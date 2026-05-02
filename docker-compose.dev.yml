@@ -59,7 +59,8 @@ services:
     container_name: codingpt_code_executor_dev
     build:
       context: ./codingpt_back
-      dockerfile: Dockerfile.executor
+      dockerfile: Dockerfile.dev
+    command: node executor-server.js
     expose:
       - "5200"
     env_file:
