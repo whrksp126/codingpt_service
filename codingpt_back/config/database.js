@@ -27,9 +27,9 @@ module.exports = {
     pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
   },
 
-  // 개발 서버(또는 개발용 도커): dev
+  // 개발 서버(홈서버 도커 PostgreSQL): SSL 불필요
   development: {
-    ...base,
+    ...baseLocal,
     logging: console.log,
     pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
   },
