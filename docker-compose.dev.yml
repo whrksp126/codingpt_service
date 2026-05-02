@@ -47,7 +47,7 @@ services:
       context: ./codingpt_front
       dockerfile: Dockerfile.dev
     expose:
-      - "3100"
+      - "3300"
     env_file:
       - ./codingpt_front/.env.dev
     networks:
