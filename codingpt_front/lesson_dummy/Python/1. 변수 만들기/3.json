@@ -1,0 +1,824 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 75994,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Lines of code are **instructions** for the computer to follow.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "When we run code, we tell the computer to follow the instructions we put together.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 75995,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The order of the instructions matters because the computer follows the instructions line by line.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Add the lines of code in the correct order, beginning with `step_1`, followed by `step_2`, and finally `step_3`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "step_1 = \"Collect pants\"\nstep_2 = \"?\"\nstep_3 = \"Profit\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 24,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 24,
+              "value": "step_1 = \"Collect pants\"",
+              "correct": true
+            },
+            {
+              "startIndex": 25,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 12,
+              "value": "step_2 = \"?\"",
+              "correct": true
+            },
+            {
+              "startIndex": 38,
+              "endIndex": 55,
+              "startLine": 2,
+              "startPos": 0,
+              "length": 17,
+              "value": "step_3 = \"Profit\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `step_1 = \"Collect pants\"`, followed by `step_2 = \"?\"`, and finally `step_3 = \"Profit\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75992,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "With the special instruction `print()`, we tell the computer to display a value in an area called the **console**, also known as the shell.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Hello, World!\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 15,
+              "value": "\"Hello, World!\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Hello, World!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Hello, World!\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75989,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use the `print()` instruction as often as we want. The computer displays every value on a new line in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"3, 2, 1\")\nprint(\"GO!\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 17,
+              "endIndex": 22,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "print",
+              "correct": true
+            },
+            {
+              "startIndex": 22,
+              "endIndex": 23,
+              "startLine": 1,
+              "startPos": 5,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 29,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "3, 2, 1\nGO!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `print`, followed by `(`, and finally `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75987,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use `print()` to display variables like `greeting`, too.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "greeting = \"Hello, World!\"\nprint(greeting)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 33,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 8,
+              "value": "greeting",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print",
+            "(",
+            ")"
+          ],
+          "output": "Hello, World!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `greeting`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75988,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we display variables in the console, their values appear instead of their names. If we print `name` here,  it'll show its value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "name = \"Daenerys\"\nprint(name)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 24,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 4,
+              "value": "name",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"Daenerys\""
+          ],
+          "output": "Daenerys"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `name`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76000,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know `\"Hello, World!\"` is a string?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It starts and ends with double quotes"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It contains letters and symbols"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It starts and ends with double quotes.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76001,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the console?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "An area that displays output"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The area where we write the code"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "An area that displays output.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75993,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does the special instruction `print()` do?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It displays a value in the console"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It creates a variable"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It displays a value in the console.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75999,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "sport = \"B-ball\"\nprint(sport)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "B-ball"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "sport = \"B-ball\"\nprint(sport)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`B-ball`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`sport`"
+            }
+          ],
+          "isCode": false,
+          "output": "B-ball"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `B-ball`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75991,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the value `daily` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "frequency = \"daily\"\nprint(frequency)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 20,
+              "endIndex": 25,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "print",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 35,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 9,
+              "value": "frequency",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "daily"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `print`, followed by `frequency`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75997,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the symbols to display this string value in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Buzz\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 5,
+              "endIndex": 6,
+              "startLine": 0,
+              "startPos": 5,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Buzz"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `(`, followed by `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75996,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the value of `last_name`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "last_name = \"Lightyear\"\nprint(last_name)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 24,
+              "endIndex": 29,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "print",
+              "correct": true
+            },
+            {
+              "startIndex": 29,
+              "endIndex": 30,
+              "startLine": 1,
+              "startPos": 5,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 30,
+              "endIndex": 39,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 9,
+              "value": "last_name",
+              "correct": true
+            },
+            {
+              "startIndex": 39,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 15,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Lightyear"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `print` followed by `(` and then `last_name`, `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75998,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the value of the `job` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "job = \"Sheriff\"\nprint(job)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 22,
+            "endIndex": 25,
+            "startLine": 1,
+            "startPos": 6,
+            "length": 3,
+            "value": "job",
+            "correct": true
+          },
+          "output": "Sheriff"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `job`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1104,
+      "index": 1,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 20,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8643,
+          "title": "Updating Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76142
+            },
+            {
+              "id": 76143
+            },
+            {
+              "id": 76144
+            },
+            {
+              "id": 76145
+            },
+            {
+              "id": 76141
+            },
+            {
+              "id": 76139
+            },
+            {
+              "id": 76140
+            },
+            {
+              "id": 76138
+            },
+            {
+              "id": 76137
+            },
+            {
+              "id": 76136
+            },
+            {
+              "id": 76135
+            },
+            {
+              "id": 76134
+            }
+          ]
+        },
+        {
+          "id": 8642,
+          "title": "Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76149
+            },
+            {
+              "id": 76148
+            },
+            {
+              "id": 76147
+            },
+            {
+              "id": 76125
+            },
+            {
+              "id": 76171
+            },
+            {
+              "id": 76170
+            },
+            {
+              "id": 76169
+            },
+            {
+              "id": 76167
+            },
+            {
+              "id": 76166
+            },
+            {
+              "id": 76165
+            },
+            {
+              "id": 76164
+            }
+          ]
+        },
+        {
+          "id": 13890,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 123597
+            },
+            {
+              "id": 123599
+            },
+            {
+              "id": 123595
+            },
+            {
+              "id": 123598
+            },
+            {
+              "id": 123600
+            },
+            {
+              "id": 123596
+            },
+            {
+              "id": 123594
+            },
+            {
+              "id": 123593
+            },
+            {
+              "id": 123592
+            },
+            {
+              "id": 123591
+            },
+            {
+              "id": 123589
+            },
+            {
+              "id": 123590
+            },
+            {
+              "id": 123588
+            },
+            {
+              "id": 123587
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 2,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

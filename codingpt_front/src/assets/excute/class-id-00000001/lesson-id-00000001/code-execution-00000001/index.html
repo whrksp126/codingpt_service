@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>코드 실행 샘플</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎨 코드 실행 샘플 페이지</h1>
+            <p class="subtitle">HTML, CSS, JavaScript를 함께 사용한 예제입니다</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>인터랙티브 카드</h2>
+                <p>버튼을 클릭해보세요!</p>
+                <button id="clickBtn" class="btn-primary">클릭하기</button>
+                <div id="result" class="result"></div>
+            </section>
+
+            <section class="card">
+                <h2>카운터</h2>
+                <div class="counter-container">
+                    <button id="decrementBtn" class="btn-secondary">-</button>
+                    <span id="counter" class="counter-value">0</span>
+                    <button id="incrementBtn" class="btn-secondary">+</button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>색상 변경</h2>
+                <div id="colorBox" class="color-box"></div>
+                <button id="changeColorBtn" class="btn-primary">색상 변경</button>
+            </section>
+
+            <section class="card">
+                <h2>현재 시간</h2>
+                <div id="timeDisplay" class="time-display"></div>
+            </section>
+        </main>
+
+        <footer>
+            <p>이 페이지는 S3에서 호스팅되고 있습니다.</p>
+        </footer>
+    </div>
+
+    <script src="/script.js"></script>
+</body>
+</html>
+

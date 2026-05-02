@@ -1,0 +1,14 @@
+FROM node:18-alpine
+
+# Python 설치 (코드 실행을 위해)
+RUN apk add --no-cache python3 py3-pip
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+EXPOSE 5100
+
+CMD ["npm", "run", "dev"]

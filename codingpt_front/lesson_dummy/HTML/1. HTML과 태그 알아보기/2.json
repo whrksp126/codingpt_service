@@ -1,0 +1,750 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76817,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "HTML에서 일부 태그의 키워드는 명확하지만, 줄임말을 사용하는 태그들도 있어요. 예를 들어, 문단을 나타내는 태그는 `p`를 사용합니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "다음 중 **문단**을 만드는 HTML 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<p>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<button>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<p>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76819,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "버튼을 만드는 방법을 기억해봅시다. `Post` 텍스트를 가진 버튼을 만들어 보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Post</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 8,
+              "value": "<button>",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 4,
+              "value": "Post",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 9,
+              "value": "</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <button>Post</button>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<button>`를 선택하고, `Post`를 선택한 다음, `</button>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76818,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "문단을 만드는 방법은 버튼을 만드는 방법과 비슷합니다. 열리는 태그, 텍스트, 닫는 태그가 필요해요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`CodingPT is Fun!`이라는 텍스트가 있는 문단을 코딩해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<p>CodingPT is Fun!</p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 3,
+              "value": "<p>",
+              "correct": true
+            },
+            {
+              "startIndex": 3,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 16,
+              "value": "CodingPT is Fun!",
+              "correct": true
+            },
+            {
+              "startIndex": 19,
+              "endIndex": 23,
+              "startLine": 0,
+              "startPos": 19,
+              "length": 4,
+              "value": "</p>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <p>Mimo is Fun!</p>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<p>`를 선택하고, `Mimo is Fun!`를 선택한 다음, `</p>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76820,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "열리는 태그와 닫는 태그 사이에 `hello`를 코딩해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<p>hello</p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 3,
+            "endIndex": 8,
+            "startLine": 0,
+            "startPos": 3,
+            "length": 5,
+            "value": "hello",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <p>hello</p>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`hello`를 코딩하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76821,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "HTML에서 특정 텍스트를 강조하기 위해 제목을 만들 수 있어요. HTML에는 6가지 크기의 제목이 있어요. 제목은 h1부터 h6까지 있어요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "다음 중 **제목**을 만드는 HTML 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<h1>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<button>`"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`<p>`"
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "`<video>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<h1>`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76822,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`CodingPT`이라는 텍스트가 있는 제목을 코딩해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h1>CodingPT</h1>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 4,
+              "value": "<h1>",
+              "correct": true
+            },
+            {
+              "startIndex": 4,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 8,
+              "value": "CodingPT",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 5,
+              "value": "</h1>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "<p>",
+            "</button>"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <h1>SnapCat</h1>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<h1>`을 선택하고, `CodingPT`를 선택한 다음, `</h1>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76824,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "닫는 태그를 추가해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>버튼</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 10,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 9,
+              "value": "</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "<button>",
+            "</p>"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <button>Accept</button>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`</button>`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76825,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "제목 태그는 텍스트를 더 크고 굵게 만들어요. h1은 가장 크고 굵고, h6는 가장 작고 가장 얇아요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "다음 중 `<h1>`보다 작고 얇은 **제목**을 만드는 HTML 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<h6>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<button>`"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`<video>`"
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "`<p>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<h6>`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76827,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "열리는 태그와 닫는 태그를 추가해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h6>작은 것들</h6>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 4,
+              "value": "<h6>",
+              "correct": true
+            },
+            {
+              "startIndex": 4,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 5,
+              "value": "작은 것들",
+              "correct": true
+            },
+            {
+              "startIndex": 9,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 5,
+              "value": "</h6>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <h6>Little Things</h6>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<h6>`을 선택하고, `작은 것들`를 선택한 다음, `</h6>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76828,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "가장 큰 제목을 만들기 위한 열리는 태그를 코딩해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h1>My Blog</h1>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 0,
+            "endIndex": 4,
+            "startLine": 0,
+            "startPos": 0,
+            "length": 4,
+            "value": "<h1>",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <h1>My Blog</h1>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<h1>`을 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76830,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "두 번째로 큰 제목을 만들기 위한 열리는 태그를 코딩해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h2>My Favorite Things</h2>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "<",
+              "correct": true
+            },
+            {
+              "startIndex": 1,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 1,
+              "length": 2,
+              "value": "h2",
+              "correct": true
+            },
+            {
+              "startIndex": 3,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "/"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<!doctype html>\n<html>\n <head>\n  <style>\n   body {\n    padding: 8px;\n   }\n  </style>\n </head>\n <body>\n  <h2>My Favorite Things</h2>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<h2>`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76831,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "다음 중 가장 작고 얇은 **제목**을 만드는 HTML 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<h6>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<h3>`"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`<h4>`"
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "`<h1>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<h6>`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 906,
+      "index": 1,
+      "codeLanguage": "html",
+      "descriptionContent": "HTML 태그를 사용하여 웹사이트에 스타일을 입혀보고, HTML 페이지의 헤드가 무엇을 하는지 배워보세요.",
+      "title": "HTML 태그를 사용한 스타일링 텍스트",
+      "type": "course",
+      "version": 73,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 15309,
+          "title": "줄바꿈, 강조와 중요도",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 134830
+            },
+            {
+              "id": 134837
+            },
+            {
+              "id": 134831
+            },
+            {
+              "id": 134812
+            },
+            {
+              "id": 134813
+            },
+            {
+              "id": 134838
+            },
+            {
+              "id": 134814
+            },
+            {
+              "id": 134839
+            },
+            {
+              "id": 134815
+            },
+            {
+              "id": 134816
+            },
+            {
+              "id": 134819
+            },
+            {
+              "id": 134817
+            },
+            {
+              "id": 134818
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 151,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

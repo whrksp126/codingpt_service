@@ -1,0 +1,894 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59448,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can add string values together with a `+` sign.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Add the values `\"Followers:\"` and `\"55\"` together.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "\"Followers:\" + \"55\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59447,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We call adding together string values an **expression** because it creates a single string value.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Add the expression between the parentheses of `console.log()`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Followers:\" + \"55\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 24,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 12,
+              "value": "\"Followers:\"",
+              "correct": true
+            },
+            {
+              "startIndex": 25,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 25,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 27,
+              "endIndex": 31,
+              "startLine": 0,
+              "startPos": 27,
+              "length": 4,
+              "value": "\"55\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Followers:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Followers:\"`, followed by `+`, and finally `\"55\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59446,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When expressions contain variables, they use the values in the variables.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create an expression that adds the value `\"Followers:\"` and the variable `followers` together.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const followers = \"55\";\n\"Followers:\" + followers;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 24,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 12,
+              "value": "\"Followers:\"",
+              "correct": true
+            },
+            {
+              "startIndex": 37,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 13,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 39,
+              "endIndex": 48,
+              "startLine": 1,
+              "startPos": 15,
+              "length": 9,
+              "value": "followers",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Followers:\"`, followed by `+`, and finally `followers`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59445,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use `console.log()` to see the results of expressions.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Add a `console.log()` instruction around the expression.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfFollowers = \"55\";\nconsole.log(\"Followers:\" + numberOfFollowers);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 32,
+              "endIndex": 43,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 11,
+              "value": "console.log",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 44,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 76,
+              "endIndex": 77,
+              "startLine": 1,
+              "startPos": 44,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Followers:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `console.log`, followed by `(`, and finally `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59443,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Since expressions become values, we can give them to variables just like values.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Store the expression `\"Posts:\" + \"13\"` in the variable `label` and display it in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const label = \"Posts:\" + \"13\";\nconsole.log(label);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 14,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 8,
+              "value": "\"Posts:\"",
+              "correct": true
+            },
+            {
+              "startIndex": 23,
+              "endIndex": 24,
+              "startLine": 0,
+              "startPos": 23,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 25,
+              "endIndex": 29,
+              "startLine": 0,
+              "startPos": 25,
+              "length": 4,
+              "value": "\"13\"",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 48,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 5,
+              "value": "label",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Posts:13"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Posts:\"` followed by `+` and then `\"13\"`, `label`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59796,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the value of `label`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const label = \"Name:\" + \"Joe\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const label = \"Name:\" + \"Joe\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`\"Name:Joe\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"Joe\"`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Name:Joe\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59797,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "\"Jon\" + \"athan\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "\"Jon\" + \"athan\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Nothing, because there&#039;s no `console.log()` instruction"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`Jonathan`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Nothing, because there's no `console.log()` instruction.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59798,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const username = \"snoopdogg\";\nconsole.log(\"Username:\" + username);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "Username:snoopdogg"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const username = \"snoopdogg\";\nconsole.log(\"Username:\" + username);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Username:snoopdogg`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`snoopdogg`"
+            }
+          ],
+          "isCode": false,
+          "output": "Username:snoopdogg"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Username:snoopdogg`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59799,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why does this code display `SteveJobs` without a space in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "console.log(\"Steve\" + \"Jobs\");\n",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "SteveJobs"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "console.log(\"Steve\" + \"Jobs\");\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Because `\"Steve\" + \"Jobs\"` adds the values together without a space"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Because `console.log()` never displays spaces"
+            }
+          ],
+          "isCode": false,
+          "output": "SteveJobs"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Because `\"Steve\" + \"Jobs\"` adds the values together without a space.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59800,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the `temperature` variable to the expression.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const temperature = \"14\";\nconsole.log(temperature + \" degrees\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 38,
+              "endIndex": 49,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 11,
+              "value": "temperature",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"temperature\""
+          ],
+          "output": "14 degrees"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `temperature`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59801,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `Posts:55` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Posts:\" + \"55\");\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 11,
+              "value": "console.log",
+              "correct": true
+            },
+            {
+              "startIndex": 11,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 15,
+              "value": "\"Posts:\" + \"55\"",
+              "correct": true
+            },
+            {
+              "startIndex": 27,
+              "endIndex": 28,
+              "startLine": 0,
+              "startPos": 27,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 29,
+              "startLine": 0,
+              "startPos": 28,
+              "length": 1,
+              "value": ";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Posts:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `console.log` followed by `(` and then `\"Posts:\" + \"55\"`, `)`, `;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59802,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `Ms. Irene` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const title = \"Ms. \";\nconst name = \"Irene\";\n\nconsole.log(title + name);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 57,
+              "endIndex": 62,
+              "startLine": 3,
+              "startPos": 12,
+              "length": 5,
+              "value": "title",
+              "correct": true
+            },
+            {
+              "startIndex": 63,
+              "endIndex": 64,
+              "startLine": 3,
+              "startPos": 18,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 65,
+              "endIndex": 69,
+              "startLine": 3,
+              "startPos": 20,
+              "length": 4,
+              "value": "name",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Ms. Irene"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `title`, followed by `+`, and finally `name`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59803,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code the string value `\"likes\"` to see how many likes we have.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfLikes = \"40 \";\nconsole.log(numberOfLikes + \"likes\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 57,
+            "endIndex": 64,
+            "startLine": 1,
+            "startPos": 28,
+            "length": 7,
+            "value": "\"likes\"",
+            "correct": true
+          },
+          "output": "40 likes"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"likes\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 755,
+      "index": 2,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "Using True and False",
+      "type": "course",
+      "version": 45,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7179,
+          "title": "Booleans",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62115
+            },
+            {
+              "id": 62052
+            },
+            {
+              "id": 62050
+            },
+            {
+              "id": 62049
+            },
+            {
+              "id": 62048
+            },
+            {
+              "id": 62132
+            },
+            {
+              "id": 62134
+            },
+            {
+              "id": 62133
+            },
+            {
+              "id": 62135
+            },
+            {
+              "id": 62203
+            },
+            {
+              "id": 62204
+            },
+            {
+              "id": 62205
+            },
+            {
+              "id": 62206
+            }
+          ]
+        },
+        {
+          "id": 7162,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62046
+            },
+            {
+              "id": 62047
+            },
+            {
+              "id": 62044
+            },
+            {
+              "id": 62040
+            },
+            {
+              "id": 62038
+            },
+            {
+              "id": 62211
+            },
+            {
+              "id": 62210
+            },
+            {
+              "id": 62209
+            },
+            {
+              "id": 62208
+            },
+            {
+              "id": 62212
+            },
+            {
+              "id": 62213
+            },
+            {
+              "id": 62214
+            },
+            {
+              "id": 62215
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 27,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

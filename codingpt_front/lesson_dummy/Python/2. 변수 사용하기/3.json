@@ -1,0 +1,882 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 123597,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We've seen before that variables can also store numbers. Unlike strings, numeric values don't use quotes `\"\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "active_users = 5",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 15,
+              "endIndex": 16,
+              "startLine": 0,
+              "startPos": 15,
+              "length": 1,
+              "value": "5",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"5\""
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123599,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Numbers make it easier to keep track of **numeric data**. Like here, `active_users` stores the number `5`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "active_users = 5",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 12,
+              "value": "active_users",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 15,
+              "endIndex": 16,
+              "startLine": 0,
+              "startPos": 15,
+              "length": 1,
+              "value": "5",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `active_users`, followed by `=`, and finally `5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123595,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can create expressions with numbers, too. Here, we can add numbers together with `+ 1`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "number_of_applications = 5 + 1\nprint(number_of_applications)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 27,
+              "endIndex": 28,
+              "startLine": 0,
+              "startPos": 27,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 29,
+              "endIndex": 30,
+              "startLine": 0,
+              "startPos": 29,
+              "length": 1,
+              "value": "1",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "6"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `1`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123598,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We use the `*` sign to multiply numbers and the `/`  sign to divide numbers. We'll turn `0.5` into its percent value by multiplying it by `100`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "percent = 0.5 * 100\nprint(percent)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 14,
+              "endIndex": 15,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 1,
+              "value": "*",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "50.0"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `*`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123600,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use variables with numbers for calculations, too. We'll see it in action by adding `1` to `number_of_steps`. ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "number_of_steps = 70\nprint(\"You're on step:\")\nprint(number_of_steps + 1)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 68,
+              "endIndex": 69,
+              "startLine": 2,
+              "startPos": 22,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 70,
+              "endIndex": 71,
+              "startLine": 2,
+              "startPos": 24,
+              "length": 1,
+              "value": "1",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "You're on step:\n71"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `1`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123596,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Since expressions become values, we can store calculation results in variables, like here where `total` contains `private + public`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "private = 3\npublic = 10\ntotal = private + public\nprint(\"Total posts:\")\nprint(total)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 24,
+              "endIndex": 29,
+              "startLine": 2,
+              "startPos": 0,
+              "length": 5,
+              "value": "total",
+              "correct": true
+            },
+            {
+              "startIndex": 40,
+              "endIndex": 41,
+              "startLine": 2,
+              "startPos": 16,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 42,
+              "endIndex": 48,
+              "startLine": 2,
+              "startPos": 18,
+              "length": 6,
+              "value": "public",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Total posts:\n13"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `total`, followed by `+`, and finally `public`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123594,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the value of `speed`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "speed = 300 + 5",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "speed = 300 + 5",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`305`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`300`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `305`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123593,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why does this code display `31` instead of `4` in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "temperature = \"3\" + \"1\"\nprint(temperature)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "31"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "temperature = \"3\" + \"1\"\nprint(temperature)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Because `\"3\"` and `\"1\"` are string values"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Because the expression subtracts the numbers"
+            }
+          ],
+          "isCode": false,
+          "output": "31"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Because `\"3\"` and `\"1\"` are string values.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123592,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know that the `score` variable stores a number?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "score = 40 + 4",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "score = 40 + 4",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Because there are no double quotes around `40` and `4`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Because we can only store strings when we use `=`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Because there are no double quotes around `40` and `4`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123591,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "area = \"3 * 5\"\nprint(area)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "3 * 5"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "area = \"3 * 5\"\nprint(area)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`3 * 5`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`15`"
+            }
+          ],
+          "isCode": false,
+          "output": "3 * 5"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`3 * 5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123589,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Multiply the `savings` variable by the `interest` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "savings = 100\ninterest = 0.04\nprint(savings * interest)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 44,
+              "endIndex": 45,
+              "startLine": 2,
+              "startPos": 14,
+              "length": 1,
+              "value": "*",
+              "correct": true
+            },
+            {
+              "startIndex": 46,
+              "endIndex": 54,
+              "startLine": 2,
+              "startPos": 16,
+              "length": 8,
+              "value": "interest",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "/"
+          ],
+          "output": "4.0"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `*`, followed by `interest`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123590,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Divide `sum_of_grades` by `students` to get the average grade of a class.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "sum_of_grades = 460\nstudents = 5\nprint(sum_of_grades / students)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 39,
+              "endIndex": 52,
+              "startLine": 2,
+              "startPos": 6,
+              "length": 13,
+              "value": "sum_of_grades",
+              "correct": true
+            },
+            {
+              "startIndex": 53,
+              "endIndex": 54,
+              "startLine": 2,
+              "startPos": 20,
+              "length": 1,
+              "value": "/",
+              "correct": true
+            },
+            {
+              "startIndex": 55,
+              "endIndex": 63,
+              "startLine": 2,
+              "startPos": 22,
+              "length": 8,
+              "value": "students",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "92.0"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `sum_of_grades`, followed by `/`, and finally `students`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123588,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Subtract `discount` from `total` and display the calculation result in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "total = 100\ndiscount = 20\nprint(\"Discounted price:\")\nprint(total - discount)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 59,
+              "endIndex": 64,
+              "startLine": 3,
+              "startPos": 6,
+              "length": 5,
+              "value": "total",
+              "correct": true
+            },
+            {
+              "startIndex": 65,
+              "endIndex": 66,
+              "startLine": 3,
+              "startPos": 12,
+              "length": 1,
+              "value": "-",
+              "correct": true
+            },
+            {
+              "startIndex": 67,
+              "endIndex": 75,
+              "startLine": 3,
+              "startPos": 14,
+              "length": 8,
+              "value": "discount",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Discounted price:\n80"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `total`, followed by `-`, and finally `discount`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123587,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Set `months_per_year` to `12`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "months_per_year = 12\nprint(months_per_year)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 18,
+            "endIndex": 20,
+            "startLine": 0,
+            "startPos": 18,
+            "length": 2,
+            "value": "12",
+            "correct": true
+          },
+          "output": "12"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `12`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1106,
+      "index": 2,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "True and False",
+      "type": "course",
+      "version": 17,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8669,
+          "title": "True and False",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76389
+            },
+            {
+              "id": 76388
+            },
+            {
+              "id": 76395
+            },
+            {
+              "id": 76387
+            },
+            {
+              "id": 76384
+            },
+            {
+              "id": 76390
+            },
+            {
+              "id": 76393
+            },
+            {
+              "id": 76391
+            },
+            {
+              "id": 76394
+            },
+            {
+              "id": 76348
+            },
+            {
+              "id": 76416
+            },
+            {
+              "id": 76392
+            },
+            {
+              "id": 76385
+            }
+          ]
+        },
+        {
+          "id": 8680,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76368
+            },
+            {
+              "id": 76367
+            },
+            {
+              "id": 76366
+            },
+            {
+              "id": 76365
+            },
+            {
+              "id": 76363
+            },
+            {
+              "id": 76373
+            },
+            {
+              "id": 76372
+            },
+            {
+              "id": 76371
+            },
+            {
+              "id": 76370
+            },
+            {
+              "id": 76374
+            },
+            {
+              "id": 76358
+            },
+            {
+              "id": 76357
+            },
+            {
+              "id": 76356
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 2,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 20,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

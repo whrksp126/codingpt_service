@@ -1,0 +1,630 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 62182,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To check if a number isn't equal to another number, we use the **inequality operator**, `!==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(1 !== 10);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 14,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 3,
+              "value": "!==",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "==="
+          ],
+          "output": "true"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62178,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can store the result of a comparison with the inequality operator in a variable.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Save the comparison between `1` and `2` into the variable `result`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const result = 1 !== 2;\nconsole.log(result);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 17,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 17,
+              "length": 3,
+              "value": "!==",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "true"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `!==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62176,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Variables can store the result of equality comparisons, too.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const result = 1 === 2;\nconsole.log(result);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 17,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 17,
+              "length": 3,
+              "value": "===",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `===`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62179,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can compare values with variables and variables with other variables.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Type `===` to compare the contents of the variables.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const one = 1;\nconst two = 2;\nconsole.log(one === two);\nconsole.log(one !== two);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 46,
+            "endIndex": 49,
+            "startLine": 2,
+            "startPos": 16,
+            "length": 3,
+            "value": "===",
+            "correct": true
+          },
+          "output": "false\ntrue"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `===`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62190,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which value should `batteryLevel` have, so that the comparison in the `charged` variable gives `false`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const batteryLevel = ? ;\nconst charged = batteryLevel === 100;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const batteryLevel = ? ;\nconst charged = batteryLevel === 100;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`78`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`100`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `78`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62188,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const result = 7 !== 10;\nconsole.log(result);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "true"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const result = 7 !== 10;\nconsole.log(result);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`true`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`false`"
+            }
+          ],
+          "isCode": false,
+          "output": "true"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62193,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What value should we give to the variable `emails` to store `true` in `inboxFull`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const emails = ? ; \nconst inboxFull = emails === 1000;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const emails = ? ; \nconst inboxFull = emails === 1000;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`1000`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`67`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `1000`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62192,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What should the value of `scoreOne` be if we want `equal` to be `true`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const scoreOne = ? ;\nconst scoreTwo = 80;\nconst equal = scoreOne === scoreTwo;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const scoreOne = ? ;\nconst scoreTwo = 80;\nconst equal = scoreOne === scoreTwo;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`80`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`true`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `80`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62189,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the operator that makes the comparison `false`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(10 !== 10);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 15,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 15,
+              "length": 3,
+              "value": "!==",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "==="
+          ],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62194,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if the `answer` variable equals `13` and store the result in the `correctAnswer` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const answer = 16;\nconst correctAnswer = answer === 13;\nconsole.log(correctAnswer);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 39,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 20,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 48,
+              "endIndex": 51,
+              "startLine": 1,
+              "startPos": 29,
+              "length": 3,
+              "value": "===",
+              "correct": true
+            },
+            {
+              "startIndex": 52,
+              "endIndex": 54,
+              "startLine": 1,
+              "startPos": 33,
+              "length": 2,
+              "value": "13",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "correctAnswer"
+          ],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `===`, and finally `13`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62195,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if the user's current `level` equals `highestLevel` by typing `===`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const level = 5;\nconst highestLevel = 50;\nconsole.log(level === highestLevel);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 60,
+            "endIndex": 63,
+            "startLine": 2,
+            "startPos": 18,
+            "length": 3,
+            "value": "===",
+            "correct": true
+          },
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `===`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62196,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if the answer submitted by the user isn't empty by typing `!==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const letters = 12;\nconst validAnswer = letters !== 0;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 48,
+            "endIndex": 51,
+            "startLine": 1,
+            "startPos": 28,
+            "length": 3,
+            "value": "!==",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `!==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": null,
+    "chaptersCount": 2,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 37,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

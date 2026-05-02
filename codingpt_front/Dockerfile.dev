@@ -1,0 +1,19 @@
+# Node.js 개발 환경 (Local, Dev)
+FROM node:20-alpine AS dev
+WORKDIR /app
+
+# npm 기본 레지스트리 설정
+RUN npm config set registry https://registry.npmjs.org/
+
+# package.json과 package-lock.json 복사
+COPY package.json package-lock.json ./
+
+# 패키지 설치
+RUN npm ci
+
+# 소스 코드 복사
+COPY . .
+
+# 개발 서버 실행
+EXPOSE 3100
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

@@ -1,0 +1,698 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76149,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can add string values together with a `+` sign.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "\"Followers:\" + \"55\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76148,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We call adding string values an **expression** as the output creates a single value.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "In this example, only one string is the displayed output when we add `\"55\"` inside `print()`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Followers:\" + \"55\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 19,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 19,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 4,
+              "value": "\"55\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Followers:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `\"55\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76147,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When expressions contain variables, they use the values in the variables, which we can see when adding `\"Followers:\"` to `followers`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "followers = \"55\"\nprint(\"Followers:\" + followers)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 36,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 19,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 38,
+              "endIndex": 47,
+              "startLine": 1,
+              "startPos": 21,
+              "length": 9,
+              "value": "followers",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "Followers:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `followers`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76125,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Since expressions become values, we can store them in variables the same way as values.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "See the example here where we'll code `label` to display the expression.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "label = \"Posts:\" + \"13\"\nprint(label)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 30,
+            "endIndex": 35,
+            "startLine": 1,
+            "startPos": 6,
+            "length": 5,
+            "value": "label",
+            "correct": true
+          },
+          "output": "Posts:13"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `label`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76171,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the value of `label`?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "label = \"Name:\" + \"Joe\"",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "label = \"Name:\" + \"Joe\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`\"Name:Joe\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"Joe\"`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Name:Joe\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76170,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "print(\"Jon\" + \"athan\")\n",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "Jonathan"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "print(\"Jon\" + \"athan\")\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": false,
+              "value": 0,
+              "text": "Nothing, because there&#039;s no `print()` instruction"
+            },
+            {
+              "correct": true,
+              "value": 1,
+              "text": "`Jonathan`"
+            }
+          ],
+          "isCode": false,
+          "output": "Jonathan"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Jonathan`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76169,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "user = \"snoopdogg\"\nprint(\"Username:\" + user)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "Username:snoopdogg"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "user = \"snoopdogg\"\nprint(\"Username:\" + user)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Username:snoopdogg`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`snoopdogg`"
+            }
+          ],
+          "isCode": false,
+          "output": "Username:snoopdogg"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Username:snoopdogg`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76167,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the `temperature` variable to the expression.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "temperature = \"14\"\nprint(temperature + \" degrees\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 25,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 11,
+              "value": "temperature",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"temperature\""
+          ],
+          "output": "14 degrees"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `temperature`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76166,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `Posts:55` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Posts:\" + \"55\")\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 5,
+              "endIndex": 6,
+              "startLine": 0,
+              "startPos": 5,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 6,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 15,
+              "value": "\"Posts:\" + \"55\"",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Posts:55"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `(`, followed by `\"Posts:\" + \"55\"`, and finally `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76165,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `Ms. Irene` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "title = \"Ms. \"\nname = \"Irene\"\n\nprint(title + name)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 37,
+              "endIndex": 42,
+              "startLine": 3,
+              "startPos": 6,
+              "length": 5,
+              "value": "title",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 44,
+              "startLine": 3,
+              "startPos": 12,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 49,
+              "startLine": 3,
+              "startPos": 14,
+              "length": 4,
+              "value": "name",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Ms. Irene"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `title`, followed by `+`, and finally `name`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76164,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code the string value `\"likes\"` so that the code displays `40 likes`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "number_of_likes = \"40 \"\nprint(number_of_likes + \"likes\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 48,
+            "endIndex": 55,
+            "startLine": 1,
+            "startPos": 24,
+            "length": 7,
+            "value": "\"likes\"",
+            "correct": true
+          },
+          "output": "40 likes"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"likes\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1106,
+      "index": 2,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "True and False",
+      "type": "course",
+      "version": 17,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8669,
+          "title": "True and False",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76389
+            },
+            {
+              "id": 76388
+            },
+            {
+              "id": 76395
+            },
+            {
+              "id": 76387
+            },
+            {
+              "id": 76384
+            },
+            {
+              "id": 76390
+            },
+            {
+              "id": 76393
+            },
+            {
+              "id": 76391
+            },
+            {
+              "id": 76394
+            },
+            {
+              "id": 76348
+            },
+            {
+              "id": 76416
+            },
+            {
+              "id": 76392
+            },
+            {
+              "id": 76385
+            }
+          ]
+        },
+        {
+          "id": 8680,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76368
+            },
+            {
+              "id": 76367
+            },
+            {
+              "id": 76366
+            },
+            {
+              "id": 76365
+            },
+            {
+              "id": 76363
+            },
+            {
+              "id": 76373
+            },
+            {
+              "id": 76372
+            },
+            {
+              "id": 76371
+            },
+            {
+              "id": 76370
+            },
+            {
+              "id": 76374
+            },
+            {
+              "id": 76358
+            },
+            {
+              "id": 76357
+            },
+            {
+              "id": 76356
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 20,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

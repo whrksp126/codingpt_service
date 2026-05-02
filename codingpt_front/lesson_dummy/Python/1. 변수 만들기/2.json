@@ -1,0 +1,850 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 123584,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Variables can contain all types of values. Let's take a look at storing text values, like `\"Porsche\"` here.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "car_1 = \"Porsche\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 8,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 9,
+              "value": "\"Porsche\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "text"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Porsche\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123583,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "After creating and naming a variable, we use the `=` sign to store a **value** inside it.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Type `=` to store the value `\"Miami\"` inside the `city` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "city = \"Miami\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 5,
+            "endIndex": 6,
+            "startLine": 0,
+            "startPos": 5,
+            "length": 1,
+            "value": "=",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123586,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Storing a value in a variable is like putting stuff inside a labeled box. Here, the variable `device_type` stores the value `\"apple\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "device_type = \"apple\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 14,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 7,
+              "value": "\"apple\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `\"apple\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123585,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The values we've been storing, like `\"Miami\"` are **strings**. String values are text between double quotes.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "city = \"Miami\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            ".",
+            "."
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"`, followed by `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123580,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Strings can contain all sorts of letters and symbols, including spaces, like the value `\"Winter is coming.\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "movie_quote = \"Winter is coming.\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 14,
+              "endIndex": 15,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 15,
+              "endIndex": 32,
+              "startLine": 0,
+              "startPos": 15,
+              "length": 17,
+              "value": "Winter is coming.",
+              "correct": true
+            },
+            {
+              "startIndex": 32,
+              "endIndex": 33,
+              "startLine": 0,
+              "startPos": 32,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"`, followed by `Winter is coming.`, and finally `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123579,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the **value** of this variable?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "name = \"Karin\"",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "name = \"Karin\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`\"Karin\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`name`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Karin\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123574,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know a value is a string?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It&#039;s a text between double quotes, like `\"Amy\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It contains the `=` sign"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It's a text between double quotes, like `\"Amy\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123582,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's happening in this code?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "song_name = \"Hey Ya!\"",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "song_name = \"Hey Ya!\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The variable `song_name` stores the value `\"Hey Ya!\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The variable `\"Hey Ya!\"` stores the value `song_name`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The variable `song_name` stores the value `\"Hey Ya!\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123578,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the name of this variable?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "hobby = \"Tree shaping\"",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "hobby = \"Tree shaping\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`hobby`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"Tree shaping\"`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `hobby`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123581,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create a `job` variable and give it the value `\"Plumber\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "name = \"Mario\"\njob = \"Plumber\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 15,
+              "endIndex": 18,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 3,
+              "value": "job",
+              "correct": true
+            },
+            {
+              "startIndex": 19,
+              "endIndex": 20,
+              "startLine": 1,
+              "startPos": 4,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 30,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 9,
+              "value": "\"Plumber\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `job`, followed by `=`, and finally `\"Plumber\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123577,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create a `company` variable that stores a string value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "company = \"Microsoft\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 7,
+              "value": "company",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "Apple"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `company`, followed by `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123575,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Give the `job_title` variable a string value. Remember to use double quotes to create strings.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "job_title = \"Analyst\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 10,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 7,
+              "value": "Analyst",
+              "correct": true
+            },
+            {
+              "startIndex": 20,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 20,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=` followed by `\"` and then `Analyst`, `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123576,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Give the `user_agent` variable the string value `\"desktop\"` by typing `\"`, then the text `desktop`, and finally the closing `\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "user_agent = \"desktop\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 13,
+            "endIndex": 22,
+            "startLine": 0,
+            "startPos": 13,
+            "length": 9,
+            "value": "\"desktop\"",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"desktop\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1104,
+      "index": 1,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 20,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8643,
+          "title": "Updating Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76142
+            },
+            {
+              "id": 76143
+            },
+            {
+              "id": 76144
+            },
+            {
+              "id": 76145
+            },
+            {
+              "id": 76141
+            },
+            {
+              "id": 76139
+            },
+            {
+              "id": 76140
+            },
+            {
+              "id": 76138
+            },
+            {
+              "id": 76137
+            },
+            {
+              "id": 76136
+            },
+            {
+              "id": 76135
+            },
+            {
+              "id": 76134
+            }
+          ]
+        },
+        {
+          "id": 8642,
+          "title": "Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76149
+            },
+            {
+              "id": 76148
+            },
+            {
+              "id": 76147
+            },
+            {
+              "id": 76125
+            },
+            {
+              "id": 76171
+            },
+            {
+              "id": 76170
+            },
+            {
+              "id": 76169
+            },
+            {
+              "id": 76167
+            },
+            {
+              "id": 76166
+            },
+            {
+              "id": 76165
+            },
+            {
+              "id": 76164
+            }
+          ]
+        },
+        {
+          "id": 13890,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 123597
+            },
+            {
+              "id": 123599
+            },
+            {
+              "id": 123595
+            },
+            {
+              "id": 123598
+            },
+            {
+              "id": 123600
+            },
+            {
+              "id": 123596
+            },
+            {
+              "id": 123594
+            },
+            {
+              "id": 123593
+            },
+            {
+              "id": 123592
+            },
+            {
+              "id": 123591
+            },
+            {
+              "id": 123589
+            },
+            {
+              "id": 123590
+            },
+            {
+              "id": 123588
+            },
+            {
+              "id": 123587
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

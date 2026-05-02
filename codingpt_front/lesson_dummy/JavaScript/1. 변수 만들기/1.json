@@ -1,0 +1,759 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59774,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "ca5202a2-c1d5-4128-a8fd-8e7218d04173",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Welcome to **JavaScript**, a versatile coding language.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "We'll take an in depth look into Javascript, a **programming** **language** that powers dynamic websites and apps.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 59681,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "6be4880a-4219-460f-9f29-262862278b69",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Dynamic websites need to remember information to display or change. For that, JavaScript has **variables**.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Like moving boxes, variables have content and names that tell us what's inside.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 59680,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We use `let`, and `const` to create variables. We'll use both for now and cover the difference between them later.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let\nconst",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 4,
+              "endIndex": 9,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "let\nconst"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59674,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Every variable needs a **name**. Variable names need to be single words and, therefore, have no spaces.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let city ",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 4,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 4,
+              "value": "city",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "home city"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `city`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59682,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To create variable names with multiple words, we use **camel case**. We start with a lowercase letter and capitalize the additional words.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let homeCity ",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 4,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 8,
+              "value": "homeCity",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "home city"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `homeCity`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59678,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To help us understand what's inside a variable we pick descriptive names.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const windyCity",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 15,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 9,
+              "value": "windyCity",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "wC"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `windyCity`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59687,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's wrong with this variable name?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "let high Score",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "let high Score",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It contains a space"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It contains a capital letter"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It contains a space.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59688,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why do we give variables descriptive names like `city` or `country` instead of `x` or `y`?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "To help us understand what&#039;s inside them"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "To make them faster to type"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To help us understand what's inside them.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59689,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What words can we use to declare variables?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`let` and `const`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`let` and `variable`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`let` and `const`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59756,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What do we use camel case for?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "To create variable names with multiple words"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "To create variable names with spaces"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To create variable names with multiple words.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59757,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Pick the most descriptive variable name.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const highScore",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 15,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 9,
+              "value": "highScore",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "hs"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `highScore`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59692,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Spell out the word for one of the ways we use to create a variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "l",
+              "correct": true
+            },
+            {
+              "startIndex": 2,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 2,
+              "length": 1,
+              "value": "t",
+              "correct": true
+            },
+            {
+              "startIndex": 1,
+              "endIndex": 2,
+              "startLine": 0,
+              "startPos": 1,
+              "length": 1,
+              "value": "e",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "let"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `l`, followed by `e`, and finally `t`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59693,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Put the snippets in the right order to create a variable name.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let highScore ",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 4,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 9,
+              "value": "highScore",
+              "correct": true
+            },
+            {
+              "startIndex": 0,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 3,
+              "value": "let",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `let`, followed by `highScore`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59694,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Finish up creating this variable by coding `let`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let person",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 0,
+            "endIndex": 3,
+            "startLine": 0,
+            "startPos": 0,
+            "length": 3,
+            "value": "let",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `let`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 912,
+      "index": 1,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 27,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 6874,
+          "title": "Updating Let Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59350
+            },
+            {
+              "id": 59349
+            },
+            {
+              "id": 59348
+            },
+            {
+              "id": 59345
+            },
+            {
+              "id": 59788
+            },
+            {
+              "id": 59790
+            },
+            {
+              "id": 59789
+            },
+            {
+              "id": 59791
+            },
+            {
+              "id": 59792
+            },
+            {
+              "id": 59793
+            },
+            {
+              "id": 59794
+            },
+            {
+              "id": 59795
+            }
+          ]
+        },
+        {
+          "id": 6878,
+          "title": "String Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59448
+            },
+            {
+              "id": 59447
+            },
+            {
+              "id": 59446
+            },
+            {
+              "id": 59445
+            },
+            {
+              "id": 59443
+            },
+            {
+              "id": 59796
+            },
+            {
+              "id": 59797
+            },
+            {
+              "id": 59798
+            },
+            {
+              "id": 59799
+            },
+            {
+              "id": 59800
+            },
+            {
+              "id": 59801
+            },
+            {
+              "id": 59802
+            },
+            {
+              "id": 59803
+            }
+          ]
+        },
+        {
+          "id": 6895,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59534
+            },
+            {
+              "id": 59532
+            },
+            {
+              "id": 59537
+            },
+            {
+              "id": 59533
+            },
+            {
+              "id": 59526
+            },
+            {
+              "id": 59525
+            },
+            {
+              "id": 59816
+            },
+            {
+              "id": 59817
+            },
+            {
+              "id": 59818
+            },
+            {
+              "id": 59819
+            },
+            {
+              "id": 59820
+            },
+            {
+              "id": 59821
+            },
+            {
+              "id": 59822
+            },
+            {
+              "id": 59823
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 4,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

@@ -1,0 +1,715 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76142,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Variables are called variables because the values they store can change. We can update `status` by using `=` and giving it a new value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "status = \"Watching Netflix\"\nstatus = \"Relaxing at the beach\"\nprint(status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 35,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            ":"
+          ],
+          "output": "Relaxing at the beach"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76143,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can update variables as often as we want. Try it yourself: change the value of `status` to `\"New data required\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "status = \"Incomplete\"\nstatus = \"Complete\"\nprint(status)\n\nstatus = \"New data required\"\nprint(status)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 57,
+              "endIndex": 63,
+              "startLine": 4,
+              "startPos": 0,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            },
+            {
+              "startIndex": 64,
+              "endIndex": 65,
+              "startLine": 4,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 66,
+              "endIndex": 85,
+              "startLine": 4,
+              "startPos": 9,
+              "length": 19,
+              "value": "\"New data required\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Complete\nNew data required"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `status`, followed by `=`, and finally `\"New data required\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76144,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can also give variables the values of other variables. Here, we can give the `new_status` variable the value of `default_option`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "default_option = \"upload\"\nnew_status = \"download\"\n\nnew_status = default_option\nprint(new_status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 64,
+              "endIndex": 78,
+              "startLine": 3,
+              "startPos": 13,
+              "length": 14,
+              "value": "default_option",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print",
+            "()"
+          ],
+          "output": "upload"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `default_option`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76145,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we update a variable, it forgets its previous value. Here, we can display the `status` variable twice and see how its value updates.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "status = \"Playing football\"\nprint(status)\n\nstatus = \"Walking the dog\"\nprint(status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 34,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print"
+          ],
+          "output": "Playing football\nWalking the dog"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `status`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76141,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which of these lines of code updates the `status` variable?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`status = \"Working out\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`status == \"Working out\"`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`status = \"Working out\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76139,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "status = \"Watching Netflix\"\nprint(status)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "Watching Netflix"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "status = \"Watching Netflix\"\nprint(status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Watching Netflix`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`status`"
+            }
+          ],
+          "isCode": false,
+          "output": "Watching Netflix"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`Watching Netflix`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76140,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's wrong with this code?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "name = \"Lori\"\nname = \"Joe\"",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "name = \"Lori\"\nname = \"Joe\"",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Nothing is wrong with this code"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The same value is being stored inside the variable"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Nothing is wrong with this code.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76138,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "analysis = \"Mean\"\nanalysis = \"Median\"\nprint(analysis)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "Median"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "analysis = \"Mean\"\nanalysis = \"Median\"\nprint(analysis)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Median`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`Mean`"
+            }
+          ],
+          "isCode": false,
+          "output": "Median"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Median`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76137,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Change the value in the `temperature` variable to `\"100 degrees\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "temperature = \"0 degrees\"\ntemperature = \"100 degrees\"\nprint(temperature)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 26,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 11,
+              "value": "temperature",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "temp"
+          ],
+          "output": "100 degrees"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `temperature`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76136,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Update the `status` variable to `\"Writing code\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "status = \"Completing spreadsheet\"\nstatus = \"Writing code\"\nprint(status)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 34,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            },
+            {
+              "startIndex": 41,
+              "endIndex": 42,
+              "startLine": 1,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 57,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 14,
+              "value": "\"Writing code\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Writing code"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `status`, followed by `=`, and finally `\"Writing code\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76135,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Update the `currency` variable to `\"Dollar\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "currency = \"Euro\"\ncurrency = \"Dollar\"\nprint(currency)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 29,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 8,
+              "value": "\"Dollar\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print"
+          ],
+          "output": "Dollar"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Dollar\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76134,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Change the value of the `status` variable to `\"Done\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "status = \"Unfinished\"\nstatus = \"Done\"\nprint(status)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 31,
+            "endIndex": 37,
+            "startLine": 1,
+            "startPos": 9,
+            "length": 6,
+            "value": "\"Done\"",
+            "correct": true
+          },
+          "output": "Done"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"Done\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1106,
+      "index": 2,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "True and False",
+      "type": "course",
+      "version": 17,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8669,
+          "title": "True and False",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76389
+            },
+            {
+              "id": 76388
+            },
+            {
+              "id": 76395
+            },
+            {
+              "id": 76387
+            },
+            {
+              "id": 76384
+            },
+            {
+              "id": 76390
+            },
+            {
+              "id": 76393
+            },
+            {
+              "id": 76391
+            },
+            {
+              "id": 76394
+            },
+            {
+              "id": 76348
+            },
+            {
+              "id": 76416
+            },
+            {
+              "id": 76392
+            },
+            {
+              "id": 76385
+            }
+          ]
+        },
+        {
+          "id": 8680,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76368
+            },
+            {
+              "id": 76367
+            },
+            {
+              "id": 76366
+            },
+            {
+              "id": 76365
+            },
+            {
+              "id": 76363
+            },
+            {
+              "id": 76373
+            },
+            {
+              "id": 76372
+            },
+            {
+              "id": 76371
+            },
+            {
+              "id": 76370
+            },
+            {
+              "id": 76374
+            },
+            {
+              "id": 76358
+            },
+            {
+              "id": 76357
+            },
+            {
+              "id": 76356
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 20,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

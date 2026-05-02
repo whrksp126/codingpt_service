@@ -1,0 +1,818 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 71324,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크가 작동하는 방식을 살펴보고, **웹페이지**를 **웹사이트**로 결합하는 방법을 배워보세요. `구글로 이동!`을 클릭하여 링크를 사용하세요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "webview",
+            "content": "<!doctype html>\n<head>\n <style>\n  body {\n   background-image: linear-gradient(45deg, #a1c4fd, #c2e9fb);\n   text-align: center;\n   font-family: \"Verdana\", Sans-serif;\n  }\n  \n  img {\n   margin: 40px;\n   height: 40px;\n   width: 150px;\n  }\n  \n  h1 {\n   margin-top: 30px;\n  }\n  \n  h3 {\n   margin: 20px;\n   font-weight: normal;\n  }\n  \n  p {\n   margin-top: 80px;\n   margin-left: 30px;\n   margin-right: 30px;\n   padding: 20px;\n   background-color: DimGray;\n  }\n </style>\n</head>\n<body>\n <h1>구글로 이동하실래요?</h1> <a\n  href=\"https://google.com\">구글로 이동 \n  시간!</a>\n</body>\n</html>",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 70808,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크를 만들기 위해, 텍스트를 `<a>`와 `</a>` 태그 사이에 넣습니다. 이것은 텍스트를 아직 강조하지 않습니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<a>`는 \"Anchor\" 태그를 의미합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a>Learn to Code</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 3,
+              "value": "<a>",
+              "correct": true
+            },
+            {
+              "startIndex": 16,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 16,
+              "length": 4,
+              "value": "</a>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<a>`, `</a>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70811,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "텍스트를 웹페이지에 연결하기 위해, `href=\"\"`와 함께 유니폼 리소스 로케이터(**URL**)를 추가합니다. `href`는 \"하이퍼텍스트 참조\"를 의미합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://mimo.org\">Learn to Code</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 3,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 4,
+              "value": "href",
+              "correct": true
+            },
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 18,
+              "value": "\"https://mimo.org\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href`, `=`, `\"https://mimo.org\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70809,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href` is an **attribute**. All attributes have two things in common: they provide extra information and they go inside the opening tag.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Attributes are added after the name of the tag, and before the `>` closing sign.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://mimo.org\">Learn to Code</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 3,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 4,
+              "value": "href",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70810,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "우리는 `=` 뒤에 속성을 추가하고, 따옴표 사이에 URL을 값으로 추가하여 웹페이지에 링크를 추가합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<!doctype html>\n<html>\n <body>\n  <a href=\"https://mimo.org\">Learn to Code</a>\n </body>\n</html>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 40,
+              "endIndex": 41,
+              "startLine": 3,
+              "startPos": 9,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 41,
+              "endIndex": 42,
+              "startLine": 3,
+              "startPos": 10,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 42,
+              "endIndex": 58,
+              "startLine": 3,
+              "startPos": 11,
+              "length": 16,
+              "value": "https://mimo.org",
+              "correct": true
+            },
+            {
+              "startIndex": 58,
+              "endIndex": 59,
+              "startLine": 3,
+              "startPos": 27,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`=`, `\"`, `https://mimo.org`, `\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 117993,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href` 속성을 `\"https://mimo.org\"`로 설정하여 `<a>` 태그를 만들어보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap", 
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://mimo.org\">코딩 배우기</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "<",
+              "correct": true
+            },
+            {
+              "startIndex": 1,
+              "endIndex": 2,
+              "startLine": 0,
+              "startPos": 1, 
+              "length": 1,
+              "value": "a",
+              "correct": true
+            },
+            {
+              "startIndex": 3,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 4,
+              "value": "href",
+              "correct": true
+            },
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 18,
+              "value": "\"https://mimo.org\"",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 26,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<`, `a`, `href`, `=`, `\"https://mimo.org\"`, `>`를 순서대로 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70812,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크는 무엇을 합니까?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "웹페이지를 다른 웹페이지와 웹사이트에 연결합니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "텍스트를 강조합니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "웹페이지를 다른 웹페이지와 웹사이트에 연결합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70813,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "링크가 작동하지 않는 이유는 무엇입니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "<a>코딩 배우기</a>",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html", 
+              "content": "<a>코딩 배우기</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`href` 속성이 없기 때문입니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<a>`와 `</a>` 사이에 텍스트가 없기 때문입니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href` 속성이 없기 때문입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70814,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 웹페이지에서 링크를 클릭하면 무엇이 일어납니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "<a href=\"https://mimo.org\">개발자가 배우고, 공유하고,\n   & 경력을 쌓는 곳</a>",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "<a href=\"https://mimo.org\">개발자가 배우고, 공유하고,\n   & 경력을 쌓는 곳</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "링크가 사용자를 다른 웹사이트로 이동시킵니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`href` 속성이 없어서 아무 일도 일어나지 않습니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크는 사용자를 다른 웹사이트로 이동시킵니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70815,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`attributes`는 무엇을 위한 것입니까?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "태그에 대한 추가 정보를 제공하기 위한 것입니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "모든 태그를 링크로 바꾸기 위한 것입니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "태그에 대한 추가 정보를 제공하기 위한 것입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70816,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크를 클릭할 수 있도록 하는 열리는 태그를 선택하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://cars.com\">Buy a car</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 27,
+              "value": "<a href=\"https://cars.com\">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "<a>"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<a href=\"https://cars.com\">`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70818,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "링크를 클릭하면 사용자가 Facebook 웹사이트로 이동하도록 하는 속성과 값을 추가하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://facebook.com\">좋아요 누르기</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 3,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 4,
+              "value": "href",
+              "correct": true
+            },
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 30,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 22,
+              "value": "\"https://facebook.com\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href`, `=`, `\"https://facebook.com\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70817,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Snapchat 웹사이트로 사용자를 이동시키는 태그를 만들어보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://www.snap.com/\">스냅챗 열기</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 45,
+              "endIndex": 47,
+              "startLine": 0,
+              "startPos": 45,
+              "length": 2,
+              "value": "</",
+              "correct": true
+            },
+            {
+              "startIndex": 47,
+              "endIndex": 48,
+              "startLine": 0,
+              "startPos": 47,
+              "length": 1,
+              "value": "a",
+              "correct": true
+            },
+            {
+              "startIndex": 48,
+              "endIndex": 49,
+              "startLine": 0,
+              "startPos": 48,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`</`, `a`, `>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 70819,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href` 속성을 입력하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<a href=\"https://abc.com\">뉴스 보기</a>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 3,
+            "endIndex": 7,
+            "startLine": 0,
+            "startPos": 3,
+            "length": 4,
+            "value": "href",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 907,
+      "index": 6,
+      "codeLanguage": "html",
+      "descriptionContent": "이미지를 편집하고, 웹페이지에 추가하는 방법을 배워보세요.",
+      "title": "이미지 추가",
+      "type": "course",
+      "version": 45,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 6824,
+          "title": "이미지",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 71395
+            },
+            {
+              "id": 58841
+            },
+            {
+              "id": 58835
+            },
+            {
+              "id": 58836
+            },
+            {
+              "id": 58911
+            },
+            {
+              "id": 58839
+            },
+            {
+              "id": 58840
+            },
+            {
+              "id": 58912
+            },
+            {
+              "id": 58913
+            },
+            {
+              "id": 58914
+            },
+            {
+              "id": 58915
+            },
+            {
+              "id": 58917
+            },
+            {
+              "id": 58919
+            },
+            {
+              "id": 58920
+            },
+            {
+              "id": 58921
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 1,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 31,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

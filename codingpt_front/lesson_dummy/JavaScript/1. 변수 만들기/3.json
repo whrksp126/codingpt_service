@@ -1,0 +1,725 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 115685,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We already know we can declare variables with `let` and `const`. Let's find out the difference between them!",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 115687,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We use `const` to declare variables whose values are not supposed to change. `const` is short for \"constant\".",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const norwayCapital = \"Oslo\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 13,
+              "value": "norwayCapital",
+              "correct": true
+            },
+            {
+              "startIndex": 0,
+              "endIndex": 5,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`, followed by `norwayCapital`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115781,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "If we try to update a value stored in a `const` variable. We will get an error.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeNone",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const age = 90;\nage = 91;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "output": "TypeError: Assignment to constant variable."
+        },
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 115688,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "However, we can update `let` variables with the assign `=` operator.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let age = 90;\nage = 91;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 3,
+              "value": "let",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "const"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `let`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115782,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To make it obvious that a variable is of type `const` and shouldn't change, we can optionally name it with uppercase letters.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create an uppercase `birthday` constant.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const BIRTHDAY = \"25/02/1882\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 8,
+              "value": "BIRTHDAY",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "birthDay",
+            "birthday"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `BIRTHDAY`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115783,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We cannot use `camelCase` if we use this uppercase standard, so we use an uppercase `snake_case` to name variables with more than one word.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create an _uppercase_ \"speed of light\" const using `snake_case`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const SPEED_OF_LIGHT = \"3*10⁸ m/s\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 14,
+              "value": "SPEED_OF_LIGHT",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "speed_of_light",
+            "speedOfLight"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `SPEED_OF_LIGHT`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115906,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Both `let` and `const` are useful variables and we could use them interchangeably. However, we should try to use `const` as default.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const MIDDLE_NAME = \"Francesca\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 5,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "let"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115901,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does `const` stand for?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "constant"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "continuous"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick constant.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115902,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can assign a new value to a `let` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "true"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "false"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick true.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115903,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the optional standard to make sure constants don't change their values?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "uppercase"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "lowercase snake case"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick uppercase.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115907,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What should we use as a default?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`const`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`let`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115904,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Declare the variable correctly.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let favoriteSong = \"What's love got to do with it?\";\nfavoriteSong = \"What's love got to do with it? - 2015 Remastered\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 0,
+            "endIndex": 3,
+            "startLine": 0,
+            "startPos": 0,
+            "length": 3,
+            "value": "let",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `let`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115905,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Use the uppercase `snake_case` standard to declare this `const` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const LONGEST_RIVER = \"Nile\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 13,
+              "value": "LONGEST_RIVER",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "longest_RIVER",
+            "LONGESTRIVER"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `LONGEST_RIVER`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 115908,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Use the default variable to declare the game name.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const GAME_NAME = \"Dixit\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 0,
+            "endIndex": 5,
+            "startLine": 0,
+            "startPos": 0,
+            "length": 5,
+            "value": "const",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `const`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 912,
+      "index": 1,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 27,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 6874,
+          "title": "Updating Let Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59350
+            },
+            {
+              "id": 59349
+            },
+            {
+              "id": 59348
+            },
+            {
+              "id": 59345
+            },
+            {
+              "id": 59788
+            },
+            {
+              "id": 59790
+            },
+            {
+              "id": 59789
+            },
+            {
+              "id": 59791
+            },
+            {
+              "id": 59792
+            },
+            {
+              "id": 59793
+            },
+            {
+              "id": 59794
+            },
+            {
+              "id": 59795
+            }
+          ]
+        },
+        {
+          "id": 6878,
+          "title": "String Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59448
+            },
+            {
+              "id": 59447
+            },
+            {
+              "id": 59446
+            },
+            {
+              "id": 59445
+            },
+            {
+              "id": 59443
+            },
+            {
+              "id": 59796
+            },
+            {
+              "id": 59797
+            },
+            {
+              "id": 59798
+            },
+            {
+              "id": 59799
+            },
+            {
+              "id": 59800
+            },
+            {
+              "id": 59801
+            },
+            {
+              "id": 59802
+            },
+            {
+              "id": 59803
+            }
+          ]
+        },
+        {
+          "id": 6895,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59534
+            },
+            {
+              "id": 59532
+            },
+            {
+              "id": 59537
+            },
+            {
+              "id": 59533
+            },
+            {
+              "id": 59526
+            },
+            {
+              "id": 59525
+            },
+            {
+              "id": 59816
+            },
+            {
+              "id": 59817
+            },
+            {
+              "id": 59818
+            },
+            {
+              "id": 59819
+            },
+            {
+              "id": 59820
+            },
+            {
+              "id": 59821
+            },
+            {
+              "id": 59822
+            },
+            {
+              "id": 59823
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 4,
+    "currentChapterIndex": 2,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

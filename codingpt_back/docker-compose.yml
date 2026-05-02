@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  app:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3100:3100"
+    environment:
+      - NODE_ENV=production
+      - CODE_EXECUTOR_URL=http://code-executor:5200
+    env_file:
+      - .env
+    depends_on:
+      - code-executor
+    restart: always
+
+  code-executor:
+    build:
+      context: .
+      dockerfile: Dockerfile.executor
+    ports:
+      - "5200:5200"
+    environment:
+      - PORT=5200
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL}
+    env_file:
+      - .env
+    networks:
+      - default
+    restart: always 

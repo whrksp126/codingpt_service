@@ -1,0 +1,868 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59673,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Variable names can contain **numbers**, too. Adding numbers is useful with multiple similar variables. Let's create the variable `car1` here.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const car1",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 10,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 4,
+              "value": "car1",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "1 car"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `car1`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59676,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "After creating and naming a variable, we use the `=` sign to store a **value** inside it. Like `const city = \"Chicago\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const city = \"Chicago\"",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 11,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 9,
+              "value": "\"Chicago\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `\"Chicago\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59675,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To finish creating a variable, we put a semicolon, `;`, at the end of the line.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const city = \"Chicago\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 22,
+              "endIndex": 23,
+              "startLine": 0,
+              "startPos": 22,
+              "length": 1,
+              "value": ";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "."
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59720,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The values we've been storing like `\"Chicago\"` are **strings**. Strings are words in double quotes.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "\"Chicago\"",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "'",
+            "'"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"`, followed by `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59714,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Strings can contain all sorts of letters and symbols, including spaces. For example, `\"Winter is coming.\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "\"Winter is coming.\"",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 1,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 1,
+              "length": 17,
+              "value": "Winter is coming.",
+              "correct": true
+            },
+            {
+              "startIndex": 18,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 18,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"`, followed by `Winter is coming.`, and finally `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59742,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the value of this variable?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "let name = \"Karin\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "let name = \"Karin\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`\"Karin\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`name`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Karin\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59772,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know a value is a string?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It&#039;s a word between double quotes"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It contains an `=` sign"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It's a word between double quotes.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59690,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's happening in this code?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const browser = \"Chrome\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const browser = \"Chrome\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The variable `browser` stores the value `\"Chrome\"`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The variable `\"Chrome\"` stores the value `browser`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The variable `browser` stores the value `\"Chrome\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59743,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the name of this variable?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "let hobby = \"Tree shaping\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "let hobby = \"Tree shaping\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`hobby`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"Tree shaping\"`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `hobby`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59691,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create a `job` variable and give it the value `\"Plumber\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let name = \"Mario\";\nlet job = \"Plumber\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 20,
+              "endIndex": 27,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 7,
+              "value": "let job",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 29,
+              "startLine": 1,
+              "startPos": 8,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 30,
+              "endIndex": 39,
+              "startLine": 1,
+              "startPos": 10,
+              "length": 9,
+              "value": "\"Plumber\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `let job`, followed by `=`, and finally `\"Plumber\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59745,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create a `company` variable and give it a string value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let company = \"Apple\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 11,
+              "value": "let company",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 14,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 14,
+              "length": 7,
+              "value": "\"Apple\"",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 1,
+              "value": ";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "Apple"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `let company` followed by `=` and then `\"Apple\"`, `;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59747,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Give the `island` variable a string value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const island = \"Malta\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 15,
+              "endIndex": 16,
+              "startLine": 0,
+              "startPos": 15,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            },
+            {
+              "startIndex": 16,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 16,
+              "length": 5,
+              "value": "Malta",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 1,
+              "value": "\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "'",
+            "'"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"`, followed by `Malta`, and finally `\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59746,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Give the `device` variable the string value `\"Desktop\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const device = \"Desktop\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 15,
+            "endIndex": 24,
+            "startLine": 0,
+            "startPos": 15,
+            "length": 9,
+            "value": "\"Desktop\"",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"Desktop\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 912,
+      "index": 1,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 27,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 6874,
+          "title": "Updating Let Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59350
+            },
+            {
+              "id": 59349
+            },
+            {
+              "id": 59348
+            },
+            {
+              "id": 59345
+            },
+            {
+              "id": 59788
+            },
+            {
+              "id": 59790
+            },
+            {
+              "id": 59789
+            },
+            {
+              "id": 59791
+            },
+            {
+              "id": 59792
+            },
+            {
+              "id": 59793
+            },
+            {
+              "id": 59794
+            },
+            {
+              "id": 59795
+            }
+          ]
+        },
+        {
+          "id": 6878,
+          "title": "String Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59448
+            },
+            {
+              "id": 59447
+            },
+            {
+              "id": 59446
+            },
+            {
+              "id": 59445
+            },
+            {
+              "id": 59443
+            },
+            {
+              "id": 59796
+            },
+            {
+              "id": 59797
+            },
+            {
+              "id": 59798
+            },
+            {
+              "id": 59799
+            },
+            {
+              "id": 59800
+            },
+            {
+              "id": 59801
+            },
+            {
+              "id": 59802
+            },
+            {
+              "id": 59803
+            }
+          ]
+        },
+        {
+          "id": 6895,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59534
+            },
+            {
+              "id": 59532
+            },
+            {
+              "id": 59537
+            },
+            {
+              "id": 59533
+            },
+            {
+              "id": 59526
+            },
+            {
+              "id": 59525
+            },
+            {
+              "id": 59816
+            },
+            {
+              "id": 59817
+            },
+            {
+              "id": 59818
+            },
+            {
+              "id": 59819
+            },
+            {
+              "id": 59820
+            },
+            {
+              "id": 59821
+            },
+            {
+              "id": 59822
+            },
+            {
+              "id": 59823
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 4,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

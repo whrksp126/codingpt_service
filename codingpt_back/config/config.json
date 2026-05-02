@@ -1,0 +1,9 @@
+{
+  "development": {
+    "username": "codingpt",
+    "password": "codingpt!@34",
+    "database": "codingpt_db",
+    "host": "127.0.0.1",
+    "dialect": "postgres"
+  }
+}

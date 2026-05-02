@@ -1,0 +1,637 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 71198,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "속성은 무엇을 합니까?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "태그에 추가 정보를 추가합니다."
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "속성은 링크를 만듭니다."
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "빈 태그를 만듭니다."
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "속성은 URL을 만듭니다."
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "태그에 추가 정보를 추가합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71197,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "브라우저에서 링크가 어떻게 나타납니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "\u003Ch3\u003EAnother Famous Page\u003C/h3\u003E\n\u003Cp\u003E\u003Ca href=\"https://en.wikipedia.org/wiki/Elliot_Page\"\u003E\u003Cem\u003EElliot Page\u003C/em\u003E\u003C/a\u003E\u003C/p\u003E",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EAnother Famous Page\u003C/h3\u003E\n\u003Cp\u003E\u003Ca href=\"https://en.wikipedia.org/wiki/Elliot_Page\"\u003E\u003Cem\u003EElliot Page\u003C/em\u003E\u003C/a\u003E\u003C/p\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Elliot Page` as a link with emphasis"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`Elliot Page` as a normal link"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`Elliot Page` with emphasis but with a broken link"
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "`\u003Cem\u003EElliot Page\u003C/em\u003E` as a link"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`Elliot Page` as a link with emphasis.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71200,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 코드에 무엇이 잘못되었습니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "\u003Ca src=\"https://m.xkcd.com/1425/\"\u003ELearn to Code\u003C/a\u003E",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "\u003Ca src=\"https://m.xkcd.com/1425/\"\u003ELearn to Code\u003C/a\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "속성 이름은 `href`여야 합니다."
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\u003Ca\u003E`와 `\u003C/a\u003E` 사이에 텍스트가 없습니다."
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "코드에 문제가 없습니다."
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "열리는 태그 `\u003Ca\u003E`가 없습니다."
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "속성 이름은 `href`여야 합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71159,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "코드를 완성하여 제대로 작동하도록 합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ca href=\"https://mimo.org/r/lisa.html\"\u003EClick to visit my website!\u003C/a\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 65,
+            "endIndex": 69,
+            "startLine": 0,
+            "startPos": 65,
+            "length": 4,
+            "value": "\u003C/a\u003E",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\u003C/a\u003E`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71160,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "열리는 `\u003Ca\u003E` 태그에 올바른 속성을 추가하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EWelcome to the Roaring Twenties, rebooted!\u003C/h3\u003E\n\u003Ca href=\"https://www.1920-30.com/\"\u003E Take a look at the previous\n   Roaring Twenties here! \u003C/a\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 55,
+            "endIndex": 59,
+            "startLine": 1,
+            "startPos": 3,
+            "length": 4,
+            "value": "href",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`href`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71600,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 `img` 요소에 무엇이 잘못되었습니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "\u003Ca src=\"https://mimo.app/snapcat.png\"\u003E",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "\u003Ca src=\"https://mimo.app/snapcat.png\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "태그 이름은 `img`이어야 하고, `a` 태그가 아닙니다."
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "아무것도 없습니다."
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`img` 요소에 닫는 태그가 없습니다."
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "이미지에 접근하기 위한 URL이 없습니다."
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "태그 이름은 `img`이어야 하고, `a` 태그가 아닙니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59597,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 `img` 태그에 `width` 속성을 `\"300\"`로 설정하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"/img/taxi.png\" width=\"300\" height=\"200\"\u003E\n",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 31,
+            "endIndex": 36,
+            "startLine": 0,
+            "startPos": 31,
+            "length": 5,
+            "value": "\"300\"",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\"300\"`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59600,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Set the `height` attribute of this image tag to `\"200\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"/img/cat.png\" height=\"200\" width=\"200\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 24,
+            "endIndex": 36,
+            "startLine": 0,
+            "startPos": 24,
+            "length": 12,
+            "value": "height=\"200\"",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`height=\"200\"`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71541,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 코드에 몇 개의 `img` 요소가 있습니까?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "\u003Cp\u003EA cat\u003C/p\u003E\n\u003Cimg src=\"/img/kittles.png\"\u003E\n\u003Cbr\u003E\n\u003Ca href=\"https://mimo.app/i/cat.png\"\u003EMy cat\u003C/a\u003E",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "\u003Cp\u003EA cat\u003C/p\u003E\n\u003Cimg src=\"/img/kittles.png\"\u003E\n\u003Cbr\u003E\n\u003Ca href=\"https://mimo.app/i/cat.png\"\u003EMy cat\u003C/a\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "One"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Two"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "Three"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "One을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 71540,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`height`와 `width` 속성을 설정하여 높이가 너비보다 크도록 합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"/img/clawdius.png\" height=\"300\" width=\"220\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 36,
+              "endIndex": 41,
+              "startLine": 0,
+              "startPos": 36,
+              "length": 5,
+              "value": "\"300\"",
+              "correct": true
+            },
+            {
+              "startIndex": 48,
+              "endIndex": 53,
+              "startLine": 0,
+              "startPos": 48,
+              "length": 5,
+              "value": "\"220\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "src",
+            "href"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\"300\"`, 다음으로 `\"220\"`을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "practiceRequired",
+    "nextTutorial": {
+      "id": 904,
+      "index": 0,
+      "codeLanguage": "html",
+      "descriptionContent": "HTML이 무엇인지 배우고, 웹 개발에서 중요한 역할을 하는 방법을 배워보세요.",
+      "title": "HTML 및 태그 발견",
+      "type": "course",
+      "version": 151,
+      "bannerIconUrl": "/icons/track-icons/tutorial-904-icon-banner.svg",
+      "chapters": [
+        {
+          "id": 8608,
+          "title": "HTML 태그",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76804
+            },
+            {
+              "id": 75802
+            },
+            {
+              "id": 75817
+            },
+            {
+              "id": 75819
+            },
+            {
+              "id": 75821
+            },
+            {
+              "id": 75816
+            },
+            {
+              "id": 76812
+            },
+            {
+              "id": 130087
+            },
+            {
+              "id": 75824
+            },
+            {
+              "id": 75822
+            },
+            {
+              "id": 75825
+            },
+            {
+              "id": 75823
+            }
+          ]
+        },
+        {
+          "id": 8716,
+          "title": "텍스트 및 제목",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76817
+            },
+            {
+              "id": 76819
+            },
+            {
+              "id": 76818
+            },
+            {
+              "id": 76820
+            },
+            {
+              "id": 76821
+            },
+            {
+              "id": 76822
+            },
+            {
+              "id": 76824
+            },
+            {
+              "id": 76825
+            },
+            {
+              "id": 76827
+            },
+            {
+              "id": 76828
+            },
+            {
+              "id": 76830
+            },
+            {
+              "id": 76831
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 1,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 7,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

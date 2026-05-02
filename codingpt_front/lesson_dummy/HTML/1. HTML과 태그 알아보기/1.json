@@ -1,0 +1,624 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76804,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "3715016a-67b7-42d1-9961-ab2e37adba3d",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "환영합니다! HTML, CSS, JavaScript, React 그리고 웹 개발에 필요한 모든 기술들을 배우게 될 거예요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "곧 실제 프로젝트를 만들게 될 거예요. 먼저 **HTML**부터 시작해볼까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 75802,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "하이퍼텍스트 마크업 언어, 즉 **HTML**은 인터넷의 웹 페이지를 구조화하는 컴퓨터 언어입니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "HTML을 기반으로 버튼, 이미지 등을 포함한 멋진 웹 페이지를 만들 수 있어요.\n",
+            "visibleIf": "always"
+          },
+          {
+            "type": "webview",
+            "content": "<html>\n <head>\n  <style>\n   body {\n    font-family: sans-serif;\n    color: #2C3E50;\n    background-color: #9aa4d2;\n    margin-top: 5%;\n    min-height: 300px;\n   }\n   \n   button[disabled] {\n    opacity: 0.5;\n    cursor: default;\n   }\n   \n   h2,\n   h1,\n   #result {\n    text-align: center;\n    margin: 5px;\n   }\n   \n   #letterButtons {\n    display: flex;\n    flex-direction: row;\n    flex-wrap: wrap;\n    width: 100%;\n    padding: 0;\n    justify-content: center;\n   }\n   \n   button {\n    width: 40px;\n    height: 40px;\n    background-color: #34495E;\n    color: #FFF;\n    font-size: 14px;\n    border: none;\n    border-radius: 5px;\n    cursor: pointer;\n    margin: 7px;\n    text-align: center;\n   }\n   \n   #result {\n    width: 80%;\n    height: 20px;\n    padding: 10px;\n    font-size: 1.3em;\n    margin: 0px auto;\n    border-radius: 5px;\n    color: white;\n    font-weight: bold;\n   }\n   \n   img {\n    width: 80%;\n    max-width:150px;\n    height: auto;\n    border-radius: 5px;\n    margin: 10px auto;\n    text-align: center;\n    display: none;\n    justify-content: center;\n    border: white 2px solid;\n   }\n  </style>\n </head>\n <body>\n  <h1 id=\"result\">편지를 맞춰보세요</h1>\n  <h2>_ O G</h2>\n  <img>\n  <div id=\"letterButtons\">\n   <button>Q</button>\n   <button>R</button>\n   <button>D</button>\n  </div>\n  <script>\n   let letterButtons = document.querySelectorAll(\n    '#letterButtons button');\n   let result = document.getElementById('result');\n   let image = document.getElementsByTagName(\"img\")[0];\n   let correctLetter = 'D';\n   let word = document.querySelector('h2');\n   letterButtons.forEach(button => {\n    button.addEventListener('click', function() {\n     let letter = this.textContent;\n     if (letter !== correctLetter) {\n      button.disabled = true;\n     }\n     if (letter === correctLetter) {\n      result.innerHTML = '정답이에요!';\n      result.style.color = \"#046865\";\n      image.style.display = \"flex\";\n      image.src = 'https://mimo.app/i/dog_yawn.png';\n      word.textContent = 'D O G';\n      letterButtons.forEach(button => {\n       button.disabled = true;\n      });\n     } else {\n      result.innerHTML = '다시 시도하십시오';\n      result.style.color = \"#D1345B\";\n     }\n    });\n   });\n  </script>\n </body>\n</html>",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 75817,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "HTML 코드 `<button>Like</button>`를 추가하면 \"Like\"라는 라벨이 있는 버튼을 만들 수 있어요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Like</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 21,
+              "value": "<button>Like</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `<button>Like</button>`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75819,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "버튼을 만드는 HTML 코드는 여는 태그 `<button>`와 닫는 태그 `</button>`를 이 순서대로 사용합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Like</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 8,
+              "value": "<button>",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 9,
+              "value": "</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `<button>`, followed by `</button>`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75821,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "버튼의 여는 태그와 닫는 태그 사이에 있는 텍스트가 버튼의 라벨이 됩니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Like</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 8,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 4,
+              "value": "Like",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Like`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75816,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "지금까지 배운 내용을 테스트해볼까요! 이 태그는 어떤 종류일까요? `</button>`",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "닫는 태그"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "여는 태그"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "닫는 태그입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76812,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "다음 중 **잘못** 작성된 태그는 무엇일까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": false,
+              "value": 0,
+              "text": "`<button>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`</button>`"
+            },
+            {
+              "correct": true,
+              "value": 2,
+              "text": "`<button\\>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<button\\>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 130087,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "이전 예제를 기억하시나요? 다음 단계에서는 **Q**, **R**, **D** 버튼을 만들어보겠습니다. 지금은 나머지 코드는 무시하도록 하겠습니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "webview",
+            "content": "<html> \n <head> \n  <style> \n   body { \n    font-family: sans-serif; \n    color: #2C3E50; \n    background-color: #9aa4d2; \n    margin-top: 5%; \n    min-height: 300px; \n   } \n    \n   button[disabled] { \n    opacity: 0.5; \n    cursor: default; \n   } \n    \n   h2, \n   h1, \n   #result { \n    text-align: center; \n    margin: 5px; \n   } \n    \n   #letterButtons { \n    display: flex; \n    flex-direction: row; \n    flex-wrap: wrap; \n    width: 100%; \n    padding: 0; \n    justify-content: center; \n   } \n    \n   button { \n    width: 40px; \n    height: 40px; \n    background-color: #34495E; \n    color: #FFF; \n    font-size: 14px; \n    border: none; \n    border-radius: 5px; \n    cursor: pointer; \n    margin: 7px; \n    text-align: center; \n   } \n    \n   #result { \n    width: 80%; \n    height: 20px; \n    padding: 10px; \n    font-size: 1.3em; \n    margin: 0px auto; \n    border-radius: 5px; \n    color: white; \n    font-weight: bold; \n   } \n    \n   img { \n    width: 80%; \n    max-width:150px; \n    height: auto; \n    border-radius: 5px; \n    margin: 10px auto; \n    text-align: center; \n    display: none; \n    justify-content: center; \n    border: white 2px solid; \n   } \n  </style> \n </head> \n <body> \n  <h1 id=\"result\">글자를 맞춰보세요</h1> \n  <h2>_ O G</h2> \n  <img> \n  <div id=\"letterButtons\"> \n   <button>Q</button> \n   <button>R</button> \n   <button>D</button> \n  </div> \n  <script> \n   let letterButtons = document.querySelectorAll( \n    '#letterButtons button'); \n   let result = document.getElementById('result'); \n   let image = document.getElementsByTagName(\"img\")[0]; \n   let correctLetter = 'D'; \n   let word = document.querySelector('h2'); \n   letterButtons.forEach(button => { \n    button.addEventListener('click', function() { \n     let letter = this.textContent; \n     if (letter !== correctLetter) { \n      button.disabled = true; \n     } \n     if (letter === correctLetter) { \n      result.innerHTML = '정답입니다!'; \n      result.style.color = \"#046865\"; \n      image.style.display = \"flex\"; \n      image.src = 'https://mimo.app/i/dog_yawn.png'; \n      word.textContent = 'D O G'; \n      letterButtons.forEach(button => { \n       button.disabled = true; \n      }); \n     } else { \n      result.innerHTML = '다시 시도해보세요'; \n      result.style.color = \"#D1345B\"; \n     } \n    }); \n   }); \n  </script> \n </body> \n</html>",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 75824,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "\"Q\"라는 라벨이 있는 버튼을 만들어보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Q</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 8,
+              "value": "<button>",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 1,
+              "value": "Q",
+              "correct": true
+            },
+            {
+              "startIndex": 9,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 9,
+              "value": "</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<html>\n <head>\n  <style>\n   body {\n    font-family: sans-serif;\n    color: #2C3E50;\n    background-color: #9aa4d2;\n    margin-top: 5%;\n    min-height: 300px;\n   }\n   \n   button[disabled] {\n    opacity: 0.5;\n    cursor: default;\n   }\n   \n   h2,\n   h1,\n   #result {\n    text-align: center;\n    margin: 5px;\n   }\n   \n   #letterButtons {\n    display: flex;\n    flex-direction: row;\n    flex-wrap: wrap;\n    width: 100%;\n    padding: 0;\n    justify-content: center;\n   }\n   \n   button {\n    width: 40px;\n    height: 40px;\n    background-color: #34495E;\n    color: #FFF;\n    font-size: 14px;\n    border: none;\n    border-radius: 5px;\n    cursor: pointer;\n    margin: 7px;\n    text-align: center;\n   }\n   \n   #result {\n    width: 80%;\n    height: 20px;\n    padding: 10px;\n    font-size: 1.3em;\n    margin: 0px auto;\n    border-radius: 5px;\n    color: white;\n    font-weight: bold;\n   }\n   \n   img {\n    width: 80%;\n    max-width:150px;\n    height: auto;\n    border-radius: 5px;\n    margin: 10px auto;\n    text-align: center;\n    display: none;\n    justify-content: center;\n    border: white 2px solid;\n   }\n  </style>\n </head>\n <body>\n  <h1 id=\"result\">글자를 맞춰보세요</h1>\n  <h2>_ O G</h2>\n  <img>\n  <div id=\"letterButtons\">\n   <button>Q</button>\n  </div>\n  <script>\n   let letterButtons = document.querySelectorAll(\n    '#letterButtons button');\n   let result = document.getElementById('result');\n   let image = document.getElementsByTagName(\"img\")[0];\n   let correctLetter = 'D';\n   let word = document.querySelector('h2');\n   letterButtons.forEach(button => {\n    button.addEventListener('click', function() {\n     let letter = this.textContent;\n     if (letter !== correctLetter) {\n      button.disabled = true;\n     }\n     if (letter === correctLetter) {\n      result.innerHTML = '정답입니다!';\n      result.style.color = \"#046865\";\n      image.style.display = \"flex\";\n      image.src = 'https://mimo.app/i/dog_yawn.png';\n      word.textContent = 'D O G';\n      letterButtons.forEach(button => {\n       button.disabled = true;\n      });\n     } else {\n      result.innerHTML = '다시 시도해보세요';\n      result.style.color = \"#D1345B\";\n     }\n    });\n   });\n  </script>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<button>`를 선택하고, `Q`를 입력한 다음, `</button>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75822,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "\"R\"이라는 라벨이 있는 버튼을 만드세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Q</button>\n<button>R</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 19,
+              "endIndex": 20,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 1,
+              "value": "<",
+              "correct": true
+            },
+            {
+              "startIndex": 20,
+              "endIndex": 26,
+              "startLine": 1,
+              "startPos": 1,
+              "length": 6,
+              "value": "button",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 27,
+              "startLine": 1,
+              "startPos": 7,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            },
+            {
+              "startIndex": 27,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 8,
+              "length": 1,
+              "value": "R",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 29,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 1,
+              "value": "<",
+              "correct": true
+            },
+            {
+              "startIndex": 29,
+              "endIndex": 30,
+              "startLine": 1,
+              "startPos": 10,
+              "length": 1,
+              "value": "/",
+              "correct": true
+            },
+            {
+              "startIndex": 30,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 6,
+              "value": "button",
+              "correct": true
+            },
+            {
+              "startIndex": 36,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 17,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<html>\n <head>\n  <style>\n   body {\n    font-family: sans-serif;\n    color: #2C3E50;\n    background-color: #9aa4d2;\n    margin-top: 5%;\n    min-height: 300px;\n   }\n   \n   button[disabled] {\n    opacity: 0.5;\n    cursor: default;\n   }\n   \n   h2,\n   h1,\n   #result {\n    text-align: center;\n    margin: 5px;\n   }\n   \n   #letterButtons {\n    display: flex;\n    flex-direction: row;\n    flex-wrap: wrap;\n    width: 100%;\n    padding: 0;\n    justify-content: center;\n   }\n   \n   button {\n    width: 40px;\n    height: 40px;\n    background-color: #34495E;\n    color: #FFF;\n    font-size: 14px;\n    border: none;\n    border-radius: 5px;\n    cursor: pointer;\n    margin: 7px;\n    text-align: center;\n   }\n   \n   #result {\n    width: 80%;\n    height: 20px;\n    padding: 10px;\n    font-size: 1.3em;\n    margin: 0px auto;\n    border-radius: 5px;\n    color: white;\n    font-weight: bold;\n   }\n   \n   img {\n    width: 80%;\n    max-width:150px;\n    height: auto;\n    border-radius: 5px;\n    margin: 10px auto;\n    text-align: center;\n    display: none;\n    justify-content: center;\n    border: white 2px solid;\n   }\n  </style>\n </head>\n <body>\n  <h1 id=\"result\">글자를 맞춰보세요</h1>\n  <h2>_ O G</h2>\n  <img>\n  <div id=\"letterButtons\">\n   <button>Q</button>\n   <button>R</button>\n  </div>\n  <script>\n   let letterButtons = document.querySelectorAll(\n    '#letterButtons button');\n   let result = document.getElementById('result');\n   let image = document.getElementsByTagName(\"img\")[0];\n   let correctLetter = 'D';\n   let word = document.querySelector('h2');\n   letterButtons.forEach(button => {\n    button.addEventListener('click', function() {\n     let letter = this.textContent;\n     if (letter !== correctLetter) {\n      button.disabled = true;\n     }\n     if (letter === correctLetter) {\n      result.innerHTML = '정답입니다!';\n      result.style.color = \"#046865\";\n      image.style.display = \"flex\";\n      image.src = 'https://mimo.app/i/dog_yawn.png';\n      word.textContent = 'D O G';\n      letterButtons.forEach(button => {\n       button.disabled = true;\n      });\n     } else {\n      result.innerHTML = '다시 시도해보세요';\n      result.style.color = \"#D1345B\";\n     }\n    });\n   });\n  </script>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<`, `button`, `>`, `R`, `<`, `/`, `button`, `>`를 순서대로 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75825,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "마지막으로, \"D\"라는 라벨이 있는 버튼을 여는 태그와 닫는 태그를 사용하여 만드세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<button>Q</button>\n<button>R</button>\n<button>D</button>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 38,
+              "endIndex": 46,
+              "startLine": 2,
+              "startPos": 0,
+              "length": 8,
+              "value": "<button>",
+              "correct": true
+            },
+            {
+              "startIndex": 46,
+              "endIndex": 47,
+              "startLine": 2,
+              "startPos": 8,
+              "length": 1,
+              "value": "D",
+              "correct": true
+            },
+            {
+              "startIndex": 47,
+              "endIndex": 56,
+              "startLine": 2,
+              "startPos": 9,
+              "length": 9,
+              "value": "</button>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "<button>"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "visibleIf": "correct",
+            "type": "webview",
+            "content": "<html>\n <head>\n  <style>\n   body {\n    font-family: sans-serif;\n    color: #2C3E50;\n    background-color: #9aa4d2;\n    margin-top: 5%;\n    min-height: 300px;\n   }\n   \n   button[disabled] {\n    opacity: 0.5;\n    cursor: default;\n   }\n   \n   h2,\n   h1,\n   #result {\n    text-align: center;\n    margin: 5px;\n   }\n   \n   #letterButtons {\n    display: flex;\n    flex-direction: row;\n    flex-wrap: wrap;\n    width: 100%;\n    padding: 0;\n    justify-content: center;\n   }\n   \n   button {\n    width: 40px;\n    height: 40px;\n    background-color: #34495E;\n    color: #FFF;\n    font-size: 14px;\n    border: none;\n    border-radius: 5px;\n    cursor: pointer;\n    margin: 7px;\n    text-align: center;\n   }\n   \n   #result {\n    width: 80%;\n    height: 20px;\n    padding: 10px;\n    font-size: 1.3em;\n    margin: 0px auto;\n    border-radius: 5px;\n    color: white;\n    font-weight: bold;\n   }\n   \n   img {\n    width: 80%;\n    max-width:150px;\n    height: auto;\n    border-radius: 5px;\n    margin: 10px auto;\n    text-align: center;\n    display: none;\n    justify-content: center;\n    border: white 2px solid;\n   }\n  </style>\n </head>\n <body>\n  <h1 id=\"result\">글자를 맞춰보세요</h1>\n  <h2>_ O G</h2>\n  <img>\n  <div id=\"letterButtons\">\n   <button>Q</button>\n   <button>R</button>\n   <button>D</button>\n  </div>\n  <script>\n   let letterButtons = document.querySelectorAll(\n    '#letterButtons button');\n   let result = document.getElementById('result');\n   let image = document.getElementsByTagName(\"img\")[0];\n   let correctLetter = 'D';\n   let word = document.querySelector('h2');\n   letterButtons.forEach(button => {\n    button.addEventListener('click', function() {\n     let letter = this.textContent;\n     if (letter !== correctLetter) {\n      button.disabled = true;\n     }\n     if (letter === correctLetter) {\n      result.innerHTML = '정답입니다!';\n      result.style.color = \"#046865\";\n      image.style.display = \"flex\";\n      image.src = 'https://mimo.app/i/dog_yawn.png';\n      word.textContent = 'D O G';\n      letterButtons.forEach(button => {\n       button.disabled = true;\n      });\n     } else {\n      result.innerHTML = '다시 시도해보세요';\n      result.style.color = \"#D1345B\";\n     }\n    });\n   });\n  </script>\n </body>\n</html>"
+          },
+          {
+            "type": "paragraph",
+            "content": "`<button>`를 선택하고, `D`를 선택한 다음, `</button>`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 75823,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "잘했어요! 버튼을 만드는 구조를 배웠어요.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "버튼에 동작을 추가하기 전에, 모든 웹 페이지에 있는 **HTML 요소**에 대해 배우기 위해 다음 레슨으로 넘어가볼까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 906,
+      "index": 1,
+      "codeLanguage": "html",
+      "descriptionContent": "태그를 사용하여 웹사이트의 텍스트를 스타일링하고 HTML 페이지의 head가 하는 일을 배워보세요.",
+      "title": "태그로 텍스트 구조화하기",
+      "type": "course",
+      "version": 73,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 15309,
+          "title": "줄바꿈, 강조와 중요도",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 134830
+            },
+            {
+              "id": 134837
+            },
+            {
+              "id": 134831
+            },
+            {
+              "id": 134812
+            },
+            {
+              "id": 134813
+            },
+            {
+              "id": 134838
+            },
+            {
+              "id": 134814
+            },
+            {
+              "id": 134839
+            },
+            {
+              "id": 134815
+            },
+            {
+              "id": 134816
+            },
+            {
+              "id": 134819
+            },
+            {
+              "id": 134817
+            },
+            {
+              "id": 134818
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 151,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

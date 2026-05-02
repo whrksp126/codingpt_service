@@ -1,0 +1,728 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 62115,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "41d560a0-322c-4422-b428-caf11623cc72",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "There's a special value that's _neither_ a string _nor_ a number: `true`.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "There are no quotes around it, and it's not a numeric value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 62052,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`true` is great for situations like checking if a switch is on or if a feature is enabled.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Display `true` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Allow updates\");\nconsole.log(true);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 42,
+            "endIndex": 46,
+            "startLine": 1,
+            "startPos": 12,
+            "length": 4,
+            "value": "true",
+            "correct": true
+          },
+          "output": "Allow updates\ntrue"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62050,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can store `true` in a variable just like a string or a number.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Store `true` in a variable and display it in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const correct = true;\nconsole.log(correct);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 16,
+              "endIndex": 20,
+              "startLine": 0,
+              "startPos": 16,
+              "length": 4,
+              "value": "true",
+              "correct": true
+            },
+            {
+              "startIndex": 34,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 7,
+              "value": "correct",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "true"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `true`, followed by `correct`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62049,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "581c9bf2-4254-41a8-babe-529b2f7e4feb",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`false` is another special value and the opposite of `true`. We can use it like `true`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 62048,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Save the value `false` in the variable `status` and display `status` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Device charged\");\nconst status = false;\nconsole.log(status);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 46,
+              "endIndex": 51,
+              "startLine": 1,
+              "startPos": 15,
+              "length": 5,
+              "value": "false",
+              "correct": true
+            },
+            {
+              "startIndex": 65,
+              "endIndex": 71,
+              "startLine": 2,
+              "startPos": 12,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "var"
+          ],
+          "output": "Device charged\nfalse"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `false`, followed by `status`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62132,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's a good use for the values `true` and `false`? ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Showing if a feature is switched on or off"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Storing values from one to five"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Showing if a feature is switched on or off.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62134,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why is `false` not a string?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const autoPlay = false;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const autoPlay = false;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "There are no quotes around it"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It&#039;s stored inside a variable"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "There are no quotes around it.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62133,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Pick the one that's best for showing that a user unsubscribed from a service.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`const subscribed = false;`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`const subscribed = true;`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`const subscribed = false;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62135,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why is `\"false\"` not the same as `false`?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "There are quotes around it, so `\"false\"` is a string"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"false\"` and `false` are the same"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "There are quotes around it, so `\"false\"` is a string.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62203,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Show the status of the auto-update setting by displaying `false` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Auto update\");\nconsole.log(false);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 28,
+              "endIndex": 35,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 7,
+              "value": "console",
+              "correct": true
+            },
+            {
+              "startIndex": 35,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 7,
+              "length": 1,
+              "value": ".",
+              "correct": true
+            },
+            {
+              "startIndex": 36,
+              "endIndex": 39,
+              "startLine": 1,
+              "startPos": 8,
+              "length": 3,
+              "value": "log",
+              "correct": true
+            },
+            {
+              "startIndex": 39,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 40,
+              "endIndex": 45,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 5,
+              "value": "false",
+              "correct": true
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 46,
+              "startLine": 1,
+              "startPos": 17,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Auto update\nfalse"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `console` followed by `.` and then `log`, `(`, `false`, `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62204,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create the variable `autoSaveImage` and store `true` inside it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const autoSaveImage = true;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 13,
+              "value": "autoSaveImage",
+              "correct": true
+            },
+            {
+              "startIndex": 22,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 22,
+              "length": 4,
+              "value": "true",
+              "correct": true
+            },
+            {
+              "startIndex": 0,
+              "endIndex": 5,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`, followed by `autoSaveImage`, and finally `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62205,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Prevent cookies by creating the variable and storing `false` in it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const allowCookies = false;\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 12,
+              "value": "allowCookies",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 5,
+              "value": "false",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"false\""
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `allowCookies`, followed by `false`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62206,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Adjust the auto-play settings by coding `true`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const autoPlay = true;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 17,
+            "endIndex": 21,
+            "startLine": 0,
+            "startPos": 17,
+            "length": 4,
+            "value": "true",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 750,
+      "index": 3,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to look for equality among numbers.",
+      "title": "Checking Number Equality",
+      "type": "course",
+      "version": 37,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7175,
+          "title": "Equality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62166
+            },
+            {
+              "id": 62168
+            },
+            {
+              "id": 62169
+            },
+            {
+              "id": 62170
+            },
+            {
+              "id": 62171
+            },
+            {
+              "id": 62183
+            },
+            {
+              "id": 62186
+            },
+            {
+              "id": 62185
+            },
+            {
+              "id": 62187
+            },
+            {
+              "id": 62184
+            },
+            {
+              "id": 62198
+            },
+            {
+              "id": 62200
+            },
+            {
+              "id": 62199
+            }
+          ]
+        },
+        {
+          "id": 7178,
+          "title": "Inequality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62182
+            },
+            {
+              "id": 62178
+            },
+            {
+              "id": 62176
+            },
+            {
+              "id": 62179
+            },
+            {
+              "id": 62190
+            },
+            {
+              "id": 62188
+            },
+            {
+              "id": 62193
+            },
+            {
+              "id": 62192
+            },
+            {
+              "id": 62189
+            },
+            {
+              "id": 62194
+            },
+            {
+              "id": 62195
+            },
+            {
+              "id": 62196
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 45,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

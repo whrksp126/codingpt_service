@@ -1,0 +1,683 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive", 
+        "id": 134830,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "때로는 문단을 줄바꿈으로 형식을 지정하고 싶을 때가 있습니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph", 
+            "content": "예를 들어, 이 노래는 `장미꽃 위의 빗방울`이 한 줄에, `고양이의 수염`이 다음 줄에 나타나는 식으로 표시되면 더 보기 좋을 것 같습니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "webview",
+            "content": "<h1>내가 좋아하는 것들</h1>\n<p> 장미꽃 위의 빗방울 고양이의 수염 밝은 구리 주전자 따뜻한\n 양모 장갑 </p>",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 134837,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "**줄바꿈 태그** `br`를 사용하여 줄을 나눌 수 있습니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h1>내가 좋아하는 것들</h1>\n<p> 장미꽃 위의 빗방울<br>\n고양이의 수염<br> \n밝은 구리 주전자 <br> \n따뜻한 양모 장갑\n </p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 34,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 14,
+              "length": 4,
+              "value": "<br>",
+              "correct": true
+            },
+            {
+              "startIndex": 62,
+              "endIndex": 66,
+              "startLine": 3,
+              "startPos": 10,
+              "length": 4,
+              "value": "<br>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<br>`, 그 다음 `<br>`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134831,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<br>`는 **빈 태그**입니다. 빈 태그는 닫는 태그가 없고 내용도 없습니다. 이를 자체 닫힘 태그라고도 합니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "줄바꿈 태그를 완성해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h1>내가 좋아하는 것들</h1>\n<p>\n 장미꽃 위의 빗방울<br>\n 고양이의 수염<br>\n 밝은 구리 주전자<br>\n 따뜻한 양모 장갑\n</p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 63,
+              "endIndex": 64,
+              "startLine": 4,
+              "startPos": 10,
+              "length": 1,
+              "value": "<",
+              "correct": true
+            },
+            {
+              "startIndex": 64,
+              "endIndex": 66,
+              "startLine": 4,
+              "startPos": 11,
+              "length": 2,
+              "value": "br",
+              "correct": true
+            },
+            {
+              "startIndex": 66,
+              "endIndex": 67,
+              "startLine": 4,
+              "startPos": 13,
+              "length": 1,
+              "value": ">",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "/"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<`, 그 다음 `br`, 마지막으로 `>`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134812,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "텍스트를 강조하는 요소가 있습니다. 이것은 텍스트를 _기울임꼴_로 만듭니다. 이것을 `em` 요소라고 합니다. `<em>`과 `</em>`을 추가하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\n<h1>내가 좋아하는 것들</h1>\n<p>\n 장미꽃 위의 <em>빗방울</em><br>\n 고양이의 수염<br>\n 밝은 구리 주전자<br>\n 따뜻한 양모 장갑\n</p>\n",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 33,
+              "endIndex": 37,
+              "startLine": 3,
+              "startPos": 8,
+              "length": 4,
+              "value": "<em>",
+              "correct": true
+            },
+            {
+              "startIndex": 40,
+              "endIndex": 45,
+              "startLine": 3,
+              "startPos": 15,
+              "length": 5,
+              "value": "</em>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<em>`을 선택하고, 그 다음 `</em>`을 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134813,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "텍스트를 중요하게 표시하려면 `<strong>`과 `</strong>` 태그를 사용합니다. 이것은 텍스트를 **굵게** 만듭니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<h1>내가 좋아하는 것들</h1>\n<p>\n 장미꽃 위의 <em>빗방울</em><br>\n 고양이의 <strong>수염</strong>\n</p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 55,
+              "endIndex": 63,
+              "startLine": 3,
+              "startPos": 6,
+              "length": 8,
+              "value": "<strong>",
+              "correct": true
+            },
+            {
+              "startIndex": 65,
+              "endIndex": 74,
+              "startLine": 3,
+              "startPos": 16,
+              "length": 9,
+              "value": "</strong>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<strong>`을 선택하고, 그 다음 `</strong>`을 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134838,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<br>` 태그는 무엇을 위한 태그인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": false,
+              "value": 0,
+              "text": "텍스트를 강조하기 위한 태그입니다"
+            },
+            {
+              "correct": true,
+              "value": 1,
+              "text": "줄바꿈을 하기 위한 태그입니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "줄바꿈을 하기 위한 태그입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134814,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "다음 중 빈 태그 또는 자체 닫힘 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<br>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`</strong>`"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "`</em>`"
+            },
+            {
+              "correct": false,
+              "value": 3,
+              "text": "`<p>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<br>`을 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134839,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "다음 중 텍스트를 강조하는 태그는 무엇인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`<em>`과 `</em>`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`<p>`와 `</p>`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<em>`과 `</em>` 태그입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134815,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<strong>`과 `</strong>` 태그는 무엇을 위한 태그인가요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "텍스트를 중요하다고 정의합니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "텍스트가 줄바꿈으로 끊어지지 않게 합니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "텍스트를 중요하다고 정의하는 태그입니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134816,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "앨범 제목을 강조하기 위해 강조 태그를 추가해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<p> 저는 처음으로 <em>아이유의 좋은날</em>을 들었어요.</p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 16,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 4,
+              "value": "<em>",
+              "correct": true
+            },
+            {
+              "startIndex": 24,
+              "endIndex": 29,
+              "startLine": 0,
+              "startPos": 24,
+              "length": 5,
+              "value": "</em>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<em>` 태그로 시작해서 `</em>` 태그로 닫아야 합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134819,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "_서울시청_과 _대한민국 서울_ 사이에 줄바꿈을 추가하여 _서울시청_이 한 줄에 나타나고 _대한민국 서울_이 그 아래에 나타나도록 해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html", 
+              "content": "<p> 서울시청 <br> 대한민국 서울 </p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 9,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 4,
+              "value": "<br>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "</br>"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<br>` 태그를 선택해야 합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 134817,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph", 
+            "content": "두 번째 문장에 강조를 추가해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "<p>내 친구들은 내가 기울임꼴로 글을 쓸 때마다 짜증을 내. <em>아마도 그들에게는\n 너무 오른쪽으로 기울어진 것 같아.</em></p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 35,
+              "endIndex": 39,
+              "startLine": 0,
+              "startPos": 35,
+              "length": 4,
+              "value": "<em>",
+              "correct": true
+            },
+            {
+              "startIndex": 69,
+              "endIndex": 74,
+              "startLine": 1,
+              "startPos": 20,
+              "length": 5,
+              "value": "</em>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`<em>` 태그로 시작해서 `</em>` 태그로 닫아야 합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive", 
+        "id": 134818,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`</strong>` 태그를 사용하여 _널 흔들어_ 텍스트를 중요한 텍스트로 정의하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html", 
+              "content": "<p>우리는, 우리는<br><strong>널 흔들어</strong></p>",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 28,
+              "endIndex": 37,
+              "startLine": 0,
+              "startPos": 28,
+              "length": 9,
+              "value": "</strong>",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`</strong>` 태그를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1001,
+      "index": 2,
+      "codeLanguage": "html",
+      "descriptionContent": "Learn how to build your first button in HTML.",
+      "title": "Building Buttons",
+      "type": "course",
+      "version": 29,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7692,
+          "title": "Buttons",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 67395
+            },
+            {
+              "id": 67389
+            },
+            {
+              "id": 67391
+            },
+            {
+              "id": 67425
+            },
+            {
+              "id": 67393
+            },
+            {
+              "id": 67402
+            },
+            {
+              "id": 67443
+            },
+            {
+              "id": 67444
+            },
+            {
+              "id": 67445
+            },
+            {
+              "id": 67446
+            },
+            {
+              "id": 67448
+            },
+            {
+              "id": 67449
+            },
+            {
+              "id": 67450
+            },
+            {
+              "id": 67454
+            },
+            {
+              "id": 67453
+            },
+            {
+              "id": 67451
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 1,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 73,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

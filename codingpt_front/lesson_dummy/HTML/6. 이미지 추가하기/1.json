@@ -1,0 +1,767 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 71395,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "HTML은 웹페이지에 이미지를 추가할 수 있습니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "webview",
+            "content": "\u003C!doctype html\u003E\n\u003Chtml\u003E\n \u003Chead\u003E\n  \u003Clink rel=\"stylesheet\" href=\"style.css\"\u003E\n  \u003Cstyle\u003E\n   body {\n    text-align: center;\n   }\n   \n   img {\n    border: solid gray 10px;\n    margin: 10px;\n    padding: 5px;\n   }\n   \n   h2 {\n    width: 250px;\n    margin: auto;\n   }\n  \u003C/style\u003E\n \u003C/head\u003E\n \u003Cbody\u003E\n  \u003Ch2\u003EPhotography competition winner\u003C/h2\u003E \u003Cbr\u003E \u003Cimg\n   style=\"width: 200px;\" src=\"https://mimo.app/i/fox.png\"\u003E\n \u003C/body\u003E\n\u003C/html\u003E",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 58841,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "웹페이지에 **이미지**를 추가하기 위해, 우리는 `\u003Cimg\u003E` 태그로 시작합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EDrawing of \u003Cem\u003EEarthrise\u003C/em\u003E \u003C/h3\u003E\n\u003Cimg\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 40,
+              "endIndex": 45,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "\u003Cimg\u003E",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\u003Ca\u003E"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\u003Cimg\u003E`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58835,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Just like `\u003Cbr\u003E`, `\u003Cimg\u003E` is an **empty tag**. That means it has no closing tag.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EDrawing of \u003Cem\u003EEarthrise\u003C/em\u003E \u003C/h3\u003E\n\u003Cimg\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 40,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 1,
+              "value": "\u003C",
+              "correct": true
+            },
+            {
+              "startIndex": 41,
+              "endIndex": 44,
+              "startLine": 1,
+              "startPos": 1,
+              "length": 3,
+              "value": "img",
+              "correct": true
+            },
+            {
+              "startIndex": 44,
+              "endIndex": 45,
+              "startLine": 1,
+              "startPos": 4,
+              "length": 1,
+              "value": "\u003E",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\u003Cimg\u003E\u003C/img\u003E"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\u003C`, `img`, `\u003E`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58836,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이미지를 표시하기 위해, 이미지 태그는 `src` 속성이 필요합니다. `src`는 소스를 의미합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EDrawing of \u003Cem\u003EEarthrise\u003C/em\u003E \u003C/h3\u003E\n\u003Cimg src=\"https://mimo.app/i/earth.png\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 45,
+              "endIndex": 48,
+              "startLine": 1,
+              "startPos": 5,
+              "length": 3,
+              "value": "src",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "source"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`src`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58911,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We set the image we want to display with an `=` sign and the image's address between double quotes.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Ch3\u003EDrawing of \u003Cem\u003EEarthrise\u003C/em\u003E \u003C/h3\u003E\n\u003Cimg src=\"https://mimo.app/i/earth.png\"\u003E\n",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 45,
+              "endIndex": 48,
+              "startLine": 1,
+              "startPos": 5,
+              "length": 3,
+              "value": "src",
+              "correct": true
+            },
+            {
+              "startIndex": 48,
+              "endIndex": 49,
+              "startLine": 1,
+              "startPos": 8,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 49,
+              "endIndex": 79,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 30,
+              "value": "\"https://mimo.app/i/earth.png\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "source"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`src`, `=`, `\"https://mimo.app/i/earth.png\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58839,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use attributes to change the size of images. The `width` and `height` attributes use pixels as the default unit of measurement.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": " For example, to set the width of this image as  100px,  code `width = \"100\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/earth.png\" width=\"100\" height=\"200\"\u003E\n",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 40,
+              "endIndex": 45,
+              "startLine": 0,
+              "startPos": 40,
+              "length": 5,
+              "value": "width",
+              "correct": true
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 46,
+              "startLine": 0,
+              "startPos": 45,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 46,
+              "endIndex": 51,
+              "startLine": 0,
+              "startPos": 46,
+              "length": 5,
+              "value": "\"100\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\u003C100\u003E"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`width`, `=`, `\"100\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58840,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "And the `height` attribute adjusts the **height** of an image.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/earth.png\" width=\"200\" height=\"300\" \u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 52,
+            "endIndex": 58,
+            "startLine": 0,
+            "startPos": 52,
+            "length": 6,
+            "value": "height",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`height`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58912,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What makes `\u003Cimg\u003E` an empty tag?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It has no closing tag"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It has no attributes"
+            },
+            {
+              "correct": false,
+              "value": 2,
+              "text": "There&#039;s no `/` in its opening tag"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "닫는 태그가 없습니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58913,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How many images will appear on this webpage?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "index.html",
+                "content": "\u003Cimg src=\"https://mimo.app/i/dog.png\"\u003E\n\u003Cimg src=\"https://mimo.app/i/cat.png\"\u003E",
+                "codeLanguage": "html"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/dog.png\"\u003E\n\u003Cimg src=\"https://mimo.app/i/cat.png\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "2"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "1"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "2를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58914,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How can we adjust the height of an image?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "With the `height` attribute"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "With the `\u003Cheight\u003E` tag"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`height` 속성을 사용하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58915,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which attribute do we need to set for the `img` tag?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The `src` attribute"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The `href` attribute"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`src` 속성을 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58917,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Set the `width` attribute of the image to `\"200\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/cat.png\" width=\"200\" height=\"200\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 38,
+              "endIndex": 43,
+              "startLine": 0,
+              "startPos": 38,
+              "length": 5,
+              "value": "width",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 44,
+              "startLine": 0,
+              "startPos": 43,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 44,
+              "endIndex": 49,
+              "startLine": 0,
+              "startPos": 44,
+              "length": 5,
+              "value": "\"200\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\u003Cwidth\u003E"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`width`, `=`, `\"200\"`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58919,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Pick the correct tag for an image.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/cafe.png\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 1,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 1,
+              "value": "\u003C",
+              "correct": true
+            },
+            {
+              "startIndex": 1,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 1,
+              "length": 3,
+              "value": "img",
+              "correct": true
+            },
+            {
+              "startIndex": 5,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 5,
+              "length": 3,
+              "value": "src",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 9,
+              "endIndex": 38,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 29,
+              "value": "\"https://mimo.app/i/cafe.png\"",
+              "correct": true
+            },
+            {
+              "startIndex": 38,
+              "endIndex": 39,
+              "startLine": 0,
+              "startPos": 38,
+              "length": 1,
+              "value": "\u003E",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\u003C/img\u003E"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`\u003C` 다음에 `img`를 선택하고, 그 다음 `src`, `=`, `\"https://mimo.app/i/cafe.png\"`, `\u003E`를 선택하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58920,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Use the correct attribute to set the source of the image.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/taxi.png\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 5,
+            "endIndex": 8,
+            "startLine": 0,
+            "startPos": 5,
+            "length": 3,
+            "value": "src",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`src`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 58921,
+        "index": 14,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code the height of the image with `height=\"100\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "index.html",
+              "content": "\u003Cimg src=\"https://mimo.app/i/dog.png\" width=\"100\" height=\"100\"\u003E",
+              "codeLanguage": "html"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 50,
+            "endIndex": 62,
+            "startLine": 0,
+            "startPos": 50,
+            "length": 12,
+            "value": "height=\"100\"",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`height=\"100\"`를 입력하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": null,
+    "chaptersCount": 1,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 46,
+    "tutorialVersion": 45,
+    "sectionIndex": 0,
+    "codeLanguage": "html"
+  }
+}

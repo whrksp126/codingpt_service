@@ -1,0 +1,658 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76389,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "fc410fa6-41fc-44ea-83f3-eb795f4d9c66",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "There's a special value that's _neither_ a string _nor_ a number: `True`.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "There are no quotes around it, and it's not a numeric value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 76388,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`True` is great for situations like checking if a feature is on or if data is available. We can see it here when we set `powered_on` to `True`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "powered_on = True",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 11,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 4,
+              "value": "True",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76395,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can store `True` in a variable just like a string or a number. Displaying it also works the same, like when we display `correct` here.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "correct = True\nprint(correct)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 21,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 7,
+              "value": "correct",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "True",
+            "="
+          ],
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `correct`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76387,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "23f4888a-9f03-483a-b003-77482eb25a8e",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`False` is another special value and the opposite of `True`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 76384,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can save `False` in the variable `status` and display `status`  in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Load data\")\nstatus = False\nprint(status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 28,
+              "endIndex": 33,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 5,
+              "value": "False",
+              "correct": true
+            },
+            {
+              "startIndex": 40,
+              "endIndex": 46,
+              "startLine": 2,
+              "startPos": 6,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "(",
+            ")"
+          ],
+          "output": "Load data\nFalse"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`, followed by `status`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76390,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's a good use for the values `True` and `False`? ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Showing if a feature is switched on or off"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Storing values from one to five"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Showing if a feature is switched on or off.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76393,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why is `False` not a string?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "upload = False",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "upload = False",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "There are no quotes around it"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It&#039;s stored inside a variable"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "There are no quotes around it.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76391,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Pick the one that's best for showing a user unsubscribed from a service.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`subscribed = False`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`subscribed = True`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`subscribed = False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76394,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why is `\"False\"` not the same as `False`?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "There are quotes around it, so `\"False\"` is a string"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`\"False\"` and `False` are the same"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "There are quotes around it, so `\"False\"` is a string.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76348,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Show the status of the auto-update setting by displaying `False` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"Auto update\")\nprint(False)\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 27,
+              "endIndex": 32,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 5,
+              "value": "False",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "True"
+          ],
+          "output": "Auto update\nFalse"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76416,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create the variable `auto_save` and store `True` inside it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "auto_save = True",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 16,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 4,
+              "value": "True",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"False\""
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76392,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create the variable for preventing logout and store `False` in it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "prevent_logout = False\n",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 17,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 17,
+              "length": 5,
+              "value": "False",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "True",
+            "\"True\""
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76385,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Store a variable that'll be used in calculations by coding `True`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "calculate_average = True",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 20,
+            "endIndex": 24,
+            "startLine": 0,
+            "startPos": 20,
+            "length": 4,
+            "value": "True",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1111,
+      "index": 3,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn how to look for equality among numbers.",
+      "title": "Checking Number Equality",
+      "type": "course",
+      "version": 18,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8727,
+          "title": "Equality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76931
+            },
+            {
+              "id": 76930
+            },
+            {
+              "id": 76929
+            },
+            {
+              "id": 76928
+            },
+            {
+              "id": 76927
+            },
+            {
+              "id": 76901
+            },
+            {
+              "id": 76900
+            },
+            {
+              "id": 76924
+            },
+            {
+              "id": 76896
+            },
+            {
+              "id": 76878
+            },
+            {
+              "id": 76872
+            },
+            {
+              "id": 76876
+            },
+            {
+              "id": 76874
+            }
+          ]
+        },
+        {
+          "id": 8728,
+          "title": "Inequality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76877
+            },
+            {
+              "id": 76873
+            },
+            {
+              "id": 76875
+            },
+            {
+              "id": 76871
+            },
+            {
+              "id": 76868
+            },
+            {
+              "id": 76870
+            },
+            {
+              "id": 76866
+            },
+            {
+              "id": 76867
+            },
+            {
+              "id": 76869
+            },
+            {
+              "id": 76865
+            },
+            {
+              "id": 76864
+            },
+            {
+              "id": 76863
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 17,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

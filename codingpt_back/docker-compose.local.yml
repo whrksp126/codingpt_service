@@ -1,0 +1,42 @@
+# version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: codingpt_postgres_local
+    environment:
+      POSTGRES_DB: codingpt_db
+      POSTGRES_USER: codingpt
+      POSTGRES_PASSWORD: codingpt123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codingpt -d codingpt_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    container_name: codingpt_back_local
+    image: whrksp126/codingpt_back:local
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    ports:
+      - "5103:5100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.local
+    environment:
+      - DB_HOST=postgres
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run dev -- --host"
+
+volumes:
+  postgres_local_data:

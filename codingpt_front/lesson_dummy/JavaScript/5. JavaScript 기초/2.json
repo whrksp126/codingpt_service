@@ -1,0 +1,393 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "id": 59779,
+        "type": "Executable",
+        "instructions": "Create a variable, which value cannot be changed, named `job` and store the value `\"Astronaut\"` in it.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "",
+            "solvedContent": "const job = \"Astronaut\";",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59780,
+        "type": "Executable",
+        "instructions": "Create a variable named `song`, store a string in it, and display its value.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "",
+            "solvedContent": "const song = \"Your Choice of Song\";\nconsole.log(song);",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59781,
+        "type": "Executable",
+        "instructions": "Use `console.log()` to display `Hi` in the console.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "const greeting = \"Hi\";",
+            "solvedContent": "const greeting = \"Hi\";\nconsole.log(greeting);",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59782,
+        "type": "Executable",
+        "instructions": "Create a `car1` variable and give it the string value `\"Volvo\"`. Then create a `car2` variable and give it the string value `\"Jaguar\"`.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "",
+            "solvedContent": "const car1 = \"Volvo\";\nconst car2 = \"Jaguar\";",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59857,
+        "type": "Executable",
+        "instructions": "Add another `console.log()` instruction and display another string value in the console.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "console.log(\"3, 2, 1\");\n",
+            "solvedContent": "console.log(\"3, 2, 1\");\nconsole.log(\"GO!\");",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59859,
+        "type": "Executable",
+        "instructions": "Give the variables string values. ",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "const soda;\nconst juice;",
+            "solvedContent": "const soda = \"cola\";\nconst juice = \"apple\";",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 59786,
+        "type": "Executable",
+        "instructions": "Create a variable called `sentence`, and give it a string value containing at least two words with a space in-between.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "",
+            "solvedContent": "const sentence = \"hey there\";",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 117632,
+        "type": "Executable",
+        "instructions": "Code the special instruction to display the string value in the console.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "(\"Hello, World!\");",
+            "solvedContent": "console.log(\"Hello, World!\");",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 117633,
+        "type": "Executable",
+        "instructions": "Give this variable, which stores the charging status of a battery, a descriptive and valid name. Place that variable name in the second `console.log()`.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "const = \"charged\";\r\nconsole.log(\"Charging status is: \");\r\nconsole.log();",
+            "solvedContent": "const batteryStatus = \"charged\";\r\nconsole.log(\"Charging status is: \");\r\nconsole.log(batteryStatus);",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      },
+      {
+        "id": 117634,
+        "type": "Executable",
+        "instructions": "Create a `city` variable with any city value in it.",
+        "preselectedFileIndex": 0,
+        "hints": [],
+        "httpOptions": null,
+        "files": [
+          {
+            "name": "script.js",
+            "content": "",
+            "solvedContent": "const city = \"Paris\";",
+            "codeLanguage": "javascript"
+          }
+        ],
+        "savedFiles": []
+      }
+    ],
+    "tutorialType": "practiceOptional",
+    "nextTutorial": {
+      "id": 910,
+      "index": 0,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to create variables in JavaScript.",
+      "title": "Creating Variables",
+      "type": "course",
+      "version": 36,
+      "bannerIconUrl": "/icons/track-icons/tutorial-910-icon-banner.svg",
+      "chapters": [
+        {
+          "id": 6905,
+          "title": "Variable Names",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59774
+            },
+            {
+              "id": 59681
+            },
+            {
+              "id": 59680
+            },
+            {
+              "id": 59674
+            },
+            {
+              "id": 59682
+            },
+            {
+              "id": 59678
+            },
+            {
+              "id": 59687
+            },
+            {
+              "id": 59688
+            },
+            {
+              "id": 59689
+            },
+            {
+              "id": 59756
+            },
+            {
+              "id": 59757
+            },
+            {
+              "id": 59692
+            },
+            {
+              "id": 59693
+            },
+            {
+              "id": 59694
+            }
+          ]
+        },
+        {
+          "id": 6906,
+          "title": "Variable Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59673
+            },
+            {
+              "id": 59676
+            },
+            {
+              "id": 59675
+            },
+            {
+              "id": 59720
+            },
+            {
+              "id": 59714
+            },
+            {
+              "id": 59742
+            },
+            {
+              "id": 59772
+            },
+            {
+              "id": 59690
+            },
+            {
+              "id": 59743
+            },
+            {
+              "id": 59691
+            },
+            {
+              "id": 59745
+            },
+            {
+              "id": 59747
+            },
+            {
+              "id": 59746
+            }
+          ]
+        },
+        {
+          "id": 12761,
+          "title": "Let and Const Differences",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 115685
+            },
+            {
+              "id": 115687
+            },
+            {
+              "id": 115781
+            },
+            {
+              "id": 115688
+            },
+            {
+              "id": 115782
+            },
+            {
+              "id": 115783
+            },
+            {
+              "id": 115906
+            },
+            {
+              "id": 115901
+            },
+            {
+              "id": 115902
+            },
+            {
+              "id": 115903
+            },
+            {
+              "id": 115907
+            },
+            {
+              "id": 115904
+            },
+            {
+              "id": 115905
+            },
+            {
+              "id": 115908
+            }
+          ]
+        },
+        {
+          "id": 6911,
+          "title": "Console",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59716
+            },
+            {
+              "id": 59715
+            },
+            {
+              "id": 59717
+            },
+            {
+              "id": 59718
+            },
+            {
+              "id": 59719
+            },
+            {
+              "id": 59710
+            },
+            {
+              "id": 59182
+            },
+            {
+              "id": 59181
+            },
+            {
+              "id": 59197
+            },
+            {
+              "id": 59211
+            },
+            {
+              "id": 59752
+            },
+            {
+              "id": 59753
+            },
+            {
+              "id": 59260
+            },
+            {
+              "id": 59259
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 4,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 1,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  front-end:
+    container_name: codingpt_front_dev
+    image: whrksp126/codingpt_front:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      platforms: 
+        - linux/amd64
+    ports:
+      - "3102:3100"
+    env_file:
+      - .env.dev
+    networks:
+      - codingpt_front_dev_network
+    restart: unless-stopped
+
+networks:
+  codingpt_front_dev_network:
+    driver: bridge

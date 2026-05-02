@@ -1,0 +1,823 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59716,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Lines of code are **instructions** for the computer to follow.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "When we run code, we tell the computer to follow the instructions we put together.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 59715,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The order of the instructions matters because the computer follows the instructions line by line.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create `step1` first, `step2` second, and `step3` third.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const step1 = \"Collect pants\";\nconst step2 = \"?\";\nconst step3 = \"Profit\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 30,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 30,
+              "value": "const step1 = \"Collect pants\";",
+              "correct": true
+            },
+            {
+              "startIndex": 31,
+              "endIndex": 49,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 18,
+              "value": "const step2 = \"?\";",
+              "correct": true
+            },
+            {
+              "startIndex": 50,
+              "endIndex": 73,
+              "startLine": 2,
+              "startPos": 0,
+              "length": 23,
+              "value": "const step3 = \"Profit\";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const step1 = \"Collect pants\";`, followed by `const step2 = \"?\";`, and finally `const step3 = \"Profit\";`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59717,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "With the special instruction `console.log()`, we tell the computer to display a value in an area called the **console**.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Hello, World!\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 15,
+              "value": "\"Hello, World!\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Hello, World!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `\"Hello, World!\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59718,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use the `console.log()` instruction as often as we want. The computer displays every value on a line in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"3, 2, 1\");\nconsole.log(\"GO!\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 35,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 41,
+              "endIndex": 42,
+              "startLine": 1,
+              "startPos": 17,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "3, 2, 1\nGO!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `(`, followed by `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59719,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use `console.log()` to display variables like `greeting`, too.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const greeting = \"Hello, World!\";\nconsole.log(greeting);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 46,
+              "endIndex": 54,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 8,
+              "value": "greeting",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "console.log",
+            "(",
+            ")"
+          ],
+          "output": "Hello, World!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `greeting`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59710,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we display variables in the console, their values appear instead of their names.  If we log `name` here,  it'll show its value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const name = \"Daenerys\";\nconsole.log(name);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 37,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 4,
+              "value": "name",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"Daenerys\""
+          ],
+          "output": "Daenerys"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `name`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59182,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know `\"Hello, World!\"` is a string?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It starts and ends with double quotes"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It contains letters and symbols"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It starts and ends with double quotes.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59181,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the console?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "An area that displays output"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The area where we write the code"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "An area that displays output.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59197,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does the special instruction `console.log()` do?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It displays a value in the console"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It creates a variable"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It displays a value in the console.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59211,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const sport = \"B-ball\";\nconsole.log(sport);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "B-ball"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const sport = \"B-ball\";\nconsole.log(sport);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`B-ball`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`sport`"
+            }
+          ],
+          "isCode": false,
+          "output": "B-ball"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `B-ball`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59752,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Put the code in order to display the value `daily` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const frequency = \"daily\";\nconsole.log(frequency);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 26,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 26,
+              "value": "const frequency = \"daily\";",
+              "correct": true
+            },
+            {
+              "startIndex": 27,
+              "endIndex": 50,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 23,
+              "value": "console.log(frequency);",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "daily"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const frequency = \"daily\";`, followed by `console.log(frequency);`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59753,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the instruction to display this string value in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(\"Buzz\");",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 7,
+              "value": "console",
+              "correct": true
+            },
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": ".",
+              "correct": true
+            },
+            {
+              "startIndex": 8,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 3,
+              "value": "log",
+              "correct": true
+            },
+            {
+              "startIndex": 11,
+              "endIndex": 12,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 1,
+              "value": "(",
+              "correct": true
+            },
+            {
+              "startIndex": 18,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 18,
+              "length": 1,
+              "value": ")",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Buzz"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `console` followed by `.` and then `log`, `(`, `)`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59260,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the value of `lastName`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const lastName = \"Lightyear\";\nconsole.log(lastName);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 42,
+              "endIndex": 50,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 8,
+              "value": "lastName",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"Lightyear\""
+          ],
+          "output": "Lightyear"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `lastName`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59259,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the value of the `job` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const job = \"Sheriff\";\nconsole.log(job);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 35,
+            "endIndex": 38,
+            "startLine": 1,
+            "startPos": 12,
+            "length": 3,
+            "value": "job",
+            "correct": true
+          },
+          "output": "Sheriff"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `job`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 912,
+      "index": 1,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to update and reuse variables.",
+      "title": "Using Variables",
+      "type": "course",
+      "version": 27,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 6874,
+          "title": "Updating Let Variables",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59350
+            },
+            {
+              "id": 59349
+            },
+            {
+              "id": 59348
+            },
+            {
+              "id": 59345
+            },
+            {
+              "id": 59788
+            },
+            {
+              "id": 59790
+            },
+            {
+              "id": 59789
+            },
+            {
+              "id": 59791
+            },
+            {
+              "id": 59792
+            },
+            {
+              "id": 59793
+            },
+            {
+              "id": 59794
+            },
+            {
+              "id": 59795
+            }
+          ]
+        },
+        {
+          "id": 6878,
+          "title": "String Expressions",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59448
+            },
+            {
+              "id": 59447
+            },
+            {
+              "id": 59446
+            },
+            {
+              "id": 59445
+            },
+            {
+              "id": 59443
+            },
+            {
+              "id": 59796
+            },
+            {
+              "id": 59797
+            },
+            {
+              "id": 59798
+            },
+            {
+              "id": 59799
+            },
+            {
+              "id": 59800
+            },
+            {
+              "id": 59801
+            },
+            {
+              "id": 59802
+            },
+            {
+              "id": 59803
+            }
+          ]
+        },
+        {
+          "id": 6895,
+          "title": "Numbers",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 59534
+            },
+            {
+              "id": 59532
+            },
+            {
+              "id": 59537
+            },
+            {
+              "id": 59533
+            },
+            {
+              "id": 59526
+            },
+            {
+              "id": 59525
+            },
+            {
+              "id": 59816
+            },
+            {
+              "id": 59817
+            },
+            {
+              "id": 59818
+            },
+            {
+              "id": 59819
+            },
+            {
+              "id": 59820
+            },
+            {
+              "id": 59821
+            },
+            {
+              "id": 59822
+            },
+            {
+              "id": 59823
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 4,
+    "currentChapterIndex": 3,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

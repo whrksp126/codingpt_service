@@ -1,0 +1,65 @@
+services:
+  postgres:
+    container_name: codingpt_postgres_local
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: codingpt_db
+      POSTGRES_USER: codingpt
+      POSTGRES_PASSWORD: codingpt123
+    ports:
+      - "5432:5432"
+    volumes:
+      - codingpt_back_postgres_local_data:/var/lib/postgresql/data
+    networks:
+      - codingpt_local
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codingpt -d codingpt_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  back:
+    container_name: codingpt_back_local
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.local
+    ports:
+      - "5300:5300"
+    environment:
+      - DB_HOST=postgres
+    env_file:
+      - ./codingpt_back/.env.local
+    volumes:
+      - ./codingpt_back:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codingpt_local
+    restart: unless-stopped
+
+  front:
+    container_name: codingpt_front_local
+    build:
+      context: ./codingpt_front
+      dockerfile: Dockerfile.local
+    ports:
+      - "3300:3100"
+    env_file:
+      - ./codingpt_front/.env.local
+    volumes:
+      - ./codingpt_front:/app
+      - /app/node_modules
+    networks:
+      - codingpt_local
+    restart: unless-stopped
+
+networks:
+  codingpt_local:
+    driver: bridge
+
+volumes:
+  codingpt_back_postgres_local_data:
+    external: true

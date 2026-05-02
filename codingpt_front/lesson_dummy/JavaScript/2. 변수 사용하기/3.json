@@ -1,0 +1,900 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59534,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "There are other kinds of values, too. Like **numbers**, which have no double quotes around them.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfLikes = 5;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 22,
+              "endIndex": 23,
+              "startLine": 0,
+              "startPos": 22,
+              "length": 1,
+              "value": "5",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"5\""
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59532,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Numbers make it easier to keep track of **numeric values**. For example, the number of likes on a Facebook post.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create a `numberOfLikes` variable and set it to `5`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfLikes = 5;\nconsole.log(numberOfLikes);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 19,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 13,
+              "value": "numberOfLikes",
+              "correct": true
+            },
+            {
+              "startIndex": 20,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 20,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 22,
+              "endIndex": 23,
+              "startLine": 0,
+              "startPos": 22,
+              "length": 1,
+              "value": "5",
+              "correct": true
+            },
+            {
+              "startIndex": 0,
+              "endIndex": 5,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "5"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const` followed by `numberOfLikes` and then `=`, `5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59537,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can create expressions with numbers, too. We add numbers together with the `+` sign and subtract them from each other with the `-` sign.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Display `6` in the console by setting `numberOfLikes` to `5 + 1`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfLikes = 5 + 1;\nconsole.log(numberOfLikes);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 24,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 24,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 26,
+              "length": 1,
+              "value": "1",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "6"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `1`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59533,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We use the `*` sign to multiply numbers and the `/` sign to divide numbers.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Turn `0.5` into its percent value by multiplying it by `100`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const percent = 0.5 * 100;\nconsole.log(percent);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 20,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 20,
+              "length": 1,
+              "value": "*",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "x"
+          ],
+          "output": "50"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `*`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59526,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we store numbers in variables, we can use the variables for calculations, too.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Add `1` to the `numberOfSteps` variable before displaying it in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const numberOfSteps = 70;\nconsole.log(\"You're on step:\");\nconsole.log(numberOfSteps + 1);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 84,
+              "endIndex": 85,
+              "startLine": 2,
+              "startPos": 26,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 86,
+              "endIndex": 87,
+              "startLine": 2,
+              "startPos": 28,
+              "length": 1,
+              "value": "1",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "-"
+          ],
+          "output": "You're on step:\n71"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `1`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59525,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Since expressions become values, we can store calculation results in variables.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Store the calculation result in the `total` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const private = 3;\nconst public = 10;\nconst total = private + public;\nconsole.log(\"Total posts: \" + total);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 44,
+              "endIndex": 49,
+              "startLine": 2,
+              "startPos": 6,
+              "length": 5,
+              "value": "total",
+              "correct": true
+            },
+            {
+              "startIndex": 50,
+              "endIndex": 51,
+              "startLine": 2,
+              "startPos": 12,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 52,
+              "endIndex": 68,
+              "startLine": 2,
+              "startPos": 14,
+              "length": 16,
+              "value": "private + public",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Total posts: 13"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `total`, followed by `=`, and finally `private + public`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59816,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's the value of the `speed` variable?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const speed = 300 + 5;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const speed = 300 + 5;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`305`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`300`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `305`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59817,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why does this code display `31` instead of `4` in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const temperature = \"3\" + \"1\";\nconsole.log(temperature);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "31"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const temperature = \"3\" + \"1\";\nconsole.log(temperature);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Because `\"3\"` and `\"1\"` are string values"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Because the expression subtracts the numbers"
+            }
+          ],
+          "isCode": false,
+          "output": "31"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Because `\"3\"` and `\"1\"` are string values.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59818,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we know that the `score` variable stores a number?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const score = 40 + 4;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const score = 40 + 4;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "Because there are no double quotes around `40` and `4`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Because `score` sounds like it stores a number"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Because there are no double quotes around `40` and `4`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59819,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const area = \"3 * 5\";\nconsole.log(area);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "3 * 5"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const area = \"3 * 5\";\nconsole.log(area);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`3 * 5`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`15`"
+            }
+          ],
+          "isCode": false,
+          "output": "3 * 5"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`3 * 5`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59820,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Multiply the `savings` variable by the `interest` variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const savings = 100;\nconst interest = 0.04;\nconsole.log(savings * interest);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 64,
+              "endIndex": 65,
+              "startLine": 2,
+              "startPos": 20,
+              "length": 1,
+              "value": "*",
+              "correct": true
+            },
+            {
+              "startIndex": 66,
+              "endIndex": 74,
+              "startLine": 2,
+              "startPos": 22,
+              "length": 8,
+              "value": "interest",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "/"
+          ],
+          "output": "4"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `*`, followed by `interest`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59821,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Divide `sumOfGrades` by `numberOfStudents` to get the average grade of a class.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const sumOfGrades = 460;\nconst numberOfStudents = 5;\nconsole.log(sumOfGrades / numberOfStudents);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 77,
+              "endIndex": 78,
+              "startLine": 2,
+              "startPos": 24,
+              "length": 1,
+              "value": "/",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "÷"
+          ],
+          "output": "92"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `/`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59822,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Subtract `discount` from `total` and display the calculation result in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const total = 100;\nconst discount = 20;\nconsole.log(\"Discounted price:\")\nconsole.log(total - discount);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 85,
+              "endIndex": 90,
+              "startLine": 3,
+              "startPos": 12,
+              "length": 5,
+              "value": "total",
+              "correct": true
+            },
+            {
+              "startIndex": 91,
+              "endIndex": 92,
+              "startLine": 3,
+              "startPos": 18,
+              "length": 1,
+              "value": "-",
+              "correct": true
+            },
+            {
+              "startIndex": 93,
+              "endIndex": 101,
+              "startLine": 3,
+              "startPos": 20,
+              "length": 8,
+              "value": "discount",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Discounted price:\n80"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `total`, followed by `-`, and finally `discount`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59823,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Set `monthsPerYear` to `12`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const monthsPerYear = 12;\nconsole.log(monthsPerYear);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 22,
+            "endIndex": 24,
+            "startLine": 0,
+            "startPos": 22,
+            "length": 2,
+            "value": "12",
+            "correct": true
+          },
+          "output": "12"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `12`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 755,
+      "index": 2,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "Using True and False",
+      "type": "course",
+      "version": 45,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7179,
+          "title": "Booleans",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62115
+            },
+            {
+              "id": 62052
+            },
+            {
+              "id": 62050
+            },
+            {
+              "id": 62049
+            },
+            {
+              "id": 62048
+            },
+            {
+              "id": 62132
+            },
+            {
+              "id": 62134
+            },
+            {
+              "id": 62133
+            },
+            {
+              "id": 62135
+            },
+            {
+              "id": 62203
+            },
+            {
+              "id": 62204
+            },
+            {
+              "id": 62205
+            },
+            {
+              "id": 62206
+            }
+          ]
+        },
+        {
+          "id": 7162,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62046
+            },
+            {
+              "id": 62047
+            },
+            {
+              "id": 62044
+            },
+            {
+              "id": 62040
+            },
+            {
+              "id": 62038
+            },
+            {
+              "id": 62211
+            },
+            {
+              "id": 62210
+            },
+            {
+              "id": 62209
+            },
+            {
+              "id": 62208
+            },
+            {
+              "id": 62212
+            },
+            {
+              "id": 62213
+            },
+            {
+              "id": 62214
+            },
+            {
+              "id": 62215
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 2,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 27,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

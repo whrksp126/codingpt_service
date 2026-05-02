@@ -1,0 +1,54 @@
+# Node.js 기본
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 환경 변수 파일
+.env
+.env.*
+
+# 로그 파일
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+debug.log
+*.pid
+*.seed
+*.pid.lock
+
+# OS/편집기별 파일
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+.vscode-test/
+*.sublime-project
+*.sublime-workspace
+
+# 빌드 결과물
+dist/
+build/
+out/
+tmp/
+temp/
+
+# pm2 프로세스 파일
+pm2.pid
+
+# 테스팅 관련
+coverage/
+.nyc_output/
+
+# Docker 관련
+docker-compose.override.yml
+docker-compose.override.yaml
+
+
+# 기타
+*.bak
+*.old

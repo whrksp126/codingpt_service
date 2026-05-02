@@ -1,0 +1,869 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 78785,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Let's learn how to display different kinds of values together in the console with a handy feature known as formatted strings.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 78795,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We've learned that we can use `+` to add two strings and display them together.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(\"new\" + \" messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "="
+          ],
+          "output": "new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78796,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "But using `+` to combine numeric data like `2` and `\" new messages\"` together produces an **error** as they are different kinds of values.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(2 + \" new messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 8,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 1,
+              "value": "+",
+              "correct": true
+            },
+            {
+              "startIndex": 10,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 15,
+              "value": "\" new messages\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Traceback (most recent call last):\n  File \"/home/default/code/file.py\", line 1, in \u003Cmodule\u003E\n    print(2 + \" new messages\")\nTypeError: unsupported operand type(s) for +: 'int' and 'str'\n"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `+`, followed by `\" new messages\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78797,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "f-strings, short for formatted strings, allow us to display expressions like adding a string to a number, without any error.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"{2} new messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 19,
+              "value": "f\"{2} new messages\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "2 new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `f\"{2} new messages\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78798,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Every f-string statement consists of two parts, first the character `f`, then the string that we want to format.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"{6} new messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 7,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 1,
+              "value": "f",
+              "correct": true
+            },
+            {
+              "startIndex": 7,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 18,
+              "value": "\"{6} new messages\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "6 new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `f`, followed by `\"{6} new messages\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78799,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Next, we add the different kind of value in curly braces so it'll display as one print statement. Like here, with `{2}`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"{2} new messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 8,
+            "endIndex": 11,
+            "startLine": 0,
+            "startPos": 8,
+            "length": 3,
+            "value": "{2}",
+            "correct": true
+          },
+          "output": "2 new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `{2}`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78800,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Inserting variables like `new_messages` between the curly braces displays their value too.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "new_messages = 2\nprint(f\"{new_messages} new messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 26,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 12,
+              "value": "new_messages",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "2"
+          ],
+          "output": "2 new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `new_messages`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 80749,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can also use expressions like `new - read` between the curly braces to display their value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "new = 5\nread = 2\n\nprint(f\"{new - read} unread messages\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 27,
+            "endIndex": 37,
+            "startLine": 3,
+            "startPos": 9,
+            "length": 10,
+            "value": "new - read",
+            "correct": true
+          },
+          "output": "3 unread messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `new - read`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78802,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use curly braces to insert values as often as we like inside the f-string. See it here with `5`, and then with `2`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"{5} new messages and {2} friend requests\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 9,
+              "endIndex": 10,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 1,
+              "value": "5",
+              "correct": true
+            },
+            {
+              "startIndex": 30,
+              "endIndex": 31,
+              "startLine": 0,
+              "startPos": 30,
+              "length": 1,
+              "value": "2",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "5 new messages and 2 friend requests"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `5`, followed by `2`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 82107,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To reuse an f-string, we can save it in a variable, like here with `status` and `f\"{new} new messages\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "new = 5\nstatus = f\"{new} new messages\"\n\nprint(status)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 8,
+              "endIndex": 14,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 6,
+              "value": "status",
+              "correct": true
+            },
+            {
+              "startIndex": 15,
+              "endIndex": 16,
+              "startLine": 1,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 17,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 9,
+              "length": 21,
+              "value": "f\"{new} new messages\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "5 new messages"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `status`, followed by `=`, and finally `f\"{new} new messages\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78991,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What are f-strings for?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "For displaying different kinds of values together in a string"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "For displaying just string values together"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "For displaying different kinds of values together in a string.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78992,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we recognize an f-string?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "By the character `f` in front of the string"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "There&#039;s no difference between strings and f-strings"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "By the character `f` in front of the string.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78993,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How do we display number values with f-strings?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "We place them between curly braces, `{}`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "We can&#039;t display number values with f-strings"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We place them between curly braces, `{}`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 82108,
+        "index": 13,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "How can we reuse an f-string we created?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "We save it in a variable and use the variable"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "We can&#039;t reuse f-strings"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We save it in a variable and use the variable.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78997,
+        "index": 14,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the f-string.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"{4} dataset entries\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 28,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 22,
+              "value": "f\"{4} dataset entries\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"4 dataset entries\""
+          ],
+          "output": "4 dataset entries"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `f\"{4} dataset entries\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78998,
+        "index": 15,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code the character `f` before the formatted string.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"popularity increased by {12}%\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 6,
+            "endIndex": 7,
+            "startLine": 0,
+            "startPos": 6,
+            "length": 1,
+            "value": "f",
+            "correct": true
+          },
+          "output": "popularity increased by 12%"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `f`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 78999,
+        "index": 16,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `500` inside the string by coding `{500}`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(f\"I would walk {500} miles\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 21,
+            "endIndex": 26,
+            "startLine": 0,
+            "startPos": 21,
+            "length": 5,
+            "value": "{500}",
+            "correct": true
+          },
+          "output": "I would walk 500 miles"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `{500}`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 79001,
+        "index": 17,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display the current temperature by coding `degrees` between curly braces.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "degrees = 70\nprint(f\"Temperature: {degrees}F\")",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 34,
+              "endIndex": 35,
+              "startLine": 1,
+              "startPos": 21,
+              "length": 1,
+              "value": "{",
+              "correct": true
+            },
+            {
+              "startIndex": 35,
+              "endIndex": 42,
+              "startLine": 1,
+              "startPos": 22,
+              "length": 7,
+              "value": "degrees",
+              "correct": true
+            },
+            {
+              "startIndex": 42,
+              "endIndex": 43,
+              "startLine": 1,
+              "startPos": 29,
+              "length": 1,
+              "value": "}",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print"
+          ],
+          "output": "Temperature: 70F"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `{`, followed by `degrees`, and finally `}`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 82109,
+        "index": 18,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Save the f-string in the variable `display`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "movie = \"Vertigo\"\ndisplay = f\"Airing tonight: {movie}\"\n\nprint(display)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 18,
+              "endIndex": 25,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 7,
+              "value": "display",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 27,
+              "startLine": 1,
+              "startPos": 8,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 29,
+              "startLine": 1,
+              "startPos": 10,
+              "length": 1,
+              "value": "f",
+              "correct": true
+            },
+            {
+              "startIndex": 29,
+              "endIndex": 54,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 25,
+              "value": "\"Airing tonight: {movie}\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Airing tonight: Vertigo"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `display` followed by `=` and then `f`, `\"Airing tonight: {movie}\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": null,
+    "chaptersCount": 1,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 17,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

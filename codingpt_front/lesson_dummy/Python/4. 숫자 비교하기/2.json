@@ -1,0 +1,717 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76877,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To check if a number isn't equal to another number, we use the **inequality operator**, `!=`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(1 != 10)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 8,
+              "endIndex": 10,
+              "startLine": 0,
+              "startPos": 8,
+              "length": 2,
+              "value": "!=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "==="
+          ],
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76873,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can store the result of a comparison with the inequality operator in a variable like here where we'll store the comparison `1 != 2`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "result = 1 != 2\nprint(result)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 11,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 2,
+              "value": "!=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `!=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76875,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Variables can store the result of equality comparisons too, such as `result = 1 == 2`. ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "result = 1 == 2\nprint(result)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 7,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 7,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 11,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 11,
+              "length": 2,
+              "value": "==",
+              "correct": true
+            },
+            {
+              "startIndex": 0,
+              "endIndex": 6,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 6,
+              "value": "result",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `result`, followed by `=`, and finally `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76871,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can compare values with variables and variables with other variables with `==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "one = 1\ntwo = 2\nprint(one == two)\nprint(one != two)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 26,
+            "endIndex": 28,
+            "startLine": 2,
+            "startPos": 10,
+            "length": 2,
+            "value": "==",
+            "correct": true
+          },
+          "output": "False\nTrue"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76868,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "vote_count = 99\ntarget = vote_count == 100\nprint(target)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "False"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "vote_count = 99\ntarget = vote_count == 100\nprint(target)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": false,
+              "value": 0,
+              "text": "`target`"
+            },
+            {
+              "correct": true,
+              "value": 1,
+              "text": "`False`"
+            }
+          ],
+          "isCode": false,
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76870,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "result = 7 != 10\nprint(result)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "True"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "result = 7 != 10\nprint(result)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`True`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`False`"
+            }
+          ],
+          "isCode": false,
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76866,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "orders = 1000 \ncapacity = orders == 1000\nprint(capacity)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "True"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "orders = 1000 \ncapacity = orders == 1000\nprint(capacity)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`True`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`orders == 1000`"
+            }
+          ],
+          "isCode": false,
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76867,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's wrong with this code?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "score_one = 100\nscore_two = 80\nprint(score_one ! score_two)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "score_one = 100\nscore_two = 80\nprint(score_one ! score_two)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The inequality operator is wrong"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Comparing numbers isn&#039;t possible"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The inequality operator is wrong.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76869,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the operator that makes the comparison evaluate to `False`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(10 != 10)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 9,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 2,
+              "value": "!=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "=="
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76865,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if `answer` equals `13`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "answer = 16\ncorrect_answer = answer == 13",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 27,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 15,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 36,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 24,
+              "length": 2,
+              "value": "==",
+              "correct": true
+            },
+            {
+              "startIndex": 39,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 27,
+              "length": 2,
+              "value": "13",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `==`, and finally `13`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76864,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if `level` is equal to `highest_level` using `==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "level = 5\nhighest_level = 50\nprint(level == highest_level)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 41,
+            "endIndex": 43,
+            "startLine": 2,
+            "startPos": 12,
+            "length": 2,
+            "value": "==",
+            "correct": true
+          },
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76863,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if `letters` is not equal to `0`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "letters = 12\nvalid_answer = letters != 0",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 36,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 23,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 37,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 24,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "=",
+            "?"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!`, followed by `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1148,
+      "index": 4,
+      "codeLanguage": "python",
+      "descriptionContent": "Format strings.",
+      "title": "Formatting Strings",
+      "type": "course",
+      "version": 17,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8945,
+          "title": "Strings",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 78785
+            },
+            {
+              "id": 78795
+            },
+            {
+              "id": 78796
+            },
+            {
+              "id": 78797
+            },
+            {
+              "id": 78798
+            },
+            {
+              "id": 78799
+            },
+            {
+              "id": 78800
+            },
+            {
+              "id": 80749
+            },
+            {
+              "id": 78802
+            },
+            {
+              "id": 82107
+            },
+            {
+              "id": 78991
+            },
+            {
+              "id": 78992
+            },
+            {
+              "id": 78993
+            },
+            {
+              "id": 82108
+            },
+            {
+              "id": 78997
+            },
+            {
+              "id": 78998
+            },
+            {
+              "id": 78999
+            },
+            {
+              "id": 79001
+            },
+            {
+              "id": 82109
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 18,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

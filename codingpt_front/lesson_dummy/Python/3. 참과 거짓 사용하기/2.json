@@ -1,0 +1,766 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76368,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "00e4efc4-5c4c-4408-9bc8-aefeee153c63",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "The code `not` in front of `True` makes the expression result in `False`. If something is not true, it has to be false.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`not` is the **negation operator**. It turns values into their **opposite**.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 76367,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we change a value to its opposite with `not`, we negate it, like here with `not True`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(not True)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 3,
+              "value": "not",
+              "correct": true
+            },
+            {
+              "startIndex": 10,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 4,
+              "value": "True",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"true\""
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `not`, followed by `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76366,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The `not` operator before `False` changes its value. If a value is not `False`, it has to be `True`. We can see it here by displaying `not False`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(not False)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 9,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 3,
+              "value": "not",
+              "correct": true
+            },
+            {
+              "startIndex": 10,
+              "endIndex": 15,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 5,
+              "value": "False",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "print"
+          ],
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `not`, followed by `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76365,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use the `not` operator with variables to negate their values. By displaying `not available` here, we'll see its negated value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "available = True\nprint(not available)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 17,
+              "endIndex": 22,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "print",
+              "correct": true
+            },
+            {
+              "startIndex": 23,
+              "endIndex": 26,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 3,
+              "value": "not",
+              "correct": true
+            },
+            {
+              "startIndex": 27,
+              "endIndex": 36,
+              "startLine": 1,
+              "startPos": 10,
+              "length": 9,
+              "value": "available",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `print`, followed by `not`, and finally `available`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76363,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can save a whole negation in another variable, too. Like here `is_evening` should store the value of `not morning`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "morning = True\nis_evening = not morning\nprint(is_evening)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 26,
+              "endIndex": 27,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 28,
+              "endIndex": 31,
+              "startLine": 1,
+              "startPos": 13,
+              "length": 3,
+              "value": "not",
+              "correct": true
+            },
+            {
+              "startIndex": 32,
+              "endIndex": 39,
+              "startLine": 1,
+              "startPos": 17,
+              "length": 7,
+              "value": "morning",
+              "correct": true
+            },
+            {
+              "startIndex": 15,
+              "endIndex": 25,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 10,
+              "value": "is_evening",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `is_evening` followed by `=` and then `not`, `morning`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76373,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does the `not` operator do?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It turns `True` or `False` values into their opposite"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It checks if values are equal"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It turns `True` or `False` values into their opposite.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76372,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why does this code display `False` in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "latest_version = not True\nprint(latest_version)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "False"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "latest_version = not True\nprint(latest_version)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`not` in front of `True` turns it to `False`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Variables always display as `False` in the console"
+            }
+          ],
+          "isCode": false,
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`not` in front of `True` turns it to `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76371,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What do we call the `not` sign in front of `True` or `False`? ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The `not` sign is the negation operator"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The `not` sign is the addition operator"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The `not` sign is the negation operator.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76370,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which value does `result` store?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "result = not True",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "result = not True",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`False`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`True`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76374,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Use the negation operator and store a value in the variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "allow_duplicates = not True",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 19,
+              "endIndex": 22,
+              "startLine": 0,
+              "startPos": 19,
+              "length": 3,
+              "value": "not",
+              "correct": true
+            },
+            {
+              "startIndex": 23,
+              "endIndex": 27,
+              "startLine": 0,
+              "startPos": 23,
+              "length": 4,
+              "value": "True",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `not`, followed by `True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76358,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `False` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(not True)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 8,
+              "value": "not True",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "not False"
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `not True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76357,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create a `not_available` variable and save the negated value of `open_slot` in it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "open_slot = True\nnot_available = not open_slot",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 17,
+              "endIndex": 30,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 13,
+              "value": "not_available",
+              "correct": true
+            },
+            {
+              "startIndex": 31,
+              "endIndex": 32,
+              "startLine": 1,
+              "startPos": 14,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 37,
+              "endIndex": 46,
+              "startLine": 1,
+              "startPos": 20,
+              "length": 9,
+              "value": "open_slot",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `not_available`, followed by `=`, and finally `open_slot`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76356,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code `not True` inside the print statement.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(not True)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 6,
+            "endIndex": 14,
+            "startLine": 0,
+            "startPos": 6,
+            "length": 8,
+            "value": "not True",
+            "correct": true
+          },
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `not True`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1111,
+      "index": 3,
+      "codeLanguage": "python",
+      "descriptionContent": "Learn how to look for equality among numbers.",
+      "title": "Checking Number Equality",
+      "type": "course",
+      "version": 18,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8727,
+          "title": "Equality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76931
+            },
+            {
+              "id": 76930
+            },
+            {
+              "id": 76929
+            },
+            {
+              "id": 76928
+            },
+            {
+              "id": 76927
+            },
+            {
+              "id": 76901
+            },
+            {
+              "id": 76900
+            },
+            {
+              "id": 76924
+            },
+            {
+              "id": 76896
+            },
+            {
+              "id": 76878
+            },
+            {
+              "id": 76872
+            },
+            {
+              "id": 76876
+            },
+            {
+              "id": 76874
+            }
+          ]
+        },
+        {
+          "id": 8728,
+          "title": "Inequality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76877
+            },
+            {
+              "id": 76873
+            },
+            {
+              "id": 76875
+            },
+            {
+              "id": 76871
+            },
+            {
+              "id": 76868
+            },
+            {
+              "id": 76870
+            },
+            {
+              "id": 76866
+            },
+            {
+              "id": 76867
+            },
+            {
+              "id": 76869
+            },
+            {
+              "id": 76865
+            },
+            {
+              "id": 76864
+            },
+            {
+              "id": 76863
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 17,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

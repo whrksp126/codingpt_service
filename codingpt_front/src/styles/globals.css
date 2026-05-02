@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-body: #131F24;
+  --color-main: #37464F;
+  --margin-header: 88px;
+}
+
+body {
+  background-color: var(--color-body);
+  @apply bg-body;
+}
+
+/* 헤더 아래 컨텐츠에 대한 마진 적용 */
+.mt-header {
+  margin-top: var(--margin-header);
+}
+
+/* 툴팁 애니메이션 추가 */
+@keyframes tooltipShow {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+} 

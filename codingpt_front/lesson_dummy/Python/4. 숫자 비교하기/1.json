@@ -1,0 +1,678 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 76931,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We learned how to create and store values, but how do we compare them?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Like checking if a user's entered PIN matches their saved PIN.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeNone",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "entered_pin = 5448\nexpected_pin = 5440",
+              "codeLanguage": "python"
+            }
+          ],
+          "output": null
+        },
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 76930,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "To compare if two numbers are the same, we use the **equality operator**, `==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "5 == 5",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 2,
+              "endIndex": 3,
+              "startLine": 0,
+              "startPos": 2,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 3,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 3,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76929,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "151b6e63-caf5-4fe2-abd9-b39b49d9a8da",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "When comparing, there are only two results: `True` or `False`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 76928,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we compare the same numbers with the equality operator, the result is `True`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(10 == 10)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 8,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 2,
+              "value": "10",
+              "correct": true
+            },
+            {
+              "startIndex": 9,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 2,
+              "value": "==",
+              "correct": true
+            },
+            {
+              "startIndex": 12,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 2,
+              "value": "10",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `10`, followed by `==`, and finally `10`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76927,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we compare the different numbers with the equality operator, the result is `False`. Like here with the `9` to `10` comparison.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(9 == 10)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 6,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 6,
+              "length": 7,
+              "value": "9 == 10",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "9 = 10"
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `9 == 10`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76901,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What do we use to check if two numbers are equal? ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`==`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`=`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76900,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "print(10 == 11)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "False"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "print(10 == 11)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`False`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`True`"
+            }
+          ],
+          "isCode": false,
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76924,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When might we need to check if two numbers are equal?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "When checking if a variable is exactly equal to 10"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "When checking if a variable is above 50"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When checking if a variable is exactly equal to 10.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76896,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "print(5 + 13)\nprint(5 == 13)",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": "18\nFalse"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "print(5 + 13)\nprint(5 == 13)",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`18` and then `False`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`18` and then `513`"
+            }
+          ],
+          "isCode": false,
+          "output": "18\nFalse"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`18` and then `False`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76878,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if the value of `votes` is equal to `11`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "votes = 10\nprint(votes == 11)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 23,
+              "endIndex": 24,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 24,
+              "endIndex": 25,
+              "startLine": 1,
+              "startPos": 13,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 26,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 15,
+              "length": 2,
+              "value": "11",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`, followed by `=`, and finally `11`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76872,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Add the equality operator.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(99 == 100)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 9,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 9,
+              "length": 2,
+              "value": "==",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "="
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76876,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `False` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(10 == 13)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 14,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 2,
+              "value": "13",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "10"
+          ],
+          "output": "False"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `13`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 76874,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Check if these numbers are the same by coding `==`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "print(100 == 100)",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 10,
+            "endIndex": 12,
+            "startLine": 0,
+            "startPos": 10,
+            "length": 2,
+            "value": "==",
+            "correct": true
+          },
+          "output": "True"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `==`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1148,
+      "index": 4,
+      "codeLanguage": "python",
+      "descriptionContent": "Format strings.",
+      "title": "Formatting Strings",
+      "type": "course",
+      "version": 17,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8945,
+          "title": "Strings",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 78785
+            },
+            {
+              "id": 78795
+            },
+            {
+              "id": 78796
+            },
+            {
+              "id": 78797
+            },
+            {
+              "id": 78798
+            },
+            {
+              "id": 78799
+            },
+            {
+              "id": 78800
+            },
+            {
+              "id": 80749
+            },
+            {
+              "id": 78802
+            },
+            {
+              "id": 82107
+            },
+            {
+              "id": 78991
+            },
+            {
+              "id": 78992
+            },
+            {
+              "id": 78993
+            },
+            {
+              "id": 82108
+            },
+            {
+              "id": 78997
+            },
+            {
+              "id": 78998
+            },
+            {
+              "id": 78999
+            },
+            {
+              "id": 79001
+            },
+            {
+              "id": 82109
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 18,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}

@@ -1,0 +1,763 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 62046,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "c36a47d0-0c24-47c9-ad61-1010d797bdce",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "A `!` sign in front of `true` makes the expression result in `false`. If something is not true, it has to be false.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "The `!` sign is the **negation operator**. It turns values into their **opposite**.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 62047,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we change a value to its opposite with `!`, we negate it.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Put a `!` sign before `true` to change its value.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(!true);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 4,
+              "value": "true",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!`, followed by `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62044,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The `!` operator before `false` changes its value, too. If a value is not `false`, it has to be `true`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(!false);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 13,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 13,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 13,
+              "length": 5,
+              "value": "false",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "true"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!`, followed by `false`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62040,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can use the `!` operator with variables to negate the values they store.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const isMorning = true;\nconsole.log(!isMorning);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 36,
+              "endIndex": 37,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 37,
+              "endIndex": 46,
+              "startLine": 1,
+              "startPos": 13,
+              "length": 9,
+              "value": "isMorning",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!`, followed by `isMorning`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62038,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can save a whole negation in another variable, too.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Create the variable `isEvening` and use `!` to change `isMorning` to `false`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const isMorning = true;\nconst isEvening = !isMorning;\nconsole.log(isEvening);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 30,
+              "endIndex": 39,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 9,
+              "value": "isEvening",
+              "correct": true
+            },
+            {
+              "startIndex": 40,
+              "endIndex": 41,
+              "startLine": 1,
+              "startPos": 16,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 42,
+              "endIndex": 43,
+              "startLine": 1,
+              "startPos": 18,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 52,
+              "startLine": 1,
+              "startPos": 19,
+              "length": 9,
+              "value": "isMorning",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `isEvening` followed by `=` and then `!`, `isMorning`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62211,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does the `!` operator do?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It turns `true` or `false` values into their opposite"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "It checks if values are equal"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It turns `true` or `false` values into their opposite.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62210,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Why does this code display `false` in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const latestVersion = !true;\nconsole.log(latestVersion);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "false"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const latestVersion = !true;\nconsole.log(latestVersion);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The `!` operator in front of `true` turns its value into false"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Variables always display as `false` in the console"
+            }
+          ],
+          "isCode": false,
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The `!` operator in front of `true` turns its value into false.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62209,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What do we call the `!` sign in front of `true` or `false`? ",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "The `!` sign is the negation operator"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "The `!` sign is the addition operator"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "The `!` sign is the negation operator.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62208,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which value does `result` store?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const result = !true;",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const result = !true;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`false`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`true`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `false`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62212,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Use the negation operator and store a value in the variable.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const allowPopups = !true;\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 20,
+              "endIndex": 21,
+              "startLine": 0,
+              "startPos": 20,
+              "length": 1,
+              "value": "!",
+              "correct": true
+            },
+            {
+              "startIndex": 21,
+              "endIndex": 25,
+              "startLine": 0,
+              "startPos": 21,
+              "length": 4,
+              "value": "true",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!`, followed by `true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62213,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Display `false` in the console.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(!true);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 12,
+              "endIndex": 17,
+              "startLine": 0,
+              "startPos": 12,
+              "length": 5,
+              "value": "!true",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "!false"
+          ],
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `!true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62214,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Create the variable and save the negated value in it.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "const openSlot = true;\nconst isAvailable = !openSlot;",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 23,
+              "endIndex": 28,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 5,
+              "value": "const",
+              "correct": true
+            },
+            {
+              "startIndex": 29,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 6,
+              "length": 11,
+              "value": "isAvailable",
+              "correct": true
+            },
+            {
+              "startIndex": 43,
+              "endIndex": 52,
+              "startLine": 1,
+              "startPos": 20,
+              "length": 9,
+              "value": "!openSlot",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `const`, followed by `isAvailable`, and finally `!openSlot`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 62215,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Code `!true` inside the display statement.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "console.log(!true);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 12,
+            "endIndex": 17,
+            "startLine": 0,
+            "startPos": 12,
+            "length": 5,
+            "value": "!true",
+            "correct": true
+          },
+          "output": "false"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `!true`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 750,
+      "index": 3,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn how to look for equality among numbers.",
+      "title": "Checking Number Equality",
+      "type": "course",
+      "version": 37,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7175,
+          "title": "Equality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62166
+            },
+            {
+              "id": 62168
+            },
+            {
+              "id": 62169
+            },
+            {
+              "id": 62170
+            },
+            {
+              "id": 62171
+            },
+            {
+              "id": 62183
+            },
+            {
+              "id": 62186
+            },
+            {
+              "id": 62185
+            },
+            {
+              "id": 62187
+            },
+            {
+              "id": 62184
+            },
+            {
+              "id": 62198
+            },
+            {
+              "id": 62200
+            },
+            {
+              "id": 62199
+            }
+          ]
+        },
+        {
+          "id": 7178,
+          "title": "Inequality operator",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62182
+            },
+            {
+              "id": 62178
+            },
+            {
+              "id": 62176
+            },
+            {
+              "id": 62179
+            },
+            {
+              "id": 62190
+            },
+            {
+              "id": 62188
+            },
+            {
+              "id": 62193
+            },
+            {
+              "id": 62192
+            },
+            {
+              "id": 62189
+            },
+            {
+              "id": 62194
+            },
+            {
+              "id": 62195
+            },
+            {
+              "id": 62196
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 2,
+    "currentChapterIndex": 1,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 45,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

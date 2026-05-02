@@ -1,0 +1,78 @@
+# dev-codingpt-back.ghmate.com  → codingpt_back_dev:5100
+# dev-codingpt-front.ghmate.com → codingpt_front_dev:3100
+
+services:
+  postgres:
+    container_name: codingpt_postgres_dev
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: codingpt_db
+      POSTGRES_USER: codingpt
+      POSTGRES_PASSWORD: codingpt123
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    networks:
+      - codingpt_dev
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codingpt -d codingpt_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  back:
+    container_name: codingpt_back_dev
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.dev
+    expose:
+      - "5100"
+    environment:
+      - NODE_ENV=development
+      - CODE_EXECUTOR_URL=http://code-executor:5200
+      - DB_HOST=postgres
+    env_file:
+      - ./codingpt_back/.env.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codingpt_dev
+      - nginx_proxy
+    restart: unless-stopped
+
+  front:
+    container_name: codingpt_front_dev
+    build:
+      context: ./codingpt_front
+      dockerfile: Dockerfile.dev
+    expose:
+      - "3100"
+    env_file:
+      - ./codingpt_front/.env.dev
+    networks:
+      - codingpt_dev
+      - nginx_proxy
+    restart: unless-stopped
+
+  code-executor:
+    container_name: codingpt_code_executor_dev
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.executor
+    expose:
+      - "5200"
+    env_file:
+      - ./codingpt_back/.env.dev
+    networks:
+      - codingpt_dev
+    restart: unless-stopped
+
+networks:
+  codingpt_dev:
+    driver: bridge
+  nginx_proxy:
+    external: true
+
+volumes:
+  postgres_dev_data:

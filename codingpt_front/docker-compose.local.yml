@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  front-end:
+    container_name: codingpt_front_local
+    image: whrksp126/codingpt_front:local
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    ports:
+      - "3100:3100"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - .env.local
+    networks:
+      - codingpt_front_local_network
+    restart: unless-stopped
+
+networks:
+  codingpt_front_local_network:
+    driver: bridge

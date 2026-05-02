@@ -1,0 +1,782 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 59350,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We already saw that `let` variables, as opposed to `const` can change and update the values they store.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Use the `=` sign to change the value in `status` from `\"Watching Netflix\"` to `\"Relaxing at the beach\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let currentStatus = \"Watching Netflix\";\ncurrentStatus = \"Relaxing at the beach\";\nconsole.log(currentStatus);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 54,
+              "endIndex": 55,
+              "startLine": 1,
+              "startPos": 14,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            ":"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `=`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59349,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can update `let` variables as often as we want.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Try it yourself: change the value of `currentStatus` to `\"Reading\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let currentStatus = \"Watching Netflix\";\ncurrentStatus = \"Relaxing at the Beach\";\nconsole.log(currentStatus);\n\ncurrentStatus = \"Reading\";\nconsole.log(currentStatus);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 110,
+              "endIndex": 123,
+              "startLine": 4,
+              "startPos": 0,
+              "length": 13,
+              "value": "currentStatus",
+              "correct": true
+            },
+            {
+              "startIndex": 124,
+              "endIndex": 125,
+              "startLine": 4,
+              "startPos": 14,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 126,
+              "endIndex": 135,
+              "startLine": 4,
+              "startPos": 16,
+              "length": 9,
+              "value": "\"Reading\"",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [],
+          "output": "Relaxing at the Beach\nReading"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `currentStatus`, followed by `=`, and finally `\"Reading\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59348,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "We can also give variables the values of other variables by setting one variable to the other.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Give the `currentStatus` variable the value of `defaultStatus`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let defaultStatus = \"Hi there!\";\nlet currentStatus = \"Playing football\";\n\ncurrentStatus = defaultStatus;\nconsole.log(currentStatus);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 90,
+              "endIndex": 103,
+              "startLine": 3,
+              "startPos": 16,
+              "length": 13,
+              "value": "defaultStatus",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "\"Playing football\""
+          ],
+          "output": "Hi there!"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `defaultStatus`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59345,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "When we update a variable, it forgets its previous value.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "Display the `currentStatus` variable when it's set to `\"Playing football\"` and when it's set to `\"Walking the dog\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let currentStatus = \"Playing football\";\nconsole.log(currentStatus);\n\ncurrentStatus = \"Walking the dog\";\nconsole.log(currentStatus);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 52,
+              "endIndex": 65,
+              "startLine": 1,
+              "startPos": 12,
+              "length": 13,
+              "value": "currentStatus",
+              "correct": true
+            },
+            {
+              "startIndex": 116,
+              "endIndex": 129,
+              "startLine": 4,
+              "startPos": 12,
+              "length": 13,
+              "value": "currentStatus",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "let currentStatus"
+          ],
+          "output": "Playing football\nWalking the dog"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `currentStatus`, followed by `currentStatus`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59788,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Which of these lines of code updates the `currentStatus` variable?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`currentStatus = \"Working out\";`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`let currentStatus = \"Working out\";`"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`currentStatus = \"Working out\";`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59790,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "const currentStatus = \"Watching Netflix\";\nconsole.log(currentStatus);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "Watching Netflix"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "const currentStatus = \"Watching Netflix\";\nconsole.log(currentStatus);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Watching Netflix`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`currentStatus`"
+            }
+          ],
+          "isCode": false,
+          "output": "Watching Netflix"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`Watching Netflix`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59789,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What's wrong with this code?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "firstName = \"Lori\";\nfirstName = \"Joe\";",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "firstName = \"Lori\";\nfirstName = \"Joe\";",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "It misses the `let` keyword in the first line"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "Nothing"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "It misses the `let` keyword in the first line.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59791,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "What does this code display in the console?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.js",
+                "content": "let firstName = \"Lori\";\nfirstName = \"Joe\";\nconsole.log(firstName);",
+                "codeLanguage": "javascript"
+              }
+            ],
+            "output": "Joe"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.js",
+              "content": "let firstName = \"Lori\";\nfirstName = \"Joe\";\nconsole.log(firstName);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "`Joe`"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "`Lori`"
+            }
+          ],
+          "isCode": false,
+          "output": "Joe"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `Joe`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59792,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Change the value in the `temperature` variable to `\"100 degrees\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let temperature = \"0 degrees\";\ntemperature = \"100 degrees\";\nconsole.log(temperature);",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 31,
+              "endIndex": 42,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 11,
+              "value": "temperature",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "let temperature"
+          ],
+          "output": "100 degrees"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `temperature`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59793,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Update the `currentStatus` variable to `\"Writing code\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let currentStatus = \"Dancing\";\ncurrentStatus = \"Writing code\";\nconsole.log(currentStatus);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 31,
+              "endIndex": 44,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 13,
+              "value": "currentStatus",
+              "correct": true
+            },
+            {
+              "startIndex": 45,
+              "endIndex": 46,
+              "startLine": 1,
+              "startPos": 14,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 47,
+              "endIndex": 61,
+              "startLine": 1,
+              "startPos": 16,
+              "length": 14,
+              "value": "\"Writing code\"",
+              "correct": true
+            },
+            {
+              "startIndex": 61,
+              "endIndex": 62,
+              "startLine": 1,
+              "startPos": 30,
+              "length": 1,
+              "value": ";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "let currentStatus"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `currentStatus` followed by `=` and then `\"Writing code\"`, `;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59794,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Update the `buttonText` variable to `\"Log in\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let buttonText = \"Sign up\";\nbuttonText = \"Log in\";\nconsole.log(buttonText);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 28,
+              "endIndex": 38,
+              "startLine": 1,
+              "startPos": 0,
+              "length": 10,
+              "value": "buttonText",
+              "correct": true
+            },
+            {
+              "startIndex": 39,
+              "endIndex": 40,
+              "startLine": 1,
+              "startPos": 11,
+              "length": 1,
+              "value": "=",
+              "correct": true
+            },
+            {
+              "startIndex": 41,
+              "endIndex": 49,
+              "startLine": 1,
+              "startPos": 13,
+              "length": 8,
+              "value": "\"Log in\"",
+              "correct": true
+            },
+            {
+              "startIndex": 49,
+              "endIndex": 50,
+              "startLine": 1,
+              "startPos": 21,
+              "length": 1,
+              "value": ";",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "Log in",
+            "let buttonText"
+          ],
+          "output": "Log in"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to pick `buttonText` followed by `=` and then `\"Log in\"`, `;`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 59795,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Change the value of the `currentStatus` variable to `\"Done\"`.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.js",
+              "content": "let currentStatus = \"Working hard\";\ncurrentStatus = \"Done\";\nconsole.log(currentStatus);\n",
+              "codeLanguage": "javascript"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 52,
+            "endIndex": 58,
+            "startLine": 1,
+            "startPos": 16,
+            "length": 6,
+            "value": "\"Done\"",
+            "correct": true
+          },
+          "output": "Done"
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "Make sure to type `\"Done\"`.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 755,
+      "index": 2,
+      "codeLanguage": "javascript",
+      "descriptionContent": "Learn what true and false values are in programming.",
+      "title": "Using True and False",
+      "type": "course",
+      "version": 45,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 7179,
+          "title": "Booleans",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62115
+            },
+            {
+              "id": 62052
+            },
+            {
+              "id": 62050
+            },
+            {
+              "id": 62049
+            },
+            {
+              "id": 62048
+            },
+            {
+              "id": 62132
+            },
+            {
+              "id": 62134
+            },
+            {
+              "id": 62133
+            },
+            {
+              "id": 62135
+            },
+            {
+              "id": 62203
+            },
+            {
+              "id": 62204
+            },
+            {
+              "id": 62205
+            },
+            {
+              "id": 62206
+            }
+          ]
+        },
+        {
+          "id": 7162,
+          "title": "Negating Values",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 62046
+            },
+            {
+              "id": 62047
+            },
+            {
+              "id": 62044
+            },
+            {
+              "id": 62040
+            },
+            {
+              "id": 62038
+            },
+            {
+              "id": 62211
+            },
+            {
+              "id": 62210
+            },
+            {
+              "id": 62209
+            },
+            {
+              "id": 62208
+            },
+            {
+              "id": 62212
+            },
+            {
+              "id": 62213
+            },
+            {
+              "id": 62214
+            },
+            {
+              "id": 62215
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 47,
+    "tutorialVersion": 27,
+    "sectionIndex": 0,
+    "codeLanguage": "javascript"
+  }
+}

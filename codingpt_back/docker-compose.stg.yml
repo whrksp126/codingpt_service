@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  app:
+    container_name: codingpt_back_stg
+    image: whrksp126/codingpt_back:stg
+    build: 
+      context: .
+      dockerfile: Dockerfile.stg
+      platforms: 
+        - linux/amd64
+    ports:
+      - "5101:5100"
+    environment:
+      - NODE_ENV=staging
+      - CODE_EXECUTOR_URL=http://code-executor:5200
+    env_file:
+      - .env.stg
+    depends_on:
+      - code-executor
+    restart: unless-stopped
+
+  code-executor:
+    container_name: codingpt_code_executor_stg
+    build:
+      context: .
+      dockerfile: Dockerfile.executor
+      platforms: 
+        - linux/amd64
+    ports:
+      - "5200:5200"
+    environment:
+      - PORT=5200
+      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
+      - S3_PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL}
+    env_file:
+      - .env.stg
+    networks:
+      - default
+    restart: unless-stopped 

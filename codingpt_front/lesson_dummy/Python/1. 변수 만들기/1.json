@@ -1,0 +1,676 @@
+{
+  "abTests": {
+
+  },
+  "__N_SSG": true,
+  "pageProps": {
+    "lessons": [
+      {
+        "type": "Interactive",
+        "id": 123418,
+        "index": 0,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "e9175bae-c291-4ac4-a85e-c2788e030649",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "**파이썬**은 초보자와 전문가 모두에게 적합한 훌륭한 프로그래밍 언어입니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 123419,
+        "index": 1,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "abf073bf-a3c1-422e-9fd6-fae44307cf26",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "많은 기업들이 선택하는 언어이며, 개인 프로젝트에서도 인기 있는 선택입니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "작업 자동화, 데이터 분석, 머신러닝 등 다양한 분야에서 활용할 수 있습니다!",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 123412,
+        "index": 2,
+        "preInteractionModules": [
+          {
+            "type": "image",
+            "src": "8f7303cc-7d52-41e0-ad7b-3a3a992e6de2",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "프로그램이 얼마나 복잡하든, 항상 한 줄의 코드로 시작합니다. 이 첫 줄은 보통 **변수**입니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "프로그램은 **정보를 기억하기 위해** 변수를 사용합니다. 이사 박스처럼, 변수는 내용과 그 내용을 알려주는 이름을 가지고 있습니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": null,
+        "postInteractionModules": []
+      },
+      {
+        "type": "Interactive",
+        "id": 123420,
+        "index": 3,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "컴퓨터는 변수를 어떤 용도로 사용할까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "나중에 사용하기 위해 정보를 저장하기 위해"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "화면에 정보를 표시하기 위해"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "나중에 사용하기 위해 정보를 저장하기 위해 사용합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123413,
+        "index": 4,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "변수를 만들 때는 먼저 **이름**을 입력합니다. 변수 이름은 한 단어여야 하므로 공백이 없어야 합니다.",
+            "visibleIf": "always"
+          },
+          {
+            "type": "paragraph",
+            "content": "`city` 단어를 탭하여 변수 생성을 시작해보세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "city ",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 4,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 4,
+              "value": "city",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "home city"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`city`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123411,
+        "index": 5,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "여러 단어로 된 변수 이름을 만들고 싶다면 **스네이크 케이스**를 사용합니다. 스네이크 케이스는 추가 단어를 연결할 때 `_`를 사용합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "home_city",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 4,
+              "endIndex": 5,
+              "startLine": 0,
+              "startPos": 4,
+              "length": 1,
+              "value": "_",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "+"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`_`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123410,
+        "index": 6,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "이 변수 이름의 문제점은 무엇일까요?",
+            "visibleIf": "always"
+          },
+          {
+            "type": "codeNone",
+            "files": [
+              {
+                "isInteractive": false,
+                "name": "script.py",
+                "content": "high score",
+                "codeLanguage": "python"
+              }
+            ],
+            "output": null
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [
+            {
+              "isInteractive": false,
+              "name": "script.py",
+              "content": "high score",
+              "codeLanguage": "python"
+            }
+          ],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "단어 사이에 공백이 있습니다"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "소문자를 포함하고 있습니다"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "단어 사이에 공백이 있습니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123421,
+        "index": 7,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "변수 안에 무엇이 들어있는지 이해하기 쉽게 하기 위해 설명적인 이름을 사용합니다.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "home_city_province",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 18,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 18,
+              "value": "home_city_province",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "hcp"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`home_city_province`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123416,
+        "index": 8,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "가장 설명적인 변수 이름을 선택하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "high_score",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 0,
+              "endIndex": 10,
+              "startLine": 0,
+              "startPos": 0,
+              "length": 10,
+              "value": "high_score",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "hs",
+            "h_s"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`high_score`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123417,
+        "index": 9,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "스네이크 케이스는 여러 단어로 된 변수 이름을 어떻게 만들까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "언더스코어를 사용합니다 (예: `my_variable_name`)"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "대문자를 사용합니다 (예: `myVariableName`)"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "언더스코어를 사용합니다 (예: `my_variable_name`).",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123409,
+        "index": 10,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "왜 `city`나 `population`과 같은 설명적인 이름을 `c`나 `p` 대신 사용할까요?",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "multipleChoice",
+          "files": [],
+          "items": [
+            {
+              "correct": true,
+              "value": 0,
+              "text": "그 안에 무엇이 들어있는지 이해하기 쉽게 하기 위해"
+            },
+            {
+              "correct": false,
+              "value": 1,
+              "text": "입력하기 더 빠르게 하기 위해"
+            }
+          ],
+          "isCode": false,
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "그 안에 무엇이 들어있는지 이해하기 쉽게 하기 위해 사용합니다.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123422,
+        "index": 11,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "스네이크 케이스 변수를 만들기 위해 올바른 기호를 추가하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeFillTheGap",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "total_cash_amount",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOptions": [
+            {
+              "startIndex": 5,
+              "endIndex": 6,
+              "startLine": 0,
+              "startPos": 5,
+              "length": 1,
+              "value": "_",
+              "correct": true
+            },
+            {
+              "startIndex": 10,
+              "endIndex": 11,
+              "startLine": 0,
+              "startPos": 10,
+              "length": 1,
+              "value": "_",
+              "correct": true
+            }
+          ],
+          "wrongOptions": [
+            "+"
+          ],
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`_`를 선택한 다음 `_`를 선택했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      },
+      {
+        "type": "Interactive",
+        "id": 123415,
+        "index": 12,
+        "preInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`request`를 입력하여 이 변수 이름을 완성하세요.",
+            "visibleIf": "always"
+          }
+        ],
+        "interactionModule": {
+          "type": "codeValidatedInput",
+          "files": [
+            {
+              "isInteractive": true,
+              "name": "script.py",
+              "content": "friend_request",
+              "codeLanguage": "python"
+            }
+          ],
+          "interactionOption": {
+            "startIndex": 7,
+            "endIndex": 14,
+            "startLine": 0,
+            "startPos": 7,
+            "length": 7,
+            "value": "request",
+            "correct": true
+          },
+          "output": null
+        },
+        "postInteractionModules": [
+          {
+            "type": "paragraph",
+            "content": "`request`를 입력했는지 확인하세요.",
+            "visibleIf": "wrong"
+          }
+        ]
+      }
+    ],
+    "tutorialType": "course",
+    "nextTutorial": {
+      "id": 1104,
+      "index": 1,
+      "codeLanguage": "python",
+      "descriptionContent": "변수를 업데이트하고 재사용하는 방법을 배워보세요.",
+      "title": "변수 사용하기",
+      "type": "course",
+      "version": 20,
+      "bannerIconUrl": null,
+      "chapters": [
+        {
+          "id": 8643,
+          "title": "변수 업데이트하기",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76142
+            },
+            {
+              "id": 76143
+            },
+            {
+              "id": 76144
+            },
+            {
+              "id": 76145
+            },
+            {
+              "id": 76141
+            },
+            {
+              "id": 76139
+            },
+            {
+              "id": 76140
+            },
+            {
+              "id": 76138
+            },
+            {
+              "id": 76137
+            },
+            {
+              "id": 76136
+            },
+            {
+              "id": 76135
+            },
+            {
+              "id": 76134
+            }
+          ]
+        },
+        {
+          "id": 8642,
+          "title": "표현식",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 76149
+            },
+            {
+              "id": 76148
+            },
+            {
+              "id": 76147
+            },
+            {
+              "id": 76125
+            },
+            {
+              "id": 76171
+            },
+            {
+              "id": 76170
+            },
+            {
+              "id": 76169
+            },
+            {
+              "id": 76167
+            },
+            {
+              "id": 76166
+            },
+            {
+              "id": 76165
+            },
+            {
+              "id": 76164
+            }
+          ]
+        },
+        {
+          "id": 13890,
+          "title": "숫자",
+          "type": "practiceLevel1",
+          "lessons": [
+            {
+              "id": 123597
+            },
+            {
+              "id": 123599
+            },
+            {
+              "id": 123595
+            },
+            {
+              "id": 123598
+            },
+            {
+              "id": 123600
+            },
+            {
+              "id": 123596
+            },
+            {
+              "id": 123594
+            },
+            {
+              "id": 123593
+            },
+            {
+              "id": 123592
+            },
+            {
+              "id": 123591
+            },
+            {
+              "id": 123589
+            },
+            {
+              "id": 123590
+            },
+            {
+              "id": 123588
+            },
+            {
+              "id": 123587
+            }
+          ]
+        }
+      ]
+    },
+    "chaptersCount": 3,
+    "currentChapterIndex": 0,
+    "publishSetVersion": 698,
+    "trackVersion": 115,
+    "tutorialVersion": 36,
+    "sectionIndex": 0,
+    "codeLanguage": "python"
+  }
+}
