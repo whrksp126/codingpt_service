@@ -15,6 +15,10 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app .
 
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 3100
 
-CMD ["npm", "start"] 
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["npm", "start"]

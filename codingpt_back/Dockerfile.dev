@@ -8,6 +8,9 @@ RUN npm ci --only=production
 
 COPY . .
 
+RUN chmod +x /app/docker-entrypoint.sh && cp /app/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
 EXPOSE 5100
 
-CMD ["npm", "start"] 
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["npm", "start"]

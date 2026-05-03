@@ -63,6 +63,8 @@ services:
     command: node executor-server.js
     expose:
       - "5200"
+    environment:
+      - SKIP_MIGRATIONS=1
     env_file:
       - ./codingpt_back/.env.dev
     networks:
