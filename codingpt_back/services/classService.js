@@ -69,21 +69,14 @@ class ClassService {
   // 클래스 생성
   async createClass(classData) {
     const { name, description } = classData;
-    
-    // 필수 필드 검증
-    if (!name || !description) {
-      throw new Error('필수 필드가 누락되었습니다.');
+
+    if (!name || !name.trim()) {
+      throw new Error('이름은 필수입니다.');
     }
-    
-    // 이름 중복 확인
-    const existingClass = await Class.findOne({ where: { name } });
-    if (existingClass) {
-      throw new Error('이미 존재하는 클래스명입니다.');
-    }
-    
+
     return await Class.create({
-      name,
-      description
+      name: name.trim(),
+      description: description || '',
     });
   }
   

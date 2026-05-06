@@ -113,16 +113,15 @@ const updateUserXp = async (req, res) => {
   }
 };
 
-// 사용자 하트 업데이트
-const updateUserHeart = async (req, res) => {
+// 업적 조회
+const getAchievements = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { heart } = req.body;
-    const result = await userService.updateUserHeart(id, heart);
-    successResponse(res, result, '사용자 하트가 성공적으로 업데이트되었습니다.');
+    const userId = req.user.id;
+    const achievements = await userService.getAchievements(userId);
+    successResponse(res, achievements, '업적을 성공적으로 조회했습니다.');
   } catch (error) {
-    console.error('사용자 하트 업데이트 오류:', error);
-    errorResponse(res, { message: error.message }, 400);
+    console.error('업적 조회 오류:', error);
+    errorResponse(res, { message: error.message }, 500);
   }
 };
 
@@ -188,7 +187,7 @@ module.exports = {
   getAllUsers,
   getUserById,
   updateUserXp,
-  updateUserHeart,
+  getAchievements,
   getStudyHeatmap,
   getTotalStudyDays,
   createStudyHeatmap,

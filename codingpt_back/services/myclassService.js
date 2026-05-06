@@ -1,4 +1,25 @@
-const { sequelize, MyClass, MyClassStatus, Product, ProductClassMap, Class, ClassSectionMap, Section, SectionLessonMap, Lesson, Slide, LessonSlideMap } = require('../models');
+const { sequelize, MyClass, MyClassStatus, Product, ProductClassMap, Class, ClassSectionMap, Section, SectionLessonMap, Lesson, Slide, LessonSlideMap, User } = require('../models');
+
+const XP_PER_LESSON_MAX = 10;
+
+// 슬라이드 결과에서 채점 대상 모듈의 정답률 계산
+function computeCorrectRate(result) {
+  if (!Array.isArray(result)) return 1;
+  let total = 0;
+  let correct = 0;
+  for (const slide of result) {
+    const modules = slide?.modules;
+    if (!Array.isArray(modules)) continue;
+    for (const m of modules) {
+      if (m && typeof m.isCorrect === 'boolean') {
+        total += 1;
+        if (m.isCorrect) correct += 1;
+      }
+    }
+  }
+  if (total === 0) return 1;
+  return correct / total;
+}
 
 class MyClassService {
   /**
@@ -138,30 +159,62 @@ class MyClassService {
     }
   }
 
-  // 레슨별 슬라이드 결과값 업데이트
+  // 레슨별 슬라이드 결과값 업데이트 + 신규 완료 시 XP 적립
   async completeLessonWithResult(user_id, myclass_id, lesson_id, result) {
-    try {
-      if (!user_id || !myclass_id || !lesson_id || !result) {
-        throw new Error('필수 파라미터가 누락되었습니다.');
-      }
+    if (!user_id || !myclass_id || !lesson_id || !result) {
+      throw new Error('필수 파라미터가 누락되었습니다.');
+    }
 
-      // 1) 내강의상태(myclass_status) 조회
-      let myclassStatus = await MyClassStatus.findOne({ 
-        where: { myclass_id: myclass_id, lesson_id } 
+    return await sequelize.transaction(async (t) => {
+      const myclassStatus = await MyClassStatus.findOne({
+        where: { myclass_id, lesson_id },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
       });
-      
-      if (myclassStatus) {
-        myclassStatus.status = 2;       // 학습 완료
-        myclassStatus.results = result; // 슬라이드 결과값
-        await myclassStatus.save();
-        return myclassStatus;
-      } else {
+
+      if (!myclassStatus) {
         return null;
       }
-    } catch (error) {
-      console.error('레슨별 슬라이드 결과값 DB 오류:', error);
-      errorResponse(res, error, 500);
-    }
+
+      const wasCompleted = myclassStatus.status === 2;
+      myclassStatus.status = 2;
+      myclassStatus.results = result;
+      await myclassStatus.save({ transaction: t });
+
+      let addedXp = 0;
+      let totalXp = null;
+
+      if (!wasCompleted) {
+        const correctRate = computeCorrectRate(result);
+        addedXp = Math.round(XP_PER_LESSON_MAX * correctRate);
+
+        if (addedXp > 0) {
+          const user = await User.findByPk(user_id, {
+            transaction: t,
+            lock: t.LOCK.UPDATE,
+          });
+          if (user) {
+            user.xp += addedXp;
+            await user.save({ transaction: t });
+            totalXp = user.xp;
+          }
+        }
+      }
+
+      if (totalXp === null) {
+        const user = await User.findByPk(user_id, {
+          attributes: ['xp'],
+          transaction: t,
+        });
+        totalXp = user ? user.xp : 0;
+      }
+
+      return {
+        status: myclassStatus.status,
+        addedXp,
+        totalXp,
+      };
+    });
   }
 
   // 특정 레슨 결과 조회

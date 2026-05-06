@@ -7,7 +7,8 @@ module.exports = (sequelize, DataTypes) => {
     },
     order_no: {
       type: DataTypes.INTEGER,
-      allowNull: false
+      allowNull: false,
+      defaultValue: 0
     },
     name: {
       type: DataTypes.STRING,
@@ -15,22 +16,50 @@ module.exports = (sequelize, DataTypes) => {
     },
     type: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: false,
+      defaultValue: '이론'
     },
     description: {
-      type:
-      DataTypes.STRING
+      type: DataTypes.STRING
+    },
+    default_character: {
+      type: DataTypes.STRING(64),
+      allowNull: true
+    },
+    characters: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: []
+    },
+    meta: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: {}
+    },
+    published_at: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    created_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW
+    },
+    updated_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW
     },
   }, {
     tableName: 'lesson',
-    timestamps: false,
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
   });
 
   Lesson.associate = (models) => {
     Lesson.hasMany(models.MyClassStatus, { foreignKey: 'lesson_id' });
     Lesson.hasMany(models.StudyHeatmapLog, { foreignKey: 'lesson_id' });
-    // Lesson.hasMany(models.SectionLessonMap, { foreignKey: 'lesson_id' });
-    // Lesson.hasMany(models.LessonSlideMap, { foreignKey: 'lesson_id' });
     Lesson.belongsToMany(models.Slide, {
       through: models.LessonSlideMap,
       foreignKey: 'lesson_id',
@@ -45,7 +74,7 @@ module.exports = (sequelize, DataTypes) => {
       timestamps: false,
       as: 'Sections',
     });
-  };  
+  };
 
   return Lesson;
-}
+};

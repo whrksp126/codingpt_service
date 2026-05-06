@@ -28,22 +28,14 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false
     },
     xp: {
-      type: DataTypes.INTEGER, 
-      allowNull: false,
-      defaultValue: 0
-    },
-    heart: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 5
-    },
-    heart_missing: {
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0
     },
-    hearts_refill_started_at: {
-      type: DataTypes.DATE
+    role: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      defaultValue: 'user',
     },
   }, {
     tableName: 'user',

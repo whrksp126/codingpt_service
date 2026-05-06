@@ -43,7 +43,7 @@ paginatedResponse(res, data, page, limit, total)
 | `config/database.js` | Sequelize 환경별 설정 |
 
 API 네임스페이스: `/api/users`, `/api/products`, `/api/classes`, `/api/lesson`,
-`/api/myclass`, `/api/executor`, `/api/tts`, `/api/s3`, `/api/hearts`, `/api/store`, `/api/reviews`
+`/api/myclass`, `/api/executor`, `/api/tts`, `/api/s3`, `/api/store`, `/api/reviews`
 
 ## TTS 서비스 구조
 

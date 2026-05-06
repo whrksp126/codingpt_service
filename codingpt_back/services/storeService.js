@@ -11,6 +11,8 @@ class StoreService {
                 association: 'Products',
                 attributes: ['id', 'name', 'description', 'type', 'price', 'lecture_intro'],
                 through: { attributes: [] }, // 매핑 테이블 정보 생략
+                where: { is_active: true },
+                required: false,
             },
             ],
         });
@@ -33,6 +35,8 @@ class StoreService {
                 as: 'Products',
                 through: { model: StoreCategoryProductMap, attributes: [] },
                 attributes: ['id', 'name', 'description', 'type', 'price', 'lecture_intro'],
+                where: { is_active: true },
+                required: false,
                 include: [
                   {
                     model: Class,

@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const { 
-  getAllProducts, 
-  getProductById, 
-  getProductClasses, 
+const {
+  getAllProducts,
+  getProductById,
+  getProductClasses,
   getProductsByType,
   createProduct,
   updateProduct,
@@ -11,12 +11,12 @@ const {
 } = require('../controllers/productController');
 
 // 제품 관련 라우트
-router.post('/', createProduct);                    // 제품 생성
-router.get('/', getAllProducts);                    // 모든 제품 조회
-router.get('/type/:type', getProductsByType);      // 타입별 제품 조회
-router.get('/:id', getProductById);                // 특정 제품 조회 (리뷰 포함)
-router.get('/:id/classes', getProductClasses);     // 제품별 클래스 조회
-router.put('/:id', updateProduct);                 // 제품 수정
-router.delete('/:id', deleteProduct);              // 제품 삭제
+router.post('/', createProduct);
+router.get('/', getAllProducts);
+router.get('/type/:type', getProductsByType);
+router.get('/:id', getProductById);
+router.get('/:id/classes', getProductClasses);
+router.put('/:id', updateProduct);
+router.delete('/:id', deleteProduct);
 
-module.exports = router; 
+module.exports = router;

@@ -1,5 +1,24 @@
-const { User, StudyHeatmapLog } = require('../models');
+const {
+  User,
+  StudyHeatmapLog,
+  MyClass,
+  MyClassStatus,
+  Review,
+  ProductReviewMap,
+  TTSRequest,
+  TTSSavedFile,
+  Product,
+  Class,
+  Section,
+  Lesson,
+  ProductClassMap,
+  ClassSectionMap,
+  SectionLessonMap,
+  sequelize,
+} = require('../models');
 const { fn, col, Op } = require('sequelize');
+
+const ACHIEVEMENT_CATEGORIES = ['HTML', 'CSS', 'JS', 'Python', 'Java', 'Nodejs'];
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
@@ -52,13 +71,13 @@ class UserService {
 
       // 4. JWT 토큰 생성
       const accessToken = jwt.sign(
-        { id: foundUser.id, email: foundUser.email }, 
-        ACCESS_SECRET, 
+        { id: foundUser.id, email: foundUser.email, role: foundUser.role },
+        ACCESS_SECRET,
         { expiresIn: '20s' } // 테스트용 20초
       );
       const refreshToken = jwt.sign(
-        { id: foundUser.id, email: foundUser.email}, 
-        REFRESH_SECRET, 
+        { id: foundUser.id, email: foundUser.email, role: foundUser.role },
+        REFRESH_SECRET,
         { expiresIn: '30d' }
       );
       console.log('✅ JWT 토큰 생성 성공');
@@ -152,8 +171,12 @@ class UserService {
       const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
       const now = Math.floor(Date.now() / 1000); // 현재 시간 (초)
 
+      // 어드민 임명/박탈을 즉시 반영하기 위해 role 은 항상 DB 최신값으로 갱신.
+      const dbUser = await User.findByPk(decoded.id, { attributes: ['id', 'email', 'role'] });
+      const role = dbUser?.role || 'user';
+
       const newAccessToken = jwt.sign(
-        { id: decoded.id, email: decoded.email },
+        { id: decoded.id, email: decoded.email, role },
         ACCESS_SECRET,
         { expiresIn: '20s' } // 테스트용 20초
       );
@@ -164,7 +187,7 @@ class UserService {
       let newRefreshToken = null;
       if (timeRemaining < 60 * 60 * 24) {
         newRefreshToken = jwt.sign(
-          { id: decoded.id, email: decoded.email },
+          { id: decoded.id, email: decoded.email, role },
           REFRESH_SECRET,
           { expiresIn: '30d' }
           );
@@ -228,61 +251,186 @@ class UserService {
     return user;
   }
   
-  // 사용자 삭제
+  // 사용자 삭제 (학습 기록 등 사용자 종속 데이터 일괄 정리)
   async deleteUser(id) {
     const user = await User.findByPk(id);
     if (!user) {
       throw new Error('해당 사용자를 찾을 수 없습니다.');
     }
-    
-    await user.destroy();
+
+    await sequelize.transaction(async (t) => {
+      // 1. myclass → myclass_status 정리
+      const myclasses = await MyClass.findAll({
+        where: { user_id: id },
+        attributes: ['id'],
+        transaction: t,
+      });
+      const myclassIds = myclasses.map((m) => m.id);
+      if (myclassIds.length > 0) {
+        await MyClassStatus.destroy({
+          where: { myclass_id: myclassIds },
+          transaction: t,
+        });
+        await MyClass.destroy({
+          where: { user_id: id },
+          transaction: t,
+        });
+      }
+
+      // 2. review → product_review_map 정리
+      const reviews = await Review.findAll({
+        where: { user_id: id },
+        attributes: ['id'],
+        transaction: t,
+      });
+      const reviewIds = reviews.map((r) => r.id);
+      if (reviewIds.length > 0) {
+        await ProductReviewMap.destroy({
+          where: { review_id: reviewIds },
+          transaction: t,
+        });
+        await Review.destroy({
+          where: { user_id: id },
+          transaction: t,
+        });
+      }
+
+      // 3. 학습 히트맵 로그
+      await StudyHeatmapLog.destroy({
+        where: { user_id: id },
+        transaction: t,
+      });
+
+      // 4. TTS 데이터 (있을 경우)
+      if (TTSSavedFile) {
+        await TTSSavedFile.destroy({
+          where: { user_id: id },
+          transaction: t,
+        });
+      }
+      if (TTSRequest) {
+        await TTSRequest.destroy({
+          where: { user_id: id },
+          transaction: t,
+        });
+      }
+
+      // 5. 사용자 삭제
+      await user.destroy({ transaction: t });
+    });
+
     return true;
   }
   
   // 모든 사용자 조회
   async getAllUsers() {
     return await User.findAll({
-      attributes: ['id', 'email', 'nickname', 'profile_img', 'xp', 'heart', 'created_at']
+      attributes: ['id', 'email', 'nickname', 'profile_img', 'xp', 'created_at']
     });
   }
-  
+
   // 특정 사용자 조회
   async getUserById(id) {
     const user = await User.findByPk(id, {
-      attributes: ['id', 'email', 'nickname', 'profile_img', 'xp', 'heart', 'created_at']
+      attributes: ['id', 'email', 'nickname', 'profile_img', 'xp', 'created_at']
     });
-    
+
     if (!user) {
       throw new Error('해당 사용자를 찾을 수 없습니다.');
     }
-    
+
     return user;
   }
-  
+
   // XP 업데이트
   async updateUserXp(id, xp) {
     const user = await User.findByPk(id);
     if (!user) {
       throw new Error('해당 사용자를 찾을 수 없습니다.');
     }
-    
+
     user.xp += xp;
     await user.save();
-    
+
     return { xp: user.xp };
   }
-  
-  // 하트 업데이트
-  async updateUserHeart(id, heart) {
-    const user = await User.findByPk(id);
-    if (!user) {
-      throw new Error('해당 사용자를 찾을 수 없습니다.');
+
+  // 업적 조회: 카테고리별 심화 레슨 1개라도 완료 시 unlocked
+  async getAchievements(userId) {
+    const advancedProducts = await Product.findAll({
+      where: { difficulty: '심화', category: { [Op.in]: ACHIEVEMENT_CATEGORIES } },
+      attributes: ['id', 'category'],
+      include: [{
+        model: Class,
+        as: 'Classes',
+        through: { model: ProductClassMap, attributes: [] },
+        attributes: ['id'],
+        include: [{
+          model: Section,
+          as: 'Sections',
+          through: { model: ClassSectionMap, attributes: [] },
+          attributes: ['id'],
+          include: [{
+            model: Lesson,
+            as: 'Lessons',
+            through: { model: SectionLessonMap, attributes: [] },
+            attributes: ['id'],
+          }],
+        }],
+      }],
+    });
+
+    const lessonIdsByCategory = new Map();
+    for (const category of ACHIEVEMENT_CATEGORIES) {
+      lessonIdsByCategory.set(category, new Set());
     }
-    
-    user.heart = heart;
-    await user.save();
-    
-    return { heart: user.heart };
+    for (const product of advancedProducts) {
+      const set = lessonIdsByCategory.get(product.category);
+      if (!set) continue;
+      for (const cls of product.Classes || []) {
+        for (const section of cls.Sections || []) {
+          for (const lesson of section.Lessons || []) {
+            set.add(lesson.id);
+          }
+        }
+      }
+    }
+
+    const allLessonIds = new Set();
+    for (const set of lessonIdsByCategory.values()) {
+      for (const id of set) allLessonIds.add(id);
+    }
+
+    let completedLessonIds = new Set();
+    if (allLessonIds.size > 0) {
+      const completed = await MyClassStatus.findAll({
+        attributes: ['lesson_id'],
+        where: {
+          status: 2,
+          lesson_id: { [Op.in]: Array.from(allLessonIds) },
+        },
+        include: [{
+          model: MyClass,
+          attributes: [],
+          where: { user_id: userId },
+          required: true,
+        }],
+        raw: true,
+      });
+      completedLessonIds = new Set(completed.map((r) => r.lesson_id));
+    }
+
+    return ACHIEVEMENT_CATEGORIES.map((code) => {
+      const categoryLessons = lessonIdsByCategory.get(code) || new Set();
+      let unlocked = false;
+      for (const id of categoryLessons) {
+        if (completedLessonIds.has(id)) {
+          unlocked = true;
+          break;
+        }
+      }
+      return { code, unlocked };
+    });
   }
 
   // 학습 히트맵 데이터 조회 함수

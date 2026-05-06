@@ -30,6 +30,11 @@ module.exports = (sequelize, DataTypes) => {
     difficulty: {
       type: DataTypes.STRING
     },
+    is_active: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
   }, {
     tableName: 'product',
     timestamps: false,
