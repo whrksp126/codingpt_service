@@ -1,10 +1,11 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Gear, 
-  Code, 
-  Play, 
-  Microphone 
+import {
+  Gear,
+  Code,
+  Play,
+  Microphone,
+  GraduationCap
 } from '@phosphor-icons/react';
 
 const Main = () => {
@@ -12,9 +13,17 @@ const Main = () => {
 
   const routes = [
     {
+      path: '/admin/lessons',
+      title: '레슨 관리',
+      description: '상품/강의/섹션/레슨 계층 관리',
+      icon: GraduationCap,
+      color: 'bg-cyan-500 hover:bg-cyan-600',
+      iconColor: 'text-cyan-100',
+    },
+    {
       path: '/admin',
       title: 'Admin',
-      description: '관리자 페이지',
+      description: '관리자 코드 에디터 데모',
       icon: Gear,
       color: 'bg-purple-500 hover:bg-purple-600',
       iconColor: 'text-purple-100',

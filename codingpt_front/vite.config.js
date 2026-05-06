@@ -50,6 +50,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@shared/lessonSchema': path.resolve(__dirname, '../codingpt_back/services/lessonSchema'),
     },
   },
   base: NODE_ENV === 'production' ? '/' : '/',

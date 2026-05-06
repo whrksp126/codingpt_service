@@ -11,6 +11,8 @@ import Curriculums from './pages/Curriculums';
 import Curriculum from './pages/Curriculum';
 import Sections from './pages/Sections';
 import TTS from './pages/TTS';
+import AdminLessonList from './pages/AdminLessonList';
+import LessonEditor from './pages/LessonEditor';
 
 function App() {
   return (
@@ -18,6 +20,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Main />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/admin/lessons" element={<AdminLessonList />} />
+        <Route path="/admin/lessons/:id/edit" element={<LessonEditor />} />
         <Route path="/code/:id" element={<Code />} />
         <Route path="/execute" element={<Execute />} />
         <Route path="/tts" element={<TTS />} />

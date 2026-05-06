@@ -1,0 +1,132 @@
+/* React Native HTML 렌더 스타일 미러 (htmlStyles.ts 기반) */
+.rn-html { font-family: 'Pretendard Variable', 'Pretendard', system-ui, sans-serif; color: #333333; line-height: 1.25; }
+.rn-html, .rn-html * { font-family: inherit; }
+.rn-html p  { font-size: 16px; color: #333333; line-height: 20px; margin: 0; }
+.rn-html h1 { font-size: 32px; font-weight: 700; color: #333333; margin: 0; }
+.rn-html h2 { font-size: 24px; font-weight: 700; color: #333333; margin: 0; }
+.rn-html h3 { font-size: 18.7px; font-weight: 600; color: #333333; margin: 0; }
+.rn-html ul, .rn-html ol { padding-left: 16px; margin: 0; }
+.rn-html li { font-size: 16px; color: #333333; margin: 0; }
+.rn-html a  { color: #2563EB; text-decoration: underline; font-weight: 500; }
+.rn-html pre { background: #0F172A; border-radius: 12px; padding: 10px; margin: 6px 0; color: #E5E7EB; }
+.rn-html br { line-height: 1.4; }
+
+/* 정렬 */
+.rn-html .text-center { text-align: center; }
+.rn-html .text-left   { text-align: left; }
+.rn-html .text-right  { text-align: right; }
+
+/* 텍스트 사이즈/굵기 */
+.rn-html .bold-22    { font-size: 22px; font-weight: 700; line-height: 33px; color: #333333; }
+.rn-html .bold-18    { font-size: 18px; font-weight: 700; line-height: 27px; color: #333333; }
+.rn-html .bold-16    { font-size: 16px; font-weight: 700; line-height: 24px; color: #333333; }
+.rn-html .bold-14    { font-size: 14px; font-weight: 700; line-height: 21px; color: #333333; }
+.rn-html .semibold-15{ font-size: 15px; font-weight: 600; line-height: 22.5px; color: #333333; }
+.rn-html .regular-15 { font-size: 15px; font-weight: 400; line-height: 22.5px; color: #333333; }
+.rn-html .regular-14 { font-size: 14px; font-weight: 400; line-height: 21px;   color: #333333; }
+
+/* 텍스트 색상 */
+.rn-html .blue-100    { color: #F0F5FF; }
+.rn-html .blue-700    { color: #2F6FED; }
+.rn-html .blue-800    { color: #1D5BD6; }
+.rn-html .blue-900    { color: #1E4EAE; }
+.rn-html .purple-100  { color: #F8F5FF; }
+.rn-html .purple-700  { color: #8B54F7; }
+.rn-html .purple-800  { color: #6D35DE; }
+.rn-html .purple-900  { color: #5221B5; }
+.rn-html .success-100 { color: #EDFDF8; }
+.rn-html .success-700 { color: #08875D; }
+.rn-html .success-800 { color: #04724D; }
+.rn-html .success-900 { color: #066042; }
+.rn-html .warning-100 { color: #FFF8EB; }
+.rn-html .warning-700 { color: #B25E09; }
+.rn-html .warning-800 { color: #96530F; }
+.rn-html .warning-900 { color: #80460D; }
+.rn-html .danger-100  { color: #FEF1F2; }
+.rn-html .danger-700  { color: #E02D3C; }
+.rn-html .danger-800  { color: #BA2532; }
+.rn-html .danger-900  { color: #981B25; }
+.rn-html .blackPrimary    { color: #333333; }
+.rn-html .blackSecondary  { color: rgba(51, 51, 51, 0.8); }
+.rn-html .blackDisabled   { color: rgba(51, 51, 51, 0.65); }
+.rn-html .whitePrimary    { color: #FFFFFF; }
+.rn-html .whiteSecondary  { color: rgba(255, 255, 255, 0.75); }
+.rn-html .whiteDisabled   { color: rgba(255, 255, 255, 0.6); }
+
+/* 배경 색상 */
+.rn-html .bg-blue-100   { background-color: #F0F5FF; }
+.rn-html .bg-blue-700   { background-color: #2F6FED; }
+.rn-html .bg-blue-800   { background-color: #1D5BD6; }
+.rn-html .bg-blue-900   { background-color: #1E4EAE; }
+.rn-html .bg-purple-100 { background-color: #F8F5FF; }
+.rn-html .bg-purple-700 { background-color: #8B54F7; }
+.rn-html .bg-purple-800 { background-color: #6D35DE; }
+.rn-html .bg-purple-900 { background-color: #5221B5; }
+.rn-html .bg-success-100{ background-color: #EDFDF8; }
+.rn-html .bg-success-700{ background-color: #08875D; }
+.rn-html .bg-success-800{ background-color: #04724D; }
+.rn-html .bg-success-900{ background-color: #066042; }
+.rn-html .bg-warning-100{ background-color: #FFF8EB; }
+.rn-html .bg-warning-700{ background-color: #B25E09; }
+.rn-html .bg-warning-800{ background-color: #96530F; }
+.rn-html .bg-warning-900{ background-color: #80460D; }
+.rn-html .bg-danger-100 { background-color: #FEF1F2; }
+.rn-html .bg-danger-700 { background-color: #E02D3C; }
+.rn-html .bg-danger-800 { background-color: #BA2532; }
+.rn-html .bg-danger-900 { background-color: #981B25; }
+
+/* 박스/레이아웃 */
+.rn-html .badge-pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #DBEAFE;
+  color: #1D4ED8;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.rn-html .tip-box {
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  border-radius: 14px;
+  padding: 10px;
+  margin-top: 8px;
+}
+.rn-html .tip-title { font-size: 16px; font-weight: 700; color: #1D4ED8; margin-bottom: 4px; }
+.rn-html .code-label { font-size: 14px; font-weight: 600; color: #9CA3AF; margin-bottom: 4px; }
+.rn-html .code-block { background: #0F172A; border-radius: 12px; padding: 10px; margin-top: 4px; color: #E5E7EB; }
+.rn-html .code-inline {
+  background: #F3F4F6; border-radius: 6px;
+  padding: 5px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.rn-html .container { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.rn-html .row { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; align-items: center; margin-bottom: 12px; }
+.rn-html .tag-block {
+  display: inline-block;
+  background: rgba(51, 51, 51, 0.65);
+  color: rgba(255, 255, 255, 0.6);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 21px;
+  letter-spacing: -0.28px;
+  margin: 0 6px;
+  text-align: center;
+}
+.rn-html .callout-box {
+  background: #F8F9FC;
+  padding: 12px 24px;
+  border-left: 6px solid #2F6FED;
+}
+.rn-html .symbol-box {
+  display: inline-block;
+  background: #C9DBFF;
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin-right: 4px;
+  color: #333333;
+  font-weight: 600;
+  font-size: 14px;
+}
