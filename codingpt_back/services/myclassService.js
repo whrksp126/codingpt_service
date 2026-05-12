@@ -1,6 +1,26 @@
 const { sequelize, MyClass, MyClassStatus, Product, ProductClassMap, Class, ClassSectionMap, Section, SectionLessonMap, Lesson, Slide, LessonSlideMap, User } = require('../models');
+const { SLIDE_TYPE_PRESETS } = require('./lessonSchema');
 
 const XP_PER_LESSON_MAX = 10;
+
+// 슬라이드 타입(role)별 기본 배경을 누락된 슬라이더에 주입
+const ensureSliderBackground = (slider) => {
+  if (!slider || typeof slider !== 'object') return slider;
+  if (slider.background && Array.isArray(slider.background.colors) && slider.background.colors.length > 0) {
+    return slider;
+  }
+  const role = slider.role || 'custom';
+  const preset = SLIDE_TYPE_PRESETS[role] || SLIDE_TYPE_PRESETS.custom;
+  return { ...slider, background: preset.background };
+};
+
+const normalizeSlideContents = (contents) => {
+  if (!contents || typeof contents !== 'object') return contents;
+  if (Array.isArray(contents.sliders)) {
+    return { ...contents, sliders: contents.sliders.map(ensureSliderBackground) };
+  }
+  return ensureSliderBackground(contents);
+};
 
 // 슬라이드 결과에서 채점 대상 모듈의 정답률 계산
 function computeCorrectRate(result) {
@@ -51,7 +71,7 @@ class MyClassService {
                         {
                           model: Slide,
                           as: 'Slides',
-                          through: { model: LessonSlideMap, attributes: [] }
+                          through: { model: LessonSlideMap, attributes: ['order_no'] }
                         }
                       ]
                     }
@@ -65,15 +85,40 @@ class MyClassService {
           model: MyClassStatus,
           required: false
         }
-      ]
+      ],
+      order: [
+        [
+          { model: Product },
+          { model: Class, as: 'Classes' },
+          { model: Section, as: 'Sections' },
+          { model: Lesson, as: 'Lessons' },
+          { model: Slide, as: 'Slides' },
+          LessonSlideMap,
+          'order_no',
+          'ASC',
+        ],
+      ],
     });
     
-    // 데이터 구조화
-    return myclassList.map(myclass => ({
-      ...myclass.Product.dataValues,
-      myclass_id: myclass.id,
-      status: myclass.MyClassStatuses || []
-    }));
+    // 데이터 구조화 + 슬라이드 background 정규화
+    return myclassList.map(myclass => {
+      const product = myclass.Product.toJSON ? myclass.Product.toJSON() : { ...myclass.Product.dataValues };
+      const classes = product.Classes || [];
+      for (const cls of classes) {
+        for (const section of cls.Sections || []) {
+          for (const lesson of section.Lessons || []) {
+            for (const slide of lesson.Slides || []) {
+              slide.contents = normalizeSlideContents(slide.contents);
+            }
+          }
+        }
+      }
+      return {
+        ...product,
+        myclass_id: myclass.id,
+        status: myclass.MyClassStatuses || [],
+      };
+    });
   }
   
   // 특정 상품 수강 여부 조회

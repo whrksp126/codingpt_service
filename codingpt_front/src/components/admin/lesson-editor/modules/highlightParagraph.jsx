@@ -1,13 +1,18 @@
 import { Field, TextField, TTSField } from './_shared/SharedFields';
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import IconCircle from './_shared/IconCircle';
+import { stripHtml } from './_shared/htmlText';
 
 const FormView = ({ value, onChange }) => (
   <>
     <Field label="HTML 내용 (TTS 동기화)">
       <TextField value={value.content} onChange={(v) => onChange({ ...value, content: v })} multiline rows={5} />
     </Field>
-    <TTSField value={value.tts} onChange={(v) => onChange({ ...value, tts: v })} />
+    <TTSField
+      value={value.tts}
+      onChange={(v) => onChange({ ...value, tts: v })}
+      defaultText={stripHtml(value.content)}
+    />
   </>
 );
 

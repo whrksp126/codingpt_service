@@ -10,39 +10,6 @@ import SlideCanvas from '../components/admin/lesson-editor/SlideCanvas';
 import Inspector from '../components/admin/lesson-editor/Inspector';
 import ModulePopover from '../components/admin/lesson-editor/ModulePopover';
 
-const CanvasToolbar = ({ onOpenPalette }) => {
-  const { state } = useEditor();
-  const slide = state.lesson?.slides?.find((s) => s.id === state.selection.slideId);
-  const slideId = state.selection.slideId;
-  const slideTitle = slide?.contents?.title;
-  const moduleCount = slide?.contents?.modules?.length ?? 0;
-
-  return (
-    <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
-      <button
-        type="button"
-        onClick={onOpenPalette}
-        disabled={!slideId}
-        className="rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        + 모듈 추가
-      </button>
-      <div className="truncate text-sm text-slate-500">
-        {slideId ? (
-          <>
-            <span className="font-medium text-slate-700">
-              {slideTitle || '(제목 없음)'}
-            </span>
-            <span className="ml-2 text-xs text-slate-400">· {moduleCount}개 모듈</span>
-          </>
-        ) : (
-          '슬라이드를 선택하세요'
-        )}
-      </div>
-    </div>
-  );
-};
-
 const EditorShell = ({ lessonId }) => {
   const { state, dispatch } = useEditor();
   const [loadError, setLoadError] = useState(null);
@@ -94,9 +61,8 @@ const EditorShell = ({ lessonId }) => {
         </aside>
 
         <main className="relative flex flex-1 flex-col overflow-hidden">
-          <CanvasToolbar onOpenPalette={() => setPaletteOpen(true)} />
           <div className="flex-1 overflow-auto bg-slate-100">
-            <SlideCanvas />
+            <SlideCanvas onOpenPalette={() => setPaletteOpen(true)} />
           </div>
           {paletteOpen && <ModulePopover onClose={() => setPaletteOpen(false)} />}
         </main>

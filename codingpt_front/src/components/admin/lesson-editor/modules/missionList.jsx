@@ -19,11 +19,18 @@ const FormView = ({ value, onChange }) => {
           label="완료 표시 (체크 상태로 렌더)"
         />
       </div>
-      <Field label={`항목 (${items.length})`}>
-        <button type="button" onClick={addItem} className="rounded bg-slate-100 px-2 py-1 text-xs hover:bg-slate-200">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-600">
+          항목 ({items.length})
+        </span>
+        <button
+          type="button"
+          onClick={addItem}
+          className="rounded bg-slate-100 px-2.5 py-1 text-[11px] hover:bg-slate-200"
+        >
           + 항목 추가
         </button>
-      </Field>
+      </div>
       {items.map((it, i) => (
         <div key={i} className="mb-2 flex items-center gap-2">
           <span className="text-xs text-slate-400 w-5">{i + 1}.</span>

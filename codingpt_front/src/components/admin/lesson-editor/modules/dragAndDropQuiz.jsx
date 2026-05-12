@@ -32,7 +32,7 @@ export default {
   category: 'quiz',
   label: '드래그앤드롭',
   description: '항목을 드래그해서 맞추기',
-  icon: '🤏',
+  icon: '',
   defaultValue: () => ({ type: 'dragAndDropQuiz' }),
   FormView,
   PreviewView,

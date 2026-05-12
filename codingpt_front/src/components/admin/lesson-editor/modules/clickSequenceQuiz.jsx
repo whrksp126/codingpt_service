@@ -51,7 +51,7 @@ export default {
   category: 'quiz',
   label: '순서 맞추기',
   description: '블록을 순서대로 배열',
-  icon: '🔢',
+  icon: '',
   defaultValue: () => ({ type: 'clickSequenceQuiz', question: '', slots: 2, options: [], answer: [] }),
   FormView,
   PreviewView,

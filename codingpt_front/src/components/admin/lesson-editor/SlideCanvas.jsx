@@ -78,21 +78,34 @@ const SortableModule = ({ module, selected, onClick, onVisibilityChange, onModul
   );
 };
 
-const SlideCanvas = () => {
+const SlideCanvas = ({ onOpenPalette }) => {
   const { state, dispatch } = useEditor();
   const slide = selectSelectedSlide(state);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   if (!slide) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-400">
-        슬라이드를 선택하세요
+      <div className="relative flex h-full flex-col">
+        {onOpenPalette && (
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            disabled
+            className="absolute left-4 top-4 z-10 rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm opacity-50"
+          >
+            + 모듈 추가
+          </button>
+        )}
+        <div className="flex h-full items-center justify-center text-sm text-slate-400">
+          슬라이드를 선택하세요
+        </div>
       </div>
     );
   }
 
   const bg = slide.contents?.background;
   const modules = slide.contents?.modules || [];
+  const slideTitle = slide.contents?.title;
 
   const handleDragEnd = (event) => {
     const { active, over } = event;
@@ -104,8 +117,23 @@ const SlideCanvas = () => {
   };
 
   return (
-    <div className="flex h-full flex-col items-center justify-start gap-3 overflow-y-auto p-6">
+    <div className="relative flex h-full flex-col items-center justify-start gap-3 overflow-y-auto p-6">
+      {onOpenPalette && (
+        <button
+          type="button"
+          onClick={onOpenPalette}
+          className="absolute left-4 top-4 z-10 rounded-md bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-600"
+        >
+          + 모듈 추가
+        </button>
+      )}
       <div className="text-xs text-slate-500">
+        {slideTitle && (
+          <>
+            <span className="font-medium text-slate-700">{slideTitle}</span>
+            <span className="mx-1">·</span>
+          </>
+        )}
         슬라이드 #{slide.id} · {modules.length}개 모듈
       </div>
       <div

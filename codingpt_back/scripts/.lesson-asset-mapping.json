@@ -1,0 +1,189 @@
+{
+  "generatedAt": "2026-05-04T17:27:22.174Z",
+  "objectstoreBase": "https://objectstore.ghmate.com/codingpt",
+  "prefix": "codingpt/lesson-assets/images",
+  "mapping": {
+    "student_full": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png",
+      "objKey": "codingpt/lesson-assets/images/student_full.png",
+      "ext": "png",
+      "source": "images/student_full.png",
+      "status": "uploaded"
+    },
+    "teacher_full": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png",
+      "objKey": "codingpt/lesson-assets/images/teacher_full.png",
+      "ext": "png",
+      "source": "images/teacher_full.png",
+      "status": "uploaded"
+    },
+    "html_role_img": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_role_img.png",
+      "objKey": "codingpt/lesson-assets/images/html_role_img.png",
+      "ext": "png",
+      "source": "images/html_role_img.png",
+      "status": "uploaded"
+    },
+    "html_img": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_img.png",
+      "objKey": "codingpt/lesson-assets/images/html_img.png",
+      "ext": "png",
+      "source": "images/html_img.png",
+      "status": "uploaded"
+    },
+    "css_img": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_img.png",
+      "objKey": "codingpt/lesson-assets/images/css_img.png",
+      "ext": "png",
+      "source": "images/css_img.png",
+      "status": "uploaded"
+    },
+    "js_img": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_img.png",
+      "objKey": "codingpt/lesson-assets/images/js_img.png",
+      "ext": "png",
+      "source": "images/js_img.png",
+      "status": "uploaded"
+    },
+    "html_lesson_02": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_02.png",
+      "objKey": "codingpt/lesson-assets/images/html_lesson_02.png",
+      "ext": "png",
+      "source": "images/html_lesson_02.png",
+      "status": "uploaded"
+    },
+    "teacher_profile": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png",
+      "objKey": "codingpt/lesson-assets/images/teacher_profile.png",
+      "ext": "png",
+      "source": "images/teacher_profile.png",
+      "status": "uploaded"
+    },
+    "html_lesson_03": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_03.png",
+      "objKey": "codingpt/lesson-assets/images/html_lesson_03.png",
+      "ext": "png",
+      "source": "images/html_lesson_03.png",
+      "status": "uploaded"
+    },
+    "html_lesson_04": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_04.png",
+      "objKey": "codingpt/lesson-assets/images/html_lesson_04.png",
+      "ext": "png",
+      "source": "images/html_lesson_04.png",
+      "status": "uploaded"
+    },
+    "html_lesson_09": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_09.png",
+      "objKey": "codingpt/lesson-assets/images/html_lesson_09.png",
+      "ext": "png",
+      "source": "images/html_lesson_09.png",
+      "status": "uploaded"
+    },
+    "html_lesson_09_2": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_09_2.png",
+      "objKey": "codingpt/lesson-assets/images/html_lesson_09_2.png",
+      "ext": "png",
+      "source": "images/html_lesson_09_2.png",
+      "status": "uploaded"
+    },
+    "css_lesson_01": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_01.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_01.png",
+      "ext": "png",
+      "source": "images/css_lesson_01.png",
+      "status": "uploaded"
+    },
+    "css_lesson_02": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_02.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_02.png",
+      "ext": "png",
+      "source": "images/css_lesson_02.png",
+      "status": "uploaded"
+    },
+    "css_lesson_04": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_04.png",
+      "ext": "png",
+      "source": "images/css_lesson_04.png",
+      "status": "uploaded"
+    },
+    "css_lesson_04_2": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04_2.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_04_2.png",
+      "ext": "png",
+      "source": "images/css_lesson_04_2.png",
+      "status": "uploaded"
+    },
+    "css_lesson_04_3": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04_3.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_04_3.png",
+      "ext": "png",
+      "source": "images/css_lesson_04_3.png",
+      "status": "uploaded"
+    },
+    "css_lesson_07": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_07.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_07.png",
+      "ext": "png",
+      "source": "images/css_lesson_07.png",
+      "status": "uploaded"
+    },
+    "css_lesson_08": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_08.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_08.png",
+      "ext": "png",
+      "source": "images/css_lesson_08.png",
+      "status": "uploaded"
+    },
+    "css_lesson_09_1": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_09_1.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_09_1.png",
+      "ext": "png",
+      "source": "images/css_lesson_09_1.png",
+      "status": "uploaded"
+    },
+    "css_lesson_09_2": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_09_2.png",
+      "objKey": "codingpt/lesson-assets/images/css_lesson_09_2.png",
+      "ext": "png",
+      "source": "images/css_lesson_09_2.png",
+      "status": "uploaded"
+    },
+    "student_profile": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_profile.png",
+      "objKey": "codingpt/lesson-assets/images/student_profile.png",
+      "ext": "png",
+      "source": "images/student_profile.png",
+      "status": "uploaded"
+    },
+    "js_lesson_02": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_02.png",
+      "objKey": "codingpt/lesson-assets/images/js_lesson_02.png",
+      "ext": "png",
+      "source": "images/js_lesson_02.png",
+      "status": "uploaded"
+    },
+    "js_lesson_04_1": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_04_1.png",
+      "objKey": "codingpt/lesson-assets/images/js_lesson_04_1.png",
+      "ext": "png",
+      "source": "images/js_lesson_04_1.png",
+      "status": "uploaded"
+    },
+    "js_lesson_04_2": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_04_2.png",
+      "objKey": "codingpt/lesson-assets/images/js_lesson_04_2.png",
+      "ext": "png",
+      "source": "images/js_lesson_04_2.png",
+      "status": "uploaded"
+    },
+    "js_lesson_05_1": {
+      "url": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_05_1.png",
+      "objKey": "codingpt/lesson-assets/images/js_lesson_05_1.png",
+      "ext": "png",
+      "source": "images/js_lesson_05_1.png",
+      "status": "uploaded"
+    }
+  }
+}

@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Field, NumberField, SelectField } from './SharedFields';
+import { Field, SelectField } from './SharedFields';
 
 // 퀴즈 채점 후 등장 모듈에 부여되는 condition 뱃지.
-// value 는 baseModuleFields.condition 과 동일하게 'always' | 'correct' | 'wrong' 단일 문자열.
-//   undefined 또는 'always' → 채점과 무관하게 항상 노출
-//   'correct' → 정답일 때만
-//   'wrong'   → 오답일 때만
-// onChange 는 동일 형태의 문자열(또는 undefined)을 콜백.
+// value 는 baseModuleFields.condition 과 동일한 단일 문자열로, UI 상에서는 'correct' | 'wrong' 둘 중 하나만 노출한다.
+// (legacy 데이터로 'always' 또는 undefined 가 들어올 수 있는데, 이때는 'correct' 로 정규화해 보여준다.)
 
 const formatLabel = (type) => {
-  if (!type || type === 'always') return '채점 후: 항상';
-  if (type === 'correct') return '정답 시';
   if (type === 'wrong') return '오답 시';
-  return type;
+  return '정답 시';
 };
 
 const badgeColor = (type) => {
@@ -42,8 +37,9 @@ const ConditionBadge = ({ value, onChange }) => {
     };
   }, [open]);
 
-  // 객체 형태로 들어오면 type 만 추출, 아니면 그대로.
-  const type = (typeof value === 'object' && value !== null) ? value.type : (value || 'always');
+  // 객체 형태로 들어오면 type 만 추출, legacy('always' / undefined)는 'correct' 로 정규화.
+  const raw = (typeof value === 'object' && value !== null) ? value.type : value;
+  const type = raw === 'wrong' ? 'wrong' : 'correct';
 
   return (
     <div ref={wrapRef} className="relative">
@@ -51,7 +47,7 @@ const ConditionBadge = ({ value, onChange }) => {
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         className={
-          'rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none shadow-sm transition ' +
+          'whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none shadow-sm transition ' +
           badgeColor(type)
         }
         title="채점 후 등장 조건"
@@ -66,12 +62,8 @@ const ConditionBadge = ({ value, onChange }) => {
           <Field label="조건">
             <SelectField
               value={type}
-              onChange={(t) => {
-                if (!t || t === 'always') onChange(undefined);
-                else onChange(t);
-              }}
+              onChange={(t) => onChange(t === 'wrong' ? 'wrong' : 'correct')}
               options={[
-                { value: 'always',  label: '항상 (채점과 무관)' },
                 { value: 'correct', label: '정답일 때' },
                 { value: 'wrong',   label: '오답일 때' },
               ]}

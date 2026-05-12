@@ -1,0 +1,2342 @@
+{
+  "generatedAt": "2026-05-04T17:37:25.651Z",
+  "targetProducts": [
+    "HTML 입문",
+    "CSS 입문",
+    "JS 입문"
+  ],
+  "slideCount": 26,
+  "refsByKind": {
+    "objectstore": 288,
+    "old-s3": 0,
+    "external": 0,
+    "data-uri": 0,
+    "relative-path": 0,
+    "key": 1,
+    "empty": 0,
+    "invalid": 0
+  },
+  "keyMatches": [],
+  "keyMissing": [
+    {
+      "key": "js_lesson_06_1"
+    }
+  ],
+  "relMatches": [],
+  "relMissing": [],
+  "existence": {},
+  "allRefs": [
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[3].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_role_img.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].speeches[0].image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_img.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].speeches[1].image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_img.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].speeches[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].speeches[2].image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_img.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 51,
+      "lessonName": "HTML의 역할",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_02.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 52,
+      "lessonName": "HTML의 기본 구조",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_03.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 53,
+      "lessonName": "HTML 요소",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[3].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_04.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 54,
+      "lessonName": "HTML 속성(Attribute)",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 55,
+      "lessonName": "텍스트 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 56,
+      "lessonName": "정보를 나열하는 목록 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 57,
+      "lessonName": "클릭하면 이동하는 링크 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 58,
+      "lessonName": "영역을 나누는 보이지 않는 박스",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[0].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_09.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "src",
+      "path": "sliders[2].modules[2].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_lesson_09_2.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 59,
+      "lessonName": "의미를 담은 이름표, 시맨틱 태그",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[2].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[3].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 60,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 만들기",
+      "productName": "HTML 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[3].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_01.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 61,
+      "lessonName": "CSS의 역할",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_02.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 62,
+      "lessonName": "CSS 사용법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 63,
+      "lessonName": "CSS를 연결하는 법",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[2].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[3].modules[2].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04_2.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[4].modules[2].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_04_3.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 64,
+      "lessonName": "원하는 것만 쏙 고르는 선택자",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 65,
+      "lessonName": "색상과 배경",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 66,
+      "lessonName": "텍스트 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[3].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_07.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 67,
+      "lessonName": "안쪽 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_08.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 68,
+      "lessonName": "바깥 여백 주기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_09_1.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "src",
+      "path": "sliders[3].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/css_lesson_09_2.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_profile.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].result.modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 69,
+      "lessonName": "블록과 인라인",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 70,
+      "lessonName": "[종합 실습] 나만의 프로필 페이지 꾸미기",
+      "productName": "CSS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/html_role_img.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].correctResult.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 71,
+      "lessonName": "JS와 인사해요!",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_02.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].correctResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 72,
+      "lessonName": "데이터 보관 상자: 변수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[11].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].correctResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 73,
+      "lessonName": "글자와 숫자 데이터",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_04_1.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[4].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_04_2.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].correctResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 74,
+      "lessonName": "상황에 따라 다르게 사용하는 조건문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[11].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/js_lesson_05_1.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[1].correctResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[1].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 75,
+      "lessonName": "반복되는 일을 처리하는 반복문",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[11].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[0].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/student_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[1].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "src",
+      "path": "sliders[2].modules[1].src",
+      "value": "js_lesson_06_1"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[2].modules[4].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[3].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[4].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[5].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[6].modules[3].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[7].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[8].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[9].modules[1].result.modules[0].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_profile.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].correctResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[10].modules[2].incorrectResult.modules[1].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    },
+    {
+      "slideId": 76,
+      "lessonName": "코드 묶음 도구: 함수",
+      "productName": "JS 입문",
+      "field": "image",
+      "path": "sliders[11].modules[2].character.image",
+      "value": "https://objectstore.ghmate.com/codingpt/lesson-assets/images/teacher_full.png"
+    }
+  ]
+}

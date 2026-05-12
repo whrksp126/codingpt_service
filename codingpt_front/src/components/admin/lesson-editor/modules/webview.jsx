@@ -64,6 +64,7 @@ const FormView = ({ value, onChange }) => {
                 onChange={(v) => updateTab(i, { content: v })}
                 language="html"
                 height={220}
+                disableAutoFormat
               />
             ) : (
               <TextField

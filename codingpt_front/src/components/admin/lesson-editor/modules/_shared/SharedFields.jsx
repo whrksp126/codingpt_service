@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 export const Field = ({ label, children, hint }) => (
   <label className="mb-3 block">
     <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
@@ -73,26 +75,48 @@ export const ColorField = ({ value, onChange }) => (
   </div>
 );
 
+export const Switch = ({ checked, onChange, size = 'md' }) => {
+  const dims = size === 'sm'
+    ? { track: 'h-4 w-7', knob: 'h-3 w-3', on: 'translate-x-[14px]', off: 'translate-x-0.5' }
+    : { track: 'h-4 w-7', knob: 'h-3 w-3', on: 'translate-x-[14px]', off: 'translate-x-0.5' };
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={!!checked}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onChange(!checked); }}
+      className={
+        `relative inline-flex shrink-0 items-center rounded-full transition-colors ${dims.track} ` +
+        (checked ? 'bg-cyan-500' : 'bg-slate-300')
+      }
+    >
+      <span
+        className={
+          `inline-block transform rounded-full bg-white shadow transition-transform ${dims.knob} ` +
+          (checked ? dims.on : dims.off)
+        }
+      />
+    </button>
+  );
+};
+
 export const ToggleField = ({ value, onChange, label }) => (
-  <label className="flex items-center gap-2">
-    <input
-      type="checkbox"
-      checked={!!value}
-      onChange={(e) => onChange(e.target.checked)}
-      className="h-4 w-4 rounded"
-    />
+  <label className="mb-2 flex cursor-pointer items-center justify-between gap-2">
     <span className="text-sm text-slate-700">{label}</span>
+    <Switch checked={!!value} onChange={onChange} />
   </label>
 );
 
 export const Section = ({ title, children, defaultOpen = true }) => {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <details open={defaultOpen} className="mb-3 rounded-lg border border-slate-200">
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
-        {title}
-      </summary>
-      <div className="border-t border-slate-200 p-3">{children}</div>
-    </details>
+    <div className="mb-3 rounded-lg border border-slate-200">
+      <div className="flex items-center justify-between px-3 py-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</span>
+        <Switch checked={open} onChange={setOpen} size="sm" />
+      </div>
+      {open && <div className="border-t border-slate-200 p-3">{children}</div>}
+    </div>
   );
 };
 
@@ -139,33 +163,4 @@ export const VisibilityField = ({ value, onChange }) => {
   );
 };
 
-export const TTSField = ({ value, onChange, label }) => {
-  const url = typeof value === 'string' ? value : value?.url || '';
-  // 기존 timestamps 등 부가 데이터를 보존하면서 url 만 갱신.
-  const handleUrlChange = (v) => {
-    if (!v) {
-      onChange(undefined);
-      return;
-    }
-    if (typeof value === 'object' && value !== null) {
-      onChange({ ...value, url: v });
-    } else {
-      onChange({ url: v });
-    }
-  };
-  const hasTimestamps = typeof value === 'object' && value?.timestamps;
-  return (
-    <Section title={label || 'TTS 음성'} defaultOpen={false}>
-      <Field label="오디오 URL" hint="ObjectStore URL 또는 외부 mp3 URL">
-        <TextField
-          value={url}
-          onChange={handleUrlChange}
-          placeholder="https://..."
-        />
-      </Field>
-      {hasTimestamps && (
-        <div className="text-[11px] text-slate-400">타임스탬프 데이터 보존됨 (수정 불가)</div>
-      )}
-    </Section>
-  );
-};
+export { default as TTSField } from './TTSField';

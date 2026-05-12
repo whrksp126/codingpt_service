@@ -51,7 +51,7 @@ const VisibilityBadge = ({ value, onChange }) => {
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         className={
-          'rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none shadow-sm transition ' +
+          'whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-medium leading-none shadow-sm transition ' +
           badgeColor(type)
         }
         title="가시성 / 등장 타이밍"

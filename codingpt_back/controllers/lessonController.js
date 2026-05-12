@@ -12,6 +12,24 @@ const getSlidesByLesson = async (req, res) => {
   }
 };
 
+// RN 학습자용 runtime 데이터 조회: { id, title, sliders: [...] }
+const getLessonRuntime = async (req, res) => {
+  try {
+    const lessonId = parseInt(req.params.id, 10);
+    if (!lessonId) {
+      return errorResponse(res, new Error('lessonId가 필요합니다.'), 400);
+    }
+    const data = await lessonService.getLessonRuntime(lessonId);
+    if (!data) {
+      return errorResponse(res, new Error('레슨을 찾을 수 없습니다.'), 404);
+    }
+    successResponse(res, data, '레슨 runtime 데이터를 성공적으로 조회했습니다.');
+  } catch (error) {
+    console.error('레슨 runtime 조회 오류:', error);
+    errorResponse(res, error, 500);
+  }
+};
+
 // slide_id로 코드 빈칸 채우기 퀴즈 조회
 const getCodeFillGapsBySlideId = async (req, res) => {
   try {
@@ -35,5 +53,6 @@ const getCodeFillGapsBySlideId = async (req, res) => {
 
 module.exports = {
   getSlidesByLesson,
+  getLessonRuntime,
   getCodeFillGapsBySlideId
-}; 
+};

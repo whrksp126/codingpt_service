@@ -58,6 +58,7 @@ const FormView = ({ value, onChange }) => {
               onChange={(v) => setFiles(files.map((x, idx) => idx === i ? { ...x, content: v } : x))}
               language={PRISM_LANG_MAP[f.language] === 'markup' ? 'html' : (f.language || 'plaintext')}
               height={220}
+              disableAutoFormat
             />
           </Field>
           <button

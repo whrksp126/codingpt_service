@@ -2,6 +2,7 @@ import { Field, TTSField, ToggleField } from './_shared/SharedFields';
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import MonacoField from './_shared/MonacoField';
 import IconCircle from './_shared/IconCircle';
+import { stripHtml } from './_shared/htmlText';
 
 const FormView = ({ value, onChange }) => (
   <>
@@ -20,7 +21,11 @@ const FormView = ({ value, onChange }) => (
         height={180}
       />
     </Field>
-    <TTSField value={value.tts} onChange={(v) => onChange({ ...value, tts: v })} />
+    <TTSField
+      value={value.tts}
+      onChange={(v) => onChange({ ...value, tts: v })}
+      defaultText={stripHtml(value.content)}
+    />
   </>
 );
 

@@ -3,6 +3,7 @@ import { Field, SelectField, TextField, ToggleField, TTSField } from './_shared/
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import MonacoField from './_shared/MonacoField';
 import VisibilityBadge from './_shared/VisibilityBadge';
+import { stripHtml } from './_shared/htmlText';
 
 const CHARACTERS = [
   { value: 'inherit', label: '레슨 기본 캐릭터 사용' },
@@ -75,15 +76,18 @@ const FormView = ({ value, onChange }) => {
         />
       </Field>
 
-      <Field label={`말풍선 (${speeches.length})`}>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-slate-600">
+          말풍선 ({speeches.length})
+        </span>
         <button
           type="button"
           onClick={addSpeech}
-          className="rounded bg-slate-100 px-2 py-1 text-xs text-slate-700 hover:bg-slate-200"
+          className="rounded bg-slate-100 px-2.5 py-1 text-[11px] text-slate-700 hover:bg-slate-200"
         >
           + 말풍선 추가
         </button>
-      </Field>
+      </div>
       {speeches.map((s, i) => (
         <div key={i} className="mb-3 rounded-lg border border-slate-200 p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
@@ -100,24 +104,23 @@ const FormView = ({ value, onChange }) => {
               height={140}
             />
           </Field>
-          <Field label="이미지 URL (선택)">
-            <TextField value={s.image} onChange={(v) => updateSpeech(i, { image: v })} />
-          </Field>
-          <ToggleField
-            value={s.showCharacter}
-            onChange={(v) => updateSpeech(i, { showCharacter: v })}
-            label="캐릭터 함께 표시"
-          />
-          <div className="mt-2">
-            <TTSField
-              value={s.tts}
-              onChange={(v) => updateSpeech(i, { tts: v })}
-              label="말풍선 TTS"
+          <div className="mb-2">
+            <ToggleField
+              value={s.image !== undefined}
+              onChange={(on) => updateSpeech(i, { image: on ? (s.image ?? '') : undefined })}
+              label="이미지 URL"
             />
+            {s.image !== undefined && (
+              <TextField value={s.image} onChange={(v) => updateSpeech(i, { image: v })} placeholder="https://..." />
+            )}
           </div>
+          <TTSField
+            value={s.tts}
+            onChange={(v) => updateSpeech(i, { tts: v })}
+            defaultText={stripHtml(s.content)}
+          />
         </div>
       ))}
-      <TTSField value={value.tts} onChange={(v) => onChange({ ...value, tts: v })} label="모듈 기본 TTS (말풍선별 TTS 미설정 시 폴백)" />
     </>
   );
 };

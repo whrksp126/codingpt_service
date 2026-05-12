@@ -43,6 +43,7 @@ const ttsSchema = z.union([
   z.object({
     url: z.string(),
     timestamps: ttsTimestampsSchema.optional(),
+    enabled: z.boolean().optional(), // false면 RN에서 비활성 (데이터는 보존)
   }),
 ]);
 

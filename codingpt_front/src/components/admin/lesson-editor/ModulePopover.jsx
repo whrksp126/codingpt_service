@@ -20,10 +20,10 @@ const ModulePopover = ({ onClose }) => {
   const [activeCategory, setActiveCategory] = useState('all');
   const [search, setSearch] = useState('');
 
-  // 채점 후 등장 옵션
+  // 채점 후 등장 옵션 — 'correct' | 'wrong' 둘 중 하나로 강제. 항상 등장은 일반 모듈로 추가.
   const [postGrading, setPostGrading] = useState(false);
   const [targetQuizId, setTargetQuizId] = useState(null);
-  const [condition, setCondition] = useState('always'); // 'always' | 'correct' | 'wrong'
+  const [condition, setCondition] = useState('correct');
 
   // 슬라이드 내 퀴즈 모듈 목록
   const quizModules = useMemo(() => {
@@ -84,7 +84,7 @@ const ModulePopover = ({ onClose }) => {
         const newResultMod = {
           ...baseModule,
           id: baseModule.id ?? `r${Date.now()}`,
-          condition: condition === 'always' ? undefined : condition,
+          condition,
         };
         const currentResult = quiz.result || {};
         const currentMods = currentResult.modules || [];
@@ -172,7 +172,6 @@ const ModulePopover = ({ onClose }) => {
                     onChange={(e) => setCondition(e.target.value)}
                     className="rounded border border-slate-200 px-1.5 py-0.5 text-xs"
                   >
-                    <option value="always">항상</option>
                     <option value="correct">정답일 때</option>
                     <option value="wrong">오답일 때</option>
                   </select>

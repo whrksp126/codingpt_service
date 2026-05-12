@@ -3,6 +3,7 @@ const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
 const {
   getSlidesByLesson,
+  getLessonRuntime,
   getCodeFillGapsBySlideId,
 } = require('../controllers/lessonController');
 const lessonEditor = require('../controllers/lessonEditorController');
@@ -10,6 +11,9 @@ const lessonEditor = require('../controllers/lessonEditorController');
 // === Existing learner-facing reads (auth required) ===
 router.get('/slides', authMiddleware, getSlidesByLesson);
 router.get('/slides/:slideId/code-fill-gaps', authMiddleware, getCodeFillGapsBySlideId);
+
+// === RN 학습자용: 레슨 runtime 데이터 (auth required, must come before /:id) ===
+router.get('/runtime/:id', authMiddleware, getLessonRuntime);
 
 // === Editor: 단일 사용자 운영 — 인증 없음. ===
 // === Editor: characters catalog (must come before /:id) ===
