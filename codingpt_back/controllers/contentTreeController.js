@@ -27,6 +27,7 @@ module.exports = {
   linkSectionLesson: wrap((req) => svc.linkSectionLesson(parseInt(req.params.sectionId, 10), parseInt(req.params.lessonId, 10))),
   unlinkSectionLesson: wrap((req) => svc.unlinkSectionLesson(parseInt(req.params.sectionId, 10), parseInt(req.params.lessonId, 10))),
 
+  reorderClassesInProduct: wrap((req) => svc.reorderClassesInProduct(parseInt(req.params.productId, 10), (req.body || {}).orderedClassIds)),
   reorderSectionsInClass: wrap((req) => svc.reorderSectionsInClass(parseInt(req.params.classId, 10), (req.body || {}).orderedSectionIds)),
   reorderLessonsInSection: wrap((req) => svc.reorderLessonsInSection(parseInt(req.params.sectionId, 10), (req.body || {}).orderedLessonIds)),
 };

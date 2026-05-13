@@ -135,16 +135,23 @@ export const decomposeContent = (content, answers = []) => {
 };
 
 // 캔버스/Inspector 미리보기용 다크 테마 HTML — 모바일 assembleCodeHtml 과 같은 톤.
+// 어드민 프리뷰 전용으로 input 마커에 #N 인덱스 배지를 주입한다 (DB content 자체는 변경하지 않음).
 export const previewHtml = (plainCode, language, blanks) => {
-  const body = composeContent(plainCode, language, blanks);
+  const composed = composeContent(plainCode, language, blanks);
+  const body = composed.replace(
+    /<input id="blank-(\d+)"([^>]*?)\s*\/?>/g,
+    (_match, n, rest) => `<span class="blank-wrap"><span class="blank-index">#${n}</span><input id="blank-${n}"${rest} /></span>`,
+  );
   return `<!DOCTYPE html><html><head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/prismjs/themes/prism-okaidia.css" rel="stylesheet" />
   <style>
     body { font-family: 'Menlo','Monaco','Courier New',monospace; font-size:14px; font-weight:bold; line-height:1.6; margin:0; padding:10px; background:#0A0D14; }
     pre { margin:0; white-space:pre-wrap; word-break:break-all; color:#fff; overflow-x:auto; }
-    input.blank { display:inline-block; min-width:60px; height:24px; padding:0; margin:2px; border-radius:4px; border:1.5px dashed #E1E6EF; background:#23272F; color:#E02D3C; font-weight:700; text-align:center; vertical-align:middle; outline:none; pointer-events:none; }
-    input.blank.focus { background:#DDF4FF; border:1.5px dashed #84D8FF; }
+    input.blank { display:inline-block; min-width:60px; height:24px; padding:0; margin:2px; border-radius:4px; border:1.5px dashed #E1E6EF; background:#fff; color:#06B6D4; font-weight:700; text-align:center; vertical-align:middle; outline:none; pointer-events:none; }
+    input.blank.focus { background:#fff; border:1.5px dashed #84D8FF; }
+    .blank-wrap { position:relative; display:inline-block; vertical-align:middle; }
+    .blank-index { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#06B6D4; font-family:'Menlo','Monaco',monospace; font-size:12px; font-weight:700; letter-spacing:0.2px; pointer-events:none; user-select:none; z-index:2; }
   </style></head><body><pre><code>${body || '// 코드를 입력하고 텍스트를 드래그해 빈칸을 만드세요'}</code></pre></body></html>`;
 };
 

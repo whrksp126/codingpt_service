@@ -18,6 +18,7 @@ import { Field, TextField, NumberField, SelectField } from './_shared/SharedFiel
 import MonacoField from './_shared/MonacoField';
 import ResultModulesField from './_shared/ResultModulesField';
 import ResultModulesPreview from './_shared/ResultModulesPreview';
+import { ResultParentProvider } from '../state/ResultParentContext';
 import {
   SUPPORTED_LANGUAGES,
   composeContent,
@@ -457,10 +458,17 @@ const FormView = ({ value, onChange }) => {
         )}
       </div>
 
-      <ResultModulesField
-        value={value.result}
-        onChange={(next) => onChange({ ...value, result: next })}
-      />
+      <ResultParentProvider
+        value={{
+          parentType: 'codeFillTheGapV2',
+          parentValue: { blanks: verifiedBlanks, answers, interactionOptions },
+        }}
+      >
+        <ResultModulesField
+          value={value}
+          onChange={onChange}
+        />
+      </ResultParentProvider>
     </>
   );
 };

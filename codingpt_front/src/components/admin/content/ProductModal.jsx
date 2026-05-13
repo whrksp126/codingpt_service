@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Switch } from '../lesson-editor/modules/_shared/SharedFields';
 
 const ProductModal = ({ product, onSave, onClose }) => {
   const [form, setForm] = useState(product || {
@@ -104,14 +105,10 @@ const ProductModal = ({ product, onSave, onClose }) => {
               />
             </label>
           </div>
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={!!form.is_active}
-              onChange={(e) => update({ is_active: e.target.checked })}
-            />
+          <div className="flex items-center justify-between rounded border border-slate-200 px-3 py-2">
             <span className="text-sm text-slate-700">활성화</span>
-          </label>
+            <Switch checked={!!form.is_active} onChange={(v) => update({ is_active: v })} />
+          </div>
         </div>
         <div className="flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
           <button type="button" onClick={onClose} className="rounded border border-slate-200 bg-white px-4 py-1.5 text-sm">

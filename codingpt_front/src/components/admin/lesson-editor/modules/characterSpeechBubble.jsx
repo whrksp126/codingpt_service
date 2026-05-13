@@ -1,9 +1,14 @@
+import { useMemo, useRef } from 'react';
+import * as monaco from 'monaco-editor';
 import { useEditor } from '../state/EditorContext';
+import { useResultParent } from '../state/ResultParentContext';
 import { Field, SelectField, TextField, ToggleField, TTSField } from './_shared/SharedFields';
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import MonacoField from './_shared/MonacoField';
 import VisibilityBadge from './_shared/VisibilityBadge';
 import { stripHtml } from './_shared/htmlText';
+
+const TOKEN_RE = /\{\{userAnswer_(\d+)\}\}/g;
 
 const CHARACTERS = [
   { value: 'inherit', label: '레슨 기본 캐릭터 사용' },
@@ -35,6 +40,13 @@ const detectCharacterKeyFromUrl = (url) => {
 
 const FormView = ({ value, onChange }) => {
   const speeches = value.speeches || [];
+  const { parentType, parentValue } = useResultParent();
+  const isFillGapChild = parentType === 'codeFillTheGapV2';
+  const blanksLen = isFillGapChild ? (parentValue?.blanks?.length || 0) : 0;
+
+  // 말풍선별 Monaco editor instance + 마지막 포커스된 말풍선 인덱스
+  const editorRefs = useRef({});
+  const lastFocusRef = useRef(0);
 
   const updateSpeech = (idx, patch) => {
     const next = speeches.slice();
@@ -47,6 +59,46 @@ const FormView = ({ value, onChange }) => {
   const removeSpeech = (idx) => {
     onChange({ ...value, speeches: speeches.filter((_, i) => i !== idx) });
   };
+
+  const insertToken = (n) => {
+    const token = `{{userAnswer_${n}}}`;
+    const targetIdx = lastFocusRef.current;
+    const editor = editorRefs.current[targetIdx];
+    if (!editor) {
+      // 폴백: 해당 말풍선 content 끝에 append
+      const cur = speeches[targetIdx]?.content || '';
+      updateSpeech(targetIdx, { content: cur + token });
+      return;
+    }
+    const selection = editor.getSelection();
+    const range = selection && !selection.isEmpty()
+      ? selection
+      : new monaco.Range(
+          selection?.startLineNumber || 1,
+          selection?.startColumn || 1,
+          selection?.startLineNumber || 1,
+          selection?.startColumn || 1,
+        );
+    editor.executeEdits('insert-token', [
+      { range, text: token, forceMoveMarkers: true },
+    ]);
+    editor.focus();
+  };
+
+  // 모든 말풍선의 토큰 사용 현황 요약
+  const tokenSummary = useMemo(() => {
+    const used = new Set();
+    const invalid = new Set();
+    const joined = (speeches || []).map((s) => s?.content || '').join('\n');
+    TOKEN_RE.lastIndex = 0;
+    let m;
+    while ((m = TOKEN_RE.exec(joined)) !== null) {
+      const idx = parseInt(m[1], 10);
+      used.add(idx);
+      if (Number.isNaN(idx) || idx < 0 || idx >= blanksLen) invalid.add(idx);
+    }
+    return { used: [...used].sort((a, b) => a - b), invalid: [...invalid].sort((a, b) => a - b) };
+  }, [speeches, blanksLen]);
 
   const characterImage = value.character?.image;
   const characterKey = characterImage
@@ -76,6 +128,51 @@ const FormView = ({ value, onChange }) => {
         />
       </Field>
 
+      {isFillGapChild && (
+        <div className="mb-3 rounded border border-slate-200 bg-slate-50 p-2">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            빈칸 토큰 삽입
+          </div>
+          {blanksLen === 0 ? (
+            <p className="text-[11px] text-slate-400">부모 빈칸 채우기에 빈칸이 없습니다.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {Array.from({ length: blanksLen }, (_, n) => {
+                  const sample = parentValue?.blanks?.[n]?.correctAnswer;
+                  const inUse = tokenSummary.used.includes(n);
+                  return (
+                    <button
+                      type="button"
+                      key={n}
+                      onClick={() => insertToken(n)}
+                      className={
+                        'inline-flex items-center gap-1 rounded px-2 py-0.5 font-mono text-[11px] ' +
+                        (inUse
+                          ? 'bg-cyan-500 text-white ring-1 ring-cyan-600'
+                          : 'bg-cyan-50 text-cyan-700 ring-1 ring-cyan-300 hover:bg-cyan-100')
+                      }
+                      title={sample ? `정답 예: ${sample}` : ''}
+                    >
+                      <span className="font-bold">#{n}</span>
+                      <span className="opacity-80">{`{{userAnswer_${n}}}`}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                마지막 포커스된 말풍선의 커서 위치에 삽입됩니다.
+              </p>
+              {tokenSummary.invalid.length > 0 && (
+                <p className="mt-1 text-[11px] text-red-600">
+                  ⚠ 유효하지 않은 토큰: {tokenSummary.invalid.map((i) => `#${i}`).join(', ')} — 부모 빈칸 범위(0..{blanksLen - 1}) 밖입니다.
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-slate-600">
           말풍선 ({speeches.length})
@@ -97,12 +194,18 @@ const FormView = ({ value, onChange }) => {
             </button>
           </div>
           <Field label="내용 (HTML)">
-            <MonacoField
-              value={s.content}
-              onChange={(v) => updateSpeech(i, { content: v })}
-              language="html"
-              height={140}
-            />
+            <div
+              onFocusCapture={() => { lastFocusRef.current = i; }}
+              onMouseDown={() => { lastFocusRef.current = i; }}
+            >
+              <MonacoField
+                value={s.content}
+                onChange={(v) => updateSpeech(i, { content: v })}
+                language="html"
+                height={140}
+                onReady={(ed) => { editorRefs.current[i] = ed; }}
+              />
+            </div>
           </Field>
           <div className="mb-2">
             <ToggleField

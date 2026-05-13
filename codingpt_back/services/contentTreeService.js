@@ -13,26 +13,26 @@ const {
 class ContentTreeService {
   async getTree() {
     const products = await Product.findAll({
-      attributes: ['id', 'name', 'description', 'type', 'price', 'category', 'difficulty', 'is_active'],
+      attributes: ['id', 'name', 'description', 'type', 'price', 'category', 'difficulty', 'is_active', 'updated_at'],
       order: [['id', 'ASC']],
       include: [
         {
           model: Class,
           as: 'Classes',
           through: { model: ProductClassMap, attributes: [] },
-          attributes: ['id', 'name', 'description'],
+          attributes: ['id', 'name', 'description', 'order_no', 'updated_at'],
           include: [
             {
               model: Section,
               as: 'Sections',
               through: { model: ClassSectionMap, attributes: [] },
-              attributes: ['id', 'order_no', 'name'],
+              attributes: ['id', 'order_no', 'name', 'updated_at'],
               include: [
                 {
                   model: Lesson,
                   as: 'Lessons',
                   through: { model: SectionLessonMap, attributes: [] },
-                  attributes: ['id', 'order_no', 'name', 'type', 'description', 'published_at'],
+                  attributes: ['id', 'order_no', 'name', 'type', 'description', 'published_at', 'updated_at'],
                 },
               ],
             },
@@ -44,6 +44,7 @@ class ContentTreeService {
     const result = products.map((p) => p.toJSON());
 
     result.forEach((p) => {
+      (p.Classes || []).sort((a, b) => (a.order_no || 0) - (b.order_no || 0));
       (p.Classes || []).forEach((c) => {
         (c.Sections || []).sort((a, b) => (a.order_no || 0) - (b.order_no || 0));
         (c.Sections || []).forEach((s) => {
@@ -67,15 +68,15 @@ class ContentTreeService {
 
     const orphanClasses = await Class.findAll({
       where: { id: { [Op.notIn]: Array.from(classIds).length ? Array.from(classIds) : [0] } },
-      attributes: ['id', 'name', 'description'],
+      attributes: ['id', 'name', 'description', 'updated_at'],
     });
     const orphanSections = await Section.findAll({
       where: { id: { [Op.notIn]: Array.from(sectionIds).length ? Array.from(sectionIds) : [0] } },
-      attributes: ['id', 'order_no', 'name'],
+      attributes: ['id', 'order_no', 'name', 'updated_at'],
     });
     const orphanLessons = await Lesson.findAll({
       where: { id: { [Op.notIn]: Array.from(lessonIds).length ? Array.from(lessonIds) : [0] } },
-      attributes: ['id', 'order_no', 'name', 'type', 'description', 'published_at'],
+      attributes: ['id', 'order_no', 'name', 'type', 'description', 'published_at', 'updated_at'],
     });
 
     return {
@@ -175,6 +176,23 @@ class ContentTreeService {
       where: { section_id: sectionId, lesson_id: lessonId },
     });
     return { removed: count };
+  }
+
+  async reorderClassesInProduct(productId, orderedClassIds) {
+    if (!Array.isArray(orderedClassIds)) {
+      const err = new Error('orderedClassIds 배열이 필요합니다.');
+      err.statusCode = 400;
+      throw err;
+    }
+    return sequelize.transaction(async (t) => {
+      for (let i = 0; i < orderedClassIds.length; i++) {
+        await Class.update(
+          { order_no: i },
+          { where: { id: Number(orderedClassIds[i]) }, transaction: t },
+        );
+      }
+      return { product_id: Number(productId), orderedClassIds: orderedClassIds.map(Number) };
+    });
   }
 
   async reorderSectionsInClass(classId, orderedSectionIds) {

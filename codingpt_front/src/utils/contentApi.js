@@ -48,6 +48,8 @@ export const unlinkSectionLesson = (sectionId, lessonId) =>
   j('DELETE', `/api/admin/sections/${sectionId}/lessons/${lessonId}`);
 
 // Reorder
+export const reorderClassesInProduct = (productId, orderedClassIds) =>
+  j('POST', `/api/admin/products/${productId}/classes/reorder`, { orderedClassIds });
 export const reorderSectionsInClass = (classId, orderedSectionIds) =>
   j('POST', `/api/admin/classes/${classId}/sections/reorder`, { orderedSectionIds });
 export const reorderLessonsInSection = (sectionId, orderedLessonIds) =>

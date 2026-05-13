@@ -86,8 +86,8 @@ const makeFormView = (isTrueFalse) => ({ value, onChange }) => {
     <>
       <QuestionEditor q={q} onChange={updateFirst} isTrueFalse={isTrueFalse} />
       <ResultModulesField
-        value={value.result}
-        onChange={(next) => onChange({ ...value, result: next })}
+        value={value}
+        onChange={onChange}
       />
     </>
   );
