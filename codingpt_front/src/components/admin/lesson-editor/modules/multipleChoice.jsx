@@ -1,6 +1,4 @@
 import { Field, TextField, NumberField } from './_shared/SharedFields';
-import ResultModulesField from './_shared/ResultModulesField';
-import ResultModulesPreview from './_shared/ResultModulesPreview';
 
 const OX_OPTIONS = [{ label: 'O' }, { label: 'X' }];
 
@@ -85,13 +83,37 @@ const makeFormView = (isTrueFalse) => ({ value, onChange }) => {
   return (
     <>
       <QuestionEditor q={q} onChange={updateFirst} isTrueFalse={isTrueFalse} />
-      <ResultModulesField
-        value={value}
-        onChange={onChange}
-      />
+      <p className="rounded border border-dashed border-slate-200 px-3 py-2 text-[11px] text-slate-500">
+        채점 후 등장할 모듈은 슬라이드 모듈 카드에서 직접 추가한 뒤 각 카드의 "등장 시점" 셀렉트에서 이 퀴즈 모듈을 선택하세요.
+      </p>
     </>
   );
 };
+
+const SubmitDoneButton = ({ marginTop }) => (
+  <div className="flex items-center justify-center" style={{ marginTop }}>
+    <div
+      style={{
+        width: 160,
+        height: 50,
+        borderRadius: 10,
+        background: '#E02D3C',
+        color: '#FFFFFF',
+        fontWeight: 700,
+        fontSize: 16,
+        lineHeight: '24px',
+        letterSpacing: '-0.32px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        boxShadow: '0 0 5px rgba(0,0,0,0.25)',
+        userSelect: 'none',
+      }}
+    >
+      선택 완료
+    </div>
+  </div>
+);
 
 // RN MultipleChoiceOption.tsx 외형 미러: #F8F9FC 배경, 16 round, 24/20 padding, 정답 #08875D 보더.
 const MultipleChoicePreview = ({ module, onModuleChange }) => {
@@ -123,7 +145,7 @@ const MultipleChoicePreview = ({ module, onModuleChange }) => {
           })}
         </div>
       </div>
-      <ResultModulesPreview module={module} onModuleChange={onModuleChange} />
+      <SubmitDoneButton marginTop={70} />
     </div>
   );
 };
@@ -163,7 +185,7 @@ const TrueFalsePreview = ({ module, onModuleChange }) => {
           })}
         </div>
       </div>
-      <ResultModulesPreview module={module} onModuleChange={onModuleChange} />
+      <SubmitDoneButton marginTop={20} />
     </div>
   );
 };

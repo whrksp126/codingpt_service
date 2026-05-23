@@ -64,7 +64,7 @@ export default {
   category: 'action',
   label: '로티',
   description: 'Lottie 애니메이션',
-  icon: '🎬',
+  icon: '',
   defaultValue: () => ({ type: 'lottie', src: 'CodingDevelio', size: 'md' }),
   FormView,
   PreviewView,

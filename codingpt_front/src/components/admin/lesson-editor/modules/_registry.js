@@ -1,45 +1,35 @@
 import paragraph from './paragraph.jsx';
+import quote from './quote.jsx';
 import image from './image.jsx';
 import webview from './webview.jsx';
 import characterSpeechBubble from './characterSpeechBubble.jsx';
 import missionList from './missionList.jsx';
-import missionCard from './missionCard.jsx';
-import conceptCard from './conceptCard.jsx';
 import tagDescriptionList from './tagDescriptionList.jsx';
-import iconBadge from './iconBadge.jsx';
-import card from './card.jsx';
 import code from './code.jsx';
 import terminal from './terminal.jsx';
+import simpleTerminal from './simpleTerminal.jsx';
 import { multipleChoice, trueFalseChoice } from './multipleChoice.jsx';
-import clickSequenceQuiz from './clickSequenceQuiz.jsx';
 import codeFillTheGapV2 from './codeFillTheGapV2.jsx';
-import dragAndDropQuiz from './dragAndDropQuiz.jsx';
 import lottie from './lottie.jsx';
 import { actionButton, actionButtons } from './actionButton.jsx';
-import highlightParagraph from './highlightParagraph.jsx';
 
 const allDefinitions = [
   paragraph,
+  quote,
   image,
   webview,
   characterSpeechBubble,
   missionList,
-  missionCard,
-  conceptCard,
   tagDescriptionList,
-  iconBadge,
-  card,
   code,
   terminal,
+  simpleTerminal,
   multipleChoice,
   trueFalseChoice,
-  clickSequenceQuiz,
   codeFillTheGapV2,
-  dragAndDropQuiz,
   lottie,
   actionButton,
   actionButtons,
-  highlightParagraph,
 ];
 
 export const MODULE_REGISTRY = Object.fromEntries(allDefinitions.map((d) => [d.type, d]));
@@ -54,9 +44,11 @@ export const CATEGORIES = [
   { key: 'action', label: '액션' },
 ];
 
+// 모듈 추가 팔레트에 노출되는 모듈만 — hiddenFromPalette: true 인 모듈은 다른 모듈의 종속 모듈이므로 숨김
+// (e.g. codeRunResult 는 코드 모듈의 "결과 모듈 추가" 버튼으로만 생성)
 export const MODULES_BY_CATEGORY = CATEGORIES.map((cat) => ({
   ...cat,
-  modules: allDefinitions.filter((d) => d.category === cat.key),
+  modules: allDefinitions.filter((d) => d.category === cat.key && !d.hiddenFromPalette),
 }));
 
 export const getModuleDefinition = (type) => MODULE_REGISTRY[type];

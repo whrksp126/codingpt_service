@@ -7,9 +7,7 @@ import { MODULES_BY_CATEGORY, CATEGORIES, getModuleDefinition } from './modules/
 const QUIZ_TYPES = new Set([
   'multipleChoice',
   'trueFalseChoice',
-  'clickSequenceQuiz',
   'codeFillTheGapV2',
-  'dragAndDropQuiz',
 ]);
 
 const ModulePopover = ({ onClose }) => {

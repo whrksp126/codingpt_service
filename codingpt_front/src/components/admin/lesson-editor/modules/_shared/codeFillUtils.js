@@ -136,12 +136,17 @@ export const decomposeContent = (content, answers = []) => {
 
 // 캔버스/Inspector 미리보기용 다크 테마 HTML — 모바일 assembleCodeHtml 과 같은 톤.
 // 어드민 프리뷰 전용으로 input 마커에 #N 인덱스 배지를 주입한다 (DB content 자체는 변경하지 않음).
+//
+// iframe sandbox 가 allow-scripts 없이 돌아가므로 input 의 inline event handler(oninput=/onclick=) 는
+// 차단되며 콘솔 경고를 띄움. 미리보기에서는 어차피 readOnly + pointer-events:none 이라 핸들러 불필요 →
+// 합성 후 on* 속성 모두 제거.
 export const previewHtml = (plainCode, language, blanks) => {
   const composed = composeContent(plainCode, language, blanks);
-  const body = composed.replace(
+  const withWrap = composed.replace(
     /<input id="blank-(\d+)"([^>]*?)\s*\/?>/g,
     (_match, n, rest) => `<span class="blank-wrap"><span class="blank-index">#${n}</span><input id="blank-${n}"${rest} /></span>`,
   );
+  const body = withWrap.replace(/\s+on\w+="[^"]*"/g, '');
   return `<!DOCTYPE html><html><head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/prismjs/themes/prism-okaidia.css" rel="stylesheet" />

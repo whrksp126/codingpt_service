@@ -1,90 +1,75 @@
 import { useState } from 'react';
-import { backendUrl } from '../../../../../utils/common';
-import { Field, TextField } from './SharedFields';
+import { ImageSquare, X } from '@phosphor-icons/react';
+import ObjectStoreBrowserModal from './ObjectStoreBrowserModal/ObjectStoreBrowserModal';
+import { LESSON_ASSETS_ROOT } from '../../../../../utils/objectStoreApi';
 
-const getHeaders = () => {
-  const token = localStorage.getItem('auth_token') || '';
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
+const AssetPickerField = ({ label, value, onChange, accept = 'image/*' }) => {
+  const [modalOpen, setModalOpen] = useState(false);
 
-const uploadAsset = async (file) => {
-  const arrayBuf = await file.arrayBuffer();
-  const base64 = btoa(
-    new Uint8Array(arrayBuf).reduce((acc, b) => acc + String.fromCharCode(b), ''),
-  );
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const key = `lesson-assets/lessons/upload-${Date.now()}-${safeName}`;
-  const res = await fetch(`${backendUrl}/api/s3/file`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...getHeaders() },
-    body: JSON.stringify({ filePath: key, content: base64 }),
-  });
-  if (!res.ok) throw new Error('업로드 실패');
-  const data = await res.json();
-  const base = 'https://objectstore.ghmate.com/codingpt';
-  return { url: `${base}/${data.filePath || key}`, key: data.filePath || key };
-};
-
-const AssetPickerField = ({ label, value, onChange, accept = 'image/*', hint }) => {
-  const [uploading, setUploading] = useState(false);
-  const [mode, setMode] = useState(value && value.startsWith('http') ? 'url' : 'url');
-  const [error, setError] = useState(null);
-
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploading(true);
-    setError(null);
-    try {
-      const { url } = await uploadAsset(file);
-      onChange(url);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setUploading(false);
-      e.target.value = '';
-    }
+  const handleClear = (e) => {
+    e.stopPropagation();
+    onChange('');
   };
 
+  const handleOpen = () => setModalOpen(true);
+
   return (
-    <Field label={label} hint={hint}>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setMode('url')}
-          className={'rounded px-2 py-0.5 text-xs ' + (mode === 'url' ? 'bg-cyan-500 text-white' : 'bg-slate-100 text-slate-600')}
-        >
-          URL
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('upload')}
-          className={'rounded px-2 py-0.5 text-xs ' + (mode === 'upload' ? 'bg-cyan-500 text-white' : 'bg-slate-100 text-slate-600')}
-        >
-          업로드
-        </button>
-      </div>
-      {mode === 'url' ? (
-        <div className="mt-1">
-          <TextField value={value} onChange={onChange} placeholder="https://..." />
-        </div>
-      ) : (
-        <div className="mt-1">
-          <input
-            type="file"
-            accept={accept}
-            onChange={handleFile}
-            disabled={uploading}
-            className="block w-full text-xs text-slate-500 file:mr-2 file:rounded file:border-0 file:bg-cyan-50 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-cyan-700 hover:file:bg-cyan-100"
-          />
-          {uploading && <span className="ml-2 text-xs text-slate-500">업로드 중…</span>}
-          {error && <span className="ml-2 text-xs text-red-500">{error}</span>}
-        </div>
+    <div className="mb-3">
+      <div className="mb-1 text-xs font-medium text-slate-600">{label}</div>
+      <button
+        type="button"
+        onClick={handleOpen}
+        className={
+          'group relative flex min-h-[140px] w-full cursor-pointer items-center justify-center ' +
+          'rounded-lg border-2 border-dashed border-slate-200 bg-slate-50 transition ' +
+          'hover:border-cyan-400 hover:bg-slate-100'
+        }
+        title="ObjectStore에서 이미지 선택"
+      >
+        {value ? (
+          <>
+            <img
+              src={value}
+              alt=""
+              className="max-h-32 max-w-full rounded object-contain"
+              onError={(e) => {
+                e.target.style.opacity = '0.3';
+              }}
+            />
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={handleClear}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') handleClear(e);
+              }}
+              className="absolute right-2 top-2 rounded-full bg-white/90 p-1 text-slate-500 shadow-sm opacity-0 transition group-hover:opacity-100 hover:text-red-500"
+              title="제거"
+            >
+              <X size={14} />
+            </span>
+          </>
+        ) : (
+          <div className="pointer-events-none flex flex-col items-center gap-1 text-slate-400">
+            <ImageSquare size={28} />
+            <span className="text-xs">클릭하여 ObjectStore에서 선택</span>
+          </div>
+        )}
+      </button>
+
+      {modalOpen && (
+        <ObjectStoreBrowserModal
+          accept={accept}
+          initialPath={`${LESSON_ASSETS_ROOT}images/`}
+          currentValue={value}
+          onSelect={(url) => {
+            onChange(url);
+            setModalOpen(false);
+          }}
+          onClose={() => setModalOpen(false)}
+        />
       )}
-      {value && (
-        <div className="mt-1 truncate text-[11px] text-slate-400">{value}</div>
-      )}
-    </Field>
+    </div>
   );
 };
 

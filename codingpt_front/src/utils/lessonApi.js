@@ -114,3 +114,85 @@ export const upsertCodeFillContent = async (slideId, content) => {
   });
   return handle(res);
 };
+
+// === 코드 실행 결과 사전 캐싱 ===
+
+// code/terminal/codeRunResult 모듈 1개 캐싱.
+// 응답: { contents: <slide.contents>, module: <patched module> }
+export const precomputeModuleResult = async (lessonId, slideId, moduleId, { tabIndex } = {}) => {
+  const res = await fetch(
+    `${backendUrl}/api/lesson/${lessonId}/slides/${slideId}/modules/${encodeURIComponent(moduleId)}/precompute`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ tabIndex }),
+    },
+  );
+  return handle(res);
+};
+
+// codeFillTheGapV2 옵션 순열 SSE 실행. onEvent 로 진행률/완료 이벤트 수신.
+// 이벤트 타입: { type:'start', total, mode }, { type:'progress', done, total },
+//             { type:'done', cachedCount, contents, module }, { type:'error', message }
+// resolve 값: 마지막 'done' 이벤트 payload (또는 'error' 시 reject).
+export const precomputeModulePermutations = async (lessonId, slideId, moduleId, onEvent) => {
+  const res = await fetch(
+    `${backendUrl}/api/lesson/${lessonId}/slides/${slideId}/modules/${encodeURIComponent(moduleId)}/precompute-permutations`,
+    {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({}),
+    },
+  );
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    const err = new Error(data.message || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let lastDone = null;
+
+  const processChunk = (chunk) => {
+    const lines = chunk.split('\n');
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const json = line.slice(5).trim();
+      if (!json) continue;
+      try {
+        const evt = JSON.parse(json);
+        if (typeof onEvent === 'function') onEvent(evt);
+        if (evt.type === 'done') lastDone = evt;
+        if (evt.type === 'error') throw new Error(evt.message || 'precompute error');
+      } catch (e) {
+        if (e instanceof Error && e.message !== 'precompute error') {
+          // JSON parse 실패는 무시 (부분 청크일 수 있음)
+        } else {
+          throw e;
+        }
+      }
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      // 마지막 청크가 \n\n 없이 끝나는 경우 (proxy/압축 등) 남은 buffer 도 단일 이벤트로 처리.
+      buffer += decoder.decode();
+      if (buffer.trim()) processChunk(buffer);
+      buffer = '';
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const chunk = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      processChunk(chunk);
+    }
+  }
+  if (!lastDone) throw new Error('precompute 완료 응답을 받지 못했습니다.');
+  return lastDone;
+};

@@ -112,7 +112,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 추가 (코드 실행 관련 경로인 경우)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/')) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         // class-id- 또는 execute/ 로 시작하는 경우 codingpt/execute/ prefix 추가
         if (normalizedPath.startsWith('class-id-') || normalizedPath.startsWith('execute/')) {
           normalizedPath = `codingpt/execute/${normalizedPath}`;
@@ -366,7 +366,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/')) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -512,7 +512,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/')) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -627,7 +627,7 @@ class S3Service {
       let normalizedPath = folderPath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/')) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -715,7 +715,7 @@ class S3Service {
       let normalizedPath = filePath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/')) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -873,7 +873,7 @@ class S3Service {
       // 경로 정규화
       let normalizedOldPath = oldPath.replace(/^\/+|\/+$/g, '');
       // TTS 경로(codingpt/tts/)는 제외
-      if (normalizedOldPath && !normalizedOldPath.startsWith('codingpt/execute/') && !normalizedOldPath.startsWith('codingpt/tts/')) {
+      if (normalizedOldPath && !normalizedOldPath.startsWith('codingpt/execute/') && !normalizedOldPath.startsWith('codingpt/tts/') && !(normalizedOldPath === 'lesson-assets' || normalizedOldPath.startsWith('lesson-assets/'))) {
         normalizedOldPath = `codingpt/execute/${normalizedOldPath}`;
       }
 
@@ -1027,10 +1027,10 @@ class S3Service {
       let normalizedTargetPath = targetPath.replace(/^\/+|\/+$/g, '');
 
       // TTS 경로(codingpt/tts/)는 제외
-      if (normalizedSourcePath && !normalizedSourcePath.startsWith('codingpt/execute/') && !normalizedSourcePath.startsWith('codingpt/tts/')) {
+      if (normalizedSourcePath && !normalizedSourcePath.startsWith('codingpt/execute/') && !normalizedSourcePath.startsWith('codingpt/tts/') && !(normalizedSourcePath === 'lesson-assets' || normalizedSourcePath.startsWith('lesson-assets/'))) {
         normalizedSourcePath = `codingpt/execute/${normalizedSourcePath}`;
       }
-      if (normalizedTargetPath && !normalizedTargetPath.startsWith('codingpt/execute/') && !normalizedTargetPath.startsWith('codingpt/tts/')) {
+      if (normalizedTargetPath && !normalizedTargetPath.startsWith('codingpt/execute/') && !normalizedTargetPath.startsWith('codingpt/tts/') && !(normalizedTargetPath === 'lesson-assets' || normalizedTargetPath.startsWith('lesson-assets/'))) {
         normalizedTargetPath = `codingpt/execute/${normalizedTargetPath}`;
       }
 
@@ -1183,6 +1183,97 @@ class S3Service {
         message: error.message || '이동에 실패했습니다.',
         error: error.name || 'UnknownError'
       };
+    }
+  }
+
+  /**
+   * 파일/폴더 복사 - 원본 보존
+   * @param {string} sourcePath - 원본 경로
+   * @param {string} targetPath - 대상 경로 (폴더로 끝나면 원본 이름 사용)
+   * @returns {Promise<Object>}
+   */
+  async copy(sourcePath, targetPath) {
+    try {
+      if (!this.validatePath(sourcePath) || !this.validatePath(targetPath)) {
+        return { success: false, message: '잘못된 경로입니다.', error: 'InvalidPath' };
+      }
+      if (!sourcePath || !targetPath) {
+        return { success: false, message: '원본/대상 경로가 필요합니다.', error: 'MissingPath' };
+      }
+      let normalizedSourcePath = sourcePath.replace(/^\/+|\/+$/g, '');
+      let normalizedTargetPath = targetPath.replace(/^\/+|\/+$/g, '');
+      const applyPrefix = (p) =>
+        p && !p.startsWith('codingpt/execute/') && !p.startsWith('codingpt/tts/') && !(p === 'lesson-assets' || p.startsWith('lesson-assets/'))
+          ? `codingpt/execute/${p}` : p;
+      normalizedSourcePath = applyPrefix(normalizedSourcePath);
+      normalizedTargetPath = applyPrefix(normalizedTargetPath);
+      const isFolder = sourcePath.trim().endsWith('/') || normalizedSourcePath.endsWith('/');
+
+      if (isFolder) {
+        if (!normalizedSourcePath.endsWith('/')) normalizedSourcePath += '/';
+        if (!normalizedTargetPath.endsWith('/')) normalizedTargetPath += '/';
+        const allObjects = [];
+        let continuationToken;
+        let hasMore = true;
+        while (hasMore) {
+          const listCommand = new ListObjectsV2Command({
+            Bucket: this.bucketName, Prefix: normalizedSourcePath, MaxKeys: 1000,
+          });
+          if (continuationToken) listCommand.input.ContinuationToken = continuationToken;
+          const listData = await this.s3Client.send(listCommand);
+          if (listData.Contents) allObjects.push(...listData.Contents);
+          hasMore = listData.IsTruncated === true;
+          if (hasMore) continuationToken = listData.NextContinuationToken;
+        }
+        if (allObjects.length === 0) {
+          return { success: false, message: '원본 폴더를 찾을 수 없거나 비어있습니다.', error: 'NoSuchKey' };
+        }
+        const sourcePathParts = normalizedSourcePath.split('/').filter((p) => p);
+        const folderName = sourcePathParts[sourcePathParts.length - 1];
+        const finalTargetPath = normalizedTargetPath + folderName + '/';
+        const copyPromises = allObjects.map((object) => {
+          const oldKey = object.Key;
+          const relativePath = oldKey.replace(normalizedSourcePath, '');
+          const newKey = finalTargetPath + relativePath;
+          const encodedKey = oldKey.split('/').map((p) => encodeURIComponent(p)).join('/');
+          return this.s3Client.send(new CopyObjectCommand({
+            Bucket: this.bucketName,
+            CopySource: `${this.bucketName}/${encodedKey}`,
+            Key: newKey,
+          }));
+        });
+        await Promise.all(copyPromises);
+        return {
+          success: true, message: '폴더가 복사되었습니다.',
+          sourcePath: normalizedSourcePath, targetPath: finalTargetPath, copiedFiles: allObjects.length,
+        };
+      } else {
+        if (targetPath.trim().endsWith('/') || normalizedTargetPath.endsWith('/')) {
+          const sourceFileName = normalizedSourcePath.split('/').pop();
+          normalizedTargetPath = normalizedTargetPath.replace(/\/$/, '') + '/' + sourceFileName;
+        }
+        try {
+          await this.s3Client.send(new HeadObjectCommand({ Bucket: this.bucketName, Key: normalizedSourcePath }));
+        } catch (headError) {
+          if (headError.name === 'NotFound' || headError.$metadata?.httpStatusCode === 404) {
+            return { success: false, message: '원본 파일을 찾을 수 없습니다.', error: 'NoSuchKey' };
+          }
+          throw headError;
+        }
+        const encodedSourcePath = normalizedSourcePath.split('/').map((p) => encodeURIComponent(p)).join('/');
+        await this.s3Client.send(new CopyObjectCommand({
+          Bucket: this.bucketName,
+          CopySource: `${this.bucketName}/${encodedSourcePath}`,
+          Key: normalizedTargetPath,
+        }));
+        return {
+          success: true, message: '파일이 복사되었습니다.',
+          sourcePath: normalizedSourcePath, targetPath: normalizedTargetPath,
+        };
+      }
+    } catch (error) {
+      console.error('[S3Service] 복사 오류:', error);
+      return { success: false, message: error.message || '복사에 실패했습니다.', error: error.name || 'UnknownError' };
     }
   }
 

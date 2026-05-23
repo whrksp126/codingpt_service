@@ -2,7 +2,8 @@ import { useMemo, useRef } from 'react';
 import * as monaco from 'monaco-editor';
 import { useEditor } from '../state/EditorContext';
 import { useResultParent } from '../state/ResultParentContext';
-import { Field, SelectField, TextField, ToggleField, TTSField } from './_shared/SharedFields';
+import { Field, SelectField, ToggleField, TTSField } from './_shared/SharedFields';
+import AssetPickerField from './_shared/AssetPickerField';
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import MonacoField from './_shared/MonacoField';
 import VisibilityBadge from './_shared/VisibilityBadge';
@@ -211,10 +212,15 @@ const FormView = ({ value, onChange }) => {
             <ToggleField
               value={s.image !== undefined}
               onChange={(on) => updateSpeech(i, { image: on ? (s.image ?? '') : undefined })}
-              label="이미지 URL"
+              label="이미지"
             />
             {s.image !== undefined && (
-              <TextField value={s.image} onChange={(v) => updateSpeech(i, { image: v })} placeholder="https://..." />
+              <AssetPickerField
+                label=""
+                value={s.image}
+                onChange={(v) => updateSpeech(i, { image: v })}
+                accept="image/*"
+              />
             )}
           </div>
           <TTSField
@@ -360,7 +366,7 @@ export default {
   hasItemVisibility: true,
   label: '캐릭터 말풍선',
   description: '캐릭터 + 여러 말풍선',
-  icon: '💬',
+  icon: '',
   defaultValue: () => ({
     type: 'characterSpeechBubble',
     position: 'right',

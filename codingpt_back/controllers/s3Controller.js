@@ -320,6 +320,24 @@ const rename = async (req, res) => {
  * 파일/폴더 이동 (통합 API)
  * POST /api/s3/move
  */
+const copy = async (req, res) => {
+  try {
+    const { sourcePath, targetPath } = req.body;
+    if (!sourcePath || !targetPath) {
+      return res.status(400).json({ success: false, message: '원본/대상 경로가 필요합니다.', error: 'MissingPath' });
+    }
+    const result = await s3Service.copy(sourcePath, targetPath);
+    if (result.success) return res.status(200).json(result);
+    const statusCode = result.error === 'NoSuchKey' ? 404 :
+      result.error === 'AccessDenied' ? 403 :
+      result.error === 'InvalidPath' || result.error === 'MissingPath' ? 400 : 500;
+    return res.status(statusCode).json(result);
+  } catch (error) {
+    console.error('[S3Controller] 복사 오류:', error);
+    return res.status(500).json({ success: false, message: '복사 중 오류가 발생했습니다.', error: 'InternalServerError' });
+  }
+};
+
 const move = async (req, res) => {
   try {
     const { sourcePath, targetPath } = req.body;
@@ -360,6 +378,7 @@ module.exports = {
   rename,
   deleteFile,
   move,
+  copy,
   invalidateCache
 };
 

@@ -157,7 +157,7 @@ export default {
   category: 'media',
   label: '웹뷰',
   description: 'HTML 인라인 또는 URL',
-  icon: '🌐',
+  icon: '',
   defaultValue: () => ({ type: 'webview', tabs: [{ type: 'url', content: '' }] }),
   FormView,
   PreviewView,

@@ -2,7 +2,143 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Field, SelectField, TextField, NumberField } from './_shared/SharedFields';
 import MonacoField from './_shared/MonacoField';
 import { useResultParent } from '../state/ResultParentContext';
+import { useEditor, selectSelectedSlide } from '../state/EditorContext';
+import { usePrecomputeModule, usePrecomputePermutations } from '../state/usePrecompute';
+import { computeCodeHash } from '../../../../utils/codeHash';
 import * as monaco from 'monaco-editor';
+
+// 언어 약어 → executor 가 이해하는 언어로 정규화 (백엔드 캐싱 지원: javascript/python)
+const langToExecutable = (lang) => {
+  const l = String(lang || '').toLowerCase();
+  if (l === 'js') return 'javascript';
+  if (l === 'py') return 'python';
+  return l;
+};
+const isCacheableLang = (lang) => ['javascript', 'python'].includes(langToExecutable(lang));
+
+// 코드에 빈칸 토큰이 있으면 캐싱 불가 (학생이 채워야 결정됨 — 부모 codeFillTheGapV2.cachedResults 가 담당).
+const hasTokens = (code) => /\{\{userAnswer_\d+\}\}/.test(code || '');
+
+// 옵션 N 개 + 빈칸 M 개 → 순열 P(N, M). 표시용 카운트 (옵션 ≤ 6 일 때만).
+const countPermutations = (n, m) => {
+  if (n > 6 || m === 0 || m > n) return 0;
+  let p = 1;
+  for (let i = 0; i < m; i++) p *= (n - i);
+  return p;
+};
+
+// 부모가 codeFillTheGapV2 (결과 영역 안의 terminal) 일 때 — 옵션 순열 캐싱 패널.
+// 백엔드가 부모 자동 탐색 + 토큰 치환 + 실행 → terminal.cachedResults 누적.
+const PermutationPrecomputePanel = ({ moduleId, tabIndex, language, optionsLen, blanksLen, cachedResults }) => {
+  const { state } = useEditor();
+  const slide = selectSelectedSlide(state);
+  const lessonId = state.lesson?.id;
+  const { run, running, progress, error } = usePrecomputePermutations(lessonId, slide?.id, moduleId);
+
+  const cacheable = isCacheableLang(language);
+  const expected = countPermutations(optionsLen, blanksLen);
+  const correctOnly = optionsLen > 6 || expected === 0;
+  const cachedCount = Object.keys(cachedResults || {}).length;
+  const disabled = !cacheable || blanksLen === 0 || !lessonId || !slide?.id || running;
+  const disabledReason = !cacheable
+    ? `${language || '(언어 없음)'} 은 실행 캐싱 미지원 — js/python 만 가능`
+    : blanksLen === 0
+      ? '부모 빈칸이 없습니다'
+      : '';
+
+  return (
+    <div className="mb-3 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px]">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-600">
+          옵션 조합 캐싱{Number.isInteger(tabIndex) ? ` · 탭 ${tabIndex}` : ''}
+        </span>
+        <button
+          type="button"
+          onClick={() => run({ tabIndex })}
+          disabled={disabled}
+          className={
+            'rounded px-2 py-1 text-[11px] font-semibold ' +
+            (disabled ? 'cursor-not-allowed bg-slate-200 text-slate-400' : 'bg-cyan-500 text-white hover:bg-cyan-600')
+          }
+          title={disabledReason || (correctOnly ? '정답 조합만 실행해 저장 (옵션 > 6)' : `모든 순열 ${expected}개 실행해 저장`)}
+        >
+          {running
+            ? (progress?.total ? `실행 중 ${progress.done ?? 0}/${progress.total}` : '실행 중...')
+            : (correctOnly ? '정답 조합만 실행 저장' : '모든 옵션 조합 실행 저장')}
+        </button>
+      </div>
+      <div className="text-slate-500">
+        캐시된 조합: {cachedCount}{correctOnly ? ' (정답만)' : ` / ${expected}`}
+      </div>
+      {disabledReason && <div className="mt-1 text-slate-400">{disabledReason}</div>}
+      {error && <div className="mt-1 rounded bg-red-50 px-1.5 py-1 text-red-700">실행 실패: {error}</div>}
+    </div>
+  );
+};
+
+// 단일/탭별 캐싱 패널 — 모듈 ID + 선택적 tabIndex 받음.
+const PrecomputePanel = ({ moduleId, tabIndex, code, language, cachedResult, disabledReason }) => {
+  const { state } = useEditor();
+  const slide = selectSelectedSlide(state);
+  const lessonId = state.lesson?.id;
+  const { run, running, error } = usePrecomputeModule(lessonId, slide?.id, moduleId);
+
+  const [currentHash, setCurrentHash] = useState(null);
+  useEffect(() => {
+    if (disabledReason) { setCurrentHash(null); return; }
+    let cancelled = false;
+    computeCodeHash(langToExecutable(language), code || '').then((h) => {
+      if (!cancelled) setCurrentHash(h);
+    });
+    return () => { cancelled = true; };
+  }, [language, code, disabledReason]);
+
+  const hashMismatch = cachedResult && currentHash && cachedResult.codeHash !== currentHash;
+  const blocked = !!disabledReason || !lessonId || !slide?.id;
+
+  return (
+    <div className="mb-3 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-[11px]">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-600">실행 결과 캐시{Number.isInteger(tabIndex) ? ` · 탭 ${tabIndex}` : ''}</span>
+        <button
+          type="button"
+          onClick={() => run({ tabIndex })}
+          disabled={running || blocked}
+          className={
+            'rounded px-2 py-1 text-[11px] font-semibold ' +
+            (running || blocked
+              ? 'cursor-not-allowed bg-slate-200 text-slate-400'
+              : 'bg-cyan-500 text-white hover:bg-cyan-600')
+          }
+          title={disabledReason || (cachedResult ? '재실행해서 캐시 갱신' : '결과를 미리 실행해서 저장')}
+        >
+          {running ? '실행 중...' : (cachedResult ? '재실행' : '결과 저장')}
+        </button>
+      </div>
+      {cachedResult && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-slate-500">
+          <span>exit {cachedResult.exitCode}</span>
+          <span>· {Math.round(cachedResult.durationMs)}ms</span>
+          <span className="text-slate-400">· {new Date(cachedResult.executedAt).toLocaleString()}</span>
+        </div>
+      )}
+      {cachedResult?.stdout && (
+        <pre className="mt-1 max-h-16 overflow-auto rounded bg-slate-900 px-1.5 py-1 text-[10px] text-slate-100">{cachedResult.stdout.slice(0, 400)}</pre>
+      )}
+      {hashMismatch && (
+        <div className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-amber-800">
+          ⚠️ 캐시가 현재 코드와 다릅니다 — 재실행 필요
+        </div>
+      )}
+      {disabledReason && (
+        <div className="mt-1 text-slate-400">{disabledReason}</div>
+      )}
+      {error && (
+        <div className="mt-1 rounded bg-red-50 px-1.5 py-1 text-red-700">실행 실패: {error}</div>
+      )}
+    </div>
+  );
+};
 
 // {{userAnswer_N}} 토큰 패턴 — 채점 후 터미널 input 코드 안에서 빈칸 입력값으로 치환되는 자리표시자.
 // 런타임 치환은 LessonLearningScreenV5.tsx 의 동일 패턴이 담당. 어드민에서는
@@ -242,6 +378,32 @@ const SingleScriptForm = ({ value, onChange }) => {
           editorRef={editorRef}
         />
       </Field>
+
+      {(value.executionMode || 'cached') !== 'live' && (
+        isFillGapChild ? (
+          <PermutationPrecomputePanel
+            moduleId={value.id}
+            language={language}
+            optionsLen={parentValue?.interactionOptions?.length || 0}
+            blanksLen={blanksLen}
+            cachedResults={value.cachedResults}
+          />
+        ) : (
+          <PrecomputePanel
+            moduleId={value.id}
+            code={code}
+            language={language}
+            cachedResult={value.cachedResult}
+            disabledReason={
+              !isCacheableLang(language)
+                ? 'javascript/python 만 실행 캐싱 지원'
+                : hasTokens(code)
+                  ? '빈칸 토큰이 포함되어 캐싱 불가'
+                  : ''
+            }
+          />
+        )
+      )}
     </>
   );
 };
@@ -336,6 +498,34 @@ const MultiFilesForm = ({ value, onChange }) => {
               editorRef={editorRef}
             />
           </Field>
+
+          {(value.executionMode || 'cached') !== 'live' && (
+            isFillGapChild ? (
+              <PermutationPrecomputePanel
+                moduleId={value.id}
+                tabIndex={safeActive}
+                language={activeFile.language || 'js'}
+                optionsLen={parentValue?.interactionOptions?.length || 0}
+                blanksLen={blanksLen}
+                cachedResults={value.cachedResults}
+              />
+            ) : (
+              <PrecomputePanel
+                moduleId={value.id}
+                tabIndex={safeActive}
+                code={activeCode}
+                language={activeFile.language || 'js'}
+                cachedResult={activeFile.cachedResult}
+                disabledReason={
+                  !isCacheableLang(activeFile.language || 'js')
+                    ? 'javascript/python 만 실행 캐싱 지원'
+                    : hasTokens(activeCode)
+                      ? '빈칸 토큰이 포함되어 캐싱 불가'
+                      : ''
+                }
+              />
+            )
+          )}
 
           <button
             type="button"
@@ -586,7 +776,7 @@ export default {
   category: 'code',
   label: '터미널',
   description: 'xterm.js 터미널 (단일/다중 탭). 단일 탭 모드는 백엔드 executor 연동.',
-  icon: '⌨️',
+  icon: '',
   defaultValue: () => ({
     type: 'terminal',
     height: 200,

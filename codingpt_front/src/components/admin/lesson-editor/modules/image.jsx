@@ -113,7 +113,7 @@ export default {
   category: 'media',
   label: '이미지',
   description: '파일 업로드 또는 URL',
-  icon: '🖼️',
+  icon: '',
   defaultValue: () => ({ type: 'image', src: '', size: 'md' }),
   FormView,
   PreviewView,

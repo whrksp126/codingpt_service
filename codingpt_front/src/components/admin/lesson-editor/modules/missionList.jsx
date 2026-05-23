@@ -59,11 +59,11 @@ const PreviewView = ({ module, onModuleChange }) => {
           background: '#F8F9FC',
           borderRadius: 16,
           padding: 24,
-          boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+          boxShadow: '0 0 5px rgba(0,0,0,0.25)',
         }}
       >
         {module.title && (
-          <div style={{ textAlign: 'center', marginBottom: 24, fontSize: 22, fontWeight: 700, color: '#333' }}>
+          <div style={{ textAlign: 'center', marginBottom: 24, fontSize: 22, fontWeight: 700, lineHeight: '33px', letterSpacing: '-0.44px', color: '#333' }}>
             {module.title}
           </div>
         )}
@@ -93,7 +93,7 @@ const PreviewView = ({ module, onModuleChange }) => {
                   >
                     {completed ? '✓' : ''}
                   </div>
-                  <span style={{ fontSize: 18, fontWeight: 700, color: 'rgba(51,51,51,0.8)' }}>
+                  <span style={{ fontSize: 18, fontWeight: 700, lineHeight: '24px', color: 'rgba(51,51,51,0.8)' }}>
                     {it.text}
                   </span>
                 </div>
@@ -123,7 +123,7 @@ export default {
   hasItemVisibility: true,
   label: '미션 목록',
   description: '체크리스트형 항목',
-  icon: '📋',
+  icon: '',
   defaultValue: () => ({ type: 'missionList', title: 'Mission', items: [{ id: 0, text: '' }] }),
   FormView,
   PreviewView,

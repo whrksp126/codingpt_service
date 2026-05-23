@@ -59,8 +59,8 @@ const PreviewView = ({ module }) => {
             <span
               style={{
                 alignSelf: 'flex-start',
-                background: it.tagBackgroundColor || '#F0F5FF',
-                color: it.tagColor || '#2F6FED',
+                background: '#F0F5FF',
+                color: '#2F6FED',
                 borderRadius: 6,
                 padding: '4px 8px',
                 fontSize: 14,
@@ -91,7 +91,7 @@ export default {
   category: 'structure',
   label: '태그 설명 목록',
   description: '태그/제목/설명 3단 구조',
-  icon: '🏷️',
+  icon: '',
   defaultValue: () => ({ type: 'tagDescriptionList', items: [] }),
   FormView,
   PreviewView,

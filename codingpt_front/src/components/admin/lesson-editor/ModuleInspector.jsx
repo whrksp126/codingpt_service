@@ -1,5 +1,6 @@
 import { useEditor, selectSelectedModule } from './state/EditorContext';
 import { getModuleDefinition } from './modules/_registry';
+import ExecutionModeToggle from './modules/_shared/ExecutionModeToggle';
 
 const ModuleInspector = () => {
   const { state, dispatch } = useEditor();
@@ -50,6 +51,7 @@ const ModuleInspector = () => {
           삭제
         </button>
       </div>
+      <ExecutionModeToggle module={module} onChange={handleChange} />
       <FormView value={module} onChange={handleChange} />
     </div>
   );

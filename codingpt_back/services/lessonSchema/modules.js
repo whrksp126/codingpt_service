@@ -4,12 +4,24 @@ const {
   ttsSchema,
   iconSchema,
   characterRefSchema,
+  cachedResultSchema,
+  executionModeSchema,
 } = require('./common');
+
+// 모듈 등장 트리거 — 퀴즈 채점 후 또는 actionButton 클릭 시 등장.
+// sourceModuleId 는 같은 슬라이드 내 퀴즈 모듈(afterGrading) 또는 actionButton 모듈(afterButtonClick) id.
+// branch 는 afterGrading 일 때만 의미 — 'all' 은 정/오답 무관, 미지정 시 'all' 로 간주.
+const triggerSchema = z.object({
+  type: z.enum(['afterGrading', 'afterButtonClick']),
+  sourceModuleId: z.union([z.string(), z.number()]),
+  branch: z.enum(['all', 'correct', 'wrong']).optional(),
+}).passthrough();
 
 const baseModuleFields = {
   id: z.union([z.string(), z.number()]),
   visibility: visibilitySchema.optional(),
-  condition: z.enum(['always', 'correct', 'wrong']).optional(),
+  // 등장 트리거 — afterGrading/afterButtonClick. 이전의 condition 필드는 trigger.branch 로 흡수.
+  trigger: triggerSchema.optional(),
 };
 
 const paragraphModuleSchema = z.object({
@@ -19,6 +31,12 @@ const paragraphModuleSchema = z.object({
   icon: iconSchema.optional(),
   iconHidden: z.boolean().optional(),
   tts: ttsSchema.optional(),
+}).passthrough();
+
+const quoteModuleSchema = z.object({
+  ...baseModuleFields,
+  type: z.literal('quote'),
+  content: z.string(),
 }).passthrough();
 
 const imageModuleSchema = z.object({
@@ -121,61 +139,6 @@ const tagDescriptionListModuleSchema = z.object({
   items: z.array(tagDescriptionItemSchema),
 }).passthrough();
 
-const cardModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('card'),
-  variant: z.string().optional(),
-  header: z.record(z.any()).optional(),
-  content: z.record(z.any()).optional(),
-}).passthrough();
-
-const missionCardItemSchema = z.object({
-  id: z.union([z.string(), z.number()]).optional(),
-  icon: z.string().optional(),
-  text: z.string(),
-  badge: z.string().optional(),
-  completed: z.boolean().optional(),
-  checked: z.boolean().optional(),
-});
-
-const missionCardModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('missionCard'),
-  title: z.string().optional(),
-  rightText: z.string().optional(),
-  missions: z.array(missionCardItemSchema).optional(),
-  items: z.array(missionCardItemSchema).optional(),
-  sparkle: z.boolean().optional(),
-  completed: z.boolean().optional(),
-}).passthrough();
-
-const conceptCardItemSchema = z.object({
-  code: z.string().optional(),
-  codeStyle: z.object({
-    backgroundColor: z.string().optional(),
-    textColor: z.string().optional(),
-  }).optional(),
-  description: z.string().optional(),
-  chip: z.string().optional(),
-  title: z.string().optional(),
-}).passthrough();
-
-const conceptCardModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('conceptCard'),
-  items: z.array(conceptCardItemSchema),
-}).passthrough();
-
-const iconBadgeModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('iconBadge'),
-  icon: z.string(),
-  iconSize: z.number().optional(),
-  iconColor: z.string().optional(),
-  backgroundColor: z.string().optional(),
-  size: z.number().optional(),
-}).passthrough();
-
 const lottieModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('lottie'),
@@ -183,15 +146,34 @@ const lottieModuleSchema = z.object({
   size: z.enum(['sm', 'md', 'lg', 'xl', 'xxl']).optional(),
 }).passthrough();
 
-const terminalEntrySchema = z.object({
-  type: z.enum(['input', 'output', 'error']),
-  content: z.string(),
-});
-
+// 어드민 에디터는 단일 탭(script[])/다중 탭(files[])/언어/높이/showInput 등
+// 데이터 구조가 점진적으로 확장되므로 type 만 강제하고 나머지는 passthrough.
+//
+// 캐싱:
+//   - cachedResult (또는 files[].cachedResult) — 일반 터미널 모듈의 1회성 결과
+//   - cachedResults — codeFillTheGapV2 의 결과 영역(allResult/correctResult/incorrectResult.modules) 안에 있는
+//                     터미널의 옵션 순열별 결과. answerKey → cachedResult dict
 const terminalModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('terminal'),
-  script: z.array(terminalEntrySchema),
+  cachedResult: cachedResultSchema.optional(),
+  cachedResults: z.record(cachedResultSchema).optional(),
+  executionMode: executionModeSchema.optional(),
+}).passthrough();
+
+// 코드 또는 빈칸채우기 모듈의 실행 결과를 보여주는 통합 결과 모듈.
+// linkedModuleId 가 'code'   → cachedResult (단일)
+// linkedModuleId 가 'codeFillTheGapV2' → cachedResults dict (옵션 순열별, key=answerKey)
+// initialCommand 는 출력 첫 줄 prompt 텍스트 (예: 'python index.py'), {{userAnswer_N}} 토큰 치환 지원.
+const simpleTerminalModuleSchema = z.object({
+  ...baseModuleFields,
+  type: z.literal('simpleTerminal'),
+  linkedModuleId: z.union([z.string(), z.number()]).nullable().optional(),
+  initialCommand: z.string().optional(),
+  height: z.number().optional(),
+  cachedResult: cachedResultSchema.optional(),
+  cachedResults: z.record(cachedResultSchema).optional(),
+  executionMode: executionModeSchema.optional(),
 }).passthrough();
 
 const multipleChoiceQuestionSchema = z.object({
@@ -216,122 +198,95 @@ const trueFalseChoiceModuleSchema = z.object({
   questions: z.array(multipleChoiceQuestionSchema),
 }).passthrough();
 
+// codeFillTheGapV2 자체엔 캐싱 데이터가 없음 — 옵션 순열 결과는 결과 영역(allResult/correctResult/incorrectResult)에
+// 들어간 terminal 모듈의 cachedResults 에 저장됨.
 const codeFillTheGapV2ModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('codeFillTheGapV2'),
 }).passthrough();
 
-const dragAndDropQuizModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('dragAndDropQuiz'),
+// 버튼 액션 — known type 은 executeCode / navigate_next_lesson / end_lesson.
+// 모르는 type 도 passthrough 로 통과시켜 하위 호환 유지.
+const actionSchema = z.object({
+  type: z.string(),
 }).passthrough();
 
-const clickSequenceQuizModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('clickSequenceQuiz'),
-  question: z.string().optional(),
-  slots: z.number().int().positive(),
-  options: z.array(z.object({
-    id: z.string(),
-    label: z.string(),
-  })),
-  answer: z.array(z.string()),
-  feedback: z.object({
-    correct: z.object({ message: z.string() }).optional(),
-    incorrect: z.object({ message: z.string() }).optional(),
-  }).optional(),
-  result: z.record(z.any()).optional(),
+const actionButtonItemSchema = z.object({
+  text: z.string().optional(),
+  role: z.enum(['gate', 'default']).optional(),
+  icon: z.string().optional(),
+  style: z.record(z.any()).optional(),
+  action: actionSchema.optional(),
 }).passthrough();
 
 const actionButtonModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('actionButton'),
-  action: z.record(z.any()).optional(),
+  action: actionSchema.optional(),
 }).passthrough();
 
 const actionButtonsModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('actionButtons'),
-  buttons: z.array(z.record(z.any())),
-}).passthrough();
-
-const highlightParagraphModuleSchema = z.object({
-  ...baseModuleFields,
-  type: z.literal('highlightParagraph'),
-  content: z.string(),
-  tts: ttsSchema.optional(),
+  buttons: z.array(actionButtonItemSchema),
 }).passthrough();
 
 const moduleSchema = z.discriminatedUnion('type', [
   paragraphModuleSchema,
+  quoteModuleSchema,
   imageModuleSchema,
   webviewModuleSchema,
   codeModuleSchema,
   characterSpeechBubbleModuleSchema,
   missionListModuleSchema,
   tagDescriptionListModuleSchema,
-  cardModuleSchema,
-  missionCardModuleSchema,
-  conceptCardModuleSchema,
-  iconBadgeModuleSchema,
   lottieModuleSchema,
   terminalModuleSchema,
+  simpleTerminalModuleSchema,
   multipleChoiceModuleSchema,
   trueFalseChoiceModuleSchema,
   codeFillTheGapV2ModuleSchema,
-  dragAndDropQuizModuleSchema,
-  clickSequenceQuizModuleSchema,
   actionButtonModuleSchema,
   actionButtonsModuleSchema,
-  highlightParagraphModuleSchema,
 ]);
 
 const MODULE_TYPES = [
   'paragraph',
+  'quote',
   'image',
   'webview',
   'code',
   'characterSpeechBubble',
   'missionList',
   'tagDescriptionList',
-  'card',
-  'missionCard',
-  'conceptCard',
-  'iconBadge',
   'lottie',
   'terminal',
+  'simpleTerminal',
   'multipleChoice',
   'trueFalseChoice',
   'codeFillTheGapV2',
-  'dragAndDropQuiz',
-  'clickSequenceQuiz',
   'actionButton',
   'actionButtons',
-  'highlightParagraph',
 ];
 
 module.exports = {
   moduleSchema,
   MODULE_TYPES,
+  triggerSchema,
   paragraphModuleSchema,
+  quoteModuleSchema,
   imageModuleSchema,
   webviewModuleSchema,
   codeModuleSchema,
   characterSpeechBubbleModuleSchema,
   missionListModuleSchema,
   tagDescriptionListModuleSchema,
-  cardModuleSchema,
-  missionCardModuleSchema,
-  conceptCardModuleSchema,
-  iconBadgeModuleSchema,
   lottieModuleSchema,
   terminalModuleSchema,
+  simpleTerminalModuleSchema,
   multipleChoiceModuleSchema,
   trueFalseChoiceModuleSchema,
   codeFillTheGapV2ModuleSchema,
-  dragAndDropQuizModuleSchema,
-  clickSequenceQuizModuleSchema,
   actionButtonModuleSchema,
   actionButtonsModuleSchema,
-  highlightParagraphModuleSchema,
 };

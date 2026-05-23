@@ -7,6 +7,7 @@ const {
   getCodeFillGapsBySlideId,
 } = require('../controllers/lessonController');
 const lessonEditor = require('../controllers/lessonEditorController');
+const lessonPrecompute = require('../controllers/lessonPrecomputeController');
 
 // === Existing learner-facing reads (auth required) ===
 router.get('/slides', authMiddleware, getSlidesByLesson);
@@ -18,6 +19,11 @@ router.get('/runtime/:id', authMiddleware, getLessonRuntime);
 // === Editor: 단일 사용자 운영 — 인증 없음. ===
 // === Editor: characters catalog (must come before /:id) ===
 router.get('/characters', lessonEditor.listCharacters);
+
+// === Editor: 자산 사용처 (어떤 ObjectStore URL이 어디서든 사용되고 있는지) ===
+router.get('/assets/usage', lessonEditor.getUsedAssets);
+// === Editor: 자산 URL 일괄 치환 (이동/이름변경 시 slide.contents URL 동기화) ===
+router.post('/assets/update-urls', lessonEditor.updateAssetUrls);
 
 // === Editor: code-fill-gaps (slide_id 기준 upsert) ===
 router.get('/code-fill-gaps/:slideId', lessonEditor.getCodeFillGap);
@@ -36,5 +42,9 @@ router.post('/:id/slides/reorder', lessonEditor.reorderSlides);
 router.post('/:id/slides', lessonEditor.addSlide);
 router.put('/:id/slides/:slideId', lessonEditor.updateSlideContents);
 router.delete('/:id/slides/:slideId', lessonEditor.deleteSlide);
+
+// === Editor: precompute (코드 실행 결과 캐싱) ===
+router.post('/:lessonId/slides/:slideId/modules/:moduleId/precompute', lessonPrecompute.precomputeModuleResult);
+router.post('/:lessonId/slides/:slideId/modules/:moduleId/precompute-permutations', lessonPrecompute.precomputePermutations);
 
 module.exports = router;

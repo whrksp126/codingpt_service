@@ -135,6 +135,32 @@ const listCharacters = async (req, res) => {
   }
 };
 
+const getUsedAssets = async (req, res) => {
+  try {
+    const usages = await lessonEditorService.getUsedAssetMap();
+    successResponse(res, { usages });
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+const updateAssetUrls = async (req, res) => {
+  try {
+    const { replacements } = req.body || {};
+    if (!Array.isArray(replacements)) {
+      return res.status(400).json({
+        success: false,
+        message: 'replacements 배열이 필요합니다.',
+        timestamp: new Date().toISOString(),
+      });
+    }
+    const result = await lessonEditorService.updateAssetUrls(replacements);
+    successResponse(res, result);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
 const getCodeFillGap = async (req, res) => {
   try {
     const data = await lessonEditorService.getCodeFillGap(parseInt(req.params.slideId, 10));
@@ -184,6 +210,8 @@ module.exports = {
   deleteSlide,
   reorderSlides,
   listCharacters,
+  getUsedAssets,
+  updateAssetUrls,
   getCodeFillGap,
   upsertCodeFillGap,
   deleteCodeFillGap,

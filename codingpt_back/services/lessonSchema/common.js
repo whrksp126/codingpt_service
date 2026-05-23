@@ -77,6 +77,20 @@ const characterRefSchema = z.object({
 
 const slideRoleSchema = z.enum(['intro', 'goal', 'concept', 'quiz', 'ending', 'custom']);
 
+// 코드 실행 결과 캐시 — codeRunResult/terminal/codeFillTheGapV2 모듈에 인라인 저장됨.
+// codeHash 가 현재 코드의 해시와 다르면 학생 RN 은 자동 live fallback.
+const cachedResultSchema = z.object({
+  stdout: z.string(),
+  stderr: z.string(),
+  exitCode: z.number().int().nullable(),
+  durationMs: z.number().nonnegative().optional(),
+  codeHash: z.string(),
+  language: z.string(),
+  executedAt: z.string(),
+}).passthrough();
+
+const executionModeSchema = z.enum(['cached', 'live']);
+
 module.exports = {
   visibilitySchema,
   ttsSchema,
@@ -86,4 +100,6 @@ module.exports = {
   autoAdvanceSchema,
   characterRefSchema,
   slideRoleSchema,
+  cachedResultSchema,
+  executionModeSchema,
 };

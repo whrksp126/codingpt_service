@@ -90,9 +90,11 @@ class ExecutorService {
       let args = [tempFile];
 
       // 프로세스 실행
-      const process = spawn(command, args, {
+      // 변수명 'proc' — Node 글로벌 `process` 와의 섀도잉/TDZ 회피.
+      // `env: {}` 로 환경 격리하되 PATH 만 상속해야 node/python3 같은 명령어 lookup 가능.
+      const proc = spawn(command, args, {
         cwd: '/tmp',
-        env: {},
+        env: { PATH: process.env.PATH },
         shell: false
       });
 
@@ -101,7 +103,7 @@ class ExecutorService {
       let hasError = false;
       let isFinished = false;
 
-      if (!process.stdout) {
+      if (!proc.stdout) {
         res.write(`data: ${JSON.stringify({ type: 'error', data: '프로세스 stdout을 열 수 없습니다.\n' })}\n\n`);
         res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '프로세스 실행 실패' })}\n\n`);
         res.end();
@@ -112,7 +114,7 @@ class ExecutorService {
       const timeout = setTimeout(() => {
         if (!isFinished) {
           isFinished = true;
-          process.kill('SIGTERM');
+          proc.kill('SIGTERM');
           res.write(`data: ${JSON.stringify({ type: 'error', data: '\n⏱️ 실행 시간이 30초를 초과하여 종료되었습니다.\n' })}\n\n`);
           res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '실행 시간 초과' })}\n\n`);
           res.end();
@@ -121,7 +123,7 @@ class ExecutorService {
       }, 30000);
 
       // stdout 처리
-      process.stdout.on('data', (data) => {
+      proc.stdout.on('data', (data) => {
         const output = data.toString();
         outputBuffer += output;
         const lines = output.split('\n');
@@ -135,14 +137,14 @@ class ExecutorService {
       });
 
       // stderr 처리 - 버퍼에만 쌓기 (종료 후 정제해서 전송)
-      process.stderr.on('data', (data) => {
+      proc.stderr.on('data', (data) => {
         const error = data.toString();
         errorBuffer += error;
         hasError = true;
       });
 
       // 프로세스 종료 처리
-      process.on('close', (code, signal) => {
+      proc.on('close', (code, signal) => {
         if (isFinished) return;
         isFinished = true;
         clearTimeout(timeout);
@@ -162,7 +164,7 @@ class ExecutorService {
       });
 
       // 프로세스 에러 처리
-      process.on('error', (err) => {
+      proc.on('error', (err) => {
         if (isFinished) return;
 
         // Python fallback 시도
@@ -196,7 +198,7 @@ class ExecutorService {
   runFallbackProcess(fallbackCommand, args, tempFile, res) {
     const fallbackProcess = spawn(fallbackCommand, args, {
       cwd: '/tmp',
-      env: {},
+      env: { PATH: process.env.PATH },
       shell: false
     });
 

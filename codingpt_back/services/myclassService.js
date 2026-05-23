@@ -1,5 +1,6 @@
 const { sequelize, MyClass, MyClassStatus, Product, ProductClassMap, Class, ClassSectionMap, Section, SectionLessonMap, Lesson, Slide, LessonSlideMap, User } = require('../models');
 const { SLIDE_TYPE_PRESETS } = require('./lessonSchema');
+const { transformContentsDeep } = require('../utils/lessonContentsMigration');
 
 const XP_PER_LESSON_MAX = 10;
 
@@ -108,7 +109,7 @@ class MyClassService {
         for (const section of cls.Sections || []) {
           for (const lesson of section.Lessons || []) {
             for (const slide of lesson.Slides || []) {
-              slide.contents = normalizeSlideContents(slide.contents);
+              slide.contents = transformContentsDeep(normalizeSlideContents(slide.contents));
             }
           }
         }

@@ -30,10 +30,10 @@ const FormView = ({ value, onChange }) => (
 );
 
 const PreviewView = ({ module }) => (
-  <div className="px-3 py-2">
+  <>
     {!module.iconHidden && <IconCircle icon={module.icon} />}
     <RawHtmlPreview html={module.content} />
-  </div>
+  </>
 );
 
 export default {
@@ -41,7 +41,7 @@ export default {
   category: 'text',
   label: '텍스트',
   description: 'HTML 본문 + 아이콘 + TTS',
-  icon: '📝',
+  icon: '',
   defaultValue: () => ({ type: 'paragraph', content: '<p>여기에 텍스트를 입력하세요</p>' }),
   FormView,
   PreviewView,

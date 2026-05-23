@@ -16,9 +16,6 @@ import { DotsSixVertical, Trash } from '@phosphor-icons/react';
 import { useEditor, selectSelectedSlide } from '../state/EditorContext';
 import { Field, TextField, NumberField, SelectField } from './_shared/SharedFields';
 import MonacoField from './_shared/MonacoField';
-import ResultModulesField from './_shared/ResultModulesField';
-import ResultModulesPreview from './_shared/ResultModulesPreview';
-import { ResultParentProvider } from '../state/ResultParentContext';
 import {
   SUPPORTED_LANGUAGES,
   composeContent,
@@ -28,6 +25,8 @@ import {
   validateBlanks,
 } from './_shared/codeFillUtils';
 import { fetchCodeFillContent, upsertCodeFillContent } from '../../../../utils/lessonApi';
+// 채점 후 등장 모듈은 슬라이드 평면 modules 에 두고 각 모듈의 trigger.afterGrading 메타로 연결한다.
+// 옵션 조합 캐싱은 simpleTerminal 모듈에서 linkedModuleId 로 이 빈칸채우기를 지정하면 자동 처리.
 
 const DEBOUNCE_MS = 1000;
 
@@ -458,17 +457,10 @@ const FormView = ({ value, onChange }) => {
         )}
       </div>
 
-      <ResultParentProvider
-        value={{
-          parentType: 'codeFillTheGapV2',
-          parentValue: { blanks: verifiedBlanks, answers, interactionOptions },
-        }}
-      >
-        <ResultModulesField
-          value={value}
-          onChange={onChange}
-        />
-      </ResultParentProvider>
+      <p className="rounded border border-dashed border-slate-200 px-3 py-2 text-[11px] text-slate-500">
+        채점 후 등장할 모듈은 슬라이드 모듈 카드에서 직접 추가한 뒤 각 카드의 "등장 시점" 셀렉트에서
+        이 빈칸 채우기 모듈을 선택하세요. 코드 실행 결과는 simpleTerminal 의 연결 모듈로 본 빈칸 채우기를 지정하면 됩니다.
+      </p>
     </>
   );
 };
@@ -521,7 +513,7 @@ const PreviewView = ({ module, onModuleChange }) => {
         <iframe
           title="code-fill-preview"
           srcDoc={html}
-          sandbox="allow-same-origin"
+          sandbox="allow-scripts allow-same-origin"
           style={{
             width: '100%',
             height,
@@ -542,7 +534,6 @@ const PreviewView = ({ module, onModuleChange }) => {
         </div>
       )}
 
-      <ResultModulesPreview module={module} onModuleChange={onModuleChange} />
     </div>
   );
 };

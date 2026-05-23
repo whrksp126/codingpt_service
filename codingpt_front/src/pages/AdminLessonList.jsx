@@ -502,7 +502,7 @@ const HoverGear = ({ onClick, title }) => (
     type="button"
     onClick={(e) => { e.stopPropagation(); onClick(); }}
     title={title}
-    className="invisible rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 group-hover:visible"
+    className="rounded-md p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
   >
     <GearSix size={15} weight="regular" />
   </button>
@@ -512,10 +512,31 @@ const HoverAddButton = ({ label, onClick }) => (
   <button
     type="button"
     onClick={(e) => { e.stopPropagation(); onClick(); }}
-    className="invisible inline-flex items-center gap-1 rounded-md border border-dashed border-cyan-300 bg-white px-2 py-1 text-[11px] font-medium text-cyan-700 hover:border-cyan-500 hover:bg-cyan-50 group-hover:visible"
+    className="inline-flex items-center gap-1 rounded-md border border-dashed border-cyan-300 bg-white px-2 py-1 text-[11px] font-medium text-cyan-700 hover:border-cyan-500 hover:bg-cyan-50"
   >
     <Plus size={12} weight="bold" /> {label}
   </button>
+);
+
+// 각 행의 우측에 시간 표시 + 호버 액션 그룹을 absolute로 고정시키는 슬롯.
+// - 시간: 항상 우측에 보이고, 호버 시 페이드 아웃
+// - 액션(설정/추가 버튼): 호버 시 우측 중앙에 absolute로 등장
+const RowEndSlot = ({ at, children }) => (
+  <>
+    {at && (
+      <span
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 shrink-0 text-[11px] tabular-nums text-slate-400 transition-opacity group-hover:opacity-0"
+        title={new Date(at).toLocaleString('ko-KR')}
+      >
+        {formatRelativeTime(at)}
+      </span>
+    )}
+    {children && (
+      <div className="invisible absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover:visible">
+        {children}
+      </div>
+    )}
+  </>
 );
 
 const DragHandle = ({ attributes, listeners }) => (
@@ -529,19 +550,6 @@ const DragHandle = ({ attributes, listeners }) => (
     <DotsSixVertical size={14} weight="bold" />
   </button>
 );
-
-// 우측 끝에 "n분 전" 형태로 표시. 호버 시 페이드아웃되어 옆 액션 버튼군이 자리잡도록 양보.
-const HoverHideTime = ({ at }) => {
-  if (!at) return null;
-  return (
-    <span
-      className="ml-1.5 shrink-0 text-[11px] tabular-nums text-slate-400 transition-opacity group-hover:opacity-0"
-      title={new Date(at).toLocaleString('ko-KR')}
-    >
-      {formatRelativeTime(at)}
-    </span>
-  );
-};
 
 const CaretButton = ({ open, onClick }) => (
   <button
@@ -610,7 +618,7 @@ const ProductCard = ({
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {/* 상품 헤더 */}
-      <div className="group flex items-center gap-2 border-b border-slate-200 bg-slate-50/40 px-3 py-3">
+      <div className="group relative flex items-center gap-2 border-b border-slate-200 bg-slate-50/40 px-3 py-3 pr-20">
         <CaretButton open={open} onClick={() => toggle(key)} />
         <TypeBadge type="product" />
         <div className="min-w-0 flex-1">
@@ -627,11 +635,10 @@ const ProductCard = ({
             <div className="truncate text-xs text-slate-500">{p.description}</div>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <HoverHideTime at={p.updated_at} />
+        <RowEndSlot at={p.updated_at}>
           <HoverAddButton label="클래스" onClick={() => onCreateClass(p.id)} />
           <HoverGear onClick={() => onEditProduct(p)} title="상품 설정" />
-        </div>
+        </RowEndSlot>
       </div>
 
       {/* 클래스 리스트 */}
@@ -705,7 +712,7 @@ const ClassRow = ({
 
   return (
     <div ref={setNodeRef} style={style} className="my-0.5">
-      <div className="group flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-2 hover:bg-slate-50">
+      <div className="group relative flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-20 hover:bg-slate-50">
         <DragHandle attributes={attributes} listeners={listeners} />
         <CaretButton open={open} onClick={() => toggle(key)} />
         <TypeBadge type="class" />
@@ -713,11 +720,10 @@ const ClassRow = ({
           <span className="truncate text-sm font-medium text-slate-800">{cls.name}</span>
           <HoverCount count={sections.length} />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <HoverHideTime at={cls.updated_at} />
+        <RowEndSlot at={cls.updated_at}>
           <HoverAddButton label="섹션" onClick={() => onCreateSection(cls.id)} />
           <HoverGear onClick={() => onEditClass(cls)} title="클래스 설정" />
-        </div>
+        </RowEndSlot>
       </div>
       {open && (
         <div className="ml-4 border-l border-slate-200 pl-2">
@@ -785,7 +791,7 @@ const SectionRow = ({
 
   return (
     <div ref={setNodeRef} style={style} className="my-0.5">
-      <div className="group flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-2 hover:bg-slate-50">
+      <div className="group relative flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-20 hover:bg-slate-50">
         <DragHandle attributes={attributes} listeners={listeners} />
         <CaretButton open={open} onClick={() => toggle(key)} />
         <TypeBadge type="section" />
@@ -793,11 +799,10 @@ const SectionRow = ({
           <span className="truncate text-sm font-medium text-slate-700">{sec.name}</span>
           <HoverCount count={lessons.length} />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <HoverHideTime at={sec.updated_at} />
+        <RowEndSlot at={sec.updated_at}>
           <HoverAddButton label="레슨" onClick={() => onCreateLesson(sec.id)} />
           <HoverGear onClick={() => onEditSection(sec)} title="섹션 설정" />
-        </div>
+        </RowEndSlot>
       </div>
       {open && (
         <div
@@ -847,15 +852,16 @@ const LessonRow = ({ lesson, index, onOpen }) => {
     <div
       ref={setNodeRef}
       style={style}
-      className="group my-0.5 flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-2 hover:bg-slate-50"
+      className="group relative my-0.5 flex items-center gap-1.5 rounded-md py-1.5 pl-1.5 pr-12 hover:bg-slate-50"
     >
       <DragHandle attributes={attributes} listeners={listeners} />
       <span className="w-4" />
       <TypeBadge type="lesson" />
       <span className="w-5 shrink-0 text-right text-[11px] tabular-nums text-slate-400">{index + 1}.</span>
       <span className="flex-1 truncate text-sm text-slate-700">{lesson.name}</span>
-      <HoverHideTime at={lesson.updated_at} />
-      <HoverGear onClick={() => onOpen(lesson.id)} title="레슨 에디터 열기" />
+      <RowEndSlot at={lesson.updated_at}>
+        <HoverGear onClick={() => onOpen(lesson.id)} title="레슨 에디터 열기" />
+      </RowEndSlot>
     </div>
   );
 };

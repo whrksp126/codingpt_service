@@ -5,10 +5,9 @@ import { useEditor } from './EditorContext';
 const DEBOUNCE_MS = 800;
 
 export const useAutosave = (lessonId) => {
-  const { state, dispatch, getState } = useEditor();
+  const { state, dispatch, getState, lastSavedRef } = useEditor();
   const timerRef = useRef(null);
   const inflightRef = useRef(null);
-  const lastSavedRef = useRef(null);
 
   useEffect(() => {
     if (!lessonId || !state.ui.dirty) return undefined;
