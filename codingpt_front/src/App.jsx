@@ -11,6 +11,7 @@ import Curriculums from './pages/Curriculums';
 import Curriculum from './pages/Curriculum';
 import Sections from './pages/Sections';
 import TTS from './pages/TTS';
+import TtsLibrary from './pages/TtsLibrary';
 import AdminLessonList from './pages/AdminLessonList';
 import LessonEditor from './pages/LessonEditor';
 
@@ -25,6 +26,7 @@ function App() {
         <Route path="/code/:id" element={<Code />} />
         <Route path="/execute" element={<Execute />} />
         <Route path="/tts" element={<TTS />} />
+        <Route path="/admin/tts" element={<TtsLibrary />} />
       </Routes>
     </BrowserRouter>
   );

@@ -77,6 +77,11 @@ class S3Service {
       'js': 'application/javascript',
       'json': 'application/json',
       'txt': 'text/plain',
+      'mp3': 'audio/mpeg',
+      'mpeg': 'audio/mpeg',
+      'wav': 'audio/wav',
+      'm4a': 'audio/mp4',
+      'ogg': 'audio/ogg',
       'png': 'image/png',
       'jpg': 'image/jpeg',
       'jpeg': 'image/jpeg',
@@ -91,6 +96,23 @@ class S3Service {
       'otf': 'font/otf'
     };
     return contentTypes[ext] || 'application/octet-stream';
+  }
+
+  // 일시적/미분류 오류(Cloudflare·MinIO 5xx, http/code 미상)에 대해 재시도.
+  // NoSuchKey/404 같은 확정 오류는 즉시 throw (재시도 무의미).
+  async _sendWithRetry(command, attempts = 4) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try { return await this.s3Client.send(command); }
+      catch (e) {
+        lastErr = e;
+        const code = e?.$metadata?.httpStatusCode;
+        const fatal = e?.name === 'NoSuchKey' || e?.name === 'NotFound' || code === 404 || code === 403;
+        if (fatal || i === attempts - 1) throw e;
+        await new Promise((r) => setTimeout(r, 200 * (i + 1)));
+      }
+    }
+    throw lastErr;
   }
 
   /**
@@ -112,7 +134,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 추가 (코드 실행 관련 경로인 경우)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         // class-id- 또는 execute/ 로 시작하는 경우 codingpt/execute/ prefix 추가
         if (normalizedPath.startsWith('class-id-') || normalizedPath.startsWith('execute/')) {
           normalizedPath = `codingpt/execute/${normalizedPath}`;
@@ -366,7 +388,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -478,7 +500,7 @@ class S3Service {
    * @param {string} content - 파일 내용
    * @returns {Promise<Object>} - 저장 결과 또는 에러
    */
-  async saveFile(filePath, content) {
+  async saveFile(filePath, content, options = {}) {
     try {
       // 경로 검증
       if (!this.validatePath(filePath)) {
@@ -512,7 +534,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -562,6 +584,13 @@ class S3Service {
         Body: body,
         ContentType: contentType
       };
+      // 원본 파일명 등 사용자 메타데이터(x-amz-meta-*, ASCII만) + 다운로드 시 원본명 유지
+      if (options.metadata && typeof options.metadata === 'object') {
+        params.Metadata = options.metadata;
+      }
+      if (options.contentDisposition) {
+        params.ContentDisposition = options.contentDisposition;
+      }
 
       const command = new PutObjectCommand(params);
       await this.s3Client.send(command);
@@ -627,7 +656,7 @@ class S3Service {
       let normalizedPath = folderPath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -715,7 +744,7 @@ class S3Service {
       let normalizedPath = filePath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -873,7 +902,7 @@ class S3Service {
       // 경로 정규화
       let normalizedOldPath = oldPath.replace(/^\/+|\/+$/g, '');
       // TTS 경로(codingpt/tts/)는 제외
-      if (normalizedOldPath && !normalizedOldPath.startsWith('codingpt/execute/') && !normalizedOldPath.startsWith('codingpt/tts/') && !(normalizedOldPath === 'lesson-assets' || normalizedOldPath.startsWith('lesson-assets/'))) {
+      if (normalizedOldPath && !normalizedOldPath.startsWith('codingpt/execute/') && !normalizedOldPath.startsWith('codingpt/tts/') && !normalizedOldPath.startsWith('tts/static/') && !(normalizedOldPath === 'lesson-assets' || normalizedOldPath.startsWith('lesson-assets/'))) {
         normalizedOldPath = `codingpt/execute/${normalizedOldPath}`;
       }
 
@@ -924,7 +953,7 @@ class S3Service {
             CopySource: `${this.bucketName}/${encodedKey}`,
             Key: newKey
           });
-          movePromises.push(this.s3Client.send(copyCommand).then(() => {
+          movePromises.push(this._sendWithRetry(copyCommand).then(() => {
             // 복사 성공 후 삭제
             const deleteCommand = new DeleteObjectCommand({
               Bucket: this.bucketName,
@@ -971,7 +1000,7 @@ class S3Service {
           CopySource: `${this.bucketName}/${encodedOldPath}`,
           Key: normalizedNewPath
         });
-        await this.s3Client.send(copyCommand);
+        await this._sendWithRetry(copyCommand);
 
         // 기존 파일 삭제
         const deleteCommand = new DeleteObjectCommand({
@@ -1027,10 +1056,10 @@ class S3Service {
       let normalizedTargetPath = targetPath.replace(/^\/+|\/+$/g, '');
 
       // TTS 경로(codingpt/tts/)는 제외
-      if (normalizedSourcePath && !normalizedSourcePath.startsWith('codingpt/execute/') && !normalizedSourcePath.startsWith('codingpt/tts/') && !(normalizedSourcePath === 'lesson-assets' || normalizedSourcePath.startsWith('lesson-assets/'))) {
+      if (normalizedSourcePath && !normalizedSourcePath.startsWith('codingpt/execute/') && !normalizedSourcePath.startsWith('codingpt/tts/') && !normalizedSourcePath.startsWith('tts/static/') && !(normalizedSourcePath === 'lesson-assets' || normalizedSourcePath.startsWith('lesson-assets/'))) {
         normalizedSourcePath = `codingpt/execute/${normalizedSourcePath}`;
       }
-      if (normalizedTargetPath && !normalizedTargetPath.startsWith('codingpt/execute/') && !normalizedTargetPath.startsWith('codingpt/tts/') && !(normalizedTargetPath === 'lesson-assets' || normalizedTargetPath.startsWith('lesson-assets/'))) {
+      if (normalizedTargetPath && !normalizedTargetPath.startsWith('codingpt/execute/') && !normalizedTargetPath.startsWith('codingpt/tts/') && !normalizedTargetPath.startsWith('tts/static/') && !(normalizedTargetPath === 'lesson-assets' || normalizedTargetPath.startsWith('lesson-assets/'))) {
         normalizedTargetPath = `codingpt/execute/${normalizedTargetPath}`;
       }
 
@@ -1106,7 +1135,7 @@ class S3Service {
             CopySource: `${this.bucketName}/${encodedKey}`,
             Key: newKey
           });
-          movePromises.push(this.s3Client.send(copyCommand).then(() => {
+          movePromises.push(this._sendWithRetry(copyCommand).then(() => {
             // 복사 성공 후 삭제
             const deleteCommand = new DeleteObjectCommand({
               Bucket: this.bucketName,
@@ -1134,40 +1163,22 @@ class S3Service {
           normalizedTargetPath = normalizedTargetPath.replace(/\/$/, '') + '/' + sourceFileName;
         }
 
-        // 원본 파일 존재 확인
-        const headCommand = new HeadObjectCommand({
-          Bucket: this.bucketName,
-          Key: normalizedSourcePath
-        });
-
-        try {
-          await this.s3Client.send(headCommand);
-        } catch (headError) {
-          if (headError.name === 'NotFound' || headError.$metadata?.httpStatusCode === 404) {
-            return {
-              success: false,
-              message: '원본 파일을 찾을 수 없습니다.',
-              error: 'NoSuchKey'
-            };
-          }
-          throw headError;
-        }
-
-        // 파일 복사 - CopySource는 key 부분만 URL 인코딩하여 한글 경로 지원
+        // 파일 복사 - CopySource는 key 부분만 URL 인코딩하여 한글 경로 지원.
+        // (사전 HeadObject 체크 제거: 일시 오류 유발 지점이었고, 없으면 Copy가 NoSuchKey 로 처리)
         const encodedSourcePath = normalizedSourcePath.split('/').map(part => encodeURIComponent(part)).join('/');
         const copyCommand = new CopyObjectCommand({
           Bucket: this.bucketName,
           CopySource: `${this.bucketName}/${encodedSourcePath}`,
           Key: normalizedTargetPath
         });
-        await this.s3Client.send(copyCommand);
+        await this._sendWithRetry(copyCommand);
 
-        // 원본 파일 삭제
+        // 원본 파일 삭제 (재시도)
         const deleteCommand = new DeleteObjectCommand({
           Bucket: this.bucketName,
           Key: normalizedSourcePath
         });
-        await this.s3Client.send(deleteCommand);
+        await this._sendWithRetry(deleteCommand);
 
         return {
           success: true,
@@ -1177,11 +1188,14 @@ class S3Service {
         };
       }
     } catch (error) {
-      console.error('[S3Service] 이동 오류:', error);
+      console.error('[S3Service] 이동 오류:', {
+        name: error.name, code: error.Code, http: error.$metadata?.httpStatusCode,
+        message: error.message, source: sourcePath, target: targetPath,
+      });
       return {
         success: false,
         message: error.message || '이동에 실패했습니다.',
-        error: error.name || 'UnknownError'
+        error: (error.name === 'NoSuchKey' || error.$metadata?.httpStatusCode === 404) ? 'NoSuchKey' : (error.name || 'UnknownError')
       };
     }
   }
@@ -1203,7 +1217,7 @@ class S3Service {
       let normalizedSourcePath = sourcePath.replace(/^\/+|\/+$/g, '');
       let normalizedTargetPath = targetPath.replace(/^\/+|\/+$/g, '');
       const applyPrefix = (p) =>
-        p && !p.startsWith('codingpt/execute/') && !p.startsWith('codingpt/tts/') && !(p === 'lesson-assets' || p.startsWith('lesson-assets/'))
+        p && !p.startsWith('codingpt/execute/') && !p.startsWith('codingpt/tts/') && !p.startsWith('tts/static/') && !(p === 'lesson-assets' || p.startsWith('lesson-assets/'))
           ? `codingpt/execute/${p}` : p;
       normalizedSourcePath = applyPrefix(normalizedSourcePath);
       normalizedTargetPath = applyPrefix(normalizedTargetPath);

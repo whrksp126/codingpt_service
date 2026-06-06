@@ -1,7 +1,9 @@
 const { Op } = require('sequelize');
-const { sequelize, Lesson, Slide, LessonSlideMap, CodeFillGap } = require('../models');
+const { sequelize, Lesson, Slide, LessonSlideMap, CodeFillGap, TTSAsset } = require('../models');
 const lessonSchema = require('./lessonSchema');
 const { transformContentsDeep } = require('../utils/lessonContentsMigration');
+const { collectAssetIds, hydrate, dehydrate } = require('../utils/ttsHydration');
+const ttsAssetService = require('./ttsAssetService');
 
 const buildEmptySlideContents = (role = 'custom') => {
   const preset = lessonSchema.SLIDE_TYPE_PRESETS[role] || lessonSchema.SLIDE_TYPE_PRESETS.custom;
@@ -332,7 +334,8 @@ class LessonEditorService {
       err.statusCode = 404;
       throw err;
     }
-    const validated = validateSlideContents(contents);
+    // tts:{assetId,url,timestamps} → {assetId,enabled?} 로 슬림화(인라인 데이터 부활 방지)
+    const validated = validateSlideContents(dehydrate(contents));
     await Slide.update(
       { contents: validated, updated_at: new Date() },
       { where: { id: slideId } },
@@ -396,7 +399,7 @@ class LessonEditorService {
         err.statusCode = 404;
         throw err;
       }
-      const validated = validateSlideContents(contents);
+      const validated = validateSlideContents(dehydrate(contents));
       await Slide.update(
         { contents: validated, updated_at: new Date() },
         { where: { id: slideId }, transaction: t },
@@ -494,7 +497,9 @@ class LessonEditorService {
         include: [{ model: Lesson, attributes: ['id', 'name'] }],
       }],
     });
-    const URL_RE = /https:\/\/objectstore\.ghmate\.com\/codingpt\/lesson-assets\/[^\s"'<>)\]]+/g;
+    // 주의: 폴더명에 공백(예: 'HTML 역할')이 있을 수 있어 \s 를 제외 문자에서 빼야 함.
+    // (JSON 문자열 안의 URL 이라 따옴표 등에서 자연 종료됨)
+    const URL_RE = /https:\/\/objectstore\.ghmate\.com\/codingpt\/(?:lesson-assets|tts\/static)\/[^"'<>)\]]+/g;
     const map = {};
     for (const s of slides) {
       const c = s.contents;
@@ -643,6 +648,8 @@ class LessonEditorService {
       })
       : [];
     const slideMap = new Map(slides.map((s) => [s.id, s]));
+    // 에디터 표시용 TTS 하이드레이션: tts.assetId → {url,timestamps,duration} (저장 시 dehydrate 됨)
+    const ttsAssetMap = await this._buildTtsAssetMap(slides);
     return {
       id: lesson.id,
       name: lesson.name,
@@ -661,11 +668,33 @@ class LessonEditorService {
         return {
           id: m.slide_id,
           order_no: idx,
-          contents: slide ? transformContentsDeep(slide.contents) : null,
+          contents: slide ? hydrate(transformContentsDeep(slide.contents), ttsAssetMap) : null,
           updated_at: slide ? slide.updated_at : null,
         };
       }),
     };
+  }
+
+  // 슬라이드들이 참조하는 tts.assetId 를 모아 일괄 조회 → Map<id, {url,timestamps,duration}>.
+  async _buildTtsAssetMap(slides) {
+    const ids = new Set();
+    for (const s of slides) {
+      if (!s || !s.contents) continue;
+      for (const id of collectAssetIds(s.contents)) ids.add(id);
+    }
+    const map = new Map();
+    if (ids.size === 0) return map;
+    const assets = await TTSAsset.findAll({ where: { id: { [Op.in]: [...ids] } } });
+    for (const a of assets) {
+      map.set(a.id, {
+        url: ttsAssetService.audioUrlForAsset(a),
+        timestamps: a.timestamps,
+        duration: a.duration,
+        voiceId: a.voice_id,
+        modelId: a.model_id,
+      });
+    }
+    return map;
   }
 }
 

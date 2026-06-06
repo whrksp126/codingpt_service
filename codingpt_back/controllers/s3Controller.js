@@ -90,7 +90,7 @@ const getFileContent = async (req, res) => {
  */
 const saveFile = async (req, res) => {
   try {
-    const { filePath, content } = req.body;
+    const { filePath, content, originalName, metadata } = req.body;
 
     if (!filePath) {
       return res.status(400).json({
@@ -114,7 +114,16 @@ const saveFile = async (req, res) => {
       contentLength: typeof content === 'string' ? content.length : 'binary'
     });
 
-    const result = await s3Service.saveFile(filePath, content);
+    // 원본 파일명 보존: x-amz-meta-original-name(URL-encode, ASCII) + Content-Disposition(원본명 다운로드)
+    const options = {};
+    const meta = (metadata && typeof metadata === 'object') ? { ...metadata } : {};
+    if (originalName) {
+      meta['original-name'] = encodeURIComponent(originalName);
+      options.contentDisposition = `inline; filename*=UTF-8''${encodeURIComponent(originalName)}`;
+    }
+    if (Object.keys(meta).length) options.metadata = meta;
+
+    const result = await s3Service.saveFile(filePath, content, options);
 
     if (result.success) {
       return res.status(200).json(result);

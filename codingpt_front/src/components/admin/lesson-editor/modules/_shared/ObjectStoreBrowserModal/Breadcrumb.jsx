@@ -1,15 +1,18 @@
 import { CaretRight } from '@phosphor-icons/react';
 import { LESSON_ASSETS_ROOT } from '../../../../../../utils/objectStoreApi';
 
-const Breadcrumb = ({ path, onNavigate }) => {
+const Breadcrumb = ({ path, onNavigate, rootPath = LESSON_ASSETS_ROOT }) => {
   // path 예: 'lesson-assets/lessons/python-basics/'
-  const trimmed = (path || LESSON_ASSETS_ROOT).replace(/\/+$/, '');
+  const trimmed = (path || rootPath).replace(/\/+$/, '');
   const parts = trimmed.split('/').filter(Boolean);
-  // parts 예: ['lesson-assets', 'lessons', 'python-basics']
+  // 루트(rootPath)의 마지막 세그먼트부터 표시 — 그 위로는 노출/이동하지 않음
+  const rootParts = rootPath.replace(/\/+$/, '').split('/').filter(Boolean);
+  const startIdx = Math.min(Math.max(0, rootParts.length - 1), Math.max(0, parts.length - 1));
 
-  const segments = parts.map((name, idx) => {
+  const segments = parts.slice(startIdx).map((name, i) => {
+    const idx = startIdx + i;
     const accumulated = parts.slice(0, idx + 1).join('/') + '/';
-    return { name, path: accumulated, isRoot: idx === 0 };
+    return { name, path: accumulated, isRoot: i === 0 };
   });
 
   return (

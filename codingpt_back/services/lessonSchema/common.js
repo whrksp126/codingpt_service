@@ -40,10 +40,23 @@ const ttsTimestampsSchema = z.object({
 
 const ttsSchema = z.union([
   z.string(),
+  // 중앙 라이브러리 참조: 저장 시 { assetId, enabled? } 만 보존(서버가 dehydrate).
+  // 로드/런타임 시 url·timestamps 가 하이드레이션되어 함께 올 수 있으므로 optional 로 허용.
+  z.object({
+    assetId: z.number().int(),
+    enabled: z.boolean().optional(),
+    url: z.string().optional(),
+    timestamps: ttsTimestampsSchema.optional(),
+    voiceId: z.string().optional(),
+    modelId: z.string().optional(),
+  }),
+  // 인라인/파일참조: url 직접 보유 (objectstore 파일 + 사이드카 메타)
   z.object({
     url: z.string(),
     timestamps: ttsTimestampsSchema.optional(),
     enabled: z.boolean().optional(), // false면 RN에서 비활성 (데이터는 보존)
+    voiceId: z.string().optional(),
+    modelId: z.string().optional(),
   }),
 ]);
 

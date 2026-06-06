@@ -11,6 +11,7 @@ import {
   Copy,
   Scissors,
   ClipboardText,
+  Plus,
 } from '@phosphor-icons/react';
 import Breadcrumb from './Breadcrumb';
 import FileGrid from './FileGrid';
@@ -29,6 +30,8 @@ import {
   urlToDisplayKey,
   listAssetUsage,
   updateAssetUrls,
+  cleanFileName,
+  nextAvailableName,
 } from '../../../../../../utils/objectStoreApi';
 
 const sortItems = (items, by) => {
@@ -52,8 +55,8 @@ const buildReplacements = ({ oldDisplayKey, newDisplayKey, isDirectory }) => {
   return [{ oldUrl: keyToFullUrl(oldDisplayKey), newUrl: keyToFullUrl(newDisplayKey) }];
 };
 
-const ParentSelectDialog = ({ currentPath, onSelect, onCancel }) => {
-  const [path, setPath] = useState(LESSON_ASSETS_ROOT);
+const ParentSelectDialog = ({ currentPath, onSelect, onCancel, rootPath = LESSON_ASSETS_ROOT }) => {
+  const [path, setPath] = useState(rootPath);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -64,10 +67,11 @@ const ParentSelectDialog = ({ currentPath, onSelect, onCancel }) => {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(path); }, [path, load]);
-  const isRoot = path === LESSON_ASSETS_ROOT;
+  const rootParts = rootPath.replace(/\/+$/, '').split('/').filter(Boolean);
+  const isRoot = path.replace(/\/+$/, '') === rootPath.replace(/\/+$/, '');
   const goUp = () => {
     const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
-    if (parts.length <= 1) return;
+    if (parts.length <= rootParts.length) return; // 루트 위로는 못 올라감
     setPath(parts.slice(0, -1).join('/') + '/');
   };
   return (
@@ -79,7 +83,10 @@ const ParentSelectDialog = ({ currentPath, onSelect, onCancel }) => {
         </div>
         <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-1.5">
           <button onClick={goUp} disabled={isRoot} className="rounded p-1 disabled:opacity-30 hover:bg-slate-100"><ArrowLeft size={14} /></button>
-          <Breadcrumb path={path} onNavigate={setPath} />
+          <Breadcrumb path={path} onNavigate={(p) => {
+            const pp = p.replace(/\/+$/, '').split('/').filter(Boolean);
+            if (pp.length >= rootParts.length) setPath(p.endsWith('/') ? p : p + '/');
+          }} />
         </div>
         <div className="flex-1 overflow-y-auto p-2">
           {loading && <div className="p-4 text-center text-xs text-slate-400">불러오는 중…</div>}
@@ -144,6 +151,18 @@ const ObjectStoreBrowserModal = ({
   currentValue,
   onSelect,
   onClose,
+  title = 'ObjectStore 파일 선택',
+  subtitle,
+  // 업로드 대신 커스텀 주요 액션(예: TTS 생성). { label, onClick: ({ currentPath, reload }) => void }
+  primaryAction = null,
+  // 그리드에서 숨길 파일 확장자(소문자, 점 제외). 예: ['json'] — 폴더는 항상 표시.
+  hiddenExt = null,
+  // 짝 파일 리졸버: (displayKey) => [siblingDisplayKey...]. 이름변경/이동/삭제/복사 시 함께 처리.
+  siblingResolver = null,
+  // 이동 대상 폴더 선택 다이얼로그의 루트(이 위로는 못 올라감). 기본 lesson-assets.
+  moveRoot = LESSON_ASSETS_ROOT,
+  // 브라우저 탐색 루트(뒤로가기/브레드크럼이 이 위로 못 올라감). 기본 lesson-assets.
+  browseRoot = LESSON_ASSETS_ROOT,
 }) => {
   const [currentPath, setCurrentPath] = useState(initialPath || `${LESSON_ASSETS_ROOT}images/`);
   const [items, setItems] = useState([]);
@@ -152,6 +171,8 @@ const ObjectStoreBrowserModal = ({
   const [uploadProgress, setUploadProgress] = useState(null);
   const [error, setError] = useState(null);
   const [dragOver, setDragOver] = useState(false);
+  const [customView, setCustomView] = useState(false); // primaryAction 스텝(예: TTS 생성) 표시
+  const [batchProgress, setBatchProgress] = useState(null); // { label, done, total } 다중 이동/작업 진행률
   // contextMenu.kind: 'item' (target item-based) | 'background' (빈 영역)
   const [contextMenu, setContextMenu] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
@@ -174,13 +195,17 @@ const ObjectStoreBrowserModal = ({
   const loadList = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const list = await listFolder(currentPath);
+      let list = await listFolder(currentPath);
+      if (hiddenExt && hiddenExt.length) {
+        const hide = new Set(hiddenExt.map((e) => e.toLowerCase()));
+        list = list.filter((i) => i.isDirectory || !hide.has((i.name.split('.').pop() || '').toLowerCase()));
+      }
       setItems(sortItems(list, sortBy));
       setSelectedKeys(new Set());
       setLastClickIndex(-1);
     } catch (err) { setError(err.message); setItems([]); }
     finally { setLoading(false); }
-  }, [currentPath, sortBy]);
+  }, [currentPath, sortBy, hiddenExt]);
 
   useEffect(() => { loadList(); }, [loadList]);
 
@@ -199,11 +224,13 @@ const ObjectStoreBrowserModal = ({
 
   useEffect(() => {
     const onKey = (e) => {
+      if (batchProgress) return; // 진행 중엔 키 입력 무시
       if (e.key === 'Escape') {
         if (contextMenu) setContextMenu(null);
         else if (renameTarget) setRenameTarget(null);
         else if (moveTarget) setMoveTarget(null);
         else if (selectedKeys.size > 0) { setSelectedKeys(new Set()); setLastClickIndex(-1); }
+        else if (customView) setCustomView(false);
         else onClose();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
@@ -219,7 +246,7 @@ const ObjectStoreBrowserModal = ({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contextMenu, renameTarget, moveTarget, selectedKeys, onClose, items, clipboard]);
+  }, [contextMenu, renameTarget, moveTarget, selectedKeys, onClose, items, clipboard, batchProgress]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -233,13 +260,19 @@ const ObjectStoreBrowserModal = ({
     return () => window.removeEventListener('mousedown', onMouseDown, true);
   }, [contextMenu]);
 
+  // 짝 파일(예: .mp3 ↔ .json) 목록 — 파일에만 적용
+  const siblingsOf = (displayKey) =>
+    (siblingResolver && displayKey && !displayKey.endsWith('/')) ? (siblingResolver(displayKey) || []) : [];
+
+  const browseRootNorm = browseRoot.replace(/\/+$/, '');
+  const browseRootDepth = browseRootNorm.split('/').filter(Boolean).length;
   const handleEnterFolder = (item) => setCurrentPath(item.displayKey);
   const handleBack = () => {
     const parts = currentPath.replace(/\/+$/, '').split('/').filter(Boolean);
-    if (parts.length <= 1) return;
+    if (parts.length <= browseRootDepth) return; // 브라우즈 루트 위로는 못 올라감
     setCurrentPath(parts.slice(0, -1).join('/') + '/');
   };
-  const isAtRoot = currentPath === LESSON_ASSETS_ROOT;
+  const isAtRoot = currentPath.replace(/\/+$/, '') === browseRootNorm;
 
   const handleSelectFile = (item) => {
     if (!isAcceptedFile(item.name, accept)) {
@@ -272,9 +305,13 @@ const ObjectStoreBrowserModal = ({
     setUploading(true); setError(null);
     let lastResult = null;
     try {
+      // 읽는 파일명 유지 + 현재 폴더/배치 내 충돌 시 "name (1).ext" 로 회피
+      const taken = new Set(items.map((i) => i.name.toLowerCase()));
       for (let i = 0; i < accepted.length; i++) {
         setUploadProgress({ done: i, total: accepted.length });
-        lastResult = await uploadFile(accepted[i], currentPath);
+        let fileName = nextAvailableName(cleanFileName(accepted[i].name), taken);
+        taken.add(fileName.toLowerCase());
+        lastResult = await uploadFile(accepted[i], currentPath, { fileName });
       }
       setUploadProgress({ done: accepted.length, total: accepted.length });
       if (rejected > 0) setError(`${rejected}개 파일이 형식 불일치로 제외되었습니다.`);
@@ -329,7 +366,10 @@ const ObjectStoreBrowserModal = ({
     if (!window.confirm(`${label}을(를) 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.${usageWarning}`)) return;
     try {
       setLoading(true);
-      for (const it of list) await deleteItem(it.displayKey, it.isDirectory);
+      for (const it of list) {
+        await deleteItem(it.displayKey, it.isDirectory);
+        for (const sk of siblingsOf(it.displayKey)) { try { await deleteItem(sk, false); } catch (_) { /* 사이드카 없을 수 있음 */ } }
+      }
       await loadList(); await refreshUsage();
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
@@ -347,6 +387,12 @@ const ObjectStoreBrowserModal = ({
       const newKey = renameTarget.isDirectory ? oldParts.join('/') + '/' : oldParts.join('/');
       await renameItem(oldKey, newName, renameTarget.isDirectory);
       await updateAssetUrls(buildReplacements({ oldDisplayKey: oldKey, newDisplayKey: newKey, isDirectory: renameTarget.isDirectory }));
+      // 짝 파일(.json 등)도 같은 베이스명으로 이름 변경
+      const newBase = newName.replace(/\.[^.]+$/, '');
+      for (const sk of siblingsOf(oldKey)) {
+        const skExt = (sk.split('.').pop() || '');
+        try { await renameItem(sk, `${newBase}.${skExt}`, false); } catch (_) { /* 사이드카 없을 수 있음 */ }
+      }
       setRenameTarget(null);
       await loadList(); await refreshUsage();
     } catch (err) { setError(err.message); } finally { setLoading(false); }
@@ -354,7 +400,10 @@ const ObjectStoreBrowserModal = ({
 
   const moveMany = async (targets, targetParentPath) => {
     const parent = targetParentPath.endsWith('/') ? targetParentPath : targetParentPath + '/';
-    const replacements = [];
+    const movable = targets.filter((it) => (it.displayKey.replace(/\/+$/, '').split('/').slice(0, -1).join('/') + '/') !== parent);
+    if (movable.length > 1) setBatchProgress({ label: '이동 중', done: 0, total: movable.length });
+    let processed = 0;
+    try {
     for (const it of targets) {
       const sourceParent = it.displayKey.replace(/\/+$/, '').split('/').slice(0, -1).join('/') + '/';
       if (sourceParent === parent) continue;
@@ -366,9 +415,16 @@ const ObjectStoreBrowserModal = ({
         : it.displayKey.split('/').pop();
       const newKey = it.isDirectory ? `${parent}${baseName}/` : `${parent}${baseName}`;
       await moveItem(it.displayKey, parent, it.isDirectory);
-      replacements.push(...buildReplacements({ oldDisplayKey: it.displayKey, newDisplayKey: newKey, isDirectory: it.isDirectory }));
+      // 참조를 파일별로 즉시 갱신 → 중간 실패해도 이미 옮긴 파일은 참조 일관성 유지(깨진 참조 방지)
+      await updateAssetUrls(buildReplacements({ oldDisplayKey: it.displayKey, newDisplayKey: newKey, isDirectory: it.isDirectory }));
+      // 짝 파일도 같은 폴더로 이동
+      for (const sk of siblingsOf(it.displayKey)) { try { await moveItem(sk, parent, false); } catch (_) { /* 사이드카 없을 수 있음 */ } }
+      processed += 1;
+      setBatchProgress((p) => (p ? { ...p, done: processed } : p));
     }
-    if (replacements.length > 0) await updateAssetUrls(replacements);
+    } finally {
+      setBatchProgress(null);
+    }
   };
 
   const handleMoveConfirm = async (targetParentPath) => {
@@ -402,6 +458,7 @@ const ObjectStoreBrowserModal = ({
       } else {
         for (const it of clipboard.items) {
           await copyItem(it.displayKey, currentPath, it.isDirectory);
+          for (const sk of siblingsOf(it.displayKey)) { try { await copyItem(sk, currentPath, false); } catch (_) { /* 사이드카 없을 수 있음 */ } }
         }
       }
       await loadList(); await refreshUsage();
@@ -544,17 +601,35 @@ const ObjectStoreBrowserModal = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="flex h-[80vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">ObjectStore 파일 선택</h2>
-            <p className="text-[11px] text-slate-400">
-              빈 영역 드래그 = 박스 선택 · Cmd/Shift+클릭 = 다중 · 우클릭 = 메뉴 · ⌘C/X/V 지원
-            </p>
+          <div className="flex items-center gap-2">
+            {customView && (
+              <button type="button" onClick={() => setCustomView(false)} className="rounded p-1 text-slate-500 hover:bg-slate-100" title="뒤로">
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            <div>
+              <h2 className="text-sm font-semibold text-slate-800">{customView ? (primaryAction?.label || '생성') : title}</h2>
+              <p className="text-[11px] text-slate-400">
+                {customView ? '← 뒤로가기로 목록으로 돌아갑니다.' : (subtitle || '빈 영역 드래그 = 박스 선택 · Cmd/Shift+클릭 = 다중 · 우클릭 = 메뉴 · ⌘C/X/V 지원')}
+              </p>
+            </div>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1.5 text-slate-500 hover:bg-slate-100">
             <X size={18} />
           </button>
         </div>
 
+        {customView && primaryAction?.render && (
+          <div className="flex-1 overflow-y-auto">
+            {primaryAction.render({
+              currentPath,
+              reload: () => { loadList(); refreshUsage(); },
+              close: () => setCustomView(false),
+            })}
+          </div>
+        )}
+
+        {!customView && (<>
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
           <button type="button" onClick={handleBack}
             onDragEnter={(e) => { if (draggingInternal && !isAtRoot) e.preventDefault(); }}
@@ -565,7 +640,7 @@ const ObjectStoreBrowserModal = ({
             title="상위 폴더 (드래그앤드랍으로도 이동)">
             <ArrowLeft size={16} />
           </button>
-          <Breadcrumb path={currentPath} onNavigate={setCurrentPath} />
+          <Breadcrumb path={currentPath} onNavigate={setCurrentPath} rootPath={browseRoot} />
           {selectedItems.length > 0 && (
             <span className="ml-2 rounded bg-cyan-100 px-2 py-0.5 text-[11px] font-semibold text-cyan-700">
               {selectedItems.length}개 선택됨
@@ -589,11 +664,23 @@ const ObjectStoreBrowserModal = ({
               className="flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50">
               <FolderPlus size={14} /> 새 폴더
             </button>
-            <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
-              className="flex items-center gap-1 rounded bg-cyan-500 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-600 disabled:bg-slate-300">
-              <UploadSimple size={14} /> 업로드
-            </button>
-            <input ref={fileInputRef} type="file" accept={accept} multiple onChange={handleFileInputChange} className="hidden" />
+            {primaryAction ? (
+              <button type="button" onClick={() => {
+                if (primaryAction.render) setCustomView(true);
+                else if (primaryAction.onClick) primaryAction.onClick({ currentPath, reload: () => { loadList(); refreshUsage(); } });
+              }}
+                className="flex items-center gap-1 rounded bg-cyan-500 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-600">
+                <Plus size={14} weight="bold" /> {primaryAction.label}
+              </button>
+            ) : (
+              <>
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                  className="flex items-center gap-1 rounded bg-cyan-500 px-2 py-1 text-xs font-semibold text-white hover:bg-cyan-600 disabled:bg-slate-300">
+                  <UploadSimple size={14} /> 업로드
+                </button>
+                <input ref={fileInputRef} type="file" accept={accept} multiple onChange={handleFileInputChange} className="hidden" />
+              </>
+            )}
           </div>
         </div>
 
@@ -651,7 +738,24 @@ const ObjectStoreBrowserModal = ({
           <div className="flex-1 truncate text-xs text-red-500">{error}</div>
           <div className="text-[11px] text-slate-400">{items.length}개 항목</div>
         </div>
+        </>)}
       </div>
+
+      {/* 다중 작업(이동 등) 진행 오버레이 — 완료 전까지 상호작용 차단 */}
+      {batchProgress && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40" onClick={(e) => e.stopPropagation()}>
+          <div className="w-80 rounded-xl bg-white p-5 shadow-2xl">
+            <div className="mb-2 text-sm font-semibold text-slate-800">
+              {batchProgress.label}… {batchProgress.done}/{batchProgress.total}
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div className="h-full bg-cyan-500 transition-all"
+                style={{ width: `${batchProgress.total ? Math.round((batchProgress.done / batchProgress.total) * 100) : 0}%` }} />
+            </div>
+            <div className="mt-2 text-[11px] text-slate-400">완료될 때까지 창을 닫지 마세요.</div>
+          </div>
+        </div>
+      )}
 
       {/* Context Menu */}
       {contextMenu && (
@@ -731,6 +835,7 @@ const ObjectStoreBrowserModal = ({
       {moveTarget && (
         <ParentSelectDialog
           currentPath={currentPath}
+          rootPath={moveRoot}
           onSelect={handleMoveConfirm}
           onCancel={() => setMoveTarget(null)}
         />

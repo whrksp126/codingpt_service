@@ -18,24 +18,26 @@ const getHeaders = () => {
   };
 };
 
+// 모듈 레벨 캐시 — 목소리/모델은 거의 안 바뀌므로 최초 1회만 호출하고 재사용.
+let _modelsCache = null;
+let _voicesCache = null;
+
 /**
- * ElevenLabs 모델 목록 조회 (인증 불필요)
+ * ElevenLabs 모델 목록 조회 (인증 불필요). 성공 결과는 캐시.
  */
-export const getModels = async () => {
+export const getModels = async ({ force = false } = {}) => {
+  if (_modelsCache && !force) return _modelsCache;
   try {
     const response = await fetch(`${backendUrl}/api/tts/models`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
     });
-
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.message || '모델 목록 조회에 실패했습니다.');
     }
-
-    return await response.json();
+    _modelsCache = await response.json();
+    return _modelsCache;
   } catch (error) {
     console.error('모델 목록 조회 실패:', error);
     throw error;
@@ -43,21 +45,21 @@ export const getModels = async () => {
 };
 
 /**
- * ElevenLabs 목소리 목록 조회
+ * ElevenLabs 목소리 목록 조회. 성공 결과는 캐시(force 로 갱신).
  */
-export const getVoices = async () => {
+export const getVoices = async ({ force = false } = {}) => {
+  if (_voicesCache && !force) return _voicesCache;
   try {
     const response = await fetch(`${backendUrl}/api/tts/voices`, {
       method: 'GET',
       headers: getHeaders(),
     });
-
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
       throw new Error(errorData.message || '목소리 목록 조회에 실패했습니다.');
     }
-
-    return await response.json();
+    _voicesCache = await response.json();
+    return _voicesCache;
   } catch (error) {
     console.error('목소리 목록 조회 실패:', error);
     throw error;
@@ -212,6 +214,74 @@ export const getSavedFiles = async (page = 1, limit = 20) => {
     console.error('저장된 파일 목록 조회 실패:', error);
     throw error;
   }
+};
+
+// ───────────────────────────────────────────────
+// 중앙 관리형 TTS 자산 라이브러리 (/api/tts/assets)
+// ───────────────────────────────────────────────
+
+/** 자산 생성 (생성 + objectstore 영구저장 1단계) */
+export const createAsset = async ({ text, voiceId, modelId, settings, folder }) => {
+  const response = await fetch(`${backendUrl}/api/tts/assets`, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ text, voiceId, modelId, settings, folder }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || '자산 생성에 실패했습니다.');
+  return data;
+};
+
+/** 자산 목록 (사용처 포함) */
+export const listAssets = async ({ search = '', page = 1, limit = 50 } = {}) => {
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  params.set('page', page);
+  params.set('limit', limit);
+  const response = await fetch(`${backendUrl}/api/tts/assets?${params.toString()}`, {
+    method: 'GET',
+    headers: getHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || '자산 목록 조회에 실패했습니다.');
+  return data;
+};
+
+/** 자산 단건 조회 */
+export const getAsset = async (id) => {
+  const response = await fetch(`${backendUrl}/api/tts/assets/${id}`, {
+    method: 'GET',
+    headers: getHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || '자산 조회에 실패했습니다.');
+  return data;
+};
+
+/** 자산 수정 (재생성 → 같은 키 덮어쓰기 → 참조 레슨 자동 반영) */
+export const updateAsset = async (id, { text, voiceId, modelId, settings }) => {
+  const response = await fetch(`${backendUrl}/api/tts/assets/${id}`, {
+    method: 'PUT',
+    headers: getHeaders(),
+    body: JSON.stringify({ text, voiceId, modelId, settings }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || '자산 수정에 실패했습니다.');
+  return data;
+};
+
+/** 자산 삭제 (force=true 면 사용 중이어도 강제). 사용 중(409) 시 { conflict:true, usage } 반환 */
+export const deleteAsset = async (id, force = false) => {
+  const response = await fetch(`${backendUrl}/api/tts/assets/${id}${force ? '?force=1' : ''}`, {
+    method: 'DELETE',
+    headers: getHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 409) {
+    return { conflict: true, message: data.message, usage: data.usage || [] };
+  }
+  if (!response.ok) throw new Error(data.message || '삭제에 실패했습니다.');
+  return data;
 };
 
 /**

@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Folder, FileText, File as FileIcon } from '@phosphor-icons/react';
+import { useState, useRef } from 'react';
+import { Folder, FileText, File as FileIcon, Play, Pause, SpeakerHigh } from '@phosphor-icons/react';
 import { isAcceptedFile, keyToUrl } from '../../../../../../utils/objectStoreApi';
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif', 'bmp', 'ico']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'm4a', 'ogg', 'mpeg']);
 const getExt = (name) => (name.split('.').pop() || '').toLowerCase();
 
 const UsageOverlay = ({ usages, isUsed }) => (
@@ -45,9 +46,24 @@ const FileCard = ({
   usages,
 }) => {
   const [isOver, setIsOver] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const audioElRef = useRef(null);
   const isFolder = item.isDirectory;
   const ext = isFolder ? '' : getExt(item.name);
   const isImage = !isFolder && IMAGE_EXT.has(ext);
+  const isAudio = !isFolder && AUDIO_EXT.has(ext);
+
+  const toggleAudio = (e) => {
+    e.stopPropagation();
+    let a = audioElRef.current;
+    if (!a) {
+      a = new Audio(keyToUrl(item.displayKey));
+      a.onended = () => setAudioPlaying(false);
+      a.onpause = () => setAudioPlaying(false);
+      audioElRef.current = a;
+    }
+    if (a.paused) { a.play(); setAudioPlaying(true); } else { a.pause(); setAudioPlaying(false); }
+  };
   const accepted = isFolder ? true : isAcceptedFile(item.name, accept);
   const isUsed = !isFolder && usages && usages.length > 0;
 
@@ -133,6 +149,15 @@ const FileCard = ({
             className="h-full w-full object-contain"
             onError={(e) => { e.target.style.display = 'none'; }}
           />
+        ) : isAudio ? (
+          <button
+            type="button"
+            onClick={toggleAudio}
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-600 text-white shadow hover:bg-cyan-700"
+            title="미리듣기"
+          >
+            {audioPlaying ? <Pause size={22} weight="fill" /> : <Play size={22} weight="fill" />}
+          </button>
         ) : ext === 'txt' || ext === 'md' || ext === 'json' ? (
           <FileText size={40} className="text-slate-400" />
         ) : (

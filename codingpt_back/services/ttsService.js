@@ -140,9 +140,24 @@ class TTSService {
         }
       };
 
+      // 안정형 다국어 모델 — 한국어 발음이 v3-alpha 보다 자연스러운 경우가 많음
+      const multilingualV2 = {
+        model_id: 'eleven_multilingual_v2',
+        name: 'Multilingual v2 (한국어 권장)',
+        description: '안정적인 다국어 모델. 한국어 등 비영어권 발음이 비교적 자연스러움',
+        language_support: '29개 언어',
+        quality: '높음',
+        speed: '보통',
+        character_limit: 5000,
+        can_use_style: true,
+        can_use_speaker_boost: true,
+        supported_settings: elevenV3Model.supported_settings,
+        default_settings: elevenV3Model.default_settings
+      };
+
       return {
         success: true,
-        models: [elevenV3Model]
+        models: [multilingualV2, elevenV3Model]
       };
     } catch (error) {
       console.error('[TTSService] 모델 목록 조회 실패:', error.message);
@@ -166,12 +181,12 @@ class TTSService {
         throw new Error('modelId는 필수입니다.');
       }
 
-      // eleven_v3만 지원하므로 고정값 반환
-      if (modelId !== 'eleven_v3') {
+      const SUPPORTED = ['eleven_v3', 'eleven_multilingual_v2'];
+      if (!SUPPORTED.includes(modelId)) {
         return {
           success: false,
           error: 'ModelNotFound',
-          message: `모델 '${modelId}'를 찾을 수 없습니다. 지원되는 모델: eleven_v3`
+          message: `모델 '${modelId}'를 찾을 수 없습니다. 지원되는 모델: ${SUPPORTED.join(', ')}`
         };
       }
 
@@ -223,8 +238,8 @@ class TTSService {
 
       return {
         success: true,
-        modelId: 'eleven_v3',
-        modelName: 'Eleven v3',
+        modelId,
+        modelName: modelId === 'eleven_multilingual_v2' ? 'Multilingual v2' : 'Eleven v3',
         settingsSchema,
         defaultSettings
       };
@@ -254,28 +269,15 @@ class TTSService {
 
       const allVoices = response.data.voices || [];
 
-      // 사용자가 선택/저장한 목소리만 필터링
-      // API 응답 구조에 따라 다음 필드들을 확인:
-      // - is_favorite: 즐겨찾기 여부
-      // - is_custom: 커스텀 목소리 여부
-      // - category: 'premade'가 아닌 것들 (사용자가 생성한 목소리)
-      // 또는 사용자가 생성한 목소리만 (category가 없거나 'custom'인 것들)
-      const selectedVoices = allVoices.filter(voice => {
-        // 1. 즐겨찾기된 목소리
-        if (voice.is_favorite === true) {
-          return true;
-        }
-
-        // 2. 사용자가 생성한 커스텀 목소리 (category가 'premade'가 아닌 것)
-        if (voice.category && voice.category !== 'premade') {
-          return true;
-        }
-
-        // 3. category가 없으면 사용자 계정에 등록된 목소리로 간주
-        // (API 키와 연동된 계정의 목소리만 반환되므로)
-        // 기본 제공 목소리(premade)는 제외
-        return !voice.category || voice.category !== 'premade';
-      });
+      // 모든 목소리를 반환하되 정렬: 즐겨찾기 → premade(무료 티어 사용 가능) → 그 외.
+      // (과거엔 premade 를 제외했으나, 무료 API 키로는 library/professional 보이스가
+      //  생성 시 거부되어 정작 쓸 수 있는 premade 가 목록에 없는 문제가 있었음.)
+      const rank = (v) => {
+        if (v.is_favorite === true) return 0;
+        if (v.category === 'premade') return 1;
+        return 2;
+      };
+      const selectedVoices = [...allVoices].sort((a, b) => rank(a) - rank(b));
 
       return {
         success: true,

@@ -1,7 +1,9 @@
 const { Op } = require('sequelize');
-const { Product, Class, Section, Lesson, Slide, LessonSlideMap, User, CodeFillGap } = require('../models');
+const { Product, Class, Section, Lesson, Slide, LessonSlideMap, User, CodeFillGap, TTSAsset } = require('../models');
 const { computeCodeHash } = require('../utils/codeHash');
 const { transformContentsDeep } = require('../utils/lessonContentsMigration');
+const { collectAssetIds, hydrate } = require('../utils/ttsHydration');
+const ttsAssetService = require('./ttsAssetService');
 const codeFillExecutionUtils = require('./codeFillExecutionUtils');
 
 // 언어 약어 정규화 (terminal/codeFillTheGapV2 모듈은 'js'/'py' 같은 약어 사용)
@@ -115,6 +117,29 @@ class LessonService {
     }
   }
 
+  // 슬라이드들이 참조하는 tts.assetId 를 모아 일괄 조회 → Map<id, {url,timestamps,duration}>.
+  // N+1 방지: 슬라이드 전수에서 id 수집 후 단일 findAll.
+  async _buildTtsAssetMap(slides) {
+    const ids = new Set();
+    for (const s of slides) {
+      if (!s || !s.contents) continue;
+      for (const id of collectAssetIds(s.contents)) ids.add(id);
+    }
+    const map = new Map();
+    if (ids.size === 0) return map;
+    const assets = await TTSAsset.findAll({ where: { id: { [Op.in]: [...ids] } } });
+    for (const a of assets) {
+      map.set(a.id, {
+        url: ttsAssetService.audioUrlForAsset(a),
+        timestamps: a.timestamps,
+        duration: a.duration,
+        voiceId: a.voice_id,
+        modelId: a.model_id,
+      });
+    }
+    return map;
+  }
+
   // RN(학습자) 화면용: 레슨 → { id, title, sliders: [...] } 평탄화
   // 신/구 contents 스키마 모두 지원 (구: { sliders: [...] }, 신: { title, role, modules, ... })
   async getLessonRuntime(lessonId) {
@@ -131,6 +156,9 @@ class LessonService {
       : [];
     const slideById = new Map(slides.map((s) => [s.id, s]));
 
+    // TTS 자산 하이드레이션 맵: 슬라이드들이 참조하는 tts.assetId 를 일괄 조회.
+    const ttsAssetMap = await this._buildTtsAssetMap(slides);
+
     const sliders = [];
     let sliderIdx = 0;
     for (const m of maps) {
@@ -138,7 +166,8 @@ class LessonService {
       if (!slide || !slide.contents) continue;
       // 안전망: legacy 결과영역 / codeRunResult 가 남아있으면 응답 시점에 평면화 + trigger 부여.
       // DB 마이그레이션이 누락된 슬라이드 보호 (idempotent).
-      const c = transformContentsDeep(slide.contents);
+      // tts:{assetId} → {url,timestamps,duration} 하이드레이션 (앱이 기존처럼 tts.url 사용).
+      const c = hydrate(transformContentsDeep(slide.contents), ttsAssetMap);
 
       // 구 스키마: { sliders: [...] }
       if (Array.isArray(c.sliders)) {

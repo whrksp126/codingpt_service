@@ -1,20 +1,24 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
-const authMiddleware = require('../middlewares/authMiddleware');
 const ttsController = require('../controllers/ttsController');
+const ttsAssetController = require('../controllers/ttsAssetController');
 
-// 인증은 선택적 (토큰이 있으면 사용, 없으면 null)
+// 진짜 선택적 인증: 토큰이 있고 유효하면 req.user 설정, 없거나 무효면 익명(null)으로 통과.
+// (과거엔 무효/만료 토큰이면 401 을 던져서, localStorage 에 stale 토큰이 있는 브라우저에서
+//  voices/assets 호출이 전부 401 로 깨졌음. 단일 관리자 서비스라 인증 강제 불필요.)
 const optionalAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  
   if (authHeader && authHeader.startsWith('Bearer ')) {
-    // 토큰이 있으면 인증 미들웨어 실행
-    return authMiddleware(req, res, next);
+    try {
+      req.user = jwt.verify(authHeader.split(' ')[1], process.env.ACCESS_SECRET);
+    } catch (e) {
+      req.user = null; // 무효/만료 토큰 → 익명 처리 (401 던지지 않음)
+    }
   } else {
-    // 토큰이 없으면 req.user를 null로 설정하고 계속 진행
     req.user = null;
-    next();
   }
+  next();
 };
 
 // 모든 라우트에 선택적 인증 미들웨어 적용
@@ -46,5 +50,17 @@ router.delete('/saved/:savedFileId', ttsController.deleteSavedFile);
 
 // 오디오 파일 프록시 (CORS 문제 해결용)
 router.get('/audio/:requestId', ttsController.getAudioProxy);
+
+// ───────────────────────────────────────────────
+// 중앙 관리형 TTS 자산 라이브러리 (생성+영구저장 1단계, 수정=재생성, 삭제)
+// ───────────────────────────────────────────────
+router.post('/assets/generate-file', ttsAssetController.generateFile);
+router.post('/assets/preview', ttsAssetController.preview);
+router.post('/assets/save-preview', ttsAssetController.savePreview);
+router.post('/assets', ttsAssetController.create);
+router.get('/assets', ttsAssetController.list);
+router.get('/assets/:id', ttsAssetController.getById);
+router.put('/assets/:id', ttsAssetController.regenerate);
+router.delete('/assets/:id', ttsAssetController.remove);
 
 module.exports = router;
