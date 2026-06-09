@@ -28,9 +28,5 @@ router.post('/move', s3Controller.move);
 // S3 파일/폴더 복사 (POST)
 router.post('/copy', s3Controller.copy);
 
-// CloudFront 캐시 무효화 (POST 또는 PUT)
-router.post('/invalidate', s3Controller.invalidateCache);
-router.put('/invalidate', s3Controller.invalidateCache);
-
 module.exports = router;
 

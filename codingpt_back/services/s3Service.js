@@ -1,39 +1,24 @@
 const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
-const { CloudFrontClient, CreateInvalidationCommand } = require('@aws-sdk/client-cloudfront');
 
 class S3Service {
   constructor() {
-    const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore 사용 시 설정
+    const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
 
     this.s3Client = new S3Client({
-      region: process.env.OBJECTSTORE_REGION || process.env.AWS_REGION || 'ap-northeast-2',
+      region: process.env.OBJECTSTORE_REGION || 'us-east-1',
       credentials: {
-        accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY
+        accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY,
+        secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY
       },
       ...(endpoint && {
         endpoint,
         forcePathStyle: true, // MinIO/objectstore는 path-style 필수
       }),
     });
-    this.bucketName = process.env.OBJECTSTORE_BUCKET || process.env.S3_BUCKET_NAME;
+    this.bucketName = process.env.OBJECTSTORE_BUCKET;
 
-    // CloudFront 클라이언트 초기화 (objectstore 사용 시 CloudFront 불필요)
-    this.cloudFrontClient = endpoint ? null : new CloudFrontClient({
-      region: process.env.AWS_REGION || 'ap-northeast-2',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-      }
-    });
-    this.cloudFrontDistributionId = endpoint ? null : process.env.CLOUDFRONT_DISTRIBUTION_ID;
-    
     if (!this.bucketName) {
-      console.warn('[S3Service] S3_BUCKET_NAME 환경 변수가 설정되지 않았습니다.');
-    }
-    
-    if (!this.cloudFrontDistributionId) {
-      console.warn('[S3Service] CLOUDFRONT_DISTRIBUTION_ID 환경 변수가 설정되지 않았습니다. CloudFront 캐시 무효화가 비활성화됩니다.');
+      console.warn('[S3Service] OBJECTSTORE_BUCKET 환경 변수가 설정되지 않았습니다.');
     }
   }
 
@@ -1288,86 +1273,6 @@ class S3Service {
     } catch (error) {
       console.error('[S3Service] 복사 오류:', error);
       return { success: false, message: error.message || '복사에 실패했습니다.', error: error.name || 'UnknownError' };
-    }
-  }
-
-  /**
-   * CloudFront 캐시 무효화 (배치 - 여러 파일)
-   * @param {string[]} filePaths - 무효화할 파일 경로 배열
-   * @returns {Promise<Object>} - 무효화 결과
-   */
-  async invalidateCloudFrontCacheBatch(filePaths) {
-    // CloudFront Distribution ID가 설정되지 않은 경우 스킵
-    if (!this.cloudFrontDistributionId) {
-      return {
-        success: false,
-        message: 'CloudFront Distribution ID가 설정되지 않았습니다.',
-        skipped: true
-      };
-    }
-
-    // CloudFront Distribution ID가 설정되지 않은 경우 스킵
-    if (!this.cloudFrontDistributionId) {
-      return {
-        success: false,
-        message: 'CloudFront Distribution ID가 설정되지 않았습니다.',
-        skipped: true
-      };
-    }
-
-    if (!filePaths || filePaths.length === 0) {
-      return {
-        success: false,
-        message: '무효화할 파일 경로가 없습니다.',
-        skipped: true
-      };
-    }
-
-    try {
-      // S3 경로를 CloudFront 경로로 변환 (앞에 슬래시 추가)
-      // 중복 제거 (같은 파일이 여러 번 업데이트된 경우)
-      const uniquePaths = [...new Set(filePaths.map(path => `/${path}`))];
-
-      const params = {
-        DistributionId: this.cloudFrontDistributionId,
-        InvalidationBatch: {
-          Paths: {
-            Quantity: uniquePaths.length,
-            Items: uniquePaths
-          },
-          CallerReference: `invalidate-${Date.now()}-${Math.random().toString(36).substring(7)}`
-        }
-      };
-
-      console.log('[S3Service] CloudFront 캐시 무효화 요청 (배치):', {
-        distributionId: this.cloudFrontDistributionId,
-        pathCount: uniquePaths.length,
-        paths: uniquePaths,
-        note: '여러 파일을 한 번의 요청으로 무효화하여 효율성 향상'
-      });
-
-      const command = new CreateInvalidationCommand(params);
-      const result = await this.cloudFrontClient.send(command);
-
-      console.log('[S3Service] CloudFront 캐시 무효화 성공:', {
-        invalidationId: result.Invalidation?.Id,
-        status: result.Invalidation?.Status
-      });
-
-      return {
-        success: true,
-        invalidationId: result.Invalidation?.Id,
-        status: result.Invalidation?.Status,
-        pathCount: uniquePaths.length,
-        paths: uniquePaths
-      };
-    } catch (error) {
-      console.error('[S3Service] CloudFront 캐시 무효화 오류:', error);
-      return {
-        success: false,
-        message: error.message || 'CloudFront 캐시 무효화에 실패했습니다.',
-        error: error.name || 'UnknownError'
-      };
     }
   }
 

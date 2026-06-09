@@ -181,76 +181,6 @@ const createFolder = async (req, res) => {
 };
 
 /**
- * CloudFront 캐시 무효화
- * POST /api/s3/invalidate
- * PUT /api/s3/invalidate
- * 
- * Body: { filePath: string } 또는 { filePaths: string[] }
- */
-const invalidateCache = async (req, res) => {
-  try {
-    const { filePath, filePaths } = req.body;
-
-    // 단일 경로 또는 여러 경로 지원
-    let paths = [];
-    if (filePaths && Array.isArray(filePaths)) {
-      paths = filePaths;
-    } else if (filePath && typeof filePath === 'string') {
-      paths = [filePath];
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: '파일 경로가 필요합니다. (filePath 또는 filePaths)',
-        error: 'MissingPath'
-      });
-    }
-
-    // 로깅
-    console.log(`[S3Controller] CloudFront 캐시 무효화 요청:`, { 
-      pathCount: paths.length,
-      paths: paths 
-    });
-
-    // 여러 경로를 한 번에 무효화 (배치 처리)
-    const result = await s3Service.invalidateCloudFrontCacheBatch(paths);
-
-    if (result.success) {
-      return res.status(200).json({
-        success: true,
-        message: '캐시 무효화가 성공적으로 요청되었습니다.',
-        invalidationId: result.invalidationId,
-        status: result.status,
-        pathCount: result.pathCount,
-        paths: result.paths
-      });
-    } else {
-      // 스킵된 경우 (예: Distribution ID 미설정)
-      if (result.skipped) {
-        return res.status(200).json({
-          success: false,
-          message: result.message || '캐시 무효화가 스킵되었습니다.',
-          skipped: true
-        });
-      }
-
-      const statusCode = result.error === 'AccessDenied' ? 403 : 500;
-      return res.status(statusCode).json({
-        success: false,
-        message: result.message || '캐시 무효화에 실패했습니다.',
-        error: result.error || 'UnknownError'
-      });
-    }
-  } catch (error) {
-    console.error('[S3Controller] 캐시 무효화 오류:', error);
-    return res.status(500).json({
-      success: false,
-      message: '캐시 무효화 중 오류가 발생했습니다.',
-      error: 'InternalServerError'
-    });
-  }
-};
-
-/**
  * S3 파일 삭제
  * DELETE /api/s3/file
  */
@@ -387,7 +317,6 @@ module.exports = {
   rename,
   deleteFile,
   move,
-  copy,
-  invalidateCache
+  copy
 };
 

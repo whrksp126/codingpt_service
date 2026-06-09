@@ -9,7 +9,7 @@ const http = require('http');
 const app = express();
 const PORT = process.env.EXECUTOR_PORT || 5200;
 
-const S3_PUBLIC_BASE_URL = process.env.S3_PUBLIC_BASE_URL || 'https://s3.ghmate.com';
+const S3_PUBLIC_BASE_URL = process.env.OBJECTSTORE_PUBLIC_BASE_URL || process.env.S3_PUBLIC_BASE_URL || 'https://objectstore.ghmate.com/codingpt';
 // 백엔드 URL에서 Executor 서버의 공개 URL 생성 (프리뷰 URL 생성 시 사용)
 const BACKEND_URL = process.env.BACKEND_URL || `http://localhost:5103`;
 const EXECUTOR_PUBLIC_URL = `${BACKEND_URL}/executor`;
@@ -40,9 +40,9 @@ console.log('  - PORT:', PORT);
 console.log('  - BACKEND_URL:', BACKEND_URL);
 console.log('  - EXECUTOR_PUBLIC_URL:', EXECUTOR_PUBLIC_URL);
 console.log('  - S3_PUBLIC_BASE_URL:', S3_PUBLIC_BASE_URL);
-console.log('  - OBJECTSTORE_ENDPOINT:', process.env.OBJECTSTORE_ENDPOINT || process.env.AWS_REGION || '(설정되지 않음)');
-console.log('  - OBJECTSTORE_ACCESS_KEY:', process.env.OBJECTSTORE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID ? '***설정됨***' : '(설정되지 않음)');
-console.log('  - OBJECTSTORE_BUCKET:', process.env.OBJECTSTORE_BUCKET || process.env.S3_BUCKET_NAME || '(설정되지 않음)');
+console.log('  - OBJECTSTORE_ENDPOINT:', process.env.OBJECTSTORE_ENDPOINT || '(설정되지 않음)');
+console.log('  - OBJECTSTORE_ACCESS_KEY:', process.env.OBJECTSTORE_ACCESS_KEY ? '***설정됨***' : '(설정되지 않음)');
+console.log('  - OBJECTSTORE_BUCKET:', process.env.OBJECTSTORE_BUCKET || '(설정되지 않음)');
 
 // 미들웨어
 app.use(express.json({ limit: '10mb' }));

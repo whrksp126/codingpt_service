@@ -4,7 +4,7 @@ const http = require('http');
 
 class PreviewService {
   constructor() {
-    this.s3PublicBaseUrl = process.env.S3_PUBLIC_BASE_URL || 'https://s3.ghmate.com';
+    this.s3PublicBaseUrl = process.env.OBJECTSTORE_PUBLIC_BASE_URL || process.env.S3_PUBLIC_BASE_URL || 'https://objectstore.ghmate.com/codingpt';
     this.backendUrl = process.env.BACKEND_URL || 'http://localhost:5103';
     this.executorPublicUrl = `${this.backendUrl}/api/executor`;
     

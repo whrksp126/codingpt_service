@@ -31,8 +31,7 @@ const Execute = () => {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false); // 저장되지 않은 변경사항
   const saveTimeoutRef = useRef(null); // 자동 저장 debounce용
   const [contextMenu, setContextMenu] = useState(null); // 컨텍스트 메뉴 { file, x, y }
-  const [isInvalidating, setIsInvalidating] = useState(false); // 캐시 무효화 중 상태
-  const [invalidationMessage, setInvalidationMessage] = useState(null); // 캐시 무효화 성공 메시지
+  const [invalidationMessage, setInvalidationMessage] = useState(null); // 알림 메시지 (경로 복사 등)
   const [expandedFolders, setExpandedFolders] = useState(new Set()); // 펼쳐진 폴더 경로 Set
   const [fileTree, setFileTree] = useState([]); // 트리 구조로 변환된 파일 목록
   const [isDeleting, setIsDeleting] = useState(false); // 삭제 중 상태
@@ -1041,87 +1040,6 @@ for key, value in person.items():
     }
   }, [s3TerminalOutput]);
 
-  // 캐시 무효화 API 호출
-  const handleInvalidateCache = async (filePath) => {
-    if (!filePath) return;
-
-    setIsInvalidating(true);
-    setContextMenu(null); // 컨텍스트 메뉴 닫기
-
-    try {
-      // filePath에서 codingpt/execute/ prefix 제거 (백엔드에서 자동 추가)
-      let normalizedPath = filePath;
-      if (normalizedPath.startsWith('codingpt/execute/')) {
-        normalizedPath = normalizedPath.replace('codingpt/execute/', '');
-      }
-
-      const response = await fetch(`${backendUrl}/api/s3/invalidate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ filePath: normalizedPath }),
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        // 성공 메시지 표시
-        console.log('캐시 무효화 성공:', data.invalidationId);
-        setInvalidationMessage(`캐시 무효화가 요청되었습니다. (ID: ${data.invalidationId})`);
-        setPreviewError(null);
-        // 3초 후 메시지 자동 제거
-        setTimeout(() => {
-          setInvalidationMessage(null);
-        }, 3000);
-      } else {
-        setPreviewError(data.message || '캐시 무효화에 실패했습니다.');
-        setInvalidationMessage(null);
-      }
-    } catch (err) {
-      setPreviewError('캐시 무효화 요청 중 오류가 발생했습니다.');
-      console.error('캐시 무효화 오류:', err);
-    } finally {
-      setIsInvalidating(false);
-    }
-  };
-
-  // 최상단 경로 캐시 무효화 (전체 영역 우클릭용)
-  const handleInvalidateRootCache = async () => {
-    setIsInvalidating(true);
-    setContextMenu(null);
-
-    try {
-      // 최상단 경로는 빈 문자열 또는 루트 경로로 전달
-      const response = await fetch(`${backendUrl}/api/s3/invalidate`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ filePath: '' }), // 빈 경로 = 최상단
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        console.log('최상단 캐시 무효화 성공:', data.invalidationId);
-        setInvalidationMessage(`최상단 경로 캐시 무효화가 요청되었습니다. (ID: ${data.invalidationId})`);
-        setPreviewError(null);
-        setTimeout(() => {
-          setInvalidationMessage(null);
-        }, 3000);
-      } else {
-        setPreviewError(data.message || '캐시 무효화에 실패했습니다.');
-        setInvalidationMessage(null);
-      }
-    } catch (err) {
-      setPreviewError('캐시 무효화 요청 중 오류가 발생했습니다.');
-      console.error('캐시 무효화 오류:', err);
-    } finally {
-      setIsInvalidating(false);
-    }
-  };
-
   // 경로 복사 함수
   const handleCopyPath = async (file) => {
     if (!file || !file.path) return;
@@ -1576,16 +1494,8 @@ for key, value in person.items():
                   </div>
                   )}
                 </div>
-                <div 
+                <div
                   className="flex-1 overflow-y-auto"
-                  onContextMenu={(e) => {
-                    // 파일이나 폴더가 아닌 빈 공간을 우클릭한 경우
-                    if (e.target === e.currentTarget || e.target.closest('.file-tree-item') === null) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleInvalidateRootCache();
-                    }
-                  }}
                 >
                   {!fileTree || fileTree.length === 0 ? (
                     <div className="flex items-center justify-center h-full">
@@ -1625,15 +1535,6 @@ for key, value in person.items():
                           >
                             ✏️ 이름 변경
                           </button>
-                          {contextMenu.file.type === 'file' && (
-                            <button
-                              onClick={() => handleInvalidateCache(contextMenu.file.path)}
-                              disabled={isInvalidating}
-                              className="w-full text-left px-4 py-2 text-xs text-[#cccccc] hover:bg-[#2a2d2e] font-mono transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {isInvalidating ? '캐시 무효화 중...' : '🔄 강력 새로고침 적용'}
-                            </button>
-                          )}
                           <button
                             onClick={() => handleDeleteFile(contextMenu.file)}
                             disabled={isDeleting}

@@ -18,19 +18,19 @@ const { collectAssetIds } = require('../utils/ttsHydration');
 // s3Service 는 키에 codingpt/ 를 강제하므로 여기선 raw S3Client 를 직접 쓴다
 // (lesson-assets 업로드 스크립트와 동일한 방식).
 const LIBRARY_PREFIX = 'tts/static/library';
-const BUCKET = process.env.OBJECTSTORE_BUCKET || process.env.S3_BUCKET_NAME || 'codingpt';
+const BUCKET = process.env.OBJECTSTORE_BUCKET || 'codingpt';
 // PUBLIC_BASE 는 이미 '/codingpt'(버킷)를 포함 → 키를 그대로 붙이면 공개 URL.
 const PUBLIC_BASE = (process.env.OBJECTSTORE_PUBLIC_BASE_URL
   || `${process.env.OBJECTSTORE_ENDPOINT || 'https://objectstore.ghmate.com'}/${BUCKET}`)
   .replace(/\/+$/, '');
 
 const s3 = new S3Client({
-  region: process.env.OBJECTSTORE_REGION || process.env.AWS_REGION || 'us-east-1',
+  region: process.env.OBJECTSTORE_REGION || 'us-east-1',
   endpoint: process.env.OBJECTSTORE_ENDPOINT,
   forcePathStyle: true,
   credentials: {
-    accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY,
+    accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY,
+    secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY,
   },
 });
 

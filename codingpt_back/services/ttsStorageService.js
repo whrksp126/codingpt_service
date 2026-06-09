@@ -5,10 +5,10 @@ const { S3Client } = require('@aws-sdk/client-s3');
 function createS3Client() {
   const endpoint = process.env.OBJECTSTORE_ENDPOINT;
   return new S3Client({
-    region: process.env.OBJECTSTORE_REGION || process.env.AWS_REGION || 'ap-northeast-2',
+    region: process.env.OBJECTSTORE_REGION || 'us-east-1',
     credentials: {
-      accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY || process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY || process.env.AWS_SECRET_ACCESS_KEY,
+      accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY,
+      secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY,
     },
     ...(endpoint && { endpoint, forcePathStyle: true }),
   });
@@ -85,8 +85,8 @@ class TTSStorageService {
       const encodedTempPath = tempS3Path.split('/').map(part => encodeURIComponent(part)).join('/');
       
       const copyCommand = new CopyObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        CopySource: `${process.env.S3_BUCKET_NAME}/${encodedTempPath}`,
+        Bucket: process.env.OBJECTSTORE_BUCKET,
+        CopySource: `${process.env.OBJECTSTORE_BUCKET}/${encodedTempPath}`,
         Key: finalS3Path
       });
 
@@ -158,7 +158,7 @@ class TTSStorageService {
       const s3Client = createS3Client();
 
       const command = new GetObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
+        Bucket: process.env.OBJECTSTORE_BUCKET,
         Key: s3Path
       });
 
@@ -213,7 +213,7 @@ class TTSStorageService {
       const s3Client = createS3Client();
 
       const command = new GetObjectCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
+        Bucket: process.env.OBJECTSTORE_BUCKET,
         Key: s3Path
       });
 
@@ -225,29 +225,25 @@ class TTSStorageService {
         expiresIn
       };
     } catch (error) {
-      // @aws-sdk/s3-request-presigner가 설치되지 않은 경우 대체 방법 사용
-      // CloudFront URL 또는 직접 S3 URL 사용
+      // @aws-sdk/s3-request-presigner가 설치되지 않은 경우 대체 URL 사용
       console.warn('[TTSStorageService] Presigned URL 생성 실패, 대체 URL 사용:', error.message);
-      
-      // CloudFront URL이 있으면 사용, 없으면 직접 S3 URL 반환
-      const cloudFrontUrl = process.env.CLOUDFRONT_DISTRIBUTION_URL || process.env.S3_PUBLIC_BASE_URL;
-      if (cloudFrontUrl) {
+
+      // 공개 베이스 URL(objectstore)이 있으면 사용
+      const publicBaseUrl = process.env.OBJECTSTORE_PUBLIC_BASE_URL || process.env.S3_PUBLIC_BASE_URL;
+      if (publicBaseUrl) {
         return {
           success: true,
-          url: `${cloudFrontUrl}/${s3Path}`,
-          expiresIn: null // CloudFront URL은 만료 없음
+          url: `${publicBaseUrl}/${s3Path}`,
+          expiresIn: null
         };
       }
-      
-      // 직접 URL (objectstore 또는 S3 공개 읽기 권한이 있는 경우)
-      const bucket = process.env.OBJECTSTORE_BUCKET || process.env.S3_BUCKET_NAME;
+
+      // 직접 URL (objectstore endpoint + bucket)
+      const bucket = process.env.OBJECTSTORE_BUCKET;
       const endpoint = process.env.OBJECTSTORE_ENDPOINT;
-      const fallbackUrl = endpoint
-        ? `${endpoint}/${bucket}/${s3Path}`
-        : `https://${bucket}.s3.${process.env.AWS_REGION || 'ap-northeast-2'}.amazonaws.com/${s3Path}`;
       return {
         success: true,
-        url: fallbackUrl,
+        url: `${endpoint}/${bucket}/${s3Path}`,
         expiresIn: null
       };
     }

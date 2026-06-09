@@ -31,11 +31,6 @@ services:
       - "5200:5200"
     environment:
       - PORT=5200
-      - AWS_REGION=${AWS_REGION:-ap-northeast-2}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - S3_BUCKET_NAME=${S3_BUCKET_NAME}
-      - S3_PUBLIC_BASE_URL=${S3_PUBLIC_BASE_URL}
     env_file:
       - .env.dev
     networks:

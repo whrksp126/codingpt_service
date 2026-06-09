@@ -1,6 +1,15 @@
 // config/config.js
 require('dotenv').config(); // 로컬/테스트에만 영향. 컨테이너 런타임은 --env-file로 주입됨.
 
+// SSL: 외부 관리형 DB(AWS RDS 등)는 필요, 홈서버/로컬 Docker PostgreSQL은 불필요.
+// 환경별 기본값을 두되 DB_SSL=true|false 로 명시 오버라이드 가능.
+// (RDS → 홈서버 이전 시 해당 환경 .env 에 DB_SSL=false 추가하면 SSL 비활성화)
+const SSL_OPTION = { ssl: { require: true, rejectUnauthorized: false } };
+function dialectOptions(defaultSsl) {
+  const ssl = process.env.DB_SSL != null ? process.env.DB_SSL === 'true' : defaultSsl;
+  return ssl ? { ...SSL_OPTION } : {};
+}
+
 const base = {
   username: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -8,15 +17,13 @@ const base = {
   host:     process.env.DB_HOST,
   port:     Number(process.env.DB_PORT || 5432),
   dialect:  'postgres',
-  dialectOptions: {
-    ssl: { require: true, rejectUnauthorized: false },
-  },
+  dialectOptions: dialectOptions(true),
 };
 
 // 로컬 도커 PostgreSQL은 SSL 불필요
 const baseLocal = {
   ...base,
-  dialectOptions: {},
+  dialectOptions: dialectOptions(false),
 };
 
 module.exports = {
