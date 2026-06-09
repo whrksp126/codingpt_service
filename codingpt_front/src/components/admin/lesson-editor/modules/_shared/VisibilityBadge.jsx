@@ -5,6 +5,7 @@ import { SelectField, NumberField, Field } from './SharedFields';
 const formatLabel = (value) => {
   if (!value || !value.type) return '항상';
   if (value.type === 'duration') return `시간 후 · ${value.time ?? 0}ms`;
+  if (value.type === 'ttsHold') return `TTS 후 · ${value.time ?? 0}ms`;
   if (value.type === 'step') return `단계 ${value.value ?? 0}`;
   if (value.type === 'time') {
     const show = value.showDelay ?? 0;
@@ -18,6 +19,7 @@ const formatLabel = (value) => {
 const badgeColor = (type) => {
   switch (type) {
     case 'duration': return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'ttsHold':  return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     case 'step':     return 'bg-cyan-50 text-cyan-700 border-cyan-200';
     case 'time':     return 'bg-violet-50 text-violet-700 border-violet-200';
     default:         return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -85,11 +87,13 @@ const VisibilityBadge = ({ value, onChange }) => {
               onChange={(t) => {
                 if (!t) return onChange(undefined);
                 if (t === 'duration') return onChange({ type: 'duration', time: 1000 });
+                if (t === 'ttsHold')  return onChange({ type: 'ttsHold', time: 0 });
                 if (t === 'step')     return onChange({ type: 'step', value: 1 });
                 if (t === 'time')     return onChange({ type: 'time' });
               }}
               options={[
                 { value: 'duration', label: '시간 후 표시' },
+                { value: 'ttsHold',  label: 'TTS 재생 후 지속' },
                 { value: 'step',     label: '특정 단계에서 표시' },
                 { value: 'time',     label: '시간 범위 표시 (legacy)' },
               ]}
@@ -98,6 +102,15 @@ const VisibilityBadge = ({ value, onChange }) => {
           </Field>
           {type === 'duration' && (
             <Field label="등장 후 머무는 시간 (ms)">
+              <NumberField
+                value={value.time}
+                onChange={(t) => onChange({ ...value, time: t || 0 })}
+                min={0}
+              />
+            </Field>
+          )}
+          {type === 'ttsHold' && (
+            <Field label="TTS 종료 후 유지 시간 (ms)">
               <NumberField
                 value={value.time}
                 onChange={(t) => onChange({ ...value, time: t || 0 })}

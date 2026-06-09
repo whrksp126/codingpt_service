@@ -130,11 +130,13 @@ export const VisibilityField = ({ value, onChange }) => {
           onChange={(t) => {
             if (!t) return onChange(undefined);
             if (t === 'duration') onChange({ type: 'duration', time: 1000 });
+            if (t === 'ttsHold') onChange({ type: 'ttsHold', time: 0 });
             if (t === 'step') onChange({ type: 'step', value: 1 });
             if (t === 'time') onChange({ type: 'time' });
           }}
           options={[
             { value: 'duration', label: 'duration (시간 후 표시)' },
+            { value: 'ttsHold', label: 'ttsHold (TTS 재생 후 지속)' },
             { value: 'step', label: 'step (특정 단계)' },
             { value: 'time', label: 'time (legacy)' },
           ]}
@@ -143,6 +145,15 @@ export const VisibilityField = ({ value, onChange }) => {
       </Field>
       {type === 'duration' && (
         <Field label="time (ms)">
+          <NumberField
+            value={value.time}
+            onChange={(t) => onChange({ ...value, time: t || 0 })}
+            min={0}
+          />
+        </Field>
+      )}
+      {type === 'ttsHold' && (
+        <Field label="TTS 종료 후 유지 시간 (ms)">
           <NumberField
             value={value.time}
             onChange={(t) => onChange({ ...value, time: t || 0 })}

@@ -2,6 +2,9 @@ const { z } = require('zod');
 
 const visibilitySchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('duration'), time: z.number().nonnegative() }),
+  // ttsHold: TTS 재생 종료(onEnd) 후 time(ms) 만큼 더 유지하고 다음으로 진행.
+  // duration 과 달리 실제 재생 종료를 기다리므로 TTS 가 잘리지 않는다.
+  z.object({ type: z.literal('ttsHold'), time: z.number().nonnegative() }),
   z.object({ type: z.literal('step'), value: z.number().int().nonnegative() }),
   z.object({
     type: z.literal('time'),
