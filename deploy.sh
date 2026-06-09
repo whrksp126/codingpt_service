@@ -1,5 +1,5 @@
 #!/bin/bash
-# 사용법: ./deploy.sh [dev]
+# 사용법: ./deploy.sh [dev|stg]
 ENV=$1
 SSH_KEY="$HOME/.ssh/ghmate_server"
 REMOTE_DIR="/srv/projects/codingpt"
@@ -9,8 +9,12 @@ case $ENV in
     COMPOSE_FILE="docker-compose.dev.yml"
     PROJECT_NAME="codingpt_dev"
     ;;
+  stg)
+    COMPOSE_FILE="docker-compose.stg.yml"
+    PROJECT_NAME="codingpt_stg"
+    ;;
   *)
-    echo "사용법: ./deploy.sh [dev]"
+    echo "사용법: ./deploy.sh [dev|stg]"
     exit 1
     ;;
 esac

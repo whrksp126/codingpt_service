@@ -1,0 +1,86 @@
+# stg-codingpt-back.ghmate.com  → codingpt_back_stg:5100
+# stg-codingpt-front.ghmate.com → codingpt_front_stg:80
+# dev 구조(docker-compose.dev.yml) 미러 — DB는 홈서버 Docker PostgreSQL (RDS 미사용)
+
+services:
+  postgres:
+    container_name: codingpt_postgres_stg
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: codingpt_db
+      POSTGRES_USER: codingpt
+      POSTGRES_PASSWORD: codingpt123
+    volumes:
+      - postgres_stg_data:/var/lib/postgresql/data
+    networks:
+      - codingpt_stg
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codingpt -d codingpt_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  back:
+    container_name: codingpt_back_stg
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.stg
+    expose:
+      - "5100"
+    environment:
+      - NODE_ENV=staging
+      - CODE_EXECUTOR_URL=http://code-executor:5200
+      - DB_HOST=postgres
+      - DB_SSL=false
+    env_file:
+      - ./codingpt_back/.env.stg
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codingpt_stg
+      - nginx_proxy
+    restart: unless-stopped
+
+  front:
+    container_name: codingpt_front_stg
+    build:
+      context: ./codingpt_front
+      dockerfile: Dockerfile.stg
+      args:
+        VITE_BACKEND_URL: https://stg-codingpt-back.ghmate.com
+        VITE_DEBUG: "false"
+        NODE_ENV: staging
+    expose:
+      - "80"
+    networks:
+      - codingpt_stg
+      - nginx_proxy
+    restart: unless-stopped
+
+  code-executor:
+    container_name: codingpt_code_executor_stg
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.stg
+    command: node executor-server.js
+    expose:
+      - "5200"
+    environment:
+      - NODE_ENV=staging
+      - SKIP_MIGRATIONS=1
+    env_file:
+      - ./codingpt_back/.env.stg
+    networks:
+      - codingpt_stg
+    restart: unless-stopped
+
+networks:
+  codingpt_stg:
+    driver: bridge
+  nginx_proxy:
+    external: true
+
+volumes:
+  postgres_stg_data:
