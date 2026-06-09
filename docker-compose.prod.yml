@@ -1,0 +1,86 @@
+# codingpt-back.ghmate.com  → codingpt_back_prod:5100
+# codingpt-front.ghmate.com → codingpt_front_prod:80
+# dev/stg 구조 미러 — DB는 홈서버 Docker PostgreSQL (AWS 미사용)
+
+services:
+  postgres:
+    container_name: codingpt_postgres_prod
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: codingpt_db
+      POSTGRES_USER: codingpt
+      POSTGRES_PASSWORD: codingpt123
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    networks:
+      - codingpt_prod
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codingpt -d codingpt_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  back:
+    container_name: codingpt_back_prod
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile
+    expose:
+      - "5100"
+    environment:
+      - NODE_ENV=production
+      - CODE_EXECUTOR_URL=http://code-executor:5200
+      - DB_HOST=postgres
+      - DB_SSL=false
+    env_file:
+      - ./codingpt_back/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - codingpt_prod
+      - nginx_proxy
+    restart: unless-stopped
+
+  front:
+    container_name: codingpt_front_prod
+    build:
+      context: ./codingpt_front
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: https://codingpt-back.ghmate.com
+        VITE_DEBUG: "false"
+        NODE_ENV: production
+    expose:
+      - "80"
+    networks:
+      - codingpt_prod
+      - nginx_proxy
+    restart: unless-stopped
+
+  code-executor:
+    container_name: codingpt_code_executor_prod
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile
+    command: node executor-server.js
+    expose:
+      - "5200"
+    environment:
+      - NODE_ENV=production
+      - SKIP_MIGRATIONS=1
+    env_file:
+      - ./codingpt_back/.env
+    networks:
+      - codingpt_prod
+    restart: unless-stopped
+
+networks:
+  codingpt_prod:
+    driver: bridge
+  nginx_proxy:
+    external: true
+
+volumes:
+  postgres_prod_data:

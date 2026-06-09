@@ -14,14 +14,18 @@ RUN npm ci
 # 소스 코드 복사
 COPY . .
 
-# 빌드 실행 (운영 환경)
+# 빌드 실행 (운영 환경) — Vite가 빌드 타임에 VITE_* 를 dist에 박음
 ARG NODE_ENV=production
+ARG VITE_BACKEND_URL
+ARG VITE_DEBUG=false
 ENV NODE_ENV=${NODE_ENV}
+ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+ENV VITE_DEBUG=${VITE_DEBUG}
 RUN npm run build
 
 # Nginx를 사용하여 서비스
 FROM nginx:stable-alpine AS production
-COPY nginx.prod.conf /etc/nginx/nginx.conf
+COPY nginx.prod.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/dist /usr/share/nginx/html
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
