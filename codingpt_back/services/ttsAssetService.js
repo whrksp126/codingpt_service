@@ -89,11 +89,60 @@ class TTSAssetService {
     catch { return false; }
   }
 
+  // 단일 보이스 샘플 보장(lazy): 이미 있으면 URL 만, 없으면 1회 생성+저장 후 URL.
+  // 무료 티어 rate limit 대응 — ▶ 클릭 시 그 보이스만 생성하므로 분당 요청을 자연 분산.
+  async ensureOneVoiceSample(voiceId) {
+    if (!voiceId) throw _err('voiceId는 필수입니다.', 400);
+    const key = `${ttsService.VOICE_SAMPLE_PREFIX}/${voiceId}.mp3`;
+    const url = ttsService.voiceSampleUrl(voiceId);
+    if (await this._keyExists(key)) return { url, generated: false };
+    const r = await ttsService.textToSpeech(voiceId, ttsService.voiceSampleText(voiceId), undefined, {});
+    if (!r || !r.success) throw _err(r && r.message ? r.message : '샘플 생성 실패', r && r.status === 429 ? 429 : 502);
+    await this._putObject(key, r.audioBuffer, 'audio/mpeg');
+    return { url, generated: true };
+  }
+
+  // 보이스 샘플(▶ 미리듣기) 일괄 생성/저장. 이미 있으면 건너뜀(force=true 면 전부 재생성).
+  // tts/static/library/_voice_samples/<voice>.mp3. 보이스 추가 시 재실행하면 누락분만 생성.
+  // (무료 티어는 rate limit 으로 한번에 다 안 될 수 있음 — 재실행하면 누락분만 채워짐)
+  // gapMs: 보이스 사이 간격(rate limit 분산), maxRetry: 429 시 백오프 재시도.
+  async ensureVoiceSamples({ force = false, gapMs = 8000, maxRetry = 4 } = {}) {
+    const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+    const { voices } = await ttsService.getVoices();
+    const out = [];
+    for (let i = 0; i < voices.length; i++) {
+      const v = voices[i];
+      const key = `${ttsService.VOICE_SAMPLE_PREFIX}/${v.voice_id}.mp3`;
+      if (!force && (await this._keyExists(key))) { out.push({ voice: v.voice_id, status: 'exists' }); continue; }
+
+      let done = false;
+      for (let attempt = 0; attempt <= maxRetry && !done; attempt++) {
+        const r = await ttsService.textToSpeech(v.voice_id, ttsService.voiceSampleText(v.voice_id), undefined, {});
+        if (r && r.success) {
+          await this._putObject(key, r.audioBuffer, 'audio/mpeg');
+          out.push({ voice: v.voice_id, status: 'generated', duration: r.duration });
+          console.log(`[voiceSamples] ${v.voice_id} 생성 완료 (${i + 1}/${voices.length})`);
+          done = true;
+        } else if (r && r.status === 429 && attempt < maxRetry) {
+          const back = (attempt + 1) * 20000; // 20s, 40s, 60s, 80s 백오프
+          console.log(`[voiceSamples] ${v.voice_id} rate limit → ${back / 1000}s 후 재시도`);
+          await sleep(back);
+        } else {
+          out.push({ voice: v.voice_id, status: 'fail', message: r && r.message });
+          console.log(`[voiceSamples] ${v.voice_id} 실패: ${r && r.message}`);
+          done = true;
+        }
+      }
+      if (i < voices.length - 1) await sleep(gapMs); // 다음 보이스 전 간격
+    }
+    return out;
+  }
+
   // 파일 기반 생성: tts/static/library/<folder>/<name>.mp3 + <name>.json(사이드카).
   // ObjectStore 브라우저로 탐색/관리하기 위해 opaque {id} 가 아닌 사람이 읽는 파일명 사용.
-  async generateToFolder({ text, voiceId, modelId, folder, fileName }) {
+  async generateToFolder({ text, voiceId, modelId, folder, fileName, settings }) {
     if (!text || !String(text).trim()) throw _err('text는 필수입니다.', 400);
-    const result = await ttsService.textToSpeech(voiceId, text, modelId || 'eleven_v3', {});
+    const result = await ttsService.textToSpeech(voiceId, text, modelId || 'gemini-3.1-flash-tts-preview', settings || {});
     if (!result || !result.success) throw _err(`TTS 생성 실패: ${(result && result.message) || 'unknown'}`, 502);
 
     const folderNorm = _normFolder(folder);
@@ -107,7 +156,7 @@ class TTSAssetService {
     const metaKey = `${dir}/${name}.json`;
     await this._putObject(audioKey, result.audioBuffer, 'audio/mpeg');
     await this._putObject(metaKey, Buffer.from(JSON.stringify({
-      text, voice_id: voiceId || null, model_id: modelId || 'eleven_v3',
+      text, voice_id: voiceId || null, model_id: modelId || 'gemini-3.1-flash-tts-preview',
       timestamps: result.timestamps, duration: result.duration, file_size: result.audioSize,
       created_at: new Date().toISOString(),
     }, null, 2), 'utf8'), 'application/json');
@@ -119,13 +168,13 @@ class TTSAssetService {
       folder: folderNorm,
       timestamps: result.timestamps,
       voiceId: voiceId || null,
-      modelId: modelId || 'eleven_v3',
+      modelId: modelId || 'gemini-3.1-flash-tts-preview',
       duration: result.duration,
     };
   }
 
   // 오디오 버퍼를 라이브러리 파일(.mp3 + .json 사이드카)로 기록 (생성 호출 없이 저장만)
-  async _writeAudioFile({ folder, fileName, text, voiceId, modelId, timestamps, duration, buffer }) {
+  async _writeAudioFile({ folder, fileName, text, voiceId, modelId, settings, timestamps, duration, buffer }) {
     const folderNorm = _normFolder(folder);
     const dir = `tts/static/library${folderNorm ? '/' + folderNorm : ''}`;
     const base = String(fileName || generateFileName(text)).replace(/\.mp3$/i, '').replace(/[^가-힣a-zA-Z0-9_\-]/g, '_').slice(0, 100) || 'tts';
@@ -135,33 +184,35 @@ class TTSAssetService {
     const metaKey = `${dir}/${name}.json`;
     await this._putObject(audioKey, buffer, 'audio/mpeg');
     await this._putObject(metaKey, Buffer.from(JSON.stringify({
-      text, voice_id: voiceId || null, model_id: modelId || 'eleven_v3',
+      text, voice_id: voiceId || null, model_id: modelId || 'gemini-3.1-flash-tts-preview',
+      settings: settings || null,
       timestamps, duration, file_size: buffer.length, created_at: new Date().toISOString(),
     }, null, 2), 'utf8'), 'application/json');
     return { url: this._publicUrl(audioKey), key: audioKey, fileName: `${name}.mp3`, folder: folderNorm };
   }
 
   // 미리듣기: 생성만 하고 저장하지 않음. 오디오를 base64 로 반환(클라가 재생, 저장 시 재사용 → 추가 호출 없음).
-  async preview({ text, voiceId, modelId }) {
+  async preview({ text, voiceId, modelId, settings }) {
     if (!text || !String(text).trim()) throw _err('text는 필수입니다.', 400);
-    const result = await ttsService.textToSpeech(voiceId, text, modelId || 'eleven_v3', {});
+    const result = await ttsService.textToSpeech(voiceId, text, modelId || 'gemini-3.1-flash-tts-preview', settings || {});
     if (!result || !result.success) throw _err(`TTS 생성 실패: ${(result && result.message) || 'unknown'}`, 502);
     return {
       audioBase64: result.audioBuffer.toString('base64'),
       timestamps: result.timestamps,
       duration: result.duration,
       voiceId: voiceId || null,
-      modelId: modelId || 'eleven_v3',
+      modelId: modelId || 'gemini-3.1-flash-tts-preview',
+      settings: settings || null,
       text,
     };
   }
 
   // 미리듣기 결과(base64)를 그대로 파일로 저장 (ElevenLabs 재호출 없음 = 추가 비용 0)
-  async savePreview({ audioBase64, timestamps, duration, text, voiceId, modelId, folder, fileName }) {
+  async savePreview({ audioBase64, timestamps, duration, text, voiceId, modelId, settings, folder, fileName }) {
     if (!audioBase64) throw _err('미리듣기 데이터가 없습니다.', 400);
     const buffer = Buffer.from(audioBase64, 'base64');
-    const out = await this._writeAudioFile({ folder, fileName, text, voiceId, modelId, timestamps, duration, buffer });
-    return { ...out, timestamps, voiceId: voiceId || null, modelId: modelId || 'eleven_v3', duration };
+    const out = await this._writeAudioFile({ folder, fileName, text, voiceId, modelId, settings, timestamps, duration, buffer });
+    return { ...out, timestamps, voiceId: voiceId || null, modelId: modelId || 'gemini-3.1-flash-tts-preview', settings: settings || null, duration };
   }
 
   // 폴더(prefix) 전체 삭제
@@ -247,14 +298,14 @@ class TTSAssetService {
     const asset = await TTSAsset.create({
       text,
       voice_id: voiceId || null,
-      model_id: modelId || 'eleven_v3',
+      model_id: modelId || 'gemini-3.1-flash-tts-preview',
       settings: settings || null,
       content_hash: this._contentHash(text, voiceId, modelId, settings),
       name: generateFileName(text),
       folder: _normFolder(folder),
     });
     try {
-      await this._synthesizeAndStore(asset, { text, voiceId, modelId: modelId || 'eleven_v3', settings });
+      await this._synthesizeAndStore(asset, { text, voiceId, modelId: modelId || 'gemini-3.1-flash-tts-preview', settings });
     } catch (e) {
       // 합성/업로드 실패 시 고아 레코드가 남지 않도록 롤백
       await asset.destroy().catch(() => {});
@@ -270,7 +321,7 @@ class TTSAssetService {
     const next = {
       text: patch.text != null ? patch.text : asset.text,
       voiceId: patch.voiceId != null ? patch.voiceId : asset.voice_id,
-      modelId: patch.modelId != null ? patch.modelId : (asset.model_id || 'eleven_v3'),
+      modelId: patch.modelId != null ? patch.modelId : (asset.model_id || 'gemini-3.1-flash-tts-preview'),
       settings: patch.settings != null ? patch.settings : asset.settings,
     };
     if (!next.text || !String(next.text).trim()) throw _err('text는 필수입니다.', 400);

@@ -30,8 +30,11 @@ router.get('/models', ttsController.getModels);
 // 특정 모델의 지원 설정 정보 조회
 router.get('/models/:modelId/settings', ttsController.getModelSettings);
 
-// ElevenLabs 목소리 목록 조회
+// Gemini 목소리 목록 조회
 router.get('/voices', ttsController.getVoices);
+
+// 보이스 샘플(▶) — 없으면 1회 생성+캐시 후 URL 반환 (무료 티어 rate limit 대응 lazy)
+router.get('/voices/:voiceId/sample', ttsAssetController.voiceSample);
 
 // 음성 생성 요청
 router.post('/generate', ttsController.generate);

@@ -24,8 +24,8 @@ const create = async (req, res) => {
  */
 const generateFile = async (req, res) => {
   try {
-    const { text, voiceId, modelId, folder, fileName } = req.body || {};
-    const out = await ttsAssetService.generateToFolder({ text, voiceId, modelId, folder, fileName });
+    const { text, voiceId, modelId, folder, fileName, settings } = req.body || {};
+    const out = await ttsAssetService.generateToFolder({ text, voiceId, modelId, folder, fileName, settings });
     return successResponse(res, { success: true, data: out });
   } catch (error) {
     console.error('[TTSAssetController] 파일 생성 오류:', error);
@@ -39,8 +39,8 @@ const generateFile = async (req, res) => {
  */
 const preview = async (req, res) => {
   try {
-    const { text, voiceId, modelId } = req.body || {};
-    const out = await ttsAssetService.preview({ text, voiceId, modelId });
+    const { text, voiceId, modelId, settings } = req.body || {};
+    const out = await ttsAssetService.preview({ text, voiceId, modelId, settings });
     return successResponse(res, { success: true, data: out });
   } catch (error) {
     console.error('[TTSAssetController] 미리듣기 오류:', error);
@@ -131,4 +131,18 @@ const remove = async (req, res) => {
   }
 };
 
-module.exports = { create, generateFile, preview, savePreview, list, getById, regenerate, remove };
+/**
+ * 보이스 샘플(▶ 미리듣기) 보장 — 없으면 1회 생성+캐시 후 URL 반환
+ * GET /api/tts/voices/:voiceId/sample
+ */
+const voiceSample = async (req, res) => {
+  try {
+    const out = await ttsAssetService.ensureOneVoiceSample(req.params.voiceId);
+    return successResponse(res, { success: true, data: out });
+  } catch (error) {
+    console.error('[TTSAssetController] 보이스 샘플 오류:', error.message);
+    return errorResponse(res, { message: error.message }, error.statusCode || 500);
+  }
+};
+
+module.exports = { create, generateFile, preview, savePreview, list, getById, regenerate, remove, voiceSample };

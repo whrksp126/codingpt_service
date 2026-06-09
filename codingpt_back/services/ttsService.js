@@ -1,665 +1,276 @@
-const axios = require('axios');
+const { spawn } = require('child_process');
 
 /**
- * ElevenLabs API 통합 서비스
+ * Google Gemini TTS 통합 서비스 (이전 ElevenLabs 대체)
+ *
+ * - 모델: gemini-3.1-flash-tts-preview (기본), gemini-2.5-flash-preview-tts (저비용 대안)
+ * - 보이스: Gemini 프리빌트 보이스(30종) 중 선택
+ * - 스타일: settings.styleInstructions(자연어)를 프롬프트 프리픽스로 전달
+ * - 응답: PCM(16bit/mono) → ffmpeg 로 mp3 변환하여 반환 (기존 저장/재생 파이프라인 호환)
+ * - 타임스탬프: Gemini TTS 는 제공하지 않음 → null (RN 타이핑효과 비활성 + ttsHold onEnd 기반이라 불필요)
  */
 class TTSService {
   constructor() {
-    this.apiKey = process.env.ELEVENLABS_API_KEY;
-    this.apiUrl = process.env.ELEVENLABS_API_URL || 'https://api.elevenlabs.io/v1';
+    this.apiKey = process.env.GEMINI_API_KEY;
+    this.apiUrl = process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com/v1beta';
+    this.defaultModel = 'gemini-3.1-flash-tts-preview';
+    this.defaultVoice = 'Achernar';
+    // 보이스 샘플(▶ 미리듣기)을 한 번 생성해 저장하는 objectstore 경로.
+    this.VOICE_SAMPLE_PREFIX = 'tts/static/library/_voice_samples';
+    // 캐시버스터 버전 — 샘플 문장/보이스를 바꿔 재생성할 때마다 +1 (CDN 캐시 무효화).
+    this.VOICE_SAMPLE_VERSION = 2;
 
     if (!this.apiKey) {
-      console.warn('[TTSService] ELEVENLABS_API_KEY 환경 변수가 설정되지 않았습니다.');
+      console.warn('[TTSService] GEMINI_API_KEY 환경 변수가 설정되지 않았습니다.');
     }
   }
 
-  /**
-   * ElevenLabs API 요청 헤더 생성
-   */
-  getHeaders() {
-    return {
-      'xi-api-key': this.apiKey,
-      'Content-Type': 'application/json'
-    };
+  // 보이스 샘플로 읽을 문장(보이스 이름 포함)
+  voiceSampleText(voiceId) {
+    return `안녕하세요! 저는 ${voiceId} 입니다. 이건 제 목소리 샘플이에요.`;
+  }
+
+  // 보이스 샘플 공개 URL (PUBLIC_BASE 는 이미 버킷(/codingpt)을 포함)
+  voiceSampleUrl(voiceId) {
+    const bucket = process.env.OBJECTSTORE_BUCKET || 'codingpt';
+    const base = (process.env.OBJECTSTORE_PUBLIC_BASE_URL
+      || `${process.env.OBJECTSTORE_ENDPOINT || 'https://objectstore.ghmate.com'}/${bucket}`).replace(/\/+$/, '');
+    return `${base}/${this.VOICE_SAMPLE_PREFIX}/${voiceId}.mp3?v=${this.VOICE_SAMPLE_VERSION}`;
   }
 
   /**
-   * 모델별 지원 설정 정보를 동적으로 생성
-   * @param {Object} model - 모델 객체 (can_use_style, can_use_speaker_boost 포함)
-   * @returns {Object} - 모델별 설정 스키마
-   */
-  generateModelSettingsSchema(model) {
-    const settings = {
-      stability: {
-        supported: true,
-        default: 0.5,
-        min: 0.0,
-        max: 1.0,
-        description: '음성의 안정성과 일관성 (낮을수록 안정적, 높을수록 창의적)'
-      },
-      similarity_boost: {
-        supported: true,
-        default: 0.75,
-        min: 0.0,
-        max: 1.0,
-        description: '원본 목소리와의 유사도 (높을수록 유사)'
-      },
-      use_speaker_boost: {
-        supported: model.can_use_speaker_boost === true,
-        default: true,
-        type: 'boolean',
-        description: '화자 부스트 활성화'
-      },
-      speed: {
-        supported: true,
-        default: 1.0,
-        min: 0.25,
-        max: 4.0,
-        description: '음성 속도 (높을수록 빠름)'
-      }
-    };
-
-    // style 파라미터는 can_use_style이 true인 모델에서만 지원
-    if (model.can_use_style === true) {
-      settings.style = {
-        supported: true,
-        default: 0.0,
-        min: 0.0,
-        max: 1.0,
-        description: '음성의 스타일 강도 (v3 모델 전용)'
-      };
-    } else {
-      settings.style = {
-        supported: false,
-        description: '이 모델에서는 지원하지 않습니다'
-      };
-    }
-
-    return settings;
-  }
-
-  /**
-   * 사용 가능한 모델 목록 조회 (eleven_v3 고정값 반환)
-   * @returns {Promise<Object>} - 모델 목록
+   * 사용 가능한 모델 목록 (Gemini TTS)
    */
   async getModels() {
-    try {
-      // eleven_v3 모델만 고정값으로 반환 (API 호출 없이 빠른 응답)
-      const elevenV3Model = {
-        model_id: 'eleven_v3',
-        name: 'Eleven v3',
-        description: '최신 고급 음성 합성 모델, 높은 감정 범위와 컨텍스트 이해력',
-        language_support: '70개 이상',
+    const settingsSchema = this._settingsSchema();
+    const defaultSettings = this._defaultSettings();
+    const models = [
+      {
+        model_id: 'gemini-3.1-flash-tts-preview',
+        name: 'Gemini 3.1 Flash TTS',
+        description: '최신 고품질 음성. 스타일 지시(자연어)로 톤·감정 제어, 한국어+영어 기술어 발음 우수',
+        language_support: '다국어',
         quality: '매우 높음',
-        speed: '보통',
+        speed: '빠름',
         character_limit: 5000,
         can_use_style: true,
-        can_use_speaker_boost: true,
-        supported_settings: {
-          stability: {
-            supported: true,
-            default: 0.5,
-            min: 0.0,
-            max: 1.0,
-            description: '음성의 안정성과 일관성 (낮을수록 안정적, 높을수록 창의적)'
-          },
-          similarity_boost: {
-            supported: true,
-            default: 0.75,
-            min: 0.0,
-            max: 1.0,
-            description: '원본 목소리와의 유사도 (높을수록 유사)'
-          },
-          use_speaker_boost: {
-            supported: true,
-            default: true,
-            type: 'boolean',
-            description: '화자 부스트 활성화'
-          },
-          speed: {
-            supported: true,
-            default: 1.0,
-            min: 0.25,
-            max: 4.0,
-            description: '음성 속도 (높을수록 빠름)'
-          },
-          style: {
-            supported: true,
-            default: 0.0,
-            min: 0.0,
-            max: 1.0,
-            description: '음성의 스타일 강도 (v3 모델 전용)'
-          }
-        },
-        default_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          use_speaker_boost: true,
-          speed: 1.0,
-          style: 0.0
-        }
-      };
-
-      // 안정형 다국어 모델 — 한국어 발음이 v3-alpha 보다 자연스러운 경우가 많음
-      const multilingualV2 = {
-        model_id: 'eleven_multilingual_v2',
-        name: 'Multilingual v2 (한국어 권장)',
-        description: '안정적인 다국어 모델. 한국어 등 비영어권 발음이 비교적 자연스러움',
-        language_support: '29개 언어',
+        supported_settings: settingsSchema,
+        default_settings: defaultSettings,
+      },
+      {
+        model_id: 'gemini-2.5-flash-preview-tts',
+        name: 'Gemini 2.5 Flash TTS (저비용)',
+        description: '한 단계 낮은 비용. 품질도 양호. 동일하게 스타일 지시 지원',
+        language_support: '다국어',
         quality: '높음',
-        speed: '보통',
+        speed: '빠름',
         character_limit: 5000,
         can_use_style: true,
-        can_use_speaker_boost: true,
-        supported_settings: elevenV3Model.supported_settings,
-        default_settings: elevenV3Model.default_settings
-      };
-
-      return {
-        success: true,
-        models: [multilingualV2, elevenV3Model]
-      };
-    } catch (error) {
-      console.error('[TTSService] 모델 목록 조회 실패:', error.message);
-
-      return {
-        success: false,
-        error: 'ModelListError',
-        message: error.message || '모델 목록을 가져오는데 실패했습니다.'
-      };
-    }
+        supported_settings: settingsSchema,
+        default_settings: defaultSettings,
+      },
+    ];
+    return { success: true, models };
   }
 
   /**
-   * 특정 모델의 지원 설정 정보 조회
-   * @param {string} modelId - 모델 ID
-   * @returns {Promise<Object>} - 모델 설정 스키마
+   * 특정 모델의 설정 스키마
    */
   async getModelSettings(modelId) {
-    try {
-      if (!modelId) {
-        throw new Error('modelId는 필수입니다.');
-      }
-
-      const SUPPORTED = ['eleven_v3', 'eleven_multilingual_v2'];
-      if (!SUPPORTED.includes(modelId)) {
-        return {
-          success: false,
-          error: 'ModelNotFound',
-          message: `모델 '${modelId}'를 찾을 수 없습니다. 지원되는 모델: ${SUPPORTED.join(', ')}`
-        };
-      }
-
-      // eleven_v3 모델 설정 스키마 (고정값)
-      const settingsSchema = {
-        stability: {
-          supported: true,
-          default: 0.5,
-          min: 0.0,
-          max: 1.0,
-          description: '음성의 안정성과 일관성 (낮을수록 안정적, 높을수록 창의적)'
-        },
-        similarity_boost: {
-          supported: true,
-          default: 0.75,
-          min: 0.0,
-          max: 1.0,
-          description: '원본 목소리와의 유사도 (높을수록 유사)'
-        },
-        use_speaker_boost: {
-          supported: true,
-          default: true,
-          type: 'boolean',
-          description: '화자 부스트 활성화'
-        },
-        speed: {
-          supported: true,
-          default: 1.0,
-          min: 0.25,
-          max: 4.0,
-          description: '음성 속도 (높을수록 빠름)'
-        },
-        style: {
-          supported: true,
-          default: 0.0,
-          min: 0.0,
-          max: 1.0,
-          description: '음성의 스타일 강도 (v3 모델 전용)'
-        }
-      };
-
-      const defaultSettings = {
-        stability: 0.5,
-        similarity_boost: 0.75,
-        use_speaker_boost: true,
-        speed: 1.0,
-        style: 0.0
-      };
-
-      return {
-        success: true,
-        modelId,
-        modelName: modelId === 'eleven_multilingual_v2' ? 'Multilingual v2' : 'Eleven v3',
-        settingsSchema,
-        defaultSettings
-      };
-    } catch (error) {
-      console.error('[TTSService] 모델 설정 조회 실패:', error.message);
+    const SUPPORTED = ['gemini-3.1-flash-tts-preview', 'gemini-2.5-flash-preview-tts'];
+    const id = modelId || this.defaultModel;
+    if (!SUPPORTED.includes(id)) {
       return {
         success: false,
-        error: 'ModelSettingsError',
-        message: error.message || '모델 설정을 조회하는데 실패했습니다.'
+        error: 'ModelNotFound',
+        message: `모델 '${modelId}'를 찾을 수 없습니다. 지원되는 모델: ${SUPPORTED.join(', ')}`,
       };
     }
+    return {
+      success: true,
+      modelId: id,
+      modelName: id === 'gemini-2.5-flash-preview-tts' ? 'Gemini 2.5 Flash TTS' : 'Gemini 3.1 Flash TTS',
+      settingsSchema: this._settingsSchema(),
+      defaultSettings: this._defaultSettings(),
+    };
   }
 
   /**
-   * 목소리 목록 조회 (사용자가 선택/저장한 목소리만)
-   * @returns {Promise<Object>} - 선택된 목소리 목록
+   * 사용 가능한 보이스 목록 (Gemini 프리빌트 30종)
    */
   async getVoices() {
-    try {
-      if (!this.apiKey) {
-        throw new Error('ELEVENLABS_API_KEY가 설정되지 않았습니다.');
-      }
-
-      const response = await axios.get(`${this.apiUrl}/voices`, {
-        headers: this.getHeaders()
-      });
-
-      const allVoices = response.data.voices || [];
-
-      // 모든 목소리를 반환하되 정렬: 즐겨찾기 → premade(무료 티어 사용 가능) → 그 외.
-      // (과거엔 premade 를 제외했으나, 무료 API 키로는 library/professional 보이스가
-      //  생성 시 거부되어 정작 쓸 수 있는 premade 가 목록에 없는 문제가 있었음.)
-      const rank = (v) => {
-        if (v.is_favorite === true) return 0;
-        if (v.category === 'premade') return 1;
-        return 2;
-      };
-      const selectedVoices = [...allVoices].sort((a, b) => rank(a) - rank(b));
-
-      return {
-        success: true,
-        voices: selectedVoices
-      };
-    } catch (error) {
-      console.error('[TTSService] 목소리 목록 조회 실패:', error.message);
-
-      if (error.response) {
-        const status = error.response.status;
-        const message = error.response.data?.detail?.message || error.response.data?.detail || '목소리 목록을 가져오는데 실패했습니다.';
-
-        return {
-          success: false,
-          error: 'ElevenLabsAPIError',
-          status,
-          message
-        };
-      }
-
-      return {
-        success: false,
-        error: 'NetworkError',
-        message: error.message || '네트워크 오류가 발생했습니다.'
-      };
-    }
+    // 각 보이스에 샘플 ▶ 재생용 preview_url 부여(미리 생성해 저장한 mp3).
+    const voices = GEMINI_VOICES.map((v) => ({ ...v, preview_url: this.voiceSampleUrl(v.voice_id) }));
+    return { success: true, voices };
   }
 
   /**
-   * 텍스트를 음성으로 변환
-   * @param {string} voiceId - 목소리 ID
+   * 텍스트 → 음성(mp3). 시그니처는 기존과 동일하게 유지.
+   * @param {string} voiceId - Gemini 보이스명 (예: 'Achernar')
    * @param {string} text - 변환할 텍스트
-   * @param {string} modelId - 모델 ID
-   * @param {Object} settings - 추가 설정
-   * @returns {Promise<Object>} - 오디오 데이터와 타임스탬프
+   * @param {string} modelId - Gemini 모델 ID
+   * @param {Object} settings - { styleInstructions?: string, temperature?: number }
+   * @returns {Promise<{success, audioBuffer, audioSize, timestamps, duration}>}
    */
-  async textToSpeech(voiceId, text, modelId = 'eleven_multilingual_v2', settings = {}) {
+  async textToSpeech(voiceId, text, modelId = this.defaultModel, settings = {}) {
     try {
-      if (!this.apiKey) {
-        throw new Error('ELEVENLABS_API_KEY가 설정되지 않았습니다.');
-      }
+      if (!this.apiKey) throw new Error('GEMINI_API_KEY가 설정되지 않았습니다.');
+      if (!text) throw new Error('text는 필수입니다.');
 
-      if (!voiceId || !text) {
-        throw new Error('voiceId와 text는 필수입니다.');
-      }
+      const model = modelId || this.defaultModel;
+      const voice = voiceId || this.defaultVoice;
+      const style = (settings && typeof settings.styleInstructions === 'string')
+        ? settings.styleInstructions.trim()
+        : '';
 
-      // 모델 정보 조회하여 지원하는 설정만 필터링
-      const modelSettingsResult = await this.getModelSettings(modelId);
-      let validSettings = {};
+      // 스타일 지시를 프롬프트 프리픽스로 결합 (AI Studio "Style instructions" 와 동일 방식)
+      const prompt = style ? `${style}:\n${text}` : text;
 
-      if (modelSettingsResult.success) {
-        const settingsSchema = modelSettingsResult.settingsSchema;
-        const defaultSettings = modelSettingsResult.defaultSettings;
-
-        // 지원하는 설정만 포함
-        Object.keys(settings).forEach(key => {
-          if (settingsSchema[key] && settingsSchema[key].supported) {
-            validSettings[key] = settings[key];
-          }
-        });
-
-        // 기본값으로 병합
-        validSettings = { ...defaultSettings, ...validSettings };
-      } else {
-        // 모델 정보를 가져올 수 없는 경우 기본 설정 사용
-        const defaultSettings = {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          use_speaker_boost: true
-        };
-        validSettings = { ...defaultSettings, ...settings };
-      }
-
-      // 요청 본문 구성
-      const requestBody = {
-        text,
-        model_id: modelId,
-        voice_settings: validSettings
+      const generationConfig = {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+        },
       };
-
-      // 모델별 파라미터 구성
-      // eleven_v3 모델은 optimize_streaming_latency를 지원하지 않음
-      const params = {
-        output_format: 'mp3_44100_128',
-        enable_logging: false
-      };
-
-      // optimize_streaming_latency는 v3 모델이 아닌 경우에만 추가
-      if (modelId !== 'eleven_v3') {
-        params.optimize_streaming_latency = 0;
+      if (settings && typeof settings.temperature === 'number') {
+        generationConfig.temperature = settings.temperature;
       }
 
-      // 타임스탬프를 포함한 요청 - with-timestamps 엔드포인트 사용
-      const response = await axios.post(
-        `${this.apiUrl}/text-to-speech/${voiceId}/with-timestamps`,
-        requestBody,
+      const resp = await fetch(
+        `${this.apiUrl}/models/${model}:generateContent`,
         {
-          headers: {
-            ...this.getHeaders(),
-            'Accept': 'application/json'
-          },
-          params
-        }
+          method: 'POST',
+          headers: { 'x-goog-api-key': this.apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig }),
+        },
       );
 
-      // 응답에서 오디오(base64)와 타임스탬프 추출
-      const responseData = response.data;
-      let audioBuffer;
-      let timestamps = null;
-
-      if (responseData.audio_base64) {
-        // base64 인코딩된 오디오를 버퍼로 변환
-        audioBuffer = Buffer.from(responseData.audio_base64, 'base64');
-      } else {
-        // fallback: 일반 엔드포인트 사용 (타임스탬프 없음)
-        const audioResponse = await axios.post(
-          `${this.apiUrl}/text-to-speech/${voiceId}`,
-          requestBody,
-          {
-            headers: {
-              ...this.getHeaders(),
-              'Accept': 'audio/mpeg'
-            },
-            params,
-            responseType: 'arraybuffer'
-          }
-        );
-        audioBuffer = Buffer.from(audioResponse.data);
+      if (!resp.ok) {
+        const errText = await resp.text();
+        let message = `음성 생성에 실패했습니다. (HTTP ${resp.status})`;
+        try {
+          const j = JSON.parse(errText);
+          message = j.error?.message || message;
+        } catch (e) { /* keep default */ }
+        if (resp.status === 401 || resp.status === 403) message = 'GEMINI_API_KEY가 유효하지 않거나 권한이 없습니다.';
+        if (resp.status === 429) message = 'Gemini API 할당량/속도 제한을 초과했습니다. 잠시 후 다시 시도해주세요.';
+        console.error('[TTSService] Gemini 음성 생성 실패:', resp.status, errText.slice(0, 300));
+        return { success: false, error: 'GeminiAPIError', status: resp.status, message };
       }
 
-      // 타임스탬프 데이터 파싱
-      let duration = 0;
-      if (responseData.alignment) {
-        const alignment = responseData.alignment;
-
-        // ElevenLabs API 응답 형식에 맞게 변환
-        timestamps = {
-          version: '1.0',
-          alignment: {
-            characters: [],
-            words: []
-          }
-        };
-
-        // 문자 단위 타임스탬프
-        if (alignment.characters && alignment.character_start_times_seconds && alignment.character_end_times_seconds) {
-          timestamps.alignment.characters = alignment.characters.map((char, index) => ({
-            char: char,
-            start: alignment.character_start_times_seconds[index] || 0,
-            end: alignment.character_end_times_seconds[index] || 0
-          }));
-
-          // 마지막 문자 종료 시간을 총 길이로 설정
-          if (alignment.character_end_times_seconds.length > 0) {
-            duration = alignment.character_end_times_seconds[alignment.character_end_times_seconds.length - 1];
-            timestamps.total_duration = duration;
-          }
-        }
-
-        // 단어 단위 타임스탬프 (API에서 제공하는 경우)
-        if (alignment.words && alignment.word_start_times_seconds && alignment.word_end_times_seconds) {
-          timestamps.alignment.words = alignment.words.map((word, index) => ({
-            word: word,
-            start: alignment.word_start_times_seconds[index] || 0,
-            end: alignment.word_end_times_seconds[index] || 0,
-            confidence: 1.0 // 기본값
-          }));
-        } else if (timestamps.alignment.characters.length > 0) {
-          // API에서 단어 정보가 없는 경우, 문자 배열에서 단어 추출
-          // 공백을 기준으로 단어를 구분
-          const characters = timestamps.alignment.characters;
-          const words = [];
-          let currentWord = '';
-          let wordStart = null;
-          let wordEnd = null;
-
-          for (let i = 0; i < characters.length; i++) {
-            const char = characters[i];
-
-            // 공백이면 단어 종료
-            if (char.char.trim() === '') {
-              if (currentWord.trim() && wordStart !== null) {
-                words.push({
-                  word: currentWord.trim(),
-                  start: wordStart,
-                  end: wordEnd || char.end,
-                  confidence: 1.0
-                });
-                currentWord = '';
-                wordStart = null;
-                wordEnd = null;
-              }
-            } else {
-              // 일반 문자 - 단어에 추가
-              if (wordStart === null) {
-                wordStart = char.start;
-              }
-              currentWord += char.char;
-              wordEnd = char.end;
-            }
-          }
-
-          // 마지막 단어 추가 (공백으로 끝나지 않은 경우)
-          if (currentWord.trim() && wordStart !== null) {
-            words.push({
-              word: currentWord.trim(),
-              start: wordStart,
-              end: wordEnd || characters[characters.length - 1]?.end || 0,
-              confidence: 1.0
-            });
-          }
-
-          timestamps.alignment.words = words;
-        }
+      const data = await resp.json();
+      const part = data?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+      const inline = part?.inlineData;
+      if (!inline?.data) {
+        console.error('[TTSService] Gemini 응답에 오디오 없음:', JSON.stringify(data).slice(0, 300));
+        return { success: false, error: 'GeminiNoAudio', message: '응답에 오디오 데이터가 없습니다.' };
       }
+
+      const pcm = Buffer.from(inline.data, 'base64');
+      const rateMatch = /rate=(\d+)/.exec(inline.mimeType || '');
+      const rate = rateMatch ? Number(rateMatch[1]) : 24000;
+
+      // PCM(16bit mono) → mp3
+      const audioBuffer = await this._pcmToMp3(pcm, rate);
+      // duration: PCM 바이트수 / (2바이트 × 샘플레이트)
+      const duration = pcm.length / (2 * rate);
 
       return {
         success: true,
         audioBuffer,
         audioSize: audioBuffer.length,
-        timestamps,
-        duration
+        timestamps: null, // Gemini TTS 는 정렬 타임스탬프 미제공
+        duration,
       };
     } catch (error) {
-      console.error('[TTSService] 음성 생성 실패:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        voiceId,
-        modelId,
-        textLength: text?.length
-      });
-
-      if (error.response) {
-        const status = error.response.status;
-        let message = '음성 생성에 실패했습니다.';
-
-        // 응답 데이터 파싱 (Buffer인 경우 JSON으로 변환)
-        let responseData = error.response.data;
-        if (Buffer.isBuffer(responseData)) {
-          try {
-            responseData = JSON.parse(responseData.toString());
-          } catch (e) {
-            // 파싱 실패 시 그대로 사용
-          }
-        }
-
-        if (status === 401) {
-          message = 'API 키가 유효하지 않습니다.';
-        } else if (status === 429) {
-          message = 'API 할당량을 초과했습니다. 잠시 후 다시 시도해주세요.';
-        } else if (responseData?.detail) {
-          const detail = responseData.detail;
-          if (typeof detail === 'string') {
-            message = detail;
-          } else if (detail.message) {
-            message = detail.message;
-          } else if (detail.status) {
-            message = detail.message || `오류: ${detail.status}`;
-          }
-        } else if (responseData?.message) {
-          // responseData에 직접 message가 있는 경우
-          message = responseData.message;
-        } else if (responseData) {
-          // 응답 데이터가 있으면 그대로 사용
-          if (typeof responseData === 'string') {
-            message = responseData;
-          } else if (typeof responseData === 'object') {
-            // 객체인 경우 JSON 문자열로 변환하거나 주요 필드 추출
-            message = responseData.message || responseData.error || JSON.stringify(responseData);
-          } else {
-            message = String(responseData);
-          }
-        }
-
-        return {
-          success: false,
-          error: 'ElevenLabsAPIError',
-          status,
-          message
-        };
-      }
-
-      return {
-        success: false,
-        error: 'NetworkError',
-        message: error.message || '네트워크 오류가 발생했습니다.'
-      };
+      console.error('[TTSService] 음성 생성 실패:', error.message);
+      return { success: false, error: 'NetworkError', message: error.message || '네트워크 오류가 발생했습니다.' };
     }
+  }
+
+  // === 내부 헬퍼 ===
+
+  _settingsSchema() {
+    return {
+      styleInstructions: {
+        supported: true,
+        type: 'text',
+        default: '',
+        description: '말투/감정/상황 지시(자연어). 예: "선생님이 학습 목차를 차분히 읽어주는 느낌"',
+      },
+      temperature: {
+        supported: true,
+        type: 'number',
+        default: 1.0,
+        min: 0.0,
+        max: 2.0,
+        description: '표현 다양성(낮을수록 일관, 높을수록 변화). 일관된 톤 원하면 낮게.',
+      },
+    };
+  }
+
+  _defaultSettings() {
+    return { styleInstructions: '', temperature: 1.0 };
   }
 
   /**
-   * 타임스탬프 포함 텍스트-음성 변환 (v3 알파 모델용)
-   * @param {string} voiceId - 목소리 ID
-   * @param {string} text - 변환할 텍스트
-   * @param {string} modelId - 모델 ID
-   * @param {Object} settings - 추가 설정
-   * @returns {Promise<Object>} - 오디오 데이터와 타임스탬프
+   * PCM(s16le, mono) 버퍼를 mp3 버퍼로 변환 (ffmpeg, 파이프).
    */
-  async textToSpeechWithTimestamps(voiceId, text, modelId = 'eleven_multilingual_v2', settings = {}) {
-    try {
-      if (!this.apiKey) {
-        throw new Error('ELEVENLABS_API_KEY가 설정되지 않았습니다.');
-      }
-
-      // 모델 정보 조회하여 지원하는 설정만 필터링
-      const modelSettingsResult = await this.getModelSettings(modelId);
-      let validSettings = {};
-
-      if (modelSettingsResult.success) {
-        const settingsSchema = modelSettingsResult.settingsSchema;
-        const defaultSettings = modelSettingsResult.defaultSettings;
-
-        // 지원하는 설정만 포함
-        Object.keys(settings).forEach(key => {
-          if (settingsSchema[key] && settingsSchema[key].supported) {
-            validSettings[key] = settings[key];
-          }
-        });
-
-        // 기본값으로 병합
-        validSettings = { ...defaultSettings, ...validSettings };
-      } else {
-        // 모델 정보를 가져올 수 없는 경우 기본 설정 사용
-        const defaultSettings = {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          use_speaker_boost: true
-        };
-        validSettings = { ...defaultSettings, ...settings };
-      }
-
-      const requestBody = {
-        text,
-        model_id: modelId,
-        voice_settings: validSettings
-      };
-
-      // 타임스탬프를 포함한 요청
-      // ElevenLabs API의 실제 타임스탬프 엔드포인트 확인 필요
-      // 일단 기본 구조만 구현
-
-      // 모델별 파라미터 구성
-      // eleven_v3 모델은 optimize_streaming_latency를 지원하지 않음
-      const params = {
-        output_format: 'mp3_44100_128',
-        enable_logging: false
-      };
-
-      // optimize_streaming_latency는 v3 모델이 아닌 경우에만 추가
-      if (modelId !== 'eleven_v3') {
-        params.optimize_streaming_latency = 0;
-      }
-
-      const response = await axios.post(
-        `${this.apiUrl}/text-to-speech/${voiceId}`,
-        requestBody,
-        {
-          headers: {
-            ...this.getHeaders(),
-            'Accept': 'application/json'
-          },
-          params
-        }
-      );
-
-      // 실제 API 응답 구조에 맞게 수정 필요
-      // 타임스탬프는 별도 엔드포인트나 응답에 포함될 수 있음
-      return {
-        success: true,
-        audioBuffer: null, // 실제 구현 필요
-        timestamps: null // 실제 구현 필요
-      };
-    } catch (error) {
-      console.error('[TTSService] 타임스탬프 포함 음성 생성 실패:', error.message);
-      return {
-        success: false,
-        error: 'ElevenLabsAPIError',
-        message: error.message || '음성 생성에 실패했습니다.'
-      };
-    }
+  _pcmToMp3(pcm, rate) {
+    return new Promise((resolve, reject) => {
+      const ff = spawn('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error',
+        '-f', 's16le', '-ar', String(rate), '-ac', '1', '-i', 'pipe:0',
+        '-b:a', '128k', '-f', 'mp3', 'pipe:1',
+      ]);
+      const out = [];
+      const err = [];
+      ff.stdout.on('data', (c) => out.push(c));
+      ff.stderr.on('data', (c) => err.push(c));
+      ff.on('error', (e) => reject(new Error(`ffmpeg 실행 실패: ${e.message} (ffmpeg 설치 확인 필요)`)));
+      ff.on('close', (code) => {
+        if (code === 0) resolve(Buffer.concat(out));
+        else reject(new Error(`ffmpeg PCM→mp3 변환 실패: ${Buffer.concat(err).toString().slice(0, 200)}`));
+      });
+      ff.stdin.on('error', () => { /* EPIPE 무시 */ });
+      ff.stdin.write(pcm);
+      ff.stdin.end();
+    });
   }
 }
+
+// Gemini TTS 프리빌트 보이스 (이름 + 한국어 톤 설명)
+const GEMINI_VOICES = [
+  { voice_id: 'Achernar', name: 'Achernar — 부드러움', category: 'gemini', description: '부드럽고 차분' },
+  { voice_id: 'Sulafat', name: 'Sulafat — 따뜻함', category: 'gemini', description: '따뜻한 톤' },
+  { voice_id: 'Kore', name: 'Kore — 단단함', category: 'gemini', description: '안정적이고 또렷' },
+  { voice_id: 'Charon', name: 'Charon — 정보전달', category: 'gemini', description: '차분한 설명조' },
+  { voice_id: 'Aoede', name: 'Aoede — 산뜻함', category: 'gemini', description: '밝고 산뜻' },
+  { voice_id: 'Puck', name: 'Puck — 경쾌함', category: 'gemini', description: '경쾌한 톤' },
+  { voice_id: 'Zephyr', name: 'Zephyr — 밝음', category: 'gemini', description: '밝은 톤' },
+  { voice_id: 'Leda', name: 'Leda — 젊은 느낌', category: 'gemini', description: '젊고 가벼움' },
+  { voice_id: 'Orus', name: 'Orus — 단호함', category: 'gemini', description: '단호하고 명확' },
+  { voice_id: 'Callirrhoe', name: 'Callirrhoe — 느긋함', category: 'gemini', description: '여유로운 톤' },
+  { voice_id: 'Autonoe', name: 'Autonoe — 밝음', category: 'gemini', description: '밝은 톤' },
+  { voice_id: 'Enceladus', name: 'Enceladus — 부드러움(숨결)', category: 'gemini', description: '부드럽고 숨결감' },
+  { voice_id: 'Iapetus', name: 'Iapetus — 명료함', category: 'gemini', description: '또렷한 발음' },
+  { voice_id: 'Umbriel', name: 'Umbriel — 느긋함', category: 'gemini', description: '여유로운 톤' },
+  { voice_id: 'Algieba', name: 'Algieba — 부드러움', category: 'gemini', description: '부드러운 톤' },
+  { voice_id: 'Despina', name: 'Despina — 매끄러움', category: 'gemini', description: '매끄러운 톤' },
+  { voice_id: 'Erinome', name: 'Erinome — 또렷함', category: 'gemini', description: '또렷한 톤' },
+  { voice_id: 'Algenib', name: 'Algenib — 거친 듯', category: 'gemini', description: '약간 거친 질감' },
+  { voice_id: 'Rasalgethi', name: 'Rasalgethi — 정보전달', category: 'gemini', description: '설명조' },
+  { voice_id: 'Laomedeia', name: 'Laomedeia — 경쾌함', category: 'gemini', description: '경쾌한 톤' },
+  { voice_id: 'Alnilam', name: 'Alnilam — 단단함', category: 'gemini', description: '단단한 톤' },
+  { voice_id: 'Schedar', name: 'Schedar — 고른 톤', category: 'gemini', description: '균형잡힌 톤' },
+  { voice_id: 'Gacrux', name: 'Gacrux — 성숙함', category: 'gemini', description: '성숙한 톤' },
+  { voice_id: 'Pulcherrima', name: 'Pulcherrima — 주도적', category: 'gemini', description: '또렷하고 주도적' },
+  { voice_id: 'Achird', name: 'Achird — 친근함', category: 'gemini', description: '친근한 톤' },
+  { voice_id: 'Zubenelgenubi', name: 'Zubenelgenubi — 캐주얼', category: 'gemini', description: '편안한 캐주얼' },
+  { voice_id: 'Vindemiatrix', name: 'Vindemiatrix — 온화함', category: 'gemini', description: '온화한 톤' },
+  { voice_id: 'Sadachbia', name: 'Sadachbia — 생기', category: 'gemini', description: '생기있는 톤' },
+  { voice_id: 'Sadaltager', name: 'Sadaltager — 전문적', category: 'gemini', description: '전문적인 톤' },
+  { voice_id: 'Fenrir', name: 'Fenrir — 활기', category: 'gemini', description: '활기찬 톤' },
+];
 
 module.exports = new TTSService();

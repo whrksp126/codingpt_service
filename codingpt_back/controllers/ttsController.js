@@ -99,11 +99,11 @@ const generate = async (req, res) => {
       return errorResponse(res, { message: 'voiceId, text는 필수입니다.' }, 400);
     }
 
-    // ElevenLabs API 호출하여 음성 생성
+    // Gemini TTS 호출하여 음성 생성
     const ttsResult = await ttsService.textToSpeech(
       voiceId,
       text,
-      modelId || 'eleven_multilingual_v2',
+      modelId || 'gemini-3.1-flash-tts-preview',
       settings || {}
     );
 
