@@ -347,6 +347,12 @@ const AdminLessonList = () => {
               <h1 className="mt-1 text-xl font-bold text-slate-900">콘텐츠 관리</h1>
             </div>
             <div className="flex items-center gap-2">
+              <Link
+                to="/admin/github-repos"
+                className="rounded-md border border-slate-800 bg-slate-800 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-900"
+              >
+                GitHub 레포 관리
+              </Link>
               <button
                 type="button"
                 onClick={() => setAllExpanded(true)}

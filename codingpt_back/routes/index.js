@@ -12,6 +12,7 @@ const s3Routes = require('./s3Routes');
 const ttsRoutes = require('./ttsRoutes');
 const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
+const githubRepoRoutes = require('./githubRepoRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -24,6 +25,7 @@ router.use('/executor', executorRoutes);
 router.use('/reviews', reviewRoutes);
 router.use('/s3', s3Routes);
 router.use('/tts', ttsRoutes);
+router.use('/admin/github-repos', githubRepoRoutes);
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
 

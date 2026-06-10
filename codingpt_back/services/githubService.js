@@ -100,8 +100,9 @@ async function getOrCreateRepo(token, repoName, { description } = {}) {
 }
 
 // 여러 파일을 단일 커밋으로 푸시 (Git Data API).
-// files: [{ path, content }]  path 는 basePath 하위 상대경로
-async function commitFiles(token, { owner, repo, branch, basePath, files, message }) {
+// files: [{ path, content }]  path 는 레포 루트 기준 전체 경로 (basePath 생략 시).
+// basePath 가 주어지면 그 하위 상대경로로 취급(하위호환).
+async function commitFiles(token, { owner, repo, branch, basePath = '', files, message }) {
   const client = api(token);
   const repoBase = `/repos/${owner}/${repo}`;
 

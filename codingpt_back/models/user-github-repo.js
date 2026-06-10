@@ -1,7 +1,8 @@
 module.exports = (sequelize, DataTypes) => {
-  // 학습자 × 클래스 → GitHub 레포 매핑. 클래스 단위로 레포 1개를 생성/재사용하기 위한 식별 테이블.
-  // 레슨 완료 시 이 매핑을 통해 어느 레포의 어느 폴더에 커밋할지 결정한다.
-  const UserClassRepo = sequelize.define('UserClassRepo', {
+  // 학습자 × 레포정의(github_repo) → 학습자 계정에 실제 생성된 GitHub 레포 매핑.
+  // 레슨 완료 시 이 매핑으로 레포를 재사용(재생성 방지)하고 어디에 커밋할지 식별한다.
+  // (기존 user_class_repo 를 대체 — 레포가 클래스가 아닌 레포정의에 종속)
+  const UserGithubRepo = sequelize.define('UserGithubRepo', {
     id: {
       type: DataTypes.INTEGER,
       primaryKey: true,
@@ -11,7 +12,7 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
-    class_id: {
+    github_repo_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
@@ -39,19 +40,19 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: DataTypes.NOW,
     },
   }, {
-    tableName: 'user_class_repo',
+    tableName: 'user_github_repo',
     timestamps: true,
     createdAt: 'created_at',
     updatedAt: 'updated_at',
     indexes: [
-      { unique: true, fields: ['user_id', 'class_id'], name: 'uniq_user_class_repo' },
+      { unique: true, fields: ['user_id', 'github_repo_id'], name: 'uniq_user_github_repo' },
     ],
   });
 
-  UserClassRepo.associate = (models) => {
-    UserClassRepo.belongsTo(models.User, { foreignKey: 'user_id' });
-    UserClassRepo.belongsTo(models.Class, { foreignKey: 'class_id' });
+  UserGithubRepo.associate = (models) => {
+    UserGithubRepo.belongsTo(models.User, { foreignKey: 'user_id' });
+    UserGithubRepo.belongsTo(models.GithubRepo, { foreignKey: 'github_repo_id' });
   };
 
-  return UserClassRepo;
+  return UserGithubRepo;
 };

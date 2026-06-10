@@ -8,6 +8,7 @@ const {
 } = require('../controllers/lessonController');
 const lessonEditor = require('../controllers/lessonEditorController');
 const lessonPrecompute = require('../controllers/lessonPrecomputeController');
+const githubRepoController = require('../controllers/githubRepoController');
 
 // === Existing learner-facing reads (auth required) ===
 router.get('/slides', authMiddleware, getSlidesByLesson);
@@ -29,6 +30,9 @@ router.post('/assets/update-urls', lessonEditor.updateAssetUrls);
 router.get('/code-fill-gaps/:slideId', lessonEditor.getCodeFillGap);
 router.put('/code-fill-gaps/:slideId', lessonEditor.upsertCodeFillGap);
 router.delete('/code-fill-gaps/:slideId', lessonEditor.deleteCodeFillGap);
+
+// === Editor: GitHub 산출물 — 직전 레슨 소스 불러오기 (must come before /:id) ===
+router.get('/:lessonId/github/previous-files', githubRepoController.previousLessonFiles);
 
 // === Editor: lessons CRUD ===
 router.get('/', lessonEditor.listLessons);
