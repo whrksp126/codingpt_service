@@ -43,16 +43,29 @@ const completeLessonWithResult = async (req, res) => {
     const { user_id, myclass_id, lesson_id, result } = req.body;
     const data = await myclassService.completeLessonWithResult(user_id, myclass_id, lesson_id, result);
 
-    // 완료 처리(트랜잭션 커밋) 직후, 학습자 GitHub 레포에 산출물 자동 푸시 (fire-and-forget).
-    // 푸시 실패가 완료 응답을 막지 않도록 await 하지 않고 에러는 로깅만 한다.
-    githubPushService
-      .pushLessonForUser(user_id, myclass_id, lesson_id)
-      .then((r) => {
-        if (r && !r.skipped) console.log(`[github] 산출물 푸시 완료: ${r.repoFullName}/${r.path} (${r.fileCount} files)`);
-      })
-      .catch((err) => console.error('[github] 산출물 자동 푸시 실패:', err.message));
+    // 완료 처리(트랜잭션 커밋) 직후, 학습자 GitHub 레포에 산출물 자동 푸시.
+    // 결과 화면에 "GitHub 저장됨" 표시를 위해 결과를 응답에 포함하되,
+    // 푸시 실패가 완료 응답을 막지 않도록 try/catch 로 감싼다.
+    let github = null;
+    try {
+      const r = await githubPushService.pushLessonForUser(user_id, myclass_id, lesson_id);
+      if (r && !r.skipped) {
+        console.log(`[github] 산출물 푸시 완료: ${r.repoFullName}/${r.path} (${r.fileCount} files)`);
+        github = {
+          pushed: true,
+          repoFullName: r.repoFullName,
+          repoUrl: r.htmlUrl,
+          folderUrl: r.folderUrl,
+          path: r.path,
+          fileCount: r.fileCount,
+        };
+      }
+    } catch (err) {
+      console.error('[github] 산출물 자동 푸시 실패:', err.message);
+    }
 
-    successResponse(res, data, '레슨별 슬라이드 결과값을 성공적으로 업데이트했습니다.');
+    const payload = data ? { ...data, github } : data;
+    successResponse(res, payload, '레슨별 슬라이드 결과값을 성공적으로 업데이트했습니다.');
   }
   catch (error) {
     console.error('레슨별 슬라이드 결과값 업데이트 오류:', error);

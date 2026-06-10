@@ -108,10 +108,16 @@ async function pushLessonForUser(userId, myclassId, lessonId) {
     message: `완료: ${lesson.name}`,
   });
 
+  const folderUrl = `${repo.htmlUrl}/tree/${repo.defaultBranch}/${basePath
+    .split('/')
+    .map(encodeURIComponent)
+    .join('/')}`;
+
   return {
     skipped: false,
     repoFullName: repo.fullName,
     htmlUrl: repo.htmlUrl,
+    folderUrl,
     path: basePath,
     commitSha: result.commitSha,
     fileCount: files.length,
