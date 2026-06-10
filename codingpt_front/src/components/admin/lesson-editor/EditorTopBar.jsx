@@ -21,7 +21,7 @@ const EditorTopBar = () => {
   if (!lesson) return null;
 
   const isPublished = !!lesson.published_at;
-  const githubEnabled = !!(lesson.meta && lesson.meta.github && lesson.meta.github.enabled);
+  const githubEnabled = !!(lesson.meta && lesson.meta.github && lesson.meta.github.repoId);
 
   const handlePublishToggle = async () => {
     if (ui.dirty) {

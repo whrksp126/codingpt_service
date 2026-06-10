@@ -17,7 +17,8 @@ async function pushLessonForUser(userId, myclassId, lessonId) {
 
   const github = (lesson.meta && lesson.meta.github) || {};
   const files = Array.isArray(github.files) ? github.files.filter((f) => f && f.path) : [];
-  if (!github.enabled || !github.repoId || files.length === 0) {
+  // 레포가 지정되고 산출물 파일이 있으면 항상 푸시 (별도 활성화 토글 없음)
+  if (!github.repoId || files.length === 0) {
     return { skipped: true, reason: 'no_deliverables' };
   }
 
