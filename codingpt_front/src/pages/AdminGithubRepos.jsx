@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { GithubLogo, Plus } from '@phosphor-icons/react';
 import * as repoApi from '../utils/githubRepoApi';
 import SimpleEditModal from '../components/admin/content/SimpleEditModal';
 
@@ -51,13 +52,14 @@ const AdminGithubRepos = () => {
     <div className="min-h-screen bg-slate-50">
       <header className="flex h-14 items-center gap-3 border-b border-slate-200 bg-white px-4">
         <Link to="/admin/lessons" className="text-sm text-slate-500 hover:text-slate-900">← 콘텐츠 관리</Link>
+        <GithubLogo size={20} weight="fill" className="text-slate-800" />
         <h1 className="text-base font-semibold text-slate-900">GitHub 레포 관리</h1>
         <button
           type="button"
           onClick={openCreate}
-          className="ml-auto rounded bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-cyan-600"
+          className="ml-auto flex items-center gap-1 rounded bg-cyan-500 px-3 py-1.5 text-sm font-semibold text-white hover:bg-cyan-600"
         >
-          + 레포 생성
+          <Plus size={15} weight="bold" /> 레포 생성
         </button>
       </header>
 
@@ -81,7 +83,7 @@ const AdminGithubRepos = () => {
                 key={repo.id}
                 className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-4"
               >
-                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800 text-xs font-bold text-white">GH</div>
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-800 text-white"><GithubLogo size={20} weight="fill" /></div>
                 <div className="min-w-0 flex-1">
                   <p className="font-mono text-sm font-semibold text-slate-900">{repo.name}</p>
                   {repo.description ? (

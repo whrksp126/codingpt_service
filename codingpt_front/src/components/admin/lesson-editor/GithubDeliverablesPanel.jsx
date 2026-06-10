@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import {
+  GithubLogo, Folder, File as FileIcon, FilePlus, FolderPlus,
+  CaretRight, CaretDown, X, ArrowBendUpLeft, DownloadSimple, Trash,
+} from '@phosphor-icons/react';
 import { useEditor, selectSelectedSlide } from './state/EditorContext';
 import MonacoField from './modules/_shared/MonacoField';
 import * as repoApi from '../../../utils/githubRepoApi';
@@ -204,14 +208,15 @@ const GithubDeliverablesPanel = ({ onClose }) => {
               style={{ paddingLeft: depth * 12 + 4 }}
               onClick={() => { setActiveDir(child.path); setCollapsed((c) => ({ ...c, [child.path]: !c[child.path] })); }}
             >
-              <span className="text-slate-400">{isCollapsed ? '▶' : '▼'}</span>
-              <span className="text-amber-500">📁</span>
+              {isCollapsed ? <CaretRight size={12} className="text-slate-400" /> : <CaretDown size={12} className="text-slate-400" />}
+              <Folder size={14} weight="fill" className="text-amber-500" />
               <span className="truncate text-slate-700">{child.name}</span>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); deleteFolder(child.path); }}
-                className="ml-auto hidden text-[11px] text-red-500 group-hover:block"
-              >삭제</button>
+                className="ml-auto hidden text-red-500 group-hover:block"
+                title="폴더 삭제"
+              ><Trash size={13} /></button>
             </div>
             {!isCollapsed && renderNode(child, depth + 1)}
           </div>
@@ -227,7 +232,7 @@ const GithubDeliverablesPanel = ({ onClose }) => {
           style={{ paddingLeft: depth * 12 + 16 }}
           onClick={() => openFile(child.path)}
         >
-          <span>📄</span>
+          <FileIcon size={14} className="shrink-0 text-slate-400" />
           <span className="truncate">{child.name}</span>
         </div>
       );
@@ -244,11 +249,14 @@ const GithubDeliverablesPanel = ({ onClose }) => {
       >
         {/* 헤더 */}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-3">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900">GitHub 산출물</h2>
-            <p className="text-xs text-slate-500">레슨 완료 시, 선택한 레포에 아래 파일들이 <b>레포 루트 기준 전체 경로</b>로 커밋됩니다. 같은 경로 파일은 갱신됩니다(점진적 빌드).</p>
+          <div className="flex items-center gap-2">
+            <GithubLogo size={22} weight="fill" className="text-slate-800" />
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">GitHub 산출물</h2>
+              <p className="text-xs text-slate-500">레슨 완료 시, 선택한 레포에 아래 파일들이 <b>레포 루트 기준 전체 경로</b>로 커밋됩니다. 같은 경로 파일은 갱신됩니다(점진적 빌드).</p>
+            </div>
           </div>
-          <button type="button" onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">✕</button>
+          <button type="button" onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={18} weight="bold" /></button>
         </div>
 
         {/* 상단 컨트롤: 활성화 + 레포 + 액션 */}
@@ -273,12 +281,12 @@ const GithubDeliverablesPanel = ({ onClose }) => {
           </div>
           <div className="ml-auto flex items-center gap-2">
             <button type="button" onClick={loadPreviousFiles} disabled={loadingPrev || !github.repoId}
-              className="rounded border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-              {loadingPrev ? '불러오는 중…' : '↩ 직전 레슨 소스'}
+              className="flex items-center gap-1 rounded border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              <ArrowBendUpLeft size={14} /> {loadingPrev ? '불러오는 중…' : '직전 레슨 소스'}
             </button>
             <button type="button" onClick={importFromCodeModules}
-              className="rounded border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
-              ⬇ code 모듈
+              className="flex items-center gap-1 rounded border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+              <DownloadSimple size={14} /> code 모듈
             </button>
           </div>
         </div>
@@ -288,19 +296,19 @@ const GithubDeliverablesPanel = ({ onClose }) => {
           {/* 좌측 파일 트리 */}
           <div className="flex w-64 shrink-0 flex-col border-r border-slate-200 bg-slate-50">
             <div className="flex items-center gap-1 border-b border-slate-200 px-2 py-1.5">
-              <span className="text-xs font-semibold text-slate-500">
-                {activeDir ? `📁 ${activeDir}` : '루트'}
+              <span className="flex items-center gap-1 truncate text-xs font-semibold text-slate-500">
+                {activeDir ? <><Folder size={13} weight="fill" className="text-amber-500" />{activeDir}</> : '루트'}
               </span>
               <div className="ml-auto flex gap-1">
-                <button type="button" onClick={newFile} title="새 파일" className="rounded px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-200">＋파일</button>
-                <button type="button" onClick={newFolder} title="새 폴더" className="rounded px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-200">＋폴더</button>
+                <button type="button" onClick={newFile} title="새 파일" className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-200"><FilePlus size={14} />파일</button>
+                <button type="button" onClick={newFolder} title="새 폴더" className="flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-slate-600 hover:bg-slate-200"><FolderPlus size={14} />폴더</button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-1">
               <div
                 className={`mb-1 rounded px-1 py-0.5 text-xs cursor-pointer ${activeDir === '' ? 'bg-cyan-50 text-cyan-700' : 'text-slate-400'}`}
                 onClick={() => setActiveDir('')}
-              >／ (루트)</div>
+              >／ 루트</div>
               {files.length === 0 ? (
                 <p className="px-2 py-6 text-center text-xs text-slate-400">파일이 없습니다.<br />＋파일로 시작하세요.</p>
               ) : renderNode(tree)}
@@ -327,8 +335,8 @@ const GithubDeliverablesPanel = ({ onClose }) => {
                       <button
                         type="button"
                         onClick={(e) => closeTab(p, e)}
-                        className="rounded px-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                      >✕</button>
+                        className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                      ><X size={11} weight="bold" /></button>
                     </div>
                   );
                 })}
