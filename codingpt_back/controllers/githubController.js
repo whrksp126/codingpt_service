@@ -44,9 +44,14 @@ const authorize = async (req, res) => {
   }
 };
 
-// GET /api/github/callback?code=&state=  → 토큰 교환 + 연동 저장 + 결과 HTML
+// 앱 복귀용 딥링크. 시스템 인증세션(ASWebAuthenticationSession/Custom Tabs)이 이 scheme 을 감지해 자동 종료된다.
+const APP_GITHUB_REDIRECT = process.env.APP_GITHUB_REDIRECT || 'codingpt://github-auth';
+
+// GET /api/github/callback?code=&state=  → 토큰 교환 + 연동 저장 → 앱 딥링크로 리디렉트
+// (?display=html 이면 디버그용 HTML 페이지 반환)
 const callback = async (req, res) => {
-  const { code, state, error: oauthError } = req.query;
+  const { code, state, error: oauthError, display } = req.query;
+  const wantsHtml = display === 'html';
   try {
     if (oauthError) throw new Error(`GitHub 인가 거부: ${oauthError}`);
     if (!code || !state) throw new Error('code/state 가 없습니다.');
@@ -56,10 +61,17 @@ const callback = async (req, res) => {
     const githubUser = await githubService.getGithubUser(accessToken);
     await githubConnectionService.saveConnection(userId, { accessToken, scope, githubUser });
 
-    res.status(200).send(resultPage({ ok: true, message: `@${githubUser.login} 계정이 연결되었습니다.` }));
+    if (wantsHtml) {
+      return res.status(200).send(resultPage({ ok: true, message: `@${githubUser.login} 계정이 연결되었습니다.` }));
+    }
+    // 시스템 인증세션이 감지하도록 앱 딥링크로 리디렉트
+    return res.redirect(`${APP_GITHUB_REDIRECT}?status=ok&login=${encodeURIComponent(githubUser.login)}`);
   } catch (error) {
     console.error('GitHub callback 오류:', error);
-    res.status(400).send(resultPage({ ok: false, message: error.message || '연결에 실패했습니다.' }));
+    if (wantsHtml) {
+      return res.status(400).send(resultPage({ ok: false, message: error.message || '연결에 실패했습니다.' }));
+    }
+    return res.redirect(`${APP_GITHUB_REDIRECT}?status=error&message=${encodeURIComponent(error.message || 'failed')}`);
   }
 };
 
