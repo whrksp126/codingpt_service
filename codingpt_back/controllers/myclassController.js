@@ -1,4 +1,5 @@
 const myclassService = require('../services/myclassService');
+const githubPushService = require('../services/githubPushService');
 const { successResponse, errorResponse } = require('../utils/response');
 
 // 모든 내강의 조회
@@ -41,6 +42,16 @@ const completeLessonWithResult = async (req, res) => {
   try {
     const { user_id, myclass_id, lesson_id, result } = req.body;
     const data = await myclassService.completeLessonWithResult(user_id, myclass_id, lesson_id, result);
+
+    // 완료 처리(트랜잭션 커밋) 직후, 학습자 GitHub 레포에 산출물 자동 푸시 (fire-and-forget).
+    // 푸시 실패가 완료 응답을 막지 않도록 await 하지 않고 에러는 로깅만 한다.
+    githubPushService
+      .pushLessonForUser(user_id, myclass_id, lesson_id)
+      .then((r) => {
+        if (r && !r.skipped) console.log(`[github] 산출물 푸시 완료: ${r.repoFullName}/${r.path} (${r.fileCount} files)`);
+      })
+      .catch((err) => console.error('[github] 산출물 자동 푸시 실패:', err.message));
+
     successResponse(res, data, '레슨별 슬라이드 결과값을 성공적으로 업데이트했습니다.');
   }
   catch (error) {

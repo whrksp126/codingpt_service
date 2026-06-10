@@ -26,13 +26,15 @@ export const useAutosave = (lessonId) => {
           lesson.name !== lastSaved.name ||
           lesson.description !== lastSaved.description ||
           lesson.type !== lastSaved.type ||
-          lesson.default_character !== lastSaved.default_character
+          lesson.default_character !== lastSaved.default_character ||
+          JSON.stringify(lesson.meta) !== JSON.stringify(lastSaved.meta)
         ) {
           await api.updateLessonMeta(lessonId, {
             name: lesson.name,
             type: lesson.type,
             description: lesson.description,
             default_character: lesson.default_character,
+            meta: lesson.meta,
           });
         }
 

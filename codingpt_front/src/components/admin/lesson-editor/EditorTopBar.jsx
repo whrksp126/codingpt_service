@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import * as api from '../../../utils/lessonApi';
 import { useEditor } from './state/EditorContext';
 import CharacterPool from './CharacterPool';
+import GithubDeliverablesPanel from './GithubDeliverablesPanel';
 
 const SAVE_LABEL = {
   idle: '저장 대기',
@@ -15,10 +16,12 @@ const EditorTopBar = () => {
   const { state, dispatch } = useEditor();
   const { lesson, ui } = state;
   const [publishing, setPublishing] = useState(false);
+  const [showGithub, setShowGithub] = useState(false);
 
   if (!lesson) return null;
 
   const isPublished = !!lesson.published_at;
+  const githubEnabled = !!(lesson.meta && lesson.meta.github && lesson.meta.github.enabled);
 
   const handlePublishToggle = async () => {
     if (ui.dirty) {
@@ -97,6 +100,19 @@ const EditorTopBar = () => {
         </button>
         <button
           type="button"
+          onClick={() => setShowGithub(true)}
+          className={
+            'rounded border px-3 py-1 text-xs font-semibold ' +
+            (githubEnabled
+              ? 'border-slate-800 bg-slate-800 text-white hover:bg-slate-900'
+              : 'border-slate-200 text-slate-600 hover:bg-slate-50')
+          }
+          title="GitHub 산출물 정의"
+        >
+          {githubEnabled ? '✓ GitHub 산출물' : 'GitHub 산출물'}
+        </button>
+        <button
+          type="button"
           onClick={handlePublishToggle}
           disabled={publishing}
           className={
@@ -110,6 +126,7 @@ const EditorTopBar = () => {
           {publishing ? '...' : (isPublished ? '✓ 발행됨' : '발행')}
         </button>
       </div>
+      {showGithub && <GithubDeliverablesPanel onClose={() => setShowGithub(false)} />}
     </header>
   );
 };
