@@ -26,7 +26,7 @@ const loadModelsOnce = () => {
   return _modelsPromise;
 };
 
-const TTSField = ({ value, onChange, label, defaultText = '' }) => {
+const TTSField = ({ value, onChange, label, defaultText = '', suggestedVoiceId = '' }) => {
   const [manualOpen, setManualOpen] = useState(false);
   const hasData = value !== undefined && value !== null && !(typeof value === 'string' && !value);
   const enabled = (hasData && (typeof value === 'string' || value.enabled !== false)) || manualOpen;
@@ -173,6 +173,7 @@ const TTSField = ({ value, onChange, label, defaultText = '' }) => {
                     <TtsGeneratePanel
                       defaultText={defaultText}
                       folder={folder}
+                      suggestedVoiceId={suggestedVoiceId}
                       onCancel={close}
                       onCreated={() => { reload && reload(); close && close(); }}
                     />

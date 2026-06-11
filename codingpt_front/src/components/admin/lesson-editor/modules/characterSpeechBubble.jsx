@@ -3,6 +3,7 @@ import * as monaco from 'monaco-editor';
 import { useEditor } from '../state/EditorContext';
 import { useResultParent } from '../state/ResultParentContext';
 import { Field, SelectField, ToggleField, TTSField } from './_shared/SharedFields';
+import { CONTEXT_DEFAULT_VOICE } from './_shared/ttsVoiceDefaults';
 import AssetPickerField from './_shared/AssetPickerField';
 import RawHtmlPreview from './_shared/RawHtmlPreview';
 import MonacoField from './_shared/MonacoField';
@@ -41,6 +42,7 @@ const detectCharacterKeyFromUrl = (url) => {
 
 const FormView = ({ value, onChange }) => {
   const speeches = value.speeches || [];
+  const { state } = useEditor();
   const { parentType, parentValue } = useResultParent();
   const isFillGapChild = parentType === 'codeFillTheGapV2';
   const blanksLen = isFillGapChild ? (parentValue?.blanks?.length || 0) : 0;
@@ -105,6 +107,14 @@ const FormView = ({ value, onChange }) => {
   const characterKey = characterImage
     ? (detectCharacterKeyFromUrl(characterImage) || 'inherit')
     : 'inherit';
+
+  // 캐릭터(선생님/학생)에 따른 기본 TTS 보이스 — PreviewView 의 inferredKey 와 동일 규칙.
+  // 'inherit' 이면 레슨 기본 캐릭터(default_character)로 해석.
+  const resolvedCharacterKey = detectCharacterKeyFromUrl(characterImage)
+    || state.lesson?.default_character || 'student_full';
+  const suggestedVoiceId = resolvedCharacterKey.startsWith('teacher')
+    ? CONTEXT_DEFAULT_VOICE.teacher
+    : CONTEXT_DEFAULT_VOICE.student;
 
   return (
     <>
@@ -227,6 +237,7 @@ const FormView = ({ value, onChange }) => {
             value={s.tts}
             onChange={(v) => updateSpeech(i, { tts: v })}
             defaultText={stripHtml(s.content)}
+            suggestedVoiceId={suggestedVoiceId}
           />
         </div>
       ))}

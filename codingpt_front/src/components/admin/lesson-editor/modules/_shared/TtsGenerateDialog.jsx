@@ -47,9 +47,10 @@ const authHeaders = () => {
 };
 
 // 미리듣기 → 확인 → 저장 루프. 저장 전엔 파일로 안 남기고, 미리듣기 음성을 재사용해 저장(추가 호출 X).
-const TtsGeneratePanel = ({ defaultText = '', folder = '', onCreated, onCancel }) => {
+const TtsGeneratePanel = ({ defaultText = '', folder = '', onCreated, onCancel, suggestedVoiceId = '' }) => {
   const [text, setText] = useState(defaultText || '');
-  const [voiceId, setVoiceId] = useState(() => localStorage.getItem(LS_VOICE) || '');
+  // 모듈 맥락이 추천한 보이스(suggestedVoiceId)를 최우선 초기값으로 — 없으면 마지막 사용값.
+  const [voiceId, setVoiceId] = useState(() => suggestedVoiceId || localStorage.getItem(LS_VOICE) || '');
   const [modelId, setModelId] = useState(() => localStorage.getItem(LS_MODEL) || '');
   const [styleInstructions, setStyleInstructions] = useState(() => localStorage.getItem(LS_STYLE) || '');
   const [voices, setVoices] = useState([]);
