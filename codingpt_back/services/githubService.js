@@ -78,6 +78,7 @@ async function getOrCreateRepo(token, repoName, { description } = {}) {
       fullName: data.full_name,
       defaultBranch: data.default_branch,
       htmlUrl: data.html_url,
+      created: false,
     };
   } catch (err) {
     if (!err.response || err.response.status !== 404) throw err;
@@ -96,6 +97,7 @@ async function getOrCreateRepo(token, repoName, { description } = {}) {
     fullName: data.full_name,
     defaultBranch: data.default_branch || 'main',
     htmlUrl: data.html_url,
+    created: true,
   };
 }
 

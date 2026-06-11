@@ -10,7 +10,7 @@ async function getById(id) {
   return GithubRepo.findByPk(id);
 }
 
-async function create({ name, description, visibility }) {
+async function create({ name, description, visibility, readme }) {
   if (!name || !String(name).trim()) {
     const err = new Error('레포 이름은 필수입니다.');
     err.statusCode = 400;
@@ -20,10 +20,11 @@ async function create({ name, description, visibility }) {
     name: String(name).trim(),
     description: description || null,
     visibility: visibility || 'public',
+    readme: readme || null,
   });
 }
 
-async function update(id, { name, description, visibility }) {
+async function update(id, { name, description, visibility, readme }) {
   const repo = await GithubRepo.findByPk(id);
   if (!repo) {
     const err = new Error('레포 정의를 찾을 수 없습니다.');
@@ -33,6 +34,7 @@ async function update(id, { name, description, visibility }) {
   if (name !== undefined) repo.name = String(name).trim();
   if (description !== undefined) repo.description = description || null;
   if (visibility !== undefined) repo.visibility = visibility || 'public';
+  if (readme !== undefined) repo.readme = readme || null;
   await repo.save();
   return repo;
 }

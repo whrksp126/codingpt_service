@@ -47,11 +47,18 @@ async function pushLessonForUser(userId, myclassId, lessonId) {
   }
 
   // 파일 경로 = 레포 루트 기준 전체 경로 (폴더 자동 prefix 없음)
+  const commitFiles = files.map((f) => ({ path: f.path, content: f.content }));
+
+  // 레포 최초 생성 시, 레포 정의의 README.md 를 시드 (산출물에 README.md 가 없을 때만)
+  if (repo.created && repoDef.readme && !commitFiles.some((f) => f.path.toLowerCase() === 'readme.md')) {
+    commitFiles.unshift({ path: 'README.md', content: repoDef.readme });
+  }
+
   const result = await githubService.commitFiles(token, {
     owner: repo.owner,
     repo: repo.repo,
     branch: repo.defaultBranch,
-    files: files.map((f) => ({ path: f.path, content: f.content })),
+    files: commitFiles,
     message: `완료: ${lesson.name}`,
   });
 

@@ -11,8 +11,8 @@ const list = async (req, res) => {
 
 const create = async (req, res) => {
   try {
-    const { name, description, visibility } = req.body || {};
-    successResponse(res, await svc.create({ name, description, visibility }), '레포 정의가 생성되었습니다.');
+    const { name, description, visibility, readme } = req.body || {};
+    successResponse(res, await svc.create({ name, description, visibility, readme }), '레포 정의가 생성되었습니다.');
   } catch (e) {
     errorResponse(res, e, e.statusCode || 400);
   }

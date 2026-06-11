@@ -21,6 +21,10 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'public',
     },
+    readme: {
+      type: DataTypes.TEXT, // 레포 최초 생성 시 시드될 README.md 내용
+      allowNull: true,
+    },
     created_at: {
       type: DataTypes.DATE,
       allowNull: false,
