@@ -2,6 +2,9 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# TTS PCM→mp3 변환(ttsService._pcmToMp3)에서 ffmpeg 사용
+RUN apk add --no-cache ffmpeg
+
 COPY package*.json ./
 
 RUN npm ci --only=production

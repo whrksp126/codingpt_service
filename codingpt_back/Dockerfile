@@ -12,6 +12,9 @@ FROM node:18-alpine
 
 WORKDIR /app
 
+# TTS PCM→mp3 변환(ttsService._pcmToMp3)에서 ffmpeg 사용
+RUN apk add --no-cache ffmpeg
+
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app .
 
