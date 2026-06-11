@@ -49,14 +49,15 @@ const ttsSchema = z.union([
     assetId: z.number().int(),
     enabled: z.boolean().optional(),
     url: z.string().optional(),
-    timestamps: ttsTimestampsSchema.optional(),
+    // Gemini TTS 는 타임스탬프를 제공하지 않아 null 로 들어올 수 있음 → nullish 허용.
+    timestamps: ttsTimestampsSchema.nullish(),
     voiceId: z.string().optional(),
     modelId: z.string().optional(),
   }),
   // 인라인/파일참조: url 직접 보유 (objectstore 파일 + 사이드카 메타)
   z.object({
     url: z.string(),
-    timestamps: ttsTimestampsSchema.optional(),
+    timestamps: ttsTimestampsSchema.nullish(), // Gemini TTS → null 허용
     enabled: z.boolean().optional(), // false면 RN에서 비활성 (데이터는 보존)
     voiceId: z.string().optional(),
     modelId: z.string().optional(),
