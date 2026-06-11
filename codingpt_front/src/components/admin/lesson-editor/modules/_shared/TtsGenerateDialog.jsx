@@ -93,10 +93,21 @@ const TtsGeneratePanel = ({ defaultText = '', folder = '', onCreated, onCancel }
     try {
       let url = sampleUrlCache.current[v.voice_id];
       if (!url) {
-        const res = await fetch(`${backendUrl}/api/tts/voices/${encodeURIComponent(v.voice_id)}/sample`, { headers: authHeaders() });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) throw new Error(data.message || '샘플 생성 실패');
-        url = data.data.url;
+        // 캐시 없는 보이스는 백엔드가 즉석 생성 → Gemini rate limit/지연으로 엣지가 502를
+        // 떨굴 수 있음(이때 CORS 헤더 없이 실패). 백엔드는 타임아웃 뒤에도 생성을 끝내 캐시에
+        // 남기므로, 1회 짧게 대기 후 재시도하면 두 번째엔 캐시 히트로 성공한다.
+        const fetchSample = async () => {
+          const res = await fetch(`${backendUrl}/api/tts/voices/${encodeURIComponent(v.voice_id)}/sample`, { headers: authHeaders() });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || !data.success) throw new Error(data.message || '샘플 생성 실패');
+          return data.data.url;
+        };
+        try {
+          url = await fetchSample();
+        } catch (e) {
+          await new Promise((r) => setTimeout(r, 1500));
+          url = await fetchSample();
+        }
         sampleUrlCache.current[v.voice_id] = url;
       }
       const a = new Audio(url);
