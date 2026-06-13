@@ -270,34 +270,58 @@ class ExecutorService {
     const acorn = require('acorn');
     const ast = acorn.parse(code, { ecmaVersion: 'latest', locations: true, allowReturnOutsideFunction: true });
 
-    const points = [];
-    const collect = (node) => {
+    // 소스에 삽입할 코드 조각들. pos(삽입 위치) 기준 뒤에서부터 적용해 offset 보존.
+    const inserts = [];
+    let seq = 0;
+    const add = (pos, text) => inserts.push({ pos, text, seq: seq++ });
+    const LOOP = new Set(['ForStatement', 'WhileStatement', 'DoWhileStatement']);
+
+    const walk = (node) => {
       if (!node || typeof node !== 'object') return;
-      if (Array.isArray(node)) { node.forEach(collect); return; }
+      if (Array.isArray(node)) { node.forEach(walk); return; }
       if (typeof node.type !== 'string') return;
+
+      // 1) body/consequent 배열의 각 문장 앞에 라인 emit
       for (const key of ['body', 'consequent']) {
         const arr = node[key];
         if (Array.isArray(arr)) {
           for (const stmt of arr) {
             if (stmt && stmt.type && stmt.loc && typeof stmt.start === 'number') {
-              points.push({ start: stmt.start, line: stmt.loc.start.line });
+              add(stmt.start, `__cptLine(${stmt.loc.start.line});`);
             }
           }
         }
       }
+
+      // 2) 반복문: 매 반복마다 헤더 줄을 다시 emit (settrace 수준 디테일).
+      //    test 가 있으면 `(test)` → `(__cptLine(L), test)` 로 감싸 조건 평가 직전에 emit.
+      //    test 가 없거나(for(;;)) for-in/of 면 블록 본문 진입 시 emit.
+      if (LOOP.has(node.type)) {
+        const L = node.loc.start.line;
+        if (node.test && typeof node.test.start === 'number') {
+          add(node.test.start, `(__cptLine(${L}),`);
+          add(node.test.end, ')');
+        } else if (node.body && node.body.type === 'BlockStatement' && typeof node.body.start === 'number') {
+          add(node.body.start + 1, `__cptLine(${L});`);
+        }
+      } else if ((node.type === 'ForInStatement' || node.type === 'ForOfStatement')
+        && node.body && node.body.type === 'BlockStatement' && typeof node.body.start === 'number') {
+        add(node.body.start + 1, `__cptLine(${node.loc.start.line});`);
+      }
+
       for (const key in node) {
         if (key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
         const child = node[key];
-        if (child && typeof child === 'object') collect(child);
+        if (child && typeof child === 'object') walk(child);
       }
     };
-    collect(ast);
+    walk(ast);
 
-    // 뒤에서부터 삽입해야 앞쪽 offset 이 유지됨
-    points.sort((a, b) => b.start - a.start);
+    // 뒤에서부터 삽입(앞 offset 보존). 같은 위치면 나중에 추가된 것을 먼저 넣어 안쪽에 위치.
+    inserts.sort((a, b) => (b.pos - a.pos) || (b.seq - a.seq));
     let out = code;
-    for (const p of points) {
-      out = out.slice(0, p.start) + `__cptLine(${p.line});` + out.slice(p.start);
+    for (const ins of inserts) {
+      out = out.slice(0, ins.pos) + ins.text + out.slice(ins.pos);
     }
 
     const SENTINEL = ExecutorService.TRACE_SENTINEL;
