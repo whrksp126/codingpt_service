@@ -108,6 +108,29 @@ const cachedResultSchema = z.object({
 
 const executionModeSchema = z.enum(['cached', 'live']);
 
+// 모바일 IDE 연동 설정 — code/terminal/codeFillTheGapV2 모듈에 인라인 저장됨.
+// 실제 프로젝트 소스(폴더/파일/이미지)는 objectstore `codingpt/execute/ide/<projectId>/` 에 보관되고,
+// 모듈은 이 메타(이름/식별자/진입파일)만 들고 있는다.
+// 하이라이트 구간 — Monaco 선택영역(1-based line/column) 그대로 보존, 학습자 IDE 에서 동일 구간 강조.
+const ideHighlightRangeSchema = z.object({
+  startLine: z.number().int().positive(),
+  startColumn: z.number().int().positive(),
+  endLine: z.number().int().positive(),
+  endColumn: z.number().int().positive(),
+});
+
+const ideConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  projectName: z.string().optional(), // 탐색기 작업영역 루트 이름 (예: 'html 기초')
+  projectId: z.string().optional(),   // 안정적 식별자 — basePath = ide/<projectId>
+  entryFile: z.string().optional(),   // 브라우저 프리뷰 진입 파일 (기본 index.html)
+  // IDE 소스 관리 모달에서 저장한 "보기 상태" — 학습자 IDE 가 그대로 재현.
+  initialTabs: z.array(z.string()).optional(), // 열어둘 탭(순서 유지)
+  activeTab: z.string().optional(),            // 활성 탭
+  // 파일별 하이라이트 구간 목록 (git diff 처럼 핵심 영역 강조). { '경로': [range, ...] }
+  highlights: z.record(z.string(), z.array(ideHighlightRangeSchema)).optional(),
+}).passthrough();
+
 module.exports = {
   visibilitySchema,
   ttsSchema,
@@ -119,4 +142,5 @@ module.exports = {
   slideRoleSchema,
   cachedResultSchema,
   executionModeSchema,
+  ideConfigSchema,
 };

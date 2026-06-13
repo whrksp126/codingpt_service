@@ -11,6 +11,9 @@ router.post('/execute-s3', executorController.executeS3File);
 // 프리뷰 세션 생성
 router.post('/preview', executorController.createPreview);
 
+// 인라인(편집 반영) 프리뷰 세션 생성 — 모바일 IDE 세션 내 편집 프리뷰
+router.post('/preview-inline', executorController.createPreviewInline);
+
 // 프리뷰 세션 만료
 router.post('/:sessionId/expire', executorController.expirePreview);
 

@@ -18,6 +18,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   CaretDown,
   CaretRight,
+  CaretUp,
   GearSix,
   Plus,
   DotsSixVertical,
@@ -314,6 +315,24 @@ const AdminLessonList = () => {
     return tree.products.filter((p) => !hideInactive || p.is_active);
   }, [tree, hideInactive]);
 
+  // 상품 유형/카테고리 콤보박스 옵션 — 기존 상품들의 distinct 값 + 시드(합집합).
+  // 새로 입력·저장한 값은 다음 로드 시 distinct 에 포함되어 자동으로 프리셋이 된다.
+  const productFieldOptions = useMemo(() => {
+    const types = new Set(['클래스']);
+    const categories = new Set(['HTML', 'CSS', 'JS']);
+    for (const p of tree?.products || []) {
+      if (p.type) types.add(p.type);
+      if (p.category) categories.add(p.category);
+    }
+    return { typeOptions: [...types], categoryOptions: [...categories] };
+  }, [tree]);
+
+  // 펼치기/접기 단일 토글용 — 펼쳐진 상품이 하나라도 있으면 "접기" 상태로 본다.
+  const anyExpanded = useMemo(
+    () => (tree?.products || []).some((p) => expanded[`prod-${p.id}`]),
+    [tree, expanded],
+  );
+
   const totalCounts = useMemo(() => {
     if (!tree) return null;
     return {
@@ -355,20 +374,6 @@ const AdminLessonList = () => {
               </Link>
               <button
                 type="button"
-                onClick={() => setAllExpanded(true)}
-                className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
-              >
-                전체 펼치기
-              </button>
-              <button
-                type="button"
-                onClick={() => setAllExpanded(false)}
-                className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
-              >
-                전체 접기
-              </button>
-              <button
-                type="button"
                 onClick={() =>
                   setModal({
                     type: 'product',
@@ -389,7 +394,15 @@ const AdminLessonList = () => {
               <SummaryChip type="class" count={totalCounts.classes} />
               <SummaryChip type="section" count={totalCounts.sections} />
               <SummaryChip type="lesson" count={totalCounts.lessons} />
-              <label className="ml-auto flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+              <button
+                type="button"
+                onClick={() => setAllExpanded(!anyExpanded)}
+                className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                {anyExpanded ? <CaretUp size={12} weight="bold" /> : <CaretDown size={12} weight="bold" />}
+                {anyExpanded ? '전체 접기' : '전체 펼치기'}
+              </button>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-600">
                 <span>비활성 상품 숨김</span>
                 <Switch checked={hideInactive} onChange={setHideInactive} />
               </label>
@@ -459,6 +472,8 @@ const AdminLessonList = () => {
           product={modal.product}
           onSave={modal.onSave}
           onClose={() => setModal(null)}
+          typeOptions={productFieldOptions.typeOptions}
+          categoryOptions={productFieldOptions.categoryOptions}
         />
       )}
       {modal?.type === 'simple' && (

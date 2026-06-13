@@ -8,6 +8,8 @@ import 'prismjs/components/prism-python';
 import 'prismjs/themes/prism-okaidia.css';
 import { Field, SelectField, NumberField } from './_shared/SharedFields';
 import MonacoField from './_shared/MonacoField';
+import IdeIntegrationField from './_shared/IdeIntegrationField';
+import IdeOpenBadge from './_shared/IdeOpenBadge';
 import { useEditor, selectSelectedSlide } from '../state/EditorContext';
 import { usePrecomputeModule } from '../state/usePrecompute';
 import { computeCodeHash } from '../../../../utils/codeHash';
@@ -185,6 +187,7 @@ const FormView = ({ value, onChange }) => {
           </button>
         </div>
       ))}
+      <IdeIntegrationField value={value.ide} onChange={(ide) => onChange({ ...value, ide })} />
     </>
   );
 };
@@ -239,6 +242,7 @@ const PreviewView = ({ module }) => {
             ))}
           </div>
         )}
+        <IdeOpenBadge module={module} />
       </div>
       <div
         className="overflow-auto"

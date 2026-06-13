@@ -1,4 +1,4 @@
-FROM node:18-alpine as builder
+FROM node:18-bookworm-slim as builder
 
 WORKDIR /app
 
@@ -8,12 +8,33 @@ RUN npm ci --only=production
 
 COPY . .
 
-FROM node:18-alpine
+FROM node:18-bookworm-slim
 
 WORKDIR /app
 
-# TTS PCM→mp3 변환(ttsService._pcmToMp3)에서 ffmpeg 사용
-RUN apk add --no-cache ffmpeg
+# TTS(ffmpeg) + 모바일 IDE 코드 실행 런타임/컴파일러. Debian 베이스라 Kotlin/C#(mono)까지 전 언어 지원.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ffmpeg \
+      python3 python3-pip \
+      ruby-full \
+      php-cli \
+      bash \
+      golang-go \
+      build-essential \
+      rustc cargo \
+      default-jdk \
+      mono-mcs mono-runtime \
+      curl unzip ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Kotlin: apt 저장소에 없어 GitHub 릴리스 zip 으로 설치 (default-jdk 필요)
+RUN curl -fsSL -o /tmp/kotlin.zip \
+      https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip \
+ && unzip -q /tmp/kotlin.zip -d /opt && rm /tmp/kotlin.zip
+ENV PATH="/opt/kotlinc/bin:${PATH}"
+
+# TypeScript 실행기(tsx)
+RUN npm i -g tsx
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app .

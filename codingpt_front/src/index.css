@@ -6,6 +6,12 @@
 p {
   word-break: keep-all;
 }
+
+/* 모바일 IDE 소스 모달 — Monaco 하이라이트 구간 데코레이션(학습자 IDE 와 동일한 핵심 강조) */
+.cpt-hl-range {
+  background-color: rgba(250, 204, 21, 0.28);
+  border-radius: 2px;
+}
 p code {
   background-color: #083344;
   color: #ffffff;

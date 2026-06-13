@@ -11,61 +11,61 @@ class ExecutorService {
       fs.mkdirSync(this.tempDir, { recursive: true });
     }
 
+    // 컴파일러/런타임이 쓰는 임시 캐시·홈 디렉토리(go/kotlin 등은 HOME/캐시 쓰기 권한 필요)
+    const RT_HOME = path.join(os.tmpdir(), 'cpt-runtime');
+
+    // 언어별 실행 설정.
+    //  - exts: 확장자(첫 번째가 임시파일 확장자)
+    //  - run(srcFile, outBase): 실행 [cmd, args]  (인터프리터/컴파일 후 실행 공통)
+    //  - compile(srcFile, outBase): 있으면 먼저 컴파일 [cmd, args] → 성공 시 run 실행
+    //  - fallbackCmd: run 의 cmd 가 ENOENT 일 때 대체 (python3→python)
+    //  - env: 추가 환경변수
     this.languageConfigs = {
-      javascript: {
-        extension: '.js',
-        command: 'node',
-        name: 'JavaScript'
-      },
-      python: {
-        extension: '.py',
-        command: 'python3',
-        fallbackCommand: 'python',
-        name: 'Python'
-      },
-      c: {
-        extension: '.c',
-        command: 'gcc',
-        compileArgs: ['-o'],
-        runCommand: './',
-        name: 'C'
-      },
-      cpp: {
-        extension: '.cpp',
-        command: 'g++',
-        compileArgs: ['-o'],
-        runCommand: './',
-        name: 'C++'
-      },
-      java: {
-        extension: '.java',
-        command: 'javac',
-        runCommand: 'java',
-        name: 'Java'
-      }
+      python:     { name: 'Python',     exts: ['.py'],                run: (f) => ['python3', ['-u', f]], fallbackCmd: 'python' },
+      javascript: { name: 'JavaScript', exts: ['.js', '.mjs', '.cjs'], run: (f) => ['node', [f]] },
+      typescript: { name: 'TypeScript', exts: ['.ts'],                run: (f) => ['tsx', [f]] }, // 전역 tsx 필요
+      ruby:       { name: 'Ruby',       exts: ['.rb'],                run: (f) => ['ruby', [f]] },
+      php:        { name: 'PHP',        exts: ['.php'],               run: (f) => ['php', [f]] },
+      bash:       { name: 'Bash',       exts: ['.sh', '.bash'],       run: (f) => ['bash', [f]] },
+      go:         { name: 'Go',         exts: ['.go'],                run: (f) => ['go', ['run', f]], env: { HOME: RT_HOME, GOCACHE: path.join(RT_HOME, 'go-build'), GOPATH: path.join(RT_HOME, 'go'), GOFLAGS: '-mod=mod' } },
+      c:          { name: 'C',          exts: ['.c'],                 compile: (f, o) => ['gcc', [f, '-O0', '-o', o]], run: (f, o) => [o, []] },
+      cpp:        { name: 'C++',        exts: ['.cpp', '.cc', '.cxx'], compile: (f, o) => ['g++', [f, '-O0', '-std=c++17', '-o', o]], run: (f, o) => [o, []] },
+      rust:       { name: 'Rust',       exts: ['.rs'],                compile: (f, o) => ['rustc', ['-O', f, '-o', o]], run: (f, o) => [o, []] },
+      // Java 11+ 단일 파일 소스 실행(JEP 330) — public class 명이 파일명과 달라도 됨.
+      java:       { name: 'Java',       exts: ['.java'],              run: (f) => ['java', [f]] },
+      // Kotlin: jar 로 컴파일 후 실행(느림, kotlinc JVM 기동). HOME 쓰기 권한 필요.
+      kotlin:     { name: 'Kotlin',     exts: ['.kt', '.kts'],        compile: (f, o) => ['kotlinc', [f, '-include-runtime', '-d', `${o}.jar`]], run: (f, o) => ['java', ['-jar', `${o}.jar`]], env: { HOME: RT_HOME } },
+      // C#: mono(mcs 컴파일 → mono 실행)
+      csharp:     { name: 'C#',         exts: ['.cs'],                compile: (f, o) => ['mcs', [`-out:${o}.exe`, f]], run: (f, o) => ['mono', [`${o}.exe`]] },
     };
 
-    // 확장자 -> 언어 매핑
-    this.extensionToLanguage = {
-      '.js': 'javascript',
-      '.py': 'python',
-      '.c': 'c',
-      '.cpp': 'cpp',
-      '.cc': 'cpp',
-      '.cxx': 'cpp',
-      '.java': 'java'
-    };
+    // 디버그(라인 트레이스) 지원 언어 — 트레이스 API 가 있는 인터프리터.
+    // (PHP 는 xdebug 없이는 라인 추적이 어려워 run-only)
+    this.debuggableLangs = new Set(['python', 'javascript', 'ruby', 'bash']);
+
+    // 확장자 -> 언어 매핑 (languageConfigs.exts 에서 자동 생성)
+    this.extensionToLanguage = {};
+    for (const [langKey, cfg] of Object.entries(this.languageConfigs)) {
+      for (const e of cfg.exts) this.extensionToLanguage[e] = langKey;
+    }
   }
 
   /**
    * 코드 실행 (SSE 스트림)
+   * @param {object} [options]
+   * @param {boolean} [options.debug] - true 면 라인 트레이스(디버그) 모드로 실행
    */
-  async executeCode(code, language, res) {
+  async executeCode(code, language, res, options = {}) {
     const lang = language.toLowerCase();
     const langConfig = this.languageConfigs[lang];
 
     if (!langConfig) {
       throw new Error(`지원하지 않는 언어입니다: ${language}`);
+    }
+
+    // 디버그 모드: 한 줄씩 실행되며 현재 라인 번호를 trace 이벤트로 흘린다.
+    if (options.debug && this.debuggableLangs.has(lang)) {
+      return this.executeDebug(code, lang, res);
     }
 
     // SSE 헤더 설정
@@ -74,183 +74,407 @@ class ExecutorService {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
 
-    // 시작 메시지
-    res.write(`data: ${JSON.stringify({ type: 'log', message: `${langConfig.name} 코드 실행을 시작합니다...\n` })}\n\n`);
+    const send = (o) => { try { res.write(`data: ${JSON.stringify(o)}\n\n`); } catch (_) { /* noop */ } };
+    send({ type: 'log', message: `${langConfig.name} 코드 실행을 시작합니다...\n` });
 
-    // 임시 파일 생성
-    const tempFile = path.join(
-      this.tempDir,
-      `code-${Date.now()}-${Math.random().toString(36).substring(7)}${langConfig.extension}`
-    );
+    const stamp = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const srcFile = path.join(this.tempDir, `code-${stamp}${langConfig.exts[0]}`);
+    const outBase = path.join(this.tempDir, `out-${stamp}`);
+    // 컴파일 산출물까지 정리(언어별로 out / out.jar / out.exe 중 하나)
+    const cleanupPaths = [srcFile, outBase, `${outBase}.jar`, `${outBase}.exe`];
+    const env = { PATH: process.env.PATH, ...(langConfig.env || {}) };
 
-    try {
-      fs.writeFileSync(tempFile, code, 'utf8');
+    let finished = false;
+    let cur = null;
+    const done = (closeMsg) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      cleanupPaths.forEach((p) => this.cleanupFile(p));
+      try { if (closeMsg) send(closeMsg); res.end(); } catch (_) { /* noop */ }
+    };
+    const timer = setTimeout(() => {
+      if (finished) return;
+      try { cur && cur.kill('SIGTERM'); } catch (_) { /* noop */ }
+      send({ type: 'error', data: '\n⏱️ 실행 시간이 30초를 초과하여 종료되었습니다.\n' });
+      done({ type: 'close', exitCode: -1, hasError: true, message: '실행 시간 초과' });
+    }, 30000);
 
-      let command = langConfig.command;
-      let args = [tempFile];
-
-      // 프로세스 실행
-      // 변수명 'proc' — Node 글로벌 `process` 와의 섀도잉/TDZ 회피.
-      // `env: {}` 로 환경 격리하되 PATH 만 상속해야 node/python3 같은 명령어 lookup 가능.
-      const proc = spawn(command, args, {
-        cwd: '/tmp',
-        env: { PATH: process.env.PATH },
-        shell: false
-      });
-
-      let outputBuffer = '';
-      let errorBuffer = '';
+    // 실행 단계 — stdout 스트리밍, stderr 버퍼링 후 종료 시 전송
+    const runStep = (useFallback) => {
+      let [cmd, args] = langConfig.run(srcFile, outBase);
+      if (useFallback && langConfig.fallbackCmd) cmd = langConfig.fallbackCmd;
+      const proc = spawn(cmd, args, { cwd: '/tmp', env, shell: false });
+      cur = proc;
+      let stderr = '';
       let hasError = false;
-      let isFinished = false;
-
       if (!proc.stdout) {
-        res.write(`data: ${JSON.stringify({ type: 'error', data: '프로세스 stdout을 열 수 없습니다.\n' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '프로세스 실행 실패' })}\n\n`);
-        res.end();
-        return;
+        send({ type: 'error', data: '프로세스 stdout을 열 수 없습니다.\n' });
+        return done({ type: 'close', exitCode: -1, hasError: true });
       }
-
-      // 타임아웃 설정 (30초)
-      const timeout = setTimeout(() => {
-        if (!isFinished) {
-          isFinished = true;
-          proc.kill('SIGTERM');
-          res.write(`data: ${JSON.stringify({ type: 'error', data: '\n⏱️ 실행 시간이 30초를 초과하여 종료되었습니다.\n' })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '실행 시간 초과' })}\n\n`);
-          res.end();
-          this.cleanupFile(tempFile);
-        }
-      }, 30000);
-
-      // stdout 처리
       proc.stdout.on('data', (data) => {
-        const output = data.toString();
-        outputBuffer += output;
-        const lines = output.split('\n');
-        lines.forEach((line, index) => {
-          if (line || index < lines.length - 1) {
-            try {
-              res.write(`data: ${JSON.stringify({ type: 'output', data: line + (index < lines.length - 1 ? '\n' : '') })}\n\n`);
-            } catch (err) { }
-          }
+        const out = data.toString();
+        const lines = out.split('\n');
+        lines.forEach((line, i) => {
+          if (line || i < lines.length - 1) send({ type: 'output', data: line + (i < lines.length - 1 ? '\n' : '') });
         });
       });
-
-      // stderr 처리 - 버퍼에만 쌓기 (종료 후 정제해서 전송)
-      proc.stderr.on('data', (data) => {
-        const error = data.toString();
-        errorBuffer += error;
-        hasError = true;
+      proc.stderr.on('data', (data) => { stderr += data.toString(); hasError = true; });
+      proc.on('error', (err) => {
+        if (finished) return;
+        if (err.code === 'ENOENT' && langConfig.fallbackCmd && !useFallback) return runStep(true);
+        if (err.code === 'ENOENT') {
+          send({ type: 'error', data: `'${cmd}' 런타임이 설치되어 있지 않습니다. (${langConfig.name})\n` });
+          return done({ type: 'close', exitCode: -1, hasError: true });
+        }
+        send({ type: 'error', data: `프로세스 실행 오류: ${err.message}\n` });
+        done({ type: 'close', exitCode: -1, hasError: true });
       });
+      proc.on('close', (codeNum) => {
+        if (finished) return;
+        // JS/TS 는 스택 노이즈 제거, 그 외 언어는 stderr 원문 표시
+        const cleaned = (lang === 'javascript' || lang === 'typescript')
+          ? this.parseNodeError(stderr)
+          : (stderr || '').trim();
+        if (cleaned) send({ type: 'error', data: cleaned + '\n' });
+        send({ type: 'log', message: `프로세스가 종료되었습니다. (종료 코드: ${codeNum})\n` });
+        done({ type: 'close', exitCode: codeNum, hasError: hasError || codeNum !== 0 });
+      });
+    };
 
-      // 프로세스 종료 처리
-      proc.on('close', (code, signal) => {
-        if (isFinished) return;
-        isFinished = true;
-        clearTimeout(timeout);
-        this.cleanupFile(tempFile);
+    // 컴파일 단계 — 출력은 모아서 실패 시에만 에러로 전송
+    const compileStep = () => {
+      const [cmd, args] = langConfig.compile(srcFile, outBase);
+      const proc = spawn(cmd, args, { cwd: '/tmp', env, shell: false });
+      cur = proc;
+      let buf = '';
+      if (proc.stderr) proc.stderr.on('data', (d) => { buf += d.toString(); });
+      if (proc.stdout) proc.stdout.on('data', (d) => { buf += d.toString(); });
+      proc.on('error', (err) => {
+        if (finished) return;
+        if (err.code === 'ENOENT') {
+          send({ type: 'error', data: `'${cmd}' 컴파일러가 설치되어 있지 않습니다. (${langConfig.name})\n` });
+          return done({ type: 'close', exitCode: -1, hasError: true });
+        }
+        send({ type: 'error', data: `컴파일 오류: ${err.message}\n` });
+        done({ type: 'close', exitCode: -1, hasError: true });
+      });
+      proc.on('close', (codeNum) => {
+        if (finished) return;
+        if (codeNum !== 0) {
+          if (buf.trim()) send({ type: 'error', data: buf.trim() + '\n' });
+          send({ type: 'log', message: `컴파일 실패 (종료 코드: ${codeNum})\n` });
+          return done({ type: 'close', exitCode: codeNum, hasError: true });
+        }
+        runStep(false); // 컴파일 성공 → 실행
+      });
+    };
 
-        try {
-          if (errorBuffer) {
-            const cleanedError = this.parseNodeError(errorBuffer);
-            if (cleanedError) {
-              res.write(`data: ${JSON.stringify({ type: 'error', data: cleanedError + '\n' })}\n\n`);
+    try {
+      // go/kotlin 등 HOME/캐시 디렉토리 보장
+      if (langConfig.env && langConfig.env.HOME && !fs.existsSync(langConfig.env.HOME)) {
+        fs.mkdirSync(langConfig.env.HOME, { recursive: true });
+      }
+      fs.writeFileSync(srcFile, code, 'utf8');
+    } catch (err) {
+      send({ type: 'error', data: `파일 생성 오류: ${err.message}\n` });
+      return done({ type: 'close', exitCode: -1, hasError: true });
+    }
+
+    if (langConfig.compile) compileStep();
+    else runStep(false);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 디버그(라인 트레이스) 실행
+  //   - 코드를 트레이서로 감싸 실행하고, 각 줄 실행 시 stdout 에 센티넬을 흘린다.
+  //   - 센티넬: `\x01CPT_LINE:<원본줄번호>\x01` (제어문자 SOH 로 일반 출력과 충돌 최소화)
+  //   - 프론트는 trace/output 이벤트를 타임라인으로 모아 재생(하이라이트/출력)한다.
+  // ──────────────────────────────────────────────────────────────────────
+  static get TRACE_SENTINEL() { return '\x01CPT_LINE:'; }
+  static get MAX_TRACE_STEPS() { return 5000; }
+
+  /** Python 디버그 러너 소스 — settrace 로 user 파일의 'line' 이벤트만 센티넬로 emit */
+  buildPythonRunner() {
+    const SENTINEL = ExecutorService.TRACE_SENTINEL;
+    const MAX = ExecutorService.MAX_TRACE_STEPS;
+    return [
+      'import sys, runpy',
+      'USER_FILE = sys.argv[1]',
+      `MAX_STEPS = ${MAX}`,
+      '_steps = [0]',
+      'def _cpt_trace(frame, event, arg):',
+      "    if event == 'line' and frame.f_code.co_filename == USER_FILE:",
+      '        _steps[0] += 1',
+      '        if _steps[0] > MAX_STEPS:',
+      `            sys.stdout.write('${SENTINEL}-1\\x01\\n'); sys.stdout.flush()`,
+      '            sys.settrace(None)',
+      '            raise SystemExit',
+      `        sys.stdout.write('${SENTINEL}%d\\x01\\n' % frame.f_lineno); sys.stdout.flush()`,
+      '    return _cpt_trace',
+      'sys.settrace(_cpt_trace)',
+      'try:',
+      "    runpy.run_path(USER_FILE, run_name='__main__')",
+      'finally:',
+      '    sys.settrace(None)',
+      '',
+    ].join('\n');
+  }
+
+  /** Ruby 디버그 러너 — TracePoint(:line) 로 user 파일의 줄 이벤트만 센티넬로 emit */
+  buildRubyRunner() {
+    const S = ExecutorService.TRACE_SENTINEL;
+    const MAX = ExecutorService.MAX_TRACE_STEPS;
+    return [
+      '$stdout.sync = true',
+      'user_file = File.expand_path(ARGV[0])',
+      `max_steps = ${MAX}`,
+      'steps = 0',
+      'tp = TracePoint.new(:line) do |t|',
+      '  if File.expand_path(t.path) == user_file',
+      '    steps += 1',
+      '    if steps > max_steps',
+      `      $stdout.write("${S}-1\\x01\\n"); tp.disable; exit`,
+      '    end',
+      `    $stdout.write("${S}#{t.lineno}\\x01\\n")`,
+      '  end',
+      'end',
+      'tp.enable',
+      'begin',
+      '  load user_file',
+      'ensure',
+      '  tp.disable',
+      'end',
+      '',
+    ].join('\n');
+  }
+
+  /** Bash 디버그 러너 — set -T(functrace)로 source 된 파일 안에서도 DEBUG trap 발동.
+   *  BASH_SOURCE 필터로 러너 자신의 줄은 제외, 트랩 본문은 인라인(함수 호출 시 재귀 회피). */
+  buildBashRunner() {
+    const S = ExecutorService.TRACE_SENTINEL;
+    const MAX = ExecutorService.MAX_TRACE_STEPS;
+    return [
+      'set -T',
+      '__cpt_user="$1"',
+      '__cpt_steps=0',
+      `trap 'if [ "\${BASH_SOURCE[0]}" = "$__cpt_user" ]; then __cpt_steps=$((__cpt_steps+1)); if [ "$__cpt_steps" -gt ${MAX} ]; then printf "${S}-1\\x01\\n"; trap - DEBUG; else printf "${S}%s\\x01\\n" "$LINENO"; fi; fi' DEBUG`,
+      'source "$__cpt_user"',
+      '',
+    ].join('\n');
+  }
+
+  /** JavaScript 코드를 acorn 으로 파싱해 각 statement 앞에 __cptLine(원본줄) 주입 */
+  instrumentJavaScript(code) {
+    // acorn 미설치 시 명확한 에러 (디버그 모드만 영향, 일반 실행은 무관)
+    const acorn = require('acorn');
+    const ast = acorn.parse(code, { ecmaVersion: 'latest', locations: true, allowReturnOutsideFunction: true });
+
+    const points = [];
+    const collect = (node) => {
+      if (!node || typeof node !== 'object') return;
+      if (Array.isArray(node)) { node.forEach(collect); return; }
+      if (typeof node.type !== 'string') return;
+      for (const key of ['body', 'consequent']) {
+        const arr = node[key];
+        if (Array.isArray(arr)) {
+          for (const stmt of arr) {
+            if (stmt && stmt.type && stmt.loc && typeof stmt.start === 'number') {
+              points.push({ start: stmt.start, line: stmt.loc.start.line });
             }
           }
-          res.write(`data: ${JSON.stringify({ type: 'log', message: `프로세스가 종료되었습니다. (종료 코드: ${code})\n` })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: 'close', exitCode: code, hasError: hasError || code !== 0 })}\n\n`);
-          res.end();
-        } catch (err) { }
-      });
-
-      // 프로세스 에러 처리
-      proc.on('error', (err) => {
-        if (isFinished) return;
-
-        // Python fallback 시도
-        if (lang === 'python' && langConfig.fallbackCommand && err.code === 'ENOENT') {
-          this.runFallbackProcess(langConfig.fallbackCommand, args, tempFile, res);
-          return;
         }
+      }
+      for (const key in node) {
+        if (key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
+        const child = node[key];
+        if (child && typeof child === 'object') collect(child);
+      }
+    };
+    collect(ast);
 
-        isFinished = true;
-        clearTimeout(timeout);
-        this.cleanupFile(tempFile);
-
-        try {
-          res.write(`data: ${JSON.stringify({ type: 'error', data: `프로세스 실행 오류: ${err.message}\n` })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '실행 실패' })}\n\n`);
-          res.end();
-        } catch (writeErr) { }
-      });
-
-    } catch (err) {
-      this.cleanupFile(tempFile);
-      res.write(`data: ${JSON.stringify({ type: 'error', data: `파일 생성 오류: ${err.message}\n` })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '실행 실패' })}\n\n`);
-      res.end();
+    // 뒤에서부터 삽입해야 앞쪽 offset 이 유지됨
+    points.sort((a, b) => b.start - a.start);
+    let out = code;
+    for (const p of points) {
+      out = out.slice(0, p.start) + `__cptLine(${p.line});` + out.slice(p.start);
     }
+
+    const SENTINEL = ExecutorService.TRACE_SENTINEL;
+    const MAX = ExecutorService.MAX_TRACE_STEPS;
+    const prelude =
+      'globalThis.__cptStep=0;' +
+      'globalThis.__cptLine=function(n){' +
+      `if(++globalThis.__cptStep>${MAX}){process.stdout.write('${SENTINEL}-1\\x01\\n');throw new Error('__CPT_MAX_STEPS__');}` +
+      `process.stdout.write('${SENTINEL}'+n+'\\x01\\n');` +
+      '};\n';
+    return prelude + out;
   }
 
   /**
-   * Python fallback 프로세스 실행
+   * 디버그 실행 (SSE 스트림) — trace/output/error/close 이벤트 emit
    */
-  runFallbackProcess(fallbackCommand, args, tempFile, res) {
-    const fallbackProcess = spawn(fallbackCommand, args, {
-      cwd: '/tmp',
-      env: { PATH: process.env.PATH },
-      shell: false
-    });
+  async executeDebug(code, lang, res) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
 
-    let fallbackHasError = false;
-    let fallbackFinished = false;
+    const send = (obj) => {
+      try { res.write(`data: ${JSON.stringify(obj)}\n\n`); } catch (_) { /* noop */ }
+    };
 
-    const fallbackTimeout = setTimeout(() => {
-      if (!fallbackFinished) {
-        fallbackFinished = true;
-        fallbackProcess.kill('SIGTERM');
-        res.write(`data: ${JSON.stringify({ type: 'error', data: '\n⏱️ 실행 시간이 30초를 초과하여 종료되었습니다.\n' })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: 'close', exitCode: -1, hasError: true, message: '실행 시간 초과' })}\n\n`);
-        res.end();
-        this.cleanupFile(tempFile);
+    send({ type: 'log', message: `${this.languageConfigs[lang].name} 디버그 실행을 시작합니다...\n` });
+
+    const stamp = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+    const tempFiles = [];
+    let command;
+    let args;
+
+    try {
+      if (lang === 'python') {
+        const userFile = path.join(this.tempDir, `dbg-user-${stamp}.py`);
+        const runnerFile = path.join(this.tempDir, `dbg-runner-${stamp}.py`);
+        fs.writeFileSync(userFile, code, 'utf8');
+        fs.writeFileSync(runnerFile, this.buildPythonRunner(), 'utf8');
+        tempFiles.push(userFile, runnerFile);
+        command = 'python3';
+        args = ['-u', runnerFile, userFile]; // -u: unbuffered → 출력/센티넬 순서 보존
+      } else if (lang === 'ruby') {
+        const userFile = path.join(this.tempDir, `dbg-user-${stamp}.rb`);
+        const runnerFile = path.join(this.tempDir, `dbg-runner-${stamp}.rb`);
+        fs.writeFileSync(userFile, code, 'utf8');
+        fs.writeFileSync(runnerFile, this.buildRubyRunner(), 'utf8');
+        tempFiles.push(userFile, runnerFile);
+        command = 'ruby';
+        args = [runnerFile, userFile];
+      } else if (lang === 'bash') {
+        const userFile = path.join(this.tempDir, `dbg-user-${stamp}.sh`);
+        const runnerFile = path.join(this.tempDir, `dbg-runner-${stamp}.sh`);
+        fs.writeFileSync(userFile, code, 'utf8');
+        fs.writeFileSync(runnerFile, this.buildBashRunner(), 'utf8');
+        tempFiles.push(userFile, runnerFile);
+        command = 'bash';
+        args = [runnerFile, userFile];
+      } else if (lang === 'javascript') {
+        let instrumented;
+        try {
+          instrumented = this.instrumentJavaScript(code);
+        } catch (e) {
+          // 파싱 실패(문법 오류 등) → 일반 실행으로 폴백해 에러를 그대로 노출
+          if (/Cannot find module 'acorn'/.test(String(e && e.message))) {
+            send({ type: 'error', data: '디버그 모듈(acorn)이 설치되지 않았습니다.\n' });
+            send({ type: 'close', exitCode: -1, hasError: true });
+            return res.end();
+          }
+          send({ type: 'error', data: `코드를 분석할 수 없습니다: ${e.message}\n` });
+          send({ type: 'close', exitCode: -1, hasError: true });
+          return res.end();
+        }
+        const userFile = path.join(this.tempDir, `dbg-${stamp}.js`);
+        fs.writeFileSync(userFile, instrumented, 'utf8');
+        tempFiles.push(userFile);
+        command = 'node';
+        args = [userFile];
+      } else {
+        send({ type: 'error', data: `디버그를 지원하지 않는 언어입니다: ${lang}\n` });
+        send({ type: 'close', exitCode: -1, hasError: true });
+        return res.end();
       }
-    }, 30000);
+    } catch (err) {
+      tempFiles.forEach((f) => this.cleanupFile(f));
+      send({ type: 'error', data: `파일 생성 오류: ${err.message}\n` });
+      send({ type: 'close', exitCode: -1, hasError: true });
+      return res.end();
+    }
 
-    fallbackProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-      const lines = output.split('\n');
-      lines.forEach((line, index) => {
-        if (line || index < lines.length - 1) {
-          try {
-            res.write(`data: ${JSON.stringify({ type: 'output', data: line + (index < lines.length - 1 ? '\n' : '') })}\n\n`);
-          } catch (err) { }
+    const SENTINEL_RE = /^\x01CPT_LINE:(-?\d+)\x01$/;
+    let finished = false;
+    let triedFallback = false;
+
+    const start = (cmd) => {
+      const proc = spawn(cmd, args, { cwd: '/tmp', env: { PATH: process.env.PATH }, shell: false });
+      let stdoutBuf = '';
+      let errorBuffer = '';
+      let hasError = false;
+
+      const timeout = setTimeout(() => {
+        if (finished) return;
+        finished = true;
+        proc.kill('SIGTERM');
+        send({ type: 'error', data: '\n⏱️ 실행 시간이 30초를 초과하여 종료되었습니다.\n' });
+        send({ type: 'close', exitCode: -1, hasError: true, message: '실행 시간 초과' });
+        res.end();
+        tempFiles.forEach((f) => this.cleanupFile(f));
+      }, 30000);
+
+      // stdout 라인 버퍼링 → 센티넬은 trace, 그 외는 output
+      const flushLine = (line) => {
+        const m = SENTINEL_RE.exec(line);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (n === -1) {
+            send({ type: 'error', data: `\n⛔ 최대 실행 스텝(${ExecutorService.MAX_TRACE_STEPS})을 초과했습니다.\n` });
+          } else {
+            send({ type: 'trace', line: n });
+          }
+        } else {
+          send({ type: 'output', data: line + '\n' });
+        }
+      };
+
+      proc.stdout.on('data', (data) => {
+        stdoutBuf += data.toString();
+        let idx;
+        while ((idx = stdoutBuf.indexOf('\n')) >= 0) {
+          const line = stdoutBuf.slice(0, idx);
+          stdoutBuf = stdoutBuf.slice(idx + 1);
+          flushLine(line);
         }
       });
-    });
 
-    let fallbackErrorBuffer = '';
-    fallbackProcess.stderr.on('data', (data) => {
-      fallbackErrorBuffer += data.toString();
-      fallbackHasError = true;
-    });
+      proc.stderr.on('data', (data) => {
+        errorBuffer += data.toString();
+        hasError = true;
+      });
 
-    fallbackProcess.on('close', (fallbackCode) => {
-      if (fallbackFinished) return;
-      fallbackFinished = true;
-      clearTimeout(fallbackTimeout);
-      this.cleanupFile(tempFile);
-
-      try {
-        if (fallbackErrorBuffer) {
-          const cleanedError = this.parseNodeError(fallbackErrorBuffer);
-          if (cleanedError) {
-            res.write(`data: ${JSON.stringify({ type: 'error', data: cleanedError + '\n' })}\n\n`);
+      proc.on('close', (exitCode) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timeout);
+        tempFiles.forEach((f) => this.cleanupFile(f));
+        if (stdoutBuf) flushLine(stdoutBuf); // 마지막 미완 라인
+        if (errorBuffer) {
+          const cleaned = this.parseNodeError(errorBuffer);
+          // 스텝 초과 시 던진 내부 마커는 사용자에게 노출하지 않음
+          if (cleaned && !/__CPT_MAX_STEPS__/.test(cleaned)) {
+            send({ type: 'error', data: cleaned + '\n' });
           }
         }
-        res.write(`data: ${JSON.stringify({ type: 'close', exitCode: fallbackCode, hasError: fallbackHasError || fallbackCode !== 0 })}\n\n`);
+        send({ type: 'log', message: `프로세스가 종료되었습니다. (종료 코드: ${exitCode})\n` });
+        send({ type: 'close', exitCode, hasError: hasError || exitCode !== 0 });
         res.end();
-      } catch (err) { }
-    });
+      });
+
+      proc.on('error', (err) => {
+        if (finished) return;
+        // Python: python3 없으면 python 으로 폴백
+        if (lang === 'python' && !triedFallback && err.code === 'ENOENT') {
+          triedFallback = true;
+          clearTimeout(timeout);
+          start('python');
+          return;
+        }
+        finished = true;
+        clearTimeout(timeout);
+        tempFiles.forEach((f) => this.cleanupFile(f));
+        send({ type: 'error', data: `프로세스 실행 오류: ${err.message}\n` });
+        send({ type: 'close', exitCode: -1, hasError: true });
+        res.end();
+      });
+    };
+
+    start(command);
   }
 
   /**

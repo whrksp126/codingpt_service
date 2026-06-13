@@ -9,6 +9,7 @@ const {
 const lessonEditor = require('../controllers/lessonEditorController');
 const lessonPrecompute = require('../controllers/lessonPrecomputeController');
 const githubRepoController = require('../controllers/githubRepoController');
+const ideController = require('../controllers/ideController');
 
 // === Existing learner-facing reads (auth required) ===
 router.get('/slides', authMiddleware, getSlidesByLesson);
@@ -16,6 +17,10 @@ router.get('/slides/:slideId/code-fill-gaps', authMiddleware, getCodeFillGapsByS
 
 // === RN 학습자용: 레슨 runtime 데이터 (auth required, must come before /:id) ===
 router.get('/runtime/:id', authMiddleware, getLessonRuntime);
+
+// === RN 학습자용: 모바일 IDE 프로젝트 소스 (auth required, must come before /:id) ===
+router.get('/ide/:projectId', authMiddleware, ideController.getIdeProject);
+router.get('/ide/:projectId/asset', authMiddleware, ideController.getIdeAsset);
 
 // === Editor: 단일 사용자 운영 — 인증 없음. ===
 // === Editor: characters catalog (must come before /:id) ===

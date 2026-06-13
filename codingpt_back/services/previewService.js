@@ -45,8 +45,13 @@ class PreviewService {
 
   /**
    * 프리뷰 세션 생성
+   * @param {string} s3Path - objectstore 디렉토리 경로
+   * @param {string} fileName - 진입 파일
+   * @param {Object|null} inlineFiles - 편집된 파일 맵 { 상대경로: 내용 }.
+   *   지정 시 해당 파일은 objectstore 대신 이 내용으로 서빙(세션 내 임시 편집 반영).
+   *   없는 파일(이미지 등)은 기존대로 objectstore(baseDir)에서 가져온다.
    */
-  createPreviewSession(s3Path, fileName = 'index.html') {
+  createPreviewSession(s3Path, fileName = 'index.html', inlineFiles = null) {
     // S3 경로 정규화
     let normalizedDir = s3Path.replace(/^\/+|\/+$/g, '');
     
@@ -74,7 +79,8 @@ class PreviewService {
       fileName: fileName,
       createdAt: Date.now(),
       expiresAt: expiresAt,
-      isActive: false
+      isActive: false,
+      inlineFiles: inlineFiles || null
     });
 
     this.s3PathToSessionId.set(normalizedPath, sessionId);
@@ -115,38 +121,21 @@ class PreviewService {
    * S3에서 파일 가져오기
    */
   async getS3File(s3Path) {
-    const s3Url = `${this.s3PublicBaseUrl}/${s3Path}`;
-    const urlObj = new URL(s3Url);
-    const client = urlObj.protocol === 'https:' ? https : http;
+    // 공개 URL 직접 fetch(과거 방식)는 비공개 prefix(execute/ide)에서 403 이고 바이너리를
+    // 문자열로 받아 깨졌다. 인증/HEAD-우회/base64 처리되는 s3Service.getFileContent 로 가져온다.
+    const s3Service = require('./s3Service'); // 순환참조 회피용 지연 require
+    const tryFetch = async (p) => {
+      const r = await s3Service.getFileContent(p);
+      return r.success ? r : null;
+    };
+    let res = await tryFetch(s3Path);
+    // 한글 파일명 NFC/NFD 정규화 불일치 대비(저장 키가 NFD 인 경우 등)
+    if (!res && s3Path.normalize('NFC') !== s3Path) res = await tryFetch(s3Path.normalize('NFC'));
+    if (!res && s3Path.normalize('NFD') !== s3Path) res = await tryFetch(s3Path.normalize('NFD'));
+    if (!res) throw new Error('S3 파일을 가져올 수 없습니다: 404');
 
-    return new Promise((resolve, reject) => {
-      const options = {
-        hostname: urlObj.hostname,
-        path: urlObj.pathname + (urlObj.search || ''),
-        method: 'GET'
-      };
-
-      const req = client.request(options, (response) => {
-        if (response.statusCode !== 200) {
-          reject(new Error(`S3 파일을 가져올 수 없습니다: ${response.statusCode}`));
-          return;
-        }
-
-        let data = '';
-        response.on('data', (chunk) => {
-          data += chunk;
-        });
-        response.on('end', () => {
-          resolve({
-            content: data,
-            contentType: response.headers['content-type'] || 'text/html'
-          });
-        });
-      });
-
-      req.on('error', reject);
-      req.end();
-    });
+    const content = res.encoding === 'base64' ? Buffer.from(res.content, 'base64') : res.content;
+    return { content, contentType: res.contentType || 'text/html' };
   }
 }
 

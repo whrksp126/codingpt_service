@@ -16,6 +16,8 @@ import { DotsSixVertical, Trash } from '@phosphor-icons/react';
 import { useEditor, selectSelectedSlide } from '../state/EditorContext';
 import { Field, TextField, NumberField, SelectField } from './_shared/SharedFields';
 import MonacoField from './_shared/MonacoField';
+import IdeIntegrationField from './_shared/IdeIntegrationField';
+import IdeOpenBadge from './_shared/IdeOpenBadge';
 import {
   SUPPORTED_LANGUAGES,
   composeContent,
@@ -461,6 +463,8 @@ const FormView = ({ value, onChange }) => {
         채점 후 등장할 모듈은 슬라이드 모듈 카드에서 직접 추가한 뒤 각 카드의 "등장 시점" 셀렉트에서
         이 빈칸 채우기 모듈을 선택하세요. 코드 실행 결과는 simpleTerminal 의 연결 모듈로 본 빈칸 채우기를 지정하면 됩니다.
       </p>
+
+      <IdeIntegrationField value={value.ide} onChange={(ide) => onChange({ ...value, ide })} />
     </>
   );
 };
@@ -509,6 +513,7 @@ const PreviewView = ({ module, onModuleChange }) => {
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#981B25' }} />
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#80460D' }} />
           <span className="h-2.5 w-2.5 rounded-full" style={{ background: '#066042' }} />
+          <IdeOpenBadge module={module} />
         </div>
         <iframe
           title="code-fill-preview"

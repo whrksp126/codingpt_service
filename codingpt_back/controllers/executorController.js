@@ -9,7 +9,7 @@ const path = require('path');
  */
 const executeCode = async (req, res) => {
   try {
-    let { code, language } = req.body;
+    let { code, language, debug } = req.body;
     if (language === 'js') {
       language = 'javascript';
     }
@@ -21,7 +21,7 @@ const executeCode = async (req, res) => {
       });
     }
 
-    await executorService.executeCode(code, language, res);
+    await executorService.executeCode(code, language, res, { debug: !!debug });
   } catch (error) {
     console.error('[ExecutorController] 코드 실행 오류:', error);
     if (!res.headersSent) {
@@ -168,6 +168,57 @@ const createPreview = async (req, res) => {
 };
 
 /**
+ * 인라인(편집 반영) 프리뷰 세션 생성
+ * POST /api/executor/preview-inline
+ * body: { projectId, files: [{ path, content }], entryFile }
+ * - 세션 내 임시 편집을 반영해 HTML 프리뷰를 제공한다.
+ * - 편집된 텍스트 파일은 인라인으로, 이미지 등 바이너리는 objectstore(ide/<projectId>)에서 서빙.
+ */
+const createPreviewInline = async (req, res) => {
+  try {
+    const { projectId, files, entryFile } = req.body;
+
+    if (!projectId || typeof projectId !== 'string') {
+      return res.status(400).json({
+        success: false,
+        message: 'projectId가 필요합니다.'
+      });
+    }
+
+    const inlineFiles = {};
+    if (Array.isArray(files)) {
+      for (const f of files) {
+        if (f && typeof f.path === 'string') {
+          const rel = f.path.replace(/^\/+/, '');
+          inlineFiles[rel] = String(f.content == null ? '' : f.content);
+        }
+      }
+    }
+
+    const targetFileName = (entryFile || 'index.html').replace(/^\/+/, '');
+    const s3Path = `ide/${projectId}`;
+
+    const session = previewService.createPreviewSession(s3Path, targetFileName, inlineFiles);
+
+    res.json({
+      success: true,
+      previewUrl: session.previewUrl,
+      sessionId: session.sessionId,
+      entryFile: targetFileName,
+      s3Path: session.s3Path,
+      expiresIn: session.expiresIn,
+      message: '프리뷰 URL이 생성되었습니다. (5분 유효)'
+    });
+  } catch (error) {
+    console.error('[ExecutorController] 인라인 프리뷰 생성 오류:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || '프리뷰 URL 생성에 실패했습니다.'
+    });
+  }
+};
+
+/**
  * 프리뷰 파일 제공
  * GET /api/executor/:sessionId/*
  */
@@ -204,9 +255,17 @@ const servePreview = async (req, res) => {
       `);
     }
 
-    // S3에서 파일 가져오기
-    const fullS3Path = `${session.baseDir}/${requestedFile}`;
-    const fileData = await previewService.getS3File(fullS3Path);
+    // 파일 가져오기 — 세션에 인라인(편집된) 파일이 있으면 그걸 우선 사용, 없으면 objectstore.
+    let fileData;
+    if (session.inlineFiles && Object.prototype.hasOwnProperty.call(session.inlineFiles, requestedFile)) {
+      fileData = {
+        content: session.inlineFiles[requestedFile],
+        contentType: 'text/html; charset=utf-8'
+      };
+    } else {
+      const fullS3Path = `${session.baseDir}/${requestedFile}`;
+      fileData = await previewService.getS3File(fullS3Path);
+    }
 
     // Content-Type 설정
     const ext = path.extname(requestedFile).toLowerCase();
@@ -328,6 +387,7 @@ module.exports = {
   executeCode,
   executeS3File,
   createPreview,
+  createPreviewInline,
   servePreview,
   expirePreview,
   healthCheck

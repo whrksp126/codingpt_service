@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Field, SelectField, TextField, NumberField } from './_shared/SharedFields';
 import MonacoField from './_shared/MonacoField';
+import IdeIntegrationField from './_shared/IdeIntegrationField';
+import IdeOpenBadge from './_shared/IdeOpenBadge';
 import { useResultParent } from '../state/ResultParentContext';
 import { useEditor, selectSelectedSlide } from '../state/EditorContext';
 import { usePrecomputeModule, usePrecomputePermutations } from '../state/usePrecompute';
@@ -618,6 +620,8 @@ const FormView = ({ value, onChange }) => {
       </Field>
 
       {mode === 'single' ? <SingleScriptForm value={value} onChange={onChange} /> : <MultiFilesForm value={value} onChange={onChange} />}
+
+      <IdeIntegrationField value={value.ide} onChange={(ide) => onChange({ ...value, ide })} />
     </>
   );
 };
@@ -747,6 +751,7 @@ const PreviewView = ({ module }) => {
             ))}
           </div>
         )}
+        <IdeOpenBadge module={module} />
       </div>
       <pre
         style={{

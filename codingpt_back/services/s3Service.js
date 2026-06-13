@@ -1,5 +1,15 @@
 const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
 
+// 텍스트로 취급할 확장자 — 이 목록에 없으면 바이너리로 보고 base64 로 디코딩/인코딩한다.
+// 코드 파일(py/ts/java/c 등)이 빠져 있으면 저장 시 원본 텍스트를 base64 로 잘못 디코딩해
+// 깨진 바이트가 저장된다(모바일 IDE 소스 .py 깨짐 버그). 프론트 ideSourceApi 의 TEXT_EXTS 와 동기화.
+const TEXT_EXTENSIONS = new Set([
+  'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'json', 'txt', 'md', 'xml', 'svg',
+  'py', 'java', 'ts', 'tsx', 'jsx', 'c', 'cc', 'cxx', 'cpp', 'h', 'hpp',
+  'sql', 'yml', 'yaml', 'sh', 'bash', 'rb', 'go', 'rs', 'php', 'kt', 'swift',
+  'cs', 'scss', 'sass', 'less', 'vue', 'env', 'ini', 'toml', 'csv', 'tsv', 'gitignore',
+]);
+
 class S3Service {
   constructor() {
     const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
@@ -10,6 +20,12 @@ class S3Service {
         accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY,
         secretAccessKey: process.env.OBJECTSTORE_SECRET_KEY
       },
+      // AWS SDK v3 기본값(WHEN_SUPPORTED)은 모든 요청/응답에 CRC32 체크섬을 강제하는데,
+      // MinIO objectstore는 큰 본문에서 SDK와 다른 값을 계산해 GetObject가
+      // "Checksum mismatch ... x-amz-checksum-crc32" 로 실패한다(긴 index.html 등).
+      // WHEN_REQUIRED 로 낮춰 MinIO 호환성을 확보한다.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
       ...(endpoint && {
         endpoint,
         forcePathStyle: true, // MinIO/objectstore는 path-style 필수
@@ -81,6 +97,19 @@ class S3Service {
       'otf': 'font/otf'
     };
     return contentTypes[ext] || 'application/octet-stream';
+  }
+
+  /**
+   * 텍스트 파일 여부 — content-type 이 text/* 이거나 확장자가 텍스트 목록에 있으면 텍스트.
+   * 저장(utf-8 vs base64)·조회(디코딩) 양쪽에서 동일 기준으로 사용한다.
+   * @param {string} filePath
+   * @param {string} [contentType]
+   * @returns {boolean}
+   */
+  isTextFile(filePath, contentType) {
+    if (contentType && contentType.startsWith('text/')) return true;
+    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    return TEXT_EXTENSIONS.has(ext);
   }
 
   // 일시적/미분류 오류(Cloudflare·MinIO 5xx, http/code 미상)에 대해 재시도.
@@ -382,10 +411,16 @@ class S3Service {
         Key: normalizedPath
       };
 
-      // 먼저 파일 존재 여부 확인 (크기 제한 체크를 위해)
-      const headCommand = new HeadObjectCommand(params);
-      let headData;
+      // 파일 크기 제한 (10MB)
+      const maxSize = 10 * 1024 * 1024;
+
+      // 먼저 HEAD 로 존재/크기 확인. 단, objectstore 앞단 Cloudflare 가
+      // css/js/png 등 "캐시 대상 정적 확장자"의 HEAD 요청을 가로채 403(AccessDenied)을
+      // 돌려주는 경우가 있다(서명 헤더 제거/캐시된 에러). 이때 GetObject 는 정상 동작하므로
+      // HEAD 실패는 치명적으로 보지 않고 GET 으로 진행하고, 크기는 본문 수신 후 검증한다.
+      let headData = null;
       try {
+        const headCommand = new HeadObjectCommand(params);
         headData = await this.s3Client.send(headCommand);
       } catch (headError) {
         if (headError.name === 'NotFound' || headError.$metadata?.httpStatusCode === 404) {
@@ -395,12 +430,11 @@ class S3Service {
             error: 'NoSuchKey'
           };
         }
-        throw headError;
+        // 403 등: HEAD 만 막히는 케이스 → GET 으로 진행
+        console.warn(`[S3Service] HEAD 실패(${headError.$metadata?.httpStatusCode || headError.name}) → GET 으로 진행: ${normalizedPath}`);
       }
 
-      // 파일 크기 제한 체크 (10MB)
-      const maxSize = 10 * 1024 * 1024; // 10MB
-      if (headData.ContentLength > maxSize) {
+      if (headData && headData.ContentLength > maxSize) {
         return {
           success: false,
           message: `파일 크기가 너무 큽니다. (최대 10MB, 현재: ${(headData.ContentLength / 1024 / 1024).toFixed(2)}MB)`,
@@ -415,15 +449,8 @@ class S3Service {
       // Content-Type 확인
       const contentType = data.ContentType || this.getContentType(normalizedPath);
       
-      // 텍스트 파일인지 확인
-      const isTextFile = contentType.startsWith('text/') ||
-                        normalizedPath.endsWith('.html') ||
-                        normalizedPath.endsWith('.css') ||
-                        normalizedPath.endsWith('.js') ||
-                        normalizedPath.endsWith('.json') ||
-                        normalizedPath.endsWith('.txt') ||
-                        normalizedPath.endsWith('.svg') ||
-                        normalizedPath.endsWith('.xml');
+      // 텍스트 파일인지 확인 (저장 시와 동일 기준 — 코드 파일 py/ts/java 등 포함)
+      const isTextFile = this.isTextFile(normalizedPath, contentType);
 
       // 파일 내용 읽기
       const chunks = [];
@@ -432,12 +459,24 @@ class S3Service {
       }
       const buffer = Buffer.concat(chunks);
 
+      // HEAD 를 건너뛴 경우 본문 크기로 사후 검증
+      if (!headData && buffer.length > maxSize) {
+        return {
+          success: false,
+          message: `파일 크기가 너무 큽니다. (최대 10MB, 현재: ${(buffer.length / 1024 / 1024).toFixed(2)}MB)`,
+          error: 'FileTooLarge'
+        };
+      }
+
       let content;
       let encoding;
 
       if (isTextFile) {
         // 텍스트 파일은 UTF-8로 디코딩
         content = buffer.toString('utf-8');
+        // objectstore 앞단 Cloudflare 가 text/html 응답에 자동 주입하는 Web Analytics 비콘 제거.
+        // (저장이 읽은 내용을 다시 쓰는 구조라 제거하지 않으면 open→save 마다 비콘이 누적된다.)
+        content = content.replace(/<script\b[^>]*cloudflareinsights\.com[^>]*><\/script>\n?/gi, '');
         encoding = 'utf-8';
       } else {
         // 바이너리 파일은 base64로 인코딩
@@ -540,18 +579,12 @@ class S3Service {
       // 파일 내용을 Buffer로 변환
       let body;
       if (typeof content === 'string') {
-        // 텍스트 파일인 경우
-        if (contentType.startsWith('text/') || 
-            normalizedPath.endsWith('.html') ||
-            normalizedPath.endsWith('.css') ||
-            normalizedPath.endsWith('.js') ||
-            normalizedPath.endsWith('.json') ||
-            normalizedPath.endsWith('.txt') ||
-            normalizedPath.endsWith('.svg') ||
-            normalizedPath.endsWith('.xml')) {
+        // 텍스트 파일은 UTF-8 그대로 저장. 코드 파일(py/ts/java 등)이 텍스트로 인식되지 않으면
+        // 원본 텍스트를 base64 로 잘못 디코딩해 깨진 바이트가 저장된다.
+        if (this.isTextFile(normalizedPath, contentType)) {
           body = Buffer.from(content, 'utf-8');
         } else {
-          // base64로 인코딩된 바이너리인 경우
+          // base64로 인코딩된 바이너리(이미지 등)인 경우
           try {
             body = Buffer.from(content, 'base64');
           } catch (e) {

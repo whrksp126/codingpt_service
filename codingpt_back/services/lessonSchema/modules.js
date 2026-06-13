@@ -6,6 +6,7 @@ const {
   characterRefSchema,
   cachedResultSchema,
   executionModeSchema,
+  ideConfigSchema,
 } = require('./common');
 
 // 모듈 등장 트리거 — 퀴즈 채점 후 또는 actionButton 클릭 시 등장.
@@ -84,6 +85,7 @@ const codeModuleSchema = z.object({
   type: z.literal('code'),
   files: z.array(codeFileSchema).min(1),
   height: z.number().optional(),
+  ide: ideConfigSchema.optional(), // 모바일 IDE 연동
 }).passthrough();
 
 const speechSchema = z.object({
@@ -159,6 +161,7 @@ const terminalModuleSchema = z.object({
   cachedResult: cachedResultSchema.optional(),
   cachedResults: z.record(cachedResultSchema).optional(),
   executionMode: executionModeSchema.optional(),
+  ide: ideConfigSchema.optional(), // 모바일 IDE 연동
 }).passthrough();
 
 // 코드 또는 빈칸채우기 모듈의 실행 결과를 보여주는 통합 결과 모듈.
@@ -203,6 +206,7 @@ const trueFalseChoiceModuleSchema = z.object({
 const codeFillTheGapV2ModuleSchema = z.object({
   ...baseModuleFields,
   type: z.literal('codeFillTheGapV2'),
+  ide: ideConfigSchema.optional(), // 모바일 IDE 연동
 }).passthrough();
 
 // 버튼 액션 — known type 은 executeCode / navigate_next_lesson / end_lesson.

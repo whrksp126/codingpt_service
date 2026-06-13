@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { Switch } from '../lesson-editor/modules/_shared/SharedFields';
 
-const ProductModal = ({ product, onSave, onClose }) => {
+const DIFFICULTY_OPTIONS = ['입문', '초급', '중급', '고급'];
+
+// 중복 제거하며 순서 유지 (빈 값 제외)
+const uniq = (arr) => [...new Set(arr.filter(Boolean))];
+
+const ProductModal = ({ product, onSave, onClose, typeOptions = [], categoryOptions = [] }) => {
   const [form, setForm] = useState(product || {
     name: '',
     description: '',
@@ -70,10 +75,17 @@ const ProductModal = ({ product, onSave, onClose }) => {
               <span className="text-xs text-slate-600">유형</span>
               <input
                 type="text"
+                list="product-type-options"
                 value={form.type || ''}
                 onChange={(e) => update({ type: e.target.value })}
+                placeholder="선택하거나 입력"
                 className="mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none"
               />
+              <datalist id="product-type-options">
+                {uniq([...typeOptions, form.type]).map((o) => (
+                  <option key={o} value={o} />
+                ))}
+              </datalist>
             </label>
             <label className="block">
               <span className="text-xs text-slate-600">가격</span>
@@ -90,19 +102,29 @@ const ProductModal = ({ product, onSave, onClose }) => {
               <span className="text-xs text-slate-600">카테고리</span>
               <input
                 type="text"
+                list="product-category-options"
                 value={form.category || ''}
                 onChange={(e) => update({ category: e.target.value })}
+                placeholder="선택하거나 입력"
                 className="mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none"
               />
+              <datalist id="product-category-options">
+                {uniq([...categoryOptions, form.category]).map((o) => (
+                  <option key={o} value={o} />
+                ))}
+              </datalist>
             </label>
             <label className="block">
               <span className="text-xs text-slate-600">난이도</span>
-              <input
-                type="text"
-                value={form.difficulty || ''}
+              <select
+                value={form.difficulty || '입문'}
                 onChange={(e) => update({ difficulty: e.target.value })}
-                className="mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none"
-              />
+                className="mt-1 w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-sm focus:border-cyan-500 focus:outline-none"
+              >
+                {uniq([...DIFFICULTY_OPTIONS, form.difficulty]).map((o) => (
+                  <option key={o} value={o}>{o}</option>
+                ))}
+              </select>
             </label>
           </div>
           <div className="flex items-center justify-between rounded border border-slate-200 px-3 py-2">
