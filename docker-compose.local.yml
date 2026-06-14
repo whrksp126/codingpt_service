@@ -28,6 +28,7 @@ services:
       - "5300:5300"
     environment:
       - DB_HOST=postgres
+      - AGENT_WORKER_URL=http://agent-worker:5400
     env_file:
       - ./codingpt_back/.env.local
     volumes:
@@ -36,6 +37,30 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - codingpt_local
+    restart: unless-stopped
+
+  # 바이브코딩 에이전트 워커 — Agent SDK query() 를 back 프로세스 밖에서 실행(M3-full Phase 1).
+  # back 은 /api/agent/* 를 이 워커로 프록시. 내부 전용(ports 매핑 금지). replica=1 유지(승인 대기 메모리).
+  agent-worker:
+    container_name: codingpt_agent_worker_local
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.local
+    command: ["node", "agent-worker.js"]
+    expose:
+      - "5400"
+    environment:
+      - SKIP_MIGRATIONS=1
+      - AGENT_WORKER_PORT=5400
+      - AGENT_WORKSPACE_ROOT=/workspace
+    env_file:
+      - ./codingpt_back/.env.local
+    volumes:
+      - ./codingpt_back:/app
+      - /app/node_modules
+      - cpt_agent_workspace:/workspace
     networks:
       - codingpt_local
     restart: unless-stopped
@@ -63,3 +88,4 @@ networks:
 volumes:
   codingpt_back_postgres_local_data:
     external: true
+  cpt_agent_workspace:

@@ -68,7 +68,10 @@ const VIBE_SYSTEM_APPEND = [
  * projectId 가 있으면 그 프로젝트 위에서 작업 → /tmp/cpt-agent/<userId>/<projectId>/
  */
 function workspaceDir(userId, projectId) {
-  const parts = [os.tmpdir(), 'cpt-agent', String(userId == null ? 'anon' : userId)];
+  // 워커에서는 AGENT_WORKSPACE_ROOT=/workspace(호스트 가시 named volume) 사용.
+  // 미설정 시 기존 동작(컨테이너 /tmp) — back 직접 실행 폴백과 하위호환.
+  const root = process.env.AGENT_WORKSPACE_ROOT || os.tmpdir();
+  const parts = [root, 'cpt-agent', String(userId == null ? 'anon' : userId)];
   if (projectId) parts.push(String(projectId).replace(/[^a-zA-Z0-9_-]/g, '')); // 경로 안전화
   const dir = path.join(...parts);
   fs.mkdirSync(dir, { recursive: true });
