@@ -10,7 +10,7 @@ const agentService = require('../services/agentService');
  * body: { prompt, sessionId?, model? }
  */
 const runAgent = async (req, res) => {
-  const { prompt, sessionId, model } = req.body || {};
+  const { prompt, sessionId, model, projectId, files } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ success: false, message: '프롬프트가 필요합니다.' });
@@ -55,6 +55,8 @@ const runAgent = async (req, res) => {
     await agentService.runAgentQuery({
       prompt,
       userId: req.user && req.user.id,
+      projectId,
+      seedFiles: files,
       model,
       resumeSessionId: sessionId,
       abortController,
@@ -79,11 +81,12 @@ const runAgent = async (req, res) => {
  */
 const getFile = (req, res) => {
   const relPath = req.query.path;
+  const projectId = req.query.projectId;
   if (!relPath || typeof relPath !== 'string') {
     return res.status(400).json({ success: false, message: 'path 가 필요합니다.' });
   }
   try {
-    const content = agentService.readWorkspaceFile(req.user && req.user.id, relPath);
+    const content = agentService.readWorkspaceFile(req.user && req.user.id, projectId, relPath);
     return res.json({ success: true, path: relPath, content });
   } catch (error) {
     const notFound = error.code === 'ENOENT';

@@ -41,39 +41,61 @@ const VIBE_SYSTEM_APPEND = [
 ].join('\n');
 
 /**
- * 사용자별 임시 워크스페이스 디렉토리 확보 (M3 에서 격리 컨테이너로 대체 예정)
+ * 사용자(+프로젝트)별 임시 워크스페이스 디렉토리 확보 (M3-full 에서 격리 컨테이너로 대체 예정).
+ * projectId 가 있으면 그 프로젝트 위에서 작업 → /tmp/cpt-agent/<userId>/<projectId>/
  */
-function ensureWorkspace(userId) {
-  const dir = path.join(os.tmpdir(), 'cpt-agent', String(userId == null ? 'anon' : userId));
+function workspaceDir(userId, projectId) {
+  const parts = [os.tmpdir(), 'cpt-agent', String(userId == null ? 'anon' : userId)];
+  if (projectId) parts.push(String(projectId).replace(/[^a-zA-Z0-9_-]/g, '')); // 경로 안전화
+  const dir = path.join(...parts);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-/**
- * 워크스페이스 내 파일 읽기 (에이전트 편집 후 에디터 동기화용).
- * 경로 탐색 공격 방지 — 워크스페이스 밖 접근 차단.
- */
-function readWorkspaceFile(userId, relPath) {
-  const base = ensureWorkspace(userId);
+// 워크스페이스 기준 안전 상대경로(경로 탐색 차단) → 절대경로. 밖이면 null.
+function resolveInWorkspace(base, relPath) {
   const safeRel = path.normalize(String(relPath || '')).replace(/^(\.\.(\/|\\|$))+/, '');
   const full = path.resolve(base, safeRel);
-  if (full !== base && !full.startsWith(base + path.sep)) {
-    throw new Error('잘못된 경로입니다.');
-  }
+  if (full !== base && !full.startsWith(base + path.sep)) return null;
+  return full;
+}
+
+/**
+ * 워크스페이스 내 파일 읽기 (에이전트 편집 후 에디터 동기화용).
+ */
+function readWorkspaceFile(userId, projectId, relPath) {
+  const base = workspaceDir(userId, projectId);
+  const full = resolveInWorkspace(base, relPath);
+  if (!full) throw new Error('잘못된 경로입니다.');
   return fs.readFileSync(full, 'utf-8');
 }
 
 /**
- * 절대 file_path 를 워크스페이스 기준 상대경로로 변환 (없으면 null).
- * 에이전트 이벤트의 file_path 는 절대경로(/tmp/cpt-agent/<userId>/foo.js)로 온다.
+ * 절대 file_path 를 워크스페이스 기준 상대경로로 변환 (밖이면 null).
  */
-function toWorkspaceRelative(userId, absPath) {
+function toWorkspaceRelative(userId, projectId, absPath) {
   if (!absPath) return null;
-  const base = ensureWorkspace(userId);
+  const base = workspaceDir(userId, projectId);
   const full = path.resolve(String(absPath));
   if (full === base) return '';
   if (full.startsWith(base + path.sep)) return full.slice(base.length + 1);
   return null;
+}
+
+/**
+ * 워크스페이스 시드 — 앱의 현재 파일들(편집분 포함)을 워크스페이스에 기록.
+ * 에이전트가 "사용자가 보고 있는 실제 프로젝트" 위에서 작업하도록.
+ */
+function seedWorkspace(userId, projectId, files) {
+  if (!Array.isArray(files)) return;
+  const base = workspaceDir(userId, projectId);
+  for (const f of files) {
+    if (!f || typeof f.path !== 'string') continue;
+    const full = resolveInWorkspace(base, f.path);
+    if (!full) continue;
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, String(f.content == null ? '' : f.content));
+  }
 }
 
 /**
@@ -111,6 +133,8 @@ function normalizeContent(content) {
 async function runAgentQuery({
   prompt,
   userId,
+  projectId,
+  seedFiles,
   cwd,
   model,
   resumeSessionId,
@@ -119,7 +143,9 @@ async function runAgentQuery({
   abortController,
 }) {
   const { query } = await loadSdk();
-  const workdir = cwd || ensureWorkspace(userId);
+  const workdir = cwd || workspaceDir(userId, projectId);
+  // 앱의 현재 파일들로 워크스페이스를 시드 → 에이전트가 실제 프로젝트 위에서 작업
+  if (seedFiles) seedWorkspace(userId, projectId, seedFiles);
 
   const options = {
     model: model || DEFAULT_MODEL,
@@ -159,7 +185,7 @@ async function runAgentQuery({
           } else if (b.type === 'tool_use') {
             // 파일 도구면 워크스페이스 상대경로를 함께 실어 앱이 에디터 동기화에 사용
             const fp = b.input && b.input.file_path;
-            const relPath = fp ? toWorkspaceRelative(userId, fp) : null;
+            const relPath = fp ? toWorkspaceRelative(userId, projectId, fp) : null;
             onEvent({ type: 'tool_use', toolUseId: b.id, tool: b.name, input: b.input, relPath });
           }
         }
@@ -205,7 +231,8 @@ async function runAgentQuery({
 
 module.exports = {
   runAgentQuery,
-  ensureWorkspace,
+  workspaceDir,
+  seedWorkspace,
   readWorkspaceFile,
   toWorkspaceRelative,
   normalizeContent,
