@@ -31,7 +31,7 @@ ssh -i "$SSH_KEY" -p 222 ghmate@ghmate.iptime.org "
   echo '>>> git pull...'
   git pull
   echo '>>> docker build & up...'
-  docker compose -p $PROJECT_NAME -f $COMPOSE_FILE up --build -d back front code-executor
+  docker compose -p $PROJECT_NAME -f $COMPOSE_FILE up --build -d back front code-executor agent-worker
   echo '>>> nginx reload...'
   docker exec nginx_proxy nginx -s reload
 "
