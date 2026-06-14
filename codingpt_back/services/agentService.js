@@ -20,6 +20,7 @@ const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const sandboxManager = require('./sandboxManager');
 
 // ESM-only SDK — 동적 import 결과를 캐싱
 let _sdkPromise = null;
@@ -203,7 +204,8 @@ async function runAgentQuery({
   permissionResolver,
   abortController,
 }) {
-  const { query } = await loadSdk();
+  const sdk = await loadSdk();
+  const { query } = sdk;
   const workdir = cwd || workspaceDir(userId, projectId);
   // 앱의 현재 파일들로 워크스페이스를 시드 → 에이전트가 실제 프로젝트 위에서 작업
   if (seedFiles) seedWorkspace(userId, projectId, seedFiles);
@@ -243,6 +245,35 @@ async function runAgentQuery({
       return { behavior: 'deny', message: (decision && decision.message) || '사용자가 수정을 거부했습니다.' };
     },
   };
+
+  // Phase 2: 샌드박스 활성 시 Bash 를 사용자별 격리 컨테이너로 라우팅.
+  // SDK 의 createSdkMcpServer + tool 로 인프로세스 bash 도구를 만들고,
+  // toolAliases 로 모델이 emit 한 Bash 를 그 도구로 보낸다(이벤트상 여전히 tool_use 'Bash' → 앱 무변경).
+  if (sandboxManager.isEnabled() && sdk.createSdkMcpServer && sdk.tool) {
+    try {
+      const { z } = require('zod');
+      const bashTool = sdk.tool(
+        'bash',
+        'Run a shell command in the isolated user sandbox container. Returns combined stdout/stderr.',
+        { command: z.string(), description: z.string().optional(), timeout: z.number().optional() },
+        async (args) => {
+          const { output, exitCode } = await sandboxManager.execBash(userId, args.command, { cwd: workdir });
+          return {
+            content: [{ type: 'text', text: output || '(no output)' }],
+            isError: exitCode !== 0,
+          };
+        },
+      );
+      options.mcpServers = {
+        ...(options.mcpServers || {}),
+        workspace: sdk.createSdkMcpServer({ name: 'workspace', version: '1.0.0', tools: [bashTool] }),
+      };
+      options.toolAliases = { ...(options.toolAliases || {}), Bash: 'mcp__workspace__bash' };
+    } catch (e) {
+      console.error('[agentService] 샌드박스 bash 라우팅 설정 실패 — 로컬 Bash 로 진행:', e.message);
+    }
+  }
+
   if (abortController) options.abortController = abortController;
   if (resumeSessionId) options.resume = resumeSessionId;
 
