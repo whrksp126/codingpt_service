@@ -17,6 +17,7 @@ const {
   sequelize,
 } = require('../models');
 const { fn, col, Op } = require('sequelize');
+const onboardingService = require('./onboardingService');
 
 const ACHIEVEMENT_CATEGORIES = ['HTML', 'CSS', 'JS', 'Python', 'Java', 'Nodejs'];
 const { OAuth2Client } = require('google-auth-library');
@@ -33,7 +34,7 @@ const client = new OAuth2Client();
 
 class UserService {
   // Google OAuth 로그인 (자동 회원가입 포함)
-  async login(idToken) {
+  async login(idToken, anonId) {
     if(!idToken) {
       throw new Error('idToken이 필요합니다.');
     }
@@ -67,6 +68,16 @@ class UserService {
           created_at: new Date(),
         });
         console.log('✅ 새 사용자 생성 성공:', foundUser.id);
+      }
+
+      // 3-1. 온보딩 익명 응답 연결 (실패해도 로그인은 진행)
+      if (anonId) {
+        try {
+          await onboardingService.linkToUser(anonId, foundUser.id);
+          console.log('✅ 온보딩 응답 연결 완료:', anonId, '→', foundUser.id);
+        } catch (linkErr) {
+          console.warn('⚠️ 온보딩 응답 연결 실패(무시):', linkErr.message);
+        }
       }
 
       // 4. JWT 토큰 생성

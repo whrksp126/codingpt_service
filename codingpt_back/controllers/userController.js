@@ -4,8 +4,8 @@ const { successResponse, errorResponse } = require('../utils/response');
 // 로그인
 const login = async (req, res) => {
   try {
-    const { idToken } = req.body;
-    const user = await userService.login(idToken);
+    const { idToken, anonId } = req.body;
+    const user = await userService.login(idToken, anonId);
     successResponse(res, user, '로그인이 성공적으로 완료되었습니다.');
   } catch (error) {
     console.error('로그인 오류:', error);

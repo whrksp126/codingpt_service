@@ -48,6 +48,7 @@ module.exports = (sequelize, DataTypes) => {
     User.hasMany(models.StudyHeatmapLog, { foreignKey: 'user_id' });
     User.hasOne(models.UserGithubConnection, { foreignKey: 'user_id' });
     User.hasMany(models.UserGithubRepo, { foreignKey: 'user_id' });
+    User.hasOne(models.OnboardingResponse, { foreignKey: 'user_id' });
   };
 
   return User;
