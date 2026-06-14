@@ -10,7 +10,7 @@ const agentService = require('../services/agentService');
  * body: { prompt, sessionId?, model? }
  */
 const runAgent = async (req, res) => {
-  const { prompt, sessionId, model, projectId, files } = req.body || {};
+  const { prompt, sessionId, model, projectId, files, autoApprove } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ success: false, message: '프롬프트가 필요합니다.' });
@@ -59,6 +59,7 @@ const runAgent = async (req, res) => {
       seedFiles: files,
       model,
       resumeSessionId: sessionId,
+      autoApprove: !!autoApprove,
       abortController,
       onEvent: send,
     });
@@ -98,13 +99,30 @@ const getFile = (req, res) => {
 };
 
 /**
- * 수정 승인 응답 — M2.5 에서 활성화 (현재는 자동 승인이라 미사용)
+ * 수정 승인 응답 — diff 모달에서 사용자가 승인/거부한 결과를 받아 대기 중인 canUseTool 을 해소.
+ * POST /api/agent/permission  body: { requestId, decision: 'allow'|'deny', message? }
  */
 const permission = (req, res) => {
-  return res.status(501).json({
-    success: false,
-    message: '수정 승인 기능은 추후 활성화됩니다.',
-  });
+  const { requestId, decision, message } = req.body || {};
+  if (!requestId || (decision !== 'allow' && decision !== 'deny')) {
+    return res.status(400).json({
+      success: false,
+      message: 'requestId 와 decision(allow|deny) 이 필요합니다.',
+    });
+  }
+  const ok = agentService.resolvePermissionResponse(
+    requestId,
+    req.user && req.user.id,
+    decision,
+    message,
+  );
+  if (!ok) {
+    return res.status(404).json({
+      success: false,
+      message: '대기 중인 승인 요청을 찾을 수 없습니다. (이미 처리되었거나 만료됨)',
+    });
+  }
+  return res.json({ success: true, requestId, decision });
 };
 
 module.exports = { runAgent, getFile, permission };

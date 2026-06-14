@@ -19,6 +19,7 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 
 // ESM-only SDK — 동적 import 결과를 캐싱
 let _sdkPromise = null;
@@ -30,6 +31,28 @@ function loadSdk() {
 }
 
 const DEFAULT_MODEL = process.env.AGENT_MODEL || 'claude-sonnet-4-6';
+
+// 파일을 변경하는 도구만 사용자 승인(diff) 게이트를 건다. Read/Bash/Grep 등은 자동 허용.
+const GATED_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+// 진행 중인 승인 요청: requestId → { resolve, userId }.
+// canUseTool 콜백이 여기에 resolve 를 걸어두고, 별도 HTTP(POST /permission)가 풀어준다.
+// (단일 프로세스 전제 — 멀티 인스턴스면 공유 스토어 필요. 로컬/현 배포는 단일 컨테이너라 OK.)
+const pendingPermissions = new Map();
+
+/**
+ * 승인 응답 해소 — 컨트롤러(POST /api/agent/permission)에서 호출.
+ * @returns {boolean} 대기 중 요청을 찾아 해소했으면 true
+ */
+function resolvePermissionResponse(requestId, userId, decision, message) {
+  const entry = pendingPermissions.get(requestId);
+  if (!entry) return false;
+  // 본인이 띄운 요청만 해소 가능
+  if (userId != null && String(entry.userId) !== String(userId)) return false;
+  pendingPermissions.delete(requestId);
+  entry.resolve({ decision: decision === 'allow' ? 'allow' : 'deny', message });
+  return true;
+}
 
 // claude_code 프리셋에 덧붙이는 바이브코딩 에이전트 컨텍스트
 const VIBE_SYSTEM_APPEND = [
@@ -99,6 +122,40 @@ function seedWorkspace(userId, projectId, files) {
 }
 
 /**
+ * 승인 모달용 diff 페이로드 생성. 앱이 "변경 전/후"를 시각화하는 데 사용.
+ *  - Edit:      { kind:'edit', oldString, newString }
+ *  - MultiEdit: { kind:'multiedit', edits:[{oldString,newString}] }
+ *  - Write:     { kind:'write', oldContent(현재 파일, 신규면 ''), newContent }
+ */
+function buildDiff(toolName, input, userId, projectId) {
+  try {
+    if (toolName === 'Edit') {
+      return { kind: 'edit', oldString: input.old_string || '', newString: input.new_string || '' };
+    }
+    if (toolName === 'MultiEdit') {
+      const edits = Array.isArray(input.edits) ? input.edits : [];
+      return {
+        kind: 'multiedit',
+        edits: edits.map((e) => ({ oldString: e.old_string || '', newString: e.new_string || '' })),
+      };
+    }
+    if (toolName === 'Write') {
+      let oldContent = '';
+      try {
+        const rel = toWorkspaceRelative(userId, projectId, input.file_path);
+        if (rel != null) oldContent = readWorkspaceFile(userId, projectId, rel);
+      } catch (_) {
+        /* 신규 파일이면 현재 내용 없음 */
+      }
+      return { kind: 'write', oldContent, newContent: input.content || '' };
+    }
+  } catch (_) {
+    /* diff 생성 실패해도 승인 흐름은 진행 */
+  }
+  return null;
+}
+
+/**
  * tool_result 의 content(문자열 | 블록배열)를 문자열로 정규화
  */
 function normalizeContent(content) {
@@ -138,6 +195,7 @@ async function runAgentQuery({
   cwd,
   model,
   resumeSessionId,
+  autoApprove,
   onEvent,
   permissionResolver,
   abortController,
@@ -147,6 +205,9 @@ async function runAgentQuery({
   // 앱의 현재 파일들로 워크스페이스를 시드 → 에이전트가 실제 프로젝트 위에서 작업
   if (seedFiles) seedWorkspace(userId, projectId, seedFiles);
 
+  // 이 질의가 띄운 승인 요청들 — 세션 종료/중단 시 정리(canUseTool 가 영원히 매달리지 않게)
+  const myPending = new Set();
+
   const options = {
     model: model || DEFAULT_MODEL,
     cwd: workdir,
@@ -154,12 +215,29 @@ async function runAgentQuery({
     systemPrompt: { type: 'preset', preset: 'claude_code', append: VIBE_SYSTEM_APPEND },
     // 서브프로세스(Claude Code CLI) stderr 디버깅
     stderr: (data) => console.error('[agent-stderr]', String(data).slice(0, 2000)),
-    // 권한 게이트: M1 은 자동 승인, M2 에서 사용자 승인(diff) 연결
+    // 권한 게이트: 파일 변경 도구는 사용자 승인(diff) 대기. autoApprove 면 즉시 허용.
     canUseTool: async (toolName, input, opts) => {
       if (typeof permissionResolver === 'function') {
         return permissionResolver(toolName, input, opts);
       }
-      return { behavior: 'allow', updatedInput: input };
+      if (autoApprove || !GATED_TOOLS.has(toolName)) {
+        return { behavior: 'allow', updatedInput: input };
+      }
+      // 승인 요청 발행 → 앱이 diff 모달을 띄우고 POST /permission 으로 응답할 때까지 대기
+      const requestId = crypto.randomUUID();
+      const fp = input && input.file_path;
+      const relPath = fp ? toWorkspaceRelative(userId, projectId, fp) : null;
+      const diff = buildDiff(toolName, input, userId, projectId);
+      onEvent({ type: 'permission_request', requestId, tool: toolName, input, relPath, diff });
+      const decision = await new Promise((resolve) => {
+        pendingPermissions.set(requestId, { resolve, userId });
+        myPending.add(requestId);
+      });
+      myPending.delete(requestId);
+      if (decision && decision.decision === 'allow') {
+        return { behavior: 'allow', updatedInput: input };
+      }
+      return { behavior: 'deny', message: (decision && decision.message) || '사용자가 수정을 거부했습니다.' };
     },
   };
   if (abortController) options.abortController = abortController;
@@ -167,7 +245,8 @@ async function runAgentQuery({
 
   const q = query({ prompt, options });
 
-  for await (const msg of q) {
+  try {
+    for await (const msg of q) {
     switch (msg.type) {
       case 'system':
         if (msg.subtype === 'init') {
@@ -224,6 +303,16 @@ async function runAgentQuery({
         // stream_event(partial), status, hook 등은 M1 범위 밖 — 무시
         break;
     }
+    }
+  } finally {
+    // 세션 종료/중단 시 남은 승인 요청을 deny 로 풀어 canUseTool 가 매달리지 않게 정리
+    for (const rid of myPending) {
+      const entry = pendingPermissions.get(rid);
+      if (entry) {
+        pendingPermissions.delete(rid);
+        entry.resolve({ decision: 'deny', message: '세션이 종료되었습니다.' });
+      }
+    }
   }
 
   return workdir;
@@ -231,6 +320,7 @@ async function runAgentQuery({
 
 module.exports = {
   runAgentQuery,
+  resolvePermissionResponse,
   workspaceDir,
   seedWorkspace,
   readWorkspaceFile,
