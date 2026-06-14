@@ -91,7 +91,9 @@ services:
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt-agent-worker:dev
       - AGENT_SANDBOX_VOLUME=cpt_agent_workspace_dev
-      - AGENT_SANDBOX_NETWORK=bridge
+      # 샌드박스는 internal 네트워크(직접 인터넷 차단) + allowlist 프록시로만 egress
+      - AGENT_SANDBOX_NETWORK=cpt_sandbox_net_dev
+      - AGENT_EGRESS_PROXY=http://egress-proxy:3128
     env_file:
       - ./codingpt_back/.env.dev
     volumes:
@@ -101,11 +103,25 @@ services:
       - codingpt_dev
     restart: unless-stopped
 
+  # 샌드박스 egress allowlist 프록시 — internal 네트워크 샌드박스가 이걸 통해서만 인터넷.
+  egress-proxy:
+    container_name: codingpt_egress_proxy_dev
+    image: ubuntu/squid:latest
+    volumes:
+      - ./egress-proxy/squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      - codingpt_dev      # 인터넷 egress
+      - cpt_sandbox_net     # 샌드박스(internal)와 통신
+    restart: unless-stopped
+
 networks:
   codingpt_dev:
     driver: bridge
   nginx_proxy:
     external: true
+  cpt_sandbox_net:
+    name: cpt_sandbox_net_dev
+    internal: true
 
 volumes:
   postgres_dev_data:
