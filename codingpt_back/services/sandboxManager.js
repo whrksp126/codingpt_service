@@ -30,6 +30,7 @@ const NANO_CPUS = Math.round(parseFloat(process.env.AGENT_SANDBOX_CPUS || '0.5')
 const PIDS_LIMIT = parseInt(process.env.AGENT_SANDBOX_PIDS || '256', 10);
 const IDLE_TTL_MS = parseInt(process.env.AGENT_SANDBOX_IDLE_MS || '600000', 10); // 10분
 const EXEC_TIMEOUT_MS = parseInt(process.env.AGENT_SANDBOX_EXEC_MS || '120000', 10); // 2분
+const MAX_SANDBOXES = parseInt(process.env.AGENT_SANDBOX_MAX || '20', 10); // 동시 컨테이너 상한
 
 const docker = Docker ? new Docker() : null;
 
@@ -75,6 +76,20 @@ async function ensureSandbox(userId) {
       }
     } catch (_) {
       sessions.delete(uid); // 사라졌으면 재생성
+    }
+  }
+
+  // 동시 컨테이너 상한 — 초과 시 가장 오래 안 쓴 샌드박스 1개 제거(LRU eviction)
+  if (sessions.size >= MAX_SANDBOXES) {
+    let lruUid = null;
+    let lruAt = Infinity;
+    for (const [u, s] of sessions.entries()) {
+      if (s.lastUsed < lruAt) { lruAt = s.lastUsed; lruUid = u; }
+    }
+    if (lruUid && lruUid !== uid) {
+      const ev = sessions.get(lruUid);
+      sessions.delete(lruUid);
+      try { await ev.container.remove({ force: true }); } catch (_) { /* noop */ }
     }
   }
 
