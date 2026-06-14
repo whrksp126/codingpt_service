@@ -59,8 +59,9 @@ services:
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt_service-agent-worker
       - AGENT_SANDBOX_VOLUME=codingpt_service_cpt_agent_workspace
-      # bridge = 인터넷 egress 허용(npm/pip install 가능) + 내부 compose 네트워크와는 격리
-      - AGENT_SANDBOX_NETWORK=bridge
+      # 샌드박스는 internal 네트워크(직접 인터넷 차단) + allowlist 프록시로만 egress
+      - AGENT_SANDBOX_NETWORK=cpt_sandbox_net_local
+      - AGENT_EGRESS_PROXY=http://egress-proxy:3128
     env_file:
       - ./codingpt_back/.env.local
     volumes:
@@ -71,6 +72,17 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - codingpt_local
+    restart: unless-stopped
+
+  # 샌드박스 egress allowlist 프록시 — internal 네트워크의 샌드박스가 이걸 통해서만 인터넷.
+  egress-proxy:
+    container_name: codingpt_egress_proxy_local
+    image: ubuntu/squid:latest
+    volumes:
+      - ./egress-proxy/squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      - codingpt_local       # 인터넷 egress
+      - cpt_sandbox_net       # 샌드박스(internal)와 통신
     restart: unless-stopped
 
   front:
@@ -92,6 +104,10 @@ services:
 networks:
   codingpt_local:
     driver: bridge
+  # 샌드박스 전용 internal 네트워크 — 직접 인터넷 차단(egress-proxy 통해서만 나감)
+  cpt_sandbox_net:
+    name: cpt_sandbox_net_local
+    internal: true
 
 volumes:
   codingpt_back_postgres_local_data:

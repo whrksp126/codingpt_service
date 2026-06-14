@@ -25,6 +25,7 @@ const IMAGE = process.env.AGENT_SANDBOX_IMAGE || 'codingpt_service-agent-worker'
 const VOLUME = process.env.AGENT_SANDBOX_VOLUME || 'codingpt_service_cpt_agent_workspace';
 const WORKSPACE_ROOT = process.env.AGENT_WORKSPACE_ROOT || os.tmpdir();
 const NETWORK = process.env.AGENT_SANDBOX_NETWORK || 'none';
+const EGRESS_PROXY = process.env.AGENT_EGRESS_PROXY || ''; // 설정 시 샌드박스 egress 를 이 프록시로만
 const MEM_BYTES = parseInt(process.env.AGENT_SANDBOX_MEM_MB || '512', 10) * 1024 * 1024;
 const NANO_CPUS = Math.round(parseFloat(process.env.AGENT_SANDBOX_CPUS || '0.5') * 1e9);
 const PIDS_LIMIT = parseInt(process.env.AGENT_SANDBOX_PIDS || '256', 10);
@@ -156,12 +157,21 @@ async function execBash(userId, command, opts = {}) {
   const container = await ensureSandbox(uid);
   const cwd = opts.cwd || userWorkspaceDir(uid);
 
+  // egress 프록시가 설정되면 모든 패키지 매니저/도구가 그걸 통해서만 나가도록 표준 프록시 env 주입
+  const proxyEnv = EGRESS_PROXY
+    ? [
+        `HTTP_PROXY=${EGRESS_PROXY}`, `HTTPS_PROXY=${EGRESS_PROXY}`,
+        `http_proxy=${EGRESS_PROXY}`, `https_proxy=${EGRESS_PROXY}`,
+        'NO_PROXY=localhost,127.0.0.1', 'no_proxy=localhost,127.0.0.1',
+      ]
+    : [];
+
   const exec = await container.exec({
     Cmd: ['bash', '-lc', command],
     WorkingDir: cwd,
     AttachStdout: true,
     AttachStderr: true,
-    Env: ['HOME=/root', 'CI=1'],
+    Env: ['HOME=/root', 'CI=1', ...proxyEnv],
   });
 
   const stream = await exec.start({ hijack: true, stdin: false });
