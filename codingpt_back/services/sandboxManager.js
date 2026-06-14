@@ -118,6 +118,10 @@ async function ensureSandbox(userId) {
         NanoCpus: NANO_CPUS,
         PidsLimit: PIDS_LIMIT,
         NetworkMode: NETWORK,
+        // 권한 강화(네트워크 무관): 모든 Linux capability 제거 + 권한 상승 차단.
+        // npm/node/python 등 일반 코드 실행엔 영향 없음.
+        CapDrop: ['ALL'],
+        SecurityOpt: ['no-new-privileges'],
         // 공유 볼륨에서 사용자 하위 트리만, 워커와 동일 경로에 마운트
         Mounts: [
           {
