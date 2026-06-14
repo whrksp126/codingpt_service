@@ -59,6 +59,8 @@ services:
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt_service-agent-worker
       - AGENT_SANDBOX_VOLUME=codingpt_service_cpt_agent_workspace
+      # bridge = 인터넷 egress 허용(npm/pip install 가능) + 내부 compose 네트워크와는 격리
+      - AGENT_SANDBOX_NETWORK=bridge
     env_file:
       - ./codingpt_back/.env.local
     volumes:

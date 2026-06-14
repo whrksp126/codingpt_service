@@ -30,6 +30,7 @@ services:
     environment:
       - NODE_ENV=development
       - CODE_EXECUTOR_URL=http://code-executor:5200
+      - AGENT_WORKER_URL=http://agent-worker:5400
       - DB_HOST=postgres
     env_file:
       - ./codingpt_back/.env.dev
@@ -71,6 +72,35 @@ services:
       - codingpt_dev
     restart: unless-stopped
 
+  # 바이브코딩 에이전트 워커 — query() 실행 + 사용자별 샌드박스 컨테이너(docker.sock).
+  # 내부 전용(nginx_proxy 미연결). replica=1 유지. 이미지 이름 명시(샌드박스가 재사용).
+  agent-worker:
+    container_name: codingpt_agent_worker_dev
+    build:
+      context: ./codingpt_back
+      dockerfile: Dockerfile.dev
+    image: codingpt-agent-worker:dev
+    command: node agent-worker.js
+    expose:
+      - "5400"
+    environment:
+      - NODE_ENV=development
+      - SKIP_MIGRATIONS=1
+      - AGENT_WORKER_PORT=5400
+      - AGENT_WORKSPACE_ROOT=/workspace
+      - AGENT_SANDBOX_ENABLED=1
+      - AGENT_SANDBOX_IMAGE=codingpt-agent-worker:dev
+      - AGENT_SANDBOX_VOLUME=cpt_agent_workspace_dev
+      - AGENT_SANDBOX_NETWORK=bridge
+    env_file:
+      - ./codingpt_back/.env.dev
+    volumes:
+      - cpt_agent_workspace:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - codingpt_dev
+    restart: unless-stopped
+
 networks:
   codingpt_dev:
     driver: bridge
@@ -79,3 +109,5 @@ networks:
 
 volumes:
   postgres_dev_data:
+  cpt_agent_workspace:
+    name: cpt_agent_workspace_dev
