@@ -8,7 +8,7 @@ const { successResponse, errorResponse } = require('../utils/response');
 const getIdeProject = async (req, res) => {
   try {
     const { projectId } = req.params;
-    const project = await ideProjectService.getProject(projectId);
+    const project = await ideProjectService.getProject(projectId, req.user && req.user.id);
     successResponse(res, project);
   } catch (error) {
     errorResponse(res, error, error.statusCode || 500);
@@ -41,7 +41,7 @@ const saveIdeProject = async (req, res) => {
   try {
     const { projectId } = req.params;
     const { files } = req.body || {};
-    const result = await ideProjectService.saveProject(projectId, files);
+    const result = await ideProjectService.saveProject(projectId, req.user && req.user.id, files);
     successResponse(res, result);
   } catch (error) {
     errorResponse(res, error, error.statusCode || 500);
