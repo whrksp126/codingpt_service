@@ -13,6 +13,7 @@ const ttsRoutes = require('./ttsRoutes');
 const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
 const githubRepoRoutes = require('./githubRepoRoutes');
+const agentRoutes = require('./agentRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -28,6 +29,7 @@ router.use('/tts', ttsRoutes);
 router.use('/admin/github-repos', githubRepoRoutes);
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
+router.use('/agent', agentRoutes);
 
 // API 루트 엔드포인트
 router.get('/', (req, res) => {
