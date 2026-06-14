@@ -14,6 +14,7 @@ const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
 const githubRepoRoutes = require('./githubRepoRoutes');
 const agentRoutes = require('./agentRoutes');
+const projectRoutes = require('./projectRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -30,6 +31,7 @@ router.use('/admin/github-repos', githubRepoRoutes);
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
 router.use('/agent', agentRoutes);
+router.use('/projects', projectRoutes);
 
 // API 루트 엔드포인트
 router.get('/', (req, res) => {

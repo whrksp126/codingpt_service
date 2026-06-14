@@ -89,8 +89,27 @@ async function getProject(projectId, userId) {
   // 1) 공용 템플릿 = 베이스 (파일 + 에셋)
   const template = await loadBase(`ide/${projectId}`, `codingpt/execute/ide/${projectId}/`);
   if (!template.ok) {
-    const e = new Error(template.message || '프로젝트 파일 목록을 불러올 수 없습니다.');
-    e.statusCode = template.error === 'NoSuchBucket' || template.error === 'AccessDenied' ? 500 : 404;
+    if (template.error === 'NoSuchBucket' || template.error === 'AccessDenied') {
+      const e = new Error(template.message || '프로젝트 파일 목록을 불러올 수 없습니다.');
+      e.statusCode = 500;
+      throw e;
+    }
+    // 템플릿 없음 → 바이브코딩 사용자 프로젝트(workspace/<uid>/projects/<id>)일 수 있음.
+    // project.json 이 있으면 등록된 vibe 프로젝트로 보고 그 파일들을 그대로 IDE 소스로 반환.
+    const uid = safeUid(userId);
+    if (uid) {
+      const vibeBase = `workspace/${uid}/projects/${projectId}`;
+      const vibe = await loadBase(vibeBase, `codingpt/execute/${vibeBase}/`, { textOnly: true });
+      const hasMeta = vibe.ok && vibe.files.some((f) => f.path === 'project.json');
+      if (hasMeta) {
+        const files = vibe.files
+          .filter((f) => f.path !== 'project.json') // 메타는 IDE에 노출 안 함
+          .sort((a, b) => a.path.localeCompare(b.path));
+        return { projectId, files, assets: [] };
+      }
+    }
+    const e = new Error('프로젝트를 찾을 수 없습니다.');
+    e.statusCode = 404;
     throw e;
   }
 
