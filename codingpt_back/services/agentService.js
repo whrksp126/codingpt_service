@@ -50,6 +50,33 @@ function ensureWorkspace(userId) {
 }
 
 /**
+ * 워크스페이스 내 파일 읽기 (에이전트 편집 후 에디터 동기화용).
+ * 경로 탐색 공격 방지 — 워크스페이스 밖 접근 차단.
+ */
+function readWorkspaceFile(userId, relPath) {
+  const base = ensureWorkspace(userId);
+  const safeRel = path.normalize(String(relPath || '')).replace(/^(\.\.(\/|\\|$))+/, '');
+  const full = path.resolve(base, safeRel);
+  if (full !== base && !full.startsWith(base + path.sep)) {
+    throw new Error('잘못된 경로입니다.');
+  }
+  return fs.readFileSync(full, 'utf-8');
+}
+
+/**
+ * 절대 file_path 를 워크스페이스 기준 상대경로로 변환 (없으면 null).
+ * 에이전트 이벤트의 file_path 는 절대경로(/tmp/cpt-agent/<userId>/foo.js)로 온다.
+ */
+function toWorkspaceRelative(userId, absPath) {
+  if (!absPath) return null;
+  const base = ensureWorkspace(userId);
+  const full = path.resolve(String(absPath));
+  if (full === base) return '';
+  if (full.startsWith(base + path.sep)) return full.slice(base.length + 1);
+  return null;
+}
+
+/**
  * tool_result 의 content(문자열 | 블록배열)를 문자열로 정규화
  */
 function normalizeContent(content) {
@@ -130,7 +157,10 @@ async function runAgentQuery({
           } else if (b.type === 'thinking') {
             onEvent({ type: 'thinking', text: b.thinking });
           } else if (b.type === 'tool_use') {
-            onEvent({ type: 'tool_use', toolUseId: b.id, tool: b.name, input: b.input });
+            // 파일 도구면 워크스페이스 상대경로를 함께 실어 앱이 에디터 동기화에 사용
+            const fp = b.input && b.input.file_path;
+            const relPath = fp ? toWorkspaceRelative(userId, fp) : null;
+            onEvent({ type: 'tool_use', toolUseId: b.id, tool: b.name, input: b.input, relPath });
           }
         }
         break;
@@ -173,4 +203,11 @@ async function runAgentQuery({
   return workdir;
 }
 
-module.exports = { runAgentQuery, ensureWorkspace, normalizeContent, DEFAULT_MODEL };
+module.exports = {
+  runAgentQuery,
+  ensureWorkspace,
+  readWorkspaceFile,
+  toWorkspaceRelative,
+  normalizeContent,
+  DEFAULT_MODEL,
+};

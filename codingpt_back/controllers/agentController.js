@@ -74,13 +74,34 @@ const runAgent = async (req, res) => {
 };
 
 /**
- * 수정 승인 응답 — M2 에서 활성화 (M1 은 자동 승인이라 미사용)
+ * 워크스페이스 파일 읽기 — 에이전트 편집 후 에디터 동기화용
+ * GET /api/agent/file?path=<relative>
+ */
+const getFile = (req, res) => {
+  const relPath = req.query.path;
+  if (!relPath || typeof relPath !== 'string') {
+    return res.status(400).json({ success: false, message: 'path 가 필요합니다.' });
+  }
+  try {
+    const content = agentService.readWorkspaceFile(req.user && req.user.id, relPath);
+    return res.json({ success: true, path: relPath, content });
+  } catch (error) {
+    const notFound = error.code === 'ENOENT';
+    return res.status(notFound ? 404 : 400).json({
+      success: false,
+      message: notFound ? '파일을 찾을 수 없습니다.' : error.message || '파일을 읽을 수 없습니다.',
+    });
+  }
+};
+
+/**
+ * 수정 승인 응답 — M2.5 에서 활성화 (현재는 자동 승인이라 미사용)
  */
 const permission = (req, res) => {
   return res.status(501).json({
     success: false,
-    message: '수정 승인 기능은 M2(IDE 연결)에서 활성화됩니다.',
+    message: '수정 승인 기능은 추후 활성화됩니다.',
   });
 };
 
-module.exports = { runAgent, permission };
+module.exports = { runAgent, getFile, permission };
