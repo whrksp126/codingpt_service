@@ -116,4 +116,46 @@ async function getAsset(projectId, relPath) {
   return { buffer, contentType: res.contentType || 'application/octet-stream' };
 }
 
-module.exports = { getProject, getAsset };
+/**
+ * IDE 프로젝트 저장 — 현재 텍스트 파일들을 objectstore 에 영속화.
+ * 에이전트/사용자 편집을 codingpt/execute/ide/<projectId>/ 로 되써 컨테이너 재시작에도 보존.
+ * (추가/덮어쓰기 방식 — 파일 삭제 동기화는 v1 범위 밖. 바이너리 에셋은 앱이 안 보냄.)
+ * @param {string} projectId
+ * @param {Array<{path:string, content:string}>} files
+ * @returns {Promise<{ projectId, saved: number, failed: Array<{path,message}> }>}
+ */
+async function saveProject(projectId, files) {
+  if (!projectId || !PROJECT_ID_RE.test(projectId)) {
+    const e = new Error('유효하지 않은 projectId 입니다.');
+    e.statusCode = 400;
+    throw e;
+  }
+  if (!Array.isArray(files) || files.length === 0) {
+    const e = new Error('저장할 파일이 없습니다.');
+    e.statusCode = 400;
+    throw e;
+  }
+
+  let saved = 0;
+  const failed = [];
+  for (const f of files) {
+    const rel = String((f && f.path) || '').replace(/^\/+/, '');
+    // 경로 탐색 방어 + 텍스트 확장자만(바이너리 에셋은 별도 흐름)
+    if (!rel || rel.includes('..') || rel.endsWith('/')) {
+      failed.push({ path: rel, message: '잘못된 경로' });
+      continue;
+    }
+    if (!TEXT_EXTS.has(extOf(rel))) {
+      failed.push({ path: rel, message: '텍스트 파일만 저장됩니다.' });
+      continue;
+    }
+    // s3Service 가 codingpt/execute/ prefix 를 붙임
+    const res = await s3Service.saveFile(`ide/${projectId}/${rel}`, f.content == null ? '' : String(f.content));
+    if (res.success) saved++;
+    else failed.push({ path: rel, message: res.message || '저장 실패' });
+  }
+
+  return { projectId, saved, failed };
+}
+
+module.exports = { getProject, getAsset, saveProject };

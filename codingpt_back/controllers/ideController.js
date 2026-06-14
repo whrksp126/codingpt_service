@@ -33,4 +33,19 @@ const getIdeAsset = async (req, res) => {
   }
 };
 
-module.exports = { getIdeProject, getIdeAsset };
+/**
+ * 모바일 IDE 프로젝트 저장 — 편집(에이전트/사용자) 영속화
+ * POST /api/lesson/ide/:projectId/save  body: { files: [{path, content}] }
+ */
+const saveIdeProject = async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { files } = req.body || {};
+    const result = await ideProjectService.saveProject(projectId, files);
+    successResponse(res, result);
+  } catch (error) {
+    errorResponse(res, error, error.statusCode || 500);
+  }
+};
+
+module.exports = { getIdeProject, getIdeAsset, saveIdeProject };

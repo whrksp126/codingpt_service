@@ -21,6 +21,7 @@ router.get('/runtime/:id', authMiddleware, getLessonRuntime);
 // === RN 학습자용: 모바일 IDE 프로젝트 소스 (auth required, must come before /:id) ===
 router.get('/ide/:projectId', authMiddleware, ideController.getIdeProject);
 router.get('/ide/:projectId/asset', authMiddleware, ideController.getIdeAsset);
+router.post('/ide/:projectId/save', authMiddleware, ideController.saveIdeProject);
 
 // === Editor: 단일 사용자 운영 — 인증 없음. ===
 // === Editor: characters catalog (must come before /:id) ===
