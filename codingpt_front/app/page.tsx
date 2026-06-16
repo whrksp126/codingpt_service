@@ -1,5 +1,4 @@
 import { formatKRW } from '@/lib/api';
-import CheckoutButtons from '@/components/CheckoutButtons';
 
 // 랜딩 — 정적(Static) 렌더. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
 // 가격은 정적 상수로 노출 — PG 크롤러가 JS/백엔드 없이도 상품·가격을 항상 읽도록(빌드 시 back 미도달 무관).
@@ -146,7 +145,9 @@ export default function Home() {
                 {PLAN_DESC[p.code] || '플랜 한도 안에서 자유롭게 사용해요.'}
               </p>
               {p.price_krw > 0 ? (
-                <div style={{ marginTop: 16 }}><CheckoutButtons code={p.code} label="구독하기" /></div>
+                <div style={{ marginTop: 16 }}>
+                  <a className="btn" href={`/login?next=${encodeURIComponent('/me?subscribe=' + p.code)}`} style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>구독하기</a>
+                </div>
               ) : null}
             </div>
           ))}

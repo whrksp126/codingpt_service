@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { captureHandoff, getToken } from '@/lib/auth';
 import { getWorkspace, listSessions, createSession } from '@/lib/workspaces';
@@ -9,9 +10,12 @@ import Chat from '@/components/agent/Chat';
 import Preview from '@/components/agent/Preview';
 import PermissionModal from '@/components/agent/PermissionModal';
 import FileTree from '@/components/agent/FileTree';
-import Editor from '@/components/agent/Editor';
-import Terminal from '@/components/agent/Terminal';
 import type { WorkspaceMeta, SessionMeta } from '@/lib/agentTypes';
+
+// Monaco/xterm 은 window 의존 + React Context 라 SSR/SSG 시 번들에 들어가면 프리렌더가 깨진다(useContext null).
+// 클라이언트 전용(ssr:false)으로 분리 — 다른 정적 페이지(랜딩/약관) 빌드에 영향 없게.
+const Editor = dynamic(() => import('@/components/agent/Editor'), { ssr: false });
+const Terminal = dynamic(() => import('@/components/agent/Terminal'), { ssr: false });
 
 // 바이브코딩 코딩 화면 — 채팅(좌) + IDE/프리뷰/터미널(우). 세션 전환/생성.
 

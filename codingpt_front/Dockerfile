@@ -6,6 +6,7 @@ RUN npm install
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # 빌드시 클라이언트에 인라인되는 NEXT_PUBLIC_* 는 build arg 로 주입
