@@ -38,9 +38,10 @@ export default function AppHome() {
   };
 
   if (!authed) return null;
+  const projects = (workspaces || []).filter((w) => w.kind !== 'chat');
 
   return (
-    <div style={{ maxWidth: 880, margin: '0 auto', padding: '32px 0 64px' }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px 64px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>내 프로젝트</h1>
@@ -54,14 +55,14 @@ export default function AppHome() {
       <div style={{ marginTop: 28 }}>
         {workspaces === null ? (
           <div className="muted" style={{ fontSize: 14, padding: '40px 0', textAlign: 'center' }}>불러오는 중…</div>
-        ) : workspaces.length === 0 ? (
+        ) : projects.length === 0 ? (
           <div style={{ border: '1px dashed var(--border)', borderRadius: 'var(--radius-lg)', padding: '48px 24px', textAlign: 'center', color: 'var(--dim)' }}>
             <div style={{ fontSize: 15, color: 'var(--text2)' }}>아직 프로젝트가 없어요.</div>
             <div style={{ fontSize: 13.5, marginTop: 6 }}>‘새 프로젝트’를 눌러 첫 앱을 만들어 보세요.</div>
           </div>
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 14 }}>
-            {workspaces.map((w) => (
+            {projects.map((w) => (
               <button
                 key={w.id}
                 onClick={() => router.push(`/workspace/${w.id}`)}

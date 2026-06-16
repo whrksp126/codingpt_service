@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import Footer from '@/components/Footer';
-import Nav from '@/components/Nav';
 
+// 루트 레이아웃 — html/body + 전역 스타일/메타데이터만. 크롬(Nav/Footer/사이드바)은
+// 라우트 그룹별 레이아웃에서 부여: (public)=공개 Nav+Footer, (shell)=인증 앱셸 사이드바.
 export const metadata: Metadata = {
   metadataBase: new URL('https://codingpt.ghmate.com'),
   title: 'CodingPT — 만들면서 배우는 코딩, 모바일 바이브코딩',
@@ -13,15 +13,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body>
-        <header style={{ borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'rgba(10,13,20,0.85)', backdropFilter: 'blur(8px)', zIndex: 10 }}>
-          <div className="container">
-            <Nav />
-          </div>
-        </header>
-        <main className="container" style={{ paddingTop: 24, minHeight: '60vh' }}>{children}</main>
-        <Footer />
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
