@@ -1,14 +1,10 @@
-import { headers } from 'next/headers';
-import { getPlansSSR, formatKRW } from '@/lib/api';
+import { formatKRW } from '@/lib/api';
 import CheckoutButtons from '@/components/CheckoutButtons';
 
-// 랜딩 — SSR. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
-// headers() 접근 = 동적 함수 → 빌드 시 정적 프리렌더 원천 차단(back 미도달로 notFound 생성되던 문제 해결).
-// 런타임에 back 도달 가능하므로 실 플랜을 SSR HTML에 노출(PG 크롤러가 가격 확인).
-export const dynamic = 'force-dynamic';
-
-// 가격 정적 폴백 — 백엔드 일시 불가 시에도 PG 크롤러가 상품/가격을 보도록(DB 시드와 동일).
-const PLANS_FALLBACK = [
+// 랜딩 — 정적(Static) 렌더. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
+// 가격은 정적 상수로 노출 — PG 크롤러가 JS/백엔드 없이도 상품·가격을 항상 읽도록(빌드 시 back 미도달 무관).
+// DB 시드(subscription_plan)와 동일하게 유지. 가격 변경 시 이 상수도 함께 갱신.
+const PLANS = [
   { code: 'free', name: 'Free', price_krw: 0 },
   { code: 'pro', name: 'Pro', price_krw: 20000 },
   { code: 'max', name: 'Max', price_krw: 100000 },
@@ -36,10 +32,8 @@ const PLAN_DESC: Record<string, string> = {
 
 const GAP = 104; // 섹션 간 세로 여백
 
-export default async function Home() {
-  headers(); // 동적 렌더 강제(프리렌더 차단)
-  const live = await getPlansSSR();
-  const plans = live && live.length ? live : PLANS_FALLBACK;
+export default function Home() {
+  const plans = PLANS;
 
   return (
     <div>
