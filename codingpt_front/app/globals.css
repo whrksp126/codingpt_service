@@ -95,6 +95,7 @@ th { color: var(--dim); font-weight: 600; }
   /* 좁은 화면: 채팅/코드/미리보기/터미널 한 패널씩 — 하단 탭바로 전환 */
   .cpt-pane-chat, .cpt-pane-right { display: none !important; }
   .cpt-pane-chat.cpt-active, .cpt-pane-right.cpt-active { display: flex !important; border-right: none !important; }
+  .cpt-desktop-tabs { display: none !important; }
   .cpt-mobile-bar {
     display: flex !important; gap: 4px; justify-content: space-around;
     padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0;

@@ -106,12 +106,11 @@ function CodingView({
         <button onClick={() => router.push('/app')} style={ghostBtn} aria-label="목록">←</button>
         <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>{ws?.name || '프로젝트'}</div>
         <div style={{ flex: 1 }} />
-        {/* 우측 뷰 탭 */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button onClick={() => { setMobileChat(true); }} className="cpt-tab-chat" style={{ ...tabBtn(false), display: 'none' }}>채팅</button>
-          <button onClick={() => pickTab('code')} style={tabBtn(!mobileChat && rightView === 'code')}>코드</button>
-          <button onClick={() => pickTab('preview')} style={tabBtn(!mobileChat && rightView === 'preview')}>미리보기</button>
-          <button onClick={() => pickTab('terminal')} style={tabBtn(!mobileChat && rightView === 'terminal')}>터미널</button>
+        {/* 우측 뷰 탭(데스크톱 전용) */}
+        <div className="cpt-desktop-tabs" style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => pickTab('code')} style={tabBtn(rightView === 'code')}>코드</button>
+          <button onClick={() => pickTab('preview')} style={tabBtn(rightView === 'preview')}>미리보기</button>
+          <button onClick={() => pickTab('terminal')} style={tabBtn(rightView === 'terminal')}>터미널</button>
         </div>
         <select value={sessionId} onChange={(e) => onPickSession(e.target.value)} style={selectStyle}>
           {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || '새 채팅'}</option>)}
