@@ -2,28 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import { captureHandoff, getToken, clearToken } from '@/lib/auth';
-import { clientFetch, formatUnits } from '@/lib/api';
+import { clientFetch, formatUnits, formatKRW } from '@/lib/api';
+import CheckoutButtons from '@/components/CheckoutButtons';
 
 interface UsageRow { id: number; metered_units: number; cost_usd: string; source: string; created_at: string }
+interface PlanRow { code: string; name: string; price_krw: number }
 
 // 마이페이지 — 구독 상태 + 사용량 + 사용 내역(로그인 후 진입).
 export default function MyPage() {
   const [status, setStatus] = useState<any>(null);
   const [sub, setSub] = useState<any>(null);
   const [rows, setRows] = useState<UsageRow[]>([]);
+  const [plans, setPlans] = useState<PlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
     const token = getToken();
     if (!token) { window.location.href = '/login?next=/me'; return; }
-    const [st, sb, hist] = await Promise.all([
+    const [st, sb, hist, pl] = await Promise.all([
       clientFetch('/api/usage/status', { token }),
       clientFetch('/api/subscription/me', { token }),
       clientFetch('/api/usage/history?limit=30', { token }),
+      clientFetch('/api/subscription/plans', {}),
     ]);
     setStatus(st.data); setSub(sb.data);
     setRows(((hist.data as any)?.data ?? []) as UsageRow[]);
+    setPlans(((pl.data as any) ?? []) as PlanRow[]);
     setLoading(false);
   };
 
@@ -71,8 +76,18 @@ export default function MyPage() {
           </>
         ) : (
           <div style={{ marginTop: 8 }}>
-            <p className="muted" style={{ fontSize: 13 }}>활성 구독이 없습니다.</p>
-            <a href="/#plans" className="btn" style={{ marginTop: 8, padding: '10px 16px', fontSize: 14 }}>구독 시작</a>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>활성 구독이 없습니다. 플랜을 선택해 구독하세요.</p>
+            <div className="grid" style={{ gap: 10 }}>
+              {plans.filter((p) => p.price_krw > 0).map((p) => (
+                <div key={p.code} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, border: '1px solid var(--border)', borderRadius: 12, padding: '12px 14px' }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{p.name}</div>
+                    <div className="dim" style={{ fontSize: 13 }}>{formatKRW(p.price_krw)} / 월</div>
+                  </div>
+                  <div style={{ minWidth: 130 }}><CheckoutButtons code={p.code} label="구독하기" /></div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {msg ? <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>{msg}</p> : null}
