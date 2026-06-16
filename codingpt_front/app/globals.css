@@ -86,3 +86,14 @@ th { color: var(--dim); font-weight: 600; }
 .feat .ic { width: 38px; height: 38px; border-radius: 10px; background: var(--accent-tint); display: flex; align-items: center; justify-content: center; font-size: 19px; margin-bottom: 12px; }
 .codeblock { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text2); overflow-x: auto; line-height: 1.7; }
 .tok-key { color: #60A5FA; } .tok-str { color: #FB923C; } .tok-com { color: #6B8A7A; }
+
+/* ── 웹 바이브코딩(/app) ── */
+@keyframes cptPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+.cpt-dot { animation: cptPulse 1s ease-in-out infinite; }
+.cpt-mobile-tabs { display: none; }
+@media (max-width: 860px) {
+  /* 좁은 화면: 채팅/미리보기 탭 토글 */
+  .cpt-mobile-tabs { display: flex !important; }
+  .cpt-pane-chat, .cpt-pane-preview { display: none !important; }
+  .cpt-pane-chat.cpt-active, .cpt-pane-preview.cpt-active { display: flex !important; border-right: none !important; }
+}
