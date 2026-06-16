@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import MonacoEditor from '@monaco-editor/react';
 import { getAgentFile, writeAgentFile } from '@/lib/agent';
 
-// 코드 에디터(Monaco) — 워크스페이스 파일 읽기/저장. Ctrl/Cmd+S 또는 저장 버튼.
+// 코드 에디터(Monaco) — 앱 MobileIDE 에디터처럼 배경 #0A0D14, 자동 저장(디바운스).
+// 탭/breadcrumb 은 코딩뷰가 렌더(여기선 에디터 본문만).
 
 const EXT_LANG: Record<string, string> = {
   ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
@@ -16,62 +17,63 @@ const langOf = (p: string) => EXT_LANG[(p.split('.').pop() || '').toLowerCase()]
 export default function Editor({ wsId, path }: { wsId: string; path: string | null }) {
   const [value, setValue] = useState('');
   const [loading, setLoading] = useState(false);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const loadedPathRef = useRef<string | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const valueRef = useRef('');
 
   useEffect(() => {
-    if (!path) { setValue(''); loadedPathRef.current = null; return; }
-    setLoading(true); setDirty(false);
+    if (!path) { setValue(''); return; }
+    setLoading(true);
     getAgentFile(path, wsId)
-      .then((r) => { setValue(r.content ?? ''); loadedPathRef.current = path; })
+      .then((r) => { setValue(r.content ?? ''); valueRef.current = r.content ?? ''; })
       .catch(() => setValue('// 파일을 불러올 수 없습니다.'))
       .finally(() => setLoading(false));
   }, [wsId, path]);
 
   const save = useCallback(async () => {
-    if (!path || saving) return;
-    setSaving(true);
-    try { await writeAgentFile(path, value, wsId); setDirty(false); }
-    catch (_) { /* noop */ }
-    finally { setSaving(false); }
-  }, [path, value, wsId, saving]);
+    if (!path) return;
+    try { await writeAgentFile(path, valueRef.current, wsId); } catch (_) { /* noop */ }
+  }, [path, wsId]);
+
+  const onChange = (v?: string) => {
+    const val = v ?? '';
+    setValue(val); valueRef.current = val;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { void save(); }, 1500); // 앱과 동일 자동 저장
+  };
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') { e.preventDefault(); void save(); }
     };
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [save]);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
 
   if (!path) {
-    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--dim)', fontSize: 13.5 }}>왼쪽에서 파일을 선택하세요.</div>;
+    return <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: 13.5, background: '#0A0D14' }}>왼쪽 탐색기에서 파일을 여세요.</div>;
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12.5, color: 'var(--text2)' }}>{path}{dirty ? ' •' : ''}</span>
-        <div style={{ flex: 1 }} />
-        <button onClick={save} disabled={!dirty || saving} style={{ padding: '5px 12px', borderRadius: 8, border: 'none', background: dirty ? 'var(--cta)' : 'var(--surface)', color: dirty ? 'var(--on-accent)' : 'var(--dim)', fontSize: 12.5, fontWeight: 600, cursor: dirty ? 'pointer' : 'default' }}>
-          {saving ? '저장 중…' : '저장'}
-        </button>
-      </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {loading ? (
-          <div style={{ padding: 16, color: 'var(--dim)', fontSize: 13 }}>불러오는 중…</div>
-        ) : (
-          <MonacoEditor
-            height="100%"
-            theme="vs-dark"
-            language={langOf(path)}
-            value={value}
-            onChange={(v) => { setValue(v ?? ''); setDirty(true); }}
-            options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2 }}
-          />
-        )}
-      </div>
+    <div style={{ height: '100%', minHeight: 0, background: '#0A0D14' }}>
+      {loading ? (
+        <div style={{ padding: 16, color: '#475569', fontSize: 13 }}>불러오는 중…</div>
+      ) : (
+        <MonacoEditor
+          height="100%"
+          theme="codingpt-dark"
+          language={langOf(path)}
+          value={value}
+          beforeMount={(monaco) => {
+            monaco.editor.defineTheme('codingpt-dark', {
+              base: 'vs-dark', inherit: true, rules: [],
+              colors: { 'editor.background': '#0A0D14', 'editorGutter.background': '#0A0D14', 'editor.lineHighlightBackground': '#11151F', 'editorLineNumber.foreground': '#475569' },
+            });
+          }}
+          onChange={onChange}
+          options={{ fontSize: 13, minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2, padding: { top: 8 } }}
+        />
+      )}
     </div>
   );
 }

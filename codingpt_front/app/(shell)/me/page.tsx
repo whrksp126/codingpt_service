@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, getToken } from '@/lib/auth';
+import { captureHandoff, getToken, clearToken } from '@/lib/auth';
 import { clientFetch, formatUnits, formatKRW } from '@/lib/api';
 import CheckoutButtons from '@/components/CheckoutButtons';
 
@@ -49,7 +49,10 @@ export default function MyPage() {
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '32px 24px 64px' }}>
-      <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>내정보</h1>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>내정보</h1>
+        <button className="btn secondary" onClick={() => { clearToken(); window.location.href = '/'; }} style={{ padding: '8px 14px', fontSize: 13 }}>로그아웃</button>
+      </div>
 
       {/* 구독 */}
       <section style={sectionStyle}>

@@ -7,7 +7,16 @@ const KEY = 'cpt_token';
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return window.localStorage.getItem(KEY);
+  let t = window.localStorage.getItem(KEY);
+  // 핸드오프(?handoff=) 지연 캡처 — 자식 페이지의 인증 가드가 부모 레이아웃의 captureHandoff
+  // 보다 먼저 실행돼 /login 으로 튕기는 문제 방지(딥링크 진입에서도 토큰 즉시 인식).
+  if (!t) {
+    try {
+      const h = new URL(window.location.href).searchParams.get('handoff');
+      if (h) { setToken(h); t = h; }
+    } catch (_) { /* noop */ }
+  }
+  return t;
 }
 
 export function setToken(token: string) {

@@ -10,15 +10,17 @@ import Chat from '@/components/agent/Chat';
 import Preview from '@/components/agent/Preview';
 import PermissionModal from '@/components/agent/PermissionModal';
 import FileTree from '@/components/agent/FileTree';
+import { FileTypeIcon } from '@/components/ide/FileTypeIcon';
+import { ChatPanelIcon, TerminalIcon, BrowserIcon } from '@/components/ide/ideIcons';
 import type { WorkspaceMeta, SessionMeta } from '@/lib/agentTypes';
 
-// Monaco/xterm 은 window 의존 + React Context 라 SSR/SSG 시 프리렌더가 깨진다 — 클라 전용(ssr:false).
 const Editor = dynamic(() => import('@/components/agent/Editor'), { ssr: false });
 const Terminal = dynamic(() => import('@/components/agent/Terminal'), { ssr: false });
 
-// 바이브코딩 코딩 화면 — 앱셸 콘텐츠 영역을 채운다(사이드바 유지).
-// 데스크톱: [채팅] | 탐색기(고정) · 에디터(고정) · [미리보기|터미널 토글].
-// 좁은 화면: 채팅/파일/코드/미리보기/터미널 단일 패널 + 하단 탭.
+// 바이브코딩 코딩 화면 — 앱 MobileIDE 디자인을 그대로 따른다(색/아이콘/탭/breadcrumb 동일).
+// [채팅] | 탐색기(고정) · 에디터(탭+breadcrumb, 고정) · 터미널(하단 토글) + 브라우저(오버레이 토글).
+
+const baseOf = (p: string) => (p.includes('/') ? p.slice(p.lastIndexOf('/') + 1) : p);
 
 export default function WorkspacePage() {
   const router = useRouter();
@@ -34,13 +36,8 @@ export default function WorkspacePage() {
     const list = await listSessions(wsId);
     const wanted = search.get('s');
     let active = (wanted && list.find((s) => s.id === wanted)?.id) || list[0]?.id;
-    if (!active) {
-      const created = await createSession(wsId);
-      active = created.id;
-      setSessions([created]);
-    } else {
-      setSessions(list);
-    }
+    if (!active) { const c = await createSession(wsId); active = c.id; setSessions([c]); }
+    else setSessions(list);
     setSessionId(active);
   }, [wsId, search]);
 
@@ -51,28 +48,32 @@ export default function WorkspacePage() {
   }, [wsId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!sessionId) {
-    return <div style={{ padding: 48, textAlign: 'center', color: 'var(--dim)' }}>불러오는 중…</div>;
+    return <div style={{ padding: 48, textAlign: 'center', color: '#475569', background: '#0A0D14', height: '100%' }}>불러오는 중…</div>;
   }
 
   return (
     <CodingView
-      wsId={wsId}
-      ws={ws}
-      sessionId={sessionId}
-      sessions={sessions}
+      wsId={wsId} ws={ws} sessionId={sessionId} sessions={sessions}
       onNewChat={async () => {
-        const created = await createSession(wsId);
-        setSessions((p) => [created, ...p]);
-        setSessionId(created.id);
-        router.replace(`/workspace/${wsId}?s=${created.id}`);
+        const c = await createSession(wsId);
+        setSessions((p) => [c, ...p]); setSessionId(c.id);
+        router.replace(`/workspace/${wsId}?s=${c.id}`);
       }}
       onPickSession={(id) => { setSessionId(id); router.replace(`/workspace/${wsId}?s=${id}`); }}
     />
   );
 }
 
-type RightPanel = 'preview' | 'terminal' | null;
 type Pane = 'chat' | 'files' | 'editor' | 'preview' | 'terminal';
+
+// 상단바 토글 버튼 — 앱 TopBarButton(padding 6, radius 6, active bg #2A2F3A)
+function TopBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} style={{ padding: 6, borderRadius: 6, border: 'none', cursor: 'pointer', background: active ? '#2A2F3A' : 'transparent', display: 'flex' }}>
+      {children}
+    </button>
+  );
+}
 
 function CodingView({
   wsId, ws, sessionId, sessions, onNewChat, onPickSession,
@@ -82,12 +83,15 @@ function CodingView({
 }) {
   const router = useRouter();
   const limitHit = useRef(false);
+  const projectName = ws?.name || '작업영역';
   const [narrow, setNarrow] = useState(false);
-  const [chatOpen, setChatOpen] = useState(true);                       // 데스크톱: 채팅 열림
-  const [rightPanel, setRightPanel] = useState<RightPanel>('preview');  // 데스크톱: 우측 토글(미리보기/터미널)
-  const [pane, setPane] = useState<Pane>('chat');                       // 좁은 화면: 활성 단일 패널
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(true);
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [activePath, setActivePath] = useState<string | null>(null);
   const [reloadSignal, setReloadSignal] = useState(0);
+  const [pane, setPane] = useState<Pane>('chat');
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 1023px)');
@@ -105,57 +109,98 @@ function CodingView({
       router.push('/me');
     },
   });
-
-  // 턴 종료 → 프리뷰/파일트리 새로고침
   useEffect(() => agent.subscribe((evt) => { if (evt.type === 'done') setReloadSignal((n) => n + 1); }), [agent]);
 
-  const pickFile = (p: string | null) => { setSelectedFile(p); if (narrow && p) setPane('editor'); };
-  // 데스크톱 우측 패널 토글(같은 걸 누르면 닫힘)
-  const toggleRight = (v: 'preview' | 'terminal') => setRightPanel((cur) => (cur === v ? null : v));
+  const openFile = (path: string) => {
+    setOpenTabs((t) => (t.includes(path) ? t : [...t, path]));
+    setActivePath(path);
+    if (narrow) setPane('editor');
+  };
+  const closeTab = (path: string) => {
+    setOpenTabs((t) => {
+      const idx = t.indexOf(path);
+      const next = t.filter((p) => p !== path);
+      if (activePath === path) setActivePath(next[idx] || next[idx - 1] || null);
+      return next;
+    });
+  };
 
-  const chatPane = (
-    <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} />
+  // ── 패널 ──
+  const chatPane = <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} />;
+  const filesPane = <FileTree wsId={wsId} projectName={projectName} selected={activePath} onSelect={openFile} reloadSignal={reloadSignal} />;
+  const tabBar = openTabs.length > 0 ? (
+    <div style={{ display: 'flex', overflowX: 'auto', borderBottom: '1px solid #1C2230', background: '#0A0D14', flexShrink: 0 }}>
+      {openTabs.map((p) => {
+        const active = p === activePath;
+        return (
+          <div
+            key={p}
+            onClick={() => setActivePath(p)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, borderRight: '1px solid #1C2230', background: active ? '#11151F' : 'transparent', borderTop: `2px solid ${active ? '#3B82F6' : 'transparent'}`, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          >
+            <FileTypeIcon name={p} />
+            <span style={{ color: active ? '#fff' : '#94A3B8', fontSize: 13 }}>{baseOf(p)}</span>
+            <button onClick={(e) => { e.stopPropagation(); closeTab(p); }} aria-label="닫기" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 0, marginLeft: 2 }}>
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke={active ? '#fff' : '#64748B'} strokeWidth={2} strokeLinecap="round" /></svg>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  ) : null;
+  const breadcrumb = activePath ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 8, flexShrink: 0 }}>
+      <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 700 }}>{projectName}</span>
+      <span style={{ color: '#475569', fontSize: 12 }}>›</span>
+      <FileTypeIcon name={activePath} size={14} />
+      <span style={{ color: '#94A3B8', fontSize: 13 }}>{baseOf(activePath)}</span>
+    </div>
+  ) : null;
+  const editorColumn = (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, background: '#0A0D14' }}>
+      {tabBar}
+      {breadcrumb}
+      <div style={{ flex: 1, minHeight: 0 }}><Editor wsId={wsId} path={activePath} /></div>
+      {!narrow && showTerminal ? (
+        <div style={{ height: 280, flexShrink: 0 }}><Terminal wsId={wsId} projectName={projectName} onClose={() => setShowTerminal(false)} /></div>
+      ) : null}
+    </div>
   );
-  const filesPane = <FileTree wsId={wsId} selected={selectedFile} onSelect={pickFile} reloadSignal={reloadSignal} />;
-  const editorPane = <Editor wsId={wsId} path={selectedFile} />;
-  const previewPane = <Preview wsId={wsId} reloadSignal={reloadSignal} />;
-  const terminalPane = <Terminal wsId={wsId} />;
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--base)', minHeight: 0 }}>
-      {/* 헤더 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <button onClick={() => router.push('/workspace')} style={ghostBtn} aria-label="목록">←</button>
-        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 180 }}>{ws?.name || '프로젝트'}</div>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: '#0A0D14', minHeight: 0 }}>
+      {/* 상단바 (앱 MobileIDE 헤더) */}
+      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 14, paddingRight: 14, height: 48, borderBottom: '1px solid #1C2230', flexShrink: 0 }}>
+        <button onClick={() => router.push('/workspace')} aria-label="목록" style={{ marginRight: 12, background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+          <svg width={22} height={22} viewBox="0 0 24 24" fill="none"><path d="M15 5l-7 7 7 7" stroke="#fff" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </button>
+        <span style={{ color: '#fff', fontSize: 17, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 220 }}>{projectName}</span>
         <div style={{ flex: 1 }} />
-        {!narrow ? (
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={() => setChatOpen((v) => !v)} style={tabBtn(chatOpen)}>채팅</button>
-            <button onClick={() => toggleRight('preview')} style={tabBtn(rightPanel === 'preview')}>미리보기</button>
-            <button onClick={() => toggleRight('terminal')} style={tabBtn(rightPanel === 'terminal')}>터미널</button>
-          </div>
-        ) : null}
         <select value={sessionId} onChange={(e) => onPickSession(e.target.value)} style={selectStyle}>
           {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || '새 채팅'}</option>)}
         </select>
-        <button onClick={onNewChat} style={ghostBtn}>+ 채팅</button>
+        <button onClick={onNewChat} style={newChatBtn}>+ 채팅</button>
+        <div style={{ width: 1, height: 22, background: '#1C2230', marginLeft: 8, marginRight: 8 }} />
+        <div style={{ display: 'flex', gap: 4 }}>
+          <TopBtn active={chatOpen} onClick={() => setChatOpen((v) => !v)}><ChatPanelIcon size={20} color="#fff" filled={chatOpen} /></TopBtn>
+          <TopBtn active={showTerminal} onClick={() => setShowTerminal((v) => !v)}><TerminalIcon size={20} color="#fff" filled={showTerminal} /></TopBtn>
+          <TopBtn active={showBrowser} onClick={() => setShowBrowser((v) => !v)}><BrowserIcon size={20} color="#fff" filled={showBrowser} /></TopBtn>
+        </div>
       </div>
 
       {/* 본문 */}
       {!narrow ? (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           {chatOpen ? (
-            <div style={{ width: 360, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              {chatPane}
-            </div>
+            <div style={{ width: 380, flexShrink: 0, borderRight: '1px solid #1C2230', display: 'flex', flexDirection: 'column', minHeight: 0, background: '#0A0D14' }}>{chatPane}</div>
           ) : null}
-          {/* IDE: 탐색기(고정) · 에디터(고정) · 우측 토글 패널 */}
-          <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0 }}>
-            <div style={{ width: 220, flexShrink: 0, borderRight: '1px solid var(--border)', minHeight: 0 }}>{filesPane}</div>
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>{editorPane}</div>
-            {rightPanel ? (
-              <div style={{ flex: 1, minWidth: 0, minHeight: 0, borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
-                {rightPanel === 'preview' ? previewPane : terminalPane}
+          {/* IDE */}
+          <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0, position: 'relative' }}>
+            <div style={{ width: 220, flexShrink: 0, minHeight: 0 }}>{filesPane}</div>
+            {editorColumn}
+            {showBrowser ? (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 5 }}>
+                <Preview wsId={wsId} reloadSignal={reloadSignal} onClose={() => setShowBrowser(false)} />
               </div>
             ) : null}
           </div>
@@ -165,13 +210,13 @@ function CodingView({
           <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
             {pane === 'chat' ? <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>{chatPane}</div>
               : pane === 'files' ? filesPane
-              : pane === 'editor' ? editorPane
-              : pane === 'preview' ? previewPane
-              : terminalPane}
+              : pane === 'editor' ? <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>{tabBar}{breadcrumb}<div style={{ flex: 1, minHeight: 0 }}><Editor wsId={wsId} path={activePath} /></div></div>
+              : pane === 'preview' ? <Preview wsId={wsId} reloadSignal={reloadSignal} />
+              : <Terminal wsId={wsId} projectName={projectName} />}
           </div>
-          <div style={{ display: 'flex', gap: 4, justifyContent: 'space-around', padding: '8px 10px', borderTop: '1px solid var(--border)', background: 'var(--surface)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', gap: 4, justifyContent: 'space-around', paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, borderTop: '1px solid #1C2230', background: '#0E1320', flexShrink: 0 }}>
             {(['chat', 'files', 'editor', 'preview', 'terminal'] as Pane[]).map((p) => (
-              <button key={p} onClick={() => setPane(p)} style={tabBtn(pane === p)}>{PANE_LABEL[p]}</button>
+              <button key={p} onClick={() => setPane(p)} style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: pane === p ? '#2A2F3A' : 'transparent', color: pane === p ? '#fff' : '#94A3B8', fontSize: 12.5, cursor: 'pointer' }}>{PANE_LABEL[p]}</button>
             ))}
           </div>
         </div>
@@ -183,6 +228,5 @@ function CodingView({
 }
 
 const PANE_LABEL: Record<Pane, string> = { chat: '채팅', files: '파일', editor: '코드', preview: '미리보기', terminal: '터미널' };
-const ghostBtn: React.CSSProperties = { padding: '7px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' };
-const selectStyle: React.CSSProperties = { padding: '7px 9px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12.5, maxWidth: 150 };
-const tabBtn = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: active ? 'var(--accent-tint)' : 'transparent', color: active ? 'var(--accent)' : 'var(--text2)', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' });
+const selectStyle: React.CSSProperties = { padding: '6px 9px', borderRadius: 8, border: '1px solid #1C2230', background: '#11151F', color: '#94A3B8', fontSize: 12.5, maxWidth: 150 };
+const newChatBtn: React.CSSProperties = { marginLeft: 6, padding: '6px 11px', borderRadius: 8, border: '1px solid #1C2230', background: '#11151F', color: '#CBD5E1', fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' };

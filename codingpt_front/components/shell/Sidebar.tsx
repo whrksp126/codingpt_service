@@ -2,29 +2,30 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { clearToken, getToken } from '@/lib/auth';
+import { getToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 import { listWorkspaces, listSessions } from '@/lib/workspaces';
-import type { WorkspaceMeta, SessionMeta } from '@/lib/agentTypes';
+import type { SessionMeta } from '@/lib/agentTypes';
+import { ChatCircleDots, Folders, GraduationCap, Gear } from '@phosphor-icons/react';
 
-// 배우기(레슨) 탭은 학습 플레이어 포팅 전까지 숨김 — 추후 true 로 복원.
-const SHOW_LEARN = false;
+// 앱 src/components/AppDrawer.tsx 를 웹 고정 사이드바로 1:1 이식.
+// 네비(채팅/워크스페이스/배우기) + 최근 세션 + 푸터(프로필·설정 → 내정보). 내정보는 별도 nav 행이 아님.
+const SHOW_LEARN = false; // 배우기(레슨 플레이어) 포팅 전까지 숨김 — 추후 true.
 
 type RecentSession = SessionMeta & { wsId: string; wsName: string; wsKind: 'chat' | 'project' };
 
-// 좌측 고정 사이드바 = 앱 AppDrawer 상시화. 네비 + 최근 세션 + 프로필.
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const [recents, setRecents] = useState<RecentSession[]>([]);
-  const [profile, setProfile] = useState<{ name: string; email: string } | null>(null);
+  const [nickname, setNickname] = useState('코더');
 
   useEffect(() => {
     const token = getToken();
     if (!token) return;
     clientFetch<any>('/api/users/me', { token }).then((r) => {
       const u = r.data || {};
-      setProfile({ name: u.nickname || u.name || u.username || '내 계정', email: u.email || '' });
+      setNickname(u.nickname || u.name || u.username || '코더');
     }).catch(() => { /* noop */ });
 
     (async () => {
@@ -36,91 +37,107 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
             return ss.map((s) => ({ ...s, wsId: w.id, wsName: w.name, wsKind: w.kind }));
           } catch { return [] as RecentSession[]; }
         }));
-        const flat = lists.flat() as RecentSession[];
+        const flat = (lists.flat() as RecentSession[]).filter((s) => s.wsKind === 'project');
         flat.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-        setRecents(flat.slice(0, 12));
+        setRecents(flat.slice(0, 15));
       } catch { /* noop */ }
     })();
   }, [pathname]);
 
   const go = (href: string) => { router.push(href); onNavigate?.(); };
-  const isActive = (href: string) => href === '/' ? pathname === '/' : pathname.startsWith(href);
+  const isActive = (href: string) => pathname.startsWith(href);
 
   const NAV = [
-    { href: '/chat', label: '채팅', icon: IconChat },
-    ...(SHOW_LEARN ? [{ href: '/learn', label: '배우기', icon: IconLearn }] : []),
-    { href: '/workspace', label: '워크스페이스', icon: IconWorkspace },
-    { href: '/me', label: '내정보', icon: IconUser },
+    { href: '/chat', label: '채팅', Icon: ChatCircleDots },
+    { href: '/workspace', label: '워크스페이스', Icon: Folders },
+    ...(SHOW_LEARN ? [{ href: '/learn', label: '배우기', Icon: GraduationCap }] : []),
   ];
 
-  const openRecent = (s: RecentSession) => {
-    if (s.wsKind === 'chat') go('/chat');
-    else go(`/workspace/${s.wsId}?s=${s.id}`);
-  };
-
-  const logout = () => { clearToken(); router.push('/'); };
+  const avatar = String(nickname).trim().charAt(0) || '코';
 
   return (
     <>
-      <div style={{ padding: '16px 16px 8px', flexShrink: 0 }}>
+      {/* 헤더: 로고 */}
+      <div style={{ padding: '12px 16px', flexShrink: 0 }}>
         <button onClick={() => go('/chat')} style={{ display: 'flex', alignItems: 'center', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }} aria-label="CodingPT">
           <img src="/logo.png" alt="CodingPT" height={22} style={{ display: 'block' }} />
         </button>
       </div>
 
-      <nav style={{ padding: '4px 10px', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
-        {NAV.map(({ href, label, icon: Icon }) => (
-          <button key={href} className={`shell-nav-item ${isActive(href) ? 'active' : ''}`} onClick={() => go(href)}>
-            <Icon active={isActive(href)} />
-            <span>{label}</span>
-          </button>
-        ))}
+      {/* 네비게이션 */}
+      <nav style={{ padding: '4px 8px', display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0 }}>
+        {NAV.map(({ href, label, Icon }) => {
+          const active = isActive(href);
+          return (
+            <button
+              key={href}
+              onClick={() => go(href)}
+              style={{
+                display: 'flex', alignItems: 'center', height: 46, paddingLeft: 12, paddingRight: 12,
+                borderRadius: 10, border: 'none', cursor: 'pointer',
+                background: active ? 'var(--accent-tint)' : 'transparent',
+              }}
+            >
+              <span style={{ width: 22, display: 'flex', alignItems: 'center', justifyContent: 'flex-start', marginRight: 14 }}>
+                <Icon size={19} weight={active ? 'fill' : 'regular'} color={active ? 'var(--accent)' : 'var(--text2)'} />
+              </span>
+              <span style={{ color: active ? 'var(--accent)' : 'var(--text)', fontSize: 14.5, fontWeight: 500 }}>{label}</span>
+            </button>
+          );
+        })}
       </nav>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 10px 8px' }}>
-        {recents.length > 0 ? (
-          <>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--dim)', letterSpacing: '0.02em', padding: '4px 12px 8px' }}>최근 세션</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-              {recents.map((s) => (
-                <button key={`${s.wsId}:${s.id}`} className="shell-session-item" onClick={() => openRecent(s)} title={s.title || '새 채팅'}>
-                  {s.title || s.preview || '새 채팅'}
-                </button>
-              ))}
-            </div>
-          </>
-        ) : null}
+      {/* 최근 세션 */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 8px 8px' }}>
+        <div style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11, letterSpacing: '0.4px', color: 'var(--dim)', marginTop: 18, marginBottom: 4, paddingLeft: 12 }}>최근 세션</div>
+        {recents.length === 0 ? (
+          <div style={{ color: 'var(--dim)', fontSize: 12.5, padding: '8px 12px' }}>최근 세션이 없어요</div>
+        ) : (
+          recents.map((s) => (
+            <button
+              key={`${s.wsId}:${s.id}`}
+              onClick={() => go(`/workspace/${s.wsId}?s=${s.id}`)}
+              title={s.title || '새 채팅'}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '9px 12px', borderRadius: 10, border: 'none', background: 'transparent', cursor: 'pointer' }}
+            >
+              <ChatCircleDots size={16} color="var(--dim)" style={{ flexShrink: 0 }} />
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', color: 'var(--text2)', fontSize: 13.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title || '새 채팅'}</span>
+                <span style={{ display: 'block', color: 'var(--dim)', fontSize: 11, marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.wsName}{s.updatedAt ? ` · ${relShort(s.updatedAt)}` : ''}</span>
+              </span>
+            </button>
+          ))
+        )}
       </div>
 
-      <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 999, background: 'var(--accent-tint)', color: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 14, flexShrink: 0 }}>
-          {(profile?.name || '?').slice(0, 1)}
-        </div>
-        <button onClick={() => go('/me')} style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile?.name || '내 계정'}</div>
-          {profile?.email ? <div style={{ fontSize: 11.5, color: 'var(--dim)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{profile.email}</div> : null}
+      {/* 푸터: 프로필 + 설정 → 내정보 */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '8px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+        <button onClick={() => go('/me')} style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, padding: '6px 8px', borderRadius: 10, border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <span style={{ width: 34, height: 34, borderRadius: 17, background: 'var(--accent-tint)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: 'var(--accent)', fontSize: 13, fontWeight: 700 }}>{avatar}</span>
+          </span>
+          <span style={{ flex: 1, minWidth: 0, color: 'var(--text)', fontSize: 14, fontWeight: 600, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{nickname}</span>
         </button>
-        <button onClick={logout} title="로그아웃" style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--dim)', padding: 4, flexShrink: 0 }} aria-label="로그아웃">
-          <IconLogout />
+        <button onClick={() => go('/me')} aria-label="설정" style={{ width: 40, height: 40, borderRadius: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', border: 'none', background: 'transparent', cursor: 'pointer' }}>
+          <Gear size={20} color="var(--text2)" />
         </button>
       </div>
     </>
   );
 }
 
-// ── 인라인 아이콘(앱 lucide 톤) ──
-function IconChat({ active }: { active?: boolean }) {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
-}
-function IconWorkspace({ active }: { active?: boolean }) {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>;
-}
-function IconUser({ active }: { active?: boolean }) {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>;
-}
-function IconLearn({ active }: { active?: boolean }) {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? 'var(--accent)' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z" /><path d="M6 12v5c3 3 9 3 12 0v-5" /></svg>;
-}
-function IconLogout() {
-  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>;
+// 짧은 상대시간 (앱 relShort 동일)
+function relShort(iso?: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso).getTime();
+  if (Number.isNaN(d)) return '';
+  const min = Math.floor((Date.now() - d) / 60000);
+  if (min < 1) return '방금';
+  if (min < 60) return `${min}분 전`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}시간 전`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return '어제';
+  if (day < 7) return `${day}일 전`;
+  return `${Math.floor(day / 7)}주 전`;
 }

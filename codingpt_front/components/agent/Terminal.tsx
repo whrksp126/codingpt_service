@@ -4,12 +4,17 @@ import { useEffect, useRef, useState } from 'react';
 import { streamExec } from '@/lib/agent';
 import type { ExecEvent } from '@/lib/agentTypes';
 
-// 샌드박스 터미널 — xterm + POST /api/agent/exec(SSE). 명령 입력→출력 스트리밍.
+// 샌드박스 터미널 — xterm + POST /api/agent/exec(SSE). 앱 MobileIDE 터미널 프롬프트 색상과 동일.
 
 const BACKSPACE = '\x7f';
 const CTRL_C = '\x03';
+// 앱과 동일 truecolor: user@CodingPT(민트) :(dim) ~/proj(블루) $(민트)
+const MINT = '\x1b[38;2;52;211;153m';
+const DIM = '\x1b[38;2;100;116;139m';
+const BLUE = '\x1b[38;2;96;165;250m';
+const RST = '\x1b[0m';
 
-export default function Terminal({ wsId }: { wsId: string }) {
+export default function Terminal({ wsId, projectName, onClose }: { wsId: string; projectName?: string; onClose?: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
   const cmdRef = useRef('');
@@ -17,6 +22,7 @@ export default function Terminal({ wsId }: { wsId: string }) {
   const abortRef = useRef<(() => void) | null>(null);
   const runningRef = useRef(false);
   const [ready, setReady] = useState(false);
+  const proj = projectName || '작업영역';
 
   useEffect(() => {
     let disposed = false;
@@ -29,7 +35,7 @@ export default function Terminal({ wsId }: { wsId: string }) {
       if (disposed || !hostRef.current) return;
       const term = new XTerm({
         fontSize: 12.5, fontFamily: 'ui-monospace, Menlo, monospace', cursorBlink: true,
-        theme: { background: '#0A0D14', foreground: '#E5E9F0', cursor: '#34D399' },
+        theme: { background: '#0A0D14', foreground: '#CBD5E1', cursor: '#34D399' },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
@@ -37,7 +43,6 @@ export default function Terminal({ wsId }: { wsId: string }) {
       try { fit.fit(); } catch (_) { /* noop */ }
       termRef.current = term;
       setReady(true);
-      term.writeln('\x1b[2m샌드박스 터미널 — 명령을 입력하고 Enter. (예: ls, npm run dev)\x1b[0m');
       writePrompt(term);
 
       term.onData((d: string) => onData(d));
@@ -54,9 +59,16 @@ export default function Terminal({ wsId }: { wsId: string }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const cwdDisp = () => {
+    const c = cwdRef.current;
+    if (!c) return `~/${proj}`;
+    const m = `/${wsId}`;
+    const i = c.indexOf(m);
+    return `~/${proj}${i >= 0 ? c.slice(i + m.length) : ''}`;
+  };
+
   const writePrompt = (term: any) => {
-    const c = cwdRef.current ? cwdRef.current.split('/').pop() : '~';
-    term.write(`\r\n\x1b[32m${c}\x1b[0m $ `);
+    term.write(`\r\n${MINT}user@CodingPT${RST}${DIM}:${RST}${BLUE}${cwdDisp()}${RST}${MINT}$ ${RST}`);
   };
 
   const run = (command: string) => {
@@ -96,11 +108,23 @@ export default function Terminal({ wsId }: { wsId: string }) {
     if (d >= ' ') { cmdRef.current += d; term.write(d); }
   };
 
+  const clear = () => { try { termRef.current?.clear(); } catch (_) { /* noop */ } };
+
   return (
-    <div style={{ height: '100%', background: '#0A0D14', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-      <div style={{ padding: '6px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 600, color: 'var(--text2)', flexShrink: 0 }}>터미널</div>
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, padding: 8 }} />
-      {!ready ? <div style={{ position: 'absolute', top: 36, left: 12, color: 'var(--dim)', fontSize: 12 }}>터미널 준비 중…</div> : null}
+    <div style={{ height: '100%', background: '#0A0D14', display: 'flex', flexDirection: 'column', position: 'relative', borderTop: '1px solid #1C2230' }}>
+      {/* 터미널 패널 헤더 — 앱 하단 패널 탭 스타일 */}
+      <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8, flexShrink: 0 }}>
+        <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, borderBottom: '2px solid #3B82F6', paddingBottom: 2 }}>터미널</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={clear} style={{ color: '#64748B', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', marginRight: 14 }}>지우기</button>
+        {onClose ? (
+          <button onClick={onClose} aria-label="닫기" style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex' }}>
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#64748B" strokeWidth={2} strokeLinecap="round" /></svg>
+          </button>
+        ) : null}
+      </div>
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, padding: '0 12px 8px' }} />
+      {!ready ? <div style={{ position: 'absolute', top: 40, left: 12, color: '#475569', fontSize: 12 }}>터미널 준비 중…</div> : null}
     </div>
   );
 }
