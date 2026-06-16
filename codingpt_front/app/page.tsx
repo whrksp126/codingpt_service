@@ -1,7 +1,9 @@
+import { unstable_noStore as noStore } from 'next/cache';
 import { getPlansSSR, formatKRW } from '@/lib/api';
 import CheckoutButtons from '@/components/CheckoutButtons';
 
 // 랜딩 — SSR. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
+// noStore() — 빌드 시 정적 프리렌더(이때 back 도달 불가 → notFound 산출물) 방지, 런타임 동적 렌더 강제.
 export const dynamic = 'force-dynamic';
 
 const STEPS = [
@@ -27,6 +29,7 @@ const PLAN_DESC: Record<string, string> = {
 const GAP = 104; // 섹션 간 세로 여백
 
 export default async function Home() {
+  noStore();
   const plans = await getPlansSSR();
 
   return (
