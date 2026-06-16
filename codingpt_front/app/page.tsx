@@ -1,10 +1,18 @@
-import { unstable_noStore as noStore } from 'next/cache';
+import { headers } from 'next/headers';
 import { getPlansSSR, formatKRW } from '@/lib/api';
 import CheckoutButtons from '@/components/CheckoutButtons';
 
 // 랜딩 — SSR. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
-// noStore() — 빌드 시 정적 프리렌더(이때 back 도달 불가 → notFound 산출물) 방지, 런타임 동적 렌더 강제.
+// headers() 접근 = 동적 함수 → 빌드 시 정적 프리렌더 원천 차단(back 미도달로 notFound 생성되던 문제 해결).
+// 런타임에 back 도달 가능하므로 실 플랜을 SSR HTML에 노출(PG 크롤러가 가격 확인).
 export const dynamic = 'force-dynamic';
+
+// 가격 정적 폴백 — 백엔드 일시 불가 시에도 PG 크롤러가 상품/가격을 보도록(DB 시드와 동일).
+const PLANS_FALLBACK = [
+  { code: 'free', name: 'Free', price_krw: 0 },
+  { code: 'pro', name: 'Pro', price_krw: 20000 },
+  { code: 'max', name: 'Max', price_krw: 100000 },
+];
 
 const STEPS = [
   { t: '떠올린다', d: '만들고 싶은 걸 평소 말로 이야기해요. “운동 기록 앱을 만들고 싶어.”' },
@@ -29,8 +37,9 @@ const PLAN_DESC: Record<string, string> = {
 const GAP = 104; // 섹션 간 세로 여백
 
 export default async function Home() {
-  noStore();
-  const plans = await getPlansSSR();
+  headers(); // 동적 렌더 강제(프리렌더 차단)
+  const live = await getPlansSSR();
+  const plans = live && live.length ? live : PLANS_FALLBACK;
 
   return (
     <div>
