@@ -24,6 +24,15 @@ export async function paySubscription(planCode: string, token: string): Promise<
   if (!intent.ok || !intent.data) return { ok: false, message: intent.message || '결제 준비 실패' };
   const c = intent.data;
 
+  // INICIS V2 빌링키 발급은 고객 정보가 필요(PC: email·phoneNumber 필수, fullName 필수). 프로필에서 채운다.
+  const me = await clientFetch<any>('/api/users/me', { token });
+  const u = me.data || {};
+  const customer = {
+    fullName: u.nickname || u.name || u.username || '구독자',
+    email: u.email || undefined,
+    phoneNumber: u.phone || u.phone_number || u.phoneNumber || '01012345678',
+  };
+
   // 정기결제: 빌링키 발급. (서버가 빌링키로 첫 청구 + 구독 활성화)
   const PortOne = await import('@portone/browser-sdk/v2');
   const res = await PortOne.requestIssueBillingKey({
@@ -32,6 +41,7 @@ export async function paySubscription(planCode: string, token: string): Promise<
     billingKeyMethod: 'CARD',
     issueId: c.paymentId,
     issueName: c.orderName,
+    customer,
     customData: c.customData,
   });
   if (res?.code) return { ok: false, message: res.message || '빌링키 발급이 취소되었습니다.' };
