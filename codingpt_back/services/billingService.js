@@ -14,7 +14,8 @@ class BillingService {
     const plan = await subscriptionService.getPlanByCode(code);
     if (!plan || !plan.is_active) throw new Error('존재하지 않는 플랜입니다.');
     if (plan.price_krw <= 0) throw new Error('무료 플랜은 결제가 필요하지 않습니다.');
-    const paymentId = `sub-${userId}-${crypto.randomUUID()}`;
+    // INICIS oid(주문번호)는 최대 40자 — sub-{userId}-{26hex} = 33~38자로 제한 내 유지.
+    const paymentId = `sub-${userId}-${crypto.randomBytes(13).toString('hex')}`;
     await Payment.create({
       payment_id: paymentId, user_id: userId, type: 'subscription', channel: 'inicis_billing',
       ref_id: plan.id, amount_krw: plan.price_krw, status: 'ready',
