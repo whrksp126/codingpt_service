@@ -1,6 +1,6 @@
-import { formatKRW } from '@/lib/api';
-
 // 랜딩 — 정적(Static) 렌더. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
+// 외부 import 없음(순수 서버 컴포넌트) — lib/api 등 import 시 prod SSG 가 빈 본문이 되는 문제 회피.
+const formatKRW = (n: number) => '₩' + Number(n || 0).toLocaleString('ko-KR');
 // 가격은 정적 상수로 노출 — PG 크롤러가 JS/백엔드 없이도 상품·가격을 항상 읽도록(빌드 시 back 미도달 무관).
 // DB 시드(subscription_plan)와 동일하게 유지. 가격 변경 시 이 상수도 함께 갱신.
 const PLANS = [
