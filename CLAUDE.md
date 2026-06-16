@@ -7,11 +7,14 @@
 ```
 codingpt_service/
 ├── codingpt_back/           — Express.js API (port 5100 dev / 5300 local)
-├── codingpt_front/          — React 18 + Vite (port 3300)
-├── docker-compose.dev.yml   — 홈서버 dev 배포
-├── docker-compose.local.yml — 로컬 Docker 실행
-└── deploy.sh                — dev 배포 스크립트
+├── codingpt_front/          — Next.js SSR 공개 사이트 (랜딩+구독결제+약관+웹 바이브코딩, port 3400) → codingpt.ghmate.com
+├── docker-compose.{local,dev,stg,prod}.yml
+└── deploy.sh                — back+front 배포 스크립트
 ```
+
+> **정식 공개 도메인 = `codingpt.ghmate.com`**(PG 계약 URL). `codingpt-front.ghmate.com`은 같은 컨테이너 별칭(유지). `codingpt_front`(Next.js SSR)이 랜딩+구독결제+약관(PG 심사 = 정적 HTML 노출)+**웹 바이브코딩**(`/app`)을 서빙.
+>
+> **어드민 분리(2026-06)**: 기존 Vite 어드민은 최상위 **독립 프로젝트 `../codingpt_admin`**(자체 repo/compose/deploy)으로 분리됨 → `codingpt-admin.ghmate.com`. 백엔드와는 공개 HTTPS로만 통신.
 
 ## 환경별 DB
 

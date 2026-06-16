@@ -1,0 +1,88 @@
+/* CodingPT V2 디자인 토큰 (app/src/theme/v2Tokens.ts 와 동일 값) — modern dark dev-tool 톤 */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
+
+:root {
+  --base: #0A0D14;
+  --surface: #0E1320;
+  --elevated: #11151F;
+  --elevated2: #1B1F2A;
+  --hover: #22304A;
+  --border: #1C2230;
+  --border-control: #2A2F3A;
+  --text: #F8FAFC;
+  --text2: #CBD5E1;
+  --text3: #94A3B8;
+  --dim: #64748B;
+  --accent: #34D399;
+  --accent-hover: #2CC08A;
+  --cta: #08875D;
+  --cta-hover: #0A9E6D;
+  --info: #60A5FA;
+  --error: #F87171;
+  --on-accent: #06281C;
+  --accent-tint: rgba(52, 211, 153, 0.12);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--base); color: var(--text);
+  font-family: 'PretendardVariable', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+a { color: var(--accent); text-decoration: none; }
+.container { max-width: 1020px; margin: 0 auto; padding: 0 20px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--radius-md); padding: 12px 20px;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  background: var(--accent); color: var(--on-accent); letter-spacing: -0.02em;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn:active { transform: translateY(1px); }
+.btn.cta { background: var(--cta); color: #fff; }
+.btn.cta:hover { background: var(--cta-hover); }
+.btn.secondary { background: var(--elevated2); color: var(--text); border: 1px solid var(--border-control); }
+.btn.secondary:hover { background: var(--hover); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+
+.card { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px; }
+.muted { color: var(--text3); }
+.dim { color: var(--dim); }
+.price { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; }
+.grid { display: grid; gap: 16px; }
+@media (min-width: 760px) { .grid.cols-3 { grid-template-columns: repeat(3, 1fr); } .grid.cols-2 { grid-template-columns: repeat(2, 1fr); } }
+
+h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 8px; }
+h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+h3 { font-size: 16px; font-weight: 700; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+th { color: var(--dim); font-weight: 600; }
+
+.nav { display: flex; gap: 18px; align-items: center; padding: 16px 0; }
+.nav a { color: var(--text2); font-weight: 600; font-size: 14.5px; }
+.nav a:hover { color: var(--text); }
+.brand { font-weight: 800; font-size: 17px; color: var(--text) !important; letter-spacing: -0.02em; }
+
+.footer { border-top: 1px solid var(--border); margin-top: 56px; padding: 28px 0 52px; color: var(--dim); font-size: 12.5px; line-height: 1.75; }
+.footer a { color: var(--text3); }
+.notice { background: var(--elevated2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; font-size: 13px; color: var(--text3); }
+
+.pill { display: inline-block; background: var(--accent-tint); color: var(--accent); border: 1px solid rgba(52,211,153,0.25);
+  border-radius: 999px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; }
+.hero { padding: 56px 0 40px; }
+.hero h1 { font-size: 44px; line-height: 1.1; }
+@media (max-width: 600px) { .hero h1 { font-size: 32px; } h1 { font-size: 24px; } }
+.feat { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 20px; }
+.feat .ic { width: 38px; height: 38px; border-radius: 10px; background: var(--accent-tint); display: flex; align-items: center; justify-content: center; font-size: 19px; margin-bottom: 12px; }
+.codeblock { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--text2); overflow-x: auto; line-height: 1.7; }
+.tok-key { color: #60A5FA; } .tok-str { color: #FB923C; } .tok-com { color: #6B8A7A; }

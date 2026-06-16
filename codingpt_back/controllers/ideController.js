@@ -25,7 +25,7 @@ const getIdeAsset = async (req, res) => {
   try {
     const { projectId } = req.params;
     const { path } = req.query;
-    const { buffer, contentType } = await ideProjectService.getAsset(projectId, path);
+    const { buffer, contentType } = await ideProjectService.getAsset(projectId, path, req.user && req.user.id);
     const dataUrl = `data:${contentType};base64,${buffer.toString('base64')}`;
     successResponse(res, { dataUrl, contentType, size: buffer.length });
   } catch (error) {

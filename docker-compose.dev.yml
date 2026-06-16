@@ -1,5 +1,6 @@
-# dev-codingpt-back.ghmate.com  → codingpt_back_dev:5100
-# dev-codingpt-front.ghmate.com → codingpt_front_dev:3100
+# dev-codingpt-back.ghmate.com   → codingpt_back_dev:5100
+# dev-codingpt-front.ghmate.com  → codingpt_front_dev:3400  (Next.js 공개 랜딩/결제/웹코딩)
+# (어드민은 독립 프로젝트로 분리됨 → ../codingpt_admin)
 
 services:
   postgres:
@@ -42,19 +43,27 @@ services:
       - nginx_proxy
     restart: unless-stopped
 
+  # 공개 사이트(Next.js SSR)
   front:
     container_name: codingpt_front_dev
     build:
       context: ./codingpt_front
       dockerfile: Dockerfile.dev
+    environment:
+      - NODE_ENV=development
+      - BACKEND_INTERNAL_URL=http://back:5100
+      - NEXT_PUBLIC_BACKEND_URL=https://dev-codingpt-back.ghmate.com
+      - NEXT_PUBLIC_PORTONE_STORE_ID=${PORTONE_STORE_ID:-}
+      - NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE=${PORTONE_CHANNEL_KEY_CHARGE:-}
+      - NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING=${PORTONE_CHANNEL_KEY_BILLING:-}
     expose:
-      - "3300"
-    env_file:
-      - ./codingpt_front/.env.dev
+      - "3400"
     networks:
       - codingpt_dev
       - nginx_proxy
     restart: unless-stopped
+
+  # 어드민(Vite)은 독립 프로젝트로 분리됨 → ../codingpt_admin (자체 docker-compose)
 
   code-executor:
     container_name: codingpt_code_executor_dev
@@ -90,6 +99,7 @@ services:
       - AGENT_WORKSPACE_ROOT=/workspace
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt-agent-worker:dev
+      - AGENT_SANDBOX_MEM_MB=2048   # dev 서버(vite) 메모리 여유(512MB OOM 방지)
       - AGENT_SANDBOX_VOLUME=cpt_agent_workspace_dev
       # 샌드박스는 internal 네트워크(직접 인터넷 차단) + allowlist 프록시로만 egress
       - AGENT_SANDBOX_NETWORK=cpt_sandbox_net_dev
@@ -101,6 +111,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - codingpt_dev
+      - cpt_sandbox_net       # 미리보기 dev 서버 프록시: 샌드박스에 직접 HTTP 도달
     restart: unless-stopped
 
   # 샌드박스 egress allowlist 프록시 — internal 네트워크 샌드박스가 이걸 통해서만 인터넷.

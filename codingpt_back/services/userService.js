@@ -25,6 +25,9 @@ require('dotenv').config();
 
 const ACCESS_SECRET = process.env.ACCESS_SECRET || 'ENV_NOT_FOUND_ACCESS_SECRET';
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'ENV_NOT_FOUND_REFRESH_SECRET';
+// 액세스 토큰 수명 — env 로 조정(기본 15분). 웹 결제 세션은 짧은 만료로는 끊기므로 정상화.
+const ACCESS_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
+const { verifyPassword } = require('../utils/password');
 const GOOGLE_ANDROID_CLIENT_ID = process.env.GOOGLE_ANDROID_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_ANDROID_CLIENT_ID';
 const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_WEB_CLIENT_ID';
 
@@ -73,7 +76,7 @@ class UserService {
       const accessToken = jwt.sign(
         { id: foundUser.id, email: foundUser.email, role: foundUser.role },
         ACCESS_SECRET,
-        { expiresIn: '20s' } // 테스트용 20초
+        { expiresIn: ACCESS_TTL }
       );
       const refreshToken = jwt.sign(
         { id: foundUser.id, email: foundUser.email, role: foundUser.role },
@@ -114,6 +117,27 @@ class UserService {
         throw new Error(`로그인 처리 중 오류가 발생했습니다: ${error.message}`);
       }
     }
+  }
+
+  // 로컬 ID/PW 로그인 — 카드사 심사용 계정 전용(password_hash 있는 계정만).
+  async loginLocal(email, password) {
+    if (!email || !password) throw new Error('이메일과 비밀번호가 필요합니다.');
+    const user = await User.findOne({ where: { email } });
+    if (!user || !user.password_hash) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
+    if (!verifyPassword(password, user.password_hash)) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
+
+    const accessToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      ACCESS_SECRET,
+      { expiresIn: ACCESS_TTL },
+    );
+    const refreshToken = jwt.sign(
+      { id: user.id, email: user.email, role: user.role },
+      REFRESH_SECRET,
+      { expiresIn: '30d' },
+    );
+    await User.update({ refresh_token: refreshToken }, { where: { id: user.id } });
+    return { accessToken, refreshToken };
   }
 
   // 로그아웃
@@ -178,7 +202,7 @@ class UserService {
       const newAccessToken = jwt.sign(
         { id: decoded.id, email: decoded.email, role },
         ACCESS_SECRET,
-        { expiresIn: '20s' } // 테스트용 20초
+        { expiresIn: ACCESS_TTL }
       );
 
       const timeRemaining = decoded.exp - now;

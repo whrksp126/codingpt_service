@@ -14,7 +14,11 @@ const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
 const githubRepoRoutes = require('./githubRepoRoutes');
 const agentRoutes = require('./agentRoutes');
-const projectRoutes = require('./projectRoutes');
+const workspaceRoutes = require('./workspaceRoutes');
+const previewRoutes = require('./previewRoutes');
+const usageRoutes = require('./usageRoutes');
+const subscriptionRoutes = require('./subscriptionRoutes');
+const billingRoutes = require('./billingRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -31,7 +35,13 @@ router.use('/admin/github-repos', githubRepoRoutes);
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
 router.use('/agent', agentRoutes);
-router.use('/projects', projectRoutes);
+router.use('/workspaces', workspaceRoutes);
+router.use('/preview', previewRoutes); // 바이브코딩 dev 서버 미리보기 프록시
+router.use('/usage', usageRoutes); // 사용량 미터링 조회
+router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태
+router.use('/billing', billingRoutes); // 충전/결제/크레딧
+// 한시적 호환 alias — 구버전 앱(/api/projects) 대비. 신규 코드는 /workspaces 사용.
+router.use('/projects', workspaceRoutes);
 
 // API 루트 엔드포인트
 router.get('/', (req, res) => {

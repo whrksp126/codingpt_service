@@ -37,6 +37,15 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'user',
     },
+    password_hash: {
+      type: DataTypes.STRING(255), // 심사용 ID/PW 계정만 사용(scrypt). 소셜 계정은 null.
+      allowNull: true,
+    },
+    login_type: {
+      type: DataTypes.STRING(16),
+      allowNull: false,
+      defaultValue: 'google',
+    },
   }, {
     tableName: 'user',
     timestamps: false,
@@ -48,6 +57,7 @@ module.exports = (sequelize, DataTypes) => {
     User.hasMany(models.StudyHeatmapLog, { foreignKey: 'user_id' });
     User.hasOne(models.UserGithubConnection, { foreignKey: 'user_id' });
     User.hasMany(models.UserGithubRepo, { foreignKey: 'user_id' });
+    User.hasMany(models.UsageEvent, { foreignKey: 'user_id' });
   };
 
   return User;

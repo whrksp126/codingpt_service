@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
-const { 
+const {
   login,
+  loginLocal,
   logout,
   verifyAccessToken,
   refreshAccessToken,
@@ -18,7 +19,8 @@ const {
 } = require('../controllers/userController');
 
 // 사용자 관련 라우트
-router.post('/login', login);                   // 로그인
+router.post('/login', login);                   // 로그인 (구글 OAuth)
+router.post('/login-local', loginLocal);        // 로컬 ID/PW 로그인 (심사용 계정)
 router.post('/logout', logout);                 // 로그아웃
 router.get('/verify', verifyAccessToken);       // 엑세스 토큰 검증
 router.post('/refresh', refreshAccessToken);    // 엑세스 토큰 재발급

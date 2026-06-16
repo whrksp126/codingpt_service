@@ -17,7 +17,13 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
 let Docker = null;
+
+// 셸 인자 안전 따옴표(single-quote escape)
+function shq(s) {
+  return `'${String(s).replace(/'/g, `'\\''`)}'`;
+}
 try { Docker = require('dockerode'); } catch (_) { /* 미설치 환경 폴백 */ }
 
 const ENABLED = process.env.AGENT_SANDBOX_ENABLED === '1' && !!Docker;
@@ -214,6 +220,148 @@ async function execBash(userId, command, opts = {}) {
   });
 }
 
+// ── dev 서버(미리보기) lifecycle ──────────────────────────────────────
+// 샌드박스 안에서 `npm run dev`(Vite 등)를 백그라운드(Detach exec)로 띄워 장기 유지한다.
+// execBash 의 120s 동기 한계를 우회: Detach 로 즉시 반환하고, 준비완료는 HTTP 폴링으로 확인.
+// userId → { projectId, port, dir, startedAt }
+const devServers = new Map();
+const DEV_LOG = '/tmp/devserver.log';
+const DEV_PID_FILE = '/tmp/devserver.pid';
+
+// HMR(핫리로드) 설정 주입 파일 — 미리보기 프록시(WebSocket)를 통해 HMR 이 닿도록 Vite server.hmr 를 덮어쓴다.
+// 사용자 vite.config 는 loadConfigFromFile 로 보존하고 hmr 만 병합. clientPort/protocol/path 는 CPT_HMR_* 로 주입.
+const HMR_CONFIG_FILE = '.cpt-vite.config.mjs';
+const HMR_CONFIG_JS = `import { mergeConfig, loadConfigFromFile } from "vite";
+export default async () => {
+  let loaded = null;
+  try { loaded = await loadConfigFromFile({ command: "serve", mode: "development" }, undefined, process.cwd()); } catch (_) {}
+  const hmr = { path: process.env.CPT_HMR_PATH || "/" };
+  if (process.env.CPT_HMR_PROTOCOL) hmr.protocol = process.env.CPT_HMR_PROTOCOL;
+  if (process.env.CPT_HMR_CLIENT_PORT) hmr.clientPort = Number(process.env.CPT_HMR_CLIENT_PORT);
+  return mergeConfig(loaded?.config ?? {}, { server: { hmr } });
+};
+`;
+
+// 샌드박스 이미지에 procps(pkill/pgrep)가 없다 → /proc 스캔으로 dev 프로세스를 포터블하게 종료한다.
+// 자기 자신($$)·부모($PPID)는 제외(이 스크립트의 cmdline 에도 'vite' 패턴이 들어가 자살 방지).
+const SWEEP_DEV =
+  'for d in /proc/[0-9]*; do p=${d#/proc/}; '
+  + '[ "$p" = "$$" ] && continue; [ "$p" = "$PPID" ] && continue; '
+  + `grep -qaE 'vite|esbuild' "$d/cmdline" 2>/dev/null && kill -9 "$p" 2>/dev/null; done; true`;
+// 기록해 둔 프로세스 그룹(setsid 세션 리더 pid = pgid)을 통째로 죽이고, 잔여 orphan 은 스캔으로 정리.
+const KILL_DEV =
+  `{ [ -f ${DEV_PID_FILE} ] && kill -9 -"$(cat ${DEV_PID_FILE} 2>/dev/null)" 2>/dev/null; }; `
+  + `rm -f ${DEV_PID_FILE} 2>/dev/null; ${SWEEP_DEV}`;
+
+function getDevServer(userId) {
+  return devServers.get(safeUid(userId)) || null;
+}
+
+/**
+ * 샌드박스 안에서 dev 서버를 백그라운드로 기동.
+ * Vite 기준: `--host 0.0.0.0`(컨테이너 외부에서 접근), `--base /api/preview/<pid>/`(프록시 경로 일치).
+ * @param {string|number} userId
+ * @param {{projectId:string, dir:string, port?:number, basePath?:string}} opts
+ *   dir: 컨테이너 내 절대경로(워커 fs 와 동일). basePath: Vite base(기본 /api/preview/<projectId>/)
+ */
+async function startDevServer(userId, { projectId, dir, port = 5173, basePath, hmr } = {}) {
+  const uid = safeUid(userId);
+  if (!projectId || !dir) throw new Error('projectId 와 dir 이 필요합니다.');
+  const container = await ensureSandbox(uid);
+  // 이미 떠있던 dev 서버는 정리(사용자당 1개)
+  await stopDevServer(uid).catch(() => {});
+
+  const base = basePath || `/api/preview/${projectId}/`;
+
+  // HMR 설정 주입: 사용자 vite.config 를 보존하면서 hmr(clientPort/protocol/path)만 덮어쓰는 래퍼 config 작성.
+  // 워커 fs == 샌드박스 fs(공유 볼륨)라 직접 파일을 써둔다. 실패해도 HMR 없이 정상 동작(폴백).
+  let hmrEnv = '';
+  let configFlag = '';
+  try {
+    fs.writeFileSync(path.join(dir, HMR_CONFIG_FILE), HMR_CONFIG_JS);
+    hmrEnv =
+      `export CPT_HMR_PATH=${shq(base)}`
+      + (hmr && hmr.protocol ? ` CPT_HMR_PROTOCOL=${shq(String(hmr.protocol))}` : '')
+      + (hmr && hmr.clientPort ? ` CPT_HMR_CLIENT_PORT=${shq(String(hmr.clientPort))}` : '')
+      + '; ';
+    configFlag = ` --config ${shq(HMR_CONFIG_FILE)}`;
+  } catch (_) { /* HMR 주입 실패 → 기존대로(핫리로드 없이) */ }
+
+  const proxyEnv = EGRESS_PROXY
+    ? `export HTTP_PROXY=${EGRESS_PROXY} HTTPS_PROXY=${EGRESS_PROXY} http_proxy=${EGRESS_PROXY} https_proxy=${EGRESS_PROXY} NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1; `
+    : '';
+  // 의존성 없으면 설치 후 dev 서버 실행. 전체를 한 detached 프로세스로(설치도 백그라운드).
+  const cmd =
+    `${proxyEnv}${hmrEnv}cd ${shq(dir)} && ` +
+    // 기존 dev 서버/잔여 프로세스 정리(pkill 미존재 → /proc 스캔). 그 뒤 이 세션 리더 pid 를 기록(종료 시 그룹 kill).
+    `${SWEEP_DEV}; echo $$ > ${DEV_PID_FILE}; ` +
+    // 포트가 완전히 빌 때까지 대기(이전 프로세스 종료 직후 strictPort 충돌 방지). /dev/tcp 연결되면 아직 점유 중.
+    `for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && { exec 3>&- 3<&- 2>/dev/null; sleep 0.5; } || break; done; ` +
+    `{ [ -d node_modules ] || npm install; } && ` +
+    // --strictPort: 포트 자동증가 금지(프록시 고정 포트와 어긋나지 않게). NODE_OPTIONS: 힙 여유.
+    `exec env NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- --host 0.0.0.0 --port ${port} --strictPort --base ${shq(base)}${configFlag}`;
+
+  // setsid 로 새 세션에 백그라운드 기동 → exec 가 끝나도 dev 서버는 살아남는다.
+  // (dockerode exec 의 Detach:true 는 이 환경에서 프로세스를 실제로 안 띄우는 경우가 있어 이 방식이 안전.)
+  const wrapped = `setsid bash -lc ${shq(cmd)} > ${DEV_LOG} 2>&1 < /dev/null & echo launched`;
+  const exec = await container.exec({
+    Cmd: ['bash', '-lc', wrapped],
+    WorkingDir: dir,
+    AttachStdout: true,
+    AttachStderr: true,
+    Env: ['HOME=/root', 'CI=1'],
+  });
+  const stream = await exec.start({ hijack: true, stdin: false });
+  await new Promise((resolve) => {
+    const sink = { write() {} };
+    try { container.modem.demuxStream(stream, sink, sink); } catch (_) { /* noop */ }
+    stream.on('end', resolve);
+    stream.on('error', resolve);
+    setTimeout(resolve, 4000); // 안전장치
+  });
+
+  devServers.set(uid, { projectId, port, dir, basePath: base, startedAt: Date.now() });
+  const s = sessions.get(uid);
+  if (s) s.lastUsed = Date.now();
+  return { projectId, port, basePath: base };
+}
+
+/** dev 서버 준비 여부 단발 체크 — 워커가 컨테이너로 직접 HTTP(같은 네트워크 합류 전제) */
+async function isDevReady(userId, port, basePath) {
+  const uid = safeUid(userId);
+  const host = containerName(uid);
+  const reqPath = basePath || '/';
+  return new Promise((resolve) => {
+    // base(reqPath) 로 200 이 떠야 진짜 준비됨. 404 등은 "아직/잘못된 base"(예: 다른 base 로 떠있는
+    // 서버, 재시작 중)이므로 ready 로 보지 않는다 — 그래야 base 일치까지 보장됨.
+    // Host: localhost(컨테이너명은 Vite allowedHosts 403). Accept: text/html(없으면 Vite 가 SPA index 를 404 처리).
+    const req = http.get({ host, port, path: reqPath, timeout: 2500, headers: { Host: `localhost:${port}`, Accept: 'text/html' } }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { try { req.destroy(); } catch (_) { /* noop */ } resolve(false); });
+  });
+}
+
+/** dev 서버 로그 tail(준비 지연 진단/표시용) */
+async function readDevLog(userId, lines = 40) {
+  try {
+    const r = await execBash(userId, `tail -n ${lines} ${DEV_LOG} 2>/dev/null || true`);
+    return r.output || '';
+  } catch (_) { return ''; }
+}
+
+/** dev 서버 종료 — 누적 orphan(여러 vite/node) 까지 강제 정리해 포트를 비운다. */
+async function stopDevServer(userId) {
+  const uid = safeUid(userId);
+  devServers.delete(uid);
+  try {
+    // 이미지에 pkill 이 없으므로 기록한 프로세스 그룹을 kill + /proc 스캔으로 잔여 정리.
+    await execBash(uid, `${KILL_DEV}; sleep 0.3; true`);
+  } catch (_) { /* noop */ }
+}
+
 /** 사용자 샌드박스 정지·제거 */
 async function releaseSandbox(userId) {
   const uid = safeUid(userId);
@@ -241,4 +389,8 @@ function startIdleSweeper() {
 }
 if (ENABLED) startIdleSweeper();
 
-module.exports = { isEnabled, ensureSandbox, execBash, releaseSandbox, containerName, userWorkspaceDir };
+module.exports = {
+  isEnabled, ensureSandbox, execBash, releaseSandbox, containerName, userWorkspaceDir,
+  // dev 서버(미리보기) lifecycle
+  startDevServer, isDevReady, readDevLog, stopDevServer, getDevServer,
+};

@@ -13,6 +13,17 @@ const login = async (req, res) => {
   }
 };
 
+// 로컬 ID/PW 로그인 (카드사 심사용 계정)
+const loginLocal = async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    const tokens = await userService.loginLocal(email, password);
+    successResponse(res, tokens, '로그인이 성공적으로 완료되었습니다.');
+  } catch (error) {
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
 // 로그아웃
 const logout = async (req, res) => {
   try {
@@ -179,6 +190,7 @@ const createStudyHeatmap = async (req, res) => {
 
 module.exports = {
   login,
+  loginLocal,
   logout,
   verifyAccessToken,
   refreshAccessToken,

@@ -20,6 +20,9 @@ if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') 
 }
 
 const app = express();
+// API 응답에 ETag/304 비활성화 — 모바일 앱은 HTTP 캐시 레이어가 없어 304(빈 본문)를 못 다룸.
+// 조건부 GET 으로 인한 304 → 항상 200+본문 반환(예: 워크스페이스 세션 목록).
+app.set('etag', false);
 const PORT = process.env.PORT || 3000;
 
 // CORS 설정 (실무 환경)
@@ -30,9 +33,18 @@ const allowedOrigins = [
   'http://192.168.153.122:3100', // GH_Home -> MacBook Pro
   'http://10.0.2.2:3100', // React Native Android 에뮬레이터
   'http://10.0.2.2:8381', // React Native Metro 번들러
+  'http://localhost:3400', // 로컬 공개 웹(Next.js front)
+  // 공개 웹(랜딩+결제+웹 바이브코딩) — 정식 도메인 codingpt.ghmate.com + 별칭 codingpt-front
+  'https://codingpt.ghmate.com',
+  'https://dev-codingpt.ghmate.com',
+  'https://stg-codingpt.ghmate.com',
   'https://dev-codingpt-front.ghmate.com',
   'https://stg-codingpt-front.ghmate.com',
-  'https://codingpt-front.ghmate.com'
+  'https://codingpt-front.ghmate.com',
+  // 어드민(독립 프로젝트) 도메인
+  'https://dev-codingpt-admin.ghmate.com',
+  'https://stg-codingpt-admin.ghmate.com',
+  'https://codingpt-admin.ghmate.com'
 ];
 
 app.use(cors({
@@ -59,6 +71,11 @@ app.use(cors({
   credentials: true,
   optionsSuccessStatus: 200
 }));
+
+// PortOne 웹훅 — 서명 검증을 위해 raw body 가 필요하므로 전역 JSON 파서 "앞"에 마운트.
+// (authMiddleware 없음 — 서명 검증 + getPayment 재조회로 신뢰)
+const webhookController = require('./controllers/webhookController');
+app.post('/api/billing/webhook', express.raw({ type: '*/*' }), webhookController.handlePortoneWebhook);
 
 // 미들웨어 설정
 app.use(express.json({ limit: '10mb' }));
@@ -146,10 +163,29 @@ const startServer = async () => {
     // }
 
     // 서버 시작
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`🚀 서버가 http://localhost:${PORT}에서 실행 중입니다!`);
       console.log(`👥 사용자 API: http://localhost:${PORT}/api/users`);
       console.log(`🌍 환경: ${process.env.NODE_ENV || 'local'}`);
+    });
+
+    // 구독 갱신 / 크레딧 만료 스위퍼 (cron 없이 setInterval)
+    try {
+      require('./services/billingSweeper').start();
+    } catch (e) {
+      console.error('[app] billingSweeper 시작 실패:', e.message);
+    }
+
+    // 미리보기 HMR(WebSocket) 업그레이드 프록시 — /api/preview/:token/* 의 ws 를 워커→샌드박스 dev 서버로 포워딩.
+    // (Express 라우트는 ws 업그레이드를 처리하지 않으므로 http.Server 레벨에서 직접 처리)
+    const previewProxyController = require('./controllers/previewProxyController');
+    const agentProxyService = require('./services/agentProxyService');
+    server.on('upgrade', (req, socket, head) => {
+      const m = (req.url || '').match(/^\/api\/preview\/([^/?]+)/);
+      if (!m) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+      const sess = previewProxyController.resolveToken(m[1]);
+      if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+      agentProxyService.proxyDevWs(req, socket, head, { userId: sess.userId });
     });
 
   } catch (error) {

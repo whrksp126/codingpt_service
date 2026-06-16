@@ -44,6 +44,13 @@ const safeUid = (userId) => (userId == null ? '' : String(userId).replace(/[^A-Z
 // 실제 저장 위치는 codingpt/execute/workspace/<userId>/<projectId>/.
 // (계획서의 사용자별 격리 의도 — s3Service prefix/allowlist 규칙에 맞춰 execute 하위에 둠)
 const workspaceBase = (uid, projectId) => `workspace/${uid}/${projectId}`;
+// 바이브코딩 사용자 프로젝트 경로(소스가 사는 곳) — project.json 존재로 판별.
+const vibeBasePath = (uid, projectId) => `workspace/${uid}/projects/${projectId}`;
+async function isVibeProject(uid, projectId) {
+  if (!uid) return false;
+  const r = await s3Service.getFileContent(`${vibeBasePath(uid, projectId)}/project.json`);
+  return !!r.success;
+}
 
 // 한 objectstore base 에서 텍스트 파일(+선택적 에셋) 로드. 실패해도 throw 안 함(ok=false 반환).
 async function loadBase(basePath, fullBase, { textOnly = false } = {}) {
@@ -85,8 +92,26 @@ async function getProject(projectId, userId) {
     e.statusCode = 400;
     throw e;
   }
+  const uid = safeUid(userId);
 
-  // 1) 공용 템플릿 = 베이스 (파일 + 에셋)
+  // 1) 바이브 프로젝트(사용자가 만든 워크스페이스) — projects/<id> 가 소스+저장+에셋의 단일 위치.
+  //    저장(saveProject)/에셋(getAsset) 과 동일 기준(project.json 존재)으로 판별해 경로 불일치 방지.
+  if (uid && await isVibeProject(uid, projectId)) {
+    const vibeBase = vibeBasePath(uid, projectId);
+    const vibe = await loadBase(vibeBase, `codingpt/execute/${vibeBase}/`); // 에셋 포함
+    // project.json(메타) + sessions/(세션 영속 파일)은 IDE 소스가 아니므로 제외.
+    //  · sessions/ 노출 시 저장(saveProject)에서 세션 파일을 덮어써 손상시킬 위험도 있음.
+    const hidden = (p) => p === 'project.json' || p.startsWith('sessions/');
+    const files = (vibe.files || [])
+      .filter((f) => !hidden(f.path))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    const assets = (vibe.assets || [])
+      .filter((a) => !hidden(a.path))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    return { projectId, files, assets };
+  }
+
+  // 2) 템플릿 기반(관리자 등록 레슨 IDE) = 베이스(파일+에셋)
   const template = await loadBase(`ide/${projectId}`, `codingpt/execute/ide/${projectId}/`);
   if (!template.ok) {
     if (template.error === 'NoSuchBucket' || template.error === 'AccessDenied') {
@@ -94,40 +119,29 @@ async function getProject(projectId, userId) {
       e.statusCode = 500;
       throw e;
     }
-    // 템플릿 없음 → 바이브코딩 사용자 프로젝트(workspace/<uid>/projects/<id>)일 수 있음.
-    // project.json 이 있으면 등록된 vibe 프로젝트로 보고 그 파일들을 그대로 IDE 소스로 반환.
-    const uid = safeUid(userId);
-    if (uid) {
-      const vibeBase = `workspace/${uid}/projects/${projectId}`;
-      const vibe = await loadBase(vibeBase, `codingpt/execute/${vibeBase}/`, { textOnly: true });
-      const hasMeta = vibe.ok && vibe.files.some((f) => f.path === 'project.json');
-      if (hasMeta) {
-        const files = vibe.files
-          .filter((f) => f.path !== 'project.json') // 메타는 IDE에 노출 안 함
-          .sort((a, b) => a.path.localeCompare(b.path));
-        return { projectId, files, assets: [] };
-      }
-    }
     const e = new Error('프로젝트를 찾을 수 없습니다.');
     e.statusCode = 404;
     throw e;
   }
 
-  // 2) 사용자 워크스페이스(저장된 내 편집) 텍스트 오버레이 — 없으면 빈 결과
+  // 3) 사용자 워크스페이스(저장된 내 편집/새 파일/가져온 에셋) 오버레이 — 에셋 포함.
   let userFiles = [];
-  const uid = safeUid(userId);
+  let userAssets = [];
   if (uid) {
     const base = workspaceBase(uid, projectId);
-    const ws = await loadBase(base, `codingpt/execute/${base}/`, { textOnly: true });
-    if (ws.ok) userFiles = ws.files;
+    const ws = await loadBase(base, `codingpt/execute/${base}/`);
+    if (ws.ok) { userFiles = ws.files; userAssets = ws.assets; }
   }
 
-  // 3) 병합: 템플릿 + 내 편집(덮어쓰기/신규 추가). 에셋은 템플릿에서.
+  // 4) 병합: 템플릿 + 내 편집/신규(덮어쓰기/추가). 에셋도 템플릿+내 가져오기 합집합.
   const map = new Map();
   for (const f of template.files) map.set(f.path, f);
   for (const f of userFiles) map.set(f.path, f);
   const files = [...map.values()].sort((a, b) => a.path.localeCompare(b.path));
-  const assets = template.assets.sort((a, b) => a.path.localeCompare(b.path));
+  const amap = new Map();
+  for (const a of template.assets) amap.set(a.path, a);
+  for (const a of userAssets) amap.set(a.path, a);
+  const assets = [...amap.values()].sort((a, b) => a.path.localeCompare(b.path));
 
   return { projectId, files, assets };
 }
@@ -139,7 +153,7 @@ async function getProject(projectId, userId) {
  * @param {string} relPath - projectId 기준 상대경로
  * @returns {Promise<{ buffer: Buffer, contentType: string }>}
  */
-async function getAsset(projectId, relPath) {
+async function getAsset(projectId, relPath, userId) {
   if (!projectId || !PROJECT_ID_RE.test(projectId)) {
     const e = new Error('유효하지 않은 projectId 입니다.');
     e.statusCode = 400;
@@ -152,8 +166,19 @@ async function getAsset(projectId, relPath) {
     throw e;
   }
 
-  // s3Service 가 codingpt/execute/ prefix 를 붙임
-  const res = await s3Service.getFileContent(`ide/${projectId}/${rel}`);
+  // 사용자가 가져온 에셋(내 워크스페이스/바이브) 우선, 없으면 공용 템플릿(ide/<id>) fallback.
+  // s3Service 가 codingpt/execute/ prefix 를 붙임.
+  const uid = safeUid(userId);
+  const candidates = [];
+  if (uid) {
+    candidates.push((await isVibeProject(uid, projectId)) ? vibeBasePath(uid, projectId) : workspaceBase(uid, projectId));
+  }
+  candidates.push(`ide/${projectId}`);
+  let res = { success: false, error: 'NoSuchKey' };
+  for (const kb of candidates) {
+    res = await s3Service.getFileContent(`${kb}/${rel}`);
+    if (res.success) break;
+  }
   if (!res.success) {
     const e = new Error(res.message || '에셋을 불러올 수 없습니다.');
     e.statusCode = res.error === 'NoSuchKey' ? 404 : 500;
@@ -193,17 +218,26 @@ async function saveProject(projectId, userId, files) {
     throw e;
   }
 
-  const base = workspaceBase(uid, projectId); // s3Service 가 codingpt/execute/ prefix 를 붙임
+  // 바이브 프로젝트는 소스가 projects/<id> 에 있으므로 저장도 거기로(읽기 경로와 일치).
+  const base = (await isVibeProject(uid, projectId)) ? vibeBasePath(uid, projectId) : workspaceBase(uid, projectId);
   let saved = 0;
   const failed = [];
   for (const f of files) {
     const rel = String((f && f.path) || '').replace(/^\/+/, '');
-    // 경로 탐색 방어 + 텍스트 확장자만(바이너리 에셋은 별도 흐름)
+    // 경로 탐색 방어
     if (!rel || rel.includes('..') || rel.endsWith('/')) {
       failed.push({ path: rel, message: '잘못된 경로' });
       continue;
     }
-    if (!TEXT_EXTS.has(extOf(rel))) {
+    // 메타/세션 파일은 IDE 저장 대상 아님 — 덮어써 손상 방지.
+    if (rel === 'project.json' || rel.startsWith('sessions/')) {
+      failed.push({ path: rel, message: '보호된 경로' });
+      continue;
+    }
+    // 텍스트 확장자거나, 외부 파일 가져오기(base64 바이너리)면 저장.
+    // s3Service.saveFile 은 비텍스트 확장자(이미지/PDF 등)면 content 를 base64 로 디코딩해 저장한다.
+    const isBinaryImport = !!(f && f.base64);
+    if (!isBinaryImport && !TEXT_EXTS.has(extOf(rel))) {
       failed.push({ path: rel, message: '텍스트 파일만 저장됩니다.' });
       continue;
     }

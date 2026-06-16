@@ -1,5 +1,7 @@
-# codingpt-back.ghmate.com  → codingpt_back_prod:5100
-# codingpt-front.ghmate.com → codingpt_front_prod:80
+# codingpt.ghmate.com        → codingpt_front_prod:3400  (Next.js 공개 랜딩/결제/약관/웹코딩 — 정식 도메인)
+# codingpt-front.ghmate.com  → codingpt_front_prod:3400  (별칭, 유지)
+# codingpt-back.ghmate.com   → codingpt_back_prod:5100
+# (어드민은 독립 프로젝트로 분리됨 → ../codingpt_admin = codingpt-admin.ghmate.com)
 # dev/stg 구조 미러 — DB는 홈서버 Docker PostgreSQL (AWS 미사용)
 
 services:
@@ -44,21 +46,28 @@ services:
       - nginx_proxy
     restart: unless-stopped
 
+  # 공개 사이트(Next.js SSR) — 랜딩 + 구독/크레딧 결제 + 약관/사업자정보
   front:
     container_name: codingpt_front_prod
     build:
       context: ./codingpt_front
       dockerfile: Dockerfile
       args:
-        VITE_BACKEND_URL: https://codingpt-back.ghmate.com
-        VITE_DEBUG: "false"
-        NODE_ENV: production
+        NEXT_PUBLIC_BACKEND_URL: https://codingpt-back.ghmate.com
+        NEXT_PUBLIC_PORTONE_STORE_ID: ${PORTONE_STORE_ID:-}
+        NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE: ${PORTONE_CHANNEL_KEY_CHARGE:-}
+        NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING: ${PORTONE_CHANNEL_KEY_BILLING:-}
+    environment:
+      - NODE_ENV=production
+      - BACKEND_INTERNAL_URL=http://back:5100
     expose:
-      - "80"
+      - "3400"
     networks:
       - codingpt_prod
       - nginx_proxy
     restart: unless-stopped
+
+  # 어드민(Vite)은 독립 프로젝트로 분리됨 → ../codingpt_admin (자체 docker-compose)
 
   code-executor:
     container_name: codingpt_code_executor_prod
@@ -96,6 +105,7 @@ services:
       - AGENT_WORKSPACE_ROOT=/workspace
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt-agent-worker:prod
+      - AGENT_SANDBOX_MEM_MB=2048   # dev 서버(vite) 메모리 여유(512MB OOM 방지)
       - AGENT_SANDBOX_VOLUME=cpt_agent_workspace_prod
       # 샌드박스는 internal 네트워크(직접 인터넷 차단) + allowlist 프록시로만 egress
       - AGENT_SANDBOX_NETWORK=cpt_sandbox_net_prod
@@ -107,6 +117,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - codingpt_prod
+      - cpt_sandbox_net       # 미리보기 dev 서버 프록시: 샌드박스에 직접 HTTP 도달
     restart: unless-stopped
 
   # 샌드박스 egress allowlist 프록시 — internal 네트워크 샌드박스가 이걸 통해서만 인터넷.

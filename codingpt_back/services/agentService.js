@@ -62,6 +62,21 @@ const VIBE_SYSTEM_APPEND = [
   '- 작업 디렉토리(워크스페이스)가 단일 진실원이다. 파일을 직접 만들고 수정하라.',
   '- 변경은 가능한 한 작고 명확하게. 설명은 간결하게.',
   '- 코드 실행/확인이 필요하면 Bash 를 사용하라.',
+  '- 웹 앱은 Vite 기반으로 만들고, 가능하면 워크스페이스 루트에 바로 생성하라(하위 폴더 최소화).',
+  '  dev 스크립트 이름은 반드시 "dev" 로 두고(예: "dev": "vite"), 의존성은 네가 직접 npm install 까지 마쳐라.',
+  '- 미리보기는 플랫폼이 자동으로 dev 서버를 띄워 보여준다.',
+  '  "npm run dev 를 실행하세요" 나 "localhost:5173 에 접속하세요" 같은 안내는 절대 하지 마라.',
+  '  대신 "오른쪽 위 브라우저(미리보기) 버튼을 누르면 바로 확인할 수 있어요" 라고 안내하라.',
+].join('\n');
+
+// 일반 채팅 모드 시스템 프롬프트. 코딩 도구는 없고, '만들기 의도'가 분명하면 propose_project 로 제안.
+const CHAT_SYSTEM_PROMPT = [
+  '너는 CodingPT 앱의 친절한 한국어 AI 어시스턴트다.',
+  '일반적인 질문에 답하고 자연스럽게 대화한다. 파일 생성·코드 실행 도구는 없다.',
+  '답변은 명확하고 간결하게.',
+  '사용자가 앱·웹사이트·게임·프로그램 등 무언가를 "직접 만들고 싶어" 하는 의도가 분명하면 propose_project 도구를 호출해 워크스페이스 생성을 제안하라.',
+  '- propose_project 는 만들기 의도가 분명할 때만 호출한다. 단순 질문·개념 설명·잡담·코드 한 줄 물어보기에는 절대 호출하지 말 것.',
+  '- 도구 호출 후에는 무엇을 만들지 한두 문장으로 짧게 덧붙여라.',
 ].join('\n');
 
 /**
@@ -98,6 +113,19 @@ function readWorkspaceFile(userId, projectId, relPath) {
 }
 
 /**
+ * 워크스페이스 내 파일 쓰기 (IDE 에디터 편집 → 샌드박스 FS 반영용 → dev 서버/HMR 이 감지).
+ * 워커 fs == 샌드박스 공유 볼륨이라 컨테이너 상태와 무관하게 기록된다.
+ */
+function writeWorkspaceFile(userId, projectId, relPath, content) {
+  const base = workspaceDir(userId, projectId);
+  const full = resolveInWorkspace(base, relPath);
+  if (!full) throw new Error('잘못된 경로입니다.');
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, content == null ? '' : String(content));
+  return true;
+}
+
+/**
  * 절대 file_path 를 워크스페이스 기준 상대경로로 변환 (밖이면 null).
  */
 function toWorkspaceRelative(userId, projectId, absPath) {
@@ -121,7 +149,12 @@ function seedWorkspace(userId, projectId, files) {
     const full = resolveInWorkspace(base, f.path);
     if (!full) continue;
     fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, String(f.content == null ? '' : f.content));
+    if (f.base64) {
+      // 채팅 첨부(이미지/PDF 등) — base64 를 바이너리로 기록해 에이전트가 Read 로 인식
+      fs.writeFileSync(full, Buffer.from(String(f.content || ''), 'base64'));
+    } else {
+      fs.writeFileSync(full, String(f.content == null ? '' : f.content));
+    }
   }
 }
 
@@ -198,6 +231,7 @@ async function runAgentQuery({
   seedFiles,
   cwd,
   model,
+  mode,
   resumeSessionId,
   autoApprove,
   onEvent,
@@ -206,9 +240,11 @@ async function runAgentQuery({
 }) {
   const sdk = await loadSdk();
   const { query } = sdk;
+  const isChat = mode === 'chat';
   const workdir = cwd || workspaceDir(userId, projectId);
-  // 앱의 현재 파일들로 워크스페이스를 시드 → 에이전트가 실제 프로젝트 위에서 작업
-  if (seedFiles) seedWorkspace(userId, projectId, seedFiles);
+  // 앱의 현재 파일들로 워크스페이스를 시드 → 에이전트가 실제 프로젝트 위에서 작업.
+  // 채팅 모드는 파일 작업이 없으므로 시드하지 않는다.
+  if (seedFiles && !isChat) seedWorkspace(userId, projectId, seedFiles);
 
   // 이 질의가 띄운 승인 요청들 — 세션 종료/중단 시 정리(canUseTool 가 영원히 매달리지 않게)
   const myPending = new Set();
@@ -217,11 +253,23 @@ async function runAgentQuery({
     model: model || DEFAULT_MODEL,
     cwd: workdir,
     permissionMode: 'default',
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: VIBE_SYSTEM_APPEND },
+    // 채팅 모드: 일반 어시스턴트 프롬프트 + 모든 빌트인 도구 비활성(순수 대화).
+    // 코드 모드: claude_code 프리셋 + 바이브코딩 컨텍스트.
+    systemPrompt: isChat
+      ? CHAT_SYSTEM_PROMPT
+      : { type: 'preset', preset: 'claude_code', append: VIBE_SYSTEM_APPEND },
+    ...(isChat ? { tools: [] } : {}),
     // 서브프로세스(Claude Code CLI) stderr 디버깅
     stderr: (data) => console.error('[agent-stderr]', String(data).slice(0, 2000)),
     // 권한 게이트: 파일 변경 도구는 사용자 승인(diff) 대기. autoApprove 면 즉시 허용.
     canUseTool: async (toolName, input, opts) => {
+      // 채팅 모드: 우리 propose_project(MCP) 만 허용, 그 외(파일/실행 등)는 모두 거부.
+      if (isChat) {
+        if (typeof toolName === 'string' && toolName.startsWith('mcp__chat__')) {
+          return { behavior: 'allow', updatedInput: input };
+        }
+        return { behavior: 'deny', message: '채팅 모드에서는 해당 도구를 사용할 수 없습니다.' };
+      }
       if (typeof permissionResolver === 'function') {
         return permissionResolver(toolName, input, opts);
       }
@@ -249,7 +297,35 @@ async function runAgentQuery({
   // Phase 2: 샌드박스 활성 시 Bash 를 사용자별 격리 컨테이너로 라우팅.
   // SDK 의 createSdkMcpServer + tool 로 인프로세스 bash 도구를 만들고,
   // toolAliases 로 모델이 emit 한 Bash 를 그 도구로 보낸다(이벤트상 여전히 tool_use 'Bash' → 앱 무변경).
-  if (sandboxManager.isEnabled() && sdk.createSdkMcpServer && sdk.tool) {
+  // 채팅 모드: '만들기 의도' 감지 시 모델이 호출하는 propose_project 툴 등록(부작용 없음 — 앱이 확인 카드 표시).
+  if (isChat && sdk.createSdkMcpServer && sdk.tool) {
+    try {
+      const { z } = require('zod');
+      const proposeTool = sdk.tool(
+        'propose_project',
+        'Propose creating a coding workspace (or opening an existing one) to start building, when the user clearly wants to build an app/website/game/program. Call ONLY when the build intent is clear; never for general questions or chit-chat.',
+        {
+          name: z.string().describe('짧은 워크스페이스 이름 (예: "할 일 앱")'),
+          description: z.string().describe('무엇을 만들지 한 줄 설명'),
+          stack: z.array(z.string()).optional().describe('기술 스택 후보 (예: ["React","TypeScript"])'),
+          existingWorkspaceId: z.string().optional().describe('관련된 기존 워크스페이스가 있으면 그 id'),
+          initialPrompt: z.string().describe('생성 후 코딩 에이전트에게 전달할 첫 작업 지시 (사용자 요청 요약)'),
+        },
+        async () => ({
+          // 부작용 없음: 앱이 이 tool_use 를 감지해 확인 카드를 띄우고, 사용자가 확인하면 실제 생성/전환을 수행한다.
+          content: [{ type: 'text', text: '워크스페이스 생성 제안을 사용자에게 전달했습니다. 사용자가 확인하면 코딩이 시작됩니다.' }],
+        }),
+      );
+      options.mcpServers = {
+        ...(options.mcpServers || {}),
+        chat: sdk.createSdkMcpServer({ name: 'chat', version: '1.0.0', tools: [proposeTool] }),
+      };
+    } catch (e) {
+      console.error('[agentService] propose_project 툴 등록 실패 — 일반 채팅으로 진행:', e.message);
+    }
+  }
+
+  if (!isChat && sandboxManager.isEnabled() && sdk.createSdkMcpServer && sdk.tool) {
     try {
       const { z } = require('zod');
       const bashTool = sdk.tool(
@@ -358,6 +434,7 @@ module.exports = {
   workspaceDir,
   seedWorkspace,
   readWorkspaceFile,
+  writeWorkspaceFile,
   toWorkspaceRelative,
   normalizeContent,
   DEFAULT_MODEL,

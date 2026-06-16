@@ -5,13 +5,15 @@
  */
 const agentService = require('../services/agentService');
 const agentProxyService = require('../services/agentProxyService');
+const usageService = require('../services/usageService');
+const BILLING = require('../config/billing');
 
 /**
  * 에이전트 실행 — SDK 이벤트를 SSE 로 스트리밍
  * body: { prompt, sessionId?, model? }
  */
 const runAgent = async (req, res) => {
-  const { prompt, sessionId, model, projectId, files, autoApprove } = req.body || {};
+  const { prompt, sessionId, model, projectId, files, autoApprove, mode } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ success: false, message: '프롬프트가 필요합니다.' });
@@ -23,15 +25,63 @@ const runAgent = async (req, res) => {
     });
   }
 
+  // 사용량 프리플라이트 게이트 — SSE 헤더 쓰기 전(일반 JSON 으로 429/402 반환 가능).
+  // BILLING.ENFORCE 가 켜져 있을 때만 차단. 게이트 조회 실패 시엔 허용(fail-open).
+  if (BILLING.ENFORCE && req.user && req.user.id) {
+    try {
+      const gate = await usageService.checkAllowance(req.user.id);
+      if (!gate.allowed) {
+        const httpStatus = gate.reason === 'weekly_exceeded' ? 402 : 429;
+        return res.status(httpStatus).json({
+          success: false,
+          code: 'USAGE_LIMIT_REACHED',
+          reason: gate.reason,
+          planCode: gate.planCode,
+          windowResetAt: gate.windowResetAt,
+          weeklyResetAt: gate.weeklyResetAt,
+          windowUsedUnits: gate.windowUsedUnits,
+          windowLimitUnits: gate.windowLimitUnits,
+          weeklyUsedUnits: gate.weeklyUsedUnits,
+          weeklyLimitUnits: gate.weeklyLimitUnits,
+          upgradeUrl: `${BILLING.PAYMENT_WEB_URL}/pricing`,
+          message: '사용량 한도에 도달했습니다. 한도 초기화를 기다리거나 플랜을 업그레이드하세요.',
+        });
+      }
+    } catch (e) {
+      console.error('[AgentController] 사용량 게이트 확인 실패(허용 처리):', e.message);
+    }
+  }
+
   // SSE 헤더 (executorService 패턴과 동일)
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
 
+  // 사용량 미터링: agent_init 에서 session_id 포착, done 에서 1회 적재(fire-and-forget).
+  // 스트림을 절대 블록/중단하지 않는다 — 실패는 로그만.
+  let meterSessionId = sessionId || null;
+  let metered = false;
   const send = (o) => {
     try {
       res.write(`data: ${JSON.stringify(o)}\n\n`);
+    } catch (_) {
+      /* noop */
+    }
+    try {
+      if (o && o.type === 'agent_init' && o.sessionId) meterSessionId = o.sessionId;
+      if (o && o.type === 'done' && !metered) {
+        metered = true;
+        usageService
+          .recordTurn({
+            userId: req.user && req.user.id,
+            sessionId: meterSessionId,
+            projectId,
+            costUsd: o.costUsd,
+            usage: o.usage,
+          })
+          .catch((e) => console.error('[AgentController] 사용량 적재 실패:', e.message));
+      }
     } catch (_) {
       /* noop */
     }
@@ -57,7 +107,7 @@ const runAgent = async (req, res) => {
     if (agentProxyService.isEnabled()) {
       // 워커로 SSE 프록시 (실행은 격리된 agent-worker 컨테이너)
       await agentProxyService.proxyQuery(
-        { prompt, userId, projectId, files, model, resumeSessionId: sessionId, autoApprove: !!autoApprove },
+        { prompt, userId, projectId, files, model, mode, resumeSessionId: sessionId, autoApprove: !!autoApprove },
         { onEvent: send, abortController },
       );
     } else {
@@ -68,6 +118,7 @@ const runAgent = async (req, res) => {
         projectId,
         seedFiles: files,
         model,
+        mode,
         resumeSessionId: sessionId,
         autoApprove: !!autoApprove,
         abortController,
@@ -149,4 +200,48 @@ const permission = async (req, res) => {
   return res.json({ success: true, requestId, decision });
 };
 
-module.exports = { runAgent, getFile, permission };
+/**
+ * 워크스페이스 파일 쓰기 — IDE 에디터 편집을 샌드박스 FS 에 반영(dev 서버/HMR 감지).
+ * POST /api/agent/file  body: { path, content, projectId? }
+ */
+const writeFile = async (req, res) => {
+  const { path: relPath, content, projectId } = req.body || {};
+  const userId = req.user && req.user.id;
+  if (!relPath || typeof relPath !== 'string') {
+    return res.status(400).json({ success: false, message: 'path 가 필요합니다.' });
+  }
+  if (agentProxyService.isEnabled()) {
+    try {
+      const { status, body } = await agentProxyService.writeFile({ userId, projectId, path: relPath, content });
+      return res.status(status || 200).json(body);
+    } catch (e) {
+      return res.status(502).json({ success: false, message: '워커 연결 실패: ' + e.message });
+    }
+  }
+  try {
+    agentService.writeWorkspaceFile(userId, projectId, relPath, content);
+    return res.json({ success: true, path: relPath });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message || '파일을 쓸 수 없습니다.' });
+  }
+};
+
+/**
+ * 샌드박스 터미널 — 임의 셸 명령을 사용자 샌드박스에서 실행하고 출력을 SSE 로 스트리밍.
+ * POST /api/agent/exec  body: { command, cwd?, projectId? }
+ */
+const terminalExec = async (req, res) => {
+  const { command, cwd, projectId } = req.body || {};
+  const userId = req.user && req.user.id;
+  if (!command || typeof command !== 'string') {
+    return res.status(400).json({ success: false, message: 'command 가 필요합니다.' });
+  }
+  if (!agentProxyService.isEnabled()) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.write(`data: ${JSON.stringify({ type: 'error', message: '터미널은 샌드박스(워커) 환경에서만 사용할 수 있습니다.' })}\n\n`);
+    return res.end();
+  }
+  return agentProxyService.proxyExec({ userId, projectId, command, cwd }, res);
+};
+
+module.exports = { runAgent, getFile, writeFile, permission, terminalExec };

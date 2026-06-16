@@ -23,6 +23,7 @@
   "description": "CodingPT Backend API Server",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",
+    "@anthropic-ai/sdk": "^0.104.1",
     "@aws-sdk/client-s3": "^3.943.0",
     "@aws-sdk/s3-request-presigner": "^3.943.0",
     "acorn": "^8.17.0",

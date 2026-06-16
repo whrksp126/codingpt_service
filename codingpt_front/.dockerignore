@@ -1,6 +1,7 @@
 node_modules
+.next
 .git
-.vscode
-.DS_Store
-/dist
-/cache
+.env
+.env.*
+!.env.example
+*.log

@@ -143,7 +143,92 @@ function proxyQuery(payload, { onEvent, abortController } = {}) {
   });
 }
 
+// ── dev 서버(미리보기) ──
+const startDev = (payload) => postJson('/dev/start', payload);   // { userId, projectId }
+const stopDev = (payload) => postJson('/dev/stop', payload);     // { userId }
+
+/**
+ * 미리보기 dev 서버 HTTP 프록시. back 의 원본 경로(/api/preview/<pid>/...)를 보존해
+ * 워커 /devproxy 로 포워딩(워커가 다시 샌드박스로). 요청/응답 스트림 그대로 파이프.
+ */
+function proxyDev(req, res, { userId } = {}) {
+  const url = new URL(`${WORKER_URL}/devproxy${req.originalUrl}`);
+  const headers = { ...req.headers, 'x-user-id': String(userId) };
+  delete headers.host;
+  const upstream = http.request(
+    { hostname: url.hostname, port: url.port || 80, path: url.pathname + url.search, method: req.method, headers, timeout: 35000 },
+    (up) => {
+      res.writeHead(up.statusCode || 502, up.headers);
+      up.pipe(res);
+    },
+  );
+  upstream.on('error', (e) => { if (!res.headersSent) res.status(502).end('preview proxy error: ' + e.message); else { try { res.end(); } catch (_) { /* noop */ } } });
+  upstream.on('timeout', () => { try { upstream.destroy(); } catch (_) { /* noop */ } });
+  req.pipe(upstream);
+}
+
+/**
+ * 샌드박스 터미널 SSE 프록시 — 워커 /sandbox/exec 의 이벤트 스트림을 그대로 클라이언트로 파이프.
+ * payload: { userId, projectId, command, cwd }
+ */
+function proxyExec(payload, res) {
+  const url = new URL(`${WORKER_URL}/sandbox/exec`);
+  const body = JSON.stringify(payload || {});
+  const upstream = http.request(
+    {
+      hostname: url.hostname, port: url.port || 80, path: url.pathname, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+    },
+    (up) => {
+      res.writeHead(up.statusCode || 502, {
+        'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
+        Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
+      });
+      up.pipe(res);
+    },
+  );
+  upstream.on('error', (e) => {
+    try { res.write(`data: ${JSON.stringify({ type: 'error', message: '워커 연결 실패: ' + e.message })}\n\n`); } catch (_) { /* noop */ }
+    try { res.end(); } catch (_) { /* noop */ }
+  });
+  // 클라이언트가 끊으면 업스트림도 끊는다(워커 exec 는 120s 캡으로 자동 종료).
+  res.on('close', () => { try { upstream.destroy(); } catch (_) { /* noop */ } });
+  upstream.write(body);
+  upstream.end();
+}
+
+/**
+ * 미리보기 HMR(WebSocket) 업그레이드 프록시 — back 의 ws 업그레이드를 워커 /devproxy 로 포워딩.
+ * 워커가 다시 샌드박스 dev 서버 ws 로 연결한다. (Vite 핫리로드용)
+ */
+function proxyDevWs(req, socket, head, { userId } = {}) {
+  const url = new URL(`${WORKER_URL}/devproxy${req.url}`);
+  const headers = { ...req.headers, 'x-user-id': String(userId) };
+  delete headers.host;
+  const proxyReq = http.request({
+    hostname: url.hostname, port: url.port || 80, path: url.pathname + url.search, method: 'GET', headers, timeout: 0,
+  });
+  proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+    const lines = [`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage || ''}`.trim()];
+    for (const [k, v] of Object.entries(proxyRes.headers || {})) {
+      if (Array.isArray(v)) v.forEach((vv) => lines.push(`${k}: ${vv}`));
+      else lines.push(`${k}: ${v}`);
+    }
+    socket.write(lines.join('\r\n') + '\r\n\r\n');
+    if (proxyHead && proxyHead.length) proxySocket.unshift(proxyHead);
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+    const cleanup = () => { try { proxySocket.destroy(); } catch (_) { /* noop */ } try { socket.destroy(); } catch (_) { /* noop */ } };
+    proxySocket.on('error', cleanup); socket.on('error', cleanup);
+    proxySocket.on('close', cleanup); socket.on('close', cleanup);
+  });
+  proxyReq.on('error', () => { try { socket.destroy(); } catch (_) { /* noop */ } });
+  if (head && head.length) proxyReq.write(head);
+  proxyReq.end();
+}
+
 const proxyPermission = (payload) => postJson('/permission', payload);
+const writeFile = (payload) => postJson('/file', payload); // { userId, projectId, path, content }
 const getFile = ({ userId, projectId, path }) => {
   const qs = new URLSearchParams();
   if (path != null) qs.set('path', String(path));
@@ -152,4 +237,4 @@ const getFile = ({ userId, projectId, path }) => {
   return getJson(`/file?${qs.toString()}`);
 };
 
-module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, WORKER_URL };
+module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyExec, WORKER_URL };

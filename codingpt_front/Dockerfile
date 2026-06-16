@@ -1,31 +1,29 @@
-# Node.js 환경에서 빌드 (운영)
+# CodingPT 결제 웹 (Next.js standalone)
+FROM node:20-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install
+
 FROM node:20-alpine AS builder
 WORKDIR /app
-
-# npm 기본 레지스트리 설정
-RUN npm config set registry https://registry.npmjs.org/
-
-# package.json과 package-lock.json 복사
-COPY package.json package-lock.json ./
-
-# 패키지 설치 (버전 차이 방지)
-RUN npm ci
-
-# 소스 코드 복사
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-
-# 빌드 실행 (운영 환경) — Vite가 빌드 타임에 VITE_* 를 dist에 박음
-ARG NODE_ENV=production
-ARG VITE_BACKEND_URL
-ARG VITE_DEBUG=false
-ENV NODE_ENV=${NODE_ENV}
-ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
-ENV VITE_DEBUG=${VITE_DEBUG}
+# 빌드시 클라이언트에 인라인되는 NEXT_PUBLIC_* 는 build arg 로 주입
+ARG NEXT_PUBLIC_BACKEND_URL
+ARG NEXT_PUBLIC_PORTONE_STORE_ID
+ARG NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE
+ARG NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING
+ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL \
+    NEXT_PUBLIC_PORTONE_STORE_ID=$NEXT_PUBLIC_PORTONE_STORE_ID \
+    NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE=$NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE \
+    NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING=$NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING
 RUN npm run build
 
-# Nginx를 사용하여 서비스
-FROM nginx:stable-alpine AS production
-COPY nginx.prod.conf /etc/nginx/conf.d/default.conf
-COPY --from=builder /app/dist /usr/share/nginx/html
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production PORT=3400
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+EXPOSE 3400
+CMD ["node", "server.js"]

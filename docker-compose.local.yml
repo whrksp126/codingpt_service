@@ -59,6 +59,8 @@ services:
       - AGENT_SANDBOX_ENABLED=1
       - AGENT_SANDBOX_IMAGE=codingpt_service-agent-worker
       - AGENT_SANDBOX_VOLUME=codingpt_service_cpt_agent_workspace
+      # dev 서버(vite/esbuild) 메모리 여유 — 512MB 면 OOM Killed.
+      - AGENT_SANDBOX_MEM_MB=2048
       # 샌드박스는 internal 네트워크(직접 인터넷 차단) + allowlist 프록시로만 egress
       - AGENT_SANDBOX_NETWORK=cpt_sandbox_net_local
       - AGENT_EGRESS_PROXY=http://egress-proxy:3128
@@ -72,6 +74,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - codingpt_local
+      - cpt_sandbox_net       # 미리보기 dev 서버 프록시: 샌드박스 컨테이너에 직접 HTTP 도달
     restart: unless-stopped
 
   # 샌드박스 egress allowlist 프록시 — internal 네트워크의 샌드박스가 이걸 통해서만 인터넷.
@@ -85,21 +88,30 @@ services:
       - cpt_sandbox_net       # 샌드박스(internal)와 통신
     restart: unless-stopped
 
+  # 공개 사이트(Next.js SSR) — 랜딩 + 구독/크레딧 결제 + 약관
   front:
     container_name: codingpt_front_local
     build:
       context: ./codingpt_front
-      dockerfile: Dockerfile.local
+      dockerfile: Dockerfile.dev
     ports:
-      - "3300:3100"
-    env_file:
-      - ./codingpt_front/.env.local
+      - "3400:3400"
+    environment:
+      - NODE_ENV=development
+      - BACKEND_INTERNAL_URL=http://back:5300
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:5300
+      - NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID:-}
+      - NEXT_PUBLIC_PORTONE_STORE_ID=${PORTONE_STORE_ID:-}
+      - NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING=${PORTONE_CHANNEL_KEY_BILLING:-}
     volumes:
       - ./codingpt_front:/app
       - /app/node_modules
+      - /app/.next
     networks:
       - codingpt_local
     restart: unless-stopped
+
+  # 어드민(Vite)은 독립 프로젝트로 분리됨 → ../codingpt_admin (자체 docker-compose)
 
 networks:
   codingpt_local:
