@@ -5,7 +5,7 @@
 
 import { BACKEND_PUBLIC } from './api';
 import { getToken } from './auth';
-import type { AgentEvent, PreviewState } from './agentTypes';
+import type { AgentEvent, PreviewState, FileNode, ExecEvent } from './agentTypes';
 
 export interface StreamHandlers {
   onEvent: (evt: AgentEvent) => void;
@@ -121,6 +121,11 @@ async function jsonFetch<T>(path: string, init: { method?: string; body?: unknow
   return data as T;
 }
 
+/** 워크스페이스 파일 트리(IDE 파일트리) */
+export const listAgentFiles = (projectId: string) =>
+  jsonFetch<{ success: boolean; tree: FileNode[] }>(`/api/agent/files?projectId=${encodeURIComponent(projectId)}`)
+    .then((r) => r.tree || []);
+
 /** 워크스페이스 파일 읽기(에디터 동기화) */
 export const getAgentFile = (relPath: string, projectId?: string) =>
   jsonFetch<{ path: string; content: string }>(
@@ -140,6 +145,60 @@ export const resolveAgentPermission = (requestId: string, decision: 'allow' | 'd
     method: 'POST',
     body: { requestId, decision, message },
   });
+
+// ── 터미널(샌드박스 exec) ─────────────────────────────────────
+/** 샌드박스 셸 명령 실행 — 출력 SSE 스트리밍. @returns abort 함수 */
+export function streamExec(
+  payload: { command: string; cwd?: string; projectId?: string },
+  handlers: { onEvent: (e: ExecEvent) => void; onError?: (m: string) => void; onComplete?: () => void },
+): () => void {
+  const controller = new AbortController();
+  const token = getToken();
+  (async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${BACKEND_PUBLIC}/api/agent/exec`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (e) {
+      handlers.onError?.(e instanceof Error ? e.message : '네트워크 에러');
+      return;
+    }
+    if (!res.ok || !res.body) { handlers.onError?.(`서버 에러: ${res.status}`); return; }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    const emit = (line: string) => {
+      const t = line.trim();
+      if (!t.startsWith('data:')) return;
+      try { handlers.onEvent(JSON.parse(t.slice(5).trim()) as ExecEvent); } catch (_) { /* noop */ }
+    };
+    try {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const l of lines) emit(l);
+      }
+      if (pending) emit(pending);
+      handlers.onComplete?.();
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') handlers.onError?.(e?.message || '스트림 중단');
+    }
+  })();
+  return () => { try { controller.abort(); } catch (_) { /* noop */ } };
+}
+
+/** dev 서버 기동 명령인지(미리보기로 라우팅) */
+export const isDevServerCommand = (raw: string): boolean =>
+  /(^|\s|&&|;)(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|serve)\b/.test(raw)
+  || /(^|\s|&&|;)(vite|next\s+dev|react-scripts\s+start)\b/.test(raw);
 
 // ── 프리뷰(dev 서버) ──────────────────────────────────────────
 /** dev 서버 시작 → { mode, token, url } (url 은 /api/preview/{token}/ 상대경로) */

@@ -8,9 +8,12 @@ import { useAgentSession } from '@/hooks/useAgentSession';
 import Chat from '@/components/agent/Chat';
 import Preview from '@/components/agent/Preview';
 import PermissionModal from '@/components/agent/PermissionModal';
+import FileTree from '@/components/agent/FileTree';
+import Editor from '@/components/agent/Editor';
+import Terminal from '@/components/agent/Terminal';
 import type { WorkspaceMeta, SessionMeta } from '@/lib/agentTypes';
 
-// 바이브코딩 코딩 화면 — 채팅(좌) + 라이브 프리뷰(우). 세션 전환/생성.
+// 바이브코딩 코딩 화면 — 채팅(좌) + IDE/프리뷰/터미널(우). 세션 전환/생성.
 
 export default function WorkspacePage() {
   const router = useRouter();
@@ -22,15 +25,11 @@ export default function WorkspacePage() {
   const [ws, setWs] = useState<WorkspaceMeta | null>(null);
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [mobileTab, setMobileTab] = useState<'chat' | 'preview'>('chat');
-  const [reloadSignal, setReloadSignal] = useState(0);
 
-  // 세션 결정: ?s= → 최신 → 없으면 생성
   const ensureSession = useCallback(async () => {
     const list = await listSessions(wsId);
     const wanted = search.get('s');
-    let active = wanted && list.find((s) => s.id === wanted)?.id;
-    if (!active) active = list[0]?.id;
+    let active = (wanted && list.find((s) => s.id === wanted)?.id) || list[0]?.id;
     if (!active) {
       const created = await createSession(wsId);
       active = created.id;
@@ -59,10 +58,6 @@ export default function WorkspacePage() {
       ws={ws}
       sessionId={sessionId}
       sessions={sessions}
-      mobileTab={mobileTab}
-      setMobileTab={setMobileTab}
-      reloadSignal={reloadSignal}
-      onTurnDone={() => setReloadSignal((n) => n + 1)}
       onNewChat={async () => {
         const created = await createSession(wsId);
         setSessions((p) => [created, ...p]);
@@ -74,16 +69,21 @@ export default function WorkspacePage() {
   );
 }
 
+type RightView = 'code' | 'preview' | 'terminal';
+
 function CodingView({
-  wsId, ws, sessionId, sessions, mobileTab, setMobileTab, reloadSignal, onTurnDone, onNewChat, onPickSession,
+  wsId, ws, sessionId, sessions, onNewChat, onPickSession,
 }: {
   wsId: string; ws: WorkspaceMeta | null; sessionId: string; sessions: SessionMeta[];
-  mobileTab: 'chat' | 'preview'; setMobileTab: (t: 'chat' | 'preview') => void;
-  reloadSignal: number; onTurnDone: () => void;
   onNewChat: () => void; onPickSession: (id: string) => void;
 }) {
   const router = useRouter();
   const limitHit = useRef(false);
+  const [rightView, setRightView] = useState<RightView>('preview');
+  const [mobileChat, setMobileChat] = useState(true); // 모바일: 채팅 vs 우측뷰
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [reloadSignal, setReloadSignal] = useState(0);
+
   const agent = useAgentSession(wsId, sessionId, {
     mode: ws?.kind === 'chat' ? 'chat' : 'code',
     onLimit: () => {
@@ -94,45 +94,63 @@ function CodingView({
     },
   });
 
-  // 턴 종료 시 프리뷰 새로고침 트리거
-  useEffect(() => agent.subscribe((evt) => { if (evt.type === 'done') onTurnDone(); }), [agent, onTurnDone]);
+  // 턴 종료 → 프리뷰/파일트리 새로고침
+  useEffect(() => agent.subscribe((evt) => { if (evt.type === 'done') setReloadSignal((n) => n + 1); }), [agent]);
+
+  const pickTab = (v: RightView) => { setRightView(v); setMobileChat(false); };
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 20, display: 'flex', flexDirection: 'column', background: 'var(--base)' }}>
       {/* 헤더 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <button onClick={() => router.push('/app')} style={ghostBtn} aria-label="목록">←</button>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{ws?.name || '프로젝트'}</div>
-        </div>
+        <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>{ws?.name || '프로젝트'}</div>
         <div style={{ flex: 1 }} />
+        {/* 우측 뷰 탭 */}
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button onClick={() => { setMobileChat(true); }} className="cpt-tab-chat" style={{ ...tabBtn(false), display: 'none' }}>채팅</button>
+          <button onClick={() => pickTab('code')} style={tabBtn(!mobileChat && rightView === 'code')}>코드</button>
+          <button onClick={() => pickTab('preview')} style={tabBtn(!mobileChat && rightView === 'preview')}>미리보기</button>
+          <button onClick={() => pickTab('terminal')} style={tabBtn(!mobileChat && rightView === 'terminal')}>터미널</button>
+        </div>
         <select value={sessionId} onChange={(e) => onPickSession(e.target.value)} style={selectStyle}>
           {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || '새 채팅'}</option>)}
         </select>
-        <button onClick={onNewChat} style={ghostBtn}>+ 새 채팅</button>
-        {/* 모바일 탭 */}
-        <div className="cpt-mobile-tabs" style={{ display: 'none', gap: 4 }}>
-          <button onClick={() => setMobileTab('chat')} style={tabBtn(mobileTab === 'chat')}>채팅</button>
-          <button onClick={() => setMobileTab('preview')} style={tabBtn(mobileTab === 'preview')}>미리보기</button>
+        <button onClick={onNewChat} style={ghostBtn}>+ 채팅</button>
+      </div>
+
+      {/* 본문 */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <div className={`cpt-pane-chat ${mobileChat ? 'cpt-active' : ''}`} style={{ flex: '1 1 0', minWidth: 0, borderRight: '1px solid var(--border)', display: 'flex' }}>
+          <div style={{ width: '100%', maxWidth: 600, margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} />
+          </div>
+        </div>
+
+        <div className={`cpt-pane-right ${!mobileChat ? 'cpt-active' : ''}`} style={{ flex: '1.2 1 0', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          {rightView === 'code' ? (
+            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+              <div style={{ width: 220, flexShrink: 0 }}>
+                <FileTree wsId={wsId} selected={selectedFile} onSelect={setSelectedFile} reloadSignal={reloadSignal} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Editor wsId={wsId} path={selectedFile} />
+              </div>
+            </div>
+          ) : rightView === 'preview' ? (
+            <Preview wsId={wsId} reloadSignal={reloadSignal} />
+          ) : (
+            <Terminal wsId={wsId} />
+          )}
         </div>
       </div>
 
-      {/* 본문: 채팅 | 프리뷰 */}
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <div className={`cpt-pane-chat ${mobileTab === 'chat' ? 'cpt-active' : ''}`} style={{ flex: '1 1 0', minWidth: 0, borderRight: '1px solid var(--border)', display: 'flex' }}>
-          <div style={{ width: '100%', maxWidth: 620, margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <Chat
-              messages={agent.messages}
-              running={agent.running}
-              loading={agent.loading}
-              onSend={agent.send}
-              onAbort={agent.abort}
-            />
-          </div>
-        </div>
-        <div className={`cpt-pane-preview ${mobileTab === 'preview' ? 'cpt-active' : ''}`} style={{ flex: '1 1 0', minWidth: 0, display: 'flex' }}>
-          <div style={{ width: '100%' }}><Preview wsId={wsId} reloadSignal={reloadSignal} /></div>
-        </div>
+      {/* 모바일 하단 탭(채팅 복귀) */}
+      <div className="cpt-mobile-bar" style={{ display: 'none' }}>
+        <button onClick={() => setMobileChat(true)} style={tabBtn(mobileChat)}>채팅</button>
+        <button onClick={() => pickTab('code')} style={tabBtn(!mobileChat && rightView === 'code')}>코드</button>
+        <button onClick={() => pickTab('preview')} style={tabBtn(!mobileChat && rightView === 'preview')}>미리보기</button>
+        <button onClick={() => pickTab('terminal')} style={tabBtn(!mobileChat && rightView === 'terminal')}>터미널</button>
       </div>
 
       <PermissionModal pending={agent.pendingPermission} onResolve={agent.resolvePermission} />
@@ -140,6 +158,6 @@ function CodingView({
   );
 }
 
-const ghostBtn: React.CSSProperties = { padding: '7px 12px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' };
-const selectStyle: React.CSSProperties = { padding: '7px 10px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, maxWidth: 180 };
-const tabBtn = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: active ? 'var(--accent-tint)' : 'transparent', color: active ? 'var(--accent)' : 'var(--text2)', fontSize: 13, cursor: 'pointer' });
+const ghostBtn: React.CSSProperties = { padding: '7px 11px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' };
+const selectStyle: React.CSSProperties = { padding: '7px 9px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text2)', fontSize: 12.5, maxWidth: 150 };
+const tabBtn = (active: boolean): React.CSSProperties => ({ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: active ? 'var(--accent-tint)' : 'transparent', color: active ? 'var(--accent)' : 'var(--text2)', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' });

@@ -170,6 +170,29 @@ const getFile = async (req, res) => {
 };
 
 /**
+ * 워크스페이스 파일 트리 — IDE 파일트리용.
+ * GET /api/agent/files?projectId=<id>
+ */
+const getFiles = async (req, res) => {
+  const projectId = req.query.projectId;
+  const userId = req.user && req.user.id;
+  if (agentProxyService.isEnabled()) {
+    try {
+      const { status, body } = await agentProxyService.listFiles({ userId, projectId });
+      return res.status(status || 200).json(body);
+    } catch (e) {
+      return res.status(502).json({ success: false, message: '워커 연결 실패: ' + e.message });
+    }
+  }
+  try {
+    const tree = agentService.listWorkspaceFiles(userId, projectId);
+    return res.json({ success: true, tree });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message || '파일 목록을 읽을 수 없습니다.' });
+  }
+};
+
+/**
  * 수정 승인 응답 — diff 모달에서 사용자가 승인/거부한 결과를 받아 대기 중인 canUseTool 을 해소.
  * POST /api/agent/permission  body: { requestId, decision: 'allow'|'deny', message? }
  */
@@ -244,4 +267,4 @@ const terminalExec = async (req, res) => {
   return agentProxyService.proxyExec({ userId, projectId, command, cwd }, res);
 };
 
-module.exports = { runAgent, getFile, writeFile, permission, terminalExec };
+module.exports = { runAgent, getFile, getFiles, writeFile, permission, terminalExec };

@@ -174,6 +174,20 @@ app.post('/file', (req, res) => {
   }
 });
 
+/**
+ * 워크스페이스 파일 트리 — IDE 파일트리용.
+ * GET /files?projectId=<id>&userId=<id>
+ */
+app.get('/files', (req, res) => {
+  const { projectId, userId } = req.query;
+  try {
+    const tree = agentService.listWorkspaceFiles(userId, projectId);
+    return res.json({ success: true, tree });
+  } catch (error) {
+    return res.status(400).json({ success: false, message: error.message || '파일 목록을 읽을 수 없습니다.' });
+  }
+});
+
 // ── dev 서버(미리보기) ──────────────────────────────────────────────
 // 샌드박스에서 npm run dev 를 띄우고, /devproxy 로 그 포트를 프록시한다.
 // back 이 userId 를 인증 후 실어 보낸다(워커는 재검증 안 함).

@@ -90,10 +90,13 @@ th { color: var(--dim); font-weight: 600; }
 /* ── 웹 바이브코딩(/app) ── */
 @keyframes cptPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
 .cpt-dot { animation: cptPulse 1s ease-in-out infinite; }
-.cpt-mobile-tabs { display: none; }
+.cpt-mobile-bar { display: none; }
 @media (max-width: 860px) {
-  /* 좁은 화면: 채팅/미리보기 탭 토글 */
-  .cpt-mobile-tabs { display: flex !important; }
-  .cpt-pane-chat, .cpt-pane-preview { display: none !important; }
-  .cpt-pane-chat.cpt-active, .cpt-pane-preview.cpt-active { display: flex !important; border-right: none !important; }
+  /* 좁은 화면: 채팅/코드/미리보기/터미널 한 패널씩 — 하단 탭바로 전환 */
+  .cpt-pane-chat, .cpt-pane-right { display: none !important; }
+  .cpt-pane-chat.cpt-active, .cpt-pane-right.cpt-active { display: flex !important; border-right: none !important; }
+  .cpt-mobile-bar {
+    display: flex !important; gap: 4px; justify-content: space-around;
+    padding: 8px 10px; border-top: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+  }
 }

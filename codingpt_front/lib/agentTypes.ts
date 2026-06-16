@@ -59,3 +59,19 @@ export interface PreviewState {
   url?: string;
   log?: string;
 }
+
+// 파일 트리 노드(백엔드 listWorkspaceFiles 와 동일 shape)
+export interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'directory';
+  children?: FileNode[];
+}
+
+// 터미널(샌드박스 exec) SSE 이벤트
+export type ExecEvent =
+  | { type: 'start'; cwd: string }
+  | { type: 'output'; data: string }
+  | { type: 'cwd'; cwd: string }
+  | { type: 'done'; exitCode: number; timedOut?: boolean }
+  | { type: 'error'; message: string };

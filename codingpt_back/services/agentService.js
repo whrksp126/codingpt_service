@@ -126,6 +126,44 @@ function writeWorkspaceFile(userId, projectId, relPath, content) {
 }
 
 /**
+ * 워크스페이스 파일 트리 — 에디터/파일트리용. node_modules/.git 등 제외, 깊이/개수 캡.
+ * 반환: [{ name, path(상대), type:'file'|'directory', children? }] (디렉토리 우선·이름순)
+ */
+const TREE_SKIP = new Set(['node_modules', '.git', '.next', 'dist', 'build', '.cache', '.turbo']);
+function listWorkspaceFiles(userId, projectId) {
+  const base = workspaceDir(userId, projectId);
+  let count = 0;
+  const MAX = 2000;
+  const walk = (dir, rel, depth) => {
+    if (depth > 12 || count > MAX) return [];
+    let ents;
+    try { ents = fs.readdirSync(dir, { withFileTypes: true }); }
+    catch (_) { return []; }
+    const dirs = [];
+    const files = [];
+    for (const ent of ents) {
+      if (count > MAX) break;
+      const name = ent.name;
+      if (name.startsWith('.') && name !== '.env.example') {
+        if (TREE_SKIP.has(name) || name === '.git') continue;
+      }
+      if (TREE_SKIP.has(name)) continue;
+      const childRel = rel ? `${rel}/${name}` : name;
+      count++;
+      if (ent.isDirectory()) {
+        dirs.push({ name, path: childRel, type: 'directory', children: walk(path.join(dir, name), childRel, depth + 1) });
+      } else if (ent.isFile()) {
+        files.push({ name, path: childRel, type: 'file' });
+      }
+    }
+    dirs.sort((a, b) => a.name.localeCompare(b.name));
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    return [...dirs, ...files];
+  };
+  return walk(base, '', 0);
+}
+
+/**
  * 절대 file_path 를 워크스페이스 기준 상대경로로 변환 (밖이면 null).
  */
 function toWorkspaceRelative(userId, projectId, absPath) {
@@ -435,6 +473,7 @@ module.exports = {
   seedWorkspace,
   readWorkspaceFile,
   writeWorkspaceFile,
+  listWorkspaceFiles,
   toWorkspaceRelative,
   normalizeContent,
   DEFAULT_MODEL,

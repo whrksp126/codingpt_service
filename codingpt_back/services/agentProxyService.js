@@ -236,5 +236,11 @@ const getFile = ({ userId, projectId, path }) => {
   if (userId != null) qs.set('userId', String(userId));
   return getJson(`/file?${qs.toString()}`);
 };
+const listFiles = ({ userId, projectId }) => {
+  const qs = new URLSearchParams();
+  if (projectId != null) qs.set('projectId', String(projectId));
+  if (userId != null) qs.set('userId', String(userId));
+  return getJson(`/files?${qs.toString()}`);
+};
 
-module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyExec, WORKER_URL };
+module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyExec, WORKER_URL };
