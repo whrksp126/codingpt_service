@@ -21,7 +21,9 @@ RUN npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app
-ENV NODE_ENV=production PORT=3400
+# HOSTNAME=0.0.0.0 — standalone server.js 가 Docker 자동 HOSTNAME(컨테이너ID→단일 IP)에만
+# 바인딩되어 nginx_proxy 네트워크에서 도달 불가(502)해지는 문제 방지(모든 인터페이스 바인딩).
+ENV NODE_ENV=production PORT=3400 HOSTNAME=0.0.0.0
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
