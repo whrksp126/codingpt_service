@@ -68,7 +68,7 @@ class SubscriptionService {
    * 결제 검증 후 구독 활성화/전환. billingService(Phase 3)에서 호출.
    * 동일 사용자의 기존 활성 구독은 교체(업/다운그레이드)한다.
    */
-  async activateSubscription(userId, planId, { billingKey = null, paymentId = null, periodMonths = 1 } = {}, externalTx = null) {
+  async activateSubscription(userId, planId, { billingKey = null, paymentId = null, periodMonths = 1, source = null } = {}, externalTx = null) {
     const run = async (t) => {
       const plan = await SubscriptionPlan.findByPk(planId, { transaction: t });
       if (!plan) throw new Error('존재하지 않는 플랜입니다.');
@@ -85,6 +85,7 @@ class SubscriptionService {
 
       if (existing) {
         existing.plan_id = planId;
+        if (source) existing.source = source; // 채널 전환(웹↔스토어) 시 출처 갱신
         existing.billing_key = billingKey || existing.billing_key;
         existing.current_period_start = now;
         existing.current_period_end = periodEnd;
@@ -100,6 +101,7 @@ class SubscriptionService {
         user_id: userId,
         plan_id: planId,
         status: 'active',
+        source: source || 'portone',
         billing_key: billingKey,
         current_period_start: now,
         current_period_end: periodEnd,
@@ -148,6 +150,10 @@ class SubscriptionService {
     const plan = sub.SubscriptionPlan || (await SubscriptionPlan.findByPk(sub.plan_id));
     if (!plan) throw new Error('플랜을 찾을 수 없습니다.');
 
+    // 스토어 IAP 구독은 Apple/Google 이 자동 갱신 → PortOne 청구 금지(RC RENEWAL 웹훅이 기간 연장).
+    if (sub.source && sub.source !== 'portone') {
+      return { status: 'skipped', reason: 'store_managed' };
+    }
     if (sub.cancel_at_period_end) {
       sub.status = 'canceled';
       sub.updated_at = new Date();
@@ -200,6 +206,7 @@ class SubscriptionService {
     return UserSubscription.findAll({
       where: {
         status: { [Op.in]: ['active', 'past_due'] },
+        source: 'portone', // 스토어 IAP 구독은 스위퍼 제외(스토어가 자동 갱신)
         current_period_end: { [Op.lte]: new Date() },
       },
       include: [{ model: SubscriptionPlan }],

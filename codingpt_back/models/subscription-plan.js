@@ -17,6 +17,9 @@ module.exports = (sequelize, DataTypes) => {
     badge: { type: DataTypes.STRING(32), allowNull: true }, // 예: "가장 인기"
     highlight: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // 강조 카드
     display_multiplier: { type: DataTypes.STRING(16), allowNull: true }, // 예: "5x"
+    // 스토어 IAP 상품 ID (RC 웹훅 product_id → 플랜 매핑). free 는 null.
+    apple_product_id: { type: DataTypes.STRING(64), allowNull: true },
+    google_product_id: { type: DataTypes.STRING(64), allowNull: true },
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   }, {

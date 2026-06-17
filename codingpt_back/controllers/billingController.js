@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const billingService = require('../services/billingService');
+const rcBillingService = require('../services/rcBillingService');
 const BILLING = require('../config/billing');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/response');
 
@@ -43,4 +44,12 @@ const createWebSession = async (req, res) => {
   } catch (error) { return errorResponse(res, error); }
 };
 
-module.exports = { checkout, subscribe, getPayments, createWebSession };
+// POST /api/billing/iap/sync — 스토어 구매 직후 RevenueCat entitlement 확인 후 즉시 활성화.
+const iapSync = async (req, res) => {
+  try {
+    const result = await rcBillingService.syncFromRevenueCat(req.user.id);
+    return successResponse(res, result);
+  } catch (error) { return errorResponse(res, error, 400); }
+};
+
+module.exports = { checkout, subscribe, getPayments, createWebSession, iapSync };

@@ -5,7 +5,8 @@ module.exports = (sequelize, DataTypes) => {
     user_id: { type: DataTypes.INTEGER, allowNull: false },
     plan_id: { type: DataTypes.INTEGER, allowNull: false },
     status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'active' }, // active|past_due|canceled|paused
-    billing_key: { type: DataTypes.STRING(255), allowNull: true }, // PortOne 빌링키(정기결제 채널)
+    source: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'portone' }, // portone(웹 PG) | revenuecat(스토어 IAP)
+    billing_key: { type: DataTypes.STRING(255), allowNull: true }, // PortOne 빌링키 | RC original_transaction_id
     current_period_start: { type: DataTypes.DATE, allowNull: true },
     current_period_end: { type: DataTypes.DATE, allowNull: true }, // 다음 갱신 청구일
     cancel_at_period_end: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

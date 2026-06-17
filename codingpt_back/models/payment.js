@@ -5,7 +5,8 @@ module.exports = (sequelize, DataTypes) => {
     payment_id: { type: DataTypes.STRING(255), allowNull: false, unique: true }, // PortOne paymentId(멱등키)
     user_id: { type: DataTypes.INTEGER, allowNull: false },
     type: { type: DataTypes.STRING(16), allowNull: false }, // charge|subscription
-    channel: { type: DataTypes.STRING(24), allowNull: true }, // inicis_lump|inicis_billing
+    source: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'portone' }, // portone | revenuecat
+    channel: { type: DataTypes.STRING(24), allowNull: true }, // inicis_lump|inicis_billing|appstore|googleplay
     ref_id: { type: DataTypes.INTEGER, allowNull: true }, // credit_pack.id 또는 subscription_plan.id (폴리모픽)
     amount_krw: { type: DataTypes.INTEGER, allowNull: false },
     status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'ready' }, // ready|paid|failed|cancelled|partial_cancelled
