@@ -7,6 +7,7 @@ import { listWorkspaces, createWorkspace, listSessions, createSession } from '@/
 import { useAgentSession } from '@/hooks/useAgentSession';
 import Chat from '@/components/agent/Chat';
 import PermissionModal from '@/components/agent/PermissionModal';
+import LimitModal from '@/components/billing/LimitModal';
 import type { SessionMeta } from '@/lib/agentTypes';
 
 // 채팅 탭 — 메인 채팅(kind:'chat' 워크스페이스, 단일 패널). 앱 HomeScreen 의 채팅에 해당.
@@ -51,10 +52,10 @@ function ChatView({
 }: {
   wsId: string; sessionId: string; sessions: SessionMeta[]; onPick: (id: string) => void; onNew: () => void;
 }) {
-  const router = useRouter();
+  const [limit, setLimit] = useState<any>(null);
   const agent = useAgentSession(wsId, sessionId, {
     mode: 'chat',
-    onLimit: () => { alert('사용량 한도에 도달했어요. 플랜을 업그레이드하면 계속할 수 있어요.'); router.push('/me'); },
+    onLimit: (info) => setLimit(info || { code: 'USAGE_LIMIT_REACHED' }),
   });
 
   return (
@@ -75,6 +76,7 @@ function ChatView({
       </div>
 
       <PermissionModal pending={agent.pendingPermission} onResolve={agent.resolvePermission} />
+      <LimitModal info={limit} onClose={() => setLimit(null)} />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { getToken } from '@/lib/auth';
@@ -9,6 +9,7 @@ import { useAgentSession } from '@/hooks/useAgentSession';
 import Chat from '@/components/agent/Chat';
 import Preview from '@/components/agent/Preview';
 import PermissionModal from '@/components/agent/PermissionModal';
+import LimitModal from '@/components/billing/LimitModal';
 import FileTree from '@/components/agent/FileTree';
 import { FileTypeIcon } from '@/components/ide/FileTypeIcon';
 import { ChatPanelIcon, TerminalIcon, BrowserIcon } from '@/components/ide/ideIcons';
@@ -82,7 +83,7 @@ function CodingView({
   onNewChat: () => void; onPickSession: (id: string) => void;
 }) {
   const router = useRouter();
-  const limitHit = useRef(false);
+  const [limit, setLimit] = useState<any>(null);
   const projectName = ws?.name || '작업영역';
   const [narrow, setNarrow] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
@@ -102,12 +103,7 @@ function CodingView({
 
   const agent = useAgentSession(wsId, sessionId, {
     mode: ws?.kind === 'chat' ? 'chat' : 'code',
-    onLimit: () => {
-      if (limitHit.current) return;
-      limitHit.current = true;
-      alert('사용량 한도에 도달했어요. 플랜을 업그레이드하면 계속할 수 있어요.');
-      router.push('/me');
-    },
+    onLimit: (info) => setLimit(info || { code: 'USAGE_LIMIT_REACHED' }),
   });
   useEffect(() => agent.subscribe((evt) => { if (evt.type === 'done') setReloadSignal((n) => n + 1); }), [agent]);
 
@@ -223,6 +219,7 @@ function CodingView({
       )}
 
       <PermissionModal pending={agent.pendingPermission} onResolve={agent.resolvePermission} />
+      <LimitModal info={limit} onClose={() => setLimit(null)} />
     </div>
   );
 }

@@ -19,6 +19,35 @@ class SubscriptionService {
     return SubscriptionPlan.findByPk(id);
   }
 
+  // 어드민: 플랜 편집 (한도/가격/카피). 화이트리스트 필드만 반영 — 어드민 조절판에서 호출.
+  async updatePlan(id, fields = {}) {
+    const plan = await SubscriptionPlan.findByPk(id);
+    if (!plan) throw new Error('존재하지 않는 플랜입니다.');
+    const ALLOWED = [
+      'name', 'price_krw', 'window_seconds', 'window_unit_limit', 'weekly_unit_limit',
+      'sort_order', 'is_active', 'tagline', 'features', 'badge', 'highlight', 'display_multiplier',
+    ];
+    const NUMERIC = ['price_krw', 'window_seconds', 'window_unit_limit', 'weekly_unit_limit', 'sort_order'];
+    const patch = {};
+    for (const key of ALLOWED) {
+      if (!(key in fields)) continue;
+      let val = fields[key];
+      if (NUMERIC.includes(key)) {
+        if (val === null || val === '') { val = null; }
+        else { val = Number(val); if (!Number.isFinite(val) || val < 0) throw new Error(`${key} 값이 올바르지 않습니다.`); }
+        // window_unit_limit 은 NOT NULL(0=무제한), weekly 는 nullable
+        if (key !== 'weekly_unit_limit' && val === null) continue;
+      }
+      if (key === 'features' && val != null && !Array.isArray(val)) {
+        throw new Error('features 는 배열이어야 합니다.');
+      }
+      patch[key] = val;
+    }
+    patch.updated_at = new Date();
+    await plan.update(patch);
+    return plan;
+  }
+
   // 사용자의 활성 구독 (없으면 null)
   async getActiveSubscription(userId) {
     return UserSubscription.findOne({

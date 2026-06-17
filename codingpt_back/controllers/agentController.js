@@ -6,6 +6,7 @@
 const agentService = require('../services/agentService');
 const agentProxyService = require('../services/agentProxyService');
 const usageService = require('../services/usageService');
+const subscriptionService = require('../services/subscriptionService');
 const BILLING = require('../config/billing');
 
 /**
@@ -23,6 +24,25 @@ const runAgent = async (req, res) => {
       success: false,
       message: 'ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 에 추가 후 서버를 재시작하세요.',
     });
+  }
+
+  // Free 플랜 게이트 — 워크스페이스(바이브코딩, mode!=='chat')는 Pro 이상만. 채팅(mode==='chat')은 free 허용.
+  // BILLING.ENFORCE 와 독립(항상 적용 — 무료 남용 방지). 조회 실패 시 허용(fail-open).
+  if (req.user && req.user.id && mode !== 'chat') {
+    try {
+      const plan = await subscriptionService.resolvePlanForUser(req.user.id);
+      if (plan && plan.code === 'free') {
+        return res.status(403).json({
+          success: false,
+          code: 'PLAN_REQUIRED',
+          planCode: 'free',
+          upgradeUrl: `${BILLING.PAYMENT_WEB_URL}/me`,
+          message: '워크스페이스 바이브코딩은 Pro 이상에서 사용할 수 있어요. 플랜을 업그레이드하세요.',
+        });
+      }
+    } catch (e) {
+      console.error('[AgentController] 플랜 게이트 확인 실패(허용 처리):', e.message);
+    }
   }
 
   // 사용량 프리플라이트 게이트 — SSE 헤더 쓰기 전(일반 JSON 으로 429/402 반환 가능).

@@ -3,16 +3,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { captureHandoff, getToken } from '@/lib/auth';
+import { clientFetch } from '@/lib/api';
 import { listWorkspaces, createWorkspace } from '@/lib/workspaces';
 import type { WorkspaceMeta } from '@/lib/agentTypes';
 
-// 바이브코딩 워크스페이스 목록 + 새로 만들기. 로그인 필요.
+// 바이브코딩 워크스페이스 목록 + 새로 만들기. 로그인 필요. (Free 는 워크스페이스 불가 → 업그레이드 유도)
 
 export default function AppHome() {
   const router = useRouter();
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[] | null>(null);
   const [creating, setCreating] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [plan, setPlan] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try { setWorkspaces(await listWorkspaces()); }
@@ -21,13 +23,18 @@ export default function AppHome() {
 
   useEffect(() => {
     captureHandoff();
-    if (!getToken()) { router.replace('/login?next=/workspace'); return; }
+    const token = getToken();
+    if (!token) { router.replace('/login?next=/workspace'); return; }
     setAuthed(true);
     load();
+    clientFetch<any>('/api/usage/status', { token }).then((r) => setPlan(r.data?.plan ?? null)).catch(() => {});
   }, [router, load]);
+
+  const isFree = plan === 'free';
 
   const onCreate = async () => {
     if (creating) return;
+    if (isFree) { router.push('/me#plans'); return; } // Free 는 워크스페이스 불가 → 업그레이드
     setCreating(true);
     try {
       const ws = await createWorkspace({ name: '새 프로젝트', kind: 'project' });
@@ -51,6 +58,16 @@ export default function AppHome() {
           {creating ? '만드는 중…' : '+ 새 프로젝트'}
         </button>
       </div>
+
+      {isFree ? (
+        <div style={{ marginTop: 22, borderTop: '2px solid var(--accent)', paddingTop: 18 }}>
+          <div style={{ fontWeight: 700, fontSize: 15.5 }}>워크스페이스는 Pro부터예요</div>
+          <p className="muted" style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.6, maxWidth: 520 }}>
+            AI와 대화하며 직접 앱을 만드는 워크스페이스 바이브코딩은 Pro 이상 플랜에서 사용할 수 있어요. 채팅은 Free에서도 계속 쓸 수 있어요.
+          </p>
+          <a href="/me#plans" className="btn" style={{ display: 'inline-block', marginTop: 14, textDecoration: 'none', padding: '10px 18px', fontSize: 14 }}>플랜 보기</a>
+        </div>
+      ) : null}
 
       <div style={{ marginTop: 28 }}>
         {workspaces === null ? (

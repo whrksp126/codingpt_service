@@ -13,6 +13,7 @@ const ttsRoutes = require('./ttsRoutes');
 const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
 const githubRepoRoutes = require('./githubRepoRoutes');
+const adminUsageRoutes = require('./adminUsageRoutes');
 const agentRoutes = require('./agentRoutes');
 const workspaceRoutes = require('./workspaceRoutes');
 const previewRoutes = require('./previewRoutes');
@@ -32,6 +33,7 @@ router.use('/reviews', reviewRoutes);
 router.use('/s3', s3Routes);
 router.use('/tts', ttsRoutes);
 router.use('/admin/github-repos', githubRepoRoutes);
+router.use('/admin/usage', adminUsageRoutes); // 사용량 실측 집계(어드민)
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
 router.use('/agent', agentRoutes);

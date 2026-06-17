@@ -1,12 +1,25 @@
 // 랜딩 — 정적(Static) 렌더. 입문자가 직접 만들며 배우는 모바일 코딩 교육 서비스 소개 + 요금/구독.
 // 외부 import 없음(순수 서버 컴포넌트) — lib/api 등 import 시 prod SSG 가 빈 본문이 되는 문제 회피.
 const formatKRW = (n: number) => '₩' + Number(n || 0).toLocaleString('ko-KR');
-// 가격은 정적 상수로 노출 — PG 크롤러가 JS/백엔드 없이도 상품·가격을 항상 읽도록(빌드 시 back 미도달 무관).
-// DB 시드(subscription_plan)와 동일하게 유지. 가격 변경 시 이 상수도 함께 갱신.
+// 가격·플랜 설명은 정적 상수로 노출 — PG 크롤러가 JS/백엔드 없이도 상품·가격을 항상 읽도록(빌드 시 back 미도달 무관).
+// ⚠️ 순수 서버 컴포넌트 유지(외부 import 금지 — SSG 빈 본문 버그 회피) → DB 시드(subscription_plan)를 여기 그대로 미러.
+//    런타임 단일 출처는 DB(/api/subscription/plans, /me·앱이 동적 렌더). 가격/카피 변경 시 이 상수도 함께 갱신.
 const PLANS = [
-  { code: 'free', name: 'Free', price_krw: 0 },
-  { code: 'pro', name: 'Pro', price_krw: 20000 },
-  { code: 'max', name: 'Max', price_krw: 100000 },
+  {
+    code: 'free', name: 'Free', price_krw: 0, badge: null as string | null, mult: null as string | null,
+    desc: '코딩이 처음인 분께. 부담 없이 먼저 경험해 보세요.',
+    features: ['AI 채팅으로 코딩 질문', '5시간마다 사용량 자동 충전', '워크스페이스는 Pro부터'],
+  },
+  {
+    code: 'pro', name: 'Pro', price_krw: 20000, badge: '가장 인기' as string | null, mult: null as string | null,
+    desc: '매일 꾸준히 만들고 배우고 싶은 분께.',
+    features: ['워크스페이스 바이브코딩', '넉넉한 사용량으로 매일 작업', '5시간 창 + 주간 한도 자동 충전', '모든 기능 사용'],
+  },
+  {
+    code: 'max', name: 'Max', price_krw: 100000, badge: null as string | null, mult: '5x' as string | null,
+    desc: '하루 종일 몰입해서 작업하는 분께.',
+    features: ['Pro 대비 5배 사용량', '하루 종일 끊김 없는 작업', '대규모 프로젝트에 적합'],
+  },
 ];
 
 const STEPS = [
@@ -21,13 +34,6 @@ const POINTS = [
   { t: '손에서 바로', d: '복잡한 설치나 노트북 없이, 휴대폰 앱 하나로 언제 어디서나 코딩을 시작해요.' },
   { t: '혼자서도 끝까지', d: '모르면 물어보고, 새 개념이 나오면 그 자리에서 배우니까 중간에 막혀 포기하지 않아요.' },
 ];
-
-// 플랜별 친화적 설명 (의미 없는 사용량 단위 대신)
-const PLAN_DESC: Record<string, string> = {
-  free: '코딩이 처음인 분께. 부담 없이 먼저 경험해 보세요.',
-  pro: '매일 꾸준히 만들고 배우고 싶은 분께.',
-  max: '하루 종일 몰입해서 작업하는 분께.',
-};
 
 const GAP = 104; // 섹션 간 세로 여백
 
@@ -135,17 +141,27 @@ export default function Home() {
         </p>
         <div className="grid cols-3" style={{ marginTop: 28 }}>
           {(plans || []).map((p) => (
-            <div key={p.code} style={{ paddingTop: 20, borderTop: `2px solid ${p.price_krw > 0 ? 'var(--accent)' : 'var(--border)'}` }}>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{p.name}</div>
+            <div key={p.code} style={{ paddingTop: 20, borderTop: `2px solid ${p.badge ? 'var(--accent)' : p.price_krw > 0 ? 'var(--accent)' : 'var(--border)'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 15 }}>{p.name}</span>
+                {p.mult ? <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-tint)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 999, padding: '2px 8px' }}>{p.mult}</span> : null}
+                {p.badge ? <span style={{ fontSize: 11, fontWeight: 700, color: '#0A0D14', background: 'var(--accent)', borderRadius: 999, padding: '2px 8px' }}>{p.badge}</span> : null}
+              </div>
               <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: '-0.03em', margin: '10px 0 2px' }}>
                 {p.price_krw > 0 ? formatKRW(p.price_krw) : '무료'}
                 {p.price_krw > 0 ? <span className="dim" style={{ fontSize: 14, fontWeight: 500 }}> / 월</span> : null}
               </div>
-              <p className="muted" style={{ fontSize: 13.5, marginTop: 12, lineHeight: 1.6, minHeight: 40 }}>
-                {PLAN_DESC[p.code] || '플랜 한도 안에서 자유롭게 사용해요.'}
-              </p>
+              <p className="muted" style={{ fontSize: 13.5, marginTop: 12, lineHeight: 1.6, minHeight: 40 }}>{p.desc}</p>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '14px 0 0', display: 'grid', gap: 8 }}>
+                {p.features.map((f) => (
+                  <li key={f} style={{ display: 'flex', gap: 8, fontSize: 13.5, lineHeight: 1.5, color: 'var(--text2)' }}>
+                    <span style={{ color: 'var(--accent)', fontWeight: 800 }}>✓</span>
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
               {p.price_krw > 0 ? (
-                <div style={{ marginTop: 16 }}>
+                <div style={{ marginTop: 18 }}>
                   <a className="btn" href={`/login?next=${encodeURIComponent('/me?subscribe=' + p.code)}`} style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>구독하기</a>
                 </div>
               ) : null}

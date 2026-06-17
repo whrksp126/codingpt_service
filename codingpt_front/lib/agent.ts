@@ -76,6 +76,14 @@ export function streamAgentQuery(prompt: string, handlers: StreamHandlers, opts:
       else handlers.onError?.(info?.message || '사용량 한도에 도달했습니다.');
       return;
     }
+    // 플랜 게이트(Free 는 워크스페이스 불가) — 403 PLAN_REQUIRED
+    if (res.status === 403) {
+      let info: any = null;
+      try { info = await res.json(); } catch (_) { /* noop */ }
+      if (info?.code === 'PLAN_REQUIRED' && handlers.onLimitReached) { handlers.onLimitReached(info); return; }
+      handlers.onError?.(info?.message || '권한이 없습니다.');
+      return;
+    }
     if (!res.ok || !res.body) {
       handlers.onError?.(`서버 에러: ${res.status}`);
       return;

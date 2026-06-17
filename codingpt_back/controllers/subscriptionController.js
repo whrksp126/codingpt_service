@@ -11,6 +11,16 @@ const getPlans = async (req, res) => {
   }
 };
 
+// PUT /api/subscription/plans/:id — 플랜 편집 (어드민, 무인증 — 본인 전용 서비스)
+const updatePlan = async (req, res) => {
+  try {
+    const plan = await subscriptionService.updatePlan(req.params.id, req.body || {});
+    return successResponse(res, plan);
+  } catch (error) {
+    return errorResponse(res, error, 400);
+  }
+};
+
 // GET /api/subscription/me — 내 활성 구독 (없으면 null)
 const getMine = async (req, res) => {
   try {
@@ -32,4 +42,4 @@ const cancel = async (req, res) => {
   }
 };
 
-module.exports = { getPlans, getMine, cancel };
+module.exports = { getPlans, updatePlan, getMine, cancel };

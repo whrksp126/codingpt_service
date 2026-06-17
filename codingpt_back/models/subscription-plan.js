@@ -11,6 +11,12 @@ module.exports = (sequelize, DataTypes) => {
     billing_period: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'monthly' },
     is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // 사용자 표시용 카피 (단일 출처 — 웹/앱이 /api/subscription/plans 로 렌더, 어드민 편집)
+    tagline: { type: DataTypes.STRING(255), allowNull: true }, // 한 줄 설명
+    features: { type: DataTypes.JSONB, allowNull: false, defaultValue: [] }, // 기능 불릿 배열
+    badge: { type: DataTypes.STRING(32), allowNull: true }, // 예: "가장 인기"
+    highlight: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }, // 강조 카드
+    display_multiplier: { type: DataTypes.STRING(16), allowNull: true }, // 예: "5x"
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
   }, {
