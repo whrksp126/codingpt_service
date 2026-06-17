@@ -2,56 +2,65 @@
 
 import type { AgentMsg } from '@/lib/agentTypes';
 
-// 단일 대화 메시지 렌더 — user/assistant/thinking/tool. (앱 IDE 의 메시지 카드와 동일 정보)
+// 단일 대화 메시지 렌더 — 앱 components/agent/MessageList.tsx 와 동일 스타일/색.
+// user 버블(#1D4ED8) / assistant 무버블(#E2E8F0) / thinking 이탤릭(#475569) / tool 카드(#11151F).
 
-const TOOL_LABEL: Record<string, string> = {
-  Write: '파일 작성', Edit: '파일 수정', MultiEdit: '파일 수정', Read: '파일 읽기',
-  Bash: '명령 실행', Glob: '파일 검색', Grep: '코드 검색', WebFetch: '웹 조회', TodoWrite: '할 일 정리',
-};
+// 앱 toolLabel() 과 동일
+function toolLabel(msg: Extract<AgentMsg, { role: 'tool' }>): string {
+  const { tool, command, relPath } = msg;
+  if (tool === 'Bash') return `$ ${command || ''}`;
+  if (tool === 'Write') return `파일 생성 · ${relPath || ''}`;
+  if (tool === 'Edit' || tool === 'MultiEdit') return `파일 수정 · ${relPath || ''}`;
+  if (tool === 'Read') return `읽기 · ${relPath || ''}`;
+  return `${tool}${relPath ? ` · ${relPath}` : ''}`;
+}
 
-export default function Message({ msg }: { msg: AgentMsg }) {
+export default function Message({ msg, onOpenFile }: { msg: AgentMsg; onOpenFile?: (path: string) => void }) {
   if (msg.role === 'user') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '10px 0' }}>
-        <div style={{ maxWidth: '82%', background: 'var(--accent-tint)', color: 'var(--text)', border: '1px solid rgba(52,211,153,0.25)', borderRadius: 14, borderBottomRightRadius: 4, padding: '10px 14px', fontSize: 14.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {msg.text}
-        </div>
+      <div style={{ alignSelf: 'flex-end', maxWidth: '88%', background: '#1D4ED8', borderRadius: 14, borderTopRightRadius: 4, padding: '9px 12px' }}>
+        <span style={{ color: '#fff', fontSize: 14, lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.text}</span>
       </div>
     );
   }
 
   if (msg.role === 'thinking') {
     return (
-      <div style={{ margin: '8px 0', color: 'var(--dim)', fontSize: 13, fontStyle: 'italic', lineHeight: 1.6, whiteSpace: 'pre-wrap', paddingLeft: 4, borderLeft: '2px solid var(--border)' }}>
-        <span style={{ paddingLeft: 10, display: 'inline-block' }}>{msg.text}</span>
+      <div style={{ alignSelf: 'flex-start', maxWidth: '92%' }}>
+        <span style={{ color: '#475569', fontSize: 12, fontStyle: 'italic', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>💭 {msg.text}</span>
       </div>
     );
   }
 
   if (msg.role === 'tool') {
-    const label = TOOL_LABEL[msg.tool] || msg.tool;
     const ok = msg.ok;
+    const statusColor = ok === undefined ? '#64748B' : ok ? '#34D399' : '#F87171';
+    const statusMark = ok === undefined ? '…' : ok ? '✓' : '✕';
+    const label = toolLabel(msg);
+    const tappable = !!msg.relPath && !!onOpenFile;
     return (
-      <div style={{ margin: '8px 0', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px', fontSize: 13 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ width: 7, height: 7, borderRadius: 999, background: ok === false ? 'var(--error)' : ok === true ? 'var(--accent)' : 'var(--dim)', flexShrink: 0 }} />
-          <span style={{ fontWeight: 600, color: 'var(--text2)' }}>{label}</span>
-          {msg.relPath ? <span style={{ color: 'var(--dim)', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12 }}>{msg.relPath}</span> : null}
+      <div
+        onClick={tappable ? () => onOpenFile!(msg.relPath!) : undefined}
+        style={{ alignSelf: 'flex-start', maxWidth: '92%', background: '#11151F', border: '1px solid #1C2230', borderRadius: 10, padding: '8px 11px', cursor: tappable ? 'pointer' : 'default' }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: statusColor, fontSize: 12, flexShrink: 0 }}>{statusMark}</span>
+          <span style={{ color: '#CBD5E1', fontSize: 12.5, fontFamily: 'ui-monospace, Menlo, monospace', flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+          {tappable ? <span style={{ color: '#60A5FA', fontSize: 11, flexShrink: 0 }}>열기 ›</span> : null}
         </div>
-        {msg.command ? (
-          <pre style={{ margin: '8px 0 0', padding: '8px 10px', background: 'var(--base)', borderRadius: 7, color: 'var(--text2)', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12, overflowX: 'auto', whiteSpace: 'pre-wrap' }}>$ {msg.command}</pre>
-        ) : null}
-        {msg.output ? (
-          <pre style={{ margin: '6px 0 0', padding: '8px 10px', background: 'var(--base)', borderRadius: 7, color: 'var(--dim)', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 11.5, overflowX: 'auto', whiteSpace: 'pre-wrap', maxHeight: 160 }}>{String(msg.output).slice(0, 1200)}</pre>
+        {msg.tool === 'Bash' && msg.output ? (
+          <div style={{ color: '#94A3B8', fontSize: 11.5, fontFamily: 'ui-monospace, Menlo, monospace', marginTop: 5, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: '-webkit-box', WebkitLineClamp: 6, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as React.CSSProperties}>
+            {String(msg.output).replace(/\n$/, '')}
+          </div>
         ) : null}
       </div>
     );
   }
 
-  // assistant
+  // assistant — 무버블
   return (
-    <div style={{ margin: '10px 0', color: 'var(--text)', fontSize: 14.5, lineHeight: 1.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {msg.text}
+    <div style={{ alignSelf: 'flex-start', maxWidth: '92%' }}>
+      <span style={{ color: '#E2E8F0', fontSize: 14, lineHeight: '21px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.text}</span>
     </div>
   );
 }

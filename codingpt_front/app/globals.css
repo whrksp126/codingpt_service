@@ -141,3 +141,18 @@ th { color: var(--dim); font-weight: 600; }
   }
   .shell-backdrop.open { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40; }
 }
+
+/* 커스텀 스크롤바 — CodingPT 다크 디자인(네이티브 흰 스크롤바 제거) */
+* { scrollbar-width: thin; scrollbar-color: var(--border-control) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-control); border-radius: 999px;
+  border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: #3A4458; background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 채팅 send 버튼 스피너 */
+@keyframes cpt-spin { to { transform: rotate(360deg); } }
+.cpt-spin { display: inline-block; animation: cpt-spin 0.7s linear infinite; }

@@ -12,7 +12,7 @@ import PermissionModal from '@/components/agent/PermissionModal';
 import LimitModal from '@/components/billing/LimitModal';
 import FileTree from '@/components/agent/FileTree';
 import { FileTypeIcon } from '@/components/ide/FileTypeIcon';
-import { ChatPanelIcon, TerminalIcon, BrowserIcon } from '@/components/ide/ideIcons';
+import { TerminalIcon, BrowserIcon } from '@/components/ide/ideIcons';
 import type { WorkspaceMeta, SessionMeta } from '@/lib/agentTypes';
 
 const Editor = dynamic(() => import('@/components/agent/Editor'), { ssr: false });
@@ -86,7 +86,6 @@ function CodingView({
   const [limit, setLimit] = useState<any>(null);
   const projectName = ws?.name || '작업영역';
   const [narrow, setNarrow] = useState(false);
-  const [chatOpen, setChatOpen] = useState(true);
   const [showTerminal, setShowTerminal] = useState(false);
   const [showBrowser, setShowBrowser] = useState(false);
   const [openTabs, setOpenTabs] = useState<string[]>([]);
@@ -122,7 +121,7 @@ function CodingView({
   };
 
   // ── 패널 ──
-  const chatPane = <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} />;
+  const chatPane = <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} onOpenFile={openFile} />;
   const filesPane = <FileTree wsId={wsId} projectName={projectName} selected={activePath} onSelect={openFile} reloadSignal={reloadSignal} />;
   const tabBar = openTabs.length > 0 ? (
     <div style={{ display: 'flex', overflowX: 'auto', borderBottom: '1px solid #1C2230', background: '#0A0D14', flexShrink: 0 }}>
@@ -176,20 +175,23 @@ function CodingView({
           {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || '새 채팅'}</option>)}
         </select>
         <button onClick={onNewChat} style={newChatBtn}>+ 채팅</button>
-        <div style={{ width: 1, height: 22, background: '#1C2230', marginLeft: 8, marginRight: 8 }} />
-        <div style={{ display: 'flex', gap: 4 }}>
-          <TopBtn active={chatOpen} onClick={() => setChatOpen((v) => !v)}><ChatPanelIcon size={20} color="#fff" filled={chatOpen} /></TopBtn>
-          <TopBtn active={showTerminal} onClick={() => setShowTerminal((v) => !v)}><TerminalIcon size={20} color="#fff" filled={showTerminal} /></TopBtn>
-          <TopBtn active={showBrowser} onClick={() => setShowBrowser((v) => !v)}><BrowserIcon size={20} color="#fff" filled={showBrowser} /></TopBtn>
-        </div>
+        {/* 큰 화면: 채팅·탐색기는 항상 열림 → 터미널/브라우저만 토글. 작은 화면: 하단 탭으로 관리. */}
+        {!narrow ? (
+          <>
+            <div style={{ width: 1, height: 22, background: '#1C2230', marginLeft: 8, marginRight: 8 }} />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <TopBtn active={showTerminal} onClick={() => setShowTerminal((v) => !v)}><TerminalIcon size={20} color="#fff" filled={showTerminal} /></TopBtn>
+              <TopBtn active={showBrowser} onClick={() => setShowBrowser((v) => !v)}><BrowserIcon size={20} color="#fff" filled={showBrowser} /></TopBtn>
+            </div>
+          </>
+        ) : null}
       </div>
 
       {/* 본문 */}
       {!narrow ? (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          {chatOpen ? (
-            <div style={{ width: 380, flexShrink: 0, borderRight: '1px solid #1C2230', display: 'flex', flexDirection: 'column', minHeight: 0, background: '#0A0D14' }}>{chatPane}</div>
-          ) : null}
+          {/* 채팅 — 큰 화면에서 항상 열림 */}
+          <div style={{ width: 380, flexShrink: 0, borderRight: '1px solid #1C2230', display: 'flex', flexDirection: 'column', minHeight: 0, background: '#0A0D14' }}>{chatPane}</div>
           {/* IDE */}
           <div style={{ flex: 1, display: 'flex', minHeight: 0, minWidth: 0, position: 'relative' }}>
             <div style={{ width: 220, flexShrink: 0, minHeight: 0 }}>{filesPane}</div>
