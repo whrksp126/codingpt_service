@@ -8,17 +8,22 @@ const PLANS = [
   {
     code: 'free', name: 'Free', price_krw: 0, badge: null as string | null, mult: null as string | null,
     desc: '코딩이 처음인 분께. 부담 없이 먼저 경험해 보세요.',
-    features: ['AI 채팅으로 코딩 질문', '5시간마다 사용량 자동 충전', '워크스페이스는 Pro부터'],
+    features: ['AI 채팅으로 코딩 질문·학습', '코딩 개념별 레슨 추천', '사용량 한도 내 이용 (5시간마다 자동 충전)'],
   },
   {
     code: 'pro', name: 'Pro', price_krw: 20000, badge: '가장 인기' as string | null, mult: null as string | null,
     desc: '매일 꾸준히 만들고 배우고 싶은 분께.',
-    features: ['워크스페이스 바이브코딩', '넉넉한 사용량으로 매일 작업', '5시간 창 + 주간 한도 자동 충전', '모든 기능 사용'],
+    features: [
+      'AI 바이브코딩 워크스페이스 (코드 자동 생성·수정·실행)',
+      '코드 에디터·터미널·실시간 미리보기 IDE',
+      'GitHub 연동 및 결과물 저장',
+      'Pro 사용량 한도 (5시간·주간 자동 충전)',
+    ],
   },
   {
     code: 'max', name: 'Max', price_krw: 100000, badge: null as string | null, mult: '5x' as string | null,
     desc: '하루 종일 몰입해서 작업하는 분께.',
-    features: ['Pro 대비 5배 사용량', '하루 종일 끊김 없는 작업', '대규모 프로젝트에 적합'],
+    features: ['Pro의 모든 기능 포함', 'Pro 대비 5배 사용량 한도', '대규모·장시간 작업에 적합'],
   },
 ];
 
@@ -171,6 +176,67 @@ export default function Home() {
         <p className="muted" style={{ fontSize: 12.5, marginTop: 20, lineHeight: 1.7 }}>
           구독은 매월 자동 갱신되며, 마이페이지에서 언제든 해지할 수 있어요. 환불은 <a href="/legal/refund">환불·취소 정책</a>을 따라요.
         </p>
+      </section>
+
+      {/* 정기결제 상품 상세 안내 (결제 시 제공 서비스 명시) */}
+      <section id="subscription-detail" style={{ marginTop: 56, scrollMarginTop: 80 }}>
+        <h2>구독 상품 상세 안내</h2>
+        <div style={{ marginTop: 24, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: '24px 26px', display: 'grid', gap: 22 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>서비스 개요</div>
+            <p className="muted" style={{ fontSize: 14, lineHeight: 1.7, margin: 0 }}>
+              CodingPT는 AI와 대화하며 직접 앱·웹을 만드는 ‘바이브코딩’과 코딩 학습을 제공하는 디지털 콘텐츠 구독 서비스입니다.
+              구독 결제 시 아래의 디지털 서비스를 이용 기간 동안 제공받습니다.
+            </p>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>결제 시 제공되는 서비스</div>
+            <div className="grid cols-2" style={{ gap: 18 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent)', marginBottom: 6 }}>Pro · 월 ₩20,000</div>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+                  {['AI 바이브코딩 워크스페이스 — AI 에이전트가 코드를 자동 생성·수정·실행', '클라우드 개발 환경 — 코드 에디터·터미널·실시간 미리보기(브라우저)', 'GitHub 연동 및 작업 결과물 저장', '코딩 학습 콘텐츠 및 개념별 레슨', '5시간·주간 사용량 한도 내 이용(한도 자동 충전)'].map((t) => (
+                    <li key={t} style={{ display: 'flex', gap: 8, fontSize: 13.5, lineHeight: 1.55, color: 'var(--text2)' }}><span style={{ color: 'var(--accent)', fontWeight: 800 }}>✓</span><span>{t}</span></li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--accent)', marginBottom: 6 }}>Max · 월 ₩100,000</div>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+                  {['Pro에서 제공되는 모든 서비스 포함', 'Pro 대비 5배 사용량 한도', '대규모·장시간 프로젝트 작업에 적합'].map((t) => (
+                    <li key={t} style={{ display: 'flex', gap: 8, fontSize: 13.5, lineHeight: 1.55, color: 'var(--text2)' }}><span style={{ color: 'var(--accent)', fontWeight: 800 }}>✓</span><span>{t}</span></li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10 }}>결제 및 이용 조건</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13.5 }}>
+              <tbody>
+                {[
+                  ['상품 종류', '월 정기결제(자동결제) 방식의 디지털 콘텐츠 이용권'],
+                  ['결제 주기', '매월 1회, 최초 결제일 기준 매월 같은 날 자동 갱신'],
+                  ['결제 금액', 'Pro 월 20,000원 / Max 월 100,000원 (부가가치세 포함)'],
+                  ['결제 수단', '신용카드·체크카드 (KG이니시스 정기결제)'],
+                  ['이용 기간', '결제일로부터 다음 결제일 전일까지 (해지 전까지 매월 자동 연장)'],
+                  ['해지 방법', '마이페이지 > 구독에서 즉시 해지. 해지 시 다음 결제일부터 자동결제가 중단됩니다.'],
+                  ['환불', '「전자상거래 등에서의 소비자보호에 관한 법률」 및 환불·취소 정책에 따름'],
+                ].map(([k, v]) => (
+                  <tr key={k} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '10px 12px 10px 0', color: 'var(--text3)', whiteSpace: 'nowrap', verticalAlign: 'top', fontWeight: 600, width: 110 }}>{k}</td>
+                    <td style={{ padding: '10px 0', color: 'var(--text2)', lineHeight: 1.6 }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="muted" style={{ fontSize: 12.5, marginTop: 14, lineHeight: 1.7 }}>
+              자세한 내용은 <a href="/legal/terms">이용약관</a>, <a href="/legal/refund">환불·취소 정책</a>, <a href="/legal/privacy">개인정보처리방침</a>을 확인해 주세요.
+            </p>
+          </div>
+        </div>
       </section>
 
       <div style={{ height: 64 }} />
