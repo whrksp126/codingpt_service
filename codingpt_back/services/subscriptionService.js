@@ -168,6 +168,13 @@ class SubscriptionService {
   async cancel(userId, { immediate = false, reason = null } = {}) {
     const sub = await this.getCurrentSubscription(userId);
     if (!sub) throw new Error('활성 구독이 없습니다.');
+    // 스토어(App Store / Google Play) 구독은 우리 API 로 해지할 수 없다(스토어 정책).
+    // DB 만 해지하면 스토어는 계속 청구하므로, 스토어 네이티브 해지로 유도.
+    if (sub.source && sub.source !== 'portone') {
+      const e = new Error('스토어에서 구독한 플랜이에요. 해지는 앱의 구독 관리(App Store / Google Play)에서 진행해 주세요.');
+      e.code = 'store_managed';
+      throw e;
+    }
     if (reason) console.log(`[subscription] cancel reason (user ${userId}): ${reason}`);
     if (immediate) {
       sub.status = 'canceled';
