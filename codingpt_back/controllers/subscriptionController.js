@@ -21,25 +21,48 @@ const updatePlan = async (req, res) => {
   }
 };
 
-// GET /api/subscription/me — 내 활성 구독 (없으면 null)
+// GET /api/subscription/me — 내 구독 요약(상태·기간·예약 변경·연체 grace 포함, 없으면 null)
 const getMine = async (req, res) => {
   try {
-    const sub = await subscriptionService.getActiveSubscription(req.user.id);
+    const sub = await subscriptionService.getMineEnriched(req.user.id);
     return successResponse(res, sub);
   } catch (error) {
     return errorResponse(res, error);
   }
 };
 
-// POST /api/subscription/cancel — 해지 (기본: 기간 말 해지)
+// POST /api/subscription/cancel — 해지 (기본: 기간 말 해지). body: { immediate?, reason? }
 const cancel = async (req, res) => {
   try {
     const immediate = !!(req.body && req.body.immediate);
-    const sub = await subscriptionService.cancel(req.user.id, { immediate });
+    const reason = (req.body && req.body.reason) || null;
+    const sub = await subscriptionService.cancel(req.user.id, { immediate, reason });
     return successResponse(res, sub);
   } catch (error) {
     return errorResponse(res, error, 400);
   }
 };
 
-module.exports = { getPlans, updatePlan, getMine, cancel };
+// POST /api/subscription/resume — 해지 취소(재개). 스토어 구독은 storeManaged 플래그 반환.
+const resume = async (req, res) => {
+  try {
+    const result = await subscriptionService.resume(req.user.id);
+    return successResponse(res, result);
+  } catch (error) {
+    return errorResponse(res, error, 400);
+  }
+};
+
+// POST /api/subscription/change — 플랜 변경. body: { code }. 업=즉시 비례정산, 다운=기간말 예약.
+const change = async (req, res) => {
+  try {
+    const code = req.body && req.body.code;
+    if (!code) return errorResponse(res, new Error('code 가 필요합니다.'), 400);
+    const result = await subscriptionService.changePlan(req.user.id, code);
+    return successResponse(res, result);
+  } catch (error) {
+    return errorResponse(res, error, 400);
+  }
+};
+
+module.exports = { getPlans, updatePlan, getMine, cancel, resume, change };

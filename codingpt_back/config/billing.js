@@ -36,4 +36,9 @@ module.exports = {
 
   // 미가입 사용자의 기본 플랜 코드
   DEFAULT_PLAN_CODE: process.env.BILLING_DEFAULT_PLAN_CODE || 'free',
+
+  // 연체(Dunning): 갱신 결제 실패 시 grace 동안 plan 권한을 유지하고 재시도한다.
+  //  컷오프(→ canceled): 시도 횟수 >= MAX_ATTEMPTS 또는 연체 경과일 >= GRACE_DAYS (둘 중 먼저).
+  DUNNING_MAX_ATTEMPTS: num(process.env.BILLING_DUNNING_MAX_ATTEMPTS, 4),
+  DUNNING_GRACE_DAYS: num(process.env.BILLING_DUNNING_GRACE_DAYS, 7),
 };

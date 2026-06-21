@@ -54,6 +54,27 @@ class PortoneService {
     return call('GET', `/payments/${encodeURIComponent(paymentId)}`);
   }
 
+  // 빌링키 단건 조회 — 카드 표시정보(브랜드/끝4자리) 추출용.
+  async getBillingKey(billingKey) {
+    return call('GET', `/billing-keys/${encodeURIComponent(billingKey)}`);
+  }
+
+  // 빌링키 응답에서 표시용 카드 정보 추출. 실패해도 null 반환(비치명적).
+  async fetchCardInfo(billingKey) {
+    try {
+      const bk = await this.getBillingKey(billingKey);
+      const methods = bk.methods || (bk.method ? [bk.method] : []);
+      const card = (methods.find((m) => m && m.card) || {}).card || bk.card || null;
+      if (!card) return null;
+      const brand = card.brand || card.issuer || card.publisher || card.name || null;
+      const num = String(card.number || card.bin || '').replace(/[^0-9]/g, '');
+      const last4 = num.length >= 4 ? num.slice(-4) : null;
+      return { brand, last4 };
+    } catch (_) {
+      return null;
+    }
+  }
+
   // 결제 취소(환불). amount 미지정 시 전액 취소.
   async cancelPayment(paymentId, { amountKrw = null, reason = '사용자 결제 취소' } = {}) {
     const body = { reason };

@@ -46,6 +46,10 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       defaultValue: 'google',
     },
+    // 저장된 결제 수단(빌링키) — 무료 계정도 카드 등록 가능. 구독 시 재사용/표시.
+    billing_key: { type: DataTypes.STRING(255), allowNull: true },
+    card_brand: { type: DataTypes.STRING(32), allowNull: true },
+    card_last4: { type: DataTypes.STRING(4), allowNull: true },
   }, {
     tableName: 'user',
     timestamps: false,

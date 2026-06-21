@@ -8,6 +8,10 @@ const rcWebhookController = require('../controllers/rcWebhookController');
 router.post('/checkout', authMiddleware, billingController.checkout);
 router.post('/subscribe', authMiddleware, billingController.subscribe);
 router.get('/payments', authMiddleware, billingController.getPayments);
+router.get('/payments/:id', authMiddleware, billingController.getPaymentReceipt);
+router.get('/payment-method', authMiddleware, billingController.getPaymentMethodInfo);
+router.post('/payment-method', authMiddleware, billingController.updatePaymentMethod);
+router.get('/portone-config', authMiddleware, billingController.portoneConfig);
 router.post('/web-session', authMiddleware, billingController.createWebSession);
 
 // 스토어 IAP (RevenueCat). 구매 직후 앱이 동기화 호출 → 즉시 플랜 반영(웹훅 지연 보정).

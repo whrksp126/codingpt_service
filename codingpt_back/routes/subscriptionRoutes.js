@@ -10,5 +10,7 @@ router.put('/plans/:id', subscriptionController.updatePlan);
 // 구독 상태/해지는 인증 필요. (구독 결제/활성화는 Phase 3 billing 흐름에서 처리)
 router.get('/me', authMiddleware, subscriptionController.getMine);
 router.post('/cancel', authMiddleware, subscriptionController.cancel);
+router.post('/resume', authMiddleware, subscriptionController.resume);
+router.post('/change', authMiddleware, subscriptionController.change);
 
 module.exports = router;

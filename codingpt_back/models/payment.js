@@ -10,6 +10,11 @@ module.exports = (sequelize, DataTypes) => {
     ref_id: { type: DataTypes.INTEGER, allowNull: true }, // credit_pack.id 또는 subscription_plan.id (폴리모픽)
     amount_krw: { type: DataTypes.INTEGER, allowNull: false },
     status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'ready' }, // ready|paid|failed|cancelled|partial_cancelled
+    kind: { type: DataTypes.STRING(24), allowNull: true }, // subscription_initial|renewal|upgrade_proration|plan_change|payment_method_retry|refund
+    description: { type: DataTypes.STRING(255), allowNull: true }, // 주문명 스냅샷(영수증)
+    period_start: { type: DataTypes.DATE, allowNull: true }, // 이 결제가 커버하는 구독 기간
+    period_end: { type: DataTypes.DATE, allowNull: true },
+    refunded_amount_krw: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     pg_tx_id: { type: DataTypes.STRING(255), allowNull: true },
     billing_key: { type: DataTypes.STRING(255), allowNull: true },
     customer_uid: { type: DataTypes.STRING(255), allowNull: true },
