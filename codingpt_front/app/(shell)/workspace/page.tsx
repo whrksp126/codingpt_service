@@ -34,7 +34,7 @@ export default function AppHome() {
 
   const onCreate = async () => {
     if (creating) return;
-    if (isFree) { router.push('/me#plans'); return; } // Free 는 워크스페이스 불가 → 업그레이드
+    if (isFree) { router.push('/plans'); return; } // Free 는 워크스페이스 불가 → 업그레이드
     setCreating(true);
     try {
       const ws = await createWorkspace({ name: '새 프로젝트', kind: 'project' });
@@ -48,7 +48,7 @@ export default function AppHome() {
   const projects = (workspaces || []).filter((w) => w.kind !== 'chat');
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px 64px' }}>
+    <div style={{ padding: '32px 28px 64px' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em' }}>내 프로젝트</h1>
@@ -65,7 +65,7 @@ export default function AppHome() {
           <p className="muted" style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.6, maxWidth: 520 }}>
             AI와 대화하며 직접 앱을 만드는 워크스페이스 바이브코딩은 Pro 이상 플랜에서 사용할 수 있어요. 채팅은 Free에서도 계속 쓸 수 있어요.
           </p>
-          <a href="/me#plans" className="btn" style={{ display: 'inline-block', marginTop: 14, textDecoration: 'none', padding: '10px 18px', fontSize: 14 }}>플랜 보기</a>
+          <a href="/plans" className="btn" style={{ display: 'inline-block', marginTop: 14, textDecoration: 'none', padding: '10px 18px', fontSize: 14 }}>플랜 보기</a>
         </div>
       ) : null}
 

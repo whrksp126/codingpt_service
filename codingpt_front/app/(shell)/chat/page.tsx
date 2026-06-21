@@ -70,7 +70,7 @@ function ChatView({
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ width: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <Chat messages={agent.messages} running={agent.running} loading={agent.loading} onSend={agent.send} onAbort={agent.abort} />
         </div>
       </div>

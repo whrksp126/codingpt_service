@@ -2,13 +2,13 @@ import type { LegalSection } from '@/config/legal';
 
 // 법적 문서 렌더러(SSR) — 조문 데이터 → 정적 HTML. 표준안 기반 약관/방침 공통.
 export default function LegalDoc({
-  title, sections, effectiveDate,
+  title, sections, effectiveDate, hideTitle,
 }: {
-  title: string; sections: LegalSection[]; effectiveDate?: string;
+  title: string; sections: LegalSection[]; effectiveDate?: string; hideTitle?: boolean;
 }) {
   return (
-    <article style={{ maxWidth: 800, margin: '0 auto', lineHeight: 1.8 }}>
-      <h1 style={{ marginBottom: 4 }}>{title}</h1>
+    <article style={{ maxWidth: 800, margin: hideTitle ? '0' : '0 auto', lineHeight: 1.8 }}>
+      {hideTitle ? null : <h1 style={{ marginBottom: 4 }}>{title}</h1>}
       {effectiveDate ? <p className="dim" style={{ fontSize: 13, marginTop: 0 }}>시행일: {effectiveDate}</p> : null}
 
       {sections.map((s, i) => (
