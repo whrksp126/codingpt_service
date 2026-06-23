@@ -374,7 +374,9 @@ async function handleTermWs(ws, userId, projectId) {
   try {
     const baseCwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
     pty = await sandboxManager.openPty(userId, { projectId, cwd: baseCwd, cols: 80, rows: 24 });
+    console.log(`[agent-worker] termproxy 연결 userId=${userId} projectId=${projectId} cwd=${baseCwd}`);
   } catch (e) {
+    console.warn(`[agent-worker] termproxy openPty 실패 userId=${userId}: ${e && e.message ? e.message : e}`);
     try { ws.send('\r\n\x1b[31m터미널을 열 수 없습니다: ' + (e && e.message ? e.message : e) + '\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
     return;
   }
@@ -392,8 +394,10 @@ async function handleTermWs(ws, userId, projectId) {
     } catch (_) { /* JSON 아니면 일반 입력으로 폴백 */ }
     try { stream.write(str); } catch (_) { /* noop */ }
   });
-  const cleanup = () => { try { stream.end(); } catch (_) { /* noop */ } try { stream.destroy(); } catch (_) { /* noop */ } };
-  ws.on('close', cleanup);
+  // Keepalive — Cloudflare 는 유휴 WebSocket 을 ~100초 후 끊는다. ping 으로 살려둔다(유휴 터미널 세션 유지).
+  const ka = setInterval(() => { try { if (ws.readyState === 1) ws.ping(); } catch (_) { /* noop */ } }, 30000);
+  const cleanup = () => { try { clearInterval(ka); } catch (_) { /* noop */ } try { stream.end(); } catch (_) { /* noop */ } try { stream.destroy(); } catch (_) { /* noop */ } };
+  ws.on('close', () => { console.log(`[agent-worker] termproxy 종료 userId=${userId}`); cleanup(); });
   ws.on('error', cleanup);
 }
 
