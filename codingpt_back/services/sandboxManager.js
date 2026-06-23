@@ -220,6 +220,53 @@ async function execBash(userId, command, opts = {}) {
   });
 }
 
+// ── 인터랙티브 PTY 터미널 ──────────────────────────────────────────────
+// 실제 셸(TTY): 키 입력(stdin)과 raw 출력(ANSI/readline/탭완성)을 양방향. 워커의 WS 종단에서 사용.
+// 단일 raw 듀플렉스(데먹스 X). EXEC_TIMEOUT 미적용 — 장수명, idle 스위퍼가 정리.
+// userId → Set<stream> : 활성 터미널이 있으면 idle 스위퍼가 컨테이너를 지우지 않게 함.
+const terminals = new Map();
+function _trackTerm(uid, stream) {
+  let set = terminals.get(uid);
+  if (!set) { set = new Set(); terminals.set(uid, set); }
+  set.add(stream);
+  const drop = () => { try { set.delete(stream); } catch (_) { /* noop */ } if (!set.size) terminals.delete(uid); };
+  stream.on('close', drop); stream.on('end', drop); stream.on('error', drop);
+}
+
+/**
+ * 인터랙티브 PTY 셸 열기. TTY 모드라 stdout/stderr 가 합쳐진 단일 raw 듀플렉스.
+ * 호출자가 stream.write(키입력), stream.on('data')(출력), exec.resize({h,w}).
+ * @returns {Promise<{ exec:any, stream:import('stream').Duplex }>}
+ */
+async function openPty(userId, opts = {}) {
+  const uid = safeUid(userId);
+  const container = await ensureSandbox(uid);
+  const cwd = opts.cwd || userWorkspaceDir(uid);
+  const proxyEnv = EGRESS_PROXY
+    ? [
+        `HTTP_PROXY=${EGRESS_PROXY}`, `HTTPS_PROXY=${EGRESS_PROXY}`,
+        `http_proxy=${EGRESS_PROXY}`, `https_proxy=${EGRESS_PROXY}`,
+        'NO_PROXY=localhost,127.0.0.1', 'no_proxy=localhost,127.0.0.1',
+      ]
+    : [];
+  const exec = await container.exec({
+    Cmd: ['bash', '-l'],
+    WorkingDir: cwd,
+    AttachStdin: true,
+    AttachStdout: true,
+    AttachStderr: true,
+    Tty: true,
+    Env: ['HOME=/root', 'TERM=xterm-256color', ...proxyEnv],
+  });
+  const stream = await exec.start({ hijack: true, stdin: true });
+  if (opts.cols && opts.rows) { try { await exec.resize({ h: opts.rows, w: opts.cols }); } catch (_) { /* noop */ } }
+  const s = sessions.get(uid); if (s) s.lastUsed = Date.now();
+  // 출력이 흐르는 동안 컨테이너 활성 유지(스위퍼는 활성 터미널 set 으로도 보호).
+  stream.on('data', () => { const ss = sessions.get(uid); if (ss) ss.lastUsed = Date.now(); });
+  _trackTerm(uid, stream);
+  return { exec, stream };
+}
+
 // ── dev 서버(미리보기) lifecycle ──────────────────────────────────────
 // 샌드박스 안에서 `npm run dev`(Vite 등)를 백그라운드(Detach exec)로 띄워 장기 유지한다.
 // execBash 의 120s 동기 한계를 우회: Detach 로 즉시 반환하고, 준비완료는 HTTP 폴링으로 확인.
@@ -379,6 +426,9 @@ function startIdleSweeper() {
   _sweeper = setInterval(() => {
     const now = Date.now();
     for (const [uid, s] of sessions.entries()) {
+      // 활성 인터랙티브 터미널이 연결돼 있으면(출력 없어도) 컨테이너를 유지한다.
+      const t = terminals.get(uid);
+      if (t && t.size > 0) continue;
       if (now - s.lastUsed > IDLE_TTL_MS) {
         sessions.delete(uid);
         s.container.remove({ force: true }).catch(() => {});
@@ -391,6 +441,8 @@ if (ENABLED) startIdleSweeper();
 
 module.exports = {
   isEnabled, ensureSandbox, execBash, releaseSandbox, containerName, userWorkspaceDir,
+  // 인터랙티브 PTY 터미널
+  openPty,
   // dev 서버(미리보기) lifecycle
   startDevServer, isDevReady, readDevLog, stopDevServer, getDevServer,
 };

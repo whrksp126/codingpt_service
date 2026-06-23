@@ -179,13 +179,28 @@ const startServer = async () => {
     // 미리보기 HMR(WebSocket) 업그레이드 프록시 — /api/preview/:token/* 의 ws 를 워커→샌드박스 dev 서버로 포워딩.
     // (Express 라우트는 ws 업그레이드를 처리하지 않으므로 http.Server 레벨에서 직접 처리)
     const previewProxyController = require('./controllers/previewProxyController');
+    const terminalProxyController = require('./controllers/terminalProxyController');
     const agentProxyService = require('./services/agentProxyService');
+    // 단일 upgrade 핸들러에서 분기(리스너 2개면 비매칭 경로를 서로 destroy 하므로 한 곳에서 처리).
     server.on('upgrade', (req, socket, head) => {
-      const m = (req.url || '').match(/^\/api\/preview\/([^/?]+)/);
-      if (!m) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-      const sess = previewProxyController.resolveToken(m[1]);
-      if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-      agentProxyService.proxyDevWs(req, socket, head, { userId: sess.userId });
+      const url = req.url || '';
+      // 인터랙티브 PTY 터미널
+      const tm = url.match(/^\/api\/terminal\/([^/?]+)/);
+      if (tm) {
+        const tsess = terminalProxyController.resolveToken(tm[1]);
+        if (!tsess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+        agentProxyService.proxyTerminalWs(req, socket, head, { userId: tsess.userId, projectId: tsess.projectId });
+        return;
+      }
+      // 미리보기 HMR
+      const m = url.match(/^\/api\/preview\/([^/?]+)/);
+      if (m) {
+        const sess = previewProxyController.resolveToken(m[1]);
+        if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+        agentProxyService.proxyDevWs(req, socket, head, { userId: sess.userId });
+        return;
+      }
+      try { socket.destroy(); } catch (_) { /* noop */ }
     });
 
   } catch (error) {

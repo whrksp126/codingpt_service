@@ -361,24 +361,73 @@ function pipeUpgrade(clientSocket, proxyRes, proxySocket, proxyHead) {
   proxySocket.on('close', cleanup); clientSocket.on('close', cleanup);
 }
 
+// ── 인터랙티브 PTY 터미널(WebSocket) ──────────────────────────────────
+// /termproxy 의 ws 업그레이드를 여기서 종단(ws 라이브러리)하고, 사용자 샌드박스의 TTY 셸에 양방향 브리지.
+//  · 클라→PTY: 바이너리 메시지=키 입력(stdin), 텍스트 JSON {type:'resize',cols,rows}=리사이즈.
+//  · PTY→클라: raw 바이트(ANSI/readline/탭완성)를 그대로 ws.send.
+let TermWss = null;
+try { TermWss = new (require('ws').Server)({ noServer: true }); }
+catch (_) { console.warn('[agent-worker] ws 미설치 — 인터랙티브 터미널 비활성'); }
+
+async function handleTermWs(ws, userId, projectId) {
+  let pty;
+  try {
+    const baseCwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    pty = await sandboxManager.openPty(userId, { projectId, cwd: baseCwd, cols: 80, rows: 24 });
+  } catch (e) {
+    try { ws.send('\r\n\x1b[31m터미널을 열 수 없습니다: ' + (e && e.message ? e.message : e) + '\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
+    return;
+  }
+  const { exec, stream } = pty;
+  const onOut = (chunk) => { try { if (ws.readyState === 1) ws.send(chunk); } catch (_) { /* noop */ } };
+  stream.on('data', onOut);
+  stream.on('end', () => { try { ws.close(); } catch (_) { /* noop */ } });
+  stream.on('error', () => { try { ws.close(); } catch (_) { /* noop */ } });
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) { try { stream.write(data); } catch (_) { /* noop */ } return; }
+    const str = data.toString();
+    try {
+      const m = JSON.parse(str);
+      if (m && m.type === 'resize' && m.cols && m.rows) { exec.resize({ h: m.rows | 0, w: m.cols | 0 }).catch(() => {}); return; }
+    } catch (_) { /* JSON 아니면 일반 입력으로 폴백 */ }
+    try { stream.write(str); } catch (_) { /* noop */ }
+  });
+  const cleanup = () => { try { stream.end(); } catch (_) { /* noop */ } try { stream.destroy(); } catch (_) { /* noop */ } };
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
+}
+
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`🤖 [agent-worker] listening on :${PORT} (workspaceRoot=${process.env.AGENT_WORKSPACE_ROOT || 'tmp'})`);
 });
 
 server.on('upgrade', (req, socket, head) => {
-  if (!(req.url === '/devproxy' || req.url.startsWith('/devproxy/'))) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-  const userId = req.headers['x-user-id'];
-  const dev = userId != null ? sandboxManager.getDevServer(userId) : null;
-  if (!dev) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-  const targetPath = req.url.replace(/^\/devproxy/, '') || '/';
-  const headers = { ...req.headers };
-  headers.host = `localhost:${dev.port}`; // Vite allowedHosts 통과(컨테이너명 차단)
-  const uidSafe = String(userId).replace(/[^A-Za-z0-9_-]/g, '') || 'anon';
-  const proxyReq = http.request({
-    host: sandboxManager.containerName(uidSafe), port: dev.port, path: targetPath, method: 'GET', headers, timeout: 0,
-  });
-  proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => pipeUpgrade(socket, proxyRes, proxySocket, proxyHead));
-  proxyReq.on('error', () => { try { socket.destroy(); } catch (_) { /* noop */ } });
-  if (head && head.length) proxyReq.write(head);
-  proxyReq.end();
+  const url = req.url || '';
+  // 인터랙티브 터미널 — ws 종단 후 PTY 브리지.
+  if (url === '/termproxy' || url.startsWith('/termproxy/')) {
+    const userId = req.headers['x-user-id'];
+    const projectId = req.headers['x-project-id'] || null;
+    if (!TermWss || userId == null || !sandboxManager.isEnabled()) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+    TermWss.handleUpgrade(req, socket, head, (ws) => { handleTermWs(ws, userId, projectId); });
+    return;
+  }
+  // 미리보기 HMR — Vite dev 서버로 ws 포워딩.
+  if (url === '/devproxy' || url.startsWith('/devproxy/')) {
+    const userId = req.headers['x-user-id'];
+    const dev = userId != null ? sandboxManager.getDevServer(userId) : null;
+    if (!dev) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+    const targetPath = url.replace(/^\/devproxy/, '') || '/';
+    const headers = { ...req.headers };
+    headers.host = `localhost:${dev.port}`; // Vite allowedHosts 통과(컨테이너명 차단)
+    const uidSafe = String(userId).replace(/[^A-Za-z0-9_-]/g, '') || 'anon';
+    const proxyReq = http.request({
+      host: sandboxManager.containerName(uidSafe), port: dev.port, path: targetPath, method: 'GET', headers, timeout: 0,
+    });
+    proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => pipeUpgrade(socket, proxyRes, proxySocket, proxyHead));
+    proxyReq.on('error', () => { try { socket.destroy(); } catch (_) { /* noop */ } });
+    if (head && head.length) proxyReq.write(head);
+    proxyReq.end();
+    return;
+  }
+  try { socket.destroy(); } catch (_) { /* noop */ }
 });

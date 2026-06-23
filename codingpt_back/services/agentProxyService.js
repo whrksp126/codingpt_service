@@ -227,6 +227,36 @@ function proxyDevWs(req, socket, head, { userId } = {}) {
   proxyReq.end();
 }
 
+/**
+ * 인터랙티브 터미널(PTY) WebSocket 업그레이드 프록시 — back 의 ws 업그레이드를 워커 /termproxy 로 포워딩.
+ * 워커가 ws 를 종단하고 사용자 샌드박스의 TTY 셸에 브리지한다. (proxyDevWs 와 동일 구조, 투명 파이프)
+ */
+function proxyTerminalWs(req, socket, head, { userId, projectId } = {}) {
+  const url = new URL(`${WORKER_URL}/termproxy`);
+  const headers = { ...req.headers, 'x-user-id': String(userId), 'x-project-id': String(projectId == null ? '' : projectId) };
+  delete headers.host;
+  const proxyReq = http.request({
+    hostname: url.hostname, port: url.port || 80, path: '/termproxy', method: 'GET', headers, timeout: 0,
+  });
+  proxyReq.on('upgrade', (proxyRes, proxySocket, proxyHead) => {
+    const lines = [`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage || ''}`.trim()];
+    for (const [k, v] of Object.entries(proxyRes.headers || {})) {
+      if (Array.isArray(v)) v.forEach((vv) => lines.push(`${k}: ${vv}`));
+      else lines.push(`${k}: ${v}`);
+    }
+    socket.write(lines.join('\r\n') + '\r\n\r\n');
+    if (proxyHead && proxyHead.length) proxySocket.unshift(proxyHead);
+    proxySocket.pipe(socket);
+    socket.pipe(proxySocket);
+    const cleanup = () => { try { proxySocket.destroy(); } catch (_) { /* noop */ } try { socket.destroy(); } catch (_) { /* noop */ } };
+    proxySocket.on('error', cleanup); socket.on('error', cleanup);
+    proxySocket.on('close', cleanup); socket.on('close', cleanup);
+  });
+  proxyReq.on('error', () => { try { socket.destroy(); } catch (_) { /* noop */ } });
+  if (head && head.length) proxyReq.write(head);
+  proxyReq.end();
+}
+
 const proxyPermission = (payload) => postJson('/permission', payload);
 const writeFile = (payload) => postJson('/file', payload); // { userId, projectId, path, content }
 const getFile = ({ userId, projectId, path }) => {
@@ -243,4 +273,4 @@ const listFiles = ({ userId, projectId }) => {
   return getJson(`/files?${qs.toString()}`);
 };
 
-module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyExec, WORKER_URL };
+module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyTerminalWs, proxyExec, WORKER_URL };

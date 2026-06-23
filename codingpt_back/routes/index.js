@@ -17,6 +17,7 @@ const adminUsageRoutes = require('./adminUsageRoutes');
 const agentRoutes = require('./agentRoutes');
 const workspaceRoutes = require('./workspaceRoutes');
 const previewRoutes = require('./previewRoutes');
+const terminalRoutes = require('./terminalRoutes');
 const usageRoutes = require('./usageRoutes');
 const subscriptionRoutes = require('./subscriptionRoutes');
 const billingRoutes = require('./billingRoutes');
@@ -39,6 +40,7 @@ router.use('/github', githubRoutes);
 router.use('/agent', agentRoutes);
 router.use('/workspaces', workspaceRoutes);
 router.use('/preview', previewRoutes); // 바이브코딩 dev 서버 미리보기 프록시
+router.use('/terminal', terminalRoutes); // 인터랙티브 PTY 터미널(ws 업그레이드는 app.js 에서)
 router.use('/usage', usageRoutes); // 사용량 미터링 조회
 router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태
 router.use('/billing', billingRoutes); // 충전/결제/크레딧
