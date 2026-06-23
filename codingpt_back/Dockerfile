@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ruby-full \
       php-cli \
       bash \
+      tmux \
       golang-go \
       build-essential \
       rustc cargo \
@@ -26,6 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       mono-mcs mono-runtime \
       curl unzip ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+# 샌드박스 터미널용 tmux 설정 (detach/reattach 영속 + 모바일 스크롤)
+COPY tmux.conf /root/.tmux.conf
 
 # Kotlin: apt 저장소에 없어 GitHub 릴리스 zip 으로 설치 (default-jdk 필요)
 RUN curl -fsSL -o /tmp/kotlin.zip \

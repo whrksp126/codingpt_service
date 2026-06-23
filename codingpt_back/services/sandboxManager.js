@@ -249,8 +249,11 @@ async function openPty(userId, opts = {}) {
         'NO_PROXY=localhost,127.0.0.1', 'no_proxy=localhost,127.0.0.1',
       ]
     : [];
+  // tmux 백킹 — Docker exec attach 가 유휴 ~80초에 끊겨도 컨테이너 안 tmux 세션(셸/실행중 프로세스)은 유지.
+  // 재접속(attach) 시 같은 세션('cpt')에 다시 붙어 cwd·npm run dev 등이 그대로 복귀한다. tmux 미설치 시 bash 폴백.
+  const startCmd = `cd ${JSON.stringify(cwd)} 2>/dev/null; if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s cpt; else exec bash -l; fi`;
   const exec = await container.exec({
-    Cmd: ['bash', '-l'],
+    Cmd: ['bash', '-lc', startCmd],
     WorkingDir: cwd,
     AttachStdin: true,
     AttachStdout: true,
