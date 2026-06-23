@@ -381,10 +381,11 @@ async function handleTermWs(ws, userId, projectId) {
     return;
   }
   const { exec, stream } = pty;
+  const openedAt = Date.now();
   const onOut = (chunk) => { try { if (ws.readyState === 1) ws.send(chunk); } catch (_) { /* noop */ } };
   stream.on('data', onOut);
-  stream.on('end', () => { try { ws.close(); } catch (_) { /* noop */ } });
-  stream.on('error', () => { try { ws.close(); } catch (_) { /* noop */ } });
+  stream.on('end', () => { console.log(`[agent-worker] termproxy PTY stream END userId=${userId} aliveMs=${Date.now() - openedAt}`); try { ws.close(); } catch (_) { /* noop */ } });
+  stream.on('error', (e) => { console.log(`[agent-worker] termproxy PTY stream ERROR userId=${userId}: ${e && e.message}`); try { ws.close(); } catch (_) { /* noop */ } });
   ws.on('message', (data, isBinary) => {
     if (isBinary) { try { stream.write(data); } catch (_) { /* noop */ } return; }
     const str = data.toString();
@@ -397,8 +398,8 @@ async function handleTermWs(ws, userId, projectId) {
   // Keepalive — Cloudflare 는 유휴 WebSocket 을 ~100초 후 끊는다. ping 으로 살려둔다(유휴 터미널 세션 유지).
   const ka = setInterval(() => { try { if (ws.readyState === 1) ws.ping(); } catch (_) { /* noop */ } }, 30000);
   const cleanup = () => { try { clearInterval(ka); } catch (_) { /* noop */ } try { stream.end(); } catch (_) { /* noop */ } try { stream.destroy(); } catch (_) { /* noop */ } };
-  ws.on('close', () => { console.log(`[agent-worker] termproxy 종료 userId=${userId}`); cleanup(); });
-  ws.on('error', cleanup);
+  ws.on('close', (code, reason) => { console.log(`[agent-worker] termproxy WS CLOSE userId=${userId} code=${code} reason=${reason} aliveMs=${Date.now() - openedAt}`); cleanup(); });
+  ws.on('error', (e) => { console.log(`[agent-worker] termproxy WS ERROR userId=${userId}: ${e && e.message}`); cleanup(); });
 }
 
 const server = app.listen(PORT, '0.0.0.0', () => {
