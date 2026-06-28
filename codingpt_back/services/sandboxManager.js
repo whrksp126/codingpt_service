@@ -64,13 +64,26 @@ function userWorkspaceDir(uid) {
   return path.join(WORKSPACE_ROOT, 'cpt-agent', safeUid(uid));
 }
 
+// 사용자별 생성 in-flight 프로미스 — 동시 호출(터미널 WS 재연결 등)이 각자 createContainer 를 때려
+// "(409) container name already in use" 가 나는 레이스를 막는다. 같은 uid 의 동시 ensure 는 1개만 실행.
+const ensuring = new Map(); // uid -> Promise<container>
+
 /**
  * 사용자 샌드박스 컨테이너 확보(없으면 생성, 멈춰있으면 시작). 동일 사용자는 재사용.
+ * 동시 호출은 in-flight 프로미스로 합쳐 createContainer 경쟁(409)을 방지한다.
  * @returns {Promise<import('dockerode').Container>}
  */
 async function ensureSandbox(userId) {
   if (!ENABLED) throw new Error('샌드박스가 비활성화되어 있습니다.');
   const uid = safeUid(userId);
+  const inflight = ensuring.get(uid);
+  if (inflight) return inflight;
+  const p = _ensureSandboxInner(uid);
+  ensuring.set(uid, p);
+  try { return await p; } finally { ensuring.delete(uid); }
+}
+
+async function _ensureSandboxInner(uid) {
 
   // 캐시된 세션이 살아있으면 재사용
   const cached = sessions.get(uid);
