@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ruby-full \
       php-cli \
       bash \
+      tmux \
       golang-go \
       build-essential \
       rustc cargo \
@@ -20,6 +21,9 @@ RUN curl -fsSL -o /tmp/kotlin.zip \
       https://github.com/JetBrains/kotlin/releases/download/v2.0.21/kotlin-compiler-2.0.21.zip \
  && unzip -q /tmp/kotlin.zip -d /opt && rm /tmp/kotlin.zip
 ENV PATH="/opt/kotlinc/bin:${PATH}"
+
+# 샌드박스 터미널용 tmux 설정 (detach/reattach 영속 + 모바일 스크롤). dev 서버를 이 세션에서 전면 실행.
+COPY tmux.conf /root/.tmux.conf
 
 # TypeScript 실행기(tsx)
 RUN npm i -g tsx

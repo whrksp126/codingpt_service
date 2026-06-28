@@ -147,13 +147,35 @@ function proxyQuery(payload, { onEvent, abortController } = {}) {
 const startDev = (payload) => postJson('/dev/start', payload);   // { userId, projectId }
 const stopDev = (payload) => postJson('/dev/stop', payload);     // { userId }
 
+// ── 멀티 터미널(tmux 윈도우) + 포트 감지 ──
+const listTerminals = ({ userId, projectId }) => {
+  const qs = new URLSearchParams();
+  if (userId != null) qs.set('userId', String(userId));
+  if (projectId != null) qs.set('projectId', String(projectId));
+  return getJson(`/terminals?${qs.toString()}`);
+};
+const portForward = (payload) => postJson('/portforward', payload);         // { userId, port } → { exposed }
+const newTerminal = (payload) => postJson('/terminals/new', payload);       // { userId, projectId }
+const selectTerminal = (payload) => postJson('/terminals/select', payload); // { userId, index }
+const closeTerminal = (payload) => postJson('/terminals/close', payload);   // { userId, index }
+const clearTerminal = (payload) => postJson('/terminals/clear', payload);   // { userId }
+const listPorts = ({ userId, projectId }) => {
+  const qs = new URLSearchParams();
+  if (userId != null) qs.set('userId', String(userId));
+  if (projectId != null) qs.set('projectId', String(projectId));
+  return getJson(`/ports?${qs.toString()}`);
+};
+
 /**
- * 미리보기 dev 서버 HTTP 프록시. back 의 원본 경로(/api/preview/<pid>/...)를 보존해
+ * 미리보기 dev 서버 HTTP 프록시. back 의 원본 경로(/api/preview/<token>/...)를 보존해
  * 워커 /devproxy 로 포워딩(워커가 다시 샌드박스로). 요청/응답 스트림 그대로 파이프.
+ *   port/basePath 지정 시(수동 감지 포트) → 워커가 그 포트로 프록시 + HTML <base> 주입(상대경로 보정).
  */
-function proxyDev(req, res, { userId } = {}) {
+function proxyDev(req, res, { userId, port, basePath } = {}) {
   const url = new URL(`${WORKER_URL}/devproxy${req.originalUrl}`);
   const headers = { ...req.headers, 'x-user-id': String(userId) };
+  if (port) headers['x-target-port'] = String(port);
+  if (basePath) headers['x-base-path'] = String(basePath);
   delete headers.host;
   const upstream = http.request(
     { hostname: url.hostname, port: url.port || 80, path: url.pathname + url.search, method: req.method, headers, timeout: 35000 },
@@ -273,4 +295,9 @@ const listFiles = ({ userId, projectId }) => {
   return getJson(`/files?${qs.toString()}`);
 };
 
-module.exports = { isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile, startDev, stopDev, proxyDev, proxyDevWs, proxyTerminalWs, proxyExec, WORKER_URL };
+module.exports = {
+  isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile,
+  startDev, stopDev, proxyDev, proxyDevWs, proxyTerminalWs, proxyExec,
+  listTerminals, newTerminal, selectTerminal, closeTerminal, clearTerminal, listPorts, portForward,
+  WORKER_URL,
+};

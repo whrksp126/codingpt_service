@@ -242,6 +242,70 @@ app.post('/dev/stop', async (req, res) => {
   return res.json({ success: true });
 });
 
+/** 포트 포워더 보장(localhost 바인딩 서버를 0.0.0.0 으로 노출) → 노출 포트 반환. body:{ userId, port } */
+app.post('/portforward', async (req, res) => {
+  const { userId, port } = req.body || {};
+  const p = parseInt(port, 10);
+  if (userId == null || !Number.isFinite(p)) return res.status(400).json({ success: false, message: 'userId, port 필요' });
+  try { const exposed = await sandboxManager.ensurePortForwarder(userId, p); return res.json({ success: true, exposed }); }
+  catch (e) { return res.status(500).json({ success: false, message: e.message || '포워더 실패' }); }
+});
+
+// ── 멀티 터미널(tmux 윈도우) ─────────────────────────────────────────
+// 세션 'cpt' 안의 윈도우 = 터미널 탭. WebView 는 단일 PTY 로 attach 하고 활성 윈도우를 따라간다.
+app.get('/terminals', async (req, res) => {
+  const { userId, projectId } = req.query;
+  if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
+  try {
+    // 세션이 아직 없으면 윈도우 0 을 프로젝트 dir 에서 생성(워크스페이스 루트엔 package.json 이 없어 npm run dev 가 실패).
+    const cwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    const windows = await sandboxManager.listWindows(userId, cwd);
+    return res.json({ success: true, windows });
+  } catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 목록 실패' }); }
+});
+
+app.post('/terminals/new', async (req, res) => {
+  const { userId, projectId, name } = req.body || {};
+  if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
+  try {
+    const cwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    const index = await sandboxManager.newWindow(userId, { name: name || 'shell', cwd });
+    return res.json({ success: true, index });
+  } catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 생성 실패' }); }
+});
+
+app.post('/terminals/select', async (req, res) => {
+  const { userId, index } = req.body || {};
+  if (userId == null || index == null) return res.status(400).json({ success: false, message: 'userId, index 가 필요합니다.' });
+  try { await sandboxManager.selectWindow(userId, index); return res.json({ success: true }); }
+  catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 전환 실패' }); }
+});
+
+app.post('/terminals/close', async (req, res) => {
+  const { userId, index } = req.body || {};
+  if (userId == null || index == null) return res.status(400).json({ success: false, message: 'userId, index 가 필요합니다.' });
+  try { await sandboxManager.killWindow(userId, index); return res.json({ success: true }); }
+  catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 종료 실패' }); }
+});
+
+app.post('/terminals/clear', async (req, res) => {
+  const { userId } = req.body || {};
+  if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
+  try { await sandboxManager.clearActiveWindow(userId); return res.json({ success: true }); }
+  catch (e) { return res.status(500).json({ success: false, message: e.message || '지우기 실패' }); }
+});
+
+/** 샌드박스 LISTEN 포트 감지 — 수동으로 띄운 서버까지 미리보기로 연결하기 위함. */
+app.get('/ports', async (req, res) => {
+  const { userId } = req.query;
+  if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
+  try {
+    const ports = await sandboxManager.detectListeningPorts(userId);
+    const dev = sandboxManager.getDevServer(userId);
+    return res.json({ success: true, ports, devPort: dev ? dev.port : null });
+  } catch (e) { return res.status(500).json({ success: false, message: e.message || '포트 감지 실패' }); }
+});
+
 /**
  * dev 서버 HTTP 프록시. back 이 원본 경로를 보존해 `/devproxy/api/preview/<pid>/...` 로 보낸다.
  * 헤더 x-user-id 로 사용자 샌드박스를 선택 → http://cpt-sandbox-<uid>:<port><원본경로> 로 포워딩.
@@ -249,16 +313,59 @@ app.post('/dev/stop', async (req, res) => {
 app.all('/devproxy/*', (req, res) => {
   const userId = req.headers['x-user-id'];
   if (userId == null) return res.status(400).end('x-user-id required');
-  const dev = sandboxManager.getDevServer(userId);
-  if (!dev) return res.status(503).end('dev server not running');
-  const targetPath = req.originalUrl.replace(/^\/devproxy/, '') || '/';
+  // x-target-port: 감지된 임의 포트(수동 서버). 없으면 관리형 dev 서버 포트.
+  const targetPort = parseInt(req.headers['x-target-port'], 10);
+  const basePath = req.headers['x-base-path'] || ''; // '/api/preview/<token>/' — 임의 포트일 때 <base> 주입 + 경로 prefix 제거
+  let port;
+  if (Number.isFinite(targetPort) && targetPort > 0) {
+    port = targetPort;
+  } else {
+    const dev = sandboxManager.getDevServer(userId);
+    if (!dev) return res.status(503).end('dev server not running');
+    port = dev.port;
+  }
+  let targetPath = req.originalUrl.replace(/^\/devproxy/, '') || '/';
+  // 임의 포트(--base 없이 / 에서 서빙)는 토큰 prefix 를 떼고 보낸다. 관리형(vite --base)은 경로 그대로.
+  if (basePath && targetPath.startsWith(basePath)) {
+    targetPath = '/' + targetPath.slice(basePath.length);
+  } else if (basePath && ('/' + basePath.replace(/^\/|\/$/g, '')) === targetPath.replace(/\/$/, '')) {
+    targetPath = '/';
+  }
   const headers = { ...req.headers };
+  delete headers['x-target-port']; delete headers['x-base-path'];
   // Vite 5+ 의 allowedHosts 검증 통과: Host 를 localhost 로(컨테이너명/외부도메인은 차단됨).
   // TCP 연결 대상은 아래 host 옵션(컨테이너명)이고, 이 헤더는 Vite 의 호스트 화이트리스트 체크용.
-  headers.host = `localhost:${dev.port}`;
+  headers.host = `localhost:${port}`;
+  const containerHost = sandboxManager.containerName(String(userId).replace(/[^A-Za-z0-9_-]/g, '') || 'anon');
   const upstream = http.request(
-    { host: sandboxManager.containerName(String(userId).replace(/[^A-Za-z0-9_-]/g, '') || 'anon'), port: dev.port, path: targetPath, method: req.method, headers, timeout: 30000 },
+    { host: containerHost, port, path: targetPath, method: req.method, headers, timeout: 30000 },
     (up) => {
+      const ct = String(up.headers['content-type'] || '');
+      const isHtml = /text\/html/i.test(ct);
+      const isJs = /(javascript|ecmascript)/i.test(ct);
+      // 임의 포트(--base 없는 dev 서버)는 에셋을 절대경로(/@vite/client, /src/..)로 emit → 하위경로 프록시에서 깨짐.
+      // HTML·JS 응답의 알려진 vite 절대경로를 토큰 경로로 재작성(=runtime --base). gzip(content-encoding) 은 건너뜀.
+      if (basePath && (isHtml || isJs) && !up.headers['content-encoding']) {
+        const chunks = [];
+        up.on('data', (c) => chunks.push(c));
+        up.on('end', () => {
+          let body = Buffer.concat(chunks).toString('utf-8');
+          // "/@vite/" · "/src/" · "/node_modules/" · "/@fs/" 등 vite 절대 경로 → basePath 접두.
+          body = body.replace(
+            /(["'`(=])\/(@vite\/|@id\/|@fs\/|@react-refresh|src\/|node_modules\/|\.vite\/|assets\/|vite\.svg|favicon\.ico)/g,
+            (m, q, p) => q + basePath + p,
+          );
+          if (isHtml) {
+            const baseTag = `<base href="${basePath}">`;
+            if (/<head[^>]*>/i.test(body)) body = body.replace(/<head[^>]*>/i, (m) => m + baseTag);
+            else body = baseTag + body;
+          }
+          const h = { ...up.headers }; delete h['content-length'];
+          res.writeHead(up.statusCode || 200, h);
+          res.end(body);
+        });
+        return;
+      }
       res.writeHead(up.statusCode || 502, up.headers);
       up.pipe(res);
     },

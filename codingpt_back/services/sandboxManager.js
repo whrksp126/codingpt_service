@@ -251,7 +251,7 @@ async function openPty(userId, opts = {}) {
     : [];
   // tmux 백킹 — Docker exec attach 가 유휴 ~80초에 끊겨도 컨테이너 안 tmux 세션(셸/실행중 프로세스)은 유지.
   // 재접속(attach) 시 같은 세션('cpt')에 다시 붙어 cwd·npm run dev 등이 그대로 복귀한다. tmux 미설치 시 bash 폴백.
-  const startCmd = `cd ${JSON.stringify(cwd)} 2>/dev/null; if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s cpt; else exec bash -l; fi`;
+  const startCmd = `cd ${JSON.stringify(cwd)} 2>/dev/null; if command -v tmux >/dev/null 2>&1; then exec tmux new-session -A -s cpt -n shell; else exec bash -l; fi`;
   const exec = await container.exec({
     Cmd: ['bash', '-lc', startCmd],
     WorkingDir: cwd,
@@ -270,6 +270,155 @@ async function openPty(userId, opts = {}) {
   return { exec, stream };
 }
 
+// ── 멀티 터미널 = tmux 윈도우 ──────────────────────────────────────────
+// 세션 'cpt' 안의 tmux window 들이 곧 "터미널 탭". WebView 는 단일 PTY 로 'cpt' 에 attach 하고,
+// 활성 윈도우를 따라간다. 탭 전환/생성/종료는 (PTY 와 무관한) execBash 로 tmux 명령을 날려
+// tmux 서버 상태를 바꾸면, attach 중인 클라이언트가 즉시 그 윈도우로 리렌더된다.
+const TMUX = 'cpt';
+
+/** 세션 'cpt' 보장(없으면 detached 로 생성). 항상 윈도우 0=셸. */
+async function ensureTmuxSession(uid, dir) {
+  await execBash(
+    uid,
+    `command -v tmux >/dev/null 2>&1 || exit 0; `
+    + `tmux has-session -t ${TMUX} 2>/dev/null || tmux new-session -d -s ${TMUX} -n shell -c ${shq(dir)}; true`,
+  );
+}
+
+/** 윈도우(탭) 목록 — index/name/active/실행중 명령/pid. tmux 없으면 빈 배열.
+ *  cwd: 세션이 아직 없을 때 윈도우 0 을 만들 디렉토리(프로젝트 dir). 미지정 시 워크스페이스 루트. */
+async function listWindows(userId, cwd) {
+  const uid = safeUid(userId);
+  await ensureSandbox(uid);
+  await ensureTmuxSession(uid, cwd || userWorkspaceDir(uid));
+  const out = await execBash(
+    uid,
+    `command -v tmux >/dev/null 2>&1 && tmux list-windows -t ${TMUX} `
+    + `-F '#{window_index}|#{window_name}|#{window_active}|#{pane_current_command}|#{pane_pid}' 2>/dev/null || true`,
+  );
+  return (out.output || out || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => {
+      const [index, name, active, command, pid] = l.split('|');
+      return {
+        index: Number(index),
+        name: name || `win${index}`,
+        active: active === '1',
+        command: command || '',
+        pid: Number(pid) || null,
+      };
+    });
+}
+
+/** 새 윈도우(탭) 생성 → 새 index 반환. select=true 면 그 윈도우로 전환. */
+async function newWindow(userId, { name = 'shell', cwd, select = true } = {}) {
+  const uid = safeUid(userId);
+  await ensureSandbox(uid);
+  const dir = cwd || userWorkspaceDir(uid);
+  await ensureTmuxSession(uid, dir);
+  const out = await execBash(
+    uid,
+    `command -v tmux >/dev/null 2>&1 || { echo NA; exit 0; }; `
+    + `tmux new-window -t ${TMUX} -P -F '#{window_index}' -n ${shq(name)} -c ${shq(dir)}`,
+  );
+  const m = (out.output || '').match(/\d+/);
+  const idx = m ? Number(m[0]) : null;
+  if (select && idx != null) await selectWindow(uid, idx);
+  return idx;
+}
+
+/** 윈도우(탭) 전환 — attach 중인 WebView 가 즉시 그 윈도우를 보여준다. */
+async function selectWindow(userId, index) {
+  await execBash(
+    safeUid(userId),
+    `command -v tmux >/dev/null 2>&1 && tmux select-window -t ${TMUX}:${Number(index)} 2>/dev/null; true`,
+  );
+}
+
+/** 현재 윈도우 화면 + 스크롤백 비우기(IDE "지우기").
+ *  포그라운드가 셸일 때만 C-l 을 보낸다 — vite 등 앱이 돌면 C-l 이 그 앱에 ^L 로 에코되므로(셸 프롬프트 없음).
+ *  셸: C-l(화면 clear, 프롬프트 재그리기) + clear-history(스크롤백) → 전환 후에도 깨끗.
+ *  앱: clear-history 만(앱 화면은 앱이 소유 → 키 안 보냄). */
+async function clearActiveWindow(userId) {
+  await execBash(
+    safeUid(userId),
+    `command -v tmux >/dev/null 2>&1 || exit 0; `
+    + `tmux send-keys -t ${TMUX} -X cancel 2>/dev/null; `
+    + `cmd=$(tmux display-message -p -t ${TMUX} '#{pane_current_command}' 2>/dev/null); `
+    + `case "$cmd" in bash|sh|zsh|dash|-bash|-sh|-zsh|ash) tmux send-keys -t ${TMUX} C-l 2>/dev/null;; esac; `
+    + `tmux clear-history -t ${TMUX} 2>/dev/null; true`,
+  );
+}
+
+/** 윈도우(탭) 종료. 그 안에서 돌던 프로세스도 함께 종료된다(마지막 윈도우면 셸 하나는 남긴다). */
+async function killWindow(userId, index) {
+  const uid = safeUid(userId);
+  const wins = await listWindows(uid);
+  if (wins.length <= 1) {
+    // 마지막 1개는 죽이지 않고 셸로 리셋(빈 세션 방지) — 윈도우 안 프로세스만 Ctrl-C.
+    await execBash(uid, `command -v tmux >/dev/null 2>&1 && tmux send-keys -t ${TMUX}:${Number(index)} C-c 2>/dev/null; true`);
+    return;
+  }
+  await execBash(uid, `command -v tmux >/dev/null 2>&1 && tmux kill-window -t ${TMUX}:${Number(index)} 2>/dev/null; true`);
+}
+
+/**
+ * 샌드박스 안 LISTEN 중인 TCP 포트 감지(/proc/net/tcp(6) 파싱, procps 불필요).
+ * 1024 초과만(시스템 포트 제외). 수동으로 띄운 서버까지 감지 → 미리보기/탭 매핑.
+ */
+async function detectListeningPorts(userId) {
+  // LISTEN 중인 모든 포트(>1024). 사용자가 직접 띄운 서버(localhost 바인딩 포함)까지 다 보여준다 —
+  //   "무엇이 실행 중인지" 가시성이 목적. 단 Docker 내부 DNS(127.0.0.11)·우리 포워더 포트는 노이즈라 제외.
+  //   ipv4 local_address = 'IIIIIIII:PPPP'(IP little-endian hex). 127.0.0.11 = '0B00007F'.
+  const script =
+    "for f in /proc/net/tcp /proc/net/tcp6; do [ -f \"$f\" ] || continue; "
+    + "awk 'NR>1 && $4==\"0A\" {split($2,a,\":\"); if (a[1]!=\"0B00007F\") print a[2]}' \"$f\"; done | sort -u";
+  const r = await execBash(userId, script);
+  const uid = safeUid(userId);
+  const fwd = portForwarders.get(uid);
+  const exposed = fwd ? new Set([...fwd.values()].map((v) => v.exposed)) : new Set();
+  const ports = (r.output || '')
+    .split('\n')
+    .map((h) => parseInt(h.trim(), 16))
+    .filter((p) => Number.isFinite(p) && p > 1024 && p < 65536 && !exposed.has(p));
+  return [...new Set(ports)].sort((a, b) => a - b);
+}
+
+// ── 포트 포워더 ───────────────────────────────────────────────────────
+// localhost(127.0.0.1) 에만 바인딩된 서버(예: --host 없는 vite)는 컨테이너 간 도달 불가.
+// 0.0.0.0 에 바인딩되는 작은 node TCP 포워더를 띄워 127.0.0.1:port 로 중계 → 워커가 프록시할 수 있게.
+//   uid → Map(targetPort → { exposed, startedAt })
+const portForwarders = new Map();
+function _exposedPortFor(port) {
+  // 결정론적이고 충돌 적은 노출 포트.
+  return port + 20000 <= 64000 ? port + 20000 : port - 20000;
+}
+/** port(127.0.0.1) 를 0.0.0.0:exposed 로 노출하는 포워더 보장. 노출 포트 반환. */
+async function ensurePortForwarder(userId, port) {
+  const uid = safeUid(userId);
+  let map = portForwarders.get(uid);
+  if (!map) { map = new Map(); portForwarders.set(uid, map); }
+  const cached = map.get(port);
+  const exposed = cached ? cached.exposed : _exposedPortFor(port);
+  // 이미 노출 포트가 LISTEN 중이면 재사용(멱등). 아니면 detached node 포워더 기동.
+  // 업스트림은 127.0.0.1/::1 둘 다 시도(vite 가 localhost=::1 에만 바인딩되는 경우가 있음).
+  const fwd =
+    `node -e 'const net=require("net");const L=+process.argv[1],R=+process.argv[2];`
+    + `net.createServer(s=>{const hs=["127.0.0.1","::1"];const go=()=>{const h=hs.shift();`
+    + `const u=net.connect(R,h);u.on("connect",()=>{s.pipe(u);u.pipe(s);});`
+    + `u.on("error",()=>{hs.length?go():s.destroy();});s.on("error",()=>u.destroy());s.on("close",()=>u.destroy());};go();})`
+    + `.listen(L,"0.0.0.0");' `
+    + `${exposed} ${port}`;
+  const launch =
+    `if (exec 3<>/dev/tcp/127.0.0.1/${exposed}) 2>/dev/null; then exec 3>&- 3<&-; echo exists; `
+    + `else setsid bash -lc ${shq(fwd)} > /tmp/cptfwd-${exposed}.log 2>&1 < /dev/null & echo started; fi`;
+  await execBash(uid, launch).catch(() => {});
+  map.set(port, { exposed, startedAt: Date.now() });
+  return exposed;
+}
+
 // ── dev 서버(미리보기) lifecycle ──────────────────────────────────────
 // 샌드박스 안에서 `npm run dev`(Vite 등)를 백그라운드(Detach exec)로 띄워 장기 유지한다.
 // execBash 의 120s 동기 한계를 우회: Detach 로 즉시 반환하고, 준비완료는 HTTP 폴링으로 확인.
@@ -277,6 +426,8 @@ async function openPty(userId, opts = {}) {
 const devServers = new Map();
 const DEV_LOG = '/tmp/devserver.log';
 const DEV_PID_FILE = '/tmp/devserver.pid';
+const DEV_WINDOW = 'dev';           // dev 서버 전용 tmux 윈도우 이름(셸과 분리된 탭)
+const DEV_SCRIPT = '.cpt-dev.sh';   // 긴 실행 명령을 감싸는 래퍼 스크립트(터미널엔 짧게 'bash .cpt-dev.sh'만 보임)
 
 // HMR(핫리로드) 설정 주입 파일 — 미리보기 프록시(WebSocket)를 통해 HMR 이 닿도록 Vite server.hmr 를 덮어쓴다.
 // 사용자 vite.config 는 loadConfigFromFile 로 보존하고 hmr 만 병합. clientPort/protocol/path 는 CPT_HMR_* 로 주입.
@@ -318,10 +469,22 @@ async function startDevServer(userId, { projectId, dir, port = 5173, basePath, h
   const uid = safeUid(userId);
   if (!projectId || !dir) throw new Error('projectId 와 dir 이 필요합니다.');
   const container = await ensureSandbox(uid);
-  // 이미 떠있던 dev 서버는 정리(사용자당 1개)
-  await stopDevServer(uid).catch(() => {});
 
   const base = basePath || `/api/preview/${projectId}/`;
+
+  // 재활용: 같은 프로젝트의 vite 가 이미 같은 base 로 살아있으면 죽이지 않고 그대로 재입양한다.
+  //   워커가 재시작돼 devServers 상태를 잃었어도(샌드박스/vite 는 생존) 여기서 복구되어,
+  //   프리뷰 재진입 시 "죽였다 재시작"하지 않고 이어서 본다(= 워크스페이스 유지).
+  const cur = devServers.get(uid);
+  if ((!cur || cur.projectId === projectId) && await isDevReady(uid, port, base)) {
+    devServers.set(uid, { projectId, port, dir, basePath: base, startedAt: (cur && cur.startedAt) || Date.now() });
+    const s0 = sessions.get(uid);
+    if (s0) s0.lastUsed = Date.now();
+    return { projectId, port, basePath: base, reused: true };
+  }
+
+  // 이미 떠있던 dev 서버(다른 프로젝트 등)는 정리(사용자당 1개)
+  await stopDevServer(uid).catch(() => {});
 
   // HMR 설정 주입: 사용자 vite.config 를 보존하면서 hmr(clientPort/protocol/path)만 덮어쓰는 래퍼 config 작성.
   // 워커 fs == 샌드박스 fs(공유 볼륨)라 직접 파일을 써둔다. 실패해도 HMR 없이 정상 동작(폴백).
@@ -337,23 +500,50 @@ async function startDevServer(userId, { projectId, dir, port = 5173, basePath, h
     configFlag = ` --config ${shq(HMR_CONFIG_FILE)}`;
   } catch (_) { /* HMR 주입 실패 → 기존대로(핫리로드 없이) */ }
 
-  const proxyEnv = EGRESS_PROXY
-    ? `export HTTP_PROXY=${EGRESS_PROXY} HTTPS_PROXY=${EGRESS_PROXY} http_proxy=${EGRESS_PROXY} https_proxy=${EGRESS_PROXY} NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1; `
+  const proxyExports = EGRESS_PROXY
+    ? `export HTTP_PROXY=${EGRESS_PROXY} HTTPS_PROXY=${EGRESS_PROXY} http_proxy=${EGRESS_PROXY} https_proxy=${EGRESS_PROXY} NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1\n`
     : '';
-  // 의존성 없으면 설치 후 dev 서버 실행. 전체를 한 detached 프로세스로(설치도 백그라운드).
-  const cmd =
-    `${proxyEnv}${hmrEnv}cd ${shq(dir)} && ` +
-    // 기존 dev 서버/잔여 프로세스 정리(pkill 미존재 → /proc 스캔). 그 뒤 이 세션 리더 pid 를 기록(종료 시 그룹 kill).
-    `${SWEEP_DEV}; echo $$ > ${DEV_PID_FILE}; ` +
-    // 포트가 완전히 빌 때까지 대기(이전 프로세스 종료 직후 strictPort 충돌 방지). /dev/tcp 연결되면 아직 점유 중.
-    `for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && { exec 3>&- 3<&- 2>/dev/null; sleep 0.5; } || break; done; ` +
-    `{ [ -d node_modules ] || npm install; } && ` +
-    // --strictPort: 포트 자동증가 금지(프록시 고정 포트와 어긋나지 않게). NODE_OPTIONS: 힙 여유.
-    `exec env NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- --host 0.0.0.0 --port ${port} --strictPort --base ${shq(base)}${configFlag}`;
+  const hmrExports = hmrEnv ? hmrEnv.replace(/; $/, '') + '\n' : '';
+  // 포트가 완전히 빌 때까지 대기(이전 프로세스 종료 직후 strictPort 충돌 방지). /dev/tcp 연결되면 아직 점유 중.
+  const portWait = `for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && { exec 3>&- 3<&- 2>/dev/null; sleep 0.5; } || break; done`;
+  const devFlags = `--host 0.0.0.0 --port ${port} --strictPort --base ${shq(base)}${configFlag}`;
 
-  // setsid 로 새 세션에 백그라운드 기동 → exec 가 끝나도 dev 서버는 살아남는다.
-  // (dockerode exec 의 Detach:true 는 이 환경에서 프로세스를 실제로 안 띄우는 경우가 있어 이 방식이 안전.)
-  const wrapped = `setsid bash -lc ${shq(cmd)} > ${DEV_LOG} 2>&1 < /dev/null & echo launched`;
+  // ── 긴 실행 명령을 래퍼 스크립트(.cpt-dev.sh)로 빼서, 터미널엔 짧고 읽기 쉬운 'bash .cpt-dev.sh' 만 보이게 ──
+  //   exec 안 함 → Ctrl-C 로 npm 종료 시 dev 윈도우의 셸 프롬프트로 복귀(실제 dev 환경과 동일).
+  //   (예전엔 거대한 한 줄을 tmux 에 그대로 타이핑해 "표현이 다름"·가독성 저하 → 스크립트로 해결)
+  const scriptBody =
+    `#!/usr/bin/env bash\n`
+    + `${proxyExports}${hmrExports}`
+    + `cd ${shq(dir)} || exit 1\n`
+    + `${SWEEP_DEV}\n`
+    + `${portWait}\n`
+    + `[ -d node_modules ] || npm install\n`
+    + `echo "▶ dev 서버 시작 (포트 ${port}) — 종료하려면 Ctrl-C"\n`
+    + `NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- ${devFlags}\n`;
+  try { fs.writeFileSync(path.join(dir, DEV_SCRIPT), scriptBody, { mode: 0o755 }); } catch (_) { /* noop */ }
+  const devCmd = `clear; bash ${DEV_SCRIPT}`;
+
+  // ── setsid 폴백(tmux 미설치 환경): 기존 방식(pid 기록 + 로그파일로 백그라운드) ──
+  const fallbackCmd =
+    `${EGRESS_PROXY ? proxyExports.replace(/\n/g, '; ') : ''}${hmrEnv}cd ${shq(dir)} && ${SWEEP_DEV}; echo $$ > ${DEV_PID_FILE}; ${portWait}; ` +
+    `{ [ -d node_modules ] || npm install; } && ` +
+    `exec env NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- ${devFlags}`;
+
+  // tmux 있으면 dev 전용 윈도우에서 전면 실행(셸 윈도우와 분리된 탭 → 멀티 터미널), 없으면 setsid 백그라운드.
+  //   기존 dev 윈도우가 있으면 Ctrl-C 후 재사용, 없으면 새로 만든다. 실행 후 그 윈도우로 전환.
+  const wrapped =
+    `if command -v tmux >/dev/null 2>&1; then `
+    + `tmux has-session -t ${TMUX} 2>/dev/null || tmux new-session -d -s ${TMUX} -n shell -c ${shq(dir)}; `
+    + `if tmux list-windows -t ${TMUX} -F '#{window_name}' 2>/dev/null | grep -qx ${shq(DEV_WINDOW)}; then `
+    +   `tmux send-keys -t ${TMUX}:${shq(DEV_WINDOW)} C-c 2>/dev/null; sleep 0.2; `
+    + `else `
+    +   `tmux new-window -t ${TMUX} -n ${shq(DEV_WINDOW)} -c ${shq(dir)}; sleep 0.1; `
+    + `fi; `
+    + `tmux send-keys -t ${TMUX}:${shq(DEV_WINDOW)} -l ${shq(devCmd)}; tmux send-keys -t ${TMUX}:${shq(DEV_WINDOW)} Enter; `
+    + `tmux select-window -t ${TMUX}:${shq(DEV_WINDOW)} 2>/dev/null; echo tmux-launched; `
+    + `else `
+    + `setsid bash -lc ${shq(fallbackCmd)} > ${DEV_LOG} 2>&1 < /dev/null & echo setsid-launched; `
+    + `fi`;
   const exec = await container.exec({
     Cmd: ['bash', '-lc', wrapped],
     WorkingDir: dir,
@@ -407,8 +597,15 @@ async function stopDevServer(userId) {
   const uid = safeUid(userId);
   devServers.delete(uid);
   try {
-    // 이미지에 pkill 이 없으므로 기록한 프로세스 그룹을 kill + /proc 스캔으로 잔여 정리.
-    await execBash(uid, `${KILL_DEV}; sleep 0.3; true`);
+    // dev 전용 윈도우에서 전면 실행 중이면 Ctrl-C 로 우아하게 종료 후 그 윈도우(탭)를 닫는다.
+    // 미설치/잔여는 KILL_DEV 폴백(이미지에 pkill 이 없으므로 기록 pid 그룹 kill + /proc 스캔).
+    await execBash(
+      uid,
+      `command -v tmux >/dev/null 2>&1 && { `
+      + `tmux send-keys -t ${TMUX}:${shq(DEV_WINDOW)} C-c 2>/dev/null; sleep 0.3; `
+      + `tmux kill-window -t ${TMUX}:${shq(DEV_WINDOW)} 2>/dev/null; }; `
+      + `sleep 0.1; ${KILL_DEV}; sleep 0.2; true`,
+    );
   } catch (_) { /* noop */ }
 }
 
@@ -420,6 +617,30 @@ async function releaseSandbox(userId) {
   const container = (s && s.container) || (docker && docker.getContainer(containerName(uid)));
   if (!container) return;
   try { await container.remove({ force: true }); } catch (_) { /* noop */ }
+}
+
+// 워커 부팅 시 재입양 — 워커가 재시작되면 in-memory(sessions/devServers) 가 비워지지만,
+// 샌드박스 컨테이너(+그 안의 tmux/vite/포워더)는 그대로 살아있다. 살아있는 샌드박스를 sessions 에
+// 다시 등록해 (1) idle sweeper 가 추적하도록(고아 누수 방지) (2) 다음 사용 시 재활용되도록 복구한다.
+async function adoptRunningSandboxes() {
+  if (!ENABLED || !docker) return;
+  try {
+    const list = await docker.listContainers({
+      filters: { label: ['cpt.role=agent-sandbox'], status: ['running'] },
+    });
+    const now = Date.now();
+    for (const info of list) {
+      const uid = (info.Labels && info.Labels['cpt.userId']) || null;
+      if (!uid || sessions.has(uid)) continue;
+      const name = containerName(uid);
+      sessions.set(uid, { container: docker.getContainer(info.Id), name, lastUsed: now });
+    }
+    if (list.length) {
+      console.log(`[sandbox] 부팅 재입양: 실행 중 샌드박스 ${list.length}개 복원`);
+    }
+  } catch (e) {
+    console.error('[sandbox] adoptRunningSandboxes 실패:', e && e.message);
+  }
 }
 
 // idle TTL 정리 — 마지막 사용 후 IDLE_TTL_MS 경과 컨테이너 제거
@@ -440,12 +661,14 @@ function startIdleSweeper() {
   }, 60000);
   if (_sweeper.unref) _sweeper.unref();
 }
-if (ENABLED) startIdleSweeper();
+if (ENABLED) { adoptRunningSandboxes().finally(startIdleSweeper); }
 
 module.exports = {
   isEnabled, ensureSandbox, execBash, releaseSandbox, containerName, userWorkspaceDir,
   // 인터랙티브 PTY 터미널
   openPty,
+  // 멀티 터미널(tmux 윈도우) + 포트 감지 + 포워더
+  listWindows, newWindow, selectWindow, killWindow, clearActiveWindow, detectListeningPorts, ensurePortForwarder,
   // dev 서버(미리보기) lifecycle
   startDevServer, isDevReady, readDevLog, stopDevServer, getDevServer,
 };
