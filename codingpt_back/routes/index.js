@@ -21,6 +21,7 @@ const terminalRoutes = require('./terminalRoutes');
 const usageRoutes = require('./usageRoutes');
 const subscriptionRoutes = require('./subscriptionRoutes');
 const billingRoutes = require('./billingRoutes');
+const onboardingRoutes = require('./onboardingRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -44,6 +45,7 @@ router.use('/terminal', terminalRoutes); // 인터랙티브 PTY 터미널(ws 업
 router.use('/usage', usageRoutes); // 사용량 미터링 조회
 router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태
 router.use('/billing', billingRoutes); // 충전/결제/크레딧
+router.use('/onboarding', onboardingRoutes); // 온보딩 설문(익명)
 // 한시적 호환 alias — 구버전 앱(/api/projects) 대비. 신규 코드는 /workspaces 사용.
 router.use('/projects', workspaceRoutes);
 
