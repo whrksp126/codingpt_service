@@ -350,9 +350,10 @@ app.all('/devproxy/*', (req, res) => {
         up.on('data', (c) => chunks.push(c));
         up.on('end', () => {
           let body = Buffer.concat(chunks).toString('utf-8');
-          // "/@vite/" · "/src/" · "/node_modules/" · "/@fs/" 등 vite 절대 경로 → basePath 접두.
+          // vite("/@vite/" "/src/" "/node_modules/" "/@fs/" 등) + Next.js("/_next/") + Nuxt("/_nuxt/")
+          // 절대 경로 → basePath 접두(=runtime --base). 프레임워크별 best-effort(관리형은 --base 로 정확).
           body = body.replace(
-            /(["'`(=])\/(@vite\/|@id\/|@fs\/|@react-refresh|src\/|node_modules\/|\.vite\/|assets\/|vite\.svg|favicon\.ico)/g,
+            /(["'`(=])\/(@vite\/|@id\/|@fs\/|@react-refresh|src\/|node_modules\/|\.vite\/|_next\/|_nuxt\/|__nuxt\/|assets\/|vite\.svg|favicon\.ico)/g,
             (m, q, p) => q + basePath + p,
           );
           if (isHtml) {

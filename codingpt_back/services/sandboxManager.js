@@ -666,6 +666,9 @@ function startIdleSweeper() {
       // 활성 인터랙티브 터미널이 연결돼 있으면(출력 없어도) 컨테이너를 유지한다.
       const t = terminals.get(uid);
       if (t && t.size > 0) continue;
+      // dev 서버(미리보기)가 도는 동안은 idle 로 보지 않는다 — 사용자가 IDE 를 닫아도
+      // "워크스페이스 나가기 전까지 유지"(워크스페이스 이탈 시 stopDevServer 로 devServers 에서 제거됨).
+      if (devServers.has(uid)) { s.lastUsed = now; continue; }
       if (now - s.lastUsed > IDLE_TTL_MS) {
         sessions.delete(uid);
         s.container.remove({ force: true }).catch(() => {});
