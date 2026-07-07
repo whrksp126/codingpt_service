@@ -24,11 +24,12 @@ const { DaemonDevice } = require('../models');
 const wss = new WebSocket.Server({ noServer: true });
 
 const STREAM_OPEN_TIMEOUT_MS = 10 * 1000; // stream_open 지시 후 데몬 dial-back 대기
+const RPC_TIMEOUT_MS = 15 * 1000; // fs RPC 응답 대기
 const TERM_TOKEN_TTL_MS = 60 * 60 * 1000; // 앱 터미널 토큰 1시간(접근 시 갱신)
 const PING_INTERVAL_MS = 30 * 1000; // Cloudflare 유휴 WS ~100s 컷 대비
 const LAST_SEEN_FLUSH_MS = 60 * 1000; // last_seen_at DB 반영 주기
 
-// userId(str) → { deviceId, deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt }
+// userId(str) → { deviceId, deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt, rpcSeq, pendingRpc }
 const connections = new Map();
 // streamToken → { userId, kind, resolve, reject, timer }
 const pendingStreams = new Map();
@@ -73,6 +74,8 @@ function registerControl(ws, device) {
     ws,
     connectedAt: Date.now(),
     lastSeenFlushedAt: 0,
+    rpcSeq: 0,
+    pendingRpc: new Map(), // id → { resolve, reject, timer }
   };
   connections.set(userId, conn);
   console.log(`[daemonRelay] 데몬 연결 userId=${userId} device=${device.device_name}(#${device.id})`);
@@ -110,11 +113,24 @@ function registerControl(ws, device) {
         clearTimeout(pending.timer);
         pending.reject(new Error(msg.message || '데몬이 스트림을 열지 못했습니다.'));
       }
+      return;
+    }
+    if (msg.type === 'rpc_result' && msg.id != null) {
+      const pending = conn.pendingRpc.get(msg.id);
+      if (pending) {
+        conn.pendingRpc.delete(msg.id);
+        clearTimeout(pending.timer);
+        if (msg.ok) pending.resolve(msg.result);
+        else pending.reject(new Error(msg.error || 'RPC 실패'));
+      }
     }
   });
 
   const cleanup = () => {
     clearInterval(ka);
+    // 미해결 RPC 는 실패로 정리(무한 대기 방지).
+    for (const [, p] of conn.pendingRpc) { clearTimeout(p.timer); try { p.reject(new Error('DAEMON_OFFLINE')); } catch (_) { /* noop */ } }
+    conn.pendingRpc.clear();
     if (connections.get(userId) === conn) {
       connections.delete(userId);
       console.log(`[daemonRelay] 데몬 연결 종료 userId=${userId} aliveMs=${Date.now() - conn.connectedAt}`);
@@ -150,6 +166,28 @@ function openStream(userId, kind, params) {
     } catch (e) {
       clearTimeout(timer);
       pendingStreams.delete(streamToken);
+      reject(new Error('데몬 제어 채널 전송 실패: ' + e.message));
+    }
+  });
+}
+
+// ── fs RPC ────────────────────────────────────────────────────────────
+// 제어 채널로 {type:'rpc'} 를 보내고 {type:'rpc_result'} 를 id 로 매칭해 Promise resolve.
+function callRpc(userId, method, params) {
+  const conn = connections.get(String(userId));
+  if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
+  const id = ++conn.rpcSeq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      conn.pendingRpc.delete(id);
+      reject(new Error('데몬이 응답하지 않습니다(RPC 타임아웃).'));
+    }, RPC_TIMEOUT_MS);
+    conn.pendingRpc.set(id, { resolve, reject, timer });
+    try {
+      conn.ws.send(JSON.stringify({ type: 'rpc', id, method, params: params || {} }));
+    } catch (e) {
+      clearTimeout(timer);
+      conn.pendingRpc.delete(id);
       reject(new Error('데몬 제어 채널 전송 실패: ' + e.message));
     }
   });
@@ -264,6 +302,7 @@ module.exports = {
   handleStreamUpgrade,
   handleAppTerminalUpgrade,
   openStream,
+  callRpc,
   issueTerminalToken,
   getConnection,
   disconnectDevice,

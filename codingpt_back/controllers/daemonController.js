@@ -129,4 +129,37 @@ async function startTerminal(req, res) {
   }
 }
 
-module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal };
+// 데몬 오프라인 시 통일된 409.
+function mapRpcError(res, e) {
+  if (e.message === 'DAEMON_OFFLINE') {
+    return errorResponse(res, new Error('PC 데몬이 연결되어 있지 않습니다.'), 409);
+  }
+  return errorResponse(res, e, 500);
+}
+
+// GET /api/daemon/fs/list?path=  (인증) — 데몬 파일 목록
+async function fsList(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.list', { path: req.query.path || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/fs/read?path=  (인증) — 텍스트 파일 내용
+async function fsRead(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.read', { path: req.query.path || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/fs/write  (인증) body:{ path, content } — 텍스트 저장
+async function fsWrite(req, res) {
+  try {
+    const { path: p, content } = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.write', { path: p, content });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsRead, fsWrite };

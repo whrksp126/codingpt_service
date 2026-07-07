@@ -10,4 +10,9 @@ router.get('/status', authMiddleware, daemonController.getStatus);
 router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 
+// 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
+router.get('/fs/list', authMiddleware, daemonController.fsList);
+router.get('/fs/read', authMiddleware, daemonController.fsRead);
+router.post('/fs/write', authMiddleware, daemonController.fsWrite);
+
 module.exports = router;

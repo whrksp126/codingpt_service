@@ -11,6 +11,7 @@
 const os = require('os');
 const WebSocket = require('ws');
 const ptyLib = require('./pty');
+const fsRpc = require('./fs');
 const pkg = require('../package.json');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
@@ -72,6 +73,14 @@ function run(config) {
           console.error(`[control] 스트림 열기 실패: ${e.message}`);
           try { ws.send(JSON.stringify({ type: 'stream_fail', streamToken: msg.streamToken, message: e.message })); } catch (_) { /* noop */ }
         }
+        return;
+      }
+      // fs RPC(list/read/write) — 요청/응답. back 이 id 로 응답을 매칭.
+      if (msg.type === 'rpc' && msg.id) {
+        fsRpc.handle(msg.method, msg.params)
+          .then((result) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: true, result })); } catch (_) { /* noop */ } })
+          .catch((e) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: false, error: e.message || String(e) })); } catch (_) { /* noop */ } });
+        return;
       }
     });
 
