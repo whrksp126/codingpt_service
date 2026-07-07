@@ -122,7 +122,9 @@ async function revokeDevice(req, res) {
 async function startTerminal(req, res) {
   try {
     const userId = req.user && req.user.id;
-    const token = daemonRelayService.issueTerminalToken(userId);
+    // cwd: 진입한 워크스페이스 폴더(데몬 홈-기준 상대). 없으면 홈.
+    const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
+    const token = daemonRelayService.issueTerminalToken(userId, cwd);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);

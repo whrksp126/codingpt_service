@@ -24,10 +24,24 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const WebSocket = require('ws');
 const nodePty = require('node-pty');
+const fsLib = require('./fs');
 
 const TMUX_SOCKET = 'codingpt'; // tmux -L codingpt (사용자 기본 tmux 서버와 격리)
 const TMUX_SESSION = 'codingpt';
 const TMUX_CONF = path.join(__dirname, '..', 'tmux.conf'); // 서버 시작 시(-f) 로드 → alt-screen override 선적용
+
+// 열려는 워크스페이스 경로(홈-기준 상대)에 맞는 tmux 세션명 + 시작 절대경로.
+//  · 홈 루트('') = 기존 공유 세션 'codingpt'(Mac attach 하위호환).
+//  · 워크스페이스 = 경로별 전용 세션 'cpt-<sanitized>' 를 그 폴더에서 시작(-c) → 진입 시 터미널이 그 경로.
+//  경로는 홈 jail(safeResolve) 로 검증하고, 없으면 홈으로 폴백(터미널은 항상 열림).
+function sessionForCwd(cwdRel) {
+  if (!cwdRel) return { session: TMUX_SESSION, abs: os.homedir() };
+  let abs;
+  try { abs = fsLib.safeResolve(cwdRel); } catch (_) { return { session: TMUX_SESSION, abs: os.homedir() }; }
+  if (!fs.existsSync(abs)) return { session: TMUX_SESSION, abs: os.homedir() };
+  const safe = String(cwdRel).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return { session: 'cpt-' + (safe || 'ws'), abs };
+}
 
 let tmuxPathCache = null;
 function findTmux() {
@@ -63,24 +77,27 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
     //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
     // 매 attach 마다 실행하는 건 window-size 뿐(마지막 조작 클라이언트 크기 반영 보정).
+    // 진입한 워크스페이스 경로에 맞는 세션/시작폴더 결정(홈=공유 세션, 워크스페이스=전용 세션 @ 그 폴더).
+    const { session, abs } = sessionForCwd(params && params.cwd);
+
     let pty;
     try {
       pty = nodePty.spawn(tmux, [
         '-L', TMUX_SOCKET,
         '-f', TMUX_CONF,
-        'new-session', '-A', '-s', TMUX_SESSION,
+        'new-session', '-A', '-s', session, '-c', abs, // -c: 새로 만들 때 그 폴더에서 시작(attach 시엔 무시)
         ';', 'set', '-g', 'window-size', 'latest',
       ], {
         name: 'xterm-256color',
         cols, rows,
-        cwd: os.homedir(),
+        cwd: abs,
         env,
       });
     } catch (e) {
       try { ws.send(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
       return;
     }
-    console.log(`[pty] 스트림 연결 (session=${TMUX_SESSION}, ${cols}x${rows})`);
+    console.log(`[pty] 스트림 연결 (session=${session}, cwd=${abs}, ${cols}x${rows})`);
 
     pty.onData((data) => {
       try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
