@@ -35,6 +35,8 @@ const connections = new Map();
 const pendingStreams = new Map();
 // 앱 터미널 토큰 → { userId, expiresAt }
 const termTokens = new Map();
+// userId(str) → Set<res>  파일 변경 이벤트 SSE 구독자(앱). 데몬 fs_event 를 여기로 broadcast.
+const eventClients = new Map();
 
 const SECRET = process.env.PREVIEW_TOKEN_SECRET || process.env.JWT_SECRET || 'cpt-preview-secret';
 
@@ -123,6 +125,10 @@ function registerControl(ws, device) {
         if (msg.ok) pending.resolve(msg.result);
         else pending.reject(new Error(msg.error || 'RPC 실패'));
       }
+      return;
+    }
+    if (msg.type === 'fs_event') {
+      broadcastEvent(userId, { type: 'fs_event', event: msg.event, path: msg.path });
     }
   });
 
@@ -191,6 +197,27 @@ function callRpc(userId, method, params) {
       reject(new Error('데몬 제어 채널 전송 실패: ' + e.message));
     }
   });
+}
+
+// ── 파일 이벤트 SSE(앱 구독) ──
+function addEventClient(userId, res) {
+  const key = String(userId);
+  let set = eventClients.get(key);
+  if (!set) { set = new Set(); eventClients.set(key, set); }
+  set.add(res);
+}
+
+function removeEventClient(userId, res) {
+  const key = String(userId);
+  const set = eventClients.get(key);
+  if (set) { set.delete(res); if (set.size === 0) eventClients.delete(key); }
+}
+
+function broadcastEvent(userId, payload) {
+  const set = eventClients.get(String(userId));
+  if (!set || set.size === 0) return;
+  const line = 'data: ' + JSON.stringify(payload) + '\n\n';
+  for (const res of set) { try { res.write(line); } catch (_) { /* noop */ } }
 }
 
 // GET /api/daemon/stream/:streamToken 업그레이드(데몬→back).
@@ -306,4 +333,6 @@ module.exports = {
   issueTerminalToken,
   getConnection,
   disconnectDevice,
+  addEventClient,
+  removeEventClient,
 };

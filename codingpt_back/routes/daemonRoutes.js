@@ -14,5 +14,9 @@ router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 router.get('/fs/list', authMiddleware, daemonController.fsList);
 router.get('/fs/read', authMiddleware, daemonController.fsRead);
 router.post('/fs/write', authMiddleware, daemonController.fsWrite);
+router.post('/fs/watch', authMiddleware, daemonController.fsWatch);
+router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
+// 파일 변경 이벤트 SSE(앱 구독) — 데몬 chokidar → back → 앱 즉시 반영.
+router.get('/events', authMiddleware, daemonController.streamEvents);
 
 module.exports = router;

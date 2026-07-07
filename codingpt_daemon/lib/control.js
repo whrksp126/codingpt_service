@@ -75,11 +75,22 @@ function run(config) {
         }
         return;
       }
-      // fs RPC(list/read/write) — 요청/응답. back 이 id 로 응답을 매칭.
+      // fs RPC(list/read/write/watch/unwatch) — 요청/응답. back 이 id 로 응답을 매칭.
       if (msg.type === 'rpc' && msg.id) {
-        fsRpc.handle(msg.method, msg.params)
-          .then((result) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: true, result })); } catch (_) { /* noop */ } })
-          .catch((e) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: false, error: e.message || String(e) })); } catch (_) { /* noop */ } });
+        const ok = (result) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: true, result })); } catch (_) { /* noop */ } };
+        const fail = (e) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: false, error: (e && e.message) || String(e) })); } catch (_) { /* noop */ } };
+        // watch/unwatch 는 unsolicited push(fs_event)를 동반하므로 여기서 직접 처리(제어 ws 에 바인딩).
+        if (msg.method === 'fs.watch') {
+          try {
+            const r = fsRpc.startWatch(msg.params && msg.params.path, (ev) => {
+              try { ws.send(JSON.stringify({ type: 'fs_event', event: ev.event, path: ev.path })); } catch (_) { /* noop */ }
+            });
+            ok(r);
+          } catch (e) { fail(e); }
+          return;
+        }
+        if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
+        fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
         return;
       }
     });
@@ -95,6 +106,7 @@ function run(config) {
     let closed = false;
     ws.on('close', (code, reason) => {
       if (closed) return; closed = true;
+      fsRpc.stopWatch(); // 이 연결에 바인딩된 감시 정리(재접속 시 앱이 다시 watch 등록)
       console.warn(`[control] 연결 끊김 code=${code} reason=${reason || ''}`);
       if (code === 4001) { // revoked — 재페어링 필요
         console.error('[control] 서버에서 이 기기의 연결이 해제되었습니다. `pair` 를 다시 실행하세요.');

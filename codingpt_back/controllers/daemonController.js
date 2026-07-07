@@ -162,4 +162,35 @@ async function fsWrite(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
-module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsRead, fsWrite };
+// POST /api/daemon/fs/watch  (인증) body:{ path } — 그 디렉토리 변경을 감시(단일). 이벤트는 /events SSE 로.
+async function fsWatch(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.watch', { path: (req.body && req.body.path) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/fs/unwatch  (인증)
+async function fsUnwatch(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.unwatch', {});
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/events  (인증) — 파일 변경 이벤트 SSE. 데몬 fs_event 를 앱으로 push.
+function streamEvents(req, res) {
+  const userId = req.user && req.user.id;
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.write(': connected\n\n');
+  daemonRelayService.addEventClient(userId, res);
+  const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch (_) { /* noop */ } }, 25000);
+  req.on('close', () => { clearInterval(ka); daemonRelayService.removeEventClient(userId, res); });
+}
+
+module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents };
