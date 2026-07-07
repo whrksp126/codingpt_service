@@ -186,6 +186,31 @@ async function fsUnwatch(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── 워크스페이스(Slice2) — PC 에 결정적 스캐폴드 ──
+// GET /api/daemon/ws/root  (인증) — 지정된 워크스페이스 루트(홈-기준 상대) 또는 null
+async function wsGetRoot(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.getRoot', {});
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/ws/root  (인증) body:{ path } — 워크스페이스 루트 최초 1회(또는 변경) 지정
+async function wsSetRoot(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.setRoot', { path: (req.body && req.body.path) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/ws/create  (인증) body:{ name } — 루트 아래 새 워크스페이스 폴더 스캐폴드
+async function wsCreate(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.create', { name: (req.body && req.body.name) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // GET /api/daemon/events  (인증) — 파일 변경 이벤트 SSE. 데몬 fs_event 를 앱으로 push.
 function streamEvents(req, res) {
   const userId = req.user && req.user.id;
@@ -278,5 +303,6 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
+  wsGetRoot, wsSetRoot, wsCreate,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

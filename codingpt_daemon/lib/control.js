@@ -13,6 +13,7 @@ const WebSocket = require('ws');
 const ptyLib = require('./pty');
 const proxyLib = require('./proxy');
 const fsRpc = require('./fs');
+const wsRpc = require('./workspace');
 const pkg = require('../package.json');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
@@ -94,6 +95,8 @@ function run(config) {
         }
         if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
         if (msg.method === 'net.ports') { proxyLib.listPorts().then(ok).catch(fail); return; }
+        // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
+        if (msg.method.startsWith('ws.')) { wsRpc.handle(msg.method, msg.params).then(ok).catch(fail); return; }
         fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
         return;
       }

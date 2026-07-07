@@ -183,4 +183,4 @@ async function handle(method, params) {
   }
 }
 
-module.exports = { handle, startWatch, stopWatch, ROOT };
+module.exports = { handle, startWatch, stopWatch, ROOT, safeResolve, relOf };
