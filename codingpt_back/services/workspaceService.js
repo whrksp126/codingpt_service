@@ -60,6 +60,9 @@ function normalizeMeta(raw, id) {
     thumb: ['list', 'page', 'chart'].includes(m.thumb) ? m.thumb : 'list',
     // 워크스페이스 종류: 'chat'(일반 채팅 전용) | 'project'(바이브코딩). 누락=과거 데이터→'project'.
     kind: m.kind === 'chat' ? 'chat' : 'project',
+    // 실행 위치: 'cloud'(샌드박스, 기본) | 'local'(사용자 PC 데몬). localPath 는 데몬 홈-기준 상대경로.
+    compute: m.compute === 'local' ? 'local' : 'cloud',
+    ...(m.compute === 'local' && typeof m.localPath === 'string' && m.localPath ? { localPath: m.localPath } : {}),
     unread: Number.isInteger(m.unread) ? m.unread : 0,
     createdAt: m.createdAt || null,
     updatedAt: m.updatedAt || m.createdAt || null,
@@ -142,6 +145,8 @@ async function createWorkspace(userId, input = {}) {
       stack: input.stack,
       thumb: input.thumb,
       kind: input.kind,
+      compute: input.compute,
+      localPath: input.localPath,
       unread: 0,
       createdAt: now,
       updatedAt: now,

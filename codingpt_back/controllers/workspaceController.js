@@ -16,8 +16,8 @@ async function list(req, res) {
 
 async function create(req, res) {
   try {
-    const { name, description, stack, thumb, kind } = req.body || {};
-    const workspace = await workspaceService.createWorkspace(req.user.id, { name, description, stack, thumb, kind });
+    const { name, description, stack, thumb, kind, compute, localPath } = req.body || {};
+    const workspace = await workspaceService.createWorkspace(req.user.id, { name, description, stack, thumb, kind, compute, localPath });
     return successResponse(res, { workspace }, 'Created', 201);
   } catch (err) {
     return errorResponse(res, err, err.statusCode || 500);
