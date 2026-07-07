@@ -20,10 +20,19 @@ const HIDDEN_DIRS = new Set([
   'Library', 'Applications', '.Trash', '.npm', '.cargo', '.rustup', 'go',
 ]);
 const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB 초과 텍스트는 편집 대상에서 제외
+// 목록/트리에 노출할 점파일(대부분의 점파일은 숨기되 흔한 편집 대상만 화이트리스트).
+const SHOWN_DOTFILES = new Set([
+  '.env', '.gitignore', '.gitattributes', '.eslintrc', '.prettierrc', '.babelrc',
+  '.editorconfig', '.npmrc', '.nvmrc', '.dockerignore', '.eslintignore', '.prettierignore',
+]);
+const isShownDotfile = (name) => SHOWN_DOTFILES.has(name) || name.toLowerCase().startsWith('.env');
 const TEXT_EXT = new Set([
   'js','jsx','ts','tsx','mjs','cjs','json','html','htm','css','scss','less','md','txt',
   'py','java','c','cpp','h','hpp','go','rs','rb','php','sh','bash','yml','yaml','xml','svg',
   'sql','toml','ini','env','gitignore','dockerfile','vue','svelte','kt','swift','lua','pl','r',
+  'conf','cfg','log','properties','lock','gradle','bat','ps1','zsh','fish','tsv','csv','graphql',
+  'gql','proto','tf','hcl','rst','tex','astro','cjson','jsonc','editorconfig','prettierrc',
+  'eslintrc','babelrc','npmrc','nvmrc','mdx','vim','makefile','cmake','gitattributes',
 ]);
 
 // 루트 기준 상대경로 → 안전한 절대경로. 탈출 시 throw.
@@ -48,9 +57,11 @@ function relOf(abs) {
 }
 
 function isTextFile(name) {
+  const lower = name.toLowerCase();
   const ext = (name.split('.').pop() || '').toLowerCase();
+  if (lower.startsWith('.env')) return true; // .env / .env.local / .env.production …
   if (name.startsWith('.') && TEXT_EXT.has(name.slice(1).toLowerCase())) return true;
-  return TEXT_EXT.has(ext) || name.toLowerCase() === 'dockerfile' || name.toLowerCase() === 'makefile';
+  return TEXT_EXT.has(ext) || lower === 'dockerfile' || lower === 'makefile' || lower === 'procfile' || lower === 'brewfile';
 }
 
 // fs.list — 한 디렉토리의 항목(디렉토리 우선, 숨김/무거운 디렉토리 제외).
@@ -60,10 +71,7 @@ async function list(params) {
   const entries = await fsp.readdir(abs, { withFileTypes: true });
   const items = [];
   for (const e of entries) {
-    if (e.name.startsWith('.') && e.name !== '.env' && e.name !== '.gitignore') {
-      // 점파일은 대체로 숨김(단 흔한 편집 대상 몇 개만 노출)
-      if (!['.env', '.gitignore', '.eslintrc', '.prettierrc', '.babelrc'].includes(e.name)) continue;
-    }
+    if (e.name.startsWith('.') && !isShownDotfile(e.name)) continue; // 점파일은 대체로 숨김(흔한 편집 대상만 노출)
     const isDir = e.isDirectory();
     if (isDir && HIDDEN_DIRS.has(e.name)) continue;
     items.push({
@@ -101,9 +109,7 @@ async function tree(params) {
     for (const e of entries) {
       if (items.length >= TREE_MAX_FILES) { truncated = true; return; }
       const isDir = e.isDirectory();
-      if (e.name.startsWith('.')) {
-        if (!['.env', '.gitignore', '.eslintrc', '.prettierrc', '.babelrc'].includes(e.name)) continue;
-      }
+      if (e.name.startsWith('.') && !isShownDotfile(e.name)) continue;
       const absChild = path.join(absDir, e.name);
       if (isDir) {
         if (HIDDEN_DIRS.has(e.name)) continue;
