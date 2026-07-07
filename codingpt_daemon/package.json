@@ -1,0 +1,22 @@
+{
+  "name": "@codingpt/daemon",
+  "version": "0.1.0",
+  "description": "CodingPT PC 에이전트 — 사용자 PC의 터미널/파일/프리뷰를 모바일 앱으로 릴레이하는 데몬",
+  "main": "index.js",
+  "bin": {
+    "codingpt-daemon": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js run",
+    "postinstall": "node -e \"const fs=require('fs'),p='node_modules/node-pty/prebuilds/'+process.platform+'-'+process.arch+'/spawn-helper';try{fs.chmodSync(p,0o755)}catch(e){}\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}

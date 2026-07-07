@@ -181,9 +181,27 @@ const startServer = async () => {
     const previewProxyController = require('./controllers/previewProxyController');
     const terminalProxyController = require('./controllers/terminalProxyController');
     const agentProxyService = require('./services/agentProxyService');
+    const daemonRelayService = require('./services/daemonRelayService');
     // 단일 upgrade 핸들러에서 분기(리스너 2개면 비매칭 경로를 서로 destroy 하므로 한 곳에서 처리).
     server.on('upgrade', (req, socket, head) => {
       const url = req.url || '';
+      // BYO-PC 데몬 — 제어 채널(데몬 아웃바운드, Bearer deviceToken 인증)
+      if (url === '/api/daemon/connect' || url.startsWith('/api/daemon/connect?')) {
+        daemonRelayService.handleControlUpgrade(req, socket, head);
+        return;
+      }
+      // BYO-PC 데몬 — dial-back 스트림(데몬→back, stream_open 지시에 대한 응답)
+      const dsm = url.match(/^\/api\/daemon\/stream\/([^/?]+)/);
+      if (dsm) {
+        daemonRelayService.handleStreamUpgrade(dsm[1], req, socket, head);
+        return;
+      }
+      // BYO-PC 데몬 — 앱 터미널(불투명 토큰, /api/daemon/terminal/start 에서 발급)
+      const dtm = url.match(/^\/api\/daemon\/terminal\/([^/?]+)/);
+      if (dtm) {
+        daemonRelayService.handleAppTerminalUpgrade(dtm[1], req, socket, head);
+        return;
+      }
       // 인터랙티브 PTY 터미널
       const tm = url.match(/^\/api\/terminal\/([^/?]+)/);
       if (tm) {
