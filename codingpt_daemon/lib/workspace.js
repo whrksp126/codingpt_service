@@ -16,6 +16,15 @@ const { execFile } = require('child_process');
 const fsLib = require('./fs');
 const configLib = require('./config');
 
+// 권장 워크스페이스 루트(홈-기준 상대). 홈 바로 아래라 macOS TCC 보호폴더가 아님 → 접근 프롬프트가 안 뜬다.
+const DEFAULT_ROOT_REL = 'CodingPT/workspaces';
+// macOS TCC 보호폴더(홈-기준 상대, 소문자) — 여기로 루트를 잡으면 접근 프롬프트가 뜰 수 있어 경고한다.
+const PROTECTED_REL = ['desktop', 'documents', 'downloads', 'movies', 'music', 'pictures', 'library'];
+function isProtectedRel(rel) {
+  const first = String(rel || '').split('/')[0].toLowerCase();
+  return PROTECTED_REL.includes(first);
+}
+
 // name → 안전한 폴더 slug. 한글/영숫자 유지, 공백→'-', 그 외 제거, 소문자화(라틴).
 function slugify(name) {
   let s = String(name || '').trim();
@@ -37,28 +46,36 @@ function runGit(args, cwd) {
 }
 
 // 현재 지정된 워크스페이스 루트(홈-기준 상대). 없거나 더 이상 폴더가 아니면 null.
+//  recommended: 권장 기본 루트(TCC 프롬프트 없는 위치) — 앱이 "추천 위치 원탭"으로 사용.
 async function getRoot() {
   const cfg = configLib.load() || {};
   const rel = cfg.workspaceRoot;
-  if (typeof rel !== 'string') return { root: null };
+  const base = { recommended: DEFAULT_ROOT_REL };
+  if (typeof rel !== 'string') return { root: null, ...base };
   try {
     const abs = fsLib.safeResolve(rel);
     const st = await fsp.stat(abs);
-    if (!st.isDirectory()) return { root: null };
-    return { root: fsLib.relOf(abs) };
-  } catch (_) { return { root: null }; }
+    if (!st.isDirectory()) return { root: null, ...base };
+    return { root: fsLib.relOf(abs), protected: isProtectedRel(rel), ...base };
+  } catch (_) { return { root: null, ...base }; }
 }
 
-// 워크스페이스 루트 지정(존재하는 디렉토리만). path 는 홈-기준 상대경로.
+// 워크스페이스 루트 지정. path 는 홈-기준 상대경로. create=true 면 없을 때 생성(추천 위치용).
 async function setRoot(params) {
   const rel = (params && params.path) || '';
   const abs = fsLib.safeResolve(rel); // 홈 밖이면 throw
-  const st = await fsp.stat(abs).catch(() => null);
+  let st = await fsp.stat(abs).catch(() => null);
+  if (!st && params && params.create) { await fsp.mkdir(abs, { recursive: true }); st = await fsp.stat(abs).catch(() => null); }
   if (!st || !st.isDirectory()) throw new Error('존재하는 폴더를 선택해 주세요.');
   const root = fsLib.relOf(abs);
   const cfg = configLib.load() || {};
   configLib.save({ ...cfg, workspaceRoot: root });
-  return { root };
+  return { root, protected: isProtectedRel(root) };
+}
+
+// 권장 기본 루트(~/CodingPT/workspaces)를 생성하고 루트로 지정 — TCC 프롬프트 없는 위치.
+async function useDefaultRoot() {
+  return setRoot({ path: DEFAULT_ROOT_REL, create: true });
 }
 
 // 루트 아래 새 워크스페이스 폴더 스캐폴드. name → slug, 충돌 시 -2/-3 …
@@ -94,9 +111,10 @@ async function handle(method, params) {
   switch (method) {
     case 'ws.getRoot': return getRoot();
     case 'ws.setRoot': return setRoot(params);
+    case 'ws.useDefaultRoot': return useDefaultRoot();
     case 'ws.create': return create(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }
 
-module.exports = { handle, getRoot, setRoot, create, slugify };
+module.exports = { handle, getRoot, setRoot, useDefaultRoot, create, slugify, DEFAULT_ROOT_REL };

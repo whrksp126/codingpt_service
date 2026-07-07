@@ -23,6 +23,7 @@ router.get('/events', authMiddleware, daemonController.streamEvents);
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);
 router.post('/ws/root', authMiddleware, daemonController.wsSetRoot);
+router.post('/ws/root/default', authMiddleware, daemonController.wsUseDefaultRoot);
 router.post('/ws/create', authMiddleware, daemonController.wsCreate);
 
 // 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).

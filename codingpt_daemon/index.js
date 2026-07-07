@@ -4,6 +4,7 @@
  *
  *   node index.js pair [--server <URL>]   앱에서 발급한 페어링 코드로 이 PC 를 계정에 연결
  *   node index.js run                     데몬 실행(서버와 상시 연결, 터미널 릴레이)
+ *   node index.js setup                   초기 세팅 도우미(권장 폴더 생성 + macOS 권한 안내)
  *   node index.js status                  페어링/설정 상태 출력
  *   node index.js unpair                  로컬 설정 삭제(서버 revoke 는 앱에서)
  *
@@ -86,16 +87,42 @@ function cmdUnpair() {
   else console.log('삭제할 설정이 없습니다.');
 }
 
+// 초기 세팅 도우미 — 권장 워크스페이스 폴더 생성 + macOS 권한(전체 디스크 접근) 안내/설정창 열기.
+//  목적: 외부에서 모바일로 작업할 때 macOS 폴더 접근 프롬프트가 안 뜨도록 초기에 한 번 정리.
+function cmdSetup() {
+  const path = require('path');
+  const fs = require('fs');
+  const { execFile } = require('child_process');
+  const wsLib = require('./lib/workspace');
+  const dir = path.join(os.homedir(), wsLib.DEFAULT_ROOT_REL);
+  try { fs.mkdirSync(dir, { recursive: true }); console.log(`✅ 권장 워크스페이스 폴더: ${dir}`); }
+  catch (e) { console.error(`폴더 생성 실패: ${e.message}`); }
+  console.log('   → 여기에 워크스페이스를 만들면 macOS 폴더 접근 프롬프트가 뜨지 않습니다(보호폴더 밖).');
+  console.log('');
+  console.log('📂 (선택) 어디서든 파일 접근 프롬프트를 아예 없애려면 — 지금 이 터미널 앱에 "전체 디스크 접근"을 켜세요:');
+  console.log('   시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 → (터미널/iTerm 등) 켜기 → 터미널 재시작');
+  console.log('   설정창을 엽니다…');
+  if (process.platform === 'darwin') {
+    execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'], () => {});
+  }
+  console.log('');
+  const tmux = require('./lib/pty').findTmux();
+  console.log(`tmux: ${tmux || '❌ 미설치 → brew install tmux'}`);
+  const cfg = configLib.load();
+  console.log(`페어링: ${cfg && cfg.deviceToken ? '✅ 완료' : '❌ 아직 → node index.js pair --server <URL>'}`);
+}
+
 const cmd = process.argv[2];
 (async () => {
   switch (cmd) {
     case 'pair': await cmdPair(); break;
     case 'run': cmdRun(); break;
     case 'status': cmdStatus(); break;
+    case 'setup': cmdSetup(); break;
     case 'unpair': cmdUnpair(); break;
     default:
       console.log(`CodingPT PC 에이전트 v${pkg.version}`);
-      console.log('사용법: node index.js <pair [--server URL] | run | status | unpair>');
+      console.log('사용법: node index.js <pair [--server URL] | run | status | setup | unpair>');
       process.exit(cmd ? 1 : 0);
   }
 })().catch((e) => { console.error('오류:', e.message); process.exit(1); });

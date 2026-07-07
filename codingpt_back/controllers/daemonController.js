@@ -203,6 +203,14 @@ async function wsSetRoot(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// POST /api/daemon/ws/root/default  (인증) — 권장 루트(~/CodingPT/workspaces, TCC 프롬프트 없음) 생성+지정
+async function wsUseDefaultRoot(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.useDefaultRoot', {});
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // POST /api/daemon/ws/create  (인증) body:{ name } — 루트 아래 새 워크스페이스 폴더 스캐폴드
 async function wsCreate(req, res) {
   try {
@@ -303,6 +311,6 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
-  wsGetRoot, wsSetRoot, wsCreate,
+  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };
