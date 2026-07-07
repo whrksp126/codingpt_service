@@ -145,6 +145,14 @@ async function fsList(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// GET /api/daemon/fs/tree?path=  (인증) — 선택 폴더 아래 파일 flat 목록(모바일 IDE 소스용)
+async function fsTree(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.tree', { path: req.query.path || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // GET /api/daemon/fs/read?path=  (인증) — 텍스트 파일 내용
 async function fsRead(req, res) {
   try {
@@ -193,4 +201,4 @@ function streamEvents(req, res) {
   req.on('close', () => { clearInterval(ka); daemonRelayService.removeEventClient(userId, res); });
 }
 
-module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents };
+module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents };

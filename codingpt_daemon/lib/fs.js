@@ -77,6 +77,46 @@ async function list(params) {
   return { root: relOf(abs), items };
 }
 
+// fs.tree — 선택한 폴더(rel) 아래를 bounded 재귀 순회해 "파일 flat 목록"을 반환.
+//  모바일 IDE 는 objectstore 프로젝트처럼 파일 경로 flat 목록으로 트리를 구성한다(디렉토리는 경로에서 파생).
+//  → 데몬 폴더를 IDE 프로젝트로 그대로 소비 가능. path 는 선택 루트(rel) 기준 상대경로.
+//  깊이/개수 상한으로 거대한 폴더에서도 안전(초과 시 truncated=true).
+const TREE_MAX_DEPTH = 8;
+const TREE_MAX_FILES = 4000;
+async function tree(params) {
+  const rel = (params?.path || '').replace(/^\/+|\/+$/g, '');
+  const rootAbs = safeResolve(rel);
+  const st = await fsp.stat(rootAbs);
+  if (!st.isDirectory()) throw new Error('폴더가 아닙니다.');
+  const items = [];
+  let truncated = false;
+  // rootAbs 기준 상대경로(선택 폴더가 트리 루트가 되도록).
+  const relToRoot = (abs) => path.relative(rootAbs, abs).split(path.sep).join('/');
+  const walk = async (absDir, depth) => {
+    if (truncated || depth > TREE_MAX_DEPTH) return;
+    let entries;
+    try { entries = await fsp.readdir(absDir, { withFileTypes: true }); }
+    catch (_) { return; } // 권한 없는 디렉토리 건너뜀
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      if (items.length >= TREE_MAX_FILES) { truncated = true; return; }
+      const isDir = e.isDirectory();
+      if (e.name.startsWith('.')) {
+        if (!['.env', '.gitignore', '.eslintrc', '.prettierrc', '.babelrc'].includes(e.name)) continue;
+      }
+      const absChild = path.join(absDir, e.name);
+      if (isDir) {
+        if (HIDDEN_DIRS.has(e.name)) continue;
+        await walk(absChild, depth + 1);
+      } else {
+        items.push({ path: relToRoot(absChild), text: isTextFile(e.name) });
+      }
+    }
+  };
+  await walk(rootAbs, 0);
+  return { root: rel, items, truncated };
+}
+
 // fs.read — 텍스트 파일 내용. 바이너리/초과 크기는 편집 불가로 표시.
 async function read(params) {
   const abs = safeResolve(params?.path || '');
@@ -130,6 +170,7 @@ function stopWatch() {
 async function handle(method, params) {
   switch (method) {
     case 'fs.list': return list(params);
+    case 'fs.tree': return tree(params);
     case 'fs.read': return read(params);
     case 'fs.write': return write(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
