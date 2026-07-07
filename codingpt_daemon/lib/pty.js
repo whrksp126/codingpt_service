@@ -20,12 +20,14 @@
  */
 const os = require('os');
 const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 const WebSocket = require('ws');
 const nodePty = require('node-pty');
 
 const TMUX_SOCKET = 'codingpt'; // tmux -L codingpt (사용자 기본 tmux 서버와 격리)
 const TMUX_SESSION = 'codingpt';
+const TMUX_CONF = path.join(__dirname, '..', 'tmux.conf'); // 서버 시작 시(-f) 로드 → alt-screen override 선적용
 
 let tmuxPathCache = null;
 function findTmux() {
@@ -57,13 +59,17 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     const env = { ...process.env };
     delete env.TMUX;
 
+    // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
+    //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
+    //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
+    // 매 attach 마다 실행하는 건 window-size 뿐(마지막 조작 클라이언트 크기 반영 보정).
     let pty;
     try {
       pty = nodePty.spawn(tmux, [
         '-L', TMUX_SOCKET,
+        '-f', TMUX_CONF,
         'new-session', '-A', '-s', TMUX_SESSION,
         ';', 'set', '-g', 'window-size', 'latest',
-        ';', 'setw', '-g', 'aggressive-resize', 'on',
       ], {
         name: 'xterm-256color',
         cols, rows,
