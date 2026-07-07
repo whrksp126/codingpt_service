@@ -77,6 +77,10 @@ app.use(cors({
 const webhookController = require('./controllers/webhookController');
 app.post('/api/billing/webhook', express.raw({ type: '*/*' }), webhookController.handlePortoneWebhook);
 
+// BYO-PC 프리뷰 — dpv 쿠키가 있는 non-/api 루트 요청을 데몬 dev 서버로 프록시(Vite 절대경로/에셋).
+//  JSON 파서 "앞": 프록시는 요청 본문을 raw 로 파이프하므로 파서가 먼저 소비하면 안 됨. (/api 요청은 즉시 next)
+app.use(require('./controllers/daemonController').previewCookieMiddleware);
+
 // 미들웨어 설정
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -217,6 +221,22 @@ const startServer = async () => {
         if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
         agentProxyService.proxyDevWs(req, socket, head, { userId: sess.userId });
         return;
+      }
+      // BYO-PC 데몬 프리뷰 HMR — 토큰 경로(:token) 또는 dpv 쿠키 기반 루트 WS(사용자 Vite HMR)
+      const daemonController = require('./controllers/daemonController');
+      const dpm = url.match(/^\/api\/daemon\/preview\/([^/?]+)(\/[^?]*)?/);
+      if (dpm) {
+        const sess = daemonController.resolvePreviewToken(dpm[1]);
+        if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+        daemonRelayService.proxyWs(sess.userId, sess.port, dpm[2] || '/', req, socket, head);
+        return;
+      }
+      if (!url.startsWith('/api/')) {
+        const mm = String(req.headers.cookie || '').match(/(?:^|;\s*)dpv=([^;]+)/);
+        if (mm) {
+          const sess = daemonController.resolvePreviewToken(decodeURIComponent(mm[1]));
+          if (sess) { daemonRelayService.proxyWs(sess.userId, sess.port, url, req, socket, head); return; }
+        }
       }
       try { socket.destroy(); } catch (_) { /* noop */ }
     });

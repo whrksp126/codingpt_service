@@ -18,6 +18,7 @@
  * 단일 back 인스턴스 전제(인메모리 Map — pendingPermissions 와 동일).
  */
 const crypto = require('crypto');
+const http = require('http');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
 
@@ -317,6 +318,83 @@ function disconnectDevice(deviceId) {
   return false;
 }
 
+// ── 프리뷰 프록시(데몬 dev 서버) ───────────────────────────────────────
+// dial-back TCP 터널(kind:'tcp')로 사용자 PC 의 127.0.0.1:<port> 에 붙어 HTTP/HMR 을 프록시한다.
+// 데몬은 HTTP 를 해석하지 않고 raw 바이트만 릴레이 → back 이 HTTP 를 종단(요청 재구성/응답 파이프).
+
+// 스트림 WS 를 Node Duplex(바이트 스트림)로 감싸 http.request 의 소켓으로 쓴다.
+// createWebSocketStream 은 바이너리 메시지를 이어붙인 바이트 스트림을 준다(TCP 등가).
+// http 가 호출하는 소켓 메서드 몇 개를 no-op 으로 스텁(Duplex 엔 없음).
+function wsToSocket(ws) {
+  const duplex = WebSocket.createWebSocketStream(ws, { allowHalfOpen: false });
+  const noop = () => duplex;
+  duplex.setNoDelay = duplex.setKeepAlive = duplex.setTimeout = noop;
+  duplex.ref = duplex.unref = noop;
+  return duplex;
+}
+
+// HTTP 프록시 한 건 = dial-back 터널 한 개(요청마다 새 연결, Connection: close).
+async function proxyHttp(userId, port, path, req, res) {
+  let ws;
+  try {
+    ws = await openStream(userId, 'tcp', { port });
+  } catch (e) {
+    if (!res.headersSent) res.status(502).end('preview: 데몬 연결 실패 — ' + e.message);
+    return;
+  }
+  const socket = wsToSocket(ws);
+  const headers = { ...req.headers };
+  delete headers.host; // dev 서버가 보는 Host 는 localhost:port
+  headers.host = `localhost:${port}`;
+  headers.connection = 'close'; // 단발 터널 — 응답 후 종료
+  delete headers['accept-encoding']; // 재작성/버퍼링 대비 압축 회피(dev 서버는 대개 비압축)
+
+  const upstream = http.request(
+    { createConnection: () => socket, method: req.method, path, headers, timeout: 30000 },
+    (up) => {
+      if (!res.headersSent) res.writeHead(up.statusCode || 502, up.headers);
+      up.pipe(res);
+    },
+  );
+  upstream.on('error', (e) => {
+    if (!res.headersSent) res.status(502).end('preview proxy error: ' + e.message);
+    else { try { res.end(); } catch (_) { /* noop */ } }
+    try { ws.close(); } catch (_) { /* noop */ }
+  });
+  upstream.on('timeout', () => { try { upstream.destroy(); } catch (_) { /* noop */ } });
+  res.on('close', () => { try { ws.close(); } catch (_) { /* noop */ } });
+  req.pipe(upstream);
+}
+
+// HMR 등 WebSocket 업그레이드 프록시 — dial-back 터널에 원본 업그레이드 요청을 재구성해 쓰고 raw 브리지.
+async function proxyWs(userId, port, path, req, socket, head) {
+  let ws;
+  try { ws = await openStream(userId, 'tcp', { port }); }
+  catch (_) { try { socket.destroy(); } catch (_2) { /* noop */ } return; }
+  const tunnel = wsToSocket(ws);
+
+  const headers = { ...req.headers };
+  delete headers.host;
+  headers.host = `localhost:${port}`;
+  const lines = [`${req.method} ${path} HTTP/1.1`];
+  for (const [k, v] of Object.entries(headers)) {
+    if (Array.isArray(v)) v.forEach((vv) => lines.push(`${k}: ${vv}`));
+    else lines.push(`${k}: ${v}`);
+  }
+  tunnel.write(lines.join('\r\n') + '\r\n\r\n');
+  if (head && head.length) tunnel.write(head);
+
+  tunnel.pipe(socket);
+  socket.pipe(tunnel);
+  const cleanup = () => {
+    try { tunnel.destroy(); } catch (_) { /* noop */ }
+    try { socket.destroy(); } catch (_) { /* noop */ }
+    try { ws.close(); } catch (_) { /* noop */ }
+  };
+  tunnel.on('error', cleanup); socket.on('error', cleanup);
+  tunnel.on('close', cleanup); socket.on('close', cleanup);
+}
+
 // 토큰/펜딩 스윕
 const _sweeper = setInterval(() => {
   const now = Date.now();
@@ -335,4 +413,6 @@ module.exports = {
   disconnectDevice,
   addEventClient,
   removeEventClient,
+  proxyHttp,
+  proxyWs,
 };

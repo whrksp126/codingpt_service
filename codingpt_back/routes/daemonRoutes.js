@@ -20,4 +20,10 @@ router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
 // 파일 변경 이벤트 SSE(앱 구독) — 데몬 chokidar → back → 앱 즉시 반영.
 router.get('/events', authMiddleware, daemonController.streamEvents);
 
+// 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).
+router.get('/preview/ports', authMiddleware, daemonController.previewPorts);
+router.post('/preview/start', authMiddleware, daemonController.previewStart);
+router.all('/preview/:token', daemonController.previewEntry);
+router.all('/preview/:token/*', daemonController.previewEntry);
+
 module.exports = router;

@@ -11,6 +11,7 @@
 const os = require('os');
 const WebSocket = require('ws');
 const ptyLib = require('./pty');
+const proxyLib = require('./proxy');
 const fsRpc = require('./fs');
 const pkg = require('../package.json');
 
@@ -66,6 +67,8 @@ function run(config) {
         try {
           if (msg.kind === 'pty') {
             ptyLib.openPtyStream(config, msg);
+          } else if (msg.kind === 'tcp') {
+            proxyLib.openTcpStream(config, msg); // 프리뷰 — 로컬 포트 raw TCP 터널
           } else {
             throw new Error(`지원하지 않는 스트림 종류: ${msg.kind}`);
           }
@@ -90,6 +93,7 @@ function run(config) {
           return;
         }
         if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
+        if (msg.method === 'net.ports') { proxyLib.listPorts().then(ok).catch(fail); return; }
         fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
         return;
       }

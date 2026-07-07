@@ -201,4 +201,82 @@ function streamEvents(req, res) {
   req.on('close', () => { clearInterval(ka); daemonRelayService.removeEventClient(userId, res); });
 }
 
-module.exports = { createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal, fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents };
+// ── 프리뷰(데몬 dev 서버) ──────────────────────────────────────────────
+// 사용자가 PC 에서 직접 띄운 dev 서버를 폰 웹뷰로 미리보기. WebView 는 URL 을 직접 로드하므로
+// JWT 를 못 싣는다 → 불투명 토큰(userId:port 결정론적 HMAC)으로 사용자/포트 바인딩.
+// 사용자 Vite 등은 base='/' 라 런타임 절대경로(/node_modules/…)가 토큰 경로 밖으로 나간다 →
+// 첫 로드 시 dpv 쿠키를 심고, 이후 non-/api 루트 요청을 쿠키로 데몬 프록시에 라우팅(previewCookieMiddleware).
+const PREVIEW_SECRET = process.env.PREVIEW_TOKEN_SECRET || process.env.JWT_SECRET || 'cpt-preview-secret';
+const PREVIEW_TTL_MS = 60 * 60 * 1000;
+const previewTokens = new Map(); // token → { userId, port, expiresAt }
+const _pvSweeper = setInterval(() => {
+  const now = Date.now();
+  for (const [t, s] of previewTokens) { if (s.expiresAt < now) previewTokens.delete(t); }
+}, 5 * 60 * 1000);
+if (_pvSweeper.unref) _pvSweeper.unref();
+
+function previewTokenFor(userId, port) {
+  return 'dpv-' + crypto.createHmac('sha256', PREVIEW_SECRET).update(`${userId}:${port}`).digest('hex').slice(0, 18);
+}
+function resolvePreviewToken(token) {
+  const s = previewTokens.get(token);
+  if (!s || s.expiresAt < Date.now()) { if (s) previewTokens.delete(token); return null; }
+  s.expiresAt = Date.now() + PREVIEW_TTL_MS;
+  return s;
+}
+function parseCookies(header) {
+  const out = {};
+  String(header || '').split(';').forEach((p) => {
+    const i = p.indexOf('=');
+    if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+  });
+  return out;
+}
+
+// GET /api/daemon/preview/ports  (인증) — PC 에서 LISTEN 중인 포트 목록
+async function previewPorts(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'net.ports', {});
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/preview/start  (인증) body:{ port } → 그 포트로의 무인증 프록시 토큰
+async function previewStart(req, res) {
+  const port = parseInt((req.body || {}).port, 10);
+  if (!Number.isFinite(port) || port <= 0 || port >= 65536) {
+    return errorResponse(res, new Error('유효한 port 가 필요합니다.'), 400);
+  }
+  const token = previewTokenFor(req.user.id, port);
+  previewTokens.set(token, { userId: req.user.id, port, expiresAt: Date.now() + PREVIEW_TTL_MS });
+  return successResponse(res, { token, url: `/api/daemon/preview/${token}/`, port });
+}
+
+// ALL /api/daemon/preview/:token(/*)  (무인증) — 진입 프록시. dpv 쿠키를 심고 토큰 경로를 벗겨 데몬으로.
+function previewEntry(req, res) {
+  const { token } = req.params;
+  const sess = resolvePreviewToken(token);
+  if (!sess) return res.status(404).end('preview session not found or expired');
+  // 이후 이 WebView 의 루트 절대경로 요청을 이 토큰으로 라우팅.
+  res.setHeader('Set-Cookie', `dpv=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600`);
+  const prefix = `/api/daemon/preview/${token}`;
+  let path = req.originalUrl.slice(prefix.length) || '/';
+  if (!path.startsWith('/')) path = '/' + path;
+  return daemonRelayService.proxyHttp(sess.userId, sess.port, path, req, res);
+}
+
+// 미들웨어 — non-/api 루트 요청에 dpv 쿠키가 있으면 데몬 dev 서버로 프록시(Vite 절대경로/에셋).
+function previewCookieMiddleware(req, res, next) {
+  if (req.url.startsWith('/api/')) return next();
+  const token = parseCookies(req.headers.cookie).dpv;
+  if (!token) return next();
+  const sess = resolvePreviewToken(token);
+  if (!sess) return next();
+  return daemonRelayService.proxyHttp(sess.userId, sess.port, req.originalUrl, req, res);
+}
+
+module.exports = {
+  createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
+  fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
+  previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
+};
