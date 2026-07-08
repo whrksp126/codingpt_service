@@ -3,11 +3,20 @@
 사용자 PC에 설치되는 데몬. 모바일 앱이 PC 터미널을 미러링/조작하게 릴레이한다.
 설계 정본: `../codingpt_back/docs/byo-pc-design.md` (와이어 프로토콜/단계 로드맵/보안 원칙).
 
-## 절대 규칙 (ToS 경계)
+## 절대 규칙 (ToS 경계) — 2026-07-09 M1 피벗으로 갱신
 
-- **AI 자격증명을 읽거나 다루는 코드를 절대 추가하지 않는다.** (Keychain, `~/.claude`, OAuth 토큰 등)
-- 이 데몬은 터미널/파일/프리뷰 바이트 릴레이 전용. 사용자 claude는 사용자가 터미널에서 직접 실행한다.
-- claude를 헤드리스로 구동하는 기능(`claude -p` 등) 추가 금지 — Anthropic ToS 위반.
+경계의 핵심은 **실행 위치·자격증명 소유**다("헤드리스냐"가 아님). AI는 항상 **사용자 PC에서
+사용자 자신의 claude·구독으로** 돈다.
+
+- **AI 자격증명(Keychain·`~/.claude` OAuth·구독 토큰)을 읽거나 옮기거나 우리 인프라로 라우팅하는 코드는
+  절대 추가하지 않는다.**
+- ✅ 허용: 데몬이 **사용자 자신의 로컬 `claude` CLI를 구조화 모드로 spawn**한다
+  (`claude -p --output-format stream-json --input-format stream-json`). 사용자가 터미널에 직접 치는 것과
+  동일하게 사용자 PC·사용자 구독으로 실행되고, 크레덴셜은 그 PC에만, API는 PC→Anthropic 직결.
+  (`lib/agent.js`가 이 spawn을 담당. 승인은 `--permission-prompt-tool` + 번들 MCP로 앱에 중계.)
+- ✅ 허용: 세션 재개용 `~/.claude/projects/<cwd>/*.jsonl` **대화 로그** 읽기(자격증명 아님).
+- ❌ 금지: 우리 서버/우리 키로 claude 구동, 사용자 크레덴셜을 back/릴레이로 전송하는 모든 형태.
+- GA 전 Anthropic 서면 확인 권고(비차단).
 
 ## macOS 권한(TCC) — 원격에서 폴더 접근 프롬프트 안 뜨게
 
@@ -23,8 +32,13 @@
 ```
 index.js        CLI (pair | run | status | unpair)
 lib/config.js   ~/.codingpt/daemon.json (0600, deviceToken 원문은 여기만)
-lib/control.js  제어 WS(/api/daemon/connect) — 재접속 백오프, stream_open 디스패치
+lib/control.js  제어 WS(/api/daemon/connect) — 재접속 백오프, stream_open/rpc 디스패치
 lib/pty.js      dial-back PTY 스트림 — node-pty + tmux(-L codingpt 전용 소켓)
+lib/fs.js       fs RPC(list/tree/read/write/watch) — 홈 jail(safeResolve)
+lib/workspace.js 워크스페이스 스캐폴드(ws.*) — 루트 지정·git init
+lib/proxy.js    net.ports(lsof) + dial-back TCP 터널(프리뷰)
+lib/agent.js    BYO 에이전트 — 사용자 claude spawn(stream-json), 8-이벤트 정규화, agent.* RPC (M1)
+lib/approval-mcp.js  승인 중계 MCP(--permission-prompt-tool) — claude 권한요청 → 앱 카드 (M1)
 ```
 
 ## 컨벤션
