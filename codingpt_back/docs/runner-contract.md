@@ -1,10 +1,12 @@
-# 러너 계약 명세 (Runner Contract) — 초안 v0.1
+# 러너 계약 명세 (Runner Contract) — v0.2
 
 > **목적**: 모바일 앱·웹 ↔ 릴레이(back) ↔ 러너(PC 데몬 / 클라우드) 사이의 **단일 계약**을 정의한다.
-> 이 계약 하나를 기준으로 ① 모바일 IDE 소스 레이어 교체(isDaemon 분기 소거), ② 데몬 구조화 에이전트 세션(BYO), ③ 클라우드 러너 BYO 전환이 각각 독립적으로 진행된다.
+> 이 계약 하나를 기준으로 ① 모바일 IDE 소스 레이어 교체(isDaemon 분기 소거), ② 데몬 구조화 에이전트 세션(BYO), ③ 클라우드 러너 BYO 전환, ④ 로컬↔클라우드 동기화(sync 채널)가 각각 독립적으로 진행된다.
 >
-> **관계 문서**: 기획 정본 = 새 기획서(Final/MVP) §2·§2.1·§5.5·§6.5. 현재 토대 = [`byo-pc-status.md`](./byo-pc-status.md).
-> **상태**: 설계 초안. 구현 전 검토용. 최종 갱신 2026-07-09.
+> **관계 문서**: 기획 정본 = 새 기획서(Final/MVP) §2·§2.1·§5.5·§6.5. 로드맵 = [`mvp-roadmap.md`](./mvp-roadmap.md). 현재 토대 = [`byo-pc-status.md`](./byo-pc-status.md).
+> **상태**: v0.2 동결(M0-3). M1 구현 착수 기준. 최종 갱신 2026-07-09.
+>
+> **v0.2 변경점**: `sync` 채널 신설(checkpoint/materialize/status/conflict) · "러너 코어 패키지" 채택 확정 · 미결 수치(버퍼/청크/grep 상한/푸시 트리거) 확정.
 
 ---
 
@@ -15,7 +17,7 @@
 3. **기존 자산 승격, 재발명 금지.**
    - 에이전트 이벤트 8종(`agent_init/text/thinking/tool_use/tool_result/permission_request/done/error`)은 그대로 이 계약의 정규화 스키마가 된다 (기획서 CodingPT Event와 1:1).
    - 데몬의 제어 WS + dial-back 스트림 구조, PTY 와이어 계약(바이너리=stdin, JSON resize, raw out), 프리뷰 HMAC 토큰은 유지·확장.
-4. **드롭 정책**: `files`·`control`·`agent` 이벤트는 절대 드롭 금지(순서 보장). `terminal` 출력·프리뷰는 고volume이라 최신 우선 드롭 허용.
+4. **드롭 정책**: `files`·`control`·`agent`·`sync` 이벤트는 절대 드롭 금지(순서 보장·데이터 정합성). `terminal` 출력·프리뷰는 고volume이라 최신 우선 드롭 허용.
 5. **AI 우선 편집 규칙** (제품 결정): 모바일 IDE는 확인+가벼운 수정 용도. 에이전트 파일 수정은 항상 이기고, 사용자 버퍼는 그에 맞춰 갱신된다. §3.4 참조.
 
 ---
@@ -40,7 +42,7 @@
   "v": 1,
   "id": "req-uuid",        // req/res 상관관계용 (event엔 없음)
   "type": "req|res|err|event|input",
-  "channel": "control|files|terminal|agent|preview",
+  "channel": "control|files|terminal|agent|preview|sync",
   "workspaceId": "ws_xxx",
   "sessionId": "as_xxx",   // agent 채널만
   "seq": 123,              // event만, 채널별 단조 증가
@@ -49,7 +51,7 @@
 }
 ```
 
-- `req` → `res`(성공) 또는 `err`(§7 에러 모델). 타임아웃 기본 15s, `fs.tree`·`fs.grep`은 60s.
+- `req` → `res`(성공) 또는 `err`(§8 에러 모델). 타임아웃 기본 15s, `fs.tree`·`fs.grep`은 60s.
 - `event`: 서버→클라이언트 단방향, 채널별 `seq` 단조 증가. 갭 감지 시 클라이언트가 `control.resync` 요청.
 - 바이너리(터미널 raw, 프리뷰 tcp)는 프레임에 싸지 않고 기존 dial-back 전용 소켓 그대로.
 
@@ -169,7 +171,34 @@ interrupt: SIGINT          # 1차. control 프로토콜 확인 후 교체 가능
 
 ---
 
-## 6. preview 채널 (기존 유지 + 명세화)
+## 6. sync 채널 (동기화 — 체크포인트/머티리얼라이즈/충돌)
+
+> 기획서 §5·§5.6, 로드맵 M4 의 계약화. **코드만 동기화**(환경은 러너별 재구성). 정본 = **objectstore git-bundle 허브**. 사용자 실제 커밋 히스토리는 불변(shadow 커밋으로 WIP 포함 스냅샷).
+
+### 6.1 메서드
+
+| method | params | 반환 | 비고 |
+|---|---|---|---|
+| `sync.checkpoint` | workspaceId, reason(`turn_end\|periodic\|handoff\|manual`), includeAgentSession? | { checkpointId, baseCommit, bundleKey, sizeBytes, excluded[] } | shadow 커밋 → `git bundle` → objectstore `codingpt/sync/<ws>/<ckpt>.bundle`. 대용량(node_modules 등)·`excludeFromCloud` 제외 |
+| `sync.materialize` | workspaceId, checkpointId | { baseCommit, restored, reinstall } | 다른 러너에서 스냅샷 복원 + 환경 재구성(예: `npm ci`) |
+| `sync.status` | workspaceId | { state:`clean\|syncing\|conflict`, base, head, dirty, lastCheckpointId, lastAt } | 앱 동기화 인디케이터 소스 |
+| `sync.resolve` | workspaceId, conflictId, choices[{ path, side:`local\|cloud` }], bulk? | { resolved, rescueBranch } | 파일 단위 택1 / "전부 한쪽". 진 쪽은 rescue 브랜치로 보존(되돌리기 가능) |
+
+### 6.2 이벤트
+
+- `sync_status { state, base, head, dirty }` — 상태 전이 시.
+- `sync_conflict { conflictId, base, files:[{ path, kind:'text'|'binary' }], canBulkPick }` — 3-way 겹침 파일 목록(보통 소수). **충돌 중 에이전트 정지**(§5.3). 바이너리는 머지 불가 → 택1만.
+- `sync_progress { phase:'checkpoint'|'upload'|'materialize'|'reinstall', pct? }` — 콜드스타트/핸드오프 진행 UX("환경 깨우는 중…").
+
+### 6.3 정책
+
+- **자동 체크포인트**: 턴 종료 / 주기(~30s) / 타겟 전환 직전. → 갈라짐 창 최소화.
+- **활성 리스(lease)**: 릴레이가 한 타겟에만 활성 권한. 나머지는 핸드오프 전까지 읽기전용.
+- **탐지**: 각 체크포인트가 base 커밋 id 기록. `diff(러너)` vs `diff(정본 since base)` → 겹치는 파일만 충돌, 나머지 자동 머지.
+- **에이전트 세션 파일 포함(확정)**: 체크포인트에 코드 + 에이전트 세션 파일 → 클라우드에서 같은 대화 `--resume`. `excludeFromCloud` 로 워크스페이스별 제외(프라이버시 고지).
+- **안전**: 파괴적 해결 전 진 쪽을 rescue 브랜치/stash 로 보존. 원시 conflict 마커·전체 3-way 편집기는 폰에 안 띄움(§5.6 UX).
+
+## 7. preview 채널 (기존 유지 + 명세화)
 
 | method | 내용 |
 |---|---|
@@ -181,7 +210,7 @@ interrupt: SIGINT          # 1차. control 프로토콜 확인 후 교체 가능
 
 ---
 
-## 7. 에러 모델
+## 8. 에러 모델
 
 `err { code, message, retryable, channel }`
 
@@ -196,20 +225,23 @@ interrupt: SIGINT          # 1차. control 프로토콜 확인 후 교체 가능
 
 ---
 
-## 8. 러너별 구현 매핑
+## 9. 러너별 구현 매핑
 
 | 계약 | LocalRunner(데몬, 현행) | CloudRunner |
 |---|---|---|
-| files | `fs.list/tree/read/write/watch` **거의 그대로** + 신규: grep, stat, mkdir/rename/delete/move, baseMtime, base64 read | 신규 (데몬 fs 모듈 재사용 검토 — §9) |
+| files | `fs.list/tree/read/write/watch` **거의 그대로** + 신규: grep, stat, mkdir/rename/delete/move, baseMtime, base64 read | 러너 코어 fs 모듈 공유(§10) |
 | terminal | dial-back pty + tmux 있음. 신규: `term.list/open/attach/close` 멀티 탭 API | 컨테이너 내 tmux 동일 |
 | agent | **전면 신규** (기존 "claude -p 금지" 경계 폐기 확정) | 동일 코드 |
+| sync | shadow 커밋 + `git bundle` → objectstore 허브. materialize 시 환경 재구성 | 동일 코드(핸드오프 반대편) |
 | preview | `net.ports` + tcp 터널 현행 유지 | devproxy 방식과 통합 |
 | control | hello/stream_open/rpc 현행 → attach/ack/seq 추가 | 동일 |
 
-## 9. 미결 (구현 전 확정 필요)
+## 10. 확정된 구현 결정 (구 미결)
 
-- **러너 코드 공유**: 데몬 lib(fs/pty/proxy)를 "러너 코어" 패키지로 추출해 클라우드 컨테이너에서도 그대로 돌릴지 (권장 — 계약 구현이 한 벌이 됨).
-- 클라이언트↔릴레이 WSS 다중화의 기존 SSE/REST 대체 순서 (병행 기간 둘지).
-- seq 버퍼 크기·보존 시간, fs.read 청크 크기, grep 상한 기본값.
-- 푸시 알림 트리거 목록과 페이로드 (done/permission_request/crashed/RUNNER_OFFLINE).
-- 어댑터 2호(codex) 매니페스트 — 계약 검증용.
+- **러너 코드 공유 = 러너 코어 패키지 채택(확정)**: 데몬 lib(fs/pty/proxy/sync)를 `runner-core` 로 추출 → 데몬(local)·격리 컨테이너(cloud)가 **한 벌 공유**. 계약 구현이 한 벌이 되어 local/cloud 동작 편차를 원천 차단.
+- **WSS 다중화 이관 순서**: SSE/REST 병행 기간을 둔다. `agent` 채널부터 WSS 로 이관(리플레이 §2.3 필수), `files/terminal/preview` 는 현행 유지하며 순차 이관(로드맵 M3).
+- **롤링 버퍼**: 채널별 최근 **1,000건 또는 5분**(둘 중 큰 쪽). `agent` 채널은 러너가 **세션 전체 이벤트 로그**를 별도 보존(장기 부재 후 리플레이).
+- **fs.read 청크**: 256KB/청크(바이너리는 base64 인코딩 후 ~340KB). 초과 시 offset/limit 페이지.
+- **fs.grep 상한**: 기본 500 매치(최대 2,000), 타임아웃 60s, ripgrep/grep 실행.
+- **푸시 트리거 3종(확정)**: `done`(턴 완료) · `permission_request`(승인 대기) · `crashed`(에이전트/러너 크래시). 페이로드 `{ workspaceId, sessionId, kind, title, deeplink }`. `RUNNER_OFFLINE` 은 푸시가 아니라 앱 연결 인디케이터로 표시.
+- **어댑터 2호(codex)**: Post-MVP(로드맵). MVP 는 `claude-code`(구조화) + `generic`(PTY) 만.
