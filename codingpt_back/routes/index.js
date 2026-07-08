@@ -14,7 +14,6 @@ const contentTreeRoutes = require('./contentTreeRoutes');
 const githubRoutes = require('./githubRoutes');
 const githubRepoRoutes = require('./githubRepoRoutes');
 const adminUsageRoutes = require('./adminUsageRoutes');
-const agentRoutes = require('./agentRoutes');
 const workspaceRoutes = require('./workspaceRoutes');
 const previewRoutes = require('./previewRoutes');
 const terminalRoutes = require('./terminalRoutes');
@@ -39,7 +38,6 @@ router.use('/admin/github-repos', githubRepoRoutes);
 router.use('/admin/usage', adminUsageRoutes); // 사용량 실측 집계(어드민)
 router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
-router.use('/agent', agentRoutes);
 router.use('/workspaces', workspaceRoutes);
 router.use('/preview', previewRoutes); // 바이브코딩 dev 서버 미리보기 프록시
 router.use('/terminal', terminalRoutes); // 인터랙티브 PTY 터미널(ws 업그레이드는 app.js 에서)

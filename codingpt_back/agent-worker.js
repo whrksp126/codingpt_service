@@ -1,23 +1,24 @@
 /**
- * 바이브코딩 에이전트 워커 서버 (M3-full Phase 1)
+ * 샌드박스/프리뷰 워커 서버 (러너 인프라)
  *
- * Agent SDK query() 를 **메인 API 프로세스(back) 밖** 별도 컨테이너에서 실행한다.
- * back 은 /api/agent/* 를 이 워커로 SSE/HTTP 프록시(agentProxyService)만 한다.
- * 워크스페이스는 호스트 가시 named volume(/workspace, AGENT_WORKSPACE_ROOT)에 둔다.
+ * 사용자 코드의 dev 서버·멀티 터미널·인터랙티브 PTY 를 **메인 API 프로세스(back) 밖**
+ * 별도 컨테이너의 격리 샌드박스에서 구동한다. back 은 preview/terminal 을 이 워커로
+ * SSE/HTTP/WS 프록시(agentProxyService)만 한다. 워크스페이스는 호스트 가시 named volume
+ * (/workspace, AGENT_WORKSPACE_ROOT)에 둔다.
  *
  * 구조 선례: executor-server.js(별도 실행 서버) + executeService.js(SSE 프록시).
  *
  * 보안: 이 워커는 **내부 네트워크 전용**(compose expose 만, ports 매핑 금지).
  *       userId 는 back 이 인증 후 신뢰 가능한 값으로 실어 보낸다(워커는 재검증 안 함).
  *
- * 주의: pendingPermissions(승인 대기)는 이 프로세스 메모리에 있으므로 **단일 인스턴스(replica=1)** 유지.
- *       /query 의 permission_request 와 /permission 응답이 같은 워커 프로세스에서 처리돼야 한다.
+ * 이력: 과거 클라우드 AI 에이전트(우리 키 SDK) 실행부(/query·/permission·/file(s))가 여기 있었으나
+ *       BYO 원격 조작 서비스로 피벗하며 전면 제거됨. 남은 preview/sandbox 인프라는 M5 클라우드 러너가 재사용.
  */
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const agentService = require('./services/agentService');
+const workspaceFs = require('./services/workspaceFsService');
 const sandboxManager = require('./services/sandboxManager');
 
 const app = express();
@@ -26,7 +27,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 프로젝트 dir 탐지: 워크스페이스 루트(→ depth1 하위) 중 package.json 에 scripts.dev 가진 dir.
 function detectProjectDir(userId, projectId) {
-  const base = agentService.workspaceDir(userId, projectId); // /workspace/cpt-agent/<uid>/<projectId> (워커 fs == 샌드박스 경로)
+  const base = workspaceFs.workspaceDir(userId, projectId); // /workspace/cpt-agent/<uid>/<projectId> (워커 fs == 샌드박스 경로)
   const hasDevScript = (dir) => {
     try {
       const pj = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf-8'));
@@ -49,143 +50,6 @@ app.use(express.json({ limit: '10mb' }));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'agent-worker', workspaceRoot: process.env.AGENT_WORKSPACE_ROOT || '(tmp)' });
-});
-
-/**
- * 에이전트 실행 — SDKMessage 를 SSE 로 스트리밍.
- * body: { prompt, userId, projectId, files, model, resumeSessionId, autoApprove }
- */
-app.post('/query', async (req, res) => {
-  const { prompt, userId, projectId, files, model, mode, resumeSessionId, autoApprove } = req.body || {};
-
-  if (!prompt || typeof prompt !== 'string') {
-    return res.status(400).json({ success: false, message: '프롬프트가 필요합니다.' });
-  }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(500).json({
-      success: false,
-      message: 'ANTHROPIC_API_KEY 가 설정되지 않았습니다. 워커 .env 에 추가 후 재시작하세요.',
-    });
-  }
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-
-  const send = (o) => {
-    try {
-      res.write(`data: ${JSON.stringify(o)}\n\n`);
-    } catch (_) {
-      /* noop */
-    }
-  };
-
-  // 클라이언트(back 프록시)가 끊으면 query() 중단. 정상 종료(finished)면 abort 안 함.
-  const abortController = new AbortController();
-  let finished = false;
-  res.on('close', () => {
-    if (!finished) {
-      try {
-        abortController.abort();
-      } catch (_) {
-        /* noop */
-      }
-    }
-  });
-
-  try {
-    await agentService.runAgentQuery({
-      prompt,
-      userId,
-      projectId,
-      seedFiles: files,
-      model,
-      mode,
-      resumeSessionId,
-      autoApprove: !!autoApprove,
-      abortController,
-      onEvent: send,
-    });
-  } catch (error) {
-    console.error('[agent-worker] 에이전트 실행 오류:', error);
-    send({ type: 'error', message: error.message || '에이전트 실행 중 오류가 발생했습니다.' });
-  } finally {
-    finished = true;
-    try {
-      res.end();
-    } catch (_) {
-      /* noop */
-    }
-  }
-});
-
-/**
- * 수정 승인 응답 — 대기 중인 canUseTool 해소.
- * body: { requestId, userId, decision, message }
- */
-app.post('/permission', (req, res) => {
-  const { requestId, userId, decision, message } = req.body || {};
-  if (!requestId || (decision !== 'allow' && decision !== 'deny')) {
-    return res.status(400).json({ success: false, message: 'requestId 와 decision(allow|deny) 이 필요합니다.' });
-  }
-  const ok = agentService.resolvePermissionResponse(requestId, userId, decision, message);
-  if (!ok) {
-    return res.status(404).json({ success: false, message: '대기 중인 승인 요청을 찾을 수 없습니다.' });
-  }
-  return res.json({ success: true, requestId, decision });
-});
-
-/**
- * 워크스페이스 파일 읽기 — 에이전트 편집 후 에디터 동기화용.
- * GET /file?path=<rel>&projectId=<id>&userId=<id>
- */
-app.get('/file', (req, res) => {
-  const { path: relPath, projectId, userId } = req.query;
-  if (!relPath || typeof relPath !== 'string') {
-    return res.status(400).json({ success: false, message: 'path 가 필요합니다.' });
-  }
-  try {
-    const content = agentService.readWorkspaceFile(userId, projectId, relPath);
-    return res.json({ success: true, path: relPath, content });
-  } catch (error) {
-    const notFound = error.code === 'ENOENT';
-    return res.status(notFound ? 404 : 400).json({
-      success: false,
-      message: notFound ? '파일을 찾을 수 없습니다.' : error.message || '파일을 읽을 수 없습니다.',
-    });
-  }
-});
-
-/**
- * 워크스페이스 파일 쓰기 — IDE 에디터 편집을 샌드박스 FS 에 반영(dev 서버/HMR 이 감지).
- * POST /file  body: { path, content, projectId, userId }
- */
-app.post('/file', (req, res) => {
-  const { path: relPath, content, projectId, userId } = req.body || {};
-  if (!relPath || typeof relPath !== 'string') {
-    return res.status(400).json({ success: false, message: 'path 가 필요합니다.' });
-  }
-  try {
-    agentService.writeWorkspaceFile(userId, projectId, relPath, content);
-    return res.json({ success: true, path: relPath });
-  } catch (error) {
-    return res.status(400).json({ success: false, message: error.message || '파일을 쓸 수 없습니다.' });
-  }
-});
-
-/**
- * 워크스페이스 파일 트리 — IDE 파일트리용.
- * GET /files?projectId=<id>&userId=<id>
- */
-app.get('/files', (req, res) => {
-  const { projectId, userId } = req.query;
-  try {
-    const tree = agentService.listWorkspaceFiles(userId, projectId);
-    return res.json({ success: true, tree });
-  } catch (error) {
-    return res.status(400).json({ success: false, message: error.message || '파일 목록을 읽을 수 없습니다.' });
-  }
 });
 
 // ── dev 서버(미리보기) ──────────────────────────────────────────────
@@ -258,7 +122,7 @@ app.get('/terminals', async (req, res) => {
   if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
   try {
     // 세션이 아직 없으면 윈도우 0 을 프로젝트 dir 에서 생성(워크스페이스 루트엔 package.json 이 없어 npm run dev 가 실패).
-    const cwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    const cwd = detectProjectDir(userId, projectId) || workspaceFs.workspaceDir(userId, projectId);
     const windows = await sandboxManager.listWindows(userId, cwd);
     return res.json({ success: true, windows });
   } catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 목록 실패' }); }
@@ -268,7 +132,7 @@ app.post('/terminals/new', async (req, res) => {
   const { userId, projectId, name } = req.body || {};
   if (userId == null) return res.status(400).json({ success: false, message: 'userId 가 필요합니다.' });
   try {
-    const cwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    const cwd = detectProjectDir(userId, projectId) || workspaceFs.workspaceDir(userId, projectId);
     const index = await sandboxManager.newWindow(userId, { name: name || 'shell', cwd });
     return res.json({ success: true, index });
   } catch (e) { return res.status(500).json({ success: false, message: e.message || '윈도우 생성 실패' }); }
@@ -397,7 +261,7 @@ app.post('/sandbox/exec', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   const send = (o) => { try { res.write(`data: ${JSON.stringify(o)}\n\n`); } catch (_) { /* noop */ } };
 
-  const root = agentService.workspaceDir(userId, projectId);
+  const root = workspaceFs.workspaceDir(userId, projectId);
   // 시작 cwd: 지정 없으면 프로젝트 dir(package.json 있는 곳), 없으면 워크스페이스 루트.
   const baseCwd = cwd || detectProjectDir(userId, projectId) || root;
   send({ type: 'start', cwd: baseCwd });
@@ -480,7 +344,7 @@ catch (_) { console.warn('[agent-worker] ws 미설치 — 인터랙티브 터미
 async function handleTermWs(ws, userId, projectId) {
   let pty;
   try {
-    const baseCwd = detectProjectDir(userId, projectId) || agentService.workspaceDir(userId, projectId);
+    const baseCwd = detectProjectDir(userId, projectId) || workspaceFs.workspaceDir(userId, projectId);
     pty = await sandboxManager.openPty(userId, { projectId, cwd: baseCwd, cols: 80, rows: 24 });
     console.log(`[agent-worker] termproxy 연결 userId=${userId} projectId=${projectId} cwd=${baseCwd}`);
   } catch (e) {

@@ -1,12 +1,13 @@
 /**
- * 에이전트 워커 프록시 (M3-full Phase 1)
+ * 샌드박스/프리뷰 워커 프록시
  *
- * back 이 /api/agent/* 요청을 agent-worker 로 전달한다.
- *  - proxyQuery: 워커 /query 의 SSE 를 라인 파싱해 onEvent 로 흘림 (executeService.js 패턴)
- *  - proxyPermission: 워커 /permission 으로 forward
- *  - getFile: 워커 /file 로 forward
+ * back 이 preview(dev 서버)·멀티 터미널·인터랙티브 PTY 요청을 agent-worker 로 전달한다.
+ *  - startDev/stopDev/proxyDev/proxyDevWs: 미리보기 dev 서버 HTTP/WS 프록시
+ *  - proxyTerminalWs: 인터랙티브 PTY(WS) 프록시
+ *  - listTerminals/newTerminal/… : tmux 멀티 터미널 제어
  *
- * AGENT_WORKER_URL 미설정 시 컨트롤러가 이 프록시 대신 agentService 를 직접 호출(폴백).
+ * (과거 클라우드 AI 에이전트 프록시(proxyQuery/proxyPermission/file)는 BYO 피벗으로 제거됨.)
+ * AGENT_WORKER_URL 미설정 시 preview/terminal 기능은 비활성(isEnabled=false).
  */
 const http = require('http');
 const { URL } = require('url');
@@ -65,84 +66,6 @@ function getJson(pathname) {
   });
 }
 
-/**
- * 워커 /query SSE 프록시. 파싱된 이벤트 객체를 그대로 onEvent 로 전달.
- * abortController.abort() 시 업스트림 요청을 끊는다(앱→back 끊김 전파).
- * @returns {Promise<void>} 스트림 종료 시 resolve
- */
-function proxyQuery(payload, { onEvent, abortController } = {}) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${WORKER_URL}/query`);
-    const body = JSON.stringify(payload || {});
-
-    const req = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 80,
-        path: url.pathname,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-      },
-      (res) => {
-        if (res.statusCode !== 200) {
-          let errBody = '';
-          res.on('data', (c) => { errBody += c.toString(); });
-          res.on('end', () => {
-            let msg = `에이전트 워커 오류 (${res.statusCode})`;
-            try { const j = JSON.parse(errBody); if (j && j.message) msg = j.message; } catch (_) { /* noop */ }
-            if (onEvent) onEvent({ type: 'error', message: msg });
-            resolve();
-          });
-          return;
-        }
-
-        let buffer = '';
-        res.on('data', (chunk) => {
-          buffer += chunk.toString();
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-          for (const line of lines) {
-            const t = line.trim();
-            if (!t.startsWith('data:')) continue;
-            try {
-              const evt = JSON.parse(t.slice(5).trim());
-              if (onEvent) onEvent(evt);
-            } catch (err) {
-              console.error('[agentProxyService] SSE 파싱 오류:', err, '라인:', t);
-            }
-          }
-        });
-        res.on('end', () => {
-          const t = buffer.trim();
-          if (t.startsWith('data:')) {
-            try { const evt = JSON.parse(t.slice(5).trim()); if (onEvent) onEvent(evt); } catch (_) { /* noop */ }
-          }
-          resolve();
-        });
-        res.on('error', (err) => {
-          if (onEvent) onEvent({ type: 'error', message: `워커 연결 오류: ${err.message}` });
-          resolve();
-        });
-      },
-    );
-
-    req.on('error', (err) => {
-      if (onEvent) onEvent({ type: 'error', message: `에이전트 워커 연결 실패: ${err.message} (${WORKER_URL})` });
-      resolve();
-    });
-
-    // 앱→back 끊김 전파 → 업스트림(back→워커) 요청 끊기 → 워커 query() abort
-    if (abortController && abortController.signal) {
-      abortController.signal.addEventListener('abort', () => {
-        try { req.destroy(); } catch (_) { /* noop */ }
-      });
-    }
-
-    req.write(body);
-    req.end();
-  });
-}
-
 // ── dev 서버(미리보기) ──
 const startDev = (payload) => postJson('/dev/start', payload);   // { userId, projectId }
 const stopDev = (payload) => postJson('/dev/stop', payload);     // { userId }
@@ -187,36 +110,6 @@ function proxyDev(req, res, { userId, port, basePath } = {}) {
   upstream.on('error', (e) => { if (!res.headersSent) res.status(502).end('preview proxy error: ' + e.message); else { try { res.end(); } catch (_) { /* noop */ } } });
   upstream.on('timeout', () => { try { upstream.destroy(); } catch (_) { /* noop */ } });
   req.pipe(upstream);
-}
-
-/**
- * 샌드박스 터미널 SSE 프록시 — 워커 /sandbox/exec 의 이벤트 스트림을 그대로 클라이언트로 파이프.
- * payload: { userId, projectId, command, cwd }
- */
-function proxyExec(payload, res) {
-  const url = new URL(`${WORKER_URL}/sandbox/exec`);
-  const body = JSON.stringify(payload || {});
-  const upstream = http.request(
-    {
-      hostname: url.hostname, port: url.port || 80, path: url.pathname, method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-    },
-    (up) => {
-      res.writeHead(up.statusCode || 502, {
-        'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache',
-        Connection: 'keep-alive', 'X-Accel-Buffering': 'no',
-      });
-      up.pipe(res);
-    },
-  );
-  upstream.on('error', (e) => {
-    try { res.write(`data: ${JSON.stringify({ type: 'error', message: '워커 연결 실패: ' + e.message })}\n\n`); } catch (_) { /* noop */ }
-    try { res.end(); } catch (_) { /* noop */ }
-  });
-  // 클라이언트가 끊으면 업스트림도 끊는다(워커 exec 는 120s 캡으로 자동 종료).
-  res.on('close', () => { try { upstream.destroy(); } catch (_) { /* noop */ } });
-  upstream.write(body);
-  upstream.end();
 }
 
 /**
@@ -279,25 +172,9 @@ function proxyTerminalWs(req, socket, head, { userId, projectId } = {}) {
   proxyReq.end();
 }
 
-const proxyPermission = (payload) => postJson('/permission', payload);
-const writeFile = (payload) => postJson('/file', payload); // { userId, projectId, path, content }
-const getFile = ({ userId, projectId, path }) => {
-  const qs = new URLSearchParams();
-  if (path != null) qs.set('path', String(path));
-  if (projectId != null) qs.set('projectId', String(projectId));
-  if (userId != null) qs.set('userId', String(userId));
-  return getJson(`/file?${qs.toString()}`);
-};
-const listFiles = ({ userId, projectId }) => {
-  const qs = new URLSearchParams();
-  if (projectId != null) qs.set('projectId', String(projectId));
-  if (userId != null) qs.set('userId', String(userId));
-  return getJson(`/files?${qs.toString()}`);
-};
-
 module.exports = {
-  isEnabled, proxyQuery, proxyPermission, getFile, listFiles, writeFile,
-  startDev, stopDev, proxyDev, proxyDevWs, proxyTerminalWs, proxyExec,
+  isEnabled,
+  startDev, stopDev, proxyDev, proxyDevWs, proxyTerminalWs,
   listTerminals, newTerminal, selectTerminal, closeTerminal, clearTerminal, listPorts, portForward,
   WORKER_URL,
 };

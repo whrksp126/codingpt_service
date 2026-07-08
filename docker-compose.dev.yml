@@ -81,7 +81,7 @@ services:
       - codingpt_dev
     restart: unless-stopped
 
-  # 바이브코딩 에이전트 워커 — query() 실행 + 사용자별 샌드박스 컨테이너(docker.sock).
+  # 샌드박스/프리뷰 워커 — 사용자 dev 서버·터미널·PTY 격리 실행(docker.sock). (클라우드 AI query() 실행부는 제거됨.)
   # 내부 전용(nginx_proxy 미연결). replica=1 유지. 이미지 이름 명시(샌드박스가 재사용).
   agent-worker:
     container_name: codingpt_agent_worker_dev
