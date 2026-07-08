@@ -14,6 +14,7 @@ const ptyLib = require('./pty');
 const proxyLib = require('./proxy');
 const fsRpc = require('./fs');
 const wsRpc = require('./workspace');
+const agentLib = require('./agent');
 const pkg = require('../package.json');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
@@ -95,6 +96,8 @@ function run(config) {
         }
         if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
         if (msg.method === 'net.ports') { proxyLib.listPorts().then(ok).catch(fail); return; }
+        // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
+        if (msg.method.startsWith('agent.')) { agentLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
         // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
         if (msg.method.startsWith('ws.')) { wsRpc.handle(msg.method, msg.params).then(ok).catch(fail); return; }
         fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
@@ -114,6 +117,7 @@ function run(config) {
     ws.on('close', (code, reason) => {
       if (closed) return; closed = true;
       fsRpc.stopWatch(); // 이 연결에 바인딩된 감시 정리(재접속 시 앱이 다시 watch 등록)
+      agentLib.detachAll(); // 이벤트 push 대상 해제(자식 claude 는 유지 — 재접속 시 backlog)
       console.warn(`[control] 연결 끊김 code=${code} reason=${reason || ''}`);
       if (code === 4001) { // revoked — 재페어링 필요
         console.error('[control] 서버에서 이 기기의 연결이 해제되었습니다. `pair` 를 다시 실행하세요.');
