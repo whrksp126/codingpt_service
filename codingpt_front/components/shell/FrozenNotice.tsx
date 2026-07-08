@@ -1,0 +1,23 @@
+'use client';
+
+// 웹 바이브코딩 동결 안내 — BYO 원격 조작 서비스 피벗(M0)으로 웹 AI 화면은 잠시 비활성.
+// 랜딩/구독/약관/내정보는 그대로 동작한다. 에이전트 스택을 import 하지 않는다.
+export default function FrozenNotice({ title }: { title?: string }) {
+  return (
+    <div style={{ height: '100%', minHeight: 360, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32 }}>
+      <div style={{ maxWidth: 460, textAlign: 'center' }}>
+        <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>{title || '웹 바이브코딩은 잠시 쉬어가요'}</div>
+        <p className="muted" style={{ fontSize: 14.5, lineHeight: 1.7, marginTop: 12 }}>
+          지금은 모바일에서 내 PC·서버를 원격으로 조작하는 서비스로 전환 중이에요.
+          웹 화면은 곧 새 모습으로 다시 찾아올게요.
+        </p>
+        <a
+          href="/me"
+          style={{ display: 'inline-block', marginTop: 20, textDecoration: 'none', padding: '11px 20px', borderRadius: 12, background: 'var(--cta)', color: 'var(--on-accent)', fontWeight: 700, fontSize: 14.5 }}
+        >
+          내 정보로 가기
+        </a>
+      </div>
+    </div>
+  );
+}

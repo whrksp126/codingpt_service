@@ -15,8 +15,8 @@ export default function Nav() {
       </a>
       <span style={{ flex: 1 }} />
       {authed
-        ? <><a href="/chat">코딩 시작</a><a href="/me">마이페이지</a></>
-        : <><a href="/chat">코딩 시작</a><a href="/login" className="muted">로그인</a></>}
+        ? <a href="/me">마이페이지</a>
+        : <a href="/login" className="muted">로그인</a>}
     </nav>
   );
 }
