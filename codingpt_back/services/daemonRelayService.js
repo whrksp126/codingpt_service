@@ -130,6 +130,13 @@ function registerControl(ws, device) {
     }
     if (msg.type === 'fs_event') {
       broadcastEvent(userId, { type: 'fs_event', event: msg.event, path: msg.path });
+      return;
+    }
+    if (msg.type === 'agent_event') {
+      // BYO 에이전트 이벤트(agent_init/text/tool_use/permission_request/done/…) — 앱 SSE 로 팬아웃.
+      // 순서는 데몬 seq 로 보장, 유실은 앱이 agent.backlog(sinceSeq)로 보정.
+      broadcastEvent(userId, { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event });
+      return;
     }
   });
 
@@ -180,7 +187,7 @@ function openStream(userId, kind, params) {
 
 // ── fs RPC ────────────────────────────────────────────────────────────
 // 제어 채널로 {type:'rpc'} 를 보내고 {type:'rpc_result'} 를 id 로 매칭해 Promise resolve.
-function callRpc(userId, method, params) {
+function callRpc(userId, method, params, timeoutMs) {
   const conn = connections.get(String(userId));
   if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
   const id = ++conn.rpcSeq;
@@ -188,7 +195,7 @@ function callRpc(userId, method, params) {
     const timer = setTimeout(() => {
       conn.pendingRpc.delete(id);
       reject(new Error('데몬이 응답하지 않습니다(RPC 타임아웃).'));
-    }, RPC_TIMEOUT_MS);
+    }, timeoutMs || RPC_TIMEOUT_MS);
     conn.pendingRpc.set(id, { resolve, reject, timer });
     try {
       conn.ws.send(JSON.stringify({ type: 'rpc', id, method, params: params || {} }));

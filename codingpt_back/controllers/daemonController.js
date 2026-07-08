@@ -221,6 +221,74 @@ async function wsCreate(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── BYO 에이전트(M1) — 데몬이 사용자 claude 를 spawn. 커맨드는 RPC, 이벤트는 /events SSE(agent_event). ──
+// POST /api/daemon/agent/start  body:{ cwd, prompt?, resumeId? } → { sessionId }
+async function agentStart(req, res) {
+  try {
+    const { cwd, prompt, resumeId } = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.start', { cwd: cwd || '', prompt, resumeId }, 30000);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/input  body:{ sessionId, text }
+async function agentInput(req, res) {
+  try {
+    const { sessionId, text } = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.input', { sessionId, text });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/approve  body:{ sessionId, requestId, decision, message? }
+async function agentApprove(req, res) {
+  try {
+    const { sessionId, requestId, decision, message } = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.approve', { sessionId, requestId, decision, message });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/interrupt  body:{ sessionId }
+async function agentInterrupt(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.interrupt', { sessionId: (req.body || {}).sessionId });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/stop  body:{ sessionId }
+async function agentStop(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.stop', { sessionId: (req.body || {}).sessionId });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/agent/status?sessionId=
+async function agentStatus(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.status', { sessionId: req.query.sessionId });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/agent/backlog?sessionId=&sinceSeq=  — SSE 유실 보정(이벤트 리플레이)
+async function agentBacklog(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.backlog', { sessionId: req.query.sessionId, sinceSeq: req.query.sinceSeq });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/agent/sessions?cwd=  — 이어받기 목록(~/.claude/projects 대화 로그)
+async function agentSessions(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.sessions', { cwd: req.query.cwd || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // GET /api/daemon/events  (인증) — 파일 변경 이벤트 SSE. 데몬 fs_event 를 앱으로 push.
 function streamEvents(req, res) {
   const userId = req.user && req.user.id;
@@ -314,5 +382,6 @@ module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
+  agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

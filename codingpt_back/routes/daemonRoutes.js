@@ -20,6 +20,16 @@ router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
 // 파일 변경 이벤트 SSE(앱 구독) — 데몬 chokidar → back → 앱 즉시 반영.
 router.get('/events', authMiddleware, daemonController.streamEvents);
 
+// BYO 에이전트(M1) — 데몬이 사용자 claude spawn. 커맨드는 RPC, 이벤트는 /events SSE(agent_event).
+router.post('/agent/start', authMiddleware, daemonController.agentStart);
+router.post('/agent/input', authMiddleware, daemonController.agentInput);
+router.post('/agent/approve', authMiddleware, daemonController.agentApprove);
+router.post('/agent/interrupt', authMiddleware, daemonController.agentInterrupt);
+router.post('/agent/stop', authMiddleware, daemonController.agentStop);
+router.get('/agent/status', authMiddleware, daemonController.agentStatus);
+router.get('/agent/backlog', authMiddleware, daemonController.agentBacklog);
+router.get('/agent/sessions', authMiddleware, daemonController.agentSessions);
+
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);
 router.post('/ws/root', authMiddleware, daemonController.wsSetRoot);
