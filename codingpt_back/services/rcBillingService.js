@@ -1,6 +1,10 @@
 const { Op } = require('sequelize');
 const { Payment, UserSubscription, SubscriptionPlan, sequelize } = require('../models');
 const subscriptionService = require('./subscriptionService');
+const BILLING = require('../config/billing');
+
+// 신규 구매(첫 구매/비갱신 구매) 이벤트 — 판매 중단 시 차단 대상. 갱신/플랜변경/해지취소는 기존 구독자 lifecycle.
+const NEW_PURCHASE_TYPES = new Set(['INITIAL_PURCHASE', 'NON_RENEWING_PURCHASE']);
 
 // RevenueCat(Apple App Store / Google Play) 인앱 구독 연동.
 //  - 웹훅: RC 서버가 구매/갱신/취소/만료/환불을 통지 → user_subscription 전이.
@@ -73,6 +77,10 @@ class RcBillingService {
     const type = ev.type;
 
     if (ACTIVATE_TYPES.includes(type)) {
+      // 신규 판매 중단(M0): 첫 구매/비갱신 구매만 거부. 갱신/플랜변경/해지취소는 기존 구독자라 통과.
+      if (!BILLING.SALES_OPEN && NEW_PURCHASE_TYPES.has(type)) {
+        return { ignored: 'sales_closed', type, userId };
+      }
       const plan = await this.resolvePlan({ productId: ev.product_id, entitlementIds: ev.entitlement_ids });
       if (!plan) return { ignored: 'plan_not_found', productId: ev.product_id };
       await sequelize.transaction(async (t) => {
@@ -107,6 +115,8 @@ class RcBillingService {
 
   // 앱 구매 직후 즉시 동기화 — RC REST 로 활성 entitlement 확인 후 활성화. 웹훅 지연 보정.
   async syncFromRevenueCat(userId) {
+    // 신규 판매 중단(M0): 구매 직후 즉시 활성화 경로 차단(웹훅 RENEWAL 은 기존 구독자라 별도 유지).
+    if (!BILLING.SALES_OPEN) return { active: false, reason: 'sales_closed' };
     if (!REST_KEY) throw new Error('RC_REST_API_KEY 미설정 — 스토어 결제 동기화 불가.');
     const res = await fetch(`${REST_BASE}/subscribers/${encodeURIComponent(userId)}`, {
       headers: { Authorization: `Bearer ${REST_KEY}` },

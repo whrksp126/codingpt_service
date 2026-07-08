@@ -17,6 +17,10 @@ interface SubInfo {
 }
 const fmtDate = (s?: string | null) => (s ? new Date(s).toLocaleDateString('ko-KR') : null);
 
+// 신규 구독 판매 on/off (M0 BYO 피벗). 'false' 면 비구독자 '구독하기' CTA 를 감춘다.
+// 기존 구독자의 업그레이드/다운그레이드/해지는 그대로 노출된다.
+const SALES_OPEN = process.env.NEXT_PUBLIC_SUBSCRIPTION_SALES_ENABLED !== 'false';
+
 // 구독 플랜 선택/변경 본문 (페이지 헤더 없음). /plans 페이지 + /me 의 '플랜' 패널이 공유.
 // onAfterChange: 변경 성공 시 부모가 자기 데이터를 다시 불러올 수 있게 알림.
 export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => void }) {
@@ -110,8 +114,10 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
                   <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.5 }}>앱에서 변경</button>
                 ) : isPaidNow ? (
                   <button className="btn" onClick={() => setConfirm({ plan: p, isUpgrade })} style={{ width: '100%' }}>{label}</button>
-                ) : (
+                ) : SALES_OPEN ? (
                   <CheckoutButtons code={p.code} label={label} />
+                ) : (
+                  <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.6, cursor: 'default' }}>구독 준비 중</button>
                 )}
               </div>
             </div>

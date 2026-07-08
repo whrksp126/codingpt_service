@@ -28,8 +28,12 @@ module.exports = {
   CREDIT_EXPIRY_DAYS: num(process.env.BILLING_CREDIT_EXPIRY_DAYS, 365),
 
   // 사용량 한도 강제 on/off. 기본 false — 한도/가격을 실측으로 보정하기 전엔 차단하지 않는다.
-  // true 로 켜야 agentController 프리플라이트 게이트가 429/402 를 반환한다.
   ENFORCE: String(process.env.BILLING_ENFORCE || 'false').toLowerCase() === 'true',
+
+  // 신규 구독 판매 on/off. BYO 원격 조작 서비스 피벗(M0)으로 신규 판매를 중단한다.
+  //  false 면 새 구독 생성 경로(웹 createCheckout/subscribe, IAP initial-purchase/sync)가 거부된다.
+  //  기존 구독자의 갱신·해지·플랜변경·결제수단변경은 영향 없음. (M5 에서 실행시간 과금으로 재설계.)
+  SALES_OPEN: String(process.env.SUBSCRIPTION_SALES_ENABLED || 'true').toLowerCase() === 'true',
 
   // 결제 웹 서비스 베이스 URL (한도 도달 시 앱이 유도할 업그레이드/충전 페이지)
   PAYMENT_WEB_URL: process.env.PAYMENT_WEB_URL || 'https://codingpt.ghmate.com',

@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const { Payment, SubscriptionPlan, sequelize } = require('../models');
 const portoneService = require('./portoneService');
 const subscriptionService = require('./subscriptionService');
+const BILLING = require('../config/billing');
 
 // 영수증 종류 한글 라벨
 const KIND_LABELS = {
@@ -20,6 +21,7 @@ class BillingService {
   // 구독 체크아웃 의도 생성. 서버 권위 금액으로 payment(ready) 행을 만들고
   // 웹이 PortOne 빌링키 발급창을 띄우는 데 필요한 값들을 반환한다.
   async createCheckout(userId, { type, code }) {
+    if (!BILLING.SALES_OPEN) throw new Error('현재 신규 구독 판매가 중단되었습니다.');
     if (type !== 'subscription') throw new Error('지원하지 않는 결제 유형입니다. (월 구독만 지원)');
     const plan = await subscriptionService.getPlanByCode(code);
     if (!plan || !plan.is_active) throw new Error('존재하지 않는 플랜입니다.');
@@ -181,6 +183,7 @@ class BillingService {
 
   // 구독 활성화 — 빌링키 발급 후 첫 달 청구 + 구독 활성화.
   async subscribeWithBillingKey(userId, paymentId, billingKey) {
+    if (!BILLING.SALES_OPEN) throw new Error('현재 신규 구독 판매가 중단되었습니다.');
     if (!billingKey) throw new Error('billingKey 가 필요합니다.');
     if (!portoneService.isEnabled()) throw new Error('PortOne 미설정 (PORTONE_API_SECRET).');
 
