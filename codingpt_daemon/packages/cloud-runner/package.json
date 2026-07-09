@@ -1,0 +1,20 @@
+{
+  "name": "@codingpt/cloud-runner",
+  "version": "0.1.0",
+  "description": "CodingPT 클라우드 러너 부트스트랩 — 격리 컨테이너에서 runner-core 를 env 주입 설정으로 구동(아웃바운드 연결)",
+  "main": "index.js",
+  "bin": {
+    "codingpt-cloud-runner": "index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@codingpt/runner-core": "*"
+  }
+}
