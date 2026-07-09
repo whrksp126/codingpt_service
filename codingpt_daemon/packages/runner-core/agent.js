@@ -308,10 +308,11 @@ function listSessions(absCwd) {
   return out;
 }
 
-// ── 온보딩 점검(agent.doctor) — 크레덴셜은 절대 열람하지 않는다 ──────
-// 설치 여부(claude/tmux)만 확인한다. **로그인 여부는 자동 점검하지 않는다**:
-// BYO 원칙상 우리는 사용자 크레덴셜(Keychain·~/.claude OAuth)을 읽지 않으며,
-// 로그인은 사용자 자신이 수행한다(첫 세션이 성공하면 로그인된 것으로 확인).
+// ── 온보딩 점검(agent.doctor) — 크레덴셜(토큰)은 절대 열람하지 않는다 ──────
+// 설치 여부(claude/tmux) + 로그인 여부를 확인한다. 로그인 확인은 claude **자체의**
+// `auth status`(비밀 아닌 loggedIn/계정 라벨만 리턴)로만 한다 — 우리가 Keychain·
+// ~/.claude OAuth 토큰 파일을 직접 열지 않는다. (M5 Slice2: 클라우드 러너는 사용자가
+// 컨테이너 안에서 자기 claude 에 직접 로그인해야 첫 턴이 가능하므로 실제 점검이 필요.)
 function detectClaude() {
   try {
     const version = execFileSync(CLAUDE_BIN, ['--version'], { encoding: 'utf-8', timeout: 4000 }).trim();
@@ -326,9 +327,87 @@ function doctor() {
     claude: detectClaude(),                                  // {installed, version, bin}
     tmux: { installed: !!tmuxPath, path: tmuxPath || null }, // brew install tmux
     platform: process.platform,
-    // 로그인은 크레덴셜 미열람 원칙상 자동 점검 대상 아님(사용자 소유). 첫 세션 성공으로 확인.
-    login: { probed: false },
+    // 로그인 상태 = claude 자체 `auth status`(토큰 미노출) 결과. 크레덴셜 파일은 우리가 열지 않는다.
+    login: { probed: true, ...safeStatus(authStatus()) },
   };
+}
+
+// ── BYO 로그인(M5 Slice2) — 사용자 자신의 claude 계정에 컨테이너/PC 에서 로그인 ──
+// claude **자체의** `auth login` OAuth 플로우를 PTY 로 구동한다. 우리 역할은 (1) CLI 가
+// 출력하는 인증 URL 캡처 → 앱 인앱브라우저로 중계, (2) 사용자가 콜백페이지에서 복사한
+// 인증 코드를 되받아 CLI stdin 에 입력하는 것뿐이다. 크레덴셜(토큰)은 그 러너의
+// CLAUDE_CONFIG_DIR(컨테이너/PC)에만 안착하며 우리는 읽지도 옮기지도 않는다.
+const OAUTH_URL_RE = /(https?:\/\/[^\s'"]*oauth\/authorize[^\s'"]*)/i;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function stripAnsi(s) { return String(s).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g, ''); }
+
+let loginState = null; // { proc, buf, url, exited, exitCode, onData }
+
+function endLogin() {
+  if (loginState && loginState.proc) { try { loginState.proc.kill(); } catch (_) { /* noop */ } }
+  loginState = null;
+}
+
+// claude 자체 상태 리포트(auth status --json) — 토큰은 노출되지 않고 loggedIn + 계정 라벨만.
+function authStatus() {
+  try {
+    const out = execFileSync(CLAUDE_BIN, ['auth', 'status', '--json'], { encoding: 'utf-8', timeout: 6000 });
+    return JSON.parse(out);
+  } catch (e) {
+    const out = e && e.stdout ? String(e.stdout) : ''; // 비로그인 시 non-zero exit + stdout 에 json
+    try { return JSON.parse(out); } catch (_) { return { loggedIn: false }; }
+  }
+}
+function safeStatus(st) {
+  st = st || {};
+  return { loggedIn: !!st.loggedIn, authMethod: st.authMethod || null, email: st.email || null, subscriptionType: st.subscriptionType || null };
+}
+
+// 로그인 시작 → 인증 URL 캡처. PTY 를 살려두고 코드 입력(agent.loginSubmit)을 기다린다.
+async function startLogin({ useConsole } = {}) {
+  endLogin();
+  const nodePty = require('node-pty');
+  const args = ['auth', 'login', useConsole ? '--console' : '--claudeai'];
+  // BROWSER=true → CLI 가 브라우저 대신 `true`(무동작)를 실행 → 데스크톱에서도 탭이 안 열림.
+  //  컨테이너엔 브라우저가 없어 어차피 "visit: <URL>" 폴백만 출력된다.
+  const proc = nodePty.spawn(CLAUDE_BIN, args, {
+    name: 'xterm-256color', cols: 100, rows: 30, cwd: runtime.root(),
+    env: { ...process.env, BROWSER: 'true' },
+  });
+  const state = { proc, buf: '', url: null, exited: false, exitCode: null, onData: null };
+  loginState = state;
+  proc.onData((d) => { state.buf += d; if (state.buf.length > 40000) state.buf = state.buf.slice(-40000); if (state.onData) state.onData(); });
+  proc.onExit(({ exitCode }) => { state.exited = true; state.exitCode = exitCode; if (state.onData) state.onData(); });
+  const url = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { state.onData = null; reject(new Error('로그인 URL 대기 시간 초과')); }, 20000);
+    const check = () => {
+      const m = stripAnsi(state.buf).match(OAUTH_URL_RE);
+      if (m) { clearTimeout(timer); state.onData = null; state.url = m[1]; resolve(m[1]); return; }
+      if (state.exited) { clearTimeout(timer); state.onData = null; reject(new Error('로그인 프로세스가 URL 출력 전에 종료되었습니다.')); }
+    };
+    state.onData = check; check();
+  });
+  return { url, authMethod: useConsole ? 'console' : 'claude.ai' };
+}
+
+// 앱에서 받은 인증 코드를 CLI stdin 에 입력 → 로그인 완료. 진위는 auth status 로 확정.
+async function submitLoginCode(code) {
+  if (!loginState || !loginState.proc || loginState.exited) { const e = new Error('진행 중인 로그인 세션이 없습니다. 로그인을 다시 시작하세요.'); e.code = 'NO_LOGIN'; throw e; }
+  const state = loginState;
+  const marker = state.buf.length;
+  try { state.proc.write(String(code || '').trim() + '\r'); } catch (_) { /* noop */ }
+  const deadline = Date.now() + 40000;
+  while (Date.now() < deadline) {
+    await sleep(1500);
+    const st = authStatus();
+    if (st.loggedIn) { endLogin(); return { ok: true, status: safeStatus(st) }; }
+    const tail = stripAnsi(state.buf).slice(marker);
+    if (/invalid|incorrect|not\s*valid|expired|failed|error/i.test(tail)) { return { ok: false, message: '코드가 유효하지 않거나 만료되었습니다.' }; }
+    if (state.exited) break;
+  }
+  const st = authStatus();
+  if (st.loggedIn) { endLogin(); return { ok: true, status: safeStatus(st) }; }
+  return { ok: false, message: '로그인을 완료하지 못했습니다. 다시 시도하세요.' };
 }
 
 // ── RPC 디스패치 (control.js 에서 호출) ─────────────────────────────
@@ -389,6 +468,11 @@ async function handle(method, params, ws) {
       return { sessions: listSessions(absCwd) };
     }
     case 'agent.doctor': return doctor();
+    // BYO 로그인(Slice2) — 크레덴셜은 이 러너의 CLAUDE_CONFIG_DIR 에만 안착, 우리는 미열람.
+    case 'agent.login': return startLogin({ useConsole: !!p.useConsole });
+    case 'agent.loginSubmit': return submitLoginCode(p.code);
+    case 'agent.loginCancel': { endLogin(); return { ok: true }; }
+    case 'agent.loginStatus': return safeStatus(authStatus());
     default: { const e = new Error('알 수 없는 agent 메서드: ' + method); throw e; }
   }
 }

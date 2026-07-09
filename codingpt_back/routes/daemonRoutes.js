@@ -37,6 +37,11 @@ router.get('/agent/status', authMiddleware, daemonController.agentStatus);
 router.get('/agent/backlog', authMiddleware, daemonController.agentBacklog);
 router.get('/agent/sessions', authMiddleware, daemonController.agentSessions);
 router.get('/agent/doctor', authMiddleware, daemonController.agentDoctor);
+// BYO 로그인(M5 Slice2) — 활성 러너(클라우드 컨테이너)에서 사용자 claude 계정 로그인. URL/코드만 중계.
+router.post('/agent/login', authMiddleware, daemonController.agentLogin);
+router.post('/agent/login/submit', authMiddleware, daemonController.agentLoginSubmit);
+router.post('/agent/login/cancel', authMiddleware, daemonController.agentLoginCancel);
+router.get('/agent/login/status', authMiddleware, daemonController.agentLoginStatus);
 
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);

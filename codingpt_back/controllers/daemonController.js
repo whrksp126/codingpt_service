@@ -362,6 +362,49 @@ async function agentDoctor(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── BYO 로그인(M5 Slice2) — 활성 러너(주로 클라우드 컨테이너)에서 사용자 claude 계정 로그인 ──
+// 크레덴셜(토큰)은 그 러너의 CLAUDE_CONFIG_DIR 에만 안착. 우리는 인증 URL/코드만 중계한다.
+// runnerId 를 주면 특정 러너로, 없으면 활성 러너로 라우팅(핸드오프 후 클라우드가 활성).
+
+// POST /api/daemon/agent/login  { runnerId?, useConsole? } — 로그인 시작, 인증 URL 반환.
+async function agentLogin(req, res) {
+  try {
+    const b = req.body || {};
+    const opts = b.runnerId != null ? { runnerId: b.runnerId } : undefined;
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.login', { useConsole: !!b.useConsole }, 25000, opts);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/login/submit  { runnerId?, code } — 인증 코드 제출 → 로그인 완료.
+async function agentLoginSubmit(req, res) {
+  try {
+    const b = req.body || {};
+    const opts = b.runnerId != null ? { runnerId: b.runnerId } : undefined;
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.loginSubmit', { code: b.code }, 45000, opts);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/agent/login/cancel  { runnerId? } — 진행 중인 로그인 취소.
+async function agentLoginCancel(req, res) {
+  try {
+    const b = req.body || {};
+    const opts = b.runnerId != null ? { runnerId: b.runnerId } : undefined;
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.loginCancel', {}, 8000, opts);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/agent/login/status  (runnerId?) — 러너의 claude 로그인 상태(토큰 미노출).
+async function agentLoginStatus(req, res) {
+  try {
+    const opts = req.query.runnerId != null ? { runnerId: req.query.runnerId } : undefined;
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.loginStatus', {}, 8000, opts);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // GET /api/daemon/events  (인증) — 파일 변경 이벤트 SSE. 데몬 fs_event 를 앱으로 push.
 function streamEvents(req, res) {
   const userId = req.user && req.user.id;
@@ -457,5 +500,6 @@ module.exports = {
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
+  agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };
