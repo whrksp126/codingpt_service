@@ -150,6 +150,12 @@ function registerControl(ws, device) {
       maybePush(userId, msg.sessionId, msg.event); // M3-3: 앱이 안 보고 있을 때만 푸시
       return;
     }
+    if (msg.type === 'sync_event') {
+      // 동기화 이벤트(sync_status/sync_progress/sync_conflict) — 앱에 팬아웃.
+      //  버퍼링하지 않는다(오래된 sync_conflict 리플레이로 해결된 충돌 시트가 되살아나는 것 방지).
+      fanoutSyncEvent(userId, msg.event);
+      return;
+    }
   });
 
   const cleanup = () => {
@@ -238,6 +244,16 @@ function broadcastEvent(userId, payload) {
   if (!set || set.size === 0) return;
   const line = 'data: ' + JSON.stringify(payload) + '\n\n';
   for (const res of set) { try { res.write(line); } catch (_) { /* noop */ } }
+}
+
+// 동기화 이벤트 팬아웃 — SSE(폴백) + WSS(현재 구독) 양쪽에 즉시 전달(버퍼/리플레이 없음).
+//  프레임 형태 {type:'sync_event', event} — 앱은 이 type 을 보고 sync UI(진행/충돌 시트)를 갱신.
+function fanoutSyncEvent(userId, event) {
+  const payload = { type: 'sync_event', event };
+  broadcastEvent(userId, payload); // SSE
+  const key = String(userId);
+  const set = agentWsClients.get(key);
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
 
 // 앱이 지금 이벤트를 받고 있는가(WSS 또는 SSE 연결됨) — foreground 판정 근사치.

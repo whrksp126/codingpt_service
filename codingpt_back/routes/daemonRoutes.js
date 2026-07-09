@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
 const daemonController = require('../controllers/daemonController');
+const syncController = require('../controllers/syncController');
 
 // BYO-PC 데몬 — 페어링/상태/터미널. ws 업그레이드(/connect, /stream, /terminal)는 app.js 에서 처리.
 router.post('/pair/code', authMiddleware, daemonController.createPairCode);
@@ -42,6 +43,13 @@ router.post('/ws/root', authMiddleware, daemonController.wsSetRoot);
 router.post('/ws/root/default', authMiddleware, daemonController.wsUseDefaultRoot);
 router.post('/ws/create', authMiddleware, daemonController.wsCreate);
 router.post('/ws/clone', authMiddleware, daemonController.wsClone); // GitHub 레포 git clone → 로컬 워크스페이스
+
+// 동기화(M4) — objectstore git-bundle 체크포인트/머티리얼라이즈/충돌. 데몬 오프라인이면 409.
+router.post('/sync/checkpoint', authMiddleware, syncController.checkpoint);
+router.post('/sync/materialize', authMiddleware, syncController.materialize);
+router.get('/sync/status', authMiddleware, syncController.status);
+router.post('/sync/resolve', authMiddleware, syncController.resolve);
+router.get('/sync/checkpoints', authMiddleware, syncController.listCheckpoints);
 
 // 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).
 router.get('/preview/ports', authMiddleware, daemonController.previewPorts);
