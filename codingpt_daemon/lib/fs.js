@@ -20,6 +20,7 @@ const HIDDEN_DIRS = new Set([
   'Library', 'Applications', '.Trash', '.npm', '.cargo', '.rustup', 'go',
 ]);
 const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB 초과 텍스트는 편집 대상에서 제외
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 이미지 미리보기 base64 상한
 // 목록/트리에 노출할 점파일(대부분의 점파일은 숨기되 흔한 편집 대상만 화이트리스트).
 const SHOWN_DOTFILES = new Set([
   '.env', '.gitignore', '.gitattributes', '.eslintrc', '.prettierrc', '.babelrc',
@@ -124,15 +125,67 @@ async function tree(params) {
 }
 
 // fs.read — 텍스트 파일 내용. 바이너리/초과 크기는 편집 불가로 표시.
+//  base64:true 면 원본 바이트를 base64 로 반환(이미지 미리보기 — 바이너리도 허용).
 async function read(params) {
   const abs = safeResolve(params?.path || '');
   const st = await fsp.stat(abs);
   if (st.isDirectory()) throw new Error('디렉토리는 열 수 없습니다.');
+  if (params?.base64) {
+    if (st.size > MAX_IMAGE_BYTES) return { path: relOf(abs), tooLarge: true, size: st.size };
+    const buf = await fsp.readFile(abs);
+    return { path: relOf(abs), base64: buf.toString('base64'), size: st.size };
+  }
   if (st.size > MAX_READ_BYTES) return { path: relOf(abs), tooLarge: true, size: st.size };
   const buf = await fsp.readFile(abs);
   // NUL 바이트가 있으면 바이너리로 간주.
   if (buf.includes(0)) return { path: relOf(abs), binary: true, size: st.size };
   return { path: relOf(abs), content: buf.toString('utf8'), size: st.size };
+}
+
+// fs.grep — 프로젝트 폴더(path) 아래 텍스트 파일에서 리터럴(대소문자 무시) 검색.
+//  결과 path 는 검색 루트(path) 기준 상대경로 → IDE 트리 키와 동일해 바로 openFile 가능.
+const GREP_MAX_RESULTS = 300;
+const GREP_MAX_FILE_BYTES = 1024 * 1024;
+const GREP_MAX_SCAN_FILES = 5000;
+async function grep(params) {
+  const baseRel = (params?.path || '').replace(/^\/+|\/+$/g, '');
+  const q = String(params?.query || '');
+  if (!q.trim()) return { matches: [], truncated: false };
+  const rootAbs = safeResolve(baseRel);
+  const st = await fsp.stat(rootAbs);
+  if (!st.isDirectory()) throw new Error('폴더가 아닙니다.');
+  const relToRoot = (abs) => path.relative(rootAbs, abs).split(path.sep).join('/');
+  const lowerQ = q.toLowerCase();
+  const matches = [];
+  let truncated = false;
+  let scanned = 0;
+  const walk = async (absDir, depth) => {
+    if (truncated || depth > TREE_MAX_DEPTH) return;
+    let entries;
+    try { entries = await fsp.readdir(absDir, { withFileTypes: true }); } catch (_) { return; }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      if (truncated) return;
+      if (e.name.startsWith('.') && !isShownDotfile(e.name)) continue;
+      const abs = path.join(absDir, e.name);
+      if (e.isDirectory()) { if (HIDDEN_DIRS.has(e.name)) continue; await walk(abs, depth + 1); continue; }
+      if (!isTextFile(e.name)) continue;
+      if (++scanned > GREP_MAX_SCAN_FILES) { truncated = true; return; }
+      let st2; try { st2 = await fsp.stat(abs); } catch (_) { continue; }
+      if (st2.size > GREP_MAX_FILE_BYTES) continue;
+      let text; try { text = await fsp.readFile(abs, 'utf8'); } catch (_) { continue; }
+      if (text.indexOf('\0') >= 0) continue; // 바이너리
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const idx = lines[i].toLowerCase().indexOf(lowerQ);
+        if (idx < 0) continue;
+        matches.push({ path: relToRoot(abs), line: i + 1, col: idx + 1, text: lines[i].slice(0, 300) });
+        if (matches.length >= GREP_MAX_RESULTS) { truncated = true; return; }
+      }
+    }
+  };
+  await walk(rootAbs, 0);
+  return { matches, truncated };
 }
 
 // fs.write — 텍스트 저장(존재하는 파일만 P1; 신규 생성은 P1 후반/워크스페이스에서).
@@ -179,6 +232,7 @@ async function handle(method, params) {
     case 'fs.tree': return tree(params);
     case 'fs.read': return read(params);
     case 'fs.write': return write(params);
+    case 'fs.grep': return grep(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }

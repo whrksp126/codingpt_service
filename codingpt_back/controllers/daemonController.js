@@ -155,10 +155,18 @@ async function fsTree(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// GET /api/daemon/fs/read?path=  (인증) — 텍스트 파일 내용
+// GET /api/daemon/fs/read?path=&base64=1  (인증) — 텍스트 파일 내용(base64=1 이면 이미지 등 원본 바이트)
 async function fsRead(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.read', { path: req.query.path || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.read', { path: req.query.path || '', base64: req.query.base64 === '1' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// GET /api/daemon/fs/grep?path=&q=  (인증) — 프로젝트 폴더 내 리터럴(대소문자무시) 검색
+async function fsGrep(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.grep', { path: req.query.path || '', query: req.query.q || '' }, 20000);
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -388,7 +396,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
-  fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
+  fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,

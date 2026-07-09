@@ -14,6 +14,7 @@ router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 router.get('/fs/list', authMiddleware, daemonController.fsList);
 router.get('/fs/tree', authMiddleware, daemonController.fsTree);
 router.get('/fs/read', authMiddleware, daemonController.fsRead);
+router.get('/fs/grep', authMiddleware, daemonController.fsGrep);
 router.post('/fs/write', authMiddleware, daemonController.fsWrite);
 router.post('/fs/watch', authMiddleware, daemonController.fsWatch);
 router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
