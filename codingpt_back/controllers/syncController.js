@@ -11,11 +11,12 @@ function mapErr(res, e) {
   return errorResponse(res, e, (e && e.statusCode) || 500);
 }
 
-// POST /api/daemon/sync/checkpoint  body:{ workspaceId, reason?, includeAgentSession? }
+// POST /api/daemon/sync/checkpoint  body:{ workspaceId, reason?, includeAgentSession?, cwd? }
+//  cwd 는 역방향 핸드오프(클라우드 실폴더서 스냅샷)용 오버라이드. 미지정=ws.localPath.
 async function checkpoint(req, res) {
   try {
-    const { workspaceId, reason, includeAgentSession } = req.body || {};
-    const result = await syncService.checkpoint(req.user.id, workspaceId, { reason, includeAgentSession });
+    const { workspaceId, reason, includeAgentSession, cwd } = req.body || {};
+    const result = await syncService.checkpoint(req.user.id, workspaceId, { reason, includeAgentSession, cwd });
     return successResponse(res, result);
   } catch (e) { return mapErr(res, e); }
 }

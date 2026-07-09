@@ -46,7 +46,9 @@ async function saveManifest(wsId, manifest) {
 }
 
 // ── checkpoint ───────────────────────────────────────────────────────────
-async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession = true } = {}) {
+//  cwd: 스냅샷 대상 폴더(데몬 홈-기준 상대). 미지정=ws.localPath(로컬 러너). 역방향 핸드오프에선
+//   활성=클라우드일 때 클라우드 실폴더(예 슬러그 'foo'=/workspace/foo)를 넘겨 그쪽에서 찍는다.
+async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession = true, cwd } = {}) {
   const ws = await requireLocalWorkspace(userId, wsId);
   const ckptId = newCheckpointId();
   const bKey = bundleKey(wsId, ckptId);
@@ -55,9 +57,9 @@ async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession
     bundle: await s3Service.getSignedPutUrl(bKey),
     session: await s3Service.getSignedPutUrl(sKey),
   };
-  // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드.
+  // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드. cwd 는 활성 러너 홈-기준 상대.
   const result = await daemonRelayService.callRpc(userId, 'sync.checkpoint', {
-    cwd: ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession,
+    cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession,
   }, RPC_TIMEOUT);
 
   // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).

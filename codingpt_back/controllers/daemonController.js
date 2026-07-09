@@ -11,6 +11,7 @@
 const crypto = require('crypto');
 const { DaemonDevice } = require('../models');
 const daemonRelayService = require('../services/daemonRelayService');
+const cloudRunnerService = require('../services/cloudRunnerService');
 const { successResponse, errorResponse } = require('../utils/response');
 
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000;
@@ -105,17 +106,55 @@ async function getStatus(req, res) {
   }
 }
 
-// POST /api/daemon/runner/activate  (인증) body:{ runnerId } → 활성 러너 전환(핸드오프, M5)
+// POST /api/daemon/runner/activate  (인증) body:{ runnerId } 또는 { kind:'local'|'cloud' } → 활성 러너 전환(핸드오프, M5)
 //  로컬↔클라우드 러너가 둘 다 연결돼 있을 때 RPC/스트림 라우팅 대상을 바꾼다.
+//  kind 로 주면 그 종류의 연결된 러너를 골라 활성화(앱이 status 왕복 없이 전환).
 async function activateRunner(req, res) {
   try {
-    const runnerId = Number(req.body && req.body.runnerId);
-    if (!runnerId) return errorResponse(res, new Error('runnerId 가 필요합니다.'), 400);
+    const b = req.body || {};
+    let runnerId = Number(b.runnerId);
+    if (!runnerId && (b.kind === 'local' || b.kind === 'cloud')) {
+      const match = daemonRelayService.listRunners(req.user.id).find((r) => r.kind === b.kind);
+      if (!match) return errorResponse(res, new Error(`연결된 ${b.kind} 러너가 없습니다.`), 409);
+      runnerId = match.deviceId;
+    }
+    if (!runnerId) return errorResponse(res, new Error('runnerId 또는 kind 가 필요합니다.'), 400);
     const ok = daemonRelayService.setActiveRunner(req.user.id, runnerId);
     if (!ok) return errorResponse(res, new Error('해당 러너가 연결되어 있지 않습니다.'), 409);
     return successResponse(res, { active: runnerId, runners: daemonRelayService.listRunners(req.user.id) });
   } catch (e) {
     return errorResponse(res, e, 500);
+  }
+}
+
+// POST /api/daemon/runner/cloud/ensure  (인증) body:{ workspaceId } → 클라우드 러너 확보(핸드오프 진입점, M5 Slice4)
+//  (user,workspace)별 cloud DaemonDevice 프로비저닝 + 컨테이너 기동. docker.sock 없으면(로컬 dev)
+//  graceful: launched=false·needsManualRun=true 로 반환하고 back 콘솔에 수동 docker run 힌트를 남긴다.
+//  deviceToken 원문은 앱에 반환하지 않는다(컨테이너 env 주입용). 앱은 runnerId 로 연결 대기→activate.
+async function ensureCloudRunner(req, res) {
+  try {
+    const workspaceId = (req.body && req.body.workspaceId) || null;
+    if (!workspaceId) return errorResponse(res, new Error('workspaceId 가 필요합니다.'), 400);
+    const { deviceId, deviceToken } = await cloudRunnerService.provisionDevice(req.user.id, { workspaceId, deviceName: '클라우드 러너' });
+    const volumeName = `cpt-vol-${req.user.id}-${String(workspaceId).replace(/[^A-Za-z0-9_.-]/g, '')}`;
+    let launched = false;
+    let needsManualRun = false;
+    try {
+      await cloudRunnerService.launchContainer(req.user.id, { deviceToken, deviceName: '클라우드 러너', workspaceId, volumeName });
+      launched = true;
+    } catch (e) {
+      // docker.sock 미가용(로컬 dev): 명시 503 또는 소켓 연결 실패(ENOENT/ECONNREFUSED) → graceful 수동 기동.
+      const noDocker = e && (e.statusCode === 503 || e.code === 'ENOENT' || e.code === 'ECONNREFUSED' || /docker\.sock/i.test(e.message || ''));
+      if (noDocker) {
+        needsManualRun = true;
+        const net = process.env.CLOUD_RUNNER_NETWORK || 'codingpt_service_codingpt_local';
+        // 개발자 수동 기동용 힌트(토큰은 콘솔에만, 응답엔 안 실림).
+        console.log(`[cloudRunner] docker.sock 미가용 — 수동 기동:\n  docker run -d --rm --name cpt-runner-${req.user.id}-${deviceId} --network ${net} -e RUNNER_SERVER_URL=${process.env.CLOUD_RUNNER_SERVER_URL || 'http://back:5300'} -e RUNNER_TOKEN=${deviceToken} ${cloudRunnerService.RUNNER_IMAGE}`);
+      } else { throw e; }
+    }
+    return successResponse(res, { runnerId: deviceId, launched, needsManualRun });
+  } catch (e) {
+    return errorResponse(res, e, (e && e.statusCode) || 500);
   }
 }
 
@@ -495,7 +534,7 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
-  createPairCode, claimPairCode, getStatus, revokeDevice, activateRunner, startTerminal,
+  createPairCode, claimPairCode, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,

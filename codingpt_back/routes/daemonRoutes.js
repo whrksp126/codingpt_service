@@ -9,7 +9,8 @@ router.post('/pair/code', authMiddleware, daemonController.createPairCode);
 router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 일회용 코드가 비밀
 router.get('/status', authMiddleware, daemonController.getStatus);
 router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
-router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프)
+router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)
+router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloudRunner); // M5 Slice4: 클라우드 러너 확보(핸드오프 진입점)
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 router.get('/terminal/list', authMiddleware, daemonController.terminalList);
 router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
