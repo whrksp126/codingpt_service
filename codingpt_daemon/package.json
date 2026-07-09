@@ -1,23 +1,19 @@
 {
-  "name": "@codingpt/daemon",
+  "name": "@codingpt/runner-monorepo",
   "version": "0.1.0",
-  "description": "CodingPT PC 에이전트 — 사용자 PC의 터미널/파일/프리뷰를 모바일 앱으로 릴레이하는 데몬",
-  "main": "index.js",
-  "bin": {
-    "codingpt-daemon": "index.js"
-  },
+  "description": "CodingPT 러너 모노레포 — runner-core(공유) + daemon(로컬) + cloud-runner(클라우드)",
+  "private": true,
+  "workspaces": [
+    "packages/runner-core",
+    "packages/daemon",
+    "packages/cloud-runner"
+  ],
   "scripts": {
-    "start": "node index.js run",
-    "postinstall": "node -e \"const fs=require('fs'),p='node_modules/node-pty/prebuilds/'+process.platform+'-'+process.arch+'/spawn-helper';try{fs.chmodSync(p,0o755)}catch(e){}\""
+    "daemon": "node packages/daemon/index.js",
+    "daemon:run": "node packages/daemon/index.js run"
   },
   "engines": {
     "node": ">=18"
   },
-  "license": "UNLICENSED",
-  "private": true,
-  "dependencies": {
-    "chokidar": "^3.6.0",
-    "node-pty": "^1.0.0",
-    "ws": "^8.18.0"
-  }
+  "license": "UNLICENSED"
 }

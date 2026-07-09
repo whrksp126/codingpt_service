@@ -16,7 +16,6 @@ const fsRpc = require('./fs');
 const wsRpc = require('./workspace');
 const agentLib = require('./agent');
 const syncLib = require('./sync');
-const pkg = require('../package.json');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
 const BACKOFF_MIN_MS = 1000;
@@ -48,7 +47,8 @@ function run(config) {
         type: 'hello',
         deviceName: config.deviceName || os.hostname(),
         platform: process.platform,
-        daemonVersion: pkg.version,
+        daemonVersion: config.daemonVersion || 'unknown',
+        clientType: config.clientType || 'daemon',
       }));
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
     });

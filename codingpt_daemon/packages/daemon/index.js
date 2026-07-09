@@ -12,7 +12,8 @@
  */
 const os = require('os');
 const readline = require('readline');
-const configLib = require('./lib/config');
+const runnerCore = require('@codingpt/runner-core');
+const configLib = runnerCore.config;
 const pkg = require('./package.json');
 
 const DEFAULT_SERVER = 'https://codingpt-back.ghmate.com';
@@ -69,7 +70,7 @@ function cmdRun() {
   }
   console.log(`CodingPT 데몬 v${pkg.version} — ${config.deviceName} → ${config.serverUrl}`);
   console.log(`로컬에서 같은 터미널 보기: tmux -L codingpt attach -t codingpt`);
-  require('./lib/control').run(config);
+  runnerCore.control.run({ ...config, daemonVersion: pkg.version });
 }
 
 function cmdStatus() {
@@ -78,7 +79,7 @@ function cmdStatus() {
   console.log(`서버:     ${config.serverUrl}`);
   console.log(`deviceId: ${config.deviceId}`);
   console.log(`기기명:   ${config.deviceName}`);
-  const tmux = require('./lib/pty').findTmux();
+  const tmux = runnerCore.pty.findTmux();
   console.log(`tmux:     ${tmux || '❌ 미설치 (brew install tmux)'}`);
 }
 
@@ -93,7 +94,7 @@ function cmdSetup() {
   const path = require('path');
   const fs = require('fs');
   const { execFile } = require('child_process');
-  const wsLib = require('./lib/workspace');
+  const wsLib = runnerCore.workspace;
   const dir = path.join(os.homedir(), wsLib.DEFAULT_ROOT_REL);
   try { fs.mkdirSync(dir, { recursive: true }); console.log(`✅ 권장 워크스페이스 폴더: ${dir}`); }
   catch (e) { console.error(`폴더 생성 실패: ${e.message}`); }
@@ -106,7 +107,7 @@ function cmdSetup() {
     execFile('open', ['x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles'], () => {});
   }
   console.log('');
-  const tmux = require('./lib/pty').findTmux();
+  const tmux = runnerCore.pty.findTmux();
   console.log(`tmux: ${tmux || '❌ 미설치 → brew install tmux'}`);
   const cfg = configLib.load();
   console.log(`페어링: ${cfg && cfg.deviceToken ? '✅ 완료' : '❌ 아직 → node index.js pair --server <URL>'}`);
