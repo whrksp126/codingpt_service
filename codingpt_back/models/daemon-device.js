@@ -8,6 +8,10 @@ module.exports = (sequelize, DataTypes) => {
     platform: { type: DataTypes.STRING(32), allowNull: true }, // darwin/win32/linux
     daemon_version: { type: DataTypes.STRING(32), allowNull: true },
     token_hash: { type: DataTypes.STRING(64), allowNull: false, unique: true }, // sha256(deviceToken)
+    runner_kind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'local' }, // local(PC 데몬) | cloud(격리 컨테이너) — M5
+    container_id: { type: DataTypes.STRING(128), allowNull: true }, // cloud: 도커 컨테이너 id
+    workspace_id: { type: DataTypes.STRING(64), allowNull: true }, // cloud: 바인딩된 워크스페이스
+    dormant_at: { type: DataTypes.DATE, allowNull: true }, // cloud: 동면(scale-to-zero) 시각
     last_seen_at: { type: DataTypes.DATE, allowNull: true }, // 제어 WS 마지막 생존 시각
     revoked_at: { type: DataTypes.DATE, allowNull: true }, // 연결 해제(재페어링 필요)
     created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
