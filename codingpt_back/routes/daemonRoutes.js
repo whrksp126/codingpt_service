@@ -41,6 +41,7 @@ router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);
 router.post('/ws/root', authMiddleware, daemonController.wsSetRoot);
 router.post('/ws/root/default', authMiddleware, daemonController.wsUseDefaultRoot);
 router.post('/ws/create', authMiddleware, daemonController.wsCreate);
+router.post('/ws/clone', authMiddleware, daemonController.wsClone); // GitHub 레포 git clone → 로컬 워크스페이스
 
 // 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).
 router.get('/preview/ports', authMiddleware, daemonController.previewPorts);

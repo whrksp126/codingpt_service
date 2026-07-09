@@ -259,6 +259,17 @@ async function wsCreate(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// POST /api/daemon/ws/clone  (인증) body:{ url, name? } — GitHub 레포를 루트 아래로 git clone
+//  url 검증은 데몬(ws.clone)이 화이트리스트로 수행. clone 은 네트워크 fetch라 넉넉한 타임아웃(120s).
+async function wsClone(req, res) {
+  try {
+    const url = (req.body && req.body.url) || '';
+    const name = (req.body && req.body.name) || '';
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.clone', { url, name }, 120000);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // ── BYO 에이전트(M1) — 데몬이 사용자 claude 를 spawn. 커맨드는 RPC, 이벤트는 /events SSE(agent_event). ──
 // POST /api/daemon/agent/start  body:{ cwd, prompt?, resumeId? } → { sessionId }
 async function agentStart(req, res) {
@@ -428,7 +439,7 @@ module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
-  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
+  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

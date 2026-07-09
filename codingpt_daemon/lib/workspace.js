@@ -36,13 +36,33 @@ function slugify(name) {
 }
 
 // git 시스템 명령 실행(절대 바이너리 탐색 대신 PATH 의 git, timeout 가드).
-function runGit(args, cwd) {
+//  timeout: clone 처럼 네트워크 fetch 가 있는 명령은 넉넉히(기본 15s).
+function runGit(args, cwd, timeout = 15000) {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, timeout: 15000 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd, timeout }, (err, stdout, stderr) => {
       // git 미설치/실패해도 스캐폴드 자체는 성공으로 본다(폴더+파일은 만들어짐).
       resolve({ ok: !err, out: String(stdout || ''), err: String(stderr || (err && err.message) || '') });
     });
   });
+}
+
+// GitHub clone URL 검증 — https + github.com 호스트만 허용(SSRF/내부주소 clone 방지).
+//  execFile 이라 셸 인젝션은 원천 없지만, 임의 URL clone 은 막는다. 반환: 정규화된 https URL.
+function normalizeGithubUrl(raw) {
+  const s = String(raw || '').trim();
+  let u;
+  try { u = new URL(s); } catch (_) { throw new Error('올바른 GitHub 저장소 주소가 아닙니다.'); }
+  if (u.protocol !== 'https:') throw new Error('https 주소만 지원합니다.');
+  if (u.hostname.toLowerCase() !== 'github.com') throw new Error('github.com 저장소만 열 수 있습니다.');
+  // 경로는 /<owner>/<repo>(.git)? 형태여야 한다.
+  const m = u.pathname.replace(/^\/+/, '').replace(/\.git$/, '').split('/');
+  if (m.length !== 2 || !m[0] || !m[1]) throw new Error('저장소 경로가 올바르지 않습니다.');
+  const owner = m[0];
+  const repo = m[1];
+  if (!/^[A-Za-z0-9._-]+$/.test(owner) || !/^[A-Za-z0-9._-]+$/.test(repo)) {
+    throw new Error('저장소 경로에 허용되지 않은 문자가 있습니다.');
+  }
+  return { url: `https://github.com/${owner}/${repo}.git`, owner, repo };
 }
 
 // 현재 지정된 워크스페이스 루트(홈-기준 상대). 없거나 더 이상 폴더가 아니면 null.
@@ -107,14 +127,48 @@ async function create(params) {
   return { path: fsLib.relOf(dirAbs), name: name || slug, slug, gitInit: git.ok };
 }
 
+// GitHub 레포를 루트 아래로 clone. 루트 미지정이면 권장 위치를 자동 생성/지정(매끄러운 진입).
+//  compute:'local' 워크스페이스로 등록될 폴더를 결정적으로 만든다. AI 자격증명 무접촉(순수 git clone).
+async function clone(params) {
+  const { url, owner, repo } = normalizeGithubUrl(params && params.url);
+
+  // 루트 확보 — 없으면 권장 위치(~/CodingPT/workspaces, TCC 프롬프트 없음)를 자동 지정.
+  let cfg = configLib.load() || {};
+  if (typeof cfg.workspaceRoot !== 'string') {
+    await useDefaultRoot();
+    cfg = configLib.load() || {};
+  }
+  const rootAbs = fsLib.safeResolve(cfg.workspaceRoot);
+  const rootSt = await fsp.stat(rootAbs).catch(() => null);
+  if (!rootSt || !rootSt.isDirectory()) throw new Error('워크스페이스 루트 폴더가 없습니다. 다시 지정해 주세요.');
+
+  // 폴더 이름 — 사용자 지정 name 우선, 없으면 레포명. 충돌 시 -2/-3 …
+  const base = slugify((params && params.name) || repo);
+  let slug = base;
+  let n = 2;
+  while (fs.existsSync(path.join(rootAbs, slug))) { slug = `${base}-${n}`; n += 1; }
+  const dirAbs = fsLib.safeResolve(path.join(fsLib.relOf(rootAbs), slug)); // jail 재검증
+
+  // git clone <url> <dir> — 네트워크 fetch라 넉넉한 타임아웃(120s). execFile 이라 셸 인젝션 없음.
+  const git = await runGit(['clone', url, dirAbs], rootAbs, 120000);
+  if (!git.ok) {
+    // 실패 시 부분 생성된 폴더 정리(있으면).
+    await fsp.rm(dirAbs, { recursive: true, force: true }).catch(() => {});
+    throw new Error(git.err ? `clone 실패: ${git.err.split('\n').slice(-3).join(' ').trim()}` : 'clone 에 실패했습니다.');
+  }
+
+  return { path: fsLib.relOf(dirAbs), name: (params && params.name) || repo, slug, owner, repo };
+}
+
 async function handle(method, params) {
   switch (method) {
     case 'ws.getRoot': return getRoot();
     case 'ws.setRoot': return setRoot(params);
     case 'ws.useDefaultRoot': return useDefaultRoot();
     case 'ws.create': return create(params);
+    case 'ws.clone': return clone(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }
 
-module.exports = { handle, getRoot, setRoot, useDefaultRoot, create, slugify, DEFAULT_ROOT_REL };
+module.exports = { handle, getRoot, setRoot, useDefaultRoot, create, clone, slugify, DEFAULT_ROOT_REL };

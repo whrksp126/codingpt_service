@@ -64,6 +64,32 @@ async function getGithubUser(token) {
   return { id: data.id, login: data.login, avatarUrl: data.avatar_url };
 }
 
+// 사용자 레포 목록 조회(최근 업데이트순). "GitHub에서 열기"의 레포 피커 소스.
+// scope=public_repo 이면 공개 레포만 반환된다(비공개는 scope 'repo' 필요 — 후속).
+async function listRepos(token, { page = 1, perPage = 50 } = {}) {
+  const client = api(token);
+  const { data } = await client.get('/user/repos', {
+    params: {
+      sort: 'updated',
+      per_page: Math.min(Math.max(perPage | 0, 1), 100),
+      page: Math.max(page | 0, 1),
+      affiliation: 'owner,collaborator',
+    },
+  });
+  return (Array.isArray(data) ? data : []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    fullName: r.full_name,
+    private: !!r.private,
+    defaultBranch: r.default_branch || 'main',
+    cloneUrl: r.clone_url, // https://github.com/<owner>/<repo>.git
+    htmlUrl: r.html_url,
+    description: r.description || null,
+    language: r.language || null,
+    updatedAt: r.updated_at || r.pushed_at || null,
+  }));
+}
+
 // 레포 조회 → 없으면 생성. 반환: { owner, repo, fullName, defaultBranch, htmlUrl }
 async function getOrCreateRepo(token, repoName, { description } = {}) {
   const client = api(token);
@@ -174,6 +200,7 @@ module.exports = {
   getAuthorizeUrl,
   exchangeCodeForToken,
   getGithubUser,
+  listRepos,
   getOrCreateRepo,
   commitFiles,
   slugifySegment,

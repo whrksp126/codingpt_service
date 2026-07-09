@@ -94,6 +94,23 @@ const status = async (req, res) => {
   }
 };
 
+// GET /api/github/repos  (auth) — 연동된 사용자의 레포 목록(레포 피커용)
+const repos = async (req, res) => {
+  try {
+    const token = await githubConnectionService.getDecryptedToken(req.user.id);
+    if (!token) {
+      return errorResponse(res, new Error('GitHub 계정이 연결되어 있지 않습니다.'), 409);
+    }
+    const page = parseInt(req.query.page, 10) || 1;
+    const perPage = parseInt(req.query.perPage, 10) || 50;
+    const list = await githubService.listRepos(token, { page, perPage });
+    successResponse(res, { repos: list });
+  } catch (error) {
+    console.error('GitHub repos 조회 오류:', error);
+    errorResponse(res, error, 500);
+  }
+};
+
 // DELETE /api/github/disconnect  (auth)
 const disconnect = async (req, res) => {
   try {
@@ -118,4 +135,4 @@ const push = async (req, res) => {
   }
 };
 
-module.exports = { authorize, callback, status, disconnect, push };
+module.exports = { authorize, callback, status, repos, disconnect, push };
