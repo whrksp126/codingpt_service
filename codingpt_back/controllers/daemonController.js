@@ -89,6 +89,8 @@ async function getStatus(req, res) {
         daemonVersion: conn.daemonVersion,
         connectedAt: new Date(conn.connectedAt).toISOString(),
       } : null,
+      runners: daemonRelayService.listRunners(userId), // M5: 연결된 러너 목록(local+cloud), active 표식
+
       devices: devices.map((d) => ({
         deviceId: d.id,
         deviceName: d.device_name,
