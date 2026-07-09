@@ -15,6 +15,7 @@ const proxyLib = require('./proxy');
 const fsRpc = require('./fs');
 const wsRpc = require('./workspace');
 const agentLib = require('./agent');
+const syncLib = require('./sync');
 const pkg = require('../package.json');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
@@ -100,6 +101,8 @@ function run(config) {
         if (msg.method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(msg.method, msg.params).then(ok).catch(fail); return; }
         // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
         if (msg.method.startsWith('agent.')) { agentLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
+        // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
+        if (msg.method.startsWith('sync.')) { syncLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
         // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
         if (msg.method.startsWith('ws.')) { wsRpc.handle(msg.method, msg.params).then(ok).catch(fail); return; }
         fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
