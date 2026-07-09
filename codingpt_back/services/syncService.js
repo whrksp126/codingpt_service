@@ -60,6 +60,12 @@ async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession
     cwd: ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession,
   }, RPC_TIMEOUT);
 
+  // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
+  if (result && result.skipped) {
+    const manifest = await loadManifest(wsId);
+    return { skipped: true, unchanged: true, checkpointId: result.checkpointId || (manifest.head && manifest.head.checkpointId) || null, head: manifest.head || null };
+  }
+
   const at = new Date().toISOString();
   const entry = {
     id: ckptId, reason, at,

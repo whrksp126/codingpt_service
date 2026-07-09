@@ -38,6 +38,9 @@ function emitSync(event) {
 
 // 진행 중 충돌 상태(resolve 에서 사용): conflictId → { targetAbs, localHead, incomingCommit, base, files, branch }
 const conflicts = new Map();
+// 자동 체크포인트 중복제거(M4-2): abs → { tree, id, commit }. WIP 트리가 직전 체크포인트와 같으면 skip.
+//  (턴종료/주기/전환직전 트리거가 자유롭게 발사돼도 변경 없으면 번들/업로드를 안 만든다.)
+const lastCheckpoint = new Map();
 
 // git 실행 — env 주입(GIT_INDEX_FILE 등)·종료코드 포착(merge-tree 는 exit 1 로 충돌을 알린다).
 function git(args, opts = {}) {
@@ -162,6 +165,16 @@ async function checkpoint(p) {
   const wt = await git(['write-tree'], { cwd: abs, env });
   if (!wt.ok) { await fsp.rm(idxFile, { force: true }).catch(() => {}); throw new Error('write-tree 실패: ' + wt.err.slice(0, 200)); }
   const tree = wt.out.trim();
+
+  // 중복제거: 직전 체크포인트와 WIP 트리가 같으면 새 번들/업로드를 만들지 않고 skip.
+  //  (자동 트리거가 변경 없이 반복돼도 무의미한 체크포인트가 쌓이지 않게.)
+  const prev = lastCheckpoint.get(abs);
+  if (prev && prev.tree === tree) {
+    await fsp.rm(idxFile, { force: true }).catch(() => {});
+    emitSync({ type: 'sync_status', state: 'clean', head: prev.commit, base, lastCheckpointId: prev.id });
+    return { checkpointId: prev.id, baseCommit: base, commit: prev.commit, sizeBytes: 0, hasSession: false, excluded: [], skipped: true, unchanged: true };
+  }
+
   const ctArgs = ['commit-tree', tree, '-m', `codingpt checkpoint ${p.reason || 'manual'}`];
   if (base) { ctArgs.push('-p', base); }
   const ct = await git(ctArgs, { cwd: abs, env: botEnv({ GIT_INDEX_FILE: idxFile }) });
@@ -190,6 +203,7 @@ async function checkpoint(p) {
   if (sessionBuf) await httpsPut(p.putUrls.session, sessionBuf);
 
   await fsp.rm(bundleFile, { force: true }).catch(() => {});
+  lastCheckpoint.set(abs, { tree, id, commit }); // 다음 자동 트리거의 중복제거 기준.
 
   const result = {
     checkpointId: id,
