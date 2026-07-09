@@ -289,6 +289,14 @@ async function agentSessions(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// GET /api/daemon/agent/doctor  — 온보딩 점검(claude/tmux 설치 여부). 데몬이 크레덴셜은 열람하지 않음.
+async function agentDoctor(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agent.doctor', {}, 8000);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // GET /api/daemon/events  (인증) — 파일 변경 이벤트 SSE. 데몬 fs_event 를 앱으로 push.
 function streamEvents(req, res) {
   const userId = req.user && req.user.id;
@@ -382,6 +390,6 @@ module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
-  agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions,
+  agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

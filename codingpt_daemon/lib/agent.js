@@ -16,7 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const fsLib = require('./fs');
 
 const CLAUDE_BIN = process.env.CODINGPT_CLAUDE_BIN || 'claude';
@@ -253,6 +253,29 @@ function listSessions(absCwd) {
   return out;
 }
 
+// ── 온보딩 점검(agent.doctor) — 크레덴셜은 절대 열람하지 않는다 ──────
+// 설치 여부(claude/tmux)만 확인한다. **로그인 여부는 자동 점검하지 않는다**:
+// BYO 원칙상 우리는 사용자 크레덴셜(Keychain·~/.claude OAuth)을 읽지 않으며,
+// 로그인은 사용자 자신이 수행한다(첫 세션이 성공하면 로그인된 것으로 확인).
+function detectClaude() {
+  try {
+    const version = execFileSync(CLAUDE_BIN, ['--version'], { encoding: 'utf-8', timeout: 4000 }).trim();
+    return { installed: true, version, bin: CLAUDE_BIN };
+  } catch (e) {
+    return { installed: false, version: null, bin: CLAUDE_BIN, error: (e && (e.code || e.message)) || 'unknown' };
+  }
+}
+function doctor() {
+  const tmuxPath = require('./pty').findTmux();
+  return {
+    claude: detectClaude(),                                  // {installed, version, bin}
+    tmux: { installed: !!tmuxPath, path: tmuxPath || null }, // brew install tmux
+    platform: process.platform,
+    // 로그인은 크레덴셜 미열람 원칙상 자동 점검 대상 아님(사용자 소유). 첫 세션 성공으로 확인.
+    login: { probed: false },
+  };
+}
+
 // ── RPC 디스패치 (control.js 에서 호출) ─────────────────────────────
 async function handle(method, params, ws) {
   pushWs = ws; // 최신 제어 WS 로 이벤트 push 대상 갱신
@@ -306,6 +329,7 @@ async function handle(method, params, ws) {
       const absCwd = fsLib.safeResolve(p.cwd || '');
       return { sessions: listSessions(absCwd) };
     }
+    case 'agent.doctor': return doctor();
     default: { const e = new Error('알 수 없는 agent 메서드: ' + method); throw e; }
   }
 }

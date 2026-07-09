@@ -29,6 +29,7 @@ router.post('/agent/stop', authMiddleware, daemonController.agentStop);
 router.get('/agent/status', authMiddleware, daemonController.agentStatus);
 router.get('/agent/backlog', authMiddleware, daemonController.agentBacklog);
 router.get('/agent/sessions', authMiddleware, daemonController.agentSessions);
+router.get('/agent/doctor', authMiddleware, daemonController.agentDoctor);
 
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);
