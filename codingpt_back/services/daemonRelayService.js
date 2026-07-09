@@ -19,6 +19,7 @@
  */
 const crypto = require('crypto');
 const http = require('http');
+const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
 
@@ -29,6 +30,8 @@ const RPC_TIMEOUT_MS = 15 * 1000; // fs RPC 응답 대기
 const TERM_TOKEN_TTL_MS = 60 * 60 * 1000; // 앱 터미널 토큰 1시간(접근 시 갱신)
 const PING_INTERVAL_MS = 30 * 1000; // Cloudflare 유휴 WS ~100s 컷 대비
 const LAST_SEEN_FLUSH_MS = 60 * 1000; // last_seen_at DB 반영 주기
+const AGENT_BUF_MAX = 1000;             // 채널별 롤링 버퍼 상한(계약 §2.3)
+const AGENT_BUF_TTL_MS = 5 * 60 * 1000; // 또는 최근 5분(둘 중 큰 쪽 유지)
 
 // userId(str) → { deviceId, deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt, rpcSeq, pendingRpc }
 const connections = new Map();
@@ -38,6 +41,11 @@ const pendingStreams = new Map();
 const termTokens = new Map();
 // userId(str) → Set<res>  파일 변경 이벤트 SSE 구독자(앱). 데몬 fs_event 를 여기로 broadcast.
 const eventClients = new Map();
+// ── 에이전트 이벤트 채널(M3-1) — WSS 다중화 + 롤링 버퍼(리플레이) ──
+// userId(str) → { seq, items:[{rseq, at, payload}] }  릴레이 롤링 버퍼(agent 채널). SSE 와 병행.
+const agentBuf = new Map();
+// userId(str) → Set<ws>  에이전트 이벤트 WSS 구독자(앱).
+const agentWsClients = new Map();
 
 const SECRET = process.env.PREVIEW_TOKEN_SECRET || process.env.JWT_SECRET || 'cpt-preview-secret';
 
@@ -133,9 +141,11 @@ function registerControl(ws, device) {
       return;
     }
     if (msg.type === 'agent_event') {
-      // BYO 에이전트 이벤트(agent_init/text/tool_use/permission_request/done/…) — 앱 SSE 로 팬아웃.
-      // 순서는 데몬 seq 로 보장, 유실은 앱이 agent.backlog(sinceSeq)로 보정.
-      broadcastEvent(userId, { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event });
+      // BYO 에이전트 이벤트(agent_init/text/tool_use/permission_request/done/…) — 앱에 팬아웃.
+      // 순서는 데몬 seq(세션별)로 보장. M3-1: SSE(기존)와 WSS(버퍼+리플레이) 양쪽으로 내보낸다.
+      const payload = { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event };
+      broadcastEvent(userId, payload);   // SSE(기존, 폴백)
+      pushAgentEvent(userId, payload);   // WSS 버퍼 + 라이브(리플레이용 rseq 부여)
       return;
     }
   });
@@ -226,6 +236,69 @@ function broadcastEvent(userId, payload) {
   if (!set || set.size === 0) return;
   const line = 'data: ' + JSON.stringify(payload) + '\n\n';
   for (const res of set) { try { res.write(line); } catch (_) { /* noop */ } }
+}
+
+// ── 에이전트 이벤트 채널(M3-1): 롤링 버퍼 + WSS 라이브 ──
+// 데몬 agent_event 를 릴레이 순번(rseq)과 함께 버퍼에 넣고, 접속 중인 WSS 구독자에게 즉시 보낸다.
+// 버퍼는 앱이 백그라운드/재접속 사이 놓친 이벤트를 attach(lastRseq) 로 리플레이하는 데 쓴다.
+function pushAgentEvent(userId, payload) {
+  const key = String(userId);
+  let buf = agentBuf.get(key);
+  if (!buf) { buf = { seq: 0, items: [] }; agentBuf.set(key, buf); }
+  const rseq = ++buf.seq;
+  const at = Date.now();
+  buf.items.push({ rseq, at, payload });
+  // 트리밍: 최근 1,000건 또는 5분(둘 중 큰 쪽) — 오래되고 상한 초과분만 버린다.
+  const cutoff = at - AGENT_BUF_TTL_MS;
+  while (buf.items.length > AGENT_BUF_MAX && buf.items[0].at < cutoff) buf.items.shift();
+  const frame = JSON.stringify({ ...payload, rseq });
+  const set = agentWsClients.get(key);
+  if (set) for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } }
+  return rseq;
+}
+
+// GET /api/daemon/agent/stream?token=<JWT> 업그레이드(앱→back). 에이전트 이벤트 WSS 구독.
+//  WebSocket 은 Authorization 헤더를 못 실으므로 access token 을 쿼리로 받아 검증한다.
+function handleAgentStreamUpgrade(token, req, socket, head) {
+  let userId;
+  try {
+    const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
+    userId = decoded && (decoded.id || decoded.userId);
+  } catch (_) { userId = null; }
+  if (!userId) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+  wss.handleUpgrade(req, socket, head, (ws) => registerAgentWs(ws, String(userId)));
+}
+
+function registerAgentWs(ws, userId) {
+  let set = agentWsClients.get(userId);
+  if (!set) { set = new Set(); agentWsClients.set(userId, set); }
+  set.add(ws);
+  const ka = setInterval(() => { try { if (ws.readyState === WebSocket.OPEN) ws.ping(); } catch (_) { /* noop */ } }, PING_INTERVAL_MS);
+  ws.on('message', (data) => {
+    let msg; try { msg = JSON.parse(data.toString()); } catch (_) { return; }
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'attach') {
+      // lastRseq 이후 버퍼 이벤트를 순서대로 리플레이한 뒤 attach_ack(headRseq).
+      //  lastRseq < 0 = "지금부터"(첫 구독) → 리플레이 안 함(과거 세션/이미 본 이벤트 재적용 방지).
+      //  재접속 시엔 앱이 마지막으로 받은 rseq 를 보내 놓친 구간만 채운다.
+      const buf = agentBuf.get(userId);
+      const raw = Number(msg.lastRseq);
+      const since = Number.isFinite(raw) ? raw : 0;
+      if (buf && since >= 0) for (const it of buf.items) {
+        if (it.rseq > since) { try { ws.send(JSON.stringify({ ...it.payload, rseq: it.rseq })); } catch (_) { /* noop */ } }
+      }
+      try { ws.send(JSON.stringify({ type: 'attach_ack', headRseq: buf ? buf.seq : 0 })); } catch (_) { /* noop */ }
+      return;
+    }
+    // ack 는 MVP 에선 keepalive 로만 취급(버퍼 트리밍은 상한/TTL 로 처리).
+  });
+  const cleanup = () => {
+    clearInterval(ka);
+    const s = agentWsClients.get(userId);
+    if (s) { s.delete(ws); if (s.size === 0) agentWsClients.delete(userId); }
+  };
+  ws.on('close', cleanup);
+  ws.on('error', cleanup);
 }
 
 // GET /api/daemon/stream/:streamToken 업그레이드(데몬→back).
@@ -414,6 +487,7 @@ module.exports = {
   handleControlUpgrade,
   handleStreamUpgrade,
   handleAppTerminalUpgrade,
+  handleAgentStreamUpgrade,
   openStream,
   callRpc,
   issueTerminalToken,

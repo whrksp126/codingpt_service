@@ -200,6 +200,13 @@ const startServer = async () => {
         daemonRelayService.handleStreamUpgrade(dsm[1], req, socket, head);
         return;
       }
+      // BYO-PC 데몬 — 에이전트 이벤트 WSS(M3-1, JWT=쿼리 토큰). SSE(/events)와 병행.
+      const asm = url.match(/^\/api\/daemon\/agent\/stream(?:\?|$)/);
+      if (asm) {
+        const token = new URLSearchParams(url.split('?')[1] || '').get('token') || '';
+        daemonRelayService.handleAgentStreamUpgrade(token, req, socket, head);
+        return;
+      }
       // BYO-PC 데몬 — 앱 터미널(불투명 토큰, /api/daemon/terminal/start 에서 발급)
       const dtm = url.match(/^\/api\/daemon\/terminal\/([^/?]+)/);
       if (dtm) {
