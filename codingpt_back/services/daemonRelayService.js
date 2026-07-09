@@ -22,6 +22,7 @@ const http = require('http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
+const pushService = require('./pushService');
 
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -146,6 +147,7 @@ function registerControl(ws, device) {
       const payload = { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event };
       broadcastEvent(userId, payload);   // SSE(기존, 폴백)
       pushAgentEvent(userId, payload);   // WSS 버퍼 + 라이브(리플레이용 rseq 부여)
+      maybePush(userId, msg.sessionId, msg.event); // M3-3: 앱이 안 보고 있을 때만 푸시
       return;
     }
   });
@@ -236,6 +238,30 @@ function broadcastEvent(userId, payload) {
   if (!set || set.size === 0) return;
   const line = 'data: ' + JSON.stringify(payload) + '\n\n';
   for (const res of set) { try { res.write(line); } catch (_) { /* noop */ } }
+}
+
+// 앱이 지금 이벤트를 받고 있는가(WSS 또는 SSE 연결됨) — foreground 판정 근사치.
+function hasActiveClient(userId) {
+  const key = String(userId);
+  const ws = agentWsClients.get(key);
+  const sse = eventClients.get(key);
+  return !!((ws && ws.size) || (sse && sse.size));
+}
+
+// M3-3: 핵심 3종(done/permission_request/crashed) 발생 시, 앱이 안 보고 있으면 푸시.
+//  RUNNER_OFFLINE 은 푸시 아님(연결 인디케이터). 앱 연결 중이면 라이브로 보므로 스킵.
+const PUSH_KIND = { done: 'done', permission_request: 'permission_request', error: 'crashed' };
+const PUSH_TITLE = { done: '작업이 끝났어요', permission_request: '승인이 필요해요', crashed: '에이전트에 문제가 생겼어요' };
+function maybePush(userId, sessionId, event) {
+  if (!event || !event.type) return;
+  const kind = PUSH_KIND[event.type];
+  if (!kind) return;
+  if (hasActiveClient(userId)) return; // 앱이 연결돼 라이브로 보는 중 → 푸시 불필요
+  const sid = sessionId || '';
+  pushService.sendToUser(userId, {
+    kind, sessionId: sid, title: PUSH_TITLE[kind],
+    deeplink: `codingpt://session/${encodeURIComponent(sid)}?kind=${kind}`,
+  }).catch(() => { /* fire-and-forget */ });
 }
 
 // ── 에이전트 이벤트 채널(M3-1): 롤링 버퍼 + WSS 라이브 ──

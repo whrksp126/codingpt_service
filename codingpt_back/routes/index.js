@@ -22,6 +22,7 @@ const subscriptionRoutes = require('./subscriptionRoutes');
 const billingRoutes = require('./billingRoutes');
 const onboardingRoutes = require('./onboardingRoutes');
 const daemonRoutes = require('./daemonRoutes');
+const pushRoutes = require('./pushRoutes');
 
 // API 라우트 설정
 router.use('/users', userRoutes);
@@ -46,6 +47,7 @@ router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태
 router.use('/billing', billingRoutes); // 충전/결제/크레딧
 router.use('/onboarding', onboardingRoutes); // 온보딩 설문(익명)
 router.use('/daemon', daemonRoutes); // BYO-PC 데몬 페어링/상태(ws 업그레이드는 app.js 에서)
+router.use('/push', pushRoutes); // 푸시 기기 등록/해제(M3-3)
 // 한시적 호환 alias — 구버전 앱(/api/projects) 대비. 신규 코드는 /workspaces 사용.
 router.use('/projects', workspaceRoutes);
 
