@@ -21,7 +21,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const WebSocket = require('ws');
 const nodePty = require('node-pty');
 const fsLib = require('./fs');
@@ -134,4 +134,58 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   ws.on('error', (e) => console.error(`[pty] 스트림 WS 오류: ${e.message}`));
 }
 
-module.exports = { openPtyStream, findTmux, TMUX_SOCKET, TMUX_SESSION };
+// ── 멀티 터미널(tmux window) RPC ──
+// 클라우드(ideService)와 동일한 "window 스위칭" 모델을 데몬에서 미러한다: 앱의 단일 PTY 스트림이
+// 세션에 attach 돼 있고, 여기서 select-window 로 활성 window 를 바꾸면 그 클라이언트가 따라 그린다.
+// → 토큰/스트림/bridge 는 전혀 손대지 않고 window 관리 RPC 만 추가. 전용 소켓 -L codingpt 규율 유지.
+function runTmux(args) {
+  return new Promise((resolve, reject) => {
+    const tmux = findTmux();
+    if (!tmux) return reject(new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)'));
+    const env = { ...process.env };
+    delete env.TMUX; // 데몬이 tmux/cmux 안에서 돌아도 전용 소켓 조작 가능하게 중첩 가드 해제
+    execFile(tmux, ['-L', TMUX_SOCKET, ...args], { env, timeout: 5000 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error((String(stderr || err.message || '')).trim() || 'tmux 오류'));
+      resolve(String(stdout || ''));
+    });
+  });
+}
+
+// terminal.list/new/select/close — 진입 워크스페이스(cwd)에 해당하는 tmux 세션의 window 를 관리.
+async function handleTerminalRpc(method, params) {
+  const { session, abs } = sessionForCwd(params && params.cwd);
+  if (method === 'terminal.list') {
+    let out;
+    try {
+      out = await runTmux(['list-windows', '-t', session, '-F', '#{window_index}\t#{window_active}\t#{pane_current_command}']);
+    } catch (_) {
+      return { windows: [] }; // 세션 미존재(스트림 미개설) → 빈 목록
+    }
+    const windows = out.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean).map((l) => {
+      const parts = l.split('\t');
+      return { index: parseInt(parts[0], 10) || 0, active: parts[1] === '1', command: (parts.slice(2).join('\t') || '').trim() };
+    });
+    return { windows };
+  }
+  if (method === 'terminal.new') {
+    try {
+      const out = await runTmux(['new-window', '-t', session, '-c', abs, '-P', '-F', '#{window_index}']);
+      return { index: parseInt(out.trim(), 10) || 0 };
+    } catch (_) {
+      // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach). conf 는 서버 시작 시점에만 유효.
+      const out = await runTmux(['-f', TMUX_CONF, 'new-session', '-d', '-s', session, '-c', abs, '-P', '-F', '#{window_index}']);
+      return { index: parseInt(out.trim(), 10) || 0 };
+    }
+  }
+  if (method === 'terminal.select') {
+    await runTmux(['select-window', '-t', `${session}:${(params && params.index) | 0}`]);
+    return { ok: true };
+  }
+  if (method === 'terminal.close') {
+    await runTmux(['kill-window', '-t', `${session}:${(params && params.index) | 0}`]);
+    return { ok: true };
+  }
+  throw new Error('unknown terminal method: ' + method);
+}
+
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, TMUX_SOCKET, TMUX_SESSION };

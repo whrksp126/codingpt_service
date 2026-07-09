@@ -96,6 +96,8 @@ function run(config) {
         }
         if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
         if (msg.method === 'net.ports') { proxyLib.listPorts().then(ok).catch(fail); return; }
+        // 멀티 터미널(tmux window) — terminal.list/new/select/close.
+        if (msg.method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(msg.method, msg.params).then(ok).catch(fail); return; }
         // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
         if (msg.method.startsWith('agent.')) { agentLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
         // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).

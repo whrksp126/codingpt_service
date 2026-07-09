@@ -131,6 +131,36 @@ async function startTerminal(req, res) {
   }
 }
 
+// ── 멀티 터미널(tmux window) 관리 — 스트림과 별개의 RPC. 데몬이 -L codingpt 세션의 window 를 조작 ──
+// GET /api/daemon/terminal/list?cwd=  (인증) → { windows:[{index,active,command}] }
+async function terminalList(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.list', { cwd: req.query.cwd || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/terminal/new  (인증) body:{ cwd } → { index }
+async function terminalNew(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/terminal/select  (인증) body:{ cwd, index } → { ok }
+async function terminalSelect(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0 });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/terminal/close  (인증) body:{ cwd, index } → { ok }
+async function terminalClose(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0 });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // 데몬 오프라인 시 통일된 409.
 function mapRpcError(res, e) {
   if (e.message === 'DAEMON_OFFLINE') {
@@ -396,6 +426,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
+  terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,

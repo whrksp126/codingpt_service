@@ -9,6 +9,10 @@ router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 일
 router.get('/status', authMiddleware, daemonController.getStatus);
 router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
+router.get('/terminal/list', authMiddleware, daemonController.terminalList);
+router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
+router.post('/terminal/select', authMiddleware, daemonController.terminalSelect);
+router.post('/terminal/close', authMiddleware, daemonController.terminalClose);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 router.get('/fs/list', authMiddleware, daemonController.fsList);
