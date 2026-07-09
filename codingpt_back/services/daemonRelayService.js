@@ -34,8 +34,43 @@ const LAST_SEEN_FLUSH_MS = 60 * 1000; // last_seen_at DB 반영 주기
 const AGENT_BUF_MAX = 1000;             // 채널별 롤링 버퍼 상한(계약 §2.3)
 const AGENT_BUF_TTL_MS = 5 * 60 * 1000; // 또는 최근 5분(둘 중 큰 쪽 유지)
 
-// userId(str) → { deviceId, deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt, rpcSeq, pendingRpc }
+// userId(str) → { runners: Map(deviceId → conn), activeRunnerId }  (M5: 로컬+클라우드 러너 다중화)
+//   conn = { deviceId, kind:'local'|'cloud', deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt, rpcSeq, pendingRpc }
+//   MVP 원칙 "한 번에 하나의 활성 타겟" → 러너별로 연결은 유지하되 RPC/스트림은 activeRunnerId 로만 라우팅.
+//   핸드오프(Slice4)가 setActiveRunner 로 활성 러너를 전환한다.
 const connections = new Map();
+
+// 사용자 엔트리 확보(없으면 생성).
+function userEntry(userId, create) {
+  const key = String(userId);
+  let e = connections.get(key);
+  if (!e && create) { e = { runners: new Map(), activeRunnerId: null }; connections.set(key, e); }
+  return e || null;
+}
+// RPC/스트림 대상 러너 선택 — 기본은 활성 러너. opts.runnerId/opts.kind 로 특정 러너 지정 가능.
+function pickConn(userId, opts) {
+  const e = userEntry(userId, false);
+  if (!e || e.runners.size === 0) return null;
+  if (opts && opts.runnerId != null) return e.runners.get(Number(opts.runnerId)) || null;
+  if (opts && opts.kind) { for (const c of e.runners.values()) if (c.kind === opts.kind) return c; return null; }
+  return e.runners.get(e.activeRunnerId) || null;
+}
+// 활성 러너 전환(핸드오프). 대상 러너가 연결돼 있어야 성공.
+function setActiveRunner(userId, runnerId) {
+  const e = userEntry(userId, false);
+  if (!e || !e.runners.has(Number(runnerId))) return false;
+  e.activeRunnerId = Number(runnerId);
+  return true;
+}
+// 연결된 러너 목록(상태/핸드오프 UI 용).
+function listRunners(userId) {
+  const e = userEntry(userId, false);
+  if (!e) return [];
+  return [...e.runners.values()].map((c) => ({
+    deviceId: c.deviceId, kind: c.kind, deviceName: c.deviceName,
+    platform: c.platform, active: c.deviceId === e.activeRunnerId, connectedAt: c.connectedAt,
+  }));
+}
 // streamToken → { userId, kind, resolve, reject, timer }
 const pendingStreams = new Map();
 // 앱 터미널 토큰 → { userId, expiresAt }
@@ -74,12 +109,14 @@ async function handleControlUpgrade(req, socket, head) {
 
 function registerControl(ws, device) {
   const userId = String(device.user_id);
-  // 같은 사용자의 기존 연결은 교체(데몬 재시작/재접속) — 새 연결이 항상 이긴다.
-  const prev = connections.get(userId);
-  if (prev) { try { prev.ws.close(4000, 'replaced'); } catch (_) { /* noop */ } }
+  const entry = userEntry(userId, true);
+  // 같은 기기(deviceId) 재접속만 교체 — 다른 종류 러너(로컬↔클라우드)는 공존시킨다.
+  const prevSame = entry.runners.get(device.id);
+  if (prevSame) { try { prevSame.ws.close(4000, 'replaced'); } catch (_) { /* noop */ } entry.runners.delete(device.id); }
 
   const conn = {
     deviceId: device.id,
+    kind: device.runner_kind || 'local',
     deviceName: device.device_name,
     platform: device.platform,
     daemonVersion: device.daemon_version,
@@ -89,8 +126,10 @@ function registerControl(ws, device) {
     rpcSeq: 0,
     pendingRpc: new Map(), // id → { resolve, reject, timer }
   };
-  connections.set(userId, conn);
-  console.log(`[daemonRelay] 데몬 연결 userId=${userId} device=${device.device_name}(#${device.id})`);
+  entry.runners.set(device.id, conn);
+  // 활성 러너가 없거나 죽었으면 이 러너를 활성으로(로컬-우선 기본 동작 보존). 핸드오프는 명시적으로만.
+  if (entry.activeRunnerId == null || !entry.runners.has(entry.activeRunnerId)) entry.activeRunnerId = device.id;
+  console.log(`[daemonRelay] 러너 연결 userId=${userId} kind=${conn.kind} device=${device.device_name}(#${device.id}) active=${entry.activeRunnerId}`);
   touchLastSeen(conn, true);
 
   let alive = true;
@@ -163,9 +202,15 @@ function registerControl(ws, device) {
     // 미해결 RPC 는 실패로 정리(무한 대기 방지).
     for (const [, p] of conn.pendingRpc) { clearTimeout(p.timer); try { p.reject(new Error('DAEMON_OFFLINE')); } catch (_) { /* noop */ } }
     conn.pendingRpc.clear();
-    if (connections.get(userId) === conn) {
-      connections.delete(userId);
-      console.log(`[daemonRelay] 데몬 연결 종료 userId=${userId} aliveMs=${Date.now() - conn.connectedAt}`);
+    const entry = connections.get(userId);
+    if (entry && entry.runners.get(conn.deviceId) === conn) {
+      entry.runners.delete(conn.deviceId);
+      // 활성 러너가 끊겼으면 남은 러너로 이전(있으면), 없으면 null.
+      if (entry.activeRunnerId === conn.deviceId) {
+        entry.activeRunnerId = entry.runners.size ? entry.runners.keys().next().value : null;
+      }
+      if (entry.runners.size === 0) connections.delete(userId);
+      console.log(`[daemonRelay] 러너 연결 종료 userId=${userId} kind=${conn.kind} device=#${conn.deviceId} aliveMs=${Date.now() - conn.connectedAt} 남은러너=${entry.runners.size}`);
     }
     DaemonDevice.update({ last_seen_at: new Date() }, { where: { id: conn.deviceId } }).catch(() => { /* noop */ });
   };
@@ -183,8 +228,8 @@ function touchLastSeen(conn, force) {
 // ── 스트림(dial-back) ─────────────────────────────────────────────────
 
 // 제어 채널로 stream_open 지시 → 데몬이 /api/daemon/stream/:token 으로 다이얼 → 그 WS resolve.
-function openStream(userId, kind, params) {
-  const conn = connections.get(String(userId));
+function openStream(userId, kind, params, opts) {
+  const conn = pickConn(userId, opts); // 기본=활성 러너
   if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
   const streamToken = 'ds-' + crypto.randomBytes(18).toString('hex');
   return new Promise((resolve, reject) => {
@@ -205,8 +250,8 @@ function openStream(userId, kind, params) {
 
 // ── fs RPC ────────────────────────────────────────────────────────────
 // 제어 채널로 {type:'rpc'} 를 보내고 {type:'rpc_result'} 를 id 로 매칭해 Promise resolve.
-function callRpc(userId, method, params, timeoutMs) {
-  const conn = connections.get(String(userId));
+function callRpc(userId, method, params, timeoutMs, opts) {
+  const conn = pickConn(userId, opts); // 기본=활성 러너(로컬/클라우드). opts.runnerId/kind 로 특정 러너 지정.
   if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
   const id = ++conn.rpcSeq;
   return new Promise((resolve, reject) => {
@@ -360,7 +405,7 @@ function termTokenFor(userId) {
 
 // POST /api/daemon/terminal/start 에서 호출(인증 후). 데몬 오프라인이면 throw.
 function issueTerminalToken(userId, cwd) {
-  if (!connections.has(String(userId))) {
+  if (!pickConn(userId)) { // 활성 러너 없으면 오프라인
     const err = new Error('PC 데몬이 연결되어 있지 않습니다.');
     err.statusCode = 409;
     throw err;
@@ -427,13 +472,15 @@ function bridge(aWs, bWs, label) {
 
 // ── 상태 조회/강제 종료 ───────────────────────────────────────────────
 
+// 활성 러너 conn 반환(상태 표시용 — deviceName/platform/connectedAt). 없으면 null.
 function getConnection(userId) {
-  return connections.get(String(userId)) || null;
+  return pickConn(userId) || null;
 }
 
 function disconnectDevice(deviceId) {
-  for (const [, conn] of connections) {
-    if (conn.deviceId === Number(deviceId)) {
+  for (const [, entry] of connections) {
+    const conn = entry.runners.get(Number(deviceId));
+    if (conn) {
       try { conn.ws.close(4001, 'revoked'); } catch (_) { /* noop */ }
       return true;
     }
@@ -535,6 +582,8 @@ module.exports = {
   issueTerminalToken,
   getConnection,
   disconnectDevice,
+  setActiveRunner,
+  listRunners,
   addEventClient,
   removeEventClient,
   proxyHttp,
