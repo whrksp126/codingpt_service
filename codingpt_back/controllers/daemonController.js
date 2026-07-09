@@ -105,6 +105,20 @@ async function getStatus(req, res) {
   }
 }
 
+// POST /api/daemon/runner/activate  (인증) body:{ runnerId } → 활성 러너 전환(핸드오프, M5)
+//  로컬↔클라우드 러너가 둘 다 연결돼 있을 때 RPC/스트림 라우팅 대상을 바꾼다.
+async function activateRunner(req, res) {
+  try {
+    const runnerId = Number(req.body && req.body.runnerId);
+    if (!runnerId) return errorResponse(res, new Error('runnerId 가 필요합니다.'), 400);
+    const ok = daemonRelayService.setActiveRunner(req.user.id, runnerId);
+    if (!ok) return errorResponse(res, new Error('해당 러너가 연결되어 있지 않습니다.'), 409);
+    return successResponse(res, { active: runnerId, runners: daemonRelayService.listRunners(req.user.id) });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
 // POST /api/daemon/devices/:deviceId/revoke  (인증) — 기기 연결 해제(재페어링 필요)
 async function revokeDevice(req, res) {
   try {
@@ -438,7 +452,7 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
-  createPairCode, claimPairCode, getStatus, revokeDevice, startTerminal,
+  createPairCode, claimPairCode, getStatus, revokeDevice, activateRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,

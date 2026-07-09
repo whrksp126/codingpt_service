@@ -10,6 +10,19 @@
 const crypto = require('crypto');
 const { DaemonDevice } = require('../models');
 
+let Docker = null;
+try { Docker = require('dockerode'); } catch (_) { /* docker 미가용 환경 폴백 */ }
+const docker = Docker ? new Docker() : null;
+
+// 클라우드 러너 컨테이너 격리/리소스(sandboxManager 패턴 재사용).
+const RUNNER_IMAGE = process.env.CLOUD_RUNNER_IMAGE || 'codingpt-runner:dev';
+const RUNNER_NETWORK = process.env.CLOUD_RUNNER_NETWORK || ''; // egress allowlist 네트워크(prod). 빈 값=기본 bridge
+const RUNNER_MEM_MB = Number(process.env.CLOUD_RUNNER_MEM_MB || 2048);
+const RUNNER_CPUS = Number(process.env.CLOUD_RUNNER_CPUS || 1);
+const RUNNER_PIDS = Number(process.env.CLOUD_RUNNER_PIDS || 512);
+// 컨테이너가 릴레이(back)에 붙을 URL — 컨테이너 네트워크 기준(prod=서비스 별칭 http://back:5300).
+const RUNNER_SELF_URL = process.env.CLOUD_RUNNER_SERVER_URL || 'http://back:5300';
+
 function genToken() {
   const deviceToken = 'cptc_' + crypto.randomBytes(32).toString('hex'); // cptc_ = cloud(로컬 데몬은 cptd_)
   const tokenHash = crypto.createHash('sha256').update(deviceToken).digest('hex');
@@ -45,4 +58,45 @@ async function provisionDevice(userId, { workspaceId = null, deviceName } = {}) 
   return { deviceId: device.id, deviceToken, reused };
 }
 
-module.exports = { provisionDevice };
+/**
+ * 클라우드 러너 컨테이너 기동(prod) — 격리 HostConfig(CapDrop/cgroup) + env 주입.
+ *  컨테이너는 부팅 시 RUNNER_SERVER_URL 로 back 에 아웃바운드 연결(clientType:cloud).
+ *  docker.sock 이 있는 환경(agent-worker/prod 배포)에서만 동작. 로컬 back 은 수동 docker run 으로 검증.
+ * @returns {Promise<{ containerId:string }>}
+ */
+async function launchContainer(userId, { deviceToken, deviceName, workspaceId, volumeName } = {}) {
+  if (!docker) { const e = new Error('컨테이너 런타임을 사용할 수 없습니다(docker.sock 필요).'); e.statusCode = 503; throw e; }
+  if (!deviceToken) throw new Error('deviceToken 이 필요합니다.');
+  const container = await docker.createContainer({
+    name: `cpt-runner-${userId}-${crypto.randomBytes(4).toString('hex')}`,
+    Image: RUNNER_IMAGE,
+    Labels: { 'cpt.role': 'cloud-runner', 'cpt.userId': String(userId), 'cpt.workspaceId': String(workspaceId || '') },
+    Env: [
+      `RUNNER_SERVER_URL=${RUNNER_SELF_URL}`,
+      `RUNNER_TOKEN=${deviceToken}`,
+      `RUNNER_DEVICE_NAME=${deviceName || 'Cloud Runner'}`,
+      // 경로(RUNNER_ROOT/STATE_DIR/CLAUDE_CONFIG_DIR)는 이미지 기본값 사용.
+    ],
+    HostConfig: {
+      Memory: RUNNER_MEM_MB * 1024 * 1024,
+      NanoCpus: Math.round(RUNNER_CPUS * 1e9),
+      PidsLimit: RUNNER_PIDS,
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges'],
+      RestartPolicy: { Name: 'no' },
+      ...(RUNNER_NETWORK ? { NetworkMode: RUNNER_NETWORK } : {}),
+      // 사용자 코드 영속 볼륨(동면/재개 간 유지). 미지정이면 컨테이너 수명과 함께.
+      ...(volumeName ? { Mounts: [{ Type: 'volume', Source: volumeName, Target: '/workspace' }] } : {}),
+    },
+  });
+  await container.start();
+  return { containerId: container.id };
+}
+
+async function stopContainer(containerId) {
+  if (!docker || !containerId) return false;
+  try { const c = docker.getContainer(containerId); await c.stop({ t: 5 }).catch(() => {}); await c.remove({ force: true }); return true; }
+  catch (_) { return false; }
+}
+
+module.exports = { provisionDevice, launchContainer, stopContainer, RUNNER_IMAGE };

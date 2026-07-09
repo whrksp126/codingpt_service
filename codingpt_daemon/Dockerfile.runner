@@ -1,0 +1,33 @@
+# CodingPT 클라우드 러너 이미지 (M5 Slice1)
+# 격리 컨테이너에서 @codingpt/runner-core 를 구동한다. 로컬 데몬과 같은 계약 구현을 쓰되,
+# 페어링 CLI 없이 env(RUNNER_SERVER_URL/RUNNER_TOKEN)로 부팅하고 back 으로 아웃바운드 연결한다.
+# 격리(CapDrop/egress/리소스 제한)는 런타임 HostConfig(sandboxManager/cloudRunnerService)에서 건다.
+FROM node:20-bookworm-slim
+
+# 러너 필수 도구: tmux(터미널), git(sync/clone), python3+빌드툴(node-pty 네이티브), procps(포트/프로세스)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      tmux git ca-certificates python3 make g++ procps \
+  && rm -rf /var/lib/apt/lists/*
+
+# Claude Code CLI — BYO: 사용자가 컨테이너에서 자기 계정으로 로그인(claude /login, Slice2).
+#  우리는 크레덴셜 무접촉. 설치 실패해도 Slice1(fs/터미널/sync) 범위는 동작하므로 빌드는 계속.
+RUN npm install -g @anthropic-ai/claude-code || echo "[runner] claude CLI 설치 스킵 — Slice2에서 확정"
+
+# 러너 패키지(npm workspaces) 설치
+WORKDIR /opt/codingpt-runner
+COPY package.json ./
+COPY packages/runner-core ./packages/runner-core
+COPY packages/cloud-runner ./packages/cloud-runner
+RUN npm install --omit=dev
+
+# 사용자 코드 작업 루트 + 우리 상태 볼륨 마운트 지점
+RUN mkdir -p /workspace /var/lib/codingpt /root/.claude
+WORKDIR /workspace
+
+# 기본 경로(런타임에 back 이 RUNNER_SERVER_URL/RUNNER_TOKEN 을 추가 주입)
+ENV RUNNER_ROOT=/workspace \
+    RUNNER_STATE_DIR=/var/lib/codingpt \
+    CLAUDE_CONFIG_DIR=/root/.claude \
+    CODINGPT_CLAUDE_BIN=claude
+
+CMD ["node", "/opt/codingpt-runner/packages/cloud-runner/index.js"]
