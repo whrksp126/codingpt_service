@@ -1,4 +1,5 @@
 const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 // 텍스트로 취급할 확장자 — 이 목록에 없으면 바이너리로 보고 base64 로 디코딩/인코딩한다.
 // 코드 파일(py/ts/java/c 등)이 빠져 있으면 저장 시 원본 텍스트를 base64 로 잘못 디코딩해
@@ -1343,6 +1344,37 @@ class S3Service {
       console.error('[S3Service] index.html 찾기 오류:', error);
       return null;
     }
+  }
+
+  /**
+   * presigned PUT URL 발급 — 클라이언트/데몬이 objectstore 에 본문을 직접 업로드하게 한다.
+   * (자격증명은 back 에만 두고, 대용량 바이트는 릴레이를 우회한다 — sync 번들 업로드용.)
+   * @param {string} key - 버킷 내 오브젝트 키(경로). validatePath 규칙 준수.
+   * @param {{ expiresIn?: number, contentType?: string }} [options]
+   * @returns {Promise<string>} presigned URL
+   */
+  async getSignedPutUrl(key, options = {}) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    const { expiresIn = 900, contentType } = options;
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: key,
+      ...(contentType ? { ContentType: contentType } : {}),
+    });
+    return getSignedUrl(this.s3Client, command, { expiresIn });
+  }
+
+  /**
+   * presigned GET URL 발급 — 데몬이 objectstore 에서 번들을 직접 다운로드하게 한다.
+   * @param {string} key - 버킷 내 오브젝트 키(경로).
+   * @param {{ expiresIn?: number }} [options]
+   * @returns {Promise<string>} presigned URL
+   */
+  async getSignedGetUrl(key, options = {}) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    const { expiresIn = 900 } = options;
+    const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
+    return getSignedUrl(this.s3Client, command, { expiresIn });
   }
 }
 
