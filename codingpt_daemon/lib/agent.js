@@ -23,9 +23,52 @@ const CLAUDE_BIN = process.env.CODINGPT_CLAUDE_BIN || 'claude';
 const NODE_BIN = process.execPath;
 const APPROVAL_MCP = path.join(__dirname, 'approval-mcp.js');
 const APPROVAL_SOCK = path.join(os.tmpdir(), `cpt-approval-${process.pid}.sock`);
-const MAX_LOG = 3000;        // 세션별 이벤트 링버퍼(백로그 리플레이용)
+const MAX_LOG = 3000;        // 세션별 이벤트 링버퍼(백로그 리플레이용 — 인메모리)
 const COALESCE_MS = 50;      // 텍스트 델타 코얼레싱 주기
 const INIT_TIMEOUT_MS = 15000;
+// ── 세션 이벤트 로그 영속화(M3-2) — 데몬 재시작/세션 종료 후에도 리플레이 ──
+//  우리 정규화 이벤트(seq 부여)를 사용자 PC ~/.codingpt/sessions/<id>.jsonl 에 append.
+//  (claude 원본 대화는 ~/.claude/projects 에 별도로 있고, 이건 우리 이벤트 스트림의 사본.)
+const SESSIONS_DIR = path.join(os.homedir(), '.codingpt', 'sessions');
+const SESSION_RETAIN_MS = 30 * 24 * 60 * 60 * 1000; // 30일 지난 세션 로그는 정리
+
+function sessionFile(id) {
+  const safe = String(id || '').replace(/[^A-Za-z0-9._-]/g, '_');
+  return path.join(SESSIONS_DIR, safe + '.jsonl');
+}
+// 프레임 1건을 디스크에 append(순서 보존). 실패해도 이벤트 흐름을 막지 않는다.
+function persistFrame(id, frame) {
+  if (!id) return;
+  try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); fs.appendFileSync(sessionFile(id), JSON.stringify(frame) + '\n'); }
+  catch (_) { /* 영속 실패는 무시(라이브 전달은 계속) */ }
+}
+// 디스크 로그 읽기 → 프레임 배열. 파일 없으면 null.
+function readPersisted(id) {
+  let raw;
+  try { raw = fs.readFileSync(sessionFile(id), 'utf8'); } catch (_) { return null; }
+  const out = [];
+  for (const line of raw.split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch (_) { /* 손상 라인 스킵 */ } }
+  return out;
+}
+// 디스크 로그의 마지막 seq(이어받기 seq 연속성용). 없으면 0.
+function lastSeqOf(id) {
+  const frames = readPersisted(id);
+  if (!frames || !frames.length) return 0;
+  let max = 0; for (const f of frames) if (typeof f.seq === 'number' && f.seq > max) max = f.seq;
+  return max;
+}
+// 오래된 세션 로그 정리(데몬 기동 시 1회).
+function pruneSessionLogs() {
+  try {
+    const now = Date.now();
+    for (const f of fs.readdirSync(SESSIONS_DIR)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const full = path.join(SESSIONS_DIR, f);
+      try { if (now - fs.statSync(full).mtimeMs > SESSION_RETAIN_MS) fs.unlinkSync(full); } catch (_) { /* noop */ }
+    }
+  } catch (_) { /* 디렉토리 없음 등 무시 */ }
+}
+pruneSessionLogs();
 
 // sessionId(claude session_id) → session
 const sessions = new Map();
@@ -44,12 +87,13 @@ function rawSend(obj) {
   }
 }
 
-// 세션 로그에 적재(seq++) + 제어 WS push. must-not-drop 은 로그+agent.backlog 로 보장.
+// 세션 로그에 적재(seq++) + 디스크 영속(M3-2) + 제어 WS push. must-not-drop = 로그+agent.backlog.
 function emit(session, event) {
   const seq = ++session.seq;
   const frame = { type: 'agent_event', sessionId: session.id, seq, event };
   session.log.push(frame);
   if (session.log.length > MAX_LOG) session.log.shift();
+  persistFrame(session.id, frame); // 재시작/세션종료 후에도 리플레이 가능하게 디스크에 남긴다
   rawSend(frame);
 }
 
@@ -159,6 +203,12 @@ function attachStdout(session) {
 function bindSessionId(session, claudeId) {
   session.id = claudeId;
   sessions.set(claudeId, session);
+  // M3-2: 이어받기(같은 claude session_id 재사용) 시 디스크 로그의 마지막 seq 이후로 이어 붙인다
+  //  → seq 충돌 없이 하나의 세션 로그가 전체 수명을 커버한다.
+  const last = lastSeqOf(claudeId);
+  if (last > session.seq) session.seq = last;
+  // start 시 첫 프롬프트는 id 확정 전에 stdin 으로 보냈으므로(user 이벤트 미emit) 여기서 로그에 남긴다.
+  if (session._pendingUserText != null) { const t = session._pendingUserText; session._pendingUserText = null; emit(session, { type: 'user', text: t }); }
   if (session._resolveInit) { session._resolveInit(claudeId); session._resolveInit = null; }
 }
 
@@ -220,6 +270,10 @@ function writeUser(session, text) {
   if (!session.proc || session.proc.exitCode != null) throw new Error('세션이 종료되었습니다.');
   session.state = 'running';
   session.proc.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: String(text) } }) + '\n');
+  // M3-2: 사용자 프롬프트도 로그에 남겨 이어받기 복원 시 양방향 대화가 보이게 한다.
+  //  id 확정 전(첫 프롬프트)이면 stash → bindSessionId 에서 emit.
+  if (session.id) emit(session, { type: 'user', text: String(text) });
+  else session._pendingUserText = String(text);
 }
 
 // ── agent.sessions (이어받기): ~/.claude/projects/<slug>/*.jsonl ────
@@ -321,9 +375,13 @@ async function handle(method, params, ws) {
       const s = sessions.get(p.sessionId); return { state: s ? s.state : 'stopped', seq: s ? s.seq : 0 };
     }
     case 'agent.backlog': {
-      const s = sessions.get(p.sessionId); if (!s) return { events: [], gone: true };
+      // M3-2: 디스크 로그 우선(전체 이력 — 세션종료/데몬재시작 후에도 유효). 없으면 인메모리/gone.
       const since = Number(p.sinceSeq) || 0;
-      return { events: s.log.filter((f) => f.seq > since) };
+      const persisted = readPersisted(p.sessionId);
+      if (persisted) return { events: persisted.filter((f) => typeof f.seq === 'number' && f.seq > since) };
+      const s = sessions.get(p.sessionId);
+      if (s) return { events: s.log.filter((f) => f.seq > since) };
+      return { events: [], gone: true };
     }
     case 'agent.sessions': {
       const absCwd = fsLib.safeResolve(p.cwd || '');
