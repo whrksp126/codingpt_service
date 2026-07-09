@@ -25,6 +25,7 @@ const { execFileSync, execFile } = require('child_process');
 const WebSocket = require('ws');
 const nodePty = require('node-pty');
 const fsLib = require('./fs');
+const runtime = require('./runtime');
 
 const TMUX_SOCKET = 'codingpt'; // tmux -L codingpt (사용자 기본 tmux 서버와 격리)
 const TMUX_SESSION = 'codingpt';
@@ -35,10 +36,10 @@ const TMUX_CONF = path.join(__dirname, '..', 'tmux.conf'); // 서버 시작 시(
 //  · 워크스페이스 = 경로별 전용 세션 'cpt-<sanitized>' 를 그 폴더에서 시작(-c) → 진입 시 터미널이 그 경로.
 //  경로는 홈 jail(safeResolve) 로 검증하고, 없으면 홈으로 폴백(터미널은 항상 열림).
 function sessionForCwd(cwdRel) {
-  if (!cwdRel) return { session: TMUX_SESSION, abs: os.homedir() };
+  if (!cwdRel) return { session: TMUX_SESSION, abs: runtime.root() };
   let abs;
-  try { abs = fsLib.safeResolve(cwdRel); } catch (_) { return { session: TMUX_SESSION, abs: os.homedir() }; }
-  if (!fs.existsSync(abs)) return { session: TMUX_SESSION, abs: os.homedir() };
+  try { abs = fsLib.safeResolve(cwdRel); } catch (_) { return { session: TMUX_SESSION, abs: runtime.root() }; }
+  if (!fs.existsSync(abs)) return { session: TMUX_SESSION, abs: runtime.root() };
   const safe = String(cwdRel).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
   return { session: 'cpt-' + (safe || 'ws'), abs };
 }

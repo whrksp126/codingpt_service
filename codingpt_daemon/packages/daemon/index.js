@@ -75,7 +75,7 @@ function cmdRun() {
 
 function cmdStatus() {
   const config = configLib.load();
-  if (!config) { console.log(`페어링 안 됨 (설정 파일 없음: ${configLib.CONFIG_FILE})`); return; }
+  if (!config) { console.log(`페어링 안 됨 (설정 파일 없음: ${configLib.configFile()})`); return; }
   console.log(`서버:     ${config.serverUrl}`);
   console.log(`deviceId: ${config.deviceId}`);
   console.log(`기기명:   ${config.deviceName}`);

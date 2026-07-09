@@ -21,10 +21,12 @@ const os = require('os');
 const https = require('https');
 const { execFile } = require('child_process');
 const fsLib = require('./fs');
+const runtime = require('./runtime');
 
-const TMP_DIR = path.join(os.homedir(), '.codingpt', 'tmp');
-const SESSIONS_DIR = path.join(os.homedir(), '.codingpt', 'sessions');
-const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+// 지연 평가(로컬=홈, 클라우드 러너=주입된 상태/클로드 홈).
+const tmpDir = () => path.join(runtime.stateDir(), 'tmp');
+const sessionsDir = () => path.join(runtime.stateDir(), 'sessions');
+const claudeProjectsDir = () => path.join(runtime.claudeHome(), 'projects');
 
 // claude 의 cwd→프로젝트 slug 규칙(agent.js projectSlug 와 동일해야 resume 가 맞다).
 function projectSlug(absCwd) { return absCwd.replace(/[^a-zA-Z0-9]/g, '-'); }
@@ -89,7 +91,7 @@ function httpsGet(urlStr) {
   });
 }
 
-async function ensureTmp() { await fsp.mkdir(TMP_DIR, { recursive: true }).catch(() => {}); }
+async function ensureTmp() { await fsp.mkdir(tmpDir(), { recursive: true }).catch(() => {}); }
 async function isGitRepo(absCwd) { return (await git(['rev-parse', '--is-inside-work-tree'], { cwd: absCwd })).ok; }
 async function headSha(absCwd) { const r = await git(['rev-parse', 'HEAD'], { cwd: absCwd }); return r.ok ? r.out.trim() : null; }
 
@@ -98,7 +100,7 @@ async function headSha(absCwd) { const r = await git(['rev-parse', 'HEAD'], { cw
 function collectSessionArtifact(absCwd) {
   const files = [];
   const slug = projectSlug(absCwd);
-  const claudeDir = path.join(CLAUDE_PROJECTS_DIR, slug);
+  const claudeDir = path.join(claudeProjectsDir(), slug);
   let claudeFiles = [];
   try { claudeFiles = fs.readdirSync(claudeDir).filter((f) => f.endsWith('.jsonl')); } catch (_) { claudeFiles = []; }
   for (const f of claudeFiles) {
@@ -107,7 +109,7 @@ function collectSessionArtifact(absCwd) {
       files.push({ scope: 'claude', name: f, contentB64: buf.toString('base64') });
       // 대응하는 우리 이벤트 로그(파일명 = claude session id).
       const id = f.replace(/\.jsonl$/, '');
-      const ours = path.join(SESSIONS_DIR, id + '.jsonl');
+      const ours = path.join(sessionsDir(), id + '.jsonl');
       if (fs.existsSync(ours)) files.push({ scope: 'codingpt', name: id + '.jsonl', contentB64: fs.readFileSync(ours).toString('base64') });
     } catch (_) { /* skip */ }
   }
@@ -118,7 +120,7 @@ function collectSessionArtifact(absCwd) {
 function restoreSessionArtifact(artifact, targetAbsCwd) {
   if (!artifact || !Array.isArray(artifact.files)) return 0;
   const targetSlug = projectSlug(targetAbsCwd);
-  const claudeDir = path.join(CLAUDE_PROJECTS_DIR, targetSlug);
+  const claudeDir = path.join(claudeProjectsDir(), targetSlug);
   let n = 0;
   for (const f of artifact.files) {
     try {
@@ -128,8 +130,8 @@ function restoreSessionArtifact(artifact, targetAbsCwd) {
         fs.writeFileSync(path.join(claudeDir, f.name), buf);
         n++;
       } else if (f.scope === 'codingpt') {
-        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-        fs.writeFileSync(path.join(SESSIONS_DIR, f.name), buf);
+        fs.mkdirSync(sessionsDir(), { recursive: true });
+        fs.writeFileSync(path.join(sessionsDir(), f.name), buf);
         n++;
       }
     } catch (_) { /* skip */ }
@@ -154,7 +156,7 @@ async function checkpoint(p) {
 
   const base = await headSha(abs); // null=커밋 없는 새 repo
   const ref = `refs/codingpt/checkpoints/${id}`;
-  const idxFile = path.join(TMP_DIR, `idx-${id}`);
+  const idxFile = path.join(tmpDir(), `idx-${id}`);
   await fsp.rm(idxFile, { force: true }).catch(() => {});
   const env = { ...process.env, GIT_INDEX_FILE: idxFile };
 
@@ -184,7 +186,7 @@ async function checkpoint(p) {
   await git(['update-ref', ref, commit], { cwd: abs });
 
   // 번들 생성(도달 가능 객체 전체 — 자기완결). .gitignore 로 node_modules 등은 이미 제외.
-  const bundleFile = path.join(TMP_DIR, `${id}.bundle`);
+  const bundleFile = path.join(tmpDir(), `${id}.bundle`);
   const bd = await git(['bundle', 'create', bundleFile, ref], { cwd: abs, timeout: 120000 });
   if (!bd.ok) throw new Error('번들 생성 실패: ' + bd.err.slice(0, 200));
   const bundleBuf = await fsp.readFile(bundleFile);
@@ -231,7 +233,7 @@ async function materialize(p) {
   emitSync({ type: 'sync_progress', phase: 'materialize', checkpointId: id });
 
   // 번들 다운로드.
-  const bundleFile = path.join(TMP_DIR, `mat-${id}.bundle`);
+  const bundleFile = path.join(tmpDir(), `mat-${id}.bundle`);
   const bundleBuf = await httpsGet(p.getUrls.bundle);
   await fsp.writeFile(bundleFile, bundleBuf);
 
@@ -351,7 +353,7 @@ async function resolve(p) {
 
   // 임시 인덱스로 머지 결과 구성: base 트리에서 시작해 파일별 승자 blob 을 stage.
   await ensureTmp();
-  const idxFile = path.join(TMP_DIR, `resolve-${conflictId}`);
+  const idxFile = path.join(tmpDir(), `resolve-${conflictId}`);
   await fsp.rm(idxFile, { force: true }).catch(() => {});
   const env = { ...process.env, GIT_INDEX_FILE: idxFile };
   // 자동 머지된 부분을 살리기 위해 incoming 트리를 베이스로 두고, 충돌 파일만 승자로 덮는다.

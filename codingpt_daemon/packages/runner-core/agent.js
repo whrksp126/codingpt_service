@@ -18,6 +18,7 @@ const net = require('net');
 const crypto = require('crypto');
 const { spawn, execFileSync } = require('child_process');
 const fsLib = require('./fs');
+const runtime = require('./runtime');
 
 const CLAUDE_BIN = process.env.CODINGPT_CLAUDE_BIN || 'claude';
 const NODE_BIN = process.execPath;
@@ -29,17 +30,17 @@ const INIT_TIMEOUT_MS = 15000;
 // ── 세션 이벤트 로그 영속화(M3-2) — 데몬 재시작/세션 종료 후에도 리플레이 ──
 //  우리 정규화 이벤트(seq 부여)를 사용자 PC ~/.codingpt/sessions/<id>.jsonl 에 append.
 //  (claude 원본 대화는 ~/.claude/projects 에 별도로 있고, 이건 우리 이벤트 스트림의 사본.)
-const SESSIONS_DIR = path.join(os.homedir(), '.codingpt', 'sessions');
+const sessionsDir = () => path.join(runtime.stateDir(), 'sessions'); // 지연 평가(로컬=~/.codingpt, 클라우드=주입)
 const SESSION_RETAIN_MS = 30 * 24 * 60 * 60 * 1000; // 30일 지난 세션 로그는 정리
 
 function sessionFile(id) {
   const safe = String(id || '').replace(/[^A-Za-z0-9._-]/g, '_');
-  return path.join(SESSIONS_DIR, safe + '.jsonl');
+  return path.join(sessionsDir(), safe + '.jsonl');
 }
 // 프레임 1건을 디스크에 append(순서 보존). 실패해도 이벤트 흐름을 막지 않는다.
 function persistFrame(id, frame) {
   if (!id) return;
-  try { fs.mkdirSync(SESSIONS_DIR, { recursive: true }); fs.appendFileSync(sessionFile(id), JSON.stringify(frame) + '\n'); }
+  try { fs.mkdirSync(sessionsDir(), { recursive: true }); fs.appendFileSync(sessionFile(id), JSON.stringify(frame) + '\n'); }
   catch (_) { /* 영속 실패는 무시(라이브 전달은 계속) */ }
 }
 // 디스크 로그 읽기 → 프레임 배열. 파일 없으면 null.
@@ -61,9 +62,9 @@ function lastSeqOf(id) {
 function pruneSessionLogs() {
   try {
     const now = Date.now();
-    for (const f of fs.readdirSync(SESSIONS_DIR)) {
+    for (const f of fs.readdirSync(sessionsDir())) {
       if (!f.endsWith('.jsonl')) continue;
-      const full = path.join(SESSIONS_DIR, f);
+      const full = path.join(sessionsDir(), f);
       try { if (now - fs.statSync(full).mtimeMs > SESSION_RETAIN_MS) fs.unlinkSync(full); } catch (_) { /* noop */ }
     }
   } catch (_) { /* 디렉토리 없음 등 무시 */ }
@@ -279,7 +280,7 @@ function writeUser(session, text) {
 // ── agent.sessions (이어받기): ~/.claude/projects/<slug>/*.jsonl ────
 function projectSlug(absCwd) { return absCwd.replace(/[^a-zA-Z0-9]/g, '-'); }
 function listSessions(absCwd) {
-  const dir = path.join(os.homedir(), '.claude', 'projects', projectSlug(absCwd));
+  const dir = path.join(runtime.claudeHome(), 'projects', projectSlug(absCwd));
   let files;
   try { files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')); } catch (_) { return []; }
   const out = [];

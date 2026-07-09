@@ -6,13 +6,15 @@
  *  - 기본 deny: 루트를 벗어나면 에러.
  * P1 MVP 는 단일 루트(홈). P3 에서 워크스페이스별 다중 allowlist 로 확장.
  */
-const os = require('os');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const chokidar = require('chokidar');
+const runtime = require('./runtime');
 
-const ROOT = os.homedir();
+// fs jail 루트 — 지연 평가(runner-core 로드 후 부트스트랩이 init 해도 반영되게).
+//  로컬 데몬=사용자 홈, 클라우드 러너=컨테이너 workdir.
+const rootDir = () => runtime.root();
 
 // 목록에서 숨기고 순회도 막을 디렉토리(성능/노이즈/보안).
 const HIDDEN_DIRS = new Set([
@@ -38,6 +40,7 @@ const TEXT_EXT = new Set([
 
 // 루트 기준 상대경로 → 안전한 절대경로. 탈출 시 throw.
 function safeResolve(rel) {
+  const ROOT = rootDir();
   const abs = path.resolve(ROOT, rel || '.');
   const rootReal = fs.realpathSync(ROOT);
   // 존재하는 경로면 realpath 로, 없으면(신규 파일 write) 부모까지 realpath 로 검증.
@@ -54,7 +57,7 @@ function safeResolve(rel) {
 }
 
 function relOf(abs) {
-  return path.relative(ROOT, abs).split(path.sep).join('/');
+  return path.relative(rootDir(), abs).split(path.sep).join('/');
 }
 
 function isTextFile(name) {
@@ -237,4 +240,4 @@ async function handle(method, params) {
   }
 }
 
-module.exports = { handle, startWatch, stopWatch, ROOT, safeResolve, relOf };
+module.exports = { handle, startWatch, stopWatch, rootDir, safeResolve, relOf };

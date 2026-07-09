@@ -6,6 +6,7 @@
  * 각 러너가 주입한다.
  */
 module.exports = {
+  runtime: require('./runtime'),   // 부트스트랩이 init({root,stateDir,claudeHome,platform}) 로 러너별 경로 주입
   config: require('./config'),
   control: require('./control'),
   pty: require('./pty'),
