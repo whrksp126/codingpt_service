@@ -149,7 +149,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 추가 (코드 실행 관련 경로인 경우)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('codingpt/sync/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         // class-id- 또는 execute/ 로 시작하는 경우 codingpt/execute/ prefix 추가
         if (normalizedPath.startsWith('class-id-') || normalizedPath.startsWith('execute/')) {
           normalizedPath = `codingpt/execute/${normalizedPath}`;
@@ -403,7 +403,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('codingpt/sync/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -559,7 +559,7 @@ class S3Service {
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
       // 단, TTS 경로(codingpt/tts/)는 제외
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('codingpt/sync/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -675,7 +675,7 @@ class S3Service {
       let normalizedPath = folderPath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('codingpt/sync/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 
@@ -763,7 +763,7 @@ class S3Service {
       let normalizedPath = filePath.replace(/^\/+|\/+$/g, '');
       
       // codingpt/execute/ prefix가 없으면 항상 추가 (기본 경로)
-      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
+      if (normalizedPath && !normalizedPath.startsWith('codingpt/execute/') && !normalizedPath.startsWith('codingpt/tts/') && !normalizedPath.startsWith('codingpt/sync/') && !normalizedPath.startsWith('tts/static/') && !(normalizedPath === 'lesson-assets' || normalizedPath.startsWith('lesson-assets/'))) {
         normalizedPath = `codingpt/execute/${normalizedPath}`;
       }
 

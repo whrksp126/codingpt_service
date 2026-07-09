@@ -374,8 +374,9 @@ async function status(p) {
   const head = await headSha(abs);
   const porcelain = (await git(['status', '--porcelain'], { cwd: abs })).out.trim();
   const dirty = porcelain.length > 0;
-  // 진행 중 충돌이 이 타겟에 걸려 있으면 conflict.
-  let state = dirty ? 'syncing' : 'clean';
+  // state 는 "동기화" 상태(허브 대비)다 — 로컬 미커밋(dirty)과는 별개 축(계약 §6.1).
+  //  진행 중 충돌이 이 타겟에 걸려 있으면 conflict, 아니면 clean. syncing 은 진행 이벤트로만 표기.
+  let state = 'clean';
   for (const [, c] of conflicts) { if (c.targetAbs === abs) { state = 'conflict'; break; } }
   return { state, base: p.head || null, head, dirty };
 }
