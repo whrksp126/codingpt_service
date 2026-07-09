@@ -71,11 +71,17 @@ function relPathOf(input) {
   if (!p) return null;
   try { return fsLib.relOf(p); } catch (_) { return null; }
 }
+// 앱 services/agentService.ts 의 AgentDiff 스키마와 1:1.
+//  write:{kind,oldContent,newContent} / edit:{kind,oldString,newString} / multiedit:{kind,edits:[{oldString,newString}]}
 function buildDiff(tool, input) {
   if (!input) return null;
-  if (tool === 'Write') return { kind: 'write', path: input.file_path || null, newText: String(input.content ?? '') };
-  if (tool === 'Edit') return { kind: 'edit', path: input.file_path || null, oldText: String(input.old_string ?? ''), newText: String(input.new_string ?? '') };
-  if (tool === 'MultiEdit') return { kind: 'multiedit', path: input.file_path || null, edits: input.edits || [] };
+  if (tool === 'Write') {
+    let oldContent = '';
+    try { const abs = fsLib.safeResolve(fsLib.relOf(input.file_path)); oldContent = fs.readFileSync(abs, 'utf-8'); } catch (_) { /* 신규 파일 */ }
+    return { kind: 'write', oldContent, newContent: String(input.content ?? '') };
+  }
+  if (tool === 'Edit') return { kind: 'edit', oldString: String(input.old_string ?? ''), newString: String(input.new_string ?? '') };
+  if (tool === 'MultiEdit') return { kind: 'multiedit', edits: (input.edits || []).map((e) => ({ oldString: String(e.old_string ?? ''), newString: String(e.new_string ?? '') })) };
   return null;
 }
 
