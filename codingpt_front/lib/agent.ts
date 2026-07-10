@@ -1,224 +1,88 @@
 'use client';
 
-// 바이브코딩 웹 — 백엔드 /api/agent/* + /api/preview/* 호출(브라우저, JWT bearer).
-// 앱 agentService.ts 의 계약과 동일. 스트리밍은 fetch + ReadableStream 으로 SSE 라인 파싱.
+// 바이브코딩 웹 — IDE 파일/프리뷰 데이터층(M5-웹 W6). M0 제거된 /api/agent/* 대신 데몬 릴레이(lib/daemon)로 위임.
+//  컴포넌트(FileTree/Editor/Preview) 시그니처는 유지하되, 내부 전송을 BYO 데몬 fs/preview 로 재배선.
+//  에이전트 스트리밍(streamAgentQuery)·권한(resolveAgentPermission)·exec(streamExec) 은 W2/W3/W5 로 이관돼 제거됨.
+//  경로 규약: projectId 인자 = 러너(데몬) 홈-기준 루트(핸드오프 cwd). 트리/읽기/쓰기 경로를 이 루트 기준으로 해석.
 
+import {
+  fsTree, fsRead, fsWrite, previewPorts, previewStart, buildDaemonPreviewUrl,
+} from './daemon';
 import { BACKEND_PUBLIC } from './api';
-import { getToken } from './auth';
-import type { AgentEvent, PreviewState, FileNode, ExecEvent } from './agentTypes';
+import type { PreviewState, FileNode } from './agentTypes';
 
-export interface StreamHandlers {
-  onEvent: (evt: AgentEvent) => void;
-  onError?: (msg: string) => void;
-  onComplete?: () => void;
-  onLimitReached?: (info: any) => void;
+const clean = (s: string) => (s || '').replace(/^\/+|\/+$/g, '');
+// 러너 홈-기준 절대상대경로 = 루트(핸드오프 cwd) + 프로젝트-상대 경로.
+function joinRoot(root: string | undefined, rel: string): string {
+  const r = clean(root || '');
+  const p = clean(rel);
+  return r ? `${r}/${p}` : p;
 }
 
-export interface StreamOpts {
-  sessionId?: string; // SDK resume id
-  projectId?: string; // = workspaceId (샌드박스/프리뷰 식별)
-  model?: string;
-  autoApprove?: boolean;
-  mode?: 'chat' | 'code';
-}
-
-function processLine(line: string, onEvent: (e: AgentEvent) => void) {
-  const t = line.trim();
-  if (!t.startsWith('data:')) return;
-  try {
-    onEvent(JSON.parse(t.slice(5).trim()) as AgentEvent);
-  } catch (_) {
-    /* 부분 라인/노이즈 무시 */
+// flat {path,text}[] (루트 기준 상대, '/' 구분) → 중첩 FileNode[]. fsTree 는 파일만 주므로 디렉토리는 경로에서 유추.
+function buildTree(items: { path: string; text?: boolean }[]): FileNode[] {
+  const root: FileNode[] = [];
+  const dirMap = new Map<string, FileNode>();
+  for (const it of [...items].sort((a, b) => a.path.localeCompare(b.path))) {
+    const parts = clean(it.path).split('/').filter(Boolean);
+    let level = root;
+    let prefix = '';
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      prefix = prefix ? `${prefix}/${name}` : name;
+      if (i === parts.length - 1) {
+        level.push({ name, path: prefix, type: 'file' });
+      } else {
+        let dir = dirMap.get(prefix);
+        if (!dir) { dir = { name, path: prefix, type: 'directory', children: [] }; dirMap.set(prefix, dir); level.push(dir); }
+        level = dir.children!;
+      }
+    }
   }
+  return root;
 }
 
-/**
- * 에이전트 질의 스트림. SSE `data:` 라인을 파싱해 onEvent 로 흘린다.
- * @returns abort 함수
- */
-export function streamAgentQuery(prompt: string, handlers: StreamHandlers, opts: StreamOpts = {}): () => void {
-  const controller = new AbortController();
-  const token = getToken();
+/** 워크스페이스 파일 트리(IDE 파일트리) — 러너 fs.tree 를 중첩 FileNode 로. */
+export const listAgentFiles = async (projectId: string): Promise<FileNode[]> => {
+  const t = await fsTree(projectId).catch(() => ({ root: '', items: [] as { path: string; text: boolean }[] }));
+  return buildTree(t.items || []);
+};
 
-  (async () => {
-    let res: Response;
-    try {
-      res = await fetch(`${BACKEND_PUBLIC}/api/agent/query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({
-          prompt,
-          sessionId: opts.sessionId,
-          projectId: opts.projectId,
-          model: opts.model,
-          autoApprove: opts.autoApprove,
-          mode: opts.mode,
-        }),
-        signal: controller.signal,
-      });
-    } catch (e) {
-      handlers.onError?.(e instanceof Error ? e.message : '네트워크 연결 에러가 발생했습니다.');
-      return;
-    }
+/** 워크스페이스 파일 읽기(에디터 동기화). */
+export const getAgentFile = async (relPath: string, projectId?: string): Promise<{ path: string; content: string }> => {
+  const r = await fsRead(joinRoot(projectId, relPath));
+  return { path: relPath, content: r.content ?? '' };
+};
 
-    if (res.status === 401) {
-      handlers.onError?.('인증이 만료되었습니다. 다시 로그인해주세요.');
-      return;
-    }
-    // 사용량 한도(프리플라이트 게이트) — SSE 시작 전 일반 JSON
-    if (res.status === 402 || res.status === 429) {
-      let info: any = null;
-      try { info = await res.json(); } catch (_) { /* noop */ }
-      if (handlers.onLimitReached) handlers.onLimitReached(info || { code: 'USAGE_LIMIT_REACHED' });
-      else handlers.onError?.(info?.message || '사용량 한도에 도달했습니다.');
-      return;
-    }
-    // 플랜 게이트(Free 는 워크스페이스 불가) — 403 PLAN_REQUIRED
-    if (res.status === 403) {
-      let info: any = null;
-      try { info = await res.json(); } catch (_) { /* noop */ }
-      if (info?.code === 'PLAN_REQUIRED' && handlers.onLimitReached) { handlers.onLimitReached(info); return; }
-      handlers.onError?.(info?.message || '권한이 없습니다.');
-      return;
-    }
-    if (!res.ok || !res.body) {
-      handlers.onError?.(`서버 에러: ${res.status}`);
-      return;
-    }
+/** 워크스페이스 파일 쓰기(에디터 편집 → 러너 FS → HMR). */
+export const writeAgentFile = async (relPath: string, content: string, projectId?: string): Promise<{ success: boolean; path: string }> => {
+  const r = await fsWrite(joinRoot(projectId, relPath), content);
+  return { success: true, path: r.path };
+};
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let pending = '';
-    try {
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split('\n');
-        pending = lines.pop() ?? '';
-        for (const line of lines) processLine(line, handlers.onEvent);
-      }
-      if (pending) processLine(pending, handlers.onEvent);
-      handlers.onComplete?.();
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') handlers.onError?.(e?.message || '스트림 중단');
-    }
-  })();
-
-  return () => { try { controller.abort(); } catch (_) { /* noop */ } };
-}
-
-// ── 단순 JSON 호출 헬퍼(bearer) ───────────────────────────────
-async function jsonFetch<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const token = getToken();
-  const res = await fetch(`${BACKEND_PUBLIC}${path}`, {
-    method: init.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: init.body ? JSON.stringify(init.body) : undefined,
-  });
-  let data: any = null;
-  try { data = await res.json(); } catch (_) { /* noop */ }
-  if (!res.ok) throw new Error(data?.message || `요청 실패(${res.status})`);
-  return data as T;
-}
-
-/** 워크스페이스 파일 트리(IDE 파일트리) */
-export const listAgentFiles = (projectId: string) =>
-  jsonFetch<{ success: boolean; tree: FileNode[] }>(`/api/agent/files?projectId=${encodeURIComponent(projectId)}`)
-    .then((r) => r.tree || []);
-
-/** 워크스페이스 파일 읽기(에디터 동기화) */
-export const getAgentFile = (relPath: string, projectId?: string) =>
-  jsonFetch<{ path: string; content: string }>(
-    `/api/agent/file?path=${encodeURIComponent(relPath)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`,
-  );
-
-/** 워크스페이스 파일 쓰기(에디터 편집 → 샌드박스 FS → HMR) */
-export const writeAgentFile = (relPath: string, content: string, projectId?: string) =>
-  jsonFetch<{ success: boolean; path: string }>('/api/agent/file', {
-    method: 'POST',
-    body: { path: relPath, content, projectId },
-  });
-
-/** 수정 승인/거부 — diff 모달에서 호출 */
-export const resolveAgentPermission = (requestId: string, decision: 'allow' | 'deny', message?: string) =>
-  jsonFetch<{ success: boolean }>('/api/agent/permission', {
-    method: 'POST',
-    body: { requestId, decision, message },
-  });
-
-// ── 터미널(샌드박스 exec) ─────────────────────────────────────
-/** 샌드박스 셸 명령 실행 — 출력 SSE 스트리밍. @returns abort 함수 */
-export function streamExec(
-  payload: { command: string; cwd?: string; projectId?: string },
-  handlers: { onEvent: (e: ExecEvent) => void; onError?: (m: string) => void; onComplete?: () => void },
-): () => void {
-  const controller = new AbortController();
-  const token = getToken();
-  (async () => {
-    let res: Response;
-    try {
-      res = await fetch(`${BACKEND_PUBLIC}/api/agent/exec`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify(payload),
-        signal: controller.signal,
-      });
-    } catch (e) {
-      handlers.onError?.(e instanceof Error ? e.message : '네트워크 에러');
-      return;
-    }
-    if (!res.ok || !res.body) { handlers.onError?.(`서버 에러: ${res.status}`); return; }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let pending = '';
-    const emit = (line: string) => {
-      const t = line.trim();
-      if (!t.startsWith('data:')) return;
-      try { handlers.onEvent(JSON.parse(t.slice(5).trim()) as ExecEvent); } catch (_) { /* noop */ }
-    };
-    try {
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split('\n');
-        pending = lines.pop() ?? '';
-        for (const l of lines) emit(l);
-      }
-      if (pending) emit(pending);
-      handlers.onComplete?.();
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') handlers.onError?.(e?.message || '스트림 중단');
-    }
-  })();
-  return () => { try { controller.abort(); } catch (_) { /* noop */ } };
-}
-
-/** dev 서버 기동 명령인지(미리보기로 라우팅) */
+/** dev 서버 기동 명령인지(미리보기로 라우팅). */
 export const isDevServerCommand = (raw: string): boolean =>
   /(^|\s|&&|;)(npm|pnpm|yarn|bun)\s+(run\s+)?(dev|start|serve)\b/.test(raw)
   || /(^|\s|&&|;)(vite|next\s+dev|react-scripts\s+start)\b/.test(raw);
 
-// ── 프리뷰(dev 서버) ──────────────────────────────────────────
-/** dev 서버 시작 → { mode, token, url } (url 은 /api/preview/{token}/ 상대경로) */
-export const startPreview = (projectId: string) =>
-  jsonFetch<PreviewState>('/api/preview/dev/start', { method: 'POST', body: { projectId } });
+// ── 프리뷰(러너 dev 서버) ─────────────────────────────────────
+// BYO 프리뷰는 러너에서 LISTEN 중인 포트를 감지해 그 포트로 프록시 토큰을 발급한다(포트 기반).
+/** dev 서버 미리보기 시작 → PreviewState. 감지된 포트가 없으면 static 폴백. */
+export const startPreview = async (_projectId: string): Promise<PreviewState> => {
+  const ports = await previewPorts().catch(() => [] as number[]);
+  if (!ports.length) return { mode: 'static' };
+  const port = ports[0]; // 첫 LISTEN 포트(대개 dev 서버). 다중 포트 선택 UI 는 후속.
+  try {
+    const p = await previewStart(port);
+    return { mode: 'dev', ready: true, token: p.token, url: p.url };
+  } catch (_) {
+    return { mode: 'static' };
+  }
+};
 
-export const stopPreview = (projectId: string) =>
-  jsonFetch<{ ok?: boolean }>('/api/preview/dev/stop', { method: 'POST', body: { projectId } });
-
-/** 프리뷰 토큰 경로 → 브라우저가 로드할 절대 URL (무인증 프록시) */
-export const previewUrl = (relUrlOrToken: string) => {
+/** 프리뷰 토큰/경로 → 브라우저가 로드할 절대 URL. */
+export const previewUrl = (relUrlOrToken: string): string => {
   if (relUrlOrToken.startsWith('http')) return relUrlOrToken;
-  const rel = relUrlOrToken.startsWith('/') ? relUrlOrToken : `/api/preview/${relUrlOrToken}/`;
-  return `${BACKEND_PUBLIC}${rel}`;
+  if (relUrlOrToken.startsWith('/')) return `${BACKEND_PUBLIC}${relUrlOrToken}`;
+  return buildDaemonPreviewUrl(relUrlOrToken); // 토큰 → /api/daemon/preview/<token>/
 };
