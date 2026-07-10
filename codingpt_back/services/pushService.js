@@ -10,9 +10,10 @@ function providerConfigured() {
   return pushProvider.configured();
 }
 
-function defaultProvider(platform) {
-  // 초기 기본. 실제로는 FCM 하나로 iOS/Android 통합 가능(APNs 인증서 연결).
-  return platform === 'ios' ? 'apns' : 'fcm';
+function defaultProvider(_platform) {
+  // 앱은 @react-native-firebase(FCM) 를 쓰므로 iOS/Android 모두 FCM 토큰(Firebase 가 APNs 릴레이).
+  //  → 기본 FCM. 직접 APNs 토큰을 쓰는 경우에만 등록 시 provider='apns' 명시.
+  return 'fcm';
 }
 
 // 기기 토큰 등록(upsert). token 재발급 시 같은 행을 갱신.
@@ -55,8 +56,10 @@ async function dispatch(device, payload) {
     console.log(`[push] (provider 미설정 · 스킵) user=${device.user_id} ${device.platform} kind=${payload.kind} title="${payload.title}" deeplink=${payload.deeplink}`);
     return false;
   }
+  // 프로바이더 기준 라우팅(플랫폼 아님) — RN Firebase 는 iOS 도 FCM 토큰이므로 기본 FCM.
+  //  직접 APNs 토큰(provider='apns')일 때만 APNs HTTP/2 로 보낸다.
   const provider = device.provider || defaultProvider(device.platform);
-  const r = provider === 'apns' || device.platform === 'ios'
+  const r = provider === 'apns'
     ? await pushProvider.sendApns(device, payload)
     : await pushProvider.sendFcm(device, payload);
   if (r.ok) return true;
