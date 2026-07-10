@@ -135,12 +135,15 @@ async function ensureCloudRunner(req, res) {
   try {
     const workspaceId = (req.body && req.body.workspaceId) || null;
     if (!workspaceId) return errorResponse(res, new Error('workspaceId 가 필요합니다.'), 400);
-    const { deviceId, deviceToken } = await cloudRunnerService.provisionDevice(req.user.id, { workspaceId, deviceName: '클라우드 러너' });
-    const volumeName = `cpt-vol-${req.user.id}-${String(workspaceId).replace(/[^A-Za-z0-9_.-]/g, '')}`;
+    const { deviceId, deviceToken, wasDormant } = await cloudRunnerService.provisionDevice(req.user.id, { workspaceId, deviceName: '클라우드 러너' });
+    // 동면 상태였다면(볼륨에 크레덴셜·코드 존재) 콜드스타트 = "환경 깨우는 중…" 진행 표시(best-effort).
+    if (wasDormant) { try { daemonRelayService.fanoutSyncEvent(req.user.id, { type: 'sync_progress', phase: 'wake' }); } catch (_) { /* noop */ } }
     let launched = false;
     let needsManualRun = false;
     try {
-      await cloudRunnerService.launchContainer(req.user.id, { deviceToken, deviceName: '클라우드 러너', workspaceId, volumeName });
+      const { containerId } = await cloudRunnerService.launchContainer(req.user.id, { deviceToken, deviceName: '클라우드 러너', workspaceId });
+      // 동면 시 컨테이너를 찾으려면 container_id 를 DB 에 남겨야 한다(스위퍼가 이걸로 stop).
+      await DaemonDevice.update({ container_id: containerId, updated_at: new Date() }, { where: { id: deviceId } }).catch(() => {});
       launched = true;
     } catch (e) {
       // docker.sock 미가용(로컬 dev): 명시 503 또는 소켓 연결 실패(ENOENT/ECONNREFUSED) → graceful 수동 기동.
@@ -148,11 +151,12 @@ async function ensureCloudRunner(req, res) {
       if (noDocker) {
         needsManualRun = true;
         const net = process.env.CLOUD_RUNNER_NETWORK || 'codingpt_service_codingpt_local';
-        // 개발자 수동 기동용 힌트(토큰은 콘솔에만, 응답엔 안 실림).
-        console.log(`[cloudRunner] docker.sock 미가용 — 수동 기동:\n  docker run -d --rm --name cpt-runner-${req.user.id}-${deviceId} --network ${net} -e RUNNER_SERVER_URL=${process.env.CLOUD_RUNNER_SERVER_URL || 'http://back:5300'} -e RUNNER_TOKEN=${deviceToken} ${cloudRunnerService.RUNNER_IMAGE}`);
+        const v = cloudRunnerService.volNames(req.user.id, workspaceId);
+        // 개발자 수동 기동용 힌트(토큰은 콘솔에만, 응답엔 안 실림). 3볼륨 마운트 포함 → 수동 검증도 동면/재개 일관.
+        console.log(`[cloudRunner] docker.sock 미가용 — 수동 기동:\n  docker run -d --name cpt-runner-${req.user.id}-${deviceId} --network ${net} -v ${v.work}:/workspace -v ${v.claude}:/root/.claude -v ${v.state}:/var/lib/codingpt -e RUNNER_SERVER_URL=${process.env.CLOUD_RUNNER_SERVER_URL || 'http://back:5300'} -e RUNNER_TOKEN=${deviceToken} ${cloudRunnerService.RUNNER_IMAGE}`);
       } else { throw e; }
     }
-    return successResponse(res, { runnerId: deviceId, launched, needsManualRun });
+    return successResponse(res, { runnerId: deviceId, launched, needsManualRun, wasDormant });
   } catch (e) {
     return errorResponse(res, e, (e && e.statusCode) || 500);
   }
@@ -167,6 +171,11 @@ async function revokeDevice(req, res) {
     if (!device) return errorResponse(res, new Error('기기를 찾을 수 없습니다.'), 404);
     await device.update({ revoked_at: new Date() });
     daemonRelayService.disconnectDevice(deviceId);
+    // 클라우드 러너 revoke → 컨테이너 정지 + 워크스페이스 볼륨 3종 GC(고아 방지, best-effort).
+    if (device.runner_kind === 'cloud') {
+      if (device.container_id) cloudRunnerService.stopContainer(device.container_id).catch(() => {});
+      cloudRunnerService.removeVolumes(userId, device.workspace_id).catch(() => {});
+    }
     return successResponse(res, { deviceId, revoked: true });
   } catch (e) {
     return errorResponse(res, e, 500);

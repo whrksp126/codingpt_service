@@ -71,6 +71,24 @@ function listRunners(userId) {
     platform: c.platform, active: c.deviceId === e.activeRunnerId, connectedAt: c.connectedAt,
   }));
 }
+// 연결된 클라우드 러너 목록(동면 스위퍼용) — 활동시각/바쁨 상태 포함.
+function listCloudRunners() {
+  const out = [];
+  for (const [userId, entry] of connections) {
+    for (const conn of entry.runners.values()) {
+      if (conn.kind !== 'cloud') continue;
+      out.push({
+        userId: Number(userId),
+        deviceId: conn.deviceId,
+        lastActivityAt: conn.lastActivityAt || conn.connectedAt,
+        hasLiveTerminal: (conn.liveTerminals || 0) > 0,
+        hasInflight: conn.pendingRpc.size > 0,
+      });
+    }
+  }
+  return out;
+}
+
 // streamToken → { userId, kind, resolve, reject, timer }
 const pendingStreams = new Map();
 // 앱 터미널 토큰 → { userId, expiresAt }
@@ -123,6 +141,8 @@ function registerControl(ws, device) {
     ws,
     connectedAt: Date.now(),
     lastSeenFlushedAt: 0,
+    lastActivityAt: Date.now(), // M5 Slice3: 동면 스위퍼가 쓰는 활동시각(RPC/스트림/인바운드 메시지 시 갱신). keepalive 는 활동 아님.
+    liveTerminals: 0,           // 이 러너로 열린 앱 PTY 터미널 수(>0 이면 동면 금지).
     rpcSeq: 0,
     pendingRpc: new Map(), // id → { resolve, reject, timer }
   };
@@ -145,6 +165,7 @@ function registerControl(ws, device) {
     let msg = null;
     try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || typeof msg.type !== 'string') return;
+    conn.lastActivityAt = Date.now(); // 인바운드 메시지(rpc_result/agent_event/fs_event/sync_event 등)=러너 활동 → 동면 방지.
     if (msg.type === 'hello') {
       // 데몬 메타 갱신(버전업 반영). 이름/플랫폼/버전은 hello 가 정본.
       if (msg.deviceName) conn.deviceName = String(msg.deviceName).slice(0, 128);
@@ -231,6 +252,7 @@ function touchLastSeen(conn, force) {
 function openStream(userId, kind, params, opts) {
   const conn = pickConn(userId, opts); // 기본=활성 러너
   if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
+  conn.lastActivityAt = Date.now(); // 스트림 오픈=활동
   const streamToken = 'ds-' + crypto.randomBytes(18).toString('hex');
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -253,6 +275,7 @@ function openStream(userId, kind, params, opts) {
 function callRpc(userId, method, params, timeoutMs, opts) {
   const conn = pickConn(userId, opts); // 기본=활성 러너(로컬/클라우드). opts.runnerId/kind 로 특정 러너 지정.
   if (!conn) return Promise.reject(new Error('DAEMON_OFFLINE'));
+  conn.lastActivityAt = Date.now(); // RPC=활동
   const id = ++conn.rpcSeq;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -430,6 +453,8 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
   if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
   wss.handleUpgrade(req, socket, head, async (appWs) => {
     let daemonWs = null;
+    // 이 터미널을 실제로 여는 대상 러너 conn — 라이브 터미널 카운트로 동면을 막는다.
+    const ptyConn = pickConn(sess.userId);
     try {
       // cols/rows 는 앱이 접속 직후 resize 프레임으로 보정하므로 기본값으로 시작. cwd=진입 워크스페이스 폴더.
       daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '' });
@@ -437,6 +462,12 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
       const msg = e.message === 'DAEMON_OFFLINE' ? 'PC 데몬이 오프라인입니다.' : ('터미널을 열 수 없습니다: ' + e.message);
       try { appWs.send('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); appWs.close(); } catch (_) { /* noop */ }
       return;
+    }
+    if (ptyConn) {
+      ptyConn.liveTerminals = (ptyConn.liveTerminals || 0) + 1;
+      const dec = () => { ptyConn.liveTerminals = Math.max(0, (ptyConn.liveTerminals || 1) - 1); };
+      appWs.once('close', dec);
+      appWs.once('error', dec);
     }
     bridge(appWs, daemonWs, `pty userId=${sess.userId}`);
   });
@@ -584,6 +615,8 @@ module.exports = {
   disconnectDevice,
   setActiveRunner,
   listRunners,
+  listCloudRunners,
+  fanoutSyncEvent,
   addEventClient,
   removeEventClient,
   proxyHttp,
