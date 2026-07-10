@@ -456,12 +456,77 @@ export default async () => {
 };
 `;
 
+// ── 프레임워크 감지 + 프레임워크별 dev 기동 ───────────────────────────
+// package.json 의 deps/dev 스크립트로 vite/next/cra 를 구분한다. 각 프레임워크는 host/port/base·HMR 를
+// 넘기는 방식이 전혀 다르다(Vite=CLI 플래그, CRA=env, Next=-p/-H). 미상은 현행(Vite 스타일) 유지 → 무회귀.
+function detectFramework(dir) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+    const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+    const dev = (pkg.scripts && pkg.scripts.dev) || '';
+    const start = (pkg.scripts && pkg.scripts.start) || '';
+    if (deps.next || /\bnext\s+dev\b/.test(dev) || /\bnext\s+dev\b/.test(start)) return 'next';
+    if (deps.vite || /\bvite\b/.test(dev)) return 'vite';
+    if (deps['react-scripts'] || /\breact-scripts\s+start\b/.test(dev) || /\breact-scripts\s+start\b/.test(start)) return 'cra';
+  } catch (_) { /* package.json 없거나 파싱 실패 → 미상 */ }
+  return 'unknown';
+}
+
+/**
+ * 프레임워크별 dev 기동 파라미터 산출.
+ *  @returns {{ devArgs:string, envLines:string[], configWrite:?{file:string,body:string}, runScript:string, hmr:'native'|'none' }}
+ *   devArgs: `npm run <runScript> -- <devArgs>` 로 붙는 인자. envLines: 스크립트 상단 export 들.
+ *   configWrite: 샌드박스 fs 에 써둘 설정 래퍼(있으면). runScript: 실행할 npm 스크립트명(dev|start).
+ */
+function buildFrameworkLaunch(framework, { dir, port, base, hmr }) {
+  const hmrEnv = [
+    `CPT_HMR_PATH=${shq(base)}`,
+    ...(hmr && hmr.protocol ? [`CPT_HMR_PROTOCOL=${shq(String(hmr.protocol))}`] : []),
+    ...(hmr && hmr.clientPort ? [`CPT_HMR_CLIENT_PORT=${shq(String(hmr.clientPort))}`] : []),
+  ];
+  if (framework === 'cra') {
+    // CRA(react-scripts): 모든 설정을 env 로. base=PUBLIC_URL, HMR ws 경로=WDS_SOCKET_PATH=<base>ws.
+    //   호스트체크 해제(프록시 도메인 허용). 포트/호스트도 env. CLI 플래그는 무시되므로 devArgs 없음.
+    const wsPath = base.endsWith('/') ? base + 'ws' : base + '/ws';
+    return {
+      runScript: 'start',
+      devArgs: '',
+      envLines: [
+        `export PORT=${port} HOST=0.0.0.0 PUBLIC_URL=${shq(base)}`,
+        `export WDS_SOCKET_PATH=${shq(wsPath)} DANGEROUSLY_DISABLE_HOST_CHECK=true BROWSER=none CI=false`,
+      ],
+      configWrite: null,
+      hmr: 'native',
+    };
+  }
+  if (framework === 'next') {
+    // Next.js: 포트/호스트는 -p/-H. base(assetPrefix/basePath)는 사용자 next.config 를 덮어쓰지 않기 위해
+    //   런타임 주입 대신 프록시 rewrite 에 의존(선골격). HMR(_next/webpack-hmr)은 same-origin 프록시로 native 동작.
+    return {
+      runScript: 'dev',
+      devArgs: `-p ${port} -H 0.0.0.0`,
+      envLines: [],
+      configWrite: null,
+      hmr: 'native',
+    };
+  }
+  // vite + unknown(현행 유지): --host/--port/--strictPort/--base + hmr 래퍼 config. 무회귀.
+  return {
+    runScript: 'dev',
+    devArgs: `--host 0.0.0.0 --port ${port} --strictPort --base ${shq(base)} --config ${shq(HMR_CONFIG_FILE)}`,
+    envLines: [`export ${hmrEnv.join(' ')}`],
+    configWrite: { file: HMR_CONFIG_FILE, body: HMR_CONFIG_JS },
+    hmr: 'native',
+  };
+}
+
 // 샌드박스 이미지에 procps(pkill/pgrep)가 없다 → /proc 스캔으로 dev 프로세스를 포터블하게 종료한다.
-// 자기 자신($$)·부모($PPID)는 제외(이 스크립트의 cmdline 에도 'vite' 패턴이 들어가 자살 방지).
+// 자기 자신($$)·부모($PPID)는 제외(이 스크립트의 cmdline 에도 패턴이 들어가 자살 방지).
+// vite/esbuild(Vite) + next-server/next dev(Next) + react-scripts/webpack(CRA) 를 포괄.
 const SWEEP_DEV =
   'for d in /proc/[0-9]*; do p=${d#/proc/}; '
   + '[ "$p" = "$$" ] && continue; [ "$p" = "$PPID" ] && continue; '
-  + `grep -qaE 'vite|esbuild' "$d/cmdline" 2>/dev/null && kill -9 "$p" 2>/dev/null; done; true`;
+  + `grep -qaE 'vite|esbuild|next-server|next dev|react-scripts|webpack' "$d/cmdline" 2>/dev/null && kill -9 "$p" 2>/dev/null; done; true`;
 // 기록해 둔 프로세스 그룹(setsid 세션 리더 pid = pgid)을 통째로 죽이고, 잔여 orphan 은 스캔으로 정리.
 const KILL_DEV =
   `{ [ -f ${DEV_PID_FILE} ] && kill -9 -"$(cat ${DEV_PID_FILE} 2>/dev/null)" 2>/dev/null; }; `
@@ -499,48 +564,44 @@ async function startDevServer(userId, { projectId, dir, port = 5173, basePath, h
   // 이미 떠있던 dev 서버(다른 프로젝트 등)는 정리(사용자당 1개)
   await stopDevServer(uid).catch(() => {});
 
-  // HMR 설정 주입: 사용자 vite.config 를 보존하면서 hmr(clientPort/protocol/path)만 덮어쓰는 래퍼 config 작성.
-  // 워커 fs == 샌드박스 fs(공유 볼륨)라 직접 파일을 써둔다. 실패해도 HMR 없이 정상 동작(폴백).
-  let hmrEnv = '';
-  let configFlag = '';
-  try {
-    fs.writeFileSync(path.join(dir, HMR_CONFIG_FILE), HMR_CONFIG_JS);
-    hmrEnv =
-      `export CPT_HMR_PATH=${shq(base)}`
-      + (hmr && hmr.protocol ? ` CPT_HMR_PROTOCOL=${shq(String(hmr.protocol))}` : '')
-      + (hmr && hmr.clientPort ? ` CPT_HMR_CLIENT_PORT=${shq(String(hmr.clientPort))}` : '')
-      + '; ';
-    configFlag = ` --config ${shq(HMR_CONFIG_FILE)}`;
-  } catch (_) { /* HMR 주입 실패 → 기존대로(핫리로드 없이) */ }
+  // 프레임워크 감지 → 프레임워크별 기동 파라미터(vite/unknown=현행, next=-p/-H, cra=env). 무회귀.
+  const framework = detectFramework(dir);
+  const launch = buildFrameworkLaunch(framework, { dir, port, base, hmr });
+  // 설정 래퍼(vite HMR config 등)를 샌드박스 fs 에 써둔다(공유 볼륨). 실패해도 HMR 없이 정상 동작(폴백).
+  if (launch.configWrite) {
+    try { fs.writeFileSync(path.join(dir, launch.configWrite.file), launch.configWrite.body); }
+    catch (_) { /* 주입 실패 → 핫리로드 없이 정상 동작 */ }
+  }
+  const runScript = launch.runScript;
+  const devArgsStr = launch.devArgs ? ` -- ${launch.devArgs}` : '';
+  const fwEnvScript = launch.envLines.length ? launch.envLines.join('\n') + '\n' : '';       // 스크립트용(줄바꿈)
+  const fwEnvInline = launch.envLines.length ? launch.envLines.join('; ') + '; ' : '';        // 폴백 한 줄용
 
   const proxyExports = EGRESS_PROXY
     ? `export HTTP_PROXY=${EGRESS_PROXY} HTTPS_PROXY=${EGRESS_PROXY} http_proxy=${EGRESS_PROXY} https_proxy=${EGRESS_PROXY} NO_PROXY=localhost,127.0.0.1 no_proxy=localhost,127.0.0.1\n`
     : '';
-  const hmrExports = hmrEnv ? hmrEnv.replace(/; $/, '') + '\n' : '';
   // 포트가 완전히 빌 때까지 대기(이전 프로세스 종료 직후 strictPort 충돌 방지). /dev/tcp 연결되면 아직 점유 중.
   const portWait = `for i in $(seq 1 30); do (exec 3<>/dev/tcp/127.0.0.1/${port}) 2>/dev/null && { exec 3>&- 3<&- 2>/dev/null; sleep 0.5; } || break; done`;
-  const devFlags = `--host 0.0.0.0 --port ${port} --strictPort --base ${shq(base)}${configFlag}`;
 
   // ── 긴 실행 명령을 래퍼 스크립트(.cpt-dev.sh)로 빼서, 터미널엔 짧고 읽기 쉬운 'bash .cpt-dev.sh' 만 보이게 ──
   //   exec 안 함 → Ctrl-C 로 npm 종료 시 dev 윈도우의 셸 프롬프트로 복귀(실제 dev 환경과 동일).
-  //   (예전엔 거대한 한 줄을 tmux 에 그대로 타이핑해 "표현이 다름"·가독성 저하 → 스크립트로 해결)
   const scriptBody =
     `#!/usr/bin/env bash\n`
-    + `${proxyExports}${hmrExports}`
+    + `${proxyExports}${fwEnvScript}`
     + `cd ${shq(dir)} || exit 1\n`
     + `${SWEEP_DEV}\n`
     + `${portWait}\n`
     + `[ -d node_modules ] || npm install\n`
-    + `echo "▶ dev 서버 시작 (포트 ${port}) — 종료하려면 Ctrl-C"\n`
-    + `NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- ${devFlags}\n`;
+    + `echo "▶ dev 서버 시작 (${framework}, 포트 ${port}) — 종료하려면 Ctrl-C"\n`
+    + `NODE_OPTIONS=--max-old-space-size=1536 npm run ${runScript}${devArgsStr}\n`;
   try { fs.writeFileSync(path.join(dir, DEV_SCRIPT), scriptBody, { mode: 0o755 }); } catch (_) { /* noop */ }
   const devCmd = `clear; bash ${DEV_SCRIPT}`;
 
   // ── setsid 폴백(tmux 미설치 환경): 기존 방식(pid 기록 + 로그파일로 백그라운드) ──
   const fallbackCmd =
-    `${EGRESS_PROXY ? proxyExports.replace(/\n/g, '; ') : ''}${hmrEnv}cd ${shq(dir)} && ${SWEEP_DEV}; echo $$ > ${DEV_PID_FILE}; ${portWait}; ` +
+    `${EGRESS_PROXY ? proxyExports.replace(/\n/g, '; ') : ''}${fwEnvInline}cd ${shq(dir)} && ${SWEEP_DEV}; echo $$ > ${DEV_PID_FILE}; ${portWait}; ` +
     `{ [ -d node_modules ] || npm install; } && ` +
-    `exec env NODE_OPTIONS=--max-old-space-size=1536 npm run dev -- ${devFlags}`;
+    `exec env NODE_OPTIONS=--max-old-space-size=1536 npm run ${runScript}${devArgsStr}`;
 
   // tmux 있으면 dev 전용 윈도우에서 전면 실행(셸 윈도우와 분리된 탭 → 멀티 터미널), 없으면 setsid 백그라운드.
   //   기존 dev 윈도우가 있으면 Ctrl-C 후 재사용, 없으면 새로 만든다. 실행 후 그 윈도우로 전환.
@@ -687,4 +748,6 @@ module.exports = {
   listWindows, newWindow, selectWindow, killWindow, clearActiveWindow, detectListeningPorts, ensurePortForwarder,
   // dev 서버(미리보기) lifecycle
   startDevServer, isDevReady, readDevLog, stopDevServer, getDevServer,
+  // 프레임워크 감지/기동(테스트·재사용)
+  detectFramework, buildFrameworkLaunch,
 };
