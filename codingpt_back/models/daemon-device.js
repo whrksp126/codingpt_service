@@ -10,6 +10,7 @@ module.exports = (sequelize, DataTypes) => {
     token_hash: { type: DataTypes.STRING(64), allowNull: false, unique: true }, // sha256(deviceToken)
     runner_kind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'local' }, // local(PC 데몬) | cloud(격리 컨테이너) — M5
     container_id: { type: DataTypes.STRING(128), allowNull: true }, // cloud: 도커 컨테이너 id
+    container_started_at: { type: DataTypes.DATE, allowNull: true }, // cloud: 컨테이너 기동 시각(정지 시 실행시간 span 계측 — M5 Slice5)
     workspace_id: { type: DataTypes.STRING(64), allowNull: true }, // cloud: 바인딩된 워크스페이스
     dormant_at: { type: DataTypes.DATE, allowNull: true }, // cloud: 동면(scale-to-zero) 시각
     last_seen_at: { type: DataTypes.DATE, allowNull: true }, // 제어 WS 마지막 생존 시각

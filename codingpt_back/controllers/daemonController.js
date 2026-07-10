@@ -12,7 +12,20 @@ const crypto = require('crypto');
 const { DaemonDevice } = require('../models');
 const daemonRelayService = require('../services/daemonRelayService');
 const cloudRunnerService = require('../services/cloudRunnerService');
+const usageService = require('../services/usageService');
+const BILLING = require('../config/billing');
 const { successResponse, errorResponse } = require('../utils/response');
+
+// 클라우드 실행시간 초 쿼터 프리플라이트(M5 Slice5). ENFORCE 꺼져 있으면 항상 통과(실측 전 안전).
+//  차단 시 402 + 메시지. 앱은 402=페이월 트리거로 보고 상세는 GET /api/usage/status 로 조회. 로컬은 무제한이라 호출 안 함.
+async function cloudAllowanceGate(res, userId) {
+  if (!BILLING.ENFORCE) return true;
+  const a = await usageService.checkAllowance(userId).catch(() => ({ allowed: true }));
+  if (a.allowed) return true;
+  const msg = a.reason === 'weekly_exceeded' ? '주간 클라우드 실행시간 한도에 도달했어요.' : '클라우드 실행시간 한도에 도달했어요.';
+  errorResponse(res, new Error(msg), 402);
+  return false;
+}
 
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000;
 const pairCodes = new Map(); // code → { userId, expiresAt }
@@ -135,6 +148,8 @@ async function ensureCloudRunner(req, res) {
   try {
     const workspaceId = (req.body && req.body.workspaceId) || null;
     if (!workspaceId) return errorResponse(res, new Error('workspaceId 가 필요합니다.'), 400);
+    // 프리플라이트: 클라우드 실행시간 초 쿼터 초과면 러너 기동/깨우기 차단(ENFORCE 시).
+    if (!(await cloudAllowanceGate(res, req.user.id))) return;
     const { deviceId, deviceToken, wasDormant } = await cloudRunnerService.provisionDevice(req.user.id, { workspaceId, deviceName: '클라우드 러너' });
     // 동면 상태였다면(볼륨에 크레덴셜·코드 존재) 콜드스타트 = "환경 깨우는 중…" 진행 표시(best-effort).
     if (wasDormant) { try { daemonRelayService.fanoutSyncEvent(req.user.id, { type: 'sync_progress', phase: 'wake' }); } catch (_) { /* noop */ } }
@@ -142,8 +157,8 @@ async function ensureCloudRunner(req, res) {
     let needsManualRun = false;
     try {
       const { containerId } = await cloudRunnerService.launchContainer(req.user.id, { deviceToken, deviceName: '클라우드 러너', workspaceId });
-      // 동면 시 컨테이너를 찾으려면 container_id 를 DB 에 남겨야 한다(스위퍼가 이걸로 stop).
-      await DaemonDevice.update({ container_id: containerId, updated_at: new Date() }, { where: { id: deviceId } }).catch(() => {});
+      // 동면 시 컨테이너를 찾으려면 container_id 를, 실행시간 계측 위해 container_started_at 를 DB 에 남긴다.
+      await DaemonDevice.update({ container_id: containerId, container_started_at: new Date(), updated_at: new Date() }, { where: { id: deviceId } }).catch(() => {});
       launched = true;
     } catch (e) {
       // docker.sock 미가용(로컬 dev): 명시 503 또는 소켓 연결 실패(ENOENT/ECONNREFUSED) → graceful 수동 기동.
@@ -171,8 +186,9 @@ async function revokeDevice(req, res) {
     if (!device) return errorResponse(res, new Error('기기를 찾을 수 없습니다.'), 404);
     await device.update({ revoked_at: new Date() });
     daemonRelayService.disconnectDevice(deviceId);
-    // 클라우드 러너 revoke → 컨테이너 정지 + 워크스페이스 볼륨 3종 GC(고아 방지, best-effort).
+    // 클라우드 러너 revoke → 실행시간 계측 마감 + 컨테이너 정지 + 워크스페이스 볼륨 3종 GC(best-effort).
     if (device.runner_kind === 'cloud') {
+      await cloudRunnerService.endComputeSpan(device).catch(() => {});
       if (device.container_id) cloudRunnerService.stopContainer(device.container_id).catch(() => {});
       cloudRunnerService.removeVolumes(userId, device.workspace_id).catch(() => {});
     }
@@ -339,6 +355,9 @@ async function wsClone(req, res) {
 async function agentStart(req, res) {
   try {
     const { cwd, prompt, resumeId } = req.body || {};
+    // 활성 러너가 클라우드면 실행시간 초 쿼터 프리플라이트(ENFORCE 시). 로컬 활성이면 무제한 → 게이트 스킵.
+    const conn = daemonRelayService.getConnection(req.user.id);
+    if (conn && conn.kind === 'cloud') { if (!(await cloudAllowanceGate(res, req.user.id))) return; }
     const result = await daemonRelayService.callRpc(req.user.id, 'agent.start', { cwd: cwd || '', prompt, resumeId }, 30000);
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }

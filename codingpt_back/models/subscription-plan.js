@@ -6,8 +6,11 @@ module.exports = (sequelize, DataTypes) => {
     name: { type: DataTypes.STRING(64), allowNull: false },
     price_krw: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // 월 구독료(원)
     window_seconds: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 18000 }, // 롤링 윈도우 길이(5h)
-    window_unit_limit: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 }, // 윈도우당 허용 unit
-    weekly_unit_limit: { type: DataTypes.BIGINT, allowNull: true }, // 주간 캡(선택)
+    window_unit_limit: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 }, // (레거시) 윈도우당 허용 unit
+    weekly_unit_limit: { type: DataTypes.BIGINT, allowNull: true }, // (레거시) 주간 캡(선택)
+    // M5 Slice5 — 클라우드 실행시간(초) 쿼터. BYO=cost 불가시라 계측 대상은 클라우드 런타임 초.
+    window_seconds_limit: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 }, // 윈도우당 허용 초(0=무제한)
+    weekly_seconds_limit: { type: DataTypes.BIGINT, allowNull: true }, // 주간 캡(초, null=없음)
     billing_period: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'monthly' },
     is_active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     sort_order: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },

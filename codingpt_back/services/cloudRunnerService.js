@@ -153,11 +153,27 @@ async function dormant(userId, deviceId) {
     where: { id: deviceId, user_id: userId, runner_kind: 'cloud', revoked_at: null },
   });
   if (!device || !device.container_id) return false;
+  await endComputeSpan(device); // 정지 전 실행시간(초) 계측 적재 — M5 Slice5
   await stopContainer(device.container_id);
-  await device.update({ dormant_at: new Date(), container_id: null, updated_at: new Date() });
+  await device.update({ dormant_at: new Date(), container_id: null, container_started_at: null, updated_at: new Date() });
   try { require('./daemonRelayService').fanoutSyncEvent(userId, { type: 'sync_progress', phase: 'dormant' }); } catch (_) { /* noop */ }
   console.log(`[cloudRunner] 동면 userId=${userId} device=#${deviceId}`);
   return true;
+}
+
+// 클라우드 컨테이너 실행시간 span(기동~정지)을 usage_event.compute_ms 로 적재(M5 Slice5).
+//  BYO=사용자 토큰비용 불가시라 계측 대상은 실행시간뿐. 로컬 러너는 호출되지 않음(무제한).
+//  fire-and-forget — 실패해도 정지/동면 흐름을 막지 않는다. 호출부가 container_started_at 을 null 로 정리.
+async function endComputeSpan(device) {
+  try {
+    if (!device || !device.container_started_at) return 0;
+    const ms = Math.max(0, Date.now() - new Date(device.container_started_at).getTime());
+    if (ms > 0) {
+      const usageService = require('./usageService');
+      await usageService.recordTurn({ userId: device.user_id, projectId: device.workspace_id, costUsd: 0, computeMs: ms }).catch(() => {});
+    }
+    return ms;
+  } catch (_) { return 0; }
 }
 
 // idle 스위퍼 — 연결된 클라우드 러너 중 TTL 초과 & 라이브 터미널/인플라이트 없음 → 동면.
@@ -185,7 +201,7 @@ function startDormancySweeper() {
 const _dormancySweeper = startDormancySweeper();
 
 module.exports = {
-  provisionDevice, launchContainer, stopContainer, dormant, removeVolumes,
+  provisionDevice, launchContainer, stopContainer, dormant, endComputeSpan, removeVolumes,
   volNames, startDormancySweeper, RUNNER_IMAGE,
   _dormancySweeper,
 };
