@@ -25,9 +25,11 @@ class SubscriptionService {
     if (!plan) throw new Error('존재하지 않는 플랜입니다.');
     const ALLOWED = [
       'name', 'price_krw', 'window_seconds', 'window_unit_limit', 'weekly_unit_limit',
+      'window_seconds_limit', 'weekly_seconds_limit', // M5 Slice5 — 클라우드 실행시간 초 쿼터(라이브 튜닝)
       'sort_order', 'is_active', 'tagline', 'features', 'badge', 'highlight', 'display_multiplier',
     ];
-    const NUMERIC = ['price_krw', 'window_seconds', 'window_unit_limit', 'weekly_unit_limit', 'sort_order'];
+    const NUMERIC = ['price_krw', 'window_seconds', 'window_unit_limit', 'weekly_unit_limit', 'window_seconds_limit', 'weekly_seconds_limit', 'sort_order'];
+    const NULLABLE_NUMERIC = ['weekly_unit_limit', 'weekly_seconds_limit']; // null=주간 캡 없음. 나머지 NOT NULL(0=무제한)
     const patch = {};
     for (const key of ALLOWED) {
       if (!(key in fields)) continue;
@@ -35,8 +37,7 @@ class SubscriptionService {
       if (NUMERIC.includes(key)) {
         if (val === null || val === '') { val = null; }
         else { val = Number(val); if (!Number.isFinite(val) || val < 0) throw new Error(`${key} 값이 올바르지 않습니다.`); }
-        // window_unit_limit 은 NOT NULL(0=무제한), weekly 는 nullable
-        if (key !== 'weekly_unit_limit' && val === null) continue;
+        if (!NULLABLE_NUMERIC.includes(key) && val === null) continue;
       }
       if (key === 'features' && val != null && !Array.isArray(val)) {
         throw new Error('features 는 배열이어야 합니다.');
