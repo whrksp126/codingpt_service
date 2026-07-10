@@ -35,7 +35,8 @@ services:
       - DB_HOST=postgres
       # M5 Slice4: 클라우드 러너 자동 기동(cloudRunnerService). 기동 컨테이너를 back 과 같은 네트워크에
       #  붙이고 dev back 내부포트(5100)로 아웃바운드 연결시킨다. 이미지는 dev 호스트에 빌드돼 있어야 함.
-      - CLOUD_RUNNER_NETWORK=codingpt_service_codingpt_dev
+      #  네트워크명 = compose 프로젝트(-p codingpt_dev) + 네트워크키(codingpt_dev) = codingpt_dev_codingpt_dev.
+      - CLOUD_RUNNER_NETWORK=codingpt_dev_codingpt_dev
       - CLOUD_RUNNER_IMAGE=codingpt-runner:dev
       - CLOUD_RUNNER_SERVER_URL=http://back:5100
     env_file:
