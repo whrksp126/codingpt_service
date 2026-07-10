@@ -1,31 +1,24 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { streamExec } from '@/lib/agent';
-import type { ExecEvent } from '@/lib/agentTypes';
+import { startTerminal, buildTerminalWsUrl } from '@/lib/daemon';
 
-// 샌드박스 터미널 — xterm + POST /api/agent/exec(SSE). 앱 MobileIDE 터미널 프롬프트 색상과 동일.
+// BYO 터미널(M5-웹 W3) — 사용자 러너(PC 데몬/클라우드)의 실제 PTY 를 xterm 에 브리지.
+//  startTerminal(cwd)→불투명 토큰→WSS. 와이어: 바이너리=stdin(키입력), 텍스트 JSON {type:'resize',cols,rows},
+//  서버→클라 = PTY 출력 raw. 로컬 에코/프롬프트 없음(셸이 직접 그림). 앱 TerminalWebView 와 동일 계약.
 
-const BACKSPACE = '\x7f';
-const CTRL_C = '\x03';
-// 앱과 동일 truecolor: user@CodingPT(민트) :(dim) ~/proj(블루) $(민트)
-const MINT = '\x1b[38;2;52;211;153m';
-const DIM = '\x1b[38;2;100;116;139m';
-const BLUE = '\x1b[38;2;96;165;250m';
-const RST = '\x1b[0m';
-
-export default function Terminal({ wsId, projectName, onClose }: { wsId: string; projectName?: string; onClose?: () => void }) {
+export default function Terminal({ cwd = '', projectName, onClose }: { cwd?: string; projectName?: string; onClose?: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<any>(null);
-  const cmdRef = useRef('');
-  const cwdRef = useRef('');
-  const abortRef = useRef<(() => void) | null>(null);
-  const runningRef = useRef(false);
+  const wsRef = useRef<WebSocket | null>(null);
   const [ready, setReady] = useState(false);
-  const proj = projectName || '작업영역';
+  const [status, setStatus] = useState<'connecting' | 'open' | 'closed' | 'error'>('connecting');
 
   useEffect(() => {
     let disposed = false;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+
     (async () => {
       const [{ Terminal: XTerm }, { FitAddon }] = await Promise.all([
         import('@xterm/xterm'),
@@ -43,78 +36,64 @@ export default function Terminal({ wsId, projectName, onClose }: { wsId: string;
       try { fit.fit(); } catch (_) { /* noop */ }
       termRef.current = term;
       setReady(true);
-      writePrompt(term);
 
-      term.onData((d: string) => onData(d));
-      const onResize = () => { try { fit.fit(); } catch (_) { /* noop */ } };
-      window.addEventListener('resize', onResize);
-      (term as any).__onResize = onResize;
+      // 러너 PTY 세션 시작 → WSS 브리지. 데몬 오프라인이면 startTerminal 이 throw.
+      let token: string;
+      try { token = await startTerminal(cwd); }
+      catch (e) {
+        if (disposed) return;
+        term.write(`\r\n\x1b[31m${e instanceof Error ? e.message : '터미널을 시작할 수 없어요.'}\x1b[0m\r\n`);
+        setStatus('error');
+        return;
+      }
+      if (disposed) return;
+      const ws = new WebSocket(buildTerminalWsUrl(token));
+      ws.binaryType = 'arraybuffer';
+      wsRef.current = ws;
+
+      const sendResize = () => {
+        try {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        } catch (_) { /* noop */ }
+      };
+
+      ws.onopen = () => { if (disposed) return; setStatus('open'); sendResize(); term.focus(); };
+      ws.onmessage = (ev: MessageEvent) => {
+        if (disposed) return;
+        if (ev.data instanceof ArrayBuffer) term.write(decoder.decode(new Uint8Array(ev.data)));
+        else term.write(String(ev.data));
+      };
+      ws.onerror = () => { if (!disposed) setStatus('error'); };
+      ws.onclose = () => { if (!disposed) { setStatus('closed'); term.write('\r\n\x1b[90m[연결 종료됨]\x1b[0m\r\n'); } };
+
+      // 키 입력 → 바이너리 stdin. 리사이즈 → JSON.
+      term.onData((d: string) => { try { if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(d)); } catch (_) { /* noop */ } });
+      term.onResize(() => sendResize());
+      const onWinResize = () => { try { fit.fit(); } catch (_) { /* noop */ } };
+      window.addEventListener('resize', onWinResize);
+      (term as any).__onResize = onWinResize;
     })();
+
     return () => {
       disposed = true;
-      try { abortRef.current?.(); } catch (_) { /* noop */ }
+      try { wsRef.current?.close(); } catch (_) { /* noop */ }
+      wsRef.current = null;
       const term = termRef.current;
       if (term?.__onResize) window.removeEventListener('resize', term.__onResize);
       try { term?.dispose(); } catch (_) { /* noop */ }
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const cwdDisp = () => {
-    const c = cwdRef.current;
-    if (!c) return `~/${proj}`;
-    const m = `/${wsId}`;
-    const i = c.indexOf(m);
-    return `~/${proj}${i >= 0 ? c.slice(i + m.length) : ''}`;
-  };
-
-  const writePrompt = (term: any) => {
-    term.write(`\r\n${MINT}user@CodingPT${RST}${DIM}:${RST}${BLUE}${cwdDisp()}${RST}${MINT}$ ${RST}`);
-  };
-
-  const run = (command: string) => {
-    const term = termRef.current;
-    if (!term || runningRef.current) return;
-    if (!command.trim()) { writePrompt(term); return; }
-    runningRef.current = true;
-    term.write('\r\n');
-    abortRef.current = streamExec(
-      { command, cwd: cwdRef.current || undefined, projectId: wsId },
-      {
-        onEvent: (e: ExecEvent) => {
-          if (e.type === 'output') term.write(e.data.replace(/\n/g, '\r\n'));
-          else if (e.type === 'cwd') cwdRef.current = e.cwd;
-          else if (e.type === 'start') cwdRef.current = e.cwd || cwdRef.current;
-          else if (e.type === 'error') term.write(`\r\n\x1b[31m${e.message}\x1b[0m`);
-        },
-        onComplete: () => { runningRef.current = false; writePrompt(term); },
-        onError: (m) => { runningRef.current = false; term.write(`\r\n\x1b[31m${m}\x1b[0m`); writePrompt(term); },
-      },
-    );
-  };
-
-  const onData = (d: string) => {
-    const term = termRef.current;
-    if (!term) return;
-    if (d === CTRL_C) {
-      try { abortRef.current?.(); } catch (_) { /* noop */ }
-      runningRef.current = false; cmdRef.current = ''; term.write('^C'); writePrompt(term); return;
-    }
-    if (runningRef.current) return;
-    if (d === '\r') { const c = cmdRef.current; cmdRef.current = ''; run(c); return; }
-    if (d === BACKSPACE || d === '\b') {
-      if (cmdRef.current.length > 0) { cmdRef.current = cmdRef.current.slice(0, -1); term.write('\b \b'); }
-      return;
-    }
-    if (d >= ' ') { cmdRef.current += d; term.write(d); }
-  };
+  }, [cwd]);
 
   const clear = () => { try { termRef.current?.clear(); } catch (_) { /* noop */ } };
+  const proj = projectName || '작업영역';
 
   return (
     <div style={{ height: '100%', background: '#0A0D14', display: 'flex', flexDirection: 'column', position: 'relative', borderTop: '1px solid #1C2230' }}>
-      {/* 터미널 패널 헤더 — 앱 하단 패널 탭 스타일 */}
       <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8, flexShrink: 0 }}>
         <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, borderBottom: '2px solid #3B82F6', paddingBottom: 2 }}>터미널</span>
+        <span style={{ color: '#475569', fontSize: 11, marginLeft: 10 }}>
+          {status === 'open' ? `● ${proj}` : status === 'connecting' ? '연결 중…' : status === 'error' ? '연결 실패' : '연결 종료'}
+        </span>
         <div style={{ flex: 1 }} />
         <button onClick={clear} style={{ color: '#64748B', fontSize: 12, background: 'none', border: 'none', cursor: 'pointer', marginRight: 14 }}>지우기</button>
         {onClose ? (
