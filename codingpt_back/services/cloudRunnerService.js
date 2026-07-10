@@ -12,6 +12,7 @@
  *  크레덴셜은 홈서버 밖으로 나가지 않고 우리 앱 코드가 읽지도 않는다(규율 준수).
  */
 const crypto = require('crypto');
+const { Op } = require('sequelize');
 const { DaemonDevice } = require('../models');
 
 let Docker = null;
@@ -29,6 +30,11 @@ const RUNNER_SELF_URL = process.env.CLOUD_RUNNER_SERVER_URL || 'http://back:5300
 // 동면 스위퍼: idle TTL(기본 15분) · 검사 주기(60s). sandboxManager.startIdleSweeper 패턴.
 const IDLE_TTL_MS = Number(process.env.CLOUD_RUNNER_IDLE_TTL_MS || 15 * 60 * 1000);
 const SWEEP_INTERVAL_MS = Number(process.env.CLOUD_RUNNER_SWEEP_MS || 60 * 1000);
+// 동시 실행 캡 — 기동 중(container_id != null) 컨테이너 수를 제한해 홈서버 RAM 소진을 막는다.
+//  각 러너 컨테이너는 최대 RUNNER_MEM_MB(기본 2GB)까지 쓸 수 있으므로 무제한 기동은 위험.
+//  유저당 + 전역 두 축으로 제한. 0 이하면 해당 축 무제한(비권장).
+const MAX_PER_USER = Number(process.env.CLOUD_RUNNER_MAX_PER_USER || 3);
+const MAX_TOTAL = Number(process.env.CLOUD_RUNNER_MAX_TOTAL || 12);
 
 // 이미지 내부 마운트 지점(Dockerfile.runner 의 RUNNER_ROOT/STATE_DIR/CLAUDE_CONFIG_DIR 와 일치해야 함).
 const MOUNT_TARGETS = { work: '/workspace', claude: '/root/.claude', state: '/var/lib/codingpt' };
@@ -83,6 +89,37 @@ async function provisionDevice(userId, { workspaceId = null, deviceName } = {}) 
     });
   }
   return { deviceId: device.id, deviceToken, reused, wasDormant };
+}
+
+/**
+ * 기동 중(container_id != null, 미revoke) 클라우드 컨테이너 수. RAM 캡 판정용.
+ *  excludeDeviceId: 지금 기동하려는 기기 자신은 제외(재개/재연결 시 이중계산 방지).
+ * @returns {Promise<number>}
+ */
+async function countActive({ userId = null, excludeDeviceId = null } = {}) {
+  const where = { runner_kind: 'cloud', revoked_at: null, container_id: { [Op.ne]: null } };
+  if (userId != null) where.user_id = userId;
+  if (excludeDeviceId != null) where.id = { [Op.ne]: excludeDeviceId };
+  return DaemonDevice.count({ where });
+}
+
+/**
+ * 동시 실행 캡 검사 — 이 기기의 컨테이너를 하나 더 올렸을 때 유저당/전역 한도를 넘으면 429 throw.
+ *  launchContainer 직전에 호출. 초과 시 e.statusCode=429, e.capExceeded='user'|'total'.
+ */
+async function assertCapacity(userId, deviceId) {
+  const [userActive, totalActive] = await Promise.all([
+    countActive({ userId, excludeDeviceId: deviceId }),
+    countActive({ excludeDeviceId: deviceId }),
+  ]);
+  if (MAX_PER_USER > 0 && userActive + 1 > MAX_PER_USER) {
+    const e = new Error(`동시에 실행할 수 있는 클라우드 러너는 최대 ${MAX_PER_USER}개예요. 다른 워크스페이스를 닫은 뒤 다시 시도해 주세요.`);
+    e.statusCode = 429; e.capExceeded = 'user'; throw e;
+  }
+  if (MAX_TOTAL > 0 && totalActive + 1 > MAX_TOTAL) {
+    const e = new Error('지금 클라우드 러너가 모두 사용 중이에요. 잠시 후 다시 시도해 주세요.');
+    e.statusCode = 429; e.capExceeded = 'total'; throw e;
+  }
 }
 
 /**
@@ -202,6 +239,7 @@ const _dormancySweeper = startDormancySweeper();
 
 module.exports = {
   provisionDevice, launchContainer, stopContainer, dormant, endComputeSpan, removeVolumes,
-  volNames, startDormancySweeper, RUNNER_IMAGE,
+  volNames, startDormancySweeper, countActive, assertCapacity, RUNNER_IMAGE,
+  MAX_PER_USER, MAX_TOTAL,
   _dormancySweeper,
 };

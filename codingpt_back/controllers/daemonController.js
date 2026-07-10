@@ -156,6 +156,8 @@ async function ensureCloudRunner(req, res) {
     let launched = false;
     let needsManualRun = false;
     try {
+      // 동시 실행 캡: 이 기기 컨테이너를 올리면 유저당/전역 한도를 넘는지 검사(초과 시 429). RAM 소진 방지.
+      await cloudRunnerService.assertCapacity(req.user.id, deviceId);
       const { containerId } = await cloudRunnerService.launchContainer(req.user.id, { deviceToken, deviceName: '클라우드 러너', workspaceId });
       // 동면 시 컨테이너를 찾으려면 container_id 를, 실행시간 계측 위해 container_started_at 를 DB 에 남긴다.
       await DaemonDevice.update({ container_id: containerId, container_started_at: new Date(), updated_at: new Date() }, { where: { id: deviceId } }).catch(() => {});
