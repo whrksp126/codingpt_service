@@ -1,0 +1,180 @@
+:root {
+  --bg: #0a0d14;
+  --surface: #121722;
+  --surface2: #1a2130;
+  --border: #232c3d;
+  --text: #eef2f8;
+  --text2: #aeb8c8;
+  --dim: #6b7688;
+  --accent: #46e35a;
+  --accent-ink: #052e16;
+  --warn: #ff6b6b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Pretendard", "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* 투명 타이틀바 드래그 영역 */
+.titlebar { height: 30px; width: 100%; flex: none; }
+
+.app {
+  height: calc(100% - 30px);
+  padding: 10px 24px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;   /* 고급 설정 펼치면 창이 고정크기라 넘칠 수 있음 → 세로 스크롤 허용 */
+  overflow-x: hidden;
+}
+
+/* 섹션 내부 자식 간격 — .app 의 gap 은 섹션들 사이에만 적용되므로 내부는 별도로 준다. */
+#pairView, #connectedView { display: flex; flex-direction: column; gap: 14px; }
+
+/* ── 브랜드 헤더 ── */
+.brand {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.brand-logo { width: 52px; height: 52px; margin-bottom: 4px; }
+.brand-title {
+  font-size: 21px;
+  font-weight: 800;
+  font-style: italic;
+  color: var(--text);
+  letter-spacing: -0.4px;
+}
+.brand-sub { font-size: 12px; color: var(--dim); }
+
+/* ── 상태 카드 ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 13px 16px;
+}
+.status { display: flex; align-items: center; gap: 12px; }
+.status .dot {
+  width: 10px; height: 10px; border-radius: 999px;
+  background: var(--dim); flex: none;
+}
+.status.online .dot { background: var(--accent); animation: pulse 2s infinite; }
+.status.offline .dot { background: var(--dim); }
+.status.error .dot { background: var(--warn); }
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(70, 227, 90, 0.5); }
+  70% { box-shadow: 0 0 0 7px rgba(70, 227, 90, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(70, 227, 90, 0); }
+}
+.status-text { flex: 1; min-width: 0; } /* 긴 서버주소가 카드를 가로로 밀지 않도록 */
+.status-title { font-size: 14px; font-weight: 700; }
+.status-desc { font-size: 11.5px; color: var(--dim); margin-top: 2px; font-family: ui-monospace, monospace; word-break: break-all; }
+
+/* ── QR 카드 ── */
+.qr-card {
+  align-self: center;
+  position: relative;
+  background: #fff;
+  border-radius: 18px;
+  padding: 16px;
+  width: 208px;
+  height: 208px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.qr-box { width: 176px; height: 176px; display: flex; align-items: center; justify-content: center; }
+.qr-box img, .qr-box svg { width: 176px; height: 176px; display: block; image-rendering: pixelated; }
+.qr-spinner {
+  width: 30px; height: 30px; border-radius: 999px;
+  border: 3px solid #d7dde6; border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.qr-expired {
+  position: absolute; inset: 0;
+  background: rgba(10, 13, 20, 0.86); color: var(--text);
+  border-radius: 18px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  font-size: 13px;
+}
+
+/* ── 힌트/코드 ── */
+.hint { font-size: 13px; color: var(--text2); line-height: 1.55; }
+.hint.center { text-align: center; }
+.hint b { color: var(--text); }
+
+.code-line {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 9px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+}
+.code-label { font-size: 11px; color: var(--dim); }
+.code-val {
+  font-family: ui-monospace, monospace;
+  font-size: 15px; font-weight: 700; letter-spacing: 2px; color: var(--text);
+}
+
+/* ── 고급/폼 ── */
+.adv { font-size: 12px; color: var(--dim); }
+.adv summary { cursor: pointer; padding: 6px 0; text-align: center; color: var(--text2); }
+.adv[open] { display: flex; flex-direction: column; gap: 12px; margin-top: 2px; padding-bottom: 4px; }
+/* flex column 안에서 <button> 은 stretch 가 잘 안 돼 작게 뜸 → full-width 고정 */
+.adv[open] > .btn { width: 100%; align-self: stretch; }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field span { font-size: 11.5px; color: var(--dim); }
+.field input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 11px 13px;
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#codeInput { text-transform: uppercase; letter-spacing: 2px; font-weight: 700; text-align: center; }
+.field input:focus { border-color: var(--accent); }
+
+/* ── 버튼 ── */
+.btn {
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.08s, filter 0.15s, background 0.15s;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn.small { padding: 8px 14px; font-size: 13px; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.ghost { background: transparent; color: var(--text2); }
+.btn.danger { color: var(--warn); border-color: var(--warn); background: transparent; }
+
+.row { display: flex; gap: 10px; }
+.row .btn { flex: 1; }
+
+.switch { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--text2); cursor: pointer; }
+.switch input { width: 16px; height: 16px; accent-color: var(--accent); }
+
+.foot { font-size: 11px; color: var(--dim); text-align: center; margin-top: 2px; line-height: 1.5; }
+.error { font-size: 12px; color: var(--warn); line-height: 1.4; }
+.hidden { display: none !important; }

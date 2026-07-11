@@ -31,8 +31,15 @@ function ask(question) {
 async function cmdPair() {
   const serverUrl = (argValue('--server') || DEFAULT_SERVER).replace(/\/+$/, '');
   console.log(`서버: ${serverUrl}`);
-  console.log('앱의 [마이페이지 → 내 PC 연결] 에서 페어링 코드를 발급하세요.');
-  const code = (await ask('페어링 코드 입력 (예: ABCD-2345): ')).trim().toUpperCase();
+  // 데스크톱 앱(GUI)/스크립트용 비대화형 경로: --code 로 코드를 직접 넘기면 프롬프트 없이 진행.
+  const codeArg = argValue('--code');
+  let code;
+  if (codeArg) {
+    code = codeArg.trim().toUpperCase();
+  } else {
+    console.log('앱의 [마이페이지 → 내 PC 연결] 에서 페어링 코드를 발급하세요.');
+    code = (await ask('페어링 코드 입력 (예: ABCD-2345): ')).trim().toUpperCase();
+  }
   if (!code) { console.error('코드가 입력되지 않았습니다.'); process.exit(1); }
 
   const res = await fetch(`${serverUrl}/api/daemon/pair/claim`, {
@@ -60,6 +67,49 @@ async function cmdPair() {
   console.log(`✅ 페어링 완료 (deviceId=${deviceId})`);
   console.log(`설정 저장: ${file}`);
   console.log('이제 `npm start` (또는 node index.js run) 으로 데몬을 실행하세요.');
+}
+
+// ── QR 페어링(넷플릭스 방식) — PC가 세션을 열고 QR 표시, 로그인된 앱이 스캔·승인 ──
+// 1단계: 세션 생성 → QR 용 code/deepLink 를 stdout(JSON) 으로 반환. sessionSecret 은 이 PC 만 보관.
+async function cmdPairSession() {
+  const serverUrl = (argValue('--server') || DEFAULT_SERVER).replace(/\/+$/, '');
+  const res = await fetch(`${serverUrl}/api/daemon/pair/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      deviceName: os.hostname().replace(/\.local$/, ''),
+      platform: process.platform,
+      daemonVersion: pkg.version,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { process.stdout.write(JSON.stringify({ error: body.message || String(res.status) })); process.exit(1); }
+  process.stdout.write(JSON.stringify(body)); // { code, sessionSecret, deepLink, expiresAt }
+}
+
+// 2단계(폴링 1회): code/secret 으로 claim. 아직이면 {pending:true}, 승인되면 config 저장 후 {paired,deviceId}.
+//  폴링 루프는 프론트(GUI)가 담당 — 각 호출은 one-shot(기존 pair 아키텍처와 동일).
+async function cmdPairClaim() {
+  const serverUrl = (argValue('--server') || DEFAULT_SERVER).replace(/\/+$/, '');
+  const code = (argValue('--code') || '').trim().toUpperCase();
+  const secret = argValue('--secret') || '';
+  if (!code || !secret) { process.stdout.write(JSON.stringify({ error: 'code/secret 누락' })); process.exit(1); }
+  const res = await fetch(`${serverUrl}/api/daemon/pair/claim`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, sessionSecret: secret }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) { process.stdout.write(JSON.stringify({ error: body.message || String(res.status) })); process.exit(1); }
+  if (body.pending) { process.stdout.write(JSON.stringify({ pending: true })); return; }
+  const { deviceId, deviceToken } = body;
+  configLib.save({
+    serverUrl,
+    deviceId,
+    deviceToken,
+    deviceName: os.hostname().replace(/\.local$/, ''),
+  });
+  process.stdout.write(JSON.stringify({ paired: true, deviceId }));
 }
 
 function cmdRun() {
@@ -117,6 +167,8 @@ const cmd = process.argv[2];
 (async () => {
   switch (cmd) {
     case 'pair': await cmdPair(); break;
+    case 'pair-session': await cmdPairSession(); break;
+    case 'pair-claim': await cmdPairClaim(); break;
     case 'run': cmdRun(); break;
     case 'status': cmdStatus(); break;
     case 'setup': cmdSetup(); break;

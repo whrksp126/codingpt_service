@@ -28,7 +28,12 @@ async function cloudAllowanceGate(res, userId) {
 }
 
 const PAIR_CODE_TTL_MS = 10 * 60 * 1000;
-const pairCodes = new Map(); // code → { userId, expiresAt }
+// code → 세션. 한 Map이 두 페어링 모드를 공유한다:
+//  · 레거시(앱이 코드 발급):  { userId, expiresAt }               → PC claim 시 device 생성
+//  · QR(PC가 세션 발급):      { userId:null, expiresAt, status:'pending'|'approved',
+//                              secretHash, meta, deviceId?, deviceName?, deviceToken? }
+//    status 필드 유무로 두 모드를 구분한다.
+const pairCodes = new Map();
 
 const _sweeper = setInterval(() => {
   const now = Date.now();
@@ -36,14 +41,29 @@ const _sweeper = setInterval(() => {
 }, 60 * 1000);
 if (_sweeper.unref) _sweeper.unref();
 
-// 헷갈리는 문자(0/O, 1/I/L) 제외 — 사용자가 눈으로 옮겨 적는 코드.
+// 헷갈리는 문자(0/O, 1/I/L) 제외 — QR 미인식 시 눈으로 옮겨 적을 수도 있는 코드.
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function genPairCode() {
   const pick = (n) => Array.from(crypto.randomBytes(n)).map((b) => CODE_CHARS[b % CODE_CHARS.length]).join('');
   return `${pick(4)}-${pick(4)}`;
 }
+function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
 
-// POST /api/daemon/pair/code  (인증) → { code, expiresAt }
+// deviceToken 발급 + DaemonDevice 생성 (레거시 claim / QR approve 공용).
+async function createDeviceForUser(userId, meta) {
+  const deviceToken = 'cptd_' + crypto.randomBytes(32).toString('hex');
+  const tokenHash = sha256(deviceToken);
+  const device = await DaemonDevice.create({
+    user_id: userId,
+    device_name: String((meta && meta.deviceName) || 'PC').slice(0, 128),
+    platform: meta && meta.platform ? String(meta.platform).slice(0, 32) : null,
+    daemon_version: meta && meta.daemonVersion ? String(meta.daemonVersion).slice(0, 32) : null,
+    token_hash: tokenHash,
+  });
+  return { device, deviceToken };
+}
+
+// POST /api/daemon/pair/code  (인증) → { code, expiresAt }   [레거시 — 앱이 코드 발급]
 async function createPairCode(req, res) {
   try {
     const userId = req.user && req.user.id;
@@ -56,29 +76,84 @@ async function createPairCode(req, res) {
   }
 }
 
-// POST /api/daemon/pair/claim  (무인증 — 코드가 비밀)
-// body: { code, deviceName, platform, daemonVersion } → { deviceId, deviceToken }
+// POST /api/daemon/pair/session  (무인증) → { code, sessionSecret, deepLink, expiresAt }
+//  넷플릭스 TV 방식: PC가 세션을 열고 QR(code)을 표시 → 로그인된 앱이 스캔·승인한다.
+//  sessionSecret 은 PC만 보관(QR 에는 없음) → 승인 후 이 PC 만 토큰을 claim 할 수 있어 탈취 레이스를 막는다.
+async function createPairSession(req, res) {
+  try {
+    const { deviceName, platform, daemonVersion } = req.body || {};
+    const code = genPairCode();
+    const sessionSecret = crypto.randomBytes(24).toString('hex');
+    const expiresAt = Date.now() + PAIR_CODE_TTL_MS;
+    pairCodes.set(code, {
+      userId: null,
+      expiresAt,
+      status: 'pending',
+      secretHash: sha256(sessionSecret),
+      meta: { deviceName, platform, daemonVersion },
+    });
+    const deepLink = `codingpt://pair?code=${encodeURIComponent(code)}`;
+    return successResponse(res, { code, sessionSecret, deepLink, expiresAt: new Date(expiresAt).toISOString() });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
+// POST /api/daemon/pair/approve  (인증) — 앱이 스캔한 QR 코드를 승인 → device 생성.
+//  body: { code } → { deviceId, deviceName }.  실제 deviceToken 은 PC가 claim 으로 가져간다.
+async function approvePairSession(req, res) {
+  try {
+    const userId = req.user && req.user.id;
+    const normalized = String((req.body && req.body.code) || '').trim().toUpperCase();
+    const sess = pairCodes.get(normalized);
+    if (!sess || sess.expiresAt < Date.now() || sess.status == null) {
+      return errorResponse(res, new Error('연결 코드가 유효하지 않거나 만료되었습니다.'), 400);
+    }
+    if (sess.status === 'approved') {
+      return successResponse(res, { deviceId: sess.deviceId, deviceName: sess.deviceName, alreadyApproved: true });
+    }
+    const { device, deviceToken } = await createDeviceForUser(userId, sess.meta);
+    sess.status = 'approved';
+    sess.userId = userId;
+    sess.deviceId = device.id;
+    sess.deviceName = device.device_name;
+    sess.deviceToken = deviceToken; // 단명 — PC claim 시 반환하고 세션 폐기
+    console.log(`[daemon] QR 승인 userId=${userId} device=${device.device_name}(#${device.id})`);
+    return successResponse(res, { deviceId: device.id, deviceName: device.device_name });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
+// POST /api/daemon/pair/claim  (무인증 — 코드/secret 이 비밀)
+//  레거시: { code[, deviceName, ...] }        → device 생성 후 { deviceId, deviceToken }
+//  QR    : { code, sessionSecret }            → pending 이면 { pending:true }, approved 면 { deviceId, deviceToken }
 async function claimPairCode(req, res) {
   try {
-    const { code, deviceName, platform, daemonVersion } = req.body || {};
+    const { code, sessionSecret, deviceName, platform, daemonVersion } = req.body || {};
     const normalized = String(code || '').trim().toUpperCase();
     const sess = pairCodes.get(normalized);
     if (!sess || sess.expiresAt < Date.now()) {
       pairCodes.delete(normalized);
       return errorResponse(res, new Error('페어링 코드가 유효하지 않거나 만료되었습니다.'), 400);
     }
-    pairCodes.delete(normalized); // single-use
 
-    const deviceToken = 'cptd_' + crypto.randomBytes(32).toString('hex');
-    const tokenHash = crypto.createHash('sha256').update(deviceToken).digest('hex');
-    const device = await DaemonDevice.create({
-      user_id: sess.userId,
-      device_name: String(deviceName || 'PC').slice(0, 128),
-      platform: platform ? String(platform).slice(0, 32) : null,
-      daemon_version: daemonVersion ? String(daemonVersion).slice(0, 32) : null,
-      token_hash: tokenHash,
-    });
-    console.log(`[daemon] 기기 페어링 완료 userId=${sess.userId} device=${device.device_name}(#${device.id})`);
+    // QR 세션(status 존재) → secret 검증 후 승인 상태로 분기
+    if (sess.status != null) {
+      if (!sessionSecret || sess.secretHash !== sha256(sessionSecret)) {
+        return errorResponse(res, new Error('세션 인증에 실패했습니다.'), 403);
+      }
+      if (sess.status === 'pending') {
+        return successResponse(res, { pending: true }); // 아직 앱 승인 전 — PC가 폴링 지속
+      }
+      pairCodes.delete(normalized); // approved & single-use
+      return successResponse(res, { deviceId: sess.deviceId, deviceToken: sess.deviceToken });
+    }
+
+    // 레거시(앱이 코드 발급) — 즉시 device 생성
+    pairCodes.delete(normalized);
+    const { device, deviceToken } = await createDeviceForUser(sess.userId, { deviceName, platform, daemonVersion });
+    console.log(`[daemon] 기기 페어링 완료(레거시) userId=${sess.userId} device=${device.device_name}(#${device.id})`);
     return successResponse(res, { deviceId: device.id, deviceToken });
   } catch (e) {
     return errorResponse(res, e, 500);
@@ -564,7 +639,7 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
-  createPairCode, claimPairCode, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
+  createPairCode, createPairSession, approvePairSession, claimPairCode, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,

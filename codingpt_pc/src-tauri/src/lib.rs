@@ -1,0 +1,491 @@
+// CodingPT for Mac/Windows — PC 데몬을 백그라운드로 구동하는 트레이(메뉴바) 앱.
+//  · 번들된 Node 사이드카로 데몬(pair/run)을 돌린다(사용자 PC에 Node 불필요).
+//  · 페어링 코드로 계정에 연결하고, 상시 실행하며, 트레이에서 상태/종료를 제공한다.
+//  · 딥링크 codingpt-pc://pair?code=... 로 앱에서 원탭 연결한다.
+//  이 앱은 어떤 AI 자격증명도 다루지 않는다 — 데몬(터미널/파일 릴레이) 부트스트랩 전용.
+
+use std::path::PathBuf;
+use std::process::Child;
+use std::sync::Mutex;
+
+use serde::Serialize;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const DEFAULT_SERVER: &str = "https://codingpt-back.ghmate.com";
+
+// ── 데몬 생명주기 상태(Tauri managed state) ──────────────────────────
+#[derive(Default)]
+struct Daemon {
+    child: Mutex<Option<Child>>, // run 프로세스 핸들
+    should_run: Mutex<bool>,     // 감시 스레드 재시작 여부
+}
+
+#[derive(Serialize, Clone)]
+struct Status {
+    paired: bool,
+    running: bool,
+    device_name: Option<String>,
+    server: Option<String>,
+}
+
+// ~/.codingpt/daemon.json (데몬이 pair 시 저장) 경로.
+fn config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".codingpt").join("daemon.json"))
+}
+
+fn read_config() -> Option<serde_json::Value> {
+    let p = config_path()?;
+    let s = std::fs::read_to_string(p).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
+fn is_paired() -> bool {
+    read_config()
+        .and_then(|c| c.get("deviceToken").and_then(|t| t.as_str().map(|s| !s.is_empty())))
+        .unwrap_or(false)
+}
+
+// 번들된 사이드카 경로 해석: (node 바이너리, daemon 진입 스크립트).
+//  bundle-sidecar.sh 가 resources/daemon/{node, app/node_modules/@codingpt/daemon/index.js} 로 배치.
+//  Tauri resource_dir 아래 위치는 설정(bundle.resources)에 따라 daemon/ 또는 resources/daemon/ 이므로 후보를 탐색.
+fn sidecar_paths(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let res = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("resource_dir 해석 실패: {e}"))?;
+    let node_name = if cfg!(windows) { "node.exe" } else { "node" };
+    let candidates = ["daemon", "resources/daemon", "_up_/daemon"];
+    for c in candidates {
+        let base = res.join(c);
+        let node = base.join(node_name);
+        let script = base
+            .join("app")
+            .join("node_modules")
+            .join("@codingpt")
+            .join("daemon")
+            .join("index.js");
+        if node.exists() && script.exists() {
+            return Ok((node, script));
+        }
+    }
+    Err(format!(
+        "사이드카를 찾을 수 없습니다(resource_dir={}). bundle-sidecar.sh 실행 여부 확인.",
+        res.display()
+    ))
+}
+
+fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
+    let (node, script) = sidecar_paths(app)?;
+    let mut cmd = std::process::Command::new(&node);
+    cmd.arg(script);
+    // 부모(Mac 화면)의 tmux 중첩 가드 회피 — 데몬은 전용 소켓(-L codingpt) 사용.
+    cmd.env_remove("TMUX");
+    // 번들 tmux(사이드카 base/tmux/bin/tmux)가 있으면 주입 → 데몬이 무설치 tmux 사용.
+    if let Some(base) = node.parent() {
+        let bundled_tmux = base.join("tmux").join("bin").join("tmux");
+        if bundled_tmux.exists() {
+            cmd.env("CODINGPT_TMUX", bundled_tmux);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    Ok(cmd)
+}
+
+// ── IPC 커맨드 ───────────────────────────────────────────────────────
+
+// 현재 상태(페어링/실행/기기명/서버).
+#[tauri::command]
+fn daemon_status(state: State<Daemon>) -> Status {
+    let running = {
+        let mut guard = state.child.lock().unwrap();
+        match guard.as_mut() {
+            Some(ch) => match ch.try_wait() {
+                Ok(Some(_)) => false, // 종료됨
+                Ok(None) => true,     // 살아있음
+                Err(_) => false,
+            },
+            None => false,
+        }
+    };
+    let cfg = read_config();
+    Status {
+        paired: is_paired(),
+        running,
+        device_name: cfg
+            .as_ref()
+            .and_then(|c| c.get("deviceName").and_then(|v| v.as_str().map(String::from))),
+        server: cfg
+            .as_ref()
+            .and_then(|c| c.get("serverUrl").and_then(|v| v.as_str().map(String::from))),
+    }
+}
+
+// 페어링 코드로 계정 연결(데몬 pair --code 비대화형 실행). 성공 시 run 시작.
+#[tauri::command]
+async fn daemon_pair(
+    app: AppHandle,
+    state: State<'_, Daemon>,
+    code: String,
+    server: Option<String>,
+) -> Result<Status, String> {
+    let server = server
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let mut cmd = build_command(&app)?;
+    cmd.arg("pair").arg("--code").arg(code.trim()).arg("--server").arg(&server);
+    let out = cmd.output().map_err(|e| format!("데몬 실행 실패: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let msg = String::from_utf8_lossy(&out.stdout);
+        return Err(format!("페어링 실패: {}", if !err.trim().is_empty() { err.trim() } else { msg.trim() }));
+    }
+    start_run(&app, &state)?;
+    Ok(daemon_status(state))
+}
+
+// QR 페어링 1단계: 세션 생성 → { code, sessionSecret, deepLink, expiresAt } 반환(프론트가 QR 표시).
+#[tauri::command]
+async fn daemon_pair_session(
+    app: AppHandle,
+    server: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let server = server
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let mut cmd = build_command(&app)?;
+    cmd.arg("pair-session").arg("--server").arg(&server);
+    let out = cmd.output().map_err(|e| format!("데몬 실행 실패: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| format!("세션 생성 실패: {}", stdout.trim()))?;
+    if let Some(err) = v.get("error") {
+        return Err(err.as_str().unwrap_or("세션 생성 실패").to_string());
+    }
+    Ok(v)
+}
+
+// QR 페어링 2단계(폴링 1회): claim. pending 이면 {pending:true}, 승인되면 config 저장 후 run 시작.
+//  프론트가 이 커맨드를 주기적으로 호출(각 호출 one-shot).
+#[tauri::command]
+async fn daemon_pair_poll(
+    app: AppHandle,
+    state: State<'_, Daemon>,
+    server: Option<String>,
+    code: String,
+    secret: String,
+) -> Result<serde_json::Value, String> {
+    let server = server
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let mut cmd = build_command(&app)?;
+    cmd.arg("pair-claim")
+        .arg("--server").arg(&server)
+        .arg("--code").arg(code.trim())
+        .arg("--secret").arg(secret.trim());
+    let out = cmd.output().map_err(|e| format!("데몬 실행 실패: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| format!("연결 확인 실패: {}", stdout.trim()))?;
+    if let Some(err) = v.get("error") {
+        return Err(err.as_str().unwrap_or("연결 실패").to_string());
+    }
+    if v.get("paired").and_then(|b| b.as_bool()).unwrap_or(false) {
+        start_run(&app, &state)?;
+    }
+    Ok(v)
+}
+
+// run 데몬 시작(이미 실행 중이면 무시). 감시 스레드가 크래시 시 재시작.
+fn start_run(app: &AppHandle, state: &State<Daemon>) -> Result<(), String> {
+    if !is_paired() {
+        return Err("페어링이 필요합니다.".into());
+    }
+    {
+        let mut guard = state.child.lock().unwrap();
+        if let Some(ch) = guard.as_mut() {
+            if matches!(ch.try_wait(), Ok(None)) {
+                return Ok(()); // 이미 실행 중
+            }
+        }
+        let mut cmd = build_command(app)?;
+        cmd.arg("run");
+        let child = cmd.spawn().map_err(|e| format!("데몬 run 실패: {e}"))?;
+        *guard = Some(child);
+    }
+    *state.should_run.lock().unwrap() = true;
+    let _ = app.emit("daemon-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn daemon_start(app: AppHandle, state: State<Daemon>) -> Result<Status, String> {
+    start_run(&app, &state)?;
+    Ok(daemon_status(state))
+}
+
+// run 중지(감시 재시작 끔 + 자식 kill).
+#[tauri::command]
+fn daemon_stop(app: AppHandle, state: State<Daemon>) -> Status {
+    *state.should_run.lock().unwrap() = false;
+    if let Some(mut ch) = state.child.lock().unwrap().take() {
+        let _ = ch.kill();
+        let _ = ch.wait();
+    }
+    let _ = app.emit("daemon-changed", ());
+    daemon_status(state)
+}
+
+// 로컬 페어링 해제(데몬 unpair) + run 중지.
+#[tauri::command]
+fn daemon_unpair(app: AppHandle, state: State<Daemon>) -> Result<Status, String> {
+    daemon_stop(app.clone(), state.clone());
+    let mut cmd = build_command(&app)?;
+    cmd.arg("unpair");
+    let _ = cmd.output();
+    Ok(daemon_status(state))
+}
+
+// 창 열기(트레이/딥링크에서).
+fn show_window(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.set_focus();
+        let _ = w.unminimize();
+    }
+}
+
+// 딥링크 URL 처리: codingpt-pc://pair?code=XXXX[&server=YYY]
+fn handle_deep_link(app: &AppHandle, url: &str) {
+    let url = url.trim();
+    if !url.starts_with("codingpt-pc://") {
+        return;
+    }
+    // 매우 단순한 쿼리 파서(외부 crate 없이).
+    let query = url.splitn(2, '?').nth(1).unwrap_or("");
+    let mut code: Option<String> = None;
+    let mut server: Option<String> = None;
+    for kv in query.split('&') {
+        let mut it = kv.splitn(2, '=');
+        let k = it.next().unwrap_or("");
+        let v = it.next().unwrap_or("");
+        let v = urldecode(v);
+        match k {
+            "code" => code = Some(v),
+            "server" => server = Some(v),
+            _ => {}
+        }
+    }
+    show_window(app);
+    if let Some(code) = code {
+        // 프론트가 코드/서버를 받아 확인 후 daemon_pair 호출(사용자 가시 확인 유지).
+        let _ = app.emit("deep-link-pair", serde_json::json!({ "code": code, "server": server }));
+    }
+}
+
+// 최소 URL 디코드(%XX, + → space). 외부 crate 회피.
+fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                let h = |c: u8| -> Option<u8> {
+                    match c {
+                        b'0'..=b'9' => Some(c - b'0'),
+                        b'a'..=b'f' => Some(c - b'a' + 10),
+                        b'A'..=b'F' => Some(c - b'A' + 10),
+                        _ => None,
+                    }
+                };
+                if let (Some(a), Some(b)) = (h(bytes[i + 1]), h(bytes[i + 2])) {
+                    out.push(a * 16 + b);
+                    i += 3;
+                    continue;
+                }
+                out.push(bytes[i]);
+                i += 1;
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// 트레이 아이콘/메뉴 구성.
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let open_i = MenuItem::with_id(app, "open", "CodingPT 열기", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit_i = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;
+
+    let mut builder = TrayIconBuilder::with_id("main")
+        .tooltip("CodingPT")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_window(app),
+            "quit" => {
+                // 종료 시 데몬도 함께 정리.
+                if let Some(state) = app.try_state::<Daemon>() {
+                    *state.should_run.lock().unwrap() = false;
+                    if let Some(mut ch) = state.child.lock().unwrap().take() {
+                        let _ = ch.kill();
+                    }
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
+                show_window(tray.app_handle());
+            }
+        });
+    // 메뉴바 트레이 아이콘: 흰 글리프(alpha=모양)를 템플릿 이미지로 지정 → macOS 라이트/다크
+    //  메뉴바에 맞춰 자동 틴트. 앱/독 아이콘(초록)과 분리한다.
+    match tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")) {
+        Ok(icon) => {
+            builder = builder.icon(icon).icon_as_template(true);
+        }
+        Err(_) => {
+            if let Some(icon) = app.default_window_icon() {
+                builder = builder.icon(icon.clone());
+            }
+        }
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    let mut builder = tauri::Builder::default();
+
+    // 단일 인스턴스 + 딥링크(데스크톱): 두 번째 실행/URL 오픈을 기존 인스턴스로 라우팅.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            show_window(app);
+            // 인자에 딥링크 URL 이 있으면 처리(Windows/Linux 경로).
+            for a in args.iter() {
+                if a.starts_with("codingpt-pc://") {
+                    handle_deep_link(app, a);
+                }
+            }
+        }));
+    }
+
+    builder
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .manage(Daemon::default())
+        .invoke_handler(tauri::generate_handler![
+            daemon_status,
+            daemon_pair,
+            daemon_pair_session,
+            daemon_pair_poll,
+            daemon_start,
+            daemon_stop,
+            daemon_unpair,
+        ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+
+            // macOS: Dock 아이콘 숨김(메뉴바 액세서리 앱).
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            setup_tray(&handle)?;
+
+            // 런타임 딥링크(mac: 앱 실행 중 URL 오픈) 구독.
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let h = handle.clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        handle_deep_link(&h, url.as_str());
+                    }
+                });
+            }
+
+            // 이미 페어링돼 있으면 자동으로 run 시작.
+            if is_paired() {
+                if let Some(state) = app.try_state::<Daemon>() {
+                    let _ = start_run(&handle, &state);
+                }
+            }
+
+            // 자식 감시 스레드: should_run 인데 죽었으면 백오프 후 재시작.
+            {
+                let h = handle.clone();
+                std::thread::spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    let state = match h.try_state::<Daemon>() {
+                        Some(s) => s,
+                        None => continue,
+                    };
+                    let should = *state.should_run.lock().unwrap();
+                    if !should {
+                        continue;
+                    }
+                    let dead = {
+                        let mut guard = state.child.lock().unwrap();
+                        match guard.as_mut() {
+                            Some(ch) => matches!(ch.try_wait(), Ok(Some(_))),
+                            None => true,
+                        }
+                    };
+                    if dead && is_paired() {
+                        if let Ok(mut cmd) = build_command(&h) {
+                            cmd.arg("run");
+                            if let Ok(child) = cmd.spawn() {
+                                *state.child.lock().unwrap() = Some(child);
+                                let _ = h.emit("daemon-changed", ());
+                            }
+                        }
+                    }
+                });
+            }
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 창 닫기 = 숨김(앱은 트레이에 상주).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let _ = window.hide();
+                api.prevent_close();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 앱이 어떤 경로(Cmd+Q · 트레이 종료 · 시스템 종료)로 끝나도 데몬 자식을 정리(고아 방지).
+            if let tauri::RunEvent::Exit = event {
+                if let Some(state) = app_handle.try_state::<Daemon>() {
+                    *state.should_run.lock().unwrap() = false;
+                    if let Some(mut ch) = state.child.lock().unwrap().take() {
+                        let _ = ch.kill();
+                        let _ = ch.wait();
+                    }
+                }
+            }
+        });
+}

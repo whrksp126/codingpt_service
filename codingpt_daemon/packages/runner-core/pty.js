@@ -47,11 +47,14 @@ function sessionForCwd(cwdRel) {
 let tmuxPathCache = null;
 function findTmux() {
   if (tmuxPathCache) return tmuxPathCache;
-  const candidates = ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux'];
+  const candidates = [];
+  // 번들 tmux(데스크톱 앱이 CODINGPT_TMUX 로 주입) 최우선 — 사용자 무설치.
+  if (process.env.CODINGPT_TMUX) candidates.push(process.env.CODINGPT_TMUX);
   try {
     const p = execFileSync('/usr/bin/which', ['tmux'], { encoding: 'utf8' }).trim();
-    if (p) candidates.unshift(p);
+    if (p) candidates.push(p);
   } catch (_) { /* PATH 에 없으면 후보 경로 탐색 */ }
+  candidates.push('/opt/homebrew/bin/tmux', '/usr/local/bin/tmux', '/usr/bin/tmux');
   for (const p of candidates) {
     try { if (fs.existsSync(p)) { tmuxPathCache = p; return p; } } catch (_) { /* noop */ }
   }

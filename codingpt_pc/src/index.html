@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CodingPT</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="titlebar" data-tauri-drag-region></div>
+
+    <main class="app">
+      <!-- 상태 배지 -->
+      <section id="statusCard" class="card status hidden">
+        <div class="dot" id="statusDot"></div>
+        <div class="status-text">
+          <div id="statusTitle" class="status-title">확인 중…</div>
+          <div id="statusDesc" class="status-desc"></div>
+        </div>
+      </section>
+
+      <!-- 미연결: QR 스캔(넷플릭스 방식) -->
+      <section id="pairView" class="hidden">
+        <div class="qr-card">
+          <div id="qrBox" class="qr-box">
+            <div class="qr-spinner"></div>
+          </div>
+          <div id="qrExpired" class="qr-expired hidden">
+            <span>코드가 만료됐어요</span>
+            <button id="qrRefreshBtn" class="btn small">새 코드</button>
+          </div>
+        </div>
+
+        <p class="hint center">
+          코딩PT 앱 <b>내 정보 → 내 PC 연결</b>에서<br />이 QR을 스캔하면 바로 연결됩니다.
+        </p>
+
+        <div class="code-line" id="codeLine">
+          <span class="code-label">연결 코드</span>
+          <span id="codeText" class="code-val">····-····</span>
+        </div>
+
+        <details class="adv">
+          <summary>코드 직접 입력 · 고급 설정</summary>
+          <label class="field">
+            <span>페어링 코드(앱에서 발급)</span>
+            <input id="codeInput" type="text" inputmode="latin" autocapitalize="characters"
+                   placeholder="예: ABCD-2345" maxlength="12" />
+          </label>
+          <label class="field">
+            <span>서버 주소</span>
+            <input id="serverInput" type="text" placeholder="https://codingpt-back.ghmate.com" />
+          </label>
+          <button id="pairBtn" class="btn primary">코드로 연결</button>
+          <div id="pairError" class="error hidden"></div>
+        </details>
+      </section>
+
+      <!-- 연결됨: 제어 -->
+      <section id="connectedView" class="hidden">
+        <div class="row">
+          <button id="toggleRunBtn" class="btn">중지</button>
+          <button id="unpairBtn" class="btn ghost">연결 해제</button>
+        </div>
+        <label class="switch">
+          <input id="autostartChk" type="checkbox" />
+          <span>이 Mac 로그인 시 자동 실행</span>
+        </label>
+        <p class="foot">이 창을 닫아도 메뉴바에서 계속 실행됩니다.</p>
+      </section>
+    </main>
+
+    <script src="vendor/qrcode.js"></script>
+    <script src="main.js"></script>
+  </body>
+</html>

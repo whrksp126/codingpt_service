@@ -5,8 +5,10 @@ const daemonController = require('../controllers/daemonController');
 const syncController = require('../controllers/syncController');
 
 // BYO-PC 데몬 — 페어링/상태/터미널. ws 업그레이드(/connect, /stream, /terminal)는 app.js 에서 처리.
-router.post('/pair/code', authMiddleware, daemonController.createPairCode);
-router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 일회용 코드가 비밀
+router.post('/pair/code', authMiddleware, daemonController.createPairCode); // 레거시 — 앱이 코드 발급
+router.post('/pair/session', daemonController.createPairSession); // 무인증 — PC가 QR 세션 발급(넷플릭스 방식)
+router.post('/pair/approve', authMiddleware, daemonController.approvePairSession); // 로그인된 앱이 QR 코드 승인
+router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코드/secret 이 비밀
 router.get('/status', authMiddleware, daemonController.getStatus);
 router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)
