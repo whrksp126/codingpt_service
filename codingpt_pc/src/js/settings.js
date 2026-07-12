@@ -193,14 +193,14 @@ function buildPaired() {
 }
 
 // "내 기기" 목록 렌더(state.devices). 클라우드 호스트 포함.
-// 기기 유형 라벨 — 식별 가능한 핵심만(플랫폼 기술표기 대신 친숙한 이름).
-function deviceTypeLabel(d) {
-  if (d.runnerKind === "cloud") return "클라우드";
+// 기기 아래 작은 텍스트 = 운영체제(정확히). 위 텍스트는 기기명(d.name).
+function deviceOsLabel(d) {
+  if (d.runnerKind === "cloud") return "Linux"; // 클라우드 러너 = Linux 컨테이너
   const p = String(d.platform || "").toLowerCase();
-  if (p === "darwin") return "Mac";
+  if (p === "darwin") return "macOS";
   if (p === "win32" || p === "windows") return "Windows";
   if (p === "linux") return "Linux";
-  if (p === "ios" || p === "ipados") return "iOS";
+  if (p === "ios" || p === "ipados") return /iphone/i.test(d.name || "") ? "iOS" : "iPadOS";
   if (p === "android") return "Android";
   return d.role === "controller" ? "모바일" : "기기";
 }
@@ -217,7 +217,7 @@ function renderDeviceList() {
         : icons.monitor({ size: 16 });
     return `<div class="dev-row">
       <span class="dev-ic">${icon}</span>
-      <div class="dev-meta"><div class="dev-name">${esc(d.name)}${cur}</div><div class="dev-sub">${esc(deviceTypeLabel(d))}</div></div>
+      <div class="dev-meta"><div class="dev-name">${esc(d.name)}${cur}</div><div class="dev-sub">${esc(deviceOsLabel(d))}</div></div>
       <span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span>
     </div>`;
   }).join("");

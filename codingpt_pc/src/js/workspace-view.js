@@ -5,6 +5,7 @@ import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { PaneView } from "./pane.js";
 import { handleOsc } from "./notifications.js";
+import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 
@@ -234,12 +235,14 @@ function moveTabToNewSplit(srcId, index, targetId, side) {
 function renderMainTop(ws) {
   mainTop.innerHTML = "";
   if (state.sidebarCollapsed) {
-    const t = document.createElement("button");
-    t.className = "ic-btn mt-toggle";
-    t.title = "사이드바 펼치기";
-    t.innerHTML = icons.sidebar({ size: 16 });
-    t.addEventListener("click", () => S.toggleSidebar());
-    mainTop.appendChild(t);
+    // 접힘 시 사이드바 상단 컨트롤(토글·알림·+)을 메인 상단바에 그대로 노출 → 토글 전후 정합성.
+    const ctl = document.createElement("span");
+    ctl.className = "mt-ctl";
+    ctl.append(buildTopControls());
+    mainTop.appendChild(ctl);
+    const div = document.createElement("span");
+    div.className = "mt-div";
+    mainTop.appendChild(div);
   }
   const fold = document.createElement("span");
   fold.className = "mt-folder";

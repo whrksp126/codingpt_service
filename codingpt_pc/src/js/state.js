@@ -18,6 +18,73 @@ export const state = {
   currentDeviceId: null, // 이 기기의 DaemonDevice id
 };
 
+// 워크스페이스 로컬 표시 설정(순서/고정/색/이름) — 백엔드 목록과 별개로 pc-ui.json 에 영속.
+export const wsPrefs = { order: [], pinned: [], color: {}, rename: {} };
+
+export function wsDisplayName(w) {
+  return (w && (wsPrefs.rename[w.id] || w.name)) || "워크스페이스";
+}
+export function wsColor(id) {
+  return wsPrefs.color[id] || null;
+}
+export function wsPinned(id) {
+  return wsPrefs.pinned.includes(id);
+}
+
+// order 배열을 현재 워크스페이스 집합에 맞춰 정합화(신규는 뒤에 편입, 사라진 건 제거).
+function ensureWsOrder() {
+  for (const w of state.workspaces) if (!wsPrefs.order.includes(w.id)) wsPrefs.order.push(w.id);
+  wsPrefs.order = wsPrefs.order.filter((id) => state.workspaces.some((w) => w.id === id));
+  wsPrefs.pinned = wsPrefs.pinned.filter((id) => state.workspaces.some((w) => w.id === id));
+}
+
+// 표시 순서: 고정 먼저 → order 순. (고정은 항상 상단으로 float)
+export function sortedWorkspaces() {
+  ensureWsOrder();
+  const idx = (id) => { const i = wsPrefs.order.indexOf(id); return i === -1 ? 1e9 : i; };
+  return state.workspaces.slice().sort((a, b) => {
+    const pa = wsPinned(a.id) ? 0 : 1, pb = wsPinned(b.id) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return idx(a.id) - idx(b.id);
+  });
+}
+
+// 시각 순서(id 배열)를 절대 순서로 채택 — 드래그앤드롭/이동 공용.
+export function applyWsVisualOrder(ids) {
+  wsPrefs.order = ids.slice();
+  emit();
+  schedulePersist();
+}
+export function moveWs(id, dir) { // 'up' | 'down' | 'top'
+  const ids = sortedWorkspaces().map((w) => w.id);
+  const i = ids.indexOf(id);
+  if (i < 0) return;
+  const j = dir === "top" ? 0 : dir === "up" ? i - 1 : i + 1;
+  if (dir !== "top" && (j < 0 || j >= ids.length)) return;
+  ids.splice(i, 1);
+  ids.splice(dir === "top" ? 0 : j, 0, id);
+  applyWsVisualOrder(ids);
+}
+export function togglePinWs(id) {
+  if (wsPinned(id)) wsPrefs.pinned = wsPrefs.pinned.filter((x) => x !== id);
+  else wsPrefs.pinned.push(id);
+  emit();
+  schedulePersist();
+}
+export function setWsColor(id, color) {
+  if (color) wsPrefs.color[id] = color;
+  else delete wsPrefs.color[id];
+  emit();
+  schedulePersist();
+}
+export function renameWs(id, name) {
+  const v = String(name || "").trim();
+  if (v) wsPrefs.rename[id] = v.slice(0, 80);
+  else delete wsPrefs.rename[id];
+  emit();
+  schedulePersist();
+}
+
 // 로그인 계정 프로필 로드(deviceToken→user). 미로그인이면 null.
 export async function loadMe() {
   try {
@@ -250,7 +317,7 @@ function serialize() {
   for (const [id, w] of Object.entries(state.ws)) {
     ws[id] = { layout: w.layout, focusId: w.focusId };
   }
-  return { activeWsId: state.activeWsId, ws };
+  return { activeWsId: state.activeWsId, ws, wsPrefs };
 }
 let saveTimer = null;
 function schedulePersist() {
@@ -359,6 +426,12 @@ export async function restorePersisted() {
       T.bumpSeq(allIds);
     }
     if (saved.activeWsId) state.activeWsId = saved.activeWsId;
+    if (saved.wsPrefs && typeof saved.wsPrefs === "object") {
+      wsPrefs.order = Array.isArray(saved.wsPrefs.order) ? saved.wsPrefs.order : [];
+      wsPrefs.pinned = Array.isArray(saved.wsPrefs.pinned) ? saved.wsPrefs.pinned : [];
+      wsPrefs.color = saved.wsPrefs.color && typeof saved.wsPrefs.color === "object" ? saved.wsPrefs.color : {};
+      wsPrefs.rename = saved.wsPrefs.rename && typeof saved.wsPrefs.rename === "object" ? saved.wsPrefs.rename : {};
+    }
   } catch (_) {
     /* 복원 실패는 무시(빈 상태로 시작) */
   }

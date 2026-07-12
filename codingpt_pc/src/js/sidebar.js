@@ -33,7 +33,8 @@ function openNotif() {
   notifOpen = true;
   notifPanel.classList.remove("hidden");
   renderNotifPanel(notifPanel, (n) => jumpToNotification(n));
-  const bell = el.querySelector(".bell");
+  // 접힘 시 bell 은 메인 상단바에 있으므로 화면에 보이는 bell 을 기준으로 위치.
+  const bell = [...document.querySelectorAll(".bell")].find((b) => b.offsetParent !== null) || el.querySelector(".bell");
   if (bell) {
     const r = bell.getBoundingClientRect();
     notifPanel.style.left = r.left + "px";
@@ -54,21 +55,7 @@ export function updateSidebar() {
   const top = document.createElement("div");
   top.className = "sb-top";
   top.setAttribute("data-tauri-drag-region", "");
-  const toggle = ctlBtn("sidebar", "사이드바 접기", () => S.toggleSidebar());
-  const bell = ctlBtn("bell", "알림", (e) => {
-    e.stopPropagation();
-    notifOpen ? closeNotif() : openNotif();
-  });
-  bell.classList.add("bell");
-  if (totalUnread) {
-    const badge = document.createElement("span");
-    badge.className = "bell-badge";
-    badge.textContent = totalUnread > 9 ? "9+" : String(totalUnread);
-    bell.appendChild(badge);
-  }
-  const add = ctlBtn("plus", "새 워크스페이스", () => S.createLocalWorkspace());
-  if (state.creatingWs) add.classList.add("busy");
-  top.append(toggle, bell, add);
+  top.append(buildTopControls());
   el.appendChild(top);
 
   // 목록.
@@ -80,7 +67,7 @@ export function updateSidebar() {
   } else if (!state.workspaces.length) {
     list.appendChild(note("+ 로 워크스페이스를 추가하세요"));
   }
-  for (const w of state.workspaces) list.appendChild(wsRow(w));
+  for (const w of S.sortedWorkspaces()) list.appendChild(wsRow(w));
   el.appendChild(list);
 
   // 하단: 내 정보.
@@ -119,6 +106,28 @@ function ctlBtn(iconName, title, onClick) {
   b.addEventListener("click", onClick);
   return b;
 }
+
+// 상단 컨트롤(토글·알림·추가) — 사이드바 상단바 + 접힘 시 메인 상단바에서 공용 사용(정합성).
+export function buildTopControls() {
+  const frag = document.createDocumentFragment();
+  const totalUnread = state.notifications.filter((n) => !n.read).length;
+  const toggle = ctlBtn("sidebar", state.sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기", () => S.toggleSidebar());
+  const bell = ctlBtn("bell", "알림", (e) => {
+    e.stopPropagation();
+    notifOpen ? closeNotif() : openNotif();
+  });
+  bell.classList.add("bell");
+  if (totalUnread) {
+    const badge = document.createElement("span");
+    badge.className = "bell-badge";
+    badge.textContent = totalUnread > 9 ? "9+" : String(totalUnread);
+    bell.appendChild(badge);
+  }
+  const add = ctlBtn("plus", "새 워크스페이스", () => S.createLocalWorkspace());
+  if (state.creatingWs) add.classList.add("busy");
+  frag.append(toggle, bell, add);
+  return frag;
+}
 function note(text) {
   const d = document.createElement("div");
   d.className = "sb-note";
@@ -130,12 +139,20 @@ function wsRow(w) {
   const rt = S.wsRuntime(w.id);
   const unread = S.unreadForWs(w.id);
   const local = isLocal(w);
+  const color = S.wsColor(w.id);
+  const pinned = S.wsPinned(w.id);
   const row = document.createElement("button");
   row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "");
+  row.draggable = true;
+  row.dataset.wsId = w.id;
+  if (color) row.style.boxShadow = `inset 3px 0 0 ${color}`;
 
   const name = document.createElement("div");
   name.className = "wsr-name";
-  name.innerHTML = `<span>${escapeHtml(w.name || "워크스페이스")}</span>` + (unread ? `<span class="wsr-badge">${unread}</span>` : "");
+  name.innerHTML =
+    (pinned ? `<span class="wsr-pin" title="고정됨">${icons.pin({ size: 12 })}</span>` : "") +
+    `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
+    (unread ? `<span class="wsr-badge">${unread}</span>` : "");
 
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
@@ -157,8 +174,137 @@ function wsRow(w) {
     p.innerHTML = ports.map((x) => `<span class="port">:${x}</span>`).join("");
     row.appendChild(p);
   }
-  row.addEventListener("click", () => S.setActive(w.id));
+  row.addEventListener("click", () => { if (!row.classList.contains("dragging")) S.setActive(w.id); });
+  row.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
+  bindWsDrag(row, w);
   return row;
+}
+
+// ── 워크스페이스 드래그앤드롭 순서 변경 ──
+let dragSrcId = null;
+function bindWsDrag(row, w) {
+  row.addEventListener("dragstart", (e) => {
+    dragSrcId = w.id;
+    row.classList.add("dragging");
+    try { e.dataTransfer.setData("text/plain", String(w.id)); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
+  });
+  row.addEventListener("dragend", () => {
+    dragSrcId = null;
+    row.classList.remove("dragging");
+    el?.querySelectorAll(".ws-row.drop-before,.ws-row.drop-after").forEach((r) => r.classList.remove("drop-before", "drop-after"));
+  });
+  row.addEventListener("dragover", (e) => {
+    if (dragSrcId == null || dragSrcId === w.id) return;
+    e.preventDefault();
+    try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
+    const r = row.getBoundingClientRect();
+    const after = e.clientY > r.top + r.height / 2;
+    row.classList.toggle("drop-before", !after);
+    row.classList.toggle("drop-after", after);
+  });
+  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
+  row.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const after = row.classList.contains("drop-after");
+    row.classList.remove("drop-before", "drop-after");
+    if (dragSrcId == null || dragSrcId === w.id) return;
+    const ids = S.sortedWorkspaces().map((x) => x.id).filter((id) => id !== dragSrcId);
+    let idx = ids.indexOf(w.id);
+    if (idx === -1) idx = ids.length; else if (after) idx += 1;
+    ids.splice(idx, 0, dragSrcId);
+    S.applyWsVisualOrder(ids);
+  });
+}
+
+// ── 워크스페이스 우클릭 컨텍스트 메뉴 ──
+const WS_COLORS = [
+  ["없음", ""], ["빨강", "#f87171"], ["주황", "#fb923c"], ["초록", "#34d399"],
+  ["파랑", "#60a5fa"], ["보라", "#a78bfa"], ["분홍", "#f472b6"],
+];
+let wsMenuEl = null;
+function closeWsMenu() {
+  if (wsMenuEl) { wsMenuEl.remove(); wsMenuEl = null; }
+  document.removeEventListener("mousedown", onWsMenuOutside, true);
+  document.removeEventListener("keydown", onWsMenuKey, true);
+  window.removeEventListener("blur", closeWsMenu);
+}
+function onWsMenuOutside(e) { if (wsMenuEl && !wsMenuEl.contains(e.target)) closeWsMenu(); }
+function onWsMenuKey(e) { if (e.key === "Escape") closeWsMenu(); }
+
+function showWsMenu(e, w) {
+  closeWsMenu();
+  const pinned = S.wsPinned(w.id);
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  const item = (icon, label, onClick, opts = {}) => {
+    const b = document.createElement("button");
+    b.className = "ctx-item" + (opts.danger ? " danger" : "");
+    b.innerHTML = `<span class="ctx-ic">${icon || ""}</span><span class="ctx-label">${label}</span>`;
+    b.addEventListener("click", () => { closeWsMenu(); onClick(); });
+    menu.appendChild(b);
+    return b;
+  };
+  const sep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); };
+
+  item(icons.edit({ size: 15 }), "이름 변경", () => inlineRename(w));
+  item(icons.pin({ size: 15 }), pinned ? "고정 해제" : "고정", () => S.togglePinWs(w.id));
+  // 색상 스와치
+  const colorWrap = document.createElement("div");
+  colorWrap.className = "ctx-colors";
+  for (const [title, c] of WS_COLORS) {
+    const sw = document.createElement("button");
+    sw.className = "ctx-sw" + (c ? "" : " none") + ((S.wsColor(w.id) || "") === c ? " sel" : "");
+    sw.title = title;
+    if (c) sw.style.background = c;
+    sw.addEventListener("click", () => { closeWsMenu(); S.setWsColor(w.id, c); });
+    colorWrap.appendChild(sw);
+  }
+  const colorRow = document.createElement("div");
+  colorRow.className = "ctx-item ctx-static";
+  colorRow.innerHTML = `<span class="ctx-ic">${icons.palette({ size: 15 })}</span><span class="ctx-label">색상</span>`;
+  colorRow.appendChild(colorWrap);
+  menu.appendChild(colorRow);
+  sep();
+  item(icons.arrowUp({ size: 15 }), "위로 이동", () => S.moveWs(w.id, "up"));
+  item(icons.arrowDown({ size: 15 }), "아래로 이동", () => S.moveWs(w.id, "down"));
+  item(icons.arrowTop({ size: 15 }), "맨 위로 이동", () => S.moveWs(w.id, "top"));
+
+  document.body.appendChild(menu);
+  wsMenuEl = menu;
+  // 위치(뷰포트 넘치면 보정)
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let x = e.clientX, y = e.clientY;
+  if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(8, x) + "px";
+  menu.style.top = Math.max(8, y) + "px";
+  setTimeout(() => {
+    document.addEventListener("mousedown", onWsMenuOutside, true);
+    document.addEventListener("keydown", onWsMenuKey, true);
+    window.addEventListener("blur", closeWsMenu);
+  }, 0);
+}
+
+// 인라인 이름 변경 — 해당 행의 이름을 입력창으로 교체.
+function inlineRename(w) {
+  const row = el?.querySelector(`.ws-row[data-ws-id="${w.id}"]`);
+  const nm = row?.querySelector(".wsr-nm");
+  if (!nm) return;
+  const input = document.createElement("input");
+  input.className = "wsr-rename";
+  input.value = S.wsDisplayName(w);
+  input.spellcheck = false;
+  nm.replaceWith(input);
+  input.focus();
+  input.select();
+  const commit = () => { S.renameWs(w.id, input.value); };
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); commit(); }
+    else if (e.key === "Escape") { e.preventDefault(); S.emit(); }
+  });
+  input.addEventListener("blur", commit);
+  input.addEventListener("click", (e) => e.stopPropagation());
 }
 
 export async function refreshWsMeta() {
