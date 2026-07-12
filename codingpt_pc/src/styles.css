@@ -439,6 +439,36 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .dev-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
 .dev-dot.on { background: var(--accent); }
 .dev-dot.off { background: var(--dim); }
+
+/* 계정 섹션 라인(로그아웃 / 회원탈퇴) */
+.acct-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 2px; border-bottom: 1px solid var(--border); }
+.acct-line-txt { font-size: 13px; color: var(--text2); }
+.acct-line .btn { flex: none; }
+.acct-msg { font-size: 12px; color: var(--dim); padding: 8px 2px 0; }
+.acct-msg.warn { color: var(--error); }
+
+/* 프로필(일반 탭) */
+.prof { display: flex; align-items: center; gap: 14px; }
+.acct-avatar.big { width: 56px; height: 56px; }
+.acct-avatar.big .acct-initial { font-size: 22px; }
+.prof-main { flex: 1; min-width: 0; }
+.prof-nick-row { display: flex; align-items: center; gap: 8px; }
+.prof-nick { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--text); background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 7px 10px; outline: none; }
+.prof-nick:focus { border-color: var(--accent); }
+.prof-email { font-size: 12.5px; color: var(--dim); margin-top: 7px; }
+
+/* 내 기기 테이블 */
+.dev-table { display: flex; flex-direction: column; }
+.dev-tr { display: grid; grid-template-columns: 1.7fr 0.9fr 1fr 1.1fr 34px; align-items: center; gap: 10px; padding: 11px 6px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); }
+.dev-th { font-size: 11.5px; font-weight: 700; color: var(--dim); }
+.dc-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dc-name .dev-ic { color: var(--text3); flex: none; }
+.dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; }
+.dc-os, .dc-loc, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-act { display: flex; justify-content: flex-end; }
+.dev-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: transparent; color: var(--text3); border-radius: var(--r-sm); cursor: pointer; opacity: 0; transition: opacity 0.12s, background 0.12s; }
+.dev-tr:hover .dev-menu-btn { opacity: 1; }
+.dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
 .conn-status { display: flex; align-items: center; gap: 12px; }
 .cst-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--dim); flex: none; }
 .cst-dot.on { background: var(--accent); animation: pulse 2s infinite; }

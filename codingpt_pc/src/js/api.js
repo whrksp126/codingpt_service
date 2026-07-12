@@ -20,6 +20,9 @@ export const api = {
   fetchMe: () => invoke("fetch_me"),
   // 계정의 모든 기기 목록(멀티기기 "내 기기"). 미로그인이면 null.
   fetchDevices: () => invoke("fetch_devices"),
+  updateNickname: (nickname) => invoke("update_nickname", { nickname }),
+  deleteAccount: () => invoke("delete_account"),
+  revokeDevice: (deviceId) => invoke("revoke_device", { deviceId }),
   // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필).
   claimWorkspace: (wsId) => invoke("claim_workspace", { wsId }),
   // 홈-상대 경로가 이 기기에 실재하는 디렉토리인지.

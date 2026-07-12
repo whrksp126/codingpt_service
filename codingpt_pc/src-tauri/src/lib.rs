@@ -441,6 +441,9 @@ pub fn run() {
             // 브리지(워크스페이스/영속화/알림)
             bridge::fetch_workspaces,
             bridge::fetch_me,
+            bridge::update_nickname,
+            bridge::delete_account,
+            bridge::revoke_device,
             bridge::fetch_devices,
             bridge::claim_workspace,
             bridge::desktop_login_url,

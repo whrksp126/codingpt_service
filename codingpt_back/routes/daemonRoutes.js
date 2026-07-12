@@ -12,6 +12,8 @@ router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코
 router.get('/status', authMiddleware, daemonController.getStatus);
 // PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
 router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)
+router.patch('/me', daemonController.updateMe); // JWT|deviceToken — 닉네임 등 프로필 수정
+router.delete('/account', daemonController.deleteAccount); // JWT|deviceToken — 회원 탈퇴(본인 계정)
 router.get('/devices', daemonController.daemonDevices); // deviceToken 인증 — 계정의 모든 기기 목록(멀티기기)
 router.post('/devices/register', daemonController.registerController); // JWT|deviceToken — 컨트롤러(모바일/태블릿) 자기 등록
 router.get('/workspaces', daemonController.daemonWorkspaces);
@@ -20,7 +22,7 @@ router.get('/workspaces/:wsId/session', daemonController.daemonGetSession); // �
 router.put('/workspaces/:wsId/session', daemonController.daemonPutSession);
 router.post('/workspaces', daemonController.daemonCreateWorkspace);
 router.post('/terminal/device-start', daemonController.daemonTerminalStart);
-router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
+router.post('/devices/:deviceId/revoke', daemonController.revokeDevice); // JWT|deviceToken(핸들러 resolveAccount)
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)
 router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloudRunner); // M5 Slice4: 클라우드 러너 확보(핸드오프 진입점)
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);

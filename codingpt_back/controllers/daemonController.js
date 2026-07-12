@@ -110,6 +110,43 @@ async function registerController(req, res) {
   }
 }
 
+// PATCH /api/daemon/me  (JWT|deviceToken) — 프로필(닉네임) 수정.
+async function updateMe(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const nickname = String((req.body && req.body.nickname) || '').trim().slice(0, 40);
+    if (!nickname) return errorResponse(res, new Error('닉네임을 입력하세요.'), 400);
+    await User.update({ nickname }, { where: { id: acct.userId } });
+    const u = await User.findByPk(acct.userId, { attributes: ['id', 'email', 'nickname', 'profile_img'] });
+    return successResponse(res, { id: u.id, email: u.email, nickname: u.nickname, profileImg: u.profile_img });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
+// DELETE /api/daemon/account  (JWT|deviceToken) — 회원 탈퇴(본인 계정 + 기기 삭제). 파괴적.
+async function deleteAccount(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const userId = acct.userId;
+    // 기기(클라우드 러너 포함) 정리 후 사용자 삭제.
+    const devices = await DaemonDevice.findAll({ where: { user_id: userId } });
+    for (const d of devices) {
+      try {
+        daemonRelayService.disconnectDevice(d.id);
+        if (d.runner_kind === 'cloud' && d.container_id) await cloudRunnerService.stopContainer(d.container_id).catch(() => {});
+      } catch (_) { /* best-effort */ }
+    }
+    await DaemonDevice.destroy({ where: { user_id: userId } });
+    await User.destroy({ where: { id: userId } });
+    return successResponse(res, { deleted: true });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
 // Authorization: Bearer <deviceToken> → 해당 DaemonDevice(폐기 안 됨). PC 데스크톱 앱(사용자 JWT 없음)이
 //  이미 페어링으로 계정에 묶인 deviceToken 으로 소유자 자원(워크스페이스 목록 등)을 읽을 때 사용.
 async function resolveDeviceUser(req) {
@@ -520,7 +557,9 @@ async function ensureCloudRunner(req, res) {
 // POST /api/daemon/devices/:deviceId/revoke  (인증) — 기기 연결 해제(재페어링 필요)
 async function revokeDevice(req, res) {
   try {
-    const userId = req.user && req.user.id;
+    const acct = await resolveAccount(req); // deviceToken(PC) | JWT(모바일) 모두 허용
+    const userId = acct && acct.userId;
+    if (!userId) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
     const deviceId = Number(req.params.deviceId);
     const device = await DaemonDevice.findOne({ where: { id: deviceId, user_id: userId, revoked_at: null } });
     if (!device) return errorResponse(res, new Error('기기를 찾을 수 없습니다.'), 404);
@@ -902,7 +941,7 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
-  daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, daemonDevices,
+  daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,

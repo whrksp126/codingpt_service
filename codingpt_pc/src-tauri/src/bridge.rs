@@ -113,6 +113,52 @@ pub fn claim_workspace(ws_id: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
+// 프로필(닉네임) 수정 — deviceToken.
+#[tauri::command]
+pub fn update_nickname(nickname: String) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!("{}/api/daemon/me", server_url().trim_end_matches('/'));
+    let resp = ureq::request("PATCH", &url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(serde_json::json!({ "nickname": nickname }))
+        .map_err(|e| format!("프로필 수정 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 회원 탈퇴(본인 계정 삭제) — deviceToken.
+#[tauri::command]
+pub fn delete_account() -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!("{}/api/daemon/account", server_url().trim_end_matches('/'));
+    let resp = ureq::request("DELETE", &url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+        .map_err(|e| format!("회원 탈퇴 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 기기 삭제(revoke) — deviceToken.
+#[tauri::command]
+pub fn revoke_device(device_id: i64) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!(
+        "{}/api/daemon/devices/{}/revoke",
+        server_url().trim_end_matches('/'),
+        device_id
+    );
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| format!("기기 삭제 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
 // 데스크톱 웹 로그인 URL — 백엔드 서버 주소에서 프론트(codingpt.ghmate.com) 로 유도해 코드 부착.
 //  prod: codingpt-back.ghmate.com → codingpt.ghmate.com / local: :5300 → :3400.
 #[tauri::command]

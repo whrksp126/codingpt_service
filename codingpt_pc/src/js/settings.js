@@ -10,15 +10,15 @@ let navEl = null;
 let contentEl = null;
 let connBody = null; // 연결 탭 내부 컨테이너
 let autostartChk = null;
-let section = "connection"; // 'connection' | 'general' | 'about'
+let section = "general"; // 'general' | 'connection' | 'about'  — 일반 탭이 기본
 let connMode = null; // 'paired' | 'unpaired'
 let query = "";
 let qr = null;
 let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
-  { key: "connection", label: "계정", icon: "user" },
   { key: "general", label: "일반", icon: "gear" },
+  { key: "connection", label: "계정", icon: "user" },
   { key: "about", label: "정보", icon: "monitor" },
 ];
 
@@ -105,13 +105,31 @@ function renderSection(force) {
       connMode = mode;
       paired ? buildPaired() : buildUnpaired();
     } else if (paired) {
-      updatePairedStatus();
-      ensureAccountCard();
       renderDeviceList();
     }
   } else if (section === "general") {
+    const me = state.me;
+    const initial = me ? (me.nickname || me.email || "U").trim().charAt(0).toUpperCase() : "";
+    const avatar = me?.profileImg
+      ? `<img class="acct-img" src="${esc(me.profileImg)}" alt="" />`
+      : `<span class="acct-initial">${esc(initial)}</span>`;
+    const profileHtml = me
+      ? `<div class="sm-card2">
+          <div class="prof">
+            <div class="acct-avatar big">${avatar}</div>
+            <div class="prof-main">
+              <div class="prof-nick-row">
+                <input id="nickInput" class="prof-nick" value="${esc(me.nickname || "")}" placeholder="닉네임" maxlength="40" spellcheck="false" />
+                <button id="nickSave" class="btn small">저장</button>
+              </div>
+              <div class="prof-email">${esc(me.email || "")}</div>
+            </div>
+          </div>
+        </div>`
+      : `<div class="sm-card2"><div class="dim" style="font-size:13px">로그인하면 프로필이 표시됩니다.</div></div>`;
     contentEl.innerHTML = `
       <div class="sm-h">일반</div>
+      ${profileHtml}
       <div class="sm-card2">
         <label class="switch"><input id="autostartChk" type="checkbox" /><span>이 Mac 로그인 시 자동 실행</span></label>
         <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
@@ -125,6 +143,8 @@ function renderSection(force) {
       }
     });
     syncAutostart();
+    bindNickname();
+    if (state.paired && !state.me) S.loadMe(); // 프로필 지연 로드 → emit 후 재렌더
   } else {
     contentEl.innerHTML = `
       <div class="sm-h">정보</div>
@@ -178,18 +198,85 @@ function buildPaired() {
   stopQr();
   stopWebLogin();
   connBody.innerHTML = `
-    <div id="acctCard">${accountCardHtml()}</div>
-    <div class="acct-actions" style="margin:10px 0 2px">
-      <button id="unpairBtn" class="btn ghost small">로그아웃</button>
+    <div class="acct-line">
+      <div class="acct-line-txt">모든 기기에서 로그아웃</div>
+      <button id="unpairBtn" class="btn small">로그아웃</button>
     </div>
+    <div class="acct-line">
+      <div class="acct-line-txt">회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.</div>
+      <button id="deleteAcctBtn" class="btn small danger">회원 탈퇴</button>
+    </div>
+    <div id="acctMsg" class="acct-msg"></div>
     <div class="dev-section">
       <div class="dev-title">내 기기</div>
-      <div id="deviceList" class="dev-list"></div>
+      <div id="deviceTable" class="dev-table"></div>
     </div>`;
   bindUnpair(connBody.querySelector("#unpairBtn"));
+  connBody.querySelector("#deleteAcctBtn").addEventListener("click", onDeleteAccount);
   renderDeviceList();
-  if (!state.me) S.loadMe(); // 프로필 지연 로드 → emit 후 재렌더
+  if (!state.me) S.loadMe(); // 프로필 지연 로드
   S.loadDevices(); // 기기 목록/온라인 상태 최신화
+}
+
+// 닉네임 저장(일반 탭 프로필).
+function bindNickname() {
+  const save = contentEl?.querySelector("#nickSave");
+  const input = contentEl?.querySelector("#nickInput");
+  if (!save || !input) return;
+  const commit = async () => {
+    const v = (input.value || "").trim();
+    if (!v || v === (state.me?.nickname || "")) return;
+    save.disabled = true;
+    const prev = save.textContent;
+    save.textContent = "저장 중…";
+    try { await api.updateNickname(v); await S.loadMe(); }
+    catch (_) { save.disabled = false; save.textContent = prev; }
+  };
+  save.addEventListener("click", commit);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } });
+}
+
+// 회원 탈퇴 — 인라인 2단계 확인(파괴적).
+let acctDeleting = false;
+async function onDeleteAccount() {
+  const btn = connBody?.querySelector("#deleteAcctBtn");
+  const msg = connBody?.querySelector("#acctMsg");
+  if (!btn) return;
+  if (!btn.dataset.confirm) {
+    btn.dataset.confirm = "1";
+    btn.textContent = "정말 탈퇴하시겠어요?";
+    if (msg) { msg.textContent = "한 번 더 누르면 계정이 영구 삭제됩니다."; msg.classList.add("warn"); }
+    setTimeout(() => { if (btn.dataset.confirm) { delete btn.dataset.confirm; btn.textContent = "회원 탈퇴"; if (msg) { msg.textContent = ""; msg.classList.remove("warn"); } } }, 4000);
+    return;
+  }
+  if (acctDeleting) return;
+  acctDeleting = true;
+  delete btn.dataset.confirm;
+  btn.disabled = true;
+  btn.textContent = "탈퇴 중…";
+  try {
+    await api.deleteAccount();
+    await api.unpair().catch(() => {}); // 로컬 자격 정리 → 로그아웃 상태로
+    state.me = null;
+    state.devices = [];
+    connMode = null;
+    state.daemon = await api.daemonStatus().catch(() => state.daemon);
+    state.paired = !!state.daemon?.paired;
+    S.emit();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "회원 탈퇴";
+    if (msg) { msg.textContent = "탈퇴 실패: " + e; msg.classList.add("warn"); }
+  }
+  acctDeleting = false;
+}
+
+// 날짜 포맷 — "2026년 7월 3일".
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return "—";
+  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
 // "내 기기" 목록 렌더(state.devices). 클라우드 호스트 포함.
@@ -205,22 +292,60 @@ function deviceOsLabel(d) {
   return d.role === "controller" ? "모바일" : "기기";
 }
 function renderDeviceList() {
-  const el = connBody?.querySelector("#deviceList");
+  const el = connBody?.querySelector("#deviceTable");
   if (!el) return;
-  if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px">불러오는 중…</div>`; return; }
-  el.innerHTML = state.devices.map((d) => {
+  if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`; return; }
+  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-loc">위치</span><span class="dc-date">등록됨</span><span class="dc-act"></span></div>`;
+  const rows = state.devices.map((d) => {
     const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
     const icon = d.runnerKind === "cloud"
-      ? icons.cloud({ size: 16 })
+      ? icons.cloud({ size: 15 })
       : d.role === "controller"
-        ? icons.smartphone({ size: 16 })
-        : icons.monitor({ size: 16 });
-    return `<div class="dev-row">
-      <span class="dev-ic">${icon}</span>
-      <div class="dev-meta"><div class="dev-name">${esc(d.name)}${cur}</div><div class="dev-sub">${esc(deviceOsLabel(d))}</div></div>
-      <span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span>
+        ? icons.smartphone({ size: 15 })
+        : icons.monitor({ size: 15 });
+    const canRevoke = d.runnerKind !== "cloud" && typeof d.id === "number";
+    const act = canRevoke ? `<button class="dev-menu-btn" data-dev="${d.id}" title="더보기">${icons.dots({ size: 16 })}</button>` : "";
+    return `<div class="dev-tr">
+      <span class="dc-name"><span class="dev-ic">${icon}</span><span class="dc-nm">${esc(d.name)}</span>${cur}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
+      <span class="dc-os">${esc(deviceOsLabel(d))}</span>
+      <span class="dc-loc">—</span>
+      <span class="dc-date">${esc(fmtDate(d.createdAt))}</span>
+      <span class="dc-act">${act}</span>
     </div>`;
   }).join("");
+  el.innerHTML = head + rows;
+  el.querySelectorAll(".dev-menu-btn").forEach((b) =>
+    b.addEventListener("click", (e) => { e.stopPropagation(); showDeviceMenu(e, Number(b.dataset.dev)); }));
+}
+
+// 기기 행 "..." 드롭다운(기기 삭제).
+let devMenuEl = null;
+function closeDevMenu() {
+  if (devMenuEl) { devMenuEl.remove(); devMenuEl = null; }
+  document.removeEventListener("mousedown", onDevMenuOutside, true);
+}
+function onDevMenuOutside(ev) { if (devMenuEl && !devMenuEl.contains(ev.target)) closeDevMenu(); }
+function showDeviceMenu(e, deviceId) {
+  closeDevMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  const del = document.createElement("button");
+  del.className = "ctx-item danger";
+  del.innerHTML = `<span class="ctx-ic">${icons.trash({ size: 15 })}</span><span class="ctx-label">기기 삭제</span>`;
+  del.addEventListener("click", async () => {
+    closeDevMenu();
+    try { await api.revokeDevice(deviceId); await S.loadDevices(); } catch (_) {}
+  });
+  menu.appendChild(del);
+  document.body.appendChild(menu);
+  devMenuEl = menu;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  let x = e.clientX, y = e.clientY;
+  if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(8, x) + "px";
+  menu.style.top = Math.max(8, y) + "px";
+  setTimeout(() => document.addEventListener("mousedown", onDevMenuOutside, true), 0);
 }
 
 function updatePairedStatus() {
@@ -255,13 +380,13 @@ function bindUnpair(btn) {
   const reset = () => {
     armed = false;
     if (timer) clearTimeout(timer);
-    btn.textContent = "연결 해제";
+    btn.textContent = "로그아웃";
     btn.classList.remove("danger");
   };
   btn.addEventListener("click", async () => {
     if (!armed) {
       armed = true;
-      btn.textContent = "정말 해제? (다시 클릭)";
+      btn.textContent = "다시 클릭";
       btn.classList.add("danger");
       timer = setTimeout(reset, 3000);
       return;
