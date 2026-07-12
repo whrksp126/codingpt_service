@@ -44,6 +44,11 @@ function sessionForCwd(cwdRel) {
   return { session: 'cpt-' + (safe || 'ws'), abs };
 }
 
+// pane 별 grouped view 세션명. primary 와 window 를 공유하되 current-window 는 독립.
+function viewSession(primary, paneId) {
+  return primary + '--v-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
+}
+
 let tmuxPathCache = null;
 function findTmux() {
   if (tmuxPathCache) return tmuxPathCache;
@@ -83,15 +88,32 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     // 매 attach 마다 실행하는 건 window-size 뿐(마지막 조작 클라이언트 크기 반영 보정).
     // 진입한 워크스페이스 경로에 맞는 세션/시작폴더 결정(홈=공유 세션, 워크스페이스=전용 세션 @ 그 폴더).
     const { session, abs } = sessionForCwd(params && params.cwd);
+    // pane 별 grouped view 세션명(모바일 다중 터미널 pane 이 각자 다른 window 를 동시에 보게).
+    const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
+
+    let spawnArgs;
+    if (paneId) {
+      // primary 세션 보장(detached create-or-noop) → 이 pane 전용 grouped view 세션에 attach.
+      //   grouped(-t): window 목록은 primary 와 공유, current-window/size 는 독립
+      //   → PC 의 grouped session 방식과 동일하게 여러 pane 이 서로 다른 window 를 동시 표시.
+      try {
+        execFileSync(tmux, [
+          '-L', TMUX_SOCKET, '-f', TMUX_CONF,
+          'new-session', '-A', '-d', '-s', session, '-c', abs,
+          ';', 'set', '-g', 'window-size', 'latest',
+        ], { env, stdio: 'ignore' });
+      } catch (_) { /* 이미 존재하면 무시 */ }
+      const view = viewSession(session, paneId);
+      // -A: view 가 있으면 attach(재연결 시 current-window 유지), 없으면 -t 로 grouped 생성.
+      spawnArgs = ['-L', TMUX_SOCKET, 'new-session', '-A', '-t', session, '-s', view, ';', 'set', '-g', 'window-size', 'latest'];
+    } else {
+      // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
+      spawnArgs = ['-L', TMUX_SOCKET, '-f', TMUX_CONF, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+    }
 
     let pty;
     try {
-      pty = nodePty.spawn(tmux, [
-        '-L', TMUX_SOCKET,
-        '-f', TMUX_CONF,
-        'new-session', '-A', '-s', session, '-c', abs, // -c: 새로 만들 때 그 폴더에서 시작(attach 시엔 무시)
-        ';', 'set', '-g', 'window-size', 'latest',
-      ], {
+      pty = nodePty.spawn(tmux, spawnArgs, {
         name: 'xterm-256color',
         cols, rows,
         cwd: abs,
@@ -101,7 +123,7 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       try { ws.send(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
       return;
     }
-    console.log(`[pty] 스트림 연결 (session=${session}, cwd=${abs}, ${cols}x${rows})`);
+    console.log(`[pty] 스트림 연결 (session=${session}${paneId ? ' view=' + viewSession(session, paneId) : ''}, cwd=${abs}, ${cols}x${rows})`);
 
     pty.onData((data) => {
       try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
@@ -182,7 +204,10 @@ async function handleTerminalRpc(method, params) {
     }
   }
   if (method === 'terminal.select') {
-    await runTmux(['select-window', '-t', `${session}:${(params && params.index) | 0}`]);
+    // paneId 있으면 그 pane 의 grouped view 세션에서 window 선택(다른 pane 에 영향 없음).
+    const paneId = params && params.paneId ? String(params.paneId) : '';
+    const target = paneId ? viewSession(session, paneId) : session;
+    await runTmux(['select-window', '-t', `${target}:${(params && params.index) | 0}`]);
     return { ok: true };
   }
   if (method === 'terminal.close') {

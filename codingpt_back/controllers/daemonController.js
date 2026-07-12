@@ -583,7 +583,9 @@ async function startTerminal(req, res) {
     const userId = req.user && req.user.id;
     // cwd: 진입한 워크스페이스 폴더(데몬 홈-기준 상대). 없으면 홈.
     const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
-    const token = daemonRelayService.issueTerminalToken(userId, cwd);
+    // paneId — pane 별 grouped tmux view(여러 터미널 pane 이 각자 다른 window 동시 표시). 없으면 공유 세션.
+    const paneId = (req.body && typeof req.body.paneId === 'string') ? req.body.paneId : '';
+    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -608,7 +610,7 @@ async function terminalNew(req, res) {
 // POST /api/daemon/terminal/select  (인증) body:{ cwd, index } → { ok }
 async function terminalSelect(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0 });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

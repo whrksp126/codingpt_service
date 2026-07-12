@@ -427,7 +427,7 @@ function termTokenFor(userId) {
 }
 
 // POST /api/daemon/terminal/start 에서 호출(인증 후). 데몬 오프라인이면 throw.
-function issueTerminalToken(userId, cwd) {
+function issueTerminalToken(userId, cwd, paneId) {
   if (!pickConn(userId)) { // 활성 러너 없으면 오프라인
     const err = new Error('PC 데몬이 연결되어 있지 않습니다.');
     err.statusCode = 409;
@@ -435,7 +435,8 @@ function issueTerminalToken(userId, cwd) {
   }
   const token = termTokenFor(userId);
   // cwd(데몬 홈-기준 상대경로) — 진입한 워크스페이스 폴더에서 터미널을 시작. 빈 문자열=홈.
-  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
+  // paneId — pane 별 grouped tmux view 세션 식별(여러 터미널 pane 이 각자 다른 window 를 동시에 보게).
+  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', paneId: typeof paneId === 'string' ? paneId : '', expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
   return token;
 }
 
@@ -457,7 +458,7 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
     const ptyConn = pickConn(sess.userId);
     try {
       // cols/rows 는 앱이 접속 직후 resize 프레임으로 보정하므로 기본값으로 시작. cwd=진입 워크스페이스 폴더.
-      daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '' });
+      daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '', paneId: sess.paneId || '' });
     } catch (e) {
       const msg = e.message === 'DAEMON_OFFLINE' ? 'PC 데몬이 오프라인입니다.' : ('터미널을 열 수 없습니다: ' + e.message);
       try { appWs.send('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); appWs.close(); } catch (_) { /* noop */ }
