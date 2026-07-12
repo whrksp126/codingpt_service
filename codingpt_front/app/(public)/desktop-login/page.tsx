@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { captureHandoff, setToken, getToken } from '@/lib/auth';
+import { captureHandoff, setToken, getToken, clearToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 
 const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
@@ -61,8 +61,17 @@ export default function DesktopLogin() {
     setBusy(true); setMsg(null);
     const r = await clientFetch('/api/daemon/pair/approve', { method: 'POST', body: { code }, token });
     setBusy(false);
-    if (r.ok) { setDone(true); setMsg(null); }
-    else { autoRef.current = false; setMsg(r.message || '연결에 실패했습니다. 코드가 만료되었을 수 있어요.'); }
+    if (r.ok) { setDone(true); setMsg(null); return; }
+    autoRef.current = false;
+    // 저장된 토큰이 만료/무효(401)면 비우고 재로그인 유도 — 클로드 CLI식 재인증.
+    //  기존 로그인 토큰(15분 만료)이 남아 자동 승인이 실패하는 경우를 처리.
+    if (r.status === 401) {
+      clearToken();
+      setTok(null);
+      setMsg('세션이 만료되었어요. 다시 로그인해 주세요.');
+    } else {
+      setMsg(r.message || '연결에 실패했습니다. 코드가 만료되었을 수 있어요.');
+    }
   };
 
   // 로그인되면(토큰 획득) 자동으로 이 기기를 승인 — 클로드 CLI식 자동 완료(별도 승인 버튼 없음).
