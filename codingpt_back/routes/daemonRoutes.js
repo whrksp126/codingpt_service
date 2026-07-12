@@ -68,6 +68,7 @@ router.post('/ws/root', authMiddleware, daemonController.wsSetRoot);
 router.post('/ws/root/default', authMiddleware, daemonController.wsUseDefaultRoot);
 router.post('/ws/create', authMiddleware, daemonController.wsCreate);
 router.post('/ws/clone', authMiddleware, daemonController.wsClone); // GitHub 레포 git clone → 로컬 워크스페이스
+router.post('/ws/fulldisk', authMiddleware, daemonController.wsSetFullDisk); // 전체 디스크 접근 토글(홈 jail 완화)
 
 // 동기화(M4) — objectstore git-bundle 체크포인트/머티리얼라이즈/충돌. 데몬 오프라인이면 409.
 router.post('/sync/checkpoint', authMiddleware, syncController.checkpoint);

@@ -11,10 +11,24 @@ const fsp = require('fs/promises');
 const path = require('path');
 const chokidar = require('chokidar');
 const runtime = require('./runtime');
+const configLib = require('./config');
 
 // fs jail 루트 — 지연 평가(runner-core 로드 후 부트스트랩이 init 해도 반영되게).
 //  로컬 데몬=사용자 홈, 클라우드 러너=컨테이너 workdir.
 const rootDir = () => runtime.root();
+
+// 전체 디스크 접근 토글 — config.allowFullDisk=true 면 홈 jail 을 우회한다(홈 밖 절대경로 허용).
+//  기본은 false(홈 jail 유지). safeResolve 가 아주 자주 불리므로 2초 TTL 캐시로 config 재읽기를 억제.
+//  전제: 사용자가 이 토글을 켤 땐 데몬 프로세스(터미널/앱)에 macOS 전체 디스크 접근(FDA)을 부여해야
+//  실제 파일 접근 시 TCC 프롬프트가 안 뜬다. jail 완화는 원격 조작이라 신중히(사용자 명시 opt-in).
+let _fullDiskCache = { at: 0, val: false };
+function allowFullDisk() {
+  const now = Date.now();
+  if (now - _fullDiskCache.at < 2000) return _fullDiskCache.val;
+  const cfg = configLib.load() || {};
+  _fullDiskCache = { at: now, val: cfg.allowFullDisk === true };
+  return _fullDiskCache.val;
+}
 
 // 목록에서 숨기고 순회도 막을 디렉토리(성능/노이즈/보안).
 const HIDDEN_DIRS = new Set([
@@ -42,6 +56,9 @@ const TEXT_EXT = new Set([
 function safeResolve(rel) {
   const ROOT = rootDir();
   const abs = path.resolve(ROOT, rel || '.');
+  // 전체 디스크 허용 시 jail 검증을 건너뛴다(절대경로면 그대로, 상대면 홈 기준).
+  //  나중에 쉽게 되돌릴 수 있도록 config 플래그 하나로만 게이팅.
+  if (allowFullDisk()) return abs;
   const rootReal = fs.realpathSync(ROOT);
   // 존재하는 경로면 realpath 로, 없으면(신규 파일 write) 부모까지 realpath 로 검증.
   let checkAbs = abs;
@@ -57,7 +74,11 @@ function safeResolve(rel) {
 }
 
 function relOf(abs) {
-  return path.relative(rootDir(), abs).split(path.sep).join('/');
+  const rel = path.relative(rootDir(), abs).split(path.sep).join('/');
+  // 홈 밖(전체 디스크 모드)이면 상대경로가 '../../…' 로 지저분해지므로 절대경로를 식별자로 사용.
+  //  safeResolve 는 절대경로 입력을 그대로 처리하므로 왕복이 안전하다.
+  if (rel.startsWith('..')) return abs.split(path.sep).join('/');
+  return rel;
 }
 
 function isTextFile(name) {

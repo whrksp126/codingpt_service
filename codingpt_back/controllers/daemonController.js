@@ -741,21 +741,36 @@ async function wsUseDefaultRoot(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// POST /api/daemon/ws/create  (인증) body:{ name } — 루트 아래 새 워크스페이스 폴더 스캐폴드
+// POST /api/daemon/ws/create  (인증) body:{ name, parentPath? } — 선택한 폴더 아래 새 워크스페이스 스캐폴드
+//  parentPath: 사용자가 이번 생성마다 고르는 목적지 부모(홈-기준 상대, 전체 디스크 모드면 절대경로).
 async function wsCreate(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'ws.create', { name: (req.body && req.body.name) || '' });
+    const params = { name: (req.body && req.body.name) || '' };
+    if (req.body && req.body.parentPath) params.parentPath = req.body.parentPath;
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.create', params);
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// POST /api/daemon/ws/clone  (인증) body:{ url, name? } — GitHub 레포를 루트 아래로 git clone
+// POST /api/daemon/ws/clone  (인증) body:{ url, name?, parentPath? } — GitHub 레포를 선택한 폴더 아래로 clone
 //  url 검증은 데몬(ws.clone)이 화이트리스트로 수행. clone 은 네트워크 fetch라 넉넉한 타임아웃(120s).
 async function wsClone(req, res) {
   try {
     const url = (req.body && req.body.url) || '';
     const name = (req.body && req.body.name) || '';
-    const result = await daemonRelayService.callRpc(req.user.id, 'ws.clone', { url, name }, 120000);
+    const params = { url, name };
+    if (req.body && req.body.parentPath) params.parentPath = req.body.parentPath;
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.clone', params, 120000);
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+// POST /api/daemon/ws/fulldisk  (인증) body:{ enabled } — 전체 디스크 접근 토글(홈 jail 완화)
+//  실제 무프롬프트 접근은 사용자가 데몬에 macOS 전체 디스크 접근(FDA)을 부여해야 완성됨(앱이 안내).
+async function wsSetFullDisk(req, res) {
+  try {
+    const enabled = !!(req.body && req.body.enabled);
+    const result = await daemonRelayService.callRpc(req.user.id, 'ws.setFullDisk', { enabled });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -977,7 +992,7 @@ module.exports = {
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
-  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,
+  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,

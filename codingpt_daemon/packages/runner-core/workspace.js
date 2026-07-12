@@ -70,7 +70,13 @@ function normalizeGithubUrl(raw) {
 async function getRoot() {
   const cfg = configLib.load() || {};
   const rel = cfg.workspaceRoot;
-  const base = { recommended: DEFAULT_ROOT_REL };
+  // recommended=TCC 프롬프트 없는 추천 위치, lastParent=마지막 선택 부모(피커 기본값),
+  //  allowFullDisk=전체 디스크 모드 여부(피커가 홈 밖 탐색 허용 판단).
+  const base = {
+    recommended: DEFAULT_ROOT_REL,
+    lastParent: (typeof cfg.lastWorkspaceParent === 'string' ? cfg.lastWorkspaceParent : null),
+    allowFullDisk: cfg.allowFullDisk === true,
+  };
   if (typeof rel !== 'string') return { root: null, ...base };
   try {
     const abs = fsLib.safeResolve(rel);
@@ -98,14 +104,17 @@ async function useDefaultRoot() {
   return setRoot({ path: DEFAULT_ROOT_REL, create: true });
 }
 
-// 루트 아래 새 워크스페이스 폴더 스캐폴드. name → slug, 충돌 시 -2/-3 …
+// 선택한 부모 폴더 아래 새 워크스페이스 폴더 스캐폴드. name → slug, 충돌 시 -2/-3 …
+//  destParent(params.parentPath): 사용자가 이번 생성마다 고르는 목적지 폴더(홈-기준 상대,
+//  또는 전체 디스크 모드면 절대경로). 미지정이면 마지막 사용 위치 → (구)영구 루트 순으로 폴백.
 async function create(params) {
   const name = (params && params.name) || '';
   const cfg = configLib.load() || {};
-  if (typeof cfg.workspaceRoot !== 'string') throw new Error('먼저 워크스페이스 루트를 지정해 주세요.');
-  const rootAbs = fsLib.safeResolve(cfg.workspaceRoot);
+  const parentRel = (params && params.parentPath) || cfg.lastWorkspaceParent || cfg.workspaceRoot;
+  if (typeof parentRel !== 'string' || !parentRel) throw new Error('워크스페이스를 만들 폴더를 선택해 주세요.');
+  const rootAbs = fsLib.safeResolve(parentRel);
   const rootSt = await fsp.stat(rootAbs).catch(() => null);
-  if (!rootSt || !rootSt.isDirectory()) throw new Error('워크스페이스 루트 폴더가 없습니다. 다시 지정해 주세요.');
+  if (!rootSt || !rootSt.isDirectory()) throw new Error('선택한 폴더가 존재하지 않습니다. 다시 선택해 주세요.');
 
   const base = slugify(name);
   let slug = base;
@@ -124,23 +133,25 @@ async function create(params) {
   // git init(실패해도 폴더/파일은 유지 — git 미설치 환경 허용).
   const git = await runGit(['init'], dirAbs);
 
+  // 다음 생성 시 기본값으로 쓰도록 마지막 선택 부모를 기억.
+  configLib.save({ ...cfg, lastWorkspaceParent: fsLib.relOf(rootAbs) });
+
   return { path: fsLib.relOf(dirAbs), name: name || slug, slug, gitInit: git.ok };
 }
 
-// GitHub 레포를 루트 아래로 clone. 루트 미지정이면 권장 위치를 자동 생성/지정(매끄러운 진입).
+// GitHub 레포를 선택한 부모 폴더 아래로 clone. destParent(params.parentPath)를 사용자가 매번 고른다.
 //  compute:'local' 워크스페이스로 등록될 폴더를 결정적으로 만든다. AI 자격증명 무접촉(순수 git clone).
 async function clone(params) {
   const { url, owner, repo } = normalizeGithubUrl(params && params.url);
 
-  // 루트 확보 — 없으면 권장 위치(~/CodingPT/workspaces, TCC 프롬프트 없음)를 자동 지정.
-  let cfg = configLib.load() || {};
-  if (typeof cfg.workspaceRoot !== 'string') {
-    await useDefaultRoot();
-    cfg = configLib.load() || {};
-  }
-  const rootAbs = fsLib.safeResolve(cfg.workspaceRoot);
+  // 목적지 부모 — 사용자 선택(parentPath). 없으면 마지막 사용 위치 → (구)영구 루트 순으로 폴백.
+  //  ~/CodingPT 자동 생성은 하지 않는다(사용자가 위치를 명시적으로 고르는 모델).
+  const cfg = configLib.load() || {};
+  const parentRel = (params && params.parentPath) || cfg.lastWorkspaceParent || cfg.workspaceRoot;
+  if (typeof parentRel !== 'string' || !parentRel) throw new Error('저장소를 받을 폴더를 선택해 주세요.');
+  const rootAbs = fsLib.safeResolve(parentRel);
   const rootSt = await fsp.stat(rootAbs).catch(() => null);
-  if (!rootSt || !rootSt.isDirectory()) throw new Error('워크스페이스 루트 폴더가 없습니다. 다시 지정해 주세요.');
+  if (!rootSt || !rootSt.isDirectory()) throw new Error('선택한 폴더가 존재하지 않습니다. 다시 선택해 주세요.');
 
   // 폴더 이름 — 사용자 지정 name 우선, 없으면 레포명. 충돌 시 -2/-3 …
   const base = slugify((params && params.name) || repo);
@@ -157,7 +168,19 @@ async function clone(params) {
     throw new Error(git.err ? `clone 실패: ${git.err.split('\n').slice(-3).join(' ').trim()}` : 'clone 에 실패했습니다.');
   }
 
+  // 다음 생성/클론 시 기본값으로 쓰도록 마지막 선택 부모를 기억.
+  configLib.save({ ...cfg, lastWorkspaceParent: fsLib.relOf(rootAbs) });
+
   return { path: fsLib.relOf(dirAbs), name: (params && params.name) || repo, slug, owner, repo };
+}
+
+// 전체 디스크 접근 토글 저장(설정에서 켜고 끔). 실제 무프롬프트 접근은 사용자가 데몬에 macOS
+//  전체 디스크 접근(FDA)을 부여해야 완성됨(앱이 안내). 이 플래그는 fs.js safeResolve 의 jail 을 완화.
+async function setFullDisk(params) {
+  const enabled = !!(params && params.enabled);
+  const cfg = configLib.load() || {};
+  configLib.save({ ...cfg, allowFullDisk: enabled });
+  return { allowFullDisk: enabled };
 }
 
 async function handle(method, params) {
@@ -165,10 +188,11 @@ async function handle(method, params) {
     case 'ws.getRoot': return getRoot();
     case 'ws.setRoot': return setRoot(params);
     case 'ws.useDefaultRoot': return useDefaultRoot();
+    case 'ws.setFullDisk': return setFullDisk(params);
     case 'ws.create': return create(params);
     case 'ws.clone': return clone(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }
 
-module.exports = { handle, getRoot, setRoot, useDefaultRoot, create, clone, slugify, DEFAULT_ROOT_REL };
+module.exports = { handle, getRoot, setRoot, useDefaultRoot, setFullDisk, create, clone, slugify, DEFAULT_ROOT_REL };
