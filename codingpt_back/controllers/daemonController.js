@@ -671,6 +671,35 @@ async function fsWrite(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// POST /api/daemon/fs/mkdir  (인증) body:{ path } — 디렉토리 생성
+async function fsMkdir(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.mkdir', { path: (req.body && req.body.path) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/fs/create  (인증) body:{ path } — 빈 파일 생성
+async function fsCreateFile(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.createFile', { path: (req.body && req.body.path) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/fs/rename  (인증) body:{ path, dest } — 이름변경/이동
+async function fsRename(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.rename', { path: (req.body && req.body.path) || '', dest: (req.body && req.body.dest) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/fs/delete  (인증) body:{ path } — 삭제(재귀)
+async function fsDelete(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.delete', { path: (req.body && req.body.path) || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // POST /api/daemon/fs/watch  (인증) body:{ path } — 그 디렉토리 변경을 감시(단일). 이벤트는 /events SSE 로.
 async function fsWatch(req, res) {
   try {
@@ -947,7 +976,7 @@ module.exports = {
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
-  fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
+  fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,

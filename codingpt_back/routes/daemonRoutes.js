@@ -37,6 +37,10 @@ router.get('/fs/tree', authMiddleware, daemonController.fsTree);
 router.get('/fs/read', authMiddleware, daemonController.fsRead);
 router.get('/fs/grep', authMiddleware, daemonController.fsGrep);
 router.post('/fs/write', authMiddleware, daemonController.fsWrite);
+router.post('/fs/mkdir', authMiddleware, daemonController.fsMkdir);
+router.post('/fs/create', authMiddleware, daemonController.fsCreateFile);
+router.post('/fs/rename', authMiddleware, daemonController.fsRename);
+router.post('/fs/delete', authMiddleware, daemonController.fsDelete);
 router.post('/fs/watch', authMiddleware, daemonController.fsWatch);
 router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
 // 파일 변경 이벤트 SSE(앱 구독) — 데몬 chokidar → back → 앱 즉시 반영.

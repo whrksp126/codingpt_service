@@ -200,6 +200,38 @@ async function write(params) {
   return { path: relOf(abs), size: st.size };
 }
 
+// fs.mkdir — 디렉토리 생성(중간 경로 포함).
+async function mkdir(params) {
+  const abs = safeResolve(params?.path || '');
+  await fsp.mkdir(abs, { recursive: true });
+  return { path: relOf(abs) };
+}
+
+// fs.createFile — 빈 파일 생성(이미 있으면 유지). 부모 디렉토리 자동 생성.
+async function createFile(params) {
+  const abs = safeResolve(params?.path || '');
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  const fh = await fsp.open(abs, 'a'); // 없으면 생성, 있으면 그대로
+  await fh.close();
+  return { path: relOf(abs) };
+}
+
+// fs.rename — 이름 변경/이동(둘 다 jail 검증).
+async function rename(params) {
+  const from = safeResolve(params?.path || '');
+  const to = safeResolve(params?.dest || '');
+  await fsp.mkdir(path.dirname(to), { recursive: true });
+  await fsp.rename(from, to);
+  return { path: relOf(to) };
+}
+
+// fs.delete — 파일/디렉토리 삭제(재귀).
+async function remove(params) {
+  const abs = safeResolve(params?.path || '');
+  await fsp.rm(abs, { recursive: true, force: true });
+  return { path: relOf(abs), deleted: true };
+}
+
 // ── 파일 감시(watch) ──
 // 앱이 현재 보고 있는 디렉토리 하나만 감시(단일 watcher). 새 watch 오면 이전 것 close.
 //  claude 등 외부 프로세스가 PC 파일을 수정하면 이벤트를 push → 앱이 목록/에디터 즉시 갱신.
@@ -236,6 +268,10 @@ async function handle(method, params) {
     case 'fs.read': return read(params);
     case 'fs.write': return write(params);
     case 'fs.grep': return grep(params);
+    case 'fs.mkdir': return mkdir(params);
+    case 'fs.createFile': return createFile(params);
+    case 'fs.rename': return rename(params);
+    case 'fs.delete': return remove(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }
