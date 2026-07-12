@@ -51,6 +51,19 @@ fn read_config() -> Option<serde_json::Value> {
     serde_json::from_str(&s).ok()
 }
 
+// 페어링/웹로그인 서버 해석: 명시 인자 → daemon.json.serverUrl → DEFAULT_SERVER.
+//  bridge::server_url(desktop_login_url 의 front 파생)과 같은 소스를 써야
+//  "세션을 만든 서버"와 "브라우저로 여는 서버"가 반드시 일치한다(불일치=승인 코드 not found).
+fn resolve_server(explicit: Option<String>) -> String {
+    if let Some(s) = explicit.filter(|s| !s.trim().is_empty()) {
+        return s;
+    }
+    read_config()
+        .and_then(|c| c.get("serverUrl").and_then(|v| v.as_str().map(String::from)))
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string())
+}
+
 fn is_paired() -> bool {
     read_config()
         .and_then(|c| c.get("deviceToken").and_then(|t| t.as_str().map(|s| !s.is_empty())))
@@ -144,9 +157,7 @@ async fn daemon_pair(
     code: String,
     server: Option<String>,
 ) -> Result<Status, String> {
-    let server = server
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let server = resolve_server(server);
     let mut cmd = build_command(&app)?;
     cmd.arg("pair").arg("--code").arg(code.trim()).arg("--server").arg(&server);
     let out = cmd.output().map_err(|e| format!("데몬 실행 실패: {e}"))?;
@@ -165,9 +176,7 @@ async fn daemon_pair_session(
     app: AppHandle,
     server: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let server = server
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let server = resolve_server(server);
     let mut cmd = build_command(&app)?;
     cmd.arg("pair-session").arg("--server").arg(&server);
     let out = cmd.output().map_err(|e| format!("데몬 실행 실패: {e}"))?;
@@ -190,9 +199,7 @@ async fn daemon_pair_poll(
     code: String,
     secret: String,
 ) -> Result<serde_json::Value, String> {
-    let server = server
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
+    let server = resolve_server(server);
     let mut cmd = build_command(&app)?;
     cmd.arg("pair-claim")
         .arg("--server").arg(&server)

@@ -301,7 +301,9 @@ function startWebLogin() {
   if (btn) { btn.disabled = true; btn.textContent = "브라우저 여는 중…"; }
   (async () => {
     try {
-      const res = await api.pairSession(serverOverride());
+      // 서버는 null 로 넘겨 Rust(resolve_server=config→DEFAULT)가 정하게 한다.
+      //  desktopLoginUrl 도 같은 소스를 쓰므로 "세션 생성 서버"와 "브라우저 서버"가 항상 일치.
+      const res = await api.pairSession(null);
       const url = await api.desktopLoginUrl(res.code);
       await api.openExternal(url).catch(() => {});
       webLogin = {
@@ -336,7 +338,7 @@ async function pollWebLogin() {
   }
   webLogin.busy = true;
   try {
-    const res = await api.pairPoll(serverOverride(), webLogin.code, webLogin.secret);
+    const res = await api.pairPoll(null, webLogin.code, webLogin.secret);
     if (res && res.paired) {
       stopWebLogin();
       state.daemon = await api.daemonStatus();
