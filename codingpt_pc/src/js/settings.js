@@ -166,6 +166,8 @@ function ensureAccountCard() {
   if (!connBody || !state.me) return;
   const html = accountCardHtml();
   if (!html) return;
+  const holder = connBody.querySelector("#acctCard");
+  if (holder) { holder.innerHTML = html; return; }
   const card = connBody.querySelector(".acct-card");
   if (!card) connBody.insertAdjacentHTML("afterbegin", html);
   else card.outerHTML = html;
@@ -176,9 +178,9 @@ function buildPaired() {
   stopQr();
   stopWebLogin();
   connBody.innerHTML = `
-    ${accountCardHtml()}
-    <div class="conn-actions">
-      <button id="unpairBtn" class="btn ghost">로그아웃</button>
+    <div id="acctCard">${accountCardHtml()}</div>
+    <div class="acct-actions" style="margin:10px 0 2px">
+      <button id="unpairBtn" class="btn ghost small">로그아웃</button>
     </div>
     <div class="dev-section">
       <div class="dev-title">내 기기</div>
@@ -191,18 +193,32 @@ function buildPaired() {
 }
 
 // "내 기기" 목록 렌더(state.devices). 클라우드 호스트 포함.
+// 기기 유형 라벨 — 식별 가능한 핵심만(플랫폼 기술표기 대신 친숙한 이름).
+function deviceTypeLabel(d) {
+  if (d.runnerKind === "cloud") return "클라우드";
+  const p = String(d.platform || "").toLowerCase();
+  if (p === "darwin") return "Mac";
+  if (p === "win32" || p === "windows") return "Windows";
+  if (p === "linux") return "Linux";
+  if (p === "ios" || p === "ipados") return "iPad · iPhone";
+  if (p === "android") return "Android";
+  return d.role === "controller" ? "모바일" : "기기";
+}
 function renderDeviceList() {
   const el = connBody?.querySelector("#deviceList");
   if (!el) return;
   if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px">불러오는 중…</div>`; return; }
   el.innerHTML = state.devices.map((d) => {
     const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
-    const kindLabel = d.runnerKind === "cloud" ? "클라우드 · 항상 켜짐" : `${d.platform || "기기"} · ${d.online ? "온라인" : "오프라인"}`;
-    const icon = d.runnerKind === "cloud" ? icons.cloud({ size: 16 }) : icons.monitor({ size: 16 });
+    const icon = d.runnerKind === "cloud"
+      ? icons.cloud({ size: 16 })
+      : d.role === "controller"
+        ? icons.smartphone({ size: 16 })
+        : icons.monitor({ size: 16 });
     return `<div class="dev-row">
       <span class="dev-ic">${icon}</span>
-      <div class="dev-meta"><div class="dev-name">${esc(d.name)}${cur}</div><div class="dev-sub">${esc(kindLabel)}</div></div>
-      <span class="dev-dot ${d.online ? "on" : "off"}"></span>
+      <div class="dev-meta"><div class="dev-name">${esc(d.name)}${cur}</div><div class="dev-sub">${esc(deviceTypeLabel(d))}</div></div>
+      <span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span>
     </div>`;
   }).join("");
 }

@@ -10,7 +10,7 @@
  */
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const { DaemonDevice, user } = require('../models');
+const { DaemonDevice, User } = require('../models');
 const daemonRelayService = require('../services/daemonRelayService');
 const workspaceService = require('../services/workspaceService');
 const cloudRunnerService = require('../services/cloudRunnerService');
@@ -172,7 +172,7 @@ async function daemonMe(req, res) {
   try {
     const device = await resolveDeviceUser(req);
     if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
-    const u = await user.findByPk(device.user_id, {
+    const u = await User.findByPk(device.user_id, {
       attributes: ['id', 'email', 'nickname', 'profile_img', 'role'],
     });
     if (!u) return errorResponse(res, new Error('사용자를 찾을 수 없습니다.'), 404);
@@ -221,9 +221,11 @@ async function daemonDevices(req, res) {
         platform: d.platform,
         role: d.role || 'host',
         runnerKind: d.runner_kind,
-        online: d.role === 'controller'
-          ? !!(d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() < 10 * 60 * 1000)
-          : online.has(d.id),
+        online: d.id === currentDeviceId // 이 요청을 보낸 현재 기기는 항상 온라인
+          ? true
+          : d.role === 'controller'
+            ? !!(d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() < 10 * 60 * 1000)
+            : online.has(d.id),
         lastSeenAt: d.last_seen_at,
         isCurrent: d.id === currentDeviceId,
         createdAt: d.created_at,

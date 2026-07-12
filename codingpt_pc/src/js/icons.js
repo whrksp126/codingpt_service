@@ -12,6 +12,7 @@ export const icons = {
   splitRight: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="13" y1="4" x2="13" y2="20"/>', o),
   splitDown: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/>', o),
   monitor: (o) => svg('<rect x="3" y="4" width="18" height="12" rx="2"/><line x1="8.5" y1="20" x2="15.5" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/>', o),
+  smartphone: (o) => svg('<rect x="6.5" y="3" width="11" height="18" rx="2.4"/><line x1="10.5" y1="18" x2="13.5" y2="18"/>', o),
   cloud: (o) => svg('<path d="M7 18a4 4 0 0 1-.5-8A5 5 0 0 1 16.5 9 3.5 3.5 0 0 1 17 18H7z"/>', o),
   gitBranch: (o) => svg('<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6"/><path d="M18 10.2a6 6 0 0 1-6 6H8.5"/>', o),
   refresh: (o) => svg('<path d="M20 11a8 8 0 1 0-2.3 5.3"/><path d="M20 5v6h-6"/>', o),
