@@ -95,7 +95,6 @@ function renderSection(force) {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
         <div class="sm-h">계정</div>
-        <div class="sm-sub">이 기기를 코딩PT 계정에 로그인하면, 어디서든(폰·태블릿·다른 PC) 이어서 작업할 수 있어요.</div>
         <div id="connBody" class="conn-body"></div>`;
       connBody = contentEl.querySelector("#connBody");
       connMode = null;
@@ -288,26 +287,9 @@ function buildUnpaired() {
   stopWebLogin();
   connBody.innerHTML = `
     <div class="login-primary">
-      <p class="conn-hint">브라우저에서 코딩PT 계정으로 로그인하면 <b>이 기기가 자동으로 등록</b>됩니다.<br/>이후 폰·태블릿 등 어디서든 이 기기의 작업을 이어서 할 수 있어요.</p>
-      <button id="webLoginBtn" class="btn primary lg">웹으로 로그인</button>
+      <button id="webLoginBtn" class="btn primary lg">로그인</button>
       <div id="webLoginStatus" class="login-status"></div>
-    </div>
-    <details class="adv">
-      <summary>고급 · 서버 주소</summary>
-      <label class="field"><span>서버 주소</span><input id="serverInput" type="text" placeholder="https://codingpt-back.ghmate.com" /></label>
-      <div class="dim" style="font-size:11px">개발/자체 서버로 로그인할 때만 입력하세요.</div>
-    </details>`;
-  const si = connBody.querySelector("#serverInput");
-  try {
-    const ls = localStorage.getItem("cpt.server");
-    if (ls && si) si.value = ls;
-  } catch (_) {}
-  if (si) si.addEventListener("change", () => {
-    try {
-      const v = (si.value || "").trim();
-      if (v) localStorage.setItem("cpt.server", v); else localStorage.removeItem("cpt.server");
-    } catch (_) {}
-  });
+    </div>`;
   connBody.querySelector("#webLoginBtn").addEventListener("click", startWebLogin);
 }
 
@@ -334,7 +316,7 @@ function startWebLogin() {
       webLogin.poll = setInterval(pollWebLogin, 2500);
     } catch (e) {
       if (statusEl) statusEl.textContent = "로그인 세션 생성 실패: " + e;
-      if (btn) { btn.disabled = false; btn.textContent = "웹으로 로그인"; }
+      if (btn) { btn.disabled = false; btn.textContent = "로그인"; }
     }
   })();
 }
@@ -349,7 +331,7 @@ async function pollWebLogin() {
     const s = connBody?.querySelector("#webLoginStatus");
     const b = connBody?.querySelector("#webLoginBtn");
     if (s) s.textContent = "코드가 만료됐어요. 다시 시도하세요.";
-    if (b) { b.disabled = false; b.textContent = "웹으로 로그인"; }
+    if (b) { b.disabled = false; b.textContent = "로그인"; }
     return;
   }
   webLogin.busy = true;

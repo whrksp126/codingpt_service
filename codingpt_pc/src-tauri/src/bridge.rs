@@ -7,7 +7,11 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::AppHandle;
 
+// 릴리스=prod, dev(debug)=로컬 백엔드. lib.rs 와 동일 규칙.
+#[cfg(not(debug_assertions))]
 const DEFAULT_SERVER: &str = "https://codingpt-back.ghmate.com";
+#[cfg(debug_assertions)]
+const DEFAULT_SERVER: &str = "http://localhost:5300";
 
 fn config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".codingpt").join("daemon.json"))

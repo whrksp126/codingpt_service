@@ -19,7 +19,11 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 
+// 기본 서버 — 릴리스(배포)는 prod, dev(tauri dev = debug)는 로컬 백엔드. UI 서버 입력 없이도 dev 동작.
+#[cfg(not(debug_assertions))]
 const DEFAULT_SERVER: &str = "https://codingpt-back.ghmate.com";
+#[cfg(debug_assertions)]
+const DEFAULT_SERVER: &str = "http://localhost:5300";
 
 // ── 데몬 생명주기 상태(Tauri managed state) ──────────────────────────
 #[derive(Default)]

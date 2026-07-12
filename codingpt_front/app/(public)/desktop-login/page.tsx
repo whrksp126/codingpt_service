@@ -17,6 +17,7 @@ export default function DesktopLogin() {
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const gbtn = useRef<HTMLDivElement>(null);
+  const autoRef = useRef(false); // 자동 승인 1회 가드
 
   useEffect(() => {
     captureHandoff();
@@ -61,8 +62,18 @@ export default function DesktopLogin() {
     const r = await clientFetch('/api/daemon/pair/approve', { method: 'POST', body: { code }, token });
     setBusy(false);
     if (r.ok) { setDone(true); setMsg(null); }
-    else setMsg(r.message || '연결에 실패했습니다. 코드가 만료되었을 수 있어요.');
+    else { autoRef.current = false; setMsg(r.message || '연결에 실패했습니다. 코드가 만료되었을 수 있어요.'); }
   };
+
+  // 로그인되면(토큰 획득) 자동으로 이 기기를 승인 — 클로드 CLI식 자동 완료(별도 승인 버튼 없음).
+  //  웹에서 로그인만 하면 PC 앱이 폴링으로 즉시 로그인 완료된다.
+  useEffect(() => {
+    if (token && code && !done && !autoRef.current) {
+      autoRef.current = true;
+      void onApprove();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, code]);
 
   if (done) {
     return (
@@ -99,11 +110,14 @@ export default function DesktopLogin() {
           </p>
         </>
       ) : (
-        <div style={{ marginTop: 16, display: 'grid', gap: 10 }}>
-          <button className="btn" disabled={busy || !code} onClick={onApprove} style={cta}>
-            {busy ? '연결 중…' : '이 PC 연결하기'}
-          </button>
-          <p className="muted" style={{ fontSize: 12 }}>로그인된 계정으로 이 PC를 연결합니다.</p>
+        <div style={{ marginTop: 16, display: 'grid', gap: 10, justifyItems: 'center' }}>
+          {!msg ? (
+            <p className="muted" style={{ fontSize: 13 }}>이 PC에 로그인하는 중…</p>
+          ) : (
+            <button className="btn" disabled={busy || !code} onClick={() => { autoRef.current = false; void onApprove(); }} style={cta}>
+              {busy ? '연결 중…' : '다시 시도'}
+            </button>
+          )}
         </div>
       )}
 
