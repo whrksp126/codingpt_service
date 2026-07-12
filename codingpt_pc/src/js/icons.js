@@ -1,0 +1,38 @@
+// icons.js — 인라인 SVG 아이콘(이모지 금지). Phosphor/Lucide 풍 라인 아이콘, currentColor.
+const svg = (inner, o = {}) =>
+  `<svg viewBox="0 0 24 24" width="${o.size || 16}" height="${o.size || 16}" fill="none" stroke="currentColor" stroke-width="${o.sw || 1.8}" stroke-linecap="round" stroke-linejoin="round" class="ic">${inner}</svg>`;
+
+export const icons = {
+  sidebar: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>', o),
+  bell: (o) => svg('<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5 2 5.5H4c.5-.5 2-1.5 2-5.5"/><path d="M10 18.5a2 2 0 0 0 4 0"/>', o),
+  plus: (o) => svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', o),
+  folder: (o) => svg('<path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', o),
+  terminal: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><line x1="12.5" y1="15" x2="17" y2="15"/>', o),
+  x: (o) => svg('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>', o),
+  splitRight: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="13" y1="4" x2="13" y2="20"/>', o),
+  splitDown: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="12" x2="21" y2="12"/>', o),
+  monitor: (o) => svg('<rect x="3" y="4" width="18" height="12" rx="2"/><line x1="8.5" y1="20" x2="15.5" y2="20"/><line x1="12" y1="16" x2="12" y2="20"/>', o),
+  cloud: (o) => svg('<path d="M7 18a4 4 0 0 1-.5-8A5 5 0 0 1 16.5 9 3.5 3.5 0 0 1 17 18H7z"/>', o),
+  gitBranch: (o) => svg('<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6"/><path d="M18 10.2a6 6 0 0 1-6 6H8.5"/>', o),
+  refresh: (o) => svg('<path d="M20 11a8 8 0 1 0-2.3 5.3"/><path d="M20 5v6h-6"/>', o),
+  gear: (o) => svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M18.9 5.1l-2.1 2.1M7.2 16.8l-2.1 2.1"/>', o),
+  globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"/>', o),
+  code: (o) => svg('<path d="M8.5 8l-4 4 4 4"/><path d="M15.5 8l4 4-4 4"/><path d="M13.5 6l-3 12"/>', o),
+  user: (o) => svg('<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>', o),
+  caretRight: (o) => svg('<path d="M9 5l7 7-7 7"/>', o),
+  chevronUp: (o) => svg('<path d="M6 15l6-6 6 6"/>', o),
+  chevronDown: (o) => svg('<path d="M6 9l6 6 6-6"/>', o),
+  external: (o) => svg('<path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/>', o),
+  search: (o) => svg('<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', o),
+  dot: (o) => `<span class="ic-dot ${o?.cls || ""}"></span>`,
+};
+
+// DOM 헬퍼: 아이콘 버튼.
+export function iconBtn(name, opts = {}) {
+  const b = document.createElement("button");
+  b.className = "ic-btn" + (opts.cls ? " " + opts.cls : "");
+  b.innerHTML = icons[name](opts);
+  if (opts.title) b.title = opts.title;
+  if (opts.onClick) b.addEventListener("click", opts.onClick);
+  return b;
+}

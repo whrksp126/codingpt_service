@@ -142,6 +142,12 @@ if [[ "$TARGET" == darwin-* ]]; then
     else
       codesign -f -s - "$TMUX_OUT/lib/"*.dylib "$TMUX_OUT/bin/tmux" >/dev/null 2>&1 || true
     fi
+    # tmux.conf 동봉 — 데몬·Mac GUI 가 같은 서버 설정(alt-screen off/status off/aggressive-resize)을
+    #  공유하도록. lib.rs(tmux.rs resolve_ctx)가 이 경로(<base>/tmux/tmux.conf)를 -f 로 로드한다.
+    if [ -f "$DAEMON_SRC/tmux.conf" ]; then
+      cp "$DAEMON_SRC/tmux.conf" "$TMUX_OUT/tmux.conf"
+      echo "▸ tmux.conf 동봉 → $TMUX_OUT/tmux.conf"
+    fi
     echo "▸ tmux 번들 완료 → $TMUX_OUT ($("$TMUX_OUT/bin/tmux" -V), dylib: $(ls "$TMUX_OUT/lib" | tr '\n' ' '))"
   fi
 fi

@@ -4,6 +4,12 @@
 //  · 딥링크 codingpt-pc://pair?code=... 로 앱에서 원탭 연결한다.
 //  이 앱은 어떤 AI 자격증명도 다루지 않는다 — 데몬(터미널/파일 릴레이) 부트스트랩 전용.
 
+mod bridge;
+mod fsapi;
+mod preview;
+mod pty;
+mod tmux;
+
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::Mutex;
@@ -392,11 +398,15 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .manage(Daemon::default())
+        .manage(pty::PtyManager::default())
+        .manage(preview::PreviewManager::default())
         .invoke_handler(tauri::generate_handler![
             daemon_status,
             daemon_pair,
@@ -405,13 +415,58 @@ pub fn run() {
             daemon_start,
             daemon_stop,
             daemon_unpair,
+            // 터미널 pane (로컬 tmux)
+            pty::pty_open,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_close,
+            pty::pty_select_window,
+            // tmux 제어(서피스/브랜치/포트)
+            tmux::tmux_list_windows,
+            tmux::tmux_new_window,
+            tmux::tmux_kill_window,
+            tmux::tmux_git_branch,
+            tmux::tmux_listen_ports,
+            // 브리지(워크스페이스/영속화/알림)
+            bridge::fetch_workspaces,
+            bridge::fetch_me,
+            bridge::fetch_devices,
+            bridge::claim_workspace,
+            bridge::desktop_login_url,
+            bridge::fetch_ws_session,
+            bridge::save_ws_session,
+            bridge::cloud_terminal_start,
+            bridge::create_workspace,
+            bridge::ui_state_load,
+            bridge::ui_state_save,
+            bridge::open_external,
+            bridge::notify,
+            // 프리뷰(네이티브 임베디드 webview)
+            preview::preview_sync,
+            preview::preview_navigate,
+            preview::preview_close,
+            // 내장 IDE 파일 접근
+            fsapi::fs_tree,
+            fsapi::path_exists,
+            fsapi::fs_search,
+            fsapi::fs_read,
+            fsapi::fs_write,
+            fsapi::fs_mkdir,
+            fsapi::fs_create_file,
+            fsapi::fs_rename,
+            fsapi::fs_delete,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // macOS: Dock 아이콘 숨김(메뉴바 액세서리 앱).
+            // 풀 윈도우 앱: Dock 아이콘 표시(Regular). 메뉴바 트레이는 백그라운드 실행용으로 병행.
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            app.set_activation_policy(tauri::ActivationPolicy::Regular);
+
+            // tmux 컨텍스트(번들 tmux/conf) 해석 후 managed state 로. 고아 grouped view 세션 정리.
+            let tmux_ctx = tmux::resolve_ctx(&handle);
+            pty::sweep_views(&tmux_ctx);
+            app.manage(tmux_ctx);
 
             setup_tray(&handle)?;
 
@@ -479,12 +534,19 @@ pub fn run() {
         .run(|app_handle, event| {
             // 앱이 어떤 경로(Cmd+Q · 트레이 종료 · 시스템 종료)로 끝나도 데몬 자식을 정리(고아 방지).
             if let tauri::RunEvent::Exit = event {
+                if let Some(pm) = app_handle.try_state::<preview::PreviewManager>() {
+                    preview::close_all(&pm);
+                }
                 if let Some(state) = app_handle.try_state::<Daemon>() {
                     *state.should_run.lock().unwrap() = false;
                     if let Some(mut ch) = state.child.lock().unwrap().take() {
                         let _ = ch.kill();
                         let _ = ch.wait();
                     }
+                }
+                // grouped view 세션 정리(primary/window 는 폰과 공유하므로 보존).
+                if let Some(ctx) = app_handle.try_state::<tmux::TmuxCtx>() {
+                    pty::sweep_views(&ctx);
                 }
             }
         });
