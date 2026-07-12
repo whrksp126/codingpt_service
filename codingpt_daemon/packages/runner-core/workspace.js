@@ -110,8 +110,10 @@ async function useDefaultRoot() {
 async function create(params) {
   const name = (params && params.name) || '';
   const cfg = configLib.load() || {};
-  const parentRel = (params && params.parentPath) || cfg.lastWorkspaceParent || cfg.workspaceRoot;
-  if (typeof parentRel !== 'string' || !parentRel) throw new Error('워크스페이스를 만들 폴더를 선택해 주세요.');
+  // parentPath 가 문자열이면(빈문자열='홈' 포함) 그대로, 미지정이면 마지막 선택 → (구)루트 폴백.
+  const parentRel = (params && typeof params.parentPath === 'string')
+    ? params.parentPath
+    : (cfg.lastWorkspaceParent || cfg.workspaceRoot || '');
   const rootAbs = fsLib.safeResolve(parentRel);
   const rootSt = await fsp.stat(rootAbs).catch(() => null);
   if (!rootSt || !rootSt.isDirectory()) throw new Error('선택한 폴더가 존재하지 않습니다. 다시 선택해 주세요.');
@@ -144,11 +146,12 @@ async function create(params) {
 async function clone(params) {
   const { url, owner, repo } = normalizeGithubUrl(params && params.url);
 
-  // 목적지 부모 — 사용자 선택(parentPath). 없으면 마지막 사용 위치 → (구)영구 루트 순으로 폴백.
+  // 목적지 부모 — 사용자 선택(parentPath, 빈문자열='홈'). 미지정이면 마지막 선택 → (구)루트 폴백.
   //  ~/CodingPT 자동 생성은 하지 않는다(사용자가 위치를 명시적으로 고르는 모델).
   const cfg = configLib.load() || {};
-  const parentRel = (params && params.parentPath) || cfg.lastWorkspaceParent || cfg.workspaceRoot;
-  if (typeof parentRel !== 'string' || !parentRel) throw new Error('저장소를 받을 폴더를 선택해 주세요.');
+  const parentRel = (params && typeof params.parentPath === 'string')
+    ? params.parentPath
+    : (cfg.lastWorkspaceParent || cfg.workspaceRoot || '');
   const rootAbs = fsLib.safeResolve(parentRel);
   const rootSt = await fsp.stat(rootAbs).catch(() => null);
   if (!rootSt || !rootSt.isDirectory()) throw new Error('선택한 폴더가 존재하지 않습니다. 다시 선택해 주세요.');
