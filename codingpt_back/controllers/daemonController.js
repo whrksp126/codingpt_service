@@ -9,8 +9,10 @@
  *     서버는 sha256 해시만 저장(daemon_device.token_hash).
  */
 const crypto = require('crypto');
-const { DaemonDevice } = require('../models');
+const jwt = require('jsonwebtoken');
+const { DaemonDevice, user } = require('../models');
 const daemonRelayService = require('../services/daemonRelayService');
+const workspaceService = require('../services/workspaceService');
 const cloudRunnerService = require('../services/cloudRunnerService');
 const usageService = require('../services/usageService');
 const BILLING = require('../config/billing');
@@ -61,6 +63,209 @@ async function createDeviceForUser(userId, meta) {
     token_hash: tokenHash,
   });
   return { device, deviceToken };
+}
+
+// Authorization: Bearer <deviceToken> → 해당 DaemonDevice(폐기 안 됨). PC 데스크톱 앱(사용자 JWT 없음)이
+//  이미 페어링으로 계정에 묶인 deviceToken 으로 소유자 자원(워크스페이스 목록 등)을 읽을 때 사용.
+async function resolveDeviceUser(req) {
+  const h = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
+  if (!m) return null;
+  const device = await DaemonDevice.findOne({ where: { token_hash: sha256(m[1].trim()), revoked_at: null } });
+  return device || null;
+}
+
+// 계정 스코프 인증 — 멀티기기: PC/컨트롤러는 deviceToken, 모바일은 기존 user JWT 둘 다 허용.
+//  반환: { userId, deviceId|null, device|null }. deviceId 는 현재 기기 식별(isCurrent/currentDeviceId 용).
+async function resolveAccount(req) {
+  const device = await resolveDeviceUser(req);
+  if (device) return { userId: device.user_id, deviceId: device.id, device };
+  const h = req.headers.authorization || '';
+  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
+  if (m) {
+    try {
+      const decoded = jwt.verify(m[1].trim(), process.env.ACCESS_SECRET);
+      if (decoded && decoded.id) return { userId: decoded.id, deviceId: null, device: null };
+    } catch (_) { /* deviceToken 도 JWT 도 아님 */ }
+  }
+  return null;
+}
+
+// GET /api/daemon/workspaces  (deviceToken 인증) → 소유자 워크스페이스(클라우드+로컬) 목록.
+//  PC 데스크톱 GUI 가 사이드바 목록을 채운다. 별도 OAuth 없이 device 소유권으로 인가.
+async function daemonWorkspaces(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const userId = acct.userId;
+    const list = await workspaceService.listWorkspaces(userId);
+    // 멀티기기: 각 워크스페이스에 호스트 이름/온라인 상태를 붙여 전역 목록에서 바로 배지 렌더 가능하게.
+    const rows = await DaemonDevice.findAll({
+      where: { user_id: userId, revoked_at: null },
+      attributes: ['id', 'device_name', 'runner_kind'],
+    });
+    const nameById = new Map(rows.map((d) => [d.id, d.device_name]));
+    const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
+    const enriched = list.map((w) => {
+      if (w.compute === 'cloud') return { ...w, hostName: '클라우드', hostOnline: true };
+      const hid = w.hostDeviceId;
+      return {
+        ...w,
+        hostName: (hid != null && nameById.get(hid)) || null,
+        hostOnline: hid != null ? online.has(hid) : false,
+      };
+    });
+    return successResponse(res, enriched);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// GET /api/daemon/me  (deviceToken 인증) → 이 기기를 소유한 사용자 프로필.
+//  PC 데스크톱 GUI 설정 모달의 "계정" 표시용. 웹 로그인(=브라우저 승인 페어링) 후 계정 정보를 보여준다.
+async function daemonMe(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const u = await user.findByPk(device.user_id, {
+      attributes: ['id', 'email', 'nickname', 'profile_img', 'role'],
+    });
+    if (!u) return errorResponse(res, new Error('사용자를 찾을 수 없습니다.'), 404);
+    return successResponse(res, {
+      id: u.id,
+      email: u.email,
+      nickname: u.nickname,
+      profileImg: u.profile_img,
+      role: u.role,
+      deviceId: device.id,
+      deviceName: device.device_name,
+    });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// GET /api/daemon/devices  (deviceToken 인증) → 계정의 모든 기기 + 온라인 상태 + 논리 클라우드 호스트.
+//  멀티기기: 로그인=자동 등록된 기기들을 한 목록으로. 클라우드 러너(runner_kind=cloud)는 개별 노출하지 않고
+//  "항상 켜진 클라우드 호스트" 하나로 접는다. 설계: docs/multi-device-design.md
+async function daemonDevices(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const userId = acct.userId;
+    const rows = await DaemonDevice.findAll({
+      where: { user_id: userId, revoked_at: null },
+      order: [['last_seen_at', 'DESC']],
+    });
+    const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
+    const devices = [];
+    for (const d of rows) {
+      if (d.runner_kind === 'cloud') continue; // 클라우드 러너는 아래 논리 호스트로 통합
+      devices.push({
+        id: d.id,
+        name: d.device_name,
+        platform: d.platform,
+        role: d.role || 'host',
+        runnerKind: d.runner_kind,
+        online: online.has(d.id),
+        lastSeenAt: d.last_seen_at,
+        isCurrent: d.id === acct.deviceId,
+        createdAt: d.created_at,
+      });
+    }
+    // 항상 켜진 클라우드 호스트(우리 제공) — 콜드스타트로 상시 사용 가능한 논리 기기 1개.
+    devices.push({
+      id: 'cloud',
+      name: '클라우드',
+      platform: 'cloud',
+      role: 'host',
+      runnerKind: 'cloud',
+      online: true,
+      virtual: true,
+      isCurrent: false,
+    });
+    return successResponse(res, { devices, currentDeviceId: acct.deviceId });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// POST /api/daemon/workspaces/:wsId/claim  (deviceToken 인증) → 이 로컬 워크스페이스를 요청 호스트에 귀속.
+//  멀티기기 백필: hostDeviceId 없던 기존 로컬 워크스페이스를, 그 파일을 실제로 가진 호스트가 클레임.
+async function daemonClaimWorkspaceHost(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const wsId = String(req.params.wsId || '');
+    const meta = await workspaceService.setWorkspaceHost(device.user_id, wsId, device.id);
+    return successResponse(res, meta);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// GET /api/daemon/workspaces/:wsId/session  (deviceToken 인증) → 워크스페이스 세션 상태(이어받기).
+//  열린 터미널(tmux window)·IDE 파일·프리뷰 + 레이아웃. 없으면 { session: null }.
+async function daemonGetSession(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const wsId = String(req.params.wsId || '');
+    const stored = await workspaceService.getWorkspaceSession(acct.userId, wsId);
+    return successResponse(res, stored || { session: null });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// PUT /api/daemon/workspaces/:wsId/session  (deviceToken 인증) → 세션 상태 저장(디바운스 푸시).
+//  body: { session, updatedBy?:'pc'|'mobile' }. 서버가 updatedAt 을 스탬프.
+async function daemonPutSession(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const wsId = String(req.params.wsId || '');
+    const b = req.body || {};
+    const saved = await workspaceService.saveWorkspaceSession(acct.userId, wsId, b.session, b.updatedBy);
+    return successResponse(res, saved);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// POST /api/daemon/workspaces  (deviceToken 인증) → 새 로컬 워크스페이스 생성. PC GUI 의 "+" 버튼.
+async function daemonCreateWorkspace(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const b = req.body || {};
+    const isLocal = b.compute === 'local';
+    const meta = await workspaceService.createWorkspace(device.user_id, {
+      name: b.name,
+      compute: isLocal ? 'local' : 'cloud',
+      localPath: typeof b.localPath === 'string' ? b.localPath : undefined,
+      // 멀티기기: 로컬 워크스페이스는 이 요청을 보낸 호스트 기기에 귀속.
+      hostDeviceId: isLocal ? device.id : undefined,
+      stack: Array.isArray(b.stack) ? b.stack : undefined,
+    });
+    return successResponse(res, meta);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// POST /api/daemon/terminal/start  (deviceToken 인증) → { token } — 클라우드 워크스페이스 pane 용.
+//  로컬 워크스페이스는 로컬 tmux 직결이라 이 경로를 안 탄다.
+async function daemonTerminalStart(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
+    const token = daemonRelayService.issueTerminalToken(device.user_id, cwd);
+    return successResponse(res, { token });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
 }
 
 // POST /api/daemon/pair/code  (인증) → { code, expiresAt }   [레거시 — 앱이 코드 발급]
@@ -639,6 +844,8 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
+  daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, daemonDevices,
+  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
   createPairCode, createPairSession, approvePairSession, claimPairCode, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,

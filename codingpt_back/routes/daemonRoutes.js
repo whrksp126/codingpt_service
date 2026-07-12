@@ -10,6 +10,15 @@ router.post('/pair/session', daemonController.createPairSession); // 무인증 �
 router.post('/pair/approve', authMiddleware, daemonController.approvePairSession); // 로그인된 앱이 QR 코드 승인
 router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코드/secret 이 비밀
 router.get('/status', authMiddleware, daemonController.getStatus);
+// PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
+router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)
+router.get('/devices', daemonController.daemonDevices); // deviceToken 인증 — 계정의 모든 기기 목록(멀티기기)
+router.get('/workspaces', daemonController.daemonWorkspaces);
+router.post('/workspaces/:wsId/claim', daemonController.daemonClaimWorkspaceHost); // 호스트 귀속 클레임(deviceToken)
+router.get('/workspaces/:wsId/session', daemonController.daemonGetSession); // 세션 이어받기(deviceToken)
+router.put('/workspaces/:wsId/session', daemonController.daemonPutSession);
+router.post('/workspaces', daemonController.daemonCreateWorkspace);
+router.post('/terminal/device-start', daemonController.daemonTerminalStart);
 router.post('/devices/:deviceId/revoke', authMiddleware, daemonController.revokeDevice);
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)
 router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloudRunner); // M5 Slice4: 클라우드 러너 확보(핸드오프 진입점)

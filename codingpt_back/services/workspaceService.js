@@ -16,6 +16,8 @@ const WORKSPACE_ID_RE = /^[A-Za-z0-9_-]+$/;
 const workspacesBase = (uid) => `workspace/${uid}/projects`;
 const workspaceDir = (uid, id) => `workspace/${uid}/projects/${id}`;
 const metaKey = (uid, id) => `${workspaceDir(uid, id)}/project.json`;
+// 워크스페이스 세션 상태(열린 터미널/IDE/프리뷰 + 레이아웃) — PC↔모바일 이어받기용.
+const sessionKey = (uid, id) => `${workspaceDir(uid, id)}/session.json`;
 
 // s3Service.listFiles 중첩 트리 평탄화 → 파일 노드만
 const flattenTree = (nodes, acc = []) => {
@@ -63,6 +65,8 @@ function normalizeMeta(raw, id) {
     // 실행 위치: 'cloud'(샌드박스, 기본) | 'local'(사용자 PC 데몬). localPath 는 데몬 홈-기준 상대경로.
     compute: m.compute === 'local' ? 'local' : 'cloud',
     ...(m.compute === 'local' && typeof m.localPath === 'string' && m.localPath ? { localPath: m.localPath } : {}),
+    // 멀티기기: 이 로컬 워크스페이스가 사는 호스트 기기(DaemonDevice.id). 목록은 전역, 열 때 이 호스트로 라우팅.
+    ...(m.compute === 'local' && m.hostDeviceId != null ? { hostDeviceId: m.hostDeviceId } : {}),
     unread: Number.isInteger(m.unread) ? m.unread : 0,
     createdAt: m.createdAt || null,
     updatedAt: m.updatedAt || m.createdAt || null,
@@ -89,6 +93,58 @@ async function writeMeta(uid, id, meta) {
     throw e;
   }
   return meta;
+}
+
+// ── 워크스페이스 세션 상태(이어받기) ──
+//  session = 기기 무관 표면 목록 + (기기별) 레이아웃 트리. 아래 계약을 PC/모바일이 공유한다:
+//   { version, surfaces:[{kind:'terminal'|'ide'|'preview', win?, title?, path?|files?, url?}],
+//     layout?(PC 타일링 트리), focusId?, activeSurfaceId? }
+//  서버는 여기에 updatedAt(서버시각) + updatedBy 를 감싸 저장한다.
+async function getWorkspaceSession(userId, id) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  const res = await s3Service.getFileContent(sessionKey(uid, id));
+  if (!res.success) return null;
+  let content = res.content;
+  if (res.encoding === 'base64') content = Buffer.from(content, 'base64').toString('utf-8');
+  try {
+    return JSON.parse(content);
+  } catch (_) {
+    return null;
+  }
+}
+
+// 로컬 워크스페이스를 특정 호스트 기기에 귀속(멀티기기 백필/클레임). local 이 아니면 무시.
+async function setWorkspaceHost(userId, id, hostDeviceId) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  const meta = await readMeta(uid, id);
+  if (!meta) {
+    const e = new Error('워크스페이스를 찾을 수 없습니다.');
+    e.statusCode = 404;
+    throw e;
+  }
+  if (meta.compute !== 'local') return meta; // 클라우드는 호스트 귀속 개념 없음
+  const next = normalizeMeta({ ...meta, hostDeviceId, updatedAt: new Date().toISOString() }, id);
+  return writeMeta(uid, id, next);
+}
+
+async function saveWorkspaceSession(userId, id, session, updatedBy) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  const payload = {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    updatedBy: updatedBy === 'mobile' ? 'mobile' : updatedBy === 'pc' ? 'pc' : 'unknown',
+    session: session && typeof session === 'object' ? session : {},
+  };
+  const res = await s3Service.saveFile(sessionKey(uid, id), JSON.stringify(payload, null, 2));
+  if (!res.success) {
+    const e = new Error(res.message || '세션 상태를 저장할 수 없습니다.');
+    e.statusCode = 500;
+    throw e;
+  }
+  return payload;
 }
 
 /**
@@ -147,6 +203,7 @@ async function createWorkspace(userId, input = {}) {
       kind: input.kind,
       compute: input.compute,
       localPath: input.localPath,
+      hostDeviceId: input.hostDeviceId, // 멀티기기: 생성한 호스트 기기(로컬만)
       unread: 0,
       createdAt: now,
       updatedAt: now,
@@ -243,6 +300,9 @@ module.exports = {
   updateWorkspace,
   duplicateWorkspace,
   deleteWorkspace,
+  getWorkspaceSession,
+  saveWorkspaceSession,
+  setWorkspaceHost,
   // 경로 헬퍼(세션/워크스페이스 연동용)
   workspaceDir,
   safeUid,
