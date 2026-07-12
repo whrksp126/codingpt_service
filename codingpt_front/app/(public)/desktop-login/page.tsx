@@ -99,25 +99,22 @@ export default function DesktopLogin() {
   return (
     <div className="card" style={wrap}>
       <h1 style={{ fontSize: 20 }}>PC 로그인</h1>
-      <p className="muted" style={{ fontSize: 13 }}>
-        CodingPT 데스크톱 앱을 이 계정에 연결합니다.
-        {code ? <> 연결 코드 <b style={{ letterSpacing: 1 }}>{code}</b></> : ' 연결 코드가 감지되지 않았습니다.'}
-      </p>
 
       {!token ? (
-        <>
-          <p className="muted" style={{ fontSize: 13, marginTop: 14 }}>먼저 로그인하세요.</p>
+        <div style={{ marginTop: 20, display: 'grid', gap: 14, justifyItems: 'center' }}>
           {GOOGLE_CLIENT_ID ? (
-            <div style={{ marginTop: 12, display: 'flex', justifyContent: 'center' }}>
-              <div ref={gbtn} />
-            </div>
+            <div ref={gbtn} />
           ) : (
             <p className="muted" style={{ fontSize: 12 }}>구글 로그인이 구성되지 않았습니다.</p>
           )}
-          <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>
-            이메일 계정은 <a href={`/login?next=${encodeURIComponent(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/desktop-login')}`}>여기</a>에서 로그인 후 돌아오세요.
-          </p>
-        </>
+          <a
+            className="muted"
+            style={{ fontSize: 13, textDecoration: 'none' }}
+            href={`/login?next=${encodeURIComponent(typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/desktop-login')}`}
+          >
+            이메일로 로그인
+          </a>
+        </div>
       ) : (
         <div style={{ marginTop: 16, display: 'grid', gap: 10, justifyItems: 'center' }}>
           {!msg ? (
@@ -130,6 +127,7 @@ export default function DesktopLogin() {
         </div>
       )}
 
+      {!code ? <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>연결 코드가 없습니다. PC 앱에서 다시 시도하세요.</p> : null}
       {msg ? <p style={{ fontSize: 13, marginTop: 12, color: 'var(--error, #f87171)' }}>{msg}</p> : null}
     </div>
   );
