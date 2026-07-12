@@ -177,21 +177,14 @@ function buildPaired() {
   stopWebLogin();
   connBody.innerHTML = `
     ${accountCardHtml()}
-    <div class="conn-status">
-      <span class="cst-dot"></span>
-      <div class="cst-text"><div class="cst-title" id="cstTitle">로그인됨</div><div class="cst-desc" id="cstDesc"></div></div>
-    </div>
     <div class="conn-actions">
-      <button id="toggleRunBtn" class="btn">중지</button>
       <button id="unpairBtn" class="btn ghost">로그아웃</button>
     </div>
     <div class="dev-section">
       <div class="dev-title">내 기기</div>
       <div id="deviceList" class="dev-list"></div>
     </div>`;
-  connBody.querySelector("#toggleRunBtn").addEventListener("click", toggleRun);
   bindUnpair(connBody.querySelector("#unpairBtn"));
-  updatePairedStatus();
   renderDeviceList();
   if (!state.me) S.loadMe(); // 프로필 지연 로드 → emit 후 재렌더
   S.loadDevices(); // 기기 목록/온라인 상태 최신화

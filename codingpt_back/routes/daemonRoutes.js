@@ -13,6 +13,7 @@ router.get('/status', authMiddleware, daemonController.getStatus);
 // PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
 router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)
 router.get('/devices', daemonController.daemonDevices); // deviceToken 인증 — 계정의 모든 기기 목록(멀티기기)
+router.post('/devices/register', daemonController.registerController); // JWT|deviceToken — 컨트롤러(모바일/태블릿) 자기 등록
 router.get('/workspaces', daemonController.daemonWorkspaces);
 router.post('/workspaces/:wsId/claim', daemonController.daemonClaimWorkspaceHost); // 호스트 귀속 클레임(deviceToken)
 router.get('/workspaces/:wsId/session', daemonController.daemonGetSession); // 세션 이어받기(deviceToken)

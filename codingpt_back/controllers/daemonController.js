@@ -65,6 +65,51 @@ async function createDeviceForUser(userId, meta) {
   return { device, deviceToken };
 }
 
+// 컨트롤러(모바일/태블릿) 기기의 안정 식별키 — 앱이 보관하는 deviceUuid 로 파생.
+//  컨트롤러는 user JWT 로 인증하므로 deviceToken 이 없지만, token_hash(NOT NULL unique)에
+//  이 값을 넣어 upsert 키로 재사용한다(실제 인증 토큰 아님).
+function controllerTokenHash(deviceUuid) {
+  return sha256('ctrl:' + String(deviceUuid || '').trim());
+}
+
+// POST /api/daemon/devices/register  (JWT|deviceToken) — 컨트롤러가 로그인 시 자신을 계정에 등록.
+//  deviceUuid(앱 영구 보관) 로 upsert → "내 기기" 목록에 노출. role='controller'.
+async function registerController(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const { deviceUuid, deviceName, platform, daemonVersion } = req.body || {};
+    const uuid = String(deviceUuid || '').trim();
+    if (!uuid) return errorResponse(res, new Error('deviceUuid 가 필요합니다.'), 400);
+    const tokenHash = controllerTokenHash(uuid);
+    let device = await DaemonDevice.findOne({ where: { user_id: acct.userId, token_hash: tokenHash } });
+    if (device) {
+      await device.update({
+        device_name: String(deviceName || device.device_name || '기기').slice(0, 128),
+        platform: platform ? String(platform).slice(0, 32) : device.platform,
+        daemon_version: daemonVersion ? String(daemonVersion).slice(0, 32) : device.daemon_version,
+        last_seen_at: new Date(),
+        revoked_at: null,
+        updated_at: new Date(),
+      });
+    } else {
+      device = await DaemonDevice.create({
+        user_id: acct.userId,
+        device_name: String(deviceName || '기기').slice(0, 128),
+        platform: platform ? String(platform).slice(0, 32) : null,
+        daemon_version: daemonVersion ? String(daemonVersion).slice(0, 32) : null,
+        token_hash: tokenHash,
+        role: 'controller',
+        runner_kind: 'local',
+        last_seen_at: new Date(),
+      });
+    }
+    return successResponse(res, { deviceId: device.id, deviceName: device.device_name, role: 'controller' });
+  } catch (e) {
+    return errorResponse(res, e, 500);
+  }
+}
+
 // Authorization: Bearer <deviceToken> → 해당 DaemonDevice(폐기 안 됨). PC 데스크톱 앱(사용자 JWT 없음)이
 //  이미 페어링으로 계정에 묶인 deviceToken 으로 소유자 자원(워크스페이스 목록 등)을 읽을 때 사용.
 async function resolveDeviceUser(req) {
@@ -158,6 +203,15 @@ async function daemonDevices(req, res) {
       order: [['last_seen_at', 'DESC']],
     });
     const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
+    // 현재 기기 식별: deviceToken 이면 acct.deviceId, JWT(컨트롤러)면 x-device-uuid 헤더로 파생.
+    let currentDeviceId = acct.deviceId;
+    if (currentDeviceId == null) {
+      const uuid = String(req.headers['x-device-uuid'] || '').trim();
+      if (uuid) {
+        const self = rows.find((d) => d.token_hash === controllerTokenHash(uuid));
+        if (self) currentDeviceId = self.id;
+      }
+    }
     const devices = [];
     for (const d of rows) {
       if (d.runner_kind === 'cloud') continue; // 클라우드 러너는 아래 논리 호스트로 통합
@@ -167,9 +221,11 @@ async function daemonDevices(req, res) {
         platform: d.platform,
         role: d.role || 'host',
         runnerKind: d.runner_kind,
-        online: online.has(d.id),
+        online: d.role === 'controller'
+          ? !!(d.last_seen_at && Date.now() - new Date(d.last_seen_at).getTime() < 10 * 60 * 1000)
+          : online.has(d.id),
         lastSeenAt: d.last_seen_at,
-        isCurrent: d.id === acct.deviceId,
+        isCurrent: d.id === currentDeviceId,
         createdAt: d.created_at,
       });
     }
@@ -846,7 +902,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
-  createPairCode, createPairSession, approvePairSession, claimPairCode, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
+  createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
   terminalList, terminalNew, terminalSelect, terminalClose,
   fsList, fsTree, fsRead, fsWrite, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone,
