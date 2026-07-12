@@ -29,7 +29,23 @@ const runtime = require('./runtime');
 
 const TMUX_SOCKET = 'codingpt'; // tmux -L codingpt (사용자 기본 tmux 서버와 격리)
 const TMUX_SESSION = 'codingpt';
-const TMUX_CONF = path.join(__dirname, '..', 'tmux.conf'); // 서버 시작 시(-f) 로드 → alt-screen override 선적용
+// tmux.conf 위치 — 소스/번들 레이아웃이 달라 여러 후보를 탐색(첫 존재 파일). 없으면 null → '-f' 생략.
+//  소스: codingpt_daemon/tmux.conf (runner-core→packages→daemon root).
+//  번들: resources/daemon/tmux/tmux.conf (CODINGPT_TMUX=.../tmux/bin/tmux 기준 형제).
+function resolveTmuxConf() {
+  const c = [];
+  if (process.env.CODINGPT_TMUX_CONF) c.push(process.env.CODINGPT_TMUX_CONF);
+  if (process.env.CODINGPT_TMUX) {
+    c.push(path.join(path.dirname(process.env.CODINGPT_TMUX), '..', 'tmux.conf'));
+    c.push(path.join(path.dirname(process.env.CODINGPT_TMUX), 'tmux.conf'));
+  }
+  c.push(path.join(__dirname, '..', '..', 'tmux.conf'));
+  c.push(path.join(__dirname, '..', 'tmux.conf'));
+  for (const p of c) { try { if (fs.existsSync(p)) return p; } catch (_) { /* noop */ } }
+  return null;
+}
+const TMUX_CONF = resolveTmuxConf(); // 서버 시작 시(-f) 로드 → alt-screen override 선적용. null 이면 -f 생략
+const CONF_ARGS = TMUX_CONF ? ['-f', TMUX_CONF] : [];
 
 // 열려는 워크스페이스 경로(홈-기준 상대)에 맞는 tmux 세션명 + 시작 절대경로.
 //  · 홈 루트('') = 기존 공유 세션 'codingpt'(Mac attach 하위호환).
@@ -98,7 +114,7 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       //   → PC 의 grouped session 방식과 동일하게 여러 pane 이 서로 다른 window 를 동시 표시.
       try {
         execFileSync(tmux, [
-          '-L', TMUX_SOCKET, '-f', TMUX_CONF,
+          '-L', TMUX_SOCKET, ...CONF_ARGS,
           'new-session', '-A', '-d', '-s', session, '-c', abs,
           ';', 'set', '-g', 'window-size', 'latest',
         ], { env, stdio: 'ignore' });
@@ -108,7 +124,7 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       spawnArgs = ['-L', TMUX_SOCKET, 'new-session', '-A', '-t', session, '-s', view, ';', 'set', '-g', 'window-size', 'latest'];
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
-      spawnArgs = ['-L', TMUX_SOCKET, '-f', TMUX_CONF, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+      spawnArgs = ['-L', TMUX_SOCKET, ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
     }
 
     let pty;

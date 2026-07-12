@@ -108,8 +108,21 @@ async function useDefaultRoot() {
 //  destParent(params.parentPath): 사용자가 이번 생성마다 고르는 목적지 폴더(홈-기준 상대,
 //  또는 전체 디스크 모드면 절대경로). 미지정이면 마지막 사용 위치 → (구)영구 루트 순으로 폴백.
 async function create(params) {
-  const name = (params && params.name) || '';
   const cfg = configLib.load() || {};
+  // 지정(designate) 모드 — 선택한 폴더 "자체"를 워크스페이스로 사용. 하위폴더 생성/스캐폴드 안 함.
+  //  name 은 폴더명(basename). 사용자가 "PC 폴더를 워크스페이스로 지정"하는 기본 흐름.
+  if (params && typeof params.path === 'string') {
+    const abs = fsLib.safeResolve(params.path);
+    const st = await fsp.stat(abs).catch(() => null);
+    if (!st || !st.isDirectory()) throw new Error('선택한 폴더가 존재하지 않습니다. 다시 선택해 주세요.');
+    const rel = fsLib.relOf(abs);
+    const nm = (params.name && String(params.name).trim()) || path.basename(abs) || '워크스페이스';
+    const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
+    configLib.save({ ...cfg, lastWorkspaceParent: parentRel });
+    return { path: rel, name: nm, slug: slugify(nm), gitInit: false, designated: true };
+  }
+  // (레거시) 부모+이름으로 하위폴더 스캐폴드.
+  const name = (params && params.name) || '';
   // parentPath 가 문자열이면(빈문자열='홈' 포함) 그대로, 미지정이면 마지막 선택 → (구)루트 폴백.
   const parentRel = (params && typeof params.parentPath === 'string')
     ? params.parentPath

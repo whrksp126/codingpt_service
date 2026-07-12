@@ -746,6 +746,8 @@ async function wsUseDefaultRoot(req, res) {
 async function wsCreate(req, res) {
   try {
     const params = { name: (req.body && req.body.name) || '' };
+    // path=선택 폴더 자체를 워크스페이스로 지정(designate). parentPath=(레거시) 하위폴더 생성.
+    if (req.body && typeof req.body.path === 'string') params.path = req.body.path;
     if (req.body && req.body.parentPath) params.parentPath = req.body.parentPath;
     const result = await daemonRelayService.callRpc(req.user.id, 'ws.create', params);
     return successResponse(res, result);
