@@ -200,7 +200,7 @@ function deviceTypeLabel(d) {
   if (p === "darwin") return "Mac";
   if (p === "win32" || p === "windows") return "Windows";
   if (p === "linux") return "Linux";
-  if (p === "ios" || p === "ipados") return "iPad · iPhone";
+  if (p === "ios" || p === "ipados") return "iOS";
   if (p === "android") return "Android";
   return d.role === "controller" ? "모바일" : "기기";
 }
