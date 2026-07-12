@@ -105,9 +105,15 @@ QR·수동 페어링 없이.
      `/devices`·`/workspaces`·session. `daemonService.listDevices/getWorkspaceSession/putWorkspaceSession/claimWorkspace`.
      ConnectionsContent 단일 PC → **"내 기기" 목록**(hosts + 클라우드, online). ProjectsScreen 로컬 워크스페이스
      **호스트 배지**(hostName + online, `hostDeviceId`→device map). `WorkspaceMeta` host 필드.
-   - **Step 4b** (남음): ① 워크스페이스 열기 = 그 `hostDeviceId` 로 라우팅(`activateRunner(deviceId)` 후 연결) ②
-     세션 이어받기(session.json 읽어 열린 표면 복원 + 앱이 상태 변화 시 PUT) ③ 모바일 controller 등록
-     (role=controller → "내 기기"에 폰·태블릿 표시 + 원격 로그아웃) ④ 오프라인 호스트 안내 + 클라우드 대안.
+   - **Step 4b — ① 호스트 라우팅** ✅ (2026-07-12, tsc 통과 · 멀티호스트 실검증 대기): 워크스페이스 열기/이어받기
+     시 `hostDeviceId` 가 연결된 러너면 `activateRunner(deviceId)` 로 그 기기 라우팅. 귀속 없거나 미연결이면
+     기존 단일호스트 동작 폴백(안전·additive). `HomeScreen.activateHostForWorkspace` + `ProjectsScreen.openLocalWorkspace`.
+   - **Step 4b — 남은 부분(에뮬/설계 필요, 미착수)**:
+     ② **세션 이어받기 표면 복원** — 모바일 IDE 는 다중 표면(session.json) 개념이 없어, MobileIDEScreen 에 표면
+        매니페스트 모델을 도입해야 함(큰 작업). 지금은 에이전트 세션 resume 만 존재.
+     ③ **모바일 controller 등록 + 원격 로그아웃** — 폰·태블릿을 "내 기기"에 표시하려면 role=controller 기기 등록 필요.
+        진짜 원격 로그아웃은 모바일 인증을 user JWT → controller deviceToken 으로 통일해야 성립(모바일 auth 리팩터).
+     ④ **오프라인 호스트별 안내** — 현재는 단일 `localOnline` 게이트. 워크스페이스별 호스트 온오프 판정으로 정교화.
 
 ## 8. 확정 결정 (2026-07-12 합의)
 
