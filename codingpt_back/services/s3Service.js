@@ -13,9 +13,19 @@ const TEXT_EXTENSIONS = new Set([
 
 class S3Service {
   constructor() {
-    const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
+    this.s3Client = this._buildClient();
+    this.bucketName = process.env.OBJECTSTORE_BUCKET;
 
-    this.s3Client = new S3Client({
+    if (!this.bucketName) {
+      console.warn('[S3Service] OBJECTSTORE_BUCKET 환경 변수가 설정되지 않았습니다.');
+    }
+  }
+
+  // S3Client 생성(재생성 가능). systemClockOffset 을 명시하지 않아 항상 0(=시스템 시계)으로 시작한다.
+  //  → skew 자가회복(_sendWithRetry)에서 이 메서드로 새 클라이언트를 만들어 낡은 오프셋을 버린다.
+  _buildClient() {
+    const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
+    return new S3Client({
       region: process.env.OBJECTSTORE_REGION || 'us-east-1',
       credentials: {
         accessKeyId: process.env.OBJECTSTORE_ACCESS_KEY,
@@ -32,11 +42,6 @@ class S3Service {
         forcePathStyle: true, // MinIO/objectstore는 path-style 필수
       }),
     });
-    this.bucketName = process.env.OBJECTSTORE_BUCKET;
-
-    if (!this.bucketName) {
-      console.warn('[S3Service] OBJECTSTORE_BUCKET 환경 변수가 설정되지 않았습니다.');
-    }
   }
 
   /**
@@ -113,14 +118,32 @@ class S3Service {
     return TEXT_EXTENSIONS.has(ext);
   }
 
+  // 시계 오차(RequestTimeTooSkewed) 판별 — 홈서버 정전/재부팅 시 NTP 동기 전 시계로 뜬 뒤,
+  //  SDK 싱글턴이 잘못된 systemClockOffset 을 캐시해 시계 복구 후에도 계속 실패하는 케이스.
+  _isClockSkew(e) {
+    const name = e?.name || e?.Code || '';
+    const msg = e?.message || '';
+    return /RequestTimeTooSkewed/i.test(name)
+      || /difference between the request time and the server'?s time is too large/i.test(msg);
+  }
+
   // 일시적/미분류 오류(Cloudflare·MinIO 5xx, http/code 미상)에 대해 재시도.
   // NoSuchKey/404 같은 확정 오류는 즉시 throw (재시도 무의미).
   async _sendWithRetry(command, attempts = 4) {
     let lastErr;
+    let skewHealed = false;
     for (let i = 0; i < attempts; i++) {
       try { return await this.s3Client.send(command); }
       catch (e) {
         lastErr = e;
+        // 시계 오차: 낡은 systemClockOffset 을 버리도록 클라이언트를 통째로 재생성 후 즉시 재시도.
+        //  한 번만 재생성(무한루프 방지). 재생성 후에도 나면 실제 호스트 시계가 크게 틀어진 것.
+        if (this._isClockSkew(e) && !skewHealed) {
+          skewHealed = true;
+          try { this.s3Client = this._buildClient(); } catch (_) { /* noop */ }
+          console.warn('[S3Service] RequestTimeTooSkewed 감지 → S3 클라이언트 재생성 후 재시도');
+          continue; // sleep 없이 즉시 재시도(새 클라이언트=오프셋 0)
+        }
         const code = e?.$metadata?.httpStatusCode;
         const fatal = e?.name === 'NoSuchKey' || e?.name === 'NotFound' || code === 404 || code === 403;
         if (fatal || i === attempts - 1) throw e;
