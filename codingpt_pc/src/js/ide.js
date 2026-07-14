@@ -498,8 +498,18 @@ export class IdeView {
     const idx = group.open.findIndex((o) => o.path === path);
     if (idx >= 0) { this._activate(group, idx); if (line) this._jumpTo(group, line); return; }
     try {
-      const content = await api.fsRead(path);
-      group.open.push({ path, doc: CM.Doc(content, modeFor(baseName(path))), dirty: false });
+      // 같은 파일이 다른 그룹에 열려 있으면 linkedDoc 으로 버퍼 공유 — 그룹별로 편집이 따로 놀아
+      //  마지막 저장이 덮어쓰는 문제를 원천 차단(VS Code 동작).
+      let doc = null;
+      for (const g of this.groups.values()) {
+        const e = g.open.find((o) => o.path === path);
+        if (e) { doc = e.doc.linkedDoc({ sharedHist: false, mode: modeFor(baseName(path)) }); break; }
+      }
+      if (!doc) {
+        const content = await api.fsRead(path);
+        doc = CM.Doc(content, modeFor(baseName(path)));
+      }
+      group.open.push({ path, doc, dirty: false });
       this._activate(group, group.open.length - 1);
       if (line) this._jumpTo(group, line);
     } catch (e) {
@@ -553,16 +563,38 @@ export class IdeView {
   }
   _markDirty(group) {
     const f = group.open[group.active];
-    if (f && !f.dirty) { f.dirty = true; this._renderGroupTabs(group); }
+    if (!f || f.dirty) return;
+    // 공유 버퍼(linkedDoc) — 같은 파일을 연 모든 그룹의 dirty 를 함께 표시.
+    for (const g of this.groups.values()) {
+      let hit = false;
+      for (const o of g.open) if (o.path === f.path && !o.dirty) { o.dirty = true; hit = true; }
+      if (hit) this._renderGroupTabs(g);
+    }
   }
   async save() {
     const group = this.activeGroup;
     const f = group.open[group.active];
     if (!f) return;
-    try { await api.fsWrite(f.path, f.doc.getValue()); f.dirty = false; this._renderGroupTabs(group); }
+    try {
+      await api.fsWrite(f.path, f.doc.getValue());
+      for (const g of this.groups.values()) {
+        let hit = false;
+        for (const o of g.open) if (o.path === f.path && o.dirty) { o.dirty = false; hit = true; }
+        if (hit) this._renderGroupTabs(g);
+      }
+    }
     catch (e) { this._toast(String(e)); }
   }
   closeFile(group, i) {
+    // linkedDoc 해제(누수 방지) — 남은 쪽 문서는 그대로 유지된다.
+    const f = group.open[i];
+    try {
+      if (f && f.doc && f.doc.iterLinkedDocs) {
+        const linked = [];
+        f.doc.iterLinkedDocs((d) => linked.push(d));
+        linked.forEach((d) => { try { f.doc.unlinkDoc(d); } catch (_) {} });
+      }
+    } catch (_) {}
     group.open.splice(i, 1);
     if (group.active >= group.open.length) group.active = group.open.length - 1;
     if (group.active < 0) { group.cm.swapDoc(CM.Doc("", "text/plain")); group.editorHost.style.display = "none"; group.empty.style.display = ""; }
