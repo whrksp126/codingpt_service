@@ -367,6 +367,7 @@ export class PaneView {
     if (this.ctx.isLocal) {
       api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).catch((e) => {
         this.term.write("\r\n\x1b[31m터미널 연결 실패: " + e + "\x1b[0m\r\n");
+        this._scheduleReopen(2500); // 일시 오류(서버 재기동 중 등)에 고착되지 않게 자동 재시도
       });
     } else {
       try {
@@ -480,8 +481,42 @@ export class PaneView {
   _onData(b64) {
     this._termOut(b64ToBytes(b64));
   }
+  // attach 가 끊겼다(다른 기기가 이 터미널/마지막 터미널을 닫아 tmux 서버까지 죽었을 수 있음).
+  //  모바일 웹뷰는 자동 재접속하는데 PC 는 여기서 끝이라 "새 터미널이 생겨도 못 넘어오는" 문제가
+  //  있었다 → 풀에 window 가 다시 생기면 유효한 win 으로 자동 재연결한다.
+  //  풀이 빈 동안은 대기만 — 여기서 창을 만들면 기기 간 생성 레이스로 유령 터미널이 생긴다.
   _onExit() {
-    this.term?.write("\r\n\x1b[90m[세션 종료]\x1b[0m\r\n");
+    this.term?.write("\r\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\r\n");
+    if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
+    this._reopenTries = 0;
+    this._scheduleReopen(1500);
+  }
+  _scheduleReopen(delay) {
+    clearTimeout(this._reopenTimer);
+    this._reopenTimer = setTimeout(async () => {
+      if (this._reopenStop || !this.mounted) return;
+      const tab = this.node.tabs?.[this.node.active];
+      if (!tab) return;
+      let wins = [];
+      try { wins = (await api.listWindows(this.ctx.localPath || "")) || []; } catch (_) { /* 서버 다운 */ }
+      if (this._reopenStop) return;
+      if (!wins.length) {
+        this._reopenTries = (this._reopenTries || 0) + 1;
+        this._scheduleReopen(Math.min(1500 * this._reopenTries, 10000));
+        return;
+      }
+      // 죽은 win 은 풀의 첫 터미널로 갈아탄다(리컨실러가 탭 목록은 따로 정리).
+      if (typeof tab.win !== "number" || !wins.some((w) => w.index === tab.win)) {
+        tab.win = wins[0].index;
+        if (wins[0].name) tab.title = wins[0].name;
+        this.buildHead();
+        this.ctx.persist?.();
+      }
+      const { cols, rows } = this.term || {};
+      api.ptyOpen(this.id, this.ctx.localPath || "", tab.win ?? 0, cols || 80, rows || 24)
+        .then(() => this.term?.write("\x1b[90m[재연결됨]\x1b[0m\r\n"))
+        .catch(() => this._scheduleReopen(3000));
+    }, delay);
   }
   _fitNow() {
     if (!this.term) return;
@@ -586,6 +621,8 @@ export class PaneView {
   }
   dispose() {
     registry.delete(this.id);
+    this._reopenStop = true;
+    clearTimeout(this._reopenTimer);
     try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {

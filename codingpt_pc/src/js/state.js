@@ -475,6 +475,13 @@ export async function reconcilePool() {
       if (targetId) {
         const leafT = T.findLeaf(w.layout, targetId);
         for (const m of missing) leafT.tabs.push({ win: m.index, title: m.name || "" });
+        // 트리 전멸 폴백으로 방금 만든 'new' placeholder 는 실제 풀 window 가 편입됐으면 제거 —
+        //  남겨두면 mount 의 _ensureWin 이 풀에 불필요한 새 터미널을 또 만든다.
+        //  (진짜 진행 중인 'new' 탭이 있으면 위 pending 가드가 이번 틱을 이미 스킵했으므로 안전)
+        if (leafT.tabs.length > 1) {
+          leafT.tabs = leafT.tabs.filter((t) => t.win !== "new");
+          leafT.active = Math.max(0, Math.min(leafT.active, leafT.tabs.length - 1));
+        }
         touched.add(targetId);
         changed = true;
       } else {

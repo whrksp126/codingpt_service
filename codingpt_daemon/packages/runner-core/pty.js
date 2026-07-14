@@ -133,14 +133,17 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     const client = params && params.client ? String(params.client) : '';
 
     let spawnArgs;
+    // 실제 표시 중인 window 인덱스 — 재접속 시 URL 의 params.win 은 서버 재시작 전 인덱스라 스테일할
+    //  수 있고, ensureView 가 풀 첫 터미널로 폴백하면 인덱스가 바뀐다. 리사이즈는 반드시 이 값 기준.
+    let resolvedWin = (params && Number.isInteger(params.win)) ? params.win : 0;
     if (paneId) {
       // 공유 풀 모델: 터미널 실체 = primary(풀) 세션의 window(전 기기 공유), pane = 이 기기 전용
       //  뷰 세션(link-window 로 풀 window 를 골라 표시). 배치는 기기별, 내역/내용은 전 기기 공유.
       const psess = paneSession(session, paneId, client);
-      const selWin = (params && Number.isInteger(params.win)) ? params.win : 0;
+      const selWin = resolvedWin;
       try {
         await ensurePool(session, abs);
-        await ensureView(psess, session, selWin, abs);
+        resolvedWin = await ensureView(psess, session, selWin, abs);
       } catch (e) {
         try { ws.send(`\r\n\x1b[31m터미널 준비 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
         return;
@@ -176,7 +179,9 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
 
     // 웹뷰가 fit 후 보내는 "첫" resize 크기로 표시 중인 window 를 맞춘다 — attach 직후엔 기본
     //  80x24 라 클라이언트 크기 조회가 이르고(80x24 로 고정되는 사고), 첫 resize 가 실제 pane 크기다.
-    const selForResize = (params && Number.isInteger(params.win)) ? params.win : 0;
+    //  타깃은 resolvedWin(ensureView 폴백 반영) — 스테일 params.win 을 쓰면 없는 창에 쏴서
+    //  새 창이 기본 크기(80x24)로 남는다(점선 반쪽 화면).
+    const selForResize = resolvedWin;
     let firstResizeDone = !paneId;
 
     pty.onData((data) => {
@@ -313,6 +318,7 @@ async function ensureView(psess, session, win, abs) {
   if (slots.some((p) => (parseInt(p[0], 10) || 0) === 999) || !slot) {
     await runTmux(['kill-window', '-t', `=${psess}:999`]).catch(() => {});
   }
+  return win; // 폴백으로 바뀌었을 수 있는 실제 표시 인덱스 — 호출측 리사이즈 타깃
 }
 
 // pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
@@ -361,9 +367,11 @@ async function handleTerminalRpc(method, params) {
     const win = (params && params.index) | 0;
     if (!paneId) { await runTmux(['select-window', '-t', `=${session}:${win}`]); return { ok: true }; }
     await ensurePool(session, abs);
-    await ensureView(psess, session, win, abs);
-    await resizeToClient(psess, session, win);
-    return { ok: true };
+    // 리사이즈는 ensureView 가 실제로 링크한 인덱스 기준 — 요청 인덱스가 스테일(서버 재시작/타 기기
+    //  삭제)이면 폴백된 창이 표시되는데, 스테일 인덱스로 resize 하면 표시 창이 기본 크기로 남는다.
+    const resolved = await ensureView(psess, session, win, abs);
+    await resizeToClient(psess, session, resolved);
+    return { ok: true, index: resolved };
   }
   if (method === 'terminal.unview') {
     // pane 에서 탭 제거(풀 window 는 보존) — 드래그 이동의 src 측/레이아웃 정리.
@@ -377,7 +385,14 @@ async function handleTerminalRpc(method, params) {
   }
   if (method === 'terminal.close') {
     // 풀에서 완전 삭제(전 기기 공통). 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 자동 소멸.
-    await runTmux(['kill-window', '-t', `=${session}:${(params && params.index) | 0}`]);
+    //  멱등 처리: 마지막 창을 닫으면 tmux 서버 자체가 죽으므로, 연달아 닫는 요청/이미 사라진 창은
+    //  "no server running"/"can't find window" 로 실패한다 — 이미 닫힌 것이니 성공으로 간주.
+    try {
+      await runTmux(['kill-window', '-t', `=${session}:${(params && params.index) | 0}`]);
+    } catch (e) {
+      const msg = String(e.message || '');
+      if (!/no server running|can't find window|session not found/i.test(msg)) throw e;
+    }
     return { ok: true };
   }
   throw new Error('unknown terminal method: ' + method);

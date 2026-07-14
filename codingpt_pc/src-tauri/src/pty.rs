@@ -63,9 +63,10 @@ pub fn pty_open(
     let (session, abs) = tmux::session_for(&local_path);
     let view = tmux::pane_session(&session, &pane_id);
     // 공유 풀 모델: 터미널 실체 = 풀(primary) window(전 기기 공유), pane = 뷰 세션(link-window).
-    //  ensure_view 가 풀/뷰/링크/선택을 전부 보장(스테일 win 이면 그 인덱스에 새 터미널 생성).
+    //  ensure_view 가 풀/뷰/링크/선택을 전부 보장. 반환 = 실제 표시 인덱스(스테일 win 폴백 반영) —
+    //  아래 attach 후 리사이즈 보정은 반드시 이 값을 타깃해야 한다.
     let win = if win_index >= 0 { win_index } else { 0 };
-    tmux::ensure_view(&ctx, &view, &session, win, &abs)?;
+    let win = tmux::ensure_view(&ctx, &view, &session, win, &abs)?;
 
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })

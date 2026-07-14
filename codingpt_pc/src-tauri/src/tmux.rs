@@ -223,7 +223,9 @@ pub fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
 // pane 뷰 세션 보장 + 풀 window(win)를 같은 인덱스로 link + select — 데몬 ensureView 미러.
 //  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
 //  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거.
-pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &PathBuf) -> Result<(), String> {
+// 반환 = 실제로 링크/선택한 풀 인덱스 — 요청 win 이 스테일이면 폴백으로 바뀌므로 호출측
+//  리사이즈는 반드시 이 값을 써야 한다(스테일 인덱스로 resize 하면 표시 창이 기본 크기로 남는다).
+pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &PathBuf) -> Result<i64, String> {
     let abs_s = abs.to_string_lossy().to_string();
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
@@ -272,7 +274,7 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
     run(ctx, &["select-window", "-t", &format!("={psess}:{win}")])?;
     let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
     resize_to_client(ctx, psess, session, win); // 포커스한 pane 크기로 즉시 맞춤(클라이언트 미접속이면 무시)
-    Ok(())
+    Ok(win)
 }
 
 // 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.
@@ -453,7 +455,7 @@ pub fn tmux_view_window(
     local_path: String,
     pane_id: String,
     index: i64,
-) -> Result<(), String> {
+) -> Result<i64, String> {
     let (session, abs) = session_for(&local_path);
     let psess = pane_session(&session, &pane_id);
     ensure_view(&ctx, &psess, &session, index, &abs)
