@@ -55,6 +55,24 @@ function focusedPane() {
   return w?.focusId ? getPane(w.focusId) : null;
 }
 
+// ── 앱 창 활성화 시 포커스 터미널의 창 크기 회수 ──
+//  다른 기기가 같은 터미널을 자기 크기로 잡아두면(창=manual 고정) PC 화면이 우측 잘림으로 남는다.
+//  부팅 보정은 이미 잡힌(manual) 창을 건드리지 않으므로, "PC 앱을 앞으로 가져온 순간"을 사용자
+//  의사로 보고 이 기기 크기로 회수한다(pane 내부 클릭·포커스와 같은 규칙, 1.2s 스로틀).
+let lastWinClaim = 0;
+function claimFocusedTerminalSize() {
+  const n = Date.now();
+  if (n - lastWinClaim < 1200) return;
+  lastWinClaim = n;
+  const p = focusedPane();
+  if (!p || p.node.kind !== "terminal") return;
+  const t = p.node.tabs?.[p.node.active];
+  if (t && typeof t.win === "number") p._view(t.win);
+}
+window.addEventListener("focus", claimFocusedTerminalSize);
+// 부팅 직후 1회 — attach(500ms 보정은 virgin 창만)가 끝난 뒤 잡힌 창도 이 기기 크기로.
+setTimeout(claimFocusedTerminalSize, 1600);
+
 // ── 활성 영역 검색(⌘F / Ctrl+F) ──
 //  ⌘F = 터미널·IDE 모두. Ctrl+F 는 터미널의 셸 forward-char 를 살리려 IDE 에서만.
 window.addEventListener("keydown", (e) => {

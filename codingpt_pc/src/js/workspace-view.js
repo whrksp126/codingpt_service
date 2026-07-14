@@ -259,22 +259,20 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
 function renderMainTop(ws) {
   mainTop.innerHTML = "";
   if (state.sidebarCollapsed) {
-    // 접힘 시 사이드바 상단 컨트롤(토글·알림·+)을 메인 상단바에 그대로 노출 → 토글 전후 정합성.
+    // 접힘 시 사이드바 상단 컨트롤(토글·알림)을 메인 상단바에 노출 — 워크스페이스 추가(+)는
+    //  사이드바를 열어야 보인다(접힘 상태 축약).
     const ctl = document.createElement("span");
     ctl.className = "mt-ctl";
-    ctl.append(buildTopControls());
+    ctl.append(buildTopControls(false));
     mainTop.appendChild(ctl);
     const div = document.createElement("span");
     div.className = "mt-div";
     mainTop.appendChild(div);
   }
-  const fold = document.createElement("span");
-  fold.className = "mt-folder";
-  fold.innerHTML = icons.folder({ size: 15 });
   const name = document.createElement("span");
   name.className = "mt-name";
   name.textContent = ws?.name || "워크스페이스";
-  mainTop.append(fold, name);
+  mainTop.append(name);
   // 통합 추가 버튼(터미널/IDE/웹뷰) — pane 별 버튼 대신 여기 고정. 활성 pane 기준 자동 배치.
   if (ws) {
     const spacer = document.createElement("span");

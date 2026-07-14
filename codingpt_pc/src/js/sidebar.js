@@ -186,7 +186,8 @@ function ctlBtn(iconName, title, onClick) {
 }
 
 // 상단 컨트롤(토글·알림·추가) — 사이드바 상단바 + 접힘 시 메인 상단바에서 공용 사용(정합성).
-export function buildTopControls() {
+//  withAdd=false: 접힘 시 이식되는 축약판 — 워크스페이스 추가(+)는 사이드바를 열어야 보인다.
+export function buildTopControls(withAdd = true) {
   const frag = document.createDocumentFragment();
   const totalUnread = state.notifications.filter((n) => !n.read).length;
   const toggle = ctlBtn("sidebar", state.sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기", () => S.toggleSidebar());
@@ -201,9 +202,12 @@ export function buildTopControls() {
     badge.textContent = totalUnread > 9 ? "9+" : String(totalUnread);
     bell.appendChild(badge);
   }
-  const add = ctlBtn("plus", "새 워크스페이스", () => S.createLocalWorkspace());
-  if (state.creatingWs) add.classList.add("busy");
-  frag.append(toggle, bell, add);
+  frag.append(toggle, bell);
+  if (withAdd) {
+    const add = ctlBtn("plus", "새 워크스페이스", () => S.createLocalWorkspace());
+    if (state.creatingWs) add.classList.add("busy");
+    frag.append(add);
+  }
   return frag;
 }
 function note(text) {
