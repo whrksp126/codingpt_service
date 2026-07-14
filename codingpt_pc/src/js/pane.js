@@ -28,6 +28,98 @@ function b64ToBytes(b64) {
   for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
   return u;
 }
+
+// 혼합 탭 — 터미널 pane 의 탭은 터미널(tmux window) 외에 IDE/프리뷰일 수도 있다.
+//  kind 미지정 = 터미널(하위호환 — 기존 영속 레이아웃의 탭은 전부 터미널).
+export function isTermTab(t) {
+  return !t || !t.kind || t.kind === "term";
+}
+let _tidSeq = 1;
+export function newTid() {
+  return "mx" + _tidSeq++ + "-" + Date.now().toString(36);
+}
+
+// 혼합 탭용 프리뷰 표면 — 표준 프리뷰 pane(_buildFrame/_startPreviewSync)과 동일 동작을
+//  탭 host 안에 캡슐화. webview id 는 탭 tid 기반(pane 당 여러 프리뷰 탭 공존 가능).
+class PreviewSurface {
+  constructor(parent, tid, tab, persist) {
+    this.id = "pv-" + tid;
+    this.tab = tab;
+    this.url = tab.url || "";
+    const bar = document.createElement("div");
+    bar.className = "preview-bar";
+    const input = document.createElement("input");
+    input.className = "preview-url";
+    input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
+    input.value = this.url;
+    const go = document.createElement("button");
+    go.className = "btn small";
+    go.textContent = "이동";
+    bar.append(input, go);
+    const load = (raw) => {
+      let u = (raw || "").trim();
+      if (!u) return;
+      const isUrl = /^https?:\/\//i.test(u);
+      const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)([:/]|$)/i.test(u);
+      const isHostPort = /^[\w-]+:\d+([/?#]|$)/.test(u);
+      const isDomain = /^[\w-]+(\.[\w-]+)+([:/?#]|$)/.test(u);
+      if (isUrl || isLocal || isHostPort || isDomain) {
+        if (!isUrl) u = isLocal || isHostPort ? "http://" + u : "https://" + u;
+      } else {
+        u = "https://www.google.com/search?q=" + encodeURIComponent(u);
+      }
+      this.tab.url = u;
+      this.url = u;
+      input.value = u;
+      api.previewNavigate(this.id, u).catch(() => {});
+      this._key = "";
+      persist?.();
+    };
+    go.addEventListener("click", () => load(input.value));
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") load(input.value); });
+    const reload = document.createElement("button");
+    reload.className = "pane-ctrl";
+    reload.title = "새로고침";
+    reload.innerHTML = icons.refresh({ size: 14 });
+    reload.addEventListener("click", () => { if (this.url) api.previewNavigate(this.id, this.url).catch(() => {}); });
+    const ext = document.createElement("button");
+    ext.className = "pane-ctrl";
+    ext.title = "외부 브라우저에서 열기";
+    ext.innerHTML = icons.external({ size: 14 });
+    ext.addEventListener("click", () => { if (this.url) api.openExternal(this.url).catch(() => {}); });
+    bar.append(reload, ext);
+    this.host = document.createElement("div");
+    this.host.className = "preview-host";
+    this.host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
+    parent.append(bar, this.host);
+    this._visible = false;
+    this._key = "";
+    this._disposed = false;
+    const tick = () => {
+      if (this._disposed) return;
+      const h = this.host;
+      if (h && document.body.contains(h)) {
+        const r = h.getBoundingClientRect();
+        const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
+        const dragging = document.body.classList.contains("tab-dragging");
+        const visible = this._visible && r.width > 2 && r.height > 2 && !modalOpen && !dragging;
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.url].join("|");
+        if (key !== this._key) {
+          this._key = key;
+          if (this.url) api.previewSync(this.id, this.url, r.left, r.top, r.width, r.height, visible).catch(() => {});
+        }
+      }
+      this._raf = requestAnimationFrame(tick);
+    };
+    this._raf = requestAnimationFrame(tick);
+  }
+  setVisible(v) { this._visible = v; }
+  dispose() {
+    this._disposed = true;
+    cancelAnimationFrame(this._raf);
+    api.previewClose(this.id).catch(() => {});
+  }
+}
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
@@ -76,6 +168,7 @@ export class PaneView {
     this.body = document.createElement("div");
     this.body.className = "pane-body";
     this.el.append(this.head, this.body);
+    this._mixed = new Map(); // 혼합 탭(IDE/프리뷰) 본문 — tid → { host, ide?, preview? }
 
     if (node.kind === "terminal") this._buildTerminal();
     else if (node.kind === "ide") this._buildIde();
@@ -93,8 +186,12 @@ export class PaneView {
         const tab = document.createElement("div");
         tab.className = "ptab" + (i === this.node.active ? " active" : "");
         tab.draggable = true;
-        const label = t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
-        tab.innerHTML = `<span class="ptab-ic">${icons.terminal({ size: 13 })}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
+        const isT = isTermTab(t);
+        const icon = isT ? icons.terminal : t.kind === "ide" ? icons.code : icons.globe;
+        const label = isT
+          ? t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널")
+          : t.kind === "ide" ? (t.openPath ? String(t.openPath).split("/").pop() : "IDE") : "프리뷰";
+        tab.innerHTML = `<span class="ptab-ic">${icon({ size: 13 })}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
         const x = document.createElement("span");
         x.className = "ptab-x";
         x.innerHTML = icons.x({ size: 11 });
@@ -276,15 +373,21 @@ export class PaneView {
     this.term.open(this.termEl);
     this._setupInput();
     this._fitNow();
-    const tab = this.node.tabs[this.node.active] || this.node.tabs[0];
-    const win = await this._ensureWin(tab);
-    this._openChannel(win);
-    this.ro = new ResizeObserver(() => this._fitNow());
+    // 스트림은 "터미널" 탭 기준 — 활성 탭이 IDE/프리뷰(혼합 탭)여도 백그라운드 터미널은 유지.
+    //  터미널 탭이 하나도 없으면 채널 없이 혼합 탭 본문만 표시.
+    const active = this.node.tabs[this.node.active];
+    const termTab = (isTermTab(active) && active) || this.node.tabs.find((t) => isTermTab(t));
+    if (termTab) {
+      const win = await this._ensureWin(termTab);
+      this._openChannel(win);
+    }
+    this.showActiveTab();
+    this.ro = new ResizeObserver(() => { this._fitNow(); this._mixed.forEach((m) => m.ide?.refresh()); });
     this.ro.observe(this.el);
   }
 
   async _ensureWin(tab) {
-    if (this.ctx.isLocal && (tab.win === "new" || tab.win == null)) {
+    if (this.ctx.isLocal && isTermTab(tab) && (tab.win === "new" || tab.win == null)) {
       try {
         // 풀의 미배치 터미널 먼저 입양(첫 진입 시 남발 방지) → 없으면 풀에 새 터미널 생성(전 기기 공유).
         //  '+'로 만든 탭(fresh)은 입양 없이 반드시 새로 생성(사용자가 새 터미널을 명시 요청).
@@ -327,15 +430,24 @@ export class PaneView {
     }
     this.node.active = i;
     this.buildHead();
-    const win = await this._ensureWin(this.node.tabs[i]);
-    this._view(win);
+    const tab = this.node.tabs[i];
+    if (isTermTab(tab)) {
+      const win = await this._ensureWin(tab);
+      if (this.node.tabs[this.node.active] === tab) this._view(win);
+    }
+    this.showActiveTab();
     this.ctx.persist?.();
     this.focus();
   }
   closeTab(i) {
     const tab = this.node.tabs[i];
-    // 풀에서 완전 삭제 — 모든 기기에서 사라진다(공유 내역).
-    if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
+    if (isTermTab(tab)) {
+      // 터미널 탭 = 풀에서 완전 삭제(전 기기 공통).
+      if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
+    } else {
+      // IDE/프리뷰 탭 = 이 기기 뷰만 닫힘.
+      this.disposeMixedTab(tab);
+    }
     this.node.tabs.splice(i, 1);
     if (!this.node.tabs.length) {
       this.ctx.onClosePane?.(this.id);
@@ -343,9 +455,58 @@ export class PaneView {
     }
     if (this.node.active >= this.node.tabs.length) this.node.active = this.node.tabs.length - 1;
     this.buildHead();
-    this._view(this.node.tabs[this.node.active].win);
+    const at = this.node.tabs[this.node.active];
+    if (isTermTab(at)) this._view(at.win);
+    this.showActiveTab();
     this.ctx.onSurfacesChanged?.();
     this.ctx.persist?.();
+  }
+
+  // ── 혼합 탭(IDE/프리뷰) 본문 관리 ──
+  _ensureMixed(tab) {
+    if (!tab.tid) tab.tid = newTid();
+    let m = this._mixed.get(tab.tid);
+    if (m) return m;
+    const host = document.createElement("div");
+    host.className = "pane-mixed";
+    this.body.appendChild(host);
+    m = { host };
+    if (tab.kind === "ide") {
+      m.ide = new IdeView(this.ctx.localPath || "", host, {
+        openPath: tab.openPath || null,
+        paneId: this.id,
+        paneDropZone: this.ctx.paneDropZone,
+        onFileSplit: this.ctx.onFileSplit,
+      });
+      m.ide.mount();
+    } else {
+      m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.());
+    }
+    this._mixed.set(tab.tid, m);
+    return m;
+  }
+  disposeMixedTab(tab) {
+    const m = tab && tab.tid ? this._mixed.get(tab.tid) : null;
+    if (!m) return;
+    m.ide?.dispose();
+    m.preview?.dispose();
+    m.host.remove();
+    this._mixed.delete(tab.tid);
+  }
+  // 활성 탭 kind 에 맞춰 본문 표시 전환(터미널 ↔ IDE/프리뷰). 터미널 스트림은 숨겨도 유지.
+  showActiveTab() {
+    if (this.node.kind !== "terminal" || !this.termEl) return;
+    const tab = this.node.tabs[this.node.active];
+    const isT = isTermTab(tab);
+    if (!isT && tab) this._ensureMixed(tab);
+    this.termEl.style.display = isT ? "" : "none";
+    for (const [tid, m] of this._mixed) {
+      const on = !isT && tab && tab.tid === tid;
+      m.host.style.display = on ? "flex" : "none";
+      if (on && m.ide) m.ide.refresh();
+      m.preview?.setVisible(!!on);
+    }
+    if (isT) this._fitNow();
   }
   // 드롭으로 이동해 온 탭을 활성화(뷰 링크 + select).
   async activateWin(win) {
@@ -499,7 +660,9 @@ export class PaneView {
     clearTimeout(this._reopenTimer);
     this._reopenTimer = setTimeout(async () => {
       if (this._reopenStop || !this.mounted) return;
-      const tab = this.node.tabs?.[this.node.active];
+      // 재연결 대상은 "터미널" 탭 — 활성 탭이 IDE/프리뷰(혼합 탭)여도 백그라운드 터미널을 복구.
+      const active = this.node.tabs?.[this.node.active];
+      const tab = (isTermTab(active) && active) || this.node.tabs?.find((t) => isTermTab(t));
       if (!tab) return;
       let wins = [];
       try { wins = (await api.listWindows(this.ctx.localPath || "")) || []; } catch (_) { /* 서버 다운 */ }
@@ -627,6 +790,10 @@ export class PaneView {
     registry.delete(this.id);
     this._reopenStop = true;
     clearTimeout(this._reopenTimer);
+    for (const [, m] of this._mixed) {
+      try { m.ide?.dispose(); m.preview?.dispose(); } catch (_) {}
+    }
+    this._mixed.clear();
     try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {

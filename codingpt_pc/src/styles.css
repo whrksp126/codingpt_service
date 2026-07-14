@@ -258,6 +258,8 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .pane-ctrl:hover { background: var(--elevated2); color: var(--text); }
 
 .pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* 혼합 탭(IDE/프리뷰가 터미널 pane 의 탭으로) 본문 host — showActiveTab 이 display 토글 */
+.pane-mixed { flex: 1; min-height: 0; display: none; flex-direction: column; overflow: hidden; }
 .pane-term { flex: 1; min-height: 0; padding: 4px 2px 2px 8px; overflow: hidden; }
 .pane-term .xterm { height: 100%; }
 

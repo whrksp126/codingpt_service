@@ -3,7 +3,7 @@
 import { state, wsRuntime, activeWs, isLocal } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
-import { PaneView } from "./pane.js";
+import { PaneView, isTermTab, newTid } from "./pane.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
@@ -84,10 +84,15 @@ function beginTabDrag(srcId, index, e) {
   // 터미널 = 탭 단위 이동, IDE/프리뷰 = pane 통째 이동(index<0).
   const wholePane = src.kind !== "terminal" || index < 0;
   const tab = wholePane ? null : src.tabs[index];
+  const tabIsTerm = tab ? isTermTab(tab) : false;
   const label = wholePane
     ? (src.kind === "ide" ? "IDE" : "프리뷰")
-    : tab?.title || (typeof tab?.win === "number" ? "터미널 " + tab.win : "터미널");
-  const ghostIcon = wholePane ? (src.kind === "ide" ? icons.code : icons.globe) : icons.terminal;
+    : tabIsTerm
+      ? tab?.title || (typeof tab?.win === "number" ? "터미널 " + tab.win : "터미널")
+      : tab?.kind === "ide" ? "IDE" : "프리뷰";
+  const ghostIcon = wholePane
+    ? (src.kind === "ide" ? icons.code : icons.globe)
+    : tabIsTerm ? icons.terminal : tab?.kind === "ide" ? icons.code : icons.globe;
   const pointerId = e.pointerId;
   const startX = e.clientX, startY = e.clientY;
   let dragging = false;
@@ -129,9 +134,11 @@ function beginTabDrag(srcId, index, e) {
     const head = pane.querySelector(".pane-head");
     const headR = head ? head.getBoundingClientRect() : null;
     const headH = headR ? headR.height : 0;
-    // 탭바 위 = 순서 재배치(터미널 탭끼리). 삽입 위치 라인 표시.
+    // 탭바 위 = 순서 재배치/편입. 삽입 위치 라인 표시.
+    //  IDE/프리뷰 pane 통째 드래그도 터미널 pane 탭바에 놓으면 "탭"으로 편입(혼합 탭).
     const targetLeaf = T.findLeaf(rt.layout, paneId);
-    if (!wholePane && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom && targetLeaf && targetLeaf.kind === "terminal") {
+    const canTabbar = !wholePane || src.kind === "ide" || src.kind === "preview";
+    if (canTabbar && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom && targetLeaf && targetLeaf.kind === "terminal") {
       const tabsRegion = pane.querySelector(".pane-tabs");
       const tabEls = tabsRegion ? [...tabsRegion.querySelectorAll(".ptab")] : [];
       let ti = tabEls.length;
@@ -195,8 +202,18 @@ function beginTabDrag(srcId, index, e) {
     }
     if (dragging && drop) {
       if (wholePane) {
-        // 가운데 = 스왑, 가장자리 = 그 방향 분할 이동.
-        if (drop.paneId !== srcId) movePane(srcId, drop.paneId, drop.zone === "center" ? null : drop.zone);
+        // IDE/프리뷰 pane 을 터미널 pane 탭바/가운데에 드롭 = 그 pane 의 탭으로 편입(혼합 탭).
+        const rt2 = wsRuntime(state.activeWsId);
+        const tl = rt2 && T.findLeaf(rt2.layout, drop.paneId);
+        if (
+          (src.kind === "ide" || src.kind === "preview") && drop.paneId !== srcId &&
+          tl && tl.kind === "terminal" && (drop.zone === "tabbar" || drop.zone === "center")
+        ) {
+          joinPaneAsTab(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
+        } else if (drop.paneId !== srcId) {
+          // 가운데 = 스왑, 가장자리 = 그 방향 분할 이동.
+          movePane(srcId, drop.paneId, drop.zone === "center" || drop.zone === "tabbar" ? null : drop.zone);
+        }
       } else if (drop.zone === "tabbar") {
         if (drop.paneId === srcId) reorderTab(srcId, index, drop.index);
         else moveTabToIndex(srcId, index, drop.paneId, drop.index);
@@ -227,23 +244,30 @@ function escGhost(s) {
 
 // 탭을 새 분할 pane 으로 이동(방향). side: left/right/top/bottom.
 //  공유 풀 모델: win(풀 인덱스)은 불변 — 새 pane 스트림이 열리며 링크 생성, src 뷰에서 unview.
+//  IDE/프리뷰 혼합 탭은 그 kind 의 독립 pane 으로 승격(본문은 새 pane 에서 재생성).
 async function moveTabToNewSplit(srcId, index, targetId, side) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   if (!src || src.kind !== "terminal" || index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
+  const isT = isTermTab(tab);
   const newId = T.newPaneId();
   const ws = activeWs();
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  const newLeaf = { id: newId, kind: "terminal", tabs: [tab], active: 0 };
+  const newLeaf = isT
+    ? { id: newId, kind: "terminal", tabs: [tab], active: 0 }
+    : tab.kind === "ide"
+      ? { id: newId, kind: "ide", openPath: tab.openPath || null }
+      : { id: newId, kind: "preview", url: tab.url || null };
   const dir = side === "left" || side === "right" ? "h" : "v";
   const before = side === "left" || side === "top";
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
   rt.layout = r.tree;
   rt.focusId = newLeaf.id;
-  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab);
   if (!src.tabs.length) {
     // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 풀 kill 대상이 없다.
     S.closePane(state.activeWsId, srcId);
@@ -252,8 +276,31 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   S.emit();
   // 재조립은 기존 pane 의 헤더를 다시 그리지 않으므로, 옮겨간 탭이 소스에 남아 보이는 것 방지.
   panes.get(srcId)?.buildHead();
+  panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active]?.win;
   if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+}
+
+// IDE/프리뷰 pane 통째를 터미널 pane 의 "탭"으로 편입(혼합 탭) — src pane 은 제거.
+function joinPaneAsTab(srcId, dstId, insertIndex) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt) return;
+  const src = T.findLeaf(rt.layout, srcId);
+  const dst = T.findLeaf(rt.layout, dstId);
+  if (!src || !dst || dst.kind !== "terminal" || (src.kind !== "ide" && src.kind !== "preview")) return;
+  const tab = src.kind === "ide"
+    ? { kind: "ide", openPath: src.openPath || null, tid: newTid() }
+    : { kind: "preview", url: src.url || null, tid: newTid() };
+  const at = insertIndex == null ? dst.tabs.length : Math.max(0, Math.min(dst.tabs.length, insertIndex));
+  dst.tabs.splice(at, 0, tab);
+  dst.active = at;
+  // src pane 제거 — 터미널 없는 pane 이라 풀 영향 없음(closePane 은 터미널 win 만 kill).
+  S.closePane(state.activeWsId, srcId);
+  const rt2 = wsRuntime(state.activeWsId);
+  if (rt2) rt2.focusId = dstId;
+  panes.get(dstId)?.buildHead();
+  panes.get(dstId)?.showActiveTab?.();
+  S.emit();
 }
 
 function renderMainTop(ws) {
@@ -298,8 +345,7 @@ function renderMainTop(ws) {
 
 // 통합 추가 — 활성 pane 의 크기·비율로 배치를 자동 결정(모바일과 동일 규칙).
 //  · 절반이 최소 크기 이상인 축을 분할(둘 다 되면 긴 축): 가로=우측, 세로=아래.
-//  · 둘 다 부족하고 활성 pane 이 터미널이면 같은 영역에 탭으로 추가.
-//  · IDE/웹뷰는 공간이 부족해도 여유 있는 축으로 분할(탭 개념 없음). 새 요소 자동 포커스(splitPane).
+//  · 둘 다 부족하고 활성 pane 이 터미널 pane 이면 같은 영역에 탭으로 추가(혼합 탭 — IDE/웹뷰 포함).
 function smartAdd(kind) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt || !rt.layout) return;
@@ -314,9 +360,21 @@ function smartAdd(kind) {
   if (canH && canV) dir = r.width >= r.height ? "h" : "v";
   else if (canH) dir = "h";
   else if (canV) dir = "v";
-  if (kind === "terminal" && !dir && focusLeaf?.kind === "terminal") {
-    panes.get(focusId)?.addTab();
+  if (!dir && focusLeaf?.kind === "terminal") {
+    if (kind === "terminal") {
+      panes.get(focusId)?.addTab();
+      S.focusPane(focusId);
+      return;
+    }
+    const tab = kind === "ide"
+      ? { kind: "ide", openPath: null, tid: newTid() }
+      : { kind: "preview", url: "", tid: newTid() };
+    focusLeaf.tabs.push(tab);
+    focusLeaf.active = focusLeaf.tabs.length - 1;
+    panes.get(focusId)?.buildHead();
+    panes.get(focusId)?.showActiveTab?.();
     S.focusPane(focusId);
+    S.emit();
     return;
   }
   const opts = kind === "preview" ? { url: "" } : kind === "terminal" ? { fresh: true } : undefined;
@@ -437,21 +495,27 @@ async function moveTab(srcId, index, dstId) {
   if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
+  const isT = isTermTab(tab);
   const ws = activeWs();
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  // dst 에 이미 같은 터미널 탭이 있으면(중복 방지) 그 탭 활성화로 대체.
-  const exist = dst.tabs.findIndex((t) => t.win === tab.win);
+  // dst 에 이미 같은 탭이 있으면(중복 방지) 그 탭 활성화로 대체.
+  const exist = isT
+    ? dst.tabs.findIndex((t) => isTermTab(t) && t.win === tab.win)
+    : dst.tabs.findIndex((t) => !isTermTab(t) && !!tab.tid && t.tid === tab.tid);
   if (exist >= 0) dst.active = exist;
   else { dst.tabs.push(tab); dst.active = dst.tabs.length - 1; }
   panes.get(dstId)?.buildHead();
-  panes.get(dstId)?.activateWin(tab.win);
-  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT) panes.get(dstId)?.activateWin(tab.win);
+  panes.get(dstId)?.showActiveTab?.();
+  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab); // 본문은 dst 에서 재생성
   if (!src.tabs.length) {
     S.closePane(state.activeWsId, srcId);
     return; // closePane → emit → 재렌더
   }
   panes.get(srcId)?.buildHead();
+  panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
   if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
@@ -483,10 +547,13 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
+  const isT = isTermTab(tab);
   const ws = activeWs();
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  const exist = dst.tabs.findIndex((t) => t.win === tab.win);
+  const exist = isT
+    ? dst.tabs.findIndex((t) => isTermTab(t) && t.win === tab.win)
+    : dst.tabs.findIndex((t) => !isTermTab(t) && !!tab.tid && t.tid === tab.tid);
   if (exist >= 0) dst.active = exist;
   else {
     const at = Math.max(0, Math.min(dst.tabs.length, insertIndex));
@@ -494,10 +561,13 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
     dst.active = at;
   }
   panes.get(dstId)?.buildHead();
-  panes.get(dstId)?.activateWin(tab.win);
-  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT) panes.get(dstId)?.activateWin(tab.win);
+  panes.get(dstId)?.showActiveTab?.();
+  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab);
   if (!src.tabs.length) { S.closePane(state.activeWsId, srcId); return; }
   panes.get(srcId)?.buildHead();
+  panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
   if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
