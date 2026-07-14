@@ -247,6 +247,32 @@ async function handleTerminalRpc(method, params) {
     await runTmux(['kill-window', '-t', `${target}:${(params && params.index) | 0}`]);
     return { ok: true };
   }
+  if (method === 'terminal.move') {
+    // 탭(window)을 다른 pane 의 독립 세션으로 이전 — 모바일 탭 드래그(PC moveTab/moveTabToNewSplit 미러).
+    //  params: { cwd, index(win, src 세션 기준), srcPaneId, paneId(dst) } → { index: dst 세션에서의 새 window index }
+    //  dst 세션이 없으면(가장자리 드롭=새 pane) detached 생성 후 기본 window 0 을 -k 로 대체 → 항상 index 0.
+    const srcPaneId = params && params.srcPaneId ? String(params.srcPaneId) : '';
+    const srcSess = srcPaneId ? paneSession(session, srcPaneId) : session;
+    const win = (params && params.index) | 0;
+    if (srcSess === target) return { index: win }; // 같은 pane 이면 이동 불필요(순서는 앱 상태만)
+    let fresh = false;
+    try {
+      await runTmux(['has-session', '-t', '=' + target]); // '=' 접두사 = 정확 일치(prefix 매칭 방지)
+    } catch (_) {
+      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', target, '-c', abs]);
+      fresh = true;
+    }
+    if (fresh) {
+      await runTmux(['move-window', '-k', '-s', `${srcSess}:${win}`, '-t', `${target}:0`]);
+      await runTmux(['select-window', '-t', `${target}:0`]);
+      return { index: 0 };
+    }
+    const out = await runTmux(['list-windows', '-t', target, '-F', '#{window_index}']);
+    const next = out.split('\n').filter(Boolean).reduce((m, l) => Math.max(m, parseInt(l, 10) || 0), -1) + 1;
+    await runTmux(['move-window', '-s', `${srcSess}:${win}`, '-t', `${target}:${next}`]);
+    await runTmux(['select-window', '-t', `${target}:${next}`]);
+    return { index: next };
+  }
   throw new Error('unknown terminal method: ' + method);
 }
 

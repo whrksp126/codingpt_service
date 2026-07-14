@@ -624,6 +624,15 @@ async function terminalClose(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+// POST /api/daemon/terminal/move  (인증) body:{ cwd, index, srcPaneId, paneId } → { index }
+//  window(탭)를 srcPaneId 세션에서 paneId(dst) 세션으로 이전 — 모바일 탭 드래그.
+async function terminalMove(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.move', { cwd: b.cwd || '', index: b.index | 0, srcPaneId: b.srcPaneId || '', paneId: b.paneId || '' });
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
 
 // 데몬 오프라인 시 통일된 409.
 function mapRpcError(res, e) {
@@ -996,7 +1005,7 @@ module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
-  terminalList, terminalNew, terminalSelect, terminalClose,
+  terminalList, terminalNew, terminalSelect, terminalClose, terminalMove,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
