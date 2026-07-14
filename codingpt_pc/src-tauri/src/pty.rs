@@ -25,6 +25,10 @@ struct PtyHandle {
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
     view_session: String,
+    // 마지막으로 반영한 클라이언트 크기 — pty_resize 에서 크기가 "변할 때"만 표시 창을 따라
+    //  리사이즈(분할선 드래그/창 크기 변경이 TUI(claude 등)에 즉시 반영되게).
+    last_cols: u16,
+    last_rows: u16,
 }
 
 #[derive(Default)]
@@ -91,18 +95,24 @@ pub fn pty_open(
 
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, view_session: view.clone() },
+        PtyHandle { master: pair.master, writer, child, view_session: view.clone(), last_cols: cols, last_rows: rows },
     );
 
     // 클라이언트 attach 완료 직후 이 pane 크기로 리사이즈 — ensure_view 는 attach 전이라
     //  클라이언트가 없어 스킵됐으므로, 부팅 시에도 활성 탭이 제 크기로 보이게 한 번 보정.
+    //  단 "아무도 안 잡은(virgin)" 창에만 — 이미 어떤 기기가 잡은(manual) 창을 앱 재실행이
+    //  도로 뺏지 않는다(크기 주장은 포커스/조작 시점이 담당).
     {
         let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
         let view2 = view;
         let session2 = session.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            tmux::resize_to_client(&ctx2, &view2, &session2, win);
+            let mode = tmux::run(&ctx2, &["show-options", "-wv", "-t", &format!("={session2}:{win}"), "window-size"])
+                .unwrap_or_default();
+            if mode.trim() != "manual" {
+                tmux::resize_to_client(&ctx2, &view2, &session2, win);
+            }
         });
     }
 
@@ -139,19 +149,49 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
     Ok(())
 }
 
-// 리사이즈(xterm FitAddon → PTY). tmux window-size latest/aggressive-resize 로 화면 반영.
+// 리사이즈(xterm FitAddon → PTY). 크기가 변했으면 표시 중인 창(window)도 이 pane 크기로 —
+//  창은 manual 크기 고정이라 클라이언트만 리사이즈하면 TUI(claude 등)가 옛 크기로 그려진다
+//  (분할선 드래그/창 크기 변경의 실시간 반영. 데몬 openPtyStream 의 resize 처리와 동일 규칙).
 #[tauri::command]
 pub fn pty_resize(
+    ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
     pane_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let panes = mgr.panes.lock().unwrap();
-    if let Some(h) = panes.get(&pane_id) {
+    let mut panes = mgr.panes.lock().unwrap();
+    if let Some(h) = panes.get_mut(&pane_id) {
         h.master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("resize 실패: {e}"))?;
+        if h.last_cols != cols || h.last_rows != rows {
+            h.last_cols = cols;
+            h.last_rows = rows;
+            let view = h.view_session.clone();
+            let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
+            std::thread::spawn(move || {
+                // display-message -t <세션> 은 빈 값을 주는 경우가 있어 list-windows 로 활성 창 조회.
+                if let Ok(out) = tmux::run(&ctx2, &["list-windows", "-t", &format!("={view}"), "-F", "#{window_index} #{window_active}"]) {
+                    let idx = out
+                        .lines()
+                        .filter_map(|l| {
+                            let mut it = l.split_whitespace();
+                            match (it.next(), it.next()) {
+                                (Some(i), Some("1")) => Some(i.to_string()),
+                                _ => None,
+                            }
+                        })
+                        .next();
+                    if let Some(idx) = idx {
+                        let _ = tmux::run(
+                            &ctx2,
+                            &["resize-window", "-t", &format!("={view}:{idx}"), "-x", &cols.to_string(), "-y", &rows.to_string()],
+                        );
+                    }
+                }
+            });
+        }
     }
     Ok(())
 }

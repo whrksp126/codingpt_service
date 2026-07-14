@@ -136,10 +136,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     // 실제 표시 중인 window 인덱스 — 재접속 시 URL 의 params.win 은 서버 재시작 전 인덱스라 스테일할
     //  수 있고, ensureView 가 풀 첫 터미널로 폴백하면 인덱스가 바뀐다. 리사이즈는 반드시 이 값 기준.
     let resolvedWin = (params && Number.isInteger(params.win)) ? params.win : 0;
+    const psess = paneId ? paneSession(session, paneId, client) : '';
     if (paneId) {
       // 공유 풀 모델: 터미널 실체 = primary(풀) 세션의 window(전 기기 공유), pane = 이 기기 전용
       //  뷰 세션(link-window 로 풀 window 를 골라 표시). 배치는 기기별, 내역/내용은 전 기기 공유.
-      const psess = paneSession(session, paneId, client);
       const selWin = resolvedWin;
       try {
         await ensurePool(session, abs);
@@ -183,6 +183,11 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     //  새 창이 기본 크기(80x24)로 남는다(점선 반쪽 화면).
     const selForResize = resolvedWin;
     let firstResizeDone = !paneId;
+    // 마지막으로 반영한 클라이언트 크기 — 크기가 "변할 때"만 표시 창을 따라 리사이즈한다.
+    //  (키보드 노출/pane 분할선 드래그로 이 기기 화면이 바뀌면 창도 즉시 따라와야 TUI(claude 등)가
+    //   이 기기 크기로 다시 그린다. keepalive 는 같은 크기를 재전송하므로 여기서 걸러진다 —
+    //   안 거르면 25초마다 다른 기기가 잡아둔 크기를 도로 뺏는 플래핑이 된다.)
+    let lastW = 0, lastH = 0;
 
     pty.onData((data) => {
       try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
@@ -201,10 +206,33 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       try {
         const m = JSON.parse(str);
         if (m && m.type === 'resize' && m.cols && m.rows) {
-          try { pty.resize(m.cols | 0, m.rows | 0); } catch (_) { /* noop */ }
+          const w = m.cols | 0, h = m.rows | 0;
+          try { pty.resize(w, h); } catch (_) { /* noop */ }
           if (!firstResizeDone) {
             firstResizeDone = true;
-            runTmux(['resize-window', '-t', `=${session}:${selForResize}`, '-x', String(m.cols | 0), '-y', String(m.rows | 0)]).catch(() => {});
+            lastW = w; lastH = h;
+            // 부팅 초기화는 "아무도 안 잡은(virgin)" 창에만 — resize-window 를 거친 창은 window-size
+            //  옵션이 manual 로 남으므로, 이미 어떤 기기가 잡은 창을 백그라운드 기기의 재접속이
+            //  도로 뺏지 않는다(크기 주장은 포커스/조작 시점의 select 가 담당).
+            (async () => {
+              try {
+                const mode = (await runTmux(['show-options', '-wv', '-t', `=${session}:${selForResize}`, 'window-size']).catch(() => '')).trim();
+                if (mode !== 'manual') await runTmux(['resize-window', '-t', `=${session}:${selForResize}`, '-x', String(w), '-y', String(h)]);
+              } catch (_) { /* noop */ }
+            })();
+          } else if (psess && (w !== lastW || h !== lastH)) {
+            lastW = w; lastH = h;
+            // 이 pane 이 "현재 보고 있는" 창을 이 기기 크기로 — 탭 전환으로 창이 바뀌었을 수 있으니
+            //  뷰 세션의 활성 창을 조회해 리사이즈(창은 풀과 공유 객체라 어느 쪽으로 잡아도 동일).
+            //  주의: display-message -t <세션> 은 빈 값을 주는 경우가 있어 list-windows 로 조회한다.
+            (async () => {
+              try {
+                const out = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index} #{window_active}']);
+                const line = out.split('\n').find((l) => /\s1\s*$/.test(l));
+                const idx = line ? line.trim().split(/\s+/)[0] : '';
+                if (/^\d+$/.test(idx)) await runTmux(['resize-window', '-t', `=${psess}:${idx}`, '-x', String(w), '-y', String(h)]);
+              } catch (_) { /* 세션 소멸 등 — 다음 select 에서 보정 */ }
+            })();
           }
           return;
         }
