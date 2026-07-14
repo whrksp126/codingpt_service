@@ -174,13 +174,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     }
     console.log(`[pty] 스트림 연결 (session=${session}${paneId ? ' view=' + viewSession(session, paneId) : ''}, cwd=${abs}, ${cols}x${rows})`);
 
-    // 클라이언트 attach 완료 직후 이 pane 크기로 리사이즈 — select(ensureView)는 attach 전에 돌아
-    //  클라이언트가 없어 스킵되므로, 부팅/재연결 시에도 첫 탭부터 제 크기로 보이게 한 번 보정.
-    if (paneId) {
-      const psessForResize = paneSession(session, paneId, client);
-      const selForResize = (params && Number.isInteger(params.win)) ? params.win : 0;
-      setTimeout(() => { resizeToClient(psessForResize, session, selForResize); }, 500);
-    }
+    // 웹뷰가 fit 후 보내는 "첫" resize 크기로 표시 중인 window 를 맞춘다 — attach 직후엔 기본
+    //  80x24 라 클라이언트 크기 조회가 이르고(80x24 로 고정되는 사고), 첫 resize 가 실제 pane 크기다.
+    const selForResize = (params && Number.isInteger(params.win)) ? params.win : 0;
+    let firstResizeDone = !paneId;
 
     pty.onData((data) => {
       try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
@@ -200,6 +197,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         const m = JSON.parse(str);
         if (m && m.type === 'resize' && m.cols && m.rows) {
           try { pty.resize(m.cols | 0, m.rows | 0); } catch (_) { /* noop */ }
+          if (!firstResizeDone) {
+            firstResizeDone = true;
+            runTmux(['resize-window', '-t', `=${session}:${selForResize}`, '-x', String(m.cols | 0), '-y', String(m.rows | 0)]).catch(() => {});
+          }
           return;
         }
       } catch (_) { /* JSON 아니면 일반 입력 */ }
