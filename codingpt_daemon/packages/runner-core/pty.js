@@ -95,6 +95,11 @@ function findTmux() {
   return null;
 }
 
+// 스폰 실패 쿨다운 — node-pty 는 스폰 실패 경로에서 pty 마스터 fd 를 누수한다. 웹뷰 자동 재접속
+//  (1~10s)과 결합하면 실패가 실패를 낳는 나선(pty 고갈 고착, 실측 75분에 마스터 459개 누수)이 되므로,
+//  직전 스폰 실패 후 잠시는 스폰 시도 자체를 거부한다.
+let lastSpawnFailAt = 0;
+
 // back 지시(stream_open)에 대한 dial-back. 실패 시 throw → control 이 stream_fail 회신.
 function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   const tmux = findTmux();
@@ -148,6 +153,11 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
     }
 
+    // 쿨다운 중이면 스폰 시도 없이 거절 — 실패 스폰마다 pty 마스터가 새는 것을 차단.
+    if (Date.now() - lastSpawnFailAt < 3000) {
+      try { ws.send('\r\n\x1b[33m터미널 준비 중입니다. 잠시 후 다시 연결돼요.\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
+      return;
+    }
     let pty;
     try {
       pty = nodePty.spawn(tmux, spawnArgs, {
@@ -157,6 +167,8 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         env,
       });
     } catch (e) {
+      lastSpawnFailAt = Date.now();
+      console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
       try { ws.send(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
       return;
     }
