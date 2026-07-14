@@ -313,13 +313,40 @@ export async function createLocalWorkspace() {
   }
 }
 
+// 이 PC 설치본의 안정 기기 키 — 세션 매니페스트에 발신 기기를 표시(다른 기기가 pull 시 win 리셋 판단).
+const DEVICE_KEY_LS = "cpt.deviceKey";
+function deviceKey() {
+  let k = "";
+  try { k = localStorage.getItem(DEVICE_KEY_LS) || ""; } catch (_) {}
+  if (!k) {
+    k = "pc-" + Math.random().toString(36).slice(2, 12);
+    try { localStorage.setItem(DEVICE_KEY_LS, k); } catch (_) {}
+  }
+  return k;
+}
+
+// 터미널 탭의 win 을 전부 'new' 로 리셋(제목/배치 유지) — 다른 기기(또는 구 아키텍처)에서 온
+//  레이아웃의 win 은 이 기기의 pane 세션에 존재하지 않으므로, 새 셸로 다시 확보한다.
+function resetTerminalWins(node) {
+  if (!node) return;
+  if (T.isLeaf(node)) {
+    if (node.kind === "terminal" && Array.isArray(node.tabs)) {
+      node.tabs = node.tabs.map((t) => ({ win: "new", title: (t && t.title) || "" }));
+    }
+    return;
+  }
+  resetTerminalWins(node.first);
+  resetTerminalWins(node.second);
+}
+
 // ── 영속화(pc-ui.json) ──
 function serialize() {
   const ws = {};
   for (const [id, w] of Object.entries(state.ws)) {
     ws[id] = { layout: w.layout, focusId: w.focusId };
   }
-  return { activeWsId: state.activeWsId, ws, wsPrefs };
+  // v: 2 = pane 독립 세션 아키텍처 이후 저장본(복원 시 win 재사용 가능 표식).
+  return { v: 2, activeWsId: state.activeWsId, ws, wsPrefs };
 }
 let saveTimer = null;
 function schedulePersist() {
@@ -359,7 +386,8 @@ function leafSurfaces(node, acc = []) {
 function buildSession(wsId) {
   const w = state.ws[wsId];
   if (!w || !w.layout) return null;
-  return { version: 1, surfaces: leafSurfaces(w.layout), layout: w.layout, focusId: w.focusId || null };
+  // device = 발신 기기 키. pull 하는 쪽이 "내가 푸시한 것"인지 판단해 win 재사용/리셋을 가른다.
+  return { version: 1, device: deviceKey(), surfaces: leafSurfaces(w.layout), layout: w.layout, focusId: w.focusId || null };
 }
 
 function scheduleSessionPush() {
@@ -386,6 +414,9 @@ export async function pullSession(wsId) {
     const remote = r && (r.session || (r.data && r.data.session));
     if (!remote || !remote.layout) return;
     const layout = migrateTree(remote.layout);
+    // 다른 기기가 푸시한 매니페스트(또는 구버전 무표식)면 win 리셋 — 그 기기의 세션 window 는
+    //  이 기기(pane 독립 세션)에 없다. 배치/제목만 이어받고 셸은 새로 확보('new').
+    if (!remote.device || remote.device !== deviceKey()) resetTerminalWins(layout);
     T.bumpSeq(T.leafIds(layout));
     state.ws[wsId] = { layout, focusId: remote.focusId || T.firstLeafId(layout), surfaces: [], ports: [] };
     _lastPushed[wsId] = JSON.stringify(buildSession(wsId)); // 방금 채택 → 즉시 재푸시 방지
@@ -421,6 +452,8 @@ export async function restorePersisted() {
       for (const [id, w] of Object.entries(saved.ws)) {
         if (w && w.layout) {
           const layout = migrateTree(w.layout);
+          // v2 이전 저장본 — win 이 구 아키텍처(primary 공유 세션) 기준이라 무효 → 새 셸로 리셋.
+          if (saved.v !== 2) resetTerminalWins(layout);
           state.ws[id] = { layout, focusId: w.focusId || T.firstLeafId(layout), surfaces: [], ports: [] };
           allIds.push(...T.leafIds(layout));
         }

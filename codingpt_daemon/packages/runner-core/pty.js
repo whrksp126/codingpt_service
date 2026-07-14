@@ -69,8 +69,13 @@ function viewSession(primary, paneId) {
 // pane 별 "독립" 세션명(현행). primary 와 window 를 공유하지 않는다 → current-window 경쟁 원천 소멸.
 //  각 pane = 자기 세션 = 자기 셸(들). 탭 = 이 세션 안의 window. select 는 단일 세션·단일 클라이언트라 확실히 붙는다.
 //  (대가: PC↔모바일 터미널 라이브미러는 없어진다 — 어차피 공유모델서도 신뢰 못했음. 파일은 여전히 공유.)
-function paneSession(primary, paneId) {
-  return primary + '--p-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
+//  client(기기 키)가 있으면 세션을 기기별로도 분리('--c-') — 여러 기기가 같은 워크스페이스 레이아웃을
+//  이어받아 같은 paneId 로 attach 하면 tmux 가 화면 크기를 클라이언트끼리 공유해(작은 기기 기준 점선
+//  여백) 어느 기기도 풀사이즈를 못 쓴다 → 기기마다 자기 세션 = 자기 크기.
+function paneSession(primary, paneId, client) {
+  const base = primary + '--p-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
+  const c = client ? String(client).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
+  return c ? base + '--c-' + c : base;
 }
 
 let tmuxPathCache = null;
@@ -119,10 +124,13 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     // pane 별 grouped view 세션명(모바일 다중 터미널 pane 이 각자 다른 window 를 동시에 보게).
     const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
 
+    // 기기 키 — pane 세션을 기기별로 분리(기기마다 자기 화면 크기로 풀 사용).
+    const client = params && params.client ? String(params.client) : '';
+
     let spawnArgs;
     if (paneId) {
       // 이 pane 전용 "독립" 세션에 attach. primary 와 window 공유 안 함 → 다른 pane 과 절대 겹치지 않음.
-      const psess = paneSession(session, paneId);
+      const psess = paneSession(session, paneId, client);
       // 이 pane 이 표시할 window(탭). 없으면 세션의 첫 window(0). 독립 세션이라 attach 전 select 가 확실히 붙는다.
       const selWin = (params && Number.isInteger(params.win)) ? params.win : 0;
       // 세션 보장(detached create-or-noop) — 없으면 abs 에서 첫 셸(window 0) 생성.
@@ -136,7 +144,9 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       // 목표 탭 window 로 미리 전환(존재할 때만) — 독립 세션이라 attach 후에도 유지된다.
       try { execFileSync(tmux, ['-L', TMUX_SOCKET, 'select-window', '-t', `${psess}:${selWin}`], { env, stdio: 'ignore' }); } catch (_) { /* 없는 window 무시 */ }
       // -u: UTF-8 출력 강제. -A: 있으면 attach(재연결 시 current-window 유지).
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-s', psess, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+      // -D(+-A): 다른 클라이언트 detach — 죽은 앱/이전 스트림의 스테일 클라이언트가 남아
+      //  화면 크기를 물고 늘어지는 것(점선 여백)을 자가치유.
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-D', '-s', psess, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
@@ -212,8 +222,10 @@ function runTmux(args) {
 async function handleTerminalRpc(method, params) {
   const { session, abs } = sessionForCwd(params && params.cwd);
   // paneId 있으면 그 pane 의 독립 세션을 대상으로(탭=이 세션의 window). 없으면 레거시 공유 세션.
+  //  client(기기 키)까지 있으면 기기별 세션(--c-) — 스트림(openPtyStream)과 같은 네이밍이어야 한다.
   const paneId = params && params.paneId ? String(params.paneId) : '';
-  const target = paneId ? paneSession(session, paneId) : session;
+  const client = params && params.client ? String(params.client) : '';
+  const target = paneId ? paneSession(session, paneId, client) : session;
   if (method === 'terminal.list') {
     let out;
     try {
@@ -252,7 +264,7 @@ async function handleTerminalRpc(method, params) {
     //  params: { cwd, index(win, src 세션 기준), srcPaneId, paneId(dst) } → { index: dst 세션에서의 새 window index }
     //  dst 세션이 없으면(가장자리 드롭=새 pane) detached 생성 후 기본 window 0 을 -k 로 대체 → 항상 index 0.
     const srcPaneId = params && params.srcPaneId ? String(params.srcPaneId) : '';
-    const srcSess = srcPaneId ? paneSession(session, srcPaneId) : session;
+    const srcSess = srcPaneId ? paneSession(session, srcPaneId, client) : session;
     const win = (params && params.index) | 0;
     if (srcSess === target) return { index: win }; // 같은 pane 이면 이동 불필요(순서는 앱 상태만)
     let fresh = false;

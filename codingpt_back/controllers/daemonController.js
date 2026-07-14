@@ -588,7 +588,9 @@ async function startTerminal(req, res) {
     // win — 이 pane 이 표시할 tmux window(정수). grouped view attach 시 이 window 로 select(경쟁 방지).
     const winRaw = req.body && req.body.win;
     const win = Number.isInteger(winRaw) ? winRaw : (typeof winRaw === 'string' && /^\d+$/.test(winRaw) ? parseInt(winRaw, 10) : undefined);
-    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win);
+    // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
+    const client = (req.body && typeof req.body.client === 'string') ? req.body.client : '';
+    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -606,21 +608,21 @@ async function terminalList(req, res) {
 // POST /api/daemon/terminal/new  (인증) body:{ cwd } → { index }
 async function terminalNew(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '', paneId: (req.body && req.body.paneId) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '', paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/terminal/select  (인증) body:{ cwd, index } → { ok }
 async function terminalSelect(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/terminal/close  (인증) body:{ cwd, index } → { ok }
 async function terminalClose(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -629,7 +631,7 @@ async function terminalClose(req, res) {
 async function terminalMove(req, res) {
   try {
     const b = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.move', { cwd: b.cwd || '', index: b.index | 0, srcPaneId: b.srcPaneId || '', paneId: b.paneId || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.move', { cwd: b.cwd || '', index: b.index | 0, srcPaneId: b.srcPaneId || '', paneId: b.paneId || '', client: b.client || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
