@@ -163,7 +163,7 @@ export function isLocal(w) {
 // 워크스페이스 런타임 보장(레이아웃 없으면 단일 터미널로 초기화).
 export function ensureRuntime(id) {
   if (!state.ws[id]) {
-    state.ws[id] = { layout: T.leaf("terminal", { win: 0 }), focusId: null, surfaces: [], ports: [] };
+    state.ws[id] = { layout: T.leaf("terminal", { win: 0, title: "터미널 1" }), focusId: null, surfaces: [], ports: [] };
     state.ws[id].focusId = T.firstLeafId(state.ws[id].layout);
   }
   return state.ws[id];
@@ -188,8 +188,8 @@ export function setView(v) {
 export function splitPane(paneId, dir, kind, opts) {
   const w = wsRuntime(state.activeWsId);
   if (!w || !paneId) return;
-  // 새 터미널 pane 은 새 서피스(tmux window)를 할당(win:'new') → 각 pane 이 서로 다른 터미널.
-  const node = kind === "preview" || kind === "ide" ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new" });
+  // 새 터미널 pane = 완전 독립 새 터미널(win:'new' → pane 독립 세션에 새 window). 표시명은 생성 시 고정.
+  const node = kind === "preview" || kind === "ide" ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new", title: T.nextTerminalTitle(w.layout) });
   const r = T.split(w.layout, paneId, dir, node);
   w.layout = r.tree;
   w.focusId = r.added.id;
@@ -210,7 +210,7 @@ export function closePane(wsId, paneId) {
   const leaf = T.findLeaf(w.layout, paneId);
   if (leaf && leaf.kind === "terminal" && isLocal(ws)) {
     for (const t of leaf.tabs || []) {
-      if (typeof t.win === "number") api.killWindow(ws.localPath || "", t.win).catch(() => {});
+      if (typeof t.win === "number") api.killWindow(ws.localPath || "", t.win, paneId).catch(() => {});
     }
   }
   const r = T.closeLeaf(w.layout, paneId);
@@ -218,7 +218,7 @@ export function closePane(wsId, paneId) {
   w.focusId = r.focusId || (w.layout ? T.firstLeafId(w.layout) : null);
   if (!w.layout) {
     // 마지막 pane 을 닫으면 완전히 새 터미널(새 tmux window)로 — 이전 작업 안 보임.
-    w.layout = T.leaf("terminal", { win: "new" });
+    w.layout = T.leaf("terminal", { win: "new", title: "터미널 1" });
     w.focusId = T.firstLeafId(w.layout);
   }
   emit();

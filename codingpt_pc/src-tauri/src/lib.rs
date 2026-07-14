@@ -446,6 +446,7 @@ pub fn run() {
             tmux::tmux_list_windows,
             tmux::tmux_new_window,
             tmux::tmux_kill_window,
+            tmux::tmux_move_window,
             tmux::tmux_git_branch,
             tmux::tmux_listen_ports,
             // 브리지(워크스페이스/영속화/알림)

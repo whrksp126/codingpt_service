@@ -1,13 +1,13 @@
 // PTY 스트림 — cmux식 로컬 터미널 pane. portable-pty 로 번들 tmux 에 attach 해 xterm(webview)과 브리지.
 //
-//  모델:
-//   · 워크스페이스 = tmux primary 세션(폰과 공유). 서피스 = tmux window.
-//   · Mac pane = primary 와 grouped 된 view 세션(window 공유, current-window/size 독립).
-//     → 여러 pane 이 서로 다른 window 를 동시에 보여주면서 폰과 세션/서피스를 공유(미러).
-//   · pane 닫기 = view 세션만 kill(primary/window 는 보존). 서피스 닫기 = window kill(tmux.rs).
+//  모델(모바일 데몬과 동일 — pane 당 "독립" tmux 세션):
+//   · pane = 자기 세션 "<primary>--p-<paneId>", 탭 = 그 세션의 window.
+//   · grouped view(--view--) 는 폐기 — current-window 가 attach/동시성에 취약해 여러 pane 이
+//     같은 window 를 비추는 복제가 발생했다(모바일과 같은 근본 원인). 독립 세션은 경쟁 자체가 없다.
+//   · pane 스트림 닫기 = attach 클라이언트만 종료(세션/셸은 tmux 서버에 생존 → 재실행 시 복원).
+//     터미널 완전 삭제 = window kill(tmux.rs, 마지막 window kill 시 세션 자동 소멸).
 //
 //  와이어: 출력=raw 바이트(base64 로 emit "pty://data"), 입력=UTF-8 문자열(pty_write), 리사이즈=pty_resize.
-//  view 세션명 = "<primary>--view--<paneId>" (sanitizer 는 '--' 를 못 만들므로 워크스페이스명과 충돌 없음).
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -44,15 +44,7 @@ struct ExitEvent {
     pane_id: String,
 }
 
-fn view_name(session: &str, pane_id: &str) -> String {
-    let safe: String = pane_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
-        .collect();
-    format!("{session}--view--{safe}")
-}
-
-// pane 열기: primary 보장 → grouped view 생성(재사용) → 지정 window 선택 → PTY attach + reader 스레드.
+// pane 열기: pane 독립 세션 보장 → 지정 window 선택 → PTY attach + reader 스레드.
 #[tauri::command]
 pub fn pty_open(
     app: AppHandle,
@@ -69,17 +61,9 @@ pub fn pty_open(
     }
 
     let (session, abs) = tmux::session_for(&local_path);
-    tmux::ensure_session(&ctx, &session, &abs)?;
-
-    let view = view_name(&session, &pane_id);
-    if tmux::run(&ctx, &["has-session", "-t", &view]).is_err() {
-        let cols_s = cols.max(2).to_string();
-        let rows_s = rows.max(2).to_string();
-        tmux::run(
-            &ctx,
-            &["new-session", "-d", "-t", &session, "-s", &view, "-x", &cols_s, "-y", &rows_s],
-        )?;
-    }
+    let view = tmux::pane_session(&session, &pane_id);
+    tmux::ensure_session(&ctx, &view, &abs)?;
+    // 독립 세션이라 attach 전 select 가 확실히 유지된다(grouped 의 current-window 경쟁 없음).
     if win_index >= 0 {
         let _ = tmux::run(&ctx, &["select-window", "-t", &format!("{view}:{win_index}")]);
     }
@@ -159,16 +143,17 @@ pub fn pty_resize(
     Ok(())
 }
 
-// pane 닫기: PTY child kill + grouped view 세션만 kill(공유 primary/window 보존).
+// pane 스트림 닫기: attach 클라이언트(PTY child)만 종료 — 세션/셸은 tmux 서버에 생존.
+//  (워크스페이스 전환/재렌더 dispose 에서 호출되므로 여기서 세션을 kill 하면 안 된다.
+//   터미널 완전 삭제는 탭 닫기/pane 닫기의 kill_window 가 담당 — 마지막 window kill 시 세션 자동 소멸.)
 #[tauri::command]
-pub fn pty_close(ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+pub fn pty_close(_ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
     if let Some(mut h) = mgr.panes.lock().unwrap().remove(&pane_id) {
         let _ = h.child.kill();
-        let _ = tmux::run(&ctx, &["kill-session", "-t", &h.view_session]);
     }
 }
 
-// 이 pane 이 보여줄 서피스(window) 전환 — 그룹 세션은 current-window 독립.
+// 이 pane 이 보여줄 window(탭) 전환 — 독립 세션·단일 클라이언트라 확실히 붙는다.
 #[tauri::command]
 pub fn pty_select_window(
     ctx: State<TmuxCtx>,
@@ -183,7 +168,8 @@ pub fn pty_select_window(
     Ok(())
 }
 
-// 앱 종료/시작 시 고아 grouped view 세션 정리("--view--" 표식 + grouped 인 것만).
+// 앱 시작/종료 시 레거시 grouped view 세션 정리("--view--" 만 — 독립 pane 세션(--p-)은
+//  실제 셸이 사는 곳이라 절대 건드리지 않는다: 앱 재실행 시 레이아웃 복원이 재attach 한다).
 pub fn sweep_views(ctx: &TmuxCtx) {
     let out = match tmux::run(
         ctx,

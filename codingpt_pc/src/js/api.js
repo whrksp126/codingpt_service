@@ -50,8 +50,9 @@ export const api = {
 
   // ── tmux 제어(서피스/브랜치/포트) ──
   listWindows: (localPath) => invoke("tmux_list_windows", { localPath }),
-  newWindow: (localPath) => invoke("tmux_new_window", { localPath }),
-  killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
+  newWindow: (localPath, paneId = "") => invoke("tmux_new_window", { localPath, paneId }),
+  killWindow: (localPath, index, paneId = "") => invoke("tmux_kill_window", { localPath, index, paneId }),
+  moveWindow: (localPath, index, srcPaneId, dstPaneId) => invoke("tmux_move_window", { localPath, index, srcPaneId, dstPaneId }),
   gitBranch: (localPath) => invoke("tmux_git_branch", { localPath }),
   listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
 

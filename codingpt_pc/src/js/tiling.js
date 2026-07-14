@@ -55,6 +55,22 @@ export function leafIds(node) {
   return ids;
 }
 
+// 다음 터미널 표시명("터미널 N") — 생성 시 고정 부여(pane 간 이동/새 분할에도 유지).
+//  win(tmux window index)에서 파생하던 라벨은 독립 세션 구조에서 이동 시 번호가 재부여돼 이름이
+//  바뀌어 보였다 → 사용중 번호(제목 "터미널 N" + 무제목 탭의 win 레거시 라벨) 최대값 +1.
+export function nextTerminalTitle(root) {
+  let max = 0;
+  eachLeaf(root, (l) => {
+    if (l.kind !== "terminal") return;
+    for (const t of l.tabs || []) {
+      const m = /^터미널 (\d+)$/.exec(t.title || "");
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+      else if (!t.title && typeof t.win === "number") max = Math.max(max, t.win);
+    }
+  });
+  return "터미널 " + (max + 1);
+}
+
 // leaf 를 branch 로 치환(분할). before=true 면 newLeaf 를 first(좌/상)에 둔다.
 //  반환: { tree, added } (새 트리 루트 + 추가된 leaf).
 export function split(root, targetId, dir, newLeafNode, before) {

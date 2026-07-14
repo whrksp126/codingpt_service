@@ -94,6 +94,17 @@ pub fn session_for(local_path: &str) -> (String, PathBuf) {
     (format!("cpt-{safe}"), abs)
 }
 
+// pane 별 "독립" 세션명 — 데몬 pty.js paneSession 과 동일 규칙("<primary>--p-<paneId>").
+//  grouped view(--view--)의 current-window 불안정(여러 pane 이 같은 window 를 비추는 복제)을
+//  원천 제거: pane = 자기 세션, 탭 = 그 세션의 window. 모바일 데몬과 같은 아키텍처.
+pub fn pane_session(session: &str, pane_id: &str) -> String {
+    let safe: String = pane_id
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
+        .collect();
+    format!("{session}--p-{safe}")
+}
+
 // 전용 소켓으로 tmux 실행(제어 명령). 자식 env 의 TMUX 제거(데몬이 cmux 안에서 돌 수 있음).
 pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(&ctx.tmux);
@@ -160,15 +171,61 @@ pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
         .collect()
 }
 
-// 새 서피스(window) 생성 → 인덱스 반환. 세션 없으면 생성 후 재시도.
+// 새 서피스(window) 생성 → 인덱스 반환. 세션이 없으면 detached 생성(그 첫 window 가 곧 새 터미널 —
+//  ensure 후 new-window 를 하면 안 쓰는 window 0 셸이 고아로 남는다). 데몬 terminal.new 미러.
 pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<i64, String> {
-    ensure_session(ctx, session, abs)?;
     let abs_s = abs.to_string_lossy().to_string();
-    let out = run(
+    // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 select 가 담당).
+    if let Ok(out) = run(
         ctx,
-        &["new-window", "-t", session, "-c", &abs_s, "-P", "-F", "#{window_index}"],
-    )?;
+        &["new-window", "-d", "-t", session, "-c", &abs_s, "-P", "-F", "#{window_index}"],
+    ) {
+        return Ok(out.trim().parse().unwrap_or(0));
+    }
+    let mut args: Vec<String> = Vec::new();
+    if let Some(conf) = &ctx.conf {
+        args.push("-f".into());
+        args.push(conf.to_string_lossy().to_string());
+    }
+    args.extend(
+        ["new-session", "-d", "-s", session, "-c", &abs_s, "-P", "-F", "#{window_index}"]
+            .map(String::from),
+    );
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = run(ctx, &refs)?;
     Ok(out.trim().parse().unwrap_or(0))
+}
+
+// 탭(window)을 다른 pane 세션으로 이전(드래그 이동/새 분할) — 데몬 terminal.move 미러.
+//  dst 세션이 없으면(가장자리 드롭=새 pane) 생성 후 기본 window 0 을 -k 로 대체 → 항상 0 반환.
+pub fn move_window(
+    ctx: &TmuxCtx,
+    src_session: &str,
+    win: i64,
+    dst_session: &str,
+    abs: &PathBuf,
+) -> Result<i64, String> {
+    if src_session == dst_session {
+        return Ok(win);
+    }
+    // '=' 접두사 = 세션명 정확 일치(prefix 매칭 방지).
+    let fresh = run(ctx, &["has-session", "-t", &format!("={dst_session}")]).is_err();
+    if fresh {
+        ensure_session(ctx, dst_session, abs)?;
+        run(
+            ctx,
+            &["move-window", "-k", "-s", &format!("{src_session}:{win}"), "-t", &format!("{dst_session}:0")],
+        )?;
+        let _ = run(ctx, &["select-window", "-t", &format!("{dst_session}:0")]);
+        return Ok(0);
+    }
+    let next = list_windows(ctx, dst_session).iter().map(|w| w.index).max().unwrap_or(-1) + 1;
+    run(
+        ctx,
+        &["move-window", "-s", &format!("{src_session}:{win}"), "-t", &format!("{dst_session}:{next}")],
+    )?;
+    let _ = run(ctx, &["select-window", "-t", &format!("{dst_session}:{next}")]);
+    Ok(next)
 }
 
 // 서피스(window) 종료.
@@ -296,9 +353,14 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Vec<
 }
 
 #[tauri::command]
-pub fn tmux_new_window(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<i64, String> {
+pub fn tmux_new_window(
+    ctx: tauri::State<TmuxCtx>,
+    local_path: String,
+    pane_id: String,
+) -> Result<i64, String> {
     let (session, abs) = session_for(&local_path);
-    new_window(&ctx, &session, &abs)
+    let target = if pane_id.is_empty() { session } else { pane_session(&session, &pane_id) };
+    new_window(&ctx, &target, &abs)
 }
 
 #[tauri::command]
@@ -306,9 +368,25 @@ pub fn tmux_kill_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
     index: i64,
+    pane_id: String,
 ) -> Result<(), String> {
     let (session, _abs) = session_for(&local_path);
-    kill_window(&ctx, &session, index)
+    let target = if pane_id.is_empty() { session } else { pane_session(&session, &pane_id) };
+    kill_window(&ctx, &target, index)
+}
+
+#[tauri::command]
+pub fn tmux_move_window(
+    ctx: tauri::State<TmuxCtx>,
+    local_path: String,
+    index: i64,
+    src_pane_id: String,
+    dst_pane_id: String,
+) -> Result<i64, String> {
+    let (session, abs) = session_for(&local_path);
+    let src = if src_pane_id.is_empty() { session.clone() } else { pane_session(&session, &src_pane_id) };
+    let dst = pane_session(&session, &dst_pane_id);
+    move_window(&ctx, &src, index, &dst, &abs)
 }
 
 #[tauri::command]

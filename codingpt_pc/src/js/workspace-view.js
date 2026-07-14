@@ -49,6 +49,7 @@ function paneCtx(ws) {
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),
     paneDropZone: (x, y) => paneDropZone(x, y),
     onFileSplit: (filePath, srcPaneId, targetPaneId, zone) => openFileInPane(filePath, srcPaneId, targetPaneId, zone),
+    nextTermTitle: () => T.nextTerminalTitle(wsRuntime(state.activeWsId)?.layout || null),
     persist: () => S.emit(),
   };
 }
@@ -207,14 +208,22 @@ function escGhost(s) {
 }
 
 // 탭을 새 분할 pane 으로 이동(방향). side: left/right/top/bottom.
-function moveTabToNewSplit(srcId, index, targetId, side) {
+//  독립 pane 세션: tmux window 를 새 pane 세션으로 먼저 이전(move-window) 후 트리 갱신.
+async function moveTabToNewSplit(srcId, index, targetId, side) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   if (!src || src.kind !== "terminal" || index < 0 || index >= src.tabs.length) return;
-  const [tab] = src.tabs.splice(index, 1);
+  const tab = src.tabs[index];
+  const newId = T.newPaneId();
+  const ws = activeWs();
+  if (isLocal(ws) && typeof tab.win === "number") {
+    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, newId); }
+    catch (_) { return; } // 이동 실패 → 원상 유지
+  }
+  src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  const newLeaf = { id: T.newPaneId(), kind: "terminal", tabs: [tab], active: 0 };
+  const newLeaf = { id: newId, kind: "terminal", tabs: [tab], active: 0 };
   const dir = side === "left" || side === "right" ? "h" : "v";
   const before = side === "left" || side === "top";
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
@@ -251,12 +260,6 @@ function renderMainTop(ws) {
   name.className = "mt-name";
   name.textContent = ws?.name || "워크스페이스";
   mainTop.append(fold, name);
-  if (ws && ws.localPath) {
-    const path = document.createElement("span");
-    path.className = "mt-path";
-    path.textContent = "~/" + ws.localPath;
-    mainTop.appendChild(path);
-  }
 }
 
 export function updateWorkspaceView() {
@@ -364,14 +367,21 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
 }
 
 // 탭을 다른 pane 으로 이동(드롭). src 가 비면 pane 닫기.
-function moveTab(srcId, index, dstId) {
+//  독립 pane 세션: tmux window 를 dst pane 세션으로 먼저 이전(move-window) 후 배열 갱신.
+async function moveTab(srcId, index, dstId) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   const dst = T.findLeaf(rt.layout, dstId);
   if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
   if (index < 0 || index >= src.tabs.length) return;
-  const [tab] = src.tabs.splice(index, 1);
+  const tab = src.tabs[index];
+  const ws = activeWs();
+  if (isLocal(ws) && typeof tab.win === "number") {
+    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, dstId); }
+    catch (_) { return; }
+  }
+  src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
   dst.tabs.push(tab);
   dst.active = dst.tabs.length - 1;
@@ -404,14 +414,21 @@ function reorderTab(paneId, from, insertIndex) {
 }
 
 // 다른 터미널 pane 의 특정 위치로 탭 이동.
-function moveTabToIndex(srcId, index, dstId, insertIndex) {
+//  독립 pane 세션: tmux window 를 dst pane 세션으로 먼저 이전(move-window) 후 배열 갱신.
+async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   const dst = T.findLeaf(rt.layout, dstId);
   if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
   if (index < 0 || index >= src.tabs.length) return;
-  const [tab] = src.tabs.splice(index, 1);
+  const tab = src.tabs[index];
+  const ws = activeWs();
+  if (isLocal(ws) && typeof tab.win === "number") {
+    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, dstId); }
+    catch (_) { return; }
+  }
+  src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
   const at = Math.max(0, Math.min(dst.tabs.length, insertIndex));
   dst.tabs.splice(at, 0, tab);

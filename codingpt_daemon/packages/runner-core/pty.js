@@ -233,8 +233,8 @@ async function handleTerminalRpc(method, params) {
       const out = await runTmux(['new-window', '-d', '-t', target, '-c', abs, '-P', '-F', '#{window_index}']);
       return { index: parseInt(out.trim(), 10) || 0 };
     } catch (_) {
-      // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach).
-      const out = await runTmux(['-f', TMUX_CONF, 'new-session', '-d', '-s', target, '-c', abs, '-P', '-F', '#{window_index}']);
+      // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach). conf 없으면 -f 생략.
+      const out = await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', target, '-c', abs, '-P', '-F', '#{window_index}']);
       return { index: parseInt(out.trim(), 10) || 0 };
     }
   }

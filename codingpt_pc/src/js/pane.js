@@ -298,7 +298,7 @@ export class PaneView {
   async _ensureWin(tab) {
     if (this.ctx.isLocal && (tab.win === "new" || tab.win == null)) {
       try {
-        tab.win = await api.newWindow(this.ctx.localPath || "");
+        tab.win = await api.newWindow(this.ctx.localPath || "", this.id);
       } catch (_) {
         tab.win = 0;
       }
@@ -310,7 +310,8 @@ export class PaneView {
   // ── 탭 조작 ──
   async addTab() {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
-    const tab = { win: "new", title: "" };
+    // 표시명은 생성 시 고정("터미널 N") — win 파생 라벨은 pane 간 이동 시 번호가 바뀌어 보인다.
+    const tab = { win: "new", title: this.ctx.nextTermTitle?.() || "" };
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();
@@ -335,7 +336,7 @@ export class PaneView {
   }
   closeTab(i) {
     const tab = this.node.tabs[i];
-    if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
+    if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win, this.id).catch(() => {});
     this.node.tabs.splice(i, 1);
     if (!this.node.tabs.length) {
       this.ctx.onClosePane?.(this.id);
