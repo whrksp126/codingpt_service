@@ -726,7 +726,14 @@ export class PaneView {
   // ── 활성 영역 검색(⌘F/Ctrl+F) — 터미널은 스크롤백, IDE 는 열린 파일 내부 ──
   openSearch() {
     if (this.node.kind === "ide") { this.ide?.openSearch(); return; }
-    if (this.node.kind === "terminal") { this._openTermSearch(); return; }
+    if (this.node.kind === "terminal") {
+      // 혼합 탭: 활성 탭이 IDE/프리뷰면 그쪽으로 — IDE 는 파일 내 찾기(VS Code 동작).
+      const at = this.node.tabs?.[this.node.active];
+      if (at && at.kind === "ide") { this._mixed.get(at.tid)?.ide?.openSearch(); return; }
+      if (at && at.kind === "preview") return; // 프리뷰는 페이지 검색 미지원
+      this._openTermSearch();
+      return;
+    }
   }
 
   _openTermSearch() {
