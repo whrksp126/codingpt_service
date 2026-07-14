@@ -90,8 +90,20 @@ pub fn pty_open(
 
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, view_session: view },
+        PtyHandle { master: pair.master, writer, child, view_session: view.clone() },
     );
+
+    // 클라이언트 attach 완료 직후 이 pane 크기로 리사이즈 — ensure_view 는 attach 전이라
+    //  클라이언트가 없어 스킵됐으므로, 부팅 시에도 활성 탭이 제 크기로 보이게 한 번 보정.
+    {
+        let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
+        let view2 = view;
+        let session2 = session.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            tmux::resize_to_client(&ctx2, &view2, &session2, win);
+        });
+    }
 
     // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리.
     let app2 = app.clone();

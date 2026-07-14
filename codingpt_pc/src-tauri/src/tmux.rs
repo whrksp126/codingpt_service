@@ -205,7 +205,7 @@ pub struct NewWindowInfo {
 
 // pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
 //  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(view) 이동으로만 바뀐다.
-fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
+pub fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
     let out = match run(ctx, &["list-clients", "-t", &format!("={psess}"), "-F", "#{client_width} #{client_height}"]) {
         Ok(o) => o,
         Err(_) => return,
