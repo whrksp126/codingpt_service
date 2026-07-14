@@ -441,12 +441,12 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_close,
-            pty::pty_select_window,
-            // tmux 제어(서피스/브랜치/포트)
+            // tmux 제어(풀/뷰/브랜치/포트)
             tmux::tmux_list_windows,
             tmux::tmux_new_window,
             tmux::tmux_kill_window,
-            tmux::tmux_move_window,
+            tmux::tmux_view_window,
+            tmux::tmux_unview_window,
             tmux::tmux_git_branch,
             tmux::tmux_listen_ports,
             // 브리지(워크스페이스/영속화/알림)

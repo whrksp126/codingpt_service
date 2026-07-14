@@ -171,13 +171,7 @@ export class PaneView {
       } catch (_) {}
     }
     this.term.onData((d) => this._write(d));
-    this.term.onTitleChange?.((t) => {
-      const tab = this.node.tabs[this.node.active];
-      if (tab) {
-        tab.title = t;
-        this._refreshTabLabels();
-      }
-    });
+    // 탭 제목의 원천 = 풀 window 이름("터미널 N", 전 기기 공유) — xterm 타이틀 이벤트로 덮지 않는다.
     this._registerOsc(9, (data) => this.ctx.onNotify?.(this.id, "", data));
     this._registerOsc(777, (data) => {
       const parts = String(data).split(";");
@@ -298,7 +292,10 @@ export class PaneView {
   async _ensureWin(tab) {
     if (this.ctx.isLocal && (tab.win === "new" || tab.win == null)) {
       try {
-        tab.win = await api.newWindow(this.ctx.localPath || "", this.id);
+        // 풀에 새 터미널 생성(전 기기에 나타남) — 이름("터미널 N")은 풀 기준으로 부여.
+        const r = await api.newWindow(this.ctx.localPath || "");
+        tab.win = r.index;
+        if (r.name) tab.title = r.name;
       } catch (_) {
         tab.win = 0;
       }
@@ -307,18 +304,23 @@ export class PaneView {
     return tab.win;
   }
 
+  // 이 pane 뷰에 풀 window 링크 + 선택(탭 전환/드롭 이동 공용).
+  _view(win) {
+    if (typeof win === "number") api.viewWindow(this.ctx.localPath || "", this.id, win).catch(() => {});
+  }
+
   // ── 탭 조작 ──
   async addTab() {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
-    // 표시명은 생성 시 고정("터미널 N") — win 파생 라벨은 pane 간 이동 시 번호가 바뀌어 보인다.
-    const tab = { win: "new", title: this.ctx.nextTermTitle?.() || "" };
+    const tab = { win: "new", title: "" };
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();
     const win = await this._ensureWin(tab);
     // await 사이 탭이 다른 pane 으로 드래그돼 사라졌을 수 있음 → 아직 이 pane 소속일 때만 반영.
     if (!this.node.tabs.includes(tab)) return;
-    api.ptySelectWindow(this.id, win).catch(() => {});
+    this.buildHead(); // 풀이 부여한 이름 반영
+    this._view(win);
     this.ctx.persist?.();
     this.focus();
   }
@@ -330,13 +332,14 @@ export class PaneView {
     this.node.active = i;
     this.buildHead();
     const win = await this._ensureWin(this.node.tabs[i]);
-    api.ptySelectWindow(this.id, win).catch(() => {});
+    this._view(win);
     this.ctx.persist?.();
     this.focus();
   }
   closeTab(i) {
     const tab = this.node.tabs[i];
-    if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win, this.id).catch(() => {});
+    // 풀에서 완전 삭제 — 모든 기기에서 사라진다(공유 내역).
+    if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
     this.node.tabs.splice(i, 1);
     if (!this.node.tabs.length) {
       this.ctx.onClosePane?.(this.id);
@@ -344,14 +347,13 @@ export class PaneView {
     }
     if (this.node.active >= this.node.tabs.length) this.node.active = this.node.tabs.length - 1;
     this.buildHead();
-    const win = this.node.tabs[this.node.active].win;
-    if (typeof win === "number") api.ptySelectWindow(this.id, win).catch(() => {});
+    this._view(this.node.tabs[this.node.active].win);
     this.ctx.onSurfacesChanged?.();
     this.ctx.persist?.();
   }
-  // 드롭으로 이동해 온 탭을 활성화(window select).
+  // 드롭으로 이동해 온 탭을 활성화(뷰 링크 + select).
   async activateWin(win) {
-    if (typeof win === "number") api.ptySelectWindow(this.id, win).catch(() => {});
+    this._view(win);
     this.buildHead();
     this.focus();
   }

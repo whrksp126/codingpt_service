@@ -62,11 +62,10 @@ pub fn pty_open(
 
     let (session, abs) = tmux::session_for(&local_path);
     let view = tmux::pane_session(&session, &pane_id);
-    tmux::ensure_session(&ctx, &view, &abs)?;
-    // 독립 세션이라 attach 전 select 가 확실히 유지된다(grouped 의 current-window 경쟁 없음).
-    if win_index >= 0 {
-        let _ = tmux::run(&ctx, &["select-window", "-t", &format!("{view}:{win_index}")]);
-    }
+    // 공유 풀 모델: 터미널 실체 = 풀(primary) window(전 기기 공유), pane = 뷰 세션(link-window).
+    //  ensure_view 가 풀/뷰/링크/선택을 전부 보장(스테일 win 이면 그 인덱스에 새 터미널 생성).
+    let win = if win_index >= 0 { win_index } else { 0 };
+    tmux::ensure_view(&ctx, &view, &session, win, &abs)?;
 
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
@@ -152,21 +151,6 @@ pub fn pty_close(_ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) 
     if let Some(mut h) = mgr.panes.lock().unwrap().remove(&pane_id) {
         let _ = h.child.kill();
     }
-}
-
-// 이 pane 이 보여줄 window(탭) 전환 — 독립 세션·단일 클라이언트라 확실히 붙는다.
-#[tauri::command]
-pub fn pty_select_window(
-    ctx: State<TmuxCtx>,
-    mgr: State<PtyManager>,
-    pane_id: String,
-    index: i64,
-) -> Result<(), String> {
-    let panes = mgr.panes.lock().unwrap();
-    if let Some(h) = panes.get(&pane_id) {
-        tmux::run(&ctx, &["select-window", "-t", &format!("{}:{}", h.view_session, index)])?;
-    }
-    Ok(())
 }
 
 // 앱 시작/종료 시 레거시 grouped view 세션 정리("--view--" 만 — 독립 pane 세션(--p-)은

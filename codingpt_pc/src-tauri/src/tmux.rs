@@ -140,10 +140,12 @@ pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(),
 pub struct WindowInfo {
     pub index: i64,
     pub active: bool,
+    pub name: String,
     pub command: String,
+    pub id: String,
 }
 
-// 세션의 window(서피스) 목록.
+// 세션의 window 목록(이름 포함 — 공유 풀의 "내역" 원천).
 pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
     let out = match run(
         ctx,
@@ -152,7 +154,7 @@ pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
             "-t",
             session,
             "-F",
-            "#{window_index}\t#{window_active}\t#{pane_current_command}",
+            "#{window_index}\t#{window_active}\t#{window_id}\t#{window_name}\t#{pane_current_command}",
         ],
     ) {
         Ok(o) => o,
@@ -161,71 +163,96 @@ pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
     out.lines()
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
-            let parts: Vec<&str> = l.splitn(3, '\t').collect();
+            let parts: Vec<&str> = l.splitn(5, '\t').collect();
             WindowInfo {
                 index: parts.first().and_then(|s| s.trim().parse().ok()).unwrap_or(0),
                 active: parts.get(1).map(|s| *s == "1").unwrap_or(false),
-                command: parts.get(2).map(|s| s.trim().to_string()).unwrap_or_default(),
+                id: parts.get(2).map(|s| s.trim().to_string()).unwrap_or_default(),
+                name: parts.get(3).map(|s| s.trim().to_string()).unwrap_or_default(),
+                command: parts.get(4).map(|s| s.trim().to_string()).unwrap_or_default(),
             }
         })
         .collect()
 }
 
-// 새 서피스(window) 생성 → 인덱스 반환. 세션이 없으면 detached 생성(그 첫 window 가 곧 새 터미널 —
-//  ensure 후 new-window 를 하면 안 쓰는 window 0 셸이 고아로 남는다). 데몬 terminal.new 미러.
-pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<i64, String> {
-    let abs_s = abs.to_string_lossy().to_string();
-    // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 select 가 담당).
-    if let Ok(out) = run(
-        ctx,
-        &["new-window", "-d", "-t", session, "-c", &abs_s, "-P", "-F", "#{window_index}"],
-    ) {
-        return Ok(out.trim().parse().unwrap_or(0));
+// 다음 풀 터미널 이름("터미널 N") — 이름이 tmux window 에 저장돼 전 기기 동일하게 보인다.
+fn next_pool_name(wins: &[WindowInfo]) -> String {
+    let mut max = 0i64;
+    for w in wins {
+        if let Some(rest) = w.name.strip_prefix("터미널 ") {
+            if let Ok(n) = rest.trim().parse::<i64>() {
+                if n > max {
+                    max = n;
+                }
+            }
+        }
     }
-    let mut args: Vec<String> = Vec::new();
-    if let Some(conf) = &ctx.conf {
-        args.push("-f".into());
-        args.push(conf.to_string_lossy().to_string());
-    }
-    args.extend(
-        ["new-session", "-d", "-s", session, "-c", &abs_s, "-P", "-F", "#{window_index}"]
-            .map(String::from),
-    );
-    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let out = run(ctx, &refs)?;
-    Ok(out.trim().parse().unwrap_or(0))
+    format!("터미널 {}", max + 1)
 }
 
-// 탭(window)을 다른 pane 세션으로 이전(드래그 이동/새 분할) — 데몬 terminal.move 미러.
-//  dst 세션이 없으면(가장자리 드롭=새 pane) 생성 후 기본 window 0 을 -k 로 대체 → 항상 0 반환.
-pub fn move_window(
-    ctx: &TmuxCtx,
-    src_session: &str,
-    win: i64,
-    dst_session: &str,
-    abs: &PathBuf,
-) -> Result<i64, String> {
-    if src_session == dst_session {
-        return Ok(win);
+#[derive(Serialize)]
+pub struct NewWindowInfo {
+    pub index: i64,
+    pub name: String,
+}
+
+// pane 뷰 세션 보장 + 풀 window(win)를 같은 인덱스로 link + select — 데몬 ensureView 미러.
+//  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
+//  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거.
+pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &PathBuf) -> Result<(), String> {
+    let abs_s = abs.to_string_lossy().to_string();
+    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
+        ensure_session(ctx, session, abs)?;
+        let _ = run(ctx, &["rename-window", "-t", &format!("{session}:0"), "터미널 1"]);
     }
-    // '=' 접두사 = 세션명 정확 일치(prefix 매칭 방지).
-    let fresh = run(ctx, &["has-session", "-t", &format!("={dst_session}")]).is_err();
-    if fresh {
-        ensure_session(ctx, dst_session, abs)?;
-        run(
-            ctx,
-            &["move-window", "-k", "-s", &format!("{src_session}:{win}"), "-t", &format!("{dst_session}:0")],
-        )?;
-        let _ = run(ctx, &["select-window", "-t", &format!("{dst_session}:0")]);
-        return Ok(0);
+    let mut wins = list_windows(ctx, session);
+    if !wins.iter().any(|w| w.index == win) {
+        let name = next_pool_name(&wins);
+        run(ctx, &["new-window", "-d", "-t", &format!("{session}:{win}"), "-n", &name, "-c", &abs_s])?;
+        wins = list_windows(ctx, session);
     }
-    let next = list_windows(ctx, dst_session).iter().map(|w| w.index).max().unwrap_or(-1) + 1;
-    run(
+    let target_id = wins
+        .iter()
+        .find(|w| w.index == win)
+        .map(|w| w.id.clone())
+        .ok_or_else(|| "터미널 window 확보 실패".to_string())?;
+    if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
+        run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s])?;
+        let _ = run(ctx, &["move-window", "-s", &format!("{psess}:0"), "-t", &format!("{psess}:999")]);
+    }
+    let slots = list_windows(ctx, psess);
+    let slot = slots.iter().find(|w| w.index == win);
+    let needs_link = match slot {
+        Some(s) if s.id == target_id => false,
+        Some(_) => {
+            let _ = run(ctx, &["unlink-window", "-t", &format!("{psess}:{win}")]);
+            true
+        }
+        None => true,
+    };
+    if needs_link {
+        run(ctx, &["link-window", "-s", &format!("{session}:{win}"), "-t", &format!("{psess}:{win}")])?;
+    }
+    run(ctx, &["select-window", "-t", &format!("{psess}:{win}")])?;
+    let _ = run(ctx, &["kill-window", "-t", &format!("{psess}:999")]); // temp 셸 정리(전용이라 무해)
+    Ok(())
+}
+
+// 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.
+pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
+    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
+        ensure_session(ctx, session, abs)?;
+        let _ = run(ctx, &["rename-window", "-t", &format!("{session}:0"), "터미널 1"]);
+        return Ok(NewWindowInfo { index: 0, name: "터미널 1".to_string() });
+    }
+    let name = next_pool_name(&list_windows(ctx, session));
+    let abs_s = abs.to_string_lossy().to_string();
+    // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 view 가 담당).
+    let out = run(
         ctx,
-        &["move-window", "-s", &format!("{src_session}:{win}"), "-t", &format!("{dst_session}:{next}")],
+        &["new-window", "-d", "-t", session, "-n", &name, "-c", &abs_s, "-P", "-F", "#{window_index}"],
     )?;
-    let _ = run(ctx, &["select-window", "-t", &format!("{dst_session}:{next}")]);
-    Ok(next)
+    Ok(NewWindowInfo { index: out.trim().parse().unwrap_or(0), name })
 }
 
 // 서피스(window) 종료.
@@ -356,37 +383,55 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Vec<
 pub fn tmux_new_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
-    pane_id: String,
-) -> Result<i64, String> {
+) -> Result<NewWindowInfo, String> {
     let (session, abs) = session_for(&local_path);
-    let target = if pane_id.is_empty() { session } else { pane_session(&session, &pane_id) };
-    new_window(&ctx, &target, &abs)
+    new_window(&ctx, &session, &abs)
 }
 
+// 풀에서 완전 삭제(전 기기 공통) — 링크된 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 소멸.
 #[tauri::command]
 pub fn tmux_kill_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
     index: i64,
-    pane_id: String,
 ) -> Result<(), String> {
     let (session, _abs) = session_for(&local_path);
-    let target = if pane_id.is_empty() { session } else { pane_session(&session, &pane_id) };
-    kill_window(&ctx, &target, index)
+    kill_window(&ctx, &session, index)
 }
 
+// = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/드롭 이동 공용).
 #[tauri::command]
-pub fn tmux_move_window(
+pub fn tmux_view_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
+    pane_id: String,
     index: i64,
-    src_pane_id: String,
-    dst_pane_id: String,
-) -> Result<i64, String> {
+) -> Result<(), String> {
     let (session, abs) = session_for(&local_path);
-    let src = if src_pane_id.is_empty() { session.clone() } else { pane_session(&session, &src_pane_id) };
-    let dst = pane_session(&session, &dst_pane_id);
-    move_window(&ctx, &src, index, &dst, &abs)
+    let psess = pane_session(&session, &pane_id);
+    ensure_view(&ctx, &psess, &session, index, &abs)
+}
+
+// pane 뷰에서 탭 제거(풀 window 는 보존) — 드래그 이동의 src 측.
+#[tauri::command]
+pub fn tmux_unview_window(
+    ctx: tauri::State<TmuxCtx>,
+    local_path: String,
+    pane_id: String,
+    index: i64,
+) -> Result<(), String> {
+    let (session, _abs) = session_for(&local_path);
+    let psess = pane_session(&session, &pane_id);
+    let n = list_windows(&ctx, &psess).len();
+    if n == 0 {
+        return Ok(());
+    }
+    if n <= 1 {
+        let _ = run(&ctx, &["kill-session", "-t", &psess]);
+        return Ok(());
+    }
+    let _ = run(&ctx, &["unlink-window", "-t", &format!("{psess}:{index}")]);
+    Ok(())
 }
 
 #[tauri::command]

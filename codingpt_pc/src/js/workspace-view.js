@@ -49,7 +49,6 @@ function paneCtx(ws) {
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),
     paneDropZone: (x, y) => paneDropZone(x, y),
     onFileSplit: (filePath, srcPaneId, targetPaneId, zone) => openFileInPane(filePath, srcPaneId, targetPaneId, zone),
-    nextTermTitle: () => T.nextTerminalTitle(wsRuntime(state.activeWsId)?.layout || null),
     persist: () => S.emit(),
   };
 }
@@ -208,7 +207,7 @@ function escGhost(s) {
 }
 
 // 탭을 새 분할 pane 으로 이동(방향). side: left/right/top/bottom.
-//  독립 pane 세션: tmux window 를 새 pane 세션으로 먼저 이전(move-window) 후 트리 갱신.
+//  공유 풀 모델: win(풀 인덱스)은 불변 — 새 pane 스트림이 열리며 링크 생성, src 뷰에서 unview.
 async function moveTabToNewSplit(srcId, index, targetId, side) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
@@ -217,10 +216,6 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   const tab = src.tabs[index];
   const newId = T.newPaneId();
   const ws = activeWs();
-  if (isLocal(ws) && typeof tab.win === "number") {
-    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, newId); }
-    catch (_) { return; } // 이동 실패 → 원상 유지
-  }
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
   const newLeaf = { id: newId, kind: "terminal", tabs: [tab], active: 0 };
@@ -229,8 +224,9 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
   rt.layout = r.tree;
   rt.focusId = newLeaf.id;
+  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!src.tabs.length) {
-    // src 가 비면 닫기(형제 승격). 새 leaf 는 이미 트리에 삽입됨.
+    // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 풀 kill 대상이 없다.
     S.closePane(state.activeWsId, srcId);
     return;
   }
@@ -238,7 +234,7 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   // 재조립은 기존 pane 의 헤더를 다시 그리지 않으므로, 옮겨간 탭이 소스에 남아 보이는 것 방지.
   panes.get(srcId)?.buildHead();
   const w = src.tabs[src.active]?.win;
-  if (typeof w === "number") api.ptySelectWindow(srcId, w).catch(() => {});
+  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
 }
 
 function renderMainTop(ws) {
@@ -367,7 +363,7 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
 }
 
 // 탭을 다른 pane 으로 이동(드롭). src 가 비면 pane 닫기.
-//  독립 pane 세션: tmux window 를 dst pane 세션으로 먼저 이전(move-window) 후 배열 갱신.
+//  공유 풀 모델: 링크만 이동(win 불변) — dst 는 activateWin(view), src 는 unview.
 async function moveTab(srcId, index, dstId) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
@@ -377,23 +373,22 @@ async function moveTab(srcId, index, dstId) {
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
   const ws = activeWs();
-  if (isLocal(ws) && typeof tab.win === "number") {
-    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, dstId); }
-    catch (_) { return; }
-  }
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  dst.tabs.push(tab);
-  dst.active = dst.tabs.length - 1;
+  // dst 에 이미 같은 터미널 탭이 있으면(중복 방지) 그 탭 활성화로 대체.
+  const exist = dst.tabs.findIndex((t) => t.win === tab.win);
+  if (exist >= 0) dst.active = exist;
+  else { dst.tabs.push(tab); dst.active = dst.tabs.length - 1; }
   panes.get(dstId)?.buildHead();
   panes.get(dstId)?.activateWin(tab.win);
+  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!src.tabs.length) {
     S.closePane(state.activeWsId, srcId);
     return; // closePane → emit → 재렌더
   }
   panes.get(srcId)?.buildHead();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number") api.ptySelectWindow(srcId, w).catch(() => {});
+  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
 }
 
@@ -414,7 +409,7 @@ function reorderTab(paneId, from, insertIndex) {
 }
 
 // 다른 터미널 pane 의 특정 위치로 탭 이동.
-//  독립 pane 세션: tmux window 를 dst pane 세션으로 먼저 이전(move-window) 후 배열 갱신.
+//  공유 풀 모델: 링크만 이동(win 불변) — dst 는 activateWin(view), src 는 unview.
 async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
@@ -424,21 +419,22 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
   const ws = activeWs();
-  if (isLocal(ws) && typeof tab.win === "number") {
-    try { tab.win = await api.moveWindow(ws.localPath || "", tab.win, srcId, dstId); }
-    catch (_) { return; }
-  }
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
-  const at = Math.max(0, Math.min(dst.tabs.length, insertIndex));
-  dst.tabs.splice(at, 0, tab);
-  dst.active = at;
+  const exist = dst.tabs.findIndex((t) => t.win === tab.win);
+  if (exist >= 0) dst.active = exist;
+  else {
+    const at = Math.max(0, Math.min(dst.tabs.length, insertIndex));
+    dst.tabs.splice(at, 0, tab);
+    dst.active = at;
+  }
   panes.get(dstId)?.buildHead();
   panes.get(dstId)?.activateWin(tab.win);
+  if (isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!src.tabs.length) { S.closePane(state.activeWsId, srcId); return; }
   panes.get(srcId)?.buildHead();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number") api.ptySelectWindow(srcId, w).catch(() => {});
+  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
 }
 

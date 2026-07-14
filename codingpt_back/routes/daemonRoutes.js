@@ -30,7 +30,7 @@ router.get('/terminal/list', authMiddleware, daemonController.terminalList);
 router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
 router.post('/terminal/select', authMiddleware, daemonController.terminalSelect);
 router.post('/terminal/close', authMiddleware, daemonController.terminalClose);
-router.post('/terminal/move', authMiddleware, daemonController.terminalMove);
+router.post('/terminal/unview', authMiddleware, daemonController.terminalUnview);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 router.get('/fs/list', authMiddleware, daemonController.fsList);
