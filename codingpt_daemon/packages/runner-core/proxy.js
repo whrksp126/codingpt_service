@@ -12,6 +12,7 @@
 const net = require('net');
 const { execFile } = require('child_process');
 const WebSocket = require('ws');
+const fsLib = require('./fs');
 
 // 시스템/노이즈 포트는 미리보기 후보에서 제외(감지 목록만 정리 — 프록시 자체는 요청 포트로 함).
 // dev 서버는 관례상 낮은 포트(<10000) → 에페메랄/고포트는 목록에서 제외해 노이즈를 줄인다.
@@ -24,25 +25,64 @@ const IGNORE_PORTS = new Set([
   1935, // RTMP
 ]);
 
-// 127.0.0.1 에 LISTEN 중인 TCP 포트 감지(macOS/Linux: lsof). 실패하면 빈 목록.
-function listPorts() {
+function lsof(args, timeout = 4000) {
   return new Promise((resolve) => {
-    // -nP: 이름 해석 안 함(빠름), -iTCP -sTCP:LISTEN: LISTEN 소켓만, -Fn: 파싱용 필드 출력
-    execFile('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-Fn'], { timeout: 4000 }, (err, stdout) => {
-      if (err && !stdout) { resolve({ ports: [] }); return; }
-      const ports = new Set();
-      for (const line of String(stdout || '').split('\n')) {
-        if (line[0] !== 'n') continue; // name 필드만
-        // 예: n127.0.0.1:5173  n[::1]:5173  n*:3000  n127.0.0.1:5173->... (LISTEN엔 화살표 없음)
-        const body = line.slice(1);
-        const m = body.match(/(?:^\*|127\.0\.0\.1|\[::1\]|\[::\]|0\.0\.0\.0):(\d+)$/);
-        if (!m) continue;
-        const port = Number(m[1]);
-        if (port > 1024 && port <= MAX_DEV_PORT && !IGNORE_PORTS.has(port)) ports.add(port);
-      }
-      resolve({ ports: Array.from(ports).sort((a, b) => a - b) });
-    });
+    execFile('lsof', args, { timeout, maxBuffer: 4 * 1024 * 1024 }, (_err, stdout) => resolve(String(stdout || '')));
   });
+}
+
+// LISTEN 소켓 → [{ pid, port }] (127.0.0.1/*/::1 등 로컬 바인딩만, dev 포트대만).
+async function listListenSockets() {
+  // -Fpn: p<pid> 블록 + n<name> 라인(프로세스별로 그룹핑됨).
+  const out = await lsof(['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']);
+  const rows = [];
+  let pid = null;
+  for (const line of out.split('\n')) {
+    if (line[0] === 'p') { pid = parseInt(line.slice(1), 10) || null; continue; }
+    if (line[0] !== 'n' || !pid) continue;
+    const m = line.slice(1).match(/(?:^\*|127\.0\.0\.1|\[::1\]|\[::\]|0\.0\.0\.0):(\d+)$/);
+    if (!m) continue;
+    const port = Number(m[1]);
+    if (port > 1024 && port <= MAX_DEV_PORT && !IGNORE_PORTS.has(port)) rows.push({ pid, port });
+  }
+  return rows;
+}
+
+// pid[] → { pid: cwdAbs } (각 프로세스의 현재 작업 디렉토리).
+async function cwdsForPids(pids) {
+  if (!pids.length) return {};
+  const out = await lsof(['-a', '-d', 'cwd', '-Fn', '-p', pids.join(',')]);
+  const map = {};
+  let pid = null;
+  for (const line of out.split('\n')) {
+    if (line[0] === 'p') { pid = parseInt(line.slice(1), 10) || null; continue; }
+    if (line[0] === 'n' && pid) map[pid] = line.slice(1);
+  }
+  return map;
+}
+
+// 127.0.0.1 에 LISTEN 중인 TCP 포트 감지(macOS/Linux: lsof). 실패하면 빈 목록.
+//  opts.cwd(홈-기준 상대) 를 주면 그 워크스페이스 폴더 아래에서 실행 중인 프로세스의 포트만 반환
+//  (그 폴더 안 터미널에서 띄운 dev 서버만 감지 — 시스템/타 폴더 포트는 제외).
+async function listPorts(opts = {}) {
+  const rows = await listListenSockets();
+  if (rows.length === 0) return { ports: [] };
+  const cwdRel = opts && typeof opts.cwd === 'string' ? opts.cwd.trim() : '';
+  if (!cwdRel) {
+    const ports = Array.from(new Set(rows.map((r) => r.port))).sort((a, b) => a - b);
+    return { ports };
+  }
+  let base;
+  try { base = fsLib.safeResolve(cwdRel); } catch (_) { return { ports: [] }; }
+  const prefix = base.replace(/\/+$/, '') + '/';
+  const pids = Array.from(new Set(rows.map((r) => r.pid)));
+  const cwds = await cwdsForPids(pids);
+  const ports = new Set();
+  for (const r of rows) {
+    const c = cwds[r.pid];
+    if (c && (c === base || c.startsWith(prefix))) ports.add(r.port);
+  }
+  return { ports: Array.from(ports).sort((a, b) => a - b) };
 }
 
 // back 지시(stream_open kind:'tcp')에 대한 dial-back → 로컬 포트로 raw TCP 브리지.

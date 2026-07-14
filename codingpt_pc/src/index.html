@@ -19,8 +19,10 @@
       </main>
     </div>
 
-    <!-- 벤더(전역): QR + xterm. 모듈보다 먼저 실행돼 window.Terminal/FitAddon/qrcode 노출. -->
-    <script src="vendor/qrcode.js"></script>
+    <!-- 미로그인 게이트(로그인 전 앱 사용 차단) — 최상위 오버레이. -->
+    <div id="loginGate"></div>
+
+    <!-- 벤더(전역): xterm. 모듈보다 먼저 실행돼 window.Terminal/FitAddon 노출. -->
     <script src="vendor/xterm/xterm.js"></script>
     <script src="vendor/xterm/xterm-addon-fit.js"></script>
     <script src="vendor/xterm/xterm-addon-search.js"></script>

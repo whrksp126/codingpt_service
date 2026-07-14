@@ -1,5 +1,5 @@
 // settings.js — "내 정보 · 설정" 모달. 좌측 탭 사이드바 + 우측 콘텐츠(오버레이).
-//  모바일 연결 관리(QR 페어링/상태/해제)를 "연결" 탭에 담는다. QR = vendor/qrcode.js(전역 qrcode).
+//  모바일 연결 관리(웹 로그인/상태/해제)를 "계정" 탭에 담는다.
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
@@ -13,7 +13,6 @@ let autostartChk = null;
 let section = "general"; // 'general' | 'connection' | 'about'  — 일반 탭이 기본
 let connMode = null; // 'paired' | 'unpaired'
 let query = "";
-let qr = null;
 let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
@@ -61,7 +60,6 @@ export function updateSettings() {
   const show = state.view === "settings";
   root.classList.toggle("hidden", !show);
   if (!show) {
-    stopQr();
     stopWebLogin();
     connMode = null;
     return;
@@ -90,7 +88,6 @@ function renderNav() {
 
 // force = 탭 전환 등으로 강제 재구성. 아니면 상태만 갱신.
 function renderSection(force) {
-  if (section !== "connection") stopQr();
   if (section === "connection") {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
@@ -195,7 +192,6 @@ function ensureAccountCard() {
 
 // ── 로그인됨: 계정 + 이 기기 상태 + 내 기기 목록 ──
 function buildPaired() {
-  stopQr();
   stopWebLogin();
   connBody.innerHTML = `
     <div class="acct-line">
@@ -405,18 +401,6 @@ function bindUnpair(btn) {
   });
 }
 
-// ── 미연결: QR 페어링 ──
-function serverOverride() {
-  const inp = connBody?.querySelector("#serverInput");
-  const v = (inp?.value || "").trim();
-  if (v) return v;
-  try {
-    return localStorage.getItem("cpt.server") || null;
-  } catch (_) {
-    return null;
-  }
-}
-
 function buildUnpaired() {
   stopWebLogin();
   connBody.innerHTML = `
@@ -485,90 +469,6 @@ async function pollWebLogin() {
     /* 계속 폴링 — 만료 시 위에서 종료 */
   } finally {
     if (webLogin) webLogin.busy = false;
-  }
-}
-
-function renderQr(text) {
-  const qrBox = connBody.querySelector("#qrBox");
-  let model = null;
-  for (let t = 3; t <= 14; t++) {
-    try {
-      const m = window.qrcode(t, "M");
-      m.addData(text);
-      m.make();
-      model = m;
-      break;
-    } catch (_) {}
-  }
-  if (!model) {
-    qrBox.textContent = "QR 생성 실패";
-    return;
-  }
-  qrBox.innerHTML = model.createImgTag(6, 0);
-}
-
-async function startQr() {
-  stopQr();
-  const qrExpired = connBody.querySelector("#qrExpired");
-  const qrBox = connBody.querySelector("#qrBox");
-  if (!qrBox) return;
-  qrExpired.classList.add("hidden");
-  qrBox.innerHTML = '<div class="qr-spinner"></div>';
-  connBody.querySelector("#codeText").textContent = "····-····";
-  try {
-    const res = await api.pairSession(serverOverride());
-    qr = {
-      code: res.code,
-      secret: res.sessionSecret,
-      expiresAt: res.expiresAt ? Date.parse(res.expiresAt) : Date.now() + 600000,
-      poll: null,
-      expiryTimer: null,
-      busy: false,
-    };
-    renderQr(res.deepLink || `codingpt://pair?code=${res.code}`);
-    connBody.querySelector("#codeText").textContent = res.code;
-    qr.poll = setInterval(pollQr, 2500);
-    qr.expiryTimer = setTimeout(expireQr, Math.max(1000, qr.expiresAt - Date.now()));
-  } catch (e) {
-    qrBox.innerHTML = "";
-    qrExpired.classList.remove("hidden");
-    qrExpired.querySelector("span").textContent = "세션 생성 실패";
-  }
-}
-
-function stopQr() {
-  if (qr) {
-    if (qr.poll) clearInterval(qr.poll);
-    if (qr.expiryTimer) clearTimeout(qr.expiryTimer);
-  }
-  qr = null;
-}
-function expireQr() {
-  if (!qr) return;
-  if (qr.poll) clearInterval(qr.poll);
-  qr.poll = null;
-  const qrExpired = connBody?.querySelector("#qrExpired");
-  if (qrExpired) {
-    qrExpired.querySelector("span").textContent = "코드가 만료됐어요";
-    qrExpired.classList.remove("hidden");
-  }
-}
-async function pollQr() {
-  if (!qr || qr.busy) return;
-  qr.busy = true;
-  try {
-    const res = await api.pairPoll(serverOverride(), qr.code, qr.secret);
-    if (res && res.paired) {
-      stopQr();
-      state.daemon = await api.daemonStatus();
-      state.paired = !!state.daemon?.paired;
-      await S.loadWorkspaces();
-      S.emit();
-    }
-  } catch (e) {
-    expireQr();
-  } finally {
-    if (qr) qr.busy = false;
   }
 }
 

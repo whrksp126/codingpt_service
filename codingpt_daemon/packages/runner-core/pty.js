@@ -97,6 +97,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     // 데몬 자체가 tmux/cmux 안에서 실행돼도 attach 되도록 TMUX 해제(중첩 가드 우회 — 소켓이 달라 안전).
     const env = { ...process.env };
     delete env.TMUX;
+    // UTF-8 로케일 강제 — 데스크톱 앱으로 데몬이 뜨면 셸 로케일(LANG)이 없어 tmux 클라이언트가
+    //  non-UTF-8 로 attach → 한글 등 멀티바이트 출력이 '_' 로 뭉개진다. 로케일을 UTF-8 로 고정한다.
+    if (!/UTF-?8/i.test(env.LANG || '')) env.LANG = 'en_US.UTF-8';
+    if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
 
     // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
     //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
@@ -120,11 +124,18 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         ], { env, stdio: 'ignore' });
       } catch (_) { /* 이미 존재하면 무시 */ }
       const view = viewSession(session, paneId);
+      // 이 pane 이 표시할 window(win). 앱이 pane 별로 자기 window 를 미리 확보해 넘긴다.
+      //  grouped view 는 생성 시 primary 의 current-window 를 상속하므로, 명시 win 을 attach 와 같은
+      //  tmux 명령에서 select-window 로 못박아 "여러 pane 이 같은 window 를 보는" 경쟁을 원천 차단한다.
+      const selWin = (params && Number.isInteger(params.win)) ? params.win : null;
+      // -u: UTF-8 출력 강제(로케일과 무관). 한글 등 멀티바이트가 '_' 로 뭉개지지 않게.
       // -A: view 가 있으면 attach(재연결 시 current-window 유지), 없으면 -t 로 grouped 생성.
-      spawnArgs = ['-L', TMUX_SOCKET, 'new-session', '-A', '-t', session, '-s', view, ';', 'set', '-g', 'window-size', 'latest'];
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-t', session, '-s', view];
+      if (selWin != null) spawnArgs.push(';', 'select-window', '-t', `${view}:${selWin}`);
+      spawnArgs.push(';', 'set', '-g', 'window-size', 'latest');
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
-      spawnArgs = ['-L', TMUX_SOCKET, ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
     }
 
     let pty;
@@ -211,7 +222,9 @@ async function handleTerminalRpc(method, params) {
   }
   if (method === 'terminal.new') {
     try {
-      const out = await runTmux(['new-window', '-t', session, '-c', abs, '-P', '-F', '#{window_index}']);
+      // -d: 새 window 를 만들되 primary 의 current-window 를 바꾸지 않는다. 그래야 뒤이어 생성되는
+      //  grouped view 세션이 엉뚱한(방금 만든) window 를 상속하지 않는다. 각 pane 은 자기 win 을 명시 select.
+      const out = await runTmux(['new-window', '-d', '-t', session, '-c', abs, '-P', '-F', '#{window_index}']);
       return { index: parseInt(out.trim(), 10) || 0 };
     } catch (_) {
       // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach). conf 는 서버 시작 시점에만 유효.

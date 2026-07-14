@@ -61,6 +61,8 @@ export function updateSidebar() {
   // 목록.
   const list = document.createElement("div");
   list.className = "sb-list";
+  // 맨 위에서 아래로 당김(오버스크롤) → 워크스페이스 목록 새로고침(pull-to-refresh).
+  attachPullToRefresh(list);
 
   if (state.wsError && !state.workspaces.length) {
     list.appendChild(note(state.paired ? "목록을 불러오지 못했습니다" : "PC를 연결하세요"));
@@ -96,6 +98,82 @@ export function updateSidebar() {
   el.appendChild(foot);
 
   if (notifOpen) renderNotifPanel(notifPanel, (n) => jumpToNotification(n));
+}
+
+// pull-to-refresh — 목록 맨 위에서 "잡고 아래로 당김"(마우스 드래그) 또는 트랙패드 오버스크롤 → 새로고침.
+//  당기는 양만큼 상단 인디케이터가 커지고, 임계값을 넘겨 놓으면 loadWorkspaces() 실행.
+let __ptrBusy = false;
+function attachPullToRefresh(list) {
+  const THRESH = 56;
+  let pull = 0;
+
+  // 상단 인디케이터(당길수록 높이가 커지며 내용을 밀어냄).
+  const ind = document.createElement("div");
+  ind.className = "ptr-indicator";
+  ind.style.cssText =
+    "height:0px;overflow:hidden;display:flex;align-items:center;justify-content:center;" +
+    "font-size:11px;color:var(--text-dim,#8b93a7);opacity:0;transition:height .12s,opacity .12s;user-select:none;";
+  list.prepend(ind);
+
+  const render = () => {
+    const v = Math.min(pull, 96);
+    if (__ptrBusy) return;
+    ind.style.height = v > 3 ? Math.min(6 + v * 0.5, 44) + "px" : "0px";
+    ind.style.opacity = v > 3 ? "1" : "0";
+    ind.textContent = pull >= THRESH ? "놓으면 새로고침 ↑" : "당겨서 새로고침 ↓";
+  };
+  const reset = () => { pull = 0; render(); };
+  const fire = () => {
+    if (pull >= THRESH && !__ptrBusy) {
+      __ptrBusy = true;
+      ind.style.height = "30px";
+      ind.style.opacity = "1";
+      ind.textContent = "새로고침 중…";
+      Promise.resolve(S.loadWorkspaces()).finally(() => {
+        setTimeout(() => { __ptrBusy = false; }, 400);
+      });
+    } else {
+      reset();
+    }
+  };
+
+  // 마우스로 잡고 당김.
+  list.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || list.scrollTop > 0 || __ptrBusy) return;
+    const startY = e.clientY;
+    let active = true;
+    const mv = (ev) => {
+      if (!active) return;
+      if (list.scrollTop > 0) { pull = 0; render(); return; }
+      const dy = ev.clientY - startY;
+      if (dy > 0) { ev.preventDefault(); pull = dy; render(); }
+      else { pull = 0; render(); }
+    };
+    const up = () => {
+      active = false;
+      document.removeEventListener("mousemove", mv);
+      document.removeEventListener("mouseup", up);
+      fire();
+    };
+    document.addEventListener("mousemove", mv);
+    document.addEventListener("mouseup", up);
+  });
+
+  // 트랙패드 오버스크롤(위로 튕김).
+  let wt = null;
+  list.addEventListener(
+    "wheel",
+    (e) => {
+      if (list.scrollTop > 0 || __ptrBusy) return;
+      if (e.deltaY < 0) {
+        pull += -e.deltaY;
+        render();
+        clearTimeout(wt);
+        wt = setTimeout(fire, 130);
+      }
+    },
+    { passive: true }
+  );
 }
 
 function ctlBtn(iconName, title, onClick) {
@@ -314,12 +392,11 @@ export async function refreshWsMeta() {
     try {
       rt.branch = await api.gitBranch(w.localPath || "");
     } catch (_) {}
+    // 그 워크스페이스 폴더 안에서 실제로 도는 dev 서버 포트만 감지(시스템/타 폴더 포트 제외).
+    try {
+      rt.ports = await api.listenPorts(w.localPath || "");
+    } catch (_) {}
   }
-  try {
-    const ports = await api.listenPorts();
-    const rt = S.wsRuntime(state.activeWsId);
-    if (rt) rt.ports = ports;
-  } catch (_) {}
   S.emit();
 }
 

@@ -10,19 +10,23 @@ import {
   focusCurrentPane,
 } from "./workspace-view.js";
 import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
+import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 
 const shellEl = document.querySelector(".shell");
 const sidebarEl = document.getElementById("sidebar");
 const wsViewEl = document.getElementById("wsView");
 const settingsEl = document.getElementById("settingsView");
+const loginGateEl = document.getElementById("loginGate");
 
 mountSidebar(sidebarEl, {});
 mountWorkspaceView(wsViewEl);
 mountSettings(settingsEl);
+mountLoginGate(loginGateEl);
 
 let lastActive = null;
 function render() {
+  updateLoginGate(); // 미로그인 시 전체화면 게이트로 앱 차단
   shellEl.classList.toggle("sb-collapsed", state.sidebarCollapsed);
   updateSidebar();
   const settingsShown = state.view === "settings";

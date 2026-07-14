@@ -213,6 +213,16 @@ async fn daemon_pair_poll(
         return Err(err.as_str().unwrap_or("연결 실패").to_string());
     }
     if v.get("paired").and_then(|b| b.as_bool()).unwrap_or(false) {
+        // 재페어링 대응: 이미 떠 있는 데몬은 예전(무효) 토큰을 물고 있으므로, 반드시 죽였다가
+        //  새로 띄워 갱신된 ~/.codingpt/daemon.json 토큰으로 릴레이에 재연결하게 한다.
+        //  (기존엔 start_run 이 "이미 실행 중"이면 no-op → 새 토큰을 안 물고 계속 오프라인이던 버그)
+        {
+            let mut guard = state.child.lock().unwrap();
+            if let Some(mut ch) = guard.take() {
+                let _ = ch.kill();
+                let _ = ch.wait();
+            }
+        }
         start_run(&app, &state)?;
     }
     Ok(v)

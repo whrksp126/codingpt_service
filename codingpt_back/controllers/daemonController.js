@@ -585,7 +585,10 @@ async function startTerminal(req, res) {
     const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
     // paneId — pane 별 grouped tmux view(여러 터미널 pane 이 각자 다른 window 동시 표시). 없으면 공유 세션.
     const paneId = (req.body && typeof req.body.paneId === 'string') ? req.body.paneId : '';
-    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId);
+    // win — 이 pane 이 표시할 tmux window(정수). grouped view attach 시 이 window 로 select(경쟁 방지).
+    const winRaw = req.body && req.body.win;
+    const win = Number.isInteger(winRaw) ? winRaw : (typeof winRaw === 'string' && /^\d+$/.test(winRaw) ? parseInt(winRaw, 10) : undefined);
+    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -949,7 +952,8 @@ function parseCookies(header) {
 // GET /api/daemon/preview/ports  (인증) — PC 에서 LISTEN 중인 포트 목록
 async function previewPorts(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'net.ports', {});
+    // cwd(워크스페이스 폴더, 홈-기준 상대) — 그 폴더 안에서 실행 중인 프로세스의 포트만 감지.
+    const result = await daemonRelayService.callRpc(req.user.id, 'net.ports', { cwd: req.query.cwd || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

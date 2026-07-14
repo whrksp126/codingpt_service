@@ -53,7 +53,7 @@ export const api = {
   newWindow: (localPath) => invoke("tmux_new_window", { localPath }),
   killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
   gitBranch: (localPath) => invoke("tmux_git_branch", { localPath }),
-  listenPorts: () => invoke("tmux_listen_ports"),
+  listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
 
   // ── 클라우드 터미널(relay) ──
   cloudTerminalStart: (cwd) => invoke("cloud_terminal_start", { cwd }),

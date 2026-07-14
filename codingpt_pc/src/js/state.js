@@ -14,6 +14,7 @@ export const state = {
   sidebarCollapsed: false,
   creatingWs: false,
   me: null, // 로그인 계정 프로필 {id,email,nickname,profileImg,...} — 웹 로그인 후 표시
+  authChecked: false, // loadMe 를 최소 1회 시도했는지(로그인 게이트 판정용 — 페어링돼도 계정 확인 실패 시 게이트)
   devices: [], // 계정의 모든 기기(멀티기기 "내 기기")
   currentDeviceId: null, // 이 기기의 DaemonDevice id
 };
@@ -92,6 +93,7 @@ export async function loadMe() {
   } catch (_) {
     state.me = null;
   }
+  state.authChecked = true; // 페어링됐는데 me 가 null 이면(=토큰 폐기됨) 로그인 게이트가 뜬다.
   emit();
 }
 

@@ -3,7 +3,8 @@
 //  · 데몬(pty.js)의 sessionForCwd / findTmux 규칙과 정확히 일치해야 폰과 세션이 공유된다.
 //  · 여기서는 window 관리·git 브랜치·리스닝 포트 등 "제어" 명령만. 실제 스트림은 pty.rs.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::Serialize;
@@ -195,22 +196,88 @@ pub fn git_branch(abs: &PathBuf) -> Option<String> {
 }
 
 // 로컬 리스닝 TCP 포트 목록(프리뷰/사이드바 배지). lsof 기반, 실패 시 빈 목록.
-pub fn listen_ports() -> Vec<u16> {
+// LISTEN 소켓 → [(pid, port)] (프로세스별 그룹). -Fpn: p<pid> 블록 + n<name> 라인.
+fn listen_sockets() -> Vec<(u32, u16)> {
     let out = match Command::new("lsof")
-        .args(["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-Fn"])
+        .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpn"])
         .output()
     {
         Ok(o) => o,
         Err(_) => return vec![],
     };
-    let mut ports: Vec<u16> = Vec::new();
+    let mut rows: Vec<(u32, u16)> = Vec::new();
+    let mut pid: Option<u32> = None;
     for line in String::from_utf8_lossy(&out.stdout).lines() {
-        // -Fn: n<name> 라인. name 예: 127.0.0.1:3000 또는 *:8080
-        if let Some(rest) = line.strip_prefix('n') {
-            if let Some(idx) = rest.rfind(':') {
-                if let Ok(p) = rest[idx + 1..].parse::<u16>() {
-                    if p >= 1024 && !ports.contains(&p) {
-                        ports.push(p);
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = rest.parse::<u32>().ok();
+        } else if let Some(rest) = line.strip_prefix('n') {
+            if let (Some(p), Some(idx)) = (pid, rest.rfind(':')) {
+                if let Ok(port) = rest[idx + 1..].parse::<u16>() {
+                    if port >= 1024 {
+                        rows.push((p, port));
+                    }
+                }
+            }
+        }
+    }
+    rows
+}
+
+// pid[] → { pid: cwd(절대경로) }. 각 프로세스의 현재 작업 디렉토리.
+fn cwds_for(pids: &[u32]) -> HashMap<u32, String> {
+    let mut map = HashMap::new();
+    if pids.is_empty() {
+        return map;
+    }
+    let list = pids.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
+    let out = match Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-Fn", "-p", &list])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return map,
+    };
+    let mut pid: Option<u32> = None;
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = rest.parse::<u32>().ok();
+        } else if let Some(rest) = line.strip_prefix('n') {
+            if let Some(p) = pid {
+                map.insert(p, rest.to_string());
+            }
+        }
+    }
+    map
+}
+
+// LISTEN 중인 로컬 포트. filter 를 주면 그 폴더 아래에서 도는 프로세스의 포트만(그 워크스페이스
+//  터미널에서 띄운 dev 서버만 감지 — 시스템/타 폴더 포트 제외).
+pub fn listen_ports_in(filter: Option<&Path>) -> Vec<u16> {
+    let rows = listen_sockets();
+    if rows.is_empty() {
+        return vec![];
+    }
+    let mut ports: Vec<u16> = Vec::new();
+    match filter {
+        None => {
+            for (_pid, port) in rows {
+                if !ports.contains(&port) {
+                    ports.push(port);
+                }
+            }
+        }
+        Some(base) => {
+            let mut pids: Vec<u32> = rows.iter().map(|r| r.0).collect();
+            pids.sort_unstable();
+            pids.dedup();
+            let cwds = cwds_for(&pids);
+            let base_str = base.to_string_lossy();
+            let base_trim = base_str.trim_end_matches('/');
+            let prefix = format!("{base_trim}/");
+            for (pid, port) in rows {
+                if let Some(c) = cwds.get(&pid) {
+                    if (c == base_trim || c.starts_with(&prefix)) && !ports.contains(&port) {
+                        ports.push(port);
                     }
                 }
             }
@@ -251,6 +318,11 @@ pub fn tmux_git_branch(local_path: String) -> Option<String> {
 }
 
 #[tauri::command]
-pub fn tmux_listen_ports() -> Vec<u16> {
-    listen_ports()
+pub fn tmux_listen_ports(local_path: String) -> Vec<u16> {
+    // 워크스페이스 폴더 안에서 도는 프로세스의 포트만. 빈 경로(홈)면 필터 없음(하위호환).
+    if local_path.trim().is_empty() {
+        return listen_ports_in(None);
+    }
+    let (_session, abs) = session_for(&local_path);
+    listen_ports_in(Some(&abs))
 }
