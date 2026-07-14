@@ -125,14 +125,26 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       } catch (_) { /* 이미 존재하면 무시 */ }
       const view = viewSession(session, paneId);
       // 이 pane 이 표시할 window(win). 앱이 pane 별로 자기 window 를 미리 확보해 넘긴다.
-      //  grouped view 는 생성 시 primary 의 current-window 를 상속하므로, 명시 win 을 attach 와 같은
-      //  tmux 명령에서 select-window 로 못박아 "여러 pane 이 같은 window 를 보는" 경쟁을 원천 차단한다.
+      //  ⚠️ grouped view 는 생성 시 primary 의 current-window 를 상속하고, "attach 와 한 커맨드로 묶은
+      //  select-window"는 attach 가 current-window 를 0 으로 되돌려 무효화된다(tmux 3.7 실측).
+      //  → select-window 는 **attach 가 자리잡은 뒤 별도 커맨드**로 실행해야 붙는다(아래 selectAfterAttach).
+      //  안 그러면 여러 pane 이 같은(상속된) window 를 봐서 "터미널 복제"처럼 보인다.
       const selWin = (params && Number.isInteger(params.win)) ? params.win : null;
       // -u: UTF-8 출력 강제(로케일과 무관). 한글 등 멀티바이트가 '_' 로 뭉개지지 않게.
       // -A: view 가 있으면 attach(재연결 시 current-window 유지), 없으면 -t 로 grouped 생성.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-t', session, '-s', view];
-      if (selWin != null) spawnArgs.push(';', 'select-window', '-t', `${view}:${selWin}`);
       spawnArgs.push(';', 'set', '-g', 'window-size', 'latest');
+      // attach 직후(별도 커맨드) 목표 window 로 전환 — 짧게 지연 후 재시도(뷰 세션이 붙을 때까지).
+      if (selWin != null) {
+        const doSelect = (attempt) => {
+          try {
+            execFileSync(tmux, ['-L', TMUX_SOCKET, 'select-window', '-t', `${view}:${selWin}`], { env, stdio: 'ignore' });
+          } catch (_) {
+            if (attempt < 4) setTimeout(() => doSelect(attempt + 1), 200);
+          }
+        };
+        setTimeout(() => doSelect(0), 120);
+      }
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
