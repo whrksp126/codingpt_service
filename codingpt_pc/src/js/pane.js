@@ -281,6 +281,7 @@ export class PaneView {
     }
     if (this.node.kind !== "terminal") return;
     this.term.open(this.termEl);
+    this._setupImeGuard();
     this._fitNow();
     const tab = this.node.tabs[this.node.active] || this.node.tabs[0];
     const win = await this._ensureWin(tab);
@@ -292,13 +293,15 @@ export class PaneView {
   async _ensureWin(tab) {
     if (this.ctx.isLocal && (tab.win === "new" || tab.win == null)) {
       try {
-        // 풀에 새 터미널 생성(전 기기에 나타남) — 이름("터미널 N")은 풀 기준으로 부여.
-        const r = await api.newWindow(this.ctx.localPath || "");
+        // 풀의 미배치 터미널 먼저 입양(첫 진입 시 남발 방지) → 없으면 풀에 새 터미널 생성(전 기기 공유).
+        //  '+'로 만든 탭(fresh)은 입양 없이 반드시 새로 생성(사용자가 새 터미널을 명시 요청).
+        const r = (!tab.fresh && (await this.ctx.claimPoolWin?.())) || (await api.newWindow(this.ctx.localPath || ""));
         tab.win = r.index;
         if (r.name) tab.title = r.name;
       } catch (_) {
         tab.win = 0;
       }
+      delete tab.fresh;
       this.ctx.onSurfacesChanged?.();
     }
     return tab.win;
@@ -312,7 +315,7 @@ export class PaneView {
   // ── 탭 조작 ──
   async addTab() {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
-    const tab = { win: "new", title: "" };
+    const tab = { win: "new", title: "", fresh: true };
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();
@@ -373,8 +376,7 @@ export class PaneView {
         this.ws = ws;
         ws.onopen = () => this._resize(this.term.cols, this.term.rows);
         ws.onmessage = (e) => {
-          if (typeof e.data === "string") this.term.write(e.data);
-          else this.term.write(new Uint8Array(e.data));
+          this._termOut(typeof e.data === "string" ? e.data : new Uint8Array(e.data));
         };
         ws.onclose = () => this.term.write("\r\n\x1b[90m[연결 종료]\x1b[0m\r\n");
       } catch (e) {
@@ -390,8 +392,43 @@ export class PaneView {
     if (this.ctx.isLocal) api.ptyResize(this.id, cols, rows).catch(() => {});
     else if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
   }
+  // WKWebView(사파리 엔진)는 IME 조합 중 term.write 렌더(커서 이동 → xterm 이 숨은 textarea 를
+  //  커서 위치로 옮김)가 조합을 강제 커밋시켜 한글이 자소 단위로 깨진다("실시간"→"ㅅ시가").
+  //  → 조합 중엔 출력(직전 음절 에코 등)을 버퍼링하고, 조합이 끝난 뒤 플러시한다.
+  _setupImeGuard() {
+    const ta = this.term?.textarea;
+    if (!ta) return;
+    this._composing = false;
+    this._imeBuf = null; // null = 조합 아님, [] = 조합 중 출력 홀드
+    this._imeHeld = 0;
+    ta.addEventListener("compositionstart", () => {
+      this._composing = true;
+      if (!this._imeBuf) this._imeBuf = [];
+    });
+    ta.addEventListener("compositionend", () => {
+      this._composing = false;
+      // xterm 자체 조합 확정(setTimeout 0) 이후에, 그리고 다음 음절 조합이 이미 시작되지 않았을 때만 플러시.
+      setTimeout(() => { if (!this._composing) this._imeFlush(); }, 30);
+    });
+    ta.addEventListener("blur", () => { this._composing = false; this._imeFlush(); });
+  }
+  _imeFlush() {
+    const buf = this._imeBuf;
+    this._imeBuf = null;
+    this._imeHeld = 0;
+    if (buf && this.term) for (const b of buf) this.term.write(b);
+  }
+  _termOut(data) {
+    if (this._imeBuf) {
+      this._imeBuf.push(data);
+      this._imeHeld += data.length || 0;
+      if (this._imeHeld > 262144) this._imeFlush(); // 조합 중 폭주 출력 안전판(사실상 미발생)
+      return;
+    }
+    this.term?.write(data);
+  }
   _onData(b64) {
-    this.term?.write(b64ToBytes(b64));
+    this._termOut(b64ToBytes(b64));
   }
   _onExit() {
     this.term?.write("\r\n\x1b[90m[세션 종료]\x1b[0m\r\n");

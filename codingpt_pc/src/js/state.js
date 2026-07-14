@@ -429,6 +429,9 @@ export async function reconcilePool() {
   _reconciling = true;
   try {
     const wins = (await api.listWindows(meta.localPath || "")) || [];
+    // 빈 목록은 신뢰하지 않는다 — Rust list_windows 는 tmux 오류도 [] 로 주므로, "전부 삭제됨"
+    //  오판이 레이아웃 전멸(pane 교체)로 이어진다. 풀이 진짜 비었으면 ensure_view 가 자가치유.
+    if (!wins.length) return;
     // 'new'(풀 window 확보 진행 중) 탭이 있으면 이번 틱 스킵 — 방금 만든 터미널의 중복 편입 방지.
     let pending = false;
     T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") { for (const t of l.tabs) if (t.win === "new") pending = true; } });

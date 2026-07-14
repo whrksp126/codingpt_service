@@ -49,8 +49,30 @@ function paneCtx(ws) {
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),
     paneDropZone: (x, y) => paneDropZone(x, y),
     onFileSplit: (filePath, srcPaneId, targetPaneId, zone) => openFileInPane(filePath, srcPaneId, targetPaneId, zone),
+    claimPoolWin: () => claimPoolWin(ws),
     persist: () => S.emit(),
   };
+}
+
+// 풀의 미배치 터미널 입양 — 'new' 탭이 풀에 이미 있는 터미널을 놔두고 새로 만드는 것을 방지.
+//  _claiming: 동시 다발 pane 들이 같은 window 를 이중 입양하지 않게 5초 예약.
+const _claiming = new Set();
+async function claimPoolWin(ws) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!ws || !isLocal(ws) || !rt || !rt.layout) return null;
+  try {
+    const wins = (await api.listWindows(ws.localPath || "")) || [];
+    const used = new Set();
+    T.eachLeaf(rt.layout, (l) => { if (l.kind === "terminal") { for (const t of l.tabs) if (typeof t.win === "number") used.add(t.win); } });
+    for (const w of wins) {
+      if (!used.has(w.index) && !_claiming.has(w.index)) {
+        _claiming.add(w.index);
+        setTimeout(() => _claiming.delete(w.index), 5000);
+        return { index: w.index, name: w.name || "" };
+      }
+    }
+  } catch (_) { /* 오프라인 → 생성 폴백 */ }
+  return null;
 }
 
 // ── VS Code 식 탭 드래그 — 포인터 캡처 + 전체화면 오버레이(iframe/xterm 위에서도 이벤트 유실 없음).
