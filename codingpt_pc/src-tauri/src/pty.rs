@@ -91,6 +91,11 @@ pub fn pty_open(
     cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-t", &view]);
     cmd.cwd(abs.to_string_lossy().to_string());
     cmd.env_remove("TMUX");
+    // GUI(open)로 뜬 앱은 TERM/LANG 이 없어 tmux attach 가 "terminal does not support clear" 로 죽는다.
+    //  데몬(node-pty)은 name:'xterm-256color' 로 TERM 을 넣지만 Rust portable-pty 는 상속뿐 → 명시 주입.
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("LANG", "en_US.UTF-8");
+    cmd.env("LC_CTYPE", "en_US.UTF-8");
     let child = pair
         .slave
         .spawn_command(cmd)
