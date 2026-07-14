@@ -281,7 +281,7 @@ export class PaneView {
     }
     if (this.node.kind !== "terminal") return;
     this.term.open(this.termEl);
-    this._setupImeGuard();
+    this._setupInput();
     this._fitNow();
     const tab = this.node.tabs[this.node.active] || this.node.tabs[0];
     const win = await this._ensureWin(tab);
@@ -392,39 +392,82 @@ export class PaneView {
     if (this.ctx.isLocal) api.ptyResize(this.id, cols, rows).catch(() => {});
     else if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
   }
-  // WKWebView(사파리 엔진)는 IME 조합 중 term.write 렌더(커서 이동 → xterm 이 숨은 textarea 를
-  //  커서 위치로 옮김)가 조합을 강제 커밋시켜 한글이 자소 단위로 깨진다("실시간"→"ㅅ시가").
-  //  → 조합 중엔 출력(직전 음절 에코 등)을 버퍼링하고, 조합이 끝난 뒤 플러시한다.
-  _setupImeGuard() {
+  // ── 입력 인터셉트 — WKWebView(사파리 엔진) 한글 IME 깨짐의 근본 해법 ──
+  //  xterm 기본 키 처리는 macOS IME 조합 키에도 개입(preventDefault/keyup 의 textarea.value 클리어)해
+  //  조합을 키마다 강제 커밋시킨다("실시간"→"ㅅ시가"). 모바일 TerminalWebView 에서 검증된 방식 이식:
+  //  xterm 키보드를 전부 끄고(attachCustomKeyEventHandler=false + document 캡처 단계에서 input/
+  //  composition 차단), textarea 'input' 의 증가분(delta)만 직접 전송한다 — 조합 중에도 백스페이스-
+  //  치환으로 실시간 반영되고, 조합 자체는 맨 textarea 처럼 IME 가 온전히 소유한다.
+  //  ⌘ 조합은 통과 — 앱 단축키(⌘F/⌘D/⌘1-8)와 복사/붙여넣기(xterm paste 핸들러)가 그대로 동작.
+  _setupInput() {
     const ta = this.term?.textarea;
     if (!ta) return;
-    this._composing = false;
-    this._imeBuf = null; // null = 조합 아님, [] = 조합 중 출력 홀드
-    this._imeHeld = 0;
-    ta.addEventListener("compositionstart", () => {
-      this._composing = true;
-      if (!this._imeBuf) this._imeBuf = [];
-    });
-    ta.addEventListener("compositionend", () => {
-      this._composing = false;
-      // xterm 자체 조합 확정(setTimeout 0) 이후에, 그리고 다음 음절 조합이 이미 시작되지 않았을 때만 플러시.
-      setTimeout(() => { if (!this._composing) this._imeFlush(); }, 30);
-    });
-    ta.addEventListener("blur", () => { this._composing = false; this._imeFlush(); });
-  }
-  _imeFlush() {
-    const buf = this._imeBuf;
-    this._imeBuf = null;
-    this._imeHeld = 0;
-    if (buf && this.term) for (const b of buf) this.term.write(b);
+    this.term.attachCustomKeyEventHandler(() => false); // xterm 키 처리 비활성(전송은 아래가 전담)
+    this._sentBuf = "";
+    const SEQ = {
+      Enter: "\r", Tab: "\t", Backspace: "\x7f", Escape: "\x1b", Delete: "\x1b[3~",
+      ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", ArrowRight: "\x1b[C", ArrowLeft: "\x1b[D",
+      Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
+    };
+    const resetBuf = () => { this._sentBuf = ""; try { ta.value = ""; } catch (_) {} };
+    const onKeydown = (e) => {
+      if (e.target !== ta) return;
+      if (e.isComposing || e.keyCode === 229) return; // 조합 중 키는 IME 소유(Enter=확정 포함)
+      if (e.metaKey) return;                          // ⌘ = 앱 단축키/브라우저 기본(복사·붙여넣기)
+      if (e.ctrlKey && e.key && e.key.length === 1) {
+        const c = e.key.toLowerCase().charCodeAt(0);
+        if (c >= 97 && c <= 122) {
+          this._write(String.fromCharCode(c - 96)); resetBuf();
+          e.preventDefault(); e.stopImmediatePropagation(); return;
+        }
+      }
+      if (e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")) { // 로컬 스크롤백
+        this.term.scrollPages(e.key === "PageUp" ? -1 : 1);
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      const seq = SEQ[e.key];
+      if (seq) {
+        this._write(seq); resetBuf();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      // 인쇄 가능한 글자는 기본 흐름(textarea 삽입 → input 델타)에 맡긴다.
+    };
+    const onInput = (e) => {
+      if (e.target !== ta) return;
+      e.stopImmediatePropagation(); // xterm 의 input 핸들러 차단(중복 전송 방지)
+      const v = ta.value || "";
+      if (v === this._sentBuf) return;
+      let i = 0;
+      const n = Math.min(v.length, this._sentBuf.length);
+      while (i < n && v.charAt(i) === this._sentBuf.charAt(i)) i++;
+      let out = "";
+      for (let k = this._sentBuf.length; k > i; k--) out += "\x7f"; // 바뀐/지운 뒷부분 제거
+      out += v.slice(i);                                            // 새 꼬리 전송
+      if (out) this._write(out);
+      this._sentBuf = v;
+    };
+    // xterm CompositionHelper 차단 — 조합 표시는 위 델타 에코가 터미널 안에서 직접 보여준다(모바일 동일).
+    const onComp = (e) => { if (e.target === ta) e.stopImmediatePropagation(); };
+    const onCompEnd = (e) => {
+      if (e.target !== ta) return;
+      e.stopImmediatePropagation();
+      // 확정 직후 input(확정 텍스트 반영)이 처리된 다음 틱에 버퍼 리셋 — 다음 입력은 새로 시작.
+      setTimeout(() => resetBuf(), 0);
+    };
+    document.addEventListener("keydown", onKeydown, true);
+    document.addEventListener("input", onInput, true);
+    document.addEventListener("compositionstart", onComp, true);
+    document.addEventListener("compositionupdate", onComp, true);
+    document.addEventListener("compositionend", onCompEnd, true);
+    this._inputDispose = () => {
+      document.removeEventListener("keydown", onKeydown, true);
+      document.removeEventListener("input", onInput, true);
+      document.removeEventListener("compositionstart", onComp, true);
+      document.removeEventListener("compositionupdate", onComp, true);
+      document.removeEventListener("compositionend", onCompEnd, true);
+    };
   }
   _termOut(data) {
-    if (this._imeBuf) {
-      this._imeBuf.push(data);
-      this._imeHeld += data.length || 0;
-      if (this._imeHeld > 262144) this._imeFlush(); // 조합 중 폭주 출력 안전판(사실상 미발생)
-      return;
-    }
     this.term?.write(data);
   }
   _onData(b64) {
@@ -536,6 +579,7 @@ export class PaneView {
   }
   dispose() {
     registry.delete(this.id);
+    try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {
       this.ro?.disconnect();

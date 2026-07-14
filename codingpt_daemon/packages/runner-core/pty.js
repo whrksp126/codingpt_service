@@ -147,7 +147,7 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       }
       // -u: UTF-8. -d: 다른 클라이언트 detach — 죽은 앱/이전 스트림의 스테일 클라이언트가 남아
       //  화면 크기를 물고 늘어지는 것(점선 여백)을 자가치유. 세션은 ensureView 가 보장했다.
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-d', '-t', psess, ';', 'set', '-g', 'window-size', 'latest'];
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-d', '-t', '=' + psess, ';', 'set', '-g', 'window-size', 'latest'];
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
@@ -228,10 +228,18 @@ function runTmux(args) {
 
 // ── 공유 터미널 풀 헬퍼 ──
 // 풀(primary) 세션 보장 — 워크스페이스의 공유 터미널 풀. 없으면 detached 생성(window 0 = 첫 터미널).
+// 주의: tmux -t 는 접두사 매칭 — 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
+//  명령이 엉뚱한 세션에 떨어진다. 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 async function ensurePool(session, abs) {
   try { await runTmux(['has-session', '-t', '=' + session]); return false; } catch (_) { /* 생성 */ }
-  await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', session, '-c', abs]);
-  await runTmux(['rename-window', '-t', `${session}:0`, '터미널 1']).catch(() => {});
+  try {
+    await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', session, '-c', abs]);
+  } catch (e) {
+    // 여러 스트림이 동시에 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
+    if (!/duplicate session/.test(String(e.message || ''))) throw e;
+    return false;
+  }
+  await runTmux(['rename-window', '-t', `=${session}:0`, '터미널 1']).catch(() => {});
   return true;
 }
 
@@ -239,7 +247,7 @@ async function ensurePool(session, abs) {
 async function poolWindows(session) {
   let out;
   try {
-    out = await runTmux(['list-windows', '-t', session, '-F', '#{window_index}\t#{window_name}\t#{pane_current_command}\t#{window_id}']);
+    out = await runTmux(['list-windows', '-t', '=' + session, '-F', '#{window_index}\t#{window_name}\t#{pane_current_command}\t#{window_id}']);
   } catch (_) { return []; }
   return out.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean).map((l) => {
     const p = l.split('\t');
@@ -265,7 +273,12 @@ async function ensureView(psess, session, win, abs) {
   let wins = await poolWindows(session);
   let target = wins.find((w) => w.index === win);
   if (!target) {
-    await runTmux(['new-window', '-d', '-t', `${session}:${win}`, '-n', nextPoolName(wins), '-c', abs]);
+    try {
+      await runTmux(['new-window', '-d', '-t', `=${session}:${win}`, '-n', nextPoolName(wins), '-c', abs]);
+    } catch (e) {
+      // 여러 pane/기기가 같은 스테일 인덱스를 동시에 자가치유하는 레이스 — 이미 생겼으면 진행.
+      if (!/in use/.test(String(e.message || ''))) throw e;
+    }
     wins = await poolWindows(session);
     target = wins.find((w) => w.index === win);
     if (!target) throw new Error('터미널 window 확보 실패');
@@ -273,18 +286,22 @@ async function ensureView(psess, session, win, abs) {
   try {
     await runTmux(['has-session', '-t', '=' + psess]);
   } catch (_) {
-    await runTmux(['new-session', '-d', '-s', psess, '-c', abs]);
-    await runTmux(['move-window', '-s', `${psess}:0`, '-t', `${psess}:999`]).catch(() => {});
+    try {
+      await runTmux(['new-session', '-d', '-s', psess, '-c', abs]);
+    } catch (e) {
+      if (!/duplicate session/.test(String(e.message || ''))) throw e;
+    }
+    await runTmux(['move-window', '-s', `=${psess}:0`, '-t', `=${psess}:999`]).catch(() => {});
   }
-  const slotOut = await runTmux(['list-windows', '-t', psess, '-F', '#{window_index}\t#{window_id}']).catch(() => '');
+  const slotOut = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index}\t#{window_id}']).catch(() => '');
   const slots = slotOut.split('\n').filter(Boolean).map((l) => l.split('\t'));
   const slot = slots.find((p) => (parseInt(p[0], 10) || 0) === win);
-  if (slot && slot[1] !== target.id) await runTmux(['unlink-window', '-t', `${psess}:${win}`]).catch(() => {});
-  if (!slot || slot[1] !== target.id) await runTmux(['link-window', '-s', `${session}:${win}`, '-t', `${psess}:${win}`]);
-  await runTmux(['select-window', '-t', `${psess}:${win}`]);
+  if (slot && slot[1] !== target.id) await runTmux(['unlink-window', '-t', `=${psess}:${win}`]).catch(() => {});
+  if (!slot || slot[1] !== target.id) await runTmux(['link-window', '-s', `=${session}:${win}`, '-t', `=${psess}:${win}`]);
+  await runTmux(['select-window', '-t', `=${psess}:${win}`]);
   // temp(999) 정리 — 링크가 하나 이상 있으니 안전(999 는 이 세션 전용 셸이라 전역 kill 무해).
   if (slots.some((p) => (parseInt(p[0], 10) || 0) === 999) || !slot) {
-    await runTmux(['kill-window', '-t', `${psess}:999`]).catch(() => {});
+    await runTmux(['kill-window', '-t', `=${psess}:999`]).catch(() => {});
   }
 }
 
@@ -306,13 +323,13 @@ async function handleTerminalRpc(method, params) {
     if (created) return { index: 0, name: '터미널 1' };
     const wins = await poolWindows(session);
     const name = nextPoolName(wins);
-    const out = await runTmux(['new-window', '-d', '-t', session, '-n', name, '-c', abs, '-P', '-F', '#{window_index}']);
+    const out = await runTmux(['new-window', '-d', '-t', '=' + session, '-n', name, '-c', abs, '-P', '-F', '#{window_index}']);
     return { index: parseInt(out.trim(), 10) || 0, name };
   }
   if (method === 'terminal.select') {
     // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/드롭 이동 공용).
     const win = (params && params.index) | 0;
-    if (!paneId) { await runTmux(['select-window', '-t', `${session}:${win}`]); return { ok: true }; }
+    if (!paneId) { await runTmux(['select-window', '-t', `=${session}:${win}`]); return { ok: true }; }
     await ensurePool(session, abs);
     await ensureView(psess, session, win, abs);
     return { ok: true };
@@ -321,15 +338,15 @@ async function handleTerminalRpc(method, params) {
     // pane 에서 탭 제거(풀 window 는 보존) — 드래그 이동의 src 측/레이아웃 정리.
     const win = (params && params.index) | 0;
     try {
-      const n = (await runTmux(['list-windows', '-t', psess, '-F', 'x'])).split('\n').filter(Boolean).length;
-      if (n <= 1) await runTmux(['kill-session', '-t', psess]);
-      else await runTmux(['unlink-window', '-t', `${psess}:${win}`]);
+      const n = (await runTmux(['list-windows', '-t', '=' + psess, '-F', 'x'])).split('\n').filter(Boolean).length;
+      if (n <= 1) await runTmux(['kill-session', '-t', '=' + psess]);
+      else await runTmux(['unlink-window', '-t', `=${psess}:${win}`]);
     } catch (_) { /* 세션 없음 = 이미 정리됨 */ }
     return { ok: true };
   }
   if (method === 'terminal.close') {
     // 풀에서 완전 삭제(전 기기 공통). 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 자동 소멸.
-    await runTmux(['kill-window', '-t', `${session}:${(params && params.index) | 0}`]);
+    await runTmux(['kill-window', '-t', `=${session}:${(params && params.index) | 0}`]);
     return { ok: true };
   }
   throw new Error('unknown terminal method: ' + method);

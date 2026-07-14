@@ -72,7 +72,7 @@ pub fn pty_open(
         .map_err(|e| format!("PTY 생성 실패: {e}"))?;
     let mut cmd = CommandBuilder::new(ctx.tmux.to_string_lossy().to_string());
     // -d: 다른 클라이언트 detach — 죽은 이전 실행의 스테일 attach 가 화면 크기를 물고 늘어지는 것 자가치유.
-    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-d", "-t", &view]);
+    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-d", "-t", &format!("={view}")]);
     cmd.cwd(abs.to_string_lossy().to_string());
     cmd.env_remove("TMUX");
     // GUI(open)로 뜬 앱은 TERM/LANG 이 없어 tmux attach 가 "terminal does not support clear" 로 죽는다.

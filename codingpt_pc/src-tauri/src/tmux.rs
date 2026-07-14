@@ -120,9 +120,11 @@ pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
 }
 
 // 워크스페이스 primary 세션 보장(없으면 detached 생성 + conf 적용). 서버가 처음이면 -f 로 conf 로드.
+//  주의: tmux -t 는 접두사 매칭이라, 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
+//  명령이 엉뚱한 세션에 떨어진다 → 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(), String> {
     // 이미 있으면 아무것도 안 함.
-    if run(ctx, &["has-session", "-t", session]).is_ok() {
+    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_ok() {
         return Ok(());
     }
     let abs_s = abs.to_string_lossy().to_string();
@@ -133,7 +135,12 @@ pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(),
     }
     args.extend(["new-session", "-d", "-s", session, "-c", &abs_s].map(String::from));
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    run(ctx, &refs).map(|_| ())
+    match run(ctx, &refs) {
+        Ok(_) => Ok(()),
+        // 여러 pane 이 동시에 부팅하며 같은 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
+        Err(e) if e.contains("duplicate session") => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 #[derive(Serialize)]
@@ -152,7 +159,7 @@ pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
         &[
             "list-windows",
             "-t",
-            session,
+            &format!("={session}"),
             "-F",
             "#{window_index}\t#{window_active}\t#{window_id}\t#{window_name}\t#{pane_current_command}",
         ],
@@ -203,12 +210,17 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
     let abs_s = abs.to_string_lossy().to_string();
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
-        let _ = run(ctx, &["rename-window", "-t", &format!("{session}:0"), "터미널 1"]);
+        let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
     }
     let mut wins = list_windows(ctx, session);
     if !wins.iter().any(|w| w.index == win) {
         let name = next_pool_name(&wins);
-        run(ctx, &["new-window", "-d", "-t", &format!("{session}:{win}"), "-n", &name, "-c", &abs_s])?;
+        match run(ctx, &["new-window", "-d", "-t", &format!("={session}:{win}"), "-n", &name, "-c", &abs_s]) {
+            Ok(_) => {}
+            // 여러 pane/기기가 같은 스테일 인덱스를 동시에 자가치유하는 레이스 — 이미 생겼으면 진행.
+            Err(e) if e.contains("in use") => {}
+            Err(e) => return Err(e),
+        }
         wins = list_windows(ctx, session);
     }
     let target_id = wins
@@ -217,24 +229,28 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
         .map(|w| w.id.clone())
         .ok_or_else(|| "터미널 window 확보 실패".to_string())?;
     if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
-        run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s])?;
-        let _ = run(ctx, &["move-window", "-s", &format!("{psess}:0"), "-t", &format!("{psess}:999")]);
+        match run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s]) {
+            Ok(_) => {}
+            Err(e) if e.contains("duplicate session") => {}
+            Err(e) => return Err(e),
+        }
+        let _ = run(ctx, &["move-window", "-s", &format!("={psess}:0"), "-t", &format!("={psess}:999")]);
     }
     let slots = list_windows(ctx, psess);
     let slot = slots.iter().find(|w| w.index == win);
     let needs_link = match slot {
         Some(s) if s.id == target_id => false,
         Some(_) => {
-            let _ = run(ctx, &["unlink-window", "-t", &format!("{psess}:{win}")]);
+            let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{win}")]);
             true
         }
         None => true,
     };
     if needs_link {
-        run(ctx, &["link-window", "-s", &format!("{session}:{win}"), "-t", &format!("{psess}:{win}")])?;
+        run(ctx, &["link-window", "-s", &format!("={session}:{win}"), "-t", &format!("={psess}:{win}")])?;
     }
-    run(ctx, &["select-window", "-t", &format!("{psess}:{win}")])?;
-    let _ = run(ctx, &["kill-window", "-t", &format!("{psess}:999")]); // temp 셸 정리(전용이라 무해)
+    run(ctx, &["select-window", "-t", &format!("={psess}:{win}")])?;
+    let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
     Ok(())
 }
 
@@ -242,7 +258,7 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
 pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
-        let _ = run(ctx, &["rename-window", "-t", &format!("{session}:0"), "터미널 1"]);
+        let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
         return Ok(NewWindowInfo { index: 0, name: "터미널 1".to_string() });
     }
     let name = next_pool_name(&list_windows(ctx, session));
@@ -250,14 +266,14 @@ pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<NewWind
     // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 view 가 담당).
     let out = run(
         ctx,
-        &["new-window", "-d", "-t", session, "-n", &name, "-c", &abs_s, "-P", "-F", "#{window_index}"],
+        &["new-window", "-d", "-t", &format!("={session}"), "-n", &name, "-c", &abs_s, "-P", "-F", "#{window_index}"],
     )?;
     Ok(NewWindowInfo { index: out.trim().parse().unwrap_or(0), name })
 }
 
 // 서피스(window) 종료.
 pub fn kill_window(ctx: &TmuxCtx, session: &str, index: i64) -> Result<(), String> {
-    run(ctx, &["kill-window", "-t", &format!("{session}:{index}")]).map(|_| ())
+    run(ctx, &["kill-window", "-t", &format!("={session}:{index}")]).map(|_| ())
 }
 
 // git 현재 브랜치(사이드바 표시용). 실패 시 None.
@@ -427,10 +443,10 @@ pub fn tmux_unview_window(
         return Ok(());
     }
     if n <= 1 {
-        let _ = run(&ctx, &["kill-session", "-t", &psess]);
+        let _ = run(&ctx, &["kill-session", "-t", &format!("={psess}")]);
         return Ok(());
     }
-    let _ = run(&ctx, &["unlink-window", "-t", &format!("{psess}:{index}")]);
+    let _ = run(&ctx, &["unlink-window", "-t", &format!("={psess}:{index}")]);
     Ok(())
 }
 
