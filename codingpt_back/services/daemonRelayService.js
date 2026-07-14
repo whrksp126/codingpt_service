@@ -422,10 +422,6 @@ function handleStreamUpgrade(streamToken, req, socket, head) {
 
 // ── 앱 터미널 ─────────────────────────────────────────────────────────
 
-function termTokenFor(userId) {
-  return 'dterm-' + crypto.createHmac('sha256', SECRET).update(`dterm:${userId}`).digest('hex').slice(0, 18);
-}
-
 // POST /api/daemon/terminal/start 에서 호출(인증 후). 데몬 오프라인이면 throw.
 function issueTerminalToken(userId, cwd, paneId, win, client) {
   if (!pickConn(userId)) { // 활성 러너 없으면 오프라인
@@ -433,7 +429,14 @@ function issueTerminalToken(userId, cwd, paneId, win, client) {
     err.statusCode = 409;
     throw err;
   }
-  const token = termTokenFor(userId);
+  // 토큰 = 스트림별 고유 난수. (구) 사용자당 고정 HMAC 토큰은 여러 pane/기기의 start 가 같은
+  //  토큰의 {paneId, client, win} 을 서로 덮어써, 한 기기의 스트림이 다른 기기의 pane 세션에
+  //  attach(-d 상호 킥 = "detached" 무한 반복)되는 혼선을 만들었다. 재접속은 각자의 토큰 URL 로
+  //  그대로 가능(TTL 은 resolve 시 연장).
+  const token = 'dterm-' + crypto.randomBytes(18).toString('hex');
+  // 만료 토큰 청소 — 스트림별 토큰이라 방치하면 누적된다.
+  const nowTs = Date.now();
+  for (const [t, s] of termTokens) { if (s.expiresAt < nowTs) termTokens.delete(t); }
   // cwd(데몬 홈-기준 상대경로) — 진입한 워크스페이스 폴더에서 터미널을 시작. 빈 문자열=홈.
   // paneId — pane 별 독립 tmux 세션 식별(여러 터미널 pane 이 각자 다른 window 를 동시에 보게).
   // win — 이 pane 이 표시할 tmux window(정수). 앱이 미리 확보해 넘기면 데몬이 attach 와 동시에 select.
