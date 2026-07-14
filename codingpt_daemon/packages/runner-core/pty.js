@@ -282,15 +282,16 @@ async function ensureView(psess, session, win, abs) {
   let wins = await poolWindows(session);
   let target = wins.find((w) => w.index === win);
   if (!target) {
-    try {
-      await runTmux(['new-window', '-d', '-t', `=${session}:${win}`, '-n', nextPoolName(wins), '-c', abs]);
-    } catch (e) {
-      // 여러 pane/기기가 같은 스테일 인덱스를 동시에 자가치유하는 레이스 — 이미 생겼으면 진행.
-      if (!/in use/.test(String(e.message || ''))) throw e;
+    // 재생성 금지 — "그 인덱스에 창을 다시 만들면" 다른 기기가 닫은 터미널이 스테일 참조/웹뷰
+    //  자동 재연결마다 부활한다(1개만 남겨도 잠시 후 3개). 죽은 win 은 풀의 첫 터미널로 폴백하고,
+    //  레이아웃 정리는 리컨실러가 한다. 풀이 완전히 비었을 때만 새 터미널 1개 생성.
+    if (!wins.length) {
+      await runTmux(['new-window', '-d', '-t', `=${session}:0`, '-n', '터미널 1', '-c', abs]).catch(() => {});
+      wins = await poolWindows(session);
     }
-    wins = await poolWindows(session);
-    target = wins.find((w) => w.index === win);
+    target = wins[0];
     if (!target) throw new Error('터미널 window 확보 실패');
+    win = target.index;
   }
   try {
     await runTmux(['has-session', '-t', '=' + psess]);

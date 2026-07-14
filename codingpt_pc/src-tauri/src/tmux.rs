@@ -229,16 +229,19 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
         ensure_session(ctx, session, abs)?;
         let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
     }
+    let mut win = win;
     let mut wins = list_windows(ctx, session);
     if !wins.iter().any(|w| w.index == win) {
-        let name = next_pool_name(&wins);
-        match run(ctx, &["new-window", "-d", "-t", &format!("={session}:{win}"), "-n", &name, "-c", &abs_s]) {
-            Ok(_) => {}
-            // 여러 pane/기기가 같은 스테일 인덱스를 동시에 자가치유하는 레이스 — 이미 생겼으면 진행.
-            Err(e) if e.contains("in use") => {}
-            Err(e) => return Err(e),
+        // 재생성 금지 — 그 인덱스에 창을 다시 만들면 다른 기기가 닫은 터미널이 스테일 참조/재연결마다
+        //  부활한다. 죽은 win 은 풀의 첫 터미널로 폴백(레이아웃 정리는 리컨실러 몫), 풀이 비었을 때만 생성.
+        if wins.is_empty() {
+            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-n", "터미널 1", "-c", &abs_s]);
+            wins = list_windows(ctx, session);
         }
-        wins = list_windows(ctx, session);
+        match wins.first() {
+            Some(f) => win = f.index,
+            None => return Err("터미널 window 확보 실패".to_string()),
+        }
     }
     let target_id = wins
         .iter()
