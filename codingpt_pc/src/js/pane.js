@@ -454,6 +454,16 @@ export class PaneView {
       if (t && typeof t.win === "number") this._view(t.win);
     };
     ta.addEventListener("focus", onFocus);
+    // 내부 클릭 — 이미 포커스된 터미널은 focus 이벤트가 다시 안 떠서 위 경로가 안 타므로,
+    //  클릭 자체로도 크기를 회수한다(다른 기기가 이 창을 자기 크기로 바꿨을 수 있음). 1.2s 스로틀.
+    let lastClaim = 0;
+    const onMouseDown = () => {
+      const n = Date.now();
+      if (n - lastClaim < 1200) return;
+      lastClaim = n;
+      onFocus();
+    };
+    this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
     document.addEventListener("input", onInput, true);
     document.addEventListener("compositionstart", onComp, true);
@@ -461,6 +471,7 @@ export class PaneView {
     document.addEventListener("compositionend", onCompEnd, true);
     this._inputDispose = () => {
       ta.removeEventListener("focus", onFocus);
+      this.termEl?.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("compositionstart", onComp, true);
