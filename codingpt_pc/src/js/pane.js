@@ -190,7 +190,7 @@ export class PaneView {
         const icon = isT ? icons.terminal : t.kind === "ide" ? icons.code : icons.globe;
         const label = isT
           ? t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널")
-          : t.kind === "ide" ? (t.openPath ? String(t.openPath).split("/").pop() : "IDE") : "프리뷰";
+          : t.kind === "ide" ? "IDE" : "프리뷰";
         tab.innerHTML = `<span class="ptab-ic">${icon({ size: 13 })}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
         const x = document.createElement("span");
         x.className = "ptab-x";
