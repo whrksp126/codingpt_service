@@ -295,7 +295,7 @@ export class PaneView {
       try {
         // 풀의 미배치 터미널 먼저 입양(첫 진입 시 남발 방지) → 없으면 풀에 새 터미널 생성(전 기기 공유).
         //  '+'로 만든 탭(fresh)은 입양 없이 반드시 새로 생성(사용자가 새 터미널을 명시 요청).
-        const r = (!tab.fresh && (await this.ctx.claimPoolWin?.())) || (await api.newWindow(this.ctx.localPath || ""));
+        const r = (!tab.fresh && (await this.ctx.claimPoolWin?.())) || (await api.newWindow(this.ctx.localPath || "", this.id));
         tab.win = r.index;
         if (r.name) tab.title = r.name;
       } catch (_) {
@@ -454,12 +454,19 @@ export class PaneView {
       // 확정 직후 input(확정 텍스트 반영)이 처리된 다음 틱에 버퍼 리셋 — 다음 입력은 새로 시작.
       setTimeout(() => resetBuf(), 0);
     };
+    // 포커스만 해도 이 pane 크기로 리사이즈 — view(select)가 클라이언트 크기로 resize-window 한다.
+    const onFocus = () => {
+      const t = this.node.tabs?.[this.node.active];
+      if (t && typeof t.win === "number") this._view(t.win);
+    };
+    ta.addEventListener("focus", onFocus);
     document.addEventListener("keydown", onKeydown, true);
     document.addEventListener("input", onInput, true);
     document.addEventListener("compositionstart", onComp, true);
     document.addEventListener("compositionupdate", onComp, true);
     document.addEventListener("compositionend", onCompEnd, true);
     this._inputDispose = () => {
+      ta.removeEventListener("focus", onFocus);
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("compositionstart", onComp, true);

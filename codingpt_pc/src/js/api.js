@@ -49,7 +49,7 @@ export const api = {
 
   // ── tmux 제어(서피스/브랜치/포트) ──
   listWindows: (localPath) => invoke("tmux_list_windows", { localPath }),
-  newWindow: (localPath) => invoke("tmux_new_window", { localPath }),
+  newWindow: (localPath, paneId) => invoke("tmux_new_window", { localPath, paneId: paneId || null }),
   killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
   viewWindow: (localPath, paneId, index) => invoke("tmux_view_window", { localPath, paneId, index }),
   unviewWindow: (localPath, paneId, index) => invoke("tmux_unview_window", { localPath, paneId, index }),

@@ -305,6 +305,18 @@ async function ensureView(psess, session, win, abs) {
   }
 }
 
+// pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
+//  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(select) 이동으로만 바뀐다.
+async function resizeToClient(psess, session, win) {
+  try {
+    const out = await runTmux(['list-clients', '-t', '=' + psess, '-F', '#{client_width} #{client_height}']);
+    const first = out.split('\n').filter(Boolean)[0];
+    if (!first) return;
+    const [w, h] = first.trim().split(/\s+/).map((n) => parseInt(n, 10));
+    if (w > 0 && h > 0) await runTmux(['resize-window', '-t', `=${session}:${win}`, '-x', String(w), '-y', String(h)]);
+  } catch (_) { /* 클라이언트 미접속 등 — 다음 포커스에서 보정 */ }
+}
+
 // terminal.* — 공유 풀 모델: 터미널 실체=풀(primary) window(전 기기 공유), pane=기기별 뷰 세션(링크).
 //  list/new/close = 풀 대상(전 기기 공통 내역). select(view)/unview = 이 기기 pane 뷰 대상.
 async function handleTerminalRpc(method, params) {
@@ -320,18 +332,27 @@ async function handleTerminalRpc(method, params) {
   if (method === 'terminal.new') {
     // 풀에 새 터미널 생성(전 기기에 나타남). 풀이 없으면 생성된 window 0 이 곧 새 터미널.
     const created = await ensurePool(session, abs);
-    if (created) return { index: 0, name: '터미널 1' };
+    if (created) {
+      if (paneId) await resizeToClient(psess, session, 0);
+      return { index: 0, name: '터미널 1' };
+    }
     const wins = await poolWindows(session);
     const name = nextPoolName(wins);
     const out = await runTmux(['new-window', '-d', '-t', '=' + session, '-n', name, '-c', abs, '-P', '-F', '#{window_index}']);
-    return { index: parseInt(out.trim(), 10) || 0, name };
+    const index = parseInt(out.trim(), 10) || 0;
+    // 요청 pane 의 클라이언트 크기로 즉시 맞춤 — 기본 크기(80x24)→실크기 리사이즈로 새 터미널에
+    //  재프롬프트가 쌓이는 것("내역처럼 보임")을 방지.
+    if (paneId) await resizeToClient(psess, session, index);
+    return { index, name };
   }
   if (method === 'terminal.select') {
-    // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/드롭 이동 공용).
+    // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/포커스/드롭 이동 공용).
+    //  선택 후 이 pane 클라이언트 크기로 리사이즈 — "포커스만 해도" 크기가 이 기기에 맞춰진다.
     const win = (params && params.index) | 0;
     if (!paneId) { await runTmux(['select-window', '-t', `=${session}:${win}`]); return { ok: true }; }
     await ensurePool(session, abs);
     await ensureView(psess, session, win, abs);
+    await resizeToClient(psess, session, win);
     return { ok: true };
   }
   if (method === 'terminal.unview') {

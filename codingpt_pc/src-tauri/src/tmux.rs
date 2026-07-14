@@ -203,6 +203,23 @@ pub struct NewWindowInfo {
     pub name: String,
 }
 
+// pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
+//  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(view) 이동으로만 바뀐다.
+fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
+    let out = match run(ctx, &["list-clients", "-t", &format!("={psess}"), "-F", "#{client_width} #{client_height}"]) {
+        Ok(o) => o,
+        Err(_) => return,
+    };
+    if let Some(line) = out.lines().find(|l| !l.trim().is_empty()) {
+        let mut it = line.split_whitespace();
+        if let (Some(w), Some(h)) = (it.next(), it.next()) {
+            if w.parse::<i64>().unwrap_or(0) > 0 && h.parse::<i64>().unwrap_or(0) > 0 {
+                let _ = run(ctx, &["resize-window", "-t", &format!("={session}:{win}"), "-x", w, "-y", h]);
+            }
+        }
+    }
+}
+
 // pane 뷰 세션 보장 + 풀 window(win)를 같은 인덱스로 link + select — 데몬 ensureView 미러.
 //  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
 //  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거.
@@ -251,14 +268,18 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
     }
     run(ctx, &["select-window", "-t", &format!("={psess}:{win}")])?;
     let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
+    resize_to_client(ctx, psess, session, win); // 포커스한 pane 크기로 즉시 맞춤(클라이언트 미접속이면 무시)
     Ok(())
 }
 
 // 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.
-pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
+pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf, psess: Option<&str>) -> Result<NewWindowInfo, String> {
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
         let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
+        if let Some(p) = psess {
+            resize_to_client(ctx, p, session, 0);
+        }
         return Ok(NewWindowInfo { index: 0, name: "터미널 1".to_string() });
     }
     let name = next_pool_name(&list_windows(ctx, session));
@@ -268,7 +289,12 @@ pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<NewWind
         ctx,
         &["new-window", "-d", "-t", &format!("={session}"), "-n", &name, "-c", &abs_s, "-P", "-F", "#{window_index}"],
     )?;
-    Ok(NewWindowInfo { index: out.trim().parse().unwrap_or(0), name })
+    let index: i64 = out.trim().parse().unwrap_or(0);
+    // 요청 pane 클라이언트 크기로 즉시 맞춤 — 기본 크기→실크기 리사이즈 재프롬프트가 안 쌓이게.
+    if let Some(p) = psess {
+        resize_to_client(ctx, p, session, index);
+    }
+    Ok(NewWindowInfo { index, name })
 }
 
 // 서피스(window) 종료.
@@ -399,9 +425,11 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Vec<
 pub fn tmux_new_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
+    pane_id: Option<String>,
 ) -> Result<NewWindowInfo, String> {
     let (session, abs) = session_for(&local_path);
-    new_window(&ctx, &session, &abs)
+    let psess = pane_id.as_deref().map(|p| pane_session(&session, p));
+    new_window(&ctx, &session, &abs, psess.as_deref())
 }
 
 // 풀에서 완전 삭제(전 기기 공통) — 링크된 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 소멸.
