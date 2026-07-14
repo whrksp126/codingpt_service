@@ -41,9 +41,6 @@ function paneCtx(ws) {
     onFocus: (id) => S.focusPane(id),
     onNotify: (paneId, title, body) => handleOsc(state.activeWsId, paneId, title, body),
     onSurfacesChanged: () => {},
-    onSplit: (paneId, dir) => S.splitPane(paneId, dir, "terminal"),
-    onPreview: (paneId) => S.splitPane(paneId, "h", "preview", { url: "" }),
-    onIde: (paneId) => S.splitPane(paneId, "h", "ide"),
     onClosePane: (paneId) => S.closePane(state.activeWsId, paneId),
     onMoveTab: (srcId, index, dstId) => moveTab(srcId, index, dstId),
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),
@@ -278,6 +275,54 @@ function renderMainTop(ws) {
   name.className = "mt-name";
   name.textContent = ws?.name || "워크스페이스";
   mainTop.append(fold, name);
+  // 통합 추가 버튼(터미널/IDE/웹뷰) — pane 별 버튼 대신 여기 고정. 활성 pane 기준 자동 배치.
+  if (ws) {
+    const spacer = document.createElement("span");
+    spacer.className = "mt-spacer";
+    const adds = document.createElement("span");
+    adds.className = "mt-adds";
+    const mkBtn = (icon, title, kind) => {
+      const b = document.createElement("button");
+      b.className = "pane-ctrl";
+      b.title = title;
+      b.innerHTML = icon({ size: 16 });
+      b.addEventListener("click", () => smartAdd(kind));
+      return b;
+    };
+    adds.append(
+      mkBtn(icons.terminal, "터미널 추가", "terminal"),
+      mkBtn(icons.code, "IDE 추가", "ide"),
+      mkBtn(icons.globe, "웹뷰 추가", "preview"),
+    );
+    mainTop.append(spacer, adds);
+  }
+}
+
+// 통합 추가 — 활성 pane 의 크기·비율로 배치를 자동 결정(모바일과 동일 규칙).
+//  · 절반이 최소 크기 이상인 축을 분할(둘 다 되면 긴 축): 가로=우측, 세로=아래.
+//  · 둘 다 부족하고 활성 pane 이 터미널이면 같은 영역에 탭으로 추가.
+//  · IDE/웹뷰는 공간이 부족해도 여유 있는 축으로 분할(탭 개념 없음). 새 요소 자동 포커스(splitPane).
+function smartAdd(kind) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout) return;
+  const focusId = rt.focusId || T.firstLeafId(rt.layout);
+  if (!focusId) return;
+  const focusLeaf = T.findLeaf(rt.layout, focusId);
+  const r = panes.get(focusId)?.el?.getBoundingClientRect();
+  const MIN_W = 360, MIN_H = 240;
+  const canH = !!r && r.width / 2 >= MIN_W;
+  const canV = !!r && r.height / 2 >= MIN_H;
+  let dir = null;
+  if (canH && canV) dir = r.width >= r.height ? "h" : "v";
+  else if (canH) dir = "h";
+  else if (canV) dir = "v";
+  if (kind === "terminal" && !dir && focusLeaf?.kind === "terminal") {
+    panes.get(focusId)?.addTab();
+    S.focusPane(focusId);
+    return;
+  }
+  const opts = kind === "preview" ? { url: "" } : kind === "terminal" ? { fresh: true } : undefined;
+  S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
 }
 
 export function updateWorkspaceView() {

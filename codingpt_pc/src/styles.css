@@ -185,6 +185,9 @@ body.resizing-row { cursor: row-resize; }
 .mt-folder { display: inline-flex; color: var(--accent); }
 .mt-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .mt-path { font-size: 11.5px; color: var(--dim); font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 통합 추가 버튼(터미널/IDE/웹뷰) — main-top 우측 고정, 활성 pane 기준 자동 배치 */
+.mt-spacer { flex: 1; }
+.mt-adds { display: inline-flex; align-items: center; gap: 2px; }
 
 .ws-grid { flex: 1; min-height: 0; background: var(--base); }
 .ws-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--dim); }

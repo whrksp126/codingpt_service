@@ -55,7 +55,7 @@ const TERM_THEME = {
 
 export class PaneView {
   // node: tiling leaf, ctx: { localPath, isLocal, onFocus, onNotify, onSurfacesChanged,
-  //   onSplit(paneId,dir), onClosePane(paneId), onMoveTab(srcId,index,dstId), persist }
+  //   onClosePane(paneId), onMoveTab(srcId,index,dstId), persist }
   constructor(node, ctx) {
     this.node = node;
     this.id = node.id;
@@ -131,20 +131,13 @@ export class PaneView {
       tabsEl.appendChild(lbl);
     }
 
+    // 추가류 버튼(새 터미널/분할/IDE/프리뷰)은 상단 워크스페이스 헤더의 통합 추가 버튼으로 이동
+    //  (활성 pane 기준 자동 배치) — pane 헤더에는 pane 전용 컨트롤만 남긴다. 단축키(⌘D 등)는 유지.
     const ctrls = document.createElement("div");
     ctrls.className = "pane-ctrls";
-    if (this.node.kind === "terminal") {
-      ctrls.append(headBtn(icons.terminal, "새 터미널", () => this.addTab()));
-    }
     if (this.node.kind === "ide") {
       ctrls.append(headBtn(icons.sidebar, "탐색기 토글", () => this.ide?.toggleTree()));
     }
-    ctrls.append(
-      headBtn(icons.splitRight, "우측 분할 (⌘D)", () => this.ctx.onSplit?.(this.id, "h")),
-      headBtn(icons.splitDown, "하단 분할 (⌘⇧D)", () => this.ctx.onSplit?.(this.id, "v")),
-      headBtn(icons.code, "IDE 열기", () => this.ctx.onIde?.(this.id)),
-      headBtn(icons.globe, "프리뷰 열기", () => this.ctx.onPreview?.(this.id))
-    );
     this.head.append(tabsEl, ctrls);
   }
 

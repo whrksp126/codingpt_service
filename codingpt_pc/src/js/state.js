@@ -190,7 +190,9 @@ export function splitPane(paneId, dir, kind, opts) {
   const w = wsRuntime(state.activeWsId);
   if (!w || !paneId) return;
   // 새 터미널 pane = 풀에 새 터미널('new' → _ensureWin 이 생성, 전 기기에 나타남).
+  //  opts.fresh: 사용자가 명시적으로 "터미널 추가"한 경우 — 입양(claim) 없이 반드시 새로 생성.
   const node = kind === "preview" || kind === "ide" ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new" });
+  if (node.kind === "terminal" && opts && opts.fresh) node.tabs[0].fresh = true;
   const r = T.split(w.layout, paneId, dir, node);
   w.layout = r.tree;
   w.focusId = r.added.id;
