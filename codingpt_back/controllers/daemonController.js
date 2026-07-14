@@ -606,7 +606,7 @@ async function terminalList(req, res) {
 // POST /api/daemon/terminal/new  (인증) body:{ cwd } → { index }
 async function terminalNew(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '', paneId: (req.body && req.body.paneId) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -620,7 +620,7 @@ async function terminalSelect(req, res) {
 // POST /api/daemon/terminal/close  (인증) body:{ cwd, index } → { ok }
 async function terminalClose(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0 });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '' });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

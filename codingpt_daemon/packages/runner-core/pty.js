@@ -60,9 +60,17 @@ function sessionForCwd(cwdRel) {
   return { session: 'cpt-' + (safe || 'ws'), abs };
 }
 
-// pane 별 grouped view 세션명. primary 와 window 를 공유하되 current-window 는 독립.
+// pane 별 grouped view 세션명(레거시). primary 와 window 공유·current-window 독립 — 이었으나
+//  grouped 의 current-window 가 attach 타이밍/동시성에 취약해 여러 pane 이 같은 window 를 봤다(복제).
 function viewSession(primary, paneId) {
   return primary + '--v-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
+}
+
+// pane 별 "독립" 세션명(현행). primary 와 window 를 공유하지 않는다 → current-window 경쟁 원천 소멸.
+//  각 pane = 자기 세션 = 자기 셸(들). 탭 = 이 세션 안의 window. select 는 단일 세션·단일 클라이언트라 확실히 붙는다.
+//  (대가: PC↔모바일 터미널 라이브미러는 없어진다 — 어차피 공유모델서도 신뢰 못했음. 파일은 여전히 공유.)
+function paneSession(primary, paneId) {
+  return primary + '--p-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
 }
 
 let tmuxPathCache = null;
@@ -113,38 +121,22 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
 
     let spawnArgs;
     if (paneId) {
-      // primary 세션 보장(detached create-or-noop) → 이 pane 전용 grouped view 세션에 attach.
-      //   grouped(-t): window 목록은 primary 와 공유, current-window/size 는 독립
-      //   → PC 의 grouped session 방식과 동일하게 여러 pane 이 서로 다른 window 를 동시 표시.
+      // 이 pane 전용 "독립" 세션에 attach. primary 와 window 공유 안 함 → 다른 pane 과 절대 겹치지 않음.
+      const psess = paneSession(session, paneId);
+      // 이 pane 이 표시할 window(탭). 없으면 세션의 첫 window(0). 독립 세션이라 attach 전 select 가 확실히 붙는다.
+      const selWin = (params && Number.isInteger(params.win)) ? params.win : 0;
+      // 세션 보장(detached create-or-noop) — 없으면 abs 에서 첫 셸(window 0) 생성.
       try {
         execFileSync(tmux, [
           '-L', TMUX_SOCKET, ...CONF_ARGS,
-          'new-session', '-A', '-d', '-s', session, '-c', abs,
+          'new-session', '-A', '-d', '-s', psess, '-c', abs,
           ';', 'set', '-g', 'window-size', 'latest',
         ], { env, stdio: 'ignore' });
       } catch (_) { /* 이미 존재하면 무시 */ }
-      const view = viewSession(session, paneId);
-      // 이 pane 이 표시할 window(win). 앱이 pane 별로 자기 window 를 미리 확보해 넘긴다.
-      //  ⚠️ grouped view 는 생성 시 primary 의 current-window 를 상속하고, "attach 와 한 커맨드로 묶은
-      //  select-window"는 attach 가 current-window 를 0 으로 되돌려 무효화된다(tmux 3.7 실측).
-      //  → select-window 는 **attach 가 자리잡은 뒤 별도 커맨드**로 실행해야 붙는다(아래 selectAfterAttach).
-      //  안 그러면 여러 pane 이 같은(상속된) window 를 봐서 "터미널 복제"처럼 보인다.
-      const selWin = (params && Number.isInteger(params.win)) ? params.win : null;
-      // -u: UTF-8 출력 강제(로케일과 무관). 한글 등 멀티바이트가 '_' 로 뭉개지지 않게.
-      // -A: view 가 있으면 attach(재연결 시 current-window 유지), 없으면 -t 로 grouped 생성.
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-t', session, '-s', view];
-      spawnArgs.push(';', 'set', '-g', 'window-size', 'latest');
-      // attach 직후(별도 커맨드) 목표 window 로 전환 — 짧게 지연 후 재시도(뷰 세션이 붙을 때까지).
-      if (selWin != null) {
-        const doSelect = (attempt) => {
-          try {
-            execFileSync(tmux, ['-L', TMUX_SOCKET, 'select-window', '-t', `${view}:${selWin}`], { env, stdio: 'ignore' });
-          } catch (_) {
-            if (attempt < 4) setTimeout(() => doSelect(attempt + 1), 200);
-          }
-        };
-        setTimeout(() => doSelect(0), 120);
-      }
+      // 목표 탭 window 로 미리 전환(존재할 때만) — 독립 세션이라 attach 후에도 유지된다.
+      try { execFileSync(tmux, ['-L', TMUX_SOCKET, 'select-window', '-t', `${psess}:${selWin}`], { env, stdio: 'ignore' }); } catch (_) { /* 없는 window 무시 */ }
+      // -u: UTF-8 출력 강제. -A: 있으면 attach(재연결 시 current-window 유지).
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'new-session', '-A', '-s', psess, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
@@ -219,10 +211,13 @@ function runTmux(args) {
 // terminal.list/new/select/close — 진입 워크스페이스(cwd)에 해당하는 tmux 세션의 window 를 관리.
 async function handleTerminalRpc(method, params) {
   const { session, abs } = sessionForCwd(params && params.cwd);
+  // paneId 있으면 그 pane 의 독립 세션을 대상으로(탭=이 세션의 window). 없으면 레거시 공유 세션.
+  const paneId = params && params.paneId ? String(params.paneId) : '';
+  const target = paneId ? paneSession(session, paneId) : session;
   if (method === 'terminal.list') {
     let out;
     try {
-      out = await runTmux(['list-windows', '-t', session, '-F', '#{window_index}\t#{window_active}\t#{pane_current_command}']);
+      out = await runTmux(['list-windows', '-t', target, '-F', '#{window_index}\t#{window_active}\t#{pane_current_command}']);
     } catch (_) {
       return { windows: [] }; // 세션 미존재(스트림 미개설) → 빈 목록
     }
@@ -233,26 +228,23 @@ async function handleTerminalRpc(method, params) {
     return { windows };
   }
   if (method === 'terminal.new') {
+    // 이 pane 의 세션에 새 window(탭) 생성. -d: 스트림(attach)의 current-window 를 즉시 안 바꿈(앱이 select 로 전환).
     try {
-      // -d: 새 window 를 만들되 primary 의 current-window 를 바꾸지 않는다. 그래야 뒤이어 생성되는
-      //  grouped view 세션이 엉뚱한(방금 만든) window 를 상속하지 않는다. 각 pane 은 자기 win 을 명시 select.
-      const out = await runTmux(['new-window', '-d', '-t', session, '-c', abs, '-P', '-F', '#{window_index}']);
+      const out = await runTmux(['new-window', '-d', '-t', target, '-c', abs, '-P', '-F', '#{window_index}']);
       return { index: parseInt(out.trim(), 10) || 0 };
     } catch (_) {
-      // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach). conf 는 서버 시작 시점에만 유효.
-      const out = await runTmux(['-f', TMUX_CONF, 'new-session', '-d', '-s', session, '-c', abs, '-P', '-F', '#{window_index}']);
+      // 세션이 아직 없으면 detached 로 생성(앱 스트림이 뒤이어 -A 로 attach).
+      const out = await runTmux(['-f', TMUX_CONF, 'new-session', '-d', '-s', target, '-c', abs, '-P', '-F', '#{window_index}']);
       return { index: parseInt(out.trim(), 10) || 0 };
     }
   }
   if (method === 'terminal.select') {
-    // paneId 있으면 그 pane 의 grouped view 세션에서 window 선택(다른 pane 에 영향 없음).
-    const paneId = params && params.paneId ? String(params.paneId) : '';
-    const target = paneId ? viewSession(session, paneId) : session;
+    // 이 pane 의 독립 세션에서 window(탭) 선택 — 단일 세션·단일 클라이언트라 확실히 붙는다.
     await runTmux(['select-window', '-t', `${target}:${(params && params.index) | 0}`]);
     return { ok: true };
   }
   if (method === 'terminal.close') {
-    await runTmux(['kill-window', '-t', `${session}:${(params && params.index) | 0}`]);
+    await runTmux(['kill-window', '-t', `${target}:${(params && params.index) | 0}`]);
     return { ok: true };
   }
   throw new Error('unknown terminal method: ' + method);
