@@ -460,6 +460,12 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
   if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
   wss.handleUpgrade(req, socket, head, async (appWs) => {
     let daemonWs = null;
+    // 브리지 성립 전(데몬 다이얼백 대기 중) 도착한 앱 메시지 버퍼 — 앱은 open 직후 곧바로 첫
+    //  resize 를 보내는데, 리스너가 없으면 통째로 유실된다. 첫 resize 유실 = 창/클라이언트가
+    //  80x24 로 남고, 이후 select 리사이즈가 스테일 크기와 핑퐁하며 셸 프롬프트가 누적된다(실측 근원).
+    const early = [];
+    const earlyFn = (data, isBinary) => { early.push([data, isBinary]); };
+    appWs.on('message', earlyFn);
     // 이 터미널을 실제로 여는 대상 러너 conn — 라이브 터미널 카운트로 동면을 막는다.
     const ptyConn = pickConn(sess.userId);
     try {
@@ -476,7 +482,12 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
       appWs.once('close', dec);
       appWs.once('error', dec);
     }
+    appWs.off('message', earlyFn);
     bridge(appWs, daemonWs, `pty userId=${sess.userId}`);
+    // 버퍼된 메시지(첫 resize 등)를 데몬으로 순서대로 재생.
+    for (const [d, b] of early) {
+      try { if (daemonWs.readyState === WebSocket.OPEN) daemonWs.send(d, { binary: b }); } catch (_) { /* noop */ }
+    }
   });
 }
 

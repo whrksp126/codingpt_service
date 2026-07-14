@@ -108,6 +108,14 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   const wsUrl = serverUrl.replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
   const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
 
+  // 셋업(풀/뷰 준비·pty 스폰) 완료 전에 도착한 메시지 버퍼 — 클라이언트는 open 직후 곧바로 첫
+  //  resize 를 보내는데, 실제 핸들러가 셋업 뒤에 붙으면 그 메시지가 통째로 유실된다. 유실되면
+  //  창/클라이언트가 80x24 로 남고(keepalive 25s 가 올 때까지), select 리사이즈가 그 스테일 크기로
+  //  동작해 실크기 리사이즈와 핑퐁 → 셸 프롬프트 무한 누적(실측 근원).
+  const earlyMsgs = [];
+  let onMsg = (data, isBinary) => { earlyMsgs.push([data, isBinary]); };
+  ws.on('message', (d, b) => onMsg(d, b));
+
   ws.on('open', async () => {
     const cols = (params && params.cols) || 80;
     const rows = (params && params.rows) || 24;
@@ -183,6 +191,11 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     //  새 창이 기본 크기(80x24)로 남는다(점선 반쪽 화면).
     const selForResize = resolvedWin;
     let firstResizeDone = !paneId;
+    // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
+    //  클라이언트 크기가 80x24 로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
+    //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 80x24 화면만 그려지는(반쪽 화면)
+    //  사고가 난다. 창 크기는 첫 resize 에서 manual 로 고정된 뒤라 nudge 는 클라이언트만 건드린다.
+    let nudgeTimer = null;
     // 마지막으로 반영한 클라이언트 크기 — 크기가 "변할 때"만 표시 창을 따라 리사이즈한다.
     //  (키보드 노출/pane 분할선 드래그로 이 기기 화면이 바뀌면 창도 즉시 따라와야 TUI(claude 등)가
     //   이 기기 크기로 다시 그린다. keepalive 는 같은 크기를 재전송하므로 여기서 걸러진다 —
@@ -197,7 +210,7 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       try { ws.close(); } catch (_) { /* noop */ }
     });
 
-    ws.on('message', (data, isBinary) => {
+    onMsg = (data, isBinary) => {
       if (isBinary) {
         try { pty.write(data.toString('utf8')); } catch (_) { /* noop */ }
         return;
@@ -208,9 +221,16 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         if (m && m.type === 'resize' && m.cols && m.rows) {
           const w = m.cols | 0, h = m.rows | 0;
           try { pty.resize(w, h); } catch (_) { /* noop */ }
+          // 이 pane 클라이언트의 실제 크기를 기록 — select(claim) 리사이즈가 tmux 클라이언트 크기
+          //  조회 대신 이 값을 쓴다(attach 레이스로 클라이언트가 80x24 로 고착돼 있어도 정확).
+          if (psess) paneClientSize.set(psess, { w, h });
           if (!firstResizeDone) {
             firstResizeDone = true;
             lastW = w; lastH = h;
+            if (nudgeTimer) clearTimeout(nudgeTimer);
+            nudgeTimer = setTimeout(() => {
+              try { pty.resize(Math.max(2, lastW - 1), lastH); pty.resize(lastW, lastH); } catch (_) { /* noop */ }
+            }, 600);
             // 부팅 초기화는 "아무도 안 잡은(virgin)" 창에만 — resize-window 를 거친 창은 window-size
             //  옵션이 manual 로 남으므로, 이미 어떤 기기가 잡은 창을 백그라운드 기기의 재접속이
             //  도로 뺏지 않는다(크기 주장은 포커스/조작 시점의 select 가 담당).
@@ -238,10 +258,13 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         }
       } catch (_) { /* JSON 아니면 일반 입력 */ }
       try { pty.write(str); } catch (_) { /* noop */ }
-    });
+    };
+    // 셋업 중 버퍼된 메시지(첫 resize 등)를 순서대로 재생.
+    for (const [d, b] of earlyMsgs.splice(0)) onMsg(d, b);
 
     const cleanup = () => {
       // tmux 클라이언트만 종료(detach) — 세션은 tmux 서버에 살아남는다.
+      if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
       try { pty.kill(); } catch (_) { /* noop */ }
     };
     ws.on('close', cleanup);
@@ -250,6 +273,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
 
   ws.on('error', (e) => console.error(`[pty] 스트림 WS 오류: ${e.message}`));
 }
+
+// pane 뷰 세션별 "스트림이 보고한" 클라이언트 크기 — psess → {w,h}.
+//  tmux list-clients 는 attach 레이스로 스테일(80x24)일 수 있어 select 리사이즈의 원천으로 못 쓴다.
+const paneClientSize = new Map();
 
 // ── 멀티 터미널(tmux window) RPC ──
 // 클라우드(ideService)와 동일한 "window 스위칭" 모델을 데몬에서 미러한다: 앱의 단일 PTY 스트림이
@@ -353,10 +380,18 @@ async function ensureView(psess, session, win, abs) {
 //  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(select) 이동으로만 바뀐다.
 async function resizeToClient(psess, session, win) {
   try {
-    const out = await runTmux(['list-clients', '-t', '=' + psess, '-F', '#{client_width} #{client_height}']);
-    const first = out.split('\n').filter(Boolean)[0];
-    if (!first) return;
-    const [w, h] = first.trim().split(/\s+/).map((n) => parseInt(n, 10));
+    // 스트림이 보고한 실제 크기 우선 — tmux 클라이언트 크기는 attach 레이스로 80x24 에 고착될 수
+    //  있어(첫 resize 유실), 그걸 믿으면 select(claim)마다 창을 80x24 로 줄여 스트림 리사이즈와
+    //  핑퐁하며 셸 프롬프트가 무한 누적된다(실측 근원).
+    let w = 0, h = 0;
+    const known = paneClientSize.get(psess);
+    if (known) { w = known.w; h = known.h; }
+    else {
+      const out = await runTmux(['list-clients', '-t', '=' + psess, '-F', '#{client_width} #{client_height}']);
+      const first = out.split('\n').filter(Boolean)[0];
+      if (!first) return;
+      [w, h] = first.trim().split(/\s+/).map((n) => parseInt(n, 10));
+    }
     if (!(w > 0 && h > 0)) return;
     // 이미 같은 크기면 스킵 — 같은 기기의 반복 터치(스크롤 등)가 매번 resize-window 를 때리면
     //  다른 기기와 크기 주장이 교차할 때 SIGWINCH 가 반복돼 셸 프롬프트가 스크롤백에 쌓인다.
