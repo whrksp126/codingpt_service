@@ -357,7 +357,13 @@ async function resizeToClient(psess, session, win) {
     const first = out.split('\n').filter(Boolean)[0];
     if (!first) return;
     const [w, h] = first.trim().split(/\s+/).map((n) => parseInt(n, 10));
-    if (w > 0 && h > 0) await runTmux(['resize-window', '-t', `=${session}:${win}`, '-x', String(w), '-y', String(h)]);
+    if (!(w > 0 && h > 0)) return;
+    // 이미 같은 크기면 스킵 — 같은 기기의 반복 터치(스크롤 등)가 매번 resize-window 를 때리면
+    //  다른 기기와 크기 주장이 교차할 때 SIGWINCH 가 반복돼 셸 프롬프트가 스크롤백에 쌓인다.
+    const cur = await runTmux(['list-windows', '-t', '=' + session, '-F', '#{window_index} #{window_width} #{window_height}']).catch(() => '');
+    const line = cur.split('\n').map((l) => l.trim().split(/\s+/)).find((p) => (parseInt(p[0], 10) || 0) === win);
+    if (line && parseInt(line[1], 10) === w && parseInt(line[2], 10) === h) return;
+    await runTmux(['resize-window', '-t', `=${session}:${win}`, '-x', String(w), '-y', String(h)]);
   } catch (_) { /* 클라이언트 미접속 등 — 다음 포커스에서 보정 */ }
 }
 
@@ -391,14 +397,18 @@ async function handleTerminalRpc(method, params) {
   }
   if (method === 'terminal.select') {
     // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/포커스/드롭 이동 공용).
-    //  선택 후 이 pane 클라이언트 크기로 리사이즈 — "포커스만 해도" 크기가 이 기기에 맞춰진다.
+    //  claim=true(사용자 터치/포커스/탭 클릭)일 때만 이 pane 클라이언트 크기로 리사이즈.
+    //  자동 경로(리컨실러 반영·재접속 보정 등)가 크기를 주장하면 기기 간 크기 뺏기가 반복돼
+    //  셸이 SIGWINCH 마다 프롬프트를 다시 찍어 스크롤백에 쌓인다 — 뷰 전환만 수행한다.
     const win = (params && params.index) | 0;
+    // claim 필드가 아예 없으면(구버전 백엔드가 필드를 안 넘김) 현행 동작(true) 유지 — 롤아웃 호환.
+    const claim = params && 'claim' in params ? !!params.claim : true;
     if (!paneId) { await runTmux(['select-window', '-t', `=${session}:${win}`]); return { ok: true }; }
     await ensurePool(session, abs);
     // 리사이즈는 ensureView 가 실제로 링크한 인덱스 기준 — 요청 인덱스가 스테일(서버 재시작/타 기기
     //  삭제)이면 폴백된 창이 표시되는데, 스테일 인덱스로 resize 하면 표시 창이 기본 크기로 남는다.
     const resolved = await ensureView(psess, session, win, abs);
-    await resizeToClient(psess, session, resolved);
+    if (claim) await resizeToClient(psess, session, resolved);
     return { ok: true, index: resolved };
   }
   if (method === 'terminal.unview') {

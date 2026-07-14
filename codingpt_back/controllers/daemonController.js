@@ -612,10 +612,11 @@ async function terminalNew(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
-// POST /api/daemon/terminal/select  (인증) body:{ cwd, index } → { ok }
+// POST /api/daemon/terminal/select  (인증) body:{ cwd, index, claim } → { ok }
+//  claim=true(사용자 터치/포커스/탭 클릭)일 때만 데몬이 창 크기를 이 기기로 리사이즈.
 async function terminalSelect(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '', claim: !!(req.body && req.body.claim) });
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
