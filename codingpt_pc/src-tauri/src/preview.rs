@@ -126,7 +126,13 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
                         // macOS 13.3+ 는 inspectable 플래그가 있어야 인스펙터 부착 가능.
                         let _: () = msg_send![wk, setInspectable: true];
                         let insp: *mut AnyObject = msg_send![wk, _inspector];
-                        if !insp.is_null() { let _: () = msg_send![insp, show]; }
+                        if !insp.is_null() {
+                            // attach 모드는 WebKit 이 webview 프레임을 점유해 pane 밖(창 전체)으로
+                            //  확장시키므로(강제 재동기화로도 복구 불가), 항상 별도 창으로 연다.
+                            //  detach 는 "열린 뒤"에만 유효 — show 후 호출해야 실제로 분리된다.
+                            let _: () = msg_send![insp, show];
+                            let _: () = msg_send![insp, detach];
+                        }
                     }
                     other => {
                         let js = if other == "theme_on" { DARK_ON_JS } else { DARK_OFF_JS };

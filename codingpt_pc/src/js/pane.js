@@ -174,10 +174,14 @@ class PreviewSurface {
     this._visible = false;
     this._key = "";
     this._disposed = false;
+    this._forceTick = 0;
     const tick = () => {
       if (this._disposed) return;
       const h = this.host;
       if (h && document.body.contains(h)) {
+        // 인스펙터 attach 등 네이티브 쪽이 webview 프레임을 바꿔도(DOM rect 는 그대로라 key 불변)
+        //  주기적으로 강제 재적용해 pane 영역에 다시 고정한다 → 인스펙터도 pane 안에 갇힌다.
+        if (++this._forceTick >= 45) { this._forceTick = 0; this._key = ""; }
         const r = h.getBoundingClientRect();
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
@@ -775,10 +779,13 @@ export class PaneView {
   _startPreviewSync() {
     this._disposed = false;
     this._previewKey = "";
+    this._previewForceTick = 0;
     const tick = () => {
       if (this._disposed || this.node.kind !== "preview") return;
       const host = this.previewHost;
       if (host && document.body.contains(host)) {
+        // 인스펙터 attach 등 네이티브 프레임 변경 복구용 주기 강제 재적용(위 PreviewSurface 와 동일).
+        if (++this._previewForceTick >= 45) { this._previewForceTick = 0; this._previewKey = ""; }
         const r = host.getBoundingClientRect();
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
