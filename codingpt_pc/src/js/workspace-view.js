@@ -260,14 +260,15 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
     ? { id: newId, kind: "terminal", tabs: [tab], active: 0 }
     : tab.kind === "ide"
       ? { id: newId, kind: "ide", openPath: tab.openPath || null }
-      : { id: newId, kind: "preview", url: tab.url || null };
+      // 표면 ID(tid)·다크·메타 승계 — 같은 "pv-"+tid 로 재생성돼 webview 가 유지된다.
+      : { id: newId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav };
   const dir = side === "left" || side === "right" ? "h" : "v";
   const before = side === "left" || side === "top";
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
   rt.layout = r.tree;
   rt.focusId = newLeaf.id;
   if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
-  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab);
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — webview 보존(새 pane 이 승계)
   if (!src.tabs.length) {
     // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 풀 kill 대상이 없다.
     S.closePane(state.activeWsId, srcId);
@@ -290,11 +291,15 @@ function joinPaneAsTab(srcId, dstId, insertIndex) {
   if (!src || !dst || dst.kind !== "terminal" || (src.kind !== "ide" && src.kind !== "preview")) return;
   const tab = src.kind === "ide"
     ? { kind: "ide", openPath: src.openPath || null, tid: newTid() }
-    : { kind: "preview", url: src.url || null, tid: newTid() };
+    // 표면 ID 승계(pane→탭): 기존 독립 pane 의 "pv-"+(tid||paneId) webview 를 그대로 쓴다.
+    : { kind: "preview", url: src.url || null, tid: src.tid || src.id, dark: src.dark, metaTitle: src.metaTitle, metaFav: src.metaFav };
   const at = insertIndex == null ? dst.tabs.length : Math.max(0, Math.min(dst.tabs.length, insertIndex));
   dst.tabs.splice(at, 0, tab);
   dst.active = at;
   // src pane 제거 — 터미널 없는 pane 이라 풀 영향 없음(closePane 은 터미널 win 만 kill).
+  //  프리뷰는 webview 를 닫지 않고 넘긴다(표면 승계 — dispose 가 _preservePreview 확인).
+  const srcPane = panes.get(srcId);
+  if (srcPane && src.kind === "preview") srcPane._preservePreview = true;
   S.closePane(state.activeWsId, srcId);
   const rt2 = wsRuntime(state.activeWsId);
   if (rt2) rt2.focusId = dstId;
@@ -509,7 +514,7 @@ async function moveTab(srcId, index, dstId) {
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
   if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
-  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab); // 본문은 dst 에서 재생성
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 본문은 dst 에서 재생성 — 프리뷰 webview 는 보존·승계
   if (!src.tabs.length) {
     S.closePane(state.activeWsId, srcId);
     return; // closePane → emit → 재렌더
@@ -564,7 +569,7 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
   if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
-  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab);
+  if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — 프리뷰 webview 보존
   if (!src.tabs.length) { S.closePane(state.activeWsId, srcId); return; }
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();

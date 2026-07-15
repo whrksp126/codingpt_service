@@ -55,7 +55,7 @@ function smartUrl(raw) {
   return "https://www.google.com/search?q=" + encodeURIComponent(u);
 }
 
-function makePreviewBar({ getId, initialUrl, onNavigate, onMeta }) {
+function makePreviewBar({ getId, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
   const bar = document.createElement("div");
   bar.className = "preview-bar";
   const mk = (iconFn, title) => {
@@ -77,7 +77,8 @@ function makePreviewBar({ getId, initialUrl, onNavigate, onMeta }) {
   const ext = mk(icons.external, "외부 브라우저에서 열기");
   bar.append(back, fwd, reload, input, theme, tools, ext);
 
-  const st = { url: initialUrl || "", dark: false, disposed: false, meta: { title: "", favicon: "" } };
+  const st = { url: initialUrl || "", dark: !!initialDark, disposed: false, meta: { title: "", favicon: "" } };
+  theme.classList.toggle("active", st.dark);
   const setNavState = (b, f) => { back.disabled = !b; fwd.disabled = !f; };
   setNavState(false, false);
   back.addEventListener("click", () => api.previewControl(getId(), "back").catch(() => {}));
@@ -88,6 +89,7 @@ function makePreviewBar({ getId, initialUrl, onNavigate, onMeta }) {
     st.dark = !st.dark;
     theme.classList.toggle("active", st.dark);
     api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
+    onDarkChange?.(st.dark);
   });
   tools.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "devtools").catch(() => {}); });
   ext.addEventListener("click", () => { if (st.url) api.openExternal(st.url).catch(() => {}); });
@@ -162,6 +164,8 @@ class PreviewSurface {
         onMeta?.(m);
         persist?.(); // 탭 메타는 레이아웃과 함께 영속(복원 시 라벨 유지)
       },
+      initialDark: !!tab.dark,
+      onDarkChange: (v) => { this.tab.dark = v; persist?.(); },
     });
     this.host = document.createElement("div");
     this.host.className = "preview-host";
@@ -191,12 +195,14 @@ class PreviewSurface {
     this._infoTimer = setInterval(() => { if (this._visible && this.url) this.bar.refreshInfo(); }, 4000);
   }
   setVisible(v) { this._visible = v; }
-  dispose() {
+  // keepWebview=true — 탭 이동(다른 pane 재생성 예정): 네이티브 webview 를 닫지 않고 넘긴다.
+  //  같은 표면 ID("pv-"+tid)로 재생성되면 기존 webview 에 재부착 → 페이지·테마·인스펙터 유지.
+  dispose(keepWebview) {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
     clearInterval(this._infoTimer);
     this.bar.dispose();
-    api.previewClose(this.id).catch(() => {});
+    if (!keepWebview) api.previewClose(this.id).catch(() => {});
   }
 }
 function escapeHtml(s) {
@@ -389,13 +395,17 @@ export class PaneView {
   // preview pane — 네이티브 임베디드 webview(iframe 아님 → X-Frame-Options 무관, 구글 등 다 뜸).
   //  툴바(DOM) + host(DOM placeholder) 위에 Rust 가 webview 를 얹어 위치/가시성 동기화.
   _buildFrame() {
+    // 표면 ID — 탭↔독립 pane 전환에도 동일("pv-"+tid)해서 네이티브 webview 를 승계한다.
+    this._pvId = "pv-" + (this.node.tid || this.id);
     this.previewBar = makePreviewBar({
-      getId: () => this.id,
+      getId: () => this._pvId,
       initialUrl: this.node.url || "",
+      initialDark: !!this.node.dark,
+      onDarkChange: (v) => { this.node.dark = v; this.ctx.persist?.(); },
       onNavigate: (u) => {
         this.node.url = u;
         this.previewUrl = u;
-        api.previewNavigate(this.id, u).catch(() => {});
+        api.previewNavigate(this._pvId, u).catch(() => {});
         this._previewKey = ""; // 강제 재동기화(없으면 생성)
         this.ctx.persist?.();
       },
@@ -552,11 +562,11 @@ export class PaneView {
     this._mixed.set(tab.tid, m);
     return m;
   }
-  disposeMixedTab(tab) {
+  disposeMixedTab(tab, keepWebview) {
     const m = tab && tab.tid ? this._mixed.get(tab.tid) : null;
     if (!m) return;
     m.ide?.dispose();
-    m.preview?.dispose();
+    m.preview?.dispose(keepWebview);
     m.host.remove();
     this._mixed.delete(tab.tid);
   }
@@ -777,7 +787,7 @@ export class PaneView {
         if (key !== this._previewKey) {
           this._previewKey = key;
           if (this.previewUrl) {
-            api.previewSync(this.id, this.previewUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
+            api.previewSync(this._pvId, this.previewUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
           }
         }
       }
@@ -881,7 +891,8 @@ export class PaneView {
       if (this._previewRaf) cancelAnimationFrame(this._previewRaf);
       if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
       this.previewBar?.dispose();
-      api.previewClose(this.id).catch(() => {});
+      // 탭 편입(joinPaneAsTab) 등 표면 승계 경로에선 webview 를 닫지 않는다.
+      if (!this._preservePreview) api.previewClose(this._pvId).catch(() => {});
     }
     if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});
     try {
