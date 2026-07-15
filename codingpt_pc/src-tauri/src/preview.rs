@@ -3,7 +3,8 @@
 //  top-level 컨텍스트라 아무 사이트나 로드 가능(cmux 프리뷰와 동일 원리).
 //  webview 는 메인 DOM 위에 얹히므로, 프론트가 pane 위치/가시성을 rAF 로 동기화한다.
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
@@ -15,10 +16,112 @@ pub struct PreviewManager {
 struct Entry {
     webview: Webview,
     url: String,
+    // macOS: webview 를 감싸는 pane 크기 컨테이너 NSView(포인터, 0=미생성).
+    //  WebKit 인스펙터 attach 는 "inspected 뷰의 superview 전체"를 분할하므로(Safari 가정),
+    //  superview 를 pane 크기 컨테이너로 만들어야 "내부 열기"가 pane 안에 갇힌다.
+    container: Arc<AtomicUsize>,
 }
 
 fn sanitize(id: &str) -> String {
     id.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
+}
+
+// AppKit 지오메트리(objc2 msg_send 인코딩용 최소 정의).
+#[cfg(target_os = "macos")]
+mod ns {
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Point { pub x: f64, pub y: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Size { pub w: f64, pub h: f64 }
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    pub struct Rect { pub origin: Point, pub size: Size }
+    unsafe impl objc2::Encode for Point {
+        const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl objc2::Encode for Size {
+        const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+    }
+    unsafe impl objc2::Encode for Rect {
+        const ENCODING: objc2::Encoding = objc2::Encoding::Struct("CGRect", &[Point::ENCODING, Size::ENCODING]);
+    }
+}
+
+// 컨테이너 프레임 갱신(위치/크기/숨김) — 생성 전(0)이면 false 반환(호출측이 tauri 경로 사용).
+#[cfg(target_os = "macos")]
+fn container_set_frame(webview: &Webview, container: &Arc<AtomicUsize>, x: f64, y: f64, w: f64, h: f64) -> bool {
+    let cont = container.load(Ordering::Acquire);
+    if cont == 0 {
+        return false;
+    }
+    let _ = webview.with_webview(move |_pw| unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let cont = cont as *mut AnyObject;
+        // 부모 뷰가 non-flipped(AppKit 기본, 원점=좌하단)면 top-left y 를 변환한다
+        //  (wry set_bounds 가 해주던 변환을 컨테이너 직접 제어에선 우리가 해야 함).
+        let sv: *mut AnyObject = msg_send![cont, superview];
+        let mut ay = y;
+        if !sv.is_null() {
+            let flipped: bool = msg_send![sv, isFlipped];
+            if !flipped {
+                let sb: ns::Rect = msg_send![sv, bounds];
+                ay = sb.size.h - y - h;
+            }
+        }
+        let frame = ns::Rect { origin: ns::Point { x, y: ay }, size: ns::Size { w, h } };
+        let _: () = msg_send![cont, setFrame: frame];
+    });
+    true
+}
+
+// webview 를 pane 크기 컨테이너 NSView 로 감싼다(생성 직후 1회).
+//  이후 위치/크기 동기화는 컨테이너 프레임만 움직인다(webview 는 autoresizing 으로 추종,
+//  인스펙터 attach 시엔 WebKit 이 컨테이너 안에서 webview/인스펙터를 분할 배치).
+#[cfg(target_os = "macos")]
+fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>) {
+    let _ = webview.with_webview(move |pw| unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let wk: *mut AnyObject = pw.inner().cast();
+        let superview: *mut AnyObject = msg_send![wk, superview];
+        if superview.is_null() {
+            return;
+        }
+        let frame: ns::Rect = msg_send![wk, frame];
+        let cls = objc2::class!(NSView);
+        let alloc: *mut AnyObject = msg_send![cls, alloc];
+        let cont: *mut AnyObject = msg_send![alloc, initWithFrame: frame];
+        let _: () = msg_send![superview, addSubview: cont];
+        // 재부모화 — 컨테이너 로컬 (0,0) 에 가득 채우고 autoresize 로 추종.
+        let _: () = msg_send![wk, retain];
+        let _: () = msg_send![wk, removeFromSuperview];
+        let _: () = msg_send![cont, addSubview: wk];
+        let bounds: ns::Rect = msg_send![cont, bounds];
+        let _: () = msg_send![wk, setFrame: bounds];
+        let mask: usize = 2 | 16; // NSViewWidthSizable | NSViewHeightSizable
+        let _: () = msg_send![wk, setAutoresizingMask: mask];
+        let _: () = msg_send![wk, release];
+        slot.store(cont as usize, Ordering::Release);
+    });
+}
+
+// 컨테이너 정리(웹뷰 close 후) — 메인 스레드에서 remove + release.
+#[cfg(target_os = "macos")]
+fn drop_container(app: &AppHandle, container: &Arc<AtomicUsize>) {
+    let cont = container.swap(0, Ordering::AcqRel);
+    if cont == 0 {
+        return;
+    }
+    let _ = app.run_on_main_thread(move || unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let cont = cont as *mut AnyObject;
+        let _: () = msg_send![cont, removeFromSuperview];
+        let _: () = msg_send![cont, release];
+    });
 }
 
 // pane 의 프리뷰 webview 를 (없으면 생성) 위치/크기/가시성/URL 에 맞춘다.
@@ -40,9 +143,16 @@ pub fn preview_sync(
     let (px, py) = if visible && sized { (x, y) } else { (-30000.0, -30000.0) };
 
     if let Some(entry) = map.get_mut(&pane_id) {
-        let _ = entry.webview.set_position(LogicalPosition::new(px, py));
-        if sized {
-            let _ = entry.webview.set_size(LogicalSize::new(w, h));
+        // macOS: 컨테이너가 있으면 컨테이너 프레임만 이동(웹뷰는 autoresize/WebKit 이 관리).
+        #[cfg(target_os = "macos")]
+        let moved = container_set_frame(&entry.webview, &entry.container, px, py, if sized { w } else { 1.0 }, if sized { h } else { 1.0 });
+        #[cfg(not(target_os = "macos"))]
+        let moved = false;
+        if !moved {
+            let _ = entry.webview.set_position(LogicalPosition::new(px, py));
+            if sized {
+                let _ = entry.webview.set_size(LogicalSize::new(w, h));
+            }
         }
         if !url.is_empty() && entry.url != url {
             if let Ok(u) = Url::parse(&url) {
@@ -80,7 +190,10 @@ pub fn preview_sync(
             LogicalSize::new(w.max(1.0), h.max(1.0)),
         )
         .map_err(|e| e.to_string())?;
-    map.insert(pane_id, Entry { webview, url });
+    let container = Arc::new(AtomicUsize::new(0));
+    #[cfg(target_os = "macos")]
+    wrap_in_container(&webview, container.clone());
+    map.insert(pane_id, Entry { webview, url, container });
     Ok(())
 }
 
@@ -127,11 +240,10 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
                         let _: () = msg_send![wk, setInspectable: true];
                         let insp: *mut AnyObject = msg_send![wk, _inspector];
                         if !insp.is_null() {
-                            // attach 모드는 WebKit 이 webview 프레임을 점유해 pane 밖(창 전체)으로
-                            //  확장시키므로(강제 재동기화로도 복구 불가), 항상 별도 창으로 연다.
-                            //  detach 는 "열린 뒤"에만 유효 — show 후 호출해야 실제로 분리된다.
+                            // 내부(attach)는 WebKit 이 superview 전체를 분할하는데, webview 를
+                            //  pane 크기 컨테이너로 감쌌으므로 pane 안에서 분할된다. 내부/외부
+                            //  전환은 인스펙터 자체 UI 버튼으로 — 둘 다 정상 동작.
                             let _: () = msg_send![insp, show];
-                            let _: () = msg_send![insp, detach];
                         }
                     }
                     other => {
@@ -220,10 +332,14 @@ pub fn preview_info(mgr: State<PreviewManager>, pane_id: String) -> Result<Previ
 }
 
 #[tauri::command]
-pub fn preview_close(mgr: State<PreviewManager>, pane_id: String) {
+pub fn preview_close(app: AppHandle, mgr: State<PreviewManager>, pane_id: String) {
     if let Ok(mut map) = mgr.inner.lock() {
         if let Some(e) = map.remove(&pane_id) {
             let _ = e.webview.close();
+            #[cfg(target_os = "macos")]
+            drop_container(&app, &e.container);
+            #[cfg(not(target_os = "macos"))]
+            let _ = &app;
         }
     }
 }
