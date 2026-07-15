@@ -5,7 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
+use tauri::webview::PageLoadEvent;
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
 
 #[derive(Default)]
 pub struct PreviewManager {
@@ -59,7 +60,19 @@ pub fn preview_sync(
     let parsed = Url::parse(&url).map_err(|_| "잘못된 URL".to_string())?;
     let window = app.get_window("main").ok_or("메인 창 없음")?;
     let label = format!("preview-{}", sanitize(&pane_id));
-    let builder = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(parsed));
+    // 페이지 로드 완료 → 메인 창에 알림(주소창/탭 메타/테마 재적용은 프론트가 처리).
+    let pane_for_event = pane_id.clone();
+    let app_for_event = app.clone();
+    let builder = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(parsed)).on_page_load(
+        move |_wv, payload| {
+            if matches!(payload.event(), PageLoadEvent::Finished) {
+                let _ = app_for_event.emit(
+                    "preview-loaded",
+                    serde_json::json!({ "pane": pane_for_event, "url": payload.url().to_string() }),
+                );
+            }
+        },
+    );
     let webview = window
         .add_child(
             builder,
@@ -81,6 +94,123 @@ pub fn preview_navigate(mgr: State<PreviewManager>, pane_id: String, url: String
         }
     }
     Ok(())
+}
+
+// 페이지 강제 다크(다크리더식 필터) 주입/해제 — 모바일 프리뷰와 동일 동작.
+// html 배경은 filter 로 함께 반전되므로 밝은색(#fff)을 지정해야 결과가 어두워진다.
+const DARK_ON_JS: &str = r#"(function(){var d=document.documentElement;if(document.getElementById('__cpt_dark'))return;var s=document.createElement('style');s.id='__cpt_dark';s.textContent='html{filter:invert(1) hue-rotate(180deg)!important;background:#fff!important}img,video,canvas,iframe,embed,object,svg image{filter:invert(1) hue-rotate(180deg)!important}';(document.head||d).appendChild(s);})();"#;
+const DARK_OFF_JS: &str = r#"(function(){var s=document.getElementById('__cpt_dark');if(s)s.remove();})();"#;
+
+// 프리뷰 브라우저 제어 — back/forward/reload 는 WKWebView 네이티브 히스토리, devtools 는 인스펙터,
+//  theme_on/off 는 페이지에 다크 필터 주입.
+#[tauri::command]
+pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: String) -> Result<(), String> {
+    let map = mgr.inner.lock().map_err(|e| e.to_string())?;
+    let entry = map.get(&pane_id).ok_or("프리뷰 없음")?;
+    // macOS: 전부 WKWebView 네이티브로 처리(뒤/앞/리로드=히스토리 API, devtools=WKInspector,
+    //  테마=evaluateJavaScript — tauri eval/open_devtools 가 child webview 에 안 먹는 케이스 회피).
+    #[cfg(target_os = "macos")]
+    {
+        let act = action.clone();
+        entry
+            .webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                match act.as_str() {
+                    "back" => { let _: *mut AnyObject = msg_send![wk, goBack]; }
+                    "forward" => { let _: *mut AnyObject = msg_send![wk, goForward]; }
+                    "reload" => { let _: *mut AnyObject = msg_send![wk, reload]; }
+                    "devtools" => {
+                        // macOS 13.3+ 는 inspectable 플래그가 있어야 인스펙터 부착 가능.
+                        let _: () = msg_send![wk, setInspectable: true];
+                        let insp: *mut AnyObject = msg_send![wk, _inspector];
+                        if !insp.is_null() { let _: () = msg_send![insp, show]; }
+                    }
+                    other => {
+                        let js = if other == "theme_on" { DARK_ON_JS } else { DARK_OFF_JS };
+                        let ns = objc2_foundation::NSString::from_str(js);
+                        let nil: *mut AnyObject = std::ptr::null_mut();
+                        let _: () = msg_send![wk, evaluateJavaScript: &*ns, completionHandler: nil];
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        match action.as_str() {
+            "devtools" => { entry.webview.open_devtools(); Ok(()) }
+            "theme_on" => entry.webview.eval(DARK_ON_JS).map_err(|e| e.to_string()),
+            "theme_off" => entry.webview.eval(DARK_OFF_JS).map_err(|e| e.to_string()),
+            "back" | "forward" | "reload" => {
+                let js = match action.as_str() {
+                    "back" => "history.back()",
+                    "forward" => "history.forward()",
+                    _ => "location.reload()",
+                };
+                let _ = entry.webview.eval(js);
+                Ok(())
+            }
+            _ => Err("알 수 없는 action".into()),
+        }
+    }
+}
+
+#[derive(serde::Serialize, Default)]
+pub struct PreviewInfo {
+    pub url: String,
+    pub title: String,
+    pub can_back: bool,
+    pub can_fwd: bool,
+}
+
+// 현재 페이지 정보(주소/제목/히스토리 가능 여부) — 주소창·탭 메타·버튼 활성화용.
+#[tauri::command]
+pub fn preview_info(mgr: State<PreviewManager>, pane_id: String) -> Result<PreviewInfo, String> {
+    let map = mgr.inner.lock().map_err(|e| e.to_string())?;
+    let entry = map.get(&pane_id).ok_or("프리뷰 없음")?;
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<PreviewInfo>();
+        entry
+            .webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                let ns_str = |o: *mut AnyObject| -> String {
+                    if o.is_null() {
+                        return String::new();
+                    }
+                    let c: *const std::os::raw::c_char = msg_send![o, UTF8String];
+                    if c.is_null() {
+                        return String::new();
+                    }
+                    std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned()
+                };
+                let title: *mut AnyObject = msg_send![wk, title];
+                let nsurl: *mut AnyObject = msg_send![wk, URL];
+                let url_s = if nsurl.is_null() {
+                    String::new()
+                } else {
+                    let abs: *mut AnyObject = msg_send![nsurl, absoluteString];
+                    ns_str(abs)
+                };
+                let can_back: bool = msg_send![wk, canGoBack];
+                let can_fwd: bool = msg_send![wk, canGoForward];
+                let _ = tx.send(PreviewInfo { url: url_s, title: ns_str(title), can_back, can_fwd });
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_millis(400))
+            .map_err(|_| "정보 조회 시간 초과".to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(PreviewInfo { url: entry.url.clone(), ..Default::default() })
+    }
 }
 
 #[tauri::command]

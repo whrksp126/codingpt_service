@@ -39,59 +39,134 @@ export function newTid() {
   return "mx" + _tidSeq++ + "-" + Date.now().toString(36);
 }
 
+// ── 프리뷰 툴바(cmux식): ‹ › ↻ [주소창] ☀(테마) 🛠(개발자도구) ↗(외부) — 혼합 탭/독립 pane 공용 ──
+const previewBars = new Map(); // previewId → 툴바 컨트롤러(Rust page-load 이벤트 라우팅)
+api.onPreviewLoaded?.((p) => { previewBars.get(p?.pane)?.onLoaded(p?.url || ""); });
+
+// 스마트 주소: URL/로컬/호스트:포트/도메인이면 이동, 아니면 웹 검색.
+function smartUrl(raw) {
+  let u = (raw || "").trim();
+  if (!u) return "";
+  const isUrl = /^https?:\/\//i.test(u);
+  const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)([:/]|$)/i.test(u);
+  const isHostPort = /^[\w-]+:\d+([/?#]|$)/.test(u);
+  const isDomain = /^[\w-]+(\.[\w-]+)+([:/?#]|$)/.test(u);
+  if (isUrl || isLocal || isHostPort || isDomain) return isUrl ? u : (isLocal || isHostPort ? "http://" + u : "https://" + u);
+  return "https://www.google.com/search?q=" + encodeURIComponent(u);
+}
+
+function makePreviewBar({ getId, initialUrl, onNavigate, onMeta }) {
+  const bar = document.createElement("div");
+  bar.className = "preview-bar";
+  const mk = (iconFn, title) => {
+    const b = document.createElement("button");
+    b.className = "pane-ctrl";
+    b.title = title;
+    b.innerHTML = iconFn({ size: 14 });
+    return b;
+  };
+  const back = mk(icons.chevronLeft, "뒤로");
+  const fwd = mk(icons.chevronRight, "앞으로");
+  const reload = mk(icons.refresh, "새로고침");
+  const input = document.createElement("input");
+  input.className = "preview-url";
+  input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
+  input.value = initialUrl || "";
+  const theme = mk(icons.sun, "페이지 다크 모드");
+  const tools = mk(icons.tools, "개발자 도구");
+  const ext = mk(icons.external, "외부 브라우저에서 열기");
+  bar.append(back, fwd, reload, input, theme, tools, ext);
+
+  const st = { url: initialUrl || "", dark: false, disposed: false, meta: { title: "", favicon: "" } };
+  const setNavState = (b, f) => { back.disabled = !b; fwd.disabled = !f; };
+  setNavState(false, false);
+  back.addEventListener("click", () => api.previewControl(getId(), "back").catch(() => {}));
+  fwd.addEventListener("click", () => api.previewControl(getId(), "forward").catch(() => {}));
+  reload.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "reload").catch(() => {}); });
+  theme.addEventListener("click", () => {
+    if (!st.url) return;
+    st.dark = !st.dark;
+    theme.classList.toggle("active", st.dark);
+    api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
+  });
+  tools.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "devtools").catch(() => {}); });
+  ext.addEventListener("click", () => { if (st.url) api.openExternal(st.url).catch(() => {}); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    const u = smartUrl(input.value);
+    if (!u) return;
+    st.url = u;
+    input.value = u;
+    onNavigate(u);
+  });
+
+  // 현재 페이지 정보(주소/제목/히스토리) → 주소창·버튼·탭 메타. 메타는 변한 것만 통지.
+  const refreshInfo = async () => {
+    if (st.disposed || !st.url) return;
+    try {
+      const info = await api.previewInfo(getId());
+      if (st.disposed || !info) return;
+      setNavState(!!info.can_back, !!info.can_fwd);
+      if (info.url) {
+        st.url = info.url;
+        if (document.activeElement !== input) input.value = info.url;
+      }
+      let fav = "";
+      try { fav = new URL(info.url || st.url).origin + "/favicon.ico"; } catch (_) {}
+      const title = info.title || "";
+      if (title !== st.meta.title || fav !== st.meta.favicon) {
+        st.meta = { title, favicon: fav };
+        onMeta?.({ title, favicon: fav, url: info.url || st.url });
+      }
+    } catch (_) { /* webview 미생성 등 */ }
+  };
+  const ctl = {
+    el: bar,
+    get url() { return st.url; },
+    onLoaded(u) {
+      if (st.disposed) return;
+      if (u) {
+        st.url = u;
+        if (document.activeElement !== input) input.value = u;
+      }
+      if (st.dark) api.previewControl(getId(), "theme_on").catch(() => {}); // 내비게이션마다 재주입
+      setTimeout(refreshInfo, 250);
+    },
+    refreshInfo,
+    dispose() { st.disposed = true; previewBars.delete(getId()); },
+  };
+  previewBars.set(getId(), ctl);
+  return ctl;
+}
+
 // 혼합 탭용 프리뷰 표면 — 표준 프리뷰 pane(_buildFrame/_startPreviewSync)과 동일 동작을
 //  탭 host 안에 캡슐화. webview id 는 탭 tid 기반(pane 당 여러 프리뷰 탭 공존 가능).
 class PreviewSurface {
-  constructor(parent, tid, tab, persist) {
+  constructor(parent, tid, tab, persist, onMeta) {
     this.id = "pv-" + tid;
     this.tab = tab;
     this.url = tab.url || "";
-    const bar = document.createElement("div");
-    bar.className = "preview-bar";
-    const input = document.createElement("input");
-    input.className = "preview-url";
-    input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
-    input.value = this.url;
-    const go = document.createElement("button");
-    go.className = "btn small";
-    go.textContent = "이동";
-    bar.append(input, go);
-    const load = (raw) => {
-      let u = (raw || "").trim();
-      if (!u) return;
-      const isUrl = /^https?:\/\//i.test(u);
-      const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)([:/]|$)/i.test(u);
-      const isHostPort = /^[\w-]+:\d+([/?#]|$)/.test(u);
-      const isDomain = /^[\w-]+(\.[\w-]+)+([:/?#]|$)/.test(u);
-      if (isUrl || isLocal || isHostPort || isDomain) {
-        if (!isUrl) u = isLocal || isHostPort ? "http://" + u : "https://" + u;
-      } else {
-        u = "https://www.google.com/search?q=" + encodeURIComponent(u);
-      }
-      this.tab.url = u;
-      this.url = u;
-      input.value = u;
-      api.previewNavigate(this.id, u).catch(() => {});
-      this._key = "";
-      persist?.();
-    };
-    go.addEventListener("click", () => load(input.value));
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") load(input.value); });
-    const reload = document.createElement("button");
-    reload.className = "pane-ctrl";
-    reload.title = "새로고침";
-    reload.innerHTML = icons.refresh({ size: 14 });
-    reload.addEventListener("click", () => { if (this.url) api.previewNavigate(this.id, this.url).catch(() => {}); });
-    const ext = document.createElement("button");
-    ext.className = "pane-ctrl";
-    ext.title = "외부 브라우저에서 열기";
-    ext.innerHTML = icons.external({ size: 14 });
-    ext.addEventListener("click", () => { if (this.url) api.openExternal(this.url).catch(() => {}); });
-    bar.append(reload, ext);
+    this.bar = makePreviewBar({
+      getId: () => this.id,
+      initialUrl: this.url,
+      onNavigate: (u) => {
+        this.tab.url = u;
+        this.url = u;
+        api.previewNavigate(this.id, u).catch(() => {});
+        this._key = "";
+        persist?.();
+      },
+      onMeta: (m) => {
+        this.tab.metaTitle = m.title || "";
+        this.tab.metaFav = m.favicon || "";
+        onMeta?.(m);
+        persist?.(); // 탭 메타는 레이아웃과 함께 영속(복원 시 라벨 유지)
+      },
+    });
     this.host = document.createElement("div");
     this.host.className = "preview-host";
     this.host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
-    parent.append(bar, this.host);
+    parent.append(this.bar.el, this.host);
     this._visible = false;
     this._key = "";
     this._disposed = false;
@@ -112,16 +187,25 @@ class PreviewSurface {
       this._raf = requestAnimationFrame(tick);
     };
     this._raf = requestAnimationFrame(tick);
+    // SPA 제목 변경 등 대비 — 표시 중일 때 저빈도 정보 갱신.
+    this._infoTimer = setInterval(() => { if (this._visible && this.url) this.bar.refreshInfo(); }, 4000);
   }
   setVisible(v) { this._visible = v; }
   dispose() {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
+    clearInterval(this._infoTimer);
+    this.bar.dispose();
     api.previewClose(this.id).catch(() => {});
   }
 }
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+// 프리뷰 탭 아이콘 — 페이지 파비콘(로드 실패 시 지구본 폴백. cmux 처럼 탭이 열린 페이지를 표현).
+function previewTabIconHtml(fav) {
+  if (!fav) return icons.globe({ size: 13 });
+  return `<img class="ptab-fav" src="${escapeHtml(fav)}" onerror="this.style.display='none';this.nextSibling.style.display=''"><span style="display:none">${icons.globe({ size: 13 })}</span>`;
 }
 function headBtn(iconFn, title, onClick) {
   const b = document.createElement("button");
@@ -187,11 +271,14 @@ export class PaneView {
         tab.className = "ptab" + (i === this.node.active ? " active" : "");
         tab.draggable = true;
         const isT = isTermTab(t);
-        const icon = isT ? icons.terminal : t.kind === "ide" ? icons.code : icons.globe;
+        // 프리뷰 탭은 열린 페이지의 메타(파비콘+제목)로 표현(cmux 미러).
+        const iconHtml = isT ? icons.terminal({ size: 13 })
+          : t.kind === "ide" ? icons.code({ size: 13 })
+          : previewTabIconHtml(t.metaFav);
         const label = isT
           ? t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널")
-          : t.kind === "ide" ? "IDE" : "프리뷰";
-        tab.innerHTML = `<span class="ptab-ic">${icon({ size: 13 })}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
+          : t.kind === "ide" ? "IDE" : (t.metaTitle || "프리뷰");
+        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
         const x = document.createElement("span");
         x.className = "ptab-x";
         x.innerHTML = icons.x({ size: 11 });
@@ -213,7 +300,9 @@ export class PaneView {
       const isIde = this.node.kind === "ide";
       const lbl = document.createElement("div");
       lbl.className = "ptab active static";
-      lbl.innerHTML = `<span class="ptab-ic">${(isIde ? icons.code : icons.globe)({ size: 13 })}</span><span class="ptab-title">${isIde ? "IDE" : "프리뷰"}</span>`;
+      const icHtml = isIde ? icons.code({ size: 13 }) : previewTabIconHtml(this.node.metaFav);
+      const lblText = isIde ? "IDE" : (this.node.metaTitle || "프리뷰");
+      lbl.innerHTML = `<span class="ptab-ic">${icHtml}</span><span class="ptab-title">${escapeHtml(lblText)}</span>`;
       const x = document.createElement("span");
       x.className = "ptab-x";
       x.innerHTML = icons.x({ size: 11 });
@@ -298,61 +387,39 @@ export class PaneView {
   }
 
   // preview pane — 네이티브 임베디드 webview(iframe 아님 → X-Frame-Options 무관, 구글 등 다 뜸).
-  //  주소창(DOM) + host(DOM placeholder) 위에 Rust 가 webview 를 얹어 위치/가시성 동기화.
+  //  툴바(DOM) + host(DOM placeholder) 위에 Rust 가 webview 를 얹어 위치/가시성 동기화.
   _buildFrame() {
-    const bar = document.createElement("div");
-    bar.className = "preview-bar";
-    const input = document.createElement("input");
-    input.className = "preview-url";
-    input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
-    input.value = this.node.url || "";
-    this.previewInput = input;
-    const go = document.createElement("button");
-    go.className = "btn small";
-    go.textContent = "이동";
-    bar.append(input, go);
-
-    // 스마트 주소창: URL/호스트/포트면 이동, 아니면 웹 검색(네이티브 webview 라 결과도 pane 안에 표시).
-    const load = (raw) => {
-      let u = (raw || "").trim();
-      if (!u) return;
-      const isUrl = /^https?:\/\//i.test(u);
-      const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)([:/]|$)/i.test(u);
-      const isHostPort = /^[\w-]+:\d+([/?#]|$)/.test(u);
-      const isDomain = /^[\w-]+(\.[\w-]+)+([:/?#]|$)/.test(u);
-      if (isUrl || isLocal || isHostPort || isDomain) {
-        if (!isUrl) u = isLocal || isHostPort ? "http://" + u : "https://" + u;
-      } else {
-        u = "https://www.google.com/search?q=" + encodeURIComponent(u);
-      }
-      this.node.url = u;
-      this.previewUrl = u;
-      input.value = u;
-      api.previewNavigate(this.id, u).catch(() => {});
-      this._previewKey = ""; // 강제 재동기화(없으면 생성)
-      this.ctx.persist?.();
-    };
-    go.addEventListener("click", () => load(input.value));
-    input.addEventListener("keydown", (e) => { if (e.key === "Enter") load(input.value); });
-
-    const reload = document.createElement("button");
-    reload.className = "pane-ctrl";
-    reload.title = "새로고침";
-    reload.innerHTML = icons.refresh({ size: 14 });
-    reload.addEventListener("click", () => { if (this.previewUrl) { api.previewNavigate(this.id, this.previewUrl).catch(() => {}); } });
-    const ext = document.createElement("button");
-    ext.className = "pane-ctrl";
-    ext.title = "외부 브라우저에서 열기";
-    ext.innerHTML = icons.external({ size: 14 });
-    ext.addEventListener("click", () => { if (this.previewUrl) api.openExternal(this.previewUrl).catch(() => {}); });
-    bar.append(reload, ext);
-
+    this.previewBar = makePreviewBar({
+      getId: () => this.id,
+      initialUrl: this.node.url || "",
+      onNavigate: (u) => {
+        this.node.url = u;
+        this.previewUrl = u;
+        api.previewNavigate(this.id, u).catch(() => {});
+        this._previewKey = ""; // 강제 재동기화(없으면 생성)
+        this.ctx.persist?.();
+      },
+      onMeta: (m) => {
+        this.node.metaTitle = m.title || "";
+        this.node.metaFav = m.favicon || "";
+        this._refreshStaticTabMeta();
+        this.ctx.persist?.();
+      },
+    });
     const host = document.createElement("div");
     host.className = "preview-host";
     host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
     this.previewHost = host;
     this.previewUrl = this.node.url || "";
-    this.body.append(bar, host);
+    this.body.append(this.previewBar.el, host);
+  }
+  // 독립 프리뷰 pane 의 정적 탭 라벨을 페이지 메타(제목/파비콘)로 갱신.
+  _refreshStaticTabMeta() {
+    if (this.node.kind !== "preview") return;
+    const t = this.head.querySelector(".ptab-title");
+    if (t) t.textContent = this.node.metaTitle || "프리뷰";
+    const ic = this.head.querySelector(".ptab-ic");
+    if (ic) ic.innerHTML = previewTabIconHtml(this.node.metaFav);
   }
 
   // ── 마운트 ──
@@ -480,7 +547,7 @@ export class PaneView {
       });
       m.ide.mount();
     } else {
-      m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.());
+      m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.(), () => this.buildHead());
     }
     this._mixed.set(tab.tid, m);
     return m;
@@ -717,6 +784,8 @@ export class PaneView {
       this._previewRaf = requestAnimationFrame(tick);
     };
     this._previewRaf = requestAnimationFrame(tick);
+    // SPA 제목 변경 등 대비 — 저빈도 정보 갱신(주소/제목/히스토리 버튼).
+    this._previewInfoTimer = setInterval(() => { if (!this._disposed && this.previewUrl) this.previewBar?.refreshInfo(); }, 4000);
   }
 
   focus() {
@@ -810,6 +879,8 @@ export class PaneView {
     if (this.node.kind === "preview") {
       this._disposed = true;
       if (this._previewRaf) cancelAnimationFrame(this._previewRaf);
+      if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
+      this.previewBar?.dispose();
       api.previewClose(this.id).catch(() => {});
     }
     if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});

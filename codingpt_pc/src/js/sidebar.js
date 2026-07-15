@@ -9,9 +9,47 @@ let el = null;
 let notifPanel = null;
 let notifOpen = false;
 
+// 사이드바 폭 — 우측 테두리 드래그로 조절, localStorage 영속(기본 264, 200~420 클램프).
+const SB_MIN = 200, SB_MAX = 420;
+function applySbWidth(w) {
+  const v = Math.max(SB_MIN, Math.min(SB_MAX, Math.round(w)));
+  document.documentElement.style.setProperty("--sb-w", v + "px");
+  return v;
+}
+let sbGrip = null; // updateSidebar 가 innerHTML 을 비워도 재부착할 수 있게 모듈 보관
+function mountSbResizer() {
+  const saved = parseInt(localStorage.getItem("cpt:sbW") || "", 10);
+  if (saved) applySbWidth(saved);
+  const grip = document.createElement("div");
+  sbGrip = grip;
+  grip.className = "sb-resizer";
+  grip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add("dragging");
+    document.body.classList.add("resizing-col");
+    const startX = e.clientX;
+    const startW = el.getBoundingClientRect().width;
+    let cur = startW;
+    const move = (ev) => { cur = applySbWidth(startW + (ev.clientX - startX)); };
+    const up = () => {
+      grip.classList.remove("dragging");
+      document.body.classList.remove("resizing-col");
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      try { localStorage.setItem("cpt:sbW", String(Math.round(cur))); } catch (_) {}
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  });
+  el.appendChild(grip);
+}
+
 export function mountSidebar(container) {
   el = container;
   el.className = "sidebar";
+  mountSbResizer();
   notifPanel = document.createElement("div");
   notifPanel.className = "notif-panel hidden";
   document.body.appendChild(notifPanel);
@@ -50,6 +88,7 @@ export function updateSidebar() {
   if (!el) return;
   const totalUnread = state.notifications.filter((n) => !n.read).length;
   el.innerHTML = "";
+  if (sbGrip) el.appendChild(sbGrip); // 리사이즈 핸들 재부착(innerHTML 초기화로 떨어짐)
 
   // 상단 컨트롤(트래픽 라이트 여백 + 토글/알림/추가). 드래그 영역.
   const top = document.createElement("div");

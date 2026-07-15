@@ -80,6 +80,9 @@ export const api = {
   previewSync: (paneId, url, x, y, w, h, visible) =>
     invoke("preview_sync", { paneId, url: url || "", x, y, w, h, visible }),
   previewNavigate: (paneId, url) => invoke("preview_navigate", { paneId, url }),
+  previewControl: (paneId, action) => invoke("preview_control", { paneId, action }),
+  previewInfo: (paneId) => invoke("preview_info", { paneId }),
+  onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
   previewClose: (paneId) => invoke("preview_close", { paneId }),
 
   // ── 네이티브 알림 ──

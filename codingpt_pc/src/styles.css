@@ -61,7 +61,10 @@ body.resizing-row { cursor: row-resize; }
 .ic-btn.busy { opacity: 0.5; pointer-events: none; }
 
 /* ── 사이드바 ── */
-.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; position: relative; }
+/* 사이드바 폭 조절 핸들 — 우측 테두리를 잡고 드래그(최소/최대는 JS 클램프) */
+.sb-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 30; }
+.sb-resizer:hover, .sb-resizer.dragging { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .sb-top {
   display: flex; align-items: center; gap: 2px;
   height: 40px; padding: 0 8px 0 72px; /* 좌: macOS 트래픽 라이트 여백 */
@@ -256,6 +259,10 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .pane-ctrls { display: flex; align-items: center; gap: 1px; flex: none; padding: 0 5px; }
 .pane-ctrl { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--dim); cursor: pointer; border-radius: var(--r-sm); }
 .pane-ctrl:hover { background: var(--elevated2); color: var(--text); }
+.pane-ctrl:disabled { opacity: 0.35; cursor: default; }
+.pane-ctrl:disabled:hover { background: transparent; color: var(--dim); }
+.pane-ctrl.active { color: var(--accent); background: var(--elevated2); }
+.ptab-fav { width: 13px; height: 13px; border-radius: 3px; display: inline-block; vertical-align: middle; }
 
 .pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* 혼합 탭(IDE/프리뷰가 터미널 pane 의 탭으로) 본문 host — showActiveTab 이 display 토글 */

@@ -33,6 +33,10 @@ export const icons = {
   chevronDown: (o) => svg('<path d="M6 9l6 6 6-6"/>', o),
   external: (o) => svg('<path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/>', o),
   search: (o) => svg('<circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/>', o),
+  chevronLeft: (o) => svg('<path d="M14.5 5.5L8 12l6.5 6.5"/>', o),
+  chevronRight: (o) => svg('<path d="M9.5 5.5L16 12l-6.5 6.5"/>', o),
+  sun: (o) => svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>', o),
+  tools: (o) => svg('<path d="M14.5 6.5a3.5 3.5 0 0 0-4.8 4.1L4 16.3V20h3.7l5.7-5.7a3.5 3.5 0 0 0 4.1-4.8L15 12l-3-3z"/>', o),
   dot: (o) => `<span class="ic-dot ${o?.cls || ""}"></span>`,
 };
 

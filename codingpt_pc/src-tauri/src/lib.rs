@@ -469,6 +469,8 @@ pub fn run() {
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,
+            preview::preview_control,
+            preview::preview_info,
             preview::preview_close,
             // 내장 IDE 파일 접근
             fsapi::fs_tree,
