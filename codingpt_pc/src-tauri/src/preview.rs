@@ -63,11 +63,21 @@ fn container_set_frame(webview: &Webview, container: &Arc<AtomicUsize>, x: f64, 
         // 부모 뷰가 non-flipped(AppKit 기본, 원점=좌하단)면 top-left y 를 변환한다
         //  (wry set_bounds 가 해주던 변환을 컨테이너 직접 제어에선 우리가 해야 함).
         let sv: *mut AnyObject = msg_send![cont, superview];
+        let (x, y, mut w, mut h) = (x.round(), y.round(), w.round(), h.round());
         let mut ay = y;
         if !sv.is_null() {
+            let sb: ns::Rect = msg_send![sv, bounds];
+            // 컨테이너가 창 콘텐츠 영역을 1px 라도 벗어나면 WebKit 인스펙터(우측 도킹)가
+            //  contentLayoutRect 로 프레임을 클리핑하고, 클리핑된 폭을 기준으로 다음 relayout 이
+            //  또 줄이는 자가-축소 루프에 빠져 폭 조절이 불가능해진다 → 우/하단 가장자리 클램프.
+            if x < sb.size.w && x + w > sb.size.w {
+                w = (sb.size.w - x).max(1.0);
+            }
+            if y < sb.size.h && y + h > sb.size.h {
+                h = (sb.size.h - y).max(1.0);
+            }
             let flipped: bool = msg_send![sv, isFlipped];
             if !flipped {
-                let sb: ns::Rect = msg_send![sv, bounds];
                 ay = sb.size.h - y - h;
             }
         }
@@ -75,6 +85,31 @@ fn container_set_frame(webview: &Webview, container: &Arc<AtomicUsize>, x: f64, 
         let _: () = msg_send![cont, setFrame: frame];
     });
     true
+}
+
+// 컨테이너 안에서 인스펙터 프론트엔드 WKWebView(페이지 webview 가 아닌 것)를 찾는다.
+#[cfg(target_os = "macos")]
+unsafe fn find_inspector_view(
+    page: *mut objc2::runtime::AnyObject,
+    cont: *mut objc2::runtime::AnyObject,
+) -> *mut objc2::runtime::AnyObject {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    if cont.is_null() {
+        return std::ptr::null_mut();
+    }
+    let subs: *mut AnyObject = msg_send![cont, subviews];
+    let n: usize = msg_send![subs, count];
+    for i in 0..n {
+        let v: *mut AnyObject = msg_send![subs, objectAtIndex: i];
+        if v != page {
+            let is_wk: bool = msg_send![v, isKindOfClass: objc2::class!(WKWebView)];
+            if is_wk {
+                return v;
+            }
+        }
+    }
+    std::ptr::null_mut()
 }
 
 // webview 를 pane 크기 컨테이너 NSView 로 감싼다(생성 직후 1회).
@@ -225,6 +260,7 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
     #[cfg(target_os = "macos")]
     {
         let act = action.clone();
+        let cont_ptr = entry.container.load(std::sync::atomic::Ordering::Acquire);
         entry
             .webview
             .with_webview(move |pw| unsafe {
@@ -246,6 +282,17 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
                             let _: () = msg_send![insp, show];
                         }
                     }
+                    "devtools_fit" => {
+                        // 좁은 pane 에서 사이드 도킹은 WebKit 최소폭(인스펙터 500 + 페이지 320)
+                        //  때문에 조절 불가로 잠기므로, 인스펙터 프론트엔드에 하단 도킹을 요청한다.
+                        let insp = find_inspector_view(wk, cont_ptr as *mut AnyObject);
+                        if !insp.is_null() {
+                            let js = "(function(){try{if(window.WI&&window.InspectorFrontendHost&&(WI.dockConfiguration==='right'||WI.dockConfiguration==='left'))InspectorFrontendHost.requestSetDockSide('bottom');}catch(e){}})();";
+                            let ns = objc2_foundation::NSString::from_str(js);
+                            let nil: *mut AnyObject = std::ptr::null_mut();
+                            let _: () = msg_send![insp, evaluateJavaScript: &*ns, completionHandler: nil];
+                        }
+                    }
                     other => {
                         let js = if other == "theme_on" { DARK_ON_JS } else { DARK_OFF_JS };
                         let ns = objc2_foundation::NSString::from_str(js);
@@ -261,6 +308,7 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
     {
         match action.as_str() {
             "devtools" => { entry.webview.open_devtools(); Ok(()) }
+            "devtools_fit" => Ok(()),
             "theme_on" => entry.webview.eval(DARK_ON_JS).map_err(|e| e.to_string()),
             "theme_off" => entry.webview.eval(DARK_OFF_JS).map_err(|e| e.to_string()),
             "back" | "forward" | "reload" => {

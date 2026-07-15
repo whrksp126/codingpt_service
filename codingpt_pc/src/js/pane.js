@@ -91,7 +91,16 @@ function makePreviewBar({ getId, initialUrl, initialDark, onNavigate, onMeta, on
     api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
     onDarkChange?.(st.dark);
   });
-  tools.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "devtools").catch(() => {}); });
+  tools.addEventListener("click", () => {
+    if (!st.url) return;
+    api.previewControl(getId(), "devtools").catch(() => {});
+    // 좁은 pane(사이드 도킹 최소폭 = 인스펙터 500 + 페이지 320 미달)은 폭 조절이 잠기므로
+    //  인스펙터 로드를 기다렸다 하단 도킹으로 자동 전환(이미 하단/미로드면 no-op).
+    if (bar.getBoundingClientRect().width < 840) {
+      setTimeout(() => api.previewControl(getId(), "devtools_fit").catch(() => {}), 900);
+      setTimeout(() => api.previewControl(getId(), "devtools_fit").catch(() => {}), 2200);
+    }
+  });
   ext.addEventListener("click", () => { if (st.url) api.openExternal(st.url).catch(() => {}); });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
