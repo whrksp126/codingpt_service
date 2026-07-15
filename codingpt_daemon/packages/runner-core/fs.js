@@ -254,8 +254,8 @@ async function remove(params) {
 }
 
 // ── 파일 감시(watch) ──
-// 앱이 현재 보고 있는 디렉토리 하나만 감시(단일 watcher). 새 watch 오면 이전 것 close.
-//  claude 등 외부 프로세스가 PC 파일을 수정하면 이벤트를 push → 앱이 목록/에디터 즉시 갱신.
+// 앱이 현재 보고 있는 워크스페이스 루트 하나를 감시(단일 watcher). 새 watch 오면 이전 것 close.
+//  claude/터미널/다른 기기 IDE 등 어떤 경로로든 파일이 바뀌면 이벤트를 push → 앱이 목록/에디터 즉시 갱신.
 let watcher = null;
 let watchedRel = null;
 
@@ -263,12 +263,13 @@ function startWatch(rel, onEvent) {
   const abs = safeResolve(rel || '');
   stopWatch();
   watchedRel = rel || '';
-  // depth:1 — 현재 디렉토리 + 직속 항목(파일 편집은 cwd 안이므로 커버). 무거운 디렉토리 무시.
+  // 루트 재귀(depth 12) — IDE 라이브 동기화: 하위 폴더의 열린 파일 변경도 잡는다.
+  //  node_modules 등 무거운 디렉토리는 ignore 로 걸러 감시 비용을 제한.
   watcher = chokidar.watch(abs, {
-    depth: 1,
+    depth: 12,
     ignoreInitial: true,
     ignorePermissionErrors: true,
-    ignored: /(^|[/\\])(node_modules|\.git|\.next|dist|build|\.cache|__pycache__)([/\\]|$)/,
+    ignored: /(^|[/\\])(node_modules|\.git|\.next|dist|build|out|coverage|\.cache|\.venv|venv|__pycache__|\.DS_Store)([/\\]|$)/,
     awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 },
   });
   const emit = (event) => (p) => { try { onEvent({ event, path: relOf(p) }); } catch (_) { /* noop */ } };

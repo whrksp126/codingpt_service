@@ -50,6 +50,11 @@ export class IdeView {
     this._searchToken = 0;
     this._searchTimer = null;
     this._build();
+    // 외부 변경 리컨실러 — 다른 기기(모바일 IDE)/터미널/에이전트가 바꾼 파일을 열린 버퍼에 반영.
+    //  로컬 디스크 직결이라 워처 없이 저비용 폴링: dirty 아닌 열린 파일만 다시 읽어 달라지면 교체.
+    this._syncTick = 0;
+    this._reloadingExternal = false;
+    this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, 2500);
   }
 
   get activeGroup() { return this.groups.get(this.activeGroupId) || this.groups.values().next().value; }
@@ -562,6 +567,7 @@ export class IdeView {
     });
   }
   _markDirty(group) {
+    if (this._reloadingExternal) return; // 외부 변경 반영(setValue)은 편집이 아님
     const f = group.open[group.active];
     if (!f || f.dirty) return;
     // 공유 버퍼(linkedDoc) — 같은 파일을 연 모든 그룹의 dirty 를 함께 표시.
@@ -957,7 +963,49 @@ export class IdeView {
   }
 
   refresh() { setTimeout(() => this.groups.forEach((g) => g.cm?.refresh()), 0); }
-  dispose() { this.closeSearch(); closeMenu(); }
+
+  // ── 외부 변경 리컨실러 — 열린 파일(디스크) ↔ 버퍼 동기화 + 주기적 트리 갱신 ──
+  //  dirty(내가 편집 중)인 파일은 보호(마지막 저장 승리 — 모바일 IDE 와 동일 정책).
+  async _reconcileDisk() {
+    if (this._reconciling) return;
+    this._reconciling = true;
+    try {
+      const seen = new Set(); // 같은 path 는 linkedDoc 공유 — 한 번만
+      for (const g of this.groups.values()) {
+        for (const f of g.open) {
+          if (f.dirty || seen.has(f.path)) continue;
+          seen.add(f.path);
+          let content;
+          try { content = await api.fsRead(f.path); } catch (_) { continue; }
+          if (typeof content !== "string" || f.dirty || content === f.doc.getValue()) continue;
+          this._applyExternal(f, content);
+        }
+      }
+      // 트리는 3틱(7.5초)마다 — 다른 기기의 새 파일/삭제 반영. 검색 표시 중엔 건너뜀.
+      this._syncTick = (this._syncTick + 1) % 3;
+      if (this._syncTick === 0 && !this.searchTree) {
+        try {
+          const t = await api.fsTree(this.root, 4);
+          if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
+        } catch (_) { /* noop */ }
+      }
+    } finally { this._reconciling = false; }
+  }
+  _applyExternal(f, content) {
+    this._reloadingExternal = true;
+    try {
+      // 이 문서를 표시 중인 그룹들의 커서/스크롤 보존 후 교체(linkedDoc 라 한 번이면 전 그룹 반영)
+      const views = [];
+      for (const g of this.groups.values()) {
+        const cf = g.open[g.active];
+        if (cf && cf.path === f.path) views.push({ g, cur: g.cm.getCursor(), sc: g.cm.getScrollInfo() });
+      }
+      f.doc.setValue(content);
+      for (const v of views) { try { v.g.cm.setCursor(v.cur); v.g.cm.scrollTo(v.sc.left, v.sc.top); } catch (_) {} }
+    } finally { this._reloadingExternal = false; }
+  }
+
+  dispose() { if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; } this.closeSearch(); closeMenu(); }
   _toast(msg) {
     const d = document.createElement("div"); d.className = "ide-toast"; d.textContent = msg;
     this.mainEl.appendChild(d); setTimeout(() => d.remove(), 2800);
