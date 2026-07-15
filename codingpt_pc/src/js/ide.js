@@ -54,7 +54,9 @@ export class IdeView {
     //  로컬 디스크 직결이라 워처 없이 저비용 폴링: dirty 아닌 열린 파일만 다시 읽어 달라지면 교체.
     this._syncTick = 0;
     this._reloadingExternal = false;
-    this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, 2500);
+    this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, 1200);
+    // 자동 저장(VS Code afterDelay) — 타이핑이 멈추고 800ms 뒤 디스크 기록 → 다른 기기에 곧바로 반영.
+    this._autoTimers = new Map(); // path → timeout
   }
 
   get activeGroup() { return this.groups.get(this.activeGroupId) || this.groups.values().next().value; }
@@ -118,7 +120,10 @@ export class IdeView {
         "Ctrl-Space": "autocomplete", "Alt-/": "autocomplete",
       },
     });
-    g.cm.on("change", () => this._markDirty(g));
+    g.cm.on("change", () => {
+      this._markDirty(g);
+      if (!this._reloadingExternal) { const f = g.open[g.active]; if (f) this._scheduleAutosave(f.path); }
+    });
     g.cm.on("inputRead", (cm, change) => {
       if (cm.state.completionActive) return;
       const ch = change.text && change.text[change.text.length - 1];
@@ -581,19 +586,44 @@ export class IdeView {
     const group = this.activeGroup;
     const f = group.open[group.active];
     if (!f) return;
+    const t = this._autoTimers.get(f.path);
+    if (t) { clearTimeout(t); this._autoTimers.delete(f.path); }
+    const text = f.doc.getValue();
     try {
-      await api.fsWrite(f.path, f.doc.getValue());
-      for (const g of this.groups.values()) {
-        let hit = false;
-        for (const o of g.open) if (o.path === f.path && o.dirty) { o.dirty = false; hit = true; }
-        if (hit) this._renderGroupTabs(g);
-      }
+      await api.fsWrite(f.path, text);
+      // 쓰는 동안 추가 편집됐으면 dirty 유지(자동 저장이 이어서 기록).
+      if (f.doc.getValue() !== text) { this._scheduleAutosave(f.path); return; }
+      this._clearDirty(f.path);
     }
     catch (e) { this._toast(String(e)); }
   }
+  // ── 자동 저장 — 마지막 편집 후 800ms 디바운스, 파일(path) 단위 ──
+  _scheduleAutosave(path) {
+    const t = this._autoTimers.get(path);
+    if (t) clearTimeout(t);
+    this._autoTimers.set(path, setTimeout(() => { this._autoTimers.delete(path); this._autosave(path).catch(() => {}); }, 800));
+  }
+  async _autosave(path) {
+    let f = null;
+    for (const g of this.groups.values()) { f = g.open.find((o) => o.path === path); if (f) break; }
+    if (!f || !f.dirty) return;
+    const text = f.doc.getValue();
+    try { await api.fsWrite(path, text); } catch (e) { this._toast(String(e)); return; }
+    if (f.doc.getValue() !== text) { this._scheduleAutosave(path); return; } // 쓰는 동안 추가 편집
+    this._clearDirty(path);
+  }
+  _clearDirty(path) {
+    for (const g of this.groups.values()) {
+      let hit = false;
+      for (const o of g.open) if (o.path === path && o.dirty) { o.dirty = false; hit = true; }
+      if (hit) this._renderGroupTabs(g);
+    }
+  }
   closeFile(group, i) {
-    // linkedDoc 해제(누수 방지) — 남은 쪽 문서는 그대로 유지된다.
     const f = group.open[i];
+    // 미저장 편집이 있으면 버리지 않고 플러시(자동 저장 정책 — 편집분 유실 방지).
+    if (f && f.dirty) this._autosave(f.path).catch(() => {});
+    // linkedDoc 해제(누수 방지) — 남은 쪽 문서는 그대로 유지된다.
     try {
       if (f && f.doc && f.doc.iterLinkedDocs) {
         const linked = [];
@@ -981,8 +1011,8 @@ export class IdeView {
           this._applyExternal(f, content);
         }
       }
-      // 트리는 3틱(7.5초)마다 — 다른 기기의 새 파일/삭제 반영. 검색 표시 중엔 건너뜀.
-      this._syncTick = (this._syncTick + 1) % 3;
+      // 트리는 6틱(7.2초)마다 — 다른 기기의 새 파일/삭제 반영. 검색 표시 중엔 건너뜀.
+      this._syncTick = (this._syncTick + 1) % 6;
       if (this._syncTick === 0 && !this.searchTree) {
         try {
           const t = await api.fsTree(this.root, 4);
@@ -1005,7 +1035,17 @@ export class IdeView {
     } finally { this._reloadingExternal = false; }
   }
 
-  dispose() { if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; } this.closeSearch(); closeMenu(); }
+  dispose() {
+    if (this._syncTimer) { clearInterval(this._syncTimer); this._syncTimer = null; }
+    // 대기 중 자동 저장 즉시 플러시(pane 닫기/앱 종료 시 편집분 유실 방지).
+    this._autoTimers.forEach((t) => clearTimeout(t));
+    this._autoTimers.clear();
+    const seen = new Set();
+    for (const g of this.groups.values()) for (const f of g.open) {
+      if (f.dirty && !seen.has(f.path)) { seen.add(f.path); api.fsWrite(f.path, f.doc.getValue()).catch(() => {}); }
+    }
+    this.closeSearch(); closeMenu();
+  }
   _toast(msg) {
     const d = document.createElement("div"); d.className = "ide-toast"; d.textContent = msg;
     this.mainEl.appendChild(d); setTimeout(() => d.remove(), 2800);
