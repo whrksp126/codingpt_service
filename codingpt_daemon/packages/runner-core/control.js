@@ -27,10 +27,7 @@ function run(config) {
   let ws = null;
   let idleTimer = null;
 
-  // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
-  try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
-  // shim(cpt/claude/codex 래퍼 + claude 훅 설정) 멱등 생성 — 터미널 PATH 주입은 pty.js 가 담당.
-  try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
+  // cpt 소켓·shim·WS 연결은 파일 하단 boot() 에서 — 기존 인스턴스 인수(takeover) 후 순서대로.
 
   const wsUrl = config.serverUrl.replace(/^http/, 'ws') + '/api/daemon/connect';
 
@@ -151,7 +148,19 @@ function run(config) {
     });
   };
 
-  connect();
+  (async () => {
+    // 같은 stateDir 의 기존 인스턴스가 살아있으면 정상 종료를 지시하고 대체(새 인스턴스 승리) —
+    //  둘이 단일 control WS 를 서로 뺏는 replaced 재접속 폭주 방지. WS 연결 전에 수행해야 무쟁탈.
+    try {
+      const took = await cptServer.takeoverExisting();
+      if (took) console.log('[control] 기존 데몬 인스턴스 인수 완료(구 인스턴스 종료 지시)');
+    } catch (_) { /* noop */ }
+    // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
+    try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
+    // shim(cpt/claude/codex 래퍼 + claude 훅 설정) 멱등 생성 — 터미널 PATH 주입은 pty.js 가 담당.
+    try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
+    connect();
+  })();
 }
 
 module.exports = { run };

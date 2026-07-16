@@ -164,6 +164,16 @@ function pushStatusChanged(cwdRel) {
 // ── 명령 디스패치 ──
 async function dispatch(req) {
   const cmd = String(req.cmd || '');
+  // 인수(takeover) 지시 — 새 데몬 인스턴스가 기존 인스턴스를 정상 종료시킬 때 사용.
+  //  resolveCtx(tmux 조회) 전에 처리해 어떤 상태에서도 응답 가능하게. CAPABILITIES 비공개(내부용).
+  if (cmd === 'daemon.shutdown') {
+    console.log('[cpt] 인수 지시 수신 — 이 인스턴스를 종료합니다(새 데몬이 대체)');
+    setTimeout(() => {
+      try { fs.unlinkSync(sockPath()); } catch (_) { /* noop */ }
+      process.exit(0);
+    }, 200); // 응답 flush 여유
+    return { shuttingDown: true, pid: process.pid };
+  }
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
   const { session } = ptyLib.sessionForCwd(resolved.cwdRel);
@@ -385,11 +395,38 @@ const CAPABILITIES = [
   'hook.event',
 ];
 
+// 같은 stateDir 의 기존 데몬 인스턴스 감지·인수 — 살아있으면 shutdown 을 지시하고 소켓이 빌 때까지 대기.
+//  (tauri dev 재시작·수동 재실행이 남긴 인스턴스와 단일 control WS 를 서로 뺏는 replaced 재접속
+//   폭주(~2s 간격)를 원천 차단. 새 인스턴스 승리 = PC 앱 재시작 시맨틱과 일치)
+function takeoverExisting(timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    const sock = sockPath();
+    if (!fs.existsSync(sock)) return resolve(false);
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    const probe = net.createConnection(sock);
+    const guard = setTimeout(() => { try { probe.destroy(); } catch (_) { /* noop */ } finish(false); }, 1500);
+    probe.on('connect', () => {
+      try { probe.write(JSON.stringify({ id: 0, cmd: 'daemon.shutdown' }) + '\n'); } catch (_) { /* noop */ }
+      probe.on('data', () => { /* 응답 무시 — close 대기 */ });
+      probe.on('close', () => {
+        clearTimeout(guard);
+        const t0 = Date.now();
+        const poll = setInterval(() => {
+          // 기존 인스턴스가 exit 하며 소켓을 unlink 한다 — 사라지면(또는 타임아웃) 진행.
+          if (!fs.existsSync(sock) || Date.now() - t0 > timeoutMs) { clearInterval(poll); finish(true); }
+        }, 150);
+      });
+    });
+    probe.on('error', () => { clearTimeout(guard); finish(false); }); // 스테일 소켓 — start()가 unlink
+  });
+}
+
 function start() {
   if (server) return server;
   const sock = sockPath();
   try { fs.mkdirSync(path.dirname(sock), { recursive: true }); } catch (_) { /* noop */ }
-  try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리 */ }
+  try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
   server = net.createServer((conn) => {
     let buf = '';
     conn.on('data', async (d) => {
@@ -429,4 +466,4 @@ function start() {
   return server;
 }
 
-module.exports = { start, setControlWs, resolveUi, sockPath };
+module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting };
