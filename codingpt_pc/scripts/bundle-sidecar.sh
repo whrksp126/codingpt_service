@@ -83,6 +83,7 @@ if [ -d "$PTY" ]; then
 fi
 
 # ── 4) Node 바이너리 배치 ──────────────────────────────────────────
+rm -f "$OUT/$NODE_OUT" # in-place 덮어쓰기 금지 — vnode 서명 캐시 불일치로 exec 시 SIGKILL(재빌드 반복 시 재현)
 cp "$CACHE/$NODE_PKG/$NODE_BIN_REL" "$OUT/$NODE_OUT"
 chmod +x "$OUT/$NODE_OUT" 2>/dev/null || true
 
@@ -98,6 +99,7 @@ if [[ "$TARGET" == darwin-* ]]; then
     echo "▸ tmux 번들: $HOST_TMUX ($("$HOST_TMUX" -V))"
     TMUX_OUT="$OUT/tmux"
     rm -rf "$TMUX_OUT"; mkdir -p "$TMUX_OUT/bin" "$TMUX_OUT/lib"
+    rm -f "$TMUX_OUT/bin/tmux" # 새 inode 보장(서명 캐시)
     cp "$HOST_TMUX" "$TMUX_OUT/bin/tmux"; chmod +w "$TMUX_OUT/bin/tmux"
     # non-system 의존 dylib 재귀 수집
     collect_dylibs() {
@@ -107,6 +109,7 @@ if [[ "$TARGET" == darwin-* ]]; then
         [ -f "$real" ] || real="$dep"
         local base; base="$(basename "$real")"
         if [ -f "$real" ] && [ ! -f "$TMUX_OUT/lib/$base" ]; then
+          rm -f "$TMUX_OUT/lib/$base" # 새 inode 보장(서명 캐시)
           cp "$real" "$TMUX_OUT/lib/$base"; chmod +w "$TMUX_OUT/lib/$base"
           collect_dylibs "$TMUX_OUT/lib/$base"
         fi
