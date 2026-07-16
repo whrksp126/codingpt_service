@@ -33,7 +33,14 @@ async function put(key, body, contentType) {
   const dmgName = `CodingPT_${version}_aarch64.dmg`;
   await put(tarName, fs.readFileSync(targz), 'application/gzip');
   await put(dmgName, fs.readFileSync(dmg), 'application/x-apple-diskimage');
-  await put('CodingPT.dmg', fs.readFileSync(dmg), 'application/x-apple-diskimage'); // 다운로드 페이지 안정 별칭
+  await put('CodingPT.dmg', fs.readFileSync(dmg), 'application/x-apple-diskimage'); // back 프록시 별칭
+  // 다운로드 페이지(codingpt.ghmate.com/download)가 가리키는 objectstore 공개 경로도 갱신 —
+  //  키는 PREFIX(pc-releases/) 밖이라 client 로 직접 put.
+  await client.send(new PutObjectCommand({
+    Bucket: BUCKET, Key: 'codingpt/common/downloads/CodingPT-arm64.dmg',
+    Body: fs.readFileSync(dmg), ContentType: 'application/x-apple-diskimage',
+  }));
+  console.log('  업로드: common/downloads/CodingPT-arm64.dmg (공개 다운로드 페이지)');
   const latest = {
     version,
     pub_date: new Date().toISOString(),
