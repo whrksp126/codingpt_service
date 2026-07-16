@@ -18,7 +18,13 @@ WORKDIR /opt/codingpt-runner
 COPY package.json ./
 COPY packages/runner-core ./packages/runner-core
 COPY packages/cloud-runner ./packages/cloud-runner
+COPY packages/cpt-cli ./packages/cpt-cli
 RUN npm install --omit=dev
+
+# cpt CLI 전역 노출 — 컨테이너 터미널의 AI/사용자가 어디서든 `cpt` 로 서비스를 조작.
+#  (claude/codex 훅 래퍼는 데몬(shim.js)이 상태 디렉토리에 생성 — PATH 는 runner-core 가 주입)
+RUN ln -sf /opt/codingpt-runner/packages/cpt-cli/bin/cpt.js /usr/local/bin/cpt \
+  && chmod +x /opt/codingpt-runner/packages/cpt-cli/bin/cpt.js
 
 # 사용자 코드 작업 루트 + 우리 상태 볼륨 마운트 지점
 RUN mkdir -p /workspace /var/lib/codingpt /root/.claude

@@ -487,6 +487,7 @@ name = "codingpt_pc"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "dirs 5.0.1",
  "objc2",
  "objc2-foundation",

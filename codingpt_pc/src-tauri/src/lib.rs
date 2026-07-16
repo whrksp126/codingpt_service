@@ -477,6 +477,8 @@ pub fn run() {
             preview::preview_navigate,
             preview::preview_control,
             preview::preview_info,
+            preview::preview_eval,
+            preview::preview_screenshot,
             preview::preview_close,
             // 내장 IDE 파일 접근
             fsapi::fs_tree,

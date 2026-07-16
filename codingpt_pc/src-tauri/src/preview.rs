@@ -379,6 +379,178 @@ pub fn preview_info(mgr: State<PreviewManager>, pane_id: String) -> Result<Previ
     }
 }
 
+// ── 브라우저 자동화(browser.*) 지원 ─────────────────────────────────
+//  · preview_eval: evaluateJavaScript 결과를 completionHandler 로 회수. 결과 타입 단순화를 위해
+//    호출측(JS)이 항상 JSON.stringify 한 "문자열"을 반환하도록 감싸는 책임을 진다(NSString 만 처리).
+//  · preview_screenshot: takeSnapshotWithConfiguration → NSImage → JPEG base64.
+//  둘 다 async 커맨드 — 메인 스레드가 아닌 async 런타임에서 돌아야 completionHandler(메인 런루프)가
+//  살아 있는 채로 recv_timeout 대기가 가능하다(메인 스레드 블로킹=데드락).
+
+// NSString* → Rust String (preview_info 의 ns_str 과 동일 규칙, 모듈 공용).
+#[cfg(target_os = "macos")]
+unsafe fn ns_to_string(o: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::msg_send;
+    if o.is_null() {
+        return String::new();
+    }
+    let c: *const std::os::raw::c_char = msg_send![o, UTF8String];
+    if c.is_null() {
+        return String::new();
+    }
+    std::ffi::CStr::from_ptr(c).to_string_lossy().into_owned()
+}
+
+// evaluateJavaScript completionHandler(result, error) → 문자열 결과.
+//  JS 쪽이 JSON.stringify 문자열을 반환하는 전제 — NSString 외 타입은 description 폴백.
+#[cfg(target_os = "macos")]
+unsafe fn eval_result_to_string(
+    result: *mut objc2::runtime::AnyObject,
+    error: *mut objc2::runtime::AnyObject,
+) -> Result<String, String> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    if !error.is_null() {
+        let desc: *mut AnyObject = msg_send![error, localizedDescription];
+        return Err(format!("JS 평가 오류: {}", ns_to_string(desc)));
+    }
+    if result.is_null() {
+        return Ok("null".to_string());
+    }
+    let is_str: bool = msg_send![result, isKindOfClass: objc2::class!(NSString)];
+    if is_str {
+        Ok(ns_to_string(result))
+    } else {
+        let d: *mut AnyObject = msg_send![result, description];
+        Ok(ns_to_string(d))
+    }
+}
+
+// NSBitmapImageRep → JPEG 바이트(quality 0.0~1.0).
+#[cfg(target_os = "macos")]
+unsafe fn jpeg_bytes(rep: *mut objc2::runtime::AnyObject, quality: f64) -> Result<Vec<u8>, String> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    // NSImageCompressionFactor 상수(문자열 리터럴과 동일 값) — AppKit 심볼 링크 회피.
+    let key = objc2_foundation::NSString::from_str("NSImageCompressionFactor");
+    let num: *mut AnyObject = msg_send![objc2::class!(NSNumber), numberWithDouble: quality];
+    let props: *mut AnyObject = msg_send![objc2::class!(NSDictionary), dictionaryWithObject: num, forKey: &*key];
+    // NSBitmapImageFileTypeJPEG = 3
+    let jpeg: *mut AnyObject = msg_send![rep, representationUsingType: 3usize, properties: props];
+    if jpeg.is_null() {
+        return Err("JPEG 인코딩 실패".into());
+    }
+    let len: usize = msg_send![jpeg, length];
+    let bytes: *const u8 = msg_send![jpeg, bytes];
+    if bytes.is_null() || len == 0 {
+        return Err("JPEG 데이터 없음".into());
+    }
+    Ok(std::slice::from_raw_parts(bytes, len).to_vec())
+}
+
+// takeSnapshot completionHandler(image, error) → JPEG base64.
+//  2MB 초과면 품질을 낮춰 1회 재시도, 그래도 크면 그대로 반환(호출측이 감내).
+#[cfg(target_os = "macos")]
+unsafe fn snapshot_to_b64(
+    img: *mut objc2::runtime::AnyObject,
+    error: *mut objc2::runtime::AnyObject,
+) -> Result<String, String> {
+    use base64::Engine;
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    if !error.is_null() {
+        let desc: *mut AnyObject = msg_send![error, localizedDescription];
+        return Err(format!("스냅샷 오류: {}", ns_to_string(desc)));
+    }
+    if img.is_null() {
+        return Err("스냅샷 이미지 없음".into());
+    }
+    // NSImage → TIFF → NSBitmapImageRep → JPEG.
+    let tiff: *mut AnyObject = msg_send![img, TIFFRepresentation];
+    if tiff.is_null() {
+        return Err("TIFF 변환 실패".into());
+    }
+    let rep: *mut AnyObject = msg_send![objc2::class!(NSBitmapImageRep), imageRepWithData: tiff];
+    if rep.is_null() {
+        return Err("비트맵 변환 실패".into());
+    }
+    let mut jpeg = jpeg_bytes(rep, 0.8)?;
+    if jpeg.len() > 2 * 1024 * 1024 {
+        if let Ok(smaller) = jpeg_bytes(rep, 0.4) {
+            jpeg = smaller;
+        }
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(&jpeg))
+}
+
+// pane 의 프리뷰 webview 핸들 복제 — 잠금은 여기까지만(완료 대기 중 다른 프리뷰 명령을 막지 않는다).
+fn webview_of(mgr: &State<PreviewManager>, pane_id: &str) -> Result<Webview, String> {
+    let map = mgr.inner.lock().map_err(|e| e.to_string())?;
+    Ok(map.get(pane_id).ok_or("프리뷰 없음")?.webview.clone())
+}
+
+// 프리뷰 페이지에서 JS 평가 후 결과 회수. 호출측이 JSON.stringify 문자열 반환을 보장할 것.
+#[tauri::command]
+pub async fn preview_eval(mgr: State<'_, PreviewManager>, pane: String, js: String) -> Result<String, String> {
+    let webview = webview_of(&mgr, &pane)?;
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                let ns = objc2_foundation::NSString::from_str(&js);
+                // completionHandler 는 메인 런루프에서 1회 호출 → 채널로 결과 전달.
+                let block = block2::RcBlock::new(move |result: *mut AnyObject, error: *mut AnyObject| {
+                    let out = eval_result_to_string(result, error);
+                    let _ = tx.send(out);
+                });
+                let _: () = msg_send![wk, evaluateJavaScript: &*ns, completionHandler: &*block];
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(25))
+            .map_err(|_| "JS 평가 시간 초과".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // 비 macOS: wry eval 은 반환값 회수가 안 됨 — 명시적 미지원.
+        let _ = (webview, js);
+        Err("preview_eval 은 macOS 전용입니다".into())
+    }
+}
+
+// 프리뷰 보이는 영역 스크린샷 → JPEG base64 문자열.
+#[tauri::command]
+pub async fn preview_screenshot(mgr: State<'_, PreviewManager>, pane: String) -> Result<String, String> {
+    let webview = webview_of(&mgr, &pane)?;
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
+        webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                let block = block2::RcBlock::new(move |img: *mut AnyObject, error: *mut AnyObject| {
+                    let out = snapshot_to_b64(img, error);
+                    let _ = tx.send(out);
+                });
+                // configuration=nil → 보이는 뷰포트 rect 그대로 스냅샷.
+                let nil_cfg: *mut AnyObject = std::ptr::null_mut();
+                let _: () = msg_send![wk, takeSnapshotWithConfiguration: nil_cfg, completionHandler: &*block];
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(25))
+            .map_err(|_| "스크린샷 시간 초과".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = webview;
+        Err("preview_screenshot 은 macOS 전용입니다".into())
+    }
+}
+
 #[tauri::command]
 pub fn preview_close(app: AppHandle, mgr: State<PreviewManager>, pane_id: String) {
     if let Ok(mut map) = mgr.inner.lock() {

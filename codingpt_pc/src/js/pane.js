@@ -39,6 +39,14 @@ export function newTid() {
   return "mx" + _tidSeq++ + "-" + Date.now().toString(36);
 }
 
+// 터미널 탭 라벨 — 이름 + 실행 중 명령 부제("터미널 1 · claude"). 셸 자체(zsh 등)는 생략(cmux 미러).
+const IDLE_CMDS = new Set(["zsh", "bash", "sh", "fish", "login", "-zsh", "-bash"]);
+export function termTabLabel(t) {
+  const base = t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
+  const cmd = (t.cmd || "").trim();
+  return cmd && !IDLE_CMDS.has(cmd) ? `${base} · ${cmd}` : base;
+}
+
 // ── 프리뷰 툴바(cmux식): ‹ › ↻ [주소창] ☀(테마) 🛠(개발자도구) ↗(외부) — 혼합 탭/독립 pane 공용 ──
 const previewBars = new Map(); // previewId → 툴바 컨트롤러(Rust page-load 이벤트 라우팅)
 api.onPreviewLoaded?.((p) => { previewBars.get(p?.pane)?.onLoaded(p?.url || ""); });
@@ -302,7 +310,7 @@ export class PaneView {
           : t.kind === "ide" ? icons.code({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
-          ? t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널")
+          ? termTabLabel(t)
           : t.kind === "ide" ? "IDE" : (t.metaTitle || "프리뷰");
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
         const x = document.createElement("span");
@@ -409,7 +417,7 @@ export class PaneView {
   _refreshTabLabels() {
     const titles = this.head.querySelectorAll(".ptab .ptab-title");
     this.node.tabs.forEach((t, i) => {
-      if (titles[i]) titles[i].textContent = t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
+      if (titles[i]) titles[i].textContent = isTermTab(t) ? termTabLabel(t) : titles[i].textContent;
     });
   }
 

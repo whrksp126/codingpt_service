@@ -10,6 +10,7 @@ import { state } from "./state.js";
 import * as T from "./tiling.js";
 import { getPane, smartUrl } from "./pane.js";
 import { smartAdd } from "./workspace-view.js";
+import { PAGE_AGENT_JS } from "./page-agent.js";
 
 let sock = null;
 let retryMs = 3000;
@@ -110,8 +111,8 @@ async function handleUiCommand(ws, msg) {
   let res;
   try {
     if (typeof cmd === "string" && cmd.startsWith("browser.")) {
-      // 브라우저 자동화는 P4 범위 — 명시적 미구현 응답.
-      res = { ok: false, error: "browser 자동화 미구현(P4)", code: "NOT_IMPLEMENTED" };
+      // 프리뷰 브라우저 자동화 — 페이지 에이전트 주입 + preview_eval 결과 회수.
+      res = await handleBrowserCommand(cmd.slice("browser.".length), params || {});
     } else {
       const handler = handlers[cmd];
       if (!handler) res = { ok: false, error: "알 수 없는 명령: " + cmd };
@@ -219,6 +220,88 @@ function navigatePreview(target, url) {
   }
   S.focusPane(target.leaf.id);
   S.emit();
+}
+
+// ── browser.* — 프리뷰 네이티브 WKWebView 자동화 ──
+//  흐름: 대상 프리뷰 표면 찾기 → (조작이면) 오리진 가드 → 에이전트 주입(멱등) → 호출 → JSON 회수.
+//  에이전트 메서드는 동기 반환(preview_eval 이 결과를 회수) — wait 만 여기서 500ms 폴링.
+
+// 대상 프리뷰 표면 id — previewReload 와 동일 규칙("pv-"+tid). 혼합 탭이 아직 표시된 적 없으면
+//  네이티브 webview 자체가 없으므로 에러.
+function requirePreviewId(rt) {
+  const target = findPreviewTarget(rt);
+  if (!target) throw new Error("프리뷰 없음");
+  if (target.tab && !target.tab.tid) throw new Error("프리뷰 표면 미생성(탭을 한 번 표시해야 함)");
+  return target.tab ? "pv-" + target.tab.tid : "pv-" + (target.leaf.tid || target.leaf.id);
+}
+
+// 오리진 가드 — 조작(click/type/fill/eval)은 로컬 데브서버에서만 허용(외부 사이트 원격 조작 차단).
+//  snapshot/get/screenshot 은 읽기 전용이라 허용.
+async function assertLocalOrigin(pvId) {
+  const info = await api.previewInfo(pvId);
+  let host = "";
+  try { host = new URL(info.url || "").hostname; } catch (_) {}
+  if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]" && host !== "::1") {
+    throw new Error("로컬(localhost) 페이지가 아니어서 조작 거부: " + (info.url || "(URL 없음)"));
+  }
+}
+
+// 에이전트 함수 1회 호출 — 주입(멱등) 후 JSON.stringify 로 감싼 결과를 회수해 파싱.
+//  페이지 이동으로 에이전트가 사라져도 매 호출 재주입되므로 안전.
+async function agentCall(pvId, expr) {
+  await api.previewEval(pvId, PAGE_AGENT_JS);
+  const js =
+    "JSON.stringify((function(){try{return {ok:true,result:(" + expr + ")};}" +
+    "catch(e){return {ok:false,error:String((e&&e.message)||e)};}})())";
+  const raw = await api.previewEval(pvId, js);
+  let out = null;
+  try { out = JSON.parse(raw); } catch (_) {
+    throw new Error("에이전트 응답 파싱 실패: " + String(raw).slice(0, 200));
+  }
+  if (!out || out.ok !== true) throw new Error((out && out.error) || "에이전트 실행 실패");
+  return out.result;
+}
+
+const BROWSER_MUTATING = new Set(["click", "type", "fill", "eval"]);
+
+async function handleBrowserCommand(op, p) {
+  const { rt } = requireWs(p);
+  const pvId = requirePreviewId(rt);
+  // wait 도 {js} 조건은 페이지에서 임의 JS 를 돌리므로 조작과 동일하게 가드.
+  if (BROWSER_MUTATING.has(op) || (op === "wait" && p.js)) await assertLocalOrigin(pvId);
+  const q = (v) => JSON.stringify(v == null ? "" : String(v));
+  const target = () => q(p.target || p.ref || p.selector);
+  switch (op) {
+    case "snapshot":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.snapshot()") };
+    case "click":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.click(" + target() + ")") };
+    case "type":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.type(" + target() + "," + q(p.text) + ")") };
+    case "fill":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.fill(" + target() + "," + q(p.value ?? p.text) + ")") };
+    case "eval":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.eval(" + q(p.js || p.code) + ")") };
+    case "get":
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.get(" + q(p.what || "text") + "," + q(p.selector || "") + ")") };
+    case "wait": {
+      // 500ms 폴링(상한 25s) — 에이전트 wait 는 단발 검사만, 재-eval 은 여기서.
+      const deadline = Date.now() + Math.min(Number(p.timeoutMs) || 25000, 25000);
+      const spec = JSON.stringify({ selector: p.selector || "", text: p.text || "", js: p.js || "" });
+      for (;;) {
+        const r = await agentCall(pvId, "window.__cptAgent.wait(" + spec + ")").catch(() => null);
+        if (r && r.ready) return { ok: true, result: { ready: true } };
+        if (Date.now() >= deadline) return { ok: true, result: { ready: false, timeout: true } };
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+    case "screenshot": {
+      const base64 = await api.previewScreenshot(pvId);
+      return { ok: true, result: { format: "jpeg", base64 } };
+    }
+    default:
+      return { ok: false, error: "알 수 없는 browser 명령: " + op };
+  }
 }
 
 const PANE_TYPES = ["terminal", "ide", "preview"];

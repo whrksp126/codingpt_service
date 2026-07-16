@@ -541,6 +541,9 @@ export async function reconcilePool() {
         if (!p) { changed = true; return false; }
         seen.add(t.win);
         if (p.name && t.title !== p.name) { t.title = p.name; changed = true; touched.add(l.id); }
+        // 실행 중 명령(pane_current_command) — 탭 라벨 부제("이름 · claude")로 표시(cmux 미러).
+        const cmd = p.command || "";
+        if ((t.cmd || "") !== cmd) { t.cmd = cmd; changed = true; touched.add(l.id); }
         return true;
       });
       if (l.tabs.length !== before) touched.add(l.id);
