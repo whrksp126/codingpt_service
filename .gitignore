@@ -14,7 +14,7 @@ build/
 # 기타
 .DS_Store
 *.log
-.claude/
+.claude/settings.local.json
 
 # DB 백업 파일 (개인정보 포함, git에 올리지 않음)
 db/backups/*

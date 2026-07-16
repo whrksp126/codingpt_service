@@ -43,10 +43,14 @@ packages/runner-core/  @codingpt/runner-core — 계약 구현 한 벌(로컬/�
   agent.js     BYO 에이전트 — 사용자 claude spawn(stream-json), 8-이벤트 정규화, agent.* RPC (M1)
   sync.js      동기화(sync.*) — shadow 체크포인트 + git bundle + 세션묶음 + 3-way 충돌 (M4)
   approval-mcp.js  승인 중계 MCP(--permission-prompt-tool) — claude 권한요청 → 앱 카드 (M1)
+  cpt-server.js  cpt CLI용 유닉스 소켓 서버(~/.codingpt/cpt.sock 0600, NDJSON one-shot)
+  shim.js      ~/.codingpt/bin/ PATH shim(cpt·claude·codex 래퍼 — 훅 주입, 자격증명 무접촉)
   index.js     public API 재export({config,control,pty,fs,agent,sync,proxy,workspace})
 packages/daemon/       @codingpt/daemon — 로컬 부트스트랩(페어링 CLI·tmux·TCC), runner-core 의존
   index.js     CLI (pair | run | status | setup | unpair)
-packages/cloud-runner/ @codingpt/cloud-runner — 클라우드 컨테이너 부트스트랩(env config) (M5 Slice0-C 예정)
+packages/cpt-cli/      @codingpt/cpt-cli — 터미널 안 AI가 서비스를 조작하는 `cpt` CLI(의존성 0)
+                       identify/terminal/send/read-screen/notify/layout/browser/훅 수신
+packages/cloud-runner/ @codingpt/cloud-runner — 클라우드 컨테이너 부트스트랩(현재 게이팅 OFF)
 ```
 
 ## 컨벤션
