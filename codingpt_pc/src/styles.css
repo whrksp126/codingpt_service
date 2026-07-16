@@ -599,3 +599,27 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .login-gate .lg-sub { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
 .login-gate .btn.lg { min-width: 200px; padding: 11px 20px; font-size: 14px; }
 .login-gate .lg-status { font-size: 12px; color: var(--dim); min-height: 18px; max-width: 320px; line-height: 1.5; }
+
+/* ── 앱 종료 가드(미저장 IDE 변경) ── */
+.quit-guard-backdrop {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex; align-items: center; justify-content: center;
+}
+.quit-guard {
+  width: 380px; max-width: 90vw;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 12px;
+  padding: 18px 20px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+.qg-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.qg-desc { font-size: 12px; color: var(--text-dim, #8b93a7); line-height: 1.5; }
+.qg-files { margin: 10px 0 2px; max-height: 120px; overflow-y: auto; }
+.qg-file { font-size: 12px; color: #eab308; padding: 2px 0; font-family: ui-monospace, monospace; }
+.qg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.qg-btn {
+  font-size: 12px; padding: 7px 14px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
+}
+.qg-btn:hover { background: var(--hover); }
+.qg-quit { border-color: #7f1d1d; background: #3b1113; color: #fca5a5; }
+.qg-quit:hover { background: #4c1518; }

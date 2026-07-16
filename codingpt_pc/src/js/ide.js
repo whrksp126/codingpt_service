@@ -33,6 +33,22 @@ const baseName = (p) => p.split("/").pop() || p;
 const parentOf = (p) => p.split("/").slice(0, -1).join("/");
 const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// ── 전역 미저장 상태 — 앱 종료 가드용. dirty 전이 때마다 Rust(set_ide_dirty)에 미러한다. ──
+const _ideInstances = new Set();
+let _lastDirtyFlag = null;
+export function ideDirtyPaths() {
+  const seen = new Set();
+  for (const inst of _ideInstances) for (const g of inst.groups.values()) for (const f of g.open)
+    if (f.dirty) seen.add(f.path);
+  return [...seen];
+}
+function syncGlobalDirty() {
+  const flag = ideDirtyPaths().length > 0;
+  if (flag === _lastDirtyFlag) return;
+  _lastDirtyFlag = flag;
+  api.setIdeDirty(flag).catch(() => { /* 구 버전 브리지 등 — 가드 없이 기존 동작 */ });
+}
+
 export class IdeView {
   constructor(localPath, body, opts = {}) {
     this.root = (localPath || "").replace(/\/+$/, "");
@@ -57,6 +73,7 @@ export class IdeView {
     this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, 1200);
     // 자동 저장(VS Code afterDelay) — 타이핑이 멈추고 800ms 뒤 디스크 기록 → 다른 기기에 곧바로 반영.
     this._autoTimers = new Map(); // path → timeout
+    _ideInstances.add(this); // 앱 종료 가드의 전역 dirty 집계 대상
   }
 
   get activeGroup() { return this.groups.get(this.activeGroupId) || this.groups.values().next().value; }
@@ -581,6 +598,7 @@ export class IdeView {
       for (const o of g.open) if (o.path === f.path && !o.dirty) { o.dirty = true; hit = true; }
       if (hit) this._renderGroupTabs(g);
     }
+    syncGlobalDirty();
   }
   async save() {
     const group = this.activeGroup;
@@ -618,6 +636,7 @@ export class IdeView {
       for (const o of g.open) if (o.path === path && o.dirty) { o.dirty = false; hit = true; }
       if (hit) this._renderGroupTabs(g);
     }
+    syncGlobalDirty();
   }
   closeFile(group, i) {
     const f = group.open[i];
@@ -632,6 +651,7 @@ export class IdeView {
       }
     } catch (_) {}
     group.open.splice(i, 1);
+    syncGlobalDirty();
     if (group.active >= group.open.length) group.active = group.open.length - 1;
     if (group.active < 0) { group.cm.swapDoc(CM.Doc("", "text/plain")); group.editorHost.style.display = "none"; group.empty.style.display = ""; }
     else this._activate(group, group.active);
@@ -1044,6 +1064,8 @@ export class IdeView {
     for (const g of this.groups.values()) for (const f of g.open) {
       if (f.dirty && !seen.has(f.path)) { seen.add(f.path); api.fsWrite(f.path, f.doc.getValue()).catch(() => {}); }
     }
+    _ideInstances.delete(this);
+    syncGlobalDirty();
     this.closeSearch(); closeMenu();
   }
   _toast(msg) {

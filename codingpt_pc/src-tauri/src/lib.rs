@@ -32,6 +32,34 @@ struct Daemon {
     should_run: Mutex<bool>,     // 감시 스레드 재시작 여부
 }
 
+// ── 앱 종료 가드 — IDE 미저장 변경 여부(JS 가 dirty 전이마다 set_ide_dirty 로 미러) ──
+#[derive(Default)]
+struct IdeDirty(std::sync::atomic::AtomicBool);
+
+fn ide_dirty(app: &AppHandle) -> bool {
+    app.try_state::<IdeDirty>()
+        .map(|s| s.0.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
+    state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
+}
+
+// 가드 다이얼로그에서 "종료" 확정 — app.exit(0)=code Some 이라 ExitRequested 가드를 통과한다.
+//  데몬 정리는 트레이 종료와 동일하게 인라인으로(RunEvent::Exit 정리만으로는 사이드카가 살아남는 것 실측).
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    if let Some(state) = app.try_state::<Daemon>() {
+        *state.should_run.lock().unwrap() = false;
+        if let Some(mut ch) = state.child.lock().unwrap().take() {
+            let _ = ch.kill();
+        }
+    }
+    app.exit(0);
+}
+
 #[derive(Serialize, Clone)]
 struct Status {
     paired: bool,
@@ -366,6 +394,12 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_window(app),
             "quit" => {
+                // 미저장 IDE 변경이 있으면 바로 끄지 않고 창을 띄워 확인(취소/종료) 받는다.
+                if ide_dirty(app) {
+                    show_window(app);
+                    let _ = app.emit("cpt-quit-guard", "tray");
+                    return;
+                }
                 // 종료 시 데몬도 함께 정리.
                 if let Some(state) = app.try_state::<Daemon>() {
                     *state.should_run.lock().unwrap() = false;
@@ -426,6 +460,7 @@ pub fn run() {
             None,
         ))
         .manage(Daemon::default())
+        .manage(IdeDirty::default())
         .manage(pty::PtyManager::default())
         .manage(preview::PreviewManager::default())
         .invoke_handler(tauri::generate_handler![
@@ -469,6 +504,9 @@ pub fn run() {
             bridge::ui_state_save,
             bridge::open_external,
             bridge::notify,
+            // 앱 종료 가드(미저장 IDE 변경)
+            set_ide_dirty,
+            quit_app,
             // 서버 동기화 알림 + UI 실시간 채널
             bridge::notif_list,
             bridge::notif_create,
@@ -570,6 +608,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // Cmd+Q 등 code 없는 종료 요청 — 미저장 IDE 변경이 있으면 막고 확인 다이얼로그로.
+            //  (quit_app/트레이 확정 종료는 app.exit(0)=code Some 이라 여기 걸리지 않는다)
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+                if code.is_none() && ide_dirty(app_handle) {
+                    api.prevent_exit();
+                    show_window(app_handle);
+                    let _ = app_handle.emit("cpt-quit-guard", "exit-request");
+                    return;
+                }
+            }
             // 앱이 어떤 경로(Cmd+Q · 트레이 종료 · 시스템 종료)로 끝나도 데몬 자식을 정리(고아 방지).
             if let tauri::RunEvent::Exit = event {
                 if let Some(pm) = app_handle.try_state::<preview::PreviewManager>() {

@@ -13,6 +13,34 @@ import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
 import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
+import { ideDirtyPaths } from "./ide.js";
+
+// ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
+//  스펙(사용자 확정): 취소 / (저장 안 하고) 종료 2택. 저장은 탭의 ● 표시 + ⌘S(또는 자동저장 완료 대기).
+function initQuitGuard() {
+  api.onQuitGuard(() => {
+    if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
+    const files = ideDirtyPaths();
+    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${p.split("/").pop()}</div>`).join("")
+      + (files.length > 6 ? `<div class="qg-file">… 외 ${files.length - 6}개</div>` : "");
+    const bd = document.createElement("div");
+    bd.className = "quit-guard-backdrop";
+    bd.innerHTML = `
+      <div class="quit-guard">
+        <div class="qg-title">저장되지 않은 변경이 있습니다</div>
+        <div class="qg-desc">${files.length}개 파일이 아직 저장되지 않았습니다. 지금 종료하면 변경 내용이 사라집니다.</div>
+        <div class="qg-files">${list}</div>
+        <div class="qg-actions">
+          <button class="qg-btn qg-cancel">취소</button>
+          <button class="qg-btn qg-quit">저장 안 하고 종료</button>
+        </div>
+      </div>`;
+    bd.querySelector(".qg-cancel").addEventListener("click", () => bd.remove());
+    bd.querySelector(".qg-quit").addEventListener("click", () => { api.quitApp().catch(() => {}); });
+    bd.addEventListener("click", (e) => { if (e.target === bd) bd.remove(); });
+    document.body.appendChild(bd);
+  });
+}
 
 const shellEl = document.querySelector(".shell");
 const sidebarEl = document.getElementById("sidebar");
@@ -133,6 +161,7 @@ window.addEventListener("keydown", (e) => {
   S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
   S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
   startUiChannel(); // UI 실시간 채널(WS) — 알림 이벤트 수신
+  initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
   render();
   refreshWsMeta();
 

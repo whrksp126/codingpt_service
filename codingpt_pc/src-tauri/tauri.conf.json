@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "identifier": "com.ghmate.codingpt.pc",
   "build": {
-    "frontendDist": "../src"
+    "frontendDist": "../src",
+    "beforeDevCommand": "bash scripts/bundle-sidecar.sh",
+    "beforeBuildCommand": "bash scripts/bundle-sidecar.sh"
   },
   "app": {
     "withGlobalTauri": true,
