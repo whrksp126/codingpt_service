@@ -348,12 +348,6 @@ function hasActiveClient(userId) {
 function hasActiveMobileClient(userId) {
   const key = String(userId);
   const ws = agentWsClients.get(key);
-  try {
-    const wsTags = ws ? [...ws].map((c) => c._cptClient || '?') : [];
-    const sseSet = eventClients.get(key);
-    const sseTags = sseSet ? [...sseSet].map((r) => r._cptClient || 'mobile') : [];
-    console.log(`[push-debug] user=${key} wss=[${wsTags.join(',')}] sse=[${sseTags.join(',')}]`);
-  } catch (_) { /* noop */ }
   if (ws) for (const c of ws) { if (c._cptClient === 'mobile') return true; }
   const sse = eventClients.get(key);
   if (sse) for (const r of sse) { if ((r._cptClient || 'mobile') === 'mobile') return true; }
