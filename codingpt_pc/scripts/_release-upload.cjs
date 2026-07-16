@@ -34,10 +34,10 @@ async function put(key, body, contentType) {
   await put(tarName, fs.readFileSync(targz), 'application/gzip');
   await put(dmgName, fs.readFileSync(dmg), 'application/x-apple-diskimage');
   await put('CodingPT.dmg', fs.readFileSync(dmg), 'application/x-apple-diskimage'); // back 프록시 별칭
-  // 다운로드 페이지(codingpt.ghmate.com/download)가 가리키는 objectstore 공개 경로도 갱신 —
-  //  키는 PREFIX(pc-releases/) 밖이라 client 로 직접 put.
+  // 다운로드 페이지(codingpt.ghmate.com/download)가 가리키는 objectstore 공개 키 갱신.
+  //  공개 URL = https://objectstore.ghmate.com/<bucket>/<key> — 키에 codingpt/ 접두사 없음(실측).
   await client.send(new PutObjectCommand({
-    Bucket: BUCKET, Key: 'codingpt/common/downloads/CodingPT-arm64.dmg',
+    Bucket: BUCKET, Key: 'common/downloads/CodingPT-arm64.dmg',
     Body: fs.readFileSync(dmg), ContentType: 'application/x-apple-diskimage',
   }));
   console.log('  업로드: common/downloads/CodingPT-arm64.dmg (공개 다운로드 페이지)');

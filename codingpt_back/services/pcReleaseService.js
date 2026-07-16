@@ -15,12 +15,17 @@ const s3Service = require('./s3Service');
 const PREFIX = 'codingpt/pc-releases/';
 const BUCKET = process.env.OBJECTSTORE_BUCKET || 'codingpt';
 
+// ⚠️ s3Service.getFileContent/saveFile 은 경로를 codingpt/execute/ 밑으로 강제 정규화한다
+//  (레슨 실행 전용 규칙) — pc-releases 처럼 밖에 있는 키는 반드시 raw client 로 접근할 것.
 async function readLatest() {
-  const res = await s3Service.getFileContent(`${PREFIX}latest.json`);
-  if (!res.success) return null;
-  let content = res.content;
-  if (res.encoding === 'base64') content = Buffer.from(content, 'base64').toString('utf-8');
-  try { return JSON.parse(content); } catch (_) { return null; }
+  try {
+    const data = await s3Service.s3Client.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${PREFIX}latest.json` }));
+    const chunks = [];
+    for await (const c of data.Body) chunks.push(c);
+    return JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+  } catch (_) {
+    return null;
+  }
 }
 
 // 단순 semver 비교: a > b 이면 1, 같으면 0, 작으면 -1 (프리릴리스 미사용 전제).

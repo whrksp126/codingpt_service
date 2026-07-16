@@ -26,7 +26,8 @@ VERSION="$(python3 -c "import json;print(json.load(open('$PC_DIR/src-tauri/tauri
 echo "▸ 릴리스 버전: $VERSION"
 
 # 1) 서명 릴리스 빌드 (beforeBuildCommand 가 CPT_RELEASE=1 로 사이드카 서명 필수화 수행)
-export TAURI_SIGNING_PRIVATE_KEY_PATH="$KEY"
+#  주의: _PATH 변형은 CLI 버전에 따라 무시됨(실측) — 키 내용을 직접 넘긴다.
+export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
 ( cd "$PC_DIR" && npm run tauri build )
 
@@ -37,16 +38,19 @@ DMG="$(ls "$BUNDLE"/dmg/*.dmg | head -1)"
 [ -f "$TARGZ" ] && [ -f "$SIG" ] && [ -f "$DMG" ] || { echo "✗ 빌드 산출물 누락 (tar.gz/sig/dmg)" >&2; exit 1; }
 
 # 2) 외부 앱 서명 검증 — ad-hoc 이면 중단(릴리스 규율)
+#  주의: pipefail 아래서 `codesign | grep -q` 는 grep 조기종료가 codesign 에 SIGPIPE(141)를 먹여
+#  성공을 실패로 오판한다(실측) — 출력을 변수로 캡처해 검사한다.
 APP="$(ls -d "$BUNDLE"/macos/*.app | head -1)"
-if ! codesign -dv "$APP" 2>&1 | grep -q "Developer ID Application"; then
+SIGN_INFO="$(codesign -dvv "$APP" 2>&1 || true)"
+if ! grep -q "Developer ID Application" <<<"$SIGN_INFO"; then
   echo "✗ 앱이 Developer ID 로 서명되지 않았습니다:" >&2
-  codesign -dv "$APP" 2>&1 | grep Authority >&2 || true
+  grep Authority <<<"$SIGN_INFO" >&2 || true
   exit 1
 fi
-echo "▸ 서명 검증 OK: $(codesign -dv "$APP" 2>&1 | grep 'Authority=Developer ID' | head -1)"
+echo "▸ 서명 검증 OK: $(grep 'Authority=Developer ID' <<<"$SIGN_INFO" | head -1)"
 
 # 3) objectstore 업로드 + latest.json (back 의 aws-sdk 재사용 — OBJECTSTORE_* 는 .env.local)
 set -a; source "$BACK_DIR/.env.local"; set +a
-node "$PC_DIR/scripts/_release-upload.js" "$VERSION" "$TARGZ" "$SIG" "$DMG" "$NOTES"
+node "$PC_DIR/scripts/_release-upload.cjs" "$VERSION" "$TARGZ" "$SIG" "$DMG" "$NOTES"
 
 echo "✅ 릴리스 $VERSION 발행 완료 — 업데이트 확인: /api/pc/update/darwin/aarch64/<구버전>"
