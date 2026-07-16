@@ -15,6 +15,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execFileSync } = require('child_process');
 const runtime = require('./runtime');
 
@@ -75,6 +76,22 @@ function ensureShims() {
   writeExec(path.join(bin, 'cpt'), `#!/bin/sh
 exec "${process.execPath}" "${cptCli}" "$@"
 `);
+  // cpt 를 PATH 에 이미 있는 전역 bin 에도 심링크(best-effort). shim env(ZDOTDIR/PATH)가 붙기 전에
+  //  시작된 "옛 셸"(persistent tmux window 등)에서는 ~/.codingpt/bin 이 PATH 에 없어 cpt 가 안 잡힌다.
+  //  cpt 는 CPT_WS/CPT_SOCK 없이도 TMUX_PANE 자체조회 + 기본 소켓으로 동작하므로, 전역 bin 에만 있으면
+  //  어느 셸에서든 실행된다. claude/codex 는 실제 바이너리와 충돌할 수 있어 cpt 만 링크한다.
+  try {
+    const cptShim = path.join(bin, 'cpt');
+    for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin')]) {
+      try {
+        fs.accessSync(dir, fs.constants.W_OK);
+        const link = path.join(dir, 'cpt');
+        try { const st = fs.lstatSync(link); if (st) fs.unlinkSync(link); } catch (_) { /* 없으면 그냥 생성 */ }
+        fs.symlinkSync(cptShim, link);
+        break; // 한 곳만 성공하면 충분
+      } catch (_) { /* 이 dir 는 쓰기불가/없음 — 다음 후보 */ }
+    }
+  } catch (_) { /* noop */ }
 
   // 3) claude 래퍼 — 훅 설정 주입. 사용자가 --settings 를 직접 주면 무간섭 통과.
   const realClaude = which('claude');
