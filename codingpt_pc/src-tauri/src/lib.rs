@@ -47,6 +47,53 @@ fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
     state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
 }
 
+// ── 자동 업데이트 — 순수 JS 프론트(번들러 없음)라 JS 플러그인 대신 Rust API 를 커맨드로 노출 ──
+//  updater 는 번들된 앱(.app)에서만 동작(tauri dev 에선 항상 "미지원" 에러 → available:false 로 정규화).
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<serde_json::Value, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    match updater.check().await {
+        Ok(Some(u)) => Ok(serde_json::json!({
+            "available": true,
+            "version": u.version,
+            "notes": u.body.clone().unwrap_or_default(),
+        })),
+        Ok(None) => Ok(serde_json::json!({ "available": false })),
+        Err(e) => Ok(serde_json::json!({ "available": false, "error": e.to_string() })),
+    }
+}
+
+// 다운로드+설치+재시작. 진행률은 cpt-update-progress 이벤트(받은 바이트/전체)로 프론트에 중계.
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or("이미 최신 버전입니다.")?;
+    let handle = app.clone();
+    update
+        .download_and_install(
+            move |chunk, total| {
+                let _ = handle.emit("cpt-update-progress", serde_json::json!({ "chunk": chunk, "total": total }));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    // 데몬 자식 정리 후 재시작(고아 방지 — quit_app 과 동일 규율).
+    if let Some(state) = app.try_state::<Daemon>() {
+        *state.should_run.lock().unwrap() = false;
+        if let Some(mut ch) = state.child.lock().unwrap().take() {
+            let _ = ch.kill();
+        }
+    }
+    app.restart();
+}
+
 // 가드 다이얼로그에서 "종료" 확정 — app.exit(0)=code Some 이라 ExitRequested 가드를 통과한다.
 //  데몬 정리는 트레이 종료와 동일하게 인라인으로(RunEvent::Exit 정리만으로는 사이드카가 살아남는 것 실측).
 #[tauri::command]
@@ -457,6 +504,7 @@ pub fn run() {
 
     builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -512,6 +560,9 @@ pub fn run() {
             // 앱 종료 가드(미저장 IDE 변경)
             set_ide_dirty,
             quit_app,
+            // 자동 업데이트
+            update_check,
+            update_install,
             // 서버 동기화 알림 + UI 실시간 채널
             bridge::notif_list,
             bridge::notif_create,

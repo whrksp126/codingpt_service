@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../src",
     "beforeDevCommand": "bash scripts/bundle-sidecar.sh",
-    "beforeBuildCommand": "bash scripts/bundle-sidecar.sh"
+    "beforeBuildCommand": "CPT_RELEASE=1 bash scripts/bundle-sidecar.sh"
   },
   "app": {
     "withGlobalTauri": true,
@@ -32,13 +32,24 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["codingpt-pc"]
+        "schemes": [
+          "codingpt-pc"
+        ]
       }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ4Q0QxQUQ1MTMxRjU0OTYKUldTV1ZCOFQxUnJOU0hJY2RBSll4Y2tHZWdCelB2Rm9NbUVtbTdtNnBnamRvWVdzV1JtK2dkdVcK",
+      "endpoints": [
+        "https://codingpt-back.ghmate.com/api/pc/update/{{target}}/{{arch}}/{{current_version}}"
+      ]
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -46,9 +57,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/daemon"],
+    "resources": [
+      "resources/daemon"
+    ],
     "macOS": {
-      "minimumSystemVersion": "10.15"
-    }
+      "minimumSystemVersion": "10.15",
+      "signingIdentity": "Developer ID Application: GeonHo Jo (BB8GGQPRRX)"
+    },
+    "createUpdaterArtifacts": true
   }
 }

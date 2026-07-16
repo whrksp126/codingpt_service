@@ -13,6 +13,22 @@ set -euo pipefail
 TARGET="${1:-darwin-arm64}"
 NODE_VERSION="${NODE_VERSION:-22.18.0}"
 
+# ── 릴리스 서명 필수화 ──
+#  CPT_RELEASE=1(= tauri build 경로)이면 Developer ID 서명이 필수다. ad-hoc 릴리스 배포물은
+#  Gatekeeper/업데이터 서명 검증에서 깨지고, 과거 "서명키 없으면 조용히 ad-hoc" 이 사고 원인.
+#  CODESIGN_IDENTITY 미지정 시 키체인의 Developer ID Application 을 자동 탐지, 그래도 없으면 중단.
+#  dev(tauri dev)는 기존대로 ad-hoc 허용(오프라인/속도 — --timestamp 는 네트워크 필요).
+if [ "${CPT_RELEASE:-}" = "1" ] && [ -z "${CODESIGN_IDENTITY:-}" ]; then
+  CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/{print $2; exit}')"
+  if [ -n "$CODESIGN_IDENTITY" ]; then
+    export CODESIGN_IDENTITY
+    echo "▸ 릴리스 서명 ID 자동 탐지: $CODESIGN_IDENTITY"
+  else
+    echo "✗ 릴리스 빌드에 코드서명 ID가 없습니다 — 키체인에 'Developer ID Application' 인증서가 필요합니다(ad-hoc 릴리스 금지)." >&2
+    exit 1
+  fi
+fi
+
 PC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DAEMON_SRC="$(cd "$PC_DIR/../codingpt_daemon" && pwd)"
 OUT="$PC_DIR/src-tauri/resources/daemon"

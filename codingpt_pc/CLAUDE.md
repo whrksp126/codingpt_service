@@ -44,8 +44,15 @@ scripts/bundle-sidecar.sh  node+tmux+dylib 자립 번들(dmg 무설치)
 
 ```bash
 npm install && npm run tauri dev     # 개발 실행 — beforeDevCommand 가 사이드카 번들 자동 실행
-npm run tauri build                  # .dmg 빌드
+bash scripts/release-pc.sh           # 릴리스: 서명 빌드→업데이터 아티팩트→objectstore 발행(latest.json)
 ```
+
+- **릴리스 서명 필수**: 릴리스(CPT_RELEASE=1)는 키체인의 Developer ID Application 을 자동 탐지해
+  서명하고, 없으면 빌드가 실패한다(ad-hoc 릴리스 금지). dev 는 ad-hoc 허용.
+- **자동 업데이트**: 앱이 `/api/pc/update/{target}/{arch}/{ver}` 를 확인(설정>정보>업데이트).
+  업데이터 개인키 `~/.codingpt-release/pc-updater.key` — 유출 금지, 분실 시 기존 설치본 업데이트 불가.
+  배포물은 objectstore `codingpt/pc-releases/`, 다운로드는 back 스트리밍(`/api/pc/dl/*`).
+- 공증(notarization)은 미적용 — Gatekeeper 첫 실행 경고가 남는다(App Store Connect API 키 필요, 후속).
 
 - **데몬 코드(runner-core) 수정은 tauri dev 재시작으로만 반영**(beforeDevCommand 재번들).
   실행 중 rust 파일 저장으로 인한 자동 재빌드는 사이드카를 갱신하지 않는다 — 스테일 데몬 주의.

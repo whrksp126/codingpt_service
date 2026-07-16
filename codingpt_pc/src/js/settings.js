@@ -156,9 +156,51 @@ function renderSection(force) {
       <div class="sm-h">정보</div>
       <div class="sm-card2">
         <div class="sett-row"><span>버전</span><span class="dim">CodingPT PC 0.1.0</span></div>
+        <div class="sett-row"><span>업데이트</span>
+          <span style="display:inline-flex;align-items:center;gap:8px;">
+            <span class="dim" id="updStatus">-</span>
+            <button class="sett-btn" id="updBtn">확인</button>
+          </span>
+        </div>
         <div class="sett-row"><span>이 창을 닫아도</span><span class="dim">메뉴바에서 계속 실행됩니다</span></div>
       </div>`;
+    bindUpdate();
   }
+}
+
+// ── 자동 업데이트 — 확인 → (있으면) 버튼이 "설치 후 재시작" 으로 전환 ──
+function bindUpdate() {
+  const btn = contentEl.querySelector("#updBtn");
+  const st = contentEl.querySelector("#updStatus");
+  if (!btn || !st) return;
+  let found = null;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      if (found) {
+        st.textContent = "다운로드 중…";
+        const un = await api.onUpdateProgress((p) => {
+          if (p && p.total) st.textContent = `다운로드 ${Math.round((p.chunk / p.total) * 100) || 0}%`;
+        });
+        await api.updateInstall(); // 성공 시 앱이 재시작되므로 이후 코드는 실행 안 될 수 있음
+        un?.();
+        return;
+      }
+      st.textContent = "확인 중…";
+      const r = await api.updateCheck();
+      if (r && r.available) {
+        found = r;
+        st.textContent = `새 버전 ${r.version}`;
+        btn.textContent = "설치 후 재시작";
+      } else {
+        st.textContent = r && r.error ? "확인 불가(개발 실행에선 미지원)" : "최신 버전입니다";
+      }
+    } catch (e) {
+      st.textContent = "실패: " + e;
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
 
 async function syncAutostart() {

@@ -30,6 +30,7 @@ dirs = "5"
 portable-pty = "0.8"
 base64 = "0.22"
 ureq = { version = "2", features = ["json"] }
+tauri-plugin-updater = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

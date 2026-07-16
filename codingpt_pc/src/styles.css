@@ -630,3 +630,11 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
   margin-left: 6px; font-size: 10px; color: #eab308; flex: none;
 }
 .wsr-fresh svg { stroke: #eab308; }
+
+/* 설정 소형 버튼(업데이트 확인 등) */
+.sett-btn {
+  font-size: 12px; padding: 4px 10px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
+}
+.sett-btn:hover { background: var(--hover); }
+.sett-btn:disabled { opacity: 0.5; cursor: default; }

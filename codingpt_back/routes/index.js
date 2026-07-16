@@ -42,6 +42,7 @@ router.use('/admin', contentTreeRoutes);
 router.use('/github', githubRoutes);
 router.use('/workspaces', workspaceRoutes);
 router.use('/preview', previewRoutes); // 바이브코딩 dev 서버 미리보기 프록시
+router.use('/pc', require('./pcReleaseRoutes')); // PC 앱 릴리스(자동업데이트 확인·배포물 다운로드, 공개)
 router.use('/terminal', terminalRoutes); // 인터랙티브 PTY 터미널(ws 업그레이드는 app.js 에서)
 router.use('/usage', usageRoutes); // 사용량 미터링 조회
 router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태

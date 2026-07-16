@@ -98,6 +98,11 @@ export const api = {
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
 
+  // ── 자동 업데이트(번들 앱 전용 — tauri dev 에선 updateCheck 가 error 반환) ──
+  updateCheck: () => invoke("update_check"),
+  updateInstall: () => invoke("update_install"),
+  onUpdateProgress: (cb) => listen("cpt-update-progress", (e) => cb(e.payload)),
+
   // ── 앱 종료 가드 — IDE 전역 dirty 를 Rust 에 미러, 가드 이벤트 수신, 종료 확정 ──
   setIdeDirty: (dirty) => invoke("set_ide_dirty", { dirty }),
   quitApp: () => invoke("quit_app"),
