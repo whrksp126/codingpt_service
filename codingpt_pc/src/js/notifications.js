@@ -4,10 +4,10 @@ import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
 
-let lastNotifyTs = 0;
-
-// 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(링/OS 알림).
+// 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(pane 링).
 //  win = 발생한 터미널의 풀 window 인덱스(스코프 읽음 처리·점프의 키).
+//  OS 네이티브 알림은 새 알림이 state 에 편입되는 단일 지점(state.maybeOsNotify — 창 비포커스 시)에서만
+//  발송한다 → 여기서 직접 api.notify 를 부르지 않아 이중 발송이 없다.
 export function handleOsc(ws, paneId, win, title, body) {
   const t = (title || "").trim() || ws?.name || "CodingPT";
   const b = (body || "").trim();
@@ -21,11 +21,6 @@ export function handleOsc(ws, paneId, win, title, body) {
     body: b,
   });
   flashPane(paneId);
-  const now = Date.now();
-  if (now - lastNotifyTs > 400) {
-    lastNotifyTs = now;
-    api.notify(t, b);
-  }
 }
 
 function flashPane(paneId) {

@@ -321,7 +321,12 @@ export class PaneView {
           this.closeTab(i);
         });
         tab.appendChild(x);
-        tab.addEventListener("click", () => this.switchTab(i));
+        tab.addEventListener("click", () => {
+          this.switchTab(i);
+          // 사용자가 탭을 직접 클릭 = 그 터미널을 봄 → 알림 읽음(프로그램적 전환은 안 읽음).
+          const tt = this.node.tabs[i];
+          if (isTermTab(tt) && typeof tt.win === "number") this.ctx.onTabActivated?.(tt.win);
+        });
         // 포인터 기반 드래그(WKWebView 에서 HTML5 draggable 불안정 → 텍스트 드래그 방지).
         tab.addEventListener("pointerdown", (e) => {
           if (e.button !== 0 || e.pointerType === "touch" || e.target.closest(".ptab-x")) return;
@@ -550,8 +555,8 @@ export class PaneView {
     if (isTermTab(tab)) {
       const win = await this._ensureWin(tab);
       if (this.node.tabs[this.node.active] === tab) this._view(win);
-      // 그 터미널(win)을 화면에 띄웠다 = 해당 알림 읽음(서버 스코프 읽음 처리).
-      this.ctx.onTabActivated?.(win);
+      // 읽음 처리 없음 — switchTab 은 프로그램적으로도 호출된다(알림 활성화/점프). 읽음은
+      //  사용자가 탭/터미널을 직접 클릭할 때만(buildHead 탭 클릭·_setupInput mousedown).
     }
     this.showActiveTab();
     this.ctx.persist?.();
@@ -737,6 +742,9 @@ export class PaneView {
     //  클릭 자체로도 크기를 회수한다(다른 기기가 이 창을 자기 크기로 바꿨을 수 있음). 1.2s 스로틀.
     let lastClaim = 0;
     const onMouseDown = () => {
+      // 사용자가 실제로 터미널을 클릭 = 이 터미널을 봄 → 활성 탭 win 알림 읽음(프로그램적 포커스 제외).
+      const at = this.node.tabs?.[this.node.active];
+      if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
       const n = Date.now();
       if (n - lastClaim < 1200) return;
       lastClaim = n;

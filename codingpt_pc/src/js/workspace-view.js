@@ -517,7 +517,26 @@ export function updateWorkspaceView() {
   }
 
   for (const [id, p] of panes) p.el.classList.toggle("focused", id === rt.focusId);
+  updateUnreadRings(ws);
   measureRects();
+}
+
+// 미읽음 알림이 귀속된 win 을 탭으로 가진 터미널 pane 에 강조 테두리(읽기 전까지 유지 — 모바일 패리티).
+function updateUnreadRings(ws) {
+  const cwd = ws?.localPath || "";
+  const unreadWins = new Set(
+    cwd
+      ? state.notifications
+          .filter((n) => !n.read && n.cwd === cwd && typeof n.win === "number")
+          .map((n) => n.win)
+      : []
+  );
+  for (const [, p] of panes) {
+    const on =
+      p.node.kind === "terminal" &&
+      (p.node.tabs || []).some((t) => typeof t.win === "number" && unreadWins.has(t.win));
+    p.el.classList.toggle("notif-unread", on);
+  }
 }
 
 function buildNode(node, path) {

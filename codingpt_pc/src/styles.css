@@ -222,6 +222,8 @@ body.resizing-row { cursor: row-resize; }
 }
 .pane.focused .ptab.active { box-shadow: inset 0 2px 0 var(--accent); }
 .pane.ring { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.5); }
+/* 미읽음 알림이 있는 터미널 pane — 읽기 전까지 상하좌우 강조 테두리(모바일 borderWidth:2 + accent 패리티) */
+.pane.notif-unread { box-shadow: inset 0 0 0 2px var(--accent); }
 
 /* VS Code 식 탭/파일 드래그: 캡처 오버레이 + 고스트 + 분할 존 인디케이터 */
 .drag-overlay { position: fixed; inset: 0; z-index: 997; cursor: grabbing; }

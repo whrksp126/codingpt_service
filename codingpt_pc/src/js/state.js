@@ -176,11 +176,46 @@ export function setActive(id) {
   if (id) {
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
-    // 워크스페이스를 열어봤다 = 그 폴더(cwd) 알림 전체 읽음(win=null 스코프).
-    const meta = state.workspaces.find((w) => w.id === id);
-    if (meta && meta.localPath) readScope(meta.localPath, null);
   }
   emit();
+  // 워크스페이스 진입 = 읽음 처리 X(모바일 패리티). 미읽음 알림이 있으면 그 알림이 귀속된
+  //  터미널을 활성 탭+포커스로 "잘 보이게"만 한다(읽음은 사용자가 실제로 볼 때만).
+  //  대상 터미널이 아직 레이아웃에 없으면(다른 기기가 만든 창=리컨실 대기) 한 번 지연 재시도.
+  if (id) {
+    if (!activateNotifTerminal(id)) setTimeout(() => activateNotifTerminal(id), 400);
+  }
+}
+
+// 미읽음 알림이 귀속된 터미널(win)을 활성 탭 + 포커스로 올린다 — 읽음은 처리하지 않는다.
+//  preferredWin 지정 시 그 win 우선, 없으면 가장 최근(맨 앞) 미읽음의 win.
+//  반환: true = 처리했거나 미읽음 없음, false = 미읽음은 있으나 대상 터미널 미발견(재시도 권장).
+export function activateNotifTerminal(wsId, preferredWin) {
+  const meta = state.workspaces.find((w) => w.id === wsId);
+  const w = state.ws[wsId];
+  if (!meta || !meta.localPath || !w || !w.layout) return true;
+  const unread = state.notifications.filter(
+    (n) => !n.read && n.cwd && n.cwd === meta.localPath && typeof n.win === "number"
+  );
+  if (!unread.length) return true;
+  const wins = new Set(unread.map((n) => n.win));
+  const targetWin = preferredWin != null && wins.has(Number(preferredWin)) ? Number(preferredWin) : unread[0].win;
+  let hit = null, hitIdx = -1;
+  T.eachLeaf(w.layout, (l) => {
+    if (hit || l.kind !== "terminal") return;
+    const idx = (l.tabs || []).findIndex((t) => typeof t.win === "number" && t.win === targetWin);
+    if (idx >= 0) { hit = l; hitIdx = idx; }
+  });
+  if (!hit) return false; // 대상 터미널이 아직 레이아웃에 없음(리컨실 대기)
+  w.focusId = hit.id;
+  const pane = getPane(hit.id);
+  if (pane && typeof pane.switchTab === "function") {
+    pane.switchTab(hitIdx); // 활성 탭 전환 + view + 포커스(읽음 트리거 없음 — 프로그램적)
+    pane.focus?.();
+  } else {
+    hit.active = hitIdx; // pane 미생성 — 상태만 반영해 렌더가 올바른 활성 탭으로 뜨게
+    emit();
+  }
+  return true;
 }
 
 export function setView(v) {
@@ -234,11 +269,8 @@ export function focusPane(paneId) {
   if (w) {
     w.focusId = paneId;
     emit();
-    // 포커스한 pane 의 활성 터미널 탭(win) 알림 읽음 처리.
-    const meta = activeWs();
-    const leaf = w.layout ? T.findLeaf(w.layout, paneId) : null;
-    const t = leaf && leaf.kind === "terminal" ? leaf.tabs?.[leaf.active] : null;
-    if (meta?.localPath && t && typeof t.win === "number") readScope(meta.localPath, t.win);
+    // 프로그램적/포커스 이동으로는 읽음 처리하지 않는다(모바일 패리티). 읽음은 사용자가
+    //  터미널을 실제 클릭하거나 탭을 직접 클릭할 때만(pane.js 에서 onTabActivated 로 트리거).
   }
 }
 export function setRatio(branchPath, ratio) {
@@ -252,6 +284,31 @@ export function setRatio(branchPath, ratio) {
 //  원천 = 백엔드 /api/notifications. state.notifications 는 서버 행 그대로(read=!!readAt 파생)를
 //  미러하고, ui-channel(WS notif_event)이 실시간 반영한다. 서버 미가용 시 pushNotification 로컬 폴백.
 
+// PC 창이 포커스/가시 상태가 아니면(사용자가 다른 앱/브라우저를 보는 중) OS 네이티브 알림.
+//  · 새 알림이 state 에 편입되는 단일 지점(applyNotifEvent 'new' / pushNotical)에서만 호출 →
+//    로컬 OSC(handleOsc)가 별도로 api.notify 를 부르지 않아 이중 발송이 없다(pushNotification/applyNotifEvent).
+//  · 이미 읽은 알림엔 울리지 않고, 400ms 스로틀로 연속 알림 폭주를 막는다.
+let _lastOsNotify = 0;
+export function maybeOsNotify(n) {
+  if (!n || n.read) return;
+  let hidden = false;
+  try {
+    hidden = !document.hasFocus() || document.visibilityState !== "visible";
+  } catch (_) {
+    hidden = true;
+  }
+  if (!hidden) return;
+  const now = Date.now();
+  if (now - _lastOsNotify < 400) return;
+  _lastOsNotify = now;
+  const title = String(n.title || n.wsName || "CodingPT");
+  const body = String(n.body || "");
+  try {
+    const r = api.notify(title, body);
+    if (r && typeof r.catch === "function") r.catch(() => {});
+  } catch (_) {}
+}
+
 // 로컬 폴백 — 서버 기록 실패 시 이 세션 한정으로만 쌓는다(id 는 문자열 "n…" = 서버 미기록 표식).
 export function pushNotification(n) {
   const item = {
@@ -262,6 +319,7 @@ export function pushNotification(n) {
   };
   state.notifications.unshift(item);
   if (state.notifications.length > 100) state.notifications.length = 100;
+  maybeOsNotify(item);
   emit();
   return item;
 }
@@ -283,9 +341,10 @@ export function applyNotifEvent(ev) {
   if (!ev) return;
   if (ev.kind === "new" && ev.notification) {
     const n = { ...ev.notification, read: !!ev.notification.readAt };
-    if (n.id != null && state.notifications.some((x) => x.id === n.id)) return;
+    if (n.id != null && state.notifications.some((x) => x.id === n.id)) return; // WS 에코 dedupe
     state.notifications.unshift(n);
     if (state.notifications.length > 100) state.notifications.length = 100;
+    maybeOsNotify(n); // 창 비포커스/비가시 시 OS 알림(dedupe 통과분만 = 알림당 1회)
     emit();
   } else if (ev.kind === "read" && Array.isArray(ev.ids)) {
     const set = new Set(ev.ids);
@@ -317,8 +376,8 @@ export function markAllRead() {
   api.notifReadAll().catch(() => {});
 }
 
-// 스코프 읽음 처리 — 터미널 포커스/탭 전환(win 지정)·워크스페이스 활성화(win=null) 순간,
-//  그 cwd(+win) 의 로컬 미읽음이 있을 때만 서버 호출(+낙관 반영).
+// 스코프 읽음 처리 — 사용자가 그 터미널을 실제로 클릭/탭 클릭한 순간(pane.js onTabActivated),
+//  그 cwd(+win) 의 로컬 미읽음이 있을 때만 서버 호출(+낙관 반영). 프로그램적 포커스/전환은 제외.
 export function readScope(cwd, win) {
   if (!cwd) return;
   const w = win == null ? null : win;
