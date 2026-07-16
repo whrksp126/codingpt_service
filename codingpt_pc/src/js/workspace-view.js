@@ -98,10 +98,15 @@ function beginTabDrag(srcId, index, e) {
   let dragging = false;
   let drop = null; // { paneId, zone }
   let overlay = null;
+  let srcTabEl = null; // 드래그 중 흐리게 표시할 원본 탭
 
   const start = () => {
     dragging = true;
     document.body.classList.add("tab-dragging");
+    // 잡힌 탭(원본)은 흐리게 — "이 자리는 비워질 것"을 표현(예상 위치 표시와 결과 일치감).
+    const srcTabs = panes.get(srcId)?.el?.querySelectorAll(".pane-tabs .ptab");
+    srcTabEl = srcTabs ? (wholePane ? srcTabs[0] : srcTabs[index]) : null;
+    srcTabEl?.classList.add("drag-src");
     overlay = document.createElement("div");
     overlay.className = "drag-overlay";
     document.body.appendChild(overlay);
@@ -169,12 +174,17 @@ function beginTabDrag(srcId, index, e) {
       }
     }
     drop = { paneId, zone };
-    // 존 하이라이트 배치.
-    let zx = r.left, zy = r.top, zw = r.width, zh = r.height;
-    if (zone === "left") zw = r.width / 2;
-    else if (zone === "right") { zx = r.left + r.width / 2; zw = r.width / 2; }
-    else if (zone === "top") zh = r.height / 2;
-    else if (zone === "bottom") { zy = r.top + r.height / 2; zh = r.height / 2; }
+    // 존 하이라이트 배치 — 표시는 "실제 드랍 결과" 기준으로 보정:
+    //  · no-op 드랍(자기 pane 통째/단일 탭, 비터미널 pane 가운데로 탭 이동)은 숨김/제자리 표시
+    //  · src pane 이 사라지는 드랍은 형제 확장 후(rectAfterRemoval)의 rect 로 그린다.
+    const disp = displayDrop(rt.layout, src, wholePane, srcId, drop);
+    if (!disp) { zoneEl.classList.add("hidden"); return; }
+    const dr = disp.rect;
+    let zx = dr.x, zy = dr.y, zw = dr.w, zh = dr.h;
+    if (disp.zone === "left") zw = dr.w / 2;
+    else if (disp.zone === "right") { zx = dr.x + dr.w / 2; zw = dr.w / 2; }
+    else if (disp.zone === "top") zh = dr.h / 2;
+    else if (disp.zone === "bottom") { zy = dr.y + dr.h / 2; zh = dr.h / 2; }
     zoneEl.style.left = zx + "px";
     zoneEl.style.top = zy + "px";
     zoneEl.style.width = zw + "px";
@@ -194,6 +204,8 @@ function beginTabDrag(srcId, index, e) {
     zoneEl?.remove();
     insEl?.remove();
     ghostEl = zoneEl = insEl = overlay = null;
+    srcTabEl?.classList.remove("drag-src");
+    srcTabEl = null;
     document.body.classList.remove("tab-dragging");
     if (dragging) {
       // 드래그 직후 발생하는 click(→ switchTab) 억제.
@@ -240,6 +252,40 @@ function beginTabDrag(srcId, index, e) {
 }
 function escGhost(s) {
   return String(s || "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+
+// 드랍 예상 존의 "표시" 보정 — finish() 의 실제 결과와 일치시킨다(적용 로직은 그대로).
+//  반환 null = 하이라이트 숨김(아무 일도 안 일어나는 드랍). rect 는 화면좌표 {x,y,w,h}.
+function displayDrop(layout, src, wholePane, srcId, drop) {
+  const dstLeaf = T.findLeaf(layout, drop.paneId);
+  if (!dstLeaf) return null;
+  const self = drop.paneId === srcId;
+  const singleTab = src.kind === "terminal" && src.tabs.length <= 1;
+  const rectOf = (id) => {
+    const p = panes.get(id);
+    if (!p) return null;
+    const q = p.el.getBoundingClientRect();
+    return { x: q.left, y: q.top, w: q.width, h: q.height };
+  };
+  let zone = drop.zone;
+  let removed = false; // 이 드랍으로 src pane 이 사라지는가
+  if (self) {
+    // 자기 자신: 통째/단일 탭은 어디에 놓아도 no-op → "제자리"(pane 전체) 표시.
+    //  다중 탭 pane 의 가장자리는 실제 분할이므로 그대로.
+    if (wholePane || singleTab) zone = "center";
+  } else if (wholePane) {
+    // IDE/프리뷰 pane 을 터미널 pane 가운데 = 탭 편입(src 제거), 그 외 가운데 = 스왑(유지),
+    //  가장자리 = movePane(src 제거 후 분할).
+    const join = (src.kind === "ide" || src.kind === "preview") && dstLeaf.kind === "terminal" && zone === "center";
+    removed = join || zone !== "center";
+  } else {
+    // 터미널 pane 의 탭 드래그: 비터미널 pane 가운데는 이동 불가(no-op) → 숨김.
+    if (zone === "center" && dstLeaf.kind !== "terminal") return null;
+    removed = singleTab; // 마지막 탭 이동 = src pane 닫힘
+  }
+  const rect = removed ? T.rectAfterRemoval(layout, srcId, drop.paneId, rectOf) : rectOf(drop.paneId);
+  if (!rect) return null;
+  return { rect, zone };
 }
 
 // 탭을 새 분할 pane 으로 이동(방향). side: left/right/top/bottom.
@@ -466,6 +512,7 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
   divider.addEventListener("mousedown", (e) => {
     e.preventDefault();
     document.body.classList.add(dir === "h" ? "resizing-col" : "resizing-row");
+    divider.classList.add("dragging"); // 드래그 중 포인터가 벗어나도 굵은 하이라이트 유지
     const rect = box.getBoundingClientRect();
     let ratio =
       firstWrap.getBoundingClientRect()[dir === "h" ? "width" : "height"] / (dir === "h" ? rect.width : rect.height);
@@ -482,6 +529,7 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
       document.removeEventListener("mousemove", move);
       document.removeEventListener("mouseup", up);
       document.body.classList.remove("resizing-col", "resizing-row");
+      divider.classList.remove("dragging");
       S.setRatio(path, ratio);
       refitAll();
     };

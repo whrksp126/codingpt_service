@@ -166,6 +166,49 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+// src leaf 제거(형제 승격) 후 dst leaf 가 차지할 rect 예측 — 드래그 "예상 위치" 표시용.
+//  드랍이 src pane 을 없애는 경우(단일 탭 이동, pane 통째 이동/편입) 예상 존을 제거 전 rect 로
+//  그리면 실제 결과(형제가 src 자리까지 확장)와 어긋난다. 측정된 현재 rect 만으로 계산:
+//  형제 서브트리가 부모 branch 영역 전체(형제 ∪ src)로 늘어난다고 보고 dst rect 를 아핀 스케일.
+//  dst 가 형제 서브트리 밖이면 변화 없음. rectOf(id) → {x,y,w,h}|null.
+export function rectAfterRemoval(root, srcId, dstId, rectOf) {
+  const dst = rectOf(dstId) || null;
+  if (!root || !dst || srcId === dstId) return dst;
+  let sibling = null;
+  (function walk(node) {
+    if (sibling || isLeaf(node)) return;
+    if (isLeaf(node.first) && node.first.id === srcId) { sibling = node.second; return; }
+    if (isLeaf(node.second) && node.second.id === srcId) { sibling = node.first; return; }
+    walk(node.first);
+    walk(node.second);
+  })(root);
+  if (!sibling) return dst; // src 가 루트(마지막 pane)거나 트리에 없음
+  const sibIds = leafIds(sibling);
+  if (!sibIds.includes(dstId)) return dst;
+  const union = (ids) => {
+    let u = null;
+    for (const id of ids) {
+      const q = rectOf(id);
+      if (!q || q.w <= 0 || q.h <= 0) continue;
+      u = u
+        ? { x: Math.min(u.x, q.x), y: Math.min(u.y, q.y), x2: Math.max(u.x2, q.x + q.w), y2: Math.max(u.y2, q.y + q.h) }
+        : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
+    }
+    return u;
+  };
+  const sib = union(sibIds);
+  const par = union([...sibIds, srcId]); // 부모 영역 = 형제 ∪ src
+  if (!sib || !par || sib.x2 - sib.x <= 0 || sib.y2 - sib.y <= 0) return dst;
+  const sx = (par.x2 - par.x) / (sib.x2 - sib.x);
+  const sy = (par.y2 - par.y) / (sib.y2 - sib.y);
+  return {
+    x: par.x + (dst.x - sib.x) * sx,
+    y: par.y + (dst.y - sib.y) * sy,
+    w: dst.w * sx,
+    h: dst.h * sy,
+  };
+}
+
 // 방향 이동(⌥⌘화살표) — 렌더된 rect 를 받아 가장 가까운 leaf 로 포커스.
 //  dir: 'left'|'right'|'up'|'down'. rects: { id: {x,y,w,h} }.
 export function neighbor(rects, fromId, dir) {

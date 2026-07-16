@@ -208,6 +208,9 @@ body.resizing-row { cursor: row-resize; }
 .divider-h::after { top: 0; bottom: 0; left: -3px; right: -3px; }
 .divider-v::after { left: 0; right: 0; top: -3px; bottom: -3px; }
 .divider:hover { background: var(--accent); }
+/* 호버/드래그 시 히트영역(±3px) 전체를 반투명 액센트로 — 사이드바 리사이저(.sb-resizer)와 같은 굵기감. */
+.divider:hover::after, .divider.dragging::after { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.divider.dragging { background: var(--accent); }
 .pane-slot { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 
 /* ── pane (여백/보더 없이 flush) ── */
@@ -253,7 +256,9 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ptab.static:active { cursor: grabbing; }
 .ptab-ic { display: inline-flex; color: var(--dim); }
 .ptab.active .ptab-ic { color: var(--accent); }
-.ptab-title { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+/* 탭 라벨 최대폭 = 화면 폭 비례(좁은 창=짧게, 넓은 창=길게) — 넘치면 탭바 가로 스크롤(휠 지원). */
+.ptab-title { max-width: clamp(72px, 16vw, 200px); overflow: hidden; text-overflow: ellipsis; }
+.ptab.drag-src { opacity: 0.35; } /* 드래그 중 원본 탭 — 이 자리는 비워질 것임을 표현 */
 .ptab-x { display: inline-flex; color: var(--dim); border-radius: 3px; padding: 1px; margin-left: 1px; }
 .ptab-x:hover { color: var(--error); background: rgba(248, 113, 113, 0.12); }
 .pane-ctrls { display: flex; align-items: center; gap: 1px; flex: none; padding: 0 5px; }
@@ -350,6 +355,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .eg-divider-h::after { top: 0; bottom: 0; left: -3px; right: -3px; }
 .eg-divider-v::after { left: 0; right: 0; top: -3px; bottom: -3px; }
 .eg-divider:hover { background: var(--accent); }
+.eg-divider:hover::after { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .ide-node.opened .ide-nname { color: var(--text2); }
 .ide-editor { flex: 1; min-height: 0; }
 .ide-editor .CodeMirror { height: 100%; font-family: Menlo, Monaco, "SF Mono", monospace; font-size: 12.5px; }

@@ -284,6 +284,13 @@ export class PaneView {
     this.head.innerHTML = "";
     const tabsEl = document.createElement("div");
     tabsEl.className = "pane-tabs";
+    // 탭이 넘치면 가로 스크롤(overflow-x) — 세로 휠도 가로 스크롤로 변환(마우스 사용자용).
+    tabsEl.addEventListener("wheel", (e) => {
+      if (tabsEl.scrollWidth <= tabsEl.clientWidth) return;
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return; // 트랙패드 가로 제스처는 기본 동작
+      e.preventDefault();
+      tabsEl.scrollLeft += e.deltaY;
+    }, { passive: false });
     if (this.node.kind === "terminal") {
       this.node.tabs.forEach((t, i) => {
         const tab = document.createElement("div");
@@ -344,6 +351,9 @@ export class PaneView {
       ctrls.append(headBtn(icons.sidebar, "탐색기 토글", () => this.ide?.toggleTree()));
     }
     this.head.append(tabsEl, ctrls);
+    // 활성 탭이 스크롤 밖이면 보이게(탭 전환/추가 직후) — 레이아웃 확정 후 한 프레임 뒤.
+    const act = tabsEl.querySelector(".ptab.active");
+    if (act) requestAnimationFrame(() => { try { act.scrollIntoView({ inline: "nearest", block: "nearest" }); } catch (_) {} });
   }
 
   // ── 터미널 본문 ──
