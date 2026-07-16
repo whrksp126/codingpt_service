@@ -509,7 +509,15 @@ function registerAgentWs(ws, userId, client) {
   if (!set) { set = new Set(); agentWsClients.set(userId, set); }
   ws._cptClient = client === 'pc' ? 'pc' : 'mobile'; // 기기 종류 태그(hasActiveMobileClient 판정용)
   set.add(ws);
-  const ka = setInterval(() => { try { if (ws.readyState === WebSocket.OPEN) ws.ping(); } catch (_) { /* noop */ } }, PING_INTERVAL_MS);
+  // pong 기반 생존 확인 — 앱을 강제 종료/네트워크 단절 시 좀비 WSS 가 남아 hasActiveMobileClient 가
+  //  계속 true 로 판정돼 FCM 이 영구 억제되던 버그 수정. 무응답이면 terminate → 'close' → cleanup.
+  ws._alive = true;
+  ws.on('pong', () => { ws._alive = true; });
+  const ka = setInterval(() => {
+    if (ws._alive === false) { try { ws.terminate(); } catch (_) { /* noop */ } return; }
+    ws._alive = false;
+    try { if (ws.readyState === WebSocket.OPEN) ws.ping(); } catch (_) { /* noop */ }
+  }, PING_INTERVAL_MS);
   ws.on('message', (data) => {
     let msg; try { msg = JSON.parse(data.toString()); } catch (_) { return; }
     if (!msg || typeof msg !== 'object') return;
