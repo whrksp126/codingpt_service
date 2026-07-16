@@ -466,6 +466,12 @@ pub fn run() {
             bridge::ui_state_save,
             bridge::open_external,
             bridge::notify,
+            // 서버 동기화 알림 + UI 실시간 채널
+            bridge::notif_list,
+            bridge::notif_create,
+            bridge::notif_read,
+            bridge::notif_read_all,
+            bridge::ui_stream_url,
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,

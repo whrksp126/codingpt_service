@@ -88,6 +88,14 @@ export const api = {
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
 
+  // ── 서버 동기화 알림(deviceToken 은 Rust 내부) ──
+  notifList: (limit, beforeId) => invoke("notif_list", { limit: limit ?? 50, beforeId: beforeId ?? null }),
+  notifCreate: (payload) => invoke("notif_create", { payload }),
+  notifRead: (payload) => invoke("notif_read", { payload }),
+  notifReadAll: () => invoke("notif_read_all"),
+  // UI 실시간 채널(WS) 접속 URL — 티켓 발급 포함(완성된 ws URL 문자열).
+  uiStreamUrl: () => invoke("ui_stream_url"),
+
   // ── 자동 실행(로그인 아이템) ──
   autostartEnabled: () => invoke("plugin:autostart|is_enabled"),
   autostartEnable: () => invoke("plugin:autostart|enable"),

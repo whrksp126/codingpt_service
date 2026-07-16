@@ -16,6 +16,7 @@ const fsRpc = require('./fs');
 const wsRpc = require('./workspace');
 const agentLib = require('./agent');
 const syncLib = require('./sync');
+const cptServer = require('./cpt-server');
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
 const BACKOFF_MIN_MS = 1000;
@@ -25,6 +26,9 @@ function run(config) {
   let backoff = BACKOFF_MIN_MS;
   let ws = null;
   let idleTimer = null;
+
+  // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
+  try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
 
   const wsUrl = config.serverUrl.replace(/^http/, 'ws') + '/api/daemon/connect';
 
@@ -50,6 +54,7 @@ function run(config) {
         daemonVersion: config.daemonVersion || 'unknown',
         clientType: config.clientType || 'daemon',
       }));
+      cptServer.setControlWs(ws); // cpt ui_command 전송로 갱신
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
     });
 
@@ -63,6 +68,11 @@ function run(config) {
 
       if (msg.type === 'hello_ack') {
         console.log(`[control] 서버 확인 (serverTime=${msg.serverTime})`);
+        return;
+      }
+      // cpt ui_command 의 결과 회신(back → 데몬) — 대기 중인 CLI 요청으로 전달.
+      if (msg.type === 'ui_result' && msg.id) {
+        cptServer.resolveUi(msg.id, msg);
         return;
       }
       if (msg.type === 'stream_open') {

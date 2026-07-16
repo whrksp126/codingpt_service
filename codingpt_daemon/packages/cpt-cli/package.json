@@ -1,0 +1,12 @@
+{
+  "name": "@codingpt/cpt-cli",
+  "version": "0.1.0",
+  "description": "cpt — CodingPT 컨트롤 CLI (터미널 안의 AI/사용자가 서비스를 조작)",
+  "bin": {
+    "cpt": "bin/cpt.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED"
+}

@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/runner-core",
     "packages/daemon",
-    "packages/cloud-runner"
+    "packages/cloud-runner",
+    "packages/cpt-cli"
   ],
   "scripts": {
     "daemon": "node packages/daemon/index.js",

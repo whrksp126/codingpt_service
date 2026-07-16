@@ -22,7 +22,7 @@ const http = require('http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
-const pushService = require('./pushService');
+// (구) pushService 직접 발송(maybePush)은 제거 — FCM 은 notificationService.createNotification 내부에서 한 번만.
 
 const wss = new WebSocket.Server({ noServer: true });
 
@@ -207,7 +207,7 @@ function registerControl(ws, device) {
       const payload = { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event };
       broadcastEvent(userId, payload);   // SSE(기존, 폴백)
       pushAgentEvent(userId, payload);   // WSS 버퍼 + 라이브(리플레이용 rseq 부여)
-      maybePush(userId, msg.sessionId, msg.event); // M3-3: 앱이 안 보고 있을 때만 푸시
+      maybeNotify(userId, msg.sessionId, msg.event); // 알림 영속화 + 팬아웃 + (미접속 시) FCM
       return;
     }
     if (msg.type === 'sync_event') {
@@ -294,10 +294,12 @@ function callRpc(userId, method, params, timeoutMs, opts) {
 }
 
 // ── 파일 이벤트 SSE(앱 구독) ──
-function addEventClient(userId, res) {
+// client — 구독 기기 종류('pc'|'mobile', 기본 mobile). FCM 억제 판정(hasActiveMobileClient)에 사용.
+function addEventClient(userId, res, client) {
   const key = String(userId);
   let set = eventClients.get(key);
   if (!set) { set = new Set(); eventClients.set(key, set); }
+  res._cptClient = client === 'pc' ? 'pc' : 'mobile';
   set.add(res);
 }
 
@@ -332,20 +334,44 @@ function hasActiveClient(userId) {
   return !!((ws && ws.size) || (sse && sse.size));
 }
 
-// M3-3: 핵심 3종(done/permission_request/crashed) 발생 시, 앱이 안 보고 있으면 푸시.
-//  RUNNER_OFFLINE 은 푸시 아님(연결 인디케이터). 앱 연결 중이면 라이브로 보므로 스킵.
-const PUSH_KIND = { done: 'done', permission_request: 'permission_request', error: 'crashed' };
-const PUSH_TITLE = { done: '작업이 끝났어요', permission_request: '승인이 필요해요', crashed: '에이전트에 문제가 생겼어요' };
-function maybePush(userId, sessionId, event) {
-  if (!event || !event.type) return;
-  const kind = PUSH_KIND[event.type];
-  if (!kind) return;
-  if (hasActiveClient(userId)) return; // 앱이 연결돼 라이브로 보는 중 → 푸시 불필요
-  const sid = sessionId || '';
-  pushService.sendToUser(userId, {
-    kind, sessionId: sid, title: PUSH_TITLE[kind],
-    deeplink: `codingpt://session/${encodeURIComponent(sid)}?kind=${kind}`,
-  }).catch(() => { /* fire-and-forget */ });
+// 모바일 클라이언트만 접속 판정 — FCM 억제 기준(PC 만 붙어 있으면 폰엔 푸시가 가야 함).
+//  WSS 는 스트림 접속 쿼리 &client= 태그, SSE 는 addEventClient 의 client 태그로 구분(기본 mobile).
+function hasActiveMobileClient(userId) {
+  const key = String(userId);
+  const ws = agentWsClients.get(key);
+  if (ws) for (const c of ws) { if (c._cptClient === 'mobile') return true; }
+  const sse = eventClients.get(key);
+  if (sse) for (const r of sse) { if ((r._cptClient || 'mobile') === 'mobile') return true; }
+  return false;
+}
+
+// 알림 팬아웃 — notif_event(new/read) 를 SSE(폴백) + WSS 양쪽에 즉시 전달(버퍼/리플레이 없음).
+//  프레임 형태 {type:'notif_event', event} — fanoutSyncEvent 미러. notificationService 가 호출.
+function fanoutNotifEvent(userId, event) {
+  const payload = { type: 'notif_event', event };
+  broadcastEvent(userId, payload); // SSE
+  const key = String(userId);
+  const set = agentWsClients.get(key);
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 핵심 3종(done/permission_request/error) 발생 시 알림 영속화(notification 행) + 팬아웃 + (모바일 미접속 시) FCM.
+//  (구) maybePush 의 직접 FCM 발송을 대체 — 푸시는 createNotification 내부에서 한 번만(이중 푸시 방지).
+//  RUNNER_OFFLINE 은 알림 아님(연결 인디케이터).
+const NOTIF_KINDS = new Set(['done', 'permission_request', 'error']);
+function maybeNotify(userId, sessionId, event) {
+  if (!event || !event.type || !NOTIF_KINDS.has(event.type)) return;
+  // 순환 require 회피(notificationService → daemonRelayService) — 호출 시점 lazy require.
+  const notificationService = require('./notificationService');
+  // 이벤트에서 추출 가능한 본문 텍스트(형태가 다양하므로 best-effort).
+  const body = String(event.text || event.message || event.summary || event.error || event.tool || '').slice(0, 2000) || null;
+  notificationService.createNotification(Number(userId), {
+    source: 'agent',
+    kind: event.type,
+    title: 'Claude Code',
+    sessionId: sessionId || null,
+    body,
+  }).catch((e) => { console.warn('[daemonRelay] 알림 생성 실패:', e && e.message); });
 }
 
 // ── 에이전트 이벤트 채널(M3-1): 롤링 버퍼 + WSS 라이브 ──
@@ -367,21 +393,29 @@ function pushAgentEvent(userId, payload) {
   return rseq;
 }
 
-// GET /api/daemon/agent/stream?token=<JWT> 업그레이드(앱→back). 에이전트 이벤트 WSS 구독.
+// GET /api/daemon/agent/stream?token=<JWT>|?ticket=<t> 업그레이드(앱/PC→back). 에이전트 이벤트 WSS 구독.
 //  WebSocket 은 Authorization 헤더를 못 실으므로 access token 을 쿼리로 받아 검증한다.
+//  ticket — deviceToken 기기(PC)용 60초 1회용 불투명 티켓(issueUiTicket). JWT 없이 스트림 구독.
+//  &client=pc|mobile(기본 mobile) — 구독 기기 종류 태그(FCM 억제 판정용).
 function handleAgentStreamUpgrade(token, req, socket, head) {
-  let userId;
-  try {
-    const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
-    userId = decoded && (decoded.id || decoded.userId);
-  } catch (_) { userId = null; }
+  const q = new URLSearchParams(String(req.url || '').split('?')[1] || '');
+  let userId = null;
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.ACCESS_SECRET);
+      userId = decoded && (decoded.id || decoded.userId);
+    } catch (_) { userId = null; }
+  }
+  if (!userId) userId = redeemUiTicket(q.get('ticket') || ''); // JWT 실패/부재 → 티켓 분기
   if (!userId) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-  wss.handleUpgrade(req, socket, head, (ws) => registerAgentWs(ws, String(userId)));
+  const client = q.get('client') === 'pc' ? 'pc' : 'mobile';
+  wss.handleUpgrade(req, socket, head, (ws) => registerAgentWs(ws, String(userId), client));
 }
 
-function registerAgentWs(ws, userId) {
+function registerAgentWs(ws, userId, client) {
   let set = agentWsClients.get(userId);
   if (!set) { set = new Set(); agentWsClients.set(userId, set); }
+  ws._cptClient = client === 'pc' ? 'pc' : 'mobile'; // 기기 종류 태그(hasActiveMobileClient 판정용)
   set.add(ws);
   const ka = setInterval(() => { try { if (ws.readyState === WebSocket.OPEN) ws.ping(); } catch (_) { /* noop */ } }, PING_INTERVAL_MS);
   ws.on('message', (data) => {
@@ -418,6 +452,30 @@ function handleStreamUpgrade(streamToken, req, socket, head) {
   pendingStreams.delete(streamToken);
   clearTimeout(pending.timer);
   wss.handleUpgrade(req, socket, head, (ws) => pending.resolve(ws));
+}
+
+// ── UI 스트림 티켓(PC 데스크톱) ───────────────────────────────────────
+// deviceToken 기기는 user JWT 가 없어 /agent/stream?token= 을 못 쓴다 → POST /api/daemon/ui/ticket 으로
+// 60초 1회용 불투명 티켓을 발급받아 ?ticket= 으로 업그레이드(issueTerminalToken 패턴 미러).
+const UI_TICKET_TTL_MS = 60 * 1000;
+const uiTickets = new Map(); // ticket → { userId, expiresAt }
+
+function issueUiTicket(userId) {
+  const ticket = 'uit-' + crypto.randomBytes(18).toString('hex');
+  // 만료 티켓 청소 — 발급마다 훑어 누적 방지(스윕 주기 사이 보강).
+  const now = Date.now();
+  for (const [t, s] of uiTickets) { if (s.expiresAt < now) uiTickets.delete(t); }
+  uiTickets.set(ticket, { userId: String(userId), expiresAt: now + UI_TICKET_TTL_MS });
+  return ticket;
+}
+
+// 1회용 — 성공/실패 무관 조회 즉시 폐기. 유효하면 userId, 아니면 null.
+function redeemUiTicket(ticket) {
+  if (!ticket) return null;
+  const s = uiTickets.get(ticket);
+  if (s) uiTickets.delete(ticket);
+  if (!s || s.expiresAt < Date.now()) return null;
+  return s.userId;
 }
 
 // ── 앱 터미널 ─────────────────────────────────────────────────────────
@@ -618,6 +676,7 @@ async function proxyWs(userId, port, path, req, socket, head) {
 const _sweeper = setInterval(() => {
   const now = Date.now();
   for (const [t, s] of termTokens) { if (s.expiresAt < now) termTokens.delete(t); }
+  for (const [t, s] of uiTickets) { if (s.expiresAt < now) uiTickets.delete(t); }
 }, 5 * 60 * 1000);
 if (_sweeper.unref) _sweeper.unref();
 
@@ -635,6 +694,9 @@ module.exports = {
   listRunners,
   listCloudRunners,
   fanoutSyncEvent,
+  fanoutNotifEvent,
+  hasActiveMobileClient,
+  issueUiTicket,
   addEventClient,
   removeEventClient,
   proxyHttp,

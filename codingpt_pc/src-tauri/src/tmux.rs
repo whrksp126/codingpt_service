@@ -135,12 +135,32 @@ pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(),
     }
     args.extend(["new-session", "-d", "-s", session, "-c", &abs_s].map(String::from));
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match run(ctx, &refs) {
+    let created = match run(ctx, &refs) {
         Ok(_) => Ok(()),
         // 여러 pane 이 동시에 부팅하며 같은 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
         Err(e) if e.contains("duplicate session") => Ok(()),
         Err(e) => Err(e),
+    };
+    if created.is_ok() {
+        inject_pool_env(ctx, session, abs);
     }
+    created
+}
+
+// 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 생성되는 window 셸이 상속(데몬 injectPoolEnv 미러).
+//  PC 가 풀을 먼저 만들어도 터미널 안의 `cpt` 가 자기 워크스페이스/소켓을 알 수 있게 한다.
+fn inject_pool_env(ctx: &TmuxCtx, session: &str, abs: &PathBuf) {
+    let h = home();
+    let rel = abs
+        .strip_prefix(&h)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| abs.to_string_lossy().to_string());
+    let sock = h.join(".codingpt").join("cpt.sock").to_string_lossy().to_string();
+    let tmux_bin = ctx.tmux.to_string_lossy().to_string();
+    let target = format!("={session}");
+    let _ = run(ctx, &["set-environment", "-t", &target, "CPT_WS", &rel]);
+    let _ = run(ctx, &["set-environment", "-t", &target, "CPT_SOCK", &sock]);
+    let _ = run(ctx, &["set-environment", "-t", &target, "CPT_TMUX", &tmux_bin]);
 }
 
 #[derive(Serialize)]

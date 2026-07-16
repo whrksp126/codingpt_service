@@ -39,7 +39,12 @@ function paneCtx(ws) {
     localPath: ws?.localPath || "",
     isLocal: isLocal(ws),
     onFocus: (id) => S.focusPane(id),
-    onNotify: (paneId, title, body) => handleOsc(state.activeWsId, paneId, title, body),
+    // ws 는 클로저로 고정 — 알림이 늦게 와도 발생한 워크스페이스로 귀속(activeWsId 는 이미 딴 곳일 수 있음).
+    onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),
+    // 터미널 탭 활성화 = 그 win 알림 읽음(서버 스코프).
+    onTabActivated: (win) => {
+      if (isLocal(ws) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
+    },
     onSurfacesChanged: () => {},
     onClosePane: (paneId) => S.closePane(state.activeWsId, paneId),
     onMoveTab: (srcId, index, dstId) => moveTab(srcId, index, dstId),

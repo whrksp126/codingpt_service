@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
+const accountAuth = require('../middlewares/accountAuth');
 const daemonController = require('../controllers/daemonController');
 const syncController = require('../controllers/syncController');
 
@@ -26,6 +27,7 @@ router.post('/devices/:deviceId/revoke', daemonController.revokeDevice); // JWT|
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)
 router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloudRunner); // M5 Slice4: 클라우드 러너 확보(핸드오프 진입점)
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
+router.post('/ui/ticket', accountAuth, daemonController.uiTicket); // deviceToken 기기(PC)용 agent/stream 1회용 티켓
 router.get('/terminal/list', authMiddleware, daemonController.terminalList);
 router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
 router.post('/terminal/select', authMiddleware, daemonController.terminalSelect);

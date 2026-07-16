@@ -300,16 +300,38 @@ function runTmux(args) {
 // 주의: tmux -t 는 접두사 매칭 — 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
 //  명령이 엉뚱한 세션에 떨어진다. 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 async function ensurePool(session, abs) {
-  try { await runTmux(['has-session', '-t', '=' + session]); return false; } catch (_) { /* 생성 */ }
+  try {
+    await runTmux(['has-session', '-t', '=' + session]);
+    await injectPoolEnv(session, abs); // 기존 세션에도 cpt 좌표 env 보장(멱등)
+    return false;
+  } catch (_) { /* 생성 */ }
   try {
     await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', session, '-c', abs]);
   } catch (e) {
     // 여러 스트림이 동시에 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
     if (!/duplicate session/.test(String(e.message || ''))) throw e;
+    await injectPoolEnv(session, abs).catch(() => {});
     return false;
   }
   await runTmux(['rename-window', '-t', `=${session}:0`, '터미널 1']).catch(() => {});
+  await injectPoolEnv(session, abs).catch(() => {});
   return true;
+}
+
+// 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 이 세션에서 생성되는 모든 window 의 셸이 상속한다.
+//  CPT_WS = 워크스페이스(홈-상대 경로), CPT_SOCK = cpt 컨트롤 소켓, CPT_TMUX = tmux 바이너리(번들 대응),
+//  PATH prepend(~/.codingpt/bin) 는 shim(P5)이 담당 — 여기서는 좌표만.
+//  이미 떠 있는 셸은 env 변경을 못 받으므로 CLI 쪽에 show-environment 폴백이 있다.
+const poolEnvDone = new Set(); // 세션당 1회(데몬 수명 동안) — set-environment 반복 호출 절약
+async function injectPoolEnv(session, abs) {
+  if (poolEnvDone.has(session)) return;
+  const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
+  const sock = path.join(runtime.stateDir(), 'cpt.sock');
+  const tmuxBin = findTmux();
+  await runTmux(['set-environment', '-t', '=' + session, 'CPT_WS', rel == null ? '' : String(rel)]);
+  await runTmux(['set-environment', '-t', '=' + session, 'CPT_SOCK', sock]);
+  if (tmuxBin) await runTmux(['set-environment', '-t', '=' + session, 'CPT_TMUX', tmuxBin]);
+  poolEnvDone.add(session);
 }
 
 // 풀 window 목록: [{index, name, command, id}] — 세션 미존재면 [].
@@ -471,4 +493,4 @@ async function handleTerminalRpc(method, params) {
   throw new Error('unknown terminal method: ' + method);
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, TMUX_SOCKET, TMUX_SESSION };

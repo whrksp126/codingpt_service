@@ -9,7 +9,6 @@
  *     서버는 sha256 해시만 저장(daemon_device.token_hash).
  */
 const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
 const { DaemonDevice, User } = require('../models');
 const daemonRelayService = require('../services/daemonRelayService');
 const workspaceService = require('../services/workspaceService');
@@ -147,31 +146,10 @@ async function deleteAccount(req, res) {
   }
 }
 
-// Authorization: Bearer <deviceToken> → 해당 DaemonDevice(폐기 안 됨). PC 데스크톱 앱(사용자 JWT 없음)이
-//  이미 페어링으로 계정에 묶인 deviceToken 으로 소유자 자원(워크스페이스 목록 등)을 읽을 때 사용.
-async function resolveDeviceUser(req) {
-  const h = req.headers.authorization || '';
-  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
-  if (!m) return null;
-  const device = await DaemonDevice.findOne({ where: { token_hash: sha256(m[1].trim()), revoked_at: null } });
-  return device || null;
-}
-
-// 계정 스코프 인증 — 멀티기기: PC/컨트롤러는 deviceToken, 모바일은 기존 user JWT 둘 다 허용.
-//  반환: { userId, deviceId|null, device|null }. deviceId 는 현재 기기 식별(isCurrent/currentDeviceId 용).
-async function resolveAccount(req) {
-  const device = await resolveDeviceUser(req);
-  if (device) return { userId: device.user_id, deviceId: device.id, device };
-  const h = req.headers.authorization || '';
-  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
-  if (m) {
-    try {
-      const decoded = jwt.verify(m[1].trim(), process.env.ACCESS_SECRET);
-      if (decoded && decoded.id) return { userId: decoded.id, deviceId: null, device: null };
-    } catch (_) { /* deviceToken 도 JWT 도 아님 */ }
-  }
-  return null;
-}
+// Authorization: Bearer <deviceToken> → DaemonDevice / 계정 스코프 인증(deviceToken|JWT 겸용).
+//  middlewares/accountAuth.js 로 추출됨(알림 등 신규 라우트가 미들웨어로 공용). 여기선 기존 동작
+//  유지를 위해 같은 함수를 import 해 그대로 사용한다(하위호환).
+const { resolveAccount, resolveDeviceUser } = require('../middlewares/accountAuth');
 
 // GET /api/daemon/workspaces  (deviceToken 인증) → 소유자 워크스페이스(클라우드+로컬) 목록.
 //  PC 데스크톱 GUI 가 사이드바 목록을 채운다. 별도 OAuth 없이 device 소유권으로 인가.
@@ -358,6 +336,22 @@ async function daemonTerminalStart(req, res) {
     const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
     const token = daemonRelayService.issueTerminalToken(device.user_id, cwd);
     return successResponse(res, { token });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// POST /api/daemon/ui/ticket  (accountAuth: deviceToken|JWT) → { ticket, wsUrl }
+//  deviceToken 기기(PC)는 user JWT 가 없어 /agent/stream?token= 을 못 쓴다 → 60초 1회용 불투명
+//  티켓을 발급받아 GET /api/daemon/agent/stream?ticket=<t>(&client=pc) 로 업그레이드한다.
+async function uiTicket(req, res) {
+  try {
+    const ticket = daemonRelayService.issueUiTicket(req.account.userId);
+    // 프록시(nginx/Cloudflare) 뒤에서도 올바른 스킴/호스트로 조립.
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+    const wsUrl = `${proto === 'https' ? 'wss' : 'ws'}://${host}/api/daemon/agent/stream?ticket=${encodeURIComponent(ticket)}`;
+    return successResponse(res, { ticket, wsUrl });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -924,7 +918,8 @@ function streamEvents(req, res) {
     'X-Accel-Buffering': 'no',
   });
   res.write(': connected\n\n');
-  daemonRelayService.addEventClient(userId, res);
+  // client=pc|mobile(기본 mobile) — 구독 기기 종류 태그. FCM 억제 판정(hasActiveMobileClient)에 사용.
+  daemonRelayService.addEventClient(userId, res, req.query.client);
   const ka = setInterval(() => { try { res.write(': ka\n\n'); } catch (_) { /* noop */ } }, 25000);
   req.on('close', () => { clearInterval(ka); daemonRelayService.removeEventClient(userId, res); });
 }
@@ -1007,7 +1002,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
-  createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal,
+  createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone, wsSetFullDisk,

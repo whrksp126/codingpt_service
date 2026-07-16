@@ -1,15 +1,25 @@
-// notifications.js — OSC 9/777/99·벨 → 상태 기록 + 네이티브 알림 + pane 링 + 알림 패널.
+// notifications.js — OSC 9/777/99·벨 → 서버 알림 기록 + 네이티브 알림 + pane 링 + 알림 패널.
+//  알림 원천 = 백엔드(/api/notifications) 미러(state.notifications) — 전 기기 동기화.
 import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
 
 let lastNotifyTs = 0;
 
-export function handleOsc(wsId, paneId, title, body) {
-  const ws = state.workspaces.find((w) => w.id === wsId);
+// 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(링/OS 알림).
+//  win = 발생한 터미널의 풀 window 인덱스(스코프 읽음 처리·점프의 키).
+export function handleOsc(ws, paneId, win, title, body) {
   const t = (title || "").trim() || ws?.name || "CodingPT";
   const b = (body || "").trim();
-  S.pushNotification({ wsId, paneId, title: t, body: b });
+  S.reportNotification({
+    source: "osc",
+    workspaceId: ws?.id,
+    wsName: ws?.name,
+    cwd: ws?.localPath,
+    win: typeof win === "number" ? win : undefined,
+    title: t,
+    body: b,
+  });
   flashPane(paneId);
   const now = Date.now();
   if (now - lastNotifyTs > 400) {
@@ -26,6 +36,15 @@ function flashPane(paneId) {
       setTimeout(() => el.classList.remove("ring"), 4000);
     }
   } catch (_) {}
+}
+
+// 알림 1건 읽음 — 낙관 반영 + 서버(숫자 id = 서버 행일 때만. 문자열 id 는 로컬 폴백분).
+function readOne(n) {
+  if (!n.read) {
+    n.read = true;
+    if (typeof n.id === "number") api.notifRead({ ids: [n.id] }).catch(() => {});
+    S.emit();
+  }
 }
 
 // 알림 패널 렌더(사이드바 벨에서 토글).
@@ -52,15 +71,18 @@ export function renderNotifPanel(el, onJump) {
     return;
   }
   for (const n of state.notifications.slice(0, 40)) {
-    const ws = state.workspaces.find((w) => w.id === n.wsId);
+    // 워크스페이스 이름 — 서버 행의 wsName 우선, 없으면 목록에서 역참조.
+    const ws = state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId));
+    const wsName = n.wsName || ws?.name || "";
     const row = document.createElement("button");
     row.className = "notif-row" + (n.read ? "" : " unread");
     row.innerHTML =
       `<div class="notif-title">${escapeHtml(n.title)}</div>` +
+      (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
       (n.body ? `<div class="notif-body">${escapeHtml(n.body)}</div>` : "") +
-      `<div class="notif-meta">${ws ? escapeHtml(ws.name) : ""} · ${fmtTime(n.ts)}</div>`;
+      `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}</div>`;
     row.addEventListener("click", () => {
-      n.read = true;
+      readOne(n);
       onJump?.(n);
     });
     el.appendChild(row);
@@ -70,13 +92,14 @@ export function renderNotifPanel(el, onJump) {
 export function jumpLatestUnread(onJump) {
   const n = state.notifications.find((x) => !x.read);
   if (n) {
-    n.read = true;
+    readOne(n);
     onJump?.(n);
   }
 }
 
 function fmtTime(ts) {
   const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
   const p = (x) => String(x).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }

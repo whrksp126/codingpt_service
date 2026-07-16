@@ -231,6 +231,115 @@ pub fn save_ws_session(ws_id: String, session: serde_json::Value) -> Result<serd
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
+// ── 서버 동기화 알림(deviceToken 인증 — HTTP 는 여기 Rust 에서, 토큰 JS 노출 금지) ──
+
+// 알림 목록 조회 — data = { notifications:[...], unreadCount }.
+#[tauri::command]
+pub fn notif_list(limit: Option<u32>, before_id: Option<i64>) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    let mut url = format!(
+        "{}/api/notifications?limit={}",
+        server_url().trim_end_matches('/'),
+        limit.unwrap_or(50)
+    );
+    if let Some(b) = before_id {
+        url.push_str(&format!("&beforeId={b}"));
+    }
+    let resp = ureq::get(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| format!("알림 목록 조회 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 알림 생성(OSC/벨 → 서버 기록) — data = 생성된 행.
+#[tauri::command]
+pub fn notif_create(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    let url = format!("{}/api/notifications", server_url().trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(payload)
+        .map_err(|e| format!("알림 생성 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 알림 읽음 처리 — payload = {ids} | {scope:{cwd,win}} | {scope:{cwd,win:null}}.
+#[tauri::command]
+pub fn notif_read(payload: serde_json::Value) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    let url = format!("{}/api/notifications/read", server_url().trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(payload)
+        .map_err(|e| format!("알림 읽음 처리 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 전체 읽음 처리 — data = {ids}.
+#[tauri::command]
+pub fn notif_read_all() -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    let url = format!("{}/api/notifications/read-all", server_url().trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(serde_json::json!({}))
+        .map_err(|e| format!("전체 읽음 처리 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// UI 실시간 채널 접속 URL 발급 — 티켓(POST /api/daemon/ui/ticket)을 받아 완성된 ws URL 반환.
+//  wsUrl 이 없으면 serverUrl 에서 조립: ws(s)://…/api/daemon/agent/stream?ticket=<t>&client=pc.
+#[tauri::command]
+pub fn ui_stream_url() -> Result<String, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    let server = server_url();
+    let url = format!("{}/api/daemon/ui/ticket", server.trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(serde_json::json!({}))
+        .map_err(|e| format!("UI 채널 티켓 발급 실패: {e}"))?;
+    let v = resp
+        .into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))?;
+    // 성공 규약(data 직접 반환)이지만 {data:{…}} 래핑도 방어적으로 허용.
+    let obj = v.get("data").filter(|d| d.get("ticket").is_some()).unwrap_or(&v);
+    let ticket = obj
+        .get("ticket")
+        .and_then(|t| t.as_str())
+        .filter(|s| !s.is_empty())
+        .ok_or("티켓 없음")?;
+    let base = obj
+        .get("wsUrl")
+        .and_then(|u| u.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            format!(
+                "{}/api/daemon/agent/stream",
+                server
+                    .trim_end_matches('/')
+                    .replacen("https://", "wss://", 1)
+                    .replacen("http://", "ws://", 1)
+            )
+        });
+    // wsUrl 에 이미 ticket 쿼리가 있으면 그대로, 없으면 부착.
+    if base.contains("ticket=") {
+        return Ok(base);
+    }
+    let sep = if base.contains('?') { '&' } else { '?' };
+    Ok(format!("{base}{sep}ticket={}&client=pc", urlencoding_min(ticket)))
+}
+
 #[derive(Serialize)]
 pub struct CloudTerminal {
     pub token: String,

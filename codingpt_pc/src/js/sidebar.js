@@ -1,8 +1,10 @@
 // sidebar.js — 좌측: 상단 컨트롤(사이드바 토글·알림·새 워크스페이스) + 워크스페이스 목록 + 하단 내 정보.
 import { state, isLocal } from "./state.js";
 import * as S from "./state.js";
+import * as T from "./tiling.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 
 let el = null;
@@ -59,8 +61,26 @@ export function mountSidebar(container) {
 }
 
 export function jumpToNotification(n) {
-  S.setActive(n.wsId);
-  if (n.paneId) S.focusPane(n.paneId);
+  // 대상 워크스페이스 활성화 — 서버 행(workspaceId → cwd 매칭) 우선, 로컬 폴백(wsId)도 지원.
+  const ws =
+    state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId)) ||
+    (n.cwd ? state.workspaces.find((w) => w.localPath === n.cwd) : null);
+  if (ws) S.setActive(ws.id);
+  // 발생한 터미널(win)을 보여주는 leaf 로 점프 — 다른 pane 탭에 숨어 있으면 그 탭으로 전환.
+  const rt = S.wsRuntime(state.activeWsId);
+  if (rt && rt.layout && n.win != null) {
+    let hit = null;
+    T.eachLeaf(rt.layout, (l) => {
+      if (!hit && l.kind === "terminal" && (l.tabs || []).some((t) => typeof t.win === "number" && t.win === Number(n.win))) hit = l;
+    });
+    if (hit) {
+      const idx = hit.tabs.findIndex((t) => typeof t.win === "number" && t.win === Number(n.win));
+      if (idx >= 0 && idx !== hit.active) getPane(hit.id)?.switchTab(idx);
+      S.focusPane(hit.id);
+    }
+  } else if (n.paneId) {
+    S.focusPane(n.paneId); // 로컬 폴백 알림(구 형식)
+  }
   closeNotif();
 }
 export function toggleLatestUnread() {
@@ -258,7 +278,7 @@ function note(text) {
 
 function wsRow(w) {
   const rt = S.wsRuntime(w.id);
-  const unread = S.unreadForWs(w.id);
+  const unread = S.unreadForWs(w);
   const local = isLocal(w);
   const color = S.wsColor(w.id);
   const pinned = S.wsPinned(w.id);

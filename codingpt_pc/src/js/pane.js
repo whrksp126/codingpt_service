@@ -380,13 +380,21 @@ export class PaneView {
     }
     this.term.onData((d) => this._write(d));
     // 탭 제목의 원천 = 풀 window 이름("터미널 N", 전 기기 공유) — xterm 타이틀 이벤트로 덮지 않는다.
-    this._registerOsc(9, (data) => this.ctx.onNotify?.(this.id, "", data));
+    this._registerOsc(9, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", data));
     this._registerOsc(777, (data) => {
       const parts = String(data).split(";");
-      if (parts[0] === "notify") this.ctx.onNotify?.(this.id, parts[1] || "", parts.slice(2).join(";"));
+      if (parts[0] === "notify") this.ctx.onNotify?.(this.id, this._streamWin(), parts[1] || "", parts.slice(2).join(";"));
     });
-    this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, "", String(data).replace(/^.*?;/, "")));
-    if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, "", "알림"));
+    this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
+    if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
+  }
+  // 이 pane 터미널 스트림의 현재 win — 활성 탭이 터미널이면 그 win, 아니면(혼합 탭 활성) 백그라운드
+  //  터미널 탭의 win(스트림은 터미널 탭 기준으로 유지되므로 알림 발생원도 그쪽).
+  _streamWin() {
+    const a = this.node.tabs?.[this.node.active];
+    if (a && isTermTab(a) && typeof a.win === "number") return a.win;
+    const t = this.node.tabs?.find((x) => isTermTab(x) && typeof x.win === "number");
+    return t ? t.win : null;
   }
   _registerOsc(ident, cb) {
     try {
@@ -534,6 +542,8 @@ export class PaneView {
     if (isTermTab(tab)) {
       const win = await this._ensureWin(tab);
       if (this.node.tabs[this.node.active] === tab) this._view(win);
+      // 그 터미널(win)을 화면에 띄웠다 = 해당 알림 읽음(서버 스코프 읽음 처리).
+      this.ctx.onTabActivated?.(win);
     }
     this.showActiveTab();
     this.ctx.persist?.();

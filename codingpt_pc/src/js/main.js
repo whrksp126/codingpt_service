@@ -12,6 +12,7 @@ import {
 import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
 import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
+import { startUiChannel } from "./ui-channel.js";
 
 const shellEl = document.querySelector(".shell");
 const sidebarEl = document.getElementById("sidebar");
@@ -130,6 +131,8 @@ window.addEventListener("keydown", (e) => {
   S.loadMe();
   S.loadDevices();
   S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
+  S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
+  startUiChannel(); // UI 실시간 채널(WS) — 알림 이벤트 수신
   render();
   refreshWsMeta();
 

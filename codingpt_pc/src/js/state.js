@@ -176,6 +176,9 @@ export function setActive(id) {
   if (id) {
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
+    // 워크스페이스를 열어봤다 = 그 폴더(cwd) 알림 전체 읽음(win=null 스코프).
+    const meta = state.workspaces.find((w) => w.id === id);
+    if (meta && meta.localPath) readScope(meta.localPath, null);
   }
   emit();
 }
@@ -231,6 +234,11 @@ export function focusPane(paneId) {
   if (w) {
     w.focusId = paneId;
     emit();
+    // 포커스한 pane 의 활성 터미널 탭(win) 알림 읽음 처리.
+    const meta = activeWs();
+    const leaf = w.layout ? T.findLeaf(w.layout, paneId) : null;
+    const t = leaf && leaf.kind === "terminal" ? leaf.tabs?.[leaf.active] : null;
+    if (meta?.localPath && t && typeof t.win === "number") readScope(meta.localPath, t.win);
   }
 }
 export function setRatio(branchPath, ratio) {
@@ -240,7 +248,11 @@ export function setRatio(branchPath, ratio) {
   emit();
 }
 
-// ── 알림 ──
+// ── 알림(서버 미러) ──
+//  원천 = 백엔드 /api/notifications. state.notifications 는 서버 행 그대로(read=!!readAt 파생)를
+//  미러하고, ui-channel(WS notif_event)이 실시간 반영한다. 서버 미가용 시 pushNotification 로컬 폴백.
+
+// 로컬 폴백 — 서버 기록 실패 시 이 세션 한정으로만 쌓는다(id 는 문자열 "n…" = 서버 미기록 표식).
 export function pushNotification(n) {
   const item = {
     id: "n" + Date.now() + Math.random().toString(36).slice(2, 6),
@@ -253,12 +265,78 @@ export function pushNotification(n) {
   emit();
   return item;
 }
+
+// 서버 알림 목록 로드(부팅·ui-channel 재접속 시). 실패해도 부팅을 막지 않는다.
+export async function loadNotifications() {
+  try {
+    const data = await api.notifList(50);
+    const rows = (data && (data.notifications || data.data?.notifications)) || [];
+    state.notifications = rows.map((n) => ({ ...n, read: !!n.readAt }));
+    emit();
+  } catch (_) {
+    /* 서버 미가용 — 기존(로컬) 목록 유지 */
+  }
+}
+
+// ui-channel WS 이벤트 반영 — kind:'new'(id 로 dedupe·100개 상한) | kind:'read'(ids 읽음).
+export function applyNotifEvent(ev) {
+  if (!ev) return;
+  if (ev.kind === "new" && ev.notification) {
+    const n = { ...ev.notification, read: !!ev.notification.readAt };
+    if (n.id != null && state.notifications.some((x) => x.id === n.id)) return;
+    state.notifications.unshift(n);
+    if (state.notifications.length > 100) state.notifications.length = 100;
+    emit();
+  } else if (ev.kind === "read" && Array.isArray(ev.ids)) {
+    const set = new Set(ev.ids);
+    let changed = false;
+    for (const n of state.notifications) {
+      if (set.has(n.id) && !n.read) { n.read = true; changed = true; }
+    }
+    if (changed) emit();
+  }
+}
+
+// 알림 발생 보고 — 서버에 기록(fire-and-forget). 생성 행은 WS 에코로도 오지만, WS 가 끊겨 있어도
+//  패널에 보이도록 응답 행을 직접 반영한다(applyNotifEvent 가 id 로 dedupe). 실패 시 로컬 폴백.
+export function reportNotification(p) {
+  api
+    .notifCreate(p)
+    .then((row) => {
+      const n = row && row.id != null ? row : row?.data;
+      if (n && n.id != null) applyNotifEvent({ kind: "new", notification: n });
+    })
+    .catch(() => {
+      pushNotification({ ...p, wsId: p.workspaceId });
+    });
+}
+
 export function markAllRead() {
   state.notifications.forEach((n) => (n.read = true));
   emit();
+  api.notifReadAll().catch(() => {});
 }
-export function unreadForWs(wsId) {
-  return state.notifications.filter((n) => n.wsId === wsId && !n.read).length;
+
+// 스코프 읽음 처리 — 터미널 포커스/탭 전환(win 지정)·워크스페이스 활성화(win=null) 순간,
+//  그 cwd(+win) 의 로컬 미읽음이 있을 때만 서버 호출(+낙관 반영).
+export function readScope(cwd, win) {
+  if (!cwd) return;
+  const w = win == null ? null : win;
+  const hit = state.notifications.filter(
+    (n) => !n.read && n.cwd && n.cwd === cwd && (w == null || String(n.win) === String(w))
+  );
+  if (!hit.length) return;
+  hit.forEach((n) => (n.read = true));
+  emit();
+  api.notifRead({ scope: { cwd, win: w } }).catch(() => {});
+}
+
+// 워크스페이스별 미읽음 수 — 서버 행(workspaceId/cwd)과 로컬 폴백(wsId) 모두 매칭.
+export function unreadForWs(w) {
+  if (!w) return 0;
+  return state.notifications.filter(
+    (n) => !n.read && (n.workspaceId === w.id || n.wsId === w.id || (n.cwd && n.cwd === w.localPath))
+  ).length;
 }
 
 // ── 백엔드 워크스페이스 로드 ──
