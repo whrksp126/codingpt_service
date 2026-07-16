@@ -216,6 +216,11 @@ function registerControl(ws, device) {
       fanoutSyncEvent(userId, msg.event);
       return;
     }
+    if (msg.type === 'ui_command') {
+      // 데몬(cpt CLI)→UI 클라이언트 커맨드 중계 — 결과(ui_result)는 요청이 온 이 conn 으로 회신.
+      handleUiCommand(userId, conn, msg);
+      return;
+    }
   });
 
   const cleanup = () => {
@@ -223,6 +228,10 @@ function registerControl(ws, device) {
     // 미해결 RPC 는 실패로 정리(무한 대기 방지).
     for (const [, p] of conn.pendingRpc) { clearTimeout(p.timer); try { p.reject(new Error('DAEMON_OFFLINE')); } catch (_) { /* noop */ } }
     conn.pendingRpc.clear();
+    // 이 데몬 conn 이 기다리던 ui_command 응답은 회신처가 사라짐 → 타이머만 정리하고 폐기.
+    for (const [uiId, p] of uiPending) {
+      if (p.conn === conn) { clearTimeout(p.timer); uiPending.delete(uiId); }
+    }
     const entry = connections.get(userId);
     if (entry && entry.runners.get(conn.deviceId) === conn) {
       entry.runners.delete(conn.deviceId);
@@ -393,6 +402,89 @@ function pushAgentEvent(userId, payload) {
   return rseq;
 }
 
+// ── ui_command 중계(데몬↔UI 클라이언트 왕복) ──────────────────────────
+// 데몬(cpt CLI)이 control WS 로 보낸 {type:'ui_command'} 를 접속 중인 UI 클라이언트(agent stream WSS 중
+// ui_hello 를 보낸 곳)로 중계하고, executor 의 {type:'ui_result'} 를 요청이 온 데몬 conn 으로 회신한다.
+//  · executor 선정 = lastActivityAt 최대(동률이면 kind==='pc' 우선) — "사용자가 지금 보고 있는 화면".
+//  · broadcast 모드 = 전 클라이언트에 전송하되 executor 1곳만 executor:true(회신도 executor 만).
+const UI_CMD_TIMEOUT_DEFAULT_MS = 10 * 1000; // 데몬이 timeoutMs 를 안 주면 10s
+const UI_CMD_TIMEOUT_MAX_MS = 60 * 1000;     // 데몬이 줘도 상한 60s
+const UI_CMD_RATE_LIMIT = 10;                // 유저당 초당 ui_command 상한
+// uiId → { conn(요청 데몬), daemonMsgId, timer, executorWs }  왕복 대기 중인 커맨드.
+const uiPending = new Map();
+// userId(str) → { windowStart, count }  유저당 1초 창 카운터(간단 rate limit).
+const uiCmdRate = new Map();
+
+// 유저당 초당 UI_CMD_RATE_LIMIT 건 초과 여부(1초 창 카운터).
+function allowUiCommand(userId) {
+  const now = Date.now();
+  let r = uiCmdRate.get(userId);
+  if (!r || now - r.windowStart >= 1000) { r = { windowStart: now, count: 0 }; uiCmdRate.set(userId, r); }
+  r.count += 1;
+  return r.count <= UI_CMD_RATE_LIMIT;
+}
+
+// 데몬 ui_command 1건 처리 — 검증→rate limit→executor 선정→전송→pending 등록(타임아웃 포함).
+function handleUiCommand(userId, conn, msg) {
+  // 회신은 항상 요청이 온 데몬 conn 으로(로컬+클라우드 다중 연결 대비).
+  const reply = (ok, extra) => {
+    try { conn.ws.send(JSON.stringify({ type: 'ui_result', id: msg.id, ok, ...extra })); } catch (_) { /* noop */ }
+  };
+  if (msg.id == null || typeof msg.cmd !== 'string' || !msg.cmd) {
+    reply(false, { error: '잘못된 ui_command 형식입니다(id/cmd 필요)', code: 'BAD_REQUEST' });
+    return;
+  }
+  if (!allowUiCommand(userId)) {
+    reply(false, { error: 'ui_command 가 너무 잦습니다(초당 ' + UI_CMD_RATE_LIMIT + '건 제한)', code: 'RATE_LIMITED' });
+    return;
+  }
+  // 대상 = ui_hello 를 보낸(=_cptMeta 있는) 열린 WSS 클라이언트만.
+  const set = agentWsClients.get(String(userId));
+  const clients = [];
+  if (set) for (const ws of set) { if (ws._cptMeta && ws.readyState === WebSocket.OPEN) clients.push(ws); }
+  if (clients.length === 0) {
+    reply(false, { error: '연결된 화면(UI 클라이언트)이 없습니다', code: 'NO_UI_CLIENT' });
+    return;
+  }
+  // executor 선정: lastActivityAt 최대 → 동률이면 kind==='pc' 우선.
+  clients.sort((a, b) =>
+    (b._cptMeta.lastActivityAt - a._cptMeta.lastActivityAt) ||
+    ((b._cptMeta.kind === 'pc' ? 1 : 0) - (a._cptMeta.kind === 'pc' ? 1 : 0)));
+  const executor = clients[0];
+
+  // uiId 는 데몬이 보낸 id(전역 유일 uuid) 재사용 — 회신 매칭 키.
+  const uiId = String(msg.id);
+  const rawTimeout = Number(msg.timeoutMs);
+  const timeoutMs = Math.min(
+    Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : UI_CMD_TIMEOUT_DEFAULT_MS,
+    UI_CMD_TIMEOUT_MAX_MS
+  );
+  const timer = setTimeout(() => {
+    uiPending.delete(uiId);
+    reply(false, { error: 'UI 클라이언트가 응답하지 않습니다(타임아웃)', code: 'UI_TIMEOUT' });
+  }, timeoutMs);
+  uiPending.set(uiId, { conn, daemonMsgId: msg.id, timer, executorWs: executor });
+
+  const targets = msg.mode === 'broadcast' ? clients : [executor];
+  for (const ws of targets) {
+    try {
+      ws.send(JSON.stringify({ type: 'ui_command', uiId, cmd: msg.cmd, params: msg.params || {}, executor: ws === executor }));
+    } catch (_) { /* noop — 전송 실패는 타임아웃/EXECUTOR_GONE 이 수습 */ }
+  }
+}
+
+// UI 클라이언트(WSS)가 끊길 때 — 이 ws 가 executor 였던 pending 은 응답이 영영 안 오므로 즉시 실패 회신.
+function failPendingForExecutor(ws) {
+  for (const [uiId, p] of uiPending) {
+    if (p.executorWs !== ws) continue;
+    uiPending.delete(uiId);
+    clearTimeout(p.timer);
+    try {
+      p.conn.ws.send(JSON.stringify({ type: 'ui_result', id: p.daemonMsgId, ok: false, error: '실행 화면(UI 클라이언트) 연결이 끊어졌습니다', code: 'UI_EXECUTOR_GONE' }));
+    } catch (_) { /* noop */ }
+  }
+}
+
 // GET /api/daemon/agent/stream?token=<JWT>|?ticket=<t> 업그레이드(앱/PC→back). 에이전트 이벤트 WSS 구독.
 //  WebSocket 은 Authorization 헤더를 못 실으므로 access token 을 쿼리로 받아 검증한다.
 //  ticket — deviceToken 기기(PC)용 60초 1회용 불투명 티켓(issueUiTicket). JWT 없이 스트림 구독.
@@ -434,10 +526,37 @@ function registerAgentWs(ws, userId, client) {
       try { ws.send(JSON.stringify({ type: 'attach_ack', headRseq: buf ? buf.seq : 0 })); } catch (_) { /* noop */ }
       return;
     }
+    if (msg.type === 'ui_hello') {
+      // ui_command 수신 의사 표명(접속 직후 1회) — 메타가 있어야 중계 대상이 된다.
+      ws._cptMeta = {
+        clientKey: typeof msg.clientKey === 'string' ? msg.clientKey.slice(0, 128) : '',
+        kind: msg.kind === 'pc' ? 'pc' : 'mobile',
+        lastActivityAt: Date.now(),
+      };
+      return;
+    }
+    if (msg.type === 'ui_activity') {
+      // 사용자 입력 활동(클라이언트가 30s 스로틀로 전송) — executor 선정 기준 갱신.
+      if (ws._cptMeta) ws._cptMeta.lastActivityAt = Date.now();
+      return;
+    }
+    if (msg.type === 'ui_result' && msg.uiId != null) {
+      // executor 의 커맨드 실행 결과 — pending 매칭 후 요청 데몬 conn 으로 회신.
+      const uiId = String(msg.uiId);
+      const pending = uiPending.get(uiId);
+      if (!pending || pending.executorWs !== ws) return; // executor 회신만 인정(중복/비 executor 무시)
+      uiPending.delete(uiId);
+      clearTimeout(pending.timer);
+      try {
+        pending.conn.ws.send(JSON.stringify({ type: 'ui_result', id: pending.daemonMsgId, ok: !!msg.ok, result: msg.result, error: msg.error }));
+      } catch (_) { /* noop */ }
+      return;
+    }
     // ack 는 MVP 에선 keepalive 로만 취급(버퍼 트리밍은 상한/TTL 로 처리).
   });
   const cleanup = () => {
     clearInterval(ka);
+    failPendingForExecutor(ws); // 이 ws 가 executor 인 pending ui_command 즉시 실패 회신
     const s = agentWsClients.get(userId);
     if (s) { s.delete(ws); if (s.size === 0) agentWsClients.delete(userId); }
   };
@@ -677,6 +796,7 @@ const _sweeper = setInterval(() => {
   const now = Date.now();
   for (const [t, s] of termTokens) { if (s.expiresAt < now) termTokens.delete(t); }
   for (const [t, s] of uiTickets) { if (s.expiresAt < now) uiTickets.delete(t); }
+  for (const [u, r] of uiCmdRate) { if (now - r.windowStart >= 1000) uiCmdRate.delete(u); } // 지난 창 카운터 정리
 }, 5 * 60 * 1000);
 if (_sweeper.unref) _sweeper.unref();
 

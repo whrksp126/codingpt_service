@@ -427,11 +427,13 @@ function renderMainTop(ws) {
 // 통합 추가 — 활성 pane 의 크기·비율로 배치를 자동 결정(모바일과 동일 규칙).
 //  · 절반이 최소 크기 이상인 축을 분할(둘 다 되면 긴 축): 가로=우측, 세로=아래.
 //  · 둘 다 부족하고 활성 pane 이 터미널 pane 이면 같은 영역에 탭으로 추가(혼합 탭 — IDE/웹뷰 포함).
-function smartAdd(kind) {
+//  extra: { url?, openPath? } — 원격 명령(ui-channel newPane)이 초기 URL/파일을 지정할 때 사용.
+//  반환: 새 내용이 배치된 paneId(탭 추가면 기존 pane id) | null.
+export function smartAdd(kind, extra) {
   const rt = wsRuntime(state.activeWsId);
-  if (!rt || !rt.layout) return;
+  if (!rt || !rt.layout) return null;
   const focusId = rt.focusId || T.firstLeafId(rt.layout);
-  if (!focusId) return;
+  if (!focusId) return null;
   const focusLeaf = T.findLeaf(rt.layout, focusId);
   const r = panes.get(focusId)?.el?.getBoundingClientRect();
   const MIN_W = 360, MIN_H = 240;
@@ -445,21 +447,26 @@ function smartAdd(kind) {
     if (kind === "terminal") {
       panes.get(focusId)?.addTab();
       S.focusPane(focusId);
-      return;
+      return focusId;
     }
     const tab = kind === "ide"
-      ? { kind: "ide", openPath: null, tid: newTid() }
-      : { kind: "preview", url: "", tid: newTid() };
+      ? { kind: "ide", openPath: extra?.openPath || null, tid: newTid() }
+      : { kind: "preview", url: extra?.url || "", tid: newTid() };
     focusLeaf.tabs.push(tab);
     focusLeaf.active = focusLeaf.tabs.length - 1;
     panes.get(focusId)?.buildHead();
     panes.get(focusId)?.showActiveTab?.();
     S.focusPane(focusId);
     S.emit();
-    return;
+    return focusId;
   }
-  const opts = kind === "preview" ? { url: "" } : kind === "terminal" ? { fresh: true } : undefined;
+  const opts = kind === "preview"
+    ? { url: extra?.url || "" }
+    : kind === "terminal"
+      ? { fresh: true }
+      : extra?.openPath ? { openPath: extra.openPath } : undefined;
   S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
+  return wsRuntime(state.activeWsId)?.focusId || null;
 }
 
 export function updateWorkspaceView() {

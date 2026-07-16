@@ -339,6 +339,15 @@ export function unreadForWs(w) {
   ).length;
 }
 
+// ── 원격 상태 스트림(ui_command status.changed) — cwd(홈-상대 localPath) 키 ──
+//  back 이 흘려주는 워크스페이스 작업 상태(status[]/progress/logTail)를 미러. 사이드바가 최소 표시.
+export const wsStatus = new Map(); // cwd -> { status:[], progress, logTail, ts }
+export function setWsStatus(cwd, payload) {
+  if (!cwd) return;
+  wsStatus.set(cwd, { ...(payload || {}), ts: Date.now() });
+  emit();
+}
+
 // ── 백엔드 워크스페이스 로드 ──
 export async function loadWorkspaces() {
   try {
@@ -395,8 +404,9 @@ export async function createLocalWorkspace() {
 }
 
 // 이 PC 설치본의 안정 기기 키 — 세션 매니페스트에 발신 기기를 표시(다른 기기가 pull 시 win 리셋 판단).
+//  ui-channel 의 ui_hello(clientKey)도 같은 키를 재사용한다.
 const DEVICE_KEY_LS = "cpt.deviceKey";
-function deviceKey() {
+export function deviceKey() {
   let k = "";
   try { k = localStorage.getItem(DEVICE_KEY_LS) || ""; } catch (_) {}
   if (!k) {

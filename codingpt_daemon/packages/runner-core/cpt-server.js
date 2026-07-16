@@ -36,7 +36,14 @@ const pendingUi = new Map();   // uiId → { resolve, reject, timer }
 const wsMeta = new Map();
 const LOG_MAX = 200;
 
-function sockPath() { return path.join(runtime.stateDir(), 'cpt.sock'); }
+// 유닉스 소켓 경로 — sun_path 한계(macOS 104B) 초과 시 /tmp 짧은 폴백(경로 해시로 인스턴스 구분).
+//  초과 경로는 커널이 조용히 잘라 바인딩해 유령 소켓(연결은 되는데 파일이 안 보임)이 된다.
+function sockPath() {
+  const p = path.join(runtime.stateDir(), 'cpt.sock');
+  if (Buffer.byteLength(p) <= 100) return p;
+  const h = crypto.createHash('sha1').update(runtime.stateDir()).digest('hex').slice(0, 8);
+  return path.join('/tmp', `cpt-${typeof process.getuid === 'function' ? process.getuid() : 0}-${h}.sock`);
+}
 
 function setControlWs(ws) {
   controlWs = ws;
@@ -403,7 +410,18 @@ function start() {
     });
     conn.on('error', () => { /* noop */ });
   });
-  server.on('error', (e) => console.error('[cpt] 소켓 오류:', e.message));
+  server.on('error', (e) => {
+    // 스테일 소켓 자가치유 — 다른(살아있는) 데몬이 물고 있으면 접속이 되고, 죽은 잔재면 실패한다.
+    //  실패 시 unlink 후 1회 재시도(EADDRINUSE 는 unlink 전 크래시/중복 기동 잔재가 대부분).
+    if (e && e.code === 'EADDRINUSE') {
+      const probe = net.createConnection(sock);
+      const retry = () => { try { fs.unlinkSync(sock); } catch (_) { /* noop */ } server.listen(sock); };
+      probe.on('connect', () => { probe.end(); console.error('[cpt] 소켓을 다른 데몬이 사용 중 — 이 인스턴스는 cpt 비활성'); });
+      probe.on('error', retry);
+      return;
+    }
+    console.error('[cpt] 소켓 오류:', e.message);
+  });
   server.listen(sock, () => {
     try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);

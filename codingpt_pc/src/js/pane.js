@@ -43,8 +43,8 @@ export function newTid() {
 const previewBars = new Map(); // previewId → 툴바 컨트롤러(Rust page-load 이벤트 라우팅)
 api.onPreviewLoaded?.((p) => { previewBars.get(p?.pane)?.onLoaded(p?.url || ""); });
 
-// 스마트 주소: URL/로컬/호스트:포트/도메인이면 이동, 아니면 웹 검색.
-function smartUrl(raw) {
+// 스마트 주소: URL/로컬/호스트:포트/도메인이면 이동, 아니면 웹 검색. (ui-channel 원격 명령도 재사용)
+export function smartUrl(raw) {
   let u = (raw || "").trim();
   if (!u) return "";
   const isUrl = /^https?:\/\//i.test(u);

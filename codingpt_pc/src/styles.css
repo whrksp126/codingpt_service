@@ -124,6 +124,8 @@ body.resizing-row { cursor: row-resize; }
 .wsr-path { font-size: 11px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsr-ports { display: flex; gap: 4px; }
 .port { font-size: 10px; font-family: ui-monospace, monospace; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; }
+/* 원격 상태 스트림(status.changed) 뱃지 — 상태 텍스트 + 진행률 */
+.wsr-status { font-size: 10px; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 
 /* ── 워크스페이스 컨텍스트 메뉴 ── */
 .ctx-menu {

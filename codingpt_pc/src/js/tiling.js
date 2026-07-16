@@ -19,9 +19,10 @@ export function bumpSeq(fromIds) {
   }
 }
 
-// leaf: 터미널 pane 은 탭 배열(각 탭=tmux window). 프리뷰/IDE 는 url.
+// leaf: 터미널 pane 은 탭 배열(각 탭=tmux window). 프리뷰는 url, IDE 는 openPath.
 export function leaf(kind, opts = {}) {
-  if (kind === "preview" || kind === "ide") return { id: newPaneId(), kind, url: opts.url || null };
+  if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null };
+  if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null };
   return {
     id: newPaneId(),
     kind: "terminal",

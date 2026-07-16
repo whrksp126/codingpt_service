@@ -301,6 +301,17 @@ function wsRow(w) {
   const branch = rt?.branch ? `<span class="wsr-branch">${icons.gitBranch({ size: 11 })}${escapeHtml(rt.branch)}</span>` : "";
   meta.innerHTML = `<span class="wsr-kind">${kindIc}${local ? "내 PC" : "클라우드"}</span>${branch}`;
 
+  // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
+  const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
+  const stText = st?.status?.[0]?.value;
+  if (stText || typeof st?.progress === "number") {
+    const badge = document.createElement("span");
+    badge.className = "wsr-status";
+    badge.textContent =
+      (stText || "") + (typeof st.progress === "number" ? ` ${Math.round(st.progress)}%` : "");
+    meta.appendChild(badge);
+  }
+
   row.append(name, meta);
   if (w.localPath) {
     const path = document.createElement("div");

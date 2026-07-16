@@ -326,11 +326,26 @@ const poolEnvDone = new Set(); // 세션당 1회(데몬 수명 동안) — set-e
 async function injectPoolEnv(session, abs) {
   if (poolEnvDone.has(session)) return;
   const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
-  const sock = path.join(runtime.stateDir(), 'cpt.sock');
+  // 소켓 경로는 cpt-server 와 동일 규칙(sun_path 한계 폴백 포함) — 어긋나면 CLI 가 유령 소켓을 본다.
+  const sock = require('./cpt-server').sockPath();
   const tmuxBin = findTmux();
   await runTmux(['set-environment', '-t', '=' + session, 'CPT_WS', rel == null ? '' : String(rel)]);
   await runTmux(['set-environment', '-t', '=' + session, 'CPT_SOCK', sock]);
   if (tmuxBin) await runTmux(['set-environment', '-t', '=' + session, 'CPT_TMUX', tmuxBin]);
+  // shim(cpt/claude/codex 래퍼) 경로를 PATH 선두에 — 새 window 셸부터 적용.
+  //  zsh 는 rc 가 PATH 를 재구성해 이 값이 밀린다(실측) → ZDOTDIR 체인으로 rc 이후에 재-prepend.
+  const shimBin = path.join(runtime.stateDir(), 'bin');
+  const basePath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin';
+  await runTmux(['set-environment', '-t', '=' + session, 'PATH', `${shimBin}:${basePath}`]).catch(() => {});
+  try {
+    const shimLib = require('./shim');
+    const zdot = shimLib.zdotDir();
+    if (fs.existsSync(zdot)) {
+      const origZdot = process.env.ZDOTDIR || '';
+      await runTmux(['set-environment', '-t', '=' + session, 'ZDOTDIR', zdot]);
+      if (origZdot && origZdot !== zdot) await runTmux(['set-environment', '-t', '=' + session, 'CPT_ORIG_ZDOTDIR', origZdot]);
+    }
+  } catch (_) { /* shim 미생성 — PATH 주입만으로 동작(제한적) */ }
   poolEnvDone.add(session);
 }
 
