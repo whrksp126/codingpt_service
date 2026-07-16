@@ -444,9 +444,14 @@ pub fn open_external(url: String) -> Result<(), String> {
 // 네이티브 알림(OSC/벨 → macOS 알림). 프론트 notifications.js 에서 호출.
 #[tauri::command]
 pub fn notify(app: AppHandle, title: String, body: String) {
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app
-        .notification()
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+    let notif = app.notification();
+    // 권한 미허용이면 1회 요청 — tauri dev(비번들 바이너리)에선 배너가 안 뜰 수 있고,
+    //  빌드된 .app 에선 이 요청으로 System Settings 알림 항목이 생성돼 배너가 표시된다.
+    if !matches!(notif.permission_state(), Ok(PermissionState::Granted)) {
+        let _ = notif.request_permission();
+    }
+    let _ = notif
         .builder()
         .title(if title.is_empty() { "CodingPT".into() } else { title })
         .body(body)
