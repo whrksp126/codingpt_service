@@ -36,17 +36,40 @@
     '    };\n' +
     '  } catch (e) {}\n' +
     '  try { window.open = function () { return null; }; } catch (e) {}\n' +
-    '  function sweep(root) {\n' +
+    '  function sweep(root, acc) {\n' +
     "    var els = root.querySelectorAll('*');\n" +
     '    for (var i = 0; i < els.length; i++) {\n' +
     '      var el = els[i];\n' +
     "      var a = (el.getAttribute && el.getAttribute('aria-label')) || '';\n" +
     "      if (a && (a === 'Toggle screencast' || /undock|도킹 해제/i.test(a))) el.style.display = 'none';\n" +
-    '      if (el.shadowRoot) sweep(el.shadowRoot);\n' +
+    "      if (el.tagName === 'BUTTON' && String(el.className || '').indexOf('toolbar-button') >= 0) acc.tb.push(el);\n" +
+    '      if (el.shadowRoot) sweep(el.shadowRoot, acc);\n' +
     '    }\n' +
     '  }\n' +
-    '  setInterval(function () { try { sweep(document); } catch (e) {} }, 1200);\n' +
-    "  document.addEventListener('click', function () { setTimeout(function () { try { sweep(document); } catch (e) {} }, 60); }, true);\n" +
+    '  function sweepAll() {\n' +
+    '    try {\n' +
+    '      var acc = { tb: [] };\n' +
+    '      sweep(document, acc);\n' +
+    '      // WebKit: absolute 포지션 툴바 버튼(✕)의 기준 요소 해석이 달라 이웃 버튼(⋮) 위에 겹친다\n' +
+    '      //  → 겹침을 감지하면 flow 로 되돌린다(라벨 무관·겹칠 때만 발동, 모바일 PaneView 동일 수정).\n' +
+    '      for (var i = 0; i < acc.tb.length; i++) {\n' +
+    '        var el = acc.tb[i];\n' +
+    "        if (getComputedStyle(el).position !== 'absolute') continue;\n" +
+    '        var r = el.getBoundingClientRect();\n' +
+    '        if (!r.width) continue;\n' +
+    '        for (var j = 0; j < acc.tb.length; j++) {\n' +
+    '          if (i === j) continue;\n' +
+    '          var o = acc.tb[j].getBoundingClientRect();\n' +
+    '          if (o.width && Math.abs(o.x - r.x) < r.width * 0.7 && Math.abs(o.y - r.y) < r.height * 0.7) {\n' +
+    "            el.style.position = 'static';\n" +
+    '            break;\n' +
+    '          }\n' +
+    '        }\n' +
+    '      }\n' +
+    '    } catch (e) {}\n' +
+    '  }\n' +
+    '  setInterval(sweepAll, 1200);\n' +
+    "  document.addEventListener('click', function () { setTimeout(sweepAll, 60); }, true);\n" +
     '  function FakeWS(url) {\n' +
     '    var self = this;\n' +
     "    this.url = String(url || '');\n" +

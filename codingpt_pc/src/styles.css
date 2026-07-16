@@ -133,7 +133,7 @@ body.resizing-row { cursor: row-resize; }
 .cpt-dt-wrap { position: absolute; inset: 0; z-index: 2; }
 .cpt-dt-frame { width: 100%; height: 100%; border: 0; background: #292a2d; display: block; }
 .cpt-dt-slot { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
-.cpt-dt-status { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 11px; color: #ffd479; background: rgba(0,0,0,.55); padding: 3px 8px; border-radius: 6px; max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpt-dt-status { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 11px; color: #ffd479; background: rgba(0,0,0,.75); padding: 3px 8px; border-radius: 6px; max-width: 90%; }
 .wsr-branch { color: var(--text3); }
 .wsr-kind .ic, .wsr-branch .ic { opacity: 0.85; }
 .wsr-path { font-size: 11px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
