@@ -30,93 +30,10 @@ function chobitsuBootJs(src) {
   return (
     "(function(){if(window.__cptCdp)return;try{" + src +
     "\n;window.__cptCdp=1;window.__cptCdpQ=[];window.chobitsu.setOnMessage(function(s){window.__cptCdpQ.push(String(s));});" +
-    "}catch(e){}})();0"
+    "}catch(e){window.__cptCdpErr=String(e&&(e.message||e)).slice(0,200)}})();0"
   );
 }
 const DRAIN_JS = "JSON.stringify(window.__cptCdpQ?window.__cptCdpQ.splice(0,window.__cptCdpQ.length):[])";
-
-// DevTools 프론트엔드 브리지 — chii_app.html 최상단 삽입(모바일 DEVTOOLS_BRIDGE 의 PC 판):
-//  ① ?ws=cpt 위장 → WebSocket 트랜스포트 선택 ② WebSocket → parent postMessage 릴레이
-//  ③ __cptDeliver = 페이지→프론트엔드 CDP 진입점 ④ setInspectedPageBounds → bounds 통지
-//  (모바일 전용이던 합성 포인터 리사이저/두꺼운 손잡이/customElement 폴리필은 PC에 불필요·유해라 제외)
-const DT_BRIDGE = `<script>
-(function(){
-  function post(m) { try { parent.postMessage(Object.assign({ __cptDt: '' }, m), '*'); } catch (e) {} }
-  var biv = setInterval(function () {
-    var h = window.InspectorFrontendHost;
-    if (!h || !h.setInspectedPageBounds || h.__cptPatched) return;
-    h.__cptPatched = true;
-    clearInterval(biv);
-    var ob = h.setInspectedPageBounds.bind(h);
-    h.setInspectedPageBounds = function (b) { post({ __cptDt: 'bounds', b: b }); return ob(b); };
-    // 도킹 툴바의 ✕(임베더 창 닫기) → 패널 닫기.
-    h.closeWindow = function () { post({ __cptDt: 'dock', side: 'undocked' }); };
-  }, 50);
-  try { localStorage.setItem('uiTheme', '"dark"'); } catch (e) {}
-  try { if (localStorage.getItem('currentDockState') === '"undocked"') localStorage.setItem('currentDockState', '"bottom"'); } catch (e) {}
-  try {
-    var ols = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (k, v) {
-      ols.call(this, k, v);
-      if (k === 'currentDockState') { try { post({ __cptDt: 'dock', side: JSON.parse(v) }); } catch (e) {} }
-    };
-  } catch (e) {}
-  try { window.open = function () { return null; }; } catch (e) {}
-  // screencast 토글(프리뷰가 바로 옆이라 무용)과 undock 메뉴(별도 창 없음) 숨김 — shadow DOM 포함 스캔.
-  function sweep(root) {
-    var els = root.querySelectorAll('*');
-    for (var i = 0; i < els.length; i++) {
-      var el = els[i];
-      var a = (el.getAttribute && el.getAttribute('aria-label')) || '';
-      if (a && (a === 'Toggle screencast' || /undock|도킹 해제/i.test(a))) el.style.display = 'none';
-      if (el.shadowRoot) sweep(el.shadowRoot);
-    }
-  }
-  setInterval(function () { try { sweep(document); } catch (e) {} }, 1200);
-  document.addEventListener('click', function () { setTimeout(function () { try { sweep(document); } catch (e) {} }, 60); }, true);
-  history.replaceState(null, '', location.pathname + '?ws=cpt&can_dock=true');
-  function FakeWS(url) {
-    var self = this;
-    this.url = String(url || '');
-    this.readyState = 0;
-    this._ls = { open: [], message: [], close: [], error: [] };
-    window.__cptWs = this;
-    setTimeout(function () {
-      self.readyState = 1;
-      var ev = { type: 'open', target: self };
-      if (self.onopen) self.onopen(ev);
-      self._ls.open.slice().forEach(function (f) { try { f(ev); } catch (e) {} });
-      post({ __cptDt: 'open' });
-    }, 30);
-  }
-  FakeWS.prototype.send = function (d) { post({ __cptDt: 'cdp', data: String(d) }); };
-  FakeWS.prototype.close = function () { this.readyState = 3; };
-  FakeWS.prototype.addEventListener = function (t, f) { (this._ls[t] = this._ls[t] || []).push(f); };
-  FakeWS.prototype.removeEventListener = function (t, f) { var a = this._ls[t] || []; var i = a.indexOf(f); if (i >= 0) a.splice(i, 1); };
-  FakeWS.CONNECTING = 0; FakeWS.OPEN = 1; FakeWS.CLOSING = 2; FakeWS.CLOSED = 3;
-  window.WebSocket = FakeWS;
-  window.__cptDeliver = function (d) {
-    var ws = window.__cptWs;
-    if (!ws || ws.readyState !== 1) return;
-    var ev = { type: 'message', data: d, target: ws };
-    if (ws.onmessage) ws.onmessage(ev);
-    (ws._ls.message || []).slice().forEach(function (f) { try { f(ev); } catch (e) {} });
-  };
-})();
-</` + `script>`;
-
-let chiiHtml = null;
-async function loadChiiHtml() {
-  if (chiiHtml) return chiiHtml;
-  try {
-    const r = await fetch(CDN_CHII_FE + "chii_app.html");
-    if (!r.ok) return null;
-    const raw = await r.text();
-    // srcdoc 은 상대경로 기준이 없다 → <base> 로 CDN 을 기준 삼아 모듈 스크립트를 해석시킨다.
-    chiiHtml = raw.replace('<meta charset="utf-8">', `<meta charset="utf-8"><base href="${CDN_CHII_FE}">` + DT_BRIDGE);
-  } catch (_) { return null; }
-  return chiiHtml;
-}
 
 // pvId → 세션 { host, wrap, iframe, slot, active, poll, enableLog, replayId }
 const sessions = new Map();
@@ -124,7 +41,7 @@ const sessions = new Map();
 // pane 동기화 tick 이 프리뷰 webview 를 놓을 기준 요소 — 데브툴이 열려 있으면 슬롯(bounds), 아니면 null.
 export function dtPageSlot(pvId) {
   const s = sessions.get(pvId);
-  return s && s.active && s.boundsSeen ? s.slot : null;
+  return s && s.active ? s.slot : null;
 }
 export function dtActive(pvId) {
   const s = sessions.get(pvId);
@@ -134,8 +51,21 @@ export function dtActive(pvId) {
 async function injectChobitsu(pvId) {
   const src = await loadChobitsu();
   const s = sessions.get(pvId);
-  if (!src || !s || !s.active) return;
-  try { await api.previewEval(pvId, chobitsuBootJs(src)); } catch (_) {}
+  if (!s || !s.active) return;
+  if (!src) { dtStatus(s, "chobitsu 소스 로드 실패(CDN)"); return; }
+  try {
+    await api.previewEval(pvId, chobitsuBootJs(src));
+    // 주입 결과 확인 — 페이지 환경 문제(스토리지 차단 등)로 chobitsu 부트가 죽으면 사용자에게 표시.
+    const chk = String(await api.previewEval(pvId, "typeof window.chobitsu + ' err=' + (window.__cptCdpErr||'-')"));
+    if (!chk.startsWith("object") && !chk.startsWith("function")) dtStatus(s, "페이지 CDP 부트 실패: " + chk.slice(0, 140));
+  } catch (e) {
+    dtStatus(s, "주입 오류: " + String(e).slice(0, 120));
+  }
+}
+
+function dtStatus(s, msg) {
+  console.log("[CPT-DevTools]", msg);
+  if (s.status) { s.status.textContent = msg; s.status.style.display = ""; }
 }
 
 // 페이지가 새 문서를 로드했을 때(내비게이션/리로드) DevTools 를 리로드 없이 재동기화.
@@ -174,7 +104,7 @@ function startPoll(s) {
           try { s.iframe?.contentWindow?.__cptDeliver?.(str); } catch (_) {}
         }
       }
-    } catch (_) { /* webview 미생성/이동 중 */ }
+    } catch (_) { /* webview 미생성/이동 중 — 다음 tick 재시도 */ }
     busy = false;
   }, 120);
 }
@@ -184,7 +114,12 @@ function stopPoll(s) {
 
 function onFrameMessage(s, d) {
   if (!d || typeof d.__cptDt !== "string") return;
-  if (d.__cptDt === "open") {
+  if (d.__cptDt === "log") {
+    console.log("[CPT-DevTools]", d.msg);
+    if (s.status) { s.status.textContent = String(d.msg).slice(0, 160); s.status.style.display = ""; }
+  } else if (d.__cptDt === "open") {
+    s.opened = true;
+    if (s.status) s.status.style.display = "none";
     void injectChobitsu(s.pvId); // 프론트엔드 접속 시점에 페이지 쪽 CDP 준비 보장
   } else if (d.__cptDt === "cdp") {
     const data = String(d.data);
@@ -211,6 +146,14 @@ function setDtVisible(s, on) {
   s.active = on;
   s.wrap.style.display = on ? "" : "none";
   s.slot.style.display = on ? "" : "none";
+  // bounds(setInspectedPageBounds) 수신 전 기본 배치 — 상단 60%=페이지, 하단=DevTools.
+  //  (네이티브 프리뷰 webview 는 항상 DOM 위라, 슬롯을 먼저 줄여야 iframe/상태줄이 보인다)
+  if (on && !s.boundsSeen) {
+    s.slot.style.left = "0px";
+    s.slot.style.top = "0px";
+    s.slot.style.width = "100%";
+    s.slot.style.height = "60%";
+  }
   if (on) startPoll(s); else stopPoll(s);
 }
 
@@ -221,8 +164,6 @@ export async function toggleChiiDevtools(pvId, host) {
     setDtVisible(s, !s.active);
     return s.active;
   }
-  const html = await loadChiiHtml();
-  if (!html) return false;
   s = { pvId, host, active: true, poll: null, enableLog: new Map(), replayId: REPLAY_ID_BASE, boundsSeen: false };
   sessions.set(pvId, s);
   host.style.position = "relative";
@@ -236,13 +177,24 @@ export async function toggleChiiDevtools(pvId, host) {
   // 페이지 슬롯 — setInspectedPageBounds rect(host 기준 좌표)에 놓이는 투명 기준 요소.
   const slot = document.createElement("div");
   slot.className = "cpt-dt-slot";
+  // 상태줄 — 프론트엔드 부팅 실패/오류를 화면에 표시(진단 겸 사용자 안내).
+  const status = document.createElement("div");
+  status.className = "cpt-dt-status";
+  status.textContent = "DevTools 로딩 중…";
+  wrap.appendChild(status);
   host.append(wrap, slot);
   s.wrap = wrap;
   s.iframe = iframe;
   s.slot = slot;
+  s.status = status;
+  setTimeout(() => {
+    if (!s.opened && s.active && s.status) s.status.textContent = "DevTools 로드 실패 — 네트워크(CDN) 연결을 확인하세요";
+  }, 8000);
   s.msgHandler = (e) => { if (e.source === iframe.contentWindow) onFrameMessage(s, e.data); };
   window.addEventListener("message", s.msgHandler);
-  iframe.srcdoc = html;
+  // 래퍼 페이지(같은 오리진, ?ws= 쿼리 유지)가 CDN chii_app.html 을 받아 자기 자신을 교체한다 —
+  //  srcdoc 은 쿼리를 못 가져 WS 트랜스포트가 선택되지 않는다(devtools-frame.html 참고).
+  iframe.src = "devtools-frame.html?ws=cpt&can_dock=true";
   setDtVisible(s, true);
   void injectChobitsu(pvId);
   return true;

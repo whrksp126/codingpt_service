@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- devtools-frame.html — 크롬 데브툴(chii) 프론트엔드 래퍼(devtools.js 의 iframe 이 로드).
+     srcdoc 은 ?ws= 쿼리를 가질 수 없어(replaceState 가 about:srcdoc 에서 무효) 진짜 문서가 필요:
+     이 페이지가 ?ws=cpt&can_dock=true 쿼리를 유지한 채 CDN 의 chii_app.html 을 fetch →
+     브리지/폴리필을 삽입해 document.write 로 자기 자신을 교체한다(URL·쿼리·오리진 유지).
+     브리지 프로토콜(부모 postMessage {__cptDt}) 과 릴레이는 devtools.js 참고. -->
+<meta charset="utf-8">
+<style>html,body{margin:0;height:100%;background:#292a2d;color:#9aa0a6;font:12px -apple-system,sans-serif}</style>
+<body>DevTools 로딩 중…
+<script>
+(function () {
+  var CDN = 'https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end/';
+  function post(m) { try { parent.postMessage(Object.assign({ __cptDt: '' }, m), '*'); } catch (e) {} }
+
+  var BRIDGE = '<scr' + 'ipt>\n' +
+    '(function(){\n' +
+    "  function post(m) { try { parent.postMessage(Object.assign({ __cptDt: '' }, m), '*'); } catch (e) {} }\n" +
+    "  window.addEventListener('error', function (e) { post({ __cptDt: 'log', msg: 'err: ' + (e.message || (e.target && (e.target.src || e.target.href)) || '') + ' @' + (e.filename || '') + ':' + (e.lineno || 0) }); }, true);\n" +
+    "  window.addEventListener('unhandledrejection', function (e) { var r = e.reason; post({ __cptDt: 'log', msg: 'rej: ' + (r && (r.message || r)) }); });\n" +
+    '  var biv = setInterval(function () {\n' +
+    '    var h = window.InspectorFrontendHost;\n' +
+    '    if (!h || !h.setInspectedPageBounds || h.__cptPatched) return;\n' +
+    '    h.__cptPatched = true;\n' +
+    '    clearInterval(biv);\n' +
+    '    var ob = h.setInspectedPageBounds.bind(h);\n' +
+    "    h.setInspectedPageBounds = function (b) { post({ __cptDt: 'bounds', b: b }); return ob(b); };\n" +
+    "    h.closeWindow = function () { post({ __cptDt: 'dock', side: 'undocked' }); };\n" +
+    '  }, 50);\n' +
+    '  try { localStorage.setItem(\'uiTheme\', \'"dark"\'); } catch (e) {}\n' +
+    '  try { if (localStorage.getItem(\'currentDockState\') === \'"undocked"\') localStorage.setItem(\'currentDockState\', \'"bottom"\'); } catch (e) {}\n' +
+    '  try {\n' +
+    '    var ols = Storage.prototype.setItem;\n' +
+    '    Storage.prototype.setItem = function (k, v) {\n' +
+    '      ols.call(this, k, v);\n' +
+    "      if (k === 'currentDockState') { try { post({ __cptDt: 'dock', side: JSON.parse(v) }); } catch (e) {} }\n" +
+    '    };\n' +
+    '  } catch (e) {}\n' +
+    '  try { window.open = function () { return null; }; } catch (e) {}\n' +
+    '  function sweep(root) {\n' +
+    "    var els = root.querySelectorAll('*');\n" +
+    '    for (var i = 0; i < els.length; i++) {\n' +
+    '      var el = els[i];\n' +
+    "      var a = (el.getAttribute && el.getAttribute('aria-label')) || '';\n" +
+    "      if (a && (a === 'Toggle screencast' || /undock|도킹 해제/i.test(a))) el.style.display = 'none';\n" +
+    '      if (el.shadowRoot) sweep(el.shadowRoot);\n' +
+    '    }\n' +
+    '  }\n' +
+    '  setInterval(function () { try { sweep(document); } catch (e) {} }, 1200);\n' +
+    "  document.addEventListener('click', function () { setTimeout(function () { try { sweep(document); } catch (e) {} }, 60); }, true);\n" +
+    '  function FakeWS(url) {\n' +
+    '    var self = this;\n' +
+    "    this.url = String(url || '');\n" +
+    '    this.readyState = 0;\n' +
+    '    this._ls = { open: [], message: [], close: [], error: [] };\n' +
+    '    window.__cptWs = this;\n' +
+    '    setTimeout(function () {\n' +
+    '      self.readyState = 1;\n' +
+    "      var ev = { type: 'open', target: self };\n" +
+    '      if (self.onopen) self.onopen(ev);\n' +
+    '      self._ls.open.slice().forEach(function (f) { try { f(ev); } catch (e) {} });\n' +
+    "      post({ __cptDt: 'open' });\n" +
+    '    }, 30);\n' +
+    '  }\n' +
+    "  FakeWS.prototype.send = function (d) { post({ __cptDt: 'cdp', data: String(d) }); };\n" +
+    '  FakeWS.prototype.close = function () { this.readyState = 3; };\n' +
+    '  FakeWS.prototype.addEventListener = function (t, f) { (this._ls[t] = this._ls[t] || []).push(f); };\n' +
+    '  FakeWS.prototype.removeEventListener = function (t, f) { var a = this._ls[t] || []; var i = a.indexOf(f); if (i >= 0) a.splice(i, 1); };\n' +
+    '  FakeWS.CONNECTING = 0; FakeWS.OPEN = 1; FakeWS.CLOSING = 2; FakeWS.CLOSED = 3;\n' +
+    '  window.WebSocket = FakeWS;\n' +
+    '  window.__cptDeliver = function (d) {\n' +
+    '    var ws = window.__cptWs;\n' +
+    '    if (!ws || ws.readyState !== 1) return;\n' +
+    "    var ev = { type: 'message', data: d, target: ws };\n" +
+    '    if (ws.onmessage) ws.onmessage(ev);\n' +
+    '    (ws._ls.message || []).slice().forEach(function (f) { try { f(ev); } catch (e) {} });\n' +
+    '  };\n' +
+    '})();\n' +
+    '</scr' + 'ipt>';
+
+  // customized built-in elements(is=) 폴리필 — WebKit 필수. chii 자체 로더(UA Safari 조건)는 끈다.
+  var POLYFILL = '<scr' + 'ipt src="' + CDN + 'third_party/polyfill/customElement.js"></scr' + 'ipt>';
+
+  fetch(CDN + 'chii_app.html')
+    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+    .then(function (raw) {
+      var html = raw
+        .replace('<meta charset="utf-8">', '<meta charset="utf-8"><base href="' + CDN + '">' + BRIDGE + POLYFILL)
+        .replace('const isSafari = ', 'const isSafari = false && ');
+      document.open();
+      document.write(html);
+      document.close();
+    })
+    .catch(function (e) { post({ __cptDt: 'log', msg: 'chii fetch 실패: ' + e.message }); });
+})();
+</script>
