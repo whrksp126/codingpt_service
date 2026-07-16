@@ -350,7 +350,9 @@ async function uiTicket(req, res) {
     // 프록시(nginx/Cloudflare) 뒤에서도 올바른 스킴/호스트로 조립.
     const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
-    const wsUrl = `${proto === 'https' ? 'wss' : 'ws'}://${host}/api/daemon/agent/stream?ticket=${encodeURIComponent(ticket)}`;
+    // client=pc 필수 — 이게 없으면 서버가 PC 스트림을 'mobile' 로 태깅해 hasActiveMobileClient 가
+    //  항상 true 가 되고(=PC 켜두면) FCM 푸시가 영구 억제된다. PC 티켓 경로는 데스크톱 전용이므로 pc 고정.
+    const wsUrl = `${proto === 'https' ? 'wss' : 'ws'}://${host}/api/daemon/agent/stream?ticket=${encodeURIComponent(ticket)}&client=pc`;
     return successResponse(res, { ticket, wsUrl });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
