@@ -55,8 +55,10 @@ rm -rf "$OUT/app/node_modules/@codingpt"
 mkdir -p "$OUT/app/node_modules/@codingpt"
 cp -R "$DAEMON_SRC/packages/daemon"       "$OUT/app/node_modules/@codingpt/daemon"
 cp -R "$DAEMON_SRC/packages/runner-core"  "$OUT/app/node_modules/@codingpt/runner-core"
+# cpt-cli — runner-core/shim.js 가 형제 디렉토리(../cpt-cli/bin/cpt.js)로 해석하므로 반드시 동봉
+cp -R "$DAEMON_SRC/packages/cpt-cli"      "$OUT/app/node_modules/@codingpt/cpt-cli"
 # 각 패키지 내부의 중첩 node_modules(있으면) 제거 — 루트로 통일
-rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" 2>/dev/null || true
+rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" 2>/dev/null || true
 
 # .bin 워크스페이스 심링크 제거 — cloud-runner 등 미번들 대상을 가리키는 깨진 심링크가
 #  Tauri 리소스 수집을 실패시킨다(런타임엔 node index.js 로 직접 실행하므로 불필요).
