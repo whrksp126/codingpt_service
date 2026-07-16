@@ -458,6 +458,7 @@ pub fn run() {
             bridge::fetch_devices,
             bridge::claim_workspace,
             bridge::project_detach,
+            bridge::devtools_window,
             bridge::project_attach,
             bridge::desktop_login_url,
             bridge::fetch_ws_session,

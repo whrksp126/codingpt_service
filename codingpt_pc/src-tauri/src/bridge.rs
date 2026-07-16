@@ -500,3 +500,40 @@ pub fn notify(app: AppHandle, title: String, body: String) {
         .body(body)
         .show();
 }
+
+// ── 크롬 데브툴 별도 창(Undock) — devtools-frame.html?win=1 을 독립 WebviewWindow 로 ──
+//  통신은 Tauri 이벤트(cpt-dt-out / cpt-dt-in-<pv>), 창 파괴 시 cpt-dt-closed 로 메인에 통지.
+#[tauri::command]
+pub fn devtools_window(app: AppHandle, pv: String, open: bool) -> Result<(), String> {
+    use tauri::{Emitter, Manager};
+    // 라벨 안전화(허용: 영숫자/-/_)
+    let safe: String = pv.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect();
+    let label = format!("dt-{safe}");
+    if !open {
+        if let Some(w) = app.get_webview_window(&label) {
+            let _ = w.close();
+        }
+        return Ok(());
+    }
+    if let Some(w) = app.get_webview_window(&label) {
+        let _ = w.set_focus();
+        return Ok(());
+    }
+    let url = format!(
+        "devtools-frame.html?ws=cpt&can_dock=true&win=1&pv={}",
+        urlencoding_min(&pv)
+    );
+    let w = tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(url.into()))
+        .title("개발자 도구")
+        .inner_size(1100.0, 720.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let app2 = app.clone();
+    let pv2 = pv.clone();
+    w.on_window_event(move |e| {
+        if matches!(e, tauri::WindowEvent::Destroyed) {
+            let _ = app2.emit("cpt-dt-closed", pv2.clone());
+        }
+    });
+    Ok(())
+}

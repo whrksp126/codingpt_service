@@ -14,7 +14,14 @@
 
   var BRIDGE = '<scr' + 'ipt>\n' +
     '(function(){\n' +
-    "  function post(m) { try { parent.postMessage(Object.assign({ __cptDt: '' }, m), '*'); } catch (e) {} }\n" +
+    '  // 도킹(iframe) 모드=부모 postMessage / 별도 창(Undock) 모드=Tauri 이벤트(cpt-dt-out, pv 태그).\n' +
+    "  var Q = new URLSearchParams(location.search);\n" +
+    "  var WIN = Q.get('win') === '1', PV = Q.get('pv') || '';\n" +
+    '  function post(m) {\n' +
+    '    var d = Object.assign({ __cptDt: \'\', pv: PV }, m);\n' +
+    '    if (WIN) { try { window.__TAURI__.event.emit(\'cpt-dt-out\', d); } catch (e) {} }\n' +
+    "    else { try { parent.postMessage(d, '*'); } catch (e) {} }\n" +
+    '  }\n' +
     "  window.addEventListener('error', function (e) { post({ __cptDt: 'log', msg: 'err: ' + (e.message || (e.target && (e.target.src || e.target.href)) || '') + ' @' + (e.filename || '') + ':' + (e.lineno || 0) }); }, true);\n" +
     "  window.addEventListener('unhandledrejection', function (e) { var r = e.reason; post({ __cptDt: 'log', msg: 'rej: ' + (r && (r.message || r)) }); });\n" +
     '  var biv = setInterval(function () {\n' +
@@ -24,10 +31,17 @@
     '    clearInterval(biv);\n' +
     '    var ob = h.setInspectedPageBounds.bind(h);\n' +
     "    h.setInspectedPageBounds = function (b) { post({ __cptDt: 'bounds', b: b }); return ob(b); };\n" +
-    "    h.closeWindow = function () { post({ __cptDt: 'dock', side: 'undocked' }); };\n" +
+    "    h.closeWindow = function () { post({ __cptDt: 'close' }); };\n" +
+    "    // Undock/재도킹은 localStorage 가 아니라 호스트 호출(setIsDocked)로 흐른다 — 여기서 통지.\n" +
+    "    var osd = h.setIsDocked ? h.setIsDocked.bind(h) : null;\n" +
+    "    h.setIsDocked = function (docked, cb) { post({ __cptDt: 'docked', docked: !!docked }); if (osd) { try { return osd(docked, cb); } catch (e) {} } if (typeof cb === 'function') { try { cb(); } catch (e) {} } };\n" +
     '  }, 50);\n' +
     '  try { localStorage.setItem(\'uiTheme\', \'"dark"\'); } catch (e) {}\n' +
-    '  try { if (localStorage.getItem(\'currentDockState\') === \'"undocked"\') localStorage.setItem(\'currentDockState\', \'"bottom"\'); } catch (e) {}\n' +
+    '  // 부팅 도킹 상태 — 별도 창(WIN)은 undocked 로, pane 안 iframe 은 undocked 잔존값을 bottom 으로.\n' +
+    '  try {\n' +
+    "    if (WIN) localStorage.setItem('currentDockState', '\\\"undocked\\\"');\n" +
+    '    else if (localStorage.getItem(\'currentDockState\') === \'"undocked"\') localStorage.setItem(\'currentDockState\', \'"bottom"\');\n' +
+    '  } catch (e) {}\n' +
     '  try {\n' +
     '    var ols = Storage.prototype.setItem;\n' +
     '    Storage.prototype.setItem = function (k, v) {\n' +
@@ -41,7 +55,8 @@
     '    for (var i = 0; i < els.length; i++) {\n' +
     '      var el = els[i];\n' +
     "      var a = (el.getAttribute && el.getAttribute('aria-label')) || '';\n" +
-    "      if (a && (a === 'Toggle screencast' || /undock|도킹 해제/i.test(a))) el.style.display = 'none';\n" +
+    "      // PC 는 별도 창(Undock)이 실제로 구현돼 있어 undock 옵션을 숨기지 않는다(모바일과 차이).\n" +
+    "      if (a === 'Toggle screencast') el.style.display = 'none';\n" +
     "      if (el.tagName === 'BUTTON' && String(el.className || '').indexOf('toolbar-button') >= 0) acc.tb.push(el);\n" +
     '      if (el.shadowRoot) sweep(el.shadowRoot, acc);\n' +
     '    }\n' +
@@ -97,6 +112,8 @@
     '    if (ws.onmessage) ws.onmessage(ev);\n' +
     '    (ws._ls.message || []).slice().forEach(function (f) { try { f(ev); } catch (e) {} });\n' +
     '  };\n' +
+    "  // 별도 창 모드 — 메인 창이 보내는 CDP 다운스트림(cpt-dt-in-<pv>) 수신.\n" +
+    "  if (WIN) { try { window.__TAURI__.event.listen('cpt-dt-in-' + PV, function (e) { try { window.__cptDeliver(e.payload); } catch (err) {} }); } catch (e) {} }\n" +
     '})();\n' +
     '</scr' + 'ipt>';
 

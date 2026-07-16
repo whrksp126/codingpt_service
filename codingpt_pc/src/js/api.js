@@ -86,6 +86,8 @@ export const api = {
   previewInfo: (paneId) => invoke("preview_info", { paneId }),
   // 프리뷰 페이지 JS 평가(결과 회수) — 호출측이 JSON.stringify 문자열 반환을 보장할 것.
   previewEval: (paneId, js) => invoke("preview_eval", { pane: paneId, js }),
+  // 크롬 데브툴 별도 창(Undock) 열기/닫기 — devtools.js 전용.
+  devtoolsWindow: (pv, open) => invoke("devtools_window", { pv, open }),
   // 프리뷰 보이는 영역 스크린샷 — JPEG base64 문자열.
   previewScreenshot: (paneId) => invoke("preview_screenshot", { pane: paneId }),
   onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
