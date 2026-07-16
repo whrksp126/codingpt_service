@@ -689,15 +689,34 @@ export class PaneView {
         const ws = new WebSocket(`${wsBase}/api/daemon/terminal/${token}`);
         ws.binaryType = "arraybuffer";
         this.ws = ws;
-        ws.onopen = () => this._resize(this.term.cols, this.term.rows);
+        ws.onopen = () => { this._remoteTries = 0; this._resize(this.term.cols, this.term.rows); };
         ws.onmessage = (e) => {
           this._termOut(typeof e.data === "string" ? e.data : new Uint8Array(e.data));
         };
-        ws.onclose = () => this.term.write("\r\n\x1b[90m[연결 종료]\x1b[0m\r\n");
+        // 끊기면 자동 재연결 — 반드시 새 토큰 발급(만료 dterm 토큰 재시도 = 서버 502 스팸의 근원).
+        ws.onclose = () => {
+          if (this._reopenStop || !this.mounted) return;
+          this.term.write("\r\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\r\n");
+          this._scheduleRemoteReopen();
+        };
       } catch (e) {
-        this.term.write("\r\n\x1b[31m클라우드 터미널 실패: " + e + "\x1b[0m\r\n");
+        this.term.write("\r\n\x1b[31m원격 터미널 실패: " + e + "\x1b[0m\r\n");
+        this._scheduleRemoteReopen();
       }
     }
+  }
+
+  // 원격(릴레이) 터미널 재연결 — 지수 백오프, _openChannel 이 새 토큰을 발급한다.
+  _scheduleRemoteReopen() {
+    if (this._reopenStop || !this.mounted) return;
+    clearTimeout(this._remoteReopenTimer);
+    this._remoteTries = (this._remoteTries || 0) + 1;
+    const delay = Math.min(2000 * this._remoteTries, 15000);
+    this._remoteReopenTimer = setTimeout(() => {
+      if (this._reopenStop || !this.mounted) return;
+      try { this.ws?.close(); } catch (_) { /* noop */ }
+      this._openChannel();
+    }, delay);
   }
   _write(d) {
     if (this.ctx.isLocal) api.ptyWrite(this.id, d).catch(() => {});
@@ -994,6 +1013,7 @@ export class PaneView {
     registry.delete(this.id);
     this._reopenStop = true;
     clearTimeout(this._reopenTimer);
+    clearTimeout(this._remoteReopenTimer);
     for (const [, m] of this._mixed) {
       try { m.ide?.dispose(); m.preview?.dispose(); } catch (_) {}
     }
