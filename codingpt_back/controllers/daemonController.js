@@ -346,6 +346,19 @@ async function daemonProjectAttach(req, res) {
   }
 }
 
+// POST /api/daemon/workspaces/:wsId/git  (deviceToken) — 호스트 데몬의 신선도(브랜치·미커밋·미푸시) 보고.
+//  변화 없으면 서비스가 쓰기를 생략한다. 사이드바 배지의 데이터 원천.
+async function daemonReportGit(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const meta = await workspaceService.updateGitStatus(device.user_id, req.params.wsId, req.body || {});
+    return successResponse(res, { id: meta.id, git: meta.git || null });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
 // POST /api/daemon/terminal/start  (deviceToken 인증) → { token } — 클라우드 워크스페이스 pane 용.
 //  로컬 워크스페이스는 로컬 tmux 직결이라 이 경로를 안 탄다.
 async function daemonTerminalStart(req, res) {
@@ -1028,7 +1041,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
-  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach,
+  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,

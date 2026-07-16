@@ -172,4 +172,6 @@ window.addEventListener("keydown", (e) => {
     if (JSON.stringify(state.daemon) !== prev) S.emit();
   }, 4000);
   setInterval(() => refreshWsMeta(), 15000);
+  // 신선도(미커밋/미푸시)·타 호스트 브랜치는 서버 메타에 실림 — 목록을 주기 재로드해 배지 갱신.
+  setInterval(() => { S.loadWorkspaces().catch(() => {}); }, 60000);
 })();

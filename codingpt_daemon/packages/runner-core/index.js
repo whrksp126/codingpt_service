@@ -14,6 +14,7 @@ module.exports = {
   agent: require('./agent'),
   sync: require('./sync'),
   proxy: require('./proxy'),
+  freshness: require('./freshness'),
   workspace: require('./workspace'),
   cptServer: require('./cpt-server'), // cpt CLI 컨트롤 소켓(터미널 안 AI 의 서비스 조작 진입점)
 };

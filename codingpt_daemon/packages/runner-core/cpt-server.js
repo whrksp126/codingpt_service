@@ -466,4 +466,4 @@ function start() {
   return server;
 }
 
-module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting };
+module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting, backFetch };

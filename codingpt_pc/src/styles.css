@@ -623,3 +623,10 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .qg-btn:hover { background: var(--hover); }
 .qg-quit { border-color: #7f1d1d; background: #3b1113; color: #fca5a5; }
 .qg-quit:hover { background: #4c1518; }
+
+/* 신선도 배지(사이드바) — ●=미커밋, ↑N=미푸시 */
+.wsr-fresh {
+  display: inline-flex; align-items: center; gap: 1px;
+  margin-left: 6px; font-size: 10px; color: #eab308; flex: none;
+}
+.wsr-fresh svg { stroke: #eab308; }

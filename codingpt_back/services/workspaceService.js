@@ -70,6 +70,20 @@ function assertWorkspaceId(id) {
   }
 }
 
+// 신선도(호스트 데몬 보고) 정제 — { branch, dirty, ahead, behind, upstream, at }
+function sanitizeGit(g) {
+  if (!g || typeof g !== 'object') return null;
+  const int = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
+  return {
+    branch: typeof g.branch === 'string' ? g.branch.slice(0, 100) : '',
+    dirty: !!g.dirty, // 미커밋 변경 존재
+    ahead: int(g.ahead), // 미푸시 커밋 수(업스트림 기준)
+    behind: int(g.behind),
+    upstream: !!g.upstream, // 업스트림 없으면 ahead/behind 무의미
+    at: typeof g.at === 'string' ? g.at : new Date().toISOString(),
+  };
+}
+
 // 메타 정규화 — 누락 필드 기본값 채움(과거/손상 데이터 방어)
 function normalizeMeta(raw, id) {
   const m = raw && typeof raw === 'object' ? raw : {};
@@ -91,6 +105,8 @@ function normalizeMeta(raw, id) {
     ...(typeof m.projectId === 'string' && WORKSPACE_ID_RE.test(m.projectId) ? { projectId: m.projectId } : {}),
     // git remote 정규화 키 — 자동 연결의 보조 신호(이름이 달라도 같은 저장소면 같은 프로젝트).
     ...(typeof m.remoteUrl === 'string' && m.remoteUrl ? { remoteUrl: m.remoteUrl } : {}),
+    // 신선도 캐시(호스트 데몬이 주기 보고) — 사이드바 미커밋/미푸시 배지용.
+    ...(m.git && typeof m.git === 'object' ? { git: sanitizeGit(m.git) } : {}),
     unread: Number.isInteger(m.unread) ? m.unread : 0,
     createdAt: m.createdAt || null,
     updatedAt: m.updatedAt || m.createdAt || null,
@@ -397,11 +413,29 @@ async function deleteWorkspace(userId, id) {
   return { id, deleted };
 }
 
+/** 신선도 보고(호스트 데몬) — git 상태가 실제로 달라졌을 때만 objectstore 에 기록 */
+async function updateGitStatus(userId, id, git) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  const current = await readMeta(uid, id);
+  if (!current) {
+    const e = new Error('워크스페이스를 찾을 수 없습니다.');
+    e.statusCode = 404;
+    throw e;
+  }
+  const next = sanitizeGit(git);
+  const cmp = (g) => (g ? JSON.stringify([g.branch, g.dirty, g.ahead, g.behind, g.upstream]) : '');
+  if (cmp(current.git) === cmp(next)) return current; // 변화 없음 — 쓰기 생략(objectstore churn 방지)
+  // updatedAt 은 건드리지 않는다(신선도 보고가 목록 정렬/최근성 신호를 오염시키지 않게).
+  return writeMeta(uid, id, normalizeMeta({ ...current, git: next }, id));
+}
+
 module.exports = {
   listWorkspaces,
   createWorkspace,
   getWorkspace,
   updateWorkspace,
+  updateGitStatus,
   duplicateWorkspace,
   deleteWorkspace,
   getWorkspaceSession,

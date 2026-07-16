@@ -326,10 +326,17 @@ function wsRow(w, group) {
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
   const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
-  const branch = rt?.branch ? `<span class="wsr-branch">${icons.gitBranch({ size: 11 })}${escapeHtml(rt.branch)}</span>` : "";
+  // 브랜치: 이 PC 사본은 로컬 실측(rt), 다른 호스트 사본은 그 호스트 데몬의 신선도 보고(w.git).
+  const brName = rt?.branch || w.git?.branch || "";
+  const branch = brName ? `<span class="wsr-branch">${icons.gitBranch({ size: 11 })}${escapeHtml(brName)}</span>` : "";
+  // 신선도 배지 — ●=커밋 안 된 변경(IDE 미저장 ● 관례), ↑N=푸시 안 된 커밋 수.
+  const g = w.git;
+  const fresh =
+    (g?.dirty ? `<span class="wsr-fresh" title="커밋 안 된 변경 있음">●</span>` : "") +
+    (g?.upstream && g.ahead > 0 ? `<span class="wsr-fresh" title="푸시 안 된 커밋 ${g.ahead}개">${icons.arrowUp({ size: 10 })}${g.ahead}</span>` : "");
   meta.innerHTML = grouped
-    ? branch
-    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>${branch}`;
+    ? branch + fresh
+    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>${branch}${fresh}`;
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
