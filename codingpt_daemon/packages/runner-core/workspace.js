@@ -119,7 +119,9 @@ async function create(params) {
     const nm = (params.name && String(params.name).trim()) || path.basename(abs) || '워크스페이스';
     const parentRel = rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')) : '';
     configLib.save({ ...cfg, lastWorkspaceParent: parentRel });
-    return { path: rel, name: nm, slug: slugify(nm), gitInit: false, designated: true };
+    // git remote(origin) — 프로젝트 자동 연결(다른 PC의 같은 저장소 사본 묶기)의 보조 신호.
+    const remoteUrl = await readRemote(abs);
+    return { path: rel, name: nm, slug: slugify(nm), gitInit: false, designated: true, remoteUrl };
   }
   // (레거시) 부모+이름으로 하위폴더 스캐폴드.
   const name = (params && params.name) || '';
@@ -187,7 +189,19 @@ async function clone(params) {
   // 다음 생성/클론 시 기본값으로 쓰도록 마지막 선택 부모를 기억.
   configLib.save({ ...cfg, lastWorkspaceParent: fsLib.relOf(rootAbs) });
 
-  return { path: fsLib.relOf(dirAbs), name: (params && params.name) || repo, slug, owner, repo };
+  return { path: fsLib.relOf(dirAbs), name: (params && params.name) || repo, slug, owner, repo, remoteUrl: url };
+}
+
+// 폴더의 git remote(origin) URL — 없으면 ''. 프로젝트 자동 연결/신선도 비교용(빠른 로컬 조회).
+async function readRemote(dirAbs) {
+  const r = await runGit(['remote', 'get-url', 'origin'], dirAbs, 3000);
+  return r.ok ? String(r.out || '').trim() : '';
+}
+
+// ws.remote — 지정 경로의 remote 조회 RPC(기존 워크스페이스 백필/갱신용).
+async function remote(params) {
+  const abs = fsLib.safeResolve((params && params.path) || '');
+  return { remoteUrl: await readRemote(abs) };
 }
 
 // 전체 디스크 접근 토글 저장(설정에서 켜고 끔). 실제 무프롬프트 접근은 사용자가 데몬에 macOS
@@ -207,8 +221,9 @@ async function handle(method, params) {
     case 'ws.setFullDisk': return setFullDisk(params);
     case 'ws.create': return create(params);
     case 'ws.clone': return clone(params);
+    case 'ws.remote': return remote(params);
     default: throw new Error('알 수 없는 메서드: ' + method);
   }
 }
 
-module.exports = { handle, getRoot, setRoot, useDefaultRoot, setFullDisk, create, clone, slugify, DEFAULT_ROOT_REL };
+module.exports = { handle, getRoot, setRoot, useDefaultRoot, setFullDisk, create, clone, remote, slugify, DEFAULT_ROOT_REL };

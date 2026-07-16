@@ -6,6 +6,8 @@
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { IdeView } from "./ide.js";
+import { termFontPx, onScaleChange } from "./display-scale.js";
+import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -15,6 +17,19 @@ const registry = new Map();
 export function getPane(paneId) {
   return registry.get(paneId) || null;
 }
+// 표시 배율 변경 → 열려있는 모든 pane 즉시 반영.
+//  터미널: fontSize 교체 + fit 재실행(cols/rows 재계산 → _fitNow 가 기존 경로로 리사이즈 전송).
+//  IDE: CSS 변수(--cpt-ide-font)는 display-scale.js 가 이미 바꿈 → CodeMirror refresh 만 필요.
+onScaleChange(() => {
+  const px = termFontPx();
+  for (const [, p] of registry) {
+    try {
+      if (p.term) { p.term.options.fontSize = px; p._fitNow(); }
+      p.ide?.refresh();
+      p._mixed?.forEach((m) => m.ide?.refresh());
+    } catch (_) {}
+  }
+});
 export function dispatchData(paneId, b64) {
   registry.get(paneId)?._onData(b64);
 }
@@ -63,7 +78,7 @@ export function smartUrl(raw) {
   return "https://www.google.com/search?q=" + encodeURIComponent(u);
 }
 
-function makePreviewBar({ getId, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
+function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
   const bar = document.createElement("div");
   bar.className = "preview-bar";
   const mk = (iconFn, title) => {
@@ -99,8 +114,14 @@ function makePreviewBar({ getId, initialUrl, initialDark, onNavigate, onMeta, on
     api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
     onDarkChange?.(st.dark);
   });
-  tools.addEventListener("click", () => {
+  tools.title = "개발자 도구 (⌥클릭=네이티브 인스펙터)";
+  tools.addEventListener("click", (e) => {
     if (!st.url) return;
+    // 기본 = 모바일과 동일한 Chrome DevTools(chii). ⌥클릭 = 기존 네이티브 WebKit 인스펙터(고급).
+    if (!e.altKey && getHost) {
+      toggleChiiDevtools(getId(), getHost()).then((on) => tools.classList.toggle("active", !!on)).catch(() => {});
+      return;
+    }
     api.previewControl(getId(), "devtools").catch(() => {});
     // 좁은 pane(사이드 도킹 최소폭 = 인스펙터 500 + 페이지 320 미달)은 폭 조절이 잠기므로
     //  인스펙터 로드를 기다렸다 하단 도킹으로 자동 전환(이미 하단/미로드면 no-op).
@@ -149,6 +170,7 @@ function makePreviewBar({ getId, initialUrl, initialDark, onNavigate, onMeta, on
         if (document.activeElement !== input) input.value = u;
       }
       if (st.dark) api.previewControl(getId(), "theme_on").catch(() => {}); // 내비게이션마다 재주입
+      dtOnPageLoaded(getId()); // 크롬 데브툴 열려 있으면 chobitsu 재주입 + enable 리플레이
       setTimeout(refreshInfo, 250);
     },
     refreshInfo,
@@ -167,6 +189,7 @@ class PreviewSurface {
     this.url = tab.url || "";
     this.bar = makePreviewBar({
       getId: () => this.id,
+      getHost: () => this.host,
       initialUrl: this.url,
       onNavigate: (u) => {
         this.tab.url = u;
@@ -199,7 +222,8 @@ class PreviewSurface {
         // 인스펙터 attach 등 네이티브 쪽이 webview 프레임을 바꿔도(DOM rect 는 그대로라 key 불변)
         //  주기적으로 강제 재적용해 pane 영역에 다시 고정한다 → 인스펙터도 pane 안에 갇힌다.
         if (++this._forceTick >= 45) { this._forceTick = 0; this._key = ""; }
-        const r = h.getBoundingClientRect();
+        // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
+        const r = (dtPageSlot(this.id) || h).getBoundingClientRect();
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = this._visible && r.width > 2 && r.height > 2 && !modalOpen && !dragging;
@@ -223,6 +247,7 @@ class PreviewSurface {
     cancelAnimationFrame(this._raf);
     clearInterval(this._infoTimer);
     this.bar.dispose();
+    dtDispose(this.id, keepWebview);
     if (!keepWebview) api.previewClose(this.id).catch(() => {});
   }
 }
@@ -376,7 +401,7 @@ export class PaneView {
     this.body.appendChild(this.termEl);
     this.term = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
+      fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
       fontFamily: 'Menlo, Monaco, "SF Mono", Consolas, monospace',
       scrollback: 10000,
       convertEol: false,
@@ -443,6 +468,7 @@ export class PaneView {
     this._pvId = "pv-" + (this.node.tid || this.id);
     this.previewBar = makePreviewBar({
       getId: () => this._pvId,
+      getHost: () => this.previewHost,
       initialUrl: this.node.url || "",
       initialDark: !!this.node.dark,
       onDarkChange: (v) => { this.node.dark = v; this.ctx.persist?.(); },
@@ -859,7 +885,8 @@ export class PaneView {
       if (host && document.body.contains(host)) {
         // 인스펙터 attach 등 네이티브 프레임 변경 복구용 주기 강제 재적용(위 PreviewSurface 와 동일).
         if (++this._previewForceTick >= 45) { this._previewForceTick = 0; this._previewKey = ""; }
-        const r = host.getBoundingClientRect();
+        // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
+        const r = (dtPageSlot(this._pvId) || host).getBoundingClientRect();
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = r.width > 2 && r.height > 2 && !modalOpen && !dragging;
@@ -972,6 +999,7 @@ export class PaneView {
       if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
       this.previewBar?.dispose();
       // 탭 편입(joinPaneAsTab) 등 표면 승계 경로에선 webview 를 닫지 않는다.
+      dtDispose(this._pvId, this._preservePreview);
       if (!this._preservePreview) api.previewClose(this._pvId).catch(() => {});
     }
     if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});

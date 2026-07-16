@@ -22,6 +22,8 @@ router.post('/workspaces/:wsId/claim', daemonController.daemonClaimWorkspaceHost
 router.get('/workspaces/:wsId/session', daemonController.daemonGetSession); // 세션 이어받기(deviceToken)
 router.put('/workspaces/:wsId/session', daemonController.daemonPutSession);
 router.post('/workspaces', daemonController.daemonCreateWorkspace);
+router.post('/workspaces/:wsId/project/detach', daemonController.daemonProjectDetach); // 프로젝트 그룹 분리(deviceToken)
+router.post('/workspaces/:wsId/project/attach', daemonController.daemonProjectAttach); // 프로젝트 그룹 합치기(deviceToken)
 router.post('/terminal/device-start', daemonController.daemonTerminalStart);
 router.post('/devices/:deviceId/revoke', daemonController.revokeDevice); // JWT|deviceToken(핸들러 resolveAccount)
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)

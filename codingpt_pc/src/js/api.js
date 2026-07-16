@@ -25,6 +25,8 @@ export const api = {
   revokeDevice: (deviceId) => invoke("revoke_device", { deviceId }),
   // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필).
   claimWorkspace: (wsId) => invoke("claim_workspace", { wsId }),
+  projectDetach: (wsId) => invoke("project_detach", { wsId }),
+  projectAttach: (wsId, targetWsId) => invoke("project_attach", { wsId, targetWsId }),
   // 홈-상대 경로가 이 기기에 실재하는 디렉토리인지.
   pathExists: (rel) => invoke("path_exists", { rel }),
   // 웹 로그인 URL(프론트 /desktop-login?code=) — Rust 가 서버에서 프론트 주소 파생.

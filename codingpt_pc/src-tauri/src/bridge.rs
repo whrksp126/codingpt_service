@@ -392,12 +392,55 @@ pub fn create_workspace(abs_path: String) -> Result<serde_json::Value, String> {
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| local_path.clone());
+    // git remote(origin) — 프로젝트 자동 연결(다른 PC의 같은 저장소 사본 묶기) 보조 신호. 실패=빈 값.
+    let remote_url = std::process::Command::new("git")
+        .args(["-C", &abs.to_string_lossy(), "remote", "get-url", "origin"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
     let url = format!("{}/api/daemon/workspaces", server_url().trim_end_matches('/'));
     let resp = ureq::post(&url)
         .set("Authorization", &format!("Bearer {token}"))
         .timeout(std::time::Duration::from_secs(10))
-        .send_json(ureq::json!({ "name": name, "compute": "local", "localPath": local_path }))
+        .send_json(ureq::json!({ "name": name, "compute": "local", "localPath": local_path, "remoteUrl": remote_url }))
         .map_err(|e| format!("워크스페이스 생성 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+// 프로젝트 그룹 수동 교정 — 분리(단독 프로젝트로) / 합치기(대상 워크스페이스의 프로젝트로).
+#[tauri::command]
+pub fn project_detach(ws_id: String) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!(
+        "{}/api/daemon/workspaces/{}/project/detach",
+        server_url().trim_end_matches('/'),
+        ws_id
+    );
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .call()
+        .map_err(|e| format!("프로젝트 분리 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+#[tauri::command]
+pub fn project_attach(ws_id: String, target_ws_id: String) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!(
+        "{}/api/daemon/workspaces/{}/project/attach",
+        server_url().trim_end_matches('/'),
+        ws_id
+    );
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(ureq::json!({ "targetWorkspaceId": target_ws_id }))
+        .map_err(|e| format!("프로젝트 합치기 실패: {e}"))?;
     resp.into_json::<serde_json::Value>()
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }

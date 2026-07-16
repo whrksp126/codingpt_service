@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { getScale, setScale, SCALE_PRESETS } from "./display-scale.js";
 
 let root = null;
 let navEl = null;
@@ -130,7 +131,15 @@ function renderSection(force) {
       <div class="sm-card2">
         <label class="switch"><input id="autostartChk" type="checkbox" /><span>이 Mac 로그인 시 자동 실행</span></label>
         <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
+        <div class="sett-row"><span>터미널·에디터 배율</span><span class="scale-seg" id="scaleSeg">${SCALE_PRESETS.map((p) =>
+          `<button class="scale-opt${p === getScale() ? " active" : ""}" data-scale="${p}">${p === 1 ? "1×" : p + "×"}</button>`).join("")}</span></div>
+        <div class="sett-hint">이 기기에서 터미널과 코드 에디터의 글자 크기에만 적용돼요. 작게 하면 더 넓게 보여요.</div>
       </div>`;
+    contentEl.querySelectorAll("#scaleSeg .scale-opt").forEach((b) =>
+      b.addEventListener("click", () => {
+        setScale(parseFloat(b.dataset.scale)); // 열린 터미널/에디터 즉시 반영(pane.js 구독)
+        contentEl.querySelectorAll("#scaleSeg .scale-opt").forEach((x) => x.classList.toggle("active", x === b));
+      }));
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {

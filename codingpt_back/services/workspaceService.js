@@ -33,6 +33,25 @@ function genId() {
   return `p-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
 }
 
+// 프로젝트(그룹) id — 같은 프로젝트의 PC별 사본(워크스페이스)들을 묶는 명시적 멤버십 키.
+function genProjectId() {
+  return `prj-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+// git remote URL 정규화 — ssh/https/포트/`.git` 차이를 흡수해 같은 저장소면 같은 키.
+//  예: git@github.com:a/b.git == https://github.com/a/b → "github.com/a/b"
+function normalizeRemote(url) {
+  let s = String(url || '').trim();
+  if (!s) return '';
+  s = s.replace(/\.git$/i, '');
+  let m = s.match(/^[a-z][\w+.-]*:\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+)$/i); // scheme://[user@]host[:port]/path
+  if (!m) m = s.match(/^(?:[^@/]+@)?([^/:]+):(.+)$/);                          // scp 형식 user@host:path
+  if (!m) return '';
+  const path = m[2].replace(/^\/+|\/+$/g, '');
+  if (!path) return '';
+  return `${m[1].toLowerCase()}/${path}`;
+}
+
 function requireUid(userId) {
   const uid = safeUid(userId);
   if (!uid) {
@@ -67,6 +86,11 @@ function normalizeMeta(raw, id) {
     ...(m.compute === 'local' && typeof m.localPath === 'string' && m.localPath ? { localPath: m.localPath } : {}),
     // 멀티기기: 이 로컬 워크스페이스가 사는 호스트 기기(DaemonDevice.id). 목록은 전역, 열 때 이 호스트로 라우팅.
     ...(m.compute === 'local' && m.hostDeviceId != null ? { hostDeviceId: m.hostDeviceId } : {}),
+    // 프로젝트 그룹핑: 같은 프로젝트(다른 PC의 사본)를 묶는 명시적 멤버십. 생성 시 1회 자동 판단
+    //  (이름/remote 일치)해 저장하고, 이후엔 이 값만 본다. 없으면(과거 데이터) 단독 — 그룹키=자기 id.
+    ...(typeof m.projectId === 'string' && WORKSPACE_ID_RE.test(m.projectId) ? { projectId: m.projectId } : {}),
+    // git remote 정규화 키 — 자동 연결의 보조 신호(이름이 달라도 같은 저장소면 같은 프로젝트).
+    ...(typeof m.remoteUrl === 'string' && m.remoteUrl ? { remoteUrl: m.remoteUrl } : {}),
     unread: Number.isInteger(m.unread) ? m.unread : 0,
     createdAt: m.createdAt || null,
     updatedAt: m.updatedAt || m.createdAt || null,
@@ -204,14 +228,93 @@ async function createWorkspace(userId, input = {}) {
       compute: input.compute,
       localPath: input.localPath,
       hostDeviceId: input.hostDeviceId, // 멀티기기: 생성한 호스트 기기(로컬만)
+      remoteUrl: normalizeRemote(input.remoteUrl),
       unread: 0,
       createdAt: now,
       updatedAt: now,
     },
     id,
   );
+  // 프로젝트 자동 연결 — 등록 시점 1회 판단(remote 일치 우선, 폴더/워크스페이스 이름 일치 보조).
+  //  결과는 projectId 로 저장돼 이후엔 재계산하지 않는다(이름/remote 가 바뀌어도 그룹 유지).
+  meta.projectId = await resolveProjectId(uid, meta);
   await writeMeta(uid, id, meta);
   return meta;
+}
+
+// 새 워크스페이스가 속할 프로젝트 결정. 기존 사본과 매칭되면 그 프로젝트에 합류(매칭 사본에
+//  projectId 가 없으면 백필), 아니면 새 프로젝트(단독). chat 은 그룹 대상 아님.
+async function resolveProjectId(uid, meta) {
+  if (meta.kind !== 'project') return undefined;
+  let metas = [];
+  try { metas = await listWorkspaces(uid); } catch (_) { return genProjectId(); }
+  const others = metas.filter((w) => w.id !== meta.id && w.kind === 'project');
+  const normName = meta.name.trim().toLowerCase();
+  const match =
+    (meta.remoteUrl && others.find((w) => w.remoteUrl && w.remoteUrl === meta.remoteUrl)) ||
+    others.find((w) => (w.name || '').trim().toLowerCase() === normName) ||
+    null;
+  if (!match) return genProjectId();
+  if (match.projectId) return match.projectId;
+  const pid = genProjectId();
+  try {
+    await writeMeta(uid, match.id, normalizeMeta({ ...match, projectId: pid }, match.id));
+  } catch (_) { /* 백필 실패해도 신규 생성은 계속 */ }
+  return pid;
+}
+
+// 프로젝트에서 분리 — 새 단독 프로젝트로. (자동 연결이 틀렸을 때의 수동 교정, 결과 영구 저장)
+async function detachProject(userId, id) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  const meta = await readMeta(uid, id);
+  if (!meta) {
+    const e = new Error('워크스페이스를 찾을 수 없습니다.');
+    e.statusCode = 404;
+    throw e;
+  }
+  return writeMeta(uid, id, normalizeMeta({ ...meta, projectId: genProjectId(), updatedAt: new Date().toISOString() }, id));
+}
+
+// 다른 워크스페이스의 프로젝트에 합치기 — 대상에 projectId 가 없으면 만들어 양쪽에 저장.
+async function attachProject(userId, id, targetId) {
+  const uid = requireUid(userId);
+  assertWorkspaceId(id);
+  assertWorkspaceId(targetId);
+  const [meta, target] = await Promise.all([readMeta(uid, id), readMeta(uid, targetId)]);
+  if (!meta || !target) {
+    const e = new Error('워크스페이스를 찾을 수 없습니다.');
+    e.statusCode = 404;
+    throw e;
+  }
+  let pid = target.projectId;
+  if (!pid) {
+    pid = genProjectId();
+    await writeMeta(uid, targetId, normalizeMeta({ ...target, projectId: pid }, targetId));
+  }
+  return writeMeta(uid, id, normalizeMeta({ ...meta, projectId: pid, updatedAt: new Date().toISOString() }, id));
+}
+
+// 목록 인리치(모바일·PC 공용) — 로컬 워크스페이스에 호스트 기기 이름/온라인 상태를 붙인다.
+//  models/relay 는 lazy require(이 서비스는 원래 objectstore 전용이라 상단 의존 최소 유지).
+async function enrichHosts(userId, metas) {
+  const { DaemonDevice } = require('../models');
+  const daemonRelayService = require('./daemonRelayService');
+  const rows = await DaemonDevice.findAll({
+    where: { user_id: userId, revoked_at: null },
+    attributes: ['id', 'device_name'],
+  });
+  const nameById = new Map(rows.map((d) => [d.id, d.device_name]));
+  const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
+  return metas.map((w) => {
+    if (w.compute === 'cloud') return { ...w, hostName: '클라우드', hostOnline: true };
+    const hid = w.hostDeviceId;
+    return {
+      ...w,
+      hostName: (hid != null && nameById.get(hid)) || null,
+      hostOnline: hid != null ? online.has(hid) : false,
+    };
+  });
 }
 
 /** 단일 워크스페이스 메타 조회 */
@@ -272,7 +375,8 @@ async function duplicateWorkspace(userId, id) {
     throw e;
   }
   const now = new Date().toISOString();
-  const meta = normalizeMeta({ ...src, id: newId, name: `${src.name} (복제)`, createdAt: now, updatedAt: now }, newId);
+  // 복제본은 별개 작업의 시작 — 원본 프로젝트 그룹에 넣지 않고 단독 프로젝트로.
+  const meta = normalizeMeta({ ...src, id: newId, name: `${src.name} (복제)`, projectId: genProjectId(), createdAt: now, updatedAt: now }, newId);
   await writeMeta(uid, newId, meta);
   return meta;
 }
@@ -303,6 +407,10 @@ module.exports = {
   getWorkspaceSession,
   saveWorkspaceSession,
   setWorkspaceHost,
+  detachProject,
+  attachProject,
+  enrichHosts,
+  normalizeRemote,
   // 경로 헬퍼(세션/워크스페이스 연동용)
   workspaceDir,
   safeUid,

@@ -128,7 +128,29 @@ export function updateSidebar() {
   } else if (!state.workspaces.length) {
     list.appendChild(note("+ 로 워크스페이스를 추가하세요"));
   }
-  for (const w of S.sortedWorkspaces()) list.appendChild(wsRow(w));
+  // 프로젝트 그룹 — projectId 가 같은 워크스페이스(다른 PC의 사본)를 인접 묶음으로.
+  //  정렬 순서 유지(그룹 위치=첫 멤버), 단독 그룹은 기존 행 그대로. 항상 전부 펼침.
+  const groups = [];
+  {
+    const byKey = new Map();
+    for (const w of S.sortedWorkspaces()) {
+      const key = w.projectId || w.id;
+      let g = byKey.get(key);
+      if (!g) { g = { key, members: [] }; byKey.set(key, g); groups.push(g); }
+      g.members.push(w);
+    }
+  }
+  for (const g of groups) {
+    if (g.members.length === 1) { list.appendChild(wsRow(g.members[0])); continue; }
+    const head = document.createElement("div");
+    head.className = "ws-proj-head";
+    head.innerHTML = `${icons.folder({ size: 13 })}<span class="wsp-nm">${escapeHtml(S.wsDisplayName(g.members[0]))}</span>`;
+    list.appendChild(head);
+    const wrap = document.createElement("div");
+    wrap.className = "ws-proj-members";
+    for (const m of g.members) wrap.appendChild(wsRow(m, g));
+    list.appendChild(wrap);
+  }
   el.appendChild(list);
 
   // 하단: 내 정보.
@@ -276,30 +298,38 @@ function note(text) {
   return d;
 }
 
-function wsRow(w) {
+function wsRow(w, group) {
   const rt = S.wsRuntime(w.id);
   const unread = S.unreadForWs(w);
   const local = isLocal(w);
   const color = S.wsColor(w.id);
   const pinned = S.wsPinned(w.id);
+  const grouped = !!group;
+  const online = local ? (w.hostOnline !== false) : true;
+  const hostLabel = local ? (w.hostName || "내 PC") : "클라우드";
   const row = document.createElement("button");
-  row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "");
+  row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "") + (online ? "" : " ws-off");
   row.draggable = true;
   row.dataset.wsId = w.id;
   if (color) row.style.boxShadow = `inset 3px 0 0 ${color}`;
 
   const name = document.createElement("div");
   name.className = "wsr-name";
+  // 그룹 멤버 행은 제목=호스트명(프로젝트 이름은 그룹 헤더에 1회) + 상태점.
   name.innerHTML =
     (pinned ? `<span class="wsr-pin" title="고정됨">${icons.pin({ size: 12 })}</span>` : "") +
-    `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
+    (grouped ? `<span class="wsr-kind">${local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 })}</span>` : "") +
+    `<span class="wsr-nm">${escapeHtml(grouped ? hostLabel : S.wsDisplayName(w))}</span>` +
+    (grouped ? `<span class="wsr-dot ${online ? "on" : "off"}"></span>` : "") +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
 
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
   const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
   const branch = rt?.branch ? `<span class="wsr-branch">${icons.gitBranch({ size: 11 })}${escapeHtml(rt.branch)}</span>` : "";
-  meta.innerHTML = `<span class="wsr-kind">${kindIc}${local ? "내 PC" : "클라우드"}</span>${branch}`;
+  meta.innerHTML = grouped
+    ? branch
+    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>${branch}`;
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -326,7 +356,17 @@ function wsRow(w) {
     p.innerHTML = ports.map((x) => `<span class="port">:${x}</span>`).join("");
     row.appendChild(p);
   }
-  row.addEventListener("click", () => { if (!row.classList.contains("dragging")) S.setActive(w.id); });
+  row.addEventListener("click", (e) => {
+    if (row.classList.contains("dragging")) return;
+    // 호스트가 꺼진 사본인데 같은 프로젝트의 켜진 사본이 있으면 원탭 폴백 제안.
+    if (local && w.hostOnline === false) {
+      const key = w.projectId || w.id;
+      const alt = state.workspaces.find((x) => x.id !== w.id && (x.projectId || x.id) === key
+        && (isLocal(x) ? x.hostOnline !== false : true));
+      if (alt) { showOfflineFallback(e, w, alt); return; }
+    }
+    S.setActive(w.id);
+  });
   row.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   bindWsDrag(row, w);
   return row;
@@ -420,6 +460,17 @@ function showWsMenu(e, w) {
   item(icons.arrowUp({ size: 15 }), "위로 이동", () => S.moveWs(w.id, "up"));
   item(icons.arrowDown({ size: 15 }), "아래로 이동", () => S.moveWs(w.id, "down"));
   item(icons.arrowTop({ size: 15 }), "맨 위로 이동", () => S.moveWs(w.id, "top"));
+  sep();
+  // 프로젝트 그룹 교정 — 자동 연결(이름/remote)이 틀렸을 때 1회 수정(영구 저장).
+  const projKey = w.projectId || w.id;
+  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
+  if (hasSibling) {
+    item(icons.folder({ size: 15 }), "프로젝트에서 분리", async () => {
+      try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {}
+    });
+  } else {
+    item(icons.folder({ size: 15 }), "다른 프로젝트와 합치기", () => showAttachMenu(w));
+  }
 
   document.body.appendChild(menu);
   wsMenuEl = menu;
@@ -435,6 +486,63 @@ function showWsMenu(e, w) {
     document.addEventListener("keydown", onWsMenuKey, true);
     window.addEventListener("blur", closeWsMenu);
   }, 0);
+}
+
+// ctx-menu 스타일 공용 팝업 빌더 — items: [{icon,label,onClick}]. 지정 좌표(뷰포트 보정)에 표시.
+function showPopupMenu(x, y, items) {
+  closeWsMenu();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu";
+  for (const it of items) {
+    const b = document.createElement("button");
+    b.className = "ctx-item";
+    b.innerHTML = `<span class="ctx-ic">${it.icon || ""}</span><span class="ctx-label">${escapeHtml(it.label)}</span>`;
+    b.addEventListener("click", () => { closeWsMenu(); it.onClick(); });
+    menu.appendChild(b);
+  }
+  document.body.appendChild(menu);
+  wsMenuEl = menu;
+  const mw = menu.offsetWidth, mh = menu.offsetHeight;
+  if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
+  if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
+  menu.style.left = Math.max(8, x) + "px";
+  menu.style.top = Math.max(8, y) + "px";
+  setTimeout(() => {
+    document.addEventListener("mousedown", onWsMenuOutside, true);
+    document.addEventListener("keydown", onWsMenuKey, true);
+    window.addEventListener("blur", closeWsMenu);
+  }, 0);
+}
+
+// 꺼진 호스트 사본 클릭 — 같은 프로젝트의 켜진 사본으로 원탭 폴백 제안.
+function showOfflineFallback(e, w, alt) {
+  const altHost = isLocal(alt) ? (alt.hostName || "내 PC") : "클라우드";
+  showPopupMenu(e.clientX, e.clientY, [
+    { icon: isLocal(alt) ? icons.monitor({ size: 15 }) : icons.cloud({ size: 15 }), label: `${altHost}로 열기`, onClick: () => S.setActive(alt.id) },
+    { icon: icons.monitor({ size: 15 }), label: "그냥 열기", onClick: () => S.setActive(w.id) },
+  ]);
+}
+
+// 합칠 대상 프로젝트 선택(자기 그룹 제외, 그룹당 1항목).
+function showAttachMenu(w) {
+  const key = w.projectId || w.id;
+  const seen = new Set();
+  const items = [];
+  for (const x of S.sortedWorkspaces()) {
+    const k = x.projectId || x.id;
+    if (k === key || seen.has(k)) continue;
+    seen.add(k);
+    items.push({
+      icon: icons.folder({ size: 15 }),
+      label: S.wsDisplayName(x),
+      onClick: async () => {
+        try { await api.projectAttach(w.id, x.id); await S.loadWorkspaces(); } catch (_) {}
+      },
+    });
+  }
+  if (!items.length) return;
+  const r = el?.querySelector(`.ws-row[data-ws-id="${w.id}"]`)?.getBoundingClientRect();
+  showPopupMenu(r ? r.right - 40 : 200, r ? r.top + 8 : 200, items);
 }
 
 // 인라인 이름 변경 — 해당 행의 이름을 입력창으로 교체.

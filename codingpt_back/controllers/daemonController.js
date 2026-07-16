@@ -15,6 +15,7 @@ const workspaceService = require('../services/workspaceService');
 const cloudRunnerService = require('../services/cloudRunnerService');
 const usageService = require('../services/usageService');
 const BILLING = require('../config/billing');
+const RUNNER = require('../config/runner'); // CLOUD_RUNNER_ENABLED — 클라우드 러너 제공 잠정 중단 게이트
 const { successResponse, errorResponse } = require('../utils/response');
 
 // 클라우드 실행시간 초 쿼터 프리플라이트(M5 Slice5). ENFORCE 꺼져 있으면 항상 통과(실측 전 안전).
@@ -159,22 +160,8 @@ async function daemonWorkspaces(req, res) {
     if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
     const userId = acct.userId;
     const list = await workspaceService.listWorkspaces(userId);
-    // 멀티기기: 각 워크스페이스에 호스트 이름/온라인 상태를 붙여 전역 목록에서 바로 배지 렌더 가능하게.
-    const rows = await DaemonDevice.findAll({
-      where: { user_id: userId, revoked_at: null },
-      attributes: ['id', 'device_name', 'runner_kind'],
-    });
-    const nameById = new Map(rows.map((d) => [d.id, d.device_name]));
-    const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
-    const enriched = list.map((w) => {
-      if (w.compute === 'cloud') return { ...w, hostName: '클라우드', hostOnline: true };
-      const hid = w.hostDeviceId;
-      return {
-        ...w,
-        hostName: (hid != null && nameById.get(hid)) || null,
-        hostOnline: hid != null ? online.has(hid) : false,
-      };
-    });
+    // 멀티기기: 호스트 이름/온라인 상태 인리치 — JWT 목록(/api/workspaces)과 동일한 공용 헬퍼.
+    const enriched = await workspaceService.enrichHosts(userId, list);
     return successResponse(res, enriched);
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -247,16 +234,19 @@ async function daemonDevices(req, res) {
       });
     }
     // 항상 켜진 클라우드 호스트(우리 제공) — 콜드스타트로 상시 사용 가능한 논리 기기 1개.
-    devices.push({
-      id: 'cloud',
-      name: '클라우드',
-      platform: 'cloud',
-      role: 'host',
-      runnerKind: 'cloud',
-      online: true,
-      virtual: true,
-      isCurrent: false,
-    });
+    //  클라우드 러너 제공 중단(CLOUD_RUNNER_ENABLED=false) 중엔 노출하지 않는다(진입점 숨김).
+    if (RUNNER.CLOUD_ENABLED) {
+      devices.push({
+        id: 'cloud',
+        name: '클라우드',
+        platform: 'cloud',
+        role: 'host',
+        runnerKind: 'cloud',
+        online: true,
+        virtual: true,
+        isCurrent: false,
+      });
+    }
     return successResponse(res, { devices, currentDeviceId: acct.deviceId });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -313,14 +303,43 @@ async function daemonCreateWorkspace(req, res) {
     if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
     const b = req.body || {};
     const isLocal = b.compute === 'local';
+    // 클라우드 러너 잠정 중단 — 새 클라우드 워크스페이스 생성 거부(기존 것의 조회/삭제는 그대로).
+    if (!isLocal && !RUNNER.CLOUD_ENABLED) {
+      return errorResponse(res, new Error('클라우드 워크스페이스 생성이 잠정 중단되어 있어요. 내 PC 폴더에 만들어 주세요.'), 403);
+    }
     const meta = await workspaceService.createWorkspace(device.user_id, {
       name: b.name,
       compute: isLocal ? 'local' : 'cloud',
       localPath: typeof b.localPath === 'string' ? b.localPath : undefined,
       // 멀티기기: 로컬 워크스페이스는 이 요청을 보낸 호스트 기기에 귀속.
       hostDeviceId: isLocal ? device.id : undefined,
+      remoteUrl: typeof b.remoteUrl === 'string' ? b.remoteUrl : undefined, // 프로젝트 자동 연결 보조 신호
       stack: Array.isArray(b.stack) ? b.stack : undefined,
     });
+    return successResponse(res, meta);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// POST /api/daemon/workspaces/:wsId/project/detach|attach  (deviceToken 인증)
+//  PC GUI 의 프로젝트 그룹 수동 교정 — JWT 라우트(workspaceRoutes)와 동일 동작.
+async function daemonProjectDetach(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const meta = await workspaceService.detachProject(device.user_id, req.params.wsId);
+    return successResponse(res, meta);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+async function daemonProjectAttach(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const meta = await workspaceService.attachProject(device.user_id, req.params.wsId, (req.body || {}).targetWorkspaceId);
     return successResponse(res, meta);
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -467,6 +486,8 @@ async function getStatus(req, res) {
     });
     return successResponse(res, {
       online: !!conn,
+      // 클라우드 러너 제공 여부 — off 면 앱이 클라우드 생성/전환 진입점을 숨긴다(config/runner.js).
+      cloudEnabled: RUNNER.CLOUD_ENABLED,
       current: conn ? {
         deviceId: conn.deviceId,
         deviceName: conn.deviceName,
@@ -517,6 +538,10 @@ async function activateRunner(req, res) {
 //  deviceToken 원문은 앱에 반환하지 않는다(컨테이너 env 주입용). 앱은 runnerId 로 연결 대기→activate.
 async function ensureCloudRunner(req, res) {
   try {
+    // 클라우드 러너 제공 잠정 중단(CLOUD_RUNNER_ENABLED=false) — 프로비저닝/깨우기 진입 자체를 차단.
+    if (!RUNNER.CLOUD_ENABLED) {
+      return errorResponse(res, new Error('클라우드 러너 제공이 잠정 중단되어 있어요. 내 PC를 연결해 작업해 주세요.'), 403);
+    }
     const workspaceId = (req.body && req.body.workspaceId) || null;
     if (!workspaceId) return errorResponse(res, new Error('workspaceId 가 필요합니다.'), 400);
     // 프리플라이트: 클라우드 실행시간 초 쿼터 초과면 러너 기동/깨우기 차단(ENFORCE 시).
@@ -1003,7 +1028,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
-  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost,
+  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
