@@ -289,8 +289,9 @@ export function setRatio(branchPath, ratio) {
 //    로컬 OSC(handleOsc)가 별도로 api.notify 를 부르지 않아 이중 발송이 없다(pushNotification/applyNotifEvent).
 //  · 이미 읽은 알림엔 울리지 않고, 400ms 스로틀로 연속 알림 폭주를 막는다.
 let _lastOsNotify = 0;
-export function maybeOsNotify(n) {
-  if (!n || n.read) return;
+// alertForMe = 서버가 이 기기를 present(지금 보고 있는 기기)로 지정했는지 — 아니면 소리/배너 없이 뱃지만.
+export function maybeOsNotify(n, alertForMe = true) {
+  if (!n || n.read || !alertForMe) return;
   let hidden = false;
   try {
     hidden = !document.hasFocus() || document.visibilityState !== "visible";
@@ -344,7 +345,8 @@ export function applyNotifEvent(ev) {
     if (n.id != null && state.notifications.some((x) => x.id === n.id)) return; // WS 에코 dedupe
     state.notifications.unshift(n);
     if (state.notifications.length > 100) state.notifications.length = 100;
-    maybeOsNotify(n); // 창 비포커스/비가시 시 OS 알림(dedupe 통과분만 = 알림당 1회)
+    // 서버가 present 로 지정한 기기(alertClientKey===내 deviceKey)에서만 OS 알림 — 나머진 뱃지만.
+    maybeOsNotify(n, ev.alertClientKey == null ? false : ev.alertClientKey === deviceKey());
     emit();
   } else if (ev.kind === "read" && Array.isArray(ev.ids)) {
     const set = new Set(ev.ids);

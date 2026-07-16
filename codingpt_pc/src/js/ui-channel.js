@@ -41,6 +41,7 @@ async function connect() {
     retryMs = 3000;
     // 이 클라이언트 식별(원격 조작 executor 선정용) — 기기 키 재사용.
     send(ws, { type: "ui_hello", clientKey: S.deviceKey(), kind: "pc" });
+    sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
   };
   ws.onmessage = (e) => {
@@ -101,6 +102,18 @@ function bindActivityReport() {
   };
   window.addEventListener("keydown", report, true);
   window.addEventListener("pointerdown", report, true);
+  // present 신호(알림 라우팅) — 창이 보이면(포커스 아니어도, 예: 사용자가 브라우저 보는 중) present,
+  //  최소화/숨김이면 not-present. 자리비움(=아무 기기도 present 아님)이면 서버가 폰 푸시로 보낸다.
+  window.addEventListener("focus", sendPresence);
+  document.addEventListener("visibilitychange", sendPresence);
+}
+
+// 현재 창 가시성을 present 신호로 전송. visible(포커스 여부 무관)=present.
+function sendPresence() {
+  if (!sock || sock.readyState !== 1) return;
+  let active = true;
+  try { active = document.visibilityState === "visible"; } catch (_) { active = true; }
+  send(sock, { type: "presence", active });
 }
 
 // ── ui_command 디스패처 ──

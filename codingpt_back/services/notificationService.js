@@ -92,13 +92,18 @@ async function createNotification(userId, payload) {
     pruneOld(userId).catch(() => { /* noop */ });
   }
 
-  // 라이브 팬아웃(모든 접속 기기) — 실패해도 생성 자체는 성공으로 둔다.
-  try { relay().fanoutNotifEvent(userId, { kind: 'new', notification }); } catch (_) { /* noop */ }
+  // present 기기 = 지금 사용자가 보고 있는 화면(포그라운드) 하나. 주의 알림(사운드/햅틱/OS배너)은
+  //  그 기기에서만 울리고, 나머지 기기는 뱃지/목록만 조용히 갱신한다(present-device 라우팅).
+  let present = null;
+  try { present = relay().presentClient(userId); } catch (_) { /* noop */ }
+  const alertClientKey = present ? present.clientKey : null;
 
-  // 모바일이 라이브로 보고 있지 않으면 FCM(제목=title, 본문=subtitle 또는 body 앞부분).
-  let mobileActive = false;
-  try { mobileActive = relay().hasActiveMobileClient(userId); } catch (_) { /* noop */ }
-  if (!mobileActive) {
+  // 라이브 팬아웃(모든 접속 기기, 뱃지/목록 동기화) — alertClientKey 로 소리낼 기기만 표시. 실패해도 생성 성공.
+  try { relay().fanoutNotifEvent(userId, { kind: 'new', notification, alertClientKey }); } catch (_) { /* noop */ }
+
+  // present 기기가 없으면(전 기기 백그라운드/종료 = 자리 비움) 폰 FCM 푸시로 대체.
+  //  present 기기가 있으면 그 기기가 인앱으로 알리므로 푸시하지 않는다(이중 알림 방지).
+  if (!present) {
     pushService.sendToUser(userId, {
       kind: kind || 'notification',
       sessionId: notification.sessionId || '',

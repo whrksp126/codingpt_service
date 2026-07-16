@@ -354,6 +354,22 @@ function hasActiveMobileClient(userId) {
   return false;
 }
 
+// 알림을 보낼 "지금 사용자가 보고 있는(present) 기기" 를 고른다 — 알림 present-device 라우팅.
+//  · present = ui_hello 한 접속 클라이언트 중 foreground=true 인 것(가장 최근 포그라운드된 하나).
+//  · 없으면 null → 호출부가 폰 FCM 푸시로 대체.
+//  반환: { clientKey, kind } 또는 null.
+function presentClient(userId) {
+  const set = agentWsClients.get(String(userId));
+  if (!set) return null;
+  let best = null;
+  for (const ws of set) {
+    const m = ws._cptMeta;
+    if (!m || !m.clientKey || !m.foreground) continue;
+    if (!best || (m.foregroundAt || 0) > (best.foregroundAt || 0)) best = m;
+  }
+  return best ? { clientKey: best.clientKey, kind: best.kind } : null;
+}
+
 // 알림 팬아웃 — notif_event(new/read) 를 SSE(폴백) + WSS 양쪽에 즉시 전달(버퍼/리플레이 없음).
 //  프레임 형태 {type:'notif_event', event} — fanoutSyncEvent 미러. notificationService 가 호출.
 function fanoutNotifEvent(userId, event) {
@@ -536,16 +552,29 @@ function registerAgentWs(ws, userId, client) {
     }
     if (msg.type === 'ui_hello') {
       // ui_command 수신 의사 표명(접속 직후 1회) — 메타가 있어야 중계 대상이 된다.
+      //  foreground = 이 기기가 지금 사용자가 보고 있는 화면인지(알림 라우팅용 present 판정).
+      //   접속 직후엔 foreground 로 간주(막 열었으니). 이후 presence 프레임으로 갱신.
       ws._cptMeta = {
         clientKey: typeof msg.clientKey === 'string' ? msg.clientKey.slice(0, 128) : '',
         kind: msg.kind === 'pc' ? 'pc' : 'mobile',
         lastActivityAt: Date.now(),
+        foreground: true,
+        foregroundAt: Date.now(),
       };
       return;
     }
     if (msg.type === 'ui_activity') {
-      // 사용자 입력 활동(클라이언트가 30s 스로틀로 전송) — executor 선정 기준 갱신.
-      if (ws._cptMeta) ws._cptMeta.lastActivityAt = Date.now();
+      // 사용자 입력 활동(클라이언트가 30s 스로틀로 전송) — executor 선정 기준 갱신. 입력=포그라운드.
+      if (ws._cptMeta) { ws._cptMeta.lastActivityAt = Date.now(); ws._cptMeta.foreground = true; ws._cptMeta.foregroundAt = Date.now(); }
+      return;
+    }
+    if (msg.type === 'presence') {
+      // 포그라운드/백그라운드 전환 — 알림을 '지금 보고 있는 기기'로만 보내기 위한 present 신호.
+      if (ws._cptMeta) {
+        const active = !!msg.active;
+        ws._cptMeta.foreground = active;
+        if (active) ws._cptMeta.foregroundAt = Date.now();
+      }
       return;
     }
     if (msg.type === 'ui_result' && msg.uiId != null) {
@@ -824,6 +853,7 @@ module.exports = {
   fanoutSyncEvent,
   fanoutNotifEvent,
   hasActiveMobileClient,
+  presentClient,
   issueUiTicket,
   addEventClient,
   removeEventClient,
