@@ -688,9 +688,28 @@ export class PaneView {
       Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
     };
     const resetBuf = () => { this._sentBuf = ""; try { ta.value = ""; } catch (_) {} };
+    // ⌘/⌥ 편집 조합 — textarea 기본동작(delta 의존)이 아니라 셸 표준 시퀀스를 직접 보낸다.
+    //  탭 자동완성·히스토리(↑) 등으로 셸 라인과 textarea 미러가 어긋나 있어도 항상 동작.
+    const EDIT_COMBO = {
+      "meta:Backspace": "\x15",      // 라인 앞쪽 전체 삭제(^U)
+      "alt:Backspace": "\x1b\x7f",   // 단어 삭제
+      "meta:ArrowLeft": "\x01",      // 라인 처음(^A)
+      "meta:ArrowRight": "\x05",     // 라인 끝(^E)
+      "alt:ArrowLeft": "\x1bb",      // 단어 왼쪽
+      "alt:ArrowRight": "\x1bf",     // 단어 오른쪽
+      "alt:Enter": "\x1b\r",         // 멀티라인 개행(Claude Code 등 REPL)
+    };
     const onKeydown = (e) => {
       if (e.target !== ta) return;
       if (e.isComposing || e.keyCode === 229) return; // 조합 중 키는 IME 소유(Enter=확정 포함)
+      const mod = e.metaKey ? "meta" : e.altKey ? "alt" : null;
+      if (mod && !(e.metaKey && e.altKey)) {
+        const seq = EDIT_COMBO[mod + ":" + e.key];
+        if (seq) {
+          this._write(seq); resetBuf();
+          e.preventDefault(); e.stopImmediatePropagation(); return;
+        }
+      }
       if (e.metaKey) return;                          // ⌘ = 앱 단축키/브라우저 기본(복사·붙여넣기)
       if (e.ctrlKey && e.key && e.key.length === 1) {
         const c = e.key.toLowerCase().charCodeAt(0);
@@ -701,6 +720,10 @@ export class PaneView {
       }
       if (e.shiftKey && (e.key === "PageUp" || e.key === "PageDown")) { // 로컬 스크롤백
         this.term.scrollPages(e.key === "PageUp" ? -1 : 1);
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      if (e.shiftKey && e.key === "Enter") {            // 멀티라인 개행(Claude Code 등 REPL)
+        this._write("\x1b\r"); resetBuf();
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
       const seq = SEQ[e.key];
@@ -738,6 +761,10 @@ export class PaneView {
       if (t && typeof t.win === "number") this._view(t.win);
     };
     ta.addEventListener("focus", onFocus);
+    // xterm 은 blur 시 textarea.value 를 비운다 — 미러(_sentBuf)도 함께 비워야
+    //  복귀 후 첫 입력의 델타가 "옛 텍스트 길이만큼 백스페이스"를 쏘지 않는다.
+    const onBlur = () => resetBuf();
+    ta.addEventListener("blur", onBlur);
     // 내부 클릭 — 이미 포커스된 터미널은 focus 이벤트가 다시 안 떠서 위 경로가 안 타므로,
     //  클릭 자체로도 크기를 회수한다(다른 기기가 이 창을 자기 크기로 바꿨을 수 있음). 1.2s 스로틀.
     let lastClaim = 0;
@@ -758,6 +785,7 @@ export class PaneView {
     document.addEventListener("compositionend", onCompEnd, true);
     this._inputDispose = () => {
       ta.removeEventListener("focus", onFocus);
+      ta.removeEventListener("blur", onBlur);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
