@@ -99,6 +99,11 @@ function beginTabDrag(srcId, index, e) {
   let drop = null; // { paneId, zone }
   let overlay = null;
   let srcTabEl = null; // 드래그 중 흐리게 표시할 원본 탭
+  // 탭바 끝단 자동 스크롤 — 일반 DnD 처럼 끝에 대면 가려진 탭이 나타나 원하는 위치에 놓을 수 있다.
+  let lastEv = null;       // 마지막 포인터 좌표(정지 상태에서 스크롤 후 재판정용)
+  let scrollEl = null;     // 스크롤 대상 .pane-tabs
+  let scrollDir = 0;       // -1/0/1
+  let scrollRaf = 0;
 
   const start = () => {
     dragging = true;
@@ -124,8 +129,19 @@ function beginTabDrag(srcId, index, e) {
     overlay.addEventListener("pointermove", onMove);
     overlay.addEventListener("pointerup", onUp);
     overlay.addEventListener("lostpointercapture", onUp);
+    // 자동 스크롤 틱 — 포인터가 정지해도 계속 스크롤돼야 하므로 move 이벤트가 아닌 rAF 루프.
+    const tick = () => {
+      if (scrollDir && scrollEl) {
+        const before = scrollEl.scrollLeft;
+        scrollEl.scrollLeft = before + scrollDir * 9;
+        if (scrollEl.scrollLeft !== before && lastEv) update(lastEv); // 탭 rect 가 밀렸으니 인서트 라인 재판정
+      }
+      scrollRaf = requestAnimationFrame(tick);
+    };
+    scrollRaf = requestAnimationFrame(tick);
   };
   const update = (ev) => {
+    lastEv = { clientX: ev.clientX, clientY: ev.clientY };
     ghostEl.style.left = ev.clientX + 14 + "px";
     ghostEl.style.top = ev.clientY + 14 + "px";
     // 오버레이가 최상단이라 hit-test 방해 → 잠깐 통과시켜 아래 pane 탐지.
@@ -133,6 +149,7 @@ function beginTabDrag(srcId, index, e) {
     const el = document.elementFromPoint(ev.clientX, ev.clientY);
     overlay.style.pointerEvents = "";
     const pane = el && el.closest && el.closest(".pane");
+    scrollDir = 0; // 탭바 끝단에 있을 때만 아래에서 다시 세팅
     if (!pane) { zoneEl.classList.add("hidden"); insEl.classList.add("hidden"); drop = null; return; }
     const paneId = pane.dataset.paneId;
     const r = pane.getBoundingClientRect();
@@ -145,6 +162,12 @@ function beginTabDrag(srcId, index, e) {
     const canTabbar = !wholePane || src.kind === "ide" || src.kind === "preview";
     if (canTabbar && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom && targetLeaf && targetLeaf.kind === "terminal") {
       const tabsRegion = pane.querySelector(".pane-tabs");
+      // 끝단 자동 스크롤 판정 — 넘친 탭바에서만, 좌/우 36px 밴드.
+      if (tabsRegion && tabsRegion.scrollWidth > tabsRegion.clientWidth + 1) {
+        const tr2 = tabsRegion.getBoundingClientRect();
+        scrollEl = tabsRegion;
+        scrollDir = ev.clientX < tr2.left + 36 ? -1 : ev.clientX > tr2.right - 36 ? 1 : 0;
+      }
       const tabEls = tabsRegion ? [...tabsRegion.querySelectorAll(".ptab")] : [];
       let ti = tabEls.length;
       for (let k = 0; k < tabEls.length; k++) {
@@ -194,6 +217,8 @@ function beginTabDrag(srcId, index, e) {
   const finish = () => {
     window.removeEventListener("pointermove", preMove, true);
     window.removeEventListener("pointerup", preUp, true);
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = 0; }
+    scrollDir = 0; scrollEl = null; lastEv = null;
     if (overlay) {
       overlay.removeEventListener("pointermove", onMove);
       overlay.removeEventListener("pointerup", onUp);
