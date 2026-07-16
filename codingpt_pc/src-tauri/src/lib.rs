@@ -66,6 +66,8 @@ struct Status {
     running: bool,
     device_name: Option<String>,
     server: Option<String>,
+    #[serde(rename = "deviceId")]
+    device_id: Option<i64>, // 내 호스트 판정(다른 PC 워크스페이스 구분)용
 }
 
 // ~/.codingpt/daemon.json (데몬이 pair 시 저장) 경로.
@@ -174,6 +176,9 @@ fn daemon_status(state: State<Daemon>) -> Status {
         server: cfg
             .as_ref()
             .and_then(|c| c.get("serverUrl").and_then(|v| v.as_str().map(String::from))),
+        device_id: cfg
+            .as_ref()
+            .and_then(|c| c.get("deviceId").and_then(|v| v.as_i64())),
     }
 }
 

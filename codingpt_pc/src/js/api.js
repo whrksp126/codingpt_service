@@ -59,7 +59,9 @@ export const api = {
   listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
 
   // ── 클라우드 터미널(relay) ──
-  cloudTerminalStart: (cwd) => invoke("cloud_terminal_start", { cwd }),
+  // 원격 터미널(back 릴레이) — hostDeviceId 지정=다른 PC 의 워크스페이스(활성 러너 무변경).
+  cloudTerminalStart: (cwd, hostDeviceId, paneId) =>
+    invoke("cloud_terminal_start", { cwd, hostDeviceId: hostDeviceId ?? null, paneId: paneId ?? null }),
 
   // ── 내장 IDE 파일 접근(로컬, 홈 jail) ──
   fsTree: (rel, depth) => invoke("fs_tree", { rel, depth: depth ?? 2 }),

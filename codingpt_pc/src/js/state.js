@@ -160,6 +160,13 @@ export function wsRuntime(id) {
 export function isLocal(w) {
   return w && (w.compute === "local" || (!w.compute && w.localPath));
 }
+// 이 PC(호스트)의 워크스페이스인가 — 로컬 tmux 직결 가능 여부. 다른 PC 의 사본(hostDeviceId 상이)은
+// back 릴레이로 열어야 한다(멀티 PC). deviceId 를 모르면(구버전/미페어링) 기존 동작(전부 내 것) 보존.
+export function isThisHost(w) {
+  if (!isLocal(w)) return false;
+  const my = state.daemon?.deviceId;
+  return w.hostDeviceId == null || my == null || w.hostDeviceId === my;
+}
 
 // 워크스페이스 런타임 보장(레이아웃 없으면 단일 터미널로 초기화).
 export function ensureRuntime(id) {
@@ -249,7 +256,7 @@ export function closePane(wsId, paneId) {
   // 닫는 pane 의 터미널 window(작업)를 kill — 로컬. "닫으면 날아가고, 새로 열면 새 터미널".
   const ws = state.workspaces.find((x) => x.id === wsId);
   const leaf = T.findLeaf(w.layout, paneId);
-  if (leaf && leaf.kind === "terminal" && isLocal(ws)) {
+  if (leaf && leaf.kind === "terminal" && isThisHost(ws)) {
     for (const t of leaf.tabs || []) {
       if (typeof t.win === "number") api.killWindow(ws.localPath || "", t.win).catch(() => {});
     }
@@ -576,7 +583,7 @@ export async function reconcilePool() {
   const wsId = state.activeWsId;
   const w = wsId ? state.ws[wsId] : null;
   const meta = state.workspaces.find((x) => x.id === wsId);
-  if (!w || !w.layout || !meta || !isLocal(meta)) return;
+  if (!w || !w.layout || !meta || !isThisHost(meta)) return;
   _reconciling = true;
   try {
     const wins = (await api.listWindows(meta.localPath || "")) || [];

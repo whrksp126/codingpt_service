@@ -452,7 +452,17 @@ export class PaneView {
   }
 
   // 내장 IDE(파일트리 + CodeMirror).
+  // 원격 호스트 미지원 표면 안내(멀티 PC 후속: fs RPC 경유 원격 IDE)
+  _remoteNotice(host, what) {
+    const d = document.createElement("div");
+    d.style.cssText = "display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--text-dim,#8b93a7);font-size:12.5px;";
+    d.innerHTML = `<div>다른 PC 워크스페이스에서는 ${what} 를 아직 지원하지 않아요.</div><div>터미널로 작업하거나, 해당 PC 에서 열어주세요.</div>`;
+    host.appendChild(d);
+  }
+
   _buildIde() {
+    // 다른 PC(원격 호스트) 워크스페이스 — PC IDE 는 로컬 fs 직결이라 아직 미지원(터미널만).
+    if (!this.ctx.isLocal) { this._remoteNotice(this.body, "IDE"); return; }
     this.ide = new IdeView(this.ctx.localPath || "", this.body, {
       openPath: this.node.openPath || null,
       paneId: this.id,
@@ -621,6 +631,7 @@ export class PaneView {
     this.body.appendChild(host);
     m = { host };
     if (tab.kind === "ide") {
+      if (!this.ctx.isLocal) { this._remoteNotice(host, "IDE"); return m; }
       m.ide = new IdeView(this.ctx.localPath || "", host, {
         openPath: tab.openPath || null,
         paneId: this.id,
@@ -674,7 +685,7 @@ export class PaneView {
       });
     } else {
       try {
-        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "");
+        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
         const ws = new WebSocket(`${wsBase}/api/daemon/terminal/${token}`);
         ws.binaryType = "arraybuffer";
         this.ws = ws;

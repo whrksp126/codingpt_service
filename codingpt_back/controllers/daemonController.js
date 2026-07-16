@@ -365,8 +365,13 @@ async function daemonTerminalStart(req, res) {
   try {
     const device = await resolveDeviceUser(req);
     if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
-    const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : '';
-    const token = daemonRelayService.issueTerminalToken(device.user_id, cwd);
+    const b = req.body || {};
+    const cwd = typeof b.cwd === 'string' ? b.cwd : '';
+    const paneId = typeof b.paneId === 'string' ? b.paneId : '';
+    const win = Number.isInteger(b.win) ? b.win : undefined;
+    const client = typeof b.client === 'string' ? b.client : '';
+    // hostDeviceId — 다른 PC(호스트)의 워크스페이스를 열 때 대상 러너 지정(활성 러너 무변경).
+    const token = daemonRelayService.issueTerminalToken(device.user_id, cwd, paneId, win, client, b.hostDeviceId);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -624,7 +629,8 @@ async function startTerminal(req, res) {
     const win = Number.isInteger(winRaw) ? winRaw : (typeof winRaw === 'string' && /^\d+$/.test(winRaw) ? parseInt(winRaw, 10) : undefined);
     // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
     const client = (req.body && typeof req.body.client === 'string') ? req.body.client : '';
-    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client);
+    // hostDeviceId — 다른 PC(호스트) 지정(멀티 PC). 없으면 활성 러너(기존 동작).
+    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client, req.body && req.body.hostDeviceId);
     return successResponse(res, { token });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);

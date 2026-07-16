@@ -347,17 +347,32 @@ pub struct CloudTerminal {
     pub ws_base: String,
 }
 
-// 클라우드 워크스페이스 터미널 토큰 발급(deviceToken 인증) — 프론트는 이 토큰으로 WS 연결.
-//  로컬 워크스페이스는 이 경로를 안 탄다(로컬 tmux 직결).
+// 원격 터미널 토큰 발급(deviceToken 인증) — 프론트는 이 토큰으로 back 릴레이 WS 연결.
+//  이 PC 의 로컬 워크스페이스는 이 경로를 안 탄다(로컬 tmux 직결). 사용처: 클라우드 +
+//  **다른 PC(host_device_id 지정)의 워크스페이스**(멀티 PC — 활성 러너 무변경 직결).
 #[tauri::command]
-pub fn cloud_terminal_start(cwd: String) -> Result<CloudTerminal, String> {
+pub fn cloud_terminal_start(
+    cwd: String,
+    host_device_id: Option<i64>,
+    pane_id: Option<String>,
+) -> Result<CloudTerminal, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let server = server_url();
     let url = format!("{}/api/daemon/terminal/device-start", server.trim_end_matches('/'));
+    // client — 기기 안정 키(pane 세션을 기기별 분리, tmux 크기 공유 방지). 내 deviceId 기반.
+    let client = read_config()
+        .and_then(|c| c.get("deviceId").and_then(|v| v.as_i64()))
+        .map(|id| format!("pc-{id}"))
+        .unwrap_or_else(|| "pc".into());
     let resp = ureq::post(&url)
         .set("Authorization", &format!("Bearer {token}"))
         .timeout(std::time::Duration::from_secs(10))
-        .send_json(ureq::json!({ "cwd": cwd }))
+        .send_json(ureq::json!({
+            "cwd": cwd,
+            "hostDeviceId": host_device_id,
+            "paneId": pane_id.unwrap_or_default(),
+            "client": client,
+        }))
         .map_err(|e| format!("터미널 시작 실패: {e}"))?;
     let v = resp
         .into_json::<serde_json::Value>()

@@ -637,9 +637,13 @@ function redeemUiTicket(ticket) {
 // ── 앱 터미널 ─────────────────────────────────────────────────────────
 
 // POST /api/daemon/terminal/start 에서 호출(인증 후). 데몬 오프라인이면 throw.
-function issueTerminalToken(userId, cwd, paneId, win, client) {
-  if (!pickConn(userId)) { // 활성 러너 없으면 오프라인
-    const err = new Error('PC 데몬이 연결되어 있지 않습니다.');
+function issueTerminalToken(userId, cwd, paneId, win, client, runnerId) {
+  // runnerId — 대상 호스트(DaemonDevice.id) 지정. 다른 PC 의 워크스페이스를 열 때 활성 러너를
+  //  건드리지 않고 그 호스트로 직결한다(멀티 PC). 같은 userId 의 러너만 조회되므로 월경 불가.
+  const rid = Number.isInteger(runnerId) ? runnerId
+    : (typeof runnerId === 'string' && /^\d+$/.test(runnerId) ? parseInt(runnerId, 10) : null);
+  if (!pickConn(userId, rid != null ? { runnerId: rid } : undefined)) {
+    const err = new Error(rid != null ? '대상 PC 데몬이 연결되어 있지 않습니다.' : 'PC 데몬이 연결되어 있지 않습니다.');
     err.statusCode = 409;
     throw err;
   }
@@ -656,7 +660,7 @@ function issueTerminalToken(userId, cwd, paneId, win, client) {
   // win — 이 pane 이 표시할 tmux window(정수). 앱이 미리 확보해 넘기면 데몬이 attach 와 동시에 select.
   // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
   const winNum = Number.isInteger(win) ? win : null;
-  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', paneId: typeof paneId === 'string' ? paneId : '', win: winNum, client: typeof client === 'string' ? client : '', expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
+  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', paneId: typeof paneId === 'string' ? paneId : '', win: winNum, client: typeof client === 'string' ? client : '', runnerId: rid, expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
   return token;
 }
 
@@ -681,10 +685,12 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
     const earlyFn = (data, isBinary) => { early.push([data, isBinary]); };
     appWs.on('message', earlyFn);
     // 이 터미널을 실제로 여는 대상 러너 conn — 라이브 터미널 카운트로 동면을 막는다.
-    const ptyConn = pickConn(sess.userId);
+    //  runnerId 지정(다른 PC 워크스페이스)이면 그 호스트로 직결, 아니면 활성 러너.
+    const connOpts = Number.isInteger(sess.runnerId) ? { runnerId: sess.runnerId } : undefined;
+    const ptyConn = pickConn(sess.userId, connOpts);
     try {
       // cols/rows 는 앱이 접속 직후 resize 프레임으로 보정하므로 기본값으로 시작. cwd=진입 워크스페이스 폴더.
-      daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '', paneId: sess.paneId || '', win: Number.isInteger(sess.win) ? sess.win : undefined, client: sess.client || '' });
+      daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '', paneId: sess.paneId || '', win: Number.isInteger(sess.win) ? sess.win : undefined, client: sess.client || '' }, connOpts);
     } catch (e) {
       const msg = e.message === 'DAEMON_OFFLINE' ? 'PC 데몬이 오프라인입니다.' : ('터미널을 열 수 없습니다: ' + e.message);
       try { appWs.send('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); appWs.close(); } catch (_) { /* noop */ }

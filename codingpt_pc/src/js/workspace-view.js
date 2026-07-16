@@ -1,6 +1,6 @@
 // workspace-view.js — 활성 워크스페이스 헤더(폴더명) + 타일링 pane 그리드.
 //  각 pane 은 자체 탭 헤더(cmux식)를 가진다. tiling 트리를 DOM 으로 조립하고 PaneView 를 재사용.
-import { state, wsRuntime, activeWs, isLocal } from "./state.js";
+import { state, wsRuntime, activeWs, isLocal, isThisHost } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { PaneView, isTermTab, newTid } from "./pane.js";
@@ -37,13 +37,14 @@ function structureSig(node) {
 function paneCtx(ws) {
   return {
     localPath: ws?.localPath || "",
-    isLocal: isLocal(ws),
+    isLocal: isThisHost(ws),
+    hostDeviceId: ws?.hostDeviceId ?? null,
     onFocus: (id) => S.focusPane(id),
     // ws 는 클로저로 고정 — 알림이 늦게 와도 발생한 워크스페이스로 귀속(activeWsId 는 이미 딴 곳일 수 있음).
     onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),
     // 터미널 탭 활성화 = 그 win 알림 읽음(서버 스코프).
     onTabActivated: (win) => {
-      if (isLocal(ws) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
+      if (isThisHost(ws) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
     },
     onSurfacesChanged: () => {},
     onClosePane: (paneId) => S.closePane(state.activeWsId, paneId),
@@ -343,7 +344,7 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
   rt.layout = r.tree;
   rt.focusId = newLeaf.id;
-  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — webview 보존(새 pane 이 승계)
   if (!src.tabs.length) {
     // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 풀 kill 대상이 없다.
@@ -355,7 +356,7 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active]?.win;
-  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
 }
 
 // IDE/프리뷰 pane 통째를 터미널 pane 의 "탭"으로 편입(혼합 탭) — src pane 은 제거.
@@ -617,7 +618,7 @@ async function moveTab(srcId, index, dstId) {
   panes.get(dstId)?.buildHead();
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
-  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 본문은 dst 에서 재생성 — 프리뷰 webview 는 보존·승계
   if (!src.tabs.length) {
     S.closePane(state.activeWsId, srcId);
@@ -626,7 +627,7 @@ async function moveTab(srcId, index, dstId) {
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
 }
 
@@ -672,13 +673,13 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   panes.get(dstId)?.buildHead();
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
-  if (isT && isLocal(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
+  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — 프리뷰 webview 보존
   if (!src.tabs.length) { S.closePane(state.activeWsId, srcId); return; }
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number" && isLocal(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
   S.emit();
 }
 
