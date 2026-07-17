@@ -17,7 +17,6 @@ const fsLib = require('./fs');
 const configLib = require('./config');
 
 // 권장 워크스페이스 루트(홈-기준 상대). 홈 바로 아래라 macOS TCC 보호폴더가 아님 → 접근 프롬프트가 안 뜬다.
-const DEFAULT_ROOT_REL = 'CodingPT/workspaces';
 // macOS TCC 보호폴더(홈-기준 상대, 소문자) — 여기로 루트를 잡으면 접근 프롬프트가 뜰 수 있어 경고한다.
 const PROTECTED_REL = ['desktop', 'documents', 'downloads', 'movies', 'music', 'pictures', 'library'];
 function isProtectedRel(rel) {
@@ -66,14 +65,12 @@ function normalizeGithubUrl(raw) {
 }
 
 // 현재 지정된 워크스페이스 루트(홈-기준 상대). 없거나 더 이상 폴더가 아니면 null.
-//  recommended: 권장 기본 루트(TCC 프롬프트 없는 위치) — 앱이 "추천 위치 원탭"으로 사용.
+//  위치는 항상 사용자가 직접 선택한다(권장 기본 위치 개념 없음 — 사용자 확정 스펙).
 async function getRoot() {
   const cfg = configLib.load() || {};
   const rel = cfg.workspaceRoot;
-  // recommended=TCC 프롬프트 없는 추천 위치, lastParent=마지막 선택 부모(피커 기본값),
-  //  allowFullDisk=전체 디스크 모드 여부(피커가 홈 밖 탐색 허용 판단).
+  // lastParent=마지막 선택 부모(피커 기본값), allowFullDisk=전체 디스크 모드 여부.
   const base = {
-    recommended: DEFAULT_ROOT_REL,
     lastParent: (typeof cfg.lastWorkspaceParent === 'string' ? cfg.lastWorkspaceParent : null),
     allowFullDisk: cfg.allowFullDisk === true,
   };
@@ -86,7 +83,7 @@ async function getRoot() {
   } catch (_) { return { root: null, ...base }; }
 }
 
-// 워크스페이스 루트 지정. path 는 홈-기준 상대경로. create=true 면 없을 때 생성(추천 위치용).
+// 워크스페이스 루트 지정. path 는 홈-기준 상대경로. create=true 면 없을 때 생성.
 async function setRoot(params) {
   const rel = (params && params.path) || '';
   const abs = fsLib.safeResolve(rel); // 홈 밖이면 throw
@@ -97,11 +94,6 @@ async function setRoot(params) {
   const cfg = configLib.load() || {};
   configLib.save({ ...cfg, workspaceRoot: root });
   return { root, protected: isProtectedRel(root) };
-}
-
-// 권장 기본 루트(~/CodingPT/workspaces)를 생성하고 루트로 지정 — TCC 프롬프트 없는 위치.
-async function useDefaultRoot() {
-  return setRoot({ path: DEFAULT_ROOT_REL, create: true });
 }
 
 // 선택한 부모 폴더 아래 새 워크스페이스 폴더 스캐폴드. name → slug, 충돌 시 -2/-3 …
@@ -217,7 +209,6 @@ async function handle(method, params) {
   switch (method) {
     case 'ws.getRoot': return getRoot();
     case 'ws.setRoot': return setRoot(params);
-    case 'ws.useDefaultRoot': return useDefaultRoot();
     case 'ws.setFullDisk': return setFullDisk(params);
     case 'ws.create': return create(params);
     case 'ws.clone': return clone(params);
@@ -226,4 +217,4 @@ async function handle(method, params) {
   }
 }
 
-module.exports = { handle, getRoot, setRoot, useDefaultRoot, setFullDisk, create, clone, remote, slugify, DEFAULT_ROOT_REL };
+module.exports = { handle, getRoot, setRoot, setFullDisk, create, clone, remote, slugify };

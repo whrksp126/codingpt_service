@@ -800,13 +800,6 @@ async function wsSetRoot(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// POST /api/daemon/ws/root/default  (인증) — 권장 루트(~/CodingPT/workspaces, TCC 프롬프트 없음) 생성+지정
-async function wsUseDefaultRoot(req, res) {
-  try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'ws.useDefaultRoot', {});
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
 
 // POST /api/daemon/ws/create  (인증) body:{ name, parentPath? } — 선택한 폴더 아래 새 워크스페이스 스캐폴드
 //  parentPath: 사용자가 이번 생성마다 고르는 목적지 부모(홈-기준 상대, 전체 디스크 모드면 절대경로).
@@ -1071,7 +1064,7 @@ module.exports = {
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
-  wsGetRoot, wsSetRoot, wsUseDefaultRoot, wsCreate, wsClone, wsSetFullDisk,
+  wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
   previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,

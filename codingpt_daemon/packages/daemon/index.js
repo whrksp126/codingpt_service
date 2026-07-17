@@ -140,18 +140,11 @@ function cmdUnpair() {
   else console.log('삭제할 설정이 없습니다.');
 }
 
-// 초기 세팅 도우미 — 권장 워크스페이스 폴더 생성 + macOS 권한(전체 디스크 접근) 안내/설정창 열기.
+// 초기 세팅 도우미 — macOS 권한(전체 디스크 접근) 안내/설정창 열기.
 //  목적: 외부에서 모바일로 작업할 때 macOS 폴더 접근 프롬프트가 안 뜨도록 초기에 한 번 정리.
+//  (워크스페이스 위치는 항상 사용자가 직접 선택 — 권장 폴더 자동 생성 없음)
 function cmdSetup() {
-  const path = require('path');
-  const fs = require('fs');
   const { execFile } = require('child_process');
-  const wsLib = runnerCore.workspace;
-  const dir = path.join(os.homedir(), wsLib.DEFAULT_ROOT_REL);
-  try { fs.mkdirSync(dir, { recursive: true }); console.log(`✅ 권장 워크스페이스 폴더: ${dir}`); }
-  catch (e) { console.error(`폴더 생성 실패: ${e.message}`); }
-  console.log('   → 여기에 워크스페이스를 만들면 macOS 폴더 접근 프롬프트가 뜨지 않습니다(보호폴더 밖).');
-  console.log('');
   console.log('📂 (선택) 어디서든 파일 접근 프롬프트를 아예 없애려면 — 지금 이 터미널 앱에 "전체 디스크 접근"을 켜세요:');
   console.log('   시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근 → (터미널/iTerm 등) 켜기 → 터미널 재시작');
   console.log('   설정창을 엽니다…');
