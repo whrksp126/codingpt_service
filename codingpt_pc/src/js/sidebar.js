@@ -141,7 +141,7 @@ export function updateSidebar() {
     }
   }
   for (const g of groups) {
-    if (g.members.length === 1) { list.appendChild(wsRow(g.members[0])); continue; }
+    // 단독(사본 1개)도 같은 구조로 렌더(표현 통일 — 프로젝트명 ⊃ 기기 워크스페이스, 모바일 미러).
     const head = document.createElement("div");
     head.className = "ws-proj-head";
     head.innerHTML = `${icons.folder({ size: 13 })}<span class="wsp-nm">${escapeHtml(S.wsDisplayName(g.members[0]))}</span>`;
