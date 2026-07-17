@@ -151,6 +151,7 @@ function registerControl(ws, device) {
   if (entry.activeRunnerId == null || !entry.runners.has(entry.activeRunnerId)) entry.activeRunnerId = device.id;
   console.log(`[daemonRelay] 러너 연결 userId=${userId} kind=${conn.kind} device=${device.device_name}(#${device.id}) active=${entry.activeRunnerId}`);
   touchLastSeen(conn, true);
+  fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName });
 
   let alive = true;
   ws.on('pong', () => { alive = true; touchLastSeen(conn, false); });
@@ -241,6 +242,7 @@ function registerControl(ws, device) {
       }
       if (entry.runners.size === 0) connections.delete(userId);
       console.log(`[daemonRelay] 러너 연결 종료 userId=${userId} kind=${conn.kind} device=#${conn.deviceId} aliveMs=${Date.now() - conn.connectedAt} 남은러너=${entry.runners.size}`);
+      fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: false, kind: conn.kind, deviceName: conn.deviceName });
     }
     DaemonDevice.update({ last_seen_at: new Date() }, { where: { id: conn.deviceId } }).catch(() => { /* noop */ });
   };
@@ -377,6 +379,15 @@ function fanoutNotifEvent(userId, event) {
   broadcastEvent(userId, payload); // SSE
   const key = String(userId);
   const set = agentWsClients.get(key);
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 러너(데몬) 연결 상태 팬아웃 — 접속/종료 즉시 {type:'runner_status', event:{deviceId, online, kind, deviceName}}.
+//  클라이언트 사이드바의 호스트 온라인 점/오프라인 UX 를 라이브로 갱신하는 용도(구 클라이언트는 무시해도 안전).
+function fanoutRunnerStatus(userId, event) {
+  const payload = { type: 'runner_status', event };
+  broadcastEvent(userId, payload); // SSE
+  const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
 

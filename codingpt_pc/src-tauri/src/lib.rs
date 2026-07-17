@@ -358,12 +358,14 @@ fn daemon_unpair(app: AppHandle, state: State<Daemon>) -> Result<Status, String>
     Ok(daemon_status(state))
 }
 
-// 창 열기(트레이/딥링크에서).
+// 창 열기(트레이/딥링크/독 클릭에서) — 닫기가 NSApp hide 이므로 앱 unhide 부터.
 fn show_window(app: &AppHandle) {
+    #[cfg(target_os = "macos")]
+    { let _ = app.show(); }
     if let Some(w) = app.get_webview_window("main") {
+        let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
-        let _ = w.unminimize();
     }
 }
 
@@ -659,14 +661,30 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // 창 닫기 = 숨김(앱은 트레이에 상주).
+            //  macOS: windowShouldClose 콜백 안에서 window.hide()(orderOut)를 부르면 prevent_close 에도
+            //  불구하고 창이 매니저에서 사라져(재표시 불가) 이후 트레이/독 '열기'가 무반응이 된다(실측).
+            //  → 창 대신 앱 전체 숨김(NSApp hide)으로 대체 — 창은 살아 있고 show_window 가 복원한다.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
                 api.prevent_close();
+                if window.label() == "main" {
+                    #[cfg(target_os = "macos")]
+                    { let _ = window.app_handle().hide(); }
+                    #[cfg(not(target_os = "macos"))]
+                    { let _ = window.hide(); }
+                } else {
+                    // 보조 창(데브툴 dt-* 등)은 기존대로 창만 숨긴다.
+                    let _ = window.hide();
+                }
             }
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
+            // 독 아이콘 클릭(창 없음 상태) — macOS 표준 재열기. 이게 없으면 독 클릭이 무반응.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = &event {
+                show_window(app_handle);
+            }
             // Cmd+Q 등 code 없는 종료 요청 — 미저장 IDE 변경이 있으면 막고 확인 다이얼로그로.
             //  (quit_app/트레이 확정 종료는 app.exit(0)=code Some 이라 여기 걸리지 않는다)
             if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
