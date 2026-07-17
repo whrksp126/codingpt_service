@@ -4,7 +4,6 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { getScale, setScale, SCALE_PRESETS } from "./display-scale.js";
 
 let root = null;
 let navEl = null;
@@ -129,17 +128,9 @@ function renderSection(force) {
       <div class="sm-h">일반</div>
       ${profileHtml}
       <div class="sm-card2">
-        <label class="switch"><input id="autostartChk" type="checkbox" /><span>이 Mac 로그인 시 자동 실행</span></label>
+        <label class="switch sett-row"><input id="autostartChk" type="checkbox" /><span>이 Mac 로그인 시 자동 실행</span></label>
         <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
-        <div class="sett-row"><span>터미널·에디터 배율</span><span class="scale-seg" id="scaleSeg">${SCALE_PRESETS.map((p) =>
-          `<button class="scale-opt${p === getScale() ? " active" : ""}" data-scale="${p}">${p === 1 ? "1×" : p + "×"}</button>`).join("")}</span></div>
-        <div class="sett-hint">이 기기에서 터미널과 코드 에디터의 글자 크기에만 적용돼요. 작게 하면 더 넓게 보여요.</div>
       </div>`;
-    contentEl.querySelectorAll("#scaleSeg .scale-opt").forEach((b) =>
-      b.addEventListener("click", () => {
-        setScale(parseFloat(b.dataset.scale)); // 열린 터미널/에디터 즉시 반영(pane.js 구독)
-        contentEl.querySelectorAll("#scaleSeg .scale-opt").forEach((x) => x.classList.toggle("active", x === b));
-      }));
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {
@@ -379,7 +370,7 @@ function renderDeviceList() {
   const el = connBody?.querySelector("#deviceTable");
   if (!el) return;
   if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`; return; }
-  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-loc">위치</span><span class="dc-date">최근 작업</span><span class="dc-act"></span></div>`;
+  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-date">최근 작업</span><span class="dc-act"></span></div>`;
   const rows = state.devices.map((d) => {
     const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
     const icon = d.runnerKind === "cloud"
@@ -387,49 +378,29 @@ function renderDeviceList() {
       : d.role === "controller"
         ? icons.smartphone({ size: 15 })
         : icons.monitor({ size: 15 });
-    const canRevoke = d.runnerKind !== "cloud" && typeof d.id === "number";
-    const act = canRevoke ? `<button class="dev-menu-btn" data-dev="${d.id}" title="더보기">${icons.dots({ size: 16 })}</button>` : "";
+    // 모바일과 동일: 클라우드/이 기기는 삭제 불가, 삭제 = 휴지통 아이콘 2탭 확인.
+    const canRevoke = d.runnerKind !== "cloud" && typeof d.id === "number" && !d.isCurrent;
+    const act = canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}" title="기기 삭제">${icons.trash({ size: 15 })}</button>` : "";
     return `<div class="dev-tr">
       <span class="dc-name"><span class="dev-ic">${icon}</span><span class="dc-nm">${esc(d.name)}</span>${cur}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
       <span class="dc-os">${esc(deviceOsLabel(d))}</span>
-      <span class="dc-loc">—</span>
       <span class="dc-date">${esc(fmtRecent(d.lastSeenAt || d.createdAt))}</span>
       <span class="dc-act">${act}</span>
     </div>`;
   }).join("");
   el.innerHTML = head + rows;
-  el.querySelectorAll(".dev-menu-btn").forEach((b) =>
-    b.addEventListener("click", (e) => { e.stopPropagation(); showDeviceMenu(e, Number(b.dataset.dev)); }));
-}
-
-// 기기 행 "..." 드롭다운(기기 삭제).
-let devMenuEl = null;
-function closeDevMenu() {
-  if (devMenuEl) { devMenuEl.remove(); devMenuEl = null; }
-  document.removeEventListener("mousedown", onDevMenuOutside, true);
-}
-function onDevMenuOutside(ev) { if (devMenuEl && !devMenuEl.contains(ev.target)) closeDevMenu(); }
-function showDeviceMenu(e, deviceId) {
-  closeDevMenu();
-  const menu = document.createElement("div");
-  menu.className = "ctx-menu";
-  const del = document.createElement("button");
-  del.className = "ctx-item danger";
-  del.innerHTML = `<span class="ctx-ic">${icons.trash({ size: 15 })}</span><span class="ctx-label">기기 삭제</span>`;
-  del.addEventListener("click", async () => {
-    closeDevMenu();
-    try { await api.revokeDevice(deviceId); await S.loadDevices(); } catch (_) {}
-  });
-  menu.appendChild(del);
-  document.body.appendChild(menu);
-  devMenuEl = menu;
-  const mw = menu.offsetWidth, mh = menu.offsetHeight;
-  let x = e.clientX, y = e.clientY;
-  if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
-  if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
-  menu.style.left = Math.max(8, x) + "px";
-  menu.style.top = Math.max(8, y) + "px";
-  setTimeout(() => document.addEventListener("mousedown", onDevMenuOutside, true), 0);
+  el.querySelectorAll(".dev-del-btn").forEach((b) =>
+    b.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      // 1탭=무장(빨강), 2탭=삭제 — 모바일 confirmRevokeId 미러.
+      if (!b.classList.contains("arm")) {
+        b.classList.add("arm");
+        setTimeout(() => b.classList.remove("arm"), 4000);
+        return;
+      }
+      b.disabled = true;
+      try { await api.revokeDevice(Number(b.dataset.dev)); await S.loadDevices(); } catch (_) { b.disabled = false; }
+    }));
 }
 
 function updatePairedStatus() {

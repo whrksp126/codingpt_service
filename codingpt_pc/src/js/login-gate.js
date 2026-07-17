@@ -55,14 +55,15 @@ function renderStep() {
     return;
   }
   if (step === "login") {
+    // 뒤로 = 좌상단 화살표 · 스피너 = 주 버튼 안 · 재열기 = 아래 텍스트 버튼 · 코드/안내문 없음
+    //  (웹이 로그인 즉시 자동 연결하므로 별도 설명 불필요 — 사용자 확정 스펙)
     el.innerHTML = `
+      <button id="lgBack" class="lg-back" title="처음으로">←</button>
       <div class="lg-inner">
-        <div class="lg-spinner" id="lgSpin"></div>
         <div class="lg-head sm">브라우저에서 로그인하세요</div>
-        <div class="lg-code hidden" id="lgCode"></div>
+        <button id="lgMain" class="btn primary lg lg-wait" disabled><span class="lg-btnspin" id="lgSpin"></span><span id="lgMainTxt">브라우저 여는 중…</span></button>
+        <button id="lgRetry" class="lg-link">브라우저 다시 열기</button>
         <div id="gateLoginStatus" class="lg-status"></div>
-        <button id="lgRetry" class="btn primary lg">브라우저 다시 열기</button>
-        <button id="lgBack" class="lg-link">← 처음으로</button>
       </div>`;
     el.querySelector("#lgRetry").addEventListener("click", startGateLogin);
     el.querySelector("#lgBack").addEventListener("click", () => { stopGateLogin(); step = "welcome"; renderStep(); });
@@ -100,12 +101,12 @@ function setStatus(msg) {
   const s = el?.querySelector("#gateLoginStatus");
   if (s) s.textContent = msg || "";
 }
-// 대기 상태 표기 — 스피너/코드 칩 갱신.
-function setWaiting(code) {
+// 대기 상태 표기 — 주 버튼 안 스피너 + 라벨 갱신.
+function setWaiting() {
   const spin = el?.querySelector("#lgSpin");
-  const codeEl = el?.querySelector("#lgCode");
+  const txt = el?.querySelector("#lgMainTxt");
   if (spin) spin.classList.add("on");
-  if (codeEl) { codeEl.textContent = code || ""; codeEl.classList.toggle("hidden", !code); }
+  if (txt) txt.textContent = "로그인 대기 중…";
 }
 
 // ── 로그인(브라우저 device-code) — 기존 로직 유지 ─────────────────────
@@ -124,8 +125,7 @@ function startGateLogin() {
         poll: null,
         busy: false,
       };
-      setWaiting(res.code);
-      setStatus("로그인 후 ‘이 PC 연결하기’를 누르세요");
+      setWaiting();
       session.poll = setInterval(pollGateLogin, 2500);
     } catch (e) {
       setStatus("연결 실패 — 다시 시도하세요");

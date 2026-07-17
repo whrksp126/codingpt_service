@@ -448,8 +448,10 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .sm-content { padding: 40px 44px; max-width: 720px; }
 .sm-h { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
 .sm-sub { font-size: 13px; color: var(--text3); line-height: 1.55; margin-bottom: 22px; }
-.sm-card2 { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px 18px; }
-.sett-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; font-size: 13.5px; }
+.sm-card2 { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 8px 18px; }
+.sm-card2 + .sm-card2 { margin-top: 16px; } /* 카드(부류) 사이 갭 */
+.sett-row { display: flex; justify-content: space-between; align-items: center; padding: 13px 0; font-size: 13.5px; }
+.sett-row + .sett-row, .sett-row + .sett-hint { border-top: 1px solid var(--border); } /* 행 구분선(모바일 미러) */
 .sett-hint { font-size: 11.5px; color: var(--dim); padding: 2px 0 4px; }
 /* 표시 배율 세그먼트(설정 행 우측) — 모바일 SettingsModal Seg 미러 */
 .scale-seg { display: inline-flex; gap: 2px; background: var(--elevated2); border-radius: var(--r-sm); padding: 2px; }
@@ -480,7 +482,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .dev-meta { flex: 1; min-width: 0; }
 .dev-name { font-size: 13.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
 .dev-sub { font-size: 11.5px; color: var(--dim); margin-top: 1px; }
-.dev-badge.cur { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border-radius: 999px; padding: 1px 7px; }
+.dev-badge.cur { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border-radius: 999px; padding: 1px 7px; white-space: nowrap; flex: none; }
 .dev-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
 .dev-dot.on { background: var(--accent); }
 .dev-dot.off { background: var(--dim); }
@@ -504,21 +506,23 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 
 /* 내 기기 테이블 */
 .dev-table { display: flex; flex-direction: column; }
-.dev-tr { display: grid; grid-template-columns: 1.7fr 0.9fr 1fr 1.1fr 34px; align-items: center; gap: 10px; padding: 11px 6px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); }
+.dev-tr { display: grid; grid-template-columns: 1.9fr 0.9fr 1.1fr 34px; align-items: center; gap: 10px; padding: 11px 6px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); }
 .dev-th { font-size: 11.5px; font-weight: 700; color: var(--dim); }
 .dc-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dc-name .dev-ic { color: var(--text3); flex: none; }
 /* 회원 탈퇴 이메일 확인(설정>계정) — 파괴적 작업 가드 */
 .acct-del-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 12px; border: 1px solid var(--danger, #f87171); border-radius: 8px; background: var(--elevated, #151a21); font-size: 12.5px; }
 .acct-del-input { background: var(--base, #0b0f14); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
-.acct-del-input:focus { border-color: var(--accent); }
+.acct-del-input:focus { border-color: var(--danger, #f87171); } /* 위험 맥락 — 초록 포커스 금지(사용자 지적) */
 .acct-del-confirm .btn[disabled] { opacity: 0.5; cursor: default; }
 
 .dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
-.dc-os, .dc-loc, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dc-os, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-act { display: flex; justify-content: flex-end; }
-.dev-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: transparent; color: var(--text3); border-radius: var(--r-sm); cursor: pointer; opacity: 0; transition: opacity 0.12s, background 0.12s; }
-.dev-tr:hover .dev-menu-btn { opacity: 1; }
+.dev-del-btn { background: none; border: none; color: var(--dim); cursor: pointer; padding: 4px; border-radius: 6px; opacity: 0.55; display: inline-flex; }
+.dev-del-btn:hover { color: var(--text2); }
+.dev-del-btn.arm { color: var(--danger, #f87171); opacity: 1; }
+.dev-tr:hover .dev-del-btn { opacity: 1; }
 .dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
 .conn-status { display: flex; align-items: center; gap: 12px; }
 .cst-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--dim); flex: none; }
@@ -618,6 +622,11 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .login-gate .lg-row + .lg-row { border-top: 1px solid var(--border); }
 .login-gate .lg-row .lg-hint { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
 .login-gate .lg-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.login-gate .lg-back { position: absolute; top: 44px; left: 16px; background: none; border: none; color: var(--dim); font-size: 18px; cursor: pointer; padding: 8px 10px; border-radius: 8px; }
+.login-gate .lg-back:hover { color: var(--text); background: var(--elevated); }
+.login-gate .btn.lg.lg-wait { display: inline-flex; align-items: center; justify-content: center; gap: 9px; opacity: 0.95; cursor: default; }
+.login-gate .lg-btnspin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; display: none; }
+.login-gate .lg-btnspin.on { display: inline-block; animation: lg-spin 0.9s linear infinite; }
 @keyframes lg-spin { to { transform: rotate(360deg); } }
 @keyframes lg-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
 
