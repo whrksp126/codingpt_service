@@ -15,8 +15,8 @@ function mapErr(res, e) {
 //  cwd 는 역방향 핸드오프(클라우드 실폴더서 스냅샷)용 오버라이드. 미지정=ws.localPath.
 async function checkpoint(req, res) {
   try {
-    const { workspaceId, reason, includeAgentSession, cwd } = req.body || {};
-    const result = await syncService.checkpoint(req.user.id, workspaceId, { reason, includeAgentSession, cwd });
+    const { workspaceId, reason, includeAgentSession, cwd, background } = req.body || {};
+    const result = await syncService.checkpoint(req.user.id, workspaceId, { reason, includeAgentSession, cwd, background: !!background });
     return successResponse(res, result);
   } catch (e) { return mapErr(res, e); }
 }

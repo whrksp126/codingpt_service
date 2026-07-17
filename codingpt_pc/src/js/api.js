@@ -126,12 +126,13 @@ export const api = {
   backBase: () => invoke("back_base"),
 
   // ── 작업 스냅샷(자동 체크포인트) — back sync 채널(데몬 오프라인이면 409) ──
-  //  타임아웃 610s: 대형 번들은 git 압축+업로드가 분 단위(back RPC 600s와 정합).
+  //  background: HTTP 는 즉시 accepted 응답(대형 번들은 분 단위 — 동기 대기는 CF 524).
+  //  실제 작업·manifest 등록은 back-데몬 사이에서 계속 진행(RPC 600s).
   syncCheckpoint: (workspaceId, reason, cwd) =>
     invoke("back_api", {
       method: "POST", path: "/api/daemon/sync/checkpoint",
-      body: { workspaceId, reason: reason || "periodic", ...(cwd ? { cwd } : {}) },
-      timeoutSecs: 610,
+      body: { workspaceId, reason: reason || "periodic", background: true, ...(cwd ? { cwd } : {}) },
+      timeoutSecs: 30,
     }),
 
   // ── 자동 실행(로그인 아이템) ──

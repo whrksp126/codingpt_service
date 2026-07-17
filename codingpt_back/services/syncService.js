@@ -48,45 +48,57 @@ async function saveManifest(wsId, manifest) {
 // ── checkpoint ───────────────────────────────────────────────────────────
 //  cwd: 스냅샷 대상 폴더(데몬 홈-기준 상대). 미지정=ws.localPath(로컬 러너). 역방향 핸드오프에선
 //   활성=클라우드일 때 클라우드 실폴더(예 슬러그 'foo'=/workspace/foo)를 넘겨 그쪽에서 찍는다.
-async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession = true, cwd } = {}) {
+//  background=true: RPC 를 기다리지 않고 즉시 { accepted, checkpointId } 반환 — 대형 번들은
+//   압축+업로드가 분 단위라 동기 HTTP 로 기다리면 Cloudflare 오리진 타임아웃(524, ~100s)에 걸린다.
+//   완료 시 manifest 등록은 백그라운드에서 그대로 진행되고, 클라이언트는 sync_event/목록으로 확인.
+async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession = true, cwd, background = false } = {}) {
   const ws = await requireLocalWorkspace(userId, wsId);
   const ckptId = newCheckpointId();
   const bKey = bundleKey(wsId, ckptId);
   const sKey = sessionKey(wsId, ckptId);
   const putUrls = {
-    bundle: await s3Service.getSignedPutUrl(bKey),
-    session: await s3Service.getSignedPutUrl(sKey),
+    bundle: await s3Service.getSignedPutUrl(bKey, { expiresIn: 3600 }),
+    session: await s3Service.getSignedPutUrl(sKey, { expiresIn: 3600 }),
   };
-  // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드. cwd 는 활성 러너 홈-기준 상대.
-  //  wsId 는 대용량(>80MB) 번들의 멀티파트 업로드 콜백(/sync/multipart/*)용 좌표.
-  const result = await daemonRelayService.callRpc(userId, 'sync.checkpoint', {
-    cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession, wsId,
-  }, RPC_TIMEOUT);
 
-  // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
-  if (result && result.skipped) {
+  const run = async () => {
+    // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드. cwd 는 활성 러너 홈-기준 상대.
+    //  wsId 는 대용량(>80MB) 번들의 멀티파트 업로드 콜백(/sync/multipart/*)용 좌표.
+    const result = await daemonRelayService.callRpc(userId, 'sync.checkpoint', {
+      cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession, wsId,
+    }, RPC_TIMEOUT);
+
+    // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
+    if (result && result.skipped) {
+      const manifest = await loadManifest(wsId);
+      return { skipped: true, unchanged: true, checkpointId: result.checkpointId || (manifest.head && manifest.head.checkpointId) || null, head: manifest.head || null };
+    }
+
+    const at = new Date().toISOString();
+    const entry = {
+      id: ckptId, reason, at,
+      baseCommit: result.baseCommit || null,
+      commit: result.commit || null,
+      bundleKey: bKey,
+      sessionKey: result.hasSession ? sKey : null,
+      sizeBytes: result.sizeBytes || 0,
+      hasSession: !!result.hasSession,
+    };
     const manifest = await loadManifest(wsId);
-    return { skipped: true, unchanged: true, checkpointId: result.checkpointId || (manifest.head && manifest.head.checkpointId) || null, head: manifest.head || null };
-  }
+    manifest.checkpoints = (manifest.checkpoints || []).filter((c) => c.id !== ckptId);
+    manifest.checkpoints.push(entry);
+    if (manifest.checkpoints.length > 200) manifest.checkpoints = manifest.checkpoints.slice(-200);
+    manifest.head = { checkpointId: ckptId, commit: entry.commit, baseCommit: entry.baseCommit, at };
+    await saveManifest(wsId, manifest);
 
-  const at = new Date().toISOString();
-  const entry = {
-    id: ckptId, reason, at,
-    baseCommit: result.baseCommit || null,
-    commit: result.commit || null,
-    bundleKey: bKey,
-    sessionKey: result.hasSession ? sKey : null,
-    sizeBytes: result.sizeBytes || 0,
-    hasSession: !!result.hasSession,
+    return { ...entry, head: manifest.head };
   };
-  const manifest = await loadManifest(wsId);
-  manifest.checkpoints = (manifest.checkpoints || []).filter((c) => c.id !== ckptId);
-  manifest.checkpoints.push(entry);
-  if (manifest.checkpoints.length > 200) manifest.checkpoints = manifest.checkpoints.slice(-200);
-  manifest.head = { checkpointId: ckptId, commit: entry.commit, baseCommit: entry.baseCommit, at };
-  await saveManifest(wsId, manifest);
 
-  return { ...entry, head: manifest.head };
+  if (background) {
+    run().catch((e) => console.warn(`[sync] 백그라운드 체크포인트 실패 ws=${wsId} ck=${ckptId}: ${e.message}`));
+    return { accepted: true, background: true, checkpointId: ckptId };
+  }
+  return run();
 }
 
 // ── materialize ────────────────────────────────────────────────────────────
