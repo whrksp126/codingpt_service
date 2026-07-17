@@ -197,6 +197,12 @@ if [[ "$TARGET" == darwin-* && -n "${CODESIGN_IDENTITY:-}" ]]; then
   codesign --verify --verbose=1 "$OUT/$NODE_OUT"
 fi
 
+# ── 5.5) dev target 스테일 사본 제거 ─────────────────────────────
+# tauri dev 는 resources 를 target/debug/resources 로 "덮어쓰기" 복사한다 — 같은 inode 에
+# 덮어쓰면 macOS vnode 서명 캐시 불일치로 node exec 즉시 SIGKILL(137, 실측 재발).
+# 미리 지워 두면 tauri 가 새로 만들어 안전하다(릴리스 번들 경로엔 영향 없음).
+rm -rf "$PC_DIR/src-tauri/target/debug/resources/daemon" 2>/dev/null || true
+
 # ── 6) 요약 ────────────────────────────────────────────────────────
 echo "▸ 번들 크기:"; du -sh "$OUT" | sed 's/^/    /'
 echo "▸ node-pty prebuilds:"; ls "$PTY/prebuilds" 2>/dev/null | sed 's/^/    /' || true

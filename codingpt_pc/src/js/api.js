@@ -79,6 +79,7 @@ export const api = {
 
   // ── 외부 브라우저 열기 ──
   openExternal: (url) => invoke("open_external", { url }),
+  openPrivacySettings: () => invoke("open_privacy_settings"), // macOS 전체 디스크 접근 설정(온보딩)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──
   previewSync: (paneId, url, x, y, w, h, visible) =>

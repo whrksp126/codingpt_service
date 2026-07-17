@@ -600,11 +600,26 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
   padding: 32px;
   text-align: center;
 }
-.login-gate .lg-logo { color: var(--accent); opacity: 0.95; margin-bottom: 4px; }
-.login-gate .lg-title { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: 0.2px; }
-.login-gate .lg-sub { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
-.login-gate .btn.lg { min-width: 200px; padding: 11px 20px; font-size: 14px; }
+/* 온보딩(웰컴→로그인→셋업) — 텍스트 최소, 글리프 하나만(워드마크 병행 금지) */
+.login-gate .lg-glyph { width: 96px; height: 96px; object-fit: contain; margin-bottom: 6px; filter: drop-shadow(0 6px 24px rgba(52, 211, 153, 0.25)); animation: lg-in 0.5s ease-out; }
+.login-gate .lg-head { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: 0.2px; }
+.login-gate .lg-head.sm { font-size: 16px; font-weight: 700; }
+.login-gate .btn.lg { min-width: 220px; padding: 12px 22px; font-size: 14px; border-radius: 10px; }
 .login-gate .lg-status { font-size: 12px; color: var(--dim); min-height: 18px; max-width: 320px; line-height: 1.5; }
+.login-gate .lg-link { background: none; border: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 6px; }
+.login-gate .lg-link:hover { color: var(--text2); }
+.login-gate .lg-code { font-family: var(--mono, ui-monospace, monospace); font-size: 15px; font-weight: 700; letter-spacing: 2px; color: var(--accent); background: var(--elevated); border: 1px solid var(--border); border-radius: 8px; padding: 7px 14px; }
+.login-gate .lg-code.hidden { display: none; }
+.login-gate .lg-spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--border); border-top-color: var(--accent); opacity: 0; }
+.login-gate .lg-spinner.on { opacity: 1; animation: lg-spin 0.9s linear infinite; }
+.login-gate .lg-inner.wide { width: 340px; }
+.login-gate .lg-card { width: 100%; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; background: var(--elevated); padding: 4px 14px; text-align: left; }
+.login-gate .lg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 0; font-size: 13.5px; color: var(--text); cursor: default; }
+.login-gate .lg-row + .lg-row { border-top: 1px solid var(--border); }
+.login-gate .lg-row .lg-hint { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
+.login-gate .lg-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+@keyframes lg-spin { to { transform: rotate(360deg); } }
+@keyframes lg-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
 
 /* ── 앱 종료 가드(미저장 IDE 변경) ── */
 .quit-guard-backdrop {

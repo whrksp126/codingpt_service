@@ -1,23 +1,23 @@
-// login-gate.js — 미로그인 시 전체화면 로그인 게이트로 앱 사용을 막는다.
-//  로그인(=데몬 페어링, 웹 device-code 방식)이 되기 전에는 워크스페이스/설정에 접근 불가.
+// login-gate.js — 첫 실행 온보딩 게이트(웰컴 → 브라우저 로그인 → PC 셋업).
+//  미로그인(=데몬 미페어링) 동안 앱 사용을 막고, Cursor/Warp 식의 짧은 3단계로 안내한다.
+//  · 텍스트 최소(사용자 확정 스펙), 브랜드 = 글리프 하나만(로고+워드마크 이중 사용 금지).
+//  · 로그인 방식은 기존 그대로(브라우저 device-code) — 껍데기만 온보딩.
+//  · 셋업(자동 실행 기본 켬 + 폴더 권한)은 이 게이트로 "방금 로그인한" 세션에만 1회 노출.
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 
 let el = null;
 let session = null; // { code, secret, expiresAt, poll, busy }
+let step = "welcome"; // 'welcome' | 'login' | 'setup'
+let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 노출
+let autostartOn = true; // 셋업 토글 상태(기본 켬 — 진입 시 실제 적용)
 
 export function mountLoginGate(container) {
   el = container;
   el.className = "login-gate hidden";
   el.setAttribute("data-tauri-drag-region", ""); // 게이트 상태에서도 창 이동 가능
-  el.innerHTML = `
-    <div class="lg-inner">
-      <div class="lg-sub">로그인하고 시작하세요</div>
-      <button id="gateLoginBtn" class="btn primary lg">로그인</button>
-      <div id="gateLoginStatus" class="lg-status"></div>
-    </div>`;
-  el.querySelector("#gateLoginBtn").addEventListener("click", startGateLogin);
+  renderStep();
 }
 
 // 로그인 여부 판정.
@@ -32,23 +32,86 @@ function needsLogin() {
 
 export function updateLoginGate() {
   if (!el) return;
-  const gate = needsLogin();
-  el.classList.toggle("hidden", !gate);
-  if (!gate) stopGateLogin(); // 로그인되면 폴링 정리
+  const need = needsLogin();
+  // 로그인 완료 직후엔 셋업 단계를 이어서 보여준다(이 게이트로 로그인한 경우 1회).
+  const show = need || (pendingSetup && step === "setup");
+  el.classList.toggle("hidden", !show);
+  if (!show) stopGateLogin();
+  if (need && step === "setup") { step = "welcome"; renderStep(); } // 재로그인 필요 상태로 회귀
+}
+
+// ── 렌더 ──────────────────────────────────────────────────────────────
+function renderStep() {
+  if (!el) return;
+  if (step === "welcome") {
+    el.innerHTML = `
+      <div class="lg-inner">
+        <img class="lg-glyph" src="assets/logo.png" alt="" draggable="false" />
+        <div class="lg-head">폰과 태블릿에서, 내 PC 그대로</div>
+        <button id="lgStart" class="btn primary lg">시작하기</button>
+      </div>`;
+    // 시작하기 = 바로 브라우저 로그인(클릭 수 최소 — Cursor 식).
+    el.querySelector("#lgStart").addEventListener("click", () => { step = "login"; renderStep(); startGateLogin(); });
+    return;
+  }
+  if (step === "login") {
+    el.innerHTML = `
+      <div class="lg-inner">
+        <div class="lg-spinner" id="lgSpin"></div>
+        <div class="lg-head sm">브라우저에서 로그인하세요</div>
+        <div class="lg-code hidden" id="lgCode"></div>
+        <div id="gateLoginStatus" class="lg-status"></div>
+        <button id="lgRetry" class="btn primary lg">브라우저 다시 열기</button>
+        <button id="lgBack" class="lg-link">← 처음으로</button>
+      </div>`;
+    el.querySelector("#lgRetry").addEventListener("click", startGateLogin);
+    el.querySelector("#lgBack").addEventListener("click", () => { stopGateLogin(); step = "welcome"; renderStep(); });
+    return;
+  }
+  // setup
+  el.innerHTML = `
+    <div class="lg-inner wide">
+      <div class="lg-head">거의 다 됐어요</div>
+      <div class="lg-card">
+        <label class="lg-row">
+          <span>로그인 시 자동 실행</span>
+          <input type="checkbox" id="lgAuto" ${autostartOn ? "checked" : ""} />
+        </label>
+        <div class="lg-row">
+          <span>모든 폴더 접근 허용<span class="lg-hint">원격 작업 중 권한 팝업 방지</span></span>
+          <button id="lgPerm" class="btn small">권한 열기</button>
+        </div>
+      </div>
+      <button id="lgDone" class="btn primary lg">시작하기</button>
+    </div>`;
+  el.querySelector("#lgAuto").addEventListener("change", async (e) => {
+    autostartOn = !!e.target.checked;
+    try { await (autostartOn ? api.autostartEnable() : api.autostartDisable()); }
+    catch (_) { e.target.checked = autostartOn = !autostartOn; }
+  });
+  el.querySelector("#lgPerm").addEventListener("click", () => api.openPrivacySettings().catch(() => {}));
+  el.querySelector("#lgDone").addEventListener("click", () => {
+    pendingSetup = false;
+    updateLoginGate();
+  });
 }
 
 function setStatus(msg) {
   const s = el?.querySelector("#gateLoginStatus");
   if (s) s.textContent = msg || "";
 }
-function setBtn(txt, disabled) {
-  const b = el?.querySelector("#gateLoginBtn");
-  if (b) { b.textContent = txt; b.disabled = !!disabled; }
+// 대기 상태 표기 — 스피너/코드 칩 갱신.
+function setWaiting(code) {
+  const spin = el?.querySelector("#lgSpin");
+  const codeEl = el?.querySelector("#lgCode");
+  if (spin) spin.classList.add("on");
+  if (codeEl) { codeEl.textContent = code || ""; codeEl.classList.toggle("hidden", !code); }
 }
 
+// ── 로그인(브라우저 device-code) — 기존 로직 유지 ─────────────────────
 function startGateLogin() {
   stopGateLogin();
-  setBtn("브라우저 여는 중…", true);
+  setStatus("");
   (async () => {
     try {
       const res = await api.pairSession(null);
@@ -61,12 +124,12 @@ function startGateLogin() {
         poll: null,
         busy: false,
       };
-      setStatus("브라우저에서 로그인 후 ‘이 PC 연결하기’를 누르세요…");
-      setBtn("브라우저에서 로그인 대기 중…", true);
+      setWaiting(res.code);
+      setStatus("로그인 후 ‘이 PC 연결하기’를 누르세요");
       session.poll = setInterval(pollGateLogin, 2500);
     } catch (e) {
-      setStatus("로그인 세션 생성 실패: " + e);
-      setBtn("로그인", false);
+      setStatus("연결 실패 — 다시 시도하세요");
+      console.warn("[gate] 로그인 세션 생성 실패:", e);
     }
   })();
 }
@@ -80,8 +143,7 @@ async function pollGateLogin() {
   if (!session || session.busy) return;
   if (Date.now() > session.expiresAt) {
     stopGateLogin();
-    setStatus("코드가 만료됐어요. 다시 시도하세요.");
-    setBtn("로그인", false);
+    setStatus("코드가 만료됐어요 — 다시 시도하세요");
     return;
   }
   session.busy = true;
@@ -93,7 +155,13 @@ async function pollGateLogin() {
       state.paired = !!state.daemon?.paired;
       await S.loadMe();
       await S.loadWorkspaces();
-      S.emit(); // → render() → updateLoginGate() 가 게이트를 숨김
+      // 셋업 단계로 — 자동 실행 기본 켬을 실제 적용(끄면 토글로 해제).
+      pendingSetup = true;
+      step = "setup";
+      autostartOn = true;
+      api.autostartEnable().catch(() => { autostartOn = false; });
+      renderStep();
+      S.emit(); // → render() → updateLoginGate() (pendingSetup 이라 게이트 유지)
     }
   } catch (_) {
     /* 계속 폴링 — 만료 시 위에서 종료 */

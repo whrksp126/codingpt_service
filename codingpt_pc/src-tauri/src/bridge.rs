@@ -483,6 +483,22 @@ pub fn ui_state_save(state: serde_json::Value) -> Result<(), String> {
     std::fs::write(&p, s).map_err(|e| format!("저장 실패: {e}"))
 }
 
+// macOS 개인정보 보호 설정(전체 디스크 접근) 열기 — 온보딩 폴더 권한 안내용.
+//  open_external 은 http/https 만 허용하므로 시스템 설정 URL 은 전용 커맨드로.
+#[tauri::command]
+pub fn open_privacy_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("설정 열기 실패: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
 // 외부 브라우저로 URL 열기(프리뷰의 프레임 차단 사이트·웹검색용). http/https 만 허용.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
