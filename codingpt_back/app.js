@@ -235,14 +235,19 @@ const startServer = async () => {
       if (dpm) {
         const sess = daemonController.resolvePreviewToken(dpm[1]);
         if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
-        daemonRelayService.proxyWs(sess.userId, sess.port, dpm[2] || '/', req, socket, head);
+        const connOpts = sess.runnerId != null ? { runnerId: sess.runnerId } : undefined;
+        daemonRelayService.proxyWs(sess.userId, sess.port, dpm[2] || '/', req, socket, head, connOpts);
         return;
       }
       if (!url.startsWith('/api/')) {
         const mm = String(req.headers.cookie || '').match(/(?:^|;\s*)dpv=([^;]+)/);
         if (mm) {
           const sess = daemonController.resolvePreviewToken(decodeURIComponent(mm[1]));
-          if (sess) { daemonRelayService.proxyWs(sess.userId, sess.port, url, req, socket, head); return; }
+          if (sess) {
+            const connOpts = sess.runnerId != null ? { runnerId: sess.runnerId } : undefined;
+            daemonRelayService.proxyWs(sess.userId, sess.port, url, req, socket, head, connOpts);
+            return;
+          }
         }
       }
       try { socket.destroy(); } catch (_) { /* noop */ }

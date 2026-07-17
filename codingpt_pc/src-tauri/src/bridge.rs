@@ -552,3 +552,54 @@ pub fn devtools_window(app: AppHandle, pv: String, open: bool) -> Result<(), Str
     });
     Ok(())
 }
+
+// ── 범용 back REST(deviceToken) — 원격 PC 워크스페이스의 fs/프리뷰 릴레이 호출용 ──
+//  /api/daemon/ 경로만 허용(최소 울타리). 성공 응답은 data 직접 반환 규약이라 JSON 그대로 넘긴다.
+//  에러는 back 의 { message } 를 살려 "HTTP <code>: <message>" 로 전달(409=대상 데몬 오프라인 등).
+#[tauri::command]
+pub fn back_api(
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("페어링이 필요합니다.")?;
+    if !path.starts_with("/api/daemon/") {
+        return Err("허용되지 않은 경로입니다.".into());
+    }
+    let url = format!("{}{}", server_url().trim_end_matches('/'), path);
+    let req = match method.as_str() {
+        "GET" => ureq::get(&url),
+        "POST" => ureq::post(&url),
+        _ => return Err("허용되지 않은 메서드입니다.".into()),
+    }
+    .set("Authorization", &format!("Bearer {token}"))
+    .timeout(std::time::Duration::from_secs(25));
+    let resp = match body {
+        Some(b) => req.send_json(b),
+        None => req.call(),
+    };
+    match resp {
+        Ok(r) => r
+            .into_json::<serde_json::Value>()
+            .map_err(|e| format!("응답 파싱 실패: {e}")),
+        Err(ureq::Error::Status(code, r)) => {
+            let msg = r
+                .into_json::<serde_json::Value>()
+                .ok()
+                .and_then(|v| v.get("message").and_then(|m| m.as_str().map(String::from)))
+                .unwrap_or_default();
+            if msg.is_empty() {
+                Err(format!("HTTP {code}"))
+            } else {
+                Err(format!("HTTP {code}: {msg}"))
+            }
+        }
+        Err(e) => Err(format!("요청 실패: {e}")),
+    }
+}
+
+// back 베이스 URL — 원격 프리뷰 프록시 절대 URL 조립용(JS 에는 토큰 없이 주소만).
+#[tauri::command]
+pub fn back_base() -> String {
+    server_url().trim_end_matches('/').to_string()
+}

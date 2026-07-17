@@ -38,17 +38,19 @@ router.post('/terminal/close', authMiddleware, daemonController.terminalClose);
 router.post('/terminal/unview', authMiddleware, daemonController.terminalUnview);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
-router.get('/fs/list', authMiddleware, daemonController.fsList);
-router.get('/fs/tree', authMiddleware, daemonController.fsTree);
-router.get('/fs/read', authMiddleware, daemonController.fsRead);
-router.get('/fs/grep', authMiddleware, daemonController.fsGrep);
-router.post('/fs/write', authMiddleware, daemonController.fsWrite);
-router.post('/fs/mkdir', authMiddleware, daemonController.fsMkdir);
-router.post('/fs/create', authMiddleware, daemonController.fsCreateFile);
-router.post('/fs/rename', authMiddleware, daemonController.fsRename);
-router.post('/fs/delete', authMiddleware, daemonController.fsDelete);
-router.post('/fs/watch', authMiddleware, daemonController.fsWatch);
-router.post('/fs/unwatch', authMiddleware, daemonController.fsUnwatch);
+//  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.
+//  ?hostDeviceId= / body.hostDeviceId 로 대상 호스트 지정(활성 러너 무변경), 미지정=활성 러너.
+router.get('/fs/list', accountAuth, daemonController.fsList);
+router.get('/fs/tree', accountAuth, daemonController.fsTree);
+router.get('/fs/read', accountAuth, daemonController.fsRead);
+router.get('/fs/grep', accountAuth, daemonController.fsGrep);
+router.post('/fs/write', accountAuth, daemonController.fsWrite);
+router.post('/fs/mkdir', accountAuth, daemonController.fsMkdir);
+router.post('/fs/create', accountAuth, daemonController.fsCreateFile);
+router.post('/fs/rename', accountAuth, daemonController.fsRename);
+router.post('/fs/delete', accountAuth, daemonController.fsDelete);
+router.post('/fs/watch', accountAuth, daemonController.fsWatch);
+router.post('/fs/unwatch', accountAuth, daemonController.fsUnwatch);
 // 파일 변경 이벤트 SSE(앱 구독) — 데몬 chokidar → back → 앱 즉시 반영.
 router.get('/events', authMiddleware, daemonController.streamEvents);
 
@@ -84,8 +86,9 @@ router.post('/sync/resolve', authMiddleware, syncController.resolve);
 router.get('/sync/checkpoints', authMiddleware, syncController.listCheckpoints);
 
 // 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).
-router.get('/preview/ports', authMiddleware, daemonController.previewPorts);
-router.post('/preview/start', authMiddleware, daemonController.previewStart);
+//  포트/시작도 accountAuth + hostDeviceId 지정 지원(PC 앱 원격 프리뷰).
+router.get('/preview/ports', accountAuth, daemonController.previewPorts);
+router.post('/preview/start', accountAuth, daemonController.previewStart);
 router.all('/preview/:token', daemonController.previewEntry);
 router.all('/preview/:token/*', daemonController.previewEntry);
 

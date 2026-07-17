@@ -578,13 +578,25 @@ export async function refreshWsMeta() {
   for (const w of state.workspaces) {
     if (!isLocal(w)) continue;
     const rt = S.wsRuntime(w.id) || S.ensureRuntime(w.id);
-    try {
-      rt.branch = await api.gitBranch(w.localPath || "");
-    } catch (_) {}
-    // 그 워크스페이스 폴더 안에서 실제로 도는 dev 서버 포트만 감지(시스템/타 폴더 포트 제외).
-    try {
-      rt.ports = await api.listenPorts(w.localPath || "");
-    } catch (_) {}
+    if (S.isThisHost(w)) {
+      try {
+        rt.branch = await api.gitBranch(w.localPath || "");
+      } catch (_) {}
+      // 그 워크스페이스 폴더 안에서 실제로 도는 dev 서버 포트만 감지(시스템/타 폴더 포트 제외).
+      try {
+        rt.ports = await api.listenPorts(w.localPath || "");
+      } catch (_) {}
+    } else {
+      // 다른 PC 워크스페이스 — 포트는 그 호스트 데몬에 조회(브랜치는 신선도 메타 w.git 폴백이 이미 있음).
+      //  로컬 lsof 를 원격 사본 경로에 돌리면 "이 기기의" 포트가 잡히는 오답이라 반드시 릴레이로.
+      try {
+        const r = await api.backApi(
+          "GET",
+          `/api/daemon/preview/ports?cwd=${encodeURIComponent(w.localPath || "")}&hostDeviceId=${w.hostDeviceId}`,
+        );
+        rt.ports = r?.ports || [];
+      } catch (_) { rt.ports = []; } // 호스트 오프라인 등 — 배지 없음
+    }
   }
   S.emit();
 }

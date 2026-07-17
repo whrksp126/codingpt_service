@@ -773,10 +773,11 @@ function wsToSocket(ws) {
 }
 
 // HTTP 프록시 한 건 = dial-back 터널 한 개(요청마다 새 연결, Connection: close).
-async function proxyHttp(userId, port, path, req, res) {
+//  connOpts.runnerId 지정 시 그 호스트로 터널(원격 PC 프리뷰) — 미지정=활성 러너.
+async function proxyHttp(userId, port, path, req, res, connOpts) {
   let ws;
   try {
-    ws = await openStream(userId, 'tcp', { port });
+    ws = await openStream(userId, 'tcp', { port }, connOpts);
   } catch (e) {
     if (!res.headersSent) res.status(502).end('preview: 데몬 연결 실패 — ' + e.message);
     return;
@@ -806,9 +807,9 @@ async function proxyHttp(userId, port, path, req, res) {
 }
 
 // HMR 등 WebSocket 업그레이드 프록시 — dial-back 터널에 원본 업그레이드 요청을 재구성해 쓰고 raw 브리지.
-async function proxyWs(userId, port, path, req, socket, head) {
+async function proxyWs(userId, port, path, req, socket, head, connOpts) {
   let ws;
-  try { ws = await openStream(userId, 'tcp', { port }); }
+  try { ws = await openStream(userId, 'tcp', { port }, connOpts); }
   catch (_) { try { socket.destroy(); } catch (_2) { /* noop */ } return; }
   const tunnel = wsToSocket(ws);
 
@@ -865,4 +866,5 @@ module.exports = {
   removeEventClient,
   proxyHttp,
   proxyWs,
+  pickConn,
 };

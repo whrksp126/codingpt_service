@@ -53,7 +53,9 @@ export class IdeView {
   constructor(localPath, body, opts = {}) {
     this.root = (localPath || "").replace(/\/+$/, "");
     this.body = body;
-    this.opts = opts; // { openPath, paneId, ... }
+    this.opts = opts; // { openPath, paneId, fs(원격 전송 어댑터), ... }
+    // 파일 전송 계층 — 기본=로컬 fsapi, 원격 워크스페이스면 back 릴레이 어댑터(remote-fs.js) 주입.
+    this.fs = opts.fs || api;
     this.groups = new Map(); // id → { id, open:[{path,doc,dirty}], active, cm, wrap, tabsBar, tablist, editorHost, empty }
     this.egRoot = null; // 에디터 그룹 타일링 트리(leaf=group, branch={dir,ratio,first,second})
     this.activeGroupId = null;
@@ -70,7 +72,8 @@ export class IdeView {
     //  로컬 디스크 직결이라 워처 없이 저비용 폴링: dirty 아닌 열린 파일만 다시 읽어 달라지면 교체.
     this._syncTick = 0;
     this._reloadingExternal = false;
-    this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, 1200);
+    //  원격(릴레이)은 호출당 서버 왕복이라 주기를 완화(열린 버퍼 1.2s → 4s).
+    this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, this.fs.remote ? 4000 : 1200);
     // 자동 저장(VS Code afterDelay) — 타이핑이 멈추고 800ms 뒤 디스크 기록 → 다른 기기에 곧바로 반영.
     this._autoTimers = new Map(); // path → timeout
     _ideInstances.add(this); // 앱 종료 가드의 전역 dirty 집계 대상
@@ -355,7 +358,7 @@ export class IdeView {
   }
   async _reload() {
     try {
-      this.tree = await api.fsTree(this.root, 4);
+      this.tree = await this.fs.fsTree(this.root, 4);
       this.searchTree = null;
       this._renderTree();
     } catch (e) {
@@ -423,7 +426,7 @@ export class IdeView {
     const token = ++this._searchToken;
     this.bodyEl.innerHTML = `<div class="ide-empty">검색 중…</div>`;
     let hits = [];
-    try { hits = await api.fsSearch(this.root, q, 500); } catch (_) { hits = []; }
+    try { hits = await this.fs.fsSearch(this.root, q, 500); } catch (_) { hits = []; }
     if (token !== this._searchToken) return; // 그 사이 쿼리 변경 → 취소
     this.bodyEl.innerHTML = "";
     if (!hits.length) { this.bodyEl.innerHTML = `<div class="ide-empty">일치하는 결과가 없어요</div>`; return; }
@@ -514,7 +517,7 @@ export class IdeView {
     } else {
       this.expanded.add(n.path);
       if (!n.children) {
-        try { n.children = await api.fsTree(n.path, 2); } catch (_) {}
+        try { n.children = await this.fs.fsTree(n.path, 2); } catch (_) {}
       }
     }
     this._renderTree();
@@ -533,7 +536,7 @@ export class IdeView {
         if (e) { doc = e.doc.linkedDoc({ sharedHist: false, mode: modeFor(baseName(path)) }); break; }
       }
       if (!doc) {
-        const content = await api.fsRead(path);
+        const content = await this.fs.fsRead(path);
         doc = CM.Doc(content, modeFor(baseName(path)));
       }
       group.open.push({ path, doc, dirty: false });
@@ -608,7 +611,7 @@ export class IdeView {
     if (t) { clearTimeout(t); this._autoTimers.delete(f.path); }
     const text = f.doc.getValue();
     try {
-      await api.fsWrite(f.path, text);
+      await this.fs.fsWrite(f.path, text);
       // 쓰는 동안 추가 편집됐으면 dirty 유지(자동 저장이 이어서 기록).
       if (f.doc.getValue() !== text) { this._scheduleAutosave(f.path); return; }
       this._clearDirty(f.path);
@@ -626,7 +629,7 @@ export class IdeView {
     for (const g of this.groups.values()) { f = g.open.find((o) => o.path === path); if (f) break; }
     if (!f || !f.dirty) return;
     const text = f.doc.getValue();
-    try { await api.fsWrite(path, text); } catch (e) { this._toast(String(e)); return; }
+    try { await this.fs.fsWrite(path, text); } catch (e) { this._toast(String(e)); return; }
     if (f.doc.getValue() !== text) { this._scheduleAutosave(path); return; } // 쓰는 동안 추가 편집
     this._clearDirty(path);
   }
@@ -880,7 +883,7 @@ export class IdeView {
       if (!commit || !name) return;
       const dest = dirPath + "/" + name;
       try {
-        if (isDir) await api.fsMkdir(dest); else await api.fsCreateFile(dest);
+        if (isDir) await this.fs.fsMkdir(dest); else await this.fs.fsCreateFile(dest);
         const node = this._findNode(dirPath);
         if (node) node.children = null;
         await this._reload();
@@ -905,7 +908,7 @@ export class IdeView {
       if (!commit || !name || name === n.name) { this._renderTree(); return; }
       try {
         const dest = parentOf(n.path) + "/" + name;
-        await api.fsRename(n.path, dest);
+        await this.fs.fsRename(n.path, dest);
         for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
         const pnode = this._findNode(parentOf(n.path));
         if (pnode) pnode.children = null;
@@ -919,7 +922,7 @@ export class IdeView {
 
   async _delete(n) {
     try {
-      await api.fsDelete(n.path);
+      await this.fs.fsDelete(n.path);
       for (const g of this.groups.values()) {
         g.open = g.open.filter((f) => f.path !== n.path && !f.path.startsWith(n.path + "/"));
         if (g.active >= g.open.length) g.active = g.open.length - 1;
@@ -989,7 +992,7 @@ export class IdeView {
       if (dragging && overFolder) {
         try {
           const dest = overFolder + "/" + n.name;
-          await api.fsRename(n.path, dest);
+          await this.fs.fsRename(n.path, dest);
           for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
           this.tree = null;
           this.searchTree = null;
@@ -1026,7 +1029,7 @@ export class IdeView {
           if (f.dirty || seen.has(f.path)) continue;
           seen.add(f.path);
           let content;
-          try { content = await api.fsRead(f.path); } catch (_) { continue; }
+          try { content = await this.fs.fsRead(f.path); } catch (_) { continue; }
           if (typeof content !== "string" || f.dirty || content === f.doc.getValue()) continue;
           this._applyExternal(f, content);
         }
@@ -1035,7 +1038,7 @@ export class IdeView {
       this._syncTick = (this._syncTick + 1) % 6;
       if (this._syncTick === 0 && !this.searchTree) {
         try {
-          const t = await api.fsTree(this.root, 4);
+          const t = await this.fs.fsTree(this.root, 4);
           if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
         } catch (_) { /* noop */ }
       }
@@ -1062,7 +1065,7 @@ export class IdeView {
     this._autoTimers.clear();
     const seen = new Set();
     for (const g of this.groups.values()) for (const f of g.open) {
-      if (f.dirty && !seen.has(f.path)) { seen.add(f.path); api.fsWrite(f.path, f.doc.getValue()).catch(() => {}); }
+      if (f.dirty && !seen.has(f.path)) { seen.add(f.path); this.fs.fsWrite(f.path, f.doc.getValue()).catch(() => {}); }
     }
     _ideInstances.delete(this);
     syncGlobalDirty();

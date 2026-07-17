@@ -116,6 +116,10 @@ export const api = {
   // UI 실시간 채널(WS) 접속 URL — 티켓 발급 포함(완성된 ws URL 문자열).
   uiStreamUrl: () => invoke("ui_stream_url"),
 
+  // ── 원격 PC 릴레이(back REST, deviceToken 은 Rust 내부) — /api/daemon/* 전용 ──
+  backApi: (method, path, body) => invoke("back_api", { method, path, body: body ?? null }),
+  backBase: () => invoke("back_base"),
+
   // ── 자동 실행(로그인 아이템) ──
   autostartEnabled: () => invoke("plugin:autostart|is_enabled"),
   autostartEnable: () => invoke("plugin:autostart|enable"),

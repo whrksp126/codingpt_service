@@ -569,6 +569,9 @@ pub fn run() {
             bridge::notif_read,
             bridge::notif_read_all,
             bridge::ui_stream_url,
+            // 원격 PC fs/프리뷰(back 릴레이)
+            bridge::back_api,
+            bridge::back_base,
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,

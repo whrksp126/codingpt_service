@@ -685,10 +685,20 @@ function mapRpcError(res, e) {
   return errorResponse(res, e, 500);
 }
 
+// fs/프리뷰 RPC 의 대상 호스트 지정 — 터미널 device-start 와 동일 규약(hostDeviceId=DaemonDevice.id).
+//  미지정이면 기존대로 활성 러너. 활성 러너를 바꾸지 않고 특정 PC 를 직결한다(PC 앱 원격 IDE/프리뷰).
+function connOptsOf(req) {
+  const raw = (req.query && req.query.hostDeviceId) != null ? req.query.hostDeviceId
+    : (req.body && req.body.hostDeviceId);
+  if (raw == null || raw === '') return undefined;
+  const rid = Number(raw);
+  return Number.isInteger(rid) ? { runnerId: rid } : undefined;
+}
+
 // GET /api/daemon/fs/list?path=  (인증) — 데몬 파일 목록
 async function fsList(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.list', { path: req.query.path || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.list', { path: req.query.path || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -696,7 +706,7 @@ async function fsList(req, res) {
 // GET /api/daemon/fs/tree?path=  (인증) — 선택 폴더 아래 파일 flat 목록(모바일 IDE 소스용)
 async function fsTree(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.tree', { path: req.query.path || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.tree', { path: req.query.path || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -704,7 +714,7 @@ async function fsTree(req, res) {
 // GET /api/daemon/fs/read?path=&base64=1  (인증) — 텍스트 파일 내용(base64=1 이면 이미지 등 원본 바이트)
 async function fsRead(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.read', { path: req.query.path || '', base64: req.query.base64 === '1' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.read', { path: req.query.path || '', base64: req.query.base64 === '1' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -712,7 +722,7 @@ async function fsRead(req, res) {
 // GET /api/daemon/fs/grep?path=&q=  (인증) — 프로젝트 폴더 내 리터럴(대소문자무시) 검색
 async function fsGrep(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.grep', { path: req.query.path || '', query: req.query.q || '' }, 20000);
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.grep', { path: req.query.path || '', query: req.query.q || '' }, 20000, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -721,7 +731,7 @@ async function fsGrep(req, res) {
 async function fsWrite(req, res) {
   try {
     const { path: p, content } = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.write', { path: p, content });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.write', { path: p, content }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -729,28 +739,28 @@ async function fsWrite(req, res) {
 // POST /api/daemon/fs/mkdir  (인증) body:{ path } — 디렉토리 생성
 async function fsMkdir(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.mkdir', { path: (req.body && req.body.path) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.mkdir', { path: (req.body && req.body.path) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/fs/create  (인증) body:{ path } — 빈 파일 생성
 async function fsCreateFile(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.createFile', { path: (req.body && req.body.path) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.createFile', { path: (req.body && req.body.path) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/fs/rename  (인증) body:{ path, dest } — 이름변경/이동
 async function fsRename(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.rename', { path: (req.body && req.body.path) || '', dest: (req.body && req.body.dest) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.rename', { path: (req.body && req.body.path) || '', dest: (req.body && req.body.dest) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/fs/delete  (인증) body:{ path } — 삭제(재귀)
 async function fsDelete(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.delete', { path: (req.body && req.body.path) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.delete', { path: (req.body && req.body.path) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -758,7 +768,7 @@ async function fsDelete(req, res) {
 // POST /api/daemon/fs/watch  (인증) body:{ path } — 그 디렉토리 변경을 감시(단일). 이벤트는 /events SSE 로.
 async function fsWatch(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.watch', { path: (req.body && req.body.path) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.watch', { path: (req.body && req.body.path) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -766,7 +776,7 @@ async function fsWatch(req, res) {
 // POST /api/daemon/fs/unwatch  (인증)
 async function fsUnwatch(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.unwatch', {});
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.unwatch', {}, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -984,8 +994,10 @@ const _pvSweeper = setInterval(() => {
 }, 5 * 60 * 1000);
 if (_pvSweeper.unref) _pvSweeper.unref();
 
-function previewTokenFor(userId, port) {
-  return 'dpv-' + crypto.createHmac('sha256', PREVIEW_SECRET).update(`${userId}:${port}`).digest('hex').slice(0, 18);
+function previewTokenFor(userId, port, runnerId) {
+  // 호스트 지정 시 토큰에 포함 — 다른 PC 의 같은 포트와 결정론 토큰이 충돌하지 않게.
+  const scope = runnerId != null ? `${userId}:${port}:${runnerId}` : `${userId}:${port}`;
+  return 'dpv-' + crypto.createHmac('sha256', PREVIEW_SECRET).update(scope).digest('hex').slice(0, 18);
 }
 function resolvePreviewToken(token) {
   const s = previewTokens.get(token);
@@ -1006,19 +1018,25 @@ function parseCookies(header) {
 async function previewPorts(req, res) {
   try {
     // cwd(워크스페이스 폴더, 홈-기준 상대) — 그 폴더 안에서 실행 중인 프로세스의 포트만 감지.
-    const result = await daemonRelayService.callRpc(req.user.id, 'net.ports', { cwd: req.query.cwd || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'net.ports', { cwd: req.query.cwd || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// POST /api/daemon/preview/start  (인증) body:{ port } → 그 포트로의 무인증 프록시 토큰
+// POST /api/daemon/preview/start  (인증) body:{ port, hostDeviceId? } → 그 포트로의 무인증 프록시 토큰
+//  hostDeviceId 지정 시 그 PC 의 dev 서버로 터널(활성 러너 무변경) — 미지정=기존대로 활성 러너.
 async function previewStart(req, res) {
   const port = parseInt((req.body || {}).port, 10);
   if (!Number.isFinite(port) || port <= 0 || port >= 65536) {
     return errorResponse(res, new Error('유효한 port 가 필요합니다.'), 400);
   }
-  const token = previewTokenFor(req.user.id, port);
-  previewTokens.set(token, { userId: req.user.id, port, expiresAt: Date.now() + PREVIEW_TTL_MS });
+  const opts = connOptsOf(req);
+  const runnerId = opts ? opts.runnerId : null;
+  if (opts && !daemonRelayService.pickConn(req.user.id, opts)) {
+    return errorResponse(res, new Error('해당 PC 데몬이 연결되어 있지 않습니다.'), 409);
+  }
+  const token = previewTokenFor(req.user.id, port, runnerId);
+  previewTokens.set(token, { userId: req.user.id, port, runnerId, expiresAt: Date.now() + PREVIEW_TTL_MS });
   return successResponse(res, { token, url: `/api/daemon/preview/${token}/`, port });
 }
 
@@ -1032,7 +1050,7 @@ function previewEntry(req, res) {
   const prefix = `/api/daemon/preview/${token}`;
   let path = req.originalUrl.slice(prefix.length) || '/';
   if (!path.startsWith('/')) path = '/' + path;
-  return daemonRelayService.proxyHttp(sess.userId, sess.port, path, req, res);
+  return daemonRelayService.proxyHttp(sess.userId, sess.port, path, req, res, sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
 }
 
 // 미들웨어 — non-/api 루트 요청에 dpv 쿠키가 있으면 데몬 dev 서버로 프록시(Vite 절대경로/에셋).
@@ -1042,7 +1060,7 @@ function previewCookieMiddleware(req, res, next) {
   if (!token) return next();
   const sess = resolvePreviewToken(token);
   if (!sess) return next();
-  return daemonRelayService.proxyHttp(sess.userId, sess.port, req.originalUrl, req, res);
+  return daemonRelayService.proxyHttp(sess.userId, sess.port, req.originalUrl, req, res, sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
 }
 
 module.exports = {

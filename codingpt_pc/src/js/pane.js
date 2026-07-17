@@ -6,6 +6,7 @@
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { IdeView } from "./ide.js";
+import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
 
@@ -60,6 +61,29 @@ export function termTabLabel(t) {
   const base = t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
   const cmd = (t.cmd || "").trim();
   return cmd && !IDLE_CMDS.has(cmd) ? `${base} · ${cmd}` : base;
+}
+
+// ── 원격 워크스페이스 프리뷰 — 그 PC 의 localhost dev 서버를 back 프록시 URL 로 치환 ──
+//  모바일 PaneView 와 동일 모델: 표시(주소창/영속)는 localhost 그대로, webview 로드만 프록시 URL.
+//  결정론 토큰이라 재시작해도 동일 URL — 매 내비게이션마다 start 를 다시 쳐서 TTL 을 연장한다.
+const LOCAL_PREVIEW_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(?::(\d{2,5}))?([/?#].*)?$/i;
+const _proxyDisplay = new Map(); // 절대 프록시 base → "http://localhost:<port>" (주소창 역매핑)
+async function remotePreviewUrl(url, ctx) {
+  if (!url || !ctx || ctx.isLocal || ctx.hostDeviceId == null) return url;
+  const m = LOCAL_PREVIEW_RE.exec(String(url).trim());
+  if (!m) return url; // 외부 URL 은 프록시 불필요
+  const port = m[1] ? parseInt(m[1], 10) : 80;
+  const r = await api.backApi("POST", "/api/daemon/preview/start", { port, hostDeviceId: ctx.hostDeviceId });
+  const base = (await api.backBase()) + String(r?.url || "").replace(/\/+$/, "");
+  _proxyDisplay.set(base, `http://localhost:${port}`);
+  return base + (m[2] || "/");
+}
+// webview 가 보고한 실제 URL(프록시)을 사용자 표시용 localhost URL 로 되돌린다.
+function displayPreviewUrl(u) {
+  for (const [base, local] of _proxyDisplay) {
+    if (u && u.startsWith(base)) return local + (u.slice(base.length) || "/");
+  }
+  return u;
 }
 
 // ── 프리뷰 툴바(cmux식): ‹ › ↻ [주소창] ☀(테마) 🛠(개발자도구) ↗(외부) — 혼합 탭/독립 pane 공용 ──
@@ -130,7 +154,8 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
       setTimeout(() => api.previewControl(getId(), "devtools_fit").catch(() => {}), 2200);
     }
   });
-  ext.addEventListener("click", () => { if (st.url) api.openExternal(st.url).catch(() => {}); });
+  // 원격 프록시로 보는 중이면 외부 브라우저에는 실제(프록시) URL — localhost 는 이 기기가 아님.
+  ext.addEventListener("click", () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     const u = smartUrl(input.value);
@@ -148,11 +173,13 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
       if (st.disposed || !info) return;
       setNavState(!!info.can_back, !!info.can_fwd);
       if (info.url) {
-        st.url = info.url;
-        if (document.activeElement !== input) input.value = info.url;
+        st.rawUrl = info.url;
+        const disp = displayPreviewUrl(info.url);
+        st.url = disp;
+        if (document.activeElement !== input) input.value = disp;
       }
       let fav = "";
-      try { fav = new URL(info.url || st.url).origin + "/favicon.ico"; } catch (_) {}
+      try { fav = new URL(st.rawUrl || st.url).origin + "/favicon.ico"; } catch (_) {}
       const title = info.title || "";
       if (title !== st.meta.title || fav !== st.meta.favicon) {
         st.meta = { title, favicon: fav };
@@ -166,8 +193,10 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
     onLoaded(u) {
       if (st.disposed) return;
       if (u) {
-        st.url = u;
-        if (document.activeElement !== input) input.value = u;
+        st.rawUrl = u;
+        const disp = displayPreviewUrl(u);
+        st.url = disp;
+        if (document.activeElement !== input) input.value = disp;
       }
       if (st.dark) api.previewControl(getId(), "theme_on").catch(() => {}); // 내비게이션마다 재주입
       dtOnPageLoaded(getId()); // 크롬 데브툴 열려 있으면 chobitsu 재주입 + enable 리플레이
@@ -183,10 +212,14 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
 // 혼합 탭용 프리뷰 표면 — 표준 프리뷰 pane(_buildFrame/_startPreviewSync)과 동일 동작을
 //  탭 host 안에 캡슐화. webview id 는 탭 tid 기반(pane 당 여러 프리뷰 탭 공존 가능).
 class PreviewSurface {
-  constructor(parent, tid, tab, persist, onMeta) {
+  constructor(parent, tid, tab, persist, onMeta, ctx) {
     this.id = "pv-" + tid;
     this.tab = tab;
+    this.ctx = ctx || null;
     this.url = tab.url || "";
+    // webview 에 실제로 로드할 URL — 원격 워크스페이스의 localhost 는 back 프록시로 치환(비동기).
+    this.effUrl = this.url;
+    this._applyEff(this.url);
     this.bar = makePreviewBar({
       getId: () => this.id,
       getHost: () => this.host,
@@ -194,8 +227,7 @@ class PreviewSurface {
       onNavigate: (u) => {
         this.tab.url = u;
         this.url = u;
-        api.previewNavigate(this.id, u).catch(() => {});
-        this._key = "";
+        this._applyEff(u, true);
         persist?.();
       },
       onMeta: (m) => {
@@ -227,10 +259,10 @@ class PreviewSurface {
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = this._visible && r.width > 2 && r.height > 2 && !modalOpen && !dragging;
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.url].join("|");
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.effUrl].join("|");
         if (key !== this._key) {
           this._key = key;
-          if (this.url) api.previewSync(this.id, this.url, r.left, r.top, r.width, r.height, visible).catch(() => {});
+          if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
         }
       }
       this._raf = requestAnimationFrame(tick);
@@ -238,6 +270,17 @@ class PreviewSurface {
     this._raf = requestAnimationFrame(tick);
     // SPA 제목 변경 등 대비 — 표시 중일 때 저빈도 정보 갱신.
     this._infoTimer = setInterval(() => { if (this._visible && this.url) this.bar.refreshInfo(); }, 4000);
+  }
+  // 원격이면 프록시 URL 확보 후 반영(로컬/외부 URL 은 그대로). navigate=true 면 즉시 이동까지.
+  _applyEff(u, navigate) {
+    remotePreviewUrl(u, this.ctx)
+      .catch(() => u) // 대상 데몬 오프라인 등 — 원본 URL 로 폴백(에러 페이지로 상황 노출)
+      .then((eff) => {
+        if (this._disposed) return;
+        this.effUrl = eff;
+        this._key = "";
+        if (navigate) api.previewNavigate(this.id, eff).catch(() => {});
+      });
   }
   setVisible(v) { this._visible = v; }
   // keepWebview=true — 탭 이동(다른 pane 재생성 예정): 네이티브 webview 를 닫지 않고 넘긴다.
@@ -452,22 +495,18 @@ export class PaneView {
   }
 
   // 내장 IDE(파일트리 + CodeMirror).
-  // 원격 호스트 미지원 표면 안내(멀티 PC 후속: fs RPC 경유 원격 IDE)
-  _remoteNotice(host, what) {
-    const d = document.createElement("div");
-    d.style.cssText = "display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:var(--text-dim,#8b93a7);font-size:12.5px;";
-    d.innerHTML = `<div>다른 PC 워크스페이스에서는 ${what} 를 아직 지원하지 않아요.</div><div>터미널로 작업하거나, 해당 PC 에서 열어주세요.</div>`;
-    host.appendChild(d);
+  // 파일 전송 계층 — 이 호스트면 로컬 fsapi(기본), 다른 PC 워크스페이스면 back fs 릴레이(원격 IDE).
+  _ideFs() {
+    return this.ctx.isLocal ? null : makeRemoteFs(this.ctx.hostDeviceId);
   }
 
   _buildIde() {
-    // 다른 PC(원격 호스트) 워크스페이스 — PC IDE 는 로컬 fs 직결이라 아직 미지원(터미널만).
-    if (!this.ctx.isLocal) { this._remoteNotice(this.body, "IDE"); return; }
     this.ide = new IdeView(this.ctx.localPath || "", this.body, {
       openPath: this.node.openPath || null,
       paneId: this.id,
       paneDropZone: this.ctx.paneDropZone,
       onFileSplit: this.ctx.onFileSplit,
+      fs: this._ideFs(),
     });
   }
 
@@ -485,8 +524,7 @@ export class PaneView {
       onNavigate: (u) => {
         this.node.url = u;
         this.previewUrl = u;
-        api.previewNavigate(this._pvId, u).catch(() => {});
-        this._previewKey = ""; // 강제 재동기화(없으면 생성)
+        this._applyPvEff(u, true);
         this.ctx.persist?.();
       },
       onMeta: (m) => {
@@ -501,7 +539,22 @@ export class PaneView {
     host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
     this.previewHost = host;
     this.previewUrl = this.node.url || "";
+    // webview 로드용 실효 URL(원격이면 프록시로 치환) — 복원된 URL 도 즉시 매핑.
+    this._pvEffUrl = this.previewUrl;
+    if (this.previewUrl) this._applyPvEff(this.previewUrl, false);
     this.body.append(this.previewBar.el, host);
+  }
+
+  // 독립 프리뷰 pane 의 실효 URL 반영(PreviewSurface._applyEff 와 동일 규칙).
+  _applyPvEff(u, navigate) {
+    remotePreviewUrl(u, this.ctx)
+      .catch(() => u)
+      .then((eff) => {
+        if (this.node.kind !== "preview") return;
+        this._pvEffUrl = eff;
+        this._previewKey = ""; // 강제 재동기화(없으면 생성)
+        if (navigate) api.previewNavigate(this._pvId, eff).catch(() => {});
+      });
   }
   // 독립 프리뷰 pane 의 정적 탭 라벨을 페이지 메타(제목/파비콘)로 갱신.
   _refreshStaticTabMeta() {
@@ -631,16 +684,16 @@ export class PaneView {
     this.body.appendChild(host);
     m = { host };
     if (tab.kind === "ide") {
-      if (!this.ctx.isLocal) { this._remoteNotice(host, "IDE"); return m; }
       m.ide = new IdeView(this.ctx.localPath || "", host, {
         openPath: tab.openPath || null,
         paneId: this.id,
         paneDropZone: this.ctx.paneDropZone,
         onFileSplit: this.ctx.onFileSplit,
+        fs: this._ideFs(),
       });
       m.ide.mount();
     } else {
-      m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.(), () => this.buildHead());
+      m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.(), () => this.buildHead(), this.ctx);
     }
     this._mixed.set(tab.tid, m);
     return m;
@@ -920,11 +973,11 @@ export class PaneView {
         const modalOpen = !!document.querySelector(".settings-modal:not(.hidden)");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = r.width > 2 && r.height > 2 && !modalOpen && !dragging;
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.previewUrl].join("|");
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
         if (key !== this._previewKey) {
           this._previewKey = key;
-          if (this.previewUrl) {
-            api.previewSync(this._pvId, this.previewUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
+          if (this._pvEffUrl) {
+            api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
           }
         }
       }
