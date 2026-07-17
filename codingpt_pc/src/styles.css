@@ -622,6 +622,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .login-gate .lg-row + .lg-row { border-top: 1px solid var(--border); }
 .login-gate .lg-row .lg-hint { display: block; font-size: 11px; color: var(--dim); margin-top: 2px; }
 .login-gate .lg-row input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.login-gate .lg-row .btn { white-space: nowrap; flex: none; }
 .login-gate .lg-back { position: absolute; top: 44px; left: 16px; background: none; border: none; color: var(--dim); font-size: 18px; cursor: pointer; padding: 8px 10px; border-radius: 8px; }
 .login-gate .lg-back:hover { color: var(--text); background: var(--elevated); }
 .login-gate .btn.lg.lg-wait { display: inline-flex; align-items: center; justify-content: center; gap: 9px; opacity: 0.95; cursor: default; }

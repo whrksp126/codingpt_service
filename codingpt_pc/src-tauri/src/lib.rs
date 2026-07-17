@@ -559,6 +559,7 @@ pub fn run() {
             bridge::ui_state_save,
             bridge::open_external,
             bridge::open_privacy_settings,
+            bridge::notification_permission,
             bridge::notify,
             // 앱 종료 가드(미저장 IDE 변경)
             set_ide_dirty,

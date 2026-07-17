@@ -79,7 +79,11 @@ function renderStep() {
           <input type="checkbox" id="lgAuto" ${autostartOn ? "checked" : ""} />
         </label>
         <div class="lg-row">
-          <span>모든 폴더 접근 허용<span class="lg-hint">원격 작업 중 권한 팝업 방지</span></span>
+          <span>알림 허용<span class="lg-hint">작업 완료를 바로 알려드려요</span></span>
+          <button id="lgNotif" class="btn small">허용</button>
+        </div>
+        <div class="lg-row">
+          <span>모든 폴더 접근 허용<span class="lg-hint">권한 팝업 방지 · 목록에 없으면 +로 추가</span></span>
           <button id="lgPerm" class="btn small">권한 열기</button>
         </div>
       </div>
@@ -90,6 +94,16 @@ function renderStep() {
     try { await (autostartOn ? api.autostartEnable() : api.autostartDisable()); }
     catch (_) { e.target.checked = autostartOn = !autostartOn; }
   });
+  // 알림 권한 — 진입 시 1회 자동 요청 + 버튼으로 재시도. granted 면 "허용됨" 고정.
+  const notifBtn = el.querySelector("#lgNotif");
+  const reqNotif = async () => {
+    try {
+      const ok = await api.notifPermission();
+      if (ok) { notifBtn.textContent = "허용됨"; notifBtn.disabled = true; }
+    } catch (_) { /* dev(비번들)에선 배너가 안 뜰 수 있음 — 릴리스에서 동작 */ }
+  };
+  notifBtn.addEventListener("click", reqNotif);
+  reqNotif();
   el.querySelector("#lgPerm").addEventListener("click", () => api.openPrivacySettings().catch(() => {}));
   el.querySelector("#lgDone").addEventListener("click", () => {
     pendingSetup = false;

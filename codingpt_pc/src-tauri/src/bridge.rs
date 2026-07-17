@@ -489,6 +489,12 @@ pub fn ui_state_save(state: serde_json::Value) -> Result<(), String> {
 pub fn open_privacy_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        // FDA 목록 등록 유도 — 보호 경로 접근을 시도해 두면 설정 목록에 앱이 나타나는 경우가
+        //  많다(거부돼도 무해). 안 나타나면 사용자가 + 로 추가(셋업 힌트 안내).
+        if let Some(h) = dirs::home_dir() {
+            let _ = std::fs::read_dir(h.join("Library").join("Mail"));
+            let _ = std::fs::metadata(h.join("Library").join("Application Support").join("com.apple.TCC").join("TCC.db"));
+        }
         std::process::Command::new("/usr/bin/open")
             .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
             .spawn()
@@ -497,6 +503,17 @@ pub fn open_privacy_settings() -> Result<(), String> {
     }
     #[cfg(not(target_os = "macos"))]
     Ok(())
+}
+
+// 알림 권한 요청(온보딩) — 릴리스 .app 에선 macOS 허용 배너가 뜨고, 허용 여부를 돌려준다.
+#[tauri::command]
+pub fn notification_permission(app: AppHandle) -> bool {
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+    let notif = app.notification();
+    if matches!(notif.permission_state(), Ok(PermissionState::Granted)) {
+        return true;
+    }
+    matches!(notif.request_permission(), Ok(PermissionState::Granted))
 }
 
 // 외부 브라우저로 URL 열기(프리뷰의 프레임 차단 사이트·웹검색용). http/https 만 허용.
