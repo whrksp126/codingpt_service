@@ -490,8 +490,10 @@ pub fn open_external(url: String) -> Result<(), String> {
     if !(u.starts_with("http://") || u.starts_with("https://")) {
         return Err("http/https URL 만 열 수 있습니다.".into());
     }
+    // 절대경로 — PATH 에 open shim(cmux 등 터미널 멀티플렉서의 URL 가로채기)이 있으면
+    //  브라우저 대신 그쪽 pane 으로 열린다(dev 실행 실측). 시스템 open 을 명시한다.
     #[cfg(target_os = "macos")]
-    let r = std::process::Command::new("open").arg(u).spawn();
+    let r = std::process::Command::new("/usr/bin/open").arg(u).spawn();
     #[cfg(target_os = "windows")]
     let r = std::process::Command::new("cmd").args(["/C", "start", "", u]).spawn();
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
