@@ -5,6 +5,7 @@
 #
 # 요구사항:
 #  · 키체인에 Developer ID Application 인증서(빌드 서명 — bundle-sidecar 가 자동 탐지)
+#  · 키체인 공증 프로필 `codingpt-notary` (xcrun notarytool store-credentials 로 등록)
 #  · ~/.codingpt-release/pc-updater.key (업데이터 서명 개인키 — 유출 금지·분실 시 업데이트 불가)
 #  · codingpt_back/.env.local 의 OBJECTSTORE_* (업로드 자격)
 #
@@ -49,7 +50,22 @@ if ! grep -q "Developer ID Application" <<<"$SIGN_INFO"; then
 fi
 echo "▸ 서명 검증 OK: $(grep 'Authority=Developer ID' <<<"$SIGN_INFO" | head -1)"
 
-# 3) objectstore 업로드 + latest.json (back 의 aws-sdk 재사용 — OBJECTSTORE_* 는 .env.local)
+# 3) 공증 + 스테이플 — Gatekeeper 첫 실행 경고 제거. dmg 공증이 내부 .app 까지 커버하고,
+#  업데이터 서명(latest.json)은 tar.gz 기준이라 dmg 스테이플과 무관하다.
+#  프로필 없으면 중단(미공증 릴리스 금지) — 등록: xcrun notarytool store-credentials codingpt-notary
+NOTARY_PROFILE="codingpt-notary"
+if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  echo "✗ 공증 프로필 없음: $NOTARY_PROFILE (notarytool store-credentials 로 등록)" >&2; exit 1
+fi
+echo "▸ 공증 제출(수 분 소요)..."
+NOTARY_OUT="$(xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait 2>&1 || true)"
+if ! grep -q "status: Accepted" <<<"$NOTARY_OUT"; then
+  echo "✗ 공증 실패:" >&2; tail -10 <<<"$NOTARY_OUT" >&2; exit 1
+fi
+xcrun stapler staple "$DMG" >/dev/null
+echo "▸ 공증+스테이플 OK"
+
+# 4) objectstore 업로드 + latest.json (back 의 aws-sdk 재사용 — OBJECTSTORE_* 는 .env.local)
 set -a; source "$BACK_DIR/.env.local"; set +a
 node "$PC_DIR/scripts/_release-upload.cjs" "$VERSION" "$TARGZ" "$SIG" "$DMG" "$NOTES"
 

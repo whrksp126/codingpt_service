@@ -52,7 +52,8 @@ bash scripts/release-pc.sh           # 릴리스: 서명 빌드→업데이터 �
 - **자동 업데이트**: 앱이 `/api/pc/update/{target}/{arch}/{ver}` 를 확인(설정>정보>업데이트).
   업데이터 개인키 `~/.codingpt-release/pc-updater.key` — 유출 금지, 분실 시 기존 설치본 업데이트 불가.
   배포물은 objectstore `codingpt/pc-releases/`, 다운로드는 back 스트리밍(`/api/pc/dl/*`).
-- 공증(notarization)은 미적용 — Gatekeeper 첫 실행 경고가 남는다(App Store Connect API 키 필요, 후속).
+- **공증 필수**: release-pc.sh 가 키체인 프로필 `codingpt-notary`(App Store Connect API 키)로
+  dmg 를 공증+스테이플한다(프로필 없으면 릴리스 중단). 업데이터 tar.gz 는 공증 무관(자체 서명 검증).
 
 - **데몬 코드(runner-core) 수정은 `npm run dev` 재시작으로만 반영**(선행 재번들).
   주의: tauri 의 beforeDevCommand 는 dev 에서 비동기(dev 서버용)라 번들-빌드 경주가 나므로 쓰지 않는다.
