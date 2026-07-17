@@ -641,14 +641,14 @@ async function startTerminal(req, res) {
 // GET /api/daemon/terminal/list?cwd=  (인증) → { windows:[{index,active,command}] }
 async function terminalList(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.list', { cwd: req.query.cwd || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.list', { cwd: req.query.cwd || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/terminal/new  (인증) body:{ cwd } → { index }
 async function terminalNew(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '', paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.new', { cwd: (req.body && req.body.cwd) || '', paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -656,14 +656,14 @@ async function terminalNew(req, res) {
 //  claim=true(사용자 터치/포커스/탭 클릭)일 때만 데몬이 창 크기를 이 기기로 리사이즈.
 async function terminalSelect(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '', claim: !!(req.body && req.body.claim) });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.select', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '', claim: !!(req.body && req.body.claim) }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
 // POST /api/daemon/terminal/close  (인증) body:{ cwd, index } → { ok }
 async function terminalClose(req, res) {
   try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.close', { cwd: (req.body && req.body.cwd) || '', index: (req.body && req.body.index) | 0, paneId: (req.body && req.body.paneId) || '', client: (req.body && req.body.client) || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -672,7 +672,7 @@ async function terminalClose(req, res) {
 async function terminalUnview(req, res) {
   try {
     const b = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.unview', { cwd: b.cwd || '', index: b.index | 0, paneId: b.paneId || '', client: b.client || '' });
+    const result = await daemonRelayService.callRpc(req.user.id, 'terminal.unview', { cwd: b.cwd || '', index: b.index | 0, paneId: b.paneId || '', client: b.client || '' }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
