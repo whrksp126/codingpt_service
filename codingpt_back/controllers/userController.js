@@ -74,10 +74,33 @@ const updateUser = async (req, res) => {
   }
 };
 
-// 사용자 삭제
+// 회원 탈퇴 — 본인 계정만(IDOR 차단). DB 삭제 전에 데몬/클라우드·objectstore 를 best-effort 정리.
 const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!req.user || String(req.user.id) !== String(id)) {
+      return errorResponse(res, { message: '본인 계정만 탈퇴할 수 있습니다.' }, 403);
+    }
+    // ① 살아있는 데몬 연결 강제 종료 + 클라우드 러너 컨테이너 정지(잔존 세션/과금 방지).
+    //    DB 행은 아래 user 삭제 시 FK CASCADE 로 함께 지워진다 — 여기선 라이브 자원만.
+    try {
+      const daemonRelayService = require('../services/daemonRelayService');
+      const cloudRunnerService = require('../services/cloudRunnerService');
+      const { DaemonDevice } = require('../models');
+      const devices = await DaemonDevice.findAll({ where: { user_id: id } });
+      for (const d of devices) {
+        try {
+          daemonRelayService.disconnectDevice(d.id);
+          if (d.runner_kind === 'cloud' && d.container_id) await cloudRunnerService.stopContainer(d.container_id).catch(() => {});
+        } catch (_) { /* best-effort */ }
+      }
+    } catch (e) { console.warn('탈퇴 기기 정리 실패(계속 진행):', e.message); }
+    // ② objectstore 사용자 데이터(workspace/<uid>/** — 메타·세션·체크포인트 번들) 정리.
+    try {
+      const workspaceService = require('../services/workspaceService');
+      await workspaceService.deleteAllForUser(id);
+    } catch (e) { console.warn('탈퇴 objectstore 정리 실패(계속 진행):', e.message); }
+    // ③ DB 삭제(트랜잭션) — 결제/구독/크레딧 이력은 정산 추적을 위해 보존(고아 허용, 의도).
     await userService.deleteUser(id);
     successResponse(res, null, '사용자가 성공적으로 삭제되었습니다.');
   } catch (error) {

@@ -303,6 +303,7 @@ async function ensurePool(session, abs) {
   try {
     await runTmux(['has-session', '-t', '=' + session]);
     await injectPoolEnv(session, abs); // 기존 세션에도 cpt 좌표 env 보장(멱등)
+    await ensureAutoRename(session);   // 구 서버/구 이름("터미널 N") 자동 개명 마이그레이션(멱등)
     return false;
   } catch (_) { /* 생성 */ }
   try {
@@ -311,11 +312,31 @@ async function ensurePool(session, abs) {
     // 여러 스트림이 동시에 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
     if (!/duplicate session/.test(String(e.message || ''))) throw e;
     await injectPoolEnv(session, abs).catch(() => {});
+    await ensureAutoRename(session).catch(() => {});
     return false;
   }
-  await runTmux(['rename-window', '-t', `=${session}:0`, '터미널 1']).catch(() => {});
   await injectPoolEnv(session, abs).catch(() => {});
+  await ensureAutoRename(session).catch(() => {});
   return true;
+}
+
+// 자동 개명(automatic-rename) 보장 — cmux 탭처럼 실행 중엔 명령, 대기 중엔 폴더명.
+//  tmux.conf 는 서버 시작 시에만 읽히므로, 이미 떠 있는 서버(구 conf 로 시작)에도 전역 옵션을
+//  런타임 주입한다. 구 데몬이 -n 으로 만든 "터미널 N" window 는 per-window automatic-rename 이
+//  꺼져 있어 개별로 다시 켠다(사용자 수동 이름 = "터미널 N" 패턴 밖 → 그대로 보존).
+const AUTO_RENAME_FMT = '#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{pane_current_command}}';
+const autoRenameDone = new Set(); // 세션당 1회(데몬 수명 동안)
+async function ensureAutoRename(session) {
+  if (autoRenameDone.has(session)) return;
+  await runTmux(['set-window-option', '-g', 'automatic-rename-format', AUTO_RENAME_FMT]).catch(() => {});
+  await runTmux(['set-window-option', '-g', 'automatic-rename', 'on']).catch(() => {});
+  const wins = await poolWindows(session);
+  for (const w of wins) {
+    if (/^터미널 \d+$/.test(w.name || '')) {
+      await runTmux(['set-window-option', '-t', `=${session}:${w.index}`, 'automatic-rename', 'on']).catch(() => {});
+    }
+  }
+  autoRenameDone.add(session);
 }
 
 // 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 이 세션에서 생성되는 모든 window 의 셸이 상속한다.
@@ -361,16 +382,6 @@ async function poolWindows(session) {
   });
 }
 
-// 다음 터미널 이름("터미널 N") — 이름이 tmux window 에 저장돼 전 기기 동일하게 보인다.
-function nextPoolName(wins) {
-  let max = 0;
-  for (const w of wins) {
-    const m = /^터미널 (\d+)$/.exec(w.name || '');
-    if (m) max = Math.max(max, parseInt(m[1], 10));
-  }
-  return '터미널 ' + (max + 1);
-}
-
 // pane 뷰 세션 보장 + 풀 window(win) 를 같은 인덱스로 link + select.
 //  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
 //  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거(불필요 셸 잔재 방지).
@@ -383,7 +394,8 @@ async function ensureView(psess, session, win, abs) {
     //  자동 재연결마다 부활한다(1개만 남겨도 잠시 후 3개). 죽은 win 은 풀의 첫 터미널로 폴백하고,
     //  레이아웃 정리는 리컨실러가 한다. 풀이 완전히 비었을 때만 새 터미널 1개 생성.
     if (!wins.length) {
-      await runTmux(['new-window', '-d', '-t', `=${session}:0`, '-n', '터미널 1', '-c', abs]).catch(() => {});
+      // -n 금지 — 명시 이름은 그 window 의 automatic-rename 을 꺼서 자동 개명이 죽는다.
+      await runTmux(['new-window', '-d', '-t', `=${session}:0`, '-c', abs]).catch(() => {});
       wins = await poolWindows(session);
     }
     target = wins[0];
@@ -453,19 +465,20 @@ async function handleTerminalRpc(method, params) {
   }
   if (method === 'terminal.new') {
     // 풀에 새 터미널 생성(전 기기에 나타남). 풀이 없으면 생성된 window 0 이 곧 새 터미널.
+    //  이름은 자동 개명(automatic-rename)이 부여 — -n 으로 지정하면 그 window 의 자동 개명이 꺼진다.
     const created = await ensurePool(session, abs);
     if (created) {
       if (paneId) await resizeToClient(psess, session, 0);
-      return { index: 0, name: '터미널 1' };
+      const w0 = (await poolWindows(session)).find((w) => w.index === 0);
+      return { index: 0, name: (w0 && w0.name) || '' };
     }
-    const wins = await poolWindows(session);
-    const name = nextPoolName(wins);
-    const out = await runTmux(['new-window', '-d', '-t', '=' + session, '-n', name, '-c', abs, '-P', '-F', '#{window_index}']);
-    const index = parseInt(out.trim(), 10) || 0;
+    const out = await runTmux(['new-window', '-d', '-t', '=' + session, '-c', abs, '-P', '-F', '#{window_index}\t#{window_name}']);
+    const [idxStr, autoName] = out.trim().split('\t');
+    const index = parseInt(idxStr, 10) || 0;
     // 요청 pane 의 클라이언트 크기로 즉시 맞춤 — 기본 크기(80x24)→실크기 리사이즈로 새 터미널에
     //  재프롬프트가 쌓이는 것("내역처럼 보임")을 방지.
     if (paneId) await resizeToClient(psess, session, index);
-    return { index, name };
+    return { index, name: autoName || '' };
   }
   if (method === 'terminal.select') {
     // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/포커스/드롭 이동 공용).

@@ -326,6 +326,18 @@ function fmtDate(iso) {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
+// 최근 작업 시각 — 가까울수록 상대 표기(방금/분/시간), 하루 넘으면 날짜(모바일 fmtRecent 미러).
+function fmtRecent(iso) {
+  if (!iso) return "—";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "—";
+  const diff = Date.now() - t;
+  if (diff < 60_000) return "방금 전";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}시간 전`;
+  return fmtDate(iso);
+}
+
 // "내 기기" 목록 렌더(state.devices). 클라우드 호스트 포함.
 // 기기 아래 작은 텍스트 = 운영체제(정확히). 위 텍스트는 기기명(d.name).
 function deviceOsLabel(d) {
@@ -342,7 +354,7 @@ function renderDeviceList() {
   const el = connBody?.querySelector("#deviceTable");
   if (!el) return;
   if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`; return; }
-  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-loc">위치</span><span class="dc-date">등록됨</span><span class="dc-act"></span></div>`;
+  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-loc">위치</span><span class="dc-date">최근 작업</span><span class="dc-act"></span></div>`;
   const rows = state.devices.map((d) => {
     const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
     const icon = d.runnerKind === "cloud"
@@ -356,7 +368,7 @@ function renderDeviceList() {
       <span class="dc-name"><span class="dev-ic">${icon}</span><span class="dc-nm">${esc(d.name)}</span>${cur}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
       <span class="dc-os">${esc(deviceOsLabel(d))}</span>
       <span class="dc-loc">—</span>
-      <span class="dc-date">${esc(fmtDate(d.createdAt))}</span>
+      <span class="dc-date">${esc(fmtRecent(d.lastSeenAt || d.createdAt))}</span>
       <span class="dc-act">${act}</span>
     </div>`;
   }).join("");

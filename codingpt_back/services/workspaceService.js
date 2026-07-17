@@ -413,6 +413,19 @@ async function deleteWorkspace(userId, id) {
   return { id, deleted };
 }
 
+/** 회원 탈퇴 정리 — 사용자 objectstore 전체(workspace/<uid>/**) 삭제(메타·세션·번들 포함) */
+async function deleteAllForUser(userId) {
+  const uid = requireUid(userId);
+  const listed = await s3Service.listFiles(`workspace/${uid}`, true);
+  const fileNodes = listed.success ? flattenTree(listed.files) : [];
+  let deleted = 0;
+  for (const node of fileNodes) {
+    const res = await s3Service.deleteFile(node.path); // node.path = 풀키(prefix 포함)
+    if (res.success) deleted++;
+  }
+  return { deleted };
+}
+
 /** 신선도 보고(호스트 데몬) — git 상태가 실제로 달라졌을 때만 objectstore 에 기록 */
 async function updateGitStatus(userId, id, git) {
   const uid = requireUid(userId);
@@ -438,6 +451,7 @@ module.exports = {
   updateGitStatus,
   duplicateWorkspace,
   deleteWorkspace,
+  deleteAllForUser,
   getWorkspaceSession,
   saveWorkspaceSession,
   setWorkspaceHost,

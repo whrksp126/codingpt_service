@@ -55,12 +55,13 @@ export function newTid() {
   return "mx" + _tidSeq++ + "-" + Date.now().toString(36);
 }
 
-// 터미널 탭 라벨 — 이름 + 실행 중 명령 부제("터미널 1 · claude"). 셸 자체(zsh 등)는 생략(cmux 미러).
+// 터미널 탭 라벨 — 이름(자동 개명: 실행 중=명령, 대기=폴더명) + 명령 부제.
+//  자동 개명으로 이름 자체가 명령과 같아지는 경우("claude · claude") 부제 생략. 셸 자체도 생략.
 const IDLE_CMDS = new Set(["zsh", "bash", "sh", "fish", "login", "-zsh", "-bash"]);
 export function termTabLabel(t) {
   const base = t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
   const cmd = (t.cmd || "").trim();
-  return cmd && !IDLE_CMDS.has(cmd) ? `${base} · ${cmd}` : base;
+  return cmd && !IDLE_CMDS.has(cmd) && cmd !== base ? `${base} · ${cmd}` : base;
 }
 
 // ── 원격 워크스페이스 프리뷰 — 그 PC 의 localhost dev 서버를 back 프록시 URL 로 치환 ──

@@ -123,8 +123,9 @@ pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
 //  주의: tmux -t 는 접두사 매칭이라, 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
 //  명령이 엉뚱한 세션에 떨어진다 → 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(), String> {
-    // 이미 있으면 아무것도 안 함.
+    // 이미 있으면 자동 개명 마이그레이션만 보장(프로세스당 세션 1회).
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_ok() {
+        ensure_auto_rename_once(ctx, session);
         return Ok(());
     }
     let abs_s = abs.to_string_lossy().to_string();
@@ -143,8 +144,44 @@ pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(),
     };
     if created.is_ok() {
         inject_pool_env(ctx, session, abs);
+        ensure_auto_rename_once(ctx, session);
     }
     created
+}
+
+// ensure_auto_rename 의 프로세스당 세션 1회 래퍼 — ensure_session 이 pane 부팅마다 불리므로 절약.
+fn ensure_auto_rename_once(ctx: &TmuxCtx, session: &str) {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static DONE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let done = DONE.get_or_init(|| Mutex::new(HashSet::new()));
+    {
+        let mut g = done.lock().unwrap();
+        if !g.insert(session.to_string()) {
+            return;
+        }
+    }
+    ensure_auto_rename(ctx, session);
+}
+
+// 자동 개명(automatic-rename) 보장 — 실행 중엔 명령, 대기 중엔 폴더명(cmux 탭 UX, 데몬 미러).
+//  이미 떠 있는 서버(구 conf)에도 전역 옵션을 런타임 주입하고, 구 빌드가 -n 으로 만들어
+//  per-window automatic-rename 이 꺼진 "터미널 N" window 를 개별로 다시 켠다(수동 이름은 보존).
+const AUTO_RENAME_FMT: &str =
+    "#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{pane_current_command}}";
+pub fn ensure_auto_rename(ctx: &TmuxCtx, session: &str) {
+    let _ = run(ctx, &["set-window-option", "-g", "automatic-rename-format", AUTO_RENAME_FMT]);
+    let _ = run(ctx, &["set-window-option", "-g", "automatic-rename", "on"]);
+    for w in list_windows(ctx, session) {
+        let is_legacy = w
+            .name
+            .strip_prefix("터미널 ")
+            .map(|rest| rest.trim().parse::<i64>().is_ok())
+            .unwrap_or(false);
+        if is_legacy {
+            let _ = run(ctx, &["set-window-option", "-t", &format!("={session}:{}", w.index), "automatic-rename", "on"]);
+        }
+    }
 }
 
 // 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 생성되는 window 셸이 상속(데몬 injectPoolEnv 미러).
@@ -202,21 +239,6 @@ pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
         .collect()
 }
 
-// 다음 풀 터미널 이름("터미널 N") — 이름이 tmux window 에 저장돼 전 기기 동일하게 보인다.
-fn next_pool_name(wins: &[WindowInfo]) -> String {
-    let mut max = 0i64;
-    for w in wins {
-        if let Some(rest) = w.name.strip_prefix("터미널 ") {
-            if let Ok(n) = rest.trim().parse::<i64>() {
-                if n > max {
-                    max = n;
-                }
-            }
-        }
-    }
-    format!("터미널 {}", max + 1)
-}
-
 #[derive(Serialize)]
 pub struct NewWindowInfo {
     pub index: i64,
@@ -249,15 +271,15 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
     let abs_s = abs.to_string_lossy().to_string();
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
-        let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
     }
     let mut win = win;
     let mut wins = list_windows(ctx, session);
     if !wins.iter().any(|w| w.index == win) {
         // 재생성 금지 — 그 인덱스에 창을 다시 만들면 다른 기기가 닫은 터미널이 스테일 참조/재연결마다
         //  부활한다. 죽은 win 은 풀의 첫 터미널로 폴백(레이아웃 정리는 리컨실러 몫), 풀이 비었을 때만 생성.
+        //  -n 금지 — 명시 이름은 그 window 의 automatic-rename 을 끈다.
         if wins.is_empty() {
-            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-n", "터미널 1", "-c", &abs_s]);
+            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-c", &abs_s]);
             wins = list_windows(ctx, session);
         }
         match wins.first() {
@@ -298,23 +320,29 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
 }
 
 // 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.
+//  이름은 자동 개명(automatic-rename)이 부여 — -n 지정은 그 window 의 자동 개명을 꺼서 금지.
 pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf, psess: Option<&str>) -> Result<NewWindowInfo, String> {
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
-        let _ = run(ctx, &["rename-window", "-t", &format!("={session}:0"), "터미널 1"]);
         if let Some(p) = psess {
             resize_to_client(ctx, p, session, 0);
         }
-        return Ok(NewWindowInfo { index: 0, name: "터미널 1".to_string() });
+        let name = list_windows(ctx, session)
+            .iter()
+            .find(|w| w.index == 0)
+            .map(|w| w.name.clone())
+            .unwrap_or_default();
+        return Ok(NewWindowInfo { index: 0, name });
     }
-    let name = next_pool_name(&list_windows(ctx, session));
     let abs_s = abs.to_string_lossy().to_string();
     // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 view 가 담당).
     let out = run(
         ctx,
-        &["new-window", "-d", "-t", &format!("={session}"), "-n", &name, "-c", &abs_s, "-P", "-F", "#{window_index}"],
+        &["new-window", "-d", "-t", &format!("={session}"), "-c", &abs_s, "-P", "-F", "#{window_index}\t#{window_name}"],
     )?;
-    let index: i64 = out.trim().parse().unwrap_or(0);
+    let mut it = out.trim().splitn(2, '\t');
+    let index: i64 = it.next().unwrap_or("0").trim().parse().unwrap_or(0);
+    let name = it.next().unwrap_or("").trim().to_string();
     // 요청 pane 클라이언트 크기로 즉시 맞춤 — 기본 크기→실크기 리사이즈 재프롬프트가 안 쌓이게.
     if let Some(p) = psess {
         resize_to_client(ctx, p, session, index);

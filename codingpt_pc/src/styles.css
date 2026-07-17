@@ -508,7 +508,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .dev-th { font-size: 11.5px; font-weight: 700; color: var(--dim); }
 .dc-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dc-name .dev-ic { color: var(--text3); flex: none; }
-.dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; }
+.dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
 .dc-os, .dc-loc, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-act { display: flex; justify-content: flex-end; }
 .dev-menu-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; background: transparent; color: var(--text3); border-radius: var(--r-sm); cursor: pointer; opacity: 0; transition: opacity 0.12s, background 0.12s; }
