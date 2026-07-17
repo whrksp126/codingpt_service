@@ -13,7 +13,7 @@ const s3Service = require('./s3Service');
 const workspaceService = require('./workspaceService');
 const daemonRelayService = require('./daemonRelayService');
 
-const RPC_TIMEOUT = 120000; // checkpoint/materialize 는 네트워크(번들 업/다운) 포함 → 넉넉히.
+const RPC_TIMEOUT = 600000; // checkpoint/materialize 는 대형 번들(수백MB)의 git 압축+업/다운 포함 — 분 단위 소요.
 
 function newCheckpointId() {
   return `ck_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
