@@ -161,7 +161,7 @@ function renderSection(force) {
     contentEl.innerHTML = `
       <div class="sm-h">정보</div>
       <div class="sm-card2">
-        <div class="sett-row"><span>버전</span><span class="dim">CodingPT PC 0.1.0</span></div>
+        <div class="sett-row"><span>버전</span><span class="dim">CodingPT PC 0.1.1</span></div>
         <div class="sett-row"><span>업데이트</span>
           <span style="display:inline-flex;align-items:center;gap:8px;">
             <span class="dim" id="updStatus">-</span>

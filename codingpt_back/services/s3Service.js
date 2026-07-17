@@ -1,4 +1,4 @@
-const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+const { S3Client, ListObjectsV2Command, GetObjectCommand, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, CopyObjectCommand, DeleteObjectsCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 // 텍스트로 취급할 확장자 — 이 목록에 없으면 바이너리로 보고 base64 로 디코딩/인코딩한다.
@@ -1398,6 +1398,42 @@ class S3Service {
     const { expiresIn = 900 } = options;
     const command = new GetObjectCommand({ Bucket: this.bucketName, Key: key });
     return getSignedUrl(this.s3Client, command, { expiresIn });
+  }
+
+  // ── S3 멀티파트(대용량 업로드 — Cloudflare 프록시의 요청당 100MB 제한 우회) ──
+  //  단일 presigned PUT 이 100MB 를 넘으면 CF 가 413 을 반환한다. 파트를 100MB 미만으로 쪼개
+  //  presigned UploadPart 로 올리면 각 요청이 제한 아래라 프록시를 통과한다(sync 번들용).
+
+  /** 멀티파트 업로드 시작 → uploadId 반환. */
+  async createMultipartUpload(key) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    const r = await this.s3Client.send(new CreateMultipartUploadCommand({ Bucket: this.bucketName, Key: key }));
+    return r.UploadId;
+  }
+
+  /** 파트 업로드용 presigned PUT URL 발급(partNumber 는 1부터). */
+  async getSignedPartUrl(key, uploadId, partNumber, options = {}) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    const { expiresIn = 900 } = options;
+    const command = new UploadPartCommand({
+      Bucket: this.bucketName, Key: key, UploadId: uploadId, PartNumber: partNumber,
+    });
+    return getSignedUrl(this.s3Client, command, { expiresIn });
+  }
+
+  /** 멀티파트 완료 — parts: [{ PartNumber, ETag }] (PartNumber 오름차순). */
+  async completeMultipartUpload(key, uploadId, parts) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    await this.s3Client.send(new CompleteMultipartUploadCommand({
+      Bucket: this.bucketName, Key: key, UploadId: uploadId,
+      MultipartUpload: { Parts: parts },
+    }));
+  }
+
+  /** 멀티파트 중단(파트 잔재 정리). */
+  async abortMultipartUpload(key, uploadId) {
+    if (!this.validatePath(key)) throw new Error('잘못된 오브젝트 키입니다.');
+    await this.s3Client.send(new AbortMultipartUploadCommand({ Bucket: this.bucketName, Key: key, UploadId: uploadId }));
   }
 }
 

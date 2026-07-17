@@ -107,26 +107,45 @@ function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex');
 
 // ── 제어 채널 ─────────────────────────────────────────────────────────
 
+// 인증 실패 negative cache — 폐기 토큰의 구버전 데몬(401 을 무시하고 백오프 없이 재시도하는
+//  옛 바이너리)이 초 단위로 두드려도 DB 조회·로그 없이 즉시 401 로 쳐낸다. 해시키라 원문 무보관.
+const authFailCache = new Map(); // tokenHash → expiresAt
+const AUTH_FAIL_TTL_MS = 60 * 1000;
+
 // GET /api/daemon/connect 업그레이드. Bearer deviceToken 을 DB 해시 대조로 인증.
 async function handleControlUpgrade(req, socket, head) {
   socket.on('error', () => { /* 인증 중 끊김 무시 */ });
   let device = null;
+  let tokenHash = null;
   try {
     const auth = req.headers.authorization || '';
     const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
     if (token) {
-      device = await DaemonDevice.findOne({ where: { token_hash: sha256(token), revoked_at: null } });
+      tokenHash = sha256(token);
+      const failUntil = authFailCache.get(tokenHash);
+      if (failUntil && failUntil > Date.now()) {
+        try { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); } catch (_) { /* noop */ }
+        try { socket.destroy(); } catch (_) { /* noop */ }
+        return;
+      }
+      device = await DaemonDevice.findOne({ where: { token_hash: tokenHash, revoked_at: null } });
     }
   } catch (e) {
     console.error('[daemonRelay] 제어 채널 인증 오류:', e.message);
+    tokenHash = null; // DB 일시 오류 — "토큰 무효" 로 오인해 캐시(60s 차단)하지 않는다
   }
   if (!device) {
     // 401 을 명시 응답 — 삭제/해제된 deviceToken 의 데몬이 이를 보고 재연결 폭주를 멈춘다
     //  (그냥 destroy 하면 데몬이 일시 네트워크 오류로 오인해 영원히 재시도).
+    if (tokenHash) {
+      if (authFailCache.size > 1000) authFailCache.clear(); // 무한 성장 방지(악의적 난수 토큰)
+      authFailCache.set(tokenHash, Date.now() + AUTH_FAIL_TTL_MS);
+    }
     try { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); } catch (_) { /* noop */ }
     try { socket.destroy(); } catch (_) { /* noop */ }
     return;
   }
+  if (tokenHash) authFailCache.delete(tokenHash); // 재페어링 등으로 유효해진 토큰 즉시 회복
 
   wss.handleUpgrade(req, socket, head, (ws) => registerControl(ws, device));
 }

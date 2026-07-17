@@ -150,6 +150,12 @@ function run(config) {
         console.error('[control] 서버에서 이 기기의 연결이 해제되었습니다. `pair` 를 다시 실행하세요.');
         process.exit(1);
       }
+      if (code === 4000) { // replaced — 같은 기기의 새 데몬이 연결됨. 재접속하면 서로 밀어내는
+        //  핑퐁(재연결 폭주)이 되므로 구 인스턴스는 조용히 물러난다(takeover 소켓이 못 잡는
+        //  다른 stateDir/구버전 고아까지 이 경로로 정리됨).
+        console.error('[control] 이 기기의 새 데몬 인스턴스로 대체되었습니다 — 이 인스턴스를 종료합니다.');
+        process.exit(0);
+      }
       scheduleReconnect();
     });
     ws.on('error', (e) => {

@@ -55,4 +55,21 @@ async function listCheckpoints(req, res) {
   } catch (e) { return mapErr(res, e); }
 }
 
-module.exports = { checkpoint, materialize, status, resolve, listCheckpoints };
+// POST /api/daemon/sync/multipart/:action  body:{ wsId, checkpointId, kind, uploadId?, partNumber?, parts? }
+//  대용량 번들 멀티파트 업로드(데몬 콜백, accountAuth). action = init | part-url | complete | abort.
+const MULTIPART_ACTIONS = {
+  'init': syncService.multipartInit,
+  'part-url': syncService.multipartPartUrl,
+  'complete': syncService.multipartComplete,
+  'abort': syncService.multipartAbort,
+};
+async function multipart(req, res) {
+  try {
+    const fn = MULTIPART_ACTIONS[req.params.action];
+    if (!fn) return errorResponse(res, new Error('알 수 없는 멀티파트 액션입니다.'), 404);
+    const result = await fn(req.user.id, req.body || {});
+    return successResponse(res, result);
+  } catch (e) { return mapErr(res, e); }
+}
+
+module.exports = { checkpoint, materialize, status, resolve, listCheckpoints, multipart };

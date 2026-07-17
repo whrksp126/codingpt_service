@@ -80,6 +80,7 @@ router.post('/ws/fulldisk', authMiddleware, daemonController.wsSetFullDisk); // 
 // 동기화(M4) — objectstore git-bundle 체크포인트/머티리얼라이즈/충돌. 데몬 오프라인이면 409.
 //  checkpoint/checkpoints 는 accountAuth(JWT|deviceToken 겸용) — PC 앱 자동 체크포인트가 deviceToken 으로 호출.
 router.post('/sync/checkpoint', accountAuth, syncController.checkpoint);
+router.post('/sync/multipart/:action', accountAuth, syncController.multipart); // 대용량 번들 파트 업로드(데몬 콜백)
 router.post('/sync/materialize', authMiddleware, syncController.materialize);
 router.get('/sync/status', authMiddleware, syncController.status);
 router.post('/sync/resolve', authMiddleware, syncController.resolve);

@@ -58,8 +58,9 @@ async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession
     session: await s3Service.getSignedPutUrl(sKey),
   };
   // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드. cwd 는 활성 러너 홈-기준 상대.
+  //  wsId 는 대용량(>80MB) 번들의 멀티파트 업로드 콜백(/sync/multipart/*)용 좌표.
   const result = await daemonRelayService.callRpc(userId, 'sync.checkpoint', {
-    cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession,
+    cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession, wsId,
   }, RPC_TIMEOUT);
 
   // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
@@ -131,4 +132,52 @@ async function listCheckpoints(userId, wsId) {
   return { head: manifest.head || null, checkpoints: (manifest.checkpoints || []).slice().reverse() };
 }
 
-module.exports = { checkpoint, materialize, status, resolve, listCheckpoints };
+// ── 멀티파트 업로드(대용량 번들 — Cloudflare 요청당 100MB 제한 우회) ─────────────
+//  데몬이 번들 생성 후 크기가 크면 이 REST 를 콜백한다. 키는 서버측 조립(데몬의 임의 key 금지),
+//  소유권은 매 호출 requireLocalWorkspace 로 확인. partNumber 1..10000(S3 규격).
+function multipartKey(wsId, checkpointId, kind) {
+  if (!/^ck_[A-Za-z0-9_-]+$/.test(String(checkpointId || ''))) {
+    const e = new Error('잘못된 체크포인트 ID 입니다.'); e.statusCode = 400; throw e;
+  }
+  return kind === 'session' ? sessionKey(wsId, checkpointId) : bundleKey(wsId, checkpointId);
+}
+async function multipartInit(userId, { wsId, checkpointId, kind } = {}) {
+  await requireLocalWorkspace(userId, wsId);
+  const key = multipartKey(wsId, checkpointId, kind);
+  const uploadId = await s3Service.createMultipartUpload(key);
+  return { uploadId };
+}
+async function multipartPartUrl(userId, { wsId, checkpointId, kind, uploadId, partNumber } = {}) {
+  await requireLocalWorkspace(userId, wsId);
+  const key = multipartKey(wsId, checkpointId, kind);
+  const n = Number(partNumber);
+  if (!uploadId || !Number.isInteger(n) || n < 1 || n > 10000) {
+    const e = new Error('잘못된 파트 번호입니다.'); e.statusCode = 400; throw e;
+  }
+  const url = await s3Service.getSignedPartUrl(key, String(uploadId), n);
+  return { url };
+}
+async function multipartComplete(userId, { wsId, checkpointId, kind, uploadId, parts } = {}) {
+  await requireLocalWorkspace(userId, wsId);
+  const key = multipartKey(wsId, checkpointId, kind);
+  if (!uploadId || !Array.isArray(parts) || !parts.length || parts.length > 10000) {
+    const e = new Error('잘못된 파트 목록입니다.'); e.statusCode = 400; throw e;
+  }
+  const clean = parts.map((p) => ({ PartNumber: Number(p.PartNumber), ETag: String(p.ETag || '') }));
+  if (clean.some((p) => !Number.isInteger(p.PartNumber) || p.PartNumber < 1 || !p.ETag)) {
+    const e = new Error('잘못된 파트 목록입니다.'); e.statusCode = 400; throw e;
+  }
+  await s3Service.completeMultipartUpload(key, String(uploadId), clean);
+  return { ok: true };
+}
+async function multipartAbort(userId, { wsId, checkpointId, kind, uploadId } = {}) {
+  await requireLocalWorkspace(userId, wsId);
+  const key = multipartKey(wsId, checkpointId, kind);
+  if (uploadId) await s3Service.abortMultipartUpload(key, String(uploadId)).catch(() => {});
+  return { ok: true };
+}
+
+module.exports = {
+  checkpoint, materialize, status, resolve, listCheckpoints,
+  multipartInit, multipartPartUrl, multipartComplete, multipartAbort,
+};

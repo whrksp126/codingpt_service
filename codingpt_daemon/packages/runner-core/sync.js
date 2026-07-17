@@ -74,12 +74,60 @@ function httpsPut(urlStr, buf) {
     const req = https.request(u, { method: 'PUT', headers: { 'Content-Length': buf.length } }, (res) => {
       const d = []; res.on('data', (c) => d.push(c));
       res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) resolve();
+        if (res.statusCode >= 200 && res.statusCode < 300) resolve(res.headers.etag || null);
         else reject(new Error(`업로드 실패(${res.statusCode}) ${Buffer.concat(d).toString('utf8').slice(0, 200)}`));
       });
     });
     req.on('error', reject); req.write(buf); req.end();
   });
+}
+
+// ── 대용량 업로드(멀티파트) — Cloudflare 프록시의 요청당 100MB 제한 우회 ──
+//  단일 PUT 이 그 제한에 걸리면 413 으로 전부 실패한다(거대 워크스페이스 번들).
+//  80MB 초과 본문은 back /sync/multipart/* 콜백으로 파트(64MB)를 나눠 올린다.
+const PART_SIZE = 64 * 1024 * 1024;
+const SINGLE_PUT_MAX = 80 * 1024 * 1024;   // CF 100MB 제한에 여유를 둔 단일 PUT 상한
+const UPLOAD_TOTAL_MAX = 4 * 1024 * 1024 * 1024; // 폭주 가드(4GB) — 스냅샷 대상이 아님을 명확히 실패
+
+async function syncBackApi(action, body) {
+  const configLib = require('./config');
+  const cfg = configLib.load();
+  if (!cfg || !cfg.serverUrl || !cfg.deviceToken) throw new Error('페어링돼 있지 않습니다');
+  const res = await fetch(cfg.serverUrl.replace(/\/+$/, '') + `/api/daemon/sync/multipart/${action}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.deviceToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const text = await res.text();
+  let json = null; try { json = JSON.parse(text); } catch (_) { /* noop */ }
+  if (!res.ok) throw new Error((json && json.message) || `multipart ${action} 실패(HTTP ${res.status})`);
+  return json || {};
+}
+
+// meta = { wsId, checkpointId, kind:'bundle'|'session' } — 없으면(구 back) 단일 PUT 폴백.
+async function uploadObject(putUrl, buf, meta) {
+  if (buf.length > UPLOAD_TOTAL_MAX) {
+    throw new Error(`스냅샷이 너무 큽니다(${Math.round(buf.length / 1048576)}MB). .gitignore 로 대용량 산출물을 제외해 주세요.`);
+  }
+  if (buf.length <= SINGLE_PUT_MAX || !meta || !meta.wsId) return httpsPut(putUrl, buf);
+
+  const coord = { wsId: meta.wsId, checkpointId: meta.checkpointId, kind: meta.kind };
+  const { uploadId } = await syncBackApi('init', coord);
+  if (!uploadId) throw new Error('멀티파트 시작 실패');
+  try {
+    const parts = [];
+    for (let off = 0, n = 1; off < buf.length; off += PART_SIZE, n++) {
+      const chunk = buf.subarray(off, Math.min(off + PART_SIZE, buf.length));
+      const { url } = await syncBackApi('part-url', { ...coord, uploadId, partNumber: n });
+      const etag = await httpsPut(url, chunk);
+      if (!etag) throw new Error('파트 응답에 ETag 가 없습니다(프록시 설정 확인)');
+      parts.push({ PartNumber: n, ETag: etag });
+    }
+    await syncBackApi('complete', { ...coord, uploadId, parts });
+  } catch (e) {
+    await syncBackApi('abort', { ...coord, uploadId }).catch(() => {});
+    throw e;
+  }
 }
 function httpsGet(urlStr) {
   return new Promise((resolve, reject) => {
@@ -199,10 +247,10 @@ async function checkpoint(p) {
     sessionBuf = Buffer.from(JSON.stringify(artifact), 'utf8');
   }
 
-  // 업로드(presigned PUT).
+  // 업로드(presigned PUT — 80MB 초과 번들은 멀티파트로 Cloudflare 100MB 제한 우회).
   emitSync({ type: 'sync_progress', phase: 'upload', checkpointId: id });
-  await httpsPut(p.putUrls.bundle, bundleBuf);
-  if (sessionBuf) await httpsPut(p.putUrls.session, sessionBuf);
+  await uploadObject(p.putUrls.bundle, bundleBuf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'bundle' } : null);
+  if (sessionBuf) await uploadObject(p.putUrls.session, sessionBuf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'session' } : null);
 
   await fsp.rm(bundleFile, { force: true }).catch(() => {});
   lastCheckpoint.set(abs, { tree, id, commit }); // 다음 자동 트리거의 중복제거 기준.
