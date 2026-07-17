@@ -120,7 +120,13 @@ async function handleControlUpgrade(req, socket, head) {
   } catch (e) {
     console.error('[daemonRelay] 제어 채널 인증 오류:', e.message);
   }
-  if (!device) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+  if (!device) {
+    // 401 을 명시 응답 — 삭제/해제된 deviceToken 의 데몬이 이를 보고 재연결 폭주를 멈춘다
+    //  (그냥 destroy 하면 데몬이 일시 네트워크 오류로 오인해 영원히 재시도).
+    try { socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n'); } catch (_) { /* noop */ }
+    try { socket.destroy(); } catch (_) { /* noop */ }
+    return;
+  }
 
   wss.handleUpgrade(req, socket, head, (ws) => registerControl(ws, device));
 }
@@ -380,6 +386,23 @@ function fanoutNotifEvent(userId, event) {
   const key = String(userId);
   const set = agentWsClients.get(key);
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 회원 탈퇴 통지 — 접속 중인 모든 UI 클라이언트(폰/태블릿/PC)에 {type:'account_deleted'} 를 보내고
+//  소켓을 닫는다. 클라이언트는 이를 받으면 즉시 로컬 로그아웃/페어링 해제 → 로그인 화면.
+//  탈퇴 처리(DB 삭제) "전"에 호출해야 소켓이 아직 살아 있다.
+function fanoutAccountDeleted(userId) {
+  const payload = { type: 'account_deleted' };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) {
+    const frame = JSON.stringify(payload);
+    for (const ws of set) {
+      try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ }
+      // 전송 플러시 여유 후 종료 — 즉시 close 하면 프레임이 유실될 수 있다.
+      setTimeout(() => { try { ws.close(4001, 'account-deleted'); } catch (_) { /* noop */ } }, 300);
+    }
+  }
 }
 
 // 러너(데몬) 연결 상태 팬아웃 — 접속/종료 즉시 {type:'runner_status', event:{deviceId, online, kind, deviceName}}.
@@ -870,6 +893,7 @@ module.exports = {
   listCloudRunners,
   fanoutSyncEvent,
   fanoutNotifEvent,
+  fanoutAccountDeleted,
   hasActiveMobileClient,
   presentClient,
   issueUiTicket,

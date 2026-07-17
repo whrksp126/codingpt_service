@@ -283,19 +283,43 @@ function bindNickname() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } });
 }
 
-// 회원 탈퇴 — 인라인 2단계 확인(파괴적).
+// 회원 탈퇴 — 계정 이메일 동일 입력 확인(모바일과 동일 스펙, 파괴적 작업 가드).
+//  1탭: 확인 영역(이메일 입력 + 영구 삭제) 펼침 → 이메일이 정확히 일치할 때만 실행.
 let acctDeleting = false;
 async function onDeleteAccount() {
   const btn = connBody?.querySelector("#deleteAcctBtn");
   const msg = connBody?.querySelector("#acctMsg");
-  if (!btn) return;
+  if (!btn || !msg) return;
+  const email = String(state.me?.email || "").trim();
   if (!btn.dataset.confirm) {
     btn.dataset.confirm = "1";
-    btn.textContent = "정말 탈퇴하시겠어요?";
-    if (msg) { msg.textContent = "한 번 더 누르면 계정이 영구 삭제됩니다."; msg.classList.add("warn"); }
-    setTimeout(() => { if (btn.dataset.confirm) { delete btn.dataset.confirm; btn.textContent = "회원 탈퇴"; if (msg) { msg.textContent = ""; msg.classList.remove("warn"); } } }, 4000);
+    btn.textContent = "취소";
+    btn.classList.remove("danger");
+    msg.classList.add("warn");
+    msg.innerHTML = `
+      <div class="acct-del-confirm">
+        <div>계속하려면 계정 이메일 <b>${esc(email || "(이메일 없음)")}</b> 을 똑같이 입력하세요.</div>
+        <input id="acctDelEmail" class="acct-del-input" placeholder="${esc(email)}" autocomplete="off" spellcheck="false" />
+        <button id="acctDelGo" class="btn small danger" disabled>영구 삭제</button>
+      </div>`;
+    const input = msg.querySelector("#acctDelEmail");
+    const go = msg.querySelector("#acctDelGo");
+    input.addEventListener("input", () => {
+      go.disabled = !email || input.value.trim().toLowerCase() !== email.toLowerCase();
+    });
+    go.addEventListener("click", () => doDeleteAccount(btn, msg));
+    input.focus();
     return;
   }
+  // confirm 상태에서 버튼(=취소) 클릭 — 접기.
+  delete btn.dataset.confirm;
+  btn.textContent = "회원 탈퇴";
+  btn.classList.add("danger");
+  msg.textContent = "";
+  msg.classList.remove("warn");
+}
+
+async function doDeleteAccount(btn, msg) {
   if (acctDeleting) return;
   acctDeleting = true;
   delete btn.dataset.confirm;
@@ -313,6 +337,7 @@ async function onDeleteAccount() {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = "회원 탈퇴";
+    btn.classList.add("danger");
     if (msg) { msg.textContent = "탈퇴 실패: " + e; msg.classList.add("warn"); }
   }
   acctDeleting = false;

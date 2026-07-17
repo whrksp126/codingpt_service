@@ -169,15 +169,18 @@ class UserService {
 
   // 엑세스 토큰 검증
   async verifyAccessToken(token) {
+    let decoded;
     try {
-      console.log("token:", token);
-      const decoded = jwt.verify(token, ACCESS_SECRET);
-      console.log("decoded:", decoded);
-      return decoded;
+      decoded = jwt.verify(token, ACCESS_SECRET);
     } catch (err) {
       console.error('JWT 검증 오류:', err.message);
       throw new Error('토큰이 유효하지 않습니다.');
     }
+    // 서명만 믿으면 탈퇴한 계정의 토큰이 만료 전까지 "유효"로 남는다 — 유저 실존까지 확인
+    //  (앱이 시작 시 verify 로 세션을 판정하므로, 탈퇴 후 재시작하면 여기서 로그인 화면으로 떨어진다).
+    const dbUser = await User.findByPk(decoded.id, { attributes: ['id'] });
+    if (!dbUser) throw new Error('존재하지 않는 계정입니다.');
+    return decoded;
   }
   
   // 엑세스 토큰 재발급
@@ -197,7 +200,9 @@ class UserService {
 
       // 어드민 임명/박탈을 즉시 반영하기 위해 role 은 항상 DB 최신값으로 갱신.
       const dbUser = await User.findByPk(decoded.id, { attributes: ['id', 'email', 'role'] });
-      const role = dbUser?.role || 'user';
+      // 탈퇴한 계정의 refreshToken 으로 새 토큰을 발급하면 유령 세션이 영속된다 — 재발급 거부.
+      if (!dbUser) throw new Error('존재하지 않는 계정입니다.');
+      const role = dbUser.role || 'user';
 
       const newAccessToken = jwt.sign(
         { id: decoded.id, email: decoded.email, role },

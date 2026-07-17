@@ -125,13 +125,15 @@ async function updateMe(req, res) {
   }
 }
 
-// DELETE /api/daemon/account  (JWT|deviceToken) — 회원 탈퇴(본인 계정 + 기기 삭제). 파괴적.
+// DELETE /api/daemon/account  (JWT|deviceToken) — 회원 탈퇴(PC 앱 경로). 파괴적.
+//  앱 경로(userController.deleteUser)와 동일 정리: 탈퇴 통지 팬아웃 → 라이브 기기/클라우드 정리 →
+//  objectstore 정리 → DB 트랜잭션 삭제(userService — 연관 테이블 포함).
 async function deleteAccount(req, res) {
   try {
     const acct = await resolveAccount(req);
     if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
     const userId = acct.userId;
-    // 기기(클라우드 러너 포함) 정리 후 사용자 삭제.
+    try { daemonRelayService.fanoutAccountDeleted(userId); } catch (_) { /* best-effort */ }
     const devices = await DaemonDevice.findAll({ where: { user_id: userId } });
     for (const d of devices) {
       try {
@@ -139,8 +141,8 @@ async function deleteAccount(req, res) {
         if (d.runner_kind === 'cloud' && d.container_id) await cloudRunnerService.stopContainer(d.container_id).catch(() => {});
       } catch (_) { /* best-effort */ }
     }
-    await DaemonDevice.destroy({ where: { user_id: userId } });
-    await User.destroy({ where: { id: userId } });
+    try { await require('../services/workspaceService').deleteAllForUser(userId); } catch (e) { console.warn('탈퇴 objectstore 정리 실패(계속 진행):', e.message); }
+    await require('../services/userService').deleteUser(userId); // 트랜잭션 — user + 연관(FK CASCADE 포함)
     return successResponse(res, { deleted: true });
   } catch (e) {
     return errorResponse(res, e, 500);

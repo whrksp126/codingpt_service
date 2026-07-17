@@ -57,6 +57,19 @@ function run(config) {
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
     });
 
+    // 업그레이드 거부(101 아님) — 401/403 = deviceToken 무효(계정 탈퇴/기기 해제). 재시도 무의미,
+    //  방치하면 백오프 재연결이 영원히 돈다(고아 데몬 폭주). 즉시 종료한다.
+    //  그 외 상태코드(프록시 5xx 등)는 일시 장애로 보고 기존 close 경로로 재접속을 잇는다.
+    ws.on('unexpected-response', (_req2, res2) => {
+      const sc = res2 && res2.statusCode;
+      if (sc === 401 || sc === 403) {
+        console.error('[control] 서버가 이 기기의 등록을 거부했습니다(계정 탈퇴/기기 해제). `pair` 를 다시 실행하세요.');
+        process.exit(1);
+      }
+      try { ws.terminate(); } catch (_) { /* noop */ }
+      ws.emit('close', 1006, `unexpected-response ${sc || ''}`); // close 핸들러(중복 가드 내장)로 재접속 스케줄
+    });
+
     ws.on('ping', bumpIdle);
     ws.on('message', (data, isBinary) => {
       bumpIdle();

@@ -12,6 +12,16 @@ import { getPane, smartUrl } from "./pane.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
 
+// 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
+async function onAccountDeleted() {
+  try { await api.unpair(); } catch (_) { /* 이미 해제됐을 수 있음 */ }
+  state.me = null;
+  state.devices = [];
+  state.daemon = await api.daemonStatus().catch(() => state.daemon);
+  state.paired = !!state.daemon?.paired;
+  S.emit();
+}
+
 let sock = null;
 let retryMs = 3000;
 let retryTimer = null;
@@ -58,6 +68,10 @@ async function connect() {
         break;
       case "ui_command":
         handleUiCommand(ws, msg);
+        break;
+      case "account_deleted":
+        // 다른 기기에서 회원 탈퇴 — 이 PC 도 즉시 페어링 해제(데몬 정지 포함) → 로그인 게이트.
+        onAccountDeleted();
         break;
       default:
         break;

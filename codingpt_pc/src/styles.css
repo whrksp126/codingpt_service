@@ -508,6 +508,12 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .dev-th { font-size: 11.5px; font-weight: 700; color: var(--dim); }
 .dc-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dc-name .dev-ic { color: var(--text3); flex: none; }
+/* 회원 탈퇴 이메일 확인(설정>계정) — 파괴적 작업 가드 */
+.acct-del-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 12px; border: 1px solid var(--danger, #f87171); border-radius: 8px; background: var(--elevated, #151a21); font-size: 12.5px; }
+.acct-del-input { background: var(--base, #0b0f14); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
+.acct-del-input:focus { border-color: var(--accent); }
+.acct-del-confirm .btn[disabled] { opacity: 0.5; cursor: default; }
+
 .dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
 .dc-os, .dc-loc, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-act { display: flex; justify-content: flex-end; }

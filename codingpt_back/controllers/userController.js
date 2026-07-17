@@ -81,6 +81,10 @@ const deleteUser = async (req, res) => {
     if (!req.user || String(req.user.id) !== String(id)) {
       return errorResponse(res, { message: '본인 계정만 탈퇴할 수 있습니다.' }, 403);
     }
+    // ⓪ 접속 중인 다른 기기(폰/태블릿/PC UI)에 탈퇴 통지 — 각자 즉시 로그아웃/페어링 해제.
+    try {
+      require('../services/daemonRelayService').fanoutAccountDeleted(id);
+    } catch (e) { console.warn('탈퇴 통지 팬아웃 실패(계속 진행):', e.message); }
     // ① 살아있는 데몬 연결 강제 종료 + 클라우드 러너 컨테이너 정지(잔존 세션/과금 방지).
     //    DB 행은 아래 user 삭제 시 FK CASCADE 로 함께 지워진다 — 여기선 라이브 자원만.
     try {
