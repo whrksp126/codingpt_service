@@ -158,6 +158,9 @@ function renderSection(force) {
     bindNickname();
     if (state.paired && !state.me) S.loadMe(); // 프로필 지연 로드 → emit 후 재렌더
   } else {
+    // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
+    // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
+    if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
       <div class="sm-h">정보</div>
       <div class="sm-card2">
