@@ -22,8 +22,8 @@
 
 외부에서 모바일로 작업하면 Mac 화면의 "폴더 접근 허용?" 프롬프트를 승인할 수 없다. **앱이 권한을 스스로 승인하는 건 불가능**(Apple 차단) — 초기 세팅 때 사람이 한 번 정리한다. 두 지렛대:
 
-1. **워크스페이스를 보호폴더 밖에 둔다(기본 전략, 승인 불필요).** `~/CodingPT/workspaces`(홈 바로 아래)는 TCC 보호 대상이 아니라 접근 프롬프트가 **아예 안 뜬다**. `lib/workspace.js`의 `DEFAULT_ROOT_REL`이 이 위치, `ws.useDefaultRoot`가 생성+지정. 앱 피커 상단 "추천 위치 사용" 원탭. Desktop/Documents/Downloads/Movies/Music/Pictures/Library 는 보호폴더 → 앱이 경고.
-2. **전체 디스크 접근(FDA) 1회 부여(선택, 모든 프롬프트 제거).** 데몬을 띄우는 터미널 앱(또는 P4에서 패키징된 .app)에 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근에서 켜면 어디든 프롬프트 없음. `node index.js setup`이 폴더 생성 + FDA 설정창(`open x-apple.systempreferences:...Privacy_AllFiles`)을 열어 안내.
+1. **워크스페이스 위치는 항상 사용자가 직접 선택한다.** 권장 기본 위치(~/CodingPT/workspaces) 개념은 2026-07-17 사용자 확정으로 **전면 제거**됨(재도입 금지). 보호폴더(Desktop/Documents/Downloads/Movies/Music/Pictures/Library) 선택 시 앱이 경고만 한다.
+2. **전체 디스크 접근(FDA) 1회 부여(선택, 모든 프롬프트 제거).** 데몬을 띄우는 앱(패키징된 .app)에 시스템 설정 → 개인정보 보호 및 보안 → 전체 디스크 접근에서 켜면 어디든 프롬프트 없음. `node index.js setup`이 FDA 설정창을 열어 안내.
 
 > LaunchAgent/패키징(P4) 전까지 FDA는 "터미널 앱" 기준. 정식 배포 시 서명된 .app 에 FDA 부여로 정리 예정.
 
