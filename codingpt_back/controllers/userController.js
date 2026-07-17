@@ -13,6 +13,18 @@ const login = async (req, res) => {
   }
 };
 
+// Apple 로그인 (자동 회원가입 포함) — iOS 네이티브·웹·PC·안드로이드 웹플로우 공용
+const appleLogin = async (req, res) => {
+  try {
+    const { identityToken, name } = req.body || {};
+    const user = await userService.appleLogin(identityToken, name);
+    successResponse(res, user, '로그인이 성공적으로 완료되었습니다.');
+  } catch (error) {
+    console.error('Apple 로그인 오류:', error);
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
 // 로컬 ID/PW 로그인 (카드사 심사용 계정)
 const loginLocal = async (req, res) => {
   try {
@@ -217,6 +229,7 @@ const createStudyHeatmap = async (req, res) => {
 
 module.exports = {
   login,
+  appleLogin,
   loginLocal,
   logout,
   verifyAccessToken,

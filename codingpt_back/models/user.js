@@ -11,7 +11,11 @@ module.exports = (sequelize, DataTypes) => {
     },
     google_id: {
       type: DataTypes.STRING,
-      allowNull: false
+      allowNull: true // Apple 전용 계정은 google_id 가 없다(로그인 수단은 login_type 으로 구분).
+    },
+    apple_id: {
+      type: DataTypes.STRING, // Apple 'sub'(계정당 안정적 식별자). 이메일 비공개 릴레이 대비 정본 키.
+      allowNull: true
     },
     refresh_token: {
       type: DataTypes.STRING,

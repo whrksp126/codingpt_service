@@ -3,6 +3,7 @@ const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
 const {
   login,
+  appleLogin,
   loginLocal,
   logout,
   verifyAccessToken,
@@ -20,6 +21,7 @@ const {
 
 // 사용자 관련 라우트
 router.post('/login', login);                   // 로그인 (구글 OAuth)
+router.post('/apple-login', appleLogin);        // 로그인 (Apple — iOS/웹/PC/안드로이드 공용)
 router.post('/login-local', loginLocal);        // 로컬 ID/PW 로그인 (심사용 계정)
 router.post('/logout', logout);                 // 로그아웃
 router.get('/verify', verifyAccessToken);       // 엑세스 토큰 검증

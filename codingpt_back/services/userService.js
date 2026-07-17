@@ -21,6 +21,7 @@ const { fn, col, Op } = require('sequelize');
 const ACHIEVEMENT_CATEGORIES = ['HTML', 'CSS', 'JS', 'Python', 'Java', 'Nodejs'];
 const { OAuth2Client } = require('google-auth-library');
 const jwt = require('jsonwebtoken');
+const appleAuthService = require('./appleAuthService');
 require('dotenv').config();
 
 const ACCESS_SECRET = process.env.ACCESS_SECRET || 'ENV_NOT_FOUND_ACCESS_SECRET';
@@ -117,6 +118,53 @@ class UserService {
         throw new Error(`로그인 처리 중 오류가 발생했습니다: ${error.message}`);
       }
     }
+  }
+
+  // Apple 로그인 (자동 회원가입 포함) — 구글 login 과 대칭.
+  //  clientName: 첫 로그인 시에만 Apple 이 이름을 주므로 클라이언트가 함께 넘긴다(선택).
+  async appleLogin(identityToken, clientName) {
+    if (!identityToken) throw new Error('identityToken이 필요합니다.');
+
+    // 1. Apple 토큰 검증(JWKS) → sub(안정 식별자) + email(비공개 릴레이일 수 있음)
+    const { sub: apple_id, email } = await appleAuthService.verifyIdentityToken(identityToken);
+
+    // 2. 사용자 조회: apple_id(정본) 우선 → 이메일(기존 구글 계정과 자동 연결)
+    let foundUser = await User.findOne({ where: { apple_id } });
+    if (!foundUser && email) {
+      foundUser = await User.findOne({ where: { email } });
+      if (foundUser && !foundUser.apple_id) {
+        // 같은 이메일의 기존 계정에 Apple 식별자 연결(구글↔애플 통합).
+        await User.update({ apple_id }, { where: { id: foundUser.id } });
+      }
+    }
+
+    // 3. 없으면 생성. 이메일 비공개 릴레이일 수도 있고, 이름은 첫 로그인에만 오므로 폴백 처리.
+    if (!foundUser) {
+      const nickname = (clientName && String(clientName).trim())
+        || (email ? String(email).split('@')[0] : '사용자');
+      foundUser = await User.create({
+        email: email || `${apple_id}@privaterelay.appleid.com`,
+        nickname,
+        apple_id,
+        login_type: 'apple',
+        created_at: new Date(),
+      });
+    }
+
+    // 4. JWT 발급 + refresh 저장 (구글 경로와 동일 규칙)
+    const accessToken = jwt.sign(
+      { id: foundUser.id, email: foundUser.email, role: foundUser.role },
+      ACCESS_SECRET,
+      { expiresIn: ACCESS_TTL }
+    );
+    const refreshToken = jwt.sign(
+      { id: foundUser.id, email: foundUser.email, role: foundUser.role },
+      REFRESH_SECRET,
+      { expiresIn: '30d' }
+    );
+    await User.update({ refresh_token: refreshToken }, { where: { id: foundUser.id } });
+
+    return { accessToken, refreshToken };
   }
 
   // 로컬 ID/PW 로그인 — 카드사 심사용 계정 전용(password_hash 있는 계정만).
