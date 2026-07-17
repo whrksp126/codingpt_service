@@ -631,6 +631,7 @@ pub fn back_api(
     method: String,
     path: String,
     body: Option<serde_json::Value>,
+    timeout_secs: Option<u64>,
 ) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     if !path.starts_with("/api/daemon/") {
@@ -643,7 +644,7 @@ pub fn back_api(
         _ => return Err("허용되지 않은 메서드입니다.".into()),
     }
     .set("Authorization", &format!("Bearer {token}"))
-    .timeout(std::time::Duration::from_secs(25));
+    .timeout(std::time::Duration::from_secs(timeout_secs.unwrap_or(25).clamp(1, 180)));
     let resp = match body {
         Some(b) => req.send_json(b),
         None => req.call(),

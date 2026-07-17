@@ -78,11 +78,12 @@ router.post('/ws/clone', authMiddleware, daemonController.wsClone); // GitHub �
 router.post('/ws/fulldisk', authMiddleware, daemonController.wsSetFullDisk); // 전체 디스크 접근 토글(홈 jail 완화)
 
 // 동기화(M4) — objectstore git-bundle 체크포인트/머티리얼라이즈/충돌. 데몬 오프라인이면 409.
-router.post('/sync/checkpoint', authMiddleware, syncController.checkpoint);
+//  checkpoint/checkpoints 는 accountAuth(JWT|deviceToken 겸용) — PC 앱 자동 체크포인트가 deviceToken 으로 호출.
+router.post('/sync/checkpoint', accountAuth, syncController.checkpoint);
 router.post('/sync/materialize', authMiddleware, syncController.materialize);
 router.get('/sync/status', authMiddleware, syncController.status);
 router.post('/sync/resolve', authMiddleware, syncController.resolve);
-router.get('/sync/checkpoints', authMiddleware, syncController.listCheckpoints);
+router.get('/sync/checkpoints', accountAuth, syncController.listCheckpoints);
 
 // 프리뷰(데몬 dev 서버) — 포트 조회/시작은 인증, 프록시 진입(:token)은 무인증(불투명 토큰).
 //  포트/시작도 accountAuth + hostDeviceId 지정 지원(PC 앱 원격 프리뷰).

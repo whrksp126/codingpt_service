@@ -836,6 +836,10 @@ export class PaneView {
         this._write("\x1b\r"); resetBuf();
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
+      if (e.shiftKey && e.key === "Tab") {              // 역탭(CSI Z) — Claude Code 모드 전환 등
+        this._write("\x1b[Z"); resetBuf();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
       const seq = SEQ[e.key];
       if (seq) {
         this._write(seq); resetBuf();

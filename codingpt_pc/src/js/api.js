@@ -121,8 +121,18 @@ export const api = {
   uiStreamUrl: () => invoke("ui_stream_url"),
 
   // ── 원격 PC 릴레이(back REST, deviceToken 은 Rust 내부) — /api/daemon/* 전용 ──
-  backApi: (method, path, body) => invoke("back_api", { method, path, body: body ?? null }),
+  backApi: (method, path, body, timeoutSecs) =>
+    invoke("back_api", { method, path, body: body ?? null, timeoutSecs: timeoutSecs ?? null }),
   backBase: () => invoke("back_base"),
+
+  // ── 작업 스냅샷(자동 체크포인트) — back sync 채널(데몬 오프라인이면 409) ──
+  //  타임아웃 150s: 첫 체크포인트는 번들 업로드 포함(back RPC 120s)이라 기본 25s 로는 짧다.
+  syncCheckpoint: (workspaceId, reason, cwd) =>
+    invoke("back_api", {
+      method: "POST", path: "/api/daemon/sync/checkpoint",
+      body: { workspaceId, reason: reason || "periodic", ...(cwd ? { cwd } : {}) },
+      timeoutSecs: 150,
+    }),
 
   // ── 자동 실행(로그인 아이템) ──
   autostartEnabled: () => invoke("plugin:autostart|is_enabled"),
