@@ -31,4 +31,17 @@ function remove() {
   try { fs.unlinkSync(configFile()); return true; } catch (_) { return false; }
 }
 
-module.exports = { load, save, remove, configFile };
+// 페어링 해제 — 자격(deviceToken/deviceId)만 지우고 serverUrl 은 보존.
+//  serverUrl 까지 지우면 dev 빌드가 기본값(localhost)으로 떨어져, 재로그인 버튼이
+//  로컬 프론트(localhost:3400)를 여는 사고가 난다(실측). 서버 좌표는 비밀이 아니므로 유지.
+function clearCredentials() {
+  const cur = load();
+  if (!cur) return false;
+  const keep = {};
+  if (cur.serverUrl) keep.serverUrl = cur.serverUrl;
+  if (cur.workspaceRoot) keep.workspaceRoot = cur.workspaceRoot;
+  if (Object.keys(keep).length) { save(keep); return true; }
+  return remove();
+}
+
+module.exports = { load, save, remove, clearCredentials, configFile };

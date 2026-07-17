@@ -134,7 +134,9 @@ function cmdStatus() {
 }
 
 function cmdUnpair() {
-  if (configLib.remove()) console.log('로컬 설정을 삭제했습니다. (서버측 기기 해제는 앱에서)');
+  // 자격만 삭제, serverUrl 은 보존 — 재로그인이 같은 서버(prod 등)를 계속 향하게.
+  //  (전부 지우면 dev 빌드가 localhost 기본값으로 떨어져 웹 로그인이 로컬 프론트를 연다 — 실측)
+  if (configLib.clearCredentials()) console.log('로컬 자격을 삭제했습니다. (서버측 기기 해제는 앱에서)');
   else console.log('삭제할 설정이 없습니다.');
 }
 
