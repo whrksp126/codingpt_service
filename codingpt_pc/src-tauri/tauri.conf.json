@@ -5,7 +5,6 @@
   "identifier": "com.ghmate.codingpt.pc",
   "build": {
     "frontendDist": "../src",
-    "beforeDevCommand": "bash scripts/bundle-sidecar.sh",
     "beforeBuildCommand": "CPT_RELEASE=1 bash scripts/bundle-sidecar.sh"
   },
   "app": {

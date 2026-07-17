@@ -10,7 +10,9 @@ const path = require('path');
 const { execFile } = require('child_process');
 const runtime = require('./runtime');
 const configLib = require('./config');
-const { backFetch } = require('./cpt-server');
+// backFetch 는 지연 require — cpt-server 가 pty(node-pty 네이티브)를 끌고 와서, statusFor 만 쓰는
+// 테스트/CI(prebuild 없음)에서 모듈 로드가 깨지지 않게 한다.
+const backFetch = (...a) => require('./cpt-server').backFetch(...a);
 
 const INTERVAL_MS = 60 * 1000;
 const lastReported = new Map(); // wsId → 비교 키(JSON)

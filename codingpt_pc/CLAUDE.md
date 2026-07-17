@@ -43,7 +43,7 @@ scripts/bundle-sidecar.sh  node+tmux+dylib 자립 번들(dmg 무설치)
 ## 개발/검증
 
 ```bash
-npm install && npm run tauri dev     # 개발 실행 — beforeDevCommand 가 사이드카 번들 자동 실행
+npm install && npm run dev           # 개발 실행 — 사이드카 번들 후 tauri dev (번들은 반드시 선행·동기)
 bash scripts/release-pc.sh           # 릴리스: 서명 빌드→업데이터 아티팩트→objectstore 발행(latest.json)
 ```
 
@@ -54,7 +54,8 @@ bash scripts/release-pc.sh           # 릴리스: 서명 빌드→업데이터 �
   배포물은 objectstore `codingpt/pc-releases/`, 다운로드는 back 스트리밍(`/api/pc/dl/*`).
 - 공증(notarization)은 미적용 — Gatekeeper 첫 실행 경고가 남는다(App Store Connect API 키 필요, 후속).
 
-- **데몬 코드(runner-core) 수정은 tauri dev 재시작으로만 반영**(beforeDevCommand 재번들).
+- **데몬 코드(runner-core) 수정은 `npm run dev` 재시작으로만 반영**(선행 재번들).
+  주의: tauri 의 beforeDevCommand 는 dev 에서 비동기(dev 서버용)라 번들-빌드 경주가 나므로 쓰지 않는다.
   실행 중 rust 파일 저장으로 인한 자동 재빌드는 사이드카를 갱신하지 않는다 — 스테일 데몬 주의.
 - **수정 후엔 반드시 실행해 실제 동작 확인 후 완료 보고**(스크린샷 권장). UI 자동화로 클릭할 땐
   창 위치가 세션 중 움직이므로 **매번 좌표 재조회** 후 계산.

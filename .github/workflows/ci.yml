@@ -1,0 +1,53 @@
+# 최소 CI — push/PR 마다 핵심 안전장치를 검증한다.
+#  back: 순수 유닛 테스트(그룹핑 키·릴리스 semver) · daemon: fs 홈 jail·신선도 git 판정
+#  pc: JS/셸 문법(cargo check 는 macOS 러너 비용 문제로 제외 — 로컬 훅/개발 흐름이 커버)
+#  front: next build(프로드 배포가 서버에서 빌드하므로 깨짐을 여기서 먼저 잡는다)
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  back:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: codingpt_back } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_back/package-lock.json }
+      - run: npm ci --ignore-scripts
+      - run: node --test test/*.test.js
+
+  daemon:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: codingpt_daemon } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_daemon/package-lock.json }
+      # --ignore-scripts: node-pty 네이티브 빌드 생략(테스트는 pty 무접촉 — freshness 가 지연 require)
+      - run: npm ci --ignore-scripts
+      - run: node --test packages/runner-core/test/*.test.js
+
+  pc-js:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: codingpt_pc } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: JS/셸 문법 검사
+        run: |
+          for f in src/js/*.js scripts/*.cjs; do node --check "$f"; done
+          bash -n scripts/*.sh
+
+  front:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: codingpt_front } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_front/package-lock.json }
+      - run: npm ci
+      - run: npx next build
