@@ -17,6 +17,14 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING, // Apple 'sub'(계정당 안정적 식별자). 이메일 비공개 릴레이 대비 정본 키.
       allowNull: true
     },
+    apple_refresh_token: {
+      type: DataTypes.TEXT, // authorizationCode 교환으로 얻은 refresh_token. 탈퇴 시 revoke(5.1.1(v)).
+      allowNull: true
+    },
+    apple_client_id: {
+      type: DataTypes.STRING, // 위 토큰이 발급된 client_id(번들ID/ServicesID) — revoke 에 동일 값 필요.
+      allowNull: true
+    },
     refresh_token: {
       type: DataTypes.STRING,
     },

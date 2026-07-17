@@ -14,6 +14,7 @@ export default function Nav() {
         <img src="/logo.png" alt="CodingPT" height={22} style={{ display: 'block' }} />
       </a>
       <span style={{ flex: 1 }} />
+      <a href="/download" style={{ marginRight: 18 }}>PC 앱 다운로드</a>
       {authed
         ? <a href="/me">마이페이지</a>
         : <a href="/login" className="muted">로그인</a>}

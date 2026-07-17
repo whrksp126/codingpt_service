@@ -45,7 +45,7 @@ export default function DesktopLogin() {
       const res = await appleSignIn();
       if (!res) { setBusy(false); return; }
       const r = await clientFetch<{ accessToken: string }>('/api/users/apple-login', {
-        method: 'POST', body: { identityToken: res.identityToken, name: res.name },
+        method: 'POST', body: { identityToken: res.identityToken, name: res.name, authorizationCode: res.authorizationCode },
       });
       setBusy(false);
       if (r.ok && r.data?.accessToken) { setToken(r.data.accessToken); setTok(r.data.accessToken); }

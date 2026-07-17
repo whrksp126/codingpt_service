@@ -30,6 +30,8 @@ function loadSdk(): Promise<void> {
 export interface AppleSignInResult {
   identityToken: string;
   name?: string;
+  // 최초 동의 시에만 발급 — 백엔드가 refresh_token 으로 교환해 탈퇴 시 연동 해제(revoke)에 사용.
+  authorizationCode?: string;
 }
 
 // Apple 팝업 로그인 실행 → { identityToken, name }. 취소 시 null.
@@ -46,10 +48,11 @@ export async function appleSignIn(): Promise<AppleSignInResult | null> {
     const data = await AppleID.auth.signIn();
     const identityToken: string | undefined = data?.authorization?.id_token;
     if (!identityToken) throw new Error('Apple 인증 토큰이 없습니다.');
+    const authorizationCode: string | undefined = data?.authorization?.code;
     // 이름은 최초 1회만 제공됨.
     const n = data?.user?.name;
     const name = n ? [n.firstName, n.lastName].filter(Boolean).join(' ').trim() || undefined : undefined;
-    return { identityToken, name };
+    return { identityToken, name, authorizationCode };
   } catch (e: any) {
     // 사용자가 팝업을 닫음 → 조용히 취소로 처리.
     if (e?.error === 'popup_closed_by_user' || e?.error === 'user_cancelled_authorize') return null;

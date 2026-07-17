@@ -122,11 +122,17 @@ class UserService {
 
   // Apple 로그인 (자동 회원가입 포함) — 구글 login 과 대칭.
   //  clientName: 첫 로그인 시에만 Apple 이 이름을 주므로 클라이언트가 함께 넘긴다(선택).
-  async appleLogin(identityToken, clientName) {
+  async appleLogin(identityToken, clientName, authorizationCode) {
     if (!identityToken) throw new Error('identityToken이 필요합니다.');
 
-    // 1. Apple 토큰 검증(JWKS) → sub(안정 식별자) + email(비공개 릴레이일 수 있음)
-    const { sub: apple_id, email } = await appleAuthService.verifyIdentityToken(identityToken);
+    // 1. Apple 토큰 검증(JWKS) → sub(안정 식별자) + email(비공개 릴레이일 수 있음) + aud(client_id)
+    const { sub: apple_id, email, aud: appleClientId } = await appleAuthService.verifyIdentityToken(identityToken);
+
+    // 1-b. authorizationCode 가 오면 refresh_token 으로 교환해 둔다(탈퇴 시 revoke 에 필요 — 5.1.1(v)).
+    //  최초 로그인에만 code 가 오므로, 얻은 값이 있을 때만 저장한다.
+    const appleRefreshToken = authorizationCode
+      ? await appleAuthService.exchangeAuthCode(authorizationCode, appleClientId)
+      : null;
 
     // 2. 사용자 조회: apple_id(정본) 우선 → 이메일(기존 구글 계정과 자동 연결)
     let foundUser = await User.findOne({ where: { apple_id } });
@@ -149,6 +155,14 @@ class UserService {
         login_type: 'apple',
         created_at: new Date(),
       });
+    }
+
+    // 3-b. Apple refresh_token 교환에 성공했으면 저장(탈퇴 시 revoke 용). client_id 도 함께.
+    if (appleRefreshToken) {
+      await User.update(
+        { apple_refresh_token: appleRefreshToken, apple_client_id: appleClientId },
+        { where: { id: foundUser.id } }
+      );
     }
 
     // 4. JWT 발급 + refresh 저장 (구글 경로와 동일 규칙)
@@ -333,6 +347,12 @@ class UserService {
     const user = await User.findByPk(id);
     if (!user) {
       throw new Error('해당 사용자를 찾을 수 없습니다.');
+    }
+
+    // Apple 로그인 계정이면 연동 해제(App Store 5.1.1(v) 의무). refresh_token 이 있을 때만 시도하며,
+    //  실패해도 탈퇴 자체는 진행한다(revoke 실패로 탈퇴를 막지 않음).
+    if (user.apple_refresh_token && user.apple_client_id) {
+      await appleAuthService.revokeToken(user.apple_refresh_token, user.apple_client_id);
     }
 
     await sequelize.transaction(async (t) => {
