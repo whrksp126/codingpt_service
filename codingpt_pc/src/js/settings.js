@@ -128,7 +128,7 @@ function renderSection(force) {
       <div class="sm-h">일반</div>
       ${profileHtml}
       <div class="sm-card2">
-        <label class="switch sett-row"><input id="autostartChk" type="checkbox" /><span>이 Mac 로그인 시 자동 실행</span></label>
+        <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
         <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
       </div>`;
     autostartChk = contentEl.querySelector("#autostartChk");

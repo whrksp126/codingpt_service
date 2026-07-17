@@ -76,15 +76,11 @@ function renderStep() {
       <div class="lg-card">
         <label class="lg-row">
           <span>로그인 시 자동 실행</span>
-          <input type="checkbox" id="lgAuto" ${autostartOn ? "checked" : ""} />
+          <input type="checkbox" id="lgAuto" class="tgl" ${autostartOn ? "checked" : ""} />
         </label>
         <div class="lg-row">
           <span>알림 허용<span class="lg-hint">작업 완료를 바로 알려드려요</span></span>
           <button id="lgNotif" class="btn small">허용</button>
-        </div>
-        <div class="lg-row">
-          <span>모든 폴더 접근 허용<span class="lg-hint">권한 팝업 방지 · 목록에 없으면 +로 추가</span></span>
-          <button id="lgPerm" class="btn small">권한 열기</button>
         </div>
       </div>
       <button id="lgDone" class="btn primary lg">시작하기</button>
@@ -104,7 +100,6 @@ function renderStep() {
   };
   notifBtn.addEventListener("click", reqNotif);
   reqNotif();
-  el.querySelector("#lgPerm").addEventListener("click", () => api.openPrivacySettings().catch(() => {}));
   el.querySelector("#lgDone").addEventListener("click", () => {
     pendingSetup = false;
     updateLoginGate();
