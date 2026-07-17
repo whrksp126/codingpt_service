@@ -312,14 +312,14 @@ function bindNickname() {
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } });
 }
 
-// 회원 탈퇴 — 계정 이메일 동일 입력 확인(모바일과 동일 스펙, 파괴적 작업 가드).
-//  1탭: 확인 영역(이메일 입력 + 영구 삭제) 펼침 → 이메일이 정확히 일치할 때만 실행.
+// 회원 탈퇴 — "회원탈퇴" 문구 입력 확인(파괴적 작업 가드, 모바일과 동일 스펙).
+//  1탭: 확인 영역(문구 입력 + 영구 삭제) 펼침 → "회원탈퇴" 를 정확히 입력할 때만 실행.
+const DELETE_CONFIRM_WORD = "회원탈퇴";
 let acctDeleting = false;
 async function onDeleteAccount() {
   const btn = connBody?.querySelector("#deleteAcctBtn");
   const msg = connBody?.querySelector("#acctMsg");
   if (!btn || !msg) return;
-  const email = String(state.me?.email || "").trim();
   if (!btn.dataset.confirm) {
     btn.dataset.confirm = "1";
     btn.textContent = "취소";
@@ -327,14 +327,14 @@ async function onDeleteAccount() {
     msg.classList.add("warn");
     msg.innerHTML = `
       <div class="acct-del-confirm">
-        <div>계속하려면 계정 이메일 <b>${esc(email || "(이메일 없음)")}</b> 을 똑같이 입력하세요.</div>
-        <input id="acctDelEmail" class="acct-del-input" placeholder="${esc(email)}" autocomplete="off" spellcheck="false" />
+        <div>계속하려면 <b>${DELETE_CONFIRM_WORD}</b> 를 입력하세요.</div>
+        <input id="acctDelEmail" class="acct-del-input" placeholder="${DELETE_CONFIRM_WORD}" autocomplete="off" spellcheck="false" />
         <button id="acctDelGo" class="btn small danger" disabled>영구 삭제</button>
       </div>`;
     const input = msg.querySelector("#acctDelEmail");
     const go = msg.querySelector("#acctDelGo");
     input.addEventListener("input", () => {
-      go.disabled = !email || input.value.trim().toLowerCase() !== email.toLowerCase();
+      go.disabled = input.value.trim() !== DELETE_CONFIRM_WORD;
     });
     go.addEventListener("click", () => doDeleteAccount(btn, msg));
     input.focus();

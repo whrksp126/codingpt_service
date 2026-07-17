@@ -4,9 +4,11 @@
 
 const APPLE_JS = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
 const SERVICES_ID = process.env.NEXT_PUBLIC_APPLE_SERVICES_ID || 'com.ghmate.codingpt.web';
-// Apple Developer 포털 Services ID 의 Return URL 과 정확히 일치해야 한다.
+// usePopup(web_message) 플로우는 JS 가 도는 도메인과 redirectURI 도메인이 반드시 일치해야 한다.
+//  → JS 실행 도메인(프론트)과 동일한 codingpt.ghmate.com 을 쓴다(백엔드 콜백 아님).
+//  이 도메인은 Services ID 의 Domains·Return URLs 에 등록 + .well-known 도메인 검증 파일 필요.
 const REDIRECT_URI = process.env.NEXT_PUBLIC_APPLE_REDIRECT_URI
-  || 'https://codingpt-back.ghmate.com/api/auth/apple/callback';
+  || 'https://codingpt.ghmate.com';
 
 let sdkPromise: Promise<void> | null = null;
 
