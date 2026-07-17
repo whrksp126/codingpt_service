@@ -439,6 +439,11 @@ async function createPairSession(req, res) {
 async function approvePairSession(req, res) {
   try {
     const userId = req.user && req.user.id;
+    // 유저 실존 확인 — 탈퇴한 계정의 스테일 토큰이면 FK 위반(500) 대신 깔끔한 401 로 재로그인 유도.
+    const account = userId != null ? await User.findByPk(userId, { attributes: ['id'] }) : null;
+    if (!account) {
+      return errorResponse(res, new Error('세션이 만료되었어요. 다시 로그인해 주세요.'), 401);
+    }
     const normalized = String((req.body && req.body.code) || '').trim().toUpperCase();
     const sess = pairCodes.get(normalized);
     if (!sess || sess.expiresAt < Date.now() || sess.status == null) {
