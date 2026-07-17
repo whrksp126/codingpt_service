@@ -81,6 +81,8 @@ export const api = {
   openExternal: (url) => invoke("open_external", { url }),
   openPrivacySettings: () => invoke("open_privacy_settings"), // macOS 전체 디스크 접근 설정(온보딩)
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
+  probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents → 허용 여부(최초엔 macOS 팝업)
+  openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──
   previewSync: (paneId, url, x, y, w, h, visible) =>

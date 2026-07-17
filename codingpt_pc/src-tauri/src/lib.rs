@@ -560,6 +560,8 @@ pub fn run() {
             bridge::open_external,
             bridge::open_privacy_settings,
             bridge::notification_permission,
+            bridge::probe_folder_access,
+            bridge::open_files_privacy_settings,
             bridge::notify,
             // 앱 종료 가드(미저장 IDE 변경)
             set_ide_dirty,

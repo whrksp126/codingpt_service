@@ -82,6 +82,10 @@ function renderStep() {
           <span>알림 허용<span class="lg-hint">작업 완료를 바로 알려드려요</span></span>
           <button id="lgNotif" class="btn small">허용</button>
         </div>
+        <div class="lg-row">
+          <span>폴더 접근<span class="lg-hint">다운로드·데스크탑·문서 — 한 번 허용하면 계속 적용</span></span>
+          <button id="lgFolders" class="btn small">허용</button>
+        </div>
       </div>
       <button id="lgDone" class="btn primary lg">시작하기</button>
     </div>`;
@@ -100,6 +104,24 @@ function renderStep() {
   };
   notifBtn.addEventListener("click", reqNotif);
   reqNotif();
+  // 폴더 접근 3종 일괄 프로브 — 각 폴더 최초 접근 시 macOS 팝업이 순서대로 뜬다(PC 앞에서 허용).
+  const fBtn = el.querySelector("#lgFolders");
+  fBtn.addEventListener("click", async () => {
+    if (fBtn.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
+    fBtn.disabled = true;
+    fBtn.textContent = "확인 중…";
+    try {
+      let all = true;
+      for (const f of ["downloads", "desktop", "documents"]) {
+        const ok = await api.probeFolder(f).catch(() => false);
+        if (!ok) all = false;
+      }
+      if (all) { fBtn.textContent = "허용됨"; return; } // disabled 유지
+      fBtn.dataset.denied = "1";
+      fBtn.textContent = "설정 열기";
+      fBtn.disabled = false;
+    } catch (_) { fBtn.textContent = "허용"; fBtn.disabled = false; }
+  });
   el.querySelector("#lgDone").addEventListener("click", () => {
     pendingSetup = false;
     updateLoginGate();

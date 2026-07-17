@@ -505,6 +505,41 @@ pub fn open_privacy_settings() -> Result<(), String> {
     Ok(())
 }
 
+// 보호 폴더(다운로드/데스크탑/문서) 접근 프로브 — 최초 호출 시 macOS 허용 팝업이 뜨고(릴리스 .app),
+//  이후엔 즉시 허용/거부가 판정된다. 한 번 허용되면 앱 단위 영구 → 모든 워크스페이스에서 유효.
+//  read_dir 은 팝업 응답까지 블로킹되므로 spawn_blocking 으로 UI 를 막지 않는다.
+#[tauri::command]
+pub async fn probe_folder_access(folder: String) -> Result<bool, String> {
+    let dir = {
+        let h = dirs::home_dir().ok_or("홈 디렉토리를 찾을 수 없습니다.")?;
+        match folder.as_str() {
+            "downloads" => h.join("Downloads"),
+            "desktop" => h.join("Desktop"),
+            "documents" => h.join("Documents"),
+            _ => return Err("지원하지 않는 폴더".into()),
+        }
+    };
+    let granted = tauri::async_runtime::spawn_blocking(move || std::fs::read_dir(&dir).is_ok())
+        .await
+        .map_err(|e| format!("프로브 실패: {e}"))?;
+    Ok(granted)
+}
+
+// '파일 및 폴더' 개인정보 설정 열기 — 팝업에서 거부한 뒤 다시 켤 때 안내용.
+#[tauri::command]
+pub fn open_files_privacy_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("설정 열기 실패: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
 // 알림 권한 요청(온보딩) — 릴리스 .app 에선 macOS 허용 배너가 뜨고, 허용 여부를 돌려준다.
 #[tauri::command]
 pub fn notification_permission(app: AppHandle) -> bool {
