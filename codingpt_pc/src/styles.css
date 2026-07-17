@@ -118,7 +118,7 @@ body.resizing-row { cursor: row-resize; }
 .ws-row.active .wsr-name { color: var(--text); }
 .wsr-badge { background: var(--error); color: #fff; font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 999px; padding: 0 4px; }
 .wsr-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dim); }
-.wsr-kind, .wsr-branch { display: inline-flex; align-items: center; gap: 4px; }
+.wsr-kind { display: inline-flex; align-items: center; gap: 4px; }
 /* 프로젝트 그룹(같은 프로젝트의 PC별 사본 묶음) — 헤더 1회 + 멤버 들여쓰기 + 상태점 */
 .ws-proj-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px 3px; color: var(--text-2, #aab2c5); font-size: 12.5px; font-weight: 700; }
 .ws-proj-head .wsp-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -134,8 +134,7 @@ body.resizing-row { cursor: row-resize; }
 .cpt-dt-frame { width: 100%; height: 100%; border: 0; background: #292a2d; display: block; }
 .cpt-dt-slot { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 .cpt-dt-status { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 11px; color: #ffd479; background: rgba(0,0,0,.75); padding: 3px 8px; border-radius: 6px; max-width: 90%; }
-.wsr-branch { color: var(--text3); }
-.wsr-kind .ic, .wsr-branch .ic { opacity: 0.85; }
+.wsr-kind .ic { opacity: 0.85; }
 .wsr-path { font-size: 11px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsr-ports { display: flex; gap: 4px; }
 .port { font-size: 10px; font-family: ui-monospace, monospace; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; }
@@ -658,13 +657,6 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 .qg-btn:hover { background: var(--hover); }
 .qg-quit { border-color: #7f1d1d; background: #3b1113; color: #fca5a5; }
 .qg-quit:hover { background: #4c1518; }
-
-/* 신선도 배지(사이드바) — ●=미커밋, ↑N=미푸시 */
-.wsr-fresh {
-  display: inline-flex; align-items: center; gap: 1px;
-  margin-left: 6px; font-size: 10px; color: #eab308; flex: none;
-}
-.wsr-fresh svg { stroke: #eab308; }
 
 /* 설정 소형 버튼(업데이트 확인 등) */
 .sett-btn {

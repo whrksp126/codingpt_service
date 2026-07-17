@@ -22,7 +22,6 @@ export const icons = {
   arrowDown: (o) => svg('<line x1="12" y1="5" x2="12" y2="18"/><path d="M6 12l6 6 6-6"/>', o),
   arrowTop: (o) => svg('<line x1="5" y1="5" x2="19" y2="5"/><line x1="12" y1="20" x2="12" y2="9"/><path d="M7 13l5-5 5 5"/>', o),
   cloud: (o) => svg('<path d="M7 18a4 4 0 0 1-.5-8A5 5 0 0 1 16.5 9 3.5 3.5 0 0 1 17 18H7z"/>', o),
-  gitBranch: (o) => svg('<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="8" r="2.2"/><path d="M6 8.2v7.6"/><path d="M18 10.2a6 6 0 0 1-6 6H8.5"/>', o),
   refresh: (o) => svg('<path d="M20 11a8 8 0 1 0-2.3 5.3"/><path d="M20 5v6h-6"/>', o),
   gear: (o) => svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M18.9 5.1l-2.1 2.1M7.2 16.8l-2.1 2.1"/>', o),
   globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"/>', o),

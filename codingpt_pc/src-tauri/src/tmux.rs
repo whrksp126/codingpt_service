@@ -357,25 +357,6 @@ pub fn kill_window(ctx: &TmuxCtx, session: &str, index: i64) -> Result<(), Strin
     run(ctx, &["kill-window", "-t", &format!("={session}:{index}")]).map(|_| ())
 }
 
-// git 현재 브랜치(사이드바 표시용). 실패 시 None.
-pub fn git_branch(abs: &PathBuf) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(abs)
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let b = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if b.is_empty() || b == "HEAD" {
-        None
-    } else {
-        Some(b)
-    }
-}
-
 // 로컬 리스닝 TCP 포트 목록(프리뷰/사이드바 배지). lsof 기반, 실패 시 빈 목록.
 // LISTEN 소켓 → [(pid, port)] (프로세스별 그룹). -Fpn: p<pid> 블록 + n<name> 라인.
 fn listen_sockets() -> Vec<(u32, u16)> {
@@ -531,12 +512,6 @@ pub fn tmux_unview_window(
     }
     let _ = run(&ctx, &["unlink-window", "-t", &format!("={psess}:{index}")]);
     Ok(())
-}
-
-#[tauri::command]
-pub fn tmux_git_branch(local_path: String) -> Option<String> {
-    let (_session, abs) = session_for(&local_path);
-    git_branch(&abs)
 }
 
 #[tauri::command]

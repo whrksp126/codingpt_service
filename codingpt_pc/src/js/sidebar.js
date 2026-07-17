@@ -326,17 +326,9 @@ function wsRow(w, group) {
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
   const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
-  // 브랜치: 이 PC 사본은 로컬 실측(rt), 다른 호스트 사본은 그 호스트 데몬의 신선도 보고(w.git).
-  const brName = rt?.branch || w.git?.branch || "";
-  const branch = brName ? `<span class="wsr-branch">${icons.gitBranch({ size: 11 })}${escapeHtml(brName)}</span>` : "";
-  // 신선도 배지 — ●=커밋 안 된 변경(IDE 미저장 ● 관례), ↑N=푸시 안 된 커밋 수.
-  const g = w.git;
-  const fresh =
-    (g?.dirty ? `<span class="wsr-fresh" title="커밋 안 된 변경 있음">●</span>` : "") +
-    (g?.upstream && g.ahead > 0 ? `<span class="wsr-fresh" title="푸시 안 된 커밋 ${g.ahead}개">${icons.arrowUp({ size: 10 })}${g.ahead}</span>` : "");
   meta.innerHTML = grouped
-    ? branch + fresh
-    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>${branch}${fresh}`;
+    ? ""
+    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -349,7 +341,8 @@ function wsRow(w, group) {
     meta.appendChild(badge);
   }
 
-  row.append(name, meta);
+  row.append(name);
+  if (meta.innerHTML) row.append(meta); // 빈 meta 줄(그룹 멤버 + 상태 배지 없음)은 여백만 남으니 생략
   if (w.localPath) {
     const path = document.createElement("div");
     path.className = "wsr-path";
@@ -579,9 +572,6 @@ export async function refreshWsMeta() {
     if (!isLocal(w)) continue;
     const rt = S.wsRuntime(w.id) || S.ensureRuntime(w.id);
     if (S.isThisHost(w)) {
-      try {
-        rt.branch = await api.gitBranch(w.localPath || "");
-      } catch (_) {}
       // 그 워크스페이스 폴더 안에서 실제로 도는 dev 서버 포트만 감지(시스템/타 폴더 포트 제외).
       try {
         rt.ports = await api.listenPorts(w.localPath || "");

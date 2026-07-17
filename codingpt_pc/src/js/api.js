@@ -55,7 +55,6 @@ export const api = {
   killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
   viewWindow: (localPath, paneId, index) => invoke("tmux_view_window", { localPath, paneId, index }),
   unviewWindow: (localPath, paneId, index) => invoke("tmux_unview_window", { localPath, paneId, index }),
-  gitBranch: (localPath) => invoke("tmux_git_branch", { localPath }),
   listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
 
   // ── 클라우드 터미널(relay) ──
