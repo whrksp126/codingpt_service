@@ -164,11 +164,13 @@ fn ensure_auto_rename_once(ctx: &TmuxCtx, session: &str) {
     ensure_auto_rename(ctx, session);
 }
 
-// 자동 개명(automatic-rename) 보장 — 실행 중엔 명령, 대기 중엔 폴더명(cmux 탭 UX, 데몬 미러).
+// 자동 개명(automatic-rename) 보장 — 셸 대기=폴더명, 실행 중=앱 OSC 타이틀(pane_title)→프로세스명
+//  폴백(cmux 탭 UX, 데몬 미러). 셸이 쏘는 "user@host:path" 타이틀은 걸러낸다.
+//  포맷은 데몬 tmux.conf·pty.js 와 3벌 동기 — 한쪽만 수정 금지.
 //  이미 떠 있는 서버(구 conf)에도 전역 옵션을 런타임 주입하고, 구 빌드가 -n 으로 만들어
 //  per-window automatic-rename 이 꺼진 "터미널 N" window 를 개별로 다시 켠다(수동 이름은 보존).
 const AUTO_RENAME_FMT: &str =
-    "#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{pane_current_command}}";
+    "#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{?#{&&:#{!=:#{pane_title},},#{&&:#{!=:#{pane_title},#{host}},#{&&:#{!=:#{pane_title},#{host_short}},#{?#{m:*@#{host_short}*,#{pane_title}},0,1}}}},#{pane_title},#{pane_current_command}}}";
 pub fn ensure_auto_rename(ctx: &TmuxCtx, session: &str) {
     let _ = run(ctx, &["set-window-option", "-g", "automatic-rename-format", AUTO_RENAME_FMT]);
     let _ = run(ctx, &["set-window-option", "-g", "automatic-rename", "on"]);
