@@ -15,7 +15,7 @@ const WIN_EXE_URL = ''; // 준비 중
 const STEPS = [
   { t: '설치', d: '받은 파일을 실행해 CodingPT를 설치하면 메뉴바(트레이)에 아이콘이 상주합니다. Node·터미널 같은 별도 프로그램은 필요 없어요.' },
   { t: '연결', d: 'CodingPT를 처음 열면 로그인 버튼 하나가 보여요. 누르면 브라우저가 열리고, CodingPT 계정으로 로그인 후 [이 PC 연결하기]를 누르면 끝 — 코드 입력도 필요 없습니다.' },
-  { t: '어디서든', d: '연결되면 폰·태블릿·다른 PC에서 이 컴퓨터의 폴더를 IDE로 열어 편집하고, 터미널의 claude 같은 CLI 에이전트를 이어서 조작할 수 있어요.' },
+  { t: '어디서든', d: '연결되면 폰·태블릿·다른 PC에서 이 컴퓨터의 폴더를 IDE로 열어 편집하고, 터미널의 claude 같은 CLI 에이전트를 이어서 작업할 수 있어요.' },
 ];
 
 export default function DownloadPage() {
@@ -28,7 +28,7 @@ export default function DownloadPage() {
         </h1>
         <p style={{ fontSize: 15, color: 'var(--text2, #aeb8c8)', marginTop: 12, lineHeight: 1.6 }}>
           설치만 하면 메뉴바에서 항상 실행됩니다. 폰에서 내 PC 폴더로 바이브코딩하고,
-          PC 터미널을 이어서 조작할 수 있어요.
+          PC 터미널을 이어서 작업할 수 있어요.
         </p>
       </section>
 
