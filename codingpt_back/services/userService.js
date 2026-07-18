@@ -233,6 +233,7 @@ class UserService {
       login_type: 'local',
       nickname: nick,
       role: 'user',
+      created_at: new Date(),
     });
     const tokens = this._issueTokens(user);
     await User.update({ refresh_token: tokens.refreshToken }, { where: { id: user.id } });
