@@ -80,7 +80,7 @@ const passwordForgot = async (req, res) => {
 // 로그아웃
 const logout = async (req, res) => {
   try {
-    const result = await userService.logout(req.headers.authorization);
+    const result = await userService.logout(req.headers.authorization, (req.body || {}).refreshToken);
     successResponse(res, result, '로그아웃이 완료되었습니다.');
   } catch (error) {
     console.error('로그아웃 오류:', error);

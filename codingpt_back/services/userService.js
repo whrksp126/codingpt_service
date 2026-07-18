@@ -14,9 +14,11 @@ const {
   ProductClassMap,
   ClassSectionMap,
   SectionLessonMap,
+  RefreshSession,
   sequelize,
 } = require('../models');
 const { fn, col, Op } = require('sequelize');
+const crypto = require('crypto');
 
 const ACHIEVEMENT_CATEGORIES = ['HTML', 'CSS', 'JS', 'Python', 'Java', 'Nodejs'];
 const { OAuth2Client } = require('google-auth-library');
@@ -44,6 +46,21 @@ const _handoff = new Map(); // code -> { tokens, exp }
 function _handoffPrune() {
   const now = Date.now();
   for (const [c, v] of _handoff) if (v.exp <= now) _handoff.delete(c);
+}
+
+// ── 기기별 refresh 세션(폐기 가능·해시 저장) ──────────────────────────────
+function _sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+// 발급된 refresh 토큰을 세션 테이블에 기록 — 원문 대신 sha256, exp 는 디코드로 채움. best-effort(실패해도 로그인 진행).
+async function _recordRefreshSession(userId, refreshToken) {
+  try {
+    const decoded = jwt.decode(refreshToken);
+    const expires_at = decoded && decoded.exp ? new Date(decoded.exp * 1000) : null;
+    await RefreshSession.create({ user_id: userId, token_hash: _sha256(refreshToken), expires_at, created_at: new Date() });
+  } catch (_) { /* 테이블 부재/중복 등 — 인증 흐름은 막지 않음 */ }
+}
+// 특정 refresh 토큰의 세션을 폐기(로그아웃/회전 시 구 토큰).
+async function _revokeRefreshSession(refreshToken) {
+  try { await RefreshSession.update({ revoked_at: new Date() }, { where: { token_hash: _sha256(refreshToken), revoked_at: null } }); } catch (_) { /* noop */ }
 }
 const GOOGLE_ANDROID_CLIENT_ID = process.env.GOOGLE_ANDROID_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_ANDROID_CLIENT_ID';
 const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_WEB_CLIENT_ID';
@@ -108,6 +125,7 @@ class UserService {
 
       // 5. Refresh Token 업데이트
       await User.update({ refresh_token: refreshToken }, { where: { id: foundUser.id } });
+      await _recordRefreshSession(foundUser.id, refreshToken);
       console.log('✅ Refresh Token 업데이트 성공');
 
       return { accessToken, refreshToken };
@@ -194,6 +212,7 @@ class UserService {
       { expiresIn: '30d' }
     );
     await User.update({ refresh_token: refreshToken }, { where: { id: foundUser.id } });
+    await _recordRefreshSession(foundUser.id, refreshToken);
 
     return { accessToken, refreshToken };
   }
@@ -220,6 +239,7 @@ class UserService {
       { expiresIn: '30d' },
     );
     await User.update({ refresh_token: refreshToken }, { where: { id: user.id } });
+    await _recordRefreshSession(user.id, refreshToken);
     return { accessToken, refreshToken };
   }
 
@@ -250,6 +270,7 @@ class UserService {
     });
     const tokens = this._issueTokens(user);
     await User.update({ refresh_token: tokens.refreshToken }, { where: { id: user.id } });
+    await _recordRefreshSession(user.id, tokens.refreshToken);
     return tokens;
   }
 
@@ -259,6 +280,7 @@ class UserService {
     if (!user) throw new Error('사용자를 찾을 수 없어요.');
     const tokens = this._issueTokens(user);
     await User.update({ refresh_token: tokens.refreshToken }, { where: { id: user.id } });
+    await _recordRefreshSession(user.id, tokens.refreshToken);
     _handoffPrune();
     const code = require('crypto').randomBytes(24).toString('hex');
     _handoff.set(code, { tokens, exp: Date.now() + 90 * 1000 });
@@ -287,8 +309,8 @@ class UserService {
     return { pending: true };
   }
 
-  // 로그아웃
-  async logout(authHeader) {
+  // 로그아웃 — refreshToken 을 함께 받으면 그 기기 세션만 폐기(다기기 유지). 없으면 레거시 동작(만료 대기).
+  async logout(authHeader, refreshToken) {
     try {
       if (!authHeader) {
         throw new Error('토큰이 필요합니다.');
@@ -303,10 +325,10 @@ class UserService {
       const decoded = jwt.verify(token, ACCESS_SECRET, JWT_VERIFY_OPTS);
       console.log('✅ 토큰 검증 성공:', decoded.id);
 
-      // Refresh Token을 빈 문자열로 설정하여 무효화
-      await User.update({ refresh_token: '' }, { where: { id: decoded.id } });
+      // 이 기기의 refresh 세션만 폐기(제공된 경우) — 다른 기기 로그인은 유지.
+      if (refreshToken) await _revokeRefreshSession(refreshToken);
       console.log('✅ 로그아웃 성공:', decoded.id);
-      
+
       return { message: '로그아웃이 완료되었습니다.' };
     } catch (error) {
       console.error('로그아웃 오류:', error);
@@ -350,6 +372,16 @@ class UserService {
       if (!dbUser) throw new Error('존재하지 않는 계정입니다.');
       const role = dbUser.role || 'user';
 
+      // 세션 검증 — 폐기된 refresh 토큰(로그아웃/기기 해제/재사용 감지)은 거부.
+      //  테이블 도입 전에 발급된 토큰은 세션이 없으므로 lazy 로 등록(기존 로그인 사용자 대량 로그아웃 방지).
+      const session = await RefreshSession.findOne({ where: { token_hash: _sha256(refreshToken) } }).catch(() => null);
+      if (session) {
+        if (session.revoked_at) throw new Error('로그아웃되었거나 폐기된 세션입니다. 다시 로그인해 주세요.');
+        await RefreshSession.update({ last_used_at: new Date() }, { where: { id: session.id } }).catch(() => {});
+      } else {
+        await _recordRefreshSession(decoded.id, refreshToken);
+      }
+
       const newAccessToken = jwt.sign(
         { id: decoded.id, email: decoded.email, role },
         ACCESS_SECRET,
@@ -366,8 +398,10 @@ class UserService {
           REFRESH_SECRET,
           { expiresIn: '30d' }
           );
-        // DB에 업데이트
+        // DB에 업데이트 + 세션 회전(구 토큰 폐기, 새 토큰 등록 — 단일 사용/재사용 감지).
         await User.update({ refresh_token: newRefreshToken }, { where: { id: decoded.id } });
+        await _revokeRefreshSession(refreshToken);
+        await _recordRefreshSession(decoded.id, newRefreshToken);
       }
 
       const response = { accessToken: newAccessToken };
