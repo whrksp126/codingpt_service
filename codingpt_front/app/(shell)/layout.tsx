@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { captureHandoff, getToken } from '@/lib/auth';
+import { captureHandoff, getToken, redeemHandoffCode } from '@/lib/auth';
 import Sidebar from '@/components/shell/Sidebar';
 
 // 인증 앱셸 — 좌측 고정 사이드바 + 콘텐츠. <1024px 는 햄버거 오버레이 드로어.
@@ -13,9 +13,15 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
   const [drawer, setDrawer] = useState(false);
 
   useEffect(() => {
-    captureHandoff();
-    if (!getToken()) { router.replace(`/login?next=${encodeURIComponent(pathname)}`); return; }
-    setAuthed(true);
+    let cancelled = false;
+    (async () => {
+      await redeemHandoffCode(); // ?hc= 일회용 코드 → 토큰 교환(있을 때만)
+      captureHandoff();          // 레거시 ?handoff= 토큰(하위호환)
+      if (cancelled) return;
+      if (!getToken()) { router.replace(`/login?next=${encodeURIComponent(pathname)}`); return; }
+      setAuthed(true);
+    })();
+    return () => { cancelled = true; };
   }, [pathname, router]);
 
   // 라우트 이동 시 모바일 드로어 닫기

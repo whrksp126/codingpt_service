@@ -71,12 +71,12 @@ const updatePaymentMethod = async (req, res) => {
   } catch (error) { return errorResponse(res, error, 400); }
 };
 
-// POST /api/billing/web-session — 앱→웹 핸드오프. 같은 user_id 로 결제 웹에 로그인할 단기 토큰.
+// POST /api/billing/web-session — 앱→웹 핸드오프. 토큰을 URL 에 직접 싣지 않기 위해 일회용 코드(90초, 1회 소진)를
+//  발급하고, 웹이 로드 시 /api/users/handoff/redeem 으로 코드를 토큰으로 교환한다(로그·프록시 노출 방지).
 const createWebSession = async (req, res) => {
   try {
-    const u = req.user;
-    const token = jwt.sign({ id: u.id, email: u.email, role: u.role, scope: 'web' }, ACCESS_SECRET, { expiresIn: '30m' });
-    return successResponse(res, { token, webUrl: BILLING.PAYMENT_WEB_URL });
+    const { code } = await require('../services/userService').issueHandoff(req.user.id);
+    return successResponse(res, { code, webUrl: BILLING.PAYMENT_WEB_URL });
   } catch (error) { return errorResponse(res, error); }
 };
 
