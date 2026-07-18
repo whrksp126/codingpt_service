@@ -28,7 +28,15 @@ const ACCESS_SECRET = process.env.ACCESS_SECRET || 'ENV_NOT_FOUND_ACCESS_SECRET'
 const REFRESH_SECRET = process.env.REFRESH_SECRET || 'ENV_NOT_FOUND_REFRESH_SECRET';
 // 액세스 토큰 수명 — env 로 조정(기본 15분). 웹 결제 세션은 짧은 만료로는 끊기므로 정상화.
 const ACCESS_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
-const { verifyPassword } = require('../utils/password');
+const { hashPassword, verifyPassword } = require('../utils/password');
+
+// 모바일 앱↔웹 로그인 핸드오프 — 웹에서 로그인/가입을 마친 뒤 앱으로 토큰을 안전하게 넘기는
+//  일회용 코드(메모리, 90초 TTL). 토큰을 URL 에 직접 싣지 않기 위해 코드만 딥링크로 전달한다.
+const _handoff = new Map(); // code -> { tokens, exp }
+function _handoffPrune() {
+  const now = Date.now();
+  for (const [c, v] of _handoff) if (v.exp <= now) _handoff.delete(c);
+}
 const GOOGLE_ANDROID_CLIENT_ID = process.env.GOOGLE_ANDROID_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_ANDROID_CLIENT_ID';
 const GOOGLE_WEB_CLIENT_ID = process.env.GOOGLE_WEB_CLIENT_ID || 'ENV_NOT_FOUND_GOOGLE_WEB_CLIENT_ID';
 
@@ -200,6 +208,56 @@ class UserService {
     );
     await User.update({ refresh_token: refreshToken }, { where: { id: user.id } });
     return { accessToken, refreshToken };
+  }
+
+  // 유저에게 새 토큰 쌍을 발급하고 refresh_token 저장 (공용 헬퍼).
+  _issueTokens(user) {
+    const payload = { id: user.id, email: user.email, role: user.role };
+    const accessToken = jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_TTL });
+    const refreshToken = jwt.sign(payload, REFRESH_SECRET, { expiresIn: '30d' });
+    return { accessToken, refreshToken };
+  }
+
+  // 이메일/비밀번호 회원가입 — 일반 사용자용. login_type='local', scrypt 해시 저장.
+  async registerLocal(email, password, nickname) {
+    const em = String(email || '').trim().toLowerCase();
+    const pw = String(password || '');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) throw new Error('올바른 이메일 형식이 아니에요.');
+    if (pw.length < 8) throw new Error('비밀번호는 8자 이상이어야 해요.');
+    const existing = await User.findOne({ where: { email: em } });
+    if (existing) throw new Error('이미 가입된 이메일이에요. 로그인해 주세요.');
+    const nick = String(nickname || '').trim().slice(0, 40) || em.split('@')[0];
+    const user = await User.create({
+      email: em,
+      password_hash: hashPassword(pw),
+      login_type: 'local',
+      nickname: nick,
+      role: 'user',
+    });
+    const tokens = this._issueTokens(user);
+    await User.update({ refresh_token: tokens.refreshToken }, { where: { id: user.id } });
+    return tokens;
+  }
+
+  // 핸드오프 코드 발급 — 로그인된 유저(req.user)에게 새 토큰 쌍을 만들어 일회용 코드로 보관.
+  async issueHandoff(userId) {
+    const user = await User.findByPk(userId);
+    if (!user) throw new Error('사용자를 찾을 수 없어요.');
+    const tokens = this._issueTokens(user);
+    await User.update({ refresh_token: tokens.refreshToken }, { where: { id: user.id } });
+    _handoffPrune();
+    const code = require('crypto').randomBytes(24).toString('hex');
+    _handoff.set(code, { tokens, exp: Date.now() + 90 * 1000 });
+    return { code };
+  }
+
+  // 핸드오프 코드 교환 — 앱이 딥링크로 받은 코드를 토큰으로 교환(1회용, 소진 시 삭제).
+  async redeemHandoff(code) {
+    _handoffPrune();
+    const entry = _handoff.get(String(code || ''));
+    if (!entry) throw new Error('만료되었거나 잘못된 코드예요. 다시 시도해 주세요.');
+    _handoff.delete(code);
+    return entry.tokens;
   }
 
   // 로그아웃

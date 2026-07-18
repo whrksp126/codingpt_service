@@ -5,6 +5,9 @@ const {
   login,
   appleLogin,
   loginLocal,
+  registerLocal,
+  handoffIssue,
+  handoffRedeem,
   logout,
   verifyAccessToken,
   refreshAccessToken,
@@ -22,7 +25,10 @@ const {
 // 사용자 관련 라우트
 router.post('/login', login);                   // 로그인 (구글 OAuth)
 router.post('/apple-login', appleLogin);        // 로그인 (Apple — iOS/웹/PC/안드로이드 공용)
-router.post('/login-local', loginLocal);        // 로컬 ID/PW 로그인 (심사용 계정)
+router.post('/login-local', loginLocal);        // 로컬 ID/PW 로그인 (심사용 계정 + 일반 이메일 가입자)
+router.post('/register-local', registerLocal);  // 이메일/비밀번호 회원가입 (일반 사용자)
+router.post('/handoff/issue', authMiddleware, handoffIssue);  // 웹→앱 로그인 핸드오프 코드 발급(로그인 필요)
+router.post('/handoff/redeem', handoffRedeem);  // 앱→토큰 핸드오프 코드 교환(무인증, 코드가 비밀)
 router.post('/logout', logout);                 // 로그아웃
 router.get('/verify', verifyAccessToken);       // 엑세스 토큰 검증
 router.post('/refresh', refreshAccessToken);    // 엑세스 토큰 재발급

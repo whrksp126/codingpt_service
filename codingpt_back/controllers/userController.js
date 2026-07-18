@@ -25,12 +25,43 @@ const appleLogin = async (req, res) => {
   }
 };
 
-// 로컬 ID/PW 로그인 (카드사 심사용 계정)
+// 로컬 ID/PW 로그인 (카드사 심사용 계정 + 일반 이메일 가입자)
 const loginLocal = async (req, res) => {
   try {
     const { email, password } = req.body || {};
     const tokens = await userService.loginLocal(email, password);
     successResponse(res, tokens, '로그인이 성공적으로 완료되었습니다.');
+  } catch (error) {
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
+// 이메일/비밀번호 회원가입 (일반 사용자)
+const registerLocal = async (req, res) => {
+  try {
+    const { email, password, nickname } = req.body || {};
+    const tokens = await userService.registerLocal(email, password, nickname);
+    successResponse(res, tokens, '회원가입이 완료되었습니다.');
+  } catch (error) {
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
+// 모바일 핸드오프 코드 발급 (로그인된 웹 → 코드) — authMiddleware 필요.
+const handoffIssue = async (req, res) => {
+  try {
+    const result = await userService.issueHandoff(req.user.id);
+    successResponse(res, result);
+  } catch (error) {
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
+// 모바일 핸드오프 코드 교환 (앱 → 토큰) — 무인증(코드가 비밀).
+const handoffRedeem = async (req, res) => {
+  try {
+    const tokens = await userService.redeemHandoff((req.body || {}).code);
+    successResponse(res, tokens);
   } catch (error) {
     errorResponse(res, { message: error.message }, 400);
   }
@@ -231,6 +262,9 @@ module.exports = {
   login,
   appleLogin,
   loginLocal,
+  registerLocal,
+  handoffIssue,
+  handoffRedeem,
   logout,
   verifyAccessToken,
   refreshAccessToken,
