@@ -261,6 +261,19 @@ class UserService {
     return entry.tokens;
   }
 
+  // 비밀번호 찾기(재설정 요청) — 스캐폴드.
+  //  · 계정 존재 여부를 노출하지 않도록 항상 동일 응답(user enumeration 방지).
+  //  · 메일 발송 인프라는 아직 미구축 → pending:true 로 "준비 중" 안내. 발송 연동 시
+  //    여기서 재설정 토큰 생성 + 메일 발송(예: 재설정 링크 codingpt.ghmate.com/reset-password?token=)만 추가하면 됨.
+  async forgotPassword(email) {
+    const em = String(email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) throw new Error('올바른 이메일 형식이 아니에요.');
+    // TODO(email): 가입된 local 계정이면 재설정 토큰 발급 후 메일 발송.
+    //   const user = await User.findOne({ where: { email: em, login_type: 'local' } });
+    //   if (user) { const token = ...; await sendResetEmail(em, token); }
+    return { pending: true };
+  }
+
   // 로그아웃
   async logout(authHeader) {
     try {

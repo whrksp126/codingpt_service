@@ -9,11 +9,15 @@ const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID || '';
 
 // 공용 로그인 패널 — [로고][애플][구글][구분선][이메일 버튼(로그인/회원가입)][약관].
 //  성공 시 setToken 저장 후 onAuthed(accessToken) 호출 → 페이지가 후처리(리다이렉트/PC연결/앱핸드오프).
-export default function AuthPanel({ onAuthed, title }: { onAuthed: (accessToken: string) => void; title?: string }) {
+//  only='email' 이면 애플/구글/구분선을 숨기고 이메일 폼만 노출(앱에서 이미 이메일을 택한 경우).
+export default function AuthPanel({ onAuthed, title, only }: { onAuthed: (accessToken: string) => void; title?: string; only?: 'email' | null }) {
+  const emailOnly = only === 'email';
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [showEmail, setShowEmail] = useState(false);
+  const [showEmail, setShowEmail] = useState(emailOnly);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [forgot, setForgot] = useState(false); // 비밀번호 찾기 화면
+  const [forgotMsg, setForgotMsg] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -59,9 +63,24 @@ export default function AuthPanel({ onAuthed, title }: { onAuthed: (accessToken:
     else setMsg(r.message || (mode === 'signup' ? '회원가입에 실패했어요.' : '로그인에 실패했어요.'));
   };
 
-  // 구글 GSI 버튼 렌더
+  // 비밀번호 찾기 — 재설정 안내 요청(현재 메일 발송은 준비 중, 백엔드는 존재 노출 없이 일반 응답).
+  const onForgotSubmit = async () => {
+    if (!email) { setForgotMsg('이메일을 입력해 주세요.'); return; }
+    setBusy(true); setForgotMsg(null);
+    const r = await clientFetch<{ pending?: boolean }>('/api/users/password/forgot', { method: 'POST', body: { email } });
+    setBusy(false);
+    if (r.ok) {
+      setForgotMsg(r.data?.pending
+        ? '비밀번호 재설정 기능은 준비 중이에요. 곧 이메일로 안내해 드릴게요.'
+        : '가입된 이메일이라면 재설정 안내를 보내 드렸어요. 메일함을 확인해 주세요.');
+    } else {
+      setForgotMsg(r.message || '요청 처리에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    }
+  };
+
+  // 구글 GSI 버튼 렌더 (이메일 전용 모드에선 렌더하지 않음)
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) return;
+    if (emailOnly || !GOOGLE_CLIENT_ID) return;
     const s = document.createElement('script');
     s.src = 'https://accounts.google.com/gsi/client';
     s.async = true; s.defer = true;
@@ -81,25 +100,40 @@ export default function AuthPanel({ onAuthed, title }: { onAuthed: (accessToken:
       <img src="/logo.png" alt="CodingPT" height={30} style={{ display: 'block', margin: '4px auto 6px' }} />
       {title ? <p className="muted" style={{ fontSize: 13, marginBottom: 4 }}>{title}</p> : null}
 
-      <div style={{ marginTop: 18, display: 'grid', gap: 10, justifyItems: 'center' }}>
-        {/* Apple */}
-        <button onClick={onApple} disabled={busy} style={appleBtn} aria-label="Apple로 계속하기">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="#fff" aria-hidden><path d="M17.05 12.04c-.03-2.85 2.33-4.22 2.44-4.28-1.33-1.95-3.4-2.22-4.14-2.25-1.76-.18-3.44 1.04-4.33 1.04-.89 0-2.27-1.02-3.73-.99-1.92.03-3.69 1.12-4.68 2.84-2 3.46-.51 8.58 1.43 11.39.95 1.38 2.08 2.92 3.56 2.87 1.43-.06 1.97-.92 3.7-.92 1.72 0 2.21.92 3.72.89 1.54-.03 2.51-1.4 3.45-2.79 1.09-1.6 1.54-3.15 1.56-3.23-.03-.02-2.99-1.15-3.02-4.56zM14.23 3.66c.79-.96 1.32-2.29 1.17-3.62-1.14.05-2.51.76-3.32 1.71-.73.85-1.37 2.2-1.2 3.5 1.27.1 2.57-.64 3.35-1.59z" /></svg>
-          <span>Apple로 계속하기</span>
-        </button>
-        {/* Google */}
-        {GOOGLE_CLIENT_ID ? <div ref={gbtn} /> : null}
-      </div>
+      {/* 애플/구글/구분선 — 이메일 전용 모드에선 숨김(앱에서 이미 이메일을 택함). */}
+      {!emailOnly ? (
+        <>
+          <div style={{ marginTop: 18, display: 'grid', gap: 10, justifyItems: 'center' }}>
+            {/* Apple */}
+            <button onClick={onApple} disabled={busy} style={appleBtn} aria-label="Apple로 계속하기">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="#fff" aria-hidden><path d="M17.05 12.04c-.03-2.85 2.33-4.22 2.44-4.28-1.33-1.95-3.4-2.22-4.14-2.25-1.76-.18-3.44 1.04-4.33 1.04-.89 0-2.27-1.02-3.73-.99-1.92.03-3.69 1.12-4.68 2.84-2 3.46-.51 8.58 1.43 11.39.95 1.38 2.08 2.92 3.56 2.87 1.43-.06 1.97-.92 3.7-.92 1.72 0 2.21.92 3.72.89 1.54-.03 2.51-1.4 3.45-2.79 1.09-1.6 1.54-3.15 1.56-3.23-.03-.02-2.99-1.15-3.02-4.56zM14.23 3.66c.79-.96 1.32-2.29 1.17-3.62-1.14.05-2.51.76-3.32 1.71-.73.85-1.37 2.2-1.2 3.5 1.27.1 2.57-.64 3.35-1.59z" /></svg>
+              <span>Apple로 계속하기</span>
+            </button>
+            {/* Google */}
+            {GOOGLE_CLIENT_ID ? <div ref={gbtn} /> : null}
+          </div>
 
-      {/* 구분선 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '18px auto', width: 320 }}>
-        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-        <span className="dim" style={{ fontSize: 12 }}>또는</span>
-        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-      </div>
+          {/* 구분선 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '18px auto', width: 320 }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            <span className="dim" style={{ fontSize: 12 }}>또는</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          </div>
+        </>
+      ) : null}
 
       {/* 이메일 — 버튼 형식. 누르면 로그인/회원가입 폼 펼침. */}
-      {!showEmail ? (
+      {forgot ? (
+        <div style={{ display: 'grid', gap: 10, width: 320, margin: '0 auto', textAlign: 'left' }}>
+          <p className="muted" style={{ fontSize: 13, margin: '0 0 2px' }}>가입한 이메일을 입력하면 재설정 안내를 보내 드려요.</p>
+          <input placeholder="이메일" type="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} style={inp} />
+          <button className="btn" disabled={busy} onClick={onForgotSubmit} style={cta}>
+            {busy ? '처리 중…' : '재설정 안내 받기'}
+          </button>
+          {forgotMsg ? <p style={{ fontSize: 13, color: 'var(--text2)' }}>{forgotMsg}</p> : null}
+          <button onClick={() => { setForgot(false); setForgotMsg(null); setMsg(null); }} style={linkBtn}>← 로그인으로 돌아가기</button>
+        </div>
+      ) : !showEmail ? (
         <div style={{ display: 'flex', justifyContent: 'center' }}>
           <button onClick={() => { setShowEmail(true); setMsg(null); }} style={emailBtn}>이메일로 계속하기</button>
         </div>
@@ -122,6 +156,9 @@ export default function AuthPanel({ onAuthed, title }: { onAuthed: (accessToken:
           <button className="btn" disabled={busy} onClick={onEmailSubmit} style={cta}>
             {busy ? '처리 중…' : (mode === 'signup' ? '회원가입' : '로그인')}
           </button>
+          {mode === 'login' ? (
+            <button onClick={() => { setForgot(true); setForgotMsg(null); setMsg(null); }} style={linkBtn}>비밀번호를 잊으셨나요?</button>
+          ) : null}
         </div>
       )}
 
@@ -152,4 +189,8 @@ const emailBtn: React.CSSProperties = {
 const cta: React.CSSProperties = {
   background: 'var(--cta, #08875d)', color: '#fff', border: 'none',
   borderRadius: 10, padding: '12px 14px', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+};
+const linkBtn: React.CSSProperties = {
+  background: 'none', border: 'none', color: 'var(--text2)', fontSize: 13,
+  cursor: 'pointer', padding: '2px 0', textAlign: 'center',
 };

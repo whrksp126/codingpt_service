@@ -10,6 +10,7 @@ import AuthPanel from '@/components/AuthPanel';
 export default function Login() {
   const [appMode, setAppMode] = useState(false);
   const [handing, setHanding] = useState(false);
+  const [emailOnly, setEmailOnly] = useState(false); // ?method=email (앱에서 이메일 선택 → 이메일 폼만)
 
   const redirectNext = () => {
     const next = new URL(window.location.href).searchParams.get('next') || '/me';
@@ -31,8 +32,10 @@ export default function Login() {
 
   useEffect(() => {
     captureHandoff();
-    const app = new URL(window.location.href).searchParams.get('app') === '1';
+    const sp = new URL(window.location.href).searchParams;
+    const app = sp.get('app') === '1';
     setAppMode(app);
+    setEmailOnly(sp.get('method') === 'email');
     if (getToken()) { if (app) void handoffToApp(); else redirectNext(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -46,5 +49,5 @@ export default function Login() {
     );
   }
 
-  return <AuthPanel onAuthed={onAuthed} title={appMode ? '앱에 로그인' : undefined} />;
+  return <AuthPanel onAuthed={onAuthed} title={appMode ? '앱에 로그인' : undefined} only={emailOnly ? 'email' : null} />;
 }

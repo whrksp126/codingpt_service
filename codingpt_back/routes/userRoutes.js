@@ -8,6 +8,7 @@ const {
   registerLocal,
   handoffIssue,
   handoffRedeem,
+  passwordForgot,
   logout,
   verifyAccessToken,
   refreshAccessToken,
@@ -29,6 +30,7 @@ router.post('/login-local', loginLocal);        // 로컬 ID/PW 로그인 (심�
 router.post('/register-local', registerLocal);  // 이메일/비밀번호 회원가입 (일반 사용자)
 router.post('/handoff/issue', authMiddleware, handoffIssue);  // 웹→앱 로그인 핸드오프 코드 발급(로그인 필요)
 router.post('/handoff/redeem', handoffRedeem);  // 앱→토큰 핸드오프 코드 교환(무인증, 코드가 비밀)
+router.post('/password/forgot', passwordForgot); // 비밀번호 찾기(재설정 요청) — 무인증, 존재 노출 없음
 router.post('/logout', logout);                 // 로그아웃
 router.get('/verify', verifyAccessToken);       // 엑세스 토큰 검증
 router.post('/refresh', refreshAccessToken);    // 엑세스 토큰 재발급

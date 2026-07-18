@@ -67,6 +67,16 @@ const handoffRedeem = async (req, res) => {
   }
 };
 
+// 비밀번호 찾기(재설정 요청) — 무인증. 계정 존재 여부 노출 금지(항상 동일 응답).
+const passwordForgot = async (req, res) => {
+  try {
+    const result = await userService.forgotPassword((req.body || {}).email);
+    successResponse(res, result);
+  } catch (error) {
+    errorResponse(res, { message: error.message }, 400);
+  }
+};
+
 // 로그아웃
 const logout = async (req, res) => {
   try {
@@ -265,6 +275,7 @@ module.exports = {
   registerLocal,
   handoffIssue,
   handoffRedeem,
+  passwordForgot,
   logout,
   verifyAccessToken,
   refreshAccessToken,
