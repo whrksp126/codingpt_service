@@ -10,17 +10,27 @@
  */
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { Op } = require('sequelize');
 const { DaemonDevice } = require('../models');
 const { errorResponse } = require('../utils/response');
 
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
 
 // Authorization: Bearer <deviceToken> → 해당 DaemonDevice(폐기 안 됨). 아니면 null.
+//  보안: 컨트롤러(모바일) 기기의 token_hash 는 sha256('ctrl:'+deviceUuid) 로, deviceUuid 는 비밀이
+//  아니다(헤더/로그 노출·약한 난수). 이를 bearer 자격증명으로 인정하면 `Bearer ctrl:<uuid>` 로 계정
+//  탈취가 가능하다. 컨트롤러는 원래 user JWT 로 인증하므로 deviceToken 매칭에서 role='controller' 를
+//  반드시 제외한다(실제 랜덤 deviceToken 을 가진 PC/러너 기기만 인정).
 async function resolveDeviceUser(req) {
   const h = req.headers.authorization || '';
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   if (!m) return null;
-  const device = await DaemonDevice.findOne({ where: { token_hash: sha256(m[1].trim()), revoked_at: null } });
+  const raw = m[1].trim();
+  // 실제 deviceToken 은 'cptd_' 접두사(createDeviceForUser). 컨트롤러 파생키('ctrl:...')는 bearer 로 불허.
+  if (!raw.startsWith('cptd_')) return null;
+  const device = await DaemonDevice.findOne({
+    where: { token_hash: sha256(raw), revoked_at: null, role: { [Op.ne]: 'controller' } },
+  });
   return device || null;
 }
 
@@ -32,7 +42,7 @@ async function resolveAccount(req) {
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   if (m) {
     try {
-      const decoded = jwt.verify(m[1].trim(), process.env.ACCESS_SECRET);
+      const decoded = jwt.verify(m[1].trim(), process.env.ACCESS_SECRET, { algorithms: ['HS256'] });
       if (decoded && decoded.id) return { userId: decoded.id, deviceId: null, device: null };
     } catch (_) { /* deviceToken 도 JWT 도 아님 */ }
   }

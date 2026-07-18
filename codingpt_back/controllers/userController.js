@@ -119,6 +119,9 @@ const refreshAccessToken = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
+    if (!req.user || String(req.user.id) !== String(id)) {
+      return errorResponse(res, { message: '본인 정보만 수정할 수 있습니다.' }, 403);
+    }
     const user = await userService.updateUser(id, req.body);
     successResponse(res, user, '사용자 정보가 성공적으로 수정되었습니다.');
   } catch (error) {
@@ -173,7 +176,7 @@ const getAllUsers = async (req, res) => {
     successResponse(res, users, '사용자 목록을 성공적으로 조회했습니다.');
   } catch (error) {
     console.error('사용자 조회 오류:', error);
-    errorResponse(res, error, 500);
+    errorResponse(res, { message: '사용자 목록 조회 중 오류가 발생했습니다.' }, 500);
   }
 };
 
@@ -194,6 +197,9 @@ const updateUserXp = async (req, res) => {
   try {
     const { id } = req.params;
     const { xp } = req.body;
+    if (!req.user || String(req.user.id) !== String(id)) {
+      return errorResponse(res, { message: '본인 XP만 수정할 수 있습니다.' }, 403);
+    }
 
     const result = await userService.updateUserXp(id, xp);
     successResponse(res, result, '사용자 XP가 성공적으로 업데이트되었습니다.');
@@ -251,7 +257,9 @@ const getTotalStudyDays = async (req, res) => {
 // 잔디 생성: 학습 히트맵 로그 생성
 const createStudyHeatmap = async (req, res) => {
   try {
-    let { user_id, product_id, section_id, lesson_id } = req.body;
+    let { product_id, section_id, lesson_id } = req.body;
+    // user_id 는 body 가 아니라 인증 토큰에서 — 남의 히트맵 위조 방지.
+    const user_id = req.user && req.user.id;
     if (!user_id || !product_id || !section_id || !lesson_id) {
       throw new Error('필수 파라미터가 누락되었습니다.');
     }

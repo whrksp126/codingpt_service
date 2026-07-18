@@ -24,11 +24,19 @@ const jwt = require('jsonwebtoken');
 const appleAuthService = require('./appleAuthService');
 require('dotenv').config();
 
-const ACCESS_SECRET = process.env.ACCESS_SECRET || 'ENV_NOT_FOUND_ACCESS_SECRET';
-const REFRESH_SECRET = process.env.REFRESH_SECRET || 'ENV_NOT_FOUND_REFRESH_SECRET';
+// 시크릿은 fail-closed — 미설정 시 하드코딩 폴백으로 토큰을 서명하면 누구나 위조 가능하므로 기동 중단.
+const ACCESS_SECRET = process.env.ACCESS_SECRET;
+const REFRESH_SECRET = process.env.REFRESH_SECRET;
+if (!ACCESS_SECRET || !REFRESH_SECRET) {
+  throw new Error('보안: ACCESS_SECRET / REFRESH_SECRET 환경변수가 설정되지 않았습니다. 서버를 기동하지 않습니다.');
+}
+// 대칭키(HS256) 고정 — alg=none / RS↔HS 혼동 공격 방지(모든 jwt.verify 에 적용).
+const JWT_VERIFY_OPTS = { algorithms: ['HS256'] };
 // 액세스 토큰 수명 — env 로 조정(기본 15분). 웹 결제 세션은 짧은 만료로는 끊기므로 정상화.
 const ACCESS_TTL = process.env.ACCESS_TOKEN_TTL || '15m';
 const { hashPassword, verifyPassword } = require('../utils/password');
+// 로그인 실패(계정 없음) 시에도 동일한 scrypt 비용을 치르기 위한 더미 해시(타이밍 균일화용).
+const _DUMMY_HASH = hashPassword('cpt-timing-equalizer-not-a-real-password');
 
 // 모바일 앱↔웹 로그인 핸드오프 — 웹에서 로그인/가입을 마친 뒤 앱으로 토큰을 안전하게 넘기는
 //  일회용 코드(메모리, 90초 TTL). 토큰을 URL 에 직접 싣지 않기 위해 코드만 딥링크로 전달한다.
@@ -60,12 +68,16 @@ class UserService {
 
       // 2. 토큰 페이로드 추출
       const payload = ticket.getPayload();
-      const { sub: google_id, email, name } = payload;
-      
+      const { sub: google_id, email, name, email_verified } = payload;
+
       if(!email || !google_id) {
         throw new Error('Google 토큰에서 이메일 또는 Google ID를 찾을 수 없습니다.');
       }
-      console.log('✅ 토큰 페이로드 추출 성공:', { email, google_id, name });
+      // 이메일이 검증되지 않은 Google 계정은 이메일 기반 계정 병합에 신뢰하지 않는다(계정 탈취 방지).
+      if (email_verified === false) {
+        throw new Error('이메일이 확인되지 않은 Google 계정입니다.');
+      }
+      console.log('✅ Google 토큰 페이로드 추출 성공');
 
       // 3. 사용자 조회 또는 생성
       let foundUser = await User.findOne({ where: { email } });
@@ -97,10 +109,7 @@ class UserService {
       // 5. Refresh Token 업데이트
       await User.update({ refresh_token: refreshToken }, { where: { id: foundUser.id } });
       console.log('✅ Refresh Token 업데이트 성공');
-      
-      console.log("accessToken:", accessToken);
-      console.log("refreshToken:", refreshToken);
-      
+
       return { accessToken, refreshToken };
 
     } catch (error) {
@@ -193,7 +202,11 @@ class UserService {
   async loginLocal(email, password) {
     if (!email || !password) throw new Error('이메일과 비밀번호가 필요합니다.');
     const user = await User.findOne({ where: { email } });
-    if (!user || !user.password_hash) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
+    // 타이밍 사이드채널 방지 — 계정이 없어도 동일하게 scrypt 를 한 번 돌려 응답 시간을 균일화(이메일 존재 노출 차단).
+    if (!user || !user.password_hash) {
+      verifyPassword(password, _DUMMY_HASH);
+      throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
+    }
     if (!verifyPassword(password, user.password_hash)) throw new Error('아이디 또는 비밀번호가 올바르지 않습니다.');
 
     const accessToken = jwt.sign(
@@ -287,7 +300,7 @@ class UserService {
       }
 
       // Access Token 검증
-      const decoded = jwt.verify(token, ACCESS_SECRET);
+      const decoded = jwt.verify(token, ACCESS_SECRET, JWT_VERIFY_OPTS);
       console.log('✅ 토큰 검증 성공:', decoded.id);
 
       // Refresh Token을 빈 문자열로 설정하여 무효화
@@ -305,7 +318,7 @@ class UserService {
   async verifyAccessToken(token) {
     let decoded;
     try {
-      decoded = jwt.verify(token, ACCESS_SECRET);
+      decoded = jwt.verify(token, ACCESS_SECRET, JWT_VERIFY_OPTS);
     } catch (err) {
       console.error('JWT 검증 오류:', err.message);
       throw new Error('토큰이 유효하지 않습니다.');
@@ -320,7 +333,6 @@ class UserService {
   // 엑세스 토큰 재발급
   // 기한 임박 시 리프레시 토큰 재발급
   async refreshAccessToken(refreshToken) {
-    console.log("refreshToken:", refreshToken);
     if(!refreshToken || refreshToken === '') {
       throw new Error('refreshToken 없음');
     }
@@ -329,7 +341,7 @@ class UserService {
       //const decoded = jwt.decode(refreshToken, { complete: true });
       //console.log('refreshToken payload:', decoded.payload);
 
-      const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
+      const decoded = jwt.verify(refreshToken, REFRESH_SECRET, JWT_VERIFY_OPTS);
       const now = Math.floor(Date.now() / 1000); // 현재 시간 (초)
 
       // 어드민 임명/박탈을 즉시 반영하기 위해 role 은 항상 DB 최신값으로 갱신.
@@ -354,7 +366,6 @@ class UserService {
           REFRESH_SECRET,
           { expiresIn: '30d' }
           );
-        console.log('Refresh Token 재발급 : ', newRefreshToken);
         // DB에 업데이트
         await User.update({ refresh_token: newRefreshToken }, { where: { id: decoded.id } });
       }

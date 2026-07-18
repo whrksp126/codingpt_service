@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { captureHandoff, setToken, getToken, clearToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 import AuthPanel from '@/components/AuthPanel';
@@ -13,7 +13,6 @@ export default function DesktopLogin() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [done, setDone] = useState(false);
-  const autoRef = useRef(false); // 자동 승인 1회 가드
 
   useEffect(() => {
     captureHandoff();
@@ -30,16 +29,11 @@ export default function DesktopLogin() {
     const r = await clientFetch('/api/daemon/pair/approve', { method: 'POST', body: { code }, token: getToken() });
     setBusy(false);
     if (r.ok) { setDone(true); setMsg(null); return; }
-    autoRef.current = false;
     if (r.status === 401) { clearToken(); setTok(null); setMsg('세션이 만료되었어요. 다시 로그인해 주세요.'); }
     else setMsg(r.message || '연결에 실패했습니다. 코드가 만료되었을 수 있어요.');
   };
-
-  // 로그인되면 자동으로 이 기기를 승인 — 별도 버튼 없이 완료(클로드 CLI식).
-  useEffect(() => {
-    if (token && code && !done && !autoRef.current) { autoRef.current = true; void onApprove(); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, code]);
+  // 보안: 자동 승인하지 않는다. 악성 사이트가 로그인된 사용자를 /desktop-login?code=공격자코드 로 유도해
+  //  피해자 계정에 공격자 PC를 페어링하는 CSRF를 막기 위해, 사용자가 코드를 확인하고 직접 눌러야 승인된다.
 
   if (done) {
     return (
@@ -63,19 +57,23 @@ export default function DesktopLogin() {
     );
   }
 
-  // 로그인 후 — 승인 진행/재시도.
+  // 로그인 후 — 사용자가 코드를 확인하고 직접 승인(자동 승인 금지, CSRF 방지).
   return (
     <div className="card" style={wrap}>
-      <h1 style={{ fontSize: 20 }}>PC 로그인</h1>
-      <div style={{ marginTop: 16, display: 'grid', gap: 10, justifyItems: 'center' }}>
-        {!msg ? (
-          <p className="muted" style={{ fontSize: 13 }}>이 PC에 로그인하는 중…</p>
-        ) : (
-          <button className="btn" disabled={busy || !code} onClick={() => { autoRef.current = false; void onApprove(); }} style={cta}>
-            {busy ? '연결 중…' : '다시 시도'}
-          </button>
-        )}
-      </div>
+      <h1 style={{ fontSize: 20 }}>이 PC를 연결할까요?</h1>
+      {code ? (
+        <>
+          <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>PC 화면에 표시된 코드와 같은지 확인하세요.</p>
+          <div style={{ margin: '14px auto', fontSize: 26, fontWeight: 700, letterSpacing: 3, fontFamily: 'monospace' }}>{code}</div>
+          <div style={{ display: 'grid', gap: 10, justifyItems: 'center' }}>
+            <button className="btn" disabled={busy} onClick={() => void onApprove()} style={cta}>
+              {busy ? '연결 중…' : '이 PC 연결'}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="muted" style={{ fontSize: 13, marginTop: 8 }}>연결 코드가 없습니다. PC 앱에서 다시 시도하세요.</p>
+      )}
       {msg ? <p style={{ fontSize: 13, marginTop: 12, color: 'var(--error, #f87171)' }}>{msg}</p> : null}
     </div>
   );

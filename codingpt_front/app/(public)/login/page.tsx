@@ -13,7 +13,9 @@ export default function Login() {
   const [emailOnly, setEmailOnly] = useState(false); // ?method=email (앱에서 이메일 선택 → 이메일 폼만)
 
   const redirectNext = () => {
-    const next = new URL(window.location.href).searchParams.get('next') || '/me';
+    const raw = new URL(window.location.href).searchParams.get('next') || '/me';
+    // 오픈 리다이렉트/`javascript:` 주입 차단 — 같은 출처의 절대경로(/...)만 허용.
+    const next = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/me';
     window.location.href = next;
   };
 

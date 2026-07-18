@@ -985,19 +985,18 @@ function streamEvents(req, res) {
 // JWT 를 못 싣는다 → 불투명 토큰(userId:port 결정론적 HMAC)으로 사용자/포트 바인딩.
 // 사용자 Vite 등은 base='/' 라 런타임 절대경로(/node_modules/…)가 토큰 경로 밖으로 나간다 →
 // 첫 로드 시 dpv 쿠키를 심고, 이후 non-/api 루트 요청을 쿠키로 데몬 프록시에 라우팅(previewCookieMiddleware).
-const PREVIEW_SECRET = process.env.PREVIEW_TOKEN_SECRET || process.env.JWT_SECRET || 'cpt-preview-secret';
 const PREVIEW_TTL_MS = 60 * 60 * 1000;
-const previewTokens = new Map(); // token → { userId, port, expiresAt }
+const previewTokens = new Map(); // token → { userId, port, runnerId, expiresAt }
 const _pvSweeper = setInterval(() => {
   const now = Date.now();
   for (const [t, s] of previewTokens) { if (s.expiresAt < now) previewTokens.delete(t); }
 }, 5 * 60 * 1000);
 if (_pvSweeper.unref) _pvSweeper.unref();
 
-function previewTokenFor(userId, port, runnerId) {
-  // 호스트 지정 시 토큰에 포함 — 다른 PC 의 같은 포트와 결정론 토큰이 충돌하지 않게.
-  const scope = runnerId != null ? `${userId}:${port}:${runnerId}` : `${userId}:${port}`;
-  return 'dpv-' + crypto.createHmac('sha256', PREVIEW_SECRET).update(scope).digest('hex').slice(0, 18);
+// 프리뷰 토큰은 예측 불가능한 랜덤 값(맵이 진실원본). 과거의 결정론적 HMAC(userId:port) 방식은
+//  하드코딩 시크릿 폴백과 결합해 오프라인 계산으로 타인 dev 서버에 무인증 접근을 허용했다 → 랜덤화.
+function previewTokenFor() {
+  return 'dpv-' + crypto.randomBytes(24).toString('hex');
 }
 function resolvePreviewToken(token) {
   const s = previewTokens.get(token);

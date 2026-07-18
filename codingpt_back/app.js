@@ -3,6 +3,7 @@ require('dotenv').config({ path: '.env.local' });
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const { sequelize } = require('./models');
 const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
@@ -20,6 +21,10 @@ if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') 
 }
 
 const app = express();
+// nginx 뒤에 있으므로 X-Forwarded-For 를 신뢰 — 레이트리밋이 실제 클라이언트 IP 로 동작(안 하면 전부 nginx IP 로 집계).
+app.set('trust proxy', 1);
+// 보안 헤더 — nosniff/HSTS/프레임 차단 등. CSP 는 프리뷰 프록시/외부 스크립트(GSI 등) 때문에 앱 레벨에선 끔(nginx/페이지가 관리).
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false, crossOriginResourcePolicy: false }));
 // API 응답에 ETag/304 비활성화 — 모바일 앱은 HTTP 캐시 레이어가 없어 304(빈 본문)를 못 다룸.
 // 조건부 GET 으로 인한 304 → 항상 200+본문 반환(예: 워크스페이스 세션 목록).
 app.set('etag', false);
@@ -47,24 +52,20 @@ const allowedOrigins = [
   'https://codingpt-admin.ghmate.com'
 ];
 
+// 개발 환경에서만 추가로 허용할 로컬/사설망 origin 패턴 — credentials:true 이므로 임의 인터넷 origin 반사는
+//  금지(그러면 어떤 사이트든 피해자 자격증명으로 크로스오리진 요청 가능). dev 도 로컬/LAN 만 허용한다.
+const isDevLocalOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)(:\d+)?$/.test(origin);
+const isDevEnv = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local';
+
 app.use(cors({
   origin: (origin, callback) => {
-    console.log('🌐 CORS 요청 origin:', origin);
-    
-    // 개발 환경에서는 모든 origin 허용
-    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'local') {
-      console.log('✅ 개발 환경 - 모든 origin 허용');
-      callback(null, true);
-    } else {
-      // 프로덕션에서는 허용된 origin만
-      if (!origin || allowedOrigins.includes(origin)) {
-        console.log('✅ 허용된 origin:', origin);
-        callback(null, true);
-      } else {
-        console.log('❌ 차단된 origin:', origin);
-        callback(new Error('CORS 정책에 의해 차단되었습니다.'));
-      }
-    }
+    // 브라우저 아닌 클라이언트(모바일 네이티브 등)는 Origin 이 없음 — 허용.
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    if (isDevEnv && isDevLocalOrigin(origin)) return callback(null, true);
+    console.log('❌ 차단된 origin:', origin);
+    return callback(new Error('CORS 정책에 의해 차단되었습니다.'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
