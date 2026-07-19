@@ -254,14 +254,35 @@ pub fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
         Ok(o) => o,
         Err(_) => return,
     };
-    if let Some(line) = out.lines().find(|l| !l.trim().is_empty()) {
-        let mut it = line.split_whitespace();
-        if let (Some(w), Some(h)) = (it.next(), it.next()) {
-            if w.parse::<i64>().unwrap_or(0) > 0 && h.parse::<i64>().unwrap_or(0) > 0 {
-                let _ = run(ctx, &["resize-window", "-t", &format!("={session}:{win}"), "-x", w, "-y", h]);
+    let line = match out.lines().find(|l| !l.trim().is_empty()) {
+        Some(l) => l,
+        None => return,
+    };
+    let mut it = line.split_whitespace();
+    let (w, h) = match (it.next(), it.next()) {
+        (Some(w), Some(h)) => (w, h),
+        _ => return,
+    };
+    let (wi, hi) = (w.parse::<i64>().unwrap_or(0), h.parse::<i64>().unwrap_or(0));
+    if wi <= 0 || hi <= 0 {
+        return;
+    }
+    // 이미 같은 크기면 스킵 — 다른 기기와 크기 주장이 교차할 때 불필요한 SIGWINCH 로 셸 프롬프트가
+    //  스크롤백에 누적되는 것을 막는다(데몬 resizeToClient 미러).
+    if let Ok(cur) = run(ctx, &["list-windows", "-t", &format!("={session}"), "-F", "#{window_index} #{window_width} #{window_height}"]) {
+        for l in cur.lines() {
+            let mut p = l.split_whitespace();
+            if let (Some(idx), Some(cw), Some(ch)) = (p.next(), p.next(), p.next()) {
+                if idx.parse::<i64>().unwrap_or(-1) == win
+                    && cw.parse::<i64>().unwrap_or(0) == wi
+                    && ch.parse::<i64>().unwrap_or(0) == hi
+                {
+                    return; // 이미 맞음
+                }
             }
         }
     }
+    let _ = run(ctx, &["resize-window", "-t", &format!("={session}:{win}"), "-x", w, "-y", h]);
 }
 
 // pane 뷰 세션 보장 + 풀 window(win)를 같은 인덱스로 link + select — 데몬 ensureView 미러.

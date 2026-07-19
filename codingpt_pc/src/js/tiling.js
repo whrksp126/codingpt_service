@@ -111,6 +111,15 @@ export function closeLeaf(root, targetId) {
   return { tree: r.node, focusId: r.focusId || null };
 }
 
+// leaf(id) 를 다른 노드로 치환(불변). IDE/프리뷰 pane 병합 시 대상 leaf 를 탭 host 로 교체하는 데 사용.
+export function replaceLeaf(root, id, replacement) {
+  function rec(node) {
+    if (isLeaf(node)) return node.id === id ? replacement : node;
+    return { ...node, first: rec(node.first), second: rec(node.second) };
+  }
+  return rec(root);
+}
+
 // 두 leaf 의 트리 내 위치를 맞바꾼다(불변). 노드 객체 identity 는 유지.
 export function swapLeaves(root, idA, idB) {
   const a = findLeaf(root, idA);

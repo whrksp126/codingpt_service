@@ -163,10 +163,13 @@ function beginTabDrag(srcId, index, e) {
     const headR = head ? head.getBoundingClientRect() : null;
     const headH = headR ? headR.height : 0;
     // 탭바 위 = 순서 재배치/편입. 삽입 위치 라인 표시.
-    //  IDE/프리뷰 pane 통째 드래그도 터미널 pane 탭바에 놓으면 "탭"으로 편입(혼합 탭).
+    //  IDE/프리뷰 pane 통째 드래그도 다른 pane 탭바에 놓으면 "탭"으로 편입(혼합 탭).
+    //  대상: 터미널 pane(join) + IDE/프리뷰 pane(merge — 탭 host 로 승격). 단 자기 자신 제외.
     const targetLeaf = T.findLeaf(rt.layout, paneId);
-    const canTabbar = !wholePane || src.kind === "ide" || src.kind === "preview";
-    if (canTabbar && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom && targetLeaf && targetLeaf.kind === "terminal") {
+    const termTabbar = !wholePane && targetLeaf && targetLeaf.kind === "terminal";
+    const mergeTabbar = wholePane && (src.kind === "ide" || src.kind === "preview") &&
+      targetLeaf && paneId !== srcId && (targetLeaf.kind === "terminal" || targetLeaf.kind === "ide" || targetLeaf.kind === "preview");
+    if ((termTabbar || mergeTabbar) && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom) {
       const tabsRegion = pane.querySelector(".pane-tabs");
       // 끝단 자동 스크롤 판정 — 넘친 탭바에서만, 좌/우 36px 밴드.
       if (tabsRegion && tabsRegion.scrollWidth > tabsRegion.clientWidth + 1) {
@@ -245,14 +248,16 @@ function beginTabDrag(srcId, index, e) {
     }
     if (dragging && drop) {
       if (wholePane) {
-        // IDE/프리뷰 pane 을 터미널 pane 탭바/가운데에 드롭 = 그 pane 의 탭으로 편입(혼합 탭).
+        // IDE/프리뷰 pane 을 다른 pane 탭바/가운데에 드롭 = 그 pane 의 탭으로 편입(혼합 탭).
+        //  대상이 터미널 = joinPaneAsTab, 대상이 IDE/프리뷰 = mergeAsTabs(탭 host 로 승격).
         const rt2 = wsRuntime(state.activeWsId);
         const tl = rt2 && T.findLeaf(rt2.layout, drop.paneId);
-        if (
-          (src.kind === "ide" || src.kind === "preview") && drop.paneId !== srcId &&
-          tl && tl.kind === "terminal" && (drop.zone === "tabbar" || drop.zone === "center")
-        ) {
+        const mergeable = (src.kind === "ide" || src.kind === "preview") && drop.paneId !== srcId &&
+          tl && (drop.zone === "tabbar" || drop.zone === "center");
+        if (mergeable && tl.kind === "terminal") {
           joinPaneAsTab(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
+        } else if (mergeable && (tl.kind === "ide" || tl.kind === "preview")) {
+          mergeAsTabs(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
         } else if (drop.paneId !== srcId) {
           // 가운데 = 스왑, 가장자리 = 그 방향 분할 이동.
           movePane(srcId, drop.paneId, drop.zone === "center" || drop.zone === "tabbar" ? null : drop.zone);
@@ -305,9 +310,10 @@ function displayDrop(layout, src, wholePane, srcId, drop) {
     //  다중 탭 pane 의 가장자리는 실제 분할이므로 그대로.
     if (wholePane || singleTab) zone = "center";
   } else if (wholePane) {
-    // IDE/프리뷰 pane 을 터미널 pane 가운데 = 탭 편입(src 제거), 그 외 가운데 = 스왑(유지),
-    //  가장자리 = movePane(src 제거 후 분할).
-    const join = (src.kind === "ide" || src.kind === "preview") && dstLeaf.kind === "terminal" && zone === "center";
+    // IDE/프리뷰 pane 을 다른 pane 가운데 = 탭 편입/병합(src 제거), 자기 자신 가운데 = 스왑(유지),
+    //  가장자리 = movePane(src 제거 후 분할). 대상 종류(터미널/IDE/프리뷰) 무관하게 병합은 src 제거.
+    const join = (src.kind === "ide" || src.kind === "preview") &&
+      (dstLeaf.kind === "terminal" || dstLeaf.kind === "ide" || dstLeaf.kind === "preview") && zone === "center";
     removed = join || zone !== "center";
   } else {
     // 터미널 pane 의 탭 드래그: 비터미널 pane 가운데는 이동 불가(no-op) → 숨김.
@@ -382,6 +388,40 @@ function joinPaneAsTab(srcId, dstId, insertIndex) {
   if (rt2) rt2.focusId = dstId;
   panes.get(dstId)?.buildHead();
   panes.get(dstId)?.showActiveTab?.();
+  S.emit();
+}
+
+// IDE/프리뷰 pane 두 개를 하나의 탭 host 로 병합 — 대상 leaf 를 "터미널-kind(터미널 탭 0개)" host 로
+//  교체하고 두 표면을 혼합 탭으로 편입한다. 기존 혼합 탭 기계(터미널 pane 이 IDE/프리뷰 탭을 담는)를
+//  그대로 재사용. 프리뷰 webview 는 tid("pv-"+tid) 승계로 보존(닫지 않음), IDE 는 openPath 로 재생성.
+//  insertIndex: tabbar 드롭 위치(0=src 를 앞, 그 외=뒤). center 드롭이면 undefined(뒤).
+function mergeAsTabs(srcId, dstId, insertIndex) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt) return;
+  const src = T.findLeaf(rt.layout, srcId);
+  const dst = T.findLeaf(rt.layout, dstId);
+  if (!src || !dst || srcId === dstId) return;
+  const mkTab = (leaf, pane) => {
+    if (leaf.kind === "ide") return { kind: "ide", openPath: leaf.openPath || null, tid: newTid() };
+    if (leaf.kind === "preview") {
+      // 표면 ID 승계(pane→탭): 기존 "pv-"+(tid||id) webview 를 그대로 넘긴다 → dispose 가 보존.
+      if (pane) pane._preservePreview = true;
+      return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav };
+    }
+    return null; // 터미널은 이 경로로 오지 않음
+  };
+  const dstTab = mkTab(dst, panes.get(dstId));
+  const srcTab = mkTab(src, panes.get(srcId));
+  if (!dstTab || !srcTab) return;
+  // dst 자리를 새 host leaf(새 id)로 교체 → 리컨실러가 dst/src PaneView 를 dispose 하고 host 를 생성.
+  const before = insertIndex != null && insertIndex <= 0;
+  const tabs = before ? [srcTab, dstTab] : [dstTab, srcTab];
+  const host = { id: T.newPaneId(), kind: "terminal", tabs, active: tabs.indexOf(srcTab) };
+  rt.layout = T.replaceLeaf(rt.layout, dstId, host);
+  // src 제거(형제 승격) — 표면은 이미 host 탭으로 옮겨졌다.
+  const r = T.closeLeaf(rt.layout, srcId);
+  rt.layout = r.tree || T.leaf("terminal", { win: "new" });
+  rt.focusId = host.id;
   S.emit();
 }
 

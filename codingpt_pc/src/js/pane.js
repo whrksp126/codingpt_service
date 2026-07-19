@@ -1089,9 +1089,12 @@ export class PaneView {
       if (this._previewRaf) cancelAnimationFrame(this._previewRaf);
       if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
       this.previewBar?.dispose();
-      // 탭 편입(joinPaneAsTab) 등 표면 승계 경로에선 webview 를 닫지 않는다.
+      // 탭 편입(joinPaneAsTab/mergeAsTabs) 등 표면 승계 경로에선 webview 를 닫지 않는다.
+      //  단, 이 pane 의 rAF 동기화가 멈추므로 webview 를 즉시 숨겨 "부유"(다른 pane 위 덮힘)를 막고,
+      //  승계한 host 의 PreviewSurface 가 활성화될 때 올바른 위치/가시성으로 다시 동기화하게 한다.
       dtDispose(this._pvId, this._preservePreview);
-      if (!this._preservePreview) api.previewClose(this._pvId).catch(() => {});
+      if (this._preservePreview) api.previewSync(this._pvId, this._pvEffUrl || this.previewUrl || "", 0, 0, 0, 0, false).catch(() => {});
+      else api.previewClose(this._pvId).catch(() => {});
     }
     if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});
     try {

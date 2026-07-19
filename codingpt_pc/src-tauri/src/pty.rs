@@ -100,19 +100,18 @@ pub fn pty_open(
 
     // 클라이언트 attach 완료 직후 이 pane 크기로 리사이즈 — ensure_view 는 attach 전이라
     //  클라이언트가 없어 스킵됐으므로, 부팅 시에도 활성 탭이 제 크기로 보이게 한 번 보정.
-    //  단 "아무도 안 잡은(virgin)" 창에만 — 이미 어떤 기기가 잡은(manual) 창을 앱 재실행이
-    //  도로 뺏지 않는다(크기 주장은 포커스/조작 시점이 담당).
+    //  manual 여부와 무관하게 이 pane 의 클라이언트 크기를 주장한다(데몬 resizeToClient 미러) —
+    //  이전엔 "virgin(비-manual) 창"에만 보정했는데, 다른 기기(모바일)가 공유 풀 window 를
+    //  manual 로 남겨두면 PC 가 자기 크기를 못 주장해 TUI(claude 등)가 어긋난 크기로 그려졌다
+    //  (실측: PC client 61x23 인데 모바일이 남긴 window 62x55 를 그대로 표시). resize_to_client 는
+    //  같은 크기면 내부에서 스킵하므로 단일 기기에서 불필요한 SIGWINCH 도 없다.
     {
         let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
         let view2 = view;
         let session2 = session.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            let mode = tmux::run(&ctx2, &["show-options", "-wv", "-t", &format!("={session2}:{win}"), "window-size"])
-                .unwrap_or_default();
-            if mode.trim() != "manual" {
-                tmux::resize_to_client(&ctx2, &view2, &session2, win);
-            }
+            tmux::resize_to_client(&ctx2, &view2, &session2, win);
         });
     }
 
