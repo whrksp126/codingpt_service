@@ -369,6 +369,9 @@ async function doDeleteAccount(btn, go, msg) {
   if (goTxt) goTxt.textContent = "탈퇴 처리 중…";
   if (btn) btn.disabled = true;
   if (errEl) errEl.textContent = "";
+  // 스피너가 반드시 한 프레임 그려진 뒤 네트워크 작업 시작 — 빠른 완료/즉시 재렌더로 프로그래스가 안 보이던 문제 방지.
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+  const _t0 = Date.now();
   try {
     await api.deleteAccount();
     await api.unpair().catch(() => {}); // 로컬 자격 정리 → 로그아웃 상태로
@@ -377,6 +380,8 @@ async function doDeleteAccount(btn, go, msg) {
     connMode = null;
     state.daemon = await api.daemonStatus().catch(() => state.daemon);
     state.paired = !!state.daemon?.paired;
+    const _elapsed = Date.now() - _t0; // 프로그래스 최소 노출(빠른 완료에도 스피너가 잠깐 보이게)
+    if (_elapsed < 500) await new Promise((r) => setTimeout(r, 500 - _elapsed));
     S.emit();
   } catch (e) {
     if (go) { go.disabled = false; go.classList.remove("deleting"); }
