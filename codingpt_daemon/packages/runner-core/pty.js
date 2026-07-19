@@ -523,4 +523,30 @@ async function handleTerminalRpc(method, params) {
   throw new Error('unknown terminal method: ' + method);
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, TMUX_SOCKET, TMUX_SESSION };
+// ── 스테일 뷰 세션 리퍼(누적 예방) ─────────────────────────────────────
+// 문제: pane 뷰 세션(--p-/--v-/--c-)은 클라이언트가 정상 경로(terminal.unview/close)로 끊을 때만
+//  정리된다. 앱 강제종료·네트워크 단절·웹뷰 자동 재접속·다기기 테스트는 unview 를 안 보내므로,
+//  버려진 뷰 세션이 영구 소켓(-L codingpt, 데몬보다 오래 산다)에 무한 누적된다(실측 며칠에 수십 개).
+//  뷰 세션은 primary window 로의 "링크"일 뿐 고유 셸 상태가 없어(ensureView 가 언제든 재구성) attach
+//  클라이언트가 하나도 없는 뷰는 안전하게 제거 가능. primary(마커 없는 cpt-<ws>/codingpt = 실제 셸)는
+//  절대 건드리지 않는다.
+//  grace(idleSec): ensureView 로 막 만들어져 stream attach 직전(수백 ms)인 뷰를 죽이지 않도록,
+//   session_activity 가 idleSec 이상 지난(=아무도 안 붙은 채 방치된) 뷰만 대상으로 한다.
+async function reapStaleViews(idleSec = 90) {
+  let out;
+  try {
+    out = await runTmux(['list-sessions', '-F', '#{session_name}\t#{session_attached}\t#{session_activity}']);
+  } catch (_) { return 0; } // 서버 없음 = 정리할 것 없음
+  const now = Math.floor(Date.now() / 1000);
+  let reaped = 0;
+  for (const line of out.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)) {
+    const [name, attached, activity] = line.split('\t');
+    if (!/--p-|--v-|--c-/.test(name || '')) continue;              // primary 보존
+    if ((parseInt(attached, 10) || 0) > 0) continue;               // attach 중인 뷰 보존
+    if (now - (parseInt(activity, 10) || 0) < idleSec) continue;   // grace — 방금 만든 뷰 보호
+    try { await runTmux(['kill-session', '-t', '=' + name]); reaped++; } catch (_) { /* 이미 사라짐 */ }
+  }
+  return reaped;
+}
+
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, reapStaleViews, TMUX_SOCKET, TMUX_SESSION };

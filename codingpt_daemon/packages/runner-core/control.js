@@ -180,6 +180,15 @@ function run(config) {
     try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
     // 신선도 보고 루프(사이드바 미커밋/미푸시 배지) — 60s 주기, 변화시에만 서버 기록.
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
+    // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
+    //  tmux 소켓에 무한 누적되는 것을 막는다(attach 없는 뷰만·primary 셸은 보존). idleSec grace 로
+    //  방금 만든 뷰는 안 건드림. 데몬 수명 내내 소켓을 스스로 청소한다.
+    const reap = () => ptyLib.reapStaleViews()
+      .then((n) => { if (n) console.log(`[control] 스테일 뷰 세션 ${n}개 정리`); })
+      .catch(() => { /* 서버 없음 등 — 다음 주기 */ });
+    reap();
+    const reapTimer = setInterval(reap, 120000);
+    if (reapTimer.unref) reapTimer.unref();
     connect();
   })();
 }
