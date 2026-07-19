@@ -329,18 +329,18 @@ async function onDeleteAccount() {
       <div class="acct-del-confirm">
         <div>계속하려면 <b>${DELETE_CONFIRM_WORD}</b> 를 입력하세요.</div>
         <input id="acctDelEmail" class="acct-del-input" placeholder="${DELETE_CONFIRM_WORD}" autocomplete="off" spellcheck="false" />
-        <button id="acctDelGo" class="acct-del-go" disabled>
+        <button id="acctDelGo" class="acct-del-go">
           <span class="acct-del-spin"></span><span class="acct-del-go-txt">영구 삭제</span>
         </button>
         <div id="acctDelErr" class="acct-del-err"></div>
       </div>`;
     const input = msg.querySelector("#acctDelEmail");
     const go = msg.querySelector("#acctDelGo");
-    input.addEventListener("input", () => {
-      const match = input.value.trim() === DELETE_CONFIRM_WORD;
-      go.disabled = !match;
-      go.classList.toggle("match", match); // 모바일과 동일 — 일치 시 빨간 버튼 활성
-    });
+    // 시각적 활성(빨간 버튼)만 토글 — 클릭 차단은 disabled 로 하지 않는다(한글 IME 확정이 첫 클릭과
+    //  겹쳐 첫 클릭이 무시되던 문제 회피). 실제 실행 여부는 doDeleteAccount 가 클릭 시점 최신 값으로 판정.
+    const syncMatch = () => go.classList.toggle("match", input.value.trim() === DELETE_CONFIRM_WORD);
+    input.addEventListener("input", syncMatch);
+    input.addEventListener("compositionend", syncMatch); // 한글 IME 확정 시 반영
     go.addEventListener("click", () => doDeleteAccount(btn, go, msg));
     input.focus();
     return;
@@ -355,6 +355,12 @@ async function onDeleteAccount() {
 
 async function doDeleteAccount(btn, go, msg) {
   if (acctDeleting) return;
+  // 클릭 시점에 최신 입력값으로 판정(IME 확정 후) — 문구 불일치면 조용히 무시. 첫 클릭에 바로 반응.
+  const inputEl = msg?.querySelector("#acctDelEmail");
+  if (!inputEl || inputEl.value.trim() !== DELETE_CONFIRM_WORD) {
+    if (go) go.classList.toggle("match", (inputEl?.value.trim() || "") === DELETE_CONFIRM_WORD);
+    return;
+  }
   acctDeleting = true;
   // 스피너·"탈퇴 처리 중…"은 "영구 삭제" 버튼에(모바일과 동일). 취소 버튼도 잠금(중복/취소 방지).
   const goTxt = go?.querySelector(".acct-del-go-txt");
