@@ -37,6 +37,16 @@ function which(name) {
   } catch (_) { return null; }
 }
 
+// "진짜" 바이너리 해석 — 다른 툴(cmux 등)의 래퍼를 건너뛰고 원본을 가리키게 한다.
+//  데몬이 cmux 안에서 떠 있으면 process.env.PATH 선두가 cmux/bin 이라 which() 가 cmux 래퍼를 잡는다.
+//  그러면 우리 래퍼가 cmux 래퍼를 호출 → cmux 가 자기 훅을 다시 얹어 우리 훅이 무력화된다.
+//  → Anthropic 공식 설치 경로(~/.local/bin)를 우선하고, 없으면 PATH 탐색으로 폴백.
+function resolveReal(name) {
+  const local = path.join(os.homedir(), '.local', 'bin', name);
+  try { fs.accessSync(local, fs.constants.X_OK); return local; } catch (_) { /* 없음 → 폴백 */ }
+  return which(name);
+}
+
 function writeExec(file, content) {
   fs.writeFileSync(file, content, { mode: 0o755 });
   try { fs.chmodSync(file, 0o755); } catch (_) { /* noop */ }
@@ -94,7 +104,7 @@ exec "${process.execPath}" "${cptCli}" "$@"
   } catch (_) { /* noop */ }
 
   // 3) claude 래퍼 — 훅 설정 주입. 사용자가 --settings 를 직접 주면 무간섭 통과.
-  const realClaude = which('claude');
+  const realClaude = resolveReal('claude');
   writeExec(path.join(bin, 'claude'), `#!/bin/sh
 REAL="${realClaude || ''}"
 ${resolverSnippet('claude')}
@@ -106,7 +116,7 @@ exec "$REAL" --settings "${hooksFile}" "$@"
 `);
 
   // 4) codex 래퍼 — notify 프로그램 주입(작업 종료/승인 알림).
-  const realCodex = which('codex');
+  const realCodex = resolveReal('codex');
   writeExec(path.join(bin, 'codex'), `#!/bin/sh
 REAL="${realCodex || ''}"
 ${resolverSnippet('codex')}
@@ -119,11 +129,22 @@ exec "$REAL" -c 'notify=["cpt","codex-notify"]' "$@"
 
   // 5) zsh ZDOTDIR 체인 — tmux 세션 env 의 PATH 주입은 사용자 zshrc 가 PATH 를 재구성하면
   //    밀려난다(실측). ZDOTDIR 를 이 디렉토리로 바꿔 사용자 rc 를 그대로 source 한 뒤
-  //    "마지막에" shim 을 PATH 선두에 얹는다(iTerm/cmux 류 shell integration 과 같은 패턴).
-  //    사용자 파일은 일절 수정하지 않는다.
+  //    "마지막에" shim 을 얹는다(iTerm/cmux 류 shell integration 과 같은 패턴). 사용자 파일 무수정.
+  //
+  //    ⚠ PATH 선두 주입만으론 cmux 등 다른 툴이 자기 bin 을 "더 나중에" 앞세우면 진다(실측:
+  //    워크스페이스 claude 가 cmux 래퍼로 실행돼 우리 Stop 훅이 안 걸림 → 알림 미생성). 그래서
+  //    claude/codex/cpt 를 **셸 함수**로도 정의한다 — 함수는 PATH 조회보다 우선하므로 다른 툴의
+  //    PATH 래핑을 무조건 이긴다. 이 ZDOTDIR 는 CodingPT 가 띄운 터미널에만 적용되므로 사용자
+  //    개인 셸/기존 도구(그들 터미널)엔 전혀 영향이 없다("우리 터미널은 우리 방식대로").
   const zdot = path.join(shim, 'zdot');
   fs.mkdirSync(zdot, { recursive: true, mode: 0o700 });
   const orig = '"${CPT_ORIG_ZDOTDIR:-$HOME}"';
+  // 사용자 rc 이후 마지막에 실행 — PATH 선두 주입 + claude/codex/cpt 셸 함수 강제(다른 툴의 PATH 래핑 우선).
+  const cptTail = `# CodingPT shim — 사용자 rc 이후 우리 배선을 확정(우리 터미널 전용).
+export PATH="${bin}:$PATH"
+claude() { "${bin}/claude" "$@"; }
+codex()  { "${bin}/codex" "$@"; }
+cpt()    { "${bin}/cpt" "$@"; }`;
   fs.writeFileSync(path.join(zdot, '.zshenv'), `# CodingPT shim — 원래 zshenv 위임
 _cpt_orig=${orig}
 [ -f "$_cpt_orig/.zshenv" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zshenv"
@@ -136,12 +157,14 @@ ZDOTDIR="${zdot}"
   fs.writeFileSync(path.join(zdot, '.zshrc'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zshrc" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zshrc"
 ZDOTDIR="${zdot}"
-# 사용자 rc 이후에 shim 을 선두로 — claude/codex 훅 래핑과 cpt 를 항상 우선.
-export PATH="${bin}:$PATH"
+${cptTail}
 `);
+  // 로그인 셸은 .zshrc 다음 .zlogin 이 "마지막"이라 여기서 한 번 더 확정(cmux 통합이 .zlogin/precmd 로
+  //  뒤에 끼어드는 환경 대비). tmux 는 기본 로그인 셸(-l)로 pane 을 띄운다.
   fs.writeFileSync(path.join(zdot, '.zlogin'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zlogin" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zlogin"
 ZDOTDIR="${zdot}"
+${cptTail}
 `);
 
   return { binDir: bin, hooksFile, zdotDir: zdot };
