@@ -101,9 +101,13 @@ async function createNotification(userId, payload) {
   // 라이브 팬아웃(모든 접속 기기, 뱃지/목록 동기화) — alertClientKey 로 소리낼 기기만 표시. 실패해도 생성 성공.
   try { relay().fanoutNotifEvent(userId, { kind: 'new', notification, alertClientKey }); } catch (_) { /* noop */ }
 
-  // present 기기가 없으면(전 기기 백그라운드/종료 = 자리 비움) 폰 FCM 푸시로 대체.
-  //  present 기기가 있으면 그 기기가 인앱으로 알리므로 푸시하지 않는다(이중 알림 방지).
-  if (!present) {
+  // FCM 푸시는 "활성 모바일 앱"이 없을 때만 보낸다(폰이 켜져 인앱으로 볼 때만 억제 → 이중 알림 방지).
+  //  주의: present(포그라운드 기기)로 판정하면 PC 앱이 present 일 때 폰(닫힘) 푸시까지 억제돼
+  //  "PC 켜두고 폰 닫으면 폰 알림이 안 오는" 버그가 난다. PC 는 push_device 가 아니므로 폰 푸시와 무관 →
+  //  모바일 클라이언트가 실제로 접속(foreground)해 있을 때만 억제한다(hasActiveMobileClient, PC 무시).
+  let mobileActive = false;
+  try { mobileActive = relay().hasActiveMobileClient(userId); } catch (_) { /* noop */ }
+  if (!mobileActive) {
     pushService.sendToUser(userId, {
       kind: kind || 'notification',
       sessionId: notification.sessionId || '',
