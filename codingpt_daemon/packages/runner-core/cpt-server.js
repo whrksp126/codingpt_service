@@ -16,6 +16,7 @@ const fs = require('fs');
 const net = require('net');
 const path = require('path');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const runtime = require('./runtime');
 const configLib = require('./config');
 const ptyLib = require('./pty');
@@ -395,6 +396,44 @@ const CAPABILITIES = [
   'hook.event',
 ];
 
+// 소켓에 의존하지 않는 단일 인스턴스 백스톱 — 시작 시 같은 머신의 "다른" 데몬 프로세스를 전부 정리.
+//  takeoverExisting 은 cpt.sock 소유자 하나만 graceful 종료시키는데, start() 가 sock 을 무조건 unlink
+//  하고 takeover 가 타임아웃(느린 종료·행)나면 "sock 을 잃었지만 살아있는" 좀비 데몬이 남는다. 이 좀비는
+//  이후 어떤 takeover 로도 못 잡아(sock 없음) 계속 누적되고, 공유 tmux 소켓(-L codingpt)을 놓고 경쟁해
+//  세션 churn·"can't find session" 을 유발한다(실측 데몬 3개 공존). ps 로 데몬 진입 프로세스를 직접 훑어
+//  자기 자신만 남기고 SIGTERM→(잔존 시)SIGKILL. 새 인스턴스 승리 = 앱 재시작 시맨틱과 일치.
+//  전용 소켓(-L codingpt)은 stateDir 무관 머신 전역이라, 머신당 데몬 1개가 올바른 불변식.
+function killStrayDaemons() {
+  return new Promise((resolve) => {
+    let strays = [];
+    execFile('/bin/ps', ['-A', '-o', 'pid=,command='], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return resolve(0);
+      const self = process.pid;
+      for (const line of String(stdout).split('\n')) {
+        const m = line.trim().match(/^(\d+)\s+(.*)$/);
+        if (!m) continue;
+        const pid = parseInt(m[1], 10);
+        const cmd = m[2] || '';
+        if (!pid || pid === self) continue;
+        // 데몬 진입 프로세스만: <node 실행파일> <...>/daemon/index.js run 형태.
+        //  node 실행 토큰 + 공백없는 스크립트 경로 + run 을 함께 요구 → 셸/에디터/grep 이 그 경로
+        //  문자열을 인자로 담고 있어도(오탐) 안 잡힌다. 번들(@codingpt/daemon/index.js)·dev(packages/daemon/index.js) 공통.
+        if (!/(^|\/)node(\.exe)?\s+\S*daemon\/index\.js\s+run\b/.test(cmd)) continue;
+        strays.push(pid);
+      }
+      if (!strays.length) return resolve(0);
+      for (const pid of strays) { try { process.kill(pid, 'SIGTERM'); } catch (_) { /* 이미 죽음 */ } }
+      // graceful 유예 후 잔존 좀비 강제 종료(행 데몬 대비).
+      setTimeout(() => {
+        for (const pid of strays) {
+          try { process.kill(pid, 0); try { process.kill(pid, 'SIGKILL'); } catch (_) { /* noop */ } } catch (_) { /* 정상 종료됨 */ }
+        }
+        resolve(strays.length);
+      }, 800);
+    });
+  });
+}
+
 // 같은 stateDir 의 기존 데몬 인스턴스 감지·인수 — 살아있으면 shutdown 을 지시하고 소켓이 빌 때까지 대기.
 //  (tauri dev 재시작·수동 재실행이 남긴 인스턴스와 단일 control WS 를 서로 뺏는 replaced 재접속
 //   폭주(~2s 간격)를 원천 차단. 새 인스턴스 승리 = PC 앱 재시작 시맨틱과 일치)
@@ -466,4 +505,4 @@ function start() {
   return server;
 }
 
-module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting, backFetch };
+module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch };

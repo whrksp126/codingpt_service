@@ -171,6 +171,10 @@ function run(config) {
     // 같은 stateDir 의 기존 인스턴스가 살아있으면 정상 종료를 지시하고 대체(새 인스턴스 승리) —
     //  둘이 단일 control WS 를 서로 뺏는 replaced 재접속 폭주 방지. WS 연결 전에 수행해야 무쟁탈.
     try {
+      // 소켓 무관 백스톱 먼저 — sock 을 잃은 좀비 데몬(takeover 사각지대)까지 ps 로 훑어 정리.
+      const strays = await cptServer.killStrayDaemons();
+      if (strays) console.log(`[control] 다른 데몬 프로세스 ${strays}개 정리(단일 인스턴스 강제)`);
+      // 그다음 sock 소유자 graceful 인수(정상 경로).
       const took = await cptServer.takeoverExisting();
       if (took) console.log('[control] 기존 데몬 인스턴스 인수 완료(구 인스턴스 종료 지시)');
     } catch (_) { /* noop */ }
