@@ -27,7 +27,10 @@ const nodePty = require('node-pty');
 const fsLib = require('./fs');
 const runtime = require('./runtime');
 
-const TMUX_SOCKET = 'codingpt'; // tmux -L codingpt (사용자 기본 tmux 서버와 격리)
+// tmux -L codingpt (사용자 기본 tmux 서버와 격리). 기본은 'codingpt' — 프로덕션은 이 값을 절대
+//  바꾸지 않는다. 격리 소켓(재연결 레이스 재현 테스트 등)만 CODINGPT_TMUX_SOCKET 로 덮어써 실사용
+//  세션을 건드리지 않고 검증한다.
+const TMUX_SOCKET = process.env.CODINGPT_TMUX_SOCKET || 'codingpt';
 const TMUX_SESSION = 'codingpt';
 // tmux.conf 위치 — 소스/번들 레이아웃이 달라 여러 후보를 탐색(첫 존재 파일). 없으면 null → '-f' 생략.
 //  소스: codingpt_daemon/tmux.conf (runner-core→packages→daemon root).
@@ -628,4 +631,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, ensurePool, ensureView, sessionForCwd, paneSession, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };

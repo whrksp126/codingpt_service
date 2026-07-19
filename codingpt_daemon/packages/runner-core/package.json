@@ -4,6 +4,7 @@
   "description": "CodingPT 러너 코어 — 로컬 데몬/클라우드 러너가 공유하는 계약 구현(fs/pty/proxy/agent/sync/control)",
   "main": "index.js",
   "scripts": {
+    "test": "node --test test/*.test.js",
     "postinstall": "node -e \"const fs=require('fs'),path=require('path');for(const base of [path.resolve(__dirname,'node_modules'),path.resolve(__dirname,'../../node_modules')]){const p=path.join(base,'node-pty/prebuilds/'+process.platform+'-'+process.arch+'/spawn-helper');try{fs.chmodSync(p,0o755)}catch(e){}}\""
   },
   "engines": {
