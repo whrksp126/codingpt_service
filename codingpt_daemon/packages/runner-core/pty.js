@@ -406,27 +406,44 @@ async function ensureView(psess, session, win, abs) {
     if (!target) throw new Error('터미널 window 확보 실패');
     win = target.index;
   }
-  try {
-    await runTmux(['has-session', '-t', '=' + psess]);
-  } catch (_) {
+  // 뷰 세션(psess) 준비 + 링크/셀렉트. 소켓을 공유하는 다른(스테일) 데몬의 reapStaleViews 가
+  //  has-session 통과 직후 psess 를 지워버리면(PC 강제종료 후 인수인계 레이스) link/select 가
+  //  "can't find session" 으로 터지고, 예전엔 그 에러가 호출측으로 튀어 앱이 무한 재연결 루프에
+  //  빠졌다. 뷰 세션은 고유 상태가 없으니 지워졌으면 다시 만들고 재시도한다(멱등). 최대 3회.
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await runTmux(['new-session', '-d', '-s', psess, '-c', abs]);
+      try {
+        await runTmux(['has-session', '-t', '=' + psess]);
+      } catch (_) {
+        try {
+          await runTmux(['new-session', '-d', '-s', psess, '-c', abs]);
+        } catch (e) {
+          if (!/duplicate session/.test(String(e.message || ''))) throw e;
+        }
+        await runTmux(['move-window', '-s', `=${psess}:0`, '-t', `=${psess}:999`]).catch(() => {});
+      }
+      // list-windows 는 .catch 로 삼키지 않는다 — psess 가 레이스로 사라졌으면 여기서 던져
+      //  아래 catch 가 재생성 재시도하게 한다(예전엔 빈 목록으로 진행해 link 에서 터졌음).
+      const slotOut = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index}\t#{window_id}']);
+      const slots = slotOut.split('\n').filter(Boolean).map((l) => l.split('\t'));
+      const slot = slots.find((p) => (parseInt(p[0], 10) || 0) === win);
+      if (slot && slot[1] !== target.id) await runTmux(['unlink-window', '-t', `=${psess}:${win}`]).catch(() => {});
+      if (!slot || slot[1] !== target.id) await runTmux(['link-window', '-s', `=${session}:${win}`, '-t', `=${psess}:${win}`]);
+      await runTmux(['select-window', '-t', `=${psess}:${win}`]);
+      // temp(999) 정리 — 링크가 하나 이상 있으니 안전(999 는 이 세션 전용 셸이라 전역 kill 무해).
+      if (slots.some((p) => (parseInt(p[0], 10) || 0) === 999) || !slot) {
+        await runTmux(['kill-window', '-t', `=${psess}:999`]).catch(() => {});
+      }
+      return win; // 폴백으로 바뀌었을 수 있는 실제 표시 인덱스 — 호출측 리사이즈 타깃
     } catch (e) {
-      if (!/duplicate session/.test(String(e.message || ''))) throw e;
+      lastErr = e;
+      // 뷰 세션/창이 레이스로 사라진 경우만 재생성 재시도. 그 외(풀 window 부재 등)는 즉시 던짐.
+      if (!/can't find session|can't find window|no server running/i.test(String(e.message || ''))) throw e;
+      await new Promise((r) => setTimeout(r, 120));
     }
-    await runTmux(['move-window', '-s', `=${psess}:0`, '-t', `=${psess}:999`]).catch(() => {});
   }
-  const slotOut = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index}\t#{window_id}']).catch(() => '');
-  const slots = slotOut.split('\n').filter(Boolean).map((l) => l.split('\t'));
-  const slot = slots.find((p) => (parseInt(p[0], 10) || 0) === win);
-  if (slot && slot[1] !== target.id) await runTmux(['unlink-window', '-t', `=${psess}:${win}`]).catch(() => {});
-  if (!slot || slot[1] !== target.id) await runTmux(['link-window', '-s', `=${session}:${win}`, '-t', `=${psess}:${win}`]);
-  await runTmux(['select-window', '-t', `=${psess}:${win}`]);
-  // temp(999) 정리 — 링크가 하나 이상 있으니 안전(999 는 이 세션 전용 셸이라 전역 kill 무해).
-  if (slots.some((p) => (parseInt(p[0], 10) || 0) === 999) || !slot) {
-    await runTmux(['kill-window', '-t', `=${psess}:999`]).catch(() => {});
-  }
-  return win; // 폴백으로 바뀌었을 수 있는 실제 표시 인덱스 — 호출측 리사이즈 타깃
+  throw lastErr || new Error('뷰 세션 준비 실패');
 }
 
 // pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
