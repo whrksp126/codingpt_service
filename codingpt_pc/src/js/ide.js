@@ -122,7 +122,14 @@ export class IdeView {
     g.tabsBar.className = "ide-tabs";
     g.tablist = document.createElement("div");
     g.tablist.className = "ide-tablist";
-    g.tabsBar.append(g.tablist);
+    // 파일 탭 바 맨 우측 = 탐색기(파일 트리) 토글 — pane 헤더 대신 IDE 안에 둬서
+    //  IDE 가 다른 pane 의 혼합 탭으로 들어가도 항상 보인다(독립 pane/혼합 탭 무관).
+    g.treeToggle = document.createElement("button");
+    g.treeToggle.className = "ide-tabtoggle" + (this.treeVisible ? " active" : "");
+    g.treeToggle.title = "탐색기 토글";
+    g.treeToggle.innerHTML = icons.sidebar({ size: 15 });
+    g.treeToggle.addEventListener("click", (e) => { e.stopPropagation(); this.toggleTree(); });
+    g.tabsBar.append(g.tablist, g.treeToggle);
     g.editorHost = document.createElement("div");
     g.editorHost.className = "ide-editor";
     g.empty = document.createElement("div");
@@ -224,6 +231,8 @@ export class IdeView {
     this.treeVisible = !this.treeVisible;
     this.treeEl.style.display = this.treeVisible ? "" : "none";
     this.resizer.style.display = this.treeVisible ? "" : "none";
+    // 모든 그룹의 탭바 토글 버튼 상태 동기화(트리는 IDE 하나 공유).
+    this.groups.forEach((g) => g.treeToggle?.classList.toggle("active", this.treeVisible));
     setTimeout(() => this.groups.forEach((g) => g.cm.refresh()), 0);
   }
 

@@ -431,9 +431,7 @@ export class PaneView {
     //  (활성 pane 기준 자동 배치) — pane 헤더에는 pane 전용 컨트롤만 남긴다. 단축키(⌘D 등)는 유지.
     const ctrls = document.createElement("div");
     ctrls.className = "pane-ctrls";
-    if (this.node.kind === "ide") {
-      ctrls.append(headBtn(icons.sidebar, "탐색기 토글", () => this.ide?.toggleTree()));
-    }
+    // 탐색기 토글은 IDE 파일 탭 바 맨 우측으로 이동(ide.js) — 혼합 탭으로 들어가도 보이게.
     this.head.append(tabsEl, ctrls);
     // 활성 탭이 스크롤 밖이면 보이게(탭 전환/추가 직후) — 레이아웃 확정 후 한 프레임 뒤.
     const act = tabsEl.querySelector(".ptab.active");
