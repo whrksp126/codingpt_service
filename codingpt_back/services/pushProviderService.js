@@ -73,8 +73,23 @@ async function sendFcm(device, payload) {
       token: device.token,
       notification: { title: payload.title || 'CodingPT', body: payload.body || '' },
       data: stringData({ kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink }),
-      android: { priority: 'high' },
-      apns: { payload: { aps: { sound: 'default' } } },
+      // Android: 소리·진동·헤드업 명시(채널 codingpt_default = importance HIGH). notification 블록이 없으면
+      //  기기/런처가 조용히 처리하는 경우가 있어 명시한다.
+      android: {
+        priority: 'high',
+        notification: {
+          sound: 'default',
+          default_sound: true,
+          default_vibrate_timings: true,
+          channel_id: 'codingpt_default',
+          notification_priority: 'PRIORITY_MAX',
+        },
+      },
+      // iOS: 최고 우선순위 + 소리(사용자 Focus/무음 상태는 기기가 판단).
+      apns: {
+        headers: { 'apns-priority': '10', 'apns-push-type': 'alert' },
+        payload: { aps: { sound: 'default' } },
+      },
     },
   };
   let res;
