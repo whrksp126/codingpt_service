@@ -551,4 +551,64 @@ async function reapStaleViews(idleSec = 90) {
   return reaped;
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, reapStaleViews, TMUX_SOCKET, TMUX_SESSION };
+// ── 낡은 터미널 자가 치유(shim 갱신 후 훅 배선 소급) ────────────────────
+// 문제: 셸은 시작할 때 한 번만 rc(zdot)를 읽는다. shim 을 업데이트(예: claude 훅 함수 추가)해도
+//  "그 전에 열려 있던 셸"은 낡은 배선 그대로라, 거기서 claude 를 켜면 우리 훅이 안 걸린다
+//  (다른 툴(cmux)이 PATH 로 claude 를 가로채면 특히). 사용자는 "왜 안 오지"만 겪는다.
+// 해결: shim 이 실제로 바뀐 시점(zdot/.zlogin mtime)보다 먼저 시작된 "idle 셸" pane 을 respawn 한다.
+//  respawn 된 셸은 현재 세션 env(ZDOTDIR)로 zdot 를 다시 읽어 함수를 로드한다(실측 확인).
+//  안전장치: primary 세션만 · 셸(idle) pane 만(claude/vim 등 실행 중은 절대 건드리지 않음) ·
+//   최근 활동 idleSec 이내는 보존(타이핑 중 방해 방지) · cwd 보존.
+const HEAL_SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh']);
+
+function procStartMs(pid) {
+  return new Promise((resolve) => {
+    if (!pid) return resolve(0);
+    // LC_ALL=C 필수 — 한국어 등 로케일에선 lstart 가 "2026년 7월..."로 나와 Date.parse 가 NaN 이 된다(실측).
+    execFile('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { timeout: 4000, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } }, (err, out) => {
+      if (err) return resolve(0);
+      const t = Date.parse(String(out).trim());
+      resolve(Number.isFinite(t) ? t : 0);
+    });
+  });
+}
+
+async function healStaleTerminals(idleSec = 45) {
+  const ourZdot = path.join(runtime.stateDir(), 'shim', 'zdot');
+  let shimMtime = 0;
+  try { shimMtime = fs.statSync(path.join(ourZdot, '.zlogin')).mtimeMs; } catch (_) { return 0; }
+  if (!shimMtime) return 0;
+  let out;
+  try { out = await runTmux(['list-sessions', '-F', '#{session_name}']); } catch (_) { return 0; }
+  const sessions = out.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)
+    .filter((n) => !/--p-|--v-|--c-/.test(n)); // primary 만(뷰 세션 제외)
+  const now = Date.now();
+  let healed = 0;
+  for (const session of sessions) {
+    // 멀티 데몬 안전장치 — 이 세션이 "우리 shim"으로 설정된 경우에만 치유(남의 데몬 세션 respawn 금지).
+    //  소켓(-L codingpt)을 여러 데몬이 공유할 수 있어(dev/demo home), 세션 ZDOTDIR 로 소유를 판정한다.
+    try {
+      const env = await runTmux(['show-environment', '-t', '=' + session, 'ZDOTDIR']);
+      if (String(env).trim() !== `ZDOTDIR=${ourZdot}`) continue;
+    } catch (_) { continue; } // env 조회 실패 = 건드리지 않음
+    let wl;
+    try {
+      wl = await runTmux(['list-windows', '-t', '=' + session, '-F',
+        '#{pane_id}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_activity}']);
+    } catch (_) { continue; }
+    for (const line of wl.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)) {
+      const [paneId, panePid, cmd, cpath, act] = line.split('\t');
+      if (!HEAL_SHELL_CMDS.has((cmd || '').trim())) continue;            // 실행 중(claude 등) 보존
+      if (now - (parseInt(act, 10) || 0) * 1000 < idleSec * 1000) continue; // 최근 활동 보존
+      const start = await procStartMs(panePid);
+      if (!start || start >= shimMtime - 3000) continue;                 // 최신 셸 = 스킵
+      try {
+        await runTmux(['respawn-pane', '-k', '-t', paneId, ...(cpath ? ['-c', cpath] : [])]);
+        healed++;
+      } catch (_) { /* 사라짐/실행중 전환 등 — 다음 주기 */ }
+    }
+  }
+  return healed;
+}
+
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };

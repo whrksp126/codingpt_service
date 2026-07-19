@@ -48,8 +48,15 @@ function resolveReal(name) {
 }
 
 function writeExec(file, content) {
-  fs.writeFileSync(file, content, { mode: 0o755 });
+  writeIfChanged(file, content, 0o755);
   try { fs.chmodSync(file, 0o755); } catch (_) { /* noop */ }
+}
+
+// 내용이 같으면 쓰지 않는다 — mtime 을 보존해 "shim 이 실제로 바뀐 시점"만 mtime 에 남긴다.
+//  (healStaleTerminals 가 이 mtime 을 낡음 판정 기준으로 쓴다 — 매 부팅 불필요 respawn 방지)
+function writeIfChanged(file, content, mode) {
+  try { if (fs.readFileSync(file, 'utf8') === content) return; } catch (_) { /* 없음 → 쓴다 */ }
+  fs.writeFileSync(file, content, mode != null ? { mode } : undefined);
 }
 
 // 래퍼 공통 꼬리 — 생성 시점 절대경로가 사라졌으면 런타임 재탐색(shim 디렉토리 제외).
@@ -79,7 +86,7 @@ function ensureShims() {
       Notification: [{ hooks: [{ type: 'command', command: 'cpt claude-hook notification' }] }],
     },
   };
-  fs.writeFileSync(hooksFile, JSON.stringify(hooks, null, 2) + '\n');
+  writeIfChanged(hooksFile, JSON.stringify(hooks, null, 2) + '\n');
 
   // 2) cpt — 번들/소스 CLI 를 데몬의 node 로 실행(터미널 PATH 에 node 가 없어도 동작).
   const cptCli = path.join(__dirname, '..', 'cpt-cli', 'bin', 'cpt.js');
@@ -145,23 +152,24 @@ export PATH="${bin}:$PATH"
 claude() { "${bin}/claude" "$@"; }
 codex()  { "${bin}/codex" "$@"; }
 cpt()    { "${bin}/cpt" "$@"; }`;
-  fs.writeFileSync(path.join(zdot, '.zshenv'), `# CodingPT shim — 원래 zshenv 위임
+  writeIfChanged(path.join(zdot, '.zshenv'), `# CodingPT shim — 원래 zshenv 위임
 _cpt_orig=${orig}
 [ -f "$_cpt_orig/.zshenv" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zshenv"
 ZDOTDIR="${zdot}"
 `);
-  fs.writeFileSync(path.join(zdot, '.zprofile'), `_cpt_orig=${orig}
+  writeIfChanged(path.join(zdot, '.zprofile'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zprofile" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zprofile"
 ZDOTDIR="${zdot}"
 `);
-  fs.writeFileSync(path.join(zdot, '.zshrc'), `_cpt_orig=${orig}
+  writeIfChanged(path.join(zdot, '.zshrc'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zshrc" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zshrc"
 ZDOTDIR="${zdot}"
 ${cptTail}
 `);
   // 로그인 셸은 .zshrc 다음 .zlogin 이 "마지막"이라 여기서 한 번 더 확정(cmux 통합이 .zlogin/precmd 로
   //  뒤에 끼어드는 환경 대비). tmux 는 기본 로그인 셸(-l)로 pane 을 띄운다.
-  fs.writeFileSync(path.join(zdot, '.zlogin'), `_cpt_orig=${orig}
+  //  이 파일의 mtime = "훅 배선 마지막 변경 시점" → healStaleTerminals 낡음 판정 기준.
+  writeIfChanged(path.join(zdot, '.zlogin'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zlogin" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zlogin"
 ZDOTDIR="${zdot}"
 ${cptTail}

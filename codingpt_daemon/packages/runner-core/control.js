@@ -193,9 +193,16 @@ function run(config) {
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
     //  tmux 소켓에 무한 누적되는 것을 막는다(attach 없는 뷰만·primary 셸은 보존). idleSec grace 로
     //  방금 만든 뷰는 안 건드림. 데몬 수명 내내 소켓을 스스로 청소한다.
-    const reap = () => ptyLib.reapStaleViews()
-      .then((n) => { if (n) console.log(`[control] 스테일 뷰 세션 ${n}개 정리`); })
-      .catch(() => { /* 서버 없음 등 — 다음 주기 */ });
+    const reap = () => {
+      ptyLib.reapStaleViews()
+        .then((n) => { if (n) console.log(`[control] 스테일 뷰 세션 ${n}개 정리`); })
+        .catch(() => { /* 서버 없음 등 — 다음 주기 */ });
+      // 낡은 터미널 자가치유 — shim 갱신 전에 열린 idle 셸을 respawn 해 훅 배선을 소급 적용.
+      //  (부팅 시 1회 + 주기 — 실행 중이던 claude 를 끝내 idle 이 된 낡은 셸도 다음 주기에 치유)
+      ptyLib.healStaleTerminals()
+        .then((n) => { if (n) console.log(`[control] 낡은 터미널 ${n}개 자가치유(respawn)`); })
+        .catch(() => { /* 다음 주기 */ });
+    };
     reap();
     const reapTimer = setInterval(reap, 120000);
     if (reapTimer.unref) reapTimer.unref();
