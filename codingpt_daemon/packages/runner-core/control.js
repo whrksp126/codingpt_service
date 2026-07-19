@@ -44,6 +44,7 @@ function run(config) {
     ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${config.deviceToken}` } });
 
     ws.on('open', () => {
+      try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ } // Nagle off — RPC/resize 응답성
       backoff = BACKOFF_MIN_MS;
       bumpIdle();
       ws.send(JSON.stringify({

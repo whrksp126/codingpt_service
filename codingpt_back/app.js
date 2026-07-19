@@ -189,6 +189,10 @@ const startServer = async () => {
     const daemonRelayService = require('./services/daemonRelayService');
     // 단일 upgrade 핸들러에서 분기(리스너 2개면 비매칭 경로를 서로 destroy 하므로 한 곳에서 처리).
     server.on('upgrade', (req, socket, head) => {
+      // 인터랙티브 터미널 지연 최소화 — Nagle(작은 패킷 합치기, 최대 ~40ms 지연)을 끈다. pty 릴레이는
+      //  키 한 글자·에코가 작은 프레임이라 Nagle 이 매 키마다 지연을 얹어 모바일 타자가 렉처럼 느껴진다.
+      //  모든 WS(제어/스트림/앱터미널/프리뷰)에 일괄 적용.
+      try { socket.setNoDelay(true); } catch (_) { /* noop */ }
       const url = req.url || '';
       // BYO-PC 데몬 — 제어 채널(데몬 아웃바운드, Bearer deviceToken 인증)
       if (url === '/api/daemon/connect' || url.startsWith('/api/daemon/connect?')) {

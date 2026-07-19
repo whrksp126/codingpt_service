@@ -117,6 +117,8 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   ws.on('message', (d, b) => onMsg(d, b));
 
   ws.on('open', async () => {
+    // Nagle off — pty 출력(에코)이 작은 프레임이라 Nagle 이 매 키마다 지연을 얹는다(모바일 타자 렉).
+    try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ }
     const cols = (params && params.cols) || 80;
     const rows = (params && params.rows) || 24;
 
