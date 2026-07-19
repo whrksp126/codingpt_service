@@ -352,9 +352,11 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-tabtoggle.active { color: var(--accent); }
 .ide-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 11px; background: transparent; color: var(--text3); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; border: none; border-right: 1px solid var(--border); }
 .ide-tab:hover { background: var(--elevated); color: var(--text2); }
-.ide-tab.active { background: var(--base); color: var(--text); margin-bottom: -1px; box-shadow: inset 0 2px 0 var(--border-ctrl); }
+/* 파일 탭 활성 = 상단선(box-shadow) 대신 텍스트 색으로만 표현. 활성 파일이라도 pane 이
+   포커스 안 됐으면(다른 터미널 활성 등) dim 으로 "풀린다" — .pane.focused 일 때만 밝게. */
+.ide-tab.active { background: var(--base); color: var(--text3); margin-bottom: -1px; }
+.pane.focused .ide-tab.active { color: var(--text); }
 .ide-tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--base); }
-.eg.focused .ide-tab.active { box-shadow: inset 0 2px 0 var(--accent); }
 .ide-tab.drop-before { box-shadow: inset 2px 0 0 var(--accent) !important; }
 .ide-tab.drop-after { box-shadow: inset -2px 0 0 var(--accent) !important; }
 .ide-tab-ic { display: inline-flex; }
