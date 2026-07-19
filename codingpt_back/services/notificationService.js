@@ -114,6 +114,8 @@ async function createNotification(userId, payload) {
     if (present.kind === 'mobile') suppressAll = true;
     else if (present.kind === 'pc') pcActive = true;
   }
+  // 라우팅 관측 로그(성공 FCM 은 provider 가 로그를 안 남기므로 결정 지점에서 남긴다).
+  console.log(`[notif-route] user=${userId} present=${present ? present.kind : 'none'} fresh=${present ? present.fresh : '-'} suppressAll=${suppressAll} pcActive=${pcActive} title="${title}"`);
   if (!suppressAll) {
     pushService.sendToUser(userId, {
       kind: kind || 'notification',

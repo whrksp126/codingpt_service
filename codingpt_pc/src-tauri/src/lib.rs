@@ -674,6 +674,13 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 네이티브 창 포커스(NSWindow key 상태) → JS 로 emit. WKWebView 의 DOM blur/hasFocus 는 OS
+            //  앱 전환(예: cmux)에 안 바뀌어 알림 present 판정이 틀어지므로, 신뢰 가능한 이 신호를 진실源으로 쓴다.
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if window.label() == "main" {
+                    let _ = window.app_handle().emit("cpt-focus", *focused);
+                }
+            }
             // 창 닫기 = 숨김(앱은 트레이에 상주).
             //  macOS: windowShouldClose 콜백 안에서 window.hide()(orderOut)를 부르면 prevent_close 에도
             //  불구하고 창이 매니저에서 사라져(재표시 불가) 이후 트레이/독 '열기'가 무반응이 된다(실측).

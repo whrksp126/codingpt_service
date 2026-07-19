@@ -101,16 +101,60 @@ function send(ws, frame) {
   } catch (_) {}
 }
 
+// ── 네이티브 창 포커스(Tauri) — present 판정의 진실源 ──
+//  WKWebView 의 DOM window.blur / document.hasFocus() 는 "OS 앱 전환"(예: cmux 로 전환) 시 갱신되지
+//  않는다(실측: 딴 앱에서 작업 중인데 CodingPT 가 present 로 잡혀 폰 푸시가 억제됨 → PC 로만 알림).
+//  Tauri 의 onFocusChanged(= NSWindow key 상태)는 앱 전환에도 정확히 바뀌므로 이걸 진실源으로 쓴다.
+let _nativeFocused = true;
+let _nativeFocusWired = false;
+function wireNativeFocus() {
+  if (_nativeFocusWired) return;
+  const setF = (v) => { _nativeFocused = !!v; sendPresence(); };
+  let wired = false;
+  // 0) Rust WindowEvent::Focused → "cpt-focus"(가장 신뢰: NSWindow key 상태, event API 는 앱에서 검증됨)
+  try {
+    const ev = window.__TAURI__ && window.__TAURI__.event;
+    if (ev && ev.listen) { ev.listen("cpt-focus", (e) => setF(e && e.payload)); wired = true; }
+  } catch (_) { /* noop */ }
+  // 1) 창 객체 onFocusChanged (권장 경로)
+  try {
+    const tw = window.__TAURI__ && window.__TAURI__.window;
+    const w = tw && tw.getCurrentWindow && tw.getCurrentWindow();
+    if (w && w.onFocusChanged) {
+      w.onFocusChanged(({ payload }) => setF(payload));
+      if (w.isFocused) w.isFocused().then(setF).catch(() => {});
+      wired = true;
+    }
+  } catch (_) { /* noop */ }
+  // 2) 폴백 — 전역 이벤트로 tauri://focus|blur 수신(event API 는 앱에서 이미 검증됨)
+  try {
+    const ev = window.__TAURI__ && window.__TAURI__.event;
+    if (ev && ev.listen) {
+      ev.listen("tauri://focus", () => setF(true));
+      ev.listen("tauri://blur", () => setF(false));
+      wired = true;
+    }
+  } catch (_) { /* noop */ }
+  if (wired) _nativeFocusWired = true; // 하나라도 배선되면 네이티브를 진실源으로
+}
+// "지금 실제로 최전면(key)인가" — 네이티브 우선, 미배선 시 DOM 폴백.
+function isReallyFocused() {
+  if (_nativeFocusWired) return _nativeFocused;
+  try { return typeof document.hasFocus === "function" ? document.hasFocus() : true; } catch (_) { return true; }
+}
+
 // ── 사용자 활동 보고(ui_activity) — 원격 조작 executor 선정에 쓰이는 "이 화면을 보는 중" 신호 ──
 let _activityBound = false;
 let _lastActivity = 0;
 function bindActivityReport() {
   if (_activityBound) return;
   _activityBound = true;
+  wireNativeFocus();
   const report = () => {
-    // 포커스 가드 — ui_activity 는 서버에서 foreground=true 로 취급된다. 창이 포커스가 아닐 때(딴 앱
-    //  focus, 옆에 떠 있어 마우스만 지나가는 경우 등) 보내면 present 판정이 다시 켜져 폰 알림을 가로챈다.
-    try { if (typeof document.hasFocus === "function" && !document.hasFocus()) return; } catch (_) { /* noop */ }
+    // 포커스 가드 — ui_activity 는 서버에서 foreground=true 로 취급된다. 창이 최전면이 아닐 때(딴 앱
+    //  사용, 옆에 떠 있어 마우스만 지나가는 경우 등) 보내면 present 판정이 다시 켜져 폰 알림을 가로챈다.
+    //  네이티브 포커스로 판정(DOM hasFocus 는 앱 전환 시 못 믿음).
+    if (!isReallyFocused()) return;
     const now = Date.now();
     if (now - _lastActivity < 30000) return; // 30s 스로틀
     if (!sock || sock.readyState !== 1) return;
@@ -121,22 +165,19 @@ function bindActivityReport() {
   window.addEventListener("pointerdown", report, true);
   window.addEventListener("pointermove", report, true); // 보는 중(마우스 이동)도 활성 유지 → foregroundAt 갱신
   window.addEventListener("wheel", report, true);
-  // present 신호(알림 라우팅) — "지금 이 앱을 실제로 보고 있는가". 가시성(visible)만 보면 뒤에 깔린
-  //  창까지 present 로 잡혀 폰 알림을 가로챈다(사용자는 딴 앱 사용 중인데). → focus(맨 앞·활성)까지 본다.
-  //  포커스를 잃으면(딴 앱으로 전환) not-present → 서버가 알림을 폰으로 넘긴다.
+  // present 신호(알림 라우팅) — 네이티브 포커스 변화가 주 트리거. DOM 이벤트는 폴백(웹/미배선 대비).
   window.addEventListener("focus", sendPresence);
   window.addEventListener("blur", sendPresence);
   document.addEventListener("visibilitychange", sendPresence);
 }
 
-// 현재 "실제로 보고 있음" 여부를 present 신호로 전송. visible AND 창 포커스 = present.
+// 현재 "실제로 보고 있음" 여부를 present 신호로 전송. visible AND 네이티브 포커스 = present.
 function sendPresence() {
   if (!sock || sock.readyState !== 1) return;
   let active = true;
   try {
     const visible = document.visibilityState === "visible";
-    const focused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
-    active = visible && focused;
+    active = visible && isReallyFocused();
   } catch (_) { active = true; }
   send(sock, { type: "presence", active });
 }
