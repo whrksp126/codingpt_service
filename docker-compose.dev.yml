@@ -9,7 +9,7 @@ services:
     environment:
       POSTGRES_DB: codingpt_db
       POSTGRES_USER: codingpt
-      POSTGRES_PASSWORD: codingpt123
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - postgres_dev_data:/var/lib/postgresql/data
     networks:

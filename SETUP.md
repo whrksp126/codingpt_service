@@ -162,7 +162,7 @@ cd codingpt_app && npm run android:local
 | 웹 프론트 | `http://localhost:3300` |
 | 백엔드 API | `http://localhost:5300` |
 | Metro | `http://localhost:8081` |
-| PostgreSQL | `localhost:5432` (user: codingpt / pw: codingpt123 / db: codingpt_db) |
+| PostgreSQL | `localhost:5432` (user: codingpt / pw: $DB_PASSWORD (.env 참조) / db: codingpt_db) |
 
 ---
 
