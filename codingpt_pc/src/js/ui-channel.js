@@ -108,6 +108,9 @@ function bindActivityReport() {
   if (_activityBound) return;
   _activityBound = true;
   const report = () => {
+    // 포커스 가드 — ui_activity 는 서버에서 foreground=true 로 취급된다. 창이 포커스가 아닐 때(딴 앱
+    //  focus, 옆에 떠 있어 마우스만 지나가는 경우 등) 보내면 present 판정이 다시 켜져 폰 알림을 가로챈다.
+    try { if (typeof document.hasFocus === "function" && !document.hasFocus()) return; } catch (_) { /* noop */ }
     const now = Date.now();
     if (now - _lastActivity < 30000) return; // 30s 스로틀
     if (!sock || sock.readyState !== 1) return;
@@ -116,17 +119,25 @@ function bindActivityReport() {
   };
   window.addEventListener("keydown", report, true);
   window.addEventListener("pointerdown", report, true);
-  // present 신호(알림 라우팅) — 창이 보이면(포커스 아니어도, 예: 사용자가 브라우저 보는 중) present,
-  //  최소화/숨김이면 not-present. 자리비움(=아무 기기도 present 아님)이면 서버가 폰 푸시로 보낸다.
+  window.addEventListener("pointermove", report, true); // 보는 중(마우스 이동)도 활성 유지 → foregroundAt 갱신
+  window.addEventListener("wheel", report, true);
+  // present 신호(알림 라우팅) — "지금 이 앱을 실제로 보고 있는가". 가시성(visible)만 보면 뒤에 깔린
+  //  창까지 present 로 잡혀 폰 알림을 가로챈다(사용자는 딴 앱 사용 중인데). → focus(맨 앞·활성)까지 본다.
+  //  포커스를 잃으면(딴 앱으로 전환) not-present → 서버가 알림을 폰으로 넘긴다.
   window.addEventListener("focus", sendPresence);
+  window.addEventListener("blur", sendPresence);
   document.addEventListener("visibilitychange", sendPresence);
 }
 
-// 현재 창 가시성을 present 신호로 전송. visible(포커스 여부 무관)=present.
+// 현재 "실제로 보고 있음" 여부를 present 신호로 전송. visible AND 창 포커스 = present.
 function sendPresence() {
   if (!sock || sock.readyState !== 1) return;
   let active = true;
-  try { active = document.visibilityState === "visible"; } catch (_) { active = true; }
+  try {
+    const visible = document.visibilityState === "visible";
+    const focused = typeof document.hasFocus === "function" ? document.hasFocus() : true;
+    active = visible && focused;
+  } catch (_) { active = true; }
   send(sock, { type: "presence", active });
 }
 

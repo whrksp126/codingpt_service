@@ -17,16 +17,27 @@ function defaultProvider(_platform) {
 }
 
 // 기기 토큰 등록(upsert). token 재발급 시 같은 행을 갱신.
-async function registerDevice(userId, { token, platform, provider }) {
+//  alertWhenPcActive: 앱의 로컬 설정을 서버에 미러(라우팅 토글). 미지정이면 기존값 유지(신규는 false).
+async function registerDevice(userId, { token, platform, provider, alertWhenPcActive }) {
   if (!token || !platform) throw new Error('token, platform 이 필요합니다.');
   const payload = {
     user_id: userId, token, platform,
     provider: provider || defaultProvider(platform),
     enabled: true, last_seen_at: new Date(), updated_at: new Date(),
   };
+  if (typeof alertWhenPcActive === 'boolean') payload.alert_when_pc_active = alertWhenPcActive;
   const existing = await PushDevice.findOne({ where: { token } });
   if (existing) { await existing.update(payload); return existing; }
   return PushDevice.create(payload);
+}
+
+// 라우팅 토글 갱신 — 사용자의 모든 기기에 일괄 적용(앱 설정 화면 토글). 반환 = 갱신된 행 수.
+async function setAlertWhenPcActive(userId, value) {
+  const [count] = await PushDevice.update(
+    { alert_when_pc_active: !!value, updated_at: new Date() },
+    { where: { user_id: userId } },
+  );
+  return count;
 }
 
 async function unregisterDevice(userId, token) {
@@ -35,14 +46,17 @@ async function unregisterDevice(userId, token) {
 }
 
 // 사용자의 모든 활성 기기에 발송. payload = { kind, sessionId, workspaceId?, title, body?, deeplink }.
+//  opts.pcActive: 지금 PC 를 실제로 쓰는 중(present=pc+fresh)이면 true → alert_when_pc_active=false 인
+//   기기(기본)는 건너뛴다("PC 사용 중 이 폰 무음" 토글). 토글을 끈(=true) 기기만 그때도 푸시한다.
 //  실패해도 throw 하지 않는다(호출부는 fire-and-forget). 반환 { sent, skipped }.
-async function sendToUser(userId, payload) {
+async function sendToUser(userId, payload, opts = {}) {
   let devices;
   try { devices = await PushDevice.findAll({ where: { user_id: userId, enabled: true } }); }
   catch (_) { return { sent: 0, skipped: 0 }; }
   if (!devices || !devices.length) return { sent: 0, skipped: 0 };
   let sent = 0, skipped = 0;
   for (const d of devices) {
+    if (opts.pcActive && !d.alert_when_pc_active) { skipped += 1; continue; } // PC 사용 중 무음 토글
     try { (await dispatch(d, payload)) ? (sent += 1) : (skipped += 1); }
     catch (e) { skipped += 1; console.warn('[push] 발송 실패 device=' + d.id + ': ' + (e && e.message)); }
   }
@@ -73,4 +87,4 @@ async function dispatch(device, payload) {
   return false;
 }
 
-module.exports = { registerDevice, unregisterDevice, sendToUser, providerConfigured };
+module.exports = { registerDevice, unregisterDevice, setAlertWhenPcActive, sendToUser, providerConfigured };

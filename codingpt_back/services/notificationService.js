@@ -92,8 +92,8 @@ async function createNotification(userId, payload) {
     pruneOld(userId).catch(() => { /* noop */ });
   }
 
-  // present 기기 = 지금 사용자가 보고 있는 화면(포그라운드) 하나. 주의 알림(사운드/햅틱/OS배너)은
-  //  그 기기에서만 울리고, 나머지 기기는 뱃지/목록만 조용히 갱신한다(present-device 라우팅).
+  // present 기기 = 지금 사용자가 "실제로 보고 있는" 화면 하나(PC=창 포커스, 모바일=AppState active).
+  //  주의 알림(사운드/햅틱/OS배너)은 그 기기에서만 울리고, 나머지 기기는 뱃지/목록만 조용히 갱신한다.
   let present = null;
   try { present = relay().presentClient(userId); } catch (_) { /* noop */ }
   const alertClientKey = present ? present.clientKey : null;
@@ -101,13 +101,20 @@ async function createNotification(userId, payload) {
   // 라이브 팬아웃(모든 접속 기기, 뱃지/목록 동기화) — alertClientKey 로 소리낼 기기만 표시. 실패해도 생성 성공.
   try { relay().fanoutNotifEvent(userId, { kind: 'new', notification, alertClientKey }); } catch (_) { /* noop */ }
 
-  // FCM 푸시는 "활성 모바일 앱"이 없을 때만 보낸다(폰이 켜져 인앱으로 볼 때만 억제 → 이중 알림 방지).
-  //  주의: present(포그라운드 기기)로 판정하면 PC 앱이 present 일 때 폰(닫힘) 푸시까지 억제돼
-  //  "PC 켜두고 폰 닫으면 폰 알림이 안 오는" 버그가 난다. PC 는 push_device 가 아니므로 폰 푸시와 무관 →
-  //  모바일 클라이언트가 실제로 접속(foreground)해 있을 때만 억제한다(hasActiveMobileClient, PC 무시).
-  let mobileActive = false;
-  try { mobileActive = relay().hasActiveMobileClient(userId); } catch (_) { /* noop */ }
-  if (!mobileActive) {
+  // 폰 FCM 푸시 라우팅 — "지금 실제로 쓰는 기기가 이미 알림을 보여주면" 만 억제(이중 알림 방지),
+  //  아무 기기도 안 쓰면 폰으로 넘긴다(자리비움 안전망).
+  //   · present=모바일 + 최근활성(fresh) → 활성 폰이 인앱으로 봄     → FCM 전량 억제
+  //   · present=PC     + 최근활성(fresh) → 사용자가 PC 를 쓰는 중   → 폰별 토글(alert_when_pc_active)로 결정
+  //   · present=PC 인데 오래 자리비움(!fresh) / present 없음        → 폰으로 푸시(PC 는 인앱 배너 유지)
+  //  이전엔 "모바일 WS 접속 여부(hasActiveMobileClient)"로만 억제해, 백그라운드로 접속만 살아 있는
+  //  폰이 자기 자신의 푸시를 막고 PC 는 present 판정이 느슨(가시성)해 폰을 가로채는 문제가 있었다.
+  let suppressAll = false;   // 활성 폰이 이미 인앱으로 봄
+  let pcActive = false;      // PC 사용 중 → sendToUser 가 기기별 토글로 스킵
+  if (present && present.fresh) {
+    if (present.kind === 'mobile') suppressAll = true;
+    else if (present.kind === 'pc') pcActive = true;
+  }
+  if (!suppressAll) {
     pushService.sendToUser(userId, {
       kind: kind || 'notification',
       sessionId: notification.sessionId || '',
@@ -115,7 +122,7 @@ async function createNotification(userId, payload) {
       title,
       body: subtitle || (notification.body ? String(notification.body).slice(0, 120) : ''),
       deeplink: buildDeeplink(notification),
-    }).catch(() => { /* fire-and-forget */ });
+    }, { pcActive }).catch(() => { /* fire-and-forget */ });
   }
 
   return notification;

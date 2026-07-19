@@ -381,10 +381,17 @@ function hasActiveMobileClient(userId) {
   return false;
 }
 
+// present 기기가 "최근에도 실제로 쓰이는지" 판정 창(5분). foregroundAt(포커스/포그라운드 전환 +
+//  입력 활동 ui_activity 로 갱신)이 이 안이면 fresh=true. 소리(alertClientKey)는 focus 만 보지만,
+//  폰 FCM 억제는 fresh 까지 본다 — 창은 포커스돼 있으나 자리를 비운 지 오래면 폰으로 넘기기 위함.
+const PRESENCE_FRESH_MS = 5 * 60 * 1000;
+
 // 알림을 보낼 "지금 사용자가 보고 있는(present) 기기" 를 고른다 — 알림 present-device 라우팅.
 //  · present = ui_hello 한 접속 클라이언트 중 foreground=true 인 것(가장 최근 포그라운드된 하나).
+//    (PC 는 창 포커스, 모바일은 AppState=active 를 presence 로 보고 → foreground 갱신)
+//  · fresh = 그 기기가 최근(PRESENCE_FRESH_MS) 활성 — 폰 FCM 억제 판정용.
 //  · 없으면 null → 호출부가 폰 FCM 푸시로 대체.
-//  반환: { clientKey, kind } 또는 null.
+//  반환: { clientKey, kind, foregroundAt, fresh } 또는 null.
 function presentClient(userId) {
   const set = agentWsClients.get(String(userId));
   if (!set) return null;
@@ -394,7 +401,9 @@ function presentClient(userId) {
     if (!m || !m.clientKey || !m.foreground) continue;
     if (!best || (m.foregroundAt || 0) > (best.foregroundAt || 0)) best = m;
   }
-  return best ? { clientKey: best.clientKey, kind: best.kind } : null;
+  if (!best) return null;
+  const fresh = (Date.now() - (best.foregroundAt || 0)) < PRESENCE_FRESH_MS;
+  return { clientKey: best.clientKey, kind: best.kind, foregroundAt: best.foregroundAt || 0, fresh };
 }
 
 // 알림 팬아웃 — notif_event(new/read) 를 SSE(폴백) + WSS 양쪽에 즉시 전달(버퍼/리플레이 없음).
