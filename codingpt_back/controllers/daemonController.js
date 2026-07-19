@@ -299,6 +299,16 @@ async function daemonPutSession(req, res) {
 }
 
 // POST /api/daemon/workspaces  (deviceToken 인증) → 새 로컬 워크스페이스 생성. PC GUI 의 "+" 버튼.
+// 요청한 hostDeviceId 가 이 사용자 소유의 기기면 그 id 를, 아니면 fallback(요청 기기) 을 반환(권한 우회 방지).
+async function resolveOwnedHost(userId, requestedId, fallbackId) {
+  const rid = Number(requestedId);
+  if (!Number.isInteger(rid) || rid === fallbackId) return fallbackId;
+  try {
+    const owned = await DaemonDevice.findOne({ where: { id: rid, user_id: userId, revoked_at: null } });
+    return owned ? rid : fallbackId;
+  } catch (_) { return fallbackId; }
+}
+
 async function daemonCreateWorkspace(req, res) {
   try {
     const device = await resolveDeviceUser(req);
@@ -313,8 +323,9 @@ async function daemonCreateWorkspace(req, res) {
       name: b.name,
       compute: isLocal ? 'local' : 'cloud',
       localPath: typeof b.localPath === 'string' ? b.localPath : undefined,
-      // 멀티기기: 로컬 워크스페이스는 이 요청을 보낸 호스트 기기에 귀속.
-      hostDeviceId: isLocal ? device.id : undefined,
+      // 멀티기기: 로컬 워크스페이스는 호스트 기기에 귀속. 클라이언트가 다른 PC(외부)를 지정하면(b.hostDeviceId)
+      //  그 기기(본인 소유 검증)에, 아니면 이 요청을 보낸 기기에 귀속.
+      hostDeviceId: isLocal ? (await resolveOwnedHost(device.user_id, b.hostDeviceId, device.id)) : undefined,
       remoteUrl: typeof b.remoteUrl === 'string' ? b.remoteUrl : undefined, // 프로젝트 자동 연결 보조 신호
       stack: Array.isArray(b.stack) ? b.stack : undefined,
     });

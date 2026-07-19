@@ -6,6 +6,7 @@ import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
+import { openNewWorkspace } from "./folder-picker.js";
 
 let el = null;
 let notifPanel = null;
@@ -285,7 +286,7 @@ export function buildTopControls(withAdd = true) {
   }
   frag.append(toggle, bell);
   if (withAdd) {
-    const add = ctlBtn("plus", "새 워크스페이스", () => S.createLocalWorkspace());
+    const add = ctlBtn("plus", "새 워크스페이스", () => openNewWorkspace());
     if (state.creatingWs) add.classList.add("busy");
     frag.append(add);
   }

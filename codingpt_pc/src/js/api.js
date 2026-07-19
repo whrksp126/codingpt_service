@@ -35,12 +35,16 @@ export const api = {
   fetchWsSession: (wsId) => invoke("fetch_ws_session", { wsId }),
   saveWsSession: (wsId, session) => invoke("save_ws_session", { wsId, session }),
   createWorkspace: (absPath) => invoke("create_workspace", { absPath }),
-  // 네이티브 폴더 피커(새 워크스페이스). 취소 시 null.
+  // 네이티브 폴더 피커(이 PC 로컬 워크스페이스). 취소 시 null.
   pickFolder: async (defaultPath) => {
     const d = window.__TAURI__?.dialog;
     if (d?.open) return await d.open({ directory: true, multiple: false, defaultPath });
     return null;
   },
+  // ── 외부 PC(다른 기기) 폴더 브라우징/생성 — back 릴레이 fs API 를 hostDeviceId 로 라우팅 ──
+  remoteFsList: (path, hostDeviceId) => invoke("remote_fs_list", { path: path || "", hostDeviceId: hostDeviceId ?? null }),
+  remoteFsMkdir: (path, hostDeviceId) => invoke("remote_fs_mkdir", { path, hostDeviceId: hostDeviceId ?? null }),
+  remoteWsCreate: (path, hostDeviceId) => invoke("remote_ws_create", { path: path || "", hostDeviceId: hostDeviceId ?? null }),
 
   // ── 로컬 터미널 pane (tmux) ──
   ptyOpen: (paneId, localPath, winIndex, cols, rows) =>

@@ -113,6 +113,63 @@ pub fn claim_workspace(ws_id: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
+// ── 외부 PC(다른 기기) 폴더 브라우징/워크스페이스 생성 — back 릴레이 fs API 를 hostDeviceId 로 라우팅 ──
+//  (이 PC 로컬은 네이티브 폴더 다이얼로그를 쓰고, 원격 PC 만 이 경로로 컬럼 브라우저를 띄운다)
+#[tauri::command]
+pub fn remote_fs_list(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let host_qs = match host_device_id {
+        Some(h) => format!("&hostDeviceId={h}"),
+        None => String::new(),
+    };
+    let url = format!(
+        "{}/api/daemon/fs/list?path={}{}",
+        server_url().trim_end_matches('/'),
+        urlencoding_min(&path),
+        host_qs
+    );
+    let resp = ureq::get(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+        .map_err(|e| format!("폴더 조회 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+#[tauri::command]
+pub fn remote_fs_mkdir(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!("{}/api/daemon/fs/mkdir", server_url().trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(15))
+        .send_json(ureq::json!({ "path": path, "hostDeviceId": host_device_id }))
+        .map_err(|e| format!("폴더 생성 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
+#[tauri::command]
+pub fn remote_ws_create(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    // 폴더명 = 워크스페이스명(홈-기준 상대경로의 마지막 구간). 빈 경로(홈)는 지정 불가.
+    let clean = path.trim().trim_matches('/');
+    if clean.is_empty() {
+        return Err("홈 루트는 워크스페이스로 지정할 수 없어요.".into());
+    }
+    let name = clean.rsplit('/').next().unwrap_or(clean).to_string();
+    // 로컬 워크스페이스 메타 등록 — hostDeviceId 로 그 외부 PC 에 귀속(폴더는 이미 존재).
+    let url = format!("{}/api/daemon/workspaces", server_url().trim_end_matches('/'));
+    let resp = ureq::post(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(20))
+        .send_json(ureq::json!({ "name": name, "compute": "local", "localPath": clean, "hostDeviceId": host_device_id }))
+        .map_err(|e| format!("워크스페이스 지정 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
 // 프로필(닉네임) 수정 — deviceToken.
 #[tauri::command]
 pub fn update_nickname(nickname: String) -> Result<serde_json::Value, String> {

@@ -522,6 +522,44 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .acct-del-go.deleting .acct-del-spin { display: inline-block; animation: spin 0.9s linear infinite; }
 .acct-del-err { font-size: 12px; color: var(--error, #f87171); }
 
+/* ── 새 워크스페이스 폴더 피커(PC 선택 + Finder 컬럼뷰) — 모바일 앱과 동일 톤 ── */
+.fp-overlay { position: fixed; inset: 0; z-index: 4000; display: flex; align-items: center; justify-content: center; background: rgba(5,7,12,0.62); padding: 24px; }
+.fp-overlay.hidden { display: none; }
+.fp-card { width: 100%; max-width: 640px; max-height: 82vh; display: flex; flex-direction: column; background: var(--surface, #12171f); border: 1px solid var(--border-control, #2a323d); border-radius: 14px; padding: 16px; box-shadow: 0 18px 60px rgba(0,0,0,0.5); }
+.fp-card-sm { max-width: 400px; }
+.fp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.fp-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.fp-sub { font-size: 12px; color: var(--dim); margin-bottom: 12px; }
+.fp-newfolder { background: none; border: none; color: var(--text2); font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+.fp-newfolder:hover { background: var(--elevated2, #1c232c); }
+.fp-path { font-family: var(--mono, monospace); font-size: 12px; color: var(--dim); line-height: 1.5; margin-bottom: 10px; word-break: break-all; }
+.fp-cols { display: flex; gap: 0; overflow-x: auto; flex: 1; min-height: 240px; }
+.fp-col { width: 210px; min-width: 210px; overflow-y: auto; border-right: 1px solid var(--border, #222a33); padding: 2px; }
+.fp-col:last-child { border-right: none; }
+.fp-row { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: none; background: none; border-radius: 7px; cursor: pointer; text-align: left; color: var(--text2); font-size: 13.5px; }
+.fp-row:hover { background: rgba(255,255,255,0.04); }
+.fp-row.sel { background: var(--elevated2, #1c232c); color: var(--text); font-weight: 600; }
+.fp-row.fp-row-edit { cursor: default; }
+.fp-folder { font-size: 14px; opacity: 0.85; }
+.fp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-check { color: var(--accent, #34D399); font-weight: 800; }
+.fp-newinput { flex: 1; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--accent, #34D399); background: var(--base, #0b0f14); color: var(--text); font-size: 13.5px; outline: none; }
+.fp-empty { color: var(--dim); font-size: 12px; text-align: center; padding: 20px 8px; }
+.fp-actions { display: flex; gap: 10px; margin-top: 14px; }
+.fp-btn { flex: 1; height: 44px; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.fp-cancel { background: var(--elevated2, #1c232c); color: var(--text); }
+.fp-designate { background: var(--accent, #34D399); color: #052e16; font-weight: 800; }
+.fp-designate:disabled { opacity: 0.7; cursor: default; }
+.fp-pc-list { display: flex; flex-direction: column; gap: 10px; }
+.fp-pc-row { display: flex; align-items: center; gap: 12px; width: 100%; padding: 13px 12px; border: 1px solid var(--border, #222a33); background: var(--elevated, #151a21); border-radius: 10px; cursor: pointer; text-align: left; }
+.fp-pc-row:hover { border-color: var(--border-control, #2a323d); }
+.fp-pc-ic { font-size: 20px; }
+.fp-pc-meta { flex: 1; min-width: 0; }
+.fp-pc-name { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 700; color: var(--text); }
+.fp-pc-sub { font-size: 11.5px; color: var(--dim); }
+.fp-dot { width: 7px; height: 7px; border-radius: 4px; background: var(--accent, #34D399); }
+.fp-caret { color: var(--dim); font-size: 16px; }
+
 .dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
 .dc-os, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dc-act { display: flex; justify-content: flex-end; }
