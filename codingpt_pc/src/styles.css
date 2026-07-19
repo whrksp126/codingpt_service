@@ -710,3 +710,6 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 }
 .sett-btn:hover { background: var(--hover); }
 .sett-btn:disabled { opacity: 0.5; cursor: default; }
+/* 폴더접근 허용 버튼 — sett-row(space-between)에서 우측 컴팩트 버튼. 라벨(허용/허용됨/설정 열기)
+   변화에도 폭이 흔들리지 않게 min-width. (.fp-btn=folder-picker 모달 전용 flex:1 과 분리) */
+.fpa-btn { min-width: 72px; text-align: center; white-space: nowrap; }

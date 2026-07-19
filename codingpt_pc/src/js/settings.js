@@ -133,9 +133,9 @@ function renderSection(force) {
         <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
       </div>
       <div class="sm-card2">
-        <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fp-btn" data-f="downloads">허용</button></div>
-        <div class="sett-row"><span>데스크탑 폴더 접근</span><button class="sett-btn fp-btn" data-f="desktop">허용</button></div>
-        <div class="sett-row"><span>문서 폴더 접근</span><button class="sett-btn fp-btn" data-f="documents">허용</button></div>
+        <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fpa-btn" data-f="downloads">허용</button></div>
+        <div class="sett-row"><span>데스크탑 폴더 접근</span><button class="sett-btn fpa-btn" data-f="desktop">허용</button></div>
+        <div class="sett-row"><span>문서 폴더 접근</span><button class="sett-btn fpa-btn" data-f="documents">허용</button></div>
         <div class="sett-hint">한 번 허용하면 모든 워크스페이스에 적용돼요</div>
       </div>
       <div class="sm-card2">
@@ -277,7 +277,7 @@ function buildPaired() {
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
 //  허용=버튼 '허용됨' 고정, 거부=버튼이 '설정 열기'(파일 및 폴더 설정)로 전환.
 function bindFolderPerms(rootEl) {
-  rootEl.querySelectorAll(".fp-btn").forEach((b) => {
+  rootEl.querySelectorAll(".fpa-btn").forEach((b) => {
     b.addEventListener("click", async () => {
       if (b.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
       b.disabled = true;
