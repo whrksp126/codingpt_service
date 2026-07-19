@@ -60,6 +60,8 @@ async function sendToUser(userId, payload, opts = {}) {
     try { (await dispatch(d, payload)) ? (sent += 1) : (skipped += 1); }
     catch (e) { skipped += 1; console.warn('[push] 발송 실패 device=' + d.id + ': ' + (e && e.message)); }
   }
+  // 관측 로그 — 기기 수/발송 결과(무푸시 원인 진단: devices=0=등록문제, sent=0=발송실패/토글).
+  console.log(`[push] user=${userId} devices=${devices.length} pcActive=${!!opts.pcActive} sent=${sent} skipped=${skipped} platforms=${devices.map((d) => d.platform + (d.enabled ? '' : ':off')).join(',')}`);
   return { sent, skipped };
 }
 
@@ -76,7 +78,7 @@ async function dispatch(device, payload) {
   const r = provider === 'apns'
     ? await pushProvider.sendApns(device, payload)
     : await pushProvider.sendFcm(device, payload);
-  if (r.ok) return true;
+  if (r.ok) { console.log(`[push] 발송 OK device=${device.id} ${device.platform}/${provider} id=${r.id || ''}`); return true; }
   // 무효 토큰(등록해제/BadDeviceToken) → 다음 발송 대상에서 제외.
   if (r.invalidToken) {
     try { await device.update({ enabled: false, updated_at: new Date() }); } catch (_) { /* noop */ }
