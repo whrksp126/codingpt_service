@@ -164,7 +164,7 @@ function renderSection(force) {
     contentEl.innerHTML = `
       <div class="sm-h">정보</div>
       <div class="sm-card2">
-        <div class="sett-row"><span>버전</span><span class="dim">CodingPT PC 0.1.4</span></div>
+        <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>업데이트</span>
           <span style="display:inline-flex;align-items:center;gap:8px;">
             <span class="dim" id="updStatus">-</span>
@@ -173,6 +173,8 @@ function renderSection(force) {
         </div>
         <div class="sett-row"><span>이 창을 닫아도</span><span class="dim">메뉴바에서 계속 실행됩니다</span></div>
       </div>`;
+    // 실제 앱 버전으로 채움(하드코딩 금지 — 업데이트되면 자동 반영). 실패해도 조용히(dev 등).
+    api.appVersion().then((v) => { const el = contentEl.querySelector("#appVerLabel"); if (el && v) el.textContent = `CodingPT PC ${v}`; }).catch(() => {});
     bindUpdate();
   }
 }

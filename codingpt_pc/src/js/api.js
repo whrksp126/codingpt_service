@@ -106,6 +106,7 @@ export const api = {
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
 
   // ── 자동 업데이트(번들 앱 전용 — tauri dev 에선 updateCheck 가 error 반환) ──
+  appVersion: () => invoke("app_version"),
   updateCheck: () => invoke("update_check"),
   updateInstall: () => invoke("update_install"),
   onUpdateProgress: (cb) => listen("cpt-update-progress", (e) => cb(e.payload)),

@@ -47,6 +47,13 @@ fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
     state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
 }
 
+// 실제 앱 버전(빌드 시 tauri.conf.json/Cargo 의 package version). 설정 정보 화면에 표시 —
+//  과거 하드코딩 문자열이 업데이트돼도 안 바뀌던 버그(항상 0.1.4로 보임) 수정.
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
 // ── 자동 업데이트 — 순수 JS 프론트(번들러 없음)라 JS 플러그인 대신 Rust API 를 커맨드로 노출 ──
 //  updater 는 번들된 앱(.app)에서만 동작(tauri dev 에선 항상 "미지원" 에러 → available:false 로 정규화).
 #[tauri::command]
@@ -569,6 +576,7 @@ pub fn run() {
             set_ide_dirty,
             quit_app,
             // 자동 업데이트
+            app_version,
             update_check,
             update_install,
             // 서버 동기화 알림 + UI 실시간 채널
