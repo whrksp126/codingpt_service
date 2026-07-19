@@ -18,6 +18,14 @@ const pkg = require('./package.json');
 
 const DEFAULT_SERVER = 'https://codingpt-back.ghmate.com';
 
+// PTY 스트림 WS(leg B)를 CF 우회 직결 도메인으로 보낼지 결정. prod back 이면 자동으로 직결(저지연),
+//  env RELAY_WS_URL 로 명시 override 가능. 그 외(dev/local)는 undefined → serverUrl 파생(기존 동작 유지).
+function relayWsFor(serverUrl) {
+  if (process.env.RELAY_WS_URL) return process.env.RELAY_WS_URL.replace(/\/+$/, '');
+  if (/(^|\/\/)codingpt-back\.ghmate\.com\b/.test(String(serverUrl || ''))) return 'wss://codingpt-direct.ghmate.com';
+  return undefined;
+}
+
 function argValue(flag) {
   const i = process.argv.indexOf(flag);
   return i >= 0 ? process.argv[i + 1] : null;
@@ -120,7 +128,11 @@ function cmdRun() {
   }
   console.log(`CodingPT 데몬 v${pkg.version} — ${config.deviceName} → ${config.serverUrl}`);
   console.log(`로컬에서 같은 터미널 보기: tmux -L codingpt attach -t codingpt`);
-  runnerCore.control.run({ ...config, daemonVersion: pkg.version });
+  // 터미널 PTY 스트림 WS(leg B)를 CF 우회 직결로 — prod 는 자동, env 로 명시 override 가능.
+  //  dev/local 은 undefined 로 두어 serverUrl(CF/로컬) 파생 유지. 클라우드러너는 이 경로를 안 탐(내부 back).
+  const relayWsUrl = relayWsFor(config.serverUrl);
+  if (relayWsUrl) console.log(`릴레이 WS(직결): ${relayWsUrl}`);
+  runnerCore.control.run({ ...config, daemonVersion: pkg.version, relayWsUrl });
 }
 
 function cmdStatus() {

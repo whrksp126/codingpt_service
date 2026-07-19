@@ -29,7 +29,12 @@ function run(config) {
 
   // cpt 소켓·shim·WS 연결은 파일 하단 boot() 에서 — 기존 인스턴스 인수(takeover) 후 순서대로.
 
-  const wsUrl = config.serverUrl.replace(/^http/, 'ws') + '/api/daemon/connect';
+  // PTY 스트림이 흐르는 핵심 WS(leg B). relayWsUrl(예: wss://codingpt-direct — CF 우회 직결) 이 있으면
+  //  WS 만 그리로 보내 지연을 줄이고(REST/pair 는 serverUrl=CF 유지), 없으면 serverUrl 에서 파생(기존).
+  const wsBase = config.relayWsUrl
+    ? config.relayWsUrl.replace(/\/+$/, '')
+    : config.serverUrl.replace(/^http/, 'ws');
+  const wsUrl = wsBase + '/api/daemon/connect';
 
   const bumpIdle = () => {
     if (idleTimer) clearTimeout(idleTimer);
