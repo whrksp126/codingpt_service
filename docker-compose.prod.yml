@@ -38,14 +38,44 @@ services:
       - AGENT_WORKER_URL=http://agent-worker:5400
       - DB_HOST=postgres
       - DB_SSL=false
+      # 클라우드 러너(M5) — 데모/심사 계정이 서버에서 24/7(scale-to-zero) 워크스페이스를 쓰도록 활성.
+      - CLOUD_RUNNER_ENABLED=true
+      - CLOUD_RUNNER_IMAGE=codingpt-runner:dev
+      - CLOUD_RUNNER_SERVER_URL=http://back:5100   # 러너 컨테이너가 붙을 back 주소(prod 내부 포트 5100)
+      - CLOUD_RUNNER_NETWORK=codingpt_prod_codingpt_prod
+      # Docker 접근은 raw 소켓 직결 대신 socket-proxy 경유 — back(공개 API)이 호스트 소켓을 직접 안 만짐.
+      - DOCKER_HOST=tcp://docker-socket-proxy:2375
     env_file:
       - ./codingpt_back/.env
     depends_on:
       postgres:
         condition: service_healthy
+      docker-socket-proxy:
+        condition: service_started
     networks:
       - codingpt_prod
       - nginx_proxy
+    restart: unless-stopped
+
+  # Docker 소켓 프록시 — back 이 컨테이너 생성/시작/정지만 할 수 있도록 API 표면을 제한(raw 소켓 직결 방지).
+  #  cloudRunnerService(dockerode)가 DOCKER_HOST=tcp://docker-socket-proxy:2375 로 접근한다.
+  docker-socket-proxy:
+    container_name: codingpt_docker_proxy_prod
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1   # /containers/* (create/inspect/list)
+      - IMAGES=1       # 이미지 inspect(컨테이너 생성 시 필요)
+      - VOLUMES=1      # named volume(코드/크레덴셜/세션 영속)
+      - NETWORKS=1     # 러너를 codingpt_prod 네트워크에 연결
+      - POST=1         # 생성/시작/정지/삭제(쓰기) 허용
+      - EXEC=0         # exec 비허용
+      - INFO=0
+      - SWARM=0
+      - SYSTEM=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - codingpt_prod
     restart: unless-stopped
 
   # 공개 사이트(Next.js SSR) — 랜딩 + 구독/크레딧 결제 + 약관/사업자정보
