@@ -173,9 +173,7 @@ export function updateSidebar() {
     ? me.email || state.daemon?.device_name || "로그인됨"
     : state.daemon?.device_name || (state.paired ? "연결됨" : "로그인 필요");
   txt.innerHTML = `<span class="me-name">${escapeHtml(name)}</span><span class="me-sub">${escapeHtml(sub)}</span>`;
-  const dot = document.createElement("span");
-  dot.className = "me-dot " + (online ? "on" : "off");
-  foot.append(av, txt, dot);
+  foot.append(av, txt);
   foot.addEventListener("click", () => S.setView(state.view === "settings" ? "workspace" : "settings"));
   el.appendChild(foot);
 

@@ -274,7 +274,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ptab.static { cursor: grab; }
 .ptab.static:active { cursor: grabbing; }
 .ptab-ic { display: inline-flex; color: var(--dim); }
-.ptab.active .ptab-ic { color: var(--accent); }
+.ptab.active .ptab-ic { color: var(--text); }
 /* 탭 라벨 최대폭 = 화면 폭 비례(좁은 창=짧게, 넓은 창=길게) — 넘치면 탭바 가로 스크롤(휠 지원). */
 .ptab-title { max-width: clamp(72px, 16vw, 200px); overflow: hidden; text-overflow: ellipsis; }
 .ptab.drag-src { opacity: 0.35; } /* 드래그 중 원본 탭 — 이 자리는 비워질 것임을 표현 */

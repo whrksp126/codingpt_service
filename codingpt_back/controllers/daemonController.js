@@ -82,12 +82,17 @@ async function registerController(req, res) {
     const uuid = String(deviceUuid || '').trim();
     if (!uuid) return errorResponse(res, new Error('deviceUuid 가 필요합니다.'), 400);
     const tokenHash = controllerTokenHash(uuid);
-    let device = await DaemonDevice.findOne({ where: { user_id: acct.userId, token_hash: tokenHash } });
+    // token_hash 는 전역 unique — 같은 기기(deviceUuid)를 다른 계정이 먼저 등록했을 수 있으므로
+    //  token_hash "단독"으로 찾아 현재 사용자로 재귀속한다(user_id 로 필터하면 create 가 unique 위반→500).
+    //  deviceUuid 는 자격증명이 아니므로(표시용 메타 행) 재귀속은 안전.
+    let device = await DaemonDevice.findOne({ where: { token_hash: tokenHash } });
     if (device) {
       await device.update({
+        user_id: acct.userId,
         device_name: String(deviceName || device.device_name || '기기').slice(0, 128),
         platform: platform ? String(platform).slice(0, 32) : device.platform,
         daemon_version: daemonVersion ? String(daemonVersion).slice(0, 32) : device.daemon_version,
+        role: 'controller',
         last_seen_at: new Date(),
         revoked_at: null,
         updated_at: new Date(),
@@ -106,6 +111,7 @@ async function registerController(req, res) {
     }
     return successResponse(res, { deviceId: device.id, deviceName: device.device_name, role: 'controller' });
   } catch (e) {
+    console.error('registerController 오류:', e && e.name, e && e.message);
     return errorResponse(res, e, 500);
   }
 }

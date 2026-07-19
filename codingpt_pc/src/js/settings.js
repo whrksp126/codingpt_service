@@ -171,7 +171,6 @@ function renderSection(force) {
             <button class="sett-btn" id="updBtn">확인</button>
           </span>
         </div>
-        <div class="sett-row"><span>이 창을 닫아도</span><span class="dim">메뉴바에서 계속 실행됩니다</span></div>
       </div>`;
     // 실제 앱 버전으로 채움(하드코딩 금지 — 업데이트되면 자동 반영). 실패해도 조용히(dev 등).
     api.appVersion().then((v) => { const el = contentEl.querySelector("#appVerLabel"); if (el && v) el.textContent = `CodingPT PC ${v}`; }).catch(() => {});
@@ -431,7 +430,8 @@ function renderDeviceList() {
   if (!el) return;
   if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`; return; }
   const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-date">최근 작업</span><span class="dc-act"></span></div>`;
-  const rows = state.devices.map((d) => {
+  // 클라우드 러너는 폐기(BYO 피벗)라 "내 기기" 목록에서 숨긴다 — 사용자에겐 PC/모바일만 노출.
+  const rows = state.devices.filter((d) => d.runnerKind !== 'cloud').map((d) => {
     const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
     const icon = d.runnerKind === "cloud"
       ? icons.cloud({ size: 15 })

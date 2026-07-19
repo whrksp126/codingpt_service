@@ -397,6 +397,9 @@ export class PaneView {
         // 포인터 기반 드래그(WKWebView 에서 HTML5 draggable 불안정 → 텍스트 드래그 방지).
         tab.addEventListener("pointerdown", (e) => {
           if (e.button !== 0 || e.pointerType === "touch" || e.target.closest(".ptab-x")) return;
+          // 탭 헤더 클릭 시에도 pane 포커스 — pointerdown preventDefault 가 pane 의 focus용 mousedown(l.341)을
+          //  억제해 탭을 눌러도 활성 pane 이 안 바뀌던 문제. 여기서 직접 포커스한다.
+          this.ctx.onFocus?.(this.id);
           e.preventDefault(); // 텍스트 선택/네이티브 드래그 차단
           this.ctx.onTabDragStart?.(this.id, i, e);
         });
@@ -417,6 +420,7 @@ export class PaneView {
       // IDE/프리뷰 탭도 잡아 pane 통째 이동(index<0).
       lbl.addEventListener("pointerdown", (e) => {
         if (e.button !== 0 || e.pointerType === "touch" || e.target.closest(".ptab-x")) return;
+        this.ctx.onFocus?.(this.id); // 탭 클릭 시 pane 포커스(mousedown 억제 보완)
         e.preventDefault();
         this.ctx.onTabDragStart?.(this.id, -1, e);
       });
