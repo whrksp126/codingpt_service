@@ -329,14 +329,19 @@ async function onDeleteAccount() {
       <div class="acct-del-confirm">
         <div>계속하려면 <b>${DELETE_CONFIRM_WORD}</b> 를 입력하세요.</div>
         <input id="acctDelEmail" class="acct-del-input" placeholder="${DELETE_CONFIRM_WORD}" autocomplete="off" spellcheck="false" />
-        <button id="acctDelGo" class="btn small danger" disabled>영구 삭제</button>
+        <button id="acctDelGo" class="acct-del-go" disabled>
+          <span class="acct-del-spin"></span><span class="acct-del-go-txt">영구 삭제</span>
+        </button>
+        <div id="acctDelErr" class="acct-del-err"></div>
       </div>`;
     const input = msg.querySelector("#acctDelEmail");
     const go = msg.querySelector("#acctDelGo");
     input.addEventListener("input", () => {
-      go.disabled = input.value.trim() !== DELETE_CONFIRM_WORD;
+      const match = input.value.trim() === DELETE_CONFIRM_WORD;
+      go.disabled = !match;
+      go.classList.toggle("match", match); // 모바일과 동일 — 일치 시 빨간 버튼 활성
     });
-    go.addEventListener("click", () => doDeleteAccount(btn, msg));
+    go.addEventListener("click", () => doDeleteAccount(btn, go, msg));
     input.focus();
     return;
   }
@@ -348,12 +353,16 @@ async function onDeleteAccount() {
   msg.classList.remove("warn");
 }
 
-async function doDeleteAccount(btn, msg) {
+async function doDeleteAccount(btn, go, msg) {
   if (acctDeleting) return;
   acctDeleting = true;
-  delete btn.dataset.confirm;
-  btn.disabled = true;
-  btn.textContent = "탈퇴 중…";
+  // 스피너·"탈퇴 처리 중…"은 "영구 삭제" 버튼에(모바일과 동일). 취소 버튼도 잠금(중복/취소 방지).
+  const goTxt = go?.querySelector(".acct-del-go-txt");
+  const errEl = msg?.querySelector("#acctDelErr");
+  if (go) { go.disabled = true; go.classList.add("deleting"); }
+  if (goTxt) goTxt.textContent = "탈퇴 처리 중…";
+  if (btn) btn.disabled = true;
+  if (errEl) errEl.textContent = "";
   try {
     await api.deleteAccount();
     await api.unpair().catch(() => {}); // 로컬 자격 정리 → 로그아웃 상태로
@@ -364,10 +373,10 @@ async function doDeleteAccount(btn, msg) {
     state.paired = !!state.daemon?.paired;
     S.emit();
   } catch (e) {
-    btn.disabled = false;
-    btn.textContent = "회원 탈퇴";
-    btn.classList.add("danger");
-    if (msg) { msg.textContent = "탈퇴 실패: " + e; msg.classList.add("warn"); }
+    if (go) { go.disabled = false; go.classList.remove("deleting"); }
+    if (goTxt) goTxt.textContent = "영구 삭제";
+    if (btn) btn.disabled = false;
+    if (errEl) errEl.textContent = "탈퇴 실패: " + (e?.message || e);
   }
   acctDeleting = false;
 }

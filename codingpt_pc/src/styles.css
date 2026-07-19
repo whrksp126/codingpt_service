@@ -514,6 +514,13 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .acct-del-input { background: var(--base, #0b0f14); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
 .acct-del-input:focus { border-color: var(--danger, #f87171); } /* 위험 맥락 — 초록 포커스 금지(사용자 지적) */
 .acct-del-confirm .btn[disabled] { opacity: 0.5; cursor: default; }
+/* 영구 삭제 버튼 — 모바일(앱)과 동일: 풀폭·문구 일치 시 빨간 활성·처리 중 스피너+"탈퇴 처리 중…" */
+.acct-del-go { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 40px; border: none; border-radius: 8px; font-size: 13.5px; font-weight: 700; background: var(--elevated2, #1c232c); color: var(--dim); opacity: 0.6; cursor: default; }
+.acct-del-go.match { background: var(--danger, #f87171); color: #fff; opacity: 1; cursor: pointer; }
+.acct-del-go.deleting { opacity: 0.85; cursor: default; }
+.acct-del-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; display: none; }
+.acct-del-go.deleting .acct-del-spin { display: inline-block; animation: spin 0.9s linear infinite; }
+.acct-del-err { font-size: 12px; color: var(--error, #f87171); }
 
 .dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
 .dc-os, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
