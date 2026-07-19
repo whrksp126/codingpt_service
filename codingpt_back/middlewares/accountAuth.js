@@ -26,8 +26,9 @@ async function resolveDeviceUser(req) {
   const m = /^Bearer\s+(.+)$/i.exec(h.trim());
   if (!m) return null;
   const raw = m[1].trim();
-  // 실제 deviceToken 은 'cptd_' 접두사(createDeviceForUser). 컨트롤러 파생키('ctrl:...')는 bearer 로 불허.
-  if (!raw.startsWith('cptd_')) return null;
+  // 실제 deviceToken 은 'cptd_'(로컬 PC 데몬) 또는 'cptc_'(클라우드 러너) 접두사. 컨트롤러 파생키
+  // ('ctrl:'+uuid)는 이 접두사가 없고 role='controller' 로도 걸러진다(이중 방어) → bearer 로 불허.
+  if (!raw.startsWith('cptd_') && !raw.startsWith('cptc_')) return null;
   const device = await DaemonDevice.findOne({
     where: { token_hash: sha256(raw), revoked_at: null, role: { [Op.ne]: 'controller' } },
   });
