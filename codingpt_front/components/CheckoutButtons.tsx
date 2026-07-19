@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, getToken } from '@/lib/auth';
+import { getToken } from '@/lib/auth';
 import { paySubscription } from '@/lib/portone';
 
 // 구독 결제 버튼(클라이언트). 핸드오프 토큰 캡처 → PortOne 빌링키 발급 → 서버 활성화.
@@ -11,7 +11,6 @@ export default function CheckoutButtons({ code, label }: { code: string; label: 
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    captureHandoff();
     setAuthed(!!getToken());
   }, []);
 

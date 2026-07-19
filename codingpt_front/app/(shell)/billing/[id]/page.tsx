@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { captureHandoff, getToken } from '@/lib/auth';
+import { getToken } from '@/lib/auth';
 import { clientFetch, formatKRW } from '@/lib/api';
 
 interface Receipt {
@@ -27,7 +27,6 @@ export default function ReceiptPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    captureHandoff();
     (async () => {
       const token = getToken();
       if (!token) { window.location.href = '/login?next=/billing'; return; }

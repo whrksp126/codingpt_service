@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, getToken, clearToken } from '@/lib/auth';
+import { getToken, clearToken } from '@/lib/auth';
 import { clientFetch, formatKRW } from '@/lib/api';
 import { updatePaymentMethod } from '@/lib/portone';
 import PlansPanel from '@/components/PlansPanel';
@@ -131,7 +131,7 @@ export default function MyPage() {
     setGithub((gh.data as GithubStatus) || { connected: false });
     setLoading(false);
   };
-  useEffect(() => { captureHandoff(); load(); }, []);
+  useEffect(() => { load(); }, []);
 
   // 패널 깊이를 브라우저 히스토리에 싱크 — 좌상단 뒤로가기 + OS 뒤로가기 모두 동작.
   const goPanel = (p: Panel) => {

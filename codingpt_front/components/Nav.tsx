@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, getToken } from '@/lib/auth';
+import { getToken } from '@/lib/auth';
 
 // 상단 네비 — 로고 + (로그인 / 마이페이지). 요금·구독은 랜딩에서 한 번에 처리.
 export default function Nav() {
   const [authed, setAuthed] = useState(false);
-  useEffect(() => { captureHandoff(); setAuthed(!!getToken()); }, []);
+  useEffect(() => { setAuthed(!!getToken()); }, []);
 
   return (
     <nav className="nav">

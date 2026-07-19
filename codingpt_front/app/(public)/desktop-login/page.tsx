@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, setToken, getToken, clearToken } from '@/lib/auth';
+import { getToken, clearToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 import AuthPanel from '@/components/AuthPanel';
 
@@ -15,7 +15,6 @@ export default function DesktopLogin() {
   const [done, setDone] = useState(false);
 
   useEffect(() => {
-    captureHandoff();
     setTok(getToken());
     try {
       const c = new URL(window.location.href).searchParams.get('code') || '';

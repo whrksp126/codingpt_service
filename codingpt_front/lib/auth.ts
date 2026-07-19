@@ -7,16 +7,7 @@ const KEY = 'cpt_token';
 
 export function getToken(): string | null {
   if (typeof window === 'undefined') return null;
-  let t = window.localStorage.getItem(KEY);
-  // 핸드오프(?handoff=) 지연 캡처 — 자식 페이지의 인증 가드가 부모 레이아웃의 captureHandoff
-  // 보다 먼저 실행돼 /login 으로 튕기는 문제 방지(딥링크 진입에서도 토큰 즉시 인식).
-  if (!t) {
-    try {
-      const h = new URL(window.location.href).searchParams.get('handoff');
-      if (h) { setToken(h); t = h; }
-    } catch (_) { /* noop */ }
-  }
-  return t;
+  return window.localStorage.getItem(KEY);
 }
 
 export function setToken(token: string) {
@@ -25,19 +16,6 @@ export function setToken(token: string) {
 
 export function clearToken() {
   if (typeof window !== 'undefined') window.localStorage.removeItem(KEY);
-}
-
-// URL 의 ?handoff= 토큰을 저장하고 쿼리에서 제거. 페이지 진입 시 1회 호출.
-//  (레거시 경로 — 신규는 ?hc= 일회용 코드 방식(redeemHandoffCode)을 쓴다. 토큰 URL 노출 방지.)
-export function captureHandoff() {
-  if (typeof window === 'undefined') return;
-  const url = new URL(window.location.href);
-  const handoff = url.searchParams.get('handoff');
-  if (handoff) {
-    setToken(handoff);
-    url.searchParams.delete('handoff');
-    window.history.replaceState({}, '', url.toString());
-  }
 }
 
 // URL 의 ?hc= 일회용 코드를 서버에서 토큰으로 교환하고 쿼리에서 제거(토큰을 URL 에 싣지 않는 방식).

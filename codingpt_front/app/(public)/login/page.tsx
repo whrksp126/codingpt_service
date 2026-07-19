@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { captureHandoff, setToken, getToken } from '@/lib/auth';
+import { getToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 import AuthPanel from '@/components/AuthPanel';
 
@@ -33,7 +33,6 @@ export default function Login() {
   const onAuthed = () => { if (appMode) void handoffToApp(); else redirectNext(); };
 
   useEffect(() => {
-    captureHandoff();
     const sp = new URL(window.location.href).searchParams;
     const app = sp.get('app') === '1';
     setAppMode(app);
