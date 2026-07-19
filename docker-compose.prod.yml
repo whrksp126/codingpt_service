@@ -11,7 +11,9 @@ services:
     environment:
       POSTGRES_DB: codingpt_db
       POSTGRES_USER: codingpt
-      POSTGRES_PASSWORD: codingpt123
+      # 비번은 git 에 하드코딩하지 않는다 — 최초 init 시에만 사용되며(볼륨 초기화됨→이후 무시),
+      # 실제 접속 비번은 DB(pg_authid) + back 의 env_file(DB_PASSWORD)이 정본. compose .env 의 DB_PASSWORD 로 주입.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-}
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
     networks:
