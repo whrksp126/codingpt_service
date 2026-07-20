@@ -69,6 +69,8 @@ function resolveWs(tmuxInfo) {
     const bin = findTmuxBin();
     if (bin) {
       try {
+        // 전용 세션(--t-<id>)엔 세션 자체에 CPT_WS 가 주입돼 있어 그대로 조회 가능. 레거시 뷰
+        //  세션(--p-)만 풀 세션명으로 역산한다.
         const pool = tmuxInfo.session.includes('--p-') ? tmuxInfo.session.split('--p-')[0] : tmuxInfo.session;
         const out = execFileSync(bin, ['-L', TMUX_SOCKET, 'show-environment', '-t', '=' + pool, 'CPT_WS'],
           { encoding: 'utf8', timeout: 3000 }).trim();

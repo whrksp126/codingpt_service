@@ -110,10 +110,10 @@ async function backFetch(method, apiPath, body) {
   return json;
 }
 
-// ── ctx 해석 — CLI 가 보낸 좌표에서 (풀 세션, cwdRel, windowIndex) 확정 ──
+// ── ctx 해석 — CLI 가 보낸 좌표에서 (네임스페이스, cwdRel, 터미널 ID) 확정 ──
 //  · ctx.ws(CPT_WS env) = 워크스페이스 cwdRel(정본). 없으면 ctx.cwd(프로세스 CWD)를 relOf.
-//  · ctx.tmux.session 이 뷰 세션(...--p-...)이면 '--p-' 앞이 풀 세션.
-//  · window 는 windowId(@N, 전 세션 공유 정본)로 풀 index 를 확정(뷰 폴백으로 index 가 어긋나도 안전).
+//  · 전용 세션 모델: 세션명 "<ns>--t-<tid>" 의 접미 tid 가 곧 이 터미널의 안정 ID(windowIndex 자리).
+//  · 레거시(마이그레이션 전) 뷰 세션(--p-)/풀 직결은 구 규칙(windowId→index)로 폴백.
 async function resolveCtx(ctx) {
   const c = ctx || {};
   let cwdRel = typeof c.ws === 'string' ? c.ws : null;
@@ -123,16 +123,23 @@ async function resolveCtx(ctx) {
   }
   if (cwdRel == null) cwdRel = '';
   const sessionName = c.tmux && c.tmux.session ? String(c.tmux.session) : '';
-  const pool = sessionName.includes('--p-') ? sessionName.split('--p-')[0] : sessionName;
+  let pool = sessionName;
   let windowIndex = c.tmux && Number.isInteger(c.tmux.windowIndex) ? c.tmux.windowIndex : null;
   const windowId = c.tmux && c.tmux.windowId ? String(c.tmux.windowId) : '';
-  // windowId 로 풀 index 확정(가능하면) — 뷰 세션 index 는 폴백으로 어긋날 수 있다.
-  if (pool && windowId) {
-    try {
-      const wins = await ptyLib.poolWindows(pool);
-      const hit = wins.find((w) => w.id === windowId);
-      if (hit) windowIndex = hit.index;
-    } catch (_) { /* 풀 미존재 등 — ctx 값 유지 */ }
+  const t = /^(.*)--t-(\d+)$/.exec(sessionName);
+  if (t) {
+    pool = t[1];
+    windowIndex = parseInt(t[2], 10); // 터미널 ID(안정) — 알림 win/타겟팅의 정본
+  } else {
+    if (sessionName.includes('--p-')) pool = sessionName.split('--p-')[0];
+    // 레거시: windowId 로 풀 index 확정(가능하면) — 뷰 세션 index 는 폴백으로 어긋날 수 있다.
+    if (pool && windowId) {
+      try {
+        const wins = await ptyLib.poolWindows(pool);
+        const hit = wins.find((w) => w.id === windowId);
+        if (hit) windowIndex = hit.index;
+      } catch (_) { /* 풀 미존재 등 — ctx 값 유지 */ }
+    }
   }
   return { cwdRel, pool, windowIndex, windowId };
 }
@@ -177,7 +184,9 @@ async function dispatch(req) {
   }
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
-  const { session } = ptyLib.sessionForCwd(resolved.cwdRel);
+  const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
+  // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 직접 tmux 를 때리는 커맨드의 타겟.
+  const termTarget = (tid) => `=${ptyLib.termSession(session, tid)}:0`;
 
   switch (cmd) {
     case 'ping': return { pong: true, at: Date.now() };
@@ -203,7 +212,7 @@ async function dispatch(req) {
     case 'terminal.new': {
       const r = await ptyLib.handleTerminalRpc('terminal.new', { cwd: resolved.cwdRel });
       if (args.name) {
-        await ptyLib.runTmux(['rename-window', '-t', `=${session}:${r.index}`, String(args.name)]).catch(() => {});
+        await ptyLib.runTmux(['rename-window', '-t', termTarget(r.index), String(args.name)]).catch(() => {});
         r.name = String(args.name);
       }
       notifyPoolChanged();
@@ -218,15 +227,17 @@ async function dispatch(req) {
     case 'terminal.rename': {
       const win = targetWin(args, resolved);
       if (!args.name) throw new Error('새 이름이 필요합니다');
-      await ptyLib.runTmux(['rename-window', '-t', `=${session}:${win}`, String(args.name)]);
+      await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
+      await ptyLib.runTmux(['rename-window', '-t', termTarget(win), String(args.name)]);
       notifyPoolChanged();
       return { ok: true, index: win, name: String(args.name) };
     }
     case 'terminal.read': {
       const win = targetWin(args, resolved);
       const lines = Math.max(1, Math.min(5000, (args.lines | 0) || 200));
+      await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
       // -p: stdout, -S -N: 스크롤백 N줄 위부터, -E -: 화면 끝까지. -J: 랩 줄 병합.
-      const out = await ptyLib.runTmux(['capture-pane', '-p', '-J', '-t', `=${session}:${win}`, '-S', `-${lines}`]);
+      const out = await ptyLib.runTmux(['capture-pane', '-p', '-J', '-t', termTarget(win), '-S', `-${lines}`]);
       return { text: out.replace(/\s+$/, ''), index: win };
     }
     case 'terminal.send': {
@@ -236,8 +247,9 @@ async function dispatch(req) {
         throw new Error('자기 자신 터미널에 입력하려 합니다. 의도한 것이면 --force 를 붙이세요.');
       }
       if (typeof args.text !== 'string' || !args.text.length) throw new Error('보낼 텍스트가 필요합니다');
-      await ptyLib.runTmux(['send-keys', '-t', `=${session}:${win}`, '-l', '--', args.text]);
-      if (args.enter) await ptyLib.runTmux(['send-keys', '-t', `=${session}:${win}`, 'Enter']);
+      await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
+      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), '-l', '--', args.text]);
+      if (args.enter) await ptyLib.runTmux(['send-keys', '-t', termTarget(win), 'Enter']);
       return { ok: true, index: win };
     }
     case 'terminal.sendKey': {
@@ -246,7 +258,8 @@ async function dispatch(req) {
       if (resolved.windowIndex != null && win === resolved.windowIndex && !args.force) {
         throw new Error('자기 자신 터미널에 키를 보내려 합니다. 의도한 것이면 --force 를 붙이세요.');
       }
-      await ptyLib.runTmux(['send-keys', '-t', `=${session}:${win}`, String(args.key)]);
+      await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
+      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), String(args.key)]);
       return { ok: true, index: win };
     }
 

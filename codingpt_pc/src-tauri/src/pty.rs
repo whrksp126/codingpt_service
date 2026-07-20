@@ -1,11 +1,12 @@
 // PTY 스트림 — cmux식 로컬 터미널 pane. portable-pty 로 번들 tmux 에 attach 해 xterm(webview)과 브리지.
 //
-//  모델(모바일 데몬과 동일 — pane 당 "독립" tmux 세션):
-//   · pane = 자기 세션 "<primary>--p-<paneId>", 탭 = 그 세션의 window.
-//   · grouped view(--view--) 는 폐기 — current-window 가 attach/동시성에 취약해 여러 pane 이
-//     같은 window 를 비추는 복제가 발생했다(모바일과 같은 근본 원인). 독립 세션은 경쟁 자체가 없다.
+//  모델(전용 세션 — 데몬과 동일): 터미널 = 자기 tmux 세션 "<ns>--t-<tid>"(window 0 하나).
+//   · pane 은 활성 터미널 탭의 세션에 "직접" attach 한다 — 뷰 세션/link-window/인덱스 간접층 없음.
+//     탭 전환 = 이 pane 의 attach 재수립(pane.js 가 pty_close→pty_open). 로컬이라 즉시다.
+//   · 여러 기기가 같은 세션에 동시 attach = 라이브 미러/이어받기. 크기는 window-size latest(전역) —
+//     마지막으로 조작한 기기 크기(수동 resize-window 클레임 전면 폐지).
 //   · pane 스트림 닫기 = attach 클라이언트만 종료(세션/셸은 tmux 서버에 생존 → 재실행 시 복원).
-//     터미널 완전 삭제 = window kill(tmux.rs, 마지막 window kill 시 세션 자동 소멸).
+//     터미널 완전 삭제 = kill-session(tmux.rs kill_terminal).
 //
 //  와이어: 출력=raw 바이트(base64 로 emit "pty://data"), 입력=UTF-8 문자열(pty_write), 리사이즈=pty_resize.
 
@@ -24,12 +25,12 @@ struct PtyHandle {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
-    view_session: String,
-    // 마지막으로 반영한 클라이언트 크기 — pty_resize 에서 크기가 "변할 때"만 표시 창을 따라
-    //  리사이즈(분할선 드래그/창 크기 변경이 TUI(claude 등)에 즉시 반영되게).
-    last_cols: u16,
-    last_rows: u16,
+    // 세대 표식 — 탭 전환(_reattach: close→open)으로 같은 pane_id 에 새 attach 가 끼워진 뒤,
+    //  "구" reader 스레드의 종료 정리가 새 핸들을 지워버리는 레이스를 막는다(자기 세대만 정리).
+    epoch: u64,
 }
+
+static PTY_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 #[derive(Default)]
 pub struct PtyManager {
@@ -48,7 +49,9 @@ struct ExitEvent {
     pane_id: String,
 }
 
-// pane 열기: pane 독립 세션 보장 → 지정 window 선택 → PTY attach + reader 스레드.
+// pane 열기: 터미널(tid) 확정 → 전용 세션에 직접 PTY attach + reader 스레드.
+//  반환 = 실제로 attach 한 tid — 요청 win_index 가 스테일(닫힘/구버전 인덱스)이면 첫 터미널로
+//  폴백되므로, 호출측(pane.js)은 반환값으로 탭을 보정해야 한다.
 #[tauri::command]
 pub fn pty_open(
     app: AppHandle,
@@ -59,25 +62,25 @@ pub fn pty_open(
     win_index: i64,
     cols: u16,
     rows: u16,
-) -> Result<(), String> {
+) -> Result<i64, String> {
+    let (ns, abs) = tmux::session_for(&local_path);
+    // 구 풀 잔재가 있으면 무손실 승격(멱등) → 요청 tid 확정. 전용 세션은 리퍼 불가침 + durable 이라
+    //  앱이 얼마나 죽어 있었든 여기서의 attach 는 "이름으로 다시 붙기"일 뿐 레이스가 없다.
+    tmux::migrate_legacy_pool(&ctx, &ns, &abs);
+    let tid = tmux::resolve_tid(&ctx, &ns, &abs, win_index)?;
     if mgr.panes.lock().unwrap().contains_key(&pane_id) {
-        return Ok(()); // 이미 열림(중복 방지)
+        return Ok(tid); // 이미 열림(중복 방지)
     }
-
-    let (session, abs) = tmux::session_for(&local_path);
-    let view = tmux::pane_session(&session, &pane_id);
-    // 공유 풀 모델: 터미널 실체 = 풀(primary) window(전 기기 공유), pane = 뷰 세션(link-window).
-    //  ensure_view 가 풀/뷰/링크/선택을 전부 보장. 반환 = 실제 표시 인덱스(스테일 win 폴백 반영) —
-    //  아래 attach 후 리사이즈 보정은 반드시 이 값을 타깃해야 한다.
-    let win = if win_index >= 0 { win_index } else { 0 };
-    let win = tmux::ensure_view(&ctx, &view, &session, win, &abs)?;
+    let target = tmux::term_session(&ns, tid);
 
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("PTY 생성 실패: {e}"))?;
     let mut cmd = CommandBuilder::new(ctx.tmux.to_string_lossy().to_string());
-    // -d: 다른 클라이언트 detach — 죽은 이전 실행의 스테일 attach 가 화면 크기를 물고 늘어지는 것 자가치유.
-    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-d", "-t", &format!("={view}")]);
+    // -d 금지 — 같은 세션에 폰/다른 PC 가 동시 attach 해 미러/이어받기 한다(죽은 앱의 스테일
+    //  클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). window-size latest 는 conf 가 전역
+    //  세팅하지만, conf 없이 뜬 구 서버 대비로 attach 시에도 한 번 보장한다.
+    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-t", &format!("={target}"), ";", "set", "-g", "window-size", "latest"]);
     cmd.cwd(abs.to_string_lossy().to_string());
     cmd.env_remove("TMUX");
     // GUI(open)로 뜬 앱은 TERM/LANG 이 없어 tmux attach 가 "terminal does not support clear" 로 죽는다.
@@ -93,29 +96,13 @@ pub fn pty_open(
     let mut reader = pair.master.try_clone_reader().map_err(|e| format!("reader 실패: {e}"))?;
     let writer = pair.master.take_writer().map_err(|e| format!("writer 실패: {e}"))?;
 
+    let epoch = PTY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, view_session: view.clone(), last_cols: cols, last_rows: rows },
+        PtyHandle { master: pair.master, writer, child, epoch },
     );
 
-    // 클라이언트 attach 완료 직후 이 pane 크기로 리사이즈 — ensure_view 는 attach 전이라
-    //  클라이언트가 없어 스킵됐으므로, 부팅 시에도 활성 탭이 제 크기로 보이게 한 번 보정.
-    //  manual 여부와 무관하게 이 pane 의 클라이언트 크기를 주장한다(데몬 resizeToClient 미러) —
-    //  이전엔 "virgin(비-manual) 창"에만 보정했는데, 다른 기기(모바일)가 공유 풀 window 를
-    //  manual 로 남겨두면 PC 가 자기 크기를 못 주장해 TUI(claude 등)가 어긋난 크기로 그려졌다
-    //  (실측: PC client 61x23 인데 모바일이 남긴 window 62x55 를 그대로 표시). resize_to_client 는
-    //  같은 크기면 내부에서 스킵하므로 단일 기기에서 불필요한 SIGWINCH 도 없다.
-    {
-        let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
-        let view2 = view;
-        let session2 = session.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            tmux::resize_to_client(&ctx2, &view2, &session2, win);
-        });
-    }
-
-    // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리.
+    // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리(자기 세대만).
     let app2 = app.clone();
     let pid = pane_id.clone();
     std::thread::spawn(move || {
@@ -131,10 +118,13 @@ pub fn pty_open(
         }
         let _ = app2.emit("pty://exit", ExitEvent { pane_id: pid.clone() });
         if let Some(mgr) = app2.try_state::<PtyManager>() {
-            mgr.panes.lock().unwrap().remove(&pid);
+            let mut panes = mgr.panes.lock().unwrap();
+            if panes.get(&pid).map(|h| h.epoch) == Some(epoch) {
+                panes.remove(&pid);
+            }
         }
     });
-    Ok(())
+    Ok(tid)
 }
 
 // 키 입력(UTF-8 문자열) → PTY stdin.
@@ -148,12 +138,11 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
     Ok(())
 }
 
-// 리사이즈(xterm FitAddon → PTY). 크기가 변했으면 표시 중인 창(window)도 이 pane 크기로 —
-//  창은 manual 크기 고정이라 클라이언트만 리사이즈하면 TUI(claude 등)가 옛 크기로 그려진다
-//  (분할선 드래그/창 크기 변경의 실시간 반영. 데몬 openPtyStream 의 resize 처리와 동일 규칙).
+// 리사이즈(xterm FitAddon → PTY). 클라이언트 리사이즈(SIGWINCH→MSG_RESIZE)가 그 클라이언트를
+//  window-size latest 의 "latest" 로 만들어 창 크기가 자동으로 따라온다 — 수동 resize-window
+//  클레임(구 모델의 기기 간 크기 뺏기 전쟁 근원)은 전면 폐지.
 #[tauri::command]
 pub fn pty_resize(
-    ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
     pane_id: String,
     cols: u16,
@@ -164,33 +153,6 @@ pub fn pty_resize(
         h.master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("resize 실패: {e}"))?;
-        if h.last_cols != cols || h.last_rows != rows {
-            h.last_cols = cols;
-            h.last_rows = rows;
-            let view = h.view_session.clone();
-            let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
-            std::thread::spawn(move || {
-                // display-message -t <세션> 은 빈 값을 주는 경우가 있어 list-windows 로 활성 창 조회.
-                if let Ok(out) = tmux::run(&ctx2, &["list-windows", "-t", &format!("={view}"), "-F", "#{window_index} #{window_active}"]) {
-                    let idx = out
-                        .lines()
-                        .filter_map(|l| {
-                            let mut it = l.split_whitespace();
-                            match (it.next(), it.next()) {
-                                (Some(i), Some("1")) => Some(i.to_string()),
-                                _ => None,
-                            }
-                        })
-                        .next();
-                    if let Some(idx) = idx {
-                        let _ = tmux::run(
-                            &ctx2,
-                            &["resize-window", "-t", &format!("={view}:{idx}"), "-x", &cols.to_string(), "-y", &rows.to_string()],
-                        );
-                    }
-                }
-            });
-        }
     }
     Ok(())
 }

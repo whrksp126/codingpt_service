@@ -63,22 +63,133 @@ function sessionForCwd(cwdRel) {
   return { session: 'cpt-' + (safe || 'ws'), abs };
 }
 
-// pane 별 grouped view 세션명(레거시). primary 와 window 공유·current-window 독립 — 이었으나
-//  grouped 의 current-window 가 attach 타이밍/동시성에 취약해 여러 pane 이 같은 window 를 봤다(복제).
-function viewSession(primary, paneId) {
-  return primary + '--v-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
-}
-
-// pane 별 "독립" 세션명(현행). primary 와 window 를 공유하지 않는다 → current-window 경쟁 원천 소멸.
-//  각 pane = 자기 세션 = 자기 셸(들). 탭 = 이 세션 안의 window. select 는 단일 세션·단일 클라이언트라 확실히 붙는다.
-//  (대가: PC↔모바일 터미널 라이브미러는 없어진다 — 어차피 공유모델서도 신뢰 못했음. 파일은 여전히 공유.)
-//  client(기기 키)가 있으면 세션을 기기별로도 분리('--c-') — 여러 기기가 같은 워크스페이스 레이아웃을
-//  이어받아 같은 paneId 로 attach 하면 tmux 가 화면 크기를 클라이언트끼리 공유해(작은 기기 기준 점선
-//  여백) 어느 기기도 풀사이즈를 못 쓴다 → 기기마다 자기 세션 = 자기 크기.
+// pane 별 "독립" 세션명(레거시 — 리퍼 대상 식별에만 사용). 구 아키텍처(공유 풀 window + 기기별
+//  뷰 세션 link-window)의 잔재로, 신 아키텍처(아래 termSession)는 뷰 세션을 아예 만들지 않는다.
 function paneSession(primary, paneId, client) {
   const base = primary + '--p-' + String(paneId).replace(/[^A-Za-z0-9_-]+/g, '-');
   const c = client ? String(client).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
   return c ? base + '--c-' + c : base;
+}
+
+// ── 터미널 = 전용 tmux 세션(신 아키텍처) ──────────────────────────────────
+// 터미널 하나 = 자기 세션 "<ns>--t-<tid>" 하나(window 0 하나). ns = 워크스페이스 네임스페이스
+//  (구 풀 세션명 'cpt-<ws>'). tid = 안정적 숫자 ID(랜덤 31-bit — 와이어/영속의 기존 "win 숫자" 자리에
+//  그대로 실려 앱/백엔드 무수정, `|0` 을 쓰는 구 코드와도 안전).
+//
+// 이 모델이 "can't find window/session" 재발 클래스를 구조적으로 없애는 이유:
+//  · 링크/인덱스/뷰세션 간접층이 없다 — attach 대상이 곧 터미널 실체라 중간 상태가 존재하지 않는다.
+//  · 터미널 세션은 리퍼가 절대 건드리지 않는다(리퍼는 레거시 뷰 패턴만) — 앱이 몇 분을 죽어 있어도
+//    tmux 서버가 durable 목록(세션들)을 그대로 보존하고, 재실행은 이름으로 다시 attach 만 한다.
+//  · 세션이 없다 = 사용자가 명시적으로 닫았다(kill-session) — 에러가 아니라 결정적 상태다.
+function termSession(ns, tid) {
+  return ns + '--t-' + String(tid);
+}
+// 레거시 작은 인덱스(0~수십)와 절대 안 겹치게 1e6 이상. 31-bit 안이라 `|0` 경유에도 불변.
+function newTid() {
+  return 1000000 + Math.floor(Math.random() * (0x7fffffff - 1000000));
+}
+
+// 워크스페이스의 터미널 목록 — [{index(tid), name, command, session}] 생성순 정렬.
+//  window name(자동 개명)이 곧 전 기기 공유 탭 이름. 서버 없음/오류 = [].
+async function listTerminals(ns) {
+  let out;
+  try {
+    out = await runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}']);
+  } catch (_) { return []; }
+  const prefix = ns + '--t-';
+  const rows = [];
+  const seen = new Set();
+  for (const l of out.split('\n').map((s) => s.replace(/\r$/, '')).filter(Boolean)) {
+    const [sname, created, wname, cmd] = l.split('\t');
+    if (!sname || !sname.startsWith(prefix)) continue;
+    if (seen.has(sname)) continue; // 세션당 첫 window 만(사용자가 tmux 로 window 를 더 만들어도 1터미널)
+    seen.add(sname);
+    const tid = parseInt(sname.slice(prefix.length), 10);
+    if (!Number.isFinite(tid)) continue;
+    rows.push({ index: tid, name: wname || '', command: (cmd || '').trim(), session: sname, created: parseInt(created, 10) || 0 });
+  }
+  rows.sort((a, b) => (a.created - b.created) || (a.index - b.index));
+  return rows;
+}
+
+// 새 터미널 생성 — 전용 세션 detached 생성(+서버 첫 기동이면 conf 로드) + cpt env 주입.
+//  tid 는 랜덤 31-bit — 극히 드문 기존 세션과의 충돌은 새 tid 로 재시도(기존 터미널 무접촉).
+async function createTerminal(ns, abs) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const id = newTid();
+    const name = termSession(ns, id);
+    try {
+      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs]);
+    } catch (e) {
+      lastErr = e;
+      if (/duplicate session/.test(String(e.message || ''))) continue; // tid 충돌 — 재시도
+      throw e;
+    }
+    await injectPoolEnv(name, abs).catch(() => {});
+    await ensureAutoRename(name).catch(() => {});
+    const w = (await poolWindows(name))[0];
+    return { index: id, name: (w && w.name) || '', session: name };
+  }
+  throw lastErr || new Error('터미널 생성 실패');
+}
+
+// 레거시 공유 풀(cpt-<ws> 세션의 window들) → 전용 세션 마이그레이션. move-window 라 실행 중인
+//  셸/프로세스가 그대로 보존된다(앱 업데이트 직후 첫 호출에서 1회 수행, 멱등).
+//  동시 실행(PC Rust 미러와 경쟁) 안전: window 이동은 tmux 서버에서 원자적 — 진 쪽은 자기가 만든
+//  빈 세션만 회수한다. 창을 전부 옮기면 풀 세션은 tmux 가 자동 소멸시킨다.
+const migratedNs = new Set(); // 프로세스 수명 동안 ns 당 1회(풀 부재 확인 후 캐시)
+async function migrateLegacyPool(ns, abs) {
+  if (migratedNs.has(ns)) return;
+  // 홈 공유 세션(codingpt)은 풀이 아니라 레거시 직결 attach 세션(Mac attach 하위호환) — 옮기지 않는다.
+  if (ns === TMUX_SESSION) { migratedNs.add(ns); return; }
+  try { await runTmux(['has-session', '-t', '=' + ns]); } catch (_) { migratedNs.add(ns); return; }
+  const wins = await poolWindows(ns);
+  // 생성순(원래 인덱스순) 보존: 같은 초에 만들어져도 tid 오름차순이 원래 순서가 되게 연속 부여.
+  //  기존 --t- tid 와의 충돌 회피 필수 — 충돌하면 아래 move-window -k 가 기존 터미널을 덮어쓴다.
+  const taken = new Set((await listTerminals(ns)).map((t) => t.index));
+  let base = newTid();
+  for (let guard = 0; guard < 32; guard++) {
+    const clash = wins.some((_, i) => taken.has(base + i)) || base + wins.length > 0x7fffffff;
+    if (!clash) break;
+    base = newTid();
+  }
+  for (let i = 0; i < wins.length; i++) {
+    const w = wins[i];
+    const name = termSession(ns, base + i);
+    try {
+      await runTmux(['new-session', '-d', '-s', name, '-c', abs]);
+      await runTmux(['move-window', '-k', '-s', `=${ns}:${w.index}`, '-t', `=${name}:0`]);
+      // 구 모델의 resize-window 가 남긴 manual 고정 해제 → 전역 window-size latest 로 복귀.
+      await runTmux(['set-option', '-w', '-u', '-t', `=${name}:0`, 'window-size']).catch(() => {});
+      await injectPoolEnv(name, abs).catch(() => {});
+    } catch (_) {
+      // 다른 액터가 먼저 옮겼거나 창이 사라짐 — 내가 만든 자리(빈 세션)만 회수.
+      await runTmux(['kill-session', '-t', '=' + name]).catch(() => {});
+    }
+  }
+  migratedNs.add(ns);
+}
+
+// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백, 하나도 없으면 생성.
+//  (재생성 금지 원칙 유지: 스테일 tid 로 세션을 "되살리면" 닫은 터미널이 부활한다.)
+async function resolveTid(ns, abs, want) {
+  const tid = Number(want);
+  if (Number.isFinite(tid) && tid > 0) {
+    try { await runTmux(['has-session', '-t', '=' + termSession(ns, tid)]); return tid; } catch (_) { /* 폴백 */ }
+  }
+  const list = await listTerminals(ns);
+  if (list.length) return list[0].index;
+  return (await createTerminal(ns, abs)).index;
+}
+
+// pane 스트림 레지스트리 — terminal.select 가 "그 pane 의 살아있는 스트림"의 attach 대상을 즉석
+//  교체(swap)할 수 있게 한다(뷰 세션 select-window 의 대체). key = ns|paneId|client.
+const paneStreams = new Map(); // key -> { tid, swap(tid) }
+// pane 이 마지막으로 본 터미널 — 재접속(스트림 재수립) 시 select 이후 상태를 이어받는다.
+const paneCurrent = new Map(); // key -> tid
+function paneKeyOf(ns, paneId, client) {
+  return ns + '|' + String(paneId || '') + '|' + String(client || '');
 }
 
 let tmuxPathCache = null;
@@ -136,34 +247,31 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
     //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
     //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
-    // 매 attach 마다 실행하는 건 window-size 뿐(마지막 조작 클라이언트 크기 반영 보정).
-    // 진입한 워크스페이스 경로에 맞는 세션/시작폴더 결정(홈=공유 세션, 워크스페이스=전용 세션 @ 그 폴더).
+    // 진입한 워크스페이스 경로에 맞는 네임스페이스/시작폴더 결정.
     const { session, abs } = sessionForCwd(params && params.cwd);
-    // pane 별 grouped view 세션명(모바일 다중 터미널 pane 이 각자 다른 window 를 동시에 보게).
     const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
-
-    // 기기 키 — pane 세션을 기기별로 분리(기기마다 자기 화면 크기로 풀 사용).
     const client = params && params.client ? String(params.client) : '';
+    const pkey = paneId ? paneKeyOf(session, paneId, client) : '';
 
     let spawnArgs;
-    // 실제 표시 중인 window 인덱스 — 재접속 시 URL 의 params.win 은 서버 재시작 전 인덱스라 스테일할
-    //  수 있고, ensureView 가 풀 첫 터미널로 폴백하면 인덱스가 바뀐다. 리사이즈는 반드시 이 값 기준.
-    let resolvedWin = (params && Number.isInteger(params.win)) ? params.win : 0;
-    const psess = paneId ? paneSession(session, paneId, client) : '';
+    // 이 스트림이 attach 하는 터미널(tid) — params.win 은 스테일(닫힘/구버전 인덱스)일 수 있어
+    //  resolveTid 가 확정한다. select 이후 재접속이면 데몬이 기억하는 현재 터미널을 우선한다.
+    let tid = 0;
     if (paneId) {
-      // 공유 풀 모델: 터미널 실체 = primary(풀) 세션의 window(전 기기 공유), pane = 이 기기 전용
-      //  뷰 세션(link-window 로 풀 window 를 골라 표시). 배치는 기기별, 내역/내용은 전 기기 공유.
-      const selWin = resolvedWin;
       try {
-        await ensurePool(session, abs);
-        resolvedWin = await ensureView(psess, session, selWin, abs);
+        await migrateLegacyPool(session, abs);
+        const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
+        tid = await resolveTid(session, abs, want);
+        paneCurrent.set(pkey, tid);
       } catch (e) {
         try { ws.send(`\r\n\x1b[31m터미널 준비 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
         return;
       }
-      // -u: UTF-8. -d: 다른 클라이언트 detach — 죽은 앱/이전 스트림의 스테일 클라이언트가 남아
-      //  화면 크기를 물고 늘어지는 것(점선 여백)을 자가치유. 세션은 ensureView 가 보장했다.
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-d', '-t', '=' + psess, ';', 'set', '-g', 'window-size', 'latest'];
+      // -u: UTF-8. -d 금지 — 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다
+      //  (죽은 앱의 스테일 클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). 크기는 전역
+      //  window-size latest — 마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 resize-window
+      //  클레임 전면 폐지 — 기기 간 크기 뺏기/SIGWINCH 핑퐁의 근원이었다).
+      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, tid), ';', 'set', '-g', 'window-size', 'latest'];
     } else {
       // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
       spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
@@ -188,32 +296,53 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       try { ws.send(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
       return;
     }
-    console.log(`[pty] 스트림 연결 (session=${session}${paneId ? ' view=' + viewSession(session, paneId) : ''}, cwd=${abs}, ${cols}x${rows})`);
+    console.log(`[pty] 스트림 연결 (session=${session}${paneId ? ' term=' + termSession(session, tid) : ''}, cwd=${abs}, ${cols}x${rows})`);
 
-    // 웹뷰가 fit 후 보내는 "첫" resize 크기로 표시 중인 window 를 맞춘다 — attach 직후엔 기본
-    //  80x24 라 클라이언트 크기 조회가 이르고(80x24 로 고정되는 사고), 첫 resize 가 실제 pane 크기다.
-    //  타깃은 resolvedWin(ensureView 폴백 반영) — 스테일 params.win 을 쓰면 없는 창에 쏴서
-    //  새 창이 기본 크기(80x24)로 남는다(점선 반쪽 화면).
-    const selForResize = resolvedWin;
+    // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
+    let lastW = cols, lastH = rows;
     let firstResizeDone = !paneId;
     // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
     //  클라이언트 크기가 80x24 로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
     //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 80x24 화면만 그려지는(반쪽 화면)
-    //  사고가 난다. 창 크기는 첫 resize 에서 manual 로 고정된 뒤라 nudge 는 클라이언트만 건드린다.
+    //  사고가 난다.
     let nudgeTimer = null;
-    // 마지막으로 반영한 클라이언트 크기 — 크기가 "변할 때"만 표시 창을 따라 리사이즈한다.
-    //  (키보드 노출/pane 분할선 드래그로 이 기기 화면이 바뀌면 창도 즉시 따라와야 TUI(claude 등)가
-    //   이 기기 크기로 다시 그린다. keepalive 는 같은 크기를 재전송하므로 여기서 걸러진다 —
-    //   안 거르면 25초마다 다른 기기가 잡아둔 크기를 도로 뺏는 플래핑이 된다.)
-    let lastW = 0, lastH = 0;
 
-    pty.onData((data) => {
-      try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
-    });
-    pty.onExit(({ exitCode }) => {
-      console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
-      try { ws.close(); } catch (_) { /* noop */ }
-    });
+    // pty 이벤트 배선 — swap(탭 전환)마다 새 pty 에 재배선. 구 pty 의 exit 는 무시(교체 정상경로).
+    const wirePty = (p) => {
+      p.onData((data) => {
+        try { if (ws.readyState === WebSocket.OPEN) ws.send(data); } catch (_) { /* noop */ }
+      });
+      p.onExit(({ exitCode }) => {
+        if (p !== pty) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
+        console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
+        try { ws.close(); } catch (_) { /* noop */ }
+      });
+    };
+    wirePty(pty);
+
+    // terminal.select → 이 스트림의 attach 대상을 즉석 교체(구 모델의 select-window 대체).
+    //  ws(앱 연결)는 유지한 채 tmux 클라이언트만 갈아끼운다 — attach 시 tmux 가 전체 화면을
+    //  다시 그리므로 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
+    let handle = null;
+    if (pkey) {
+      const swap = (newTid) => {
+        const np = nodePty.spawn(tmux, ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, newTid)], {
+          name: 'xterm-256color',
+          cols: lastW || cols, rows: lastH || rows,
+          cwd: abs,
+          env,
+        });
+        const old = pty;
+        pty = np;
+        wirePty(np);
+        tid = newTid;
+        if (handle) handle.tid = newTid;
+        paneCurrent.set(pkey, newTid);
+        try { old.kill(); } catch (_) { /* noop */ }
+      };
+      handle = { tid, swap };
+      paneStreams.set(pkey, handle);
+    }
 
     onMsg = (data, isBinary) => {
       if (isBinary) {
@@ -226,38 +355,15 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
         if (m && m.type === 'resize' && m.cols && m.rows) {
           const w = m.cols | 0, h = m.rows | 0;
           try { pty.resize(w, h); } catch (_) { /* noop */ }
-          // 이 pane 클라이언트의 실제 크기를 기록 — select(claim) 리사이즈가 tmux 클라이언트 크기
-          //  조회 대신 이 값을 쓴다(attach 레이스로 클라이언트가 80x24 로 고착돼 있어도 정확).
-          if (psess) paneClientSize.set(psess, { w, h });
+          lastW = w; lastH = h;
+          // 창 크기는 window-size latest 가 클라이언트 리사이즈/입력을 따라 자동 반영 —
+          //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
           if (!firstResizeDone) {
             firstResizeDone = true;
-            lastW = w; lastH = h;
             if (nudgeTimer) clearTimeout(nudgeTimer);
             nudgeTimer = setTimeout(() => {
               try { pty.resize(Math.max(2, lastW - 1), lastH); pty.resize(lastW, lastH); } catch (_) { /* noop */ }
             }, 600);
-            // 부팅 초기화는 "아무도 안 잡은(virgin)" 창에만 — resize-window 를 거친 창은 window-size
-            //  옵션이 manual 로 남으므로, 이미 어떤 기기가 잡은 창을 백그라운드 기기의 재접속이
-            //  도로 뺏지 않는다(크기 주장은 포커스/조작 시점의 select 가 담당).
-            (async () => {
-              try {
-                const mode = (await runTmux(['show-options', '-wv', '-t', `=${session}:${selForResize}`, 'window-size']).catch(() => '')).trim();
-                if (mode !== 'manual') await runTmux(['resize-window', '-t', `=${session}:${selForResize}`, '-x', String(w), '-y', String(h)]);
-              } catch (_) { /* noop */ }
-            })();
-          } else if (psess && (w !== lastW || h !== lastH)) {
-            lastW = w; lastH = h;
-            // 이 pane 이 "현재 보고 있는" 창을 이 기기 크기로 — 탭 전환으로 창이 바뀌었을 수 있으니
-            //  뷰 세션의 활성 창을 조회해 리사이즈(창은 풀과 공유 객체라 어느 쪽으로 잡아도 동일).
-            //  주의: display-message -t <세션> 은 빈 값을 주는 경우가 있어 list-windows 로 조회한다.
-            (async () => {
-              try {
-                const out = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index} #{window_active}']);
-                const line = out.split('\n').find((l) => /\s1\s*$/.test(l));
-                const idx = line ? line.trim().split(/\s+/)[0] : '';
-                if (/^\d+$/.test(idx)) await runTmux(['resize-window', '-t', `=${psess}:${idx}`, '-x', String(w), '-y', String(h)]);
-              } catch (_) { /* 세션 소멸 등 — 다음 select 에서 보정 */ }
-            })();
           }
           return;
         }
@@ -268,8 +374,9 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
     for (const [d, b] of earlyMsgs.splice(0)) onMsg(d, b);
 
     const cleanup = () => {
-      // tmux 클라이언트만 종료(detach) — 세션은 tmux 서버에 살아남는다.
+      // tmux 클라이언트만 종료(detach) — 세션(터미널 실체)은 tmux 서버에 살아남는다.
       if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
+      if (handle && paneStreams.get(pkey) === handle) paneStreams.delete(pkey);
       try { pty.kill(); } catch (_) { /* noop */ }
     };
     ws.on('close', cleanup);
@@ -279,14 +386,9 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   ws.on('error', (e) => console.error(`[pty] 스트림 WS 오류: ${e.message}`));
 }
 
-// pane 뷰 세션별 "스트림이 보고한" 클라이언트 크기 — psess → {w,h}.
-//  tmux list-clients 는 attach 레이스로 스테일(80x24)일 수 있어 select 리사이즈의 원천으로 못 쓴다.
-const paneClientSize = new Map();
-
-// ── 멀티 터미널(tmux window) RPC ──
-// 클라우드(ideService)와 동일한 "window 스위칭" 모델을 데몬에서 미러한다: 앱의 단일 PTY 스트림이
-// 세션에 attach 돼 있고, 여기서 select-window 로 활성 window 를 바꾸면 그 클라이언트가 따라 그린다.
-// → 토큰/스트림/bridge 는 전혀 손대지 않고 window 관리 RPC 만 추가. 전용 소켓 -L codingpt 규율 유지.
+// ── 멀티 터미널 RPC ──
+// 터미널 = 전용 세션(termSession) 모델. list/new/close = 전 기기 공통 durable 목록(tmux 세션들),
+// select = 이 pane 스트림의 attach 대상 교체. 전용 소켓 -L codingpt 규율 유지.
 function runTmux(args) {
   return new Promise((resolve, reject) => {
     const tmux = findTmux();
@@ -300,30 +402,7 @@ function runTmux(args) {
   });
 }
 
-// ── 공유 터미널 풀 헬퍼 ──
-// 풀(primary) 세션 보장 — 워크스페이스의 공유 터미널 풀. 없으면 detached 생성(window 0 = 첫 터미널).
-// 주의: tmux -t 는 접두사 매칭 — 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
-//  명령이 엉뚱한 세션에 떨어진다. 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
-async function ensurePool(session, abs) {
-  try {
-    await runTmux(['has-session', '-t', '=' + session]);
-    await injectPoolEnv(session, abs); // 기존 세션에도 cpt 좌표 env 보장(멱등)
-    await ensureAutoRename(session);   // 구 서버/구 이름("터미널 N") 자동 개명 마이그레이션(멱등)
-    return false;
-  } catch (_) { /* 생성 */ }
-  try {
-    await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', session, '-c', abs]);
-  } catch (e) {
-    // 여러 스트림이 동시에 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
-    if (!/duplicate session/.test(String(e.message || ''))) throw e;
-    await injectPoolEnv(session, abs).catch(() => {});
-    await ensureAutoRename(session).catch(() => {});
-    return false;
-  }
-  await injectPoolEnv(session, abs).catch(() => {});
-  await ensureAutoRename(session).catch(() => {});
-  return true;
-}
+// 주의: tmux -t 는 접두사 매칭 — 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 
 // 자동 개명(automatic-rename) 보장 — cmux 탭처럼 셸 대기=폴더명, 실행 중=앱 OSC 타이틀(pane_title)
 //  → 프로세스명 폴백. 셸이 쏘는 "user@host:path" 타이틀은 걸러 폴더명/명령 유지(tmux.conf 주석 참조 —
@@ -389,156 +468,51 @@ async function poolWindows(session) {
   });
 }
 
-// pane 뷰 세션 보장 + 풀 window(win) 를 같은 인덱스로 link + select.
-//  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
-//  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거(불필요 셸 잔재 방지).
-//  · 슬롯 인덱스 = 풀 인덱스(매핑 불필요). 같은 슬롯에 다른 window 가 링크돼 있으면 교체.
-async function ensureView(psess, session, win, abs) {
-  let wins = await poolWindows(session);
-  let target = wins.find((w) => w.index === win);
-  if (!target) {
-    // 재생성 금지 — "그 인덱스에 창을 다시 만들면" 다른 기기가 닫은 터미널이 스테일 참조/웹뷰
-    //  자동 재연결마다 부활한다(1개만 남겨도 잠시 후 3개). 죽은 win 은 풀의 첫 터미널로 폴백하고,
-    //  레이아웃 정리는 리컨실러가 한다. 풀이 완전히 비었을 때만 새 터미널 1개 생성.
-    if (!wins.length) {
-      // -n 금지 — 명시 이름은 그 window 의 automatic-rename 을 꺼서 자동 개명이 죽는다.
-      await runTmux(['new-window', '-d', '-t', `=${session}:0`, '-c', abs]).catch(() => {});
-      wins = await poolWindows(session);
-    }
-    target = wins[0];
-    if (!target) throw new Error('터미널 window 확보 실패');
-    win = target.index;
-  }
-  // 뷰 세션(psess) 준비 + 링크/셀렉트. 소켓을 공유하는 다른(스테일) 데몬의 reapStaleViews 가
-  //  has-session 통과 직후 psess 를 지워버리면(PC 강제종료 후 인수인계 레이스) link/select 가
-  //  "can't find session" 으로 터지고, 예전엔 그 에러가 호출측으로 튀어 앱이 무한 재연결 루프에
-  //  빠졌다. 뷰 세션은 고유 상태가 없으니 지워졌으면 다시 만들고 재시도한다(멱등). 최대 3회.
-  let lastErr = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      try {
-        await runTmux(['has-session', '-t', '=' + psess]);
-      } catch (_) {
-        try {
-          await runTmux(['new-session', '-d', '-s', psess, '-c', abs]);
-        } catch (e) {
-          if (!/duplicate session/.test(String(e.message || ''))) throw e;
-        }
-        await runTmux(['move-window', '-s', `=${psess}:0`, '-t', `=${psess}:999`]).catch(() => {});
-      }
-      // list-windows 는 .catch 로 삼키지 않는다 — psess 가 레이스로 사라졌으면 여기서 던져
-      //  아래 catch 가 재생성 재시도하게 한다(예전엔 빈 목록으로 진행해 link 에서 터졌음).
-      const slotOut = await runTmux(['list-windows', '-t', '=' + psess, '-F', '#{window_index}\t#{window_id}']);
-      const slots = slotOut.split('\n').filter(Boolean).map((l) => l.split('\t'));
-      const slot = slots.find((p) => (parseInt(p[0], 10) || 0) === win);
-      if (slot && slot[1] !== target.id) await runTmux(['unlink-window', '-t', `=${psess}:${win}`]).catch(() => {});
-      if (!slot || slot[1] !== target.id) await runTmux(['link-window', '-s', `=${session}:${win}`, '-t', `=${psess}:${win}`]);
-      await runTmux(['select-window', '-t', `=${psess}:${win}`]);
-      // temp(999) 정리 — 링크가 하나 이상 있으니 안전(999 는 이 세션 전용 셸이라 전역 kill 무해).
-      if (slots.some((p) => (parseInt(p[0], 10) || 0) === 999) || !slot) {
-        await runTmux(['kill-window', '-t', `=${psess}:999`]).catch(() => {});
-      }
-      return win; // 폴백으로 바뀌었을 수 있는 실제 표시 인덱스 — 호출측 리사이즈 타깃
-    } catch (e) {
-      lastErr = e;
-      // 뷰 세션/창이 레이스로 사라진 경우만 재생성 재시도. 그 외(풀 window 부재 등)는 즉시 던짐.
-      if (!/can't find session|can't find window|no server running/i.test(String(e.message || ''))) throw e;
-      await new Promise((r) => setTimeout(r, 120));
-    }
-  }
-  throw lastErr || new Error('뷰 세션 준비 실패');
-}
-
-// pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
-//  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(select) 이동으로만 바뀐다.
-async function resizeToClient(psess, session, win) {
-  try {
-    // 스트림이 보고한 실제 크기 우선 — tmux 클라이언트 크기는 attach 레이스로 80x24 에 고착될 수
-    //  있어(첫 resize 유실), 그걸 믿으면 select(claim)마다 창을 80x24 로 줄여 스트림 리사이즈와
-    //  핑퐁하며 셸 프롬프트가 무한 누적된다(실측 근원).
-    let w = 0, h = 0;
-    const known = paneClientSize.get(psess);
-    if (known) { w = known.w; h = known.h; }
-    else {
-      const out = await runTmux(['list-clients', '-t', '=' + psess, '-F', '#{client_width} #{client_height}']);
-      const first = out.split('\n').filter(Boolean)[0];
-      if (!first) return;
-      [w, h] = first.trim().split(/\s+/).map((n) => parseInt(n, 10));
-    }
-    if (!(w > 0 && h > 0)) return;
-    // 이미 같은 크기면 스킵 — 같은 기기의 반복 터치(스크롤 등)가 매번 resize-window 를 때리면
-    //  다른 기기와 크기 주장이 교차할 때 SIGWINCH 가 반복돼 셸 프롬프트가 스크롤백에 쌓인다.
-    const cur = await runTmux(['list-windows', '-t', '=' + session, '-F', '#{window_index} #{window_width} #{window_height}']).catch(() => '');
-    const line = cur.split('\n').map((l) => l.trim().split(/\s+/)).find((p) => (parseInt(p[0], 10) || 0) === win);
-    if (line && parseInt(line[1], 10) === w && parseInt(line[2], 10) === h) return;
-    await runTmux(['resize-window', '-t', `=${session}:${win}`, '-x', String(w), '-y', String(h)]);
-  } catch (_) { /* 클라이언트 미접속 등 — 다음 포커스에서 보정 */ }
-}
-
-// terminal.* — 공유 풀 모델: 터미널 실체=풀(primary) window(전 기기 공유), pane=기기별 뷰 세션(링크).
-//  list/new/close = 풀 대상(전 기기 공통 내역). select(view)/unview = 이 기기 pane 뷰 대상.
+// terminal.* — 전용 세션 모델: 터미널 실체 = termSession(전 기기 공유·durable), 배치만 기기별.
+//  list/new/close = 전 기기 공통. select = 이 pane 의 살아있는 스트림 attach 대상 교체.
 async function handleTerminalRpc(method, params) {
   const { session, abs } = sessionForCwd(params && params.cwd);
-  const paneId = params && params.paneId ? String(params.paneId) : '';
+  const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
   const client = params && params.client ? String(params.client) : '';
-  const psess = paneId ? paneSession(session, paneId, client) : session;
+  const pkey = paneId ? paneKeyOf(session, paneId, client) : '';
+  await migrateLegacyPool(session, abs);
   if (method === 'terminal.list') {
-    // 공유 풀의 window 목록 — 모든 기기 "내역"의 원천(이름 포함).
-    const wins = await poolWindows(session);
-    return { windows: wins.map((w) => ({ index: w.index, name: w.name, command: w.command })) };
+    // durable 터미널 목록(tmux 세션들) — 모든 기기 "내역"의 원천(이름 포함, 생성순).
+    const list = await listTerminals(session);
+    return { windows: list.map((t) => ({ index: t.index, name: t.name, command: t.command })) };
   }
   if (method === 'terminal.new') {
-    // 풀에 새 터미널 생성(전 기기에 나타남). 풀이 없으면 생성된 window 0 이 곧 새 터미널.
-    //  이름은 자동 개명(automatic-rename)이 부여 — -n 으로 지정하면 그 window 의 자동 개명이 꺼진다.
-    const created = await ensurePool(session, abs);
-    if (created) {
-      if (paneId) await resizeToClient(psess, session, 0);
-      const w0 = (await poolWindows(session)).find((w) => w.index === 0);
-      return { index: 0, name: (w0 && w0.name) || '' };
-    }
-    const out = await runTmux(['new-window', '-d', '-t', '=' + session, '-c', abs, '-P', '-F', '#{window_index}\t#{window_name}']);
-    const [idxStr, autoName] = out.trim().split('\t');
-    const index = parseInt(idxStr, 10) || 0;
-    // 요청 pane 의 클라이언트 크기로 즉시 맞춤 — 기본 크기(80x24)→실크기 리사이즈로 새 터미널에
-    //  재프롬프트가 쌓이는 것("내역처럼 보임")을 방지.
-    if (paneId) await resizeToClient(psess, session, index);
-    return { index, name: autoName || '' };
+    // 새 터미널 = 전용 세션 생성(전 기기에 나타남). 이름은 자동 개명(automatic-rename)이 부여.
+    const t = await createTerminal(session, abs);
+    return { index: t.index, name: t.name };
   }
   if (method === 'terminal.select') {
-    // = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/포커스/드롭 이동 공용).
-    //  claim=true(사용자 터치/포커스/탭 클릭)일 때만 이 pane 클라이언트 크기로 리사이즈.
-    //  자동 경로(리컨실러 반영·재접속 보정 등)가 크기를 주장하면 기기 간 크기 뺏기가 반복돼
-    //  셸이 SIGWINCH 마다 프롬프트를 다시 찍어 스크롤백에 쌓인다 — 뷰 전환만 수행한다.
-    const win = (params && params.index) | 0;
-    // claim 필드가 아예 없으면(구버전 백엔드가 필드를 안 넘김) 현행 동작(true) 유지 — 롤아웃 호환.
-    const claim = params && 'claim' in params ? !!params.claim : true;
-    if (!paneId) { await runTmux(['select-window', '-t', `=${session}:${win}`]); return { ok: true }; }
-    await ensurePool(session, abs);
-    // 리사이즈는 ensureView 가 실제로 링크한 인덱스 기준 — 요청 인덱스가 스테일(서버 재시작/타 기기
-    //  삭제)이면 폴백된 창이 표시되는데, 스테일 인덱스로 resize 하면 표시 창이 기본 크기로 남는다.
-    const resolved = await ensureView(psess, session, win, abs);
-    if (claim) await resizeToClient(psess, session, resolved);
-    return { ok: true, index: resolved };
+    // 이 pane 이 보는 터미널 전환. 요청 tid 가 스테일(닫힘)이면 첫 터미널 폴백(재생성 금지 —
+    //  닫은 터미널이 부활하면 안 된다). 크기는 window-size latest 가 자동 처리(claim 폐지).
+    const tid = await resolveTid(session, abs, params && params.index);
+    if (pkey) {
+      paneCurrent.set(pkey, tid);
+      const h = paneStreams.get(pkey);
+      if (h && h.tid !== tid) {
+        try { h.swap(tid); } catch (_) { /* 스트림 사망 직후 등 — 재접속 경로가 paneCurrent 로 잇는다 */ }
+      }
+    }
+    return { ok: true, index: tid };
   }
   if (method === 'terminal.unview') {
-    // pane 에서 탭 제거(풀 window 는 보존) — 드래그 이동의 src 측/레이아웃 정리.
-    const win = (params && params.index) | 0;
-    try {
-      const n = (await runTmux(['list-windows', '-t', '=' + psess, '-F', 'x'])).split('\n').filter(Boolean).length;
-      if (n <= 1) await runTmux(['kill-session', '-t', '=' + psess]);
-      else await runTmux(['unlink-window', '-t', `=${psess}:${win}`]);
-    } catch (_) { /* 세션 없음 = 이미 정리됨 */ }
+    // pane 에서 탭 제거(터미널 세션은 보존) — 전용 세션 모델에선 서버 상태가 없어 기억만 정리.
+    const tid = Number(params && params.index);
+    if (pkey && paneCurrent.get(pkey) === tid) paneCurrent.delete(pkey);
     return { ok: true };
   }
   if (method === 'terminal.close') {
-    // 풀에서 완전 삭제(전 기기 공통). 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 자동 소멸.
-    //  멱등 처리: 마지막 창을 닫으면 tmux 서버 자체가 죽으므로, 연달아 닫는 요청/이미 사라진 창은
-    //  "no server running"/"can't find window" 로 실패한다 — 이미 닫힌 것이니 성공으로 간주.
+    // 완전 삭제(전 기기 공통) = kill-session. 세션이 이미 없거나 서버가 죽었어도 멱등 성공.
+    const tid = Number(params && params.index);
     try {
-      await runTmux(['kill-window', '-t', `=${session}:${(params && params.index) | 0}`]);
+      await runTmux(['kill-session', '-t', '=' + termSession(session, tid)]);
     } catch (e) {
       const msg = String(e.message || '');
-      if (!/no server running|can't find window|session not found/i.test(msg)) throw e;
+      if (!/no server running|can't find session|session not found/i.test(msg)) throw e;
     }
     return { ok: true };
   }
@@ -563,6 +537,7 @@ async function reapStaleViews(idleSec = 90) {
   let reaped = 0;
   for (const line of out.split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean)) {
     const [name, attached, activity] = line.split('\t');
+    if (/--t-\d+$/.test(name || '')) continue;                     // 터미널 세션(전용 세션 모델) 절대 불가침
     if (!/--p-|--v-|--c-/.test(name || '')) continue;              // primary 보존
     if ((parseInt(attached, 10) || 0) > 0) continue;               // attach 중인 뷰 보존
     if (now - (parseInt(activity, 10) || 0) < idleSec) continue;   // grace — 방금 만든 뷰 보호
@@ -631,4 +606,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, ensurePool, ensureView, sessionForCwd, paneSession, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };

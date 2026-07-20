@@ -543,12 +543,10 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_close,
-            // tmux 제어(풀/뷰/브랜치/포트)
+            // tmux 제어(터미널=전용 세션/포트)
             tmux::tmux_list_windows,
             tmux::tmux_new_window,
             tmux::tmux_kill_window,
-            tmux::tmux_view_window,
-            tmux::tmux_unview_window,
             tmux::tmux_listen_ports,
             // 브리지(워크스페이스/영속화/알림)
             bridge::fetch_workspaces,

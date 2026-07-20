@@ -94,15 +94,22 @@ pub fn session_for(local_path: &str) -> (String, PathBuf) {
     (format!("cpt-{safe}"), abs)
 }
 
-// pane 별 "독립" 세션명 — 데몬 pty.js paneSession 과 동일 규칙("<primary>--p-<paneId>").
-//  grouped view(--view--)의 current-window 불안정(여러 pane 이 같은 window 를 비추는 복제)을
-//  원천 제거: pane = 자기 세션, 탭 = 그 세션의 window. 모바일 데몬과 같은 아키텍처.
-pub fn pane_session(session: &str, pane_id: &str) -> String {
-    let safe: String = pane_id
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '-' })
-        .collect();
-    format!("{session}--p-{safe}")
+// ── 터미널 = 전용 tmux 세션(신 아키텍처, 데몬 pty.js termSession 미러) ──
+//  터미널 하나 = 세션 "<ns>--t-<tid>" 하나(window 0 하나). ns = 워크스페이스 네임스페이스(session_for).
+//  tid = 안정적 숫자 ID(31-bit 랜덤) — 와이어/영속(pc-ui.json tab.win)의 기존 숫자 자리에 그대로.
+//  뷰 세션/link-window/인덱스 간접층을 전면 폐기: attach 대상이 곧 실체라 "can't find window/session"
+//  레이스 클래스가 구조적으로 사라진다(세션 부재 = 사용자가 닫음이라는 결정적 상태뿐).
+pub fn term_session(ns: &str, tid: i64) -> String {
+    format!("{ns}--t-{tid}")
+}
+// 레거시 작은 인덱스(0~수십)와 절대 안 겹치게 1e6 이상, `|0` 경유에도 안전한 31-bit 안.
+pub fn new_tid() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as i64)
+        .unwrap_or(0);
+    let pid = std::process::id() as i64;
+    1_000_000 + ((nanos.wrapping_mul(2_654_435_761) ^ (pid << 16)).rem_euclid(0x7fff_ffff - 2_000_000))
 }
 
 // 전용 소켓으로 tmux 실행(제어 명령). 자식 env 의 TMUX 제거(데몬이 cmux 안에서 돌 수 있음).
@@ -119,34 +126,19 @@ pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-// 워크스페이스 primary 세션 보장(없으면 detached 생성 + conf 적용). 서버가 처음이면 -f 로 conf 로드.
-//  주의: tmux -t 는 접두사 매칭이라, 풀 세션이 없을 때 이름을 확장한 뷰 세션(--p-...)이 대신 매칭돼
-//  명령이 엉뚱한 세션에 떨어진다 → 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
-pub fn ensure_session(ctx: &TmuxCtx, session: &str, abs: &PathBuf) -> Result<(), String> {
-    // 이미 있으면 자동 개명 마이그레이션만 보장(프로세스당 세션 1회).
-    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_ok() {
-        ensure_auto_rename_once(ctx, session);
-        return Ok(());
-    }
+// 주의: tmux -t 는 접두사 매칭 — 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
+// detached 세션 생성(+서버 첫 기동이면 -f 로 conf 로드). duplicate = Err(호출측이 tid 재시도/스킵) —
+//  성공으로 뭉개면 기존 터미널 세션을 오인 점유(마이그레이션 move-window -k 덮어쓰기)할 수 있다.
+fn new_detached_session(ctx: &TmuxCtx, name: &str, abs: &PathBuf) -> Result<(), String> {
     let abs_s = abs.to_string_lossy().to_string();
     let mut args: Vec<String> = Vec::new();
     if let Some(conf) = &ctx.conf {
         args.push("-f".into());
         args.push(conf.to_string_lossy().to_string());
     }
-    args.extend(["new-session", "-d", "-s", session, "-c", &abs_s].map(String::from));
+    args.extend(["new-session", "-d", "-s", name, "-c", &abs_s].map(String::from));
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let created = match run(ctx, &refs) {
-        Ok(_) => Ok(()),
-        // 여러 pane 이 동시에 부팅하며 같은 풀을 만들려는 레이스 — 이미 생겼으면 성공으로 간주.
-        Err(e) if e.contains("duplicate session") => Ok(()),
-        Err(e) => Err(e),
-    };
-    if created.is_ok() {
-        inject_pool_env(ctx, session, abs);
-        ensure_auto_rename_once(ctx, session);
-    }
-    created
+    run(ctx, &refs).map(|_| ())
 }
 
 // ensure_auto_rename 의 프로세스당 세션 1회 래퍼 — ensure_session 이 pane 부팅마다 불리므로 절약.
@@ -247,151 +239,129 @@ pub struct NewWindowInfo {
     pub name: String,
 }
 
-// pane 뷰 세션의 클라이언트 크기로 풀 window 를 맞춘다 — "마지막 입력"이 아니라 "포커스" 기준 리사이즈.
-//  resize-window 는 그 window 를 manual 크기로 고정하므로 이후 크기는 오직 포커스(view) 이동으로만 바뀐다.
-pub fn resize_to_client(ctx: &TmuxCtx, psess: &str, session: &str, win: i64) {
-    let out = match run(ctx, &["list-clients", "-t", &format!("={psess}"), "-F", "#{client_width} #{client_height}"]) {
+// 워크스페이스의 터미널 목록 — 전용 세션들을 훑어 [{index(tid), name, command}] 생성순 정렬.
+//  window name(자동 개명)이 곧 전 기기 공유 탭 이름. 서버 없음/오류 = 빈 목록.
+pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Vec<WindowInfo> {
+    let out = match run(
+        ctx,
+        &["list-windows", "-a", "-F", "#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}"],
+    ) {
         Ok(o) => o,
-        Err(_) => return,
+        Err(_) => return vec![],
     };
-    let line = match out.lines().find(|l| !l.trim().is_empty()) {
-        Some(l) => l,
-        None => return,
-    };
-    let mut it = line.split_whitespace();
-    let (w, h) = match (it.next(), it.next()) {
-        (Some(w), Some(h)) => (w, h),
-        _ => return,
-    };
-    let (wi, hi) = (w.parse::<i64>().unwrap_or(0), h.parse::<i64>().unwrap_or(0));
-    if wi <= 0 || hi <= 0 {
+    let prefix = format!("{ns}--t-");
+    let mut rows: Vec<(i64, i64, WindowInfo)> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for l in out.lines().filter(|l| !l.trim().is_empty()) {
+        let parts: Vec<&str> = l.splitn(4, '\t').collect();
+        let sname = parts.first().copied().unwrap_or("");
+        if !sname.starts_with(&prefix) || !seen.insert(sname.to_string()) {
+            continue; // 세션당 첫 window 만(사용자가 tmux 로 window 를 더 만들어도 1터미널)
+        }
+        let tid: i64 = match sname[prefix.len()..].parse() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let created: i64 = parts.get(1).and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        rows.push((created, tid, WindowInfo {
+            index: tid,
+            active: false,
+            id: sname.to_string(),
+            name: parts.get(2).map(|s| s.trim().to_string()).unwrap_or_default(),
+            command: parts.get(3).map(|s| s.trim().to_string()).unwrap_or_default(),
+        }));
+    }
+    rows.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    rows.into_iter().map(|r| r.2).collect()
+}
+
+// 새 터미널 생성(전 기기에 나타남) — 전용 세션 detached 생성 + cpt env 주입.
+//  이름은 자동 개명(automatic-rename)이 부여 — -n 지정은 automatic-rename 을 꺼서 금지.
+pub fn create_terminal(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        let tid = new_tid();
+        let name = term_session(ns, tid);
+        match new_detached_session(ctx, &name, abs) {
+            Ok(_) => {
+                inject_pool_env(ctx, &name, abs);
+                ensure_auto_rename_once(ctx, &name);
+                let wname = list_windows(ctx, &name).first().map(|w| w.name.clone()).unwrap_or_default();
+                return Ok(NewWindowInfo { index: tid, name: wname });
+            }
+            Err(e) if e.contains("duplicate session") => { last_err = e; continue } // tid 충돌 — 재시도
+            Err(e) => return Err(e),
+        }
+    }
+    Err(if last_err.is_empty() { "터미널 생성 실패".to_string() } else { last_err })
+}
+
+// 레거시 공유 풀(ns 세션의 window들) → 전용 세션 마이그레이션(데몬 migrateLegacyPool 미러).
+//  move-window 라 실행 중인 셸이 무손실 보존된다. 데몬과 동시에 돌아도 안전 — window 이동은
+//  tmux 서버에서 원자적이라 진 쪽은 자기가 만든 빈 세션만 회수한다. 멱등(풀 소멸 후 no-op).
+pub fn migrate_legacy_pool(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) {
+    if ns == TMUX_SESSION {
+        return; // 홈 공유 세션은 풀이 아님(레거시 직결 attach) — 옮기지 않는다
+    }
+    if run(ctx, &["has-session", "-t", &format!("={ns}")]).is_err() {
         return;
     }
-    // 이미 같은 크기면 스킵 — 다른 기기와 크기 주장이 교차할 때 불필요한 SIGWINCH 로 셸 프롬프트가
-    //  스크롤백에 누적되는 것을 막는다(데몬 resizeToClient 미러).
-    if let Ok(cur) = run(ctx, &["list-windows", "-t", &format!("={session}"), "-F", "#{window_index} #{window_width} #{window_height}"]) {
-        for l in cur.lines() {
-            let mut p = l.split_whitespace();
-            if let (Some(idx), Some(cw), Some(ch)) = (p.next(), p.next(), p.next()) {
-                if idx.parse::<i64>().unwrap_or(-1) == win
-                    && cw.parse::<i64>().unwrap_or(0) == wi
-                    && ch.parse::<i64>().unwrap_or(0) == hi
-                {
-                    return; // 이미 맞음
-                }
+    let wins = list_windows(ctx, ns);
+    // 기존 --t- tid 와의 충돌 회피 필수 — 충돌하면 아래 move-window -k 가 기존 터미널을 덮어쓴다.
+    let taken: std::collections::HashSet<i64> = list_terminals(ctx, ns).iter().map(|t| t.index).collect();
+    let mut base = new_tid();
+    for _ in 0..32 {
+        let clash = (0..wins.len() as i64).any(|i| taken.contains(&(base + i))) || base + wins.len() as i64 > 0x7fff_ffff;
+        if !clash {
+            break;
+        }
+        base = new_tid();
+    }
+    for (i, w) in wins.iter().enumerate() {
+        let name = term_session(ns, base + i as i64);
+        if new_detached_session(ctx, &name, abs).is_err() {
+            continue; // duplicate(동시 마이그레이션 등) — 이번은 스킵, 풀에 남아 다음 호출이 잇는다
+        }
+        match run(ctx, &["move-window", "-k", "-s", &format!("={ns}:{}", w.index), "-t", &format!("={name}:0")]) {
+            Ok(_) => {
+                // 구 모델 resize-window 가 남긴 manual 고정 해제 → 전역 window-size latest 복귀.
+                let _ = run(ctx, &["set-option", "-w", "-u", "-t", &format!("={name}:0"), "window-size"]);
+                inject_pool_env(ctx, &name, abs);
+            }
+            Err(_) => {
+                // 다른 액터(번들 데몬)가 먼저 옮김 — 내가 만든 자리(빈 세션)만 회수.
+                let _ = run(ctx, &["kill-session", "-t", &format!("={name}")]);
             }
         }
     }
-    let _ = run(ctx, &["resize-window", "-t", &format!("={session}:{win}"), "-x", w, "-y", h]);
 }
 
-// pane 뷰 세션 보장 + 풀 window(win)를 같은 인덱스로 link + select — 데몬 ensureView 미러.
-//  · 풀 window 가 없으면(스테일 win 자가치유) 그 인덱스에 새 터미널을 만든다.
-//  · 뷰 세션 최초 생성 시 기본 셸(window 0)은 999 로 파킹했다가 링크 후 제거.
-// 반환 = 실제로 링크/선택한 풀 인덱스 — 요청 win 이 스테일이면 폴백으로 바뀌므로 호출측
-//  리사이즈는 반드시 이 값을 써야 한다(스테일 인덱스로 resize 하면 표시 창이 기본 크기로 남는다).
-pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &PathBuf) -> Result<i64, String> {
-    let abs_s = abs.to_string_lossy().to_string();
-    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
-        ensure_session(ctx, session, abs)?;
+// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백, 없으면 생성.
+//  (재생성 금지: 스테일 tid 로 세션을 되살리면 닫은 터미널이 부활한다.)
+pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, abs: &PathBuf, want: i64) -> Result<i64, String> {
+    if want > 0 && run(ctx, &["has-session", "-t", &format!("={}", term_session(ns, want))]).is_ok() {
+        return Ok(want);
     }
-    // 뷰 세션(psess) 준비 + 풀 window 링크 + 선택. 소켓(-L codingpt)을 공유하는 (번들) 데몬의
-    //  reapStaleViews 가 attach=0 인 이 pane 뷰 세션을 재사용 직전에 지우거나(앱 업데이트가 리퍼
-    //  grace 90s 를 넘겨 idle 판정 → startup reap), 링크가 도중에 실패해 psess 가 반쪽 상태(예: 999
-    //  파킹 셸만 남고 window 0 미링크)로 굳으면 link/select 가 "can't find window/session" 으로 터졌다
-    //  (사용자가 매 업데이트마다 본 "터미널 연결 실패: can't find window: 0", 심하면 그 상태로 하루
-    //  종일 고착). 뷰 세션은 고유 상태가 없어 재생성이 멱등 → 실패 시 psess 를 통째로 버리고 새로 만들며
-    //  풀 소스도 매 시도 재조회해 순간 부재/인덱스 변경까지 흡수한다(최대 4회).
-    let is_race = |e: &str| {
-        let l = e.to_lowercase();
-        l.contains("can't find session") || l.contains("can't find window") || l.contains("no server running")
-    };
-    let mut last_err = String::new();
-    for attempt in 0..4 {
-        // 이전 시도 실패 = psess 가 반쪽/레이스 잔재일 수 있으니 통째로 버리고 새로 만든다(뷰 세션은
-        //  고유 상태 없어 안전 — attach 는 이 함수 이후라 끊길 클라이언트도 없음).
-        if attempt > 0 {
-            let _ = run(ctx, &["kill-session", "-t", &format!("={psess}")]);
-            std::thread::sleep(std::time::Duration::from_millis(120));
-        }
-        // ── 풀(source) window 확정 — 매 시도 재조회(순간 부재/인덱스 변경 흡수). 요청 win 이 없으면
-        //    풀의 첫 window 로 폴백(재생성 금지: 스테일 인덱스에 창을 다시 만들면 닫은 터미널이 부활).
-        let mut wins = list_windows(ctx, session);
-        if wins.is_empty() {
-            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-c", &abs_s]);
-            wins = list_windows(ctx, session);
-        }
-        let (cur_win, target_id) = match wins.iter().find(|w| w.index == win).or_else(|| wins.first()) {
-            Some(w) => (w.index, w.id.clone()),
-            None => { last_err = "터미널 window 확보 실패".to_string(); std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
-        };
-        // ── psess 보장(없으면 생성 + 기본 셸 0→999 파킹) ──
-        if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
-            match run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s]) {
-                Ok(_) => {}
-                Err(e) if e.contains("duplicate session") => {}
-                Err(e) => { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
-            }
-            let _ = run(ctx, &["move-window", "-s", &format!("={psess}:0"), "-t", &format!("={psess}:999")]);
-        }
-        // ── 풀 window 를 같은 인덱스로 link + select ──
-        let slots = list_windows(ctx, psess);
-        let needs_link = match slots.iter().find(|w| w.index == cur_win) {
-            Some(s) if s.id == target_id => false,
-            Some(_) => { let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{cur_win}")]); true }
-            None => true,
-        };
-        if needs_link {
-            if let Err(e) = run(ctx, &["link-window", "-s", &format!("={session}:{cur_win}"), "-t", &format!("={psess}:{cur_win}")]) {
-                if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
-                return Err(e);
+    let list = list_terminals(ctx, ns);
+    if let Some(first) = list.first() {
+        return Ok(first.index);
+    }
+    create_terminal(ctx, ns, abs).map(|t| t.index)
+}
+
+// 터미널 완전 삭제(전 기기 공통) = kill-session. 이미 없거나 서버가 죽었어도 멱등 성공.
+pub fn kill_terminal(ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
+    match run(ctx, &["kill-session", "-t", &format!("={}", term_session(ns, tid))]) {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            let l = e.to_lowercase();
+            if l.contains("no server running") || l.contains("can't find session") || l.contains("session not found") {
+                Ok(())
+            } else {
+                Err(e)
             }
         }
-        if let Err(e) = run(ctx, &["select-window", "-t", &format!("={psess}:{cur_win}")]) {
-            if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
-            return Err(e);
-        }
-        let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
-        resize_to_client(ctx, psess, session, cur_win); // 포커스한 pane 크기로 즉시 맞춤(미접속이면 무시)
-        return Ok(cur_win);
     }
-    Err(if last_err.is_empty() { "뷰 세션 준비 실패".to_string() } else { last_err })
-}
-
-// 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.
-//  이름은 자동 개명(automatic-rename)이 부여 — -n 지정은 그 window 의 자동 개명을 꺼서 금지.
-pub fn new_window(ctx: &TmuxCtx, session: &str, abs: &PathBuf, psess: Option<&str>) -> Result<NewWindowInfo, String> {
-    if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
-        ensure_session(ctx, session, abs)?;
-        if let Some(p) = psess {
-            resize_to_client(ctx, p, session, 0);
-        }
-        let name = list_windows(ctx, session)
-            .iter()
-            .find(|w| w.index == 0)
-            .map(|w| w.name.clone())
-            .unwrap_or_default();
-        return Ok(NewWindowInfo { index: 0, name });
-    }
-    let abs_s = abs.to_string_lossy().to_string();
-    // -d: attach 중인 클라이언트 화면을 즉시 바꾸지 않음(전환은 호출측 view 가 담당).
-    let out = run(
-        ctx,
-        &["new-window", "-d", "-t", &format!("={session}"), "-c", &abs_s, "-P", "-F", "#{window_index}\t#{window_name}"],
-    )?;
-    let mut it = out.trim().splitn(2, '\t');
-    let index: i64 = it.next().unwrap_or("0").trim().parse().unwrap_or(0);
-    let name = it.next().unwrap_or("").trim().to_string();
-    // 요청 pane 클라이언트 크기로 즉시 맞춤 — 기본 크기→실크기 리사이즈 재프롬프트가 안 쌓이게.
-    if let Some(p) = psess {
-        resize_to_client(ctx, p, session, index);
-    }
-    Ok(NewWindowInfo { index, name })
-}
-
-// 서피스(window) 종료.
-pub fn kill_window(ctx: &TmuxCtx, session: &str, index: i64) -> Result<(), String> {
-    run(ctx, &["kill-window", "-t", &format!("={session}:{index}")]).map(|_| ())
 }
 
 // 로컬 리스닝 TCP 포트 목록(프리뷰/사이드바 배지). lsof 기반, 실패 시 빈 목록.
@@ -490,8 +460,9 @@ pub fn listen_ports_in(filter: Option<&Path>) -> Vec<u16> {
 
 #[tauri::command]
 pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Vec<WindowInfo> {
-    let (session, _abs) = session_for(&local_path);
-    list_windows(&ctx, &session)
+    let (ns, abs) = session_for(&local_path);
+    migrate_legacy_pool(&ctx, &ns, &abs); // 구 풀 잔재가 있으면 무손실 승격(멱등)
+    list_terminals(&ctx, &ns)
 }
 
 #[tauri::command]
@@ -500,55 +471,21 @@ pub fn tmux_new_window(
     local_path: String,
     pane_id: Option<String>,
 ) -> Result<NewWindowInfo, String> {
-    let (session, abs) = session_for(&local_path);
-    let psess = pane_id.as_deref().map(|p| pane_session(&session, p));
-    new_window(&ctx, &session, &abs, psess.as_deref())
+    let _ = pane_id; // 구 시그니처 유지(호출측 무수정) — 전용 세션 모델에선 불필요
+    let (ns, abs) = session_for(&local_path);
+    migrate_legacy_pool(&ctx, &ns, &abs);
+    create_terminal(&ctx, &ns, &abs)
 }
 
-// 풀에서 완전 삭제(전 기기 공통) — 링크된 모든 뷰에서 사라지고, 마지막 링크였던 뷰 세션은 소멸.
+// 터미널 완전 삭제(전 기기 공통) — 전용 세션 kill(멱등).
 #[tauri::command]
 pub fn tmux_kill_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
     index: i64,
 ) -> Result<(), String> {
-    let (session, _abs) = session_for(&local_path);
-    kill_window(&ctx, &session, index)
-}
-
-// = view: 이 pane 뷰 세션에 풀 window 를 링크 + 선택(탭 전환/드롭 이동 공용).
-#[tauri::command]
-pub fn tmux_view_window(
-    ctx: tauri::State<TmuxCtx>,
-    local_path: String,
-    pane_id: String,
-    index: i64,
-) -> Result<i64, String> {
-    let (session, abs) = session_for(&local_path);
-    let psess = pane_session(&session, &pane_id);
-    ensure_view(&ctx, &psess, &session, index, &abs)
-}
-
-// pane 뷰에서 탭 제거(풀 window 는 보존) — 드래그 이동의 src 측.
-#[tauri::command]
-pub fn tmux_unview_window(
-    ctx: tauri::State<TmuxCtx>,
-    local_path: String,
-    pane_id: String,
-    index: i64,
-) -> Result<(), String> {
-    let (session, _abs) = session_for(&local_path);
-    let psess = pane_session(&session, &pane_id);
-    let n = list_windows(&ctx, &psess).len();
-    if n == 0 {
-        return Ok(());
-    }
-    if n <= 1 {
-        let _ = run(&ctx, &["kill-session", "-t", &format!("={psess}")]);
-        return Ok(());
-    }
-    let _ = run(&ctx, &["unlink-window", "-t", &format!("={psess}:{index}")]);
-    Ok(())
+    let (ns, _abs) = session_for(&local_path);
+    kill_terminal(&ctx, &ns, index)
 }
 
 #[tauri::command]

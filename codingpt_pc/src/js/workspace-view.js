@@ -350,10 +350,9 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
   rt.layout = r.tree;
   rt.focusId = newLeaf.id;
-  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — webview 보존(새 pane 이 승계)
   if (!src.tabs.length) {
-    // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 풀 kill 대상이 없다.
+    // src 가 비면 닫기(형제 승격). 탭은 이미 새 leaf 로 옮겨져 터미널 kill 대상이 없다.
     S.closePane(state.activeWsId, srcId);
     return;
   }
@@ -362,7 +361,7 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active]?.win;
-  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) panes.get(srcId)?._reattach?.(w); // src 스트림을 남은 활성 탭으로
 }
 
 // IDE/프리뷰 pane 통째를 터미널 pane 의 "탭"으로 편입(혼합 탭) — src pane 은 제거.
@@ -636,7 +635,7 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
 }
 
 // 탭을 다른 pane 으로 이동(드롭). src 가 비면 pane 닫기.
-//  공유 풀 모델: 링크만 이동(win 불변) — dst 는 activateWin(view), src 는 unview.
+//  전용 세션 모델: 탭(win=tid) 데이터만 이동 — dst 는 activateWin(재attach), src 는 남은 탭 재attach.
 async function moveTab(srcId, index, dstId) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
@@ -658,7 +657,6 @@ async function moveTab(srcId, index, dstId) {
   panes.get(dstId)?.buildHead();
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
-  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 본문은 dst 에서 재생성 — 프리뷰 webview 는 보존·승계
   if (!src.tabs.length) {
     S.closePane(state.activeWsId, srcId);
@@ -667,7 +665,7 @@ async function moveTab(srcId, index, dstId) {
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) panes.get(srcId)?._reattach?.(w); // src 스트림을 남은 활성 탭으로
   S.emit();
 }
 
@@ -688,7 +686,7 @@ function reorderTab(paneId, from, insertIndex) {
 }
 
 // 다른 터미널 pane 의 특정 위치로 탭 이동.
-//  공유 풀 모델: 링크만 이동(win 불변) — dst 는 activateWin(view), src 는 unview.
+//  전용 세션 모델: 탭(win=tid) 데이터만 이동 — dst 는 activateWin(재attach), src 는 남은 탭 재attach.
 async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return;
@@ -713,13 +711,12 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   panes.get(dstId)?.buildHead();
   if (isT) panes.get(dstId)?.activateWin(tab.win);
   panes.get(dstId)?.showActiveTab?.();
-  if (isT && isThisHost(ws) && typeof tab.win === "number") api.unviewWindow(ws.localPath || "", srcId, tab.win).catch(() => {});
   if (!isT) panes.get(srcId)?.disposeMixedTab?.(tab, true); // 이동 — 프리뷰 webview 보존
   if (!src.tabs.length) { S.closePane(state.activeWsId, srcId); return; }
   panes.get(srcId)?.buildHead();
   panes.get(srcId)?.showActiveTab?.();
   const w = src.tabs[src.active].win;
-  if (typeof w === "number" && isThisHost(ws)) api.viewWindow(ws.localPath || "", srcId, w).catch(() => {});
+  if (typeof w === "number" && isThisHost(ws)) panes.get(srcId)?._reattach?.(w); // src 스트림을 남은 활성 탭으로
   S.emit();
 }
 

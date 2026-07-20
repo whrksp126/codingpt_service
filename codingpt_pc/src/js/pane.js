@@ -58,8 +58,9 @@ export function newTid() {
 // 터미널 탭 라벨 = window name 그대로(cmux 와 동일).
 //  자동 개명이 대기=폴더명 / 실행=앱 OSC 타이틀(claude 상태 등) or 명령을 이미 담으므로
 //  `· 명령` 부제는 노이즈("… · 2.1.211")라 제거 — 수동 이름 창도 이름만 표시.
+//  win 은 안정 터미널 ID(큰 숫자)라 라벨엔 안 쓴다 — 이름은 리컨실러가 곧 채운다.
 export function termTabLabel(t) {
-  return t.title || (typeof t.win === "number" ? "터미널 " + t.win : "터미널");
+  return t.title || "터미널";
 }
 
 // ── 원격 워크스페이스 프리뷰 — 그 PC 의 localhost dev 서버를 back 프록시 URL 로 치환 ──
@@ -470,9 +471,9 @@ export class PaneView {
     this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
     if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
   }
-  // 이 pane 터미널 스트림의 현재 win — 활성 탭이 터미널이면 그 win, 아니면(혼합 탭 활성) 백그라운드
-  //  터미널 탭의 win(스트림은 터미널 탭 기준으로 유지되므로 알림 발생원도 그쪽).
+  // 이 pane 터미널 스트림의 현재 win(tid) — 실제 attach 중인 터미널이 정본, 없으면 탭에서 유추.
   _streamWin() {
+    if (typeof this._attachedWin === "number") return this._attachedWin;
     const a = this.node.tabs?.[this.node.active];
     if (a && isTermTab(a) && typeof a.win === "number") return a.win;
     const t = this.node.tabs?.find((x) => isTermTab(x) && typeof x.win === "number");
@@ -614,9 +615,15 @@ export class PaneView {
     return tab.win;
   }
 
-  // 이 pane 뷰에 풀 window 링크 + 선택(탭 전환/드롭 이동 공용).
-  _view(win) {
-    if (typeof win === "number") api.viewWindow(this.ctx.localPath || "", this.id, win).catch(() => {});
+  // 이 pane 의 attach 를 지정 터미널(tid)로 재수립 — 전용 세션 모델의 탭 전환/드롭 이동 공용.
+  //  이미 그 터미널에 붙어 있으면 no-op. 로컬 tmux attach 라 전환은 즉시(전체 화면 재그리기).
+  async _reattach(win) {
+    if (typeof win !== "number" || !this.ctx.isLocal || this.node.kind !== "terminal") return;
+    if (this._attachedWin === win) return;
+    // 의도된 교체 — 구 attach 의 exit 이벤트가 "[세션 종료]" 안내/재연결 루프를 타지 않게 표식.
+    this._expectExit = true;
+    try { await api.ptyClose(this.id); } catch (_) {}
+    this._openChannel(win);
   }
 
   // ── 탭 조작 ──
@@ -629,8 +636,8 @@ export class PaneView {
     const win = await this._ensureWin(tab);
     // await 사이 탭이 다른 pane 으로 드래그돼 사라졌을 수 있음 → 아직 이 pane 소속일 때만 반영.
     if (!this.node.tabs.includes(tab)) return;
-    this.buildHead(); // 풀이 부여한 이름 반영
-    this._view(win);
+    this.buildHead(); // 자동 개명이 부여한 이름 반영
+    this._reattach(win);
     this.ctx.persist?.();
     this.focus();
   }
@@ -644,7 +651,7 @@ export class PaneView {
     const tab = this.node.tabs[i];
     if (isTermTab(tab)) {
       const win = await this._ensureWin(tab);
-      if (this.node.tabs[this.node.active] === tab) this._view(win);
+      if (this.node.tabs[this.node.active] === tab) this._reattach(win);
       // 읽음 처리 없음 — switchTab 은 프로그램적으로도 호출된다(알림 활성화/점프). 읽음은
       //  사용자가 탭/터미널을 직접 클릭할 때만(buildHead 탭 클릭·_setupInput mousedown).
     }
@@ -655,8 +662,9 @@ export class PaneView {
   closeTab(i) {
     const tab = this.node.tabs[i];
     if (isTermTab(tab)) {
-      // 터미널 탭 = 풀에서 완전 삭제(전 기기 공통).
+      // 터미널 탭 = 완전 삭제(전 기기 공통) — 전용 세션 kill. 목록에서도, 실체도 사라진다.
       if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
+      if (this._attachedWin === tab.win) this._attachedWin = null; // 죽은 attach — 아래서 갈아탐
     } else {
       // IDE/프리뷰 탭 = 이 기기 뷰만 닫힘.
       this.disposeMixedTab(tab);
@@ -669,7 +677,7 @@ export class PaneView {
     if (this.node.active >= this.node.tabs.length) this.node.active = this.node.tabs.length - 1;
     this.buildHead();
     const at = this.node.tabs[this.node.active];
-    if (isTermTab(at)) this._view(at.win);
+    if (isTermTab(at)) this._reattach(at.win);
     this.showActiveTab();
     this.ctx.onSurfacesChanged?.();
     this.ctx.persist?.();
@@ -722,9 +730,9 @@ export class PaneView {
     }
     if (isT) this._fitNow();
   }
-  // 드롭으로 이동해 온 탭을 활성화(뷰 링크 + select).
+  // 드롭으로 이동해 온 탭을 활성화(이 pane 스트림을 그 터미널로 재attach).
   async activateWin(win) {
-    this._view(win);
+    this._reattach(win);
     this.buildHead();
     this.focus();
   }
@@ -733,7 +741,18 @@ export class PaneView {
   async _openChannel(win) {
     const { cols, rows } = this.term;
     if (this.ctx.isLocal) {
-      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).catch((e) => {
+      this._attachedWin = typeof win === "number" ? win : null;
+      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).then((resolved) => {
+        // 요청 tid 가 스테일(닫힘/구버전 인덱스)이면 Rust 가 첫 터미널로 폴백해 실제 attach 한
+        //  tid 를 돌려준다 — 탭을 실체에 맞게 보정(리컨실러가 목록은 따로 정리).
+        if (typeof resolved !== "number") return;
+        this._attachedWin = resolved;
+        if (resolved !== win) {
+          const t = this.node.tabs?.find((x) => isTermTab(x) && x.win === win);
+          if (t) { t.win = resolved; this.buildHead(); this.ctx.persist?.(); this.ctx.onSurfacesChanged?.(); }
+        }
+      }).catch((e) => {
+        this._attachedWin = null;
         this.term.write("\r\n\x1b[31m터미널 연결 실패: " + e + "\x1b[0m\r\n");
         this._scheduleReopen(2500); // 일시 오류(서버 재기동 중 등)에 고착되지 않게 자동 재시도
       });
@@ -869,27 +888,16 @@ export class PaneView {
       // 확정 직후 input(확정 텍스트 반영)이 처리된 다음 틱에 버퍼 리셋 — 다음 입력은 새로 시작.
       setTimeout(() => resetBuf(), 0);
     };
-    // 포커스만 해도 이 pane 크기로 리사이즈 — view(select)가 클라이언트 크기로 resize-window 한다.
-    const onFocus = () => {
-      const t = this.node.tabs?.[this.node.active];
-      if (t && typeof t.win === "number") this._view(t.win);
-    };
-    ta.addEventListener("focus", onFocus);
     // xterm 은 blur 시 textarea.value 를 비운다 — 미러(_sentBuf)도 함께 비워야
     //  복귀 후 첫 입력의 델타가 "옛 텍스트 길이만큼 백스페이스"를 쏘지 않는다.
     const onBlur = () => resetBuf();
     ta.addEventListener("blur", onBlur);
-    // 내부 클릭 — 이미 포커스된 터미널은 focus 이벤트가 다시 안 떠서 위 경로가 안 타므로,
-    //  클릭 자체로도 크기를 회수한다(다른 기기가 이 창을 자기 크기로 바꿨을 수 있음). 1.2s 스로틀.
-    let lastClaim = 0;
+    // 크기 클레임(포커스/클릭 시 resize-window)은 폐지 — window-size latest 가 입력/리사이즈를
+    //  하는 클라이언트를 자동으로 따라간다(수동 클레임이 기기 간 크기 뺏기 전쟁의 근원이었다).
     const onMouseDown = () => {
       // 사용자가 실제로 터미널을 클릭 = 이 터미널을 봄 → 활성 탭 win 알림 읽음(프로그램적 포커스 제외).
       const at = this.node.tabs?.[this.node.active];
       if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
-      const n = Date.now();
-      if (n - lastClaim < 1200) return;
-      lastClaim = n;
-      onFocus();
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
@@ -898,7 +906,6 @@ export class PaneView {
     document.addEventListener("compositionupdate", onComp, true);
     document.addEventListener("compositionend", onCompEnd, true);
     this._inputDispose = () => {
-      ta.removeEventListener("focus", onFocus);
       ta.removeEventListener("blur", onBlur);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeydown, true);
@@ -914,13 +921,14 @@ export class PaneView {
   _onData(b64) {
     this._termOut(b64ToBytes(b64));
   }
-  // attach 가 끊겼다(다른 기기가 이 터미널/마지막 터미널을 닫아 tmux 서버까지 죽었을 수 있음).
-  //  모바일 웹뷰는 자동 재접속하는데 PC 는 여기서 끝이라 "새 터미널이 생겨도 못 넘어오는" 문제가
-  //  있었다 → 풀에 window 가 다시 생기면 유효한 win 으로 자동 재연결한다.
-  //  풀이 빈 동안은 대기만 — 여기서 창을 만들면 기기 간 생성 레이스로 유령 터미널이 생긴다.
+  // attach 가 끊겼다 — 정상 원인은 둘뿐: 이 터미널이 (다른 기기에서) 닫혔거나, 탭 전환(_reattach)의
+  //  의도된 교체. 전자는 남은/새 터미널로 갈아타고, 목록이 비어 있으면 생길 때까지 대기만 한다
+  //  (여기서 창을 만들면 기기 간 생성 레이스로 유령 터미널이 생긴다).
   _onExit() {
-    this.term?.write("\r\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\r\n");
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
+    if (this._expectExit) { this._expectExit = false; return; } // 탭 전환의 의도된 교체 — 무시
+    this.term?.write("\r\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\r\n");
+    this._attachedWin = null;
     this._reopenTries = 0;
     this._scheduleReopen(1500);
   }
@@ -928,6 +936,7 @@ export class PaneView {
     clearTimeout(this._reopenTimer);
     this._reopenTimer = setTimeout(async () => {
       if (this._reopenStop || !this.mounted) return;
+      if (typeof this._attachedWin === "number") return; // 이미 다른 경로(_reattach 등)로 복구됨
       // 재연결 대상은 "터미널" 탭 — 활성 탭이 IDE/프리뷰(혼합 탭)여도 백그라운드 터미널을 복구.
       const active = this.node.tabs?.[this.node.active];
       const tab = (isTermTab(active) && active) || this.node.tabs?.find((t) => isTermTab(t));
@@ -940,7 +949,7 @@ export class PaneView {
         this._scheduleReopen(Math.min(1500 * this._reopenTries, 10000));
         return;
       }
-      // 죽은 win 은 풀의 첫 터미널로 갈아탄다(리컨실러가 탭 목록은 따로 정리).
+      // 닫힌 터미널(tid 부재)은 첫 터미널로 갈아탄다(리컨실러가 탭 목록은 따로 정리).
       if (typeof tab.win !== "number" || !wins.some((w) => w.index === tab.win)) {
         tab.win = wins[0].index;
         if (wins[0].name) tab.title = wins[0].name;
@@ -949,7 +958,10 @@ export class PaneView {
       }
       const { cols, rows } = this.term || {};
       api.ptyOpen(this.id, this.ctx.localPath || "", tab.win ?? 0, cols || 80, rows || 24)
-        .then(() => this.term?.write("\x1b[90m[재연결됨]\x1b[0m\r\n"))
+        .then((resolved) => {
+          this._attachedWin = typeof resolved === "number" ? resolved : tab.win;
+          this.term?.write("\x1b[90m[재연결됨]\x1b[0m\r\n");
+        })
         .catch(() => this._scheduleReopen(3000));
     }, delay);
   }

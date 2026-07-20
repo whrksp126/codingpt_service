@@ -53,12 +53,10 @@ export const api = {
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   ptyClose: (paneId) => invoke("pty_close", { paneId }),
 
-  // ── tmux 제어(서피스/브랜치/포트) ──
+  // ── tmux 제어(터미널=전용 세션/포트) — index 자리의 숫자는 안정 터미널 ID(tid) ──
   listWindows: (localPath) => invoke("tmux_list_windows", { localPath }),
   newWindow: (localPath, paneId) => invoke("tmux_new_window", { localPath, paneId: paneId || null }),
   killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
-  viewWindow: (localPath, paneId, index) => invoke("tmux_view_window", { localPath, paneId, index }),
-  unviewWindow: (localPath, paneId, index) => invoke("tmux_unview_window", { localPath, paneId, index }),
   listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
 
   // ── 클라우드 터미널(relay) ──
