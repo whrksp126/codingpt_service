@@ -178,44 +178,52 @@ function renderSection(force) {
   }
 }
 
-// ── 자동 업데이트 — 확인 → (있으면) 버튼이 "설치 후 재시작" 으로 전환 ──
+// ── 자동 업데이트 — 정보 열리면 자동 확인. 새 버전 있으면 [업데이트] 버튼(클릭=다운로드/설치),
+//    없으면 "최신 버전입니다"(클릭 불필요). ──
 function bindUpdate() {
   const btn = contentEl.querySelector("#updBtn");
   const st = contentEl.querySelector("#updStatus");
   if (!btn || !st) return;
-  let found = null;
-  btn.addEventListener("click", async () => {
+
+  // 다운로드+설치(업데이트 버튼 클릭). 진행률은 버튼에만 [ n% ] 하나로.
+  const doInstall = async () => {
     btn.disabled = true;
+    st.textContent = "";
+    btn.textContent = "0%";
     try {
-      if (found) {
-        // 다운로드 중엔 진행률을 "버튼에만" 표시(별도 상태 텍스트 없이 [ n% ] 하나만).
-        st.textContent = "";
-        btn.textContent = "0%";
-        const un = await api.onUpdateProgress((p) => {
-          if (!p) return;
-          // chunk = 누적 바이트(Rust에서 델타 누적). total 있으면 %, 없으면 받은 MB 로라도 진행 표시.
-          if (p.total) btn.textContent = `${Math.min(100, Math.round((p.chunk / p.total) * 100))}%`;
-          else if (p.chunk) btn.textContent = `${(p.chunk / 1048576).toFixed(1)}MB`;
-        });
-        await api.updateInstall(); // 성공 시 앱이 재시작되므로 이후 코드는 실행 안 될 수 있음
-        un?.();
-        return;
-      }
-      st.textContent = "확인 중…";
-      const r = await api.updateCheck();
+      const un = await api.onUpdateProgress((p) => {
+        if (!p) return;
+        // chunk = 누적 바이트(Rust에서 델타 누적). total 있으면 %, 없으면 받은 MB 로라도 진행 표시.
+        if (p.total) btn.textContent = `${Math.min(100, Math.round((p.chunk / p.total) * 100))}%`;
+        else if (p.chunk) btn.textContent = `${(p.chunk / 1048576).toFixed(1)}MB`;
+      });
+      await api.updateInstall(); // 성공 시 앱이 재시작되므로 이후 코드는 실행 안 될 수 있음
+      un?.();
+    } catch (e) {
+      st.textContent = "실패: " + e;
+      btn.disabled = false;
+      btn.textContent = "업데이트";
+    }
+  };
+
+  // 열릴 때 자동 확인 — 버튼은 새 버전이 있을 때만 노출.
+  btn.style.display = "none";
+  st.textContent = "확인 중…";
+  api
+    .updateCheck()
+    .then((r) => {
       if (r && r.available) {
-        found = r;
-        st.textContent = `새 버전 ${r.version}`;
-        btn.textContent = "설치 후 재시작";
+        st.textContent = "";
+        btn.textContent = "업데이트";
+        btn.style.display = "";
+        btn.onclick = doInstall;
       } else {
         st.textContent = r && r.error ? "확인 불가(개발 실행에선 미지원)" : "최신 버전입니다";
       }
-    } catch (e) {
-      st.textContent = "실패: " + e;
-    } finally {
-      btn.disabled = false;
-    }
-  });
+    })
+    .catch(() => {
+      st.textContent = "확인 실패";
+    });
 }
 
 async function syncAutostart() {
