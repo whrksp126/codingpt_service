@@ -82,10 +82,15 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .ok_or("이미 최신 버전입니다.")?;
     let handle = app.clone();
+    // on_chunk 콜백의 chunk 는 "이번 조각의 바이트(델타)"라 그대로 total 로 나누면 언제나 ~0% 다
+    //  (프론트가 chunk/total 로 계산 → 0 에서 안 올라가는 버그). 여기서 누적해 "받은 총 바이트"로 보낸다.
+    let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let dl = downloaded.clone();
     update
         .download_and_install(
             move |chunk, total| {
-                let _ = handle.emit("cpt-update-progress", serde_json::json!({ "chunk": chunk, "total": total }));
+                let got = dl.fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed) + chunk as u64;
+                let _ = handle.emit("cpt-update-progress", serde_json::json!({ "chunk": got, "total": total }));
             },
             || {},
         )

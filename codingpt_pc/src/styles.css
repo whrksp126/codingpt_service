@@ -349,7 +349,6 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-tablist::-webkit-scrollbar { height: 0; }
 .ide-tabtoggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 100%; border: none; border-left: 1px solid var(--border); background: transparent; color: var(--dim); cursor: pointer; }
 .ide-tabtoggle:hover { background: var(--elevated2); color: var(--text); }
-.ide-tabtoggle.active { color: var(--accent); }
 .ide-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 100%; padding: 0 11px; background: transparent; color: var(--text3); font-size: 12px; cursor: pointer; white-space: nowrap; user-select: none; -webkit-user-select: none; border: none; border-right: 1px solid var(--border); }
 .ide-tab:hover { background: var(--elevated); color: var(--text2); }
 /* 파일 탭 활성 = 상단선(box-shadow) 대신 텍스트 색으로만 표현. 활성 파일이라도 pane 이

@@ -4,6 +4,8 @@ const svg = (inner, o = {}) =>
 
 export const icons = {
   sidebar: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>', o),
+  // 열림 상태 표시용 — 왼쪽 컬럼이 채워진 변형(색이 아니라 채움 유무로 토글 상태를 직관 표현).
+  sidebarFilled: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M4 4h5v16H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" fill="currentColor" stroke="none"/>', o),
   bell: (o) => svg('<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5 2 5.5H4c.5-.5 2-1.5 2-5.5"/><path d="M10 18.5a2 2 0 0 0 4 0"/>', o),
   plus: (o) => svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', o),
   folder: (o) => svg('<path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', o),

@@ -166,8 +166,8 @@ function renderSection(force) {
       <div class="sm-card2">
         <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>업데이트</span>
-          <span style="display:inline-flex;align-items:center;gap:8px;">
-            <span class="dim" id="updStatus">-</span>
+          <span style="display:inline-flex;align-items:center;gap:14px;">
+            <span class="dim" id="updStatus" style="min-width:76px;text-align:right;">-</span>
             <button class="sett-btn" id="updBtn">확인</button>
           </span>
         </div>

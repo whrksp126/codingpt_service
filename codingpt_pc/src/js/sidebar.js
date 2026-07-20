@@ -270,7 +270,8 @@ function ctlBtn(iconName, title, onClick) {
 export function buildTopControls(withAdd = true) {
   const frag = document.createDocumentFragment();
   const totalUnread = state.notifications.filter((n) => !n.read).length;
-  const toggle = ctlBtn("sidebar", state.sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기", () => S.toggleSidebar());
+  // 열림=채운 아이콘, 닫힘=빈 아이콘(색이 아니라 채움 유무로 상태 표현).
+  const toggle = ctlBtn(state.sidebarCollapsed ? "sidebar" : "sidebarFilled", state.sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기", () => S.toggleSidebar());
   const bell = ctlBtn("bell", "알림", (e) => {
     e.stopPropagation();
     notifOpen ? closeNotif() : openNotif();

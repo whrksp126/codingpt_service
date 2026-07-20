@@ -295,39 +295,37 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
     if run(ctx, &["has-session", "-t", &format!("={session}")]).is_err() {
         ensure_session(ctx, session, abs)?;
     }
-    let mut win = win;
-    let mut wins = list_windows(ctx, session);
-    if !wins.iter().any(|w| w.index == win) {
-        // 재생성 금지 — 그 인덱스에 창을 다시 만들면 다른 기기가 닫은 터미널이 스테일 참조/재연결마다
-        //  부활한다. 죽은 win 은 풀의 첫 터미널로 폴백(레이아웃 정리는 리컨실러 몫), 풀이 비었을 때만 생성.
-        //  -n 금지 — 명시 이름은 그 window 의 automatic-rename 을 끈다.
-        if wins.is_empty() {
-            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-c", &abs_s]);
-            wins = list_windows(ctx, session);
-        }
-        match wins.first() {
-            Some(f) => win = f.index,
-            None => return Err("터미널 window 확보 실패".to_string()),
-        }
-    }
-    let target_id = wins
-        .iter()
-        .find(|w| w.index == win)
-        .map(|w| w.id.clone())
-        .ok_or_else(|| "터미널 window 확보 실패".to_string())?;
-    // 뷰 세션(psess) 준비 + 링크 + 선택 — 소켓(-L codingpt)을 공유하는 (번들) 데몬의 reapStaleViews 가
-    //  attach=0 인 이 pane 뷰 세션을 재사용 직전에 지우면 link/select 가 "can't find window/session"
-    //  으로 터졌다. 특히 앱 업데이트에서 결정적으로 재현: 다운로드+설치+재실행이 리퍼 grace(90s)를
-    //  넘겨 이 세션이 idle 로 판정 → 재기동한 번들 데몬의 startup reap 이 킬 → 레이아웃 복원 attach 와
-    //  충돌(사용자가 매 업데이트마다 본 "터미널 연결 실패: can't find window: 0"). 뷰 세션은 고유
-    //  상태가 없어 재생성이 멱등 → 최대 3회 재생성 재시도로 레이스를 흡수한다(데몬 JS ensureView 미러).
+    // 뷰 세션(psess) 준비 + 풀 window 링크 + 선택. 소켓(-L codingpt)을 공유하는 (번들) 데몬의
+    //  reapStaleViews 가 attach=0 인 이 pane 뷰 세션을 재사용 직전에 지우거나(앱 업데이트가 리퍼
+    //  grace 90s 를 넘겨 idle 판정 → startup reap), 링크가 도중에 실패해 psess 가 반쪽 상태(예: 999
+    //  파킹 셸만 남고 window 0 미링크)로 굳으면 link/select 가 "can't find window/session" 으로 터졌다
+    //  (사용자가 매 업데이트마다 본 "터미널 연결 실패: can't find window: 0", 심하면 그 상태로 하루
+    //  종일 고착). 뷰 세션은 고유 상태가 없어 재생성이 멱등 → 실패 시 psess 를 통째로 버리고 새로 만들며
+    //  풀 소스도 매 시도 재조회해 순간 부재/인덱스 변경까지 흡수한다(최대 4회).
     let is_race = |e: &str| {
         let l = e.to_lowercase();
         l.contains("can't find session") || l.contains("can't find window") || l.contains("no server running")
     };
     let mut last_err = String::new();
-    let mut linked = false;
-    for _attempt in 0..3 {
+    for attempt in 0..4 {
+        // 이전 시도 실패 = psess 가 반쪽/레이스 잔재일 수 있으니 통째로 버리고 새로 만든다(뷰 세션은
+        //  고유 상태 없어 안전 — attach 는 이 함수 이후라 끊길 클라이언트도 없음).
+        if attempt > 0 {
+            let _ = run(ctx, &["kill-session", "-t", &format!("={psess}")]);
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        // ── 풀(source) window 확정 — 매 시도 재조회(순간 부재/인덱스 변경 흡수). 요청 win 이 없으면
+        //    풀의 첫 window 로 폴백(재생성 금지: 스테일 인덱스에 창을 다시 만들면 닫은 터미널이 부활).
+        let mut wins = list_windows(ctx, session);
+        if wins.is_empty() {
+            let _ = run(ctx, &["new-window", "-d", "-t", &format!("={session}:0"), "-c", &abs_s]);
+            wins = list_windows(ctx, session);
+        }
+        let (cur_win, target_id) = match wins.iter().find(|w| w.index == win).or_else(|| wins.first()) {
+            Some(w) => (w.index, w.id.clone()),
+            None => { last_err = "터미널 window 확보 실패".to_string(); std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
+        };
+        // ── psess 보장(없으면 생성 + 기본 셸 0→999 파킹) ──
         if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
             match run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s]) {
                 Ok(_) => {}
@@ -336,35 +334,28 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
             }
             let _ = run(ctx, &["move-window", "-s", &format!("={psess}:0"), "-t", &format!("={psess}:999")]);
         }
+        // ── 풀 window 를 같은 인덱스로 link + select ──
         let slots = list_windows(ctx, psess);
-        let slot = slots.iter().find(|w| w.index == win);
-        let needs_link = match slot {
+        let needs_link = match slots.iter().find(|w| w.index == cur_win) {
             Some(s) if s.id == target_id => false,
-            Some(_) => {
-                let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{win}")]);
-                true
-            }
+            Some(_) => { let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{cur_win}")]); true }
             None => true,
         };
         if needs_link {
-            if let Err(e) = run(ctx, &["link-window", "-s", &format!("={session}:{win}"), "-t", &format!("={psess}:{win}")]) {
+            if let Err(e) = run(ctx, &["link-window", "-s", &format!("={session}:{cur_win}"), "-t", &format!("={psess}:{cur_win}")]) {
                 if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
                 return Err(e);
             }
         }
-        if let Err(e) = run(ctx, &["select-window", "-t", &format!("={psess}:{win}")]) {
+        if let Err(e) = run(ctx, &["select-window", "-t", &format!("={psess}:{cur_win}")]) {
             if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
             return Err(e);
         }
-        linked = true;
-        break;
+        let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
+        resize_to_client(ctx, psess, session, cur_win); // 포커스한 pane 크기로 즉시 맞춤(미접속이면 무시)
+        return Ok(cur_win);
     }
-    if !linked {
-        return Err(if last_err.is_empty() { "뷰 세션 준비 실패".to_string() } else { last_err });
-    }
-    let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
-    resize_to_client(ctx, psess, session, win); // 포커스한 pane 크기로 즉시 맞춤(클라이언트 미접속이면 무시)
-    Ok(win)
+    Err(if last_err.is_empty() { "뷰 세션 준비 실패".to_string() } else { last_err })
 }
 
 // 풀에 새 터미널 생성(전 기기에 나타남) — 데몬 terminal.new 미러. 풀이 없으면 window 0 이 곧 새 터미널.

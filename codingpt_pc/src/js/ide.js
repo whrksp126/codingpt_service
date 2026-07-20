@@ -125,9 +125,10 @@ export class IdeView {
     // 파일 탭 바 맨 우측 = 탐색기(파일 트리) 토글 — pane 헤더 대신 IDE 안에 둬서
     //  IDE 가 다른 pane 의 혼합 탭으로 들어가도 항상 보인다(독립 pane/혼합 탭 무관).
     g.treeToggle = document.createElement("button");
-    g.treeToggle.className = "ide-tabtoggle" + (this.treeVisible ? " active" : "");
+    g.treeToggle.className = "ide-tabtoggle"; // 액티브(색) 표시 제거 — 채운/빈 아이콘으로만 구분
     g.treeToggle.title = "탐색기 토글";
-    g.treeToggle.innerHTML = icons.sidebar({ size: 15 });
+    // 열림=채운 아이콘, 닫힘=빈 아이콘.
+    g.treeToggle.innerHTML = icons[this.treeVisible ? "sidebarFilled" : "sidebar"]({ size: 15 });
     g.treeToggle.addEventListener("click", (e) => { e.stopPropagation(); this.toggleTree(); });
     g.tabsBar.append(g.tablist, g.treeToggle);
     g.editorHost = document.createElement("div");
@@ -231,8 +232,8 @@ export class IdeView {
     this.treeVisible = !this.treeVisible;
     this.treeEl.style.display = this.treeVisible ? "" : "none";
     this.resizer.style.display = this.treeVisible ? "" : "none";
-    // 모든 그룹의 탭바 토글 버튼 상태 동기화(트리는 IDE 하나 공유).
-    this.groups.forEach((g) => g.treeToggle?.classList.toggle("active", this.treeVisible));
+    // 모든 그룹의 탭바 토글 아이콘 동기화(트리는 IDE 하나 공유) — 채운/빈 아이콘으로 표현.
+    this.groups.forEach((g) => { if (g.treeToggle) g.treeToggle.innerHTML = icons[this.treeVisible ? "sidebarFilled" : "sidebar"]({ size: 15 }); });
     setTimeout(() => this.groups.forEach((g) => g.cm.refresh()), 0);
   }
 
