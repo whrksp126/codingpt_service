@@ -37,7 +37,10 @@ export function mountSettings(container) {
         <div class="sm-navlist" id="smNav"></div>
       </aside>
       <div class="sm-main">
-        <button class="sm-close" id="smClose" title="닫기">${icons.x({ size: 18 })}</button>
+        <div class="sm-head">
+          <div class="sm-head-title" id="smTitle"></div>
+          <button class="sm-close" id="smClose" title="닫기">${icons.x({ size: 18 })}</button>
+        </div>
         <div class="sm-content" id="smContent"></div>
       </div>
     </div>`;
@@ -89,10 +92,12 @@ function renderNav() {
 
 // force = 탭 전환 등으로 강제 재구성. 아니면 상태만 갱신.
 function renderSection(force) {
+  // 메인 영역 상단 헤더의 제목을 현재 섹션으로(사이드바 말고 메인에 명확히 구분된 헤더).
+  const titleEl = root && root.querySelector("#smTitle");
+  if (titleEl) titleEl.textContent = (NAV.find((n) => n.key === section) || {}).label || "";
   if (section === "connection") {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
-        <div class="sm-h">계정</div>
         <div id="connBody" class="conn-body"></div>`;
       connBody = contentEl.querySelector("#connBody");
       connMode = null;
@@ -126,7 +131,6 @@ function renderSection(force) {
         </div>`
       : `<div class="sm-card2"><div class="dim" style="font-size:13px">로그인하면 프로필이 표시됩니다.</div></div>`;
     contentEl.innerHTML = `
-      <div class="sm-h">일반</div>
       ${profileHtml}
       <div class="sm-card2">
         <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
@@ -162,7 +166,6 @@ function renderSection(force) {
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
     if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
-      <div class="sm-h">정보</div>
       <div class="sm-card2">
         <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>업데이트</span>
