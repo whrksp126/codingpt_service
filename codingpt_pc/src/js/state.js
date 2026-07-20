@@ -593,6 +593,9 @@ export async function reconcilePool() {
   const w = wsId ? state.ws[wsId] : null;
   const meta = state.workspaces.find((x) => x.id === wsId);
   if (!w || !w.layout || !meta || !isThisHost(meta)) return;
+  // localPath 없는 메타로 진행 금지 — 빈 경로는 홈 네임스페이스(codingpt)로 폴백돼 "터미널 0개"
+  //  목록을 받게 되고, 그걸 신뢰하면 이 워크스페이스 탭이 전부 오소거된다.
+  if (!meta.localPath) return;
   _reconciling = true;
   try {
     // 빈 목록도 신뢰한다(터미널 0개 = 정식 상태 — 다른 기기가 전부 닫았으면 여기서도 탭 정리).
@@ -614,7 +617,7 @@ export async function reconcilePool() {
       l.tabs = l.tabs.filter((t) => {
         if (typeof t.win !== "number") return true;
         const p = pool.get(t.win);
-        if (!p) { changed = true; return false; }
+        if (!p) { changed = true; api.debugLog(`reconcile: 탭 제거 win=${t.win} pane=${l.id} (목록 ${wins.length}개에 없음)`); return false; }
         seen.add(t.win);
         if (p.name && t.title !== p.name) { t.title = p.name; changed = true; touched.add(l.id); }
         // 실행 중 명령(pane_current_command) — 탭 라벨 부제("이름 · claude")로 표시(cmux 미러).
@@ -646,6 +649,7 @@ export async function reconcilePool() {
       if (targetId) {
         const leafT = T.findLeaf(w.layout, targetId);
         for (const m of missing) leafT.tabs.push({ win: m.index, title: m.name || "" });
+        api.debugLog(`reconcile: 탭 편입 ${missing.map((m) => m.index).join(",")} → pane=${targetId}`);
         // 트리 전멸 폴백으로 방금 만든 'new' placeholder 는 실제 풀 window 가 편입됐으면 제거 —
         //  남겨두면 mount 의 _ensureWin 이 풀에 불필요한 새 터미널을 또 만든다.
         //  (진짜 진행 중인 'new' 탭이 있으면 위 pending 가드가 이번 틱을 이미 스킵했으므로 안전)
@@ -666,13 +670,13 @@ export async function reconcilePool() {
       }
     }
     if (changed) {
-      for (const id of touched) {
-        const p = getPane(id);
-        p?.buildHead();
-        p?.ensureAttached?.(); // 빈 pane 에 편입된 터미널 attach + 자리표시 토글
-      }
+      for (const id of touched) getPane(id)?.buildHead();
       emit();
     }
+    // 자가치유 워치독 — 변경 유무와 무관하게 매 틱, 모든 터미널 pane 의 채널 생존을 확인해
+    //  죽은 attach(이벤트 유실·레이스 등 원인 불문)를 활성 탭으로 재수립한다. 정상 상태에선
+    //  pane 당 IPC 1회의 no-op.
+    T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") getPane(l.id)?.ensureAttached?.(); });
   } catch (_) { /* 오프라인 */ } finally { _reconciling = false; }
 }
 setInterval(() => { reconcilePool(); }, 7000);

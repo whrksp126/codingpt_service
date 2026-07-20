@@ -645,7 +645,11 @@ export class PaneView {
     if (typeof win !== "number" || !this.ctx.isLocal || this.node.kind !== "terminal") return;
     if (this._attachedWin === win) return;
     // 의도된 교체 — 구 attach 의 exit 이벤트가 "[세션 종료]" 안내/재연결 루프를 타지 않게 표식.
+    //  반드시 시간 제한(2s) — 닫을 채널이 없던 경우 exit 이 안 와서 표식이 남으면, 이후의 "진짜"
+    //  종료 이벤트를 삼켜 pane 이 죽은 채 침묵(입력 무반응·복구 루프 미작동)하는 사고가 났다.
     this._expectExit = true;
+    clearTimeout(this._expectExitTimer);
+    this._expectExitTimer = setTimeout(() => { this._expectExit = false; }, 2000);
     try { await api.ptyClose(this.id); } catch (_) {}
     this._openChannel(win);
   }
@@ -758,12 +762,18 @@ export class PaneView {
     }
     if (isT) this._fitNow();
   }
-  // 리컨실러가 탭을 편입/정리한 뒤 호출 — 빈 pane 에 터미널이 들어왔는데 채널이 없으면 attach 하고,
-  //  빈 상태 자리표시 토글도 갱신한다(리컨실러는 상태만 만지고 렌더/채널은 pane 이 책임).
-  ensureAttached() {
+  // 리컨실러가 매 틱 호출하는 자가치유 워치독 — 빈 pane 에 터미널이 편입됐거나, 어떤 경로로든
+  //  채널이 죽은 채 방치돼 있으면(_attachedWin 낙관 상태가 스테일해도 Rust 에 실제 생존을 물어
+  //  진실 기준) 활성 터미널 탭으로 재attach 한다. 빈 상태 자리표시 토글도 갱신.
+  async ensureAttached() {
     if (this.node.kind !== "terminal" || !this.mounted) return;
     this.showActiveTab();
-    if (!this.ctx.isLocal || typeof this._attachedWin === "number") return;
+    if (!this.ctx.isLocal) return;
+    if (typeof this._attachedWin === "number") {
+      const alive = await api.ptyAlive(this.id).catch(() => true);
+      if (alive) return;
+      this._attachedWin = null; // 죽었는데 낙관 상태만 남음(이벤트 유실 등) — 아래서 재attach
+    }
     const active = this.node.tabs?.[this.node.active];
     const tab = (isTermTab(active) && active) || this.node.tabs?.find((t) => isTermTab(t));
     if (tab && typeof tab.win === "number") this._reattach(tab.win);

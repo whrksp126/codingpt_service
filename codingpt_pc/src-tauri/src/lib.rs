@@ -47,6 +47,13 @@ fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
     state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
 }
 
+// 프론트 진단 로그 → stderr(dev/터미널 실행에서만 보임). 터미널 탭 소거/편입 같은 상태 변화를
+//  사후 추적할 수 있게 남긴다(릴리스에선 무해한 no-op 수준).
+#[tauri::command]
+fn debug_log(msg: String) {
+    eprintln!("[ui] {msg}");
+}
+
 // 실제 앱 버전(빌드 시 tauri.conf.json/Cargo 의 package version). 설정 정보 화면에 표시 —
 //  과거 하드코딩 문자열이 업데이트돼도 안 바뀌던 버그(항상 0.1.4로 보임) 수정.
 #[tauri::command]
@@ -543,7 +550,9 @@ pub fn run() {
             pty::pty_write,
             pty::pty_resize,
             pty::pty_claim,
+            pty::pty_alive,
             pty::pty_close,
+            debug_log,
             // tmux 제어(터미널=전용 세션/포트)
             tmux::tmux_list_windows,
             tmux::tmux_new_window,

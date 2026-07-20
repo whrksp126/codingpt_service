@@ -471,7 +471,12 @@ pub fn listen_ports_in(filter: Option<&Path>) -> Vec<u16> {
 pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
     let (ns, abs) = session_for(&local_path);
     migrate_legacy_pool(&ctx, &ns, &abs); // 구 풀 잔재가 있으면 무손실 승격(멱등)
-    list_terminals(&ctx, &ns)
+    let r = list_terminals(&ctx, &ns);
+    match &r {
+        Ok(v) => eprintln!("[tmux] list ns={ns} -> {} terminals", v.len()),
+        Err(e) => eprintln!("[tmux] list ns={ns} -> ERR {e}"),
+    }
+    r
 }
 
 #[tauri::command]

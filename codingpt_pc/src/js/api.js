@@ -53,6 +53,10 @@ export const api = {
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).
   ptyClaim: (paneId) => invoke("pty_claim", { paneId }),
+  // 채널 실제 생존 여부 — 리컨실러 워치독이 스테일 낙관 상태를 바로잡는 진실 원천.
+  ptyAlive: (paneId) => invoke("pty_alive", { paneId }),
+  // 진단 로그(stderr) — 터미널 탭 소거/편입 등 상태 변화 사후 추적용.
+  debugLog: (msg) => invoke("debug_log", { msg: String(msg) }).catch(() => {}),
   ptyClose: (paneId) => invoke("pty_close", { paneId }),
 
   // ── tmux 제어(터미널=전용 세션/포트) — index 자리의 숫자는 안정 터미널 ID(tid) ──

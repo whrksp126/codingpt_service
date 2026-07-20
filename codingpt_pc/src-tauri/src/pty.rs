@@ -201,6 +201,13 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     });
 }
 
+// 이 pane 의 채널이 실제로 살아있는가 — JS 쪽 낙관 상태(_attachedWin)가 이벤트 유실로 스테일해져도
+//  리컨실러 워치독이 진실을 확인해 재attach 할 수 있게 한다.
+#[tauri::command]
+pub fn pty_alive(mgr: State<PtyManager>, pane_id: String) -> bool {
+    mgr.panes.lock().unwrap().contains_key(&pane_id)
+}
+
 // pane 스트림 닫기: attach 클라이언트(PTY child)만 종료 — 세션/셸은 tmux 서버에 생존.
 //  (워크스페이스 전환/재렌더 dispose 에서 호출되므로 여기서 세션을 kill 하면 안 된다.
 //   터미널 완전 삭제는 탭 닫기/pane 닫기의 kill_window 가 담당 — 마지막 window kill 시 세션 자동 소멸.)
