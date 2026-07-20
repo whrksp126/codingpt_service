@@ -188,12 +188,14 @@ function bindUpdate() {
     btn.disabled = true;
     try {
       if (found) {
-        st.textContent = "다운로드 중…";
+        // 다운로드 중엔 진행률을 "버튼에만" 표시(별도 상태 텍스트 없이 [ n% ] 하나만).
+        st.textContent = "";
+        btn.textContent = "0%";
         const un = await api.onUpdateProgress((p) => {
           if (!p) return;
           // chunk = 누적 바이트(Rust에서 델타 누적). total 있으면 %, 없으면 받은 MB 로라도 진행 표시.
-          if (p.total) st.textContent = `다운로드 ${Math.min(100, Math.round((p.chunk / p.total) * 100))}%`;
-          else if (p.chunk) st.textContent = `다운로드 ${(p.chunk / 1048576).toFixed(1)}MB`;
+          if (p.total) btn.textContent = `${Math.min(100, Math.round((p.chunk / p.total) * 100))}%`;
+          else if (p.chunk) btn.textContent = `${(p.chunk / 1048576).toFixed(1)}MB`;
         });
         await api.updateInstall(); // 성공 시 앱이 재시작되므로 이후 코드는 실행 안 될 수 있음
         un?.();
