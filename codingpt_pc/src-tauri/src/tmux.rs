@@ -315,28 +315,53 @@ pub fn ensure_view(ctx: &TmuxCtx, psess: &str, session: &str, win: i64, abs: &Pa
         .find(|w| w.index == win)
         .map(|w| w.id.clone())
         .ok_or_else(|| "터미널 window 확보 실패".to_string())?;
-    if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
-        match run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s]) {
-            Ok(_) => {}
-            Err(e) if e.contains("duplicate session") => {}
-            Err(e) => return Err(e),
-        }
-        let _ = run(ctx, &["move-window", "-s", &format!("={psess}:0"), "-t", &format!("={psess}:999")]);
-    }
-    let slots = list_windows(ctx, psess);
-    let slot = slots.iter().find(|w| w.index == win);
-    let needs_link = match slot {
-        Some(s) if s.id == target_id => false,
-        Some(_) => {
-            let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{win}")]);
-            true
-        }
-        None => true,
+    // 뷰 세션(psess) 준비 + 링크 + 선택 — 소켓(-L codingpt)을 공유하는 (번들) 데몬의 reapStaleViews 가
+    //  attach=0 인 이 pane 뷰 세션을 재사용 직전에 지우면 link/select 가 "can't find window/session"
+    //  으로 터졌다. 특히 앱 업데이트에서 결정적으로 재현: 다운로드+설치+재실행이 리퍼 grace(90s)를
+    //  넘겨 이 세션이 idle 로 판정 → 재기동한 번들 데몬의 startup reap 이 킬 → 레이아웃 복원 attach 와
+    //  충돌(사용자가 매 업데이트마다 본 "터미널 연결 실패: can't find window: 0"). 뷰 세션은 고유
+    //  상태가 없어 재생성이 멱등 → 최대 3회 재생성 재시도로 레이스를 흡수한다(데몬 JS ensureView 미러).
+    let is_race = |e: &str| {
+        let l = e.to_lowercase();
+        l.contains("can't find session") || l.contains("can't find window") || l.contains("no server running")
     };
-    if needs_link {
-        run(ctx, &["link-window", "-s", &format!("={session}:{win}"), "-t", &format!("={psess}:{win}")])?;
+    let mut last_err = String::new();
+    let mut linked = false;
+    for _attempt in 0..3 {
+        if run(ctx, &["has-session", "-t", &format!("={psess}")]).is_err() {
+            match run(ctx, &["new-session", "-d", "-s", psess, "-c", &abs_s]) {
+                Ok(_) => {}
+                Err(e) if e.contains("duplicate session") => {}
+                Err(e) => { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
+            }
+            let _ = run(ctx, &["move-window", "-s", &format!("={psess}:0"), "-t", &format!("={psess}:999")]);
+        }
+        let slots = list_windows(ctx, psess);
+        let slot = slots.iter().find(|w| w.index == win);
+        let needs_link = match slot {
+            Some(s) if s.id == target_id => false,
+            Some(_) => {
+                let _ = run(ctx, &["unlink-window", "-t", &format!("={psess}:{win}")]);
+                true
+            }
+            None => true,
+        };
+        if needs_link {
+            if let Err(e) = run(ctx, &["link-window", "-s", &format!("={session}:{win}"), "-t", &format!("={psess}:{win}")]) {
+                if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
+                return Err(e);
+            }
+        }
+        if let Err(e) = run(ctx, &["select-window", "-t", &format!("={psess}:{win}")]) {
+            if is_race(&e) { last_err = e; std::thread::sleep(std::time::Duration::from_millis(120)); continue; }
+            return Err(e);
+        }
+        linked = true;
+        break;
     }
-    run(ctx, &["select-window", "-t", &format!("={psess}:{win}")])?;
+    if !linked {
+        return Err(if last_err.is_empty() { "뷰 세션 준비 실패".to_string() } else { last_err });
+    }
     let _ = run(ctx, &["kill-window", "-t", &format!("={psess}:999")]); // temp 셸 정리(전용이라 무해)
     resize_to_client(ctx, psess, session, win); // 포커스한 pane 크기로 즉시 맞춤(클라이언트 미접속이면 무시)
     Ok(win)

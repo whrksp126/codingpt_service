@@ -203,7 +203,13 @@ function run(config) {
         .then((n) => { if (n) console.log(`[control] 낡은 터미널 ${n}개 자가치유(respawn)`); })
         .catch(() => { /* 다음 주기 */ });
     };
-    reap();
+    // 첫 reap 은 지연한다 — 앱/데몬이 함께 재기동되는 순간(특히 PC 앱 업데이트: 다운로드+설치가
+    //  리퍼 grace(90s)를 넘겨 뷰 세션이 idle 로 판정됨)에, 클라이언트가 레이아웃을 복원해 자기 뷰
+    //  세션에 재attach 하기 "전에" 리퍼가 그 세션을 죽이면 attach 가 "can't find window/session"
+    //  으로 터진다(사용자가 매 업데이트마다 본 PC 터미널 오류의 근원). 재attach 하면 attach>0 이라
+    //  이후엔 안 죽으므로, 첫 청소를 미뤄 복원이 먼저 끝나게 한다(누적 스테일은 15s 뒤/주기로 정리).
+    const firstReap = setTimeout(reap, 15000);
+    if (firstReap.unref) firstReap.unref();
     const reapTimer = setInterval(reap, 120000);
     if (reapTimer.unref) reapTimer.unref();
     connect();
