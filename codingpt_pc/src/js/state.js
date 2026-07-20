@@ -20,8 +20,10 @@ export const state = {
   currentDeviceId: null, // 이 기기의 DaemonDevice id
 };
 
-// 워크스페이스 로컬 표시 설정(순서/고정/색/이름) — 백엔드 목록과 별개로 pc-ui.json 에 영속.
-export const wsPrefs = { order: [], pinned: [], color: {}, rename: {} };
+// 워크스페이스 로컬 표시 설정(순서/고정/색/이름/터미널 시드 여부) — 백엔드 목록과 별개로 pc-ui.json 영속.
+//  seeded: 이 기기에서 그 워크스페이스에 "최초 1회 터미널 자동 준비"를 이미 했는가 — 이후엔
+//  사용자가 터미널을 전부 닫으면 0개 상태를 존중한다(자동 재생성 금지, 전 기기 공통).
+export const wsPrefs = { order: [], pinned: [], color: {}, rename: {}, seeded: [] };
 
 export function wsDisplayName(w) {
   return (w && (wsPrefs.rename[w.id] || w.name)) || "워크스페이스";
@@ -168,11 +170,17 @@ export function isThisHost(w) {
   return w.hostDeviceId == null || my == null || w.hostDeviceId === my;
 }
 
-// 워크스페이스 런타임 보장(레이아웃 없으면 단일 터미널로 초기화).
+// 워크스페이스 런타임 보장. 최초 진입(기기별 1회)에만 터미널 시드('new' → 기존 입양 우선, 없으면
+//  생성) — 이미 시드한 적 있으면 빈 pane 으로 시작해 리컨실러가 실제 터미널 목록을 그대로 반영한다.
 export function ensureRuntime(id) {
   if (!state.ws[id]) {
-    state.ws[id] = { layout: T.leaf("terminal", { win: "new" }), focusId: null, surfaces: [], ports: [] };
+    const seeded = wsPrefs.seeded.includes(id);
+    state.ws[id] = {
+      layout: T.leaf("terminal", seeded ? { empty: true } : { win: "new" }),
+      focusId: null, surfaces: [], ports: [],
+    };
     state.ws[id].focusId = T.firstLeafId(state.ws[id].layout);
+    if (!seeded) { wsPrefs.seeded.push(id); schedulePersist(); }
   }
   return state.ws[id];
 }
@@ -265,8 +273,9 @@ export function closePane(wsId, paneId) {
   w.layout = r.tree;
   w.focusId = r.focusId || (w.layout ? T.firstLeafId(w.layout) : null);
   if (!w.layout) {
-    // 마지막 pane 을 닫으면 완전히 새 터미널(새 tmux window)로 — 이전 작업 안 보임.
-    w.layout = T.leaf("terminal", { win: "new" });
+    // 마지막 pane 닫힘 = 터미널 0개 상태 유지(자동 재생성 금지 — 닫힘은 전 기기 공통 의사).
+    //  빈 자리 pane 에서 + 로 언제든 추가.
+    w.layout = T.leaf("terminal", { empty: true });
     w.focusId = T.firstLeafId(w.layout);
   }
   emit();
@@ -586,10 +595,9 @@ export async function reconcilePool() {
   if (!w || !w.layout || !meta || !isThisHost(meta)) return;
   _reconciling = true;
   try {
+    // 빈 목록도 신뢰한다(터미널 0개 = 정식 상태 — 다른 기기가 전부 닫았으면 여기서도 탭 정리).
+    //  tmux 오류는 Rust tmux_list_windows 가 Err 로 구분해 던지므로(catch 로 이번 틱 스킵) 안전.
     const wins = (await api.listWindows(meta.localPath || "")) || [];
-    // 빈 목록은 신뢰하지 않는다 — Rust list_terminals 는 tmux 오류도 [] 로 주므로, "전부 삭제됨"
-    //  오판이 레이아웃 전멸(pane 교체)로 이어진다. 진짜 비었으면 pty_open(resolve_tid)이 새로 만든다.
-    if (!wins.length) return;
     // 'new'(풀 window 확보 진행 중) 탭이 있으면 이번 틱 스킵 — 방금 만든 터미널의 중복 편입 방지.
     let pending = false;
     T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") { for (const t of l.tabs) if (t.win === "new") pending = true; } });
@@ -615,14 +623,16 @@ export async function reconcilePool() {
         return true;
       });
       if (l.tabs.length !== before) touched.add(l.id);
-      if (!l.tabs.length) { deadPanes.push(l.id); return; }
+      // 원래부터 빈 자리 pane(터미널 0개 상태)은 보존 — "탭이 있었다가 전부 사라진" pane 만 정리.
+      if (!l.tabs.length) { if (before) deadPanes.push(l.id); return; }
       const ai = l.tabs.indexOf(activeTab);
       l.active = ai >= 0 ? ai : Math.max(0, Math.min(l.tabs.length - 1, l.active));
     });
-    // 빈 pane 제거 — 터미널이 타 기기에서 삭제됨(풀은 이미 정리, 로컬 kill 불필요).
+    // 빈 pane 제거 — 터미널이 타 기기에서 삭제됨(실체는 이미 소멸, 로컬 kill 불필요).
+    //  전부 사라졌으면 빈 자리 pane 유지(자동 재생성 금지 — 삭제는 전 기기 공통 의사).
     for (const id of deadPanes) {
       const r = T.closeLeaf(w.layout, id);
-      w.layout = r.tree || T.leaf("terminal", { win: "new" });
+      w.layout = r.tree || T.leaf("terminal", { empty: true });
       w.focusId = r.focusId || T.firstLeafId(w.layout);
       changed = true;
     }
@@ -656,7 +666,11 @@ export async function reconcilePool() {
       }
     }
     if (changed) {
-      for (const id of touched) getPane(id)?.buildHead();
+      for (const id of touched) {
+        const p = getPane(id);
+        p?.buildHead();
+        p?.ensureAttached?.(); // 빈 pane 에 편입된 터미널 attach + 자리표시 토글
+      }
       emit();
     }
   } catch (_) { /* 오프라인 */ } finally { _reconciling = false; }
@@ -686,7 +700,10 @@ export async function restorePersisted() {
       wsPrefs.pinned = Array.isArray(saved.wsPrefs.pinned) ? saved.wsPrefs.pinned : [];
       wsPrefs.color = saved.wsPrefs.color && typeof saved.wsPrefs.color === "object" ? saved.wsPrefs.color : {};
       wsPrefs.rename = saved.wsPrefs.rename && typeof saved.wsPrefs.rename === "object" ? saved.wsPrefs.rename : {};
+      wsPrefs.seeded = Array.isArray(saved.wsPrefs.seeded) ? saved.wsPrefs.seeded : [];
     }
+    // 구 저장본(seeded 없음) 마이그레이션 — 복원된 레이아웃이 있는 워크스페이스는 이미 시드된 것.
+    for (const id of Object.keys(state.ws)) if (!wsPrefs.seeded.includes(id)) wsPrefs.seeded.push(id);
   } catch (_) {
     /* 복원 실패는 무시(빈 상태로 시작) */
   }

@@ -19,10 +19,12 @@ export function bumpSeq(fromIds) {
   }
 }
 
-// leaf: 터미널 pane 은 탭 배열(각 탭=tmux window). 프리뷰는 url, IDE 는 openPath.
+// leaf: 터미널 pane 은 탭 배열(각 탭=tmux 터미널). 프리뷰는 url, IDE 는 openPath.
 export function leaf(kind, opts = {}) {
   if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null };
   if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null };
+  // empty: 터미널 0개 상태의 자리 pane — 자동 생성 금지(닫힘=전 기기 공통 의사), 사용자가 + 로 추가.
+  if (opts.empty) return { id: newPaneId(), kind: "terminal", tabs: [], active: 0 };
   return {
     id: newPaneId(),
     kind: "terminal",

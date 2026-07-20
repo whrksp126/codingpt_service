@@ -28,6 +28,10 @@ struct PtyHandle {
     // 세대 표식 — 탭 전환(_reattach: close→open)으로 같은 pane_id 에 새 attach 가 끼워진 뒤,
     //  "구" reader 스레드의 종료 정리가 새 핸들을 지워버리는 레이스를 막는다(자기 세대만 정리).
     epoch: u64,
+    // attach 대상 터미널 세션 + 마지막 클라이언트 크기 — pty_claim(크기 주장)용.
+    target: String,
+    last_cols: u16,
+    last_rows: u16,
 }
 
 static PTY_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -67,7 +71,7 @@ pub fn pty_open(
     // 구 풀 잔재가 있으면 무손실 승격(멱등) → 요청 tid 확정. 전용 세션은 리퍼 불가침 + durable 이라
     //  앱이 얼마나 죽어 있었든 여기서의 attach 는 "이름으로 다시 붙기"일 뿐 레이스가 없다.
     tmux::migrate_legacy_pool(&ctx, &ns, &abs);
-    let tid = tmux::resolve_tid(&ctx, &ns, &abs, win_index)?;
+    let tid = tmux::resolve_tid(&ctx, &ns, win_index)?;
     if mgr.panes.lock().unwrap().contains_key(&pane_id) {
         return Ok(tid); // 이미 열림(중복 방지)
     }
@@ -99,7 +103,7 @@ pub fn pty_open(
     let epoch = PTY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, epoch },
+        PtyHandle { master: pair.master, writer, child, epoch, target, last_cols: cols, last_rows: rows },
     );
 
     // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리(자기 세대만).
@@ -153,8 +157,48 @@ pub fn pty_resize(
         h.master
             .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("resize 실패: {e}"))?;
+        h.last_cols = cols;
+        h.last_rows = rows;
     }
     Ok(())
+}
+
+// 크기 주장(claim) — 사용자가 이 pane 을 클릭/포커스/타이핑할 때, 표시 중인 터미널 창이 다른 기기
+//  크기로 잡혀 있으면 클라이언트 pty 를 1칸 줄였다 복원(nudge)한다. 리사이즈 신호가 이 클라이언트를
+//  window-size latest 의 "latest" 로 만들어 창이 이 pane 크기로 따라온다 — resize-window(manual 고정)
+//  없이 성립하므로 기기 간 크기 뺏기 전쟁이 없다. 창이 이미 내 크기면 완전 no-op.
+#[tauri::command]
+pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+    let (target, cols, rows) = {
+        let panes = mgr.panes.lock().unwrap();
+        match panes.get(&pane_id) {
+            Some(h) => (h.target.clone(), h.last_cols, h.last_rows),
+            None => return,
+        }
+    };
+    if cols < 4 || rows < 2 {
+        return;
+    }
+    let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
+    std::thread::spawn(move || {
+        let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{window_width} #{window_height}"]).unwrap_or_default();
+        let mut it = cur.split_whitespace();
+        let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if cw == cols && ch == rows {
+            return; // 이미 내 크기 — SIGWINCH 소음 없이 종료
+        }
+        let nudge = |c: u16| {
+            if let Some(m) = app.try_state::<PtyManager>() {
+                if let Some(h) = m.panes.lock().unwrap().get(&pane_id) {
+                    let _ = h.master.resize(PtySize { rows, cols: c, pixel_width: 0, pixel_height: 0 });
+                }
+            }
+        };
+        nudge(cols - 1);
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        nudge(cols);
+    });
 }
 
 // pane 스트림 닫기: attach 클라이언트(PTY child)만 종료 — 세션/셸은 tmux 서버에 생존.

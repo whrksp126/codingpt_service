@@ -51,6 +51,8 @@ export const api = {
     invoke("pty_open", { paneId, localPath, winIndex, cols, rows }),
   ptyWrite: (paneId, data) => invoke("pty_write", { paneId, data }),
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
+  // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).
+  ptyClaim: (paneId) => invoke("pty_claim", { paneId }),
   ptyClose: (paneId) => invoke("pty_close", { paneId }),
 
   // ── tmux 제어(터미널=전용 세션/포트) — index 자리의 숫자는 안정 터미널 ID(tid) ──

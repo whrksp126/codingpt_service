@@ -444,6 +444,19 @@ export class PaneView {
     this.termEl = document.createElement("div");
     this.termEl.className = "pane-term";
     this.body.appendChild(this.termEl);
+    // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
+    this.emptyEl = document.createElement("div");
+    this.emptyEl.className = "pane-term-empty";
+    this.emptyEl.style.display = "none";
+    const msg = document.createElement("div");
+    msg.className = "pane-term-empty-msg";
+    msg.textContent = "열린 터미널이 없습니다";
+    const btn = document.createElement("button");
+    btn.className = "pane-term-empty-btn";
+    btn.innerHTML = `${icons.terminal({ size: 14 })}<span>새 터미널</span>`;
+    btn.addEventListener("click", () => this.addTab());
+    this.emptyEl.append(msg, btn);
+    this.body.appendChild(this.emptyEl);
     this.term = new Terminal({
       cursorBlink: true,
       fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
@@ -615,6 +628,17 @@ export class PaneView {
     return tab.win;
   }
 
+  // 크기 주장(스로틀) — 사용자가 이 pane 을 실제로 만질 때(클릭/포커스/타이핑), 표시 창이 다른
+  //  기기 크기로 잡혀 있으면 Rust 가 클라이언트 nudge 로 회수한다(이미 내 크기면 no-op).
+  //  모바일은 키보드 노출 등 실 리사이즈가 자연 클레임을 만들지만 PC 는 이 훅이 유일한 계기다.
+  _claimSize() {
+    if (!this.ctx.isLocal || this.node.kind !== "terminal") return;
+    const n = Date.now();
+    if (n - (this._lastClaim || 0) < 1200) return;
+    this._lastClaim = n;
+    api.ptyClaim(this.id).catch(() => {});
+  }
+
   // 이 pane 의 attach 를 지정 터미널(tid)로 재수립 — 전용 세션 모델의 탭 전환/드롭 이동 공용.
   //  이미 그 터미널에 붙어 있으면 no-op. 로컬 tmux attach 라 전환은 즉시(전체 화면 재그리기).
   async _reattach(win) {
@@ -633,12 +657,14 @@ export class PaneView {
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();
+    this.showActiveTab(); // 빈 상태 자리표시 → 터미널 본문 전환
     const win = await this._ensureWin(tab);
     // await 사이 탭이 다른 pane 으로 드래그돼 사라졌을 수 있음 → 아직 이 pane 소속일 때만 반영.
     if (!this.node.tabs.includes(tab)) return;
     this.buildHead(); // 자동 개명이 부여한 이름 반영
     this._reattach(win);
     this.ctx.persist?.();
+    this.ctx.onSurfacesChanged?.();
     this.focus();
   }
   async switchTab(i) {
@@ -721,7 +747,9 @@ export class PaneView {
     const tab = this.node.tabs[this.node.active];
     const isT = isTermTab(tab);
     if (!isT && tab) this._ensureMixed(tab);
-    this.termEl.style.display = isT ? "" : "none";
+    const empty = !this.node.tabs.length;
+    if (this.emptyEl) this.emptyEl.style.display = empty ? "flex" : "none";
+    this.termEl.style.display = !empty && isT ? "" : "none";
     for (const [tid, m] of this._mixed) {
       const on = !isT && tab && tab.tid === tid;
       m.host.style.display = on ? "flex" : "none";
@@ -730,6 +758,17 @@ export class PaneView {
     }
     if (isT) this._fitNow();
   }
+  // 리컨실러가 탭을 편입/정리한 뒤 호출 — 빈 pane 에 터미널이 들어왔는데 채널이 없으면 attach 하고,
+  //  빈 상태 자리표시 토글도 갱신한다(리컨실러는 상태만 만지고 렌더/채널은 pane 이 책임).
+  ensureAttached() {
+    if (this.node.kind !== "terminal" || !this.mounted) return;
+    this.showActiveTab();
+    if (!this.ctx.isLocal || typeof this._attachedWin === "number") return;
+    const active = this.node.tabs?.[this.node.active];
+    const tab = (isTermTab(active) && active) || this.node.tabs?.find((t) => isTermTab(t));
+    if (tab && typeof tab.win === "number") this._reattach(tab.win);
+  }
+
   // 드롭으로 이동해 온 탭을 활성화(이 pane 스트림을 그 터미널로 재attach).
   async activateWin(win) {
     this._reattach(win);
@@ -830,6 +869,7 @@ export class PaneView {
     };
     const onKeydown = (e) => {
       if (e.target !== ta) return;
+      this._claimSize(); // 타이핑 = 이 pane 크기 주장(스로틀·창이 내 크기면 no-op)
       if (e.isComposing || e.keyCode === 229) return; // 조합 중 키는 IME 소유(Enter=확정 포함)
       const mod = e.metaKey ? "meta" : e.altKey ? "alt" : null;
       if (mod && !(e.metaKey && e.altKey)) {
@@ -892,12 +932,13 @@ export class PaneView {
     //  복귀 후 첫 입력의 델타가 "옛 텍스트 길이만큼 백스페이스"를 쏘지 않는다.
     const onBlur = () => resetBuf();
     ta.addEventListener("blur", onBlur);
-    // 크기 클레임(포커스/클릭 시 resize-window)은 폐지 — window-size latest 가 입력/리사이즈를
-    //  하는 클라이언트를 자동으로 따라간다(수동 클레임이 기기 간 크기 뺏기 전쟁의 근원이었다).
+    const onFocus = () => this._claimSize();
+    ta.addEventListener("focus", onFocus);
     const onMouseDown = () => {
       // 사용자가 실제로 터미널을 클릭 = 이 터미널을 봄 → 활성 탭 win 알림 읽음(프로그램적 포커스 제외).
       const at = this.node.tabs?.[this.node.active];
       if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
+      this._claimSize(); // 클릭 = 크기 주장(모바일의 키보드 노출 리사이즈에 대응하는 PC 계기)
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
@@ -907,6 +948,7 @@ export class PaneView {
     document.addEventListener("compositionend", onCompEnd, true);
     this._inputDispose = () => {
       ta.removeEventListener("blur", onBlur);
+      ta.removeEventListener("focus", onFocus);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);

@@ -475,6 +475,23 @@ export function smartAdd(kind, extra) {
   const focusId = rt.focusId || T.firstLeafId(rt.layout);
   if (!focusId) return null;
   const focusLeaf = T.findLeaf(rt.layout, focusId);
+  // 빈 자리 pane(터미널 0개 상태)이 활성이면 분할 대신 그 자리를 채운다.
+  if (focusLeaf?.kind === "terminal" && !focusLeaf.tabs.length) {
+    if (kind === "terminal") {
+      panes.get(focusId)?.addTab();
+    } else {
+      const tab = kind === "ide"
+        ? { kind: "ide", openPath: extra?.openPath || null, tid: newTid() }
+        : { kind: "preview", url: extra?.url || "", tid: newTid() };
+      focusLeaf.tabs.push(tab);
+      focusLeaf.active = 0;
+      panes.get(focusId)?.buildHead();
+      panes.get(focusId)?.showActiveTab?.();
+      S.emit();
+    }
+    S.focusPane(focusId);
+    return focusId;
+  }
   const r = panes.get(focusId)?.el?.getBoundingClientRect();
   const MIN_W = 360, MIN_H = 240;
   const canH = !!r && r.width / 2 >= MIN_W;

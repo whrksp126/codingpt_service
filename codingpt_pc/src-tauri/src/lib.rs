@@ -542,6 +542,7 @@ pub fn run() {
             pty::pty_open,
             pty::pty_write,
             pty::pty_resize,
+            pty::pty_claim,
             pty::pty_close,
             // tmux 제어(터미널=전용 세션/포트)
             tmux::tmux_list_windows,

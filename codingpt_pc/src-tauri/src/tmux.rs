@@ -240,14 +240,21 @@ pub struct NewWindowInfo {
 }
 
 // 워크스페이스의 터미널 목록 — 전용 세션들을 훑어 [{index(tid), name, command}] 생성순 정렬.
-//  window name(자동 개명)이 곧 전 기기 공유 탭 이름. 서버 없음/오류 = 빈 목록.
-pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Vec<WindowInfo> {
+//  window name(자동 개명)이 곧 전 기기 공유 탭 이름.
+//  "서버 없음" = 터미널 0개(정상) → Ok(빈 목록). 그 외 오류 = Err — 호출측(리컨실러)이 빈 목록을
+//  "전부 삭제됨" 으로 신뢰할 수 있게 오류와 진짜 0개를 구분한다.
+pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Result<Vec<WindowInfo>, String> {
     let out = match run(
         ctx,
         &["list-windows", "-a", "-F", "#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}"],
     ) {
         Ok(o) => o,
-        Err(_) => return vec![],
+        Err(e) => {
+            if e.to_lowercase().contains("no server running") {
+                return Ok(vec![]);
+            }
+            return Err(e);
+        }
     };
     let prefix = format!("{ns}--t-");
     let mut rows: Vec<(i64, i64, WindowInfo)> = Vec::new();
@@ -272,7 +279,7 @@ pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Vec<WindowInfo> {
         }));
     }
     rows.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-    rows.into_iter().map(|r| r.2).collect()
+    Ok(rows.into_iter().map(|r| r.2).collect())
 }
 
 // 새 터미널 생성(전 기기에 나타남) — 전용 세션 detached 생성 + cpt env 주입.
@@ -308,7 +315,8 @@ pub fn migrate_legacy_pool(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) {
     }
     let wins = list_windows(ctx, ns);
     // 기존 --t- tid 와의 충돌 회피 필수 — 충돌하면 아래 move-window -k 가 기존 터미널을 덮어쓴다.
-    let taken: std::collections::HashSet<i64> = list_terminals(ctx, ns).iter().map(|t| t.index).collect();
+    let taken: std::collections::HashSet<i64> =
+        list_terminals(ctx, ns).unwrap_or_default().iter().map(|t| t.index).collect();
     let mut base = new_tid();
     for _ in 0..32 {
         let clash = (0..wins.len() as i64).any(|i| taken.contains(&(base + i))) || base + wins.len() as i64 > 0x7fff_ffff;
@@ -336,17 +344,18 @@ pub fn migrate_legacy_pool(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) {
     }
 }
 
-// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백, 없으면 생성.
-//  (재생성 금지: 스테일 tid 로 세션을 되살리면 닫은 터미널이 부활한다.)
-pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, abs: &PathBuf, want: i64) -> Result<i64, String> {
+// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백.
+//  터미널 0개면 Err — 여기서 "생성"하면 죽은 pane 의 자동 재연결이 닫은 터미널을 유령으로
+//  부활시킨다(0개 = 정식 상태, 생성은 tmux_new_window/시드의 명시 경로만).
+pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, want: i64) -> Result<i64, String> {
     if want > 0 && run(ctx, &["has-session", "-t", &format!("={}", term_session(ns, want))]).is_ok() {
         return Ok(want);
     }
-    let list = list_terminals(ctx, ns);
-    if let Some(first) = list.first() {
-        return Ok(first.index);
+    let list = list_terminals(ctx, ns)?;
+    match list.first() {
+        Some(first) => Ok(first.index),
+        None => Err("열린 터미널이 없습니다".to_string()),
     }
-    create_terminal(ctx, ns, abs).map(|t| t.index)
 }
 
 // 터미널 완전 삭제(전 기기 공통) = kill-session. 이미 없거나 서버가 죽었어도 멱등 성공.
@@ -459,7 +468,7 @@ pub fn listen_ports_in(filter: Option<&Path>) -> Vec<u16> {
 // ── 프론트 노출 커맨드 ──
 
 #[tauri::command]
-pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Vec<WindowInfo> {
+pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
     let (ns, abs) = session_for(&local_path);
     migrate_legacy_pool(&ctx, &ns, &abs); // 구 풀 잔재가 있으면 무손실 승격(멱등)
     list_terminals(&ctx, &ns)

@@ -171,16 +171,16 @@ async function migrateLegacyPool(ns, abs) {
   migratedNs.add(ns);
 }
 
-// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백, 하나도 없으면 생성.
-//  (재생성 금지 원칙 유지: 스테일 tid 로 세션을 "되살리면" 닫은 터미널이 부활한다.)
-async function resolveTid(ns, abs, want) {
+// 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백.
+//  터미널이 하나도 없으면 null — 여기서 "생성"하면 안 된다: 죽은 pane 의 자동 재접속이 닫은
+//  터미널을 유령으로 부활시킨다(터미널 0개 = 정식 상태, 생성은 terminal.new/시드의 명시 경로만).
+async function resolveTid(ns, want) {
   const tid = Number(want);
   if (Number.isFinite(tid) && tid > 0) {
     try { await runTmux(['has-session', '-t', '=' + termSession(ns, tid)]); return tid; } catch (_) { /* 폴백 */ }
   }
   const list = await listTerminals(ns);
-  if (list.length) return list[0].index;
-  return (await createTerminal(ns, abs)).index;
+  return list.length ? list[0].index : null;
 }
 
 // pane 스트림 레지스트리 — terminal.select 가 "그 pane 의 살아있는 스트림"의 attach 대상을 즉석
@@ -261,7 +261,13 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
       try {
         await migrateLegacyPool(session, abs);
         const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
-        tid = await resolveTid(session, abs, want);
+        tid = await resolveTid(session, want);
+        if (tid == null) {
+          // 터미널 0개(정식 상태) — 여기서 만들면 죽은 pane 재접속이 유령을 부활시킨다.
+          //  앱 리컨실러가 곧 이 pane 을 정리한다(생성은 terminal.new 명시 경로만).
+          try { ws.send('\r\n\x1b[90m[이 워크스페이스에 열린 터미널이 없습니다]\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
+          return;
+        }
         paneCurrent.set(pkey, tid);
       } catch (e) {
         try { ws.send(`\r\n\x1b[31m터미널 준비 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
@@ -488,8 +494,9 @@ async function handleTerminalRpc(method, params) {
   }
   if (method === 'terminal.select') {
     // 이 pane 이 보는 터미널 전환. 요청 tid 가 스테일(닫힘)이면 첫 터미널 폴백(재생성 금지 —
-    //  닫은 터미널이 부활하면 안 된다). 크기는 window-size latest 가 자동 처리(claim 폐지).
-    const tid = await resolveTid(session, abs, params && params.index);
+    //  닫은 터미널이 부활하면 안 된다). 터미널 0개면 no-op. 크기는 window-size latest 가 자동 처리.
+    const tid = await resolveTid(session, params && params.index);
+    if (tid == null) return { ok: true };
     if (pkey) {
       paneCurrent.set(pkey, tid);
       const h = paneStreams.get(pkey);

@@ -74,7 +74,7 @@ test('리퍼 불가침: reapStaleViews(0) 연사에도 터미널 세션 생존 +
   for (let round = 0; round < 60; round++) {
     // 재접속(resolveTid)과 동시에 리퍼가 무작위 시점(0~25ms)에 grace 0 으로 발화.
     const killer = (async () => { await sleep(Math.floor(Math.random() * 25)); await pty.reapStaleViews(0); })();
-    const r = await Promise.allSettled([pty.resolveTid(NS, ABS, a.index)]);
+    const r = await Promise.allSettled([pty.resolveTid(NS, a.index)]);
     await killer;
     if (r[0].status === 'rejected') rejected += 1;
     else assert.strictEqual(r[0].value, a.index, '폴백 없이 요청한 그 터미널이어야 함(ID 안정)');
@@ -120,14 +120,16 @@ test('close=완전 소멸(멱등) + 스테일 tid 폴백/무터미널 생성', {
   const ids = (await pty.listTerminals(NS)).map((x) => x.index);
   assert.ok(!ids.includes(t2.index) && ids.includes(t1.index));
   // 스테일 tid → 살아있는 첫 터미널로 폴백(t2 부활 금지).
-  const resolved = await pty.resolveTid(NS, ABS, t2.index);
+  const resolved = await pty.resolveTid(NS, t2.index);
   assert.strictEqual(resolved, t1.index);
   assert.ok(!(await pty.listTerminals(NS)).map((x) => x.index).includes(t2.index), '닫은 터미널이 부활했다');
-  // 전부 닫으면 다음 resolve 가 새 터미널을 만든다(항상 열리는 UX).
+  // 전부 닫으면 resolve 는 null — 재접속/select 가 유령을 "생성"하지 않는다(0개 = 정식 상태).
   await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: t1.index });
-  const fresh = await pty.resolveTid(NS, ABS, undefined);
-  assert.ok(Number.isFinite(fresh) && fresh >= 1000000);
-  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: fresh });
+  assert.strictEqual(await pty.resolveTid(NS, undefined), null);
+  assert.strictEqual((await pty.listTerminals(NS)).length, 0, 'resolve 가 유령 터미널을 만들었다');
+  const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: t1.index, paneId: 'pz', client: 'cz' });
+  assert.deepStrictEqual(sel, { ok: true });
+  assert.strictEqual((await pty.listTerminals(NS)).length, 0, 'select 가 유령 터미널을 만들었다');
 });
 
 // (마이그레이션) 레거시 풀(cpt-<ws> window 들) → 전용 세션 무손실 승격: 실행 중 셸 보존(내용 검증),
