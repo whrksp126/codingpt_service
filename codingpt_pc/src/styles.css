@@ -1,4 +1,5 @@
-/* CodingPT PC — cmux식 터미널 워크스페이스. 모바일 v2 토큰과 일관. */
+/* CodingPT PC — cmux식 터미널 워크스페이스. 모바일 v2 토큰과 일관.
+   테마: :root = 다크(기본). html[data-theme="light"] 가 변수만 오버라이드(theme.js 가 세팅). */
 :root {
   --base: #0a0d14;
   --surface: #0e1320;
@@ -24,6 +25,37 @@
   --r-md: 10px;
   --r-lg: 12px;
   --sb-w: 264px;
+  /* 별칭 — 본문 곳곳의 var(--x, #폴백) 가 참조하는 미정의 변수들을 정식 등록(테마 전환 시 폴백 고착 방지) */
+  --text-2: var(--text2);
+  --text-dim: var(--dim);
+  --danger: var(--error);
+  --border-control: var(--border-ctrl);
+  /* 글꼴 — theme.js 가 설정값으로 덮어씀(인라인 스타일). 아래는 초기 폴백. */
+  --ui-font: "PretendardVariable", "Pretendard", -apple-system, system-ui, "Segoe UI", sans-serif;
+  --mono-font: Menlo, Monaco, "SF Mono", Consolas, monospace;
+  --mono: var(--mono-font);
+}
+html[data-theme="light"] {
+  --base: #f2f4f8;
+  --surface: #f8fafc;
+  --elevated: #ffffff;
+  --elevated2: #e9edf3;
+  --hover: #dbe4f0;
+  --border: #e2e7ef;
+  --border-ctrl: #cbd4e0;
+  --border-focus: #3b82f6;
+  --text: #0f172a;
+  --text2: #334155;
+  --text3: #64748b;
+  --dim: #8593a8;
+  --accent: #0ea371;
+  --accent-hover: #0b8f63;
+  --cta: #08875d;
+  --on-accent: #ffffff;
+  --accent-tint: rgba(14, 163, 113, 0.13);
+  --info: #2563eb;
+  --warn: #b45309;
+  --error: #dc2626;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,7 +64,7 @@ html, body {
   height: 100%;
   background: var(--base);
   color: var(--text);
-  font-family: "PretendardVariable", "Pretendard", -apple-system, system-ui, "Segoe UI", sans-serif;
+  font-family: var(--ui-font);
   font-size: 14px;
   letter-spacing: -0.02em;
   -webkit-font-smoothing: antialiased;
@@ -135,9 +167,9 @@ body.resizing-row { cursor: row-resize; }
 .cpt-dt-slot { position: absolute; left: 0; top: 0; width: 0; height: 0; pointer-events: none; }
 .cpt-dt-status { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 11px; color: #ffd479; background: rgba(0,0,0,.75); padding: 3px 8px; border-radius: 6px; max-width: 90%; }
 .wsr-kind .ic { opacity: 0.85; }
-.wsr-path { font-size: 11px; color: var(--dim); font-family: ui-monospace, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsr-path { font-size: 11px; color: var(--dim); font-family: var(--mono-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wsr-ports { display: flex; gap: 4px; }
-.port { font-size: 10px; font-family: ui-monospace, monospace; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; }
+.port { font-size: 10px; font-family: var(--mono-font); color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; }
 /* 원격 상태 스트림(status.changed) 뱃지 — 상태 텍스트 + 진행률 */
 .wsr-status { font-size: 10px; color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
 
@@ -203,7 +235,7 @@ body.resizing-row { cursor: row-resize; }
 .mt-div { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
 .mt-folder { display: inline-flex; color: var(--accent); }
 .mt-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
-.mt-path { font-size: 11.5px; color: var(--dim); font-family: ui-monospace, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mt-path { font-size: 11.5px; color: var(--dim); font-family: var(--mono-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 통합 추가 버튼(터미널/IDE/웹뷰) — main-top 우측 고정, 활성 pane 기준 자동 배치 */
 .mt-spacer { flex: 1; }
 .mt-adds { display: inline-flex; align-items: center; gap: 2px; }
@@ -302,7 +334,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 
 /* preview */
 .preview-bar { flex: none; display: flex; gap: 6px; padding: 5px 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
-.preview-url { flex: 1; min-width: 0; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 5px 9px; color: var(--text); font-size: 12px; outline: none; font-family: ui-monospace, monospace; }
+.preview-url { flex: 1; min-width: 0; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 5px 9px; color: var(--text); font-size: 12px; outline: none; font-family: var(--mono-font); }
 .preview-url:focus { border-color: var(--border-focus); }
 .preview-host { flex: 1; min-height: 0; position: relative; background: var(--base); overflow: hidden; }
 .preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; }
@@ -327,13 +359,13 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-tree-body { min-height: 40px; }
 .ide-node.search { height: 26px; padding-left: 10px; }
 .ide-node.search .ide-nname { flex: none; }
-.ide-npath { margin-left: 8px; font-size: 10.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, Menlo, monospace; }
+.ide-npath { margin-left: 8px; font-size: 10.5px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; font-family: var(--mono-font); }
 /* 프로젝트 전체 검색 결과(파일별 그룹 + 매칭 줄) */
 .ide-search-file { display: flex; align-items: center; gap: 6px; height: 25px; padding: 0 8px 0 10px; cursor: pointer; color: var(--text2); white-space: nowrap; overflow: hidden; }
 .ide-search-file:hover { background: var(--elevated); }
 .ide-sf-name { font-size: 12.5px; flex: none; }
 .ide-sf-count { margin-left: auto; flex: none; font-size: 10px; font-weight: 700; color: var(--dim); background: var(--elevated2); border-radius: 999px; padding: 1px 6px; }
-.ide-search-line { display: flex; align-items: center; gap: 8px; min-height: 22px; padding: 2px 8px 2px 28px; cursor: pointer; color: var(--text3); font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.ide-search-line { display: flex; align-items: center; gap: 8px; min-height: 22px; padding: 2px 8px 2px 28px; cursor: pointer; color: var(--text3); font-family: var(--mono-font); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
 .ide-search-line:hover { background: var(--elevated); color: var(--text2); }
 .ide-sl-no { flex: none; color: var(--dim); min-width: 26px; text-align: right; }
 .ide-sl-text { overflow: hidden; text-overflow: ellipsis; }
@@ -388,7 +420,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-node.opened .ide-nname { color: var(--text2); }
 .ide-editor { flex: 1; min-height: 0; }
 /* font-size 는 표시 배율(display-scale.js)이 --cpt-ide-font 로 주입 — 기본 12.5px */
-.ide-editor .CodeMirror { height: 100%; font-family: Menlo, Monaco, "SF Mono", monospace; font-size: var(--cpt-ide-font, 12.5px); }
+.ide-editor .CodeMirror { height: 100%; font-family: var(--mono-font); font-size: var(--cpt-ide-font, 12.5px); }
 
 /* ── 활성 영역 검색 위젯(⌘F): 터미널(.pane-search) · IDE 파일 내(.ide-find) ── */
 .pane-search, .ide-find {
@@ -423,7 +455,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-editor .CodeMirror-gutters { background: var(--base); }
 .ide-editor .CodeMirror-gutters { border-right: none; }
 /* 자동완성 팝업(다크) */
-.CodeMirror-hints { position: absolute; z-index: 1002; overflow: auto; max-height: 20em; margin: 2px 0; padding: 4px; background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); font-family: Menlo, Monaco, monospace; font-size: 12px; list-style: none; }
+.CodeMirror-hints { position: absolute; z-index: 1002; overflow: auto; max-height: 20em; margin: 2px 0; padding: 4px; background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55); font-family: var(--mono-font); font-size: 12px; list-style: none; }
 .CodeMirror-hint { margin: 0; padding: 3px 10px; border-radius: 4px; white-space: pre; color: var(--text2); cursor: pointer; }
 li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); }
 .ide-toast { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: var(--error); color: #fff; font-size: 12px; padding: 8px 14px; border-radius: var(--r-md); z-index: 20; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
@@ -585,7 +617,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .cst-dot.on { background: var(--accent); animation: pulse 2s infinite; }
 .cst-text { flex: 1; min-width: 0; }
 .cst-title { font-size: 14px; font-weight: 700; }
-.cst-desc { font-size: 11.5px; color: var(--dim); font-family: ui-monospace, monospace; word-break: break-all; margin-top: 2px; }
+.cst-desc { font-size: 11.5px; color: var(--dim); font-family: var(--mono-font); word-break: break-all; margin-top: 2px; }
 .conn-actions { display: flex; gap: 10px; }
 .conn-actions .btn { flex: 1; }
 .conn-hint { font-size: 13px; color: var(--text2); line-height: 1.55; text-align: center; }
@@ -598,7 +630,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .qr-expired { position: absolute; inset: 0; background: rgba(10, 13, 20, 0.86); color: var(--text); border-radius: 18px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 13px; }
 .code-line { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 9px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); align-self: center; }
 .code-label { font-size: 11px; color: var(--dim); }
-.code-val { font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; letter-spacing: 2px; }
+.code-val { font-family: var(--mono-font); font-size: 15px; font-weight: 700; letter-spacing: 2px; }
 .adv { font-size: 12px; color: var(--dim); }
 .adv summary { cursor: pointer; padding: 6px 0; text-align: center; color: var(--text3); }
 .adv[open] { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
@@ -705,7 +737,7 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 .qg-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
 .qg-desc { font-size: 12px; color: var(--text-dim, #8b93a7); line-height: 1.5; }
 .qg-files { margin: 10px 0 2px; max-height: 120px; overflow-y: auto; }
-.qg-file { font-size: 12px; color: #eab308; padding: 2px 0; font-family: ui-monospace, monospace; }
+.qg-file { font-size: 12px; color: #eab308; padding: 2px 0; font-family: var(--mono-font); }
 .qg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .qg-btn {
   font-size: 12px; padding: 7px 14px; border-radius: 8px; cursor: pointer;
@@ -725,3 +757,33 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 /* 폴더접근 허용 버튼 — sett-row(space-between)에서 우측 컴팩트 버튼. 라벨(허용/허용됨/설정 열기)
    변화에도 폭이 흔들리지 않게 min-width. (.fp-btn=folder-picker 모달 전용 flex:1 과 분리) */
 .fpa-btn { min-width: 72px; text-align: center; white-space: nowrap; }
+
+/* 설정 드롭다운(글꼴 선택 등) — sett-row 우측 컴팩트 셀렉트 */
+select.sett-select {
+  appearance: none; -webkit-appearance: none;
+  background: var(--elevated2); color: var(--text);
+  border: 1px solid var(--border-ctrl); border-radius: 7px;
+  font-size: 12px; font-weight: 600; padding: 5px 26px 5px 10px; cursor: pointer; outline: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 55%, calc(100% - 10px) 55%;
+  background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  max-width: 220px;
+}
+select.sett-select:focus { border-color: var(--border-focus); }
+
+/* ── 라이트 테마 보정 — 변수로 못 따라오는 하드코딩 지점만 개별 오버라이드 ── */
+html[data-theme="light"] .ctx-menu,
+html[data-theme="light"] .notif-panel,
+html[data-theme="light"] .pane-search,
+html[data-theme="light"] .ide-find,
+html[data-theme="light"] .tab-ghost,
+html[data-theme="light"] .CodeMirror-hints { box-shadow: 0 10px 32px rgba(15, 23, 42, 0.16); }
+html[data-theme="light"] .sm-card,
+html[data-theme="light"] .fp-card,
+html[data-theme="light"] .quit-guard { box-shadow: 0 20px 64px rgba(15, 23, 42, 0.2); }
+html[data-theme="light"] .fp-row:hover { background: rgba(15, 23, 42, 0.05); }
+html[data-theme="light"] input[type="checkbox"].tgl:checked::after { background: #fff; }
+html[data-theme="light"] .qg-file { color: #a16207; }
+html[data-theme="light"] .qg-quit { border-color: #fca5a5; background: #fee2e2; color: #b91c1c; }
+html[data-theme="light"] .qg-quit:hover { background: #fecaca; }
+html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16); border: 1px solid var(--border); }

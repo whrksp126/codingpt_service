@@ -1,4 +1,5 @@
 // main.js — 엔트리. 셸 마운트 + 상태 구독 + 이벤트/단축키 배선 + 초기 로드.
+import "./theme.js"; // 모양(테마·글꼴) — 첫 페인트 전에 data-theme/폰트 변수 적용(최상단 유지)
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";

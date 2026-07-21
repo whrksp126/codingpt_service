@@ -8,6 +8,7 @@ import { icons } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
+import { termTheme, monoFontStack, cmThemeName, onAppearanceChange } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
 
 const Terminal = window.Terminal;
@@ -28,6 +29,23 @@ onScaleChange(() => {
       if (p.term) { p.term.options.fontSize = px; p._fitNow(); }
       p.ide?.refresh();
       p._mixed?.forEach((m) => m.ide?.refresh());
+    } catch (_) {}
+  }
+});
+// 모양(테마/글꼴) 변경 → 열려있는 모든 터미널(xterm 팔레트·폰트)과 에디터(CM 테마) 즉시 반영.
+onAppearanceChange(() => {
+  const theme = termTheme();
+  const mono = monoFontStack();
+  const cmName = cmThemeName();
+  for (const [, p] of registry) {
+    try {
+      if (p.term) {
+        p.term.options.theme = theme;
+        p.term.options.fontFamily = mono;
+        p._fitNow();
+      }
+      p.ide?.setTheme(cmName);
+      p._mixed?.forEach((m) => m.ide?.setTheme(cmName));
     } catch (_) {}
   }
 });
@@ -314,16 +332,6 @@ function headBtn(iconFn, title, onClick) {
   return b;
 }
 
-const TERM_THEME = {
-  background: "#0A0D14",
-  foreground: "#E2E8F0",
-  cursor: "#34D399",
-  cursorAccent: "#0A0D14",
-  selectionBackground: "#264F78",
-  black: "#0A0D14",
-  brightBlack: "#334155",
-};
-
 export class PaneView {
   // node: tiling leaf, ctx: { localPath, isLocal, onFocus, onNotify, onSurfacesChanged,
   //   onClosePane(paneId), onMoveTab(srcId,index,dstId), persist }
@@ -460,10 +468,10 @@ export class PaneView {
     this.term = new Terminal({
       cursorBlink: true,
       fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
-      fontFamily: 'Menlo, Monaco, "SF Mono", Consolas, monospace',
+      fontFamily: monoFontStack(), // 코드·터미널 글꼴 설정(theme.js) — 변경은 onAppearanceChange 가 반영
       scrollback: 10000,
       convertEol: false,
-      theme: TERM_THEME,
+      theme: termTheme(),
       allowProposedApi: true,
     });
     this.fit = new FitAddon();

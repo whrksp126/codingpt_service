@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont, uiFontOptions, monoFontOptions } from "./theme.js";
 
 let root = null;
 let navEl = null;
@@ -133,7 +134,18 @@ function renderSection(force) {
       ${profileHtml}
       <div class="sm-card2">
         <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
-        <div class="sett-row"><span>테마</span><span class="dim">다크</span></div>
+      </div>
+      <div class="sm-card2">
+        <div class="sett-row"><span>테마</span>
+          <span class="scale-seg" id="themeSeg">
+            <button class="scale-opt" data-v="system">시스템</button>
+            <button class="scale-opt" data-v="light">라이트</button>
+            <button class="scale-opt" data-v="dark">다크</button>
+          </span>
+        </div>
+        <div class="sett-row"><span>인터페이스 글꼴</span><select class="sett-select" id="uiFontSel"></select></div>
+        <div class="sett-row"><span>코드·터미널 글꼴</span><select class="sett-select" id="monoFontSel"></select></div>
+        <div class="sett-hint">코드·터미널 글꼴은 이 Mac에 설치된 고정폭 글꼴만 표시돼요</div>
       </div>
       <div class="sm-card2">
         <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fpa-btn" data-f="downloads">허용</button></div>
@@ -145,6 +157,7 @@ function renderSection(force) {
     // 작업 스냅샷(자동 체크포인트) 카드는 MVP 범위 제외로 잠정 숨김(2026-07-21 결정) —
     //  엔진(auto-checkpoint.js·데몬 sync·back)은 보존, 복원 시 이전 커밋에서 카드+바인딩 복원.
     bindFolderPerms(contentEl);
+    bindAppearance(contentEl);
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {
@@ -222,6 +235,38 @@ function bindUpdate() {
     .catch(() => {
       st.textContent = "확인 실패";
     });
+}
+
+// ── 모양(테마·글꼴) — theme.js 로컬 설정 바인딩 ──
+function bindAppearance(rootEl) {
+  const seg = rootEl.querySelector("#themeSeg");
+  if (seg) {
+    const paint = () => {
+      const cur = getThemeMode();
+      seg.querySelectorAll(".scale-opt").forEach((b) => b.classList.toggle("active", b.dataset.v === cur));
+    };
+    seg.addEventListener("click", (e) => {
+      const b = e.target.closest(".scale-opt");
+      if (!b) return;
+      setThemeMode(b.dataset.v);
+      paint();
+    });
+    paint();
+  }
+  const fill = (sel, opts, cur, onPick) => {
+    if (!sel) return;
+    sel.innerHTML = "";
+    for (const o of opts) {
+      const op = document.createElement("option");
+      op.value = o.value;
+      op.textContent = o.label;
+      sel.appendChild(op);
+    }
+    sel.value = opts.some((o) => o.value === cur) ? cur : opts[0].value;
+    sel.addEventListener("change", () => onPick(sel.value));
+  };
+  fill(rootEl.querySelector("#uiFontSel"), uiFontOptions(), getUiFont(), setUiFont);
+  fill(rootEl.querySelector("#monoFontSel"), monoFontOptions(), getMonoFont(), setMonoFont);
 }
 
 async function syncAutostart() {

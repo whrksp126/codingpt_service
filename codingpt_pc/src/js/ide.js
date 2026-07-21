@@ -5,6 +5,7 @@ import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { fileIcon, folderIcon } from "./fileicons.js";
 import * as T from "./tiling.js";
+import { cmThemeName } from "./theme.js";
 
 const CM = window.CodeMirror;
 
@@ -138,7 +139,7 @@ export class IdeView {
     g.empty.textContent = "왼쪽에서 파일을 선택하세요";
     g.wrap.append(g.tabsBar, g.editorHost, g.empty);
     g.cm = CM(g.editorHost, {
-      value: "", mode: "javascript", theme: "material-darker",
+      value: "", mode: "javascript", theme: cmThemeName(),
       lineNumbers: true, autoCloseBrackets: true, matchBrackets: true, styleActiveLine: true,
       indentUnit: 2, tabSize: 2,
       hintOptions: { completeSingle: false },
@@ -1026,6 +1027,8 @@ export class IdeView {
   }
 
   refresh() { setTimeout(() => this.groups.forEach((g) => g.cm?.refresh()), 0); }
+  /** 앱 테마 전환 → 모든 그룹 CM 테마 교체(pane.js onAppearanceChange 가 호출). */
+  setTheme(name) { this.groups.forEach((g) => { try { g.cm?.setOption("theme", name); } catch (_) {} }); }
 
   // ── 외부 변경 리컨실러 — 열린 파일(디스크) ↔ 버퍼 동기화 + 주기적 트리 갱신 ──
   //  dirty(내가 편집 중)인 파일은 보호(마지막 저장 승리 — 모바일 IDE 와 동일 정책).
