@@ -618,6 +618,14 @@ export async function reconcilePool() {
         if (typeof t.win !== "number") return true;
         const p = pool.get(t.win);
         if (!p) {
+          // 라이브 attach = 존재 증명 — 이 pane 이 지금 그 세션에 붙어 데이터를 주고받는 중이면
+          //  목록이 뭐라 하든 제거하지 않는다(목록 조회가 프로세스-로컬로 오염돼 살아있는 세션을
+          //  0개로 보고한 실사고 — 사용 중인 터미널이 눈앞에서 사라졌다). 죽은 attach 는
+          //  워치독(pty_alive)이 7s 내 _attachedWin 을 비우므로 진짜 삭제는 여전히 정리된다.
+          if (getPane(l.id)?._attachedWin === t.win) {
+            if (!t.miss) { t.miss = 1; api.debugLog(`reconcile: 탭 win=${t.win} 목록 부재지만 attach 생존 — 제거 보류`); }
+            return true;
+          }
           // 2-strike: 목록 스냅샷은 이 틱의 list 요청 "시작 시점" 기준이라, 요청 중에 생성돼
           //  win 이 확정된 새 탭이 스냅샷에 없을 수 있다(실제로 add 직후 탭이 오소거된 사고).
           //  1틱 유예 후 다음 틱에도 없을 때만 진짜 삭제(타 기기 close)로 확정한다.

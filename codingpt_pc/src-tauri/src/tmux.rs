@@ -473,7 +473,28 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Resu
     migrate_legacy_pool(&ctx, &ns, &abs); // 구 풀 잔재가 있으면 무손실 승격(멱등)
     let r = list_terminals(&ctx, &ns);
     match &r {
-        Ok(v) => eprintln!("[tmux] list ns={ns} -> {} terminals", v.len()),
+        Ok(v) => {
+            eprintln!("[tmux] list ns={ns} -> {} terminals", v.len());
+            // "N>0 → 0" 급전이 순간의 원시 진단 — 살아있는 세션이 있는데 목록이 0개로 고착돼
+            //  탭이 오소거된 실사고(원인 미확정)의 부검용. no-server 였는지 / 서버는 응답했는데
+            //  prefix 매칭이 0이었는지(ns 불일치)를 구분해 남긴다. 0개 지속 시엔 1회만 기록.
+            use std::collections::HashMap;
+            use std::sync::{Mutex, OnceLock};
+            static LAST: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+            let last = LAST.get_or_init(|| Mutex::new(HashMap::new()));
+            let prev = last.lock().unwrap().insert(ns.clone(), v.len());
+            if v.is_empty() && prev.unwrap_or(1) > 0 {
+                let raw = run(&ctx, &["list-windows", "-a", "-F", "#{session_name}"]);
+                let diag = match &raw {
+                    Ok(o) => {
+                        let names: Vec<&str> = o.lines().filter(|l| !l.trim().is_empty()).collect();
+                        format!("서버 응답 세션 {}개: [{}]", names.len(), names.join(","))
+                    }
+                    Err(e) => format!("raw ERR: {e}"),
+                };
+                crate::applog(&format!("[tmux] list ns={ns} -> 0개 급전이! {diag}"));
+            }
+        }
         Err(e) => {
             eprintln!("[tmux] list ns={ns} -> ERR {e}");
             crate::applog(&format!("[tmux] list ns={ns} -> ERR {e}")); // 오류만 파일로(정상 틱은 소음)
