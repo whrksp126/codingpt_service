@@ -149,8 +149,44 @@ fn new_detached_session(ctx: &TmuxCtx, name: &str, abs: &PathBuf) -> Result<(), 
         args.push(conf.to_string_lossy().to_string());
     }
     args.extend(["new-session", "-d", "-s", name, "-c", &abs_s].map(String::from));
+    // ⚠ 초기 셸에 shim env(-e)를 spawn 시점 주입 — set-environment(inject_pool_env)는 이미 뜬 셸엔
+    //  안 먹어(tmux 세션 env 는 이후 spawn 프로세스만 상속), new-session 이 셸을 즉시 띄우므로 ZDOTDIR/
+    //  PATH 를 못 받아 shim(open→프리뷰·cpt·훅)이 비활성이었다(실측: PC 생성 터미널 bare open → 외부 브라우저).
+    //  데몬 pty.js poolEnvArgs 미러. tmux 3.2+ -e 지원.
+    args.extend(pool_env_args(ctx, abs));
     let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     run(ctx, &refs).map(|_| ())
+}
+
+// new-session -e 로 넣을 env(-e KEY=VAL) 목록 — 초기 셸부터 shim 활성화. inject_pool_env(세션 env 영속)와
+//  같은 값이되, 이건 spawn 시점 적용이라 초기 셸이 바로 받는다.
+fn pool_env_args(ctx: &TmuxCtx, abs: &PathBuf) -> Vec<String> {
+    let h = home();
+    let rel = abs
+        .strip_prefix(&h)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| abs.to_string_lossy().to_string());
+    let cptdir = h.join(".codingpt");
+    let sock = cptdir.join("cpt.sock").to_string_lossy().to_string();
+    let bin = cptdir.join("bin").to_string_lossy().to_string();
+    let zdot = cptdir.join("shim").join("zdot");
+    let tmux_bin = ctx.tmux.to_string_lossy().to_string();
+    let base_path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".into());
+    let mut out: Vec<String> = Vec::new();
+    out.push("-e".into()); out.push(format!("CPT_WS={rel}"));
+    out.push("-e".into()); out.push(format!("CPT_SOCK={sock}"));
+    out.push("-e".into()); out.push(format!("CPT_TMUX={tmux_bin}"));
+    out.push("-e".into()); out.push(format!("PATH={bin}:{base_path}"));
+    if zdot.exists() {
+        let z = zdot.to_string_lossy().to_string();
+        out.push("-e".into()); out.push(format!("ZDOTDIR={z}"));
+        if let Ok(orig) = std::env::var("ZDOTDIR") {
+            if !orig.is_empty() && orig != z {
+                out.push("-e".into()); out.push(format!("CPT_ORIG_ZDOTDIR={orig}"));
+            }
+        }
+    }
+    out
 }
 
 // ensure_auto_rename 의 프로세스당 세션 1회 래퍼 — ensure_session 이 pane 부팅마다 불리므로 절약.
@@ -204,6 +240,20 @@ fn inject_pool_env(ctx: &TmuxCtx, session: &str, abs: &PathBuf) {
     let _ = run(ctx, &["set-environment", "-t", &target, "CPT_WS", &rel]);
     let _ = run(ctx, &["set-environment", "-t", &target, "CPT_SOCK", &sock]);
     let _ = run(ctx, &["set-environment", "-t", &target, "CPT_TMUX", &tmux_bin]);
+    // PATH/ZDOTDIR 도 세션 env 에 — 재spawn(respawn-pane) 되는 셸이 shim 을 잃지 않게(데몬 injectPoolEnv 미러).
+    let bin = h.join(".codingpt").join("bin").to_string_lossy().to_string();
+    let base_path = std::env::var("PATH").unwrap_or_else(|_| "/usr/local/bin:/usr/bin:/bin".into());
+    let _ = run(ctx, &["set-environment", "-t", &target, "PATH", &format!("{bin}:{base_path}")]);
+    let zdot = h.join(".codingpt").join("shim").join("zdot");
+    if zdot.exists() {
+        let z = zdot.to_string_lossy().to_string();
+        let _ = run(ctx, &["set-environment", "-t", &target, "ZDOTDIR", &z]);
+        if let Ok(orig) = std::env::var("ZDOTDIR") {
+            if !orig.is_empty() && orig != z {
+                let _ = run(ctx, &["set-environment", "-t", &target, "CPT_ORIG_ZDOTDIR", &orig]);
+            }
+        }
+    }
 }
 
 #[derive(Serialize)]
