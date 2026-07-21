@@ -324,13 +324,14 @@ function bindAppearance(rootEl) {
       card.className = "ts-card" + (o.value === getTermStyle() ? " sel" : "");
       card.dataset.v = o.value;
       card.innerHTML = `
+        <div class="ts-name">${esc(o.label)}</div>
         <div class="ts-prev" style="background:${p.background}">
           <div class="ts-pline">
             <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@mac</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
           </div>
           <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">코드 설명해줘</span></div>
         </div>
-        <div class="ts-pick"><span class="ts-name">${esc(o.label)}</span><span class="ts-radio"></span></div>`;
+        <div class="ts-pick"><span class="ts-radio"></span></div>`;
       card.addEventListener("click", () => {
         setTermStyle(o.value);
         paintStyleGrid();

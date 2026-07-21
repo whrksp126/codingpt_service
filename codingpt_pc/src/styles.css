@@ -819,8 +819,8 @@ html[data-theme="light"] .fd-menu { box-shadow: 0 14px 44px rgba(15, 23, 42, 0.1
   transition: border-color 0.12s;
 }
 .ts-card:hover .ts-prev { border-color: var(--border-focus); }
-/* 선택 표시 = 동그라미 라디오(카드 테두리 액티브 없음) */
-.ts-pick { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-left: 2px; }
+/* 선택 표시 = 동그라미 라디오(카드 하단 중앙 정렬, 카드 테두리 액티브 없음) */
+.ts-pick { display: flex; justify-content: center; padding-top: 1px; }
 .ts-radio { width: 15px; height: 15px; border-radius: 999px; border: 1.5px solid var(--border-ctrl); flex: none; position: relative; }
 .ts-card.sel .ts-radio { border-color: var(--accent); }
 .ts-card.sel .ts-radio::after { content: ""; position: absolute; inset: 2.5px; border-radius: 999px; background: var(--accent); }
