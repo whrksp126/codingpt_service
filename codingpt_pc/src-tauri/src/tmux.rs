@@ -474,7 +474,10 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Resu
     let r = list_terminals(&ctx, &ns);
     match &r {
         Ok(v) => eprintln!("[tmux] list ns={ns} -> {} terminals", v.len()),
-        Err(e) => eprintln!("[tmux] list ns={ns} -> ERR {e}"),
+        Err(e) => {
+            eprintln!("[tmux] list ns={ns} -> ERR {e}");
+            crate::applog(&format!("[tmux] list ns={ns} -> ERR {e}")); // 오류만 파일로(정상 틱은 소음)
+        }
     }
     r
 }

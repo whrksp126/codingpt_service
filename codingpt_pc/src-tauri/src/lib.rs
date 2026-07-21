@@ -47,11 +47,30 @@ fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
     state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
 }
 
-// 프론트 진단 로그 → stderr(dev/터미널 실행에서만 보임). 터미널 탭 소거/편입 같은 상태 변화를
-//  사후 추적할 수 있게 남긴다(릴리스에선 무해한 no-op 수준).
+// 프론트 진단 로그 → stderr + 파일. 터미널 탭 소거/편입 같은 상태 변화를 사후 추적할 수 있게 남긴다.
 #[tauri::command]
 fn debug_log(msg: String) {
     eprintln!("[ui] {msg}");
+    applog(&format!("[ui] {msg}"));
+}
+
+// 진단 로그 파일 영속 — Finder 실행 앱은 stderr 가 유실돼 재발 시 부검이 불가하다(실사고).
+//  ~/.codingpt/pc-ui.log 에 append, 1MB 초과 시 리셋. 실패는 조용히 무시(로깅이 앱을 방해 금지).
+pub fn applog(msg: &str) {
+    use std::io::Write;
+    let Some(path) = dirs::home_dir().map(|h| h.join(".codingpt").join("pc-ui.log")) else { return };
+    if std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // KST(+9, DST 없음) 시:분:초 병기 — epoch 원값으로 정밀 대조.
+    let (h, m, s) = (((ts + 9 * 3600) / 3600) % 24, (ts / 60) % 60, ts % 60);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(f, "{ts} {h:02}:{m:02}:{s:02} {msg}");
+    }
 }
 
 // 실제 앱 버전(빌드 시 tauri.conf.json/Cargo 의 package version). 설정 정보 화면에 표시 —

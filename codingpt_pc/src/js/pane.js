@@ -604,7 +604,7 @@ export class PaneView {
     const termTab = (isTermTab(active) && active) || this.node.tabs.find((t) => isTermTab(t));
     if (termTab) {
       const win = await this._ensureWin(termTab);
-      this._openChannel(win);
+      if (typeof win === "number") this._openChannel(win); // 확보 실패(탭 회수)면 빈 상태 유지
     }
     this.showActiveTab();
     this.ro = new ResizeObserver(() => { this._fitNow(); this._mixed.forEach((m) => m.ide?.refresh()); });
@@ -619,8 +619,22 @@ export class PaneView {
         const r = (!tab.fresh && (await this.ctx.claimPoolWin?.())) || (await api.newWindow(this.ctx.localPath || "", this.id));
         tab.win = r.index;
         if (r.name) tab.title = r.name;
-      } catch (_) {
-        tab.win = 0;
+      } catch (e) {
+        // 확보 실패 = 탭 회수. 과거의 win=0 폴백은 어떤 목록에도 없는 유령 win 이라
+        //  리컨실러 탭 제거의 씨앗이었다(실제 저장본 [0] 흔적). 'new' 로 남기는 것도
+        //  pending 가드가 리컨실을 정지시키므로 금물 — 깨끗이 걷어내고 로그만 남긴다.
+        api.debugLog(`ensureWin: 터미널 확보 실패 pane=${this.id} — 탭 회수 (${e})`);
+        const i = this.node.tabs.indexOf(tab);
+        if (i >= 0) {
+          this.node.tabs.splice(i, 1);
+          this.node.active = Math.max(0, Math.min(this.node.tabs.length - 1, this.node.active));
+          this.buildHead();
+          this.showActiveTab();
+        }
+        delete tab.fresh;
+        this.ctx.onSurfacesChanged?.();
+        this.ctx.persist?.();
+        return null;
       }
       delete tab.fresh;
       this.ctx.onSurfacesChanged?.();

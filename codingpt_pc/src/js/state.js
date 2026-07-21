@@ -493,20 +493,6 @@ export function deviceKey() {
   return k;
 }
 
-// 터미널 탭의 win 을 전부 'new' 로 리셋(제목/배치 유지) — 다른 기기(또는 구 아키텍처)에서 온
-//  레이아웃의 win 은 이 기기의 pane 세션에 존재하지 않으므로, 새 셸로 다시 확보한다.
-function resetTerminalWins(node) {
-  if (!node) return;
-  if (T.isLeaf(node)) {
-    if (node.kind === "terminal" && Array.isArray(node.tabs)) {
-      node.tabs = node.tabs.map((t) => ({ win: "new", title: (t && t.title) || "" }));
-    }
-    return;
-  }
-  resetTerminalWins(node.first);
-  resetTerminalWins(node.second);
-}
-
 // ── 영속화(pc-ui.json) ──
 function serialize() {
   const ws = {};
@@ -587,6 +573,7 @@ function migrateTree(node) {
 //  · 레이아웃에 없는 풀 터미널은 포커스(없으면 첫) 터미널 pane 탭으로 편입(다른 기기가 생성).
 //  · 탭 제목 = 풀 window 이름("터미널 N") 동기화.
 let _reconciling = false;
+let _pendingTicks = 0; // 'new' 탭으로 인한 연속 스킵 횟수 — 유한화(고착 회수)용
 export async function reconcilePool() {
   if (_reconciling || state.view !== "workspace") return;
   const wsId = state.activeWsId;
@@ -602,9 +589,22 @@ export async function reconcilePool() {
     //  tmux 오류는 Rust tmux_list_windows 가 Err 로 구분해 던지므로(catch 로 이번 틱 스킵) 안전.
     const wins = (await api.listWindows(meta.localPath || "")) || [];
     // 'new'(풀 window 확보 진행 중) 탭이 있으면 이번 틱 스킵 — 방금 만든 터미널의 중복 편입 방지.
+    //  단 유한하게: 정상 확보는 수 초면 끝나므로, 4틱(≈28s) 연속이면 고착('new' 잔류 = 확보 실패
+    //  잔재)으로 보고 회수한다 — 'new' 고착은 리컨실 전체를 영구 정지시킨다(실제 저장본에서 발견).
     let pending = false;
     T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") { for (const t of l.tabs) if (t.win === "new") pending = true; } });
-    if (pending) return;
+    if (pending) {
+      _pendingTicks += 1;
+      if (_pendingTicks < 4) return;
+      T.eachLeaf(w.layout, (l) => {
+        if (l.kind !== "terminal" || !l.tabs.some((t) => t.win === "new")) return;
+        api.debugLog(`reconcile: 'new' 고착 탭 회수 pane=${l.id} (${_pendingTicks}틱 연속 미확보)`);
+        l.tabs = l.tabs.filter((t) => t.win !== "new");
+        l.active = Math.max(0, Math.min(l.tabs.length - 1, l.active));
+        getPane(l.id)?.buildHead();
+      });
+    }
+    _pendingTicks = 0;
     const pool = new Map(wins.map((x) => [x.index, x]));
     const seen = new Set();
     const touched = new Set();
@@ -617,7 +617,16 @@ export async function reconcilePool() {
       l.tabs = l.tabs.filter((t) => {
         if (typeof t.win !== "number") return true;
         const p = pool.get(t.win);
-        if (!p) { changed = true; api.debugLog(`reconcile: 탭 제거 win=${t.win} pane=${l.id} (목록 ${wins.length}개에 없음)`); return false; }
+        if (!p) {
+          // 2-strike: 목록 스냅샷은 이 틱의 list 요청 "시작 시점" 기준이라, 요청 중에 생성돼
+          //  win 이 확정된 새 탭이 스냅샷에 없을 수 있다(실제로 add 직후 탭이 오소거된 사고).
+          //  1틱 유예 후 다음 틱에도 없을 때만 진짜 삭제(타 기기 close)로 확정한다.
+          if (!t.miss) { t.miss = 1; api.debugLog(`reconcile: 탭 win=${t.win} 목록 부재 — 1틱 유예`); return true; }
+          changed = true;
+          api.debugLog(`reconcile: 탭 제거 win=${t.win} pane=${l.id} (2틱 연속 목록 ${wins.length}개에 없음)`);
+          return false;
+        }
+        if (t.miss) delete t.miss;
         seen.add(t.win);
         if (p.name && t.title !== p.name) { t.title = p.name; changed = true; touched.add(l.id); }
         // 실행 중 명령(pane_current_command) — 탭 라벨 부제("이름 · claude")로 표시(cmux 미러).
@@ -692,6 +701,16 @@ export async function restorePersisted() {
       for (const [id, w] of Object.entries(saved.ws)) {
         if (w && w.layout) {
           const layout = migrateTree(w.layout);
+          // 영속된 'new' 는 완료되지 못한 add 의 잔재(정상 확보는 수 초 내 숫자로 저장됨) —
+          //  남겨두면 pending 가드가 리컨실을 영구 정지시키므로 복원 시점에 제거한다.
+          //  miss(리컨실 유예 마킹)도 런타임 전용이라 함께 걷어낸다(복원 직후 유예 상실 방지).
+          T.eachLeaf(layout, (l) => {
+            if (l.kind !== "terminal" || !Array.isArray(l.tabs)) return;
+            for (const t of l.tabs) delete t.miss;
+            if (!l.tabs.some((t) => t.win === "new")) return;
+            l.tabs = l.tabs.filter((t) => t.win !== "new");
+            l.active = Math.max(0, Math.min(l.tabs.length - 1, l.active || 0));
+          });
           state.ws[id] = { layout, focusId: w.focusId || T.firstLeafId(layout), surfaces: [], ports: [] };
           allIds.push(...T.leafIds(layout));
         }
