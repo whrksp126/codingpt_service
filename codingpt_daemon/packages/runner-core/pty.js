@@ -112,6 +112,33 @@ async function listTerminals(ns) {
   return rows;
 }
 
+// new-session 시점에 초기 셸에 바로 넣을 env(-e KEY=VAL) 목록.
+//  ⚠ 핵심: set-environment(injectPoolEnv)는 "이미 뜬 셸"엔 안 먹는다(tmux 세션 env 는 이후 spawn 되는
+//  프로세스만 상속). new-session 은 셸을 즉시 띄우므로, 나중에 set-environment 를 해도 그 초기 셸은
+//  ZDOTDIR/PATH 를 못 받아 shim(open/claude/cpt PATH 프리펜드)이 비활성이 된다(실측: bare `open` →
+//  /usr/bin/open). 그래서 spawn 시점에 -e 로 직접 넣어 초기 셸부터 shim 을 활성화한다. injectPoolEnv 는
+//  세션 env 영속(재spawn/attach 대비)용으로 그대로 유지(멱등).
+function poolEnvArgs(abs) {
+  const out = [];
+  const push = (k, v) => { out.push('-e', `${k}=${v}`); };
+  try {
+    const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
+    push('CPT_WS', rel == null ? '' : String(rel));
+    push('CPT_SOCK', require('./cpt-server').sockPath());
+    const tmuxBin = findTmux();
+    if (tmuxBin) push('CPT_TMUX', tmuxBin);
+    const shimBin = path.join(runtime.stateDir(), 'bin');
+    push('PATH', `${shimBin}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`);
+    const zdot = require('./shim').zdotDir();
+    if (fs.existsSync(zdot)) {
+      push('ZDOTDIR', zdot);
+      const origZdot = process.env.ZDOTDIR || '';
+      if (origZdot && origZdot !== zdot) push('CPT_ORIG_ZDOTDIR', origZdot);
+    }
+  } catch (_) { /* shim 미생성 등 — 넣을 수 있는 것만 */ }
+  return out;
+}
+
 // 새 터미널 생성 — 전용 세션 detached 생성(+서버 첫 기동이면 conf 로드) + cpt env 주입.
 //  tid 는 랜덤 31-bit — 극히 드문 기존 세션과의 충돌은 새 tid 로 재시도(기존 터미널 무접촉).
 async function createTerminal(ns, abs) {
@@ -120,7 +147,7 @@ async function createTerminal(ns, abs) {
     const id = newTid();
     const name = termSession(ns, id);
     try {
-      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs]);
+      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs)]);
     } catch (e) {
       lastErr = e;
       if (/duplicate session/.test(String(e.message || ''))) continue; // tid 충돌 — 재시도
@@ -158,7 +185,7 @@ async function migrateLegacyPool(ns, abs) {
     const w = wins[i];
     const name = termSession(ns, base + i);
     try {
-      await runTmux(['new-session', '-d', '-s', name, '-c', abs]);
+      await runTmux(['new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs)]);
       await runTmux(['move-window', '-k', '-s', `=${ns}:${w.index}`, '-t', `=${name}:0`]);
       // 구 모델의 resize-window 가 남긴 manual 고정 해제 → 전역 window-size latest 로 복귀.
       await runTmux(['set-option', '-w', '-u', '-t', `=${name}:0`, 'window-size']).catch(() => {});
