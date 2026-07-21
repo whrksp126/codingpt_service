@@ -821,6 +821,10 @@ html[data-theme="light"] .fd-menu { box-shadow: 0 14px 44px rgba(15, 23, 42, 0.1
 .ts-card:hover .ts-prev { border-color: var(--border-focus); }
 .ts-card.sel .ts-prev { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .ts-line { display: flex; align-items: center; gap: 4px; overflow: hidden; }
+/* 파워라인 프롬프트 재현(세그먼트+삼각 구분자) — 실제 적용 모습 미리보기 */
+.ts-pline { display: flex; align-items: stretch; overflow: hidden; margin-bottom: 2px; }
+.ts-seg { display: inline-flex; align-items: center; padding: 1px 7px; font-size: 10px; white-space: nowrap; }
+.ts-tri { width: 0; height: auto; border-top: 8px solid transparent; border-bottom: 8px solid transparent; border-left: 7px solid transparent; }
 .ts-name { font-size: 12px; font-weight: 600; color: var(--text2); padding-left: 2px; }
 .ts-card.sel .ts-name { color: var(--accent); font-weight: 700; }
 

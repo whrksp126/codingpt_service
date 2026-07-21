@@ -8,7 +8,7 @@ import { icons } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
-import { termTheme, monoFontStack, cmThemeName, onAppearanceChange } from "./theme.js";
+import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
 
 const Terminal = window.Terminal;
@@ -44,6 +44,7 @@ onAppearanceChange(() => {
         if (p.term) {
           p.term.options.theme = theme;
           p.term.options.fontFamily = mono;
+          p.term.options.minimumContrastRatio = termMinContrast();
           if (p.termEl) p.termEl.style.background = theme.background || "";
           p._fitNow();
         }
@@ -482,6 +483,8 @@ export class PaneView {
       scrollback: 10000,
       convertEol: false,
       theme: termTheme(),
+      // 최소 대비 자동 보정 — 프롬프트(p10k 등)가 팔레트 밖 256색 배경을 써도 글자가 항상 읽히게.
+      minimumContrastRatio: termMinContrast(),
       allowProposedApi: true,
     });
     this.fit = new FitAddon();

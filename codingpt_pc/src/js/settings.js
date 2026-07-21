@@ -302,22 +302,34 @@ function bindAppearance(rootEl) {
   buildFontDd(rootEl.querySelector("#uiFontDd"), uiFontOptions(), getUiFont, setUiFont, "한글과 English 123");
   buildFontDd(rootEl.querySelector("#monoFontDd"), monoFontOptions(), getMonoFont, setMonoFont, "const 한글 = i => 0;");
 
-  // 터미널 스타일 카드(라디오) — 실제 팔레트 값으로 미니 터미널을 그려 미리보기.
+  // 터미널 스타일 카드(라디오) — 실제 팔레트로 "진짜 터미널에 보이는 모습"(파워라인 프롬프트·claude·diff)을
+  //  그려 미리보기. 세그먼트 글자색은 배경 밝기에 따라 자동(실제 xterm 의 최소 대비 보정과 동일한 결).
   const grid = rootEl.querySelector("#termStyleGrid");
+  const lum = (hex) => {
+    const m = /^#?([0-9a-f]{6})/i.exec(hex || "");
+    if (!m) return 0;
+    const n = parseInt(m[1], 16);
+    return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  };
+  const onColor = (bg) => (lum(bg) < 150 ? "#F4F6FA" : "#15181E");
   const paintStyleGrid = () => {
     if (!grid) return;
     const variant = resolvedTheme();
     grid.innerHTML = "";
     for (const o of TERM_STYLE_OPTIONS) {
       const p = termStylePalette(o.value, variant);
+      const seg1 = "#3A4150"; // p10k 기본 세그먼트(256색 회색) — 실제 프롬프트가 쓰는 색을 그대로 재현
+      const seg2 = p.blue || "#61AFEF";
       const card = document.createElement("button");
       card.className = "ts-card" + (o.value === getTermStyle() ? " sel" : "");
       card.dataset.v = o.value;
       card.innerHTML = `
-        <div class="ts-prev" style="background:${p.background};color:${p.foreground}">
-          <div class="ts-line"><span style="color:${p.green || "#98C379"}">➜</span> <span style="color:${p.blue || "#61AFEF"}">~/app</span> claude</div>
-          <div class="ts-line"><span style="color:${p.yellow || "#E5C07B"}">◆</span> 코드 <span style="color:${p.magenta || "#C678DD"}">diff</span> <span style="color:${p.red || "#E06C75"}">-old</span> <span style="color:${p.green || "#98C379"}">+new</span></div>
-          <div class="ts-line"><span style="color:${p.red || "#E06C75"}">■</span><span style="color:${p.yellow || "#E5C07B"}">■</span><span style="color:${p.green || "#98C379"}">■</span><span style="color:${p.cyan || "#56B6C2"}">■</span><span style="color:${p.blue || "#61AFEF"}">■</span><span style="color:${p.magenta || "#C678DD"}">■</span></div>
+        <div class="ts-prev" style="background:${p.background}">
+          <div class="ts-pline">
+            <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@mac</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
+          </div>
+          <div class="ts-line" style="color:${p.foreground}"><span style="color:${p.green || "#98C379"}">➜</span>&nbsp;claude&nbsp;<span style="opacity:.75">코드 설명해줘</span></div>
+          <div class="ts-line"><span style="color:${p.green || "#98C379"}">+ 추가한 줄</span>&nbsp;&nbsp;<span style="color:${p.red || "#E06C75"}">- 지운 줄</span></div>
         </div>
         <div class="ts-name">${esc(o.label)}</div>`;
       card.addEventListener("click", () => {

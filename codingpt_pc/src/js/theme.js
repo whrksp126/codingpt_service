@@ -157,23 +157,29 @@ export function onAppearanceChange(fn) {
 //    claude/codex/vim 등 모든 TUI 는 ANSI 색 번호로만 그리므로 이 팔레트가 곧 TUI 스타일이 된다.
 //    값은 모바일(terminalSchemes.ts)과 반드시 동일하게 유지.
 export const TERM_STYLE_OPTIONS = [
-  { value: "auto", label: "기본" },
+  { value: "auto", label: "CodingPT (권장)" },
   { value: "ghostty", label: "Ghostty (cmux)" },
   { value: "one", label: "One" },
   { value: "dracula", label: "Dracula" },
   { value: "solarized", label: "Solarized" },
 ];
 const TERM_AUTO_DARK = {
+  // CodingPT 다크 — 배경=앱 배경(--base), 액센트 민트, 16색 전부 가독 튜닝
   background: "#0A0D14", foreground: "#E2E8F0", cursor: "#34D399", cursorAccent: "#0A0D14",
-  selectionBackground: "#264F78", black: "#0A0D14", brightBlack: "#334155",
+  selectionBackground: "#264F78",
+  black: "#1B2230", red: "#F87171", green: "#34D399", yellow: "#FBBF24",
+  blue: "#60A5FA", magenta: "#C084FC", cyan: "#22D3EE", white: "#CBD5E1",
+  brightBlack: "#475569", brightRed: "#FCA5A5", brightGreen: "#6EE7B7", brightYellow: "#FCD34D",
+  brightBlue: "#93C5FD", brightMagenta: "#D8B4FE", brightCyan: "#67E8F9", brightWhite: "#F8FAFC",
 };
 const TERM_AUTO_LIGHT = {
+  // CodingPT 라이트 — 배경=앱 라이트 배경(--base), 밝은 배경 가독 팔레트
   background: "#F2F4F8", foreground: "#1E293B", cursor: "#0B8F63", cursorAccent: "#FFFFFF",
   selectionBackground: "#BCD3F5",
-  black: "#383A42", red: "#CA1243", green: "#50A14F", yellow: "#C18401",
-  blue: "#4078F2", magenta: "#A626A4", cyan: "#0184BC", white: "#A0A1A7",
-  brightBlack: "#696C77", brightRed: "#CA1243", brightGreen: "#50A14F", brightYellow: "#C18401",
-  brightBlue: "#4078F2", brightMagenta: "#A626A4", brightCyan: "#0184BC", brightWhite: "#101012",
+  black: "#334155", red: "#DC2626", green: "#059669", yellow: "#B45309",
+  blue: "#2563EB", magenta: "#9333EA", cyan: "#0891B2", white: "#CBD5E1",
+  brightBlack: "#64748B", brightRed: "#EF4444", brightGreen: "#10B981", brightYellow: "#D97706",
+  brightBlue: "#3B82F6", brightMagenta: "#A855F7", brightCyan: "#06B6D4", brightWhite: "#0F172A",
 };
 export const TERM_STYLES = {
   auto: { dark: TERM_AUTO_DARK, light: TERM_AUTO_LIGHT },
@@ -254,6 +260,12 @@ export const TERM_STYLES = {
   },
 };
 
+
+/** xterm 최소 대비 자동 보정 — 프롬프트가 256색(팔레트 밖) 배경을 써도 글자가 항상 읽히게.
+ *  라이트는 다크용으로 설정된 프롬프트(p10k 등)가 흔해 더 강하게 보정한다. */
+export function termMinContrast() {
+  return resolvedTheme() === "light" ? 4.5 : 3;
+}
 /** 스타일 계열의 특정 변형 팔레트(미리보기용). */
 export function termStylePalette(style, variant) {
   const fam = TERM_STYLES[style] || TERM_STYLES.auto;
