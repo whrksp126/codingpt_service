@@ -113,11 +113,23 @@ pub fn new_tid() -> i64 {
 }
 
 // 전용 소켓으로 tmux 실행(제어 명령). 자식 env 의 TMUX 제거(데몬이 cmux 안에서 돌 수 있음).
+//  UTF-8 로케일 강제(데몬 pty.js 242 미러) — Finder/독 실행 앱엔 LANG 이 없어 POSIX C 로케일이
+//  되고, 그러면 tmux 가 출력의 제어문자(탭 구분자!)와 한글을 '_' 로 이스케이프해 list 파싱이
+//  전멸한다(살아있는 세션이 0개로 보여 탭 오소거 — 2일 추적 끝에 확정한 실사고 근원).
+//  pty.rs 스트림 spawn 엔 이미 있었고 이 제어 경로에만 빠져 있었다.
 pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(&ctx.tmux);
     cmd.arg("-L").arg(TMUX_SOCKET);
     cmd.args(args);
     cmd.env_remove("TMUX");
+    let utf8 = |v: std::ffi::OsString| {
+        let s = v.to_string_lossy().to_uppercase();
+        s.contains("UTF-8") || s.contains("UTF8")
+    };
+    if !std::env::var_os("LANG").map(utf8).unwrap_or(false) {
+        cmd.env("LANG", "en_US.UTF-8");
+        cmd.env("LC_CTYPE", "en_US.UTF-8");
+    }
     let out = cmd.output().map_err(|e| format!("tmux 실행 실패: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
