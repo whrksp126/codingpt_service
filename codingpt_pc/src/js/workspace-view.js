@@ -592,7 +592,19 @@ function updateUnreadRings(ws) {
     const on =
       p.node.kind === "terminal" &&
       (p.node.tabs || []).some((t) => typeof t.win === "number" && unreadWins.has(t.win));
-    p.el.classList.toggle("notif-unread", on);
+    const was = p.el.classList.contains("notif-unread");
+    if (on) {
+      p.el.classList.add("notif-unread");
+      p.el.classList.remove("notif-clearing");
+    } else {
+      p.el.classList.remove("notif-unread");
+      // on→off(읽음) 순간 = 두 번 깜빡이고 소멸(cmux 식). animationend 에서 클래스 제거.
+      if (was && !p.el.classList.contains("notif-clearing")) {
+        p.el.classList.add("notif-clearing");
+        const done = () => { p.el.classList.remove("notif-clearing"); p.el.removeEventListener("animationend", done); };
+        p.el.addEventListener("animationend", done);
+      }
+    }
   }
 }
 

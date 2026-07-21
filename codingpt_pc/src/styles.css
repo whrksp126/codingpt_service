@@ -114,7 +114,8 @@ body.resizing-row { cursor: row-resize; }
 .sidebar { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; position: relative; }
 /* 사이드바 폭 조절 핸들 — 우측 테두리를 잡고 드래그(최소/최대는 JS 클램프) */
 .sb-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 30; }
-.sb-resizer:hover, .sb-resizer.dragging { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+/* 잡았을 때 = 중립 테두리색(액센트 아님)으로 표시 */
+.sb-resizer:hover, .sb-resizer.dragging { background: var(--border-ctrl); }
 .sb-top {
   display: flex; align-items: center; gap: 2px;
   height: 40px; padding: 0 8px 0 72px; /* 좌: macOS 트래픽 라이트 여백 */
@@ -273,10 +274,10 @@ body.resizing-row { cursor: row-resize; }
 .divider::after { content: ""; position: absolute; }
 .divider-h::after { top: 0; bottom: 0; left: -3px; right: -3px; }
 .divider-v::after { left: 0; right: 0; top: -3px; bottom: -3px; }
-.divider:hover { background: var(--accent); }
-/* 호버/드래그 시 히트영역(±3px) 전체를 반투명 액센트로 — 사이드바 리사이저(.sb-resizer)와 같은 굵기감. */
-.divider:hover::after, .divider.dragging::after { background: color-mix(in srgb, var(--accent) 35%, transparent); }
-.divider.dragging { background: var(--accent); }
+.divider:hover { background: var(--border-ctrl); }
+/* 호버/드래그 시 히트영역(±3px) 전체를 중립 테두리색으로 — 사이드바 리사이저(.sb-resizer)와 같은 굵기감(액센트 아님). */
+.divider:hover::after, .divider.dragging::after { background: var(--border-ctrl); }
+.divider.dragging { background: var(--border-ctrl); }
 .pane-slot { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 
 /* ── pane (여백/보더 없이 flush) ── */
@@ -289,6 +290,16 @@ body.resizing-row { cursor: row-resize; }
 /* 미읽음 알림이 있는 터미널 pane — 읽기 전까지 강조 테두리(모바일 패리티).
    탭바(헤더)는 제외하고 "탭 아래 본문 영역"에만 그린다. 자식(터미널)에 가리지 않게 outline 사용. */
 .pane.notif-unread > .pane-body { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+/* 읽음(클릭) 순간 = 바로 사라지지 않고 두 번 깜빡이고 소멸(cmux 식). animationend 에서 클래스 제거. */
+.pane.notif-clearing > .pane-body { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; animation: notifBlink 0.58s ease-in-out forwards; }
+@keyframes notifBlink {
+  0% { outline-color: var(--accent); }
+  20% { outline-color: transparent; }
+  40% { outline-color: var(--accent); }
+  60% { outline-color: transparent; }
+  80% { outline-color: var(--accent); }
+  100% { outline-color: transparent; }
+}
 
 /* 터미널 0개 상태의 자리 표시 — 자동 생성 금지, 사용자가 버튼으로 추가 */
 .pane-term-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--dim); }
@@ -362,7 +373,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-tree { width: 230px; flex: none; overflow: auto; background: var(--surface); border-right: 1px solid var(--border); font-size: 12.5px; padding-bottom: 8px; user-select: none; -webkit-user-select: none; }
 .ide-node, .ide-nname { user-select: none; -webkit-user-select: none; -webkit-user-drag: none; }
 .ide-resizer { flex: none; width: 5px; margin: 0 -2px; cursor: col-resize; background: transparent; position: relative; z-index: 4; }
-.ide-resizer:hover { background: var(--accent); opacity: 0.6; }
+.ide-resizer:hover { background: var(--border-ctrl); }
 .ide-err, .ide-empty { padding: 14px; color: var(--dim); font-size: 12.5px; }
 .ide-err { color: var(--error); }
 .ide-tree-hdr { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 7px 6px 6px 10px; background: var(--surface); user-select: none; }
