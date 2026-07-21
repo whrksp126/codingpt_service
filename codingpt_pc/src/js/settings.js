@@ -367,7 +367,7 @@ function buildPaired() {
   connBody.innerHTML = `
     <div id="acctCard">${profileCardHtml()}</div>
     <div class="acct-line">
-      <div class="acct-line-txt">모든 기기에서 로그아웃</div>
+      <div class="acct-line-txt">이 기기에서 로그아웃</div>
       <button id="unpairBtn" class="btn small">로그아웃</button>
     </div>
     <div class="acct-line">
