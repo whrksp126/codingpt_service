@@ -58,6 +58,18 @@ html[data-theme="light"] {
   --error: #dc2626;
 }
 
+/* ── 내장 글꼴(3플랫폼 통일 목록 — 기기 설치 여부와 무관하게 동일 선택지 보장) ──
+   @font-face 는 실제 사용될 때만 로드되므로 선언 자체는 비용 0. */
+@font-face { font-family: "PretendardVariable"; font-weight: 45 920; src: url("fonts/PretendardVariable.woff2") format("woff2-variations"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 400; src: url("fonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-weight: 700; src: url("fonts/JetBrainsMono-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Fira Code"; font-weight: 400; src: url("fonts/FiraCode-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Fira Code"; font-weight: 700; src: url("fonts/FiraCode-Bold.woff2") format("woff2"); }
+@font-face { font-family: "D2Coding"; font-weight: 400; src: url("fonts/D2Coding-Regular.woff2") format("woff2"); }
+@font-face { font-family: "D2Coding"; font-weight: 700; src: url("fonts/D2Coding-Bold.woff2") format("woff2"); }
+/* 파워라인/Nerd 글리프 폴백(PUA 서브셋) — p10k 등 프롬프트 장식이 어떤 코드 글꼴에서도 네모(□)로 깨지지 않게 */
+@font-face { font-family: "Symbols Nerd Font Mono"; font-weight: 400; src: url("fonts/SymbolsNerdMono.woff2") format("woff2"); }
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {

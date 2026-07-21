@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont, uiFontOptions, monoFontOptions } from "./theme.js";
+import { getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont, uiFontOptions, monoFontOptions, getTermScheme, setTermScheme, TERM_SCHEME_OPTIONS } from "./theme.js";
 
 let root = null;
 let navEl = null;
@@ -145,7 +145,8 @@ function renderSection(force) {
         </div>
         <div class="sett-row"><span>인터페이스 글꼴</span><select class="sett-select" id="uiFontSel"></select></div>
         <div class="sett-row"><span>코드·터미널 글꼴</span><select class="sett-select" id="monoFontSel"></select></div>
-        <div class="sett-hint">코드·터미널 글꼴은 이 Mac에 설치된 고정폭 글꼴만 표시돼요</div>
+        <div class="sett-row"><span>터미널 색상</span><select class="sett-select" id="termSchemeSel"></select></div>
+        <div class="sett-hint">글꼴·터미널 색상은 모든 기기에서 같은 목록이 제공되고, 선택은 이 기기에만 적용돼요</div>
       </div>
       <div class="sm-card2">
         <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fpa-btn" data-f="downloads">허용</button></div>
@@ -267,6 +268,7 @@ function bindAppearance(rootEl) {
   };
   fill(rootEl.querySelector("#uiFontSel"), uiFontOptions(), getUiFont(), setUiFont);
   fill(rootEl.querySelector("#monoFontSel"), monoFontOptions(), getMonoFont(), setMonoFont);
+  fill(rootEl.querySelector("#termSchemeSel"), TERM_SCHEME_OPTIONS, getTermScheme(), setTermScheme);
 }
 
 async function syncAutostart() {

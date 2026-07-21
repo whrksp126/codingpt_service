@@ -32,22 +32,30 @@ onScaleChange(() => {
     } catch (_) {}
   }
 });
-// 모양(테마/글꼴) 변경 → 열려있는 모든 터미널(xterm 팔레트·폰트)과 에디터(CM 테마) 즉시 반영.
+// 모양(테마/글꼴/터미널 스킴) 변경 → 열려있는 모든 터미널(xterm 팔레트·폰트)과 에디터(CM 테마) 즉시 반영.
+//  웹폰트(@font-face)는 사용 시점까지 lazy-load — 로드 완료를 기다렸다 적용해야 폴백 글꼴로 굳지 않는다.
 onAppearanceChange(() => {
   const theme = termTheme();
   const mono = monoFontStack();
   const cmName = cmThemeName();
-  for (const [, p] of registry) {
-    try {
-      if (p.term) {
-        p.term.options.theme = theme;
-        p.term.options.fontFamily = mono;
-        p._fitNow();
-      }
-      p.ide?.setTheme(cmName);
-      p._mixed?.forEach((m) => m.ide?.setTheme(cmName));
-    } catch (_) {}
-  }
+  const apply = () => {
+    for (const [, p] of registry) {
+      try {
+        if (p.term) {
+          p.term.options.theme = theme;
+          p.term.options.fontFamily = mono;
+          if (p.termEl) p.termEl.style.background = theme.background || "";
+          p._fitNow();
+        }
+        p.ide?.setTheme(cmName);
+        p._mixed?.forEach((m) => m.ide?.setTheme(cmName));
+      } catch (_) {}
+    }
+  };
+  try {
+    if (document.fonts?.load) document.fonts.load("13px " + mono).then(apply).catch(apply);
+    else apply();
+  } catch (_) { apply(); }
 });
 export function dispatchData(paneId, b64) {
   registry.get(paneId)?._onData(b64);
@@ -451,6 +459,8 @@ export class PaneView {
   _buildTerminal() {
     this.termEl = document.createElement("div");
     this.termEl.className = "pane-term";
+    // 터미널 스킴 배경을 pane 여백까지 — 프리셋 배경이 앱 배경과 다를 때 띠가 지지 않게.
+    try { this.termEl.style.background = termTheme().background || ""; } catch (_) {}
     this.body.appendChild(this.termEl);
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
     this.emptyEl = document.createElement("div");

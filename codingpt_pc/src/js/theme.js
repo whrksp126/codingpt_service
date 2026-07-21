@@ -19,20 +19,28 @@ export const UI_FONT_OPTIONS = [
 ];
 const UI_FONT_CANDIDATES = ["Apple SD Gothic Neo", "Noto Sans KR", "Nanum Gothic"];
 
-export const MONO_FONT_DEFAULT_OPTION = { value: "default", label: "기본 (Menlo)", stack: MONO_FONT_DEFAULT };
-const MONO_FONT_CANDIDATES = [
-  "JetBrains Mono", "SF Mono", "Menlo", "Monaco", "Fira Code", "Cascadia Code",
-  "D2Coding", "IBM Plex Mono", "Source Code Pro", "Hack", "Consolas",
+// 코드·터미널 글꼴 — 3플랫폼(PC/iOS/Android) 통일 목록. 앱에 웹폰트를 내장(styles.css @font-face)해
+// 기기 설치 여부와 무관하게 어디서나 같은 선택지·같은 룩. "Symbols Nerd Font Mono"는 파워라인 글리프 폴백.
+const MONO_FALLBACK = '"Symbols Nerd Font Mono", ' + MONO_FONT_DEFAULT;
+export const MONO_FONT_UNIFIED = [
+  { value: "default", label: "기본", stack: "Menlo, Monaco, \"SF Mono\", Consolas, \"Symbols Nerd Font Mono\", monospace" },
+  { value: "JetBrains Mono", label: "JetBrains Mono", stack: `"JetBrains Mono", ${MONO_FALLBACK}` },
+  { value: "Fira Code", label: "Fira Code", stack: `"Fira Code", ${MONO_FALLBACK}` },
+  { value: "D2Coding", label: "D2Coding", stack: `"D2Coding", ${MONO_FALLBACK}` },
 ];
+
+const KEY_TERM_SCHEME = "cpt.termScheme";
 
 let themeMode = "system"; // 'system' | 'light' | 'dark'
 let uiFont = "default";
 let monoFont = "default";
+let termScheme = "auto"; // 'auto'(테마 연동) | TERM_SCHEMES 키
 try {
   const t = localStorage.getItem(KEY_THEME);
   if (t === "light" || t === "dark" || t === "system") themeMode = t;
   uiFont = localStorage.getItem(KEY_UI_FONT) || "default";
   monoFont = localStorage.getItem(KEY_MONO_FONT) || "default";
+  termScheme = localStorage.getItem(KEY_TERM_SCHEME) || "auto";
 } catch (_) {}
 
 const listeners = new Set();
@@ -60,11 +68,7 @@ export function uiFontOptions() {
   return opts;
 }
 export function monoFontOptions() {
-  const opts = [MONO_FONT_DEFAULT_OPTION];
-  for (const n of MONO_FONT_CANDIDATES) {
-    if (fontAvailable(n)) opts.push({ value: n, label: n, stack: `"${n}", ${MONO_FONT_DEFAULT}` });
-  }
-  return opts;
+  return MONO_FONT_UNIFIED;
 }
 
 function stackFor(kind, value) {
@@ -114,6 +118,13 @@ export function setMonoFont(v) {
   try { localStorage.setItem(KEY_MONO_FONT, v); } catch (_) {}
   emit();
 }
+export function getTermScheme() { return termScheme; }
+export function setTermScheme(v) {
+  if (v === termScheme) return;
+  termScheme = v;
+  try { localStorage.setItem(KEY_TERM_SCHEME, v); } catch (_) {}
+  emit();
+}
 
 /** 모양(테마/글꼴) 변경 구독 — 인자로 resolved 테마('light'|'dark'). 반환값 = 해제 함수. */
 export function onAppearanceChange(fn) {
@@ -155,8 +166,63 @@ const TERM_LIGHT = {
   brightCyan: "#0184BC",
   brightWhite: "#101012",
 };
-/** 현재 테마의 xterm 팔레트. */
+// ── 터미널 컬러 스킴 프리셋 — 앱 테마와 별개로 "터미널만" 갈아입는 팔레트(모바일과 목록/값 통일).
+//    claude/codex/vim 등 모든 TUI 는 ANSI 색 번호로만 그리므로 이 팔레트가 곧 TUI 스타일이 된다.
+export const TERM_SCHEME_OPTIONS = [
+  { value: "auto", label: "기본 (테마 연동)" },
+  { value: "ghostty", label: "Ghostty (cmux 기본)" },
+  { value: "one-dark", label: "One Dark" },
+  { value: "dracula", label: "Dracula" },
+  { value: "solarized-dark", label: "Solarized Dark" },
+  { value: "solarized-light", label: "Solarized Light" },
+];
+const TERM_SCHEMES = {
+  // cmux 가 내장한 Ghostty 의 기본 팔레트(Ghostty Default Style Dark) — cmux 와 같은 느낌.
+  ghostty: {
+    background: "#282C34", foreground: "#FFFFFF", cursor: "#FFFFFF", cursorAccent: "#353A44",
+    selectionBackground: "#FFFFFF", selectionForeground: "#282C34",
+    black: "#1D1F21", red: "#CC6566", green: "#B6BD68", yellow: "#F0C674",
+    blue: "#82A2BE", magenta: "#B294BB", cyan: "#8ABEB7", white: "#C4C8C6",
+    brightBlack: "#666666", brightRed: "#D54E53", brightGreen: "#B9CA4B", brightYellow: "#E7C547",
+    brightBlue: "#7AA6DA", brightMagenta: "#C397D8", brightCyan: "#70C0B1", brightWhite: "#EAEAEA",
+  },
+  "one-dark": {
+    background: "#282C34", foreground: "#ABB2BF", cursor: "#528BFF", cursorAccent: "#282C34",
+    selectionBackground: "#3E4451",
+    black: "#282C34", red: "#E06C75", green: "#98C379", yellow: "#E5C07B",
+    blue: "#61AFEF", magenta: "#C678DD", cyan: "#56B6C2", white: "#ABB2BF",
+    brightBlack: "#5C6370", brightRed: "#E06C75", brightGreen: "#98C379", brightYellow: "#E5C07B",
+    brightBlue: "#61AFEF", brightMagenta: "#C678DD", brightCyan: "#56B6C2", brightWhite: "#FFFFFF",
+  },
+  dracula: {
+    background: "#282A36", foreground: "#F8F8F2", cursor: "#F8F8F2", cursorAccent: "#282A36",
+    selectionBackground: "#44475A",
+    black: "#21222C", red: "#FF5555", green: "#50FA7B", yellow: "#F1FA8C",
+    blue: "#BD93F9", magenta: "#FF79C6", cyan: "#8BE9FD", white: "#F8F8F2",
+    brightBlack: "#6272A4", brightRed: "#FF6E6E", brightGreen: "#69FF94", brightYellow: "#FFFFA5",
+    brightBlue: "#D6ACFF", brightMagenta: "#FF92DF", brightCyan: "#A4FFFF", brightWhite: "#FFFFFF",
+  },
+  "solarized-dark": {
+    background: "#002B36", foreground: "#839496", cursor: "#839496", cursorAccent: "#002B36",
+    selectionBackground: "#073642",
+    black: "#073642", red: "#DC322F", green: "#859900", yellow: "#B58900",
+    blue: "#268BD2", magenta: "#D33682", cyan: "#2AA198", white: "#EEE8D5",
+    brightBlack: "#586E75", brightRed: "#CB4B16", brightGreen: "#586E75", brightYellow: "#657B83",
+    brightBlue: "#839496", brightMagenta: "#6C71C4", brightCyan: "#93A1A1", brightWhite: "#FDF6E3",
+  },
+  "solarized-light": {
+    background: "#FDF6E3", foreground: "#657B83", cursor: "#657B83", cursorAccent: "#FDF6E3",
+    selectionBackground: "#EEE8D5",
+    black: "#073642", red: "#DC322F", green: "#859900", yellow: "#B58900",
+    blue: "#268BD2", magenta: "#D33682", cyan: "#2AA198", white: "#EEE8D5",
+    brightBlack: "#586E75", brightRed: "#CB4B16", brightGreen: "#93A1A1", brightYellow: "#839496",
+    brightBlue: "#657B83", brightMagenta: "#6C71C4", brightCyan: "#586E75", brightWhite: "#FDF6E3",
+  },
+};
+
+/** 현재 xterm 팔레트 — 프리셋 선택 시 프리셋, auto 면 앱 테마(다크/라이트) 연동. */
 export function termTheme() {
+  if (termScheme !== "auto" && TERM_SCHEMES[termScheme]) return TERM_SCHEMES[termScheme];
   return resolvedTheme() === "light" ? TERM_LIGHT : TERM_DARK;
 }
 /** 현재 테마의 CodeMirror theme 이름 — 라이트는 코어 내장 default(별도 CSS 불필요). */
