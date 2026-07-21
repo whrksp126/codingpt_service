@@ -188,6 +188,8 @@ function run(config) {
     try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
     // shim(cpt/claude/codex 래퍼 + claude 훅 설정) 멱등 생성 — 터미널 PATH 주입은 pty.js 가 담당.
     try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
+    // cpt 스킬 스텁을 ~/.claude/skills 에 설치 — claude 가 cpt 를 스스로 인지·사용하게(opt-out: CPT_SKILL_INSTALL=0).
+    try { require('./skills').ensureSkillStub(); } catch (e) { console.error('[control] 스킬 스텁 설치 실패:', e.message); }
     // 신선도 보고 루프(사이드바 미커밋/미푸시 배지) — 60s 주기, 변화시에만 서버 기록.
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구

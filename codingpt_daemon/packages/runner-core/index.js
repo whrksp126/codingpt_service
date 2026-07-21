@@ -17,4 +17,5 @@ module.exports = {
   freshness: require('./freshness'),
   workspace: require('./workspace'),
   cptServer: require('./cpt-server'), // cpt CLI 컨트롤 소켓(터미널 안 AI 의 서비스 조작 진입점)
+  skills: require('./skills'),        // cpt 스킬 스텁 설치(claude 가 cpt 를 인지하게)
 };

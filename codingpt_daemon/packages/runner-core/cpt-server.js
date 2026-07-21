@@ -357,9 +357,17 @@ async function dispatch(req) {
     case 'ui.previewOpen':
     case 'ui.previewNavigate':
     case 'ui.previewReload':
-    case 'ui.ideOpen': {
+    case 'ui.previewClose':
+    case 'ui.previewDevtools':
+    case 'ui.previewInfo':
+    case 'ui.ideOpen':
+    case 'ui.ideClose':
+    case 'ui.ideCloseFile':
+    case 'ui.ideList': {
       const uiCmd = cmd.slice(3, 4).toLowerCase() + cmd.slice(4); // ui.layoutTree → layoutTree
-      const mode = (cmd === 'ui.layoutTree') ? 'executor' : 'broadcast';
+      // 조회/기기-로컬 UI 는 "지금 보고 있는" 기기 1곳(executor)에서만 실행·회신. 나머지는 broadcast.
+      const EXECUTOR_ONLY = new Set(['ui.layoutTree', 'ui.ideList', 'ui.previewInfo', 'ui.previewDevtools']);
+      const mode = EXECUTOR_ONLY.has(cmd) ? 'executor' : 'broadcast';
       return sendUiCommand(uiCmd, { ...args, ws: resolved.cwdRel }, { mode, timeoutMs: args.timeoutMs });
     }
     // 브라우저 자동화 — executor 1곳 단독 실행(P4 에서 클라이언트 구현).
@@ -404,7 +412,8 @@ const CAPABILITIES = [
   'notify', 'notification.list', 'notification.readAll',
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
-  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.ideOpen',
+  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo',
+  'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList',
   'browser.snapshot', 'browser.click', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot',
   'hook.event',
 ];

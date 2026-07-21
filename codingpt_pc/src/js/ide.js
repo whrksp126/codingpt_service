@@ -677,6 +677,39 @@ export class IdeView {
     this._renderGroupTabs(group);
     this._renderBody();
   }
+  // ── ui_command(원격 조작) 진입점 — 홈-상대 경로(path)로 열린 파일 제어 ──
+  //  ui-channel 이 ws 상대 → 홈-상대(normPath)로 맞춰 넘긴다. 표면(pane/혼합탭) 무관.
+  //  열린 파일 탭 하나 닫기 — 활성 그룹 우선, 없으면 아무 그룹에서 찾아 기존 closeFile 로 닫는다.
+  closeFileByPath(path) {
+    let hit = null;
+    const ag = this.activeGroup;
+    if (ag) { const i = ag.open.findIndex((o) => o.path === path); if (i >= 0) hit = { group: ag, i }; }
+    if (!hit) {
+      for (const g of this.groups.values()) {
+        const i = g.open.findIndex((o) => o.path === path);
+        if (i >= 0) { hit = { group: g, i }; break; }
+      }
+    }
+    if (!hit) return false;
+    this.closeFile(hit.group, hit.i);
+    return true;
+  }
+  // 지금 열린 파일 목록(중복 제거) — 활성 그룹의 활성 파일을 active 로 표시. 경로는 홈-상대(f.path).
+  listOpenFiles() {
+    const g = this.activeGroup;
+    const activePath = g && g.open[g.active] ? g.open[g.active].path : null;
+    const seen = new Set();
+    const list = [];
+    for (const gg of this.groups.values()) {
+      for (const f of gg.open) {
+        if (seen.has(f.path)) continue;
+        seen.add(f.path);
+        list.push({ path: f.path, active: f.path === activePath });
+      }
+    }
+    return list;
+  }
+
   _removeGroup(group) {
     if (this.groups.size <= 1) return;
     const r = T.closeLeaf(this.egRoot, group.id);

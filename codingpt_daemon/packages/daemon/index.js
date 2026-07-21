@@ -150,6 +150,8 @@ function cmdUnpair() {
   //  (전부 지우면 dev 빌드가 localhost 기본값으로 떨어져 웹 로그인이 로컬 프론트를 연다 — 실측)
   if (configLib.clearCredentials()) console.log('로컬 자격을 삭제했습니다. (서버측 기기 해제는 앱에서)');
   else console.log('삭제할 설정이 없습니다.');
+  // 우리가 설치한 cpt 스킬 스텁도 정리(순수 add 를 되돌린다).
+  try { if (runnerCore.skills.removeSkillStub()) console.log('cpt 스킬 스텁을 제거했습니다.'); } catch (_) { /* noop */ }
 }
 
 // 초기 세팅 도우미 — macOS 권한(전체 디스크 접근) 안내/설정창 열기.

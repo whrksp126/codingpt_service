@@ -170,7 +170,13 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   preview open <url|:port>              프리뷰 열기(새 pane)
   preview navigate <url>                활성 프리뷰 이동
   preview reload                        활성 프리뷰 새로고침
-  ide open <파일경로> [--line <n>]      IDE 로 파일 열기
+  preview close                         프리뷰 닫기
+  preview devtools [on|off]             개발자도구 토글(보고 있는 기기)
+  preview info                          현재 URL/제목/뷰포트
+  ide open <파일경로> [--line <n>]      IDE 로 파일 열기(해당 줄로 이동)
+  ide close                             IDE pane 닫기
+  ide close-file <파일경로>             열린 파일 탭 하나 닫기
+  ide list                              지금 열린 파일 목록
 
   # 브라우저 자동화 (프리뷰 페이지 — 한 기기에서 실행해 결과 회신)
   browser snapshot                      인터랙티브 요소 트리(ref 포함)
@@ -193,7 +199,10 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   log [--level info|warn|error] <message>
   status                                이 워크스페이스의 상태/로그 보기
 
-옵션: --json (원본 JSON 출력)
+  # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
+  skills get cpt-cli                    버전 일치 전체 가이드 출력(태스크 중심)
+
+옵션: --json (원본 JSON 출력), --sid <표면id> (특정 프리뷰/IDE 대상 지정)
 
 환경: CPT_WS(워크스페이스), CPT_SOCK(소켓 경로), TMUX_PANE(자동)
 `;
@@ -287,13 +296,27 @@ async function main() {
         break;
       }
       case 'preview': {
-        if (c2 === 'open') return out(await request('ui.previewOpen', { url: rest[0] }), flags, 'ok');
-        if (c2 === 'navigate') return out(await request('ui.previewNavigate', { url: rest[0] }), flags, 'ok');
-        if (c2 === 'reload') return out(await request('ui.previewReload', {}), flags, 'ok');
+        const sid = flags.sid || undefined;
+        // open 은 dev 서버가 fire-and-forget 으로 부를 수 있어 짧은 타임아웃(open shim 블록 방지).
+        if (c2 === 'open') return out(await request('ui.previewOpen', { url: rest[0], sid, timeoutMs: 5000 }), flags, 'ok');
+        if (c2 === 'navigate') return out(await request('ui.previewNavigate', { url: rest[0], sid }), flags, 'ok');
+        if (c2 === 'reload') return out(await request('ui.previewReload', { sid }), flags, 'ok');
+        if (c2 === 'close') return out(await request('ui.previewClose', { sid }), flags, 'ok');
+        if (c2 === 'devtools') return out(await request('ui.previewDevtools', { sid, on: rest[0] === 'off' ? false : (rest[0] === 'on' ? true : undefined) }), flags, 'ok');
+        if (c2 === 'info') return printJson(await request('ui.previewInfo', { sid }));
         break;
       }
       case 'ide': {
-        if (c2 === 'open') return out(await request('ui.ideOpen', { path: rest[0], line: flags.line ? parseInt(flags.line, 10) : undefined }), flags, 'ok');
+        const sid = flags.sid || undefined;
+        if (c2 === 'open') return out(await request('ui.ideOpen', { path: rest[0], line: flags.line ? parseInt(flags.line, 10) : undefined, sid }), flags, 'ok');
+        if (c2 === 'close') return out(await request('ui.ideClose', { sid }), flags, 'ok');
+        if (c2 === 'close-file') return out(await request('ui.ideCloseFile', { path: rest[0], sid }), flags, 'ok');
+        if (c2 === 'list') return printJson(await request('ui.ideList', { sid }));
+        break;
+      }
+      case 'skills': {
+        if (c2 === 'get') return printSkillGuide(rest[0]);
+        if (c2 === 'list' || c2 == null) { process.stdout.write('cpt-cli\n'); return; }
         break;
       }
 
@@ -381,6 +404,22 @@ function readStdinJson() {
   });
 }
 function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
+
+// 스킬 전체 가이드 — cpt-cli 패키지에 동봉된 GUIDE.md 를 그대로 출력(바이너리 버전과 항상 일치).
+//  소켓 불필요(순수 파일 읽기) — 데몬이 죽어 있어도 동작해 에이전트가 명령을 학습할 수 있다.
+function printSkillGuide(name) {
+  if (name && name !== 'cpt-cli') {
+    process.stderr.write(`알 수 없는 스킬: ${name} (사용 가능: cpt-cli)\n`);
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    process.stdout.write(fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8'));
+  } catch (_) {
+    process.stderr.write('가이드 파일(GUIDE.md)을 찾을 수 없습니다.\n');
+    process.exitCode = 1;
+  }
+}
 
 // Claude Code Stop 훅 페이로드에서 마지막 assistant 응답 요약 추출 — transcript jsonl 을 뒤에서 스캔.
 function extractClaudeSummary(payload) {

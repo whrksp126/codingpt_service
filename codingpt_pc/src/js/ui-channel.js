@@ -9,6 +9,7 @@ import * as S from "./state.js";
 import { state } from "./state.js";
 import * as T from "./tiling.js";
 import { getPane, smartUrl } from "./pane.js";
+import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
 
@@ -305,6 +306,62 @@ function navigatePreview(target, url) {
   S.emit();
 }
 
+// IDE 대상 탐색(findPreviewTarget 미러) — 포커스 pane 우선, 독립 IDE pane 또는 혼합 IDE 탭.
+//  반환: { leaf, tab:null } | { leaf, tab, index } | null.
+function findIdeTarget(rt) {
+  const check = (l) => {
+    if (l.kind === "ide") return { leaf: l, tab: null };
+    if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "ide");
+      if (i >= 0) return { leaf: l, tab: l.tabs[i], index: i };
+    }
+    return null;
+  };
+  let hit = null;
+  const focusLeaf = rt.focusId ? T.findLeaf(rt.layout, rt.focusId) : null;
+  if (focusLeaf) hit = check(focusLeaf);
+  if (!hit) T.eachLeaf(rt.layout, (l) => { if (!hit) hit = check(l); });
+  return hit;
+}
+
+// 표면 대상(findPreview/IdeTarget 결과) 닫기 — 독립 pane 은 통째 close, 혼합 탭은 그 탭만 제거.
+//  (모바일 closeSurfaceHit 미러. Phase 1: 각 기기 로컬.)
+function closeSurfaceTarget(meta, target) {
+  if (!target.tab) { S.closePane(meta.id, target.leaf.id); return; }
+  const pane = getPane(target.leaf.id);
+  if (pane) pane.closeTab(target.index); // 마지막 탭이면 closeTab 내부에서 pane 통째 닫음
+  else S.closePane(meta.id, target.leaf.id);
+}
+
+// IDE 대상의 살아있는 IdeView 인스턴스(없으면 null — 혼합 탭이 아직 한 번도 표시 안 됨 등).
+function ideInstanceOf(target) {
+  const pane = getPane(target.leaf.id);
+  if (!pane) return null;
+  if (target.tab) return target.tab.tid ? (pane._mixed?.get(target.tab.tid)?.ide || null) : null;
+  return pane.ide || null;
+}
+
+// 홈-상대(IDE 내부) 경로 → ws 상대 경로(normPath 역변환) — ideList 출력용(모바일 rel 규칙과 정합).
+function relPath(meta, full) {
+  const root = (meta.localPath || "").replace(/\/+$/, "");
+  const p = String(full || "");
+  if (root && p.startsWith(root + "/")) return p.slice(root.length + 1);
+  return p.replace(/^\/+/, "");
+}
+
+// 프리뷰 대상의 표면 핸들(pvId/host/bar/title) — 없으면 surface:null(표면 미생성). target:null=프리뷰 자체 없음.
+function findPreviewSurface(rt) {
+  const target = findPreviewTarget(rt);
+  if (!target) return { target: null, surface: null };
+  const pane = getPane(target.leaf.id);
+  if (!pane) return { target, surface: null };
+  if (target.tab) {
+    const sf = target.tab.tid ? pane._mixed?.get(target.tab.tid)?.preview : null;
+    return { target, surface: sf ? { pvId: sf.id, host: sf.host, bar: sf.bar, title: target.tab.metaTitle || "" } : null };
+  }
+  return { target, surface: { pvId: pane._pvId, host: pane.previewHost, bar: pane.previewBar, title: pane.node.metaTitle || "" } };
+}
+
 // ── browser.* — 프리뷰 네이티브 WKWebView 자동화 ──
 //  흐름: 대상 프리뷰 표면 찾기 → (조작이면) 오리진 가드 → 에이전트 주입(멱등) → 호출 → JSON 회수.
 //  에이전트 메서드는 동기 반환(preview_eval 이 결과를 회수) — wait 만 여기서 500ms 폴링.
@@ -551,5 +608,73 @@ const handlers = {
     S.focusPane(target.leaf.id);
     S.emit();
     return { ok: true, paneId: target.leaf.id };
+  },
+
+  // 첫(포커스 우선) 프리뷰 표면(pane/혼합 탭) 닫기 — 없으면 멱등 성공. (Phase 1: 각 기기 로컬 — sid 무시)
+  previewClose: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const target = findPreviewTarget(rt);
+    if (!target) return { ok: true }; // 없으면 멱등 성공
+    closeSurfaceTarget(meta, target);
+    return { ok: true };
+  },
+
+  // 개발자도구 토글(executor) — 보고 있는 기기의 프리뷰 인스턴스. on 생략 시 반전. 새 상태 회신.
+  previewDevtools: async (p) => {
+    const { rt } = requireWs(p);
+    const { target, surface } = findPreviewSurface(rt);
+    if (!target) throw new Error("프리뷰 없음");
+    if (!surface) throw new Error("프리뷰가 아직 로드되지 않았어요");
+    const on = typeof p.on === "boolean" ? p.on : undefined;
+    const cur = dtActive(surface.pvId);
+    const want = on === undefined ? !cur : on;
+    let result = cur;
+    if (want !== cur) result = await toggleChiiDevtools(surface.pvId, surface.host);
+    return { ok: true, result: { on: !!result } };
+  },
+
+  // 프리뷰 현재 상태 조회(executor) — url/제목/뷰포트/기기. 표면 미로드면 url 빈 값.
+  previewInfo: async (p) => {
+    const { rt } = requireWs(p);
+    const { target, surface } = findPreviewSurface(rt);
+    if (!target) throw new Error("프리뷰 없음");
+    if (!surface) return { ok: true, result: { url: "", device: "pc" } };
+    const out = { url: surface.bar?.url || "", device: "pc" };
+    if (surface.title) out.title = surface.title;
+    const r = surface.host?.getBoundingClientRect?.();
+    if (r && r.width > 2 && r.height > 2) out.viewport = { w: Math.round(r.width), h: Math.round(r.height) };
+    return { ok: true, result: out };
+  },
+
+  // 첫(포커스 우선) IDE 표면(pane/혼합 탭) 닫기 — 없으면 멱등 성공. (Phase 1: 각 기기 로컬)
+  ideClose: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const target = findIdeTarget(rt);
+    if (!target) return { ok: true }; // 없으면 멱등 성공
+    closeSurfaceTarget(meta, target);
+    return { ok: true };
+  },
+
+  // 열린 파일 탭 하나 닫기 — 첫 IDE 표면의 열린 파일에서 제거(라이브). skipped 회신.
+  ideCloseFile: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const path = normPath(meta, p.path);
+    if (!path) throw new Error("path 필요");
+    const target = findIdeTarget(rt);
+    if (!target) throw new Error("IDE 없음");
+    const ide = ideInstanceOf(target);
+    const closed = ide?.closeFileByPath ? ide.closeFileByPath(path) : false;
+    return { ok: true, result: { skipped: !closed } };
+  },
+
+  // 지금 열린 파일 목록(executor) — 첫 IDE 표면의 열린 파일(ws 상대 경로)+활성.
+  ideList: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const target = findIdeTarget(rt);
+    if (!target) throw new Error("IDE 없음");
+    const ide = ideInstanceOf(target);
+    const list = ide?.listOpenFiles ? ide.listOpenFiles() : [];
+    const files = list.map((f) => ({ path: relPath(meta, f.path), active: !!f.active }));
+    return { ok: true, result: { files, device: "pc" } };
   },
 };

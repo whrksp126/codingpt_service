@@ -134,6 +134,38 @@ esac
 exec "$REAL" -c 'notify=["cpt","codex-notify"]' "$@"
 `);
 
+  // 4.5) open 래퍼(macOS 전용) — `open http(s)://…` 를 워크스페이스 프리뷰로 라우팅한다(cmux 미러).
+  //   PATH 선두에 bin 이 오므로 이 파일이 /usr/bin/open 보다 먼저 잡힌다. cpt 와 달리 전역 심링크·
+  //   셸 함수는 만들지 않는다 — open 을 PATH 래핑하는 서드파티가 없어 함수 강제가 불필요하고, rc 가
+  //   source 하는 스크립트의 open 호출까지 오염시킬 위험만 있다. 우리 터미널(PATH 주입된) 안에서만 동작.
+  //   플래그(-a/-e/…) 하나라도 있거나 비 http(s) 인자가 섞이면 통째로 시스템 open 으로 통과(보수적).
+  if (process.platform === 'darwin') {
+    writeExec(path.join(bin, 'open'), `#!/bin/sh
+# CodingPT open shim — http(s) URL 은 워크스페이스 프리뷰로, 그 외는 시스템 open 그대로.
+REAL="/usr/bin/open"
+BIN="$(cd "$(dirname "$0")" && pwd)"
+[ "\${CPT_OPEN_PASSTHROUGH:-0}" = "1" ] && exec "$REAL" "$@"
+for a in "$@"; do
+  case "$a" in
+    -*) exec "$REAL" "$@" ;;
+  esac
+done
+[ $# -eq 0 ] && exec "$REAL"
+for a in "$@"; do
+  case "$a" in
+    http://*|https://*) ;;
+    *) exec "$REAL" "$@" ;;
+  esac
+done
+ok=1
+for a in "$@"; do
+  "$BIN/cpt" preview open "$a" >/dev/null 2>&1 || ok=0
+done
+[ "$ok" = "1" ] || exec "$REAL" "$@"
+exit 0
+`);
+  }
+
   // 5) zsh ZDOTDIR 체인 — tmux 세션 env 의 PATH 주입은 사용자 zshrc 가 PATH 를 재구성하면
   //    밀려난다(실측). ZDOTDIR 를 이 디렉토리로 바꿔 사용자 rc 를 그대로 source 한 뒤
   //    "마지막에" shim 을 얹는다(iTerm/cmux 류 shell integration 과 같은 패턴). 사용자 파일 무수정.
