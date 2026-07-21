@@ -112,30 +112,11 @@ function renderSection(force) {
       connMode = mode;
       paired ? buildPaired() : buildUnpaired();
     } else if (paired) {
+      ensureAccountCard(); // 프로필 지연 로드 반영(닉네임 재바인딩 포함)
       renderDeviceList();
     }
   } else if (section === "general") {
-    const me = state.me;
-    const initial = me ? (me.nickname || me.email || "U").trim().charAt(0).toUpperCase() : "";
-    const avatar = me?.profileImg
-      ? `<img class="acct-img" src="${esc(me.profileImg)}" alt="" />`
-      : `<span class="acct-initial">${esc(initial)}</span>`;
-    const profileHtml = me
-      ? `<div class="sm-card2">
-          <div class="prof">
-            <div class="acct-avatar big">${avatar}</div>
-            <div class="prof-main">
-              <div class="prof-nick-row">
-                <input id="nickInput" class="prof-nick" value="${esc(me.nickname || "")}" placeholder="닉네임" maxlength="40" spellcheck="false" />
-                <button id="nickSave" class="btn small">저장</button>
-              </div>
-              <div class="prof-email">${esc(me.email || "")}</div>
-            </div>
-          </div>
-        </div>`
-      : `<div class="sm-card2"><div class="dim" style="font-size:13px">로그인하면 프로필이 표시됩니다.</div></div>`;
     contentEl.innerHTML = `
-      ${profileHtml}
       <div class="sm-card2">
         <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
       </div>
@@ -172,8 +153,7 @@ function renderSection(force) {
       }
     });
     syncAutostart();
-    bindNickname();
-    if (state.paired && !state.me) S.loadMe(); // 프로필 지연 로드 → emit 후 재렌더
+    if (state.paired && !state.me) S.loadMe(); // 프로필 지연 로드(계정 탭 프로필 카드용)
   } else {
     // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
@@ -348,42 +328,44 @@ async function syncAutostart() {
   } catch (_) {}
 }
 
-// 계정 카드(로그인된 사용자 프로필). state.me 없으면 빈 문자열.
-function accountCardHtml() {
+// 프로필 카드(로그인된 사용자 · 닉네임 편집 + 이메일). 계정 탭 최상단. state.me 없으면 안내 문구.
+function profileCardHtml() {
   const me = state.me;
-  if (!me) return "";
-  const name = esc(me.nickname || me.email || "사용자");
-  const email = esc(me.email || "");
+  if (!me) return `<div class="sm-card2"><div class="dim" style="font-size:13px">로그인하면 프로필이 표시됩니다.</div></div>`;
   const initial = (me.nickname || me.email || "U").trim().charAt(0).toUpperCase();
   const avatar = me.profileImg
     ? `<img class="acct-img" src="${esc(me.profileImg)}" alt="" />`
     : `<span class="acct-initial">${esc(initial)}</span>`;
-  return `
-    <div class="acct-card">
-      <div class="acct-avatar">${avatar}</div>
-      <div class="acct-meta"><div class="acct-name">${name}</div>${email ? `<div class="acct-email">${email}</div>` : ""}</div>
-      <span class="acct-badge">로그인됨</span>
+  return `<div class="sm-card2">
+      <div class="prof">
+        <div class="acct-avatar big">${avatar}</div>
+        <div class="prof-main">
+          <div class="prof-nick-row">
+            <input id="nickInput" class="prof-nick" value="${esc(me.nickname || "")}" placeholder="닉네임" maxlength="40" spellcheck="false" />
+            <button id="nickSave" class="btn small">저장</button>
+          </div>
+          <div class="prof-email">${esc(me.email || "")}</div>
+        </div>
+      </div>
     </div>`;
 }
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
-// 프로필 지연 로드 후 계정 카드 반영(paired 뷰 통째 재빌드 없이).
+// 프로필 지연 로드 후 계정 탭 프로필 카드 반영(paired 뷰 통째 재빌드 없이) + 닉네임 저장 재바인딩.
 function ensureAccountCard() {
-  if (!connBody || !state.me) return;
-  const html = accountCardHtml();
-  if (!html) return;
+  if (!connBody) return;
   const holder = connBody.querySelector("#acctCard");
-  if (holder) { holder.innerHTML = html; return; }
-  const card = connBody.querySelector(".acct-card");
-  if (!card) connBody.insertAdjacentHTML("afterbegin", html);
-  else card.outerHTML = html;
+  if (!holder) return;
+  holder.innerHTML = profileCardHtml();
+  bindNickname();
 }
 
 // ── 로그인됨: 계정 + 이 기기 상태 + 내 기기 목록 ──
 function buildPaired() {
   stopWebLogin();
   connBody.innerHTML = `
+    <div id="acctCard">${profileCardHtml()}</div>
     <div class="acct-line">
       <div class="acct-line-txt">모든 기기에서 로그아웃</div>
       <button id="unpairBtn" class="btn small">로그아웃</button>
@@ -399,8 +381,9 @@ function buildPaired() {
     </div>`;
   bindUnpair(connBody.querySelector("#unpairBtn"));
   connBody.querySelector("#deleteAcctBtn").addEventListener("click", onDeleteAccount);
+  bindNickname(); // 프로필 카드 닉네임 저장
   renderDeviceList();
-  if (!state.me) S.loadMe(); // 프로필 지연 로드
+  if (!state.me) S.loadMe(); // 프로필 지연 로드 → emit 시 ensureAccountCard 로 카드 채움
   S.loadDevices(); // 기기 목록/온라인 상태 최신화
 }
 
