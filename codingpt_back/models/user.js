@@ -62,6 +62,8 @@ module.exports = (sequelize, DataTypes) => {
     billing_key: { type: DataTypes.STRING(255), allowNull: true },
     card_brand: { type: DataTypes.STRING(32), allowNull: true },
     card_last4: { type: DataTypes.STRING(4), allowNull: true },
+    // 모양 설정(계정 전체 동기화) — {uiFont, codeFont, termStyle}. 변경 시 appearance_event 팬아웃.
+    appearance: { type: DataTypes.JSONB, allowNull: true },
   }, {
     tableName: 'user',
     timestamps: false,

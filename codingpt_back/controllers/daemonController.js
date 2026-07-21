@@ -116,16 +116,44 @@ async function registerController(req, res) {
   }
 }
 
-// PATCH /api/daemon/me  (JWT|deviceToken) — 프로필(닉네임) 수정.
+// 모양 설정 화이트리스트 — 알 수 없는 키/값은 버린다(전 기기 동기화 페이로드라 오염 방지).
+const APPEARANCE_KEYS = {
+  uiFont: ['pretendard', 'notoserif', 'gowun', 'gmarket'],
+  codeFont: ['default', 'jetbrains', 'fira', 'd2coding'],
+  termStyle: ['auto', 'ghostty', 'one', 'dracula', 'solarized'],
+};
+function sanitizeAppearance(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const [k, allowed] of Object.entries(APPEARANCE_KEYS)) {
+    if (typeof raw[k] === 'string' && allowed.includes(raw[k])) out[k] = raw[k];
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+// PATCH /api/daemon/me  (JWT|deviceToken) — 프로필(닉네임)·모양 설정(appearance) 수정.
+//  appearance 는 계정 전체 동기화 — 저장 후 appearance_event 로 전 기기 팬아웃.
 async function updateMe(req, res) {
   try {
     const acct = await resolveAccount(req);
     if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
     const nickname = String((req.body && req.body.nickname) || '').trim().slice(0, 40);
-    if (!nickname) return errorResponse(res, new Error('닉네임을 입력하세요.'), 400);
-    await User.update({ nickname }, { where: { id: acct.userId } });
-    const u = await User.findByPk(acct.userId, { attributes: ['id', 'email', 'nickname', 'profile_img'] });
-    return successResponse(res, { id: u.id, email: u.email, nickname: u.nickname, profileImg: u.profile_img });
+    const appearancePatch = sanitizeAppearance(req.body && req.body.appearance);
+    if (!nickname && !appearancePatch) return errorResponse(res, new Error('변경할 내용이 없습니다.'), 400);
+    const patch = {};
+    if (nickname) patch.nickname = nickname;
+    let mergedAppearance = null;
+    if (appearancePatch) {
+      const cur = await User.findByPk(acct.userId, { attributes: ['appearance'] });
+      mergedAppearance = { ...((cur && cur.appearance) || {}), ...appearancePatch };
+      patch.appearance = mergedAppearance;
+    }
+    await User.update(patch, { where: { id: acct.userId } });
+    if (mergedAppearance) {
+      try { daemonRelayService.fanoutAppearance(acct.userId, mergedAppearance); } catch (_) { /* best-effort */ }
+    }
+    const u = await User.findByPk(acct.userId, { attributes: ['id', 'email', 'nickname', 'profile_img', 'appearance'] });
+    return successResponse(res, { id: u.id, email: u.email, nickname: u.nickname, profileImg: u.profile_img, appearance: u.appearance || null });
   } catch (e) {
     return errorResponse(res, e, 500);
   }
@@ -176,14 +204,15 @@ async function daemonWorkspaces(req, res) {
   }
 }
 
-// GET /api/daemon/me  (deviceToken 인증) → 이 기기를 소유한 사용자 프로필.
-//  PC 데스크톱 GUI 설정 모달의 "계정" 표시용. 웹 로그인(=브라우저 승인 페어링) 후 계정 정보를 보여준다.
+// GET /api/daemon/me  (deviceToken|JWT) → 이 계정의 사용자 프로필(+모양 설정).
+//  PC 데스크톱 GUI 설정 모달의 "계정" 표시용 + 모바일 appearance 부트 동기화(JWT 폴백 허용).
 async function daemonMe(req, res) {
   try {
-    const device = await resolveDeviceUser(req);
-    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
-    const u = await User.findByPk(device.user_id, {
-      attributes: ['id', 'email', 'nickname', 'profile_img', 'role'],
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const device = acct.device || null;
+    const u = await User.findByPk(acct.userId, {
+      attributes: ['id', 'email', 'nickname', 'profile_img', 'role', 'appearance'],
     });
     if (!u) return errorResponse(res, new Error('사용자를 찾을 수 없습니다.'), 404);
     return successResponse(res, {
@@ -192,8 +221,9 @@ async function daemonMe(req, res) {
       nickname: u.nickname,
       profileImg: u.profile_img,
       role: u.role,
-      deviceId: device.id,
-      deviceName: device.device_name,
+      appearance: u.appearance || null,
+      deviceId: device ? device.id : null,
+      deviceName: device ? device.device_name : null,
     });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);

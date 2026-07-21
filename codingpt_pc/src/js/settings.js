@@ -4,7 +4,11 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont, uiFontOptions, monoFontOptions, getTermScheme, setTermScheme, TERM_SCHEME_OPTIONS } from "./theme.js";
+import {
+  getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
+  uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
+  TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
+} from "./theme.js";
 
 let root = null;
 let navEl = null;
@@ -143,10 +147,10 @@ function renderSection(force) {
             <button class="scale-opt" data-v="dark">다크</button>
           </span>
         </div>
-        <div class="sett-row"><span>인터페이스 글꼴</span><select class="sett-select" id="uiFontSel"></select></div>
-        <div class="sett-row"><span>코드·터미널 글꼴</span><select class="sett-select" id="monoFontSel"></select></div>
-        <div class="sett-row"><span>터미널 색상</span><select class="sett-select" id="termSchemeSel"></select></div>
-        <div class="sett-hint">글꼴·터미널 색상은 모든 기기에서 같은 목록이 제공되고, 선택은 이 기기에만 적용돼요</div>
+        <div class="sett-row"><span>인터페이스 글꼴</span><div class="fd" id="uiFontDd"></div></div>
+        <div class="sett-row"><span>코드·터미널 글꼴</span><div class="fd" id="monoFontDd"></div></div>
+        <div class="sett-col"><span>터미널 스타일</span><div class="ts-grid" id="termStyleGrid"></div></div>
+        <div class="sett-hint">글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.</div>
       </div>
       <div class="sm-card2">
         <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fpa-btn" data-f="downloads">허용</button></div>
@@ -238,37 +242,92 @@ function bindUpdate() {
     });
 }
 
-// ── 모양(테마·글꼴) — theme.js 로컬 설정 바인딩 ──
+// ── 모양(테마·글꼴·터미널 스타일) — theme.js 바인딩. 글꼴은 미리보기 드롭다운,
+//    터미널 스타일은 실제 팔레트로 그린 미니 터미널 카드(라디오)로 고른다. ──
 function bindAppearance(rootEl) {
   const seg = rootEl.querySelector("#themeSeg");
+  const paintSeg = () => {
+    const cur = getThemeMode();
+    seg?.querySelectorAll(".scale-opt").forEach((b) => b.classList.toggle("active", b.dataset.v === cur));
+  };
   if (seg) {
-    const paint = () => {
-      const cur = getThemeMode();
-      seg.querySelectorAll(".scale-opt").forEach((b) => b.classList.toggle("active", b.dataset.v === cur));
-    };
     seg.addEventListener("click", (e) => {
       const b = e.target.closest(".scale-opt");
       if (!b) return;
       setThemeMode(b.dataset.v);
-      paint();
+      paintSeg();
+      paintStyleGrid(); // 테마 변형(다크/라이트)이 바뀌므로 미리보기 다시
     });
-    paint();
+    paintSeg();
   }
-  const fill = (sel, opts, cur, onPick) => {
-    if (!sel) return;
-    sel.innerHTML = "";
+
+  // 글꼴 미리보기 드롭다운 — 옵션을 실제 그 글꼴로 렌더 + 샘플 문구.
+  const buildFontDd = (host, opts, getCur, onPick, sample) => {
+    if (!host) return;
+    host.innerHTML = "";
+    const btn = document.createElement("button");
+    btn.className = "fd-btn";
+    const menu = document.createElement("div");
+    menu.className = "fd-menu hidden";
+    const paintBtn = () => {
+      const cur = opts.find((o) => o.value === getCur()) || opts[0];
+      btn.innerHTML = `<span style="font-family:${cur.stack.replace(/"/g, "&quot;")}">${esc(cur.label)}</span><span class="fd-caret">▾</span>`;
+      menu.querySelectorAll(".fd-opt").forEach((el) => el.classList.toggle("sel", el.dataset.v === getCur()));
+    };
     for (const o of opts) {
-      const op = document.createElement("option");
-      op.value = o.value;
-      op.textContent = o.label;
-      sel.appendChild(op);
+      const it = document.createElement("button");
+      it.className = "fd-opt";
+      it.dataset.v = o.value;
+      it.style.fontFamily = o.stack;
+      it.innerHTML = `<span class="fd-name">${esc(o.label)}</span><span class="fd-sample">${esc(sample)}</span>`;
+      it.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onPick(o.value);
+        menu.classList.add("hidden");
+        paintBtn();
+      });
+      menu.appendChild(it);
     }
-    sel.value = opts.some((o) => o.value === cur) ? cur : opts[0].value;
-    sel.addEventListener("change", () => onPick(sel.value));
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      // 열 때 내장 웹폰트 로드 트리거(lazy) — 옵션이 폴백 글꼴로 보이지 않게
+      try { opts.forEach((o) => document.fonts?.load?.(`13px ${o.stack}`)); } catch (_) {}
+      menu.classList.toggle("hidden");
+    });
+    document.addEventListener("click", () => menu.classList.add("hidden"));
+    host.append(btn, menu);
+    paintBtn();
+    host._repaint = paintBtn;
   };
-  fill(rootEl.querySelector("#uiFontSel"), uiFontOptions(), getUiFont(), setUiFont);
-  fill(rootEl.querySelector("#monoFontSel"), monoFontOptions(), getMonoFont(), setMonoFont);
-  fill(rootEl.querySelector("#termSchemeSel"), TERM_SCHEME_OPTIONS, getTermScheme(), setTermScheme);
+  buildFontDd(rootEl.querySelector("#uiFontDd"), uiFontOptions(), getUiFont, setUiFont, "한글과 English 123");
+  buildFontDd(rootEl.querySelector("#monoFontDd"), monoFontOptions(), getMonoFont, setMonoFont, "const 한글 = i => 0;");
+
+  // 터미널 스타일 카드(라디오) — 실제 팔레트 값으로 미니 터미널을 그려 미리보기.
+  const grid = rootEl.querySelector("#termStyleGrid");
+  const paintStyleGrid = () => {
+    if (!grid) return;
+    const variant = resolvedTheme();
+    grid.innerHTML = "";
+    for (const o of TERM_STYLE_OPTIONS) {
+      const p = termStylePalette(o.value, variant);
+      const card = document.createElement("button");
+      card.className = "ts-card" + (o.value === getTermStyle() ? " sel" : "");
+      card.dataset.v = o.value;
+      card.innerHTML = `
+        <div class="ts-prev" style="background:${p.background};color:${p.foreground}">
+          <div class="ts-line"><span style="color:${p.green || "#98C379"}">➜</span> <span style="color:${p.blue || "#61AFEF"}">~/app</span> claude</div>
+          <div class="ts-line"><span style="color:${p.yellow || "#E5C07B"}">◆</span> 코드 <span style="color:${p.magenta || "#C678DD"}">diff</span> <span style="color:${p.red || "#E06C75"}">-old</span> <span style="color:${p.green || "#98C379"}">+new</span></div>
+          <div class="ts-line"><span style="color:${p.red || "#E06C75"}">■</span><span style="color:${p.yellow || "#E5C07B"}">■</span><span style="color:${p.green || "#98C379"}">■</span><span style="color:${p.cyan || "#56B6C2"}">■</span><span style="color:${p.blue || "#61AFEF"}">■</span><span style="color:${p.magenta || "#C678DD"}">■</span></div>
+        </div>
+        <div class="ts-name">${esc(o.label)}</div>`;
+      card.addEventListener("click", () => {
+        setTermStyle(o.value);
+        paintStyleGrid();
+      });
+      grid.appendChild(card);
+    }
+  };
+  paintStyleGrid();
 }
 
 async function syncAutostart() {

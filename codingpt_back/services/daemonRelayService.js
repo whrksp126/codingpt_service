@@ -433,6 +433,15 @@ function fanoutAccountDeleted(userId) {
   }
 }
 
+// 모양 설정(계정 전체 동기화) 팬아웃 — {type:'appearance_event', event:{appearance}}.
+//  어느 기기서 바꾸든 같은 계정의 모든 접속 클라이언트(PC/모바일)에 즉시 반영(구 클라이언트는 무시해도 안전).
+function fanoutAppearance(userId, appearance) {
+  const payload = { type: 'appearance_event', event: { appearance } };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
 // 러너(데몬) 연결 상태 팬아웃 — 접속/종료 즉시 {type:'runner_status', event:{deviceId, online, kind, deviceName}}.
 //  클라이언트 사이드바의 호스트 온라인 점/오프라인 UX 를 라이브로 갱신하는 용도(구 클라이언트는 무시해도 안전).
 function fanoutRunnerStatus(userId, event) {
@@ -922,6 +931,7 @@ module.exports = {
   fanoutSyncEvent,
   fanoutNotifEvent,
   fanoutAccountDeleted,
+  fanoutAppearance,
   hasActiveMobileClient,
   presentClient,
   issueUiTicket,

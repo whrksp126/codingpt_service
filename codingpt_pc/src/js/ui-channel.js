@@ -69,6 +69,10 @@ async function connect() {
       case "ui_command":
         handleUiCommand(ws, msg);
         break;
+      case "appearance_event":
+        // 모양 설정(계정 동기화) — 다른 기기서 변경 → 즉시 반영(서버로 되밀지 않음)
+        import("./theme.js").then((t) => t.applyRemoteAppearance(msg.event && msg.event.appearance)).catch(() => {});
+        break;
       case "account_deleted":
         // 다른 기기에서 회원 탈퇴 — 이 PC 도 즉시 페어링 해제(데몬 정지 포함) → 로그인 게이트.
         onAccountDeleted();

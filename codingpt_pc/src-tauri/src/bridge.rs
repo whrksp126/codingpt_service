@@ -184,6 +184,20 @@ pub fn update_nickname(nickname: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
+// 모양 설정(계정 전체 동기화) 저장 — deviceToken. 서버가 appearance_event 로 전 기기 팬아웃.
+#[tauri::command]
+pub fn update_appearance(appearance: serde_json::Value) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!("{}/api/daemon/me", server_url().trim_end_matches('/'));
+    let resp = ureq::request("PATCH", &url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send_json(serde_json::json!({ "appearance": appearance }))
+        .map_err(|e| format!("모양 설정 저장 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
 // 회원 탈퇴(본인 계정 삭제) — deviceToken.
 #[tauri::command]
 pub fn delete_account() -> Result<serde_json::Value, String> {

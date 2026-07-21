@@ -581,6 +581,7 @@ pub fn run() {
             bridge::fetch_workspaces,
             bridge::fetch_me,
             bridge::update_nickname,
+            bridge::update_appearance,
             bridge::delete_account,
             bridge::revoke_device,
             bridge::fetch_devices,

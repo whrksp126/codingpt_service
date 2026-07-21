@@ -93,6 +93,10 @@ export function renameWs(id, name) {
 export async function loadMe() {
   try {
     state.me = (await api.fetchMe()) || null;
+    // 모양 설정(계정 동기화) 부트 적용 — 서버 정본을 로컬 캐시/화면에 반영(서버로 되밀지 않음).
+    if (state.me && state.me.appearance) {
+      try { (await import("./theme.js")).applyRemoteAppearance(state.me.appearance); } catch (_) {}
+    }
   } catch (_) {
     state.me = null;
   }

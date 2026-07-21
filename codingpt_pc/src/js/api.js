@@ -21,6 +21,7 @@ export const api = {
   // 계정의 모든 기기 목록(멀티기기 "내 기기"). 미로그인이면 null.
   fetchDevices: () => invoke("fetch_devices"),
   updateNickname: (nickname) => invoke("update_nickname", { nickname }),
+  updateAppearance: (appearance) => invoke("update_appearance", { appearance }),
   deleteAccount: () => invoke("delete_account"),
   revokeDevice: (deviceId) => invoke("revoke_device", { deviceId }),
   // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필).
