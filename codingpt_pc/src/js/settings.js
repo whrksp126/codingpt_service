@@ -330,7 +330,7 @@ function bindAppearance(rootEl) {
           </div>
           <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">코드 설명해줘</span></div>
         </div>
-        <div class="ts-pick"><span class="ts-radio"></span><span class="ts-name">${esc(o.label)}</span></div>`;
+        <div class="ts-pick"><span class="ts-name">${esc(o.label)}</span><span class="ts-radio"></span></div>`;
       card.addEventListener("click", () => {
         setTermStyle(o.value);
         paintStyleGrid();
