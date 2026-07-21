@@ -4,7 +4,6 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { getAutoCheckpointEnabled, setAutoCheckpointEnabled } from "./auto-checkpoint.js";
 
 let root = null;
 let navEl = null;
@@ -142,14 +141,10 @@ function renderSection(force) {
         <div class="sett-row"><span>문서 폴더 접근</span><button class="sett-btn fpa-btn" data-f="documents">허용</button></div>
         <div class="sett-hint">한 번 허용하면 모든 워크스페이스에 적용돼요</div>
       </div>
-      <div class="sm-card2">
-        <div class="sett-row"><span>작업 스냅샷 자동 체크포인트</span><input id="autoCkptChk" type="checkbox" class="tgl" /></div>
-        <div class="sett-hint">켜면 작업 중 주기적으로(및 워크스페이스 전환 시) 스냅샷을 자동 저장해요. 미푸시 작업 유실을 막아주지만 저장 공간을 조금 더 써요.</div>
-      </div>`;
+      `;
+    // 작업 스냅샷(자동 체크포인트) 카드는 MVP 범위 제외로 잠정 숨김(2026-07-21 결정) —
+    //  엔진(auto-checkpoint.js·데몬 sync·back)은 보존, 복원 시 이전 커밋에서 카드+바인딩 복원.
     bindFolderPerms(contentEl);
-    const ckptChk = contentEl.querySelector("#autoCkptChk");
-    ckptChk.checked = getAutoCheckpointEnabled();
-    ckptChk.addEventListener("change", () => setAutoCheckpointEnabled(ckptChk.checked));
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {

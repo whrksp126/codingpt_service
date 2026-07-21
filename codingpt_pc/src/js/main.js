@@ -13,7 +13,6 @@ import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
 import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
-import { initAutoCheckpoint } from "./auto-checkpoint.js";
 import { ideDirtyPaths } from "./ide.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
@@ -69,7 +68,7 @@ function render() {
   }
 }
 S.subscribe(render);
-initAutoCheckpoint(); // 작업 스냅샷(자동 체크포인트) 트리거 — 설정 꺼져 있으면 no-op
+// 작업 스냅샷(자동 체크포인트) 트리거는 MVP 범위 제외로 잠정 배선 해제(2026-07-21 결정) — 엔진 보존.
 
 // ── PTY / 데몬 / 딥링크 이벤트 ──
 api.onPtyData((p) => dispatchData(p.paneId, p.b64));
