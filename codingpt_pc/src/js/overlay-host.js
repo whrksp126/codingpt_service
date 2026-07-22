@@ -34,21 +34,36 @@ function wireOnce() {
   });
 }
 
-// 오버레이 창을 (한 번만) 생성·웜업. 성공 시 true. 준비 신호(ovl:ready)를 기다리되 타임아웃 폴백.
+// 오버레이 창을 생성·웜업하고 핑퐁으로 살아있음을 확인. 응답이 없으면 false(호출부가 DOM 폴백).
+//  낙관적 성공 금지 — 오버레이가 실제로 응답할 때만 사용해야 "무반응" 을 막는다.
 export async function ensureOverlay() {
   if (ready) return true;
   if (!available()) return false;
   wireOnce();
   if (!ensuring) {
-    ensuring = new Promise((resolve) => {
-      let settled = false;
-      const finish = (v) => { if (!settled) { settled = true; ready = v; resolve(v); } };
-      event.listen("ovl:ready", () => finish(true)).catch(() => {});
-      api.overlayEnsure().catch(() => finish(false));
-      setTimeout(() => finish(true), 1500); // ready 신호를 놓쳐도 진행(창은 생성됨)
-    });
+    ensuring = (async () => {
+      try { await api.overlayEnsure(); } catch (e) { api.debugLog("[overlay] ensure invoke fail: " + e); return false; }
+      // 핑퐁 핸드셰이크(최대 ~1.8s) — 오버레이 페이지가 로드되어 리스너가 준비됐는지 확인.
+      const ok = await new Promise((resolve) => {
+        let done = false, tries = 0;
+        const finish = (v) => { if (!done) { done = true; resolve(v); } };
+        event.listen("ovl:pong", () => finish(true)).catch(() => {});
+        const tick = () => {
+          if (done) return;
+          if (tries++ > 9) { finish(false); return; }
+          event.emit("ovl:ping", {});
+          setTimeout(tick, 200);
+        };
+        tick();
+      });
+      ready = ok;
+      api.debugLog("[overlay] handshake " + (ok ? "ok" : "TIMEOUT → DOM 폴백"));
+      return ok;
+    })();
   }
-  return ensuring;
+  const result = await ensuring;
+  if (!result) ensuring = null; // 다음 사용자 액션에서 재시도(폴백은 그대로 동작)
+  return result;
 }
 
 // 액션 태거 — el 의 인터랙티브 노드에 data-ovl 부여 + 콜백 등록.

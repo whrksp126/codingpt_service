@@ -11,8 +11,12 @@ import "./theme.js"; // localStorage 기반 data-theme/폰트를 이 창에도 �
 
 const { event, core } = window.__TAURI__;
 const invoke = core.invoke;
+const log = (m) => { try { invoke("debug_log", { msg: "[overlay] " + m }); } catch (_) {} };
 const backdrop = document.getElementById("ovl-backdrop");
 const pop = document.getElementById("ovl-pop");
+
+// 핑퐁 — host 가 살아있음을 확인(핸드셰이크). 리스너가 준비된 뒤 응답.
+event.listen("ovl:ping", () => { try { event.emit("ovl:pong", {}); } catch (_) {} });
 
 let dismissable = true;
 let autohideTimer = 0;
@@ -46,6 +50,7 @@ function placeEl(el, place) {
 
 event.listen("ovl:show", ({ payload }) => {
   const { html, place, passthrough, autohideMs } = payload || {};
+  log("show: len=" + (html ? html.length : 0) + " place=" + JSON.stringify(place) + " pass=" + !!passthrough);
   clear();
   dismissable = !passthrough;
   pop.innerHTML = html || "";
@@ -54,9 +59,9 @@ event.listen("ovl:show", ({ payload }) => {
   backdrop.style.pointerEvents = dismissable ? "auto" : "none";
   // 창을 먼저 표시(투명이라 빈 상태는 안 보임) → 다음 프레임에 크기 측정·배치 후 노출.
   requestAnimationFrame(() => {
-    invoke("overlay_show", { passthrough: !!passthrough }).catch(() => {});
+    invoke("overlay_show", { passthrough: !!passthrough }).then(() => log("overlay_show ok")).catch((e) => log("overlay_show ERR " + e));
     requestAnimationFrame(() => {
-      if (el) { placeEl(el, place); el.style.visibility = "visible"; if (el.classList.contains("wv-toast")) el.classList.add("show"); }
+      if (el) { placeEl(el, place); el.style.visibility = "visible"; if (el.classList.contains("wv-toast")) el.classList.add("show"); log("placed at " + el.style.left + "," + el.style.top + " size " + el.offsetWidth + "x" + el.offsetHeight); }
     });
   });
   if (autohideMs) autohideTimer = setTimeout(() => hide("auto"), autohideMs);
@@ -72,5 +77,5 @@ pop.addEventListener("click", (e) => {
   if (!t.hasAttribute("data-ovl-keep")) hide(); // 액션 실행은 host, 창은 바로 닫음
 });
 
-// 준비 완료 통지(host 가 첫 show 전에 이 신호를 기다린다).
-try { event.emit("ovl:ready", {}); } catch (_) {}
+// 로드 완료 로그(진단). host 는 ovl:ping 으로 준비를 확인한다.
+log("page loaded");
