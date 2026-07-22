@@ -8,7 +8,7 @@ import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
 import * as T from "./tiling.js";
-import { getPane, smartUrl } from "./pane.js";
+import { getPane, smartUrl, newTid } from "./pane.js";
 import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
@@ -533,8 +533,8 @@ const handlers = {
 
   // 열린 프리뷰가 있으면 그 pane 포커스+이동. 없으면 신규 생성:
   //  · executor(지금 조작 중인 기기) = 포커스 pane 우측 분할로 명시 배치(프리뷰가 잘 보이게).
-  //  · 그 외 기기 = 강제 우측분할 금지, 터미널 추가와 동일 규칙(smartAdd)으로 편입
-  //    (포커스 터미널 pane 있으면 혼합 프리뷰 탭, 공간 있으면 분할). 배치는 기기별 자율.
+  //  · 그 외 기기 = 강제 분할 금지. 터미널이 기기간 동기화되는 방식(reconcilePool)과 동일하게
+  //    포커스(없으면 첫) 터미널 pane 에 혼합 프리뷰 탭으로 편입. 터미널 pane 이 하나도 없을 때만 분할.
   previewOpen: async (p, executor) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
@@ -544,14 +544,29 @@ const handlers = {
       navigatePreview(target, url);
       return { ok: true, paneId: target.leaf.id };
     }
+    const focusId = rt.focusId || T.firstLeafId(rt.layout);
+    if (!focusId) throw new Error("분할할 pane 없음");
     if (executor) {
-      const focusId = rt.focusId || T.firstLeafId(rt.layout);
-      if (!focusId) throw new Error("분할할 pane 없음");
       S.splitPane(focusId, "h", "preview", { url });
       return { ok: true, paneId: rt.focusId };
     }
-    const paneId = smartAdd("preview", { url });
-    return { ok: true, paneId };
+    let hostId = null;
+    const focusLeaf = T.findLeaf(rt.layout, focusId);
+    if (focusLeaf && focusLeaf.kind === "terminal") hostId = focusLeaf.id;
+    if (!hostId) T.eachLeaf(rt.layout, (l) => { if (!hostId && l.kind === "terminal") hostId = l.id; });
+    if (!hostId) {
+      S.splitPane(focusId, "h", "preview", { url });
+      return { ok: true, paneId: rt.focusId };
+    }
+    const host = T.findLeaf(rt.layout, hostId);
+    host.tabs.push({ kind: "preview", url, tid: newTid() });
+    host.active = host.tabs.length - 1;
+    const pane = getPane(hostId);
+    pane?.buildHead();
+    pane?.showActiveTab?.();
+    S.focusPane(hostId);
+    S.emit();
+    return { ok: true, paneId: hostId };
   },
 
   // 첫(포커스 우선) 프리뷰 대상에 URL 이동.
