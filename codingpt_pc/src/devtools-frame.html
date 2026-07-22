@@ -37,6 +37,10 @@
     "    h.setIsDocked = function (docked, cb) { post({ __cptDt: 'docked', docked: !!docked }); if (osd) { try { return osd(docked, cb); } catch (e) {} } if (typeof cb === 'function') { try { cb(); } catch (e) {} } };\n" +
     '  }, 50);\n' +
     '  try { localStorage.setItem(\'uiTheme\', \'"dark"\'); } catch (e) {}\n' +
+    "  // 디바이스 툴바(모바일 에뮬레이션)는 진짜 브라우저 전용(CDP Emulation+스크린캐스트) — chobitsu\n" +
+    "  //  브리지로는 불가능해 켜면 빈 프레임만 남는다(실측). 강제 off + 버튼 숨김 + 단축키 차단.\n" +
+    "  try { localStorage.setItem('emulation.showDeviceMode', 'false'); } catch (e) {}\n" +
+    "  document.addEventListener('keydown', function (e) { if ((e.metaKey || e.ctrlKey) && e.shiftKey && String(e.key).toLowerCase() === 'm') { e.stopImmediatePropagation(); e.preventDefault(); } }, true);\n" +
     '  // 부팅 도킹 상태 — 별도 창(WIN)은 undocked 로, pane 안 iframe 은 undocked 잔존값을 bottom 으로.\n' +
     '  try {\n' +
     "    if (WIN) localStorage.setItem('currentDockState', '\\\"undocked\\\"');\n" +
@@ -57,6 +61,7 @@
     "      var a = (el.getAttribute && el.getAttribute('aria-label')) || '';\n" +
     "      // PC 는 별도 창(Undock)이 실제로 구현돼 있어 undock 옵션을 숨기지 않는다(모바일과 차이).\n" +
     "      if (a === 'Toggle screencast') el.style.display = 'none';\n" +
+    "      if (a === 'Toggle device toolbar') el.style.display = 'none'; // 디바이스 모드 미지원(위 주석)\n" +
     "      if (el.tagName === 'BUTTON' && String(el.className || '').indexOf('toolbar-button') >= 0) acc.tb.push(el);\n" +
     '      if (el.shadowRoot) sweep(el.shadowRoot, acc);\n' +
     '    }\n' +
