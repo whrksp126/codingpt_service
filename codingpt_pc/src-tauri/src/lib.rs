@@ -632,6 +632,7 @@ pub fn run() {
             preview::preview_set_cookies,
             preview::preview_close,
             preview::preview_shield,
+            preview::preview_zoom,
             preview::window_set_bg,
             // 내장 IDE 파일 접근
             fsapi::fs_tree,

@@ -109,6 +109,8 @@ export const api = {
   previewSetCookies: (paneId, cookiesJson) => invoke("preview_set_cookies", { pane: paneId, cookiesJson }),
   onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
   previewClose: (paneId) => invoke("preview_close", { paneId }),
+  // 데브툴 디바이스 툴바 — 페이지 줌(WKWebView pageZoom). 1=복원.
+  previewZoom: (paneId, zoom) => invoke("preview_zoom", { pane: paneId, zoom }),
 
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),

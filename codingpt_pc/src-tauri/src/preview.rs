@@ -69,6 +69,28 @@ pub fn preview_shield(on: bool) {
     let _ = on;
 }
 
+// 프리뷰 페이지 줌(WKWebView.pageZoom, macOS 11+) — 데브툴 디바이스 툴바(모바일 에뮬레이션)용.
+//  프레임을 화면 rect 에 두고 zoom=rect폭÷에뮬폭 을 걸면 레이아웃 뷰포트가 정확히 에뮬 크기가 된다
+//  (스크린캐스트 없는 진짜 렌더링·반응형 실동작). 1.0 = 복원.
+#[tauri::command]
+pub fn preview_zoom(mgr: State<PreviewManager>, pane: String, zoom: f64) -> Result<(), String> {
+    let map = mgr.inner.lock().map_err(|e| e.to_string())?;
+    let Some(entry) = map.get(&pane) else { return Ok(()) };
+    #[cfg(target_os = "macos")]
+    {
+        let z = zoom.clamp(0.05, 5.0);
+        let _ = entry.webview.with_webview(move |pw| unsafe {
+            use objc2::msg_send;
+            use objc2::runtime::AnyObject;
+            let wk: *mut AnyObject = pw.inner().cast();
+            let _: () = msg_send![&*wk, setPageZoom: z];
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (entry, zoom);
+    Ok(())
+}
+
 // 메인 창 배경색 — 투명 슬롯의 "누수" 영역이 앱 배경과 동일해 보이게 테마 base 색으로 맞춘다.
 #[tauri::command]
 pub fn window_set_bg(app: AppHandle, hex: String) -> Result<(), String> {

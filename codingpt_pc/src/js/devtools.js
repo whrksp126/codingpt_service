@@ -163,23 +163,35 @@ function onFrameMessage(s, d) {
     const b = d.b || {};
     if ([b.x, b.y, b.width, b.height].every((n) => typeof n === "number")) {
       s.boundsSeen = true;
-      s.slot.style.left = b.x + "px";
-      s.slot.style.top = b.y + "px";
-      s.slot.style.width = b.width + "px";
-      s.slot.style.height = b.height + "px";
-      // punch-through: 페이지 영역만큼 iframe 을 clip-path 로 잘라내 그 자리 DOM 을 비운다 →
-      //  아래층 네이티브 프리뷰가 구멍으로 비친다(웹뷰를 위로 올릴 필요 없음 — DOM 모달이 늘 위).
-      //  페이지 rect 는 항상 한 변에 붙는 직사각형(dock bottom/left/right)이라 inset 으로 표현 가능.
+      s.lastBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+      if (s.slot) {
+        s.slot.style.left = b.x + "px";
+        s.slot.style.top = b.y + "px";
+        s.slot.style.width = b.width + "px";
+        s.slot.style.height = b.height + "px";
+      }
+      // punch-through: 페이지 영역만큼 iframe 을 "도넛" clip-path(evenodd — 전체 사각형 - 구멍)로
+      //  잘라내 그 자리 DOM 을 비운다 → 아래층 네이티브 프리뷰가 구멍으로 비친다.
+      //  일반 도킹(변에 붙은 rect)뿐 아니라 디바이스 툴바 모드(중앙에 뜬 rect)도 커버 — 디바이스
+      //  프레임/눈금(데브툴 DOM)은 구멍 밖이라 그대로 보이고, 화면 영역만 뚫린다.
       if (s.iframe) {
         const W = s.iframe.clientWidth, H = s.iframe.clientHeight;
-        let t = 0, r = 0, bo = 0, l = 0;
-        if (W > 2 && H > 2) {
-          if (b.width >= W - 2) { if (b.y <= 1) t = b.y + b.height; else bo = H - b.y; }
-          else if (b.height >= H - 2) { if (b.x <= 1) l = b.x + b.width; else r = W - b.x; }
+        if (W > 2 && H > 2 && b.width > 1 && b.height > 1) {
+          const x = Math.max(0, b.x), y = Math.max(0, b.y);
+          const w = Math.min(b.width, W - x), h = Math.min(b.height, H - y);
+          s.iframe.style.clipPath =
+            `path(evenodd, "M0 0 H${W} V${H} H0 Z M${x} ${y} h${w} v${h} h-${w} Z")`;
+        } else {
+          s.iframe.style.clipPath = "";
         }
-        s.iframe.style.clipPath = `inset(${t}px ${r}px ${bo}px ${l}px)`;
       }
+      recomputeEmuZoom(s);
     }
+  } else if (d.__cptDt === "emu") {
+    // 디바이스 툴바(모바일 에뮬레이션) — 브리지가 툴바의 크기 입력(예: 370×607)을 보고.
+    //  w=0 → 디바이스 모드 꺼짐.
+    s.emu = d.w > 0 && d.h > 0 ? { w: d.w, h: d.h } : null;
+    recomputeEmuZoom(s);
   } else if (d.__cptDt === "docked") {
     // InspectorFrontendHost.setIsDocked — Undock 선택(false) / 별도 창에서 재도킹(true).
     if (s.mode !== "window" && d.docked === false) undockToWindow(s);
@@ -241,6 +253,7 @@ function destroyDockUi(s) {
 function undockToWindow(s) {
   initWinEvents();
   s.mode = "window";
+  resetEmuZoom(s); // 별도 창 모드에선 페이지가 pane 전체 — 에뮬레이션 줌 복원
   destroyDockUi(s);
   stopPoll(s);
   api.devtoolsWindow(s.pvId, true).then(() => { startPoll(s); }).catch((e) => {
@@ -260,8 +273,28 @@ function redockFromWindow(s) {
   startPoll(s);
 }
 
+// 디바이스 툴바 줌 — 화면 rect(bounds) 폭 ÷ 에뮬레이션 폭(툴바 입력값) = 데브툴 표시 배율.
+//  네이티브 웹뷰 pageZoom 에 적용하면 프레임(=rect) 안에서 페이지가 "진짜 370px 뷰포트"로
+//  레이아웃된다(미디어쿼리·반응형 실동작 — 스크린캐스트 아님). 모드 꺼짐/데브툴 닫힘 → 1 복원.
+function recomputeEmuZoom(s) {
+  let zoom = 1;
+  if (s.emu && s.lastBounds && s.lastBounds.width > 1) {
+    zoom = Math.min(5, Math.max(0.05, s.lastBounds.width / s.emu.w));
+  }
+  const rounded = Math.round(zoom * 1000) / 1000;
+  if (s.zoomApplied === rounded) return;
+  s.zoomApplied = rounded;
+  api.previewZoom(s.pvId, rounded).catch(() => {});
+}
+function resetEmuZoom(s) {
+  s.emu = null;
+  if (s.zoomApplied !== undefined && s.zoomApplied !== 1) api.previewZoom(s.pvId, 1).catch(() => {});
+  s.zoomApplied = 1;
+}
+
 function setDtVisible(s, on) {
   s.active = on;
+  if (!on) resetEmuZoom(s); // 데브툴 닫힘 → 에뮬레이션 줌 복원
   if (s.wrap) s.wrap.style.display = on ? "" : "none";
   if (s.slot) s.slot.style.display = on ? "" : "none";
   if (!s.wrap) { if (on) startPoll(s); else stopPoll(s); return; }
