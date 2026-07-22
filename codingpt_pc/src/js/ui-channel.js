@@ -155,21 +155,25 @@ function bindActivityReport() {
   if (_activityBound) return;
   _activityBound = true;
   wireNativeFocus();
-  const report = () => {
+  //  strong = 의도적 상호작용(타이핑·클릭) → 짧은 스로틀로 executor 선정을 빠르게 갱신한다.
+  //   두 기기 화면을 다 켜둔 환경에서 "지금 터미널에 입력하는 기기"가 곧바로 executor 가 되어야
+  //   그 기기에서만 프리뷰가 분할로 뜨고 나머지는 조용한 탭이 된다(안 그러면 옆 기기가 executor 로
+  //   뽑혀 엉뚱하게 분할됨). weak = 마우스 이동/휠 같은 연속 신호 → 30s(메시지 폭주·present 잔떨림 방지).
+  const report = (strong) => {
     // 포커스 가드 — ui_activity 는 서버에서 foreground=true 로 취급된다. 창이 최전면이 아닐 때(딴 앱
     //  사용, 옆에 떠 있어 마우스만 지나가는 경우 등) 보내면 present 판정이 다시 켜져 폰 알림을 가로챈다.
     //  네이티브 포커스로 판정(DOM hasFocus 는 앱 전환 시 못 믿음).
     if (!isReallyFocused()) return;
     const now = Date.now();
-    if (now - _lastActivity < 30000) return; // 30s 스로틀
+    if (now - _lastActivity < (strong ? 1000 : 30000)) return;
     if (!sock || sock.readyState !== 1) return;
     _lastActivity = now;
     send(sock, { type: "ui_activity" });
   };
-  window.addEventListener("keydown", report, true);
-  window.addEventListener("pointerdown", report, true);
-  window.addEventListener("pointermove", report, true); // 보는 중(마우스 이동)도 활성 유지 → foregroundAt 갱신
-  window.addEventListener("wheel", report, true);
+  window.addEventListener("keydown", () => report(true), true);
+  window.addEventListener("pointerdown", () => report(true), true);
+  window.addEventListener("pointermove", () => report(false), true); // 보는 중(마우스 이동)도 활성 유지 → foregroundAt 갱신
+  window.addEventListener("wheel", () => report(false), true);
   // present 신호(알림 라우팅) — 네이티브 포커스 변화가 주 트리거. DOM 이벤트는 폴백(웹/미배선 대비).
   window.addEventListener("focus", sendPresence);
   window.addEventListener("blur", sendPresence);
@@ -560,11 +564,9 @@ const handlers = {
     }
     const host = T.findLeaf(rt.layout, hostId);
     host.tabs.push({ kind: "preview", url, tid: newTid() });
-    host.active = host.tabs.length - 1;
-    const pane = getPane(hostId);
-    pane?.buildHead();
-    pane?.showActiveTab?.();
-    S.focusPane(hostId);
+    // 포커스는 뺏지 않는다 — 활성 탭·pane 포커스 그대로 두고 탭바만 갱신(새 탭이 보이되 화면 전환 없음).
+    //  사용자가 조작 중인 executor 기기가 아니므로, 리컨실러가 터미널 탭을 조용히 추가하는 것과 동일.
+    getPane(hostId)?.buildHead();
     S.emit();
     return { ok: true, paneId: hostId };
   },
