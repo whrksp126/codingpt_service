@@ -645,7 +645,10 @@ export async function saveSnapshotPC() {
   if (!manifest && !ide) return { ok: false, error: "저장할 프리뷰나 IDE가 없어요" };
   try {
     const root = String(meta.localPath).replace(/\/+$/, "");
-    await api.fsMkdir(snapDir(meta.localPath));
+    // fs_mkdir 는 부모가 없으면 실패하고, 이미 있으면 "이미 존재해요"로 throw → 단계별 생성 + 존재 에러 무시.
+    const okMkdir = async (p) => { try { await api.fsMkdir(p); } catch (e) { if (!/이미 존재/.test(String((e && e.message) || e || ""))) throw e; } };
+    await okMkdir(root + "/.codingpt");
+    await okMkdir(root + "/.codingpt/snapshots");
     try { await api.fsWrite(root + "/.codingpt/.gitignore", "*\n"); } catch (_) { /* gitignore 실패 무시 */ }
     const id = String(Date.now()) + "-" + Math.floor(Math.random() * 1e6).toString(36);
     const url = manifest ? (manifest.externalUrl || (manifest.logical ? ":" + manifest.logical.port + (manifest.logical.path || "") : "")) : "";
@@ -657,7 +660,7 @@ export async function saveSnapshotPC() {
     for (const p of pruned) { try { await api.fsDelete(snapDir(meta.localPath) + "/" + p.id + ".json"); } catch (_) { /* noop */ } }
     await api.fsWrite(snapDir(meta.localPath) + "/index.json", JSON.stringify(list));
     return { ok: true, label: m.label };
-  } catch (e) { return { ok: false, error: (e && e.message) || "저장 실패" }; }
+  } catch (e) { return { ok: false, error: (e && e.message) || (typeof e === "string" ? e : "") || "저장 실패" }; }
 }
 
 // dev 열기 — 활성 워크스페이스의 리스닝 포트를 감지해 활성 프리뷰를 그 포트로 이동.

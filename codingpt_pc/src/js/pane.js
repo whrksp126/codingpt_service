@@ -355,7 +355,7 @@ class PreviewSurface {
         // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
         const r = (dtPageSlot(this.id) || h).getBoundingClientRect();
         // 모달/⋯메뉴 열림 = 네이티브 웹뷰를 화면 밖으로(그 위에 뜨는 DOM 오버레이가 가려지지 않게).
-        const modalOpen = !!document.querySelector(".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay");
+        const modalOpen = !!document.querySelector(".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = this._visible && r.width > 2 && r.height > 2 && !modalOpen && !dragging;
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.effUrl].join("|");
@@ -1164,7 +1164,7 @@ export class PaneView {
         // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
         const r = (dtPageSlot(this._pvId) || host).getBoundingClientRect();
         // 모달/⋯메뉴/시트 열림 = 네이티브 웹뷰를 화면 밖으로(그 위 DOM 오버레이가 가려지지 않게).
-        const modalOpen = !!document.querySelector(".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay");
+        const modalOpen = !!document.querySelector(".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu");
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = r.width > 2 && r.height > 2 && !modalOpen && !dragging;
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
