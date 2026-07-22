@@ -358,8 +358,9 @@ class PreviewSurface {
         //  (오버레이 중 이벤트 차단은 main.js 의 preview_shield 가 담당) 드래그 중만 숨김 유지.
         // URL 로드됐으면 빈 상태 DOM 제거 — 예전엔 웹뷰가 위에서 가려줬지만 이제 구멍을 막는다.
         if (this.effUrl && h.querySelector(".preview-empty")) h.innerHTML = "";
-        const dragging = document.body.classList.contains("tab-dragging");
-        const visible = this._visible && r.width > 2 && r.height > 2 && !dragging;
+        // punch-through: 드래그 중에도 숨기지 않는다 — DOM(고스트/드롭존)이 위층이라 가릴 게 없고,
+        //  숨기면 배치 조정 중 웹이 사라져 보인다(실측). 이벤트는 shield 가 차단.
+        const visible = this._visible && r.width > 2 && r.height > 2;
         // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — chii 프런트가 페이지 영역에 배경을 칠해 아래층이 가려짐).
         const raised = !!dtPageSlot(this.id);
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this.effUrl].join("|");
@@ -1169,8 +1170,8 @@ export class PaneView {
         const r = (dtPageSlot(this._pvId) || host).getBoundingClientRect();
         // punch-through: 웹뷰는 앱 UI "아래" — DOM 모달/메뉴가 자연히 위. 드래그 중만 숨김 유지.
         if (this._pvEffUrl && host.querySelector(".preview-empty")) host.innerHTML = "";
-        const dragging = document.body.classList.contains("tab-dragging");
-        const visible = r.width > 2 && r.height > 2 && !dragging;
+        // punch-through: 드래그 중에도 숨기지 않는다(위 PreviewSurface 와 동일 규칙 — shield 가 이벤트 차단).
+        const visible = r.width > 2 && r.height > 2;
         // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — 위 PreviewSurface 와 동일 규칙).
         const raised = !!dtPageSlot(this._pvId);
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this._pvEffUrl].join("|");
