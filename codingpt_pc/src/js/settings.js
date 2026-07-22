@@ -31,7 +31,7 @@ export function mountSettings(container) {
   root.className = "settings-modal hidden";
   root.innerHTML = `
     <div class="sm-backdrop" id="smBackdrop"></div>
-    <div class="sm-card" role="dialog" aria-modal="true">
+    <div class="sm-card" role="dialog" aria-modal="true" tabindex="-1">
       <aside class="sm-nav">
         <div class="sm-search">
           <span class="sm-search-ic">${icons.search({ size: 15 })}</span>
@@ -270,6 +270,8 @@ function bindAppearance(rootEl) {
     }
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
+      // 다른 드롭다운은 먼저 닫는다(하나만 열림 — 겹침 방지).
+      document.querySelectorAll(".fd-menu").forEach((m) => { if (m !== menu) m.classList.add("hidden"); });
       // 열 때 내장 웹폰트 로드 트리거(lazy) — 옵션이 폴백 글꼴로 보이지 않게
       try { opts.forEach((o) => document.fonts?.load?.(`13px ${o.stack}`)); } catch (_) {}
       menu.classList.toggle("hidden");
@@ -628,7 +630,7 @@ function bindUnpair(btn) {
     } catch (_) {}
     btn.disabled = false;
     reset();
-    S.emit();
+    S.setView("workspace"); // 로그아웃 → 설정 모달 닫기(메인은 로그인 게이트로 전환)
   });
 }
 

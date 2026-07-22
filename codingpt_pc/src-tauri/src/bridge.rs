@@ -709,7 +709,6 @@ pub fn overlay_ensure(app: AppHandle) -> Result<(), String> {
         .title("")
         .transparent(true)
         .decorations(false)
-        .always_on_top(true)
         .skip_taskbar(true)
         .shadow(false)
         .resizable(false)
@@ -722,6 +721,21 @@ pub fn overlay_ensure(app: AppHandle) -> Result<(), String> {
         }
     }
     b.build().map_err(|e| e.to_string())?;
+    // 메인 창의 "자식 창" 으로 붙인다 → 메인 위에만 뜨고(다른 앱 위로 안 감), 메인과 함께 이동/숨김.
+    //  always_on_top(전역 floating 레벨) 대신 이 방식이라야 "다른 프로그램보다 위" 문제가 없다.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        if let (Some(main), Some(ov)) = (main_win(&app), app.get_webview_window("overlay")) {
+            if let (Ok(mp), Ok(op)) = (main.ns_window(), ov.ns_window()) {
+                let mn = mp as *mut AnyObject;
+                let on = op as *mut AnyObject;
+                let _: () = msg_send![mn, addChildWindow: on, ordered: 1isize]; // NSWindowAbove
+                let _ = app.get_webview_window("overlay").map(|w| w.hide()); // addChildWindow 가 보이게 할 수 있어 다시 숨김
+            }
+        }
+    }
     Ok(())
 }
 
@@ -743,7 +757,6 @@ pub fn overlay_show(app: AppHandle, passthrough: bool) -> Result<(), String> {
     ov.set_position(tauri::PhysicalPosition::new(pos.x, pos.y)).map_err(|e| e.to_string())?;
     ov.set_size(tauri::PhysicalSize::new(size.width, size.height)).map_err(|e| e.to_string())?;
     ov.set_ignore_cursor_events(passthrough).map_err(|e| e.to_string())?;
-    ov.set_always_on_top(true).map_err(|e| e.to_string())?;
     ov.show().map_err(|e| e.to_string())?;
     if !passthrough {
         let _ = ov.set_focus();

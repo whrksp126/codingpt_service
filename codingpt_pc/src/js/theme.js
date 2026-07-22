@@ -45,17 +45,29 @@ let themeMode = "system"; // 기기 로컬
 let uiFont = "pretendard";
 let monoFont = "default";
 let termStyle = "auto";
+function loadFromStorage() {
+  try {
+    const t = localStorage.getItem(KEY_THEME);
+    themeMode = (t === "light" || t === "dark" || t === "system") ? t : "system";
+    const u = localStorage.getItem(KEY_UI_FONT);
+    uiFont = UI_VALUES.includes(u) ? u : "pretendard";
+    const m0 = localStorage.getItem(KEY_MONO_FONT);
+    const m = LEGACY_MONO[m0] || m0;
+    monoFont = MONO_VALUES.includes(m) ? m : "default";
+    const s0 = localStorage.getItem(KEY_TERM_STYLE) || localStorage.getItem("cpt.termScheme");
+    const st = LEGACY_STYLE[s0] || s0;
+    termStyle = STYLE_VALUES.includes(st) ? st : "auto";
+  } catch (_) {}
+}
+loadFromStorage();
+// 다른 창(오버레이 설정 등)에서 모양을 바꾸면 localStorage 가 바뀐다 → 이 창에도 즉시 반영.
+//  storage 이벤트는 '변경을 일으킨 창'이 아닌 다른 창에서만 발생하므로 무한루프 없음.
 try {
-  const t = localStorage.getItem(KEY_THEME);
-  if (t === "light" || t === "dark" || t === "system") themeMode = t;
-  const u = localStorage.getItem(KEY_UI_FONT);
-  if (UI_VALUES.includes(u)) uiFont = u;
-  const m0 = localStorage.getItem(KEY_MONO_FONT);
-  const m = LEGACY_MONO[m0] || m0;
-  if (MONO_VALUES.includes(m)) monoFont = m;
-  const s0 = localStorage.getItem(KEY_TERM_STYLE) || localStorage.getItem("cpt.termScheme");
-  const st = LEGACY_STYLE[s0] || s0;
-  if (STYLE_VALUES.includes(st)) termStyle = st;
+  window.addEventListener("storage", (e) => {
+    if (e.key && !e.key.startsWith("cpt.")) return;
+    loadFromStorage();
+    emit();
+  });
 } catch (_) {}
 
 const listeners = new Set();

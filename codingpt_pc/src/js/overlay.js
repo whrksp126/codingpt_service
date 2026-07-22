@@ -37,17 +37,23 @@ async function ensureSettings() {
   });
   settingsMounted = true;
 }
+function focusModal() {
+  // 창을 표시한 뒤 모달 카드에 DOM 포커스를 줘야 Esc/키보드가 바로 먹힌다(포커스 전엔 keydown 미수신).
+  requestAnimationFrame(() => { const c = document.querySelector("#ovl-settings .sm-card"); if (c) c.focus(); });
+  setTimeout(() => { const c = document.querySelector("#ovl-settings .sm-card"); if (c) c.focus(); }, 50);
+}
 async function openSettings() {
   try {
     await ensureSettings();
     settingsOn = true;
-    // 필요한 데이터 로드(메인과 별개 인스턴스라 여기서 페치).
-    try { stateMod.state.daemon = await invoke("daemon_status"); stateMod.state.paired = !!(stateMod.state.daemon && stateMod.state.daemon.paired); } catch (_) {}
+    stateMod.setView("settings");                         // 즉시 렌더(빈 상태여도 바로 뜨게)
+    await invoke("overlay_show", { passthrough: false }); // 창 표시(빠른 등장)
+    focusModal();
+    log("settings opened");
+    // 데이터는 표시 후 로드 → emit → 재렌더(등장 속도 우선).
+    invoke("daemon_status").then((d) => { stateMod.state.daemon = d; stateMod.state.paired = !!(d && d.paired); stateMod.emit(); }).catch(() => {});
     if (stateMod.loadMe) stateMod.loadMe();
     if (stateMod.loadDevices) stateMod.loadDevices();
-    stateMod.setView("settings"); // → updateSettings 렌더
-    await invoke("overlay_show", { passthrough: false });
-    log("settings opened");
   } catch (e) {
     log("settings open ERR " + e);
     settingsOn = false;
@@ -55,6 +61,8 @@ async function openSettings() {
     event.emit("ovl:settings-failed", {}); // host 가 메인 모달로 폴백
   }
 }
+// 웜업 — 무거운 import(state→pane→vendor)를 미리 끝내둬 첫 설정 열기를 빠르게.
+setTimeout(() => { ensureSettings().catch(() => {}); }, 800);
 async function closeSettings() {
   try { await invoke("overlay_hide"); } catch (_) {}
   event.emit("ovl:settings-closed", {});
