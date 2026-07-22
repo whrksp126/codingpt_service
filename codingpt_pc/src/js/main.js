@@ -158,6 +158,18 @@ window.addEventListener("keydown", (e) => {
 });
 
 // ── 초기화 ──
+// punch-through 이벤트 실드 — DOM 오버레이(모달/메뉴/드롭다운/게이트)가 떠 있는 동안엔 프리뷰 구멍
+//  안의 클릭·스크롤이 프리뷰로 내려가면 안 된다(오버레이가 위에 보이는데 뒤가 반응하는 사고).
+//  셀렉터 존재 여부를 주기 폴링해 변화 시에만 Rust 에 통지(hitTest 가 참조).
+function startPreviewShieldWatch() {
+  const SEL = ".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .wsheet-overlay, .drag-overlay";
+  let cur = null;
+  setInterval(() => {
+    const on = !!document.querySelector(SEL);
+    if (on !== cur) { cur = on; api.previewShield(on); }
+  }, 80);
+}
+
 (async function init() {
   await S.restorePersisted();
   state.daemon = await api.daemonStatus().catch(() => null);
@@ -168,7 +180,7 @@ window.addEventListener("keydown", (e) => {
   S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
   S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
   startUiChannel(); // UI 실시간 채널(WS) — 알림 이벤트 수신
-  import("./overlay-host.js").then((m) => m.ensureOverlay()).catch(() => {}); // 오버레이 창 웜업(첫 클릭 즉시 표시)
+  startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
   render();
   refreshWsMeta();

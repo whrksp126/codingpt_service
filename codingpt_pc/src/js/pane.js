@@ -16,35 +16,8 @@ const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
 const SearchAddon = window.SearchAddon?.SearchAddon;
 
-// 프리뷰 프리즈 — 설정 같은 반투명 풀모달이 뜰 때 네이티브 웹뷰를 숨기면 그 자리가 "빈 구멍" 이
-//  된다(모달 배경이 반투명이라 뒤가 비침). 그래서 숨기기 직전 프리뷰 스크린샷을 슬롯에 이미지로
-//  깔아둔다 → 모달 반투명 배경이 그 이미지를 자연스럽게 덮는다(기존 UI 유지). 오버레이 창은 인터랙티브
-//  풀모달엔 안 맞으므로(별도 JS 컨텍스트) 이 방식(사용자 제안)을 쓴다.
-//  반환값 = "설정 때문에 웹뷰를 숨겨야 하는가"(캡처가 끝나 이미지가 준비된 뒤에만 숨김).
-function previewFreezeHide(st, paneId, host, wantPreview) {
-  const settingsOpen = !!document.querySelector(".settings-modal:not(.hidden)");
-  if (settingsOpen) {
-    if (!wantPreview) return false;
-    if (!st._freezeReq) {
-      st._freezeReq = true;
-      st._frozenReady = false;
-      api.previewScreenshot(paneId).then((b64) => {
-        if (!st._freezeReq) return; // 그새 닫힘
-        let img = st._freezeImg;
-        if (!img) { img = document.createElement("img"); img.className = "preview-freeze"; host.appendChild(img); st._freezeImg = img; }
-        img.src = "data:image/jpeg;base64," + b64;
-        st._frozenReady = true;
-      }).catch(() => { st._frozenReady = true; }); // 실패해도 진행(그냥 숨김)
-    }
-    return !!st._frozenReady; // 준비 전엔 웹뷰 유지(캡처용) → 준비되면 숨기고 이미지가 대체
-  }
-  // 설정 닫힘 — 프리즈 정리
-  if (st._freezeReq) {
-    st._freezeReq = false; st._frozenReady = false;
-    if (st._freezeImg) { st._freezeImg.remove(); st._freezeImg = null; }
-  }
-  return false;
-}
+// (구) 프리뷰 프리즈/모달 숨김은 punch-through 전환으로 폐지 — 웹뷰가 앱 UI 아래층이라
+//  DOM 모달·메뉴가 자연히 위에 그려지고, 오버레이 중 이벤트만 preview_shield 로 차단한다.
 
 const registry = new Map();
 export function getPane(paneId) {
@@ -381,11 +354,12 @@ class PreviewSurface {
         if (++this._forceTick >= 45) { this._forceTick = 0; this._key = ""; }
         // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
         const r = (dtPageSlot(this.id) || h).getBoundingClientRect();
-        // 모달/⋯메뉴 열림(DOM 폴백) = 네이티브 웹뷰를 화면 밖으로. 설정은 프리즈 이미지로 대체 후 숨김.
-        const otherModal = !!document.querySelector(".pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu");
-        const modalOpen = otherModal || previewFreezeHide(this, this.id, h, this._visible && !!this.effUrl);
+        // punch-through: 웹뷰는 앱 UI "아래" 라 DOM 모달/메뉴가 자연히 위에 그려진다 — 숨김 불필요.
+        //  (오버레이 중 이벤트 차단은 main.js 의 preview_shield 가 담당) 드래그 중만 숨김 유지.
+        // URL 로드됐으면 빈 상태 DOM 제거 — 예전엔 웹뷰가 위에서 가려줬지만 이제 구멍을 막는다.
+        if (this.effUrl && h.querySelector(".preview-empty")) h.innerHTML = "";
         const dragging = document.body.classList.contains("tab-dragging");
-        const visible = this._visible && r.width > 2 && r.height > 2 && !modalOpen && !dragging;
+        const visible = this._visible && r.width > 2 && r.height > 2 && !dragging;
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.effUrl].join("|");
         if (key !== this._key) {
           this._key = key;
@@ -1191,11 +1165,10 @@ export class PaneView {
         if (++this._previewForceTick >= 45) { this._previewForceTick = 0; this._previewKey = ""; }
         // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
         const r = (dtPageSlot(this._pvId) || host).getBoundingClientRect();
-        // 모달/⋯메뉴/시트 열림(DOM 폴백) = 웹뷰를 화면 밖으로. 설정은 프리즈 이미지로 대체 후 숨김.
-        const otherModal = !!document.querySelector(".pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu");
-        const modalOpen = otherModal || previewFreezeHide(this, this._pvId, host, !!this._pvEffUrl);
+        // punch-through: 웹뷰는 앱 UI "아래" — DOM 모달/메뉴가 자연히 위. 드래그 중만 숨김 유지.
+        if (this._pvEffUrl && host.querySelector(".preview-empty")) host.innerHTML = "";
         const dragging = document.body.classList.contains("tab-dragging");
-        const visible = r.width > 2 && r.height > 2 && !modalOpen && !dragging;
+        const visible = r.width > 2 && r.height > 2 && !dragging;
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
         if (key !== this._previewKey) {
           this._previewKey = key;

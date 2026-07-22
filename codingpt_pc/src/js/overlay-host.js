@@ -21,7 +21,10 @@ let dismissCb = null;
 let wired = false;
 let settingsOpen = false;
 
-function available() { return !!(T && T.core && event); }
+// punch-through 전환(프리뷰=앱 UI 아래층)으로 오버레이 창은 폐기 — DOM 이 자연히 프리뷰 위에
+//  그려지므로 모든 호출부가 자동으로 DOM 폴백을 탄다(설정=메인 모달, 메뉴/토스트=DOM).
+const OVERLAY_DISABLED = true;
+function available() { return !OVERLAY_DISABLED && !!(T && T.core && event); }
 
 export function isSettingsOpen() { return settingsOpen; }
 

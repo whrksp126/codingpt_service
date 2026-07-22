@@ -113,9 +113,13 @@ export const api = {
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
 
-  // ── 범용 오버레이 창(프리뷰 웹뷰 위에 뜨는 메뉴·패널·토스트) ──
+  // ── 범용 오버레이 창(프리뷰 웹뷰 위에 뜨는 메뉴·패널·토스트) — punch-through 전환으로 비활성 ──
   overlayEnsure: () => invoke("overlay_ensure"),
   overlayHide: () => invoke("overlay_hide"),
+
+  // ── punch-through(프리뷰=앱 UI 아래층) ──
+  previewShield: (on) => invoke("preview_shield", { on: !!on }), // DOM 오버레이 동안 프리뷰 이벤트 차단
+  windowSetBg: (hex) => invoke("window_set_bg", { hex }), // 창 배경 = 테마 base(투명 누수 영역 커버)
 
   // ── 자동 업데이트(번들 앱 전용 — tauri dev 에선 updateCheck 가 error 반환) ──
   appVersion: () => invoke("app_version"),

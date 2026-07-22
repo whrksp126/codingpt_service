@@ -80,7 +80,9 @@ html[data-theme="light"] {
 
 html, body {
   height: 100%;
-  background: var(--base);
+  /* punch-through: 앱 웹뷰는 투명(drawsBackground=NO) — 프리뷰 슬롯 자리만 아래층 네이티브
+     프리뷰 웹뷰가 비친다. 배경은 NSWindow backgroundColor(테마 base, theme.js 가 동기화)가 담당. */
+  background: transparent;
   color: var(--text);
   font-family: var(--ui-font);
   font-size: 14px;
@@ -259,7 +261,7 @@ body.resizing-row { cursor: row-resize; }
 .mt-spacer { flex: 1; }
 .mt-adds { display: inline-flex; align-items: center; gap: 2px; }
 
-.ws-grid { flex: 1; min-height: 0; background: var(--base); }
+.ws-grid { flex: 1; min-height: 0; background: transparent; } /* punch-through 경로(창 bg 가 base) */
 .ws-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--dim); }
 
 /* 분할 — 여백 없이 flush, 얇은 1px 구분선(넓은 히트영역). */
@@ -283,7 +285,7 @@ body.resizing-row { cursor: row-resize; }
 /* ── pane (여백/보더 없이 flush) ── */
 .pane {
   flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;
-  background: var(--base); overflow: hidden; position: relative;
+  background: transparent; overflow: hidden; position: relative; /* punch-through 경로(창 bg 가 base) */
 }
 .pane.focused .ptab.active { box-shadow: inset 0 2px 0 var(--accent); }
 .pane.ring { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.5); }
@@ -365,9 +367,9 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .preview-bar { flex: none; display: flex; gap: 6px; padding: 5px 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
 .preview-url { flex: 1; min-width: 0; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 5px 9px; color: var(--text); font-size: 12px; outline: none; font-family: var(--mono-font); }
 .preview-url:focus { border-color: var(--border-focus); }
-.preview-host { flex: 1; min-height: 0; position: relative; background: var(--base); overflow: hidden; }
-/* 프리즈 이미지 — 설정 등 반투명 모달이 뜰 때 숨겨진 네이티브 프리뷰 웹뷰 자리를 채우는 정지 스냅샷 */
-.preview-freeze { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; z-index: 0; pointer-events: none; }
+/* punch-through 슬롯 — 투명 구멍으로 아래층 네이티브 프리뷰가 비친다. 빈 상태만 base 로 채움. */
+.preview-host { flex: 1; min-height: 0; position: relative; background: transparent; overflow: hidden; }
+.preview-host:has(.preview-empty) { background: var(--base); }
 .preview-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--dim); font-size: 13px; }
 
 /* ── 내장 IDE ── */

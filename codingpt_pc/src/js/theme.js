@@ -100,6 +100,11 @@ function apply() {
   el.dataset.theme = resolvedTheme();
   el.style.setProperty("--ui-font", uiFontStack());
   el.style.setProperty("--mono-font", monoFontStack());
+  // punch-through: 앱 웹뷰가 투명이라 배경은 NSWindow 가 담당 — 테마 base 색으로 동기화.
+  try {
+    const base = getComputedStyle(el).getPropertyValue("--base").trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(base)) api.windowSetBg(base).catch(() => {});
+  } catch (_) { /* 오버레이 창 등 api 무관 컨텍스트 */ }
 }
 apply(); // 모듈 로드 시 저장값 즉시 반영(첫 페인트 전에 main.js 최상단 import 필수)
 

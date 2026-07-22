@@ -634,6 +634,8 @@ pub fn run() {
             preview::preview_cookies,
             preview::preview_set_cookies,
             preview::preview_close,
+            preview::preview_shield,
+            preview::window_set_bg,
             // 내장 IDE 파일 접근
             fsapi::fs_tree,
             fsapi::path_exists,
@@ -658,6 +660,10 @@ pub fn run() {
             app.manage(tmux_ctx);
 
             setup_tray(&handle)?;
+
+            // punch-through 설치 — 프리뷰(네이티브 웹뷰)를 앱 UI 아래에 깔고, 앱 웹뷰 투명 슬롯으로
+            //  비추며 hitTest 로 이벤트를 라우팅(DOM 모달/메뉴가 자연히 프리뷰 위에 그려진다).
+            preview::install_punch_through(&handle);
 
             // 런타임 딥링크(mac: 앱 실행 중 URL 오픈) 구독.
             {
