@@ -591,9 +591,6 @@ pub fn run() {
             bridge::remote_ws_create,
             bridge::project_detach,
             bridge::devtools_window,
-            bridge::overlay_ensure,
-            bridge::overlay_show,
-            bridge::overlay_hide,
             bridge::project_attach,
             bridge::desktop_login_url,
             bridge::fetch_ws_session,
@@ -723,37 +720,6 @@ pub fn run() {
             if let tauri::WindowEvent::Focused(focused) = event {
                 if window.label() == "main" {
                     let _ = window.app_handle().emit("cpt-focus", *focused);
-                }
-                // 오버레이 앱-활성 게이트 — 오버레이는 별도 OS 창이라 앱이 백그라운드로 가도 남아
-                //  다른 앱 위에 떠 보인다(실측: 넷플릭스/카톡 위 설정 모달). main/overlay 어느 쪽도
-                //  포커스가 없으면(=다른 앱으로 전환) 오버레이를 숨기고, main 복귀 시 JS 가 재표시.
-                {
-                    use std::sync::atomic::{AtomicBool, Ordering};
-                    static MAIN_F: AtomicBool = AtomicBool::new(false);
-                    static OVL_F: AtomicBool = AtomicBool::new(false);
-                    let label = window.label();
-                    if label == "main" { MAIN_F.store(*focused, Ordering::SeqCst); }
-                    if label == "overlay" { OVL_F.store(*focused, Ordering::SeqCst); }
-                    if label == "main" || label == "overlay" {
-                        let app = window.app_handle().clone();
-                        if !*focused {
-                            // 포커스가 두 창 사이를 이동 중일 수 있음(오버레이 클릭 등) → 잠깐 후 재확인.
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(180));
-                                if !MAIN_F.load(Ordering::SeqCst) && !OVL_F.load(Ordering::SeqCst) {
-                                    use tauri::Manager;
-                                    if let Some(ov) = app.get_webview_window("overlay") {
-                                        if ov.is_visible().unwrap_or(false) {
-                                            let _ = ov.hide();
-                                            let _ = app.emit("cpt-overlay-autohide", ());
-                                        }
-                                    }
-                                }
-                            });
-                        } else if label == "main" {
-                            let _ = app.emit("cpt-app-active", ());
-                        }
-                    }
                 }
             }
             // 창 닫기 = 숨김(앱은 트레이에 상주).

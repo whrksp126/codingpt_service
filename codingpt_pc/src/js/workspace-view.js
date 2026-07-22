@@ -8,20 +8,9 @@ import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { openOverlay } from "./overlay-host.js";
 
-// 간단 토스트(스냅샷 결과 등). 프리뷰(네이티브 웹뷰)가 DOM 위에 합성되므로, 오버레이 웹뷰(프리뷰 위)에
-//  띄운다. 클릭 통과(passthrough)라 작업 방해 없음. 오버레이 미가용 시 DOM 토스트 폴백.
+// 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
-  const text = String(msg);
-  const el = document.createElement("div");
-  el.className = "wv-toast";
-  el.textContent = text;
-  openOverlay(el, null, { place: { mode: "toast" }, passthrough: true, autohideMs: 2800 })
-    .then((ok) => { if (!ok) wvToastDom(text); })
-    .catch(() => wvToastDom(text));
-}
-function wvToastDom(msg) {
   const d = document.createElement("div");
   d.className = "wv-toast";
   d.textContent = String(msg);
@@ -44,18 +33,6 @@ export async function pickSnapshotAndApply() {
   if (!list.length) { wvToast("저장된 스냅샷이 없어요 — 다른 기기에서 올리기로 저장해 보세요"); return; }
   const fmt = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
   const applyOne = async (id) => { wvToast("불러오는 중…"); const r = await m.applySnapshotPC(id); if (!r.ok) wvToast(r.error || "복원 실패"); };
-  // 네이티브 메뉴(웹뷰 위) 우선 — 실패 시 DOM 시트 폴백.
-  try {
-    const menuApi = window.__TAURI__ && window.__TAURI__.menu;
-    if (!menuApi || !menuApi.Menu) throw new Error("no native menu");
-    const items = list.slice(0, 12).map((s) => ({
-      text: (s.label || "프리뷰") + "  ·  " + (s.device || "") + " " + fmt(s.createdAt),
-      action: () => { applyOne(s.id); },
-    }));
-    const menu = await menuApi.Menu.new({ items });
-    await menu.popup();
-    return;
-  } catch (_) { /* DOM 폴백 */ }
   const overlay = document.createElement("div");
   overlay.className = "wv-sheet-overlay";
   const sheet = document.createElement("div");

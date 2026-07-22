@@ -167,6 +167,18 @@ function onFrameMessage(s, d) {
       s.slot.style.top = b.y + "px";
       s.slot.style.width = b.width + "px";
       s.slot.style.height = b.height + "px";
+      // punch-through: 페이지 영역만큼 iframe 을 clip-path 로 잘라내 그 자리 DOM 을 비운다 →
+      //  아래층 네이티브 프리뷰가 구멍으로 비친다(웹뷰를 위로 올릴 필요 없음 — DOM 모달이 늘 위).
+      //  페이지 rect 는 항상 한 변에 붙는 직사각형(dock bottom/left/right)이라 inset 으로 표현 가능.
+      if (s.iframe) {
+        const W = s.iframe.clientWidth, H = s.iframe.clientHeight;
+        let t = 0, r = 0, bo = 0, l = 0;
+        if (W > 2 && H > 2) {
+          if (b.width >= W - 2) { if (b.y <= 1) t = b.y + b.height; else bo = H - b.y; }
+          else if (b.height >= H - 2) { if (b.x <= 1) l = b.x + b.width; else r = W - b.x; }
+        }
+        s.iframe.style.clipPath = `inset(${t}px ${r}px ${bo}px ${l}px)`;
+      }
     }
   } else if (d.__cptDt === "docked") {
     // InspectorFrontendHost.setIsDocked — Undock 선택(false) / 별도 창에서 재도킹(true).

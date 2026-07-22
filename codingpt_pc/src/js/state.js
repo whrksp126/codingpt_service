@@ -737,11 +737,7 @@ export async function reconcilePool() {
     T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") getPane(l.id)?.ensureAttached?.(); });
   } catch (_) { /* 오프라인 */ } finally { _reconciling = false; }
 }
-// ⚠️ 메인 창에서만 리컨실러를 돈다. 오버레이 창(설정 호스팅)도 state.js 를 로드하는데, 거기서도
-//  이게 돌면 같은 tmux 풀을 두 리컨실러가 다퉈 device-start 409(터미널 시작 충돌)가 폭주한다.
-if (!(typeof window !== "undefined" && window.__CPT_OVERLAY__)) {
-  setInterval(() => { reconcilePool(); }, 7000);
-}
+setInterval(() => { reconcilePool(); }, 7000);
 
 export async function restorePersisted() {
   try {

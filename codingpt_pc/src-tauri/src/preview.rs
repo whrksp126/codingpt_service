@@ -20,9 +20,6 @@ struct Entry {
     //  WebKit 인스펙터 attach 는 "inspected 뷰의 superview 전체"를 분할하므로(Safari 가정),
     //  superview 를 pane 크기 컨테이너로 만들어야 "내부 열기"가 pane 안에 갇힌다.
     container: Arc<AtomicUsize>,
-    // punch-through 예외: 데브툴(chii) 도킹 중엔 chii 프런트가 페이지 영역에 자기 배경을 칠해
-    //  아래층 프리뷰가 가려진다 → 그동안만 앱 웹뷰 "위"로 올린다(Chrome 의 페이지뷰와 동일).
-    raised: bool,
 }
 
 fn sanitize(id: &str) -> String {
@@ -297,30 +294,6 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>) {
     });
 }
 
-// 컨테이너 z-순서 전환 — raised=true 면 앱 웹뷰 위(데브툴 도킹 중), false 면 아래(punch-through 기본).
-#[cfg(target_os = "macos")]
-fn container_set_raised(app: &AppHandle, container: &Arc<AtomicUsize>, raised: bool) {
-    let cont = container.load(Ordering::Acquire);
-    if cont == 0 {
-        return;
-    }
-    let _ = app.run_on_main_thread(move || unsafe {
-        use objc2::msg_send;
-        use objc2::runtime::AnyObject;
-        let cont = cont as *mut AnyObject;
-        let sv: *mut AnyObject = msg_send![&*cont, superview];
-        if sv.is_null() {
-            return;
-        }
-        let _: () = msg_send![&*cont, retain];
-        let _: () = msg_send![&*cont, removeFromSuperview];
-        let ord: isize = if raised { 1 } else { -1 }; // NSWindowAbove / NSWindowBelow
-        let nil_view: *mut AnyObject = std::ptr::null_mut();
-        let _: () = msg_send![&*sv, addSubview: cont, positioned: ord, relativeTo: nil_view];
-        let _: () = msg_send![&*cont, release];
-    });
-}
-
 // 컨테이너 정리(웹뷰 close 후) — 메인 스레드에서 remove + release.
 #[cfg(target_os = "macos")]
 fn drop_container(app: &AppHandle, container: &Arc<AtomicUsize>) {
@@ -351,7 +324,6 @@ pub fn preview_sync(
     w: f64,
     h: f64,
     visible: bool,
-    raised: Option<bool>, // 데브툴 도킹 중 = 앱 웹뷰 위로(구버전 JS 미전달 대비 Option)
 ) -> Result<(), String> {
     let mut map = mgr.inner.lock().map_err(|e| e.to_string())?;
     let sized = w > 1.0 && h > 1.0;
@@ -368,13 +340,6 @@ pub fn preview_sync(
             if sized {
                 let _ = entry.webview.set_size(LogicalSize::new(w, h));
             }
-        }
-        // 데브툴 도킹 상태 변화 시에만 z-순서 전환(매 프레임 재배치 방지).
-        let want_raised = raised.unwrap_or(false);
-        if entry.raised != want_raised {
-            entry.raised = want_raised;
-            #[cfg(target_os = "macos")]
-            container_set_raised(&app, &entry.container, want_raised);
         }
         if !url.is_empty() && entry.url != url {
             if let Ok(u) = Url::parse(&url) {
@@ -415,7 +380,7 @@ pub fn preview_sync(
     let container = Arc::new(AtomicUsize::new(0));
     #[cfg(target_os = "macos")]
     wrap_in_container(&webview, container.clone());
-    map.insert(pane_id, Entry { webview, url, container, raised: false });
+    map.insert(pane_id, Entry { webview, url, container });
     Ok(())
 }
 

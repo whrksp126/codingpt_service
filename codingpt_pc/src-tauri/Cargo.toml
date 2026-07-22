@@ -1,6 +1,6 @@
 [package]
 name = "codingpt_pc"
-version = "0.1.74"
+version = "0.1.75"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -24,7 +24,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png", "unstable", "devtools", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "unstable", "devtools"] }
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-autostart = "2"

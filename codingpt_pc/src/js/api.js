@@ -93,8 +93,8 @@ export const api = {
   openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──
-  previewSync: (paneId, url, x, y, w, h, visible, raised) =>
-    invoke("preview_sync", { paneId, url: url || "", x, y, w, h, visible, raised: !!raised }),
+  previewSync: (paneId, url, x, y, w, h, visible) =>
+    invoke("preview_sync", { paneId, url: url || "", x, y, w, h, visible }),
   previewNavigate: (paneId, url) => invoke("preview_navigate", { paneId, url }),
   previewControl: (paneId, action) => invoke("preview_control", { paneId, action }),
   previewInfo: (paneId) => invoke("preview_info", { paneId }),
@@ -112,10 +112,6 @@ export const api = {
 
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
-
-  // ── 범용 오버레이 창(프리뷰 웹뷰 위에 뜨는 메뉴·패널·토스트) — punch-through 전환으로 비활성 ──
-  overlayEnsure: () => invoke("overlay_ensure"),
-  overlayHide: () => invoke("overlay_hide"),
 
   // ── punch-through(프리뷰=앱 UI 아래층) ──
   previewShield: (on) => invoke("preview_shield", { on: !!on }), // DOM 오버레이 동안 프리뷰 이벤트 차단

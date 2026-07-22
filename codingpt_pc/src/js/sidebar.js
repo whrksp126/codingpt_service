@@ -5,9 +5,8 @@ import * as T from "./tiling.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
-import { renderNotifPanel, buildNotifPanelEl, jumpLatestUnread, readNotif } from "./notifications.js";
+import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
-import { makeActions, bindActions, openOverlay, refreshOverlay, openSettings, isSettingsOpen } from "./overlay-host.js";
 
 let el = null;
 let notifPanel = null;
@@ -89,28 +88,8 @@ export function toggleLatestUnread() {
   jumpLatestUnread((n) => jumpToNotification(n));
 }
 
-// 알림 패널 — 기존 디자인 그대로 오버레이 웹뷰(프리뷰 위)에 표시. 미가용 시 DOM 패널 폴백.
-function notifPlace() {
-  const bell = [...document.querySelectorAll(".bell")].find((b) => b.offsetParent !== null) || el?.querySelector(".bell");
-  const r = bell ? bell.getBoundingClientRect() : { left: 60, bottom: 40 };
-  return { mode: "anchor", x: r.left, y: (r.bottom || 0) + 6 };
-}
-async function openNotif() {
-  const place = notifPlace();
-  const render = (viaRefresh) => {
-    const { map, tag } = makeActions();
-    const panel = buildNotifPanelEl({
-      tag,
-      onRow: (n) => { readNotif(n); jumpToNotification(n); },
-      onMarkAll: () => { S.markAllRead(); render(true); }, // keep: 갱신 후 열림 유지
-    });
-    return viaRefresh ? (refreshOverlay(panel, map, place), true) : openOverlay(panel, map, { place });
-  };
-  const ok = await render(false);
-  if (!ok) openNotifDom();
-}
-
-function openNotifDom() {
+// 알림 패널 — punch-through(프리뷰=아래층) 덕에 평범한 DOM 으로 프리뷰 위에 뜬다.
+function openNotif() {
   notifOpen = true;
   notifPanel.classList.remove("hidden");
   renderNotifPanel(notifPanel, (n) => jumpToNotification(n));
@@ -179,7 +158,7 @@ export function updateSidebar() {
   // 하단: 내 정보.
   const online = state.daemon?.running && state.daemon?.paired;
   const foot = document.createElement("button");
-  foot.className = "sb-me" + (state.view === "settings" || isSettingsOpen() ? " active" : "");
+  foot.className = "sb-me" + (state.view === "settings" ? " active" : "");
   const me = state.me;
   const av = document.createElement("span");
   av.className = "me-avatar";
@@ -196,7 +175,7 @@ export function updateSidebar() {
     : state.daemon?.device_name || (state.paired ? "연결됨" : "로그인 필요");
   txt.innerHTML = `<span class="me-name">${escapeHtml(name)}</span><span class="me-sub">${escapeHtml(sub)}</span>`;
   foot.append(av, txt);
-  foot.addEventListener("click", () => { openSettings().then((ok) => { if (!ok) S.setView("settings"); }); });
+  foot.addEventListener("click", () => S.setView(state.view === "settings" ? "workspace" : "settings"));
   el.appendChild(foot);
 
   if (notifOpen) renderNotifPanel(notifPanel, (n) => jumpToNotification(n));
@@ -445,9 +424,10 @@ function closeWsMenu() {
 function onWsMenuOutside(e) { if (wsMenuEl && !wsMenuEl.contains(e.target)) closeWsMenu(); }
 function onWsMenuKey(e) { if (e.key === "Escape") closeWsMenu(); }
 
-// ctx-menu 요소 빌드(디자인=styles.css .ctx-menu 그대로). 오버레이/DOM 양쪽 공용.
+// ctx-menu 요소 빌드(디자인=styles.css .ctx-menu). onAfter=항목 클릭 시 메뉴 닫기 콜백.
 //  items: {icon,label,danger,onClick}(기본 항목) | {type:'sep'} | {type:'colors',icon,label,colors:[{title,c,sel,onClick}]}
-function buildCtxEl(items, tag) {
+function buildCtxEl(items, onAfter) {
+  const tag = (elm, fn) => elm.addEventListener("click", () => { onAfter?.(); fn(); });
   const menu = document.createElement("div");
   menu.className = "ctx-menu";
   for (const it of items) {
@@ -500,20 +480,14 @@ function wsMenuItems(w) {
   return items;
 }
 
-// 우클릭 컨텍스트 메뉴 — 오버레이 웹뷰(프리뷰 위) 우선, 미가용 시 DOM 폴백.
+// 우클릭 컨텍스트 메뉴 — DOM(punch-through 로 프리뷰 위에 뜸).
 function showWsMenu(e, w) {
-  const place = { mode: "point", x: e.clientX, y: e.clientY };
-  const { map, tag } = makeActions();
-  const menu = buildCtxEl(wsMenuItems(w), tag);
-  openOverlay(menu, map, { place }).then((ok) => { if (!ok) showCtxDom(e.clientX, e.clientY, wsMenuItems(w)); }).catch(() => showCtxDom(e.clientX, e.clientY, wsMenuItems(w)));
+  showCtxDom(e.clientX, e.clientY, wsMenuItems(w));
 }
 
-// DOM 폴백 — body 에 붙여 표시(오버레이가 없을 때만. 프리뷰가 위에 겹치면 rAF 가 잠깐 숨김).
 function showCtxDom(x, y, items) {
   closeWsMenu();
-  const { map, tag } = makeActions();
-  const menu = buildCtxEl(items, tag);
-  bindActions(menu, map, closeWsMenu);
+  const menu = buildCtxEl(items, closeWsMenu);
   document.body.appendChild(menu);
   wsMenuEl = menu;
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
@@ -528,12 +502,9 @@ function showCtxDom(x, y, items) {
   }, 0);
 }
 
-// 지정 좌표 팝업 메뉴 — 오버레이 우선, DOM 폴백. items: [{icon,label,onClick}].
+// 지정 좌표 팝업 메뉴 — items: [{icon,label,onClick}].
 function showPopupMenu(x, y, items) {
-  const place = { mode: "point", x, y };
-  const { map, tag } = makeActions();
-  const menu = buildCtxEl(items, tag);
-  openOverlay(menu, map, { place }).then((ok) => { if (!ok) showCtxDom(x, y, items); }).catch(() => showCtxDom(x, y, items));
+  showCtxDom(x, y, items);
 }
 
 // 꺼진 호스트 사본 클릭 — 같은 프로젝트의 켜진 사본으로 원탭 폴백 제안.

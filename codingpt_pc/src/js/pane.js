@@ -10,7 +10,6 @@ import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
-import { makeActions, bindActions, openOverlay } from "./overlay-host.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -213,30 +212,23 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   const doExt = () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); };
   const doSave = async () => { try { const wv = await import("./workspace-view.js"); await wv.saveSnapshotAndToast(); } catch (_) { /* noop */ } };
 
-  // ⋯ 메뉴 항목 요소 빌드(디자인=styles.css .pv-menu 그대로). 오버레이/DOM 공용.
-  const buildMoreMenu = (tag) => {
+  // ⋯ 메뉴 — 평범한 DOM(punch-through 로 프리뷰 위에 뜬다).
+  const openMoreMenu = () => {
+    document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
     const menu = document.createElement("div");
     menu.className = "pv-menu";
+    const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
     const item = (label, active, onClick) => {
       const b = document.createElement("button");
       b.className = "pv-menu-item" + (active ? " active" : "");
       b.textContent = label;
-      tag(b, onClick);
+      b.addEventListener("click", () => { close(); onClick(); });
       menu.appendChild(b);
     };
     item(st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", st.dark, doTheme);
     item("개발자 도구", false, () => doTools(false));
     item("올리기 (스냅샷 저장)", false, doSave);
     item("외부 브라우저에서 열기", false, doExt);
-    return menu;
-  };
-  // DOM 폴백 — 오버레이 미가용 시만(프리뷰 뒤에 뜨므로 rAF 가 프리뷰를 잠깐 숨김).
-  const openDomMenu = () => {
-    document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
-    const { map, tag } = makeActions();
-    const menu = buildMoreMenu(tag);
-    const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
-    bindActions(menu, map, close);
     const r = more.getBoundingClientRect();
     menu.style.top = (r.bottom + 4) + "px";
     menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
@@ -245,14 +237,9 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
     setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
   };
 
-  more.addEventListener("click", async () => {
+  more.addEventListener("click", () => {
     if (!st.url) return;
-    // 오버레이 웹뷰(프리뷰 위)에 표시 — 우측 정렬(⋯ 버튼 우측 끝 기준).
-    const r = more.getBoundingClientRect();
-    const { map, tag } = makeActions();
-    const menu = buildMoreMenu(tag);
-    const ok = await openOverlay(menu, map, { place: { mode: "point", x: r.right, y: r.bottom + 4, align: "tr" } }).catch(() => false);
-    if (!ok) openDomMenu();
+    openMoreMenu();
   });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
@@ -361,12 +348,10 @@ class PreviewSurface {
         // punch-through: 드래그 중에도 숨기지 않는다 — DOM(고스트/드롭존)이 위층이라 가릴 게 없고,
         //  숨기면 배치 조정 중 웹이 사라져 보인다(실측). 이벤트는 shield 가 차단.
         const visible = this._visible && r.width > 2 && r.height > 2;
-        // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — chii 프런트가 페이지 영역에 배경을 칠해 아래층이 가려짐).
-        const raised = !!dtPageSlot(this.id);
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this.effUrl].join("|");
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.effUrl].join("|");
         if (key !== this._key) {
           this._key = key;
-          if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible, raised).catch(() => {});
+          if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
         }
       }
       this._raf = requestAnimationFrame(tick);
@@ -1172,13 +1157,11 @@ export class PaneView {
         if (this._pvEffUrl && host.querySelector(".preview-empty")) host.innerHTML = "";
         // punch-through: 드래그 중에도 숨기지 않는다(위 PreviewSurface 와 동일 규칙 — shield 가 이벤트 차단).
         const visible = r.width > 2 && r.height > 2;
-        // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — 위 PreviewSurface 와 동일 규칙).
-        const raised = !!dtPageSlot(this._pvId);
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this._pvEffUrl].join("|");
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
         if (key !== this._previewKey) {
           this._previewKey = key;
           if (this._pvEffUrl) {
-            api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible, raised).catch(() => {});
+            api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
           }
         }
       }
