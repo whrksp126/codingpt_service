@@ -360,10 +360,12 @@ class PreviewSurface {
         if (this.effUrl && h.querySelector(".preview-empty")) h.innerHTML = "";
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = this._visible && r.width > 2 && r.height > 2 && !dragging;
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this.effUrl].join("|");
+        // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — chii 프런트가 페이지 영역에 배경을 칠해 아래층이 가려짐).
+        const raised = !!dtPageSlot(this.id);
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this.effUrl].join("|");
         if (key !== this._key) {
           this._key = key;
-          if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
+          if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible, raised).catch(() => {});
         }
       }
       this._raf = requestAnimationFrame(tick);
@@ -1169,11 +1171,13 @@ export class PaneView {
         if (this._pvEffUrl && host.querySelector(".preview-empty")) host.innerHTML = "";
         const dragging = document.body.classList.contains("tab-dragging");
         const visible = r.width > 2 && r.height > 2 && !dragging;
-        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
+        // 데브툴 도킹 중 = 앱 웹뷰 위로(raise — 위 PreviewSurface 와 동일 규칙).
+        const raised = !!dtPageSlot(this._pvId);
+        const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, raised, this._pvEffUrl].join("|");
         if (key !== this._previewKey) {
           this._previewKey = key;
           if (this._pvEffUrl) {
-            api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
+            api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible, raised).catch(() => {});
           }
         }
       }

@@ -93,8 +93,8 @@ export const api = {
   openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──
-  previewSync: (paneId, url, x, y, w, h, visible) =>
-    invoke("preview_sync", { paneId, url: url || "", x, y, w, h, visible }),
+  previewSync: (paneId, url, x, y, w, h, visible, raised) =>
+    invoke("preview_sync", { paneId, url: url || "", x, y, w, h, visible, raised: !!raised }),
   previewNavigate: (paneId, url) => invoke("preview_navigate", { paneId, url }),
   previewControl: (paneId, action) => invoke("preview_control", { paneId, action }),
   previewInfo: (paneId) => invoke("preview_info", { paneId }),
