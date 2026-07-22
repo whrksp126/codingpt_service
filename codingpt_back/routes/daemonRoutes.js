@@ -31,6 +31,7 @@ router.post('/runner/activate', authMiddleware, daemonController.activateRunner)
 router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloudRunner); // M5 Slice4: 클라우드 러너 확보(핸드오프 진입점)
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 router.post('/ui/ticket', accountAuth, daemonController.uiTicket); // deviceToken 기기(PC)용 agent/stream 1회용 티켓
+router.get('/ui/clients', accountAuth, daemonController.uiClients); // 접속 중 UI 화면 목록(기기 타겟팅 --on / cpt devices)
 router.get('/terminal/list', authMiddleware, daemonController.terminalList);
 router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
 router.post('/terminal/select', authMiddleware, daemonController.terminalSelect);

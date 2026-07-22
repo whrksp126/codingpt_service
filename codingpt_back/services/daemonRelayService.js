@@ -406,6 +406,27 @@ function presentClient(userId) {
   return { clientKey: best.clientKey, kind: best.kind, foregroundAt: best.foregroundAt || 0, fresh };
 }
 
+// 접속 중인 UI 클라이언트(화면) 목록 — 기기 타겟팅용(cpt devices / --on). executor(활성 기기) 표기.
+//  handleUiCommand 의 executor 선정과 동일 정렬(foreground → lastActivityAt → pc)로 1위를 executor 로 마킹.
+function listUiClients(userId) {
+  const set = agentWsClients.get(String(userId));
+  const out = [];
+  if (set) for (const ws of set) {
+    const m = ws._cptMeta;
+    if (!m || ws.readyState !== WebSocket.OPEN) continue;
+    out.push({
+      clientKey: m.clientKey || '', deviceId: m.deviceId ?? null, deviceName: m.deviceName || '',
+      kind: m.kind, foreground: !!m.foreground, lastActivityAt: m.lastActivityAt || 0, executor: false,
+    });
+  }
+  out.sort((a, b) =>
+    ((b.foreground ? 1 : 0) - (a.foreground ? 1 : 0)) ||
+    (b.lastActivityAt - a.lastActivityAt) ||
+    ((b.kind === 'pc' ? 1 : 0) - (a.kind === 'pc' ? 1 : 0)));
+  if (out.length) out[0].executor = true;
+  return out;
+}
+
 // 알림 팬아웃 — notif_event(new/read) 를 SSE(폴백) + WSS 양쪽에 즉시 전달(버퍼/리플레이 없음).
 //  프레임 형태 {type:'notif_event', event} — fanoutSyncEvent 미러. notificationService 가 호출.
 function fanoutNotifEvent(userId, event) {
@@ -535,11 +556,26 @@ function handleUiCommand(userId, conn, msg) {
     reply(false, { error: '연결된 화면(UI 클라이언트)이 없습니다', code: 'NO_UI_CLIENT' });
     return;
   }
-  // executor 선정: lastActivityAt 최대 → 동률이면 kind==='pc' 우선.
+  // executor(활성 기기) 선정: foreground(지금 최전면) 우선 → lastActivityAt 최대 → 동률이면 kind==='pc'.
+  //  foreground 를 1순위로 두어야 백그라운드 기기가 최근활동만으로 "활성 기기"를 뺏지 않는다.
   clients.sort((a, b) =>
+    ((b._cptMeta.foreground ? 1 : 0) - (a._cptMeta.foreground ? 1 : 0)) ||
     (b._cptMeta.lastActivityAt - a._cptMeta.lastActivityAt) ||
     ((b._cptMeta.kind === 'pc' ? 1 : 0) - (a._cptMeta.kind === 'pc' ? 1 : 0)));
-  const executor = clients[0];
+  let executor = clients[0];
+  // 명시 타겟(mode:'target' + target:{deviceId|clientKey}) — 지정한 기기 1곳으로만 라우팅.
+  //  매칭 기기가 접속 중이 아니면 즉시 실패(마법 폴백 금지 — 에이전트가 cpt devices 로 재시도).
+  if (msg.target && typeof msg.target === 'object') {
+    const t = msg.target;
+    const match = clients.find((ws) =>
+      (t.deviceId != null && ws._cptMeta.deviceId === t.deviceId) ||
+      (t.clientKey && ws._cptMeta.clientKey === t.clientKey));
+    if (!match) {
+      reply(false, { error: '대상 기기가 접속돼 있지 않습니다', code: 'TARGET_OFFLINE' });
+      return;
+    }
+    executor = match;
+  }
 
   // uiId 는 데몬이 보낸 id(전역 유일 uuid) 재사용 — 회신 매칭 키.
   const uiId = String(msg.id);
@@ -630,6 +666,9 @@ function registerAgentWs(ws, userId, client) {
       ws._cptMeta = {
         clientKey: typeof msg.clientKey === 'string' ? msg.clientKey.slice(0, 128) : '',
         kind: msg.kind === 'pc' ? 'pc' : 'mobile',
+        // 이름 있는 기기 타겟팅용 — 계정 기기 레지스트리(DaemonDevice) id/이름. 구 클라는 안 보내므로 null.
+        deviceId: Number.isInteger(msg.deviceId) ? msg.deviceId : null,
+        deviceName: typeof msg.deviceName === 'string' ? msg.deviceName.slice(0, 128) : '',
         lastActivityAt: Date.now(),
         foreground: true,
         foregroundAt: Date.now(),
@@ -953,6 +992,7 @@ module.exports = {
   fanoutAppearance,
   hasActiveMobileClient,
   presentClient,
+  listUiClients,
   issueUiTicket,
   addEventClient,
   removeEventClient,

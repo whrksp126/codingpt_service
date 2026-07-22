@@ -2,8 +2,17 @@
 
 `cpt` 는 네가 지금 실행 중인 **CodingPT 워크스페이스**를 조작하는 CLI다. 사용자는 이 화면을
 **폰·태블릿·PC 등 다른 기기에서 원격으로** 보고 있을 수 있다. 그래서 "브라우저 띄워서 확인해봐"
-라고 사용자에게 미루지 말고, 네가 직접 `cpt` 로 열고·확인하고·보여줘라. 열린 프리뷰/IDE 는
-사용자의 모든 기기에 함께 나타난다.
+라고 사용자에게 미루지 말고, 네가 직접 `cpt` 로 열고·확인하고·보여줘라.
+
+**중요(기기 라우팅)**: 프리뷰·IDE·화면 조작은 **사용자가 지금 보고 있는 활성 기기 1곳**에 나타난다
+(전 기기 동시 아님). 다른 기기에 열고 싶으면 `--on <기기>` 로 지정한다. 접속 중인 기기는
+`cpt devices` 로 확인한다(● = 지금 활성 기기).
+
+```
+cpt devices                                 # 접속 중인 화면(기기) 목록 — ● 가 활성 기기
+cpt preview open :5173                       # 활성 기기에 열기(기본)
+cpt preview open :5173 --on iPad             # 특정 기기(이름 부분일치·#id·pc/mobile)에 열기
+```
 
 지원되는 명령의 정확한 목록·플래그는 항상 `cpt capabilities` 와 `cpt help` 가 정본이다.
 아래는 "무엇을 언제 하는가"의 태스크 레시피다.
@@ -22,7 +31,7 @@ CodingPT 터미널이면 워크스페이스를 자동 인지하므로 대부분�
 dev 서버를 띄웠거나 웹 결과를 보여주고 싶으면:
 
 ```
-cpt preview open http://localhost:5173     # 프리뷰 pane 을 열고 URL 로드(전 기기)
+cpt preview open http://localhost:5173     # 프리뷰 pane 을 열고 URL 로드(활성 기기)
 cpt preview open :5173                      # 축약: 포트만
 cpt preview navigate http://localhost:5173/settings
 cpt preview reload
@@ -60,14 +69,14 @@ cpt preview devtools on                # 개발자도구 열기(네가 보는 �
 특정 파일의 특정 위치를 사용자에게 보여주려면:
 
 ```
-cpt ide open src/App.tsx --line 42     # 파일 열고 42행으로 이동(전 기기)
+cpt ide open src/App.tsx --line 42     # 파일 열고 42행으로 이동(활성 기기)
 cpt ide list                            # 지금 열린 파일 목록
 cpt ide close-file src/App.tsx          # 파일 탭 하나 닫기
 cpt ide close                           # IDE pane 닫기
 ```
 
 파일 내용 자체는 디스크가 정본이고 모든 기기가 실시간으로 같은 파일을 본다. `ide open` 은
-"어느 파일의 어느 줄을 보여줄지"를 전 기기에 맞춘다.
+"어느 파일의 어느 줄을 보여줄지"를 활성 기기(또는 --on 지정 기기)에 맞춘다.
 
 ## 4. 화면 배치 (layout)
 

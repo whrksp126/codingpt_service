@@ -50,8 +50,12 @@ async function connect() {
   sock = ws;
   ws.onopen = () => {
     retryMs = 3000;
-    // 이 클라이언트 식별(원격 조작 executor 선정용) — 기기 키 재사용.
-    send(ws, { type: "ui_hello", clientKey: S.deviceKey(), kind: "pc" });
+    // 이 클라이언트 식별(원격 조작 executor 선정 + 기기 타겟팅) — 기기 키 + 페어링된 기기 id/이름.
+    send(ws, {
+      type: "ui_hello", clientKey: S.deviceKey(), kind: "pc",
+      deviceId: state.daemon?.deviceId ?? undefined,
+      deviceName: state.daemon?.deviceName || undefined,
+    });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
   };

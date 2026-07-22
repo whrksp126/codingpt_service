@@ -68,8 +68,10 @@ function resolveUi(id, msg) {
   else p.reject(Object.assign(new Error((msg && msg.error) || 'UI 명령 실패'), { code: (msg && msg.code) || 'UI_ERROR' }));
 }
 
-// ui_command 를 back 으로 보내고 ui_result 를 기다린다(P3 왕복). mode: 'broadcast'|'executor'.
-function sendUiCommand(cmd, params, { mode = 'broadcast', timeoutMs } = {}) {
+// ui_command 를 back 으로 보내고 ui_result 를 기다린다(P3 왕복).
+//  mode: 'broadcast'(전 기기) | 'target'(지정 기기 1곳, target 없으면 활성 기기) | 'executor'(구 호환=활성 기기).
+//  target: {deviceId}|{clientKey} — mode:'target' 에서 명시 기기. undefined 면 back 이 활성 기기 선정.
+function sendUiCommand(cmd, params, { mode = 'broadcast', target, timeoutMs } = {}) {
   return new Promise((resolve, reject) => {
     if (!controlWs || controlWs.readyState !== 1) {
       return reject(Object.assign(new Error('back 에 연결돼 있지 않습니다(데몬 오프라인)'), { code: 'BACK_OFFLINE' }));
@@ -82,7 +84,7 @@ function sendUiCommand(cmd, params, { mode = 'broadcast', timeoutMs } = {}) {
     }, t);
     pendingUi.set(id, { resolve, reject, timer });
     try {
-      controlWs.send(JSON.stringify({ type: 'ui_command', id, cmd, params: params || {}, mode, timeoutMs: t }));
+      controlWs.send(JSON.stringify({ type: 'ui_command', id, cmd, params: params || {}, mode, target, timeoutMs: t }));
     } catch (e) {
       clearTimeout(timer);
       pendingUi.delete(id);
@@ -108,6 +110,26 @@ async function backFetch(method, apiPath, body) {
   try { json = JSON.parse(text); } catch (_) { /* 비 JSON 응답 */ }
   if (!res.ok) throw new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
   return json;
+}
+
+// --on <deviceId|이름 부분일치|kind> → target {deviceId}|{clientKey}. 미지정=undefined(=활성 기기).
+//  이름 매칭은 back 의 접속 클라 목록(/api/daemon/ui/clients)으로 해석. 0개/2개+ 매칭이면 에러.
+async function resolveTargetDevice(on) {
+  if (on == null || on === '') return undefined;
+  const res = await backFetch('GET', '/api/daemon/ui/clients');
+  const clients = (res && res.clients) || [];
+  const key = String(on).trim();
+  if (/^\d+$/.test(key)) {
+    const byId = clients.find((c) => c.deviceId === Number(key));
+    if (byId) return { deviceId: byId.deviceId };
+  }
+  const low = key.toLowerCase();
+  const matches = clients.filter((c) =>
+    (c.deviceName || '').toLowerCase().includes(low) || String(c.kind || '').toLowerCase() === low);
+  if (matches.length === 0) throw new Error(`--on: '${on}' 에 맞는 접속 기기가 없습니다 (cpt devices 로 확인)`);
+  if (matches.length > 1) throw new Error(`--on: '${on}' 가 여러 기기와 일치합니다: ${matches.map((c) => c.deviceName || c.kind).join(', ')}`);
+  const m = matches[0];
+  return m.deviceId != null ? { deviceId: m.deviceId } : { clientKey: m.clientKey };
 }
 
 // ── ctx 해석 — CLI 가 보낸 좌표에서 (네임스페이스, cwdRel, 터미널 ID) 확정 ──
@@ -344,7 +366,13 @@ async function dispatch(req) {
       };
     }
 
-    // ── 화면 조작(ui_command — back/클라이언트 왕복, P3 에서 클라이언트 구현) ──
+    // 접속 중인 UI 화면(기기) 목록 — 기기 타겟팅(--on) 재료. executor=활성 기기 표기.
+    case 'ui.devices': {
+      const res = await backFetch('GET', '/api/daemon/ui/clients');
+      return { devices: (res && res.clients) || [] };
+    }
+
+    // ── 화면 조작(ui_command — back/클라이언트 왕복) — 기기-타겟 라우팅 ──
     case 'ui.wsSelect':
     case 'ui.wsClose':
     case 'ui.layoutTree':
@@ -365,15 +393,16 @@ async function dispatch(req) {
     case 'ui.ideCloseFile':
     case 'ui.ideList': {
       const uiCmd = cmd.slice(3, 4).toLowerCase() + cmd.slice(4); // ui.layoutTree → layoutTree
-      // 조회/기기-로컬 UI 는 "지금 보고 있는" 기기 1곳(executor)에서만 실행·회신. 나머지는 broadcast.
-      const EXECUTOR_ONLY = new Set(['ui.layoutTree', 'ui.ideList', 'ui.previewInfo', 'ui.previewDevtools']);
-      const mode = EXECUTOR_ONLY.has(cmd) ? 'executor' : 'broadcast';
-      return sendUiCommand(uiCmd, { ...args, ws: resolved.cwdRel }, { mode, timeoutMs: args.timeoutMs });
+      // 기기-타겟 라우팅: 화면 조작/조회는 "사용자가 보고 있는 활성 기기" 1곳에서만 실행·회신.
+      //  --on <기기> 지정 시 그 기기 1곳. (구 broadcast '전 기기 오픈' 모델 폐기 — 표면은 한 기기에만.)
+      const target = await resolveTargetDevice(args.on);
+      return sendUiCommand(uiCmd, { ...args, ws: resolved.cwdRel }, { mode: 'target', target, timeoutMs: args.timeoutMs });
     }
-    // 브라우저 자동화 — executor 1곳 단독 실행(P4 에서 클라이언트 구현).
+    // 브라우저 자동화 — 활성(또는 --on 지정) 기기 1곳 단독 실행.
     default: {
       if (cmd.startsWith('browser.')) {
-        return sendUiCommand(cmd, { ...args, ws: resolved.cwdRel }, { mode: 'executor', timeoutMs: args.timeoutMs });
+        const target = await resolveTargetDevice(args.on);
+        return sendUiCommand(cmd, { ...args, ws: resolved.cwdRel }, { mode: 'target', target, timeoutMs: args.timeoutMs });
       }
       // 훅(P5): claude/codex 훅이 응답 요약과 함께 호출 — notify 경로 재사용.
       if (cmd === 'hook.event') {
@@ -411,6 +440,7 @@ const CAPABILITIES = [
   'ws.list', 'ws.create', 'ws.clone',
   'notify', 'notification.list', 'notification.readAll',
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
+  'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo',
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList',

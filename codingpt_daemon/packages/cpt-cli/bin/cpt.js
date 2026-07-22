@@ -88,6 +88,9 @@ function sockPath() {
 }
 
 // 소켓 요청(one-shot) — 응답 한 줄 수신 후 종료.
+// 전역 --on <기기> — 화면 조작/브라우저 명령을 지정 기기로 라우팅(미지정=활성 기기). run() 에서 채움.
+let GLOBAL_ON = null;
+
 function request(cmd, args, { timeoutMs = 65000 } = {}) {
   return new Promise((resolve, reject) => {
     const tmuxInfo = tmuxSelf();
@@ -96,6 +99,10 @@ function request(cmd, args, { timeoutMs = 65000 } = {}) {
       ws: resolveWs(tmuxInfo),
       tmux: tmuxInfo || undefined,
     };
+    // --on 은 ui.*/browser.* 계열에만 의미 있음(기기 타겟팅) — 데몬 dispatch 가 args.on 으로 해석.
+    if (GLOBAL_ON && (cmd.startsWith('ui.') || cmd.startsWith('browser.'))) {
+      args = { ...(args || {}), on: GLOBAL_ON };
+    }
     const sock = sockPath();
     const conn = net.createConnection(sock);
     let buf = '';
@@ -144,6 +151,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 
 명령:
   identify                              내 좌표(워크스페이스/터미널) 확인
+  devices                               접속 중인 화면(기기) 목록 (● = 지금 활성 기기)
   capabilities                          지원 명령 목록
   ping
 
@@ -162,8 +170,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   ws clone <git-url> [--name <이름>]    GitHub 레포 클론
   ws select <id>                        전 기기에서 이 워크스페이스로 전환
 
-  # 화면 배치 (접속 중인 모든 기기에 반영)
-  layout tree                           현재 레이아웃 트리(최근 활동 기기 기준)
+  # 화면 배치 (사용자가 보고 있는 활성 기기에 반영 — --on <기기> 로 특정 기기 지정)
+  layout tree                           현재 레이아웃 트리(활성 기기 기준)
   layout split <left|right|up|down> [--type terminal|preview|ide] [--url <u>] [--path <p>]
   layout focus <paneId>                 pane 포커스
   layout close <paneId>                 pane/surface 닫기
@@ -202,7 +210,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
   skills get cpt-cli                    버전 일치 전체 가이드 출력(태스크 중심)
 
-옵션: --json (원본 JSON 출력), --sid <표면id> (특정 프리뷰/IDE 대상 지정)
+옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
+      --sid <표면id> (특정 프리뷰/IDE 대상 지정)
 
 환경: CPT_WS(워크스페이스), CPT_SOCK(소켓 경로), TMUX_PANE(자동)
 `;
@@ -214,6 +223,9 @@ async function main() {
 
   if (!c1 || c1 === 'help' || flags.help) { process.stdout.write(HELP); return; }
 
+  // 전역 --on <기기> — 이후 ui.*/browser.* 요청에 자동 동봉(기기 타겟팅).
+  GLOBAL_ON = typeof flags.on === 'string' ? flags.on : null;
+
   // 위치 인자에서 "터미널 인덱스(숫자)" 선택적 소비.
   const takeIdx = (arr) => (arr.length && /^\d+$/.test(arr[0]) ? { index: parseInt(arr.shift(), 10) } : {});
 
@@ -221,6 +233,14 @@ async function main() {
     switch (c1) {
       case 'ping': return out(await request('ping', {}), flags, 'pong');
       case 'capabilities': return printJson(await request('capabilities', {}));
+      case 'devices': {
+        // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
+        const r = await request('ui.devices', {});
+        const arr = (r && r.devices) || [];
+        return out(r, flags, arr.map((d) =>
+          `${d.executor ? '●' : '○'} ${d.deviceName || '(이름없음)'} (${d.kind}${d.foreground ? '' : ', bg'})${d.deviceId != null ? ` [#${d.deviceId}]` : ''}`
+        ).join('\n') || '(접속된 화면 없음)');
+      }
       case 'identify': {
         const r = await request('identify', {});
         return out(r, flags, `workspace: ${r.ws || '(홈)'}\nterminal: ${r.windowIndex != null ? r.windowIndex : '-'} (${r.windowId || '-'})\nrunner: ${r.runner}`);
