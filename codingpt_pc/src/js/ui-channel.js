@@ -658,6 +658,83 @@ export async function listUiDevices() {
   } catch (_) { return []; }
 }
 
+// ── PC 저장 스냅샷 모델 ──────────────────────────────────────────────
+//  올리기 = 현재 프리뷰 캡처 → 이 PC(워크스페이스)에 파일 저장. 홈서버 미사용(쿠키=자격증명 PC 한정).
+//   <ws>/.codingpt/snapshots/index.json + <id>.json,  <ws>/.codingpt/.gitignore="*"(커밋 방지)
+const SNAP_MAX = 20;
+const snapDir = (wsLocal) => String(wsLocal).replace(/\/+$/, "") + "/.codingpt/snapshots";
+function snapLabel(url) {
+  if (!url) return "프리뷰";
+  const m = /^:(\d+)(.*)$/.exec(url);
+  if (m) return ":" + m[1] + (m[2] ? m[2].split(/[?#]/)[0] : "");
+  return String(url).replace(/^https?:\/\//, "").slice(0, 40);
+}
+async function snapReadIndex(wsLocal) {
+  try { const s = await api.fsRead(snapDir(wsLocal) + "/index.json"); const a = JSON.parse(s || "[]"); return Array.isArray(a) ? a : []; }
+  catch (_) { return []; }
+}
+
+// 올리기 — 활성 프리뷰 캡처 → PC 워크스페이스에 스냅샷 저장.
+export async function saveSnapshotPC() {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  const rt = S.ensureRuntime(meta.id);
+  const tgt = findPreviewTarget(rt);
+  if (!tgt) return { ok: false, error: "저장할 프리뷰가 없어요" };
+  if (tgt.tab && !tgt.tab.tid) return { ok: false, error: "프리뷰가 아직 로드되지 않았어요" };
+  const pvId = tgt.tab ? "pv-" + tgt.tab.tid : "pv-" + (tgt.leaf.tid || tgt.leaf.id);
+  let manifest;
+  try { manifest = await captureManifestPC(pvId); } catch (e) { return { ok: false, error: (e && e.message) || "캡처 실패" }; }
+  try {
+    const root = String(meta.localPath).replace(/\/+$/, "");
+    await api.fsMkdir(snapDir(meta.localPath));
+    try { await api.fsWrite(root + "/.codingpt/.gitignore", "*\n"); } catch (_) { /* gitignore 실패 무시 */ }
+    const id = String(Date.now()) + "-" + Math.floor(Math.random() * 1e6).toString(36);
+    const url = manifest.externalUrl || (manifest.logical ? ":" + manifest.logical.port + (manifest.logical.path || "") : "");
+    const m = { id, label: snapLabel(url), createdAt: Date.now(), device: state.daemon?.device_name || "PC", url };
+    await api.fsWrite(snapDir(meta.localPath) + "/" + id + ".json", JSON.stringify({ ...m, manifest }));
+    let list = [m, ...(await snapReadIndex(meta.localPath)).filter((s) => s.id !== id)];
+    const pruned = list.slice(SNAP_MAX); list = list.slice(0, SNAP_MAX);
+    for (const p of pruned) { try { await api.fsDelete(snapDir(meta.localPath) + "/" + p.id + ".json"); } catch (_) { /* noop */ } }
+    await api.fsWrite(snapDir(meta.localPath) + "/index.json", JSON.stringify(list));
+    return { ok: true, label: m.label };
+  } catch (e) { return { ok: false, error: (e && e.message) || "저장 실패" }; }
+}
+
+// dev 열기 — 활성 워크스페이스의 리스닝 포트를 감지해 활성 프리뷰를 그 포트로 이동.
+export async function openDevPortPC() {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  let ports = [];
+  try { ports = (await api.listenPorts(meta.localPath)) || []; } catch (_) { ports = []; }
+  if (!ports.length) return { ok: false, error: "감지된 dev 포트가 없어요" };
+  const rt = S.ensureRuntime(meta.id);
+  const target = findPreviewTarget(rt);
+  if (!target) return { ok: false, error: "프리뷰 없음" };
+  navigatePreview(target, "http://localhost:" + ports[0]);
+  return { ok: true, port: ports[0] };
+}
+
+// 스냅샷 목록(내려받기 시트용).
+export async function listSnapshotsPC() {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return [];
+  return snapReadIndex(meta.localPath);
+}
+
+// 내려받기 — 선택한 스냅샷을 활성 프리뷰로 복원.
+export async function applySnapshotPC(id) {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  const rt = S.ensureRuntime(meta.id);
+  let manifest;
+  try { const s = await api.fsRead(snapDir(meta.localPath) + "/" + id + ".json"); manifest = JSON.parse(s || "{}").manifest; }
+  catch (_) { return { ok: false, error: "스냅샷 로드 실패" }; }
+  if (!manifest) return { ok: false, error: "스냅샷 없음" };
+  try { await restoreManifestPC(rt, manifest); return { ok: true }; }
+  catch (e) { return { ok: false, error: (e && e.message) || "복원 실패" }; }
+}
+
 const PANE_TYPES = ["terminal", "ide", "preview"];
 
 // 명령 → 핸들러. 반환 객체가 ui_result 프레임에 그대로 병합된다({ok, ...}).

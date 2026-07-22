@@ -129,6 +129,39 @@ export function smartUrl(raw) {
   return "https://www.google.com/search?q=" + encodeURIComponent(u);
 }
 
+// 빈 프리뷰(검색 전) 상태 — dev 열기 + 내려받기(이어하기). 웹뷰 생성 전에만 보인다.
+function fillPreviewEmpty(host) {
+  host.innerHTML = "";
+  const box = document.createElement("div");
+  box.className = "preview-empty";
+  const msg = document.createElement("div");
+  msg.className = "preview-empty-msg";
+  msg.textContent = "URL 또는 데브서버 포트를 입력하세요";
+  const row = document.createElement("div");
+  row.className = "preview-empty-row";
+  const mkb = (label, handler) => {
+    const b = document.createElement("button");
+    b.className = "preview-empty-btn";
+    b.textContent = label;
+    b.addEventListener("click", handler);
+    return b;
+  };
+  row.append(
+    mkb("dev 열기", async () => {
+      try {
+        const [uic, wv] = await Promise.all([import("./ui-channel.js"), import("./workspace-view.js")]);
+        const r = await uic.openDevPortPC();
+        if (!r.ok) wv.wvToast(r.error || "dev 포트 없음");
+      } catch (_) { /* noop */ }
+    }),
+    mkb("내려받기 (이어하기)", async () => {
+      try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
+    }),
+  );
+  box.append(msg, row);
+  host.append(box);
+}
+
 function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
   const bar = document.createElement("div");
   bar.className = "preview-bar";
@@ -146,51 +179,61 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   input.className = "preview-url";
   input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
   input.value = initialUrl || "";
-  const theme = mk(icons.sun, "페이지 다크 모드");
-  const tools = mk(icons.tools, "개발자 도구");
-  const sendTo = mk(icons.handoffOut, "다른 기기로 보내기(세션·쿠키 포함)");
-  const ext = mk(icons.external, "외부 브라우저에서 열기");
-  bar.append(back, fwd, reload, input, theme, tools, sendTo, ext);
-  sendTo.addEventListener("click", async () => {
-    if (!st.url) return;
-    try {
-      const [wv, S] = await Promise.all([import("./workspace-view.js"), import("./state.js")]);
-      await wv.pickDeviceAndPush(S.deviceKey());
-    } catch (_) { /* 무시 */ }
-  });
+  // 테마·개발자도구·올리기·외부열기 → ⋯ 메뉴 하나로 통합.
+  const more = mk(icons.dots, "더보기");
+  bar.append(back, fwd, reload, input, more);
 
   const st = { url: initialUrl || "", dark: !!initialDark, disposed: false, meta: { title: "", favicon: "" } };
-  theme.classList.toggle("active", st.dark);
   const setNavState = (b, f) => { back.disabled = !b; fwd.disabled = !f; };
   setNavState(false, false);
   back.addEventListener("click", () => api.previewControl(getId(), "back").catch(() => {}));
   fwd.addEventListener("click", () => api.previewControl(getId(), "forward").catch(() => {}));
   reload.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "reload").catch(() => {}); });
-  theme.addEventListener("click", () => {
+
+  // 메뉴 액션들 —
+  const doTheme = () => {
     if (!st.url) return;
     st.dark = !st.dark;
-    theme.classList.toggle("active", st.dark);
     api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
     onDarkChange?.(st.dark);
-  });
-  tools.title = "개발자 도구 (⌥클릭=네이티브 인스펙터)";
-  tools.addEventListener("click", (e) => {
+  };
+  const doTools = (alt) => {
     if (!st.url) return;
-    // 기본 = 모바일과 동일한 Chrome DevTools(chii). ⌥클릭 = 기존 네이티브 WebKit 인스펙터(고급).
-    if (!e.altKey && getHost) {
-      toggleChiiDevtools(getId(), getHost()).then((on) => tools.classList.toggle("active", !!on)).catch(() => {});
-      return;
-    }
+    if (!alt && getHost) { toggleChiiDevtools(getId(), getHost()).catch(() => {}); return; }
     api.previewControl(getId(), "devtools").catch(() => {});
-    // 좁은 pane(사이드 도킹 최소폭 = 인스펙터 500 + 페이지 320 미달)은 폭 조절이 잠기므로
-    //  인스펙터 로드를 기다렸다 하단 도킹으로 자동 전환(이미 하단/미로드면 no-op).
     if (bar.getBoundingClientRect().width < 840) {
       setTimeout(() => api.previewControl(getId(), "devtools_fit").catch(() => {}), 900);
       setTimeout(() => api.previewControl(getId(), "devtools_fit").catch(() => {}), 2200);
     }
+  };
+  const doExt = () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); };
+  const doSave = async () => { try { const wv = await import("./workspace-view.js"); await wv.saveSnapshotAndToast(); } catch (_) { /* noop */ } };
+
+  more.addEventListener("click", () => {
+    document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+    if (!st.url) return;
+    const menu = document.createElement("div");
+    menu.className = "pv-menu";
+    const item = (label, active, onClick) => {
+      const b = document.createElement("button");
+      b.className = "pv-menu-item" + (active ? " active" : "");
+      b.textContent = label;
+      b.addEventListener("click", () => { menu.remove(); onClick(); });
+      return b;
+    };
+    menu.append(
+      item(st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", st.dark, doTheme),
+      item("개발자 도구", false, () => doTools(false)),
+      item("올리기 (스냅샷 저장)", false, doSave),
+      item("외부 브라우저에서 열기", false, doExt),
+    );
+    const r = more.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + "px";
+    menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
+    document.body.append(menu);
+    const closer = (e) => { if (!menu.contains(e.target) && e.target !== more) { menu.remove(); document.removeEventListener("mousedown", closer, true); } };
+    setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
   });
-  // 원격 프록시로 보는 중이면 외부 브라우저에는 실제(프록시) URL — localhost 는 이 기기가 아님.
-  ext.addEventListener("click", () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
     const u = smartUrl(input.value);
@@ -276,7 +319,7 @@ class PreviewSurface {
     });
     this.host = document.createElement("div");
     this.host.className = "preview-host";
-    this.host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
+    fillPreviewEmpty(this.host);
     parent.append(this.bar.el, this.host);
     this._visible = false;
     this._key = "";
@@ -580,7 +623,7 @@ export class PaneView {
     });
     const host = document.createElement("div");
     host.className = "preview-host";
-    host.innerHTML = `<div class="preview-empty">URL 또는 검색어를 입력하세요</div>`;
+    fillPreviewEmpty(host);
     this.previewHost = host;
     this.previewUrl = this.node.url || "";
     // webview 로드용 실효 URL(원격이면 프록시로 치환) — 복원된 URL 도 즉시 매핑.

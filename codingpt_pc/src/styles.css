@@ -898,3 +898,27 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 }
 .wv-sheet-row:hover { background: var(--elevated2); }
 .wv-sheet-row svg { flex: none; opacity: 0.85; }
+
+/* ── 빈 프리뷰(dev 열기 / 내려받기) ── */
+.preview-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; height: 100%; }
+.preview-empty-msg { color: var(--dim, #8a93a6); font-size: 12.5px; }
+.preview-empty-row { display: flex; gap: 8px; }
+.preview-empty-btn {
+  display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px;
+  background: var(--elevated2); color: var(--text2, var(--text)); border: 1px solid var(--border-ctrl);
+  border-radius: 9px; font-size: 12.5px; cursor: pointer;
+}
+.preview-empty-btn:hover { background: var(--elevated); border-color: var(--accent); }
+
+/* ── 프리뷰 ⋯ 오버플로 메뉴 ── */
+.pv-menu {
+  position: fixed; z-index: 9002; min-width: 180px; padding: 5px;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.38);
+}
+.pv-menu-item {
+  display: block; width: 100%; text-align: left; padding: 8px 10px; border: none;
+  background: transparent; color: var(--text); border-radius: 7px; font-size: 13px; cursor: pointer;
+}
+.pv-menu-item:hover { background: var(--elevated2); }
+.pv-menu-item.active { color: var(--accent); }

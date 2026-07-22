@@ -19,32 +19,39 @@ export function wvToast(msg) {
   setTimeout(() => { d.classList.remove("show"); setTimeout(() => d.remove(), 220); }, 2800);
 }
 
-// 보내기 대상 기기 선택 시트 — 자기(clientKey) 제외·온라인만. 선택 시 pushPreviewSession.
-export async function pickDeviceAndPush(selfClientKey) {
+// 올리기 — 현재 프리뷰를 이 PC 워크스페이스에 스냅샷 저장.
+export async function saveSnapshotAndToast() {
   const m = await import("./ui-channel.js");
-  const devices = (await m.listUiDevices()).filter((d) => d.clientKey !== selfClientKey);
-  if (!devices.length) { wvToast("보낼 다른 기기가 없어요"); return; }
+  wvToast("저장 중…");
+  const r = await m.saveSnapshotPC();
+  wvToast(r.ok ? ("스냅샷 저장됨" + (r.label ? " · " + r.label : "")) : (r.error || "저장 실패"));
+}
+
+// 내려받기 — PC 저장 스냅샷 목록 시트에서 선택해 활성 프리뷰로 복원.
+export async function pickSnapshotAndApply() {
+  const m = await import("./ui-channel.js");
+  const list = await m.listSnapshotsPC();
+  if (!list.length) { wvToast("저장된 스냅샷이 없어요 — 다른 기기에서 올리기로 저장해 보세요"); return; }
   const overlay = document.createElement("div");
   overlay.className = "wv-sheet-overlay";
   const sheet = document.createElement("div");
   sheet.className = "wv-sheet";
   const title = document.createElement("div");
   title.className = "wv-sheet-title";
-  title.textContent = "어느 기기로 보낼까요?";
+  title.textContent = "이어할 스냅샷 선택";
   sheet.append(title);
   const close = () => overlay.remove();
-  for (const dev of devices) {
+  const fmt = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  for (const s of list.slice(0, 12)) {
     const row = document.createElement("button");
     row.className = "wv-sheet-row";
-    const label = dev.deviceName || (dev.kind === "pc" ? "PC" : "모바일");
-    row.innerHTML = (dev.kind === "pc" ? icons.monitor({ size: 16 }) : icons.smartphone({ size: 16 })) +
-      '<span>' + label + (dev.executor ? " · 활성" : "") + '</span>';
+    row.innerHTML = icons.globe({ size: 16 }) +
+      '<span>' + (s.label || "프리뷰") + '<small style="opacity:.6"> · ' + (s.device || "") + " " + fmt(s.createdAt) + '</small></span>';
     row.addEventListener("click", async () => {
       close();
-      const target = dev.deviceId != null ? { deviceId: dev.deviceId } : { clientKey: dev.clientKey };
-      wvToast("보내는 중…");
-      const r = await m.pushPreviewSession(target);
-      wvToast(r.ok ? (label + "로 보냈어요") : (r.error || "보내기 실패"));
+      wvToast("불러오는 중…");
+      const r = await m.applySnapshotPC(s.id);
+      if (!r.ok) wvToast(r.error || "복원 실패");
     });
     sheet.append(row);
   }
@@ -500,25 +507,10 @@ function renderMainTop(ws) {
       b.addEventListener("click", () => smartAdd(kind));
       return b;
     };
-    // 이어받기 — 다른 기기의 프리뷰(로그인 세션·쿠키 포함)를 이 기기로. 프리뷰가 없어도 접근 가능.
-    const pull = document.createElement("button");
-    pull.className = "pane-ctrl";
-    pull.title = "다른 기기 화면 이어받기";
-    pull.innerHTML = icons.handoffIn({ size: 16 });
-    pull.addEventListener("click", async () => {
-      pull.disabled = true;
-      try {
-        const m = await import("./ui-channel.js");
-        const r = await m.pullPreviewSession();
-        wvToast(r.ok ? ("이어받았어요" + (r.from?.deviceName ? " · " + r.from.deviceName : "")) : (r.error || "이어받기 실패"));
-      } catch (e) { wvToast(String((e && e.message) || e)); }
-      finally { pull.disabled = false; }
-    });
     adds.append(
       mkBtn(icons.terminal, "터미널 추가", "terminal"),
       mkBtn(icons.code, "IDE 추가", "ide"),
       mkBtn(icons.globe, "웹뷰 추가", "preview"),
-      pull,
     );
     mainTop.append(spacer, adds);
   }
