@@ -32,6 +32,20 @@ export async function pickSnapshotAndApply() {
   const m = await import("./ui-channel.js");
   const list = await m.listSnapshotsPC();
   if (!list.length) { wvToast("저장된 스냅샷이 없어요 — 다른 기기에서 올리기로 저장해 보세요"); return; }
+  const fmt = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+  const applyOne = async (id) => { wvToast("불러오는 중…"); const r = await m.applySnapshotPC(id); if (!r.ok) wvToast(r.error || "복원 실패"); };
+  // 네이티브 메뉴(웹뷰 위) 우선 — 실패 시 DOM 시트 폴백.
+  try {
+    const menuApi = window.__TAURI__ && window.__TAURI__.menu;
+    if (!menuApi || !menuApi.Menu) throw new Error("no native menu");
+    const items = list.slice(0, 12).map((s) => ({
+      text: (s.label || "프리뷰") + "  ·  " + (s.device || "") + " " + fmt(s.createdAt),
+      action: () => { applyOne(s.id); },
+    }));
+    const menu = await menuApi.Menu.new({ items });
+    await menu.popup();
+    return;
+  } catch (_) { /* DOM 폴백 */ }
   const overlay = document.createElement("div");
   overlay.className = "wv-sheet-overlay";
   const sheet = document.createElement("div");
@@ -41,7 +55,6 @@ export async function pickSnapshotAndApply() {
   title.textContent = "이어할 스냅샷 선택";
   sheet.append(title);
   const close = () => overlay.remove();
-  const fmt = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
   for (const s of list.slice(0, 12)) {
     const row = document.createElement("button");
     row.className = "wv-sheet-row";
@@ -49,9 +62,7 @@ export async function pickSnapshotAndApply() {
       '<span>' + (s.label || "프리뷰") + '<small style="opacity:.6"> · ' + (s.device || "") + " " + fmt(s.createdAt) + '</small></span>';
     row.addEventListener("click", async () => {
       close();
-      wvToast("불러오는 중…");
-      const r = await m.applySnapshotPC(s.id);
-      if (!r.ok) wvToast(r.error || "복원 실패");
+      await applyOne(s.id);
     });
     sheet.append(row);
   }

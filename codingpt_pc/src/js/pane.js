@@ -209,9 +209,9 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   const doExt = () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); };
   const doSave = async () => { try { const wv = await import("./workspace-view.js"); await wv.saveSnapshotAndToast(); } catch (_) { /* noop */ } };
 
-  more.addEventListener("click", () => {
+  // DOM 폴백 메뉴 — 네이티브 메뉴가 안 될 때만. (네이티브 웹뷰 뒤에 뜨므로 rAF 가 프리뷰를 잠깐 숨김)
+  const openDomMenu = () => {
     document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
-    if (!st.url) return;
     const menu = document.createElement("div");
     menu.className = "pv-menu";
     const item = (label, active, onClick) => {
@@ -233,6 +233,26 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
     document.body.append(menu);
     const closer = (e) => { if (!menu.contains(e.target) && e.target !== more) { menu.remove(); document.removeEventListener("mousedown", closer, true); } };
     setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  };
+
+  more.addEventListener("click", async () => {
+    if (!st.url) return;
+    // 네이티브 메뉴(NSMenu) — 웹뷰를 안 숨기고 그 위에 뜬다(네이티브가 DOM 위에 합성됨).
+    try {
+      const menuApi = window.__TAURI__ && window.__TAURI__.menu;
+      if (!menuApi || !menuApi.Menu) throw new Error("no native menu");
+      const menu = await menuApi.Menu.new({
+        items: [
+          { text: st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", action: () => doTheme() },
+          { text: "개발자 도구", action: () => doTools(false) },
+          { text: "올리기 (스냅샷 저장)", action: () => { doSave(); } },
+          { text: "외부 브라우저에서 열기", action: () => doExt() },
+        ],
+      });
+      await menu.popup();
+    } catch (_) {
+      openDomMenu(); // 네이티브 실패 시 DOM 폴백(웹뷰 숨김 경유)
+    }
   });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;
