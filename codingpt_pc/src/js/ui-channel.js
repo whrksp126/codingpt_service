@@ -517,10 +517,19 @@ async function captureManifestPC(pvId) {
     "return {local:l,session:s};})())";
   let storage = { local: {}, session: {} };
   try { storage = JSON.parse(await api.previewEval(pvId, storeJs)); } catch (_) { /* 빈 storage */ }
+  // 캡처 대상 호스트 — WKHTTPCookieStore 는 전역(모든 사이트) 쿠키를 주므로 이 프리뷰 오리진 것만 남긴다.
+  let pageHost = "";
+  try { pageHost = new URL(rawUrl).hostname.toLowerCase(); } catch (_) {}
+  const cookieMatchesHost = (c) => {
+    if (!pageHost) return true;
+    const d = String(c.domain || "").replace(/^\./, "").toLowerCase();
+    if (!d) return true;
+    return pageHost === d || pageHost.endsWith("." + d);
+  };
   // 쿠키 — 네이티브(httpOnly 포함). 실패 시 document.cookie 폴백(비-httpOnly 만, partial).
   let cookies = [], partial = false;
   try {
-    cookies = JSON.parse(await api.previewCookies(pvId));
+    cookies = JSON.parse(await api.previewCookies(pvId)).filter(cookieMatchesHost);
   } catch (_) {
     partial = true;
     try {
