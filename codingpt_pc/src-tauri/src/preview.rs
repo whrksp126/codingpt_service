@@ -56,7 +56,7 @@ mod ns {
 #[cfg(target_os = "macos")]
 static PUNCH_SHIELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 #[cfg(target_os = "macos")]
-static PUNCH_SUPER: AtomicUsize = AtomicUsize::new(0); // contentView 원 클래스(&'static AnyClass)
+static PUNCH_ORIG_HITTEST: AtomicUsize = AtomicUsize::new(0); // 스위즐 전 원본 hitTest IMP
 #[cfg(target_os = "macos")]
 static CONTAINERS: Mutex<Vec<usize>> = Mutex::new(Vec::new()); // 살아있는 프리뷰 컨테이너 NSView 들
 
@@ -95,20 +95,29 @@ pub fn window_set_bg(app: AppHandle, hex: String) -> Result<(), String> {
 }
 
 // contentView hitTest 오버라이드 본체 — 프리뷰 컨테이너 rect 안이면 프리뷰(아래층)로 라우팅.
+//  ⚠️ isa-swizzle(클래스 교체) 금지 — tao 의 뷰 메서드(drawRect 등)가 superclass 를 동적으로
+//  계산해([self class].superclass) 무한 재귀 → 스택 오버플로우 크래시(0.1.71 실측). 대신
+//  클래스의 hitTest IMP 만 교체(메서드 스위즐)하고 원본 IMP 를 직접 호출한다([self class] 불변).
 #[cfg(target_os = "macos")]
 unsafe extern "C-unwind" fn punch_hit_test(
     this: *mut objc2::runtime::AnyObject,
-    _cmd: objc2::runtime::Sel,
+    cmd: objc2::runtime::Sel,
     point: ns::Point,
 ) -> *mut objc2::runtime::AnyObject {
     use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject};
+    use objc2::runtime::AnyObject;
     if !PUNCH_SHIELD.load(std::sync::atomic::Ordering::Relaxed) {
+        // 같은 클래스의 다른 창(dt-* 등) contentView 에도 스위즐이 적용되므로 창 일치 필수.
+        let this_win: *mut AnyObject = msg_send![&*this, window];
         let sv: *mut AnyObject = msg_send![&*this, superview];
         let p_self: ns::Point = if sv.is_null() { point } else { msg_send![&*this, convertPoint: point, fromView: sv] };
         let conts: Vec<usize> = CONTAINERS.lock().map(|v| v.clone()).unwrap_or_default();
         for c in conts {
             let cont = c as *mut AnyObject;
+            let cw: *mut AnyObject = msg_send![&*cont, window];
+            if cw.is_null() || cw != this_win {
+                continue;
+            }
             let fr: ns::Rect = msg_send![&*cont, frame];
             if p_self.x >= fr.origin.x && p_self.x <= fr.origin.x + fr.size.w
                 && p_self.y >= fr.origin.y && p_self.y <= fr.origin.y + fr.size.h
@@ -120,22 +129,25 @@ unsafe extern "C-unwind" fn punch_hit_test(
             }
         }
     }
-    let sup = PUNCH_SUPER.load(Ordering::Relaxed) as *const AnyClass;
-    if sup.is_null() {
+    // 원본 IMP 직접 호출(수퍼 디스패치 아님 — 재귀 위험 0).
+    let orig = PUNCH_ORIG_HITTEST.load(Ordering::Relaxed);
+    if orig == 0 {
         return std::ptr::null_mut();
     }
-    msg_send![super(&*this, &*sup), hitTest: point]
+    let f: unsafe extern "C-unwind" fn(*mut objc2::runtime::AnyObject, objc2::runtime::Sel, ns::Point) -> *mut objc2::runtime::AnyObject =
+        std::mem::transmute(orig);
+    f(this, cmd, point)
 }
 
-// punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 를 hitTest
-//  오버라이드 서브클래스로 교체(isa-swizzle). 프리뷰 컨테이너는 wrap_in_container 가 아래층 삽입.
+// punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
+//  hitTest IMP 교체(메서드 스위즐). 프리뷰 컨테이너는 wrap_in_container 가 아래층 삽입.
 pub fn install_punch_through(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     {
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || unsafe {
             use objc2::msg_send;
-            use objc2::runtime::{AnyClass, AnyObject, ClassBuilder};
+            use objc2::runtime::{AnyClass, AnyObject};
             let Some(window) = app2.get_window("main") else { return };
             // ① 앱 UI 웹뷰 투명화 — DOM 이 투명한 곳(프리뷰 슬롯)은 아래층 프리뷰가 비친다.
             for wv in window.webviews() {
@@ -148,26 +160,36 @@ pub fn install_punch_through(app: &AppHandle) {
                     });
                 }
             }
-            // ② contentView hitTest 오버라이드 설치.
+            // ② contentView 클래스 hitTest 스위즐(1회).
+            if PUNCH_ORIG_HITTEST.load(Ordering::SeqCst) != 0 {
+                return; // 이미 설치됨
+            }
             let Ok(nsw_ptr) = window.ns_window() else { return };
             let nsw = nsw_ptr as *mut AnyObject;
             let content: *mut AnyObject = msg_send![&*nsw, contentView];
             if content.is_null() { return; }
-            let orig: &AnyClass = msg_send![&*content, class];
-            PUNCH_SUPER.store(orig as *const AnyClass as usize, Ordering::SeqCst);
-            let name = std::ffi::CString::new("CptPunchContentView").unwrap();
-            let cls: &'static AnyClass = if let Some(existing) = AnyClass::get(&name) {
-                existing
-            } else if let Some(mut b) = ClassBuilder::new(&name, orig) {
-                b.add_method(
-                    objc2::sel!(hitTest:),
-                    punch_hit_test as unsafe extern "C-unwind" fn(_, _, _) -> _,
-                );
-                b.register()
-            } else {
-                return;
-            };
-            let _ = AnyObject::set_class(&*content, cls);
+            let cls: &AnyClass = msg_send![&*content, class];
+            let sel = objc2::sel!(hitTest:);
+            let new_imp: objc2::runtime::Imp = std::mem::transmute(
+                punch_hit_test as unsafe extern "C-unwind" fn(_, _, _) -> _,
+            );
+            let m = objc2::ffi::class_getInstanceMethod(cls as *const AnyClass, sel);
+            if m.is_null() { return; }
+            let Some(orig_imp) = objc2::ffi::method_getImplementation(m) else { return };
+            // 클래스가 hitTest 를 직접 구현하지 않았으면(상속) addMethod 로 이 클래스에만 추가 —
+            //  상속 원본(NSView)의 IMP 를 건드리면 프로세스 전체 NSView 가 오염된다.
+            let types = std::ffi::CString::new("@@:{CGPoint=dd}").unwrap();
+            let added = objc2::ffi::class_addMethod(
+                cls as *const AnyClass as *mut AnyClass,
+                sel,
+                new_imp,
+                types.as_ptr(),
+            );
+            if !added.as_bool() {
+                // 클래스 자체 구현 존재 → 그 메서드의 IMP 만 교체.
+                let _ = objc2::ffi::method_setImplementation(m, new_imp);
+            }
+            PUNCH_ORIG_HITTEST.store(orig_imp as usize, Ordering::SeqCst);
         });
     }
     #[cfg(not(target_os = "macos"))]
