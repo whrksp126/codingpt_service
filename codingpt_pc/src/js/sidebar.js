@@ -5,7 +5,7 @@ import * as T from "./tiling.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
-import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
+import { renderNotifPanel, jumpLatestUnread, readNotif } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 
 let el = null;
@@ -88,7 +88,29 @@ export function toggleLatestUnread() {
   jumpLatestUnread((n) => jumpToNotification(n));
 }
 
+// 알림 목록을 네이티브 메뉴 항목으로.
+function notifMenuSpec() {
+  if (!state.notifications.length) return [{ text: "알림이 없습니다", enabled: false }];
+  const oneLine = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 48);
+  const spec = [
+    { text: "모두 읽음", action: () => S.markAllRead() },
+    { separator: true },
+  ];
+  for (const n of state.notifications.slice(0, 30)) {
+    const ws = state.workspaces.find((x) => x.id === (n.workspaceId ?? n.wsId));
+    const wsName = n.wsName || ws?.name || "";
+    const label = (n.read ? "" : "● ") + oneLine(n.title) + (wsName ? " · " + oneLine(wsName) : "");
+    spec.push({ text: label || "알림", action: () => { readNotif(n); jumpToNotification(n); } });
+  }
+  return spec;
+}
+
 function openNotif() {
+  // 네이티브 메뉴 우선(프리뷰 웹뷰 위에 뜸) → 실패 시 DOM 패널 폴백.
+  popupNativeMenu(notifMenuSpec()).then((ok) => { if (!ok) openNotifDom(); }).catch(() => openNotifDom());
+}
+
+function openNotifDom() {
   notifOpen = true;
   notifPanel.classList.remove("hidden");
   renderNotifPanel(notifPanel, (n) => jumpToNotification(n));
@@ -423,7 +445,72 @@ function closeWsMenu() {
 function onWsMenuOutside(e) { if (wsMenuEl && !wsMenuEl.contains(e.target)) closeWsMenu(); }
 function onWsMenuKey(e) { if (e.key === "Escape") closeWsMenu(); }
 
+// 네이티브 NSMenu 팝업 — items: [{text,action,enabled}|{separator:true}|{text,submenu:[...]}].
+//  네이티브 웹뷰(프리뷰) 위에 합성되므로 DOM 이 가려지지 않는다. 성공 시 true, 미지원 시 false, 실패 시 throw.
+async function popupNativeMenu(items) {
+  const menuApi = window.__TAURI__ && window.__TAURI__.menu;
+  if (!menuApi || !menuApi.Menu) return false;
+  const build = async (specs) => {
+    const out = [];
+    for (const s of specs) {
+      if (!s) continue;
+      if (s.separator) { out.push({ item: "Separator" }); continue; }
+      if (s.submenu) {
+        out.push(await menuApi.Submenu.new({ text: s.text, enabled: s.enabled !== false, items: await build(s.submenu) }));
+        continue;
+      }
+      out.push({ text: s.text, enabled: s.enabled !== false, action: s.action || (() => {}) });
+    }
+    return out;
+  };
+  const menu = await menuApi.Menu.new({ items: await build(items) });
+  await menu.popup();
+  return true;
+}
+
+// 워크스페이스 우클릭 메뉴를 네이티브 항목으로 구성.
+function wsMenuSpec(w) {
+  const pinned = S.wsPinned(w.id);
+  const projKey = w.projectId || w.id;
+  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
+  const colorSub = WS_COLORS.map(([title, c]) => ({
+    text: ((S.wsColor(w.id) || "") === c ? "● " : "") + title,
+    action: () => S.setWsColor(w.id, c),
+  }));
+  const attachCands = [];
+  {
+    const seen = new Set();
+    for (const x of S.sortedWorkspaces()) {
+      const k = x.projectId || x.id;
+      if (k === projKey || seen.has(k)) continue;
+      seen.add(k);
+      attachCands.push({ text: S.wsDisplayName(x), action: async () => { try { await api.projectAttach(w.id, x.id); await S.loadWorkspaces(); } catch (_) {} } });
+    }
+  }
+  const spec = [
+    { text: "이름 변경", action: () => inlineRename(w) },
+    { text: pinned ? "고정 해제" : "고정", action: () => S.togglePinWs(w.id) },
+    { separator: true },
+    { text: "색상", submenu: colorSub },
+    { separator: true },
+    { text: "위로 이동", action: () => S.moveWs(w.id, "up") },
+    { text: "아래로 이동", action: () => S.moveWs(w.id, "down") },
+    { text: "맨 위로 이동", action: () => S.moveWs(w.id, "top") },
+  ];
+  if (hasSibling) {
+    spec.push({ separator: true }, { text: "프로젝트에서 분리", action: async () => { try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
+  } else if (attachCands.length) {
+    spec.push({ separator: true }, { text: "다른 프로젝트와 합치기", submenu: attachCands });
+  }
+  return spec;
+}
+
 function showWsMenu(e, w) {
+  // 네이티브 메뉴 우선(프리뷰 웹뷰 위에 뜸) → 실패 시 DOM 메뉴 폴백.
+  popupNativeMenu(wsMenuSpec(w)).then((ok) => { if (!ok) showWsMenuDom(e, w); }).catch(() => showWsMenuDom(e, w));
+}
+
+function showWsMenuDom(e, w) {
   closeWsMenu();
   const pinned = S.wsPinned(w.id);
   const menu = document.createElement("div");

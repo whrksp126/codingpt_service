@@ -34,6 +34,7 @@ function flashPane(paneId) {
 }
 
 // 알림 1건 읽음 — 낙관 반영 + 서버(숫자 id = 서버 행일 때만. 문자열 id 는 로컬 폴백분).
+export function readNotif(n) { readOne(n); }
 function readOne(n) {
   if (!n.read) {
     n.read = true;

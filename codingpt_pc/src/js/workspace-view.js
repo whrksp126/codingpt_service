@@ -9,8 +9,17 @@ import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 
-// 간단 토스트(핸드오프 결과 등) — 화면 하단 중앙에 2.8s.
+// 간단 토스트(스냅샷 결과 등). 프리뷰(네이티브 웹뷰)가 DOM 위에 합성되므로,
+//  토스트는 네이티브 OS 알림으로 띄워 항상 위에 보이게 한다. 네이티브 실패 시에만 DOM 토스트 폴백.
 export function wvToast(msg) {
+  const text = String(msg);
+  try {
+    const p = api.notify("CodingPT", text);
+    if (p && typeof p.then === "function") { p.catch(() => wvToastDom(text)); return; }
+  } catch (_) { /* 아래 DOM 폴백 */ }
+  wvToastDom(text);
+}
+function wvToastDom(msg) {
   const d = document.createElement("div");
   d.className = "wv-toast";
   d.textContent = String(msg);
@@ -22,7 +31,6 @@ export function wvToast(msg) {
 // 올리기 — 현재 프리뷰를 이 PC 워크스페이스에 스냅샷 저장.
 export async function saveSnapshotAndToast() {
   const m = await import("./ui-channel.js");
-  wvToast("저장 중…");
   const r = await m.saveSnapshotPC();
   wvToast(r.ok ? ("스냅샷 저장됨" + (r.label ? " · " + r.label : "")) : (r.error || "저장 실패"));
 }
