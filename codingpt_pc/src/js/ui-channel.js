@@ -106,6 +106,21 @@ function send(ws, frame) {
   } catch (_) {}
 }
 
+// ── 표면(프리뷰) 생명주기 전파 — "같이 닫힘" ──
+//  open 은 데몬 ui_command 브로드캐스트로 이미 양쪽에 열리지만, UI × 닫기는 로컬이라 전파가 필요하다.
+//  UI 로 프리뷰를 닫으면 back 에 surface_broadcast 를 보내 다른 기기도 previewClose 하게 한다.
+//  _applyingRemoteClose = 다른 기기가 보낸 close 를 이 기기가 실행 중 → 재전파 금지(루프 차단).
+let _applyingRemoteClose = false;
+function broadcastPreviewClose(wsId) {
+  if (!sock || sock.readyState !== 1) return;
+  const meta = state.workspaces.find((w) => w.id === wsId);
+  if (!meta) return;
+  send(sock, { type: "surface_broadcast", cmd: "previewClose", params: { ws: meta.localPath } });
+}
+S.onSurfaceClose((kind, wsId) => {
+  if (kind === "preview" && !_applyingRemoteClose) broadcastPreviewClose(wsId);
+});
+
 // ── 네이티브 창 포커스(Tauri) — present 판정의 진실源 ──
 //  WKWebView 의 DOM window.blur / document.hasFocus() 는 "OS 앱 전환"(예: cmux 로 전환) 시 갱신되지
 //  않는다(실측: 딴 앱에서 작업 중인데 CodingPT 가 present 로 잡혀 폰 푸시가 억제됨 → PC 로만 알림).
@@ -521,7 +536,9 @@ const handlers = {
   closeSurface: async (p) => {
     const { meta, rt } = requireWs(p);
     if (!p.paneId || !T.findLeaf(rt.layout, p.paneId)) throw new Error("pane 없음: " + (p.paneId || ""));
-    S.closePane(meta.id, p.paneId);
+    // 원격에서 온 close 적용 — 프리뷰가 포함돼도 재전파하지 않는다(루프 차단).
+    _applyingRemoteClose = true;
+    try { S.closePane(meta.id, p.paneId); } finally { _applyingRemoteClose = false; }
     return { ok: true };
   },
 
@@ -639,7 +656,9 @@ const handlers = {
     const { meta, rt } = requireWs(p);
     const target = findPreviewTarget(rt);
     if (!target) return { ok: true }; // 없으면 멱등 성공
-    closeSurfaceTarget(meta, target);
+    // 원격에서 온 close 적용 — 이 닫힘은 재전파하지 않는다(루프 차단).
+    _applyingRemoteClose = true;
+    try { closeSurfaceTarget(meta, target); } finally { _applyingRemoteClose = false; }
     return { ok: true };
   },
 

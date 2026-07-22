@@ -47,6 +47,7 @@ function paneCtx(ws) {
       if (isThisHost(ws) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
     },
     onSurfacesChanged: () => {},
+    onSurfaceClosed: (kind) => S.fireSurfaceClose(kind, ws.id),
     onClosePane: (paneId) => S.closePane(state.activeWsId, paneId),
     onMoveTab: (srcId, index, dstId) => moveTab(srcId, index, dstId),
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),

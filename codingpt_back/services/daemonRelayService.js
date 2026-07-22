@@ -501,6 +501,8 @@ const UI_CMD_RATE_LIMIT = 10;                // 유저당 초당 ui_command 상�
 const uiPending = new Map();
 // userId(str) → { windowStart, count }  유저당 1초 창 카운터(간단 rate limit).
 const uiCmdRate = new Map();
+// 클라이언트 발신 표면 전파(surface_broadcast) 의 uiId 시퀀스.
+let surfaceBcastSeq = 0;
 
 // 유저당 초당 UI_CMD_RATE_LIMIT 건 초과 여부(1초 창 카운터).
 function allowUiCommand(userId) {
@@ -645,6 +647,23 @@ function registerAgentWs(ws, userId, client) {
         const active = !!msg.active;
         ws._cptMeta.foreground = active;
         if (active) ws._cptMeta.foregroundAt = Date.now();
+      }
+      return;
+    }
+    if (msg.type === 'surface_broadcast' && typeof msg.cmd === 'string') {
+      // 클라이언트 발신 생명주기 전파 — 한 기기에서 표면(프리뷰/IDE)을 UI 로 닫으면 다른 기기도 같이 닫는다.
+      //  (open 은 데몬 ui_command 브로드캐스트로 이미 양쪽에 열리지만, UI × 닫기는 로컬이라 전파 필요.)
+      //  보낸 기기는 이미 로컬 처리했으므로 제외하고 나머지 UI 클라이언트에 apply-only(executor=false)로 팬아웃.
+      //  루프 방지는 클라이언트가 담당(원격 적용 중엔 재-broadcast 안 함).
+      if (!allowUiCommand(userId)) return;
+      const others = agentWsClients.get(String(userId));
+      if (others) {
+        surfaceBcastSeq += 1;
+        const uiId = 'sb-' + surfaceBcastSeq;
+        for (const other of others) {
+          if (other === ws || !other._cptMeta || other.readyState !== WebSocket.OPEN) continue;
+          try { other.send(JSON.stringify({ type: 'ui_command', uiId, cmd: msg.cmd, params: msg.params || {}, executor: false })); } catch (_) { /* noop */ }
+        }
       }
       return;
     }

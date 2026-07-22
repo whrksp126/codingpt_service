@@ -731,8 +731,9 @@ export class PaneView {
       if (this.ctx.isLocal && typeof tab.win === "number") api.killWindow(this.ctx.localPath || "", tab.win).catch(() => {});
       if (this._attachedWin === tab.win) this._attachedWin = null; // 죽은 attach — 아래서 갈아탐
     } else {
-      // IDE/프리뷰 탭 = 이 기기 뷰만 닫힘.
+      // IDE/프리뷰 탭 = 이 기기 뷰만 닫힘. 프리뷰면 다른 기기도 같이 닫도록 신호(원격 적용 중이면 재전파 안 함).
       this.disposeMixedTab(tab);
+      if (tab.kind === "preview") this.ctx.onSurfaceClosed?.("preview");
     }
     this.node.tabs.splice(i, 1);
     if (!this.node.tabs.length) {

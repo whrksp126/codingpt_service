@@ -262,12 +262,21 @@ export function splitFocused(dir, kind, opts) {
 export function closeFocused() {
   closePane(state.activeWsId, wsRuntime(state.activeWsId)?.focusId);
 }
+// 표면(프리뷰/IDE) 닫힘 훅 — ui-channel 이 등록해 다른 기기로 "같이 닫힘"을 전파한다.
+let _surfaceCloseHook = null;
+export function onSurfaceClose(fn) { _surfaceCloseHook = fn; }
+export function fireSurfaceClose(kind, wsId) { try { _surfaceCloseHook?.(kind, wsId); } catch (_) { /* noop */ } }
+
 export function closePane(wsId, paneId) {
   const w = wsRuntime(wsId);
   if (!w || !paneId) return;
   // 닫는 pane 의 터미널 window(작업)를 kill — 로컬. "닫으면 날아가고, 새로 열면 새 터미널".
   const ws = state.workspaces.find((x) => x.id === wsId);
   const leaf = T.findLeaf(w.layout, paneId);
+  // pane 통째 닫힘에 프리뷰가 포함되면 다른 기기도 같이 닫도록 신호(원격 적용 중이면 훅이 재전파 안 함).
+  if (leaf && (leaf.kind === "preview" || (leaf.kind === "terminal" && (leaf.tabs || []).some((t) => t.kind === "preview")))) {
+    fireSurfaceClose("preview", wsId);
+  }
   if (leaf && leaf.kind === "terminal" && isThisHost(ws)) {
     for (const t of leaf.tabs || []) {
       if (typeof t.win === "number") api.killWindow(ws.localPath || "", t.win).catch(() => {});
