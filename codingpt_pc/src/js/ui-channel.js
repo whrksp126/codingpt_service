@@ -54,7 +54,7 @@ async function connect() {
     send(ws, {
       type: "ui_hello", clientKey: S.deviceKey(), kind: "pc",
       deviceId: state.daemon?.deviceId ?? undefined,
-      deviceName: state.daemon?.deviceName || undefined,
+      deviceName: state.daemon?.device_name || undefined, // daemon_status Status 는 device_name(snake) 로 노출
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
