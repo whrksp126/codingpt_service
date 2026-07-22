@@ -10,6 +10,7 @@ import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
+import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -165,7 +166,7 @@ function fillPreviewEmpty(host) {
   host.append(box);
 }
 
-function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
+function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
   const bar = document.createElement("div");
   bar.className = "preview-bar";
   const mk = (iconFn, title) => {
@@ -181,6 +182,11 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   const input = document.createElement("input");
   input.className = "preview-url";
   input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
+  // macOS 자동수정/자동대문자 제안 풍선이 추천 드롭다운 위에 겹치는 것 방지.
+  input.setAttribute("autocorrect", "off");
+  input.setAttribute("autocapitalize", "off");
+  input.setAttribute("spellcheck", "false");
+  input.setAttribute("autocomplete", "off");
   input.value = initialUrl || "";
   // 테마·개발자도구·올리기·외부열기 → ⋯ 메뉴 하나로 통합.
   const more = mk(icons.dots, "더보기");
@@ -241,10 +247,84 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
     if (!st.url) return;
     openMoreMenu();
   });
+  // ── 방문 기록 + 검색어 추천 드롭다운(크롬식) — DOM 이라 punch-through 로 프리뷰 위에 뜬다.
+  //  포커스=최근 방문, 타이핑=기록 매칭 + Google Suggest. ↑↓/Enter/Esc/클릭.
+  let sugEl = null, sugItems = [], sugSel = -1, sugSeq = 0, sugTimer = 0;
+  const closeSug = () => { sugEl?.remove(); sugEl = null; sugItems = []; sugSel = -1; sugSeq++; };
+  const navTo = (u) => {
+    if (!u) return;
+    closeSug();
+    st.url = u;
+    input.value = u;
+    input.blur();
+    onNavigate(u);
+  };
+  const markSel = () => { if (sugEl) [...sugEl.children].forEach((c, j) => c.classList.toggle("sel", j === sugSel)); };
+  const renderSug = () => {
+    if (!sugItems.length) { closeSug(); return; }
+    if (!sugEl) {
+      sugEl = document.createElement("div");
+      sugEl.className = "pv-suggest";
+      document.body.append(sugEl);
+    }
+    const r = input.getBoundingClientRect();
+    sugEl.style.left = r.left + "px";
+    sugEl.style.top = (r.bottom + 4) + "px";
+    sugEl.style.width = Math.min(Math.max(r.width, 280), window.innerWidth - r.left - 8) + "px";
+    sugEl.innerHTML = "";
+    sugItems.forEach((it, i) => {
+      const row = document.createElement("div");
+      row.className = "pvs-row" + (i === sugSel ? " sel" : "");
+      if (it.kind === "h") {
+        row.innerHTML =
+          (it.f ? `<img class="pvs-fav" src="${escapeHtml(it.f)}" onerror="this.style.visibility='hidden'">` : `<span class="pvs-ic">${icons.globe({ size: 13 })}</span>`) +
+          `<span class="pvs-title">${escapeHtml(it.t || displayPreviewUrl(it.u))}</span><span class="pvs-url">${escapeHtml(displayPreviewUrl(it.u))}</span>`;
+      } else {
+        row.innerHTML = `<span class="pvs-ic">${icons.search({ size: 13 })}</span><span class="pvs-title">${escapeHtml(it.q)}</span><span class="pvs-url">Google 검색</span>`;
+      }
+      row.addEventListener("mousedown", (e) => { e.preventDefault(); navTo(it.kind === "h" ? it.u : smartUrl(it.q)); });
+      row.addEventListener("mousemove", () => { if (sugSel !== i) { sugSel = i; markSel(); } });
+      sugEl.append(row);
+    });
+  };
+  const refreshSug = async () => {
+    const seq = ++sugSeq;
+    const q = input.value.trim();
+    const typed = !!q && q !== st.url && q !== (st.rawUrl || "");
+    const [hist, sugg] = await Promise.all([
+      queryHistory(getCtx?.(), typed ? q : "", 5),
+      typed ? googleSuggest(q, 5) : Promise.resolve([]),
+    ]);
+    if (seq !== sugSeq || document.activeElement !== input) return;
+    sugItems = [
+      ...hist.map((e) => ({ kind: "h", u: e.u, t: e.t, f: e.f })),
+      ...sugg.map((t) => ({ kind: "s", q: t })),
+    ];
+    sugSel = -1;
+    renderSug();
+  };
+  const queueSug = () => { clearTimeout(sugTimer); sugTimer = setTimeout(refreshSug, 180); };
+  input.addEventListener("focus", queueSug);
+  input.addEventListener("input", queueSug);
+  input.addEventListener("blur", () => setTimeout(closeSug, 120));
   input.addEventListener("keydown", (e) => {
+    if (sugEl && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      const n = sugItems.length;
+      sugSel = e.key === "ArrowDown" ? (sugSel + 1) % n : (sugSel - 1 + n) % n;
+      markSel();
+      return;
+    }
+    if (e.key === "Escape" && sugEl) { e.preventDefault(); closeSug(); return; }
     if (e.key !== "Enter") return;
+    if (sugEl && sugSel >= 0 && sugItems[sugSel]) {
+      const it = sugItems[sugSel];
+      navTo(it.kind === "h" ? it.u : smartUrl(it.q));
+      return;
+    }
     const u = smartUrl(input.value);
     if (!u) return;
+    closeSug();
     st.url = u;
     input.value = u;
     onNavigate(u);
@@ -269,6 +349,12 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
       if (title !== st.meta.title || fav !== st.meta.favicon) {
         st.meta = { title, favicon: fav };
         onMeta?.({ title, favicon: fav, url: info.url || st.url });
+      }
+      // 방문 기록 적재 — url 확정 시 1회, 제목이 늦게 오면 제목 확보 시 한 번 더(같은 url 병합).
+      if (info.url && (st._recUrl !== info.url || (!st._recTitled && title))) {
+        st._recUrl = info.url;
+        st._recTitled = !!title;
+        recordVisit(getCtx?.(), { url: info.url, title, favicon: fav });
       }
     } catch (_) { /* webview 미생성 등 */ }
   };
@@ -308,6 +394,7 @@ class PreviewSurface {
     this.bar = makePreviewBar({
       getId: () => this.id,
       getHost: () => this.host,
+      getCtx: () => this.ctx,
       initialUrl: this.url,
       onNavigate: (u) => {
         this.tab.url = u;
@@ -618,6 +705,7 @@ export class PaneView {
     this.previewBar = makePreviewBar({
       getId: () => this._pvId,
       getHost: () => this.previewHost,
+      getCtx: () => this.ctx,
       initialUrl: this.node.url || "",
       initialDark: !!this.node.dark,
       onDarkChange: (v) => { this.node.dark = v; this.ctx.persist?.(); },

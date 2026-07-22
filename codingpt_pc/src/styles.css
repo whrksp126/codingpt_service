@@ -926,3 +926,19 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 }
 .pv-menu-item:hover { background: var(--elevated2); }
 .pv-menu-item.active { color: var(--accent); }
+
+/* ── 주소창 방문 기록 + 검색 추천 드롭다운(크롬식) ── */
+.pv-suggest {
+  position: fixed; z-index: 9002; padding: 5px; max-height: 340px; overflow-y: auto;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.38);
+}
+.pvs-row {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px;
+  border-radius: 7px; cursor: pointer; min-width: 0;
+}
+.pvs-row.sel { background: var(--elevated2); }
+.pvs-fav { width: 14px; height: 14px; border-radius: 3px; flex: 0 0 auto; }
+.pvs-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
+.pvs-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.pvs-url { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }

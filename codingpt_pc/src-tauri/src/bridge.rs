@@ -73,6 +73,35 @@ pub fn fetch_me() -> Result<Option<serde_json::Value>, String> {
     }
 }
 
+// 프리뷰 주소창 검색어 추천 — Google Suggest 공개 엔드포인트(무키·무인증).
+//  브라우저가 아닌 네이티브 호출이라 CORS 무관. 반환 = 추천 검색어 문자열 배열.
+#[tauri::command]
+pub fn preview_suggest(q: String) -> Result<Vec<String>, String> {
+    let s = q.trim();
+    if s.is_empty() {
+        return Ok(vec![]);
+    }
+    match ureq::get("https://suggestqueries.google.com/complete/search")
+        .query("client", "firefox")
+        .query("ie", "utf-8")
+        .query("oe", "utf-8")
+        .query("q", s)
+        .timeout(std::time::Duration::from_secs(4))
+        .call()
+    {
+        Ok(resp) => {
+            let v: serde_json::Value = resp
+                .into_json()
+                .map_err(|e| format!("응답 파싱 실패: {e}"))?;
+            Ok(v.get(1)
+                .and_then(|a| a.as_array())
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+                .unwrap_or_default())
+        }
+        Err(e) => Err(format!("추천 조회 실패: {e}")),
+    }
+}
+
 // 계정의 모든 기기 목록(deviceToken) — 멀티기기 "내 기기". 미페어링이면 Ok(null).
 #[tauri::command]
 pub fn fetch_devices() -> Result<Option<serde_json::Value>, String> {

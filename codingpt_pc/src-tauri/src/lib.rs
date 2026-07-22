@@ -580,6 +580,7 @@ pub fn run() {
             // 브리지(워크스페이스/영속화/알림)
             bridge::fetch_workspaces,
             bridge::fetch_me,
+            bridge::preview_suggest,
             bridge::update_nickname,
             bridge::update_appearance,
             bridge::delete_account,

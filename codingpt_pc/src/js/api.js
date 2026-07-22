@@ -18,6 +18,8 @@ export const api = {
   fetchWorkspaces: () => invoke("fetch_workspaces"),
   // 로그인 계정 프로필(deviceToken→user). 미로그인이면 null.
   fetchMe: () => invoke("fetch_me"),
+  // 주소창 검색어 추천(Google Suggest, 네이티브 호출 — CORS 무관).
+  previewSuggest: (q) => invoke("preview_suggest", { q }),
   // 계정의 모든 기기 목록(멀티기기 "내 기기"). 미로그인이면 null.
   fetchDevices: () => invoke("fetch_devices"),
   updateNickname: (nickname) => invoke("update_nickname", { nickname }),

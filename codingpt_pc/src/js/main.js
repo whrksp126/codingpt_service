@@ -162,7 +162,7 @@ window.addEventListener("keydown", (e) => {
 //  안의 클릭·스크롤이 프리뷰로 내려가면 안 된다(오버레이가 위에 보이는데 뒤가 반응하는 사고).
 //  셀렉터 존재 여부를 주기 폴링해 변화 시에만 Rust 에 통지(hitTest 가 참조).
 function startPreviewShieldWatch() {
-  const SEL = ".settings-modal:not(.hidden), .pv-menu, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, body.tab-dragging, body.resizing-col, body.resizing-row";
+  const SEL = ".settings-modal:not(.hidden), .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, body.tab-dragging, body.resizing-col, body.resizing-row";
   let cur = null;
   setInterval(() => {
     const on = !!document.querySelector(SEL);
