@@ -127,7 +127,7 @@ window.addEventListener("keydown", (e) => {
     toggleLatestUnread();
   } else if (k === "," ) {
     e.preventDefault();
-    S.setView(state.view === "settings" ? "workspace" : "settings");
+    import("./overlay-host.js").then((m) => m.openSettings().then((ok) => { if (!ok) S.setView("settings"); }));
   } else if (/^[1-8]$/.test(e.key)) {
     const w = state.workspaces[parseInt(e.key, 10) - 1];
     if (w) {

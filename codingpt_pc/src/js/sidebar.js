@@ -7,7 +7,7 @@ import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
 import { renderNotifPanel, buildNotifPanelEl, jumpLatestUnread, readNotif } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
-import { makeActions, bindActions, openOverlay, refreshOverlay } from "./overlay-host.js";
+import { makeActions, bindActions, openOverlay, refreshOverlay, openSettings, isSettingsOpen } from "./overlay-host.js";
 
 let el = null;
 let notifPanel = null;
@@ -179,7 +179,7 @@ export function updateSidebar() {
   // 하단: 내 정보.
   const online = state.daemon?.running && state.daemon?.paired;
   const foot = document.createElement("button");
-  foot.className = "sb-me" + (state.view === "settings" ? " active" : "");
+  foot.className = "sb-me" + (state.view === "settings" || isSettingsOpen() ? " active" : "");
   const me = state.me;
   const av = document.createElement("span");
   av.className = "me-avatar";
@@ -196,7 +196,7 @@ export function updateSidebar() {
     : state.daemon?.device_name || (state.paired ? "연결됨" : "로그인 필요");
   txt.innerHTML = `<span class="me-name">${escapeHtml(name)}</span><span class="me-sub">${escapeHtml(sub)}</span>`;
   foot.append(av, txt);
-  foot.addEventListener("click", () => S.setView(state.view === "settings" ? "workspace" : "settings"));
+  foot.addEventListener("click", () => { openSettings().then((ok) => { if (!ok) S.setView("settings"); }); });
   el.appendChild(foot);
 
   if (notifOpen) renderNotifPanel(notifPanel, (n) => jumpToNotification(n));

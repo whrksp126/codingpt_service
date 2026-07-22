@@ -9,6 +9,7 @@
 //    const el = document.createElement('div'); el.className = 'ctx-menu'; ... tag(btn, () => 무언가);
 //    if (!(await openOverlay(el, map, { place }))) { /* DOM 폴백 */ }
 import { api } from "./api.js";
+import * as S from "./state.js";
 
 const T = window.__TAURI__;
 const event = T && T.event;
@@ -18,8 +19,11 @@ let ensuring = null;
 let handlers = new Map(); // id → 클릭 콜백(현재 표시 중인 오버레이)
 let dismissCb = null;
 let wired = false;
+let settingsOpen = false;
 
 function available() { return !!(T && T.core && event); }
+
+export function isSettingsOpen() { return settingsOpen; }
 
 function wireOnce() {
   if (wired || !available()) return;
@@ -32,6 +36,17 @@ function wireOnce() {
     const c = dismissCb; dismissCb = null; handlers = new Map();
     if (c) { try { c(); } catch (_) {} }
   });
+  event.listen("ovl:settings-closed", () => { settingsOpen = false; S.emit(); });
+  event.listen("ovl:settings-failed", () => { settingsOpen = false; S.setView("settings"); }); // 오버레이 실패 → 메인 모달 폴백
+}
+
+// 설정 모달을 오버레이 창에서 라이브로 표시(프리뷰가 뒤에 비침). 오버레이 미가용 시 false → 메인 모달.
+export async function openSettings() {
+  if (!(await ensureOverlay())) return false;
+  settingsOpen = true;
+  S.emit(); // 사이드바 설정 버튼 하이라이트 갱신
+  event.emit("ovl:settings-open", {});
+  return true;
 }
 
 // 오버레이 창을 생성·웜업하고 핑퐁으로 살아있음을 확인. 응답이 없으면 false(호출부가 DOM 폴백).

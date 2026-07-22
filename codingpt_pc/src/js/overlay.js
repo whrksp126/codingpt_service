@@ -18,6 +18,49 @@ const pop = document.getElementById("ovl-pop");
 // 핑퐁 — host 가 살아있음을 확인(핸드셰이크). 리스너가 준비된 뒤 응답.
 event.listen("ovl:ping", () => { try { event.emit("ovl:pong", {}); } catch (_) {} });
 
+// ── 설정 모달 호스팅 ────────────────────────────────────────────────────────
+//  설정은 상태 가득한 풀 모달이라 outerHTML 버스로는 안 되고, 이 오버레이 창에서 settings.js 를
+//  독립 인스턴스로 구동한다(자기 상태·api 로 데이터 페치). 오버레이가 투명·프리뷰 위라, 설정 반투명
+//  배경 뒤로 메인 창의 라이브 프리뷰가 그대로 비친다(프리즈 불필요).
+let settingsOn = false;
+let settingsMod = null, stateMod = null, settingsMounted = false;
+async function ensureSettings() {
+  if (settingsMounted) return;
+  stateMod = await import("./state.js");
+  settingsMod = await import("./settings.js");
+  settingsMod.mountSettings(document.getElementById("ovl-settings"));
+  // 비동기 데이터 로드(loadMe/loadDevices)나 테마 변경으로 상태가 바뀌면 재렌더.
+  stateMod.subscribe(() => { try { settingsMod.updateSettings(); } catch (_) {} });
+  // 닫힘 감지 — settings 가 S.setView('workspace') 하면 view 가 바뀐다 → 오버레이 숨김.
+  stateMod.subscribe(() => {
+    if (settingsOn && stateMod.state.view !== "settings") { settingsOn = false; closeSettings(); }
+  });
+  settingsMounted = true;
+}
+async function openSettings() {
+  try {
+    await ensureSettings();
+    settingsOn = true;
+    // 필요한 데이터 로드(메인과 별개 인스턴스라 여기서 페치).
+    try { stateMod.state.daemon = await invoke("daemon_status"); stateMod.state.paired = !!(stateMod.state.daemon && stateMod.state.daemon.paired); } catch (_) {}
+    if (stateMod.loadMe) stateMod.loadMe();
+    if (stateMod.loadDevices) stateMod.loadDevices();
+    stateMod.setView("settings"); // → updateSettings 렌더
+    await invoke("overlay_show", { passthrough: false });
+    log("settings opened");
+  } catch (e) {
+    log("settings open ERR " + e);
+    settingsOn = false;
+    try { await invoke("overlay_hide"); } catch (_) {}
+    event.emit("ovl:settings-failed", {}); // host 가 메인 모달로 폴백
+  }
+}
+async function closeSettings() {
+  try { await invoke("overlay_hide"); } catch (_) {}
+  event.emit("ovl:settings-closed", {});
+}
+event.listen("ovl:settings-open", () => { openSettings(); });
+
 let dismissable = true;
 let autohideTimer = 0;
 
@@ -49,6 +92,7 @@ function placeEl(el, place) {
 }
 
 event.listen("ovl:show", async ({ payload }) => {
+  if (settingsOn) return; // 설정 열려있는 동안엔 팝업/토스트가 창을 가로채지 않게
   const { html, place, passthrough, autohideMs } = payload || {};
   log("show: len=" + (html ? html.length : 0) + " place=" + JSON.stringify(place) + " pass=" + !!passthrough);
   clear();
@@ -74,8 +118,8 @@ event.listen("ovl:show", async ({ payload }) => {
   if (autohideMs) autohideTimer = setTimeout(() => hide("auto"), autohideMs);
 });
 
-backdrop.addEventListener("mousedown", () => { if (dismissable) hide("dismiss"); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape" && dismissable) hide("dismiss"); });
+backdrop.addEventListener("mousedown", () => { if (!settingsOn && dismissable) hide("dismiss"); });
+document.addEventListener("keydown", (e) => { if (!settingsOn && e.key === "Escape" && dismissable) hide("dismiss"); });
 
 pop.addEventListener("click", (e) => {
   const t = e.target.closest("[data-ovl]");
