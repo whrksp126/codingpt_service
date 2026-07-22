@@ -916,16 +916,20 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 
 /* ── 프리뷰 ⋯ 오버플로 메뉴 ── */
 .pv-menu {
-  position: fixed; z-index: 9002; min-width: 180px; padding: 5px;
+  position: fixed; z-index: 9002; min-width: 230px; padding: 5px;
   background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 10px;
   box-shadow: 0 12px 34px rgba(0,0,0,0.38);
 }
 .pv-menu-item {
-  display: block; width: 100%; text-align: left; padding: 8px 10px; border: none;
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 8px 10px; border: none;
   background: transparent; color: var(--text); border-radius: 7px; font-size: 13px; cursor: pointer;
 }
 .pv-menu-item:hover { background: var(--elevated2); }
 .pv-menu-item.active { color: var(--accent); }
+.pvm-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
+.pvm-label { flex: 1 1 auto; }
+.pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
 /* ── 주소창 방문 기록 + 검색 추천 드롭다운(크롬식) ── */
 .pv-suggest {

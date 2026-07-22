@@ -9,7 +9,7 @@ import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
-import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
+import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 
 const Terminal = window.Terminal;
@@ -218,23 +218,42 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
   const doExt = () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); };
   const doSave = async () => { try { const wv = await import("./workspace-view.js"); await wv.saveSnapshotAndToast(); } catch (_) { /* noop */ } };
 
-  // ⋯ 메뉴 — 평범한 DOM(punch-through 로 프리뷰 위에 뜬다).
+  // ⋯ 메뉴 — 평범한 DOM(punch-through 로 프리뷰 위에 뜬다). 행 = 왼쪽 아이콘 + 텍스트,
+  //  다크 모드/개발자 도구는 설정 모달과 동일한 토글(.tgl) — 토글 행은 메뉴를 닫지 않는다.
   const openMoreMenu = () => {
     document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
     const menu = document.createElement("div");
     menu.className = "pv-menu";
     const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
-    const item = (label, active, onClick) => {
+    const row = (iconFn, label, opt) => {
       const b = document.createElement("button");
-      b.className = "pv-menu-item" + (active ? " active" : "");
-      b.textContent = label;
-      b.addEventListener("click", () => { close(); onClick(); });
+      b.className = "pv-menu-item";
+      b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`;
+      let tgl = null;
+      if (opt.toggle) {
+        tgl = document.createElement("input");
+        tgl.type = "checkbox";
+        tgl.className = "tgl";
+        tgl.checked = !!opt.toggle.get();
+        tgl.tabIndex = -1;
+        b.appendChild(tgl);
+      }
+      b.addEventListener("click", () => {
+        if (opt.toggle) {
+          opt.toggle.set();
+          // 상태 반영은 마이크로태스크 뒤(데브툴 토글이 비동기 경계를 가질 수 있음).
+          Promise.resolve().then(() => { if (tgl) tgl.checked = !!opt.toggle.get(); });
+        } else {
+          close();
+          opt.onClick();
+        }
+      });
       menu.appendChild(b);
     };
-    item(st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", st.dark, doTheme);
-    item("개발자 도구", false, () => doTools(false));
-    item("올리기 (스냅샷 저장)", false, doSave);
-    item("외부 브라우저에서 열기", false, doExt);
+    row(icons.moon, "페이지 다크 모드", { toggle: { get: () => st.dark, set: doTheme } });
+    row(icons.tools, "개발자 도구", { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
+    row(icons.handoffOut, "스냅샷 등록", { onClick: doSave });
+    row(icons.external, "외부 브라우저에서 열기", { onClick: doExt });
     const r = more.getBoundingClientRect();
     menu.style.top = (r.bottom + 4) + "px";
     menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";

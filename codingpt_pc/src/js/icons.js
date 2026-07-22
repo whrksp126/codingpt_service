@@ -37,6 +37,7 @@ export const icons = {
   chevronLeft: (o) => svg('<path d="M14.5 5.5L8 12l6.5 6.5"/>', o),
   chevronRight: (o) => svg('<path d="M9.5 5.5L16 12l-6.5 6.5"/>', o),
   sun: (o) => svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>', o),
+  moon: (o) => svg('<path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.8 6.8 0 0 0 10 10z"/>', o),
   tools: (o) => svg('<path d="M14.5 6.5a3.5 3.5 0 0 0-4.8 4.1L4 16.3V20h3.7l5.7-5.7a3.5 3.5 0 0 0 4.1-4.8L15 12l-3-3z"/>', o),
   dot: (o) => `<span class="ic-dot ${o?.cls || ""}"></span>`,
   handoffIn: (o) => svg('<path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>', o),
