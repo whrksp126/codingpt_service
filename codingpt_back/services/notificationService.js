@@ -121,6 +121,7 @@ async function createNotification(userId, payload) {
       kind: kind || 'notification',
       sessionId: notification.sessionId || '',
       workspaceId: notification.workspaceId || undefined,
+      notifId: notification.id, // Android 태그/iOS userInfo 매칭 — 크로스기기 dismiss 의 열쇠
       title,
       body: subtitle || (notification.body ? String(notification.body).slice(0, 120) : ''),
       deeplink: buildDeeplink(notification),
@@ -193,6 +194,9 @@ async function applyRead(userId, where) {
     { where: { user_id: userId, id: { [Op.in]: targetIds } } },
   );
   try { relay().fanoutNotifEvent(userId, { kind: 'read', ids: targetIds }); } catch (_) { /* noop */ }
+  // 크로스기기 dismiss — 다른 기기(폰)에 이미 떠 있는 트레이 배너를 무음 데이터 푸시로 회수.
+  //  (PC 에서 읽으면 폰 배너가 사라진다. Orca 의 desktop→mobile dismiss 모델 이식.)
+  pushService.sendDismissToUser(userId, targetIds).catch(() => { /* fire-and-forget */ });
   return { ids: targetIds };
 }
 

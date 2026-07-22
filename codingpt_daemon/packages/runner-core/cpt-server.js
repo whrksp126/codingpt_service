@@ -418,6 +418,8 @@ async function dispatch(req) {
       }
       // 훅(P5): claude/codex 훅이 응답 요약과 함께 호출 — notify 경로 재사용.
       if (cmd === 'hook.event') {
+        // 폴백 감지(agent-watch)에 훅 생존 신고 — 같은 턴을 title/exit 폴백이 중복 알림하지 않게.
+        try { require('./agent-watch').noteHook(resolved.cwdRel, resolved.windowIndex); } catch (_) { /* noop */ }
         const agentName = args.agent === 'codex' ? 'Codex' : 'Claude Code';
         const wsName = resolved.cwdRel ? path.basename(resolved.cwdRel) : '';
         const kind = args.event === 'notification' ? 'permission_request' : 'done';

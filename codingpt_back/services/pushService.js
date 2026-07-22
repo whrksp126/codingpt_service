@@ -65,6 +65,27 @@ async function sendToUser(userId, payload, opts = {}) {
   return { sent, skipped };
 }
 
+// 크로스기기 dismiss — 읽음 처리된 알림의 "이미 표시된" 트레이 배너를 모든 폰에서 회수한다.
+//  data-only 무음 푸시(type:'notif_dismiss', ids CSV) → 앱이 태그/notifId 매칭으로 배너 취소.
+//  라우팅 게이트(pcActive 등) 무관 — 회수는 항상 전 기기 대상(조용한 메시지라 무해).
+async function sendDismissToUser(userId, ids) {
+  const list = (Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isFinite(n) && n > 0);
+  if (!list.length || !providerConfigured()) return { sent: 0 };
+  let devices;
+  try { devices = await PushDevice.findAll({ where: { user_id: userId, enabled: true } }); }
+  catch (_) { return { sent: 0 }; }
+  if (!devices || !devices.length) return { sent: 0 };
+  let sent = 0;
+  const data = { type: 'notif_dismiss', ids: list.join(',') };
+  for (const d of devices) {
+    if ((d.provider || defaultProvider(d.platform)) === 'apns') continue; // 직접 APNs 기기는 미지원(기본 fcm)
+    try { const r = await pushProvider.sendFcmData(d, data); if (r.ok) sent += 1; }
+    catch (_) { /* fire-and-forget */ }
+  }
+  if (sent) console.log(`[push] dismiss user=${userId} ids=${list.join(',')} sent=${sent}`);
+  return { sent };
+}
+
 // 실제 발송 지점. provider 미설정이면 로그만 남기고 스킵.
 //  device.provider(또는 platform)로 FCM/APNs 라우팅. 무효 토큰이면 기기 비활성화.
 async function dispatch(device, payload) {
@@ -89,4 +110,4 @@ async function dispatch(device, payload) {
   return false;
 }
 
-module.exports = { registerDevice, unregisterDevice, setAlertWhenPcActive, sendToUser, providerConfigured };
+module.exports = { registerDevice, unregisterDevice, setAlertWhenPcActive, sendToUser, sendDismissToUser, providerConfigured };

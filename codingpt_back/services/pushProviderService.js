@@ -72,7 +72,7 @@ async function sendFcm(device, payload) {
     message: {
       token: device.token,
       notification: { title: payload.title || 'CodingPT', body: payload.body || '' },
-      data: stringData({ kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink }),
+      data: stringData({ kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink, notifId: payload.notifId }),
       // Android: 소리·진동·헤드업 명시(채널 codingpt_default = importance HIGH). notification 블록이 없으면
       //  기기/런처가 조용히 처리하는 경우가 있어 명시한다.
       android: {
@@ -83,12 +83,49 @@ async function sendFcm(device, payload) {
           default_vibrate_timings: true,
           channel_id: 'codingpt_default',
           notification_priority: 'PRIORITY_MAX',
+          // 크로스기기 dismiss 용 안정 태그 — FCM SDK 가 이 태그(id=0)로 표시하므로,
+          //  나중에 NotificationManager.cancel(tag, 0) 로 정확히 그 배너만 회수할 수 있다.
+          ...(payload.notifId != null ? { tag: `cptnotif-${payload.notifId}` } : {}),
         },
       },
       // iOS: 최고 우선순위 + 소리(사용자 Focus/무음 상태는 기기가 판단).
       apns: {
         headers: { 'apns-priority': '10', 'apns-push-type': 'alert' },
         payload: { aps: { sound: 'default' } },
+      },
+    },
+  };
+  let res;
+  try {
+    res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(message),
+    });
+  } catch (e) { return { ok: false, err: e.message }; }
+  if (res.ok) return { ok: true };
+  const errText = await res.text().catch(() => '');
+  const invalidToken = res.status === 404 || /UNREGISTERED|INVALID_ARGUMENT/i.test(errText);
+  return { ok: false, invalidToken, status: res.status, err: errText.slice(0, 200) };
+}
+
+// data-only 무음 푸시(FCM) — 표시 없이 앱 백그라운드 핸들러만 깨운다(크로스기기 dismiss 등).
+//  Android: priority high 데이터 메시지(headless JS). iOS: content-available 백그라운드 푸시
+//  (스로틀될 수 있음 — best effort. 배너 회수 실패 시 사용자가 스와이프하면 그만).
+async function sendFcmData(device, data) {
+  const sa = loadFcmServiceAccount();
+  const projectId = process.env.FCM_PROJECT_ID || (sa && sa.project_id);
+  if (!projectId) return { ok: false };
+  const accessToken = await getFcmAccessToken();
+  if (!accessToken) return { ok: false };
+  const message = {
+    message: {
+      token: device.token,
+      data: stringData(data),
+      android: { priority: 'high' },
+      apns: {
+        headers: { 'apns-priority': '5', 'apns-push-type': 'background' },
+        payload: { aps: { 'content-available': 1 } },
       },
     },
   };
@@ -165,4 +202,4 @@ function configured() {
   return !!(loadFcmServiceAccount() || apnsConfig());
 }
 
-module.exports = { sendFcm, sendApns, configured };
+module.exports = { sendFcm, sendFcmData, sendApns, configured };
