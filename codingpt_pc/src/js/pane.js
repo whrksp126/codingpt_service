@@ -148,8 +148,16 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   input.value = initialUrl || "";
   const theme = mk(icons.sun, "페이지 다크 모드");
   const tools = mk(icons.tools, "개발자 도구");
+  const sendTo = mk(icons.handoffOut, "다른 기기로 보내기(세션·쿠키 포함)");
   const ext = mk(icons.external, "외부 브라우저에서 열기");
-  bar.append(back, fwd, reload, input, theme, tools, ext);
+  bar.append(back, fwd, reload, input, theme, tools, sendTo, ext);
+  sendTo.addEventListener("click", async () => {
+    if (!st.url) return;
+    try {
+      const [wv, S] = await Promise.all([import("./workspace-view.js"), import("./state.js")]);
+      await wv.pickDeviceAndPush(S.deviceKey());
+    } catch (_) { /* 무시 */ }
+  });
 
   const st = { url: initialUrl || "", dark: !!initialDark, disposed: false, meta: { title: "", favicon: "" } };
   theme.classList.toggle("active", st.dark);

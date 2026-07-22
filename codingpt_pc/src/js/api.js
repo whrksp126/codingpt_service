@@ -104,6 +104,9 @@ export const api = {
   devtoolsWindow: (pv, open) => invoke("devtools_window", { pv, open }),
   // 프리뷰 보이는 영역 스크린샷 — JPEG base64 문자열.
   previewScreenshot: (paneId) => invoke("preview_screenshot", { pane: paneId }),
+  // 프리뷰 세션 핸드오프 — 쿠키 캡처/심기(httpOnly 포함, WKHTTPCookieStore). JSON 문자열 왕복.
+  previewCookies: (paneId) => invoke("preview_cookies", { pane: paneId }),
+  previewSetCookies: (paneId, cookiesJson) => invoke("preview_set_cookies", { pane: paneId, cookiesJson }),
   onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
   previewClose: (paneId) => invoke("preview_close", { paneId }),
 

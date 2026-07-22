@@ -872,3 +872,29 @@ html[data-theme="light"] .qg-file { color: #a16207; }
 html[data-theme="light"] .qg-quit { border-color: #fca5a5; background: #fee2e2; color: #b91c1c; }
 html[data-theme="light"] .qg-quit:hover { background: #fecaca; }
 html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16); border: 1px solid var(--border); }
+
+/* ── 핸드오프 토스트 / 기기 선택 시트 ── */
+.wv-toast {
+  position: fixed; left: 50%; bottom: 34px;
+  transform: translateX(-50%) translateY(8px);
+  background: var(--elevated2); color: var(--text); border: 1px solid var(--border-ctrl);
+  border-radius: var(--r-md, 10px); padding: 9px 15px; font-size: 13px; z-index: 9000;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.32); opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
+}
+.wv-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.wv-sheet-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.42); z-index: 9001;
+  display: flex; align-items: center; justify-content: center;
+}
+.wv-sheet {
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 14px;
+  min-width: 260px; max-width: 340px; padding: 8px; box-shadow: 0 16px 44px rgba(0,0,0,0.4);
+}
+.wv-sheet-title { padding: 8px 10px 10px; font-size: 13px; font-weight: 700; color: var(--text); }
+.wv-sheet-row {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 10px 10px; border: none; background: transparent; color: var(--text);
+  border-radius: 9px; font-size: 13.5px; cursor: pointer;
+}
+.wv-sheet-row:hover { background: var(--elevated2); }
+.wv-sheet-row svg { flex: none; opacity: 0.85; }

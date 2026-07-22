@@ -372,6 +372,18 @@ async function dispatch(req) {
       return { devices: (res && res.clients) || [] };
     }
 
+    // 프리뷰 세션 이어받기(CLI) — 활성(또는 --on) 기기에서 캡처 → --to 기기에 복원(세션·쿠키 포함).
+    //  데몬이 오케스트레이터: surfaceCapture(소스) → previewHandoff(타겟) 2단 sendUiCommand.
+    case 'ui.previewHandoff': {
+      const toTarget = await resolveTargetDevice(args.to);
+      if (!toTarget) throw new Error('--to <기기> 가 필요합니다 (cpt devices 로 대상 확인)');
+      const fromTarget = await resolveTargetDevice(args.on); // 캡처 소스(기본=활성 기기)
+      const cap = await sendUiCommand('surfaceCapture', { kind: 'preview', ws: resolved.cwdRel }, { mode: 'target', target: fromTarget, timeoutMs: 12000 });
+      if (!cap || !cap.manifest) throw new Error('이어받을 프리뷰가 없습니다(소스 기기에 프리뷰 없음)');
+      const r = await sendUiCommand('previewHandoff', { manifest: cap.manifest, ws: resolved.cwdRel }, { mode: 'target', target: toTarget, timeoutMs: 20000 });
+      return { ok: true, to: toTarget, result: r };
+    }
+
     // ── 화면 조작(ui_command — back/클라이언트 왕복) — 기기-타겟 라우팅 ──
     case 'ui.wsSelect':
     case 'ui.wsClose':
@@ -442,7 +454,7 @@ const CAPABILITIES = [
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
-  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo',
+  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewHandoff',
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot',
   'hook.event',

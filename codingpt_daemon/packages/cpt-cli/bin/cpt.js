@@ -181,6 +181,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   preview close                         프리뷰 닫기
   preview devtools [on|off]             개발자도구 토글(보고 있는 기기)
   preview info                          현재 URL/제목/뷰포트
+  preview handoff --to <기기>           현재 프리뷰를 다른 기기로 이어주기(세션·쿠키·localStorage 포함)
   ide open <파일경로> [--line <n>]      IDE 로 파일 열기(해당 줄로 이동)
   ide close                             IDE pane 닫기
   ide close-file <파일경로>             열린 파일 탭 하나 닫기
@@ -326,6 +327,8 @@ async function main() {
         if (c2 === 'close') return out(await request('ui.previewClose', { sid }), flags, 'ok');
         if (c2 === 'devtools') return out(await request('ui.previewDevtools', { sid, on: rest[0] === 'off' ? false : (rest[0] === 'on' ? true : undefined) }), flags, 'ok');
         if (c2 === 'info') return printJson(await request('ui.previewInfo', { sid }));
+        // 이어받기: 현재(또는 --on) 기기의 프리뷰를 --to 기기로 세션·쿠키째 옮긴다.
+        if (c2 === 'handoff') return out(await request('ui.previewHandoff', { to: flags.to, timeoutMs: 35000 }), flags, 'ok');
         break;
       }
       case 'ide': {

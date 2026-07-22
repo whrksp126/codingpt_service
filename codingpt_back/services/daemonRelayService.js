@@ -524,6 +524,30 @@ const uiPending = new Map();
 const uiCmdRate = new Map();
 // 클라이언트 발신 표면 전파(surface_broadcast) 의 uiId 시퀀스.
 let surfaceBcastSeq = 0;
+// 핸드오프(surfaceCapture/previewHandoff) 왕복용 uiId 시퀀스.
+let handoffSeq = 0;
+// 핸드오프 매니페스트(쿠키=자격증명) 상한 — 무로그·무버퍼·무저장(릴레이 통과만).
+const HANDOFF_MANIFEST_MAX = 256 * 1024;
+
+// 특정 UI 클라이언트(ws) 하나에 ui_command 를 보내고 그 ui_result 를 Promise 로 받는다(핸드오프 전용).
+//  uiPending 를 재사용하되 resolveHandoff 콜백으로 데몬 conn 대신 여기로 회수한다. 항상 resolve(reject 없음).
+function sendUiToClient(ws, cmd, params, timeoutMs = 12000) {
+  return new Promise((resolve) => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) { resolve({ ok: false, error: '기기 연결 끊김', code: 'TARGET_OFFLINE' }); return; }
+    handoffSeq += 1;
+    const uiId = 'ho-' + handoffSeq;
+    const timer = setTimeout(() => {
+      if (uiPending.has(uiId)) { uiPending.delete(uiId); resolve({ ok: false, error: '기기가 응답하지 않습니다(타임아웃)', code: 'UI_TIMEOUT' }); }
+    }, timeoutMs);
+    uiPending.set(uiId, { resolveHandoff: resolve, timer, executorWs: ws });
+    try {
+      ws.send(JSON.stringify({ type: 'ui_command', uiId, cmd, params: params || {}, executor: true }));
+    } catch (_) {
+      clearTimeout(timer); uiPending.delete(uiId);
+      resolve({ ok: false, error: '전송 실패', code: 'SEND_FAILED' });
+    }
+  });
+}
 
 // 유저당 초당 UI_CMD_RATE_LIMIT 건 초과 여부(1초 창 카운터).
 function allowUiCommand(userId) {
@@ -604,10 +628,62 @@ function failPendingForExecutor(ws) {
     if (p.executorWs !== ws) continue;
     uiPending.delete(uiId);
     clearTimeout(p.timer);
+    if (p.resolveHandoff) { p.resolveHandoff({ ok: false, error: '기기 연결이 끊어졌습니다', code: 'UI_EXECUTOR_GONE' }); continue; }
     try {
       p.conn.ws.send(JSON.stringify({ type: 'ui_result', id: p.daemonMsgId, ok: false, error: '실행 화면(UI 클라이언트) 연결이 끊어졌습니다', code: 'UI_EXECUTOR_GONE' }));
     } catch (_) { /* noop */ }
   }
+}
+
+// 같은 userId 의 열린 UI 클라이언트 중 ws 를 제외한 것들(executor 정렬) — 핸드오프 소스/타겟 후보.
+function otherUiClients(userId, exclude) {
+  const set = agentWsClients.get(String(userId));
+  const out = [];
+  if (set) for (const c of set) { if (c !== exclude && c._cptMeta && c.readyState === WebSocket.OPEN) out.push(c); }
+  out.sort((a, b) =>
+    ((b._cptMeta.foreground ? 1 : 0) - (a._cptMeta.foreground ? 1 : 0)) ||
+    (b._cptMeta.lastActivityAt - a._cptMeta.lastActivityAt) ||
+    ((b._cptMeta.kind === 'pc' ? 1 : 0) - (a._cptMeta.kind === 'pc' ? 1 : 0)));
+  return out;
+}
+
+// 이어받기(pull) — 요청 기기가 다른 기기의 프리뷰/IDE 표면을 캡처해 넘겨받는다.
+//  from.deviceId 지정 시 그 기기만, 아니면 나머지 기기들을 executor 순으로 순회하며 첫 성공 매니페스트 채택.
+async function handleHandoffRequest(userId, ws, msg) {
+  const reqId = msg.reqId;
+  const kind = msg.kind === 'ide' ? 'ide' : 'preview';
+  const reply = (extra) => { try { ws.send(JSON.stringify({ type: 'handoff_payload', reqId, ...extra })); } catch (_) { /* noop */ } };
+  if (!allowUiCommand(userId)) { reply({ ok: false, error: '요청이 너무 잦습니다', code: 'RATE_LIMITED' }); return; }
+  let others = otherUiClients(userId, ws);
+  if (msg.from && msg.from.deviceId != null) others = others.filter((c) => c._cptMeta.deviceId === msg.from.deviceId);
+  if (others.length === 0) { reply({ ok: false, error: '이어받을 다른 기기가 없습니다', code: 'NO_SOURCE' }); return; }
+  for (const src of others) {
+    const r = await sendUiToClient(src, 'surfaceCapture', { kind }, 10000);
+    const manifest = r && r.ok && r.result && r.result.manifest;
+    if (manifest) {
+      if (JSON.stringify(manifest).length > HANDOFF_MANIFEST_MAX) { reply({ ok: false, error: '세션이 너무 큽니다', code: 'TOO_LARGE' }); return; }
+      reply({ ok: true, manifest, from: { deviceId: src._cptMeta.deviceId, deviceName: src._cptMeta.deviceName || '' } });
+      return;
+    }
+  }
+  reply({ ok: false, error: '이어받을 ' + (kind === 'ide' ? 'IDE' : '프리뷰') + '가 없습니다', code: 'NO_PREVIEW' });
+}
+
+// 보내기(push) — 소스 기기의 매니페스트를 지정 기기(target)에 복원(previewHandoff/ideHandoff)시킨다.
+async function handleHandoffPush(userId, ws, msg) {
+  const reqId = msg.reqId;
+  const reply = (extra) => { try { ws.send(JSON.stringify({ type: 'handoff_ack', reqId, ...extra })); } catch (_) { /* noop */ } };
+  if (!allowUiCommand(userId)) { reply({ ok: false, error: '요청이 너무 잦습니다', code: 'RATE_LIMITED' }); return; }
+  const manifest = msg.manifest;
+  if (!manifest || typeof manifest !== 'object') { reply({ ok: false, error: '매니페스트 없음', code: 'BAD_MANIFEST' }); return; }
+  if (JSON.stringify(manifest).length > HANDOFF_MANIFEST_MAX) { reply({ ok: false, error: '세션이 너무 큽니다', code: 'TOO_LARGE' }); return; }
+  const t = msg.target || {};
+  const dst = otherUiClients(userId, ws).find((c) =>
+    (t.deviceId != null && c._cptMeta.deviceId === t.deviceId) || (t.clientKey && c._cptMeta.clientKey === t.clientKey));
+  if (!dst) { reply({ ok: false, error: '대상 기기가 접속돼 있지 않습니다', code: 'TARGET_OFFLINE' }); return; }
+  const cmd = manifest.kind === 'ide' ? 'ideHandoff' : 'previewHandoff';
+  const r = await sendUiToClient(dst, cmd, { manifest, ws: typeof msg.ws === 'string' ? msg.ws : undefined }, 20000);
+  reply({ ok: !!(r && r.ok), error: r && r.error, code: r && r.code });
 }
 
 // GET /api/daemon/agent/stream?token=<JWT>|?ticket=<t> 업그레이드(앱/PC→back). 에이전트 이벤트 WSS 구독.
@@ -706,6 +782,16 @@ function registerAgentWs(ws, userId, client) {
       }
       return;
     }
+    if (msg.type === 'handoff_request') {
+      // 이어받기(pull) — 이 기기가 다른 기기의 표면(프리뷰/IDE)을 캡처해 넘겨받는다.
+      handleHandoffRequest(userId, ws, msg);
+      return;
+    }
+    if (msg.type === 'handoff_push') {
+      // 보내기(push) — 이 기기의 매니페스트를 지정 기기에 복원시킨다.
+      handleHandoffPush(userId, ws, msg);
+      return;
+    }
     if (msg.type === 'ui_result' && msg.uiId != null) {
       // executor 의 커맨드 실행 결과 — pending 매칭 후 요청 데몬 conn 으로 회신.
       const uiId = String(msg.uiId);
@@ -713,6 +799,8 @@ function registerAgentWs(ws, userId, client) {
       if (!pending || pending.executorWs !== ws) return; // executor 회신만 인정(중복/비 executor 무시)
       uiPending.delete(uiId);
       clearTimeout(pending.timer);
+      // 핸드오프 왕복(sendUiToClient) — 데몬 conn 이 아니라 Promise 로 회수.
+      if (pending.resolveHandoff) { pending.resolveHandoff({ ok: !!msg.ok, result: msg.result, error: msg.error, code: msg.code }); return; }
       try {
         pending.conn.ws.send(JSON.stringify({ type: 'ui_result', id: pending.daemonMsgId, ok: !!msg.ok, result: msg.result, error: msg.error }));
       } catch (_) { /* noop */ }

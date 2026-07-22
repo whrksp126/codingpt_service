@@ -9,6 +9,50 @@ import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 
+// 간단 토스트(핸드오프 결과 등) — 화면 하단 중앙에 2.8s.
+export function wvToast(msg) {
+  const d = document.createElement("div");
+  d.className = "wv-toast";
+  d.textContent = String(msg);
+  document.body.appendChild(d);
+  requestAnimationFrame(() => d.classList.add("show"));
+  setTimeout(() => { d.classList.remove("show"); setTimeout(() => d.remove(), 220); }, 2800);
+}
+
+// 보내기 대상 기기 선택 시트 — 자기(clientKey) 제외·온라인만. 선택 시 pushPreviewSession.
+export async function pickDeviceAndPush(selfClientKey) {
+  const m = await import("./ui-channel.js");
+  const devices = (await m.listUiDevices()).filter((d) => d.clientKey !== selfClientKey);
+  if (!devices.length) { wvToast("보낼 다른 기기가 없어요"); return; }
+  const overlay = document.createElement("div");
+  overlay.className = "wv-sheet-overlay";
+  const sheet = document.createElement("div");
+  sheet.className = "wv-sheet";
+  const title = document.createElement("div");
+  title.className = "wv-sheet-title";
+  title.textContent = "어느 기기로 보낼까요?";
+  sheet.append(title);
+  const close = () => overlay.remove();
+  for (const dev of devices) {
+    const row = document.createElement("button");
+    row.className = "wv-sheet-row";
+    const label = dev.deviceName || (dev.kind === "pc" ? "PC" : "모바일");
+    row.innerHTML = (dev.kind === "pc" ? icons.monitor({ size: 16 }) : icons.smartphone({ size: 16 })) +
+      '<span>' + label + (dev.executor ? " · 활성" : "") + '</span>';
+    row.addEventListener("click", async () => {
+      close();
+      const target = dev.deviceId != null ? { deviceId: dev.deviceId } : { clientKey: dev.clientKey };
+      wvToast("보내는 중…");
+      const r = await m.pushPreviewSession(target);
+      wvToast(r.ok ? (label + "로 보냈어요") : (r.error || "보내기 실패"));
+    });
+    sheet.append(row);
+  }
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.append(sheet);
+  document.body.appendChild(overlay);
+}
+
 let hostEl = null;
 let mainTop = null;
 let gridEl = null;
@@ -456,10 +500,25 @@ function renderMainTop(ws) {
       b.addEventListener("click", () => smartAdd(kind));
       return b;
     };
+    // 이어받기 — 다른 기기의 프리뷰(로그인 세션·쿠키 포함)를 이 기기로. 프리뷰가 없어도 접근 가능.
+    const pull = document.createElement("button");
+    pull.className = "pane-ctrl";
+    pull.title = "다른 기기 화면 이어받기";
+    pull.innerHTML = icons.handoffIn({ size: 16 });
+    pull.addEventListener("click", async () => {
+      pull.disabled = true;
+      try {
+        const m = await import("./ui-channel.js");
+        const r = await m.pullPreviewSession();
+        wvToast(r.ok ? ("이어받았어요" + (r.from?.deviceName ? " · " + r.from.deviceName : "")) : (r.error || "이어받기 실패"));
+      } catch (e) { wvToast(String((e && e.message) || e)); }
+      finally { pull.disabled = false; }
+    });
     adds.append(
       mkBtn(icons.terminal, "터미널 추가", "terminal"),
       mkBtn(icons.code, "IDE 추가", "ide"),
       mkBtn(icons.globe, "웹뷰 추가", "preview"),
+      pull,
     );
     mainTop.append(spacer, adds);
   }

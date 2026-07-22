@@ -551,6 +551,172 @@ pub async fn preview_screenshot(mgr: State<'_, PreviewManager>, pane: String) ->
     }
 }
 
+// ── 프리뷰 세션 핸드오프: 네이티브 쿠키 브리지(httpOnly 포함) ─────────────────
+//  document.cookie(eval)로는 httpOnly 쿠키를 못 읽으므로 WKHTTPCookieStore 를 직접 쓴다.
+//  캡처=getAllCookies(비동기 completionHandler→mpsc), 심기=setCookie(FIFO 직렬 → 마지막 completion 이 배리어).
+//  오리진 재작성(domain/secure/path/__Host- 접두 처리)은 호출측(JS)이 매니페스트 단계에서 수행한다.
+
+// NSArray<NSHTTPCookie*> → JSON 문자열(각 쿠키 name/value/domain/path/expiresAt/secure/httpOnly/sameSite/session).
+#[cfg(target_os = "macos")]
+unsafe fn cookies_to_json(cookies: *mut objc2::runtime::AnyObject) -> String {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let mut arr: Vec<serde_json::Value> = Vec::new();
+    if !cookies.is_null() {
+        let n: usize = msg_send![cookies, count];
+        for i in 0..n {
+            let c: *mut AnyObject = msg_send![cookies, objectAtIndex: i];
+            let name: *mut AnyObject = msg_send![c, name];
+            let value: *mut AnyObject = msg_send![c, value];
+            let domain: *mut AnyObject = msg_send![c, domain];
+            let path: *mut AnyObject = msg_send![c, path];
+            let secure: bool = msg_send![c, isSecure];
+            let http_only: bool = msg_send![c, isHTTPOnly];
+            let exp: *mut AnyObject = msg_send![c, expiresDate];
+            let expires_at = if exp.is_null() {
+                serde_json::Value::Null
+            } else {
+                let t: f64 = msg_send![exp, timeIntervalSince1970];
+                serde_json::json!(t)
+            };
+            // sameSitePolicy: macOS 10.15+ (타깃 13.3+ 라 안전). nil=미지정.
+            let ss: *mut AnyObject = msg_send![c, sameSitePolicy];
+            let same_site = if ss.is_null() { serde_json::Value::Null } else { serde_json::json!(ns_to_string(ss)) };
+            arr.push(serde_json::json!({
+                "name": ns_to_string(name),
+                "value": ns_to_string(value),
+                "domain": ns_to_string(domain),
+                "path": ns_to_string(path),
+                "expiresAt": expires_at,
+                "secure": secure,
+                "httpOnly": http_only,
+                "sameSite": same_site,
+                "session": exp.is_null(),
+            }));
+        }
+    }
+    serde_json::Value::Array(arr).to_string()
+}
+
+// 프리뷰의 모든 쿠키(httpOnly 포함) → JSON 배열 문자열.
+#[tauri::command]
+pub async fn preview_cookies(mgr: State<'_, PreviewManager>, pane: String) -> Result<String, String> {
+    let webview = webview_of(&mgr, &pane)?;
+    #[cfg(target_os = "macos")]
+    {
+        let (tx, rx) = std::sync::mpsc::channel::<String>();
+        webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                let cfg: *mut AnyObject = msg_send![wk, configuration];
+                let store: *mut AnyObject = msg_send![cfg, websiteDataStore];
+                let cookie_store: *mut AnyObject = msg_send![store, httpCookieStore];
+                let block = block2::RcBlock::new(move |cookies: *mut AnyObject| {
+                    let _ = tx.send(cookies_to_json(cookies));
+                });
+                let _: () = msg_send![cookie_store, getAllCookies: &*block];
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "쿠키 조회 시간 초과".to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = webview;
+        Err("preview_cookies 은 macOS 전용입니다".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(serde::Deserialize)]
+struct CookieSpec {
+    name: String,
+    value: String,
+    domain: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(rename = "expiresAt", default)]
+    expires_at: Option<f64>,
+    #[serde(default)]
+    secure: Option<bool>,
+}
+
+// JSON 쿠키 배열을 프리뷰 쿠키 스토어에 심는다(전부 완료 후 resolve — 다음 로드 전 보장).
+//  httpOnly 는 NSHTTPCookie 생성 시 지정 불가(HTTPOnly 프로퍼티 키는 읽기 전용) → 소실되나 값·전송은 동일.
+#[tauri::command]
+pub async fn preview_set_cookies(mgr: State<'_, PreviewManager>, pane: String, cookies_json: String) -> Result<(), String> {
+    let webview = webview_of(&mgr, &pane)?;
+    #[cfg(target_os = "macos")]
+    {
+        let parsed: Vec<CookieSpec> =
+            serde_json::from_str(&cookies_json).map_err(|e| format!("쿠키 JSON 파싱 실패: {}", e))?;
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        webview
+            .with_webview(move |pw| unsafe {
+                use objc2::msg_send;
+                use objc2::runtime::AnyObject;
+                let wk: *mut AnyObject = pw.inner().cast();
+                let cfg: *mut AnyObject = msg_send![wk, configuration];
+                let store: *mut AnyObject = msg_send![cfg, websiteDataStore];
+                let cookie_store: *mut AnyObject = msg_send![store, httpCookieStore];
+                // NSHTTPCookie 프로퍼티 키는 실제 문자열 값("Name"/"Value"/...)이라 리터럴로 안전(심볼 링크 회피).
+                let mut built: Vec<*mut AnyObject> = Vec::new();
+                for spec in &parsed {
+                    let dict: *mut AnyObject = msg_send![objc2::class!(NSMutableDictionary), dictionary];
+                    let put = |k: &str, v: *mut AnyObject| {
+                        let key = objc2_foundation::NSString::from_str(k);
+                        let _: () = msg_send![dict, setObject: v, forKey: &*key];
+                    };
+                    let name = objc2_foundation::NSString::from_str(&spec.name);
+                    let value = objc2_foundation::NSString::from_str(&spec.value);
+                    let domain = objc2_foundation::NSString::from_str(&spec.domain);
+                    let path = objc2_foundation::NSString::from_str(spec.path.as_deref().unwrap_or("/"));
+                    put("Name", &*name as *const _ as *mut AnyObject);
+                    put("Value", &*value as *const _ as *mut AnyObject);
+                    put("Domain", &*domain as *const _ as *mut AnyObject);
+                    put("Path", &*path as *const _ as *mut AnyObject);
+                    if spec.secure.unwrap_or(false) {
+                        let t = objc2_foundation::NSString::from_str("TRUE");
+                        put("Secure", &*t as *const _ as *mut AnyObject);
+                    }
+                    if let Some(secs) = spec.expires_at {
+                        let date: *mut AnyObject = msg_send![objc2::class!(NSDate), dateWithTimeIntervalSince1970: secs];
+                        put("Expires", date);
+                    }
+                    let cookie: *mut AnyObject = msg_send![objc2::class!(NSHTTPCookie), cookieWithProperties: dict];
+                    if !cookie.is_null() {
+                        built.push(cookie);
+                    }
+                }
+                if built.is_empty() {
+                    let _ = tx.send(());
+                } else {
+                    // 스토어 연산은 FIFO 직렬 → 마지막 completion 이 전부 완료 배리어.
+                    let last = built.len() - 1;
+                    for (i, cookie) in built.iter().enumerate() {
+                        if i == last {
+                            let txc = tx.clone();
+                            let block = block2::RcBlock::new(move || { let _ = txc.send(()); });
+                            let _: () = msg_send![cookie_store, setCookie: *cookie, completionHandler: &*block];
+                        } else {
+                            let nil: *mut AnyObject = std::ptr::null_mut();
+                            let _: () = msg_send![cookie_store, setCookie: *cookie, completionHandler: nil];
+                        }
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        rx.recv_timeout(std::time::Duration::from_secs(10)).map_err(|_| "쿠키 설정 시간 초과".to_string())?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (webview, cookies_json);
+        Err("preview_set_cookies 은 macOS 전용입니다".into())
+    }
+}
+
 #[tauri::command]
 pub fn preview_close(app: AppHandle, mgr: State<PreviewManager>, pane_id: String) {
     if let Ok(mut map) = mgr.inner.lock() {

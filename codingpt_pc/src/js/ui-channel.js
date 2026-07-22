@@ -74,6 +74,12 @@ async function connect() {
       case "ui_command":
         handleUiCommand(ws, msg);
         break;
+      case "handoff_payload":
+      case "handoff_ack": {
+        const p = _handoffPending.get(msg.reqId);
+        if (p) { clearTimeout(p.timer); _handoffPending.delete(msg.reqId); p.resolve(msg); }
+        break;
+      }
       case "appearance_event":
         // 모양 설정(계정 동기화) — 다른 기기서 변경 → 즉시 반영(서버로 되밀지 않음)
         import("./theme.js").then((t) => t.applyRemoteAppearance(msg.event && msg.event.appearance)).catch(() => {});
@@ -476,6 +482,173 @@ async function handleBrowserCommand(op, p) {
   }
 }
 
+// ── 프리뷰 세션 핸드오프(P3) — 캡처/오리진재작성/복원 ──────────────────────
+//  프리뷰 오리진은 기기마다 다르다(PC=localhost 직결, 모바일=back 프록시) → "논리 오리진(localhost:port)"
+//  으로 캡처한 뒤 타겟 기기의 실제 오리진으로 쿠키를 재작성해 심는다. httpOnly 는 네이티브 쿠키 브리지로.
+
+// p.ws 있으면 그 워크스페이스, 없으면 활성 워크스페이스(핸드오프는 활성 프리뷰 대상).
+function requireWsOrActive(p) {
+  if (p && p.ws) {
+    const m = wsByCwd(p.ws);
+    if (m) { if (state.activeWsId !== m.id || state.view !== "workspace") S.setActive(m.id); return { meta: m, rt: S.ensureRuntime(m.id) }; }
+  }
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) throw new Error("활성 워크스페이스 없음");
+  if (state.view !== "workspace") S.setActive(meta.id);
+  return { meta, rt: S.ensureRuntime(meta.id) };
+}
+
+// 현재 프리뷰 표면 → 매니페스트(URL 논리화 + storage + 쿠키[httpOnly 포함]).
+async function captureManifestPC(pvId) {
+  const info = await api.previewInfo(pvId).catch(() => ({ url: "" }));
+  const rawUrl = info && info.url ? info.url : "";
+  let logical = null, externalUrl = null;
+  try {
+    const u = new URL(rawUrl);
+    const local = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(u.hostname);
+    if (local) logical = { port: Number(u.port) || (u.protocol === "https:" ? 443 : 80), path: u.pathname + u.search + u.hash, scheme: u.protocol.replace(":", "") };
+    else externalUrl = rawUrl;
+  } catch (_) { if (rawUrl) externalUrl = rawUrl; }
+  // localStorage/sessionStorage
+  const storeJs =
+    "JSON.stringify((function(){var l={},s={};" +
+    "try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);l[k]=localStorage.getItem(k);}}catch(e){}" +
+    "try{for(var j=0;j<sessionStorage.length;j++){var m=sessionStorage.key(j);s[m]=sessionStorage.getItem(m);}}catch(e){}" +
+    "return {local:l,session:s};})())";
+  let storage = { local: {}, session: {} };
+  try { storage = JSON.parse(await api.previewEval(pvId, storeJs)); } catch (_) { /* 빈 storage */ }
+  // 쿠키 — 네이티브(httpOnly 포함). 실패 시 document.cookie 폴백(비-httpOnly 만, partial).
+  let cookies = [], partial = false;
+  try {
+    cookies = JSON.parse(await api.previewCookies(pvId));
+  } catch (_) {
+    partial = true;
+    try {
+      const raw = JSON.parse(await api.previewEval(pvId, "JSON.stringify(document.cookie||'')"));
+      cookies = String(raw).split(";").map((c) => c.trim()).filter(Boolean).map((c) => {
+        const eq = c.indexOf("=");
+        return { name: eq >= 0 ? c.slice(0, eq) : c, value: eq >= 0 ? c.slice(eq + 1) : "", path: "/", session: true };
+      });
+    } catch (_) { /* 쿠키 없음 */ }
+  }
+  return { v: 1, kind: "preview", logical, externalUrl, host: null, storage, cookies, partial, attrsLossy: false };
+}
+
+// 캡처 쿠키를 타겟 오리진으로 재작성(domain/secure/path/__Host- 접두).
+function rewriteCookiesForTarget(cookies, target) {
+  const host = target.hostname;
+  const isHttps = target.protocol === "https:";
+  const out = [];
+  for (const c of cookies || []) {
+    let name = c.name || "";
+    if (!name) continue;
+    // __Host-/__Secure- 는 https 필수 → http(localhost) 이식 시 접두 제거(서버가 이름을 보므로 로그인 실패 가능=partial)
+    if (!isHttps && (name.startsWith("__Host-") || name.startsWith("__Secure-"))) name = name.replace(/^__(Host|Secure)-/, "");
+    out.push({
+      name, value: c.value || "", domain: host, path: "/",
+      expiresAt: c.expiresAt != null ? c.expiresAt : null,
+      secure: isHttps ? !!c.secure : false, // http 이식 시 secure 드롭(안 그러면 미전송)
+    });
+  }
+  return out;
+}
+
+// storage 주입 JS(eval) — 로드 후 setItem 일괄.
+function storageInjectJs(storage) {
+  const l = JSON.stringify((storage && storage.local) || {});
+  const s = JSON.stringify((storage && storage.session) || {});
+  return "(function(){try{var l=" + l + ";for(var k in l)localStorage.setItem(k,l[k]);}catch(e){}" +
+    "try{var s=" + s + ";for(var m in s)sessionStorage.setItem(m,s[m]);}catch(e){}return 'ok';})()";
+}
+
+// 프리뷰 첫 로드(=webview 생성 완료) 대기 — pvId 매칭, 타임아웃이면 false.
+function waitPreviewLoaded(pvId, timeoutMs = 6000) {
+  return new Promise((resolve) => {
+    let done = false, un = null;
+    const finish = (ok) => { if (done) return; done = true; try { un && un(); } catch (_) {} resolve(ok); };
+    api.onPreviewLoaded((pl) => { if (pl && pl.pane === pvId) finish(true); }).then((u) => { un = u; if (done) { try { u(); } catch (_) {} } });
+    setTimeout(() => finish(false), timeoutMs);
+  });
+}
+
+// 매니페스트 복원 — 프리뷰 표면 확보 → 로드 대기 → 쿠키+storage 심기 → 최종 URL 이동.
+async function restoreManifestPC(rt, manifest) {
+  const url = manifest.externalUrl ||
+    (manifest.logical ? "http://localhost:" + (manifest.logical.port || 80) + (manifest.logical.path || "/") : "");
+  if (!url) throw new Error("복원할 URL 없음");
+  let target; try { target = new URL(url); } catch (_) { throw new Error("URL 파싱 실패"); }
+  // 표면 확보 — 기존 프리뷰 재사용 or 우측 분할.
+  let pvId;
+  const existing = findPreviewTarget(rt);
+  if (existing) {
+    navigatePreview(existing, url);
+    pvId = existing.tab ? "pv-" + existing.tab.tid : "pv-" + (existing.leaf.tid || existing.leaf.id);
+  } else {
+    const focusId = rt.focusId || T.firstLeafId(rt.layout);
+    if (!focusId) throw new Error("분할할 pane 없음");
+    S.splitPane(focusId, "h", "preview", { url });
+    const sf = findPreviewSurface(rt);
+    pvId = sf.surface ? sf.surface.pvId : (sf.target ? ("pv-" + (sf.target.leaf.tid || sf.target.leaf.id)) : null);
+  }
+  if (!pvId) throw new Error("프리뷰 표면 생성 실패");
+  await waitPreviewLoaded(pvId, 6000); // webview 존재 보장
+  const cookies = rewriteCookiesForTarget(manifest.cookies, target);
+  if (cookies.length) { try { await api.previewSetCookies(pvId, JSON.stringify(cookies)); } catch (_) { /* 쿠키 실패 무시 */ } }
+  try { await api.previewEval(pvId, storageInjectJs(manifest.storage)); } catch (_) { /* storage 실패 무시 */ }
+  api.previewNavigate(pvId, url).catch(() => {}); // 쿠키·storage 반영된 상태로 최종 로드
+  return { ok: true, result: { url, cookies: cookies.length, partial: !!manifest.partial } };
+}
+
+// ── 핸드오프 프레임 왕복(pull/push) — back 릴레이 handoff_request/handoff_push ──
+let _handoffSeq = 0;
+const _handoffPending = new Map(); // reqId → {resolve, timer}
+function newReqId() { _handoffSeq += 1; return "pc-" + Date.now() + "-" + _handoffSeq; }
+function sendHandoff(frame, timeoutMs) {
+  return new Promise((resolve) => {
+    const reqId = frame.reqId;
+    if (!sock || sock.readyState !== 1) { resolve({ ok: false, error: "서버에 연결돼 있지 않습니다" }); return; }
+    const timer = setTimeout(() => { _handoffPending.delete(reqId); resolve({ ok: false, error: "응답 시간 초과" }); }, timeoutMs);
+    _handoffPending.set(reqId, { resolve, timer });
+    send(sock, frame);
+  });
+}
+
+// 다른 기기의 프리뷰를 이 기기로 이어받기(pull).
+export async function pullPreviewSession() {
+  const payload = await sendHandoff({ type: "handoff_request", reqId: newReqId(), kind: "preview" }, 20000);
+  if (!payload.ok || !payload.manifest) return { ok: false, error: payload.error || "이어받을 프리뷰가 없어요" };
+  try {
+    const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+    if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+    const rt = S.ensureRuntime(meta.id);
+    await restoreManifestPC(rt, payload.manifest);
+    return { ok: true, from: payload.from };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+}
+
+// 이 기기의 활성 프리뷰를 지정 기기로 보내기(push). target={deviceId}|{clientKey}.
+export async function pushPreviewSession(target) {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  const rt = S.ensureRuntime(meta.id);
+  const tgt = findPreviewTarget(rt);
+  if (!tgt) return { ok: false, error: "보낼 프리뷰가 없어요" };
+  if (tgt.tab && !tgt.tab.tid) return { ok: false, error: "프리뷰가 아직 로드되지 않았어요" };
+  const pvId = tgt.tab ? "pv-" + tgt.tab.tid : "pv-" + (tgt.leaf.tid || tgt.leaf.id);
+  let manifest;
+  try { manifest = await captureManifestPC(pvId); } catch (e) { return { ok: false, error: (e && e.message) || "캡처 실패" }; }
+  const ack = await sendHandoff({ type: "handoff_push", reqId: newReqId(), target, manifest, ws: meta.localPath }, 25000);
+  return ack.ok ? { ok: true } : { ok: false, error: ack.error || "보내기 실패" };
+}
+
+// 접속 중인 UI 기기 목록(보내기 대상 선택 시트용) — 자기 제외는 호출측이.
+export async function listUiDevices() {
+  try {
+    const res = await api.backApi("GET", "/api/daemon/ui/clients");
+    return (res && res.clients) || [];
+  } catch (_) { return []; }
+}
+
 const PANE_TYPES = ["terminal", "ide", "preview"];
 
 // 명령 → 핸들러. 반환 객체가 ui_result 프레임에 그대로 병합된다({ok, ...}).
@@ -682,6 +855,26 @@ const handlers = {
     const r = surface.host?.getBoundingClientRect?.();
     if (r && r.width > 2 && r.height > 2) out.viewport = { w: Math.round(r.width), h: Math.round(r.height) };
     return { ok: true, result: out };
+  },
+
+  // 핸드오프: 현재 활성 프리뷰 표면을 매니페스트로 캡처(pull 소스/CLI). ws 없으면 활성 워크스페이스.
+  surfaceCapture: async (p) => {
+    const kind = p.kind === "ide" ? "ide" : "preview";
+    const { rt } = requireWsOrActive(p);
+    if (kind === "ide") return { ok: false, code: "NO_PREVIEW", error: "IDE 핸드오프 미지원" };
+    const target = findPreviewTarget(rt);
+    if (!target) return { ok: false, code: "NO_PREVIEW", error: "프리뷰 없음" };
+    if (target.tab && !target.tab.tid) return { ok: false, code: "NO_PREVIEW", error: "프리뷰 표면 미생성" };
+    const pvId = target.tab ? "pv-" + target.tab.tid : "pv-" + (target.leaf.tid || target.leaf.id);
+    const manifest = await captureManifestPC(pvId);
+    return { ok: true, result: { manifest, kind: "preview" } };
+  },
+
+  // 핸드오프: 매니페스트를 이 기기에 복원(push 타겟/CLI). ws 있으면 그 워크스페이스, 없으면 활성.
+  previewHandoff: async (p) => {
+    if (!p.manifest || typeof p.manifest !== "object") throw new Error("manifest 필요");
+    const { rt } = requireWsOrActive(p);
+    return await restoreManifestPC(rt, p.manifest);
   },
 
   // 첫(포커스 우선) IDE 표면(pane/혼합 탭) 닫기 — 없으면 멱등 성공. (Phase 1: 각 기기 로컬)
