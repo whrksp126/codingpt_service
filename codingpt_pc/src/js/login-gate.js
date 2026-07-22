@@ -123,6 +123,7 @@ function renderStep() {
     } catch (_) { fBtn.textContent = "허용"; fBtn.disabled = false; }
   });
   el.querySelector("#lgDone").addEventListener("click", () => {
+    try { localStorage.setItem("cpt.setupDone", "1"); } catch (_) {} // 이 PC 셋업 완료 — 다음 로그인부턴 스킵
     pendingSetup = false;
     updateLoginGate();
   });
@@ -186,6 +187,16 @@ async function pollGateLogin() {
       state.paired = !!state.daemon?.paired;
       await S.loadMe();
       await S.loadWorkspaces();
+      // 셋업(자동 실행·알림·폴더 권한)은 계정이 아니라 "이 PC" 1회성 — 이미 완료한 기기면 건너뛴다
+      //  (재로그인/계정 전환마다 다시 나오던 문제의 수정).
+      let done = false;
+      try { done = localStorage.getItem("cpt.setupDone") === "1"; } catch (_) {}
+      if (done) {
+        pendingSetup = false;
+        step = "welcome";
+        S.emit(); // → render() → updateLoginGate() → 게이트 닫힘(바로 워크스페이스로)
+        return;
+      }
       // 셋업 단계로 — 자동 실행 기본 켬을 실제 적용(끄면 토글로 해제).
       pendingSetup = true;
       step = "setup";

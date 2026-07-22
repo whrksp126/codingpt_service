@@ -118,9 +118,9 @@ function paneCtx(ws) {
     onFocus: (id) => S.focusPane(id),
     // ws 는 클로저로 고정 — 알림이 늦게 와도 발생한 워크스페이스로 귀속(activeWsId 는 이미 딴 곳일 수 있음).
     onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),
-    // 터미널 탭 활성화 = 그 win 알림 읽음(서버 스코프).
+    // 터미널 탭 활성화 = 그 win 알림 읽음(서버 스코프). isThisHost 도 라이브(재클레임 반영).
     onTabActivated: (win) => {
-      if (isThisHost(ws) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
+      if (isThisHost(live()) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
     },
     onSurfacesChanged: () => {},
     onSurfaceClosed: (kind) => S.fireSurfaceClose(kind, ws.id),

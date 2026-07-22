@@ -69,6 +69,19 @@ async function closeSettings() {
 }
 event.listen("ovl:settings-open", () => { openSettings(); });
 
+// 앱 비활성(다른 앱으로 전환) → Rust 가 오버레이 창을 숨김. 팝업(메뉴/토스트)은 닫힌 것으로 정리하고,
+//  설정은 열림 상태를 유지했다가 앱 복귀(cpt-app-active) 때 다시 표시한다.
+event.listen("cpt-overlay-autohide", () => {
+  if (!settingsOn) { clear(); try { event.emit("ovl:dismiss", {}); } catch (_) {} }
+  log("autohidden (app inactive)");
+});
+event.listen("cpt-app-active", () => {
+  if (settingsOn) {
+    invoke("overlay_show", { passthrough: false }).then(() => focusModal()).catch(() => {});
+    log("re-shown on app active");
+  }
+});
+
 let dismissable = true;
 let autohideTimer = 0;
 
