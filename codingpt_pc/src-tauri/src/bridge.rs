@@ -716,7 +716,7 @@ pub fn overlay_ensure(app: AppHandle) -> Result<(), String> {
         .focused(false)
         .visible(false);
     // 초기 크기는 메인 창 콘텐츠에 맞춰둔다(show 때 재정렬).
-    if let Some(main) = app.get_webview_window("main") {
+    if let Some(main) = app.get_window("main") {
         if let (Ok(pos), Ok(size)) = (main.inner_position(), main.inner_size()) {
             b = b.inner_size(size.width as f64, size.height as f64).position(pos.x as f64, pos.y as f64);
         }
@@ -725,11 +725,18 @@ pub fn overlay_ensure(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// 메인 창(라벨 main) — get_webview_window 이 None 을 주는 경우가 있어(런타임 조회 차이) get_window
+//  로도 폴백. 지오메트리만 읽으므로 Window 로 충분(preview.rs 와 동일 경로).
+fn main_win(app: &AppHandle) -> Option<tauri::Window> {
+    use tauri::Manager;
+    app.get_window("main")
+}
+
 // 오버레이를 메인 창 콘텐츠 영역에 정확히 겹쳐 표시. passthrough=true 면 클릭 통과(토스트용).
 #[tauri::command]
 pub fn overlay_show(app: AppHandle, passthrough: bool) -> Result<(), String> {
     use tauri::Manager;
-    let main = app.get_webview_window("main").ok_or("메인 창 없음")?;
+    let main = main_win(&app).ok_or("메인 창 없음")?;
     let ov = app.get_webview_window("overlay").ok_or("오버레이 창 없음")?;
     let pos = main.inner_position().map_err(|e| e.to_string())?;
     let size = main.inner_size().map_err(|e| e.to_string())?;
@@ -750,7 +757,7 @@ pub fn overlay_hide(app: AppHandle) -> Result<(), String> {
     if let Some(ov) = app.get_webview_window("overlay") {
         let _ = ov.hide();
     }
-    if let Some(m) = app.get_webview_window("main") {
+    if let Some(m) = main_win(&app) {
         let _ = m.set_focus();
     }
     Ok(())
