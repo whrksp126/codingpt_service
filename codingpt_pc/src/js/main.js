@@ -77,6 +77,23 @@ api.onPtyExit((p) => dispatchExit(p.paneId));
 api.onDaemonChanged(async () => {
   state.daemon = await api.daemonStatus().catch(() => state.daemon);
   state.paired = !!state.daemon?.paired;
+  // 로그인/로그아웃/계정 전환 시 daemon-changed 가 온다(재페어링=데몬 재기동).
+  if (!state.paired) {
+    // 로그아웃/언페어 → 이전 계정 컨텍스트 완전 정리(clean slate). loadWorkspaces 는 실패해도
+    //  옛 목록을 안 지우므로 여기서 명시적으로 비운다 → 로그인 게이트로 전환된다.
+    state.workspaces = [];
+    state.activeWsId = null;
+    state.me = null;
+    state.devices = [];
+    state.wsError = null;
+    S.emit();
+    return;
+  }
+  // 로그인/계정 전환 → 새 계정 기준으로 워크스페이스·프로필·기기 새로고침. loadWorkspaces 는 활성
+  //  워크스페이스가 새 목록에 없으면 자동으로 첫 항목으로 전환하므로 이전 계정 터미널이 정리된다.
+  await S.loadWorkspaces().catch(() => {});
+  S.loadMe();
+  S.loadDevices();
   S.emit();
 });
 api.onDeepLinkPair((payload) => deepLinkPair(payload));
