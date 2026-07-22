@@ -695,6 +695,16 @@ export class IdeView {
     return true;
   }
   // 지금 열린 파일 목록(중복 제거) — 활성 그룹의 활성 파일을 active 로 표시. 경로는 홈-상대(f.path).
+  // 현재 활성 파일 + 커서 줄(스냅샷 IDE 상태 캡처용). 없으면 null.
+  getActiveState() {
+    const g = this.activeGroup;
+    const f = g && g.open[g.active];
+    if (!f) return null;
+    let line = 0;
+    try { const c = g.cm && g.cm.getCursor(); if (c && typeof c.line === "number") line = c.line + 1; } catch (_) { /* noop */ }
+    return { path: f.path, line };
+  }
+
   listOpenFiles() {
     const g = this.activeGroup;
     const activePath = g && g.open[g.active] ? g.open[g.active].path : null;

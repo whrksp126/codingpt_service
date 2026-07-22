@@ -74,12 +74,6 @@ async function connect() {
       case "ui_command":
         handleUiCommand(ws, msg);
         break;
-      case "handoff_payload":
-      case "handoff_ack": {
-        const p = _handoffPending.get(msg.reqId);
-        if (p) { clearTimeout(p.timer); _handoffPending.delete(msg.reqId); p.resolve(msg); }
-        break;
-      }
       case "appearance_event":
         // 모양 설정(계정 동기화) — 다른 기기서 변경 → 즉시 반영(서버로 되밀지 않음)
         import("./theme.js").then((t) => t.applyRemoteAppearance(msg.event && msg.event.appearance)).catch(() => {});
@@ -608,56 +602,6 @@ async function restoreManifestPC(rt, manifest) {
   return { ok: true, result: { url, cookies: cookies.length, partial: !!manifest.partial } };
 }
 
-// ── 핸드오프 프레임 왕복(pull/push) — back 릴레이 handoff_request/handoff_push ──
-let _handoffSeq = 0;
-const _handoffPending = new Map(); // reqId → {resolve, timer}
-function newReqId() { _handoffSeq += 1; return "pc-" + Date.now() + "-" + _handoffSeq; }
-function sendHandoff(frame, timeoutMs) {
-  return new Promise((resolve) => {
-    const reqId = frame.reqId;
-    if (!sock || sock.readyState !== 1) { resolve({ ok: false, error: "서버에 연결돼 있지 않습니다" }); return; }
-    const timer = setTimeout(() => { _handoffPending.delete(reqId); resolve({ ok: false, error: "응답 시간 초과" }); }, timeoutMs);
-    _handoffPending.set(reqId, { resolve, timer });
-    send(sock, frame);
-  });
-}
-
-// 다른 기기의 프리뷰를 이 기기로 이어받기(pull).
-export async function pullPreviewSession() {
-  const payload = await sendHandoff({ type: "handoff_request", reqId: newReqId(), kind: "preview" }, 20000);
-  if (!payload.ok || !payload.manifest) return { ok: false, error: payload.error || "이어받을 프리뷰가 없어요" };
-  try {
-    const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-    if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
-    const rt = S.ensureRuntime(meta.id);
-    await restoreManifestPC(rt, payload.manifest);
-    return { ok: true, from: payload.from };
-  } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
-}
-
-// 이 기기의 활성 프리뷰를 지정 기기로 보내기(push). target={deviceId}|{clientKey}.
-export async function pushPreviewSession(target) {
-  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
-  const rt = S.ensureRuntime(meta.id);
-  const tgt = findPreviewTarget(rt);
-  if (!tgt) return { ok: false, error: "보낼 프리뷰가 없어요" };
-  if (tgt.tab && !tgt.tab.tid) return { ok: false, error: "프리뷰가 아직 로드되지 않았어요" };
-  const pvId = tgt.tab ? "pv-" + tgt.tab.tid : "pv-" + (tgt.leaf.tid || tgt.leaf.id);
-  let manifest;
-  try { manifest = await captureManifestPC(pvId); } catch (e) { return { ok: false, error: (e && e.message) || "캡처 실패" }; }
-  const ack = await sendHandoff({ type: "handoff_push", reqId: newReqId(), target, manifest, ws: meta.localPath }, 25000);
-  return ack.ok ? { ok: true } : { ok: false, error: ack.error || "보내기 실패" };
-}
-
-// 접속 중인 UI 기기 목록(보내기 대상 선택 시트용) — 자기 제외는 호출측이.
-export async function listUiDevices() {
-  try {
-    const res = await api.backApi("GET", "/api/daemon/ui/clients");
-    return (res && res.clients) || [];
-  } catch (_) { return []; }
-}
-
 // ── PC 저장 스냅샷 모델 ──────────────────────────────────────────────
 //  올리기 = 현재 프리뷰 캡처 → 이 PC(워크스페이스)에 파일 저장. 홈서버 미사용(쿠키=자격증명 PC 한정).
 //   <ws>/.codingpt/snapshots/index.json + <id>.json,  <ws>/.codingpt/.gitignore="*"(커밋 방지)
@@ -674,25 +618,40 @@ async function snapReadIndex(wsLocal) {
   catch (_) { return []; }
 }
 
-// 올리기 — 활성 프리뷰 캡처 → PC 워크스페이스에 스냅샷 저장.
+// 현재 활성 IDE 상태(열린 파일·커서 줄) 캡처 — ws 상대 경로로. 없으면 null.
+function captureIdePC(meta, rt) {
+  const target = findIdeTarget(rt);
+  if (!target) return null;
+  const ide = ideInstanceOf(target);
+  const st = ide && ide.getActiveState ? ide.getActiveState() : null;
+  if (!st || !st.path) return null;
+  return { path: relPath(meta, st.path), line: st.line || 0 };
+}
+
+// 올리기 — 활성 프리뷰 + IDE 상태 캡처 → PC 워크스페이스에 스냅샷 저장(작업 전체 이어하기).
 export async function saveSnapshotPC() {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
   if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
   const rt = S.ensureRuntime(meta.id);
+  // 프리뷰(있으면)
+  let manifest = null;
   const tgt = findPreviewTarget(rt);
-  if (!tgt) return { ok: false, error: "저장할 프리뷰가 없어요" };
-  if (tgt.tab && !tgt.tab.tid) return { ok: false, error: "프리뷰가 아직 로드되지 않았어요" };
-  const pvId = tgt.tab ? "pv-" + tgt.tab.tid : "pv-" + (tgt.leaf.tid || tgt.leaf.id);
-  let manifest;
-  try { manifest = await captureManifestPC(pvId); } catch (e) { return { ok: false, error: (e && e.message) || "캡처 실패" }; }
+  if (tgt && !(tgt.tab && !tgt.tab.tid)) {
+    const pvId = tgt.tab ? "pv-" + tgt.tab.tid : "pv-" + (tgt.leaf.tid || tgt.leaf.id);
+    try { manifest = await captureManifestPC(pvId); } catch (_) { manifest = null; }
+  }
+  // IDE(있으면)
+  const ide = captureIdePC(meta, rt);
+  if (!manifest && !ide) return { ok: false, error: "저장할 프리뷰나 IDE가 없어요" };
   try {
     const root = String(meta.localPath).replace(/\/+$/, "");
     await api.fsMkdir(snapDir(meta.localPath));
     try { await api.fsWrite(root + "/.codingpt/.gitignore", "*\n"); } catch (_) { /* gitignore 실패 무시 */ }
     const id = String(Date.now()) + "-" + Math.floor(Math.random() * 1e6).toString(36);
-    const url = manifest.externalUrl || (manifest.logical ? ":" + manifest.logical.port + (manifest.logical.path || "") : "");
-    const m = { id, label: snapLabel(url), createdAt: Date.now(), device: state.daemon?.device_name || "PC", url };
-    await api.fsWrite(snapDir(meta.localPath) + "/" + id + ".json", JSON.stringify({ ...m, manifest }));
+    const url = manifest ? (manifest.externalUrl || (manifest.logical ? ":" + manifest.logical.port + (manifest.logical.path || "") : "")) : "";
+    const label = manifest ? snapLabel(url) : ("IDE · " + String(ide.path).split("/").pop());
+    const m = { id, label, createdAt: Date.now(), device: state.daemon?.device_name || "PC", url, has: { preview: !!manifest, ide: !!ide } };
+    await api.fsWrite(snapDir(meta.localPath) + "/" + id + ".json", JSON.stringify({ ...m, manifest, ide }));
     let list = [m, ...(await snapReadIndex(meta.localPath)).filter((s) => s.id !== id)];
     const pruned = list.slice(SNAP_MAX); list = list.slice(0, SNAP_MAX);
     for (const p of pruned) { try { await api.fsDelete(snapDir(meta.localPath) + "/" + p.id + ".json"); } catch (_) { /* noop */ } }
@@ -722,17 +681,21 @@ export async function listSnapshotsPC() {
   return snapReadIndex(meta.localPath);
 }
 
-// 내려받기 — 선택한 스냅샷을 활성 프리뷰로 복원.
+// 내려받기 — 선택한 스냅샷을 활성 워크스페이스로 복원(프리뷰 + IDE).
 export async function applySnapshotPC(id) {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
   if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
   const rt = S.ensureRuntime(meta.id);
-  let manifest;
-  try { const s = await api.fsRead(snapDir(meta.localPath) + "/" + id + ".json"); manifest = JSON.parse(s || "{}").manifest; }
+  let obj;
+  try { const s = await api.fsRead(snapDir(meta.localPath) + "/" + id + ".json"); obj = JSON.parse(s || "{}"); }
   catch (_) { return { ok: false, error: "스냅샷 로드 실패" }; }
-  if (!manifest) return { ok: false, error: "스냅샷 없음" };
-  try { await restoreManifestPC(rt, manifest); return { ok: true }; }
-  catch (e) { return { ok: false, error: (e && e.message) || "복원 실패" }; }
+  if (!obj || (!obj.manifest && !obj.ide)) return { ok: false, error: "스냅샷 없음" };
+  let err = null;
+  if (obj.manifest) { try { await restoreManifestPC(rt, obj.manifest); } catch (e) { err = (e && e.message) || "프리뷰 복원 실패"; } }
+  if (obj.ide && obj.ide.path) {
+    try { await handlers.ideOpen({ ws: meta.localPath, path: obj.ide.path, line: obj.ide.line }); } catch (_) { /* IDE 복원 실패는 무시(프리뷰 우선) */ }
+  }
+  return err ? { ok: false, error: err } : { ok: true };
 }
 
 const PANE_TYPES = ["terminal", "ide", "preview"];
