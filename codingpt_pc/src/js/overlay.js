@@ -48,7 +48,7 @@ function placeEl(el, place) {
   el.style.top = Math.max(8, y) + "px";
 }
 
-event.listen("ovl:show", ({ payload }) => {
+event.listen("ovl:show", async ({ payload }) => {
   const { html, place, passthrough, autohideMs } = payload || {};
   log("show: len=" + (html ? html.length : 0) + " place=" + JSON.stringify(place) + " pass=" + !!passthrough);
   clear();
@@ -57,13 +57,20 @@ event.listen("ovl:show", ({ payload }) => {
   const el = pop.firstElementChild;
   if (el) el.style.visibility = "hidden"; // 배치 전 깜빡임 방지
   backdrop.style.pointerEvents = dismissable ? "auto" : "none";
-  // 창을 먼저 표시(투명이라 빈 상태는 안 보임) → 다음 프레임에 크기 측정·배치 후 노출.
-  requestAnimationFrame(() => {
-    invoke("overlay_show", { passthrough: !!passthrough }).then(() => log("overlay_show ok")).catch((e) => log("overlay_show ERR " + e));
-    requestAnimationFrame(() => {
-      if (el) { placeEl(el, place); el.style.visibility = "visible"; if (el.classList.contains("wv-toast")) el.classList.add("show"); log("placed at " + el.style.left + "," + el.style.top + " size " + el.offsetWidth + "x" + el.offsetHeight); }
-    });
-  });
+  // ⚠️ 창을 먼저 즉시 표시해야 한다 — 숨겨진 창에선 rAF/타이머가 멈춰서, rAF 안에서 show 를
+  //  호출하면 영영 안 불린다(데드락). show 는 이벤트 콜백에서 직접 호출.
+  try { await invoke("overlay_show", { passthrough: !!passthrough }); log("overlay_show ok"); }
+  catch (e) { log("overlay_show ERR " + e); }
+  // 이제 창이 보이므로 레이아웃 측정·배치 가능(다음 프레임).
+  const paint = () => {
+    if (!el) return;
+    placeEl(el, place);
+    el.style.visibility = "visible";
+    if (el.classList.contains("wv-toast")) el.classList.add("show");
+    log("placed " + el.style.left + "," + el.style.top + " " + el.offsetWidth + "x" + el.offsetHeight);
+  };
+  requestAnimationFrame(paint);
+  setTimeout(paint, 60); // rAF 가 아직 안 돌 경우 대비(창 표시 직후 프레임)
   if (autohideMs) autohideTimer = setTimeout(() => hide("auto"), autohideMs);
 });
 
