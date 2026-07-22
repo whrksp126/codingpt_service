@@ -250,10 +250,10 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
       });
       menu.appendChild(b);
     };
-    row(icons.moon, "페이지 다크 모드", { toggle: { get: () => st.dark, set: doTheme } });
+    row(icons.moon, "다크모드", { toggle: { get: () => st.dark, set: doTheme } });
     row(icons.tools, "개발자 도구", { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
     row(icons.handoffOut, "스냅샷 등록", { onClick: doSave });
-    row(icons.external, "외부 브라우저에서 열기", { onClick: doExt });
+    row(icons.external, "외부 열기", { onClick: doExt });
     const r = more.getBoundingClientRect();
     menu.style.top = (r.bottom + 4) + "px";
     menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
