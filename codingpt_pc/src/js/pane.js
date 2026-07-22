@@ -344,8 +344,9 @@ class PreviewSurface {
         const r = (dtPageSlot(this.id) || h).getBoundingClientRect();
         // punch-through: 웹뷰는 앱 UI "아래" 라 DOM 모달/메뉴가 자연히 위에 그려진다 — 숨김 불필요.
         //  (오버레이 중 이벤트 차단은 main.js 의 preview_shield 가 담당) 드래그 중만 숨김 유지.
-        // URL 로드됐으면 빈 상태 DOM 제거 — 예전엔 웹뷰가 위에서 가려줬지만 이제 구멍을 막는다.
-        if (this.effUrl && h.querySelector(".preview-empty")) h.innerHTML = "";
+        // URL 로드됐으면 빈 상태 placeholder 만 제거 — innerHTML="" 전체 소거는 재부착된
+        //  데브툴 UI(wrap/slot)까지 날려 웹뷰가 죽은 슬롯(0×0)을 따라가 영영 숨는다(실측).
+        if (this.effUrl) h.querySelector(".preview-empty")?.remove();
         // punch-through: 드래그 중에도 숨기지 않는다 — DOM(고스트/드롭존)이 위층이라 가릴 게 없고,
         //  숨기면 배치 조정 중 웹이 사라져 보인다(실측). 이벤트는 shield 가 차단.
         const visible = this._visible && r.width > 2 && r.height > 2;
@@ -380,7 +381,7 @@ class PreviewSurface {
     cancelAnimationFrame(this._raf);
     clearInterval(this._infoTimer);
     this.bar.dispose();
-    dtDispose(this.id, keepWebview);
+    dtDispose(this.id, keepWebview, this.host);
     if (!keepWebview) api.previewClose(this.id).catch(() => {});
   }
 }
@@ -1156,7 +1157,8 @@ export class PaneView {
         // 크롬 데브툴 열림 = 프론트엔드가 알려준 "페이지 자리"(슬롯)에 webview 를 겹친다.
         const r = (dtPageSlot(this._pvId) || host).getBoundingClientRect();
         // punch-through: 웹뷰는 앱 UI "아래" — DOM 모달/메뉴가 자연히 위. 드래그 중만 숨김 유지.
-        if (this._pvEffUrl && host.querySelector(".preview-empty")) host.innerHTML = "";
+        // placeholder 만 제거(innerHTML="" 는 데브툴 UI 까지 소거 — 위 PreviewSurface 와 동일 규칙).
+        if (this._pvEffUrl) host.querySelector(".preview-empty")?.remove();
         // punch-through: 드래그 중에도 숨기지 않는다(위 PreviewSurface 와 동일 규칙 — shield 가 이벤트 차단).
         const visible = r.width > 2 && r.height > 2;
         const key = [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height), visible, this._pvEffUrl].join("|");
@@ -1271,7 +1273,7 @@ export class PaneView {
       // 탭 편입(joinPaneAsTab/mergeAsTabs) 등 표면 승계 경로에선 webview 를 닫지 않는다.
       //  단, 이 pane 의 rAF 동기화가 멈추므로 webview 를 즉시 숨겨 "부유"(다른 pane 위 덮힘)를 막고,
       //  승계한 host 의 PreviewSurface 가 활성화될 때 올바른 위치/가시성으로 다시 동기화하게 한다.
-      dtDispose(this._pvId, this._preservePreview);
+      dtDispose(this._pvId, this._preservePreview, this.previewHost);
       if (this._preservePreview) api.previewSync(this._pvId, this._pvEffUrl || this.previewUrl || "", 0, 0, 0, 0, false).catch(() => {});
       else api.previewClose(this._pvId).catch(() => {});
     }

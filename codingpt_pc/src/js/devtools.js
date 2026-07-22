@@ -340,11 +340,18 @@ export async function toggleChiiDevtools(pvId, host) {
 //  도킹 UI(iframe/슬롯)는 옛 pane DOM 과 함께 사라지므로 참조를 걷는다 — 안 걷으면
 //  dtPageSlot 이 detached 슬롯(rect 0×0)을 반환해 승계된 웹뷰가 영영 숨는다(실측).
 //  새 표면이 dtAttachHost 로 재부착하면 그때 새 host 안에 다시 짓는다.
-export function dtDispose(pvId, keep) {
+export function dtDispose(pvId, keep, host) {
   const s = sessions.get(pvId);
   if (!s) return;
+  if (keep) {
+    // 이동 경로마다 폐기/재생성 순서가 다르다(joinPaneAsTab=폐기→재생성, moveTab=재생성→폐기).
+    //  새 표면이 이미 재부착했으면(s.host 가 다른 host) 새 UI/폴링을 건드리면 안 된다.
+    if (host && s.host && s.host !== host) return;
+    stopPoll(s);
+    destroyDockUi(s);
+    return;
+  }
   stopPoll(s);
-  if (keep) { destroyDockUi(s); return; }
   if (s.mode === "window") api.devtoolsWindow(pvId, false).catch(() => {});
   destroyDockUi(s);
   sessions.delete(pvId);
@@ -356,10 +363,12 @@ export function dtDispose(pvId, keep) {
 export function dtAttachHost(pvId, host) {
   const s = sessions.get(pvId);
   if (!s) return;
+  const moved = s.host !== host;
   s.host = host;
-  if (!s.active) return;
+  if (!s.active) { if (moved) destroyDockUi(s); return; }
   if (s.mode === "window") { startPoll(s); return; } // 별도 창 모드 — UI 없음, CDP 폴링만 재개
-  if (!s.iframe) buildDockUi(s);
+  // host 가 바뀌었으면 항상 재구축 — 옛 UI 는 옛 pane DOM 소속이라 재사용 불가(iframe 재부팅).
+  if (moved || !s.iframe) { destroyDockUi(s); buildDockUi(s); }
   setDtVisible(s, true);
   void injectChobitsu(pvId);
 }
