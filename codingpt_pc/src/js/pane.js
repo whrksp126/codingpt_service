@@ -965,6 +965,20 @@ export class PaneView {
       if (out) this._write(out);
       this._sentBuf = v;
     };
+    // 붙여넣기 — 우리가 직접 1회만 전송하고 두 중복 경로를 모두 차단한다.
+    //  (버그: xterm 자체 paste 핸들러 onData→_write 와, textarea 에 붙은 텍스트의 input 델타→_write 가
+    //   동시에 발화해 붙여넣기가 2번 들어갔다. preventDefault 로 네이티브 삽입(→input) 차단 +
+    //   stopImmediatePropagation 으로 xterm paste 핸들러 차단 → 여기서 한 번만 보낸다.)
+    const onPaste = (e) => {
+      if (e.target !== ta) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+      if (!text) return;
+      let t = text.replace(/\r?\n/g, "\r");                         // xterm 규칙: 개행 → CR
+      if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~"; // 앱이 bracketed paste 지원 시 감쌈
+      this._write(t);
+      resetBuf();                                                   // textarea 미변경 → 미러(_sentBuf) 동기 유지
+    };
     // xterm CompositionHelper 차단 — 조합 표시는 위 델타 에코가 터미널 안에서 직접 보여준다(모바일 동일).
     const onComp = (e) => { if (e.target === ta) e.stopImmediatePropagation(); };
     const onCompEnd = (e) => {
@@ -988,6 +1002,7 @@ export class PaneView {
     this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
     document.addEventListener("input", onInput, true);
+    document.addEventListener("paste", onPaste, true);
     document.addEventListener("compositionstart", onComp, true);
     document.addEventListener("compositionupdate", onComp, true);
     document.addEventListener("compositionend", onCompEnd, true);
@@ -997,6 +1012,7 @@ export class PaneView {
       this.termEl?.removeEventListener("mousedown", onMouseDown);
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
+      document.removeEventListener("paste", onPaste, true);
       document.removeEventListener("compositionstart", onComp, true);
       document.removeEventListener("compositionupdate", onComp, true);
       document.removeEventListener("compositionend", onCompEnd, true);

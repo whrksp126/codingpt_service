@@ -200,7 +200,7 @@ async function handleUiCommand(ws, msg) {
     } else {
       const handler = handlers[cmd];
       if (!handler) res = { ok: false, error: "알 수 없는 명령: " + cmd };
-      else res = (await handler(params || {})) || { ok: true };
+      else res = (await handler(params || {}, executor)) || { ok: true };
     }
   } catch (e) {
     res = { ok: false, error: (e && e.message) || String(e) };
@@ -531,8 +531,11 @@ const handlers = {
     return { ok: true };
   },
 
-  // 열린 프리뷰가 있으면 그 pane 포커스+이동, 없으면 포커스 pane 우측 분할로 프리뷰 생성.
-  previewOpen: async (p) => {
+  // 열린 프리뷰가 있으면 그 pane 포커스+이동. 없으면 신규 생성:
+  //  · executor(지금 조작 중인 기기) = 포커스 pane 우측 분할로 명시 배치(프리뷰가 잘 보이게).
+  //  · 그 외 기기 = 강제 우측분할 금지, 터미널 추가와 동일 규칙(smartAdd)으로 편입
+  //    (포커스 터미널 pane 있으면 혼합 프리뷰 탭, 공간 있으면 분할). 배치는 기기별 자율.
+  previewOpen: async (p, executor) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
     if (!url) throw new Error("url 필요");
@@ -541,10 +544,14 @@ const handlers = {
       navigatePreview(target, url);
       return { ok: true, paneId: target.leaf.id };
     }
-    const focusId = rt.focusId || T.firstLeafId(rt.layout);
-    if (!focusId) throw new Error("분할할 pane 없음");
-    S.splitPane(focusId, "h", "preview", { url });
-    return { ok: true, paneId: rt.focusId };
+    if (executor) {
+      const focusId = rt.focusId || T.firstLeafId(rt.layout);
+      if (!focusId) throw new Error("분할할 pane 없음");
+      S.splitPane(focusId, "h", "preview", { url });
+      return { ok: true, paneId: rt.focusId };
+    }
+    const paneId = smartAdd("preview", { url });
+    return { ok: true, paneId };
   },
 
   // 첫(포커스 우선) 프리뷰 대상에 URL 이동.
