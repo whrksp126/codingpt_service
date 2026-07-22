@@ -318,8 +318,12 @@ export async function toggleChiiDevtools(pvId, host) {
     setDtVisible(s, false);
     return false;
   }
-  if (s && s.iframe) {
+  if (s) {
+    // 재열기 — 표면 승계로 UI 가 걷혔으면(iframe 없음) 새 host 에 다시 짓는다.
+    s.host = host;
+    if (!s.iframe) buildDockUi(s);
     setDtVisible(s, true);
+    void injectChobitsu(pvId); // 닫힌 사이 페이지가 이동했을 수 있음(멱등)
     return true;
   }
   s = { pvId, host, active: true, mode: "dock", poll: null, enableLog: new Map(), replayId: REPLAY_ID_BASE, boundsSeen: false };
@@ -332,13 +336,30 @@ export async function toggleChiiDevtools(pvId, host) {
   return true;
 }
 
-// 표면 폐기(웹뷰 닫힘/탭 이동) — 세션 정리. keep=true 면(웹뷰 승계) 세션도 유지.
+// 표면 폐기(웹뷰 닫힘/탭 이동) — 세션 정리. keep=true 면(웹뷰 승계) 세션은 유지하되,
+//  도킹 UI(iframe/슬롯)는 옛 pane DOM 과 함께 사라지므로 참조를 걷는다 — 안 걷으면
+//  dtPageSlot 이 detached 슬롯(rect 0×0)을 반환해 승계된 웹뷰가 영영 숨는다(실측).
+//  새 표면이 dtAttachHost 로 재부착하면 그때 새 host 안에 다시 짓는다.
 export function dtDispose(pvId, keep) {
-  if (keep) return;
   const s = sessions.get(pvId);
   if (!s) return;
   stopPoll(s);
+  if (keep) { destroyDockUi(s); return; }
   if (s.mode === "window") api.devtoolsWindow(pvId, false).catch(() => {});
   destroyDockUi(s);
   sessions.delete(pvId);
+}
+
+// 표면 재생성(탭↔독립 pane 전환·pane 간 탭 이동) — 새 host 에 데브툴 세션 재부착.
+//  열려 있었으면 새 host 안에 도킹 UI 를 다시 짓는다(iframe 은 재부팅되지만 페이지 쪽
+//  chobitsu·enable 리플레이 로그가 세션에 남아 있어 상태 손실 없음).
+export function dtAttachHost(pvId, host) {
+  const s = sessions.get(pvId);
+  if (!s) return;
+  s.host = host;
+  if (!s.active) return;
+  if (s.mode === "window") { startPoll(s); return; } // 별도 창 모드 — UI 없음, CDP 폴링만 재개
+  if (!s.iframe) buildDockUi(s);
+  setDtVisible(s, true);
+  void injectChobitsu(pvId);
 }

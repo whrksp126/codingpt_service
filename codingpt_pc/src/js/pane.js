@@ -9,7 +9,7 @@ import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
-import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
+import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -328,6 +328,7 @@ class PreviewSurface {
     this.host.className = "preview-host";
     fillPreviewEmpty(this.host);
     parent.append(this.bar.el, this.host);
+    dtAttachHost(this.id, this.host); // 승계된 데브툴 세션이 있으면 새 host 에 재부착
     this._visible = false;
     this._key = "";
     this._disposed = false;
@@ -641,6 +642,7 @@ export class PaneView {
     this._pvEffUrl = this.previewUrl;
     if (this.previewUrl) this._applyPvEff(this.previewUrl, false);
     this.body.append(this.previewBar.el, host);
+    dtAttachHost(this._pvId, host); // 승계된 데브툴 세션이 있으면 새 host 에 재부착
   }
 
   // 독립 프리뷰 pane 의 실효 URL 반영(PreviewSurface._applyEff 와 동일 규칙).
