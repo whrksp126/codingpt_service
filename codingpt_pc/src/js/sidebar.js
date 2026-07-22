@@ -5,8 +5,9 @@ import * as T from "./tiling.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
-import { renderNotifPanel, jumpLatestUnread, readNotif } from "./notifications.js";
+import { renderNotifPanel, buildNotifPanelEl, jumpLatestUnread, readNotif } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
+import { makeActions, bindActions, openOverlay, refreshOverlay } from "./overlay-host.js";
 
 let el = null;
 let notifPanel = null;
@@ -88,26 +89,25 @@ export function toggleLatestUnread() {
   jumpLatestUnread((n) => jumpToNotification(n));
 }
 
-// 알림 목록을 네이티브 메뉴 항목으로.
-function notifMenuSpec() {
-  if (!state.notifications.length) return [{ text: "알림이 없습니다", enabled: false }];
-  const oneLine = (s) => String(s || "").replace(/\s+/g, " ").trim().slice(0, 48);
-  const spec = [
-    { text: "모두 읽음", action: () => S.markAllRead() },
-    { separator: true },
-  ];
-  for (const n of state.notifications.slice(0, 30)) {
-    const ws = state.workspaces.find((x) => x.id === (n.workspaceId ?? n.wsId));
-    const wsName = n.wsName || ws?.name || "";
-    const label = (n.read ? "" : "● ") + oneLine(n.title) + (wsName ? " · " + oneLine(wsName) : "");
-    spec.push({ text: label || "알림", action: () => { readNotif(n); jumpToNotification(n); } });
-  }
-  return spec;
+// 알림 패널 — 기존 디자인 그대로 오버레이 웹뷰(프리뷰 위)에 표시. 미가용 시 DOM 패널 폴백.
+function notifPlace() {
+  const bell = [...document.querySelectorAll(".bell")].find((b) => b.offsetParent !== null) || el?.querySelector(".bell");
+  const r = bell ? bell.getBoundingClientRect() : { left: 60, bottom: 40 };
+  return { mode: "anchor", x: r.left, y: (r.bottom || 0) + 6 };
 }
-
-function openNotif() {
-  // 네이티브 메뉴 우선(프리뷰 웹뷰 위에 뜸) → 실패 시 DOM 패널 폴백.
-  popupNativeMenu(notifMenuSpec()).then((ok) => { if (!ok) openNotifDom(); }).catch(() => openNotifDom());
+async function openNotif() {
+  const place = notifPlace();
+  const render = (viaRefresh) => {
+    const { map, tag } = makeActions();
+    const panel = buildNotifPanelEl({
+      tag,
+      onRow: (n) => { readNotif(n); jumpToNotification(n); },
+      onMarkAll: () => { S.markAllRead(); render(true); }, // keep: 갱신 후 열림 유지
+    });
+    return viaRefresh ? (refreshOverlay(panel, map, place), true) : openOverlay(panel, map, { place });
+  };
+  const ok = await render(false);
+  if (!ok) openNotifDom();
 }
 
 function openNotifDom() {
@@ -445,148 +445,75 @@ function closeWsMenu() {
 function onWsMenuOutside(e) { if (wsMenuEl && !wsMenuEl.contains(e.target)) closeWsMenu(); }
 function onWsMenuKey(e) { if (e.key === "Escape") closeWsMenu(); }
 
-// 네이티브 NSMenu 팝업 — items: [{text,action,enabled}|{separator:true}|{text,submenu:[...]}].
-//  네이티브 웹뷰(프리뷰) 위에 합성되므로 DOM 이 가려지지 않는다. 성공 시 true, 미지원 시 false, 실패 시 throw.
-async function popupNativeMenu(items) {
-  const menuApi = window.__TAURI__ && window.__TAURI__.menu;
-  if (!menuApi || !menuApi.Menu) return false;
-  const build = async (specs) => {
-    const out = [];
-    for (const s of specs) {
-      if (!s) continue;
-      if (s.separator) { out.push({ item: "Separator" }); continue; }
-      if (s.submenu) {
-        out.push(await menuApi.Submenu.new({ text: s.text, enabled: s.enabled !== false, items: await build(s.submenu) }));
-        continue;
-      }
-      out.push({ text: s.text, enabled: s.enabled !== false, action: s.action || (() => {}) });
-    }
-    return out;
-  };
-  const menu = await menuApi.Menu.new({ items: await build(items) });
-  await menu.popup();
-  return true;
-}
-
-// 워크스페이스 우클릭 메뉴를 네이티브 항목으로 구성.
-function wsMenuSpec(w) {
-  const pinned = S.wsPinned(w.id);
-  const projKey = w.projectId || w.id;
-  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
-  const colorSub = WS_COLORS.map(([title, c]) => ({
-    text: ((S.wsColor(w.id) || "") === c ? "● " : "") + title,
-    action: () => S.setWsColor(w.id, c),
-  }));
-  const attachCands = [];
-  {
-    const seen = new Set();
-    for (const x of S.sortedWorkspaces()) {
-      const k = x.projectId || x.id;
-      if (k === projKey || seen.has(k)) continue;
-      seen.add(k);
-      attachCands.push({ text: S.wsDisplayName(x), action: async () => { try { await api.projectAttach(w.id, x.id); await S.loadWorkspaces(); } catch (_) {} } });
-    }
-  }
-  const spec = [
-    { text: "이름 변경", action: () => inlineRename(w) },
-    { text: pinned ? "고정 해제" : "고정", action: () => S.togglePinWs(w.id) },
-    { separator: true },
-    { text: "색상", submenu: colorSub },
-    { separator: true },
-    { text: "위로 이동", action: () => S.moveWs(w.id, "up") },
-    { text: "아래로 이동", action: () => S.moveWs(w.id, "down") },
-    { text: "맨 위로 이동", action: () => S.moveWs(w.id, "top") },
-  ];
-  if (hasSibling) {
-    spec.push({ separator: true }, { text: "프로젝트에서 분리", action: async () => { try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
-  } else if (attachCands.length) {
-    spec.push({ separator: true }, { text: "다른 프로젝트와 합치기", submenu: attachCands });
-  }
-  return spec;
-}
-
-function showWsMenu(e, w) {
-  // 네이티브 메뉴 우선(프리뷰 웹뷰 위에 뜸) → 실패 시 DOM 메뉴 폴백.
-  popupNativeMenu(wsMenuSpec(w)).then((ok) => { if (!ok) showWsMenuDom(e, w); }).catch(() => showWsMenuDom(e, w));
-}
-
-function showWsMenuDom(e, w) {
-  closeWsMenu();
-  const pinned = S.wsPinned(w.id);
-  const menu = document.createElement("div");
-  menu.className = "ctx-menu";
-  const item = (icon, label, onClick, opts = {}) => {
-    const b = document.createElement("button");
-    b.className = "ctx-item" + (opts.danger ? " danger" : "");
-    b.innerHTML = `<span class="ctx-ic">${icon || ""}</span><span class="ctx-label">${label}</span>`;
-    b.addEventListener("click", () => { closeWsMenu(); onClick(); });
-    menu.appendChild(b);
-    return b;
-  };
-  const sep = () => { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); };
-
-  item(icons.edit({ size: 15 }), "이름 변경", () => inlineRename(w));
-  item(icons.pin({ size: 15 }), pinned ? "고정 해제" : "고정", () => S.togglePinWs(w.id));
-  // 색상 스와치
-  const colorWrap = document.createElement("div");
-  colorWrap.className = "ctx-colors";
-  for (const [title, c] of WS_COLORS) {
-    const sw = document.createElement("button");
-    sw.className = "ctx-sw" + (c ? "" : " none") + ((S.wsColor(w.id) || "") === c ? " sel" : "");
-    sw.title = title;
-    if (c) sw.style.background = c;
-    sw.addEventListener("click", () => { closeWsMenu(); S.setWsColor(w.id, c); });
-    colorWrap.appendChild(sw);
-  }
-  const colorRow = document.createElement("div");
-  colorRow.className = "ctx-item ctx-static";
-  colorRow.innerHTML = `<span class="ctx-ic">${icons.palette({ size: 15 })}</span><span class="ctx-label">색상</span>`;
-  colorRow.appendChild(colorWrap);
-  menu.appendChild(colorRow);
-  sep();
-  item(icons.arrowUp({ size: 15 }), "위로 이동", () => S.moveWs(w.id, "up"));
-  item(icons.arrowDown({ size: 15 }), "아래로 이동", () => S.moveWs(w.id, "down"));
-  item(icons.arrowTop({ size: 15 }), "맨 위로 이동", () => S.moveWs(w.id, "top"));
-  sep();
-  // 프로젝트 그룹 교정 — 자동 연결(이름/remote)이 틀렸을 때 1회 수정(영구 저장).
-  const projKey = w.projectId || w.id;
-  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
-  if (hasSibling) {
-    item(icons.folder({ size: 15 }), "프로젝트에서 분리", async () => {
-      try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {}
-    });
-  } else {
-    item(icons.folder({ size: 15 }), "다른 프로젝트와 합치기", () => showAttachMenu(w));
-  }
-
-  document.body.appendChild(menu);
-  wsMenuEl = menu;
-  // 위치(뷰포트 넘치면 보정)
-  const mw = menu.offsetWidth, mh = menu.offsetHeight;
-  let x = e.clientX, y = e.clientY;
-  if (x + mw > window.innerWidth - 8) x = window.innerWidth - mw - 8;
-  if (y + mh > window.innerHeight - 8) y = window.innerHeight - mh - 8;
-  menu.style.left = Math.max(8, x) + "px";
-  menu.style.top = Math.max(8, y) + "px";
-  setTimeout(() => {
-    document.addEventListener("mousedown", onWsMenuOutside, true);
-    document.addEventListener("keydown", onWsMenuKey, true);
-    window.addEventListener("blur", closeWsMenu);
-  }, 0);
-}
-
-// ctx-menu 스타일 공용 팝업 빌더 — items: [{icon,label,onClick}]. 지정 좌표(뷰포트 보정)에 표시.
-function showPopupMenu(x, y, items) {
-  closeWsMenu();
+// ctx-menu 요소 빌드(디자인=styles.css .ctx-menu 그대로). 오버레이/DOM 양쪽 공용.
+//  items: {icon,label,danger,onClick}(기본 항목) | {type:'sep'} | {type:'colors',icon,label,colors:[{title,c,sel,onClick}]}
+function buildCtxEl(items, tag) {
   const menu = document.createElement("div");
   menu.className = "ctx-menu";
   for (const it of items) {
+    if (!it) continue;
+    if (it.type === "sep") { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); continue; }
+    if (it.type === "colors") {
+      const row = document.createElement("div");
+      row.className = "ctx-item ctx-static";
+      row.innerHTML = `<span class="ctx-ic">${it.icon || ""}</span><span class="ctx-label">${escapeHtml(it.label)}</span>`;
+      const wrap = document.createElement("div");
+      wrap.className = "ctx-colors";
+      for (const c of it.colors) {
+        const sw = document.createElement("button");
+        sw.className = "ctx-sw" + (c.c ? "" : " none") + (c.sel ? " sel" : "");
+        if (c.c) sw.style.background = c.c;
+        sw.title = c.title;
+        tag(sw, c.onClick);
+        wrap.appendChild(sw);
+      }
+      row.appendChild(wrap);
+      menu.appendChild(row);
+      continue;
+    }
     const b = document.createElement("button");
-    b.className = "ctx-item";
+    b.className = "ctx-item" + (it.danger ? " danger" : "");
     b.innerHTML = `<span class="ctx-ic">${it.icon || ""}</span><span class="ctx-label">${escapeHtml(it.label)}</span>`;
-    b.addEventListener("click", () => { closeWsMenu(); it.onClick(); });
+    tag(b, it.onClick);
     menu.appendChild(b);
   }
+  return menu;
+}
+
+// 워크스페이스 우클릭 메뉴 항목 모델.
+function wsMenuItems(w) {
+  const pinned = S.wsPinned(w.id);
+  const projKey = w.projectId || w.id;
+  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
+  const items = [
+    { icon: icons.edit({ size: 15 }), label: "이름 변경", onClick: () => inlineRename(w) },
+    { icon: icons.pin({ size: 15 }), label: pinned ? "고정 해제" : "고정", onClick: () => S.togglePinWs(w.id) },
+    { type: "colors", icon: icons.palette({ size: 15 }), label: "색상", colors: WS_COLORS.map(([title, c]) => ({ title, c, sel: (S.wsColor(w.id) || "") === c, onClick: () => S.setWsColor(w.id, c) })) },
+    { type: "sep" },
+    { icon: icons.arrowUp({ size: 15 }), label: "위로 이동", onClick: () => S.moveWs(w.id, "up") },
+    { icon: icons.arrowDown({ size: 15 }), label: "아래로 이동", onClick: () => S.moveWs(w.id, "down") },
+    { icon: icons.arrowTop({ size: 15 }), label: "맨 위로 이동", onClick: () => S.moveWs(w.id, "top") },
+    { type: "sep" },
+  ];
+  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: "프로젝트에서 분리", onClick: async () => { try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
+  else items.push({ icon: icons.folder({ size: 15 }), label: "다른 프로젝트와 합치기", onClick: () => showAttachMenu(w) });
+  return items;
+}
+
+// 우클릭 컨텍스트 메뉴 — 오버레이 웹뷰(프리뷰 위) 우선, 미가용 시 DOM 폴백.
+function showWsMenu(e, w) {
+  const place = { mode: "point", x: e.clientX, y: e.clientY };
+  const { map, tag } = makeActions();
+  const menu = buildCtxEl(wsMenuItems(w), tag);
+  openOverlay(menu, map, { place }).then((ok) => { if (!ok) showCtxDom(e.clientX, e.clientY, wsMenuItems(w)); }).catch(() => showCtxDom(e.clientX, e.clientY, wsMenuItems(w)));
+}
+
+// DOM 폴백 — body 에 붙여 표시(오버레이가 없을 때만. 프리뷰가 위에 겹치면 rAF 가 잠깐 숨김).
+function showCtxDom(x, y, items) {
+  closeWsMenu();
+  const { map, tag } = makeActions();
+  const menu = buildCtxEl(items, tag);
+  bindActions(menu, map, closeWsMenu);
   document.body.appendChild(menu);
   wsMenuEl = menu;
   const mw = menu.offsetWidth, mh = menu.offsetHeight;
@@ -599,6 +526,14 @@ function showPopupMenu(x, y, items) {
     document.addEventListener("keydown", onWsMenuKey, true);
     window.addEventListener("blur", closeWsMenu);
   }, 0);
+}
+
+// 지정 좌표 팝업 메뉴 — 오버레이 우선, DOM 폴백. items: [{icon,label,onClick}].
+function showPopupMenu(x, y, items) {
+  const place = { mode: "point", x, y };
+  const { map, tag } = makeActions();
+  const menu = buildCtxEl(items, tag);
+  openOverlay(menu, map, { place }).then((ok) => { if (!ok) showCtxDom(x, y, items); }).catch(() => showCtxDom(x, y, items));
 }
 
 // 꺼진 호스트 사본 클릭 — 같은 프로젝트의 켜진 사본으로 원탭 폴백 제안.

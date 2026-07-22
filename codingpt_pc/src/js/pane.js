@@ -10,6 +10,7 @@ import { makeRemoteFs } from "./remote-fs.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtOnPageLoaded, dtDispose } from "./devtools.js";
+import { makeActions, bindActions, openOverlay } from "./overlay-host.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -209,50 +210,46 @@ function makePreviewBar({ getId, getHost, initialUrl, initialDark, onNavigate, o
   const doExt = () => { if (st.url) api.openExternal(st.rawUrl || st.url).catch(() => {}); };
   const doSave = async () => { try { const wv = await import("./workspace-view.js"); await wv.saveSnapshotAndToast(); } catch (_) { /* noop */ } };
 
-  // DOM 폴백 메뉴 — 네이티브 메뉴가 안 될 때만. (네이티브 웹뷰 뒤에 뜨므로 rAF 가 프리뷰를 잠깐 숨김)
-  const openDomMenu = () => {
-    document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+  // ⋯ 메뉴 항목 요소 빌드(디자인=styles.css .pv-menu 그대로). 오버레이/DOM 공용.
+  const buildMoreMenu = (tag) => {
     const menu = document.createElement("div");
     menu.className = "pv-menu";
     const item = (label, active, onClick) => {
       const b = document.createElement("button");
       b.className = "pv-menu-item" + (active ? " active" : "");
       b.textContent = label;
-      b.addEventListener("click", () => { menu.remove(); onClick(); });
-      return b;
+      tag(b, onClick);
+      menu.appendChild(b);
     };
-    menu.append(
-      item(st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", st.dark, doTheme),
-      item("개발자 도구", false, () => doTools(false)),
-      item("올리기 (스냅샷 저장)", false, doSave),
-      item("외부 브라우저에서 열기", false, doExt),
-    );
+    item(st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", st.dark, doTheme);
+    item("개발자 도구", false, () => doTools(false));
+    item("올리기 (스냅샷 저장)", false, doSave);
+    item("외부 브라우저에서 열기", false, doExt);
+    return menu;
+  };
+  // DOM 폴백 — 오버레이 미가용 시만(프리뷰 뒤에 뜨므로 rAF 가 프리뷰를 잠깐 숨김).
+  const openDomMenu = () => {
+    document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+    const { map, tag } = makeActions();
+    const menu = buildMoreMenu(tag);
+    const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+    bindActions(menu, map, close);
     const r = more.getBoundingClientRect();
     menu.style.top = (r.bottom + 4) + "px";
     menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
     document.body.append(menu);
-    const closer = (e) => { if (!menu.contains(e.target) && e.target !== more) { menu.remove(); document.removeEventListener("mousedown", closer, true); } };
+    const closer = (e) => { if (!menu.contains(e.target) && e.target !== more) close(); };
     setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
   };
 
   more.addEventListener("click", async () => {
     if (!st.url) return;
-    // 네이티브 메뉴(NSMenu) — 웹뷰를 안 숨기고 그 위에 뜬다(네이티브가 DOM 위에 합성됨).
-    try {
-      const menuApi = window.__TAURI__ && window.__TAURI__.menu;
-      if (!menuApi || !menuApi.Menu) throw new Error("no native menu");
-      const menu = await menuApi.Menu.new({
-        items: [
-          { text: st.dark ? "페이지 다크 끄기" : "페이지 다크 모드", action: () => doTheme() },
-          { text: "개발자 도구", action: () => doTools(false) },
-          { text: "올리기 (스냅샷 저장)", action: () => { doSave(); } },
-          { text: "외부 브라우저에서 열기", action: () => doExt() },
-        ],
-      });
-      await menu.popup();
-    } catch (_) {
-      openDomMenu(); // 네이티브 실패 시 DOM 폴백(웹뷰 숨김 경유)
-    }
+    // 오버레이 웹뷰(프리뷰 위)에 표시 — 우측 정렬(⋯ 버튼 우측 끝 기준).
+    const r = more.getBoundingClientRect();
+    const { map, tag } = makeActions();
+    const menu = buildMoreMenu(tag);
+    const ok = await openOverlay(menu, map, { place: { mode: "point", x: r.right, y: r.bottom + 4, align: "tr" } }).catch(() => false);
+    if (!ok) openDomMenu();
   });
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter") return;

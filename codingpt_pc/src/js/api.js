@@ -113,6 +113,10 @@ export const api = {
   // ── 네이티브 알림 ──
   notify: (title, body) => invoke("notify", { title, body: body || "" }),
 
+  // ── 범용 오버레이 창(프리뷰 웹뷰 위에 뜨는 메뉴·패널·토스트) ──
+  overlayEnsure: () => invoke("overlay_ensure"),
+  overlayHide: () => invoke("overlay_hide"),
+
   // ── 자동 업데이트(번들 앱 전용 — tauri dev 에선 updateCheck 가 error 반환) ──
   appVersion: () => invoke("app_version"),
   updateCheck: () => invoke("update_check"),

@@ -85,6 +85,43 @@ export function renderNotifPanel(el, onJump) {
   }
 }
 
+// 오버레이용 알림 패널 요소 빌드 — 디자인(클래스)은 renderNotifPanel 과 동일. 액션은 tag 로 등록.
+//  handlers: { tag(node,fn,keep), onRow(n), onMarkAll() }
+export function buildNotifPanelEl({ tag, onRow, onMarkAll }) {
+  const el = document.createElement("div");
+  el.className = "notif-panel";
+  const head = document.createElement("div");
+  head.className = "notif-head";
+  head.innerHTML = "<span>알림</span>";
+  const clear = document.createElement("button");
+  clear.className = "btn small ghost";
+  clear.textContent = "모두 읽음";
+  tag(clear, onMarkAll, true); // keep: 갱신 후에도 패널 유지
+  head.appendChild(clear);
+  el.appendChild(head);
+  if (!state.notifications.length) {
+    const empty = document.createElement("div");
+    empty.className = "notif-empty";
+    empty.textContent = "알림이 없습니다";
+    el.appendChild(empty);
+    return el;
+  }
+  for (const n of state.notifications.slice(0, 40)) {
+    const ws = state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId));
+    const wsName = n.wsName || ws?.name || "";
+    const row = document.createElement("button");
+    row.className = "notif-row" + (n.read ? "" : " unread");
+    row.innerHTML =
+      `<div class="notif-title">${escapeHtml(n.title)}</div>` +
+      (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
+      (n.body ? `<div class="notif-body">${escapeHtml(n.body)}</div>` : "") +
+      `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}</div>`;
+    tag(row, () => onRow(n));
+    el.appendChild(row);
+  }
+  return el;
+}
+
 export function jumpLatestUnread(onJump) {
   const n = state.notifications.find((x) => !x.read);
   if (n) {

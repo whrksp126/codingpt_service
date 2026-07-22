@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title></title>
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* 오버레이 창은 배경 투명 — 아래 메인 창(프리뷰 포함)이 비쳐 보인다. */
+      html, body { background: transparent !important; margin: 0; height: 100%; width: 100%; overflow: hidden; }
+      #ovl-backdrop { position: fixed; inset: 0; background: transparent; pointer-events: none; }
+      #ovl-pop { position: fixed; inset: 0; pointer-events: none; }
+      /* 팝업 자체(.ctx-menu/.notif-panel/.wv-toast 등)는 position:fixed + 클릭 가능 */
+      #ovl-pop > * { pointer-events: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="ovl-backdrop"></div>
+    <div id="ovl-pop"></div>
+    <script type="module" src="js/overlay.js"></script>
+  </body>
+</html>

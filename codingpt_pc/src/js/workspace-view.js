@@ -8,16 +8,18 @@ import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { openOverlay } from "./overlay-host.js";
 
-// 간단 토스트(스냅샷 결과 등). 프리뷰(네이티브 웹뷰)가 DOM 위에 합성되므로,
-//  토스트는 네이티브 OS 알림으로 띄워 항상 위에 보이게 한다. 네이티브 실패 시에만 DOM 토스트 폴백.
+// 간단 토스트(스냅샷 결과 등). 프리뷰(네이티브 웹뷰)가 DOM 위에 합성되므로, 오버레이 웹뷰(프리뷰 위)에
+//  띄운다. 클릭 통과(passthrough)라 작업 방해 없음. 오버레이 미가용 시 DOM 토스트 폴백.
 export function wvToast(msg) {
   const text = String(msg);
-  try {
-    const p = api.notify("CodingPT", text);
-    if (p && typeof p.then === "function") { p.catch(() => wvToastDom(text)); return; }
-  } catch (_) { /* 아래 DOM 폴백 */ }
-  wvToastDom(text);
+  const el = document.createElement("div");
+  el.className = "wv-toast";
+  el.textContent = text;
+  openOverlay(el, null, { place: { mode: "toast" }, passthrough: true, autohideMs: 2800 })
+    .then((ok) => { if (!ok) wvToastDom(text); })
+    .catch(() => wvToastDom(text));
 }
 function wvToastDom(msg) {
   const d = document.createElement("div");

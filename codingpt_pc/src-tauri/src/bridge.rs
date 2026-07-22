@@ -694,6 +694,68 @@ pub fn devtools_window(app: AppHandle, pv: String, open: bool) -> Result<(), Str
     Ok(())
 }
 
+// ── 범용 오버레이 창 ─────────────────────────────────────────────────────────
+//  프리뷰(네이티브 웹뷰)는 항상 DOM 위에 합성되므로, 그 위에 떠야 하는 UI(메뉴·알림 패널·토스트·
+//  향후 다이얼로그 등)는 DOM 으로 못 올린다. → 투명·테두리 없음·always-on-top 별도 웹뷰 창 하나를
+//  시작 시 미리 만들어두고(웜) 재사용한다. 콘텐츠·액션은 JS 이벤트 버스(overlay-host.js), 창
+//  생명주기/지오메트리는 여기 Rust 가 소유(신뢰성). transparent 는 macOSPrivateApi=true 필요.
+#[tauri::command]
+pub fn overlay_ensure(app: AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if app.get_webview_window("overlay").is_some() {
+        return Ok(());
+    }
+    let mut b = tauri::WebviewWindowBuilder::new(&app, "overlay", tauri::WebviewUrl::App("overlay.html".into()))
+        .title("")
+        .transparent(true)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .resizable(false)
+        .focused(false)
+        .visible(false);
+    // 초기 크기는 메인 창 콘텐츠에 맞춰둔다(show 때 재정렬).
+    if let Some(main) = app.get_webview_window("main") {
+        if let (Ok(pos), Ok(size)) = (main.inner_position(), main.inner_size()) {
+            b = b.inner_size(size.width as f64, size.height as f64).position(pos.x as f64, pos.y as f64);
+        }
+    }
+    b.build().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// 오버레이를 메인 창 콘텐츠 영역에 정확히 겹쳐 표시. passthrough=true 면 클릭 통과(토스트용).
+#[tauri::command]
+pub fn overlay_show(app: AppHandle, passthrough: bool) -> Result<(), String> {
+    use tauri::Manager;
+    let main = app.get_webview_window("main").ok_or("메인 창 없음")?;
+    let ov = app.get_webview_window("overlay").ok_or("오버레이 창 없음")?;
+    let pos = main.inner_position().map_err(|e| e.to_string())?;
+    let size = main.inner_size().map_err(|e| e.to_string())?;
+    ov.set_position(tauri::PhysicalPosition::new(pos.x, pos.y)).map_err(|e| e.to_string())?;
+    ov.set_size(tauri::PhysicalSize::new(size.width, size.height)).map_err(|e| e.to_string())?;
+    ov.set_ignore_cursor_events(passthrough).map_err(|e| e.to_string())?;
+    ov.set_always_on_top(true).map_err(|e| e.to_string())?;
+    ov.show().map_err(|e| e.to_string())?;
+    if !passthrough {
+        let _ = ov.set_focus();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn overlay_hide(app: AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    if let Some(ov) = app.get_webview_window("overlay") {
+        let _ = ov.hide();
+    }
+    if let Some(m) = app.get_webview_window("main") {
+        let _ = m.set_focus();
+    }
+    Ok(())
+}
+
 // ── 범용 back REST(deviceToken) — 원격 PC 워크스페이스의 fs/프리뷰 릴레이 호출용 ──
 //  /api/daemon/ 경로만 허용(최소 울타리). 성공 응답은 data 직접 반환 규약이라 JSON 그대로 넘긴다.
 //  에러는 back 의 { message } 를 살려 "HTTP <code>: <message>" 로 전달(409=대상 데몬 오프라인 등).
