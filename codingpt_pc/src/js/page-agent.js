@@ -75,18 +75,62 @@ export const PAGE_AGENT_JS = String.raw`(function(){
       return { url: location.href, title: document.title, refs: refs };
     },
 
-    // 클릭 — 실제 사용자 입력에 가깝게 pointer/mouse 시퀀스 후 click().
-    click: function(target){
-      var el = resolve(target);
-      try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+    // 클릭 — target(ref/selector) 또는 좌표(x,y, viewport CSS px). 좌표면 elementFromPoint 로 대상 결정.
+    click: function(target, x, y){
+      var byXY = (typeof x === 'number' && typeof y === 'number');
+      var el;
+      if (byXY) {
+        el = document.elementFromPoint(x, y);
+        if (!el) throw new Error('좌표에 요소가 없음: ' + x + ',' + y);
+      } else {
+        el = resolve(target);
+        try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+      }
       var r = el.getBoundingClientRect();
-      var opts = { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 };
+      var cx = byXY ? x : r.x + r.width / 2;
+      var cy = byXY ? y : r.y + r.height / 2;
+      var opts = { bubbles: true, cancelable: true, clientX: cx, clientY: cy };
       try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}
       el.dispatchEvent(new MouseEvent('mousedown', opts));
       try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}
       el.dispatchEvent(new MouseEvent('mouseup', opts));
       el.click();
-      return { clicked: String(target) };
+      return { clicked: byXY ? (cx + ',' + cy) : String(target) };
+    },
+
+    // 스크롤 — target 지정 시 그 요소를 화면 중앙으로. 아니면 window: dx/dy=상대(scrollBy), x/y=절대(scrollTo).
+    scroll: function(spec){
+      spec = spec || {};
+      if (spec.target != null && spec.target !== '') {
+        var el = resolve(spec.target);
+        try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+        return { x: window.scrollX, y: window.scrollY, into: true };
+      }
+      if (typeof spec.dx === 'number' || typeof spec.dy === 'number') window.scrollBy(spec.dx || 0, spec.dy || 0);
+      else window.scrollTo(spec.x || 0, spec.y || 0);
+      return { x: window.scrollX, y: window.scrollY };
+    },
+
+    // 키 입력 — keydown→(문자면 값 반영)→keyup 을 합성 KeyboardEvent 로. 합성 이벤트는 isTrusted:false 라
+    //  앱 JS 핸들러엔 통하지만 브라우저 기본동작(폼 submit 등)은 발화 안 될 수 있음(GUIDE 명기).
+    press: function(spec){
+      spec = spec || {};
+      var key = String(spec.key || '');
+      if (!key) throw new Error('key 필요');
+      var el = (spec.target != null && spec.target !== '') ? resolve(spec.target) : (document.activeElement || document.body);
+      try { el.focus(); } catch (e) {}
+      var mods = spec.modifiers || [];
+      function has(m){ return mods.indexOf(m) >= 0; }
+      var init = { key: key, code: (key.length === 1 ? 'Key' + key.toUpperCase() : key),
+        bubbles: true, cancelable: true, ctrlKey: has('ctrl'), altKey: has('alt'), shiftKey: has('shift'), metaKey: has('meta') };
+      el.dispatchEvent(new KeyboardEvent('keydown', init));
+      var ins = spec.text != null ? String(spec.text) : (key.length === 1 && !has('ctrl') && !has('meta') && !has('alt') ? key : '');
+      if (ins) {
+        if ('value' in el && typeof el.value === 'string') setValue(el, String(el.value || '') + ins, false);
+        else if (el.isContentEditable) { el.textContent = String(el.textContent || '') + ins; el.dispatchEvent(new Event('input', { bubbles: true })); }
+      }
+      el.dispatchEvent(new KeyboardEvent('keyup', init));
+      return { key: key };
     },
 
     // 타이핑 — 기존 값에 append + input 이벤트.

@@ -49,7 +49,9 @@ cpt preview close
 
 ```
 cpt browser snapshot                  # 인터랙티브 요소 트리(ref 포함) — 좌표 대신 ref 로 조작
-cpt browser click <ref|selector>
+cpt browser click <ref|selector>      # 또는 좌표: cpt browser click --x 200 --y 300
+cpt browser scroll --dy 800           # 상대 스크롤(dx/dy) / 절대(--x --y) / 요소로: cpt browser scroll <ref>
+cpt browser press Enter --target "input[name=q]"   # 키 입력(Enter/Escape/Tab/Arrow*/문자, --mod ctrl,shift)
 cpt browser type <ref|selector> "텍스트"
 cpt browser fill <ref|selector> "값"
 cpt browser eval "document.title"     # 페이지 컨텍스트 JS
@@ -58,6 +60,10 @@ cpt browser get text --selector "h1"
 cpt browser screenshot --out /tmp/shot.png   # 캡처(파일로 저장)
 cpt preview devtools on                # 개발자도구 열기(네가 보는 기기 기준)
 ```
+
+정직성 계약(press): `press` 의 키 이벤트는 합성(isTrusted:false)이라 앱 JS 리스너엔 통하지만
+브라우저 기본동작(폼 submit·단축키 등)은 발화 안 될 수 있다. 폼 제출은 `click` 으로 버튼을 누르거나
+`fill`+`click` 을 병용하라.
 
 정직성 계약: `screenshot` 은 **명령을 실행한 기기의 현재 뷰포트 실렌더**다(전체 페이지 아님).
 결과 메타의 `{device, viewport}` 를 보고 해석하라. 어느 기기가 실행할지 네가 통제할 수 없으므로,

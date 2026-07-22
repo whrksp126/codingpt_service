@@ -8,7 +8,7 @@ import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
 import * as T from "./tiling.js";
-import { getPane, smartUrl, newTid } from "./pane.js";
+import { getPane, smartUrl } from "./pane.js";
 import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
@@ -110,20 +110,10 @@ function send(ws, frame) {
   } catch (_) {}
 }
 
-// ── 표면(프리뷰) 생명주기 전파 — "같이 닫힘" ──
-//  open 은 데몬 ui_command 브로드캐스트로 이미 양쪽에 열리지만, UI × 닫기는 로컬이라 전파가 필요하다.
-//  UI 로 프리뷰를 닫으면 back 에 surface_broadcast 를 보내 다른 기기도 previewClose 하게 한다.
-//  _applyingRemoteClose = 다른 기기가 보낸 close 를 이 기기가 실행 중 → 재전파 금지(루프 차단).
+// 표면 닫힘 전파(surface_broadcast) 발신은 폐지됨 — 기기-타겟 라우팅에선 프리뷰가 기기마다 독립이라
+//  한 기기에서 닫아도 다른 기기 것을 닫으면 안 된다(오동작). 수신측 previewClose 핸들러와
+//  _applyingRemoteClose 가드는 구 클라 호환 + 핸드오프(P3) 복원 재사용 위해 유지한다.
 let _applyingRemoteClose = false;
-function broadcastPreviewClose(wsId) {
-  if (!sock || sock.readyState !== 1) return;
-  const meta = state.workspaces.find((w) => w.id === wsId);
-  if (!meta) return;
-  send(sock, { type: "surface_broadcast", cmd: "previewClose", params: { ws: meta.localPath } });
-}
-S.onSurfaceClose((kind, wsId) => {
-  if (kind === "preview" && !_applyingRemoteClose) broadcastPreviewClose(wsId);
-});
 
 // ── 네이티브 창 포커스(Tauri) — present 판정의 진실源 ──
 //  WKWebView 의 DOM window.blur / document.hasFocus() 는 "OS 앱 전환"(예: cmux 로 전환) 시 갱신되지
@@ -425,7 +415,7 @@ async function agentCall(pvId, expr) {
   return out.result;
 }
 
-const BROWSER_MUTATING = new Set(["click", "type", "fill", "eval"]);
+const BROWSER_MUTATING = new Set(["click", "type", "fill", "eval", "press"]);
 
 async function handleBrowserCommand(op, p) {
   const { rt } = requireWs(p);
@@ -437,8 +427,27 @@ async function handleBrowserCommand(op, p) {
   switch (op) {
     case "snapshot":
       return { ok: true, result: await agentCall(pvId, "window.__cptAgent.snapshot()") };
-    case "click":
-      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.click(" + target() + ")") };
+    case "click": {
+      const hasXY = typeof p.x === "number" && typeof p.y === "number";
+      const args = hasXY ? (target() + "," + Number(p.x) + "," + Number(p.y)) : target();
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.click(" + args + ")") };
+    }
+    case "scroll": {
+      const spec = JSON.stringify({
+        target: p.target || p.ref || p.selector || "",
+        x: typeof p.x === "number" ? p.x : undefined, y: typeof p.y === "number" ? p.y : undefined,
+        dx: typeof p.dx === "number" ? p.dx : undefined, dy: typeof p.dy === "number" ? p.dy : undefined,
+      });
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.scroll(" + spec + ")") };
+    }
+    case "press": {
+      const spec = JSON.stringify({
+        key: String(p.key || ""), target: p.target || p.selector || "",
+        modifiers: Array.isArray(p.modifiers) ? p.modifiers : (p.mod ? String(p.mod).split(",") : []),
+        text: p.text != null ? String(p.text) : undefined,
+      });
+      return { ok: true, result: await agentCall(pvId, "window.__cptAgent.press(" + spec + ")") };
+    }
     case "type":
       return { ok: true, result: await agentCall(pvId, "window.__cptAgent.type(" + target() + "," + q(p.text) + ")") };
     case "fill":
@@ -556,11 +565,10 @@ const handlers = {
     return { ok: true };
   },
 
-  // 열린 프리뷰가 있으면 그 pane 포커스+이동. 없으면 신규 생성:
-  //  · executor(지금 조작 중인 기기) = 포커스 pane 우측 분할로 명시 배치(프리뷰가 잘 보이게).
-  //  · 그 외 기기 = 강제 분할 금지. 터미널이 기기간 동기화되는 방식(reconcilePool)과 동일하게
-  //    포커스(없으면 첫) 터미널 pane 에 혼합 프리뷰 탭으로 편입. 터미널 pane 이 하나도 없을 때만 분할.
-  previewOpen: async (p, executor) => {
+  // 열린 프리뷰가 있으면 그 pane 포커스+이동. 없으면 포커스 pane 우측 분할로 새로 연다.
+  //  기기-타겟 라우팅이라 이 명령은 항상 "대상 기기 1곳"에서만 실행된다(구 broadcast 비-executor
+  //  조용한 탭 편입 분기는 폐기 — 대상 기기에선 프리뷰를 눈에 띄게 여는 게 맞다).
+  previewOpen: async (p) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
     if (!url) throw new Error("url 필요");
@@ -571,25 +579,8 @@ const handlers = {
     }
     const focusId = rt.focusId || T.firstLeafId(rt.layout);
     if (!focusId) throw new Error("분할할 pane 없음");
-    if (executor) {
-      S.splitPane(focusId, "h", "preview", { url });
-      return { ok: true, paneId: rt.focusId };
-    }
-    let hostId = null;
-    const focusLeaf = T.findLeaf(rt.layout, focusId);
-    if (focusLeaf && focusLeaf.kind === "terminal") hostId = focusLeaf.id;
-    if (!hostId) T.eachLeaf(rt.layout, (l) => { if (!hostId && l.kind === "terminal") hostId = l.id; });
-    if (!hostId) {
-      S.splitPane(focusId, "h", "preview", { url });
-      return { ok: true, paneId: rt.focusId };
-    }
-    const host = T.findLeaf(rt.layout, hostId);
-    host.tabs.push({ kind: "preview", url, tid: newTid() });
-    // 포커스는 뺏지 않는다 — 활성 탭·pane 포커스 그대로 두고 탭바만 갱신(새 탭이 보이되 화면 전환 없음).
-    //  사용자가 조작 중인 executor 기기가 아니므로, 리컨실러가 터미널 탭을 조용히 추가하는 것과 동일.
-    getPane(hostId)?.buildHead();
-    S.emit();
-    return { ok: true, paneId: hostId };
+    S.splitPane(focusId, "h", "preview", { url });
+    return { ok: true, paneId: rt.focusId };
   },
 
   // 첫(포커스 우선) 프리뷰 대상에 URL 이동.

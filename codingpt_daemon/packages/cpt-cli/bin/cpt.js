@@ -188,7 +188,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 
   # 브라우저 자동화 (프리뷰 페이지 — 한 기기에서 실행해 결과 회신)
   browser snapshot                      인터랙티브 요소 트리(ref 포함)
-  browser click <ref|selector>
+  browser click <ref|selector>          또는 좌표: browser click --x <n> --y <n>
+  browser scroll [--dy <n>] [--dx <n>] [--x <n>] [--y <n>] [<ref|selector>]
+  browser press <key> [--target <sel>] [--mod ctrl,shift] [--text <t>]  (Enter/Escape/Tab/Arrow*/문자)
   browser type <ref|selector> <text>
   browser fill <ref|selector> <value>
   browser eval <js>
@@ -342,9 +344,12 @@ async function main() {
 
       case 'browser': {
         const sub = c2;
+        const numF = (n) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : undefined);
         const m = {
           snapshot: () => request('browser.snapshot', { compact: !!flags.compact }),
-          click: () => request('browser.click', { target: rest[0] }),
+          click: () => request('browser.click', { target: rest[0], x: numF('x'), y: numF('y') }),
+          scroll: () => request('browser.scroll', { target: rest[0], x: numF('x'), y: numF('y'), dx: numF('dx'), dy: numF('dy') }),
+          press: () => request('browser.press', { key: rest[0], target: flags.target, modifiers: flags.mod ? String(flags.mod).split(',') : undefined, text: flags.text }),
           type: () => request('browser.type', { target: rest[0], text: rest.slice(1).join(' ') }),
           fill: () => request('browser.fill', { target: rest[0], value: rest.slice(1).join(' ') }),
           eval: () => request('browser.eval', { js: rest.join(' ') }),
