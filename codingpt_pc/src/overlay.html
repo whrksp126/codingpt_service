@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title></title>
     <link rel="stylesheet" href="styles.css" />
+    <!-- 이 창이 오버레이임을 표시 — state.js 등이 메인 전용 부작용(터미널 리컨실러 등)을 건너뛰게 한다. -->
+    <script>window.__CPT_OVERLAY__ = true;</script>
     <style>
       /* 오버레이 창은 배경 투명 — 아래 메인 창(프리뷰 포함)이 비쳐 보인다. */
       html, body { background: transparent !important; margin: 0; height: 100%; width: 100%; overflow: hidden; }
