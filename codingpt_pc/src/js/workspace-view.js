@@ -107,10 +107,14 @@ function structureSig(node) {
 }
 
 function paneCtx(ws) {
+  // ⚠️ isLocal/hostDeviceId 는 라이브 getter — 생성 시점 스냅샷으로 고정하면, 재클레임(스테일 호스트
+  //  복구)으로 hostDeviceId 가 바뀌어도 기존 pane 이 죽은 기기로 계속 터미널을 요청(409 영구)하고,
+  //  자기 PC 워크스페이스를 "원격"으로 착각해 릴레이 경로를 탄다(실측 — pane 을 옮기면(재생성) 정상).
+  const live = () => state.workspaces.find((w) => w.id === ws?.id) || ws;
   return {
     localPath: ws?.localPath || "",
-    isLocal: isThisHost(ws),
-    hostDeviceId: ws?.hostDeviceId ?? null,
+    get isLocal() { return isThisHost(live()); },
+    get hostDeviceId() { return live()?.hostDeviceId ?? null; },
     onFocus: (id) => S.focusPane(id),
     // ws 는 클로저로 고정 — 알림이 늦게 와도 발생한 워크스페이스로 귀속(activeWsId 는 이미 딴 곳일 수 있음).
     onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),
