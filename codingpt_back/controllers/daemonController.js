@@ -51,17 +51,32 @@ function genPairCode() {
 }
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
 
-// deviceToken 발급 + DaemonDevice 생성 (레거시 claim / QR approve 공용).
+// deviceToken 발급 + DaemonDevice 생성/재사용 (레거시 claim / QR approve 공용).
+//  machineId(데몬이 ~/.codingpt/machine.json 에 영속 보관)가 오면 같은 물리 머신의 기존 host 행을
+//  재사용(업서트)한다 — 재로그인/계정 전환마다 새 행이 생기면 워크스페이스 hostDeviceId 가 죽은
+//  기기에 고아로 묶여 터미널이 영구 409(DAEMON_OFFLINE)가 된다(실측). 계정이 바뀌면 행을 새 계정으로
+//  이관한다(물리 PC 의 주인이 바뀐 것 — 이전 계정의 데몬 토큰은 자동 무효화). machineId 는 자격증명이
+//  아닌 서버로만 전송되는 랜덤 UUID — controller 의 deviceUuid 재귀속(registerController)과 동일 원칙.
 async function createDeviceForUser(userId, meta) {
   const deviceToken = 'cptd_' + crypto.randomBytes(32).toString('hex');
   const tokenHash = sha256(deviceToken);
-  const device = await DaemonDevice.create({
+  const machineId = meta && meta.machineId ? String(meta.machineId).trim().slice(0, 64) : '';
+  const fields = {
     user_id: userId,
     device_name: String((meta && meta.deviceName) || 'PC').slice(0, 128),
     platform: meta && meta.platform ? String(meta.platform).slice(0, 32) : null,
     daemon_version: meta && meta.daemonVersion ? String(meta.daemonVersion).slice(0, 32) : null,
     token_hash: tokenHash,
-  });
+  };
+  if (machineId) {
+    const existing = await DaemonDevice.findOne({ where: { machine_id: machineId, role: 'host' } });
+    if (existing) {
+      await existing.update({ ...fields, revoked_at: null, last_seen_at: new Date(), updated_at: new Date() });
+      console.log(`[daemon] 기기 재사용(machineId) device=#${existing.id} user=${userId}`);
+      return { device: existing, deviceToken };
+    }
+  }
+  const device = await DaemonDevice.create({ ...fields, machine_id: machineId || null });
   return { device, deviceToken };
 }
 
@@ -472,7 +487,7 @@ async function createPairCode(req, res) {
 //  sessionSecret 은 PC만 보관(QR 에는 없음) → 승인 후 이 PC 만 토큰을 claim 할 수 있어 탈취 레이스를 막는다.
 async function createPairSession(req, res) {
   try {
-    const { deviceName, platform, daemonVersion } = req.body || {};
+    const { deviceName, platform, daemonVersion, machineId } = req.body || {};
     const code = genPairCode();
     const sessionSecret = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + PAIR_CODE_TTL_MS;
@@ -481,7 +496,7 @@ async function createPairSession(req, res) {
       expiresAt,
       status: 'pending',
       secretHash: sha256(sessionSecret),
-      meta: { deviceName, platform, daemonVersion },
+      meta: { deviceName, platform, daemonVersion, machineId }, // machineId → approve 시 기기 행 재사용 키
     });
     const deepLink = `codingpt://pair?code=${encodeURIComponent(code)}`;
     return successResponse(res, { code, sessionSecret, deepLink, expiresAt: new Date(expiresAt).toISOString() });
@@ -526,7 +541,7 @@ async function approvePairSession(req, res) {
 //  QR    : { code, sessionSecret }            → pending 이면 { pending:true }, approved 면 { deviceId, deviceToken }
 async function claimPairCode(req, res) {
   try {
-    const { code, sessionSecret, deviceName, platform, daemonVersion } = req.body || {};
+    const { code, sessionSecret, deviceName, platform, daemonVersion, machineId } = req.body || {};
     const normalized = String(code || '').trim().toUpperCase();
     const sess = pairCodes.get(normalized);
     if (!sess || sess.expiresAt < Date.now()) {
@@ -546,9 +561,9 @@ async function claimPairCode(req, res) {
       return successResponse(res, { deviceId: sess.deviceId, deviceToken: sess.deviceToken });
     }
 
-    // 레거시(앱이 코드 발급) — 즉시 device 생성
+    // 레거시(앱이 코드 발급) — 즉시 device 생성/재사용
     pairCodes.delete(normalized);
-    const { device, deviceToken } = await createDeviceForUser(sess.userId, { deviceName, platform, daemonVersion });
+    const { device, deviceToken } = await createDeviceForUser(sess.userId, { deviceName, platform, daemonVersion, machineId });
     console.log(`[daemon] 기기 페어링 완료(레거시) userId=${sess.userId} device=${device.device_name}(#${device.id})`);
     return successResponse(res, { deviceId: device.id, deviceToken });
   } catch (e) {

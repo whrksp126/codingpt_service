@@ -44,4 +44,22 @@ function clearCredentials() {
   return remove();
 }
 
-module.exports = { load, save, remove, clearCredentials, configFile };
+// 물리 머신 영속 식별자 — <stateDir>/machine.json (unpair/재로그인에도 유지, 자격증명 아님).
+//  페어링에 함께 보내 서버가 같은 머신의 기존 device 행을 재사용(업서트)하게 한다 →
+//  재로그인마다 새 device 행이 생겨 워크스페이스 hostDeviceId 가 고아가 되는 문제의 근본 차단.
+function machineId() {
+  const crypto = require('crypto');
+  const file = path.join(runtime.stateDir(), 'machine.json');
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (v && typeof v.machineId === 'string' && v.machineId.trim()) return v.machineId.trim();
+  } catch (_) { /* 없음/손상 → 새로 생성 */ }
+  const id = crypto.randomUUID();
+  try {
+    fs.mkdirSync(runtime.stateDir(), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ machineId: id }, null, 2) + '\n', { mode: 0o600 });
+  } catch (_) { /* 저장 실패해도 이번 페어링엔 사용(다음번엔 재생성) */ }
+  return id;
+}
+
+module.exports = { load, save, remove, clearCredentials, configFile, machineId };

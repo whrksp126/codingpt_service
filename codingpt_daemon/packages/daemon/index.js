@@ -58,6 +58,7 @@ async function cmdPair() {
       deviceName: os.hostname().replace(/\.local$/, ''),
       platform: process.platform,
       daemonVersion: pkg.version,
+      machineId: configLib.machineId(), // 같은 머신 재페어링 시 서버가 기존 device 행 재사용(고아 방지)
     }),
   });
   const body = await res.json().catch(() => ({}));
@@ -88,6 +89,7 @@ async function cmdPairSession() {
       deviceName: os.hostname().replace(/\.local$/, ''),
       platform: process.platform,
       daemonVersion: pkg.version,
+      machineId: configLib.machineId(), // approve 시 서버가 기존 device 행 재사용(고아 방지)
     }),
   });
   const body = await res.json().catch(() => ({}));

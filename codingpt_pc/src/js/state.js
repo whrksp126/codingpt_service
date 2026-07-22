@@ -116,18 +116,46 @@ export async function loadDevices() {
   emit();
 }
 
-// 멀티기기 백필: hostDeviceId 없는 로컬 워크스페이스 중, 그 경로가 이 기기에 실재하면 이 호스트로 귀속.
+// 멀티기기 백필 + 스테일 호스트 복구:
+//  ① hostDeviceId 없는 로컬 워크스페이스 — 경로가 이 기기에 실재하면 이 호스트로 귀속(기존).
+//  ② hostDeviceId 가 "내 계정의 죽은 기기"를 가리키는 워크스페이스 — 재로그인마다 페어링이 새
+//     device 행을 만들면 기존 워크스페이스가 옛(오프라인·무효토큰) 기기에 고아로 묶여 터미널이
+//     영구 409(DAEMON_OFFLINE)가 된다. 경로가 이 기기에 실재하고 묶인 기기가 온라인이 아니면
+//     현재 기기로 재클레임한다. (묶인 기기가 온라인이면 진짜 다른 PC → 건드리지 않음)
 export async function reconcileWorkspaceHosts() {
   if (!state.paired) return;
-  const targets = state.workspaces.filter((w) => isLocal(w) && w.localPath && w.hostDeviceId == null);
-  if (!targets.length) return;
+  const myId = state.daemon?.deviceId;
+  const nullTargets = state.workspaces.filter((w) => isLocal(w) && w.localPath && w.hostDeviceId == null);
+  const staleCands = myId != null
+    ? state.workspaces.filter((w) => isLocal(w) && w.localPath && w.hostDeviceId != null && w.hostDeviceId !== myId)
+    : [];
+  if (!nullTargets.length && !staleCands.length) return;
+  // 스테일 판정용 — 내 기기 목록에서 온라인 기기 id 집합(목록에 없으면 내 계정 기기 아님=스테일).
+  let onlineIds = null;
+  if (staleCands.length) {
+    try {
+      const d = await api.fetchDevices();
+      const list = (d && (d.devices || d.data?.devices)) || (Array.isArray(d) ? d : []);
+      onlineIds = new Set(list.filter((x) => x && x.online).map((x) => x.id));
+    } catch (_) { onlineIds = null; /* 목록 실패 시 스테일 재클레임 보류(안전) */ }
+  }
+  const targets = [...nullTargets];
+  if (onlineIds) {
+    for (const w of staleCands) {
+      if (!onlineIds.has(w.hostDeviceId)) targets.push(w); // 묶인 기기가 온라인이 아님 → 복구 대상
+    }
+  }
   let changed = false;
   for (const w of targets) {
     try {
       if (!(await api.pathExists(w.localPath))) continue; // 이 기기에 그 폴더가 없으면 남의 것 → 건너뜀
       const meta = await api.claimWorkspace(w.id);
       const hid = meta && (meta.hostDeviceId ?? meta.data?.hostDeviceId);
-      if (hid != null) { w.hostDeviceId = hid; changed = true; }
+      if (hid != null && hid !== w.hostDeviceId) {
+        api.debugLog(`hosts: 워크스페이스 ${w.id} 호스트 재클레임 ${w.hostDeviceId} → ${hid}`);
+        w.hostDeviceId = hid;
+        changed = true;
+      } else if (hid != null) { w.hostDeviceId = hid; changed = true; }
     } catch (_) {
       /* 개별 실패는 무시 */
     }

@@ -8,6 +8,8 @@ module.exports = (sequelize, DataTypes) => {
     platform: { type: DataTypes.STRING(32), allowNull: true }, // darwin/win32/linux
     daemon_version: { type: DataTypes.STRING(32), allowNull: true },
     token_hash: { type: DataTypes.STRING(64), allowNull: false, unique: true }, // sha256(deviceToken)
+    machine_id: { type: DataTypes.STRING(64), allowNull: true }, // 물리 머신 영속 식별자(데몬 ~/.codingpt/machine.json) — 재페어링 시 행 재사용(업서트) 키. 없으면(구버전 데몬) 매번 새 행(레거시)
+
     runner_kind: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'local' }, // local(PC 데몬) | cloud(격리 컨테이너) — M5
     role: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'host' }, // host(실행 기기) | controller(조작 전용, 모바일 등) — 멀티기기
     container_id: { type: DataTypes.STRING(128), allowNull: true }, // cloud: 도커 컨테이너 id

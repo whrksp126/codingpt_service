@@ -94,6 +94,9 @@ api.onDaemonChanged(async () => {
   await S.loadWorkspaces().catch(() => {});
   S.loadMe();
   S.loadDevices();
+  // 재페어링은 새 device 행을 만들 수 있다 → 옛 기기에 묶인 이 PC 워크스페이스를 즉시 재클레임
+  //  (안 하면 터미널이 죽은 기기로 시작 요청 → 409 DAEMON_OFFLINE 영구화).
+  S.reconcileWorkspaceHosts();
   S.emit();
 });
 api.onDeepLinkPair((payload) => deepLinkPair(payload));
