@@ -5,6 +5,7 @@
 //  이 앱은 어떤 AI 자격증명도 다루지 않는다 — 데몬(터미널/파일 릴레이) 부트스트랩 전용.
 
 mod bridge;
+mod cptsock;
 mod fsapi;
 mod preview;
 mod pty;
@@ -623,6 +624,9 @@ pub fn run() {
             // 원격 PC fs/프리뷰(back 릴레이)
             bridge::back_api,
             bridge::back_base,
+            // 원격 프리뷰 로컬 포트 포워더(사이드카 데몬 cpt.sock 지시)
+            cptsock::forward_start,
+            cptsock::forward_stop,
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,

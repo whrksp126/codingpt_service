@@ -112,16 +112,55 @@ export function termTabLabel(t) {
   return t.title || "터미널";
 }
 
-// ── 원격 워크스페이스 프리뷰 — 그 PC 의 localhost dev 서버를 back 프록시 URL 로 치환 ──
-//  모바일 PaneView 와 동일 모델: 표시(주소창/영속)는 localhost 그대로, webview 로드만 프록시 URL.
-//  결정론 토큰이라 재시작해도 동일 URL — 매 내비게이션마다 start 를 다시 쳐서 TTL 을 연장한다.
+// ── 원격 워크스페이스 프리뷰 — 로컬 포트 포워더 우선, back HTTP 프록시 폴백 ──
+//  1순위(포워딩): 사이드카 데몬이 이 기기의 127.0.0.1:<port> 리스너 → back WS → 대상 PC 로
+//    raw TCP 파이프. 성공하면 원본 localhost URL 을 그대로 로드 — 주소창/영속 표기와 실주소가
+//    일치해 치환/_proxyDisplay 역매핑이 아예 불필요하다.
+//  폴백(프록시): 기존 back HTTP 프록시 URL 치환(모바일 PaneView 와 동일 모델 — 표시는 localhost,
+//    로드만 프록시). 이 PC 의 같은 포트를 자기 dev 서버가 점유(EADDRINUSE)했을 때 등.
 const LOCAL_PREVIEW_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[?::1\]?)(?::(\d{2,5}))?([/?#].*)?$/i;
 const _proxyDisplay = new Map(); // 절대 프록시 base → "http://localhost:<port>" (주소창 역매핑)
+
+// (hostDeviceId, port)별 포워더 성공 캐시 — 매 내비게이션마다 backApi/invoke 왕복을 반복하지 않되,
+//  토큰 TTL(서버 1시간)보다 훨씬 짧은 10분 주기로 재발급+forward_start 재호출해 만료를 선제 갱신.
+const FORWARD_REFRESH_MS = 10 * 60 * 1000;
+const _forwards = new Map(); // `${hostDeviceId}:${port}` → { at, promise, port, hostDeviceId }
+function ensureLocalForward(port, hostDeviceId) {
+  const key = hostDeviceId + ":" + port;
+  const hit = _forwards.get(key);
+  if (hit && Date.now() - hit.at < FORWARD_REFRESH_MS) return hit.promise;
+  const promise = (async () => {
+    const r = await api.backApi("POST", "/api/daemon/forward/start", { port, hostDeviceId });
+    if (!r?.token) throw new Error("포워딩 토큰 발급 실패");
+    const fr = await api.forwardStart(port, r.token);
+    if (fr?.ok !== true) {
+      if (fr?.error === "EADDRINUSE") console.warn(`[preview] 이 PC 의 포트 ${port} 가 사용 중이라 프록시 모드로 엽니다`);
+      return false;
+    }
+    return true;
+  })();
+  _forwards.set(key, { at: Date.now(), promise, port, hostDeviceId });
+  // 실패(false/throw)는 캐시하지 않는다 — 다음 내비게이션이 재시도(포트가 비면 포워딩으로 복귀).
+  promise.then((ok) => { if (!ok) _forwards.delete(key); }, () => _forwards.delete(key));
+  return promise;
+}
+// 내비게이션 없이 열어둔 프리뷰도 토큰 TTL 을 넘기지 않게 주기 점검 — 10분 경과분만 재발급된다
+//  (리스너 자체는 데몬이 유지하므로 재발급 실패 엔트리는 캐시에서 빠져 다음 사용 때 재시도).
+setInterval(() => {
+  for (const f of [..._forwards.values()]) ensureLocalForward(f.port, f.hostDeviceId).catch(() => {});
+}, 60 * 1000);
+
 async function remotePreviewUrl(url, ctx) {
   if (!url || !ctx || ctx.isLocal || ctx.hostDeviceId == null) return url;
   const m = LOCAL_PREVIEW_RE.exec(String(url).trim());
   if (!m) return url; // 외부 URL 은 프록시 불필요
   const port = m[1] ? parseInt(m[1], 10) : 80;
+  // 1) 로컬 포워더 — 성공이면 원본 localhost URL 그대로 반환(치환 불필요).
+  try {
+    if (await ensureLocalForward(port, ctx.hostDeviceId)) return url;
+  } catch (_) { /* 토큰 발급/데몬 invoke 실패(사이드카 미기동 등) — 아래 프록시 폴백 */ }
+  // 2) 폴백: back HTTP 프록시(기존 경로 유지). 결정론 토큰이라 재시작해도 동일 URL —
+  //    매 내비게이션마다 start 를 다시 쳐서 TTL 을 연장한다.
   const r = await api.backApi("POST", "/api/daemon/preview/start", { port, hostDeviceId: ctx.hostDeviceId });
   const base = (await api.backBase()) + String(r?.url || "").replace(/\/+$/, "");
   _proxyDisplay.set(base, `http://localhost:${port}`);

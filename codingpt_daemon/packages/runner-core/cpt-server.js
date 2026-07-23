@@ -22,6 +22,7 @@ const configLib = require('./config');
 const ptyLib = require('./pty');
 const wsRpc = require('./workspace');
 const fsLib = require('./fs');
+const forwardLib = require('./forward');
 
 const MAX_REQ_BYTES = 256 * 1024;
 const UI_TIMEOUT_DEFAULT_MS = 10 * 1000;
@@ -230,6 +231,20 @@ async function dispatch(req) {
       process.exit(0);
     }, 200); // 응답 flush 여유
     return { shuttingDown: true, pid: process.pid };
+  }
+  // 로컬 포트 포워더(PC 앱 내부용) — 원격 프리뷰의 127.0.0.1 리스너 기동/정리. tmux ctx 가
+  //  불필요하므로 resolveCtx 전에 처리. daemon.shutdown 처럼 CAPABILITIES 비공개(내부용).
+  if (cmd === 'forward.start' || cmd === 'forward.stop') {
+    const fargs = req.args || {};
+    const port = Number(fargs.port);
+    if (!Number.isInteger(port) || port <= 0 || port >= 65536) throw new Error('유효한 port 가 필요합니다.');
+    if (cmd === 'forward.stop') return forwardLib.stopLocalForward(port);
+    const cfg = configLib.load();
+    if (!cfg || !cfg.serverUrl) throw new Error('페어링돼 있지 않습니다 (daemon.json 없음)');
+    const token = typeof fargs.token === 'string' ? fargs.token.trim() : '';
+    if (!token) throw new Error('token 이 필요합니다.');
+    // bind 실패는 { ok:false, error:'EADDRINUSE' } 구조화 반환 — 호출측이 프록시 폴백 판단.
+    return forwardLib.startLocalForward({ serverUrl: cfg.serverUrl.replace(/\/+$/, ''), port, token });
   }
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);

@@ -840,6 +840,64 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
   });
 }
 
+// ── 앱 포트 포워딩 ────────────────────────────────────────────────────
+// 원격 기기(폰/타 PC)가 자기 127.0.0.1:<port> 리스너로 받은 TCP 연결 1개당 WS 1개를 열어
+// raw 바이트를 파이프(ssh -L 모델). back 은 데몬 dial-back TCP 스트림과 브리지만 한다.
+// 터미널 릴레이와 동일 패턴, kind 만 'pty'→'tcp'.
+const FWD_TOKEN_TTL_MS = 60 * 60 * 1000; // 포워딩 토큰 1시간(접근 시 갱신)
+const fwdTokens = new Map(); // token → { userId, port, runnerId, expiresAt }
+
+// POST /api/daemon/forward/start 에서 호출(인증 후). 대상 러너 오프라인이면 throw.
+function issueForwardToken(userId, port, runnerId) {
+  const rid = Number.isInteger(runnerId) ? runnerId
+    : (typeof runnerId === 'string' && /^\d+$/.test(runnerId) ? parseInt(runnerId, 10) : null);
+  if (!pickConn(userId, rid != null ? { runnerId: rid } : undefined)) {
+    const err = new Error(rid != null ? '대상 PC 데몬이 연결되어 있지 않습니다.' : 'PC 데몬이 연결되어 있지 않습니다.');
+    err.statusCode = 409;
+    throw err;
+  }
+  const token = 'dfwd-' + crypto.randomBytes(18).toString('hex');
+  // 만료 토큰 청소 — 발급마다 훑어 누적 방지(터미널과 동일).
+  const nowTs = Date.now();
+  for (const [t, s] of fwdTokens) { if (s.expiresAt < nowTs) fwdTokens.delete(t); }
+  fwdTokens.set(token, { userId, port, runnerId: rid, expiresAt: Date.now() + FWD_TOKEN_TTL_MS });
+  return token;
+}
+
+// 토큰은 (port,runner)당 재사용 — 동시 TCP 연결 여러 개가 같은 토큰으로 각자 WS 를 연다(삭제 금지).
+function resolveForwardToken(token) {
+  const sess = fwdTokens.get(token);
+  if (!sess || sess.expiresAt < Date.now()) { if (sess) fwdTokens.delete(token); return null; }
+  sess.expiresAt = Date.now() + FWD_TOKEN_TTL_MS;
+  return sess;
+}
+
+// GET /api/daemon/forward/:token 업그레이드(앱→back). TCP 연결 1개 = WS 1개.
+function handleForwardUpgrade(token, req, socket, head) {
+  const sess = resolveForwardToken(token);
+  if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+  wss.handleUpgrade(req, socket, head, async (appWs) => {
+    let daemonWs = null;
+    // 브리지 성립 전 도착한 앱 메시지 버퍼 — 클라이언트는 open 직후 첫 HTTP 요청 바이트를 보낸다.
+    const early = [];
+    const earlyFn = (data, isBinary) => { early.push([data, isBinary]); };
+    appWs.on('message', earlyFn);
+    try {
+      daemonWs = await openStream(sess.userId, 'tcp', { port: sess.port }, sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
+    } catch (_) {
+      // raw TCP 바이트 스트림 — 에러 텍스트를 보내면 스트림이 오염되므로 그냥 닫는다.
+      try { appWs.close(1011); } catch (_) { /* noop */ }
+      return;
+    }
+    appWs.off('message', earlyFn);
+    bridge(appWs, daemonWs, `fwd userId=${sess.userId} port=${sess.port}`);
+    // 버퍼된 메시지(첫 요청 바이트)를 데몬으로 순서대로 재생.
+    for (const [d, b] of early) {
+      try { if (daemonWs.readyState === WebSocket.OPEN) daemonWs.send(d, { binary: b }); } catch (_) { /* noop */ }
+    }
+  });
+}
+
 // ── 양방향 브리지 ─────────────────────────────────────────────────────
 // 메시지 단위 릴레이(텍스트/바이너리 구분 보존 — resize JSON 은 텍스트, stdin 은 바이너리).
 // raw 소켓 pipe 는 WS 마스킹(클라→서버만 마스킹) 때문에 불가.
@@ -968,6 +1026,7 @@ async function proxyWs(userId, port, path, req, socket, head, connOpts) {
 const _sweeper = setInterval(() => {
   const now = Date.now();
   for (const [t, s] of termTokens) { if (s.expiresAt < now) termTokens.delete(t); }
+  for (const [t, s] of fwdTokens) { if (s.expiresAt < now) fwdTokens.delete(t); }
   for (const [t, s] of uiTickets) { if (s.expiresAt < now) uiTickets.delete(t); }
   for (const [u, r] of uiCmdRate) { if (now - r.windowStart >= 1000) uiCmdRate.delete(u); } // 지난 창 카운터 정리
 }, 5 * 60 * 1000);
@@ -981,6 +1040,8 @@ module.exports = {
   openStream,
   callRpc,
   issueTerminalToken,
+  issueForwardToken,
+  handleForwardUpgrade,
   getConnection,
   disconnectDevice,
   setActiveRunner,

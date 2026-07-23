@@ -92,6 +92,7 @@ router.get('/sync/checkpoints', accountAuth, syncController.listCheckpoints);
 //  포트/시작도 accountAuth + hostDeviceId 지정 지원(PC 앱 원격 프리뷰).
 router.get('/preview/ports', accountAuth, daemonController.previewPorts);
 router.post('/preview/start', accountAuth, daemonController.previewStart);
+router.post('/forward/start', accountAuth, daemonController.forwardStart); // 포트 포워딩 토큰(WS 는 app.js upgrade)
 router.all('/preview/:token', daemonController.previewEntry);
 router.all('/preview/:token/*', daemonController.previewEntry);
 

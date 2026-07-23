@@ -149,6 +149,11 @@ export const api = {
     invoke("back_api", { method, path, body: body ?? null, timeoutSecs: timeoutSecs ?? null }),
   backBase: () => invoke("back_base"),
 
+  // ── 원격 프리뷰 로컬 포트 포워더 — 사이드카 데몬(cpt.sock)에 리스너 기동/정리 지시 ──
+  //  결과 { ok:true } | { ok:false, error:'EADDRINUSE'… } (실패는 프록시 폴백 신호).
+  forwardStart: (port, token) => invoke("forward_start", { port, token }),
+  forwardStop: (port) => invoke("forward_stop", { port }),
+
   // ── 작업 스냅샷(자동 체크포인트) — back sync 채널(데몬 오프라인이면 409) ──
   //  background: HTTP 는 즉시 accepted 응답(대형 번들은 분 단위 — 동기 대기는 CF 524).
   //  실제 작업·manifest 등록은 back-데몬 사이에서 계속 진행(RPC 600s).

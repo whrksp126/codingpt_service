@@ -218,6 +218,12 @@ const startServer = async () => {
         daemonRelayService.handleAppTerminalUpgrade(dtm[1], req, socket, head);
         return;
       }
+      // BYO-PC 포트 포워딩 — 원격 기기 로컬 리스너의 TCP 연결 1개당 WS 1개(raw 바이트 파이프)
+      const dfm = url.match(/^\/api\/daemon\/forward\/([^/?]+)/);
+      if (dfm) {
+        daemonRelayService.handleForwardUpgrade(dfm[1], req, socket, head);
+        return;
+      }
       // 인터랙티브 PTY 터미널
       const tm = url.match(/^\/api\/terminal\/([^/?]+)/);
       if (tm) {

@@ -1124,6 +1124,27 @@ async function previewStart(req, res) {
   return successResponse(res, { token, url: `/api/daemon/preview/${token}/`, port });
 }
 
+// POST /api/daemon/forward/start  (인증) body:{ port, hostDeviceId? } — 원격 기기 로컬 포트 포워딩 토큰.
+//  원격 기기가 자기 127.0.0.1:<port> 리스너의 TCP 연결 1개당 WS(/api/daemon/forward/:token) 1개를 열어
+//  raw 바이트를 파이프(ssh -L 모델). hostDeviceId 규약은 previewStart 와 동일.
+async function forwardStart(req, res) {
+  const port = parseInt((req.body || {}).port, 10);
+  if (!Number.isFinite(port) || port <= 0 || port >= 65536) {
+    return errorResponse(res, new Error('유효한 port 가 필요합니다.'), 400);
+  }
+  const opts = connOptsOf(req);
+  const runnerId = opts ? opts.runnerId : null;
+  if (opts && !daemonRelayService.pickConn(req.user.id, opts)) {
+    return errorResponse(res, new Error('해당 PC 데몬이 연결되어 있지 않습니다.'), 409);
+  }
+  try {
+    const token = daemonRelayService.issueForwardToken(req.user.id, port, runnerId);
+    return successResponse(res, { token, port });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
 // ALL /api/daemon/preview/:token(/*)  (무인증) — 진입 프록시. dpv 쿠키를 심고 토큰 경로를 벗겨 데몬으로.
 function previewEntry(req, res) {
   const { token } = req.params;
@@ -1156,5 +1177,5 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  previewPorts, previewStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
+  previewPorts, previewStart, forwardStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };
