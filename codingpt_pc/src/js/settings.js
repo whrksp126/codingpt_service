@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { ANDROID_QR } from "./store-qr.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -159,6 +160,20 @@ function renderSection(force) {
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
     if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
+      <div class="sm-card2">
+        <div class="qr-head">휴대폰·태블릿에서 이어서 작업하기</div>
+        <div class="qr-sub">코드는 이 PC에서 실행하고, 화면은 폰·태블릿에서 이어받아요. 아래 QR을 휴대폰 카메라로 스캔하면 앱 설치 페이지로 바로 이동해요.</div>
+        <div class="qr-row">
+          <div class="qr-tile">
+            <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="Android 앱 설치 QR" draggable="false"></div>
+            <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>Android</span></div>
+          </div>
+          <div class="qr-tile qr-tile--soon">
+            <div class="qr-imgwrap qr-imgwrap--soon"><span class="qr-soonlbl">준비 중</span></div>
+            <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>iOS</span></div>
+          </div>
+        </div>
+      </div>
       <div class="sm-card2">
         <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>업데이트</span>
