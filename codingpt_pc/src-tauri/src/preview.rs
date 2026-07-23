@@ -58,7 +58,9 @@ static PUNCH_SHIELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 #[cfg(target_os = "macos")]
 static PUNCH_ORIG_HITTEST: AtomicUsize = AtomicUsize::new(0); // 스위즐 전 원본 hitTest IMP
 #[cfg(target_os = "macos")]
-static CONTAINERS: Mutex<Vec<usize>> = Mutex::new(Vec::new()); // 살아있는 프리뷰 컨테이너 NSView 들
+static CONTAINERS: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new()); // 살아있는 프리뷰 컨테이너 NSView (포인터, pvId)
+#[cfg(target_os = "macos")]
+static MOUSE_MONITOR: AtomicUsize = AtomicUsize::new(0); // NSEvent 좌클릭 로컬 모니터(설치 1회, 0=미설치)
 
 // DOM 오버레이(모달/메뉴/드롭다운)가 떠 있는 동안 프리뷰로의 이벤트 포워딩을 차단(JS 가 갱신).
 #[tauri::command]
@@ -133,8 +135,8 @@ unsafe extern "C-unwind" fn punch_hit_test(
         let this_win: *mut AnyObject = msg_send![&*this, window];
         let sv: *mut AnyObject = msg_send![&*this, superview];
         let p_self: ns::Point = if sv.is_null() { point } else { msg_send![&*this, convertPoint: point, fromView: sv] };
-        let conts: Vec<usize> = CONTAINERS.lock().map(|v| v.clone()).unwrap_or_default();
-        for c in conts {
+        let conts: Vec<(usize, String)> = CONTAINERS.lock().map(|v| v.clone()).unwrap_or_default();
+        for (c, _pv) in conts {
             let cont = c as *mut AnyObject;
             let cw: *mut AnyObject = msg_send![&*cont, window];
             if cw.is_null() || cw != this_win {
@@ -161,6 +163,65 @@ unsafe extern "C-unwind" fn punch_hit_test(
     f(this, cmd, point)
 }
 
+// 프리뷰 native webview 내부를 사용자가 실제로 좌클릭(down)하면 그 프리뷰 표면 id 를 프론트로 알린다
+//  (R4) — "preview-focus"{pane:pvId}. 터미널 탭이 포커스여도 프리뷰를 누르면 프론트가 그 pane/탭을
+//  활성으로 만든다. 좌표 판정은 punch-through 와 동일하게 스위즐된 contentView hitTest 를 재사용하므로
+//  shield(모달/메뉴 오버레이) 중엔 프리뷰로 라우팅되지 않아 자연히 무시된다. AI browser 자동화 클릭은
+//  페이지 안 JS dispatchEvent 라 NSEvent 를 만들지 않으므로 여기 걸리지 않는다(사용자 실클릭만).
+#[cfg(target_os = "macos")]
+fn install_click_focus_monitor(app: &AppHandle) {
+    if MOUSE_MONITOR.load(Ordering::SeqCst) != 0 {
+        return; // 이미 설치됨
+    }
+    let app = app.clone();
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let mask: usize = 1 << 1; // NSEventMaskLeftMouseDown (NSUInteger)
+        let block = block2::RcBlock::new(move |event: *mut AnyObject| -> *mut AnyObject {
+            if event.is_null() {
+                return event;
+            }
+            // shield(DOM 오버레이) 중엔 프리뷰가 클릭을 못 받으므로 포커스 신호도 내지 않는다.
+            if PUNCH_SHIELD.load(Ordering::Relaxed) {
+                return event;
+            }
+            let win: *mut AnyObject = msg_send![event, window];
+            if win.is_null() {
+                return event;
+            }
+            let content: *mut AnyObject = msg_send![win, contentView];
+            if content.is_null() {
+                return event;
+            }
+            let loc: ns::Point = msg_send![event, locationInWindow];
+            // 스위즐된 hitTest 로 라우팅(shield off + 컨테이너 rect 안이면 프리뷰 내부 뷰를 돌려준다).
+            let hit: *mut AnyObject = msg_send![content, hitTest: loc];
+            if hit.is_null() {
+                return event;
+            }
+            let conts: Vec<(usize, String)> = CONTAINERS.lock().map(|v| v.clone()).unwrap_or_default();
+            // hit 뷰의 superview 사슬을 따라 올라가며 프리뷰 컨테이너에 속하는지 확인 → 속하면 그 pvId 로 emit.
+            let mut v = hit;
+            while !v.is_null() {
+                let vp = v as usize;
+                if let Some((_, pv)) = conts.iter().find(|(c, _)| *c == vp) {
+                    let _ = app.emit("preview-focus", serde_json::json!({ "pane": pv }));
+                    break;
+                }
+                v = msg_send![v, superview];
+            }
+            event
+        });
+        let monitor: *mut AnyObject =
+            msg_send![objc2::class!(NSEvent), addLocalMonitorForEventsMatchingMask: mask, handler: &*block];
+        if !monitor.is_null() {
+            let _: *mut AnyObject = msg_send![monitor, retain]; // 앱 수명 동안 유지(removeMonitor 안 함)
+            MOUSE_MONITOR.store(monitor as usize, Ordering::SeqCst);
+        }
+    }
+}
+
 // punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
 //  hitTest IMP 교체(메서드 스위즐). 프리뷰 컨테이너는 wrap_in_container 가 아래층 삽입.
 pub fn install_punch_through(app: &AppHandle) {
@@ -171,6 +232,7 @@ pub fn install_punch_through(app: &AppHandle) {
             use objc2::msg_send;
             use objc2::runtime::{AnyClass, AnyObject};
             let Some(window) = app2.get_window("main") else { return };
+            install_click_focus_monitor(&app2); // R4 — 프리뷰 클릭 포커스 NSEvent 모니터(1회)
             // ① 앱 UI 웹뷰 투명화 — DOM 이 투명한 곳(프리뷰 슬롯)은 아래층 프리뷰가 비친다.
             for wv in window.webviews() {
                 if wv.label() == "main" {
@@ -285,7 +347,7 @@ unsafe fn find_inspector_view(
 //  이후 위치/크기 동기화는 컨테이너 프레임만 움직인다(webview 는 autoresizing 으로 추종,
 //  인스펙터 attach 시엔 WebKit 이 컨테이너 안에서 webview/인스펙터를 분할 배치).
 #[cfg(target_os = "macos")]
-fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>) {
+fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String) {
     let _ = webview.with_webview(move |pw| unsafe {
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
@@ -312,7 +374,7 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>) {
         let _: () = msg_send![wk, setAutoresizingMask: mask];
         let _: () = msg_send![wk, release];
         slot.store(cont as usize, Ordering::Release);
-        if let Ok(mut v) = CONTAINERS.lock() { v.push(cont as usize); } // hitTest 라우팅 대상 등록
+        if let Ok(mut v) = CONTAINERS.lock() { v.push((cont as usize, pane_id.clone())); } // hitTest 라우팅 + 클릭 포커스 역매핑 등록
     });
 }
 
@@ -323,7 +385,7 @@ fn drop_container(app: &AppHandle, container: &Arc<AtomicUsize>) {
     if cont == 0 {
         return;
     }
-    if let Ok(mut v) = CONTAINERS.lock() { v.retain(|&c| c != cont); } // hitTest 라우팅 대상 해제
+    if let Ok(mut v) = CONTAINERS.lock() { v.retain(|(c, _)| *c != cont); } // hitTest 라우팅 대상 해제
     let _ = app.run_on_main_thread(move || unsafe {
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
@@ -404,7 +466,7 @@ pub fn preview_sync(
         .map_err(|e| e.to_string())?;
     let container = Arc::new(AtomicUsize::new(0));
     #[cfg(target_os = "macos")]
-    wrap_in_container(&webview, container.clone());
+    wrap_in_container(&webview, container.clone(), pane_id.clone());
     map.insert(pane_id, Entry { webview, url, container });
     Ok(())
 }

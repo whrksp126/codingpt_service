@@ -23,6 +23,24 @@ const registry = new Map();
 export function getPane(paneId) {
   return registry.get(paneId) || null;
 }
+// 프리뷰 표면 id("pv-…")를 소유한 pane/탭 역매핑 — 사용자가 프리뷰 native webview 내부를 클릭했을 때
+//  그 pane/탭을 포커스하기 위한 순수 조회(상태 의존 없음 — 포커스 적용은 호출측이 S 로 수행).
+//  반환: { pane, tabIndex } (독립 프리뷰 pane 은 tabIndex=-1, 혼합 프리뷰 탭은 그 탭 index) | null.
+export function paneForPreviewId(pvId) {
+  if (!pvId) return null;
+  for (const [, p] of registry) {
+    if (p.node.kind === "preview" && p._pvId === pvId) return { pane: p, tabIndex: -1 };
+    if (p.node.kind === "terminal" && p._mixed) {
+      for (const [tid, m] of p._mixed) {
+        if (m.preview && m.preview.id === pvId) {
+          const idx = (p.node.tabs || []).findIndex((t) => t.tid === tid && t.kind === "preview");
+          return { pane: p, tabIndex: idx };
+        }
+      }
+    }
+  }
+  return null;
+}
 // 표시 배율 변경 → 열려있는 모든 pane 즉시 반영.
 //  터미널: fontSize 교체 + fit 재실행(cols/rows 재계산 → _fitNow 가 기존 경로로 리사이즈 전송).
 //  IDE: CSS 변수(--cpt-ide-font)는 display-scale.js 가 이미 바꿈 → CodeMirror refresh 만 필요.

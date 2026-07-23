@@ -8,7 +8,7 @@ import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
 import * as T from "./tiling.js";
-import { getPane, smartUrl } from "./pane.js";
+import { getPane, smartUrl, newTid, paneForPreviewId } from "./pane.js";
 import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
@@ -28,9 +28,70 @@ let sock = null;
 let retryMs = 3000;
 let retryTimer = null;
 
+// R1 — 화면(활성 pane) 폭이 이 값 미만이면 프리뷰/IDE 를 우측 분할(split) 대신 활성 터미널 pane 에
+//  탭으로 편입한다(좁은 화면에서 분할하면 양쪽이 다 못 쓸 만큼 좁아지는 것 방지).
+const NARROW_W = 720;
+
 export function startUiChannel() {
   bindActivityReport();
+  bindPreviewFocus(); // R4 — 프리뷰 native webview 내부 클릭 시 그 pane/탭 포커스
   connect();
+}
+
+// ── R4: 프리뷰 native webview 내부 사용자 클릭 → 그 pane/탭 포커스 ──
+//  preview.rs 의 좌클릭 NSEvent 모니터가 "preview-focus"{pane:pvId} 를 emit(터미널 탭이 포커스여도
+//  사용자가 프리뷰를 누르면 그 pane 이 활성이 되도록). AI 자동화 클릭은 페이지 안 JS dispatchEvent 라
+//  NSEvent 를 만들지 않으므로 자연히 제외된다.
+let _pvFocusBound = false;
+function bindPreviewFocus() {
+  if (_pvFocusBound) return;
+  _pvFocusBound = true;
+  try {
+    const ev = window.__TAURI__ && window.__TAURI__.event;
+    if (ev && ev.listen) ev.listen("preview-focus", (e) => onPreviewFocus(e && e.payload));
+  } catch (_) { /* 이벤트 API 미가용 — 무시 */ }
+}
+function onPreviewFocus(payload) {
+  const pvId = payload && payload.pane;
+  const hit = paneForPreviewId(pvId);
+  if (!hit) return;
+  // 혼합 프리뷰 탭이면 그 탭을 활성으로(이미 활성이면 스킵) — 독립 프리뷰 pane 은 탭 전환 없음.
+  if (hit.tabIndex >= 0 && hit.pane.node.active !== hit.tabIndex) hit.pane.switchTab(hit.tabIndex);
+  S.focusPane(hit.pane.id);
+  hit.pane.focus?.();
+}
+
+// R1 — 프리뷰/IDE 를 "열기"(previewOpen/ideOpen) 시 폭 게이팅: 좁으면 탭 편입, 넓으면 기존처럼 분할.
+//  대상 = 활성(포커스) 터미널 pane, 없으면 첫 터미널 pane. 터미널 pane 이 하나도 없으면 분할 폴백.
+//  opts: preview={url}, ide={openPath,line}. 반환: 배치된 paneId.
+function addSurfaceGated(rt, kind, opts) {
+  opts = opts || {};
+  const focusId = rt.focusId || T.firstLeafId(rt.layout);
+  if (!focusId) throw new Error("분할할 pane 없음");
+  const focusLeaf = T.findLeaf(rt.layout, focusId);
+  const rect = getPane(focusId)?.el?.getBoundingClientRect?.();
+  const width = rect && rect.width > 1 ? rect.width : ((typeof window !== "undefined" && window.innerWidth) || 9999);
+  if (width < NARROW_W) {
+    let host = focusLeaf && focusLeaf.kind === "terminal" ? focusLeaf : null;
+    if (!host) T.eachLeaf(rt.layout, (l) => { if (!host && l.kind === "terminal") host = l; });
+    if (host) {
+      const tab = kind === "ide"
+        ? { kind: "ide", openPath: opts.openPath || null, tid: newTid() }
+        : { kind: "preview", url: opts.url || "", tid: newTid() };
+      host.tabs.push(tab);
+      host.active = host.tabs.length - 1;
+      const pane = getPane(host.id);
+      pane?.buildHead();
+      pane?.showActiveTab?.(); // 혼합 탭 본문(IdeView/PreviewSurface) 생성 + 표시
+      if (kind === "ide" && opts.line) pane?._mixed?.get(tab.tid)?.ide?.openFile(opts.openPath, opts.line);
+      S.focusPane(host.id);
+      S.emit();
+      return host.id;
+    }
+  }
+  const sopts = kind === "ide" ? { openPath: opts.openPath } : { url: opts.url || "" };
+  S.splitPane(focusId, "h", kind, sopts);
+  return rt.focusId;
 }
 
 async function connect() {
@@ -298,27 +359,32 @@ function findPreviewTarget(rt) {
 //  ⚠️ 표면 승계 버그 근본수정: 예전엔 effUrl(_pvEffUrl) 갱신 없이 previewNavigate 만 직접 쐈다 →
 //  직후 rAF previewSync 가 "옛 effUrl" 로 재내비게이트해 새 URL 이 즉시 되돌려졌다(no-op 처럼 보임).
 //  표면 자체의 _applyEff/_applyPvEff(원격 프록시 치환 포함)를 태워 effUrl→키 리셋→navigate 순서를 보장한다.
-function navigatePreview(target, url) {
+// foreground=true(기본): 프리뷰 탭을 앞으로 끌어온다(사용자가 "처음 여는" previewOpen 신호).
+// foreground=false: 활성 탭/포커스를 바꾸지 않고 url 로드/제어만 한다(previewNavigate·browser 계열).
+//  프리뷰 native webview 는 숨겨져 있어도 살아 있어 pvId 로 계속 제어되므로 백그라운드로 이동 가능.
+function navigatePreview(target, url, foreground = true) {
   if (isPicking()) cancelDesignPick(); // Design Mode 중 다른 명령(navigate 등) = 선택 모드 중단(계약)
   const pane = getPane(target.leaf.id);
   if (target.tab) {
-    // 혼합 프리뷰 탭 — url 먼저 반영 후 탭 활성화(표면 미생성이면 showActiveTab 이 url 로 생성).
+    // 혼합 프리뷰 탭 — url 먼저 반영. foreground 일 때만 탭 활성화(표면 미생성이면 showActiveTab 이 생성).
     target.tab.url = url;
-    target.leaf.active = target.index;
-    pane?.buildHead();
-    pane?.showActiveTab?.();
+    if (foreground) {
+      target.leaf.active = target.index;
+      pane?.buildHead();
+      pane?.showActiveTab?.();
+    }
     const sf = target.tab.tid ? pane?._mixed?.get(target.tab.tid)?.preview : null;
     if (sf) {
       sf.url = url;
       sf._applyEff(url, true); // effUrl 갱신 + 키 리셋 + 즉시 이동(웹뷰 없으면 previewSync 가 생성)
     }
   } else if (pane) {
-    // 독립 프리뷰 pane — _buildFrame onNavigate 와 동일 절차.
+    // 독립 프리뷰 pane — _buildFrame onNavigate 와 동일 절차(자체 pane 이라 탭 포그라운드 개념 없음).
     pane.node.url = url;
     pane.previewUrl = url;
     pane._applyPvEff(url, true);
   }
-  S.focusPane(target.leaf.id);
+  if (foreground) S.focusPane(target.leaf.id); // 백그라운드 명령은 사용자 화면(포커스)을 강제로 옮기지 않는다
   S.emit();
 }
 
@@ -849,23 +915,22 @@ const handlers = {
     if (!url) throw new Error("url 필요");
     const target = findPreviewTarget(rt);
     if (target) {
-      navigatePreview(target, url);
+      navigatePreview(target, url); // previewOpen = 처음 여는 신호 → 포그라운드(기본 foreground=true)
       return { ok: true, paneId: target.leaf.id };
     }
-    const focusId = rt.focusId || T.firstLeafId(rt.layout);
-    if (!focusId) throw new Error("분할할 pane 없음");
-    S.splitPane(focusId, "h", "preview", { url });
-    return { ok: true, paneId: rt.focusId };
+    // 신규 프리뷰 — 좁은 화면이면 분할 대신 활성 터미널 pane 에 탭으로(R1).
+    const paneId = addSurfaceGated(rt, "preview", { url });
+    return { ok: true, paneId };
   },
 
-  // 첫(포커스 우선) 프리뷰 대상에 URL 이동.
+  // 첫(포커스 우선) 프리뷰 대상에 URL 이동 — 백그라운드(사용자 활성 탭을 강제 전환하지 않음, R2).
   previewNavigate: async (p) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
     if (!url) throw new Error("url 필요");
     const target = findPreviewTarget(rt);
     if (!target) throw new Error("프리뷰 없음");
-    navigatePreview(target, url);
+    navigatePreview(target, url, false);
     return { ok: true };
   },
 
@@ -900,10 +965,9 @@ const handlers = {
     if (focusLeaf) target = check(focusLeaf);
     if (!target) T.eachLeaf(rt.layout, (l) => { if (!target) target = check(l); });
     if (!target) {
-      const focusId = rt.focusId || T.firstLeafId(rt.layout);
-      if (!focusId) throw new Error("분할할 pane 없음");
-      S.splitPane(focusId, "h", "ide", { openPath: path });
-      return { ok: true, paneId: rt.focusId };
+      // IDE 없음 — 좁은 화면이면 분할 대신 활성 터미널 pane 에 탭으로(R1).
+      const paneId = addSurfaceGated(rt, "ide", { openPath: path, line });
+      return { ok: true, paneId };
     }
     const pane = getPane(target.leaf.id);
     if (target.tab) {
