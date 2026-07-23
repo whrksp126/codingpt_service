@@ -724,6 +724,27 @@ pub fn run() {
                     let _ = window.app_handle().emit("cpt-focus", *focused);
                 }
             }
+            // OS 파일 드래그앤드랍 → JS 포워딩("cpt-drag"). tauri://drag-* 는 창/웹뷰 타겟 한정
+            //  emit 이라 프론트의 평범한 listen(target Any)이 못 받는다 — 여기서 전역 emit 으로 중계.
+            //  position 은 물리 픽셀(웹뷰 좌상단 기준) — JS 가 devicePixelRatio 로 CSS px 환산.
+            if let tauri::WindowEvent::DragDrop(evt) = event {
+                if window.label() == "main" {
+                    use tauri::DragDropEvent as D;
+                    let payload = match evt {
+                        D::Enter { paths, position } => {
+                            serde_json::json!({ "kind": "enter", "paths": paths, "x": position.x, "y": position.y })
+                        }
+                        D::Over { position } => {
+                            serde_json::json!({ "kind": "over", "x": position.x, "y": position.y })
+                        }
+                        D::Drop { paths, position } => {
+                            serde_json::json!({ "kind": "drop", "paths": paths, "x": position.x, "y": position.y })
+                        }
+                        _ => serde_json::json!({ "kind": "leave" }), // Leave + non_exhaustive 미래 변형
+                    };
+                    let _ = window.app_handle().emit("cpt-drag", payload);
+                }
+            }
             // 창 닫기 = 숨김(앱은 트레이에 상주).
             //  macOS: windowShouldClose 콜백 안에서 window.hide()(orderOut)를 부르면 prevent_close 에도
             //  불구하고 창이 매니저에서 사라져(재표시 불가) 이후 트레이/독 '열기'가 무반응이 된다(실측).

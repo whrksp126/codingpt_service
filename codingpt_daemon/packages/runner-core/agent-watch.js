@@ -193,4 +193,12 @@ function stop() {
   states.clear();
 }
 
-module.exports = { start, stop, noteHook, observe, titleStatus, _states: states };
+// 세션의 현재 에이전트 상태 조회 — terminal.wait(cpt-server) 폴링용.
+//  미관찰/셸 복귀(status null) = 'idle' 로 본다(에이전트가 안 도는 터미널은 곧 유휴).
+//  관찰 주기(POLL_MS=2s) 만큼 실제 상태보다 늦을 수 있다(베스트에포트).
+function statusOf(session) {
+  const st = states.get(session);
+  return (st && st.status) || 'idle';
+}
+
+module.exports = { start, stop, noteHook, observe, titleStatus, statusOf, _states: states };

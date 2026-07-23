@@ -37,6 +37,7 @@ const HIDDEN_DIRS = new Set([
 ]);
 const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB 초과 텍스트는 편집 대상에서 제외
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 이미지 미리보기 base64 상한
+const MAX_WRITE_BASE64_BYTES = 6 * 1024 * 1024; // base64 쓰기(첨부 업로드) 디코드 후 상한
 // 목록/트리에 노출할 점파일(대부분의 점파일은 숨기되 흔한 편집 대상만 화이트리스트).
 const SHOWN_DOTFILES = new Set([
   '.env', '.gitignore', '.gitattributes', '.eslintrc', '.prettierrc', '.babelrc',
@@ -213,12 +214,21 @@ async function grep(params) {
 }
 
 // fs.write — 텍스트 저장(존재하는 파일만 P1; 신규 생성은 P1 후반/워크스페이스에서).
+//  base64:true 면 바이너리 저장(첨부 업로드 — fs.read 의 base64 와 대칭). 디코드 후 6MB 상한.
+//  응답의 absPath(절대경로)는 클라가 터미널에 경로를 삽입할 때 쓴다(따옴표 안 ~ 는 확장 안 됨).
 async function write(params) {
   const abs = safeResolve(params?.path || '');
   if (typeof params?.content !== 'string') throw new Error('content 가 필요합니다.');
-  await fsp.writeFile(abs, params.content, 'utf8');
+  if (params?.base64) {
+    const buf = Buffer.from(params.content, 'base64');
+    if (buf.length > MAX_WRITE_BASE64_BYTES) throw new Error('파일이 너무 큽니다(6MB 제한)');
+    await fsp.mkdir(path.dirname(abs), { recursive: true }); // 첨부 디렉토리 등 신규 경로 허용
+    await fsp.writeFile(abs, buf);
+  } else {
+    await fsp.writeFile(abs, params.content, 'utf8');
+  }
   const st = await fsp.stat(abs);
-  return { path: relOf(abs), size: st.size };
+  return { path: relOf(abs), absPath: abs, size: st.size };
 }
 
 // fs.mkdir — 디렉토리 생성(중간 경로 포함).

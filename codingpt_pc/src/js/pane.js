@@ -1191,6 +1191,16 @@ export class PaneView {
       document.removeEventListener("compositionend", onCompEnd, true);
     };
   }
+  // 프로그램적 텍스트 삽입(OS 파일 드롭 등) — 붙여넣기(onPaste)와 동일 규칙:
+  //  개행→CR, bracketed paste 지원 시 감쌈, textarea 미변경이므로 미러(_sentBuf) 리셋으로 동기 유지.
+  insertText(text) {
+    if (this.node.kind !== "terminal" || !text) return;
+    let t = String(text).replace(/\r?\n/g, "\r");
+    if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~";
+    this._write(t);
+    this._sentBuf = "";
+    try { const ta = this.term?.textarea; if (ta) ta.value = ""; } catch (_) {}
+  }
   _termOut(data) {
     this.term?.write(data);
   }

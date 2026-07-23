@@ -382,7 +382,10 @@ pub fn preview_sync(
     // 페이지 로드 완료 → 메인 창에 알림(주소창/탭 메타/테마 재적용은 프론트가 처리).
     let pane_for_event = pane_id.clone();
     let app_for_event = app.clone();
-    let builder = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(parsed)).on_page_load(
+    let builder = tauri::webview::WebviewBuilder::new(label, WebviewUrl::External(parsed))
+        // 상시 콘솔 후크(browser.console) — 매 내비게이션 document start 에 자동 재설치.
+        .initialization_script(CONSOLE_HOOK_JS)
+        .on_page_load(
         move |_wv, payload| {
             if matches!(payload.event(), PageLoadEvent::Finished) {
                 let _ = app_for_event.emit(
@@ -417,6 +420,45 @@ pub fn preview_navigate(mgr: State<PreviewManager>, pane_id: String, url: String
     }
     Ok(())
 }
+
+// 상시 콘솔 후크(browser.console) — 프리뷰 webview 생성 시 initialization_script 로 주입되어
+//  매 내비게이션(document start)마다 자동 재설치된다(가장 이른 상시 지점 — eval 재주입 불필요).
+//  window.__cptConsole = 링버퍼 500: console.log/info/warn/error 원본 유지 래핑 + window 'error' +
+//  'unhandledrejection' 캡처. 엔트리 { lv, msg(각 인자 안전 직렬화 2KB 캡, 공백 join), ts, n(증가 시퀀스) }.
+const CONSOLE_HOOK_JS: &str = r#"(function(){
+  if (window.__cptConsole) return;
+  var buf = [], seq = 0, MAX = 500, CAP = 2048;
+  function ser(a){
+    var s;
+    try {
+      if (typeof a === 'string') s = a;
+      else if (a instanceof Error) s = String(a.stack || a);
+      else { s = JSON.stringify(a); if (s === undefined) s = String(a); }
+    } catch (e) { try { s = String(a); } catch (e2) { s = '[unserializable]'; } }
+    return s.length > CAP ? s.slice(0, CAP) + '…' : s;
+  }
+  function push(lv, args){
+    try {
+      var msg = Array.prototype.map.call(args, ser).join(' ');
+      buf.push({ lv: lv, msg: msg, ts: Date.now(), n: ++seq });
+      if (buf.length > MAX) buf.splice(0, buf.length - MAX);
+    } catch (e) {}
+  }
+  window.__cptConsole = {
+    dump: function(){ return buf.slice(); },
+    clear: function(){ buf.length = 0; }
+  };
+  ['log','info','warn','error'].forEach(function(lv){
+    var orig = console[lv];
+    console[lv] = function(){ push(lv, arguments); return orig && orig.apply(console, arguments); };
+  });
+  window.addEventListener('error', function(e){
+    push('error', [ (e && e.message) ? e.message + ' (' + (e.filename || '') + ':' + (e.lineno || 0) + ')' : 'Script error' ]);
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    push('error', [ 'Unhandled rejection: ' + ser(e && e.reason) ]);
+  });
+})();"#;
 
 // 페이지 강제 다크(다크리더식 필터) 주입/해제 — 모바일 프리뷰와 동일 동작.
 // html 배경은 filter 로 함께 반전되므로 밝은색(#fff)을 지정해야 결과가 어두워진다.

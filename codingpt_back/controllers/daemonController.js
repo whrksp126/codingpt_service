@@ -805,11 +805,11 @@ async function fsGrep(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
-// POST /api/daemon/fs/write  (인증) body:{ path, content } — 텍스트 저장
+// POST /api/daemon/fs/write  (인증) body:{ path, content, base64? } — 텍스트 저장(base64=true 면 바이너리 첨부)
 async function fsWrite(req, res) {
   try {
-    const { path: p, content } = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'fs.write', { path: p, content }, undefined, connOptsOf(req));
+    const { path: p, content, base64 } = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'fs.write', { path: p, content, base64: !!base64 }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

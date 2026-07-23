@@ -165,4 +165,6 @@ export const api = {
   onPtyExit: (cb) => listen("pty://exit", (e) => cb(e.payload)),
   onDaemonChanged: (cb) => listen("daemon-changed", () => cb()),
   onDeepLinkPair: (cb) => listen("deep-link-pair", (e) => cb(e.payload)),
+  // OS 파일 드래그앤드랍(Rust on_window_event 포워딩) — { kind:enter|over|drop|leave, paths?, x?, y?(물리 px) }
+  onOsDrag: (cb) => listen("cpt-drag", (e) => cb(e.payload)),
 };

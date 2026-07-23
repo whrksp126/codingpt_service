@@ -16,6 +16,15 @@ const runtime = require('./runtime');
 
 // claude 가 스킬을 찾는 곳 = 러너 HOME 의 ~/.claude/skills. (claude 가 도는 그 머신)
 function skillDir() { return path.join(runtime.claudeHome(), 'skills', 'cpt-cli'); }
+// codex/gemini 도 같은 스킬 규약(~/.<agent>/skills/<name>/SKILL.md)을 읽는다 — 러너 HOME 은
+//  claudeHome 의 부모(러너 HOME 의 ~/.claude)에서 역산해 로컬/클라우드 공통.
+function agentSkillDirs() {
+  const home = path.dirname(runtime.claudeHome());
+  return [
+    { home: path.join(home, '.codex'), dir: path.join(home, '.codex', 'skills', 'cpt-cli') },
+    { home: path.join(home, '.gemini'), dir: path.join(home, '.gemini', 'skills', 'cpt-cli') },
+  ];
+}
 // 스텁 정본 = cpt-cli 패키지에 커밋된 SKILL.md(cpt 바이너리와 함께 배포되어 버전 일치).
 function stubSrc() { return path.join(__dirname, '..', 'cpt-cli', 'SKILL.md'); }
 
@@ -27,6 +36,8 @@ function writeIfChanged(file, content) {
 }
 
 // ~/.claude/skills/cpt-cli/SKILL.md 설치(멱등). opt-out: env CPT_SKILL_INSTALL=0.
+//  codex/gemini 는 해당 홈 디렉토리(~/.codex, ~/.gemini)가 **이미 존재할 때만** 같은 스텁을 설치한다
+//  (그 에이전트를 실제로 쓰는 사용자에게만 add — 폴더를 새로 만들지 않는다).
 function ensureSkillStub() {
   if (String(process.env.CPT_SKILL_INSTALL || '') === '0') return { installed: false, reason: 'opt-out' };
   let content;
@@ -35,12 +46,25 @@ function ensureSkillStub() {
   const dir = skillDir();
   try { fs.mkdirSync(dir, { recursive: true }); } catch (_) { return { installed: false, reason: 'mkdir-failed' }; }
   const changed = writeIfChanged(path.join(dir, 'SKILL.md'), content);
+  // codex/gemini 스킬(베스트에포트) — 개별 실패는 claude 설치 결과에 영향 없음.
+  for (const a of agentSkillDirs()) {
+    try {
+      if (!fs.existsSync(a.home)) continue; // 해당 에이전트 미사용 — 건너뜀
+      fs.mkdirSync(a.dir, { recursive: true });
+      writeIfChanged(path.join(a.dir, 'SKILL.md'), content);
+    } catch (_) { /* noop */ }
+  }
   return { installed: true, changed, dir };
 }
 
-// unpair(연결 해제) 시 우리가 설치한 스텁만 정리 — 순수 add 를 되돌린다.
+// unpair(연결 해제) 시 우리가 설치한 스텁만 정리 — 순수 add 를 되돌린다(claude+codex/gemini 대칭).
 function removeSkillStub() {
-  try { fs.rmSync(skillDir(), { recursive: true, force: true }); return true; } catch (_) { return false; }
+  let removed = false;
+  try { fs.rmSync(skillDir(), { recursive: true, force: true }); removed = true; } catch (_) { /* noop */ }
+  for (const a of agentSkillDirs()) {
+    try { if (fs.existsSync(a.dir)) { fs.rmSync(a.dir, { recursive: true, force: true }); removed = true; } } catch (_) { /* noop */ }
+  }
+  return removed;
 }
 
-module.exports = { ensureSkillStub, removeSkillStub, skillDir };
+module.exports = { ensureSkillStub, removeSkillStub, skillDir, agentSkillDirs };

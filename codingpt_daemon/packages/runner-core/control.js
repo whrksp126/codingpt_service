@@ -190,6 +190,8 @@ function run(config) {
     try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
     // cpt 스킬 스텁을 ~/.claude/skills 에 설치 — claude 가 cpt 를 스스로 인지·사용하게(opt-out: CPT_SKILL_INSTALL=0).
     try { require('./skills').ensureSkillStub(); } catch (e) { console.error('[control] 스킬 스텁 설치 실패:', e.message); }
+    // 첨부 저장소(<stateDir>/attachments) 보장 + 7일 초과 파일 삭제 — 베스트에포트(실패 무해).
+    cleanupAttachments();
     // 신선도 보고 루프(사이드바 미커밋/미푸시 배지) — 60s 주기, 변화시에만 서버 기록.
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
     // 에이전트 완료 폴백 감지 — 훅이 안 걸린 터미널의 title/process-exit 전이를 관찰해 알림(안전망).
@@ -218,6 +220,27 @@ function run(config) {
     if (reapTimer.unref) reapTimer.unref();
     connect();
   })();
+}
+
+// 첨부 저장소 정리 — 모바일이 fs.write(base64) 로 올린 이미지가 ~/.codingpt/attachments/ 에 쌓인다.
+//  부팅 시 디렉토리를 보장하고 7일 초과 파일만 삭제(베스트에포트 — 개별 실패는 다음 부팅에 재시도).
+function cleanupAttachments() {
+  const fs = require('fs');
+  const path = require('path');
+  const runtime = require('./runtime');
+  const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  try {
+    const dir = path.join(runtime.stateDir(), 'attachments');
+    fs.mkdirSync(dir, { recursive: true });
+    const cut = Date.now() - MAX_AGE_MS;
+    for (const name of fs.readdirSync(dir)) {
+      const p = path.join(dir, name);
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile() && st.mtimeMs < cut) fs.unlinkSync(p);
+      } catch (_) { /* 개별 파일 실패 무시 */ }
+    }
+  } catch (e) { console.error('[control] 첨부 정리 실패:', e.message); }
 }
 
 module.exports = { run };

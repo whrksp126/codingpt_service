@@ -151,7 +151,8 @@ export class IdeView {
     });
     g.cm.on("change", () => {
       this._markDirty(g);
-      if (!this._reloadingExternal) { const f = g.open[g.active]; if (f) this._scheduleAutosave(f.path); }
+      // 가상 문서(diff)는 자동 저장 경로에 절대 태우지 않는다(읽기 전용 — setValue 갱신만 발생).
+      if (!this._reloadingExternal) { const f = g.open[g.active]; if (f && !f.virtual) this._scheduleAutosave(f.path); }
     });
     g.cm.on("inputRead", (cm, change) => {
       if (cm.state.completionActive) return;
@@ -557,6 +558,28 @@ export class IdeView {
       this._toast(String(e));
     }
   }
+  // ── ui.ideDiff — 읽기 전용 가상 diff 문서(CodeMirror 'diff' 모드) ──
+  //  실파일이 아니므로 저장(⌘S)/자동저장/디스크 리컨실러 어디에도 태우지 않는다(virtual 플래그로 격리).
+  //  같은 path 의 diff 문서가 이미 열려 있으면 내용만 갱신 + 활성화(중복 탭 금지).
+  openDiff(path, diffText, group = this.activeGroup) {
+    const key = "diff:" + path; // 실파일 경로와 절대 충돌하지 않는 가상 키
+    const text = String(diffText || "");
+    for (const g of this.groups.values()) {
+      const i = g.open.findIndex((o) => o.virtual && o.path === key);
+      if (i >= 0) {
+        const f = g.open[i];
+        // setValue 가 dirty/자동저장을 타지 않게 외부 변경과 동일 가드로 감싼다.
+        this._reloadingExternal = true;
+        try { f.doc.setValue(text); } finally { this._reloadingExternal = false; }
+        this._activate(g, i);
+        return;
+      }
+    }
+    const doc = CM.Doc(text, "diff");
+    group.open.push({ path: key, label: "diff: " + baseName(path), doc, dirty: false, virtual: true });
+    this._activate(group, group.open.length - 1);
+  }
+
   _jumpTo(group, line) {
     setTimeout(() => {
       const l = Math.max(0, (line | 0) - 1);
@@ -575,7 +598,9 @@ export class IdeView {
     group.empty.style.display = "none";
     group.editorHost.style.display = "";
     group.cm.swapDoc(f.doc);
-    group.cm.setOption("mode", modeFor(baseName(f.path)));
+    // 가상 diff 문서 = 'diff' 모드 + 읽기 전용. 일반 파일로 돌아오면 반드시 해제.
+    group.cm.setOption("mode", f.virtual ? "diff" : modeFor(baseName(f.path)));
+    group.cm.setOption("readOnly", f.virtual ? true : false);
     setTimeout(() => group.cm.refresh(), 0);
     this._renderTabs();
     this._renderBody();
@@ -589,7 +614,7 @@ export class IdeView {
     group.open.forEach((f, i) => {
       const t = document.createElement("div");
       t.className = "ide-tab" + (i === group.active ? " active" : "");
-      t.innerHTML = `<span class="ide-tab-ic">${fileIcon(baseName(f.path), 13)}</span><span class="ide-tab-name">${esc(baseName(f.path))}</span>${f.dirty ? '<span class="ide-dirty"></span>' : ""}`;
+      t.innerHTML = `<span class="ide-tab-ic">${fileIcon(baseName(f.path), 13)}</span><span class="ide-tab-name">${esc(f.label || baseName(f.path))}</span>${f.dirty ? '<span class="ide-dirty"></span>' : ""}`;
       const x = document.createElement("span"); x.className = "ide-tab-x"; x.innerHTML = icons.x({ size: 11 });
       x.addEventListener("click", (e) => { e.stopPropagation(); this.closeFile(group, i); });
       t.appendChild(x);
@@ -605,7 +630,7 @@ export class IdeView {
   _markDirty(group) {
     if (this._reloadingExternal) return; // 외부 변경 반영(setValue)은 편집이 아님
     const f = group.open[group.active];
-    if (!f || f.dirty) return;
+    if (!f || f.dirty || f.virtual) return; // 가상 문서(diff)는 dirty/저장 대상이 아님
     // 공유 버퍼(linkedDoc) — 같은 파일을 연 모든 그룹의 dirty 를 함께 표시.
     for (const g of this.groups.values()) {
       let hit = false;
@@ -617,7 +642,7 @@ export class IdeView {
   async save() {
     const group = this.activeGroup;
     const f = group.open[group.active];
-    if (!f) return;
+    if (!f || f.virtual) return; // 가상 문서(diff)는 ⌘S 무시(실파일 아님)
     const t = this._autoTimers.get(f.path);
     if (t) { clearTimeout(t); this._autoTimers.delete(f.path); }
     const text = f.doc.getValue();
@@ -638,7 +663,7 @@ export class IdeView {
   async _autosave(path) {
     let f = null;
     for (const g of this.groups.values()) { f = g.open.find((o) => o.path === path); if (f) break; }
-    if (!f || !f.dirty) return;
+    if (!f || !f.dirty || f.virtual) return;
     const text = f.doc.getValue();
     try { await this.fs.fsWrite(path, text); } catch (e) { this._toast(String(e)); return; }
     if (f.doc.getValue() !== text) { this._scheduleAutosave(path); return; } // 쓰는 동안 추가 편집
@@ -699,7 +724,7 @@ export class IdeView {
   getActiveState() {
     const g = this.activeGroup;
     const f = g && g.open[g.active];
-    if (!f) return null;
+    if (!f || f.virtual) return null; // 가상 문서(diff)는 스냅샷 캡처 대상 아님
     let line = 0;
     try { const c = g.cm && g.cm.getCursor(); if (c && typeof c.line === "number") line = c.line + 1; } catch (_) { /* noop */ }
     return { path: f.path, line };
@@ -712,7 +737,7 @@ export class IdeView {
     const list = [];
     for (const gg of this.groups.values()) {
       for (const f of gg.open) {
-        if (seen.has(f.path)) continue;
+        if (f.virtual || seen.has(f.path)) continue; // 가상 문서(diff)는 실파일 목록에서 제외
         seen.add(f.path);
         list.push({ path: f.path, active: f.path === activePath });
       }
@@ -1082,7 +1107,7 @@ export class IdeView {
       const seen = new Set(); // 같은 path 는 linkedDoc 공유 — 한 번만
       for (const g of this.groups.values()) {
         for (const f of g.open) {
-          if (f.dirty || seen.has(f.path)) continue;
+          if (f.dirty || f.virtual || seen.has(f.path)) continue; // 가상 문서(diff)는 디스크 리컨실 제외
           seen.add(f.path);
           let content;
           try { content = await this.fs.fsRead(f.path); } catch (_) { continue; }

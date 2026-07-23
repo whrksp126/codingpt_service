@@ -160,6 +160,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   terminal new [--name <이름>]          새 터미널 생성(전 기기에 나타남)
   terminal close [<idx>]                터미널 삭제(전 기기)
   terminal rename <이름> [--index <n>]  터미널 이름 변경
+  terminal wait [<idx>] [--for idle|permission|any] [--timeout-sec <n>=600]
+                                        다른 터미널의 에이전트가 유휴/승인대기 될 때까지 대기(자기 자신은 --force)
   read-screen [<idx>] [--lines <n>]     터미널 화면/스크롤백 읽기
   send [<idx>] <text> [--enter]         터미널에 텍스트 입력(자기 자신은 --force)
   send-key [<idx>] <key>                특수키 입력 (C-c, Enter, Up ...)
@@ -183,6 +185,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   preview info                          현재 URL/제목/뷰포트
   preview handoff --to <기기>           현재 프리뷰를 다른 기기로 이어주기(세션·쿠키·localStorage 포함)
   ide open <파일경로> [--line <n>]      IDE 로 파일 열기(해당 줄로 이동)
+  ide diff <파일경로> [--staged]        git diff 를 IDE 에 읽기 전용 문서로 표시(변경 없으면 "변경 없음")
+  ide open-changed [--mode edit|diff|both] [--staged] [--max <n>=10]
+                                        변경된 파일 일괄 열기(기본 diff)
   ide close                             IDE pane 닫기
   ide close-file <파일경로>             열린 파일 탭 하나 닫기
   ide list                              지금 열린 파일 목록
@@ -197,7 +202,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   browser eval <js>
   browser wait [--selector <css>] [--text <t>] [--timeout-ms <ms>]
   browser get <url|title|text|html> [--selector <css>]
-  browser screenshot [--out <path>]
+  browser screenshot [--out <path>]     캡처(--out 없으면 ~/.codingpt/tmp/shot-<ts>.jpg 저장)
+  browser console [--limit <n>=100] [--level error|warn|info|log] [--pattern <regex>] [--clear]
+                                        프리뷰 웹뷰 콘솔 로그 조회(--clear 는 버퍼 비움)
 
   # 알림/상태 (전 기기 동기화)
   notify --title <t> [--subtitle <s>] [--body <b>]
@@ -270,6 +277,14 @@ async function main() {
           const r = await request('terminal.rename', { ...a, index: flags.index != null ? parseInt(flags.index, 10) : a.index, name });
           return out(r, flags, `터미널 ${r.index} → "${r.name}"`);
         }
+        if (c2 === 'wait') {
+          // 다른 터미널 에이전트가 idle/permission 이 될 때까지 대기 — 데몬이 폴링, CLI 는 그만큼 길게 기다린다.
+          const a = takeIdx(rest);
+          const timeoutSec = flags['timeout-sec'] ? parseInt(flags['timeout-sec'], 10) : 600;
+          const r = await request('terminal.wait', { ...a, for: flags.for, timeoutSec, force: !!flags.force },
+            { timeoutMs: (timeoutSec + 15) * 1000 });
+          return out(r, flags, r.timeout ? `타임아웃 (state=${r.state})` : `${r.state} (${(r.waitedMs / 1000).toFixed(1)}s 대기)`);
+        }
         break;
       }
       case 'read-screen': {
@@ -337,6 +352,18 @@ async function main() {
         if (c2 === 'close') return out(await request('ui.ideClose', { sid }), flags, 'ok');
         if (c2 === 'close-file') return out(await request('ui.ideCloseFile', { path: rest[0], sid }), flags, 'ok');
         if (c2 === 'list') return printJson(await request('ui.ideList', { sid }));
+        if (c2 === 'diff') {
+          // 데몬이 git diff 를 계산해 IDE 에 읽기 전용 diff 문서로 띄운다. 변경 없으면 "변경 없음".
+          const r = await request('ui.ideDiff', { path: rest[0], staged: !!flags.staged, sid });
+          return out(r, flags, r && r.noChanges ? '변경 없음' : 'ok');
+        }
+        if (c2 === 'open-changed') {
+          // 변경 파일 일괄 열기 — 파일당 최대 2회 ui 왕복 × 150ms 간격이라 CLI 타임아웃을 넉넉히.
+          const r = await request('ui.ideOpenChanged', {
+            mode: flags.mode, staged: !!flags.staged, max: flags.max ? parseInt(flags.max, 10) : undefined,
+          }, { timeoutMs: 240000 });
+          return out(r, flags, r && r.noChanges ? '변경 없음' : `${r.opened}/${(r.files || []).length}개 열림${r.skipped ? ` (${r.skipped}개 건너뜀)` : ''}`);
+        }
         break;
       }
       case 'skills': {
@@ -359,12 +386,23 @@ async function main() {
           wait: () => request('browser.wait', { selector: flags.selector, text: flags.text, timeoutMs: flags['timeout-ms'] ? parseInt(flags['timeout-ms'], 10) : undefined }),
           get: () => request('browser.get', { what: rest[0], selector: flags.selector }),
           screenshot: () => request('browser.screenshot', {}),
+          console: () => request('browser.console', {
+            limit: flags.limit ? parseInt(flags.limit, 10) : undefined,
+            level: typeof flags.level === 'string' ? flags.level : undefined,
+            pattern: typeof flags.pattern === 'string' ? flags.pattern : undefined,
+            clear: !!flags.clear,
+          }),
         };
         if (!m[sub]) break;
         const r = await m[sub]();
         if (sub === 'screenshot' && r && r.base64) {
+          // --out 미지정이면 ~/.codingpt/tmp/shot-<ts>.jpg 기본 저장(base64 는 출력하지 않는다).
           if (flags.out) { fs.writeFileSync(String(flags.out), Buffer.from(r.base64, 'base64')); return out({ saved: flags.out }, flags, `저장됨: ${flags.out}`); }
-          return printJson({ format: r.format || 'jpeg', base64Length: r.base64.length, note: '--out <path> 로 파일 저장' });
+          const dir = path.join(os.homedir(), '.codingpt', 'tmp');
+          fs.mkdirSync(dir, { recursive: true });
+          const shotPath = path.join(dir, `shot-${Date.now()}.jpg`);
+          fs.writeFileSync(shotPath, Buffer.from(r.base64, 'base64'));
+          return printJson({ path: shotPath, device: r.device, viewport: r.viewport });
         }
         return printJson(r);
       }

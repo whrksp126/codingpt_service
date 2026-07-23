@@ -15,6 +15,7 @@ import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
 import { ideDirtyPaths } from "./ide.js";
+import { initOsDrop } from "./os-drop.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
 //  스펙(사용자 확정): 취소 / (저장 안 하고) 종료 2택. 저장은 탭의 ● 표시 + ⌘S(또는 자동저장 완료 대기).
@@ -162,7 +163,7 @@ window.addEventListener("keydown", (e) => {
 //  안의 클릭·스크롤이 프리뷰로 내려가면 안 된다(오버레이가 위에 보이는데 뒤가 반응하는 사고).
 //  셀렉터 존재 여부를 주기 폴링해 변화 시에만 Rust 에 통지(hitTest 가 참조).
 function startPreviewShieldWatch() {
-  const SEL = ".settings-modal:not(.hidden), .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, body.tab-dragging, body.resizing-col, body.resizing-row";
+  const SEL = ".settings-modal:not(.hidden), .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   setInterval(() => {
     const on = !!document.querySelector(SEL);
@@ -181,6 +182,7 @@ function startPreviewShieldWatch() {
   S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
   startUiChannel(); // UI 실시간 채널(WS) — 알림 이벤트 수신
   startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
+  initOsDrop(); // OS 파일 드래그앤드랍 → 터미널 pane 경로 삽입
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
   render();
   refreshWsMeta();

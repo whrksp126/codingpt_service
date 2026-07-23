@@ -173,6 +173,33 @@ function targetWin(args, resolved) {
   throw new Error('대상 터미널을 알 수 없습니다 — 인덱스를 지정하세요 (cpt terminal list 로 확인)');
 }
 
+// ── git 헬퍼(ide diff) — 워크스페이스 루트에서 execFile 실행(셸 인젝션 없음, freshness 와 동일 컨벤션) ──
+const DIFF_MAX_BYTES = 256 * 1024; // ui.ideDiff diffText 캡(초과 시 잘라내고 truncated:true)
+
+function runGit(cwd, args) {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error(String(stderr || err.message || 'git 실행 실패').trim().split('\n')[0]));
+      resolve(String(stdout));
+    });
+  });
+}
+
+// ws 루트(abs) 기준 파일 경로 정규화 — ws 상대/절대 모두 수용, 워킹트리 밖이면 에러.
+function wsRelPath(abs, p) {
+  const fileAbs = path.isAbsolute(p) ? path.resolve(p) : path.resolve(abs, p);
+  const rel = path.relative(abs, fileAbs).split(path.sep).join('/');
+  if (!rel || rel.startsWith('..')) throw new Error('워크스페이스 밖 경로입니다: ' + p);
+  return rel;
+}
+
+// diff 텍스트 캡 — UTF-8 바이트 기준 절단(멀티바이트 경계 잔재는 제거).
+function capDiff(text) {
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= DIFF_MAX_BYTES) return { diffText: text, truncated: false };
+  return { diffText: buf.subarray(0, DIFF_MAX_BYTES).toString('utf8').replace(/�+$/, ''), truncated: true };
+}
+
 function metaFor(cwdRel) {
   let m = wsMeta.get(cwdRel);
   if (!m) { m = { status: new Map(), progress: null, log: [] }; wsMeta.set(cwdRel, m); }
@@ -284,6 +311,28 @@ async function dispatch(req) {
       await ptyLib.runTmux(['send-keys', '-t', termTarget(win), String(args.key)]);
       return { ok: true, index: win };
     }
+    case 'terminal.wait': {
+      // 다른 터미널의 에이전트(claude 등)가 유휴/승인대기가 될 때까지 agent-watch 상태를 1s 폴링.
+      const win = targetWin(args, resolved);
+      // 자기 자신 대기 = 영원히 안 끝나는 자기루프 — send/sendKey 와 동일 컨벤션으로 --force 요구.
+      if (resolved.windowIndex != null && win === resolved.windowIndex && !args.force) {
+        throw new Error('자기 자신 터미널을 대기하려 합니다. 의도한 것이면 --force 를 붙이세요.');
+      }
+      const wins = await ptyLib.listTerminals(session);
+      if (!wins.some((w) => w.index === win)) throw new Error('해당 터미널이 없습니다 (cpt terminal list 로 확인)');
+      const forWhat = ['idle', 'permission', 'any'].includes(args.for) ? args.for : 'idle';
+      const timeoutMs = Math.max(1, Math.min(3600, (args.timeoutSec | 0) || 600)) * 1000;
+      const watch = require('./agent-watch');
+      const sess = ptyLib.termSession(session, win);
+      const hit = (s) => (forWhat === 'any' ? s === 'idle' || s === 'permission' : s === forWhat);
+      const t0 = Date.now();
+      for (;;) {
+        const s = watch.statusOf(sess); // working|idle|permission (관찰 지연 최대 2s)
+        if (hit(s)) return { state: s, waitedMs: Date.now() - t0 };
+        if (Date.now() - t0 >= timeoutMs) return { timeout: true, state: s };
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
 
     // ── 워크스페이스 ──
     case 'ws.list': {
@@ -384,6 +433,51 @@ async function dispatch(req) {
       return { ok: true, to: toTarget, result: r };
     }
 
+    // IDE diff 보기 — 데몬이 ws 루트에서 git diff 를 계산해 diffText 를 실어 보낸다(클라는 렌더만).
+    //  변경 없음이면 ui_command 를 보내지 않고 { noChanges: true } 즉시 반환.
+    case 'ui.ideDiff': {
+      if (!args.path) throw new Error('파일 경로가 필요합니다');
+      const rel = wsRelPath(abs, String(args.path));
+      const staged = !!args.staged;
+      const raw = await runGit(abs, ['diff', ...(staged ? ['--staged'] : []), '--', rel]);
+      if (!raw.trim()) return { noChanges: true };
+      const { diffText, truncated } = capDiff(raw);
+      const target = await resolveTargetDevice(args.on);
+      return sendUiCommand('ideDiff', { path: rel, staged, diffText, truncated, sid: args.sid, ws: resolved.cwdRel },
+        { mode: 'target', target, timeoutMs: args.timeoutMs });
+    }
+    // 변경 파일 일괄 열기 — name-only 후 기존 ideOpen/ideDiff 를 150ms 간격 순차 발행(신규 클라 핸들러 불필요).
+    case 'ui.ideOpenChanged': {
+      const staged = !!args.staged;
+      const mode = ['edit', 'diff', 'both'].includes(args.mode) ? args.mode : 'diff';
+      const max = Math.max(1, Math.min(50, (args.max | 0) || 10));
+      const files = (await runGit(abs, ['diff', '--name-only', ...(staged ? ['--staged'] : [])]))
+        .split('\n').map((s) => s.trim()).filter(Boolean);
+      if (!files.length) return { files: [], opened: 0, skipped: 0, noChanges: true };
+      const target = await resolveTargetDevice(args.on);
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let opened = 0;
+      let skipped = files.length - Math.min(files.length, max); // 캡 초과분
+      for (const f of files.slice(0, max)) {
+        try {
+          if (mode === 'edit' || mode === 'both') {
+            await sendUiCommand('ideOpen', { path: f, ws: resolved.cwdRel }, { mode: 'target', target });
+            await sleep(150); // 순차+간격 — 클라 레이트리밋(10/s) 회피
+          }
+          if (mode === 'diff' || mode === 'both') {
+            const raw = await runGit(abs, ['diff', ...(staged ? ['--staged'] : []), '--', f]).catch(() => '');
+            if (raw.trim()) {
+              const { diffText, truncated } = capDiff(raw);
+              await sendUiCommand('ideDiff', { path: f, staged, diffText, truncated, ws: resolved.cwdRel }, { mode: 'target', target });
+            }
+            await sleep(150);
+          }
+          opened++;
+        } catch (_) { skipped++; } // 개별 실패(기기 이탈 등)는 건너뜀
+      }
+      return { files, opened, skipped };
+    }
+
     // ── 화면 조작(ui_command — back/클라이언트 왕복) — 기기-타겟 라우팅 ──
     case 'ui.wsSelect':
     case 'ui.wsClose':
@@ -450,15 +544,15 @@ function notifyPoolChanged() {
 
 const CAPABILITIES = [
   'ping', 'capabilities', 'identify',
-  'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey',
+  'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
   'ws.list', 'ws.create', 'ws.clone',
   'notify', 'notification.list', 'notification.readAll',
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewHandoff',
-  'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList',
-  'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot',
+  'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
+  'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console',
   'hook.event',
 ];
 

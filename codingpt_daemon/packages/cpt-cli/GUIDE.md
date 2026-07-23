@@ -62,9 +62,15 @@ cpt browser fill <ref|selector> "값"
 cpt browser eval "document.title"     # 페이지 컨텍스트 JS
 cpt browser wait --selector ".ready"
 cpt browser get text --selector "h1"
-cpt browser screenshot --out /tmp/shot.png   # 캡처(파일로 저장)
+cpt browser screenshot                # 캡처 — --out 없으면 ~/.codingpt/tmp/shot-<ts>.jpg 에 저장하고 경로 출력
+cpt browser console                   # 프리뷰 콘솔 로그 조회(--limit/--level/--pattern, --clear 로 버퍼 비움)
+cpt browser console --level error --pattern "fetch"   # 에러만 + 정규식 필터
 cpt preview devtools on                # 개발자도구 열기(네가 보는 기기 기준)
 ```
+
+정직성 계약(console): `console` 은 **프리뷰 웹뷰 한정**이고, 후크가 **주입된 이후의 로그만** 잡힌다
+(주입 전 초기 로그·다른 브라우저/외부 창의 로그는 없다). 링버퍼(500개)라 오래된 항목은 밀려난다.
+페이지 첫 로드 시점 로그가 필요하면 `preview reload` 후 조회하라.
 
 정직성 계약(press): `press` 의 키 이벤트는 합성(isTrusted:false)이라 앱 JS 리스너엔 통하지만
 브라우저 기본동작(폼 submit·단축키 등)은 발화 안 될 수 있다. 폼 제출은 `click` 으로 버튼을 누르거나
@@ -89,6 +95,23 @@ cpt ide close                           # IDE pane 닫기
 파일 내용 자체는 디스크가 정본이고 모든 기기가 실시간으로 같은 파일을 본다. `ide open` 은
 "어느 파일의 어느 줄을 보여줄지"를 활성 기기(또는 --on 지정 기기)에 맞춘다.
 
+### 변경사항(diff) 보여주기
+
+사용자가 "변경사항 보여줘 / diff 보여줘"라고 하면:
+
+```
+cpt ide diff src/App.tsx               # 이 파일의 git diff 를 IDE 에 읽기 전용 문서로 표시
+cpt ide diff src/App.tsx --staged      # 스테이징된 변경만
+cpt ide open-changed                    # 변경된 파일 전부(기본 diff 로, --max 10)
+cpt ide open-changed --mode both        # 파일 열기 + diff 같이
+cpt ide open-changed --mode edit        # diff 없이 파일만 열기
+```
+
+정직성 계약(ide diff): diff 는 명령 실행 시점의 **스냅샷**이다 — 이후 파일을 더 편집해도 열린
+diff 문서에는 반영되지 않는다(최신을 보려면 다시 `ide diff`). 변경이 없으면 화면에 아무것도
+띄우지 않고 "변경 없음"을 돌려준다. 큰 diff 는 256KB 에서 잘리고(truncated), git 저장소가
+아니거나 워크스페이스 밖 경로면 에러다.
+
 ## 4. 화면 배치 (layout)
 
 ```
@@ -105,9 +128,15 @@ cpt terminal list
 cpt terminal new --name build
 cpt read-screen 2 --lines 100          # 2번 터미널 화면 읽기
 cpt send 2 "npm test" --enter          # 2번 터미널에 명령 입력
+cpt terminal wait 2                     # 2번 터미널의 에이전트가 유휴가 될 때까지 대기(기본 600s)
+cpt terminal wait 2 --for permission    # 승인 대기 상태가 될 때까지 (any = idle 또는 permission)
 ```
 
-주의: **자기 자신 터미널**에 `send`/`send-key` 하려면 `--force` 가 필요하다(자기루프 방지).
+주의: **자기 자신 터미널**에 `send`/`send-key`/`terminal wait` 하려면 `--force` 가 필요하다(자기루프 방지).
+
+정직성 계약(terminal wait): 대기는 tmux 관찰(agent-watch) 기반이라 실제 상태보다 최대 2초쯤
+늦게 감지된다. 에이전트가 아직 시작 전이면 즉시 idle 로 판정될 수 있으니, `send` 직후라면 한두 초
+띄우고 걸어라. 타임아웃이면 `{ timeout: true, state }` 를 돌려준다(에러 아님).
 
 ## 6. 알림·진행 상태
 

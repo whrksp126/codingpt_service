@@ -294,6 +294,9 @@ function findPreviewTarget(rt) {
 }
 
 // 프리뷰 대상에 URL 이동 — pane/PreviewSurface 의 onNavigate 경로와 동일하게 상태·키를 갱신.
+//  ⚠️ 표면 승계 버그 근본수정: 예전엔 effUrl(_pvEffUrl) 갱신 없이 previewNavigate 만 직접 쐈다 →
+//  직후 rAF previewSync 가 "옛 effUrl" 로 재내비게이트해 새 URL 이 즉시 되돌려졌다(no-op 처럼 보임).
+//  표면 자체의 _applyEff/_applyPvEff(원격 프록시 치환 포함)를 태워 effUrl→키 리셋→navigate 순서를 보장한다.
 function navigatePreview(target, url) {
   const pane = getPane(target.leaf.id);
   if (target.tab) {
@@ -305,15 +308,13 @@ function navigatePreview(target, url) {
     const sf = target.tab.tid ? pane?._mixed?.get(target.tab.tid)?.preview : null;
     if (sf) {
       sf.url = url;
-      sf._key = ""; // 강제 재동기화(웹뷰 없으면 생성, 있으면 재고정)
-      api.previewNavigate(sf.id, url).catch(() => {});
+      sf._applyEff(url, true); // effUrl 갱신 + 키 리셋 + 즉시 이동(웹뷰 없으면 previewSync 가 생성)
     }
   } else if (pane) {
     // 독립 프리뷰 pane — _buildFrame onNavigate 와 동일 절차.
     pane.node.url = url;
     pane.previewUrl = url;
-    pane._previewKey = "";
-    api.previewNavigate(pane._pvId, url).catch(() => {});
+    pane._applyPvEff(url, true);
   }
   S.focusPane(target.leaf.id);
   S.emit();
@@ -470,6 +471,25 @@ async function handleBrowserCommand(op, p) {
     case "screenshot": {
       const base64 = await api.previewScreenshot(pvId);
       return { ok: true, result: { format: "jpeg", base64 } };
+    }
+    case "console": {
+      // 상시 주입 콘솔 후크(window.__cptConsole — preview.rs initialization_script) 링버퍼 조회/비움.
+      //  읽기 전용이라 오리진 가드 불필요(BROWSER_MUTATING 아님). 후크 미존재(구 웹뷰)면 빈 목록.
+      if (p.clear) {
+        await api.previewEval(pvId, "JSON.stringify((function(){try{window.__cptConsole&&window.__cptConsole.clear();}catch(e){}return true;})())");
+        return { ok: true, result: { cleared: true } };
+      }
+      const raw = await api.previewEval(pvId, "JSON.stringify(window.__cptConsole?window.__cptConsole.dump():[])");
+      let entries = [];
+      try { entries = JSON.parse(raw) || []; } catch (_) { entries = []; }
+      if (p.level) entries = entries.filter((en) => en && en.lv === String(p.level));
+      if (p.pattern) {
+        let re;
+        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error("pattern 정규식 오류: " + p.pattern); }
+        entries = entries.filter((en) => en && re.test(String(en.msg || "")));
+      }
+      const limit = Math.max(1, Math.min(Number(p.limit) || 100, 500));
+      return { ok: true, result: { entries: entries.slice(-limit), device: "pc" } };
     }
     default:
       return { ok: false, error: "알 수 없는 browser 명령: " + op };
@@ -869,6 +889,38 @@ const handlers = {
     S.focusPane(target.leaf.id);
     S.emit();
     return { ok: true, paneId: target.leaf.id };
+  },
+
+  // git diff 를 읽기 전용 가상 문서로 표시(ui.ideDiff) — 대상 탐색/생성은 ideOpen 미러,
+  //  저장·자동저장·리컨실러 격리는 IdeView.openDiff(virtual 플래그)가 책임진다. 같은 path 재호출=내용 갱신.
+  ideDiff: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const path = normPath(meta, p.path);
+    if (!path) throw new Error("path 필요");
+    const diffText = typeof p.diffText === "string" ? p.diffText : "";
+    const target = findIdeTarget(rt);
+    if (!target) {
+      // IDE 없음 → 포커스 pane 우측 분할로 생성 후 diff 문서 열기(splitPane 은 동기 render).
+      const focusId = rt.focusId || T.firstLeafId(rt.layout);
+      if (!focusId) throw new Error("분할할 pane 없음");
+      S.splitPane(focusId, "h", "ide", {});
+      getPane(rt.focusId)?.ide?.openDiff(path, diffText);
+      return { ok: true, result: { paneId: rt.focusId } };
+    }
+    const pane = getPane(target.leaf.id);
+    if (target.tab) {
+      // 혼합 IDE 탭 활성화 → 본문(IdeView) 보장 후 diff 열기(ideOpen 과 동일 절차).
+      target.leaf.active = target.index;
+      pane?.buildHead();
+      pane?.showActiveTab?.(); // _ensureMixed 가 tid 부여 + IdeView 생성
+      const m = target.tab.tid ? pane?._mixed?.get(target.tab.tid) : null;
+      m?.ide?.openDiff(path, diffText);
+    } else {
+      pane?.ide?.openDiff(path, diffText);
+    }
+    S.focusPane(target.leaf.id);
+    S.emit();
+    return { ok: true, result: { paneId: target.leaf.id } };
   },
 
   // 첫(포커스 우선) 프리뷰 표면(pane/혼합 탭) 닫기 — 없으면 멱등 성공. (Phase 1: 각 기기 로컬 — sid 무시)
