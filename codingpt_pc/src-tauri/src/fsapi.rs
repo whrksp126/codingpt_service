@@ -200,6 +200,31 @@ pub fn fs_write(rel: String, content: String) -> Result<(), String> {
     std::fs::write(&abs, content).map_err(|e| format!("저장 실패: {e}"))
 }
 
+// base64 바이너리 저장(Design Mode 크롭샷 등) — 부모 디렉토리 자동 생성 후 저장하고
+//  **절대경로를 반환**한다(클라가 터미널에 절대경로를 삽입해야 함 — 데몬 fs.write absPath 규약 미러).
+//  부모(~/.codingpt/attachments 등)가 아직 없으면 safe_abs(canonicalize)가 실패하므로
+//  `..` 세그먼트 사전 거부 → 부모 mkdir → safe_abs 재검증(홈 jail) 순서로 처리한다.
+#[tauri::command]
+pub fn fs_write_b64(rel: String, b64: String) -> Result<String, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64.trim())
+        .map_err(|e| format!("base64 디코드 실패: {e}"))?;
+    if bytes.len() > 6 * 1024 * 1024 {
+        return Err("파일이 너무 큽니다(6MB 제한)".into());
+    }
+    let cleaned = rel.trim_start_matches('/');
+    if cleaned.is_empty() || cleaned.split('/').any(|s| s == "..") {
+        return Err("잘못된 경로".into());
+    }
+    if let Some(parent) = home().join(cleaned).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("폴더 생성 실패: {e}"))?;
+    }
+    let abs = safe_abs(cleaned)?;
+    std::fs::write(&abs, &bytes).map_err(|e| format!("저장 실패: {e}"))?;
+    Ok(abs.to_string_lossy().to_string())
+}
+
 // 새 폴더.
 #[tauri::command]
 pub fn fs_mkdir(rel: String) -> Result<(), String> {

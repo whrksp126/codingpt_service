@@ -494,6 +494,7 @@ async function dispatch(req) {
     case 'ui.previewClose':
     case 'ui.previewDevtools':
     case 'ui.previewInfo':
+    case 'ui.previewInspect':
     case 'ui.ideOpen':
     case 'ui.ideClose':
     case 'ui.ideCloseFile':
@@ -550,9 +551,9 @@ const CAPABILITIES = [
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
-  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewHandoff',
+  'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewInspect', 'ui.previewHandoff',
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
-  'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console',
+  'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event',
 ];
 

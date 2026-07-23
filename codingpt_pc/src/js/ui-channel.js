@@ -12,6 +12,7 @@ import { getPane, smartUrl } from "./pane.js";
 import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
+import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
 async function onAccountDeleted() {
@@ -298,6 +299,7 @@ function findPreviewTarget(rt) {
 //  직후 rAF previewSync 가 "옛 effUrl" 로 재내비게이트해 새 URL 이 즉시 되돌려졌다(no-op 처럼 보임).
 //  표면 자체의 _applyEff/_applyPvEff(원격 프록시 치환 포함)를 태워 effUrl→키 리셋→navigate 순서를 보장한다.
 function navigatePreview(target, url) {
+  if (isPicking()) cancelDesignPick(); // Design Mode 중 다른 명령(navigate 등) = 선택 모드 중단(계약)
   const pane = getPane(target.leaf.id);
   if (target.tab) {
     // 혼합 프리뷰 탭 — url 먼저 반영 후 탭 활성화(표면 미생성이면 showActiveTab 이 url 로 생성).
@@ -489,6 +491,34 @@ async function handleBrowserCommand(op, p) {
         entries = entries.filter((en) => en && re.test(String(en.msg || "")));
       }
       const limit = Math.max(1, Math.min(Number(p.limit) || 100, 500));
+      return { ok: true, result: { entries: entries.slice(-limit), device: "pc" } };
+    }
+    case "network": {
+      // 상시 주입 네트워크 후크(window.__cptNet — 콘솔 후크와 같은 initialization_script) 링버퍼 조회/비움.
+      //  console 미러 — 읽기 전용이라 오리진 가드 불필요. 후크 미존재(구 웹뷰)면 빈 목록.
+      if (p.clear) {
+        await api.previewEval(pvId, "JSON.stringify((function(){try{window.__cptNet&&window.__cptNet.clear();}catch(e){}return true;})())");
+        return { ok: true, result: { cleared: true } };
+      }
+      const raw = await api.previewEval(pvId, "JSON.stringify(window.__cptNet?window.__cptNet.dump():[])");
+      let entries = [];
+      try { entries = JSON.parse(raw) || []; } catch (_) { entries = []; }
+      if (p.pattern) {
+        let re;
+        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error("pattern 정규식 오류: " + p.pattern); }
+        entries = entries.filter((en) => en && re.test(String(en.u || "")));
+      }
+      if (p.status != null && p.status !== "") {
+        // status 필터: '4xx'=400~499, '5xx'=500~599, 'err'=(s===0||err), 숫자=정확 일치.
+        const sv = String(p.status);
+        const test =
+          sv === "4xx" ? (en) => en.s >= 400 && en.s <= 499
+          : sv === "5xx" ? (en) => en.s >= 500 && en.s <= 599
+          : sv === "err" ? (en) => en.s === 0 || !!en.err
+          : (en) => en.s === Number(sv);
+        entries = entries.filter((en) => en && test(en));
+      }
+      const limit = Math.max(1, Math.min(Number(p.limit) || 50, 300));
       return { ok: true, result: { entries: entries.slice(-limit), device: "pc" } };
     }
     default:
@@ -946,6 +976,19 @@ const handlers = {
     let result = cur;
     if (want !== cur) result = await toggleChiiDevtools(surface.pvId, surface.host);
     return { ok: true, result: { on: !!result } };
+  },
+
+  // Design Mode(ui.previewInspect) — executor 프리뷰에 요소 선택 모드 시작/취소(off). 선택 결과는
+  //  비동기(design-pick 폴링 → 터미널 [디자인] 줄 삽입) — 여기선 모드 on/off 만 회신(result 키 필수).
+  previewInspect: async (p) => {
+    if (p && p.off) {
+      await cancelDesignPick(); // 모드 없어도 멱등 성공
+      return { ok: true, result: { on: false } };
+    }
+    const { meta, rt } = requireWs(p);
+    const pvId = requirePreviewId(rt);
+    const on = await startDesignPick({ pvId, localPath: meta.localPath || "" });
+    return { ok: true, result: { on: !!on } };
   },
 
   // 프리뷰 현재 상태 조회(executor) — url/제목/뷰포트/기기. 표면 미로드면 url 빈 값.

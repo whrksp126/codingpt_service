@@ -78,6 +78,8 @@ export const api = {
   fsSearch: (rel, query, max) => invoke("fs_search", { rel, query, max: max ?? 500 }),
   fsRead: (rel) => invoke("fs_read", { rel }),
   fsWrite: (rel, content) => invoke("fs_write", { rel, content }),
+  // base64 바이너리 저장(Design Mode 크롭샷 등) — 부모 mkdir 포함, 절대경로 문자열 반환.
+  fsWriteB64: (rel, b64) => invoke("fs_write_b64", { rel, b64 }),
   fsMkdir: (rel) => invoke("fs_mkdir", { rel }),
   fsCreateFile: (rel) => invoke("fs_create_file", { rel }),
   fsRename: (rel, dest) => invoke("fs_rename", { rel, dest }),

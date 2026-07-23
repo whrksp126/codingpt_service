@@ -252,6 +252,15 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     };
     row(icons.moon, "다크모드", { toggle: { get: () => st.dark, set: doTheme } });
     row(icons.tools, "개발자 도구", { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
+    // Design Mode — 1회성 요소 선택(토글 아님): 선택 → 소스 위치+크롭샷을 터미널에 [디자인] 줄로 첨부.
+    row(icons.crosshair, "요소 선택", {
+      onClick: () => {
+        const ctx = getCtx?.();
+        import("./design-pick.js")
+          .then((d) => d.startDesignPick({ pvId: getId(), localPath: ctx?.localPath || "" }))
+          .catch(() => {});
+      },
+    });
     row(icons.handoffOut, "스냅샷 등록", { onClick: doSave });
     row(icons.external, "외부 열기", { onClick: doExt });
     const r = more.getBoundingClientRect();

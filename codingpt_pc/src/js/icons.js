@@ -40,6 +40,8 @@ export const icons = {
   moon: (o) => svg('<path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.8 6.8 0 0 0 10 10z"/>', o),
   tools: (o) => svg('<path d="M14.5 6.5a3.5 3.5 0 0 0-4.8 4.1L4 16.3V20h3.7l5.7-5.7a3.5 3.5 0 0 0 4.1-4.8L15 12l-3-3z"/>', o),
   dot: (o) => `<span class="ic-dot ${o?.cls || ""}"></span>`,
+  // Design Mode 요소 선택 — 크로스헤어(중앙 원 + 4방향 십자선).
+  crosshair: (o) => svg('<circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>', o),
   handoffIn: (o) => svg('<path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>', o),
   handoffOut: (o) => svg('<path d="M12 21V11"/><path d="M8 15l4-4 4 4"/><path d="M4 9V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"/>', o),
 };

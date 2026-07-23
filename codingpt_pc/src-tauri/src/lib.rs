@@ -641,6 +641,7 @@ pub fn run() {
             fsapi::fs_search,
             fsapi::fs_read,
             fsapi::fs_write,
+            fsapi::fs_write_b64,
             fsapi::fs_mkdir,
             fsapi::fs_create_file,
             fsapi::fs_rename,

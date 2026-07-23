@@ -183,6 +183,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   preview close                         프리뷰 닫기
   preview devtools [on|off]             개발자도구 토글(보고 있는 기기)
   preview info                          현재 URL/제목/뷰포트
+  preview inspect [--off]               요소 선택(디자인) 모드 시작 — 사용자가 화면에서 클릭하면
+                                        [디자인] 소스위치+크롭샷 줄이 터미널에 삽입됨(--off=취소)
   preview handoff --to <기기>           현재 프리뷰를 다른 기기로 이어주기(세션·쿠키·localStorage 포함)
   ide open <파일경로> [--line <n>]      IDE 로 파일 열기(해당 줄로 이동)
   ide diff <파일경로> [--staged]        git diff 를 IDE 에 읽기 전용 문서로 표시(변경 없으면 "변경 없음")
@@ -205,6 +207,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   browser screenshot [--out <path>]     캡처(--out 없으면 ~/.codingpt/tmp/shot-<ts>.jpg 저장)
   browser console [--limit <n>=100] [--level error|warn|info|log] [--pattern <regex>] [--clear]
                                         프리뷰 웹뷰 콘솔 로그 조회(--clear 는 버퍼 비움)
+  browser network [--limit <n>=50] [--pattern <url정규식>] [--status 4xx|5xx|err|<숫자>] [--clear]
+                                        프리뷰 웹뷰 네트워크 요청 조회(fetch/XHR — --clear 는 버퍼 비움)
 
   # 알림/상태 (전 기기 동기화)
   notify --title <t> [--subtitle <s>] [--body <b>]
@@ -342,6 +346,13 @@ async function main() {
         if (c2 === 'close') return out(await request('ui.previewClose', { sid }), flags, 'ok');
         if (c2 === 'devtools') return out(await request('ui.previewDevtools', { sid, on: rest[0] === 'off' ? false : (rest[0] === 'on' ? true : undefined) }), flags, 'ok');
         if (c2 === 'info') return printJson(await request('ui.previewInfo', { sid }));
+        if (c2 === 'inspect') {
+          // 요소 선택(디자인) 모드 — 클라가 픽커를 켠다. 선택 결과는 비동기(사용자 클릭 시 터미널 삽입).
+          const r = await request('ui.previewInspect', { off: !!flags.off, sid });
+          return out(r, flags, r && r.on
+            ? '요소 선택 모드 시작 — 사용자가 화면에서 요소를 클릭하면 [디자인] 줄이 터미널에 삽입됩니다'
+            : '요소 선택 모드 해제');
+        }
         // 이어받기: 현재(또는 --on) 기기의 프리뷰를 --to 기기로 세션·쿠키째 옮긴다.
         if (c2 === 'handoff') return out(await request('ui.previewHandoff', { to: flags.to, timeoutMs: 35000 }), flags, 'ok');
         break;
@@ -390,6 +401,12 @@ async function main() {
             limit: flags.limit ? parseInt(flags.limit, 10) : undefined,
             level: typeof flags.level === 'string' ? flags.level : undefined,
             pattern: typeof flags.pattern === 'string' ? flags.pattern : undefined,
+            clear: !!flags.clear,
+          }),
+          network: () => request('browser.network', {
+            limit: flags.limit ? parseInt(flags.limit, 10) : undefined,
+            pattern: typeof flags.pattern === 'string' ? flags.pattern : undefined,
+            status: flags.status != null && flags.status !== true ? String(flags.status) : undefined,
             clear: !!flags.clear,
           }),
         };

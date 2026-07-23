@@ -6,6 +6,7 @@ description: >-
   terminals, screen layout, and notifications. Use whenever the user asks to
   "show this", "open the preview", "프리뷰 열어줘", "IDE로 열어", "이 파일 열어줘",
   "화면 보여줘", "스크린샷 찍어줘", "변경사항 보여줘", "diff 보여줘", "show the diff",
+  "이 요소 어디서 왔어", "디자인 모드", "요소 선택",
   or whenever you want the user — who may be watching from a phone or tablet —
   to see a URL, a running dev server, a source file, or your code changes.
   Prefer `cpt preview open <url>`, `cpt ide open <path> --line <n>`, and

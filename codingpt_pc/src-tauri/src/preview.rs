@@ -421,10 +421,14 @@ pub fn preview_navigate(mgr: State<PreviewManager>, pane_id: String, url: String
     Ok(())
 }
 
-// 상시 콘솔 후크(browser.console) — 프리뷰 webview 생성 시 initialization_script 로 주입되어
-//  매 내비게이션(document start)마다 자동 재설치된다(가장 이른 상시 지점 — eval 재주입 불필요).
-//  window.__cptConsole = 링버퍼 500: console.log/info/warn/error 원본 유지 래핑 + window 'error' +
-//  'unhandledrejection' 캡처. 엔트리 { lv, msg(각 인자 안전 직렬화 2KB 캡, 공백 join), ts, n(증가 시퀀스) }.
+// 상시 콘솔+네트워크 후크(browser.console / browser.network) — 프리뷰 webview 생성 시
+//  initialization_script 로 주입되어 매 내비게이션(document start)마다 자동 재설치된다
+//  (가장 이른 상시 지점 — eval 재주입 불필요).
+//  · window.__cptConsole = 링버퍼 500: console.log/info/warn/error 원본 유지 래핑 + window 'error' +
+//    'unhandledrejection' 캡처. 엔트리 { lv, msg(각 인자 안전 직렬화 2KB 캡, 공백 join), ts, n(증가 시퀀스) }.
+//  · window.__cptNet = 링버퍼 300: fetch + XHR(open/send) 래핑. 엔트리 { n, ts, m(메서드 대문자),
+//    u(URL 512자 캡·페이지 기준 절대화), s(HTTP status·미도달=0), ms(소요), err?(64자 캡) }.
+//    응답 바디는 저장하지 않는다(용량·프라이버시). 주입 이후 요청만 잡히고 리다이렉트는 최종만.
 const CONSOLE_HOOK_JS: &str = r#"(function(){
   if (window.__cptConsole) return;
   var buf = [], seq = 0, MAX = 500, CAP = 2048;
@@ -458,6 +462,52 @@ const CONSOLE_HOOK_JS: &str = r#"(function(){
   window.addEventListener('unhandledrejection', function(e){
     push('error', [ 'Unhandled rejection: ' + ser(e && e.reason) ]);
   });
+})();
+(function(){
+  if (window.__cptNet) return;
+  var buf = [], seq = 0, MAX = 300;
+  function absU(u){
+    var s;
+    try { s = String(new URL(u, location.href)); } catch (e) { s = String(u || ''); }
+    return s.length > 512 ? s.slice(0, 512) : s;
+  }
+  function push(m, u, s, ms, err){
+    try {
+      var en = { n: ++seq, ts: Date.now(), m: String(m || 'GET').toUpperCase(), u: absU(u), s: (s | 0) || 0, ms: Math.max(0, Math.round(ms || 0)) };
+      if (err) en.err = String(err).slice(0, 64);
+      buf.push(en);
+      if (buf.length > MAX) buf.splice(0, buf.length - MAX);
+    } catch (e) {}
+  }
+  window.__cptNet = {
+    dump: function(){ return buf.slice(); },
+    clear: function(){ buf.length = 0; }
+  };
+  var of = window.fetch;
+  if (typeof of === 'function') {
+    window.fetch = function(input, init){
+      var m = (init && init.method) || (input && typeof input === 'object' && input.method) || 'GET';
+      var u = (input && typeof input === 'object' && input.url) || String(input || '');
+      var t0 = Date.now();
+      return of.apply(this, arguments).then(
+        function(res){ push(m, u, res && res.status, Date.now() - t0); return res; },
+        function(err){ push(m, u, 0, Date.now() - t0, (err && err.message) || err); throw err; }
+      );
+    };
+  }
+  if (window.XMLHttpRequest && XMLHttpRequest.prototype) {
+    var xo = XMLHttpRequest.prototype.open, xs = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function(m, u){ this.__cptM = m; this.__cptU = u; return xo.apply(this, arguments); };
+    XMLHttpRequest.prototype.send = function(){
+      var x = this, t0 = Date.now();
+      try {
+        x.addEventListener('loadend', function(){
+          push(x.__cptM, x.__cptU, x.status, Date.now() - t0, x.status === 0 ? '네트워크 오류' : undefined);
+        });
+      } catch (e) {}
+      return xs.apply(this, arguments);
+    };
+  }
 })();"#;
 
 // 페이지 강제 다크(다크리더식 필터) 주입/해제 — 모바일 프리뷰와 동일 동작.
