@@ -423,6 +423,20 @@ async function daemonReportGit(req, res) {
   }
 }
 
+// DELETE /api/daemon/workspaces/:wsId  (deviceToken) — 워크스페이스를 목록(objectstore 메타)에서만 삭제.
+//  로컬 폴더/파일은 절대 건드리지 않는다(서버 메타 삭제 = 사이드바에서 사라짐). JWT 라우트(/api/workspaces/:id)와 동일 동작.
+async function daemonDeleteWorkspace(req, res) {
+  try {
+    const device = await resolveDeviceUser(req);
+    if (!device) return errorResponse(res, new Error('유효하지 않은 기기 토큰'), 401);
+    const wsId = String(req.params.wsId || '');
+    const result = await workspaceService.deleteWorkspace(device.user_id, wsId);
+    return successResponse(res, result);
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
 // POST /api/daemon/terminal/start  (deviceToken 인증) → { token } — 클라우드 워크스페이스 pane 용.
 //  로컬 워크스페이스는 로컬 tmux 직결이라 이 경로를 안 탄다.
 async function daemonTerminalStart(req, res) {
@@ -1135,7 +1149,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
-  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit,
+  daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,

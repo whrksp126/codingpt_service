@@ -299,6 +299,15 @@ function note(text) {
   return d;
 }
 
+// ── 유령(폴더 소실) 감지 ──
+//  서버 신선도 플래그(w.git.missing)와, 자기 호스트(이 PC) 행은 로컬 pathExists 즉시 판정을 OR
+//  (서버 보고 주기 지연 보완). 로컬 판정은 행 렌더마다 IPC 를 부르지 않도록 refreshWsMeta
+//  갱신 주기(시작+15s)에만 조회해 캐시한다. 원격 PC 행은 서버 플래그만.
+const localMissing = new Map(); // wsId -> true(이 PC 에 폴더 없음)
+function wsMissing(w) {
+  return !!w?.git?.missing || localMissing.get(w.id) === true;
+}
+
 function wsRow(w, group) {
   const rt = S.wsRuntime(w.id);
   const unread = S.unreadForWs(w);
@@ -344,7 +353,14 @@ function wsRow(w, group) {
 
   row.append(name);
   if (meta.innerHTML) row.append(meta); // 빈 meta 줄(그룹 멤버 + 상태 배지 없음)은 여백만 남으니 생략
-  if (w.localPath) {
+  const missing = wsMissing(w);
+  if (missing) {
+    // 유령 — 경로 서브라벨 대신 소실 라벨(오프라인 라벨 톤, 위험 뉘앙스 과하지 않게).
+    const miss = document.createElement("div");
+    miss.className = "wsr-path wsr-missing";
+    miss.textContent = "폴더를 찾을 수 없음";
+    row.appendChild(miss);
+  } else if (w.localPath) {
     const path = document.createElement("div");
     path.className = "wsr-path";
     path.textContent = "~/" + w.localPath;
@@ -359,6 +375,8 @@ function wsRow(w, group) {
   }
   row.addEventListener("click", (e) => {
     if (row.classList.contains("dragging")) return;
+    // 유령(폴더 소실) — 열지 않고 안내 다이얼로그(목록에서 삭제 제안)만.
+    if (wsMissing(w)) { showMissingDialog(w); return; }
     // 호스트가 꺼진 사본인데 같은 프로젝트의 켜진 사본이 있으면 원탭 폴백 제안.
     if (local && w.hostOnline === false) {
       const key = w.projectId || w.id;
@@ -477,7 +495,67 @@ function wsMenuItems(w) {
   ];
   if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: "프로젝트에서 분리", onClick: async () => { try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
   else items.push({ icon: icons.folder({ size: 15 }), label: "다른 프로젝트와 합치기", onClick: () => showAttachMenu(w) });
+  // 기기(호스트)/클라우드 행 공통 — 목록 메타만 삭제(폴더/파일 무영향). 그룹 헤더에는 메뉴 없음.
+  items.push({ type: "sep" });
+  items.push({ icon: icons.trash({ size: 15 }), label: "워크스페이스 삭제", danger: true, onClick: () => confirmDeleteWs(w) });
   return items;
+}
+
+// ── 워크스페이스 삭제(서버 목록 메타만 — 로컬 폴더/파일은 절대 건드리지 않음) ──
+// 확인 다이얼로그 — quit-guard 패턴/스타일 재사용(취소 / 위험색 확정 2택).
+function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
+  if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
+  const bd = document.createElement("div");
+  bd.className = "quit-guard-backdrop";
+  bd.innerHTML = `
+    <div class="quit-guard">
+      <div class="qg-title">${escapeHtml(title)}</div>
+      <div class="qg-desc">${lines.map((l) => escapeHtml(l)).join("<br/>")}</div>
+      <div class="qg-actions">
+        <button class="qg-btn qg-cancel">취소</button>
+        <button class="qg-btn qg-quit qg-confirm">${escapeHtml(confirmLabel)}</button>
+      </div>
+    </div>`;
+  bd.querySelector(".qg-cancel").addEventListener("click", () => bd.remove());
+  bd.querySelector(".qg-confirm").addEventListener("click", () => { bd.remove(); onConfirm(); });
+  bd.addEventListener("click", (e) => { if (e.target === bd) bd.remove(); });
+  document.body.appendChild(bd);
+}
+
+function confirmDeleteWs(w) {
+  confirmDialog({
+    title: "워크스페이스 삭제",
+    lines: [`‘${S.wsDisplayName(w)}’을(를) 목록에서 삭제할까요? PC의 폴더와 파일은 그대로 유지됩니다.`],
+    confirmLabel: "삭제",
+    onConfirm: () => deleteWs(w),
+  });
+}
+
+// 유령(폴더 소실) 행 클릭 — 열지 않고 안내 + 목록에서 삭제 제안(경로 다시 지정은 스코프 제외).
+function showMissingDialog(w) {
+  confirmDialog({
+    title: "폴더를 찾을 수 없습니다",
+    lines: [
+      "~/" + (w.localPath || ""),
+      "폴더가 이동되었거나 삭제된 것 같습니다. 목록에서 삭제해도 폴더/파일에는 영향이 없습니다.",
+    ],
+    confirmLabel: "목록에서 삭제",
+    onConfirm: () => deleteWs(w),
+  });
+}
+
+async function deleteWs(w) {
+  try {
+    await api.wsDelete(w.id);
+    localMissing.delete(w.id);
+    // 목록 리프레시 — 삭제된 ws 가 활성이었으면 loadWorkspaces 가 다른 ws 로 전환(없으면 빈 상태).
+    await S.loadWorkspaces();
+    refreshWsMeta();
+  } catch (e) {
+    console.error("워크스페이스 삭제 실패:", e);
+    state.wsError = String(e);
+    S.emit();
+  }
 }
 
 // 우클릭 컨텍스트 메뉴 — DOM(punch-through 로 프리뷰 위에 뜸).
@@ -565,6 +643,12 @@ export async function refreshWsMeta() {
     if (!isLocal(w)) continue;
     const rt = S.wsRuntime(w.id) || S.ensureRuntime(w.id);
     if (S.isThisHost(w)) {
+      // 유령 감지(로컬 즉시 판정) — 갱신 주기에만 조회해 캐시(행 렌더마다 IPC 금지).
+      if (w.localPath) {
+        try {
+          localMissing.set(w.id, !(await api.pathExists(w.localPath)));
+        } catch (_) {}
+      }
       // 그 워크스페이스 폴더 안에서 실제로 도는 dev 서버 포트만 감지(시스템/타 폴더 포트 제외).
       try {
         rt.ports = await api.listenPorts(w.localPath || "");

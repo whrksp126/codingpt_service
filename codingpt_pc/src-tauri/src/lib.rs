@@ -587,6 +587,7 @@ pub fn run() {
             bridge::revoke_device,
             bridge::fetch_devices,
             bridge::claim_workspace,
+            bridge::ws_delete,
             bridge::remote_fs_list,
             bridge::remote_fs_mkdir,
             bridge::remote_ws_create,

@@ -25,6 +25,7 @@ router.post('/workspaces', daemonController.daemonCreateWorkspace);
 router.post('/workspaces/:wsId/project/detach', daemonController.daemonProjectDetach); // 프로젝트 그룹 분리(deviceToken)
 router.post('/workspaces/:wsId/project/attach', daemonController.daemonProjectAttach); // 프로젝트 그룹 합치기(deviceToken)
 router.post('/workspaces/:wsId/git', daemonController.daemonReportGit); // 신선도 보고(deviceToken) — 사이드바 배지
+router.delete('/workspaces/:wsId', daemonController.daemonDeleteWorkspace); // 목록에서 삭제(deviceToken) — 로컬 폴더/파일은 안 건드림
 router.post('/terminal/device-start', daemonController.daemonTerminalStart);
 router.post('/devices/:deviceId/revoke', daemonController.revokeDevice); // JWT|deviceToken(핸들러 resolveAccount)
 router.post('/runner/activate', authMiddleware, daemonController.activateRunner); // M5: 활성 러너 전환(핸드오프, runnerId 또는 kind)

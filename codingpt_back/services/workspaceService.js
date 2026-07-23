@@ -70,7 +70,7 @@ function assertWorkspaceId(id) {
   }
 }
 
-// 신선도(호스트 데몬 보고) 정제 — { branch, dirty, ahead, behind, upstream, at }
+// 신선도(호스트 데몬 보고) 정제 — { branch, dirty, ahead, behind, upstream, at, missing? }
 function sanitizeGit(g) {
   if (!g || typeof g !== 'object') return null;
   const int = (v) => (Number.isInteger(v) && v >= 0 ? v : 0);
@@ -81,6 +81,8 @@ function sanitizeGit(g) {
     behind: int(g.behind),
     upstream: !!g.upstream, // 업스트림 없으면 ahead/behind 무의미
     at: typeof g.at === 'string' ? g.at : new Date().toISOString(),
+    // 유령 감지 — 호스트에서 localPath 폴더 자체가 사라짐(이동/삭제). 클라 목록(w.git.missing)으로 노출.
+    ...(g.missing ? { missing: true } : {}),
   };
 }
 
@@ -437,7 +439,7 @@ async function updateGitStatus(userId, id, git) {
     throw e;
   }
   const next = sanitizeGit(git);
-  const cmp = (g) => (g ? JSON.stringify([g.branch, g.dirty, g.ahead, g.behind, g.upstream]) : '');
+  const cmp = (g) => (g ? JSON.stringify([g.branch, g.dirty, g.ahead, g.behind, g.upstream, !!g.missing]) : '');
   if (cmp(current.git) === cmp(next)) return current; // 변화 없음 — 쓰기 생략(objectstore churn 방지)
   // updatedAt 은 건드리지 않는다(신선도 보고가 목록 정렬/최근성 신호를 오염시키지 않게).
   return writeMeta(uid, id, normalizeMeta({ ...current, git: next }, id));

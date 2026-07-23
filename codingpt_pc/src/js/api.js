@@ -28,6 +28,8 @@ export const api = {
   revokeDevice: (deviceId) => invoke("revoke_device", { deviceId }),
   // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필).
   claimWorkspace: (wsId) => invoke("claim_workspace", { wsId }),
+  // 워크스페이스 삭제 — 서버 목록 메타만(로컬 폴더/파일은 유지).
+  wsDelete: (wsId) => invoke("ws_delete", { wsId }),
   projectDetach: (wsId) => invoke("project_detach", { wsId }),
   projectAttach: (wsId, targetWsId) => invoke("project_attach", { wsId, targetWsId }),
   // 홈-상대 경로가 이 기기에 실재하는 디렉토리인지.

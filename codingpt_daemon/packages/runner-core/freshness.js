@@ -6,6 +6,7 @@
  *       달라진 것만 POST /api/daemon/workspaces/:wsId/git (back 도 무변화 쓰기 생략 — 이중 방어).
  * git 은 execFile(셸 인젝션 없음), 저장소 아님/업스트림 없음은 조용히 건너뜀/표시.
  */
+const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const runtime = require('./runtime');
@@ -15,6 +16,7 @@ const configLib = require('./config');
 const backFetch = (...a) => require('./cpt-server').backFetch(...a);
 
 const INTERVAL_MS = 60 * 1000;
+const MISSING_KEY = 'missing'; // 유령(폴더 소실) 상태의 비교 키 — 전이 시에만 1회 보고
 const lastReported = new Map(); // wsId → 비교 키(JSON)
 
 function git(args, cwd) {
@@ -54,8 +56,22 @@ async function tick() {
   for (const w of mine) {
     try {
       const abs = path.join(runtime.root(), w.localPath);
+      // 유령 감지 — 폴더 자체가 사라졌으면(이동/삭제) git 조회 생략하고 missing 만 보고.
+      if (!fs.existsSync(abs)) {
+        if (lastReported.get(w.id) === MISSING_KEY) continue;
+        await backFetch('POST', `/api/daemon/workspaces/${w.id}/git`, { missing: true });
+        lastReported.set(w.id, MISSING_KEY);
+        continue;
+      }
       const st = await statusFor(abs);
-      if (!st) continue; // git 저장소 아님 — 배지 없음(보고 생략)
+      if (!st) {
+        // git 저장소 아님 — 배지 없음(보고 생략). 단, 직전이 missing 이었다면 복구 1회 보고(플래그 해제).
+        if (lastReported.get(w.id) === MISSING_KEY) {
+          await backFetch('POST', `/api/daemon/workspaces/${w.id}/git`, { missing: false });
+          lastReported.delete(w.id);
+        }
+        continue;
+      }
       const key = JSON.stringify([st.branch, st.dirty, st.ahead, st.behind, st.upstream]);
       if (lastReported.get(w.id) === key) continue;
       await backFetch('POST', `/api/daemon/workspaces/${w.id}/git`, st);
@@ -72,4 +88,4 @@ function start() {
   if (timer.unref) timer.unref();
 }
 
-module.exports = { start, statusFor };
+module.exports = { start, statusFor, tick }; // tick 은 테스트용(단위 전이 검증)

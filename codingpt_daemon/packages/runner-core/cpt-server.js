@@ -349,6 +349,13 @@ async function dispatch(req) {
       const r = await wsRpc.clone({ url: args.url, name: args.name, parentPath: args.parentPath });
       return r;
     }
+    case 'ws.delete': {
+      // 서버 목록(메타)에서만 삭제 — 로컬 폴더/파일은 절대 건드리지 않는다.
+      if (!args.id) throw new Error('워크스페이스 id 가 필요합니다 (cpt ws list 로 확인)');
+      const r = await backFetch('DELETE', `/api/daemon/workspaces/${encodeURIComponent(String(args.id))}`);
+      notifyPoolChanged();
+      return r;
+    }
 
     // ── 알림(back 이 원천 — P1 REST) ──
     case 'notify': {
@@ -546,7 +553,7 @@ function notifyPoolChanged() {
 const CAPABILITIES = [
   'ping', 'capabilities', 'identify',
   'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
-  'ws.list', 'ws.create', 'ws.clone',
+  'ws.list', 'ws.create', 'ws.clone', 'ws.delete',
   'notify', 'notification.list', 'notification.readAll',
   'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.devices',

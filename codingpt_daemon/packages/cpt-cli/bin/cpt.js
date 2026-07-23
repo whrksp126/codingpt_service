@@ -170,6 +170,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   ws list                               워크스페이스 목록
   ws new <이름> [--parent <경로>]       새 워크스페이스 생성(git init)
   ws clone <git-url> [--name <이름>]    GitHub 레포 클론
+  ws delete <id>                        워크스페이스를 목록에서 삭제(로컬 폴더/파일은 유지)
   ws select <id>                        전 기기에서 이 워크스페이스로 전환
 
   # 화면 배치 (사용자가 보고 있는 활성 기기에 반영 — --on <기기> 로 특정 기기 지정)
@@ -320,6 +321,11 @@ async function main() {
         }
         if (c2 === 'new') return printJson(await request('ws.create', { name: rest[0], parentPath: flags.parent }));
         if (c2 === 'clone') return printJson(await request('ws.clone', { url: rest[0], name: flags.name, parentPath: flags.parent }));
+        if (c2 === 'delete') {
+          // 서버 목록(메타)에서만 삭제 — 로컬 폴더/파일은 그대로 둔다.
+          const r = await request('ws.delete', { id: rest[0] });
+          return out(r, flags, '삭제됨 — 폴더/파일은 유지됩니다');
+        }
         if (c2 === 'select') return out(await request('ui.wsSelect', { id: rest[0] }), flags, 'ok');
         if (c2 === 'close') return out(await request('ui.wsClose', { id: rest[0] }), flags, 'ok');
         break;

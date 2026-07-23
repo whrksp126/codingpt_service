@@ -189,6 +189,7 @@ body.resizing-row { cursor: row-resize; }
 .cpt-dt-status { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 11px; color: #ffd479; background: rgba(0,0,0,.75); padding: 3px 8px; border-radius: 6px; max-width: 90%; }
 .wsr-kind .ic { opacity: 0.85; }
 .wsr-path { font-size: 11px; color: var(--dim); font-family: var(--mono-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wsr-missing { font-family: inherit; opacity: 0.9; } /* 유령(폴더 소실) 라벨 — 오프라인 라벨 톤(위험 뉘앙스 억제) */
 .wsr-ports { display: flex; gap: 4px; }
 .port { font-size: 10px; font-family: var(--mono-font); color: var(--accent); background: var(--accent-tint); border-radius: 4px; padding: 0 4px; }
 /* 원격 상태 스트림(status.changed) 뱃지 — 상태 텍스트 + 진행률 */

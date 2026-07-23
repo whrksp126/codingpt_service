@@ -525,6 +525,24 @@ pub fn create_workspace(abs_path: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
+// 워크스페이스 삭제 — 서버 목록 메타만 삭제(로컬 폴더/파일은 절대 건드리지 않음). deviceToken.
+#[tauri::command]
+pub fn ws_delete(ws_id: String) -> Result<serde_json::Value, String> {
+    let token = device_token().ok_or("로그인이 필요합니다.")?;
+    let url = format!(
+        "{}/api/daemon/workspaces/{}",
+        server_url().trim_end_matches('/'),
+        ws_id
+    );
+    let resp = ureq::request("DELETE", &url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(15))
+        .call()
+        .map_err(|e| format!("워크스페이스 삭제 실패: {e}"))?;
+    resp.into_json::<serde_json::Value>()
+        .map_err(|e| format!("응답 파싱 실패: {e}"))
+}
+
 // 프로젝트 그룹 수동 교정 — 분리(단독 프로젝트로) / 합치기(대상 워크스페이스의 프로젝트로).
 #[tauri::command]
 pub fn project_detach(ws_id: String) -> Result<serde_json::Value, String> {
