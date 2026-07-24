@@ -23,6 +23,12 @@ const registry = new Map();
 export function getPane(paneId) {
   return registry.get(paneId) || null;
 }
+// 현재 살아있는 terminal-kind pane 목록 — OS 파일 드롭 좌표가 pane 을 못 짚을 때 폴백용.
+export function terminalPanes() {
+  const out = [];
+  for (const [, p] of registry) if (p.node?.kind === "terminal") out.push(p);
+  return out;
+}
 // 프리뷰 표면 id("pv-…")를 소유한 pane/탭 역매핑 — 사용자가 프리뷰 native webview 내부를 클릭했을 때
 //  그 pane/탭을 포커스하기 위한 순수 조회(상태 의존 없음 — 포커스 적용은 호출측이 S 로 수행).
 //  반환: { pane, tabIndex } (독립 프리뷰 pane 은 tabIndex=-1, 혼합 프리뷰 탭은 그 탭 index) | null.

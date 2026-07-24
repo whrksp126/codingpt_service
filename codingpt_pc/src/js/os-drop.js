@@ -4,7 +4,7 @@
 //  drag-over 중 좌표의 pane 이 "활성 탭=터미널" 이면 하이라이트, drop 시 그 pane 터미널에
 //  `'<path>'` 공백 join + 뒤 공백 1개를 붙여넣기 경로(insertText)로 삽입. 그 외 드롭은 무시.
 import { api } from "./api.js";
-import { getPane, isTermTab } from "./pane.js";
+import { getPane, isTermTab, terminalPanes } from "./pane.js";
 
 let hlEl = null; // 하이라이트 중인 pane 요소
 
@@ -72,7 +72,16 @@ export function initOsDrop() {
       return;
     }
     if (ev.kind === "drop") {
-      const tgt = termTargetAt(ev.x, ev.y);
+      let tgt = termTargetAt(ev.x, ev.y);
+      // 폴백 — 좌표가 pane 을 못 짚었는데 터미널 pane 이 딱 하나면 거기로(단일 터미널 케이스 확실).
+      if (!tgt) {
+        const terms = terminalPanes();
+        if (terms.length === 1) {
+          const p = terms[0];
+          const ti = (p.node.tabs || []).findIndex((t) => isTermTab(t));
+          if (ti >= 0) { tgt = { pane: p, tabIndex: ti }; api.debugLog?.(`[drop] js DROP 폴백→단일터미널 ${p.id}#${ti}`); }
+        }
+      }
       clearHl();
       setDragging(false);
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];

@@ -61,6 +61,11 @@ static PUNCH_ORIG_HITTEST: AtomicUsize = AtomicUsize::new(0); // 스위즐 전 �
 static CONTAINERS: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new()); // 살아있는 프리뷰 컨테이너 NSView (포인터, pvId)
 #[cfg(target_os = "macos")]
 static MOUSE_MONITOR: AtomicUsize = AtomicUsize::new(0); // NSEvent 좌클릭 로컬 모니터(설치 1회, 0=미설치)
+// OS 파일 드롭을 contentView 에서 직접 잡아 "cpt-drag" 로 쏘기 위한 앱 핸들(클래스 메서드는 캡처 불가).
+#[cfg(target_os = "macos")]
+static DRAG_APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+#[cfg(target_os = "macos")]
+static DRAG_DEST_INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // DOM 오버레이(모달/메뉴/드롭다운)가 떠 있는 동안 프리뷰로의 이벤트 포워딩을 차단(JS 가 갱신).
 #[tauri::command]
@@ -222,6 +227,119 @@ fn install_click_focus_monitor(app: &AppHandle) {
     }
 }
 
+// ── OS 파일 드롭을 contentView 에서 직접 수신(NSDraggingDestination) ──────────────────────
+//  punch-through(투명 앱 웹뷰 + 아래층 프리뷰) 환경에서 wry 웹뷰의 파일드롭이 발화하지 않아
+//  (네이티브 DragDrop/HTML5 둘 다 무발화 실측), contentView 를 직접 드롭 목적지로 등록한다.
+//  contentView 는 앱 웹뷰의 상위라, 웹뷰가 목적지로 안 잡혀도 여기로 버블링돼 잡힌다.
+//  좌표는 Tauri DragDrop 과 동일 계약(웹뷰 상단좌측 기준 물리 px) 으로 변환해 "cpt-drag" 로 emit.
+#[cfg(target_os = "macos")]
+const NSDRAG_COPY: usize = 1; // NSDragOperationCopy
+
+#[cfg(target_os = "macos")]
+fn emit_cpt_drag(kind: &str, x: f64, y: f64, paths: Vec<String>) {
+    if let Some(app) = DRAG_APP.get() {
+        let _ = app.emit("cpt-drag", serde_json::json!({ "kind": kind, "x": x, "y": y, "paths": paths }));
+    }
+}
+
+// draggingLocation(윈도우 base point, 좌하단 원점) → 웹뷰 상단좌측 기준 물리 px.
+#[cfg(target_os = "macos")]
+unsafe fn drag_xy(this: *mut objc2::runtime::AnyObject, sender: *mut objc2::runtime::AnyObject) -> (f64, f64) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let loc: ns::Point = msg_send![sender, draggingLocation];
+    let nilv: *mut AnyObject = std::ptr::null_mut();
+    let pt: ns::Point = msg_send![this, convertPoint: loc, fromView: nilv];
+    let b: ns::Rect = msg_send![this, bounds];
+    let win: *mut AnyObject = msg_send![this, window];
+    let scale: f64 = if win.is_null() { 1.0 } else { msg_send![win, backingScaleFactor] };
+    let flipped: bool = msg_send![this, isFlipped];
+    let css_y = if flipped { pt.y } else { b.size.h - pt.y }; // 상단원점으로
+    (pt.x * scale, css_y * scale)
+}
+
+// 드래그 페이스트보드에서 파일 경로 목록(레거시 NSFilenamesPboardType — Finder 파일드롭이 채워줌).
+#[cfg(target_os = "macos")]
+unsafe fn drag_paths(sender: *mut objc2::runtime::AnyObject) -> Vec<String> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let pb: *mut AnyObject = msg_send![sender, draggingPasteboard];
+    if pb.is_null() { return vec![]; }
+    let ftype = objc2_foundation::NSString::from_str("NSFilenamesPboardType");
+    let plist: *mut AnyObject = msg_send![pb, propertyListForType: &*ftype];
+    if plist.is_null() { return vec![]; }
+    let count: usize = msg_send![plist, count];
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let s: *mut AnyObject = msg_send![plist, objectAtIndex: i];
+        if s.is_null() { continue; }
+        let nss: &objc2_foundation::NSString = &*(s as *const objc2_foundation::NSString);
+        out.push(nss.to_string());
+    }
+    out
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn dd_entered(this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, sender: *mut objc2::runtime::AnyObject) -> usize {
+    let (x, y) = drag_xy(this, sender);
+    let paths = drag_paths(sender);
+    crate::applog(&format!("[drop] contentView ENTERED x={x} y={y} n={}", paths.len()));
+    emit_cpt_drag("enter", x, y, paths);
+    NSDRAG_COPY
+}
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn dd_updated(this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, sender: *mut objc2::runtime::AnyObject) -> usize {
+    let (x, y) = drag_xy(this, sender);
+    emit_cpt_drag("over", x, y, vec![]);
+    NSDRAG_COPY
+}
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn dd_exited(_this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _sender: *mut objc2::runtime::AnyObject) {
+    emit_cpt_drag("leave", 0.0, 0.0, vec![]);
+}
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn dd_prepare(_this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _sender: *mut objc2::runtime::AnyObject) -> bool {
+    true
+}
+#[cfg(target_os = "macos")]
+unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, sender: *mut objc2::runtime::AnyObject) -> bool {
+    let (x, y) = drag_xy(this, sender);
+    let paths = drag_paths(sender);
+    crate::applog(&format!("[drop] contentView PERFORM x={x} y={y} n={} paths={:?}", paths.len(), paths));
+    emit_cpt_drag("drop", x, y, paths);
+    true
+}
+
+// contentView 클래스에 NSDraggingDestination 메서드들을 추가하고 인스턴스를 드롭 목적지로 등록(1회).
+#[cfg(target_os = "macos")]
+unsafe fn install_drag_dest(content: *mut objc2::runtime::AnyObject) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    if DRAG_DEST_INSTALLED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let cls: &AnyClass = msg_send![&*content, class];
+    let clsp = cls as *const AnyClass as *mut AnyClass;
+    // (셀렉터, IMP, 타입인코딩) — Q=NSUInteger, v=void, c=BOOL(signed char), @=id, :=SEL.
+    let add = |sel: objc2::runtime::Sel, imp: objc2::runtime::Imp, types: &str| {
+        let c = std::ffi::CString::new(types).unwrap();
+        let _ = objc2::ffi::class_addMethod(clsp, sel, imp, c.as_ptr());
+    };
+    add(objc2::sel!(draggingEntered:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_entered as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
+    add(objc2::sel!(draggingUpdated:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_updated as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
+    add(objc2::sel!(draggingExited:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_exited as unsafe extern "C-unwind" fn(_, _, _)), "v@:@");
+    add(objc2::sel!(prepareForDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_prepare as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
+    add(objc2::sel!(performDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_perform as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
+    // 인스턴스를 파일 URL 드롭 목적지로 등록(레거시 + 현대 타입 모두).
+    let t_files = objc2_foundation::NSString::from_str("NSFilenamesPboardType");
+    let t_url = objc2_foundation::NSString::from_str("public.file-url");
+    let arr: *mut AnyObject = msg_send![objc2::class!(NSMutableArray), array];
+    let _: () = msg_send![arr, addObject: &*t_files];
+    let _: () = msg_send![arr, addObject: &*t_url];
+    let _: () = msg_send![&*content, registerForDraggedTypes: arr];
+    crate::applog("[drop] contentView 드롭 목적지 등록 완료");
+}
+
 // punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
 //  hitTest IMP 교체(메서드 스위즐). 프리뷰 컨테이너는 wrap_in_container 가 아래층 삽입.
 pub fn install_punch_through(app: &AppHandle) {
@@ -232,6 +350,7 @@ pub fn install_punch_through(app: &AppHandle) {
             use objc2::msg_send;
             use objc2::runtime::{AnyClass, AnyObject};
             let Some(window) = app2.get_window("main") else { return };
+            let _ = DRAG_APP.set(app2.clone()); // OS 파일 드롭 emit 용 앱 핸들(1회)
             install_click_focus_monitor(&app2); // R4 — 프리뷰 클릭 포커스 NSEvent 모니터(1회)
             // ① 앱 UI 웹뷰 투명화 — DOM 이 투명한 곳(프리뷰 슬롯)은 아래층 프리뷰가 비친다.
             for wv in window.webviews() {
@@ -252,6 +371,7 @@ pub fn install_punch_through(app: &AppHandle) {
             let nsw = nsw_ptr as *mut AnyObject;
             let content: *mut AnyObject = msg_send![&*nsw, contentView];
             if content.is_null() { return; }
+            install_drag_dest(content); // OS 파일 드롭 목적지 등록(wry 웹뷰 드롭 무발화 우회)
             let cls: &AnyClass = msg_send![&*content, class];
             let sel = objc2::sel!(hitTest:);
             let new_imp: objc2::runtime::Imp = std::mem::transmute(
