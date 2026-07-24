@@ -7,7 +7,6 @@ import { fileIcon, folderIcon } from "./fileicons.js";
 import * as T from "./tiling.js";
 import { cmThemeName } from "./theme.js";
 import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
-import { getPane as _getPaneDbg, isTermTab as _isTermTabDbg } from "./pane.js";
 
 const CM = window.CodeMirror;
 
@@ -1075,7 +1074,7 @@ export class IdeView {
     const row = e.currentTarget;
     if (!row) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
-    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null, lastX = sx, lastY = sy;
+    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null;
     // 실제 pointerdown 이면 캡처 성공(CM 선택 방지). 실패 시 window 로 폴백(그래도 동작).
     let captured = false;
     try { row.setPointerCapture(pid); captured = true; } catch (_) {}
@@ -1097,7 +1096,6 @@ export class IdeView {
     };
     const move = (ev) => {
       if (!dragging) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; start(); }
-      lastX = ev.clientX; lastY = ev.clientY;
       ghost.style.left = ev.clientX + 14 + "px"; ghost.style.top = ev.clientY + 14 + "px";
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       clearDrop();
@@ -1123,6 +1121,9 @@ export class IdeView {
       tgt.removeEventListener("pointerup", finish, opt);
       row.removeEventListener("lostpointercapture", finish);
       try { row.releasePointerCapture(pid); } catch (_) {}
+      // 드롭 대상은 clearDrop 이 상태(overTerm/overRow)를 지우기 전에 캡처한다 — clearDrop 이 overTerm 을
+      //  null 로 만든 뒤 아래 분기가 읽으면 삽입이 절대 안 된다(실측 버그).
+      const dropTerm = overTerm, dropFolder = overFolder;
       clearDrop();
       ghost?.remove();
       document.body.classList.remove("tab-dragging");
@@ -1130,35 +1131,21 @@ export class IdeView {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
       }
-      if (dragging) { // 진단 v2 — termTargetAt 내부 단계까지 분해(#3 파일→터미널)
-        try {
-          const s = window.devicePixelRatio || 1;
-          const el = document.elementFromPoint(lastX, lastY);
-          const paneEl = el && el.closest ? el.closest(".pane") : null;
-          const pid = paneEl?.dataset?.paneId;
-          const pane = pid ? _getPaneDbg(pid) : null;
-          const tabs = pane?.node?.tabs || [];
-          const at = tabs[pane?.node?.active];
-          const tgt2 = termTargetAt(lastX * s, lastY * s);
-          api.debugLog?.(`[tree-drag2] x=${lastX} y=${lastY} dpr=${s} dir=${n.dir} overTerm=${overTerm ? overTerm.pane.id : "-"} el=${el ? el.tagName : "none"} pid=${pid || "-"} paneKind=${pane?.node?.kind || "-"} nTabs=${tabs.length} activeKind=${at ? (at.kind || "term") : "-"} tgt2=${tgt2 ? tgt2.pane.id + "#" + tgt2.tabIndex : "null"} getPane=${pane ? "ok" : "null"} termTargetAtType=${typeof termTargetAt}`);
-        } catch (e) { api.debugLog?.(`[tree-drag2] ERR ${e && e.message}`); }
-      }
-      if (dragging && overTerm) {
+      if (dragging && dropTerm) {
         // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.
-        const t = overTerm;
         try {
           let p = this.fs.fsAbs ? await this.fs.fsAbs(n.path).catch(() => null) : null;
           if (!p) p = n.path.startsWith(this.root + "/") ? n.path.slice(this.root.length + 1) : n.path;
-          insertIntoTerminal(t, shq(p) + " ");
+          insertIntoTerminal(dropTerm, shq(p) + " ");
         } catch (e) { this._toast(String(e)); }
-      } else if (dragging && overFolder) {
+      } else if (dragging && dropFolder) {
         try {
-          const dest = overFolder + "/" + n.name;
+          const dest = dropFolder + "/" + n.name;
           await this.fs.fsRename(n.path, dest);
           for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
           this.tree = null;
           this.searchTree = null;
-          this.expanded.add(overFolder);
+          this.expanded.add(dropFolder);
           await this._reload();
         } catch (e) { this._toast(String(e)); }
       }
