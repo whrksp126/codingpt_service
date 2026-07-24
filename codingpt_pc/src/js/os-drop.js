@@ -43,6 +43,19 @@ function shq(p) {
 }
 
 export function initOsDrop() {
+  // 진단 — Tauri 가 OS 드롭을 가로채면(dragDropEnabled=true) 아래 HTML5 이벤트는 웹뷰에 안 온다.
+  //  만약 HTML5 dragover/drop 이 뜨면 = Tauri 가 안 가로챈 것(dragDropEnabled off/미등록) → 원인 확정.
+  //  (HTML5 File 은 절대경로가 없어 삽입엔 못 쓴다 — 진단 표식만.)
+  window.addEventListener("dragover", (e) => { e.preventDefault(); }, true);
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    try {
+      const n = e.dataTransfer?.files?.length ?? -1;
+      const types = e.dataTransfer ? Array.from(e.dataTransfer.types || []).join(",") : "";
+      api.debugLog?.(`[drop] HTML5 drop x=${e.clientX} y=${e.clientY} files=${n} types=${types}`);
+    } catch (_) {}
+  }, true);
+
   api.onOsDrag((ev) => {
     if (!ev || !ev.kind) return;
     if (ev.kind === "enter" || ev.kind === "over") {
