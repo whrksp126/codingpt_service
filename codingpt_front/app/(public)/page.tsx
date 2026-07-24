@@ -36,7 +36,9 @@ html{scroll-behavior:smooth}
 .cpt-landing .hero .avail b{color:var(--text3);font-weight:600;}
 
 /* 큰 워크스페이스 목업 */
-.cpt-landing .shot-wrap{margin-top:52px;position:relative;}
+.cpt-landing{overflow-x:clip;}
+.cpt-landing .shot-bleed{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);}
+.cpt-landing .shot-wrap{position:relative;max-width:1340px;margin:60px auto 0;padding:0 clamp(16px,3vw,44px);}
 .cpt-landing .shot-glow{position:absolute;inset:-1px 0 auto;height:60%;background:radial-gradient(60% 100% at 50% 0,rgba(52,211,153,0.06),transparent 70%);pointer-events:none;}
 .cpt-landing .app{position:relative;background:var(--surface);border:1px solid var(--border-2);border-radius:14px;overflow:hidden;box-shadow:0 40px 90px -30px rgba(0,0,0,.75);}
 .cpt-landing .app-bar{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--elevated);}
@@ -84,7 +86,7 @@ html{scroll-behavior:smooth}
 .cpt-landing .prev .render .b{height:10px;width:66%;border-radius:5px;background:var(--text2);opacity:.9;}
 .cpt-landing .prev .render .l{height:7px;border-radius:5px;background:var(--border-2);margin-top:9px;}
 .cpt-landing .prev .render .cbtn{margin-top:15px;display:inline-block;background:var(--cta);color:#fff;font-size:11px;font-weight:650;padding:6px 13px;border-radius:7px;}
-.cpt-landing .phone{position:absolute;right:-8px;bottom:-42px;width:252px;border:9px solid #0d1017;border-radius:38px;background:#0d1017;overflow:hidden;box-shadow:0 44px 80px -22px rgba(0,0,0,.92);}
+.cpt-landing .phone{position:absolute;right:-38px;bottom:-60px;width:286px;border:10px solid #0d1017;border-radius:42px;background:#0d1017;overflow:hidden;box-shadow:0 54px 100px -26px rgba(0,0,0,.95);}
 .cpt-landing .phone-shot{display:block;width:100%;height:auto;}
 .cpt-landing .phone .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:56px;height:5px;border-radius:99px;background:#05070b;z-index:2;}
 .cpt-landing .phone .top{padding:16px 12px 8px;font-size:9.5px;color:var(--dim);font-family:var(--mono);display:flex;justify-content:space-between;}
@@ -152,7 +154,7 @@ html{scroll-behavior:smooth}
 @media(max-width:820px){.cpt-landing .app-body{min-width:760px;} .cpt-landing .app-scroll{overflow-x:auto;}}
 @media(max-width:780px){.cpt-landing .row2,.cpt-landing .row2.rev{grid-template-columns:1fr;gap:26px;} .cpt-landing .row2.rev .fig{order:0;}}
 @media(max-width:680px){.cpt-landing .dlz{grid-template-columns:1fr;}}
-@media(max-width:560px){.cpt-landing .phone{display:none;}}
+@media(max-width:820px){.cpt-landing .phone{display:none;}}
 @media(prefers-reduced-motion:reduce){.cpt-landing .cur{animation:none;}}
 `;
 
@@ -173,7 +175,7 @@ export default function Home() {
           <div className="avail"><b>macOS · iOS · Android</b> 지원 · Windows 준비 중 · 무료 &amp; BYO</div>
         </div>
 
-        <div className="container" style={{ maxWidth: 1120 }}>
+        <div className="shot-bleed">
           <div className="shot-wrap">
             <div className="shot-glow" />
             <div className="app-scroll">
@@ -188,8 +190,8 @@ export default function Home() {
             <div className="phone">
               <img className="phone-shot" src="/mobile-workspace.png" alt="같은 AI 에이전트 세션을 폰에서 이어받아 지휘하는 CodingPT 모바일 앱" />
             </div>
+            <p className="cap">실제 CodingPT 워크스페이스 — 터미널의 AI 에이전트를 폰·태블릿에서 그대로 이어받아요</p>
           </div>
-          <p className="cap">실제 CodingPT 워크스페이스 — 터미널의 AI 에이전트를 폰·태블릿에서 그대로 이어받아요</p>
         </div>
       </section>
 
