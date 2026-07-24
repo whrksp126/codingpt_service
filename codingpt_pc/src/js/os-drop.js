@@ -17,18 +17,25 @@ function clearHl() {
 function setDragging(on) {
   document.body.classList.toggle("os-dragging", !!on);
 }
-// 물리 px → CSS px 환산 후 elementFromPoint 로 터미널 pane 탐색. 활성 탭이 터미널일 때만 대상
-//  (혼합 탭 IDE/프리뷰 표시 중이면 보이지 않는 백그라운드 터미널에 꽂지 않는다).
-function termPaneAt(px, py) {
+// 물리 px → CSS px 환산 후 elementFromPoint 로 터미널 pane 탐색. terminal-kind pane 이면 대상 —
+//  활성 탭이 터미널이면 그 탭, 활성 탭이 프리뷰/IDE(혼합 탭)면 같은 pane 의 첫 터미널 탭으로 라우팅한다.
+//  (프리뷰는 punch-through 네이티브 웹뷰라 활성 시 pane 을 덮어 OS 드롭이 프리뷰로 가로채졌었다 —
+//   드롭은 항상 이 pane 의 터미널에 꽂고, 필요하면 그 터미널 탭으로 먼저 전환한다.)
+//  반환: { pane, tabIndex } (삽입할 터미널 탭 인덱스) 또는 null.
+function termTargetAt(px, py) {
   const s = window.devicePixelRatio || 1;
   const el = document.elementFromPoint(px / s, py / s);
   const paneEl = el && el.closest ? el.closest(".pane") : null;
   if (!paneEl) return null;
   const pane = getPane(paneEl.dataset.paneId);
   if (!pane || pane.node.kind !== "terminal") return null;
-  const at = pane.node.tabs?.[pane.node.active];
-  if (!at || !isTermTab(at)) return null;
-  return pane;
+  const tabs = pane.node.tabs || [];
+  const active = tabs[pane.node.active];
+  if (active && isTermTab(active)) return { pane, tabIndex: pane.node.active };
+  // 활성 탭이 터미널이 아님(프리뷰 등) — 같은 pane 의 첫 터미널 탭으로.
+  const ti = tabs.findIndex((t) => isTermTab(t));
+  if (ti >= 0) return { pane, tabIndex: ti };
+  return null;
 }
 // 셸 안전 작은따옴표 감싸기 — 경로 내 ' 는 '\'' 로 이스케이프.
 function shq(p) {
@@ -40,22 +47,33 @@ export function initOsDrop() {
     if (!ev || !ev.kind) return;
     if (ev.kind === "enter" || ev.kind === "over") {
       setDragging(true);
-      const pane = termPaneAt(ev.x, ev.y);
-      if ((pane ? pane.el : null) !== hlEl) {
+      const tgt = termTargetAt(ev.x, ev.y);
+      const el = tgt ? tgt.pane.el : null;
+      if (el !== hlEl) {
         clearHl();
-        if (pane) { hlEl = pane.el; hlEl.classList.add("os-drop"); }
+        if (el) { hlEl = el; hlEl.classList.add("os-drop"); }
       }
       return;
     }
     if (ev.kind === "drop") {
-      const pane = termPaneAt(ev.x, ev.y);
+      const tgt = termTargetAt(ev.x, ev.y);
       clearHl();
       setDragging(false);
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
-      if (!pane || !paths.length) return; // 터미널 pane 밖 드롭 = 무시
-      pane.insertText(paths.map(shq).join(" ") + " ");
-      pane.ctx?.onFocus?.(pane.id);
-      pane.focus();
+      if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
+      const { pane, tabIndex } = tgt;
+      const text = paths.map(shq).join(" ") + " ";
+      const doInsert = () => {
+        pane.insertText(text);
+        pane.ctx?.onFocus?.(pane.id);
+        pane.focus();
+      };
+      // 활성 탭이 그 터미널이 아니면(프리뷰 등) 먼저 전환 후 삽입 — 삽입 결과가 눈에 보이게.
+      if (tabIndex !== pane.node.active) {
+        Promise.resolve(pane.switchTab(tabIndex)).then(doInsert, doInsert);
+      } else {
+        doInsert();
+      }
       return;
     }
     clearHl(); // leave(+미래 변형) — 하이라이트/실드 해제
