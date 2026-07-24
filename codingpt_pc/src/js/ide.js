@@ -525,11 +525,13 @@ export class IdeView {
   _wireNode(row, n, depth) {
     row.addEventListener("click", (e) => {
       if (e.target.closest(".ide-rename-input")) return;
-      this._select(n.path);
-      if (n.dir) this._toggleDir(n, row);
-      else this.openFile(n.path, undefined, this.activeGroup, false); // 파일은 열되 포커스는 트리에 유지(Return=rename)
-      // 클릭 후 포커스를 이 행에 둬 Return/화살표 키가 트리로 온다(파일 열림은 뷰만, 편집은 에디터 클릭).
-      row.focus({ preventScroll: true });
+      const p = n.path;
+      this._select(p);
+      // openFile/_toggleDir 는 트리를 재렌더(innerHTML 교체)하므로, 재렌더 완료 후 "선택된 새 행" 에
+      //  포커스를 준다(클릭 시점 행은 파괴됨). 포커스가 트리에 있어야 Return=rename·화살표가 동작.
+      const focusAfter = () => this._focusSelected();
+      if (n.dir) Promise.resolve(this._toggleDir(n, row)).then(focusAfter);
+      else Promise.resolve(this.openFile(p, undefined, this.activeGroup, false)).then(focusAfter); // 열되 편집 포커스는 트리 유지
     });
     row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); this._select(n.path); this._menu(e, n); });
     row.addEventListener("pointerdown", (e) => { if (e.button === 0 && e.pointerType !== "touch") this._beginNodeDrag(n, e); });
@@ -543,6 +545,12 @@ export class IdeView {
     this.selectedPath = path;
     const row = this.bodyEl?.querySelector(`.ide-node[data-path="${cssEsc(path)}"]`);
     row?.classList.add("selected");
+  }
+  // 선택된 행에 키보드 포커스 부여(트리 재렌더 후 호출 — Return/화살표가 트리로 오게).
+  _focusSelected() {
+    if (!this.selectedPath) return;
+    const row = this.bodyEl?.querySelector(`.ide-node[data-path="${cssEsc(this.selectedPath)}"]`);
+    row?.focus({ preventScroll: true });
   }
 
   // 트리 행 키보드 — Return=이름변경(Finder), ↑/↓=행 이동, →/←=폴더 펼침/접기.
@@ -1063,7 +1071,7 @@ export class IdeView {
     const row = e.currentTarget;
     if (!row) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
-    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null;
+    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null, lastX = sx, lastY = sy;
     // 실제 pointerdown 이면 캡처 성공(CM 선택 방지). 실패 시 window 로 폴백(그래도 동작).
     let captured = false;
     try { row.setPointerCapture(pid); captured = true; } catch (_) {}
@@ -1085,6 +1093,7 @@ export class IdeView {
     };
     const move = (ev) => {
       if (!dragging) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; start(); }
+      lastX = ev.clientX; lastY = ev.clientY;
       ghost.style.left = ev.clientX + 14 + "px"; ghost.style.top = ev.clientY + 14 + "px";
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       clearDrop();
@@ -1116,6 +1125,11 @@ export class IdeView {
       if (dragging) {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
+      }
+      if (dragging) { // 진단 — 드롭 시 대상 판정 결과(#3 파일→터미널)
+        const s = window.devicePixelRatio || 1;
+        const el = document.elementFromPoint(lastX, lastY);
+        api.debugLog?.(`[tree-drag] finish term=${overTerm ? overTerm.pane.id + "#" + overTerm.tabIndex : "-"} folder=${overFolder || "-"} el=${el ? el.tagName + "." + (typeof el.className === "string" ? el.className.slice(0, 30) : "") : "none"} pane=${el && el.closest ? (el.closest(".pane")?.dataset.paneId || "no") : "na"} dpr=${s}`);
       }
       if (dragging && overTerm) {
         // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.

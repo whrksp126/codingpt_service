@@ -667,6 +667,36 @@ pub fn run() {
 
             setup_tray(&handle)?;
 
+            // 앱 메뉴 — Tauri 기본 메뉴의 Edit>실행취소/다시실행(⌘Z/⌘⇧Z)이 웹뷰 도달 전에
+            //  가로채(performKeyEquivalent) IDE(CodeMirror)·터미널의 ⌘Z 처리를 막는다. Undo/Redo 를
+            //  뺀 커스텀 메뉴로 교체 → ⌘Z 가 웹뷰로 전달돼 각 표면이 자체 실행취소를 처리한다.
+            //  복사/붙여넣기/잘라내기/전체선택은 유지(웹뷰가 네이티브 항목에 의존).
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, PredefinedMenuItem as P, Submenu};
+                let app_m = Submenu::with_items(&handle, "CodingPT", true, &[
+                    &P::about(&handle, None, None)?,
+                    &P::separator(&handle)?,
+                    &P::hide(&handle, None)?,
+                    &P::hide_others(&handle, None)?,
+                    &P::show_all(&handle, None)?,
+                    &P::separator(&handle)?,
+                    &P::quit(&handle, None)?,
+                ])?;
+                let edit_m = Submenu::with_items(&handle, "편집", true, &[
+                    &P::cut(&handle, None)?,
+                    &P::copy(&handle, None)?,
+                    &P::paste(&handle, None)?,
+                    &P::select_all(&handle, None)?,
+                ])?;
+                let win_m = Submenu::with_items(&handle, "윈도우", true, &[
+                    &P::minimize(&handle, None)?,
+                    &P::close_window(&handle, None)?,
+                ])?;
+                let menu = Menu::with_items(&handle, &[&app_m, &edit_m, &win_m])?;
+                app.set_menu(menu)?;
+            }
+
             // punch-through 설치 — 프리뷰(네이티브 웹뷰)를 앱 UI 아래에 깔고, 앱 웹뷰 투명 슬롯으로
             //  비추며 hitTest 로 이벤트를 라우팅(DOM 모달/메뉴가 자연히 프리뷰 위에 그려진다).
             preview::install_punch_through(&handle);
