@@ -373,6 +373,55 @@ unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cm
     true
 }
 
+// 한 클래스에 드롭 메서드 5종을 심는다 — 없으면 addMethod(이 클래스에만 override, 상속 오염 없음),
+//  이미 있으면 그 클래스 자체 IMP 만 교체. AppKit 이 드롭 목적지로 고른 그 뷰의 draggingEntered/
+//  performDragOperation 이 우리 것이 되어 파일 경로를 가로챈다.
+#[cfg(target_os = "macos")]
+unsafe fn swizzle_drag_class(cls: *mut objc2::runtime::AnyClass) {
+    use objc2::runtime::AnyClass;
+    let add = |sel: objc2::runtime::Sel, imp: objc2::runtime::Imp, types: &str| {
+        let c = std::ffi::CString::new(types).unwrap();
+        let added = objc2::ffi::class_addMethod(cls, sel, imp, c.as_ptr());
+        if !added.as_bool() {
+            let m = objc2::ffi::class_getInstanceMethod(cls as *const AnyClass, sel);
+            if !m.is_null() { let _ = objc2::ffi::method_setImplementation(m, imp); }
+        }
+    };
+    add(objc2::sel!(draggingEntered:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_entered as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
+    add(objc2::sel!(draggingUpdated:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_updated as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
+    add(objc2::sel!(draggingExited:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_exited as unsafe extern "C-unwind" fn(_, _, _)), "v@:@");
+    add(objc2::sel!(prepareForDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_prepare as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
+    add(objc2::sel!(performDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_perform as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
+}
+
+// 앱 웹뷰 서브트리의 모든 뷰 클래스에 드롭 메서드를 심는다 — AppKit 이 실제로 드롭을 배달하는
+//  WebKit 내부 뷰(WKWebView 는 내부 content 뷰가 파일드롭을 받아 삼킴)를 포함해 전부 커버.
+//  드롭 목적지로 등록된 뷰만 실제 호출되므로, 비등록 뷰에 메서드가 있어도 무해.
+#[cfg(target_os = "macos")]
+unsafe fn install_webview_drag(v: *mut objc2::runtime::AnyObject, depth: u32) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    if v.is_null() || depth > 8 { return; }
+    let cls: *mut AnyClass = msg_send![&*v, class];
+    if !cls.is_null() {
+        swizzle_drag_class(cls);
+        // 이 뷰를 파일 URL 드롭 목적지로도 등록(WebKit 이 자체 등록 안 한 경우 대비).
+        let t_files = objc2_foundation::NSString::from_str("NSFilenamesPboardType");
+        let t_url = objc2_foundation::NSString::from_str("public.file-url");
+        let arr: *mut AnyObject = msg_send![objc2::class!(NSMutableArray), array];
+        let _: () = msg_send![arr, addObject: &*t_files];
+        let _: () = msg_send![arr, addObject: &*t_url];
+        let _: () = msg_send![&*v, registerForDraggedTypes: arr];
+    }
+    let subs: *mut AnyObject = msg_send![&*v, subviews];
+    if subs.is_null() { return; }
+    let count: usize = msg_send![&*subs, count];
+    for i in 0..count {
+        let sv: *mut AnyObject = msg_send![&*subs, objectAtIndex: i];
+        install_webview_drag(sv, depth + 1);
+    }
+}
+
 // contentView 하위 뷰트리(앱 WKWebView 등)의 드롭 목적지 등록을 해제 — contentView 가 유일한
 //  드롭 목적지가 되게 한다. AppKit 은 커서 아래 "가장 깊은 등록 뷰" 에만 드롭을 주므로, 웹뷰가
 //  등록돼 있으면(가로채고 아무 것도 안 함) 상위 contentView 까지 드롭이 안 온다(실측). content 자신은 보존.
@@ -487,6 +536,8 @@ pub fn install_punch_through(app: &AppHandle) {
             let content: *mut AnyObject = msg_send![&*nsw, contentView];
             if content.is_null() { return; }
             install_drag_dest(content); // OS 파일 드롭 목적지 등록(wry 웹뷰 드롭 무발화 우회)
+            install_webview_drag(content, 0); // 서브트리(WebKit 내부 뷰 포함) 드롭 메서드 직접 스위즐
+            crate::applog("[drop] 서브트리 드롭 스위즐 완료");
             let cls: &AnyClass = msg_send![&*content, class];
             let sel = objc2::sel!(hitTest:);
             let new_imp: objc2::runtime::Imp = std::mem::transmute(
