@@ -48,6 +48,7 @@ html{scroll-behavior:smooth}
 .cpt-landing .app-bar .ttl{margin-left:8px;font-size:12px;color:var(--text3);font-weight:600;}
 .cpt-landing .app-bar .rt{margin-left:auto;display:flex;gap:12px;color:var(--dim);font-size:12px;}
 .cpt-landing .app-body{display:grid;grid-template-columns:52px 148px 1fr 1fr 236px;min-height:392px;font-family:var(--mono);font-size:11.5px;}
+.cpt-landing .shot-img{display:block;width:100%;height:auto;}
 .cpt-landing .rail{border-right:1px solid var(--line);background:var(--base);display:flex;flex-direction:column;align-items:center;gap:16px;padding:14px 0;color:var(--dim);}
 .cpt-landing .rail .ico{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;background:var(--elevated);}
 .cpt-landing .rail .ico.on{background:var(--hover);color:var(--text2);}
@@ -177,52 +178,9 @@ export default function Home() {
               <div className="app">
                 <div className="app-bar">
                   <span className="dots"><i className="r" /><i className="y" /><i className="g" /></span>
-                  <span className="ttl">CodingPT — acme-web · MacBook Pro</span>
-                  <span className="rt"><span>터미널</span><span>에디터</span><span>미리보기</span></span>
+                  <span className="ttl">CodingPT — codingpt-demo</span>
                 </div>
-                <div className="app-body">
-                  <div className="rail">
-                    <div className="ico on">▧</div><div className="ico">⌘</div><div className="ico">◫</div>
-                    <div className="dev"><span className="live" /><span /><span /></div>
-                  </div>
-                  <div className="tree">
-                    <div className="h">acme-web</div>
-                    <span className="f">▸ public</span><span className="f on">▾ src</span>
-                    <span className="f in on">index.tsx</span><span className="f in">App.tsx</span><span className="f in">styles.css</span>
-                    <span className="f">package.json</span>
-                  </div>
-                  <div className="pane">
-                    <div className="ph"><span className="t on">index.tsx</span><span className="t">App.tsx</span></div>
-                    <div className="bd">
-                      <div><span className="ln">1</span><span className="kw">export default function</span> <span className="fn">Home</span>() {'{'}</div>
-                      <div><span className="ln">2</span>  <span className="kw">return</span> (</div>
-                      <div><span className="ln">3</span>    &lt;<span className="fn">main</span>&gt;</div>
-                      <div className="add"><span className="ln">4</span>      &lt;<span className="fn">h1</span>&gt;내 머신, 어디서든&lt;/<span className="fn">h1</span>&gt;</div>
-                      <div><span className="ln">5</span>    &lt;/<span className="fn">main</span>&gt;</div>
-                      <div><span className="ln">6</span>  );</div>
-                      <div><span className="ln">7</span>{'}'}</div>
-                      <div><span className="ln">8</span><span className="cm">// 폰에서 저장 → 머신에 즉시 반영</span></div>
-                    </div>
-                  </div>
-                  <div className="pane term">
-                    <div className="ph"><span className="t on">claude</span><span className="t">zsh</span></div>
-                    <div className="bd">
-                      <div><span className="path">~/acme-web</span> <span className="p">❯</span> npm run dev</div>
-                      <div><span className="ok">▲</span> ready · localhost:3000</div>
-                      <div style={{ marginTop: 6 }}><span className="path">~/acme-web</span> <span className="p">❯</span> claude</div>
-                      <div><span className="cm2"># 3개 파일 수정 · 테스트 통과</span></div>
-                      <div><span className="ok">✓</span> 완료. 다음 작업을 알려주세요</div>
-                      <div style={{ marginTop: 2 }}><span className="p">❯</span> <span className="cur" /></div>
-                    </div>
-                  </div>
-                  <div className="prev">
-                    <div className="pb"><span className="dots" style={{ gap: 4 }}><i className="r" style={{ width: 8, height: 8 }} /><i className="y" style={{ width: 8, height: 8 }} /><i className="g" style={{ width: 8, height: 8 }} /></span><span className="u">localhost:3000</span></div>
-                    <div className="render">
-                      <div className="b" /><div className="l" style={{ width: '82%' }} /><div className="l" style={{ width: '56%' }} />
-                      <span className="cbtn">시작하기</span>
-                    </div>
-                  </div>
-                </div>
+                <img className="shot-img" src="/hero-workspace.png" alt="CodingPT 워크스페이스 — 터미널의 AI 에이전트 세션, 코드 에디터의 실시간 diff, 개발자도구를 연 미리보기" />
               </div>
             </div>
             <div className="phone">
@@ -237,7 +195,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-          <p className="cap">전체 워크스페이스 미리보기 — 실제 앱 캡처로 교체 예정</p>
+          <p className="cap">실제 CodingPT 워크스페이스 — 터미널의 AI 에이전트를 폰·태블릿에서 그대로 이어받아요</p>
         </div>
       </section>
 
