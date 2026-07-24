@@ -66,6 +66,48 @@ static MOUSE_MONITOR: AtomicUsize = AtomicUsize::new(0); // NSEvent 좌클릭 �
 static DRAG_APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 #[cfg(target_os = "macos")]
 static DRAG_DEST_INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+// 이미 끝난 드래그의 changeCount — 이 값과 같으면 스테일(끝난 드래그)로 보고 무시(클릭 오라우팅 방지).
+#[cfg(target_os = "macos")]
+static DRAG_DONE_CC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(isize::MIN);
+
+// 지금 OS 파일 드래그가 이 앱 위로 진행 중인가 — 드래그 페이스트보드에 파일 타입이 있고, 아직 안 끝났고,
+//  마우스 버튼이 눌려 있으면(실드래그는 버튼 다운 유지) true. 버튼이 떼진 채 파일 타입만 남은 건
+//  다른 곳에서 끝난 스테일 페이스트보드 → 그 changeCount 를 done 으로 표시하고 false(클릭 오라우팅 방지).
+#[cfg(target_os = "macos")]
+unsafe fn os_file_drag_active() -> bool {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let name = objc2_foundation::NSString::from_str("Apple CFPasteboard drag");
+    let pb: *mut AnyObject = msg_send![objc2::class!(NSPasteboard), pasteboardWithName: &*name];
+    if pb.is_null() { return false; }
+    let cc: isize = msg_send![pb, changeCount];
+    if cc == DRAG_DONE_CC.load(Ordering::Relaxed) { return false; } // 이미 처리한 드래그
+    let t_files = objc2_foundation::NSString::from_str("NSFilenamesPboardType");
+    let t_url = objc2_foundation::NSString::from_str("public.file-url");
+    let arr: *mut AnyObject = msg_send![objc2::class!(NSMutableArray), array];
+    let _: () = msg_send![arr, addObject: &*t_files];
+    let _: () = msg_send![arr, addObject: &*t_url];
+    let avail: *mut AnyObject = msg_send![pb, availableTypeFromArray: arr];
+    if avail.is_null() { return false; }
+    // 좌버튼(bit 0)이 눌려 있으면 실제 진행 중인 드래그. 아니면 스테일 → done 표시 후 무시.
+    let pressed: usize = msg_send![objc2::class!(NSEvent), pressedMouseButtons];
+    if pressed & 1 == 0 {
+        DRAG_DONE_CC.store(cc, Ordering::Relaxed);
+        return false;
+    }
+    true
+}
+// 현재 드래그를 "끝남" 으로 표시(exit/perform 시) — 이후 같은 페이스트보드 changeCount 의 클릭은 정상 라우팅.
+#[cfg(target_os = "macos")]
+unsafe fn mark_drag_done() {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let name = objc2_foundation::NSString::from_str("Apple CFPasteboard drag");
+    let pb: *mut AnyObject = msg_send![objc2::class!(NSPasteboard), pasteboardWithName: &*name];
+    if pb.is_null() { return; }
+    let cc: isize = msg_send![pb, changeCount];
+    DRAG_DONE_CC.store(cc, Ordering::Relaxed);
+}
 
 // DOM 오버레이(모달/메뉴/드롭다운)가 떠 있는 동안 프리뷰로의 이벤트 포워딩을 차단(JS 가 갱신).
 #[tauri::command]
@@ -135,6 +177,14 @@ unsafe extern "C-unwind" fn punch_hit_test(
 ) -> *mut objc2::runtime::AnyObject {
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
+    // OS 파일 드래그 중이면 — 이 contentView(드롭 목적지로 등록된 메인 창) 자신을 반환해 AppKit 이
+    //  그 위의 웹뷰(WebKit 내부 뷰가 드롭을 삼킴) 대신 여기로 draggingEntered 를 보내게 한다.
+    //  스테일 페이스트보드로 클릭이 오라우팅되지 않도록 changeCount 신선도로 게이팅.
+    if os_file_drag_active() {
+        let reg: *mut AnyObject = msg_send![&*this, registeredDraggedTypes];
+        let n: usize = if reg.is_null() { 0 } else { msg_send![&*reg, count] };
+        if n > 0 { return this; } // 드롭 목적지로 등록된 contentView(=메인 창)만 하이재킹
+    }
     if !PUNCH_SHIELD.load(std::sync::atomic::Ordering::Relaxed) {
         // 같은 클래스의 다른 창(dt-* 등) contentView 에도 스위즐이 적용되므로 창 일치 필수.
         let this_win: *mut AnyObject = msg_send![&*this, window];
@@ -295,6 +345,7 @@ unsafe extern "C-unwind" fn dd_updated(this: *mut objc2::runtime::AnyObject, _cm
 }
 #[cfg(target_os = "macos")]
 unsafe extern "C-unwind" fn dd_exited(_this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _sender: *mut objc2::runtime::AnyObject) {
+    mark_drag_done(); // 드래그 종료 → 이후 같은 페이스트보드 클릭은 정상 라우팅
     emit_cpt_drag("leave", 0.0, 0.0, vec![]);
 }
 #[cfg(target_os = "macos")]
@@ -306,6 +357,7 @@ unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cm
     let (x, y) = drag_xy(this, sender);
     let paths = drag_paths(sender);
     crate::applog(&format!("[drop] contentView PERFORM x={x} y={y} n={} paths={:?}", paths.len(), paths));
+    mark_drag_done(); // 드롭 완료 → 이후 같은 페이스트보드 클릭은 정상 라우팅
     emit_cpt_drag("drop", x, y, paths);
     true
 }
@@ -388,16 +440,8 @@ unsafe fn install_drag_dest(content: *mut objc2::runtime::AnyObject) {
     let _: () = msg_send![arr, addObject: &*t_files];
     let _: () = msg_send![arr, addObject: &*t_url];
     let _: () = msg_send![&*content, registerForDraggedTypes: arr];
-    // 하위 뷰(앱 WKWebView 등)의 드롭 등록 해제 → contentView 가 유일 목적지.
-    unregister_drops_tree(content, content);
-    crate::applog("[drop] contentView 드롭 목적지 등록 완료 + 하위 웹뷰 드롭 해제");
-    // 웹뷰가 로드 후 지연 재등록할 수 있어 몇 차례 더 쓸어준다(안전, 없으면 no-op).
-    std::thread::spawn(|| {
-        for ms in [800u64, 2500, 6000] {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            resweep_drops();
-        }
-    });
+    // 드래그 중 hitTest 가 이 contentView 를 반환하므로(punch_hit_test) 웹뷰 하위 등록 해제는 불필요.
+    crate::applog("[drop] contentView 드롭 목적지 등록 완료");
 }
 
 // punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
