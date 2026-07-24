@@ -310,6 +310,42 @@ unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cm
     true
 }
 
+// contentView 하위 뷰트리(앱 WKWebView 등)의 드롭 목적지 등록을 해제 — contentView 가 유일한
+//  드롭 목적지가 되게 한다. AppKit 은 커서 아래 "가장 깊은 등록 뷰" 에만 드롭을 주므로, 웹뷰가
+//  등록돼 있으면(가로채고 아무 것도 안 함) 상위 contentView 까지 드롭이 안 온다(실측). content 자신은 보존.
+#[cfg(target_os = "macos")]
+unsafe fn unregister_drops_tree(v: *mut objc2::runtime::AnyObject, content: *mut objc2::runtime::AnyObject) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    if v.is_null() { return; }
+    if v != content {
+        let _: () = msg_send![&*v, unregisterDraggedTypes];
+    }
+    let subs: *mut AnyObject = msg_send![&*v, subviews];
+    if subs.is_null() { return; }
+    let count: usize = msg_send![&*subs, count];
+    for i in 0..count {
+        let sv: *mut AnyObject = msg_send![&*subs, objectAtIndex: i];
+        unregister_drops_tree(sv, content);
+    }
+}
+
+// 앱 웹뷰가 (지연) 재등록할 수 있어, 메인 창 contentView 하위 트리 드롭 등록을 다시 해제한다.
+#[cfg(target_os = "macos")]
+fn resweep_drops() {
+    let Some(app) = DRAG_APP.get() else { return };
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let Some(w) = app.get_window("main") else { return };
+        let Ok(nsw) = w.ns_window() else { return };
+        let content: *mut AnyObject = msg_send![nsw as *mut AnyObject, contentView];
+        if content.is_null() { return; }
+        unregister_drops_tree(content, content);
+    });
+}
+
 // contentView 클래스에 NSDraggingDestination 메서드들을 추가하고 인스턴스를 드롭 목적지로 등록(1회).
 #[cfg(target_os = "macos")]
 unsafe fn install_drag_dest(content: *mut objc2::runtime::AnyObject) {
@@ -337,7 +373,16 @@ unsafe fn install_drag_dest(content: *mut objc2::runtime::AnyObject) {
     let _: () = msg_send![arr, addObject: &*t_files];
     let _: () = msg_send![arr, addObject: &*t_url];
     let _: () = msg_send![&*content, registerForDraggedTypes: arr];
-    crate::applog("[drop] contentView 드롭 목적지 등록 완료");
+    // 하위 뷰(앱 WKWebView 등)의 드롭 등록 해제 → contentView 가 유일 목적지.
+    unregister_drops_tree(content, content);
+    crate::applog("[drop] contentView 드롭 목적지 등록 완료 + 하위 웹뷰 드롭 해제");
+    // 웹뷰가 로드 후 지연 재등록할 수 있어 몇 차례 더 쓸어준다(안전, 없으면 no-op).
+    std::thread::spawn(|| {
+        for ms in [800u64, 2500, 6000] {
+            std::thread::sleep(std::time::Duration::from_millis(ms));
+            resweep_drops();
+        }
+    });
 }
 
 // punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
