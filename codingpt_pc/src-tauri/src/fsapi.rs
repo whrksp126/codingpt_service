@@ -32,6 +32,12 @@ fn rel_of(abs: &Path) -> String {
     abs.strip_prefix(&home).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| abs.to_string_lossy().to_string())
 }
 
+// 홈-상대 경로 → 절대경로 문자열(홈 jail 검증). 파일트리 노드를 터미널에 절대경로로 삽입할 때 사용.
+#[tauri::command]
+pub fn fs_abs(rel: String) -> Result<String, String> {
+    Ok(safe_abs(rel.trim_start_matches('/'))?.to_string_lossy().to_string())
+}
+
 const SKIP: &[&str] = &["node_modules", ".git", ".next", "dist", "build", ".cache", "target", ".venv", "__pycache__"];
 
 #[derive(Serialize)]

@@ -6,6 +6,7 @@ import { icons } from "./icons.js";
 import { fileIcon, folderIcon } from "./fileicons.js";
 import * as T from "./tiling.js";
 import { cmThemeName } from "./theme.js";
+import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
 
 const CM = window.CodeMirror;
 
@@ -62,6 +63,7 @@ export class IdeView {
     this.activeGroupId = null;
     this._gseq = 0;
     this.expanded = new Set([this.root]);
+    this.selectedPath = null; // 트리에서 키보드로 선택된 행(Return=이름변경·화살표 이동 대상)
     this.treeVisible = true;
     this.tree = null;
     this.searchTree = null;
@@ -147,6 +149,11 @@ export class IdeView {
         "Cmd-S": () => this.save(), "Ctrl-S": () => this.save(),
         "Cmd-/": "toggleComment", "Ctrl-/": "toggleComment",
         "Ctrl-Space": "autocomplete", "Alt-/": "autocomplete",
+        // 실행취소/다시실행은 현재 활성 문서(파일)에만 스코프 — CM5 는 history 가 Doc 에 있어 swapDoc
+        //  이면 파일별로 분리되지만, 기본 keymap 낙하 대신 명시 바인딩으로 경계 누수를 확실히 막는다.
+        "Cmd-Z": (cm) => cm.undo(), "Ctrl-Z": (cm) => cm.undo(),
+        "Shift-Cmd-Z": (cm) => cm.redo(), "Shift-Ctrl-Z": (cm) => cm.redo(),
+        "Cmd-Y": (cm) => cm.redo(), "Ctrl-Y": (cm) => cm.redo(),
       },
     });
     g.cm.on("change", () => {
@@ -485,6 +492,8 @@ export class IdeView {
       row.style.paddingLeft = 6 + depth * 12 + "px";
       row.dataset.path = n.path;
       row.dataset.dir = n.dir ? "1" : "0";
+      row.tabIndex = 0; // 포커스 가능 — 키보드 네비게이션 + Return=이름변경(Finder 시맨틱)
+      if (n.path === this.selectedPath) row.classList.add("selected");
       const isOpen = this.expanded.has(n.path);
       if (n.dir) {
         row.innerHTML =
@@ -516,11 +525,44 @@ export class IdeView {
   _wireNode(row, n, depth) {
     row.addEventListener("click", (e) => {
       if (e.target.closest(".ide-rename-input")) return;
+      this._select(n.path);
       if (n.dir) this._toggleDir(n, row);
-      else this.openFile(n.path);
+      else this.openFile(n.path, undefined, this.activeGroup, false); // 파일은 열되 포커스는 트리에 유지(Return=rename)
+      // 클릭 후 포커스를 이 행에 둬 Return/화살표 키가 트리로 온다(파일 열림은 뷰만, 편집은 에디터 클릭).
+      row.focus({ preventScroll: true });
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); this._menu(e, n); });
+    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); this._select(n.path); this._menu(e, n); });
     row.addEventListener("pointerdown", (e) => { if (e.button === 0 && e.pointerType !== "touch") this._beginNodeDrag(n, e); });
+    row.addEventListener("keydown", (e) => this._treeKeydown(e, n, row));
+  }
+
+  // 현재 선택 행 표시(선택 모델). rerender 없이 클래스만 토글해 가볍게.
+  _select(path) {
+    if (this.selectedPath === path) return;
+    this.bodyEl?.querySelector(".ide-node.selected")?.classList.remove("selected");
+    this.selectedPath = path;
+    const row = this.bodyEl?.querySelector(`.ide-node[data-path="${cssEsc(path)}"]`);
+    row?.classList.add("selected");
+  }
+
+  // 트리 행 키보드 — Return=이름변경(Finder), ↑/↓=행 이동, →/←=폴더 펼침/접기.
+  _treeKeydown(e, n, row) {
+    if (e.target.closest(".ide-rename-input")) return; // 편집 인풋 내부 키는 그쪽이 처리
+    if (e.key === "Enter") {
+      if (n.path === this.root) return;
+      e.preventDefault();
+      this._startRename(n);
+      return;
+    }
+    if (e.key === "ArrowRight" && n.dir && !this.expanded.has(n.path)) { e.preventDefault(); this._toggleDir(n, row); return; }
+    if (e.key === "ArrowLeft" && n.dir && this.expanded.has(n.path)) { e.preventDefault(); this._toggleDir(n, row); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const rows = [...this.bodyEl.querySelectorAll(".ide-node")];
+      const i = rows.indexOf(row);
+      const next = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
+      if (next) { this._select(next.dataset.path); next.focus({ preventScroll: false }); }
+    }
   }
 
   async _toggleDir(n, row) {
@@ -536,9 +578,9 @@ export class IdeView {
   }
 
   // ── 파일 열기/편집(그룹). line 주어지면 해당 줄로 이동. ──
-  async openFile(path, line, group = this.activeGroup) {
+  async openFile(path, line, group = this.activeGroup, focusEditor = true) {
     const idx = group.open.findIndex((o) => o.path === path);
-    if (idx >= 0) { this._activate(group, idx); if (line) this._jumpTo(group, line); return; }
+    if (idx >= 0) { this._activate(group, idx, focusEditor); if (line) this._jumpTo(group, line); return; }
     try {
       // 같은 파일이 다른 그룹에 열려 있으면 linkedDoc 으로 버퍼 공유 — 그룹별로 편집이 따로 놀아
       //  마지막 저장이 덮어쓰는 문제를 원천 차단(VS Code 동작).
@@ -552,7 +594,7 @@ export class IdeView {
         doc = CM.Doc(content, modeFor(baseName(path)));
       }
       group.open.push({ path, doc, dirty: false });
-      this._activate(group, group.open.length - 1);
+      this._activate(group, group.open.length - 1, focusEditor);
       if (line) this._jumpTo(group, line);
     } catch (e) {
       this._toast(String(e));
@@ -590,7 +632,7 @@ export class IdeView {
       } catch (_) {}
     }, 30);
   }
-  _activate(group, i) {
+  _activate(group, i, focusEditor = true) {
     if (this._find && this._find.group === group) this.closeSearch();
     group.active = i;
     this._setActiveGroup(group.id);
@@ -604,7 +646,7 @@ export class IdeView {
     setTimeout(() => group.cm.refresh(), 0);
     this._renderTabs();
     this._renderBody();
-    group.cm.focus();
+    if (focusEditor) group.cm.focus();
   }
   _renderTabs() {
     for (const group of this.groups.values()) this._renderGroupTabs(group);
@@ -988,6 +1030,7 @@ export class IdeView {
       try {
         const dest = parentOf(n.path) + "/" + name;
         await this.fs.fsRename(n.path, dest);
+        if (this.selectedPath === n.path) this.selectedPath = dest; // 이름변경 후 선택 유지
         for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
         const pnode = this._findNode(parentOf(n.path));
         if (pnode) pnode.children = null;
@@ -1020,7 +1063,7 @@ export class IdeView {
     const row = e.currentTarget;
     if (!row) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
-    let dragging = false, ghost = null, overFolder = null, overRow = null;
+    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null;
     // 실제 pointerdown 이면 캡처 성공(CM 선택 방지). 실패 시 window 로 폴백(그래도 동작).
     let captured = false;
     try { row.setPointerCapture(pid); captured = true; } catch (_) {}
@@ -1028,6 +1071,8 @@ export class IdeView {
     const opt = captured ? false : true;
     const clearDrop = () => {
       if (overRow) { overRow.classList.remove("drop"); overRow = null; }
+      if (overTermEl) { overTermEl.classList.remove("os-drop"); overTermEl = null; }
+      overTerm = null;
       this.treeEl.classList.remove("drop-root");
     };
     const start = () => {
@@ -1043,17 +1088,21 @@ export class IdeView {
       ghost.style.left = ev.clientX + 14 + "px"; ghost.style.top = ev.clientY + 14 + "px";
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       clearDrop();
+      overFolder = null;
       const tRow = el && el.closest && el.closest(".ide-node.dir");
       const path = tRow && tRow.dataset.path;
+      const inTree = el && el.closest && el.closest(".ide-tree");
       if (path && path !== parentOf(n.path) && !path.startsWith(n.path)) {
         // 폴더 위 → 그 폴더로.
         overFolder = path; overRow = tRow; tRow.classList.add("drop");
-      } else if (el && el.closest && el.closest(".ide-tree") && parentOf(n.path) !== this.root) {
+      } else if (inTree && parentOf(n.path) !== this.root) {
         // 트리 빈 영역/루트 위 → 루트로(폴더 밖으로 빼기). 이미 루트면 대상 없음.
         overFolder = this.root;
         this.treeEl.classList.add("drop-root");
-      } else {
-        overFolder = null;
+      } else if (!inTree && !n.dir) {
+        // 트리 밖 터미널 pane 위 → 파일 경로 삽입(파일만; 폴더는 이동 전용). os-drop 과 동일 히트테스트.
+        const tgt = termTargetAt(ev.clientX * (window.devicePixelRatio || 1), ev.clientY * (window.devicePixelRatio || 1));
+        if (tgt) { overTerm = tgt; overTermEl = tgt.pane.el; overTermEl.classList.add("os-drop"); }
       }
     };
     const finish = async () => {
@@ -1068,7 +1117,15 @@ export class IdeView {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
       }
-      if (dragging && overFolder) {
+      if (dragging && overTerm) {
+        // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.
+        const t = overTerm;
+        try {
+          let p = this.fs.fsAbs ? await this.fs.fsAbs(n.path).catch(() => null) : null;
+          if (!p) p = n.path.startsWith(this.root + "/") ? n.path.slice(this.root.length + 1) : n.path;
+          insertIntoTerminal(t, shq(p) + " ");
+        } catch (e) { this._toast(String(e)); }
+      } else if (dragging && overFolder) {
         try {
           const dest = overFolder + "/" + n.name;
           await this.fs.fsRename(n.path, dest);

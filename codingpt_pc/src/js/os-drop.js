@@ -22,7 +22,8 @@ function setDragging(on) {
 //  (프리뷰는 punch-through 네이티브 웹뷰라 활성 시 pane 을 덮어 OS 드롭이 프리뷰로 가로채졌었다 —
 //   드롭은 항상 이 pane 의 터미널에 꽂고, 필요하면 그 터미널 탭으로 먼저 전환한다.)
 //  반환: { pane, tabIndex } (삽입할 터미널 탭 인덱스) 또는 null.
-function termTargetAt(px, py) {
+//  export — IDE 파일트리→터미널 드래그(ide.js)도 같은 히트테스트/삽입 규칙을 재사용한다.
+export function termTargetAt(px, py) {
   const s = window.devicePixelRatio || 1;
   const el = document.elementFromPoint(px / s, py / s);
   const paneEl = el && el.closest ? el.closest(".pane") : null;
@@ -38,8 +39,17 @@ function termTargetAt(px, py) {
   return null;
 }
 // 셸 안전 작은따옴표 감싸기 — 경로 내 ' 는 '\'' 로 이스케이프.
-function shq(p) {
+export function shq(p) {
   return "'" + String(p).replace(/'/g, "'\\''") + "'";
+}
+
+// 대상 터미널(pane, tabIndex)에 경로 텍스트를 삽입 — 필요하면 그 터미널 탭으로 먼저 전환. os-drop/ide 공용.
+export function insertIntoTerminal(tgt, text) {
+  if (!tgt || !text) return;
+  const { pane, tabIndex } = tgt;
+  const doInsert = () => { pane.insertText(text); pane.ctx?.onFocus?.(pane.id); pane.focus(); };
+  if (tabIndex !== pane.node.active) Promise.resolve(pane.switchTab(tabIndex)).then(doInsert, doInsert);
+  else doInsert();
 }
 
 export function initOsDrop() {

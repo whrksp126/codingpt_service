@@ -1169,6 +1169,11 @@ export class PaneView {
           e.preventDefault(); e.stopImmediatePropagation(); return;
         }
       }
+      // 터미널엔 텍스트 실행취소 개념이 없다 — ⌘Z/⌘⇧Z/⌘Y 는 xterm 숨은 textarea 에 네이티브 undo 를
+      //  걸어 그 델타가 셸로 새어 입력라인을 오염시킨다(IDE undo 가 터미널로 새는 것처럼 보임). 삼킨다.
+      if (e.metaKey && (e.key === "z" || e.key === "Z" || e.key === "y" || e.key === "Y")) {
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
       if (e.metaKey) return;                          // ⌘ = 앱 단축키/브라우저 기본(복사·붙여넣기)
       if (e.ctrlKey && e.key && e.key.length === 1) {
         const c = e.key.toLowerCase().charCodeAt(0);

@@ -79,6 +79,7 @@ export const api = {
   fsTree: (rel, depth) => invoke("fs_tree", { rel, depth: depth ?? 2 }),
   fsSearch: (rel, query, max) => invoke("fs_search", { rel, query, max: max ?? 500 }),
   fsRead: (rel) => invoke("fs_read", { rel }),
+  fsAbs: (rel) => invoke("fs_abs", { rel }), // 홈-상대 → 절대경로(파일트리→터미널 삽입용)
   fsWrite: (rel, content) => invoke("fs_write", { rel, content }),
   // base64 바이너리 저장(Design Mode 크롭샷 등) — 부모 mkdir 포함, 절대경로 문자열 반환.
   fsWriteB64: (rel, b64) => invoke("fs_write_b64", { rel, b64 }),
