@@ -36,9 +36,7 @@ html{scroll-behavior:smooth}
 .cpt-landing .hero .avail b{color:var(--text3);font-weight:600;}
 
 /* 큰 워크스페이스 목업 */
-.cpt-landing{overflow-x:clip;}
-.cpt-landing .shot-bleed{margin-left:calc(50% - 50vw);margin-right:calc(50% - 50vw);}
-.cpt-landing .shot-wrap{position:relative;max-width:1340px;margin:60px auto 0;padding:0 clamp(16px,3vw,44px);}
+.cpt-landing .shot-wrap{position:relative;width:min(92vw,1300px);margin:60px 0 0 50%;transform:translateX(-50%);}
 .cpt-landing .shot-glow{position:absolute;inset:-1px 0 auto;height:60%;background:radial-gradient(60% 100% at 50% 0,rgba(52,211,153,0.06),transparent 70%);pointer-events:none;}
 .cpt-landing .app{position:relative;background:var(--surface);border:1px solid var(--border-2);border-radius:14px;overflow:hidden;box-shadow:0 40px 90px -30px rgba(0,0,0,.75);}
 .cpt-landing .app-bar{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--border);background:var(--elevated);}
@@ -86,8 +84,10 @@ html{scroll-behavior:smooth}
 .cpt-landing .prev .render .b{height:10px;width:66%;border-radius:5px;background:var(--text2);opacity:.9;}
 .cpt-landing .prev .render .l{height:7px;border-radius:5px;background:var(--border-2);margin-top:9px;}
 .cpt-landing .prev .render .cbtn{margin-top:15px;display:inline-block;background:var(--cta);color:#fff;font-size:11px;font-weight:650;padding:6px 13px;border-radius:7px;}
-.cpt-landing .phone{position:absolute;right:-38px;bottom:-60px;width:286px;border:10px solid #0d1017;border-radius:42px;background:#0d1017;overflow:hidden;box-shadow:0 54px 100px -26px rgba(0,0,0,.95);}
-.cpt-landing .phone-shot{display:block;width:100%;height:auto;}
+.cpt-landing .phone{position:absolute;right:-30px;bottom:-56px;width:290px;padding:10px;border-radius:46px;background:linear-gradient(150deg,#544f66 0%,#2c2a3a 38%,#15151e 72%,#0d0d13 100%);box-shadow:0 56px 104px -26px rgba(0,0,0,.95),0 0 0 1px rgba(255,255,255,.05),inset 0 1px 1px rgba(255,255,255,.14);}
+.cpt-landing .phone::before{content:"";position:absolute;top:34px;right:-2px;width:3px;height:56px;border-radius:2px;background:linear-gradient(#3a3748,#232030);}
+.cpt-landing .phone::after{content:"";position:absolute;top:150px;left:-2px;width:3px;height:34px;border-radius:2px;background:linear-gradient(#3a3748,#232030);}
+.cpt-landing .phone-shot{display:block;width:100%;height:auto;border-radius:37px;}
 .cpt-landing .phone .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:56px;height:5px;border-radius:99px;background:#05070b;z-index:2;}
 .cpt-landing .phone .top{padding:16px 12px 8px;font-size:9.5px;color:var(--dim);font-family:var(--mono);display:flex;justify-content:space-between;}
 .cpt-landing .phone .body{padding:2px 11px 12px;font-family:var(--mono);font-size:9.5px;line-height:1.75;color:var(--text2);}
