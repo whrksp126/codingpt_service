@@ -180,11 +180,7 @@ export default function Home() {
             <div className="shot-glow" />
             <div className="app-scroll">
               <div className="app">
-                <div className="app-bar">
-                  <span className="dots"><i className="r" /><i className="y" /><i className="g" /></span>
-                  <span className="ttl">CodingPT — codingpt-demo</span>
-                </div>
-                <img className="shot-img" src="/hero-workspace.png" alt="CodingPT 워크스페이스 — 터미널의 AI 에이전트 세션, 코드 에디터의 실시간 diff, 개발자도구를 연 미리보기" />
+                <img className="shot-img" src="/hero-workspace.png" alt="CodingPT 데스크톱 앱 워크스페이스 — 워크스페이스 사이드바, 터미널의 AI 에이전트 세션, 코드 에디터의 실시간 diff, 개발자도구를 연 미리보기" />
               </div>
             </div>
             <div className="phone">
