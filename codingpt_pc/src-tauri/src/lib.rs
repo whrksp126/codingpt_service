@@ -738,14 +738,12 @@ pub fn run() {
                     use tauri::DragDropEvent as D;
                     let payload = match evt {
                         D::Enter { paths, position } => {
-                            applog(&format!("[drop] native ENTER x={} y={} n={}", position.x, position.y, paths.len())); // 진단
                             serde_json::json!({ "kind": "enter", "paths": paths, "x": position.x, "y": position.y })
                         }
                         D::Over { position } => {
                             serde_json::json!({ "kind": "over", "x": position.x, "y": position.y })
                         }
                         D::Drop { paths, position } => {
-                            applog(&format!("[drop] native DROP x={} y={} n={} paths={:?}", position.x, position.y, paths.len(), paths)); // 진단
                             serde_json::json!({ "kind": "drop", "paths": paths, "x": position.x, "y": position.y })
                         }
                         _ => serde_json::json!({ "kind": "leave" }), // Leave + non_exhaustive 미래 변형

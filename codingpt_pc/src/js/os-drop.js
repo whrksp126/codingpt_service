@@ -1,8 +1,8 @@
 // os-drop.js — OS 파일 드래그앤드랍 → 터미널 pane 에 경로 삽입.
-//  Tauri v2 드래그드롭은 Rust on_window_event 가 "cpt-drag" 로 포워딩한다(tauri://drag-* 는
-//  창/웹뷰 타겟 한정 emit 이라 평범한 listen 이 못 받음). 좌표는 물리 px(웹뷰 좌상단 기준).
-//  drag-over 중 좌표의 pane 이 "활성 탭=터미널" 이면 하이라이트, drop 시 그 pane 터미널에
-//  `'<path>'` 공백 join + 뒤 공백 1개를 붙여넣기 경로(insertText)로 삽입. 그 외 드롭은 무시.
+//  네이티브(preview.rs)가 앱 웹뷰 서브트리의 드롭 메서드를 스위즐해 파일 경로를 "cpt-drag"
+//  {kind,x,y,paths} 로 쏜다(punch-through 로 wry 기본 파일드롭 경로가 무발화라 우회). 좌표는
+//  물리 px(웹뷰 좌상단 기준). drag-over 중 좌표의 pane 이 터미널이면 하이라이트, drop 시 그 pane
+//  터미널에 `'<path>'` 공백 join + 뒤 공백 1개를 경로(insertText)로 삽입. 그 외 드롭은 무시.
 import { api } from "./api.js";
 import { getPane, isTermTab, terminalPanes } from "./pane.js";
 
@@ -43,27 +43,11 @@ function shq(p) {
 }
 
 export function initOsDrop() {
-  // 진단 — Tauri 가 OS 드롭을 가로채면(dragDropEnabled=true) 아래 HTML5 이벤트는 웹뷰에 안 온다.
-  //  만약 HTML5 dragover/drop 이 뜨면 = Tauri 가 안 가로챈 것(dragDropEnabled off/미등록) → 원인 확정.
-  //  (HTML5 File 은 절대경로가 없어 삽입엔 못 쓴다 — 진단 표식만.)
-  window.addEventListener("dragover", (e) => { e.preventDefault(); }, true);
-  window.addEventListener("drop", (e) => {
-    e.preventDefault();
-    try {
-      const n = e.dataTransfer?.files?.length ?? -1;
-      const types = e.dataTransfer ? Array.from(e.dataTransfer.types || []).join(",") : "";
-      api.debugLog?.(`[drop] HTML5 drop x=${e.clientX} y=${e.clientY} files=${n} types=${types}`);
-    } catch (_) {}
-  }, true);
-
   api.onOsDrag((ev) => {
     if (!ev || !ev.kind) return;
     if (ev.kind === "enter" || ev.kind === "over") {
       setDragging(true);
       const tgt = termTargetAt(ev.x, ev.y);
-      if (ev.kind === "enter") {
-        api.debugLog?.(`[drop] js ENTER x=${ev.x} y=${ev.y} dpr=${window.devicePixelRatio || 1} tgt=${tgt ? tgt.pane.id + "#" + tgt.tabIndex : "null"}`);
-      }
       const el = tgt ? tgt.pane.el : null;
       if (el !== hlEl) {
         clearHl();
@@ -79,20 +63,12 @@ export function initOsDrop() {
         if (terms.length === 1) {
           const p = terms[0];
           const ti = (p.node.tabs || []).findIndex((t) => isTermTab(t));
-          if (ti >= 0) { tgt = { pane: p, tabIndex: ti }; api.debugLog?.(`[drop] js DROP 폴백→단일터미널 ${p.id}#${ti}`); }
+          if (ti >= 0) tgt = { pane: p, tabIndex: ti };
         }
       }
       clearHl();
       setDragging(false);
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
-      // 진단 — 어디서 끊기는지 확정(네이티브 도달=DROP 로그, 여기 도달=js DROP, tgt/paths).
-      const s = window.devicePixelRatio || 1;
-      const hitEl = document.elementFromPoint(ev.x / s, ev.y / s);
-      api.debugLog?.(
-        `[drop] js DROP x=${ev.x} y=${ev.y} dpr=${s} paths=${paths.length} tgt=${tgt ? tgt.pane.id + "#" + tgt.tabIndex : "null"} ` +
-          `el=${hitEl ? hitEl.tagName + "." + (typeof hitEl.className === "string" ? hitEl.className : "") : "none"} ` +
-          `pane=${hitEl && hitEl.closest ? (hitEl.closest(".pane")?.dataset.paneId || "no-pane") : "na"}`
-      );
       if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
       const { pane, tabIndex } = tgt;
       const text = paths.map(shq).join(" ") + " ";
