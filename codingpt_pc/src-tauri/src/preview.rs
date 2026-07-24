@@ -356,16 +356,31 @@ unsafe fn install_drag_dest(content: *mut objc2::runtime::AnyObject) {
     }
     let cls: &AnyClass = msg_send![&*content, class];
     let clsp = cls as *const AnyClass as *mut AnyClass;
+    // 진단 — contentView 실제 클래스명(WryWebView 면 웹뷰가 곧 contentView 라는 뜻).
+    let cname = std::ffi::CStr::from_ptr(objc2::ffi::class_getName(clsp)).to_string_lossy().into_owned();
+    crate::applog(&format!("[drop] contentView class = {cname}"));
     // (셀렉터, IMP, 타입인코딩) — Q=NSUInteger, v=void, c=BOOL(signed char), @=id, :=SEL.
-    let add = |sel: objc2::runtime::Sel, imp: objc2::runtime::Imp, types: &str| {
+    //  이미 그 클래스에 메서드가 있으면(상속/기존 구현) addMethod 는 실패 → IMP 를 직접 교체(swizzle)해 내 핸들러가 뜨게 한다.
+    let add = |sel: objc2::runtime::Sel, imp: objc2::runtime::Imp, types: &str, name: &str| {
         let c = std::ffi::CString::new(types).unwrap();
-        let _ = objc2::ffi::class_addMethod(clsp, sel, imp, c.as_ptr());
+        let added = objc2::ffi::class_addMethod(clsp, sel, imp, c.as_ptr());
+        if added.as_bool() {
+            crate::applog(&format!("[drop] method {name}: ADDED"));
+        } else {
+            let m = objc2::ffi::class_getInstanceMethod(cls as *const AnyClass, sel);
+            if !m.is_null() {
+                let _ = objc2::ffi::method_setImplementation(m, imp);
+                crate::applog(&format!("[drop] method {name}: SWIZZLED(기존 구현 교체)"));
+            } else {
+                crate::applog(&format!("[drop] method {name}: FAIL"));
+            }
+        }
     };
-    add(objc2::sel!(draggingEntered:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_entered as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
-    add(objc2::sel!(draggingUpdated:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_updated as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@");
-    add(objc2::sel!(draggingExited:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_exited as unsafe extern "C-unwind" fn(_, _, _)), "v@:@");
-    add(objc2::sel!(prepareForDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_prepare as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
-    add(objc2::sel!(performDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_perform as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@");
+    add(objc2::sel!(draggingEntered:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_entered as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@", "draggingEntered");
+    add(objc2::sel!(draggingUpdated:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_updated as unsafe extern "C-unwind" fn(_, _, _) -> usize), "Q@:@", "draggingUpdated");
+    add(objc2::sel!(draggingExited:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_exited as unsafe extern "C-unwind" fn(_, _, _)), "v@:@", "draggingExited");
+    add(objc2::sel!(prepareForDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_prepare as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@", "prepareForDragOperation");
+    add(objc2::sel!(performDragOperation:), std::mem::transmute::<_, objc2::runtime::Imp>(dd_perform as unsafe extern "C-unwind" fn(_, _, _) -> bool), "c@:@", "performDragOperation");
     // 인스턴스를 파일 URL 드롭 목적지로 등록(레거시 + 현대 타입 모두).
     let t_files = objc2_foundation::NSString::from_str("NSFilenamesPboardType");
     let t_url = objc2_foundation::NSString::from_str("public.file-url");
