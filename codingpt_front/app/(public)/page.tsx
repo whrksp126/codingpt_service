@@ -84,7 +84,8 @@ html{scroll-behavior:smooth}
 .cpt-landing .prev .render .b{height:10px;width:66%;border-radius:5px;background:var(--text2);opacity:.9;}
 .cpt-landing .prev .render .l{height:7px;border-radius:5px;background:var(--border-2);margin-top:9px;}
 .cpt-landing .prev .render .cbtn{margin-top:15px;display:inline-block;background:var(--cta);color:#fff;font-size:11px;font-weight:650;padding:6px 13px;border-radius:7px;}
-.cpt-landing .phone{position:absolute;right:-14px;bottom:-26px;width:176px;border:8px solid #0d1017;border-radius:30px;background:var(--surface);overflow:hidden;box-shadow:0 30px 60px -18px rgba(0,0,0,.85);}
+.cpt-landing .phone{position:absolute;right:-8px;bottom:-42px;width:252px;border:9px solid #0d1017;border-radius:38px;background:#0d1017;overflow:hidden;box-shadow:0 44px 80px -22px rgba(0,0,0,.92);}
+.cpt-landing .phone-shot{display:block;width:100%;height:auto;}
 .cpt-landing .phone .notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:56px;height:5px;border-radius:99px;background:#05070b;z-index:2;}
 .cpt-landing .phone .top{padding:16px 12px 8px;font-size:9.5px;color:var(--dim);font-family:var(--mono);display:flex;justify-content:space-between;}
 .cpt-landing .phone .body{padding:2px 11px 12px;font-family:var(--mono);font-size:9.5px;line-height:1.75;color:var(--text2);}
@@ -185,15 +186,7 @@ export default function Home() {
               </div>
             </div>
             <div className="phone">
-              <div className="notch" />
-              <div className="top"><span>9:41</span><span>CodingPT</span></div>
-              <div className="body">
-                <div><span className="p">❯</span> claude</div>
-                <div><span className="ok">✓</span> 완료.</div>
-                <div><span className="cm2"># 계속할까요?</span></div>
-                <div><span className="p">❯</span> 배포해줘_</div>
-                <div className="kbar"><span /><span /><span /><span /></div>
-              </div>
+              <img className="phone-shot" src="/mobile-workspace.png" alt="같은 AI 에이전트 세션을 폰에서 이어받아 지휘하는 CodingPT 모바일 앱" />
             </div>
           </div>
           <p className="cap">실제 CodingPT 워크스페이스 — 터미널의 AI 에이전트를 폰·태블릿에서 그대로 이어받아요</p>
