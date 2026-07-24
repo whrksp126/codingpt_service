@@ -676,6 +676,10 @@ export async function reconcilePool() {
           return false;
         }
         if (t.miss) delete t.miss;
+        // 같은 tmux window 가 다른 pane/탭에 이미 있음 = 더블링(복제). 같은 window 를 두 pane 이
+        //  공유하면 한쪽을 닫을 때 killWindow 가 공유 세션을 죽여 양쪽이 함께 사라진다(마지막 세션이면
+        //  tmux 서버까지 사망). 이 중복 탭을 제거 — 먼저 만난(원본) pane 만 그 window 를 유지한다.
+        if (seen.has(t.win)) { changed = true; touched.add(l.id); api.debugLog(`reconcile: 중복 탭 제거 win=${t.win} pane=${l.id} (더블링 방지)`); return false; }
         seen.add(t.win);
         if (p.name && t.title !== p.name) { t.title = p.name; changed = true; touched.add(l.id); }
         // 실행 중 명령(pane_current_command) — 탭 라벨 부제("이름 · claude")로 표시(cmux 미러).
@@ -749,18 +753,31 @@ export async function restorePersisted() {
       const allIds = [];
       for (const [id, w] of Object.entries(saved.ws)) {
         if (w && w.layout) {
-          const layout = migrateTree(w.layout);
-          // 영속된 'new' 는 완료되지 못한 add 의 잔재(정상 확보는 수 초 내 숫자로 저장됨) —
-          //  남겨두면 pending 가드가 리컨실을 영구 정지시키므로 복원 시점에 제거한다.
-          //  miss(리컨실 유예 마킹)도 런타임 전용이라 함께 걷어낸다(복원 직후 유예 상실 방지).
+          let layout = migrateTree(w.layout);
+          // 복원 정리: ① 'new'(미완료 add 잔재 — 남기면 pending 가드가 리컨실을 영구 정지) 제거,
+          //  ② miss(런타임 전용 유예 마킹) 제거, ③ 같은 tmux window 가 여러 pane/탭에 중복 저장된
+          //  더블링 제거 — 첫(원본) pane 만 유지. 중복 제거로 완전히 빈 split pane 은 아래서 collapse.
+          const seenWins = new Set();
+          const dedupedEmpty = [];
           T.eachLeaf(layout, (l) => {
             if (l.kind !== "terminal" || !Array.isArray(l.tabs)) return;
+            const before = l.tabs.length;
             for (const t of l.tabs) delete t.miss;
-            if (!l.tabs.some((t) => t.win === "new")) return;
-            l.tabs = l.tabs.filter((t) => t.win !== "new");
+            l.tabs = l.tabs.filter((t) => {
+              if (t.win === "new") return false;
+              if (typeof t.win === "number") { if (seenWins.has(t.win)) return false; seenWins.add(t.win); }
+              return true;
+            });
             l.active = Math.max(0, Math.min(l.tabs.length - 1, l.active || 0));
+            if (before > 0 && l.tabs.length === 0) dedupedEmpty.push(l.id); // 정리로 비워진 leaf(중복 split)
           });
-          state.ws[id] = { layout, focusId: w.focusId || T.firstLeafId(layout), surfaces: [], ports: [] };
+          // 정리로 빈 leaf 는 트리에서 제거(원본 pane 만 남김). 단 leaf 가 하나뿐이면 유지(빈 pane UI 정상 상태).
+          for (const eid of dedupedEmpty) {
+            if (T.leafIds(layout).length <= 1) break;
+            const r = T.closeLeaf(layout, eid);
+            if (r && r.tree) { layout = r.tree; w.focusId = r.focusId || w.focusId; }
+          }
+          state.ws[id] = { layout, focusId: (w.focusId && T.findLeaf(layout, w.focusId)) ? w.focusId : T.firstLeafId(layout), surfaces: [], ports: [] };
           allIds.push(...T.leafIds(layout));
         }
       }
