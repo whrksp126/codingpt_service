@@ -162,6 +162,14 @@ export function firstLeafId(node) {
   return id;
 }
 
+// 최상단-우측 leaf id — 좌우 분할('h')이면 오른쪽(second), 상하 분할('v')이면 위(first) 로 내려간다.
+//  IDE 트리 사이드바 토글을 여기 하나만 둔다(위쪽 오른쪽).
+export function topRightLeafId(node) {
+  if (!node) return null;
+  if (isLeaf(node)) return node.id;
+  return topRightLeafId(node.dir === "h" ? node.second : node.first);
+}
+
 // branch 의 ratio 갱신(드래그 리사이즈). 불변 갱신.
 export function setRatio(root, branchPath, ratio) {
   // branchPath: 루트부터 'first'|'second' 배열. 여기선 노드 참조 대신 경로로 안전 갱신.

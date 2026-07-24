@@ -433,6 +433,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .ide-tab.active { background: var(--base); color: var(--text3); margin-bottom: -1px; }
 .pane.focused .ide-tab.active { color: var(--text); }
 .ide-tab.active::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: var(--base); }
+.ide-tab.drag-src { opacity: 0.35; } /* 드래그 중 원본 탭 — 상위 pane .ptab.drag-src 와 동일(흐림으로 "빠질 자리" 표현) */
 .ide-tab.drop-before { box-shadow: inset 2px 0 0 var(--accent) !important; }
 .ide-tab.drop-after { box-shadow: inset -2px 0 0 var(--accent) !important; }
 .ide-tab-ic { display: inline-flex; }

@@ -179,6 +179,9 @@ export class IdeView {
   _renderEditorArea() {
     this.editorAreaEl.innerHTML = "";
     if (this.egRoot) this.editorAreaEl.appendChild(this._buildEg(this.egRoot));
+    // 트리 토글은 최상단-우측 그룹에만 하나 — 분할해도 그룹마다 중복 표시하지 않는다(위쪽 오른쪽).
+    const toggleId = this.egRoot ? T.topRightLeafId(this.egRoot) : null;
+    this.groups.forEach((g) => { if (g.treeToggle) g.treeToggle.style.display = g.id === toggleId ? "" : "none"; });
     setTimeout(() => this.groups.forEach((g) => g.cm.refresh()), 0);
   }
 
@@ -818,7 +821,7 @@ export class IdeView {
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
     let dragging = false, ghost = null, drop = null;
     const overlay = document.createElement("div"); overlay.className = "drag-overlay";
-    let zoneEl = null, insEl = null;
+    let zoneEl = null, insEl = null, srcTabEl = null;
     const clearInd = () => {
       this.editorAreaEl.querySelectorAll(".ide-tab.drop-before,.ide-tab.drop-after").forEach((el) => el.classList.remove("drop-before", "drop-after"));
       zoneEl && zoneEl.classList.add("hidden");
@@ -826,6 +829,8 @@ export class IdeView {
     const start = () => {
       dragging = true;
       document.body.classList.add("tab-dragging");
+      srcTabEl = srcGroup.tablist.querySelectorAll(".ide-tab")[index];
+      srcTabEl && srcTabEl.classList.add("drag-src"); // 드래그 중 원본 탭 흐리게(이 자리는 비워질 것)
       try { window.getSelection()?.removeAllRanges(); } catch (_) {}
       document.body.appendChild(overlay);
       try { overlay.setPointerCapture(pid); } catch (_) {}
@@ -851,7 +856,8 @@ export class IdeView {
       if (!g) return;
       const barR = g.tabsBar.getBoundingClientRect();
       if (ev.clientY <= barR.bottom) {
-        // 탭바 위 → 그 그룹의 위치에 삽입(재배치/이동).
+        // 탭바 위 → 그 그룹의 위치에 삽입(재배치/이동). 상위 pane 탭과 동일 — 잡은 탭은 흐림(drag-src)
+        //  으로만 표현하고 계산엔 전체 탭 포함, midX 로 인서트 라인.
         const tabs = [...g.tablist.querySelectorAll(".ide-tab")];
         let ti = tabs.length;
         for (let k = 0; k < tabs.length; k++) { const r = tabs[k].getBoundingClientRect(); if (ev.clientX < r.left + r.width / 2) { ti = k; break; } }
@@ -866,14 +872,30 @@ export class IdeView {
       const fx = (ev.clientX - r.left) / r.width;
       const fy = (ev.clientY - r.top) / r.height;
       const m = Math.min(fx, 1 - fx, fy, 1 - fy);
-      let mode = "center", zx = r.left, zy = r.top, zw = r.width, zh = r.height;
+      let mode = "center";
       if (m < 0.28) {
-        if (m === fx) { mode = "split-left"; zw = r.width / 2; }
-        else if (m === 1 - fx) { mode = "split-right"; zx = r.left + r.width / 2; zw = r.width / 2; }
-        else if (m === fy) { mode = "split-top"; zh = r.height / 2; }
-        else { mode = "split-bottom"; zy = r.top + r.height / 2; zh = r.height / 2; }
+        if (m === fx) mode = "split-left";
+        else if (m === 1 - fx) mode = "split-right";
+        else if (m === fy) mode = "split-top";
+        else mode = "split-bottom";
       }
       drop = { group: g, mode };
+      // 상위 pane 탭(displayDrop) 미러: 잡은 탭이 srcGroup 의 마지막 탭이라 그 그룹이 닫히면
+      //  형제가 확장된 "최종 결과 기하"(rectAfterRemoval)로 예측을 그린다. 자기 그룹 단일탭=no-op(전체).
+      const self = g === srcGroup;
+      const single = srcGroup.open.length <= 1;
+      if (self && single) mode = "center"; // 어디 놔도 no-op → 전체 표시
+      const removed = !self && single;     // 마지막 탭을 다른 그룹으로 = srcGroup 닫힘
+      const rectOfGroup = (id) => { const gg = this.groups.get(id); if (!gg) return null; const q = gg.wrap.getBoundingClientRect(); return { x: q.left, y: q.top, w: q.width, h: q.height }; };
+      const rr = removed ? (T.rectAfterRemoval(this.egRoot, srcGroup.id, g.id, rectOfGroup) || rectOfGroup(g.id)) : rectOfGroup(g.id);
+      // 본문(탭바 제외) 기준으로 반쪽(또는 center=전체) 박스.
+      const barH = barR.height;
+      const bodyTop = rr.y + barH, bodyH = rr.h - barH;
+      let zx = rr.x, zy = bodyTop, zw = rr.w, zh = bodyH;
+      if (mode === "split-left") zw = rr.w / 2;
+      else if (mode === "split-right") { zx = rr.x + rr.w / 2; zw = rr.w / 2; }
+      else if (mode === "split-top") zh = bodyH / 2;
+      else if (mode === "split-bottom") { zy = bodyTop + bodyH / 2; zh = bodyH / 2; }
       zoneEl.style.left = zx + "px"; zoneEl.style.top = zy + "px"; zoneEl.style.width = zw + "px"; zoneEl.style.height = zh + "px";
       zoneEl.classList.remove("hidden");
     };
@@ -884,6 +906,7 @@ export class IdeView {
       overlay.removeEventListener("pointerup", up);
       overlay.removeEventListener("lostpointercapture", up);
       overlay.remove(); ghost?.remove(); zoneEl?.remove(); insEl?.remove();
+      srcTabEl?.classList.remove("drag-src"); srcTabEl = null;
       document.body.classList.remove("tab-dragging");
       if (dragging) {
         this._applyTabDrop(srcGroup, index, drop);
@@ -1075,6 +1098,7 @@ export class IdeView {
     if (!row) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
     let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null;
+    let zoneEl = null, insEl = null, dropEditor = null; // 에디터 그룹 위 드롭(파일 열기) 예측
     // 실제 pointerdown 이면 캡처 성공(CM 선택 방지). 실패 시 window 로 폴백(그래도 동작).
     let captured = false;
     try { row.setPointerCapture(pid); captured = true; } catch (_) {}
@@ -1084,6 +1108,9 @@ export class IdeView {
       if (overRow) { overRow.classList.remove("drop"); overRow = null; }
       if (overTermEl) { overTermEl.classList.remove("os-drop"); overTermEl = null; }
       overTerm = null;
+      dropEditor = null;
+      zoneEl && zoneEl.classList.add("hidden");
+      insEl && insEl.classList.add("hidden");
       this.treeEl.classList.remove("drop-root");
     };
     const start = () => {
@@ -1093,6 +1120,8 @@ export class IdeView {
       ghost = document.createElement("div"); ghost.className = "tab-ghost";
       ghost.innerHTML = `<span class="tg-ic">${fileIcon(n.name, 13)}</span>${esc(n.name)}`;
       document.body.appendChild(ghost);
+      zoneEl = document.createElement("div"); zoneEl.className = "drop-zone hidden"; document.body.appendChild(zoneEl);
+      insEl = document.createElement("div"); insEl.className = "tab-insert hidden"; document.body.appendChild(insEl);
     };
     const move = (ev) => {
       if (!dragging) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; start(); }
@@ -1114,6 +1143,38 @@ export class IdeView {
         // 트리 밖 터미널 pane 위 → 파일 경로 삽입(파일만; 폴더는 이동 전용). os-drop 과 동일 히트테스트.
         const tgt = termTargetAt(ev.clientX * (window.devicePixelRatio || 1), ev.clientY * (window.devicePixelRatio || 1));
         if (tgt) { overTerm = tgt; overTermEl = tgt.pane.el; overTermEl.classList.add("os-drop"); }
+        else {
+          // 에디터 그룹(.eg) 위 → 그 위치(탭바 순서/가운데/분할)에 파일 열기(예측 표시). 탭 드래그와 동일.
+          const egWrap = el && el.closest && el.closest(".eg");
+          const g = egWrap && [...this.groups.values()].find((x) => x.wrap === egWrap);
+          if (g) {
+            const barR = g.tabsBar.getBoundingClientRect();
+            if (ev.clientY <= barR.bottom) {
+              const tabs = [...g.tablist.querySelectorAll(".ide-tab")];
+              let ti = tabs.length;
+              for (let k = 0; k < tabs.length; k++) { const tr = tabs[k].getBoundingClientRect(); if (ev.clientX < tr.left + tr.width / 2) { ti = k; break; } }
+              const lineX = ti < tabs.length ? tabs[ti].getBoundingClientRect().left : (tabs.length ? tabs[tabs.length - 1].getBoundingClientRect().right : barR.left + 40);
+              dropEditor = { group: g, mode: "tabbar" };
+              insEl.style.left = lineX - 1 + "px"; insEl.style.top = barR.top + 3 + "px"; insEl.style.height = barR.height - 6 + "px";
+              insEl.classList.remove("hidden");
+            } else {
+              const r = g.wrap.getBoundingClientRect();
+              const fx = (ev.clientX - r.left) / r.width, fy = (ev.clientY - r.top) / r.height;
+              const m = Math.min(fx, 1 - fx, fy, 1 - fy);
+              const bodyTop = barR.bottom, bodyH = r.bottom - barR.bottom;
+              let mode = "center", zx = r.left, zy = bodyTop, zw = r.width, zh = bodyH;
+              if (m < 0.28) {
+                if (m === fx) { mode = "split-left"; zw = r.width / 2; }
+                else if (m === 1 - fx) { mode = "split-right"; zx = r.left + r.width / 2; zw = r.width / 2; }
+                else if (m === fy) { mode = "split-top"; zh = bodyH / 2; }
+                else { mode = "split-bottom"; zy = bodyTop + bodyH / 2; zh = bodyH / 2; }
+              }
+              dropEditor = { group: g, mode };
+              zoneEl.style.left = zx + "px"; zoneEl.style.top = zy + "px"; zoneEl.style.width = zw + "px"; zoneEl.style.height = zh + "px";
+              zoneEl.classList.remove("hidden");
+            }
+          }
+        }
       }
     };
     const finish = async () => {
@@ -1123,15 +1184,18 @@ export class IdeView {
       try { row.releasePointerCapture(pid); } catch (_) {}
       // 드롭 대상은 clearDrop 이 상태(overTerm/overRow)를 지우기 전에 캡처한다 — clearDrop 이 overTerm 을
       //  null 로 만든 뒤 아래 분기가 읽으면 삽입이 절대 안 된다(실측 버그).
-      const dropTerm = overTerm, dropFolder = overFolder;
+      const dropTerm = overTerm, dropFolder = overFolder, dropEd = dropEditor;
       clearDrop();
-      ghost?.remove();
+      ghost?.remove(); zoneEl?.remove(); insEl?.remove();
       document.body.classList.remove("tab-dragging");
       if (dragging) {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
       }
-      if (dragging && dropTerm) {
+      if (dragging && dropEd) {
+        // 에디터 그룹 위 드롭 = 그 위치에 파일 열기(터미널/폴더보다 우선).
+        try { await this._openFileToDrop(n.path, dropEd.group, dropEd.mode); } catch (e) { this._toast(String(e)); }
+      } else if (dragging && dropTerm) {
         // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.
         try {
           let p = this.fs.fsAbs ? await this.fs.fsAbs(n.path).catch(() => null) : null;
@@ -1167,6 +1231,24 @@ export class IdeView {
   refresh() { setTimeout(() => this.groups.forEach((g) => g.cm?.refresh()), 0); }
   /** 앱 테마 전환 → 모든 그룹 CM 테마 교체(pane.js onAppearanceChange 가 호출). */
   setTheme(name) { this.groups.forEach((g) => { try { g.cm?.setOption("theme", name); } catch (_) {} }); }
+
+  // 파일트리에서 잡은 파일을 에디터 그룹 드롭 위치에 "여는" 동작(탭 이동 아님). tabbar/center=그 그룹,
+  //  split-*=그 방향 새 그룹. 모바일 openRelToDrop 미러.
+  async _openFileToDrop(path, group, mode) {
+    if (mode === "tabbar" || mode === "center") {
+      await this.openFile(path, undefined, group);
+      this._setActiveGroup(group.id);
+      return;
+    }
+    const dir = mode === "split-left" || mode === "split-right" ? "h" : "v";
+    const before = mode === "split-left" || mode === "split-top";
+    const newG = this._makeGroup();
+    const r = T.split(this.egRoot, group.id, dir, newG, before);
+    this.egRoot = r.tree;
+    this._renderEditorArea();
+    await this.openFile(path, undefined, newG);
+    this._setActiveGroup(newG.id);
+  }
 
   // ── 외부 변경 리컨실러 — 열린 파일(디스크) ↔ 버퍼 동기화 + 주기적 트리 갱신 ──
   //  dirty(내가 편집 중)인 파일은 보호(마지막 저장 승리 — 모바일 IDE 와 동일 정책).
