@@ -107,6 +107,7 @@ html{scroll-behavior:smooth}
 .cpt-landing .row2 p{color:var(--text3);font-size:15px;line-height:1.72;margin:12px 0 0;max-width:42ch;}
 .cpt-landing .row2 .more{display:inline-block;margin-top:16px;color:var(--text2);font-weight:650;font-size:14px;border-bottom:1px solid var(--border-2);padding-bottom:2px;}
 .cpt-landing .row2 .more:hover{color:var(--text);border-color:var(--dim);}
+.cpt-landing .feat-img{display:block;width:100%;height:auto;border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 44px -24px rgba(0,0,0,.6);}
 .cpt-landing .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
 .cpt-landing .card .cbar{display:flex;align-items:center;gap:7px;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--elevated);}
 .cpt-landing .card .cbar .u{margin-left:6px;font-family:var(--mono);font-size:10.5px;color:var(--dim);}
@@ -217,15 +218,7 @@ export default function Home() {
               <p>내 머신에서 돌던 claude·codex 세션이 끊기지 않아요. 폰에서 그대로 이어받아 지휘하고, TUI·특수키까지 손안에서 조작합니다.</p>
               <a className="more" href="/docs">터미널 문서 →</a>
             </div>
-            <div className="fig card">
-              <div className="cbar"><span className="dots" style={{ gap: 5 }}><i className="r" /><i className="y" /><i className="g" /></span><span className="u">claude · TUI</span></div>
-              <div className="cbody">
-                <div><span style={{ color: 'var(--accent)' }}>❯</span> claude</div>
-                <div><span style={{ color: '#5D6E63' }}># 코드베이스 분석 중…</span></div>
-                <div><span style={{ color: 'var(--add)' }}>✓</span> 3개 파일 수정 · 테스트 통과</div>
-                <div style={{ marginTop: 4 }}><span style={{ color: 'var(--accent)' }}>❯</span> 다음 작업 <span className="cur" /></div>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-terminal.png" alt="폰에서 이어받은 터미널의 AI 에이전트(claude) 세션 — 파일 수정과 diff" />
           </div>
 
           <div className="row2 rev">
@@ -234,15 +227,7 @@ export default function Home() {
               <p>diff를 열어보고, 파일 트리·전체 검색·에디터 분할까지 PC와 똑같이. 저장하면 내 머신에 즉시 반영돼요.</p>
               <a className="more" href="/docs">에디터 문서 →</a>
             </div>
-            <div className="fig card">
-              <div className="cbar"><span className="dots" style={{ gap: 5 }}><i className="r" /><i className="y" /><i className="g" /></span><span className="u">App.tsx</span></div>
-              <div className="cbody">
-                <div><span className="ln">1</span><span className="kw">function</span> <span className="fn">App</span>() {'{'}</div>
-                <div><span className="ln">2</span>  <span className="kw">return</span> &lt;<span className="fn">Home</span> /&gt;;</div>
-                <div><span className="ln">3</span>{'}'}</div>
-                <div><span className="ln">4</span><span className="cm">// 트리에서 끌어다 열기</span></div>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-ide.png" alt="에이전트가 만든 변경을 보여주는 코드 에디터의 실시간 git diff" />
           </div>
 
           <div className="row2">
@@ -251,15 +236,7 @@ export default function Home() {
               <p>개발 서버를 앱 안 브라우저로. 포트 포워딩으로 진짜 localhost 그대로 — 에이전트가 고치면 화면에 즉시 반영됩니다.</p>
               <a className="more" href="/docs">미리보기 문서 →</a>
             </div>
-            <div className="fig card">
-              <div className="cbar"><span className="dots" style={{ gap: 5 }}><i className="r" /><i className="y" /><i className="g" /></span><span className="u" style={{ flex: 1, background: 'var(--base)', border: '1px solid var(--line)', borderRadius: 5, padding: '3px 8px' }}>localhost:3000</span></div>
-              <div className="cbody" style={{ fontFamily: 'var(--sans)' }}>
-                <div style={{ height: 11, width: '60%', borderRadius: 5, background: 'var(--text2)', opacity: 0.9 }} />
-                <div style={{ height: 7, width: '85%', borderRadius: 5, background: 'var(--border-2)', marginTop: 10 }} />
-                <div style={{ height: 7, width: '58%', borderRadius: 5, background: 'var(--border-2)', marginTop: 8 }} />
-                <span style={{ marginTop: 14, display: 'inline-block', background: 'var(--cta)', color: '#fff', fontSize: 11, fontWeight: 650, padding: '6px 13px', borderRadius: 7 }}>시작하기</span>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-preview.png" alt="개발자도구로 요소를 검사하는 실시간 미리보기 — 진짜 localhost 렌더" />
           </div>
         </div>
       </div>
