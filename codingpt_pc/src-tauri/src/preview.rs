@@ -69,6 +69,10 @@ static DRAG_DEST_INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::A
 // 이미 끝난 드래그의 changeCount — 이 값과 같으면 스테일(끝난 드래그)로 보고 무시(클릭 오라우팅 방지).
 #[cfg(target_os = "macos")]
 static DRAG_DONE_CC: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(isize::MIN);
+// 드래그가 한 번 감지되면(버튼 다운) 종료(exit/perform)까지 유지 — 드롭 순간 버튼을 떼도 목적지가
+//  contentView 로 고정돼 performDragOperation 이 여기로 온다(버튼만 보면 드롭 순간 웹뷰로 새어 삼켜짐).
+#[cfg(target_os = "macos")]
+static DRAG_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 // 지금 OS 파일 드래그가 이 앱 위로 진행 중인가 — 드래그 페이스트보드에 파일 타입이 있고, 아직 안 끝났고,
 //  마우스 버튼이 눌려 있으면(실드래그는 버튼 다운 유지) true. 버튼이 떼진 채 파일 타입만 남은 건
@@ -178,12 +182,16 @@ unsafe extern "C-unwind" fn punch_hit_test(
     use objc2::msg_send;
     use objc2::runtime::AnyObject;
     // OS 파일 드래그 중이면 — 이 contentView(드롭 목적지로 등록된 메인 창) 자신을 반환해 AppKit 이
-    //  그 위의 웹뷰(WebKit 내부 뷰가 드롭을 삼킴) 대신 여기로 draggingEntered 를 보내게 한다.
-    //  스테일 페이스트보드로 클릭이 오라우팅되지 않도록 changeCount 신선도로 게이팅.
-    if os_file_drag_active() {
+    //  그 위의 웹뷰(WebKit 내부 뷰가 드롭을 삼킴) 대신 여기로 draggingEntered/performDragOperation 을 보내게 한다.
+    //  한 번 감지되면 DRAG_ACTIVE 로 종료까지 유지(드롭 순간 버튼을 떼도 목적지 고정). 스테일 클릭은 신선도로 차단.
+    let dragging = DRAG_ACTIVE.load(std::sync::atomic::Ordering::Relaxed) || os_file_drag_active();
+    if dragging {
         let reg: *mut AnyObject = msg_send![&*this, registeredDraggedTypes];
         let n: usize = if reg.is_null() { 0 } else { msg_send![&*reg, count] };
-        if n > 0 { return this; } // 드롭 목적지로 등록된 contentView(=메인 창)만 하이재킹
+        if n > 0 {
+            DRAG_ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+            return this; // 드롭 목적지로 등록된 contentView(=메인 창)만 하이재킹
+        }
     }
     if !PUNCH_SHIELD.load(std::sync::atomic::Ordering::Relaxed) {
         // 같은 클래스의 다른 창(dt-* 등) contentView 에도 스위즐이 적용되므로 창 일치 필수.
@@ -345,11 +353,13 @@ unsafe extern "C-unwind" fn dd_updated(this: *mut objc2::runtime::AnyObject, _cm
 }
 #[cfg(target_os = "macos")]
 unsafe extern "C-unwind" fn dd_exited(_this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _sender: *mut objc2::runtime::AnyObject) {
+    DRAG_ACTIVE.store(false, Ordering::Relaxed);
     mark_drag_done(); // 드래그 종료 → 이후 같은 페이스트보드 클릭은 정상 라우팅
     emit_cpt_drag("leave", 0.0, 0.0, vec![]);
 }
 #[cfg(target_os = "macos")]
 unsafe extern "C-unwind" fn dd_prepare(_this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, _sender: *mut objc2::runtime::AnyObject) -> bool {
+    crate::applog("[drop] contentView PREPARE");
     true
 }
 #[cfg(target_os = "macos")]
@@ -357,6 +367,7 @@ unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cm
     let (x, y) = drag_xy(this, sender);
     let paths = drag_paths(sender);
     crate::applog(&format!("[drop] contentView PERFORM x={x} y={y} n={} paths={:?}", paths.len(), paths));
+    DRAG_ACTIVE.store(false, Ordering::Relaxed);
     mark_drag_done(); // 드롭 완료 → 이후 같은 페이스트보드 클릭은 정상 라우팅
     emit_cpt_drag("drop", x, y, paths);
     true
