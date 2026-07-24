@@ -154,6 +154,9 @@ export class IdeView {
         "Cmd-Z": (cm) => cm.undo(), "Ctrl-Z": (cm) => cm.undo(),
         "Shift-Cmd-Z": (cm) => cm.redo(), "Shift-Ctrl-Z": (cm) => cm.redo(),
         "Cmd-Y": (cm) => cm.redo(), "Ctrl-Y": (cm) => cm.redo(),
+        // VSCode 식 줄 단위 undo — CM5 는 기본적으로 1250ms 내 연속 입력을 한 undo 로 병합해 "asd⏎asd⏎asd"
+        //  를 한 번에 되돌린다. Enter 마다 changeGeneration(true) 로 병합 체인을 끊어 줄 단위 경계를 만든다.
+        "Enter": (cm) => { cm.execCommand("newlineAndIndent"); cm.getDoc().changeGeneration(true); },
       },
     });
     g.cm.on("change", () => {
@@ -1071,7 +1074,7 @@ export class IdeView {
     const row = e.currentTarget;
     if (!row) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
-    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null, lastX = sx, lastY = sy;
+    let dragging = false, ghost = null, overFolder = null, overRow = null, overTerm = null, overTermEl = null;
     // 실제 pointerdown 이면 캡처 성공(CM 선택 방지). 실패 시 window 로 폴백(그래도 동작).
     let captured = false;
     try { row.setPointerCapture(pid); captured = true; } catch (_) {}
@@ -1093,7 +1096,6 @@ export class IdeView {
     };
     const move = (ev) => {
       if (!dragging) { if (Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return; start(); }
-      lastX = ev.clientX; lastY = ev.clientY;
       ghost.style.left = ev.clientX + 14 + "px"; ghost.style.top = ev.clientY + 14 + "px";
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
       clearDrop();
@@ -1125,11 +1127,6 @@ export class IdeView {
       if (dragging) {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
-      }
-      if (dragging) { // 진단 — 드롭 시 대상 판정 결과(#3 파일→터미널)
-        const s = window.devicePixelRatio || 1;
-        const el = document.elementFromPoint(lastX, lastY);
-        api.debugLog?.(`[tree-drag] finish term=${overTerm ? overTerm.pane.id + "#" + overTerm.tabIndex : "-"} folder=${overFolder || "-"} el=${el ? el.tagName + "." + (typeof el.className === "string" ? el.className.slice(0, 30) : "") : "none"} pane=${el && el.closest ? (el.closest(".pane")?.dataset.paneId || "no") : "na"} dpr=${s}`);
       }
       if (dragging && overTerm) {
         // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.
