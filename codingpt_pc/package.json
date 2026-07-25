@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "dev": "bash scripts/bundle-sidecar.sh && tauri dev"
+    "dev": "bash scripts/bundle-sidecar.sh && tauri dev",
+    "test": "node test/parse-esm.mjs && node test/contract.mjs && node test/agentstate-reconnect.mjs && node test/lan-crossimpl.mjs && node test/e2ee-crossimpl.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

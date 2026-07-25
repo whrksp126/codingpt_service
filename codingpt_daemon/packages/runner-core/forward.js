@@ -22,8 +22,9 @@ const forwards = new Map();
 //
 //  E2EE(D단계): 이 쪽은 **뷰어**다(데몬이 보는 기기 = PC 앱). e2ee.sid 를 받으면 연결마다 프레임을
 //   봉인한다(dir=v→h). sid 는 뷰어측 세션 파생이 끝나 e2ee 모듈에 등록된 뒤에 넘어와야 한다 —
-//   ⚠ 현재 cpt-server.js `forward.start` 는 {serverUrl,port,token} 만 전달하므로(수정 금지 파일)
-//   이 인자는 그 배관이 붙기 전까지 항상 비어 있고, 포워딩은 평문으로 동작한다(설계 준수: 무마찰 폴백).
+//   ⚠ cpt-server.js `forward.start` 는 upstream 은 전달하지만(2026-07-25) **e2ee 는 아직 전달하지
+//   않는다** — PC 뷰어 offer 를 누가 만드는가가 미결이다(계약 §3.8). 그 배관이 붙기 전까지 이 인자는
+//   항상 비어 있고, 포워딩은 평문으로 동작한다(설계 준수: 무마찰 폴백).
 //
 //  LAN 직결(임무 F, F1): upstream 을 주면 연결마다 상류를 고른다.
 //    upstream = { mode:'lan', host, lanPort, grantId, secret, clientKey, kind, hostDeviceId, remotePort? }

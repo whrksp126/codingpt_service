@@ -37,18 +37,60 @@ function remove() {
 //  하나만 공유해 읽는다(기기=머신 1단위). 스키마는 e2ee.js 참조.
 const e2eeFile = () => path.join(runtime.stateDir(), 'e2ee.json');
 
-function loadE2ee() {
+/**
+ * 상태 읽기 — **'파일 없음' 과 '파싱 실패' 를 구분한다.**
+ *  구현이 둘을 뭉개면(둘 다 null) 상위 `ensureIdentity` 가 손상본을 새 blankState 로 즉시 덮어써
+ *  신원키와 **전 세대 MK 가 백업 없이 영구 소실**된다(디스크 꽉 참·쓰기 중 강제종료로 절단된 파일).
+ *  사용자에게 보이는 결과는 "폰에 뜬금없이 새 기기 승인 요청 + 지난 알림/스냅샷이 영구 🔒" 이고
+ *  로그는 0건이다. 그래서 손상은 **손상으로 보고**하고, 손상본은 그대로 남긴 뒤 사본을 백업한다.
+ * @returns {{state:object|null, corrupt:boolean, backup:string|null}}
+ */
+function readE2ee() {
+  const file = e2eeFile();
+  let text;
   try {
-    return JSON.parse(fs.readFileSync(e2eeFile(), 'utf8'));
+    text = fs.readFileSync(file, 'utf8');
   } catch (_) {
-    return null;
+    return { state: null, corrupt: false, backup: null };   // 없음 = 정상적인 신규 설치
+  }
+  try {
+    return { state: JSON.parse(text), corrupt: false, backup: null };
+  } catch (_) {
+    // 원본은 **지우지 않는다**(사람이 되살릴 유일한 근거). 사본만 떠 둔다.
+    //  파일명을 내용 해시로 짓는다 — 손상 상태에서는 이 경로가 반복 호출되므로(PC 가 60초마다 조회),
+    //  타임스탬프로 지으면 같은 손상본 사본이 무한히 쌓인다. 다른 손상은 다른 해시라 그대로 남는다.
+    let backup = null;
+    try {
+      const tag = require('crypto').createHash('sha256').update(text).digest('hex').slice(0, 8);
+      backup = `${file}.corrupt-${tag}`;
+      if (!fs.existsSync(backup)) fs.writeFileSync(backup, text, { mode: 0o600 });
+    } catch (_) { backup = null; }
+    return { state: null, corrupt: true, backup };
   }
 }
 
+function loadE2ee() {
+  return readE2ee().state;
+}
+
+/**
+ * 상태 쓰기 — **원자적**(임시 파일 + fsync + rename). 열쇠 파일에 부분 쓰기가 남으면 그 순간
+ *  계정 전체(신원키 + 전 세대 MK)를 잃는다. 표시용 값 하나를 갱신하는 경로까지 이 파일을 재작성
+ *  하므로(userRef·policy·pruneEpochs·정기 폴링) 토린 라이트 확률을 구조적으로 0 으로 만든다.
+ */
 function saveE2ee(state) {
   fs.mkdirSync(runtime.stateDir(), { recursive: true });
   const file = e2eeFile();
-  fs.writeFileSync(file, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 });
+  const tmp = `${file}.tmp`;
+  const data = JSON.stringify(state, null, 2) + '\n';
+  const fd = fs.openSync(tmp, 'w', 0o600);
+  try {
+    fs.writeFileSync(fd, data);
+    try { fs.fsyncSync(fd); } catch (_) { /* 일부 파일시스템은 fsync 미지원 — rename 순서만으로도 원자적 */ }
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, file);
   try { fs.chmodSync(file, 0o600); } catch (_) { /* 기존 파일 덮어쓰기 시 mode 무시되는 플랫폼 대비 */ }
   return file;
 }
@@ -93,5 +135,5 @@ function machineId() {
 
 module.exports = {
   load, save, remove, clearCredentials, configFile, machineId,
-  e2eeFile, loadE2ee, saveE2ee, removeE2ee,
+  e2eeFile, loadE2ee, readE2ee, saveE2ee, removeE2ee,
 };

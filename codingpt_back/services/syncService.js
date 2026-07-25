@@ -45,53 +45,141 @@ async function saveManifest(wsId, manifest) {
   await s3Service.saveFile(manifestKey(wsId), JSON.stringify(manifest), { contentType: 'application/json' });
 }
 
-// ── checkpoint ───────────────────────────────────────────────────────────
+// ── checkpoint 2단계(begin/commit) ────────────────────────────────────────
+//  왜 쪼개는가: 데몬이 back 왕복 없이 **자기 판단으로** 체크포인트를 찍을 수 있어야 한다(cpt.sock
+//   `sync.checkpoint` → begin 으로 좌표만 받고, 로컬 작업은 스스로, 끝나면 commit). 서버 → 데몬 RPC
+//   왕복이 사라져 PC 앱이 방아쇠를 당길 필요가 없어진다.
+//  구 경로 `checkpoint()` 는 **남긴다**: ① 모바일이 그 경로만 쓴다 ② 개발 중 스테일 사이드카 데몬이
+//   흔하다. 아래처럼 begin+commit 을 재사용해 재구성했으므로 구 경로의 요청/응답은 바뀌지 않는다.
+//
+//  발급 id 대장: commit 이 임의 checkpointId 를 들고 오면 매니페스트에 우리가 만들지 않은 키가
+//   들어간다(멀티파트 경로가 서버측 키 조립을 강제하는 것과 같은 이유로 금지). begin 이 발급한 id 만
+//   허용하고, 대장의 유효기간은 **presigned PUT 유효기간(1h)과 같게** 맞춘다 — 업로드가 가능한 동안은
+//   commit 도 가능해야 하고, 그 뒤엔 어차피 올릴 수 없다.
+const ISSUE_TTL_MS = 60 * 60 * 1000;
+const ISSUE_MAX = 5000;
+//  대장에는 reason 도 같이 적는다 — 데몬 commit body(cpt-server.js:252-263)에는 reason 이 **없다**.
+//   begin 이 받은 이유를 여기서 기억하지 않으면 자동(periodic) 체크포인트가 매니페스트에 전부
+//   'manual' 로 남아 목록/되돌리기 UI 가 거짓말을 한다(에러 0건).
+const issuedCheckpoints = new Map(); // `${wsId}|${ckptId}` → { at, reason }
+
+function noteIssued(wsId, ckptId, reason) {
+  const now = Date.now();
+  if (issuedCheckpoints.size > ISSUE_MAX) {
+    for (const [k, v] of issuedCheckpoints) if (now - v.at > ISSUE_TTL_MS) issuedCheckpoints.delete(k);
+    while (issuedCheckpoints.size > ISSUE_MAX) { const k = issuedCheckpoints.keys().next().value; issuedCheckpoints.delete(k); }
+  }
+  issuedCheckpoints.set(`${wsId}|${ckptId}`, { at: now, reason });
+}
+function takeIssued(wsId, ckptId) {
+  const v = issuedCheckpoints.get(`${wsId}|${ckptId}`);
+  if (!v) return null;
+  if (Date.now() - v.at > ISSUE_TTL_MS) { issuedCheckpoints.delete(`${wsId}|${ckptId}`); return null; }
+  return v; // 삭제하지 않는다 — 같은 id 로 commit 이 두 번 와도 멱등하게 처리돼야 한다
+}
+function validCheckpointId(v) { return typeof v === 'string' && /^ck_[A-Za-z0-9_-]+$/.test(v) && v.length <= 128; }
+// 봉인 좌표(E2EE C단계) — 데몬이 번들을 봉인했을 때만 실린다(평문이면 필드 자체가 없다).
+//  서버는 값을 해석하지 않고 매니페스트 entry 에 **보관**만 한다(감사/복호 실패 진단의 유일한 단서).
+//  ※ 이 보관만으로는 `e2ee.snap.v1` 을 선언하지 않는다 — config/caps.js 주석 참조.
+function normEnc(raw) {
+  const enc = typeof raw.enc === 'string' && /^[A-Za-z0-9/._+-]{1,32}$/.test(raw.enc) ? raw.enc : null;
+  const epoch = Number.isInteger(raw.epoch) && raw.epoch > 0 ? raw.epoch : null;
+  if (!enc) return {};
+  return { enc, ...(epoch != null ? { epoch } : {}) };
+}
+
+// POST /api/daemon/sync/checkpoint/begin — 좌표(체크포인트 id + presigned PUT)만 발급한다.
+//  cwd 미지정이면 ws.localPath 를 응답에 실어 준다(데몬이 그대로 쓴다 — 좌표가 없으면 데몬은 throw 하고
+//  호출측 PC 앱이 구 경로로 폴백한다).
+async function checkpointBegin(userId, wsId, { reason = 'manual', cwd } = {}) {
+  const ws = await requireLocalWorkspace(userId, wsId);
+  const ckptId = newCheckpointId();
+  const putUrls = {
+    bundle: await s3Service.getSignedPutUrl(bundleKey(wsId, ckptId), { expiresIn: 3600 }),
+    session: await s3Service.getSignedPutUrl(sessionKey(wsId, ckptId), { expiresIn: 3600 }),
+  };
+  const why = String(reason || 'manual').slice(0, 32);
+  noteIssued(wsId, ckptId, why);
+  return { checkpointId: ckptId, putUrls, cwd: cwd || ws.localPath, reason: why };
+}
+
+// POST /api/daemon/sync/checkpoint/commit — 업로드 결과를 매니페스트에 등록한다.
+//  · 소유권은 여기서 **다시** 검사한다(begin 만 믿으면 남의 매니페스트를 오염시킬 수 있다).
+//  · 멱등: 같은 checkpointId 로 두 번 와도 항목이 중복되지 않는다(filter 후 push).
+//  · skipped=true 면 매니페스트를 건드리지 않고 현재 head 를 돌려준다.
+async function checkpointCommit(userId, wsId, raw = {}) {
+  await requireLocalWorkspace(userId, wsId);
+  const given = typeof raw.checkpointId === 'string' ? raw.checkpointId : '';
+
+  if (raw.skipped) {
+    // 변경 없음(중복제거) — 새 번들/항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
+    const manifest = await loadManifest(wsId);
+    const headId = (manifest.head && manifest.head.checkpointId) || null;
+    return { skipped: true, unchanged: true, checkpointId: (validCheckpointId(given) ? given : headId), head: manifest.head || null };
+  }
+
+  if (!validCheckpointId(given)) {
+    const e = new Error('잘못된 체크포인트 ID 입니다.'); e.statusCode = 400; throw e;
+  }
+  const issued = takeIssued(wsId, given);
+  if (!issued) {
+    // 서버가 발급하지 않은 id = 클라가 매니페스트 키를 임의로 정하려는 것(또는 1시간 초과 지각 commit).
+    const e = new Error('발급되지 않은 체크포인트 ID 입니다.'); e.statusCode = 400; throw e;
+  }
+
+  const at = new Date().toISOString();
+  const entry = {
+    // reason 은 commit body 에 없으면 begin 이 기억한 값을 쓴다(자동 트리거가 'manual' 로 위장되지 않게).
+    id: given, reason: String(raw.reason || issued.reason || 'manual').slice(0, 32), at,
+    baseCommit: raw.baseCommit || null,
+    commit: raw.commit || null,
+    bundleKey: bundleKey(wsId, given),
+    sessionKey: raw.hasSession ? sessionKey(wsId, given) : null,
+    sizeBytes: Number.isFinite(Number(raw.sizeBytes)) ? Number(raw.sizeBytes) : 0,
+    hasSession: !!raw.hasSession,
+    ...normEnc(raw),
+  };
+  const manifest = await loadManifest(wsId);
+  manifest.checkpoints = (manifest.checkpoints || []).filter((c) => c.id !== given);
+  manifest.checkpoints.push(entry);
+  if (manifest.checkpoints.length > 200) manifest.checkpoints = manifest.checkpoints.slice(-200);
+  manifest.head = { checkpointId: given, commit: entry.commit, baseCommit: entry.baseCommit, at };
+  await saveManifest(wsId, manifest);
+  return { ...entry, head: manifest.head };
+}
+
+// ── checkpoint(구 경로 — 서버가 데몬 RPC 를 오케스트레이션) ─────────────────
 //  cwd: 스냅샷 대상 폴더(데몬 홈-기준 상대). 미지정=ws.localPath(로컬 러너). 역방향 핸드오프에선
 //   활성=클라우드일 때 클라우드 실폴더(예 슬러그 'foo'=/workspace/foo)를 넘겨 그쪽에서 찍는다.
 //  background=true: RPC 를 기다리지 않고 즉시 { accepted, checkpointId } 반환 — 대형 번들은
 //   압축+업로드가 분 단위라 동기 HTTP 로 기다리면 Cloudflare 오리진 타임아웃(524, ~100s)에 걸린다.
 //   완료 시 manifest 등록은 백그라운드에서 그대로 진행되고, 클라이언트는 sync_event/목록으로 확인.
 async function checkpoint(userId, wsId, { reason = 'manual', includeAgentSession = true, cwd, background = false } = {}) {
-  const ws = await requireLocalWorkspace(userId, wsId);
-  const ckptId = newCheckpointId();
-  const bKey = bundleKey(wsId, ckptId);
-  const sKey = sessionKey(wsId, ckptId);
-  const putUrls = {
-    bundle: await s3Service.getSignedPutUrl(bKey, { expiresIn: 3600 }),
-    session: await s3Service.getSignedPutUrl(sKey, { expiresIn: 3600 }),
-  };
+  const begun = await checkpointBegin(userId, wsId, { reason, cwd });
+  const ckptId = begun.checkpointId;
 
   const run = async () => {
     // 데몬이 shadow 커밋 → 번들/세션 생성 → presigned PUT 업로드. cwd 는 활성 러너 홈-기준 상대.
     //  wsId 는 대용량(>80MB) 번들의 멀티파트 업로드 콜백(/sync/multipart/*)용 좌표.
     const result = await daemonRelayService.callRpc(userId, 'sync.checkpoint', {
-      cwd: cwd || ws.localPath, reason, checkpointId: ckptId, putUrls, includeAgentSession, wsId,
-    }, RPC_TIMEOUT);
+      cwd: begun.cwd, reason, checkpointId: ckptId, putUrls: begun.putUrls, includeAgentSession, wsId,
+    }, RPC_TIMEOUT) || {};
 
-    // 변경 없음(중복제거) → 새 번들/manifest 항목을 만들지 않는다(자동 트리거가 무의미하게 쌓이지 않게).
-    if (result && result.skipped) {
-      const manifest = await loadManifest(wsId);
-      return { skipped: true, unchanged: true, checkpointId: result.checkpointId || (manifest.head && manifest.head.checkpointId) || null, head: manifest.head || null };
-    }
-
-    const at = new Date().toISOString();
-    const entry = {
-      id: ckptId, reason, at,
+    // 응답 형태는 신 경로(commit)와 완전히 같다 — 두 경로가 같은 한 벌을 타야 매니페스트가 갈라지지 않는다.
+    return checkpointCommit(userId, wsId, {
+      // ★ 비-skipped 는 **서버가 발급한 id** 를 쓴다(구 경로의 기존 동작 그대로). 데몬이 다른 id 를
+      //  echo 해도 매니페스트 키는 서버가 정한다. skipped 는 데몬 id 를 존중하고 없으면 head 로 폴백.
+      checkpointId: result.skipped ? (result.checkpointId || '') : ckptId,
+      reason,
+      skipped: !!result.skipped,
+      unchanged: !!result.unchanged,
       baseCommit: result.baseCommit || null,
       commit: result.commit || null,
-      bundleKey: bKey,
-      sessionKey: result.hasSession ? sKey : null,
       sizeBytes: result.sizeBytes || 0,
       hasSession: !!result.hasSession,
-    };
-    const manifest = await loadManifest(wsId);
-    manifest.checkpoints = (manifest.checkpoints || []).filter((c) => c.id !== ckptId);
-    manifest.checkpoints.push(entry);
-    if (manifest.checkpoints.length > 200) manifest.checkpoints = manifest.checkpoints.slice(-200);
-    manifest.head = { checkpointId: ckptId, commit: entry.commit, baseCommit: entry.baseCommit, at };
-    await saveManifest(wsId, manifest);
-
-    return { ...entry, head: manifest.head };
+      // 봉인 좌표(데몬이 봉인했을 때만) — 구 경로에서도 반드시 보관한다(§5.7).
+      ...(result.enc ? { enc: result.enc, epoch: result.epoch } : {}),
+    });
   };
 
   if (background) {
@@ -190,6 +278,8 @@ async function multipartAbort(userId, { wsId, checkpointId, kind, uploadId } = {
 }
 
 module.exports = {
-  checkpoint, materialize, status, resolve, listCheckpoints,
+  checkpoint, checkpointBegin, checkpointCommit, materialize, status, resolve, listCheckpoints,
   multipartInit, multipartPartUrl, multipartComplete, multipartAbort,
+  _issuedCheckpoints: issuedCheckpoints, // 테스트 노출 — 발급 대장(미발급 id 거부 계약)
+  _normEnc: normEnc,
 };

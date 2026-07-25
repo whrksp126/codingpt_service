@@ -21,6 +21,30 @@ async function checkpoint(req, res) {
   } catch (e) { return mapErr(res, e); }
 }
 
+// POST /api/daemon/sync/checkpoint/begin  body:{ workspaceId, reason?, cwd? }
+//  → { checkpointId, putUrls:{bundle,session}, cwd, reason }
+//  데몬이 **직접**(deviceToken) 부른다 — 좌표만 받고 로컬 작업/업로드는 데몬이 스스로 한다.
+//  ⚠ 인증은 accountAuth 여야 한다. authMiddleware(JWT 전용)로 붙이면 데몬이 401 을 받고 PC 는
+//   영구히 구 경로로 폴백해, 기능이 "정상 동작하는 것처럼 보이면서" 조용히 무발현이 된다.
+async function checkpointBegin(req, res) {
+  try {
+    const { workspaceId, reason, cwd } = req.body || {};
+    const result = await syncService.checkpointBegin(req.user.id, workspaceId, { reason, cwd });
+    return successResponse(res, result);
+  } catch (e) { return mapErr(res, e); }
+}
+
+// POST /api/daemon/sync/checkpoint/commit
+//  body:{ workspaceId, checkpointId, skipped?, unchanged?, baseCommit, commit, sizeBytes, hasSession, enc?, epoch? }
+//  → { …entry, head } 또는 { skipped:true, unchanged:true, checkpointId, head }
+async function checkpointCommit(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await syncService.checkpointCommit(req.user.id, b.workspaceId, b);
+    return successResponse(res, result);
+  } catch (e) { return mapErr(res, e); }
+}
+
 // POST /api/daemon/sync/materialize  body:{ workspaceId, checkpointId?, targetCwd, reinstall? }
 async function materialize(req, res) {
   try {
@@ -72,4 +96,4 @@ async function multipart(req, res) {
   } catch (e) { return mapErr(res, e); }
 }
 
-module.exports = { checkpoint, materialize, status, resolve, listCheckpoints, multipart };
+module.exports = { checkpoint, checkpointBegin, checkpointCommit, materialize, status, resolve, listCheckpoints, multipart };

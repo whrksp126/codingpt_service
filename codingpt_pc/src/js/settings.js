@@ -5,7 +5,11 @@ import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { ANDROID_QR } from "./store-qr.js";
-import { e2ee, refreshE2ee, approveDevice, denyDevice, setPolicy as setE2eePolicy, createRecoveryCode, restoreFromRecovery, revokeTrust } from "./e2ee.js";
+import {
+  e2ee, e2eeReady, refreshE2ee, approveDevice, denyDevice, setPolicy as setE2eePolicy,
+  createRecoveryCode, restoreFromRecovery, revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap, bootstrapAccount,
+} from "./e2ee.js";
+import { hostE2eeEpoch, hostLockLabel } from "./host-lock.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -562,20 +566,65 @@ function deviceOsLabel(d) {
   if (p === "android") return "Android";
   return d.role === "controller" ? "모바일" : "기기";
 }
-// ── 종단간 암호화(기능2) 카드 — 모바일 E2eeSettingsCard 와 **동일 정보 구조** ──
-//  ① 상태 ② 정책(킬스위치) ③ 지문/QR 재검증 ④ 복구 코드 ⑤ 열쇠를 가진 기기(신뢰 해제=회전)
+// ── 종단간 암호화(기능2) 카드 — 모바일 E2eeSettingsCard/DeviceTrustCard 와 **동일 정보 구조** ──
+//  ① 상태(이 PC 열쇠) ② PC 별 실제 자물쇠 ③ 승인(안전 코드 대조) ④ 정책(킬스위치)
+//  ⑤ 안전 코드/지문 ⑥ 복구 코드 ⑦ 열쇠를 가진 기기(신뢰 해제=회전)
 //  마스터키는 데몬에 있으므로 모든 조작은 e2ee.js → cpt.sock 위임이다(JS 에 MK 없음).
+//
+//  ★ 사람이 대조하는 값은 **60비트 안전 코드**다(계약 §2.10). 4자리는 "요청 번호"로 강등해 작게
+//    적고 문구로 대조 금지를 명시한다 — 4자리(13비트)는 서버가 같은 값이 나오는 자기 키쌍을 1코어
+//    1.3초에 찾을 수 있어(실측) 눈 대조 방어가 성립하지 않는다.
+//  ★ 표시값은 전부 ikX 에서 **로컬 계산**한 것이다(e2ee.js deriveDisplay). 서버가 준 안전 코드는
+//    받지도 그리지도 않는다 — 서버가 이 채널을 위조하는 것을 막는 게 이 UX 의 존재 이유다.
+//  ★ 문구·형식(그룹 구분·글자수)은 모바일과 같아야 한다: 사용자가 두 화면을 나란히 놓고 대조한다.
 let e2eeRecoveryShown = null; // 방금 만든 복구 문구(1회 표시 — 카드 재렌더에도 유지)
 let e2eeMsg = "";
 
+const TONE_C = { on: "var(--accent)", wait: "var(--warn, #FBBF24)", off: "var(--dim)" };
+
+//  ⚠ '켜짐' 이라고 쓰지 않는다: 이 PC 의 열쇠 보유는 트래픽이 암호화된다는 뜻이 아니다(상대 호스트도
+//   열쇠가 있어야 한다) — 그게 거짓 자물쇠의 근원이었다. 실제 자물쇠는 아래 PC 별 배지가 그린다.
+//   문구는 모바일 stateLabel() 미러.
+//  ★ 판정은 e2ee-label.js(= e2eeStateLabel)가 정본이다. 여기서 `state` 만 다시 분기하면 데몬이
+//   진행상태 정본으로 주는 keyState/checking 이 화면에 반영되지 않아 "확인 중" 과 "확인 끝났고
+//   열쇠 0개(영구 평문)" 가 같은 대기색으로 보인다(둘 다 state='bootstrap' 이다).
 function e2eeStatePill() {
-  if (e2ee.policy === "off") return { t: "꺼짐", c: "var(--dim)" };
-  if (e2ee.available && e2ee.state === "trusted") return { t: "켜짐", c: "var(--accent)" };
-  if (e2ee.state === "pending") return { t: "승인 대기", c: "var(--warn, #FBBF24)" };
-  if (e2ee.state === "bootstrap") return { t: "준비 중", c: "var(--warn, #FBBF24)" };
-  if (!e2ee.available || e2ee.state === "unsupported") return { t: "미지원", c: "var(--dim)" };
-  if (e2ee.state === "error") return { t: "오류", c: "var(--error)" };
-  return { t: "꺼짐", c: "var(--dim)" };
+  const l = e2eeStateLabel();
+  return { t: l.text, c: l.text === "오류" ? "var(--error)" : TONE_C[l.tone] };
+}
+/** 이 PC 가 승인을 기다리는 중인가 — 판정 정본은 keyState(state 확장값은 방어적으로 함께 본다). */
+function e2eeSelfWaiting() {
+  return e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
+    || e2ee.state === "pending" || e2ee.state === "enrolled";
+}
+/** '확인 중' 일 때 다음 확인까지 남은 시간(사용자가 기다려도 되는지 판단할 근거). */
+function e2eeNextCheckHint() {
+  if (!e2ee.checking || e2ee.nextCheckInMs == null) return "";
+  const s = Math.max(0, Math.round(e2ee.nextCheckInMs / 1000));
+  return s > 0 ? ` · 다음 확인 ${s < 60 ? `${s}초` : `${Math.round(s / 60)}분`} 후` : "";
+}
+
+/** 60비트 안전 코드 — 4글자 3그룹 칩(모바일 SafetyCode 와 같은 그룹 구분·글자수). */
+function safetyChips(code, color) {
+  const groups = String(code || "").split("-").filter(Boolean);
+  const g = groups.length ? groups : ["—", "—", "—"];
+  return `<span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center">${g.map((s) => `
+    <span style="padding:7px 10px;border-radius:var(--r-md);background:var(--elevated2);border:1px solid var(--border-ctrl);
+      font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:2px;color:${color};user-select:text">${esc(s)}</span>`).join("")}</span>`;
+}
+/** 요청 구분용 4자리(보조 표기) — 크기·문구로 "대조용이 아님"을 분명히 한다(모바일 RequestNo 미러). */
+function requestNo(code) {
+  if (!code) return "";
+  return `<div class="acct-msg" style="text-align:center">요청 번호 <span style="font-family:var(--mono)">${esc(code)}</span> (구분용 — 이 숫자로 대조하지 마세요)</div>`;
+}
+/**
+ * 안전 코드를 **계산할 수 없을 때**의 안내(= 파생 기준 userRef 미상 → e2ee.js deriveDisplay 가 null).
+ *  '—' 만 그려 두면 사용자는 "글자까지 같은지 확인하세요" 를 읽고 무엇을 대조해야 할지 모른 채 승인한다
+ *  → 대조 없는 승인이 습관이 되면 이 UX 의 존재 이유가 사라진다. 그래서 보류를 명시적으로 권한다.
+ */
+function noSafetyCodeWarn(code) {
+  if (code) return "";
+  return `<div class="acct-msg" style="color:var(--warn,#FBBF24)">아직 이 계정의 대조 기준을 받지 못해 안전 코드를 계산할 수 없어요(서버 연결 후 잠시 뒤 표시됩니다). 그때까지는 승인을 보류해 주세요 — 대조 없이 승인하면 안 됩니다.</div>`;
 }
 
 function renderE2ee() {
@@ -584,28 +633,61 @@ function renderE2ee() {
   const pill = e2eeStatePill();
   const pend = e2ee.pending || [];
   const devs = e2ee.devices || [];
+  const selfReady = e2eeReady();
+  // PC 별 실제 자물쇠 — 근거는 back 이 팬아웃하는 runner_status.e2eeEpoch(host-lock.js). 모바일과 달리
+  //  여기 목록에는 이 PC 자신도 들어간다(사이드카 데몬도 하나의 호스트다).
+  const hosts = (state.devices || []).filter((d) => d.runnerKind !== "cloud" && d.role !== "controller");
   box.innerHTML = `
     <div class="sett-row">
-      <span>이 PC 의 암호화 상태</span>
+      <span>이 PC 의 열쇠 상태</span>
       <span style="font-size:11px;font-weight:800;color:${pill.c}">${pill.t}</span>
     </div>
-    <div class="acct-msg">${esc(e2ee.reason || (e2ee.state === "trusted"
-      ? "이 PC 와 내 폰/태블릿 사이의 파일·알림 내용을 서버가 볼 수 없게 암호화합니다."
-      : "지원되는 기기끼리 자동으로 암호화하고, 아니면 기존 방식(평문)으로 그대로 동작합니다."))}</div>
-    ${e2ee.state === "pending" ? `<div class="sett-row"><span>이 PC 확인 숫자</span>
-      <span style="font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:4px">${esc(e2ee.verifyCode || "----")}</span></div>
-      <div class="acct-msg">이미 쓰던 폰/PC 에 승인 요청이 갔어요. 그 화면에 같은 숫자가 보이면 승인해 주세요.</div>` : ""}
+    <div class="acct-msg">${selfReady
+      ? "이 PC 에는 열쇠가 있어요. 실제 암호화는 상대 PC 에도 열쇠가 있을 때 걸립니다 — PC 별 상태는 아래에."
+      : "지원되는 기기끼리는 자동으로 암호화하고, 아니면 기존 방식(평문)으로 그대로 동작합니다."}</div>
+    ${e2ee.policy !== "off" && hosts.length ? `<div style="display:flex;flex-direction:column;gap:5px;padding:2px 2px 6px">
+      ${hosts.map((d) => {
+        // 이 PC 자신은 사이드카 데몬(e2ee.state)이 정본이다 — runner_status 프레임보다 빠르고 정확하다.
+        //  (selfReady 가 false 면 hostLockLabel 이 어차피 '평문' 을 준다 = 양쪽 다 열쇠가 있어야 암호화)
+        //  ★ 3번째 인자 = **내 열쇠 세대**. 세대가 어긋난 호스트는 '암호화됨' 이 아니라 '확인 중' 이다
+        //   (회전 직후 최대 15분간 back 의 e2eeEpoch 는 옛 세대다 — 계약 §2.7, host-lock.js 헤더).
+        const hl = hostLockLabel(selfReady, d.isCurrent && selfReady ? (e2ee.epoch || 1) : hostE2eeEpoch(d.id), e2ee.epoch);
+        return `<div style="display:flex;align-items:center;gap:7px">
+          <span class="dev-ic">${icons.monitor({ size: 13 })}</span>
+          <span style="flex:1;font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
+          <span style="font-size:11px;font-weight:800;color:${TONE_C[hl.tone]}">${esc(hl.text)}</span>
+        </div>`;
+      }).join("")}</div>` : ""}
+    ${e2ee.reason || e2eeNextCheckHint() ? `<div class="acct-msg">${esc(e2ee.reason || "")}${esc(e2eeNextCheckHint())}</div>` : ""}
+    ${e2eeNeedsBootstrap() ? `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="font-size:13px;font-weight:700">이 계정에는 아직 암호화 열쇠가 없어요</div>
+      <div class="acct-msg">그래서 지금은 기존 방식(평문)으로 동작합니다 — 기다려도 저절로 켜지지 않아요. 여기서 켜면 이 PC 가 계정의 첫 신뢰 기기가 되고, 이후 폰·태블릿은 이 PC 에서 승인해 주면 됩니다.<br>폰을 주로 쓰신다면 <b>폰(앱)에서 켜는 것을 권합니다</b> — 첫 기기가 다른 기기를 승인하는 역할을 맡습니다.</div>
+      <button class="btn small primary" id="e2eeBootBtn">이 계정에 암호화 처음 켜기</button>
+    </div>` : ""}
+    ${e2eeSelfWaiting() ? `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:8px">
+      <div style="font-size:13px;font-weight:700">이 PC 를 신뢰 목록에 추가해 주세요</div>
+      <div class="acct-msg">이미 쓰던 기기(폰·PC)에 승인 요청이 도착했어요. 그 화면에 아래 안전 코드가 같은지 확인하고 승인하면 끝입니다.</div>
+      ${safetyChips(e2ee.safetyCode, "var(--accent)")}
+      ${requestNo(e2ee.verifyCode)}
+      ${noSafetyCodeWarn(e2ee.safetyCode)}
+      <div class="acct-msg">승인 전에도 워크스페이스·터미널·IDE 는 그대로 사용할 수 있어요. 승인은 통신을 서버가 볼 수 없게 암호화하기 위한 절차입니다.</div>
+    </div>` : ""}
     ${pend.map((p) => `
-      <div class="dev-row" style="border-color:var(--warn,#FBBF24);flex-wrap:wrap">
-        <span class="dev-ic">${icons.smartphone({ size: 15 })}</span>
-        <span class="dev-meta">
-          <span class="dev-name">${esc(p.label || "새 기기")} 에서 접속 시도</span>
-          <span class="dev-sub">새 기기 화면의 숫자와 같은지 확인하세요</span>
-        </span>
-        <span style="font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:4px;color:${p.verified === false ? "var(--warn,#FBBF24)" : "var(--text)"}"
-          title="${p.verified === false ? "이 숫자는 서버가 알려준 값입니다(로컬 계산과 달랐음) — 새 기기가 내 것인지 한 번 더 확인" : "이 PC 에서 직접 계산한 값"}">${esc(p.verifyCode || "----")}</span>
-        <button class="btn small" data-e2ee-deny="${esc(p.enrollmentId)}">거절</button>
-        <button class="btn small primary" data-e2ee-approve="${esc(p.enrollmentId)}">승인</button>
+      <div class="dev-row" style="border-color:var(--warn,#FBBF24);flex-direction:column;align-items:stretch;gap:8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="dev-ic">${icons.smartphone({ size: 15 })}</span>
+          <span class="dev-name" style="flex:1">${esc(p.label || "새 기기")} 에서 접속 시도</span>
+        </div>
+        <div class="acct-msg">새 기기 화면에 아래 <b>안전 코드</b>가 글자까지 똑같이 보이는지 확인하고 승인해 주세요. 한 글자라도 다르면 거절해 주세요.</div>
+        ${safetyChips(p.safetyCode, "var(--accent)")}
+        ${requestNo(p.verifyCode)}
+        ${noSafetyCodeWarn(p.safetyCode)}
+        ${p.safetyCode && p.verified === false ? `<div class="acct-msg" style="color:var(--warn,#FBBF24)">요청 번호는 서버가 알려준 값이에요(이 PC 에서 직접 계산한 값과 달랐습니다). 대조는 위 안전 코드로 하시고, 새 기기가 내 것인지 한 번 더 확인해 주세요.</div>` : ""}
+        <div style="display:flex;gap:8px">
+          <button class="btn small" style="flex:1" data-e2ee-deny="${esc(p.enrollmentId)}">거절</button>
+          <button class="btn small primary" style="flex:1.4" data-e2ee-approve="${esc(p.enrollmentId)}">승인</button>
+        </div>
+        <div class="acct-msg">승인하면 이 PC 의 열쇠가 새 기기로 안전하게 전달됩니다(서버는 열쇠를 볼 수 없습니다).</div>
       </div>`).join("")}
     <div class="sett-row"><span>암호화 사용<br><span class="dim" style="font-size:11px">자동 = 양쪽이 지원하면 암호화(권장) · 항상 = 지원 안 하면 조작 차단</span></span>
       <span class="scale-seg" id="e2eePolicySeg">
@@ -613,8 +695,9 @@ function renderE2ee() {
         <button class="scale-opt${e2ee.policy === "preferred" ? " active" : ""}" data-v="preferred">자동</button>
         <button class="scale-opt${e2ee.policy === "required" ? " active" : ""}" data-v="required">항상</button>
       </span></div>
-    <div class="sett-row"><span>이 PC 보안 지문<br><span class="dim" style="font-size:11px">폰 설정의 같은 항목과 대조하세요(QR 스캔 시 자동 검증)</span></span>
-      <span style="font-family:var(--mono);font-size:16px;font-weight:700">${esc(e2ee.fingerprint || "— — —")}</span></div>
+    <div class="sett-row" style="align-items:flex-start"><span>이 PC 안전 코드<br><span class="dim" style="font-size:11px">폰 설정 → 종단간 암호화 에 표시된 값과 <b>글자까지</b> 같은지 확인하세요(대조는 이 값으로 합니다)</span></span>
+      <span style="font-family:var(--mono);font-size:20px;font-weight:800;letter-spacing:1.5px;user-select:text">${esc(e2ee.safetyCode || "—")}</span></div>
+    <div class="acct-msg">기기 목록 표기용 지문: <span style="font-family:var(--mono)">${esc(e2ee.fingerprint || "— — —")}</span> · QR 스캔 시 지문은 자동 검증됩니다.</div>
     <div class="sett-row"><span>복구 코드<br><span class="dim" style="font-size:11px">${e2ee.recoverySet ? "설정됨 — 새로 만들면 이전 코드는 무효" : "모든 기기를 잃으면 열쇠를 되살릴 수 없어요"}</span></span>
       <button class="btn small" id="e2eeRecBtn"${e2ee.state === "trusted" ? "" : " disabled"}>${e2ee.recoverySet ? "새로 만들기" : "만들기"}</button></div>
     ${e2eeRecoveryShown ? `<div class="acct-msg" style="color:var(--accent)">이 화면을 닫으면 다시 볼 수 없어요 — 지금 안전한 곳에 적어두세요.</div>
@@ -627,7 +710,11 @@ function renderE2ee() {
       </span></div>` : ""}
     ${devs.length ? `<div class="dev-title" style="margin-top:10px">열쇠를 가진 기기</div>
       <div class="dev-list">${devs.map((d) => {
-        const mine = !!e2ee.fingerprint && d.fingerprint === e2ee.fingerprint;
+        // '이 기기' 판정은 **ikX(공개키) 우선**이다: 지문은 파생 기준(userRef)을 모르면 비어 있어서
+        //  (deriveDisplay 가드) 자기 행을 남으로 보고 **자기 신뢰 해제 버튼**을 띄운다 = 스스로 잠긴다.
+        //  ikX 는 그 기준과 무관하게 항상 알고 있다. 지문 비교는 구 데몬(ikX 미제공) 호환으로 남긴다.
+        const mine = (!!e2ee.ikX && d.ikX === e2ee.ikX)
+          || (!!e2ee.fingerprint && d.fingerprint === e2ee.fingerprint);
         const isPc = d.platform === "darwin" || d.platform === "win32" || d.platform === "linux";
         return `<div class="dev-row">
           <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
@@ -659,6 +746,15 @@ function bindE2ee(box) {
     await setE2eePolicy(b.dataset.v);
     renderE2ee();
   }));
+  // 계정 최초 열쇠 생성 — 사람이 누르는 유일한 지점(데몬은 자동으로 하지 않는다).
+  const boot = box.querySelector("#e2eeBootBtn");
+  if (boot) boot.addEventListener("click", async () => {
+    boot.disabled = true;
+    boot.textContent = "켜는 중…";
+    const r = await bootstrapAccount();
+    e2eeMsg = r.ok ? "이 PC 가 계정의 첫 신뢰 기기가 됐어요. 폰·태블릿은 이 화면에서 승인해 주세요." : (r.error || "열쇠를 만들지 못했어요.");
+    renderE2ee();
+  });
   const rec = box.querySelector("#e2eeRecBtn");
   if (rec) rec.addEventListener("click", async () => {
     rec.disabled = true;

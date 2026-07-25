@@ -627,19 +627,87 @@ export function dismissApproval(id) {
 }
 
 // ── 에이전트 상태(기능3) — `${cwd}|${win}` 키. 데몬 push(agent_state)가 오면 채워진다 ──
-//  아직 데몬/back 이 이 이벤트를 내보내지 않으므로(caps 'agentstate.v1' 미선언) 지금은 비어 있고,
-//  토글 노출 판정은 tab.cmd 폴백으로 동작한다. 배관만 먼저 둔다(하위호환·무해).
+//  와이어 계약 정본 = docs/구현설계-2026-07-25/11-배관-계약.md §1.2~1.5.
+//   프레임 = { cwd(홈-상대, "" 도 유효), win(tid 정수), state, agent, version, at, sessionId, source, since }
+//           + back 이 hostDeviceId/kind 를 스탬프. 내용성 필드(요약·본문)는 오지 않는다(순수 메타데이터).
+//  ★ 키에 hostDeviceId 를 넣지 않는다(계약 §1.2 확정) — PC 는 (cwd,win) 만으로 색인한다. 멀티 PC 에서
+//    같은 홈-상대 경로가 두 PC 에 있으면 나중 프레임이 이긴다(허용된 한계). 대신 version 역전 폐기는
+//    **같은 호스트끼리만** 적용한다(호스트가 바뀌면 인수인계로 보고 무조건 수용해야 판정이 멈추지 않는다).
+//  ★ 폴백을 지우지 않는다: push 가 0건이거나 stale 이면 pane.js 의 tab.cmd 규칙이 그대로 판정한다(§1.5).
+const AGENT_STATE_STALE_MS = 15 * 60 * 1000; // 이보다 오래된 push 는 믿지 않는다(§1.5-c)
 export const agentStates = new Map();
 export function setAgentState(ev) {
-  if (!ev || !ev.cwd || ev.win == null) return;
+  if (!ev || typeof ev.cwd !== "string" || ev.win == null) return; // cwd 는 "" (홈) 도 유효한 값이다
   const key = `${ev.cwd}|${ev.win}`;
-  if (ev.state === "gone") agentStates.delete(key);
-  else agentStates.set(key, { agent: ev.agent || "claude", state: ev.state || "idle", sessionId: ev.sessionId || null, at: Number(ev.at) || Date.now() });
+  const st = String(ev.state || "");
+  const host = ev.hostDeviceId == null ? null : Number(ev.hostDeviceId);
+  // 'ended' 는 데몬이 'gone' 으로 변환해 보내기로 계약했지만(§1.3), 어느 한쪽이 그대로 흘려도
+  //  토글이 영구히 켜진 채 남지 않게 여기서도 소멸로 취급한다(계약 부록 A 의 1번 사고 방어).
+  if (st === "gone" || st === "ended") {
+    if (agentStates.delete(key)) emit();
+    return;
+  }
+  const prev = agentStates.get(key);
+  const version = Number(ev.version);
+  const sentAt = Number(ev.at);
+  // 순서 역전 방어 — 같은 호스트·같은 터미널에서 온 오래된 프레임은 버린다(§1.3, rseq 없음).
+  //  ★ version 만으로 버리면 **데몬 재기동**(version 이 1부터 다시 시작)에서 새 프레임을 전량 폐기하고
+  //    낡은 상태에 15분(stale) 고착한다 — 재기동은 이 제품에서 상시 이벤트다(PC 업데이트/데몬 재시작).
+  //    그래서 "version 도 후퇴 && 발신 시각(at)도 후퇴" 일 때만 폐기한다(둘 중 하나라도 전진하면 채택).
+  //    앱 `agentStateStore.applyAgentState` 와 **같은 규칙**이다 — 두 화면이 갈리면 안 된다.
+  if (prev && Number.isFinite(version) && Number.isFinite(prev.version)
+      && prev.hostDeviceId === host && version <= prev.version
+      && Number.isFinite(sentAt) && Number.isFinite(prev.at) && sentAt <= prev.at) return;
+  agentStates.set(key, {
+    agent: ev.agent || "claude",
+    state: st || "idle",
+    sessionId: ev.sessionId || null,
+    at: Number(ev.at) || Date.now(),
+    version: Number.isFinite(version) ? version : null,
+    hostDeviceId: host,
+    // stale 판정은 **수신 시각** 기준이다 — 호스트 시계가 어긋나도 판정이 뒤집히지 않게.
+    recvAt: Date.now(),
+  });
   emit();
 }
 export function agentStateOf(cwd, win) {
-  if (!cwd || win == null) return null;
-  return agentStates.get(`${cwd}|${win}`) || null;
+  if (typeof cwd !== "string" || win == null) return null;
+  const key = `${cwd}|${win}`;
+  const st = agentStates.get(key);
+  if (!st) return null;
+  // 마지막 push 가 너무 오래됐다 = 데몬/서버가 조용히 끊겼을 수 있다 → 폴백(tab.cmd)으로 되돌린다.
+  //  ※ 여기서 emit() 하지 않는다(렌더 경로에서 호출되므로 재렌더 루프가 된다).
+  if (Date.now() - (st.recvAt || st.at) > AGENT_STATE_STALE_MS) { agentStates.delete(key); return null; }
+  return st;
+}
+/**
+ * 호스트가 오프라인이 되면 그 PC 가 남긴 상태는 더 이상 진실이 아니다(§1.5-b) → 폐기해 폴백으로 되돌린다.
+ *  back 이 hostDeviceId 를 스탬프하지 않는 구버전에서는 cwd(그 워크스페이스의 홈-상대 경로)로 지운다.
+ */
+export function forgetAgentStatesForHost(hostDeviceId, cwd) {
+  const hid = hostDeviceId == null ? null : Number(hostDeviceId);
+  let changed = false;
+  for (const [k, v] of agentStates) {
+    const hostMatch = hid != null && Number.isFinite(hid) && v.hostDeviceId === hid;
+    const cwdMatch = v.hostDeviceId == null && typeof cwd === "string" && cwd !== "" && k.startsWith(`${cwd}|`);
+    if (hostMatch || cwdMatch) { agentStates.delete(k); changed = true; }
+  }
+  if (changed) emit();
+}
+
+/**
+ * 보유 상태 전량 폐기 — **제어 WS(ui-channel) 재접속 시점**에 부른다(§1.5-a/b 의 빈틈).
+ *  왜 필요한가: back 의 라스트-스테이트 리플레이는 '삭제'를 표현할 수 없다. 끊긴 사이 에이전트가 끝나
+ *  데몬이 'gone' 을 보내면 back 은 그 키를 캐시에서 **지우므로**(daemonRelayService 의 agentStateLast)
+ *  재접속 리플레이에는 그 키에 대한 프레임이 **한 건도 오지 않는다** → 우리가 들고 있던 {working} 이
+ *  유령으로 15분 남아 토글 ON + '중단' 버튼이 유지되고, push 가 존재하므로 tab.cmd 폴백도 건너뛰어진다.
+ *  폐기의 대가는 "폴백(5~9s 지연)" 이라 알려진 지연이고, 반대(스테일 신뢰)는 조용한 고착이다.
+ *  ★ 순서: 폐기 → ui_hello. 그러면 back 리플레이가 곧바로 **살아 있는 것만** 복원한다(앱 규약과 동일).
+ */
+export function resetAgentStates() {
+  if (!agentStates.size) return;
+  agentStates.clear();
+  emit();
 }
 
 // ── 원격 상태 스트림(ui_command status.changed) — cwd(홈-상대 localPath) 키 ──
@@ -671,6 +739,11 @@ export async function loadWorkspaces() {
     state.workspaces = list;
     state.wsStale = stale ? { cachedAt: Number(data.cachedAt) || 0 } : null;
     state.wsError = null;
+    // 오프라인 호스트가 남긴 에이전트 상태 push 는 폐기(§1.5-b) — 토글 판정을 tab.cmd 폴백으로 되돌린다.
+    //  ※ 호스트 온/오프라인 표시 자체는 기존 hostOnline 경로가 단독 판정한다(여기서 UX 를 바꾸지 않는다).
+    for (const w of list) {
+      if (w && isLocal(w) && w.hostOnline === false) forgetAgentStatesForHost(w.hostDeviceId, w.localPath);
+    }
     // 활성 워크스페이스가 사라졌으면 초기화.
     if (state.activeWsId && !state.workspaces.some((w) => w.id === state.activeWsId)) {
       state.activeWsId = null;

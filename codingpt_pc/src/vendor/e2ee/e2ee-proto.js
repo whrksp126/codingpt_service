@@ -50,19 +50,35 @@ export const K_NOTIF = 'notif';
 export const K_SNAPSHOT = 'snapshot';
 
 // ── 확인 숫자 / 지문 ───────────────────────────────────────────
-//  사용자 확정: 새 기기 승인 시 사람이 비교하는 값은 **4자리**.
-//  같은 4바이트에서 감사 UI용 6자리 지문도 파생한다(기기 목록 표기).
+//  ★ 파생 정본(4구현체 공통) — okm = HKDF(ikm=ikX, salt="cpt-e2ee/v1/fp", info=userId, **16바이트**)
+//      safety(60비트 대조값) = okm[0..8]        → base32 12글자
+//      fingerprint6(감사 표기) = u32BE(okm[8])  % 10^6
+//      verifyCode4(요청 구분용) = u32BE(okm[12]) % 10^4
+//    데몬 runner-core/e2ee.js `fingerprint()`(safety/legacy/short) · back deviceTrustService
+//    `fingerprintOf()` 와 **바이트 단위로 같아야** 한다. 과거 이 파일만 4바이트 OKM 의 앞 4바이트를
+//    썼기 때문에 앱/PC ↔ 데몬/back 의 표시값이 100% 어긋났고, 그러면 pickCode 규칙에 따라 화면이
+//    **항상 "서버가 준 숫자"** 를 그리게 되어(verified=false) 서버 위조 차단이 완전히 무력화된다.
 //  ★ 서버가 준 문자열을 믿지 않고 **항상 ikX 에서 로컬 계산**한다 — 서버가 숫자를 위조해
 //    "사용자가 눈으로 비교하는 채널"을 무력화하는 것을 막는다.
-export function verifyDigits(ikX, userId, digits) {
-  const b = hkdf(u8(ikX), utf8(`${SUITE}/fp`), utf8(String(userId == null ? '' : userId)), 4);
-  const n = ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]) >>> 0;
-  const mod = Math.pow(10, digits);
-  return String(n % mod).padStart(digits, '0');
+function fpOkm(ikX, userId) {
+  return hkdf(u8(ikX), utf8(`${SUITE}/fp`), utf8(String(userId == null ? '' : userId)), 16);
 }
-/** 새 기기 승인용 확인 숫자(4자리, 예: "8813"). */
+function u32At(b, off) {
+  return ((b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3]) >>> 0;
+}
+/**
+ * 숫자 표기 파생. digits 별 오프셋은 **정본이 정해져 있다**(위 표) — 임의 자릿수를 넣으면
+ *  4자리 오프셋(12)을 쓰되, 다른 구현체와 대조 가능한 값은 4/6 뿐이다.
+ */
+export function verifyDigits(ikX, userId, digits) {
+  const b = fpOkm(ikX, userId);
+  const off = digits === 6 ? 8 : 12;
+  const mod = Math.pow(10, digits);
+  return String(u32At(b, off) % mod).padStart(digits, '0');
+}
+/** 승인 요청 구분용 확인 숫자(4자리, 예: "8813") — **보안 대조값이 아니다**(safetyCode 를 쓸 것). */
 export function verifyCode4(ikX, userId) { return verifyDigits(ikX, userId, 4); }
-/** 기기 목록 감사용 지문(6자리, "418 209" 표기). */
+/** 기기 목록 감사용 지문(6자리, "418 209" 표기) = 데몬 fingerprint().legacy. */
 export function fingerprint6(ikX, userId) {
   const s = verifyDigits(ikX, userId, 6);
   return `${s.slice(0, 3)} ${s.slice(3)}`;
@@ -80,7 +96,7 @@ const FP32 = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
  *  ★ 데몬(runner-core/e2ee.js fingerprint)·서버(deviceTrustService fingerprintOf)와 바이트 동일해야 한다.
  */
 export function safetyCode(ikX, userId) {
-  const b = hkdf(u8(ikX), utf8(`${SUITE}/fp`), utf8(String(userId == null ? '' : userId)), 16);
+  const b = fpOkm(ikX, userId);
   let v = 0n;
   for (let i = 0; i < 8; i++) v = (v << 8n) | BigInt(b[i]);
   let s = '';
@@ -132,17 +148,22 @@ export function verifyGrantSig(approverEdPub, epoch, recipientIkX, sealed, sig) 
 }
 
 // ── RPC 봉투(설계 §2.5) ────────────────────────────────────────
-//  nonce = [4B 부팅 난수][8B 카운터 BE] — 같은 키로 논스 재사용 금지(재부팅마다 난수 갱신).
+//  nonce = [8B 부팅 난수][4B 카운터 BE] — 같은 키로 논스 재사용 금지.
+//  ⚠ 난수가 8B 여야 하는 이유: 봉투 키(K_rpc)는 MK 에서만 파생돼 **계정 전역**이다(모든 기기·모든
+//   앱 재시작이 같은 키). 따라서 nonce 충돌 = 부팅난수 충돌이고, 4B 면 생일 문제로 (기기×부팅) N 개에서
+//   확률 ≈ N²/2^33 — 앱 재시작이 잦은 모바일에서 현실적 확률이 된다. ChaCha20-Poly1305 의 nonce 재사용은
+//   키스트림 복원 + 위조로 이어지는 치명 실패다. 8B 로 넓히면 ≈ N²/2^65 로 사실상 불가능해진다.
+//   카운터는 부팅당 2^32 건. 데몬(runner-core/e2ee.js envNonce)과 같은 분할이어야 리플레이 창 집계가 맞는다.
 //  aad   = utf8("cpt-e2ee/v1/rpc"|"…/rpc-resp") || u32(epoch) || u32(hostDeviceId||0)
 export function rpcAad(label, epoch, hostDeviceId) {
   const dom = label === K_RPC_RESP ? D.rpcResp : D.rpc;
   return concat(utf8(dom), u32(epoch), u32(hostDeviceId == null ? 0 : hostDeviceId));
 }
-export function makeNonce(bootRand4, counter) {
+export function makeNonce(bootRand8, counter) {
   const n = new Uint8Array(12);
-  n.set(u8(bootRand4).subarray(0, 4), 0);
-  let c = BigInt(counter);
-  for (let i = 11; i >= 4; i--) { n[i] = Number(c & 0xffn); c >>= 8n; }
+  n.set(u8(bootRand8).subarray(0, 8), 0);
+  let c = BigInt(counter) & 0xffffffffn; // u32 — 부팅당 42억 건
+  for (let i = 11; i >= 8; i--) { n[i] = Number(c & 0xffn); c >>= 8n; }
   return n;
 }
 
@@ -364,7 +385,7 @@ export function openFrame(key, sid, frame) {
 export default {
   E2EE_CAP, CAP_RPC, CAP_STREAM, CAP_SNAP, NOTIF_PREFIX, D, u32,
   deriveKey, K_RPC, K_RPC_RESP, K_NOTIF, K_SNAPSHOT,
-  verifyDigits, verifyCode4, fingerprint6, qrPin,
+  verifyDigits, verifyCode4, fingerprint6, safetyCode, qrPin,
   sealGrant, openGrant, signGrant, verifyGrantSig, grantSigMsg,
   rpcAad, makeNonce, sealRpc, openRpcResponse, sealRpcResponse, openRpcRequest,
   isSealedBody, sealNotifBody, openNotifBody,

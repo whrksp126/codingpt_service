@@ -28,7 +28,10 @@ const BACKOFF_MAX_MS = 30 * 1000;
 //  미구현을 미리 선언하면 서버/기기가 그 기능을 켜고 데몬은 프레임을 버려 조용히 유실된다.
 //  · hooks.v2 — 훅 7종 수신 + agent-state 전이/알림 단일화(기능3 1단계). 서버측 처리는 불필요하지만
 //    "이 데몬은 훅으로 상태를 낸다"는 사실을 서버/기기가 알면 폴백 UI 를 접을 수 있다.
-const DAEMON_CAPS = ['caps.v1', 'hooks.v2'];
+//  · agentstate.v1 — 훅/폴백 전이를 {type:'agent_state'} 프레임으로 방출(기능3 2단계). 방출 코드가
+//    이 커밋에 있으므로 선언한다. 실제 전송은 sendEvent 가 **서버 선언까지 확인한 뒤**에만 하므로
+//    구 back 에서는 프레임 0건 = 오늘의 폴백(tab.cmd)이 그대로 유지된다.
+const DAEMON_CAPS = ['caps.v1', 'hooks.v2', 'agentstate.v1'];
 
 // 선택 능력 — "모듈이 실제로 있고 그 함수가 실제로 있을 때만" 선언한다. 번들 버전에 따라 파일이 없을 수
 //  있으므로(구 데몬) 하드코딩하면 서버/기기가 기능을 켜고 데몬은 프레임을 버려 조용히 유실된다.
@@ -80,6 +83,41 @@ function sendEvent(frame, cap) {
   if (!activeWs || activeWs.readyState !== 1) return false;
   try { activeWs.send(JSON.stringify(frame)); return true; } catch (_) { return false; }
 }
+
+// hello 프레임 — 연결 직후 1회 + **사실이 바뀌었을 때 재신고**(back 은 같은 소켓의 hello 재수신을
+//  정상 경로로 처리한다: caps/e2eeEpoch/lan 갱신 + runner_status 재팬아웃 + hello_ack 회신 —
+//  daemonRelayService.js:245-275). 재접속을 유발하지 않고 사실을 고칠 수 있는 유일한 수단이다.
+function helloFrame(config) {
+  return {
+    type: 'hello',
+    deviceName: config.deviceName || os.hostname(),
+    platform: process.platform,
+    daemonVersion: config.daemonVersion || 'unknown',
+    clientType: config.clientType || 'daemon',
+    caps: daemonCaps(), // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
+    // LAN 직결 좌표(설계 §2.5) — 사설 IP + 포트. back 은 이것을 **DB 가 아니라 conn 객체**에
+    //  보관하고 grant 응답의 endpoints 로만 노출한다(LAN IP 는 휘발성 → 마이그레이션 없음).
+    //  ⚠ 리스너는 hello_ack 에서 serverCaps 를 본 뒤에 열리므로(=인바운드 포트 0 불변식 보호)
+    //  **첫 hello 에는 보통 없다.** 좌표는 기동 직후 lan_update 로 보낸다. 여기 값은 재접속
+    //  (이미 리스너가 열려 있는 상태)에서만 채워진다 — 없으면 back 은 LAN_UNSUPPORTED 로 다룬다.
+    lan: lanInfo(),
+    // 이 기기가 들고 있는 계정 마스터키 epoch(0 = 열쇠 없음). 클라는 자기 grant epoch 과 같을 때만
+    //  암호화를 켠다(§2.8) — 0 이면 어떤 클라와도 일치하지 않아 자동으로 평문이 된다.
+    e2eeEpoch: e2eeGate.epoch(),
+  };
+}
+
+// 열쇠 상태가 바뀐 직후(승인 수령·회전) 같은 소켓으로 hello 를 다시 보낸다.
+//  이게 없으면 **승인 직후 몇 시간 동안** back 의 conn.caps 에 e2ee.* 가 없고 e2eeEpoch 가 0 으로
+//  남는다(caps 는 연결 시점의 사실이므로). 그 사이 앱/PC 는 이 PC 를 "열쇠 없음"으로 보고 평문으로
+//  돌고 잠금 배지도 꺼진 채다 — 사용자가 방금 승인했는데 아무 일도 안 일어나는 것처럼 보인다.
+//  재접속으로 갱신하는 방법도 있지만 터미널/워치/에이전트 push 대상을 모두 끊으므로 쓰지 않는다.
+function announceHello(config) {
+  const cfg = config || lastConfig;
+  if (!cfg) return false;
+  return sendEvent(helloFrame(cfg));   // cap 게이팅 없음 — hello 는 구 서버도 아는 프레임이다
+}
+let lastConfig = null;
 
 // 지연 로드 모듈로의 rpc 위임 — 모듈/함수 부재를 "명확한 실패"로 바꿔 회신한다.
 //  ⚠ require 를 message 핸들러 안에서 그냥 부르면 예외가 EventEmitter 로 새어 데몬이 죽는다(uncaught).
@@ -210,13 +248,70 @@ function handleSealedRpc(ws, params, ok, fail) {
     fail(codedError('E2EE_UNSUPPORTED', '이 데몬은 봉투 RPC 를 지원하지 않습니다(PC 앱 업데이트 필요)'));
     return;
   }
-  const env = (params || {}).env;
+  const p = params || {};
+  const env = p.env;
+  // ★ '열쇠 없음' 은 `E2EE_NO_KEY` 로 **그대로** 회신한다(뭉개지 말 것).
+  //  이 데몬이 아직 계정 열쇠를 못 받은 상태는 "일시 장애" 가 아니라 **구조적 미지원**이다.
+  //  예전에는 이 경우가 아래 epoch 검사(현재 0)에 걸려 EPOCH_MISMATCH, 또는 openRpc 실패를 뭉갠
+  //  E2EE_OPEN_FAILED 로 나갔고 → back 이 502(일시 장애)로 올려 → 앱은 "잠깐 이상했다" 로 오인하고
+  //  10분마다 같은 실패를 반복했다(진단 불가). 정본 매핑은 **501=미지원**이고 그건 back 담당이다.
+  //  코드만 정직하게 주면 클라이언트는 UNSUPPORTED 캐시 → 평문 폴백으로 조용히·정확히 내려간다.
+  if (typeof e.hasKey === 'function' && !e.hasKey()) {
+    fail(codedError('E2EE_NO_KEY', '이 PC 에는 아직 계정 열쇠가 없습니다(기존 방식으로 계속 진행하세요)'));
+    return;
+  }
+  // ★ 사용자 킬스위치(policy='off')는 봉투 **처리**도 끈다 — caps 선언만 끄고 처리를 남기면
+  //  '끄기' 가 반쪽이 되고(열쇠가 있는 한 계속 열어 준다) 재접속 전까지 옛 caps 를 본 기기가 계속
+  //  봉인해 보낸다. 501 로 회신하면 클라는 UNSUPPORTED 캐시 → 평문으로 조용히·정확히 내려간다.
+  //  ⚠ 지난 알림 body 복호(openText)는 policy 와 무관하게 남긴다(끄면 과거 알림이 🔒 가 된다).
+  if (typeof e.policy === 'function' && e.policy() === 'off') {
+    fail(codedError('E2EE_DISABLED', '이 PC 에서 종단간 암호화가 꺼져 있습니다(기존 방식으로 계속 진행하세요)'));
+    return;
+  }
+  // ★ AAD 의 hostDeviceId 는 **클라이언트가 요청 본문에 실은 값**이다(계약 §2.3 확정).
+  //  뷰어(앱 e2ee.ts / PC)는 `hostDeviceId ?? null` 로 봉인하고 null 은 AAD 에서 u32(0) 이 된다.
+  //  여기서 자기 deviceId(selfDeviceId)로 열려고 하면 **활성 러너 라우팅(host 미지정) 호출이 100%
+  //  복호 실패**하고, 클라는 그것을 "서버 미지원"으로 캐시해 평문으로 내려간다 = 잠금 배지는 켜져 있고
+  //  트래픽은 평문(결함 #8 동형). back 은 그 값을 평문 형제 필드로 그대로 중계한다.
+  const want = p.hostDeviceId == null ? 0 : Number(p.hostDeviceId);
+  const self = e2eeGate.selfDeviceId();
+  // 명시된 host 가 이 기기가 아니면 거절 — 서버가 다른 PC 로 몰래 라우팅한 경우(beginHost 의 같은 가드
+  //  미러). self 를 모를 때(0 = 미페어링/상태파일에 deviceId 없음)는 판정 근거가 없으므로 검사하지 않는다
+  //  (여기서 막으면 정상 기기에서 봉투가 영구히 거절돼 조용한 평문 폴백이 된다).
+  if (want && self && want !== self) {
+    fail(codedError('E2EE_HOST_MISMATCH', '다른 기기로 지정된 봉투입니다'));
+    return;
+  }
+  // ★ epoch 회전 = 무효화여야 한다(회전인데 무효화가 아니면 revoke 가 아무 일도 하지 않는다).
+  //  e2ee.js 는 옛 epoch 의 MK 를 **영구 보존**한다(state.keys — 옛 스냅샷/알림 body 복호용).
+  //  그래서 봉투가 주장한 env.epoch 를 그대로 믿고 열면, `e2ee.revoke` 로 세대를 회전한 뒤에도
+  //  해제된 기기(또는 유출된 옛 복구코드) 보유자가 옛 epoch 로 봉인한 `fs.write` 봉투를 계속
+  //  실행시킬 수 있다. 옛 MK 는 **읽기 전용 복호**에만 쓰고, 실행을 유발하는 봉투는 현재 세대만 받는다.
+  //  · 뷰어가 회전 직후 잠깐 뒤처진 경우도 여기로 떨어지는데, back 이 코드를 보존해 5xx 로 내려주고
+  //    클라는 refresh 후 평문 폴백(policy=preferred) — 오늘의 E2EE_OPEN_FAILED 와 같은 안전한 폴백이다.
+  const curEp = e2eeGate.epoch();
+  const envEp = Number(env && env.epoch);
+  if (!Number.isInteger(envEp) || envEp < 1 || envEp !== curEp) {
+    fail(codedError('E2EE_EPOCH_MISMATCH', `봉투 세대가 현재와 다릅니다(env=${env && env.epoch}, 현재=${curEp})`));
+    return;
+  }
   // 응답도 같은 epoch/hostDeviceId 로 봉인해야 뷰어가 열 수 있다(둘 다 AAD 에 묶여 있다).
-  const encOpts = { epoch: env && env.epoch, hostDeviceId: e2eeGate.selfDeviceId() };
+  const encOpts = { epoch: envEp, hostDeviceId: want };
   let req = null;
   try { req = e.openRpc(env, encOpts); } catch (err) {
     // 열 수 없으면 여기서 끝 — 평문 처리로 폴스루하면 서버가 내용을 보게 된다.
-    fail(codedError('E2EE_OPEN_FAILED', '봉투를 열 수 없습니다(열쇠/epoch 불일치)'));
+    //  ★ 코어가 **이미 구분해 던진 코드는 보존한다**(뭉개면 back 의 매핑표가 죽은 항목이 된다):
+    //   · E2EE_NO_KEY  — 위 가드가 대부분 잡지만 회전 레이스로 여기까지 오는 경로가 남아 있다(501).
+    //   · E2EE_REPLAY  — nonce 재사용/윈도우 밖(e2ee.js:952-953). **보안 이벤트**이고 back 은 409 를
+    //     준비해 뒀다(config/e2eeCodes.js SEALED_CONTRACT). 502 로 뭉개면 앱이 10분간 봉투를 아예
+    //     멈추고 평문으로 고정된다 — 리플레이 공격이 곧 다운그레이드 스위치가 되는 최악의 방향이다.
+    //   · E2EE_EPOCH_MISMATCH / E2EE_HOST_MISMATCH — 상태가 바뀌면 즉시 낫는 계약 위반(409).
+    //  문구는 일반화를 유지한다(경로·내용 누출 금지 불변식 그대로).
+    const KEEP = ['E2EE_NO_KEY', 'E2EE_REPLAY', 'E2EE_EPOCH_MISMATCH', 'E2EE_HOST_MISMATCH'];
+    const code = err && KEEP.includes(err.code) ? err.code : 'E2EE_OPEN_FAILED';
+    fail(codedError(code, code === 'E2EE_NO_KEY'
+      ? '이 PC 에는 아직 계정 열쇠가 없습니다(기존 방식으로 계속 진행하세요)'
+      : '봉투를 열 수 없습니다(열쇠/epoch 불일치)'));
     return;
   }
   const method = req && typeof req.m === 'string' ? req.m : '';
@@ -278,10 +373,36 @@ function dispatchRpc(ws, method, params, ok, fail) {
   fsRpc.handle(method, params).then(ok).catch(fail);
 }
 
+// ── LAN 단계 개방 스위치(영속 설정 지점) ─────────────────────────────────────
+// LAN 직결의 `rpc` 단계(= IDE 원격 fs 직결)는 데몬 스코프 `CPT_LAN_SCOPE` 로 게이팅되는데, 출하
+//  구성에서 그 문자열을 **설정하는 지점이 아무 데도 없었다**(PC 사이드카 spawn env·번들 스크립트·
+//  packages/daemon 전부 0건) → 기본값 'tcp' 로 남고 → `lan.rpc` 가 다이얼 전에 `LAN_SCOPE` 로
+//  거절되고 → PC 는 그것을 markUnsupported(30분 휴면 + **grant 폐기**)로 받아 프리뷰 tcp 직결까지
+//  같이 죽는다. 서버 `LAN_SCOPES` 에 rpc 를 넣어도 켜지지 않는 "구현했는데 안 켜지는" 상태였다.
+//  → 영속 설정 지점을 만든다: `~/.codingpt/daemon.json` 의 `lanScope`("off"|"tcp"|"rpc"|"all").
+//  · env(CPT_LAN_SCOPE)가 이미 있으면 env 가 이긴다(테스트·1회 실험이 설정 파일을 건드리지 않게).
+//  · 기본값은 그대로 'tcp' — 단계 개방은 fail-closed 방향을 유지한다. 정책 정본은 여전히 서버다
+//    (`LAN_SCOPES` 에 rpc 가 없으면 grant 에 scope 가 실리지 않아 클라 수정 없이 꺼진다).
+//  · ⚠ 재페어링은 daemon.json 을 새로 쓰므로(계정 전환 = 클린 슬레이트) 이 값도 다시 넣어야 한다.
+function applyLanScope(config) {
+  if (process.env.CPT_LAN_SCOPE) return;                     // env 우선
+  const v = String((config && config.lanScope) || '').trim().toLowerCase();
+  if (!v) return;
+  if (!['off', 'tcp', 'rpc', 'all'].includes(v)) {
+    console.warn(`[control] daemon.json lanScope 값을 무시합니다(off|tcp|rpc|all): ${v}`);
+    return;
+  }
+  process.env.CPT_LAN_SCOPE = v;
+  console.log(`[control] LAN 스코프 = ${v} (daemon.json lanScope)`);
+}
+
 function run(config) {
   let backoff = BACKOFF_MIN_MS;
   let ws = null;
   let idleTimer = null;
+  lastConfig = config;   // announceHello(열쇠 변화 시 재신고)가 hello 를 다시 만들 때 쓴다
+
+  applyLanScope(config);   // 리스너/커맨드가 스코프를 읽기 전에(= 어떤 boot 단계보다 먼저)
 
   // cpt 소켓·shim·WS 연결은 파일 하단 boot() 에서 — 기존 인스턴스 인수(takeover) 후 순서대로.
 
@@ -308,23 +429,7 @@ function run(config) {
       try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ } // Nagle off — RPC/resize 응답성
       backoff = BACKOFF_MIN_MS;
       bumpIdle();
-      ws.send(JSON.stringify({
-        type: 'hello',
-        deviceName: config.deviceName || os.hostname(),
-        platform: process.platform,
-        daemonVersion: config.daemonVersion || 'unknown',
-        clientType: config.clientType || 'daemon',
-        caps: daemonCaps(), // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
-        // LAN 직결 좌표(설계 §2.5) — 사설 IP + 포트. back 은 이것을 **DB 가 아니라 conn 객체**에
-        //  보관하고 grant 응답의 endpoints 로만 노출한다(LAN IP 는 휘발성 → 마이그레이션 없음).
-        //  ⚠ 리스너는 hello_ack 에서 serverCaps 를 본 뒤에 열리므로(=인바운드 포트 0 불변식 보호)
-        //  **첫 hello 에는 보통 없다.** 좌표는 기동 직후 lan_update 로 보낸다. 여기 값은 재접속
-        //  (이미 리스너가 열려 있는 상태)에서만 채워진다 — 없으면 back 은 LAN_UNSUPPORTED 로 다룬다.
-        lan: lanInfo(),
-        // 이 기기가 들고 있는 계정 마스터키 epoch(0 = 열쇠 없음). 클라는 자기 grant epoch 과 같을 때만
-        //  암호화를 켠다(§2.8) — 0 이면 어떤 클라와도 일치하지 않아 자동으로 평문이 된다.
-        e2eeEpoch: e2eeGate.epoch(),
-      }));
+      ws.send(JSON.stringify(helloFrame(config)));
       activeWs = ws;
       cptServer.setControlWs(ws); // cpt ui_command 전송로 갱신
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
@@ -366,6 +471,33 @@ function run(config) {
               .then(() => approvals.resync())
               .then((r) => { if (r && r.total) console.log(`[control] 대기 중 승인 재광고 ${r.resynced}/${r.total}건${r.failed ? ` (실패 ${r.failed})` : ''}`); })
               .catch((e) => console.warn('[control] 승인 재광고 실패:', (e && e.message) || e));
+          }
+        }
+        // 에이전트 상태 리싱크 — back 이 재시작하면 라스트-스테이트 인덱스가 비지만 데몬의 상태는
+        //  그대로다. 서버가 cap 을 선언했을 때만(구 서버에 프레임을 던지지 않게) 현재 스냅샷을 재방출한다.
+        if (hasServerCap('agentstate.v1')) {
+          try {
+            const r = require('./agent-state').resyncAll();
+            if (r && r.sent) console.log(`[control] 에이전트 상태 리싱크 ${r.sent}/${r.total}건`);
+          } catch (e) { console.warn('[control] 상태 리싱크 실패:', (e && e.message) || e); }
+        }
+        // E2EE 계정 열쇠 클라이언트(기능2 2b) — **서버가 e2ee.keys.v1 을 선언했을 때만** 돌린다.
+        //  이게 없으면 데몬은 열쇠를 얻는 경로가 아예 없어(계약 §2.6) e2ee.caps() 가 영구히 [] 이고,
+        //  앱이 봉인을 시도해도 데몬이 못 열어 "암호화된 척하는 평문" 이 된다. 승인 결과는 데몬 제어
+        //  WS 로 오지 않으므로(fanoutDeviceApproval 은 UI 클라이언트 전용) pull 이 유일한 경로다 —
+        //  모든 대기는 e2ee-account 의 지수 백오프 + 상한이 관리한다(부팅/재접속 폭주 금지).
+        //  ⚠ caps 는 **다음 hello** 부터 e2ee.* 를 싣는다(열쇠 수령 시점엔 이미 연결돼 있으므로).
+        //   그래서 열쇠 수령 직후 봉투 RPC 를 받으려면 재접속이 필요하지 않도록 back 은 caps 를
+        //   게이팅에만 쓰고(라우트는 항상 존재) 데몬은 sealed 를 언제나 처리한다 — 지금 구조가 그렇다.
+        if (hasServerCap('e2ee.keys.v1')) {
+          const acct = tryRequire('./e2ee-account');
+          if (acct && typeof acct.start === 'function') {
+            try {
+              // onKeyChange = 열쇠가 생기거나 세대가 바뀐 직후 hello 재신고(caps·e2eeEpoch 즉시 반영).
+              const r = acct.start({ onKeyChange: () => announceHello(config) });
+              if (!r || !r.already) console.log(`[control] E2EE 열쇠 클라이언트 시작(첫 확인 ${Math.round((r && r.firstRunInMs) || 0)}ms 후)`);
+              else acct.resync();   // 재접속 — throttle 이 폭주를 막는다(30s 최소 간격)
+            } catch (e) { console.warn('[control] E2EE 열쇠 클라이언트 시작 실패:', (e && e.message) || e); }
           }
         }
         // LAN 직결 리스너는 **서버가 lan.v1 을 선언했을 때만** 연다(부팅 시점이 아니다).
@@ -507,7 +639,10 @@ function run(config) {
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
     // 에이전트 상태의 단일 소유자 — 훅(1차)과 agent-watch(폴백)의 보고를 받아 전이·알림을 판정한다.
     //  agent-watch 보다 먼저 띄운다(agent-watch 가 lazy require 하므로 순서 의존은 없지만 의도를 드러냄).
-    try { require('./agent-state').start({}); } catch (e) { console.error('[control] agent-state 초기화 실패:', e.message); }
+    //  emit 주입 = 상태 방출로(기능3 2단계). cap 게이팅은 sendEvent 안에 있어 구 back 에서는 무발화다.
+    try {
+      require('./agent-state').start({ emit: (frame) => sendEvent(frame, 'agentstate.v1') });
+    } catch (e) { console.error('[control] agent-state 초기화 실패:', e.message); }
     // 트랜스크립트 바인딩(세션↔터미널) 정리 — 30일 초과분 삭제. 모듈이 없는 구 번들이면 조용히 건너뛴다.
     try { const t = tryRequire('./transcript'); if (t && typeof t.pruneBinds === 'function') t.pruneBinds(); } catch (e) { console.error('[control] 바인딩 정리 실패:', e.message); }
     // 에이전트 완료 폴백 감지 — 훅이 안 걸린 터미널의 title/process-exit 전이를 관찰해 알림(안전망).
@@ -563,6 +698,8 @@ module.exports = {
   run,
   DAEMON_CAPS,   // 항상 켜져 있는 기본 능력(선택 능력은 daemonCaps() 가 모듈 존재로 판정)
   daemonCaps,
+  helloFrame,      // 연결 시 신고 프레임(테스트가 caps/e2eeEpoch 동승을 고정한다)
+  announceHello,   // 열쇠 변화 직후 재신고(재접속 없이 caps·e2eeEpoch 갱신)
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
   sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
   dispatchRpc,   // 제어채널 RPC 한 벌(평문/봉투 공용) — 테스트가 봉투 경로를 직접 검증할 수 있게 노출
@@ -570,4 +707,5 @@ module.exports = {
   lanInfo,       // hello 에 싣는 LAN 좌표(리스너 없으면 undefined)
   handleE2eeBegin, // E2EE 선협상 핸들러(테스트 노출 — 스코프 게이팅/거절 계약 고정용)
   handleSealedRpc, // 봉투 RPC 핸들러(테스트 노출 — "실패도 봉인" 불변식 고정용)
+  applyLanScope,   // daemon.json lanScope → CPT_LAN_SCOPE(단계 개방 설정 지점 — 테스트가 고정한다)
 };

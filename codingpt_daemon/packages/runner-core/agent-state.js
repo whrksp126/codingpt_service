@@ -14,6 +14,8 @@
  *  · key = tmux 세션명 "<ns>--t-<tid>"(pty.termSession). tid 가 31-bit 안정 ID라 재접속/기기변경에 불변.
  *  · 알림 payload 는 기존 계약(POST /api/notifications) 그대로 — 서버 무수정으로 동작해야 한다.
  *  · 모르는 event/notificationType 은 throw 하지 않고 무시한다(구 CLI ↔ 신 데몬, 신 CLI ↔ 구 데몬 혼재 안전).
+ *  · 상태 방출(agent_state 프레임)도 여기서 한다 — bump() 가 유일한 변경 지점이므로 방출 지점도 하나다.
+ *    (계약 정본: docs/구현설계-2026-07-25/11-배관-계약.md §1.3)
  */
 const path = require('path');
 
@@ -24,6 +26,7 @@ const HOOK_RECENT_MS = 15000;          // 레거시 noteHook(cwdRel|win) dedup �
 const PRIMARY_STALE_MS = HOOK_GOVERN_MS; // 주 세션이 이 시간 무소식이면 다른 sessionId 가 승계 가능
 const SUMMARY_MAX = 2000;
 const TOMB_MAX = 200;
+const AGENT_STATE_CAP = 'agentstate.v1';   // 서버가 수신·검증·팬아웃 코드를 가진 커밋에서만 선언한다(caps 교리)
 
 // 훅 event 도메인. pre_tool/post_tool 은 1단계 미구독이지만 값이 와도 조용히 무시한다.
 const HOOK_EVENTS = new Set(['session_start', 'prompt', 'permission', 'notification', 'stop', 'stop_failure', 'session_end']);
@@ -39,16 +42,24 @@ const SUBTITLE = {
 let nowFn = () => Date.now();
 let notifyFn = null;                                  // null = 기본(cpt-server.backFetch)
 let logFn = (msg) => { console.log(msg); };
+let emitFn = null;                                    // null = 기본(control.sendEvent + caps 게이팅)
 
 // 실제 알림 전송 — cpt-server 는 lazy require(순환 회피, agent-watch 와 동일 패턴).
 async function defaultNotify(payload) {
   await require('./cpt-server').backFetch('POST', '/api/notifications', payload);
 }
 
+// 상태 프레임 전송 — control 은 lazy require(control → agent-state 단방향 유지). sendEvent 는 서버가
+//  cap 을 선언하지 않았거나 연결이 없으면 **보내지 않고 false** 를 준다(구 back 안전 = 조용한 폴백).
+function defaultEmit(frame) {
+  try { return require('./control').sendEvent(frame, AGENT_STATE_CAP); } catch (_) { return false; }
+}
+
 function configure(opts = {}) {
   if (typeof opts.now === 'function') nowFn = opts.now;
   if (opts.notify !== undefined) notifyFn = typeof opts.notify === 'function' ? opts.notify : null;
   if (opts.log !== undefined) logFn = typeof opts.log === 'function' ? opts.log : () => {};
+  if (opts.emit !== undefined) emitFn = typeof opts.emit === 'function' ? opts.emit : null;
   return module.exports;
 }
 // control.js 기동 순서용 진입점 — 타이머를 만들지 않는다(순수 스토어). 주입도 겸한다.
@@ -118,7 +129,73 @@ function bump(rec, next, source, ctx = {}) {
   rec.source = source;
   // §8 관측 계측: 훅 도착 지연(dt)까지 한 줄로 — 라이브에서 훅 배선 문제를 눈으로 잡을 수 있어야 한다.
   logFn(`[agent-state] ${rec.tid} ${prev}→${rec.state} v${rec.version} src=${source} ev=${ctx.ev || '-'}${ctx.dt != null ? ` dt=${ctx.dt}ms` : ''}`);
+  emitState(rec);  // 와이어 state 가 바뀐 경우에만 실제로 나간다(내부 dedup)
   return rec;
+}
+
+// ── 상태 방출(기능3 2단계, 계약 §1.3) ─────────────────────────────────────────
+//  왜 bump() 안에서 방출하는가: 상태를 바꾸는 지점이 여기 하나뿐이라 방출도 하나여야 한다. 호출부마다
+//  emit 을 흩으면 한 경로를 빼먹었을 때 "어떤 전이만 가끔 늦는" 버그가 되고, 그건 폴백(tab.cmd, 5~9초)
+//  으로 가려져 발견되지 않는다.
+//
+//  규율 4개(어기면 조용히 죽는다):
+//   ① 와이어 state 는 클라이언트 도메인으로 접는다 — `ended → 'gone'`, `launching → 'idle'`.
+//      ★ ended 를 그대로 보내면 PC `pane.js` 가 `st.state !== "gone"` 으로 판정해 claude 를 끝낸 뒤에도
+//        Chat 토글이 영구히 켜진 채 남고 `tab.cmd` 폴백도 다시는 발동하지 않는다(push 우선 규칙).
+//   ② 같은 와이어 state 로는 재방출하지 않는다 — 훅 7종이 도는 턴마다 version 만 오르는 프레임 폭주 차단.
+//      이 억제는 알림 억제(fire 의 REFIRE_MIN_MS)와 **다른 축**이다: 저건 kind 별 시간창(8s)이고 이건
+//      상태 변화 기준(시간 게이트 0)이다. 그래서 두 억제가 겹쳐 "전이가 늦게 나가는" 일은 없다.
+//   ③ 좌표(cwdRel, tid)를 모르면 방출하지 않는다 — 클라이언트 색인 키가 (cwd, win) 이라 빈 값으로
+//      보내면 홈 루트 워크스페이스와 충돌한다. 좌표를 알게 된 다음 bump 에서 나간다.
+//   ④ 내용성 정보(summary/body/promptId/pending)는 절대 싣지 않는다 — 상태 프레임은 순수 메타데이터여야
+//      E2EE 봉투 배관과 독립적으로 안전하다(요약은 알림 body 경로가 담당).
+const lastEmitted = new Map();   // key → 마지막으로 **실제 전송에 성공한** 와이어 state
+
+function wireStateOf(rec) {
+  const s = rec && rec.state;
+  if (s === 'ended') return 'gone';
+  if (s === 'launching') return 'idle';   // statusOf() 와 같은 접기 규칙
+  return s || 'idle';
+}
+
+// 실패(cap 미선언·연결 없음)는 캐시에 남기지 않는다 — 다음 bump 가 다시 시도하고, 첫 성공 프레임이
+//  그 시점의 현재 상태를 실어 나른다(hello_ack 리싱크에만 의존하지 않는다).
+function emitFrame(rec, wire, force) {
+  if (rec.cwdRel == null || rec.tid == null) return false;
+  if (!force && lastEmitted.get(rec.key) === wire) return false;
+  const frame = {
+    type: 'agent_state',
+    event: {
+      cwd: rec.cwdRel,
+      win: rec.tid,
+      state: wire,
+      agent: rec.agent || null,
+      version: rec.version,
+      at: nowFn(),
+      sessionId: rec.sessionId || null,
+      source: rec.source || 'hook',
+      since: rec.since,
+    },
+  };
+  let sent = false;
+  try { sent = !!(emitFn || defaultEmit)(frame); } catch (e) {
+    logFn(`[agent-state] ${rec.tid} 상태 방출 실패: ${e && e.message}`); // 방출 실패는 무해(폴백)
+    sent = false;
+  }
+  if (sent) lastEmitted.set(rec.key, wire);
+  return sent;
+}
+
+function emitState(rec, force) { return emitFrame(rec, wireStateOf(rec), !!force); }
+
+// 전체 리싱크 — back 이 재시작하면 인메모리 라스트-스테이트 인덱스가 통째로 사라지지만 데몬의 상태는
+//  그대로다. hello_ack 에서 서버가 cap 을 선언했을 때만 부른다(구 서버엔 프레임을 던지지 않는다).
+function resyncAll() {
+  lastEmitted.clear();
+  let sent = 0;
+  for (const rec of states.values()) if (emitState(rec, true)) sent += 1;
+  if (sent) logFn(`[agent-state] 상태 리싱크 ${sent}건 재방출`);
+  return { sent, total: states.size };
 }
 
 // ── 훅 생존/지배 판정 ──
@@ -398,8 +475,16 @@ async function applyWatch(key, obs = {}) {
     if (observed === rec.state) return { ok: true, state: rec.state, version: rec.version }; // 무변화 = version 인플레 방지
     bump(rec, observed, 'watch', { ev: 'observe' });
   } else if (obs.shell) {
-    // 셸 복귀 = 에이전트 없음. 오늘의 statusOf 규칙(미관찰=idle)과 동일한 의미.
-    if (rec.state !== 'idle') bump(rec, 'idle', 'watch', { ev: 'shell' });
+    // 셸 복귀 = 에이전트 프로세스가 사라졌다 → 'idle' 이 아니라 **소멸**('ended' → 와이어 'gone')이다.
+    //  와이어 계약(§1.3)에서 'idle' 은 "에이전트가 붙어 있고 유휴" 를 뜻하므로 여기서 'idle' 을 쓰면
+    //  두 방향으로 조용히 죽는다(부록A #1 의 변종, 로그·에러 0건):
+    //   ① 훅 없는 에이전트(gemini·--settings 직접 지정·kill -9): 마지막 방출값이 'idle' 로 남아
+    //      빈 셸 탭에 Chat 토글이 stale 상한(15분)까지 켜진 채 굳는다(push 우선 규칙이라 tab.cmd 폴백도 안 돈다).
+    //   ② 훅 있는 경우: session_end 가 'gone' 을 보낸 뒤 hookGoverned(10분)가 풀리면 같은 셸 관찰이
+    //      'ended'→'idle' 로 되돌려 'idle' 을 **재방출** → 이미 꺼진 토글이 스스로 되켜진다.
+    //  레거시 "미관찰=idle" 의미는 statusOf/legacyStatusOf 가 그대로 유지한다(ended→idle 접기) →
+    //  `cpt terminal wait --for idle` 은 영향 없다.
+    if (rec.state !== 'ended') bump(rec, 'ended', 'watch', { ev: 'shell' });
   }
   return { ok: true, state: rec.state, version: rec.version };
 }
@@ -470,19 +555,24 @@ function forget(key) {
       while (tombs.size > TOMB_MAX) { const k = tombs.keys().next().value; tombs.delete(k); }
     }
   }
+  // 터미널 소멸 = 클라이언트가 키를 지워야 하는 순간. 'gone' 1회를 방출한 뒤 캐시를 비운다
+  //  (이미 ended→gone 을 보냈다면 dedup 이 중복 전송을 막는다).
+  emitFrame(rec, 'gone', false);
+  lastEmitted.delete(key);
   states.delete(key);
   return true;
 }
 
 // 테스트용 전면 초기화(agent-watch.js:204 _states 노출 컨벤션 미러).
 function _reset() {
-  states.clear(); wsHooks.clear(); tombs.clear();
+  states.clear(); wsHooks.clear(); tombs.clear(); lastEmitted.clear();
 }
 
 module.exports = {
   start, configure,
   applyHook, applyWatch,
   statusOf, legacyStatusOf, snapshot, hookGoverned, noteHook, hookRecent, forget,
-  HOOK_GOVERN_MS, REFIRE_MIN_MS, PERMISSION_DEDUP_MS, HOOK_RECENT_MS,
-  _states: states, _tombs: tombs, _reset,
+  wireStateOf, resyncAll,   // 상태 방출(기능3 2단계) — control.js 가 hello_ack 에서 리싱크를 부른다
+  HOOK_GOVERN_MS, REFIRE_MIN_MS, PERMISSION_DEDUP_MS, HOOK_RECENT_MS, AGENT_STATE_CAP,
+  _states: states, _tombs: tombs, _reset, _lastEmitted: lastEmitted,
 };

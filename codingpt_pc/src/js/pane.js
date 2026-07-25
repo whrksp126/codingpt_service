@@ -775,8 +775,12 @@ export class PaneView {
   }
 
   // 활성 탭이 "에이전트가 붙은 터미널 탭"인가 — 토글 노출 판정(설계서 §2.3 우선순위).
-  //  1) 기능3 push(agent_state) — 즉시성 <1s. 아직 서버/데몬이 안 보내면 비어 있다.
+  //  1) 기능3 push(agent_state) = **서버 상태 우선**. 즉시성 <1s. state.agentStateOf 가 값을 주는 동안은
+  //     tab.cmd 를 아예 보지 않는다(계약 §1.5: push 가 존재하면 폴백을 건너뛴다).
+  //     · 'gone'/'ended' 는 state.js 가 키를 지우므로 여기로 오지 않는다 → 자동으로 2)로 되돌아간다.
+  //     · 마지막 push 가 15분 초과(stale)거나 호스트가 오프라인이면 state.js 가 폐기 → 역시 2)로.
   //  2) 폴백: tab.cmd(리컨실러가 7s 주기로 채우는 pane_current_command).
+  //     gemini(훅 미지원)·`--settings` 직접 지정·cmux PATH 경합에서 **유일한 신호**다 — 지우지 말 것.
   //  3) 폴백2: cmd 가 node 인데 이 탭에서 chat 모드가 살아 있던 적 있음(agent-watch 의 node 규칙 미러).
   _agentOn(tab) {
     if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return false;

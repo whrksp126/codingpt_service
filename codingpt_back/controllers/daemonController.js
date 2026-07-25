@@ -18,6 +18,7 @@ const deviceTrustService = require('../services/deviceTrustService'); // E2EE �
 const BILLING = require('../config/billing');
 const RUNNER = require('../config/runner'); // CLOUD_RUNNER_ENABLED — 클라우드 러너 제공 잠정 중단 게이트
 const { SERVER_CAPS } = require('../config/caps'); // capability 협상 사전(§2-(d)) — 클라이언트 기능 게이팅용
+const e2eeCodes = require('../config/e2eeCodes'); // 봉투 계층 오류코드→HTTP 매핑 정본(한 곳)
 const { successResponse, errorResponse } = require('../utils/response');
 
 // 클라우드 실행시간 초 쿼터 프리플라이트(M5 Slice5). ENFORCE 꺼져 있으면 항상 통과(실측 전 안전).
@@ -452,7 +453,9 @@ async function daemonTerminalStart(req, res) {
     const client = typeof b.client === 'string' ? b.client : '';
     // hostDeviceId — 다른 PC(호스트)의 워크스페이스를 열 때 대상 러너 지정(활성 러너 무변경).
     const token = daemonRelayService.issueTerminalToken(device.user_id, cwd, paneId, win, client, b.hostDeviceId);
-    return successResponse(res, { token });
+    // PC 앱(deviceToken) 경로도 같은 선협상을 탄다 — 오퍼가 없으면 { token } 그대로.
+    const neg = await negotiateTerminalE2ee(req, device.user_id, token, { cwd, paneId, win, client });
+    return successResponse(res, { token, ...(neg || {}) });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -795,7 +798,9 @@ async function startTerminal(req, res) {
     const client = (req.body && typeof req.body.client === 'string') ? req.body.client : '';
     // hostDeviceId — 다른 PC(호스트) 지정(멀티 PC). 없으면 활성 러너(기존 동작).
     const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client, req.body && req.body.hostDeviceId);
-    return successResponse(res, { token });
+    // body.e2ee 오퍼가 있으면 봉인 세션 선협상(기능2 D단계). 없으면 응답은 { token } 그대로.
+    const neg = await negotiateTerminalE2ee(req, userId, token, { cwd, paneId, win, client });
+    return successResponse(res, { token, ...(neg || {}) });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -847,6 +852,118 @@ function mapRpcError(res, e) {
     return errorResponse(res, new Error('PC 데몬이 연결되어 있지 않습니다.'), 409);
   }
   return errorResponse(res, e, 500);
+}
+
+// ── 봉투 RPC 프록시(기능2 B단계) ────────────────────────────────────────
+// POST /api/daemon/rpc  (accountAuth) body:{ hostDeviceId?, timeoutMs?, env } → { env }
+//
+// ★ 서버는 봉투를 **열지 않는다**. env 를 파싱·기록·재작성하지 않고 그대로 데몬에 중계하고,
+//   데몬이 준 응답 봉투를 그대로 담아 회신한다. 이 핸들러에 JSON.parse(env.ct) 류가 등장하면
+//   계약 위반이다(그래서 검증은 "형식이 봉투인가" 까지만 하고 내용은 손대지 않는다).
+// ★ ct/nonce 를 로그에 남기지 않는다 — 로그가 곧 평문 저장소가 되는 유일한 유출 경로다.
+// ★ hostDeviceId 는 **평문 형제 필드로 그대로** 전달한다(봉투 안에 넣지 않는다). 데몬은 이 값으로
+//   AAD 를 재구성해 열고 같은 값으로 응답을 봉인한다. 클라가 미지정이면 필드 자체를 싣지 않아
+//   양쪽이 u32(0) 으로 맞춘다(§2.3 — 여기서 서버가 임의로 러너 id 를 채우면 모든 봉투가 열리지 않는다).
+const ENV_B64U_RE = /^[A-Za-z0-9_-]+$/;
+const ENV_CT_MAX = 4 * 1024 * 1024; // 봉투 본문 상한(fs.write 첨부 고려) — 초과는 형식 오류로 거절
+function isSealedEnvelope(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  if (Object.keys(raw).length > 8) return false; // 미지의 필드 밀어넣기 방지(중계는 원본 그대로 한다)
+  if (raw.v !== 1) return false;
+  if (typeof raw.suite !== 'string' || !raw.suite || raw.suite.length > 32) return false;
+  if (!Number.isInteger(raw.epoch) || raw.epoch <= 0) return false;
+  if (typeof raw.nonce !== 'string' || raw.nonce.length < 8 || raw.nonce.length > 64 || !ENV_B64U_RE.test(raw.nonce)) return false;
+  if (typeof raw.ct !== 'string' || raw.ct.length < 16 || raw.ct.length > ENV_CT_MAX || !ENV_B64U_RE.test(raw.ct)) return false;
+  return true;
+}
+const SEALED_TIMEOUT_DEFAULT_MS = 15000;
+const SEALED_TIMEOUT_MAX_MS = 60000;
+// 데몬 코드 → HTTP 는 `config/e2eeCodes.js` 가 정본이다(구간 근거·개정 이력이 그 파일 주석에 있다).
+//  클라이언트는 detail.code 로만 분기한다(문구 판정 금지).
+const sealedFail = (res, code, message) => errorResponse(
+  res, Object.assign(new Error(message), { publicDetail: { code } }), e2eeCodes.sealedStatusOf(code).status,
+);
+// 킬스위치 회수 — caps 에 `e2ee.rpc.v1` 이 없으면(E2EE_ENABLED=0) 라우트는 살아 있어도 **처리하지 않는다**.
+//  왜 라우트 조건부 등록이 아니라 핸들러 게이트인가:
+//   ① 이 리포의 킬스위치 관습이 전부 핸들러 내부다(TRANSCRIPT_ENABLED → 403, deviceTrustService → 503).
+//      routes/*.js 에는 env 분기가 한 줄도 없다 — 라우트 표는 "무엇이 존재하는가"만 말한다.
+//   ② 조건부 등록은 404 가 되어 `path` 만 담긴 공용 404 본문이 나간다(detail.code 없음). 그러면
+//      "이 서버가 스위치로 껐다"와 "구 back 이라 라우트가 없다"를 로그·클라 양쪽에서 구분할 수 없다.
+//   ③ 실증된 결함이 정확히 여기였다: caps 선언만 회수되고 **이미 열쇠를 가진 클라이언트는 계속 봉투를
+//      왕복**했다(caps 는 hello 시점 1회 협상이라 그 뒤에 붙은 클라의 in-flight 를 막지 못한다).
+//      게이트를 핸들러에 두면 스위치를 내린 다음 요청부터 즉시 501 이고, 클라는 평문으로 내려간다.
+//  게이팅 근거를 `SERVER_CAPS.includes(...)` 로 두는 이유: "선언하지 않은 능력은 처리하지 않는다"를
+//  한 소스(config/caps.js)로 강제한다 — env 판정을 두 곳에서 하면 언젠가 갈라진다.
+function sealedRpcEnabled() { return SERVER_CAPS.includes('e2ee.rpc.v1'); }
+async function rpcSealed(req, res) {
+  const b = req.body || {};
+  if (!sealedRpcEnabled()) {
+    // 501 = 구조적 미지원 → 앱이 조용히 평문 REST 로 내려가고 10분 캐시한다(왕복 자체가 사라진다).
+    return sealedFail(res, 'E2EE_DISABLED', '이 서버에서 봉인 RPC 가 꺼져 있습니다.');
+  }
+  if (!isSealedEnvelope(b.env)) {
+    return sealedFail(res, 'BAD_ENVELOPE', '봉투 형식이 올바르지 않습니다.');
+  }
+  const rawTimeout = Number(b.timeoutMs);
+  const timeoutMs = Math.min(Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : SEALED_TIMEOUT_DEFAULT_MS, SEALED_TIMEOUT_MAX_MS);
+  const hostDeviceId = Number.isInteger(b.hostDeviceId) ? b.hostDeviceId
+    : (typeof b.hostDeviceId === 'string' && /^\d+$/.test(b.hostDeviceId) ? parseInt(b.hostDeviceId, 10) : null);
+  // ── epoch 선대조(왕복 절감 + 진단) ────────────────────────────────────
+  // 데몬 handleSealedRpc 는 `env.epoch === 현재 세대` 를 강제한다(회전 = 무효화여야 하므로). 그래서
+  //  **명백히 낡은 세대**는 여기서 잘라 데몬 왕복을 줄이고, 로그에 이유를 남긴다(봉투는 열지 않으므로
+  //  서버가 볼 수 있는 유일한 힌트가 이 숫자다 — 이게 없으면 진단이 "왜인지 모를 502" 뿐이다).
+  //
+  // ★ 판정의 정본은 데몬이다. 서버는 열쇠를 모르고 hello 의 광고값(conn.e2eeEpoch)만 안다 → 여기 통과가
+  //   "열 수 있다"는 보증이 절대 아니고, 데몬 검사를 건너뛰게 만드는 신호도 보내지 않는다(프레임 무변경).
+  //   그래서 거절 조건을 최소한으로 좁힌다:
+  //    · hostEpoch === 0 / null(광고 안 함·구 데몬·열쇠 없음) → 판정 근거 없음 = 통과(데몬이 정직한
+  //      코드로 답한다: 열쇠 0개면 501 계열, 그게 이 라운드의 매핑 정직화 항목이다).
+  //    · env.epoch > hostEpoch(클라가 앞섬) → 통과. 회전 직후 hello 갱신이 늦으면 정상 봉투를
+  //      서버가 거절해 버리는데, 그건 서버가 스스로 암호화를 끄는 것과 같다.
+  //    · env.epoch < hostEpoch(클라가 뒤처짐) → 거절. 데몬도 100% 같은 판정을 하므로 왕복이 낭비다.
+  const hostEpoch = daemonRelayService.hostE2eeEpoch(req.user.id, connOptsOf(req));
+  if (hostEpoch > 0 && b.env.epoch < hostEpoch) {
+    console.warn(`[e2ee] 낡은 세대 봉투 거절 user=${req.user.id} host=${hostDeviceId == null ? 'active' : hostDeviceId} env.epoch=${b.env.epoch} host.epoch=${hostEpoch}`);
+    return sealedFail(res, 'E2EE_EPOCH_MISMATCH', '봉투 세대가 현재와 다릅니다. 열쇠 정보를 새로 받아 주세요.');
+  }
+  try {
+    const result = await daemonRelayService.callRpc(
+      req.user.id, 'sealed',
+      { env: b.env, ...(hostDeviceId != null ? { hostDeviceId } : {}) },
+      timeoutMs, connOptsOf(req),
+    );
+    // 데몬 응답 봉투를 그대로. 봉투가 없으면 데몬 배관이 어긋난 것이므로 평문으로 흘리지 않고 502.
+    if (!result || typeof result !== 'object' || !result.env) {
+      return sealedFail(res, 'E2EE_NO_ENVELOPE', '데몬이 봉투 응답을 주지 않았습니다.');
+    }
+    return successResponse(res, { env: result.env });
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') {
+      return sealedFail(res, 'DAEMON_OFFLINE', 'PC 데몬이 연결되어 있지 않습니다.');
+    }
+    // 매핑은 config/e2eeCodes.js 정본. 코드가 없는 실패(구 데몬·타임아웃)는 구조적 미지원과 같은 처방.
+    const m = e2eeCodes.sealedStatusOf(e && e.code);
+    e.publicDetail = { code: m.code };
+    return errorResponse(res, e, m.status);
+  }
+}
+
+// ── 봉인 스트림 선협상(기능2 D단계) ────────────────────────────────────
+// body.e2ee(뷰어 오퍼)가 있을 때만 e2ee.begin 을 선협상해 토큰에 sid 를 붙인다.
+//  오퍼가 없으면 null → 응답이 오늘과 100% 동일(필드 추가 없음). 실패는 { e2ee:false, e2eeReason }.
+//  routing/client/hostDeviceId 는 **토큰에 저장한 값 그대로** 넘긴다(트랜스크립트 일치 = confirm 검증).
+async function negotiateTerminalE2ee(req, userId, token, { cwd, paneId, win, client }) {
+  const b = req.body || {};
+  if (!b.e2ee) return null;
+  return daemonRelayService.negotiateStreamE2ee(userId, {
+    token,
+    purpose: 'pty',
+    offer: b.e2ee,
+    routing: { cwd: cwd || '', paneId: paneId || '', win: Number.isInteger(win) ? win : null },
+    client: client || '',
+    hostDeviceId: b.hostDeviceId,
+    opts: connOptsOf(req),
+  });
 }
 
 // fs/프리뷰 RPC 의 대상 호스트 지정 — 터미널 device-start 와 동일 규약(hostDeviceId=DaemonDevice.id).
@@ -1257,7 +1374,15 @@ async function forwardStart(req, res) {
   }
   try {
     const token = daemonRelayService.issueForwardToken(req.user.id, port, runnerId);
-    return successResponse(res, { token, port });
+    // 포워딩도 같은 선협상(purpose='tcp', routing={port}) — 오퍼가 없으면 { token, port } 그대로.
+    //  ⚠ 토큰은 (port,runner)당 재사용되고 동시 TCP 연결 수십 개가 같은 sid 를 공유한다(연결별 격리는
+    //   데몬 connId 담당) → 프리뷰 에셋 폭주에도 추가 RTT 0.
+    const neg = (req.body || {}).e2ee ? await daemonRelayService.negotiateStreamE2ee(req.user.id, {
+      token, purpose: 'tcp', offer: req.body.e2ee, routing: { port },
+      client: typeof req.body.client === 'string' ? req.body.client : '',
+      hostDeviceId: req.body.hostDeviceId, opts,
+    }) : null;
+    return successResponse(res, { token, port, ...(neg || {}) });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -1321,6 +1446,7 @@ module.exports = {
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
+  rpcSealed, _isSealedEnvelope: isSealedEnvelope, // 봉투 프록시(기능2 B단계) + 테스트 노출(형식 게이트)
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,

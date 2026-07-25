@@ -15,12 +15,14 @@ import { PAGE_AGENT_JS } from "./page-agent.js";
 import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 import { applyChatEvent } from "./chat-view.js";
 import { applyDeviceApprovalEvent, e2eeCaps, refreshE2ee } from "./e2ee.js";
+import { applyRunnerStatus, resetHostLocks } from "./host-lock.js";
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
 async function onAccountDeleted() {
   try { await api.unpair(); } catch (_) { /* 이미 해제됐을 수 있음 */ }
   state.me = null;
   state.devices = [];
+  resetHostLocks(); // 다음 계정 화면에 옛 계정 PC 의 자물쇠 배지가 새지 않게
   state.daemon = await api.daemonStatus().catch(() => state.daemon);
   state.paired = !!state.daemon?.paired;
   S.emit();
@@ -151,6 +153,17 @@ async function connect() {
   sock = ws;
   ws.onopen = () => {
     retryMs = 3000;
+    // ★ 에이전트 상태(기능3) push 는 재접속 시점에 **전량 폐기**한다(계약 §1.5). 끊긴 사이의 전이,
+    //  특히 종료('gone')를 놓쳤을 수 있고 back 의 라스트-스테이트 리플레이는 '삭제'를 표현할 수 없다
+    //  (gone 은 캐시에서 지워져 리플레이 대상이 아니다) → 안 지우면 끝난 에이전트가 유령으로 15분 남는다.
+    //  폐기 후 ui_hello 를 보내면 리플레이가 살아 있는 것만 즉시 복원한다(앱 resetAgentStates 와 같은 순서).
+    S.resetAgentStates();
+    // ★ 호스트별 자물쇠(runner_status.e2eeEpoch)도 **같은 규율**로 폐기한다(계약 §2.7). 끊긴 사이 그 PC 가
+    //  열쇠를 잃었거나(신뢰 해제) 세대를 회전했을 수 있고, 그러면 남아 있는 값은 근거가 사라진 사진이라
+    //  '암호화됨' 을 유지하는 거짓 자물쇠가 된다. 폐기 후 ui_hello → back replayRunnerStatus 가 **붙어
+    //  있는 러너 전부**를 (열쇠 없는 호스트도 e2eeEpoch:0 으로) 즉시 되보내므로 '확인 중' 고착이 없다.
+    //  ⚠ 순서 불변식: 리플레이가 있는 back 에서만 안전하다 — 리셋만 있고 시드가 없으면 고착이 악화된다.
+    if (resetHostLocks()) S.emit(); // 순수 모듈이라 emit 은 호출부 몫(applyRunnerStatus 와 같은 규약)
     // 이 클라이언트 식별(원격 조작 executor 선정 + 기기 타겟팅) — 기기 키 + 페어링된 기기 id/이름.
     //  caps = "이 화면이 실제로 그릴 수 있는 신규 기능"(capability 협상, config/caps.js). 서버는
     //  이 교집합으로 "승인 카드를 그릴 화면이 있는가"(countResponders)를 판단한다. 우리가 정말
@@ -160,7 +173,10 @@ async function connect() {
       deviceId: state.daemon?.deviceId ?? undefined,
       deviceName: state.daemon?.device_name || undefined, // daemon_status Status 는 device_name(snake) 로 노출
       //  e2ee.v1 은 이 PC 가 **실제로 봉인/복호할 수 있을 때만** 실린다(데몬 열쇠 승인 완료 상태).
-      caps: ["caps.v1", "approval.v1", "transcript.v1", ...e2eeCaps()],
+      //  agentstate.v1 = 에이전트 상태 push(기능3) 수신기가 실제로 있다(아래 'agent_state' 케이스 →
+      //   state.setAgentState). 팬아웃은 caps 로 게이팅하지 않으므로(모르는 type 은 무시) 이 신고는
+      //   진단·통계용이지만, "구현한 것만 신고" 규약을 지켜 수신기와 같은 커밋에서만 실린다.
+      caps: ["caps.v1", "approval.v1", "transcript.v1", "agentstate.v1", ...e2eeCaps()],
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
@@ -192,8 +208,17 @@ async function connect() {
         applyChatEvent(msg);
         break;
       case "agent_state":
-        // 기능3(에이전트 상태머신) push — 아직 서버가 보내지 않지만 오면 토글 판정 1순위가 된다.
+        // 기능3(에이전트 상태머신) push — 토글 노출 판정의 **1순위**(폴백은 pane.js 의 tab.cmd).
+        //  back 팬아웃 형태 = { type:'agent_state', event:{ cwd, win, state, agent, version, at,
+        //  sessionId, source, since, hostDeviceId, kind } }(계약 §1.3-②). event 없이 평평하게 오는
+        //  형태도 받아 준다(데몬 → back 원본 프레임과 같은 모양이라 중계 구현에 무관하게 동작).
         S.setAgentState(msg.event || msg);
+        break;
+      case "runner_status":
+        // 호스트(내 PC)별 열쇠 세대 — 정직한 자물쇠 배지의 유일한 근거(계약 §2.7 "자물쇠 표시는 호스트별로").
+        //  back 은 러너 접속/종료와 hello.e2eeEpoch 변화마다 이 프레임을 쏜다. **표시 전용**이다 —
+        //  이 값으로 봉인 시도를 게이팅하면 구 back(필드 없음)에서 기능이 조용히 꺼진다.
+        if (applyRunnerStatus(msg.event)) S.emit();
         break;
       case "ui_command":
         handleUiCommand(msg, (frame) => send(ws, { type: "ui_result", ...frame }));

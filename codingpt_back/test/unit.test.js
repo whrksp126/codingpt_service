@@ -51,22 +51,41 @@ test('SERVER_CAPS — 처리 코드가 들어간 능력만 선언 + 킬스위치
   //  transcript.v1 = /api/daemon/chat/* callRpc 프록시 + chat_event 팬아웃(이 커밋)
   assert.ok(SERVER_CAPS.includes('approval.v1'));
   assert.ok(SERVER_CAPS.includes('transcript.v1'));
-  // 기능3 2단계(agent_state 수신·rseq 부여)는 아직 서버 코드가 없다 → 선언 금지.
-  assert.ok(!SERVER_CAPS.includes('agentstate.v1'), 'agentstate.v1 은 서버 처리 코드가 들어간 뒤에 선언해야 한다');
+  // 기능3 2단계 — 이 커밋의 서버 코드 = 제어 WS agent_state 분기 + normAgentState 검증
+  //  + fanoutAgentState(SSE/WSS) + ui_hello 라스트-스테이트 리플레이 → 이제 선언한다.
+  assert.ok(SERVER_CAPS.includes('agentstate.v1'));
+  const relay = require('../services/daemonRelayService');
+  assert.strictEqual(typeof relay.fanoutAgentState, 'function', '선언했으면 팬아웃 코드가 반드시 있어야 한다');
   // 킬스위치 — 서버에서 기능을 끄면 능력도 회수돼 신버전 데몬의 교집합이 깨진다(= 기존 동작 폴백).
-  assert.deepStrictEqual(computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', E2EE_ENABLED: 'off' }), ['caps.v1']);
+  assert.deepStrictEqual(
+    computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', AGENTSTATE_ENABLED: '0', E2EE_ENABLED: 'off' }),
+    ['caps.v1']);
   assert.ok(computeServerCaps({}).includes('approval.v1')); // 미설정 = 켜짐
+  assert.ok(!computeServerCaps({ AGENTSTATE_ENABLED: 'no' }).includes('agentstate.v1'));
 });
 
-test('SERVER_CAPS — E2EE 는 단계별 능력으로 쪼갠다(열쇠 배포만 선언)', () => {
-  // 이 커밋의 서버 코드 = deviceTrustService + /api/daemon/e2ee/* + device_approval_event 팬아웃.
+test('SERVER_CAPS — E2EE 는 단계별 능력으로 쪼갠다(A/B/D 선언, C 미선언)', () => {
+  // A단계 = deviceTrustService + /api/daemon/e2ee/* + device_approval_event 팬아웃.
   assert.ok(SERVER_CAPS.includes('e2ee.keys.v1'));
-  // ★ 트래픽 봉인 처리 코드는 아직 없다 → 뭉뚱그린 'e2ee.v1' 이나 단계 능력을 미리 선언하면
-  //   데몬이 pty/RPC 봉인을 켜고 서버는 sid/env 배관이 없어 프레임을 조용히 버린다.
-  for (const cap of ['e2ee.v1', 'e2ee.rpc.v1', 'e2ee.stream.v1', 'e2ee.snap.v1']) {
+  // B단계 = POST /api/daemon/rpc 봉투 프록시(이 커밋). 선언했으면 핸들러가 실제로 있어야 한다.
+  assert.ok(SERVER_CAPS.includes('e2ee.rpc.v1'));
+  assert.strictEqual(typeof require('../controllers/daemonController').rpcSealed, 'function');
+  // D단계 = e2ee.begin 선협상 + 토큰 sid(이 커밋).
+  assert.ok(SERVER_CAPS.includes('e2ee.stream.v1'));
+  assert.strictEqual(typeof require('../services/daemonRelayService').negotiateStreamE2ee, 'function');
+  // ★ 뭉뚱그린 'e2ee.v1' 은 영구 금지. C단계(e2ee.snap.v1)는 매니페스트에 enc/epoch 를 보관하는
+  //   데까지만 왔고 복원측 처리가 없다 → 선언하면 데몬이 번들을 봉인해 올리는데 서버는 그것이
+  //   복원 가능한지 아무것도 확인하지 못한다(교리 위반).
+  for (const cap of ['e2ee.v1', 'e2ee.snap.v1']) {
     assert.ok(!SERVER_CAPS.includes(cap), `${cap} 은 해당 단계 서버 코드가 들어간 뒤에 선언해야 한다`);
   }
-  assert.ok(!computeServerCaps({ E2EE_ENABLED: '0' }).includes('e2ee.keys.v1')); // 킬스위치로 회수
+  // 킬스위치 — E2EE 를 끄면 3개가 함께 회수된다(열쇠 없이 봉투/스트림만 켜지는 조합 금지).
+  const off = computeServerCaps({ E2EE_ENABLED: '0' });
+  for (const cap of ['e2ee.keys.v1', 'e2ee.rpc.v1', 'e2ee.stream.v1']) assert.ok(!off.includes(cap));
+  // D단계만 되돌리기 — sid 주입 회귀(4090 무한 재연결) 시 즉시 회수할 수단.
+  const noStream = computeServerCaps({ E2EE_STREAM_ENABLED: '0' });
+  assert.ok(noStream.includes('e2ee.rpc.v1'));
+  assert.ok(!noStream.includes('e2ee.stream.v1'));
 });
 
 // ── 기능1 승인 인박스 ────────────────────────────────────────────────

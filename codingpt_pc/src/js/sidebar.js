@@ -56,12 +56,37 @@ export function mountSidebar(container) {
   mountSbResizer();
   // LAN 직결 경로 변화 시 배지만 갱신(경로 상태는 호스트 온/오프라인과 무관 — 오프라인 UX 무간섭).
   lan.onLanChange(() => updateSidebar());
+  startLanBadgePoll();
   notifPanel = document.createElement("div");
   notifPanel.className = "notif-panel hidden";
   document.body.appendChild(notifPanel);
   document.addEventListener("mousedown", (e) => {
     if (notifOpen && !notifPanel.contains(e.target) && !e.target.closest?.(".bell")) closeNotif();
   });
+}
+
+// "직결" 배지 폴링 — 경로 상태의 소유자는 데몬이므로 PC 는 물어보기만 한다(캐시 10s·쿨다운·미지원
+//  휴면·승격 probe 는 전부 lan.js 안에 있고, 여기서는 **대상 고르기**만 한다).
+//  ★ 실패는 전부 무음이다: 배지가 안 뜨는 것 말고 어떤 UX 도 바뀌지 않는다(lan.js 헤더 규율).
+//  ★ 다른 PC(원격 호스트)만 대상이다 — 이 PC 자신의 워크스페이스는 로컬 fsapi/tmux 직결이라 LAN 무의미.
+//  ★ 오프라인 호스트에는 쏘지 않는다(온/오프라인 판정은 기존 hostOnline 이 단독으로 한다).
+let lanPollTimer = null;
+function startLanBadgePoll() {
+  if (lanPollTimer) return;
+  const tick = () => {
+    if (!state.paired) return;
+    if (typeof document !== "undefined" && document.hidden) return; // 창이 안 보이면 IPC 낭비 금지
+    const seen = new Set();
+    for (const w of state.workspaces || []) {
+      if (!isLocal(w) || S.isThisHost(w) || w.hostOnline === false) continue;
+      const hid = Number(w.hostDeviceId);
+      if (!Number.isFinite(hid) || seen.has(hid)) continue;
+      seen.add(hid);
+      void lan.refreshStatus(hid);
+    }
+  };
+  lanPollTimer = setInterval(tick, 10000);
+  tick();
 }
 
 export function jumpToNotification(n) {

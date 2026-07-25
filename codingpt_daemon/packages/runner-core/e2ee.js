@@ -236,13 +236,19 @@ function blankState(deviceId) {
 }
 
 let _stateCache = null;
+let _corrupt = false;      // 파싱 실패(절단·손상) — '열쇠 없음' 과 **구분해야 하는** 상태
 
 function loadState() {
   if (_stateCache) return _stateCache;
-  const st = config.loadE2ee();
+  const r = config.readE2ee();
+  _corrupt = !!r.corrupt;
+  const st = r.state;
   if (st && st.v === 1 && st.ikX && st.ikEd) { _stateCache = st; return st; }
   return null;
 }
+
+/** 상태 파일이 손상됐는가(있는데 못 읽는다). 호출부는 이때 **덮어쓰지 않는다**. */
+function stateCorrupt() { if (!_stateCache) loadState(); return _corrupt; }
 
 function saveState(st) {
   st.updatedAt = new Date().toISOString();
@@ -255,12 +261,18 @@ function saveState(st) {
 function ensureIdentity(opts) {
   const o = opts || {};
   let st = loadState();
+  // ★ 손상본 위에 blankState 를 쓰지 않는다 — 그 한 줄이 신원키와 전 세대 MK 를 백업 없이 영구
+  //  소실시킨다(config.readE2ee 주석). 실패로 남겨야 사람이 복구 코드/백업으로 되살릴 수 있고,
+  //  그 사이에도 터미널·IDE 는 평문 경로로 그대로 돈다(불변식 1).
+  if (!st && stateCorrupt()) {
+    fail('E2EE_STATE_CORRUPT', '열쇠 파일이 손상됐어요 — 덮어쓰지 않았습니다(사본을 남겼습니다).');
+  }
   if (!st) st = saveState(blankState(o.deviceId));
   else if (o.deviceId != null && st.deviceId !== o.deviceId) { st.deviceId = o.deviceId; saveState(st); }
   return st;
 }
 
-function forgetState() { _stateCache = null; }              // 테스트/재로드용
+function forgetState() { _stateCache = null; _corrupt = false; }   // 테스트/재로드용(다음 접근에서 재판정)
 function removeState() { forgetState(); return config.removeE2ee(); }
 
 function identity() {
@@ -529,6 +541,11 @@ function rotate(recipients, opts) {
     return { deviceKeyId: r.deviceKeyId, ikX: typeof r.ikX === 'string' ? r.ikX : b64u(r.ikX), sealed: s.sealed, sig: s.sig };
   });
   setMasterKey(to, mk);
+  // ★ 회전 = 무효화 — 옛 세대로 수립된 **살아 있는 스트림 세션**도 여기서 끊는다. 새 수립은 beginHost 가
+  //  막지만(현재 세대만), 이미 붙어 있는 세션을 남겨 두면 해제된 기기의 터미널/프리뷰가 그대로 계속
+  //  흐른다. 세션이 사라진 스트림은 `4090 E2EE_SESSION_UNKNOWN` 으로 닫히고 클라이언트는 토큰을
+  //  재발급한다 — "데몬 재기동" 과 완전히 같은 기존 복구 경로다(평문으로 폴스루하지 않는다).
+  for (const [k, s] of sessions) if (Number(s.epoch) !== to) sessions.delete(k);
   clearCacheKeepState();
   return { fromEpoch: from, toEpoch: to, grants };
 }
@@ -687,6 +704,13 @@ function beginHost(p) {
   const ep = Number(p.epoch);
   const st = ensureIdentity();
   if (!hasKey(ep)) fail('E2EE_EPOCH_MISMATCH', `epoch ${ep} 열쇠 없음(현재 ${st.epoch})`);
+  // ★ hasKey 만으로는 부족하다 — state.keys 는 옛 epoch MK 를 영구 보존하므로(옛 스냅샷/알림 복호용)
+  //   회전 후에도 **해제된 세대의 세션을 새로 수립**할 수 있다 = 회전이 무효화가 아니게 된다.
+  //   새 세션은 현재 세대만 허용하고, 옛 MK 는 읽기 전용 복호로만 쓴다. 회전 직후 뒤처진 뷰어는
+  //   E2EE_EPOCH_MISMATCH → back 이 `e2ee:false + e2eeReason` 으로 평문 토큰을 주는 기존 폴백을 탄다.
+  if ((st.epoch | 0) && ep !== (st.epoch | 0)) {
+    fail('E2EE_EPOCH_MISMATCH', `epoch ${ep} 는 현재 세대가 아님(현재 ${st.epoch})`);
+  }
   // ⚠ hostDeviceId 는 **데몬 자신의 신원**을 쓴다(서버가 준 값을 그대로 신뢰하면, 악의적 릴레이가
   //   PC-B 로 몰래 라우팅하면서 PC-A 의 id 를 echo 해 트랜스크립트를 맞춰버릴 수 있다).
   //   서버가 다른 id 를 주장하면 즉시 실패 = 뷰어는 평문 폴백 또는 명시 에러로 간다.
@@ -1135,6 +1159,11 @@ const CAP_RPC = 'e2ee.rpc.v1';  // 봉투 RPC (B단계)
 /** 데몬 hello 에 실을 능력 — 처리 코드가 있는 것만 선언(불변식 3). */
 function caps() {
   if (!enabled()) return [];
+  // ★ 사용자 킬스위치(policy='off')는 **선언까지** 끈다. 열쇠만 보고 광고하면 '끄기' 가 반쪽이 된다:
+  //  runOnce 는 멈추는데 caps·e2eeEpoch 는 계속 신고돼 다른 기기가 이 PC 로 봉투를 계속 보낸다.
+  //  hello 재신고(e2ee-local setPolicy → noteKeyChanged)로 back 의 conn.caps 가 즉시 회수된다 =
+  //  "연결 없이도 즉시 원복" 약속(e2ee-account.js:267-269)이 실제로 지켜진다.
+  if (policy() === 'off') return [];
   if (!hasKey()) return [];
   // 열쇠가 있으면 봉투 RPC 도 처리할 수 있다(같은 모듈이 둘 다 구현). 스트림은 e2ee-gate 가 스코프로 추가.
   return [CAP, CAP_RPC];
@@ -1233,7 +1262,7 @@ module.exports = {
   b64u, unb64u, sha256, hmac256, hkdf, randomBytes, genX25519, genEd25519, x25519, sign, verify,
   aeadSeal, aeadOpen,
   // 상태/신원
-  loadState, saveState, ensureIdentity, removeState, forgetState, identity, epoch, policy, setPolicy,
+  loadState, saveState, ensureIdentity, removeState, forgetState, stateCorrupt, identity, epoch, policy, setPolicy,
   setMasterKey, masterKey, hasKey, bootstrapMasterKey, accountKeys, clearCache, fingerprint,
   // MK 봉인/승인
   sealTo, openFrom, approvePayload, acceptGrant, rotate,

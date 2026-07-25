@@ -45,7 +45,13 @@ function withEnv(env, fn) {
   return r;
 }
 const callBegin = (params) => new Promise((res, rej) => control.handleE2eeBegin(params, res, rej));
-const callSealed = (env) => new Promise((res, rej) => control.handleSealedRpc({ readyState: 1, send() {} }, { env }, res, rej));
+// back 이 실제로 보내는 rpc params 형태: { env, hostDeviceId? } — hostDeviceId 는 **클라가 본문에 실은
+//  값 그대로**(미지정이면 필드 자체가 없다. app e2ee.ts:862 / back daemonController.js:899).
+const callSealed = (env, hostDeviceId) => new Promise((res, rej) => control.handleSealedRpc(
+  { readyState: 1, send() {} },
+  { env, ...(hostDeviceId === undefined ? {} : { hostDeviceId }) },
+  res, rej,
+));
 
 test('스코프 기본값 rpc + 킬스위치 CPT_E2EE=0 = 전면 OFF', () => {
   armKeys();
@@ -140,26 +146,58 @@ test('봉투 RPC: 성공/실패 모두 봉인되고 메서드명·오류문구�
     const encOpts = { epoch: ep, hostDeviceId: HOST_DEV };
     const seal = (m, p) => e2ee.sealRpc(m, p, encOpts);
 
-    // ① 정상 — fs.unwatch(부작용 없는 멱등 메서드)
-    const okRes = await callSealed(seal('fs.unwatch', {}));
+    // ① 정상 — fs.unwatch(부작용 없는 멱등 메서드). host 를 명시한 경우.
+    const okRes = await callSealed(seal('fs.unwatch', {}), HOST_DEV);
     assert.ok(okRes && okRes.env && okRes.env.ct, '응답이 봉인되지 않았다');
     assert.strictEqual(JSON.stringify(okRes.env).includes('fs.unwatch'), false, '봉투 밖에 메서드명이 보인다');
     assert.deepStrictEqual(e2ee.openRpcResult(okRes.env, encOpts), { ok: true, r: { ok: true } });
 
     // ② 실패 — 알 수 없는 메서드(fs.handle 이 throw). 오류 문구도 봉인돼야 한다.
-    const errRes = await callSealed(seal('nope.nothing', {}));
+    const errRes = await callSealed(seal('nope.nothing', {}), HOST_DEV);
     const openedErr = e2ee.openRpcResult(errRes.env, encOpts);
     assert.strictEqual(openedErr.ok, false);
     assert.ok(openedErr.e && openedErr.e.length > 0, '오류 메시지가 봉투 안에 없다');
     assert.strictEqual(JSON.stringify(errRes.env).includes('nope.nothing'), false, '오류 경로가 평문으로 샜다');
 
     // ③ 재귀/승격 금지
-    await assert.rejects(() => callSealed(seal('sealed', {})), (e) => e.code === 'E2EE_BAD_METHOD');
-    await assert.rejects(() => callSealed(seal('e2ee.begin', {})), (e) => e.code === 'E2EE_BAD_METHOD');
+    await assert.rejects(() => callSealed(seal('sealed', {}), HOST_DEV), (e) => e.code === 'E2EE_BAD_METHOD');
+    await assert.rejects(() => callSealed(seal('e2ee.begin', {}), HOST_DEV), (e) => e.code === 'E2EE_BAD_METHOD');
 
     // ④ 열 수 없는 봉투 = 명확한 실패(평문 처리로 폴스루 금지)
     await assert.rejects(
-      () => callSealed({ v: 1, suite: 'cpt-e2ee/v1', epoch: ep, nonce: 'AAAAAAAAAAAAAAAA', ct: 'AAAAAAAAAAAAAAAAAAAAAAAA' }),
+      () => callSealed({ v: 1, suite: 'cpt-e2ee/v1', epoch: ep, nonce: 'AAAAAAAAAAAAAAAA', ct: 'AAAAAAAAAAAAAAAAAAAAAAAA' }, HOST_DEV),
+      (e) => e.code === 'E2EE_OPEN_FAILED',
+    );
+  });
+});
+
+// ★ 계약 §2.3 — AAD 의 hostDeviceId 는 **클라가 본문에 실은 값(미지정=0)** 이다. 자기 deviceId 로 열려고
+//  하면 "활성 러너 위임"(host 미지정) 호출이 100% 복호 실패하고, 클라는 그것을 "서버 미지원"으로 캐시해
+//  평문으로 내려간다 = 잠금 배지는 켜져 있고 트래픽은 평문(결함 #8 동형). 여기서 바이트 형태로 고정한다.
+test('봉투 AAD: host 미지정(=0)과 명시(=self) 둘 다 왕복 + 다른 host 지정은 거절', async () => {
+  const ep = armKeys();
+  await withEnv({ CPT_E2EE_SCOPE: 'rpc' }, async () => {
+    // ① 미지정 — 앱은 `hostDeviceId: host ?? null` 로 봉인하고 null 은 AAD 에서 u32(0) 이다.
+    //  back 은 그 경우 params 에 필드를 넣지 않는다 → 데몬은 0 으로 재구성해야 한다.
+    const zeroOpts = { epoch: ep, hostDeviceId: 0 };
+    const r0 = await callSealed(e2ee.sealRpc('fs.unwatch', {}, zeroOpts) /* host 미지정 */);
+    assert.deepStrictEqual(e2ee.openRpcResult(r0.env, zeroOpts), { ok: true, r: { ok: true } },
+      '응답도 같은 AAD(0)로 봉인돼야 뷰어가 열 수 있다');
+
+    // ② 명시 — self 와 같으면 통과(위 테스트가 이미 증명하지만 대칭을 여기서 한 번 더 못박는다)
+    const selfOpts = { epoch: ep, hostDeviceId: HOST_DEV };
+    const r1 = await callSealed(e2ee.sealRpc('fs.unwatch', {}, selfOpts), HOST_DEV);
+    assert.deepStrictEqual(e2ee.openRpcResult(r1.env, selfOpts), { ok: true, r: { ok: true } });
+
+    // ③ 다른 기기로 지정된 봉투 = 서버가 몰래 라우팅한 경우 → 거절(beginHost 의 같은 가드 미러).
+    await assert.rejects(
+      () => callSealed(e2ee.sealRpc('fs.unwatch', {}, { epoch: ep, hostDeviceId: HOST_DEV + 1 }), HOST_DEV + 1),
+      (e) => e.code === 'E2EE_HOST_MISMATCH',
+    );
+
+    // ④ AAD 가 어긋나면(0 으로 봉인 + host 명시) 복호 실패로 떨어진다 — 평문 폴스루 금지.
+    await assert.rejects(
+      () => callSealed(e2ee.sealRpc('fs.unwatch', {}, zeroOpts), HOST_DEV),
       (e) => e.code === 'E2EE_OPEN_FAILED',
     );
   });

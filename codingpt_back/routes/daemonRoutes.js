@@ -97,6 +97,12 @@ router.post('/e2ee/rotate', accountAuth, deviceTrustController.rotate);       //
 router.patch('/e2ee/policy', accountAuth, deviceTrustController.policy);      // off|preferred|required
 router.post('/e2ee/recovery', accountAuth, deviceTrustController.recovery);   // 복구 코드 봉인문
 
+// 봉투 RPC(기능2 B단계) — 봉인된 봉투를 데몬으로 **그대로** 중계하고 응답 봉투를 그대로 돌려준다.
+//  서버는 봉투를 열지 않는다(메서드명조차 보이지 않는다). 라우트가 없으면 404 → 클라가 10분
+//  UNSUPPORTED 캐시 후 평문 REST(fs/*) 로 폴백하므로, 404 자체가 게이팅이다.
+//  accountAuth 통일(JWT=모바일 / deviceToken=PC 앱·데몬) — fs/* 와 같은 규약.
+router.post('/rpc', accountAuth, daemonController.rpcSealed);
+
 // 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더의 얇은 callRpc 프록시. 새 배관 없음(라우트만).
 //  ⚠ accountAuth 필수 — agent* 처럼 JWT 전용으로 두면 PC 앱(deviceToken)이 못 쓴다(같은 실수 반복 금지).
 //  라이브 델타는 데몬 chat_event → agent/stream WSS 팬아웃(daemonRelayService.fanoutChatEvent).
@@ -118,6 +124,11 @@ router.post('/ws/fulldisk', authMiddleware, daemonController.wsSetFullDisk); // 
 // 동기화(M4) — objectstore git-bundle 체크포인트/머티리얼라이즈/충돌. 데몬 오프라인이면 409.
 //  checkpoint/checkpoints 는 accountAuth(JWT|deviceToken 겸용) — PC 앱 자동 체크포인트가 deviceToken 으로 호출.
 router.post('/sync/checkpoint', accountAuth, syncController.checkpoint);
+// 2단계 체크포인트(데몬 자율 실행) — 데몬이 begin 으로 좌표만 받고, 로컬 작업/업로드는 스스로 한 뒤
+//  commit 으로 매니페스트에 등록한다. 구 경로(/sync/checkpoint)는 **남긴다**(모바일 + 스테일 데몬 폴백).
+//  accountAuth 필수 — 데몬은 deviceToken 으로 호출한다(JWT 전용이면 401 → 영구 구 경로 폴백).
+router.post('/sync/checkpoint/begin', accountAuth, syncController.checkpointBegin);
+router.post('/sync/checkpoint/commit', accountAuth, syncController.checkpointCommit);
 router.post('/sync/multipart/:action', accountAuth, syncController.multipart); // 대용량 번들 파트 업로드(데몬 콜백)
 router.post('/sync/materialize', authMiddleware, syncController.materialize);
 router.get('/sync/status', authMiddleware, syncController.status);

@@ -1,5 +1,11 @@
 // e2ee.js — 종단간 암호화(기능2) PC UI 측 상태/조작.
 //
+// ★ 사람이 눈으로 대조하는 값 = **60비트 안전 코드**(safetyCode, "K7M2-9QXF-B4TR"). 4자리는 요청
+//   구분용 번호로만 쓴다 — 서버는 userId 와 상대 ikX 를 알고 있어 "같은 4자리가 나오는 자기 키쌍"을
+//   1코어 1.3초에 찾는다(실측). 즉 4자리 대조는 MITM 을 못 막는다. 파생 정본은 계약 §2.10 이고
+//   구현은 vendor/e2ee/e2ee-proto.js(= 앱 e2eeProto.js 동일 사본 · 데몬 fingerprint() · back
+//   deviceTrustService 와 바이트 동일)이다. **서버가 준 안전 코드는 표시하지 않는다.**
+//
 // ★ 열쇠 custody 결정: **마스터키(MK)는 JS 로 내려오지 않는다.**
 //   PC 앱과 사이드카 데몬은 같은 머신·같은 신뢰 도메인이고(설계 §2.3), 데몬은 이미
 //   `~/.codingpt/e2ee.json`(0600) 의 소유자이며 node 내장 crypto 를 갖고 있다.
@@ -9,9 +15,16 @@
 //
 // cpt.sock 계약(데몬 runner-core 가 구현 — `e2ee.` 접두사만 Rust 가 통과시킨다):
 //   e2ee.state                        → { available, state, epoch, policy, scope, ikX, userRef,
-//                                         enrollmentId, recoverySet, reason }
+//                                         enrollmentId, recoverySet, reason,
+//                                         keyState, checking, nextCheckInMs, phase, accountEpoch }
+//        ★ 진행상태 정본 = keyState(none|enrolled|pending|trusted) + checking. `state` 는 UI 도메인
+//          6값(off|unsupported|bootstrap|pending|trusted|error)뿐이라 "확인 중" 과 "확인 끝났고
+//          열쇠 0개(=영구 평문)" 를 구분하지 못한다 — 둘 다 'bootstrap' 이다. 판정은 e2ee-label.js.
+//   e2ee.bootstrap                    → { ok:true, epoch } | { ok:false, error }
+//        사람이 버튼을 눌렀을 때만. 데몬은 자동으로 부트스트랩하지 않는다(계정 신뢰 기점 = 사람의 몫).
 //   e2ee.pending                      → { pending:[{enrollmentId,label,platform,ikX,requestedAt,
-//                                          verifyCode(서버 계산값 — 로컬 계산과 대조용)}] }
+//                                          verifyCode(서버 계산 요청 번호 — 로컬 값과 대조만 한다.
+//                                          안전 코드는 서버에서 받지 않고 ikX 로 직접 계산)}] }
 //   e2ee.approve {enrollmentId, ikX}   → { ok:true }        (MK 봉인 + 서명 + 업로드)
 //   e2ee.deny    {enrollmentId}        → { ok:true }
 //   e2ee.policy  {policy}              → { policy }
@@ -28,20 +41,35 @@
 import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
-import { verifyCode4, fingerprint6, qrPin, isSealedBody } from "../vendor/e2ee/e2ee-proto.js";
+import { verifyCode4, fingerprint6, safetyCode, qrPin, isSealedBody } from "../vendor/e2ee/e2ee-proto.js";
 import { b64uDec } from "../vendor/e2ee/e2ee-core.js";
+import { selfStateLabel, needsBootstrap } from "./e2ee-label.js";
 
 // UI 가 읽는 단일 상태(모바일 e2ee.ts getStatus() 와 같은 정보 구조).
 export const e2ee = {
   available: false,       // 데몬이 e2ee 명령을 이해하는가
-  state: "off",           // off | unsupported | bootstrap | pending | trusted | error | unavailable
+  // off | unsupported | bootstrap | pending | trusted | error | unavailable
+  //  ★ 이건 **UI 도메인**이고 진행상태 정본이 아니다(데몬 pcState() 가 이 6값만 반환한다 —
+  //    e2ee-account.js:531-539). "확인 중 vs 영구 평문" 은 아래 keyState/checking 으로 판정한다.
+  //    확장값(none|enrolled)이 실려 오는 경우도 방어적으로 함께 본다(구/미래 데몬).
+  state: "off",
+  // ── 열쇠 취득 진행상태(데몬 e2ee-local.js state() 가 싣는 정본 필드 — 계약 §2.4) ──
+  //  이 셋을 버리면 계정에 열쇠가 0개인 **영구 평문**과 "아직 확인 중" 이 같은 대기색이 된다.
+  keyState: null,         // none | enrolled | pending | trusted  (null = 구 데몬이라 모른다)
+  checking: false,        // 지금 확인 중인가(왕복 중이거나 재시도 예약됨)
+  nextCheckInMs: null,    // 다음 확인까지 남은 ms(진단 표기)
+  phase: null,            // 데몬 진단 phase(boot|bootstrap|pending|trusted|resolved|revoked|error|off|no_enroll_client)
+  accountEpoch: null,     // 서버가 말하는 계정 epoch(null = 아직 모른다)
   epoch: 0,
   policy: "preferred",    // off | preferred | required
   scope: "rpc",
   ikX: null,              // 이 머신(데몬) 기기 공개키 b64u — 지문 계산 입력
   userRef: "",            // 확인 숫자 파생 기준(서버가 준 문자열 — 모바일과 동일 값이어야 한다)
-  verifyCode: null,       // 이 기기가 pending 일 때 화면에 크게 띄우는 4자리
-  fingerprint: null,      // 감사용 6자리
+  // ★ 사람이 실제로 대조하는 값 = 60비트 안전 코드("K7M2-9QXF-B4TR"). 항상 ikX 에서 로컬 계산이며
+  //   서버가 준 문자열은 쓰지 않는다(서버 위조 차단이 이 UX 의 존재 이유다 — 계약 §2.10).
+  safetyCode: null,
+  verifyCode: null,       // 요청 구분용 4자리 — **대조값 아님**(서버가 1코어 1.3초에 같은 값을 만든다)
+  fingerprint: null,      // 감사용 6자리(기기 목록 표기)
   recoverySet: false,
   reason: null,
   pending: [],            // 승인 대기 중인 다른 기기들(확인 숫자는 로컬 계산)
@@ -50,6 +78,14 @@ export const e2ee = {
 
 function ready() { return e2ee.available && e2ee.state === "trusted" && e2ee.policy !== "off"; }
 export function e2eeReady() { return ready(); }
+/**
+ * 설정 화면 한 줄 라벨 — 판정은 e2ee-label.js 가 정본(테스트가 같은 함수를 본다).
+ *  '확인 중'(대기색)과 '열쇠 없음'(꺼짐색)이 **다른 화면**이어야 한다: 전자는 곧 바뀌고 후자는
+ *  사람이 켜기 전까지 영구 평문이다.
+ */
+export function e2eeStateLabel() { return selfStateLabel(e2ee, ready()); }
+/** 이 PC 에 '계정 암호화 처음 켜기' 버튼을 노출할지(데몬은 자동 부트스트랩을 하지 않는다). */
+export function e2eeNeedsBootstrap() { return needsBootstrap(e2ee); }
 /**
  * ui_hello 에 실을 caps — 실제로 그 단계를 수행할 수 있을 때만 신고(config/caps.js 규약).
  *  ★ 단계별로 쪼갠 문자열을 쓴다(서버 SERVER_CAPS 와 동일 이름): 'e2ee.v1' 처럼 뭉치면 아직 배관이
@@ -68,8 +104,18 @@ export function policyRequired() { return e2ee.policy === "required"; }
 /** policy='required' 인데 준비가 안 됐다 = 암호화가 필요한 조작을 막고 사유를 보여준다. */
 export function e2eeGate() {
   if (e2ee.policy !== "required" || ready()) return null;
-  if (e2ee.state === "pending") return "승인 대기 중 — 기존 기기에서 이 PC 를 승인해 주세요.";
+  // keyState 가 진행상태 정본이다. 'enrolled' = 승인은 끝났고 봉인문(열쇠) 전달 대기.
+  //  (state 확장값 none|enrolled 도 방어적으로 함께 본다 — 구/미래 데몬)
+  if (e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
+    || e2ee.state === "pending" || e2ee.state === "enrolled") return "승인 대기 중 — 기존 기기에서 이 PC 를 승인해 주세요.";
   if (!e2ee.available || e2ee.state === "unsupported") return "이 PC 데몬이 아직 종단간 암호화를 지원하지 않아요(업데이트 필요).";
+  // ★ 확인이 끝났는데 열쇠가 없다 = 저절로 풀리지 않는다. "준비하는 중" 이라고 말하면 사용자는
+  //   기다리기만 하고 required 정책 아래에서 조작이 영구히 막힌다(무엇을 해야 하는지 알려야 한다).
+  if (e2ee.keyState === "none" && !e2ee.checking) {
+    return e2ee.phase === "bootstrap"
+      ? "이 계정에 아직 암호화 열쇠가 없어요 — 설정 → 종단간 암호화 에서 '이 계정에 암호화 처음 켜기' 를 눌러 주세요."
+      : "이 PC 에 아직 열쇠가 없어요(열쇠 확인을 기다리는 중이에요).";
+  }
   return "종단간 암호화를 준비하는 중이에요.";
 }
 
@@ -84,32 +130,63 @@ async function cpt(cmd, args) {
   }
 }
 
+/**
+ * 표시값 파생 기준(계정 참조) — 데몬이 서버에서 받아 파일로 영속하는 문자열이 **유일한 정본**이다.
+ *  ★ 모르면 `null` 을 돌려주고, 호출부는 **아무 값도 만들지 않는다.** 여기서 ''(빈 문자열)로 파생하면
+ *   화면에 "그럴듯하지만 틀린" 안전코드가 아무 경고 없이 뜬다 — 폰과 절대 같아지지 않으므로 사용자는
+ *   정당한 승인을 거절하거나(치명적 UX 실패) 경고를 무시하도록 학습한다. 어느 쪽이든 **사람이 두 화면을
+ *   대조한다는 유일한 MITM 방어가 통째로 무효**가 된다(계약 §2.11-9 — 데몬도 같은 규율을 지킨다).
+ *  데몬은 userRef 를 모를 때 ''(빈 문자열)을 보낸다(e2ee-local.js:143) → 그 상태를 그대로 '모름' 으로 읽는다.
+ *  ⚠ 이 PC 가 자기 계정 id 로 대체 파생하지 않는다: 폰이 쓰는 기준(서버 userRef)과 다르면 두 화면이
+ *   어긋나고, 그 어긋남이 "서버 위조" 와 구분되지 않는다. 모를 때는 모른다고 표시하는 것이 정직하다.
+ */
+function fpRef() { return e2ee.userRef ? e2ee.userRef : null; }
+
 function deriveDisplay() {
+  const ref = fpRef();
   try {
-    if (e2ee.ikX) {
+    if (e2ee.ikX && ref) {
       const pub = b64uDec(e2ee.ikX);
-      e2ee.fingerprint = fingerprint6(pub, e2ee.userRef);
-      e2ee.verifyCode = e2ee.state === "pending" ? verifyCode4(pub, e2ee.userRef) : null;
+      // 안전 코드는 pending 여부와 무관하게 항상 계산한다 — 설정의 "이 PC 안전 코드"(폰 화면과 대조)와
+      //  승인 대기 화면이 같은 값을 쓴다(모바일 getStatus().safetyCode 미러).
+      e2ee.safetyCode = safetyCode(pub, ref);
+      e2ee.fingerprint = fingerprint6(pub, ref);
+      // 요청번호는 "이 PC 가 승인을 기다리는 중" 일 때만 표시한다 — 판정은 keyState 가 정본.
+      const waiting = e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
+        || e2ee.state === "pending" || e2ee.state === "enrolled";
+      e2ee.verifyCode = waiting ? verifyCode4(pub, ref) : null;
     } else {
+      // ikX 가 없거나(신원키 미생성) 파생 기준을 모른다 → 대조 UI 는 '—' 를 그린다(settings.js).
+      e2ee.safetyCode = null;
       e2ee.fingerprint = null;
       e2ee.verifyCode = null;
     }
-  } catch (_) { e2ee.fingerprint = null; e2ee.verifyCode = null; }
-  // 대기 목록의 확인 숫자는 **ikX 에서 로컬 계산**이 원칙(서버 위조 차단). 다만 파생 기준(userRef)이
-  //  어긋나 서버 값과 다르면 서버 값을 쓴다 — 폰과 PC 화면의 숫자가 달라 보이면 사용자가 정당한 승인을
-  //  거절하게 되기 때문이다(대신 verified=false 로 표시해 "검증 불가"를 알린다).
+  } catch (_) { e2ee.safetyCode = null; e2ee.fingerprint = null; e2ee.verifyCode = null; }
+  // 대기 목록:
+  //  · safetyCode(대조 대상) = **항상 로컬 계산**. 서버가 이 값을 보내와도 쓰지 않는다.
+  //  · verifyCode(요청 번호)만 서버 값과 비교한다 — 파생 기준(userRef)이 어긋나 서버 값과 다르면
+  //    서버 값을 표기한다(폰과 PC 의 요청 번호가 달라 보이면 사용자가 어느 요청인지 못 고른다).
+  //    대신 verified=false 로 표시해 "이 번호는 검증 불가, 대조는 안전 코드로" 를 UI 가 알린다.
   e2ee.pending = e2ee.pending.map((p) => {
+    const server = typeof p.serverVerifyCode === "string" ? p.serverVerifyCode
+      : (typeof p.verifyCodeFromServer === "string" ? p.verifyCodeFromServer
+        : (typeof p.verifyCode === "string" ? p.verifyCode : null));
+    // 파생 기준을 모르면 로컬 계산이 **전부 틀린 값**이다 → 대조 대상(안전코드/지문)은 비우고,
+    //  요청번호는 서버 값만 구분용으로 남긴다. verified=false 가 UI 의 "대조 금지" 문구를 켠다.
+    if (!ref) return { ...p, verifyCode: server, verified: false, safetyCode: null, fingerprint: null };
     try {
       const pub = b64uDec(p.ikX);
-      const local = verifyCode4(pub, e2ee.userRef);
-      const server = typeof p.serverVerifyCode === "string" ? p.serverVerifyCode
-        : (typeof p.verifyCodeFromServer === "string" ? p.verifyCodeFromServer : null);
+      const local = verifyCode4(pub, ref);
       const use = server && server !== local ? server : local;
-      return { ...p, verifyCode: use, verified: !server || server === local, fingerprint: fingerprint6(pub, e2ee.userRef) };
-    } catch (_) { return { ...p, verifyCode: "----", verified: false, fingerprint: "" }; }
+      return {
+        ...p, verifyCode: use, verified: !server || server === local,
+        safetyCode: safetyCode(pub, ref), fingerprint: fingerprint6(pub, ref),
+      };
+    } catch (_) { return { ...p, verifyCode: "----", verified: false, safetyCode: "", fingerprint: "" }; }
   });
   e2ee.devices = e2ee.devices.map((d) => {
-    try { return { ...d, fingerprint: fingerprint6(b64uDec(d.ikX), e2ee.userRef) }; } catch (_) { return { ...d, fingerprint: "" }; }
+    if (!ref) return { ...d, fingerprint: null }; // 기기 목록 지문도 같은 규율(틀린 값 대신 '—')
+    try { return { ...d, fingerprint: fingerprint6(b64uDec(d.ikX), ref) }; } catch (_) { return { ...d, fingerprint: "" }; }
   });
 }
 
@@ -119,6 +196,12 @@ export async function refreshE2ee() {
   if (!st) { deriveDisplay(); S.emit(); return; }
   e2ee.available = st.available !== false;
   e2ee.state = String(st.state || "off");
+  // 진행상태(정본) — 없으면 null 로 둔다. 구 데몬을 '열쇠 없음' 으로 단정하지 않기 위함이다.
+  e2ee.keyState = typeof st.keyState === "string" ? st.keyState : null;
+  e2ee.checking = st.checking === true;
+  e2ee.nextCheckInMs = st.nextCheckInMs != null ? Number(st.nextCheckInMs) : null;
+  e2ee.phase = typeof st.phase === "string" ? st.phase : null;
+  e2ee.accountEpoch = st.accountEpoch != null ? Number(st.accountEpoch) : null;
   e2ee.epoch = Number(st.epoch || 0);
   if (st.policy) e2ee.policy = String(st.policy);
   if (st.scope) e2ee.scope = String(st.scope);
@@ -140,7 +223,13 @@ export function applyDeviceApprovalEvent(ev) {
   if (ev.kind === "request") {
     if (ev.enrollmentId && ev.ikX) {
       const i = e2ee.pending.findIndex((p) => p.enrollmentId === ev.enrollmentId);
-      const row = { enrollmentId: ev.enrollmentId, label: ev.label || "새 기기", platform: ev.platform || null, ikX: ev.ikX, requestedAt: ev.requestedAt || new Date().toISOString() };
+      // verifyCode(요청 번호)는 서버가 실어 보내면 그대로 받아 두고 deriveDisplay 가 로컬 값과 대조한다.
+      //  안전 코드는 여기서 만들지 않는다 — ikX 에서 로컬 계산이 원칙이다(deriveDisplay).
+      const row = {
+        enrollmentId: ev.enrollmentId, label: ev.label || "새 기기", platform: ev.platform || null,
+        ikX: ev.ikX, verifyCode: typeof ev.verifyCode === "string" ? ev.verifyCode : undefined,
+        requestedAt: ev.requestedAt || new Date().toISOString(),
+      };
       if (i >= 0) e2ee.pending[i] = row; else e2ee.pending.push(row);
       deriveDisplay();
       S.emit();
@@ -150,6 +239,14 @@ export function applyDeviceApprovalEvent(ev) {
     // 다른 기기가 먼저 처리 → 카드 즉시 회수(크로스기기 dismiss 와 같은 타이밍).
     e2ee.pending = e2ee.pending.filter((p) => p.enrollmentId !== ev.enrollmentId);
     S.emit();
+    void refreshE2ee();
+  } else if (ev.kind === "rotated" || ev.kind === "policy" || ev.kind === "bootstrapped") {
+    // 계정 세대/정책이 바뀌었다(다른 기기에서 회전·신뢰 해제·정책 변경·처음 켜기) → 즉시 재확인.
+    //  ★ 이게 없으면 폰에서 회전해도 이 화면은 최대 60초(startE2ee 폴링 주기)간 **낡은 자물쇠**를
+    //   그린다. 그 사이 이 PC 는 옛 세대로 계속 봉인해 E2EE_EPOCH_MISMATCH(409)를 맞고 평문으로
+    //   내려가는데 배지는 초록이다 = 거짓 자물쇠(계약 §2.7 자가복구 ①, 앱 e2ee.ts 와 동일 처방).
+    //  back 은 이 3종을 **이미** 팬아웃한다(deviceTrustService.js:504/696/722) — 새 배관 0개.
+    //  ⚠ 억제창을 두지 않는다: push 는 드물고 정본이다(억제는 409 재시도 경로의 몫).
     void refreshE2ee();
   }
 }
@@ -176,6 +273,19 @@ export async function setPolicy(policy) {
   S.emit();
   await cpt("e2ee.policy", { policy });
   await refreshE2ee();
+}
+/**
+ * 계정 최초 열쇠 생성(부트스트랩) — **사용자가 버튼을 눌렀을 때만**.
+ *  데몬은 이 경로를 자동으로 타지 않는다(헤드리스가 신뢰 기점을 세우면 아무것도 대조하지 않은 승인
+ *  사슬이 생기고, 폰만 든 사용자가 자기 폰을 승인해 줄 기기 없이 잠긴다 — 데몬 e2ee-account.js 헤더).
+ *  그래서 PC 에 사람이 누를 자리가 필요하다: 이 버튼이 없으면 `phase='bootstrap'`(계정 열쇠 0개)에서
+ *  사용자는 화면을 보고도 스스로 벗어날 수 없다.
+ */
+export async function bootstrapAccount() {
+  const r = await cpt("e2ee.bootstrap");
+  await refreshE2ee();
+  if (!r || r.ok === false) return { ok: false, error: (r && (r.error || r.e)) || "열쇠를 만들지 못했어요(잠시 후 다시 시도해 주세요)." };
+  return { ok: true, epoch: Number(r.epoch || 0) };
 }
 export async function createRecoveryCode() {
   const r = await cpt("e2ee.recovery.create");

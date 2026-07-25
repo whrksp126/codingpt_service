@@ -36,6 +36,9 @@ const PING_INTERVAL_MS = 30 * 1000; // Cloudflare 유휴 WS ~100s 컷 대비
 const LAST_SEEN_FLUSH_MS = 60 * 1000; // last_seen_at DB 반영 주기
 const AGENT_BUF_MAX = 1000;             // 채널별 롤링 버퍼 상한(계약 §2.3)
 const AGENT_BUF_TTL_MS = 5 * 60 * 1000; // 또는 최근 5분(둘 중 큰 쪽 유지)
+// e2ee.begin 선협상 RPC(기능2 D단계) — 토큰 발급 경로에 얹히므로 기본 15s 보다 짧게 잡는다.
+//  실패해도 토큰은 정상 발급되고 평문으로 내려가므로, 여기서 오래 기다릴 이득이 없다.
+const E2EE_BEGIN_TIMEOUT_MS = 8 * 1000;
 
 // userId(str) → { runners: Map(deviceId → conn), activeRunnerId }  (M5: 로컬+클라우드 러너 다중화)
 //   conn = { deviceId, kind:'local'|'cloud', deviceName, platform, daemonVersion, ws, connectedAt, lastSeenFlushedAt, rpcSeq, pendingRpc }
@@ -57,6 +60,16 @@ function pickConn(userId, opts) {
   if (opts && opts.runnerId != null) return e.runners.get(Number(opts.runnerId)) || null;
   if (opts && opts.kind) { for (const c of e.runners.values()) if (c.kind === opts.kind) return c; return null; }
   return e.runners.get(e.activeRunnerId) || null;
+}
+/**
+ * 대상 호스트가 hello 로 광고한 E2EE 열쇠 세대. 0 = 열쇠 없음/광고 안 함(구 데몬), null = 미연결.
+ *  ★ 이 값은 **광고값**일 뿐이다 — 서버는 열쇠를 모르므로 "열 수 있는가"의 판정 근거가 될 수 없다.
+ *    봉투 프록시가 **명백히 낡은 세대**(env.epoch < 이 값)만 미리 자르는 데 쓴다(정본 판정은 데몬).
+ */
+function hostE2eeEpoch(userId, opts) {
+  const conn = pickConn(userId, opts);
+  if (!conn) return null;
+  return conn.e2eeEpoch || 0;
 }
 // 활성 러너 전환(핸드오프). 대상 러너가 연결돼 있어야 성공.
 function setActiveRunner(userId, runnerId) {
@@ -319,6 +332,17 @@ function registerControl(ws, device) {
       fanoutChatEvent(userId, msg);
       return;
     }
+    if (msg.type === 'agent_state') {
+      // 에이전트 상태(기능3 2단계) — 훅/워치가 만든 (cwd,win) 단위 순수 메타데이터.
+      //  **버퍼링·알림 금지**: chat_event 와 같은 이유로 agentBuf 에 넣지 않는다(초당 수 건의 상태
+      //  프레임이 알림 리플레이 항목을 축출한다). 요약/본문은 알림 경로가 이미 담당하고 여기엔 없다.
+      //  검증 실패는 조용히 버리지 않고 한 번 경고한다 — 이 프레임이 죽으면 증상이 "5~9초 폴백이
+      //  그대로인데 구현은 완료된 것처럼 보임" 이라 로그가 유일한 단서다.
+      const ev = normAgentState(msg.event || msg);
+      if (!ev) { warnBadAgentState(userId, msg); return; }
+      fanoutAgentState(userId, conn, ev);
+      return;
+    }
     if (msg.type === 'sync_event') {
       // 동기화 이벤트(sync_status/sync_progress/sync_conflict) — 앱에 팬아웃.
       //  버퍼링하지 않는다(오래된 sync_conflict 리플레이로 해결된 충돌 시트가 되살아나는 것 방지).
@@ -352,6 +376,9 @@ function registerControl(ws, device) {
       console.log(`[daemonRelay] 러너 연결 종료 userId=${userId} kind=${conn.kind} device=#${conn.deviceId} aliveMs=${Date.now() - conn.connectedAt} 남은러너=${entry.runners.size}`);
       fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: false, kind: conn.kind, deviceName: conn.deviceName });
     }
+    // 이 호스트의 에이전트 상태 라스트-스테이트는 폐기한다 — 오프라인 호스트의 'working' 을
+    //  다음 ui_hello 에 리플레이하면 폰이 "아직 돌고 있음"으로 오판하고 폴백이 영구 비활성된다.
+    forgetAgentStatesOf(userId, conn.deviceId);
     DaemonDevice.update({ last_seen_at: new Date() }, { where: { id: conn.deviceId } }).catch(() => { /* noop */ });
   };
   ws.on('close', cleanup);
@@ -410,6 +437,103 @@ function callRpc(userId, method, params, timeoutMs, opts) {
       reject(new Error('데몬 제어 채널 전송 실패: ' + e.message));
     }
   });
+}
+
+// ── E2EE 스트림 선협상(기능2 D단계) ───────────────────────────────────
+// 왜 "토큰 발급 시점"에 하는가: 스트림 WS 안에서 핸드셰이크를 하면 구 데몬이 그 JSON 을 셸에 그대로
+//  타이핑한다(pty 텍스트 프레임 폴스루) — 인스트림 협상 영구 금지. 제어채널 RPC 로 미리 확정하므로
+//  스트림이 열릴 때는 이미 세션키가 있고 첫 프레임부터 봉인된다 = **early 버퍼/bridge 로직 무수정**
+//  (첫 resize 유실 = 80x24 고착 근원이라 한 줄도 건드리지 않는다).
+//
+// 폴백 원칙: 협상 실패는 **전부** `{e2ee:false, e2eeReason}` 이고 토큰은 정상 발급된다.
+//  스트림을 죽이거나 4xx 를 던지면 "터미널이 안 열리는" 회귀가 된다(정책은 preferred 고정).
+function e2eeStreamEnabled() { return SERVER_CAPS.includes('e2ee.stream.v1'); }
+
+// 뷰어 오퍼(body.e2ee) 정규화 — 형식이 어긋나면 begin 을 시도하지 않는다.
+//  ★ pub/nonce 는 **정확히 32바이트**다(X25519 공개키 · 뷰어 nonce). 데몬 beginHost 는
+//    bytes(p.pub,32)/bytes(p.nonce,32) 로 잘라 길이가 다르면 E2EE_ENCODING 을 던진다
+//    (runner-core/e2ee.js:112, :719-723). 문자 수만 보면 16B nonce 가 통과해 begin 왕복을 한 번
+//    낭비하고, 돌아오는 건 아무 신호 없는 `e2ee:false`(= 평문 스트림)다 — "암호화를 켰는데 평문"
+//    이라는, 이 라운드가 닫은 결함과 같은 형태. 여기서 접으면 왕복이 0회고 사유도
+//    E2EE_BAD_OFFER 로 정확해진다.
+const B64U_RE = /^[A-Za-z0-9_-]{16,512}$/;
+const E2EE_OFFER_BYTES = 32;
+// b64u 문자열이 정확히 len 바이트로 디코드되는지. Buffer.from(_, 'base64url') 은 관용적이라
+//  (잘못된 문자를 조용히 버린다) 문자셋 검사를 **먼저** 통과시킨 뒤에만 길이를 본다.
+function b64uBytesEq(s, len) {
+  if (typeof s !== 'string' || !B64U_RE.test(s)) return false;
+  let b = null;
+  try { b = Buffer.from(s, 'base64url'); } catch (_) { return false; }
+  return b.length === len;
+}
+function normE2eeOffer(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const suite = typeof raw.suite === 'string' && raw.suite && raw.suite.length <= 32 ? raw.suite : null;
+  const epoch = intOrNull(raw.epoch);
+  const pub = b64uBytesEq(raw.pub, E2EE_OFFER_BYTES) ? raw.pub : null;
+  const nonce = b64uBytesEq(raw.nonce, E2EE_OFFER_BYTES) ? raw.nonce : null;
+  if (!suite || epoch == null || epoch <= 0 || !pub || !nonce) return null;
+  return { suite, epoch, pub, nonce };
+}
+
+/**
+ * 스트림 토큰 1개에 봉인 세션을 붙인다(터미널 purpose='pty' / 포워딩 purpose='tcp').
+ *
+ *  ★ routing·client·hostDeviceId 는 세션 트랜스크립트에 묶여 있다 — 여기서 보내는 값과 토큰에
+ *    저장된 값(=스트림 오픈 때 데몬에 가는 값)이 다르면 뷰어의 confirm 검증이 실패한다.
+ *    그게 다운그레이드 방어의 전부이므로, 호출부는 **토큰에 저장한 그 값**을 그대로 넘겨야 한다.
+ *  ★ hostDeviceId: 클라가 명시했으면 그 값을 그대로(데몬이 자기 id 와 다르면 E2EE_HOST_MISMATCH 로
+ *    거절 = 진짜 라우팅 바인딩). 미지정이면 서버가 고른 러너의 deviceId 를 쓰고 응답에 **에코**한다 —
+ *    뷰어는 에코된 값으로 트랜스크립트를 만들어야 한다(미지정 = 라우팅 바인딩 포기, 봉투 RPC 의
+ *    AAD 0 규칙과 같은 성질). 에코 없이 미지정을 협상하면 양쪽 트랜스크립트가 갈라져 confirm 이
+ *    100% 불일치한다(= 잠금 배지는 켜지고 터미널은 안 열리는 최악의 조용한 죽음).
+ * @returns {{e2ee:object}|{e2ee:false,e2eeReason:string}}
+ */
+async function negotiateStreamE2ee(userId, { token, purpose, offer, routing, client, hostDeviceId, opts } = {}) {
+  const off = normE2eeOffer(offer);
+  if (!off) return { e2ee: false, e2eeReason: 'E2EE_BAD_OFFER' };
+  // 서버 caps 에 e2ee.stream.v1 이 없으면 begin 자체를 시도하지 않는다(킬스위치 즉시 반영).
+  if (!e2eeStreamEnabled()) return { e2ee: false, e2eeReason: 'E2EE_UNSUPPORTED' };
+  const conn = pickConn(userId, opts);
+  if (!conn) return { e2ee: false, e2eeReason: 'E2EE_HOST_OFFLINE' };
+  const reqHost = intOrNull(hostDeviceId);
+  const effHost = reqHost != null ? reqHost : conn.deviceId;
+  let answer = null;
+  try {
+    // begin 은 **스트림을 열 그 conn** 으로 보내야 한다(opts=토큰이 검증한 runnerId). 다른 러너로 가면
+    //  sid 는 그 러너에만 등록되고 스트림은 4090 E2EE_SESSION_UNKNOWN 으로 죽는다.
+    answer = await callRpc(userId, 'e2ee.begin', {
+      purpose,
+      transport: 'relay',
+      suite: off.suite,
+      epoch: off.epoch,
+      pub: off.pub,
+      nonce: off.nonce,
+      client: client || '',
+      hostDeviceId: effHost,
+      routing: routing || {},
+    }, E2EE_BEGIN_TIMEOUT_MS, opts);
+  } catch (e) {
+    // 데몬 코드(E2EE_UNSUPPORTED/E2EE_DISABLED/E2EE_SCOPE/E2EE_EPOCH_MISMATCH/E2EE_HOST_MISMATCH)가
+    //  정본. 구 데몬은 code 가 없으므로 진단용 자체 코드로 대체한다.
+    return { e2ee: false, e2eeReason: (e && e.code) || 'E2EE_BEGIN_FAILED' };
+  }
+  const sid = answer && typeof answer.sid === 'string' && answer.sid ? answer.sid : null;
+  if (!sid) return { e2ee: false, e2eeReason: 'E2EE_BEGIN_FAILED' };
+  const sess = (purpose === 'tcp' ? fwdTokens : termTokens).get(token);
+  if (!sess) return { e2ee: false, e2eeReason: 'E2EE_TOKEN_GONE' }; // 발급 직후 만료 청소에 걸린 극단 케이스
+  sess.e2ee = { sid };
+  return {
+    e2ee: {
+      sid,
+      pub: answer.pub,
+      nonce: answer.nonce,
+      confirm: answer.confirm,
+      epoch: answer.epoch != null ? answer.epoch : off.epoch,
+      suite: answer.suite || off.suite,
+      hostDeviceId: effHost, // ★ 에코 — 뷰어 트랜스크립트의 hostDeviceId 는 이 값이 정본
+    },
+  };
 }
 
 // ── 파일 이벤트 SSE(앱 구독) ──
@@ -597,6 +721,144 @@ function fanoutRunnerStatus(userId, event) {
   broadcastEvent(userId, payload); // SSE
   const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// ui_hello 직후 이 화면에만 재전송(팬아웃 아님) — 붙어 있는 러너의 현재 상태 캐치업.
+//  왜 필요한가: e2eeEpoch 를 실어 나르는 프레임은 러너 **연결 시**(:229)와 hello 의 **값 변화 시**(:262)
+//  두 곳뿐이다. 데몬이 이미 붙어 있는 정상 상태에서 앱을 다시 열거나 PC 를 재시작하면 프레임이
+//  0건이므로 클라의 호스트별 자물쇠 배지(hostLock)가 빈 채로 남아 '확인 중' 에 영구 고착한다
+//  (다음 데몬 재접속까지 수 시간~수 일). 거짓 자물쇠를 드러내려고 만든 배지가 정작 진실을 한 번도
+//  못 보여주는 = 에러 0건의 조용한 죽음. 값 자체는 이미 GET /status 의 runners[].e2eeEpoch 로도
+//  내려가지만(listRunners), 클라이언트의 급여 경로는 이 WS 프레임뿐이라 여기서 채워 준다.
+//  · online:true 로만 보낸다 → 오프라인 오탐이 원리적으로 불가능(applyLanInfo 선례).
+//  · replay:true 스탬프 — 클라가 라이브 전이와 구분할 수 있게(구 클라는 모르는 필드를 무시한다).
+//  · 열쇠가 없는 호스트도 e2eeEpoch:0 으로 **반드시** 보낸다. 안 보내면 그 호스트만 '확인 중' 이 남는다.
+function replayRunnerStatus(userId, ws) {
+  const e = userEntry(userId, false);
+  if (!e || e.runners.size === 0) return;
+  for (const conn of e.runners.values()) {
+    const payload = {
+      type: 'runner_status',
+      event: {
+        deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName,
+        e2eeEpoch: conn.e2eeEpoch || 0,
+        lanCapable: !!(conn.lan && (conn.caps || []).includes('lan.v1') && lanCfg.lanEnabled()),
+        lanEpoch: conn.lanEpoch || 0,
+        replay: true,
+      },
+    };
+    try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); } catch (_) { /* noop */ }
+  }
+}
+
+// ── 에이전트 상태 팬아웃(기능3 2단계) ─────────────────────────────────
+// 데몬 agent-state(훅 7종 + tmux 워치)가 만든 (cwd,win) 단위 상태를 전 기기에 밀어 준다.
+//  · 와이어 키 = (cwd=cwdRel, win=tid) — PC 의 기존 저장 키와 바이트 단위로 같다(PC 수신기 무수정).
+//    back 은 여기에 hostDeviceId/kind 를 **추가로** 스탬프한다(멀티 PC 에서 같은 cwdRel 충돌 방지).
+//  · 프레임은 순수 메타데이터다. summary/body/promptId/pending 같은 **내용성 필드는 화이트리스트로
+//    잘라 버린다** — 상태 프레임에 내용이 실리면 E2EE 봉투 밖으로 내용이 새는 통로가 된다.
+//  · 버퍼(rseq) 없음 — 캐치업은 아래 라스트-스테이트 리플레이가 담당한다.
+const AGENT_WIRE_STATES = new Set(['idle', 'working', 'permission', 'needsInput', 'gone']);
+// 데몬 내부 상태 → 와이어 state. 데몬이 이미 접어서 보내는 것이 정본이지만(계약 §1.3), 구현이
+//  갈라졌을 때의 증상이 "claude 를 끝냈는데 Chat 토글이 영구히 켜진 채로 남음(에러 0건)" 이라
+//  서버에서도 같은 접기를 한 번 더 한다. 접었으면 한 번 경고해 데몬 쪽 결함을 드러낸다.
+const AGENT_STATE_FOLD = { ended: 'gone', launching: 'idle' };
+const AGENT_STATE_MAX_PER_USER = 200; // 유저당 라스트-스테이트 상한(터미널 수 상한 근사)
+// userId(str) → Map('<hostDeviceId>|<cwd>|<win>' → event)  재접속 캐치업용 마지막 상태.
+const agentStateLast = new Map();
+const agentStateWarned = new Set(); // 유저별 1회 경고(초당 프레임에 로그가 폭주하지 않게)
+const agentFoldWarned = new Set();
+
+function warnBadAgentState(userId, msg) {
+  const key = `bad:${userId}`;
+  if (agentStateWarned.has(key)) return;
+  if (agentStateWarned.size > 500) agentStateWarned.clear();
+  agentStateWarned.add(key);
+  const ev = (msg && msg.event) || msg || {};
+  console.warn(`[daemonRelay] agent_state 프레임을 검증하지 못해 버렸습니다 user=${userId} cwd=${JSON.stringify(ev.cwd)} win=${JSON.stringify(ev.win)} state=${JSON.stringify(ev.state)} version=${JSON.stringify(ev.version)}`);
+}
+
+// 정수 관용 파싱 — 데몬은 정수로 보내지만 구/신 구현이 문자열을 보내도 배관이 죽지 않게.
+function intOrNull(v) {
+  if (Number.isInteger(v)) return v;
+  if (typeof v === 'string' && /^-?\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
+  return null;
+}
+
+/**
+ * agent_state.event 검증·정규화. 실패하면 null(호출부가 경고 후 폐기 — 절대 throw 하지 않는다).
+ * 반환 객체는 **화이트리스트 필드만** 담는다(금지 필드 유입 차단이 이 함수의 핵심 역할).
+ */
+function normAgentState(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.cwd !== 'string') return null;            // 필수. 빈 문자열 허용(홈)
+  const cwd = raw.cwd.slice(0, 512);
+  const win = intOrNull(raw.win);
+  if (win == null || win < 0 || win > 0x7fffffff) return null; // 필수(tid = 31-bit 안정 ID)
+  const version = intOrNull(raw.version);
+  if (version == null || version < 0) return null;         // 필수 — 클라 순서 역전 방어의 유일한 근거
+  let state = typeof raw.state === 'string' ? raw.state : '';
+  if (AGENT_STATE_FOLD[state]) {
+    const folded = AGENT_STATE_FOLD[state];
+    if (!agentFoldWarned.has(state)) {
+      if (agentFoldWarned.size > 16) agentFoldWarned.clear();
+      agentFoldWarned.add(state);
+      console.warn(`[daemonRelay] agent_state 가 내부 상태 '${state}' 를 그대로 보냈습니다 — 와이어 규칙대로 '${folded}' 로 접어 보냅니다(데몬 wireStateOf 확인 필요)`);
+    }
+    state = folded;
+  }
+  if (!AGENT_WIRE_STATES.has(state)) return null;
+  const at = intOrNull(raw.at);
+  const since = intOrNull(raw.since);
+  const agent = typeof raw.agent === 'string' && raw.agent ? raw.agent.slice(0, 32) : null;
+  const sessionId = typeof raw.sessionId === 'string' && raw.sessionId ? raw.sessionId.slice(0, 128) : null;
+  const source = raw.source === 'hook' || raw.source === 'watch' ? raw.source : undefined;
+  return {
+    cwd, win, state, agent, version,
+    at: at != null && at > 0 ? at : Date.now(),
+    sessionId,
+    ...(source ? { source } : {}),
+    ...(since != null && since > 0 ? { since } : {}),
+  };
+}
+
+// 라스트-스테이트 보관/폐기 — 재접속(ui_hello) 캐치업 전용. gone 은 보관하지 않고 지운다.
+function rememberAgentState(userId, event) {
+  const key = String(userId);
+  let m = agentStateLast.get(key);
+  const idx = `${event.hostDeviceId}|${event.cwd}|${event.win}`;
+  if (event.state === 'gone') { if (m) { m.delete(idx); if (m.size === 0) agentStateLast.delete(key); } return; }
+  if (!m) { m = new Map(); agentStateLast.set(key, m); }
+  m.delete(idx); // 삽입 순서 갱신(상한 초과 시 가장 오래 갱신 안 된 것부터 버린다)
+  m.set(idx, event);
+  while (m.size > AGENT_STATE_MAX_PER_USER) { const k = m.keys().next().value; m.delete(k); }
+}
+function forgetAgentStatesOf(userId, hostDeviceId) {
+  const m = agentStateLast.get(String(userId));
+  if (!m) return;
+  const prefix = `${hostDeviceId}|`;
+  for (const k of m.keys()) if (k.startsWith(prefix)) m.delete(k);
+  if (m.size === 0) agentStateLast.delete(String(userId));
+}
+// ui_hello 직후 이 화면에만 재전송 — 폰을 켠 직후 토글 판정이 다음 전이까지 폴백으로 남는 지연 제거.
+//  구 클라이언트는 unknown type 을 무시하므로 caps 로 게이팅하지 않는다(fanoutRunnerStatus 선례).
+function replayAgentStates(userId, ws) {
+  const m = agentStateLast.get(String(userId));
+  if (!m || m.size === 0) return;
+  for (const event of m.values()) {
+    try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'agent_state', event, replay: true })); } catch (_) { /* noop */ }
+  }
+}
+
+// 상태 팬아웃 — fanoutRunnerStatus 미러(SSE 폴백 + WSS 라이브, 버퍼 없음).
+function fanoutAgentState(userId, conn, event) {
+  const full = { ...event, hostDeviceId: conn.deviceId, kind: conn.kind };
+  const payload = { type: 'agent_state', event: full };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+  rememberAgentState(userId, full);
+  return full;
 }
 
 // 핵심 3종(done/permission_request/error) 발생 시 알림 영속화(notification 행) + 팬아웃 + (모바일 미접속 시) FCM.
@@ -823,6 +1085,12 @@ function registerAgentWs(ws, userId, client) {
         foreground: true,
         foregroundAt: Date.now(),
       };
+      // 에이전트 상태 캐치업(기능3 2단계) — 이 화면에만 마지막 상태를 재전송한다.
+      //  push 가 0건이면 클라이언트는 tab.cmd 폴백(5~9초)으로 판정하므로, 재접속 직후의 공백을 메운다.
+      replayAgentStates(userId, ws);
+      // 러너 상태 캐치업 — 붙어 있는 호스트의 열쇠 세대(e2eeEpoch)를 이 화면에만 재전송한다.
+      //  없으면 이미 붙어 있는 데몬에 대해 클라의 자물쇠 배지가 '확인 중' 에 영구 고착한다(위 함수 주석).
+      replayRunnerStatus(userId, ws);
       return;
     }
     if (msg.type === 'ui_activity') {
@@ -943,6 +1211,32 @@ function issueTerminalToken(userId, cwd, paneId, win, client, runnerId) {
   return token;
 }
 
+// stream_open params 조립(터미널) — cols/rows 는 앱이 접속 직후 resize 로 보정하므로 기본값으로 시작.
+//  sid 는 **선협상됐을 때만** 실린다(데몬 pty.js:357 이 params.sid 로만 봉인 모드를 켠다).
+//  협상이 없었으면 필드 자체가 없어 오늘과 100% 동일한 평문 경로다 → 테스트로 고정한다(sid 유실 =
+//  뷰어는 봉인해 보내고 호스트는 세션을 못 찾아 4090, 화면만 안 열리는 조용한 죽음).
+//  ★ 킬스위치는 **주입 지점에서도** 확인한다(협상 지점만 막으면 스위치가 절반만 회수된다):
+//    협상은 토큰 발급 1회지만 그 토큰의 **모든 재연결**이 같은 sid 를 재사용한다(TTL 1h, 접근 시 연장).
+//    스위치를 내린 이유가 "sid 주입이 잘못돼 터미널이 4090 무한 재연결" 인데, 이미 발급된 토큰이
+//    계속 sid 를 싣는다면 그 회귀를 회수하지 못한다. 아래 게이트가 그 잔여 경로를 닫는다.
+function sidOf(sess) {
+  if (!e2eeStreamEnabled()) return {};
+  return sess && sess.e2ee && sess.e2ee.sid ? { sid: sess.e2ee.sid } : {};
+}
+function ptyStreamParams(sess) {
+  return {
+    cols: 80, rows: 24,
+    cwd: sess.cwd || '', paneId: sess.paneId || '',
+    win: Number.isInteger(sess.win) ? sess.win : undefined,
+    client: sess.client || '',
+    ...sidOf(sess),
+  };
+}
+// stream_open params 조립(포워딩) — 터미널과 같은 규칙.
+function tcpStreamParams(sess) {
+  return { port: sess.port, ...sidOf(sess) };
+}
+
 function resolveTermToken(token) {
   const sess = termTokens.get(token);
   if (!sess || sess.expiresAt < Date.now()) { if (sess) termTokens.delete(token); return null; }
@@ -969,7 +1263,7 @@ function handleAppTerminalUpgrade(token, req, socket, head) {
     const ptyConn = pickConn(sess.userId, connOpts);
     try {
       // cols/rows 는 앱이 접속 직후 resize 프레임으로 보정하므로 기본값으로 시작. cwd=진입 워크스페이스 폴더.
-      daemonWs = await openStream(sess.userId, 'pty', { cols: 80, rows: 24, cwd: sess.cwd || '', paneId: sess.paneId || '', win: Number.isInteger(sess.win) ? sess.win : undefined, client: sess.client || '' }, connOpts);
+      daemonWs = await openStream(sess.userId, 'pty', ptyStreamParams(sess), connOpts);
     } catch (e) {
       const msg = e.message === 'DAEMON_OFFLINE' ? 'PC 데몬이 오프라인입니다.' : ('터미널을 열 수 없습니다: ' + e.message);
       try { appWs.send('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); appWs.close(); } catch (_) { /* noop */ }
@@ -1033,7 +1327,7 @@ function handleForwardUpgrade(token, req, socket, head) {
     const earlyFn = (data, isBinary) => { early.push([data, isBinary]); };
     appWs.on('message', earlyFn);
     try {
-      daemonWs = await openStream(sess.userId, 'tcp', { port: sess.port }, sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
+      daemonWs = await openStream(sess.userId, 'tcp', tcpStreamParams(sess), sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
     } catch (_) {
       // raw TCP 바이트 스트림 — 에러 텍스트를 보내면 스트림이 오염되므로 그냥 닫는다.
       try { appWs.close(1011); } catch (_) { /* noop */ }
@@ -1293,6 +1587,9 @@ module.exports = {
   fanoutApprovalEvent,
   fanoutDeviceApproval,
   fanoutChatEvent,
+  fanoutAgentState,
+  negotiateStreamE2ee,
+  hostE2eeEpoch,
   fanoutAccountDeleted,
   fanoutAppearance,
   hasActiveMobileClient,
@@ -1306,4 +1603,17 @@ module.exports = {
   pickConn,
   _normCaps: normCaps, // 테스트 노출(순수 함수) — 데몬 리포의 `_states` 컨벤션 미러
   _maybeNotify: maybeNotify, // 테스트 노출 — hint/event 폴백 계약 고정(기능2)
+  _normAgentState: normAgentState, // 테스트 노출 — 데몬이 실제로 보내는 프레임으로 계약 고정(기능3)
+  _normE2eeOffer: normE2eeOffer,   // 테스트 노출 — 오퍼 형식 게이트(기능2 D단계)
+  _ptyStreamParams: ptyStreamParams, // 테스트 노출 — sid 주입이 실제로 params 에 실리는지 고정
+  _tcpStreamParams: tcpStreamParams,
+  _termTokens: termTokens,         // 테스트 노출 — 토큰에 sid 가 붙는지 확인(내부 상태 검사용)
+  _fwdTokens: fwdTokens,
+  _connections: connections,       // 테스트 노출 — 러너 conn 주입(멀티 PC 라우팅 계약 검증)
+  _agentStateLast: agentStateLast, // 테스트 노출 — 라스트-스테이트 캐시(리플레이/폐기 규칙)
+  _agentWsClients: agentWsClients,  // 테스트 노출 — WSS 구독자 집합(팬아웃 계약 검증)
+  _replayAgentStates: replayAgentStates,
+  _replayRunnerStatus: replayRunnerStatus, // 테스트 노출 — 자물쇠 배지 급여 경로(ui_hello 캐치업)
+  _registerAgentWs: registerAgentWs,       // 테스트 노출 — ui_hello 분기를 실제로 태워 배선을 고정
+  _forgetAgentStatesOf: forgetAgentStatesOf,
 };

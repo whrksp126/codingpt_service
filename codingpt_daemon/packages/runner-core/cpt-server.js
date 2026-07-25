@@ -210,7 +210,16 @@ async function backFetch(method, apiPath, body) {
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch (_) { /* 비 JSON 응답 */ }
-  if (!res.ok) throw new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
+  if (!res.ok) {
+    // 상태코드와 서버가 실은 code(errorResponse 의 detail.code 규약)를 **에러 객체에 붙인다** —
+    //  호출측이 한글 문구 정규식으로 분기하면 문구가 바뀌는 순간 조용히 오작동한다(레이트리밋 키 함정과
+    //  같은 종류의 사고). 기존 호출부는 message 만 읽으므로 additive.
+    const err = new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
+    err.status = res.status;
+    const code = json && json.detail && json.detail.code;
+    if (code) err.code = String(code);
+    throw err;
+  }
   return json;
 }
 
@@ -442,8 +451,42 @@ async function dispatch(req, conn) {
     if (!cfg || !cfg.serverUrl) throw new Error('페어링돼 있지 않습니다 (daemon.json 없음)');
     const token = typeof fargs.token === 'string' ? fargs.token.trim() : '';
     if (!token) throw new Error('token 이 필요합니다.');
+    // ★ upstream(LAN 직결 좌표)을 **반드시 전달한다**. Rust 는 이미 args.upstream 을 싣고
+    //  (`cptsock.rs:69-75`) forward.js 는 연결별 직결/버퍼 승계 폴백까지 완비돼 있는데, 여기서
+    //  한 필드를 떨어뜨리면 grant 는 매번 발급되면서 바이트는 영원히 서버를 경유한다(에러·로그 0건 —
+    //  기능4 死文의 진짜 원인이었다). token 은 upstream 이 있어도 항상 함께 넘긴다(릴레이 = 영구 폴백).
+    const up = fargs.upstream && typeof fargs.upstream === 'object' ? { ...fargs.upstream } : null;
+    if (up) {
+      // grant 는 단일 사용이다 — 세션이 끊기면 forward.js 가 refresh() 를 1회 부른다(강등 카운터 무소모).
+      //  재발급은 **PC JS 가 쓰던 clientKey 그대로** 해야 호스트 측 grant 바인딩(MAC 입력)이 맞는다.
+      const lanLocal = lazyMod('./lan-local');
+      if (lanLocal && typeof lanLocal.refreshUpstream === 'function' && up.hostDeviceId != null) {
+        up.refresh = () => lanLocal.refreshUpstream(up.hostDeviceId, up.clientKey, up.remotePort || port);
+      }
+    }
     // bind 실패는 { ok:false, error:'EADDRINUSE' } 구조화 반환 — 호출측이 프록시 폴백 판단.
-    return forwardLib.startLocalForward({ serverUrl: cfg.serverUrl.replace(/\/+$/, ''), port, token });
+    return forwardLib.startLocalForward({
+      serverUrl: cfg.serverUrl.replace(/\/+$/, ''), port, token, ...(up ? { upstream: up } : {}),
+    });
+  }
+  // LAN 직결(기능4) — PC 앱 내부용. tmux ctx 가 불필요하므로 resolveCtx 전에 처리하고
+  //  CAPABILITIES 에는 **넣지 않는다**(아래 CAPABILITIES 주석의 판단 기준 참조).
+  if (cmd === 'lan.probe' || cmd === 'lan.status' || cmd === 'lan.rpc') {
+    const lanLocal = lazyMod('./lan-local');
+    // 모듈 부재(구 번들) = 소켓 에러 → Rust Err → PC 가 markUnsupported → 조용히 릴레이(무증상).
+    const fn = lanLocal && lanLocal[cmd.slice(4)];          // lan.probe → probe
+    if (typeof fn !== 'function') throw new Error('이 데몬은 LAN 직결을 지원하지 않습니다(PC 앱 업데이트 필요)');
+    return fn(req.args || {});
+  }
+  // 종단간 암호화(기능2) — PC 앱 내부용. MK 가 필요한 연산을 데몬이 대행한다(JS 에 MK 무노출).
+  //  resolveCtx 전 처리 + CAPABILITIES 비공개. 모듈 부재는 **명확한 실패**로(callLazy 규율) —
+  //  PC 는 그걸 "구 데몬 = 미지원" 으로 읽고 조용히 평문으로 돈다.
+  if (cmd.startsWith('e2ee.')) {
+    const e2eeLocal = lazyMod('./e2ee-local');
+    if (!e2eeLocal || typeof e2eeLocal.handle !== 'function') {
+      throw new Error('이 데몬은 종단간 암호화를 지원하지 않습니다(PC 앱 업데이트 필요)');
+    }
+    return e2eeLocal.handle(cmd, req.args || {});
   }
   // 자동 체크포인트(PC 앱 내부용) — "PC 앱 → back → 제어 WS → **같은 머신의 사이드카 데몬**" 왕복 제거.
   //  presigned URL·manifest 는 objectstore 자격증명을 가진 back 만 만들 수 있다(데몬은 무접촉 원칙) →
@@ -986,10 +1029,23 @@ const CAPABILITIES = [
   // 조회 전용(사람/AI 노출 안전) — 승인 대기 목록 + 트랜스크립트 읽기.
   'approval.list',
   'chat.sessions', 'chat.open', 'chat.since', 'chat.close', 'chat.detail', 'chat.attachment',
-  // ⚠ 아래는 의도적으로 비공개다(daemon.shutdown/forward.start 선례):
+  // ⚠ 아래는 의도적으로 비공개다(daemon.shutdown/forward.start 선례).
+  //  판단 기준은 하나다: **`cpt` 는 터미널 안의 AI 도 부를 수 있는 CLI** 이므로, 노출하면 AI 가
+  //  "사람만 할 수 있어야 하는 일"(자기 승인·자기 주입·포트 개방·서버가 못 보는 경로로 파일 접근)을
+  //  스스로 하게 되는 커맨드는 목록에 넣지 않는다. 애매하면 비공개(나중에 열 수는 있다).
   //  · approval.request — 훅 전용 내부 커맨드(사람이 부를 것이 아니고, 부르면 그 터미널이 블록된다)
   //  · approval.respond — 터미널의 AI 가 자기 승인을 스스로 허용하는 경로가 된다(CPT_APPROVAL_LOCAL 게이트)
   //  · chat.input — AI 가 자기/타 세션에 프롬프트를 주입하는 자기루프 경로(응답은 back RPC 로만)
+  //  · forward.start/stop — 이 기기에 127.0.0.1 리스너를 여는 포트 개방 경로(PC 앱이 수명 주인)
+  //  · sync.checkpoint — PC 앱 트리거 전용(begin/commit 왕복 제거용 내부 경로)
+  //  · lan.probe / lan.status / lan.rpc — (계약 §4.5) `lan.rpc` 는 **서버가 보지 못하는 경로로 다른 PC
+  //    의 파일을 읽고 쓰는 수단**을 AI 에게 직접 주는 것이고(허용 접두사에 fs.write 가 있다),
+  //    `lan.probe` 는 사설 IP·포트·RTT = 사용자 내부망 지형을 프롬프트 컨텍스트로 유출한다.
+  //    사람이 부를 이유도 없다(진단은 `~/.codingpt/*.log` 의 [lan] 라인 + PC 배지로 충분).
+  //    읽기 전용인 lan.status 만 훗날 공개하는 것은 안전하지만, 지금은 셋 다 닫는다.
+  //  · e2ee.* — 열쇠 승인/거절/정책/복구코드/봉투 RPC. 승인(approve)은 **새 기기에 마스터키를 넘기는
+  //    행위**이고 recovery.create 는 열쇠 자체를 텍스트로 뽑는다 — 승인 인박스(기능1)와 같은 이유로
+  //    사람만 할 수 있어야 한다. openText(알림 복호)도 봉인된 내용을 평문으로 꺼내는 경로다.
 ];
 
 // 소켓에 의존하지 않는 단일 인스턴스 백스톱 — 시작 시 같은 머신의 "다른" 데몬 프로세스를 전부 정리.
