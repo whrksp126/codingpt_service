@@ -183,6 +183,41 @@ test('레거시 뷰 세션은 리퍼가 정리, 터미널 세션은 무접촉', 
   await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: t.index });
 });
 
+// (로케일) LANG 부재 환경에서도 `-F` 탭 파싱이 살아 있어야 한다 — 2026-07-25 사용자 Mac 실측 결함.
+//  데스크톱 앱(Finder/launchd)이 데몬을 띄우면 LANG 이 없고, 그러면 tmux 는 멀티바이트뿐 아니라
+//  **구분자 TAB(0x09)까지 '_' 로 이스케이프**한다 → listTerminals 는 name/command 가 전부 빈 값이 되고
+//  (`cpt terminal list --json` 실측: name:"" command:""), agent-watch 의 세션 필터 `/--t-\d+$/` 는 한 줄도
+//  통과하지 못해 에이전트 감지가 통째로 죽는다(에러 0건·로그 0건). attachPty 만 고쳐져 있던 항목.
+test('LANG 없는 환경(데스크톱 앱 실행)에서도 -F 탭 파싱이 살아 있다', { skip: !hasTmux }, async () => {
+  const t = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const tsess = pty.termSession(NS, t.index);
+  // 자동 개명이 되돌리지 못하게 끄고, 실측과 같은 한글 창 이름을 박는다.
+  await tmux(['set-window-option', '-t', `=${tsess}:0`, 'automatic-rename', 'off']);
+  await tmux(['rename-window', '-t', `=${tsess}:0`, '✳ 히어로 아래에 고객 후기 섹션 추가']);
+  const saved = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LC_CTYPE: process.env.LC_CTYPE };
+  delete process.env.LANG; delete process.env.LC_ALL; delete process.env.LC_CTYPE;
+  try {
+    // ① 규율 정본 — tmuxEnv 가 UTF-8 을 채운다(TMUX 해제도 함께).
+    const env = pty.tmuxEnv();
+    assert.match(String(env.LANG), /UTF-?8/i);
+    assert.match(String(env.LC_CTYPE), /UTF-?8/i);
+    assert.strictEqual(env.TMUX, undefined);
+    // ② 그 결과 탭이 살아 name/command 가 비지 않는다(구 코드는 둘 다 '').
+    const row = (await pty.listTerminals(NS)).find((w) => w.index === t.index);
+    assert.ok(row, 'LANG 없이도 세션 행이 파싱돼야 한다');
+    assert.strictEqual(row.name, '✳ 히어로 아래에 고객 후기 섹션 추가');
+    assert.ok(row.command, 'command 가 빈 값이면 앱 tab.cmd 폴백이 통째로 죽는다');
+    // ③ agent-watch 가 쓰는 3필드 포맷도 같은 규율에 얹혀 있다 — 탭이 사라지면 관찰 행이 0개가 된다.
+    const raw = await pty.runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{pane_current_command}\t#{pane_title}']);
+    const line = raw.split('\n').find((l) => l.startsWith(tsess + '\t'));
+    assert.ok(line, 'session\\tcmd\\ttitle 파싱이 죽으면 agent-watch 는 아무 pane 도 보지 못한다');
+    assert.ok(/--t-\d+$/.test(line.split('\t')[0]), 'agent-watch 의 세션 필터를 통과해야 한다');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: t.index });
+  }
+});
+
 // (RPC 계약) terminal.list 응답 스키마/정렬 — 앱·PC 리컨실러가 소비하는 형태 그대로.
 test('terminal.list: {windows:[{index,name,command}]} 생성순 정렬 + select 폴백 계약', { skip: !hasTmux }, async () => {
   const a = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });

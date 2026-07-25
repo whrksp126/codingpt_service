@@ -257,6 +257,24 @@ function findTmux() {
   return null;
 }
 
+// tmux 자식 프로세스 env 정본 — 두 규율을 한 곳에서만 집행한다(경로가 늘어도 규율은 하나다).
+//  ① TMUX 제거: 데몬이 tmux/cmux 안에서 돌아도 전용 소켓을 조작할 수 있게 중첩 가드 해제(소켓이 달라 안전).
+//  ② UTF-8 로케일 강제: 이건 표시 문제가 아니라 **`-F` 출력 파싱의 생존 조건**이다. 데스크톱 앱
+//     (Finder/launchd)이 데몬을 띄우면 LANG 이 아예 없고, 그러면 tmux 는 멀티바이트뿐 아니라
+//     **구분자 TAB(0x09)까지 '_' 로 이스케이프**한다(실측 2026-07-25, 사용자 Mac:
+//     `#{session_name}\t#{session_created}\t…` → `cpt-…--t-958257768_1784919305_…`).
+//     결과는 조용한 전멸이다 — listTerminals 는 탭이 0개라 name/command 가 전부 빈 값이 되고
+//     (`cpt terminal list --json` 실측: name:"" command:""), agent-watch 의 세션 필터 `/--t-\d+$/` 는
+//     한 줄도 통과하지 못해 **에이전트 감지가 통째로 죽는다**(에러 0건·로그 0건).
+//     attachPty 는 0.1.29 에서 고쳤는데 execFile 경로(runTmux)에 미러가 빠져 재발했다 → 여기로 통합.
+function tmuxEnv() {
+  const env = { ...process.env };
+  delete env.TMUX;
+  if (!/UTF-?8/i.test(env.LANG || '')) env.LANG = 'en_US.UTF-8';
+  if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
+  return env;
+}
+
 // 스폰 실패 쿨다운 — node-pty 는 스폰 실패 경로에서 pty 마스터 fd 를 누수한다. 웹뷰 자동 재접속
 //  (1~10s)과 결합하면 실패가 실패를 낳는 나선(pty 고갈 고착, 실측 75분에 마스터 459개 누수)이 되므로,
 //  직전 스폰 실패 후 잠시는 스폰 시도 자체를 거부한다.
@@ -397,14 +415,8 @@ async function attachPty(params, io) {
   const rows = (params && params.rows) || 24;
   const sendOut = (chunk) => { try { io.send(chunk); } catch (_) { /* noop */ } };
 
-  // 데몬 자체가 tmux/cmux 안에서 실행돼도 attach 되도록 TMUX 해제(중첩 가드 우회 — 소켓이 달라 안전).
-  const env = { ...process.env };
-  delete env.TMUX;
-  // UTF-8 로케일 강제 — 데스크톱 앱으로 데몬이 뜨면 셸 로케일(LANG)이 없어 tmux 클라이언트가
-  //  non-UTF-8 로 attach → 한글 등 멀티바이트 출력이 '_' 로 뭉개진다. 로케일을 UTF-8 로 고정한다.
-  //  (0.1.29 의 근본 원인 — list 파싱까지 전멸시켰던 그 항목. 경로가 늘어도 규율은 하나다.)
-  if (!/UTF-?8/i.test(env.LANG || '')) env.LANG = 'en_US.UTF-8';
-  if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
+  // TMUX 해제 + UTF-8 로케일 강제 — 정본은 tmuxEnv()(0.1.29 의 근본 원인 항목, 규율 설명은 거기).
+  const env = tmuxEnv();
 
   // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
   //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
@@ -579,8 +591,9 @@ function runTmux(args) {
   return new Promise((resolve, reject) => {
     const tmux = findTmux();
     if (!tmux) return reject(new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)'));
-    const env = { ...process.env };
-    delete env.TMUX; // 데몬이 tmux/cmux 안에서 돌아도 전용 소켓 조작 가능하게 중첩 가드 해제
+    // ⚠ tmuxEnv() 필수 — TMUX 해제 + UTF-8 강제. UTF-8 이 아니면 tmux 가 `-F` 의 TAB 구분자까지
+    //  '_' 로 이스케이프해 이 함수의 **모든 호출자의 파싱이 조용히 전멸**한다(tmuxEnv 주석 참조).
+    const env = tmuxEnv();
     execFile(tmux, ['-L', TMUX_SOCKET, ...args], { env, timeout: 5000 }, (err, stdout, stderr) => {
       if (err) return reject(new Error((String(stderr || err.message || '')).trim() || 'tmux 오류'));
       resolve(String(stdout || ''));
@@ -804,4 +817,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };

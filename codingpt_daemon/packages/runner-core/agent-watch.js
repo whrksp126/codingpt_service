@@ -17,8 +17,12 @@
  *      idle    = "✳ " 프리픽스(claude) | ◇(gemini)
  *      permission = ✋(gemini)
  *    → working → idle/permission 전이 = 턴 완료/승인 대기 후보.
- *  · process-exit: pane_current_command 가 에이전트(claude/codex/…) → 셸로 전이.
+ *  · process-exit: pane_current_command 가 에이전트 → 셸로 전이.
  *    working 상태에서만 후보로 삼는다(idle 에서의 종료 = 사용자가 직접 /exit — 알림 무가치).
+ *
+ * ★ "에이전트 pane 이냐" 는 **프로세스 이름으로 판정하지 않는다**(2026-07-25 실측: 최신 Claude Code 의
+ *   pane_current_command 는 `2.1.219` 같은 버전 문자열이다). 판정 정본은 isAgentPane() 주석 참조 —
+ *   셸이 아니고 제목이 에이전트 글리프를 주면 에이전트다. 이름 화이트리스트를 되살리지 말 것.
  *
  * 훅과의 중복 방지(핵심): 후보는 QUIET_MS 대기 후 agent-state 에 발사를 "요청" 하며, 훅이 지배하는
  * 터미널이면 agent-state 가 억제한다(훅이 정상 동작하면 이 모듈은 침묵). 시각 기반 레거시 창구
@@ -32,14 +36,50 @@ const QUIET_MS = 3000;         // 후보 → 발사 대기(그 사이 훅이 오
 function pty() { return require('./pty'); }                 // lazy — 순환 require 회피
 function agentState() { return require('./agent-state'); }  // 상태/알림 단일 소유자
 
-// 에이전트로 취급하는 pane_current_command → 알림 타이틀. node 는 npm 설치형 CLI(셔뱅 실행)
-//  폴백으로, "에이전트 title 글리프를 실제로 본" 세션에서만 에이전트로 인정한다(오탐 방지).
+// 이름으로 확실히 아는 에이전트 → 알림 타이틀. **이 목록은 판정의 필요조건이 아니다**(아래 참조).
 const AGENT_CMDS = new Map([
   ['claude', 'Claude Code'],
   ['codex', 'Codex'],
   ['gemini', 'Gemini CLI'],
 ]);
 const SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh']);
+const UNKNOWN_AGENT_NAME = 'AI 에이전트'; // 이름을 특정할 수 없을 때의 표시 문자열(agent-state.fire 와 동일 문구)
+
+/**
+ * 이 pane 을 에이전트로 볼지 — **프로세스 이름을 쫓지 않는다**(2026-07-25 실측으로 근거를 뒤집었다).
+ *
+ * 왜: 최신 Claude Code 의 `pane_current_command` 는 `claude` 도 `node` 도 아니고 **버전 문자열**이다
+ *  (사용자 Mac 실측: cmd=`2.1.219`, title=`✳ 히어로 아래에 고객 후기 섹션 추가`). 이름 화이트리스트로
+ *  판정하면 claude 가 멀쩡히 돌아도 `isAgentCmd=false` 가 되어 ① 상태 기록이 안 생기고(→ 와이어 방출 0건
+ *  → 모바일 TUI↔Chat 토글 무발현) ② `wasAgentCmd` 도 항상 false 라 process-exit 폴백(훅 없는 에이전트의
+ *  유일한 완료 신호)이 **영구히 발화하지 않는다**. 이름은 벤더가 언제든 바꾸므로 근거가 될 수 없다.
+ *
+ * 그래서 판정 근거는 "이름이 에이전트냐" → "**셸이 아니고 제목이 에이전트 신호를 주느냐**" 로 바뀐다.
+ * 오검 방지 3중 장치(하나라도 빠지면 임의 프로세스에 토글·알림이 뜬다):
+ *  ① 셸(SHELL_CMDS)은 어떤 제목이어도 절대 에이전트가 아니다 — 에이전트 종료 후 pane_title 은
+ *     스테일하게 남으므로(실측: cmd=zsh + title=`⠹ …`) 이 가드가 없으면 셸에 기록이 생긴다.
+ *  ② 제목 신호는 titleStatus() 의 **확정 글리프만**이다(경로/`user@host` 셸 타이틀은 null).
+ *  ③ 과거 신호(sawAgentTitle)는 그 세션이 셸로 돌아오면 리셋된다(관찰 장부의 수명 = 에이전트 1생애).
+ *
+ * 버전 문자열 패턴(`/^\d+\.\d+\.\d+$/`)을 **독립 근거로 채택하지 않은 이유**: (a) 임의 프로그램이 그런
+ *  이름일 수 있고, (b) 이 규칙 아래에선 정보량이 0이다 — 기록/알림이 나가는 모든 경로는 결국
+ *  titleStatus() 가 non-null 이어야 하므로(status 는 제목에서만 만들어진다) 패턴을 더해도 감지력은
+ *  늘지 않고 오검 표면만 넓어진다. 다시 추가하지 말 것.
+ */
+function isAgentPane(cmd, tStatus, sawAgentTitle) {
+  if (SHELL_CMDS.has(cmd)) return false;      // ① 셸은 무조건 제외
+  if (AGENT_CMDS.has(cmd)) return true;       // 이름으로 확실한 경우(구 CLI·gemini 등)
+  return tStatus != null || !!sawAgentTitle;  // ②③ 제목 신호(현재/과거) = 1급 근거
+}
+
+// 제목 글리프로 **에이전트가 특정되는** 경우만 이름을 추론한다 — cmd 가 버전 문자열이면 이름 단서가
+//  제목뿐이다. 점자 스피너는 claude/codex 공용이라 추론하지 않는다(틀린 제품명 표기 금지 → UNKNOWN).
+function titleAgent(title) {
+  const t = String(title || '');
+  if (t.includes('✋') || t.includes('✦') || t.includes('⏲') || t.includes('◇')) return 'gemini';
+  if (t.startsWith('✳')) return 'claude';
+  return null;
+}
 
 // pane_title → 에이전트 상태. 확실한 글리프 신호만 쓴다(경로/셸 타이틀 오탐 차단 — Orca 휴리스틱 축약).
 function titleStatus(title) {
@@ -114,41 +154,67 @@ function observe(rows) {
     alive.add(session);
     const cmd = String(r.cmd || '').trim();
     const tStatus = titleStatus(r.title);
+    const shell = SHELL_CMDS.has(cmd);
     let st = states.get(session);
-    const agentKey = AGENT_CMDS.has(cmd) ? cmd : undefined;
     if (!st) {
       // 첫 관찰 = 시드(이벤트 없음) — 데몬 재기동 직후 기존 idle 터미널에 오발사하지 않는다.
-      st = { cmd, status: tStatus, sawAgentTitle: tStatus != null, pendingTimer: null };
+      //  ⚠ 시드도 isAgentPane 게이트를 지난다: 셸 pane 에 스테일 제목이 남아 있으면 그걸 그대로
+      //  status 로 굳혀 이후 전이 판정이 셸을 에이전트처럼 다루게 된다(구 코드가 tStatus 무조건 채택).
+      const agentPane = isAgentPane(cmd, tStatus, false);
+      const seedAgent = agentPane ? (AGENT_CMDS.has(cmd) ? cmd : titleAgent(r.title)) : null;
+      st = {
+        cmd,
+        status: agentPane ? tStatus : null,
+        sawAgentTitle: agentPane && tStatus != null,
+        agent: seedAgent || null,
+        pendingTimer: null,
+      };
       states.set(session, st);
       // 상태만 기록(알림 없음). 훅이 지배 중이면 agent-state 가 시드를 무시한다.
-      void applyObservation(session, { tid, agent: agentKey, observedState: tStatus, shell: SHELL_CMDS.has(cmd), seed: true });
+      void applyObservation(session, {
+        tid,
+        agent: seedAgent || undefined,
+        agentName: AGENT_CMDS.get(seedAgent) || UNKNOWN_AGENT_NAME,
+        observedState: agentPane ? tStatus : null,
+        shell,
+        seed: true,
+      });
       continue;
     }
-    const isAgentCmd = AGENT_CMDS.has(cmd) || (cmd === 'node' && (tStatus != null || st.sawAgentTitle));
-    const wasAgentCmd = AGENT_CMDS.has(st.cmd) || (st.cmd === 'node' && st.sawAgentTitle);
-    const agentName = AGENT_CMDS.get(cmd) || AGENT_CMDS.get(st.cmd) || 'AI 에이전트';
-    if (tStatus != null && isAgentCmd) st.sawAgentTitle = true;
+    const isAgent = isAgentPane(cmd, tStatus, st.sawAgentTitle);
+    const wasAgent = isAgentPane(st.cmd, null, st.sawAgentTitle);
+    // 에이전트 아이덴티티는 세션에 **끈적하게** 붙인다 — cmd 가 버전 문자열이면 이름 단서는 제목뿐이고
+    //  제목은 매 틱 바뀐다(working 은 점자 스피너 = 무단서). 한 번 알면 셸 복귀까지 유지한다.
+    if ((isAgent || wasAgent) && !st.agent) {
+      st.agent = (AGENT_CMDS.has(cmd) ? cmd : null) || (AGENT_CMDS.has(st.cmd) ? st.cmd : null) || (isAgent ? titleAgent(r.title) : null) || null;
+    }
+    const agentKey = st.agent || undefined;
+    const agentName = AGENT_CMDS.get(agentKey) || UNKNOWN_AGENT_NAME;
+    if (tStatus != null && isAgent) st.sawAgentTitle = true;
 
     // 관찰 결과를 상태 소유자에게 보고(폴백 권한은 agent-state 가 판정 — hookGoverned 면 관찰만).
     void applyObservation(session, {
       tid,
-      agent: agentKey || (AGENT_CMDS.has(st.cmd) ? st.cmd : undefined),
+      agent: agentKey,
       agentName,
-      observedState: isAgentCmd ? tStatus : null,
-      shell: SHELL_CMDS.has(cmd),
+      observedState: isAgent ? tStatus : null,
+      shell,
     });
 
     // ① title 전이: working → idle/permission (에이전트 프로세스 유지 중 = 턴 완료/승인 대기).
-    if (st.status === 'working' && isAgentCmd && (tStatus === 'idle' || tStatus === 'permission')) {
+    if (st.status === 'working' && isAgent && (tStatus === 'idle' || tStatus === 'permission')) {
       scheduleFire(session, tid, agentName, tStatus === 'permission' ? 'permission_request' : 'done', { agent: agentKey });
     }
     // ② process-exit: 에이전트 → 셸 전이. 작업 중(working)이었을 때만(idle 종료 = 사용자 /exit).
-    if (wasAgentCmd && SHELL_CMDS.has(cmd) && st.status === 'working') {
-      scheduleFire(session, tid, agentName, 'done', { exited: true, agent: AGENT_CMDS.has(st.cmd) ? st.cmd : undefined });
+    //  버전 문자열 cmd 에서도 wasAgent 가 참이 되므로 이 폴백이 되살아난다(훅 없는 에이전트의 유일한 신호).
+    if (wasAgent && shell && st.status === 'working') {
+      scheduleFire(session, tid, agentName, 'done', { exited: true, agent: agentKey });
     }
     st.cmd = cmd;
-    if (tStatus != null) st.status = tStatus;
-    else if (SHELL_CMDS.has(cmd)) { st.status = null; st.sawAgentTitle = false; } // 셸 복귀 = 리셋
+    //  status 갱신도 에이전트 pane 에서만 — 셸의 스테일 제목이 'working' 을 되살리면 다음 셸 복귀가
+    //  또 한 번 종료 알림을 낸다(구 코드의 조용한 반복 발사 경로).
+    if (tStatus != null && isAgent) st.status = tStatus;
+    else if (shell) { st.status = null; st.sawAgentTitle = false; st.agent = null; } // 셸 복귀 = 리셋
   }
   // 사라진 세션(터미널 닫힘) 정리 — 닫힘은 알림 대상이 아니다(대기 중 후보도 폐기).
   for (const [session, st] of states) {
@@ -222,4 +288,4 @@ function statusOf(session) {
   try { return agentState().legacyStatusOf(session); } catch (_) { return 'idle'; }
 }
 
-module.exports = { start, stop, noteHook, observe, titleStatus, statusOf, _states: states };
+module.exports = { start, stop, noteHook, observe, titleStatus, titleAgent, isAgentPane, statusOf, _states: states };

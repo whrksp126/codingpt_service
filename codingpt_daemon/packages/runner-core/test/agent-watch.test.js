@@ -19,13 +19,19 @@ require.cache[require.resolve('../cpt-server')] = {
 const watch = require('../agent-watch');
 const agentState = require('../agent-state'); // 상태/알림 소유자 — 폴백은 이 모듈로만 보고한다
 
+// 와이어 방출 수집 — 감지가 살아 있어도 방출이 안 되면 모바일 TUI↔Chat 토글은 안 뜬다(계약 §1.3).
+const frames = [];
+agentState.configure({ emit: (f) => { frames.push(f.event); return true; } });
+
 const S = (tid) => `cpt-demo--t-${tid}`;
 const row = (tid, cmd, title) => ({ session: S(tid), cmd, title });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const tick = () => sleep(20); // cwdRel 최초 해석(show-environment 스텁)이 비동기라 1틱 양보
 const WAIT = 3600; // QUIET_MS(3000) + 여유
 
 function resetAll() {
   fired.length = 0;
+  frames.length = 0;
   for (const [k, st] of watch._states) { if (st.pendingTimer) clearTimeout(st.pendingTimer); watch._states.delete(k); }
   agentState._reset(); // 훅 지배/발사 이력까지 초기화(케이스 간 독립)
 }
@@ -153,6 +159,113 @@ test('statusOf 는 훅 상태를 즉시 반영하고 폴백 관찰에 뒤집히�
   assert.strictEqual(watch.statusOf(S(tid)), 'working'); // 훅 지배 중이라 상태는 유지
   await sleep(WAIT);
   assert.strictEqual(fired.length, 0);
+});
+
+// ── 2026-07-25 실측 회귀: 최신 Claude Code 의 프로세스 이름은 **버전 문자열**이다 ──
+//  사용자 Mac 실측(라이브 claude 세션):
+//    tmux -L codingpt list-panes -F '#{pane_current_command} | #{pane_title}'
+//    → `2.1.219 | ✳ 히어로 아래에 고객 후기 섹션 추가`
+//  이름 화이트리스트(claude|codex|gemini + node 특례)로 판정하던 구 코드는 이 pane 을 에이전트로 보지
+//  못해 ① 상태 기록 0건(→ 와이어 방출 0건 → 모바일 토글 무발현) ② process-exit 폴백 영구 미발화였다.
+//  아래 값들은 **실측 문자열 그대로** 하드코딩한다 — 여기서 깨지면 라이브에서 다시 죽는다는 뜻이다.
+const LIVE_CMD = '2.1.219';
+const LIVE_TITLE_IDLE = '✳ 히어로 아래에 고객 후기 섹션 추가';
+const LIVE_TITLE_WORK = '⠹ 히어로 아래에 고객 후기 섹션 추가'; // 점자 스피너(working)
+
+test('판정 규칙 — 셸은 절대 제외, 제목 신호는 1급 근거(isAgentPane)', () => {
+  assert.strictEqual(watch.isAgentPane(LIVE_CMD, 'idle', false), true, '버전 문자열 + 제목 신호 = 에이전트');
+  assert.strictEqual(watch.isAgentPane(LIVE_CMD, null, true), true, '과거에 본 신호(sawAgentTitle)도 근거');
+  assert.strictEqual(watch.isAgentPane(LIVE_CMD, null, false), false, '제목 신호 0 = 판정 보류(패턴 단독 채택 금지)');
+  assert.strictEqual(watch.isAgentPane('zsh', 'working', true), false, '셸은 스테일 제목이 있어도 에이전트가 아니다');
+  assert.strictEqual(watch.isAgentPane('claude', null, false), true, '이름으로 확실한 경우');
+  assert.strictEqual(watch.isAgentPane('vim', null, false), false);
+});
+
+test('titleAgent — 특정 가능한 글리프만 이름을 추론한다', () => {
+  assert.strictEqual(watch.titleAgent(LIVE_TITLE_IDLE), 'claude');
+  assert.strictEqual(watch.titleAgent('◇ Gemini CLI'), 'gemini');
+  assert.strictEqual(watch.titleAgent('✋ Gemini CLI'), 'gemini');
+  assert.strictEqual(watch.titleAgent(LIVE_TITLE_WORK), null, '점자 스피너는 claude/codex 공용 = 추론 금지');
+});
+
+test('실측 회귀 — cmd=2.1.219 인 claude 가 기록되고 와이어에 idle 이 방출된다', async () => {
+  resetAll();
+  const tid = 1000020;
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_IDLE)]); // 첫 관찰(시드)
+  await tick();
+  assert.ok(agentState._states.has(S(tid)), '기록이 생겨야 한다(구 코드는 무기록 → 토글 무발현)');
+  assert.deepStrictEqual(frames.map((f) => f.state), ['idle']);
+  assert.strictEqual(frames[0].cwd, 'proj/demo');
+  assert.strictEqual(frames[0].win, tid);
+  assert.strictEqual(frames[0].agent, 'claude', '✳ 글리프로 이름까지 특정된다');
+  // 스피너 제목 = working 방출.
+  frames.length = 0;
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]);
+  await tick();
+  assert.deepStrictEqual(frames.map((f) => f.state), ['working']);
+  // `cpt agent status`(사람·AI 노출)에도 같은 레코드가 보여야 한다 — 스코프는 cwdRel.
+  const snap = agentState.snapshot('proj/demo');
+  assert.strictEqual(snap.length, 1);
+  assert.strictEqual(snap[0].state, 'working');
+  assert.strictEqual(snap[0].tid, tid);
+});
+
+test('실측 회귀 — 버전 문자열 cmd 에서도 working→idle 완료 알림이 나간다', async () => {
+  resetAll();
+  const tid = 1000021;
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]); // 시드(working)
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]);
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_IDLE)]); // 턴 완료
+  await sleep(WAIT);
+  assert.strictEqual(fired.length, 1);
+  assert.strictEqual(fired[0].kind, 'done');
+  assert.strictEqual(fired[0].win, tid);
+  assert.strictEqual(fired[0].title, 'Claude Code');
+  assert.deepStrictEqual(frames.map((f) => f.state), ['working', 'idle']);
+});
+
+test('실측 회귀 — 버전 문자열 → 셸 전이가 종료로 인식된다(gone 방출 + exited 알림)', async () => {
+  resetAll();
+  const tid = 1000022;
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]); // 시드(working)
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]);
+  await tick();
+  frames.length = 0;
+  watch.observe([row(tid, 'zsh', LIVE_TITLE_WORK)]);    // kill -9 — pane_title 은 스테일하게 남는다
+  await tick();
+  assert.deepStrictEqual(frames.map((f) => f.state), ['gone'], '셸 복귀는 idle 이 아니라 소멸이다');
+  await sleep(WAIT);
+  assert.strictEqual(fired.length, 1, '훅 없는 에이전트의 유일한 완료 신호 — 구 코드는 영구 미발화');
+  assert.strictEqual(fired[0].kind, 'done');
+  assert.match(String(fired[0].body || ''), /종료/);
+  assert.strictEqual(fired[0].title, 'AI 에이전트', '이름 단서(제목 글리프)가 없으면 폴백 문구');
+  // 폴링이 계속돼도 gone 은 한 번만(토글 자가 재점등·중복 알림 차단).
+  frames.length = 0;
+  watch.observe([row(tid, 'zsh', 'me@mac: ~')]);
+  await tick();
+  assert.strictEqual(frames.length, 0);
+});
+
+test('셸(zsh)에는 어떤 제목이어도 기록이 생기지 않는다(오검 차단)', async () => {
+  resetAll();
+  const tid = 1000023;
+  watch.observe([row(tid, 'zsh', 'whrksp126@GH-MACui-MacBookPro:~/codingpt-demo')]); // 실측 셸 타이틀
+  watch.observe([row(tid, 'zsh', LIVE_TITLE_IDLE)]);  // 에이전트 종료 후 스테일 제목
+  watch.observe([row(tid, 'zsh', LIVE_TITLE_WORK)]);
+  await sleep(WAIT);
+  assert.strictEqual(agentState._states.has(S(tid)), false, '셸에 레코드가 생기면 빈 탭에 토글이 뜬다');
+  assert.strictEqual(frames.length, 0);
+  assert.strictEqual(fired.length, 0);
+});
+
+test('이름을 몰라도(agent:null) 기록·방출은 된다 — 토글 노출은 에이전트 이름과 무관', async () => {
+  resetAll();
+  const tid = 1000024;
+  watch.observe([row(tid, '2.1.220', LIVE_TITLE_WORK)]); // 점자 스피너만 = 제품 특정 불가
+  await tick();
+  assert.deepStrictEqual(frames.map((f) => f.state), ['working']);
+  assert.strictEqual(frames[0].agent, null, '계약 §1.3 은 agent:null 을 허용한다');
+  assert.strictEqual(agentState.snapshot('proj/demo').length, 1, 'cpt agent status 에서도 누락되지 않는다');
 });
 
 test('터미널 닫힘(세션 소멸)은 알림 없음 — 대기 후보도 폐기', async () => {

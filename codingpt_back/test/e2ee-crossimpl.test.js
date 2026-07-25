@@ -94,3 +94,52 @@ test('표시 지문 — back 과 데몬이 같은 값을 낸다', (t) => {
   // 60비트 표기 확인 — 짧은 숫자는 오프라인 그라인딩으로 뚫린다(실측 4자리 1.3초).
   assert.match(a.safety, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
 });
+
+// ── 안전코드 파생 기준(userRef) 배관 — 2026-07-26 실기기 사고 회귀 고정 ──────────────
+//  사고: 안전코드·지문은 HKDF(ikX, userRef) 로 파생하는데 **back 이 userRef 를 한 번도 보내지
+//  않았다**. 데몬/PC 는 `/api/daemon/me` 의 id 를 쓰고 앱은 서버 필드를 기다렸으므로, 같은 기기에
+//  대해 데몬은 `0727`·앱은 `8212` 를 계산했다 = **폰↔PC 대조가 처음부터 성립하지 않았다**.
+//  (실측: prod 로그 `[e2ee] 등록 신청 … code=0727`, 앱 화면 "직접 계산한 값과 달랐습니다")
+//  아래 두 테스트는 ① 모든 e2ee 응답에 userRef 가 실리는가 ② 그 값으로 3구현체 파생이 일치하는가.
+const dtController = require('../controllers/deviceTrustController');
+
+test('e2ee 컨트롤러 — 모든 응답에 userRef 가 실린다(안전코드 파생 기준)', async () => {
+  const HANDLERS = ['enroll', 'bootstrap', 'pending', 'approve', 'deny', 'keyring', 'rotate', 'policy', 'recovery'];
+  for (const name of HANDLERS) {
+    assert.equal(typeof dtController[name], 'function', `${name} 핸들러가 있어야 한다`);
+  }
+  // 서비스는 스텁하고 컨트롤러의 응답 성형만 본다(서비스 계층은 별도 테스트 대상).
+  const svc = require('../services/deviceTrustService');
+  const saved = {};
+  const stub = { enroll: 'enroll', bootstrap: 'bootstrap', listPending: 'pending', approve: 'approve',
+    deny: 'deny', keyring: 'keyring', rotate: 'rotate', setPolicy: 'policy', setRecovery: 'recovery' };
+  for (const k of Object.keys(stub)) { saved[k] = svc[k]; svc[k] = async () => ({ state: 'trusted' }); }
+  try {
+    for (const name of HANDLERS) {
+      let body = null;
+      const res = { status() { return this; }, json(b) { body = b; return this; } };
+      const req = { account: { userId: 43, deviceId: 7 }, body: {}, query: {}, headers: {}, ip: '10.0.0.2' };
+      await dtController[name](req, res);
+      const data = body && (body.data !== undefined ? body.data : body);
+      assert.ok(data && typeof data === 'object', `${name}: 응답 본문이 객체여야 한다`);
+      // successResponse 는 data 를 최상위로 펼친다(back 관습) — 어느 형태든 userRef 가 보여야 한다.
+      const ref = data.userRef !== undefined ? data.userRef : (body || {}).userRef;
+      assert.equal(ref, '43', `${name}: userRef 가 문자열 userId 로 실려야 한다`);
+    }
+  } finally {
+    for (const k of Object.keys(saved)) svc[k] = saved[k];
+  }
+});
+
+test('e2ee 안전코드 — back 이 준 userRef 로 데몬·PC 파생이 일치한다', async () => {
+  const path2 = require('path');
+  const daemonE2ee = require(path2.resolve(__dirname, '../../codingpt_daemon/packages/runner-core/e2ee.js'));
+  // 실기기에서 실제로 등록 신청한 기기의 공개키(공개값이라 비밀 아님) — 그때 서버 로그가 code=0727.
+  const ikX = Buffer.from('l_GQNh6mKArY_U9nx4ck3c5ifVp0qytXo4M7SJBoHxo'.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  const ref = '43'; // = String(userId) = back 이 이제 응답에 싣는 값
+  const f = daemonE2ee.fingerprint(ikX, ref);
+  assert.equal(f.short, '0727', '데몬 파생이 prod 실측 code 와 같아야 한다');
+  assert.equal(f.safety, 'P2MK-240X-FYC7', '60비트 안전코드(사람이 대조하는 유일한 값)');
+  // ref 가 비면 **완전히 다른 값**이 나온다 — 그래서 back 이 반드시 보내야 한다는 것이 이 테스트의 요지.
+  assert.notEqual(daemonE2ee.fingerprint(ikX, '').short, f.short);
+});

@@ -529,6 +529,13 @@ function publicView(rec) {
 // cwdRel 생략 = 전체. `cpt agent status` / agent.state 방송용.
 //  includeUnknown: cwdRel 이 아직 미상(null)인 레코드도 포함 — 진단(hooks.doctor)에서 "훅이 한 번도
 //  안 온 터미널"을 놓치지 않기 위한 옵션. 일반 조회에서는 스코프 오염을 피하려 기본 제외.
+//  ⚠ 오해 금지(2026-07-25): 여기서 "unknown" 은 **cwdRel 미상**을 뜻하며 `rec.agent`(에이전트 이름)와는
+//   아무 상관이 없다. 이름을 모르는 레코드(agent:null — 버전 문자열 cmd 처럼 제목 신호만으로 감지된
+//   에이전트)는 이 필터에 걸리지 않고, 와이어 방출(emitFrame)도 좌표(cwdRel,tid)만 요구한다.
+//   즉 **토글 노출은 "에이전트 이름을 아는가" 와 완전히 무관**하다(계약 §1.3 `agent` 는 null 허용).
+//   두 필터의 기준이 다른 이유: snapshot 은 *질의 스코프*(어느 워크스페이스를 묻는가), emitFrame 은
+//   *정확성 전제*(클라이언트 색인 키를 만들 수 있는가). 목적이 달라도 결과적으로 둘 다 cwdRel 을
+//   요구하므로 "status 엔 보이는데 와이어엔 안 나가는" 비대칭은 생기지 않는다.
 function snapshot(cwdRel, { includeUnknown = false } = {}) {
   const out = [];
   for (const rec of states.values()) {

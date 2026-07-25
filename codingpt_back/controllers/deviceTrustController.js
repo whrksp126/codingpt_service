@@ -15,6 +15,26 @@ const { successResponse, errorResponse } = require('../utils/response');
 
 function fail(res, e) { return errorResponse(res, e, (e && e.statusCode) || 500); }
 
+/**
+ * 모든 응답에 `userRef` 를 실어 보낸다 — **사람이 대조하는 안전코드의 파생 기준**이다.
+ *
+ * ★ 왜 서버가 줘야 하는가(2026-07-26 실기기 실측으로 확인된 사고)
+ *   안전코드/지문은 `HKDF(ikX, userRef)` 로 파생하므로 **모든 기기가 글자 하나까지 같은 ref** 를
+ *   써야 화면 대조가 성립한다. 데몬·PC 는 `GET /api/daemon/me` 의 id 를 쓰는데, 앱은 이 필드가
+ *   오기를 기다리고 있었고(앱 `e2ee.ts:604` 주석 "확인 숫자 기준은 서버 userRef") 서버는 **한 번도
+ *   보내지 않았다**. 그래서 앱은 ref=''(빈 문자열)로 파생 → 같은 기기에 대해 데몬은 `0727`,
+ *   앱은 `8212` 를 계산했다. 즉 **폰↔PC 안전코드 대조가 처음부터 동작한 적이 없다.**
+ *   (실측: prod 로그 `code=0727` = 데몬/PC 계산값, 앱 화면은 "직접 계산한 값과 달랐습니다" 경고)
+ *
+ * 값은 비밀이 아니다 — 서버가 위조해도 **두 기기에 같게** 주므로 대조는 여전히 성립한다
+ * (숫자를 지배하는 입력은 기기 공개키 ikX 다). 그래서 그냥 userId 를 문자열로 준다.
+ * 클라이언트가 이 값을 못 받으면 **아무 숫자도 그리지 않아야** 한다(틀린 코드를 대조시키는 것이
+ * 최악 — 앱 `fpRef()` 주석 참조). 세 구현체가 같은 규칙이어야 하므로 한쪽만 바꾸지 말 것.
+ */
+function ok(res, userId, data) {
+  return successResponse(res, Object.assign({ userRef: String(userId) }, data || {}));
+}
+
 // 요청 IP — Cloudflare 경유이므로 CF-Connecting-IP 가 정본(레이트리밋 키 함정과 동일 규칙).
 function ipOf(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip']
@@ -26,7 +46,7 @@ function ipOf(req) {
 async function enroll(req, res) {
   try {
     const r = await deviceTrustService.enroll(req.account.userId, req.account.deviceId, req.body || {}, { ip: ipOf(req) });
-    return successResponse(res, r);
+    return ok(res, req.account.userId, r);
   } catch (e) { return fail(res, e); }
 }
 
@@ -34,42 +54,42 @@ async function enroll(req, res) {
 async function bootstrap(req, res) {
   try {
     const r = await deviceTrustService.bootstrap(req.account.userId, req.account.deviceId, req.body || {});
-    return successResponse(res, r);
+    return ok(res, req.account.userId, r);
   } catch (e) { return fail(res, e); }
 }
 
 // GET /api/daemon/e2ee/pending — 신뢰 기기의 승인 시트(캐치업). push 는 힌트, pull 이 정본.
 async function pending(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.listPending(req.account.userId));
+    return ok(res, req.account.userId, await deviceTrustService.listPending(req.account.userId));
   } catch (e) { return fail(res, e); }
 }
 
 // POST /api/daemon/e2ee/approve — 신뢰 기기가 MK 봉인문을 업로드. 서버는 암호문만 저장한다.
 async function approve(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.approve(req.account.userId, req.body || {}));
+    return ok(res, req.account.userId, await deviceTrustService.approve(req.account.userId, req.body || {}));
   } catch (e) { return fail(res, e); }
 }
 
 // POST /api/daemon/e2ee/deny — 거절(+ 같은 키의 반복 신청 억제).
 async function deny(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.deny(req.account.userId, req.body || {}));
+    return ok(res, req.account.userId, await deviceTrustService.deny(req.account.userId, req.body || {}));
   } catch (e) { return fail(res, e); }
 }
 
 // GET /api/daemon/e2ee/keyring?ikX=… — 감사 UI(기기·지문 목록) + 내 봉인문 수령.
 async function keyring(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.keyring(req.account.userId, { ikX: (req.query || {}).ikX }));
+    return ok(res, req.account.userId, await deviceTrustService.keyring(req.account.userId, { ikX: (req.query || {}).ikX }));
   } catch (e) { return fail(res, e); }
 }
 
 // POST /api/daemon/e2ee/rotate — 기기 해제 후 epoch+1. 남은 기기 전부의 새 봉인문을 한 번에 올린다.
 async function rotate(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.rotate(req.account.userId, req.body || {}));
+    return ok(res, req.account.userId, await deviceTrustService.rotate(req.account.userId, req.body || {}));
   } catch (e) { return fail(res, e); }
 }
 
@@ -77,14 +97,14 @@ async function rotate(req, res) {
 //  user 테이블 컬럼 추가(마이그레이션) 없이 키링 blob 에 보관한다.
 async function policy(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.setPolicy(req.account.userId, (req.body || {}).policy));
+    return ok(res, req.account.userId, await deviceTrustService.setPolicy(req.account.userId, (req.body || {}).policy));
   } catch (e) { return fail(res, e); }
 }
 
 // POST /api/daemon/e2ee/recovery — 복구 코드 봉인문 등록/교체(전 기기 소실 대비).
 async function recovery(req, res) {
   try {
-    return successResponse(res, await deviceTrustService.setRecovery(req.account.userId, req.body || {}));
+    return ok(res, req.account.userId, await deviceTrustService.setRecovery(req.account.userId, req.body || {}));
   } catch (e) { return fail(res, e); }
 }
 
