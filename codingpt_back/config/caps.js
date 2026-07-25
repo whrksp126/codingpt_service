@@ -28,6 +28,13 @@
 //    · 'e2ee.stream.v1' — e2ee.begin 선협상 + 터미널/포워딩 토큰에 sid 를 실을 때 (D단계)
 //    · 'e2ee.snap.v1'   — 스냅샷 매니페스트 enc/epoch 처리가 들어갈 때 (C단계)
 //
+//  · lan.v1       — LAN 직결 시그널링(기능4). 서버측 = hello.lan/lan_update 수집 +
+//                   POST /api/daemon/lan/grant + 제어 WS lan_grant 통지. **기본 꺼짐**:
+//                   `LAN_DIRECT_ENABLED=1` 일 때만 선언한다(config/lanDirect.js 참조).
+//                   선언되지 않으면 데몬이 LAN 리스너를 열지 않는다 = 인바운드 포트 0 불변식 유지.
+//                   ※ 이 능력은 "시그널링을 처리한다"는 뜻이고, 어떤 scope(tcp/rpc/pty)까지 쓸 수
+//                     있는지는 grant 응답의 scopes 가 정본이다(LAN_SCOPES 로 단계 개방).
+//
 // 앞으로 추가될 자리(해당 기능의 서버측 코드가 머지되는 커밋에서 함께 켠다)
 //  · 'agentstate.v1'  — 데몬 agent_state 수신·rseq 부여·팬아웃이 들어갈 때 (기능3 2단계)
 
@@ -42,6 +49,8 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.APPROVAL_ENABLED)) caps.push('approval.v1');
   if (!envOff(env.TRANSCRIPT_ENABLED)) caps.push('transcript.v1');
   if (!envOff(env.E2EE_ENABLED)) caps.push('e2ee.keys.v1');
+  // LAN 직결은 fail-closed — 명시적으로 켠 경우에만 선언한다(다른 스위치와 기본값 방향이 반대).
+  if (require('./lanDirect').lanEnabled(env)) caps.push('lan.v1');
   return caps;
 }
 

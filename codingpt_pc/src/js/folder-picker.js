@@ -3,7 +3,7 @@
 //  · 외부 PC = macOS Finder 컬럼뷰(원격 fsList) — 모바일 앱과 동일 UX.
 //  PC 가 여러 대(이 PC + 외부)면 폴더 선택 전 PC 선택 카드를 먼저 띄운다.
 import { api } from "./api.js";
-import { state, loadWorkspaces, ensureRuntime, emit, createLocalWorkspace } from "./state.js";
+import { state, loadWorkspaces, ensureRuntime, emit, createLocalWorkspace, blockedOffline } from "./state.js";
 
 let el = null; // 오버레이
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -20,6 +20,8 @@ function close() { if (el) { el.classList.add("hidden"); el.innerHTML = ""; } }
 
 // ── 진입 ──────────────────────────────────────────────────────────────
 export async function openNewWorkspace() {
+  // 오프라인(캐시 목록) — 생성은 서버 메타가 원천이라 불가(사이드바 + 버튼도 같은 가드를 쓴다).
+  if (blockedOffline("워크스페이스 추가")) return;
   let devices = [];
   try {
     const res = await api.fetchDevices();

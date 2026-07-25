@@ -44,6 +44,11 @@ function daemonCaps() {
     const m = tryRequire(mod);
     if (m && typeof m[fn] === 'function') caps.push(cap);
   }
+  // LAN 직결(임무 F) — 모듈이 실존하고 스코프가 off 가 아닐 때만 선언한다. 이 선언이 back 에게
+  //  "이 데몬에 lan_grant 를 보내도 된다"는 유일한 신호다(선언 없으면 back 은 grant 라우트를
+  //  LAN_UNSUPPORTED 로 돌려주고 클라는 릴레이로 조용히 돈다 = 한 스위치 원복).
+  const lan = tryRequire('./lan');
+  if (lan && typeof lan.start === 'function' && lan.enabled()) caps.push('lan.v1');
   // E2EE(기능2) — 모듈 실존 + 단계 스코프(킬스위치 포함)를 e2ee-gate 가 판정한다. 미구현/OFF 면
   //  아무 것도 선언하지 않으므로 서버·기기는 협상 자체를 시도하지 않고 기존 평문 경로로 돈다.
   caps.push(...e2eeGate.caps());
@@ -92,6 +97,78 @@ function codedError(code, message) {
   const e = new Error(message);
   e.code = code;
   return e;
+}
+
+// ── LAN 직결(임무 F) 배선 ────────────────────────────────────────────────
+// 데몬의 "인바운드 포트 0" 불변식을 깨는 유일한 지점이라 배선을 한 곳에 모아 둔다.
+//  · lan.js 는 잎 모듈(node 내장만) — control 을 require 하지 않는다. RPC 는 **주입**으로 공유해
+//    dispatchRpc 한 벌을 그대로 쓴다(중복 구현 금지). 순환 require 도 자연히 없다.
+//  · 리스너 기동 위치는 boot() 의 cptServer.start() **직후**다 — 구 인스턴스 인수(takeover)와
+//    좀비 정리가 끝난 뒤여야 포트를 빼앗기지 않는다(§5.5: +1 포트로 도망가면 back 에 보고한
+//    포트와 실제가 어긋난다).
+function lanMod() {
+  const m = tryRequire('./lan');
+  return m && typeof m.start === 'function' ? m : null;
+}
+function lanInfo() {
+  const m = lanMod();
+  if (!m) return undefined;
+  try { return m.info() || undefined; } catch (_) { return undefined; }
+}
+// LAN 채널이 부르는 RPC — 제어채널과 **같은 디스패처**를 탄다. 허용 집합/게이팅은 lan.js 가 판정하고
+//  (fs.watch 는 전역 단일 watcher 사고 방지로 영구 제외), 여기서는 이벤트 push 대상이 없는
+//  sink 를 준다(허용 집합에 push 를 동반하는 메서드가 없다는 사실과 짝을 이룬다).
+// 머신 식별자 — grant 응답/chal 에 실어 뷰어가 "정말 그 PC 인가"를 대조하게 한다(자격증명 아님).
+function safeMachineId() {
+  try { return require('./config').machineId(); } catch (_) { return null; }
+}
+function lanRpc(method, params) {
+  return new Promise((resolve, reject) => {
+    const sink = { send() { /* LAN 경로엔 unsolicited push 가 없다 */ }, readyState: 3 };
+    try { dispatchRpc(sink, method, params, resolve, reject); } catch (e) { reject(e); }
+  });
+}
+
+// LAN 리스너 기동/정지 — **서버가 lan.v1 을 선언했을 때만** 연다(hello_ack 에서 호출).
+//  데몬의 "인바운드 포트 0" 은 보안 불변식이다. 부팅 시점에 여는 구현은 서버 스위치를 켜지 않은
+//  환경에서도 전 사용자 PC 에 포트를 여는 결과가 되어(grant 가 없어 인증은 못 뚫려도 미인증 표면이
+//  생기고 "스위치 하나로 원복"이라는 운영 약속이 깨진다) 금지한다.
+//  재접속 때마다 다시 판정하므로, 서버에서 스위치를 내리면 다음 재접속에서 자동으로 닫힌다.
+let lanRunning = false;
+async function startLanIfAllowed(config) {
+  const m = lanMod();
+  if (!m) return;
+  const want = hasServerCap('lan.v1') && (typeof m.enabled !== 'function' || m.enabled());
+  if (!want) {
+    if (lanRunning) {
+      try { m.stop(); } catch (_) { /* noop */ }
+      lanRunning = false;
+      console.log('[control] LAN 직결 리스너 정지(서버가 lan.v1 을 선언하지 않음)');
+    }
+    return;
+  }
+  if (lanRunning) {
+    // 이미 열려 있으면 좌표만 다시 알린다(back 재시작으로 인덱스가 비었을 수 있다).
+    const nfo = lanInfo();
+    if (nfo) sendEvent({ type: 'lan_update', lan: nfo }, 'lan.v1');
+    return;
+  }
+  try {
+    const r = await m.start({ ...config, machineId: safeMachineId() }, {
+      rpc: lanRpc,
+      // 인터페이스 변경(Wi-Fi 전환/도킹) → 새 좌표를 back 에 알린다. 서버가 lan.v1 을 모르면
+      //  sendEvent 가 false 로 접고 아무 일도 없다(구 서버 안전).
+      onLanChange: (nfo) => { if (nfo) sendEvent({ type: 'lan_update', lan: nfo }, 'lan.v1'); },
+    });
+    lanRunning = !!(r && r.ok);
+    if (lanRunning) {
+      const nfo = lanInfo();
+      if (nfo) sendEvent({ type: 'lan_update', lan: nfo }, 'lan.v1');
+    }
+  } catch (e) {
+    // 실패는 전부 무해 — 릴레이 경로가 그대로 유지된다.
+    console.error('[control] LAN 리스너 시작 실패:', e.message);
+  }
 }
 
 // ── E2EE (기능2) ────────────────────────────────────────────────────────────
@@ -238,6 +315,12 @@ function run(config) {
         daemonVersion: config.daemonVersion || 'unknown',
         clientType: config.clientType || 'daemon',
         caps: daemonCaps(), // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
+        // LAN 직결 좌표(설계 §2.5) — 사설 IP + 포트. back 은 이것을 **DB 가 아니라 conn 객체**에
+        //  보관하고 grant 응답의 endpoints 로만 노출한다(LAN IP 는 휘발성 → 마이그레이션 없음).
+        //  ⚠ 리스너는 hello_ack 에서 serverCaps 를 본 뒤에 열리므로(=인바운드 포트 0 불변식 보호)
+        //  **첫 hello 에는 보통 없다.** 좌표는 기동 직후 lan_update 로 보낸다. 여기 값은 재접속
+        //  (이미 리스너가 열려 있는 상태)에서만 채워진다 — 없으면 back 은 LAN_UNSUPPORTED 로 다룬다.
+        lan: lanInfo(),
         // 이 기기가 들고 있는 계정 마스터키 epoch(0 = 열쇠 없음). 클라는 자기 grant epoch 과 같을 때만
         //  암호화를 켠다(§2.8) — 0 이면 어떤 클라와도 일치하지 않아 자동으로 평문이 된다.
         e2eeEpoch: e2eeGate.epoch(),
@@ -285,6 +368,21 @@ function run(config) {
               .catch((e) => console.warn('[control] 승인 재광고 실패:', (e && e.message) || e));
           }
         }
+        // LAN 직결 리스너는 **서버가 lan.v1 을 선언했을 때만** 연다(부팅 시점이 아니다).
+        //  데몬의 "인바운드 포트 0" 불변식을 깨는 유일한 기능이라, 서버 스위치가 켜져 있다는 사실을
+        //  확인한 뒤에만 여는 것이 옳다. 스위치를 내리면(재접속 시 caps 소멸) 즉시 닫는다.
+        void startLanIfAllowed(config);
+        return;
+      }
+      // LAN 직결 grant 사전 통지(back → 데몬) — 뷰어가 /api/daemon/lan/grant 로 받은 것과 같은
+      //  grantId/secret 을 우리도 미리 받아 둔다. 이것이 "사용자 마찰 0" 인증의 전부다: 뷰어는
+      //  challenge-response 로 secret 보유만 증명하고 토큰은 와이어에 흐르지 않는다.
+      //  구 데몬은 이 type 을 무시하므로(조건 체인) additive — back 은 caps 'lan.v1' 로 게이팅한다.
+      if (msg.type === 'lan_grant') {
+        const m = lanMod();
+        if (!m) return;
+        const r = m.addGrant(msg);
+        if (!r.ok) console.warn(`[control] lan_grant 거부: ${r.error}`);
         return;
       }
       // cpt ui_command 의 결과 회신(back → 데몬) — 대기 중인 CLI 요청으로 전달.
@@ -393,6 +491,12 @@ function run(config) {
     } catch (_) { /* noop */ }
     // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
     try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
+    // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
+    //  리스너를 여는 것은 그 불변식을 깨는 일이라 **서버가 그 기능을 쓴다고 선언했을 때만** 열어야 한다.
+    //  부팅 시점에 열면 서버 스위치(LAN_DIRECT_ENABLED)를 켜지 않은 환경의 모든 사용자 PC 가 사설
+    //  인터페이스마다 포트를 여는 결과가 된다(grant 가 없어 인증은 못 뚫리지만, 미인증 표면이 생기고
+    //  "스위치 하나로 원복"이라는 운영 약속이 깨진다).
+    //  → 실제 기동은 hello_ack 에서 serverCaps 를 확인한 뒤(startLanIfAllowed). 좌표는 lan_update 로 보낸다.
     // shim(cpt/claude/codex 래퍼 + claude 훅 설정) 멱등 생성 — 터미널 PATH 주입은 pty.js 가 담당.
     try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
     // cpt 스킬 스텁을 ~/.claude/skills 에 설치 — claude 가 cpt 를 스스로 인지·사용하게(opt-out: CPT_SKILL_INSTALL=0).
@@ -462,6 +566,8 @@ module.exports = {
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
   sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
   dispatchRpc,   // 제어채널 RPC 한 벌(평문/봉투 공용) — 테스트가 봉투 경로를 직접 검증할 수 있게 노출
+  lanRpc,        // LAN 채널 → 같은 디스패처(주입용). 테스트가 "한 벌 공유"를 직접 검증한다
+  lanInfo,       // hello 에 싣는 LAN 좌표(리스너 없으면 undefined)
   handleE2eeBegin, // E2EE 선협상 핸들러(테스트 노출 — 스코프 게이팅/거절 계약 고정용)
   handleSealedRpc, // 봉투 RPC 핸들러(테스트 노출 — "실패도 봉인" 불변식 고정용)
 };

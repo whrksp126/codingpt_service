@@ -1263,6 +1263,35 @@ async function forwardStart(req, res) {
   }
 }
 
+// POST /api/daemon/lan/grant  (accountAuth) body:{ hostDeviceId?, clientKey, kind?, scopes? }
+//  같은 Wi-Fi 의 대상 PC 에 직결하기 위한 **단명 소개장**. 서버는 주소 후보 + grant 만 주고
+//  바이트는 지나가지 않는다. hostDeviceId 규약은 forwardStart/previewStart 와 동일(미지정=활성 러너).
+//
+//  ★ 응답 규약(클라이언트 계약): 실패는 전부 `code` 로 분기한다. 문구로 판정하지 말 것.
+//    404 LAN_UNSUPPORTED   — 서버 스위치 off / 구 데몬 / 클라우드 러너 → **정상 상태**로 취급해 릴레이 유지
+//    409 LAN_HOST_OFFLINE  — 대상 PC 가 릴레이에도 없음(오프라인 UX 는 기존 경로가 판정)
+//    403 LAN_SCOPE / 429 LAN_RATE_LIMITED / 502 LAN_NOTIFY_FAILED
+//    어떤 경우에도 '데몬이 연결'·'DAEMON_OFFLINE' 문구를 쓰지 않는다(모바일 오프라인 오탐 방지 §5.3).
+async function lanGrant(req, res) {
+  const b = req.body || {};
+  const opts = connOptsOf(req);
+  const hostDeviceId = opts ? opts.runnerId : null;
+  const clientKey = typeof b.clientKey === 'string' ? b.clientKey.trim() : '';
+  if (!clientKey) return errorResponse(res, new Error('clientKey 가 필요합니다.'), 400);
+  try {
+    const grant = daemonRelayService.issueLanGrant(req.user.id, hostDeviceId, {
+      clientKey, kind: b.kind === 'pc' ? 'pc' : 'mobile',
+      scopes: Array.isArray(b.scopes) ? b.scopes : undefined,
+    });
+    return successResponse(res, grant);
+  } catch (e) {
+    // code 는 errorResponse 의 publicDetail 규약으로 실어 보낸다(응답 본문 { detail:{ code } }).
+    //  클라이언트는 문구가 아니라 이 코드로만 분기한다.
+    e.publicDetail = { code: e.code || 'LAN_ERROR' };
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
 // ALL /api/daemon/preview/:token(/*)  (무인증) — 진입 프록시. dpv 쿠키를 심고 토큰 경로를 벗겨 데몬으로.
 function previewEntry(req, res) {
   const { token } = req.params;
@@ -1296,5 +1325,5 @@ module.exports = {
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
   chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput,
-  previewPorts, previewStart, forwardStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
+  previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

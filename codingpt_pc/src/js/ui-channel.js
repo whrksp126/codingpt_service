@@ -37,7 +37,44 @@ const NARROW_W = 720;
 export function startUiChannel() {
   bindActivityReport();
   bindPreviewFocus(); // R4 — 프리뷰 native webview 내부 클릭 시 그 pane/탭 포커스
+  startLocalUiChannel(); // 같은 기기(사이드카 데몬) 직결 — back 왕복 없는 ui_command 경로
   connect();
+}
+
+// ── 로컬 UI 채널 — 같은 기기 왕복 제거 ─────────────────────────────────────────
+//  터미널의 `cpt preview open …` 은 이 PC 의 데몬에 들어간다. 지금까지는 그게 back WSS 를 한 바퀴 돌아
+//  같은 기기의 이 앱으로 왔다. 데몬이 cpt.sock 으로 직접 밀어 주면 서버가 죽어 있어도 동작한다.
+//  ⚠ 라우팅 결정은 **데몬 쪽**에 있다(명시 타겟이 이 머신 / back 오프라인 폴백 2경우만). 앱은 온 것을
+//    실행하고 회신할 뿐이고, back 경로와 같은 handlers[] 한 벌을 쓴다(분기 이중화 금지).
+let _localUiBound = false;
+export function startLocalUiChannel() {
+  if (_localUiBound) return;
+  _localUiBound = true;
+  api.onLocalUiCommand((f) => {
+    if (!f || f.t !== "ui_command") return;
+    // 로컬 경로는 항상 executor(이 화면이 유일한 수신자) — uiId 는 데몬이 'loc-' 접두사로 준다.
+    handleUiCommand({ uiId: f.uiId, cmd: f.cmd, params: f.params, executor: true }, (frame) =>
+      api.uiLocalSend({ t: "ui_result", uiId: frame.uiId, ok: !!frame.ok, result: frame.result, error: frame.error }).catch(() => {}),
+    );
+  }).catch(() => { /* 이벤트 API 미가용 — back 경로만으로 동작 */ });
+  const attach = () =>
+    api
+      .uiLocalStart({
+        clientKey: S.deviceKey(),
+        deviceId: state.daemon?.deviceId ?? null,
+        kind: "pc",
+        foreground: isReallyFocused(),
+      })
+      .catch(() => {});
+  attach();
+  // deviceId 는 페어링/로그인 후에 채워진다 → daemon 상태가 바뀌면 attach 정보를 갱신(멱등).
+  let lastKey = "";
+  S.subscribe(() => {
+    const k = `${state.daemon?.deviceId ?? ""}`;
+    if (k === lastKey) return;
+    lastKey = k;
+    attach();
+  });
 }
 
 // ── R4: 프리뷰 native webview 내부 사용자 클릭 → 그 pane/탭 포커스 ──
@@ -159,7 +196,7 @@ async function connect() {
         S.setAgentState(msg.event || msg);
         break;
       case "ui_command":
-        handleUiCommand(ws, msg);
+        handleUiCommand(msg, (frame) => send(ws, { type: "ui_result", ...frame }));
         break;
       case "appearance_event":
         // 모양 설정(계정 동기화) — 다른 기기서 변경 → 즉시 반영(서버로 되밀지 않음)
@@ -285,19 +322,24 @@ function bindActivityReport() {
 
 // 현재 "실제로 보고 있음" 여부를 present 신호로 전송. visible AND 네이티브 포커스 = present.
 function sendPresence() {
-  if (!sock || sock.readyState !== 1) return;
   let active = true;
   try {
     const visible = document.visibilityState === "visible";
     active = visible && isReallyFocused();
   } catch (_) { active = true; }
+  // 로컬 채널에도 같은 신호 — 데몬이 back 오프라인 폴백 시 "지금 보고 있는 화면"을 고른다.
+  //  (알림 present 판정은 서버가 정본이고 여기서 바뀌지 않는다 — 로컬은 라우팅 힌트일 뿐)
+  if (_localUiBound) api.uiLocalSend({ t: "presence", active }).catch(() => {});
+  if (!sock || sock.readyState !== 1) return;
   send(sock, { type: "presence", active });
 }
 
 // ── ui_command 디스패처 ──
 //  공통 규칙: params.ws(홈-상대 localPath)로 로컬 워크스페이스를 찾고, 활성이 아니면 setActive 먼저
 //  (AI 조작을 화면에 보여주는 UX). 워크스페이스 없음/실행 실패는 executor 일 때 에러로 회신.
-async function handleUiCommand(ws, msg) {
+//  reply = 회신 전송 함수(전송 계층 주입). back WSS 경로와 로컬 cpt.sock 경로가 **같은 핸들러 한 벌**을
+//  쓰도록 전송만 갈아끼운다. handlers[cmd] 의 반환 규약({ok,result})은 절대 변경 금지(과거 함정).
+async function handleUiCommand(msg, reply) {
   const { uiId, cmd, params, executor } = msg;
   let res;
   try {
@@ -313,7 +355,7 @@ async function handleUiCommand(ws, msg) {
     res = { ok: false, error: (e && e.message) || String(e) };
   }
   // broadcast 명령도 executor 1곳만 회신 — executor=false 는 적용만.
-  if (executor) send(ws, { type: "ui_result", uiId, ...res });
+  if (executor) reply({ uiId, ...res });
 }
 
 // cwd(홈-상대 localPath)로 로컬 워크스페이스 메타 찾기.

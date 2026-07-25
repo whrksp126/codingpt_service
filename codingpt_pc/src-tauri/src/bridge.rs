@@ -37,18 +37,115 @@ fn server_url() -> String {
         .unwrap_or_else(|| DEFAULT_SERVER.to_string())
 }
 
+// ── 워크스페이스 목록 로컬 캐시(오프라인 부팅) ──────────────────────────────────
+//  내 디스크의 폴더인데 목록이 서버에만 있어서, 서버가 죽으면 **로컬 폴더에 진입조차 못 했다**
+//  (로컬 터미널/IDE 는 서버와 무관하게 멀쩡한데 사이드바가 비었다). 성공 응답을 파일로 남겨
+//  실패 시 `stale:true` 를 실어 그대로 돌려준다 — UI 가 "오프라인(캐시)" 표시 + 서버 필수 조작 차단.
+//
+//  · 나이 상한 없음: 목적이 "서버 없이도 부팅"이므로 오래된 캐시도 목록으로는 유효하다.
+//  · 무효화 = 지문(fp) 불일치. fp = (serverUrl, deviceToken) 해시 → 계정 전환·서버 전환·언페어 후
+//    재페어링이면 옛 계정 목록이 절대 보이지 않는다. 암호 용도가 아니라 캐시 키 판별용이므로
+//    의존성 없는 FNV-1a 로 충분(토큰 원문은 파일에 쓰지 않는다).
+//  · 401/403(토큰 폐기·권한 박탈)은 캐시 폴백 금지 — 그건 "오프라인"이 아니라 "자격 상실"이다.
+fn ws_cache_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".codingpt").join("pc-ws-cache.json"))
+}
+
+fn cache_fp(token: &str, server: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in server
+        .as_bytes()
+        .iter()
+        .chain(b"|".iter())
+        .chain(token.as_bytes().iter())
+    {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn ws_cache_save(token: &str, server: &str, data: &serde_json::Value) {
+    let Some(p) = ws_cache_path() else { return };
+    ws_cache_save_at(&p, token, server, data);
+}
+
+fn ws_cache_load(token: &str, server: &str) -> Option<serde_json::Value> {
+    ws_cache_load_at(&ws_cache_path()?, token, server)
+}
+
+// 경로 주입형(단위 테스트가 홈을 건드리지 않고 검증할 수 있게).
+fn ws_cache_save_at(p: &std::path::Path, token: &str, server: &str, data: &serde_json::Value) {
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let body = serde_json::json!({ "v": 1, "fp": cache_fp(token, server), "at": now_ms(), "data": data });
+    if std::fs::write(p, body.to_string()).is_ok() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+}
+
+// 캐시 → 원 응답 형태 + { stale:true, cachedAt }. 없거나 지문 불일치면 None.
+fn ws_cache_load_at(p: &std::path::Path, token: &str, server: &str) -> Option<serde_json::Value> {
+    let s = std::fs::read_to_string(p).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&s).ok()?;
+    if v.get("fp").and_then(|x| x.as_str())? != cache_fp(token, server) {
+        return None;
+    }
+    let at = v.get("at").and_then(|x| x.as_u64()).unwrap_or(0);
+    // back 응답은 배열일 수도, {workspaces:[…]} 일 수도 있다(JS 추출기가 둘 다 수용) — stale 플래그를
+    //  실으려면 객체여야 하므로 배열은 { workspaces } 로 감싼다.
+    let mut out = match v.get("data")?.clone() {
+        serde_json::Value::Object(m) => serde_json::Value::Object(m),
+        other => serde_json::json!({ "workspaces": other }),
+    };
+    if let Some(m) = out.as_object_mut() {
+        m.insert("stale".into(), serde_json::Value::Bool(true));
+        m.insert("cachedAt".into(), serde_json::json!(at));
+    }
+    Some(out)
+}
+
 // 백엔드 워크스페이스(클라우드+로컬) 목록 — deviceToken 인증. 응답은 data 직접 반환(성공 규약).
+//  실패 시 last-known 캐시를 `stale:true` 로 반환(오프라인 부팅). 캐시도 없으면 기존대로 Err.
 #[tauri::command]
 pub fn fetch_workspaces() -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
-    let url = format!("{}/api/daemon/workspaces", server_url().trim_end_matches('/'));
-    let resp = ureq::get(&url)
+    let server = server_url();
+    let url = format!("{}/api/daemon/workspaces", server.trim_end_matches('/'));
+    let call = ureq::get(&url)
         .set("Authorization", &format!("Bearer {token}"))
         .timeout(std::time::Duration::from_secs(10))
-        .call()
-        .map_err(|e| format!("워크스페이스 조회 실패: {e}"))?;
-    resp.into_json::<serde_json::Value>()
-        .map_err(|e| format!("응답 파싱 실패: {e}"))
+        .call();
+    let err = match call {
+        Ok(resp) => match resp.into_json::<serde_json::Value>() {
+            Ok(v) => {
+                ws_cache_save(&token, &server, &v);
+                return Ok(v);
+            }
+            Err(e) => format!("응답 파싱 실패: {e}"),
+        },
+        // 자격 상실은 오프라인이 아니다 — 캐시로 옛 목록을 되살리지 않는다(로그인 게이트로 가야 함).
+        Err(ureq::Error::Status(code, _)) if code == 401 || code == 403 => {
+            return Err(format!("워크스페이스 조회 실패: HTTP {code}"));
+        }
+        Err(e) => format!("워크스페이스 조회 실패: {e}"),
+    };
+    match ws_cache_load(&token, &server) {
+        Some(cached) => Ok(cached),
+        None => Err(err),
+    }
 }
 
 // 로그인된 계정 프로필(deviceToken 인증) — 설정 모달 "계정" 표시용. 미페어링이면 Ok(null).
@@ -808,4 +905,73 @@ pub fn back_api(
 #[tauri::command]
 pub fn back_base() -> String {
     server_url().trim_end_matches('/').to_string()
+}
+
+// ── 워크스페이스 목록 캐시 단위 테스트 ─────────────────────────────────────────
+//  "서버가 죽어도 로컬 폴더에 진입할 수 있다"의 하부 계약을 고정한다. 홈(~/.codingpt)을 건드리지 않고
+//  임시 경로로만 검증한다(사용자 실파일 오염 금지).
+#[cfg(test)]
+mod ws_cache_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("cpt-wscache-{}-{}", std::process::id(), name));
+        p.push("pc-ws-cache.json");
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    #[test]
+    fn 왕복_stale_플래그와_권한() {
+        let p = tmp("roundtrip");
+        let data = serde_json::json!({ "workspaces": [{ "id": "w1", "localPath": "proj/a" }] });
+        ws_cache_save_at(&p, "tok-1", "http://localhost:5300", &data);
+
+        let got = ws_cache_load_at(&p, "tok-1", "http://localhost:5300").expect("캐시를 읽어야 한다");
+        assert_eq!(got["workspaces"][0]["id"], "w1");
+        assert_eq!(got["stale"], serde_json::json!(true), "UI 가 오프라인 표시/조작 차단을 하려면 stale 필수");
+        assert!(got["cachedAt"].as_u64().unwrap_or(0) > 0);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "목록도 계정 정보다 — 0600");
+        }
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn 지문_불일치는_무효화() {
+        let p = tmp("fp");
+        let data = serde_json::json!({ "workspaces": [{ "id": "w1" }] });
+        ws_cache_save_at(&p, "tok-1", "http://localhost:5300", &data);
+        // 계정 전환(토큰 변경) — 옛 계정 목록이 절대 보이면 안 된다.
+        assert!(ws_cache_load_at(&p, "tok-2", "http://localhost:5300").is_none());
+        // 서버 전환(local ↔ prod)도 다른 캐시다.
+        assert!(ws_cache_load_at(&p, "tok-1", "https://codingpt-back.ghmate.com").is_none());
+        assert!(ws_cache_load_at(&p, "tok-1", "http://localhost:5300").is_some());
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn 배열_응답은_workspaces_로_감싼다() {
+        let p = tmp("array");
+        ws_cache_save_at(&p, "t", "s", &serde_json::json!([{ "id": "w9" }]));
+        let got = ws_cache_load_at(&p, "t", "s").unwrap();
+        assert_eq!(got["workspaces"][0]["id"], "w9");
+        assert_eq!(got["stale"], serde_json::json!(true));
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn 캐시_없음_또는_손상은_none() {
+        let p = tmp("missing");
+        assert!(ws_cache_load_at(&p, "t", "s").is_none());
+        let _ = std::fs::create_dir_all(p.parent().unwrap());
+        std::fs::write(&p, "{not json").unwrap();
+        assert!(ws_cache_load_at(&p, "t", "s").is_none(), "손상 캐시는 Err 로 떨어져야 한다");
+        let _ = std::fs::remove_file(&p);
+    }
 }

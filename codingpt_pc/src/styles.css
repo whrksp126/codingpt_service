@@ -183,6 +183,8 @@ body.resizing-row { cursor: row-resize; }
 .wsr-dot.on { background: var(--accent); }
 .wsr-dot.off { background: var(--text-dim, #8b93a7); }
 .ws-row.ws-off { opacity: 0.55; } /* 꺼진 호스트 사본은 흐리게 */
+/* LAN 직결 배지 — 액센트색 금지(액티브색 남용 금지 규칙). 릴레이는 배지 자체가 없다 = 정상 */
+.wsr-lan { font-size: 9.5px; font-weight: 700; color: var(--text-dim, #8b93a7); letter-spacing: -0.2px; flex: none; }
 
 /* ── 크롬 데브툴(chii) — 프론트엔드 iframe 이 preview-host 전체를 덮고,
      "페이지 자리" 슬롯 rect 에 네이티브 프리뷰 webview 가 겹친다(devtools.js) ── */

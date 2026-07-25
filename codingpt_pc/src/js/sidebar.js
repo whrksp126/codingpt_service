@@ -7,6 +7,7 @@ import { icons } from "./icons.js";
 import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
+import lan from "./lan.js";
 
 let el = null;
 let notifPanel = null;
@@ -53,6 +54,8 @@ export function mountSidebar(container) {
   el = container;
   el.className = "sidebar";
   mountSbResizer();
+  // LAN 직결 경로 변화 시 배지만 갱신(경로 상태는 호스트 온/오프라인과 무관 — 오프라인 UX 무간섭).
+  lan.onLanChange(() => updateSidebar());
   notifPanel = document.createElement("div");
   notifPanel.className = "notif-panel hidden";
   document.body.appendChild(notifPanel);
@@ -130,6 +133,9 @@ export function updateSidebar() {
   // 맨 위에서 아래로 당김(오버스크롤) → 워크스페이스 목록 새로고침(pull-to-refresh).
   attachPullToRefresh(list);
 
+  // 서버 미가용 — 목록은 로컬 캐시(last-known)다. 이 PC 폴더 작업은 그대로 되지만 서버가 원천인
+  //  조작(추가/삭제/그룹핑)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
+  if (state.wsStale) list.appendChild(note("오프라인 — 마지막으로 본 목록"));
   if (state.wsError && !state.workspaces.length) {
     list.appendChild(note(state.paired ? "목록을 불러오지 못했습니다" : "PC를 연결하세요"));
   } else if (!state.workspaces.length) {
@@ -291,7 +297,7 @@ export function buildTopControls(withAdd = true) {
   }
   frag.append(toggle, bell);
   if (withAdd) {
-    const add = ctlBtn("plus", "새 워크스페이스", () => openNewWorkspace());
+    const add = ctlBtn("plus", "새 워크스페이스", () => { if (S.blockedOffline("워크스페이스 추가")) return; openNewWorkspace(); });
     if (state.creatingWs) add.classList.add("busy");
     frag.append(add);
   }
@@ -335,6 +341,7 @@ function wsRow(w, group) {
     (pinned ? `<span class="wsr-pin" title="고정됨">${icons.pin({ size: 12 })}</span>` : "") +
     (grouped ? `<span class="wsr-kind">${local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(grouped ? hostLabel : S.wsDisplayName(w))}</span>` +
+    (grouped && online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="같은 Wi-Fi 직접 연결">직결</span>` : "") +
     (grouped ? `<span class="wsr-dot ${online ? "on" : "off"}"></span>` : "") +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
 
@@ -343,7 +350,7 @@ function wsRow(w, group) {
   const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
   meta.innerHTML = grouped
     ? ""
-    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
+    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}${online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="같은 Wi-Fi 직접 연결">직결</span>` : ""}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -382,6 +389,13 @@ function wsRow(w, group) {
     if (row.classList.contains("dragging")) return;
     // 유령(폴더 소실) — 열지 않고 안내 다이얼로그(목록에서 삭제 제안)만.
     if (wsMissing(w)) { showMissingDialog(w); return; }
+    // 오프라인(캐시 목록): 이 PC 것만 진입. 캐시의 hostOnline 은 옛 판정이므로 "온라인 사본 제안"
+    //  흐름(=거짓 정보)을 태우지 않고, 내 PC 워크스페이스는 로컬 직결로 그냥 연다.
+    if (state.wsStale) {
+      if (!S.isThisHost(w)) { S.blockedOffline("다른 기기의 워크스페이스 열기"); return; }
+      S.setActive(w.id);
+      return;
+    }
     // 호스트가 꺼진 사본인데 같은 프로젝트의 켜진 사본이 있으면 원탭 폴백 제안.
     if (local && w.hostOnline === false) {
       const key = w.projectId || w.id;
@@ -498,11 +512,13 @@ function wsMenuItems(w) {
     { icon: icons.arrowTop({ size: 15 }), label: "맨 위로 이동", onClick: () => S.moveWs(w.id, "top") },
     { type: "sep" },
   ];
-  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: "프로젝트에서 분리", onClick: async () => { try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
-  else items.push({ icon: icons.folder({ size: 15 }), label: "다른 프로젝트와 합치기", onClick: () => showAttachMenu(w) });
+  // 서버가 원천인 조작 3종(분리/합치기/삭제)은 오프라인(캐시 목록)에서 막는다 — 캐시 기준으로
+  //  실행하면 서버 메타를 옛 상태로 되돌리거나(그룹핑) 실패만 남는다.
+  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: "프로젝트에서 분리", onClick: async () => { if (S.blockedOffline("프로젝트 분리")) return; try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
+  else items.push({ icon: icons.folder({ size: 15 }), label: "다른 프로젝트와 합치기", onClick: () => { if (S.blockedOffline("프로젝트 합치기")) return; showAttachMenu(w); } });
   // 기기(호스트)/클라우드 행 공통 — 목록 메타만 삭제(폴더/파일 무영향). 그룹 헤더에는 메뉴 없음.
   items.push({ type: "sep" });
-  items.push({ icon: icons.trash({ size: 15 }), label: "워크스페이스 삭제", danger: true, onClick: () => confirmDeleteWs(w) });
+  items.push({ icon: icons.trash({ size: 15 }), label: "워크스페이스 삭제", danger: true, onClick: () => { if (S.blockedOffline("워크스페이스 삭제")) return; confirmDeleteWs(w); } });
   return items;
 }
 
@@ -550,6 +566,7 @@ function showMissingDialog(w) {
 }
 
 async function deleteWs(w) {
+  if (S.blockedOffline("워크스페이스 삭제")) return;
   try {
     await api.wsDelete(w.id);
     localMissing.delete(w.id);
@@ -658,6 +675,8 @@ export async function refreshWsMeta() {
       try {
         rt.ports = await api.listenPorts(w.localPath || "");
       } catch (_) {}
+    } else if (state.wsStale) {
+      rt.ports = []; // 오프라인(캐시 목록) — 릴레이 조회가 불가하므로 무의미한 호출을 하지 않는다
     } else {
       // 다른 PC 워크스페이스 — 포트는 그 호스트 데몬에 조회(브랜치는 신선도 메타 w.git 폴백이 이미 있음).
       //  로컬 lsof 를 원격 사본 경로에 돌리면 "이 기기의" 포트가 잡히는 오답이라 반드시 릴레이로.

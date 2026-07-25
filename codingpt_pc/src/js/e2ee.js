@@ -62,6 +62,9 @@ export function e2eeCaps() {
   if (e2ee.scope === "stream") caps.push("e2ee.stream.v1");
   return caps;
 }
+/** 정책이 'required' 인가 — LAN 직결(평문 leg)을 막는 근거. lan.js 가 순환 없이 조회한다. */
+export function policyRequired() { return e2ee.policy === "required"; }
+
 /** policy='required' 인데 준비가 안 됐다 = 암호화가 필요한 조작을 막고 사유를 보여준다. */
 export function e2eeGate() {
   if (e2ee.policy !== "required" || ready()) return null;
@@ -246,3 +249,7 @@ export function startE2ee() {
   void refreshE2ee();
   setInterval(() => { if (state.paired) void refreshE2ee(); }, 60000);
 }
+
+// lan.js 가 순환 import 없이 정책을 물어볼 수 있게 전역에 최소 표면만 노출한다.
+//  (모듈 간 상호 참조를 만들면 초기화 순서에 따라 한쪽이 undefined 가 된다)
+try { globalThis.__cptE2ee = { policyRequired }; } catch (_) { /* noop */ }

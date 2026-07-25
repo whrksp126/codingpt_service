@@ -23,6 +23,8 @@ const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
 const { SERVER_CAPS } = require('../config/caps');
+const lanDirect = require('./lanDirectService');
+const lanCfg = require('../config/lanDirect');
 // (구) pushService 직접 발송(maybePush)은 제거 — FCM 은 notificationService.createNotification 내부에서 한 번만.
 
 const wss = new WebSocket.Server({ noServer: true });
@@ -72,6 +74,10 @@ function listRunners(userId) {
     platform: c.platform, active: c.deviceId === e.activeRunnerId, connectedAt: c.connectedAt,
     caps: c.caps || [], // 진단용(hello.caps). 구 데몬은 [] — 구 클라이언트는 이 필드를 무시한다.
     e2eeEpoch: c.e2eeEpoch || 0, // 호스트의 열쇠 세대(0=없음). 클라 잠금 배지/게이팅 판정용.
+    // LAN 직결 가능성(주소 신고 + caps + 서버 스위치 전부 참). 클라가 grant 왕복 없이 "시도할 가치"를
+    //  판단하는 힌트다(값은 절대 주소를 노출하지 않는다 — 주소는 grant 응답에서만).
+    lanCapable: !!(c.lan && (c.caps || []).includes('lan.v1') && lanCfg.lanEnabled()),
+    lanEpoch: c.lanEpoch || 0,
   }));
 }
 // 연결된 클라우드 러너 목록(동면 스위퍼용) — 활동시각/바쁨 상태 포함.
@@ -188,6 +194,12 @@ function registerControl(ws, device) {
     // 이 호스트가 들고 있는 E2EE 열쇠 세대(hello.e2eeEpoch). 0/null = 열쇠 없음(구 데몬 포함).
     //  클라이언트가 "내 grant epoch == 호스트 epoch" 인지 보고 봉인 여부를 정하는 근거(§2.8).
     e2eeEpoch: 0,
+    // LAN 직결(기능4) — 데몬이 hello.lan / lan_update 로 신고한 사설 IP 후보 + 리스너 포트.
+    //  **DB 에 넣지 않는다**(LAN IP 는 휘발성이고 마이그레이션 가치가 없다 — 설계 §2.5).
+    //  null = 구 데몬 또는 CPT_LAN=0 → grant 라우트가 404 LAN_UNSUPPORTED 로 릴레이 유지.
+    lan: null,
+    lanEpoch: 0,                // 주소가 바뀔 때마다 +1 — 클라이언트의 재승격(revival) 트리거
+    machineId: '',              // 데몬 머신 영속 id(옵셔널) — 클라가 네트워크 지문을 기기별로 묶는 데 씀
     ws,
     connectedAt: Date.now(),
     lastSeenFlushedAt: 0,
@@ -237,6 +249,10 @@ function registerControl(ws, device) {
           fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName, e2eeEpoch: nextEpoch });
         }
       }
+      // LAN 직결 주소 신고(옵셔널·additive) — 구 데몬은 필드가 없어 lan 이 null 로 남는다(= 릴레이만).
+      //  hello 는 재연결/버전업마다 오므로 그때마다 최신 신고로 덮는다(다운그레이드 후 유령 주소 방지).
+      if ('lan' in msg) applyLanInfo(userId, conn, msg.lan);
+      if (typeof msg.machineId === 'string') conn.machineId = msg.machineId.slice(0, 64);
       DaemonDevice.update(
         { device_name: conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
         { where: { id: conn.deviceId } }
@@ -244,6 +260,11 @@ function registerControl(ws, device) {
       if (conn.caps.length) console.log(`[daemonRelay] 데몬 caps device=#${conn.deviceId} v=${conn.daemonVersion} caps=${conn.caps.join(',')}`);
       // serverCaps 는 additive — 구 데몬의 hello_ack 핸들러는 serverTime 만 읽고 나머지를 무시한다.
       try { ws.send(JSON.stringify({ type: 'hello_ack', serverTime: new Date().toISOString(), serverCaps: SERVER_CAPS })); } catch (_) { /* noop */ }
+      return;
+    }
+    if (msg.type === 'lan_update') {
+      // 인터페이스 변경/리스너 재바인딩 — 데몬이 주소가 바뀔 때만 보낸다(30s 폴링 diff).
+      applyLanInfo(userId, conn, msg.lan);
       return;
     }
     if (msg.type === 'stream_fail' && msg.streamToken) {
@@ -1027,6 +1048,95 @@ function handleForwardUpgrade(token, req, socket, head) {
   });
 }
 
+// ── LAN 직결 시그널링(기능4) ───────────────────────────────────────────
+// 서버는 "소개장"만 낸다: 데몬의 사설 IP 후보를 보관하고, 뷰어가 요청하면 단명 grant 를 만들어
+//  ① 대상 데몬에 제어 WS 로 미리 통지 ② 뷰어에 (주소 후보 + grant) 회신.
+//  실제 바이트는 서버를 거치지 않는다 → 릴레이(bridge/proxyHttp)는 **무수정**으로 영구 폴백에 남는다.
+
+// hello.lan / lan_update 반영. 주소가 실제로 바뀐 경우만 lanEpoch 를 올리고 클라이언트에 통지한다
+//  (통지 = 재승격 트리거. 무의미한 팬아웃은 사이드바 재랜더만 유발하므로 diff 로 억제).
+function applyLanInfo(userId, conn, raw) {
+  const next = lanDirect.normLanInfo(raw);
+  const prev = conn.lan;
+  if (lanDirect.sameLanInfo(prev, next)) return;
+  conn.lan = next;
+  conn.lanEpoch += 1;
+  console.log(`[daemonRelay] LAN 주소 신고 device=#${conn.deviceId} ${next ? `${next.addrs.map((a) => a.host).join(',')}:${next.port}` : '(없음)'} epoch=${conn.lanEpoch}`);
+  // 기존 runner_status 채널 재사용(새 WS 이벤트 타입 추가 금지 규율). online:true 로만 보내므로
+  //  오프라인 오탐이 원리적으로 불가능하다 — 클라의 applyHostOnline 은 변화 없으면 즉시 return.
+  fanoutRunnerStatus(userId, {
+    deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName,
+    e2eeEpoch: conn.e2eeEpoch || 0, lanCapable: !!next, lanEpoch: conn.lanEpoch,
+  });
+}
+
+function lanErr(message, statusCode, code) {
+  return Object.assign(new Error(message), { statusCode, code });
+}
+
+/**
+ * 단명 LAN grant 발급 + 대상 데몬 사전 통지.
+ *  · (뷰어 clientKey, 대상 PC, purpose=scopes) 에 바인딩 · 단일 사용 · 짧은 TTL
+ *  · 서버는 grant 를 검증하지 않는다(검증 주체 = 데몬 리스너). 그래서 서버가 secret 을 알아도
+ *    사설망 인접성 + challenge-response 없이는 쓸 수 없다.
+ *  · **에러 문구에 '데몬이 연결'/'DAEMON_OFFLINE' 을 절대 넣지 않는다** — 모바일이 그 문구 정규식으로
+ *    "호스트 오프라인"을 판정하기 때문(설계 §5.3). LAN 실패가 오프라인 UX 를 켜면 그게 곧 오탐이다.
+ */
+function issueLanGrant(userId, hostDeviceId, opts) {
+  if (!lanCfg.lanEnabled()) throw lanErr('LAN 직결이 비활성화되어 있습니다.', 404, 'LAN_UNSUPPORTED');
+  const rid = Number.isInteger(hostDeviceId) ? hostDeviceId
+    : (typeof hostDeviceId === 'string' && /^\d+$/.test(hostDeviceId) ? parseInt(hostDeviceId, 10) : null);
+  const conn = pickConn(userId, rid != null ? { runnerId: rid } : undefined);
+  // 대상 PC 가 릴레이에도 안 붙어 있음 = LAN 을 시도할 근거가 없다. 오프라인 UX 판정은
+  //  기존 runner_status/리컨실러가 하고, 여기서는 코드만 준다(클라는 조용히 릴레이 유지).
+  if (!conn) throw lanErr('대상 PC 에 직결할 수 없습니다.', 409, 'LAN_HOST_OFFLINE');
+  // 클라우드 러너는 컨테이너 안이라 LAN 개념이 없다(같은 Wi-Fi 가 아님).
+  if (conn.kind !== 'local') throw lanErr('이 호스트는 직결을 지원하지 않습니다.', 404, 'LAN_UNSUPPORTED');
+  // caps 교집합 게이팅 — 데몬이 lan.v1 을 신고하지 않으면 리스너가 없다(구 데몬/CPT_LAN=0).
+  if (!(conn.caps || []).includes('lan.v1') || !conn.lan) {
+    throw lanErr('이 호스트는 직결을 지원하지 않습니다.', 404, 'LAN_UNSUPPORTED');
+  }
+  // scope = 서버 허용(LAN_SCOPES) ∩ 클라 요청 ∩ 데몬 신고. 데몬이 안 쓰는 scope 를 실어 주면
+  //  뷰어가 그 채널을 열려다 거부당해 경로가 헛되게 강등된다 → 발급 단계에서 미리 깎는다.
+  let allowed = lanCfg.allowedScopes();
+  if (Array.isArray(conn.lan.daemonScopes)) allowed = allowed.filter((s) => conn.lan.daemonScopes.includes(s));
+  const scopes = lanDirect.normScopes(opts && opts.scopes, allowed);
+  if (!scopes.length) throw lanErr('허용된 직결 범위가 없습니다.', 403, 'LAN_SCOPE');
+  if (!lanDirect.allowGrant(userId, conn.deviceId)) {
+    throw lanErr('직결 요청이 너무 잦습니다.', 429, 'LAN_RATE_LIMITED');
+  }
+
+  const grant = lanDirect.newGrant({
+    hostDeviceId: conn.deviceId,
+    clientKey: (opts && opts.clientKey) || '',
+    kind: (opts && opts.kind) || 'mobile',
+    scopes,
+    ttlMs: lanCfg.grantTtlMs(),
+  });
+  try {
+    conn.ws.send(JSON.stringify({
+      type: 'lan_grant', grantId: grant.grantId, secret: grant.secret,
+      clientKey: grant.clientKey, kind: grant.kind, scopes: grant.scopes, expiresAt: grant.expiresAt,
+    }));
+  } catch (_) {
+    // 통지 실패 = 데몬이 이 grant 를 모른다 → 뷰어에 주면 반드시 실패한다. 폐기하고 릴레이로.
+    throw lanErr('직결 준비에 실패했습니다.', 502, 'LAN_NOTIFY_FAILED');
+  }
+  conn.lastActivityAt = Date.now();
+  return {
+    grantId: grant.grantId,
+    secret: grant.secret,
+    expiresAt: grant.expiresAt,
+    ttlMs: grant.ttlMs,
+    scopes: grant.scopes,
+    hostDeviceId: conn.deviceId,
+    machineId: conn.machineId || null,
+    proto: conn.lan.proto,
+    lanEpoch: conn.lanEpoch,
+    endpoints: lanDirect.endpointsOf(conn.lan),
+  };
+}
+
 // ── 양방향 브리지 ─────────────────────────────────────────────────────
 // 메시지 단위 릴레이(텍스트/바이너리 구분 보존 — resize JSON 은 텍스트, stdin 은 바이너리).
 // raw 소켓 pipe 는 WS 마스킹(클라→서버만 마스킹) 때문에 불가.
@@ -1158,6 +1268,7 @@ const _sweeper = setInterval(() => {
   for (const [t, s] of fwdTokens) { if (s.expiresAt < now) fwdTokens.delete(t); }
   for (const [t, s] of uiTickets) { if (s.expiresAt < now) uiTickets.delete(t); }
   for (const [u, r] of uiCmdRate) { if (now - r.windowStart >= 1000) uiCmdRate.delete(u); } // 지난 창 카운터 정리
+  lanDirect.sweepGrantRate(now); // LAN grant 발급 카운터(1분 창) 정리
 }, 5 * 60 * 1000);
 if (_sweeper.unref) _sweeper.unref();
 
@@ -1170,6 +1281,7 @@ module.exports = {
   callRpc,
   issueTerminalToken,
   issueForwardToken,
+  issueLanGrant,
   handleForwardUpgrade,
   getConnection,
   disconnectDevice,

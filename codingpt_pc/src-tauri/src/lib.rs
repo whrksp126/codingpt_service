@@ -628,6 +628,13 @@ pub fn run() {
             cptsock::forward_start,
             cptsock::forward_stop,
             cptsock::e2ee_local,
+            // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)
+            cptsock::lan_probe,
+            cptsock::lan_status,
+            cptsock::lan_rpc,
+            cptsock::sync_checkpoint,
+            cptsock::ui_local_start,
+            cptsock::ui_local_send,
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,

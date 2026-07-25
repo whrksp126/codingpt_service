@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 const authMiddleware = require('../middlewares/authMiddleware');
 const accountAuth = require('../middlewares/accountAuth');
 const daemonController = require('../controllers/daemonController');
@@ -128,6 +129,33 @@ router.get('/sync/checkpoints', accountAuth, syncController.listCheckpoints);
 router.get('/preview/ports', accountAuth, daemonController.previewPorts);
 router.post('/preview/start', accountAuth, daemonController.previewStart);
 router.post('/forward/start', accountAuth, daemonController.forwardStart); // 포트 포워딩 토큰(WS 는 app.js upgrade)
+// LAN 직결 소개장(기능4) — 뷰어(폰/PC/데몬)가 대상 PC 의 사설 IP + 단명 grant 를 받는다.
+//  IP당 15분/60회. Cloudflare→nginx 뒤라 req.ip 가 엣지 IP 로 잡히므로 실 클라이언트 IP 로 키를 고정
+//  (userRoutes.js:10 realClientIp 와 동일 규칙 — 그쪽을 고치면 여기도 같이 고칠 것).
+//  IPv6 는 /64 를 한 사용자로 묶는다(ipKeyGenerator) — 안 묶으면 IPv6 사용자가 주소를 바꿔 상한을 우회한다.
+const lanClientIp = (req) => {
+  const raw = (() => {
+    const cf = req.headers['cf-connecting-ip'];
+    if (cf) return String(cf).trim();
+    const xr = req.headers['x-real-ip'];
+    if (xr) return String(xr).trim();
+    const xff = req.headers['x-forwarded-for'];
+    if (xff) return String(xff).split(',')[0].trim();
+    return req.ip;
+  })();
+  return typeof rateLimit.ipKeyGenerator === 'function' ? rateLimit.ipKeyGenerator(raw) : raw;
+};
+const lanGrantLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: lanClientIp,
+  // 클라이언트는 code 로 분기한다 — 429 도 LAN 전용 코드로 통일(오프라인 오탐 문구 금지 §5.3).
+  message: { success: false, message: '직결 요청이 너무 많습니다.', code: 'LAN_RATE_LIMITED' },
+});
+router.post('/lan/grant', lanGrantLimiter, accountAuth, daemonController.lanGrant);
+
 router.all('/preview/:token', daemonController.previewEntry);
 router.all('/preview/:token/*', daemonController.previewEntry);
 

@@ -7,6 +7,7 @@ import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
+import lan from "./lan.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
@@ -142,7 +143,13 @@ function ensureLocalForward(port, hostDeviceId) {
   const promise = (async () => {
     const r = await api.backApi("POST", "/api/daemon/forward/start", { port, hostDeviceId });
     if (!r?.token) throw new Error("포워딩 토큰 발급 실패");
-    const fr = await api.forwardStart(port, r.token);
+    // LAN 직결(기능4) — 같은 Wi-Fi 면 직결 좌표를 함께 넘긴다. 데몬이 **연결마다** 직결을 먼저 쓰고,
+    //  실패하면 버퍼를 승계해 그 연결만 릴레이(token)로 넘긴다 → 사용자 무자각.
+    //  grant 취득 실패/미지원은 null 이라 여기서 아무 일도 일어나지 않는다(기존 동작 그대로).
+    let upstream = null;
+    try { upstream = await lan.upstreamFor(hostDeviceId, port); } catch (_) { upstream = null; }
+    const fr = await api.forwardStart(port, r.token, upstream);
+    void lan.refreshStatus(hostDeviceId); // 배지(직결) 갱신 — 실패는 조용히 무시
     if (fr?.ok !== true) {
       if (fr?.error === "EADDRINUSE") console.warn(`[preview] 이 PC 의 포트 ${port} 가 사용 중이라 프록시 모드로 엽니다`);
       return false;

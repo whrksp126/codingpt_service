@@ -75,12 +75,107 @@ function resolveUi(id, msg) {
   else p.reject(Object.assign(new Error((msg && msg.error) || 'UI 명령 실패'), { code: (msg && msg.code) || 'UI_ERROR' }));
 }
 
+// ── 로컬 UI 채널(F0-c) — 같은 기기 안에서 back 을 왕복하지 않는 ui_command 경로 ────────────────
+//  cpt.sock 은 one-shot 규약이지만 `ui.attach` 만 예외로 커넥션을 유지해 양방향 NDJSON 채널이 된다
+//   (데몬→앱 {t:'ui_command',uiId:'loc-n',cmd,params} / 앱→데몬 {t:'ui_result',uiId,ok,result,error}).
+//  ⚠ **전면 단축 금지.** executor(어느 화면에서 실행할지) 선정은 back 만 가진 전 기기 presence 로 해야
+//    한다 — 폰에서 보고 있는데 명령이 옆 PC 로 가면 회귀다. 그래서 로컬로 가는 경우는 배타적으로 둘뿐:
+//     ① target 이 명시됐고 그 deviceId|clientKey 가 이 머신의 attach 클라이언트와 일치
+//     ② back 제어 WS 가 없다(지금까지 무조건 BACK_OFFLINE 이던 상황) → 로컬 화면이 있으면 그리로
+const localUiClients = new Set(); // { conn, clientKey, deviceId, kind, foreground, at, pending:Map }
+let localUiSeq = 0;
+const MAX_UI_FRAME_BYTES = 8 * 1024 * 1024; // ui_result(browser.snapshot/screenshot)는 256KB 를 넘긴다
+
+function attachLocalUi(conn, a) {
+  const c = {
+    conn,
+    clientKey: a && a.clientKey ? String(a.clientKey) : null,
+    deviceId: a && a.deviceId != null && Number.isInteger(Number(a.deviceId)) ? Number(a.deviceId) : null,
+    kind: a && a.kind ? String(a.kind) : 'pc',
+    foreground: !!(a && a.foreground),
+    at: Date.now(),
+    pending: new Map(),
+  };
+  localUiClients.add(c);
+  console.log(`[cpt] 로컬 UI 채널 attach (kind=${c.kind} client=${c.clientKey || '-'} device=${c.deviceId ?? '-'})`);
+  return c;
+}
+
+function detachLocalUi(c) {
+  if (!localUiClients.delete(c)) return;
+  for (const [, p] of c.pending) {
+    clearTimeout(p.timer);
+    p.reject(Object.assign(new Error('로컬 UI 채널이 끊겼습니다'), { code: 'UI_LOCAL_GONE' }));
+  }
+  c.pending.clear();
+}
+
+function handleLocalUiFrame(c, f) {
+  if (!f || typeof f !== 'object') return;
+  if (f.t === 'ui_result') {
+    const p = c.pending.get(f.uiId);
+    if (!p) return; // 타임아웃 후 늦게 온 회신 — 무시
+    clearTimeout(p.timer);
+    c.pending.delete(f.uiId);
+    if (f.ok) p.resolve(f.result);
+    else p.reject(Object.assign(new Error(f.error || 'UI 명령 실패'), { code: f.code || 'UI_ERROR' }));
+    return;
+  }
+  // 앱 창 포커스 변화 — 로컬 클라이언트가 여러 개일 때(예: 개발 중 2개) 어디로 보낼지 판단에 쓴다.
+  if (f.t === 'presence') { c.foreground = !!f.active; return; }
+}
+
+function localUiFor(target) {
+  if (!target) return null;
+  for (const c of localUiClients) {
+    if (target.deviceId != null && c.deviceId != null && c.deviceId === Number(target.deviceId)) return c;
+    if (target.clientKey && c.clientKey && c.clientKey === String(target.clientKey)) return c;
+  }
+  return null;
+}
+
+// back 오프라인 폴백용 — 포커스된 화면 우선, 없으면 가장 최근 attach.
+function pickLocalUi() {
+  let best = null;
+  for (const c of localUiClients) {
+    if (!best) { best = c; continue; }
+    if (c.foreground !== best.foreground) { if (c.foreground) best = c; continue; }
+    if (c.at > best.at) best = c;
+  }
+  return best;
+}
+
+function sendLocalUiCommand(c, cmd, params, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const id = `loc-${++localUiSeq}`; // 'loc-' 접두사 = back 경로(uuid)와 절대 섞이지 않는다
+    const t = Math.min(UI_TIMEOUT_MAX_MS, timeoutMs || (cmd.startsWith('browser.') ? UI_TIMEOUT_BROWSER_MS : UI_TIMEOUT_DEFAULT_MS));
+    const timer = setTimeout(() => {
+      c.pending.delete(id);
+      reject(Object.assign(new Error('UI 명령 응답 시간 초과'), { code: 'UI_TIMEOUT' }));
+    }, t);
+    c.pending.set(id, { resolve, reject, timer });
+    try {
+      c.conn.write(JSON.stringify({ t: 'ui_command', uiId: id, cmd, params: params || {}, timeoutMs: t }) + '\n');
+    } catch (e) {
+      clearTimeout(timer);
+      c.pending.delete(id);
+      reject(e);
+    }
+  });
+}
+
 // ui_command 를 back 으로 보내고 ui_result 를 기다린다(P3 왕복).
 //  mode: 'broadcast'(전 기기) | 'target'(지정 기기 1곳, target 없으면 활성 기기) | 'executor'(구 호환=활성 기기).
 //  target: {deviceId}|{clientKey} — mode:'target' 에서 명시 기기. undefined 면 back 이 활성 기기 선정.
 function sendUiCommand(cmd, params, { mode = 'broadcast', target, timeoutMs } = {}) {
+  const backLive = !!(controlWs && controlWs.readyState === 1);
+  // ① 명시 타겟이 이 머신의 화면 → back 미경유(같은 기기 왕복 제거)
+  let local = target ? localUiFor(target) : null;
+  // ② back 오프라인 폴백 — 여기까지 오면 원래는 무조건 BACK_OFFLINE 이었다(= back 죽으면 cpt 전멸)
+  if (!local && !backLive) local = pickLocalUi();
+  if (local) return sendLocalUiCommand(local, cmd, params, timeoutMs);
   return new Promise((resolve, reject) => {
-    if (!controlWs || controlWs.readyState !== 1) {
+    if (!backLive) {
       return reject(Object.assign(new Error('back 에 연결돼 있지 않습니다(데몬 오프라인)'), { code: 'BACK_OFFLINE' }));
     }
     const id = crypto.randomUUID();
@@ -117,6 +212,59 @@ async function backFetch(method, apiPath, body) {
   try { json = JSON.parse(text); } catch (_) { /* 비 JSON 응답 */ }
   if (!res.ok) throw new Error((json && (json.message || json.error)) || `HTTP ${res.status}`);
   return json;
+}
+
+// ── 로컬 자동 체크포인트(F0-a) ──────────────────────────────────────────────
+//  back 신규 REST 2개에 의존한다(스펙은 이 함수가 보내는 body/기대 응답이 정본):
+//    POST /api/daemon/sync/checkpoint/begin  {workspaceId, reason, cwd?}
+//      → {checkpointId, putUrls:{bundle,session}, cwd}
+//    POST /api/daemon/sync/checkpoint/commit {workspaceId, checkpointId, skipped?, unchanged?,
+//                                             baseCommit, commit, sizeBytes, hasSession, enc?, epoch?}
+//      → {…entry, head}
+//  둘 중 하나라도 없는 back(=미배포)이면 begin 이 실패하고 호출측(PC 앱)이 구 경로로 폴백한다.
+const syncLocalInflight = new Set(); // wsId — 같은 워크스페이스 중복 체크포인트 방지(주기 트리거 겹침)
+
+async function localCheckpoint(a) {
+  const wsId = String(a.workspaceId || a.wsId || '').trim();
+  if (!wsId) throw new Error('workspaceId 가 필요합니다.');
+  if (syncLocalInflight.has(wsId)) return { accepted: false, busy: true }; // 진행 중 — 다음 트리거가 재시도
+  const syncLib = lazyMod('./sync');
+  if (!syncLib) throw new Error('이 데몬에는 sync 모듈이 없습니다.');
+  const reason = String(a.reason || 'periodic');
+  const begin = await backFetch('POST', '/api/daemon/sync/checkpoint/begin', {
+    workspaceId: wsId, reason, ...(a.cwd ? { cwd: a.cwd } : {}),
+  });
+  const b = (begin && (begin.data || begin)) || {};
+  const checkpointId = b.checkpointId;
+  const putUrls = b.putUrls;
+  const cwd = a.cwd || b.cwd;
+  if (!checkpointId || !putUrls || !putUrls.bundle || !cwd) {
+    throw new Error('체크포인트 좌표 발급 실패(begin 응답 형식)');
+  }
+  syncLocalInflight.add(wsId);
+  // sync_event(sync_progress) push 대상 = 살아 있는 제어 WS. 없으면 null(=푸시 없음, 진행은 정상).
+  const pushWs = controlWs && controlWs.readyState === 1 ? controlWs : null;
+  (async () => {
+    const r = (await syncLib.handle('sync.checkpoint', {
+      cwd, reason, checkpointId, putUrls, wsId,
+      includeAgentSession: a.includeAgentSession !== false,
+    }, pushWs)) || {};
+    await backFetch('POST', '/api/daemon/sync/checkpoint/commit', {
+      workspaceId: wsId,
+      checkpointId: r.checkpointId || checkpointId,
+      skipped: !!r.skipped,
+      unchanged: !!r.unchanged,
+      baseCommit: r.baseCommit || null,
+      commit: r.commit || null,
+      sizeBytes: r.sizeBytes || 0,
+      hasSession: !!r.hasSession,
+      // 봉인 좌표(E2EE) — 구 back 은 무시(additive). 평문이면 아예 실리지 않는다.
+      ...(r.enc ? { enc: r.enc, epoch: r.epoch } : {}),
+    });
+  })()
+    .catch((e) => console.warn(`[cpt] 로컬 체크포인트 실패 ws=${wsId} ck=${checkpointId}: ${e.message}`))
+    .finally(() => syncLocalInflight.delete(wsId));
+  return { accepted: true, background: true, local: true, checkpointId };
 }
 
 // --on <deviceId|이름 부분일치|kind> → target {deviceId}|{clientKey}. 미지정=undefined(=활성 기기).
@@ -297,6 +445,13 @@ async function dispatch(req, conn) {
     // bind 실패는 { ok:false, error:'EADDRINUSE' } 구조화 반환 — 호출측이 프록시 폴백 판단.
     return forwardLib.startLocalForward({ serverUrl: cfg.serverUrl.replace(/\/+$/, ''), port, token });
   }
+  // 자동 체크포인트(PC 앱 내부용) — "PC 앱 → back → 제어 WS → **같은 머신의 사이드카 데몬**" 왕복 제거.
+  //  presigned URL·manifest 는 objectstore 자격증명을 가진 back 만 만들 수 있다(데몬은 무접촉 원칙) →
+  //  왕복을 없애는 최선은 **데몬이 back REST 를 직접 호출**하는 것: begin(좌표 발급) → 로컬 번들·업로드 → commit.
+  //  begin 만 await 한다: 즉시 끝나고, 실패(구 back = 404)를 호출측에 알려 기존 경로로 폴백시킬 수 있다.
+  //  무거운 번들/업로드는 background — 대형 워크스페이스는 분 단위라 소켓 왕복으로 기다릴 수 없다.
+  //  forward.* 와 같이 CAPABILITIES 비공개(내부용) + resolveCtx 전 처리(tmux ctx 불필요).
+  if (cmd === 'sync.checkpoint') return localCheckpoint(req.args || {});
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
   const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
@@ -910,10 +1065,28 @@ function start() {
   server = net.createServer((conn) => {
     let buf = '';
     let handled = false; // 한 커넥션 = 한 요청(one-shot). 블로킹 대기 중 도착한 추가 데이터는 무시한다.
+    let uiClient = null; // ui.attach 로 승격되면 지속(양방향) 모드 — one-shot 규약의 유일한 예외
     // ⚠ conn.setTimeout 을 걸지 말 것 — 원격 승인(approval.request)은 이 커넥션을 수 분간 유지한다.
     //  유휴 종료를 넣으면 사용자가 폰에서 답하기 전에 대기가 끊겨 매번 TUI 로 폴백한다.
+    const drainUiFrames = () => {
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (!line.trim()) continue;
+        let f = null;
+        try { f = JSON.parse(line); } catch (_) { continue; } // 깨진 프레임 1개는 건너뛴다(연결 유지)
+        handleLocalUiFrame(uiClient, f);
+      }
+    };
     conn.on('data', async (d) => {
       buf += d.toString();
+      if (uiClient) {
+        // 지속 모드 — NDJSON 프레임 스트림. 프레임 상한은 one-shot 보다 크다(ui_result 페이로드).
+        if (buf.length > MAX_UI_FRAME_BYTES) { try { conn.destroy(); } catch (_) { /* noop */ } return; }
+        drainUiFrames();
+        return;
+      }
       if (buf.length > MAX_REQ_BYTES) { try { conn.end(); } catch (_) { /* noop */ } return; }
       const i = buf.indexOf('\n');
       if (i < 0 || handled) return;
@@ -921,6 +1094,14 @@ function start() {
       let req;
       try { req = JSON.parse(buf.slice(0, i)); } catch (_) { try { conn.end(); } catch (_) { /* noop */ } return; }
       const id = req && req.id;
+      // ui.attach = 로컬 UI 채널 승격(응답 후 닫지 않는다). CAPABILITIES 비공개(내부용 — PC 앱 전용).
+      if (req && req.cmd === 'ui.attach') {
+        buf = buf.slice(i + 1);
+        uiClient = attachLocalUi(conn, req.args || {});
+        try { conn.write(JSON.stringify({ id, ok: true, result: { attached: true, pid: process.pid } }) + '\n'); } catch (_) { /* noop */ }
+        drainUiFrames(); // attach 요청과 같은 청크에 프레임이 붙어 왔을 수 있다
+        return;
+      }
       try {
         // conn 을 넘긴다 — 장기 대기 커맨드가 "요청자가 사라짐"(훅 프로세스 종료)을 감지해 즉시 정리한다.
         const result = await dispatch(req, conn);
@@ -930,6 +1111,7 @@ function start() {
       }
       try { conn.end(); } catch (_) { /* one-shot */ }
     });
+    conn.on('close', () => { if (uiClient) detachLocalUi(uiClient); });
     conn.on('error', () => { /* noop — 대기 중 상대가 죽으면 EPIPE. close 로 처리된다 */ });
   });
   server.on('error', (e) => {
@@ -955,4 +1137,6 @@ module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
+  // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
+  _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },
 };

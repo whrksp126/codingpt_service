@@ -162,13 +162,24 @@ export const api = {
 
   // ── 원격 프리뷰 로컬 포트 포워더 — 사이드카 데몬(cpt.sock)에 리스너 기동/정리 지시 ──
   //  결과 { ok:true } | { ok:false, error:'EADDRINUSE'… } (실패는 프록시 폴백 신호).
-  forwardStart: (port, token) => invoke("forward_start", { port, token }),
+  // upstream(옵셔널) = LAN 직결 좌표(lan.js upstreamFor). 항상 token 도 함께 넘긴다(릴레이=폴백 전제).
+  forwardStart: (port, token, upstream) => invoke("forward_start", { port, token, upstream: upstream ?? null }),
   forwardStop: (port) => invoke("forward_stop", { port }),
+  // LAN 직결(기능4) — 사이드카 데몬 위임. 구 데몬/미지원이면 reject → 호출측이 조용히 릴레이 폴백.
+  lanProbe: (hostDeviceId) => invoke("lan_probe", { hostDeviceId }),
+  lanStatus: (hostDeviceId) => invoke("lan_status", { hostDeviceId }),
+  lanRpc: (hostDeviceId, method, params) => invoke("lan_rpc", { hostDeviceId, method, params: params || {} }),
 
   // ── 종단간 암호화(기능2) — 사이드카 데몬 위임(cpt.sock, `e2ee.` 접두사만 Rust 가 통과) ──
   //  ★ 마스터키는 데몬의 ~/.codingpt/e2ee.json 에만 있다. PC UI JS 는 MK 를 보지 않고
   //    "봉인해서 보내줘/열어줘"만 지시한다(deviceToken 을 JS 에 노출하지 않는 것과 같은 원칙).
   e2eeLocal: (cmd, args) => invoke("e2ee_local", { cmd, args: args || {} }),
+
+  // ── 로컬 UI 채널(cpt.sock 지속 연결) — 터미널의 cpt 명령이 back 을 왕복하지 않고 바로 이 앱에 온다 ──
+  //  uiLocalStart: 멱등(args 갱신만) · onLocalUiCommand: 데몬 push 수신 · uiLocalSend: ui_result/presence 회신.
+  uiLocalStart: (args) => invoke("ui_local_start", { args: args || {} }),
+  uiLocalSend: (frame) => invoke("ui_local_send", { frame }),
+  onLocalUiCommand: (cb) => listen("cpt-local-ui", (e) => cb(e.payload)),
 
   // ── 원격 승인 인박스(기능1) — back REST. 새 배관 없음: back_api(/api/daemon/*) 를 그대로 쓴다 ──
   //  · GET  /approvals            대기 목록(push 는 힌트, pull 이 정본 — 부팅/재접속마다 재조회)
@@ -197,15 +208,23 @@ export const api = {
   // 채팅 전송 — 데몬이 그 터미널 세션에 bracketed paste + (지연) Enter 로 넣는다(새 세션/attach 금지).
   chatInput: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/input", body: body || {}, timeoutSecs: 20 }),
 
-  // ── 작업 스냅샷(자동 체크포인트) — back sync 채널(데몬 오프라인이면 409) ──
+  // ── 작업 스냅샷(자동 체크포인트) ──
+  //  1순위 = 사이드카 데몬 직결(cpt.sock). 같은 머신에서 나는 트리거인데 back → 제어 WS → 이 머신의
+  //   데몬으로 되돌아오던 왕복을 없앤다(데몬이 back REST begin/commit 을 직접 호출).
+  //  폴백 = 기존 back sync 채널. **반드시 남긴다**: ① back 이 아직 begin/commit 미배포 ② 개발 중
+  //   스테일 사이드카 데몬(PC CLAUDE.md 경고) ③ 데몬 미기동. 어느 쪽이든 조용히 기존 경로로.
   //  background: HTTP 는 즉시 accepted 응답(대형 번들은 분 단위 — 동기 대기는 CF 524).
-  //  실제 작업·manifest 등록은 back-데몬 사이에서 계속 진행(RPC 600s).
-  syncCheckpoint: (workspaceId, reason, cwd) =>
-    invoke("back_api", {
-      method: "POST", path: "/api/daemon/sync/checkpoint",
-      body: { workspaceId, reason: reason || "periodic", background: true, ...(cwd ? { cwd } : {}) },
-      timeoutSecs: 30,
-    }),
+  syncCheckpoint: async (workspaceId, reason, cwd) => {
+    try {
+      return await invoke("sync_checkpoint", { wsId: workspaceId, reason: reason || "periodic", cwd: cwd || null });
+    } catch (_) {
+      return await invoke("back_api", {
+        method: "POST", path: "/api/daemon/sync/checkpoint",
+        body: { workspaceId, reason: reason || "periodic", background: true, ...(cwd ? { cwd } : {}) },
+        timeoutSecs: 30,
+      });
+    }
+  },
 
   // ── 자동 실행(로그인 아이템) ──
   autostartEnabled: () => invoke("plugin:autostart|is_enabled"),

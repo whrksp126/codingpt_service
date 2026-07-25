@@ -262,6 +262,90 @@ function findTmux() {
 //  직전 스폰 실패 후 잠시는 스폰 시도 자체를 거부한다.
 let lastSpawnFailAt = 0;
 
+// ── 전송 어댑터(io) 계약 — attachPty 는 전송을 모른다 ─────────────────────
+// 릴레이(back dial-back WS)와 LAN 직결(lan.js 채널)이 **같은 attachPty 한 벌**을 타게 하는 이음쇠다.
+// 분기 이중화 금지: tmux 세션/tid 결정·window-size latest·첫 resize nudge·early 버퍼는 한 곳에만 있다.
+//
+//   io.send(chunk)     데몬→뷰어 출력(string|Buffer). 프레이밍/봉인은 어댑터 책임.
+//   io.onMessage(cb)   cb('stdin', Buffer) | cb('text', string).
+//                      ⚠ **등록 전에 도착한 메시지를 어댑터가 버퍼**해 등록 즉시 순서대로 재생해야 한다.
+//                        클라이언트는 연결 직후 첫 resize 를 쏘는데 attachPty 의 셋업은 async 다.
+//                        유실되면 창이 80x24 로 고착되고 이후 리사이즈와 핑퐁 → 프롬프트 무한 누적
+//                        (12R/17R 에서 실측한 그 사고). LAN 경로엔 back early 버퍼가 없어 특히 필수.
+//   io.onClose(cb)     전송 종료 → cleanup. 이미 닫혀 있으면 즉시 호출해야 한다(셋업 중 종료 누수 방지).
+//   io.close()         스트림 종료 요청
+//   io.transport       'relay' | 'lan' (로그용)
+
+// 릴레이(WS) 어댑터 — E2EE 봉투(D단계)의 모든 판단이 여기 산다(attachPty 는 평문 의미만 다룬다).
+//  sid 가 있는데 세션을 못 찾으면 null 을 돌려준다 → 호출측이 4090 으로 닫아 재협상을 유도한다
+//  (평문으로 몰래 내려가면 뷰어 화면에 암호문 쓰레기가 뿌려진다).
+function wsPtyIo(ws, sid) {
+  const enc = !!sid;
+  if (enc && !(e2eeGate.allows('stream') && e2eeGate.sessionExists(sid, 'host'))) return null;
+  // 봉인 채널은 **첫 수신 프레임에서 학습**한다 — connId 는 연결을 여는 쪽(뷰어)이 정하고,
+  //  호스트가 자기 connId 로 보내면 뷰어의 open() 이 connId 불일치로 전부 거부한다.
+  //  그래서 채널 확립 전 출력(tmux attach 리페인트)은 버퍼에 담아 두고 확립 직후 순서대로 흘린다.
+  let ch = null;
+  const outQ = [];
+  let outQBytes = 0;
+  const OUT_Q_MAX = 1024 * 1024;
+  const sealSend = (buf) => {
+    try { ws.send(ch.seal(buf, e2eeGate.KIND_DATA), { binary: true }); } catch (_) { /* 이 청크만 버림 */ }
+  };
+  const flushOut = () => { const q = outQ.splice(0); outQBytes = 0; for (const b of q) sealSend(b); };
+  let cb = null;
+  const inQ = [];
+  const deliver = (kind, payload) => { if (cb) cb(kind, payload); else inQ.push([kind, payload]); };
+  // 리스너는 **즉시** 붙인다(open 핸들러의 첫 동기 구간) — 이후 어떤 await 도 메시지를 잃지 않는다.
+  ws.on('message', (data, isBinary) => {
+    if (!enc) {
+      if (isBinary) deliver('stdin', data);
+      else deliver('text', data.toString());
+      return;
+    }
+    // 봉인 모드: 평문 프레임은 전부 폐기(셸 인젝션 차단 — 함정 #1 의 거울상).
+    if (!isBinary) { console.warn('[pty] 봉인 모드에서 평문 프레임 수신 — 폐기'); return; }
+    if (!ch) {
+      ch = e2eeGate.hostChannelFromFrame(sid, data);
+      if (!ch) { console.warn('[pty] 봉인 채널 확립 실패 — 프레임 폐기'); return; }
+      flushOut(); // 채널 확립 전 쌓인 출력(리페인트)을 순서대로 방출
+    }
+    const f = e2eeGate.openFrame(ch, data);
+    // 복호 실패(변조/카운터 역행/방향 혼동) — 프레임만 버리고 소켓은 유지한다(프레임 하나로
+    //  소켓을 죽이면 재연결 백오프/하드캡을 오염시킨다).
+    if (!f) { console.warn('[pty] 프레임 복호 실패 — 폐기(스트림 유지)'); return; }
+    if (f.kind === e2eeGate.KIND_CTRL) deliver('text', f.payload.toString('utf8'));
+    else deliver('stdin', f.payload);
+  });
+  let closed = false;
+  const closeCbs = [];
+  const fireClose = () => { if (closed) return; closed = true; for (const f of closeCbs.splice(0)) { try { f(); } catch (_) { /* noop */ } } };
+  ws.on('close', fireClose);
+  ws.on('error', fireClose);
+  return {
+    transport: 'relay',
+    label: enc ? ', e2ee' : '',
+    // 평문 모드는 기존과 완전 동일(문자열 = 텍스트 프레임).
+    //  ⚠ 봉인 모드에서 "즉시 닫는" 안내 문구(터미널 0개/스폰 실패 등)는 채널이 아직 없으면 전달되지
+    //   못한다(뷰어가 connId 를 정하기 전이라 봉인할 수 없다). 클라는 close 를 보고 재시도한다.
+    send(chunk) {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (!enc) { try { ws.send(chunk); } catch (_) { /* noop */ } return; }
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
+      if (ch) { sealSend(buf); return; }
+      if (outQBytes + buf.length > OUT_Q_MAX) { console.warn('[pty] 봉인 채널 확립 전 출력 버퍼 초과 — 청크 폐기'); return; }
+      outQ.push(buf); outQBytes += buf.length;
+    },
+    onMessage(fn) { cb = fn; for (const [k, p] of inQ.splice(0)) fn(k, p); },
+    onClose(fn) { if (closed) { try { fn(); } catch (_) { /* noop */ } return; } closeCbs.push(fn); },
+    close() { try { ws.close(); } catch (_) { /* noop */ } },
+    dispose() {
+      // 봉인 채널을 닫아 connId 를 회수한다(재사용 거부 목록으로 이동 = nonce 재사용 방지).
+      if (ch && typeof ch.close === 'function') { try { ch.close(); } catch (_) { /* noop */ } }
+    },
+  };
+}
+
 // back 지시(stream_open)에 대한 dial-back. 실패 시 throw → control 이 stream_fail 회신.
 function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   const tmux = findTmux();
@@ -270,240 +354,222 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
   const wsUrl = serverUrl.replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
   const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
 
-  // 셋업(풀/뷰 준비·pty 스폰) 완료 전에 도착한 메시지 버퍼 — 클라이언트는 open 직후 곧바로 첫
-  //  resize 를 보내는데, 실제 핸들러가 셋업 뒤에 붙으면 그 메시지가 통째로 유실된다. 유실되면
-  //  창/클라이언트가 80x24 로 남고(keepalive 25s 가 올 때까지), select 리사이즈가 그 스테일 크기로
-  //  동작해 실크기 리사이즈와 핑퐁 → 셸 프롬프트 무한 누적(실측 근원).
-  const earlyMsgs = [];
-  let onMsg = (data, isBinary) => { earlyMsgs.push([data, isBinary]); };
-  ws.on('message', (d, b) => onMsg(d, b));
-
   // 봉인 세션 식별자 — back 이 e2ee.begin 결과의 sid 를 스트림 params 에 심어 보낸다(둘 중 어느 형태든 수용).
   const sid = (params && (params.sid || (params.e2ee && params.e2ee.sid))) || null;
 
-  ws.on('open', async () => {
+  ws.on('open', () => {
     // Nagle off — pty 출력(에코)이 작은 프레임이라 Nagle 이 매 키마다 지연을 얹는다(모바일 타자 렉).
     try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ }
-    const cols = (params && params.cols) || 80;
-    const rows = (params && params.rows) || 24;
-
-    // 봉인 모드 판정. sid 없음 = 평문(구 클라/협상 실패/스코프 미달) — 기존 경로 그대로.
-    const enc = !!sid;
-    if (enc && !(e2eeGate.allows('stream') && e2eeGate.sessionExists(sid, 'host'))) {
-      // 세션 부재(데몬 재기동으로 sid 전멸 등) — 평문 폴백 금지, 닫아서 재협상을 유도한다.
-      //  (평문으로 몰래 내려가면 뷰어 화면에 암호문 쓰레기가 뿌려진다.)
+    // io 생성은 이 핸들러의 **첫 동기 구간**에서 끝난다 → ws.on('message') 가 붙기 전에 처리되는
+    //  메시지가 존재할 수 없다(이후 셋업 지연분은 io 가 버퍼한다).
+    const io = wsPtyIo(ws, sid);
+    if (!io) {
       console.warn(`[pty] E2EE 세션을 찾을 수 없어 스트림을 닫습니다(sid=${String(sid).slice(0, 8)}… scope=${e2eeGate.scope()})`);
       try { ws.close(4090, 'E2EE_SESSION_UNKNOWN'); } catch (_) { /* noop */ }
       return;
     }
-    // 봉인 채널은 **첫 수신 프레임에서 학습**한다 — connId 는 연결을 여는 쪽(뷰어)이 정하고,
-    //  호스트가 자기 connId 로 보내면 뷰어의 open() 이 connId 불일치로 전부 거부한다.
-    //  그래서 채널 확립 전 출력(tmux attach 리페인트)은 버퍼에 담아 두고 확립 직후 순서대로 흘린다.
-    //  클라이언트는 open 직후 첫 resize 를 보내므로(그리고 back early 버퍼가 그걸 보장) 지연은 수 ms 다.
-    let ch = null;
-    const outQ = [];
-    let outQBytes = 0;
-    const OUT_Q_MAX = 1024 * 1024;
-    const sealSend = (buf) => {
-      try { ws.send(ch.seal(buf, e2eeGate.KIND_DATA), { binary: true }); } catch (_) { /* 이 청크만 버림 */ }
-    };
-    const flushOut = () => { const q = outQ.splice(0); outQBytes = 0; for (const b of q) sealSend(b); };
-    // 데몬 → 클라 전송 단일 창구. 평문 모드는 기존과 완전 동일(문자열 = 텍스트 프레임).
-    //  ⚠ 봉인 모드에서 "즉시 닫는" 안내 문구(터미널 0개/스폰 실패 등)는 채널이 아직 없으면 전달되지
-    //   못한다(뷰어가 connId 를 정하기 전이라 봉인할 수 없다). 클라는 close 를 보고 재시도한다 —
-    //   문구를 살리려고 평문으로 보내면 뷰어가 인젝션으로 간주해 폐기하므로 그렇게 하지 않는다.
-    const sendOut = (chunk) => {
-      if (ws.readyState !== WebSocket.OPEN) return;
-      if (!enc) { try { ws.send(chunk); } catch (_) { /* noop */ } return; }
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
-      if (ch) { sealSend(buf); return; }
-      if (outQBytes + buf.length > OUT_Q_MAX) { console.warn('[pty] 봉인 채널 확립 전 출력 버퍼 초과 — 청크 폐기'); return; }
-      outQ.push(buf); outQBytes += buf.length;
-    };
-
-    // 데몬 자체가 tmux/cmux 안에서 실행돼도 attach 되도록 TMUX 해제(중첩 가드 우회 — 소켓이 달라 안전).
-    const env = { ...process.env };
-    delete env.TMUX;
-    // UTF-8 로케일 강제 — 데스크톱 앱으로 데몬이 뜨면 셸 로케일(LANG)이 없어 tmux 클라이언트가
-    //  non-UTF-8 로 attach → 한글 등 멀티바이트 출력이 '_' 로 뭉개진다. 로케일을 UTF-8 로 고정한다.
-    if (!/UTF-?8/i.test(env.LANG || '')) env.LANG = 'en_US.UTF-8';
-    if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
-
-    // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
-    //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
-    //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
-    // 진입한 워크스페이스 경로에 맞는 네임스페이스/시작폴더 결정.
-    const { session, abs } = sessionForCwd(params && params.cwd);
-    const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
-    const client = params && params.client ? String(params.client) : '';
-    const pkey = paneId ? paneKeyOf(session, paneId, client) : '';
-
-    let spawnArgs;
-    // 이 스트림이 attach 하는 터미널(tid) — params.win 은 스테일(닫힘/구버전 인덱스)일 수 있어
-    //  resolveTid 가 확정한다. select 이후 재접속이면 데몬이 기억하는 현재 터미널을 우선한다.
-    let tid = 0;
-    if (paneId) {
-      try {
-        await migrateLegacyPool(session, abs);
-        const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
-        tid = await resolveTid(session, want);
-        if (tid == null) {
-          // 터미널 0개(정식 상태) — 여기서 만들면 죽은 pane 재접속이 유령을 부활시킨다.
-          //  앱 리컨실러가 곧 이 pane 을 정리한다(생성은 terminal.new 명시 경로만).
-          try { sendOut('\r\n\x1b[90m[이 워크스페이스에 열린 터미널이 없습니다]\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
-          return;
-        }
-        paneCurrent.set(pkey, tid);
-      } catch (e) {
-        try { sendOut(`\r\n\x1b[31m터미널 준비 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
-        return;
-      }
-      // -u: UTF-8. -d 금지 — 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다
-      //  (죽은 앱의 스테일 클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). 크기는 전역
-      //  window-size latest — 마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 resize-window
-      //  클레임 전면 폐지 — 기기 간 크기 뺏기/SIGWINCH 핑퐁의 근원이었다).
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, tid), ';', 'set', '-g', 'window-size', 'latest'];
-    } else {
-      // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
-      spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
-    }
-
-    // 쿨다운 중이면 스폰 시도 없이 거절 — 실패 스폰마다 pty 마스터가 새는 것을 차단.
-    if (Date.now() - lastSpawnFailAt < 3000) {
-      try { sendOut('\r\n\x1b[33m터미널 준비 중입니다. 잠시 후 다시 연결돼요.\x1b[0m\r\n'); ws.close(); } catch (_) { /* noop */ }
-      return;
-    }
-    let pty;
-    try {
-      pty = nodePty.spawn(tmux, spawnArgs, {
-        name: 'xterm-256color',
-        cols, rows,
-        cwd: abs,
-        env,
-      });
-    } catch (e) {
-      lastSpawnFailAt = Date.now();
-      console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
-      try { sendOut(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`); ws.close(); } catch (_) { /* noop */ }
-      return;
-    }
-    console.log(`[pty] 스트림 연결 (session=${session}${paneId ? ' term=' + termSession(session, tid) : ''}, cwd=${abs}, ${cols}x${rows}${enc ? ', e2ee' : ''})`);
-
-    // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
-    let lastW = cols, lastH = rows;
-    let firstResizeDone = !paneId;
-    // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
-    //  클라이언트 크기가 80x24 로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
-    //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 80x24 화면만 그려지는(반쪽 화면)
-    //  사고가 난다.
-    let nudgeTimer = null;
-
-    // pty 이벤트 배선 — swap(탭 전환)마다 새 pty 에 재배선. 구 pty 의 exit 는 무시(교체 정상경로).
-    const wirePty = (p) => {
-      p.onData((data) => {
-        // 평문 모드: 기존과 동일(node-pty 의 문자열을 그대로 = 텍스트 프레임).
-        //  봉인 모드: 같은 문자열을 utf8 Buffer 로 감싼다 — 뷰어가 복호 후 받는 바이트는 평문 모드에서
-        //  텍스트 프레임으로 받던 바이트와 동일하다(멀티바이트 분할은 node-pty 단계에서 이미 결정되므로
-        //  기존 동작과 차이가 없다).
-        sendOut(data);
-      });
-      p.onExit(({ exitCode }) => {
-        if (p !== pty) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
-        console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
-        try { ws.close(); } catch (_) { /* noop */ }
-      });
-    };
-    wirePty(pty);
-
-    // terminal.select → 이 스트림의 attach 대상을 즉석 교체(구 모델의 select-window 대체).
-    //  ws(앱 연결)는 유지한 채 tmux 클라이언트만 갈아끼운다 — attach 시 tmux 가 전체 화면을
-    //  다시 그리므로 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
-    let handle = null;
-    if (pkey) {
-      const swap = (newTid) => {
-        const np = nodePty.spawn(tmux, ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, newTid)], {
-          name: 'xterm-256color',
-          cols: lastW || cols, rows: lastH || rows,
-          cwd: abs,
-          env,
-        });
-        const old = pty;
-        pty = np;
-        wirePty(np);
-        tid = newTid;
-        if (handle) handle.tid = newTid;
-        paneCurrent.set(pkey, newTid);
-        try { old.kill(); } catch (_) { /* noop */ }
-      };
-      handle = { tid, swap };
-      paneStreams.set(pkey, handle);
-    }
-
-    // ── 와이어 의미(stdin / ctrl) 처리기 한 벌 — 평문·봉인 두 모드가 공유한다 ──
-    // 옛 "바이너리 프레임" 경로.
-    const handleStdin = (buf) => {
-      try { pty.write(buf.toString('utf8')); } catch (_) { /* noop */ }
-    };
-    // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드에서는 kind=ctrl
-    //  프레임의 payload 가 **그대로** 이 함수로 들어온다(원문 JSON 보존 = 리사이즈 의미 불변).
-    const handleTextFrame = (str) => {
-      try {
-        const m = JSON.parse(str);
-        if (m && m.type === 'resize' && m.cols && m.rows) {
-          const w = m.cols | 0, h = m.rows | 0;
-          try { pty.resize(w, h); } catch (_) { /* noop */ }
-          lastW = w; lastH = h;
-          // 창 크기는 window-size latest 가 클라이언트 리사이즈/입력을 따라 자동 반영 —
-          //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
-          if (!firstResizeDone) {
-            firstResizeDone = true;
-            if (nudgeTimer) clearTimeout(nudgeTimer);
-            nudgeTimer = setTimeout(() => {
-              try { pty.resize(Math.max(2, lastW - 1), lastH); pty.resize(lastW, lastH); } catch (_) { /* noop */ }
-            }, 600);
-          }
-          return;
-        }
-      } catch (_) { /* JSON 아니면 일반 입력 */ }
-      try { pty.write(str); } catch (_) { /* noop */ }
-    };
-
-    onMsg = enc
-      ? (data, isBinary) => {
-        // 봉인 모드: 평문 프레임은 전부 폐기(셸 인젝션 차단 — 함정 #1 의 거울상).
-        if (!isBinary) { console.warn('[pty] 봉인 모드에서 평문 프레임 수신 — 폐기'); return; }
-        if (!ch) {
-          ch = e2eeGate.hostChannelFromFrame(sid, data);
-          if (!ch) { console.warn('[pty] 봉인 채널 확립 실패 — 프레임 폐기'); return; }
-          flushOut(); // 채널 확립 전 쌓인 출력(리페인트)을 순서대로 방출
-        }
-        const f = e2eeGate.openFrame(ch, data);
-        // 복호 실패(변조/카운터 역행/방향 혼동) — 프레임만 버리고 소켓은 유지한다(§6-4:
-        //  프레임 하나로 소켓을 죽이면 재연결 백오프/하드캡을 오염시킨다).
-        if (!f) { console.warn('[pty] 프레임 복호 실패 — 폐기(스트림 유지)'); return; }
-        if (f.kind === e2eeGate.KIND_CTRL) handleTextFrame(f.payload.toString('utf8'));
-        else handleStdin(f.payload);
-      }
-      : (data, isBinary) => {
-        if (isBinary) { handleStdin(data); return; }
-        handleTextFrame(data.toString());
-      };
-    // 셋업 중 버퍼된 메시지(첫 resize 등)를 순서대로 재생.
-    for (const [d, b] of earlyMsgs.splice(0)) onMsg(d, b);
-
-    const cleanup = () => {
-      // tmux 클라이언트만 종료(detach) — 세션(터미널 실체)은 tmux 서버에 살아남는다.
-      // 봉인 채널은 닫아 connId 를 회수한다(재사용 거부 목록으로 이동 = nonce 재사용 방지).
-      if (ch && typeof ch.close === 'function') { try { ch.close(); } catch (_) { /* noop */ } }
-      if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
-      if (handle && paneStreams.get(pkey) === handle) paneStreams.delete(pkey);
-      try { pty.kill(); } catch (_) { /* noop */ }
-    };
-    ws.on('close', cleanup);
-    ws.on('error', cleanup);
+    attachPty(params, io).catch((e) => {
+      console.error(`[pty] attach 실패: ${(e && e.message) || e}`);
+      try { io.send(`\r\n\x1b[31m터미널 준비 실패: ${(e && e.message) || e}\x1b[0m\r\n`); io.close(); } catch (_) { /* noop */ }
+    });
   });
 
   ws.on('error', (e) => console.error(`[pty] 스트림 WS 오류: ${e.message}`));
+}
+
+/**
+ * 전송 독립 PTY attach — 릴레이(WS)와 LAN 직결이 공유하는 유일 구현.
+ *
+ * params 는 릴레이가 openStream 에 넘기는 것과 **완전 동일한 키**여야 한다
+ *  { cwd, paneId, client, win, cols, rows } — paneId/client 가 paneKeyOf(pkey)의 재료이고,
+ *  pkey 는 terminal.select 가 "살아있는 스트림"을 찾는 유일한 좌표다. LAN 이 다른 client 를 보내면
+ *  select 가 그 스트림을 못 찾아 "탭 전환이 안 되는" 유령 상태가 된다.
+ *
+ * 경로 전환(릴레이↔LAN) 안전장치: 같은 pkey 의 기존 스트림이 남아 있으면 **먼저 displace** 한다.
+ *  겹치면 같은 전용 세션에 tmux 클라이언트가 2개 붙고 `window-size latest` 가 두 크기를 번갈아
+ *  채택해 SIGWINCH 핑퐁(프롬프트 누적)이 난다 — 12R/17R 에서 실측한 사고. 뷰어가 "닫고-열기"를
+ *  지키는 것이 정석이지만, 데몬이 마지막 방어선을 갖는다(클라 순서 역전에도 클라이언트는 항상 1개).
+ */
+async function attachPty(params, io) {
+  const tmux = findTmux();
+  if (!tmux) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
+  const cols = (params && params.cols) || 80;
+  const rows = (params && params.rows) || 24;
+  const sendOut = (chunk) => { try { io.send(chunk); } catch (_) { /* noop */ } };
+
+  // 데몬 자체가 tmux/cmux 안에서 실행돼도 attach 되도록 TMUX 해제(중첩 가드 우회 — 소켓이 달라 안전).
+  const env = { ...process.env };
+  delete env.TMUX;
+  // UTF-8 로케일 강제 — 데스크톱 앱으로 데몬이 뜨면 셸 로케일(LANG)이 없어 tmux 클라이언트가
+  //  non-UTF-8 로 attach → 한글 등 멀티바이트 출력이 '_' 로 뭉개진다. 로케일을 UTF-8 로 고정한다.
+  //  (0.1.29 의 근본 원인 — list 파싱까지 전멸시켰던 그 항목. 경로가 늘어도 규율은 하나다.)
+  if (!/UTF-?8/i.test(env.LANG || '')) env.LANG = 'en_US.UTF-8';
+  if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
+
+  // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
+  //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
+  //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
+  // 진입한 워크스페이스 경로에 맞는 네임스페이스/시작폴더 결정.
+  const { session, abs } = sessionForCwd(params && params.cwd);
+  const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
+  const client = params && params.client ? String(params.client) : '';
+  const pkey = paneId ? paneKeyOf(session, paneId, client) : '';
+
+  let spawnArgs;
+  // 이 스트림이 attach 하는 터미널(tid) — params.win 은 스테일(닫힘/구버전 인덱스)일 수 있어
+  //  resolveTid 가 확정한다. select 이후 재접속이면 데몬이 기억하는 현재 터미널을 우선한다.
+  let tid = 0;
+  if (paneId) {
+    await migrateLegacyPool(session, abs);
+    const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
+    tid = await resolveTid(session, want);
+    if (tid == null) {
+      // 터미널 0개(정식 상태) — 여기서 만들면 죽은 pane 재접속이 유령을 부활시킨다.
+      //  앱 리컨실러가 곧 이 pane 을 정리한다(생성은 terminal.new 명시 경로만).
+      sendOut('\r\n\x1b[90m[이 워크스페이스에 열린 터미널이 없습니다]\x1b[0m\r\n');
+      try { io.close(); } catch (_) { /* noop */ }
+      return;
+    }
+    paneCurrent.set(pkey, tid);
+    // -u: UTF-8. -d 금지 — 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다
+    //  (죽은 앱의 스테일 클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). 크기는 전역
+    //  window-size latest — 마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 resize-window
+    //  클레임 전면 폐지 — 기기 간 크기 뺏기/SIGWINCH 핑퐁의 근원이었다).
+    spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, tid), ';', 'set', '-g', 'window-size', 'latest'];
+  } else {
+    // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
+    spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+  }
+
+  // 쿨다운 중이면 스폰 시도 없이 거절 — 실패 스폰마다 pty 마스터가 새는 것을 차단.
+  if (Date.now() - lastSpawnFailAt < 3000) {
+    sendOut('\r\n\x1b[33m터미널 준비 중입니다. 잠시 후 다시 연결돼요.\x1b[0m\r\n');
+    try { io.close(); } catch (_) { /* noop */ }
+    return;
+  }
+  let pty;
+  try {
+    pty = nodePty.spawn(tmux, spawnArgs, {
+      name: 'xterm-256color',
+      cols, rows,
+      cwd: abs,
+      env,
+    });
+  } catch (e) {
+    lastSpawnFailAt = Date.now();
+    console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
+    sendOut(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`);
+    try { io.close(); } catch (_) { /* noop */ }
+    return;
+  }
+  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + termSession(session, tid) : ''}, cwd=${abs}, ${cols}x${rows}${io.label || ''})`);
+
+  // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
+  let lastW = cols, lastH = rows;
+  let firstResizeDone = !paneId;
+  // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
+  //  클라이언트 크기가 80x24 로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
+  //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 80x24 화면만 그려지는(반쪽 화면)
+  //  사고가 난다.
+  let nudgeTimer = null;
+
+  // pty 이벤트 배선 — swap(탭 전환)마다 새 pty 에 재배선. 구 pty 의 exit 는 무시(교체 정상경로).
+  const wirePty = (p) => {
+    p.onData((data) => {
+      // 출력은 어댑터가 전송 형태를 결정한다(릴레이 평문=텍스트 프레임, 봉인/LAN=바이너리).
+      //  멀티바이트 분할은 node-pty 단계에서 이미 결정되므로 어느 경로든 바이트는 동일하다.
+      sendOut(data);
+    });
+    p.onExit(({ exitCode }) => {
+      if (p !== pty) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
+      console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
+      try { io.close(); } catch (_) { /* noop */ }
+    });
+  };
+  wirePty(pty);
+
+  // (선언 순서 주의: cleanup 이 handle 을 참조하므로 먼저 선언한다 — TDZ 사고 방지)
+  let handle = null;
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    // tmux 클라이언트만 종료(detach) — 세션(터미널 실체)은 tmux 서버에 살아남는다.
+    if (typeof io.dispose === 'function') { try { io.dispose(); } catch (_) { /* noop */ } }
+    if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
+    if (handle && paneStreams.get(pkey) === handle) paneStreams.delete(pkey);
+    try { pty.kill(); } catch (_) { /* noop */ }
+  };
+
+  // terminal.select → 이 스트림의 attach 대상을 즉석 교체(구 모델의 select-window 대체).
+  //  뷰어 연결은 유지한 채 tmux 클라이언트만 갈아끼운다 — attach 시 tmux 가 전체 화면을
+  //  다시 그리므로 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
+  if (pkey) {
+    const swap = (newTid) => {
+      const np = nodePty.spawn(tmux, ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, newTid)], {
+        name: 'xterm-256color',
+        cols: lastW || cols, rows: lastH || rows,
+        cwd: abs,
+        env,
+      });
+      const old = pty;
+      pty = np;
+      wirePty(np);
+      tid = newTid;
+      if (handle) handle.tid = newTid;
+      paneCurrent.set(pkey, newTid);
+      try { old.kill(); } catch (_) { /* noop */ }
+    };
+    // 같은 pane 아이덴티티의 기존 스트림 축출 — 경로 전환/재접속이 겹쳐도 tmux 클라이언트는 1개.
+    const prev = paneStreams.get(pkey);
+    if (prev && typeof prev.displace === 'function') {
+      console.log(`[pty] 같은 pane 의 기존 스트림 축출(경로 전환/재접속) pkey=${pkey}`);
+      try { prev.displace(); } catch (_) { /* noop */ }
+    }
+    handle = {
+      tid,
+      swap,
+      // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
+      displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },
+    };
+    paneStreams.set(pkey, handle);
+  }
+
+  // ── 와이어 의미(stdin / text) 처리기 한 벌 — 모든 전송·암호 모드가 공유한다 ──
+  // 옛 "바이너리 프레임" 경로.
+  const handleStdin = (buf) => {
+    try { pty.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
+  };
+  // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
+  //  payload 가 **그대로** 이 함수로 들어온다(원문 JSON 보존 = 리사이즈 의미 불변).
+  const handleTextFrame = (str) => {
+    try {
+      const m = JSON.parse(str);
+      if (m && m.type === 'resize' && m.cols && m.rows) {
+        const w = m.cols | 0, h = m.rows | 0;
+        try { pty.resize(w, h); } catch (_) { /* noop */ }
+        lastW = w; lastH = h;
+        // 창 크기는 window-size latest 가 클라이언트 리사이즈/입력을 따라 자동 반영 —
+        //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
+        if (!firstResizeDone) {
+          firstResizeDone = true;
+          if (nudgeTimer) clearTimeout(nudgeTimer);
+          nudgeTimer = setTimeout(() => {
+            try { pty.resize(Math.max(2, lastW - 1), lastH); pty.resize(lastW, lastH); } catch (_) { /* noop */ }
+          }, 600);
+        }
+        return;
+      }
+    } catch (_) { /* JSON 아니면 일반 입력 */ }
+    try { pty.write(str); } catch (_) { /* noop */ }
+  };
+
+  // 핸들러 등록 = 어댑터가 버퍼해 둔 셋업 중 메시지(첫 resize 등)의 순서 재생 시점.
+  io.onMessage((kind, payload) => {
+    if (kind === 'text') handleTextFrame(typeof payload === 'string' ? payload : payload.toString('utf8'));
+    else handleStdin(payload);
+  });
+  io.onClose(cleanup);
 }
 
 // ── 멀티 터미널 RPC ──
@@ -738,4 +804,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };

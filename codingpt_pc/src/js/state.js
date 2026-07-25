@@ -8,6 +8,10 @@ export const state = {
   daemon: null, // 최근 daemon_status
   workspaces: [], // 백엔드 목록 [{id,name,localPath,compute,...}]
   wsError: null, // 워크스페이스 로드 오류(오프라인 등)
+  // 목록이 로컬 캐시(pc-ws-cache.json)에서 왔음 = 서버 미가용. { cachedAt } | null.
+  //  ⚠ 캐시가 있다고 원격 조작을 허용하면 안 된다 — 이 PC 로컬 워크스페이스 진입만 허용하고
+  //    서버가 원천인 조작(생성/삭제/그룹핑/claim)과 다른 PC/클라우드 진입은 전부 막는다.
+  wsStale: null,
   activeWsId: null,
   ws: {}, // wsId -> { layout, focusId, surfaces:[{index,active,command}], branch:{}, ports:[] }
   notifications: [], // [{id, wsId, paneId, title, body, ts, read}]
@@ -93,6 +97,10 @@ export function renameWs(id, name) {
 }
 
 // 로그인 계정 프로필 로드(deviceToken→user). 미로그인이면 null.
+//  ⚠ "서버에 못 물어봤다"와 "미로그인"을 구분한다. Rust fetch_me 는 401(토큰 폐기)만 Ok(null) 로,
+//    네트워크/5xx 실패는 Err 로 올린다. Err 를 미로그인으로 처리하면 **서버가 죽은 동안 로그인 게이트가
+//    앱을 덮어** 로컬 폴더 작업(터미널·IDE — 서버 무관)에 진입조차 못 한다(오프라인 부팅의 진짜 벽).
+//    그러므로 실패 시엔 authChecked 를 켜지 않고(=게이트 판정 보류) 알고 있던 프로필도 지우지 않는다.
 export async function loadMe() {
   try {
     state.me = (await api.fetchMe()) || null;
@@ -100,10 +108,10 @@ export async function loadMe() {
     if (state.me && state.me.appearance) {
       try { (await import("./theme.js")).applyRemoteAppearance(state.me.appearance); } catch (_) {}
     }
+    state.authChecked = true; // 페어링됐는데 me 가 null 이면(=토큰 폐기됨) 로그인 게이트가 뜬다.
   } catch (_) {
-    state.me = null;
+    /* 서버 미가용 — 판정 보류(게이트 없음, 기존 프로필 유지) */
   }
-  state.authChecked = true; // 페어링됐는데 me 가 null 이면(=토큰 폐기됨) 로그인 게이트가 뜬다.
   emit();
 }
 
@@ -127,6 +135,9 @@ export async function loadDevices() {
 //     현재 기기로 재클레임한다. (묶인 기기가 온라인이면 진짜 다른 PC → 건드리지 않음)
 export async function reconcileWorkspaceHosts() {
   if (!state.paired) return;
+  // 캐시(stale) 목록으로는 절대 실행하지 않는다 — 옛 목록으로 claimWorkspace 가 돌면 호스트 귀속이
+  //  오염된다(그리고 claim 자체가 서버 호출이라 어차피 실패한다).
+  if (state.wsStale) return;
   const myId = state.daemon?.deviceId;
   const nullTargets = state.workspaces.filter((w) => isLocal(w) && w.localPath && w.hostDeviceId == null);
   const staleCands = myId != null
@@ -205,6 +216,19 @@ export function isThisHost(w) {
   return w.hostDeviceId == null || my == null || w.hostDeviceId === my;
 }
 
+// 오프라인(캐시 목록) 전용 판정 — **확실히 내 것일 때만** true.
+//  isThisHost 는 "모르면 내 것"으로 관용하는데(구버전·미페어링 호환), 오프라인에서는 그 관용이
+//  구멍이 된다: 서버가 죽은 채 부팅하면 daemon_status 가 오기 전(또는 데몬 미기동)에 my == null 이라
+//  **다른 PC 의 워크스페이스도 게이트를 통과**해 진입한다 → 빈 화면 + 실패 폭풍(이 라운드가 막으려던
+//  바로 그 증상). 그래서 여기서는 내 deviceId 를 알고 그것과 일치할 때만 허용한다.
+//  hostDeviceId 가 없는 레거시 항목은 로컬 경로가 있으면 이 PC 것으로 본다(그 시절엔 멀티PC 가 없었다).
+function isThisHostStrict(w) {
+  if (!isLocal(w)) return false;
+  const my = state.daemon?.deviceId;
+  if (w.hostDeviceId == null) return true;   // 레거시 = 귀속 정보 없음 → 로컬 경로 신뢰
+  return my != null && w.hostDeviceId === my;
+}
+
 // 워크스페이스 런타임 보장. 최초 진입(기기별 1회)에만 터미널 시드('new' → 기존 입양 우선, 없으면
 //  생성) — 이미 시드한 적 있으면 빈 pane 으로 시작해 리컨실러가 실제 터미널 목록을 그대로 반영한다.
 export function ensureRuntime(id) {
@@ -221,6 +245,12 @@ export function ensureRuntime(id) {
 }
 
 export function setActive(id) {
+  // 오프라인(캐시 목록)에서는 이 PC 로컬 워크스페이스만 진입 허용 — 다른 PC/클라우드는 서버 릴레이가
+  //  있어야 조작되므로 열면 빈 화면 + 실패 폭풍이 된다(캐시가 원격 조작 허가는 아니다).
+  if (id && state.wsStale) {
+    const meta = state.workspaces.find((w) => w.id === id);
+    if (meta && !isThisHostStrict(meta)) { blockedOffline("다른 기기의 워크스페이스 열기"); return; }
+  }
   state.activeWsId = id;
   state.view = "workspace";
   if (id) {
@@ -397,12 +427,39 @@ export async function loadNotifications() {
   }
 }
 
+// ── 낙관(로컬 선표시) 알림의 서버 행 흡수 ──
+//  로컬 터미널에서 난 알림을 "서버 왕복 후"에 보여주면 서버가 느리거나 죽었을 때 같은 화면에 띄울
+//  알림이 늦거나 안 보인다. 그래서 즉시 로컬 항목(_pending)을 넣고, 나중에 도착한 서버 행(응답 또는
+//  WS 에코)이 그 항목을 **흡수**한다. 흡수 규칙이 없으면 같은 알림이 2줄로 보인다(과거 dedupe 사고와 동형).
+const PENDING_ABSORB_MS = 15000;
+function absorbPending(n) {
+  const i = state.notifications.findIndex(
+    (x) =>
+      x._pending &&
+      Date.now() - (x.ts || 0) < PENDING_ABSORB_MS &&
+      String(x.title || "") === String(n.title || "") &&
+      String(x.body || "") === String(n.body || "") &&
+      String(x.cwd || "") === String(n.cwd || "") &&
+      String(x.win ?? "") === String(n.win ?? "")
+  );
+  if (i < 0) return false;
+  const local = state.notifications[i];
+  // 자리(정렬 위치)는 유지하고 id 만 서버 행으로 승격 — 읽음 상태는 로컬 판단을 존중한다.
+  state.notifications[i] = { ...n, read: local.read || !!n.readAt, ts: local.ts };
+  // 사용자가 서버 응답 전에 이미 읽었다면 승격된 숫자 id 로 읽음을 서버에 반영(뱃지 유령 방지).
+  if (local.read && !n.readAt && typeof n.id === "number") api.notifRead({ ids: [n.id] }).catch(() => {});
+  emit();
+  return true;
+}
+
 // ui-channel WS 이벤트 반영 — kind:'new'(id 로 dedupe·100개 상한) | kind:'read'(ids 읽음).
 export function applyNotifEvent(ev) {
   if (!ev) return;
   if (ev.kind === "new" && ev.notification) {
     const n = { ...ev.notification, read: !!ev.notification.readAt };
     if (n.id != null && state.notifications.some((x) => x.id === n.id)) return; // WS 에코 dedupe
+    // 낙관 삽입분이 있으면 그것을 승격(2줄 방지). OS 배너는 낙관 시점에 이미 1회 울렸으므로 재발송 금지.
+    if (absorbPending(n)) return;
     state.notifications.unshift(n);
     if (state.notifications.length > 100) state.notifications.length = 100;
     // 서버가 present 로 지정한 기기(alertClientKey===내 deviceKey)에서만 OS 알림 — 나머진 뱃지만.
@@ -418,18 +475,41 @@ export function applyNotifEvent(ev) {
   }
 }
 
-// 알림 발생 보고 — 서버에 기록(fire-and-forget). 생성 행은 WS 에코로도 오지만, WS 가 끊겨 있어도
-//  패널에 보이도록 응답 행을 직접 반영한다(applyNotifEvent 가 id 로 dedupe). 실패 시 로컬 폴백.
+// 알림 발생 보고 — **선표시-후동기화**. 같은 기기에서 난 알림을 같은 기기 화면에 띄우는 일에
+//  서버 왕복을 기다리지 않는다(서버가 느리면 늦고, 죽으면 아예 안 보였다).
+//   ① 즉시 로컬 항목(_pending) 삽입 + OS 배너 판단은 로컬 규칙(내 창 비포커스)으로 1회.
+//   ② 서버 응답/WS 에코가 오면 그 항목을 흡수해 서버 id 로 승격(absorbPending) — 2줄 방지.
+//   ③ 서버 실패 시 로컬 항목을 그대로 남긴다(기존 폴백과 동일 결과, 다만 지연 0).
+//  ⚠ present 라우팅(다른 기기 알림 억제)은 서버 판정이 정본이고 여기서 건드리지 않는다. 낙관 배너는
+//    **이 PC 자기 기기 화면**에만 해당하므로 기존 3케이스 규약과 충돌하지 않는다.
 export function reportNotification(p) {
+  const local = pushNotification({ ...p, wsId: p.workspaceId, _pending: true });
   api
     .notifCreate(p)
     .then((row) => {
       const n = row && row.id != null ? row : row?.data;
-      if (n && n.id != null) applyNotifEvent({ kind: "new", notification: n });
+      if (n && n.id != null) promoteLocalNotif(local, { ...n, read: !!n.readAt });
     })
     .catch(() => {
-      pushNotification({ ...p, wsId: p.workspaceId });
+      // 서버 미가용 — 이미 보이는 로컬 항목이 최종본이 된다(_pending 해제해 흡수 대상에서 제외).
+      delete local._pending;
     });
+}
+
+// 응답 경로 승격 — 어떤 로컬 항목인지 **참조로 정확히** 안다(문자열 매칭 불필요).
+//  이미 WS 에코가 같은 서버 행을 넣어 놨으면(에코가 먼저 도착 + 흡수 휴리스틱 미스) 로컬 항목을 제거한다
+//  — 같은 id 가 2줄 남는 것이 최악이므로 이 경로에서 확정적으로 정리한다.
+function promoteLocalNotif(local, n) {
+  const i = state.notifications.indexOf(local);
+  if (i < 0) return; // 100개 상한으로 밀려남 — 할 일 없음
+  if (n.id != null && state.notifications.some((x) => x !== local && x.id === n.id)) {
+    state.notifications.splice(i, 1);
+    emit();
+    return;
+  }
+  state.notifications[i] = { ...n, read: local.read || !!n.readAt, ts: local.ts };
+  if (local.read && !n.readAt && typeof n.id === "number") api.notifRead({ ids: [n.id] }).catch(() => {});
+  emit();
 }
 
 export function markAllRead() {
@@ -571,20 +651,40 @@ export function setWsStatus(cwd, payload) {
   emit();
 }
 
+// 서버가 원천인 조작 게이트 — stale(캐시) 목록 상태에서는 호출하면 안 되는 것들.
+//  true 를 돌려주면 "막았다"는 뜻(호출측은 즉시 return). 사용자에게는 토스트로 이유를 알린다.
+export function blockedOffline(what) {
+  if (!state.wsStale) return false;
+  import("./workspace-view.js")
+    .then((m) => m.wvToast(`오프라인 — ${what}은(는) 서버에 연결된 뒤에 가능합니다`))
+    .catch(() => {});
+  return true;
+}
+
 // ── 백엔드 워크스페이스 로드 ──
 export async function loadWorkspaces() {
   try {
     const data = await api.fetchWorkspaces();
     const list = Array.isArray(data) ? data : data?.workspaces || data?.data || [];
+    // stale = Rust 가 last-known 캐시로 응답(서버 미가용). 목록은 "마지막으로 본 것" 그대로다.
+    const stale = !Array.isArray(data) && !!data?.stale;
     state.workspaces = list;
+    state.wsStale = stale ? { cachedAt: Number(data.cachedAt) || 0 } : null;
     state.wsError = null;
     // 활성 워크스페이스가 사라졌으면 초기화.
     if (state.activeWsId && !state.workspaces.some((w) => w.id === state.activeWsId)) {
       state.activeWsId = null;
     }
+    // 오프라인(캐시)에서는 이 PC 워크스페이스만 열 수 있다 — 활성 선택도 그 규칙을 따른다.
+    if (stale && state.activeWsId) {
+      const cur = state.workspaces.find((w) => w.id === state.activeWsId);
+      if (cur && !isThisHost(cur)) state.activeWsId = null;
+    }
     // 첫 로컬 워크스페이스를 기본 활성으로.
     if (!state.activeWsId) {
-      const first = state.workspaces.find(isLocal) || state.workspaces[0];
+      const first = stale
+        ? state.workspaces.find((w) => isLocal(w) && isThisHost(w))
+        : state.workspaces.find(isLocal) || state.workspaces[0];
       if (first) {
         state.activeWsId = first.id;
         ensureRuntime(first.id);
@@ -601,6 +701,7 @@ export async function loadWorkspaces() {
 
 // ── 새 워크스페이스(폴더 피커 → 로컬 워크스페이스 생성 → 터미널 열기) ──
 export async function createLocalWorkspace() {
+  if (blockedOffline("워크스페이스 추가")) return;
   if (state.creatingWs) return;
   state.creatingWs = true;
   try {

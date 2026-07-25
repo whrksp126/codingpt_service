@@ -91,6 +91,7 @@ api.onDaemonChanged(async () => {
     state.me = null;
     state.devices = [];
     state.wsError = null;
+    state.wsStale = null;
     S.emit();
     return;
   }
