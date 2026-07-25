@@ -5,6 +5,7 @@ import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { ANDROID_QR } from "./store-qr.js";
+import { e2ee, refreshE2ee, approveDevice, denyDevice, setPolicy as setE2eePolicy, createRecoveryCode, restoreFromRecovery, revokeTrust } from "./e2ee.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -115,6 +116,7 @@ function renderSection(force) {
     } else if (paired) {
       ensureAccountCard(); // 프로필 지연 로드 반영(닉네임 재바인딩 포함)
       renderDeviceList();
+      renderE2ee();
     }
   } else if (section === "general") {
     contentEl.innerHTML = `
@@ -393,6 +395,10 @@ function buildPaired() {
     </div>
     <div id="acctMsg" class="acct-msg"></div>
     <div class="dev-section">
+      <div class="dev-title">종단간 암호화</div>
+      <div id="e2eeBox" class="sm-card2"></div>
+    </div>
+    <div class="dev-section">
       <div class="dev-title">내 기기</div>
       <div id="deviceTable" class="dev-table"></div>
     </div>`;
@@ -400,8 +406,10 @@ function buildPaired() {
   connBody.querySelector("#deleteAcctBtn").addEventListener("click", onDeleteAccount);
   bindNickname(); // 프로필 카드 닉네임 저장
   renderDeviceList();
+  renderE2ee();
   if (!state.me) S.loadMe(); // 프로필 지연 로드 → emit 시 ensureAccountCard 로 카드 채움
   S.loadDevices(); // 기기 목록/온라인 상태 최신화
+  void refreshE2ee(); // 열쇠 상태/대기 목록(데몬 위임) — 실패 시 '미지원'으로 표기만
 }
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
@@ -554,6 +562,133 @@ function deviceOsLabel(d) {
   if (p === "android") return "Android";
   return d.role === "controller" ? "모바일" : "기기";
 }
+// ── 종단간 암호화(기능2) 카드 — 모바일 E2eeSettingsCard 와 **동일 정보 구조** ──
+//  ① 상태 ② 정책(킬스위치) ③ 지문/QR 재검증 ④ 복구 코드 ⑤ 열쇠를 가진 기기(신뢰 해제=회전)
+//  마스터키는 데몬에 있으므로 모든 조작은 e2ee.js → cpt.sock 위임이다(JS 에 MK 없음).
+let e2eeRecoveryShown = null; // 방금 만든 복구 문구(1회 표시 — 카드 재렌더에도 유지)
+let e2eeMsg = "";
+
+function e2eeStatePill() {
+  if (e2ee.policy === "off") return { t: "꺼짐", c: "var(--dim)" };
+  if (e2ee.available && e2ee.state === "trusted") return { t: "켜짐", c: "var(--accent)" };
+  if (e2ee.state === "pending") return { t: "승인 대기", c: "var(--warn, #FBBF24)" };
+  if (e2ee.state === "bootstrap") return { t: "준비 중", c: "var(--warn, #FBBF24)" };
+  if (!e2ee.available || e2ee.state === "unsupported") return { t: "미지원", c: "var(--dim)" };
+  if (e2ee.state === "error") return { t: "오류", c: "var(--error)" };
+  return { t: "꺼짐", c: "var(--dim)" };
+}
+
+function renderE2ee() {
+  const box = connBody?.querySelector("#e2eeBox");
+  if (!box) return;
+  const pill = e2eeStatePill();
+  const pend = e2ee.pending || [];
+  const devs = e2ee.devices || [];
+  box.innerHTML = `
+    <div class="sett-row">
+      <span>이 PC 의 암호화 상태</span>
+      <span style="font-size:11px;font-weight:800;color:${pill.c}">${pill.t}</span>
+    </div>
+    <div class="acct-msg">${esc(e2ee.reason || (e2ee.state === "trusted"
+      ? "이 PC 와 내 폰/태블릿 사이의 파일·알림 내용을 서버가 볼 수 없게 암호화합니다."
+      : "지원되는 기기끼리 자동으로 암호화하고, 아니면 기존 방식(평문)으로 그대로 동작합니다."))}</div>
+    ${e2ee.state === "pending" ? `<div class="sett-row"><span>이 PC 확인 숫자</span>
+      <span style="font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:4px">${esc(e2ee.verifyCode || "----")}</span></div>
+      <div class="acct-msg">이미 쓰던 폰/PC 에 승인 요청이 갔어요. 그 화면에 같은 숫자가 보이면 승인해 주세요.</div>` : ""}
+    ${pend.map((p) => `
+      <div class="dev-row" style="border-color:var(--warn,#FBBF24);flex-wrap:wrap">
+        <span class="dev-ic">${icons.smartphone({ size: 15 })}</span>
+        <span class="dev-meta">
+          <span class="dev-name">${esc(p.label || "새 기기")} 에서 접속 시도</span>
+          <span class="dev-sub">새 기기 화면의 숫자와 같은지 확인하세요</span>
+        </span>
+        <span style="font-family:var(--mono);font-size:22px;font-weight:800;letter-spacing:4px;color:${p.verified === false ? "var(--warn,#FBBF24)" : "var(--text)"}"
+          title="${p.verified === false ? "이 숫자는 서버가 알려준 값입니다(로컬 계산과 달랐음) — 새 기기가 내 것인지 한 번 더 확인" : "이 PC 에서 직접 계산한 값"}">${esc(p.verifyCode || "----")}</span>
+        <button class="btn small" data-e2ee-deny="${esc(p.enrollmentId)}">거절</button>
+        <button class="btn small primary" data-e2ee-approve="${esc(p.enrollmentId)}">승인</button>
+      </div>`).join("")}
+    <div class="sett-row"><span>암호화 사용<br><span class="dim" style="font-size:11px">자동 = 양쪽이 지원하면 암호화(권장) · 항상 = 지원 안 하면 조작 차단</span></span>
+      <span class="scale-seg" id="e2eePolicySeg">
+        <button class="scale-opt${e2ee.policy === "off" ? " active" : ""}" data-v="off">끄기</button>
+        <button class="scale-opt${e2ee.policy === "preferred" ? " active" : ""}" data-v="preferred">자동</button>
+        <button class="scale-opt${e2ee.policy === "required" ? " active" : ""}" data-v="required">항상</button>
+      </span></div>
+    <div class="sett-row"><span>이 PC 보안 지문<br><span class="dim" style="font-size:11px">폰 설정의 같은 항목과 대조하세요(QR 스캔 시 자동 검증)</span></span>
+      <span style="font-family:var(--mono);font-size:16px;font-weight:700">${esc(e2ee.fingerprint || "— — —")}</span></div>
+    <div class="sett-row"><span>복구 코드<br><span class="dim" style="font-size:11px">${e2ee.recoverySet ? "설정됨 — 새로 만들면 이전 코드는 무효" : "모든 기기를 잃으면 열쇠를 되살릴 수 없어요"}</span></span>
+      <button class="btn small" id="e2eeRecBtn"${e2ee.state === "trusted" ? "" : " disabled"}>${e2ee.recoverySet ? "새로 만들기" : "만들기"}</button></div>
+    ${e2eeRecoveryShown ? `<div class="acct-msg" style="color:var(--accent)">이 화면을 닫으면 다시 볼 수 없어요 — 지금 안전한 곳에 적어두세요.</div>
+      <div style="font-family:var(--mono);font-size:15px;font-weight:700;padding:0 2px 8px;user-select:text">${esc(e2eeRecoveryShown)}</div>` : ""}
+    ${e2ee.state !== "trusted" && e2ee.state !== "off" ? `<div class="sett-row">
+      <span>복구 코드로 복원<br><span class="dim" style="font-size:11px">모든 기기를 잃었을 때 — 코드 자체가 열쇠입니다</span></span>
+      <span style="display:flex;gap:6px;align-items:center">
+        <input id="e2eeRecIn" class="prof-nick" placeholder="CPT1-XXXXX-…" style="width:230px;font-family:var(--mono);font-size:12px" spellcheck="false" />
+        <button class="btn small" id="e2eeRecRestore">복원</button>
+      </span></div>` : ""}
+    ${devs.length ? `<div class="dev-title" style="margin-top:10px">열쇠를 가진 기기</div>
+      <div class="dev-list">${devs.map((d) => {
+        const mine = !!e2ee.fingerprint && d.fingerprint === e2ee.fingerprint;
+        const isPc = d.platform === "darwin" || d.platform === "win32" || d.platform === "linux";
+        return `<div class="dev-row">
+          <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
+          <span class="dev-meta"><span class="dev-name">${esc(d.label || "기기")}${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span>
+            <span class="dev-sub" style="font-family:var(--mono)">🔒 ${esc(d.fingerprint || "")}</span></span>
+          ${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${d.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}
+        </div>`;
+      }).join("")}</div>
+      <div class="acct-msg">신뢰를 해제하면 열쇠를 새로 만들어 남은 기기에만 다시 나눠줍니다. 해제 이전에 그 기기가 이미 받은 데이터는 회수할 수 없습니다.</div>` : ""}
+    <div class="acct-msg">${e2eeMsg ? esc(e2eeMsg) + "<br>" : ""}암호화해도 폴더명·브랜치명 같은 메타데이터와 알림 제목은 서버가 봅니다(기기 목록·그룹핑·잠금화면 알림이 그 정보로 동작합니다).</div>`;
+  bindE2ee(box);
+}
+
+function bindE2ee(box) {
+  box.querySelectorAll("[data-e2ee-approve]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    const r = await approveDevice(b.dataset.e2eeApprove);
+    e2eeMsg = r.ok ? "" : r.error || "승인에 실패했어요.";
+    renderE2ee();
+  }));
+  box.querySelectorAll("[data-e2ee-deny]").forEach((b) => b.addEventListener("click", async () => {
+    b.disabled = true;
+    const r = await denyDevice(b.dataset.e2eeDeny);
+    e2eeMsg = r.ok ? "" : r.error || "거절에 실패했어요.";
+    renderE2ee();
+  }));
+  box.querySelectorAll("#e2eePolicySeg .scale-opt").forEach((b) => b.addEventListener("click", async () => {
+    e2eeMsg = "";
+    await setE2eePolicy(b.dataset.v);
+    renderE2ee();
+  }));
+  const rec = box.querySelector("#e2eeRecBtn");
+  if (rec) rec.addEventListener("click", async () => {
+    rec.disabled = true;
+    const code = await createRecoveryCode();
+    e2eeRecoveryShown = code;
+    e2eeMsg = code ? "" : "복구 코드를 만들 수 없어요(데몬 업데이트 필요).";
+    renderE2ee();
+  });
+  const recIn = box.querySelector("#e2eeRecIn");
+  const recGo = box.querySelector("#e2eeRecRestore");
+  if (recGo) recGo.addEventListener("click", async () => {
+    recGo.disabled = true;
+    const r = await restoreFromRecovery(recIn ? recIn.value : "");
+    e2eeMsg = r.ok ? "복구 완료 — 이 PC 가 다시 열쇠를 갖습니다." : (r.error || "복원에 실패했어요.");
+    renderE2ee();
+  });
+  // 신뢰 해제 = 휴지통 2탭(모바일/기기삭제와 동일 규율)
+  box.querySelectorAll("[data-e2ee-revoke]").forEach((b) => b.addEventListener("click", async () => {
+    if (!b.classList.contains("arm")) {
+      b.classList.add("arm");
+      setTimeout(() => b.classList.remove("arm"), 4000);
+      return;
+    }
+    b.disabled = true;
+    const r = await revokeTrust(Number(b.dataset.e2eeRevoke));
+    e2eeMsg = r.ok ? "" : r.error || "신뢰 해제에 실패했어요.";
+    renderE2ee();
+  }));
+}
+
 function renderDeviceList() {
   const el = connBody?.querySelector("#deviceTable");
   if (!el) return;
@@ -756,6 +891,13 @@ async function doPair() {
 }
 
 // 딥링크(codingpt-pc://pair?code=)로 프리필 + 자동 연결.
+/** 설정 > 계정 탭으로 이동(기기 승인 알림 클릭 등 — 종단간 암호화 카드가 여기 있다). */
+export function openAccountSection() {
+  section = "connection";
+  S.setView("settings");
+  void refreshE2ee();
+}
+
 export function deepLinkPair(payload) {
   section = "connection";
   S.setView("settings");

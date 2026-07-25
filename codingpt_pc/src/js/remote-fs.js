@@ -2,6 +2,7 @@
 //  로컬 fsapi(api.fs*)와 동일한 시그니처/모양을 돌려주는 어댑터라 IdeView 가 전송 계층만 갈아끼운다.
 //  경로 규약은 양쪽 다 "그 호스트 홈-상대"라 1:1 — 데몬 fs jail(safeResolve)이 서버측에서 강제.
 import { api } from "./api.js";
+import { sealedRpc } from "./e2ee.js";
 
 const enc = encodeURIComponent;
 
@@ -36,15 +37,20 @@ export function makeRemoteFs(hostDeviceId) {
   const hid = Number(hostDeviceId);
   const q = (rel) => `path=${enc(rel || "")}&hostDeviceId=${hid}`;
   const post = (route, body) => api.backApi("POST", `/api/daemon/fs/${route}`, { ...body, hostDeviceId: hid });
+  // 종단간 암호화(기능2): 봉투 RPC 가 가능하면 그쪽을 먼저 쓴다(서버가 경로·내용을 못 본다).
+  //  null 반환 = 미지원/정책 off → 아래 평문 REST 로 폴백(무마찰). 진짜 실패는 throw 되어 그대로 올라간다.
+  const sealed = (method, params, timeoutMs) => sealedRpc(method, { ...params }, hid, timeoutMs);
   return {
     remote: true,
     hostDeviceId: hid,
     async fsTree(rel) {
-      const r = await api.backApi("GET", `/api/daemon/fs/tree?${q(rel)}`);
+      const e = await sealed("fs.tree", { path: rel || "" });
+      const r = e || await api.backApi("GET", `/api/daemon/fs/tree?${q(rel)}`);
       return nestTree(rel || "", r?.items);
     },
     async fsSearch(rel, query) {
-      const r = await api.backApi("GET", `/api/daemon/fs/grep?${q(rel)}&q=${enc(query || "")}`);
+      const e = await sealed("fs.grep", { path: rel || "", query: query || "" }, 20000);
+      const r = e || await api.backApi("GET", `/api/daemon/fs/grep?${q(rel)}&q=${enc(query || "")}`);
       const base = (rel || "").replace(/\/+$/, "");
       return (r?.matches || []).map((m) => ({
         path: base ? `${base}/${m.path}` : m.path,
@@ -54,15 +60,17 @@ export function makeRemoteFs(hostDeviceId) {
       }));
     },
     async fsRead(rel) {
-      const r = await api.backApi("GET", `/api/daemon/fs/read?${q(rel)}`);
+      const e = await sealed("fs.read", { path: rel || "" });
+      const r = e || await api.backApi("GET", `/api/daemon/fs/read?${q(rel)}`);
       if (r?.binary) throw "바이너리 파일은 열 수 없습니다.";
       if (r?.tooLarge) throw "파일이 너무 큽니다(2MB 초과).";
       return r?.content ?? "";
     },
-    fsWrite: (rel, content) => post("write", { path: rel, content }).then(() => {}),
-    fsMkdir: (rel) => post("mkdir", { path: rel }).then(() => {}),
-    fsCreateFile: (rel) => post("create", { path: rel }).then(() => {}),
-    fsRename: (rel, dest) => post("rename", { path: rel, dest }).then(() => {}),
-    fsDelete: (rel) => post("delete", { path: rel }).then(() => {}),
+    // 변형 계열도 같은 규율(봉투 우선 → 미지원이면 평문). 반환값은 쓰지 않으므로 then(()=>{}) 유지.
+    async fsWrite(rel, content) { if (!(await sealed("fs.write", { path: rel, content }))) await post("write", { path: rel, content }); },
+    async fsMkdir(rel) { if (!(await sealed("fs.mkdir", { path: rel }))) await post("mkdir", { path: rel }); },
+    async fsCreateFile(rel) { if (!(await sealed("fs.createFile", { path: rel }))) await post("create", { path: rel }); },
+    async fsRename(rel, dest) { if (!(await sealed("fs.rename", { path: rel, dest }))) await post("rename", { path: rel, dest }); },
+    async fsDelete(rel) { if (!(await sealed("fs.delete", { path: rel }))) await post("delete", { path: rel }); },
   };
 }

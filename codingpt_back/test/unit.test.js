@@ -54,8 +54,19 @@ test('SERVER_CAPS — 처리 코드가 들어간 능력만 선언 + 킬스위치
   // 기능3 2단계(agent_state 수신·rseq 부여)는 아직 서버 코드가 없다 → 선언 금지.
   assert.ok(!SERVER_CAPS.includes('agentstate.v1'), 'agentstate.v1 은 서버 처리 코드가 들어간 뒤에 선언해야 한다');
   // 킬스위치 — 서버에서 기능을 끄면 능력도 회수돼 신버전 데몬의 교집합이 깨진다(= 기존 동작 폴백).
-  assert.deepStrictEqual(computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false' }), ['caps.v1']);
+  assert.deepStrictEqual(computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', E2EE_ENABLED: 'off' }), ['caps.v1']);
   assert.ok(computeServerCaps({}).includes('approval.v1')); // 미설정 = 켜짐
+});
+
+test('SERVER_CAPS — E2EE 는 단계별 능력으로 쪼갠다(열쇠 배포만 선언)', () => {
+  // 이 커밋의 서버 코드 = deviceTrustService + /api/daemon/e2ee/* + device_approval_event 팬아웃.
+  assert.ok(SERVER_CAPS.includes('e2ee.keys.v1'));
+  // ★ 트래픽 봉인 처리 코드는 아직 없다 → 뭉뚱그린 'e2ee.v1' 이나 단계 능력을 미리 선언하면
+  //   데몬이 pty/RPC 봉인을 켜고 서버는 sid/env 배관이 없어 프레임을 조용히 버린다.
+  for (const cap of ['e2ee.v1', 'e2ee.rpc.v1', 'e2ee.stream.v1', 'e2ee.snap.v1']) {
+    assert.ok(!SERVER_CAPS.includes(cap), `${cap} 은 해당 단계 서버 코드가 들어간 뒤에 선언해야 한다`);
+  }
+  assert.ok(!computeServerCaps({ E2EE_ENABLED: '0' }).includes('e2ee.keys.v1')); // 킬스위치로 회수
 });
 
 // ── 기능1 승인 인박스 ────────────────────────────────────────────────
@@ -321,4 +332,413 @@ test('FCM payload — 승인은 액션 가능(혼합 전송 + iOS 카테고리 +
   // iOS: UNNotificationCategory 식별자 + 시간민감
   assert.strictEqual(m.apns.payload.aps.category, 'CPT_APPROVAL');
   assert.strictEqual(m.apns.payload.aps['interruption-level'], 'time-sensitive');
+});
+
+// ── 기능2 E2EE — 기기 승인(열쇠 배포) ────────────────────────────────
+//
+// 이 블록은 "서버는 봉인문만 만진다"를 코드로 고정한다. 아래 seal/open 헬퍼는 **클라이언트 구현의
+//  참조 구현**이기도 하다(데몬 runner-core/e2ee.js · 앱 services/e2ee.ts · PC e2ee.rs 가 같은 바이트를
+//  만들어야 한다). 여기서 만든 80B 봉인문이 서버 검증(길이·서명)을 통과하고 다시 열려서 MK 가
+//  왕복하는 것까지 확인한다.
+const crypto = require('node:crypto');
+const deviceTrust = require('../services/deviceTrustService');
+
+const X_SPKI = Buffer.from('302a300506032b656e032100', 'hex'); // SPKI(X25519) 고정 헤더
+function genX() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
+  return { raw: publicKey.export({ type: 'spki', format: 'der' }).subarray(-32), pub: publicKey, priv: privateKey };
+}
+function genEd() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  return { raw: publicKey.export({ type: 'spki', format: 'der' }).subarray(-32), pub: publicKey, priv: privateKey };
+}
+function importXPub(raw) { return crypto.createPublicKey({ key: Buffer.concat([X_SPKI, raw]), format: 'der', type: 'spki' }); }
+function grantKey(ephRaw, ikXRaw, ss) {
+  return Buffer.from(crypto.hkdfSync('sha256', ss,
+    crypto.createHash('sha256').update(Buffer.concat([ephRaw, ikXRaw])).digest(),
+    Buffer.from('cpt-e2ee/v1/grant'), 32));
+}
+// sealed = ephPub(32) || AEAD(K, nonce=0^12, aad="grant"||epoch||ikX, MK32) → 정확히 80B
+function sealMk(mk, ikXRaw, epoch) {
+  const eph = genX();
+  const ss = crypto.diffieHellman({ privateKey: eph.priv, publicKey: importXPub(ikXRaw) });
+  const K = grantKey(eph.raw, ikXRaw, ss);
+  const c = crypto.createCipheriv('chacha20-poly1305', K, Buffer.alloc(12), { authTagLength: 16 });
+  c.setAAD(Buffer.concat([Buffer.from('grant'), Buffer.from(String(epoch)), ikXRaw]), { plaintextLength: 32 });
+  const ct = Buffer.concat([c.update(mk), c.final()]);
+  return Buffer.concat([eph.raw, ct, c.getAuthTag()]);
+}
+function openMk(sealed, recipient, epoch) {
+  const ephRaw = sealed.subarray(0, 32);
+  const ss = crypto.diffieHellman({ privateKey: recipient.priv, publicKey: importXPub(ephRaw) });
+  const K = grantKey(ephRaw, recipient.raw, ss);
+  const d = crypto.createDecipheriv('chacha20-poly1305', K, Buffer.alloc(12), { authTagLength: 16 });
+  d.setAAD(Buffer.concat([Buffer.from('grant'), Buffer.from(String(epoch)), recipient.raw]), { plaintextLength: 32 });
+  d.setAuthTag(sealed.subarray(64, 80));
+  return Buffer.concat([d.update(sealed.subarray(32, 64)), d.final()]);
+}
+const b64u = (b) => Buffer.from(b).toString('base64url');
+// 기기 하나 = X25519(봉인 수신) + Ed25519(승인 서명) 키쌍
+function newDevice(label, kind = 'controller', platform = 'ios') {
+  const x = genX(); const ed = genEd();
+  return { label, kind, platform, x, ed, ikX: b64u(x.raw), ikEd: b64u(ed.raw) };
+}
+function signGrant(dev, epoch, ikXRaw, sealed) {
+  return b64u(crypto.sign(null, deviceTrust._grantSigMessage(epoch, ikXRaw, sealed), dev.ed.priv));
+}
+function fakeStore() {
+  const files = new Map();
+  return {
+    files,
+    async load(uid) { return files.has(uid) ? JSON.parse(files.get(uid)) : null; },
+    async save(uid, obj) { files.set(uid, JSON.stringify(obj)); },
+  };
+}
+// 배관(알림/푸시/팬아웃)은 전부 스텁 — 검증 대상은 상태 전이와 암호문 취급이다.
+function withStubs(fn) {
+  const relay = require('../services/daemonRelayService');
+  const notif = require('../services/notificationService');
+  const push = require('../services/pushService');
+  const saved = {
+    fan: relay.fanoutDeviceApproval, present: relay.presentClient,
+    create: notif.createNotification, read: notif.markRead, send: push.sendToUser,
+  };
+  const seen = { events: [], notifs: [], reads: [], pushes: [] };
+  let notifId = 700;
+  relay.fanoutDeviceApproval = (userId, event) => seen.events.push(event);
+  relay.presentClient = () => null;
+  notif.createNotification = async (userId, p) => { seen.notifs.push({ userId, ...p }); return { id: notifId += 1 }; };
+  notif.markRead = async (userId, p) => { seen.reads.push({ userId, ...p }); return { ids: p.ids }; };
+  push.sendToUser = async (userId, p, o) => { seen.pushes.push({ userId, p, o }); return { sent: 1 }; };
+  const restore = () => {
+    relay.fanoutDeviceApproval = saved.fan; relay.presentClient = saved.present;
+    notif.createNotification = saved.create; notif.markRead = saved.read; push.sendToUser = saved.send;
+  };
+  return Promise.resolve(fn(seen)).finally(restore);
+}
+
+test('e2ee 확인번호 — 공개키에서 결정적 파생(서버 발급 아님) · 4자리 = 6자리 지문의 뒤 4자리', () => {
+  const dev = newDevice('iPad Pro');
+  const a = deviceTrust._fingerprintOf(7, dev.x.raw);
+  const b = deviceTrust._fingerprintOf(7, dev.x.raw);
+  assert.deepStrictEqual(a, b, '같은 입력 = 같은 숫자(양쪽 화면이 서버 없이 같은 값을 만든다)');
+  assert.match(a.verifyCode, /^\d{4}$/);
+  assert.match(a.fingerprint, /^\d{3} \d{3}$/);
+  // ★ 실제 MITM 대조 대상은 60비트 안전코드다. 짧은 숫자는 방어력이 없다 —
+  //  서버는 userId 와 피해 기기의 실제 공개키를 둘 다 알아서 "같은 표시값이 나오는 자기 키쌍"을
+  //  오프라인으로 찾을 수 있다(실측: 4자리 1.3초 / 6자리 80초). verifyCode 는 요청 구분용일 뿐이다.
+  assert.match(a.safetyCode, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/,
+    '표시 지문은 60비트(base32 12글자)여야 한다');
+  assert.notStrictEqual(deviceTrust._fingerprintOf(8, dev.x.raw).safetyCode, a.safetyCode);
+  assert.notStrictEqual(deviceTrust._fingerprintOf(7, newDevice('x').x.raw).safetyCode, a.safetyCode);
+  // 계정이 다르면 다른 숫자(교차계정 지문 재사용 차단), 키가 다르면 다른 숫자(= MITM 감지의 근거).
+  assert.notStrictEqual(deviceTrust._fingerprintOf(8, dev.x.raw).fingerprint, a.fingerprint);
+  assert.notStrictEqual(deviceTrust._fingerprintOf(7, newDevice('x').x.raw).fingerprint, a.fingerprint);
+});
+
+test('e2ee 평문 MK 거부 — 필드 자체가 없고, 32B 원문은 형식에서 불합격', () => {
+  const mk = crypto.randomBytes(32);
+  // ① 평문 키를 담을 필드 이름은 전부 거절된다(오전송 그물).
+  for (const f of deviceTrust._config.FORBIDDEN_FIELDS) {
+    assert.throws(() => deviceTrust._rejectPlaintextFields({ [f]: b64u(mk) }),
+      (e) => e.statusCode === 400 && e.code === 'PLAINTEXT_KEY_REJECTED' && e.publicDetail.field === f);
+  }
+  // ② sealed 는 정확히 80B(ephPub32+ct32+tag16). 32B 원문 키는 길이에서 걸린다.
+  assert.throws(() => deviceTrust._decodeExact(b64u(mk), deviceTrust._config.SEALED_LEN, 'sealed'),
+    (e) => e.code === 'BAD_LENGTH' && e.publicDetail.got === 32 && e.publicDetail.expected === 80);
+  // ③ 비정규 b64(패딩/표준알파벳)도 거절 — 조용히 삼켜서 다른 바이트로 저장되지 않게.
+  const std = Buffer.from(mk).toString('base64');
+  if (/[+/=]/.test(std)) {
+    assert.throws(() => deviceTrust._decodeExact(std, 32, 'ikX'), (e) => /BAD_ENCODING|BAD_LENGTH/.test(e.code));
+  }
+  // ④ 정상 80B 봉인문은 통과하고, 수신자 개인키로 열면 MK 가 그대로 나온다(참조 구현 왕복).
+  const dev = newDevice('MacBook', 'host', 'darwin');
+  const sealed = sealMk(mk, dev.x.raw, 1);
+  assert.strictEqual(sealed.length, 80);
+  assert.strictEqual(deviceTrust._decodeExact(b64u(sealed), 80, 'sealed').length, 80);
+  assert.deepStrictEqual(openMk(sealed, dev.x, 1), mk);
+});
+
+test('e2ee grant 서명 — 정본 바이트열 + 위조/세대변조 거부', () => {
+  const approver = newDevice('MacBook', 'host', 'darwin');
+  const recipient = newDevice('iPad Pro');
+  const mk = crypto.randomBytes(32);
+  const sealed = sealMk(mk, recipient.x.raw, 2);
+  const sig = Buffer.from(signGrant(approver, 2, recipient.x.raw, sealed), 'base64url');
+  const ok = { epoch: 2, ikXRaw: recipient.x.raw, sealedRaw: sealed, sigRaw: sig, approverIkEdRaw: approver.ed.raw };
+  assert.strictEqual(deviceTrust._verifyGrantSig(ok), true);
+  // epoch 변조 → 실패(옛 세대 봉인문을 새 세대로 재활용 못 한다)
+  assert.strictEqual(deviceTrust._verifyGrantSig({ ...ok, epoch: 3 }), false);
+  // 수신자 바꿔치기 → 실패(서버가 봉인 대상을 갈아치울 수 없다)
+  assert.strictEqual(deviceTrust._verifyGrantSig({ ...ok, ikXRaw: newDevice('x').x.raw }), false);
+  // 봉인문 1바이트 변조 → 실패
+  const tampered = Buffer.from(sealed); tampered[70] ^= 1;
+  assert.strictEqual(deviceTrust._verifyGrantSig({ ...ok, sealedRaw: tampered }), false);
+  // 다른 기기가 서명 → 실패(승인자 신원 위조 차단)
+  assert.strictEqual(deviceTrust._verifyGrantSig({ ...ok, approverIkEdRaw: newDevice('y').ed.raw }), false);
+  // 정본 메시지 모양 고정 — 다른 구현체가 맞춰야 하는 계약
+  const msg = deviceTrust._grantSigMessage(2, recipient.x.raw, sealed);
+  // epoch 는 u32 BE(4B) — 데몬/앱 구현이 정본. 이전에는 back 만 문자열+널바이트(84B)를 써서
+  //  서버 검증이 전부 실패했고, 그 결과 열쇠가 한 대도 배포되지 않았다(양쪽 단위 테스트는 초록).
+  //  이 계약은 test/e2ee-crossimpl.test.js 가 데몬 구현과 실제로 대조한다.
+  assert.strictEqual(msg.length, 'cpt-e2ee/v1/grant'.length + 4 + 32 + 32);
+  assert.ok(msg.subarray(0, 17).equals(Buffer.from('cpt-e2ee/v1/grant')));
+  assert.ok(msg.subarray(-32).equals(crypto.createHash('sha256').update(sealed).digest()));
+});
+
+test('e2ee 기기 승인 전 과정 — 부트스트랩 → 대기 → 1탭 승인 → 봉인문 수령', async () => {
+  deviceTrust._reset();
+  const store = fakeStore();
+  deviceTrust._setStore(store);
+  await withStubs(async (seen) => {
+    const pc = newDevice('MacBook Pro', 'host', 'darwin');
+    const phone = newDevice('iPhone 17');
+    const mk = crypto.randomBytes(32); // MK_1 — 오직 기기들만 아는 값. 서버로는 절대 안 간다.
+
+    // ① 계정 최초 기기 = 부트스트랩 허용(승인해 줄 기기가 없다)
+    const first = await deviceTrust.enroll(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, label: pc.label, kind: 'host' });
+    assert.strictEqual(first.state, 'bootstrap');
+    const sealedSelf = sealMk(mk, pc.x.raw, 1);
+    const boot = await deviceTrust.bootstrap(7, 12, {
+      ikX: pc.ikX, ikEd: pc.ikEd, label: pc.label, kind: 'host', platform: 'darwin',
+      sealed: b64u(sealedSelf), sig: signGrant(pc, 1, pc.x.raw, sealedSelf),
+    });
+    assert.strictEqual(boot.epoch, 1);
+    const sealedSecond = sealMk(mk, phone.x.raw, 1);
+    // 두 번째 부트스트랩은 반드시 막혀야 한다 — 통과하면 계정 열쇠가 갈라져 전 기기가 서로 못 읽는다.
+    await assert.rejects(() => deviceTrust.bootstrap(7, 99, {
+      ikX: phone.ikX, ikEd: phone.ikEd, sealed: b64u(sealedSecond),
+      sig: signGrant(phone, 1, phone.x.raw, sealedSecond),
+    }), (e) => e.statusCode === 409 && e.code === 'E2EE_ALREADY_INITIALIZED');
+
+    // ② 새 폰: 계정 로그인만으로 enroll → 대기 + 확인번호(공개키 파생)
+    const pend = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, platform: 'ios' });
+    assert.strictEqual(pend.state, 'pending');
+    assert.strictEqual(pend.verifyCode, deviceTrust._fingerprintOf(7, phone.x.raw).verifyCode);
+    // 팬아웃 = 기존 배관 그대로(인앱 시트 + 알림 인박스/FCM)
+    const reqEv = seen.events.filter((e) => e.kind === 'request');
+    assert.strictEqual(reqEv.length, 1);
+    // ★ 이벤트 종류(kind)와 기기 종류(deviceKind)는 반드시 다른 필드여야 한다 —
+    //   같은 이름이면 스프레드가 'request' 를 'controller' 로 덮어써 승인 시트가 영원히 안 뜬다.
+    assert.strictEqual(reqEv[0].deviceKind, 'controller');
+    assert.strictEqual(reqEv[0].verifyCode, pend.verifyCode);
+    const n = seen.notifs[0];
+    assert.strictEqual(n.kind, 'device_approval');
+    assert.ok(n.subtitle && n.subtitle.includes(phone.label));
+    assert.ok(!String(n.subtitle).includes(pend.verifyCode), '확인번호가 FCM 본문(subtitle)으로 새면 안 된다');
+    assert.ok(String(n.body).includes(pend.verifyCode), '확인번호는 인앱 본문에만');
+    assert.strictEqual(n.deeplink, `codingpt://device-approval/${pend.enrollmentId}`);
+    // 멱등 — 폴링/앱 재시작에 같은 enrollment 를 돌려준다(알림은 새로 만들지 않는다)
+    const again = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label });
+    assert.strictEqual(again.enrollmentId, pend.enrollmentId);
+    assert.strictEqual(seen.notifs.length, 1);
+
+    // ③ 대기 중 기기는 승인자가 될 수 없다(자기 자신을 승인하는 우회 차단)
+    const sealedPhone = sealMk(mk, phone.x.raw, 1);
+    await assert.rejects(() => deviceTrust.approve(7, {
+      enrollmentId: pend.enrollmentId, ikX: phone.ikX, approverIkX: phone.ikX, epoch: 1,
+      sealed: b64u(sealedPhone), sig: signGrant(phone, 1, phone.x.raw, sealedPhone),
+    }), (e) => e.statusCode === 403 && e.code === 'NOT_TRUSTED');
+
+    // ④ 봉인 대상 바꿔치기 시도 → KEY_MISMATCH
+    const other = newDevice('공격자');
+    const sealedOther = sealMk(mk, other.x.raw, 1);
+    await assert.rejects(() => deviceTrust.approve(7, {
+      enrollmentId: pend.enrollmentId, ikX: other.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedOther), sig: signGrant(pc, 1, other.x.raw, sealedOther),
+    }), (e) => e.statusCode === 409 && e.code === 'KEY_MISMATCH');
+
+    // ⑤ 신뢰 기기(PC)가 1탭 승인 — MK 를 폰 공개키로 봉인해 업로드
+    const okRes = await deviceTrust.approve(7, {
+      enrollmentId: pend.enrollmentId, ikX: phone.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedPhone), sig: signGrant(pc, 1, phone.x.raw, sealedPhone),
+    });
+    assert.strictEqual(okRes.ok, true);
+    // 해소 팬아웃 + 알림 읽음(= 기존 크로스기기 dismiss 재사용) → 다른 기기 배너 자동 회수
+    const resolved = seen.events.find((e) => e.kind === 'resolved');
+    assert.strictEqual(resolved.approved, true);
+    assert.deepStrictEqual(seen.reads[0].ids, [n_id(seen)]);
+
+    // ⑥ 폰이 다시 enroll → trusted + 봉인문 수령 → 열어서 MK 확인(진짜 열쇠가 옮겨졌다)
+    const trusted = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label });
+    assert.strictEqual(trusted.state, 'trusted');
+    assert.strictEqual(trusted.epoch, 1);
+    assert.deepStrictEqual(openMk(Buffer.from(trusted.grant.sealed, 'base64url'), phone.x, 1), mk);
+    assert.strictEqual(trusted.grant.sealedByKeyId, 1);
+
+    // ⑦ 서버 저장물에 평문 MK 가 없다 — blob 전체를 훑어 32B 원문의 어떤 인코딩도 없어야 한다.
+    const blob = store.files.get('7');
+    assert.ok(blob.length > 0);
+    assert.ok(!blob.includes(b64u(mk)));
+    assert.ok(!blob.includes(mk.toString('base64')));
+    assert.ok(!blob.includes(mk.toString('hex')));
+    for (const f of deviceTrust._config.FORBIDDEN_FIELDS) assert.ok(!blob.includes(`"${f}"`));
+
+    // ⑧ 키링(감사 UI) — 공개키/지문/상태만. 기기 2대가 trusted.
+    const ring = await deviceTrust.keyring(7, { ikX: phone.ikX });
+    assert.strictEqual(ring.epoch, 1);
+    assert.strictEqual(ring.devices.length, 2);
+    assert.deepStrictEqual(ring.devices.map((d) => d.state), ['trusted', 'trusted']);
+    assert.strictEqual(ring.myState, 'trusted');
+    assert.strictEqual(ring.devices[1].verifyCode, pend.verifyCode);
+  });
+});
+function n_id(seen) { return seen.notifs.length ? 701 : null; } // withStubs 의 첫 알림 id(700+1)
+
+test('e2ee — 열쇠는 ikX(공개키) 기준으로만 발급된다(deviceId 재귀속 함정 #12)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async () => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s), sig: signGrant(pc, 1, pc.x.raw, s) });
+    // 같은 ikX + 다른 deviceId(기기행 재귀속/업서트) → 여전히 trusted(열쇠 유지)
+    const same = await deviceTrust.enroll(7, 99, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host' });
+    assert.strictEqual(same.state, 'trusted');
+    // 같은 deviceId + 다른 ikX(다른 기기가 그 행을 선점) → 절대 열쇠를 주지 않고 승인 대기
+    const impostor = newDevice('같은 행을 쓰는 다른 기기', 'host', 'darwin');
+    const pend = await deviceTrust.enroll(7, 12, { ikX: impostor.ikX, ikEd: impostor.ikEd, kind: 'host' });
+    assert.strictEqual(pend.state, 'pending');
+  });
+});
+
+test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async (seen) => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    const bad = newDevice('낯선 기기');
+    for (let i = 0; i < deviceTrust._config.DENY_BLOCK_MAX; i += 1) {
+      const p = await deviceTrust.enroll(7, null, { ikX: bad.ikX, ikEd: bad.ikEd, label: bad.label });
+      assert.strictEqual(p.state, 'pending');
+      await deviceTrust.deny(7, { enrollmentId: p.enrollmentId });
+    }
+    // 3회 거절 후 같은 키의 재신청은 차단(알림 폭탄 방지)
+    await assert.rejects(() => deviceTrust.enroll(7, null, { ikX: bad.ikX, ikEd: bad.ikEd }),
+      (e) => e.statusCode === 429 && e.code === 'ENROLL_BLOCKED');
+    // 거절 알림도 읽음 처리로 배너를 회수한다
+    assert.strictEqual(seen.reads.length, deviceTrust._config.DENY_BLOCK_MAX);
+
+    // 만료: 스위퍼가 resolved(expired) 팬아웃 + 인덱스 제거
+    const other = newDevice('태블릿');
+    const p = await deviceTrust.enroll(7, null, { ikX: other.ikX, ikEd: other.ikEd });
+    deviceTrust._sweep(Date.now() + deviceTrust._config.ENROLL_TTL_MS + 1);
+    assert.strictEqual(deviceTrust._pending.has(p.enrollmentId), false);
+    const ev = seen.events.filter((e) => e.kind === 'resolved' && e.enrollmentId === p.enrollmentId)[0];
+    assert.strictEqual(ev.approved, false);
+    assert.strictEqual(ev.reason, 'expired');
+    // 만료 후 승인 시도는 404(인덱스에 없다)
+    const sealedOtherE1 = sealMk(mk, other.x.raw, 1);
+    await assert.rejects(() => deviceTrust.approve(7, {
+      enrollmentId: p.enrollmentId, ikX: other.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedOtherE1), sig: signGrant(pc, 1, other.x.raw, sealedOtherE1),
+    }), (e) => e.statusCode === 404);
+  });
+});
+
+test('e2ee 회전(revoke 후) — 남은 기기 전부 재봉인 강제 · 누락은 400', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async () => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const phone = newDevice('iPhone');
+    const tablet = newDevice('iPad');
+    const mk1 = crypto.randomBytes(32);
+    const s0 = sealMk(mk1, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+    for (const d of [phone, tablet]) {
+      const p = await deviceTrust.enroll(7, null, { ikX: d.ikX, ikEd: d.ikEd, label: d.label });
+      const sd = sealMk(mk1, d.x.raw, 1);
+      await deviceTrust.approve(7, { enrollmentId: p.enrollmentId, ikX: d.ikX, approverIkX: pc.ikX, epoch: 1, sealed: b64u(sd), sig: signGrant(pc, 1, d.x.raw, sd) });
+    }
+    // 태블릿(keyId 3)을 해제하며 epoch 2 로 회전 — 폰(keyId 2) 봉인문을 빠뜨리면 거부돼야 한다.
+    //  (조용히 통과시키면 그 폰이 다음 접속에서 영구 복호 불가 = "갑자기 안 됨")
+    const mk2 = crypto.randomBytes(32);
+    const sealedPcE2 = sealMk(mk2, pc.x.raw, 2);
+    await assert.rejects(() => deviceTrust.rotate(7, {
+      approverIkX: pc.ikX, fromEpoch: 1, toEpoch: 2, revokeKeyIds: [3],
+      grants: [{ keyId: 1, ikX: pc.ikX, sealed: b64u(sealedPcE2), sig: signGrant(pc, 2, pc.x.raw, sealedPcE2) }],
+    }), (e) => e.statusCode === 400 && e.code === 'INCOMPLETE_ROTATION' && e.publicDetail.missing.includes(2));
+
+    const mkGrant = (d) => { const s = sealMk(mk2, d.x.raw, 2); return { keyId: d === pc ? 1 : 2, ikX: d.ikX, sealed: b64u(s), sig: signGrant(pc, 2, d.x.raw, s) }; };
+    const rot = await deviceTrust.rotate(7, {
+      approverIkX: pc.ikX, fromEpoch: 1, toEpoch: 2, revokeKeyIds: [3], grants: [mkGrant(pc), mkGrant(phone)],
+    });
+    assert.deepStrictEqual({ epoch: rot.epoch, resealed: rot.resealed, revoked: rot.revoked }, { epoch: 2, resealed: 2, revoked: [3] });
+    // 폰은 새 세대 MK 를 받고, 태블릿은 revoked + 새 봉인문 없음
+    const phoneRing = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd });
+    assert.strictEqual(phoneRing.epoch, 2);
+    assert.deepStrictEqual(openMk(Buffer.from(phoneRing.grant.sealed, 'base64url'), phone.x, 2), mk2);
+    await assert.rejects(() => deviceTrust.enroll(7, null, { ikX: tablet.ikX, ikEd: tablet.ikEd }),
+      (e) => e.statusCode === 409 && e.code === 'KEY_REVOKED');
+    // 옛 세대 봉인문은 남는다(옛 스냅샷/알림 복호 — §6-19)
+    const ring = await deviceTrust.keyring(7, {});
+    assert.strictEqual(ring.epoch, 2);
+    assert.strictEqual(ring.devices.find((d) => d.keyId === 3).state, 'revoked');
+    // required 정책은 복구 코드 없이는 켤 수 없다(기기 전량 소실 = 영구 손실 방지)
+    await assert.rejects(() => deviceTrust.setPolicy(7, 'required'), (e) => e.code === 'RECOVERY_REQUIRED');
+    await deviceTrust.setRecovery(7, { recovery: { blob: b64u(crypto.randomBytes(60)) } });
+    assert.deepStrictEqual(await deviceTrust.setPolicy(7, 'required'), { policy: 'required', epoch: 2 });
+  });
+});
+
+test('e2ee 저장소 장애 — "빈 키링"으로 뭉개지 않는다(부트스트랩 재허용 금지)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore({
+    async load() { const e = new Error('objectstore down'); throw Object.assign(e, { statusCode: 503, code: 'KEYRING_UNAVAILABLE' }); },
+    async save() {},
+  });
+  await withStubs(async () => {
+    const d = newDevice('PC', 'host', 'darwin');
+    await assert.rejects(() => deviceTrust.enroll(7, 1, { ikX: d.ikX, ikEd: d.ikEd, kind: 'host' }),
+      (e) => e.statusCode === 503, '장애 시 bootstrap 을 열어주면 계정 열쇠가 갈라진다');
+  });
+  deviceTrust._reset();
+});
+
+test('e2ee 레이트 리밋 — 유저당 분당 상한 후 차단, 창 넘어가면 회복', () => {
+  const map = new Map();
+  const now = 1_000_000;
+  const max = deviceTrust._config.ENROLL_MAX_PER_MIN;
+  for (let i = 0; i < max; i += 1) assert.strictEqual(deviceTrust._allowRate(map, 'u9', now, max), true);
+  assert.strictEqual(deviceTrust._allowRate(map, 'u9', now, max), false);
+  assert.strictEqual(deviceTrust._allowRate(map, 'u9', now + 60_001, max), true);
+  // 감사 UI 에 뜨는 IP 는 마지막 옥텟을 가린다
+  assert.strictEqual(deviceTrust._maskIp('203.0.113.42'), '203.0.113.*');
+  assert.strictEqual(deviceTrust._maskIp(''), null);
+});
+
+test('maybeNotify — 봉인 모드는 평문 hint 로, hint 없으면 기존 event 로 폴백(알림 품질 보존)', async () => {
+  const relay = require('../services/daemonRelayService');
+  const notif = require('../services/notificationService');
+  const orig = notif.createNotification;
+  const calls = [];
+  notif.createNotification = async (userId, p) => { calls.push({ userId, ...p }); return { id: 1 }; };
+  try {
+    // (신) 데몬이 봉인문 + 평문 최소 요약(hint)을 보낸 경우
+    relay._maybeNotify(7, 'sess-1', { type: 'done', wsName: 'codingpt', summary: '리팩터링 완료', cwd: 'dev/codingpt', win: 1234, workspaceId: 'p-1' });
+    // (구) 데몬이 평문 event 를 보낸 경우 — 문구 추출 규칙 동일
+    relay._maybeNotify(7, 'sess-2', { type: 'error', message: 'ENOENT' });
+    // 알림 아닌 종류는 그대로 무시
+    relay._maybeNotify(7, 'sess-3', { type: 'text', text: 'blah' });
+    relay._maybeNotify(7, 'sess-4', undefined); // 봉인문만 오고 hint 가 없으면 알림 없음
+    assert.strictEqual(calls.length, 2);
+    const [a, b] = calls;
+    assert.strictEqual(a.body, '리팩터링 완료');   // ★ 잠금화면 본문 = 요약(무내용 푸시로 깎지 않는다)
+    assert.strictEqual(a.kind, 'done');
+    assert.strictEqual(a.cwd, 'dev/codingpt');     // pane 단위 읽음 scope
+    assert.strictEqual(a.win, 1234);
+    assert.strictEqual(a.workspaceId, 'p-1');      // 딥링크
+    // ★ wsName 은 넘기지 않는다 — composeSubtitle 이 subtitle 을 채우면 FCM 본문이 부제로 바뀌어
+    //   잠금화면에서 요약문이 사라진다(불변식 5).
+    assert.strictEqual(a.wsName, undefined);
+    assert.strictEqual(_composeSubtitle(a.kind, a.wsName), null);
+    assert.strictEqual(b.body, 'ENOENT');
+    assert.strictEqual(b.cwd, null);
+  } finally { notif.createNotification = orig; }
 });

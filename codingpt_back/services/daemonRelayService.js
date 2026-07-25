@@ -71,6 +71,7 @@ function listRunners(userId) {
     deviceId: c.deviceId, kind: c.kind, deviceName: c.deviceName,
     platform: c.platform, active: c.deviceId === e.activeRunnerId, connectedAt: c.connectedAt,
     caps: c.caps || [], // 진단용(hello.caps). 구 데몬은 [] — 구 클라이언트는 이 필드를 무시한다.
+    e2eeEpoch: c.e2eeEpoch || 0, // 호스트의 열쇠 세대(0=없음). 클라 잠금 배지/게이팅 판정용.
   }));
 }
 // 연결된 클라우드 러너 목록(동면 스위퍼용) — 활동시각/바쁨 상태 포함.
@@ -184,6 +185,9 @@ function registerControl(ws, device) {
     platform: device.platform,
     daemonVersion: device.daemon_version,
     caps: [],                   // 데몬이 hello.caps 로 신고한 능력(구버전 데몬 = 영구 []). 게이팅/진단용.
+    // 이 호스트가 들고 있는 E2EE 열쇠 세대(hello.e2eeEpoch). 0/null = 열쇠 없음(구 데몬 포함).
+    //  클라이언트가 "내 grant epoch == 호스트 epoch" 인지 보고 봉인 여부를 정하는 근거(§2.8).
+    e2eeEpoch: 0,
     ws,
     connectedAt: Date.now(),
     lastSeenFlushedAt: 0,
@@ -197,7 +201,7 @@ function registerControl(ws, device) {
   if (entry.activeRunnerId == null || !entry.runners.has(entry.activeRunnerId)) entry.activeRunnerId = device.id;
   console.log(`[daemonRelay] 러너 연결 userId=${userId} kind=${conn.kind} device=${device.device_name}(#${device.id}) active=${entry.activeRunnerId}`);
   touchLastSeen(conn, true);
-  fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName });
+  fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName, e2eeEpoch: conn.e2eeEpoch || 0 });
 
   let alive = true;
   ws.on('pong', () => { alive = true; touchLastSeen(conn, false); });
@@ -223,6 +227,16 @@ function registerControl(ws, device) {
       //  hello 는 재연결·버전업마다 다시 오므로 그때마다 최신 신고로 덮는다(부재 시엔 유지하지 않고 비움 —
       //  다운그레이드 설치 후에도 상태가 남지 않게).
       if ('caps' in msg) conn.caps = normCaps(msg.caps);
+      // E2EE 열쇠 세대 신고(옵셔널) — 구 데몬은 안 보내므로 0 유지 = "열쇠 없음" 판정 → 평문 폴백.
+      //  hello 는 연결 팬아웃 "뒤"에 오므로, 값이 바뀌면 runner_status 를 한 번 더 쏴 잠금 배지를 갱신한다
+      //  (안 하면 클라 배지가 재접속까지 0 으로 고착 — GET /status 재조회만으로 회복되던 stale).
+      if ('e2eeEpoch' in msg) {
+        const nextEpoch = Number.isInteger(msg.e2eeEpoch) && msg.e2eeEpoch > 0 ? msg.e2eeEpoch : 0;
+        if (nextEpoch !== conn.e2eeEpoch) {
+          conn.e2eeEpoch = nextEpoch;
+          fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName, e2eeEpoch: nextEpoch });
+        }
+      }
       DaemonDevice.update(
         { device_name: conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
         { where: { id: conn.deviceId } }
@@ -260,10 +274,21 @@ function registerControl(ws, device) {
     if (msg.type === 'agent_event') {
       // BYO 에이전트 이벤트(agent_init/text/tool_use/permission_request/done/…) — 앱에 팬아웃.
       // 순서는 데몬 seq(세션별)로 보장. M3-1: SSE(기존)와 WSS(버퍼+리플레이) 양쪽으로 내보낸다.
-      const payload = { type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event };
+      // E2EE(기능2) 봉투화 대비 — 데몬이 `env`(봉인된 원래 event) + `hint`(평문 최소 요약)를 보낼 수 있다.
+      //  · env/hint 는 additive: 구 데몬은 event 만 보내고, 구 클라이언트는 모르는 필드를 무시한다.
+      //  · 서버는 env 를 **해석하지 않는다**(그대로 중계). 라우팅/알림은 평문 hint 로만 한다.
+      const hint = msg.hint && typeof msg.hint === 'object' ? msg.hint : null;
+      const payload = {
+        type: 'agent_event', sessionId: msg.sessionId, seq: msg.seq, event: msg.event,
+        ...(typeof msg.env === 'string' ? { env: msg.env } : {}),
+        ...(hint ? { hint } : {}),
+      };
       broadcastEvent(userId, payload);   // SSE(기존, 폴백)
       pushAgentEvent(userId, payload);   // WSS 버퍼 + 라이브(리플레이용 rseq 부여)
-      maybeNotify(userId, msg.sessionId, msg.event); // 알림 영속화 + 팬아웃 + (미접속 시) FCM
+      // 알림 영속화 + 팬아웃 + (미접속 시) FCM. 봉인 모드에선 event 가 없으므로 hint 가 정본이고,
+      //  hint 가 없으면 기존 경로(event)로 폴백한다 = 구 데몬 회귀 0.
+      if (!hint && typeof msg.env === 'string') warnMissingHint(userId, msg.sessionId);
+      maybeNotify(userId, msg.sessionId, hint || msg.event);
       return;
     }
     if (msg.type === 'chat_event') {
@@ -457,6 +482,7 @@ function listUiClients(userId) {
       // ui_hello.caps — "이 화면이 응답할 수 있는 기능"(예: 승인 카드). 데몬이 "요청을 만들어도 되는가"를
       //  판단하는 근거(§2-(d) 게이팅). 구 클라이언트는 안 보내므로 [].
       caps: m.caps || [],
+      e2eeEpoch: m.e2eeEpoch || 0, // 이 화면의 열쇠 세대(0=열쇠 없음) — 잠금 배지/게이팅 진단용.
     });
   }
   out.sort((a, b) =>
@@ -483,6 +509,20 @@ function fanoutNotifEvent(userId, event) {
 //  ui_command 를 재사용하지 않는 이유: 초당 10건 rate limit + executor 1곳 라우팅이라 "전 기기 카드"와 상충.
 function fanoutApprovalEvent(userId, event) {
   const payload = { type: 'approval_event', event };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 기기 승인(E2EE 열쇠 배포) 팬아웃(기능2) — {type:'device_approval_event', event:{kind, …}}.
+//  fanoutApprovalEvent 미러(라이브 전용·버퍼 없음). kind:
+//   · request      — 새 기기가 승인 대기(확인번호 4자리 포함) → 신뢰 기기들이 승인 시트 표시
+//   · resolved     — 승인/거절/만료 → 다른 기기의 시트 철수(알림 배너는 markRead 가 회수)
+//   · bootstrapped/rotated/policy/recovery/rotate_needed — 키링 상태 변화(전 기기 동기화)
+//  구 클라이언트는 unknown type 을 무시하므로 안전(하위호환 규율).
+//  ★ 새 WS 경로/새 푸시 경로를 만들지 않는다 — 기존 agentWsClients 채널 + notificationService 재사용.
+function fanoutDeviceApproval(userId, event) {
+  const payload = { type: 'device_approval_event', event };
   broadcastEvent(userId, payload); // SSE 폴백
   const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
@@ -542,11 +582,23 @@ function fanoutRunnerStatus(userId, event) {
 //  (구) maybePush 의 직접 FCM 발송을 대체 — 푸시는 createNotification 내부에서 한 번만(이중 푸시 방지).
 //  RUNNER_OFFLINE 은 알림 아님(연결 인디케이터).
 const NOTIF_KINDS = new Set(['done', 'permission_request', 'error']);
+// 봉인 이벤트인데 hint 가 없는 데몬 버그를 조용히 넘기지 않는다(알림이 통째로 사라지는 증상).
+//  세션당 1회만 경고 — 초당 수십 이벤트에 로그가 폭주하면 진짜 신호가 묻힌다.
+const hintWarned = new Set();
+function warnMissingHint(userId, sessionId) {
+  const key = `${userId}:${sessionId || '-'}`;
+  if (hintWarned.has(key)) return;
+  if (hintWarned.size > 500) hintWarned.clear();
+  hintWarned.add(key);
+  console.warn(`[daemonRelay] 봉인 agent_event 에 hint 가 없어 알림을 만들 수 없습니다 user=${userId} session=${sessionId}`);
+}
+// event 자리에는 (구) 평문 event 또는 (신) 평문 hint 가 온다. 둘 다 `type` + 짧은 요약 필드를 갖는
+//  같은 모양이라 판정 로직은 하나로 유지된다(§4.1 "사실상 무수정").
 function maybeNotify(userId, sessionId, event) {
   if (!event || !event.type || !NOTIF_KINDS.has(event.type)) return;
   // 순환 require 회피(notificationService → daemonRelayService) — 호출 시점 lazy require.
   const notificationService = require('./notificationService');
-  // 이벤트에서 추출 가능한 본문 텍스트(형태가 다양하므로 best-effort).
+  // 이벤트에서 추출 가능한 본문 텍스트(형태가 다양하므로 best-effort). hint 는 `summary` 를 채운다.
   const body = String(event.text || event.message || event.summary || event.error || event.tool || '').slice(0, 2000) || null;
   notificationService.createNotification(Number(userId), {
     source: 'agent',
@@ -554,6 +606,13 @@ function maybeNotify(userId, sessionId, event) {
     title: 'Claude Code',
     sessionId: sessionId || null,
     body,
+    // ★ hint 가 실어 오는 평문 라우팅 메타(봉투 밖 필드) — 읽음 scope(cwd,win)·딥링크가 살아난다.
+    //   wsName 은 **일부러 넘기지 않는다**: notificationService 가 kind+wsName 으로 subtitle 을 조합하면
+    //   FCM 본문(subtitle 우선)이 요약문 대신 "「ws」에서 완료"로 바뀌어 잠금화면 정보량이 줄어든다
+    //   (불변식 5 — 알림 품질은 우리 최대 우위). 워크스페이스 표기는 딥링크/인박스 메타로 충분하다.
+    workspaceId: event.workspaceId || null,
+    cwd: event.cwd != null ? event.cwd : null,
+    win: event.win,
   }).catch((e) => { console.warn('[daemonRelay] 알림 생성 실패:', e && e.message); });
 }
 
@@ -737,6 +796,8 @@ function registerAgentWs(ws, userId, client) {
         deviceName: typeof msg.deviceName === 'string' ? msg.deviceName.slice(0, 128) : '',
         // 이 화면이 처리할 수 있는 신규 기능(§2-(d)). 구 클라는 안 보냄 → [] → 게이팅이 기존 동작으로 폴백.
         caps: normCaps(msg.caps),
+        // 이 화면이 들고 있는 E2EE 열쇠 세대(0=없음). 호스트 epoch 과 같아야 봉인 모드를 켠다(§2.8).
+        e2eeEpoch: Number.isInteger(msg.e2eeEpoch) && msg.e2eeEpoch > 0 ? msg.e2eeEpoch : 0,
         lastActivityAt: Date.now(),
         foreground: true,
         foregroundAt: Date.now(),
@@ -1118,6 +1179,7 @@ module.exports = {
   fanoutSyncEvent,
   fanoutNotifEvent,
   fanoutApprovalEvent,
+  fanoutDeviceApproval,
   fanoutChatEvent,
   fanoutAccountDeleted,
   fanoutAppearance,
@@ -1131,4 +1193,5 @@ module.exports = {
   proxyWs,
   pickConn,
   _normCaps: normCaps, // 테스트 노출(순수 함수) — 데몬 리포의 `_states` 컨벤션 미러
+  _maybeNotify: maybeNotify, // 테스트 노출 — hint/event 폴백 계약 고정(기능2)
 };

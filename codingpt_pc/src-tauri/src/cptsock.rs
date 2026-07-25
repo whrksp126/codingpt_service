@@ -64,3 +64,14 @@ pub fn forward_start(port: u16, token: String) -> Result<serde_json::Value, Stri
 pub fn forward_stop(port: u16) -> Result<serde_json::Value, String> {
     cpt_request("forward.stop", serde_json::json!({ "port": port }))
 }
+
+// 종단간 암호화(기능2) — MK 가 필요한 연산은 전부 데몬이 수행한다(PC UI JS 에 마스터키를 주지 않는다).
+//  울타리: `e2ee.` 접두사 명령만 통과시킨다. 프런트에 임의 cpt 명령 통로를 열면 웹뷰에서 실행되는
+//  어떤 스크립트든 데몬 제어권을 갖게 되므로(deviceToken 을 JS 에 노출하지 않는 것과 같은 이유).
+#[tauri::command]
+pub fn e2ee_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("e2ee.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request(&cmd, args)
+}

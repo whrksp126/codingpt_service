@@ -14,6 +14,7 @@ import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
 import { mountLoginGate, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
+import { startE2ee } from "./e2ee.js";
 import { ideDirtyPaths } from "./ide.js";
 import { initOsDrop } from "./os-drop.js";
 import { mountApprovals, updateApprovals } from "./approvals.js";
@@ -187,6 +188,7 @@ function startPreviewShieldWatch() {
   S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
   S.loadApprovals(); // 대기 중 승인 캐치업(부팅 중 폰이 아직 안 답한 카드가 있을 수 있다)
   startUiChannel(); // UI 실시간 채널(WS) — 알림/승인/채팅 이벤트 수신
+  startE2ee(); // 종단간 암호화 상태(데몬 위임) — 실패해도 부팅/기능에 영향 없음(평문 폴백)
   startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
   initOsDrop(); // OS 파일 드래그앤드랍 → 터미널 pane 경로 삽입
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그

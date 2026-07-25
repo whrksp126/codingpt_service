@@ -17,6 +17,7 @@ const wsRpc = require('./workspace');
 const agentLib = require('./agent');
 const syncLib = require('./sync');
 const cptServer = require('./cpt-server');
+const e2eeGate = require('./e2ee-gate'); // 봉투 적용 단계 판정(암호 코드는 ./e2ee 가 전담 — 잎 모듈이라 순환 없음)
 
 const IDLE_TIMEOUT_MS = 90 * 1000;
 const BACKOFF_MIN_MS = 1000;
@@ -43,6 +44,9 @@ function daemonCaps() {
     const m = tryRequire(mod);
     if (m && typeof m[fn] === 'function') caps.push(cap);
   }
+  // E2EE(기능2) — 모듈 실존 + 단계 스코프(킬스위치 포함)를 e2ee-gate 가 판정한다. 미구현/OFF 면
+  //  아무 것도 선언하지 않으므로 서버·기기는 협상 자체를 시도하지 않고 기존 평문 경로로 돈다.
+  caps.push(...e2eeGate.caps());
   return caps;
 }
 
@@ -84,6 +88,119 @@ function callLazy(mod, fn, argv, ok, fail) {
   try { Promise.resolve(m[fn](...argv)).then(ok).catch(fail); } catch (e) { fail(e); }
 }
 
+function codedError(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+// ── E2EE (기능2) ────────────────────────────────────────────────────────────
+// ① 협상은 **제어채널 RPC 선협상**이다(설계서 §2.4). 스트림 WS 안에서 핸드셰이크를 하면 구 데몬이
+//    그 JSON 을 셸에 그대로 타이핑한다(pty.js 텍스트 프레임 폴스루) — 인스트림 협상 영구 금지.
+// ② 그래서 스트림이 열리는 시점엔 이미 세션키가 확정돼 있고, 첫 프레임부터 봉인할 수 있다
+//    (= early resize 버퍼를 손대지 않아도 첫 resize 유실 함정이 재발하지 않는다).
+function handleE2eeBegin(params, ok, fail) {
+  const p = params || {};
+  const e = e2eeGate.load();
+  if (!e) {
+    fail(codedError('E2EE_UNSUPPORTED', '이 데몬은 E2EE 를 지원하지 않습니다(PC 앱 업데이트 필요)'));
+    return;
+  }
+  if (!e2eeGate.allows('rpc')) {
+    fail(codedError('E2EE_DISABLED', `이 데몬에서 E2EE 가 꺼져 있습니다(scope=${e2eeGate.scope()})`));
+    return;
+  }
+  const purpose = String(p.purpose || '');
+  // 스트림(pty/tcp)은 D단계 — 스코프가 stream 미달이면 협상을 **거절**한다. 거절이 곧 안전한 폴백:
+  //  back 은 e2ee:false + reason 을 클라에 돌려주고 클라는 평문 토큰으로 기존 경로를 탄다.
+  if ((purpose === 'pty' || purpose === 'tcp') && !e2eeGate.allows('stream')) {
+    fail(codedError('E2EE_SCOPE', `이 데몬은 스트림 암호화가 아직 꺼져 있습니다(scope=${e2eeGate.scope()})`));
+    return;
+  }
+  try {
+    // params 는 그대로 넘긴다 — routing/transport/hostDeviceId 가 트랜스크립트에 묶여, 서버가 몰래
+    //  다른 PC/pane/포트/전송로로 라우팅하면 뷰어의 confirm 검증이 실패한다(다운그레이드 차단).
+    Promise.resolve(e2eeGate.beginHost({ ...p, purpose })).then(ok).catch(fail);
+  } catch (err) { fail(err); }
+}
+
+// 봉투 RPC(`method:'sealed'`) — 서버는 메서드명조차 못 본다. 복호 → 기존 디스패처 재사용 → 응답 봉인.
+//  ⚠ 실패 응답도 반드시 봉인한다(에러 문구에 경로·파일 내용이 섞여 나오는 게 실제 유출 경로다).
+//  봉인 자체가 불가능하면 평문으로 흘리는 대신 **일반화된 실패**를 회신한다.
+function handleSealedRpc(ws, params, ok, fail) {
+  const e = e2eeGate.load();
+  if (!e || typeof e.openRpc !== 'function' || !e2eeGate.allows('rpc')) {
+    fail(codedError('E2EE_UNSUPPORTED', '이 데몬은 봉투 RPC 를 지원하지 않습니다(PC 앱 업데이트 필요)'));
+    return;
+  }
+  const env = (params || {}).env;
+  // 응답도 같은 epoch/hostDeviceId 로 봉인해야 뷰어가 열 수 있다(둘 다 AAD 에 묶여 있다).
+  const encOpts = { epoch: env && env.epoch, hostDeviceId: e2eeGate.selfDeviceId() };
+  let req = null;
+  try { req = e.openRpc(env, encOpts); } catch (err) {
+    // 열 수 없으면 여기서 끝 — 평문 처리로 폴스루하면 서버가 내용을 보게 된다.
+    fail(codedError('E2EE_OPEN_FAILED', '봉투를 열 수 없습니다(열쇠/epoch 불일치)'));
+    return;
+  }
+  const method = req && typeof req.m === 'string' ? req.m : '';
+  // 재귀/승격 금지 — 봉투 안에서 다시 sealed/e2ee.* 를 부르지 못하게.
+  if (!method || method === 'sealed' || method.startsWith('e2ee.')) {
+    fail(codedError('E2EE_BAD_METHOD', '봉투 안의 메서드가 올바르지 않습니다'));
+    return;
+  }
+  const sealed = (fn, arg) => {
+    let out = null;
+    try { out = fn(e, arg, encOpts); } catch (_) { out = null; }
+    if (out) ok({ env: out });
+    else fail(codedError('E2EE_SEAL_FAILED', '응답을 봉인할 수 없습니다'));
+  };
+  dispatchRpc(ws, method, req.p,
+    (result) => sealed(e2eeGate.sealRpcResult, result === undefined ? null : result),
+    (err) => sealed(e2eeGate.sealRpcError, err));
+}
+
+// 제어채널 RPC 디스패처 — 평문 경로와 봉투(sealed) 경로가 **같은 한 벌**을 탄다(분기 이중화 금지).
+function dispatchRpc(ws, method, params, ok, fail) {
+  if (typeof method !== 'string' || !method) { fail(new Error('method 가 필요합니다')); return; }
+  // watch/unwatch 는 unsolicited push(fs_event)를 동반하므로 여기서 직접 처리(제어 ws 에 바인딩).
+  if (method === 'fs.watch') {
+    try {
+      const r = fsRpc.startWatch(params && params.path, (ev) => {
+        try { ws.send(JSON.stringify({ type: 'fs_event', event: ev.event, path: ev.path })); } catch (_) { /* noop */ }
+      });
+      ok(r);
+    } catch (e) { fail(e); }
+    return;
+  }
+  if (method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
+  if (method === 'net.ports') { proxyLib.listPorts(params || {}).then(ok).catch(fail); return; }
+  // 멀티 터미널(tmux window) — terminal.list/new/select/close.
+  if (method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(method, params).then(ok).catch(fail); return; }
+  // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
+  if (method.startsWith('agent.')) { agentLib.handle(method, params, ws).then(ok).catch(fail); return; }
+  // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
+  if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
+  // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.
+  //  블록된 훅을 풀어주는 유일한 정상 경로다. 모듈이 없으면(구 데몬) 명확한 오류로 회신해 back 이
+  //  409/HOST_OFFLINE 을 사용자에게 표시하게 한다 — 조용히 성공하면 폰 카드가 영구히 남는다.
+  if (method.startsWith('approval.')) { callLazy('./approvals', 'handle', [method, params], ok, fail); return; }
+  // 트랜스크립트(기능5) — chat.sessions/open/since/detail/attachment/close/input.
+  //  ws 를 넘겨 chat_event push 대상을 갱신한다(agent/sync 와 같은 형태).
+  // chat.input 은 읽기가 아니라 **PTY 입력**이다 — transcript(읽기 전용)로 보내면 NOT_IMPLEMENTED 로
+  //  떨어져 폰 채팅의 전송 버튼이 항상 실패한다. cpt-server 의 구현(로컬 소켓과 동일)으로 보낸다.
+  if (method === 'chat.input') {
+    const p = params || {};
+    Promise.resolve()
+      .then(() => cptServer.chatInput({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, text: p.text, submit: p.submit }))
+      .then(ok).catch(fail);
+    return;
+  }
+  if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
+  // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
+  if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }
+  fsRpc.handle(method, params).then(ok).catch(fail);
+}
+
 function run(config) {
   let backoff = BACKOFF_MIN_MS;
   let ws = null;
@@ -121,6 +238,9 @@ function run(config) {
         daemonVersion: config.daemonVersion || 'unknown',
         clientType: config.clientType || 'daemon',
         caps: daemonCaps(), // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
+        // 이 기기가 들고 있는 계정 마스터키 epoch(0 = 열쇠 없음). 클라는 자기 grant epoch 과 같을 때만
+        //  암호화를 켠다(§2.8) — 0 이면 어떤 클라와도 일치하지 않아 자동으로 평문이 된다.
+        e2eeEpoch: e2eeGate.epoch(),
       }));
       activeWs = ws;
       cptServer.setControlWs(ws); // cpt ui_command 전송로 갱신
@@ -203,43 +323,12 @@ function run(config) {
             }));
           } catch (_) { /* noop */ }
         };
-        // watch/unwatch 는 unsolicited push(fs_event)를 동반하므로 여기서 직접 처리(제어 ws 에 바인딩).
-        if (msg.method === 'fs.watch') {
-          try {
-            const r = fsRpc.startWatch(msg.params && msg.params.path, (ev) => {
-              try { ws.send(JSON.stringify({ type: 'fs_event', event: ev.event, path: ev.path })); } catch (_) { /* noop */ }
-            });
-            ok(r);
-          } catch (e) { fail(e); }
-          return;
-        }
-        if (msg.method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
-        if (msg.method === 'net.ports') { proxyLib.listPorts(msg.params || {}).then(ok).catch(fail); return; }
-        // 멀티 터미널(tmux window) — terminal.list/new/select/close.
-        if (msg.method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(msg.method, msg.params).then(ok).catch(fail); return; }
-        // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
-        if (msg.method.startsWith('agent.')) { agentLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
-        // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
-        if (msg.method.startsWith('sync.')) { syncLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
-        // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.
-        //  블록된 훅을 풀어주는 유일한 정상 경로다. 모듈이 없으면(구 데몬) 명확한 오류로 회신해 back 이
-        //  409/HOST_OFFLINE 을 사용자에게 표시하게 한다 — 조용히 성공하면 폰 카드가 영구히 남는다.
-        if (msg.method.startsWith('approval.')) { callLazy('./approvals', 'handle', [msg.method, msg.params], ok, fail); return; }
-        // 트랜스크립트(기능5) — chat.sessions/open/since/detail/attachment/close/input.
-        //  ws 를 넘겨 chat_event push 대상을 갱신한다(agent/sync 와 같은 형태).
-        // chat.input 은 읽기가 아니라 **PTY 입력**이다 — transcript(읽기 전용)로 보내면 NOT_IMPLEMENTED 로
-        //  떨어져 폰 채팅의 전송 버튼이 항상 실패한다. cpt-server 의 구현(로컬 소켓과 동일)으로 보낸다.
-        if (msg.method === 'chat.input') {
-          const p = msg.params || {};
-          Promise.resolve()
-            .then(() => cptServer.chatInput({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, text: p.text, submit: p.submit }))
-            .then(ok).catch(fail);
-          return;
-        }
-        if (msg.method.startsWith('chat.')) { callLazy('./transcript', 'handle', [msg.method, msg.params, ws], ok, fail); return; }
-        // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
-        if (msg.method.startsWith('ws.')) { wsRpc.handle(msg.method, msg.params).then(ok).catch(fail); return; }
-        fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
+        // E2EE 스트림 세션 선협상(§2.4) — 스트림이 열리기 **전에** 세션키를 확정한다.
+        if (msg.method === 'e2ee.begin') { handleE2eeBegin(msg.params, ok, fail); return; }
+        // E2EE 봉투 RPC(§2.5) — 서버는 hostDeviceId/timeoutMs/봉인문 길이만 본다.
+        //  구 데몬은 이 분기가 없어 fs.handle 로 떨어져 throw → 클라가 평문 라우트로 폴백(안전 실패).
+        if (msg.method === 'sealed') { handleSealedRpc(ws, msg.params, ok, fail); return; }
+        dispatchRpc(ws, msg.method, msg.params, ok, fail);
         return;
       }
     });
@@ -372,4 +461,7 @@ module.exports = {
   daemonCaps,
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
   sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
+  dispatchRpc,   // 제어채널 RPC 한 벌(평문/봉투 공용) — 테스트가 봉투 경로를 직접 검증할 수 있게 노출
+  handleE2eeBegin, // E2EE 선협상 핸들러(테스트 노출 — 스코프 게이팅/거절 계약 고정용)
+  handleSealedRpc, // 봉투 RPC 핸들러(테스트 노출 — "실패도 봉인" 불변식 고정용)
 };

@@ -165,6 +165,11 @@ export const api = {
   forwardStart: (port, token) => invoke("forward_start", { port, token }),
   forwardStop: (port) => invoke("forward_stop", { port }),
 
+  // ── 종단간 암호화(기능2) — 사이드카 데몬 위임(cpt.sock, `e2ee.` 접두사만 Rust 가 통과) ──
+  //  ★ 마스터키는 데몬의 ~/.codingpt/e2ee.json 에만 있다. PC UI JS 는 MK 를 보지 않고
+  //    "봉인해서 보내줘/열어줘"만 지시한다(deviceToken 을 JS 에 노출하지 않는 것과 같은 원칙).
+  e2eeLocal: (cmd, args) => invoke("e2ee_local", { cmd, args: args || {} }),
+
   // ── 원격 승인 인박스(기능1) — back REST. 새 배관 없음: back_api(/api/daemon/*) 를 그대로 쓴다 ──
   //  · GET  /approvals            대기 목록(push 는 힌트, pull 이 정본 — 부팅/재접속마다 재조회)
   //  · POST /approvals/:id/respond { decision:'allow'|'deny'|'answer', answer?, message? }

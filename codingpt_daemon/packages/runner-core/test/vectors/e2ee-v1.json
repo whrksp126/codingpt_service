@@ -1,0 +1,108 @@
+{
+  "suite": "cpt-e2ee/v1",
+  "note": "고정 입력 골든 벡터. Node/@stablelib/Rust 3구현체가 동일 바이트를 내야 한다. hex 는 소문자.",
+  "kex": {
+    "viewerPriv": "aeab4601ae85c75f1b19654e8e64f57256b38e561192daa68223a09cd17d8a1c",
+    "viewerPub": "aeb68ae661bedd9ed2313b6f357379ef7d772c0c172337ac2bfacb899a145802",
+    "hostPriv": "86bc047d8c763f2fbd6fdd5157cc93f239dc61c0a74e49c60e98e90c0047d74e",
+    "hostPub": "2be01463fde28f6c4a4ca19d83160a849ed3ac8bb6106ebb1809f8b0e7c1033f",
+    "shared": "4958b164ea1e7a05e2d3b3f5ea94d542b78e2131b1b8456943afb5a0ee81e04e"
+  },
+  "hkdf": {
+    "ikm": "0707070707070707070707070707070707070707070707070707070707070707",
+    "salt": "09090909090909090909090909090909",
+    "info": "cpt-e2ee/v1/test",
+    "len": 64,
+    "okm": "f14b94a8e1b6031fe6eec8b2f6abe00d77a0423a60b6332b1fb9625affc8489f85845b1bb14cf8ec438a17b2a317ac5ef0f0124975b9383bbe185a773f062998"
+  },
+  "accountKeys": {
+    "mk": "5007c13c0bd3f6ed6d68cfbe352bbacd79d20669e4e0fa80f09cae73158787a2",
+    "rpc": "e2613e8bcc99a4157cc3fd236a1934d7c5c7b35e87b692f0c10bd59bf34cab7b",
+    "rpcResp": "0f966c2c123dfcd0053dc5e90808c066e89152ede0930421cb8c661a037f4cfb",
+    "notif": "b275ac0fd3cda7a8d9b49c12b2a5e74132f725e29518a3462a6764182c451418",
+    "snapshot": "c2900c5909c2a43bb9d96a0041e7f1076a8af3a405702b9866dd3d779e662fcd"
+  },
+  "session": {
+    "input": {
+      "suite": "cpt-e2ee/v1",
+      "purpose": "pty",
+      "transport": "relay",
+      "epoch": 2,
+      "hostDeviceId": 12,
+      "client": "ck_abc123",
+      "routing": {
+        "cwd": "proj/a",
+        "paneId": "p1",
+        "win": 3
+      },
+      "mk": "5007c13c0bd3f6ed6d68cfbe352bbacd79d20669e4e0fa80f09cae73158787a2",
+      "viewerPriv": "aeab4601ae85c75f1b19654e8e64f57256b38e561192daa68223a09cd17d8a1c",
+      "hostPub": "2be01463fde28f6c4a4ca19d83160a849ed3ac8bb6106ebb1809f8b0e7c1033f",
+      "nonceViewer": "5a29c1b2bcd7d2109777d7fbb249f99101597ec736e812cf8b8e388ae60feb6b",
+      "nonceHost": "429a5ab87e8f4a51e3b1afab0b0f0cbc82caf2711b2c42660b6f96105ecab9db"
+    },
+    "transcript": "cpt-e2ee/v1\npty\nrelay\n2\n12\nck_abc123\nrraK5mG-3Z7SMTtvNXN57313LAwXIzesK_rLiZoUWAI\nK-AUY_3ij2xKTKGdgxYKhJ7TrIu2EG67GAn4sOfBAz8\nWinBsrzX0hCXd9f7skn5kQFZfsc26BLPi444iuYP62s\nQppauH6PSlHjsa-rCw8MvILK8nEbLEJmC2-WEF7Kuds\npty|proj/a|p1|3",
+    "transcriptSha256": "0f673dadb82c061feaa0132db36b716907e2c739696e91fce6fc024e2abb6f59",
+    "kV2H": "a5bedcf01414b52e320b20141550002eba9037239b5017d1eb41b5211eb261e7",
+    "kH2V": "205551133ab416f84d516d343a3357eebb90f6f5f0776d3886e6e77668a8e296",
+    "sid": "a3e6063147fc9afb395a6df667c29511cb2a79965da1860232464c971d4c3de6",
+    "confirm": "c7abc6fd04ab37449470823ba4d3e19c121dae6473be4ff3260a24dd7e49cd1f",
+    "viewerConfirm": "0440388797115e3a158901455335f08cc1b701514c9a2ceb50b211b154248ab1"
+  },
+  "frames": [
+    {
+      "dir": 1,
+      "kind": 0,
+      "connId": 287454020,
+      "counter": 1,
+      "payload": "6c73202d6c610a",
+      "frame": "010111223344000000000001d2f070a3d4beb964d9fdd692a2cd08a467c0210a9f936cd046bc1c1ff9fb2c53e3973d"
+    },
+    {
+      "dir": 1,
+      "kind": 1,
+      "connId": 287454020,
+      "counter": 2,
+      "payload": "7b2274797065223a22726573697a65222c22636f6c73223a3131382c22726f7773223a34387d",
+      "frame": "011111223344000000000002ebdc27e55c86af18be6fcdbb3181ebb72f4200d32f7c02ef2dacc242639ff1bf22c105f0269836c9e8d796f1a1c12ef1e86c19787c7ec19baf07a4618ddc47c64b78"
+    },
+    {
+      "dir": 1,
+      "kind": 0,
+      "connId": 3735928559,
+      "counter": 281474976710655,
+      "payload": "",
+      "frame": "0101deadbeefffffffffffffe67ffbe85842401b34808bbff6ab93cc550ef84d86e1c0b27feac2cb"
+    }
+  ],
+  "envelope": {
+    "dir": "req",
+    "epoch": 2,
+    "hostDeviceId": 12,
+    "nonce": "1dbe3ffd2d27565b9991b3cc",
+    "plaintext": "{\"id\":\"fixed-id\",\"m\":\"fs.read\",\"p\":{\"path\":\"proj/a/package.json\"},\"ts\":1769000000000}",
+    "ct": "30eb6002416c00b140015fdfbcb32cd18fc6ff9ea75d731f416abeb5f0c78eb3a474810da05342e9eac66a1ea254c907e4e76c9cf563a16498b97177b01209649719aea402413f49f635ecf429403c9abbb4de81d98be30d78616534b12f7c7fa2729b859e"
+  },
+  "snapshot": {
+    "epoch": 2,
+    "nonce": "71f838fb09c793816273a9c2",
+    "plaintext": "PACK-fake-git-bundle",
+    "blob": "4350545331000000000271f838fb09c793816273a9c22a2b6e55cb9785651edeec8322ffb6dd09fb391bf256b5be79e6936928669df8e7ad294a"
+  },
+  "notif": {
+    "epoch": 2,
+    "nonce": "ff6365d653b1c91c5bc3584e",
+    "plaintext": "작업이 완료되었습니다",
+    "body": "cptenc:1:2:_2Nl1lOxyRxbw1hO:M0mnP3MbXSuSTdaL6h6XnxsxkdEpJ4UkxaT2Z8hNC-FlTUPHRshVV4V_HMdZCAI"
+  },
+  "recovery": {
+    "epoch": 2,
+    "mk": "5007c13c0bd3f6ed6d68cfbe352bbacd79d20669e4e0fa80f09cae73158787a2",
+    "code": "CPT1-04004-M07R4-Y0QMZ-PXNPP-HKXY6-MNVNK-BST83-6KS70-ZA0F1-75EEC-ARF1X-27550"
+  },
+  "grantAadSample": {
+    "epoch": 2,
+    "ikX": "2be01463fde28f6c4a4ca19d83160a849ed3ac8bb6106ebb1809f8b0e7c1033f",
+    "aad": "6772616e74000000022be01463fde28f6c4a4ca19d83160a849ed3ac8bb6106ebb1809f8b0e7c1033f"
+  }
+}

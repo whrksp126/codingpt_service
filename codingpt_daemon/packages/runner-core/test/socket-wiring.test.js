@@ -112,7 +112,13 @@ test('D. daemonCaps() 는 구현 모듈이 있는 능력만 선언한다', () =>
 test('E. control.js rpc 디스패치가 approval.*/chat.* 을 모듈로 위임한다 (소스 계약)', () => {
   const i = SRC_CONTROL.indexOf("msg.type === 'rpc'");
   assert.ok(i > 0, 'rpc 디스패치 블록이 있어야 한다');
-  const block = SRC_CONTROL.slice(i, i + 3000);
+  // (2026-07-25 기능2 E2EE) 디스패치 체인은 봉투 RPC(method:'sealed')와 **같은 한 벌**을 타도록
+  //  dispatchRpc() 로 추출됐다. 그래서 위임 계약은 그 함수 본문에서 확인한다(핸들러는 그리로 넘긴다).
+  assert.match(SRC_CONTROL.slice(i, i + 3000), /dispatchRpc\(ws, msg\.method, msg\.params, ok, fail\)/,
+    'rpc 프레임은 단일 디스패처(dispatchRpc)로 넘겨야 한다(평문/봉투 분기 이중화 금지)');
+  const j = SRC_CONTROL.indexOf('function dispatchRpc');
+  assert.ok(j > 0, 'rpc 디스패처 함수가 있어야 한다');
+  const block = SRC_CONTROL.slice(j, j + 3000);
   assert.match(block, /approval\.'\)\).*callLazy\('\.\/approvals'|startsWith\('approval\.'\)\)\s*\{\s*callLazy\('\.\/approvals'/s,
     "back 의 approval.* rpc 가 approvals 로 위임돼야 블록된 훅이 풀린다");
   assert.match(block, /startsWith\('chat\.'\)\)\s*\{\s*callLazy\('\.\/transcript'/,

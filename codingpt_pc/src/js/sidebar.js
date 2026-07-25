@@ -62,6 +62,11 @@ export function mountSidebar(container) {
 }
 
 export function jumpToNotification(n) {
+  // 기기 승인 알림(기능2)은 워크스페이스가 없다 — 설정>계정(종단간 암호화 카드)이 목적지다.
+  if (n && n.kind === "device_approval") {
+    import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings"));
+    return;
+  }
   // 대상 워크스페이스 활성화 — 서버 행(workspaceId → cwd 매칭) 우선, 로컬 폴백(wsId)도 지원.
   const ws =
     state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId)) ||

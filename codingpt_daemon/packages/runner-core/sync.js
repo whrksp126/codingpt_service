@@ -22,6 +22,7 @@ const https = require('https');
 const { execFile } = require('child_process');
 const fsLib = require('./fs');
 const runtime = require('./runtime');
+const e2eeGate = require('./e2ee-gate');
 
 // 지연 평가(로컬=홈, 클라우드 러너=주입된 상태/클로드 홈).
 const tmpDir = () => path.join(runtime.stateDir(), 'tmp');
@@ -129,6 +130,52 @@ async function uploadObject(putUrl, buf, meta) {
     throw e;
   }
 }
+// ── 스냅샷 봉인(E2EE C단계, 설계서 §2.7) ─────────────────────────────────
+//  objectstore 오브젝트 = 코드 전량 사본이므로 업로드 **직전**에 봉인하고 materialize **직후**에 연다.
+//  매니페스트(좌표)는 평문 유지 — 서버의 projectId 그룹핑/freshness 가 그걸로 돈다.
+//  자기서술 헤더("CPTS1\0")라서 평문 옛 번들은 그대로 복원된다(하위호환 = 마이그레이션 0).
+//  판정은 게이트에 위임한다(암호 모듈이 있으면 그 구현, 없으면 매직 바이트 폴백) — 모듈이 없어도
+//  "이건 암호문이다"를 알아야 git 에 암호문을 물리는 사고를 막을 수 있다.
+const isSealedSnapshot = (buf) => e2eeGate.isSealedSnapshot(buf);
+
+// 서버가 봉인 스냅샷을 인지하는지(매니페스트 enc/epoch 기록·복원 라우팅) — 구 back 이면 평문으로 남긴다.
+//  ⚠ 다른 PC 의 **구 데몬**이 이 번들을 materialize 하면 git fetch 가 실패한다(암호문). 그래서 서버 cap
+//   게이팅이 필수이고, 서버는 자기 함대 상태를 근거로만 이 능력을 선언해야 한다.
+function serverKnowsSealedSnapshots() {
+  try {
+    const control = require('./control'); // 지연 require — control 이 sync 를 top-level 로 물고 있어 순환 회피
+    // 스냅샷 암호화는 서버가 매니페스트의 enc/epoch 를 다룰 수 있어야 한다(C단계 = e2ee.snap.v1).
+    //  이전에 'e2ee/v1' 을 물어봐서 back 이 그 문자열을 선언하지 않아 **영구 false** = 스냅샷이 항상 평문이었다.
+    return typeof control.hasServerCap === 'function' && control.hasServerCap('e2ee.snap.v1');
+  } catch (_) { return false; }
+}
+
+// 봉인 시도 → { buf, enc, epoch }. 어떤 이유로든 못 하면 **평문 그대로**(불변식: 기능이 죽지 않는다).
+function maybeSealSnapshot(buf, what) {
+  if (!e2eeGate.allows('snapshot')) return { buf, enc: null, epoch: 0 };
+  const e = e2eeGate.load();
+  if (!e || typeof e.sealSnapshot !== 'function') return { buf, enc: null, epoch: 0 };
+  if (!serverKnowsSealedSnapshots()) return { buf, enc: null, epoch: 0 };
+  try {
+    const out = e2eeGate.toBuf(e.sealSnapshot(buf));
+    if (!isSealedSnapshot(out)) throw new Error('봉인 결과 헤더가 CPTS1 이 아닙니다');
+    return { buf: out, enc: 'cptsnap/1', epoch: e2eeGate.epoch() };
+  } catch (err) {
+    console.warn(`[sync] ${what} 봉인 실패 — 평문으로 진행: ${(err && err.message) || err}`);
+    return { buf, enc: null, epoch: 0 };
+  }
+}
+
+// 복호 — 평문(옛 번들)은 그대로 통과. 봉인문인데 열쇠가 없으면 **명확히 실패**한다(빈 결과 금지).
+function openSnapshotBuf(buf) {
+  if (!isSealedSnapshot(buf)) return buf;
+  const e = e2eeGate.load();
+  if (!e || typeof e.openSnapshot !== 'function') {
+    throw new Error('이 스냅샷은 암호화돼 있습니다 — 열쇠를 가진 기기에서 복원하거나 앱/PC 앱을 업데이트하세요.');
+  }
+  return e2eeGate.toBuf(e.openSnapshot(buf));
+}
+
 function httpsGet(urlStr) {
   return new Promise((resolve, reject) => {
     https.get(urlStr, (res) => {
@@ -247,10 +294,15 @@ async function checkpoint(p) {
     sessionBuf = Buffer.from(JSON.stringify(artifact), 'utf8');
   }
 
+  // E2EE: 업로드 직전에 봉인(스코프 snapshot 이상 + 열쇠 + 서버 인지). 실패/미지원이면 평문 그대로.
+  //  봉인은 크기를 +28B 정도만 늘리므로 멀티파트 임계값(80MB) 판정은 봉인 **후** 버퍼로 한다.
+  const sealedBundle = maybeSealSnapshot(bundleBuf, '번들');
+  const sealedSession = sessionBuf ? maybeSealSnapshot(sessionBuf, '세션 묶음') : null;
+
   // 업로드(presigned PUT — 80MB 초과 번들은 멀티파트로 Cloudflare 100MB 제한 우회).
   emitSync({ type: 'sync_progress', phase: 'upload', checkpointId: id });
-  await uploadObject(p.putUrls.bundle, bundleBuf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'bundle' } : null);
-  if (sessionBuf) await uploadObject(p.putUrls.session, sessionBuf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'session' } : null);
+  await uploadObject(p.putUrls.bundle, sealedBundle.buf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'bundle' } : null);
+  if (sealedSession) await uploadObject(p.putUrls.session, sealedSession.buf, p.wsId ? { wsId: p.wsId, checkpointId: id, kind: 'session' } : null);
 
   await fsp.rm(bundleFile, { force: true }).catch(() => {});
   lastCheckpoint.set(abs, { tree, id, commit }); // 다음 자동 트리거의 중복제거 기준.
@@ -259,9 +311,11 @@ async function checkpoint(p) {
     checkpointId: id,
     baseCommit: base,
     commit,
-    sizeBytes: bundleBuf.length,
+    sizeBytes: sealedBundle.buf.length,
     hasSession: !!sessionBuf,
     excluded: [],
+    // 매니페스트에 기록할 봉인 좌표(평문 메타). 구 back 은 이 필드를 무시한다(additive).
+    ...(sealedBundle.enc ? { enc: sealedBundle.enc, epoch: sealedBundle.epoch } : {}),
   };
   emitSync({ type: 'sync_status', state: 'clean', head: commit, base, lastCheckpointId: id });
   return result;
@@ -280,9 +334,10 @@ async function materialize(p) {
 
   emitSync({ type: 'sync_progress', phase: 'materialize', checkpointId: id });
 
-  // 번들 다운로드.
+  // 번들 다운로드 → (봉인문이면) 복호. 평문 옛 번들은 그대로 통과한다(자기서술 헤더).
+  //  열쇠가 없으면 여기서 명확히 throw — git 이 암호문을 물어 "번들 fetch 실패"로 헤매지 않게.
   const bundleFile = path.join(tmpDir(), `mat-${id}.bundle`);
-  const bundleBuf = await httpsGet(p.getUrls.bundle);
+  const bundleBuf = openSnapshotBuf(await httpsGet(p.getUrls.bundle));
   await fsp.writeFile(bundleFile, bundleBuf);
 
   const ref = `refs/codingpt/checkpoints/${id}`;
@@ -332,7 +387,7 @@ async function materialize(p) {
 async function downloadAndRestoreSession(p, targetAbs) {
   if (!p.getUrls || !p.getUrls.session) return 0;
   try {
-    const buf = await httpsGet(p.getUrls.session);
+    const buf = openSnapshotBuf(await httpsGet(p.getUrls.session));
     const artifact = JSON.parse(buf.toString('utf8'));
     return restoreSessionArtifact(artifact, targetAbs);
   } catch (_) { return 0; }
@@ -458,4 +513,8 @@ async function handle(method, params, ws) {
   }
 }
 
-module.exports = { handle };
+module.exports = {
+  handle,
+  // 스냅샷 봉인 계약(테스트 노출) — 헤더 자기서술/평문 하위호환/열쇠 부재 시 명확한 실패를 고정한다.
+  __snapshot: { isSealedSnapshot, maybeSealSnapshot, openSnapshotBuf },
+};

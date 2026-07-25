@@ -40,6 +40,7 @@ paginatedResponse(res, data, page, limit, total)
 | `controllers/daemonController.js` | 페어링·터미널·fs·프리뷰·프로젝트 detach/attach |
 | `config/runner.js` | `CLOUD_RUNNER_ENABLED`(기본 false) — 클라우드 러너 게이팅 스위치 |
 | `services/approvalService.js` | 원격 승인 인박스(기능1) 인메모리 인덱스 — **정본은 데몬**(back 재시작은 데몬 resync 로 복구). REST `/api/daemon/approvals/*`, 해소 시 `markRead` 로 기존 크로스기기 dismiss 재사용 |
+| `services/deviceTrustService.js` | E2EE 열쇠 배포(기능2 A단계) — 기기 승인/봉인문 중계. **서버는 암호문만 저장**(평문 MK 필드 없음). 저장=objectstore `workspace/<uid>/e2ee/keyring.json`(DB 무추가), 대기 enrollment=인메모리. REST `/api/daemon/e2ee/*` + `device_approval_event` 팬아웃 + 페어링 grant(`/pair/grant`) |
 | `config/caps.js` | capability 협상 사전(`SERVER_CAPS`) — 서버에 처리 코드가 있는 능력만 선언. 킬스위치로 회수 가능 |
 | `app.js` server.on('upgrade') | **WS 업그레이드 단일 핸들러** — 데몬 연결/에이전트 스트림/프리뷰 HMR 라우팅. 새 WS 경로는 여기 추가 |
 
@@ -49,6 +50,10 @@ paginatedResponse(res, data, page, limit, total)
   `APPROVAL_ESCALATE_MS`(60000), `APPROVAL_PUSH_POLICY`(`escalate`기본|`present`|`always`),
   `APPROVAL_ANDROID_CHANNEL`(기본 `codingpt_default` — 앱이 `codingpt_approval` 채널을 만든 뒤 전환).
   데몬측 킬스위치는 `CPT_APPROVAL=0`(훅이 즉시 무출력 종료 = 기존 TUI 동작).
+- E2EE 열쇠 배포 env: `E2EE_ENABLED`(끄면 `e2ee.keys.v1` 미선언 + `/e2ee/*` 503 = 평문 그대로),
+  `E2EE_VERIFY_SIG`(기본 켜짐 — 서버가 grant Ed25519 서명 자체검증), `E2EE_ENROLL_TTL_MS`(600000),
+  `E2EE_MAX_PENDING`(5), `E2EE_ENROLL_MAX_PER_MIN`(10), `E2EE_DECIDE_MAX_PER_MIN`(30),
+  `E2EE_ANDROID_CHANNEL`. 데몬측 킬스위치는 `CPT_E2EE=0`.
 - 프리뷰 프록시: `POST /api/daemon/preview/start` → 불투명 토큰 → `ALL /preview/:token(/*)` 무인증 진입
   → 데몬 loopback 터널. 토큰 발급은 JWT 전용, 터널은 loopback 한정(SSRF 방지).
 - 알림·ui_command 등 클라이언트 팬아웃은 기존 `agentWsClients` 채널 재사용 — 새 이벤트 타입 추가 시

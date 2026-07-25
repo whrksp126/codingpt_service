@@ -6,6 +6,7 @@ import { state } from "./state.js";
 import { icons } from "./icons.js";
 import { approvalForNotif, isChoiceApproval } from "./approvals.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
+import { notifBodyText } from "./e2ee.js";
 
 // 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(pane 링).
 //  win = 발생한 터미널의 풀 window 인덱스(스코프 읽음 처리·점프의 키).
@@ -80,7 +81,9 @@ export function renderNotifPanel(el, onJump) {
     row.innerHTML =
       `<div class="notif-title">${n.kind === "approval_request" ? `<span class="notif-ic">${icons.shield({ size: 12 })}</span>` : ""}${escapeHtml(n.title)}</div>` +
       (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
-      (n.body ? `<div class="notif-body">${escapeHtml(n.body)}</div>` : "") +
+      // body 가 봉인문("cptenc:1:…")이면 데몬에 복호를 요청한다(비동기 → 도착 시 emit 으로 재렌더).
+      //  잠금화면/배너는 subtitle(평문)로 도달하므로 알림 자체가 무내용이 되지는 않는다.
+      ((n.body ? `<div class="notif-body">${escapeHtml(notifBodyText(n.body))}</div>` : "")) +
       `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}` +
       (appr && appr.deadlineAt ? ` · 남은 ${fmtRemain(remainMs(appr.deadlineAt))}` : "") +
       (n.kind === "approval_request" && !appr ? " · 종료됨" : "") + `</div>`;

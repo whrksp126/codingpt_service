@@ -14,6 +14,7 @@ import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
 import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 import { applyChatEvent } from "./chat-view.js";
+import { applyDeviceApprovalEvent, e2eeCaps, refreshE2ee } from "./e2ee.js";
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
 async function onAccountDeleted() {
@@ -121,11 +122,13 @@ async function connect() {
       type: "ui_hello", clientKey: S.deviceKey(), kind: "pc",
       deviceId: state.daemon?.deviceId ?? undefined,
       deviceName: state.daemon?.device_name || undefined, // daemon_status Status 는 device_name(snake) 로 노출
-      caps: ["caps.v1", "approval.v1", "transcript.v1"],
+      //  e2ee.v1 은 이 PC 가 **실제로 봉인/복호할 수 있을 때만** 실린다(데몬 열쇠 승인 완료 상태).
+      caps: ["caps.v1", "approval.v1", "transcript.v1", ...e2eeCaps()],
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
     S.loadApprovals();     // 승인은 push 가 힌트, pull 이 정본 — 재접속마다 재조회(유령/누락 방지)
+    void refreshE2ee();    // 열쇠 상태/대기 목록도 같은 규율(재접속마다 pull)
   };
   ws.onmessage = (e) => {
     let msg = null;
@@ -142,6 +145,10 @@ async function connect() {
       case "approval_event":
         // 원격 승인 인박스(기능1) — pending/resolved. 라이브 전용(버퍼 없음)이라 놓친 건 pull 이 메운다.
         if (msg.event) S.applyApprovalEvent(msg.event);
+        break;
+      case "device_approval_event":
+        // 새 기기 열쇠 승인(기능2) — 요청 등장/해소. 구 클라이언트는 unknown type 이라 무시 = 안전.
+        applyDeviceApprovalEvent(msg.event);
         break;
       case "chat_event":
         // 트랜스크립트(기능5) 라이브 델타 — 해당 chatId 를 구독 중인 Chat 뷰에만 배달.

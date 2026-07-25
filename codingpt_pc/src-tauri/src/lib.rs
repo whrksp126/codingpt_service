@@ -627,6 +627,7 @@ pub fn run() {
             // 원격 프리뷰 로컬 포트 포워더(사이드카 데몬 cpt.sock 지시)
             cptsock::forward_start,
             cptsock::forward_stop,
+            cptsock::e2ee_local,
             // 프리뷰(네이티브 임베디드 webview)
             preview::preview_sync,
             preview::preview_navigate,

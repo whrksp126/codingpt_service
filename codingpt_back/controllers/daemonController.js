@@ -14,6 +14,7 @@ const daemonRelayService = require('../services/daemonRelayService');
 const workspaceService = require('../services/workspaceService');
 const cloudRunnerService = require('../services/cloudRunnerService');
 const usageService = require('../services/usageService');
+const deviceTrustService = require('../services/deviceTrustService'); // E2EE 열쇠 배포(기능2) — 페어링에 열쇠 전달을 얹는다
 const BILLING = require('../config/billing');
 const RUNNER = require('../config/runner'); // CLOUD_RUNNER_ENABLED — 클라우드 러너 제공 잠정 중단 게이트
 const { SERVER_CAPS } = require('../config/caps'); // capability 협상 사전(§2-(d)) — 클라이언트 기능 게이팅용
@@ -502,7 +503,7 @@ async function createPairCode(req, res) {
 //  sessionSecret 은 PC만 보관(QR 에는 없음) → 승인 후 이 PC 만 토큰을 claim 할 수 있어 탈취 레이스를 막는다.
 async function createPairSession(req, res) {
   try {
-    const { deviceName, platform, daemonVersion, machineId } = req.body || {};
+    const { deviceName, platform, daemonVersion, machineId, ikX, ikEd } = req.body || {};
     const code = genPairCode();
     const sessionSecret = crypto.randomBytes(24).toString('hex');
     const expiresAt = Date.now() + PAIR_CODE_TTL_MS;
@@ -511,12 +512,69 @@ async function createPairSession(req, res) {
       expiresAt,
       status: 'pending',
       secretHash: sha256(sessionSecret),
-      meta: { deviceName, platform, daemonVersion, machineId }, // machineId → approve 시 기기 행 재사용 키
+      // machineId → approve 시 기기 행 재사용 키.
+      // ikX/ikEd(옵셔널, 기능2) = PC 데몬의 E2EE 신원 공개키. 앱이 승인 시 이 키로 MK 를 봉인해 올린다
+      //  → PC 는 claim 응답으로 열쇠까지 함께 받는다(추가 탭 0, 사용자 확정 제약 3).
+      //  구 데몬은 안 보내므로 undefined → 열쇠 전달만 생략되고 페어링은 그대로 성공한다.
+      meta: { deviceName, platform, daemonVersion, machineId, ikX, ikEd },
     });
     const deepLink = `codingpt://pair?code=${encodeURIComponent(code)}`;
     return successResponse(res, { code, sessionSecret, deepLink, expiresAt: new Date(expiresAt).toISOString() });
   } catch (e) {
     return errorResponse(res, e, 500);
+  }
+}
+
+// QR 승인 응답에 붙는 E2EE 블록(기능2) — 앱이 "이 PC 공개키로 MK 를 봉인해 달라"는 지시를 받는 자리.
+//  · ikX 는 PC 가 pair/session 에 실어 보낸 값이며, QR 에는 그 지문(k=)이 들어 있다 → 앱이 자동 대조한다
+//    (오프라인 채널 핀닝 = Orca 공개키 핀닝 등가. 사용자 조작/탭 수는 그대로 0 추가).
+//  · 키가 없거나(구 데몬) 기능이 꺼져 있으면 블록 자체를 생략한다 → 기존 페어링 그대로 성공.
+async function pairE2eeBlock(userId, sess) {
+  const ikX = sess && sess.meta && sess.meta.ikX;
+  if (!ikX || !deviceTrustService.ENABLED) return {};
+  try {
+    const k = await deviceTrustService.keyring(userId, {});
+    return { e2ee: { ikX, ikEd: sess.meta.ikEd || null, epoch: k.epoch, policy: k.policy, suite: k.suite, needsGrant: k.epoch > 0 } };
+  } catch (e) {
+    console.warn('[daemon] 페어링 e2ee 블록 생략:', e && e.message);
+    return {};
+  }
+}
+
+// POST /api/daemon/pair/grant  (인증) — 승인 직후 앱이 PC 공개키로 봉인한 MK 를 업로드.
+//  body { code, ikX(에코), sealed, sig, epoch, approverIkX }
+//  왜 approve 와 분리했나: approve 는 "기기 생성 + deviceToken 준비"라는 기존 계약을 그대로 둬야 하고
+//   (구 앱도 계속 돌아야 한다), 봉인은 앱이 서버 응답의 ikX 를 받은 **뒤에야** 만들 수 있다.
+//   구 앱은 이 라우트를 안 부르고 → PC 는 열쇠 없이 페어링만 끝난 뒤 /e2ee/enroll 로 4자리 승인 폴백.
+async function pairGrant(req, res) {
+  try {
+    const userId = req.user && req.user.id;
+    if (!userId) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const b = req.body || {};
+    const normalized = String(b.code || '').trim().toUpperCase();
+    const sess = pairCodes.get(normalized);
+    if (!sess || sess.expiresAt < Date.now() || sess.status !== 'approved' || String(sess.userId) !== String(userId)) {
+      return errorResponse(res, new Error('연결 코드가 유효하지 않거나 만료되었습니다.'), 400);
+    }
+    if (!sess.meta || !sess.meta.ikX) {
+      return errorResponse(res, Object.assign(new Error('이 PC 는 열쇠 전달을 지원하지 않습니다.'),
+        { publicDetail: { code: 'HOST_UNSUPPORTED' } }), 409);
+    }
+    // ★ 앱이 에코한 ikX 가 세션의 것과 다르면 중간에서 대상 키가 바뀐 것 → 봉인 거부.
+    if (String(b.ikX || '') !== String(sess.meta.ikX)) {
+      return errorResponse(res, Object.assign(new Error('기기 공개키가 일치하지 않습니다.'),
+        { publicDetail: { code: 'KEY_MISMATCH' } }), 409);
+    }
+    const r = await deviceTrustService.grantForPairing(userId, {
+      ikX: sess.meta.ikX, ikEd: sess.meta.ikEd || b.ikEd, label: sess.deviceName || (sess.meta.deviceName || 'PC'),
+      platform: sess.meta.platform, sealed: b.sealed, sig: b.sig, epoch: b.epoch,
+      approverIkX: b.approverIkX, deviceId: sess.deviceId,
+    });
+    // claim 이 아직 안 왔으면 세션에 실어 둔다(PC 가 폴링으로 받아간다). 이미 claim 했으면 enroll 로 받는다.
+    sess.e2ee = r.grant ? { epoch: r.epoch, keyId: r.keyId, ...r.grant } : null;
+    return successResponse(res, { ok: true, keyId: r.keyId, epoch: r.epoch });
+  } catch (e) {
+    return errorResponse(res, e, (e && e.statusCode) || 500);
   }
 }
 
@@ -536,7 +594,7 @@ async function approvePairSession(req, res) {
       return errorResponse(res, new Error('연결 코드가 유효하지 않거나 만료되었습니다.'), 400);
     }
     if (sess.status === 'approved') {
-      return successResponse(res, { deviceId: sess.deviceId, deviceName: sess.deviceName, alreadyApproved: true });
+      return successResponse(res, { deviceId: sess.deviceId, deviceName: sess.deviceName, alreadyApproved: true, ...(await pairE2eeBlock(userId, sess)) });
     }
     const { device, deviceToken } = await createDeviceForUser(userId, sess.meta);
     sess.status = 'approved';
@@ -545,7 +603,8 @@ async function approvePairSession(req, res) {
     sess.deviceName = device.device_name;
     sess.deviceToken = deviceToken; // 단명 — PC claim 시 반환하고 세션 폐기
     console.log(`[daemon] QR 승인 userId=${userId} device=${device.device_name}(#${device.id})`);
-    return successResponse(res, { deviceId: device.id, deviceName: device.device_name });
+    // e2ee 블록이 있으면 앱은 곧바로 POST /pair/grant 로 봉인문을 올린다(사용자 탭 추가 0).
+    return successResponse(res, { deviceId: device.id, deviceName: device.device_name, ...(await pairE2eeBlock(userId, sess)) });
   } catch (e) {
     return errorResponse(res, e, 500);
   }
@@ -573,7 +632,13 @@ async function claimPairCode(req, res) {
         return successResponse(res, { pending: true }); // 아직 앱 승인 전 — PC가 폴링 지속
       }
       pairCodes.delete(normalized); // approved & single-use
-      return successResponse(res, { deviceId: sess.deviceId, deviceToken: sess.deviceToken });
+      // 열쇠 봉인문이 이미 올라와 있으면 함께 준다(구 데몬은 이 필드를 무시 → 회귀 0).
+      //  세션에 없으면 키링에서 한 번 더 조회한다(앱 grant 와 PC claim 폴링의 레이스 흡수).
+      let e2ee = sess.e2ee || null;
+      if (!e2ee && sess.meta && sess.meta.ikX) {
+        e2ee = await deviceTrustService.grantForDevice(sess.userId, sess.meta.ikX);
+      }
+      return successResponse(res, { deviceId: sess.deviceId, deviceToken: sess.deviceToken, ...(e2ee ? { e2ee } : {}) });
     }
 
     // 레거시(앱이 코드 발급) — 즉시 device 생성/재사용
@@ -700,6 +765,9 @@ async function revokeDevice(req, res) {
     if (!device) return errorResponse(res, new Error('기기를 찾을 수 없습니다.'), 404);
     await device.update({ revoked_at: new Date() });
     daemonRelayService.disconnectDevice(deviceId);
+    // E2EE 열쇠 무력화 + 회전 유도(기능2) — 해제된 기기는 더 이상 남의 승인자가 될 수 없고,
+    //  남은 신뢰 기기에 rotate_needed 가 팬아웃된다. 실패해도 기기 해제 자체는 성공시킨다.
+    deviceTrustService.onDeviceRevoked(userId, deviceId).catch(() => {});
     // 클라우드 러너 revoke → 실행시간 계측 마감 + 컨테이너 정지 + 워크스페이스 볼륨 3종 GC(best-effort).
     if (device.runner_kind === 'cloud') {
       await cloudRunnerService.endComputeSpan(device).catch(() => {});
@@ -1221,7 +1289,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
-  createPairCode, createPairSession, approvePairSession, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
+  createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,

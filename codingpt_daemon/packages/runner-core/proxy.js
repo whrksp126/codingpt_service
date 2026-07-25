@@ -13,6 +13,7 @@ const net = require('net');
 const { execFile } = require('child_process');
 const WebSocket = require('ws');
 const fsLib = require('./fs');
+const e2eeGate = require('./e2ee-gate');
 
 // 시스템/노이즈 포트는 미리보기 후보에서 제외(감지 목록만 정리 — 프록시 자체는 요청 포트로 함).
 // dev 서버는 관례상 낮은 포트(<10000) → 에페메랄/고포트는 목록에서 제외해 노이즈를 줄인다.
@@ -86,30 +87,69 @@ async function listPorts(opts = {}) {
 }
 
 // back 지시(stream_open kind:'tcp')에 대한 dial-back → 로컬 포트로 raw TCP 브리지.
+//  E2EE(D단계): params.sid 가 있으면 프레임을 봉인한다(purpose:'tcp', routing:{port} 로 선협상된 세션).
+//  TCP 는 ctrl 프레임이 없다 — data 만 오간다. 세션 부재 시엔 평문으로 내려가지 않고 닫는다(뷰어가
+//  암호문을 기대하는데 평문을 흘리면 HTTP 응답이 깨진 채 렌더된다).
 function openTcpStream({ serverUrl, deviceToken }, { streamToken, params }) {
   const port = params && Number(params.port);
   if (!port || port <= 0 || port >= 65536) throw new Error('유효한 port 가 필요합니다.');
+  const sid = (params && (params.sid || (params.e2ee && params.e2ee.sid))) || null;
 
   const wsUrl = serverUrl.replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
   const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
 
   ws.on('open', () => {
+    const enc = !!sid;
+    if (enc && !(e2eeGate.allows('stream') && e2eeGate.sessionExists(sid, 'host'))) {
+      console.warn(`[proxy] E2EE 세션을 찾을 수 없어 터널을 닫습니다(port ${port}, scope=${e2eeGate.scope()})`);
+      try { ws.close(4090, 'E2EE_SESSION_UNKNOWN'); } catch (_) { /* noop */ }
+      return;
+    }
+    // 봉인 채널은 첫 수신 프레임에서 학습(connId 는 뷰어가 정한다 — pty.js 와 동일 규율).
+    //  TCP 는 뷰어(브라우저 요청)가 항상 먼저 보내므로 응답 전에 채널이 선다. 그래도 순서 안전을 위해 버퍼.
+    let ch = null;
+    const outQ = [];
+    let outQBytes = 0;
+    const OUT_Q_MAX = 4 * 1024 * 1024;
+    const sealSend = (buf) => {
+      try { ws.send(ch.seal(buf, e2eeGate.KIND_DATA), { binary: true }); } catch (_) { /* noop */ }
+    };
+    const flushOut = () => { const q = outQ.splice(0); outQBytes = 0; for (const b of q) sealSend(b); };
+
     // loopback 전용 — 임의 호스트 금지.
     const sock = net.connect({ host: '127.0.0.1', port }, () => {
-      console.log(`[proxy] TCP 터널 연결 127.0.0.1:${port}`);
+      console.log(`[proxy] TCP 터널 연결 127.0.0.1:${port}${enc ? ' (e2ee)' : ''}`);
     });
     sock.setNoDelay(true);
 
     // ws(back) → 로컬 소켓
     ws.on('message', (data, isBinary) => {
+      if (enc) {
+        if (!isBinary) return; // 봉인 모드에 평문 프레임 = 폐기
+        if (!ch) {
+          ch = e2eeGate.hostChannelFromFrame(sid, data);
+          if (!ch) { console.warn(`[proxy] 봉인 채널 확립 실패 — 폐기(port ${port})`); return; }
+          flushOut();
+        }
+        const f = e2eeGate.openFrame(ch, data);
+        if (!f) { console.warn(`[proxy] 프레임 복호 실패 — 폐기(port ${port})`); return; }
+        if (f.kind !== e2eeGate.KIND_DATA) return; // tcp 는 ctrl 미사용
+        try { sock.write(f.payload); } catch (_) { /* noop */ }
+        return;
+      }
       try { sock.write(isBinary ? data : Buffer.from(String(data))); } catch (_) { /* noop */ }
     });
     // 로컬 소켓 → ws(back). 바이너리로 전송(HTTP 응답 바이트 원형 유지).
     sock.on('data', (buf) => {
-      try { if (ws.readyState === WebSocket.OPEN) ws.send(buf, { binary: true }); } catch (_) { /* noop */ }
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (!enc) { try { ws.send(buf, { binary: true }); } catch (_) { /* noop */ } return; }
+      if (ch) { sealSend(buf); return; }
+      if (outQBytes + buf.length > OUT_Q_MAX) { console.warn(`[proxy] 봉인 채널 확립 전 버퍼 초과 — 폐기(port ${port})`); return; }
+      outQ.push(buf); outQBytes += buf.length;
     });
 
     const cleanup = () => {
+      if (ch && typeof ch.close === 'function') { try { ch.close(); } catch (_) { /* noop */ } } // connId 회수
       try { sock.destroy(); } catch (_) { /* noop */ }
       try { if (ws.readyState === WebSocket.OPEN) ws.close(); } catch (_) { /* noop */ }
     };

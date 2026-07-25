@@ -5,12 +5,14 @@ const accountAuth = require('../middlewares/accountAuth');
 const daemonController = require('../controllers/daemonController');
 const syncController = require('../controllers/syncController');
 const approvalController = require('../controllers/approvalController');
+const deviceTrustController = require('../controllers/deviceTrustController');
 
 // BYO-PC 데몬 — 페어링/상태/터미널. ws 업그레이드(/connect, /stream, /terminal)는 app.js 에서 처리.
 router.post('/pair/code', authMiddleware, daemonController.createPairCode); // 레거시 — 앱이 코드 발급
 router.post('/pair/session', daemonController.createPairSession); // 무인증 — PC가 QR 세션 발급(넷플릭스 방식)
 router.post('/pair/approve', authMiddleware, daemonController.approvePairSession); // 로그인된 앱이 QR 코드 승인
 router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코드/secret 이 비밀
+router.post('/pair/grant', authMiddleware, daemonController.pairGrant); // 승인 직후 앱이 PC 공개키로 봉인한 MK 업로드(추가 탭 0)
 router.get('/status', authMiddleware, daemonController.getStatus);
 // PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
 router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)
@@ -80,6 +82,19 @@ router.post('/approvals', accountAuth, approvalController.create);            //
 router.get('/approvals', accountAuth, approvalController.list);               // 클라 캐치업(pull 이 정본)
 router.post('/approvals/:id/respond', accountAuth, approvalController.respond); // 클라 → back → 데몬
 router.post('/approvals/:id/cancel', accountAuth, approvalController.cancel);   // 데몬 → back(마감/훅 종료)
+
+// 기기 신뢰 / E2EE 열쇠 배포(기능2 A단계) — 트래픽은 아직 평문. 열쇠 배포 표면만 단독 검증한다.
+//  경로가 `/api/daemon/*` 인 이유: 승인 인박스와 동일 — PC 앱 브리지가 이 접두사만 통과시킨다.
+//  accountAuth 통일(JWT=모바일 / deviceToken=PC 데몬·앱). 서버는 **봉인문(암호문)만** 다룬다.
+router.post('/e2ee/enroll', accountAuth, deviceTrustController.enroll);       // 기기 등록 신청(멱등)
+router.post('/e2ee/bootstrap', accountAuth, deviceTrustController.bootstrap); // 계정 최초 1회(MK_1)
+router.get('/e2ee/pending', accountAuth, deviceTrustController.pending);      // 신뢰 기기 승인 시트(pull 이 정본)
+router.post('/e2ee/approve', accountAuth, deviceTrustController.approve);     // 승인 = 봉인문 업로드
+router.post('/e2ee/deny', accountAuth, deviceTrustController.deny);           // 거절
+router.get('/e2ee/keyring', accountAuth, deviceTrustController.keyring);      // 감사 UI + 내 봉인문 수령
+router.post('/e2ee/rotate', accountAuth, deviceTrustController.rotate);       // 기기 해제 후 epoch+1 재봉인
+router.patch('/e2ee/policy', accountAuth, deviceTrustController.policy);      // off|preferred|required
+router.post('/e2ee/recovery', accountAuth, deviceTrustController.recovery);   // 복구 코드 봉인문
 
 // 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더의 얇은 callRpc 프록시. 새 배관 없음(라우트만).
 //  ⚠ accountAuth 필수 — agent* 처럼 JWT 전용으로 두면 PC 앱(deviceToken)이 못 쓴다(같은 실수 반복 금지).
