@@ -200,4 +200,8 @@ async function applyRead(userId, where) {
   return { ids: targetIds };
 }
 
-module.exports = { createNotification, list, markRead, markAllRead };
+module.exports = {
+  createNotification, list, markRead, markAllRead,
+  // 테스트 노출(순수 함수) — 데몬 훅/폴백이 subtitle 을 서버 조합에 맡기는 계약(§3.5)을 회귀로 고정한다.
+  _composeSubtitle: composeSubtitle,
+};

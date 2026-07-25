@@ -49,7 +49,23 @@ function findTmuxBin() {
   return null;
 }
 
+// env 패스트패스 — 데몬이 터미널 세션에 CPT_TID/CPT_TSESSION(안정 ID + 세션명 전체)을 주입한다.
+//  둘 다 있으면 tmux display-message 서브프로세스를 통째로 생략한다: 훅은 한 턴에 여러 번(최대 7종)
+//  실행되므로 매번 tmux 를 띄우는 비용이 그대로 claude 의 체감 지연이 된다. 세션명이 전용 세션
+//  규칙("<ns>--t-<tid>")과 일치할 때만 채택 — 어긋나면 데몬 resolveCtx 의 레거시 분기가 windowId 를
+//  필요로 하므로 기존 조회 경로로 폴백한다(구 세션/마이그레이션 중 호환).
+function tmuxSelfFromEnv() {
+  const tid = parseInt(process.env.CPT_TID || '', 10);
+  const session = process.env.CPT_TSESSION || '';
+  if (!Number.isFinite(tid) || tid <= 0 || !session) return null;
+  const m = /^(.*)--t-(\d+)$/.exec(session);
+  if (!m || parseInt(m[2], 10) !== tid) return null;
+  return { session, windowIndex: tid };
+}
+
 function tmuxSelf() {
+  const fast = tmuxSelfFromEnv();
+  if (fast) return fast;
   const pane = process.env.TMUX_PANE;
   if (!pane) return null;
   const bin = findTmuxBin();
@@ -154,6 +170,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   devices                               접속 중인 화면(기기) 목록 (● = 지금 활성 기기)
   capabilities                          지원 명령 목록
   ping
+  agent status                          이 워크스페이스 에이전트 상태(● 작업중 ○ 유휴 ✋ 승인대기)
+  hooks doctor                          훅 배선 진단(상태·알림이 안 올 때 원인 확인)
 
   # 터미널 (전 기기 공유 풀)
   terminal list                         터미널 목록(이름/실행 중 명령)
@@ -228,7 +246,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
       --sid <표면id> (특정 프리뷰/IDE 대상 지정)
 
-환경: CPT_WS(워크스페이스), CPT_SOCK(소켓 경로), TMUX_PANE(자동)
+환경: CPT_WS(워크스페이스), CPT_SOCK(소켓 경로), CPT_TID/CPT_TSESSION(터미널 좌표 — 있으면 tmux 조회 생략), TMUX_PANE(자동)
 `;
 
 async function main() {
@@ -248,6 +266,46 @@ async function main() {
     switch (c1) {
       case 'ping': return out(await request('ping', {}), flags, 'pong');
       case 'capabilities': return printJson(await request('capabilities', {}));
+      // 에이전트 상태 — 이 워크스페이스 터미널들이 지금 무엇을 하고 있나(훅 1차 / 관찰 폴백).
+      case 'agent': {
+        if (c2 === 'status') {
+          const r = await request('agent.status', {});
+          const arr = (r && r.terminals) || [];
+          const GLYPH = { working: '●', idle: '○', permission: '✋', needsInput: '?', ended: '×', launching: '·' };
+          return out(r, flags, arr.map((t) =>
+            `${GLYPH[t.state] || '?'} [${t.tid}] ${t.state}${t.hookGoverned ? '' : ' (관찰 폴백)'}`
+            + `${t.agent ? ` ${t.agent}` : ''}${t.summary ? ` — ${String(t.summary).split('\n')[0].slice(0, 60)}` : ''}`
+          ).join('\n') || '(에이전트 없음)');
+        }
+        process.stderr.write('사용법: cpt agent status\n');
+        process.exitCode = 2;
+        return;
+      }
+      // 훅 배선 진단 — "상태/알림이 안 온다" 의 원인(PATH 경쟁·구버전 shim·비활성)을 판별한다.
+      case 'hooks': {
+        if (c2 === 'doctor') {
+          const r = await request('hooks.doctor', {});
+          const lines = [
+            `훅 설정: ${r.hooksFile}`,
+            `등록 이벤트(${(r.hookEvents || []).length}): ${(r.hookEvents || []).join(', ') || '(없음)'}`,
+            `claude 래퍼: ${r.wrapper && r.wrapper.exists ? '있음' : '없음'}${r.wrapper && r.wrapper.injectsSettings ? ' (--settings 주입)' : ' (주입 안 함)'}`,
+            `훅 비활성(CPT_HOOKS_DISABLED): ${r.hooksDisabled ? '예' : '아니오'}`,
+            '',
+            '터미널:',
+            ...(r.terminals || []).map((t) =>
+              `  [${t.tid}] ${t.state} v${t.version} src=${t.source}`
+              + ` 훅=${t.lastHookAt ? `${Math.round(t.hookAgeMs / 1000)}초 전` : '미도착'}`
+              + `${t.hookGoverned ? ' (훅 지배)' : ''}`),
+            '',
+            r.ok ? '✓ 문제 없음' : '문제:',
+            ...(r.problems || []).map((p) => `  · ${p}`),
+          ];
+          return out(r, flags, lines.join('\n'));
+        }
+        process.stderr.write('사용법: cpt hooks doctor\n');
+        process.exitCode = 2;
+        return;
+      }
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
         const r = await request('ui.devices', {});
@@ -451,21 +509,37 @@ async function main() {
 
       // ── 훅(claude/codex 래퍼가 호출 — 사람이 직접 쓸 일 없음) ──
       case 'claude-hook': {
-        const event = c2 === 'notification' ? 'notification' : 'stop';
-        const payload = await readStdinJson();
-        let summary = '';
-        if (event === 'notification') summary = (payload && payload.message) || '';
-        else summary = extractClaudeSummary(payload);
-        // 데몬 오프라인이어도 claude 를 블록하지 않는다 — 짧은 타임아웃 + 무조건 exit 0.
-        await request('hook.event', { agent: 'claude', event, summary, sessionId: payload && payload.session_id }, { timeoutMs: 3000 }).catch(() => {});
+        // 이벤트 7종(session-start|prompt|permission|notification|stop|stop-failure|session-end)을
+        //  hook.event v2 스키마로 매핑해 데몬에 자기보고한다. 데몬이 상태의 단일 소유자다.
+        //  불변식: claude 를 절대 블록/오염하지 않는다 → 짧은 타임아웃 + 무조건 exit 0 + stdout 무출력.
+        //  ⚠ permission(PermissionRequest) 도 1단계에선 무출력이다. 빈 stdout + exit 0 이면 claude 가
+        //    평소처럼 TUI 승인 대화상자를 띄운다(실측). 여기서 결정 JSON 을 뱉으면 사용자 승인을
+        //    우리가 대신 결정해버린다 — 절대 금지.
+        try {
+          const payload = await readStdinJson();
+          const ev = mapClaudeHook(c2, payload);
+          if (!ev) return;                       // 모르는 이벤트명 = 조용히 성공(구/신 버전 혼재 안전)
+          await request('hook.event', ev, { timeoutMs: 3000 }).catch(() => {});
+        } catch (_) { /* 훅은 실패해도 조용히 성공 처리 */ }
         return;
       }
       case 'codex-notify': {
         let payload = null;
         try { payload = JSON.parse(rest[0] || c2 || '{}'); } catch (_) { /* noop */ }
         const summary = (payload && (payload['last-assistant-message'] || payload.message)) || '';
-        const event = payload && /approval/i.test(String(payload.type || '')) ? 'notification' : 'stop';
-        await request('hook.event', { agent: 'codex', event, summary: String(summary) }, { timeoutMs: 3000 }).catch(() => {});
+        const approval = !!(payload && /approval/i.test(String(payload.type || '')));
+        // v2: codex 는 claude 처럼 notificationType 을 주지 않는다. 승인 여부를 여기서 판정해 명시적으로 실어
+        //  보낸다 — 안 보내면 데몬(agent-state)이 notificationType 없는 notification 을 무변경 no-op 으로
+        //  처리해 codex 승인 알림이 조용히 0건이 된다.
+        await request('hook.event', {
+          v: 2,
+          agent: 'codex',
+          event: approval ? 'notification' : 'stop',
+          at: Date.now(),
+          notificationType: approval ? 'permission_prompt' : null,
+          backgroundTasks: 0,
+          summary: String(summary),
+        }, { timeoutMs: 3000 }).catch(() => {});
         return;
       }
     }
@@ -477,17 +551,22 @@ async function main() {
   try {
     await run();
   } catch (e) {
+    // 훅 경로는 어떤 오류에도 exit 0 + 무출력 — 훅이 0 아닌 코드로 끝나거나 stderr 를 뱉으면 claude 가
+    //  사용자에게 훅 실패를 표시하고(2 는 모델을 깨우기까지 한다) 작업 흐름을 오염시킨다.
+    if (c1 === 'claude-hook' || c1 === 'codex-notify') return;
     process.stderr.write(`오류: ${e.message}\n`);
     process.exitCode = 1;
   }
 }
 
-// stdin 전체를 JSON 으로(훅 페이로드). 비 TTY 일 때만 시도, 1초 내 미도착 시 null.
+// stdin 전체를 JSON 으로(훅 페이로드). 비 TTY 일 때만 시도.
+//  타임아웃 300ms — claude 는 훅 프로세스를 띄우고 페이로드를 즉시 써서 stdin 을 close 한다(end 이벤트로
+//  바로 끝난다). 과거 1500ms 는 stdin 이 안 닫히는 예외 상황에서만 쓰이던 순수 손실이었다.
 function readStdinJson() {
   if (process.stdin.isTTY) return Promise.resolve(null);
   return new Promise((resolve) => {
     let buf = '';
-    const timer = setTimeout(() => resolve(safeParse(buf)), 1500);
+    const timer = setTimeout(() => resolve(safeParse(buf)), 300);
     process.stdin.on('data', (d) => { buf += d.toString(); });
     process.stdin.on('end', () => { clearTimeout(timer); resolve(safeParse(buf)); });
   });
@@ -510,23 +589,159 @@ function printSkillGuide(name) {
   }
 }
 
-// Claude Code Stop 훅 페이로드에서 마지막 assistant 응답 요약 추출 — transcript jsonl 을 뒤에서 스캔.
-function extractClaudeSummary(payload) {
+// ── claude 훅 페이로드 → hook.event v2 매핑 ─────────────────────────────────
+//  래퍼 인자(케밥) → 와이어 event(스네이크). 모르는 값은 null 반환 → CLI 가 조용히 exit 0.
+const CLAUDE_HOOK_EVENTS = {
+  'session-start': 'session_start',
+  prompt: 'prompt',
+  permission: 'permission',
+  notification: 'notification',
+  stop: 'stop',
+  'stop-failure': 'stop_failure',
+  'session-end': 'session_end',
+};
+
+function clip(v, n) { return v == null ? '' : String(v).replace(/\s+/g, ' ').trim().slice(0, n); }
+function len(v) { return Array.isArray(v) ? v.length : 0; }
+
+// 도구 정보 — 입력 전문은 보내지 않는다(민감 내용·용량). 상관용 digest + 짧은 프리뷰만.
+function toolOf(d) {
+  if (!d || !d.tool_name) return null;
+  let digest = null;
+  let preview = '';
   try {
-    const p = payload && payload.transcript_path;
-    if (!p || !fs.existsSync(p)) return '';
-    const lines = fs.readFileSync(p, 'utf8').trim().split('\n');
-    for (let i = lines.length - 1; i >= 0 && i > lines.length - 80; i--) {
-      let j;
-      try { j = JSON.parse(lines[i]); } catch (_) { continue; }
-      const msg = j && (j.message || j);
-      if ((j.type === 'assistant' || (msg && msg.role === 'assistant')) && msg && Array.isArray(msg.content)) {
-        const texts = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
-        if (texts) return texts.replace(/\s+/g, ' ').slice(0, 300);
+    const s = typeof d.tool_input === 'string' ? d.tool_input : JSON.stringify(d.tool_input || {});
+    digest = 'sha1:' + require('crypto').createHash('sha1').update(s).digest('hex');
+    preview = clip(s, 200);
+  } catch (_) { /* 직렬화 불가(순환 등) — digest 없이 이름만 */ }
+  return { name: String(d.tool_name), useId: d.tool_use_id || null, inputDigest: digest, inputPreview: preview };
+}
+
+function mapClaudeHook(sub, payload) {
+  const event = CLAUDE_HOOK_EVENTS[sub];
+  if (!event) return null;
+  const d = payload || {};
+  const ev = {
+    v: 2,
+    agent: 'claude',
+    event,
+    at: Date.now(),                          // 데몬이 훅 도착 지연(at vs 수신시각)을 계측한다
+    sessionId: d.session_id || null,
+    promptId: d.prompt_id || null,
+    permissionMode: d.permission_mode || null,
+    agentCwd: d.cwd || null,                 // ctx.ws 와 다를 수 있다(진단용)
+    transcriptPath: d.transcript_path || null, // 데몬은 읽지 않는다 — 포인터만
+    summary: '',
+    tool: null,
+    notificationType: null,
+    suggestions: null,
+    stopHookActive: !!d.stop_hook_active,
+    backgroundTasks: len(d.background_tasks), // >0 이면 "턴 종료"가 아니다(백그라운드 대기) → 데몬이 알림 억제
+    sessionCrons: len(d.session_crons),
+    sessionSource: null,
+    endReason: null,
+    // 서브에이전트에서 발화한 이벤트 표식 — 데몬이 상태/알림에서 제외한다(병렬 N건 오알림 방지).
+    //  ⚠ 판정은 agent_id 단독으로만 한다. agent_type 은 메인 세션의 SessionStart 페이로드에도 실려 오므로
+    //  (실측) 이걸 판정에 넣으면 메인 세션 session_start 가 통째로 서브에이전트로 오분류돼 버려지고,
+    //  상태가 launching 에 영구 고착된다. agent_type 은 진단용으로만 함께 싣는다.
+    subagent: d.agent_id ? { id: d.agent_id, type: d.agent_type || null } : null,
+    agentType: d.agent_type || null, // 진단 전용(판정에 쓰지 말 것)
+  };
+  switch (event) {
+    case 'session_start':
+      ev.sessionSource = d.source || null;   // startup|resume|clear|compact|fork
+      break;
+    case 'prompt':
+      // 프롬프트 본문(d.prompt)은 보내지 않는다 — 상태 전이(working)에 불필요하고 알림 본문도 아니다.
+      break;
+    case 'permission':
+      ev.tool = toolOf(d);
+      ev.suggestions = Array.isArray(d.permission_suggestions) ? d.permission_suggestions : null;
+      break;
+    case 'notification':
+      ev.notificationType = d.notification_type || null; // permission_prompt|idle_prompt|…
+      ev.summary = clip(d.message, 2000);
+      break;
+    case 'stop':
+      ev.summary = stopSummary(d);
+      break;
+    case 'stop_failure':
+      ev.summary = clip(d.error_details || d.error || d.last_assistant_message, 2000);
+      break;
+    case 'session_end':
+      ev.endReason = d.reason || null;
+      break;
+  }
+  if (!ev.tool && d.tool_name) ev.tool = toolOf(d);
+  return ev;
+}
+
+// 턴 요약 — payload 의 last_assistant_message 가 정본(claude 가 "트랜스크립트를 읽고 파싱할 필요를
+//  없애기 위해" 넣어준 필드). 없을 때(구버전 claude)만 트랜스크립트 tail 폴백.
+function stopSummary(d) {
+  const m = clip(d && d.last_assistant_message, 2000);
+  if (m) return m;
+  return tailAssistantSummary(d && d.transcript_path);
+}
+
+// 트랜스크립트 폴백 — 파일 "끝에서" 최대 4×256KB 만 역방향으로 읽는다.
+//  ⚠ readFileSync 금지: 이 리포의 최대 트랜스크립트는 1.25GB 로, 전체 읽기는 ERR_STRING_TOO_LONG 으로
+//    던지면서 RSS 3.3GB 를 튀긴다(실측) → 긴 세션의 완료 알림 본문이 항상 비어 있었다. 상한이 있는
+//    tail 읽기만 허용한다(메모리 ≤ 약 1MB, 시간 ≤ 수 ms).
+function tailAssistantSummary(p) {
+  const CHUNK = 256 * 1024;
+  const MAX_CHUNKS = 4;
+  let fd = null;
+  try {
+    if (!p) return '';
+    const size = fs.statSync(p).size;
+    if (!size) return '';
+    fd = fs.openSync(p, 'r');
+    let pos = size;
+    const parts = [];
+    for (let n = 0; n < MAX_CHUNKS && pos > 0; n++) {
+      const want = Math.min(CHUNK, pos);
+      pos -= want;
+      const buf = Buffer.allocUnsafe(want);
+      let got = 0;
+      while (got < want) {
+        const r = fs.readSync(fd, buf, got, want - got, pos + got);
+        if (!r) break;
+        got += r;
       }
+      parts.unshift(buf.subarray(0, got));
+      // 청크 경계에서 멀티바이트 문자가 쪼개질 수 있어 매번 전체를 한 번에 디코드한다(≤1MB).
+      const text = Buffer.concat(parts).toString('utf8');
+      const lines = text.split('\n');
+      if (pos > 0) lines.shift();            // 파일 시작이 아니면 첫 줄은 잘린 조각 — 버린다
+      const hit = scanAssistant(lines);
+      if (hit) return hit;
     }
-  } catch (_) { /* noop */ }
+  } catch (_) { /* 없음/권한/깨진 파일 — 요약 없이 진행 */ } finally {
+    if (fd != null) { try { fs.closeSync(fd); } catch (_) { /* noop */ } }
+  }
   return '';
 }
 
-main();
+// jsonl 줄 배열을 뒤에서 최대 80줄 스캔해 마지막 assistant 텍스트를 찾는다.
+function scanAssistant(lines) {
+  for (let i = lines.length - 1, seen = 0; i >= 0 && seen < 80; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    seen++;
+    let j;
+    try { j = JSON.parse(line); } catch (_) { continue; }
+    const msg = j && (j.message || j);
+    if ((j.type === 'assistant' || (msg && msg.role === 'assistant')) && msg && Array.isArray(msg.content)) {
+      const texts = msg.content.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ').trim();
+      if (texts) return texts.replace(/\s+/g, ' ').slice(0, 300);
+    }
+  }
+  return '';
+}
+
+// 직접 실행(셸 shim: node cpt.js …)일 때만 CLI 로 동작. require 로 불러오면 순수 함수만 노출해
+//  훅 매핑/요약 추출을 소켓·tmux 없이 단위 검증할 수 있다.
+if (require.main === module) main();
+
+module.exports = { mapClaudeHook, tailAssistantSummary, scanAssistant, tmuxSelfFromEnv };

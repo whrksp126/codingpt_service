@@ -533,31 +533,103 @@ async function dispatch(req) {
         const target = await resolveTargetDevice(args.on);
         return sendUiCommand(cmd, { ...args, ws: resolved.cwdRel }, { mode: 'target', target, timeoutMs: args.timeoutMs });
       }
-      // 훅(P5): claude/codex 훅이 응답 요약과 함께 호출 — notify 경로 재사용.
+      // 훅(기능3): 상태의 단일 소유자 agent-state 로 위임한다. 전이 판정·알림 발사·중복 억제가
+      //  전부 그쪽에 있으므로 여기서 알림을 직접 만들지 않는다.
+      //  ⚠ 구 구현(event==='notification' ? permission_request : done)을 남겨두면 훅 7종 × 알림 1건 =
+      //  턴당 6건 폭주가 된다(agent-state 의 REFIRE 억제는 자기 발사만 집행). 절대 되살리지 말 것.
       if (cmd === 'hook.event') {
         // 폴백 감지(agent-watch)에 훅 생존 신고 — 같은 턴을 title/exit 폴백이 중복 알림하지 않게.
         try { require('./agent-watch').noteHook(resolved.cwdRel, resolved.windowIndex); } catch (_) { /* noop */ }
-        const agentName = args.agent === 'codex' ? 'Codex' : 'Claude Code';
-        const wsName = resolved.cwdRel ? path.basename(resolved.cwdRel) : '';
-        const kind = args.event === 'notification' ? 'permission_request' : 'done';
-        const payload = {
-          source: 'hook',
-          kind,
-          title: agentName,
-          subtitle: wsName ? (kind === 'done' ? `「${wsName}」에서 완료` : `「${wsName}」에서 승인 대기`) : undefined,
-          body: args.summary ? String(args.summary).slice(0, 2000) : undefined,
-          cwd: resolved.cwdRel || undefined,
-          wsName: wsName || undefined,
-          win: resolved.windowIndex != null ? resolved.windowIndex : undefined,
-        };
-        await backFetch('POST', '/api/notifications', payload);
-        // 진행 상태도 갱신: 완료 → 진행률 제거.
-        if (kind === 'done') { const m = metaFor(resolved.cwdRel); m.progress = null; pushStatusChanged(resolved.cwdRel); }
-        return { ok: true };
+        // key = 실제 tmux 세션명. ctx 가 준 전용 세션명(--t-<tid>)을 최우선으로 쓴다 —
+        //  sessionForCwd 로 재조립하면 워크스페이스 폴더가 소실된 유령 ws 에서 TMUX_SESSION 으로
+        //  폴백해(pty.js sessionForCwd) agent-watch 가 list-windows 로 잡은 키와 갈라진다.
+        //  키가 갈라지면 hookGoverned 가 안 걸려 폴백이 authoritative 로 뒤집힌다.
+        const ctxSess = String((req.ctx && req.ctx.tmux && req.ctx.tmux.session) || '');
+        const key = /--t-\d+$/.test(ctxSess) ? ctxSess : ptyLib.termSession(session, resolved.windowIndex);
+        const r = await require('./agent-state').applyHook(key, {
+          ...args,
+          cwdRel: resolved.cwdRel,
+          tid: resolved.windowIndex,
+          wsName: resolved.cwdRel ? path.basename(resolved.cwdRel) : '',
+        });
+        // 턴 종료(done/error) → 진행률 제거. 판정은 agent-state 가 한다.
+        if (r.clearedProgress) { const m = metaFor(resolved.cwdRel); m.progress = null; pushStatusChanged(resolved.cwdRel); }
+        return { ok: true, state: r.state, version: r.version };
+      }
+      // 에이전트 상태 조회 — 훅/폴백이 만든 현재 상태 스냅샷(터미널별).
+      if (cmd === 'agent.status') {
+        return { terminals: require('./agent-state').snapshot(resolved.cwdRel) };
+      }
+      // 훅 배선 자기진단 — "상태가 왜 안 오지"를 라이브에서 판별하는 유일한 수단.
+      //  shim 이 PATH 경쟁(다른 터미널 앱의 claude 래퍼)에 밀렸는지, 훅이 실제로 도착하는지를 본다.
+      if (cmd === 'hooks.doctor') {
+        return hooksDoctor(resolved);
       }
       throw new Error(`알 수 없는 명령: ${cmd} (cpt capabilities 로 확인)`);
     }
   }
+}
+
+// 훅 배선 자기진단 — 훅 주력화의 유일한 실패 모드는 "훅이 영영 안 온다"이고, 원인이 전부 환경이다:
+//  ① 다른 터미널 앱(cmux 등)의 claude 래퍼가 PATH 선두를 잡아 우리 --settings 주입이 건너뛰어짐
+//  ② 사용자가 claude --settings 를 직접 지정(우리 래퍼가 무간섭 통과) 또는 CPT_HOOKS_DISABLED=1
+//  ③ shim 파일 자체가 없음/구버전(훅 2종)
+//  ④ CodingPT 밖 터미널에서 실행(shim PATH 미주입 — 이 경우는 정상 동작이며 진단 대상 아님)
+// 상태가 안 오는데 원인을 모르면 승인 왕복(기능1) 디버깅이 불가능하므로, 사실만 모아 반환한다(자동 수정 안 함).
+function hooksDoctor(resolved) {
+  const agentState = require('./agent-state');
+  const shim = require('./shim');
+  const binDir = path.join(runtime.stateDir(), 'bin');
+  const hooksFile = path.join(runtime.stateDir(), 'shim', 'claude-hooks.json');
+
+  let hooks = null; let hookEvents = []; let hooksError = null;
+  try {
+    hooks = JSON.parse(fs.readFileSync(hooksFile, 'utf8'));
+    hookEvents = Object.keys((hooks && hooks.hooks) || {}).sort();
+  } catch (e) { hooksError = e.message; }
+
+  const wrapper = path.join(binDir, 'claude');
+  let wrapperOk = false; let wrapperInjects = false;
+  try {
+    const src = fs.readFileSync(wrapper, 'utf8');
+    wrapperOk = true;
+    wrapperInjects = src.includes('--settings');
+  } catch (_) { /* 없음 */ }
+
+  // 이 워크스페이스 터미널들의 훅 수신 실태 — lastHookAt 이 null 이면 그 터미널엔 훅이 한 번도 안 왔다.
+  const terminals = agentState.snapshot(resolved.cwdRel, { includeUnknown: true }).map((t) => ({
+    tid: t.tid,
+    state: t.state,
+    version: t.version,
+    agent: t.agent,
+    source: t.source,
+    hookGoverned: t.hookGoverned,
+    lastHookAt: t.lastHookAt,
+    hookAgeMs: t.lastHookAt ? Date.now() - t.lastHookAt : null,
+    sessionId: t.sessionId,
+  }));
+
+  const problems = [];
+  if (hooksError) problems.push(`훅 설정 파일을 읽을 수 없습니다(${hooksFile}): ${hooksError} — 데몬 재기동으로 재생성됩니다`);
+  else if (hookEvents.length < 7) problems.push(`훅이 ${hookEvents.length}종만 등록돼 있습니다(구버전 shim) — 데몬 재기동 필요`);
+  if (!wrapperOk) problems.push(`claude 래퍼가 없습니다(${wrapper}) — 데몬 재기동으로 재생성됩니다`);
+  else if (!wrapperInjects) problems.push('claude 래퍼가 --settings 를 주입하지 않습니다(구버전) — 데몬 재기동 필요');
+  if (process.env.CPT_HOOKS_DISABLED === '1') problems.push('CPT_HOOKS_DISABLED=1 — 훅이 의도적으로 비활성 상태입니다');
+  if (terminals.length && terminals.every((t) => t.lastHookAt == null)) {
+    problems.push('이 워크스페이스의 어느 터미널에도 훅이 도착한 적이 없습니다 — PATH 선두를 다른 터미널 앱의 claude 래퍼가 잡았을 수 있습니다(`type -a claude` 로 확인). 폴백(title 관찰)으로는 계속 동작합니다');
+  }
+
+  return {
+    hooksFile, hookEvents, hooksError,
+    wrapper: { path: wrapper, exists: wrapperOk, injectsSettings: wrapperInjects },
+    binDir,
+    zdotDir: (() => { try { return shim.zdotDir(); } catch (_) { return null; } })(),
+    hooksDisabled: process.env.CPT_HOOKS_DISABLED === '1',
+    governWindowMs: agentState.HOOK_GOVERN_MS,
+    terminals,
+    problems,
+    ok: problems.length === 0,
+  };
 }
 
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
@@ -576,7 +648,7 @@ const CAPABILITIES = [
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewInspect', 'ui.previewHandoff',
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
-  'hook.event',
+  'hook.event', 'agent.status', 'hooks.doctor',
 ];
 
 // 소켓에 의존하지 않는 단일 인스턴스 백스톱 — 시작 시 같은 머신의 "다른" 데몬 프로세스를 전부 정리.
@@ -688,4 +760,7 @@ function start() {
   return server;
 }
 
-module.exports = { start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch };
+module.exports = {
+  start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
+  _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
+};

@@ -17,6 +17,7 @@ require.cache[require.resolve('../cpt-server')] = {
   exports: { backFetch: async (_m, _p, body) => { fired.push(body); return {}; } },
 };
 const watch = require('../agent-watch');
+const agentState = require('../agent-state'); // 상태/알림 소유자 — 폴백은 이 모듈로만 보고한다
 
 const S = (tid) => `cpt-demo--t-${tid}`;
 const row = (tid, cmd, title) => ({ session: S(tid), cmd, title });
@@ -26,6 +27,7 @@ const WAIT = 3600; // QUIET_MS(3000) + 여유
 function resetAll() {
   fired.length = 0;
   for (const [k, st] of watch._states) { if (st.pendingTimer) clearTimeout(st.pendingTimer); watch._states.delete(k); }
+  agentState._reset(); // 훅 지배/발사 이력까지 초기화(케이스 간 독립)
 }
 
 test('titleStatus — 글리프 판정', () => {
@@ -115,6 +117,42 @@ test('node(npm 설치형) — 에이전트 글리프를 본 세션만 에이전�
   await sleep(WAIT);
   assert.strictEqual(fired.length, 1);
   assert.strictEqual(fired[0].kind, 'done');
+});
+
+// ── 훅 주력화(2026-07-25) 이후 추가: 소유권 경계 회귀 ──
+
+test('훅 + 폴백이 같은 턴을 동시에 감지해도 알림은 정확히 1건', async () => {
+  resetAll();
+  const tid = 1000010;
+  watch.observe([row(tid, 'claude', '⠙ working…')]); // 시드(working)
+  watch.observe([row(tid, 'claude', '⠹ working…')]);
+  // 훅(Stop)이 먼저 도착 = 1차 소유자.
+  await agentState.applyHook(S(tid), {
+    v: 2, event: 'stop', agent: 'claude', sessionId: 'sess-x',
+    tid, cwdRel: 'proj/demo', wsName: 'demo', backgroundTasks: 0, summary: '훅 완료',
+  });
+  assert.strictEqual(fired.length, 1);
+  assert.strictEqual(fired[0].source, 'hook');
+  // 폴백도 title 전이로 같은 턴을 감지 → QUIET_MS 뒤 발사 요청하지만 agent-state 가 억제한다.
+  watch.observe([row(tid, 'claude', '✳ claude')]);
+  await sleep(WAIT);
+  assert.strictEqual(fired.length, 1, '훅 done + 폴백 done = 알림 1건');
+});
+
+test('statusOf 는 훅 상태를 즉시 반영하고 폴백 관찰에 뒤집히지 않는다', async () => {
+  resetAll();
+  const tid = 1000011;
+  watch.observe([row(tid, 'claude', '✳ claude')]); // 시드 idle
+  assert.strictEqual(watch.statusOf(S(tid)), 'idle');
+  await agentState.applyHook(S(tid), {
+    v: 2, event: 'prompt', agent: 'claude', sessionId: 'sess-y', promptId: 'p1',
+    tid, cwdRel: 'proj/demo', wsName: 'demo',
+  });
+  assert.strictEqual(watch.statusOf(S(tid)), 'working'); // 폴링(2s) 대기 없음
+  watch.observe([row(tid, 'claude', '✳ claude')]);       // 폴백은 여전히 idle 로 보이지만
+  assert.strictEqual(watch.statusOf(S(tid)), 'working'); // 훅 지배 중이라 상태는 유지
+  await sleep(WAIT);
+  assert.strictEqual(fired.length, 0);
 });
 
 test('터미널 닫힘(세션 소멸)은 알림 없음 — 대기 후보도 폐기', async () => {

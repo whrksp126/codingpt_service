@@ -22,6 +22,18 @@ const IDLE_TIMEOUT_MS = 90 * 1000;
 const BACKOFF_MIN_MS = 1000;
 const BACKOFF_MAX_MS = 30 * 1000;
 
+// capability 협상(설계 §2-(d)) — 게이팅은 데몬caps ∩ serverCaps ∩ 기기caps 이고, 하나라도 없으면
+//  "기존 동작" 폴백이다. 따라서 **이 데몬이 실제로 처리 코드를 가진 것만** 선언한다.
+//  미구현을 미리 선언하면 서버/기기가 그 기능을 켜고 데몬은 프레임을 버려 조용히 유실된다.
+//  · hooks.v2 — 훅 7종 수신 + agent-state 전이/알림 단일화(기능3 1단계). 서버측 처리는 불필요하지만
+//    "이 데몬은 훅으로 상태를 낸다"는 사실을 서버/기기가 알면 폴백 UI 를 접을 수 있다.
+const DAEMON_CAPS = ['caps.v1', 'hooks.v2'];
+
+// 서버가 hello_ack 으로 회신한 능력 — 기능별 게이팅의 교집합 한쪽. 구 서버는 필드 자체를 안 보내므로
+//  [] 로 남고, 그 경우 신규 기능은 전부 꺼진 채 기존 경로로 동작한다.
+let serverCaps = [];
+function hasServerCap(c) { return serverCaps.includes(c); }
+
 function run(config) {
   let backoff = BACKOFF_MIN_MS;
   let ws = null;
@@ -58,6 +70,7 @@ function run(config) {
         platform: process.platform,
         daemonVersion: config.daemonVersion || 'unknown',
         clientType: config.clientType || 'daemon',
+        caps: DAEMON_CAPS, // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
       }));
       cptServer.setControlWs(ws); // cpt ui_command 전송로 갱신
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
@@ -85,7 +98,9 @@ function run(config) {
       if (!msg || typeof msg.type !== 'string') return;
 
       if (msg.type === 'hello_ack') {
-        console.log(`[control] 서버 확인 (serverTime=${msg.serverTime})`);
+        // serverCaps 는 재연결마다 갱신(서버 배포로 늘거나 줄 수 있다). 부재 = 구 서버 = [].
+        serverCaps = Array.isArray(msg.serverCaps) ? msg.serverCaps.filter((c) => typeof c === 'string') : [];
+        console.log(`[control] 서버 확인 (serverTime=${msg.serverTime}${serverCaps.length ? `, serverCaps=${serverCaps.join(',')}` : ', serverCaps=없음(구 서버)'})`);
         return;
       }
       // cpt ui_command 의 결과 회신(back → 데몬) — 대기 중인 CLI 요청으로 전달.
@@ -151,6 +166,10 @@ function run(config) {
       if (closed) return; closed = true;
       fsRpc.stopWatch(); // 이 연결에 바인딩된 감시 정리(재접속 시 앱이 다시 watch 등록)
       agentLib.detachAll(); // 이벤트 push 대상 해제(자식 claude 는 유지 — 재접속 시 backlog)
+      // 전송로 무효화 — 이걸 빼면 controlWs 가 CLOSED 인 스테일 소켓으로 남아, 대기 중이던 ui 왕복이
+      //  BACK_OFFLINE 로 즉시 실패하지 못하고 UI_TIMEOUT(최대 60s)까지 매달린다. 훅을 블로킹하는
+      //  경로(승인 왕복)에서는 그 지연이 곧 claude 정지 시간이므로 close 시점에 반드시 끊는다.
+      cptServer.setControlWs(null);
       console.warn(`[control] 연결 끊김 code=${code} reason=${reason || ''}`);
       if (code === 4001) { // revoked — 재페어링 필요
         console.error('[control] 서버에서 이 기기의 연결이 해제되었습니다. `pair` 를 다시 실행하세요.');
@@ -168,6 +187,7 @@ function run(config) {
       console.warn(`[control] WS 오류: ${e.message}`);
       // 'close' 가 뒤따르지 않는 초기 접속 실패도 있어 close 핸들러와 중복 방지.
       if (closed) return; closed = true;
+      cptServer.setControlWs(null); // close 를 거치지 않는 경로도 전송로를 끊는다(위 close 주석 참조)
       try { ws.terminate(); } catch (_) { /* noop */ }
       scheduleReconnect();
     });
@@ -194,6 +214,9 @@ function run(config) {
     cleanupAttachments();
     // 신선도 보고 루프(사이드바 미커밋/미푸시 배지) — 60s 주기, 변화시에만 서버 기록.
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
+    // 에이전트 상태의 단일 소유자 — 훅(1차)과 agent-watch(폴백)의 보고를 받아 전이·알림을 판정한다.
+    //  agent-watch 보다 먼저 띄운다(agent-watch 가 lazy require 하므로 순서 의존은 없지만 의도를 드러냄).
+    try { require('./agent-state').start({}); } catch (e) { console.error('[control] agent-state 초기화 실패:', e.message); }
     // 에이전트 완료 폴백 감지 — 훅이 안 걸린 터미널의 title/process-exit 전이를 관찰해 알림(안전망).
     try { require('./agent-watch').start(); } catch (e) { console.error('[control] agent-watch 시작 실패:', e.message); }
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
@@ -243,4 +266,8 @@ function cleanupAttachments() {
   } catch (e) { console.error('[control] 첨부 정리 실패:', e.message); }
 }
 
-module.exports = { run };
+module.exports = {
+  run,
+  DAEMON_CAPS,
+  hasServerCap, // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
+};

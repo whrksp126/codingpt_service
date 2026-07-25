@@ -118,13 +118,21 @@ async function listTerminals(ns) {
 //  ZDOTDIR/PATH 를 못 받아 shim(open/claude/cpt PATH 프리펜드)이 비활성이 된다(실측: bare `open` →
 //  /usr/bin/open). 그래서 spawn 시점에 -e 로 직접 넣어 초기 셸부터 shim 을 활성화한다. injectPoolEnv 는
 //  세션 env 영속(재spawn/attach 대비)용으로 그대로 유지(멱등).
-function poolEnvArgs(abs) {
+//  tid/tsession 은 이 터미널의 좌표 — 넘기면 CPT_TID/CPT_TSESSION 도 함께 주입한다(cpt CLI 가
+//  tmux display-message 서브프로세스 없이 자기 좌표를 알게 된다. 훅은 한 턴에 여러 번 뜨므로 그 비용이
+//  그대로 체감 지연이다). ⚠ 넘기지 않으면 아예 주입하지 않는다 — 잘못된/undefined tid 를 주입하면 CLI 가
+//  틀린 터미널을 자기라고 보고해 알림 win·읽음 처리 scope 가 어긋난다.
+function poolEnvArgs(abs, tid, tsession) {
   const out = [];
   const push = (k, v) => { out.push('-e', `${k}=${v}`); };
   try {
     const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
     push('CPT_WS', rel == null ? '' : String(rel));
     push('CPT_SOCK', require('./cpt-server').sockPath());
+    if (Number.isFinite(Number(tid)) && Number(tid) > 0 && tsession) {
+      push('CPT_TID', String(Number(tid)));
+      push('CPT_TSESSION', String(tsession));
+    }
     const tmuxBin = findTmux();
     if (tmuxBin) push('CPT_TMUX', tmuxBin);
     const shimBin = path.join(runtime.stateDir(), 'bin');
@@ -147,7 +155,7 @@ async function createTerminal(ns, abs) {
     const id = newTid();
     const name = termSession(ns, id);
     try {
-      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs)]);
+      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs, id, name)]);
     } catch (e) {
       lastErr = e;
       if (/duplicate session/.test(String(e.message || ''))) continue; // tid 충돌 — 재시도
@@ -185,7 +193,7 @@ async function migrateLegacyPool(ns, abs) {
     const w = wins[i];
     const name = termSession(ns, base + i);
     try {
-      await runTmux(['new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs)]);
+      await runTmux(['new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs, base + i, name)]);
       await runTmux(['move-window', '-k', '-s', `=${ns}:${w.index}`, '-t', `=${name}:0`]);
       // 구 모델의 resize-window 가 남긴 manual 고정 해제 → 전역 window-size latest 로 복귀.
       await runTmux(['set-option', '-w', '-u', '-t', `=${name}:0`, 'window-size']).catch(() => {});
@@ -460,8 +468,12 @@ async function ensureAutoRename(session) {
 
 // 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 이 세션에서 생성되는 모든 window 의 셸이 상속한다.
 //  CPT_WS = 워크스페이스(홈-상대 경로), CPT_SOCK = cpt 컨트롤 소켓, CPT_TMUX = tmux 바이너리(번들 대응),
+//  CPT_TID/CPT_TSESSION = 이 터미널의 안정 좌표(세션명에서 역산 — 전용 세션에만 존재),
 //  PATH prepend(~/.codingpt/bin) 는 shim(P5)이 담당 — 여기서는 좌표만.
-//  이미 떠 있는 셸은 env 변경을 못 받으므로 CLI 쪽에 show-environment 폴백이 있다.
+//  ⚠ 이미 떠 있는 셸은 env 변경을 못 받는다(tmux 세션 env 는 "이후 spawn 되는" 프로세스만 상속). 그래서
+//   초기 셸용으로 poolEnvArgs(new-session -e)가 따로 있고, 레거시 풀에서 move-window 로 옮겨온 셸은
+//   respawn 될 때까지 CPT_TID 를 못 받는다 → CLI 는 그 경우 tmux display-message 폴백으로 정상 동작한다.
+//   이 함수는 세션 env 영속(재spawn/attach 대비)용 — 멱등.
 const poolEnvDone = new Set(); // 세션당 1회(데몬 수명 동안) — set-environment 반복 호출 절약
 async function injectPoolEnv(session, abs) {
   if (poolEnvDone.has(session)) return;
@@ -471,6 +483,13 @@ async function injectPoolEnv(session, abs) {
   const tmuxBin = findTmux();
   await runTmux(['set-environment', '-t', '=' + session, 'CPT_WS', rel == null ? '' : String(rel)]);
   await runTmux(['set-environment', '-t', '=' + session, 'CPT_SOCK', sock]);
+  // 전용 세션("<ns>--t-<tid>")만 터미널 좌표를 가진다. 레거시 홈 세션(codingpt)/풀 세션은 tid 가 없으므로
+  //  주입하지 않는다(틀린 tid 주입 = 알림 win·읽음 scope 오류).
+  const tm = /--t-(\d+)$/.exec(session);
+  if (tm) {
+    await runTmux(['set-environment', '-t', '=' + session, 'CPT_TID', tm[1]]).catch(() => {});
+    await runTmux(['set-environment', '-t', '=' + session, 'CPT_TSESSION', session]).catch(() => {});
+  }
   if (tmuxBin) await runTmux(['set-environment', '-t', '=' + session, 'CPT_TMUX', tmuxBin]);
   // shim(cpt/claude/codex 래퍼) 경로를 PATH 선두에 — 새 window 셸부터 적용.
   //  zsh 는 rc 가 PATH 를 재구성해 이 값이 밀린다(실측) → ZDOTDIR 체인으로 rc 이후에 재-prepend.

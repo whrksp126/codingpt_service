@@ -22,6 +22,7 @@ const http = require('http');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const { DaemonDevice } = require('../models');
+const { SERVER_CAPS } = require('../config/caps');
 // (구) pushService 직접 발송(maybePush)은 제거 — FCM 은 notificationService.createNotification 내부에서 한 번만.
 
 const wss = new WebSocket.Server({ noServer: true });
@@ -69,6 +70,7 @@ function listRunners(userId) {
   return [...e.runners.values()].map((c) => ({
     deviceId: c.deviceId, kind: c.kind, deviceName: c.deviceName,
     platform: c.platform, active: c.deviceId === e.activeRunnerId, connectedAt: c.connectedAt,
+    caps: c.caps || [], // 진단용(hello.caps). 구 데몬은 [] — 구 클라이언트는 이 필드를 무시한다.
   }));
 }
 // 연결된 클라우드 러너 목록(동면 스위퍼용) — 활동시각/바쁨 상태 포함.
@@ -104,6 +106,24 @@ const agentWsClients = new Map();
 const SECRET = process.env.PREVIEW_TOKEN_SECRET || process.env.JWT_SECRET || 'cpt-preview-secret';
 
 function sha256(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
+
+// 상대가 보낸 caps 배열 정규화(hello / ui_hello 공용) — 배관이므로 절대 throw 하지 않는다.
+//  신뢰 경계: caps 는 인증된 상대가 보내지만 "자기 신고" 값이므로 그대로 저장/에코하지 않는다.
+//  문자열만·길이 상한·중복 제거·개수 상한(로그/응답이 비대해지는 것과 메모리 증식을 동시에 막음).
+//  배열이 아니거나(구버전=필드 부재) 전부 버려지면 [] → 게이팅은 자동으로 "기존 동작" 폴백.
+const CAPS_MAX = 32;
+function normCaps(v) {
+  if (!Array.isArray(v)) return [];
+  const out = [];
+  for (const c of v) {
+    if (typeof c !== 'string') continue;
+    const s = c.trim().slice(0, 64);
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= CAPS_MAX) break;
+  }
+  return out;
+}
 
 // ── 제어 채널 ─────────────────────────────────────────────────────────
 
@@ -163,6 +183,7 @@ function registerControl(ws, device) {
     deviceName: device.device_name,
     platform: device.platform,
     daemonVersion: device.daemon_version,
+    caps: [],                   // 데몬이 hello.caps 로 신고한 능력(구버전 데몬 = 영구 []). 게이팅/진단용.
     ws,
     connectedAt: Date.now(),
     lastSeenFlushedAt: 0,
@@ -197,11 +218,18 @@ function registerControl(ws, device) {
       if (msg.deviceName) conn.deviceName = String(msg.deviceName).slice(0, 128);
       if (msg.platform) conn.platform = String(msg.platform).slice(0, 32);
       if (msg.daemonVersion) conn.daemonVersion = String(msg.daemonVersion).slice(0, 32);
+      // capability 협상(설계 §2-(d)) — 옵셔널 필드. 구버전 데몬은 안 보내므로 caps 가 [] 로 남고,
+      //  교집합 게이팅이 자동으로 "기존 동작" 폴백이 된다(여기서 아무 기능도 켜지 않는다 = 배관만).
+      //  hello 는 재연결·버전업마다 다시 오므로 그때마다 최신 신고로 덮는다(부재 시엔 유지하지 않고 비움 —
+      //  다운그레이드 설치 후에도 상태가 남지 않게).
+      if ('caps' in msg) conn.caps = normCaps(msg.caps);
       DaemonDevice.update(
         { device_name: conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
         { where: { id: conn.deviceId } }
       ).catch(() => { /* noop */ });
-      try { ws.send(JSON.stringify({ type: 'hello_ack', serverTime: new Date().toISOString() })); } catch (_) { /* noop */ }
+      if (conn.caps.length) console.log(`[daemonRelay] 데몬 caps device=#${conn.deviceId} v=${conn.daemonVersion} caps=${conn.caps.join(',')}`);
+      // serverCaps 는 additive — 구 데몬의 hello_ack 핸들러는 serverTime 만 읽고 나머지를 무시한다.
+      try { ws.send(JSON.stringify({ type: 'hello_ack', serverTime: new Date().toISOString(), serverCaps: SERVER_CAPS })); } catch (_) { /* noop */ }
       return;
     }
     if (msg.type === 'stream_fail' && msg.streamToken) {
@@ -417,6 +445,9 @@ function listUiClients(userId) {
     out.push({
       clientKey: m.clientKey || '', deviceId: m.deviceId ?? null, deviceName: m.deviceName || '',
       kind: m.kind, foreground: !!m.foreground, lastActivityAt: m.lastActivityAt || 0, executor: false,
+      // ui_hello.caps — "이 화면이 응답할 수 있는 기능"(예: 승인 카드). 데몬이 "요청을 만들어도 되는가"를
+      //  판단하는 근거(§2-(d) 게이팅). 구 클라이언트는 안 보내므로 [].
+      caps: m.caps || [],
     });
   }
   out.sort((a, b) =>
@@ -669,6 +700,8 @@ function registerAgentWs(ws, userId, client) {
         // 이름 있는 기기 타겟팅용 — 계정 기기 레지스트리(DaemonDevice) id/이름. 구 클라는 안 보내므로 null.
         deviceId: Number.isInteger(msg.deviceId) ? msg.deviceId : null,
         deviceName: typeof msg.deviceName === 'string' ? msg.deviceName.slice(0, 128) : '',
+        // 이 화면이 처리할 수 있는 신규 기능(§2-(d)). 구 클라는 안 보냄 → [] → 게이팅이 기존 동작으로 폴백.
+        caps: normCaps(msg.caps),
         lastActivityAt: Date.now(),
         foreground: true,
         foregroundAt: Date.now(),
@@ -1060,4 +1093,5 @@ module.exports = {
   proxyHttp,
   proxyWs,
   pickConn,
+  _normCaps: normCaps, // 테스트 노출(순수 함수) — 데몬 리포의 `_states` 컨벤션 미러
 };

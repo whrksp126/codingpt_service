@@ -2,7 +2,7 @@
  * cpt shim — 터미널에서 실행되는 `cpt`/`claude`/`codex` 를 자동 배선한다(cmux 의 claude 래핑 미러).
  *
  *  <stateDir>/bin/           cpt(CLI 진입), claude/codex(훅 주입 래퍼) — 0755
- *  <stateDir>/shim/claude-hooks.json   Stop/Notification 훅 → `cpt claude-hook <event>`
+ *  <stateDir>/shim/claude-hooks.json   훅 7종(생명주기·프롬프트·승인·알림·종료) → `cpt claude-hook <event>`
  *
  * 원칙:
  *  · 사용자 전역 설정(~/.claude/settings.json, ~/.codex/config.toml) 무오염 — 래퍼가 실행 시에만
@@ -78,12 +78,38 @@ function ensureShims() {
   fs.mkdirSync(bin, { recursive: true, mode: 0o700 });
   fs.mkdirSync(shim, { recursive: true, mode: 0o700 });
 
-  // 1) 훅 설정(claude --settings 로 주입 — 사용자 훅과 "추가 병합"됨).
+  // 1) 훅 설정(claude --settings 로 주입 — 사용자 훅과 "추가 병합"됨. 실측 확인: 사용자/프로젝트
+  //    settings.json 의 같은 이벤트 훅과 둘 다 발화한다 → 사용자 개인 훅 무오염).
+  //
+  //    상태 감지의 주력이 이 7종이다(agent-watch 폴링은 폴백으로 강등). 왜 이 조합인가:
+  //     · SessionStart/SessionEnd  : 에이전트 생명주기(launching→idle, ended) — 폴링으론 최대 2초 늦다.
+  //     · UserPromptSubmit         : working 진입의 정확한 시점(글리프 추측 불필요).
+  //     · PermissionRequest        : 승인 대기를 "즉시" 안다. Notification(permission_prompt)은 claude 내부
+  //                                  상수로 대화상자 표시 후 6초 뒤에야 오므로 그것만 쓰면 구조적으로 6초 늦다.
+  //     · Notification             : PermissionRequest 유실 대비 + idle_prompt(60초 유휴=입력 대기) 신호.
+  //     · Stop/StopFailure         : 턴 종료(완료/에러) — Stop.last_assistant_message 로 요약을 payload 에서
+  //                                  바로 받는다(트랜스크립트 전체 읽기 폐기, 1.25GB 파일에서 실패하던 경로).
+  //
+  //    ⚠ PreToolUse/PostToolUse 는 넣지 않는다 — 상태머신에 불필요하고 도구 호출마다 node 프로세스가 뜬다.
+  //    ⚠ SubagentStart/Stop 도 넣지 않는다 — 병렬 서브에이전트마다 발화해 "완료" 알림이 N건 된다.
+  //    ⚠ PermissionRequest 만 async 없이 동기 — 이 훅이 나중에 승인 결정(stdout JSON)을 내리게 될 자리라
+  //      배선을 미리 동기로 둔다. 지금은 CLI 가 stdout 무출력 + exit 0 → 평소처럼 TUI 대화상자가 뜬다(실측).
+  //    ⚠ 이 파일은 claude 가 실행 시점에 --settings 로 읽는다 → 기존 셸에도 respawn 없이 소급 적용된다.
+  //      (그래서 훅을 늘릴 때 zdot/* 를 건드릴 이유가 없다 — 건드리면 healStaleTerminals 가 사용자의
+  //       유휴 터미널을 전부 respawn 한다. §shim mtime 계약)
   const hooksFile = path.join(shim, 'claude-hooks.json');
+  const hook = (event, timeout, sync) => [{
+    hooks: [{ type: 'command', command: `cpt claude-hook ${event}`, ...(sync ? {} : { async: true }), timeout }],
+  }];
   const hooks = {
     hooks: {
-      Stop: [{ hooks: [{ type: 'command', command: 'cpt claude-hook stop' }] }],
-      Notification: [{ hooks: [{ type: 'command', command: 'cpt claude-hook notification' }] }],
+      SessionStart: hook('session-start', 5),
+      UserPromptSubmit: hook('prompt', 5),
+      PermissionRequest: hook('permission', 5, true),
+      Notification: hook('notification', 5),
+      Stop: hook('stop', 8),
+      StopFailure: hook('stop-failure', 5),
+      SessionEnd: hook('session-end', 5),
     },
   };
   writeIfChanged(hooksFile, JSON.stringify(hooks, null, 2) + '\n');
@@ -97,7 +123,11 @@ exec "${process.execPath}" "${cptCli}" "$@"
   //  시작된 "옛 셸"(persistent tmux window 등)에서는 ~/.codingpt/bin 이 PATH 에 없어 cpt 가 안 잡힌다.
   //  cpt 는 CPT_WS/CPT_SOCK 없이도 TMUX_PANE 자체조회 + 기본 소켓으로 동작하므로, 전역 bin 에만 있으면
   //  어느 셸에서든 실행된다. claude/codex 는 실제 바이너리와 충돌할 수 있어 cpt 만 링크한다.
+  //  ⚠ 이 심링크는 stateDir 밖(전역 PATH)을 건드리는 유일한 부작용이다. 격리 stateDir 로 이 함수를
+  //   테스트하면 사용자의 라이브 `cpt` 링크가 임시 디렉토리를 가리키게 덮인다(실제로 겪음) →
+  //   테스트/하네스는 CPT_SHIM_NO_GLOBAL_LINK=1 로 이 블록을 끈다.
   try {
+    if (process.env.CPT_SHIM_NO_GLOBAL_LINK === '1') throw new Error('skip');
     const cptShim = path.join(bin, 'cpt');
     for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin')]) {
       try {

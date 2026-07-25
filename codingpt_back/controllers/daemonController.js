@@ -16,6 +16,7 @@ const cloudRunnerService = require('../services/cloudRunnerService');
 const usageService = require('../services/usageService');
 const BILLING = require('../config/billing');
 const RUNNER = require('../config/runner'); // CLOUD_RUNNER_ENABLED — 클라우드 러너 제공 잠정 중단 게이트
+const { SERVER_CAPS } = require('../config/caps'); // capability 협상 사전(§2-(d)) — 클라이언트 기능 게이팅용
 const { successResponse, errorResponse } = require('../utils/response');
 
 // 클라우드 실행시간 초 쿼터 프리플라이트(M5 Slice5). ENFORCE 꺼져 있으면 항상 통과(실측 전 안전).
@@ -598,6 +599,9 @@ async function getStatus(req, res) {
       online: !!conn,
       // 클라우드 러너 제공 여부 — off 면 앱이 클라우드 생성/전환 진입점을 숨긴다(config/runner.js).
       cloudEnabled: RUNNER.CLOUD_ENABLED,
+      // 서버가 처리 코드를 가진 신규 능력 목록(config/caps.js). 클라이언트는 자기 caps 와의 교집합으로만
+      //  기능을 켠다 — 구 클라이언트는 이 필드를 무시하므로 무영향(additive).
+      serverCaps: SERVER_CAPS,
       current: conn ? {
         deviceId: conn.deviceId,
         deviceName: conn.deviceName,

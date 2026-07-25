@@ -11,7 +11,8 @@
   ],
   "scripts": {
     "daemon": "node packages/daemon/index.js",
-    "daemon:run": "node packages/daemon/index.js run"
+    "daemon:run": "node packages/daemon/index.js run",
+    "test": "CPT_SHIM_NO_GLOBAL_LINK=1 node --test packages/runner-core/test/*.test.js"
   },
   "engines": {
     "node": ">=18"
