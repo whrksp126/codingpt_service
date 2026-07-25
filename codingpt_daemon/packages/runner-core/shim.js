@@ -2,7 +2,9 @@
  * cpt shim — 터미널에서 실행되는 `cpt`/`claude`/`codex` 를 자동 배선한다(cmux 의 claude 래핑 미러).
  *
  *  <stateDir>/bin/           cpt(CLI 진입), claude/codex(훅 주입 래퍼) — 0755
- *  <stateDir>/shim/claude-hooks.json   훅 7종(생명주기·프롬프트·승인·알림·종료) → `cpt claude-hook <event>`
+ *  <stateDir>/shim/claude-hooks.json   훅 7종(생명주기·프롬프트·승인·알림·종료)
+ *      · 6종 = `cpt claude-hook <event>` (async fire-and-forget — 상태/알림 자기보고)
+ *      · PermissionRequest = `cpt approval-hook` (동기 블로킹 — 원격 승인 결정을 stdout 으로 낸다)
  *
  * 원칙:
  *  · 사용자 전역 설정(~/.claude/settings.json, ~/.codex/config.toml) 무오염 — 래퍼가 실행 시에만
@@ -92,8 +94,10 @@ function ensureShims() {
   //
   //    ⚠ PreToolUse/PostToolUse 는 넣지 않는다 — 상태머신에 불필요하고 도구 호출마다 node 프로세스가 뜬다.
   //    ⚠ SubagentStart/Stop 도 넣지 않는다 — 병렬 서브에이전트마다 발화해 "완료" 알림이 N건 된다.
-  //    ⚠ PermissionRequest 만 async 없이 동기 — 이 훅이 나중에 승인 결정(stdout JSON)을 내리게 될 자리라
-  //      배선을 미리 동기로 둔다. 지금은 CLI 가 stdout 무출력 + exit 0 → 평소처럼 TUI 대화상자가 뜬다(실측).
+  //    ⚠ PermissionRequest 만 동기 + 장시간 timeout — 이 훅이 **원격 승인 결정**(stdout JSON)을 낸다.
+  //      `cpt approval-hook` 이 데몬에 요청을 걸고 사용자가 폰/PC 카드에서 답할 때까지 블로킹한다.
+  //      결정을 못 받으면 무출력 + exit 0 → 평소처럼 TUI 대화상자가 뜬다(자동 허용 0 — 실측 확인).
+  //      상태 보고(기능3)는 approval-hook 이 내부에서 hook.event 를 함께 자기보고하므로 유실 없다.
   //    ⚠ 이 파일은 claude 가 실행 시점에 --settings 로 읽는다 → 기존 셸에도 respawn 없이 소급 적용된다.
   //      (그래서 훅을 늘릴 때 zdot/* 를 건드릴 이유가 없다 — 건드리면 healStaleTerminals 가 사용자의
   //       유휴 터미널을 전부 respawn 한다. §shim mtime 계약)
@@ -101,11 +105,24 @@ function ensureShims() {
   const hook = (event, timeout, sync) => [{
     hooks: [{ type: 'command', command: `cpt claude-hook ${event}`, ...(sync ? {} : { async: true }), timeout }],
   }];
+  // 승인 훅 예산의 단일 출처 = approvals.budget()(데몬 하드 타임아웃 < CLI 대기 < 훅 config timeout).
+  //  실패해도 훅 배선 전체가 깨지지 않게 보수적 기본값으로 폴백한다.
+  let ab = { cliWaitMs: 130000, hookTimeoutSec: 145 };
+  try { ab = require('./approvals').budget(); } catch (_) { /* 기본값 유지 */ }
+  // 절대경로 + 따옴표 — 옛 셸(PATH 에 <stateDir>/bin 이 없음)에서도 잡히고, 홈 경로에 공백이 있어도 안전.
+  const approvalCmd = `"${path.join(bin, 'cpt')}" approval-hook --wait-ms ${ab.cliWaitMs}`;
   const hooks = {
     hooks: {
       SessionStart: hook('session-start', 5),
       UserPromptSubmit: hook('prompt', 5),
-      PermissionRequest: hook('permission', 5, true),
+      PermissionRequest: [{
+        hooks: [{
+          type: 'command',
+          command: approvalCmd,
+          timeout: ab.hookTimeoutSec,
+          statusMessage: 'CodingPT — 원격 승인 대기 중…',
+        }],
+      }],
       Notification: hook('notification', 5),
       Stop: hook('stop', 8),
       StopFailure: hook('stop-failure', 5),

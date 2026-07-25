@@ -247,7 +247,9 @@ function registerControl(ws, device) {
         conn.pendingRpc.delete(msg.id);
         clearTimeout(pending.timer);
         if (msg.ok) pending.resolve(msg.result);
-        else pending.reject(new Error(msg.error || 'RPC 실패'));
+        // 데몬이 보낸 code 를 보존한다 — 호출측(예: 승인 중복 응답 → 409)이 메시지 문구를 정규식으로
+        //  추측하지 않고 코드로 분기할 수 있게. 구버전 데몬은 code 를 안 보내므로 undefined 로 남는다.
+        else pending.reject(Object.assign(new Error(msg.error || 'RPC 실패'), msg.code ? { code: String(msg.code) } : {}));
       }
       return;
     }
@@ -262,6 +264,13 @@ function registerControl(ws, device) {
       broadcastEvent(userId, payload);   // SSE(기존, 폴백)
       pushAgentEvent(userId, payload);   // WSS 버퍼 + 라이브(리플레이용 rseq 부여)
       maybeNotify(userId, msg.sessionId, msg.event); // 알림 영속화 + 팬아웃 + (미접속 시) FCM
+      return;
+    }
+    if (msg.type === 'chat_event') {
+      // 트랜스크립트(채팅) 델타 — 데몬 tail 이 밀어주는 라이브 힌트. **버퍼링·알림 금지**:
+      //  agentBuf 에 넣으면 초당 수십 건의 델타가 알림 리플레이 항목을 즉시 축출하고(§5-4),
+      //  maybeNotify 를 타면 훅 알림과 이중 발사된다(§5-3). 캐치업은 데몬 chat.since pull 이 정본.
+      fanoutChatEvent(userId, msg);
       return;
     }
     if (msg.type === 'sync_event') {
@@ -465,6 +474,29 @@ function fanoutNotifEvent(userId, event) {
   broadcastEvent(userId, payload); // SSE
   const key = String(userId);
   const set = agentWsClients.get(key);
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 승인 인박스 팬아웃(기능1) — {type:'approval_event', event:{kind:'pending'|'resolved', …}}.
+//  fanoutNotifEvent 미러(라이브 전용·버퍼 없음). 승인은 리플레이 버퍼에 의존하지 않는다 —
+//  재접속 캐치업은 GET /api/daemon/approvals 재조회가 정본이다(push 는 힌트, pull 이 정본).
+//  ui_command 를 재사용하지 않는 이유: 초당 10건 rate limit + executor 1곳 라우팅이라 "전 기기 카드"와 상충.
+function fanoutApprovalEvent(userId, event) {
+  const payload = { type: 'approval_event', event };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 트랜스크립트(채팅) 팬아웃(기능5) — 데몬 chat_event 를 그대로 라이브 중계만 한다.
+//  프레임은 데몬 것을 보존(chatId/sessionId/epoch/headSeq/messages 또는 control) — back 은 해석하지 않는다.
+function fanoutChatEvent(userId, msg) {
+  const payload = {
+    type: 'chat_event', chatId: msg.chatId, sessionId: msg.sessionId,
+    epoch: msg.epoch, headSeq: msg.headSeq, messages: msg.messages, control: msg.control,
+  };
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
 
@@ -1082,6 +1114,8 @@ module.exports = {
   listCloudRunners,
   fanoutSyncEvent,
   fanoutNotifEvent,
+  fanoutApprovalEvent,
+  fanoutChatEvent,
   fanoutAccountDeleted,
   fanoutAppearance,
   hasActiveMobileClient,

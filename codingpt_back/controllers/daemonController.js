@@ -1010,6 +1010,52 @@ async function agentDoctor(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더 RPC 의 얇은 프록시 ──────────────────────────
+// 기존 callRpc 릴레이로 충분하므로 새 배관을 만들지 않는다(라우트+얇은 래퍼만).
+//  · 인증 = accountAuth(라우트에 부착) → JWT|deviceToken 겸용. PC 앱도 deviceToken 으로 호출한다.
+//  · hostDeviceId 지정 = connOptsOf(req)(멀티 PC). 미지정이면 활성 러너.
+//  · 라이브 델타는 여기가 아니라 데몬 chat_event → fanoutChatEvent(WSS/SSE). 캐치업은 chat.since pull.
+//  · 킬스위치 TRANSCRIPT_ENABLED=0 → 즉시 403(caps 도 선언되지 않아 클라이언트가 탭을 숨긴다).
+const TRANSCRIPT_ENABLED = !/^(0|false|off|no)$/i.test(String(process.env.TRANSCRIPT_ENABLED || '').trim());
+function chatRpc(method, paramsOf, timeoutMs) {
+  return async (req, res) => {
+    if (!TRANSCRIPT_ENABLED) {
+      return errorResponse(res, Object.assign(new Error('트랜스크립트 기능이 꺼져 있습니다.'),
+        { publicDetail: { code: 'TRANSCRIPT_DISABLED' } }), 403);
+    }
+    try {
+      const result = await daemonRelayService.callRpc(req.user.id, method, paramsOf(req), timeoutMs, connOptsOf(req));
+      return successResponse(res, result);
+    } catch (e) { return mapRpcError(res, e); }
+  };
+}
+const qOf = (req) => req.query || {};
+const bOf = (req) => req.body || {};
+// GET  /api/daemon/chat/sessions?cwd=            → { supported, agent, sessions:[…] }
+const chatSessions = chatRpc('chat.sessions', (req) => ({ cwd: qOf(req).cwd || '' }), 20000);
+// POST /api/daemon/chat/open      { cwd, tid?, sessionId?, limit? } → { chatId, epoch, headSeq, messages }
+const chatOpen = chatRpc('chat.open', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid, sessionId: bOf(req).sessionId, limit: bOf(req).limit,
+}), 25000);
+// GET  /api/daemon/chat/since?chatId=&sinceSeq=&epoch=  → { epoch, headSeq, messages } | { epochChanged }
+const chatSince = chatRpc('chat.since', (req) => ({
+  chatId: qOf(req).chatId || '', sinceSeq: Number(qOf(req).sinceSeq) || 0, epoch: qOf(req).epoch || '',
+}), 20000);
+// POST /api/daemon/chat/close     { chatId } → { ok }
+const chatClose = chatRpc('chat.close', (req) => ({ chatId: bOf(req).chatId || '' }), 8000);
+// GET  /api/daemon/chat/detail?chatId=&seq=     → { raw, truncated }
+const chatDetail = chatRpc('chat.detail', (req) => ({ chatId: qOf(req).chatId || '', seq: Number(qOf(req).seq) || 0 }), 15000);
+// GET  /api/daemon/chat/attachment?chatId=&seq=&idx=  → { mediaType, base64, bytes }
+const chatAttachment = chatRpc('chat.attachment', (req) => ({
+  chatId: qOf(req).chatId || '', seq: Number(qOf(req).seq) || 0, idx: Number(qOf(req).idx) || 0,
+}), 20000);
+// POST /api/daemon/chat/input     { cwd, tid, text, submit?, submitDelayMs? } → { ok, tid, bytes }
+//  입력은 데몬이 tmux bracketed paste 로 넣는다(터미널 세션 재사용 — 새 세션/attach 금지).
+const chatInput = chatRpc('chat.input', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid, text: typeof bOf(req).text === 'string' ? bOf(req).text : '',
+  submit: bOf(req).submit !== false, submitDelayMs: bOf(req).submitDelayMs,
+}), 15000);
+
 // ── BYO 로그인(M5 Slice2) — 활성 러너(주로 클라우드 컨테이너)에서 사용자 claude 계정 로그인 ──
 // 크레덴셜(토큰)은 그 러너의 CLAUDE_CONFIG_DIR 에만 안착. 우리는 인증 URL/코드만 중계한다.
 // runnerId 를 주면 특정 러너로, 없으면 활성 러너로 라우팅(핸드오프 후 클라우드가 활성).
@@ -1181,5 +1227,6 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput,
   previewPorts, previewStart, forwardStart, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

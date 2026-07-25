@@ -13,14 +13,17 @@ const successResponse = (res, data, message = 'Success', statusCode = 200) => {
 };
 
 // 에러 응답
+//  error.publicDetail = 클라이언트가 분기해야 하는 구조화 정보(예: 승인 409 의 code/resolvedBy).
+//  우리 코드가 명시적으로 붙일 때만 실린다 — node/sequelize 의 내부 error.code 는 노출하지 않는다.
 const errorResponse = (res, error, statusCode = 500) => {
   const errorMessage = error.message || 'Internal Server Error';
   const errorDetails = process.env.NODE_ENV === 'local' ? error.stack : undefined;
-  
+
   res.status(statusCode).json({
     success: false,
     message: errorMessage,
     error: errorDetails,
+    ...(error.publicDetail && typeof error.publicDetail === 'object' ? { detail: error.publicDetail } : {}),
     timestamp: new Date().toISOString()
   });
 };

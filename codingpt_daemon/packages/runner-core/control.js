@@ -29,10 +29,60 @@ const BACKOFF_MAX_MS = 30 * 1000;
 //    "이 데몬은 훅으로 상태를 낸다"는 사실을 서버/기기가 알면 폴백 UI 를 접을 수 있다.
 const DAEMON_CAPS = ['caps.v1', 'hooks.v2'];
 
+// 선택 능력 — "모듈이 실제로 있고 그 함수가 실제로 있을 때만" 선언한다. 번들 버전에 따라 파일이 없을 수
+//  있으므로(구 데몬) 하드코딩하면 서버/기기가 기능을 켜고 데몬은 프레임을 버려 조용히 유실된다.
+//  [cap, 모듈, 필수 export] — 판정은 hello 를 보낼 때마다 다시 한다(재접속 시 최신 사실 반영).
+const OPTIONAL_CAPS = [
+  ['approval.v1', './approvals', 'request'],    // 기능1 원격 승인(훅 블로킹 왕복)
+  ['transcript.v1', './transcript', 'handle'],  // 기능5 트랜스크립트 tail/파싱
+];
+
+function daemonCaps() {
+  const caps = [...DAEMON_CAPS];
+  for (const [cap, mod, fn] of OPTIONAL_CAPS) {
+    const m = tryRequire(mod);
+    if (m && typeof m[fn] === 'function') caps.push(cap);
+  }
+  return caps;
+}
+
+// 신규 기능 모듈은 지연 로드한다 — 파일 하나가 없다고 데몬 전체(터미널·프리뷰)가 기동 실패하면 안 된다.
+function tryRequire(mod) {
+  try { return require(mod); } catch (e) {
+    if (e && e.code === 'MODULE_NOT_FOUND') return null;
+    console.error(`[control] ${mod} 로드 실패:`, e.message);
+    return null;
+  }
+}
+
 // 서버가 hello_ack 으로 회신한 능력 — 기능별 게이팅의 교집합 한쪽. 구 서버는 필드 자체를 안 보내므로
 //  [] 로 남고, 그 경우 신규 기능은 전부 꺼진 채 기존 경로로 동작한다.
 let serverCaps = [];
 function hasServerCap(c) { return serverCaps.includes(c); }
+
+// 현재 살아있는 제어 WS(모듈 레벨) — sendEvent 로 데몬→back 신규 프레임을 보내기 위한 참조.
+let activeWs = null;
+
+// 데몬 → back 신규 프레임 전송(게이팅 포함). 서버가 그 능력을 선언하지 않았거나 연결이 없으면
+//  **보내지 않고 false** 를 돌려준다 — 호출측은 조용히 기존 동작으로 폴백해야 한다(구 back 에 신규
+//  프레임을 던지면 무시되므로, "보냈다"고 믿고 응답을 기다리는 코드가 매달리는 것이 진짜 사고다).
+function sendEvent(frame, cap) {
+  if (cap && !hasServerCap(cap)) return false;
+  if (!activeWs || activeWs.readyState !== 1) return false;
+  try { activeWs.send(JSON.stringify(frame)); return true; } catch (_) { return false; }
+}
+
+// 지연 로드 모듈로의 rpc 위임 — 모듈/함수 부재를 "명확한 실패"로 바꿔 회신한다.
+//  ⚠ require 를 message 핸들러 안에서 그냥 부르면 예외가 EventEmitter 로 새어 데몬이 죽는다(uncaught).
+//   동기 throw·비동기 reject 를 모두 fail 로 접는다.
+function callLazy(mod, fn, argv, ok, fail) {
+  const m = tryRequire(mod);
+  if (!m || typeof m[fn] !== 'function') {
+    fail(new Error(`이 데몬은 ${mod.replace('./', '')} 기능을 지원하지 않습니다(PC 앱 업데이트 필요)`));
+    return;
+  }
+  try { Promise.resolve(m[fn](...argv)).then(ok).catch(fail); } catch (e) { fail(e); }
+}
 
 function run(config) {
   let backoff = BACKOFF_MIN_MS;
@@ -70,8 +120,9 @@ function run(config) {
         platform: process.platform,
         daemonVersion: config.daemonVersion || 'unknown',
         clientType: config.clientType || 'daemon',
-        caps: DAEMON_CAPS, // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
+        caps: daemonCaps(), // 이 데몬이 처리 코드를 가진 능력(구 서버는 이 필드를 무시 — additive)
       }));
+      activeWs = ws;
       cptServer.setControlWs(ws); // cpt ui_command 전송로 갱신
       console.log('[control] 연결됨 — 지시 대기 중 (Ctrl+C 로 종료)');
     });
@@ -101,6 +152,19 @@ function run(config) {
         // serverCaps 는 재연결마다 갱신(서버 배포로 늘거나 줄 수 있다). 부재 = 구 서버 = [].
         serverCaps = Array.isArray(msg.serverCaps) ? msg.serverCaps.filter((c) => typeof c === 'string') : [];
         console.log(`[control] 서버 확인 (serverTime=${msg.serverTime}${serverCaps.length ? `, serverCaps=${serverCaps.join(',')}` : ', serverCaps=없음(구 서버)'})`);
+        // 대기 중 승인 재광고 — back 이 재시작하면 인메모리 pending 인덱스가 통째로 사라지지만
+        //  데몬 쪽 훅은 그대로 블록된 채 살아 있다(정본은 데몬). 같은 id 로 재등록해 응답 경로를 되살린다.
+        //  ⚠ ws.on('open') 이 아니라 여기서 부른다 — 승인은 caps 게이팅 대상이고 serverCaps 는
+        //   hello_ack 에서야 확정된다. open 시점에 부르면 구 서버에도 재광고를 던지게 된다.
+        if (hasServerCap('approval.v1')) {
+          const approvals = tryRequire('./approvals');
+          if (approvals && typeof approvals.resync === 'function') {
+            Promise.resolve()
+              .then(() => approvals.resync())
+              .then((r) => { if (r && r.total) console.log(`[control] 대기 중 승인 재광고 ${r.resynced}/${r.total}건${r.failed ? ` (실패 ${r.failed})` : ''}`); })
+              .catch((e) => console.warn('[control] 승인 재광고 실패:', (e && e.message) || e));
+          }
+        }
         return;
       }
       // cpt ui_command 의 결과 회신(back → 데몬) — 대기 중인 CLI 요청으로 전달.
@@ -127,7 +191,18 @@ function run(config) {
       // fs RPC(list/read/write/watch/unwatch) — 요청/응답. back 이 id 로 응답을 매칭.
       if (msg.type === 'rpc' && msg.id) {
         const ok = (result) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: true, result })); } catch (_) { /* noop */ } };
-        const fail = (e) => { try { ws.send(JSON.stringify({ type: 'rpc_result', id: msg.id, ok: false, error: (e && e.message) || String(e) })); } catch (_) { /* noop */ } };
+        // code 를 함께 보낸다 — 서버/클라이언트가 오류를 **문구 정규식으로 추측하지 않고** 분기할 수 있게.
+        //  예: 승인 중복 응답(ALREADY_RESOLVED)은 409 로 접어 카드를 즉시 철수해야 하는데, code 가 없으면
+        //  back 이 한글 메시지를 정규식으로 맞춰야 하고 문구가 바뀌면 조용히 502 로 떨어진다.
+        const fail = (e) => {
+          try {
+            ws.send(JSON.stringify({
+              type: 'rpc_result', id: msg.id, ok: false,
+              error: (e && e.message) || String(e),
+              code: (e && e.code) || undefined,
+            }));
+          } catch (_) { /* noop */ }
+        };
         // watch/unwatch 는 unsolicited push(fs_event)를 동반하므로 여기서 직접 처리(제어 ws 에 바인딩).
         if (msg.method === 'fs.watch') {
           try {
@@ -146,6 +221,22 @@ function run(config) {
         if (msg.method.startsWith('agent.')) { agentLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
         // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
         if (msg.method.startsWith('sync.')) { syncLib.handle(msg.method, msg.params, ws).then(ok).catch(fail); return; }
+        // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.
+        //  블록된 훅을 풀어주는 유일한 정상 경로다. 모듈이 없으면(구 데몬) 명확한 오류로 회신해 back 이
+        //  409/HOST_OFFLINE 을 사용자에게 표시하게 한다 — 조용히 성공하면 폰 카드가 영구히 남는다.
+        if (msg.method.startsWith('approval.')) { callLazy('./approvals', 'handle', [msg.method, msg.params], ok, fail); return; }
+        // 트랜스크립트(기능5) — chat.sessions/open/since/detail/attachment/close/input.
+        //  ws 를 넘겨 chat_event push 대상을 갱신한다(agent/sync 와 같은 형태).
+        // chat.input 은 읽기가 아니라 **PTY 입력**이다 — transcript(읽기 전용)로 보내면 NOT_IMPLEMENTED 로
+        //  떨어져 폰 채팅의 전송 버튼이 항상 실패한다. cpt-server 의 구현(로컬 소켓과 동일)으로 보낸다.
+        if (msg.method === 'chat.input') {
+          const p = msg.params || {};
+          Promise.resolve()
+            .then(() => cptServer.chatInput({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, text: p.text, submit: p.submit }))
+            .then(ok).catch(fail);
+          return;
+        }
+        if (msg.method.startsWith('chat.')) { callLazy('./transcript', 'handle', [msg.method, msg.params, ws], ok, fail); return; }
         // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
         if (msg.method.startsWith('ws.')) { wsRpc.handle(msg.method, msg.params).then(ok).catch(fail); return; }
         fsRpc.handle(msg.method, msg.params).then(ok).catch(fail);
@@ -166,6 +257,12 @@ function run(config) {
       if (closed) return; closed = true;
       fsRpc.stopWatch(); // 이 연결에 바인딩된 감시 정리(재접속 시 앱이 다시 watch 등록)
       agentLib.detachAll(); // 이벤트 push 대상 해제(자식 claude 는 유지 — 재접속 시 backlog)
+      activeWs = null;
+      // 트랜스크립트: push 대상만 해제하고 tail/offset 은 유지한다(재접속 후 클라가 chat.since 로 따라잡음).
+      //  ⚠ fsRpc.stopWatch() 처럼 watcher 를 닫지 말 것 — 재접속마다 tail 이 끊겨 스냅샷 재전송이 폭주한다.
+      try { const t = tryRequire('./transcript'); if (t && typeof t.detachAll === 'function') t.detachAll(); } catch (_) { /* noop */ }
+      // 승인은 여기서 건드리지 않는다 — 훅은 여전히 블록돼 있고 pending 의 정본은 데몬이다.
+      //  재접속하면 hello_ack 에서 resync() 가 다시 광고한다(마감 타이머는 approvals 가 자체 보유).
       // 전송로 무효화 — 이걸 빼면 controlWs 가 CLOSED 인 스테일 소켓으로 남아, 대기 중이던 ui 왕복이
       //  BACK_OFFLINE 로 즉시 실패하지 못하고 UI_TIMEOUT(최대 60s)까지 매달린다. 훅을 블로킹하는
       //  경로(승인 왕복)에서는 그 지연이 곧 claude 정지 시간이므로 close 시점에 반드시 끊는다.
@@ -187,6 +284,7 @@ function run(config) {
       console.warn(`[control] WS 오류: ${e.message}`);
       // 'close' 가 뒤따르지 않는 초기 접속 실패도 있어 close 핸들러와 중복 방지.
       if (closed) return; closed = true;
+      activeWs = null;
       cptServer.setControlWs(null); // close 를 거치지 않는 경로도 전송로를 끊는다(위 close 주석 참조)
       try { ws.terminate(); } catch (_) { /* noop */ }
       scheduleReconnect();
@@ -217,6 +315,8 @@ function run(config) {
     // 에이전트 상태의 단일 소유자 — 훅(1차)과 agent-watch(폴백)의 보고를 받아 전이·알림을 판정한다.
     //  agent-watch 보다 먼저 띄운다(agent-watch 가 lazy require 하므로 순서 의존은 없지만 의도를 드러냄).
     try { require('./agent-state').start({}); } catch (e) { console.error('[control] agent-state 초기화 실패:', e.message); }
+    // 트랜스크립트 바인딩(세션↔터미널) 정리 — 30일 초과분 삭제. 모듈이 없는 구 번들이면 조용히 건너뛴다.
+    try { const t = tryRequire('./transcript'); if (t && typeof t.pruneBinds === 'function') t.pruneBinds(); } catch (e) { console.error('[control] 바인딩 정리 실패:', e.message); }
     // 에이전트 완료 폴백 감지 — 훅이 안 걸린 터미널의 title/process-exit 전이를 관찰해 알림(안전망).
     try { require('./agent-watch').start(); } catch (e) { console.error('[control] agent-watch 시작 실패:', e.message); }
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
@@ -268,6 +368,8 @@ function cleanupAttachments() {
 
 module.exports = {
   run,
-  DAEMON_CAPS,
-  hasServerCap, // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
+  DAEMON_CAPS,   // 항상 켜져 있는 기본 능력(선택 능력은 daemonCaps() 가 모듈 존재로 판정)
+  daemonCaps,
+  hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
+  sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
 };

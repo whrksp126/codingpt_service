@@ -39,8 +39,16 @@ paginatedResponse(res, data, page, limit, total)
 | `services/notificationService.js` | 알림 생성→WSS/SSE 팬아웃→미접속 시 FCM. pane 단위 읽음(cwd,win) |
 | `controllers/daemonController.js` | 페어링·터미널·fs·프리뷰·프로젝트 detach/attach |
 | `config/runner.js` | `CLOUD_RUNNER_ENABLED`(기본 false) — 클라우드 러너 게이팅 스위치 |
+| `services/approvalService.js` | 원격 승인 인박스(기능1) 인메모리 인덱스 — **정본은 데몬**(back 재시작은 데몬 resync 로 복구). REST `/api/daemon/approvals/*`, 해소 시 `markRead` 로 기존 크로스기기 dismiss 재사용 |
+| `config/caps.js` | capability 협상 사전(`SERVER_CAPS`) — 서버에 처리 코드가 있는 능력만 선언. 킬스위치로 회수 가능 |
 | `app.js` server.on('upgrade') | **WS 업그레이드 단일 핸들러** — 데몬 연결/에이전트 스트림/프리뷰 HMR 라우팅. 새 WS 경로는 여기 추가 |
 
+- 승인/트랜스크립트 env 스위치(전부 미설정=켜짐, `0|false|off|no`=끔):
+  `APPROVAL_ENABLED`(끄면 approval.v1 미선언 + create 가 즉시 `{defer:true}` → 데몬은 TUI 폴백),
+  `TRANSCRIPT_ENABLED`, `APPROVAL_TTL_MS`(600000), `APPROVAL_MAX_PENDING_PER_USER`(20),
+  `APPROVAL_ESCALATE_MS`(60000), `APPROVAL_PUSH_POLICY`(`escalate`기본|`present`|`always`),
+  `APPROVAL_ANDROID_CHANNEL`(기본 `codingpt_default` — 앱이 `codingpt_approval` 채널을 만든 뒤 전환).
+  데몬측 킬스위치는 `CPT_APPROVAL=0`(훅이 즉시 무출력 종료 = 기존 TUI 동작).
 - 프리뷰 프록시: `POST /api/daemon/preview/start` → 불투명 토큰 → `ALL /preview/:token(/*)` 무인증 진입
   → 데몬 loopback 터널. 토큰 발급은 JWT 전용, 터널은 loopback 한정(SSRF 방지).
 - 알림·ui_command 등 클라이언트 팬아웃은 기존 `agentWsClients` 채널 재사용 — 새 이벤트 타입 추가 시

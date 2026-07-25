@@ -122,9 +122,13 @@ function request(cmd, args, { timeoutMs = 65000 } = {}) {
     const sock = sockPath();
     const conn = net.createConnection(sock);
     let buf = '';
+    // settled 가드 — 아래 close 핸들러가 정상 응답 후의 종료를 오류로 오해하지 않게(그리고 승인 경로에서
+    //  "응답 전 소켓 끊김"을 타임아웃까지 기다리지 않고 즉시 알리게) 한다.
+    let settled = false;
+    const done = (fn, v) => { if (settled) return; settled = true; clearTimeout(timer); fn(v); };
     const timer = setTimeout(() => {
       try { conn.destroy(); } catch (_) { /* noop */ }
-      reject(new Error('데몬 응답 시간 초과'));
+      done(reject, new Error('데몬 응답 시간 초과'));
     }, timeoutMs);
     conn.on('connect', () => {
       conn.write(JSON.stringify({ id: 'c' + Date.now(), cmd, args, ctx }) + '\n');
@@ -133,19 +137,21 @@ function request(cmd, args, { timeoutMs = 65000 } = {}) {
       buf += d.toString();
       const i = buf.indexOf('\n');
       if (i < 0) return;
-      clearTimeout(timer);
       try {
         const res = JSON.parse(buf.slice(0, i));
-        if (res.ok) resolve(res.result);
-        else reject(Object.assign(new Error(res.error || '실패'), { code: res.code }));
-      } catch (e) { reject(e); }
+        if (res.ok) done(resolve, res.result);
+        else done(reject, Object.assign(new Error(res.error || '실패'), { code: res.code }));
+      } catch (e) { done(reject, e); }
       try { conn.end(); } catch (_) { /* noop */ }
     });
     conn.on('error', (e) => {
-      clearTimeout(timer);
       if (e.code === 'ENOENT' || e.code === 'ECONNREFUSED') {
-        reject(new Error(`CodingPT 데몬에 연결할 수 없습니다 (${sock}) — 데몬/데스크톱 앱이 실행 중인지 확인하세요.`));
-      } else reject(e);
+        done(reject, new Error(`CodingPT 데몬에 연결할 수 없습니다 (${sock}) — 데몬/데스크톱 앱이 실행 중인지 확인하세요.`));
+      } else done(reject, e);
+    });
+    // 응답 없이 닫힘(데몬 재시작·인수·크래시) — 타이머까지 매달리면 승인 훅이 그만큼 claude 를 세운다.
+    conn.on('close', () => {
+      done(reject, Object.assign(new Error('데몬 연결이 응답 전에 끊겼습니다'), { code: 'DAEMON_GONE' }));
     });
   });
 }
@@ -155,6 +161,27 @@ function printJson(v) { process.stdout.write(JSON.stringify(v, null, 2) + '\n');
 function out(v, flags, human) {
   if (flags.json || human == null) printJson(v);
   else process.stdout.write(human + '\n');
+}
+
+// ChatMsg(정규화 트랜스크립트 메시지) 1건 → 사람이 읽는 한 줄(+본문). --json 이면 원본이 나간다.
+//  seq 를 항상 앞에 찍는다 — `cpt transcript --since <seq>` 로 이어 읽을 때 그 값이 필요하다.
+function renderChatMsg(m) {
+  const role = { user: '사용자', assistant: '에이전트', system: '시스템' }[m.role] || m.role || '?';
+  const head = `[${m.seq}] ${role}/${m.kind}${m.hidden ? ' (접힘)' : ''}`;
+  if (m.kind === 'tool_use' && m.tool) {
+    return `${head} ${m.tool.title || m.tool.name}${m.tool.path ? ` — ${m.tool.path}` : ''}`
+      + `${m.tool.argsPreview ? `\n    ${String(m.tool.argsPreview).replace(/\n/g, '\n    ')}` : ''}`;
+  }
+  if (m.kind === 'tool_result' && m.result) {
+    return `${head} ${m.result.ok ? 'ok' : '실패'} ${m.result.bytes != null ? `${m.result.bytes}B` : ''}`
+      + `${m.result.preview ? `\n    ${String(m.result.preview).replace(/\n/g, '\n    ')}` : ''}`;
+  }
+  if (m.kind === 'question' && m.question) {
+    const opts = (m.question.options || []).map((o) => `- ${o.label}`).join('\n    ');
+    return `${head} ${m.question.header || ''} ${m.question.question || ''}${opts ? `\n    ${opts}` : ''}`;
+  }
+  const text = m.text ? String(m.text) : '';
+  return `${head}${text ? `\n    ${text.replace(/\n/g, '\n    ')}${m.truncated ? ' …(잘림)' : ''}` : ''}`;
 }
 
 const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의 AI/사용자용)
@@ -240,6 +267,12 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   log [--level info|warn|error] <message>
   status                                이 워크스페이스의 상태/로그 보기
 
+  # 원격 승인 / 대화 로그 (조회 전용 — 승인 응답과 프롬프트 입력은 앱/PC 화면에서 한다)
+  approval list                         지금 원격 응답을 기다리는 승인 요청 목록
+  transcript [--since <seq>] [--limit <n>=40] [--session <id>]
+                                        이 터미널 에이전트의 대화 로그 읽기(--since = 그 seq 이후만)
+  transcript sessions                   이 워크스페이스의 대화 세션 목록(● = 진행 중)
+
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
   skills get cpt-cli                    버전 일치 전체 가이드 출력(태스크 중심)
 
@@ -247,6 +280,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
       --sid <표면id> (특정 프리뷰/IDE 대상 지정)
 
 환경: CPT_WS(워크스페이스), CPT_SOCK(소켓 경로), CPT_TID/CPT_TSESSION(터미널 좌표 — 있으면 tmux 조회 생략), TMUX_PANE(자동)
+      CPT_APPROVAL=0 (원격 승인 끄기 — 승인은 항상 이 PC 터미널에서만 답한다)
 `;
 
 async function main() {
@@ -507,6 +541,64 @@ async function main() {
       case 'log': return out(await request('status.log', { message: pos.slice(1).join(' '), level: flags.level, source: flags.source }), flags, 'ok');
       case 'status': return printJson(await request('status.list', {}));
 
+      // ── 원격 승인(조회 전용) ──
+      //  응답(허용/거절)은 여기서 하지 않는다: 이 CLI 는 터미널 안의 AI 도 부를 수 있어서, 응답 명령을
+      //  노출하면 에이전트가 자기 승인 요청을 스스로 통과시킬 수 있다. 사람은 앱/PC 카드에서 답한다.
+      case 'approval': {
+        if (c2 === 'list' || c2 == null) {
+          const r = await request('approval.list', {});
+          const arr = (r && r.approvals) || [];
+          const now = Date.now();
+          const left = (d) => (d ? `남은 ${Math.max(0, Math.round((d - now) / 1000))}초` : '마감 미정');
+          return out(r, flags, arr.map((a) =>
+            `✋ ${a.id}  ${a.tool || '?'}${a.summary ? ' · ' + String(a.summary).split('\n')[0].slice(0, 80) : ''}`
+            + `\n   ${a.wsName || a.cwd || '-'}${a.win != null ? `/${a.win}` : ''} · ${left(a.deadlineAt)}`
+          ).join('\n') || (r && r.supported === false ? '(이 데몬은 원격 승인을 지원하지 않습니다 — PC 앱 업데이트 필요)' : '(대기 중 승인 없음)'));
+        }
+        process.stderr.write('사용법: cpt approval list\n');
+        process.exitCode = 2;
+        return;
+      }
+
+      // ── 트랜스크립트(에이전트 대화 로그 직독) ──
+      //  기본 = 이 터미널이 보고 있는 세션의 최근 대화. --since <seq> 면 그 이후 증분만(폴링용).
+      case 'transcript': {
+        if (c2 === 'sessions') {
+          const r = await request('chat.sessions', {});
+          const arr = (r && r.sessions) || [];
+          if (r && r.supported === false) return out(r, flags, `(${r.agent || '이 에이전트'}의 트랜스크립트는 아직 지원하지 않습니다)`);
+          return out(r, flags, arr.map((s) =>
+            `${s.live ? '●' : '○'} ${s.sessionId}  ${s.title || '(제목 없음)'}`
+            + `\n   ${s.lines != null ? `${s.lines}줄 ` : ''}${s.bytes != null ? `${Math.round(s.bytes / 1024)}KB ` : ''}`
+            + `${s.gitBranch ? `${s.gitBranch} ` : ''}${s.oversize ? '(대용량) ' : ''}${s.lastAt || ''}`
+          ).join('\n') || '(세션 없음)');
+        }
+        const limit = flags.limit != null && flags.limit !== true ? parseInt(flags.limit, 10) : undefined;
+        const sinceSeq = flags.since != null && flags.since !== true ? parseInt(flags.since, 10) : null;
+        // 스냅샷을 먼저 연다(chatId/epoch 획득 — since 는 이 좌표계 위에서만 의미가 있다).
+        const opened = await request('chat.open', {
+          sessionId: typeof flags.session === 'string' ? flags.session : undefined,
+          limit: sinceSeq != null ? 1 : (limit || 40), // --since 면 스냅샷 본문은 필요 없다
+        });
+        if (opened && opened.supported === false) {
+          return out(opened, flags, `(${opened.agent || '이 에이전트'}의 트랜스크립트는 아직 지원하지 않습니다)`);
+        }
+        let messages = (opened && opened.messages) || [];
+        let epoch = opened && opened.epoch;
+        let headSeq = opened && opened.headSeq;
+        if (sinceSeq != null) {
+          const d = await request('chat.since', { chatId: opened.chatId, sinceSeq, epoch, limit });
+          messages = (d && d.messages) || [];
+          if (d && d.epoch) epoch = d.epoch;
+          if (d && d.headSeq != null) headSeq = d.headSeq;
+          if (d && d.epochChanged) process.stderr.write('알림: 세션 파일이 교체됐습니다(--since 무효) — 전체를 다시 읽으세요.\n');
+        }
+        // 구독을 남기지 않는다(CLI 는 one-shot 조회) — 실패는 무해(데몬 idle TTL 이 정리).
+        await request('chat.close', { chatId: opened && opened.chatId }).catch(() => {});
+        const payload = { chatId: opened && opened.chatId, sessionId: opened && opened.sessionId, epoch, headSeq, messages };
+        return out(payload, flags, messages.map(renderChatMsg).join('\n') || '(내용 없음)');
+      }
+
       // ── 훅(claude/codex 래퍼가 호출 — 사람이 직접 쓸 일 없음) ──
       case 'claude-hook': {
         // 이벤트 7종(session-start|prompt|permission|notification|stop|stop-failure|session-end)을
@@ -521,6 +613,14 @@ async function main() {
           if (!ev) return;                       // 모르는 이벤트명 = 조용히 성공(구/신 버전 혼재 안전)
           await request('hook.event', ev, { timeoutMs: 3000 }).catch(() => {});
         } catch (_) { /* 훅은 실패해도 조용히 성공 처리 */ }
+        return;
+      }
+      // ── 원격 승인(기능1) — PermissionRequest 훅 전용. 다른 훅과 달리 **응답까지 블로킹**한다 ──
+      //  stdout 은 claude 와의 계약 JSON 전용이다(out()/printJson()/console.log 금지 — 한 글자라도
+      //  섞이면 결정이 무효화되고 예측 불가 동작이 된다). 결정을 못 받으면 **무출력 + exit 0** →
+      //  claude 가 평소처럼 TUI 승인 대화상자를 띄운다(= 자동 허용이 어떤 경로로도 발생하지 않는다).
+      case 'approval-hook': {
+        await approvalHook(flags);
         return;
       }
       case 'codex-notify': {
@@ -553,20 +653,86 @@ async function main() {
   } catch (e) {
     // 훅 경로는 어떤 오류에도 exit 0 + 무출력 — 훅이 0 아닌 코드로 끝나거나 stderr 를 뱉으면 claude 가
     //  사용자에게 훅 실패를 표시하고(2 는 모델을 깨우기까지 한다) 작업 흐름을 오염시킨다.
-    if (c1 === 'claude-hook' || c1 === 'codex-notify') return;
+    if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook') return;
     process.stderr.write(`오류: ${e.message}\n`);
     process.exitCode = 1;
   }
 }
 
+// ── 원격 승인 훅(PermissionRequest) ────────────────────────────────────────
+//  기본값 130s = 데몬 하드 타임아웃(120s) + 여유 10s. 실제 값은 shim 이 데몬 설정에서 파생해
+//  `--wait-ms` 로 넘긴다(단일 출처=runner-core/approvals.js budget()). 순서 불변식:
+//    데몬 하드 타임아웃 < CLI 대기(--wait-ms) < claude 훅 config timeout
+//  이 순서가 깨지면 claude 가 먼저 훅을 잘라 우리가 defer 를 제어하지 못한다(카드 회수 누락).
+const APPROVAL_WAIT_DEFAULT_MS = 130000;
+const APPROVAL_WAIT_MIN_MS = 5000;
+const APPROVAL_WAIT_MAX_MS = 570000;
+
+async function approvalHook(flags) {
+  let payload = null;
+  try { payload = await readStdinJson({ waitMs: 2000 }); } catch (_) { return; }
+  if (!payload || typeof payload !== 'object') return;      // 페이로드 파싱 실패 = 무출력(TUI 폴백)
+
+  // 상태 보고(기능3)는 승인 기능과 독립이다 — 킬스위치/서버 미지원/오류와 무관하게 항상 자기보고한다.
+  //  await 하지 않는다: 데몬이 느릴 때 그 지연이 곧 승인 대기(=claude 정지) 앞에 붙기 때문.
+  try {
+    const ev = mapClaudeHook('permission', payload);
+    if (ev) request('hook.event', ev, { timeoutMs: 3000 }).catch(() => {});
+  } catch (_) { /* noop */ }
+
+  // 킬스위치 — 기능 도입 전과 100% 동일 동작(무출력 + exit 0 → TUI 대화상자).
+  if (process.env.CPT_APPROVAL === '0') return;
+
+  const raw = parseInt((flags && flags['wait-ms']) || process.env.CPT_APPROVAL_WAIT_MS || '', 10);
+  const waitMs = Math.max(APPROVAL_WAIT_MIN_MS,
+    Math.min(APPROVAL_WAIT_MAX_MS, Number.isFinite(raw) && raw > 0 ? raw : APPROVAL_WAIT_DEFAULT_MS));
+
+  let res = null;
+  try {
+    res = await request('approval.request', {
+      agent: 'claude',
+      hookEventName: payload.hook_event_name || 'PermissionRequest',
+      sessionId: payload.session_id || null,
+      promptId: payload.prompt_id || null,
+      toolUseId: payload.tool_use_id || null,
+      toolName: payload.tool_name || null,
+      toolInput: payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {},
+      permissionMode: payload.permission_mode || null,
+      transcriptPath: payload.transcript_path || null,
+      hookCwd: payload.cwd || null,
+      waitMs,
+    }, { timeoutMs: waitMs });
+  } catch (_) {
+    return; // 데몬 오프라인/구버전(알 수 없는 명령)/타임아웃/연결 끊김 — 전부 무출력(TUI 폴백)
+  }
+
+  const out = res && res.hookOutput;
+  if (!validApprovalOutput(out)) return;                    // defer 이거나 계약 위반 → 무출력
+  process.stdout.write(JSON.stringify(out) + '\n');
+}
+
+// 계약 최종 검증 — 데몬이 뭘 보내든 CLI 가 "allow/deny 결정 JSON" 이외를 stdout 에 흘리지 않게 한다.
+//  (데몬 버전이 앞서가거나 손상된 응답을 받아도 claude 에게 쓰레기를 주지 않는다)
+function validApprovalOutput(out) {
+  if (!out || typeof out !== 'object') return false;
+  const h = out.hookSpecificOutput;
+  if (!h || h.hookEventName !== 'PermissionRequest') return false;
+  const d = h.decision;
+  if (!d || (d.behavior !== 'allow' && d.behavior !== 'deny')) return false;
+  if (d.behavior === 'deny' && typeof d.message !== 'string') return false;
+  return true;
+}
+
 // stdin 전체를 JSON 으로(훅 페이로드). 비 TTY 일 때만 시도.
 //  타임아웃 300ms — claude 는 훅 프로세스를 띄우고 페이로드를 즉시 써서 stdin 을 close 한다(end 이벤트로
 //  바로 끝난다). 과거 1500ms 는 stdin 이 안 닫히는 예외 상황에서만 쓰이던 순수 손실이었다.
-function readStdinJson() {
+//  승인 훅만 상한을 늘린다(waitMs) — 조기 resolve = 페이로드 절단 = 파싱 실패 = 승인 요청 유실이고,
+//  그 비용(사용자가 폰에서 못 받음)이 300ms 절약보다 크다.
+function readStdinJson({ waitMs = 300 } = {}) {
   if (process.stdin.isTTY) return Promise.resolve(null);
   return new Promise((resolve) => {
     let buf = '';
-    const timer = setTimeout(() => resolve(safeParse(buf)), 300);
+    const timer = setTimeout(() => resolve(safeParse(buf)), waitMs);
     process.stdin.on('data', (d) => { buf += d.toString(); });
     process.stdin.on('end', () => { clearTimeout(timer); resolve(safeParse(buf)); });
   });
@@ -744,4 +910,4 @@ function scanAssistant(lines) {
 //  훅 매핑/요약 추출을 소켓·tmux 없이 단위 검증할 수 있다.
 if (require.main === module) main();
 
-module.exports = { mapClaudeHook, tailAssistantSummary, scanAssistant, tmuxSelfFromEnv };
+module.exports = { mapClaudeHook, tailAssistantSummary, scanAssistant, tmuxSelfFromEnv, validApprovalOutput };

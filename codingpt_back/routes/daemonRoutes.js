@@ -4,6 +4,7 @@ const authMiddleware = require('../middlewares/authMiddleware');
 const accountAuth = require('../middlewares/accountAuth');
 const daemonController = require('../controllers/daemonController');
 const syncController = require('../controllers/syncController');
+const approvalController = require('../controllers/approvalController');
 
 // BYO-PC 데몬 — 페어링/상태/터미널. ws 업그레이드(/connect, /stream, /terminal)는 app.js 에서 처리.
 router.post('/pair/code', authMiddleware, daemonController.createPairCode); // 레거시 — 앱이 코드 발급
@@ -71,6 +72,25 @@ router.post('/agent/login', authMiddleware, daemonController.agentLogin);
 router.post('/agent/login/submit', authMiddleware, daemonController.agentLoginSubmit);
 router.post('/agent/login/cancel', authMiddleware, daemonController.agentLoginCancel);
 router.get('/agent/login/status', authMiddleware, daemonController.agentLoginStatus);
+
+// 원격 승인 인박스(기능1) — 훅이 블로킹 대기하는 동안 어느 기기에서든 응답.
+//  경로가 `/api/daemon/*` 인 이유: PC 앱 브리지가 이 접두사만 화이트리스트로 통과시킨다(Rust 무수정).
+//  accountAuth(JWT|deviceToken 겸용) — 생성/취소는 컨트롤러가 실 deviceToken 기기인지 추가 검사(403).
+router.post('/approvals', accountAuth, approvalController.create);            // 데몬 → back(등록)
+router.get('/approvals', accountAuth, approvalController.list);               // 클라 캐치업(pull 이 정본)
+router.post('/approvals/:id/respond', accountAuth, approvalController.respond); // 클라 → back → 데몬
+router.post('/approvals/:id/cancel', accountAuth, approvalController.cancel);   // 데몬 → back(마감/훅 종료)
+
+// 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더의 얇은 callRpc 프록시. 새 배관 없음(라우트만).
+//  ⚠ accountAuth 필수 — agent* 처럼 JWT 전용으로 두면 PC 앱(deviceToken)이 못 쓴다(같은 실수 반복 금지).
+//  라이브 델타는 데몬 chat_event → agent/stream WSS 팬아웃(daemonRelayService.fanoutChatEvent).
+router.get('/chat/sessions', accountAuth, daemonController.chatSessions);
+router.post('/chat/open', accountAuth, daemonController.chatOpen);
+router.get('/chat/since', accountAuth, daemonController.chatSince);
+router.post('/chat/close', accountAuth, daemonController.chatClose);
+router.get('/chat/detail', accountAuth, daemonController.chatDetail);
+router.get('/chat/attachment', accountAuth, daemonController.chatAttachment);
+router.post('/chat/input', accountAuth, daemonController.chatInput);
 
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);

@@ -62,17 +62,23 @@ async function getFcmAccessToken() {
   return _fcmToken.access_token;
 }
 
-async function sendFcm(device, payload) {
-  const sa = loadFcmServiceAccount();
-  const projectId = process.env.FCM_PROJECT_ID || (sa && sa.project_id);
-  if (!projectId) return { ok: false };
-  const accessToken = await getFcmAccessToken();
-  if (!accessToken) return { ok: false };
-  const message = {
+// 표시 푸시(FCM) 메시지 조립(순수) — 액션 가능 푸시(승인)만 추가 필드가 붙고, 나머지는 기존과 동일.
+//  · payload.data     — 기본 data 위에 얹는 추가 키(approvalId/deadlineAt/tool/actions). 문자열화됨.
+//  · payload.channelId— Android 알림 채널(미지정 = codingpt_default). 앱이 만들지 않은 채널을 지정하면
+//                       FCM 이 매니페스트 기본 채널로 폴백하므로 표시 자체는 유실되지 않는다.
+//  · payload.category — iOS aps.category(UNNotificationCategory 식별자, 예 CPT_APPROVAL) + 시간민감 레벨.
+//                       미지정이면 aps 는 예전 그대로 { sound:'default' } 다(기존 알림 회귀 0).
+//  ★ Android 는 notification+data 혼합 유지 — data-only 로 바꾸면 제조사 절전에서 유실 시 아무것도 안 뜬다.
+function buildFcmMessage(device, payload) {
+  return {
     message: {
       token: device.token,
       notification: { title: payload.title || 'CodingPT', body: payload.body || '' },
-      data: stringData({ kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink, notifId: payload.notifId }),
+      data: stringData({
+        kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId,
+        deeplink: payload.deeplink, notifId: payload.notifId,
+        ...(payload.data && typeof payload.data === 'object' ? payload.data : {}),
+      }),
       // Android: 소리·진동·헤드업 명시(채널 codingpt_default = importance HIGH). notification 블록이 없으면
       //  기기/런처가 조용히 처리하는 경우가 있어 명시한다.
       android: {
@@ -81,20 +87,35 @@ async function sendFcm(device, payload) {
           sound: 'default',
           default_sound: true,
           default_vibrate_timings: true,
-          channel_id: 'codingpt_default',
+          channel_id: payload.channelId || 'codingpt_default',
           notification_priority: 'PRIORITY_MAX',
           // 크로스기기 dismiss 용 안정 태그 — FCM SDK 가 이 태그(id=0)로 표시하므로,
           //  나중에 NotificationManager.cancel(tag, 0) 로 정확히 그 배너만 회수할 수 있다.
+          //  승인 알림도 같은 규약을 유지해야 NotifTray 회수 로직이 무수정으로 동작한다.
           ...(payload.notifId != null ? { tag: `cptnotif-${payload.notifId}` } : {}),
         },
       },
       // iOS: 최고 우선순위 + 소리(사용자 Focus/무음 상태는 기기가 판단).
       apns: {
         headers: { 'apns-priority': '10', 'apns-push-type': 'alert' },
-        payload: { aps: { sound: 'default' } },
+        payload: {
+          aps: {
+            sound: 'default',
+            ...(payload.category ? { category: payload.category, 'interruption-level': 'time-sensitive' } : {}),
+          },
+        },
       },
     },
   };
+}
+
+async function sendFcm(device, payload) {
+  const sa = loadFcmServiceAccount();
+  const projectId = process.env.FCM_PROJECT_ID || (sa && sa.project_id);
+  if (!projectId) return { ok: false };
+  const accessToken = await getFcmAccessToken();
+  if (!accessToken) return { ok: false };
+  const message = buildFcmMessage(device, payload);
   let res;
   try {
     res = await fetch(`https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`, {
@@ -176,8 +197,15 @@ function sendApns(device, payload) {
     const done = (r) => { if (settled) return; settled = true; try { client.close(); } catch (_) {} resolve(r); };
     client.on('error', (e) => done({ ok: false, err: e.message }));
     const body = JSON.stringify({
-      aps: { alert: { title: payload.title || 'CodingPT', body: payload.body || '' }, sound: 'default' },
-      ...stringData({ kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink }),
+      // category 는 승인 등 액션 가능 알림만 채워진다(미지정 시 기존 payload 와 완전 동일).
+      aps: {
+        alert: { title: payload.title || 'CodingPT', body: payload.body || '' }, sound: 'default',
+        ...(payload.category ? { category: payload.category, 'interruption-level': 'time-sensitive' } : {}),
+      },
+      ...stringData({
+        kind: payload.kind, sessionId: payload.sessionId, workspaceId: payload.workspaceId, deeplink: payload.deeplink,
+        ...(payload.data && typeof payload.data === 'object' ? payload.data : {}),
+      }),
     });
     const req = client.request({
       ':method': 'POST', ':path': `/3/device/${device.token}`,
@@ -202,4 +230,7 @@ function configured() {
   return !!(loadFcmServiceAccount() || apnsConfig());
 }
 
-module.exports = { sendFcm, sendFcmData, sendApns, configured };
+module.exports = {
+  sendFcm, sendFcmData, sendApns, configured,
+  _buildFcmMessage: buildFcmMessage, // 테스트 노출(순수) — 액션 푸시 조립/기존 알림 무회귀 고정
+};

@@ -45,7 +45,11 @@ async function unregisterDevice(userId, token) {
   return PushDevice.destroy({ where: { user_id: userId, token } });
 }
 
-// 사용자의 모든 활성 기기에 발송. payload = { kind, sessionId, workspaceId?, title, body?, deeplink }.
+// 사용자의 모든 활성 기기에 발송.
+//  payload = { kind, sessionId, workspaceId?, title, body?, deeplink, notifId?,
+//              channelId?, category?, data? }
+//   · channelId/category/data 는 액션 가능 푸시(승인 인박스)용 옵션 — provider 가 그대로 실어 보낸다.
+//     미지정이면 기존 페이로드와 완전히 동일하다(기존 알림 3케이스 회귀 0).
 //  opts.pcActive: 지금 PC 를 실제로 쓰는 중(present=pc+fresh)이면 true → alert_when_pc_active=false 인
 //   기기(기본)는 건너뛴다("PC 사용 중 이 폰 무음" 토글). 토글을 끈(=true) 기기만 그때도 푸시한다.
 //  실패해도 throw 하지 않는다(호출부는 fire-and-forget). 반환 { sent, skipped }.

@@ -39,7 +39,12 @@ function toJson(row) {
 }
 
 // subtitle 이 비어있고 kind + wsName 이 있으면 서버가 조합(클라이언트 공통 계약).
-const SUBTITLE_SUFFIX = { done: '에서 완료', permission_request: '에서 승인 대기', error: '에서 오류' };
+//  approval_request = 기능1(훅 승인 인박스). 동면 중인 agent 엔진의 permission_request 와 문구는 같지만
+//  kind 는 분리한다(두 경로가 섞이면 알림이 이중 발사된다 — 설계 §9-9).
+const SUBTITLE_SUFFIX = {
+  done: '에서 완료', permission_request: '에서 승인 대기', error: '에서 오류',
+  approval_request: '에서 승인 대기',
+};
 function composeSubtitle(kind, wsName) {
   const suffix = SUBTITLE_SUFFIX[kind];
   if (!suffix || !wsName) return null;
@@ -56,7 +61,26 @@ function buildDeeplink(n) {
   return `codingpt://notif/${n.id}${qs ? '?' + qs : ''}`;
 }
 
+// present 라우팅 판정(순수) — "지금 실제로 쓰는 기기가 이미 알림을 보여주면"만 억제한다.
+//  · present=모바일 + fresh → 활성 폰이 인앱으로 봄        → suppressAll(FCM 전량 억제)
+//  · present=PC     + fresh → 사용자가 PC 를 쓰는 중        → pcActive(폰별 토글 alert_when_pc_active 로 결정)
+//  · present=PC 인데 !fresh / present 없음                  → 게이트 없음(폰으로 푸시)
+//  이 3케이스는 과거 "PC엔 오는데 폰엔 안 옴" 라운드의 결론이다 — 값 의미를 바꾸면 3플랫폼 동시 회귀.
+function computeRoute(present) {
+  let suppressAll = false;   // 활성 폰이 이미 인앱으로 봄
+  let pcActive = false;      // PC 사용 중 → sendToUser 가 기기별 토글로 스킵
+  if (present && present.fresh) {
+    if (present.kind === 'mobile') suppressAll = true;
+    else if (present.kind === 'pc') pcActive = true;
+  }
+  return { suppressAll, pcActive };
+}
+
 // 알림 생성 — payload: { source, kind?, title, subtitle?, body?, workspaceId?, wsName?, cwd?, win?, sessionId? }
+//  비영속 오버라이드(DB 컬럼 무추가 — 승인 인박스용):
+//   · deeplink — buildDeeplink 기본값 대체(예: codingpt://approval/<id>)
+//   · push     — { channelId?, category?, data? } 푸시 표시/액션 힌트를 provider 까지 그대로 전달
+//   · pushGate — 'ignore-pc-active' 면 pcActive 게이트만 무시(suppressAll 은 그대로) — 정책 always 용
 async function createNotification(userId, payload) {
   const p = payload || {};
   const source = String(p.source || '').trim().slice(0, 16);
@@ -108,14 +132,15 @@ async function createNotification(userId, payload) {
   //   · present=PC 인데 오래 자리비움(!fresh) / present 없음        → 폰으로 푸시(PC 는 인앱 배너 유지)
   //  이전엔 "모바일 WS 접속 여부(hasActiveMobileClient)"로만 억제해, 백그라운드로 접속만 살아 있는
   //  폰이 자기 자신의 푸시를 막고 PC 는 present 판정이 느슨(가시성)해 폰을 가로채는 문제가 있었다.
-  let suppressAll = false;   // 활성 폰이 이미 인앱으로 봄
-  let pcActive = false;      // PC 사용 중 → sendToUser 가 기기별 토글로 스킵
-  if (present && present.fresh) {
-    if (present.kind === 'mobile') suppressAll = true;
-    else if (present.kind === 'pc') pcActive = true;
-  }
+  const { suppressAll } = computeRoute(present);
+  let { pcActive } = computeRoute(present);
+  // 승인 알림만의 예외(정책 always) — "세션이 멈춘다"는 비용이 커서 PC 무음 토글을 무시할 수 있게 한다.
+  //  기본 정책은 escalate(무응답 60s 후 재발송)이며 그때는 여기서 게이트를 건드리지 않는다.
+  const ignorePcActive = p.pushGate === 'ignore-pc-active';
+  if (ignorePcActive) pcActive = false;
+  const push = p.push && typeof p.push === 'object' ? p.push : null;
   // 라우팅 관측 로그(성공 FCM 은 provider 가 로그를 안 남기므로 결정 지점에서 남긴다).
-  console.log(`[notif-route] user=${userId} present=${present ? present.kind : 'none'} fresh=${present ? present.fresh : '-'} suppressAll=${suppressAll} pcActive=${pcActive} title="${title}"`);
+  console.log(`[notif-route] user=${userId} present=${present ? present.kind : 'none'} fresh=${present ? present.fresh : '-'} suppressAll=${suppressAll} pcActive=${pcActive} approval=${kind === 'approval_request' ? 1 : 0}${ignorePcActive ? ' pcGate=ignored' : ''} title="${title}"`);
   if (!suppressAll) {
     pushService.sendToUser(userId, {
       kind: kind || 'notification',
@@ -124,14 +149,30 @@ async function createNotification(userId, payload) {
       notifId: notification.id, // Android 태그/iOS userInfo 매칭 — 크로스기기 dismiss 의 열쇠
       title,
       body: subtitle || (notification.body ? String(notification.body).slice(0, 120) : ''),
-      deeplink: buildDeeplink(notification),
+      deeplink: p.deeplink ? String(p.deeplink).slice(0, 300) : buildDeeplink(notification),
+      // 승인 등 특수 알림만 채워진다(부재 시 provider 가 기존 기본값을 그대로 쓴다 — 회귀 0).
+      ...(push ? { channelId: push.channelId, category: push.category, data: push.data } : {}),
     }, { pcActive }).catch(() => { /* fire-and-forget */ });
   }
 
   return notification;
 }
 
-// 유저당 500건 초과분(오래된 것) 삭제 — 최신 500번째 id 미만을 지운다.
+// prune 대상 where(순수) — 유저의 오래된 초과분에서 **미해소 승인 요청은 제외**한다.
+//  이유: 승인 알림이 지워지면 대기 중인 승인 카드/배너를 회수할 수단(notifId)이 사라지고,
+//   폰에 유령 배너가 남거나 markRead 로 dismiss 를 못 보낸다(설계 R7).
+//  2중 보호:
+//   ① protectedIds — 지금 back 인덱스가 들고 있는 pending 승인의 notifId(정확).
+//   ② NOT(kind='approval_request' AND read_at IS NULL) — back 재시작으로 인덱스가 비어도 살아남는 그물.
+//      (해소된 승인은 markRead 로 read_at 이 찍히므로 정상적으로 정리 대상이 된다.)
+function pruneWhere(userId, edgeId, protectedIds) {
+  const and = [{ id: { [Op.lt]: edgeId } }];
+  if (protectedIds && protectedIds.length) and.push({ id: { [Op.notIn]: protectedIds } });
+  and.push({ [Op.not]: { kind: 'approval_request', read_at: null } });
+  return { user_id: userId, [Op.and]: and };
+}
+
+// 유저당 500건 초과분(오래된 것) 삭제 — 최신 500번째 id 미만을 지운다(미해소 승인은 보호).
 async function pruneOld(userId) {
   const edge = await Notification.findOne({
     where: { user_id: userId },
@@ -140,7 +181,10 @@ async function pruneOld(userId) {
     attributes: ['id'],
   });
   if (!edge) return 0;
-  return Notification.destroy({ where: { user_id: userId, id: { [Op.lt]: edge.id } } });
+  let protectedIds = [];
+  // lazy require — approvalService 가 이 서비스를 쓰므로(생성/읽음) 최상단 require 는 순환.
+  try { protectedIds = require('./approvalService').protectedNotifIds(userId); } catch (_) { /* noop */ }
+  return Notification.destroy({ where: pruneWhere(userId, edge.id, protectedIds) });
 }
 
 // 목록(최신순) + 미읽음 카운트. beforeId 미만 id 로 커서 페이지네이션.
@@ -204,4 +248,6 @@ module.exports = {
   createNotification, list, markRead, markAllRead,
   // 테스트 노출(순수 함수) — 데몬 훅/폴백이 subtitle 을 서버 조합에 맡기는 계약(§3.5)을 회귀로 고정한다.
   _composeSubtitle: composeSubtitle,
+  _computeRoute: computeRoute,   // approvalService 가 에스컬레이션 판정에 같은 규칙을 재사용(드리프트 방지)
+  _pruneWhere: pruneWhere,
 };

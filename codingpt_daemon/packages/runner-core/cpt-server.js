@@ -29,6 +29,12 @@ const UI_TIMEOUT_DEFAULT_MS = 10 * 1000;
 const UI_TIMEOUT_BROWSER_MS = 30 * 1000;
 const UI_TIMEOUT_MAX_MS = 60 * 1000;
 
+// 동시에 블로킹 대기할 수 있는 승인 요청 수 — 승인 1건 = 소켓 커넥션 1개가 수 분간 유지되므로
+//  상한이 없으면 폭주하는 세션이 소켓/파일디스크립터를 통째로 점유한다. 초과분은 즉시 defer
+//  (= 그 터미널에서 TUI 로 답한다) — 어떤 경우에도 자동 허용은 없다.
+const APPROVAL_MAX_INFLIGHT = 8;
+let approvalInflight = 0;
+
 let server = null;
 let controlWs = null;          // back 제어 WS(연결 시 control.js 가 주입) — ui_command 전송로
 const pendingUi = new Map();   // uiId → { resolve, reject, timer }
@@ -219,13 +225,58 @@ function pushStatusChanged(cwdRel) {
   sendUiCommand('status.changed', payload, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 클라이언트 0대 등 — 무시 */ });
 }
 
+// ── 신규 기능 모듈 지연 로드 ──
+//  approvals(기능1)/transcript(기능5)는 이 파일보다 나중에 들어오는 모듈이고, 구버전 번들에는 아예
+//  없을 수 있다. 최상단 require 로 묶으면 파일 하나가 없다는 이유로 데몬 전체가 기동하지 못한다
+//  (터미널·프리뷰까지 죽는다) → 핸들러 안에서만 lazy require 하고, 없으면 null 을 돌려 호출측이
+//  "그 기능만" 폴백하게 한다. agent-state/agent-watch 배선과 같은 규율.
+function lazyMod(name) {
+  try { return require(name); } catch (e) {
+    if (e && e.code === 'MODULE_NOT_FOUND') return null; // 미탑재 = 기능 없음(정상 폴백)
+    console.error(`[cpt] ${name} 로드 실패:`, e.message);  // 문법/런타임 오류는 진단용으로 남긴다
+    return null;
+  }
+}
+
+// 신규 프레임 push 대상 — 서버가 그 능력을 선언했을 때만 실제 제어 WS 를 넘긴다. 미선언(구 back)이거나
+//  연결이 없으면 **null**(스텁 객체가 아니라)을 돌려준다: 호출측 관례가 `if (ws) pushWs = ws` 라서
+//  스텁을 넘기면 이미 붙어 있던 진짜 push 대상을 덮어써 조용히 팬아웃이 끊긴다.
+function capGatedWs(cap) {
+  const control = lazyMod('./control');
+  const okCap = control && typeof control.hasServerCap === 'function' && control.hasServerCap(cap);
+  if (okCap && controlWs && controlWs.readyState === 1) return controlWs;
+  return null;
+}
+
+// 승인 게이트(소켓 계층) — 걸리면 즉시 defer 를 회신한다. defer = 훅이 무출력 exit 0 → claude 가
+//  평소처럼 TUI 다이얼로그를 띄운다(= 기존 동작). 이 함수가 무엇을 돌려주든 allow 가 되는 경로는 없다.
+//  여기서 보는 것은 **이 계층의 자원**뿐이다: 킬스위치(모듈을 아예 안 건드리는 최단 경로)와 동시 커넥션.
+//  기능 게이팅(daemon.json approval.remote · serverCaps approval.v1)은 approvals.gateReason() 단일 출처에
+//  둔다 — 여기서 caps 를 한 번 더 검사하면 그쪽의 로컬 검증 우회(CPT_APPROVAL_CAP_GATE=0)가 무력화된다.
+function approvalGate() {
+  if (process.env.CPT_APPROVAL === '0') return 'killswitch';
+  if (approvalInflight >= APPROVAL_MAX_INFLIGHT) return 'too_many_pending';
+  return null;
+}
+
 // ── 명령 디스패치 ──
-async function dispatch(req) {
+//  conn = 요청을 보낸 소켓 커넥션(있으면). 장기 블로킹 커맨드(approval.request)가 "요청자 소멸"을
+//  감지하는 유일한 수단이다 — 훅 프로세스가 죽으면(Esc/Ctrl-C/세션 kill) 이 소켓이 close 된다.
+async function dispatch(req, conn) {
   const cmd = String(req.cmd || '');
   // 인수(takeover) 지시 — 새 데몬 인스턴스가 기존 인스턴스를 정상 종료시킬 때 사용.
   //  resolveCtx(tmux 조회) 전에 처리해 어떤 상태에서도 응답 가능하게. CAPABILITIES 비공개(내부용).
   if (cmd === 'daemon.shutdown') {
     console.log('[cpt] 인수 지시 수신 — 이 인스턴스를 종료합니다(새 데몬이 대체)');
+    // 대기 중 승인을 먼저 defer 로 종결한다 — 블록된 훅들이 프로세스 종료(=소켓 강제 close)를 기다리지
+    //  않고 즉시 응답을 받아 TUI 로 폴백한다. 카드 회수(retract)는 베스트에포트(back TTL 스위퍼가 수습).
+    try {
+      const approvals = lazyMod('./approvals');
+      if (approvals && typeof approvals.cancelAll === 'function') {
+        const n = approvals.cancelAll('daemon_gone');
+        if (n) console.log(`[cpt] 대기 중 승인 ${n}건 defer 처리(종료)`);
+      }
+    } catch (_) { /* noop */ }
     setTimeout(() => {
       try { fs.unlinkSync(sockPath()); } catch (_) { /* noop */ }
       process.exit(0);
@@ -347,6 +398,58 @@ async function dispatch(req) {
         if (Date.now() - t0 >= timeoutMs) return { timeout: true, state: s };
         await new Promise((r) => setTimeout(r, 1000));
       }
+    }
+
+    // ── 원격 승인(기능1) ──
+    //  approval.request 는 이 소켓의 유일한 장기 블로킹 커맨드다. 구조적으로 가능한 이유:
+    //   ① dispatch 가 async 이고 응답까지 conn 을 유지한다(cpt-server 는 one-shot 이지만 무기한 대기 허용).
+    //   ② 커넥션에 유휴 타임아웃을 걸지 않는다(net 기본값 = 무제한). start() 의 소켓 생성부에
+    //      conn.setTimeout 을 절대 추가하지 말 것 — 넣으면 승인 대기가 그 시점에 끊겨 defer 로 떨어진다.
+    //  실패 규율: 어떤 오류 경로에서도 { decision:'defer' } 를 회신한다(throw 하지 않는다).
+    //   훅은 ok:false 도 defer 로 취급하지만, 여기서 명시적으로 돌려주면 이유(reason)가 로그에 남는다.
+    case 'approval.request': {
+      const gate = approvalGate();
+      if (gate) return { decision: 'defer', reason: gate };
+      const approvals = lazyMod('./approvals');
+      if (!approvals || typeof approvals.request !== 'function') return { decision: 'defer', reason: 'approvals_unavailable' };
+      approvalInflight++;
+      try {
+        const r = await approvals.request({
+          ...args,
+          // ctx 에서 확정한 좌표 — 알림/읽음 스코프의 기존 계약(cwd=cwdRel, win=tid)과 동일 값이어야 한다.
+          cwdRel: resolved.cwdRel,
+          tid: resolved.windowIndex,
+          wsName: resolved.cwdRel ? path.basename(resolved.cwdRel) : '',
+          tmuxSession: resolved.windowIndex != null ? ptyLib.termSession(session, resolved.windowIndex) : null,
+        }, resolved, conn);
+        return r && r.decision ? r : { decision: 'defer', reason: 'no_decision' };
+      } catch (e) {
+        console.error('[cpt] 승인 요청 실패(defer 로 폴백):', (e && e.message) || e);
+        return { decision: 'defer', reason: 'error' };
+      } finally {
+        approvalInflight--;
+      }
+    }
+    // 대기 중 승인 목록(조회 전용) — `cpt approval list` / 진단. 데몬이 정본이다.
+    case 'approval.list': {
+      const approvals = lazyMod('./approvals');
+      if (!approvals || typeof approvals.handle !== 'function') return { approvals: [], supported: false };
+      return approvals.handle('approval.list', {});
+    }
+    // 로컬 응답(기본 비활성) — 승인 결정은 back 경유(control WS rpc approval.resolve)가 정본이다.
+    //  ⚠ 이 소켓은 터미널 안의 AI 도 부를 수 있다 → 상시 노출하면 에이전트가 자기 승인 요청을 스스로
+    //   허용할 수 있고, 그건 기능1 의 존재 이유(사람이 결정)를 통째로 무력화한다. HOME 격리 하네스
+    //   검증용으로만 CPT_APPROVAL_LOCAL=1 에서 열린다. CAPABILITIES 에도 노출하지 않는다.
+    case 'approval.respond': {
+      if (process.env.CPT_APPROVAL_LOCAL !== '1') throw new Error('로컬 승인 응답은 비활성입니다(CPT_APPROVAL_LOCAL=1 필요) — 앱/PC 에서 응답하세요.');
+      const approvals = lazyMod('./approvals');
+      if (!approvals || typeof approvals.handle !== 'function') throw new Error('승인 모듈이 없습니다(구 데몬)');
+      return approvals.handle('approval.resolve', {
+        id: args.id,
+        decision: args.decision,
+        message: args.message || null,
+        by: { kind: 'local', deviceName: 'this PC (cpt)', deviceId: null },
+      });
     }
 
     // ── 워크스페이스 ──
@@ -533,6 +636,27 @@ async function dispatch(req) {
         const target = await resolveTargetDevice(args.on);
         return sendUiCommand(cmd, { ...args, ws: resolved.cwdRel }, { mode: 'target', target, timeoutMs: args.timeoutMs });
       }
+      // 트랜스크립트(기능5) — chat.* 는 전부 transcript 모듈로 통째 위임한다(메서드별 case 를 두지 않는다:
+      //  계약이 그쪽 정본이고, 여기서 필드를 재조립하면 스키마 드리프트가 두 파일로 갈라진다).
+      //  좌표(cwd/tid)는 CLI 가 보내지 않으므로 ctx 에서 채운 뒤 args 로 덮어쓴다(명시 인자 우선).
+      // chat.input 은 **읽기가 아니라 입력**이므로 transcript(읽기 전용 모듈)로 넘기지 않고 여기서 처리한다.
+      //  채팅 모드는 별도 에이전트 세션을 만들지 않는다 — 지금 그 터미널에서 돌고 있는 claude 에게
+      //  사람이 직접 타이핑한 것과 똑같이 들어가야 "같은 대화"가 유지된다(PTY 하네스).
+      //  멀티라인은 bracketed paste 로 감싼다: 생 개행을 그대로 보내면 TUI 가 첫 줄에서 즉시 제출한다.
+      //  Enter 는 별도 send-keys 로 지연 전송(붙여넣기 처리 완료 후 제출).
+      if (cmd === 'chat.input') {
+        return chatInput({ cwd: resolved.cwdRel, tid: targetWin(args, resolved), text: args.text, submit: args.submit });
+      }
+      if (cmd.startsWith('chat.')) {
+        const transcript = lazyMod('./transcript');
+        if (!transcript || typeof transcript.handle !== 'function') {
+          throw new Error('트랜스크립트 모듈이 없습니다(구 데몬) — chat.* 미지원');
+        }
+        const params = { cwd: resolved.cwdRel, tid: resolved.windowIndex, ...args };
+        // push 대상은 back 제어 WS. 서버가 transcript.v1 을 선언하지 않으면 프레임이 조용히 유실되므로
+        //  아예 넘기지 않는다(구독 없이 조회만 동작 = pull 폴백). RPC 응답 자체는 그대로 회신된다.
+        return transcript.handle(cmd, params, capGatedWs('transcript.v1'));
+      }
       // 훅(기능3): 상태의 단일 소유자 agent-state 로 위임한다. 전이 판정·알림 발사·중복 억제가
       //  전부 그쪽에 있으므로 여기서 알림을 직접 만들지 않는다.
       //  ⚠ 구 구현(event==='notification' ? permission_request : done)을 남겨두면 훅 7종 × 알림 1건 =
@@ -554,6 +678,29 @@ async function dispatch(req) {
         });
         // 턴 종료(done/error) → 진행률 제거. 판정은 agent-state 가 한다.
         if (r.clearedProgress) { const m = metaFor(resolved.cwdRel); m.progress = null; pushStatusChanged(resolved.cwdRel); }
+        // 세션↔터미널 바인딩(기능5 P0) — 훅만이 (sessionId, transcriptPath, tid) 를 결정론적으로 준다.
+        //  ⚠ 알림/상태(위 applyHook)보다 뒤에서, 그리고 절대 실패하지 않게(try/catch + await 없음) 한다:
+        //   훅은 claude 를 블록하는 경로이고 이 바인딩은 부가정보이므로, 여기서 예외나 지연이 새면
+        //   훅 전체가 느려지거나 상태 보고가 유실된다.
+        try {
+          const transcript = lazyMod('./transcript');
+          if (transcript && typeof transcript.noteHook === 'function') {
+            // transcriptPath 는 훅 페이로드(외부 입력)다 — jail(`~/.claude/projects/**.jsonl`) 검증을
+            //  통과한 값만 넘긴다. 검증기는 transcript.safeTranscriptPath 단일 출처를 쓴다(여기서 정규식을
+            //  복제하면 둘이 갈라지고, 느슨한 쪽이 `~/.claude/.credentials.json` 을 읽히게 만든다 = ToS 경계).
+            let tp = null;
+            try { tp = typeof transcript.safeTranscriptPath === 'function' ? transcript.safeTranscriptPath(args.transcriptPath) : null; } catch (_) { tp = null; }
+            const p = transcript.noteHook({
+              event: args.event || null,
+              sessionId: args.sessionId || null,
+              transcriptPath: tp,
+              cwd: args.agentCwd || null,   // 에이전트의 절대 cwd — path 미검증 시 파일명 추정 폴백에 쓰인다
+              cwdRel: resolved.cwdRel,
+              tid: resolved.windowIndex,
+            });
+            if (p && typeof p.then === 'function') p.catch(() => { /* 바인딩 실패는 무해(폴백=슬러그 스캔) */ });
+          }
+        } catch (_) { /* noop */ }
         return { ok: true, state: r.state, version: r.version };
       }
       // 에이전트 상태 조회 — 훅/폴백이 만든 현재 상태 스냅샷(터미널별).
@@ -632,6 +779,38 @@ function hooksDoctor(resolved) {
   };
 }
 
+// 채팅 모드 입력 — 지금 그 터미널에서 돌고 있는 claude 에게 사람이 직접 타이핑한 것과 동일하게 넣는다.
+//  별도 에이전트 세션을 만들지 않는 것이 핵심이다: 그래야 TUI 와 채팅이 "같은 대화"로 유지된다(PTY 하네스).
+//  transcript(읽기 전용 모듈)가 아니라 여기 있는 이유 = tmux/pty 관심사이기 때문. 로컬 소켓(dispatch)과
+//  back rpc(control.js) 두 경로가 같은 구현을 쓰도록 독립 함수로 둔다.
+//  ⚠ 멀티라인은 bracketed paste 로 감싼다 — 생 개행을 그대로 보내면 TUI 가 첫 줄에서 즉시 제출한다.
+async function chatInput({ cwd, tid, text, submit } = {}) {
+  const body = typeof text === 'string' ? text : '';
+  if (!body) throw Object.assign(new Error('보낼 텍스트가 필요합니다'), { code: 'BAD_REQUEST' });
+  if (Buffer.byteLength(body, 'utf8') > 32 * 1024) {
+    throw Object.assign(new Error('텍스트가 너무 깁니다(32KB 상한)'), { code: 'TOO_LARGE' });
+  }
+  const cwdRel = typeof cwd === 'string' ? cwd : '';
+  const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
+  if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
+  const { session, abs } = ptyLib.sessionForCwd(cwdRel);
+  await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
+  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const multiline = /\n/.test(body);
+  if (multiline) {
+    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', `[200~${body}[201~`]);
+  } else {
+    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', body]);
+  }
+  const doSubmit = submit !== false;
+  if (doSubmit) {
+    // 붙여넣기 직후 즉시 Enter 를 보내면 TUI 가 버퍼를 정리하기 전이라 일부만 제출되는 경우가 있다.
+    await new Promise((r) => setTimeout(r, multiline ? 120 : 30));
+    await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+  }
+  return { ok: true, index: win, submitted: doSubmit, multiline };
+}
+
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
 function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
@@ -649,6 +828,13 @@ const CAPABILITIES = [
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
+  // 조회 전용(사람/AI 노출 안전) — 승인 대기 목록 + 트랜스크립트 읽기.
+  'approval.list',
+  'chat.sessions', 'chat.open', 'chat.since', 'chat.close', 'chat.detail', 'chat.attachment',
+  // ⚠ 아래는 의도적으로 비공개다(daemon.shutdown/forward.start 선례):
+  //  · approval.request — 훅 전용 내부 커맨드(사람이 부를 것이 아니고, 부르면 그 터미널이 블록된다)
+  //  · approval.respond — 터미널의 AI 가 자기 승인을 스스로 허용하는 경로가 된다(CPT_APPROVAL_LOCAL 게이트)
+  //  · chat.input — AI 가 자기/타 세션에 프롬프트를 주입하는 자기루프 경로(응답은 back RPC 로만)
 ];
 
 // 소켓에 의존하지 않는 단일 인스턴스 백스톱 — 시작 시 같은 머신의 "다른" 데몬 프로세스를 전부 정리.
@@ -723,23 +909,28 @@ function start() {
   try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
   server = net.createServer((conn) => {
     let buf = '';
+    let handled = false; // 한 커넥션 = 한 요청(one-shot). 블로킹 대기 중 도착한 추가 데이터는 무시한다.
+    // ⚠ conn.setTimeout 을 걸지 말 것 — 원격 승인(approval.request)은 이 커넥션을 수 분간 유지한다.
+    //  유휴 종료를 넣으면 사용자가 폰에서 답하기 전에 대기가 끊겨 매번 TUI 로 폴백한다.
     conn.on('data', async (d) => {
       buf += d.toString();
       if (buf.length > MAX_REQ_BYTES) { try { conn.end(); } catch (_) { /* noop */ } return; }
       const i = buf.indexOf('\n');
-      if (i < 0) return;
+      if (i < 0 || handled) return;
+      handled = true;
       let req;
       try { req = JSON.parse(buf.slice(0, i)); } catch (_) { try { conn.end(); } catch (_) { /* noop */ } return; }
       const id = req && req.id;
       try {
-        const result = await dispatch(req);
+        // conn 을 넘긴다 — 장기 대기 커맨드가 "요청자가 사라짐"(훅 프로세스 종료)을 감지해 즉시 정리한다.
+        const result = await dispatch(req, conn);
         conn.write(JSON.stringify({ id, ok: true, result }) + '\n');
       } catch (e) {
         conn.write(JSON.stringify({ id, ok: false, error: (e && e.message) || String(e), code: (e && e.code) || undefined }) + '\n');
       }
       try { conn.end(); } catch (_) { /* one-shot */ }
     });
-    conn.on('error', () => { /* noop */ });
+    conn.on('error', () => { /* noop — 대기 중 상대가 죽으면 EPIPE. close 로 처리된다 */ });
   });
   server.on('error', (e) => {
     // 스테일 소켓 자가치유 — 다른(살아있는) 데몬이 물고 있으면 접속이 되고, 죽은 잔재면 실패한다.
@@ -762,5 +953,6 @@ function start() {
 
 module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
+  chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
 };
