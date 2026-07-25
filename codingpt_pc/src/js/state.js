@@ -11,6 +11,9 @@ export const state = {
   activeWsId: null,
   ws: {}, // wsId -> { layout, focusId, surfaces:[{index,active,command}], branch:{}, ports:[] }
   notifications: [], // [{id, wsId, paneId, title, body, ts, read}]
+  // 원격 승인 인박스(기능1) — 대기 중 승인 카드. 정본은 데몬, back 은 인덱스, 우리는 미러다.
+  //  push(approval_event)는 힌트고 pull(GET /api/daemon/approvals)이 정본 — 부팅/재접속마다 재조회.
+  approvals: [], // [{id, tool, kind, summary, prompt, relPath, cwd, wsName, win, deadlineAt, …, _busy?, _err?}]
   view: "workspace", // 'workspace' | 'settings'
   sidebarCollapsed: false,
   creatingWs: false,
@@ -455,6 +458,108 @@ export function unreadForWs(w) {
   return state.notifications.filter(
     (n) => !n.read && (n.workspaceId === w.id || n.wsId === w.id || (n.cwd && n.cwd === w.localPath))
   ).length;
+}
+
+// ── 원격 승인 인박스(기능1) ──
+// 캐치업 = REST 재조회(부팅·WS 재접속·창 재포커스). 실패해도 앱을 막지 않는다(카드만 안 보임).
+export async function loadApprovals() {
+  try {
+    const data = await api.approvalList();
+    const rows = (data && (data.approvals || data.data?.approvals)) || [];
+    // 로컬 진행 상태(_busy/_err)는 재조회로 날리지 않는다 — 버튼 누른 직후 목록이 갱신되면
+    //  스피너가 사라져 사용자가 두 번 누르게 된다.
+    const prev = new Map(state.approvals.map((a) => [a.id, a]));
+    state.approvals = rows
+      .filter((a) => a && a.id)
+      .map((a) => ({ ...a, _busy: prev.get(a.id)?._busy || false, _err: prev.get(a.id)?._err || null }));
+    emit();
+  } catch (_) { /* 미페어링/오프라인 — 기존 목록 유지 */ }
+}
+
+// WS 이벤트 반영 — kind:'pending'(신규/멱등 재광고) | 'resolved'(해소 → 전 기기에서 카드 회수).
+//  구 서버가 kind:'new'/'canceled' 를 보낼 수 있으므로 둘 다 수용한다(하위호환).
+export function applyApprovalEvent(ev) {
+  if (!ev) return;
+  const kind = ev.kind === "new" ? "pending" : ev.kind === "canceled" ? "resolved" : ev.kind;
+  if (kind === "pending" && ev.approval && ev.approval.id) {
+    const a = ev.approval;
+    const i = state.approvals.findIndex((x) => x.id === a.id);
+    if (i >= 0) state.approvals[i] = { ...state.approvals[i], ...a }; // 멱등 재광고 = 마감만 갱신
+    else state.approvals.push({ ...a, _busy: false, _err: null });
+    // OS 알림은 **여기서 보내지 않는다**. 승인은 서버가 notification 행(kind='approval_request')을
+    //  같이 만들고, 그 notif_event 가 기존 경로(applyNotifEvent → maybeOsNotify)로 이미 울린다.
+    //  여기서 또 부르면 같은 승인에 배너가 2번 뜬다(기존 알림 3케이스 규약 무간섭 원칙).
+    //  단 알림 행 생성이 실패한 경우(notifId 없음)만 폴백으로 직접 울린다.
+    if (a.notifId == null) {
+      maybeOsNotify(
+        { title: `승인 필요 — ${a.agent === "claude" ? "Claude Code" : a.agent || "에이전트"}`,
+          body: `${a.tool || "Tool"}${a.relPath || a.summary ? " · " + String(a.relPath || a.summary).slice(0, 80) : ""}`,
+          read: false },
+        ev.alertClientKey == null ? true : ev.alertClientKey === deviceKey()
+      );
+    }
+    emit();
+    return;
+  }
+  if (kind === "resolved" && ev.id) {
+    const before = state.approvals.length;
+    state.approvals = state.approvals.filter((x) => x.id !== ev.id);
+    if (state.approvals.length !== before) emit();
+  }
+}
+
+// 카드 응답 — 실패 코드별로 UI 가 분기한다(카드 철수 vs 재시도 가능).
+//  Rust back_api 가 `HTTP <status> <DETAIL_CODE>: <메시지>` 로 코드를 실어 준다.
+export async function respondApproval(id, body) {
+  const a = state.approvals.find((x) => x.id === id);
+  if (!a || a._busy) return { ok: false, code: "BUSY" };
+  a._busy = true;
+  a._err = null;
+  emit();
+  try {
+    await api.approvalRespond(id, { ...body, deviceName: state.daemon?.device_name || "PC" });
+    // 성공 — resolved 팬아웃이 곧 오지만, WS 가 끊겨 있어도 카드가 남지 않게 즉시 철수한다.
+    state.approvals = state.approvals.filter((x) => x.id !== id);
+    emit();
+    return { ok: true };
+  } catch (e) {
+    const msg = String(e || "");
+    const code = /HTTP \d+ ([A-Z_]+)/.exec(msg)?.[1] || "";
+    if (code === "ALREADY_RESOLVED" || code === "EXPIRED" || code === "NOT_FOUND") {
+      // 다른 기기 또는 PC 터미널(TUI 다이얼로그)이 먼저 답했다 / 마감됐다 → 카드 즉시 철수.
+      state.approvals = state.approvals.filter((x) => x.id !== id);
+      emit();
+      return { ok: false, code };
+    }
+    a._busy = false;
+    a._err = code === "HOST_OFFLINE" ? "PC 가 연결돼 있지 않습니다" : msg.replace(/^HTTP \d+( [A-Z_]+)?: ?/, "") || "응답 실패";
+    emit();
+    return { ok: false, code: code || "FAILED" };
+  }
+}
+
+// 사용자가 카드를 직접 닫음(마감된 카드의 "확인") — 서버에는 아무것도 보내지 않는다.
+//  마감 = 데몬이 이미 defer 해서 TUI 다이얼로그로 넘어간 상태이므로 여기서 응답을 보내면 안 된다.
+export function dismissApproval(id) {
+  const before = state.approvals.length;
+  state.approvals = state.approvals.filter((x) => x.id !== id);
+  if (state.approvals.length !== before) emit();
+}
+
+// ── 에이전트 상태(기능3) — `${cwd}|${win}` 키. 데몬 push(agent_state)가 오면 채워진다 ──
+//  아직 데몬/back 이 이 이벤트를 내보내지 않으므로(caps 'agentstate.v1' 미선언) 지금은 비어 있고,
+//  토글 노출 판정은 tab.cmd 폴백으로 동작한다. 배관만 먼저 둔다(하위호환·무해).
+export const agentStates = new Map();
+export function setAgentState(ev) {
+  if (!ev || !ev.cwd || ev.win == null) return;
+  const key = `${ev.cwd}|${ev.win}`;
+  if (ev.state === "gone") agentStates.delete(key);
+  else agentStates.set(key, { agent: ev.agent || "claude", state: ev.state || "idle", sessionId: ev.sessionId || null, at: Number(ev.at) || Date.now() });
+  emit();
+}
+export function agentStateOf(cwd, win) {
+  if (!cwd || win == null) return null;
+  return agentStates.get(`${cwd}|${win}`) || null;
 }
 
 // ── 원격 상태 스트림(ui_command status.changed) — cwd(홈-상대 localPath) 키 ──

@@ -772,15 +772,32 @@ pub fn back_api(
             .into_json::<serde_json::Value>()
             .map_err(|e| format!("응답 파싱 실패: {e}")),
         Err(ureq::Error::Status(code, r)) => {
-            let msg = r
-                .into_json::<serde_json::Value>()
-                .ok()
+            // back 의 errorResponse 는 분기용 구조화 코드를 `detail.code` 에 싣는다(utils/response.js).
+            //  승인 409 는 ALREADY_RESOLVED / HOST_OFFLINE 두 의미가 같은 상태코드로 오므로,
+            //  **한글 메시지 정규식으로 추측하면 문구가 바뀌는 순간 조용히 오분기**한다(approvalService.js
+            //  :370 주석과 같은 함정). 그래서 코드가 있으면 문자열에 실어 JS 가 코드로 분기하게 한다.
+            //  형식: `HTTP 409 ALREADY_RESOLVED: 이미 …` / 코드 없으면 기존 형식 그대로(하위호환).
+            let body = r.into_json::<serde_json::Value>().ok();
+            let msg = body
+                .as_ref()
                 .and_then(|v| v.get("message").and_then(|m| m.as_str().map(String::from)))
                 .unwrap_or_default();
-            if msg.is_empty() {
-                Err(format!("HTTP {code}"))
+            let detail_code = body
+                .as_ref()
+                .and_then(|v| v.get("detail"))
+                .and_then(|d| d.get("code"))
+                .and_then(|c| c.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let head = if detail_code.is_empty() {
+                format!("HTTP {code}")
             } else {
-                Err(format!("HTTP {code}: {msg}"))
+                format!("HTTP {code} {detail_code}")
+            };
+            if msg.is_empty() {
+                Err(head)
+            } else {
+                Err(format!("{head}: {msg}"))
             }
         }
         Err(e) => Err(format!("요청 실패: {e}")),

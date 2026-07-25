@@ -193,17 +193,40 @@ function fanout(userId, event) {
 }
 
 // 푸시 표시/액션 힌트 — Android 는 혼합(notification+data), iOS 는 aps.category + data 액션 식별자.
+//  ⚠ 승인은 두 종류이고 필요한 액션이 다르다:
+//   · permission(Bash/Write…) → [허용]/[거절]
+//   · choice(AskUserQuestion/ExitPlanMode) → 고른 **라벨**을 되돌려야 한다. 허용/거절로는 답이 안 된다.
+//  그래서 종류를 푸시 메타에 실어 네이티브가 분기할 수 있게 한다:
+//   · Android: data.approvalKind + data.options(라벨 JSON) → 라벨 버튼 또는 [답하기] 폴백
+//   · iOS: 카테고리 자체를 종류별로 분리(등록된 카테고리만 버튼이 뜨고, 미등록이면 버튼 없는 배너 = 안전 폴백)
+//  이걸 안 실으면 네이티브의 선택형 처리 코드가 영원히 도달하지 않고, 선택형에도 [허용]/[거절]이 붙어
+//  사용자가 고른 라벨이 유실된다.
 function buildPush(rec) {
   const a = rec.approval;
+  const kind = (a.prompt && a.prompt.kind) || a.kind || 'permission';
+  const choice = kind === 'choice';
+  // 첫 질문의 라벨만 싣는다(푸시 payload 는 4KB 상한이고, 카드 UI 도 첫 질문만 그린다).
+  const q = choice && a.prompt && Array.isArray(a.prompt.questions) ? a.prompt.questions[0] : null;
+  const labels = q && Array.isArray(q.options)
+    ? q.options.map((o) => String((o && o.label) || '')).filter(Boolean).slice(0, 4)
+    : [];
+  const data = {
+    approvalId: a.id,
+    approvalKind: kind,
+    deadlineAt: String(a.deadlineAt),
+    tool: a.tool,
+    actions: choice ? 'CPT_ANSWER' : 'CPT_ALLOW,CPT_DENY',
+  };
+  if (labels.length) {
+    try { data.options = JSON.stringify(labels); } catch (_) { /* 직렬화 실패 시 라벨 없이 = [답하기] 폴백 */ }
+  }
+  if (q && q.multiSelect) data.multiSelect = '1';
   return {
     channelId: ANDROID_CHANNEL,
-    category: 'CPT_APPROVAL',
-    data: {
-      approvalId: a.id,
-      deadlineAt: String(a.deadlineAt),
-      tool: a.tool,
-      actions: 'CPT_ALLOW,CPT_DENY', // 알림 액션 버튼 식별자(2단계 네이티브에서 사용)
-    },
+    // iOS 는 등록된 카테고리만 액션을 표시한다. 선택형은 승인별 카테고리(옵션 라벨이 요청마다 다르므로)로,
+    //  권한형은 고정 카테고리로 보낸다.
+    category: choice ? `CPT_CHOICE_${a.id}` : 'CPT_APPROVAL',
+    data,
   };
 }
 

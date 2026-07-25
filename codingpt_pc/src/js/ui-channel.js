@@ -13,6 +13,7 @@ import { toggleChiiDevtools, dtActive } from "./devtools.js";
 import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
 import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
+import { applyChatEvent } from "./chat-view.js";
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
 async function onAccountDeleted() {
@@ -113,13 +114,18 @@ async function connect() {
   ws.onopen = () => {
     retryMs = 3000;
     // 이 클라이언트 식별(원격 조작 executor 선정 + 기기 타겟팅) — 기기 키 + 페어링된 기기 id/이름.
+    //  caps = "이 화면이 실제로 그릴 수 있는 신규 기능"(capability 협상, config/caps.js). 서버는
+    //  이 교집합으로 "승인 카드를 그릴 화면이 있는가"(countResponders)를 판단한다. 우리가 정말
+    //  구현한 것만 신고한다 — 미구현을 선언하면 데몬이 기능을 켜고 응답할 화면이 없어 대기만 한다.
     send(ws, {
       type: "ui_hello", clientKey: S.deviceKey(), kind: "pc",
       deviceId: state.daemon?.deviceId ?? undefined,
       deviceName: state.daemon?.device_name || undefined, // daemon_status Status 는 device_name(snake) 로 노출
+      caps: ["caps.v1", "approval.v1", "transcript.v1"],
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
+    S.loadApprovals();     // 승인은 push 가 힌트, pull 이 정본 — 재접속마다 재조회(유령/누락 방지)
   };
   ws.onmessage = (e) => {
     let msg = null;
@@ -132,6 +138,18 @@ async function connect() {
     switch (msg.type) {
       case "notif_event":
         if (msg.event) S.applyNotifEvent(msg.event);
+        break;
+      case "approval_event":
+        // 원격 승인 인박스(기능1) — pending/resolved. 라이브 전용(버퍼 없음)이라 놓친 건 pull 이 메운다.
+        if (msg.event) S.applyApprovalEvent(msg.event);
+        break;
+      case "chat_event":
+        // 트랜스크립트(기능5) 라이브 델타 — 해당 chatId 를 구독 중인 Chat 뷰에만 배달.
+        applyChatEvent(msg);
+        break;
+      case "agent_state":
+        // 기능3(에이전트 상태머신) push — 아직 서버가 보내지 않지만 오면 토글 판정 1순위가 된다.
+        S.setAgentState(msg.event || msg);
         break;
       case "ui_command":
         handleUiCommand(ws, msg);
@@ -185,7 +203,14 @@ let _nativeFocused = true;
 let _nativeFocusWired = false;
 function wireNativeFocus() {
   if (_nativeFocusWired) return;
-  const setF = (v) => { _nativeFocused = !!v; sendPresence(); };
+  const setF = (v) => {
+    const was = _nativeFocused;
+    _nativeFocused = !!v;
+    sendPresence();
+    // 창을 다시 최전면으로 가져온 순간 = 사용자가 카드를 보러 온 순간. 대기 승인을 재조회한다
+    //  (WS 가 끊겨 있던 사이 생긴 카드/이미 해소된 유령 카드를 pull 정본으로 바로잡는다).
+    if (!was && _nativeFocused) S.loadApprovals();
+  };
   let wired = false;
   // 0) Rust WindowEvent::Focused → "cpt-focus"(가장 신뢰: NSWindow key 상태, event API 는 앱에서 검증됨)
   try {

@@ -3,6 +3,16 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
+// GET 쿼리 조립 — null/undefined/'' 는 생략(back 이 기본값을 쓰게).
+function qs(obj) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v == null || v === "") continue;
+    p.set(k, String(v));
+  }
+  return p.toString();
+}
+
 export const api = {
   // ── 데몬 상태/페어링(기존 유지, 설정→연결에서 사용) ──
   daemonStatus: () => invoke("daemon_status"),
@@ -154,6 +164,33 @@ export const api = {
   //  결과 { ok:true } | { ok:false, error:'EADDRINUSE'… } (실패는 프록시 폴백 신호).
   forwardStart: (port, token) => invoke("forward_start", { port, token }),
   forwardStop: (port) => invoke("forward_stop", { port }),
+
+  // ── 원격 승인 인박스(기능1) — back REST. 새 배관 없음: back_api(/api/daemon/*) 를 그대로 쓴다 ──
+  //  · GET  /approvals            대기 목록(push 는 힌트, pull 이 정본 — 부팅/재접속마다 재조회)
+  //  · POST /approvals/:id/respond { decision:'allow'|'deny'|'answer', answer?, message? }
+  //  실패 문자열은 Rust back_api 가 `HTTP <code> <CODE>: <메시지>` 로 만들어 준다(detail.code 보존).
+  approvalList: () => invoke("back_api", { method: "GET", path: "/api/daemon/approvals", body: null, timeoutSecs: 12 }),
+  approvalRespond: (id, body) =>
+    invoke("back_api", {
+      method: "POST",
+      path: `/api/daemon/approvals/${encodeURIComponent(id)}/respond`,
+      body: body || {},
+      timeoutSecs: 20,
+    }),
+
+  // ── 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더 RPC 의 back 프록시 ──
+  //  hostDeviceId 를 실으면 그 PC 로 라우팅(멀티 PC). 미지정이면 활성 러너.
+  //  라이브 델타는 여기가 아니라 ui-channel WS 의 chat_event(팬아웃) 로 온다. 캐치업은 chatSince pull.
+  chatOpen: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/open", body: body || {}, timeoutSecs: 30 }),
+  chatSince: (q) =>
+    invoke("back_api", { method: "GET", path: "/api/daemon/chat/since?" + qs(q), body: null, timeoutSecs: 25 }),
+  chatClose: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/close", body: body || {}, timeoutSecs: 10 }),
+  chatDetail: (q) =>
+    invoke("back_api", { method: "GET", path: "/api/daemon/chat/detail?" + qs(q), body: null, timeoutSecs: 20 }),
+  chatAttachment: (q) =>
+    invoke("back_api", { method: "GET", path: "/api/daemon/chat/attachment?" + qs(q), body: null, timeoutSecs: 25 }),
+  // 채팅 전송 — 데몬이 그 터미널 세션에 bracketed paste + (지연) Enter 로 넣는다(새 세션/attach 금지).
+  chatInput: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/input", body: body || {}, timeoutSecs: 20 }),
 
   // ── 작업 스냅샷(자동 체크포인트) — back sync 채널(데몬 오프라인이면 409) ──
   //  background: HTTP 는 즉시 accepted 응답(대형 번들은 분 단위 — 동기 대기는 CF 524).

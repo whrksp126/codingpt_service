@@ -107,6 +107,11 @@ function paneCtx(ws) {
     paneDropZone: (x, y) => paneDropZone(x, y),
     onFileSplit: (filePath, srcPaneId, targetPaneId, zone) => openFileInPane(filePath, srcPaneId, targetPaneId, zone),
     claimPoolWin: () => claimPoolWin(ws),
+    // Chat 모드 토글 노출 판정(기능3 push 미러) — pane.js 가 state.js 를 직접 import 하면 순환이라
+    //  여기서 주입한다. 아직 데몬이 agent_state 를 안 보내면 항상 null → tab.cmd 폴백이 판정한다.
+    agentStateOf: (cwd, win) => S.agentStateOf(cwd, win),
+    // Chat 의 tool 카드 "열기" → IDE 탭/분할(활성 pane 기준 자동 배치).
+    onOpenIde: (relPath) => { if (relPath) smartAdd("ide", { openPath: relPath }); },
     persist: () => S.emit(),
   };
 }
@@ -628,6 +633,9 @@ export function updateWorkspaceView() {
   }
 
   for (const [id, p] of panes) p.el.classList.toggle("focused", id === rt.focusId);
+  // 모드 토글 갱신 — 리컨실러가 tab.cmd 를 채우거나(claude 실행/종료) 기능3 push 가 오면 emit 이
+  //  오므로, 여기서 매번 동기화하면 "claude 를 띄운 탭에만 토글" 이 자동으로 맞는다.
+  for (const [, p] of panes) p._syncModeToggle?.();
   updateUnreadRings(ws);
   measureRects();
 }

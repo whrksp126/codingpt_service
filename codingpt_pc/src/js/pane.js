@@ -11,6 +11,10 @@ import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
+import { ChatView } from "./chat-view.js";
+import { AGENT_CMD_RE, CHAT } from "./chat-model.js";
+// ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
+//  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
@@ -639,7 +643,10 @@ export class PaneView {
         const label = isT
           ? termTabLabel(t)
           : t.kind === "ide" ? "IDE" : (t.metaTitle || "프리뷰");
-        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>`;
+        // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
+        //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
+        const modeGlyph = isT && t.mode === "chat" ? `<span class="ptab-mode">${icons.chat({ size: 11 })}</span>` : "";
+        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`;
         const x = document.createElement("span");
         x.className = "ptab-x";
         x.innerHTML = icons.x({ size: 11 });
@@ -746,6 +753,90 @@ export class PaneView {
     });
     this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
     if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
+    this._buildChat();
+  }
+
+  // ── Chat 모드 본문(터미널 탭의 하위 모드 — 새 pane kind 가 아니다) ──
+  //  호스트만 미리 만들고 ChatView 는 첫 진입 때 lazy 생성한다(에이전트를 안 쓰는 pane 에 비용 0).
+  //  ★ 터미널 레이어는 언마운트하지 않는다 — display:none 으로 가리기만(혼합 탭과 동일 경로).
+  //    언마운트하면 스트림이 끊기고 재연결 카운터가 소진돼 복귀 시 수 초 공백 + 고아 터미널이 생긴다.
+  _buildChat() {
+    this.chatHost = document.createElement("div");
+    this.chatHost.className = "pane-chat";
+    this.chatHost.style.display = "none";
+    this.body.appendChild(this.chatHost);
+  }
+
+  // 활성 탭이 "에이전트가 붙은 터미널 탭"인가 — 토글 노출 판정(설계서 §2.3 우선순위).
+  //  1) 기능3 push(agent_state) — 즉시성 <1s. 아직 서버/데몬이 안 보내면 비어 있다.
+  //  2) 폴백: tab.cmd(리컨실러가 7s 주기로 채우는 pane_current_command).
+  //  3) 폴백2: cmd 가 node 인데 이 탭에서 chat 모드가 살아 있던 적 있음(agent-watch 의 node 규칙 미러).
+  _agentOn(tab) {
+    if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return false;
+    const st = this.ctx.agentStateOf?.(this.ctx.localPath || "", tab.win);
+    if (st) return st.state !== "gone";
+    const cmd = String(tab.cmd || "");
+    if (AGENT_CMD_RE.test(cmd)) return true;
+    if (cmd === "node" && tab.mode === "chat") return true;
+    return false;
+  }
+  // 지금 이 pane 이 Chat 모드를 그리고 있는가(리사이즈/크기주장 억제 판정의 단일 기준).
+  //  ⚠ 판정은 **표시 조건(showActiveTab 의 chat)과 정확히 같아야 한다.** 여기에 _agentOn 을 AND 로 걸면
+  //  claude 가 종료된 뒤에도 화면은 Chat 인데 억제 가드만 풀려, 창/분할 리사이즈 시 display:none 인 xterm 의
+  //  스테일 cols/rows 로 ptyResize 를 보내고(_fitNow) 크기 주장(_claimSize)까지 되살아난다 —
+  //  다른 기기가 쓰는 tmux 창 크기를 뺏는 과거 사고(12R·17R) 계열의 재발 경로다.
+  _chatActive() {
+    const tab = this.node.tabs?.[this.node.active];
+    return !!(tab && isTermTab(tab) && tab.mode === "chat");
+  }
+
+  // 본문 우측 상단 고정 토글(TUI ↔ Chat). `.pane-body` 기준 절대배치 — xterm/웹뷰 내부 DOM 이 아니라
+  //  상위 레이어여야 한다(터미널 HTML 재조립 = 스트림 재마운트 = 치명적).
+  _syncModeToggle() {
+    if (this.node.kind !== "terminal" || !this.body) return;
+    const tab = this.node.tabs?.[this.node.active];
+    const chat = !!(tab && isTermTab(tab) && tab.mode === "chat");
+    // 혼합 탭(IDE/프리뷰)이 활성이면 숨김. 에이전트가 없으면 숨김. 단 이미 chat 모드면 계속 표시
+    //  (에이전트가 종료돼도 대화 기록을 계속 읽을 수 있어야 하고, 돌아갈 길이 있어야 한다).
+    const on = !!tab && isTermTab(tab) && (this._agentOn(tab) || chat);
+    if (!on) {
+      this._modeBtn?.remove();
+      this._modeBtn = null;
+      return;
+    }
+    if (!this._modeBtn) {
+      const b = document.createElement("button");
+      b.className = "pane-mode-toggle";
+      b.type = "button";
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const t = this.node.tabs?.[this.node.active];
+        if (!t || !isTermTab(t)) return;
+        this.setMode(t, t.mode === "chat" ? "tui" : "chat");
+      });
+      this.body.appendChild(b);
+      this._modeBtn = b;
+    }
+    this._modeBtn.classList.toggle("active", chat);
+    this._modeBtn.title = chat ? "터미널(TUI) 보기" : "채팅으로 보기";
+    this._modeBtn.innerHTML = chat ? icons.terminal({ size: 15 }) : icons.chat({ size: 15 });
+  }
+
+  // 모드 전환 — tab 객체에 얹으므로 영속(pc-ui.json layout)·탭 이동(객체 참조 이동) 모두 자동 승계.
+  //  기기 간 전파는 하지 않는다(세션 매니페스트 동기화는 폐지 상태 — 모드는 기기 로컬 규율).
+  setMode(tab, mode) {
+    if (!tab || !isTermTab(tab)) return;
+    const next = mode === "chat" ? "chat" : "tui";
+    if ((tab.mode || "tui") === next) return;
+    tab.mode = next;
+    if (next === "tui") delete tab.mode; // 기본값은 저장하지 않는다(하위호환 = 미지정도 tui)
+    this._syncModeToggle();
+    this.buildHead();
+    this.showActiveTab();
+    // TUI 복귀 시 fit 은 showActiveTab 이 이미 1회 수행한다(여기서 또 부르면 리사이즈가 2회 나간다 —
+    //  하네스에서 실측). 포커스만 터미널로 돌린다.
+    if (next === "tui") this.focus();
+    this.ctx.persist?.();
   }
   // 이 pane 터미널 스트림의 현재 win(tid) — 실제 attach 중인 터미널이 정본, 없으면 탭에서 유추.
   _streamWin() {
@@ -872,7 +963,12 @@ export class PaneView {
       if (typeof win === "number") this._openChannel(win); // 확보 실패(탭 회수)면 빈 상태 유지
     }
     this.showActiveTab();
-    this.ro = new ResizeObserver(() => { this._fitNow(); this._mixed.forEach((m) => m.ide?.refresh()); });
+    // Chat 모드 중 창/분할 리사이즈로는 tmux window 를 건드리지 않는다(검증 게이트 4: 전후 동일).
+    //  복귀 시 setMode 가 1회 fit 하므로 크기는 그때 맞는다.
+    this.ro = new ResizeObserver(() => {
+      if (!this._chatActive()) this._fitNow();
+      this._mixed.forEach((m) => m.ide?.refresh());
+    });
     this.ro.observe(this.el);
   }
 
@@ -912,6 +1008,9 @@ export class PaneView {
   //  모바일은 키보드 노출 등 실 리사이즈가 자연 클레임을 만들지만 PC 는 이 훅이 유일한 계기다.
   _claimSize() {
     if (!this.ctx.isLocal || this.node.kind !== "terminal") return;
+    // Chat 모드는 터미널을 "보고 있지 않다" = 크기 주장 자격이 없다. 여기서 주장하면 다른 기기가
+    //  실제로 쓰고 있는 창 크기를 놀고 있는 화면이 뺏는다(PaneView.tsx:540 주석과 같은 사고).
+    if (this._chatActive()) return;
     const n = Date.now();
     if (n - (this._lastClaim || 0) < 1200) return;
     this._lastClaim = n;
@@ -1032,15 +1131,70 @@ export class PaneView {
     const isT = isTermTab(tab);
     if (!isT && tab) this._ensureMixed(tab);
     const empty = !this.node.tabs.length;
+    // Chat 모드 = 터미널 탭이지만 본문은 채팅. 터미널 레이어는 살아 있는 채로 가려진다.
+    const chat = !empty && isT && !!tab && tab.mode === "chat";
+    if (chat) this._ensureChat();
     if (this.emptyEl) this.emptyEl.style.display = empty ? "flex" : "none";
-    this.termEl.style.display = !empty && isT ? "" : "none";
+    this.termEl.style.display = !empty && isT && !chat ? "" : "none";
+    if (this.chatHost) this.chatHost.style.display = chat ? "flex" : "none";
+    this.chat?.setVisible(chat);
+    if (chat) {
+      this.chat?.retarget();                       // 활성 터미널 탭이 바뀌었으면 그 대화로 재타깃
+      this.chat?.setAgentGone(!this._agentOn(tab)); // 종료돼도 자동 전환하지 않고 배너만(§6-4)
+    }
     for (const [tid, m] of this._mixed) {
       const on = !isT && tab && tab.tid === tid;
       m.host.style.display = on ? "flex" : "none";
       if (on && m.ide) m.ide.refresh();
       m.preview?.setVisible(!!on);
     }
-    if (isT) this._fitNow();
+    // ★ Chat 모드에서는 fit 을 부르지 않는다 — fit → ptyResize → tmux window 리사이즈가 되고,
+    //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
+    if (isT && !chat) this._fitNow();
+    this._syncModeToggle();
+  }
+
+  // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나
+  //  활성 탭이 바뀌어도 생성 시점 스냅샷에 고착되지 않게(paneCtx 의 isLocal/hostDeviceId 와 같은 규율).
+  _ensureChat() {
+    if (this.chat || !this.chatHost) return this.chat;
+    this.chat = new ChatView(this.chatHost, {
+      cwd: () => this.ctx.localPath || "",
+      // 로컬(이 PC)이든 원격(다른 PC)이든 **항상** 명시한다. 미지정이면 back 이 "활성 러너"로
+      //  라우팅하는데, 여러 PC 가 붙어 있으면 다른 PC 의 트랜스크립트를 읽어오는 오배달이 된다
+      //  (승인 resolve 가 runnerId 를 필수로 두는 이유와 같다).
+      hostDeviceId: () => this.ctx.hostDeviceId ?? null,
+      tid: () => {
+        const t = this.node.tabs?.[this.node.active];
+        return t && isTermTab(t) && typeof t.win === "number" ? t.win : null;
+      },
+      getDraft: () => {
+        const t = this.node.tabs?.[this.node.active];
+        return (t && t.chatDraft) || "";
+      },
+      setDraft: (s) => {
+        const t = this.node.tabs?.[this.node.active];
+        if (!t || !isTermTab(t)) return;
+        if (s) t.chatDraft = String(s).slice(0, CHAT.DRAFT_MAX);
+        else delete t.chatDraft;
+        this.ctx.persist?.();
+      },
+      exitChat: () => {
+        const t = this.node.tabs?.[this.node.active];
+        if (t) this.setMode(t, "tui");
+      },
+      // 서버 경로(chat.input)가 막혔을 때의 폴백 — 이 pane 은 이미 그 터미널에 붙어 있으므로
+      //  같은 규칙(bracketed paste + 지연 Enter)으로 로컬 채널로 보낸다. 같은 claude 세션이다.
+      sendFallback: (text) => {
+        if (!this.term) return false;
+        this.insertText(text);
+        setTimeout(() => { try { this._write("\r"); } catch (_) {} }, CHAT.SEND_ENTER_DELAY_MS);
+        return true;
+      },
+      openFile: (rel) => this.ctx.onOpenIde?.(rel),
+    });
+    this.chat.mount();
+    return this.chat;
   }
   // 리컨실러가 매 틱 호출하는 자가치유 워치독 — 빈 pane 에 터미널이 편입됐거나, 어떤 경로로든
   //  채널이 죽은 채 방치돼 있으면(_attachedWin 낙관 상태가 스테일해도 Rust 에 실제 생존을 물어
@@ -1382,6 +1536,9 @@ export class PaneView {
       const at = this.node.tabs?.[this.node.active];
       if (at && at.kind === "ide") { this._mixed.get(at.tid)?.ide?.openSearch(); return; }
       if (at && at.kind === "preview") return; // 프리뷰는 페이지 검색 미지원
+      // Chat 모드에서 터미널 검색을 열면 "보이지도 않는 스크롤백"을 검색하게 된다(혼란).
+      //  채팅 내 검색은 v1 범위 제외(§6-8) → 아무 것도 하지 않는다.
+      if (this._chatActive()) return;
       this._openTermSearch();
       return;
     }
@@ -1400,6 +1557,9 @@ export class PaneView {
       <button class="pane-search-btn" data-a="next" title="다음 (Enter)">${icons.chevronDown({ size: 14 })}</button>
       <button class="pane-search-btn" data-a="close" title="닫기 (Esc)">${icons.x({ size: 14 })}</button>`;
     this.body.appendChild(bar);
+    // 검색 위젯(top:8/right:14/z-index:40)과 모드 토글(top:6/right:12/z-index:36)은 좌표가 겹친다.
+    //  z-index 를 40 위로 올리면 검색 입력을 가리므로, 검색이 열려 있는 동안 토글을 비활성 은닉한다.
+    this.body.classList.add("search-open");
     this._searchBar = bar;
     const input = bar.querySelector(".pane-search-input");
     const count = bar.querySelector(".pane-search-count");
@@ -1438,6 +1598,7 @@ export class PaneView {
     this._searchBar?.remove();
     this._searchBar = null;
     this._searchInput = null;
+    this.body?.classList.remove("search-open");
     this.term?.focus();
   }
   refit() {
@@ -1453,6 +1614,8 @@ export class PaneView {
       try { m.ide?.dispose(); m.preview?.dispose(); } catch (_) {}
     }
     this._mixed.clear();
+    try { this.chat?.dispose(); } catch (_) {}
+    this.chat = null;
     try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {

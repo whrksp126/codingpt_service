@@ -3,6 +3,9 @@
 import { api } from "./api.js";
 import * as S from "./state.js";
 import { state } from "./state.js";
+import { icons } from "./icons.js";
+import { approvalForNotif, isChoiceApproval } from "./approvals.js";
+import { fmtRemain, remainMs } from "./chat-model.js";
 
 // 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(pane 링).
 //  win = 발생한 터미널의 풀 window 인덱스(스코프 읽음 처리·점프의 키).
@@ -69,13 +72,37 @@ export function renderNotifPanel(el, onJump) {
     // 워크스페이스 이름 — 서버 행의 wsName 우선, 없으면 목록에서 역참조.
     const ws = state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId));
     const wsName = n.wsName || ws?.name || "";
+    // 승인 알림은 인박스에서도 바로 응답할 수 있어야 한다(알림 패널이 유일한 진입점인 경우가 있다).
+    //  아직 대기 중인 승인(state.approvals 에 있는 것)만 버튼을 붙이고, 해소된 건 회색 처리.
+    const appr = n.kind === "approval_request" ? approvalForNotif(n) : null;
     const row = document.createElement("button");
-    row.className = "notif-row" + (n.read ? "" : " unread");
+    row.className = "notif-row" + (n.read ? "" : " unread") + (n.kind === "approval_request" ? " approval" : "") + (n.kind === "approval_request" && !appr ? " resolved" : "");
     row.innerHTML =
-      `<div class="notif-title">${escapeHtml(n.title)}</div>` +
+      `<div class="notif-title">${n.kind === "approval_request" ? `<span class="notif-ic">${icons.shield({ size: 12 })}</span>` : ""}${escapeHtml(n.title)}</div>` +
       (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
       (n.body ? `<div class="notif-body">${escapeHtml(n.body)}</div>` : "") +
-      `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}</div>`;
+      `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}` +
+      (appr && appr.deadlineAt ? ` · 남은 ${fmtRemain(remainMs(appr.deadlineAt))}` : "") +
+      (n.kind === "approval_request" && !appr ? " · 종료됨" : "") + `</div>`;
+    if (appr) {
+      const acts = document.createElement("div");
+      acts.className = "notif-acts";
+      // 선택형(AskUserQuestion 등)은 선택지가 여러 개라 이 좁은 행에 담을 수 없다 → 카드로 유도.
+      if (isChoiceApproval(appr)) {
+        acts.innerHTML = `<span class="notif-act-hint">선택형 요청 — 카드에서 응답</span>`;
+      } else {
+        acts.innerHTML =
+          `<span class="notif-act ghost" data-act="deny">거절</span>` +
+          `<span class="notif-act primary" data-act="allow">허용</span>`;
+        acts.addEventListener("click", (e) => {
+          const b = e.target.closest?.("[data-act]");
+          if (!b) return;
+          e.stopPropagation();
+          S.respondApproval(appr.id, { decision: b.dataset.act === "allow" ? "allow" : "deny" });
+        });
+      }
+      row.appendChild(acts);
+    }
     row.addEventListener("click", () => {
       readOne(n);
       onJump?.(n);

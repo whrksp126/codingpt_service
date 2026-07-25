@@ -494,6 +494,9 @@ function fanoutChatEvent(userId, msg) {
   const payload = {
     type: 'chat_event', chatId: msg.chatId, sessionId: msg.sessionId,
     epoch: msg.epoch, headSeq: msg.headSeq, messages: msg.messages, control: msg.control,
+    // epochChanged 를 빼먹으면 /clear·compact·resume 직후 클라이언트가 로컬 버퍼를 비우지 못해
+    //  구 메시지와 새 스냅샷이 섞인 화면이 다음 폴링까지 남는다(데몬은 control 과 함께 이 필드도 보낸다).
+    epochChanged: msg.epochChanged === true ? true : undefined,
   };
   broadcastEvent(userId, payload); // SSE 폴백
   const set = agentWsClients.get(String(userId));

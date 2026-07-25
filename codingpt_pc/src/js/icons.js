@@ -44,6 +44,13 @@ export const icons = {
   crosshair: (o) => svg('<circle cx="12" cy="12" r="7"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>', o),
   handoffIn: (o) => svg('<path d="M12 3v10"/><path d="M8 9l4 4 4-4"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>', o),
   handoffOut: (o) => svg('<path d="M12 21V11"/><path d="M8 15l4-4 4 4"/><path d="M4 9V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v3"/>', o),
+  // TUI↔Chat 토글 글리프 — 모바일 phosphor `ChatCircleDots` 와 같은 의미(말풍선+점 3개).
+  //  3플랫폼 동일 디자인 요구 → 형태/두께를 phosphor 라인 톤에 맞춘다.
+  chat: (o) => svg('<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H9l-4.4 3.6a.4.4 0 0 1-.6-.3V16z"/><circle cx="8.5" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r=".9" fill="currentColor" stroke="none"/>', o),
+  copy: (o) => svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H5.5A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/>', o),
+  check: (o) => svg('<path d="M5 12.5l4.5 4.5L19 7"/>', o),
+  // 승인 카드 헤드 — 방패+체크(권한 요청). warning 삼각형은 "오류"로 읽히므로 피한다.
+  shield: (o) => svg('<path d="M12 3l7 2.5v5.8c0 4-2.8 7.6-7 9.2-4.2-1.6-7-5.2-7-9.2V5.5z"/><path d="M9 12l2.2 2.2L15.5 10"/>', o),
 };
 
 // DOM 헬퍼: 아이콘 버튼.

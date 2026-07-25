@@ -19,6 +19,9 @@
   --on-accent: #06281c;
   --accent-tint: rgba(52, 211, 153, 0.12);
   --info: #60a5fa;
+  /* 모바일 v2Tokens `infoStrong`(#3B82F6, 다크/라이트 동일) — 사용자 말풍선 배경처럼 흰 글씨를 얹는
+     곳에 쓴다. --info(#60a5fa) 에 흰 글씨는 대비가 모자란다. */
+  --info-strong: #3b82f6;
   --warn: #fbbf24;
   --error: #f87171;
   --r-sm: 6px;
@@ -968,3 +971,264 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pvs-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
 .pvs-title { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .pvs-url { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
+
+/* ══ TUI ↔ Chat 모드 (기능5) ═══════════════════════════════════════════════════════════════
+   토글은 `.pane-body` 기준 절대배치 — xterm 내부 DOM 이 아니라 상위 레이어여야 한다(터미널 HTML
+   재조립 = 스트림 재마운트). 3플랫폼 동일 디자인: 글리프(말풍선/터미널)·색(text2 → hover text,
+   chat 활성 accent)·코너 오프셋(top 6)·라운드(r-sm 6)·보더(border-ctrl)·배경(elevated2) 공통.
+   크기만 입력수단에 맞춰 차등: 마우스 26px / 터치 30px+hitSlop(사용자 확정 §6-6-b). */
+.pane-mode-toggle {
+  position: absolute; top: 6px; right: 12px; z-index: 36;
+  width: 26px; height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-sm); border: 1px solid var(--border-ctrl);
+  background: var(--elevated2); color: var(--text2);
+  opacity: 0.9; cursor: pointer; padding: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.pane-mode-toggle:hover { opacity: 1; color: var(--text); background: var(--hover); }
+.pane-mode-toggle.active { opacity: 1; color: var(--accent); }
+/* ⌘F 검색 위젯(top 8 / right 14 / z-index 40)과 좌표가 겹친다 → 검색 중엔 토글을 숨긴다.
+   z-index 를 40 위로 올리는 방식은 금지(검색 입력을 가린다). */
+.pane-body.search-open .pane-mode-toggle { opacity: 0; pointer-events: none; }
+/* 탭 라벨의 chat 모드 표식 — 탭 종류를 바꾸지 않고 작은 글리프만 덧붙인다. */
+.ptab-mode { display: inline-flex; color: var(--accent); margin-left: 3px; }
+
+/* ── Chat 본문 ── */
+/* 터미널과 같은 레이어에서 display 토글(혼합 탭과 동일 경로). 터미널은 살아 있는 채로 가려진다. */
+.pane-chat {
+  flex: 1; min-height: 0; display: none; flex-direction: column;
+  background: var(--base); position: relative; overflow: hidden;
+}
+/* body 전역 user-select:none 을 이 안에서만 되돌린다 — 대화는 선택·복사할 수 있어야 한다. */
+.pane-chat, .pane-chat * { user-select: text; }
+.chat { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.chat-banner {
+  flex: none; padding: 7px 12px; font-size: 12px; line-height: 17px;
+  border-bottom: 1px solid var(--border); color: var(--text3); background: var(--surface);
+}
+.chat-banner.warn { color: var(--warn); }
+.chat-banner.hidden { display: none; }
+.chat-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: 14px 14px 10px; display: flex; flex-direction: column; gap: 10px;
+}
+.chat-empty, .chat-headhint { align-self: center; color: var(--dim); font-size: 12px; padding: 6px 0; }
+
+/* 사용자 말풍선 — 모바일 ChatRow 와 같은 규격(우상단 4px, maxWidth 88%, infoStrong 배경) */
+.chat-msg-user {
+  align-self: flex-end; max-width: 88%;
+  background: var(--info-strong); color: #fff;
+  border-radius: 14px 4px 14px 14px; padding: 9px 12px;
+  font-size: 14px; line-height: 20px; word-break: break-word;
+}
+.chat-msg-user.slash { font-family: var(--mono-font); font-size: 12.5px; }
+.chat-msg-user.optimistic { opacity: 0.72; }   /* 트랜스크립트 반영 전(전송 직후) */
+.chat-msg-user.failed { background: var(--error); }
+/* 어시스턴트 — 말풍선 없이 전폭 마크다운(Claude 앱과 동일) */
+.chat-msg-assistant { align-self: stretch; color: var(--text2); font-size: 14px; line-height: 21px; word-break: break-word; }
+.chat-msg-assistant > *:first-child { margin-top: 0; }
+.chat-p { margin: 0 0 8px; }
+.chat-p:last-child { margin-bottom: 0; }
+.chat-h1 { font-size: 15.5px; font-weight: 700; color: var(--text); margin: 4px 0 6px; }
+.chat-h2 { font-size: 14.5px; font-weight: 600; color: var(--text); margin: 4px 0 5px; }
+.chat-list { margin: 0 0 8px 18px; padding: 0; }
+.chat-list li { margin: 2px 0; }
+.chat-quote { margin: 0 0 8px; padding: 2px 0 2px 10px; border-left: 2px solid var(--border-ctrl); color: var(--text3); }
+.chat-hr { border: none; border-top: 1px solid var(--border); margin: 10px 0; }
+.chat-ic { font-family: var(--mono-font); font-size: 12.5px; background: var(--elevated2); border-radius: 4px; padding: 1px 4px; }
+.chat-a { color: var(--info); text-decoration: none; cursor: pointer; }
+.chat-a:hover { text-decoration: underline; }
+.chat-trunc { font-size: 11.5px; color: var(--dim); margin-top: 4px; }
+
+/* 코드블록 — mono + 언어 라벨 + 복사 + 가로 스크롤(pane 폭을 넘기지 않는다) */
+.chat-code {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  margin: 0 0 8px; max-width: 100%; overflow: hidden;
+}
+.chat-code-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 6px 4px 10px; border-bottom: 1px solid var(--border); background: var(--elevated);
+}
+.chat-code-lang { font-size: 10.5px; color: var(--dim); font-family: var(--mono-font); text-transform: lowercase; }
+.chat-code-copy {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px;
+  border: none; background: transparent; color: var(--dim); cursor: pointer; border-radius: 4px;
+}
+.chat-code-copy:hover { background: var(--hover); color: var(--text); }
+.chat-code-copy.done { color: var(--accent); }
+.chat-code-pre {
+  margin: 0; padding: 9px 10px; overflow-x: auto; max-width: 100%;
+  font-family: var(--mono-font); font-size: 12.5px; line-height: 18px; color: var(--text2);
+  white-space: pre; tab-size: 2;
+}
+
+/* thinking — 기본 1줄 접힘, 클릭 시 전체 */
+.chat-thinking {
+  align-self: flex-start; max-width: 92%; color: var(--dim);
+  font-size: 12px; line-height: 17px; font-style: italic; cursor: pointer;
+}
+/* tool 카드 — 결과는 카드 안 슬롯으로 합쳐진다(별도 카드 금지) */
+.chat-tool {
+  align-self: stretch; background: var(--elevated); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 8px 11px; font-size: 12.5px;
+}
+.chat-tool-head { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.chat-tool-mark { flex: none; font-family: var(--mono-font); font-size: 12px; color: var(--dim); }
+.chat-tool-mark.ok { color: var(--accent); }
+.chat-tool-mark.fail { color: var(--error); }
+.chat-tool-label {
+  flex: 1 1 auto; min-width: 0; font-family: var(--mono-font); color: var(--text2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chat-tool-open {
+  flex: none; border: 1px solid var(--border-ctrl); background: transparent; color: var(--text3);
+  font-size: 11px; border-radius: 4px; padding: 1px 6px; cursor: pointer;
+}
+.chat-tool-open:hover { background: var(--hover); color: var(--text); }
+.chat-tool-args { margin-top: 4px; font-size: 11.5px; color: var(--dim); font-family: var(--mono-font); word-break: break-all; }
+.chat-tool-result { margin-top: 6px; }
+.chat-tool-result.hidden { display: none; }
+.chat-tool-meta { margin-top: 4px; font-size: 10.5px; color: var(--dim); }
+.chat-out {
+  margin: 0; padding: 7px 9px; background: var(--base); border: 1px solid var(--border);
+  border-radius: var(--r-sm); overflow-x: auto; max-width: 100%;
+  font-family: var(--mono-font); font-size: 12px; line-height: 17px; color: var(--text3); white-space: pre;
+}
+.chat-out-more {
+  margin-top: 4px; border: none; background: transparent; color: var(--info);
+  font-size: 11.5px; cursor: pointer; padding: 0;
+}
+/* AskUserQuestion 선택지(읽기 전용 — 응답은 승인 카드에서) */
+.chat-q { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.chat-q-head { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.02em; }
+.chat-q-text { font-size: 13px; color: var(--text); }
+.chat-q-opt { display: flex; flex-direction: column; gap: 1px; padding: 5px 8px; background: var(--base); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.chat-q-label { font-size: 12.5px; color: var(--text2); }
+.chat-q-desc { font-size: 11.5px; color: var(--dim); }
+.chat-q-note { font-size: 11px; color: var(--dim); margin-top: 2px; }
+.chat-divider { align-self: center; font-size: 11.5px; color: var(--text3); }
+.chat-divider.dim { color: var(--dim); }
+.chat-divider span { padding: 2px 10px; background: var(--elevated); border-radius: 999px; }
+.chat-attach { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chat-attach-chip { border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text3); font-size: 11.5px; border-radius: var(--r-sm); padding: 3px 8px; cursor: pointer; }
+.chat-attach-img { max-width: 100%; border-radius: var(--r-sm); border: 1px solid var(--border); }
+
+/* 맨 아래로 FAB(+미읽음) */
+.chat-jump {
+  position: absolute; right: 16px; bottom: 76px; z-index: 37;
+  display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 10px;
+  border-radius: 999px; border: 1px solid var(--border-ctrl); background: var(--elevated2);
+  color: var(--text2); cursor: pointer; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.chat-jump:hover { background: var(--hover); color: var(--text); }
+.chat-jump.hidden { display: none; }
+.chat-jump-n { font-size: 11px; font-variant-numeric: tabular-nums; }
+.chat-approvals { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 10px; }
+.chat-approvals:empty { display: none; }
+
+/* 컴포저 — Enter 전송 / Shift+Enter 개행 / Esc TUI 복귀 */
+.chat-composer {
+  flex: none; display: flex; align-items: flex-end; gap: 7px;
+  border-top: 1px solid var(--border); background: var(--surface); padding: 8px;
+}
+.chat-input {
+  flex: 1 1 auto; min-width: 0; max-height: 150px; resize: none; overflow-y: auto;
+  background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm);
+  color: var(--text); font-family: var(--ui-font); font-size: 13.5px; line-height: 19px;
+  padding: 8px 10px; outline: none; letter-spacing: -0.02em;
+}
+.chat-input:focus { border-color: var(--border-focus); }
+.chat-input::placeholder { color: var(--dim); }
+.chat-send {
+  flex: none; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--r-sm); background: var(--cta); color: #fff; cursor: pointer;
+}
+.chat-send:hover { background: var(--accent-hover); }
+
+/* ══ 승인 카드 (기능1) ═════════════════════════════════════════════════════════════════════
+   전역 스택은 화면 하단 중앙. Chat 뷰 안에서는 컴포저 위 슬롯(.chat-approvals)에 같은 카드가 뜬다
+   (전역 스택은 그 카드를 제외 — 같은 카드가 두 군데 뜨는 혼란 방지). */
+.approval-stack {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 120;
+  display: flex; flex-direction: column-reverse; gap: 10px;
+  width: min(520px, calc(100vw - 48px)); pointer-events: none;
+}
+.approval-stack:empty { display: none; }
+.approval-card {
+  pointer-events: auto;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5); padding: 11px 13px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.approval-card.busy { opacity: 0.7; pointer-events: none; }
+.approval-card.expired { opacity: 0.8; }
+.apc-head { display: flex; align-items: center; gap: 7px; }
+.apc-ic { display: inline-flex; color: var(--warn); flex: none; }
+.apc-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.apc-tool {
+  font-family: var(--mono-font); font-size: 11px; color: var(--text3);
+  background: var(--elevated2); border-radius: 4px; padding: 1px 6px;
+}
+.apc-clock { margin-left: auto; font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.apc-where { font-size: 11.5px; color: var(--dim); }
+.apc-where:empty { display: none; }
+.apc-body { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+.apc-summary { font-size: 13px; line-height: 19px; color: var(--text2); word-break: break-word; }
+.apc-summary.mono { font-family: var(--mono-font); font-size: 12.5px; }
+.apc-path { font-size: 11.5px; color: var(--text3); font-family: var(--mono-font); word-break: break-all; }
+.apc-plan { font-size: 13px; line-height: 19px; color: var(--text2); }
+.apc-fold > summary { font-size: 11.5px; color: var(--dim); cursor: pointer; }
+.apc-pre {
+  margin: 5px 0 0; padding: 7px 9px; background: var(--base); border: 1px solid var(--border);
+  border-radius: var(--r-sm); overflow-x: auto; max-width: 100%;
+  font-family: var(--mono-font); font-size: 11.5px; line-height: 16px; color: var(--text3); white-space: pre-wrap;
+}
+.apc-err { font-size: 11.5px; color: var(--error); }
+.apc-err.hidden { display: none; }
+.apc-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+.apc-btn {
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
+  font-size: 12.5px; border-radius: var(--r-sm); padding: 6px 14px; cursor: pointer;
+}
+.apc-btn:hover { background: var(--hover); }
+.apc-btn.primary { background: var(--cta); border-color: transparent; color: #fff; }
+.apc-btn.primary:hover { background: var(--accent-hover); }
+.apc-btn.ghost { background: transparent; color: var(--text3); }
+.apc-btn.ghost:hover { color: var(--text); background: var(--hover); }
+/* 선택형(AskUserQuestion / ExitPlanMode) — 선택지 버튼을 라벨+설명 그대로 그린다.
+   ⚠ "항상 허용" 버튼은 존재하지 않는다(claude 2.1.220 훅에 그 개념이 없다 — 실측). */
+.apc-choices { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.apc-q { font-size: 12.5px; color: var(--text); }
+.apc-opt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; width: 100%;
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); border-radius: var(--r-sm);
+  padding: 7px 10px; cursor: pointer; color: var(--text);
+}
+.apc-opt:hover { background: var(--hover); }
+.apc-opt.on { border-color: var(--accent); background: var(--accent-tint); }
+.apc-opt-label { font-size: 12.5px; }
+.apc-opt-desc { font-size: 11.5px; color: var(--dim); }
+.apc-free { display: flex; gap: 6px; }
+.apc-free-input {
+  flex: 1 1 auto; min-width: 0; background: var(--elevated2); border: 1px solid var(--border-ctrl);
+  border-radius: var(--r-sm); color: var(--text); font-size: 12.5px; padding: 6px 9px; outline: none;
+}
+.apc-free-input:focus { border-color: var(--border-focus); }
+.apc-expired-msg { flex: 1 1 auto; font-size: 12px; color: var(--warn); }
+
+/* 알림 패널의 승인 행 — 인박스에서 바로 응답 */
+.notif-row.approval { border: 1px solid var(--border-ctrl); margin-bottom: 4px; }
+.notif-row.approval.resolved { opacity: 0.55; }
+.notif-ic { display: inline-flex; color: var(--warn); margin-right: 5px; vertical-align: -1px; }
+.notif-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 7px; }
+.notif-act { font-size: 11.5px; border-radius: 4px; padding: 3px 10px; cursor: pointer; border: 1px solid var(--border-ctrl); }
+.notif-act.primary { background: var(--cta); border-color: transparent; color: #fff; }
+.notif-act.ghost { color: var(--text3); }
+.notif-act:hover { filter: brightness(1.12); }
+.notif-act-hint { font-size: 11px; color: var(--dim); }
+
+/* 라이트 테마 보정 — 새 오버레이(승인 카드 / 맨아래로 FAB)의 그림자만 톤 조정(색은 변수가 따라온다) */
+html[data-theme="light"] .approval-card { box-shadow: 0 16px 44px rgba(15, 23, 42, 0.18); }
+html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14); }
+.apc-actions-inline { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
