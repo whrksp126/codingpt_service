@@ -93,6 +93,60 @@ function titleStatus(title) {
   return null;
 }
 
+/**
+ * 목록(terminal.list)용 **정규화된 에이전트 신호** — 판정을 데몬이 하고 클라는 받아 쓴다.
+ *
+ * 왜 여기 있는가: 클라이언트(앱 `PaneView.hasAgentCmd`, PC `pane.js _agentOn` 2순위)가
+ *  `command` 를 이름 패턴(`/^(claude|codex|gemini)$/`)으로 매칭하던 구조가 이번 사고의 원인이다 —
+ *  최신 Claude Code 의 pane_current_command 는 `2.1.219` 라 **영구 미매치**다. push(agent_state)가
+ *  비는 순간(스테일·재접속 공백·데몬 재기동·서버 cap 미선언)엔 그 폴백이 유일한 근거였으므로 토글이
+ *  사라졌다. 목록은 5~9초마다 무조건 다시 오므로, 같은 판정을 목록에 실으면 그 구멍이 구조적으로 닫힌다.
+ *  판정 규칙 정본은 **isAgentPane/titleStatus 한 벌**이어야 한다(2벌 = 이번 라운드가 잡은 사고의 재발).
+ *
+ * 근거 우선순위(설계 원칙: 애매하면 켠다 — 잘못 사라진 토글은 기능의 존재를 인식에서 지운다):
+ *  ① 셸(SHELL_CMDS) = **유일한 하드 OFF**. 다른 어떤 근거(스테일 제목·남아 있는 상태 레코드)가 있어도
+ *     ON 이 되지 않는다 — 빈 셸 탭에 토글이 굳는 것이 직전 라운드의 blocker 였다(실측: cmd=zsh +
+ *     title=`⠹ …` 조합이 실제로 존재한다).
+ *  ② agent-state 부착(훅 자기보고 + 관찰이 화해된 결과). `gone` 이면 미부착.
+ *  ③ 제목 신호(현재 글리프 / 이 세션에서 과거에 본 글리프 sticky). 데몬 재기동 직후처럼 레코드가
+ *     0건인 순간에도 **첫 목록 조회부터** 신호가 살아나는 경로다(관찰 폴링 2s 를 기다리지 않는다).
+ *
+ * ★★ 반환 `on` 은 **3값**이다(2026-07-25 3패키지 합성 교차검증이 잡은 blocker):
+ *    `true` = 에이전트 / `false` = **셸 확정(하드 OFF)** / `null` = **근거 0 = 모름**.
+ *  "근거 없음" 을 `false` 로 접어 와이어에 실으면 클라 사다리가 그것을 **명시적 부정**으로 읽어
+ *  (앱 `agentPresence.ts` · PC `agent-signal.js` 의 `normalizeDaemonAgentFlag`) "애매하면 켠다" 칸이
+ *  무력화된다. 근거 0 에는 claude 가 멀쩡히 도는 순간이 다수 들어간다 — `/resume`·`agents` 화면,
+ *  폴더 신뢰 확인, `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1`, `showStatusInTerminalTab`(noPrefix),
+ *  cursor-agent(제목 글리프 없음 + cmd=`2025.09.18-…`) 이며 그 전부가 훅 미주입과 겹치면 **영구**다.
+ *  실측 결과가 "같은 pane 에서 PC 는 ON / 모바일은 OFF"(PC 는 Rust 목록이라 이 필드를 아예 안 받는다)
+ *  였고, 사용자 요구("pc·android·ios 다 항상")가 정확히 절반만 충족됐다. `null` 은 클라 두 벌이
+ *  이미 "필드 부재" 와 같게 접으므로 **클라 수정 0**으로 경계가 닫힌다.
+ *
+ * 반환은 불리언/이름/상태 수준만이다 — pane_title 원문(사용자 프롬프트가 들어 있다)은 절대 싣지 않는다.
+ */
+function agentSignalOf(session, cmd, title) {
+  const c = String(cmd || '').trim();
+  const t = String(title || '');
+  // 근거 0 = 모름. 부정으로 단정할 수 있는 것은 셸 확정 하나뿐이다(★★ 참조).
+  const unknown = { on: null, agent: null, state: null, source: null };
+  if (SHELL_CMDS.has(c)) return { on: false, agent: null, state: null, source: 'shell' }; // ① 셸 = 하드 OFF
+  let att = { attached: false, known: false, agent: null, state: null, source: null };
+  try { att = agentState().attachmentOf(session) || att; } catch (_) { /* 로드 실패 = 제목 판정만 */ }
+  const st = states.get(session) || null;               // 관찰 장부(sticky sawAgentTitle/agent)
+  const tStatus = titleStatus(t);
+  const titleOn = isAgentPane(c, tStatus, st && st.sawAgentTitle);   // ③ 규칙 공유(정본 1개)
+  if (!att.attached && !titleOn) return unknown;        // 근거 0 → 클라 사다리를 ④(애매하면 켠다)로 내려보낸다
+  const agent = att.agent || (st && st.agent) || (AGENT_CMDS.has(c) ? c : null) || titleAgent(t) || null;
+  return {
+    on: true,
+    agent,
+    // 부착 레코드가 있으면 그 상태(와이어 도메인)를, 없으면 제목이 주는 상태를 쓴다. 제목이 글리프 없는
+    //  구간(claude 의 /resume·agents 화면 등)이면 'idle' — 상태는 몰라도 **부착은 켠다**.
+    state: att.attached ? att.state : (tStatus || 'idle'),
+    source: att.attached ? (att.source || 'hook') : 'title',
+  };
+}
+
 // 세션별 관찰 상태(에이전트 상태 아님 — tmux 스냅샷 해석용 지역 장부).
 //  key = 세션명("<ns>--t-<tid>"). { cmd, status, sawAgentTitle, pendingTimer }
 const states = new Map();
@@ -288,4 +342,4 @@ function statusOf(session) {
   try { return agentState().legacyStatusOf(session); } catch (_) { return 'idle'; }
 }
 
-module.exports = { start, stop, noteHook, observe, titleStatus, titleAgent, isAgentPane, statusOf, _states: states };
+module.exports = { start, stop, noteHook, observe, titleStatus, titleAgent, isAgentPane, agentSignalOf, statusOf, _states: states };

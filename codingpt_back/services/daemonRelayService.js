@@ -671,6 +671,48 @@ function fanoutDeviceApproval(userId, event) {
   broadcastEvent(userId, payload); // SSE 폴백
   const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+  // 같은 사실을 **데몬(러너)에게도** 알린다 — 데몬은 UI 클라이언트가 아니라 이 채널을 못 듣는다.
+  //  없으면 회전 후 최대 15분(e2ee-account TRUSTED_MS)간 그 PC 는 옛 세대로 남고 그 사이 봉투는
+  //  E2EE_EPOCH_MISMATCH 로 거절돼 화면이 '확인 중' 에 머문다. 실패는 무해(폴링이 여전히 정본).
+  notifyRunnersE2ee(userId, event);
+}
+
+// 열쇠 변화 힌트를 내려보내는 kind — deviceTrustService.fanout 이 실제로 쓰는 문자열만 넣는다.
+//  · rotated / rotate_needed — 세대 회전(이 라운드가 닫는 15분 지연의 본체)
+//  · resolved               — 승인/거절/만료(그 대기 기기가 이 데몬이면 즉시 봉인문을 받는다)
+//  · bootstrapped           — 계정 최초 열쇠 생성(데몬은 이때 bootstrap 백오프 상한 1시간에 있다)
+//  · policy / recovery      — 계정 전역 정책·복구 코드 변화(전 기기 동기화 대상)
+//  ★ 'request'(새 기기가 승인 대기)는 **일부러 뺀다**: 데몬의 열쇠 사실은 하나도 바뀌지 않으므로
+//   왕복해도 같은 키링을 다시 읽을 뿐이고, PC 승인 시트는 데몬 keyring 이 아니라 PC 가 자체 60초
+//   주기로 cpt.sock `e2ee.pending` 을 당겨 그린다(데몬이 밀어주는 경로가 없다).
+const E2EE_HINT_KINDS = new Set(['rotated', 'rotate_needed', 'resolved', 'bootstrapped', 'policy', 'recovery']);
+
+/**
+ * 데몬에게 "지금 keyring 을 다시 확인해 보라" 는 **힌트**를 내려보낸다(caps `e2ee.hint.v1` 게이팅).
+ *
+ * 규율(어기면 서버가 신뢰 경계 안으로 들어온다)
+ *  · 프레임에 epoch/policy/keyId/봉인문을 **싣지 않는다.** 스키마에 그런 필드가 없어야 데몬이 실수로
+ *    채택할 수도 없다 — 정본은 데몬의 keyring 왕복 + 승인자 Ed25519 서명 검증이다.
+ *  · 새 채널을 만들지 않는다: `lan_grant` 와 같은 제어 WS(conn.ws) 선례를 그대로 쓴다.
+ *  · 실패는 조용히 무해 — 데몬은 15분 폴링 폴백을 그대로 갖고 있다(이 프레임은 가속기일 뿐).
+ * @returns {number} 실제로 보낸 데몬 수(테스트/진단용)
+ */
+function notifyRunnersE2ee(userId, event) {
+  const kind = event && typeof event.kind === 'string' ? event.kind : '';
+  if (!E2EE_HINT_KINDS.has(kind)) return 0;
+  const entry = connections.get(String(userId));
+  if (!entry || entry.runners.size === 0) return 0;
+  const frame = JSON.stringify({ type: 'e2ee_hint', kind, at: new Date().toISOString() });
+  let sent = 0;
+  for (const conn of entry.runners.values()) {
+    // caps 교집합의 데몬 항 — 선언하지 않은 데몬(구 번들·CPT_E2EE=0)에게 보내면 프레임만 버려진다.
+    if (!(conn.caps || []).includes('e2ee.hint.v1')) continue;
+    try {
+      if (conn.ws && conn.ws.readyState === WebSocket.OPEN) { conn.ws.send(frame); sent += 1; }
+    } catch (_) { /* 통지 실패 = 폴링 폴백(무해) */ }
+  }
+  if (sent) console.log(`[daemonRelay] e2ee 힌트 kind=${kind} user=${userId} → 데몬 ${sent}대`);
+  return sent;
 }
 
 // 트랜스크립트(채팅) 팬아웃(기능5) — 데몬 chat_event 를 그대로 라이브 중계만 한다.
@@ -1586,6 +1628,7 @@ module.exports = {
   fanoutNotifEvent,
   fanoutApprovalEvent,
   fanoutDeviceApproval,
+  notifyRunnersE2ee,
   fanoutChatEvent,
   fanoutAgentState,
   negotiateStreamE2ee,
@@ -1603,6 +1646,7 @@ module.exports = {
   pickConn,
   _normCaps: normCaps, // 테스트 노출(순수 함수) — 데몬 리포의 `_states` 컨벤션 미러
   _maybeNotify: maybeNotify, // 테스트 노출 — hint/event 폴백 계약 고정(기능2)
+  _e2eeHintKinds: E2EE_HINT_KINDS, // 테스트 노출 — 어떤 kind 가 데몬 힌트를 유발하는지 계약 고정
   _normAgentState: normAgentState, // 테스트 노출 — 데몬이 실제로 보내는 프레임으로 계약 고정(기능3)
   _normE2eeOffer: normE2eeOffer,   // 테스트 노출 — 오퍼 형식 게이트(기능2 D단계)
   _ptyStreamParams: ptyStreamParams, // 테스트 노출 — sid 주입이 실제로 params 에 실리는지 고정

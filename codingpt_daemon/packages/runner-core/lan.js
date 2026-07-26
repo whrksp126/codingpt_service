@@ -434,6 +434,11 @@ async function start(config, hooks = {}, o = {}) {
       if (k === lastKey) return;
       lastKey = k;
       console.log(`[lan] 인터페이스 변경 — 재바인딩 (${k || '사설 주소 없음'})`);
+      // ★ 이 신호는 호스트 좌표(lan_update)만 바꾸는 게 아니다 — **우리가 뷰어일 때의 경로 이력도**
+      //  전부 무효다(다른 Wi-Fi/도킹/테더링). 여기가 데몬이 아는 유일한 "네트워크가 바뀌었다" 신호이고
+      //  이전 라운드에 revive() 호출자가 0건이었던 자리다(계약 §4.10).
+      const nc = noteNetChange('if-change');
+      if (nc.entries) console.log(`[lan] 네트워크 변경 — 경로 이력 초기화 ${nc.entries}건(직결 주장 철회 ${nc.demoted}건)`);
       // 기존 accept 된 연결은 유지된다(server.close 는 새 accept 만 막는다).
       closeServers();
       bindAll().then((rr) => {
@@ -964,17 +969,50 @@ async function probe(o = {}) {
 //  승격: probe 2연속 성공 && 각 RTT ≤ PROMOTE_RTT_MS
 //  강등: 하드 실패 1회 즉시 / 소프트 실패 2연속(단 lan 진입 30s 는 소프트로 강등 안 함)
 //  쿨다운: 60s → ×2 → 상한 15분. 쿨다운 중 시도 금지. revive() 는 1회 무시(앱 복귀·네트워크 변화).
+//  무소식: NO_TRAFFIC_TTL_MS 동안 성공/실패/바이트가 하나도 없으면 'lan' 주장을 스스로 철회한다(아래).
 const PROMOTE_OK_STREAK = 2;
 const PROMOTE_RTT_MS = 800;
 const MIN_DWELL_MS = 30000;
 const SOFT_FAIL_STREAK = 2;
 const COOLDOWN_MIN_MS = 60000;
 const COOLDOWN_MAX_MS = 15 * 60 * 1000;
+// ── 무트래픽 TTL(2026-07-27 추가 — 계약 §4.10) ────────────────────────────
+// 왜 필요한가: 강등 신호(noteSoftFail/noteHardFail)는 **실트래픽이 있을 때만** 불린다. 그래서 프리뷰
+//  실트래픽(PC JS clientKey)으로 승격된 엔트리는 아무도 만지지 않으면 영원히 'lan' 으로 동결되고,
+//  PC 의 검증 probe 는 **데몬 뷰어 clientKey** 의 다른 엔트리를 만지므로(키 = clientKey|host|net)
+//  그 엔트리를 강등시키지 못한다 → 집을 떠나 릴레이로 흐르는데 "직결" 배지가 켜져 있었다.
+//  TTL 은 그 비대칭을 경로 상태의 소유자(=여기)에서 닫는다.
+//
+// 값의 근거(세 구현의 관계 — 숫자를 바꿀 때 반드시 함께 볼 것):
+//  · PC `src/js/lan.js VERIFY_GAP_MS = 5분` 이 'lan' 엔트리를 살려 두는 유일한 주기적 신호다.
+//    TTL ≥ 2 × VERIFY_GAP_MS 여야 검증 폴링 **1회를 놓쳐도**(창 블러·사이드바 미렌더로 폴링이 쉴 때)
+//    배지가 깜빡이지 않는다 → 10분.
+//  · 모바일(`lanPath.ts`)에는 TTL 이 없다. 대신 소켓이 IDLE_CLOSE_MS(120s)에 닫히고 포그라운드 복귀·
+//    lan_update 마다 revive 가 돌아 상태가 자연히 재평가된다(백그라운드에서 OS 가 소켓을 회수한다).
+//    데몬은 백그라운드가 없어 그 재평가 계기가 없다 = 이 숫자는 **데몬 전용**이며 앱/PC 에 미러하지 않는다.
+//
+// ⚠ TTL 은 "무소식"에만 반응한다 — 흐르고 있는 직결은 절대 건드리지 않는다. 그래서
+//  ① 호스트→우리 방향 바이트가 도착할 때마다 noteTraffic() 이 lastSeenAt 을 갱신하고(forward.js),
+//  ② 만료 처리는 **주장 철회뿐**이다: state 'lan' → 'relay'(쿨다운·백오프 승수 무손상).
+//     쿨다운을 걸면 "실패한 적 없는" 경로에 벌을 줘 다음 프리뷰 연결이 60s 이상 릴레이로 밀린다
+//     (지연 회귀). 엔트리를 지우지도 않는다 — cooldownMs 승수를 잃으면 플래핑이 영원히 60s 쿨다운에
+//     머문다(noteProbeOk 주석의 같은 이유).
+//     ★ 강등 목표가 'probing' 이 **아니라** 'relay' 인 것이 계약이다(실측 결함). 호스트 1대에는
+//      엔트리가 둘 생긴다(프리뷰=PC JS clientKey · probe=데몬 뷰어 clientKey). 집을 떠나면 뷰어
+//      엔트리는 probe 실패로 cooldown(최대 15분)에 들어가는데, lan-local.status 는 MODE_RANK 최댓값을
+//      고르므로(probing 3 > cooldown 2) 프리뷰 엔트리가 'probing' 이면 그 쿨다운을 **가려 버린다**.
+//      그러면 PC(src/js/lan.js: `if (mode === 'cooldown') return;`)가 데몬 백오프를 존중할 기회를 잃고
+//      60초마다 lan.probe → grantFor → back POST /api/daemon/lan/grant 왕복 + 스테일 사설 IP 로의
+//      TCP 타임아웃을 무기한 반복한다. 'relay'(랭크 1)로 내리면 집계가 cooldown 을 그대로 드러낸다.
+//      지연 회귀는 없다: 재시도 가능 여부는 shouldTry(=쿨다운만 본다)가 판정하고 승격 경로
+//      (noteProbeOk/noteSuccess)는 'relay' 와 'probing' 을 똑같이 취급한다. 살아 있는 'lan' 엔트리는
+//      여전히 랭크 최댓값이라 실제로 흐르는 직결의 배지·검증 probe 도 그대로다.
+const NO_TRAFFIC_TTL_MS = 10 * 60 * 1000;
 
 let nowFn = () => Date.now();
 function __setNow(fn) { nowFn = typeof fn === 'function' ? fn : (() => Date.now()); } // 테스트 전용
 
-const paths = new Map(); // key -> {state, okStreak, softStreak, since, cooldownUntil, cooldownMs}
+const paths = new Map(); // key -> {state, okStreak, softStreak, since, lastSeenAt, cooldownUntil, cooldownMs}
 function fingerprint(host) {
   const c = classifyAddr(host);
   if (!c.addr) return '';
@@ -986,9 +1024,35 @@ function pathKey(clientKey, hostDeviceId, host) {
 }
 function pathEntry(key) {
   let e = paths.get(key);
-  if (!e) { e = { state: 'relay', okStreak: 0, softStreak: 0, since: nowFn(), cooldownUntil: 0, cooldownMs: 0 }; paths.set(key, e); }
+  if (!e) {
+    const t = nowFn();
+    e = { state: 'relay', okStreak: 0, softStreak: 0, since: t, lastSeenAt: t, cooldownUntil: 0, cooldownMs: 0 };
+    paths.set(key, e);
+    return e;
+  }
+  expireStale(e, key);
   return e;
 }
+// 아무 신호(성공·실패·바이트)도 없이 TTL 이 지났으면 'lan' 주장을 철회한다. **벌은 주지 않는다**
+//  (쿨다운 미부과·백오프 승수 보존) — 실패한 것이 아니라 증거가 만료된 것이다. 승격 근거(okStreak)도
+//  같이 지운다: 한 시간 전 probe 1회를 오늘의 성공과 합쳐 승격시키면 안 된다.
+//  lastSeenAt 을 지금으로 미뤄 두는 이유 = 같은 엔트리를 매 접근마다 다시 만료 판정/로그하지 않기 위함.
+function expireStale(e, key) {
+  const t = nowFn();
+  if (!(t - (e.lastSeenAt || 0) >= NO_TRAFFIC_TTL_MS)) return false;
+  const was = e.state;
+  if (e.state === 'lan') { e.state = 'relay'; e.since = t; }
+  e.okStreak = 0;
+  e.softStreak = 0;
+  e.lastSeenAt = t;
+  e.lastReason = 'ttl';
+  if (was === 'lan') {
+    console.log(`[lan] ${Math.round(NO_TRAFFIC_TTL_MS / 60000)}분 무트래픽 — 직결 주장 철회(${key || ''}) · 릴레이 유지`);
+  }
+  return true;
+}
+// 신호를 봤다 — TTL 시계를 리셋한다(성공·실패 양쪽 다. "무소식"만 TTL 의 대상이다).
+function touch(e) { e.lastSeenAt = nowFn(); }
 function pathState(key) {
   const e = pathEntry(key);
   if (e.cooldownUntil > nowFn()) return 'cooldown';
@@ -1001,6 +1065,7 @@ function shouldTry(key) {
 }
 function noteProbeOk(key, rttMs) {
   const e = pathEntry(key);
+  touch(e);
   if (e.cooldownUntil > nowFn()) return e.state;
   if (Number.isFinite(rttMs) && rttMs > PROMOTE_RTT_MS) { e.okStreak = 0; e.state = e.state === 'lan' ? 'lan' : 'probing'; return e.state; }
   e.okStreak += 1;
@@ -1014,12 +1079,14 @@ function noteProbeOk(key, rttMs) {
 // 실제로 바이트가 흐르고 있다 — 최소 체류를 넘겨 "안정"이 증명되면 연속 강등 승수를 초기화한다.
 function noteSuccess(key) {
   const e = pathEntry(key);
+  touch(e);
   e.softStreak = 0;
   if (e.state === 'lan' && nowFn() - e.since >= MIN_DWELL_MS) e.cooldownMs = 0;
   if (e.state !== 'lan') { e.okStreak += 1; if (e.okStreak >= PROMOTE_OK_STREAK) { e.state = 'lan'; e.since = nowFn(); } else e.state = 'probing'; }
   return e.state;
 }
 function demote(e, reason) {
+  touch(e);
   e.state = 'relay';
   e.okStreak = 0;
   e.softStreak = 0;
@@ -1034,12 +1101,26 @@ function noteHardFail(key, reason) { return demote(pathEntry(key), reason || 'ha
 // 소프트 실패(RTT 초과·채널 오픈 타임아웃) = 2연속, 단 lan 진입 30s 내에는 강등하지 않는다.
 function noteSoftFail(key, reason) {
   const e = pathEntry(key);
+  touch(e);
   e.softStreak += 1;
   if (e.state === 'lan' && nowFn() - e.since < MIN_DWELL_MS) return e.state; // 최소 체류(플랩 방지)
   if (e.softStreak >= SOFT_FAIL_STREAK) return demote(e, reason || 'soft');
   return e.state;
 }
+// 실트래픽이 흐르고 있다(호스트 → 우리 방향 바이트) — TTL 시계만 리셋한다. 승격/강등 판정은
+//  일절 하지 않는다: 바이트 도착은 "이 경로가 아직 살아있다"는 증거일 뿐이고, 상태 전이의 근거는
+//  기존 신호(noteSuccess/noteSoftFail/noteHardFail)가 독점한다.
+//  ⚠ 연결마다 chunk 단위로 불리는 **핫 패스**다 — 엔트리를 새로 만들지 않고(paths.get) 필드 하나만 쓴다.
+//  ⚠ 우리→호스트 방향(업스트림 write)에는 걸지 않는다: 죽은 소켓에도 쓸 수 있어 생존 증거가 아니다.
+function noteTraffic(key) {
+  const e = paths.get(key);
+  if (!e) return false;
+  e.lastSeenAt = nowFn();
+  return true;
+}
 // 부활 트리거(앱 복귀·네트워크 변경·사용자 새로고침·토글 ON) — 쿨다운 1회 무시.
+//  ⚠ lastSeenAt 은 **일부러 갱신하지 않는다**: 부활은 "다시 시도해도 된다"는 허가일 뿐 경로가 살아있다는
+//   증거가 아니다. 여기서 TTL 시계를 밀면 재접속마다 거짓 'lan' 배지가 10분씩 연장된다.
 function revive(key) {
   const e = pathEntry(key);
   e.cooldownUntil = 0;
@@ -1048,9 +1129,51 @@ function revive(key) {
   if (e.state === 'relay') e.state = 'probing';
   return e.state;
 }
+/**
+ * 알고 있는 모든 경로를 부활시킨다 — 제어 WS 재접속(수면 복귀·망 전환·서버 재시작) 훅용.
+ *  프레임을 보내지 않는 **로컬 상태 조작**이라 caps 게이팅 대상이 아니다.
+ *  쿨다운 승수(cooldownMs)는 보존한다 — 재접속이 잦은 불안정한 망에서 백오프가 무의미해지지 않게.
+ *  반환 = 쿨다운이 실제로 풀린 엔트리 수(로그용. 0 이면 아무 일도 없었다).
+ */
+function reviveAll(reason) {
+  let n = 0;
+  const t = nowFn();
+  for (const [k, e] of paths) {
+    const wasCooling = e.cooldownUntil > t;
+    revive(k);
+    if (wasCooling) { e.lastReason = `revive:${String(reason || '')}`; n += 1; }
+  }
+  return n;
+}
+/**
+ * 이 기기의 네트워크가 바뀌었다(사설 주소 집합 변화 = lan_update 를 유발한 바로 그 신호).
+ *  이전 망에서의 성공/실패 이력은 전부 무의미하므로 엔트리를 초기 상태로 되돌린다 — 모바일
+ *  `lanPath.step({t:'net_change'})` 가 지문이 바뀔 때 하는 것과 같은 처분이다(계약 §4.10).
+ *  · 'lan' 주장도 함께 내려간다: 망이 바뀐 뒤에도 켜져 있는 "직결" 배지가 이 라운드가 닫는 거짓 표시다.
+ *  · 흐르고 있는 연결을 끊지는 않는다(경로 상태는 **새 연결**의 선택에만 쓰인다). 실제로 못 닿게
+ *    되었으면 그 연결이 스스로 죽고 릴레이 폴백이 받는다.
+ */
+function noteNetChange(reason) {
+  let n = 0;
+  const t = nowFn();
+  for (const e of paths.values()) {
+    if (e.state === 'lan') n += 1;
+    e.state = 'relay';
+    e.okStreak = 0;
+    e.softStreak = 0;
+    e.cooldownUntil = 0;
+    e.cooldownMs = 0;
+    e.since = t;
+    e.lastSeenAt = t;
+    e.lastReason = String(reason || 'net-change');
+  }
+  return { entries: paths.size, demoted: n };
+}
 function pathSnapshot() {
   const out = {};
-  for (const [k, v] of paths) out[k] = { ...v };
+  // 배지(lan.status)가 만료된 'lan' 을 보지 않게 스냅샷 시점에도 TTL 을 적용한다 — 상태 조회만
+  //  들어오는(=실트래픽 0) 기기가 정확히 이 라운드의 거짓 배지 시나리오다.
+  for (const [k, v] of paths) { expireStale(v, k); out[k] = { ...v }; }
   return out;
 }
 function resetPaths() { paths.clear(); }
@@ -1064,8 +1187,10 @@ module.exports = {
   connect, probe,
   // 경로 상태
   pathKey, pathState, shouldTry, noteProbeOk, noteSuccess, noteHardFail, noteSoftFail, revive,
+  noteTraffic, reviveAll, noteNetChange,
   pathSnapshot, resetPaths, fingerprint,
   // 내부(테스트/진단 노출)
+  NO_TRAFFIC_TTL_MS,
   PROTO, T_CTRL, T_DATA, T_TEXT, T_CLOSE, T_PING, T_PONG, MAX_FRAME,
   encodeFrame, encodeCtrl, createFramer, classifyAddr, peerPolicy, macFor, srvMacFor,
   lanStateFile, __setNow, __resetLimits,

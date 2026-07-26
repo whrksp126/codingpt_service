@@ -184,9 +184,15 @@ export function isDirect(hostDeviceId) {
  *   lan.rpc/forward 의 실트래픽뿐이다(TTL·하트비트가 없다). 그래서 프리뷰를 열지 않고 집을 떠나면
  *   릴레이로 흐르는데 "직결" 배지가 계속 켜져 있었다. 5분 간격 검증 probe 로 데몬 히스테리시스를
  *   깨워 둔다(실패하면 데몬이 noteSoftFail/noteHardFail 로 스스로 강등 → 다음 폴링에서 배지 OFF).
- *   ⚠ 한계: 경로 엔트리 키가 `<clientKey>|<hostDeviceId>|<net>` 라서 **프리뷰(PC JS clientKey)로 승격된
- *   엔트리는 데몬 뷰어 clientKey 로 도는 이 probe 로 강등되지 않는다**. 그 경우의 완전한 해결은 데몬
- *   경로 엔트리의 무트래픽 TTL 이다(계약 §4.9 에 요구사항으로 적어 뒀다).
+ *   ⚠ 경로 엔트리 키가 `<clientKey>|<hostDeviceId>|<net>` 라서 **프리뷰(PC JS clientKey)로 승격된
+ *   엔트리는 데몬 뷰어 clientKey 로 도는 이 probe 로 강등되지 않는다**. 그 구멍은 2026-07-27 데몬
+ *   쪽에서 닫혔다: 경로 엔트리의 **무트래픽 TTL 10분**(runner-core/lan.js NO_TRAFFIC_TTL_MS · 계약
+ *   §4.10). 이 5분 검증 probe 는 그대로 유지한다 — TTL(10분)은 검증 폴링 1회를 놓쳐도 배지가
+ *   깜빡이지 않도록 그 2배로 잡은 값이라 둘은 서로를 전제한다.
+ *   ★ TTL 만료 시 데몬은 엔트리를 'relay' 로 내린다('probing' 이 아니다 — §4.10 ①-b). 그래야 같은
+ *   호스트의 실패한 형제 엔트리(cooldown)가 `lan.status` 집계에서 가려지지 않고, 아래
+ *   `if (mode === 'cooldown') return;`(데몬 백오프 존중)이 제대로 발화한다. 이 줄을 지우면 PC 가
+ *   60초마다 lan.probe + back grant 왕복을 무기한 반복한다.
  */
 export async function refreshStatus(hostDeviceId) {
   const hid = Number(hostDeviceId);

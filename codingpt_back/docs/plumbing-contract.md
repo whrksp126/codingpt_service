@@ -47,6 +47,7 @@ SERVER_CAPS(lan on)  ["caps.v1","approval.v1","transcript.v1","e2ee.keys.v1","la
 | `e2ee.rpc.v1` | back | `POST /api/daemon/rpc` 라우트가 존재하고 `callRpc(...,'sealed',…)` 로 중계하는 커밋 |
 | `e2ee.stream.v1` | back | 터미널/포워딩 토큰 발급이 `e2ee.begin` 을 선협상하고 스트림 params 에 `sid` 를 싣는 커밋 |
 | `e2ee.snap.v1` | back | 매니페스트에 `enc`/`epoch` 를 **실제로 저장**하는 커밋(구 경로 `checkpoint()` 포함 — §5.7) |
+| `e2ee.hint.v1` | back + 데몬 | (2026-07-27 추가 — §2.12) back 이 `notifyRunnersE2ee` 로 제어 WS 에 `e2ee_hint` 를 내려보내고, 데몬이 그 프레임을 `hintResync` 로 처리하는 커밋 |
 
 `lan.v1` 은 이미 양쪽에 있다(스위치만 OFF). 갭 4·5는 **새 caps 문자열이 필요 없다** — 갭 4는 기존
 `lan.v1` 안에서, 갭 5는 HTTP 404 폴백으로 게이팅된다(§4.6 / §5.5).
@@ -251,6 +252,24 @@ push 가 왔다가 끊김         → ★ 클라이언트는 마지막 push 를 
 | app | `workspace/PaneView.tsx:52-57, :473` | `hasAgentCmd` 앞에 push 우선 판정(PC `_agentOn` 과 **같은 순서**) |
 | app | `workspace/chatModel.ts:309` | (선택) `looksBusy` 를 `state==='working'` 로 교체 |
 | PC | `state.js setAgentState` / `ui-channel.js` onopen | 수신기는 이미 있었지만 두 곳을 고쳤다(2026-07-25): ① 폐기 조건에 `at` 후퇴 조건 추가(데몬 재기동 대응, §1.3) ② 재접속 시 `resetAgentStates()` → `ui_hello` 순서(§1.5-d). `ui-channel.js` caps 배열에 `'agentstate.v1'` 은 이미 포함 |
+
+★ **목록(`terminal.list`) `agent` 필드의 3값 — `false` 의 의미(2026-07-25 확정, 어기면 조용히 죽는다)**
+
+```
+agent === true   → 에이전트 부착(훅 레코드 또는 제목 글리프 근거 있음)
+agent === false  → **셸 확정(pane_current_command ∈ SHELL_CMDS) 하나만.** 유일한 명시적 부정.
+agent === null   → 근거 0 = **모름**(필드 부재와 동일 취급). 클라 사다리는 아래 칸으로 내려간다.
+```
+
+"근거 없음"을 `false` 로 접으면 안 된다. 근거 0 에는 **claude 가 멀쩡히 도는 순간이 다수** 들어간다
+(`/resume`·`agents` 화면 · 폴더 신뢰 확인 · `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` ·
+`showStatusInTerminalTab`(noPrefix) · cursor-agent) 그리고 그 전부가 훅 미주입과 겹치면 **영구**다.
+데몬 `agent-watch.agentSignalOf` 가 `on: true|false|null` 3값을 반환하고 `pty.js agentSignal` 이 그대로
+와이어에 싣는다(판정 조회 실패도 `null`). 클라 두 벌의 `normalizeDaemonAgentFlag` 는 `null`/부재를
+"모름"으로 접으므로 **클라 수정 0**이다. 회귀는 **합성**으로만 잡힌다(데몬 단위 테스트가 `false` 를,
+클라 단위 테스트가 "`false`=OFF" 를 각각 못박고 양쪽 다 초록이던 것이 이 결함의 형태였다) →
+`codingpt_daemon/packages/runner-core/test/terminal-agent-flag.test.js` ⑥절이 실 tmux 행을 앱·PC 의
+실제 사다리에 그대로 먹여 3플랫폼 최종 노출을 대조한다. 진단 `agentSource` 는 `'shell'` 값을 추가로 갖는다.
 
 ### 1.7 이 계약을 깨면 어떻게 조용히 죽는가
 
@@ -472,8 +491,41 @@ policy='required'          → 폴백 금지. 앱 `gateReason()`/PC `e2eeGate()`
 ★ **자물쇠 표시는 호스트별로** — `ready`(내 열쇠 보유)만 보고 '켜짐' 을 그리면 열쇠 없는 PC 로 가는
 평문 트래픽이 사용자에게 안 보인다(거짓 자물쇠). back 은 이미 `runner_status.e2eeEpoch`
 (`daemonRelayService.js:79/219`, 0=열쇠 없음)를 팬아웃한다 — 클라이언트는 이 값을 받아 PC 별 배지를
-그린다. 앱 구현: `e2ee/hostLock.ts` + `e2eeState.ts hostLockLabel()`, 라벨은 '이 기기 준비됨' /
-PC 별 '암호화됨 | 이 PC 는 평문(열쇠 없음) | 확인 중'.
+그린다. 구현: 앱 `e2ee/hostLock.ts` + `e2eeState.ts hostLockLabel()/stateLabel()` · PC
+`src/js/host-lock.js` + `src/js/e2ee-label.js`(문구·판정 모두 앱과 글자까지 동일해야 한다).
+
+★ **문구 정본은 여기가 아니다**(2026-07-25 카피 감사 반영) — 라벨 **문자열**의 정본은
+`docs/구현설계-2026-07-25/14-설정-카피-감사.md §4` 다. 이 절은 **의미·판정 순서**만 규정한다.
+문구를 바꿀 땐 그 문서 §4 와 §6("동시 수정 필수 파일 = 4곳 + 테스트 4곳")을 따라 앱·PC·테스트를
+같은 커밋에서 고친다(한쪽만 고치면 앱==PC 동치 회귀 3개가 깨진다).
+
+```
+self 배지(8종)  : 열쇠 있음(on) | 승인 대기(wait) | 확인 중(wait) | 열쇠 없음(off) | 꺼짐(off)
+                  | 미지원(off) | 사용 불가(off) | 오류(off)
+                  ★ '켜짐' 금지(자기 열쇠 보유 ≠ 트래픽 암호화) · '확인 중' 은 구 '준비 중' 을 흡수
+                    (구 '이 기기 준비됨' → '열쇠 있음')
+host 배지(4종)  : 암호화됨(on) | 평문(열쇠 없음)(off) | 확인 중(wait) | 평문(off)
+                  ★ '평문(열쇠 없음)' 은 구 '이 PC 는 평문(열쇠 없음)' 의 단축(행 안에 PC 이름이 이미
+                    있다) — 의미·톤·판정 순서 불변. 도메인은 정확히 이 4종이다(테스트가 집합을 고정).
+```
+
+★ **self 배지의 유일한 앱↔PC 의도적 비대칭 = `state:'off'`**(2026-07-27 확정 · 지우지 말 것)
+
+`stateLabel`/`selfStateLabel` 은 같은 입력에서 같은 라벨을 내야 하지만, **`state:'off'` 는 두 구현에서
+같은 문자열이 다른 사실을 뜻한다** — 그래서 이 한 tuple 만 동치 격자에서 빼고 이름으로 단정한다
+(PC `test/e2ee-crossimpl.mjs` 4-B 절: "state='off': PC 는 '꺼짐' · 앱은 '확인 중'").
+
+```
+PC : 데몬이 준 값이다 = **확정된 꺼짐**(policy='off' 이거나 phase='off' = 서버 킬스위치 E2EE_ENABLED=0).
+     → '꺼짐'(off). 여기에 대기색을 쓰면 켜 줄 주체가 없는 상태에서 '확인 중' 이 영원히 돈다.
+앱 : enroll 왕복 전 **초기값**이다(미결정) → '확인 중'(wait). '꺼짐' 으로 단정하면 사용자는 자기가 끈
+     적 없는 '꺼짐' 을 읽고 자세히 안에서는 '자동' 이 선택된 자기모순 화면을 본다(모름을 단정 금지).
+그 외 : **알 수 없는 state 폴백은 양쪽 다 '확인 중'(wait)** 이어야 한다(동치 격자에 포함).
+```
+
+⚠ 이 절을 읽지 않은 사람이 "앱==PC 가 42/42 뿐이니 48/48 로 고치자" 며 한쪽 폴백을 바꾸면 위 두 근거가
+지워진다. 바꾸려면 **앱 초기값을 `'off'` 가 아닌 별 값(`'unknown'`/`'init'`)으로 분리**하는 것이 옳은
+방향이다(그때는 비대칭이 사라지고 격자가 전 조합으로 넓어진다) — 미착수 항목.
 
 ★ **자물쇠는 세대(epoch)까지 교집합이다 + 회전 자가복구는 클라 책임**(2026-07-25 교차검증 실측, 앱 반영 완료)
 
@@ -483,9 +535,10 @@ push 없이 폴링으로만 감지하므로(`e2ee-account.js` TRUSTED_MS=15분) 
 `E2EE_EPOCH_MISMATCH` → back **409** → `mayFallbackFor`=true → **평문 REST** 인데 배지는 초록이었다.
 
 ```
-표시  : hostLockLabel(selfReady, hostEpoch, myEpoch)
+표시  : hostLockLabel(selfReady, hostEpoch, myEpoch, accountEpoch)
         myEpoch>0 && hostEpoch>0 && myEpoch !== hostEpoch  → '확인 중'(tone wait)  ★ '암호화됨' 금지
-        myEpoch 미지(=0/undefined)                          → 대조 생략(구 호출부 호환)
+        myEpoch>0 && accountEpoch>0 && myEpoch !== acct    → '확인 중'  ★ 반대 방향(내가 뒤처짐)
+        myEpoch / accountEpoch 미지(=0/undefined)           → 그 대조만 생략(구 호출부 호환)
 자가복구(둘 다 필요 — 하나만으론 포그라운드 고착이 남는다)
   ① device_approval_event 의 kind:'rotated' | 'policy' | 'bootstrapped' 수신 → 즉시 refresh()
      (back deviceTrustService.js:504/696/722 가 **이미** 팬아웃한다 = 새 배관 0)
@@ -493,6 +546,47 @@ push 없이 폴링으로만 감지하므로(`e2ee-account.js` TRUSTED_MS=15분) 
      800ms 자동저장이 초당 여러 번 봉인하므로 실패마다 부르면 왕복 폭주)
   ③ 이 코드는 UNSUPPORTED 네거티브 캐시(10분)에 **넣지 않는다**. 넣으면 갱신을 끝냈는데도 10분간
      봉인을 시도하지 않아 전부 평문이다. 반대로 새 세대 grant 채택 성공 시엔 캐시를 즉시 만료시킨다.
+```
+
+★ **4번째 근거(accountEpoch)는 입력 신선도가 규칙의 전부다**(2026-07-27 실측 · PC 반영 완료)
+
+위 표의 3행("내가 뒤처짐")은 **자기 행**을 구제하려고 넣은 것이다(호출부가 hostEpoch 를 자기 epoch 로
+채우므로 1·2행으로는 절대 안 걸린다). 그런데 `accountEpoch` 를 **데몬 폴링에서만** 얻으면 그 근거는
+자기가 겨냥한 창에서만 죽는다: 데몬은 `callKeyring()` 한 왕복에서 계정 세대를 읽고 **같은 왕복이
+`acceptGrant` 로 로컬 epoch 도 올린다** → 두 값이 항상 같이 낡는다 → `myEpoch !== accountEpoch` 가
+회전 직후 15분 창에서 한 번도 참이 되지 않는다(실측: 계정 4로 회전한 직후 PC 가 읽는 값 = `accountEpoch=3
+· epoch=3` → 자기 행 초록). 앱은 같은 순간 push 의 epoch 를 즉시 반영해 '확인 중' 이므로 **폰과 PC 가
+최대 15분간 다른 색**이었다(같은 규칙·같은 실제 상태인데).
+
+```
+클라 : accountEpoch 는 **단조 래치**로 유지하고 세 원천을 모두 먹인다.
+        · device_approval_event(rotated|policy|bootstrapped).epoch  ← refresh 완료 **전에** 먼저 반영
+        · enroll/keyring 응답의 epoch (앱) / 데몬 e2ee.state.accountEpoch (PC)
+        · grant 채택 성공 시 그 grant 의 epoch
+        되돌리지 않는다(낡은 응답이 값을 내리면 배지가 초록↔확인중으로 깜빡인다).
+        계정이 바뀌면(userRef 변경·로그아웃) 래치를 폐기한다 — 안 하면 다음 계정에서 '확인 중' 영구 고착.
+        ⚠ 표시 전용이다. 이 값으로 봉인 여부를 게이팅하지 않는다(모름을 평문으로 단정 금지).
+정본 : 앱 e2ee.ts noteAccountEpoch / PC e2ee.js noteAccountEpoch·noteAccountRef
+       (회귀: PC test/contract.mjs "rotated push 의 epoch 를 refresh 완료 전에 반영한다")
+```
+
+★ **'10분 캐시 금지' ≠ 상한 없음 — 'epoch' 에도 종료 조건이 필요하다**(2026-07-27 실측 · PC 반영 완료)
+
+③의 "캐시에 넣지 않는다" 를 **브레이크를 아예 없애는 것**으로 구현하면 호스트가 뒤처진 동안(현 설치본
+데몬은 회전 push 를 모르므로 최대 15분) 봉투 왕복이 **UI 호출 빈도만큼 무제한 반복**된다: 호출원은 IDE
+트리 + 800ms 자동저장 + 2.5s 디스크 리컨실러라 초당 수 회이고, 왕복 1회 = cpt.sock → 데몬 → HTTPS
+`POST /api/daemon/rpc`(레이트리밋 없음) → 호스트 WS → 409 다. ②의 20s 억제창은 **로컬 refresh 만** 막고
+봉투 재시도는 못 막으며, 로컬 refresh 로는 상대의 지연을 고칠 수도 없다(hostEpoch 원천은 runner_status).
+
+```
+클라 : 'epoch' 실패는 10분 캐시에 넣지 않는 대신 **그 호스트로만** ②와 같은 20초 재시도 게이트를 건다.
+        · 호스트별이다 — 원인이 그 호스트의 뒤처짐이면 다른 PC 는 정상이므로 함께 멈추면 안 된다.
+        · 세대가 실제로 올라가면 즉시 만료(clearRpcUnsupported 와 같은 지점) — 20초를 기다리지 않는다.
+        · required 에서는 게이트에 걸려도 평문으로 내려가지 않는다(throw) — 게이트가 정책의 구멍이 되면 안 된다.
+        (이전 동작은 첫 실패 후 10분 침묵이었으므로 20초 게이트는 그보다 훨씬 공격적인 재시도다)
+정본 : PC e2ee.js noteEpochRetryGate/epochGated (회귀: test/contract.mjs "409 뒤 같은 호스트로는 20s
+       동안 봉투를 재발사하지 않는다" · "억제는 그 호스트 한정 게이트다").
+       ⚠ 앱 e2ee.ts sealedRpc 는 아직 같은 상한이 없다(동일 처방 필요 — 미반영).
 ```
 
 정본: 앱 `e2ee/e2eeState.ts hostLockLabel()` · `e2ee.ts dispatchDeviceApprovalEvent`/`sealedRpc`
@@ -536,6 +630,7 @@ back  : ui_hello 수신 시 replayAgentStates 옆에서 replayRunnerStatus(userI
 | daemon | 신규 `runner-core/e2ee-account.js`(2b) | enroll/pending/approve/deny/keyring/rotate/policy/recovery + grant 수신·저장(backFetch 사용) |
 | daemon | `test/e2ee-gate.test.js` 확장 | AAD 0/명시 두 경우 왕복 + mismatch 거절 |
 | PC | `src/vendor/e2ee/e2ee-proto.js` + `src/js/e2ee.js` | 지문 오프셋을 §2.10 정본으로 교정 · `safetyCode` default export 추가 · 승인 UI 대조 대상을 safetyCode 로(앱과 동일 규율) |
+| PC | (2026-07-27 반영 완료) `src/js/e2ee.js` + `src/js/host-lock.js` | `accountEpoch` 단조 래치 + `device_approval_event.epoch` 즉시 반영(폴링만으로는 자기 행 대조가 회전 창에서 절대 발화하지 않았다 — §2.7) · 계정 전환 시 래치 폐기 · 'epoch' 실패에 **호스트별 20초 재시도 게이트**(캐시 금지가 상한 없음이 되어 왕복 폭주였다) |
 | app | (2026-07-25 반영 완료) | `e2eeProto.js` 오프셋 교정 + safetyCode 노출 · `envNonce.ts` 지연 부팅난수(0 nonce 사고) · `mayFallbackFor` 502 계열 폴백 허용 · `hostLock.ts` 호스트별 자물쇠 · **회전 자가복구**(hostLockLabel 3인자 epoch 대조 · `kind:'rotated'/'policy'/'bootstrapped'` → refresh · 409 EPOCH_MISMATCH → refresh(20s 억제)+캐시 제외) |
 
 ### 2.9 이 계약을 깨면 어떻게 조용히 죽는가
@@ -608,6 +703,76 @@ verifyCode4  = u32BE(okm[12..16]) % 10^4 → "0878"      (요청 구분용 — *
    `{available:true, state:'error', reason:…}` 를 회신한다(pending/keyring 과 동일). `userRef` 는 첫 기동에
    파일로 영속되고 조회 시 동기 복원되며, **모를 때는 파생값(safetyCode/fingerprint/verifyCode)을
    내보내지 않는다**(null) — 틀린 안전코드를 그리면 사람 대조라는 유일한 MITM 방어가 무력화된다.
+
+### 2.12 열쇠 변화 힌트 `e2ee_hint` (2026-07-27 추가) — back → 데몬 제어 WS
+
+**닫는 한계**: 데몬은 열쇠 보유 중 `TRUSTED_MS`(15분) 고정 주기로만 keyring 을 확인했다. 다른 기기에서
+`rotate`(기기 해제 + 세대 올림)하면 **최대 15분간** 그 PC 는 옛 세대로 남고, 그 사이 봉투는
+`E2EE_EPOCH_MISMATCH` 로 거절되며 사용자 화면은 '확인 중' 에 머문다. 승인/부트스트랩도 같은 구조
+(백오프 상한 60초/1시간)였다. 이제 back 이 같은 사실을 **데몬에게도** 알린다.
+
+와이어(새 채널 없음 — `lan_grant` 와 같은 제어 WS `conn.ws`):
+
+```jsonc
+// back → 데몬. 이 3필드가 전부다(추가 금지).
+{ "type": "e2ee_hint", "kind": "rotated", "at": "2026-07-27T04:11:22.019Z" }
+```
+
+- `kind` ∈ `rotated | rotate_needed | resolved | bootstrapped | policy | recovery`
+  (= `deviceTrustService.fanout` 이 실제로 내는 kind 중 **열쇠 사실이 바뀌는 것만**).
+  `request`(새 기기가 승인 대기)는 **일부러 뺀다** — 데몬의 열쇠 사실은 하나도 바뀌지 않아 왕복만
+  늘고, PC 승인 시트는 PC 가 자체 60초 주기로 `e2ee.pending` 을 당겨 그린다(데몬 push 경로 없음).
+- 발신 지점 = `daemonRelayService.fanoutDeviceApproval` 안의 `notifyRunnersE2ee(userId, event)` 한 곳.
+  게이팅 = `conn.caps.includes('e2ee.hint.v1')`. 선언하지 않은 데몬(구 번들·`CPT_E2EE=0`)에게는 보내지
+  않는다(보내면 프레임만 버려지는 조용한 유실).
+- 수신 지점 = 데몬 `control.js` 의 `msg.type === 'e2ee_hint'` → `handleE2eeHint(msg)` →
+  `e2ee-account.hintResync({kind})`.
+
+**★ 이 프레임은 "확인해봐" 라는 힌트일 뿐이다(불변식 5개).**
+
+1. **프레임 내용으로 열쇠 상태를 바꾸지 않는다.** 스키마에 `epoch`/`policy`/`sealed` 가 **아예 없고**,
+   데몬은 `kind`(로그 문자열) 외에 아무것도 읽지 않는다. 서버가 세대를 주장해 데몬을 옛/새 세대로
+   몰아넣을 수 있게 되면 그 순간 서버가 E2EE 신뢰 경계 안으로 들어온다(유일한 위협모델).
+   정본은 언제나 데몬의 keyring 왕복 + 승인자 Ed25519 서명 검증(`acceptGrant`).
+2. **프레임이 루프를 시작시키지 못한다.** `hintResync` 는 `!st.started` 면 무시한다 — 기동은 여전히
+   `hello_ack` 에서 서버가 `e2ee.keys.v1` 을 선언한 것을 확인한 뒤에만(caps 교리 + 킬스위치 보존).
+3. **폭주 금지**: `HINT_MIN_GAP_MS = 5000`(수용 최소 간격) + `HINT_COALESCE_MS = 400`(합침 지연).
+   한 사용자 조작이 프레임 두 장을 낼 수 있고(revoke = `rotated` + `rotate_needed`), back 은
+   keyring 저장 직후(아직 `withKeyring` 락 안에서) 팬아웃하므로 조금 미루면 왕복 1회로 최신 세대를
+   읽는다. 프레임 N장 → 왕복 1회가 회귀 테스트로 고정돼 있다.
+4. **백오프를 리셋하지 않고, `phase==='resolved'` 에서는 아예 받지 않는다.** 그 상태의 화해는 **새
+   enroll** 을 만들고 back 은 그때마다 신뢰 기기에 승인 요청 푸시를 다시 쏜다 — 프레임 반복이
+   알림 폭탄이 되는 유일한 경로다(그걸 막으려고 재신청 상한을 6시간까지 늘려 둔 백오프다).
+5. **프레임을 버리지 않는다 = 상한과 진행중은 '폐기' 가 아니라 '지연' 이다**
+   (2026-07-27 교차검증에서 적출된 실측 결함 2건. back 은 힌트를 **재전송하지 않으므로** 한 장을
+   버리면 그 사실은 다음 정기 폴링(15분)까지 영구 유실 = 이 절이 닫으려던 결함 그 자체다.)
+   · `st.running`(화해 진행 중) 검사를 **`alreadySoon`/throttle 보다 먼저** 한다. 타이머 콜백은
+     `st.nextAt` 을 갱신하지 않고 `schedule()` 은 화해가 **끝난 뒤** 부르므로, 화해 중 `st.nextAt` 은
+     언제나 과거값이다 → 순서가 반대면 `alreadySoon` 이 늘 참이 되어 `st.hintPending`(딱 한 번
+     재확인) 경로가 **도달 불가능한 죽은 코드**가 된다. 하필 그 레이스(back 이 keyring 을 저장하고
+     팬아웃하는 사이에 우리 GET 이 껴 옛 세대를 읽는 경우)에서 프레임이 유일한 회복 수단이다.
+   · throttle 창(5s) 안에 온 힌트는 `lastHintAt + HINT_MIN_GAP_MS` 시점에 **1회 예약**한다(타이머
+     1개 · `st.delays` 무접촉 → 분당 12회 상한 유지). 창 안에 프레임이 더 쏟아져도 예약 시각이
+     같아 하나로 수렴한다. `revoke → rotate_needed` 뒤 사람이 회전을 확정하는 '한 조작 두 프레임' 의
+     간격(앱 crypto+HTTP 왕복 = 수백ms~수초)은 합침창 400ms 밖 · throttle창 5s 안이라 **정확히 이
+     사각지대**였다.
+   · 미루지 않는 유일한 예외는 불변식 2(`!st.started`)와 4(`resolved`) — 그 둘은 "받으면 안 되는"
+     상태이지 미룰 일이 아니다.
+   · 겸사겸사 `cpt-server.backFetch` 에 30초 `AbortSignal.timeout`(`CPT_BACK_TIMEOUT_MS`)을 붙였다.
+     응답이 걸리면 `st.running` 이 수 분간 참이고 그 사이 힌트 전부가 한 번의 재확인으로 뭉개진다.
+
+**폴백(구 back / 프레임 0장)**: 아무 일도 일어나지 않는다 = 15분 폴링이 그대로 유일한 경로다.
+데몬은 `e2ee.hint.v1` 을 선언해도 폴링을 줄이지 않는다(힌트는 가속기이고 대체물이 아니다).
+
+**caps 선언 조건의 비대칭 하나** — 데몬은 이 문자열을 **열쇠가 없어도** 선언한다(`e2ee.js caps()` 가
+`hasKey()` 를 요구하는 것과 다르다). 힌트가 가장 필요한 순간이 열쇠가 없는 때(계정 부트스트랩 대기 =
+백오프 상한 1시간 / 승인 대기 = 60초)이기 때문이다. 조건은 (a) `hintResync` 핸들러 실존 (b) E2EE 가
+스코프/킬스위치로 꺼져 있지 않음.
+
+회귀 테스트: 데몬 `test/e2ee-hint.test.js`(16 케이스 — 실제 WS 로 프레임을 받아 세대 채택·hello
+재신고까지 + **7-A/7-B = 불변식 5**(화해 중 deferred·throttle 지연), 7-A 는 가짜 back 의 keyring 응답을
+**요청 도착 시점에 굳혀 지연 전송**해 레이스를 실제로 만든다) / back `test/plumbing-crossimpl.test.js` 의
+`e2ee_hint` 4 케이스(스키마 잠금·caps 게이팅·kind 목록이 실제 팬아웃 문자열과 일치·킬스위치 회수).
 
 ---
 
@@ -871,6 +1036,8 @@ POST /api/daemon/lan/grant     Authorization: Bearer <deviceToken>
   갖는다. `lan.status` 는 `pathSnapshot()` 을 훑어 **중간 세그먼트 == hostDeviceId** 인 엔트리를
   모아 `mode` 를 정한다(하나라도 `lan` 이면 `lan`, 아니면 `probing`>`cooldown`>`relay` 우선순위)
   [추정 — 우선순위는 권고]. 이걸 안 하면 프리뷰가 직결 중인데 배지가 안 뜨거나 반대가 된다.
+  ★ 이 "최댓값" 규칙 때문에 **무트래픽 TTL 의 강등 목표는 `'probing'` 이 아니라 `'relay'`** 여야 한다
+  (§4.10 ①-b) — 아니면 형제 엔트리의 `cooldown` 이 영구히 가려져 PC 가 60초마다 grant 왕복을 돈다.
 - grant 캐시: 데몬 안에서 `hostDeviceId → {grant, at}` 8분 캐시 + 실패 시 쿨다운 —
   PC JS `lan.js:27-30, 69-99` 규칙을 미러(같은 숫자). `LAN_AUTH_FAILED` 는 **1회 재발급 재시도**하고
   그 재시도는 강등 카운터를 소모하지 않는다(`forward.js:83-88` 의 `refresh` 규약과 동일).
@@ -953,7 +1120,8 @@ E2EE policy=required               → LAN(rpc) 미사용, 봉인 릴레이 유�
 | daemon | `cpt-server.js:436-447` | **`forward.start` 가 `args.upstream` 을 `startLocalForward` 로 전달**(+ `upstream.refresh` 콜백 주입) ← 이 한 줄이 死文의 핵심 |
 | daemon | `cpt-server.js:454` 옆 | `lan.probe` / `lan.status` / `lan.rpc` 핸들러(resolveCtx 전, CAPABILITIES 비공개) |
 | daemon | 신규 `runner-core/lan-grant.js`(또는 cpt-server 내부) | grant 취득·캐시·쿨다운·1회 재발급(backFetch 사용) |
-| daemon | `test/lan.test.js` 확장 | ① upstream 전달 회귀(현재 유실을 재현하는 테스트) ② 울타리(method 거부) ③ status 가 clientKey 무관하게 hostDeviceId 로 집계 ④ required 가드 |
+| daemon | `test/lan.test.js` 확장 | ① upstream 전달 회귀(현재 유실을 재현하는 테스트) ② 울타리(method 거부) ③ status 가 clientKey 무관하게 hostDeviceId 로 집계 ④ required 가드 ⑤ **I/I-2/I-3 = 무트래픽 TTL·부활 훅**(§4.10) ⑥ **I-4 = TTL 강등 목표가 `relay` 라서 형제 엔트리의 남은 쿨다운을 집계가 가리지 않는다**(§4.10 ①-b) |
+| daemon | `lan.js`(경로 상태) · `forward.js`(`noteTraffic`) · `control.js`(`hello_ack`) | 2026-07-27: 무트래픽 TTL 10분 + `reviveAll`(재접속) + `noteNetChange`(인터페이스 변경) — §4.9-2 의 남은 한계를 닫음(§4.10) |
 | PC | `src/js/lan.js` | Rust·JS 배관은 완비였지만 **승격/강등 3규칙**(§4.9)으로 세 곳을 고쳤다(2026-07-25): 'probing' 에서도 계속 부추김 · 'lan' 검증 probe(5분) · `LAN_SCOPE`/커맨드 부재는 rpc 전용 억제 |
 | back | — | **무수정** |
 | app | — | 무관(모바일 LAN 은 `lanLink.ts`/`lanPath.ts` 로 이미 구현) |
@@ -981,10 +1149,10 @@ E2EE policy=required               → LAN(rpc) 미사용, 봉인 릴레이 유�
    "직결" 배지 + 죽은 경로로 계속 fs 직결 시도**. → PC 가 `VERIFY_GAP_MS`(5분) 간격으로 검증 probe 를
    쏘고, 실패하면 **강등은 데몬이 한다**(noteSoftFail 2연속 / noteHardFail 1회). PC 는 검증 probe 실패로
    자기 grant/쿨다운을 건드리지 않는다(아직 흐르고 있을 수도 있는 프리뷰 upstream 을 죽이지 않기 위해).
-   · ⚠ 남은 한계: 경로 키가 `<clientKey>|<hostDeviceId>|<net>` 라서 **프리뷰(PC JS clientKey)로 승격된
-     엔트리는 데몬 뷰어 clientKey 로 도는 검증 probe 로 강등되지 않는다.** 완전한 해결은 데몬 경로
-     엔트리의 **무트래픽 TTL**(N분 무트래픽 → 'probing' 으로 되돌림) + `lanLib.revive()` 를 네트워크
-     변경/앱 복귀에 실제로 연결하는 것이다(현재 `revive()` 는 호출자 0건) — 데몬 몫으로 남아 있다.
+   · ⚠ 남은 한계였던 것: 경로 키가 `<clientKey>|<hostDeviceId>|<net>` 라서 **프리뷰(PC JS clientKey)로
+     승격된 엔트리는 데몬 뷰어 clientKey 로 도는 검증 probe 로 강등되지 않는다.** → **2026-07-27 데몬
+     쪽에서 닫았다: 무트래픽 TTL + 부활 훅 2곳(§4.10).** PC 의 5분 검증 probe 는 그대로 유지한다
+     (배지를 더 빨리 끄는 빠른 경로이고, TTL 은 그것을 놓쳤을 때의 바닥이다).
 3. **거절의 사정거리(scope)를 넘지 않는다.** `LAN_SCOPE` 는 "이 호스트가 LAN 미지원"이 아니라
    **"이 메서드군만 미지원"**이다. 기본값 `LAN_SCOPES=['tcp']`(단계적 개방)에서 fs 직결 시도는
    정상적으로 `LAN_SCOPE` 를 받는데, 이걸 호스트 단위 미지원으로 처리하면 grant 가 버려지고 30분
@@ -996,6 +1164,90 @@ E2EE policy=required               → LAN(rpc) 미사용, 봉인 릴레이 유�
 **회귀 테스트는 교차 구현이어야 한다**: 각자 스텁이면 위 3건이 전부 다시 초록으로 통과한다.
 정본 = `codingpt_pc/test/lan-crossimpl.mjs`(PC lan.js 실물 + 데몬 lan.js/lan-local.js 실물, 시계 주입,
 스텁은 back grant 와 소켓 다이얼뿐) + `codingpt_pc/test/contract.mjs`(PC 쪽 간격/억제 규칙).
+
+### 4.10 무트래픽 TTL + 부활 훅 — 2026-07-27 데몬 구현(§4.9-2 의 남은 한계를 닫음)
+
+**무엇이 깨져 있었나.** 경로 엔트리를 강등시킬 수 있는 것은 `noteSoftFail`/`noteHardFail` 뿐이고 그
+둘은 **실트래픽이 있을 때만** 불린다. 그래서 프리뷰 실트래픽(PC JS clientKey)으로 `'lan'` 이 된
+엔트리는 아무도 만지지 않으면 영원히 `'lan'` 으로 동결되고, PC 의 검증 probe 는 **데몬 뷰어
+clientKey** 의 다른 엔트리를 만지므로 그 엔트리를 내리지 못했다 → 프리뷰를 열어 둔 채 망이 바뀌면
+"직결" 배지가 거짓으로 켜져 있었다. 그리고 `lanLib.revive()` 는 **호출자가 0건**이었다.
+
+**① 무트래픽 TTL = 10분 · 처분은 "주장 철회"뿐** [`runner-core/lan.js NO_TRAFFIC_TTL_MS`]
+
+```
+lastSeenAt = 이 경로가 마지막으로 본 신호 시각. 갱신 지점(전부 "무소식이 아님"의 증거):
+   noteProbeOk / noteSuccess / noteSoftFail / noteHardFail(=demote)  … 성공·실패 양쪽
+   noteTraffic(key)  ← forward.js 의 **호스트→우리 방향** 바이트마다(핫패스: 필드 1개만 쓴다)
+만료(now - lastSeenAt ≥ TTL)의 처분:
+   state 'lan' → 'relay'     (주장 철회. 배지 OFF)  ★'probing' 이 아니다 — 아래 ①-b
+
+   okStreak/softStreak = 0    (만료된 승격 근거를 오늘의 성공과 합치지 않는다)
+   cooldownUntil·cooldownMs 무손상 · 엔트리 삭제 없음 · shouldTry 는 계속 true
+평가는 **지연(lazy)** — pathEntry()/pathSnapshot() 접근 시점에만 판정한다(타이머 0개, 시계 주입 가능).
+```
+
+- **쿨다운을 걸지 않는 이유**: 이 경로는 실패한 적이 없다. 벌을 주면 다음 프리뷰 연결이 60s 이상
+  릴레이로 밀려 **지연 회귀**가 된다. TTL 은 "배지와 승격 근거"만 회수하고 시도 권리는 남긴다.
+- **①-b 강등 목표가 `'relay'` 인 이유(2026-07-27 교차검증 — 처음엔 `'probing'` 이었고 그게 결함이었다)**:
+  호스트 1대에 엔트리는 **둘**이다(프리뷰=PC JS clientKey · probe=데몬 뷰어 clientKey). 집을 떠나면
+  뷰어 엔트리는 probe 실패로 `cooldown`(상한 15분)에 들어가는데, `lan.status` 집계는 MODE_RANK
+  **최댓값**을 고르므로(`probing 3 > cooldown 2 > relay 1`) 프리뷰 엔트리가 `'probing'` 이면 그
+  쿨다운을 **가린다**. 그러면 PC 의 `if (mode === 'cooldown') return;`(데몬 백오프 존중)이 절대
+  발화하지 않고 PC 는 `PROBE_GAP_MS`(60s)마다 `lan.probe` → `grantFor`(자기 grant 캐시를 스스로
+  비운다) → **back `POST /api/daemon/lan/grant` 왕복 1회 + 스테일 사설 IP 로의 TCP 타임아웃**을
+  무기한 반복한다(배지는 고쳐졌지만 왕복 빈도는 5분→60초로 5배가 됐다).
+  `'relay'`(랭크 1)로 내리면 집계가 형제의 `cooldown` 을 그대로 드러낸다. **지연 회귀는 없다**:
+  재시도 권리는 `shouldTry`(쿨다운만 본다)가 판정하고 승격 경로(`noteProbeOk`/`noteSuccess`)는
+  `'relay'` 와 `'probing'` 을 똑같이 취급한다. 살아 있는 `'lan'` 엔트리는 여전히 랭크 최댓값이라
+  **실제로 흐르는 직결의 배지·5분 검증 probe 는 그대로**다(형제의 쿨다운이 살아 있는 배지를 끄지 않는다).
+  ⚠ 집계 규칙을 "쿨다운이 하나라도 있으면 쿨다운" 으로 바꾸는 것은 **금지** — 프리뷰가 실제로 직결
+  중인데 뷰어 probe 만 실패한 경우 배지가 꺼지고 PC 가 손을 놓는다(역방향 회귀).
+- **엔트리를 지우지 않는 이유**: `cooldownMs`(백오프 승수)를 잃으면 플래핑이 영원히 60s 쿨다운에
+  머문다(`noteProbeOk` 주석의 같은 근거).
+- **흐르는 직결을 죽이지 않는다**: 새 연결이 더 생기지 않는 오래 열린 스트림(HMR/WS)도
+  `noteTraffic` 이 TTL 시계를 계속 리셋한다. 업스트림 write 방향에는 걸지 않는다(죽은 소켓에도
+  쓸 수 있어 생존 증거가 아니다).
+
+**② `revive()` 를 실제 신호에 연결**(이전엔 호출자 0건)
+
+| 신호 | 코드 지점 | 하는 일 |
+|---|---|---|
+| 이 기기의 사설 주소 집합 변화(= `lan_update` 를 유발하는 그 신호) | `lan.js` 인터페이스 감시(30s) 변경 분기 | `noteNetChange()` — 모든 엔트리를 초기 상태로(이전 망의 이력은 무의미). `'lan'` 주장도 내려간다 |
+| 제어 WS 재접속(수면 복귀·망 전환·90s 무신호 재수립·back 재시작) | `control.js` `hello_ack` 핸들러 | `reviveAll()` — 쿨다운 1회 무시. **`cooldownMs` 는 보존**(불안정 망에서 백오프가 무의미해지지 않게) |
+
+- 둘 다 **프레임을 보내지 않는 로컬 상태 조작**이라 caps 게이팅 대상이 아니다(구 서버·스위치 OFF 에서도
+  무해 — 아무것도 다이얼하지 않는다). 첫 접속에서는 엔트리가 없어 0건 = no-op.
+- `revive()`/`reviveAll()` 은 **`lastSeenAt` 을 갱신하지 않는다.** 갱신하면 재접속마다 거짓 `'lan'` 이
+  TTL 만큼 연장된다(부활은 "다시 시도해도 된다"는 허가일 뿐 생존 증거가 아니다).
+- 데몬은 **다른 호스트**의 좌표 변화(`runner_status.lanEpoch`)를 제어 WS 로 받지 않는다(back 팬아웃은
+  UI 클라이언트 전용). 그 대응은 grant 재발급(`lan-local.refreshUpstream`)이 새 좌표를 자연히 가져오는
+  구조로 흡수한다 — 새 와이어 타입을 만들지 않았다.
+
+**③ 임계값 3곳의 관계 — 숫자를 바꿀 때 반드시 함께 볼 것**
+
+| 값 | 모바일 `lanPath.ts`(정본) | 데몬 `runner-core/lan.js` | PC `src/js/lan.js` |
+|---|---|---|---|
+| 승격 연속 성공 | `PROBE_OK_STREAK=2` | `PROMOTE_OK_STREAK=2` | (없음 — 데몬 소유) |
+| 승격 RTT 상한 | `PROBE_RTT_MAX_MS=800` | `PROMOTE_RTT_MS=800` | — |
+| 최소 체류 | `MIN_DWELL_MS=30s` | `MIN_DWELL_MS=30s` | — |
+| 소프트 강등 | `SOFT_FAIL_STREAK=2` | `SOFT_FAIL_STREAK=2` | — |
+| 쿨다운 | 60s→×2→15분 | 60s→×2→15분 | 60s→×2→15분(grant 취득용 별도 사본) |
+| 미지원 휴면 | `UNSUPPORTED_RETRY_MS=30분` | `lan-local.js` 동일 30분 | 동일 30분 |
+| 검증/승격 probe 간격 | `PROBE_GAP_MS=1s`(한 호출 안 2측정) | `PROBE_PING_GAP_MS=250ms`(동일 역할) | `PROBE_GAP_MS=60s` / `VERIFY_GAP_MS=5분` |
+| **무트래픽 TTL** | **없음**(아래 이유) | **`NO_TRAFFIC_TTL_MS=10분`** | **없음**(데몬 소유) |
+
+- TTL 은 **데몬 전용 숫자**이고 앱/PC 에 미러하지 않는다. 근거 두 줄:
+  1. `TTL ≥ 2 × VERIFY_GAP_MS(5분)`. PC 의 검증 probe 가 `'lan'` 엔트리를 살려 두는 유일한 주기적
+     신호라, TTL 이 그보다 짧으면 폴링 1회를 놓칠 때마다(창 블러·사이드바 미렌더로 폴링이 쉴 때)
+     배지가 깜빡인다. 그래서 "1회 놓쳐도 안전"한 2배로 잡았다. **`VERIFY_GAP_MS` 를 늘리면 TTL 도
+     같이 늘려야 한다**(데몬 `test/lan.test.js` I 가 이 부등식을 단언한다).
+  2. 모바일에 TTL 이 없는 이유는 **재평가 계기가 이미 있다**는 것뿐이다: 소켓이 `IDLE_CLOSE_MS`(120s)에
+     닫히고, 백그라운드 진입에서 OS 가 소켓을 회수하며, 포그라운드 복귀·`lan_update` 마다 `revive`
+     가 돈다. 데몬(PC 사이드카)은 백그라운드가 없어 그 계기가 없다.
+- 회귀는 데몬 `test/lan.test.js` **I / I-2 / I-3** 가 고정한다(실제 forward 포워더 + 시계 주입:
+  ① 무소식 철회 ② 바이트가 흐르면 철회 없음 ③ 쿨다운 상한 15분 > TTL 10분 구간에서 TTL 이 쿨다운을
+  풀지 않음 ④ 부활 훅 2곳의 소스 배선 + 릴레이 폴백 무삭제).
 
 ---
 
@@ -1138,6 +1390,9 @@ caps 문자열은 필요 없다. **HTTP 404 가 곧 게이팅**이고, 데몬이
 | 4 | `lan.rpc` 가 PC 미지원 코드로 거절 | 조용한 릴레이 폴백이 **붉은 IDE 오류**로 바뀜 |
 | 4 | `lan.probe` 가 승격을 1회로 끝내지 않음 | 경로가 `probing` 에 영구 고착 → 배지 미표시 + fs 직결 0건(§4.2) |
 | 4 | `CPT_LAN_SCOPE` 를 아무도 설정하지 않음 | 서버 `LAN_SCOPES` 에 rpc 를 넣어도 fs 직결이 안 켜지고, 첫 `lan.rpc` 가 프리뷰 grant 까지 30분 폐기(§4.6) |
+| 4 | 경로 엔트리에 무트래픽 TTL 이 없음 | 실트래픽으로 승격된 엔트리를 아무도 못 내려 **거짓 "직결" 배지**가 무기한 유지(다른 clientKey 의 검증 probe 는 그 엔트리를 못 만진다 — §4.10) |
+| 4 | TTL 이 쿨다운을 걸거나 엔트리를 지움 | 실패한 적 없는 경로가 60s+ 릴레이로 밀리거나(지연 회귀) 백오프 승수가 사라져 플래핑이 영원히 60s(§4.10) |
+| 4 | `noteTraffic` 배선 누락 | 새 연결이 더 안 생기는 오래 열린 스트림(HMR/WS)이 **흐르는 중에** TTL 로 강등돼 배지가 꺼짐(§4.10) |
 | 5 | begin/commit 을 JWT 전용 인증으로 붙임 | 데몬 401 → 영구 구 경로 폴백(기능이 무발현) |
 | 5 | 매니페스트에 `enc/epoch` 미저장 상태로 `e2ee.snap.v1` 선언 | 암호문 스냅샷에 표시가 없어 감사/진단 불가 |
 

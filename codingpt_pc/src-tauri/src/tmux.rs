@@ -263,6 +263,10 @@ pub struct WindowInfo {
     pub name: String,
     pub command: String,
     pub id: String,
+    // ※ pane_title 원본은 싣지 않는다(2026-07-25 교차실행으로 되돌림). 토글 판정의 보조 재료로 넣었지만
+    //  JS 사다리에서 **도달 불가**였다 — 자동 개명 포맷은 셸=폴더명 / 그 외=pane_title|pane_current_command
+    //  로 window_name 을 항상 비지 않게 채우고, 수동 rename 은 사용자 이름이 얼어붙으므로 `name` 이 빈
+    //  경우가 없다. 이름이 얼어붙어 글리프를 잃는 터미널은 사다리 ④(신호 없으면 켠다)가 흡수한다.
 }
 
 // 세션의 window 목록(이름 포함 — 공유 풀의 "내역" 원천).

@@ -268,6 +268,130 @@ test('이름을 몰라도(agent:null) 기록·방출은 된다 — 토글 노출
   assert.strictEqual(agentState.snapshot('proj/demo').length, 1, 'cpt agent status 에서도 누락되지 않는다');
 });
 
+// ── 2026-07-25 추가: 목록(terminal.list)용 정규화 신호 agentSignalOf ────────────────
+//  사용자 증상 = "터미널에 claude 가 도는데 챗/TUI 토글이 있다 없다 한다". 원인은 push(agent_state)가
+//  비는 순간(스테일 15분·WS 재접속 공백·데몬 재기동·서버 cap 미선언)에 클라가 `command` 이름 패턴으로
+//  되짚는 구조였다(최신 claude = `2.1.219` → 영구 미매치). 아래는 그 구멍을 닫는 pull 경로의 판정 회귀다.
+
+test('agentSignalOf — 실측 값(cmd=2.1.219 + ✳ 제목)이면 기록 0건에서도 ON', () => {
+  resetAll();
+  const tid = 1000030;
+  // 데몬 재기동 직후 = agent-state 기록 0건 + 관찰 장부 0건. 첫 목록 조회부터 신호가 살아야 한다
+  //  (관찰 폴링 2s 를 기다리면 그 사이 목록은 OFF 를 실어 보내고 토글이 사라진다).
+  const s = watch.agentSignalOf(S(tid), LIVE_CMD, LIVE_TITLE_IDLE);
+  assert.strictEqual(s.on, true);
+  assert.strictEqual(s.agent, 'claude');
+  assert.strictEqual(s.state, 'idle');
+  assert.strictEqual(s.source, 'title');
+  // 스피너 제목(working)도 같은 규칙 — 이름은 특정 불가(claude/codex 공용)이지만 ON 은 유지.
+  const w = watch.agentSignalOf(S(tid), LIVE_CMD, LIVE_TITLE_WORK);
+  assert.strictEqual(w.on, true);
+  assert.strictEqual(w.state, 'working');
+  assert.strictEqual(w.agent, null);
+});
+
+// ★★ 와이어에서 "근거 0(모름)" 과 "부정" 은 다른 값이어야 한다 — 둘을 같은 false 로 접었을 때
+//  클라 사다리(앱 agentPresence.ts / PC agent-signal.js)가 그것을 **명시적 부정**으로 읽어 살아 있는
+//  claude 의 토글이 사라졌다(2026-07-25 3패키지 합성 교차검증 blocker). 셸 확정만 false 다.
+test('agentSignalOf — 근거 0 은 false 가 아니라 null(모름), 셸 확정만 false', () => {
+  resetAll();
+  const tid = 1000036;
+  // (a) 살아 있는 claude 인데 근거가 하나도 없는 순간: 제목 글리프 없음(CLAUDE_CODE_DISABLE_TERMINAL_TITLE
+  //     / showStatusInTerminalTab / resume·agents·폴더 신뢰 화면) + 훅 레코드 0건(데몬 재기동 직후·훅 미주입).
+  const u = watch.agentSignalOf(S(tid), '2.1.219', 'whrksp126@GH-MACui-MacBookPro:~/codingpt-demo');
+  assert.strictEqual(u.on, null, '근거 0 을 false 로 실으면 클라가 "에이전트 없음"으로 단정해 토글이 사라진다');
+  assert.strictEqual(u.agent, null);
+  assert.strictEqual(u.state, null);
+  assert.strictEqual(u.source, null);
+  // 제목이 아예 없는 환경도 같다.
+  assert.strictEqual(watch.agentSignalOf(S(tid), '2.1.219', '').on, null);
+  // cursor-agent 실측 cmd(제목 글리프 없음) 도 모름 — 감지 못 하는 것과 부정하는 것은 다르다.
+  assert.strictEqual(watch.agentSignalOf(S(tid), '2025.09.18-7ae6800', '').on, null);
+  // (b) 에이전트가 아닌 게 거의 확실한 프로세스도 "모름" 이다 — 데몬은 vim/npm 을 구별할 근거가 없다.
+  assert.strictEqual(watch.agentSignalOf(S(tid), 'vim', 'vim README.md').on, null);
+  // (c) 셸만 부정이다(유일한 하드 OFF). 근거까지 실어 왜 false 인지 남긴다.
+  const sh = watch.agentSignalOf(S(tid), 'zsh', '⠹ 스테일 제목');
+  assert.strictEqual(sh.on, false);
+  assert.strictEqual(sh.source, 'shell');
+  assert.strictEqual(watch.agentSignalOf(S(tid), '-bash', '').on, false);
+});
+
+test('agentSignalOf — 셸은 스테일 글리프·훅 기록이 있어도 OFF(직전 라운드 blocker)', async () => {
+  resetAll();
+  const tid = 1000031;
+  // 훅이 방금 working 을 보고한 터미널(= agent-state 는 부착 상태)인데 프로세스가 셸로 돌아온 경우.
+  await agentState.applyHook(S(tid), {
+    v: 2, event: 'prompt', agent: 'claude', sessionId: 'sess-shell', promptId: 'p1',
+    tid, cwdRel: 'proj/demo', wsName: 'demo',
+  });
+  assert.strictEqual(agentState.attachmentOf(S(tid)).attached, true);
+  const s = watch.agentSignalOf(S(tid), 'zsh', LIVE_TITLE_WORK); // 실측: cmd=zsh + 스테일 스피너 제목
+  assert.strictEqual(s.on, false, '빈 셸 탭에 토글이 굳으면 안 된다(하드 OFF)');
+  assert.strictEqual(s.agent, null);
+  assert.strictEqual(s.state, null);
+  // 실측 셸 타이틀도 당연히 OFF.
+  assert.strictEqual(watch.agentSignalOf(S(tid), '-zsh', 'whrksp126@GH-MACui-MacBookPro:~/codingpt-demo').on, false);
+});
+
+test('agentSignalOf — 셸 복귀가 관찰되면 ON→OFF 로 전이한다(내부 ended → 와이어 gone)', async () => {
+  resetAll();
+  const tid = 1000032;
+  watch.observe([row(tid, LIVE_CMD, LIVE_TITLE_WORK)]); // 시드(working)
+  await tick();
+  assert.strictEqual(watch.agentSignalOf(S(tid), LIVE_CMD, LIVE_TITLE_WORK).on, true);
+  watch.observe([row(tid, 'zsh', LIVE_TITLE_WORK)]);   // 종료 — 제목은 스테일하게 남는다
+  await tick();
+  assert.strictEqual(agentState.attachmentOf(S(tid)).state, 'gone');
+  assert.strictEqual(agentState.attachmentOf(S(tid)).attached, false);
+  const s = watch.agentSignalOf(S(tid), 'zsh', LIVE_TITLE_WORK);
+  assert.strictEqual(s.on, false, '에이전트 종료가 목록에도 즉시 반영돼야 한다');
+});
+
+test('agentSignalOf — 제목이 없는 환경(제목 비활성/resume 화면)도 훅·sticky 근거로 ON', async () => {
+  resetAll();
+  const tidHook = 1000033;
+  // CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 → 제목이 영구히 셸 타이틀. 훅 기록이 유일한 근거다.
+  await agentState.applyHook(S(tidHook), {
+    v: 2, event: 'prompt', agent: 'claude', sessionId: 'sess-nt', promptId: 'p1',
+    tid: tidHook, cwdRel: 'proj/demo', wsName: 'demo',
+  });
+  const h = watch.agentSignalOf(S(tidHook), LIVE_CMD, 'whrksp126@GH-MACui-MacBookPro:~/codingpt-demo');
+  assert.strictEqual(h.on, true);
+  assert.strictEqual(h.state, 'working');
+  assert.strictEqual(h.source, 'hook');
+  // 훅이 없는 경우: 한 번이라도 글리프를 본 세션은 글리프 없는 화면(claude · resume / agents)에서도 ON.
+  const tidSticky = 1000034;
+  watch.observe([row(tidSticky, LIVE_CMD, LIVE_TITLE_IDLE)]);
+  await tick();
+  const st = watch.agentSignalOf(S(tidSticky), LIVE_CMD, 'claude · resume');
+  assert.strictEqual(st.on, true, '중간에 글리프가 사라지는 화면에서 토글이 꺼지면 안 된다');
+});
+
+test('attachmentOf — 기록 유무와 무관하게 "부착" 을 답한다(와이어와 같은 접기)', async () => {
+  resetAll();
+  const tid = 1000035;
+  const unknown = agentState.attachmentOf(S(tid));
+  assert.deepStrictEqual(
+    { attached: unknown.attached, known: unknown.known, state: unknown.state },
+    { attached: false, known: false, state: null },
+    '기록 없음 = 근거 없음(OFF 단정이 아니라 제목 판정으로 내려간다)',
+  );
+  // session_start 전 launching 도 부착으로 답해야 한다(wireStateOf 가 idle 로 접는다).
+  await agentState.applyHook(S(tid), { v: 2, event: 'unknown_thing', agent: 'claude', tid, cwdRel: 'proj/demo' });
+  const launching = agentState.attachmentOf(S(tid));
+  assert.strictEqual(launching.known, true);
+  assert.strictEqual(launching.state, 'idle');
+  assert.strictEqual(launching.attached, true);
+  // session_end → ended → 와이어 gone → 미부착.
+  await agentState.applyHook(S(tid), { v: 2, event: 'session_end', agent: 'claude', tid, cwdRel: 'proj/demo' });
+  assert.strictEqual(agentState.attachmentOf(S(tid)).state, 'gone');
+  assert.strictEqual(agentState.attachmentOf(S(tid)).attached, false);
+  // snapshot(= cpt agent status·hooks.doctor)에도 같은 값이 실린다(판정 정본 1개).
+  const snap = agentState.snapshot('proj/demo').find((t) => t.tid === tid);
+  assert.strictEqual(snap.wireState, 'gone');
+  assert.strictEqual(snap.attached, false);
+});
+
 test('터미널 닫힘(세션 소멸)은 알림 없음 — 대기 후보도 폐기', async () => {
   resetAll();
   watch.observe([row(1000009, 'claude', '⠙ working…')]);

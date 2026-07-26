@@ -102,24 +102,61 @@ function newTid() {
   return 1000000 + Math.floor(Math.random() * (0x7fffffff - 1000000));
 }
 
-// 워크스페이스의 터미널 목록 — [{index(tid), name, command, session}] 생성순 정렬.
-//  window name(자동 개명)이 곧 전 기기 공유 탭 이름. 서버 없음/오류 = [].
+// 목록 한 줄의 에이전트 신호 — 판정은 agent-watch(정본) 에 위임한다. lazy require 로 순환 회피
+//  (agent-watch 는 pty 를 lazy 로 쓴다). 어떤 실패도 목록 자체를 깨지 않는다(목록은 터미널 UI 의 근간).
+//
+// ★★ 와이어 `agent` 는 **3값**이다: `true`=에이전트 / `false`=**셸 확정만** / `null`=모름
+//  (근거 0 · 판정 조회 실패). 클라 사다리는 `false` 를 "명시적 부정" 으로 읽으므로 근거 0 을 false 로
+//  접으면 그 순간 토글이 사라진다 — 제목 글리프가 없는 claude 화면(/resume·agents·폴더 신뢰 ·
+//  CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 · showStatusInTerminalTab)에 훅 미주입이 겹치면 **영구**다.
+//  `null` 은 앱·PC 의 normalizeDaemonAgentFlag 가 "필드 부재" 와 같게 접어 아래 폴백 칸으로 내려간다
+//  (클라 수정 0, 구 클라도 그대로 동작). 이 필드는 폴백을 대체하는 게 아니라 폴백이 비는 구멍을
+//  메우는 추가 근거이므로, **모름을 부정으로 승격시키지 말 것**(2026-07-25 합성 교차검증 blocker).
+function agentSignal(session, cmd, title) {
+  try {
+    const s = require('./agent-watch').agentSignalOf(session, cmd, title);
+    // 3값 정규화 — true/false 외의 값(null·undefined)은 전부 모름으로 접는다.
+    if (s) {
+      const on = s.on === true ? true : (s.on === false ? false : null);
+      return { on, agent: s.agent || null, state: s.state || null, source: s.source || null };
+    }
+  } catch (_) { /* noop */ }
+  return { on: null, agent: null, state: null, source: null };   // 조회 실패 = 모름(부정 아님)
+}
+
+// 워크스페이스의 터미널 목록 — [{index(tid), name, command, session, agent, agentName, agentState, agentSource}]
+//  생성순 정렬. window name(자동 개명)이 곧 전 기기 공유 탭 이름. 서버 없음/오류 = [].
+//
+// ★ agent* 4필드는 **추가 전용**(2026-07-25) — 구 앱/구 PC 는 모르는 키를 무시하므로 그대로 동작한다.
+//  `agent` 는 3값(true / false=셸 확정만 / null=모름) — agentSignal 의 ★★ 항이 정본이다.
+//  목적: "이 터미널에 에이전트가 붙어 있는가" 를 **데몬이 판정해서** 실어 보낸다. 클라가 command 를
+//  이름 패턴으로 매칭하는 구조를 끝내기 위함이다(최신 claude 의 pane_current_command = `2.1.219`).
+//  판정 규칙 정본은 agent-watch.agentSignalOf 한 곳(= isAgentPane/titleStatus 공유).
+//  pane_title 을 **format 에 추가로 조회**하는 이유: 판정 근거가 제목 글리프인데 window_name 은 사용자가
+//  수동 rename 하면 automatic-rename 이 꺼져 얼어붙는다(그 터미널만 영구 미감지가 된다). 제목 원문은
+//  사용자 프롬프트가 들어 있어 응답에 싣지 않는다 — 판정 입력으로만 쓰고 버린다.
 async function listTerminals(ns) {
   let out;
   try {
-    out = await runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}']);
+    out = await runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}\t#{pane_title}']);
   } catch (_) { return []; }
   const prefix = ns + '--t-';
   const rows = [];
   const seen = new Set();
   for (const l of out.split('\n').map((s) => s.replace(/\r$/, '')).filter(Boolean)) {
-    const [sname, created, wname, cmd] = l.split('\t');
+    const parts = l.split('\t');
+    const [sname, created, wname, cmd] = parts;
+    const title = parts.slice(4).join('\t'); // 제목은 마지막 필드(구분자가 섞여도 뒤를 전부 되붙인다)
     if (!sname || !sname.startsWith(prefix)) continue;
     if (seen.has(sname)) continue; // 세션당 첫 window 만(사용자가 tmux 로 window 를 더 만들어도 1터미널)
     seen.add(sname);
     const tid = parseInt(sname.slice(prefix.length), 10);
     if (!Number.isFinite(tid)) continue;
-    rows.push({ index: tid, name: wname || '', command: (cmd || '').trim(), session: sname, created: parseInt(created, 10) || 0 });
+    const sig = agentSignal(sname, cmd, title);
+    rows.push({
+      index: tid, name: wname || '', command: (cmd || '').trim(), session: sname, created: parseInt(created, 10) || 0,
+      agent: sig.on, agentName: sig.agent, agentState: sig.state, agentSource: sig.source,
+    });
   }
   rows.sort((a, b) => (a.created - b.created) || (a.index - b.index));
   return rows;
@@ -688,8 +725,18 @@ async function handleTerminalRpc(method, params) {
   await migrateLegacyPool(session, abs);
   if (method === 'terminal.list') {
     // durable 터미널 목록(tmux 세션들) — 모든 기기 "내역"의 원천(이름 포함, 생성순).
+    //  agent* 4필드는 추가 전용(2026-07-25) — 클라의 "에이전트 붙었나" 판정 정본(§1.6).
+    //   agent(true|false|null — **false 는 셸 확정만**, null=모름) · agentName('claude'|'codex'|'gemini'|null)
+    //   · agentState('idle'|'working'|'permission'|'needsInput'|null)
+    //   · agentSource('hook'|'watch'|'title'|'shell'|null). agent 가 true 가 아니면 name/state 는 전부 null.
+    //  ⚠ session/created 는 내부 필드라 여기서 싣지 않는다(기존과 동일 — 와이어 표면을 넓히지 않는다).
     const list = await listTerminals(session);
-    return { windows: list.map((t) => ({ index: t.index, name: t.name, command: t.command })) };
+    return {
+      windows: list.map((t) => ({
+        index: t.index, name: t.name, command: t.command,
+        agent: t.agent, agentName: t.agentName, agentState: t.agentState, agentSource: t.agentSource,
+      })),
+    };
   }
   if (method === 'terminal.new') {
     // 새 터미널 = 전용 세션 생성(전 기기에 나타남). 이름은 자동 개명(automatic-rename)이 부여.

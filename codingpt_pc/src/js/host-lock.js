@@ -52,11 +52,34 @@ export function resetHostLocks() {
 }
 
 /**
+ * 자물쇠 배지를 그릴 **호스트 행 집합** 규칙 — 앱 `E2eeSettingsCard` 의 `S.devices.filter(...)` 와
+ *  **같은 조건**이어야 한다(2026-07-27 교차검증 결함).
+ *  PC 는 `runnerKind !== 'cloud' && role !== 'controller'` 만 봐서 **꺼둔 PC 까지** 행에 나열했다.
+ *  오프라인 호스트는 위 `setHostE2eeEpoch(_, null)` 이 항목을 지우므로 hostE2eeEpoch=undefined →
+ *  `hostLockLabel` 이 '확인 중'(대기색)을 준다 = 몇 달 안 켠 노트북이 **영구히 '확인 중'** 으로 남았다.
+ *  '확인 중' 은 §2.7 의 '모름' 라벨로는 적법하지만 꺼진 기기에 대해서는 "지금 확인하고 있다" 는 거짓
+ *  진행 신호이고, 같은 계정의 폰 화면에는 그 행이 아예 없어(앱은 `d.online` 을 요구) 두 화면의 PC 수와
+ *  색이 달라졌다 — 사용자가 어느 쪽이 맞는지 판단할 근거가 없다. 그래서 **온라인만** 그린다.
+ *  ⚠ 오프라인을 다시 보여주려면 배지 4종 도메인에 '오프라인' 을 더해야 하고, 그건 카피표(§4-2)와
+ *   앱==PC 동치 테스트를 함께 개정하는 일이다 — 필터 통일이 이번 라운드의 답이다.
+ *  ⚠ 조건 하나하나가 앱과 같아야 한다(논리 클라우드 호스트는 `runnerKind` 와 `typeof id` 둘 다에
+ *   걸리지만, 한쪽만 두면 같은 입력에서 두 화면이 다른 행을 그릴 수 있다).
+ *  동치 고정 = test/e2ee-crossimpl.mjs(앱 TSX 의 필터식을 오려 같은 격자로 대조).
+ */
+export function isHostRow(d) {
+  if (!d) return false;
+  return d.role === "host" && !!d.online && d.runnerKind !== "cloud" && typeof d.id === "number";
+}
+
+/**
  * **호스트별** 자물쇠 라벨 — 이 PC 로 가는 트래픽이 실제로 암호화되는가(교집합).
  *  근거 = `runner_status.e2eeEpoch`(0 = 그 호스트에 열쇠 없음, undefined = 구 back 이거나
  *  아직 프레임을 못 받았다 = 모름).
  *  ⚠ '모름' 을 '평문' 으로 단정하지 않는다 — 표시를 위해 있는 값이지 게이팅 근거가 아니다.
  *  문구는 모바일 `hostLockLabel()` 과 **글자까지 동일**해야 한다(사용자가 두 화면을 나란히 본다).
+ *  정본 = docs/구현설계-2026-07-25/14-설정-카피-감사.md §4-2. 2026-07-27 개정: 행 안에 PC 이름이 이미
+ *  있으므로 '이 PC 는 평문(열쇠 없음)' → `평문(열쇠 없음)`(의미 동일 = 그 PC 에 열쇠 없음). 도메인 4종의
+ *  **의미와 판정 순서는 변경 금지**.
  *
  * ★ 세대(epoch)까지 교집합이다(2026-07-25 실측 결함 · 계약 §2.7). `hostEpoch > 0` 만 보고 '암호화됨' 을
  *   그리면 **회전 직후 최대 15분간 거짓 자물쇠**다: 데몬은 회전을 push 없이 폴링으로만 감지하므로
@@ -66,16 +89,33 @@ export function resetHostLocks() {
  *   `myEpoch` 를 넘기지 않으면(구 호출부) 세대 대조를 건너뛴다 — 기존 동작 그대로.
  *   ⚠ 모바일 `e2eeState.ts hostLockLabel()` 과 **같은 순서·같은 문구**여야 한다(판정 순서가 어긋나면
  *    같은 입력에서 두 화면이 다른 색을 그린다). PC↔앱 동치는 test/e2ee-crossimpl.mjs 가 고정한다.
+ *
+ * ★ 4번째 근거 = **계정 세대(accountEpoch)**(2026-07-27, 한계 ③-2). 위 두 대조는 "상대가 뒤처졌는가"
+ *   만 본다. 반대 방향 — **이 PC 의 로컬 세대가 서버 계정 세대보다 뒤처진 경우** — 는 어느 호스트로
+ *   보내든 봉투가 409(E2EE_EPOCH_MISMATCH)로 거절되는데(back daemonController 선대조 · 데몬
+ *   control.js 둘 다 "현재 세대만" 받는다), 상대가 나와 같은 옛 세대면 `hostEpoch === myEpoch` 라서
+ *   초록이 그려졌다. 특히 **자기 행**은 settings.js 가 hostEpoch 를 자기 epoch 로 채우므로 100% 초록이었다.
+ *   근거는 새로 만들지 않는다: 데몬 `e2ee.state` 가 이미 `accountEpoch` 를 싣는다(e2ee-local.js:135) —
+ *   PC 는 저장만 하고 쓰지 않았다. 앱은 enroll/keyring 응답의 `epoch` 로 같은 값을 얻는다(대칭).
+ *   ⚠ 표시 전용이다 — 이 값으로 봉인 여부를 게이팅하지 않는다(모름을 평문으로 단정하지 않는다).
+ *   ⚠⚠ **입력의 신선도가 이 규칙의 전부다**(2026-07-27 실측 결함): accountEpoch 를 데몬 폴링만으로
+ *    채우면 같은 왕복이 로컬 epoch 도 올리므로(e2ee-account.js callKeyring → acceptGrant) 두 값이
+ *    **항상 같이 낡아** `mine !== acct` 가 회전 직후 15분 창에서 한 번도 참이 되지 않는다 — 정확히 그
+ *    창을 위해 만든 근거인데 거기서만 죽는다. 그래서 `e2ee.js` 는 device_approval_event(rotated/
+ *    policy/bootstrapped)의 epoch 를 refresh 완료 전에 단조 반영한다(앱 e2ee.ts noteAccountEpoch 미러).
+ *    이 함수는 순수하므로 그 신선도를 스스로 지킬 수 없다 = 호출부(설정 렌더)의 입력이 정본이다.
  */
-export function hostLockLabel(selfReady, hostEpoch, myEpoch) {
+export function hostLockLabel(selfReady, hostEpoch, myEpoch, accountEpoch) {
   if (!selfReady) return { text: "평문", tone: "off" };            // 이 기기에 열쇠가 없다
   if (hostEpoch == null) return { text: "확인 중", tone: "wait" }; // 아직 모름(구 back 포함)
-  if (Number(hostEpoch) <= 0) return { text: "이 PC 는 평문(열쇠 없음)", tone: "off" };
+  if (Number(hostEpoch) <= 0) return { text: "평문(열쇠 없음)", tone: "off" };
+  const mine = myEpoch == null ? 0 : Number(myEpoch);
   // 세대 불일치 = 지금 보내는 봉투가 그 PC 에서 거절된다(또는 그 PC 의 봉투를 내가 못 연다) = 평문 폴백.
-  if (myEpoch != null && Number(myEpoch) > 0 && Number(myEpoch) !== Number(hostEpoch)) {
-    return { text: "확인 중", tone: "wait" };
-  }
+  if (mine > 0 && mine !== Number(hostEpoch)) return { text: "확인 중", tone: "wait" };
+  // 내가 계정 세대에 뒤처졌다 = 상대가 같은 옛 세대라도 회전이 이미 일어났다 → 초록 금지.
+  const acct = accountEpoch == null ? 0 : Number(accountEpoch);
+  if (mine > 0 && acct > 0 && mine !== acct) return { text: "확인 중", tone: "wait" };
   return { text: "암호화됨", tone: "on" };
 }
 
-export default { setHostE2eeEpoch, applyRunnerStatus, hostE2eeEpoch, resetHostLocks, hostLockLabel };
+export default { setHostE2eeEpoch, applyRunnerStatus, hostE2eeEpoch, resetHostLocks, hostLockLabel, isHostRow };

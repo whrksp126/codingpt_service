@@ -618,6 +618,238 @@ test('H. 실패 문구 규약(호스트 오프라인 오탐 금지) + 킬스위�
   }
 });
 
+// ── I. 무트래픽 TTL(경로 주장 철회) — 계약 §4.10 ──────────────────────────
+// 닫는 한계: 강등 신호(noteSoftFail/noteHardFail)는 **실트래픽이 있을 때만** 불린다. 그래서 프리뷰
+//  실트래픽(PC JS clientKey)으로 승격된 엔트리는 PC 의 검증 probe(데몬 뷰어 clientKey = **다른 키**)로
+//  강등되지 않고 영원히 'lan' 으로 동결됐다 → 집을 떠나도 "직결" 배지가 켜져 있는 거짓 표시.
+// 여기서 못 박는 것: ① 무소식이면 스스로 내려온다 ② **흐르고 있는 직결은 절대 내려가지 않는다**
+//  ③ 내려오는 방식은 "주장 철회"뿐(쿨다운·백오프 승수 무손상 = 지연 회귀 금지, 릴레이 강제 금지).
+test('I. 무트래픽 TTL — 무소식이면 직결 주장을 스스로 철회하고, 바이트가 흐르는 직결은 강등되지 않는다', async () => {
+  const TTL = lan.NO_TRAFFIC_TTL_MS;
+  assert.ok(Number.isFinite(TTL) && TTL > 0, 'TTL 상수가 노출되지 않았다');
+  assert.ok(TTL >= 2 * 5 * 60 * 1000,
+    'TTL 은 PC 검증 probe 간격(VERIFY_GAP_MS=5분)의 2배 이상 — 폴링 1회를 놓쳐도 배지가 깜빡이면 안 된다');
+
+  const echo = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('R:'), d]))));
+  await new Promise((r) => echo.listen(0, '127.0.0.1', r));
+  const echoPort = echo.address().port;
+  // 릴레이가 열리면 곧 "직결이 죽었다"는 뜻이다 — 이 테스트에서는 0 이어야 한다.
+  let relayHits = 0;
+  const httpServer = http.createServer();
+  httpServer.on('upgrade', (req, socket) => { relayHits += 1; socket.destroy(); });
+  await new Promise((r) => httpServer.listen(0, '127.0.0.1', r));
+
+  let now = 5_000_000;
+  lan.__setNow(() => now);
+  lan.resetPaths();
+  lan.__resetLimits();
+  const listenPort = 28000 + (process.pid % 1000);
+  // clientKey 는 **PC 웹뷰(프리뷰)** 쪽 값 — 데몬 뷰어 키로 도는 검증 probe 가 만질 수 없는 그 엔트리다.
+  const { g } = newGrant({ clientKey: 'pc-webview-ttl' });
+  const key = lan.pathKey(g.clientKey, 12, '127.0.0.1');
+  const started = await forward.startLocalForward({
+    serverUrl: `http://127.0.0.1:${httpServer.address().port}`, port: listenPort, token: 'tok-ttl',
+    upstream: {
+      mode: 'lan', host: '127.0.0.1', lanPort: LAN_PORT, remotePort: echoPort,
+      grantId: g.grantId, secret: g.secret, clientKey: g.clientKey, kind: 'pc', hostDeviceId: 12,
+    },
+  });
+  assert.strictEqual(started.ok, true, `포워더 기동 실패: ${started.error}`);
+
+  const live = () => new Promise((resolve, reject) => {
+    const c = track(net.connect({ host: '127.0.0.1', port: listenPort }));
+    const t = setTimeout(() => { c.destroy(); reject(new Error('연결 시간 초과')); }, 5000);
+    c.on('connect', () => { clearTimeout(t); resolve(c); });
+    c.on('error', (e) => { clearTimeout(t); reject(e); });
+  });
+  const exchange = (c, payload) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('왕복 시간 초과')), 5000);
+    c.once('data', (d) => { clearTimeout(t); resolve(d.toString()); });
+    c.write(payload);
+  });
+
+  try {
+    // 승격 — 연결 1개 = 성공 1단위(PROMOTE_OK_STREAK=2).
+    const c1 = await live();
+    assert.strictEqual(await exchange(c1, 'P1'), 'R:P1');
+    assert.strictEqual(lan.pathState(key), 'probing');
+    const c2 = await live();
+    assert.strictEqual(await exchange(c2, 'P2'), 'R:P2');
+    assert.strictEqual(lan.pathState(key), 'lan');
+    assert.strictEqual(relayHits, 0, '직결인데 릴레이가 열렸다');
+
+    // ② 흐르고 있는 직결 — 새 연결이 더 생기지 않아도(오래 열린 HMR/WS 스트림) 강등되면 안 된다.
+    now += TTL - 60_000;
+    assert.strictEqual(lan.pathState(key), 'lan', 'TTL 전에 내려가면 정상 사용을 깨뜨린다');
+    assert.strictEqual(await exchange(c2, 'P3'), 'R:P3');   // 호스트→우리 바이트 도착 = noteTraffic
+    now += TTL - 60_000;                                    // 누적 경과 = TTL 초과(무소식 판정이면 만료됐을 시점)
+    assert.strictEqual(lan.pathState(key), 'lan',
+      '바이트가 흐르는데 TTL 이 강등했다 — TTL 은 "무소식" 에만 반응해야 한다');
+
+    // ① 무소식 — 마지막 바이트로부터 TTL 초과 → 주장 철회.
+    now += 120_000;
+    // 강등 목표가 **'relay'** 인 것이 계약이다(값을 'probing' 으로 되돌리면 아래 I-3 이 깨진다):
+    //  같은 호스트의 실패한 형제 엔트리(cooldown)를 lan-local.status 집계가 가리지 않게 하기 위해서다
+    //  (MODE_RANK: probing 3 > cooldown 2 > relay 1).
+    assert.strictEqual(lan.pathState(key), 'relay', '무트래픽 TTL 이 지났는데 여전히 lan(거짓 배지)');
+    // ③ 철회는 벌이 아니다 — 쿨다운 미부과 + 백오프 승수 보존 + 다음 연결은 여전히 직결을 쓴다.
+    assert.strictEqual(lan.shouldTry(key), true, 'TTL 이 쿨다운을 걸면 다음 프리뷰가 60s 이상 릴레이로 밀린다');
+    const snap = lan.pathSnapshot()[key];
+    assert.strictEqual(snap.cooldownUntil, 0);
+    assert.strictEqual(snap.cooldownMs, 0, 'TTL 철회가 백오프 승수를 건드리면 플래핑 백오프가 무의미해진다');
+    assert.strictEqual(snap.okStreak, 0, '만료된 승격 근거(한 시간 전 probe)를 오늘의 성공과 합치면 안 된다');
+
+    // 재승격 — 같은 좌표로 다시 흐르면 원래대로. 릴레이로 밀린 연결은 하나도 없다.
+    const c3 = await live();
+    assert.strictEqual(await exchange(c3, 'P4'), 'R:P4');
+    assert.strictEqual(lan.pathState(key), 'probing');
+    const c4 = await live();
+    assert.strictEqual(await exchange(c4, 'P5'), 'R:P5');
+    assert.strictEqual(lan.pathState(key), 'lan', 'TTL 철회 뒤 재승격이 안 되면 직결이 영구히 죽는다');
+    assert.strictEqual(relayHits, 0, 'TTL 철회가 트래픽을 릴레이로 밀어냈다');
+    for (const c of [c1, c2, c3, c4]) { try { c.destroy(); } catch (_) { /* noop */ } }
+  } finally {
+    forward.stopLocalForward(listenPort);
+    await new Promise((r) => httpServer.close(r));
+    await new Promise((r) => echo.close(r));
+    lan.__setNow(null);
+    lan.resetPaths();
+  }
+});
+
+test('I-2. TTL × 쿨다운/부활 상호작용 — 만료가 쿨다운을 풀지 않고, 부활은 백오프 승수를 보존한다', () => {
+  let now = 9_000_000;
+  lan.__setNow(() => now);
+  lan.resetPaths();
+  try {
+    const k = lan.pathKey('pc-1', 77, '192.168.7.5');
+    // 백오프를 상한까지 올린다(60s→120→240→480→900 상한) — 쿨다운(15분)이 TTL(10분)보다 길어지는
+    //  유일한 구간이고, 여기서 TTL 이 쿨다운을 덮어쓰면 "실패한 경로를 곧바로 다시 두드리는" 회귀가 된다.
+    for (let i = 0; i < 5; i++) lan.noteHardFail(k, 'auth');
+    const cd = lan.pathSnapshot()[k];
+    assert.strictEqual(cd.cooldownMs, 15 * 60 * 1000, '쿨다운 상한은 15분');
+    assert.strictEqual(lan.shouldTry(k), false);
+
+    now += lan.NO_TRAFFIC_TTL_MS + 1000;     // TTL 만료 시점(아직 쿨다운 5분 남음)
+    assert.strictEqual(lan.pathState(k), 'cooldown', 'TTL 만료가 남은 쿨다운을 지웠다');
+    assert.strictEqual(lan.shouldTry(k), false, 'TTL 이 쿨다운을 풀면 백오프가 무의미해진다');
+    // 쿨다운 중에는 probe 성공도 승격시키지 않는다(TTL 만료가 그 울타리를 흔들지 않는다).
+    lan.noteProbeOk(k, 10); lan.noteProbeOk(k, 10);
+    assert.strictEqual(lan.pathState(k), 'cooldown');
+
+    // 부활(재접속 훅) — 쿨다운은 1회 무시되지만 **백오프 승수는 남는다**(불안정 망에서 60s 로 리셋 금지).
+    assert.strictEqual(lan.reviveAll('control-reconnect'), 1, '쿨다운 중인 엔트리를 부활시켜야 한다');
+    assert.strictEqual(lan.shouldTry(k), true);
+    assert.notStrictEqual(lan.pathState(k), 'lan', '부활이 직결 주장을 되살려선 안 된다(근거 없는 배지)');
+    lan.noteHardFail(k, 'auth');
+    assert.strictEqual(lan.pathSnapshot()[k].cooldownMs, 15 * 60 * 1000,
+      '부활 후 첫 강등이 60s 로 되돌아가면 플래핑 백오프가 사라진다');
+    // 부활은 TTL 시계를 밀지 않는다 — 밀면 재접속마다 거짓 'lan' 이 TTL 만큼 연장된다.
+    lan.resetPaths();
+    const k2 = lan.pathKey('pc-1', 78, '192.168.7.5');
+    lan.noteProbeOk(k2, 10); lan.noteProbeOk(k2, 10);
+    assert.strictEqual(lan.pathState(k2), 'lan');
+    now += lan.NO_TRAFFIC_TTL_MS - 1000;
+    lan.reviveAll('control-reconnect');
+    now += 2000;
+    assert.strictEqual(lan.pathState(k2), 'relay', '부활이 TTL 시계를 밀어 거짓 배지가 연장됐다');
+
+    // 네트워크 변경(인터페이스 감시 훅) — 이전 망의 이력은 통째로 무의미하다(모바일 net_change 등가).
+    lan.resetPaths();
+    const k3 = lan.pathKey('pc-1', 79, '192.168.9.9');
+    lan.noteProbeOk(k3, 10); lan.noteProbeOk(k3, 10);
+    lan.noteHardFail(k3, 'auth');            // 쿨다운 이력까지 만든 뒤
+    lan.noteProbeOk(k3, 10); lan.noteProbeOk(k3, 10);
+    const nc = lan.noteNetChange('if-change');
+    assert.deepStrictEqual(nc, { entries: 1, demoted: 0 });
+    assert.strictEqual(lan.pathState(k3), 'relay');
+    assert.strictEqual(lan.shouldTry(k3), true, '망이 바뀌면 이전 망의 쿨다운으로 새 망을 막아선 안 된다');
+    assert.strictEqual(lan.pathSnapshot()[k3].cooldownMs, 0);
+    // 'lan' 주장도 함께 내려간다(망이 바뀐 뒤에도 켜져 있는 배지가 이 라운드의 거짓 표시다).
+    lan.resetPaths();
+    const k4 = lan.pathKey('pc-1', 80, '192.168.9.9');
+    lan.noteProbeOk(k4, 10); lan.noteProbeOk(k4, 10);
+    assert.strictEqual(lan.noteNetChange('if-change').demoted, 1);
+    assert.strictEqual(lan.pathState(k4), 'relay');
+  } finally {
+    lan.__setNow(null);
+    lan.resetPaths();
+  }
+});
+
+test('I-3. 부활/TTL 배선 — revive 는 실제 신호에서 불리고, 흐르는 바이트는 TTL 시계를 리셋한다', () => {
+  const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/gm, '');
+  // ① 데몬이 아는 "네트워크가 바뀌었다" 신호 = lan.js 인터페이스 감시(lan_update 를 유발하는 그 지점).
+  const lanSrc = strip(fs.readFileSync(path.join(__dirname, '..', 'lan.js'), 'utf8'));
+  const ifBranch = lanSrc.slice(lanSrc.indexOf('ifTimer = setInterval'), lanSrc.indexOf('sweepTimer = setInterval'));
+  assert.match(ifBranch, /noteNetChange\(/, '인터페이스 변경에 경로 이력 초기화가 연결되지 않았다(revive 호출자 0건 재발)');
+  assert.match(ifBranch, /onLanChange/, 'lan_update 통지(호스트 좌표)는 그대로 유지돼야 한다');
+  // ② 제어 WS 재접속(수면 복귀·망 전환·서버 재시작) = hello_ack 안에서 부활.
+  const ctlSrc = strip(fs.readFileSync(path.join(__dirname, '..', 'control.js'), 'utf8'));
+  const ack = ctlSrc.slice(ctlSrc.indexOf("msg.type === 'hello_ack'"), ctlSrc.indexOf("msg.type === 'lan_grant'"));
+  assert.match(ack, /reviveAll\(/, '재접속에 LAN 경로 부활이 연결되지 않았다');
+  // ③ 흐르는 직결의 TTL 시계 리셋은 **호스트→우리 방향**에만 걸린다(죽은 소켓에도 쓸 수 있으므로
+  //    업스트림 write 는 생존 증거가 아니다).
+  const fwdSrc = strip(fs.readFileSync(path.join(__dirname, '..', 'forward.js'), 'utf8'));
+  assert.match(fwdSrc, /c\.onData\s*=\s*\([\s\S]{0,80}noteTraffic\(up\.key\)/,
+    '직결 수신 경로에 noteTraffic 이 없으면 오래 열린 스트림이 TTL 로 강등된다');
+  const localData = fwdSrc.slice(fwdSrc.indexOf('const onLocalData'), fwdSrc.indexOf('sock.on(\'data\', onLocalData)'));
+  assert.ok(!/noteTraffic/.test(localData), '업스트림 write 를 생존 증거로 쓰면 죽은 경로가 살아 있는 것처럼 보인다');
+  // 릴레이 폴백은 한 줄도 사라지지 않았다(영구 폴백 규율).
+  assert.match(fwdSrc, /handleConnRelay\(entry, port, sock, pending\.splice\(0\)\)/, '버퍼 승계 릴레이 폴백 유지');
+  assert.match(fwdSrc, /\/api\/daemon\/forward\/' \+ entry\.token/, '릴레이 upstream(token) 경로 유지');
+});
+
+// ── I-4. TTL 강등이 형제 엔트리의 쿨다운을 가리지 않는다(실측 결함 — PC 60초 왕복 영구 반복) ──
+// 호스트 1대에 경로 엔트리는 **둘** 생긴다(키 = clientKey|hostDeviceId|net):
+//   · 프리뷰 = PC JS clientKey (forward.start 실트래픽으로 승격)
+//   · probe  = 데몬 뷰어 clientKey (lan.probe / lan.rpc)
+// 집을 떠나면 뷰어 엔트리는 probe 실패로 cooldown(상한 15분)에 들어가지만 프리뷰 엔트리는 아무도
+// 만지지 않아 TTL(10분)로만 내려간다. TTL 목표가 'probing' 이면 lan-local.status 의 MODE_RANK 최댓값
+// 규칙(probing 3 > cooldown 2)이 그 쿨다운을 **가려** PC 의 `if (mode === 'cooldown') return;` 이 절대
+// 발화하지 않고, PC 는 PROBE_GAP_MS(60s)마다 lan.probe → grantFor → back POST /api/daemon/lan/grant
+// 왕복 + 스테일 사설 IP 로의 TCP 타임아웃을 무기한 반복한다.
+//  ⚠ 시계: lan-local.status 는 쿨다운 유효성을 **Date.now()** 로 본다. 그래서 주입 시계는 반드시
+//   '실시간 + offset' 이어야 한다(작은 절대값을 주입하면 두 모듈의 눈금이 갈려 쿨다운이 안 보인다).
+test('I-4. TTL 강등 목표는 relay — 같은 호스트의 남은 쿨다운을 집계가 가리지 않는다', () => {
+  const lanLocal = require('../lan-local');
+  let off = 0;
+  lan.__setNow(() => Date.now() + off);
+  lan.resetPaths();
+  try {
+    const HID = 91;
+    const IP = '192.168.31.7';
+    const kPrev = lan.pathKey('pcjs-abc', HID, IP);      // 프리뷰(PC JS)
+    const kView = lan.pathKey('daemon-viewer', HID, IP); // 데몬 뷰어(probe)
+
+    lan.noteProbeOk(kPrev, 10); lan.noteProbeOk(kPrev, 10);
+    assert.strictEqual(lan.pathState(kPrev), 'lan');
+    for (let i = 0; i < 6; i++) lan.noteHardFail(kView, 'LAN_UNREACHABLE');   // 쿨다운을 상한(15분)까지
+    assert.strictEqual(lan.pathState(kView), 'cooldown');
+
+    // 흐르는 직결이 있는 동안은 'lan' 이 맞다 — 형제의 쿨다운이 살아 있는 배지를 꺼서는 안 된다.
+    assert.strictEqual(lanLocal.status({ hostDeviceId: HID }).mode, 'lan');
+
+    off += lan.NO_TRAFFIC_TTL_MS + 1000;                 // 무트래픽 TTL 발화(쿨다운은 아직 5분 남음)
+    const after = lanLocal.status({ hostDeviceId: HID });
+    assert.ok(after.cooldownUntil - (Date.now() + off) > 0, '전제 붕괴: 가려질 쿨다운이 이미 끝났다');
+    assert.strictEqual(after.mode, 'cooldown',
+      `쿨다운이 남았는데 mode='${after.mode}' — PC 가 데몬 백오프를 존중할 기회를 잃고 60초마다 `
+      + 'lan.probe + back grant 왕복을 영구히 돈다');
+    // 벌은 주지 않았다: 직결 재시도 능력·백오프 승수는 그대로(지연 회귀 금지).
+    assert.strictEqual(lan.shouldTry(kPrev), true, 'TTL 철회가 쿨다운을 걸었다');
+    assert.strictEqual(lan.pathSnapshot()[kPrev].cooldownMs, 0);
+
+    // 다시 집에 돌아와 프리뷰가 흐르면 배지는 곧바로 되살아난다.
+    lan.noteProbeOk(kPrev, 10); lan.noteProbeOk(kPrev, 10);
+    assert.strictEqual(lanLocal.status({ hostDeviceId: HID }).mode, 'lan',
+      'relay 강등이 재승격을 막으면 집에 돌아와도 직결이 살아나지 않는다');
+  } finally {
+    lan.__setNow(null);
+    lan.resetPaths();
+  }
+});
+
 // ── C-6. IP 레이트리밋(마지막 — 127.0.0.1 을 60s 차단하므로) ─────────────
 test('C-6. 인증 실패 3회/분/IP → 그 IP 차단(무프레임 즉시 종료)', async () => {
   lan.__resetLimits();

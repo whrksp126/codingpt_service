@@ -198,6 +198,32 @@ function resyncAll() {
   return { sent, total: states.size };
 }
 
+// ── 부착 판정(pull 경로, 계약 §1.6) ────────────────────────────────────────
+//  왜 필요한가: push(agent_state) 는 **전이가 있을 때만** 나가는 휘발성 신호라, 스테일(15분)·WS 재접속
+//  공백·호스트 복귀·데몬 재기동 구간에서 클라이언트 쪽 상태가 빈다. 그때 클라가 프로세스 이름
+//  (`tab.cmd`)으로 되짚는 구조가 이번 사고의 원인이었다(최신 claude 의 pane_current_command 는
+//  `2.1.219` 같은 버전 문자열 = 어떤 이름 패턴에도 안 맞는다). 그래서 5~9초마다 무조건 다시 오는
+//  터미널 목록(terminal.list)에 **데몬이 판정한 결과**를 실어 보낸다 — 이 함수가 그 판정의 상태 쪽 절반이다.
+//
+//  규율: "부착" 의 정의는 와이어 계약과 **한 벌**이어야 한다 → `wireStateOf(rec) !== 'gone'`.
+//   · launching(훅은 왔지만 아직 상태 미확정)은 wireStateOf 가 idle 로 접으므로 부착으로 답한다.
+//   · ended(셸 복귀·session_end)는 'gone' 이므로 즉시 미부착 — 빈 셸 탭에 토글이 굳지 않는다.
+//  기록이 아예 없으면 attached:false + known:false 로 답한다(= "근거 없음". 목록 판정은 이때 제목
+//  신호로 내려간다 — agent-watch.agentSignalOf 참조).
+function attachmentOf(key) {
+  const rec = states.get(String(key || ''));
+  if (!rec) return { attached: false, known: false, agent: null, state: null, source: null, hookGoverned: false };
+  const wire = wireStateOf(rec);
+  return {
+    attached: wire !== 'gone',
+    known: true,
+    agent: rec.agent || null,
+    state: wire,
+    source: rec.source || null,
+    hookGoverned: hookGoverned(rec.key),
+  };
+}
+
 // ── 훅 생존/지배 판정 ──
 function hookGoverned(key) {
   const rec = states.get(String(key || ''));
@@ -512,6 +538,11 @@ function publicView(rec) {
     wsName: rec.wsName,
     agent: rec.agent,
     state: rec.state,
+    // 추가 전용(2026-07-25): 와이어와 같은 접기(ended→gone, launching→idle) + 부착 불리언.
+    //  구 소비자(`cpt agent status`·hooks.doctor)는 state 만 읽으므로 무영향이고, 새 소비자는
+    //  "gone 이 아니면 부착" 규칙을 여기서 그대로 받는다(판정 정본 2벌 방지).
+    wireState: wireStateOf(rec),
+    attached: wireStateOf(rec) !== 'gone',
     version: rec.version,
     since: rec.since,
     updatedAt: rec.updatedAt,
@@ -579,6 +610,7 @@ module.exports = {
   start, configure,
   applyHook, applyWatch,
   statusOf, legacyStatusOf, snapshot, hookGoverned, noteHook, hookRecent, forget,
+  attachmentOf,             // 목록(terminal.list) 판정의 상태 쪽 절반 — agent-watch.agentSignalOf 가 소비
   wireStateOf, resyncAll,   // 상태 방출(기능3 2단계) — control.js 가 hello_ack 에서 리싱크를 부른다
   HOOK_GOVERN_MS, REFIRE_MIN_MS, PERMISSION_DEDUP_MS, HOOK_RECENT_MS, AGENT_STATE_CAP,
   _states: states, _tombs: tombs, _reset, _lastEmitted: lastEmitted,

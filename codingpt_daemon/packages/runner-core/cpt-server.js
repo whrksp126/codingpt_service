@@ -196,9 +196,17 @@ function sendUiCommand(cmd, params, { mode = 'broadcast', target, timeoutMs } = 
 }
 
 // ── back REST 헬퍼(deviceToken) — 알림/워크스페이스 목록 등 서버가 원천인 것 ──
+// 응답을 **무한정 기다리지 않는다**: 여기 오는 라우트는 전부 JSON 메타(수 KB)라 30초면 넉넉하고,
+//  걸린 요청은 호출측의 "진행 중" 플래그를 그만큼 붙잡아 둔다 — e2ee-account 의 st.running 이 몇 분간
+//  참이면 그 사이 도착한 e2ee_hint 가 전부 한 번의 재확인으로 뭉개진다(실측 결함의 창 폭 확대 요인).
+//  ★ 실패 취급은 기존 네트워크 단절과 같다(에러 throw) → 호출측 백오프/폴백 경로가 그대로 돈다.
+const BACK_FETCH_TIMEOUT_MS = Math.max(5000, Number(process.env.CPT_BACK_TIMEOUT_MS) || 30000);
 async function backFetch(method, apiPath, body) {
   const cfg = configLib.load();
   if (!cfg || !cfg.serverUrl || !cfg.deviceToken) throw new Error('페어링돼 있지 않습니다 (daemon.json 없음)');
+  // 구 node(AbortSignal.timeout 부재)에서도 그대로 도는 폴백 — 그때는 타임아웃 없이 기존 동작.
+  const signal = (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function')
+    ? AbortSignal.timeout(BACK_FETCH_TIMEOUT_MS) : undefined;
   const res = await fetch(cfg.serverUrl.replace(/\/+$/, '') + apiPath, {
     method,
     headers: {
@@ -206,6 +214,7 @@ async function backFetch(method, apiPath, body) {
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
+    ...(signal ? { signal } : {}),
   });
   const text = await res.text();
   let json = null;
@@ -519,6 +528,9 @@ async function dispatch(req, conn) {
 
     // ── 터미널(공유 풀 — 전 기기 반영) ──
     case 'terminal.list': {
+      // 응답의 windows[] 는 데몬이 판정한 agent 신호를 함께 싣는다(추가 전용, §1.6):
+      //  agent(3값: true / false=셸 확정만 / null=모름) · agentName · agentState · agentSource.
+      //  내용성 정보(제목 원문·요약)는 싣지 않는다.
       const r = await ptyLib.handleTerminalRpc('terminal.list', { cwd: resolved.cwdRel });
       return r;
     }
@@ -902,6 +914,8 @@ async function dispatch(req, conn) {
         return { ok: true, state: r.state, version: r.version };
       }
       // 에이전트 상태 조회 — 훅/폴백이 만든 현재 상태 스냅샷(터미널별).
+      //  각 항목에 `wireState`(ended→gone, launching→idle 접기)와 `attached`(= wireState !== 'gone')가
+      //  함께 온다(추가 전용) — 목록(terminal.list)의 agent 플래그와 **같은 규칙**이라 두 표면이 어긋나지 않는다.
       if (cmd === 'agent.status') {
         return { terminals: require('./agent-state').snapshot(resolved.cwdRel) };
       }

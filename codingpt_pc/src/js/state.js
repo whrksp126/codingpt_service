@@ -814,10 +814,21 @@ export function deviceKey() {
 }
 
 // ── 영속화(pc-ui.json) ──
+// 리컨실러가 매 틱(7s) 다시 채우는 **휘발 판정 신호는 저장하지 않는다**. 저장하면 다음 실행 첫 몇 초를
+//  "지난 세션의 판정"이 지배한다 — 데몬이 `agent:false` 를 싣던 순간에 저장됐다면 claude 가 도는데도
+//  토글이 잠깐 사라진다(이 라운드가 없애려던 증상의 축소판). 탭 이름/cmd 는 라벨 복원에 쓰므로 유지.
+export function stripVolatile(node) { // export = test/agent-toggle.mjs 대조용(내부 헬퍼)
+  if (!node) return node;
+  if (T.isLeaf(node)) {
+    if (!Array.isArray(node.tabs)) return node;
+    return { ...node, tabs: node.tabs.map(({ agent, agentState, ...rest }) => rest) };
+  }
+  return { ...node, first: stripVolatile(node.first), second: stripVolatile(node.second) };
+}
 function serialize() {
   const ws = {};
   for (const [id, w] of Object.entries(state.ws)) {
-    ws[id] = { layout: w.layout, focusId: w.focusId };
+    ws[id] = { layout: stripVolatile(w.layout), focusId: w.focusId };
   }
   // v: 2 = pane 독립 세션 아키텍처 이후 저장본(복원 시 win 재사용 가능 표식).
   return { v: 3, activeWsId: state.activeWsId, ws, wsPrefs };
@@ -964,6 +975,15 @@ export async function reconcilePool() {
         // 실행 중 명령(pane_current_command) — 탭 라벨 부제("이름 · claude")로 표시(cmux 미러).
         const cmd = p.command || "";
         if ((t.cmd || "") !== cmd) { t.cmd = cmd; changed = true; touched.add(l.id); }
+        // ── 토글 판정용 pull 신호(agent-signal.js 사다리 ②) — 목록은 7s 마다 무조건 다시 온다 ──
+        //  agent/agentState = 데몬이 정규화해 실어 보내는 플래그(additive). 없으면 undefined 로 남고
+        //  사다리가 다음 칸으로 내려간다 — "없으면 에이전트 아님" 으로 단정하지 않는다(구 데몬 대응).
+        //  ⚠ 이 PC 의 로컬 워크스페이스 목록은 Rust(tmux 직결)라 두 필드가 **구조적으로 오지 않는다**
+        //   → 사다리 ③'(제목 글리프)·④(기본 ON)가 판정을 맡는다. 원격 목록(데몬 경유)에서만 채워진다.
+        //  ※ pane_title 원본(ptitle)은 싣지 않는다 — 사다리에서 도달 불가였고(window name 은 자동 개명이든
+        //   수동 rename 이든 항상 비지 않는다) 앱 입력과의 동치만 깨뜨렸다(2026-07-25 교차실행).
+        if (p.agent !== undefined && t.agent !== p.agent) { t.agent = p.agent; changed = true; touched.add(l.id); }
+        if (p.agentState !== undefined && t.agentState !== p.agentState) { t.agentState = p.agentState; changed = true; touched.add(l.id); }
         return true;
       });
       if (l.tabs.length !== before) touched.add(l.id);
@@ -989,7 +1009,13 @@ export async function reconcilePool() {
       if (!targetId) T.eachLeaf(w.layout, (l) => { if (!targetId && l.kind === "terminal") targetId = l.id; });
       if (targetId) {
         const leafT = T.findLeaf(w.layout, targetId);
-        for (const m of missing) leafT.tabs.push({ win: m.index, title: m.name || "" });
+        for (const m of missing) {
+          // 편입 시점에도 판정 재료를 같이 싣는다 — 다음 틱(7s)까지 토글이 비어 보이지 않게.
+          const nt = { win: m.index, title: m.name || "", cmd: m.command || "" };
+          if (m.agent !== undefined) nt.agent = m.agent;
+          if (m.agentState !== undefined) nt.agentState = m.agentState;
+          leafT.tabs.push(nt);
+        }
         api.debugLog(`reconcile: 탭 편입 ${missing.map((m) => m.index).join(",")} → pane=${targetId}`);
         // 트리 전멸 폴백으로 방금 만든 'new' placeholder 는 실제 풀 window 가 편입됐으면 제거 —
         //  남겨두면 mount 의 _ensureWin 이 풀에 불필요한 새 터미널을 또 만든다.

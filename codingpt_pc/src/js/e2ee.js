@@ -43,7 +43,9 @@ import * as S from "./state.js";
 import { state } from "./state.js";
 import { verifyCode4, fingerprint6, safetyCode, qrPin, isSealedBody } from "../vendor/e2ee/e2ee-proto.js";
 import { b64uDec } from "../vendor/e2ee/e2ee-core.js";
-import { selfStateLabel, needsBootstrap } from "./e2ee-label.js";
+import { selfStateLabel, needsBootstrap, canRestore } from "./e2ee-label.js";
+import { classifyRpcFail, isDaemonUnsupported, mayFallback, rpcFailCode } from "./e2ee-fallback.js";
+import { hostE2eeEpoch } from "./host-lock.js";
 
 // UI 가 읽는 단일 상태(모바일 e2ee.ts getStatus() 와 같은 정보 구조).
 export const e2ee = {
@@ -76,6 +78,40 @@ export const e2ee = {
   devices: [],            // 열쇠를 가진 기기(키링)
 };
 
+/**
+ * 계정 세대(accountEpoch) **단조 래치**(2026-07-27 결함 — 한계 ③-2 의 근거가 죽어 있었다).
+ *  ★ 왜 래치가 필요한가: PC 의 accountEpoch 유일한 원천이 데몬 `e2ee.state` 였고, 그 값은 데몬이
+ *   keyring 을 폴링할 때만 갱신된다(e2ee-account.js callKeyring). 그런데 **같은 왕복이 acceptGrant 로
+ *   로컬 epoch 도 올린다** → 두 값이 항상 같이 낡는다 = `accountEpoch === epoch` → host-lock.js 의
+ *   계정 세대 대조(4번째 인자)가 **회전 직후 15분 창에서 절대 발화하지 않는다**(그 창을 위해 만든
+ *   근거인데). 실측: 계정이 4로 회전한 직후 PC 가 읽는 accountEpoch=3 · epoch=3 → 자기 행은 초록.
+ *   반대로 앱은 같은 순간 device_approval_event 의 epoch 를 즉시 반영해(e2ee.ts noteAccountEpoch)
+ *   전 호스트 행이 '확인 중' 이 된다 → 같은 규칙·같은 실제 상태에서 폰과 PC 가 다른 색을 그렸다.
+ *  그래서 **push 프레임의 epoch 를 refresh 완료 전에 먼저 반영**한다(앱과 같은 처방·같은 단조 규율).
+ *  ⚠ 단조 증가만 받는다: 회전은 되돌아가지 않으므로 낡은 응답이 값을 되돌리면 배지가 깜빡인다.
+ *  ⚠ **표시 전용**이다(host-lock.js 4번째 인자) — 이 값으로 봉인 여부를 게이팅하지 않는다.
+ */
+let accountEpochSeen = 0;
+let accountEpochRef = ""; // 이 래치가 속한 계정(userRef) — 계정이 바뀌면 폐기한다
+function noteAccountEpoch(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0 || n <= accountEpochSeen) return false;
+  accountEpochSeen = n;
+  e2ee.accountEpoch = n;
+  return true;
+}
+/**
+ * 계정이 바뀌었으면 래치를 폐기한다(다음 계정 epoch 가 더 낮으면 배지가 '확인 중' 에 영구 고착된다 —
+ *  resetHostLocks 와 같은 규율). 파생 기준을 **모를 때는 폐기하지 않는다**: ''(모름)로 판단하면
+ *  부팅 직후 push 로 받아 둔 값을 첫 refresh 가 지운다.
+ */
+function noteAccountRef(ref) {
+  const r = typeof ref === "string" ? ref : "";
+  if (!r) return;
+  if (accountEpochRef && r !== accountEpochRef) { accountEpochSeen = 0; e2ee.accountEpoch = null; }
+  accountEpochRef = r;
+}
+
 function ready() { return e2ee.available && e2ee.state === "trusted" && e2ee.policy !== "off"; }
 export function e2eeReady() { return ready(); }
 /**
@@ -86,6 +122,8 @@ export function e2eeReady() { return ready(); }
 export function e2eeStateLabel() { return selfStateLabel(e2ee, ready()); }
 /** 이 PC 에 '계정 암호화 처음 켜기' 버튼을 노출할지(데몬은 자동 부트스트랩을 하지 않는다). */
 export function e2eeNeedsBootstrap() { return needsBootstrap(e2ee); }
+/** '복구 코드로 복원' 행을 노출할지 — 판정은 e2ee-label.js(앱 canRestore 와 동치, 테스트가 대조한다). */
+export function e2eeCanRestore() { return canRestore(e2ee, ready()); }
 /**
  * ui_hello 에 실을 caps — 실제로 그 단계를 수행할 수 있을 때만 신고(config/caps.js 규약).
  *  ★ 단계별로 쪼갠 문자열을 쓴다(서버 SERVER_CAPS 와 동일 이름): 'e2ee.v1' 처럼 뭉치면 아직 배관이
@@ -119,16 +157,27 @@ export function e2eeGate() {
   return "종단간 암호화를 준비하는 중이에요.";
 }
 
-async function cpt(cmd, args) {
+/**
+ * cpt.sock 왕복 + 실패 코드 반환. `{ r, code }` — r=null 이면 실패이고 code 는 데몬이 실은 코드다
+ *  (Rust cptsock.rs e2ee_local 이 `<CODE>: 메시지` 로 실어 준다. "" = 코드 없는 실패 = IPC 단절 등).
+ *  ⚠ 코드를 모듈 변수에 담아 두지 않는다 — 봉인 호출은 동시에 여러 개 날아가므로(IDE 트리 + 자동저장)
+ *   "마지막 실패 코드" 전역은 다른 호출의 코드를 읽는 레이스가 된다. 호출부가 **자기 반환값**을 본다.
+ */
+async function cptCoded(cmd, args) {
   try {
     const r = await api.e2eeLocal(cmd, args || {});
-    return r || null;
+    return { r: r || null, code: "" };
   } catch (e) {
     // 데몬 미기동/구버전/명령 미지원 — 미지원 상태로 내려놓고 조용히 진행(평문 폴백).
-    if (e2ee.available) { e2ee.available = false; e2ee.state = "unsupported"; }
-    return null;
+    //  ★ 단, **모든** 실패를 미지원으로 보면 안 된다: 봉투 하나가 세대 불일치(409)로 실패한 것만으로
+    //   available=false 가 되면 설정 배지가 '미지원' 으로 바뀌고 e2eeCaps() 가 빈 배열이 되어 다음
+    //   hello 에서 이 PC 가 **스스로 능력을 취소**한다(조용한 평문). 판정은 e2ee-fallback.js 정본.
+    const code = rpcFailCode(e);
+    if (e2ee.available && isDaemonUnsupported(code)) { e2ee.available = false; e2ee.state = "unsupported"; }
+    return { r: null, code };
   }
 }
+async function cpt(cmd, args) { return (await cptCoded(cmd, args)).r; }
 
 /**
  * 표시값 파생 기준(계정 참조) — 데몬이 서버에서 받아 파일로 영속하는 문자열이 **유일한 정본**이다.
@@ -201,12 +250,22 @@ export async function refreshE2ee() {
   e2ee.checking = st.checking === true;
   e2ee.nextCheckInMs = st.nextCheckInMs != null ? Number(st.nextCheckInMs) : null;
   e2ee.phase = typeof st.phase === "string" ? st.phase : null;
-  e2ee.accountEpoch = st.accountEpoch != null ? Number(st.accountEpoch) : null;
+  // ★ 순서 불변식: userRef(계정 식별)를 accountEpoch 보다 **먼저** 읽는다 — 계정 전환 판정이 래치보다
+  //  늦으면 옛 계정의 세대가 새 계정 배지에 남는다(다음 줄의 noteAccountEpoch 가 그 래치를 쓴다).
+  e2ee.userRef = typeof st.userRef === "string" ? st.userRef : "";
+  noteAccountRef(e2ee.userRef);
+  // 데몬이 말하는 계정 세대는 **폴링 시점의 사진**이라 push 로 이미 받아 둔 값보다 낡을 수 있다 →
+  //  단조 래치로만 반영한다(되돌리면 배지가 초록↔확인중으로 깜빡인다).
+  noteAccountEpoch(st.accountEpoch);
+  const prevEpoch = e2ee.epoch;
   e2ee.epoch = Number(st.epoch || 0);
+  // 새 세대 열쇠를 채택했다(데몬이 grant 를 받았다) = 봉투 계층의 상황이 바뀌었다 → 네거티브 캐시를
+  //  즉시 만료시킨다. 남겨두면 회전 직후의 실패로 걸린 10분 동안 갱신을 끝냈는데도 봉인을 시도하지
+  //  않아 전부 평문이면서 배지는 초록이다(계약 §2.7 자가복구 ③ 뒷문장 — 앱 adoptGrant 와 같은 처방).
+  if (e2ee.epoch > prevEpoch) clearRpcUnsupported();
   if (st.policy) e2ee.policy = String(st.policy);
   if (st.scope) e2ee.scope = String(st.scope);
   e2ee.ikX = st.ikX || null;
-  e2ee.userRef = typeof st.userRef === "string" ? st.userRef : "";
   e2ee.recoverySet = !!st.recoverySet;
   e2ee.reason = st.reason || null;
   const pend = await cpt("e2ee.pending");
@@ -247,6 +306,11 @@ export function applyDeviceApprovalEvent(ev) {
     //   내려가는데 배지는 초록이다 = 거짓 자물쇠(계약 §2.7 자가복구 ①, 앱 e2ee.ts 와 동일 처방).
     //  back 은 이 3종을 **이미** 팬아웃한다(deviceTrustService.js:504/696/722) — 새 배관 0개.
     //  ⚠ 억제창을 두지 않는다: push 는 드물고 정본이다(억제는 409 재시도 경로의 몫).
+    //  ★ 프레임이 실어 주는 계정 세대를 **refresh 완료 전에** 먼저 반영한다(앱 e2ee.ts:1046 미러).
+    //   이게 없으면 accountEpoch 의 유일한 원천이 데몬 폴링이고, 그 폴링은 로컬 epoch 도 같이 올리므로
+    //   두 값이 항상 같이 낡아 계정 세대 대조가 **회전 직후 15분 창에서 한 번도 발화하지 않는다**
+    //   (= 자기 행이 그 창 내내 초록 = 거짓 자물쇠. 폰은 같은 순간 '확인 중' 이라 화면끼리도 어긋난다).
+    if (noteAccountEpoch(ev.epoch)) S.emit();
     void refreshE2ee();
   }
 }
@@ -310,22 +374,103 @@ export async function revokeTrust(deviceKeyId) {
 
 /**
  * 봉투 RPC — 데몬이 봉인해 back 에 보낸다(서버는 메서드명조차 못 본다).
- * @returns { ok:true, r } | null(미지원 → 호출부가 기존 평문 경로로 폴백) | throws(진짜 실패)
+ * @returns 결과 객체 | null(봉투가 왕복하지 못했다 → 호출부가 기존 평문 경로로 폴백) | throws
  *  ⚠ 실패를 빈 결과로 뭉개지 않는다 — 리컨실러가 "0개"로 오판해 레이아웃을 지운 사고가 있었다.
+ *  폴백 표(계약 §2.7)의 두 행을 여기서 가른다:
+ *   · 봉투 계층 실패(데몬 throw = cpt() null) → **폴백 허용**. 막으면 IDE 트리·파일 열기·800ms
+ *     자동저장이 붉은 오류로 죽는다(= 자기 기기에서 잠긴다).
+ *   · 200 + ok:false(호스트가 **이미 실행**했고 그 처리가 실패) → **폴백 금지** = throw. 폴백하면
+ *     같은 변형(fs.write)을 평문으로 한 번 더 실행한다(이중 실행).
+ *   · policy='required' → 두 경우 다 금지(throw) — 다운그레이드 공격 차단.
  */
 //  ★ 네거티브 캐시: 데몬/서버에 봉투 배관이 없는 동안 **fs 호출마다 소켓 왕복이 한 번 더** 붙으면
 //    IDE 트리/파일 열기가 전부 느려진다. 한 번 미지원을 보면 TTL 동안 곧바로 평문 경로로 간다.
 const RPC_UNSUPPORTED_TTL_MS = 10 * 60 * 1000;
 let rpcUnsupportedUntil = 0;
+function noteRpcUnsupported() { rpcUnsupportedUntil = Date.now() + RPC_UNSUPPORTED_TTL_MS; }
+/** 상태가 실제로 바뀌었을 때(새 세대 열쇠 채택) 캐시 만료 — 다음 호출이 곧바로 봉인을 재시도한다. */
+function clearRpcUnsupported() { rpcUnsupportedUntil = 0; epochRetryUntil.clear(); }
+/**
+ * 지금 봉투 RPC 를 시도해 볼 가치가 있는가(테스트·진단용 — 앱 rpcAvailable() 미러).
+ *  @param {number|null} [hostDeviceId] 넘기면 그 호스트의 세대 억제 게이트까지 본다(호스트별).
+ *   ⚠ `undefined`(인자 없음) = 전역 게이트만. `null` 은 "호스트 미지정 = self" 라는 **유효한 키**다.
+ */
+export function rpcAvailable(hostDeviceId) {
+  if (!ready() || Date.now() < rpcUnsupportedUntil) return false;
+  return !(hostDeviceId !== undefined && epochGated(hostDeviceId));
+}
+
+// 세대 불일치 자가복구(계약 §2.7 자가복구 ②) — back 이 이 실패를 "상태가 바뀌면 즉시 낫는다" 로
+//  정의했는데 그 '상태 갱신' 을 수행하는 주체가 PC 에는 없었다: 실패를 전부 미지원으로 캐시해 10분간
+//  평문으로 내려가면서 배지는 초록을 유지했다(거짓 자물쇠).
+//  ⚠ 억제 창이 필요하다 — IDE 트리·파일 열기·800ms 자동저장이 초당 여러 번 봉인하므로 실패마다
+//    데몬 왕복(state+pending+keyring 3회)을 부르면 폭주가 된다. 창 안에서는 1회만 발사하고,
+//    갱신 결과는 다음 시도가 쓴다(앱 EPOCH_REFRESH_GAP_MS 와 같은 20초).
+const EPOCH_REFRESH_GAP_MS = 20 * 1000;
+let epochRefreshAt = 0;
+function refreshForEpochMismatch() {
+  const now = Date.now();
+  if (now - epochRefreshAt < EPOCH_REFRESH_GAP_MS) return;
+  epochRefreshAt = now;
+  void refreshE2ee();
+}
+// ★ '캐시 금지' 는 **상한 없음**이 아니다(2026-07-27 결함). 'epoch' 분류는 10분 네거티브 캐시를
+//  일부러 건너뛰는데, 그 결과 유일한 브레이크가 사라져 **종료 조건 없는 왕복 폭주**가 됐다:
+//   · 현 설치본(회전 push 미지원 데몬)은 회전을 최대 15분 뒤에야 폴링으로 본다 = 그 15분 내내 실패.
+//   · 호출 빈도는 IDE 트리 + 800ms 자동저장 + 2.5s 디스크 리컨실러라 초당 수 회.
+//   · 위 refreshForEpochMismatch 의 20s 억제창은 **로컬 refresh 만** 막고 봉투 재시도는 못 막는다.
+//   · 왕복 1회 = cpt.sock → 데몬 → HTTPS POST /api/daemon/rpc(레이트리밋 없음) → 호스트 WS → 409.
+//  그래서 refresh 억제창과 **같은 20초** 동안 그 호스트로의 봉투 재시도 자체를 멈춘다(이전 동작은
+//  첫 실패 후 10분 침묵이었으니 20초는 그보다 훨씬 공격적인 재시도다 = 자가복구를 늦추지 않는다).
+//  ⚠ 호스트별이다: 원인이 hostEpoch 뒤처짐이면 다른 PC 는 정상이므로 함께 멈추면 안 된다.
+//  ⚠ 세대가 실제로 올라가면(clearRpcUnsupported) 즉시 만료 — 20초를 기다리지 않는다.
+const epochRetryUntil = new Map(); // hostKey → ts
+const hostKey = (h) => (h == null ? "self" : String(Number(h)));
+function noteEpochRetryGate(h) { epochRetryUntil.set(hostKey(h), Date.now() + EPOCH_REFRESH_GAP_MS); }
+function epochGated(h) {
+  const t = epochRetryUntil.get(hostKey(h));
+  if (t == null) return false;
+  if (Date.now() >= t) { epochRetryUntil.delete(hostKey(h)); return false; }
+  return true;
+}
+
+/**
+ * 평문 폴백을 **막아야 할 때** 던질 오류(policy='required' = 다운그레이드 공격 차단).
+ *  ★ e2eeGate() 만으로는 부족하다: gate 는 "준비가 안 됐다" 만 본다. 열쇠가 있고(ready) 정책이
+ *   'required' 인데 봉투 계층이 실패한 경우 gate 는 null 을 주므로, 그 자리에서 null 을 돌려주면
+ *   호출부가 **평문 REST 로 폴백**한다 = 사용자가 "지원 안 하면 조작 차단" 을 골랐는데 조용히 평문.
+ *   판정 정본은 e2ee-fallback.js mayFallback(policy, hostExecuted)(계약 §2.7 표).
+ */
+function noFallbackError() {
+  return new Error(e2eeGate()
+    || "종단간 암호화가 '항상' 으로 설정돼 있어 평문으로 보낼 수 없어요(암호화가 준비되면 자동으로 됩니다).");
+}
 
 export async function sealedRpc(method, params, hostDeviceId, timeoutMs) {
-  if (!ready() || Date.now() < rpcUnsupportedUntil) {
-    const gate = e2eeGate();
-    if (gate) throw new Error(gate); // required 에서는 평문 폴백 금지
+  // 게이트 3종: 열쇠 없음 · 미지원 네거티브 캐시(10분) · 세대 억제(그 호스트 20초).
+  //  세 경우 다 **required 에서는 평문으로 내려가지 않는다**(throw) — 게이트가 정책의 구멍이 되면 안 된다.
+  if (!ready() || Date.now() < rpcUnsupportedUntil || epochGated(hostDeviceId)) {
+    if (!mayFallback(e2ee.policy, false)) throw noFallbackError(); // required 에서는 평문 폴백 금지
     return null;
   }
-  const r = await cpt("e2ee.rpc", { method, params: params || {}, hostDeviceId: hostDeviceId ?? null, timeoutMs: timeoutMs || 15000 });
-  if (!r) { rpcUnsupportedUntil = Date.now() + RPC_UNSUPPORTED_TTL_MS; return null; } // 미지원 → 폴백
+  const { r, code } = await cptCoded("e2ee.rpc", { method, params: params || {}, hostDeviceId: hostDeviceId ?? null, timeoutMs: timeoutMs || 15000 });
+  if (!r) {
+    // 봉투 계층 실패 = 봉투가 왕복하지 못했다. 두 갈래로 처방이 갈린다(계약 §2.7, e2ee-fallback.js 정본):
+    //  · 'epoch'       → 열쇠 상태를 다시 받아 오면 낫는다 → refresh 1회(20s 억제) + **10분 캐시 금지**
+    //                     대신 그 호스트로만 20초 재시도 게이트(캐시 금지 ≠ 상한 없음 — 위 주석)
+    //  · 'unsupported' → 구조적 미지원 → 10분 캐시(왕복 절감)
+    const kind = classifyRpcFail({
+      code, myEpoch: e2ee.epoch,
+      accountEpoch: e2ee.accountEpoch, hostEpoch: hostE2eeEpoch(hostDeviceId),
+    });
+    if (kind === "epoch") { refreshForEpochMismatch(); noteEpochRetryGate(hostDeviceId); }
+    else noteRpcUnsupported();
+    if (!mayFallback(e2ee.policy, false)) throw noFallbackError();
+    return null; // 평문 폴백 신호
+  }
+  // ★ 여기부터는 봉투가 **왕복했다**: 호스트가 요청을 실제로 실행했고 그 처리가 실패한 것이다.
+  //  절대 null 을 돌려주지 않는다 — 호출부가 폴백으로 오해해 같은 변형(fs.write)을 평문으로 한 번 더
+  //  실행하는 이중 실행이 된다(계약 §2.7 표 2행 = 유일한 폴백 금지 행).
   if (r.ok === false) throw new Error(r.e || r.error || "요청이 실패했어요.");
   // ⚠ 성공했는데 결과가 비어 있어도 **절대 null 을 돌려주지 않는다** — 호출부가 폴백으로 오해해
   //   같은 변형(fs.write 등)을 평문으로 한 번 더 실행하는 이중 실행이 된다.

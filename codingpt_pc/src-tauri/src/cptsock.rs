@@ -14,6 +14,21 @@ fn sock_path() -> Result<std::path::PathBuf, String> {
 // one-shot 요청/응답. ok:false 는 Err(error 메시지)로 승격 — 단, dispatch 가 정상 반환한
 //  구조화 실패(예: forward.start 의 { ok:false, error:'EADDRINUSE' })는 result 로 그대로 전달된다.
 fn cpt_request(cmd: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    cpt_request_coded(cmd, args, false)
+}
+
+// with_code=true 면 데몬이 실은 `code`(cpt-server.js:1166 의 error 프레임 필드)를 에러 문자열 앞에
+//  `<CODE>: ` 로 붙인다. 왜 문자열인가: tauri invoke 의 Err 타입이 String 이라 구조를 실을 자리가 없고,
+//  이 리포에는 이미 같은 선례가 있다(bridge.rs back_api 의 `HTTP 409 ALREADY_RESOLVED: …`).
+//  ★ 코드를 지우면 JS 가 **한글 문구 정규식**으로 분기하게 되고, 문구가 바뀌는 순간 조용히 오분기한다.
+//   특히 봉투 RPC 는 "갱신하면 낫는 세대 불일치" 와 "구조적 미지원(10분 캐시)" 을 반드시 갈라야 한다
+//   (계약 §2.7 자가복구 ③ — 세대 불일치를 캐시하면 갱신 후에도 10분간 전부 평문이 된다).
+//  기존 호출부(forward/lan/sync)는 with_code=false 로 남겨 에러 문자열을 **한 글자도** 바꾸지 않는다.
+fn cpt_request_coded(
+    cmd: &str,
+    args: serde_json::Value,
+    with_code: bool,
+) -> Result<serde_json::Value, String> {
     #[cfg(unix)]
     {
         use std::io::{BufRead, BufReader, Write};
@@ -39,16 +54,22 @@ fn cpt_request(cmd: &str, args: serde_json::Value) -> Result<serde_json::Value, 
         if v.get("ok").and_then(|b| b.as_bool()).unwrap_or(false) {
             Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null))
         } else {
-            Err(v
+            let msg = v
                 .get("error")
                 .and_then(|e| e.as_str())
                 .unwrap_or("cpt 명령 실패")
-                .to_string())
+                .to_string();
+            let code = v.get("code").and_then(|c| c.as_str()).unwrap_or_default();
+            if with_code && !code.is_empty() {
+                Err(format!("{code}: {msg}"))
+            } else {
+                Err(msg)
+            }
         }
     }
     #[cfg(not(unix))]
     {
-        let _ = (cmd, args);
+        let _ = (cmd, args, with_code);
         Err("이 플랫폼에서는 아직 지원되지 않습니다.".to_string())
     }
 }
@@ -141,11 +162,14 @@ pub fn sync_checkpoint(
 //  울타리: `e2ee.` 접두사 명령만 통과시킨다. 프런트에 임의 cpt 명령 통로를 열면 웹뷰에서 실행되는
 //  어떤 스크립트든 데몬 제어권을 갖게 되므로(deviceToken 을 JS 에 노출하지 않는 것과 같은 이유).
 #[tauri::command]
+//  ★ 실패는 데몬 코드를 실어 `<CODE>: <메시지>` 로 돌려준다(e2ee-fallback.js rpcFailCode 가 파싱).
+//   E2EE_EPOCH_MISMATCH/E2EE_DECRYPT_FAILED(= 갱신하면 낫는다)와 E2EE_UNKNOWN_CMD/E2EE_UNSUPPORTED
+//   (= 구조적 미지원, 10분 캐시)를 구분해야 하는데, 코드를 지우면 그 구분이 불가능하다.
 pub fn e2ee_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if !cmd.starts_with("e2ee.") {
         return Err("허용되지 않은 명령입니다.".to_string());
     }
-    cpt_request(&cmd, args)
+    cpt_request_coded(&cmd, args, true)
 }
 
 // ── 로컬 UI 채널(같은 기기 ui_command 왕복 제거) ─────────────────────────────────

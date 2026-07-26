@@ -13,7 +13,8 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
-import { AGENT_CMD_RE, CHAT } from "./chat-model.js";
+import { CHAT } from "./chat-model.js";
+import { resolveAgentPresence, resolveToggleVisible } from "./agent-signal.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -774,22 +775,28 @@ export class PaneView {
     this.body.appendChild(this.chatHost);
   }
 
-  // 활성 탭이 "에이전트가 붙은 터미널 탭"인가 — 토글 노출 판정(설계서 §2.3 우선순위).
-  //  1) 기능3 push(agent_state) = **서버 상태 우선**. 즉시성 <1s. state.agentStateOf 가 값을 주는 동안은
-  //     tab.cmd 를 아예 보지 않는다(계약 §1.5: push 가 존재하면 폴백을 건너뛴다).
-  //     · 'gone'/'ended' 는 state.js 가 키를 지우므로 여기로 오지 않는다 → 자동으로 2)로 되돌아간다.
-  //     · 마지막 push 가 15분 초과(stale)거나 호스트가 오프라인이면 state.js 가 폐기 → 역시 2)로.
-  //  2) 폴백: tab.cmd(리컨실러가 7s 주기로 채우는 pane_current_command).
-  //     gemini(훅 미지원)·`--settings` 직접 지정·cmux PATH 경합에서 **유일한 신호**다 — 지우지 말 것.
-  //  3) 폴백2: cmd 가 node 인데 이 탭에서 chat 모드가 살아 있던 적 있음(agent-watch 의 node 규칙 미러).
+  // 활성 탭이 "에이전트가 붙은 터미널 탭"인가 — 판정 사다리 정본 = agent-signal.js(앱 agentPresence.ts 미러).
+  //  ① push(agent_state) → 셸 확정만 항상-숨김 → ② 데몬 정규화 신호(목록 agent) → ③ tab.cmd 이름 →
+  //  ③' 제목 글리프 → ④ 신호 없으면 **켠다**. push 가 비는 모든 순간(15분 스테일·WS 재접속 폐기·호스트
+  //  오프라인·데몬 재기동·agentstate.v1 미선언)에 토글이 사라지던 것이 사용자 신고 증상이었고, ④ 가
+  //  기본 ON 이라 ①→② 하강 전이에서 OFF 가 나올 수 없다(근거는 resolveAgentPresence 주석 ★ 항).
   _agentOn(tab) {
     if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return false;
-    const st = this.ctx.agentStateOf?.(this.ctx.localPath || "", tab.win);
-    if (st) return st.state !== "gone";
-    const cmd = String(tab.cmd || "");
-    if (AGENT_CMD_RE.test(cmd)) return true;
-    if (cmd === "node" && tab.mode === "chat") return true;
-    return false;
+    const cwd = this.ctx.localPath || "";
+    return resolveAgentPresence({
+      push: this.ctx.agentStateOf?.(cwd, tab.win) || null,
+      tab: {
+        cmd: tab.cmd,
+        // 판정 입력은 앱과 **같은 재료**여야 한다(교차 테스트가 이걸 고정한다) → window name 하나만.
+        //  pane_title 원본을 폴백으로 두는 코드가 있었지만 도달 불가였다(자동 개명 포맷은 셸=폴더명 /
+        //  그 외=pane_title|pane_current_command 로 항상 비지 않고, 수동 rename 은 사용자 이름이 얼어붙는다)
+        //  → 이름이 얼어붙은 터미널의 글리프 소실은 사다리 ④(기본 ON)가 흡수한다.
+        title: tab.title,
+        agent: tab.agent,          // 데몬 정규화 플래그(additive — 구 데몬/Rust 목록엔 없다 = 모름)
+        agentState: tab.agentState,
+        mode: tab.mode,
+      },
+    }).on;
   }
   // 지금 이 pane 이 Chat 모드를 그리고 있는가(리사이즈/크기주장 억제 판정의 단일 기준).
   //  ⚠ 판정은 **표시 조건(showActiveTab 의 chat)과 정확히 같아야 한다.** 여기에 _agentOn 을 AND 로 걸면
@@ -807,9 +814,15 @@ export class PaneView {
     if (this.node.kind !== "terminal" || !this.body) return;
     const tab = this.node.tabs?.[this.node.active];
     const chat = !!(tab && isTermTab(tab) && tab.mode === "chat");
-    // 혼합 탭(IDE/프리뷰)이 활성이면 숨김. 에이전트가 없으면 숨김. 단 이미 chat 모드면 계속 표시
-    //  (에이전트가 종료돼도 대화 기록을 계속 읽을 수 있어야 하고, 돌아갈 길이 있어야 한다).
-    const on = !!tab && isTermTab(tab) && (this._agentOn(tab) || chat);
+    // 혼합 탭(IDE/프리뷰)이 활성이면 숨김 · win 미확정('new')이면 숨김(chat 스냅샷 키가 없다) ·
+    //  이미 chat 모드면 에이전트가 사라져도 계속 표시(대화 기록을 읽고 TUI 로 돌아갈 길).
+    //  ★ 이 세 규칙은 앱 `agentPresence.resolveToggleVisible` 과 **같은 함수**여야 한다(미러 = agent-signal.js).
+    const on = resolveToggleVisible({
+      isTerm: !!tab && isTermTab(tab),
+      win: tab && isTermTab(tab) ? tab.win : null,
+      chatMode: chat,
+      agentOn: this._agentOn(tab),
+    });
     if (!on) {
       this._modeBtn?.remove();
       this._modeBtn = null;
@@ -830,7 +843,8 @@ export class PaneView {
     }
     this._modeBtn.classList.toggle("active", chat);
     this._modeBtn.title = chat ? "터미널(TUI) 보기" : "채팅으로 보기";
-    this._modeBtn.innerHTML = chat ? icons.terminal({ size: 15 }) : icons.chat({ size: 15 });
+    // 글리프 16px — 앱 `ModeToggle.tsx`(TerminalWindow/ChatCircleDots size 16)와 같은 값(3플랫폼 동일 디자인).
+    this._modeBtn.innerHTML = chat ? icons.terminal({ size: 16 }) : icons.chat({ size: 16 });
   }
 
   // 모드 전환 — tab 객체에 얹으므로 영속(pc-ui.json layout)·탭 이동(객체 참조 이동) 모두 자동 승계.

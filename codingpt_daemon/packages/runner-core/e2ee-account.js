@@ -30,11 +30,19 @@
  *   사람이 명시적으로 시작하고 싶을 때만 `bootstrap()`(cpt.sock `e2ee.bootstrap`)을 부른다.
  *
  * ── 폴링 정책(부팅 폭주 금지) ────────────────────────────────────────────────
- * back 은 승인 결과를 **데몬 제어 WS 로 보내지 않는다**(`fanoutDeviceApproval` 는 UI 클라이언트
- * 전용 — daemonRelayService.js:644-649). 그래서 pull 이 유일한 경로이고, "데몬 2초 재연결 폭주"
- * 사고 이력이 있는 제품이므로 모든 대기는 **지수 백오프 + 상한 + 지터**다(값은 nextDelay 참조).
- * 특히 승인이 거절/만료된 뒤의 재신청은 back 이 신뢰 기기에 **푸시 알림을 다시 쏘는** 경로라
- * 상한을 6시간까지 늘린다(알림 폭탄 방지).
+ * pull 이 **정본**이고, "데몬 2초 재연결 폭주" 사고 이력이 있는 제품이므로 모든 대기는
+ * **지수 백오프 + 상한 + 지터**다(값은 nextDelay 참조). 특히 승인이 거절/만료된 뒤의 재신청은
+ * back 이 신뢰 기기에 **푸시 알림을 다시 쏘는** 경로라 상한을 6시간까지 늘린다(알림 폭탄 방지).
+ *
+ * ── 서버 힌트(가속기 — 정본이 아니다) ────────────────────────────────────────
+ * 2026-07-27 부터 back 은 `fanoutDeviceApproval` 과 같은 사실을 연결된 데몬에게도
+ * `{type:'e2ee_hint', kind}` 로 내려보낸다(caps `e2ee.hint.v1`). 이유: 다른 기기에서 회전하면
+ * 이 데몬은 최대 `TRUSTED_MS`(15분)간 옛 세대로 남고 그 사이 봉투가 전부 `E2EE_EPOCH_MISMATCH` 로
+ * 거절돼 화면이 '확인 중' 에 머문다. `hintResync` 가 그 프레임을 받아 즉시 화해를 예약한다.
+ *  ★ 힌트는 **힌트일 뿐**이다(불변식): 프레임 내용으로 열쇠/세대/정책을 바꾸지 않고, 프레임으로
+ *    루프를 **시작하지도** 않는다. 서버가 세대를 주장해 데몬을 옛/새 세대로 몰 수 있게 되면 그
+ *    순간 서버가 신뢰 경계 안으로 들어온다 — 정본은 keyring 왕복 + 승인자 Ed25519 서명 검증.
+ *  ★ 프레임이 없거나 구 back(선언 없음)이면 아무 일도 없다 = 15분 폴링이 그대로 유일 경로(폴백 유지).
  */
 'use strict';
 
@@ -49,13 +57,28 @@ const ENROLL_BASE_MS = 5000;       // 일시 실패(네트워크·5xx·429) 재�
 const ENROLL_MAX_MS = 5 * 60 * 1000;
 const PENDING_BASE_MS = 5000;      // 승인 대기 중 키링 폴링(사람이 폰을 켜는 시간 규모)
 const PENDING_MAX_MS = 60 * 1000;
-const TRUSTED_MS = 15 * 60 * 1000; // 열쇠 보유 중 정기 확인(rotate/revoke 감지 — 이것도 push 가 없다)
+const TRUSTED_MS = 15 * 60 * 1000; // 열쇠 보유 중 정기 확인(rotate/revoke 감지) — 힌트가 없을 때의 유일한 경로
 const RESOLVED_BASE_MS = 10 * 60 * 1000;  // 거절/만료 후 재신청 — 알림이 다시 발사되는 경로라 느리게
 const RESOLVED_MAX_MS = 6 * 60 * 60 * 1000;
 const BOOTSTRAP_BASE_MS = 5 * 60 * 1000;  // 계정에 열쇠 없음(사람이 앱에서 켤 때까지 대기)
 const BOOTSTRAP_MAX_MS = 60 * 60 * 1000;
 const OFF_MS = 60 * 60 * 1000;     // policy='off' — 승인 알림을 만들지 않기 위해 신청 자체를 멈춘다
 const KICK_MIN_GAP_MS = 30 * 1000; // 재접속 폭주가 폴링 폭주로 증폭되지 않게(kick 최소 간격)
+// ── 서버 힌트(e2ee_hint) 수용 간격 ───────────────────────────────────────────
+//  HINT_COALESCE_MS: 힌트 수신 → 실제 왕복까지의 지연. ① 한 사용자 조작이 프레임 두 장을 낼 수 있어
+//   (revoke = rotated + rotate_needed) 합쳐야 하고, ② back 은 keyring 저장 **직후** 팬아웃하지만
+//   그 저장은 아직 withKeyring 락 안이라(deviceTrustService) 곧바로 읽으면 락을 기다린다 —
+//   조금 미루면 왕복 1회로 최신 세대를 읽는다. 사람이 체감하는 값(0.4초)이라 UX 손실은 없다.
+//  HINT_MIN_GAP_MS: 힌트를 **수용**하는 최소 간격. 재접속 kick(30s)보다 짧게 잡는 근거 — 힌트는
+//   계정당 드문 사건(회전/정책 변경)이고 회전 직후 15분 평문이 이 라운드가 닫는 결함 자체라
+//   반응성이 목적이다. 대신 상한은 반드시 있어야 한다: 프레임이 폭주하면(서버 버그·악의) 왕복이
+//   초당으로 늘어 back 레이트리밋(E2EE_*_MAX_PER_MIN)에 부딪히고 로그가 오염된다.
+//   5초 = 최악의 경우 데몬 1대당 분당 12회(15분 폴링 기준선의 3배 미만) — 감쇠 없이도 안전한 상한.
+//   ★ 이 상한은 프레임을 **미루는** 장치이고 버리는 장치가 아니다(hintResync 불변식 ⑤): 창 안에 온
+//    힌트는 `lastHintAt + HINT_MIN_GAP_MS` 시점에 1회 예약된다. 버렸을 때의 대가가 '회전 직후 최대
+//    15분 평문/EPOCH_MISMATCH' 라서 상한을 지키는 것보다 사실을 잃지 않는 것이 항상 더 중요하다.
+const HINT_COALESCE_MS = 400;
+const HINT_MIN_GAP_MS = 5 * 1000;
 const JITTER = 0.2;                // ±20%
 const FETCH_CACHE_MS = 2000;       // PC 설정 화면이 state/pending/keyring 을 연달아 부를 때 왕복 축소
 
@@ -96,6 +119,11 @@ const st = {
   delays: {},             // kind → 직전 대기(지터 적용 전)
   queryOffUntil: 0,       // PC 조회(pending/keyring)의 네거티브 캐시 만료 시각
   policySync: null,       // {policy, code, message} — 정책 서버 동기화 실패(조용한 실패 금지)
+  // 서버 힌트(e2ee_hint) — 전부 **진단용 카운터**다. 열쇠 판정에 쓰이는 값은 하나도 없다.
+  lastHintAt: 0,          // 마지막으로 **수용한** 힌트 시각(throttle 기준)
+  hintSeen: 0,            // 받은 프레임 수
+  hintRuns: 0,            // 힌트가 실제로 유발한 화해 예약 수(= 추가 왕복 상한 관측치)
+  hintPending: false,     // 화해 중 도착 → 끝난 직후 한 번 재확인
 };
 
 function log(msg) { console.log(`[e2ee] ${msg}`); }
@@ -404,6 +432,11 @@ async function runOnce() {
     return { error: st.lastError };
   } finally {
     st.running = false;
+    // 화해 **중**에 도착한 서버 힌트 — 이 왕복이 사실을 지나쳤을 수 있다(back 은 keyring 을 저장한
+    //  뒤 팬아웃하는데, 그 두 시점 사이에 우리 GET 이 끼면 옛 세대를 읽는다). 딱 한 번 재확인한다.
+    //  여기서 처리하는 이유: 진행 중 runOnce 의 schedule() 이 `st.timer` 를 무조건 덮으므로
+    //  hintResync 가 그때 타이머를 세워도 조용히 지워진다(= 회전 직후 15분 고착 그대로).
+    if (st.hintPending) { st.hintPending = false; if (st.phase !== 'resolved') armHint(); }
   }
 }
 
@@ -536,10 +569,79 @@ function resync() {
   return { ok: true, nextInMs: 1000 };
 }
 
+/**
+ * back 제어 WS `e2ee_hint` 수용 — "지금 keyring 을 다시 확인해 보라"는 **힌트**다(계약 §2.12).
+ * 호출자는 control.js 의 프레임 핸들러 하나뿐이다.
+ *
+ * 불변식(하나라도 깨지면 서버가 신뢰 경계 안으로 들어온다)
+ *  ① 프레임 내용으로 상태를 바꾸지 않는다 — `hint` 에서 읽는 것은 로그용 `kind` 문자열뿐이고
+ *    epoch/policy/봉인문은 애초에 스키마에 없다. 세대 판정은 전적으로 runOnce → callKeyring →
+ *    acceptGrant(승인자 Ed25519 서명 검증)가 한다.
+ *  ② 힌트로 루프를 **시작하지 않는다**(`!st.started` → 무시). 기동은 control 이 hello_ack 에서
+ *    서버 선언(e2ee.keys.v1)을 확인한 뒤에만 한다 — 프레임 한 장이 새 동작을 유발할 수 있으면
+ *    caps 교리가 무의미해지고, '서버가 껐다'고 판정된 환경에서도 왕복이 되살아난다.
+ *  ③ 백오프를 **리셋하지 않는다**(st.delays 무접촉). 리셋하면 서버가 프레임만 반복해 재신청
+ *    상한(6시간)을 0 으로 되돌릴 수 있고, 그것이 곧 승인 알림 폭탄이다.
+ *  ④ `phase==='resolved'`(거절/만료 후 재신청 대기)에서는 아예 받지 않는다 — 그 상태의 runOnce 는
+ *    **새 enroll** 을 만들고 back 은 그때마다 신뢰 기기에 승인 요청 푸시를 다시 쏜다. 승인은 사람이
+ *    폰에서 하는 일이라 서버 이벤트가 재신청을 더 급하게 만들 여지도 없다.
+ *  ⑤ 프레임을 **버리지 않는다** — back 은 재전송하지 않으므로 버린 사실은 다음 정기 폴링(15분)까지
+ *    영구 유실이다. 상한(throttle)·진행 중(running)은 전부 '폐기' 가 아니라 '지연' 으로 처리한다
+ *    (throttled → 상한 시점 1회 예약 · running → st.hintPending → runOnce finally 재확인).
+ *    유일한 예외는 ②(미기동)와 ④(resolved) — 그 둘은 "받으면 안 되는" 상태이지 미룰 일이 아니다.
+ * @returns {{ok:boolean, throttled?:boolean, deferred?:boolean, alreadySoon?:boolean, ignored?:string}}
+ */
+function hintResync(hint) {
+  if (!st.started) return { ok: false, ignored: 'not_started' };   // 불변식 ②
+  st.hintSeen += 1;
+  const kind = hint && typeof hint.kind === 'string' ? hint.kind.slice(0, 32) : '';
+  const now = Date.now();
+  if (st.phase === 'resolved') return { ok: false, ignored: 'resolved' };   // 불변식 ④
+  // ★ 진행 중 판정을 **무엇보다 먼저** 한다. 이 검사가 alreadySoon/throttle 뒤에 있으면 영구히
+  //  도달하지 못했다(실측 결함): 타이머 콜백은 st.nextAt 을 갱신하지 않고 schedule() 은 화해가
+  //  **끝난 뒤** 부르므로 runOnce 가 도는 동안 st.nextAt 은 언제나 과거값 = alreadySoon 이 늘 참이다.
+  //  그러면 힌트가 유일한 회복 수단인 그 레이스(back 은 keyring 을 저장한 뒤 팬아웃하는데 그 사이에
+  //  우리 GET 이 끼면 옛 세대를 읽는다)에서 프레임을 버려 회전 직후 15분 고착이 그대로 남는다.
+  if (st.running) { st.hintPending = true; return { ok: true, deferred: true, kind: kind || null }; }
+  // 이미 곧 돌 예정이면 그대로 둔다 — 한 사용자 조작이 낸 프레임 여러 장이 왕복 N회로 증폭되지
+  //  않게. throttle 보다 **먼저** 본다(대기 중인 예약을 헛되게 지우지 않도록).
+  //  ★ `> now` 조건이 계약이다: 이미 발화해 소비된 예약(과거 시각)은 "곧 돌 예정" 이 아니다.
+  if (st.nextAt > now && st.nextAt - now <= HINT_COALESCE_MS) return { ok: true, alreadySoon: true };
+  if (now - st.lastHintAt < HINT_MIN_GAP_MS) {
+    // 수용 상한(5초)은 **폐기가 아니라 지연**이다. back 은 프레임을 재전송하지 않으므로 여기서
+    //  버리면 그 사실은 다음 정기 폴링(15분)까지 영구 유실된다 — 실측 결함: revoke → rotate_needed
+    //  뒤 사람이 회전을 확정하는 '한 조작 두 프레임' 의 두 번째 장(간격 수백ms~수초 = 합침창 400ms
+    //  밖 · throttle창 5s 안)이 사라져 데몬이 옛 세대로 남았다.
+    //  마지막 수용 시각 + 상한 시점에 **딱 한 번** 화해를 예약한다(타이머 1개 · st.delays 무접촉
+    //  → 분당 12회 상한은 그대로). lastHintAt 을 그 예약 시각으로 미뤄 두는 이유 = 프레임이 폭주해도
+    //  같은 시각으로 수렴해 재예약이 누적되지 않게(멱등).
+    const at = st.lastHintAt + HINT_MIN_GAP_MS;
+    if (st.nextAt > now && st.nextAt <= at) return { ok: false, throttled: true, nextInMs: Math.max(0, st.nextAt - now) };
+    st.lastHintAt = at;
+    armHint(at - now);
+    return { ok: false, throttled: true, deferred: true, nextInMs: Math.max(0, at - now), kind: kind || null };
+  }
+  st.lastHintAt = now;
+  armHint();
+  return { ok: true, nextInMs: HINT_COALESCE_MS, kind: kind || null };
+}
+
+// 힌트 → 즉시 화해 예약. schedule() 을 쓰지 않는 이유 = st.delays(백오프)를 건드리지 않기 위해서다.
+//  delayMs 를 주면 그만큼 미룬다(= throttle 창 안에 온 힌트를 버리지 않고 상한 시점으로 지연).
+function armHint(delayMs) {
+  st.hintRuns += 1;
+  const wait = Math.max(0, Number.isFinite(delayMs) ? delayMs : HINT_COALESCE_MS);
+  if (st.timer) clearTimeout(st.timer);
+  st.timer = setTimeout(() => { st.timer = null; void runOnce(); }, wait);
+  if (st.timer.unref) st.timer.unref();
+  st.nextAt = Date.now() + wait;
+}
+
 function stop() {
   if (st.timer) clearTimeout(st.timer);
   st.timer = null;
   st.started = false;
+  st.hintPending = false;
   return { ok: true };
 }
 
@@ -938,6 +1040,8 @@ function identityForPairing() {
 module.exports = {
   // 생명주기(control.js)
   start, stop, resync, runOnce,
+  // back 제어 WS 힌트 수용(control.js `e2ee_hint` 핸들러 전용) — 가속기이고 정본이 아니다.
+  hintResync,
   // e2ee-local(cpt.sock) 위임 표면
   state, pending, keyring, approve, deny, revoke, setPolicy, bootstrap, noteKeyChanged,
   // 페어링 경로(호출자는 packages/daemon·PC)
@@ -953,6 +1057,7 @@ module.exports = {
       delay: 0, phaseKind: null, delays: {}, enrollmentId: null, pendingSince: null, accountEpoch: null,
       recoverySet: false, userRef: '', reason: null, lastError: null, devices: [],
       queryOffUntil: 0, policySync: null,
+      lastHintAt: 0, hintSeen: 0, hintRuns: 0, hintPending: false,
       cache: { pending: null, pendingAt: 0, keyring: null, keyringAt: 0 },
     });
   },
@@ -960,5 +1065,6 @@ module.exports = {
     BOOT_MIN_MS, ENROLL_BASE_MS, ENROLL_MAX_MS, PENDING_BASE_MS, PENDING_MAX_MS,
     TRUSTED_MS, RESOLVED_BASE_MS, RESOLVED_MAX_MS, BOOTSTRAP_BASE_MS, BOOTSTRAP_MAX_MS,
     OFF_MS, KICK_MIN_GAP_MS, KEEP_EPOCHS, FETCH_CACHE_MS,
+    HINT_COALESCE_MS, HINT_MIN_GAP_MS,
   },
 };

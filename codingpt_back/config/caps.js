@@ -54,6 +54,17 @@
 //      ※ 데몬 담당에게: 열쇠 취득/회전 시 `hello` 를 다시 보내면(또는 e2eeEpoch 를 실은 프레임)
 //        back 이 그 자리에서 conn.e2eeEpoch 를 갱신하고 runner_status 를 재팬아웃한다(:248 분기).
 //        지금은 재접속 전까지 배지가 0 으로 고착한다.
+//  · e2ee.hint.v1 — **열쇠 변화 힌트 푸시**(기능2 A단계 후속). 서버측 = `fanoutDeviceApproval` 이
+//                   같은 이벤트를 UI 클라이언트에 팬아웃하면서 **연결된 데몬들에게도**
+//                   `{type:'e2ee_hint', kind}` 를 내려보낸다(daemonRelayService.notifyRunnersE2ee).
+//                   왜 별 문자열인가: 이 능력의 지시대상은 "데몬이 이 프레임을 처리한다" 이고,
+//                   `e2ee.keys.v1`(REST 열쇠 배포)를 가진 구 데몬은 이 프레임을 그냥 버린다 —
+//                   한 문자열로 뭉치면 back 이 프레임을 쏘는데 데몬은 폴링만 하는 조용한 유실이 된다.
+//                   ★ 이 프레임은 **힌트일 뿐**이다: epoch/policy 같은 상태 주장을 싣지 않는다(스키마에
+//                     그런 필드가 아예 없다). 서버가 세대를 주장해 데몬을 옛/새 세대로 몰아넣을 수 있게
+//                     되면 그 순간 서버는 신뢰 경계 안으로 들어온다 — 정본은 항상 데몬의 keyring
+//                     왕복 + 승인자 Ed25519 서명 검증(e2ee-account.acceptGrant).
+//                   E2EE_ENABLED=0 으로 함께 회수(열쇠 배포가 없으면 알릴 변화도 없다).
 //  · e2ee.stream.v1 — 스트림 선협상(기능2 D단계). 서버측 = 터미널/포워딩 토큰 발급 시
 //                   callRpc(…,'e2ee.begin',…) 로 세션을 미리 확정하고, 토큰에 sid 를 보관해
 //                   stream_open params 에 실어 준다(데몬 pty.js/proxy.js 가 이미 읽는 자리).
@@ -101,6 +112,8 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.E2EE_ENABLED)) {
     caps.push('e2ee.keys.v1');
     caps.push('e2ee.rpc.v1');
+    // 열쇠 변화 힌트 푸시 — 처리 코드(notifyRunnersE2ee + fanoutDeviceApproval 호출부)가 이 커밋에 있다.
+    caps.push('e2ee.hint.v1');
     // 스트림 단계만 따로 되돌릴 수 있게 별도 스위치를 둔다 — sid 주입이 잘못되면 증상이
     //  "터미널이 4090 으로 무한 재연결"(가장 위험한 회귀)이라 즉시 회수 수단이 필요하다.
     if (!envOff(env.E2EE_STREAM_ENABLED)) caps.push('e2ee.stream.v1');

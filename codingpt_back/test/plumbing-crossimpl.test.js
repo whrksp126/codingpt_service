@@ -923,3 +923,104 @@ test('체크포인트 — begin/commit 컨트롤러가 accountAuth 라우트로 
   // 봉투 RPC 도 accountAuth(PC 앱 deviceToken) — fs/* 와 같은 규약.
   assert.match(routes, /router\.post\('\/rpc', accountAuth, daemonController\.rpcSealed\)/);
 });
+
+// ── 갭2 후속(2026-07-27): 열쇠 변화 힌트 푸시 `e2ee_hint` ─────────────────────
+//
+// 닫는 한계: 데몬은 열쇠 보유 중 15분(e2ee-account TRUSTED_MS) 고정 주기로만 keyring 을 확인했다.
+//  다른 기기에서 rotate 하면 최대 15분간 그 PC 는 옛 세대로 남고 봉투는 전부 E2EE_EPOCH_MISMATCH →
+//  화면은 '확인 중' 에 머문다. 이제 back 이 같은 사실을 데몬 제어 WS 로도 알린다(가속기).
+//
+// 이 절이 고정하는 계약(깨지면 조용히 죽는다)
+//  · 프레임 스키마에 epoch/policy/봉인문이 **없다** — 있으면 서버가 세대를 주장해 데몬을 옛/새 세대로
+//    몰아넣을 수 있고 그 순간 서버가 E2EE 신뢰 경계 안으로 들어온다(유일한 위협모델).
+//  · 데몬 caps 게이팅 — 선언하지 않은 데몬에게 보내면 프레임만 버려진다(조용한 유실).
+//  · UI 팬아웃(device_approval_event)은 한 줄도 바뀌지 않는다(같은 함수 안에 추가했으므로 회귀 위험).
+
+function runnerStub(deviceId, caps) {
+  const frames = [];
+  return {
+    conn: { deviceId, kind: 'local', caps, e2eeEpoch: 1, ws: { readyState: 1, send(s) { frames.push(JSON.parse(s)); } }, rpcSeq: 0, pendingRpc: new Map(), lastActivityAt: 0 },
+    frames,
+  };
+}
+
+test('e2ee_hint — 회전 팬아웃이 e2ee.hint.v1 을 선언한 데몬에게만 내려간다(스키마에 epoch 없음)', () => {
+  const userId = 990030;
+  const newDaemon = runnerStub(12, ['caps.v1', 'e2ee.keys.v1', 'e2ee.hint.v1']);
+  const oldDaemon = runnerStub(13, ['caps.v1', 'e2ee.keys.v1']);        // 구 번들 — 프레임을 버린다
+  const ui = wsStub();
+  relay._connections.set(String(userId), { runners: new Map([[12, newDaemon.conn], [13, oldDaemon.conn]]), activeRunnerId: 12 });
+  relay._agentWsClients.set(String(userId), new Set([ui]));
+  try {
+    relay.fanoutDeviceApproval(userId, { kind: 'rotated', epoch: 4, revokedKeyIds: [7], byKeyId: 1 });
+
+    // ① UI 팬아웃은 그대로(회귀 금지) — 기기 승인 시트/키링 화면이 이 프레임으로 산다.
+    assert.strictEqual(ui.frames.length, 1);
+    assert.strictEqual(ui.frames[0].type, 'device_approval_event');
+    assert.strictEqual(ui.frames[0].event.epoch, 4, 'UI 프레임은 기존 형태를 유지한다');
+
+    // ② 데몬에게는 힌트만 — caps 를 선언한 쪽에만.
+    assert.strictEqual(oldDaemon.frames.length, 0, '선언하지 않은 데몬에게 보내면 조용한 유실이다');
+    assert.strictEqual(newDaemon.frames.length, 1);
+    const f = newDaemon.frames[0];
+    assert.strictEqual(f.type, 'e2ee_hint');
+    assert.strictEqual(f.kind, 'rotated');
+    assert.strictEqual(typeof f.at, 'string');
+    // ★ 스키마 잠금 — 상태를 주장하는 필드가 하나라도 생기면 데몬이 그것을 채택할 여지가 생긴다.
+    assert.deepStrictEqual(Object.keys(f).sort(), ['at', 'kind', 'type']);
+    for (const bad of ['epoch', 'policy', 'sealed', 'sig', 'grant', 'keyId', 'revokedKeyIds']) {
+      assert.strictEqual(bad in f, false, `힌트 프레임에 ${bad} 가 실렸다 — 정본은 데몬의 keyring 왕복이다`);
+    }
+  } finally {
+    relay._connections.delete(String(userId));
+    relay._agentWsClients.delete(String(userId));
+  }
+});
+
+test("e2ee_hint — 'request'(새 기기 승인 대기)는 데몬 힌트를 만들지 않는다(왕복만 늘고 바뀌는 게 없다)", () => {
+  const userId = 990031;
+  const d = runnerStub(12, ['e2ee.hint.v1']);
+  const ui = wsStub();
+  relay._connections.set(String(userId), { runners: new Map([[12, d.conn]]), activeRunnerId: 12 });
+  relay._agentWsClients.set(String(userId), new Set([ui]));
+  try {
+    relay.fanoutDeviceApproval(userId, { kind: 'request', enrollmentId: 'e_0001', verifyCode: '1234' });
+    assert.strictEqual(ui.frames.length, 1, '승인 시트용 UI 팬아웃은 그대로여야 한다');
+    assert.strictEqual(d.frames.length, 0);
+    // 열쇠 사실이 바뀌는 kind 는 전부 보낸다(하나라도 빠지면 그 전이만 15분 지연으로 남는다).
+    for (const kind of ['rotated', 'rotate_needed', 'resolved', 'bootstrapped', 'policy', 'recovery']) {
+      assert.strictEqual(relay.notifyRunnersE2ee(userId, { kind }), 1, `kind=${kind} 가 데몬에게 가지 않는다`);
+    }
+    assert.strictEqual(relay.notifyRunnersE2ee(userId, { kind: 'nope' }), 0, '모르는 kind 를 보내면 안 된다');
+    assert.strictEqual(relay.notifyRunnersE2ee(userId, {}), 0);
+  } finally {
+    relay._connections.delete(String(userId));
+    relay._agentWsClients.delete(String(userId));
+  }
+});
+
+test('e2ee_hint — 힌트 kind 는 deviceTrustService 가 실제로 팬아웃하는 문자열이어야 한다', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(path.resolve(__dirname, '../services/deviceTrustService.js'), 'utf8');
+  const emitted = new Set([...src.matchAll(/fanout\([^,]+,\s*\{\s*kind:\s*'([a-z_]+)'/g)].map((m) => m[1]));
+  assert.ok(emitted.size >= 6, `팬아웃 kind 스캔 실패(${emitted.size}개) — 정규식이 낡았다`);
+  for (const kind of relay._e2eeHintKinds) {
+    // 오타 하나면 그 전이의 힌트가 영원히 발화하지 않는다(에러 0건 — 15분 지연이 그대로 남는다).
+    assert.ok(emitted.has(kind), `힌트 목록의 '${kind}' 를 deviceTrustService 는 팬아웃하지 않는다`);
+  }
+});
+
+test('e2ee_hint — caps 문자열이 back·데몬 양쪽에서 글자까지 같다 + 킬스위치로 회수된다', () => {
+  const { computeServerCaps } = require('../config/caps');
+  assert.ok(SERVER_CAPS.includes('e2ee.hint.v1'), '처리 코드가 이 커밋에 있으므로 선언해야 한다');
+  assert.strictEqual(computeServerCaps({ E2EE_ENABLED: '0' }).includes('e2ee.hint.v1'), false,
+    'E2EE 를 끄면 알릴 변화 자체가 없다 — 선언도 회수해야 한다');
+  // 데몬이 다른 표기를 쓰면 교집합이 공집합이 되어 협상이 영구 OFF 된다(그게 '안전한 평문'으로 위장된다).
+  const fs = require('fs');
+  const p = path.join(DAEMON_ROOT, 'control.js');
+  if (fs.existsSync(p)) {
+    const src = fs.readFileSync(p, 'utf8');
+    assert.match(src, /caps\.push\('e2ee\.hint\.v1'\)/, '데몬 daemonCaps() 가 같은 문자열을 선언해야 한다');
+    assert.match(src, /msg\.type === 'e2ee_hint'/, '데몬에 프레임 수신 분기가 없으면 선언이 거짓이 된다');
+  }
+});

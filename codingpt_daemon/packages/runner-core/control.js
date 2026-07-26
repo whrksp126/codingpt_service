@@ -55,6 +55,18 @@ function daemonCaps() {
   // E2EE(기능2) — 모듈 실존 + 단계 스코프(킬스위치 포함)를 e2ee-gate 가 판정한다. 미구현/OFF 면
   //  아무 것도 선언하지 않으므로 서버·기기는 협상 자체를 시도하지 않고 기존 평문 경로로 돈다.
   caps.push(...e2eeGate.caps());
+  // 열쇠 변화 힌트 수신(2026-07-27) — back 이 회전/승인/정책 변화 직후 제어 WS 로 `e2ee_hint` 를
+  //  내려보내면 15분 폴링(TRUSTED_MS)을 기다리지 않고 즉시 keyring 을 다시 확인한다. 이 선언이
+  //  back 에게 "이 데몬에 e2ee_hint 를 보내도 된다"는 유일한 신호다(없으면 back 은 프레임을
+  //  만들지 않고 데몬은 폴링만 한다 = 오늘의 동작 그대로).
+  //  ★ e2ee.js caps() 와 달리 **열쇠 보유를 조건으로 걸지 않는다.** 힌트가 가장 필요한 순간이
+  //   열쇠가 아직 없는 때이기 때문이다(계정 부트스트랩 대기 = 백오프 상한 1시간 / 승인 대기 = 60초).
+  //   조건은 (a) 힌트 핸들러가 실제로 있고 (b) E2EE 가 스코프/킬스위치로 꺼져 있지 않은 것뿐 —
+  //   꺼져 있으면 열쇠 클라이언트 자체가 안 도므로 hintResync 가 무시한다(선언도 하지 않는다).
+  const acct = tryRequire('./e2ee-account');
+  if (e2eeGate.allows('rpc') && e2eeGate.load() && acct && typeof acct.hintResync === 'function') {
+    caps.push('e2ee.hint.v1');
+  }
   return caps;
 }
 
@@ -118,6 +130,28 @@ function announceHello(config) {
   return sendEvent(helloFrame(cfg));   // cap 게이팅 없음 — hello 는 구 서버도 아는 프레임이다
 }
 let lastConfig = null;
+
+/**
+ * back `e2ee_hint` 수신 — 열쇠 클라이언트에게 "지금 다시 확인해 봐" 를 넘긴다(§2.12).
+ *
+ * ★ 이 함수는 프레임에서 `kind`(로그 문자열) 외에 **아무것도 읽지 않는다.** 세대·정책을 프레임에서
+ *  받아 반영하면 서버가 데몬을 옛/새 세대로 몰아넣을 수 있고, 그 순간 서버가 신뢰 경계 안으로
+ *  들어온다(E2EE 의 유일한 위협모델). 정본은 e2ee-account 의 keyring 왕복 + 승인자 서명 검증이다.
+ * ★ 루프를 시작하지도 않는다 — `hintResync` 가 `!started` 면 스스로 무시한다(기동은 hello_ack 에서
+ *  서버 선언 e2ee.keys.v1 을 본 뒤에만). 폭주 방지(최소 간격)도 전부 그쪽 책임이다.
+ */
+function handleE2eeHint(msg) {
+  const acct = tryRequire('./e2ee-account');
+  if (!acct || typeof acct.hintResync !== 'function') return false;   // 구 번들 — 폴링만(무해)
+  try {
+    const r = acct.hintResync({ kind: msg && typeof msg.kind === 'string' ? msg.kind : '' });
+    if (r && r.ok && !r.alreadySoon) console.log(`[control] 열쇠 힌트 수신(${(msg && msg.kind) || '?'}) — 즉시 재확인`);
+    return !!(r && r.ok);
+  } catch (e) {
+    console.warn('[control] 열쇠 힌트 처리 실패:', (e && e.message) || e);
+    return false;
+  }
+}
 
 // 지연 로드 모듈로의 rpc 위임 — 모듈/함수 부재를 "명확한 실패"로 바꿔 회신한다.
 //  ⚠ require 를 message 핸들러 안에서 그냥 부르면 예외가 EventEmitter 로 새어 데몬이 죽는다(uncaught).
@@ -483,9 +517,9 @@ function run(config) {
         }
         // E2EE 계정 열쇠 클라이언트(기능2 2b) — **서버가 e2ee.keys.v1 을 선언했을 때만** 돌린다.
         //  이게 없으면 데몬은 열쇠를 얻는 경로가 아예 없어(계약 §2.6) e2ee.caps() 가 영구히 [] 이고,
-        //  앱이 봉인을 시도해도 데몬이 못 열어 "암호화된 척하는 평문" 이 된다. 승인 결과는 데몬 제어
-        //  WS 로 오지 않으므로(fanoutDeviceApproval 은 UI 클라이언트 전용) pull 이 유일한 경로다 —
-        //  모든 대기는 e2ee-account 의 지수 백오프 + 상한이 관리한다(부팅/재접속 폭주 금지).
+        //  앱이 봉인을 시도해도 데몬이 못 열어 "암호화된 척하는 평문" 이 된다. 승인/회전 결과의 **정본은
+        //  pull** 이고(back 의 `e2ee_hint` 는 그 pull 을 앞당기는 가속기일 뿐 — §2.12), 모든 대기는
+        //  e2ee-account 의 지수 백오프 + 상한이 관리한다(부팅/재접속 폭주 금지).
         //  ⚠ caps 는 **다음 hello** 부터 e2ee.* 를 싣는다(열쇠 수령 시점엔 이미 연결돼 있으므로).
         //   그래서 열쇠 수령 직후 봉투 RPC 를 받으려면 재접속이 필요하지 않도록 back 은 caps 를
         //   게이팅에만 쓰고(라우트는 항상 존재) 데몬은 sealed 를 언제나 처리한다 — 지금 구조가 그렇다.
@@ -498,6 +532,20 @@ function run(config) {
               if (!r || !r.already) console.log(`[control] E2EE 열쇠 클라이언트 시작(첫 확인 ${Math.round((r && r.firstRunInMs) || 0)}ms 후)`);
               else acct.resync();   // 재접속 — throttle 이 폭주를 막는다(30s 최소 간격)
             } catch (e) { console.warn('[control] E2EE 열쇠 클라이언트 시작 실패:', (e && e.message) || e); }
+          }
+        }
+        // LAN 경로 부활 — 제어 WS 가 다시 붙었다 = 그 사이 이 기기가 망을 잃었다 왔다는 뜻이다
+        //  (수면 복귀·Wi-Fi 전환·90s 무신호 재수립·서버 재시작). 쿨다운을 1회 무시해 "집에 돌아왔는데
+        //  직결이 다시 안 살아나는" 상태를 없앤다. **프레임을 보내지 않는 로컬 상태 조작**이라 caps
+        //  게이팅 대상이 아니고, 구 서버/스위치 OFF 에서도 무해하다(아무것도 다이얼하지 않는다).
+        //  첫 접속에서는 경로 엔트리가 없어 0건 = no-op(계약 §4.10).
+        {
+          const m = lanMod();
+          if (m && typeof m.reviveAll === 'function') {
+            try {
+              const n = m.reviveAll('control-reconnect');
+              if (n) console.log(`[control] LAN 경로 쿨다운 해제 ${n}건(재접속 부활)`);
+            } catch (e) { console.warn('[control] LAN 경로 부활 실패:', (e && e.message) || e); }
           }
         }
         // LAN 직결 리스너는 **서버가 lan.v1 을 선언했을 때만** 연다(부팅 시점이 아니다).
@@ -515,6 +563,12 @@ function run(config) {
         if (!m) return;
         const r = m.addGrant(msg);
         if (!r.ok) console.warn(`[control] lan_grant 거부: ${r.error}`);
+        return;
+      }
+      // 열쇠 변화 힌트(back → 데몬) — "지금 keyring 을 다시 확인해 보라". 구 데몬은 이 type 을
+      //  무시하므로 additive 이고, back 은 caps 'e2ee.hint.v1' 로 게이팅한다.
+      if (msg.type === 'e2ee_hint') {
+        handleE2eeHint(msg);
         return;
       }
       // cpt ui_command 의 결과 회신(back → 데몬) — 대기 중인 CLI 요청으로 전달.
@@ -700,6 +754,7 @@ module.exports = {
   daemonCaps,
   helloFrame,      // 연결 시 신고 프레임(테스트가 caps/e2eeEpoch 동승을 고정한다)
   announceHello,   // 열쇠 변화 직후 재신고(재접속 없이 caps·e2eeEpoch 갱신)
+  handleE2eeHint,  // back e2ee_hint 프레임 처리(테스트가 실제 WS 로 받은 프레임을 그대로 넣는다)
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
   sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
   dispatchRpc,   // 제어채널 RPC 한 벌(평문/봉투 공용) — 테스트가 봉투 경로를 직접 검증할 수 있게 노출

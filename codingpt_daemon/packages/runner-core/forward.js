@@ -155,7 +155,10 @@ function handleConnLan(entry, port, sock) {
       if (handedOver || sock.destroyed) { try { c.close(); } catch (_) { /* noop */ } return; }
       chan = c;
       lanLib.noteSuccess(up.key);
-      c.onData = (buf) => { gotAny = true; try { sock.write(buf); } catch (_) { /* noop */ } };
+      // 호스트에서 바이트가 올 때마다 경로의 TTL 시계를 리셋한다 — 무트래픽 TTL 이 **흐르고 있는**
+      //  직결(오래 열려 있는 HMR/WS 스트림처럼 새 연결이 더 생기지 않는 경우)을 강등시키지 않게 하는
+      //  유일한 배선이다(lan.js noteTraffic: 필드 1개만 쓰는 핫패스, 상태 전이는 하지 않는다).
+      c.onData = (buf) => { gotAny = true; lanLib.noteTraffic(up.key); try { sock.write(buf); } catch (_) { /* noop */ } };
       c.onClose = () => { try { sock.end(); } catch (_) { /* noop */ } };
       for (const b of pending.splice(0)) c.write(b);
     })
