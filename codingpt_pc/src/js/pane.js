@@ -1337,8 +1337,24 @@ export class PaneView {
     this.focus();
   }
 
+  // xterm 만 실측 재맞춤(PTY 로 resize 를 보내지 않는다) — 채널을 열기 **전에** 크기를 확정하는 용도.
+  //  ★ 왜 필요한가(2026-07-27 실측): `addTab` 은 `showActiveTab()` 직후 `_reattach` → `_openChannel` 로
+  //   가는데, 그 시점 `this.term.cols/rows` 는 **이전(또는 빈 상태 자리표시) 치수**다. 그 값으로
+  //   `pty_open` 을 부르면 tmux window 가 그 크기로 만들어지고 — 라이브 실측에서 **42x15** 였다 —
+  //   그 안에서 뜬 TUI(claude 환영 박스)가 좁은 폭으로 그려진다. tmux 는 히스토리를 리플로우하지
+  //   않으므로 나중에 창을 넓혀도 **그 화면은 영구히 어긋난 채 남는다**(사용자 신고: "우측이 잘린다").
+  //  `_fitNow` 대신 이것을 쓰는 이유: 아직 채널이 없어 resize 를 보낼 대상이 없다.
+  _fitLocalOnly() {
+    if (!this.term || !this.termEl) return;
+    // 숨겨진 동안 측정하면 0 이 나와 오히려 망친다(컴포저 붕괴와 같은 계열의 함정).
+    if (this.termEl.offsetParent === null || !this.termEl.clientWidth) return;
+    try { this.fit.fit(); } catch (_) { /* noop */ }
+    this._correctFit();
+  }
+
   // ── 채널(로컬 pty / 클라우드 WS) ──
   async _openChannel(win) {
+    this._fitLocalOnly();          // 스테일 치수로 창을 만들지 않는다(§_fitLocalOnly)
     const { cols, rows } = this.term;
     if (this.ctx.isLocal) {
       this._attachedWin = typeof win === "number" ? win : null;

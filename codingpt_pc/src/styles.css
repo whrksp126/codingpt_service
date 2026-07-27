@@ -1366,24 +1366,44 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .apc-actions-inline { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
 
 /* ── 에이전트 관리(설정 > 에이전트, 온보딩 공용) ───────────────────────────────
-   상태 점의 의미: on=연동 중 / off=설치됐지만 연동 꺼짐 / none=미설치. 등급(완전/알림/실행 전용)은
-   색이 아니라 **글자**로 말한다 — 색만으로는 "왜 승인 카드가 안 오는지"를 설명할 수 없다. */
+   사용자 확정(2026-07-27 2차): 좌측 상태 점 제거 · 에이전트별 설명문 제거 · 하단 문단 제거 ·
+   **이 영역에 accent 사용 금지**(과했다) · 설치는 모달이 아니라 그 행 아래에서 펼친다.
+   등급 라벨(`완전 연동`/`알림 연동`/`실행 전용`)은 메타 줄에 남긴다 — codex 의 "원격 승인 없음"을
+   전하는 유일한 채널이 됐다. */
 .ag-list { display: flex; flex-direction: column; }
-.ag-row { display: flex; align-items: center; gap: 10px; padding: 9px 0 4px; }
+.ag-item + .ag-item { border-top: 1px solid var(--border); }
+.ag-row { display: flex; align-items: center; gap: 11px; padding: 11px 0; }
 .ag-row.missing .ag-name, .ag-row.missing .ag-meta { color: var(--dim); }
-.ag-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
-.ag-dot.on { background: var(--ok, #34D399); }
-.ag-dot.off { background: var(--text3, #6b7684); }
-.ag-dot.none { background: transparent; border: 1px solid var(--border-ctrl); }
 .ag-logo { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: none; }
-.ag-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-.ag-name { font-size: 13px; color: var(--text); }
+.ag-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ag-name { font-size: 13.5px; color: var(--text); }
 .ag-meta { font-size: 11px; color: var(--text2); }
 .ag-right { display: flex; align-items: center; flex: none; }
-.ag-desc { font-size: 11px; color: var(--dim); padding: 0 0 9px 27px; }
-.ag-desc:last-child { padding-bottom: 2px; }
+.ag-err { font-size: 11.5px; color: var(--danger, #EF4444); padding: 0 0 8px 31px; }
 
-/* 설치 시트 — 설정 모달 위에 뜬다(z-index 는 .settings-modal 보다 높게). */
+/* 인라인 설치 패널 — 행 아래에서 펼친다(모달 위 모달 금지). */
+.ag-panel {
+  padding: 4px 0 14px 31px;   /* 로고 열 폭만큼 들여써 그 행에 속한 것으로 읽히게 */
+}
+.ag-panel-step + .ag-panel-step { margin-top: 16px; }
+.ag-panel-h { font-size: 12px; font-weight: 600; color: var(--text2); margin-bottom: 8px; }
+/* 설치 명령은 탭 전환이 아니라 **전부 세로로** 보여준다(사용자 확정). */
+.ag-cmds { display: flex; flex-direction: column; gap: 7px; }
+.ag-cmdrow { display: flex; align-items: center; gap: 8px; }
+.ag-cmd-label { font-size: 11px; color: var(--dim); flex: 0 0 132px; }
+.ag-cmd {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 12px; padding: 7px 10px;
+  border-radius: 7px; background: var(--elevated2); border: 1px solid var(--border); color: var(--text);
+}
+.ag-note { font-size: 11px; color: var(--dim); margin-top: 8px; }
+.ag-note a { color: var(--text2); text-decoration: underline; }  /* accent 금지 → 밑줄로 링크임을 알린다 */
+.ag-termwrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--term-bg, #0b0f14); }
+.ag-term { height: 190px; padding: 6px 8px; font-size: 12px; color: var(--dim); }
+.ag-actions { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
+.ag-result { font-size: 11.5px; color: var(--dim); flex: 1; min-width: 0; }
+.ag-result.warn { color: var(--warn, #FBBF24); }
+
+/* 첫 실행 온보딩 시트 — 여기만 오버레이다(설정 위에 겹치는 구조가 아니라 앱 첫 화면 1스텝). */
 .ag-sheet { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; }
 .ag-sheet-back { position: absolute; inset: 0; background: rgba(5, 7, 12, 0.62); }
 .ag-sheet-card {
@@ -1391,29 +1411,6 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
 }
-.ag-sheet-head { display: flex; align-items: center; gap: 9px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.ag-sheet-head { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .ag-sheet-title { font-size: 14.5px; font-weight: 700; color: var(--text); flex: 1; }
-.ag-sheet-body { padding: 6px 16px 16px; }
-.ag-step { padding: 12px 0; }
-.ag-step + .ag-step { border-top: 1px solid var(--border); }
-.ag-step-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 9px; }
-.ag-step-n {
-  width: 18px; height: 18px; border-radius: 50%; flex: none; display: inline-flex; align-items: center;
-  justify-content: center; font-size: 11px; font-weight: 700; background: var(--elevated2); color: var(--text2);
-}
-.ag-methods { margin-bottom: 8px; }
-.ag-cmdrow { display: flex; align-items: center; gap: 8px; }
-.ag-cmd {
-  flex: 1; min-width: 0; overflow-x: auto; white-space: pre; font-size: 12px; padding: 8px 10px;
-  border-radius: 7px; background: var(--elevated2); border: 1px solid var(--border); color: var(--text);
-}
-.ag-step-note { font-size: 11px; color: var(--dim); margin-top: 7px; }
-.ag-step-note a { color: var(--accent); }
-.ag-termwrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--term-bg, #0b0f14); }
-.ag-term { height: 190px; padding: 6px 8px; font-size: 12px; color: var(--dim); }
-.ag-actions { display: flex; align-items: center; gap: 10px; margin-top: 9px; flex-wrap: wrap; }
-.sett-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.sett-btn.primary:hover { filter: brightness(1.06); background: var(--accent); }
-.ag-result { font-size: 11.5px; color: var(--dim); }
-.ag-result.ok { color: var(--ok, #34D399); }
-.ag-result.warn { color: var(--warn, #FBBF24); }
+.ag-sheet-body { padding: 14px 18px 18px; }

@@ -317,6 +317,20 @@ async function launchAgentInTerminal(agentsLib, a) {
     await new Promise((r) => setTimeout(r, 120));
   }
   if (busy) return { ok: false, busy: true, index: tid, command: hit.bin };
+  // ★ 크기가 안정될 때까지 한 번 더 기다린다(2026-07-27 실측으로 추가).
+  //  에이전트 TUI 는 **첫 화면을 그 순간의 창 폭으로 그리고**, tmux 는 히스토리를 리플로우하지 않는다
+  //  → 창이 아직 스테일 치수(라이브 실측 42x15)일 때 실행하면 환영 박스가 영구히 어긋난 채 남는다.
+  //  클라이언트가 attach 하며 보내는 resize 가 도착할 여유를 주고, **폭이 두 번 연속 같을 때** 보낸다.
+  //  최대 1.5초만 기다린다 — 아무도 안 볼 터미널(백그라운드 생성)에서 영원히 대기하지 않게.
+  let lastW = null;
+  const sizeDeadline = Date.now() + 1500;
+  while (Date.now() < sizeDeadline) {
+    let w = null;
+    try { w = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{window_width}'])).trim(); } catch (_) { break; }
+    if (lastW !== null && w === lastW) break;   // 두 번 연속 동일 = 안정
+    lastW = w;
+    await new Promise((r) => setTimeout(r, 220));
+  }
   const command = agentsLib.launchCommand(id);
   await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', command]);
   await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);

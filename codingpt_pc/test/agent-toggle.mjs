@@ -511,9 +511,15 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     //  같은 그림이 나온다 → path 문자열을 직접 대조한다(길어서 앞 80자만 비교해도 충분히 특이하다).
     const logoTsx = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/AgentLogo.tsx"), "utf8");
     const pcIcons = readFileSync(path.resolve(here, "../src/js/icons.js"), "utf8");
-    for (const [brand, key] of [["claude", "claudeMark"], ["codex", "codexMark"], ["gemini", "geminiMark"]]) {
-      const app = new RegExp(`${brand}: '([^']{40,})'`).exec(logoTsx)?.[1] || "";
-      const pc = new RegExp(`${key}: \\(o\\) => brandSvg2\\('${brand}', '([^']{40,})'`).exec(pcIcons)?.[1] || "";
+    // 카탈로그의 5종 전부 — 하나라도 앱/PC 가 다르면 같은 탭이 기기마다 다른 그림이 된다.
+    //  `cursor-agent` 처럼 하이픈이 든 키는 앱 쪽에서 따옴표로 감싸이므로 두 형태를 다 받는다.
+    const BRANDS = [
+      ["claude", "claudeMark"], ["codex", "codexMark"], ["gemini", "geminiMark"],
+      ["cursor-agent", "cursorMark"], ["opencode", "opencodeMark"],
+    ];
+    for (const [brand, key] of BRANDS) {
+      const app = new RegExp(`'?${brand}'?: '([^']{20,})'`).exec(logoTsx)?.[1] || "";
+      const pc = new RegExp(`${key}: \\(o\\) => brandSvg2\\('${brand}', '([^']{20,})'`).exec(pcIcons)?.[1] || "";
       ok(`${brand} 로고 path 가 앱==PC (len ${app.length}/${pc.length})`, !!app && app === pc,
         `app=${app.slice(0, 40)} pc=${pc.slice(0, 40)}`);
     }
@@ -521,13 +527,17 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
       /const brandSvg = \(d, o = \{\}\) => \{[\s\S]{0,300}stroke="none"/.test(pcIcons));
     // ★ 로고는 **브랜드 색**으로 그린다(사용자 지적: "로고 컬러는 왜 적용 안 되나"). currentColor 로
     //  칠하면 텍스트 색(dim)이 되어 브랜드 식별이 사라진다. 양 플랫폼이 같은 hex 를 써야 같은 그림이다.
-    const pcHex = /const BRAND = \{ claude: "(#[0-9A-Fa-f]{6})", codex: "(#[0-9A-Fa-f]{6})", gemini: "(#[0-9A-Fa-f]{6})" \}/.exec(pcIcons);
-    const appHex = /const BRAND_COLOR: Record<string, string> = \{\s*claude: '(#[0-9A-Fa-f]{6})',\s*codex: '(#[0-9A-Fa-f]{6})',\s*gemini: '(#[0-9A-Fa-f]{6})'/.exec(logoTsx);
-    ok("브랜드 색이 양 플랫폼 동일", !!pcHex && !!appHex
-      && pcHex[1].toUpperCase() === appHex[1].toUpperCase()
-      && pcHex[2].toUpperCase() === appHex[2].toUpperCase()
-      && pcHex[3].toUpperCase() === appHex[3].toUpperCase(),
-      `pc=${pcHex && pcHex.slice(1)} app=${appHex && appHex.slice(1)}`);
+    // 색도 브랜드마다 대조한다(리터럴 모양을 고정하지 않는다 — 브랜드를 추가할 때마다 정규식이
+    //  깨지면 그 테스트는 유지되지 않고 결국 느슨해진다).
+    const pcBrandBlock = /const BRAND = \{([^}]*)\}/.exec(pcIcons)?.[1] || "";
+    const appBrandBlock = /const BRAND_COLOR: Record<string, string> = \{([\s\S]*?)\n\};/.exec(logoTsx)?.[1] || "";
+    const hexOf = (block, brand) =>
+      (new RegExp(`["']?${brand}["']?:\\s*["'](#[0-9A-Fa-f]{6})["']`).exec(block)?.[1] || "").toUpperCase();
+    for (const [brand] of BRANDS) {
+      const pcH = hexOf(pcBrandBlock, brand);
+      const appH = hexOf(appBrandBlock, brand);
+      ok(`브랜드 색 앱==PC (${brand} ${pcH})`, !!pcH && pcH === appH, `pc=${pcH} app=${appH}`);
+    }
     // ⚠ 주석을 먼저 걷어낸다 — 이 함정을 **설명하는 주석 자체**가 정규식에 걸려 거짓 실패가 났다
     //   (테스트가 자기 문서를 결함으로 신고하는 형태). 코드만 본다.
     const paneCode = paneTsx.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
