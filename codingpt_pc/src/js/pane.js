@@ -1651,38 +1651,36 @@ export class PaneView {
   _correctFit() {
     const t = this.term;
     if (!t || !this.termEl) return;
-    // ★ **그려진 영역이 보이는 상자를 넘는지**를 직접 잰다(2026-07-27, 네 번째 시도).
-    //  앞선 세 번은 전부 **대리 지표**를 쟀다: FitAddon 의 제안값 → viewport.clientWidth →
-    //  거기서 스크롤바 폭 추정치를 뺀 값. 그 대리 지표들은 부모 padding(border-box 로 폭에 포함),
-    //  스크롤바의 존재/종류, 셀 폭의 Retina 반올림 때문에 실제와 계속 어긋났다
-    //  (마지막 실측: "여유 10px" 인데 화면은 잘렸다).
-    //  `.xterm-screen` 의 실제 rect 우변과 `.pane-term`(overflow:hidden = 잘리는 경계)의 rect
-    //  우변을 비교하면 **사용자가 보는 것과 같은 판정**이 된다. 넘치면 셀 폭 단위로 줄인다.
+    // ★ 비교 대상 = **필요한 내용 폭(cols×cellW) vs `.xterm-screen` 의 폭**.
+    //  여기까지 오는 데 네 번 틀렸다. 틀린 대리 지표들:
+    //   ① FitAddon 제안값 ② `.xterm-viewport.clientWidth` ③ 거기서 스크롤바 폭 추정치를 뺀 값
+    //   ④ `.xterm-screen` 의 **rect 를 `.pane-term` 의 rect 와 비교** ← 이게 특히 나빴다:
+    //      `.xterm-screen` 이 **바로 그 클립 경계**이므로 pane 과 비교하면 항상 "여유 있음"이 나온다.
+    //  실기기 픽셀 분석으로 확정한 실제 모습(2026-07-27):
+    //    셀1 시작 744.0 · 가로 테두리는 **1188.0 에서 끊김** · `.xterm-screen` 폭 445
+    //    필요한 폭 58×7.724 = 448.0 → **초과 3.0px** → 58번째 셀이 절반만 보인다.
+    //    `─` 는 왼쪽 절반이 보여 살아남고, `│` 는 세로 획이 셀 **가운데**(≈1188.2)라 통째로 사라진다
+    //    → "박스 우측 테두리만 없다"로 보였다. 버퍼에는 `│` 가 온전히 있었다(capture-pane 확인).
     for (let pass = 0; pass < 3; pass++) {
       let cols = t.cols, rows = t.rows;
       try {
         const cell = t._core?._renderService?.dimensions?.css?.cell;
         const screen = this.termEl.querySelector(".xterm-screen");
         if (!cell || !screen || !cell.width || !cell.height) return; // 벤더 구조 변경 → 보정 없음
-        const box = this.termEl.getBoundingClientRect();
-        const sc = screen.getBoundingClientRect();
-        if (!box.width || !sc.width) return;                          // 레이아웃 미확정 → 다음 기회
-        // 1px 은 반올림 여유(rect 는 소수, 캔버스는 정수 픽셀로 굳는다).
-        const overX = sc.right - (box.right - 1);
-        const overY = sc.bottom - (box.bottom - 1);
+        const sw = screen.getBoundingClientRect().width;
+        const sh = screen.getBoundingClientRect().height;
+        if (!sw || !sh) return;                                       // 레이아웃 미확정 → 다음 기회
+        // 0.5px 여유(rect 는 소수, 셀 폭은 canvas.width/cols 로 흔들린다).
+        const overX = t.cols * cell.width - (sw + 0.5);
+        const overY = t.rows * cell.height - (sh + 0.5);
         if (overX > 0) cols = Math.max(2, t.cols - Math.ceil(overX / cell.width));
         if (overY > 0) rows = Math.max(1, t.rows - Math.ceil(overY / cell.height));
         if (pass === 0) {
-          // 같은 값이 반복되면 남기지 않는다(같은 줄이 7초마다 쌓이면 로그가 쓸모없어진다).
-          // pane **내부** 초과(over)만 보면 "pane 자체가 창을 넘는" 경우를 못 본다 — 실제로 그 상황이
-          //  의심된다(같은 box 폭인데 우측 pane 만 잘림). 창 안쪽 폭과 pane 우변까지 함께 남긴다.
           const winW = document.documentElement.clientWidth;
           const paneR = (this.el || this.termEl).getBoundingClientRect().right;
-          const line = `fit pane=${this.id} fitCols=${t.cols}x${t.rows} cell=${cell.width.toFixed(3)}`
-            + ` box=[${box.left.toFixed(0)}..${box.right.toFixed(0)}]w${box.width.toFixed(0)}`
-            + ` screenR=${sc.right.toFixed(0)} paneR=${paneR.toFixed(0)} winW=${winW}`
-            + ` over=${overX.toFixed(1)},${overY.toFixed(1)}`
-            + `${paneR > winW + 0.5 ? ` ★pane가창을넘음(+${(paneR - winW).toFixed(0)}px)` : ""}`
+          const line = `fit pane=${this.id} ${t.cols}x${t.rows} cell=${cell.width.toFixed(3)}`
+            + ` need=${(t.cols * cell.width).toFixed(1)} screenW=${sw.toFixed(1)}`
+            + ` over=${overX.toFixed(1)},${overY.toFixed(1)} paneR=${paneR.toFixed(0)} winW=${winW}`
             + ` → ${cols}x${rows}`;
           if (line !== this._lastFitLog) { this._lastFitLog = line; api.debugLog(line); }
         }

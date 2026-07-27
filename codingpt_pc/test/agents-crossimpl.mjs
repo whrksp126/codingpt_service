@@ -155,12 +155,17 @@ ok(!/직접 입력해도 돼요/.test(appSheet) && !/설치가 끝나면 눌러 
   '앱: 단계 보조 설명문 2종을 제거했다');
 
 // ── 11. 터미널 폭은 거터를 무조건 확보한다(잘림 > 빈 띠) ──────────────────────
-// ★ 잘림 판정은 **대리 지표가 아니라 실제 rect** 로 한다(네 번째 시도에서 확정).
-//  FitAddon 제안값·viewport.clientWidth·스크롤바 폭 추정은 부모 padding(border-box)·스크롤바
-//  존재 여부·Retina 셀 폭 반올림 때문에 실제와 계속 어긋났다("여유 10px" 인데 잘렸다).
-ok(/getBoundingClientRect\(\)/.test(pcPane) && /xterm-screen/.test(pcPane),
-  'PC: .xterm-screen 실제 rect 와 잘리는 상자(.pane-term) rect 를 비교한다');
-ok(/sc\.right - \(box\.right/.test(pcPane), 'PC: 우변 초과분을 셀 폭으로 나눠 줄인다');
+// ★ 잘림 판정 = **필요한 내용 폭(cols×cellW) vs `.xterm-screen` 의 폭**.
+//  실기기 픽셀 분석으로 확정(2026-07-27): screen 폭 445 · 필요 448 → 초과 3px → 58번째 셀이 절반만
+//  보이고, `│` 는 세로 획이 셀 가운데라 통째로 사라진다("우측 테두리만 없다"의 정체).
+//  ⚠ `.xterm-screen` 의 **rect 를 pane rect 와 비교**하면 안 된다 — screen 이 바로 클립 경계라
+//   항상 "여유 있음"이 나온다(이 실수로 한 라운드를 날렸다).
+ok(/t\.cols \* cell\.width - \(sw/.test(pcPane),
+  'PC: 필요 폭(cols×cellW)을 .xterm-screen 폭과 비교한다');
+ok(/querySelector\("\.xterm-screen"\)/.test(pcPane) && /getBoundingClientRect\(\)\.width/.test(pcPane),
+  'PC: .xterm-screen 의 폭을 직접 잰다');
+ok(!/sc\.right - \(box\.right/.test(pcPane),
+  'PC: screen rect 를 pane rect 와 비교하는 옛 방식으로 되돌아가지 않는다(항상 통과해 무력)');
 ok(!/term-fit/.test(pcPane), 'PC: 폐기한 대리 지표 모듈을 다시 참조하지 않는다');
 ok(/setTimeout\([\s\S]{0,120}_fitNow\(\)/.test(pcPane),
   'PC: 채널 개설 후 지연 재검산이 있다(ResizeObserver 는 크기 불변 시 안 울린다)');
@@ -178,7 +183,8 @@ ok(/\.xterm-viewport::-webkit-scrollbar \{ width: 0/.test(pcCss),
 ok(/안쪽 padding 으로 주는 것은 \*\*무효\*\*/.test(pcCss),
   'PC: "안쪽 padding 예약은 무효" 실측 결론이 CSS 에 기록돼 있다');
 // pane 이 창을 넘는지를 진단에 남긴다(pane 내부 초과만 보면 이 경우를 못 본다).
-ok(/pane가창을넘음/.test(pcPane), 'PC: pane 우변이 창 안쪽 폭을 넘는지 로그에 남긴다');
+ok(/paneR=\$\{paneR/.test(pcPane) && /winW=\$\{winW/.test(pcPane),
+  'PC: pane 우변과 창 안쪽 폭을 로그에 남긴다(레이아웃이 창을 넘는 경우를 다시 놓치지 않게)');
 
 // ★ 분할 자식은 줄어들 수 있어야 한다 — basis 합 100% + 1px 분할선이라 shrink 0 이면 마지막
 //  pane 이 컨테이너를 넘고, 그 1px 이 창에 잘려 터미널 마지막 열 오른쪽이 깎인다(실측 확정).
