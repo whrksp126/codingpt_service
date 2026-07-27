@@ -171,14 +171,14 @@ ok(/this\._sentCols === cols && this\._sentRows === rows/.test(pcPane),
 ok(/\.xterm-viewport::-webkit-scrollbar \{ width: 0/.test(pcCss),
   'PC: 터미널 스크롤바를 두지 않는다(뺄 폭을 맞추는 대신 문제군을 제거 — 되돌리면 잘림 재발)');
 
-// ★ 우측 예약은 **바깥 margin** 으로만 유효하다(안쪽 padding 은 무효 — 실측으로 확인).
-//  FitAddon 이 부모 폭을 border-box(padding 포함)로 읽고 자기 padding 만 빼기 때문에, 안쪽 padding 을
-//  늘리면 열을 그만큼 더 제안해 정확히 상쇄된다. 이 규칙을 모르는 사람이 "padding 으로 통일" 하면
-//  잘림이 조용히 재발한다.
-ok(/\.pane-term \{[^}]*margin-right: 10px/.test(pcCss),
-  'PC: .pane-term 우측 예약이 바깥 margin 이다(안쪽 padding 은 FitAddon 이 상쇄해 무효)');
-ok(/\.pane-term \{[^}]*padding: 4px 0 2px 8px/.test(pcCss),
-  'PC: .pane-term 안쪽 우 padding 은 0(예약을 안쪽에 두지 않는다)');
+// 우측 "공간 예약" 시도는 되돌렸다(pane 자체가 창을 넘는 상황에서 잘림을 키운다 — 사용자 실측).
+//  다만 **안쪽 padding 으로 예약하려는 시도는 무효**라는 실측 결론은 CSS 주석으로 남겨 둔다:
+//  FitAddon 이 부모 폭을 border-box(padding 포함)로 읽고 자기 padding 만 빼므로 정확히 상쇄된다.
+//  그 근거가 사라지면 다음 사람이 같은 무효 수정을 반복한다.
+ok(/안쪽 padding 으로 주는 것은 \*\*무효\*\*/.test(pcCss),
+  'PC: "안쪽 padding 예약은 무효" 실측 결론이 CSS 에 기록돼 있다');
+// pane 이 창을 넘는지를 진단에 남긴다(pane 내부 초과만 보면 이 경우를 못 본다).
+ok(/pane가창을넘음/.test(pcPane), 'PC: pane 우변이 창 안쪽 폭을 넘는지 로그에 남긴다');
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

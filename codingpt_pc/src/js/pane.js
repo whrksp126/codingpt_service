@@ -1674,9 +1674,16 @@ export class PaneView {
         if (overY > 0) rows = Math.max(1, t.rows - Math.ceil(overY / cell.height));
         if (pass === 0) {
           // 같은 값이 반복되면 남기지 않는다(같은 줄이 7초마다 쌓이면 로그가 쓸모없어진다).
+          // pane **내부** 초과(over)만 보면 "pane 자체가 창을 넘는" 경우를 못 본다 — 실제로 그 상황이
+          //  의심된다(같은 box 폭인데 우측 pane 만 잘림). 창 안쪽 폭과 pane 우변까지 함께 남긴다.
+          const winW = document.documentElement.clientWidth;
+          const paneR = (this.el || this.termEl).getBoundingClientRect().right;
           const line = `fit pane=${this.id} fitCols=${t.cols}x${t.rows} cell=${cell.width.toFixed(3)}`
-            + ` box=${box.width.toFixed(1)}x${box.height.toFixed(1)} screen=${sc.width.toFixed(1)}x${sc.height.toFixed(1)}`
-            + ` over=${overX.toFixed(1)},${overY.toFixed(1)} → ${cols}x${rows}`;
+            + ` box=[${box.left.toFixed(0)}..${box.right.toFixed(0)}]w${box.width.toFixed(0)}`
+            + ` screenR=${sc.right.toFixed(0)} paneR=${paneR.toFixed(0)} winW=${winW}`
+            + ` over=${overX.toFixed(1)},${overY.toFixed(1)}`
+            + `${paneR > winW + 0.5 ? ` ★pane가창을넘음(+${(paneR - winW).toFixed(0)}px)` : ""}`
+            + ` → ${cols}x${rows}`;
           if (line !== this._lastFitLog) { this._lastFitLog = line; api.debugLog(line); }
         }
       } catch (_) { return; }
