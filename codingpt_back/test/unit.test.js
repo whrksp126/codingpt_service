@@ -545,7 +545,10 @@ test('e2ee 기기 승인 전 과정 — 부트스트랩 → 대기 → 1탭 승�
     assert.strictEqual(n.kind, 'device_approval');
     assert.ok(n.subtitle && n.subtitle.includes(phone.label));
     assert.ok(!String(n.subtitle).includes(pend.verifyCode), '확인번호가 FCM 본문(subtitle)으로 새면 안 된다');
-    assert.ok(String(n.body).includes(pend.verifyCode), '확인번호는 인앱 본문에만');
+    //  ★ 개정 5(2026-07-28): 인앱 본문에서도 확인번호를 뺐다 — 알림이 승인 화면과 같은 말을 해야 한다
+    //   ("코드를 입력해야 하나" 로 읽히던 것이 이 개정의 출발점). 어느 요청인지는 시트가 구분한다.
+    assert.ok(!String(n.body).includes(pend.verifyCode), '확인번호는 알림에 싣지 않는다(개정 5)');
+    assert.ok(String(n.title).includes('로그인'), '알림 제목도 승인 화면과 같은 사실 진술이어야 한다');
     assert.strictEqual(n.deeplink, `codingpt://device-approval/${pend.enrollmentId}`);
     // 멱등 — 폴링/앱 재시작에 같은 enrollment 를 돌려준다(알림은 새로 만들지 않는다)
     const again = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label });

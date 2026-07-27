@@ -446,11 +446,13 @@ async function announce(userId, rec) {
     notification = await notificationService.createNotification(Number(userId), {
       source: 'system',
       kind: 'device_approval',
-      title: '새 기기 승인 요청',
+      //  ★ 개정 5(2026-07-28): 알림도 승인 화면과 같은 말을 한다 — 구 제목('새 기기 승인 요청')과
+      //   구 본문('확인번호 NNNN')은 사용자에게 "코드를 입력해야 하나" 를 먼저 읽히게 했다.
+      title: '새 기기에서 로그인했어요',
       // subtitle 을 명시하는 이유: FCM 본문이 subtitle 우선이라 **확인번호가 잠금화면에 노출되지 않는다**.
       //  (확인번호는 비밀이 아니지만, 잠금화면에 숫자만 떠 있으면 사용자가 대조 없이 승인할 유인이 된다)
       subtitle: `${rec.label} 에서 접속을 시도했어요`,
-      body: `확인번호 ${rec.verifyCode}${rec.platform ? ` · ${rec.platform}` : ''}`,
+      body: `본인이 맞나요? 탭해서 승인하세요${rec.platform ? ` · ${rec.platform}` : ''}`,
       sessionId: rec.id,
       deeplink,
       push,
@@ -463,7 +465,7 @@ async function announce(userId, rec) {
   if (route.suppressAll || route.pcActive) {
     pushService.sendToUser(Number(userId), {
       kind: 'device_approval', sessionId: rec.id, notifId: rec.notifId,
-      title: '새 기기 승인 요청', body: `${rec.label} 에서 접속을 시도했어요`,
+      title: '새 기기에서 로그인했어요', body: `${rec.label} 에서 접속을 시도했어요`,
       deeplink, channelId: push.channelId, category: push.category, data: push.data,
     }, { pcActive: false }).catch(() => { /* fire-and-forget */ });
   }
