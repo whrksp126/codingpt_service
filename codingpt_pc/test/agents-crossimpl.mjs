@@ -180,6 +180,13 @@ ok(/안쪽 padding 으로 주는 것은 \*\*무효\*\*/.test(pcCss),
 // pane 이 창을 넘는지를 진단에 남긴다(pane 내부 초과만 보면 이 경우를 못 본다).
 ok(/pane가창을넘음/.test(pcPane), 'PC: pane 우변이 창 안쪽 폭을 넘는지 로그에 남긴다');
 
+// ★ 분할 자식은 줄어들 수 있어야 한다 — basis 합 100% + 1px 분할선이라 shrink 0 이면 마지막
+//  pane 이 컨테이너를 넘고, 그 1px 이 창에 잘려 터미널 마지막 열 오른쪽이 깎인다(실측 확정).
+ok(/\.split-child \{[^}]*flex: 0 1 auto/.test(pcCss),
+  'PC: .split-child 는 flex-shrink 1(0 0 auto 로 되돌리면 우측 pane 이 1px 넘쳐 잘림 재발)');
+ok(!/\.split-child \{[^}]*flex: 1 1 auto/.test(pcCss),
+  'PC: grow 는 0 유지(1 이면 사용자가 잡은 분할 비율이 무너진다)');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

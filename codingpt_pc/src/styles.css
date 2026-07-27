@@ -274,7 +274,16 @@ body.resizing-row { cursor: row-resize; }
 .split { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; }
 .split-h { flex-direction: row; }
 .split-v { flex-direction: column; }
-.split-child { min-width: 0; min-height: 0; display: flex; flex: 0 0 auto; }
+/* ★ flex-shrink 를 1 로 둔다(2026-07-27, 잘림의 진짜 원인).
+   `flexBasis` 를 first=ratio%, second=(1-ratio)% 로 주므로 두 자식의 합이 **정확히 100%** 인데,
+   그 사이에 1px 분할선(.divider)이 있다. shrink 가 0 이면 아무도 양보하지 않아 **마지막 자식이
+   컨테이너를 1px 넘는다**(앱 CSS 그대로 헤드리스 실측: 우측 pane right=928 vs grid right=927).
+   그 1px 은 창 밖으로 나가 잘리고, 터미널 fit 은 넘친 폭까지 포함해 열을 계산하므로 **마지막 열의
+   오른쪽 1px 이 깎인다** — 박스 닫는 문자(╮/│)가 사라져 "우측 테두리가 없다"로 보인다.
+   좌측 pane 은 넘치지 않으니 멀쩡하다 = 사용자 신고의 좌우 비대칭이 이것으로 설명된다.
+   중첩 분할마다 누적된다. shrink 1 이면 basis 비율대로 나눠 양보해 초과가 0 이 된다(실측 +1.0 → 0.0).
+   ⚠ grow 는 0 을 유지한다 — 1 이면 남는 폭을 균등 분배해 사용자가 잡은 비율이 무너진다. */
+.split-child { min-width: 0; min-height: 0; display: flex; flex: 0 1 auto; }
 .split-child > * { flex: 1; min-width: 0; min-height: 0; }
 .divider { flex: none; position: relative; z-index: 3; background: var(--border); transition: background 0.12s; }
 .divider-h { width: 1px; cursor: col-resize; }
