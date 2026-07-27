@@ -546,7 +546,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .sm-navitem:hover { background: var(--elevated); }
 .sm-navitem.active { background: var(--elevated2); color: var(--text); }
 .sm-navic { display: inline-flex; color: var(--text3); flex: none; }
-.sm-navitem.active .sm-navic { color: var(--accent); }
+.sm-navitem.active .sm-navic { color: var(--text); }
 .sm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 /* 메인 영역 상단 헤더 — 사이드바가 아니라 콘텐츠 영역에 명확히 구분(하단 보더)된 제목 바 */
 .sm-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 16px 0 44px; border-bottom: 1px solid var(--border); }
@@ -738,8 +738,9 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn.small { padding: 6px 12px; font-size: 12.5px; }
-.btn.primary { background: var(--cta); color: #fff; border-color: transparent; }
-.btn.primary:hover { filter: brightness(1.08); }
+/* 주 버튼 = 라이트(전경 반전) — 포인트 컬러 금지(사용자 확정 2026-07-28: 버튼의 accent 전면 제거) */
+.btn.primary { background: var(--text); color: var(--base); border-color: transparent; }
+.btn.primary:hover { opacity: 0.88; }
 .btn.ghost { background: transparent; color: var(--text3); }
 .btn.danger { color: var(--error); border-color: var(--error); background: transparent; }
 .switch { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--text2); cursor: pointer; padding: 4px 0; }
@@ -747,7 +748,8 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 /* 토글 스위치(체크박스 대체) — 라벨 왼쪽 · 토글 오른쪽 규칙(설정/온보딩 공용) */
 input[type="checkbox"].tgl { appearance: none; -webkit-appearance: none; width: 38px; height: 22px; border-radius: 999px; background: var(--elevated2, #232a33); border: 1px solid var(--border); position: relative; cursor: pointer; transition: background 0.18s; flex: none; margin: 0; }
 input[type="checkbox"].tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--text2); transition: transform 0.18s, background 0.18s; }
-input[type="checkbox"].tgl:checked { background: var(--accent); border-color: var(--accent); }
+/* ON = 밝은 중립 트랙(포인트 컬러 금지 — 상태는 명암으로 말한다) */
+input[type="checkbox"].tgl:checked { background: var(--text2); border-color: var(--text2); }
 input[type="checkbox"].tgl:checked::after { transform: translateX(16px); background: #0b0f14; }
 .error { font-size: 12px; color: var(--error); line-height: 1.4; }
 
@@ -811,13 +813,14 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 .login-gate .lg-back:hover { color: var(--text); background: var(--elevated); }
 .login-gate .btn.lg.lg-wait { display: inline-flex; align-items: center; justify-content: center; gap: 9px; opacity: 0.95; cursor: default; }
 /* ── 권한 위저드(슬라이드) — 2026-07-28 2차 개정: 화면당 권한 하나 + 하단 [허용] 단일 CTA ── */
-.login-gate .lg-slide { animation: lg-slide-in 0.28s ease-out; }
+.login-gate .lg-slide { animation: lg-slide-in 0.28s ease-out; gap: 18px; }
+.login-gate .lg-slide .btn.lg { margin-top: 8px; min-width: 220px; }
 @keyframes lg-slide-in { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
 .login-gate .lg-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 2px; }
 .login-gate .lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-ctrl); transition: background 0.2s; }
-.login-gate .lg-dot.on { background: var(--accent); }
-.login-gate .lg-dot.done { background: var(--accent); opacity: 0.45; }
-.login-gate .lg-perm-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: var(--accent); background: var(--elevated); border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(52, 211, 153, 0.12); }
+.login-gate .lg-dot.on { background: var(--text2); }
+.login-gate .lg-dot.done { background: var(--text2); opacity: 0.45; }
+.login-gate .lg-perm-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: var(--text2); background: var(--elevated); border: 1px solid var(--border); }
 .login-gate .lg-perm-benefit { font-size: 13.5px; color: var(--text2); max-width: 340px; line-height: 1.55; }
 .login-gate .lg-perm-hint { font-size: 11.5px; color: var(--dim); max-width: 340px; line-height: 1.5; }
 .login-gate .lg-perm-alt { min-height: 22px; display: flex; gap: 4px; justify-content: center; }
@@ -1295,7 +1298,7 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-input::placeholder { color: var(--dim); }
 .chat-send {
   flex: none; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 999px; background: var(--cta); color: #fff; cursor: pointer;
+  border: none; border-radius: 999px; background: var(--text); color: var(--base); cursor: pointer;
   transition: opacity 120ms ease;
 }
 .chat-send:hover:not(:disabled) { background: var(--accent-hover); }
@@ -1348,8 +1351,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   font-size: 12.5px; border-radius: var(--r-sm); padding: 6px 14px; cursor: pointer;
 }
 .apc-btn:hover { background: var(--hover); }
-.apc-btn.primary { background: var(--cta); border-color: transparent; color: #fff; }
-.apc-btn.primary:hover { background: var(--accent-hover); }
+.apc-btn.primary { background: var(--text); border-color: transparent; color: var(--base); }
+.apc-btn.primary:hover { opacity: 0.88; }
 .apc-btn.ghost { background: transparent; color: var(--text3); }
 .apc-btn.ghost:hover { color: var(--text); background: var(--hover); }
 /* 선택형(AskUserQuestion / ExitPlanMode) — 선택지 버튼을 라벨+설명 그대로 그린다.
@@ -1379,7 +1382,7 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .notif-ic { display: inline-flex; color: var(--warn); margin-right: 5px; vertical-align: -1px; }
 .notif-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 7px; }
 .notif-act { font-size: 11.5px; border-radius: 4px; padding: 3px 10px; cursor: pointer; border: 1px solid var(--border-ctrl); }
-.notif-act.primary { background: var(--cta); border-color: transparent; color: #fff; }
+.notif-act.primary { background: var(--text); border-color: transparent; color: var(--base); }
 .notif-act.ghost { color: var(--text3); }
 .notif-act:hover { filter: brightness(1.12); }
 .notif-act-hint { font-size: 11px; color: var(--dim); }
@@ -1460,12 +1463,13 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
    권한 위저드와 같은 accent 시각 언어를 쓴다. 핀은 이 마커 앞까지만 검사한다) */
 /* ── 에이전트 온보딩 슬라이드(3차 개정) — 권한 위저드(login-gate .lg-slide)와 같은 시각 언어 ── */
 .ag-onb-card { width: 430px; }
-.ag-onb-slide { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 30px 26px 26px; text-align: center; animation: lg-slide-in 0.28s ease-out; }
+.ag-onb-slide { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 34px 28px 28px; text-align: center; animation: lg-slide-in 0.28s ease-out; }
+.ag-onb-slide .btn.lg { margin-top: 6px; min-width: 220px; }
 .ag-onb-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 2px; }
 /* 점 스타일은 login-gate 스코프에 있으므로 여기서도 정의한다(같은 시각 언어를 공유) */
 .ag-onb-dots .lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-ctrl); transition: background 0.2s; }
-.ag-onb-dots .lg-dot.on { background: var(--accent); }
-.ag-onb-dots .lg-dot.done { background: var(--accent); opacity: 0.45; }
+.ag-onb-dots .lg-dot.on { background: var(--text2); }
+.ag-onb-dots .lg-dot.done { background: var(--text2); opacity: 0.45; }
 .ag-onb-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; background: var(--elevated2); border: 1px solid var(--border); }
 .ag-onb-title { font-size: 18px; font-weight: 800; color: var(--text); }
 .ag-onb-meta { font-size: 12px; color: var(--dim); margin-top: -6px; }

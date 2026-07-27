@@ -41,11 +41,12 @@ function missingPerms() {
 // ── 권한 위저드 카피 — 화면당 하나에 집중하므로 "왜 필요한가" 를 크게 말할 자리가 생긴다 ────────
 //  (사용자 확정 2026-07-28 2차: 목록+행별 버튼은 아무도 누르고 싶지 않은 구성이었다 → 슬라이드
 //   하나에 권한 하나 + 하단 [허용] 단일 CTA. Raycast/Warp 류 데스크톱 온보딩과 같은 패턴.)
+//  (4차 개정: 문구 다이어트 — 이득 1줄만. "macOS 창이 떠요" 류 절차 설명은 삭제, 창이 뜨면 그게 설명이다)
 const PERM_COPY = {
-  notif: { title: "알림을 허용해 주세요", benefit: "AI 작업이 끝나면 바로 알려드려요 — 화면을 계속 지켜볼 필요가 없어요" },
-  downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
-  desktop: { title: "데스크탑 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
-  documents: { title: "문서 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
+  notif: { title: "알림을 허용해 주세요", benefit: "작업이 끝나면 바로 알려드려요" },
+  downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
+  desktop: { title: "데스크탑 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
+  documents: { title: "문서 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
 };
 let permQueue = []; // 셋업 진입 시점의 "없는 권한" 스냅샷(슬라이드 순서)
 let permIdx = 0;
@@ -123,7 +124,6 @@ function renderStep() {
       <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 30 }) : icons.bell({ size: 30 })}</div>
       <div class="lg-head">${c.title}</div>
       <div class="lg-perm-benefit">${c.benefit}</div>
-      <div class="lg-perm-hint">허용을 누르면 macOS 확인 창이 떠요 — 거기서도 [허용]을 눌러 주세요</div>
       <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">허용</button>
       <div id="lgPermAlt" class="lg-perm-alt"></div>
     </div>`;

@@ -335,7 +335,6 @@ export async function maybeShowOnboarding() {
             <div class="ag-onb-benefit">${a.tier === "full"
               ? "연동하면 작업 완료 알림이 오고, <b>휴대폰에서 승인</b>할 수 있어요"
               : "연동하면 작업 완료 알림이 와요"}</div>
-            <div class="ag-onb-hint">실행할 때만 설정이 얹히고, 개인 설정 파일(~/.claude · ~/.codex)은 수정하지 않아요</div>
             <button class="btn primary lg ag-onb-go" data-ag="${esc(a.id)}">연동하기</button>
             <button class="lg-link ag-onb-skip">연동하지 않기</button>
           </div>
