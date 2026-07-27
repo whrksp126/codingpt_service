@@ -227,8 +227,14 @@ ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem
   'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
 ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
   'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
-ok(/data-perm=/.test(pcGate) && /missingPerms\(\)/.test(pcGate) && !/id="lgFolders"/.test(pcGate),
-  'PC: 권한은 없는 것만 개별 행으로 그린다(폴더 3종 일괄 버튼 금지 — 사용자 확정)');
+// ★ 2차 개정(같은 날): 행 목록 → **슬라이드 위저드**. 화면당 권한 하나 + 하단 [허용] 단일 CTA,
+//  자동 실행 토글 제거(기본 켬 · 끄기는 설정), 성공 시 자동 다음 슬라이드, 탈출로는 거부 후에만.
+ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate) && !/id="lgFolders"/.test(pcGate),
+  'PC: 권한 위저드는 화면당 하나 + 단일 [허용] CTA 다(행 목록/일괄 버튼 금지 — 사용자 확정 2차)');
+ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
+  'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
+ok(/lgSkipPerm/.test(pcGate) && pcGate.indexOf('lgSkipPerm') > pcGate.indexOf('거부/실패'),
+  'PC: 건너뛰기는 거부된 뒤에만 열린다(필수 승인 프레이밍 + 영구 가둠 방지)');
 ok(/!missingPerms\(\)\.length/.test(pcGate),
   'PC: 요청할 권한이 0개면 셋업 화면을 건너뛴다(빈 화면 금지)');
 ok(/maybeShowOnboarding/.test(pcGate),

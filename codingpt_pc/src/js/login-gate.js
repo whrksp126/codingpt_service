@@ -6,12 +6,13 @@
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
+import { icons } from "./icons.js";
 
 let el = null;
 let session = null; // { code, secret, expiresAt, poll, busy }
 let step = "welcome"; // 'welcome' | 'login' | 'setup'
 let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 노출
-let autostartOn = true; // 셋업 토글 상태(기본 켬 — 진입 시 실제 적용)
+// (2026-07-28 2차 개정: 자동 실행 토글은 게이트에서 제거 — 기본 켬, 끄기는 설정 > 일반의 토글)
 
 // ── 셋업/권한의 스코프 (2026-07-28 사용자 실사고로 개정) ─────────────────────
 // 실사고: 회원탈퇴 → 같은 이메일로 재가입(서버는 하드 삭제라 **새 user id**) → 이 PC 에서 온보딩이
@@ -32,10 +33,22 @@ const FOLDER_PERMS = [
 ];
 function missingPerms() {
   const out = [];
-  if (!permGranted("notif")) out.push({ id: "notif", label: "알림 허용", hint: "작업 완료를 바로 알려드려요" });
+  if (!permGranted("notif")) out.push({ id: "notif", label: "알림 허용" });
   for (const f of FOLDER_PERMS) if (!permGranted(f.id)) out.push({ ...f, folder: true });
   return out;
 }
+
+// ── 권한 위저드 카피 — 화면당 하나에 집중하므로 "왜 필요한가" 를 크게 말할 자리가 생긴다 ────────
+//  (사용자 확정 2026-07-28 2차: 목록+행별 버튼은 아무도 누르고 싶지 않은 구성이었다 → 슬라이드
+//   하나에 권한 하나 + 하단 [허용] 단일 CTA. Raycast/Warp 류 데스크톱 온보딩과 같은 패턴.)
+const PERM_COPY = {
+  notif: { title: "알림을 허용해 주세요", benefit: "AI 작업이 끝나면 바로 알려드려요 — 화면을 계속 지켜볼 필요가 없어요" },
+  downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
+  desktop: { title: "데스크탑 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
+  documents: { title: "문서 폴더 접근을 허용해 주세요", benefit: "이 폴더의 프로젝트를 열고 AI가 파일을 다룰 수 있어요" },
+};
+let permQueue = []; // 셋업 진입 시점의 "없는 권한" 스냅샷(슬라이드 순서)
+let permIdx = 0;
 
 export function mountLoginGate(container) {
   el = container;
@@ -93,57 +106,60 @@ function renderStep() {
     el.querySelector("#lgBack").addEventListener("click", () => { stopGateLogin(); step = "welcome"; renderStep(); });
     return;
   }
-  // setup — ★ 2026-07-28 개정(사용자 확정): 권한은 **없는 것만 하나씩** 행으로 등장해 그 자리에서
-  //  허용을 유도한다(설정 화면의 fpa 행과 동일 구성). 각 행의 [허용]이 그 폴더를 실제 프로브해
-  //  macOS 팝업을 띄우고, 성공하면 "허용됨"으로 굳는다(+ 로컬 기록 → 다음 계정에선 그 행이 안 나온다).
-  const perms = missingPerms();
+  // setup — ★ 2026-07-28 2차 개정(사용자 확정): **권한 위저드(슬라이드)**.
+  //  · 화면당 권한 하나 — 큰 아이콘 + 제목 + 이득 1줄 + 하단 [허용] 단일 CTA(필수 승인 프레이밍).
+  //    행 목록 + 행별 작은 버튼은 "아무도 누르고 싶지 않은" 구성이었다(사용자 실사 피드백).
+  //  · 자동 실행 토글은 게이트에서 제거 — 기본 켬(페어링 시 적용), 끄기는 설정 > 일반에서.
+  //  · [허용] 성공 → ✓ 로 잠깐 굳었다가 자동으로 다음 슬라이드. 전부 끝나면 셋업 종료.
+  //  · 거부됨 → 그때만 [시스템 설정 열기] + '나중에 설정에서 허용' 탈출로가 열린다. 처음부터
+  //    건너뛰기를 주지 않는 것은 "필수 승인" 확정 — 단 거부로 막힌 사용자를 영구히 가두지 않는다.
+  if (permIdx >= permQueue.length) { finishSetup(); return; }
+  const p = permQueue[permIdx];
+  const c = PERM_COPY[p.id] || { title: `${p.label}을 허용해 주세요`, benefit: "" };
+  const dots = permQueue.map((_, i) => `<span class="lg-dot${i === permIdx ? " on" : i < permIdx ? " done" : ""}"></span>`).join("");
   el.innerHTML = `
-    <div class="lg-inner wide">
-      <div class="lg-head">거의 다 됐어요</div>
-      <div class="lg-card">
-        <label class="lg-row">
-          <span>로그인 시 자동 실행</span>
-          <input type="checkbox" id="lgAuto" class="tgl" ${autostartOn ? "checked" : ""} />
-        </label>
-        ${perms.map((p) => `
-        <div class="lg-row">
-          <span>${p.label}${p.hint ? `<span class="lg-hint">${p.hint}</span>` : ""}</span>
-          <button class="btn small lg-perm" data-perm="${p.id}"${p.folder ? ' data-folder="1"' : ""}>허용</button>
-        </div>`).join("")}
-        ${perms.some((p) => p.folder) ? `<div class="lg-hint" style="padding:4px 2px 0">한 번 허용하면 모든 워크스페이스에 적용돼요</div>` : ""}
-      </div>
-      <button id="lgDone" class="btn primary lg">시작하기</button>
+    <div class="lg-inner wide lg-slide">
+      ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
+      <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 30 }) : icons.bell({ size: 30 })}</div>
+      <div class="lg-head">${c.title}</div>
+      <div class="lg-perm-benefit">${c.benefit}</div>
+      <div class="lg-perm-hint">허용을 누르면 macOS 확인 창이 떠요 — 거기서도 [허용]을 눌러 주세요</div>
+      <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">허용</button>
+      <div id="lgPermAlt" class="lg-perm-alt"></div>
     </div>`;
-  el.querySelector("#lgAuto").addEventListener("change", async (e) => {
-    autostartOn = !!e.target.checked;
-    try { await (autostartOn ? api.autostartEnable() : api.autostartDisable()); }
-    catch (_) { e.target.checked = autostartOn = !autostartOn; }
-  });
-  el.querySelectorAll(".lg-perm").forEach((btn) => btn.addEventListener("click", async () => {
-    const id = btn.dataset.perm;
-    if (btn.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
+  const btn = el.querySelector("#lgAllow");
+  const alt = el.querySelector("#lgPermAlt");
+  btn.addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "확인 중…";
-    try {
-      const ok = btn.dataset.folder
-        ? await api.probeFolder(id).catch(() => false)
-        : await api.notifPermission().catch(() => false);
-      if (ok) { markPermGranted(id); btn.textContent = "허용됨"; return; } // disabled 유지
-      // 거부됨 — 시스템 설정으로 안내(폴더는 파일 및 폴더, 알림은 알림 설정이지만 진입점은 같다).
-      btn.dataset.denied = "1";
-      btn.textContent = "설정 열기";
-      btn.disabled = false;
-    } catch (_) { btn.textContent = "허용"; btn.disabled = false; }
-  }));
-  el.querySelector("#lgDone").addEventListener("click", () => {
-    const k = setupKey();
-    if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} } // 이 계정+이 PC 셋업 완료
-    pendingSetup = false;
-    updateLoginGate();
-    // 다음 스텝: 에이전트 온보딩(계정별 1회 — agents-view 가 자체 판정). 부팅 시에만 돌던 것을
-    //  게이트 종료 시점에도 걸어 준다(재가입/계정 전환은 부팅 없이 일어난다 — 실사고).
-    import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
+    const ok = p.folder
+      ? await api.probeFolder(p.id).catch(() => false)
+      : await api.notifPermission().catch(() => false);
+    if (ok) {
+      markPermGranted(p.id);
+      btn.textContent = "허용됐어요 ✓";
+      setTimeout(() => { permIdx += 1; renderStep(); }, 450); // ✓ 를 잠깐 보여주고 다음 슬라이드
+      return;
+    }
+    // 거부/실패 — 재시도 유지 + 시스템 설정 경로 + 최소 탈출로(이때만 연다).
+    btn.textContent = "허용";
+    btn.disabled = false;
+    alt.innerHTML = `
+      <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>
+      <button class="lg-link" id="lgSkipPerm">나중에 설정에서 허용</button>`;
+    alt.querySelector("#lgOpenPriv").addEventListener("click", () => { api.openFilesPrivacy().catch(() => {}); });
+    alt.querySelector("#lgSkipPerm").addEventListener("click", () => { permIdx += 1; renderStep(); });
   });
+}
+
+// 셋업 종료 — 계정별 완료 기록 + 게이트 닫기 + 다음 스텝(에이전트 온보딩, 계정별 1회 자체 판정).
+//  부팅 시에만 돌던 온보딩을 게이트 종료 시점에도 걸어 준다(재가입/계정 전환은 부팅 없이 온다 — 실사고).
+function finishSetup() {
+  const k = setupKey();
+  if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
+  pendingSetup = false;
+  updateLoginGate();
+  import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
 }
 
 function setStatus(msg) {
@@ -219,11 +235,12 @@ async function pollGateLogin() {
         import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
         return;
       }
-      // 셋업 단계로 — 자동 실행 기본 켬을 실제 적용(끄면 토글로 해제).
+      // 셋업(권한 위저드)으로 — 자동 실행은 **묻지 않고 기본 켬**(2차 개정: 토글 제거, 끄기는 설정).
       pendingSetup = true;
       step = "setup";
-      autostartOn = true;
-      api.autostartEnable().catch(() => { autostartOn = false; });
+      permQueue = missingPerms(); // 이 시점 스냅샷이 슬라이드 순서다
+      permIdx = 0;
+      api.autostartEnable().catch(() => { /* 설정 > 일반에서 다시 켤 수 있다 */ });
       renderStep();
       S.emit(); // → render() → updateLoginGate() (pendingSetup 이라 게이트 유지)
     }

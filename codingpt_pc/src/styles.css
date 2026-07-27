@@ -810,6 +810,17 @@ input[type="checkbox"].tgl:checked::after { transform: translateX(16px); backgro
 .login-gate .lg-back { position: absolute; top: 44px; left: 16px; background: none; border: none; color: var(--dim); font-size: 18px; cursor: pointer; padding: 8px 10px; border-radius: 8px; }
 .login-gate .lg-back:hover { color: var(--text); background: var(--elevated); }
 .login-gate .btn.lg.lg-wait { display: inline-flex; align-items: center; justify-content: center; gap: 9px; opacity: 0.95; cursor: default; }
+/* ── 권한 위저드(슬라이드) — 2026-07-28 2차 개정: 화면당 권한 하나 + 하단 [허용] 단일 CTA ── */
+.login-gate .lg-slide { animation: lg-slide-in 0.28s ease-out; }
+@keyframes lg-slide-in { from { opacity: 0; transform: translateX(26px); } to { opacity: 1; transform: none; } }
+.login-gate .lg-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 2px; }
+.login-gate .lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-ctrl); transition: background 0.2s; }
+.login-gate .lg-dot.on { background: var(--accent); }
+.login-gate .lg-dot.done { background: var(--accent); opacity: 0.45; }
+.login-gate .lg-perm-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: var(--accent); background: var(--elevated); border: 1px solid var(--border); box-shadow: 0 8px 28px rgba(52, 211, 153, 0.12); }
+.login-gate .lg-perm-benefit { font-size: 13.5px; color: var(--text2); max-width: 340px; line-height: 1.55; }
+.login-gate .lg-perm-hint { font-size: 11.5px; color: var(--dim); max-width: 340px; line-height: 1.5; }
+.login-gate .lg-perm-alt { min-height: 22px; display: flex; gap: 4px; justify-content: center; }
 .login-gate .lg-btnspin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff; display: none; }
 .login-gate .lg-btnspin.on { display: inline-block; animation: lg-spin 0.9s linear infinite; }
 @keyframes lg-spin { to { transform: rotate(360deg); } }
