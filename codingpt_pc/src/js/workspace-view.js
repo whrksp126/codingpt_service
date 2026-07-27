@@ -7,7 +7,8 @@ import { PaneView, isTermTab, newTid } from "./pane.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
-import { icons } from "./icons.js";
+import { icons, agentMarkHtml } from "./icons.js";
+import { cachedAgents, loadAgents } from "./agents-view.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -534,12 +535,61 @@ function renderMainTop(ws) {
       b.addEventListener("click", () => smartAdd(kind));
       return b;
     };
+    // 터미널 버튼만 드롭다운 — [터미널] + 이 PC 에 **설치된** 에이전트들(사용자 확정 2026-07-27).
+    //  에이전트를 고르면 새 터미널을 만들고 그 경로에서 명령을 타이핑해 실행한다. 탭 이름·아이콘은
+    //  손대지 않는다 — tmux 자동 이름과 로고 감지가 이미 claude/codex 를 알아본다(사용자 확정).
+    const termBtn = document.createElement("button");
+    termBtn.className = "pane-ctrl";
+    termBtn.title = "터미널 추가";
+    termBtn.innerHTML = icons.terminal({ size: 16 });
+    termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
     adds.append(
-      mkBtn(icons.terminal, "터미널 추가", "terminal"),
+      termBtn,
       mkBtn(icons.code, "IDE 추가", "ide"),
       mkBtn(icons.globe, "웹뷰 추가", "preview"),
     );
     mtDyn.append(spacer, adds);
+  }
+}
+
+// "터미널 추가 ▾" — [터미널] + 이 PC 에 설치된 에이전트. 스타일은 프리뷰 ⋯ 메뉴(.pv-menu) 재사용.
+//  목록은 데몬 감지가 정본이라 **설치된 것만** 나온다(미설치를 회색으로 걸어두지 않는다 — 여기서
+//  할 일은 "지금 띄우기"이고, 설치 안내는 설정 > 에이전트가 담당한다).
+//  캐시가 비어 있으면 먼저 [터미널]만 그린 뒤 조회 결과가 오면 다시 그린다(메뉴가 늦게 뜨지 않게).
+function openAddTermMenu(anchor) {
+  document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+  const menu = document.createElement("div");
+  menu.className = "pv-menu";
+  menu.style.minWidth = "196px";
+  const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+  const closer = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const paint = () => {
+    menu.innerHTML = "";
+    const row = (html, onClick) => {
+      const b = document.createElement("button");
+      b.className = "pv-menu-item";
+      b.innerHTML = html;
+      b.addEventListener("click", () => { close(); onClick(); });
+      menu.appendChild(b);
+    };
+    row(`<span class="pvm-ic">${icons.terminal({ size: 15 })}</span><span class="pvm-label">터미널</span>`,
+      () => smartAdd("terminal"));
+    for (const a of cachedAgents().agents) {
+      if (!a.installed) continue;
+      const logo = agentMarkHtml(a.id, { size: 15 }) || icons.terminal({ size: 15 });
+      row(`<span class="pvm-ic">${logo}</span><span class="pvm-label">${a.name}</span>`,
+        () => smartAdd("terminal", { launchAgent: a.id }));
+    }
+  };
+  paint();
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = (r.bottom + 4) + "px";
+  menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
+  document.body.append(menu);
+  setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  // 목록이 없거나 낡았으면(4초 초과) 갱신 — 메뉴가 열린 동안 조용히 다시 그린다.
+  if (!cachedAgents().agents.length || Date.now() - cachedAgents().at > 4000) {
+    loadAgents(false).then(() => { if (menu.isConnected) paint(); }).catch(() => { /* 구 데몬 = 터미널만 */ });
   }
 }
 
@@ -557,7 +607,7 @@ export function smartAdd(kind, extra) {
   // 빈 자리 pane(터미널 0개 상태)이 활성이면 분할 대신 그 자리를 채운다.
   if (focusLeaf?.kind === "terminal" && !focusLeaf.tabs.length) {
     if (kind === "terminal") {
-      panes.get(focusId)?.addTab();
+      panes.get(focusId)?.addTab(extra?.launchAgent);
     } else {
       const tab = kind === "ide"
         ? { kind: "ide", openPath: extra?.openPath || null, tid: newTid() }
@@ -581,7 +631,7 @@ export function smartAdd(kind, extra) {
   else if (canV) dir = "v";
   if (!dir && focusLeaf?.kind === "terminal") {
     if (kind === "terminal") {
-      panes.get(focusId)?.addTab();
+      panes.get(focusId)?.addTab(extra?.launchAgent);
       S.focusPane(focusId);
       return focusId;
     }
@@ -599,7 +649,7 @@ export function smartAdd(kind, extra) {
   const opts = kind === "preview"
     ? { url: extra?.url || "" }
     : kind === "terminal"
-      ? { fresh: true }
+      ? { fresh: true, ...(extra?.launchAgent ? { launchAgent: extra.launchAgent } : {}) }
       : extra?.openPath ? { openPath: extra.openPath } : undefined;
   S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
   return wsRuntime(state.activeWsId)?.focusId || null;

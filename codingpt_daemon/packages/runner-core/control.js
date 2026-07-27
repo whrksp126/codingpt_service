@@ -384,6 +384,10 @@ function dispatchRpc(ws, method, params, ok, fail) {
   if (method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(method, params).then(ok).catch(fail); return; }
   // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
   if (method.startsWith('agent.')) { agentLib.handle(method, params, ws).then(ok).catch(fail); return; }
+  // 에이전트 관리(agents.list/wire/rescan) — 모바일에서도 조작 가능(사용자 확정 2026-07-27).
+  //  ⚠ `agents.` 와 `agent.` 는 다른 접두사다(위 분기가 먼저 걸리지 않는다) — 순서를 바꿔도 안전.
+  //  LAN 직결 allowlist 에는 넣지 않는다(lan.js 불변식: 승인·에이전트류는 서버 릴레이로 남긴다).
+  if (method.startsWith('agents.')) { cptServer.handleAgentsRpc(method, params || {}).then(ok).catch(fail); return; }
   // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
   if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.
@@ -684,7 +688,10 @@ function run(config) {
     //  "스위치 하나로 원복"이라는 운영 약속이 깨진다).
     //  → 실제 기동은 hello_ack 에서 serverCaps 를 확인한 뒤(startLanIfAllowed). 좌표는 lan_update 로 보낸다.
     // shim(cpt/claude/codex 래퍼 + claude 훅 설정) 멱등 생성 — 터미널 PATH 주입은 pty.js 가 담당.
-    try { require('./shim').ensureShims(); } catch (e) { console.error('[control] shim 생성 실패:', e.message); }
+    //  ★ 비동기판을 쓴다 — 감지(로그인 셸 PATH 포함)를 먼저 끝내야 "설치된 것만 감싸기"가 정확하다.
+    //   실패해도 부팅을 막지 않는다(래퍼가 없으면 사용자는 훅 없이 평소대로 쓰게 되는 열화 동작).
+    require('./shim').ensureShimsAsync()
+      .catch((e) => console.error('[control] shim 생성 실패:', e.message));
     // cpt 스킬 스텁을 ~/.claude/skills 에 설치 — claude 가 cpt 를 스스로 인지·사용하게(opt-out: CPT_SKILL_INSTALL=0).
     try { require('./skills').ensureSkillStub(); } catch (e) { console.error('[control] 스킬 스텁 설치 실패:', e.message); }
     // 첨부 저장소(<stateDir>/attachments) 보장 + 7일 초과 파일 삭제 — 베스트에포트(실패 무해).

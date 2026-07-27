@@ -175,6 +175,13 @@ export const api = {
   //    "봉인해서 보내줘/열어줘"만 지시한다(deviceToken 을 JS 에 노출하지 않는 것과 같은 원칙).
   e2eeLocal: (cmd, args) => invoke("e2ee_local", { cmd, args: args || {} }),
 
+  // ── 에이전트 관리(이 PC 의 AI CLI) — 사이드카 데몬 위임(`agents.` 접두사만 Rust 가 통과) ──
+  //  agents.list {refresh}  → { agents:[…], onboardedAt }
+  //  agents.wire {id,on}    → 배선 토글 + shim 즉시 재생성(claude/codex 만)
+  //  agents.rescan {markOnboarded} → 재감지 + shim 재생성(설치 시트 3단계가 부르는 것)
+  //  agents.launch {cwd,index,id}  → 그 터미널에 명령을 타이핑(셸 준비 대기는 데몬이 판정)
+  agentsLocal: (cmd, args) => invoke("agents_local", { cmd, args: args || {} }),
+
   // ── 로컬 UI 채널(cpt.sock 지속 연결) — 터미널의 cpt 명령이 back 을 왕복하지 않고 바로 이 앱에 온다 ──
   //  uiLocalStart: 멱등(args 갱신만) · onLocalUiCommand: 데몬 push 수신 · uiLocalSend: ui_result/presence 회신.
   uiLocalStart: (args) => invoke("ui_local_start", { args: args || {} }),

@@ -1088,6 +1088,18 @@ export class PaneView {
       delete tab.fresh;
       this.ctx.onSurfacesChanged?.();
     }
+    // "터미널 추가 ▾ → Claude" — tid 를 아는 **유일한 지점**이 여기다(탭 추가·분할 두 경로가 모두
+    //  이 함수를 지난다). 명령 타이핑 자체는 데몬(agents.launch)이 한다: 새 셸이 사용자 rc 를 다
+    //  읽기 전에 키를 보내면 씹히는데, 그 준비 판정을 클라마다 구현하면 한쪽만 고쳐지는 결함이 된다.
+    //  ⚠ 반드시 지운다 — 영속(pc-ui.json)에 남으면 앱을 켤 때마다 에이전트가 저절로 실행된다.
+    if (tab && tab.launchAgent) {
+      const agentId = tab.launchAgent;
+      delete tab.launchAgent;
+      if (tab.win != null && tab.win !== "new") {
+        api.agentsLocal("agents.launch", { cwd: this.ctx.localPath || "", index: tab.win, id: agentId })
+          .catch((e) => api.debugLog(`agents.launch 실패 pane=${this.id} agent=${agentId} — ${e}`));
+      }
+    }
     return tab.win;
   }
 
@@ -1121,9 +1133,10 @@ export class PaneView {
   }
 
   // ── 탭 조작 ──
-  async addTab() {
+  // launchAgent: 'claude' | 'codex' | … — 새 터미널이 준비되면 그 명령을 타이핑해 실행한다(§_ensureWin).
+  async addTab(launchAgent) {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
-    const tab = { win: "new", title: "", fresh: true };
+    const tab = { win: "new", title: "", fresh: true, ...(launchAgent ? { launchAgent } : {}) };
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();

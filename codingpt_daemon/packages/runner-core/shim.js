@@ -10,7 +10,15 @@
  *  · 사용자 전역 설정(~/.claude/settings.json, ~/.codex/config.toml) 무오염 — 래퍼가 실행 시에만
  *    추가 설정(--settings / -c notify)을 얹는다. 사용자가 --settings 를 직접 주면 무간섭 통과.
  *  · 자격증명 무접촉(ToS 경계) — 훅/설정 주입만, 크레덴셜은 다루지 않는다.
- *  · 실제 바이너리는 생성 시점에 해석해 절대경로로 박되, 없으면 런타임 재탐색 폴백(command -v).
+ *  · **설치된 것만 감싼다**(2026-07-27). 없는 바이너리의 래퍼를 만들면 OS 의 표준
+ *    `command not found` 가 `cpt-shim: … 찾을 수 없습니다` 로 바뀌어 "우리가 망가뜨렸다"로 읽힌다
+ *    (실제 제보). 감지·배선 여부의 단일 출처 = `agents.js`. 미설치/배선 OFF 면 래퍼를 **삭제**한다.
+ *
+ * ⚠ zdot/* 의 내용은 감지 결과에 따라 바뀌면 안 된다. `.zlogin` 의 mtime 이
+ *  `healStaleTerminals`(pty.js) 의 낡음 판정 기준이라, 에이전트를 설치할 때마다 사용자의 유휴
+ *  터미널이 전부 respawn 된다. 그래서 셸 함수는 **정적**으로 두고 `[ -x ]` 폴백을 함수 안에 넣는다
+ *  (래퍼가 없으면 `command claude` 로 통과 → 표준 동작). 부수 효과로 나중에 설치해도 **이미 열려
+ *  있던 터미널에서 즉시** 배선이 붙는다(재시작 불필요).
  *
  * PATH 주입은 pty.js injectPoolEnv 가 tmux 세션 env 로 수행. 셸 rc 가 PATH 를 재구성해 shim 이
  * 뒤로 밀리는 환경은 `cpt doctor`(후속)에서 감지·안내한다(자동 수정 금지).
@@ -20,33 +28,23 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const runtime = require('./runtime');
+const agents = require('./agents');
 
 function binDir() { return path.join(runtime.stateDir(), 'bin'); }
 function shimDir() { return path.join(runtime.stateDir(), 'shim'); }
 
-// PATH 에서 실제 바이너리 탐색 — shim 디렉토리 자신은 제외(자기재귀 방지).
-function which(name) {
-  try {
-    const pathEnv = (process.env.PATH || '')
-      .split(':')
-      .filter((p) => p && p !== binDir())
-      .join(':');
-    const out = execFileSync('/usr/bin/which', [name], {
-      encoding: 'utf8',
-      env: { ...process.env, PATH: pathEnv },
-    }).trim();
-    return out || null;
-  } catch (_) { return null; }
+// "진짜" 바이너리 해석 — 다른 툴(cmux 등)의 래퍼를 건너뛰고 원본을 가리키게 한다.
+//  데몬이 cmux 안에서 떠 있으면 process.env.PATH 선두가 cmux/bin 이라 단순 which() 는 cmux 래퍼를
+//  잡는다. 그러면 우리 래퍼가 cmux 래퍼를 호출 → cmux 가 자기 훅을 다시 얹어 우리 훅이 무력화된다.
+//  → 표준 설치 위치(~/.local/bin 등) 우선 + 우리 bin 제외를 `agents.js` 가 한 곳에서 담당한다.
+function resolveReal(id) {
+  return agents.resolveBinSync(id);
 }
 
-// "진짜" 바이너리 해석 — 다른 툴(cmux 등)의 래퍼를 건너뛰고 원본을 가리키게 한다.
-//  데몬이 cmux 안에서 떠 있으면 process.env.PATH 선두가 cmux/bin 이라 which() 가 cmux 래퍼를 잡는다.
-//  그러면 우리 래퍼가 cmux 래퍼를 호출 → cmux 가 자기 훅을 다시 얹어 우리 훅이 무력화된다.
-//  → Anthropic 공식 설치 경로(~/.local/bin)를 우선하고, 없으면 PATH 탐색으로 폴백.
-function resolveReal(name) {
-  const local = path.join(os.homedir(), '.local', 'bin', name);
-  try { fs.accessSync(local, fs.constants.X_OK); return local; } catch (_) { /* 없음 → 폴백 */ }
-  return which(name);
+// 래퍼 제거 — 미설치이거나 사용자가 배선을 끈 에이전트. 남겨두면 그 에이전트의 표준 동작을
+//  우리가 가로챈다(미설치일 때 OS 의 command not found 를 우리 에러로 바꿔치기하는 사고).
+function removeExec(file) {
+  try { fs.unlinkSync(file); return true; } catch (_) { return false; }
 }
 
 function writeExec(file, content) {
@@ -69,7 +67,9 @@ if [ ! -x "$REAL" ]; then
   REAL="$(PATH="$(echo "$PATH" | tr ':' '\\n' | grep -vx "$(cd "$(dirname "$0")" && pwd)" | tr '\\n' ':')" command -v ${name} || true)"
 fi
 if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then
-  echo "cpt-shim: ${name} 실행 파일을 찾을 수 없습니다" >&2
+  # 이 래퍼는 "생성 시점에 ${name} 이 있었다"는 뜻이므로, 여기 도달했으면 그 사이에 사라진 것이다.
+  #  (미설치 상태에서는 래퍼 자체를 만들지 않는다 — 그때는 OS 의 command not found 가 그대로 뜬다)
+  echo "cpt-shim: ${name} 을 찾지 못했습니다 — 설치가 제거됐거나 PATH 에서 사라졌습니다" >&2
   exit 127
 fi`;
 }
@@ -158,9 +158,13 @@ exec "${process.execPath}" "${cptCli}" "$@"
   } catch (_) { /* noop */ }
 
   // 3) claude 래퍼 — 훅 설정 주입. 사용자가 --settings 를 직접 주면 무간섭 통과.
+  //    ★ 설치돼 있고 배선이 켜져 있을 때만 만든다. 아니면 지운다(§파일 머리 주석).
+  const wired = [];
+  const skipped = [];
   const realClaude = resolveReal('claude');
-  writeExec(path.join(bin, 'claude'), `#!/bin/sh
-REAL="${realClaude || ''}"
+  if (realClaude && agents.isWired('claude')) {
+    writeExec(path.join(bin, 'claude'), `#!/bin/sh
+REAL="${realClaude}"
 ${resolverSnippet('claude')}
 if [ "\${CPT_HOOKS_DISABLED:-0}" = "1" ]; then exec "$REAL" "$@"; fi
 case " $* " in
@@ -168,11 +172,17 @@ case " $* " in
 esac
 exec "$REAL" --settings "${hooksFile}" "$@"
 `);
+    wired.push('claude');
+  } else {
+    removeExec(path.join(bin, 'claude'));
+    skipped.push('claude');
+  }
 
   // 4) codex 래퍼 — notify 프로그램 주입(작업 종료/승인 알림).
   const realCodex = resolveReal('codex');
-  writeExec(path.join(bin, 'codex'), `#!/bin/sh
-REAL="${realCodex || ''}"
+  if (realCodex && agents.isWired('codex')) {
+    writeExec(path.join(bin, 'codex'), `#!/bin/sh
+REAL="${realCodex}"
 ${resolverSnippet('codex')}
 if [ "\${CPT_HOOKS_DISABLED:-0}" = "1" ]; then exec "$REAL" "$@"; fi
 case " $* " in
@@ -180,6 +190,11 @@ case " $* " in
 esac
 exec "$REAL" -c 'notify=["cpt","codex-notify"]' "$@"
 `);
+    wired.push('codex');
+  } else {
+    removeExec(path.join(bin, 'codex'));
+    skipped.push('codex');
+  }
 
   // 4.5) open 래퍼(macOS 전용) — `open http(s)://…` 를 워크스페이스 프리뷰로 라우팅한다(cmux 미러).
   //   PATH 선두에 bin 이 오므로 이 파일이 /usr/bin/open 보다 먼저 잡힌다. cpt 와 달리 전역 심링크·
@@ -226,10 +241,21 @@ exit 0
   fs.mkdirSync(zdot, { recursive: true, mode: 0o700 });
   const orig = '"${CPT_ORIG_ZDOTDIR:-$HOME}"';
   // 사용자 rc 이후 마지막에 실행 — PATH 선두 주입 + claude/codex/cpt 셸 함수 강제(다른 툴의 PATH 래핑 우선).
+  //  ⚠ 이 문자열은 **정적**이어야 한다(감지 결과를 넣지 말 것). 내용이 바뀌면 .zlogin mtime 이 변해
+  //   healStaleTerminals 가 사용자의 유휴 터미널을 전부 respawn 한다. 그래서 "래퍼가 있으면 쓰고,
+  //   없으면 원래대로"를 **함수 안의 런타임 분기**로 처리한다 — 래퍼 파일의 유무만 달라진다.
+  //   `command <name>` 은 함수를 우회하지만 PATH 는 그대로라 우리 bin 이 앞에 있으면 재귀한다 →
+  //   폴백에서는 PATH 에서 우리 bin 을 뺀 뒤 조회한다.
   const cptTail = `# CodingPT shim — 사용자 rc 이후 우리 배선을 확정(우리 터미널 전용).
 export PATH="${bin}:$PATH"
-claude() { "${bin}/claude" "$@"; }
-codex()  { "${bin}/codex" "$@"; }
+_cpt_passthru() {  # $1=이름, 나머지=인자 — 우리 래퍼가 없을 때 원래 명령으로 통과
+  _n="$1"; shift
+  _p="$(echo "$PATH" | tr ':' '\\n' | grep -vx "${bin}" | tr '\\n' ':')"
+  _r="$(PATH="$_p" command -v "$_n" 2>/dev/null)"
+  if [ -n "$_r" ]; then "$_r" "$@"; else command "$_n" "$@"; fi
+}
+claude() { if [ -x "${bin}/claude" ]; then "${bin}/claude" "$@"; else _cpt_passthru claude "$@"; fi; }
+codex()  { if [ -x "${bin}/codex" ];  then "${bin}/codex" "$@";  else _cpt_passthru codex "$@";  fi; }
 cpt()    { "${bin}/cpt" "$@"; }`;
   writeIfChanged(path.join(zdot, '.zshenv'), `# CodingPT shim — 원래 zshenv 위임
 _cpt_orig=${orig}
@@ -254,9 +280,19 @@ ZDOTDIR="${zdot}"
 ${cptTail}
 `);
 
-  return { binDir: bin, hooksFile, zdotDir: zdot };
+  return { binDir: bin, hooksFile, zdotDir: zdot, wired, skipped };
+}
+
+/**
+ * 감지를 **먼저** 끝낸 뒤 배선한다. 데몬은 PC 앱(Finder/launchd)이 띄우는 사이드카라 로그인 셸의
+ *  PATH 를 물려받지 않는다 — 동기 경로만 쓰면 `~/.local/bin` 밖에 깐 에이전트를 놓칠 수 있다.
+ *  `agents.list()` 가 로그인 셸 PATH 를 1회 조사해 캐시하므로, 이후 동기 해석이 정확해진다.
+ */
+async function ensureShimsAsync() {
+  try { await agents.list({ version: false, refresh: true }); } catch (_) { /* 감지 실패 → 동기 폴백 */ }
+  return ensureShims();
 }
 
 function zdotDir() { return path.join(shimDir(), 'zdot'); }
 
-module.exports = { ensureShims, binDir, shimDir, zdotDir };
+module.exports = { ensureShims, ensureShimsAsync, binDir, shimDir, zdotDir };

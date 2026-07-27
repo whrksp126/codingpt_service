@@ -12,6 +12,7 @@ module.exports = {
   pty: require('./pty'),
   fs: require('./fs'),
   agent: require('./agent'),
+  agents: require('./agents'),     // 이 PC 에 설치된 AI CLI 카탈로그·감지·배선 상태(shim 의 단일 출처)
   sync: require('./sync'),
   proxy: require('./proxy'),
   forward: require('./forward'), // 보는 기기 쪽 로컬 포트 포워더(원격 프리뷰 localhost 미러)

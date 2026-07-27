@@ -199,6 +199,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   ping
   agent status                          이 워크스페이스 에이전트 상태(● 작업중 ○ 유휴 ✋ 승인대기)
   hooks doctor                          훅 배선 진단(상태·알림이 안 올 때 원인 확인)
+  agents [rescan]                       이 PC 의 AI CLI 목록(● 연동 ○ 연동꺼짐 · 미설치)
 
   # 터미널 (전 기기 공유 풀)
   terminal list                         터미널 목록(이름/실행 중 명령)
@@ -339,6 +340,21 @@ async function main() {
         process.stderr.write('사용법: cpt hooks doctor\n');
         process.exitCode = 2;
         return;
+      }
+      case 'agents': {
+        // 이 PC 에 설치된 AI 코딩 CLI 목록. 등급을 정직하게 찍는다(배선되는 것과 실행만 되는 것 구분).
+        //  배선 토글(agents.wire)은 일부러 CLI 에 없다 — 터미널 안의 AI 가 자기 승인 훅을 스스로
+        //  끄는 경로가 되기 때문(설정 화면에서 사람이 한다).
+        const r = await request('agents.list', { refresh: c2 === 'rescan' });
+        const TIER = { full: '완전 연동', partial: '알림만', launch: '실행 전용' };
+        const lines = (r.agents || []).map((a) => {
+          const mark = a.installed ? (a.wired ? '●' : '○') : '·';
+          const tail = a.installed
+            ? `${a.version ? 'v' + a.version + ' ' : ''}${TIER[a.tier] || a.tier}${a.wirable && !a.wired ? ' (연동 꺼짐)' : ''}`
+            : '미설치';
+          return `${mark} ${a.name} (${a.bin}) — ${tail}`;
+        });
+        return out(r, flags, lines.join('\n') || '(카탈로그 비어 있음)');
       }
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).

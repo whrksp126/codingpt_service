@@ -43,6 +43,13 @@ router.post('/terminal/select', authMiddleware, daemonController.terminalSelect)
 router.post('/terminal/close', authMiddleware, daemonController.terminalClose);
 router.post('/terminal/unview', authMiddleware, daemonController.terminalUnview);
 
+// 에이전트 관리 — 이 PC 에 설치된 AI CLI 감지·배선·실행(모바일에서도 조작 가능, 사용자 확정 2026-07-27).
+//  accountAuth = JWT|deviceToken 겸용 + ?hostDeviceId 라우팅(fs.* 와 같은 규율 — 다른 PC 도 조회).
+router.get('/agents', accountAuth, daemonController.agentsList);
+router.post('/agents/wire', accountAuth, daemonController.agentsWire);
+router.post('/agents/rescan', accountAuth, daemonController.agentsRescan);
+router.post('/agents/launch', accountAuth, daemonController.agentsLaunch);
+
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.
 //  ?hostDeviceId= / body.hostDeviceId 로 대상 호스트 지정(활성 러너 무변경), 미지정=활성 러너.

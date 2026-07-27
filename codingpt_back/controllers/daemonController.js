@@ -846,6 +846,47 @@ async function terminalUnview(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── 에이전트 관리(2026-07-27) — 이 PC 에 설치된 AI CLI 감지·배선·실행 ────────────
+// GET  /api/daemon/agents            → { agents:[…], onboardedAt }
+// POST /api/daemon/agents/wire       body:{ id, on } → 갱신된 목록
+// POST /api/daemon/agents/rescan     body:{ markOnboarded? } → 갱신된 목록
+// POST /api/daemon/agents/launch     body:{ cwd, index, id } → { ok, ready, command }
+//
+// accountAuth(JWT|deviceToken) + hostDeviceId 라우팅 = fs.* 와 동일 규율. 서버는 목록·명령을
+//  **만들지 않는다** — 카탈로그와 설치 명령은 데몬 로컬(runner-core/agents.js)에만 있다.
+//  서버가 실행할 문자열을 내려주면 그것이 곧 원격 코드 실행 통로가 되기 때문이다.
+async function agentsList(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'agents.list',
+      { refresh: String(req.query.refresh || '') === '1' }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function agentsWire(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agents.wire',
+      { id: String(b.id || ''), on: !!b.on }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function agentsRescan(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agents.rescan',
+      { markOnboarded: !!b.markOnboarded }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function agentsLaunch(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'agents.launch',
+      { cwd: b.cwd || '', index: b.index | 0, id: String(b.id || '') }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // 데몬 오프라인 시 통일된 409.
 function mapRpcError(res, e) {
   if (e.message === 'DAEMON_OFFLINE') {
@@ -1445,6 +1486,7 @@ module.exports = {
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
+  agentsList, agentsWire, agentsRescan, agentsLaunch,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,
   rpcSealed, _isSealedEnvelope: isSealedEnvelope, // 봉투 프록시(기능2 B단계) + 테스트 노출(형식 게이트)
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,

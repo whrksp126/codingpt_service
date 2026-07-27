@@ -11,6 +11,7 @@ import {
   e2eeCanRestore,
 } from "./e2ee.js";
 import { hostE2eeEpoch, hostLockLabel, isHostRow } from "./host-lock.js";
+import { renderAgentList, loadAgents, cachedAgents } from "./agents-view.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -29,6 +30,7 @@ let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
   { key: "general", label: "일반", icon: "gear" },
+  { key: "agents", label: "에이전트", icon: "tools" },
   { key: "connection", label: "계정", icon: "user" },
   { key: "about", label: "정보", icon: "monitor" },
 ];
@@ -121,6 +123,27 @@ function renderSection(force) {
     } else if (paired) {
       ensureAccountCard(); // 프로필 지연 로드 반영(닉네임 재바인딩 포함)
       renderE2ee();        // 기기 목록 + 암호화 상태(한 섹션 — 2026-07-27 통합)
+    }
+  } else if (section === "agents") {
+    // 이 PC 의 AI CLI 목록. 데몬 감지가 정본이라 화면은 그 결과를 그대로 비춘다(추측 표기 금지).
+    if (force || !contentEl.querySelector("#agentsBody")) {
+      contentEl.innerHTML = `
+        <div class="sm-card2">
+          <div class="sett-col"><span>이 PC의 AI 에이전트</span><div id="agentsBody" class="ag-list"></div></div>
+          <div class="sett-hint" id="agentsHint">에이전트를 확인하는 중…</div>
+        </div>`;
+      const body = contentEl.querySelector("#agentsBody");
+      const hint = contentEl.querySelector("#agentsHint");
+      const paint = () => {
+        renderAgentList(body, { onChange: paint });
+        const c = cachedAgents();
+        const on = c.agents.filter((a) => a.installed && a.wired).length;
+        const missing = c.agents.filter((a) => !a.installed).length;
+        hint.textContent = `연동 ${on}개 · 미설치 ${missing}개. 연동을 켜면 그 에이전트를 실행할 때만 우리 훅이 얹혀요 — `
+          + `사용자 개인 설정 파일(~/.claude, ~/.codex)은 수정하지 않아요.`;
+      };
+      paint();
+      loadAgents(true).then(paint).catch((e) => { hint.textContent = String(e && e.message ? e.message : e); });
     }
   } else if (section === "general") {
     contentEl.innerHTML = `

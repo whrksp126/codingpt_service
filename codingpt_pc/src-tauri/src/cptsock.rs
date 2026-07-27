@@ -172,6 +172,19 @@ pub fn e2ee_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Va
     cpt_request_coded(&cmd, args, true)
 }
 
+// 에이전트 관리(2026-07-27) — 이 PC 에 설치된 AI CLI 감지·배선·실행. 데몬이 단일 출처다.
+//  울타리는 e2ee_local 과 동일한 이유·동일한 모양: `agents.` 접두사만 통과시킨다. 임의 cpt 명령
+//  통로를 프런트에 열면 웹뷰에서 도는 어떤 스크립트든 데몬 제어권을 갖는다.
+//  ⚠ 설치 명령 자체를 여기서 실행하지 않는다 — 설치는 **사용자가 보는 터미널에서** 돈다(그래서
+//   무엇이 실행되는지 숨겨지지 않고, Ctrl+C 로 멈출 수 있다). 이 커맨드는 감지/배선/타이핑만 한다.
+#[tauri::command]
+pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("agents.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request(&cmd, args)
+}
+
 // ── 로컬 UI 채널(같은 기기 ui_command 왕복 제거) ─────────────────────────────────
 //  터미널의 `cpt` → 로컬 데몬 → (지금까지) back WSS → 다시 이 앱. 같은 기기 안에서 서버를 왕복했다.
 //  `ui.attach` 로 cpt.sock 커넥션을 유지하면 데몬이 이 앱에 직접 명령을 밀어 넣을 수 있다.

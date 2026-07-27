@@ -242,6 +242,87 @@ async function backFetch(method, apiPath, body) {
 //  둘 중 하나라도 없는 back(=미배포)이면 begin 이 실패하고 호출측(PC 앱)이 구 경로로 폴백한다.
 const syncLocalInflight = new Set(); // wsId — 같은 워크스페이스 중복 체크포인트 방지(주기 트리거 겹침)
 
+// ── 에이전트 관리(agents.*) ──────────────────────────────────────────────────
+//  list   : 카탈로그 + 감지 결과 + 배선 상태(등급 포함). refresh=true 면 캐시 무시(설치 직후 검증용).
+//  wire   : 배선 on/off (claude/codex 만) → 즉시 shim 재생성. **CAPABILITIES 비공개**(AI 자기해제 금지).
+//  rescan : 재감지 + shim 재생성. 설치 시트의 3단계("CodingPT 동기화")가 부르는 것이 이것이다.
+//           성공 판정을 이 결과(installed)로만 한다 — 설치 명령의 종료 코드는 믿지 않는다.
+async function handleAgentsRpc(cmd, a) {
+  const agentsLib = lazyMod('./agents');
+  if (!agentsLib) throw new Error('이 데몬은 에이전트 관리를 지원하지 않습니다(PC 앱 업데이트 필요)');
+  const shimLib = lazyMod('./shim');
+  if (cmd === 'agents.list') {
+    const items = await agentsLib.list({ refresh: !!a.refresh });
+    return { agents: items, onboardedAt: agentsLib.onboardedAt() };
+  }
+  if (cmd === 'agents.wire') {
+    const id = String(a.id || '').trim();
+    const on = !!a.on;
+    agentsLib.setWired(id, on);
+    // 래퍼 생성/삭제를 즉시 반영 — 토글하고 나서 "다음 재부팅부터" 는 사용자가 이해할 수 없다.
+    if (shimLib && shimLib.ensureShimsAsync) await shimLib.ensureShimsAsync();
+    const items = await agentsLib.list({ refresh: true });
+    return { agents: items, onboardedAt: agentsLib.onboardedAt() };
+  }
+  if (cmd === 'agents.rescan') {
+    if (a.markOnboarded) agentsLib.markOnboarded();
+    if (shimLib && shimLib.ensureShimsAsync) await shimLib.ensureShimsAsync();
+    const items = await agentsLib.list({ refresh: true });
+    return { agents: items, onboardedAt: agentsLib.onboardedAt() };
+  }
+  if (cmd === 'agents.launch') return launchAgentInTerminal(agentsLib, a);
+  throw new Error('알 수 없는 명령: ' + cmd);
+}
+
+/**
+ * 이미 만들어진 터미널(tid)에서 에이전트를 **타이핑해 실행**한다. "터미널 추가 ▾ → Claude" 의 뒷단.
+ *
+ * ★ 왜 클라이언트가 아니라 여기서 하나: **새 셸이 사용자 rc 를 다 읽기 전에 키를 보내면 입력이
+ *  씹힌다**(사용자 zsh 는 powerlevel10k — 프롬프트 준비까지 수백 ms). 이 타이밍 판정을 PC/모바일이
+ *  각자 구현하면 한쪽만 고쳐지는 결함이 된다(전례: runTmux UTF-8 미러 누락).
+ *
+ * "준비됨" 판정 = ① 실행 중 명령이 셸이다(에이전트가 이미 돌고 있으면 덮어 치지 않는다)
+ *  ② 화면에 뭐라도 그려졌다(= 프롬프트가 나왔다). 둘 다 tmux 에 직접 묻는다.
+ *  타임아웃(기본 6초)이면 그래도 보내고 `ready:false` 로 정직하게 알린다 — 아무것도 안 하는 것보다,
+ *  "명령이 안 들어갔을 수 있다"를 UI 가 말할 수 있게 하는 편이 낫다.
+ */
+async function launchAgentInTerminal(agentsLib, a) {
+  const id = String(a.id || a.agent || '').trim();
+  const items = await agentsLib.list({ version: false });
+  const hit = items.find((x) => x.id === id);
+  if (!hit) throw new Error('알 수 없는 에이전트입니다: ' + id);
+  if (!hit.installed) throw new Error(`${hit.name} 이 이 PC 에 설치되어 있지 않습니다`);
+  const tid = Number(a.index != null ? a.index : a.tid);
+  if (!Number.isFinite(tid)) throw new Error('터미널 index 가 필요합니다');
+  const { session, abs } = ptyLib.sessionForCwd(a.cwd);
+  await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
+  const target = `=${ptyLib.termSession(session, tid)}:0`;
+  const SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login']);
+  const deadline = Date.now() + Math.max(1000, Math.min(20000, (a.timeoutMs | 0) || 6000));
+  let ready = false;
+  let busy = false;
+  while (Date.now() < deadline) {
+    let cur = '';
+    try {
+      cur = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{pane_current_command}'])).trim();
+    } catch (e) {
+      throw new Error('터미널을 찾을 수 없습니다 (index=' + tid + ')');
+    }
+    if (cur && !SHELLS.has(cur)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
+    let screen = '';
+    try {
+      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', target, '-S', '-5']);
+    } catch (_) { screen = ''; }
+    if (screen.trim()) { ready = true; break; }            // 프롬프트가 그려졌다
+    await new Promise((r) => setTimeout(r, 120));
+  }
+  if (busy) return { ok: false, busy: true, index: tid, command: hit.bin };
+  const command = agentsLib.launchCommand(id);
+  await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', command]);
+  await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+  return { ok: true, ready, index: tid, command };
+}
+
 async function localCheckpoint(a) {
   const wsId = String(a.workspaceId || a.wsId || '').trim();
   if (!wsId) throw new Error('workspaceId 가 필요합니다.');
@@ -504,6 +585,11 @@ async function dispatch(req, conn) {
   //  무거운 번들/업로드는 background — 대형 워크스페이스는 분 단위라 소켓 왕복으로 기다릴 수 없다.
   //  forward.* 와 같이 CAPABILITIES 비공개(내부용) + resolveCtx 전 처리(tmux ctx 불필요).
   if (cmd === 'sync.checkpoint') return localCheckpoint(req.args || {});
+  // 에이전트 관리(2026-07-27) — 이 PC 에 설치된 AI CLI 감지·배선. resolveCtx 전 처리(tmux ctx 불필요).
+  //  ⚠ `agents.wire` 는 CAPABILITIES 비공개다: 터미널 안의 AI 가 자기 승인 훅을 스스로 끄는 경로가
+  //   되기 때문이다(approval.respond 를 닫는 것과 같은 이유 — 승인 게이트의 자기해제 금지).
+  //   `agents.list` 만 공개한다(어차피 AI 는 `which claude` 로 알 수 있는 정보).
+  if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
   const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
@@ -1040,6 +1126,8 @@ const CAPABILITIES = [
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
+  // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
+  'agents.list',
   // 조회 전용(사람/AI 노출 안전) — 승인 대기 목록 + 트랜스크립트 읽기.
   'approval.list',
   'chat.sessions', 'chat.open', 'chat.since', 'chat.close', 'chat.detail', 'chat.attachment',
@@ -1057,6 +1145,9 @@ const CAPABILITIES = [
   //    `lan.probe` 는 사설 IP·포트·RTT = 사용자 내부망 지형을 프롬프트 컨텍스트로 유출한다.
   //    사람이 부를 이유도 없다(진단은 `~/.codingpt/*.log` 의 [lan] 라인 + PC 배지로 충분).
   //    읽기 전용인 lan.status 만 훗날 공개하는 것은 안전하지만, 지금은 셋 다 닫는다.
+  //  · agents.wire / agents.rescan / agents.launch — wire 는 **터미널 안의 AI 가 자기 승인 훅을
+  //    스스로 끄는 경로**다(approval.respond 를 닫는 것과 같은 이유). rescan 은 shim 을 재생성하고,
+  //    launch 는 AI 가 다른 터미널에 에이전트를 띄우는 자기증식 경로라 셋 다 사람(UI)만 부른다.
   //  · e2ee.* — 열쇠 승인/거절/정책/복구코드/봉투 RPC. 승인(approve)은 **새 기기에 마스터키를 넘기는
   //    행위**이고 recovery.create 는 열쇠 자체를 텍스트로 뽑는다 — 승인 인박스(기능1)와 같은 이유로
   //    사람만 할 수 있어야 한다. openText(알림 복호)도 봉인된 내용을 평문으로 꺼내는 경로다.
@@ -1206,6 +1297,7 @@ function start() {
 module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
+  handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
   _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },

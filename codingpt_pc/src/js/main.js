@@ -18,6 +18,7 @@ import { startE2ee } from "./e2ee.js";
 import { ideDirtyPaths } from "./ide.js";
 import { initOsDrop } from "./os-drop.js";
 import { mountApprovals, updateApprovals } from "./approvals.js";
+import { maybeShowOnboarding } from "./agents-view.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
 //  스펙(사용자 확정): 취소 / (저장 안 하고) 종료 2택. 저장은 탭의 ● 표시 + ⌘S(또는 자동저장 완료 대기).
@@ -170,7 +171,9 @@ window.addEventListener("keydown", (e) => {
 function startPreviewShieldWatch() {
   // .approval-card — 승인 카드는 프리뷰 구멍 위에 뜰 수 있다. 실드가 없으면 카드가 보이는데
   //  클릭이 뒤의 프리뷰로 내려가 "허용 버튼이 안 눌리는" 사고가 난다(punch-through 규율).
-  const SEL = ".settings-modal:not(.hidden), .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
+  // .ag-sheet — 에이전트 설치 시트(설정 밖, 온보딩에서도 뜬다). 안에 실제 터미널이 있어 클릭·키
+  //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
+  const SEL = ".settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   setInterval(() => {
     const on = !!document.querySelector(SEL);
@@ -195,6 +198,9 @@ function startPreviewShieldWatch() {
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
   render();
   refreshWsMeta();
+  // 첫 실행 1스텝: "이 PC 에서 찾은 에이전트 — 연동할까요?" (한 번만, 데몬이 기록).
+  //  페어링 전이면 묻지 않는다(설정 저장 대상이 daemon.json 이라 페어링이 선행돼야 한다).
+  if (state.paired) maybeShowOnboarding().catch(() => {});
 
   // 백그라운드 폴링: 데몬 상태 / 워크스페이스 메타(브랜치·포트).
   setInterval(async () => {
