@@ -117,8 +117,10 @@ ok(!/개인 설정 파일\(~\/\.claude · ~\/\.codex\)은\s*$/.test(strip(appCar
 
 // 이 영역에 포인트 컬러(accent)를 쓰지 않는다 — 사용자 지적("너무 과해").
 //  PC: .ag-* 규칙 어디에도 var(--accent) 가 없어야 한다. 앱: 설치 패널에 C.accent 배경이 없어야 한다.
-const agCssBlock = (/\/\* ── 에이전트 관리[\s\S]*$/.exec(pcCss) || [''])[0];
-ok(!/var\(--accent\)/.test(agCssBlock), 'PC: 에이전트 영역 CSS 에 accent 가 없다');
+//  ⚠ 온보딩 슬라이드 섹션(3차 개정)은 검사 범위 밖이다 — 온보딩 CTA·진행점은 권한 위저드와 같은
+//   accent 시각 언어를 쓴다(no-accent 규칙은 설정의 설치/관리 영역에 대한 확정이었다).
+const agCssBlock = ((/\/\* ── 에이전트 관리[\s\S]*$/.exec(pcCss) || [''])[0]).split('/* ── 에이전트 온보딩 슬라이드')[0];
+ok(agCssBlock.length > 100 && !/var\(--accent\)/.test(agCssBlock), 'PC: 에이전트 설치/관리 영역 CSS 에 accent 가 없다');
 ok(!/backgroundColor: C\.accent/.test(appSheet), '앱: 설치 패널 버튼에 accent 배경이 없다');
 
 // 설치는 **모달 위 모달을 만들지 않는다** → 행 아래 인라인 확장.
@@ -129,14 +131,17 @@ ok(!/<Modal/.test(appSheet), '앱: 설치 패널은 Modal 이 아니다(설정 �
 ok(!/ag-methods|scale-seg/.test(pcView), 'PC: 설치 명령을 탭(세그먼트)으로 감추지 않는다');
 ok(/methods\.map/.test(appSheet), '앱: 설치 명령을 전부 나열한다');
 
-// 온보딩 토글은 **우측**(목록 화면과 같은 배치).
-const onbBlock = (/ag-onb-list[\s\S]*?\}\)\.join\(""\)/.exec(pcView) || [''])[0];
-// ⚠ `ag-onb` 만 찾으면 블록 시작인 `ag-onb-list` 에 걸려 항상 0 이 나온다(첫 판본이 그랬다) →
-//  체크박스의 실제 class 문자열로 찾는다.
-const tglAt = onbBlock.indexOf('class="tgl ag-onb"');
-ok(tglAt > 0 && onbBlock.indexOf('ag-main') < tglAt,
-  'PC 온보딩: 토글이 이름 오른쪽에 온다(좌측 배치 되돌림 방지)',
-  `ag-main=${onbBlock.indexOf('ag-main')} tgl=${tglAt}`);
+// ★ 3차 개정(2026-07-28, 사용자 확정): 온보딩의 "토글 목록 + 하단 [연동하기]" 는 선택과 적용이
+//  분리된 걸 화면이 말하지 않아 혼란("토글 켜면 바로 되는 건가?")을 만들었다 → 권한 위저드와 같은
+//  문법: 슬라이드 하나에 에이전트 하나, [연동하기] 클릭 = **그 자리에서 즉시** agents.wire.
+ok(!/class="tgl ag-onb"/.test(pcView) && /ag-onb-slide/.test(pcView),
+  'PC 온보딩: 토글 목록이 아니라 슬라이드다(선택→일괄 적용 모델 폐기)');
+{
+  const goBlock = (/ag-onb-go[\s\S]*?addEventListener\("click"[\s\S]*?\}\);/.exec(pcView) || [''])[0];
+  ok(/agents\.wire/.test(goBlock), 'PC 온보딩: [연동하기]가 그 자리에서 즉시 배선한다(버튼이 곧 행동)');
+}
+ok(/wirables\.filter\(\(a\) => a\.installed\)/.test(pcView),
+  'PC 온보딩: 미설치 에이전트는 슬라이드에 없다(설치는 설정의 몫 — 첫 사용자에게 노이즈)');
 
 // ── 9. 새 터미널은 스테일 치수로 열지 않는다(TUI 첫 화면이 영구히 어긋난다) ──
 ok(/_fitLocalOnly\(\);\s*\n?\s*const \{ cols, rows \} = this\.term;/.test(pcPane)

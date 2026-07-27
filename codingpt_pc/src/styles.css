@@ -1455,3 +1455,21 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
    잃는 것: 터미널 안 스크롤바 표시. 휠 스크롤은 그대로 되고, 스크롤 위치 표시는 앱의
    "Jump to bottom" 어포던스가 이미 담당한다. TUI(claude)는 alt-screen 이라 스크롤백이 없다. */
 .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ── 에이전트 온보딩 슬라이드 ── (설치/관리 영역의 no-accent 규칙 밖 — 온보딩 CTA·진행점은
+   권한 위저드와 같은 accent 시각 언어를 쓴다. 핀은 이 마커 앞까지만 검사한다) */
+/* ── 에이전트 온보딩 슬라이드(3차 개정) — 권한 위저드(login-gate .lg-slide)와 같은 시각 언어 ── */
+.ag-onb-card { width: 430px; }
+.ag-onb-slide { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 30px 26px 26px; text-align: center; animation: lg-slide-in 0.28s ease-out; }
+.ag-onb-dots { display: flex; gap: 7px; justify-content: center; margin-bottom: 2px; }
+/* 점 스타일은 login-gate 스코프에 있으므로 여기서도 정의한다(같은 시각 언어를 공유) */
+.ag-onb-dots .lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-ctrl); transition: background 0.2s; }
+.ag-onb-dots .lg-dot.on { background: var(--accent); }
+.ag-onb-dots .lg-dot.done { background: var(--accent); opacity: 0.45; }
+.ag-onb-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; background: var(--elevated2); border: 1px solid var(--border); }
+.ag-onb-title { font-size: 18px; font-weight: 800; color: var(--text); }
+.ag-onb-meta { font-size: 12px; color: var(--dim); margin-top: -6px; }
+.ag-onb-benefit { font-size: 13.5px; color: var(--text2); max-width: 340px; line-height: 1.55; }
+.ag-onb-hint { font-size: 11.5px; color: var(--dim); max-width: 340px; line-height: 1.5; }
+.ag-onb-slide .lg-link { background: none; border: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 6px; }
+.ag-onb-slide .lg-link:hover { color: var(--text2); }

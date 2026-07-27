@@ -298,65 +298,68 @@ export async function maybeShowOnboarding() {
     try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
     return false;
   }
-  const picked = new Set(wirables.filter((a) => a.installed).map((a) => a.id));
+  // ★ 2026-07-28 3차 개정(사용자 확정): 토글 목록 + 하단 [연동하기]는 "토글이 즉시 되는 건가?"라는
+  //  혼란을 만들었다(선택과 적용이 분리된 걸 화면이 말하지 않았다) → 권한 위저드와 **같은 문법**으로
+  //  통일: 슬라이드 하나에 에이전트 하나, 하단 큰 [연동하기] 단일 CTA(누르면 그 자리에서 즉시 배선),
+  //  '연동하지 않기'는 작은 링크. 미설치 에이전트는 온보딩에 아예 안 나온다(설치는 설정의 몫 —
+  //  "미설치 행 + 비활성 토글"은 처음 온 사용자에게 노이즈다).
+  const queue = wirables.filter((a) => a.installed);
   const el = document.createElement("div");
   el.className = "ag-sheet";
-  el.innerHTML = `
-    <div class="ag-sheet-back"></div>
-    <div class="ag-sheet-card" role="dialog" aria-modal="true">
-      <div class="ag-sheet-head"><span class="ag-sheet-title">이 PC에서 찾은 AI 에이전트</span></div>
-      <div class="ag-sheet-body">
-        <div class="ag-note" style="margin:0 0 12px">
-          연동하면 작업 완료 알림과 <b>휴대폰에서 승인</b>이 가능해져요. 에이전트를 실행할 때만 우리 설정이
-          얹히고, 개인 설정 파일(~/.claude · ~/.codex)은 수정하지 않아요.
-        </div>
-        <div class="ag-list ag-onb-list"></div>
-        <div class="ag-actions" style="justify-content:flex-end;margin-top:14px">
-          <button class="sett-btn ag-later">나중에</button>
-          <button class="sett-btn ag-go">연동하기</button>
-        </div>
-      </div>
-    </div>`;
   document.body.appendChild(el);
-  const list = el.querySelector(".ag-onb-list");
-  // 토글은 **우측**(사용자 확정) — 목록 화면과 같은 배치라 눈이 옮겨 다니지 않는다.
-  list.innerHTML = wirables.map((a) => {
-    const tier = TIER[a.tier] || {};
-    return `
-      <div class="ag-row${a.installed ? "" : " missing"}">
-        <span class="ag-logo">${agentMarkHtml(a.id, { size: 17 }) || icons.terminal({ size: 17 })}</span>
-        <span class="ag-main">
-          <span class="ag-name">${esc(a.name)}</span>
-          <span class="ag-meta">${a.installed
-            ? `${a.version ? esc(a.version) + " · " : ""}${esc(tier.label || "")}`
-            : "미설치 — 설정에서 설치할 수 있어요"}</span>
-        </span>
-        <span class="ag-right">
-          <input type="checkbox" class="tgl ag-onb" data-ag="${esc(a.id)}"${a.installed ? " checked" : ""}${a.installed ? "" : " disabled"} />
-        </span>
-      </div>`;
-  }).join("");
-  list.querySelectorAll(".ag-onb").forEach((cb) => cb.addEventListener("change", () => {
-    const id = cb.getAttribute("data-ag");
-    cb.checked ? picked.add(id) : picked.delete(id);
-  }));
 
   return new Promise((resolve) => {
-    const finish = async (accept) => {
-      el.querySelectorAll("button").forEach((b) => { b.disabled = true; });
-      for (const a of wirables) {
-        const on = accept && picked.has(a.id);
-        if (!a.installed && !on) continue;         // 미설치는 기록할 것이 없다
-        try { await api.agentsLocal("agents.wire", { id: a.id, on }); } catch (_) { /* 개별 실패는 넘어간다 */ }
-      }
-      markOnboardedLocal(); // 이 계정은 봤다 — [나중에]도 결정이다(계정마다 1회만 묻는다)
+    let idx = 0;
+    const finishAll = async () => {
+      markOnboardedLocal(); // 이 계정은 봤다 — '연동하지 않기'도 결정이다(계정마다 1회만 묻는다)
       try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
       try { await loadAgents(true); } catch (_) { /* noop */ }
       el.remove();
       resolve(true);
     };
-    el.querySelector(".ag-go").addEventListener("click", () => finish(true));
-    el.querySelector(".ag-later").addEventListener("click", () => finish(false));
+    const renderSlide = () => {
+      if (idx >= queue.length) { void finishAll(); return; }
+      const a = queue[idx];
+      const tier = TIER[a.tier] || {};
+      const dots = queue.length > 1
+        ? `<div class="ag-onb-dots">${queue.map((_, i) => `<span class="lg-dot${i === idx ? " on" : i < idx ? " done" : ""}"></span>`).join("")}</div>`
+        : "";
+      el.innerHTML = `
+        <div class="ag-sheet-back"></div>
+        <div class="ag-sheet-card ag-onb-card" role="dialog" aria-modal="true">
+          <div class="ag-onb-slide">
+            ${dots}
+            <div class="ag-onb-ic">${agentMarkHtml(a.id, { size: 30 }) || icons.terminal({ size: 30 })}</div>
+            <div class="ag-onb-title">${esc(a.name)}를 찾았어요</div>
+            <div class="ag-onb-meta">${a.version ? esc(a.version) + " · " : ""}${esc(tier.label || "")}</div>
+            <div class="ag-onb-benefit">${a.tier === "full"
+              ? "연동하면 작업 완료 알림이 오고, <b>휴대폰에서 승인</b>할 수 있어요"
+              : "연동하면 작업 완료 알림이 와요"}</div>
+            <div class="ag-onb-hint">실행할 때만 설정이 얹히고, 개인 설정 파일(~/.claude · ~/.codex)은 수정하지 않아요</div>
+            <button class="btn primary lg ag-onb-go" data-ag="${esc(a.id)}">연동하기</button>
+            <button class="lg-link ag-onb-skip">연동하지 않기</button>
+          </div>
+        </div>`;
+      const go = el.querySelector(".ag-onb-go");
+      const skip = el.querySelector(".ag-onb-skip");
+      // [연동하기] = 그 자리에서 **즉시** 배선한다(선택→나중에 일괄 적용 모델 폐기 — 버튼이 곧 행동이다).
+      go.addEventListener("click", async () => {
+        go.disabled = true;
+        skip.disabled = true;
+        go.textContent = "연동하는 중…";
+        try { await api.agentsLocal("agents.wire", { id: a.id, on: true }); } catch (_) { /* 실패해도 다음으로 — 설정에서 재시도 */ }
+        go.textContent = "연동됐어요 ✓";
+        setTimeout(() => { idx += 1; renderSlide(); }, 450);
+      });
+      skip.addEventListener("click", async () => {
+        go.disabled = true;
+        skip.disabled = true;
+        try { await api.agentsLocal("agents.wire", { id: a.id, on: false }); } catch (_) { /* noop */ }
+        idx += 1;
+        renderSlide();
+      });
+    };
+    renderSlide();
   });
 }
 
