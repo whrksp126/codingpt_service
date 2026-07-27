@@ -1214,7 +1214,9 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
        그래서 PC 마크업엔 마이크 노드가 아예 없다("있지만 안 되는 버튼"을 만들지 않는다). */
 .chat-composer {
   flex: none; position: relative;
-  background: var(--surface); padding: 8px 10px 10px;
+  /* ★ 배경을 두지 않는다(사용자 확정 2026-07-27): `--surface` 띠가 "영역이 나뉜 것"으로 읽혀
+     터미널/대화와 컴포저가 다른 화면처럼 보였다. 입력 상자만 살짝 떠 있으면 충분하다. */
+  background: transparent; padding: 8px 10px 10px;
 }
 .chat-box {
   display: flex; flex-direction: column; gap: 6px;
@@ -1224,13 +1226,7 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-box:focus-within { border-color: var(--border); }
 .chat-ctl { display: flex; align-items: center; gap: 6px; }
 .chat-ctl-gap { flex: 1 1 auto; }
-/* 모델 칩 — **표시 전용**(우리가 모델을 정하지 않는다). 모르면 .hidden 으로 아예 없다. */
-.chat-model {
-  flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11.5px; color: var(--text3); background: var(--elevated); border-radius: 999px;
-  padding: 3px 9px; cursor: default;
-}
-.chat-model.hidden { display: none; }
+/* 모델 칩은 **폐기**했다(사용자 확정 2026-07-27: `+` 옆 모델 표현 제거). 되살리지 말 것. */
 .chat-plus {
   flex: none; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
   border: none; border-radius: 999px;
@@ -1267,6 +1263,10 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   background: transparent; border: none; border-radius: 0;
   color: var(--text); font-family: var(--ui-font); font-size: 14px; line-height: 20px;
   padding: 2px 4px; outline: none; letter-spacing: -0.02em;
+  /* ★ 최소 한 줄 보장 — `_autoGrow()` 가 **숨겨진 동안**(display:none) 측정하면 scrollHeight 가 0 이라
+     height:0 이 박혀 "인풋이 깨진 것처럼 납작해진다"(사용자 실측 신고). autoGrow 쪽도 고쳤지만,
+     어떤 경로로든 0 이 들어와도 이 값이 바닥을 잡아 준다(방어 2겹). */
+  min-height: 22px;
 }
 .chat-input::placeholder { color: var(--dim); }
 .chat-send {

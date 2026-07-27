@@ -84,8 +84,20 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   // class 속성에 상태 클래스가 붙는다(`chat-model hidden`) → 이름 뒤 경계까지만 본다.
   //  `chat-ctl-gap` 은 경계 문자가 '-' 이라 자동으로 걸러진다.
   const order = [...comp.matchAll(/class="(chat-box|chat-input|chat-ctl|chat-plus|chat-model|chat-send)[ "]/g)].map((m) => m[1]);
-  eq("컴포저 구조 = 상자[입력][컨트롤행[+][모델칩][전송]]", order,
-    ["chat-box", "chat-input", "chat-ctl", "chat-plus", "chat-model", "chat-send"]);
+  eq("컴포저 구조 = 상자[입력][컨트롤행[+][전송]]", order,
+    ["chat-box", "chat-input", "chat-ctl", "chat-plus", "chat-send"]);
+  // 모델 칩은 폐기(사용자 확정 2026-07-27 2차: "+ 버튼 옆에 있는 모델 표현은 제거"). 되살아나면 실패.
+  ok("모델 칩이 없다(마크업·CSS·순수 규칙 전부)",
+    !/chat-model/.test(comp) && !/\.chat-model\s*\{/.test(css) && !/prettyModel/.test(cv));
+  // 컴포저 배경 = 대화 본문과 같은 색(별색 띠가 "영역이 나뉜 것"으로 읽혔다).
+  ok("컴포저에 별색 배경 띠가 없다",
+    /\.chat-composer\s*\{[^}]*background:\s*transparent/.test(css));
+  // ★ 숨겨진 동안 autoGrow 가 도는 것이 "인풋이 처음에 납작하게 깨져 보인다"의 원인이었다.
+  ok("autoGrow 는 레이아웃에 없을 때(offsetParent===null) 높이를 쓰지 않는다",
+    /_autoGrow\(\) \{[\s\S]{0,300}offsetParent === null\) return;/.test(cv));
+  ok("보이게 되는 순간 rAF 안에서 autoGrow 를 다시 부른다", /this\._autoGrow\(\);\s*\/\/ 이제 레이아웃에/.test(cv));
+  ok("입력에 min-height 바닥이 있다(측정 실패에도 납작해지지 않게)",
+    /\.chat-input\s*\{[^}]*min-height:\s*22px/.test(css));
   ok("입력에는 자체 테두리·포커스 링이 없다(상자만 가진다 — '최초 모습이 이상하다'의 원인)",
     /\.chat-input\s*\{[^}]*border:\s*none/.test(css) && !/\.chat-input:focus\s*\{/.test(css));
   ok("전송은 원형 + 빈 입력에선 disabled(거짓 affordance 금지)",
@@ -198,7 +210,7 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     ok("앱 composer.ts 에 import 가 없다(있으면 이 절이 조용히 SKIP 된다)",
       !/^\s*import[\s{*]/m.test(readFileSync(APP, "utf8")));
     ok("앱이 컴포저 순수 규칙을 export 한다",
-      ["composerHasText", "prettyModel", "agentDisplayName", "spliceSpeech"].every((k) => typeof A[k] === "function"));
+      ["composerHasText", "agentDisplayName", "spliceSpeech"].every((k) => typeof A[k] === "function"));
 
     // (a) 전송 가능 판정 — 공백/개행만 있는 입력을 보내면 TUI 가 프롬프트를 한 번 삼킨다.
     const TEXTS = ["", " ", "\n", " \n\t ", "a", " a ", "0", "안녕", "  줄\n둘  "];
@@ -206,20 +218,6 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     for (const t of TEXTS) if (M.composerHasText(t) !== A.composerHasText(t)) bad.push(JSON.stringify(t));
     ok(`전송 가능 판정 동치 ${TEXTS.length - bad.length}/${TEXTS.length}`, !bad.length, bad.join(","));
     eq("공백만 = 전송 불가", [M.composerHasText("  \n "), A.composerHasText("  \n ")], [false, false]);
-
-    // (b) 모델 칩 문자열 — 모르는 형태는 **빈 문자열**(원문 노출 금지: 칩을 밀어낸다).
-    const MODELS = [
-      "claude-sonnet-4-5-20250929", "claude-opus-4-1-20250805", "claude-3-5-haiku-20241022",
-      "claude-opus-5", "claude-opus-5[1m]", "claude-opus-5-1m", "claude-haiku-4-5-20251001",
-      "gpt-5-codex", "gpt-4.1", "gemini-2.5-pro", "", null, undefined, "  ", "무슨모델",
-      "CLAUDE-SONNET-4-5-20250929",
-    ];
-    bad = [];
-    for (const id of MODELS) if (M.prettyModel(id) !== A.prettyModel(id)) bad.push(`${JSON.stringify(id)}: pc=${JSON.stringify(M.prettyModel(id))} app=${JSON.stringify(A.prettyModel(id))}`);
-    ok(`모델 칩 문자열 동치 ${MODELS.length - bad.length}/${MODELS.length}`, !bad.length, bad.join(" | "));
-    eq("실측 형태 3종", [M.prettyModel("claude-sonnet-4-5-20250929"), M.prettyModel("claude-3-5-haiku-20241022"), M.prettyModel("claude-opus-5[1m]")],
-      ["Sonnet 4.5", "Haiku 3.5", "Opus 5"]);
-    eq("모르는 형태는 빈 문자열(칩 미표시)", M.prettyModel("무슨모델"), "");
 
     // (c) 에이전트 표시 이름 — 플레이스홀더 "Claude에게 요청".
     const AG = ["claude", "Claude", "codex", "gemini", "cursor-agent", "", null, undefined];
@@ -240,6 +238,29 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     eq("앞이 이미 공백이면 더 넣지 않는다", A.spliceSpeech("ab ", 3, "x").value, "ab x");
     eq("빈 초안이면 앞 공백 없음", A.spliceSpeech("", 0, "x"), { value: "x", cursor: 1 });
     eq("상한을 넘기면 자른다", A.spliceSpeech("abc", 3, "defghij", 6).value, "abc de");
+    // ★ 연속 발화 — 최종 결과에서 **커밋**하지 않으면 두 번째 문장이 첫 문장을 덮어써 앞 내용이 사라진다
+    //  (사용자 Android 실측 신고 2026-07-27). 커밋 = base/anchor 를 방금 결과의 끝으로 옮기는 것.
+    //  여기서는 컴포저의 커밋 규칙을 그대로 재현해 "이어 말하기" 가 성립하는지 실행으로 확인한다.
+    {
+      let base = "", anchor = 0, value = "";
+      const speak = (t, final) => {
+        const r = A.spliceSpeech(base, anchor, t);
+        value = r.value;
+        if (final) { base = r.value; anchor = r.cursor; }
+      };
+      speak("안", false); speak("안녕하세요", true);      // 첫 문장(부분 → 최종)
+      speak("반갑", false); speak("반갑습니다", true);     // 이어서 둘째 문장
+      eq("이어 말하기가 앞 문장을 지우지 않는다", value, "안녕하세요 반갑습니다");
+      ok("컴포저가 final 에서 앵커를 커밋한다(소스 핀)",
+        /if \(final\) \{ baseRef\.current = value; anchorRef\.current = cursor; \}/.test(
+          readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8")));
+    }
+    // 회복 가능한 STT 종료(무음·타임아웃)는 사용자에게 문구를 보이지 않는다 — `7/no match` 노출 사고.
+    {
+      const sp = readFileSync(path.resolve(here, "../../../codingpt_app/src/services/speechInput.ts"), "utf8");
+      ok("라이브러리 원문 메시지를 사용자에게 노출하지 않는다", !/h\.onError\(String\(e\?\.error\?\.message/.test(sp));
+      ok("code 가 비고 message 만 오는 기기도 회복 처리한다", /RECOVERABLE_MSG/.test(sp) && /no\[/.test(sp));
+    }
   }
 }
 

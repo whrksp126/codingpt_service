@@ -43,28 +43,6 @@ export function composerHasText(v) {
   return String(v == null ? "" : v).trim().length > 0;
 }
 
-// 모델 식별자 → 사람이 읽는 짧은 이름. 컴포저 칩은 **표시 전용**이므로 모르면 빈 문자열을 준다
-//  (모르는 값을 그대로 노출하면 `claude-sonnet-4-5-20250929` 같은 문자열이 칩을 밀어낸다).
-//  실측 형태: `claude-sonnet-4-5-20250929`, `claude-opus-4-1-20250805`, `claude-3-5-haiku-20241022`,
-//            `claude-opus-5[1m]`, `gpt-5-codex`, `gemini-2.5-pro`.
-export function prettyModel(id) {
-  let t = String(id == null ? "" : id).trim().toLowerCase();
-  if (!t) return "";
-  t = t.replace(/\[[^\]]*\]$/, "");        // 컨텍스트 변형 표기 `[1m]`
-  t = t.replace(/-\d{8}$/, "");            // 날짜 접미 `-20250929`
-  t = t.replace(/-\d+[mk]$/, "");          // 컨텍스트 접미 `-1m` / `-200k`
-  const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-  let m = /^claude-(opus|sonnet|haiku)-(\d+)(?:-(\d+))?$/.exec(t);
-  if (m) return cap(m[1]) + " " + (m[3] ? m[2] + "." + m[3] : m[2]);
-  m = /^claude-(\d+)(?:-(\d+))?-(opus|sonnet|haiku)$/.exec(t); // 구 형식(claude-3-5-haiku)
-  if (m) return cap(m[3]) + " " + (m[2] ? m[1] + "." + m[2] : m[1]);
-  m = /^gpt-([\w.]+)(?:-(\w+))?$/.exec(t);
-  if (m) return "GPT-" + m[1] + (m[2] ? " " + cap(m[2]) : "");
-  m = /^gemini-([\w.]+)-(\w+)$/.exec(t);
-  if (m) return "Gemini " + m[1] + " " + cap(m[2]);
-  return "";                               // 모르는 형태는 칩을 띄우지 않는다
-}
-
 // 에이전트 코드명 → 표시 이름(플레이스홀더 "Claude에게 요청"). 모르면 빈 문자열.
 export function agentDisplayName(agent) {
   const s = String(agent == null ? "" : agent).trim().toLowerCase();

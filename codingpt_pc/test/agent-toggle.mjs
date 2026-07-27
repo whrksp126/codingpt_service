@@ -506,12 +506,25 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     //  `<AgentMark/> || <TerminalWindow/>` 는 JSX 요소가 항상 truthy 라 폴백이 도달 불가였다).
     const paneTsx = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx"), "utf8");
     ok("앱 탭 아이콘: brand 가 있을 때만 로고, 없으면 터미널 글리프(삼항)",
-      /brand \? \([\s\S]{0,200}<AgentMark[\s\S]{0,300}<TerminalWindow/.test(paneTsx));
+      /brand \? \([\s\S]{0,300}<AgentLogo[\s\S]{0,300}<TerminalWindow/.test(paneTsx));
+    // ★ 공식 브랜드 path 를 쓴다(사용자 지적 "너무 대충" → 근사 도형 금지). 양 플랫폼 **같은 데이터**여야
+    //  같은 그림이 나온다 → path 문자열을 직접 대조한다(길어서 앞 80자만 비교해도 충분히 특이하다).
+    const logoTsx = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/AgentLogo.tsx"), "utf8");
+    const pcIcons = readFileSync(path.resolve(here, "../src/js/icons.js"), "utf8");
+    for (const [brand, key] of [["claude", "claudeMark"], ["codex", "codexMark"], ["gemini", "geminiMark"]]) {
+      const app = new RegExp(`${brand}: '([^']{40,})'`).exec(logoTsx)?.[1] || "";
+      const pc = new RegExp(`${key}: \\(o\\) => brandSvg\\('([^']{40,})'`).exec(pcIcons)?.[1] || "";
+      ok(`${brand} 로고 path 가 앱==PC (len ${app.length}/${pc.length})`, !!app && app === pc,
+        `app=${app.slice(0, 40)} pc=${pc.slice(0, 40)}`);
+    }
+    ok("PC 브랜드 마크는 fill 로고로 그린다(라인 stroke 금지 — 획이 뭉개진다)",
+      /brandSvg = \(d, o = \{\}\) =>[\s\S]{0,200}fill="currentColor" stroke="none"/.test(pcIcons));
+    ok("앱도 fill 로 그린다", /<Path d=\{d\} fill=\{color\} \/>/.test(logoTsx));
     // ⚠ 주석을 먼저 걷어낸다 — 이 함정을 **설명하는 주석 자체**가 정규식에 걸려 거짓 실패가 났다
     //   (테스트가 자기 문서를 결함으로 신고하는 형태). 코드만 본다.
     const paneCode = paneTsx.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
     ok("앱 탭 아이콘 폴백을 `||` 로 쓰지 않는다(JSX 요소는 항상 truthy)",
-      !/<AgentMark[^>]*\/>\s*\|\|/.test(paneCode));
+      !/<AgentLogo[^>]*\/>\s*\|\|/.test(paneCode));
     // paneJs2 는 다른 블록 스코프의 변수다 — 여기서 참조하면 **테스트가 크래시**한다(실제로 냈다:
     //  FAIL 이 아니라 ReferenceError 라서 필터로 요약만 보면 "통과"로 오독된다). 이 블록에서 다시 읽는다.
     const pcPane = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");

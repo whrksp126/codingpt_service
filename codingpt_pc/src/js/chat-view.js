@@ -20,7 +20,7 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, insertPathAt, flattenFiles, shouldReopenNoSession,
-  composerHasText, prettyModel, agentDisplayName,
+  composerHasText, agentDisplayName,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -104,7 +104,6 @@ export class ChatView {
           <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
-            <span class="chat-model hidden"></span>
             <span class="chat-ctl-gap"></span>
             <button class="chat-send" type="button" title="보내기 (Enter)" disabled>${icons.arrowUp({ size: 17 })}</button>
           </div>
@@ -120,7 +119,6 @@ export class ChatView {
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
-    this.modelEl = el.querySelector(".chat-model");
 
     this.inputEl.value = String(this.ctx.getDraft?.() || "");
     this._autoGrow();
@@ -167,7 +165,11 @@ export class ChatView {
       this._startPoll();
       this._renderApprovals();
       // 진입 즉시 컴포저 포커스(레이아웃 확정 후 한 프레임 뒤 — display 전환 직후 focus 는 무시된다)
-      requestAnimationFrame(() => { if (this._visible && !this._disposed) try { this.inputEl?.focus(); } catch (_) {} });
+      requestAnimationFrame(() => {
+        if (!this._visible || this._disposed) return;
+        this._autoGrow();      // 이제 레이아웃에 있으므로 여기서 처음 제대로 측정된다(위 ★ 항)
+        try { this.inputEl?.focus(); } catch (_) {}
+      });
     } else {
       this._stopPoll();
     }
@@ -387,11 +389,6 @@ export class ChatView {
     if (snapshot || wasBottom) { this._scrollToBottom(); this._unread = 0; }
     else if (added.length) this._unread += added.filter((m) => isVisible(m) && !isResult(m)).length;
     this._syncJump();
-    // 컴포저 모델 칩 — 트랜스크립트가 실어 보내는 assistant.model 중 **가장 최근 것**이 정본이다
-    //  (대화 중간에 /model 로 바뀌면 그 뒤부터 새 값이 온다). 우리가 정하는 값이 아니라 관측값이다.
-    for (let i = list.length - 1; i >= 0; i--) {
-      if (list[i] && list[i].model) { if (this._model !== list[i].model) { this._model = list[i].model; this._syncComposer(); } break; }
-    }
   }
 
   _rebuild() {
@@ -885,11 +882,17 @@ export class ChatView {
     this.jumpEl.classList.toggle("hidden", !show);
     this.jumpNEl.textContent = show && this._unread ? String(Math.min(this._unread, 99)) : "";
   }
+  // ★ 숨겨진 동안(display:none)에는 절대 높이를 쓰지 않는다. 그 상태의 `scrollHeight` 는 0 이므로
+  //  `height:0px` 이 박혀 컴포저가 납작하게 깨진다 — 사용자가 "처음에 너무 작게 깨져 있다"고 신고한
+  //  그 증상이고, 아무 글자나 입력하면 그때 재측정돼 정상으로 보이던 것도 같은 이유다.
+  //  `offsetParent === null` 이 곧 "레이아웃에 없다" 이므로 그 프레임은 건너뛰고, 보이게 되는 순간
+  //  `setVisible()` 이 rAF 안에서 다시 부른다.
   _autoGrow() {
     const t = this.inputEl;
     if (!t) return;
+    if (t.offsetParent === null) return;
     t.style.height = "auto";
-    t.style.height = Math.min(t.scrollHeight, 150) + "px";
+    t.style.height = Math.min(Math.max(t.scrollHeight, 22), 150) + "px";
   }
 
   // 컴포저 상태 동기화 — 전송 버튼 활성/모델 칩/플레이스홀더. 순수 판정은 chat-model 에 있다.
@@ -898,12 +901,6 @@ export class ChatView {
   _syncComposer() {
     const has = !!composerHasText(this.inputEl?.value);
     if (this.sendEl) this.sendEl.disabled = !has;
-    if (this.modelEl) {
-      const label = prettyModel(this._model);
-      this.modelEl.textContent = label;
-      this.modelEl.classList.toggle("hidden", !label);
-      this.modelEl.title = label ? "이 대화의 모델(" + String(this._model || "") + ") — 표시 전용" : "";
-    }
     if (this.inputEl) {
       const name = agentDisplayName(this._agent);
       this.inputEl.placeholder = name ? name + "에게 요청" : "메시지 보내기";
