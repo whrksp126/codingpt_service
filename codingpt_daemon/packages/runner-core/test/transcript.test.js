@@ -19,6 +19,10 @@ runtime.init({ root: ROOT, stateDir: path.join(ROOT, '.codingpt'), claudeHome: C
 
 const T = require('../transcript');
 
+// ④-d 프로세스 소거의 기본 프로브는 실제 tmux/ps 를 부른다 — 테스트는 격리 소켓이 아니므로
+//  기본을 "에이전트 없음"으로 잠근다(각 테스트가 필요하면 자기 프로브를 심고 되돌린다).
+T._internals.setAgentProbe(async () => []);
+
 // ── 픽스처 ──────────────────────────────────────────────────────────
 const WS = path.join(ROOT, 'ws');
 fs.mkdirSync(WS, { recursive: true });
@@ -661,6 +665,71 @@ test('chat.open — 소거 후에도 여럿이면 지금 쓰이고 있는 것 �
   assert.strictEqual(open.sessionId, 'lp-live');
   assert.strictEqual(open.source, 'scan-live');
   await T.handle('chat.close', { chatId: open.chatId });
+});
+
+// ★★ 2026-07-27 tokin 실사고 회귀 — 훅 바인딩이 없는 오래된 TUI claude(7/24 부터 실행,
+//  훅은 사라진 터미널 좌표에 바인딩돼 있었다) + 마지막 응답 30초 초과(live 실패) + 옛 세션 파일 2개
+//  → ambiguous 빈 화면. 이 pane 의 에이전트 **프로세스 시작 시각** 이후에 기록된 후보가 정확히
+//  하나면 그것으로 확정한다(scan-proc). 실측에서 후보 3개 중 시작(7/24 12:22) 이후 mtime 은 1개였다.
+test('chat.open — 프로세스 소거법: 에이전트 시작 이후 기록된 후보가 하나면 확정(scan-proc)', async () => {
+  const ws = fakeWs();
+  // pr-cur: 1분 전 기록(live 아님) · pr-old/pr-older: 에이전트 시작(1시간 전)보다 오래됨
+  mkCandWs('procpick', [
+    { id: 'pr-cur', ageMs: 60 * 1000 },
+    { id: 'pr-old', ageMs: 3 * 3600 * 1000 },
+    { id: 'pr-older', ageMs: 48 * 3600 * 1000 },
+  ]);
+  T._internals.setAgentProbe(async () => [{ tid: 777, startedAt: Date.now() - 3600 * 1000 }]);
+  try {
+    const open = await T.handle('chat.open', { cwd: 'procpick', tid: 777 }, ws);
+    assert.strictEqual(open.noSession, undefined, JSON.stringify(open));
+    assert.strictEqual(open.sessionId, 'pr-cur');
+    assert.strictEqual(open.source, 'scan-proc');
+    await T.handle('chat.close', { chatId: open.chatId });
+  } finally { T._internals.setAgentProbe(async () => []); }
+});
+
+test('chat.open — 프로세스 소거법: 에이전트 pane 이 둘이면 믿지 않는다(남의 대화 금지 우선)', async () => {
+  const ws = fakeWs();
+  // pane A(111) 의 claude 가 먼저 떠서 최근 파일을 만들었고, pane B(222) 의 claude 는 아직 무기록인
+  //  시나리오 — B 가 A 의 파일을 채택하면 그게 바로 "남의 대화" 사고다.
+  mkCandWs('procdual', [
+    { id: 'pd-recent', ageMs: 60 * 1000 },
+    { id: 'pd-old', ageMs: 3 * 3600 * 1000 },
+  ]);
+  T._internals.setAgentProbe(async () => [
+    { tid: 111, startedAt: Date.now() - 3600 * 1000 },
+    { tid: 222, startedAt: Date.now() - 10 * 60 * 1000 },
+  ]);
+  try {
+    const open = await T.handle('chat.open', { cwd: 'procdual', tid: 222 }, ws);
+    assert.strictEqual(open.noSession, true, JSON.stringify(open));
+    assert.strictEqual(open.reason, 'ambiguous');
+    assert.strictEqual(T._internals.tails.size, 0);
+  } finally { T._internals.setAgentProbe(async () => []); }
+});
+
+test('chat.open — 프로세스 소거법: 시작 이후 기록이 없거나 여럿이면 ambiguous 유지', async () => {
+  const ws = fakeWs();
+  mkCandWs('procnone', [
+    { id: 'pn-a', ageMs: 3 * 3600 * 1000 },
+    { id: 'pn-b', ageMs: 48 * 3600 * 1000 },
+  ]);
+  // 에이전트는 10분 전에 시작 — 두 후보 모두 그 이전 기록(이 pane 의 대화는 아직 없다)
+  T._internals.setAgentProbe(async () => [{ tid: 888, startedAt: Date.now() - 10 * 60 * 1000 }]);
+  try {
+    const open = await T.handle('chat.open', { cwd: 'procnone', tid: 888 }, ws);
+    assert.strictEqual(open.noSession, true, JSON.stringify(open));
+    assert.strictEqual(open.reason, 'ambiguous');
+  } finally { T._internals.setAgentProbe(async () => []); }
+});
+
+test('etimeToMs — ps etime 형식 전수([[dd-]hh:]mm:ss)', () => {
+  assert.strictEqual(T._internals.etimeToMs('03:07'), (3 * 60 + 7) * 1000);
+  assert.strictEqual(T._internals.etimeToMs('02:03:04'), ((2 * 3600) + (3 * 60) + 4) * 1000);
+  assert.strictEqual(T._internals.etimeToMs('1-02:03:04'), ((26 * 3600) + (3 * 60) + 4) * 1000);
+  assert.strictEqual(T._internals.etimeToMs('garbage'), null);
+  assert.strictEqual(T._internals.etimeToMs(''), null);
 });
 
 // 死 엔트리(`<ws>|`)가 점유로 세지면 살아있는 세션이 근거 없이 배제된다 — 사용자 기기에 실제로 있었다.
