@@ -808,10 +808,20 @@ export class PaneView {
     return !!(tab && isTermTab(tab) && tab.mode === "chat");
   }
 
-  // 본문 우측 상단 고정 토글(TUI ↔ Chat). `.pane-body` 기준 절대배치 — xterm/웹뷰 내부 DOM 이 아니라
-  //  상위 레이어여야 한다(터미널 HTML 재조립 = 스트림 재마운트 = 치명적).
-  _syncModeToggle() {
-    if (this.node.kind !== "terminal" || !this.body) return;
+  // TUI ↔ Chat 토글의 **판정만** — 그리기는 main-top(workspace-view.js `syncModeToggle`)이 한다.
+  //
+  // 이 함수는 DOM 을 만들지 않는다. 토글이 pane 본문에 절대배치돼 있던 구버전에서 두 가지가 동시에
+  // 깨졌기 때문이다(둘 다 2026-07-27 라이브 실증):
+  //  ① 배치: `.pane-body` 에 `position` 이 없어 오프셋 부모가 `.pane` 이었고, `top:6px` 이 30px 짜리
+  //     `.pane-head` 안으로 들어가 탭바를 덮었다(사용자 신고: "pane 위로 올라간다").
+  //  ② 클릭 영구 사문화: 매 `emit` 마다 버튼의 `innerHTML` 을 다시 써서 **자식 SVG 를 교체**했고,
+  //     pane 내부 mousedown(capture)이 `focusPane()`→`emit()` 을 무조건 발화하므로, mousedown 타깃인
+  //     그 SVG 가 mouseup 전에 소멸해 WebKit 이 `click` 을 아예 디스패치하지 않았다. 버튼의 **패딩**을
+  //     정확히 맞춘 클릭만 살아남았다(실증: 중앙 3회=무반응 / 모서리 1회=즉시 전환).
+  // → 교훈이자 불변식: **매 렌더마다 자식 노드를 교체하는 버튼은 클릭할 수 없다.** 새 구현은 노드를
+  //    보존하고 글리프가 실제로 바뀔 때만 다시 쓴다(workspace-view.js `syncModeToggle` 참조).
+  modeToggleState() {
+    if (this.node.kind !== "terminal") return { on: false, chat: false };
     const tab = this.node.tabs?.[this.node.active];
     const chat = !!(tab && isTermTab(tab) && tab.mode === "chat");
     // 혼합 탭(IDE/프리뷰)이 활성이면 숨김 · win 미확정('new')이면 숨김(chat 스냅샷 키가 없다) ·
@@ -823,28 +833,14 @@ export class PaneView {
       chatMode: chat,
       agentOn: this._agentOn(tab),
     });
-    if (!on) {
-      this._modeBtn?.remove();
-      this._modeBtn = null;
-      return;
-    }
-    if (!this._modeBtn) {
-      const b = document.createElement("button");
-      b.className = "pane-mode-toggle";
-      b.type = "button";
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const t = this.node.tabs?.[this.node.active];
-        if (!t || !isTermTab(t)) return;
-        this.setMode(t, t.mode === "chat" ? "tui" : "chat");
-      });
-      this.body.appendChild(b);
-      this._modeBtn = b;
-    }
-    this._modeBtn.classList.toggle("active", chat);
-    this._modeBtn.title = chat ? "터미널(TUI) 보기" : "채팅으로 보기";
-    // 글리프 16px — 앱 `ModeToggle.tsx`(TerminalWindow/ChatCircleDots size 16)와 같은 값(3플랫폼 동일 디자인).
-    this._modeBtn.innerHTML = chat ? icons.terminal({ size: 16 }) : icons.chat({ size: 16 });
+    return { on, chat };
+  }
+
+  // main-top 토글 클릭 → 이 pane 의 활성 터미널 탭 모드 전환.
+  toggleMode() {
+    const t = this.node.tabs?.[this.node.active];
+    if (!t || !isTermTab(t)) return;
+    this.setMode(t, t.mode === "chat" ? "tui" : "chat");
   }
 
   // 모드 전환 — tab 객체에 얹으므로 영속(pc-ui.json layout)·탭 이동(객체 참조 이동) 모두 자동 승계.
@@ -855,7 +851,7 @@ export class PaneView {
     if ((tab.mode || "tui") === next) return;
     tab.mode = next;
     if (next === "tui") delete tab.mode; // 기본값은 저장하지 않는다(하위호환 = 미지정도 tui)
-    this._syncModeToggle();
+    this.ctx.syncModeToggle?.();
     this.buildHead();
     this.showActiveTab();
     // TUI 복귀 시 fit 은 showActiveTab 이 이미 1회 수행한다(여기서 또 부르면 리사이즈가 2회 나간다 —
@@ -1176,7 +1172,7 @@ export class PaneView {
     // ★ Chat 모드에서는 fit 을 부르지 않는다 — fit → ptyResize → tmux window 리사이즈가 되고,
     //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
     if (isT && !chat) this._fitNow();
-    this._syncModeToggle();
+    this.ctx.syncModeToggle?.();
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나
@@ -1217,6 +1213,9 @@ export class PaneView {
         return true;
       },
       openFile: (rel) => this.ctx.onOpenIde?.(rel),
+      // 컴포저 `+` 파일 목록의 출처 — IDE 트리와 **같은 제공자**(로컬 api / 원격 makeRemoteFs).
+      //  라이브 getter 인 이유는 `_ideFs()` 와 동일: 재클레임으로 host 가 바뀌면 그때의 값이어야 한다.
+      fs: () => this._ideFs() || api,
     });
     this.chat.mount();
     return this.chat;

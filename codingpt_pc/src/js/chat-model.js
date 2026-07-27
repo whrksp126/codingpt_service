@@ -26,10 +26,65 @@ export const CHAT = {
   MAX_MSGS: 1200,          // 로컬 버퍼 상한(오래된 것부터 버림 — 과거는 "이전 대화 더 보기")
   DRAFT_MAX: 4096,         // 컴포저 초안 영속 상한
   SEND_ENTER_DELAY_MS: 90, // paste 후 Enter 분리 전송(TUI 가 paste 종료 마커 전에 처리하는 것 방지)
+  PICK_LIMIT: 200,         // 컴포저 `+` 파일 목록에 한 번에 그리는 최대 행수(필터로 좁혀 쓰는 전제)
 };
 
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;
+
+// ── 컴포저 `+` 파일 넣기(순수 규칙) ──────────────────────────────────────────────
+// 여기 있는 이유: 이 규칙들이 **에이전트에게 실제로 전달되는 문자열**을 결정하는데, DOM 안에 묻어 두면
+//  단위 테스트가 불가능해 "정규식으로 소스 모양만 보는" 공허한 검증이 된다. 순수 함수로 빼서 실행 검증한다
+//  (test/chat-composer.mjs — 돌연변이 검증까지 통과시킨 핀).
+// 절대경로가 아니라 **워크스페이스 상대 경로**를 넣는 것이 정본이다: 에이전트의 cwd 가 워크스페이스
+//  루트이므로 상대 경로가 짧고 정확하며, 홈 경로에 박힌 사용자 계정명이 대화 기록에 남지 않는다.
+
+/** 홈-상대 전체 경로 → 워크스페이스 상대 경로. 루트 밖이면 그대로 둔다.
+ *  ⚠ 경계 문자(`/`)를 반드시 본다 — `startsWith(root)` 로만 검사하면 `demo` 루트에서 `demo2/a.js` 가
+ *   `/a.js` 로 잘려 **다른 파일을 가리킨다**(돌연변이 검증으로 확인한 실패 형태). */
+export function relToRoot(root, full) {
+  const r = String(root || "").replace(/\/+$/, "");
+  const p = String(full || "");
+  return r && p.startsWith(r + "/") ? p.slice(r.length + 1) : p;
+}
+
+/** 파일 목록 필터 — **상대** 경로 전체에 대해 대소문자 무시 부분일치(루트 이름은 대상이 아니다:
+ *  루트 글자로 전부 매치되면 필터가 무의미해진다). limit 로 그리는 행수를 자른다. */
+export function filterFiles(files, root, query, limit) {
+  const q = String(query || "").trim().toLowerCase();
+  const out = [];
+  for (const f of files || []) {
+    if (q && !relToRoot(root, f).toLowerCase().includes(q)) continue;
+    out.push(f);
+    if (out.length >= (limit || CHAT.PICK_LIMIT)) break;
+  }
+  return out;
+}
+
+/**
+ * 커서 위치에 경로를 끼워 넣는다 → { value, caret }.
+ *  · 앞이 공백이 아니면 공백 1칸을 먼저 넣는다(경로가 앞 단어에 붙어 다른 이름이 되는 것 방지).
+ *  · 뒤에도 공백 1칸 — 이어서 문장을 쓰는 것이 기본 사용 흐름이다.
+ *  · 선택 영역이 있으면 대체한다(일반 입력 관례). start>end 로 와도 삽입점으로만 쓰고 아무것도 지우지 않는다.
+ */
+export function insertPathAt(value, start, end, rel) {
+  const v = String(value || "");
+  const s = Math.max(0, Math.min(start ?? v.length, v.length));
+  const e = Math.max(s, Math.min(end ?? s, v.length));
+  const ins = (s > 0 && !/\s$/.test(v.slice(0, s)) ? " " : "") + String(rel || "") + " ";
+  return { value: v.slice(0, s) + ins + v.slice(e), caret: s + ins.length };
+}
+
+/** 트리(중첩) → 파일 경로 평탄화. 디렉토리는 넣지 않고, `path` 가 없는 결손 노드도 버린다
+ *  (undefined 가 목록에 섞이면 클릭해도 조용히 아무 일도 일어나지 않는다). */
+export function flattenFiles(nodes, out) {
+  const acc = out || [];
+  for (const n of nodes || []) {
+    if (n && n.dir) flattenFiles(n.children, acc);
+    else if (n && n.path) acc.push(n.path);
+  }
+  return acc;
+}
 
 // ── 표시 여부 ──
 // 데몬이 hidden:true 로 접어 보낸 것은 진단용(meta/system/unknown/구형 tool_result 자리표시).

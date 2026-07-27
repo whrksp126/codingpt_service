@@ -120,8 +120,7 @@ function renderSection(force) {
       paired ? buildPaired() : buildUnpaired();
     } else if (paired) {
       ensureAccountCard(); // 프로필 지연 로드 반영(닉네임 재바인딩 포함)
-      renderDeviceList();
-      renderE2ee();
+      renderE2ee();        // 기기 목록 + 암호화 상태(한 섹션 — 2026-07-27 통합)
     }
   } else if (section === "general") {
     contentEl.innerHTML = `
@@ -385,7 +384,7 @@ function ensureAccountCard() {
   bindNickname();
 }
 
-// ── 로그인됨: 계정 + 이 기기 상태 + 내 기기 목록 ──
+// ── 로그인됨: 계정 + `기기` 섹션(기기 목록 = 암호화 상태 한 곳) ──
 function buildPaired() {
   stopWebLogin();
   connBody.innerHTML = `
@@ -401,20 +400,15 @@ function buildPaired() {
     <div id="acctMsg" class="acct-msg"></div>
     <div class="dev-section">
       <div style="display:flex;align-items:center;gap:10px;margin:0 2px 8px">
-        <div class="dev-title" style="margin:0;flex:1;min-width:0">종단간 암호화</div>
+        <div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>
         <span id="e2eeSelfBadge" style="font-size:11px;font-weight:800;flex:none"></span>
       </div>
       <div id="e2eeBox" class="sm-card2"></div>
-    </div>
-    <div class="dev-section">
-      <div class="dev-title">내 기기</div>
-      <div id="deviceTable" class="dev-table"></div>
     </div>`;
   bindUnpair(connBody.querySelector("#unpairBtn"));
   connBody.querySelector("#deleteAcctBtn").addEventListener("click", onDeleteAccount);
   bindNickname(); // 프로필 카드 닉네임 저장
-  renderDeviceList();
-  renderE2ee();
+  renderE2ee();   // 기기 목록 + 암호화 상태(구 '내 기기' 표는 이 안으로 흡수됐다)
   if (!state.me) S.loadMe(); // 프로필 지연 로드 → emit 시 ensureAccountCard 로 카드 채움
   S.loadDevices(); // 기기 목록/온라인 상태 최신화
   void refreshE2ee(); // 열쇠 상태/대기 목록(데몬 위임) — 실패 시 '미지원'으로 표기만
@@ -558,8 +552,8 @@ function fmtRecent(iso) {
   return fmtDate(iso);
 }
 
-// "내 기기" 목록 렌더(state.devices). 클라우드 호스트 포함.
-// 기기 아래 작은 텍스트 = 운영체제(정확히). 위 텍스트는 기기명(d.name).
+// 기기 행의 부제용 라벨(운영체제) — `기기` 섹션(e2eeDeviceRowsHtml)이 쓴다.
+//  구 '내 기기' 표는 2026-07-27 통합으로 사라졌지만 이 라벨 규칙은 그 행에서 계속 쓰인다.
 function deviceOsLabel(d) {
   if (d.runnerKind === "cloud") return "Linux"; // 클라우드 러너 = Linux 컨테이너
   const p = String(d.platform || "").toLowerCase();
@@ -570,14 +564,24 @@ function deviceOsLabel(d) {
   if (p === "android") return "Android";
   return d.role === "controller" ? "모바일" : "기기";
 }
-// ── 종단간 암호화(기능2) 카드 — 모바일 E2eeSettingsCard/DeviceTrustCard 와 **동일 계층·동일 문구** ──
+// ── `기기` 섹션 — 모바일 E2eeSettingsCard/DeviceTrustCard 와 **동일 계층·동일 문구** ──
 //  문구·구조 정본 = docs/구현설계-2026-07-25/14-설정-카피-감사.md (§3 구조 · §4 확정 문구 표).
+//  ★ 2026-07-27 개정 2(사용자 요구): 구 '종단간 암호화' 카드와 구 '내 기기' 표를 **한 섹션으로 합쳤다**.
+//   암호화 카드 안 '열쇠를 가진 기기' 목록 + 그 아래 '내 기기' 표 = 같은 기기가 한 화면에 두 번 나왔다.
+//   열쇠 보유·암호화 여부는 기기의 속성이므로 **기기 행이 단일 진실**이고 목록은 하나뿐이어야 한다.
 //  첫 화면(스크롤 없음, 설명문 0줄):
-//    [섹션 제목 행] 종단간 암호화 ................ [self 배지]   ← 배지는 buildPaired 의 제목 행 우측
-//    🖥 {PC 이름} ................................ [host 배지]   ← §2.7 정직성 기제. **절대 접지 않는다**
-//    (배지 톤이 on 이 아닐 때만) reason 1줄(2줄 클램프)
-//    ⚠ 행동 행 — **동시 1개만**: 새 기기 N대 승인 > 기존 기기에서 승인해 주세요 > 암호화 열쇠가 없어요
-//    자세히 ▾ (기본 접힘) → ① 정책 ② 안전 코드 ③ 지문 ④ 복구 코드 ⑤ 열쇠 목록 ⑥ 메타데이터 고지
+//    [섹션 제목 행] 기기 ......................... [self 배지 = 계정 열쇠 상태]
+//    ⚠ 행동 행 — **동시 1개만**: 새 기기 N대 승인(펼치면 그 자리에서 대조·승인) > 기존 기기에서 승인해
+//      주세요 > 암호화 열쇠가 없어요
+//    (배지 톤이 on 이 아니고 행동 행이 없을 때만) reason 1줄(2줄 클램프)
+//    기기 행: [아이콘] 이름 [이 기기] ............. [암호화 배지]  [🗑]
+//             {OS} · {최근 작업} · 🔒 {지문}
+//    (온라인 PC 0대일 때) 🖥 연결된 PC 없음 ....... [확인 중]   ← §2.7 정직성 기제. **절대 접지 않는다**
+//    자세히 ▾ (기본 접힘) → ① 정책 ② 안전 코드 ④ 복구 코드 ⑥ 메타데이터 고지
+//  ★ 암호화 배지는 **그 기기의 실제 상태**다: 근거(runner_status.e2eeEpoch)를 가진 **온라인 PC** 행에만
+//   그린다(isHostRow = 앱 필터와 동치). 오프라인·모바일 행에는 배지를 그리지 않는다 — 모름을 초록도
+//   평문도 아닌 상태로 남기는 유일한 정직한 표시다(배지 도메인 4종은 계약 = '오프라인' 을 새로 만들지
+//   않는다). 섹션 헤더 배지(self)는 개별 기기 상태를 덮어쓰지 않는다.
 //
 //  ★ 문구는 위 문서 §4 표를 **글자까지** 옮긴 것이다(임의 윤문 금지 — 사용자가 폰과 PC 를 나란히 놓고
 //    대조하므로 한 글자 차이가 곧 버그다). 라벨 동치는 test/e2ee-crossimpl.mjs §4 가, 삭제한 상시
@@ -737,15 +741,18 @@ function e2eeActionRow(pend) {
 }
 
 /**
- * 자세히 안 — 순서 고정(정책 → 안전 코드 → 복구 → 열쇠 목록 → 메타데이터 고지).
+ * 자세히 안 — 순서 고정(정책 → 안전 코드 → 복구 → 메타데이터 고지).
+ *  ★ 개정 2 에서 '열쇠를 가진 기기' 목록은 **삭제**했다: 그 정보(열쇠 보유 + 지문 + 해제)는 기기 행에
+ *   흡수됐다(같은 기기가 두 목록에 중복 등장하던 화면을 하나로). 어느 기기 행에도 붙지 않는 열쇠만
+ *   목록에 남는다 — 그래야 해제 경로를 잃지 않는다(e2eeDeviceRowsHtml).
  *  ★ ④ 복구 코드의 컨트롤 유무는 **`state` 값으로 분기하지 않는다**(계약 §2.4 규약 3): 만들기 활성 =
  *   `e2eeReady()`(구 `state==='trusted'` 은 policy='off' + 열쇠 보유에서 "열쇠는 있는데 만들 수 없다"
  *   였다), 복원 행 노출 = `e2eeCanRestore()`(구 `state!=='trusted'&&state!=='off'` 은 사용 불가 상태에도
  *   행을 띄워 눌러도 실패했다). 두 판정 모두 앱 E2eeSettingsCard 와 동치다(테스트가 대조한다).
  */
-function e2eeAdvancedHtml(devs) {
+function e2eeAdvancedHtml() {
   return `
-    <div class="sett-row"><span>암호화 사용<br><span class="dim" style="font-size:11px">자동 권장 · 항상 = 안 되면 조작 차단</span></span>
+    <div class="sett-row"><span>종단간 암호화<br><span class="dim" style="font-size:11px">자동 권장 · 항상 = 안 되면 조작 차단</span></span>
       <span class="scale-seg" id="e2eePolicySeg">
         <button class="scale-opt${e2ee.policy === "off" ? " active" : ""}" data-v="off">끄기</button>
         <button class="scale-opt${e2ee.policy === "preferred" ? " active" : ""}" data-v="preferred">자동</button>
@@ -768,25 +775,85 @@ function e2eeAdvancedHtml(devs) {
         <input id="e2eeRecIn" class="prof-nick" placeholder="CPT1-XXXXX-…" style="width:200px;font-family:var(--mono);font-size:12px" spellcheck="false" />
         <button class="btn small" id="e2eeRecRestore">복원</button>
       </span></div>` : ""}
-    ${devs.length ? `<div class="dev-title" style="margin:12px 2px 8px">열쇠를 가진 기기</div>
-      <div class="dev-list">${devs.map((d) => {
-        // '이 기기' 판정은 **ikX(공개키) 우선**이다: 지문은 파생 기준(userRef)을 모르면 비어 있어서
-        //  (deriveDisplay 가드) 자기 행을 남으로 보고 **자기 신뢰 해제 버튼**을 띄운다 = 스스로 잠긴다.
-        //  ikX 는 그 기준과 무관하게 항상 알고 있다. 지문 비교는 구 데몬(ikX 미제공) 호환으로 남긴다.
-        const mine = (!!e2ee.ikX && d.ikX === e2ee.ikX)
-          || (!!e2ee.fingerprint && d.fingerprint === e2ee.fingerprint);
-        const isPc = d.platform === "darwin" || d.platform === "win32" || d.platform === "linux";
-        return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
-          <div style="display:flex;align-items:center;gap:11px;min-width:0">
-            <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
-            <span class="dev-meta"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span>
-              <span class="dev-sub" style="font-family:var(--mono)">🔒 ${esc(d.fingerprint || "")}</span></span>
-            ${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${d.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}
-          </div>
-          ${mine ? "" : `<div class="acct-msg" data-e2ee-armnote="${d.deviceKeyId}" style="display:none;padding:0 2px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</div>`}
-        </div>`;
-      }).join("")}</div>` : ""}
     <div class="acct-msg">폴더명·알림 제목은 서버가 봅니다</div>`;
+}
+
+/** 열쇠를 가진 기기 판정 — '이 기기' 는 **ikX(공개키) 우선**이다(지문은 userRef 미상이면 비어 있다). */
+function e2eeKeyIsMine(d) {
+  //  지문으로만 보면(deriveDisplay 가드로 빈 값) 자기 행을 남으로 보고 **자기 신뢰 해제 버튼**을 띄운다
+  //  = 스스로 잠긴다. ikX 는 그 기준과 무관하게 항상 알고 있다. 지문 비교는 구 데몬 호환으로 남긴다.
+  return (!!e2ee.ikX && d.ikX === e2ee.ikX) || (!!e2ee.fingerprint && d.fingerprint === e2ee.fingerprint);
+}
+
+/**
+ * 기기 목록(= 이 섹션의 본문) — **단일 진실**. 한 행 = 한 기기이고, 그 행이 그 기기에 대한 모든 것을 말한다.
+ *  · 암호화 배지: **온라인 PC** 행에만(isHostRow = 앱 필터와 동치). 근거가 없는 행에 배지를 그리면
+ *    꺼둔 노트북이 영구 '확인 중'(거짓 진행 신호)이 되고 폰 화면과 색·행 수가 갈라진다.
+ *  · 🔒 지문: 그 기기가 계정 열쇠를 갖고 있다는 표시(구 '열쇠를 가진 기기' 목록 흡수).
+ *  · 🗑 : 기기 삭제. **열쇠를 가진 기기면 열쇠 해제 + 세대 회전까지** 함께 한다(bindE2ee) — back
+ *    `revokeDevice` 는 열쇠를 'revoked' 로 표시하고 rotate_needed 만 팬아웃하므로, 회전 없이 지우면
+ *    지운 기기가 이미 가진 MK_epoch 로 이후 트래픽까지 계속 열 수 있다.
+ *  · 기기 행이 없는 열쇠(고아)는 마지막에 따로 그린다 — 그러지 않으면 **해제할 방법이 사라진 열쇠**가
+ *    계정에 남는다(보안 후퇴).
+ */
+function e2eeDeviceRowsHtml(devs, selfReady) {
+  const all = (state.devices || []).filter((d) => d.runnerKind !== "cloud"); // 클라우드 러너는 숨긴다(BYO 피벗)
+  // ⚠ 기기 목록이 아직 안 왔으면 **고아 판정을 하지 않는다**: 키링이 먼저 도착하면 모든 열쇠가 '고아' 로
+  //  보여 같은 기기가 두 번 뜨는 화면(합치려던 그 중복)이 로딩 중에 재현된다.
+  if (!all.length) return `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`;
+  const keyByDevice = new Map();
+  // 열쇠 보유 판정은 `state === "trusted"` 하나다(앱 trustedKeys 와 같은 조건 — pending/revoked 는 열쇠가 아니다).
+  for (const k of devs) if (k.state === "trusted" && k.deviceId != null) keyByDevice.set(String(k.deviceId), k);
+  const ids = new Set(all.map((d) => String(d.id)));
+  const orphans = devs.filter((k) => k.state === "trusted" && (k.deviceId == null || !ids.has(String(k.deviceId))));
+
+  const rows = all.map((d) => {
+    const k = keyByDevice.get(String(d.id));
+    // 이 PC 자신은 사이드카 데몬(e2ee.state)이 정본이다 — runner_status 프레임보다 빠르고 정확하다.
+    //  ★ 3번째 인자 = 내 열쇠 세대 · 4번째 = 서버가 말하는 계정 세대(자기 행이 항상 초록이던 결함 ③-2).
+    const hl = e2ee.policy !== "off" && isHostRow(d)
+      ? hostLockLabel(selfReady, d.isCurrent && selfReady ? (e2ee.epoch || 1) : hostE2eeEpoch(d.id), e2ee.epoch, e2ee.accountEpoch)
+      : null;
+    const canRevoke = typeof d.id === "number" && !d.isCurrent;
+    const sub = [deviceOsLabel(d), fmtRecent(d.lastSeenAt || d.createdAt), k && k.fingerprint ? `🔒 ${k.fingerprint}` : ""]
+      .filter(Boolean).join(" · ");
+    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;align-items:center;gap:11px;min-width:0">
+        <span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span>
+        <span class="dev-meta"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : ""}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
+          <span class="dev-sub">${esc(sub)}</span></span>
+        ${hl ? `<span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C[hl.tone]}">${esc(hl.text)}</span>` : ""}
+        ${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}
+      </div>
+      ${canRevoke && k ? `<div class="acct-msg" data-dev-armnote="${d.id}" style="display:none;padding:0 2px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</div>` : ""}
+    </div>`;
+  }).join("");
+
+  const orphanRows = orphans.map((k) => {
+    const mine = e2eeKeyIsMine(k);
+    const isPc = k.platform === "darwin" || k.platform === "win32" || k.platform === "linux";
+    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
+      <div style="display:flex;align-items:center;gap:11px;min-width:0">
+        <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
+        <span class="dev-meta"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span>
+          <span class="dev-sub">${k.fingerprint ? `🔒 ${esc(k.fingerprint)}` : ""}</span></span>
+        ${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}
+      </div>
+      ${mine ? "" : `<div class="acct-msg" data-e2ee-armnote="${k.deviceKeyId}" style="display:none;padding:0 2px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</div>`}
+    </div>`;
+  }).join("");
+
+  // 온라인 PC 가 0대여도 그 자리를 비우지 않는다: 초록 self 배지 한 줄만 남으면 사용자는 '내 데이터가
+  //  안전하다' 로 읽는데 사실은 '이 기기에 열쇠가 있다' 뿐이다(§2.7 정직성 기제가 화면에서 사라진다).
+  const hosts = (state.devices || []).filter(isHostRow);
+  const noHost = e2ee.policy !== "off" && !hosts.length
+    ? `<div class="dev-row">
+        <span class="dev-ic">${icons.monitor({ size: 15 })}</span>
+        <span class="dev-meta"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></span>
+        <span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C.wait}">확인 중</span>
+      </div>`
+    : "";
+  return `<div class="dev-list" style="padding:8px 0">${rows}${orphanRows}${noHost}</div>`;
 }
 
 function renderE2ee() {
@@ -797,48 +864,19 @@ function renderE2ee() {
   const pend = e2ee.pending || [];
   const devs = e2ee.devices || [];
   const selfReady = e2eeReady();
-  // PC 별 실제 자물쇠 — 근거는 back 이 팬아웃하는 runner_status.e2eeEpoch(host-lock.js). 모바일과 달리
-  //  여기 목록에는 이 PC 자신도 들어간다(사이드카 데몬도 하나의 호스트다 — 이 PC 는 항상 online:true).
-  //  ★ 행 집합 규칙은 host-lock.js `isHostRow` 가 정본이다(앱 필터와 동치 = 꺼둔 PC 가 영구 '확인 중'
-  //   으로 남고 폰 화면에는 없던 비대칭을 없앤다 — 그 함수 헤더 참고).
-  //  ★ 행이 0개여도(전부 오프라인) **빈 화면으로 두지 않는다**: 제목 + 초록 배지 두 줄만 남으면 사용자는
-  //   '내 데이터가 안전하다' 로 읽는데 사실은 '이 기기에 열쇠가 있다' 뿐이다 = §2.7 정직성 기제가 화면에서
-  //   사라진다. 그래서 '연결된 PC 없음 · 확인 중' 한 행을 그린다(앱 `COPY.card.noHost` 와 같은 문구).
-  const hosts = (state.devices || []).filter(isHostRow);
   // 행동 행을 먼저 만든다 — 있으면 그 아래 `reason`(데몬·서버 원문)을 **그리지 않는다**: 두 줄이 같은
   //  사실을 다른 문장으로 말하고(부트스트랩은 서로 상충한다 — reason 은 '폰에서 켜라', 행동 행은 이 PC 의
   //  켜기 버튼) 첫 화면의 '설명문 0줄' 이 무너진다. 정보 손실 0 = 행동 행이 사실 + 다음 행동을 말한다.
   //  ⚠ 앱 E2eeSettingsCard 의 `!action` 조건과 같은 규칙이다(한쪽만 고치면 두 화면의 줄 수가 달라진다).
   const actionRowHtml = e2eeActionRow(pend);
   box.innerHTML = `
-    ${e2ee.policy !== "off" ? `<div style="display:flex;flex-direction:column;gap:5px;padding:10px 2px 8px">
-      ${hosts.length ? hosts.map((d) => {
-        // 이 PC 자신은 사이드카 데몬(e2ee.state)이 정본이다 — runner_status 프레임보다 빠르고 정확하다.
-        //  (selfReady 가 false 면 hostLockLabel 이 어차피 '평문' 을 준다 = 양쪽 다 열쇠가 있어야 암호화)
-        //  ★ 3번째 인자 = **내 열쇠 세대**. 세대가 어긋난 호스트는 '암호화됨' 이 아니라 '확인 중' 이다
-        //   (회전 직후 최대 15분간 back 의 e2eeEpoch 는 옛 세대다 — 계약 §2.7, host-lock.js 헤더).
-        //  ★ 4번째 인자 = **서버가 말하는 계정 세대**(데몬 e2ee.state 가 싣는 accountEpoch). 자기 행은
-        //   hostEpoch 를 자기 epoch 로 채우므로 3인자까지는 **항상 초록**이었다 — 이 PC 가 회전에 뒤처져
-        //   자기 봉투가 409 로 거절되는 동안에도 그랬다(한계 ③-2). 앱 E2eeSettingsCard 도 같은 4인자다.
-        const hl = hostLockLabel(
-          selfReady, d.isCurrent && selfReady ? (e2ee.epoch || 1) : hostE2eeEpoch(d.id), e2ee.epoch, e2ee.accountEpoch,
-        );
-        return `<div style="display:flex;align-items:center;gap:7px">
-          <span class="dev-ic">${icons.monitor({ size: 13 })}</span>
-          <span style="flex:1;min-width:0;font-size:12px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span>
-          <span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C[hl.tone]}">${esc(hl.text)}</span>
-        </div>`;
-      }).join("") : `<div style="display:flex;align-items:center;gap:7px">
-        <span class="dev-ic">${icons.monitor({ size: 13 })}</span>
-        <span style="flex:1;min-width:0;font-size:12px;color:var(--text2)">연결된 PC 없음</span>
-        <span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C.wait}">확인 중</span>
-      </div>`}</div>` : ""}
-    ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
     ${actionRowHtml}
+    ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
     ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
+    ${e2eeDeviceRowsHtml(devs, selfReady)}
     <div class="sett-row" id="e2eeAdvToggle" style="cursor:pointer" role="button" tabindex="0">
       <span>자세히</span><span class="dim" style="font-size:12px">${e2eeAdvOpen ? "▴" : "▾"}</span></div>
-    ${e2eeAdvOpen ? e2eeAdvancedHtml(devs) : ""}`;
+    ${e2eeAdvOpen ? e2eeAdvancedHtml() : ""}`;
   bindE2ee(box);
 }
 
@@ -900,7 +938,7 @@ function bindE2ee(box) {
     e2eeMsg = r.ok ? "복구 완료" : (r.error || "코드가 올바르지 않아요");
     renderE2ee();
   });
-  // 신뢰 해제 = 휴지통 2탭(모바일/기기삭제와 동일 규율). 비가역 경고는 **결정 순간에만** 인라인으로
+  // 신뢰 해제(기기 행이 없는 고아 열쇠) = 휴지통 2탭. 비가역 경고는 **결정 순간에만** 인라인으로
   //  띄운다(상시 2줄 문단을 없앤 대신 정보량은 유지 — 카피 감사 §2 위치 이동).
   box.querySelectorAll("[data-e2ee-revoke]").forEach((b) => b.addEventListener("click", async () => {
     const note = box.querySelector(`[data-e2ee-armnote="${b.dataset.e2eeRevoke}"]`);
@@ -915,45 +953,33 @@ function bindE2ee(box) {
     e2eeMsg = r.ok ? "" : r.error || "해제하지 못했어요";
     renderE2ee();
   }));
+  // 기기 삭제 = 휴지통 2탭(모바일과 동일 규율). **열쇠를 가진 기기면 열쇠 해제 + 세대 회전까지** 한다:
+  //  back `revokeDevice` 는 그 기기의 열쇠를 'revoked' 로 표시하고 rotate_needed 만 팬아웃하므로(회전은
+  //  사람이 있는 클라이언트가 한다) 회전 없이 지우면 지운 기기가 이미 가진 MK_epoch 로 이후 트래픽까지
+  //  계속 열 수 있다. 회전이 불가능한 상태(이 PC 에 열쇠 없음)면 기기 삭제만 한다(구 동작 유지).
+  box.querySelectorAll("[data-dev]").forEach((b) => b.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    const note = box.querySelector(`[data-dev-armnote="${b.dataset.dev}"]`);
+    if (!b.classList.contains("arm")) {
+      b.classList.add("arm");
+      if (note) note.style.display = "";
+      setTimeout(() => { b.classList.remove("arm"); if (note) note.style.display = "none"; }, 4000);
+      return;
+    }
+    b.disabled = true;
+    const keyId = b.dataset.devKey ? Number(b.dataset.devKey) : 0;
+    if (keyId && e2eeReady()) {
+      const r = await revokeTrust(keyId);
+      if (!r.ok) e2eeMsg = r.error || "해제하지 못했어요";
+    }
+    try { await api.revokeDevice(Number(b.dataset.dev)); await S.loadDevices(); } catch (_) { b.disabled = false; }
+    await refreshE2ee();
+    renderE2ee();
+  }));
 }
 
-function renderDeviceList() {
-  const el = connBody?.querySelector("#deviceTable");
-  if (!el) return;
-  if (!state.devices.length) { el.innerHTML = `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`; return; }
-  const head = `<div class="dev-tr dev-th"><span class="dc-name">기기</span><span class="dc-os">운영체제</span><span class="dc-date">최근 작업</span><span class="dc-act"></span></div>`;
-  // 클라우드 러너는 폐기(BYO 피벗)라 "내 기기" 목록에서 숨긴다 — 사용자에겐 PC/모바일만 노출.
-  const rows = state.devices.filter((d) => d.runnerKind !== 'cloud').map((d) => {
-    const cur = d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : "";
-    const icon = d.runnerKind === "cloud"
-      ? icons.cloud({ size: 15 })
-      : d.role === "controller"
-        ? icons.smartphone({ size: 15 })
-        : icons.monitor({ size: 15 });
-    // 모바일과 동일: 클라우드/이 기기는 삭제 불가, 삭제 = 휴지통 아이콘 2탭 확인.
-    const canRevoke = d.runnerKind !== "cloud" && typeof d.id === "number" && !d.isCurrent;
-    const act = canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}" title="기기 삭제">${icons.trash({ size: 15 })}</button>` : "";
-    return `<div class="dev-tr">
-      <span class="dc-name"><span class="dev-ic">${icon}</span><span class="dc-nm">${esc(d.name)}</span>${cur}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
-      <span class="dc-os">${esc(deviceOsLabel(d))}</span>
-      <span class="dc-date">${esc(fmtRecent(d.lastSeenAt || d.createdAt))}</span>
-      <span class="dc-act">${act}</span>
-    </div>`;
-  }).join("");
-  el.innerHTML = head + rows;
-  el.querySelectorAll(".dev-del-btn").forEach((b) =>
-    b.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      // 1탭=무장(빨강), 2탭=삭제 — 모바일 confirmRevokeId 미러.
-      if (!b.classList.contains("arm")) {
-        b.classList.add("arm");
-        setTimeout(() => b.classList.remove("arm"), 4000);
-        return;
-      }
-      b.disabled = true;
-      try { await api.revokeDevice(Number(b.dataset.dev)); await S.loadDevices(); } catch (_) { b.disabled = false; }
-    }));
-}
+// (구 renderDeviceList — '내 기기' 표는 2026-07-27 통합으로 `기기` 섹션(e2eeDeviceRowsHtml)에 흡수됐다:
+//  같은 기기가 '열쇠를 가진 기기' 목록과 이 표에 두 번 나오던 화면을 하나로 합쳤다)
 
 function updatePairedStatus() {
   const d = state.daemon;

@@ -671,6 +671,8 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .dev-del-btn:hover { color: var(--text2); }
 .dev-del-btn.arm { color: var(--danger, #f87171); opacity: 1; }
 .dev-tr:hover .dev-del-btn { opacity: 1; }
+/* 기기 목록이 표(.dev-tr) → 행 카드(.dev-row)로 합쳐졌다(2026-07-27 `기기` 섹션 통합) — 같은 호버 규칙 */
+.dev-row:hover .dev-del-btn { opacity: 1; }
 .dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
 .conn-status { display: flex; align-items: center; gap: 12px; }
 .cst-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--dim); flex: none; }
@@ -975,24 +977,14 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pvs-url { font-size: 12px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 auto; min-width: 0; }
 
 /* ══ TUI ↔ Chat 모드 (기능5) ═══════════════════════════════════════════════════════════════
-   토글은 `.pane-body` 기준 절대배치 — xterm 내부 DOM 이 아니라 상위 레이어여야 한다(터미널 HTML
-   재조립 = 스트림 재마운트). 3플랫폼 동일 디자인: 글리프(말풍선/터미널)·색(text2 → hover text,
-   chat 활성 accent)·코너 오프셋(top 6)·라운드(r-sm 6)·보더(border-ctrl)·배경(elevated2) 공통.
-   크기만 입력수단에 맞춰 차등: 마우스 26px / 터치 30px+hitSlop(사용자 확정 §6-6-b). */
-.pane-mode-toggle {
-  position: absolute; top: 6px; right: 12px; z-index: 36;
-  width: 26px; height: 26px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: var(--r-sm); border: 1px solid var(--border-ctrl);
-  background: var(--elevated2); color: var(--text2);
-  opacity: 0.9; cursor: pointer; padding: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
-}
-.pane-mode-toggle:hover { opacity: 1; color: var(--text); background: var(--hover); }
-.pane-mode-toggle.active { opacity: 1; color: var(--accent); }
-/* ⌘F 검색 위젯(top 8 / right 14 / z-index 40)과 좌표가 겹친다 → 검색 중엔 토글을 숨긴다.
-   z-index 를 40 위로 올리는 방식은 금지(검색 입력을 가린다). */
-.pane-body.search-open .pane-mode-toggle { opacity: 0; pointer-events: none; }
+   토글은 **메인 영역 헤더(.main-top) 우측 끝**에 전역 1개(사용자 확정 2026-07-27: pane 위에 떠 있으면
+   안 된다). 이전엔 `.pane-body` 기준 절대배치라고 적혀 있었지만 `.pane-body` 에 position 이 없어
+   실제 오프셋 부모는 `.pane` 이었고, top:6px 이 30px 짜리 `.pane-head` 안으로 들어가 탭바를 덮었다.
+   헤더로 옮기면서 ⌘F 검색 위젯(top 8/right 14)과의 좌표 충돌도 함께 소멸 → search-open 예외 삭제.
+   3플랫폼 동일: 글리프(말풍선/터미널) 16px · chat 활성 accent · 같은 헤더 우측 배치. */
+.mt-dyn { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.mt-mode { margin-left: 6px; flex: none; }
+.mt-mode.hidden { display: none; }
 /* 탭 라벨의 chat 모드 표식 — 탭 종류를 바꾸지 않고 작은 글리프만 덧붙인다. */
 .ptab-mode { display: inline-flex; color: var(--accent); margin-left: 3px; }
 
@@ -1129,11 +1121,42 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-approvals { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 10px; }
 .chat-approvals:empty { display: none; }
 
-/* 컴포저 — Enter 전송 / Shift+Enter 개행 / Esc TUI 복귀 */
+/* 컴포저 — [+ 파일] [입력] [전송]. Enter 전송 / Shift+Enter 개행 / Esc TUI 복귀.
+   일반 에이전트 앱과 같은 3분할(사용자 확정 2026-07-27): 좌측 `+`, 우측 전송. */
 .chat-composer {
-  flex: none; display: flex; align-items: flex-end; gap: 7px;
+  flex: none; display: flex; align-items: flex-end; gap: 7px; position: relative;
   border-top: 1px solid var(--border); background: var(--surface); padding: 8px;
 }
+.chat-plus {
+  flex: none; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-ctrl); border-radius: var(--r-sm);
+  background: var(--elevated2); color: var(--text2); cursor: pointer; padding: 0;
+}
+.chat-plus:hover { background: var(--hover); color: var(--text); }
+/* `+` 파일 넣기 팝오버 — 컴포저 기준 위로 펼침(입력을 가리지 않게 bottom 기준). */
+.chat-pick {
+  position: absolute; left: 8px; right: 8px; bottom: calc(100% - 4px); z-index: 60;
+  display: flex; flex-direction: column; gap: 5px; padding: 6px;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-md);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+}
+.chat-pick-q {
+  flex: none; background: var(--base); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm);
+  color: var(--text); font-family: var(--ui-font); font-size: 13px; padding: 6px 9px; outline: none;
+}
+.chat-pick-q:focus { border-color: var(--border-focus); }
+.chat-pick-list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
+.chat-pick-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 8px;
+  border-radius: var(--r-sm); cursor: pointer; min-width: 0;
+}
+.chat-pick-row:hover { background: var(--hover); }
+.chat-pick-name { font-size: 13px; color: var(--text); white-space: nowrap; }
+.chat-pick-dir {
+  font-size: 11.5px; color: var(--dim); font-family: var(--mono-font);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; flex: 1 1 auto; min-width: 0;
+}
+.chat-pick-empty { font-size: 12px; color: var(--dim); padding: 8px; text-align: center; }
 .chat-input {
   flex: 1 1 auto; min-width: 0; max-height: 150px; resize: none; overflow-y: auto;
   background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm);

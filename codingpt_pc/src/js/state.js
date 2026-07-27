@@ -357,6 +357,12 @@ export function closePane(wsId, paneId) {
 export function focusPane(paneId) {
   const w = wsRuntime(state.activeWsId);
   if (w) {
+    // 이미 그 pane 이 포커스면 아무것도 하지 않는다 — pane 내부 mousedown(capture, pane.js)이 매번
+    //  이걸 부르므로, 무조건 emit 하면 **클릭 한 번마다 전체 재렌더**가 돈다. 그 재렌더가 버튼의
+    //  자식 노드를 교체하면 mousedown↔mouseup 사이에 타깃이 사라져 click 이 아예 발화하지 않는다
+    //  (2026-07-27 TUI↔Chat 토글이 이 경로로 영구히 눌리지 않았다 — 실증). 렌더 억제는 그 사고 계열의
+    //  재발 표면 자체를 줄이는 1차 방어이고, 2차 방어는 "글리프가 바뀔 때만 innerHTML 재작성"이다.
+    if (w.focusId === paneId) return;
     w.focusId = paneId;
     emit();
     // 프로그램적/포커스 이동으로는 읽음 처리하지 않는다(모바일 패리티). 읽음은 사용자가

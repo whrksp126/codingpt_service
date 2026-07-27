@@ -813,6 +813,29 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [settings.includes(".filter(isHostRow)"),
       settings.includes(`d.runnerKind !== "cloud" && d.role !== "controller"`)],
     [true, false]);
+
+  // ⑥ **기기 목록 통합**(2026-07-27 개정 2 · 사용자 요구) — '종단간 암호화' 카드 안의 '열쇠를 가진 기기'
+  //  목록 + 그 아래 '내 기기' 표 = 같은 기기가 한 화면에 두 번 나왔다. 한 섹션(`기기`)·한 목록으로 합쳤고
+  //  기기 행이 단일 진실이다. 되돌아가면(목록 2개) 사용자는 어느 쪽이 정본인지 알 수 없다.
+  //  ★ 주석에는 구 제목이 남는다(왜 지웠는지 근거) → 이 절만 **주석을 제거한 소스**로 본다.
+  const code = settings.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
+  eq("목록은 하나다('열쇠를 가진 기기' 제목 · '내 기기' 표 · deviceTable 컨테이너가 없다)",
+    ["열쇠를 가진 기기", ">내 기기<", "deviceTable", "dev-th"].filter((t) => code.includes(t)), []);
+  eq("섹션 제목은 `기기` 이고 self 배지는 그 행 우측이다", code.includes(`<div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>`), true);
+  eq("기능명은 자세히 안 정책 행이 갖는다(화면에서 '종단간 암호화' 가 사라지지 않는다)",
+    code.includes("<span>종단간 암호화<br>"), true);
+  // 암호화 배지는 **근거가 있는 행에만** 그린다(온라인 PC = isHostRow). 오프라인·모바일 행에 배지를
+  //  그리면 꺼둔 기기가 영구 '확인 중'(거짓 진행 신호)이 되고 폰 화면과 색·행 수가 갈라진다.
+  eq("행 배지는 isHostRow 행에만 그린다(모름을 초록/평문으로 단정하지 않는다)",
+    /isHostRow\(d\)\s*\n?\s*\? hostLockLabel\(/.test(code), true);
+  // 기기 삭제 = 열쇠 해제 + 세대 회전까지. back revokeDevice 는 열쇠를 'revoked' 로 표시하고
+  //  rotate_needed 만 팬아웃하므로, 회전 없이 지우면 지운 기기가 이미 가진 MK_epoch 로 이후 트래픽까지
+  //  계속 열 수 있다(구 '신뢰 해제' 가 하던 회전을 기기 행이 이어받았다).
+  eq("열쇠를 가진 기기를 지우면 회전까지 한다(data-dev-key → revokeTrust → revokeDevice)",
+    [code.includes("data-dev-key="), /revokeTrust\(keyId\)/.test(code), code.includes("api.revokeDevice(")], [true, true, true]);
+  // 기기 행이 없는 열쇠(고아)는 목록에 남는다 — 아니면 **해제할 방법이 사라진 열쇠**가 계정에 남는다.
+  eq("기기 행이 없는 열쇠는 목록에 남아 해제할 수 있다", /orphans\s*=\s*devs\.filter/.test(code), true);
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");

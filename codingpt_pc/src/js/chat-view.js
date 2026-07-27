@@ -19,6 +19,7 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
+  relToRoot, filterFiles, insertPathAt, flattenFiles,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -87,7 +88,8 @@ export class ChatView {
       <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
       <div class="chat-approvals"></div>
       <div class="chat-composer">
-        <textarea class="chat-input" rows="1" placeholder="에이전트에 메시지 보내기…  (Enter 전송 · Shift+Enter 개행 · Esc 터미널)"></textarea>
+        <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 17 })}</button>
+        <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
         <button class="chat-send" type="button" title="보내기 (Enter)">${icons.arrowUp({ size: 16 })}</button>
       </div>`;
     this.host.appendChild(el);
@@ -99,6 +101,7 @@ export class ChatView {
     this.apprEl = el.querySelector(".chat-approvals");
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
+    this.plusEl = el.querySelector(".chat-plus");
 
     this.inputEl.value = String(this.ctx.getDraft?.() || "");
     this._autoGrow();
@@ -108,6 +111,7 @@ export class ChatView {
     });
     this.jumpEl.addEventListener("click", () => { this._scrollToBottom(); this._unread = 0; this._syncJump(); });
     this.sendEl.addEventListener("click", () => this._send());
+    this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
     this.inputEl.addEventListener("input", () => {
       this._autoGrow();
       this.ctx.setDraft?.(this.inputEl.value.slice(0, CHAT.DRAFT_MAX));
@@ -589,6 +593,101 @@ export class ChatView {
     }
   }
 
+  // ── `+` 파일 넣기(일반 에이전트 앱과 같은 컴포저 좌측 버튼) ──────────────────────
+  // 무엇을 하는가: 워크스페이스 파일을 골라 **그 경로를 입력에 삽입**한다(업로드가 아니다).
+  //  에이전트는 경로만 받으면 자기가 그 파일을 읽으므로, 내용을 서버로 올릴 이유가 없다 —
+  //  경로 삽입이 프라이버시·용량·정확성 전부에서 우월하다(터미널 첨부 플로우와 같은 규율).
+  // 목록 출처는 IDE 트리와 **같은 fs 제공자**(로컬 api / 원격은 makeRemoteFs) → 다른 PC 워크스페이스도
+  //  같은 UI 로 고를 수 있고, 원격이면 LAN 직결·봉투 RPC 경로를 자동으로 탄다(remote-fs.js).
+  _togglePicker() {
+    if (this.pickEl) { this._closePicker(); return; }
+    const wrap = document.createElement("div");
+    wrap.className = "chat-pick";
+    wrap.innerHTML =
+      `<input class="chat-pick-q" type="text" placeholder="파일 이름" />` +
+      `<div class="chat-pick-list"><div class="chat-pick-empty">불러오는 중…</div></div>`;
+    this.el.querySelector(".chat-composer").appendChild(wrap);
+    this.pickEl = wrap;
+    this._pickFiles = null;
+    const q = wrap.querySelector(".chat-pick-q");
+    q.addEventListener("input", () => this._renderPicker(q.value));
+    q.addEventListener("keydown", (e) => {
+      e.stopPropagation();                       // ⌘F 등 전역 단축키가 이 입력을 가로채지 않게
+      if (e.key === "Escape") { e.preventDefault(); this._closePicker(); this.inputEl?.focus(); return; }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = wrap.querySelector(".chat-pick-row");
+        if (first) this._pickFile(first.dataset.path);
+      }
+    });
+    wrap.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-pick-row");
+      if (row) this._pickFile(row.dataset.path);
+    });
+    // 바깥 클릭으로 닫기 — 이 클릭 자체가 닫지 않도록 다음 틱에 등록(메뉴 관례, ide.js 와 동일).
+    this._pickCloser = (e) => { if (!wrap.contains(e.target) && e.target !== this.plusEl) this._closePicker(); };
+    setTimeout(() => document.addEventListener("mousedown", this._pickCloser, true), 0);
+    q.focus();
+    void this._loadPickFiles();
+  }
+
+  _closePicker() {
+    if (this._pickCloser) document.removeEventListener("mousedown", this._pickCloser, true);
+    this._pickCloser = null;
+    this.pickEl?.remove();
+    this.pickEl = null;
+  }
+
+  async _loadPickFiles() {
+    const fs = this.ctx.fs?.();
+    const root = this._cwd();
+    if (!fs) { this._renderPicker(""); return; }
+    try {
+      // 깊이 4 = IDE 트리와 같은 값(더 깊이 파면 큰 리포에서 첫 응답이 눈에 띄게 늦다).
+      const tree = await fs.fsTree(root, 4);
+      if (!this.pickEl) return;
+      this._pickFiles = flattenFiles(tree);
+      this._renderPicker(this.pickEl.querySelector(".chat-pick-q")?.value || "");
+    } catch (e) {
+      if (!this.pickEl) return;
+      this._pickFiles = [];
+      // 실패를 조용히 빈 목록으로 만들지 않는다(원격 오프라인·권한 문제를 사용자가 알아야 한다).
+      const list = this.pickEl.querySelector(".chat-pick-list");
+      list.innerHTML = `<div class="chat-pick-empty">목록을 불러오지 못했습니다</div>`;
+    }
+  }
+
+  _renderPicker(query) {
+    if (!this.pickEl) return;
+    const list = this.pickEl.querySelector(".chat-pick-list");
+    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">불러오는 중…</div>`; return; }
+    const root = this._cwd() || "";
+    const hit = filterFiles(this._pickFiles, root, query, CHAT.PICK_LIMIT);
+    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">일치하는 파일 없음</div>`; return; }
+    list.innerHTML = hit.map((p) => {
+      const r = relToRoot(root, p);
+      const i = r.lastIndexOf("/");
+      return `<div class="chat-pick-row" data-path="${escapeHtml(p)}">` +
+        `<span class="chat-pick-name">${escapeHtml(i < 0 ? r : r.slice(i + 1))}</span>` +
+        (i < 0 ? "" : `<span class="chat-pick-dir">${escapeHtml(r.slice(0, i))}</span>`) +
+        `</div>`;
+    }).join("");
+  }
+
+  // 고른 파일 = 워크스페이스 상대 경로를 커서 위치에 삽입(뒤에 공백 1칸 — 이어서 문장을 쓰게).
+  _pickFile(full) {
+    if (!full) return;
+    const ta = this.inputEl;
+    const r = relToRoot(this._cwd() || "", full);
+    const { value, caret } = insertPathAt(ta.value, ta.selectionStart, ta.selectionEnd, r);
+    ta.value = value;
+    ta.setSelectionRange(caret, caret);
+    this.ctx.setDraft?.(ta.value.slice(0, CHAT.DRAFT_MAX));
+    this._autoGrow();
+    this._closePicker();
+    ta.focus();
+  }
+
   // ── 승인 카드 슬롯(기능1) ──
   _renderApprovals() {
     if (!this.apprEl || !_approvalRenderer) return;
@@ -634,6 +733,7 @@ export class ChatView {
   dispose() {
     this._disposed = true;
     this._stopPoll();
+    this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,
     //  이 창을 닫으면 같은 대화를 보고 있는 다른 기기(폰)의 chatId 까지 무효화된다(그쪽은 CHAT_GONE →

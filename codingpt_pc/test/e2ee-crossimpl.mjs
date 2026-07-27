@@ -413,12 +413,16 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     skip("앱↔PC 행/컨트롤 노출 동치", "codingpt_app 없음 — 단독 체크아웃");
   } else {
     const card = readFileSync(CARD, "utf8");
-    const mHosts = card.match(/S\.devices\.filter\(\(d\) =>([\s\S]*?)\);/);
+    // ★ 2026-07-27 개정 2(기기 목록 통합): 앱 카드가 목록을 직접 그리면서 `S.devices.filter(...)` 가
+    //  여러 개(클라우드 제외 필터 등)로 늘었다 → 위치가 아니라 **이름**으로 오려낸다. 앱은 PC
+    //  `host-lock.js isHostRow()` 와 같은 이름의 화살표 함수 한 줄을 두고 그것만 배지 판정에 쓴다
+    //  (그 이름이 사라지면 이 절이 즉시 터진다 = "앱이 규칙을 바꿨으니 PC 도 보라" 는 신호).
+    const mHosts = card.match(/const isHostRow = \(d: AccountDevice\) =>([\s\S]*?);\n/);
     const mRestore = card.match(/const canRestore =([\s\S]*?);\n/);
     let appHost = null, appRestore = null;
     try { if (mHosts) appHost = new Function("d", `return (${mHosts[1]});`); } catch (_) { /* 아래 ok 가 잡는다 */ }
     try { if (mRestore) appRestore = new Function("st", `return (${mRestore[1]});`); } catch (_) { /* 동일 */ }
-    ok("앱 host 행 필터식을 오려내 실행할 수 있다", !!appHost, mHosts ? "실행 실패(TS 문법 유입?)" : "필터식을 찾지 못했다");
+    ok("앱 host 행 규칙(isHostRow)을 오려내 실행할 수 있다", !!appHost, mHosts ? "실행 실패(TS 문법 유입?)" : "isHostRow 식을 찾지 못했다");
     ok("앱 canRestore 식을 오려내 실행할 수 있다", !!appRestore, mRestore ? "실행 실패(TS 문법 유입?)" : "canRestore 식을 찾지 못했다");
     if (appHost) {
       let n = 0, mism = 0;

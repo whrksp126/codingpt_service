@@ -60,6 +60,9 @@ export async function pickSnapshotAndApply() {
 
 let hostEl = null;
 let mainTop = null;
+let mtDyn = null;        // main-top 동적 영역(매 렌더 재조립)
+let mtModeBtn = null;    // main-top TUI↔Chat 토글(생성 1회, 절대 재생성 금지)
+let mtModeGlyph = "";    // 현재 그려진 글리프("chat"|"term") — 바뀔 때만 innerHTML 재작성
 let gridEl = null;
 let panes = new Map();
 let lastSig = "";
@@ -72,9 +75,80 @@ export function mountWorkspaceView(container) {
   mainTop = document.createElement("div");
   mainTop.className = "main-top";
   mainTop.setAttribute("data-tauri-drag-region", "");
+  // main-top 은 두 층으로 나눈다: 매 렌더마다 다시 그리는 동적 부분(mtDyn)과 **한 번만 만들고 계속
+  //  살려두는 부분**(모드 토글). 토글을 매 렌더마다 재생성/자식교체하면 클릭이 영구히 죽는다 —
+  //  근거는 pane.js `modeToggleState` 헤더 주석(2026-07-27 라이브 실증).
+  mtDyn = document.createElement("div");
+  mtDyn.className = "mt-dyn";
+  mtDyn.setAttribute("data-tauri-drag-region", "");
+  mainTop.append(mtDyn, buildModeToggle());
   gridEl = document.createElement("div");
   gridEl.className = "ws-grid";
   hostEl.append(mainTop, gridEl);
+}
+
+// ── TUI ↔ Chat 토글(메인 영역 헤더 우측 고정, 3플랫폼 공통 배치) ──
+// 사용자 확정(2026-07-27): pane 위에 떠 있으면 안 되고 **메인 영역 기준 우측 상단**이어야 한다.
+//  그래서 pane 당 1개가 아니라 **전역 1개**이고, 대상은 "포커스된 pane 의 활성 터미널 탭"이다.
+//  노출/모드 판정은 pane.js `modeToggleState()`(정본 = agent-signal.js) 가 전담하고 여기선 그리기만 한다.
+function buildModeToggle() {
+  const b = document.createElement("button");
+  b.className = "pane-ctrl mt-mode hidden";
+  b.type = "button";
+  // ⚠ 이 노드는 앱이 살아 있는 동안 절대 remove/재생성하지 않는다(숨김은 클래스로만).
+  //   removal 도 innerHTML 교체와 똑같이 mousedown↔mouseup 사이 타깃 소멸 = click 미발화를 만든다.
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const t = modeToggleTarget();
+    if (!t) return;
+    // 폴백으로 비포커스 pane 을 조작하게 됐다면 **그 pane 으로 포커스를 옮긴다** — 그리기와 조작
+    //  대상이 같다는 것을 사용자가 볼 수 있어야 한다. 안 옮기면 두 터미널 pane 이 있을 때
+    //  "왜 딴 쪽이 채팅으로 바뀌었지?" 가 된다(에러 0건의 조용한 혼란).
+    if (t.viaFallback) S.focusPane(t.pane.id);
+    t.pane.toggleMode?.();
+  });
+  mtModeBtn = b;
+  return b;
+}
+
+/**
+ * 헤더 토글이 **그리고/조작할** 대상 pane 한 곳 → { pane, state, viaFallback } | null.
+ *
+ * ★ 그리기와 클릭이 반드시 **같은 함수**로 대상을 골라야 한다. 예전엔 그리기는 "포커스 pane 이
+ *   OFF 면 다른 pane 으로 폴백", 클릭은 "포커스 pane 이 **없을 때만** 폴백" 이라 서로 달랐다:
+ *   포커스가 셸만 띄운 터미널 pane 이고 옆 pane 에서 claude 가 도는 상황이면 **버튼은 옆 pane 상태를
+ *   보여주면서 클릭은 포커스 pane 을 토글**했다(둘 다 "정상 동작"이라 로그·에러가 남지 않는다).
+ * 폴백이 존재하는 이유: 포커스가 IDE/프리뷰 pane 일 때 claude 가 도는 터미널이 화면에 있는데도
+ *   토글이 사라지는 것을 막는다(원칙: 잘못 뜬 토글 = 무해한 오클릭 1회 / 잘못 사라진 토글 =
+ *   기능이 사용자 인식에서 삭제된다).
+ */
+function modeToggleTarget() {
+  const rt = wsRuntime(state.activeWsId);
+  const focused = rt ? panes.get(rt.focusId) : null;
+  const fst = focused?.modeToggleState?.();
+  if (fst?.on) return { pane: focused, state: fst, viaFallback: false };
+  for (const [, p] of panes) {
+    const st = p.modeToggleState?.();
+    if (st?.on) return { pane: p, state: st, viaFallback: true };
+  }
+  return null;
+}
+
+export function syncModeToggle() {
+  if (!mtModeBtn) return;
+  const t = modeToggleTarget();
+  mtModeBtn.classList.toggle("hidden", !t);
+  if (!t) return;
+  const chat = t.state.chat;
+  mtModeBtn.classList.toggle("active", chat);
+  mtModeBtn.title = chat ? "터미널(TUI) 보기" : "채팅으로 보기";
+  // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다. 매번 쓰면 자식 SVG 가 교체되어 클릭이 죽는다.
+  //  크기 16 = 이 헤더의 추가 버튼과 같은 값(앱은 자기 헤더 기준 19 — 플랫폼별로 줄 정렬을 맞춘다).
+  const want = chat ? "term" : "chat";
+  if (mtModeGlyph !== want) {
+    mtModeGlyph = want;
+    mtModeBtn.innerHTML = chat ? icons.terminal({ size: 16 }) : icons.chat({ size: 16 });
+  }
 }
 
 function structureSig(node) {
@@ -112,6 +186,8 @@ function paneCtx(ws) {
     agentStateOf: (cwd, win) => S.agentStateOf(cwd, win),
     // Chat 의 tool 카드 "열기" → IDE 탭/분할(활성 pane 기준 자동 배치).
     onOpenIde: (relPath) => { if (relPath) smartAdd("ide", { openPath: relPath }); },
+    // pane 이 모드를 바꾸면 main-top 토글(전역 1개)을 즉시 맞춘다 — pane 이 자기 버튼을 갖고 있지 않다.
+    syncModeToggle: () => syncModeToggle(),
     persist: () => S.emit(),
   };
 }
@@ -483,23 +559,25 @@ function mergeAsTabs(srcId, dstId, insertIndex) {
   S.emit();
 }
 
+// ⚠ 여기서 다시 그리는 것은 `mtDyn` 뿐이다 — `mainTop` 자체를 비우면 모드 토글 노드가 매 렌더마다
+//   소멸해 클릭이 죽는다(pane.js `modeToggleState` 주석의 ② 항과 같은 사고).
 function renderMainTop(ws) {
-  mainTop.innerHTML = "";
+  mtDyn.innerHTML = "";
   if (state.sidebarCollapsed) {
     // 접힘 시 사이드바 상단 컨트롤(토글·알림)을 메인 상단바에 노출 — 워크스페이스 추가(+)는
     //  사이드바를 열어야 보인다(접힘 상태 축약).
     const ctl = document.createElement("span");
     ctl.className = "mt-ctl";
     ctl.append(buildTopControls(false));
-    mainTop.appendChild(ctl);
+    mtDyn.appendChild(ctl);
     const div = document.createElement("span");
     div.className = "mt-div";
-    mainTop.appendChild(div);
+    mtDyn.appendChild(div);
   }
   const name = document.createElement("span");
   name.className = "mt-name";
   name.textContent = ws?.name || "워크스페이스";
-  mainTop.append(name);
+  mtDyn.append(name);
   // 통합 추가 버튼(터미널/IDE/웹뷰) — pane 별 버튼 대신 여기 고정. 활성 pane 기준 자동 배치.
   if (ws) {
     const spacer = document.createElement("span");
@@ -519,7 +597,7 @@ function renderMainTop(ws) {
       mkBtn(icons.code, "IDE 추가", "ide"),
       mkBtn(icons.globe, "웹뷰 추가", "preview"),
     );
-    mainTop.append(spacer, adds);
+    mtDyn.append(spacer, adds);
   }
 }
 
@@ -635,7 +713,8 @@ export function updateWorkspaceView() {
   for (const [id, p] of panes) p.el.classList.toggle("focused", id === rt.focusId);
   // 모드 토글 갱신 — 리컨실러가 tab.cmd 를 채우거나(claude 실행/종료) 기능3 push 가 오면 emit 이
   //  오므로, 여기서 매번 동기화하면 "claude 를 띄운 탭에만 토글" 이 자동으로 맞는다.
-  for (const [, p] of panes) p._syncModeToggle?.();
+  //  (전역 1개 = 포커스 pane 기준. 노드는 보존하고 상태만 갱신한다.)
+  syncModeToggle();
   updateUnreadRings(ws);
   measureRects();
 }
