@@ -25,7 +25,9 @@ const setupKey = () => (state.me && state.me.id != null ? `cpt.setupDone.${state
 //  곧 "허용됨"의 로컬 정본이다. 사용자가 시스템 설정에서 뒤로 껐다면 다음 실제 접근이 실패하며
 //  settings 의 허용 버튼이 여전히 있다 — 온보딩은 유도 장치이지 판정 정본이 아니다).
 export function markPermGranted(name) { try { localStorage.setItem(`cpt.perm.${name}`, "1"); } catch (_) {} }
-const permGranted = (name) => { try { return localStorage.getItem(`cpt.perm.${name}`) === "1"; } catch (_) { return false; } };
+//  설정 화면도 같은 기록을 읽는다(2026-07-28: 이미 허용된 권한을 계속 [허용] 버튼으로 그리면
+//  사용자는 "아직 허용이 안 됐나" 로 읽는다 → 기록이 있으면 '허용됨' 표기) — 그래서 export 다.
+export const permGranted = (name) => { try { return localStorage.getItem(`cpt.perm.${name}`) === "1"; } catch (_) { return false; } };
 const FOLDER_PERMS = [
   { id: "downloads", label: "다운로드 폴더 접근" },
   { id: "desktop", label: "데스크탑 폴더 접근" },

@@ -7,11 +7,11 @@ import { icons } from "./icons.js";
 import { ANDROID_QR, IOS_QR } from "./store-qr.js";
 import {
   e2ee, e2eeReady, refreshE2ee, approveDevice, denyDevice,
-  revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap,
+  revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap, e2eePendingApprovable,
 } from "./e2ee.js";
 import { hostE2eeEpoch, hostLockLabel, isHostRow } from "./host-lock.js";
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
-import { markPermGranted } from "./login-gate.js";
+import { markPermGranted, permGranted } from "./login-gate.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -148,10 +148,10 @@ function renderSection(force) {
       </div>
       <div class="sm-card2">
         <div class="sett-row"><span>테마</span>
-          <span class="scale-seg" id="themeSeg">
-            <button class="scale-opt" data-v="system">시스템</button>
-            <button class="scale-opt" data-v="light">라이트</button>
-            <button class="scale-opt" data-v="dark">다크</button>
+          <span class="scale-seg seg-ic" id="themeSeg">
+            <button class="scale-opt" data-v="system" title="시스템" aria-label="시스템">${icons.monitor({ size: 15 })}</button>
+            <button class="scale-opt" data-v="light" title="라이트" aria-label="라이트">${icons.sun({ size: 15 })}</button>
+            <button class="scale-opt" data-v="dark" title="다크" aria-label="다크">${icons.moon({ size: 15 })}</button>
           </span>
         </div>
         <div class="sett-row"><span>인터페이스 글꼴</span><div class="fd" id="uiFontDd"></div></div>
@@ -160,9 +160,9 @@ function renderSection(force) {
         <div class="sett-hint">글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.</div>
       </div>
       <div class="sm-card2">
-        <div class="sett-row"><span>다운로드 폴더 접근</span><button class="sett-btn fpa-btn" data-f="downloads">허용</button></div>
-        <div class="sett-row"><span>데스크탑 폴더 접근</span><button class="sett-btn fpa-btn" data-f="desktop">허용</button></div>
-        <div class="sett-row"><span>문서 폴더 접근</span><button class="sett-btn fpa-btn" data-f="documents">허용</button></div>
+        ${folderPermRow("downloads", "다운로드 폴더 접근")}
+        ${folderPermRow("desktop", "데스크탑 폴더 접근")}
+        ${folderPermRow("documents", "문서 폴더 접근")}
         <div class="sett-hint">한 번 허용하면 모든 워크스페이스에 적용돼요</div>
       </div>
       `;
@@ -434,6 +434,22 @@ function buildPaired() {
   void refreshE2ee(); // 열쇠 상태/대기 목록(데몬 위임) — 실패 시 '미지원'으로 표기만
 }
 
+/**
+ * 보호 폴더 권한 행 — **이미 허용된 것은 버튼을 그리지 않는다**(2026-07-28 사용자 지적:
+ *  "온보딩에서 다 허용하고 넘어왔는데 버튼으로 허용해야 한다는 느낌이거든? 허용됨으로 표현해야").
+ *  판정 = 온보딩·이 화면의 프로브 성공 기록(login-gate permGranted, 머신 스코프 localStorage).
+ *  ⚠ 여기서 렌더 시점에 프로브를 돌려 실측하지 않는다: 아직 결정 안 된 권한은 프로브가 곧 macOS
+ *   팝업이라, 설정을 열기만 해도 팝업 3개가 뜬다(사용자가 요청하지 않은 프롬프트 = 금지).
+ *   기록이 없지만 실제로 허용된 경우(구버전에서 이미 허용)는 [허용] 을 한 번 누르면 팝업 없이
+ *   즉시 '허용됨' 으로 바뀐다 — 기록이 없는 것이 손해가 아니다.
+ */
+function folderPermRow(id, label) {
+  if (permGranted(id)) {
+    return `<div class="sett-row"><span>${label}</span><span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
+  }
+  return `<div class="sett-row"><span>${label}</span><button class="sett-btn fpa-btn" data-f="${id}">허용</button></div>`;
+}
+
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
 //  허용=버튼 '허용됨' 고정, 거부=버튼이 '설정 열기'(파일 및 폴더 설정)로 전환.
 function bindFolderPerms(rootEl) {
@@ -446,7 +462,12 @@ function bindFolderPerms(rootEl) {
       try {
         const ok = await api.probeFolder(b.dataset.f);
         // 성공은 로컬에도 기록한다 — 온보딩(login-gate)이 "없는 권한만" 행으로 그리는 판정 근거.
-        if (ok) { markPermGranted(b.dataset.f); b.textContent = "허용됨"; return; } // disabled 유지
+        if (ok) {
+          markPermGranted(b.dataset.f);
+          // 버튼을 남겨 두면 '허용됨' 이 여전히 눌러야 하는 것처럼 보인다 → 표기로 교체(folderPermRow 와 같은 모양).
+          b.outerHTML = `<span class="sett-done">${icons.check({ size: 14 })}허용됨</span>`;
+          return;
+        }
         b.dataset.denied = "1";
         b.textContent = "설정 열기";
         b.disabled = false;
@@ -610,8 +631,12 @@ let e2eeMsg = "";
 // 접기 상태는 **로컬 플래그**다(state.js 에 넣지 않는다 — 기기 간 동기화 대상이 아니다).
 //  리컨실러 emit 마다 renderE2ee 가 다시 도므로 모듈 스코프에 둬야 펼친 상태가 유지된다.
 //  (개정 4: `자세히`(e2eeAdvOpen)·복구 1회 표시(e2eeRecoveryShown)는 UI 와 함께 삭제)
-let e2eeApprOpen = false;  // 행동 행(새 기기 N대 승인) → 승인 카드
-let e2eeWaitBusy = false;  // '승인됐는지 확인' 진행 중
+// 개정 5: 승인 카드는 **기본 펼침**이다 — 사용자가 지금 결정해야 하는 일이고, 한 번 더 클릭해야
+//  나타나면 알림을 눌러 들어온 사람이 빈 목록만 본다(구글 로그인 확인은 바로 보인다).
+let e2eeApprOpen = true;   // 행동 행(새 기기 N대 승인) → 승인 카드
+// 개정 5: 코드는 요청별로 접혀 있다(enrollmentId 집합 · 'self' = 이 PC 의 대기 화면).
+//  '승인됐는지 확인' 버튼은 삭제됐다 — 승인은 WS(resolved) 로 즉시 반영되고 폴링이 보증한다.
+const e2eeCodeOpen = new Set();
 
 const TONE_C = { on: "var(--accent)", wait: "var(--warn, #FBBF24)", off: "var(--dim)" };
 
@@ -673,35 +698,47 @@ function waitNoSafetyWarn() {
 }
 
 /**
- * 승인 카드(PC 는 시트가 없어 카드 인라인) — 카드 안 텍스트는 지침 1줄 + 요청번호 1줄뿐이다.
- *  ★ 요청번호는 **안전 코드 유무와 무관하게** 그린다(앱 DeviceTrustCard 와 동일 구성 — 폰과 PC 를
- *   나란히 놓으면 카드 구성이 같아야 한다). 안전 코드가 없다고 요청번호까지 감추면 요청이 여러 건일 때
- *   **어느 요청을 처리하는지 구분할 표식이 하나도 없다**. 요청번호는 대조 대상이 아니므로(라벨에
- *   `· 대조용 아님`) 이 자리에서 대조 위험을 만들지 않는다.
- *  ★ 반대로 `verified=false` 경고는 안전 코드가 **있을 때만** 그린다(앱과 동일 — 카피 감사 §3-B):
- *   안전 코드를 못 만든 상태는 항상 verified=false 를 동반하므로 두 경고가 겹치면 노이즈가 되고,
- *   그때 사용자가 읽어야 하는 지시는 더 강한 쪽('승인하지 마세요') 하나다. 경고는 한 번에 하나만.
+ * 승인 카드(PC 는 시트가 없어 카드 인라인).
+ *
+ * ★ 2026-07-28 개정 5(사용자 확정) — **구글 로그인 확인 방식**으로 바꿨다. 사용자 지적:
+ *   "지금 화면 저렇게 보이면 뭔가 코드를 입력해야 할 거 같잖아? 다른 기기에서 로그인을 시도하면 기존
+ *    기기에서 본인이 맞나요? 나오고 승인/본인이 아니에요 버튼이 나오는 식 아니야?"
+ *   → 평소 화면 = [기기명 · 시각] + '본인이 맞나요?' + [승인] [본인이 아니에요]. 60비트 안전 코드는
+ *   접힌 `코드 확인` 안으로 내렸다.
+ *  ⚠ 대조 채널은 **없애지 않았다**(사용자에게 트레이드오프를 설명하고 선택받은 결론): 코드 대조가
+ *   서버 MITM(가짜 열쇠 끼워넣기)을 막는 유일한 수단이므로, 링크 한 번으로 언제나 꺼낼 수 있어야 한다
+ *   (시그널/왓츠앱의 안전 번호와 같은 등급 = 존재하지만 강요하지 않는다). 자세한 근거는
+ *   docs/구현설계-2026-07-25/14-설정-카피-감사.md §3 개정 5.
+ *  ★ 안전 코드를 **계산할 수 없을 때**의 경고는 접지 않는다: 그때는 '코드 확인' 을 눌러야 알 수 있는
+ *   정보가 아니라 "지금 승인하면 안 된다" 는 결정 정보다(승인 버튼도 계속 비활성).
  */
 function e2eeApprovalCard(p) {
   const noSafety = !p.safetyCode;
+  const open = e2eeCodeOpen.has(p.enrollmentId);
+  const isPc = p.platform === "darwin" || p.platform === "win32" || p.platform === "linux";
   return `<div class="appr-card">
-    <div style="display:flex;align-items:center;gap:6px">
-      <span class="dev-ic" style="color:var(--warn,#FBBF24)">${icons.shield({ size: 15 })}</span>
-      <span style="flex:1;font-size:13px;font-weight:700">새 기기 승인</span>
-      <span class="dim" style="font-size:11px;flex:none">${esc(fmtWhen(p.requestedAt))}</span>
+    <div class="appr-head">
+      <span class="dev-ic">${icons.shield({ size: 15 })}</span>
+      <span class="appr-title">새 기기에서 로그인했어요</span>
+      <span class="dim appr-when">${esc(fmtWhen(p.requestedAt))}</span>
     </div>
-    <div style="display:flex;align-items:center;gap:6px;min-width:0">
-      <span class="dev-ic">${icons.smartphone({ size: 15 })}</span>
+    <div class="appr-dev">
+      <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
       <span class="dev-name" style="flex:1;min-width:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.label || "새 기기")}</span>
     </div>
-    <div class="acct-msg" style="color:var(--text2)">새 기기 화면에도 같은 코드가 보이면 승인하세요. 정상이라면 항상 같아요 — 다르면 연결이 안전하지 않은 것이니 거절하세요.</div>
-    ${noSafety ? noSafetyCodeWarn() : safetyChips(p.safetyCode, "var(--accent)")}
-    ${requestNo(p.verifyCode)}
-    ${!noSafety && p.verified === false ? `<div class="acct-msg" style="color:var(--warn,#FBBF24)">요청 번호는 서버 값 · 코드로만 대조하세요</div>` : ""}
-    <div style="display:flex;gap:8px">
-      <button class="btn small" style="flex:1" data-e2ee-deny="${esc(p.enrollmentId)}">거절</button>
-      <button class="btn small primary" style="flex:1.4" data-e2ee-approve="${esc(p.enrollmentId)}"${noSafety ? " disabled" : ""}>승인</button>
+    <div class="appr-ask">본인이 맞나요?</div>
+    ${noSafety ? noSafetyCodeWarn() : ""}
+    <div class="appr-btns">
+      <button class="btn small appr-ok" data-e2ee-approve="${esc(p.enrollmentId)}"${noSafety ? " disabled" : ""}>승인</button>
+      <button class="btn small ghost appr-no" data-e2ee-deny="${esc(p.enrollmentId)}">본인이 아니에요</button>
     </div>
+    ${noSafety ? "" : `<button class="appr-reveal" data-e2ee-code="${esc(p.enrollmentId)}">코드 확인 ${open ? "▴" : "▾"}</button>`}
+    ${open && !noSafety ? `<div class="appr-code">
+      <div class="acct-msg" style="color:var(--text2);padding-top:0">새 기기 화면에도 같은 코드가 보이면 승인하세요. 정상이라면 항상 같아요 — 다르면 연결이 안전하지 않은 것이니 거절하세요.</div>
+      ${safetyChips(p.safetyCode, "var(--text)")}
+      ${requestNo(p.verifyCode)}
+      ${p.verified === false ? `<div class="acct-msg" style="color:var(--warn,#FBBF24)">요청 번호는 서버 값 · 코드로만 대조하세요</div>` : ""}
+    </div>` : ""}
   </div>`;
 }
 
@@ -717,8 +754,8 @@ function e2eeApprovalCard(p) {
 function e2eeActionRow(pend) {
   if (pend.length) {
     return `<tr class="dev-tr" id="e2eeApprRow" style="cursor:pointer" role="button" tabindex="0">
-      <td class="dev-c-ic"><span class="dev-ic" style="color:var(--warn,#FBBF24)">${icons.shield({ size: 15 })}</span></td>
-      <td colspan="3" style="font-size:13px;font-weight:700;color:var(--warn,#FBBF24)">새 기기 ${pend.length}대 승인</td>
+      <td class="dev-c-ic"><span class="dev-ic">${icons.shield({ size: 15 })}</span></td>
+      <td colspan="3" style="font-size:13px;font-weight:700">새 기기 ${pend.length}대 승인</td>
       <td class="dev-c-del"><span class="dim" style="font-size:12px">${e2eeApprOpen ? "▴" : "▾"}</span></td>
     </tr>
     ${e2eeApprOpen ? `<tr class="dev-tr-note"><td colspan="4"><div class="dev-list">${pend.map(e2eeApprovalCard).join("")}</div></td></tr>` : ""}`;
@@ -733,12 +770,19 @@ function e2eeActionRow(pend) {
   //  (개정 4: 구 '자세히 → 복구 코드로 복원' 힌트는 복구 UI 와 함께 삭제 — 현 스코프엔 잠긴 저장
   //   데이터가 없어 기기 전손실 = 새 기기에서 자동으로 새 열쇠가 생긴다.)
   if (e2eeSelfWaiting()) {
+    const noSafety = !e2ee.safetyCode;
+    const open = e2eeCodeOpen.has("self");
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-      <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px">
-        <div style="font-size:13px;font-weight:700">기존 기기에서 승인해 주세요</div>
-        ${e2ee.safetyCode ? safetyChips(e2ee.safetyCode, "var(--accent)") : waitNoSafetyWarn()}
-        ${requestNo(e2ee.verifyCode)}
-        <button class="btn small" id="e2eeWaitRefresh"${e2eeWaitBusy ? " disabled" : ""}>${e2eeWaitBusy ? "확인 중…" : "승인됐는지 확인"}</button>
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px">
+        <div class="wait-box">
+          <span class="wait-spin"></span>
+          <div style="min-width:0">
+            <div class="wait-title">폰·태블릿에서 승인해 주세요</div>
+            <div class="wait-sub">이미 로그인된 기기에 요청을 보냈어요</div>
+          </div>
+        </div>
+        ${noSafety ? waitNoSafetyWarn() : `<button class="appr-reveal" data-e2ee-code="self">코드 확인 ${open ? "▴" : "▾"}</button>`}
+        ${open && !noSafety ? `<div class="appr-code">${safetyChips(e2ee.safetyCode, "var(--text)")}${requestNo(e2ee.verifyCode)}</div>` : ""}
       </div>
     </td></tr>`;
   }
@@ -851,7 +895,10 @@ function renderE2ee() {
   const box = connBody?.querySelector("#e2eeBox");
   if (!box) return;
   const label = e2eeStateLabel();
-  const pend = e2ee.pending || [];
+  // ★ 승인 카드는 **승인할 수 있는 요청**만 그린다(e2ee.js e2eePendingApprovable — 자기 자신의 옛
+  //  enrollment 제외 + 이 PC 에 열쇠가 없으면 0건). 필터 없이 e2ee.pending 을 그리면 눌러도 403 인
+  //  카드가 뜬다(2026-07-28 폰 실사고).
+  const pend = e2eePendingApprovable();
   const devs = e2ee.devices || [];
   const selfReady = e2eeReady();
   // 행동 행을 먼저 만든다 — 있으면 그 아래 `reason`(데몬·서버 원문)을 **그리지 않는다**: 두 줄이 같은
@@ -884,13 +931,12 @@ function bindE2ee(box) {
     e2eeMsg = r.ok ? "" : r.error || "거절하지 못했어요";
     renderE2ee();
   }));
-  // 이 PC 가 대기 중일 때 — 기존 기기에서 승인했는지 지금 확인(폴링을 기다리지 않는다).
-  const waitBtn = box.querySelector("#e2eeWaitRefresh");
-  if (waitBtn) waitBtn.addEventListener("click", async () => {
-    e2eeWaitBusy = true;
+  // '코드 확인' 접기/펼치기(개정 5) — 승인 카드와 자기 대기 화면이 같은 어포던스를 쓴다.
+  box.querySelectorAll("[data-e2ee-code]").forEach((b) => b.addEventListener("click", () => {
+    const k = b.dataset.e2eeCode;
+    if (e2eeCodeOpen.has(k)) e2eeCodeOpen.delete(k); else e2eeCodeOpen.add(k);
     renderE2ee();
-    try { await refreshE2ee(); } finally { e2eeWaitBusy = false; renderE2ee(); }
-  });
+  }));
   // (개정 4: 정책 세그/암호화 켜기/복구 코드 만들기·복원 핸들러 삭제 — 부트스트랩은
   //  e2ee.js maybeAutoBootstrap 이 자동 수행, 정책은 normalizeE2eePolicy 가 '자동' 으로 고정)
   // 신뢰 해제(기기 행이 없는 고아 열쇠) = 휴지통 2탭. 비가역 경고는 **결정 순간에만** 인라인으로

@@ -514,13 +514,34 @@ function normalizeRecovery(r) {
 }
 
 // ── C. 대기 목록(신뢰 기기의 승인 시트) ───────────────────────────────
-async function listPending(userId) {
+//  ★ 2026-07-28: 호출자가 자기 공개키(ikX)를 주면 **승인할 수 있는 것만** 돌려준다. 실사고 = 폰이
+//   "새 기기 승인 · Android" 카드를 보고 있었는데 그것은 자기 자신의 옛 enrollment 였다(재설치·계정
+//   전환으로 신원키가 갈라지면 같은 기기가 두 항목이 된다). approve 는 승인자가 trusted 여야 하므로
+//   그 카드의 [승인] 은 항상 403(NOT_TRUSTED)이다 = 사용자에게는 "왜 안 되지" 만 남는 무동작 UI.
+//    ① 자기 ikX 요청 제외 — 자기 자신은 스스로를 승인할 수 없다.
+//    ② 호출자가 trusted 가 아니면 빈 목록 — 승인 주체가 될 수 없는 기기다.
+//   ikX 를 안 주는 구 클라이언트에는 기존 동작(전량)을 유지한다(하위호환) — 클라이언트도 같은 두
+//   규칙을 걸어 두었으므로(PC e2ee.js e2eePendingApprovable · 앱 decoratePending) 어느 한쪽만으로도 막힌다.
+async function listPending(userId, { ikX } = {}) {
   enabledGate();
   const now = Date.now();
   const k = await loadKeyring(userId);
+  // 형식이 틀린 값은 400 이 아니라 '알 수 없는 호출자'로 취급한다 — 목록 조회는 읽기 전용이고,
+  //  여기서 던지면 구현이 다른 클라이언트가 승인 시트를 아예 못 띄운다.
+  let callerIkX = null;
+  if (typeof ikX === 'string' && ikX) {
+    try { callerIkX = b64u(decodeExact(ikX, PUB_LEN, 'ikX')); } catch (_) { callerIkX = null; }
+  }
+  if (callerIkX) {
+    const caller = keyByIkX(k, callerIkX);
+    if (!caller || caller.state !== 'trusted') {
+      return { pending: [], epoch: k.epoch, policy: k.policy, trustedCount: trustedKeys(k).length };
+    }
+  }
   const items = pendingIds(userId)
     .map((id) => pending.get(id))
     .filter((r) => r && !r.resolved && r.expiresAt > now)
+    .filter((r) => !callerIkX || r.ikX !== callerIkX)
     .sort((a, b) => a.requestedAt - b.requestedAt)
     .map(publicPending);
   return { pending: items, epoch: k.epoch, policy: k.policy, trustedCount: trustedKeys(k).length };

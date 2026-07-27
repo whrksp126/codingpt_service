@@ -58,10 +58,14 @@ async function bootstrap(req, res) {
   } catch (e) { return fail(res, e); }
 }
 
-// GET /api/daemon/e2ee/pending — 신뢰 기기의 승인 시트(캐치업). push 는 힌트, pull 이 정본.
+// GET /api/daemon/e2ee/pending?ikX=… — 신뢰 기기의 승인 시트(캐치업). push 는 힌트, pull 이 정본.
+//  ★ ikX(호출자 자기 공개키)는 **선택**이지만 주면 서버가 "이 기기가 승인할 수 있는 것"만 돌려준다
+//   (자기 요청 제외 + 미신뢰 호출자면 빈 목록 — listPending 주석 참조). 구 클라이언트는 안 보내므로
+//   그때는 기존 동작(전량)을 유지한다.
 async function pending(req, res) {
   try {
-    return ok(res, req.account.userId, await deviceTrustService.listPending(req.account.userId));
+    const ikX = typeof req.query?.ikX === 'string' ? req.query.ikX : null;
+    return ok(res, req.account.userId, await deviceTrustService.listPending(req.account.userId, { ikX }));
   } catch (e) { return fail(res, e); }
 }
 

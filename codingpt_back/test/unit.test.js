@@ -622,6 +622,46 @@ test('e2ee — 열쇠는 ikX(공개키) 기준으로만 발급된다(deviceId �
   });
 });
 
+// ★ 2026-07-28 실사고: 폰이 "새 기기 승인 · Android" 카드를 보고 있었는데 그것은 **자기 자신의 옛
+//  enrollment** 였다(재설치·계정 전환으로 신원키가 갈라지면 같은 기기가 두 항목이 된다). approve 는
+//  승인자가 trusted 여야 하므로 그 [승인] 은 항상 403 = 무동작 카드. listPending 이 호출자를 알면
+//  애초에 그 항목을 안 준다(ikX 쿼리). 클라이언트도 같은 규칙을 갖지만 서버가 마지막 방어선이다.
+test('e2ee 대기 목록 — 자기 요청은 빼고, 미신뢰 호출자에겐 아무것도 주지 않는다(ikX 쿼리)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async () => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    const phone = newDevice('Android');
+    const tablet = newDevice('iPad');
+    for (const d of [phone, tablet]) {
+      const p = await deviceTrust.enroll(7, null, { ikX: d.ikX, ikEd: d.ikEd, label: d.label });
+      assert.strictEqual(p.state, 'pending');
+    }
+    // ① ikX 없음(구 클라이언트) = 기존 동작: 전량
+    assert.strictEqual((await deviceTrust.listPending(7)).pending.length, 2);
+    // ② 신뢰된 PC 가 물으면 2건 그대로(자기 것은 애초에 대기 목록에 없다)
+    assert.strictEqual((await deviceTrust.listPending(7, { ikX: pc.ikX })).pending.length, 2);
+    // ③ **대기 중인 폰**이 물으면 0건 — 자기 요청 제외 + 애초에 승인 주체가 될 수 없다(미신뢰)
+    assert.strictEqual((await deviceTrust.listPending(7, { ikX: phone.ikX })).pending.length, 0);
+    // ④ 폰이 승인되면(=trusted) 남은 iPad 만 보인다. 자기 것은 이미 목록에서 빠져 있다.
+    const list = await deviceTrust.listPending(7, { ikX: pc.ikX });
+    const mine = list.pending.find((p) => p.ikX === phone.ikX);
+    const sealedPhone = sealMk(mk, phone.x.raw, 1);
+    await deviceTrust.approve(7, {
+      enrollmentId: mine.enrollmentId, ikX: phone.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedPhone), sig: signGrant(pc, 1, phone.x.raw, sealedPhone),
+    });
+    const asPhone = await deviceTrust.listPending(7, { ikX: phone.ikX });
+    assert.deepStrictEqual(asPhone.pending.map((p) => p.label), ['iPad']);
+    // ⑤ 형식이 깨진 ikX 는 400 이 아니라 '알 수 없는 호출자'(읽기 전용 조회를 던져서 막지 않는다)
+    assert.strictEqual((await deviceTrust.listPending(7, { ikX: 'not-a-key' })).pending.length, 1);
+  });
+});
+
 test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

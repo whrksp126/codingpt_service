@@ -116,6 +116,23 @@ function noteAccountRef(ref) {
 function ready() { return e2ee.available && e2ee.state === "trusted" && e2ee.policy !== "off"; }
 export function e2eeReady() { return ready(); }
 /**
+ * **승인할 수 있는** 대기 요청만 — 화면(설정 `기기` 섹션)은 이것만 그린다.
+ *
+ * ★ 2026-07-28 실사고: 폰이 "새 기기 승인 · Android" 카드를 보고 있었는데 그 요청은 **자기 자신의
+ *  옛 enrollment** 였다(재설치·계정 전환으로 신원키가 갈라지면 같은 기기가 두 항목이 된다).
+ *  누르면 서버가 403(NOT_TRUSTED: 승인은 이미 신뢰된 기기만)을 주므로 사용자는 "왜 승인이 안 되나"
+ *  만 겪는다. 두 규칙으로 원천 차단한다:
+ *   ① 내 ikX 와 같은 요청은 제외한다 — 자기 자신은 스스로를 승인할 수 없다.
+ *   ② 이 기기에 계정 열쇠가 없으면(=ready 아님) **아무 요청도 그리지 않는다** — 승인 주체가 될 수
+ *      없는 기기에 승인 UI 를 띄우면 그 화면의 모든 버튼이 무동작이다.
+ *  서버(deviceTrustService.listPending)도 같은 두 규칙을 건다 — 어느 한쪽만으로도 막히게(이중 방어).
+ */
+export function e2eePendingApprovable() {
+  if (!ready()) return [];
+  const list = Array.isArray(e2ee.pending) ? e2ee.pending : [];
+  return e2ee.ikX ? list.filter((p) => p && p.ikX !== e2ee.ikX) : list;
+}
+/**
  * 설정 화면 한 줄 라벨 — 판정은 e2ee-label.js 가 정본(테스트가 같은 함수를 본다).
  *  '확인 중'(대기색)과 '열쇠 없음'(꺼짐색)이 **다른 화면**이어야 한다: 전자는 곧 바뀌고 후자는
  *  사람이 켜기 전까지 영구 평문이다.
@@ -531,10 +548,21 @@ export function myQrPin() {
   try { return e2ee.ikX ? qrPin(b64uDec(e2ee.ikX)) : null; } catch (_) { return null; }
 }
 
-/** 부팅 시 1회 + 주기 갱신(60s). 로그인 전이면 데몬이 unsupported/off 를 준다. */
+/**
+ * 부팅 시 1회 + 주기 갱신(60s). 로그인 전이면 데몬이 unsupported/off 를 준다.
+ *  ★ 이 PC 가 승인을 기다리는 동안에는 10s 로 조인다(개정 5: 대기 화면에서 '승인됐는지 확인' 버튼을
+ *   없앴다 — 승인은 WS resolved 로 즉시 오지만 WS 가 끊긴 창에서도 화면이 스스로 넘어가야 한다).
+ */
 export function startE2ee() {
   void refreshE2ee();
-  setInterval(() => { if (state.paired) void refreshE2ee(); }, 60000);
+  let tick = 0;
+  setInterval(() => {
+    if (!state.paired) return;
+    tick += 10;
+    const waiting = e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
+      || e2ee.state === "pending" || e2ee.state === "enrolled";
+    if (waiting || tick >= 60) { tick = 0; void refreshE2ee(); }
+  }, 10000);
 }
 
 // lan.js 가 순환 import 없이 정책을 물어볼 수 있게 전역에 최소 표면만 노출한다.

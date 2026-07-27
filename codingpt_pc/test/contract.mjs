@@ -765,15 +765,22 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //  (폰은 userRef 를 서버에서 받는다) 사용자는 폰의 3블록을 PC 화면에서 찾다 못 찾고 대조 없이 승인한다
   //  = 사람 눈 대조(서버 MITM 차단의 전부)가 그 승인에서 통째로 빠진다. §5 문자열 단정으로는 이 누락이
   //  잡히지 않는다(같은 문구가 승인 카드 쪽에 1회 있으면 통과한다) → **소스 형태**를 고정한다.
+  //  ★ 개정 5(2026-07-28)로 **형태가 바뀌었다**: 코드는 접힌 `코드 확인` 안으로 들어갔으므로 이제
+  //   "칩이냐 경고냐" 삼항이 아니라 "경고냐 토글이냐" 삼항이다. 지키려는 계약은 그대로다 — 안전 코드를
+  //   못 만든 상태에서 대기 화면을 **무음으로 비우지 않는다**(승인하는 폰에는 코드가 떠 있는데 이 화면이
+  //   비어 있으면 사용자는 대조 없이 승인한다).
   eq("자기 대기 화면: 안전 코드가 없으면 경고를 그린다(무음 생략 금지)",
-    /e2ee\.safetyCode \? safetyChips[\s\S]{0,120}: waitNoSafetyWarn\(\)/.test(settings), true);
+    /noSafety \? waitNoSafetyWarn\(\)/.test(settings), true);
   eq("자기 대기 화면·승인 카드 모두 요청번호를 **무조건** 그린다(요청 구분자 유실 금지 = 앱과 동일 구성)",
     (settings.match(/\$\{requestNo\((?:p|e2ee)\.verifyCode\)\}/g) || []).length, 2);
   // ⚠ 요청번호와 달리 `verified=false` 경고는 **안전 코드가 있을 때만** 그린다(§3-B "경고는 한 번에
   //  하나만" — 안전 코드를 못 만든 상태는 항상 verified=false 를 동반하므로 겹치면 노이즈다). 앱
   //  DeviceTrustCard 도 `hasSafety && !device.verified` 다 = 두 화면의 경고 줄 수가 같아야 한다.
+  //  개정 5: 그 경고는 **코드 블록 안**에 있고, 그 블록 자체가 `!noSafety` 조건이라 겹침이 구조적으로
+  //  불가능하다 → 블록 조건 + 경고가 그 안에만 1회 있음을 고정한다.
   eq("verified=false 경고는 안전 코드가 있을 때만(경고 한 번에 하나 · 앱과 동일)",
-    /\$\{!noSafety && p\.verified === false \?/.test(settings), true);
+    /\$\{open && !noSafety \?/.test(settings)
+    && (settings.match(/p\.verified === false/g) || []).length === 1, true);
 
   // ③-c ★ 개정 4: 복구 코드 UI 는 통째로 없다(만들기 버튼·복원 입력·1회 표시 전부). 데몬 RPC
   //  (e2ee.recovery.*)는 존치 — 스냅샷 봉인을 켜는 날 UI 만 되살린다. 여기서는 부재를 고정한다.
@@ -820,7 +827,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   경고를 전부 무음 생략해서, 승인하는 폰에는 3블록 코드가 크게 떠 있는데 이 화면에는 아무것도 없었다
   //   = 사용자가 대조 없이 승인하게 되는 구멍(§2.10 방어가 PC 에서만 비어 있었다).
   eq("자기 대기 화면도 안전 코드 부재 시 경고를 그린다(무음 생략 금지)",
-    /e2ee\.safetyCode \? safetyChips[\s\S]{0,140}NoSafetyWarn\(\)/.test(settings), true);
+    /noSafety \? waitNoSafetyWarn\(\) :/.test(settings), true);
   //  ⑤-2 요청번호·verified 경고는 안전 코드 유무와 **무관**하게 그린다(앱 DeviceTrustCard 와 같은 구성).
   //   안전 코드가 없다고 요청번호까지 감추면 동시 요청 여러 건에서 구분 표식이 하나도 없다.
   eq("요청번호는 안전 코드와 분리해 항상 그린다(승인 카드·대기 화면 둘 다)",
@@ -830,7 +837,36 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   반대로 두 경고(noSafety · unverified)는 **한 번에 하나만** 그린다: 안전 코드를 못 만든 상태는 항상
   //   verified=false 를 동반하므로 겹치면 노이즈가 되고, 읽어야 하는 지시는 더 강한 쪽 하나다(앱 동일).
   eq("경고는 한 번에 하나만(noSafety 일 때 unverified 는 숨긴다)",
-    settings.includes("!noSafety && p.verified === false"), true);
+    settings.includes("open && !noSafety"), true);
+
+  //  ⑤-2′ ★ 개정 5(2026-07-28 사용자 확정) — 승인 화면이 **구글 로그인 확인** 구성이다.
+  //   평소 화면 = 기기명 + '본인이 맞나요?' + [승인][본인이 아니에요]. 코드는 `코드 확인` 링크 안.
+  //   되돌아가면(코드를 상시 크게 노출) 사용자는 "코드를 입력해야 하나" 로 멈춘다(그 지적이 이 개정의 근거).
+  eq("승인 화면은 본인 확인 질문 + 두 버튼이다(개정 5)",
+    ["새 기기에서 로그인했어요", "본인이 맞나요?", "본인이 아니에요",
+     'class="appr-reveal"', "코드 확인"].filter((t) => !settings.includes(t)), []);
+  //   코드·대조 지침은 **접힘 안에서만** 그린다 = 접힌 상태(open=false)에서는 소스상 그려지지 않는다.
+  eq("안전 코드·대조 지침은 접힌 '코드 확인' 안에만 있다",
+    /\$\{open && !noSafety \? `<div class="appr-code">[\s\S]{0,600}safetyChips\(p\.safetyCode/.test(settings), true);
+  //   대기 화면: 스피너 + 안내 2줄, 수동 새로고침 버튼 없음(승인은 WS resolved 로 자동 반영).
+  eq("대기 화면은 스피너 + 안내 2줄이고 새로고침 버튼이 없다",
+    ['class="wait-spin"', "폰·태블릿에서 승인해 주세요", "이미 로그인된 기기에 요청을 보냈어요"]
+      // 부재 검사는 **주석을 걷어낸 소스**로(왜 없앴는지 근거가 주석에 남는다 — ①-b 와 같은 규율)
+      .filter((t) => !settings.includes(t)).concat(bare.includes("승인됐는지 확인") ? ["잔존:승인됐는지 확인"] : []), []);
+  //   색 규율(사용자 확정: "과한 포인트 컬러는 AI 스러운 느낌") — 승인 카드·안전 코드에 accent 금지.
+  eq("승인 화면에 포인트 컬러가 없다(accent 는 상태 신호 전용)",
+    /safetyChips\([^)]*var\(--accent\)/.test(settings) || /appr-ok[^>]*var\(--accent\)/.test(settings), false);
+  //  ⑤-2″ 승인 카드는 **승인할 수 있는 요청**만 그린다(2026-07-28 폰 실사고: 자기 자신의 옛 enrollment 를
+  //   승인하라고 띄웠고 누르면 403 이었다) — 필터는 e2ee.js 가 갖고 화면은 그것만 쓴다.
+  eq("승인 목록은 e2eePendingApprovable() 이다(자기 요청·미신뢰 기기 차단)",
+    settings.includes("e2eePendingApprovable()") && !/const pend = e2ee\.pending/.test(settings), true);
+  {
+    const e2eeSrc2 = readFileSync(`${dir}/e2ee.js`, "utf8");
+    eq("필터 규칙 2개: 자기 ikX 제외 + 열쇠 없으면 0건",
+      /export function e2eePendingApprovable/.test(e2eeSrc2)
+      && /if \(!ready\(\)\) return \[\]/.test(e2eeSrc2)
+      && /p\.ikX !== e2ee\.ikX/.test(e2eeSrc2), true);
+  }
   //  ⑤-3 ★ 개정 4: 복구 코드 컨트롤은 UI 째로 없다(§3 개정 4 블록 — 데몬 RPC 만 존치). 노출 판정
   //   함수(canRestore)의 계약 §2.4 규약 3 은 e2ee-label.js 단위 테스트가 계속 지킨다.
   eq("복구 컨트롤이 화면에 없다(개정 4)",
