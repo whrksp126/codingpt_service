@@ -601,7 +601,7 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
    그대로 열 폭이 돼 오른쪽 열들이 카드 밖으로 나간다 — 실측). 상한 안에서 안쪽 span 이 말줄임된다. */
 .dev-c-name { max-width: 260px; }
 .dev-c-meta { font-size: 11.5px; color: var(--dim); padding-left: 12px; white-space: nowrap; }
-.dev-c-lock { padding-left: 12px; text-align: right; font-size: 11px; font-weight: 800; white-space: nowrap; }
+/* .dev-c-lock(행별 자물쇠 열)은 폐기 — 사용자 확정 2026-07-27. 판정 함수는 host-lock.js 에 남아 있다. */
 .dev-c-del { width: 30px; text-align: right; }
 .dev-ic { display: inline-flex; color: var(--text3); flex: none; }
 .dev-name { font-size: 13.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; min-width: 0; }

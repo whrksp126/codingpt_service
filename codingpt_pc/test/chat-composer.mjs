@@ -8,7 +8,7 @@
 //    (지난 라운드 교훈: "초록인데 아무것도 검증하지 않는" 테스트가 결함을 숨긴다.)
 //  · 절대경로가 아니라 상대경로인 이유: 에이전트 cwd = 워크스페이스 루트라 짧고 정확하며, 홈 경로에
 //    박힌 사용자 계정명이 대화 기록에 남지 않는다.
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -255,11 +255,26 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
         /if \(final\) \{ baseRef\.current = value; anchorRef\.current = cursor; \}/.test(
           readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8")));
     }
-    // 회복 가능한 STT 종료(무음·타임아웃)는 사용자에게 문구를 보이지 않는다 — `7/no match` 노출 사고.
+    // ★ 채팅 STT 는 **보조키 패널과 같은 엔진**이어야 한다(사용자 실측: 패널은 빠르고 정확한데 채팅은
+    //  아니었다 — 서드파티 라이브러리를 따로 붙였던 것이 원인). services/stt provider 를 쓰고
+    //  코딩 용어 바이어스(CODING_TERMS)까지 같은 것을 넘긴다. 그리고 원문 오류 메시지를 노출하지 않는다.
     {
-      const sp = readFileSync(path.resolve(here, "../../../codingpt_app/src/services/speechInput.ts"), "utf8");
-      ok("라이브러리 원문 메시지를 사용자에게 노출하지 않는다", !/h\.onError\(String\(e\?\.error\?\.message/.test(sp));
-      ok("code 가 비고 message 만 오는 기기도 회복 처리한다", /RECOVERABLE_MSG/.test(sp) && /no\[/.test(sp));
+      const ccRaw = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8");
+      // ⚠ 주석을 먼저 걷어낸다 — "서드파티를 쓰지 않는다" 핀이 그 사실을 **설명하는 주석**에 걸려
+      //  거짓 실패를 냈다(이 세션에서 세 번째로 같은 함정). 소스 핀은 항상 코드만 본다.
+      const cc = ccRaw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+      ok("채팅 STT 가 services/stt provider 를 쓴다", /getCurrentSttProvider\(\)/.test(cc) && /from '\.\.\/\.\.\/services\/stt'/.test(cc));
+      ok("패널과 같은 코딩 용어 바이어스를 넘긴다", /contextualStrings: CODING_TERMS/.test(cc));
+      ok("서드파티 STT 라이브러리를 쓰지 않는다", !/react-native-voice/.test(cc)
+        && !existsSync(path.resolve(here, "../../../codingpt_app/src/services/speechInput.ts")));
+      ok("회복 가능한 종료에 원문 메시지를 띄우지 않는다", !/e\?\.error\?\.message/.test(cc));
+      // `+` 는 4갈래(프로젝트/기기/촬영/갤러리) — 출처가 실제로 넷이라 한 화면으로 합칠 수 없다.
+      // `[^>]*` 는 안 된다: icon 속성에 `/>` 가 들어 있어 첫 `>` 에서 끊긴다(실측 0건) → 지연 매칭.
+      const labels = [...cc.matchAll(/<MenuRow[\s\S]*?label="([^"]+)"/g)].map((m) => m[1]);
+      eq("`+` 메뉴 = 프로젝트/기기/촬영/갤러리", labels, ["프로젝트에서 선택", "기기에서 선택", "촬영", "갤러리"]);
+      ok("프로젝트 선택은 컬럼뷰 시트(워크스페이스 생성과 같은 형식)",
+        /<ProjectFileSheet/.test(cc)
+        && /COL_W/.test(readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ProjectFileSheet.tsx"), "utf8")));
     }
   }
 }

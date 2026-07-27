@@ -825,10 +825,12 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("섹션 제목은 `기기` 이고 self 배지는 그 행 우측이다", code.includes(`<div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>`), true);
   eq("기능명은 자세히 안 정책 행이 갖는다(화면에서 '종단간 암호화' 가 사라지지 않는다)",
     code.includes("<span>종단간 암호화<br>"), true);
-  // 암호화 배지는 **근거가 있는 행에만** 그린다(온라인 PC = isHostRow). 오프라인·모바일 행에 배지를
-  //  그리면 꺼둔 기기가 영구 '확인 중'(거짓 진행 신호)이 되고 폰 화면과 색·행 수가 갈라진다.
-  eq("행 배지는 isHostRow 행에만 그린다(모름을 초록/평문으로 단정하지 않는다)",
-    /isHostRow\(d\)\s*\n?\s*\? hostLockLabel\(/.test(code), true);
+  // ★ 반전된 핀(사용자 확정 2026-07-27 3차): 행별 자물쇠 열('암호화됨'/'평문'/'확인 중')과 섹션
+  //  '열쇠 있음' 배지, 그리고 OS 라벨을 **화면에서 제거**했다. 표시가 사라진 것이지 규칙이 사라진 것은
+  //  아니다 — `host-lock.js` 의 판정(거짓 자물쇠 금지·세대 일치)은 그대로 있고 그쪽 단위 테스트가 지킨다.
+  //  다시 노출하려면 이 핀을 되돌리고 `hostLockLabel` 을 그 자리에 쓰면 된다(규칙 재발명 금지).
+  eq("행별 자물쇠 열이 화면에 없다", [code.includes('dev-c-lock'), code.includes('e2eeSelfBadge')], [false, false]);
+  eq("최근 접속 좌측 OS 라벨이 없다", code.includes("deviceOsLabel("), false);
   // 기기 삭제 = 열쇠 해제 + 세대 회전까지. back revokeDevice 는 열쇠를 'revoked' 로 표시하고
   //  rotate_needed 만 팬아웃하므로, 회전 없이 지우면 지운 기기가 이미 가진 MK_epoch 로 이후 트래픽까지
   //  계속 열 수 있다(구 '신뢰 해제' 가 하던 회전을 기기 행이 이어받았다).

@@ -513,13 +513,21 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     const pcIcons = readFileSync(path.resolve(here, "../src/js/icons.js"), "utf8");
     for (const [brand, key] of [["claude", "claudeMark"], ["codex", "codexMark"], ["gemini", "geminiMark"]]) {
       const app = new RegExp(`${brand}: '([^']{40,})'`).exec(logoTsx)?.[1] || "";
-      const pc = new RegExp(`${key}: \\(o\\) => brandSvg\\('([^']{40,})'`).exec(pcIcons)?.[1] || "";
+      const pc = new RegExp(`${key}: \\(o\\) => brandSvg2\\('${brand}', '([^']{40,})'`).exec(pcIcons)?.[1] || "";
       ok(`${brand} 로고 path 가 앱==PC (len ${app.length}/${pc.length})`, !!app && app === pc,
         `app=${app.slice(0, 40)} pc=${pc.slice(0, 40)}`);
     }
     ok("PC 브랜드 마크는 fill 로고로 그린다(라인 stroke 금지 — 획이 뭉개진다)",
-      /brandSvg = \(d, o = \{\}\) =>[\s\S]{0,200}fill="currentColor" stroke="none"/.test(pcIcons));
-    ok("앱도 fill 로 그린다", /<Path d=\{d\} fill=\{color\} \/>/.test(logoTsx));
+      /const brandSvg = \(d, o = \{\}\) => \{[\s\S]{0,300}stroke="none"/.test(pcIcons));
+    // ★ 로고는 **브랜드 색**으로 그린다(사용자 지적: "로고 컬러는 왜 적용 안 되나"). currentColor 로
+    //  칠하면 텍스트 색(dim)이 되어 브랜드 식별이 사라진다. 양 플랫폼이 같은 hex 를 써야 같은 그림이다.
+    const pcHex = /const BRAND = \{ claude: "(#[0-9A-Fa-f]{6})", codex: "(#[0-9A-Fa-f]{6})", gemini: "(#[0-9A-Fa-f]{6})" \}/.exec(pcIcons);
+    const appHex = /const BRAND_COLOR: Record<string, string> = \{\s*claude: '(#[0-9A-Fa-f]{6})',\s*codex: '(#[0-9A-Fa-f]{6})',\s*gemini: '(#[0-9A-Fa-f]{6})'/.exec(logoTsx);
+    ok("브랜드 색이 양 플랫폼 동일", !!pcHex && !!appHex
+      && pcHex[1].toUpperCase() === appHex[1].toUpperCase()
+      && pcHex[2].toUpperCase() === appHex[2].toUpperCase()
+      && pcHex[3].toUpperCase() === appHex[3].toUpperCase(),
+      `pc=${pcHex && pcHex.slice(1)} app=${appHex && appHex.slice(1)}`);
     // ⚠ 주석을 먼저 걷어낸다 — 이 함정을 **설명하는 주석 자체**가 정규식에 걸려 거짓 실패가 났다
     //   (테스트가 자기 문서를 결함으로 신고하는 형태). 코드만 본다.
     const paneCode = paneTsx.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");

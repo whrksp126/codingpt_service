@@ -121,8 +121,19 @@ export function newTid() {
 //  자동 개명이 대기=폴더명 / 실행=앱 OSC 타이틀(claude 상태 등) or 명령을 이미 담으므로
 //  `· 명령` 부제는 노이즈("… · 2.1.211")라 제거 — 수동 이름 창도 이름만 표시.
 //  win 은 안정 터미널 ID(큰 숫자)라 라벨엔 안 쓴다 — 이름은 리컨실러가 곧 채운다.
+// ★ 에이전트 상태 글리프(`✳ `/`⠹ `/`✦ ` 등)는 **라벨에서 걷어낸다**(사용자 확정 2026-07-27):
+//  같은 정보를 탭 좌측 브랜드 로고가 이미 (그리고 더 정확하게) 나타내므로 글자로 또 붙으면 중복이고
+//  긴 제목의 앞자리를 먹는다. 우리가 넣은 것이 아니라 claude 가 pane_title 에 직접 쓰는 접두사다.
+//  ⚠ 판정(agent-signal.agentTitleStatus)은 **원본 title** 을 계속 본다 — 여기서 지우는 것은 표시뿐이다.
+//  ⚠ "글리프+공백" 이 **여러 번** 반복될 수 있다(실측: `✳ ✳ Claude Code`) → 그룹 자체를 반복시킨다.
+export const AGENT_TITLE_GLYPH_RE = /^(?:[\s]*(?:[✳✦✧◇◆✋⏲⏳]|[\u2800-\u28ff])+)+[\s]*/;
+export function stripAgentGlyph(name) {
+  const s = String(name == null ? "" : name);
+  const out = s.replace(AGENT_TITLE_GLYPH_RE, "");
+  return out.trim() || s.trim();   // 글리프만 있는 제목이면 원본을 남긴다(빈 라벨 금지)
+}
 export function termTabLabel(t) {
-  return t.title || "터미널";
+  return stripAgentGlyph(t.title) || "터미널";
 }
 
 // ── 원격 워크스페이스 프리뷰 — 로컬 포트 포워더 우선, back HTTP 프록시 폴백 ──
@@ -656,7 +667,9 @@ export class PaneView {
           : t.kind === "ide" ? "IDE" : (t.metaTitle || "프리뷰");
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
-        const modeGlyph = isT && t.mode === "chat" ? `<span class="ptab-mode">${icons.chat({ size: 11 })}</span>` : "";
+        // ★ 탭 우측의 채팅 글리프는 **폐기**했다(사용자 확정 2026-07-27): 좌측 로고 + pane 안의 토글로
+        //  이미 모드가 드러나고, 탭마다 작은 글리프가 하나 더 붙으면 라벨 폭만 먹는다.
+        const modeGlyph = "";
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`;
         const x = document.createElement("span");
         x.className = "ptab-x";

@@ -403,7 +403,6 @@ function buildPaired() {
     <div class="dev-section">
       <div style="display:flex;align-items:center;gap:10px;margin:0 2px 8px">
         <div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>
-        <span id="e2eeSelfBadge" style="font-size:11px;font-weight:800;flex:none"></span>
       </div>
       <div id="e2eeBox" class="sm-card2"></div>
     </div>`;
@@ -556,16 +555,6 @@ function fmtRecent(iso) {
 
 // 기기 행의 부제용 라벨(운영체제) — `기기` 섹션(e2eeDeviceRowsHtml)이 쓴다.
 //  구 '내 기기' 표는 2026-07-27 통합으로 사라졌지만 이 라벨 규칙은 그 행에서 계속 쓰인다.
-function deviceOsLabel(d) {
-  if (d.runnerKind === "cloud") return "Linux"; // 클라우드 러너 = Linux 컨테이너
-  const p = String(d.platform || "").toLowerCase();
-  if (p === "darwin") return "macOS";
-  if (p === "win32" || p === "windows") return "Windows";
-  if (p === "linux") return "Linux";
-  if (p === "ios" || p === "ipados") return /iphone/i.test(d.name || "") ? "iOS" : "iPadOS";
-  if (p === "android") return "Android";
-  return d.role === "controller" ? "모바일" : "기기";
-}
 // ── `기기` 섹션 — 모바일 E2eeSettingsCard/DeviceTrustCard 와 **동일 계층·동일 문구** ──
 //  문구·구조 정본 = docs/구현설계-2026-07-25/14-설정-카피-감사.md (§3 구조 · §4 확정 문구 표).
 //  ★ 2026-07-27 개정 2(사용자 요구): 구 '종단간 암호화' 카드와 구 '내 기기' 표를 **한 섹션으로 합쳤다**.
@@ -612,12 +601,6 @@ const TONE_C = { on: "var(--accent)", wait: "var(--warn, #FBBF24)", off: "var(--
  *  ⚠ '켜짐' 이라고 쓰지 않는다: 이 PC 의 열쇠 보유는 트래픽이 암호화된다는 뜻이 아니다(상대 호스트도
  *   열쇠가 있어야 한다) — 그게 거짓 자물쇠의 근원이었다. 실제 자물쇠는 PC 별 배지가 그린다.
  */
-function paintE2eeSelfBadge(l) {
-  const el = connBody?.querySelector("#e2eeSelfBadge");
-  if (!el) return;
-  el.textContent = l.text;
-  el.style.color = l.text === "오류" ? "var(--error)" : TONE_C[l.tone];
-}
 /** 이 PC 가 승인을 기다리는 중인가 — 판정 정본은 keyState(state 확장값은 방어적으로 함께 본다). */
 function e2eeSelfWaiting() {
   return e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
@@ -716,7 +699,7 @@ function e2eeActionRow(pend) {
       <td colspan="3" style="font-size:13px;font-weight:700;color:var(--warn,#FBBF24)">새 기기 ${pend.length}대 승인</td>
       <td class="dev-c-del"><span class="dim" style="font-size:12px">${e2eeApprOpen ? "▴" : "▾"}</span></td>
     </tr>
-    ${e2eeApprOpen ? `<tr class="dev-tr-note"><td colspan="5"><div class="dev-list">${pend.map(e2eeApprovalCard).join("")}</div></td></tr>` : ""}`;
+    ${e2eeApprOpen ? `<tr class="dev-tr-note"><td colspan="4"><div class="dev-list">${pend.map(e2eeApprovalCard).join("")}</div></td></tr>` : ""}`;
   }
   // 이 PC 가 승인을 기다린다 — 설명문 0줄. 대조는 **기존 기기 화면에서** 하므로 여기엔 지침이 없다.
   //  ★ 안전 코드를 계산할 수 없으면(userRef 미상 → e2ee.js deriveDisplay 가 null) 칩을 **무음으로
@@ -728,7 +711,7 @@ function e2eeActionRow(pend) {
   //  ★ 부제 1줄만 예외적으로 붙인다: 기기를 전부 잃은 사용자에게 '기존 기기에서 승인' 은 실행 불가능한
   //   지시이고 유일한 출구(복구 코드)는 접힌 `자세히` 안에 있다 → 경로를 알린다(앱 act.selfWaitHint 미러).
   if (e2eeSelfWaiting()) {
-    return `<tr class="dev-tr"><td class="dev-c-full" colspan="5">
+    return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px">
         <div style="font-size:13px;font-weight:700">기존 기기에서 승인해 주세요</div>
         ${e2eeCanRestore() ? `<div class="acct-msg" style="padding-top:0">기기가 없으면 자세히 → 복구 코드로 복원</div>` : ""}
@@ -740,7 +723,7 @@ function e2eeActionRow(pend) {
   }
   // 계정에 열쇠가 0개 = 사람이 켜기 전까지 **영구 평문**. 데몬은 이 경로를 자동으로 타지 않는다.
   if (e2eeNeedsBootstrap()) {
-    return `<tr class="dev-tr"><td class="dev-c-full" colspan="5">
+    return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px">
         <div style="font-size:13px;font-weight:700">암호화 열쇠가 없어요</div>
         <div class="acct-msg" style="padding-top:0">주로 쓰는 기기에서 켜세요</div>
@@ -818,7 +801,7 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
   const all = (state.devices || []).filter((d) => d.runnerKind !== "cloud"); // 클라우드 러너는 숨긴다(BYO 피벗)
   // ⚠ 기기 목록이 아직 안 왔으면 **고아 판정을 하지 않는다**: 키링이 먼저 도착하면 모든 열쇠가 '고아' 로
   //  보여 같은 기기가 두 번 뜨는 화면(합치려던 그 중복)이 로딩 중에 재현된다.
-  if (!all.length) return `<tr class="dev-tr"><td class="dev-c-full dim" colspan="5" style="font-size:12px">불러오는 중…</td></tr>`;
+  if (!all.length) return `<tr class="dev-tr"><td class="dev-c-full dim" colspan="4" style="font-size:12px">불러오는 중…</td></tr>`;
   const keyByDevice = new Map();
   // 열쇠 보유 판정은 `state === "trusted"` 하나다(앱 trustedKeys 와 같은 조건 — pending/revoked 는 열쇠가 아니다).
   for (const k of devs) if (k.state === "trusted" && k.deviceId != null) keyByDevice.set(String(k.deviceId), k);
@@ -829,21 +812,22 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
     const k = keyByDevice.get(String(d.id));
     // 이 PC 자신은 사이드카 데몬(e2ee.state)이 정본이다 — runner_status 프레임보다 빠르고 정확하다.
     //  ★ 3번째 인자 = 내 열쇠 세대 · 4번째 = 서버가 말하는 계정 세대(자기 행이 항상 초록이던 결함 ③-2).
-    const hl = e2ee.policy !== "off" && isHostRow(d)
-      ? hostLockLabel(selfReady, d.isCurrent && selfReady ? (e2ee.epoch || 1) : hostE2eeEpoch(d.id), e2ee.epoch, e2ee.accountEpoch)
-      : null;
+    // ★ 행별 자물쇠 열('암호화됨'/'평문')은 **표시하지 않는다**(사용자 확정 2026-07-27: 제거 요청).
+    //  판정 함수(hostLockLabel)와 그 계약(거짓 자물쇠 금지 · 세대 일치 검사)은 그대로 남는다 —
+    //  다시 노출할 때 규칙을 재발명하지 않기 위해서다. 상태는 '자세히' 섹션에서 확인할 수 있다.
     const canRevoke = typeof d.id === "number" && !d.isCurrent;
-    const sub = [deviceOsLabel(d), fmtRecent(d.lastSeenAt || d.createdAt), k && k.fingerprint ? `🔒 ${k.fingerprint}` : ""]
+    // ★ OS 라벨(`macOS ·`)은 제거했다(사용자 확정 2026-07-27): 좌측 아이콘이 이미 PC/모바일을 구분하고,
+    //  같은 정보를 글자로 또 쓰면 최근 접속 시각이 뒤로 밀린다.
+    const sub = [fmtRecent(d.lastSeenAt || d.createdAt), k && k.fingerprint ? `🔒 ${k.fingerprint}` : ""]
       .filter(Boolean).join(" · ");
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
       <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : ""}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
       <td class="dev-c-meta">${esc(sub)}</td>
-      <td class="dev-c-lock"${hl ? ` style="color:${TONE_C[hl.tone]}"` : ""}>${hl ? esc(hl.text) : ""}</td>
       <td class="dev-c-del">${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
-    ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="5" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}`;
+    ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}`;
   }).join("");
 
   const orphanRows = orphans.map((k) => {
@@ -853,10 +837,9 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
       <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
       <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span></td>
       <td class="dev-c-meta">${k.fingerprint ? `🔒 ${esc(k.fingerprint)}` : ""}</td>
-      <td class="dev-c-lock"></td>
       <td class="dev-c-del">${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}</td>
     </tr>
-    ${mine ? "" : `<tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="5" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`}`;
+    ${mine ? "" : `<tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`}`;
   }).join("");
 
   // 온라인 PC 가 0대여도 그 자리를 비우지 않는다: 초록 self 배지 한 줄만 남으면 사용자는 '내 데이터가
@@ -867,7 +850,6 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
         <td class="dev-c-ic"><span class="dev-ic">${icons.monitor({ size: 15 })}</span></td>
         <td class="dev-c-name"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></td>
         <td class="dev-c-meta"></td>
-        <td class="dev-c-lock" style="color:${TONE_C.wait}">확인 중</td>
         <td class="dev-c-del"></td>
       </tr>`
     : "";
@@ -878,7 +860,6 @@ function renderE2ee() {
   const box = connBody?.querySelector("#e2eeBox");
   if (!box) return;
   const label = e2eeStateLabel();
-  paintE2eeSelfBadge(label);
   const pend = e2ee.pending || [];
   const devs = e2ee.devices || [];
   const selfReady = e2eeReady();
