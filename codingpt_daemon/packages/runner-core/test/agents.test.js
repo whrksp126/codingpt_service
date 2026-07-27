@@ -37,7 +37,9 @@ function unplant(name) {
   try { fs.unlinkSync(path.join(FAKEBIN, name)); } catch (_) { /* 이미 없음 */ }
 }
 function reset(prefs) {
-  // daemon.json 을 테스트가 원하는 배선 상태로 만든다(페어링된 데몬 흉내).
+  // 배선 설정 정본은 <stateDir>/agents.json(머신 영속) — 테스트마다 지우고 원하는 상태로 다시 깐다.
+  //  daemon.json 에도 같은 값을 심어 "구 저장소 → 신 저장소 1회 이관" 경로가 늘 실행되게 한다.
+  try { fs.unlinkSync(path.join(STATE, 'agents.json')); } catch (_) { /* 없음 */ }
   config.save({ serverUrl: 'http://x', deviceId: 1, deviceToken: 't', ...(prefs ? { agents: prefs } : {}) });
   agents._internals.setSearchOverride([FAKEBIN]);
 }
@@ -155,6 +157,36 @@ test('agents.wire/launch 는 cpt CAPABILITIES 에 없다 — AI 자기해제·�
     'wire 를 열면 터미널 안의 AI 가 자기 승인 훅을 스스로 끌 수 있다');
   assert.doesNotMatch(listed, /'agents\.rescan'/, 'rescan 은 shim 을 재생성한다');
   assert.doesNotMatch(listed, /'agents\.launch'/, 'launch 는 AI 자기증식 경로다');
+});
+
+// ★ 2026-07-27 사용자 제보 회귀 — 배선 설정이 daemon.json 에 있어서 로그아웃/계정 전환
+//  (clearCredentials/remove = 클린 슬레이트)에 같이 지워졌다: 계정을 바꿀 때마다 선택이 날아가고
+//  온보딩이 다시 떴다. 정본을 <stateDir>/agents.json(머신 영속)으로 분리 — 아래 3면을 고정한다.
+test('배선 선택은 계정 전환(clearCredentials)에도 유지된다', () => {
+  reset();
+  agents.setWired('claude', false);
+  agents.markOnboarded();
+  config.clearCredentials();                 // 로그아웃/계정 전환 경로
+  assert.strictEqual(agents.isWired('claude'), false, '계정을 바꿔도 사용자의 끔 선택은 남아야 한다');
+  assert.ok(agents.onboardedAt(), '온보딩 완료 표시도 남아야 한다(계정마다 다시 묻지 않는다)');
+});
+
+test('배선 선택은 unpair(config.remove)에도 유지된다', () => {
+  reset();
+  agents.setWired('codex', false);
+  config.remove();                           // unpair — daemon.json 자체 삭제
+  assert.strictEqual(agents.isWired('codex'), false);
+  assert.strictEqual(agents.wireDecided('codex'), true, '명시 결정 여부도 함께 유지된다');
+});
+
+test('구 저장소(daemon.json)의 설정은 최초 1회 이관된다', () => {
+  try { fs.unlinkSync(path.join(STATE, 'agents.json')); } catch (_) { /* 없음 */ }
+  config.save({ serverUrl: 'http://x', deviceId: 1, deviceToken: 't', agents: { claude: false }, agentsOnboardedAt: '2026-07-01T00:00:00.000Z' });
+  assert.strictEqual(agents.isWired('claude'), false, '구 daemon.json 의 선택이 읽혀야 한다');
+  assert.ok(fs.existsSync(path.join(STATE, 'agents.json')), '읽는 순간 신 저장소로 이관된다');
+  config.remove();                           // 구 저장소가 사라져도
+  assert.strictEqual(agents.isWired('claude'), false, '이관본으로 계속 동작한다');
+  assert.strictEqual(agents.onboardedAt(), '2026-07-01T00:00:00.000Z');
 });
 
 test('cleanup', () => {

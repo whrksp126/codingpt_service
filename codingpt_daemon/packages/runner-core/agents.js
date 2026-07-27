@@ -199,6 +199,36 @@ function probeVersion(binPath) {
   return version;
 }
 
+// ── 배선 설정 저장소: <stateDir>/agents.json — **머신 영속** ─────────────────────
+// 왜 daemon.json 이 아닌가(2026-07-27 실사고): 로그아웃/계정 전환은 daemon.json 을 지운다
+//  (클린 슬레이트 — 토큰·E2EE 열쇠 때문에 맞는 규칙). 그런데 에이전트 배선은 자격증명이 아니라
+//  "이 PC에 설치된 CLI를 잇는" 머신 로컬 설정이라, 같이 지워지면 **계정을 바꿀 때마다 선택이
+//  날아가고 온보딩이 다시 뜬다**(사용자 제보). machine.json(unpair 에도 유지)과 같은 원칙으로
+//  분리하고, 구 저장소(daemon.json 의 agents/agentsOnboardedAt)는 최초 1회 이관한다.
+function prefsFile() { return path.join(runtime.stateDir(), 'agents.json'); }
+function loadPrefsFile() {
+  try {
+    const v = JSON.parse(fs.readFileSync(prefsFile(), 'utf8'));
+    if (v && typeof v === 'object') {
+      return { agents: v.agents && typeof v.agents === 'object' ? v.agents : {}, onboardedAt: v.onboardedAt || null };
+    }
+  } catch (_) { /* 없음/손상 → 아래 이관 경로 */ }
+  const c = config.load() || {};
+  const migrated = {
+    agents: c.agents && typeof c.agents === 'object' ? c.agents : {},
+    onboardedAt: c.agentsOnboardedAt || null,
+  };
+  // 이관할 내용이 있을 때만 파일을 만든다(빈 파일을 미리 만들면 "이관됨"으로 오인).
+  if (Object.keys(migrated.agents).length || migrated.onboardedAt) savePrefsFile(migrated);
+  return migrated;
+}
+function savePrefsFile(p) {
+  try {
+    fs.mkdirSync(runtime.stateDir(), { recursive: true });
+    fs.writeFileSync(prefsFile(), JSON.stringify(p, null, 2) + '\n', { mode: 0o600 });
+  } catch (_) { /* 저장 실패는 동작을 막지 않는다(다음 저장에서 재시도) */ }
+}
+
 /**
  * 사용자가 결정한 배선 on/off. **'아직 안 물어봄' 과 '끔' 을 구분한다** — 뭉개면 온보딩을 아직
  *  안 본 사용자를 "사용자가 끄기로 했다"로 취급해 기능이 조용히 사라진다(같은 실수의 전례가 있다).
@@ -206,9 +236,7 @@ function probeVersion(binPath) {
  *   · true/false = 사용자가 명시적으로 결정
  */
 function wiredPrefs() {
-  const c = config.load() || {};
-  const a = c.agents;
-  return a && typeof a === 'object' ? a : {};
+  return loadPrefsFile().agents;
 }
 
 function isWired(id) {
@@ -225,22 +253,20 @@ function setWired(id, on) {
   const a = byId.get(id);
   if (!a) throw new Error('unknown agent: ' + id);
   if (!wirable(a.tier)) throw new Error('배선을 지원하지 않는 에이전트입니다: ' + id);
-  const c = config.load();
-  if (!c) throw new Error('페어링 전에는 저장할 수 없습니다');
-  c.agents = { ...(c.agents && typeof c.agents === 'object' ? c.agents : {}), [id]: !!on };
-  config.save(c);
+  const p = loadPrefsFile();
+  p.agents = { ...p.agents, [id]: !!on };
+  savePrefsFile(p);
   cache = { at: 0, items: null };
   return isWired(id);
 }
 
-/** 온보딩을 본 시점 — 있으면 PC 앱이 첫 실행 스텝을 다시 띄우지 않는다. */
-function onboardedAt() { return (config.load() || {}).agentsOnboardedAt || null; }
+/** 온보딩을 본 시점 — 있으면 PC 앱이 첫 실행 스텝을 다시 띄우지 않는다(계정 전환에도 유지). */
+function onboardedAt() { return loadPrefsFile().onboardedAt; }
 function markOnboarded() {
-  const c = config.load();
-  if (!c) return null;
-  c.agentsOnboardedAt = new Date().toISOString();
-  config.save(c);
-  return c.agentsOnboardedAt;
+  const p = loadPrefsFile();
+  p.onboardedAt = new Date().toISOString();
+  savePrefsFile(p);
+  return p.onboardedAt;
 }
 
 /**
