@@ -200,6 +200,14 @@ function buildInstallPanel(a, onDone) {
       const fit = new FitAddon();
       term.loadAddon(fit);
       term.open(host);
+      // GPU 렌더러 — pane.js `_loadRenderer` 와 같은 이유(DOM 렌더러 마지막 열 잘림).
+      try {
+        const gl = new window.WebglAddon.WebglAddon();
+        gl.onContextLoss(() => { try { gl.dispose(); } catch (_) {} });
+        term.loadAddon(gl);
+      } catch (_) {
+        try { term.loadAddon(new window.CanvasAddon.CanvasAddon()); } catch (_) { /* dom 유지 */ }
+      }
       panelTerm = term;
       requestAnimationFrame(() => { try { fit.fit(); } catch (_) { /* noop */ } });
       term.onData((d) => api.ptyWrite(PANEL_PANE_ID, d).catch(() => {}));

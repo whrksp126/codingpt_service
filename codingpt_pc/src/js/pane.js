@@ -1039,8 +1039,22 @@ export class PaneView {
     }
     if (this.node.kind !== "terminal") return;
     this.term.open(this.termEl);
+    this._loadRenderer();
     this._setupInput();
     this._fitNow();
+    // 폰트 lazy-load 대응 — xterm 은 open() 시점 폰트로 글자폭을 캐시한다. 웹폰트가 그 뒤에
+    //  로드되면 셀 폭이 변하는데(실측 7.559→7.724) 재측정 없이는 낡은 폭으로 잡은 cols 가
+    //  유지돼 마지막 열이 잘린다. fontFamily 재할당이 강제 재측정 트리거다(모바일과 동일 수법).
+    try {
+      document.fonts?.ready?.then(() => {
+        if (this._disposed || !this.term) return;
+        const fam = this.term.options.fontFamily;
+        this.term.options.fontFamily = "monospace";
+        this.term.options.fontFamily = fam;
+        this._fitNow();
+        this.term.refresh(0, this.term.rows - 1);
+      });
+    } catch (_) {}
     // 스트림은 "터미널" 탭 기준 — 활성 탭이 IDE/프리뷰(혼합 탭)여도 백그라운드 터미널은 유지.
     //  터미널 탭이 하나도 없으면 채널 없이 혼합 탭 본문만 표시.
     const active = this.node.tabs[this.node.active];
@@ -1057,6 +1071,27 @@ export class PaneView {
       this._mixed.forEach((m) => m.ide?.refresh());
     });
     this.ro.observe(this.el);
+  }
+
+  // GPU 렌더러(webgl→canvas→dom 폴백) — 마지막 열 잘림의 근본 수정(2026-07-27 픽셀 실측).
+  //  DOM 렌더러는 WebKit 텍스트 레이아웃(letter-spacing 서브픽셀 라운딩)에 의존해 행 끝으로
+  //  갈수록 글리프가 오른쪽으로 밀리고, 마지막 열 글리프가 클립 밖으로 나가 아예 안 그려진다
+  //  (버퍼엔 │ 가 있는데 세로선 픽셀 0 — 가로 ─ 는 셀을 가득 채워 선이 이어져 보여 오진 유발).
+  //  webgl/canvas 는 셀을 디바이스 픽셀 격자에 직접 그려 드리프트 자체가 없다. 모바일
+  //  TerminalWebView 가 같은 구성으로 무증상임을 확인하고 이식했다.
+  _loadRenderer() {
+    const useCanvas = () => {
+      try {
+        const c = new window.CanvasAddon.CanvasAddon();
+        this.term.loadAddon(c);
+        return true;
+      } catch (_) { return false; }
+    };
+    try {
+      const gl = new window.WebglAddon.WebglAddon();
+      gl.onContextLoss(() => { try { gl.dispose(); } catch (_) {} useCanvas(); });
+      this.term.loadAddon(gl);
+    } catch (_) { useCanvas(); }
   }
 
   async _ensureWin(tab) {

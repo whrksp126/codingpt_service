@@ -176,6 +176,28 @@ ok(/this\._sentCols === cols && this\._sentRows === rows/.test(pcPane),
 ok(/\.xterm-viewport::-webkit-scrollbar \{ width: 0/.test(pcCss),
   'PC: 터미널 스크롤바를 두지 않는다(뺄 폭을 맞추는 대신 문제군을 제거 — 되돌리면 잘림 재발)');
 
+// ── 11b. 렌더러는 GPU(webgl→canvas), DOM 은 최후 폴백 ─────────────────────────
+// ★ 진짜 근본 원인(2026-07-27 픽셀 실측, 0.1.123 에서도 재현): DOM 렌더러는 WebKit 텍스트
+//  레이아웃(letter-spacing 서브픽셀 라운딩)에 의존해 행 끝으로 갈수록 글리프가 오른쪽으로 밀리고,
+//  마지막 열 글리프가 클립 밖으로 나가 **cols 계산이 완벽해도** 잘린다. 증거: 버퍼에 `│`(11줄)와
+//  `╯` 가 전부 있는데 세로선 픽셀 0 · 인테리어 행은 논리 1170 이후 순수 배경색 · 가로 `─` 는 셀을
+//  가득 채워 1188 까지 이어져 "선은 있는데 모서리만 없다"는 오진을 유발했다. cols×cellW 대
+//  screen 폭 비교(need==screenW 가 로그에서 매번 정확히 일치)는 같은 소스에서 나온 두 값의
+//  동어반복이라 이 드리프트를 원리적으로 못 잡는다 — 다섯 번째 무효 대리 지표.
+//  webgl/canvas 는 셀을 디바이스 픽셀 격자에 직접 그려 드리프트가 없다(모바일 TerminalWebView 가
+//  같은 xterm 5.3.0 + webgl 0.16.0 조합으로 무증상임을 확인하고 이식).
+const pcIndex = read(path.resolve('src/index.html'));
+ok(/xterm-addon-webgl\.js/.test(pcIndex) && /xterm-addon-canvas\.js/.test(pcIndex),
+  'PC: webgl/canvas 렌더러 애드온을 벤더 로드한다');
+ok(/WebglAddon\.WebglAddon\(\)/.test(pcPane) && /onContextLoss/.test(pcPane) && /CanvasAddon\.CanvasAddon\(\)/.test(pcPane),
+  'PC pane: webgl 렌더러 + 컨텍스트 유실 시 canvas 폴백');
+ok(/this\.term\.open\(this\.termEl\);\s*this\._loadRenderer\(\);/.test(pcPane),
+  'PC pane: 렌더러는 open() 직후 로드한다(DOM 렌더러로 첫 페인트하지 않게)');
+ok(/WebglAddon\.WebglAddon\(\)/.test(strip(pcView)),
+  'PC 설치 패널 터미널도 GPU 렌더러를 쓴다');
+ok(/document\.fonts\?\.ready/.test(pcPane) && /fontFamily = "monospace"/.test(pcPane),
+  'PC pane: 웹폰트 로드 완료 시 fontFamily 재할당으로 강제 재측정+재fit(셀폭 7.559→7.724 실측)');
+
 // 우측 "공간 예약" 시도는 되돌렸다(pane 자체가 창을 넘는 상황에서 잘림을 키운다 — 사용자 실측).
 //  다만 **안쪽 padding 으로 예약하려는 시도는 무효**라는 실측 결론은 CSS 주석으로 남겨 둔다:
 //  FitAddon 이 부모 폭을 border-box(padding 포함)로 읽고 자기 padding 만 빼므로 정확히 상쇄된다.
