@@ -155,10 +155,13 @@ ok(!/직접 입력해도 돼요/.test(appSheet) && !/설치가 끝나면 눌러 
   '앱: 단계 보조 설명문 2종을 제거했다');
 
 // ── 11. 터미널 폭은 거터를 무조건 확보한다(잘림 > 빈 띠) ──────────────────────
-const tf = read(path.join(PC, 'term-fit.js'));
-ok(/FIT_GUTTER_PX/.test(tf), 'term-fit: 고정 거터 상수가 있다');
-ok(/gutterPx: FIT_GUTTER_PX/.test(pcPane),
-  'PC: _correctFit 이 거터를 넘긴다(clientWidth 가 스크롤바를 제외하는지 믿지 않는다)');
+// ★ 잘림 판정은 **대리 지표가 아니라 실제 rect** 로 한다(네 번째 시도에서 확정).
+//  FitAddon 제안값·viewport.clientWidth·스크롤바 폭 추정은 부모 padding(border-box)·스크롤바
+//  존재 여부·Retina 셀 폭 반올림 때문에 실제와 계속 어긋났다("여유 10px" 인데 잘렸다).
+ok(/getBoundingClientRect\(\)/.test(pcPane) && /xterm-screen/.test(pcPane),
+  'PC: .xterm-screen 실제 rect 와 잘리는 상자(.pane-term) rect 를 비교한다');
+ok(/sc\.right - \(box\.right/.test(pcPane), 'PC: 우변 초과분을 셀 폭으로 나눠 줄인다');
+ok(!/term-fit/.test(pcPane), 'PC: 폐기한 대리 지표 모듈을 다시 참조하지 않는다');
 ok(/setTimeout\([\s\S]{0,120}_fitNow\(\)/.test(pcPane),
   'PC: 채널 개설 후 지연 재검산이 있다(ResizeObserver 는 크기 불변 시 안 울린다)');
 
@@ -167,6 +170,15 @@ ok(/this\._sentCols === cols && this\._sentRows === rows/.test(pcPane),
 
 ok(/\.xterm-viewport::-webkit-scrollbar \{ width: 0/.test(pcCss),
   'PC: 터미널 스크롤바를 두지 않는다(뺄 폭을 맞추는 대신 문제군을 제거 — 되돌리면 잘림 재발)');
+
+// ★ 우측 예약은 **바깥 margin** 으로만 유효하다(안쪽 padding 은 무효 — 실측으로 확인).
+//  FitAddon 이 부모 폭을 border-box(padding 포함)로 읽고 자기 padding 만 빼기 때문에, 안쪽 padding 을
+//  늘리면 열을 그만큼 더 제안해 정확히 상쇄된다. 이 규칙을 모르는 사람이 "padding 으로 통일" 하면
+//  잘림이 조용히 재발한다.
+ok(/\.pane-term \{[^}]*margin-right: 10px/.test(pcCss),
+  'PC: .pane-term 우측 예약이 바깥 margin 이다(안쪽 padding 은 FitAddon 이 상쇄해 무효)');
+ok(/\.pane-term \{[^}]*padding: 4px 0 2px 8px/.test(pcCss),
+  'PC: .pane-term 안쪽 우 padding 은 0(예약을 안쪽에 두지 않는다)');
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

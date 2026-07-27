@@ -372,7 +372,16 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .pane-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 /* 혼합 탭(IDE/프리뷰가 터미널 pane 의 탭으로) 본문 host — showActiveTab 이 display 토글 */
 .pane-mixed { flex: 1; min-height: 0; display: none; flex-direction: column; overflow: hidden; }
-.pane-term { flex: 1; min-height: 0; padding: 4px 2px 2px 8px; overflow: hidden; }
+/* 우측에 **바깥 여백**으로 물리적 공간을 예약한다(사용자 제안 2026-07-27).
+   ⚠ 안쪽 padding 으로 주면 아무 효과가 없다 — 헤드리스 실측으로 확인: FitAddon 은 부모 폭을
+     `getComputedStyle().width`(border-box = padding 포함)로 읽고 자기 element 의 padding 만 빼므로,
+     안쪽 padding 을 12px 늘려도 열을 그만큼 더 제안해 **정확히 상쇄**된다(남는폭 8~14px 불변).
+     바깥 margin 은 element 의 border-box 폭 자체를 줄이므로 FitAddon 의 계산이 정직해지고
+     그 폭은 터미널이 절대 그릴 수 없는 영역이 된다(실측 남는폭 21~26px).
+   이 10px 이 하는 일: 측정 오차(부모 padding 계상·스크롤바 존재·Retina 셀 폭 반올림)가 한 열
+     안쪽이면 그 초과분이 **글자 위가 아니라 빈 띠에** 떨어진다. 잘림은 tmux 히스토리에 영구히
+     남으므로(리플로우 없음) 한 열을 덜 쓰는 쪽이 항상 낫다. */
+.pane-term { flex: 1; min-height: 0; padding: 4px 0 2px 8px; margin-right: 10px; overflow: hidden; }
 .pane-term .xterm { height: 100%; }
 
 /* preview */

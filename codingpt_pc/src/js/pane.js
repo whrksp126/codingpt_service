@@ -15,7 +15,6 @@ import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveAgentBrand } from "./agent-signal.js";
-import { fitCorrection, fitRowsCorrection, FIT_GUTTER_PX } from "./term-fit.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -1645,7 +1644,6 @@ export class PaneView {
   // fit() 결과의 실측 검산 — FitAddon 은 "부모 computed 폭"(border-box 라 padding 포함) 에서
   //  스크롤바만 빼서 cols 를 정하는데, 그 내용을 실제로 보여주는 영역은 `.xterm-viewport` 의
   //  clientWidth(스크롤바 제외)다. 두 값이 다르므로 마지막 열이 스크롤바 아래로 잘린다
-  //  (헤드리스 실측: 폭 1500 → cols 197 = 1490px vs viewport 1481px → 9px 초과). 규칙·근거는 term-fit.js.
   //  ★ 내부 API(`_core._renderService.dimensions`)는 벤더 업그레이드로 사라질 수 있으므로 전부 방어적으로
   //   읽고, 하나라도 비면 **보정을 건너뛴다**(조용히 죽지 않게 = 기존 동작 유지).
   //  ★ 루프 상한 2회. 보정 resize 는 셀 폭을 소수점 셋째 자리에서 다시 계산하므로(canvas.width/cols)
@@ -1653,24 +1651,32 @@ export class PaneView {
   _correctFit() {
     const t = this.term;
     if (!t || !this.termEl) return;
-    for (let pass = 0; pass < 2; pass++) {
+    // ★ **그려진 영역이 보이는 상자를 넘는지**를 직접 잰다(2026-07-27, 네 번째 시도).
+    //  앞선 세 번은 전부 **대리 지표**를 쟀다: FitAddon 의 제안값 → viewport.clientWidth →
+    //  거기서 스크롤바 폭 추정치를 뺀 값. 그 대리 지표들은 부모 padding(border-box 로 폭에 포함),
+    //  스크롤바의 존재/종류, 셀 폭의 Retina 반올림 때문에 실제와 계속 어긋났다
+    //  (마지막 실측: "여유 10px" 인데 화면은 잘렸다).
+    //  `.xterm-screen` 의 실제 rect 우변과 `.pane-term`(overflow:hidden = 잘리는 경계)의 rect
+    //  우변을 비교하면 **사용자가 보는 것과 같은 판정**이 된다. 넘치면 셀 폭 단위로 줄인다.
+    for (let pass = 0; pass < 3; pass++) {
       let cols = t.cols, rows = t.rows;
       try {
-        const dims = t._core?._renderService?.dimensions;
-        const cell = dims?.css?.cell;
-        const vp = this.termEl.querySelector(".xterm-viewport");
-        if (!cell || !vp) return;                       // 벤더 구조 변경 → 보정 없음
-        // 거터를 무조건 확보한다(§term-fit FIT_GUTTER_PX) — `clientWidth` 가 스크롤바를 제외하는지가
-        //  스크롤바 종류·표시 시점에 따라 달라서 측정만으로는 확신할 수 없다. 한 열을 덜 쓰는 쪽이
-        //  잘리는 쪽보다 낫다(잘림은 tmux 히스토리에 영구히 남는다).
-        cols = fitCorrection({ colsFromFit: t.cols, cellW: cell.width, viewportW: vp.clientWidth, gutterPx: FIT_GUTTER_PX });
-        rows = fitRowsCorrection({ rowsFromFit: t.rows, cellH: cell.height, viewportH: vp.clientHeight, gutterPx: FIT_GUTTER_PX });
-        // 진단 로그 — 다음에 또 "우측이 잘린다" 신고가 오면 추측 대신 이 숫자로 판정한다.
-        //  (측정 실패로 보정이 조용히 건너뛰어지는 경우까지 드러난다)
+        const cell = t._core?._renderService?.dimensions?.css?.cell;
+        const screen = this.termEl.querySelector(".xterm-screen");
+        if (!cell || !screen || !cell.width || !cell.height) return; // 벤더 구조 변경 → 보정 없음
+        const box = this.termEl.getBoundingClientRect();
+        const sc = screen.getBoundingClientRect();
+        if (!box.width || !sc.width) return;                          // 레이아웃 미확정 → 다음 기회
+        // 1px 은 반올림 여유(rect 는 소수, 캔버스는 정수 픽셀로 굳는다).
+        const overX = sc.right - (box.right - 1);
+        const overY = sc.bottom - (box.bottom - 1);
+        if (overX > 0) cols = Math.max(2, t.cols - Math.ceil(overX / cell.width));
+        if (overY > 0) rows = Math.max(1, t.rows - Math.ceil(overY / cell.height));
         if (pass === 0) {
-          // 같은 값이 반복되면 남기지 않는다(7초마다 같은 줄이 쌓이면 로그가 쓸모없어진다).
-          const line = `fit pane=${this.id} fitCols=${t.cols} cellW=${cell.width.toFixed(3)} `
-            + `vpW=${vp.clientWidth} vpOff=${vp.offsetWidth} → cols=${cols} rows=${rows}`;
+          // 같은 값이 반복되면 남기지 않는다(같은 줄이 7초마다 쌓이면 로그가 쓸모없어진다).
+          const line = `fit pane=${this.id} fitCols=${t.cols}x${t.rows} cell=${cell.width.toFixed(3)}`
+            + ` box=${box.width.toFixed(1)}x${box.height.toFixed(1)} screen=${sc.width.toFixed(1)}x${sc.height.toFixed(1)}`
+            + ` over=${overX.toFixed(1)},${overY.toFixed(1)} → ${cols}x${rows}`;
           if (line !== this._lastFitLog) { this._lastFitLog = line; api.debugLog(line); }
         }
       } catch (_) { return; }
