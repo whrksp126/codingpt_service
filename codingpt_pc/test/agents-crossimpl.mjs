@@ -165,6 +165,9 @@ ok(/setTimeout\([\s\S]{0,120}_fitNow\(\)/.test(pcPane),
 ok(/this\._sentCols === cols && this\._sentRows === rows/.test(pcPane),
   'PC: 크기가 안 바뀌면 resize 를 보내지 않는다(7초마다 tmux 창 재클레임 = 폰 크기 뺏기)');
 
+ok(/\.xterm-viewport::-webkit-scrollbar \{ width: 0/.test(pcCss),
+  'PC: 터미널 스크롤바를 두지 않는다(뺄 폭을 맞추는 대신 문제군을 제거 — 되돌리면 잘림 재발)');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');
