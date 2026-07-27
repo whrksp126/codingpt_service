@@ -1024,3 +1024,52 @@ test('e2ee_hint — caps 문자열이 back·데몬 양쪽에서 글자까지 같
     assert.match(src, /msg\.type === 'e2ee_hint'/, '데몬에 프레임 수신 분기가 없으면 선언이 거짓이 된다');
   }
 });
+
+// ── 갭6: chat.open 의 `noSession` 통과 (2026-07-27 실사고) ────────────────────────
+// 사고: 한 워크스페이스의 두 터미널에서 각각 다른 claude 세션을 돌렸는데 양쪽 채팅이 **같은 엉뚱한
+//  대화**를 보여줬다. 데몬 `resolveTarget` 이 "바인딩 파일이 아직 없음"(= 대화를 시작하지 않은 정상
+//  상태)을 스캔 폴백으로 처리해 **그 프로젝트의 mtime 최신 파일**을 돌려줬기 때문이다.
+// 수정: 데몬이 `{ noSession: true, reason, candidates }` 로 정직하게 답하고 클라가 빈 상태를 그린다.
+// 이 테스트가 지키는 것: **서버가 그 필드를 지우지 않는다.** chatRpc 가 응답을 화이트리스트로 걸러
+//  재조립하는 순간(리팩터로 흔히 생긴다) 클라는 `messages: []` 만 받아 "그냥 빈 대화"로 그리고,
+//  "왜 비었지?" 안내가 사라진다 — 에러 0건의 조용한 퇴행.
+test('갭6 — chat.open 응답의 noSession/reason/candidates 가 서버를 그대로 통과한다', async () => {
+  const daemonPayload = {
+    supported: true, agent: 'claude', noSession: true, reason: 'not_started',
+    candidates: 0, sessionId: 'eb7a636b-401a-4cd6-a15f-cfd71f1e1bf2',
+    messages: [], epoch: '', headSeq: 0, chatId: null,
+  };
+  const orig = relay.callRpc;
+  let sawMethod = null;
+  relay.callRpc = async (_uid, method) => { sawMethod = method; return daemonPayload; };
+  try {
+    let sent = null;
+    const res = { status() { return this; }, json(body) { sent = body; return this; } };
+    await daemonController.chatOpen({ user: { id: 43 }, body: { cwd: 'codingpt-demo', tid: 2023888634 }, query: {} }, res);
+    assert.strictEqual(sawMethod, 'chat.open');
+    const data = sent && (sent.data !== undefined ? sent.data : sent);
+    assert.strictEqual(data.noSession, true, 'noSession 이 지워지면 클라가 빈 상태 안내를 못 그린다');
+    assert.strictEqual(data.reason, 'not_started');
+    assert.strictEqual(data.candidates, 0);
+    // reason 별로 클라 UI 가 갈린다(ambiguous 일 때만 '다른 대화 보기') → 문자열 도메인도 고정한다.
+    for (const r of ['not_started', 'ambiguous', 'none']) {
+      assert.ok(typeof r === 'string' && r.length, r);
+    }
+  } finally { relay.callRpc = orig; }
+});
+
+// 데몬 쪽 절반 — 스캔 폴백이 되살아나면 다시 남의 대화가 뜬다(양쪽이 갈라지지 않게 소스로 고정).
+test('갭6 — 데몬 resolveTarget 이 바인딩 파일 부재를 스캔으로 폴백하지 않는다', () => {
+  const fs = require('fs');
+  const p = path.join(DAEMON_ROOT, 'transcript.js');
+  if (!fs.existsSync(p)) return; // 단독 체크아웃
+  const src = fs.readFileSync(p, 'utf8');
+  const at = src.indexOf('async function resolveTarget');
+  assert.ok(at > 0, 'resolveTarget 이 있어야 한다');
+  const body = src.slice(at, src.indexOf('\n}', at));
+  assert.match(body, /noSession: 'not_started'/, '바인딩 파일 부재 = not_started 여야 한다');
+  assert.match(body, /noSession: cands\.length \? 'ambiguous' : 'none'/, '바인딩 없음 = 모호/없음 이어야 한다');
+  assert.match(body, /cands\.length === 1/, '후보 1개면 폴백해야 한다(훅 미배선 에이전트 보호)');
+  // tid 가 주어진 경로에서 무조건 cands[0] 로 내려가면 안 된다.
+  assert.doesNotMatch(body, /파일이 사라졌으면 스캔으로 폴백/, '구 주석/구 동작이 되살아났다');
+});

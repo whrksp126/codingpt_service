@@ -27,10 +27,37 @@ export const CHAT = {
   DRAFT_MAX: 4096,         // 컴포저 초안 영속 상한
   SEND_ENTER_DELAY_MS: 90, // paste 후 Enter 분리 전송(TUI 가 paste 종료 마커 전에 처리하는 것 방지)
   PICK_LIMIT: 200,         // 컴포저 `+` 파일 목록에 한 번에 그리는 최대 행수(필터로 좁혀 쓰는 전제)
+  POLL_MS: 4000,           // 캐치업 폴링 주기(push 가 살아 있으면 사실상 no-op)
+  OPEN_FAIL_RETRY_MS: 8000,// 열기 **실패**(오류) 후 재시도 간격
+  NO_SESSION_IDLE_MS: 30000, // 열기 성공 + noSession(정상 상태) 일 때의 느린 재확인 간격
+  NO_SESSION_PROBE_MS: 30000, // 첫 메시지 전송 후 "훅이 바인딩을 만들었는지" 짧게 탐색하는 창
 };
 
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;
+
+// ── `noSession`(대화가 아직 없다) 상태의 재오픈 판정(순수 규칙) ────────────────────────────
+// 데몬 계약(2026-07-27): `chat.open` 이 오류가 아니라 `{ supported:true, noSession:true,
+//   reason:'not_started'|'ambiguous'|'none', candidates }` 를 준다. 즉 **성공 응답**이다.
+//
+// ⚠ 이 함수가 없으면 조용한 퇴행이 난다: 성공이라 `_openFailed` 가 비워지는데 `chatId` 는 null 이라
+//   `_tick` 의 "chatId 없으면 재오픈" 이 폴링 주기(4s)마다 영원히 chat.open 을 때린다. 화면은 정상이고
+//   에러도 없어서 아무도 모른다(원격 PC 면 back 릴레이까지 4초마다 왕복). 그래서 noSession 은
+//   **확정된 상태**로 다루고 의미 있는 트리거에서만 다시 연다:
+//     ① 첫 메시지 전송 직후(훅이 바인딩을 만들 때까지 짧게 = probe 창 안에서는 매 틱)
+//     ② chat_event push 도착 / ③ 탭·터미널 전환(retarget) → 둘은 호출측이 플래그를 지운다(여긴 안 옴)
+//     ④ 그 외에는 느린 재확인(NO_SESSION_IDLE_MS)
+//   `ambiguous` 는 사용자가 목록에서 고를 때까지 서버 상태가 저절로 바뀌지 않으므로 **자동 재시도 0회**.
+/**
+ * @param {{reason:string|null, now:number, lastAt:number, probeUntil?:number}} a
+ * @returns {boolean} 지금 chat.open 을 다시 부를 것인가
+ */
+export function shouldReopenNoSession({ reason, now, lastAt, probeUntil } = {}) {
+  if (!reason) return true;                 // noSession 상태가 아니다 → 기존(실패) 재시도 규칙에 맡긴다
+  if (reason === "ambiguous") return false; // 사용자가 고르기 전까지 바뀔 수 없다
+  if (probeUntil && now < probeUntil) return true;
+  return now - (lastAt || 0) >= CHAT.NO_SESSION_IDLE_MS;
+}
 
 // ── 컴포저 `+` 파일 넣기(순수 규칙) ──────────────────────────────────────────────
 // 여기 있는 이유: 이 규칙들이 **에이전트에게 실제로 전달되는 문자열**을 결정하는데, DOM 안에 묻어 두면

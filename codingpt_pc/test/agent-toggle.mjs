@@ -238,70 +238,98 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
 
 
 {
-  // ── 토글 배치·클릭 생존 계약(사용자 확정 2026-07-27) ────────────────────────
-  //  ★ 위치 계약이 바뀌었다: pane 본문 절대배치 → **메인 영역 헤더(main-top) 우측 끝, 전역 1개**.
-  //    (구 계약은 `.pane-body` 기준이라고 적혀 있었지만 `.pane-body` 에 position 이 없어 실제로는
-  //     `.pane` 기준이었고 30px 짜리 `.pane-head` 를 덮었다 — 사용자 신고 후 라이브 실증.)
-  //  ★ 그리고 이 블록의 진짜 목적은 디자인 토큰이 아니라 **"클릭이 살아 있는가"의 구조적 핀**이다.
-  //    구버전은 매 emit 마다 버튼의 innerHTML 을 다시 써서 자식 SVG 를 교체했고, pane 내부
-  //    mousedown(capture)이 focusPane→emit 을 무조건 발화하므로 mousedown 타깃이 mouseup 전에
-  //    소멸 → WebKit 이 click 을 아예 디스패치하지 않았다(중앙 클릭 3회 무반응 / 모서리 1회 성공으로
-  //    실증). 아래 세 핀이 그 세 조건(노드 보존·글리프 조건부 재작성·불필요 emit 억제)을 고정한다.
+  // ── 토글 배치·클릭 생존 계약(사용자 확정 2026-07-27, 재확정) ────────────────────────
+  //  ★ 위치 = **터미널 pane 본문 안 우측 상단**(탭바 아래, 터미널 내용 위). 한때 앱 헤더(main-top)로
+  //    옮긴 판본이 있었지만 그건 사용자 요구("메인 영역 기준 우측 상단")를 앱 헤더로 **오독**한 것이다.
+  //  ★ 되돌리면서 과거 사고 2건이 함께 부활하지 않도록 아래 핀이 두 조건을 각각 고정한다.
+  //    ① 배치: 구버전은 주석만 `.pane-body` 기준이었고 실제로는 `.pane` 기준(= `.pane-body` 에
+  //       position 없음)이라 top:6px 이 30px 짜리 `.pane-head` 안으로 들어가 탭바를 덮었다.
+  //       → `.pane-body { position: relative }` 가 이 계약의 절반이다.
+  //    ② 클릭 영구 사문화: 매 렌더마다 버튼의 innerHTML 을 다시 써서 자식 SVG 를 교체했고, pane 내부
+  //       mousedown(capture)이 focusPane→emit 을 발화하므로 mousedown 타깃이 mouseup 전에 소멸 →
+  //       WebKit 이 click 을 아예 디스패치하지 않았다(중앙 3회 무반응 / 모서리 1회 성공으로 실증).
+  //       → 노드 보존(숨김=클래스)·글리프 조건부 재작성·불필요 emit 억제 세 조건을 모두 본다.
   const MT = path.resolve(here, "../../../codingpt_app/src/workspace/chat/ModeToggle.tsx");
   const css = readFileSync(path.resolve(here, "../src/styles.css"), "utf8");
   const wvJs = readFileSync(path.resolve(here, "../src/js/workspace-view.js"), "utf8");
   const stateJs = readFileSync(path.resolve(here, "../src/js/state.js"), "utf8");
   const paneJs2 = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
   const num = (re, s) => { const m = re.exec(s); return m ? Number(m[1]) : null; };
+  const rule = (sel) => {
+    const i = css.indexOf(sel + " {");
+    return i < 0 ? "" : css.slice(i, css.indexOf("}", i));
+  };
 
-  // (1) 배치 — main-top 에 붙고, pane 본문 절대배치 흔적이 남아 있지 않다.
-  ok("PC 토글은 main-top 에 붙는다(pane 본문 절대배치 폐기)",
-    /mainTop\.append\(mtDyn, buildModeToggle\(\)\)/.test(wvJs) && !/\.pane-mode-toggle/.test(css));
+  // (1) 배치 — pane 본문 안 절대배치 + 오프셋 부모 계약(`.pane-body` 가 컨테이닝 블록).
+  const tgRule = rule(".pane-mode-toggle");
+  ok("PC 토글은 pane 본문 안 우측 상단 절대배치",
+    /position:\s*absolute/.test(tgRule) && /top:\s*\d/.test(tgRule) && /right:\s*\d/.test(tgRule), tgRule.replace(/\s+/g, " "));
+  ok("★ `.pane-body` 에 position: relative(없으면 토글이 탭바 `.pane-head` 를 덮는다 — 사고 ①)",
+    /\.pane-body \{[^}]*position:\s*relative/.test(css));
+  ok("토글 노드는 pane 본문에 붙는다(this.body)",
+    /_buildModeToggle\(\)\s*\{[\s\S]{0,900}?this\.body\.appendChild\(b\)/.test(paneJs2));
+  ok("유휴에도 테두리+불투명 배경이 있는 컨트롤 형태(추가 버튼과 구별 · 터미널 글자 위에서 읽힘)",
+    /border:\s*1px solid var\(--border-ctrl\)/.test(tgRule) && /background:\s*var\(--elevated2\)/.test(tgRule));
+  ok("⌘F 검색 중에는 토글을 숨긴다(좌표 충돌 — search-open 예외 복원)",
+    /\.pane-body\.search-open \.pane-mode-toggle\s*\{[^}]*display:\s*none/.test(css)
+    && /classList\.add\("search-open"\)/.test(paneJs2));
+
+  // (2) 노드 보존 — 숨김은 클래스로만(remove 도 innerHTML 교체와 같은 click 미발화를 만든다).
   ok("PC 토글 숨김은 remove 가 아니라 클래스로만(노드 보존)",
-    /\.mt-mode\.hidden\s*\{[^}]*display:\s*none/.test(css)
-    && /classList\.toggle\("hidden"/.test(wvJs));
-  ok("main-top 재렌더는 mtDyn 만 비운다(토글 노드 소멸 금지)",
+    /\.pane-mode-toggle\.hidden\s*\{[^}]*display:\s*none/.test(css)
+    && /classList\.toggle\("hidden"/.test(paneJs2));
+  ok("토글 노드는 pane 생성 시 1회만 만든다(재생성 금지)",
+    (paneJs2.match(/_buildModeToggle\(\)/g) || []).length === 2   // 정의 1 + 호출 1
+    && /this\._buildChat\(\);\n\s*this\._buildModeToggle\(\);/.test(paneJs2));
+  ok("main-top 재렌더는 mtDyn 만 비운다(헤더 상주 노드 소멸 금지 핀 유지)",
     /mtDyn\.innerHTML = ""/.test(wvJs) && !/mainTop\.innerHTML = ""/.test(wvJs));
 
-  // (2) 글리프 조건부 재작성 — 이 가드가 사라지면 클릭이 다시 죽는다.
-  const syncAt = wvJs.indexOf("export function syncModeToggle()");
-  const syncBody = syncAt < 0 ? "" : wvJs.slice(syncAt, wvJs.indexOf("\n}", syncAt));
+  // (3) 글리프 조건부 재작성 — 이 가드가 사라지면 클릭이 다시 죽는다(②의 직접 원인).
+  const syncAt = paneJs2.indexOf("_syncModeToggle() {");
+  const syncBody = syncAt < 0 ? "" : paneJs2.slice(syncAt, paneJs2.indexOf("\n  }", syncAt));
   ok("글리프는 바뀔 때만 innerHTML 재작성(mousedown 타깃 소멸 방지)",
-    syncAt > 0 && /if \(mtModeGlyph !== want\)/.test(syncBody)
+    syncAt > 0 && /if \(this\._modeGlyph !== want\)/.test(syncBody)
     && (syncBody.match(/innerHTML/g) || []).length === 1, syncBody.replace(/\s+/g, " ").slice(0, 240));
-  ok("syncModeToggle 은 토글 노드를 remove 하지 않는다", syncAt > 0 && !/\.remove\(\)/.test(syncBody));
+  ok("_syncModeToggle 은 토글 노드를 remove 하지 않는다", syncAt > 0 && !/\.remove\(\)/.test(syncBody));
 
-  // (3) 불필요 emit 억제 — pane 클릭마다 전체 재렌더가 돌면 위 가드의 여유가 사라진다.
+  // (4) 불필요 emit 억제 — pane 클릭마다 전체 재렌더가 돌면 위 가드의 여유가 사라진다.
   const fpAt = stateJs.indexOf("export function focusPane(");
   const fpBody = fpAt < 0 ? "" : stateJs.slice(fpAt, stateJs.indexOf("\n}", fpAt));
   ok("focusPane 은 포커스 무변화면 emit 하지 않는다",
     fpAt > 0 && /if \(w\.focusId === paneId\) return;/.test(fpBody), fpBody.replace(/\s+/g, " ").trim());
 
-  // (4) 판정과 그리기의 분리 — pane 은 DOM 을 만들지 않는다(전역 1개라는 사실을 코드로 고정).
-  ok("pane.js 는 토글 DOM 을 만들지 않는다(판정만 = modeToggleState)",
-    /modeToggleState\(\)\s*\{/.test(paneJs2) && !/_modeBtn/.test(paneJs2));
+  // (5) 소유 관계 — 토글 DOM 은 pane 소유. workspace-view 는 "전부 한 번 맞춰라"만 한다
+  //     (헤더 전역 1개 판본의 잔재가 남아 있으면 두 벌이 동시에 그려진다).
+  ok("workspace-view 는 토글 DOM 을 만들지 않는다(헤더 전역 1개 판본 잔재 없음)",
+    !/mt-mode/.test(wvJs) && !/buildModeToggle/.test(wvJs) && !/\.mt-mode/.test(css));
+  ok("syncModeToggle 은 모든 pane 을 순회해 맞춘다(빠뜨린 pane = 사라진 기능)",
+    /export function syncModeToggle\(\) \{\s*for \(const \[, p\] of panes\) p\._syncModeToggle\?\.\(\);/.test(wvJs));
+  ok("판정은 여전히 modeToggleState(공용 규칙)에서만 온다",
+    /modeToggleState\(\)\s*\{/.test(paneJs2) && /const st = this\.modeToggleState\(\);/.test(syncBody));
 
-  // (5) 3플랫폼 동일 디자인 — 글리프 크기만 대조(오프셋은 헤더 배치가 되어 의미가 없어졌다).
+  // (6) 3플랫폼 동일 디자인 — 글리프 크기만 대조(코너 오프셋은 플랫폼별 헤더/본문 차이로 폐기).
   if (!existsSync(MT)) console.log("SKIP 토글 글리프 크기 대조(앱 ModeToggle 없음)");
   else {
     const mt = readFileSync(MT, "utf8");
-    // ★ 글리프 픽셀을 앱=PC 로 못 박지 않는다: 두 헤더의 다른 버튼 크기가 애초에 다르다
-    //  (PC 추가 버튼 16 / 앱 19). 억지로 같은 숫자로 맞추면 각자 헤더 줄에서 어긋난다.
-    //  진짜 불변식은 **"토글 글리프 = 그 플랫폼 헤더 추가 버튼과 같은 크기"** 다(줄 정렬).
-    const glyphLine = /mtModeBtn\.innerHTML[^\n]*/.exec(wvJs)?.[0] || "";
+    // ★ 글리프 픽셀을 앱=PC 로 못 박지 않는다: 두 플랫폼의 다른 버튼 크기가 애초에 다르다
+    //  (PC 추가 버튼 16 / 앱 19). 억지로 같은 숫자로 맞추면 각자 줄에서 어긋난다.
+    const glyphLine = /b\.innerHTML = st\.chat[^\n]*/.exec(paneJs2)?.[0] || "";
     const addsGlyph = num(/mkBtn\(icons\.terminal[\s\S]*?size: (\d+)/, wvJs)
       ?? num(/b\.innerHTML = icon\(\{ size: (\d+) \}\)/, wvJs);
     eq("PC 토글 글리프 = PC 헤더 추가 버튼과 같은 크기", num(/size: (\d+)/, glyphLine), addsGlyph);
     ok("토글 두 글리프가 같은 크기(터미널/채팅)", (glyphLine.match(/size: (\d+)/g) || []).length === 2
       && new Set(glyphLine.match(/size: \d+/g)).size === 1, glyphLine.trim());
-    ok("chat 활성 색은 양쪽 다 accent 토큰", /\.pane-ctrl\.active\s*\{[^}]*var\(--accent\)/.test(css)
-      && /C\.accent/.test(mt));
-    // 앱도 pane 오버레이가 아니라 헤더에 있어야 한다(같은 라운드에 함께 옮겼다).
+    ok("chat 활성 색은 양쪽 다 accent 토큰",
+      /\.pane-mode-toggle\.active\s*\{[^}]*var\(--accent\)/.test(css) && /C\.accent/.test(mt));
+    // 앱 쪽 배치는 앱 리포에서 별도로 옮기는 중이므로 **여기서 실패시키지 않는다**(리포 경계).
+    //  대신 지금 어디서 렌더되는지 출력해 한쪽만 되돌리는 드리프트를 눈에 보이게 한다.
     const pv = path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx");
     const wv = path.resolve(here, "../../../codingpt_app/src/workspace/WorkspaceView.tsx");
     if (existsSync(pv) && existsSync(wv)) {
-      ok("앱 토글도 pane 이 아니라 워크스페이스 헤더에서 렌더된다",
-        !/<ModeToggle/.test(readFileSync(pv, "utf8")) && /<ModeToggle/.test(readFileSync(wv, "utf8")));
+      const inPane = /<ModeToggle/.test(readFileSync(pv, "utf8"));
+      const inHeader = /<ModeToggle/.test(readFileSync(wv, "utf8"));
+      ok("앱도 ModeToggle 을 어딘가에서 렌더한다(전부 사라지면 기능 소실)", inPane || inHeader);
+      console.log(`INFO 앱 ModeToggle 렌더 위치: PaneView=${inPane} WorkspaceView=${inHeader} (PC=pane 본문)`);
     }
   }
 }

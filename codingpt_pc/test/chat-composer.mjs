@@ -96,5 +96,66 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     (/placeholder="([^"]*)"/.exec(comp)?.[1] || "").length <= 12, /placeholder="([^"]*)"/.exec(comp)?.[1]);
 }
 
+// ── 6. `noSession`(대화가 아직 없다) — 빈 상태 + **폴링 폭주 방지**(실행 검증) ─────────────
+// 데몬 계약(2026-07-27): `chat.open` 이 오류가 아니라 성공 응답으로
+//   `{ supported:true, noSession:true, reason:'not_started'|'ambiguous'|'none', candidates }` 를 준다.
+// ⚠ 여기가 조용한 퇴행의 자리다: 성공이라 `_openFailed` 가 비는데 `chatId` 는 null 이라, 아무 가드가
+//   없으면 폴링 틱(4s)마다 chat.open 을 영원히 때린다(화면은 정상 · 에러 0 · 원격이면 릴레이까지 왕복).
+//   그래서 재오픈 판정을 순수 함수로 빼고 **호출 횟수를 세어** 검증한다(소스 정규식으로는 안 잡힌다).
+{
+  const R = M.shouldReopenNoSession;
+  const T0 = 1_000_000;
+  eq("noSession 이 아니면 기존 규칙에 맡긴다(true)", R({ reason: null, now: T0, lastAt: 0 }), true);
+  eq("ambiguous 는 사용자가 고르기 전까지 자동 재시도 0", R({ reason: "ambiguous", now: T0 + 9e6, lastAt: T0 }), false);
+  eq("not_started 는 직후엔 재시도하지 않는다", R({ reason: "not_started", now: T0 + 4000, lastAt: T0 }), false);
+  eq("not_started 는 느린 간격(30s) 뒤에 한 번 재확인", R({ reason: "not_started", now: T0 + 30000, lastAt: T0 }), true);
+  eq("전송 직후 탐색 창 안에서는 매 틱 재시도(훅 바인딩 순간을 잡는다)",
+    R({ reason: "not_started", now: T0 + 4000, lastAt: T0, probeUntil: T0 + 30000 }), true);
+  eq("탐색 창이 지나면 다시 느린 간격으로", R({ reason: "not_started", now: T0 + 31000, lastAt: T0 + 30000, probeUntil: T0 + 30000 }), false);
+  eq("ambiguous 는 탐색 창이 열려 있어도 재시도하지 않는다(서버 상태가 바뀔 수 없다)",
+    R({ reason: "ambiguous", now: T0 + 4000, lastAt: T0, probeUntil: T0 + 30000 }), false);
+
+  // ★ 호출 횟수 — 가짜 시계로 10분(4초 × 150틱)을 돌려 실제 재오픈 횟수를 센다.
+  const countReopens = (reason, { probeMs = 0 } = {}) => {
+    let now = T0, lastAt = T0, calls = 0;
+    const probeUntil = probeMs ? T0 + probeMs : 0;
+    for (let i = 0; i < 150; i++) {
+      now += M.CHAT.POLL_MS;
+      if (R({ reason, now, lastAt, probeUntil })) { calls += 1; lastAt = now; } // 재오픈하면 기준점 갱신
+    }
+    return calls;
+  };
+  const naive = 150; // 가드가 없을 때(매 틱 chat.open)
+  const notStarted = countReopens("not_started");
+  ok(`not_started 10분간 재오픈 ${notStarted}회(가드 없으면 ${naive}회)`, notStarted > 0 && notStarted <= 21, String(notStarted));
+  eq("ambiguous 10분간 재오픈 0회", countReopens("ambiguous"), 0);
+  const probed = countReopens("not_started", { probeMs: 30000 });
+  ok(`전송 직후 탐색 창에서는 촘촘히(10분 총 ${probed}회 = 창 안 ~7 + 이후 느린 ${notStarted}회 급)`,
+    probed > notStarted && probed <= notStarted + 8 && probed < naive / 3, String(probed));
+  eq("noSession 아님(정상 대화) = 판정이 개입하지 않는다", countReopens(null), 150);
+
+  const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
+  const tick = cv.slice(cv.indexOf("  _tick() {"), cv.indexOf("  async _catchUp("));
+  ok("_tick 은 noSession 게이트를 **_open 보다 먼저** 통과시킨다",
+    /shouldReopenNoSession\(\{/.test(tick) && tick.indexOf("shouldReopenNoSession") < tick.indexOf("this._open()"), tick.replace(/\s+/g, " ").slice(0, 200));
+  ok("noSession 은 오류 배너가 아니라 빈 상태 본문을 그린다",
+    /if \(r && r\.noSession\)/.test(cv) && /this\._renderBlank\(\)/.test(cv));
+  ok("빈 상태는 짧은 인사 한 줄(설명 문단 금지)", /무엇이든 요청하세요/.test(cv));
+  ok("보조 액션 `다른 대화 보기` 는 ambiguous 에서만 나온다",
+    /if \(this\._noSession === "ambiguous"\)[\s\S]{0,300}다른 대화 보기/.test(cv));
+  ok("고른 세션은 탭 객체에 기억한다(영속·탭 이동 승계)",
+    /setSessionPick\?\.\(sid\)/.test(cv) && /getSessionPick\?\.\(\)/.test(cv));
+  ok("첫 메시지 전송이 탐색 창을 연다(전송 → 재오픈 경로)",
+    /if \(this\._noSession\) this\._probeUntil = Date\.now\(\) \+ CHAT\.NO_SESSION_PROBE_MS;/.test(cv));
+  ok("chat_event push 는 noSession 확정을 해제한다(트리거 ②)",
+    /_onPush\(frame\) \{[\s\S]{0,400}if \(this\._noSession\) \{/.test(cv));
+  // ★ 그 트리거가 **도달 가능**해야 한다: noSession 뷰는 chatId 가 null 이라 chatId 매칭으로는 절대
+  //   배달되지 않는다 → sessionId 라우팅이 없으면 위 핀은 죽은 코드를 지키는 셈이 된다.
+  ok("push 라우팅이 noSession 뷰에도 닿는다(sessionId 매칭)",
+    /!v\._chatId && v\._noSession && frame\.sessionId && v\._sessionId === frame\.sessionId/.test(cv));
+  ok("api 에 chatSessions 래퍼가 있다(목록 RPC)",
+    /chatSessions: \(q\) =>/.test(readFileSync(path.resolve(here, "../src/js/api.js"), "utf8")));
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

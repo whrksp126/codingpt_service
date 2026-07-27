@@ -582,11 +582,56 @@ test('noteHook / lookupBind — 훅 좌표가 chat.open 의 P0 경로가 된다'
   assert.strictEqual(fs.statSync(path.join(ROOT, '.codingpt', 'chat-bind.json')).mode & 0o777, 0o600);
 });
 
-test('chat.open — 바인딩 없으면 슬러그 스캔 최신으로 폴백(P2, 훅 없이도 동작)', async () => {
+// ★★ 2026-07-27 실사고 회귀 — "터미널마다 다른 claude 세션인데 채팅이 둘 다 엉뚱한 같은 대화"
+//   구 동작: tid 가 있어도 바인딩이 없거나 바인딩 파일이 없으면 **슬러그 스캔 최신**으로 폴백했다.
+//   그래서 (a) claude 를 막 띄워 트랜스크립트가 아직 없는 터미널과 (b) 훅이 안 돈 터미널이 모두
+//   "그 프로젝트의 mtime 최신 파일" = **남의 대화**를 받았다. 에러도 로그도 없다(사용자 기기 실측 확정).
+//   새 계약: 남의 대화를 보여주는 것보다 아무것도 안 보여주는 것이 낫다 → noSession 으로 정직하게 답한다.
+test('chat.open — 바인딩 파일이 아직 없으면 not_started(남의 대화로 폴백 금지)', async () => {
+  const ws = fakeWs();
+  // 훅은 세션을 알려줬지만 claude 가 아직 메시지를 안 써서 파일이 없는 상태(가장 흔한 경우).
+  T.noteHook({ sessionId: 'never-written', cwd: WS, cwdRel: 'ws', tid: 4242, event: 'session_start' });
+  const open = await T.handle('chat.open', { cwd: 'ws', tid: 4242 }, ws);
+  assert.strictEqual(open.noSession, true);
+  assert.strictEqual(open.reason, 'not_started');
+  assert.strictEqual(open.sessionId, 'never-written');
+  assert.deepStrictEqual(open.messages, []);
+  assert.strictEqual(open.chatId, null);
+  // ★ 핵심: 어떤 파일도 열지 않았다 = 다른 세션의 tail 이 생기지 않았다.
+  assert.strictEqual(T._internals.tails.size, 0);
+});
+
+test('chat.open — 바인딩 없고 후보 여러 개면 ambiguous(사용자에게 고르게 한다)', async () => {
   const ws = fakeWs();
   const open = await T.handle('chat.open', { cwd: 'ws', tid: 9999999 }, ws);
-  assert.strictEqual(open.source, 'scan');
+  assert.strictEqual(open.noSession, true);
+  assert.strictEqual(open.reason, 'ambiguous');
+  assert.ok(open.candidates >= 2, 'candidates=' + open.candidates);
+  assert.strictEqual(T._internals.tails.size, 0);
+});
+
+test('chat.open — 후보가 정확히 1개면 그것으로 폴백(모호하지 않으므로 안전)', async () => {
+  const ws = fakeWs();
+  // 후보가 1개뿐인 별도 워크스페이스를 만든다(훅 미배선 에이전트도 채팅이 되어야 한다).
+  const soloWs = path.join(ROOT, 'solo');
+  fs.mkdirSync(soloWs, { recursive: true });
+  const dir = T.projectDirOf(soloWs);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'only-one.jsonl'),
+    JSON.stringify({ type: 'user', sessionId: 'only-one', timestamp: TS, message: { role: 'user', content: '혼자' } }) + '\n');
+  const open = await T.handle('chat.open', { cwd: 'solo', tid: 777 }, ws);
+  assert.strictEqual(open.noSession, undefined);
+  assert.strictEqual(open.source, 'scan-unique');
   await T.handle('chat.close', { chatId: open.chatId });
+});
+
+test('noteHook — tid 를 모르면 바인딩을 쓰지 않는다(조회 불가한 死 엔트리 금지)', () => {
+  const r = T.noteHook({ sessionId: 's1', cwd: WS, cwdRel: 'ws', tid: null, event: 'session_start' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.reason, 'no_tid');
+  const j = JSON.parse(fs.readFileSync(path.join(ROOT, '.codingpt', 'chat-bind.json'), 'utf-8'));
+  // 빈 tid 키('ws|')가 생기면 lookupBind(ws, 실제tid) 가 절대 매치하지 못하는데 "바인딩됨" 착각을 만든다.
+  assert.ok(!Object.keys(j.binds).some((k) => k.endsWith('|')), Object.keys(j.binds).join(','));
 });
 
 test('pruneBinds — 30일 초과 바인딩 정리', () => {

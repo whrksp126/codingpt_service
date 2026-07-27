@@ -15,6 +15,7 @@ import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible } from "./agent-signal.js";
+import { fitCorrection, fitRowsCorrection } from "./term-fit.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -762,6 +763,51 @@ export class PaneView {
     this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
     if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
     this._buildChat();
+    this._buildModeToggle();
+  }
+
+  // ── TUI ↔ Chat 토글(이 pane 본문 안, 우측 상단) ──────────────────────────────
+  // 사용자 확정(2026-07-27): 토글은 **터미널 pane 본문 안 우측 상단**(탭바 아래, 터미널 내용 위)이다.
+  //  "메인 영역"을 앱 헤더로 읽어 `.main-top` 으로 옮겼던 것은 오독이었다 → 되돌린다.
+  //
+  // ★ 과거 사고 2건을 이 구조가 막는다(둘 다 라이브 실증 — docs/구현설계-2026-07-25/15).
+  //  ① 배치: 구버전 주석은 `.pane-body` 기준이라 적혀 있었지만 `.pane-body` 에 `position` 이 없어 실제
+  //     오프셋 부모는 `.pane` 이었고, `top:6px` 이 30px 짜리 `.pane-head`(탭바) 안으로 들어가 탭을 덮었다.
+  //     → `styles.css` 의 `.pane-body { position: relative }` 가 이 계약의 절반이다(지우면 재발).
+  //  ② 클릭 영구 사문화: 매 렌더마다 버튼의 innerHTML 을 다시 써서 자식 SVG 를 교체했고, pane 내부
+  //     mousedown(capture)이 `focusPane()`→`emit()` 을 발화하므로 mousedown 타깃이 mouseup 전에 소멸 →
+  //     WebKit 이 `click` 을 아예 디스패치하지 않았다(중앙 3회 무반응 / 모서리 1회 성공으로 실증).
+  //     → 이 노드는 **한 번만 만들고 절대 remove 하지 않는다**(숨김은 `.hidden` 클래스), 글리프는
+  //       `_modeGlyph !== want` 일 때만 다시 쓴다. `focusPane` 의 "무변화면 emit 생략" 가드도 유지.
+  _buildModeToggle() {
+    const b = document.createElement("button");
+    b.className = "pane-mode-toggle hidden";
+    b.type = "button";
+    this._modeGlyph = "";
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.toggleMode();
+    });
+    this._modeBtn = b;
+    this.body.appendChild(b);
+  }
+
+  // 노출/모드 상태를 버튼에 반영. 판정은 `modeToggleState()`(정본 = agent-signal.js)가 전담한다.
+  _syncModeToggle() {
+    const b = this._modeBtn;
+    if (!b) return;
+    const st = this.modeToggleState();
+    b.classList.toggle("hidden", !st.on);
+    if (!st.on) return;
+    b.classList.toggle("active", st.chat);
+    b.title = st.chat ? "터미널(TUI) 보기" : "채팅으로 보기";
+    // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다 — ② 항).
+    //  크기 16 = 워크스페이스 헤더 추가 버튼과 같은 값(앱은 자기 헤더 기준 19).
+    const want = st.chat ? "term" : "chat";
+    if (this._modeGlyph !== want) {
+      this._modeGlyph = want;
+      b.innerHTML = st.chat ? icons.terminal({ size: 16 }) : icons.chat({ size: 16 });
+    }
   }
 
   // ── Chat 모드 본문(터미널 탭의 하위 모드 — 새 pane kind 가 아니다) ──
@@ -808,18 +854,10 @@ export class PaneView {
     return !!(tab && isTermTab(tab) && tab.mode === "chat");
   }
 
-  // TUI ↔ Chat 토글의 **판정만** — 그리기는 main-top(workspace-view.js `syncModeToggle`)이 한다.
-  //
-  // 이 함수는 DOM 을 만들지 않는다. 토글이 pane 본문에 절대배치돼 있던 구버전에서 두 가지가 동시에
-  // 깨졌기 때문이다(둘 다 2026-07-27 라이브 실증):
-  //  ① 배치: `.pane-body` 에 `position` 이 없어 오프셋 부모가 `.pane` 이었고, `top:6px` 이 30px 짜리
-  //     `.pane-head` 안으로 들어가 탭바를 덮었다(사용자 신고: "pane 위로 올라간다").
-  //  ② 클릭 영구 사문화: 매 `emit` 마다 버튼의 `innerHTML` 을 다시 써서 **자식 SVG 를 교체**했고,
-  //     pane 내부 mousedown(capture)이 `focusPane()`→`emit()` 을 무조건 발화하므로, mousedown 타깃인
-  //     그 SVG 가 mouseup 전에 소멸해 WebKit 이 `click` 을 아예 디스패치하지 않았다. 버튼의 **패딩**을
-  //     정확히 맞춘 클릭만 살아남았다(실증: 중앙 3회=무반응 / 모서리 1회=즉시 전환).
-  // → 교훈이자 불변식: **매 렌더마다 자식 노드를 교체하는 버튼은 클릭할 수 없다.** 새 구현은 노드를
-  //    보존하고 글리프가 실제로 바뀔 때만 다시 쓴다(workspace-view.js `syncModeToggle` 참조).
+  // TUI ↔ Chat 토글의 **노출/모드 판정**(그리기는 `_syncModeToggle` — 같은 pane 안이지만 분리해 둔다:
+  //  판정은 앱과 동치 검증되는 순수 규칙, 그리기는 DOM 수명 규율이라 성격이 다르다).
+  //  이 판정 경로(resolveToggleVisible/resolveAgentPresence)는 `test/agent-toggle.mjs` 가 앱과
+  //  69,300 조합 동치로 고정한다 — 인라인 규칙으로 되돌리면 그 즉시 터진다.
   modeToggleState() {
     if (this.node.kind !== "terminal") return { on: false, chat: false };
     const tab = this.node.tabs?.[this.node.active];
@@ -851,7 +889,7 @@ export class PaneView {
     if ((tab.mode || "tui") === next) return;
     tab.mode = next;
     if (next === "tui") delete tab.mode; // 기본값은 저장하지 않는다(하위호환 = 미지정도 tui)
-    this.ctx.syncModeToggle?.();
+    this._syncModeToggle();
     this.buildHead();
     this.showActiveTab();
     // TUI 복귀 시 fit 은 showActiveTab 이 이미 1회 수행한다(여기서 또 부르면 리사이즈가 2회 나간다 —
@@ -1172,7 +1210,7 @@ export class PaneView {
     // ★ Chat 모드에서는 fit 을 부르지 않는다 — fit → ptyResize → tmux window 리사이즈가 되고,
     //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
     if (isT && !chat) this._fitNow();
-    this.ctx.syncModeToggle?.();
+    this._syncModeToggle();
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나
@@ -1203,6 +1241,19 @@ export class PaneView {
       exitChat: () => {
         const t = this.node.tabs?.[this.node.active];
         if (t) this.setMode(t, "tui");
+      },
+      // 사용자가 "다른 대화 보기"로 고른 세션 — **탭 객체에 얹는다**(tab.mode/chatDraft 와 같은 규율):
+      //  pc-ui.json 영속 + 탭을 다른 pane 으로 옮겨도 객체 참조가 따라가므로 승계가 자동이다.
+      getSessionPick: () => {
+        const t = this.node.tabs?.[this.node.active];
+        return (t && t.chatSession) || null;
+      },
+      setSessionPick: (sid) => {
+        const t = this.node.tabs?.[this.node.active];
+        if (!t || !isTermTab(t)) return;
+        if (sid) t.chatSession = String(sid);
+        else delete t.chatSession;
+        this.ctx.persist?.();
       },
       // 서버 경로(chat.input)가 막혔을 때의 폴백 — 이 pane 은 이미 그 터미널에 붙어 있으므로
       //  같은 규칙(bracketed paste + 지연 Enter)으로 로컬 채널로 보낸다. 같은 claude 세션이다.
@@ -1511,8 +1562,35 @@ export class PaneView {
     try {
       this.fit.fit();
     } catch (_) {}
+    this._correctFit();
     const { cols, rows } = this.term;
     if (cols && rows) this._resize(cols, rows);
+  }
+
+  // fit() 결과의 실측 검산 — FitAddon 은 "부모 computed 폭"(border-box 라 padding 포함) 에서
+  //  스크롤바만 빼서 cols 를 정하는데, 그 내용을 실제로 보여주는 영역은 `.xterm-viewport` 의
+  //  clientWidth(스크롤바 제외)다. 두 값이 다르므로 마지막 열이 스크롤바 아래로 잘린다
+  //  (헤드리스 실측: 폭 1500 → cols 197 = 1490px vs viewport 1481px → 9px 초과). 규칙·근거는 term-fit.js.
+  //  ★ 내부 API(`_core._renderService.dimensions`)는 벤더 업그레이드로 사라질 수 있으므로 전부 방어적으로
+  //   읽고, 하나라도 비면 **보정을 건너뛴다**(조용히 죽지 않게 = 기존 동작 유지).
+  //  ★ 루프 상한 2회. 보정 resize 는 셀 폭을 소수점 셋째 자리에서 다시 계산하므로(canvas.width/cols)
+  //   한 번 더 검산할 여지만 주고, 변화가 없으면 즉시 끝낸다(무한 루프 구조적 불가).
+  _correctFit() {
+    const t = this.term;
+    if (!t || !this.termEl) return;
+    for (let pass = 0; pass < 2; pass++) {
+      let cols = t.cols, rows = t.rows;
+      try {
+        const dims = t._core?._renderService?.dimensions;
+        const cell = dims?.css?.cell;
+        const vp = this.termEl.querySelector(".xterm-viewport");
+        if (!cell || !vp) return;                       // 벤더 구조 변경 → 보정 없음
+        cols = fitCorrection({ colsFromFit: t.cols, cellW: cell.width, viewportW: vp.clientWidth });
+        rows = fitRowsCorrection({ rowsFromFit: t.rows, cellH: cell.height, viewportH: vp.clientHeight });
+      } catch (_) { return; }
+      if (cols === t.cols && rows === t.rows) return;   // 더 줄일 것 없음
+      try { t.resize(cols, rows); } catch (_) { return; }
+    }
   }
 
   // 프리뷰 webview 위치/가시성을 rAF 로 DOM host 에 맞춰 동기화(항상 최상단이라 위치 추적 필요).

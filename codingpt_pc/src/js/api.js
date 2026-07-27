@@ -197,6 +197,10 @@ export const api = {
   // ── 트랜스크립트 채팅(기능5) — 데몬 JSONL 리더 RPC 의 back 프록시 ──
   //  hostDeviceId 를 실으면 그 PC 로 라우팅(멀티 PC). 미지정이면 활성 러너.
   //  라이브 델타는 여기가 아니라 ui-channel WS 의 chat_event(팬아웃) 로 온다. 캐치업은 chatSince pull.
+  // 후보 대화 목록 — `chat.open` 이 `noSession:'ambiguous'`(바인딩 없음 + 후보 2개 이상)를 줄 때
+  //  사용자가 직접 고르는 경로. 어느 대화인지 단정할 수 없으면 **남의 대화를 보여주지 않는다**가 계약.
+  chatSessions: (q) =>
+    invoke("back_api", { method: "GET", path: "/api/daemon/chat/sessions?" + qs(q), body: null, timeoutSecs: 25 }),
   chatOpen: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/open", body: body || {}, timeoutSecs: 30 }),
   chatSince: (q) =>
     invoke("back_api", { method: "GET", path: "/api/daemon/chat/since?" + qs(q), body: null, timeoutSecs: 25 }),

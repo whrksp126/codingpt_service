@@ -19,7 +19,7 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
-  relToRoot, filterFiles, insertPathAt, flattenFiles,
+  relToRoot, filterFiles, insertPathAt, flattenFiles, shouldReopenNoSession,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -31,7 +31,13 @@ const _live = new Set();
 //  epoch 리셋 판정은 control.kind==='epoch_reset' 과 epoch 문자열 비교 양쪽으로 한다.
 export function applyChatEvent(frame) {
   if (!frame || !frame.chatId) return;
-  for (const v of _live) if (v._chatId === frame.chatId) v._onPush(frame);
+  for (const v of _live) {
+    if (v._chatId === frame.chatId) { v._onPush(frame); continue; }
+    // ★ 아직 대화가 없는(noSession) 뷰는 chatId 가 null 이라 위 조건으로 **절대** 매칭되지 않는다.
+    //   훅이 알려준 sessionId(reason='not_started' 에 실려 온다)가 같으면 "이 터미널의 대화가 방금
+    //   시작됐다"는 신호다 → 재오픈 트리거(②). 이 줄이 없으면 그 트리거는 도달 불가 죽은 코드가 된다.
+    if (!v._chatId && v._noSession && frame.sessionId && v._sessionId === frame.sessionId) v._onPush(frame);
+  }
 }
 
 // 지금 화면에 보이는 Chat 뷰들의 스코프 — approvals.js 가 중복 카드를 피하는 데 사용.
@@ -71,6 +77,11 @@ export class ChatView {
     this._optSeq = -1;
     this._unread = 0;
     this._truncated = false;
+    // noSession(대화가 아직 없다) — 오류가 아니라 **확정된 상태**. 값은 reason 문자열이거나 null.
+    //  이 플래그가 서 있으면 `_tick` 의 기본 재오픈을 건너뛴다(4초마다 chat.open 폭주 방지).
+    this._noSession = null;
+    this._noSessionAt = 0;
+    this._probeUntil = 0;   // 첫 메시지 전송 직후의 짧은 탐색 창(훅이 바인딩을 만드는 순간을 잡는다)
     _live.add(this);
   }
 
@@ -160,8 +171,11 @@ export class ChatView {
     if (tid == null) { this._setBanner("터미널이 선택되지 않았습니다."); return; }
     // 같은 터미널이면 아무것도 하지 않는다 — 캐치업은 폴링(_tick)이 담당. 여기서 매번 since 를
     //  치면 리컨실러가 7s 주기로 showActiveTab 을 부를 때마다 왕복이 늘어난다.
-    if (tid === this._tid && this._chatId) return;
+    //  ★ noSession 도 "그 터미널의 확정 상태"다 → 같은 tid 면 다시 열지 않는다(폭주 방지의 일부).
+    if (tid === this._tid && (this._chatId || this._noSession)) return;
     this._tid = tid;
+    this._noSession = null;      // 터미널이 바뀌었다 = 재판정 대상(트리거 ③)
+    this._probeUntil = 0;
     this._resetBuffer();
     this._open();
   }
@@ -187,12 +201,33 @@ export class ChatView {
     this._setBanner("대화를 불러오는 중…", "info");
     this._opening = (async () => {
       try {
+        // 사용자가 목록에서 고른 대화가 있으면 그것을 명시한다(탭 객체에 얹혀 영속·탭 이동 승계 —
+        //  tab.mode 와 같은 규율). 지정 sessionId 는 데몬에서 스캔 폴백 없이 그 파일만 연다.
+        const pick = this.ctx.getSessionPick?.() || null;
         const r = await api.chatOpen({
           cwd, tid, limit: CHAT.SNAPSHOT_LIMIT,
+          ...(pick ? { sessionId: pick } : {}),
           ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
         });
         if (this._disposed || this._tid !== tid) return;
         if (r && r.supported === false) { this._setBanner("이 에이전트의 대화 기록은 아직 지원하지 않습니다.", "warn"); return; }
+        // ── 대화가 아직 없다(정상 상태) — 오류 배너 금지, 빈 상태 본문을 그린다 ──
+        //  데몬은 "남의 대화를 보여주는 것보다 아무것도 안 보여주는 것이 낫다" 규칙으로 여기에 온다.
+        if (r && r.noSession) {
+          this._chatId = null;
+          this._epoch = "";
+          this._lastSeq = 0;
+          this._sessionId = r.sessionId || null;
+          this._openFailed = null;
+          this._noSession = String(r.reason || "none");
+          this._noSessionAt = Date.now();
+          this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
+          this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
+          this._renderBlank();
+          return;
+        }
+        this._noSession = null;
+        this._probeUntil = 0;
         this._chatId = r.chatId || null;
         this._epoch = r.epoch || "";
         this._sessionId = r.sessionId || null;
@@ -206,7 +241,21 @@ export class ChatView {
         const msg = String(e || "");
         this._openFailed = Date.now();
         // CHAT_NOT_FOUND = 그 터미널에서 claude 가 아직 대화를 만들지 않았다(정상 상태).
-        if (/CHAT_NOT_FOUND|찾을 수 없습니다/.test(msg)) this._setBanner("아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.", "info");
+        //  ★ 사용자가 고른 대화(sessionId)를 명시했는데 이게 나오면 그 **파일이 사라진** 것이다
+        //   (데몬 축출/삭제). 선택을 놓아주지 않으면 그 탭은 영구히 없는 대화를 요청하며 오류 배너에
+        //   갇힌다(조용히 죽는 경로) → 선택 해제 + 빈 상태로 되돌린다. 다음 열기는 정상 판정을 탄다.
+        if (/CHAT_NOT_FOUND|찾을 수 없습니다/.test(msg)) {
+          if (this.ctx.getSessionPick?.()) {
+            this.ctx.setSessionPick?.(null);
+            this._noSession = "none";
+            this._noSessionAt = Date.now();
+            this._openFailed = null;
+            this._setBanner("");
+            this._renderBlank();
+          } else {
+            this._setBanner("아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.", "info");
+          }
+        }
         else if (/HTTP 409|데몬/.test(msg)) this._setBanner("PC 가 연결돼 있지 않습니다.", "warn");
         else if (/TRANSCRIPT_DISABLED/.test(msg)) this._setBanner("서버에서 대화 기록 기능이 꺼져 있습니다.", "warn");
         else this._setBanner("대화를 불러오지 못했습니다 — 잠시 후 자동으로 다시 시도합니다.", "warn");
@@ -221,6 +270,13 @@ export class ChatView {
   _onPush(frame) {
     this._lastPushAt = Date.now();
     const ctl = frame.control && frame.control.kind;
+    // push 가 왔다 = 이 터미널에서 대화가 (다시) 살아 있다는 신호 → noSession 확정을 해제한다(트리거 ②).
+    if (this._noSession) {
+      this._noSession = null;
+      this._probeUntil = 0;
+      if (this._visible) this._open();
+      return;
+    }
     if (ctl === "gone") {
       // tail 이 사라졌다(파일 삭제·축출·idle). 다시 열면 같은 파일이면 같은 chatId 를 재사용한다.
       this._chatId = null;
@@ -248,15 +304,23 @@ export class ChatView {
   //  push 가 도착하고 있으면 사실상 no-op(마지막 push 가 최근이면 건너뜀). 끊긴 사이/유실은 이게 메운다.
   _startPoll() {
     this._stopPoll();
-    this._pollTimer = setInterval(() => this._tick(), 4000);
+    this._pollTimer = setInterval(() => this._tick(), CHAT.POLL_MS);
   }
   _stopPoll() { clearInterval(this._pollTimer); this._pollTimer = null; }
   _tick() {
     if (!this._visible || this._disposed) return;
     if (!this._chatId) {
+      // ★ noSession(성공 응답이지만 chatId 가 없다)은 **확정된 상태**다 → 매 틱 재오픈 금지.
+      //   규칙은 chat-model.shouldReopenNoSession(순수·실행 검증). 여기서 안 막으면 4초마다
+      //   chat.open 을 영원히 때리는 조용한 퇴행이 된다(화면은 정상, 데몬·릴레이만 두들긴다).
+      if (this._noSession && !shouldReopenNoSession({
+        reason: this._noSession, now: Date.now(), lastAt: this._noSessionAt, probeUntil: this._probeUntil,
+      })) return;
       // 열기 실패 상태 — 8초 간격으로만 재시도(서버/데몬 오프라인에서 폭주 금지).
-      if (!this._opening && (!this._openFailed || Date.now() - this._openFailed > 8000) && this.ctx.tid() != null) {
+      if (!this._opening && (!this._openFailed || Date.now() - this._openFailed > CHAT.OPEN_FAIL_RETRY_MS)
+        && this.ctx.tid() != null) {
         if (this._tid !== this.ctx.tid()) { this._tid = this.ctx.tid(); this._resetBuffer(); }
+        this._noSessionAt = Date.now(); // 느린 재확인의 기준점을 갱신(다음 확인은 다시 30초 뒤)
         this._open();
       }
       return;
@@ -565,6 +629,11 @@ export class ChatView {
     this.ctx.setDraft?.("");
     this._autoGrow();
 
+    // 첫 메시지가 곧 대화를 만든다(훅이 바인딩을 쓴다) → 짧은 탐색 창을 열어 붙는 순간을 잡는다.
+    //  창이 지나면 다시 느린 재확인으로 돌아간다(폴링 폭주 금지 — shouldReopenNoSession).
+    if (this._noSession) this._probeUntil = Date.now() + CHAT.NO_SESSION_PROBE_MS;
+    this._clearBlank();
+
     // 낙관 렌더 — 트랜스크립트에 같은 텍스트의 user 메시지가 오면 치운다(dedup 키=trim 앞 200자/60s).
     const seq = this._optSeq--;
     const opt = { seq, role: "user", kind: "text", text: raw, ts: Date.now(), hidden: false, optimistic: true };
@@ -592,6 +661,89 @@ export class ChatView {
       }
     }
   }
+
+  // ── 빈 상태(대화가 아직 없다) — 주류 에이전트 앱 형태 ────────────────────────────
+  // 사용자 확정: ChatGPT/Claude/Gemini 앱처럼 **중앙 정렬 + 짧은 인사 한 줄**, 주인공은 컴포저다.
+  //  · 오류·경고 프레이밍 금지(배너 없음). 설명문 최소 — 사용자는 텍스트를 읽지 않는다(이 프로젝트 규율).
+  //  · 그렇다고 "아무 안내 없는 빈 화면"으로 두지도 않는다(왜 비었는지 몰라 불안해진다) → 글리프 + 한 줄.
+  //  · `ambiguous`(어느 대화인지 단정 불가)일 때만 조용한 보조 액션 하나를 둔다.
+  //    'not_started'/'none' 에는 두지 않는다: 고를 후보가 없거나, 이미 이 터미널의 대화가 확정돼 있다.
+  _renderBlank() {
+    if (!this.scrollEl) return;
+    this._clearBlank();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-blank";
+    wrap.innerHTML =
+      `<span class="chat-blank-ic">${icons.chat({ size: 30 })}</span>` +
+      `<div class="chat-blank-title">무엇이든 요청하세요</div>`;
+    if (this._noSession === "ambiguous") {
+      const b = document.createElement("button");
+      b.className = "chat-blank-alt";
+      b.type = "button";
+      b.textContent = "다른 대화 보기";
+      b.addEventListener("click", (e) => { e.stopPropagation(); this._openSessionPicker(); });
+      wrap.appendChild(b);
+    }
+    this.scrollEl.appendChild(wrap);
+  }
+  _clearBlank() { this.scrollEl?.querySelector(".chat-blank")?.remove(); }
+
+  // 후보 대화 목록 시트 — `ambiguous` 에서만 도달한다. 고른 대화는 **탭 객체에 기억**하므로
+  //  영속(pc-ui.json)·탭 이동 승계가 자동이다(tab.mode 와 같은 규율).
+  async _openSessionPicker() {
+    if (this._sheetEl) return;
+    const sheet = document.createElement("div");
+    sheet.className = "chat-sheet";
+    sheet.innerHTML =
+      `<div class="chat-sheet-card">` +
+      `<div class="chat-sheet-title">대화 선택</div>` +
+      `<div class="chat-sheet-list"><div class="chat-sheet-empty">불러오는 중…</div></div>` +
+      `</div>`;
+    sheet.addEventListener("click", (e) => { if (e.target === sheet) this._closeSheet(); });
+    this.el.appendChild(sheet);
+    this._sheetEl = sheet;
+    const list = sheet.querySelector(".chat-sheet-list");
+    let sessions = [];
+    try {
+      const r = await api.chatSessions({
+        cwd: this._cwd(),
+        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
+      });
+      sessions = (r && r.sessions) || [];
+    } catch (e) {
+      // 실패를 빈 목록으로 위장하지 않는다(오프라인/권한 문제를 사용자가 알아야 한다 — 파일 피커와 같은 규율).
+      if (this._sheetEl) list.innerHTML = `<div class="chat-sheet-empty">목록을 불러오지 못했습니다</div>`;
+      return;
+    }
+    if (!this._sheetEl) return;
+    if (!sessions.length) { list.innerHTML = `<div class="chat-sheet-empty">대화가 없습니다</div>`; return; }
+    // 목록의 시각은 "오늘 몇 시"가 아니라 날짜까지 보여야 구분이 된다(후보가 여러 날에 걸쳐 있다).
+    const fmtWhen = (v) => {
+      const d = v == null ? null : new Date(v);
+      if (!d || isNaN(d.getTime())) return "";
+      const p = (x) => String(x).padStart(2, "0");
+      return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+    list.innerHTML = sessions.slice(0, 20).map((s) => {
+      const sub = [fmtWhen(s.lastAt), s.live ? "진행 중" : ""].filter(Boolean).join(" · ");
+      return `<button class="chat-sheet-row" type="button" data-sid="${escapeHtml(String(s.sessionId || ""))}">` +
+        `<span class="chat-sheet-name">${escapeHtml(String(s.title || "새 대화"))}</span>` +
+        (sub ? `<span class="chat-sheet-sub">${escapeHtml(sub)}</span>` : "") + `</button>`;
+    }).join("");
+    list.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-sheet-row");
+      if (!row) return;
+      const sid = row.dataset.sid;
+      this._closeSheet();
+      if (!sid) return;
+      this.ctx.setSessionPick?.(sid);   // 탭에 기억(영속·탭 이동 승계)
+      this._noSession = null;          // 사용자 선택 = 재판정 트리거
+      this._probeUntil = 0;
+      this._resetBuffer();
+      this._open();
+    });
+  }
+  _closeSheet() { this._sheetEl?.remove(); this._sheetEl = null; }
 
   // ── `+` 파일 넣기(일반 에이전트 앱과 같은 컴포저 좌측 버튼) ──────────────────────
   // 무엇을 하는가: 워크스페이스 파일을 골라 **그 경로를 입력에 삽입**한다(업로드가 아니다).
@@ -733,6 +885,7 @@ export class ChatView {
   dispose() {
     this._disposed = true;
     this._stopPoll();
+    this._closeSheet();
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,
