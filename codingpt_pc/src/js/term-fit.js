@@ -25,6 +25,19 @@
 export const FIT_EPS = 0.5;
 
 /**
+ * 항상 비워 두는 우측/하단 여백(px). **측정을 믿지 않고 무조건 확보한다.**
+ *
+ * 왜 상수인가(2026-07-27, 사용자 신고 3회 후): `viewport.clientWidth` 가 스크롤바를 제외하는지는
+ *  스크롤바 종류(공간 점유 vs 오버레이)·표시 시점(내용이 차기 전/후)·플랫폼에 따라 달라진다.
+ *  즉 **측정만으로는 "마지막 열이 스크롤바 아래로 들어갔는가"를 확신할 수 없다.**
+ *  두 실패의 무게가 다르다: 한 열을 덜 쓰면 우측에 9px 빈 띠가 생길 뿐이지만, 한 열이 잘리면
+ *  TUI 의 테두리·상태줄이 사라지고 **tmux 는 히스토리를 리플로우하지 않아 영구히 남는다.**
+ *  → 애매하면 덜 쓴다. 값은 앱 스크롤바 폭(`::-webkit-scrollbar { width: 9px }`)과 같다.
+ *  모바일 앱이 처음부터 8px 거터를 예약해 잘림이 없었던 것과 같은 처방이다.
+ */
+export const FIT_GUTTER_PX = 9;
+
+/**
  * 한 번의 보정으로 줄일 수 있는 최대 칸 수.
  *  · 스크롤바(≤15px)+부모 padding(10px) 을 최소 셀폭(폰트 8px ≈ 4.7px)으로 나눠도 6칸을 넘지 않는다.
  *  · 상한을 두는 이유는 폭주 방지다: 측정이 이상한 순간(레이아웃 0폭·전환 중)에 터미널이 2열로
@@ -33,10 +46,13 @@ export const FIT_EPS = 0.5;
 export const FIT_MAX_SHRINK = 6;
 
 // 내부 공통 — count 개의 셀(cellPx)이 실제 가시 영역(availPx) 안에 들어가도록 count 를 줄인다.
-function shrinkToFit(count, cellPx, availPx, minCount, maxShrink) {
+function shrinkToFit(count, cellPx, availPx, minCount, maxShrink, gutterPx) {
   const n = Number(count);
   const cell = Number(cellPx);
-  const avail = Number(availPx);
+  const g = Number.isFinite(Number(gutterPx)) ? Math.max(0, Number(gutterPx)) : 0;
+  // 가시 폭에서 거터를 **먼저** 뺀다(§FIT_GUTTER_PX) — 측정이 스크롤바를 이미 제외했더라도
+  //  한 열을 덜 쓰는 쪽이 잘리는 쪽보다 낫다.
+  const avail = Number(availPx) - g;
   const lim = Number.isFinite(Number(maxShrink)) ? Number(maxShrink) : FIT_MAX_SHRINK;
   // 방어: 내부 API 부재/미측정(0·NaN·음수)이면 **보정하지 않는다**(기존 동작 유지).
   if (!Number.isFinite(n) || n <= minCount) return Number.isFinite(n) ? n : count;
@@ -49,11 +65,11 @@ function shrinkToFit(count, cellPx, availPx, minCount, maxShrink) {
 
 /**
  * 가로 보정 — fit() 이 준 cols 를 실제 viewport 폭에 맞춰 줄인다.
- * @param {{colsFromFit:number, cellW:number, viewportW:number, maxShrink?:number}} a
+ * @param {{colsFromFit:number, cellW:number, viewportW:number, maxShrink?:number, gutterPx?:number}} a
  * @returns {number} 최종 cols (보정 불가/불필요면 colsFromFit 그대로)
  */
-export function fitCorrection({ colsFromFit, cellW, viewportW, maxShrink } = {}) {
-  return shrinkToFit(colsFromFit, cellW, viewportW, 2, maxShrink);
+export function fitCorrection({ colsFromFit, cellW, viewportW, maxShrink, gutterPx } = {}) {
+  return shrinkToFit(colsFromFit, cellW, viewportW, 2, maxShrink, gutterPx);
 }
 
 /**
@@ -61,6 +77,6 @@ export function fitCorrection({ colsFromFit, cellW, viewportW, maxShrink } = {})
  * @param {{rowsFromFit:number, cellH:number, viewportH:number, maxShrink?:number}} a
  * @returns {number} 최종 rows
  */
-export function fitRowsCorrection({ rowsFromFit, cellH, viewportH, maxShrink } = {}) {
-  return shrinkToFit(rowsFromFit, cellH, viewportH, 1, maxShrink);
+export function fitRowsCorrection({ rowsFromFit, cellH, viewportH, maxShrink, gutterPx } = {}) {
+  return shrinkToFit(rowsFromFit, cellH, viewportH, 1, maxShrink, gutterPx);
 }

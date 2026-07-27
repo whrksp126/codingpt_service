@@ -145,6 +145,23 @@ ok(/_fitLocalOnly\(\);\s*\n?\s*const \{ cols, rows \} = this\.term;/.test(pcPane
 ok(/window_width/.test(daemonSrv),
   '데몬 launch: 창 폭이 안정된 뒤 명령을 보낸다(TUI 는 첫 화면을 그 순간 폭으로 그린다)');
 
+
+// ── 10. 단계 버튼은 제목 줄 우측 끝 · 보조 설명문 없음(사용자 확정 3차) ─────────
+ok(/ag-panel-h--act/.test(pcView), 'PC: 단계 제목 줄에 실행 버튼을 얹는다');
+ok(!/직접 입력해도 돼요/.test(pcView) && !/설치가 끝나면 눌러 주세요/.test(pcView),
+  'PC: 단계 보조 설명문 2종을 제거했다');
+ok(/StepHead[\s\S]{0,200}right/.test(appSheet), '앱: StepHead 가 우측 슬롯을 받는다');
+ok(!/직접 입력해도 돼요/.test(appSheet) && !/설치가 끝나면 눌러 주세요/.test(appSheet),
+  '앱: 단계 보조 설명문 2종을 제거했다');
+
+// ── 11. 터미널 폭은 거터를 무조건 확보한다(잘림 > 빈 띠) ──────────────────────
+const tf = read(path.join(PC, 'term-fit.js'));
+ok(/FIT_GUTTER_PX/.test(tf), 'term-fit: 고정 거터 상수가 있다');
+ok(/gutterPx: FIT_GUTTER_PX/.test(pcPane),
+  'PC: _correctFit 이 거터를 넘긴다(clientWidth 가 스크롤바를 제외하는지 믿지 않는다)');
+ok(/setTimeout\([\s\S]{0,120}_fitNow\(\)/.test(pcPane),
+  'PC: 채널 개설 후 지연 재검산이 있다(ResizeObserver 는 크기 불변 시 안 울린다)');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

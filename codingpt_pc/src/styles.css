@@ -1414,3 +1414,9 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .ag-sheet-head { display: flex; align-items: center; gap: 9px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
 .ag-sheet-title { font-size: 14.5px; font-weight: 700; color: var(--text); flex: 1; }
 .ag-sheet-body { padding: 14px 18px 18px; }
+/* 단계 제목 줄 우측 끝에 그 단계의 실행 버튼을 둔다(사용자 확정 2026-07-27) — 버튼이 본문 아래
+   따로 떠 있으면 어느 단계의 동작인지 한 번 더 읽어야 한다. 보조 설명문은 제거했다. */
+.ag-panel-h--act { display: flex; align-items: center; gap: 10px; }
+.ag-panel-h--act > span:first-child { flex: none; }
+.ag-panel-h--act > .ag-result { flex: 1; min-width: 0; font-weight: 400; }
+.ag-panel-h--act > .sett-btn { margin-left: auto; flex: none; }

@@ -159,20 +159,18 @@ function buildInstallPanel(a, onDone) {
       <div class="ag-note">설치 방법은 바뀔 수 있어요 — 잘 안 되면 <a href="#" class="ag-docs">공식 문서</a>를 확인하세요.</div>
     </div>
     <div class="ag-panel-step">
-      <div class="ag-panel-h">2. 터미널에서 실행</div>
-      <div class="ag-termwrap"><div class="ag-term"></div></div>
-      <div class="ag-actions">
+      <div class="ag-panel-h ag-panel-h--act">
+        <span>2. 터미널에서 실행</span>
         <button class="sett-btn ag-run">첫 번째 명령 실행</button>
-        <span class="ag-note">직접 입력해도 돼요. 멈추려면 Ctrl+C.</span>
       </div>
+      <div class="ag-termwrap"><div class="ag-term"></div></div>
     </div>
     <div class="ag-panel-step">
-      <div class="ag-panel-h">3. CodingPT 연동</div>
-      <div class="ag-actions">
-        <button class="sett-btn ag-verify">설치 확인하고 연동</button>
+      <div class="ag-panel-h ag-panel-h--act">
+        <span>3. CodingPT 연동</span>
         <span class="ag-result"></span>
+        <button class="sett-btn ag-verify">설치 확인하고 연동</button>
       </div>
-      <div class="ag-note">설치가 끝나면 눌러 주세요. 실제로 실행 파일이 잡히는지 확인한 뒤 연동해요.</div>
     </div>`;
 
   el.querySelectorAll(".ag-copy").forEach((b) => b.addEventListener("click", async () => {

@@ -15,7 +15,7 @@ import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveAgentBrand } from "./agent-signal.js";
-import { fitCorrection, fitRowsCorrection } from "./term-fit.js";
+import { fitCorrection, fitRowsCorrection, FIT_GUTTER_PX } from "./term-fit.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -1355,6 +1355,12 @@ export class PaneView {
   // ── 채널(로컬 pty / 클라우드 WS) ──
   async _openChannel(win) {
     this._fitLocalOnly();          // 스테일 치수로 창을 만들지 않는다(§_fitLocalOnly)
+    // 첫 측정은 폰트 로드·레이아웃 확정 전일 수 있다. ResizeObserver 는 **컨테이너 크기가 바뀔 때만**
+    //  울리므로 "크기는 그대로인데 측정이 나중에 정확해지는" 경우를 아무도 바로잡지 않는다
+    //  → 채널을 연 뒤 두 번 더 검산한다(같은 값이면 _resize 가 no-op 수준이라 비용 0).
+    for (const delay of [250, 1200]) {
+      setTimeout(() => { if (this.term && this._attachedWin === win) this._fitNow(); }, delay);
+    }
     const { cols, rows } = this.term;
     if (this.ctx.isLocal) {
       this._attachedWin = typeof win === "number" ? win : null;
@@ -1643,8 +1649,17 @@ export class PaneView {
         const cell = dims?.css?.cell;
         const vp = this.termEl.querySelector(".xterm-viewport");
         if (!cell || !vp) return;                       // 벤더 구조 변경 → 보정 없음
-        cols = fitCorrection({ colsFromFit: t.cols, cellW: cell.width, viewportW: vp.clientWidth });
-        rows = fitRowsCorrection({ rowsFromFit: t.rows, cellH: cell.height, viewportH: vp.clientHeight });
+        // 거터를 무조건 확보한다(§term-fit FIT_GUTTER_PX) — `clientWidth` 가 스크롤바를 제외하는지가
+        //  스크롤바 종류·표시 시점에 따라 달라서 측정만으로는 확신할 수 없다. 한 열을 덜 쓰는 쪽이
+        //  잘리는 쪽보다 낫다(잘림은 tmux 히스토리에 영구히 남는다).
+        cols = fitCorrection({ colsFromFit: t.cols, cellW: cell.width, viewportW: vp.clientWidth, gutterPx: FIT_GUTTER_PX });
+        rows = fitRowsCorrection({ rowsFromFit: t.rows, cellH: cell.height, viewportH: vp.clientHeight, gutterPx: FIT_GUTTER_PX });
+        // 진단 로그 — 다음에 또 "우측이 잘린다" 신고가 오면 추측 대신 이 숫자로 판정한다.
+        //  (측정 실패로 보정이 조용히 건너뛰어지는 경우까지 드러난다)
+        if (pass === 0) {
+          api.debugLog(`fit pane=${this.id} fitCols=${t.cols} cellW=${cell.width.toFixed(3)} `
+            + `vpW=${vp.clientWidth} vpOff=${vp.offsetWidth} → cols=${cols} rows=${rows}`);
+        }
       } catch (_) { return; }
       if (cols === t.cols && rows === t.rows) return;   // 더 줄일 것 없음
       try { t.resize(cols, rows); } catch (_) { return; }
