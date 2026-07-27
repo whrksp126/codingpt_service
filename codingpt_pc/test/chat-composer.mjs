@@ -79,9 +79,23 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
 {
   const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
   const css = readFileSync(path.resolve(here, "../src/styles.css"), "utf8");
-  const comp = /<div class="chat-composer">([\s\S]*?)<\/div>/.exec(cv)?.[1] || "";
-  const order = [...comp.matchAll(/class="(chat-plus|chat-input|chat-send)"/g)].map((m) => m[1]);
-  eq("컴포저 순서 = [+][입력][전송]", order, ["chat-plus", "chat-input", "chat-send"]);
+  // 컴포저 마크업은 이제 **한 덩어리 둥근 상자**다(참고 앱 배치): 위=입력 / 아래=컨트롤 행.
+  const comp = cv.slice(cv.indexOf('<div class="chat-composer">'), cv.indexOf("`;", cv.indexOf('<div class="chat-composer">')));
+  // class 속성에 상태 클래스가 붙는다(`chat-model hidden`) → 이름 뒤 경계까지만 본다.
+  //  `chat-ctl-gap` 은 경계 문자가 '-' 이라 자동으로 걸러진다.
+  const order = [...comp.matchAll(/class="(chat-box|chat-input|chat-ctl|chat-plus|chat-model|chat-send)[ "]/g)].map((m) => m[1]);
+  eq("컴포저 구조 = 상자[입력][컨트롤행[+][모델칩][전송]]", order,
+    ["chat-box", "chat-input", "chat-ctl", "chat-plus", "chat-model", "chat-send"]);
+  ok("입력에는 자체 테두리·포커스 링이 없다(상자만 가진다 — '최초 모습이 이상하다'의 원인)",
+    /\.chat-input\s*\{[^}]*border:\s*none/.test(css) && !/\.chat-input:focus\s*\{/.test(css));
+  ok("전송은 원형 + 빈 입력에선 disabled(거짓 affordance 금지)",
+    /\.chat-send\s*\{[^}]*border-radius:\s*999px/.test(css) && /\.chat-send:disabled\s*\{/.test(css)
+    && /this\.sendEl\.disabled = !has;/.test(cv));
+  ok("PC 컴포저엔 마이크가 없다(웹뷰에 음성 인식 API 부재 — 사용자 확정: PC는 숨김)",
+    !/chat-mic/.test(cv) && !/chat-mic/.test(css));
+  ok("맨아래로 FAB 는 컴포저의 자식(여러 줄 입력에 파묻히지 않게 bottom:100% 기준)",
+    /\.chat-jump\s*\{[^}]*bottom:\s*calc\(100% \+ 4px\)/.test(css)
+    && comp.includes('class="chat-jump'));
   ok("`+` 팝오버는 컴포저 기준 위로 펼친다(입력을 가리지 않게)",
     /\.chat-pick\s*\{[^}]*bottom:\s*calc\(100% - 4px\)/.test(css)
     && /\.chat-composer\s*\{[^}]*position:\s*relative/.test(css));
@@ -141,8 +155,10 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("noSession 은 오류 배너가 아니라 빈 상태 본문을 그린다",
     /if \(r && r\.noSession\)/.test(cv) && /this\._renderBlank\(\)/.test(cv));
   ok("빈 상태는 짧은 인사 한 줄(설명 문단 금지)", /무엇이든 요청하세요/.test(cv));
-  ok("보조 액션 `다른 대화 보기` 는 ambiguous 에서만 나온다",
-    /if \(this\._noSession === "ambiguous"\)[\s\S]{0,300}다른 대화 보기/.test(cv));
+  // 'claimed'(후보가 전부 남의 것)도 사람이 고를 여지가 있는 상태 → 같은 보조 액션을 준다.
+  //  나머지('not_started'/'none')는 고를 후보가 없으므로 링크를 두지 않는다(빈 UI 금지 규율).
+  ok("보조 액션 `다른 대화 보기` 는 ambiguous/claimed 에서만 나온다",
+    /this\._noSession === "ambiguous" \|\| this\._noSession === "claimed"[\s\S]{0,400}다른 대화 보기/.test(cv));
   ok("고른 세션은 탭 객체에 기억한다(영속·탭 이동 승계)",
     /setSessionPick\?\.\(sid\)/.test(cv) && /getSessionPick\?\.\(\)/.test(cv));
   ok("첫 메시지 전송이 탐색 창을 연다(전송 → 재오픈 경로)",
@@ -155,6 +171,76 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     /!v\._chatId && v\._noSession && frame\.sessionId && v\._sessionId === frame\.sessionId/.test(cv));
   ok("api 에 chatSessions 래퍼가 있다(목록 RPC)",
     /chatSessions: \(q\) =>/.test(readFileSync(path.resolve(here, "../src/js/api.js"), "utf8")));
+}
+
+// ── 7. 앱 ↔ PC 컴포저 규칙 동치 — **앱 소스를 실행해** 대조한다 ────────────────────────────
+// 왜: 전송 가능 판정·모델 칩 문자열·음성 삽입 위치가 두 화면에서 다르면 같은 입력에 다른 결과가 나온다
+//  (이 제품에서 반복된 사고 유형). 선례 = agent-toggle.mjs §3(앱 agentPresence.ts 를 오려내 실행).
+// ⚠ 앱 `composer.ts` 는 **import 를 갖지 않아야** 한다 — 하나라도 있으면 data: URL 모듈 해석이 실패해
+//   이 절이 조용히 SKIP 된다(2026-07-27 실사고: import 하나로 69,300 조합 대조가 사라졌다).
+{
+  const { createRequire } = await import("node:module");
+  const { existsSync } = await import("node:fs");
+  const APP = path.resolve(here, "../../../codingpt_app/src/workspace/chat/composer.ts");
+  const APPPKG = path.resolve(here, "../../../codingpt_app/package.json");
+  let A = null, why = "";
+  if (!existsSync(APP) || !existsSync(APPPKG)) why = "codingpt_app 없음 — 단독 체크아웃";
+  else {
+    try {
+      const ts = createRequire(APPPKG)("typescript");
+      const src = readFileSync(APP, "utf8");
+      const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } }).outputText;
+      A = await import(`data:text/javascript;base64,${Buffer.from(js, "utf8").toString("base64")}`);
+    } catch (e) { why = `앱 모듈을 실행할 수 없다(형식/의존성 변경?): ${e.message}`; }
+  }
+  if (!A) console.log(`SKIP 앱↔PC 컴포저 규칙 동치(${why})`);
+  else {
+    ok("앱 composer.ts 에 import 가 없다(있으면 이 절이 조용히 SKIP 된다)",
+      !/^\s*import[\s{*]/m.test(readFileSync(APP, "utf8")));
+    ok("앱이 컴포저 순수 규칙을 export 한다",
+      ["composerHasText", "prettyModel", "agentDisplayName", "spliceSpeech"].every((k) => typeof A[k] === "function"));
+
+    // (a) 전송 가능 판정 — 공백/개행만 있는 입력을 보내면 TUI 가 프롬프트를 한 번 삼킨다.
+    const TEXTS = ["", " ", "\n", " \n\t ", "a", " a ", "0", "안녕", "  줄\n둘  "];
+    let bad = [];
+    for (const t of TEXTS) if (M.composerHasText(t) !== A.composerHasText(t)) bad.push(JSON.stringify(t));
+    ok(`전송 가능 판정 동치 ${TEXTS.length - bad.length}/${TEXTS.length}`, !bad.length, bad.join(","));
+    eq("공백만 = 전송 불가", [M.composerHasText("  \n "), A.composerHasText("  \n ")], [false, false]);
+
+    // (b) 모델 칩 문자열 — 모르는 형태는 **빈 문자열**(원문 노출 금지: 칩을 밀어낸다).
+    const MODELS = [
+      "claude-sonnet-4-5-20250929", "claude-opus-4-1-20250805", "claude-3-5-haiku-20241022",
+      "claude-opus-5", "claude-opus-5[1m]", "claude-opus-5-1m", "claude-haiku-4-5-20251001",
+      "gpt-5-codex", "gpt-4.1", "gemini-2.5-pro", "", null, undefined, "  ", "무슨모델",
+      "CLAUDE-SONNET-4-5-20250929",
+    ];
+    bad = [];
+    for (const id of MODELS) if (M.prettyModel(id) !== A.prettyModel(id)) bad.push(`${JSON.stringify(id)}: pc=${JSON.stringify(M.prettyModel(id))} app=${JSON.stringify(A.prettyModel(id))}`);
+    ok(`모델 칩 문자열 동치 ${MODELS.length - bad.length}/${MODELS.length}`, !bad.length, bad.join(" | "));
+    eq("실측 형태 3종", [M.prettyModel("claude-sonnet-4-5-20250929"), M.prettyModel("claude-3-5-haiku-20241022"), M.prettyModel("claude-opus-5[1m]")],
+      ["Sonnet 4.5", "Haiku 3.5", "Opus 5"]);
+    eq("모르는 형태는 빈 문자열(칩 미표시)", M.prettyModel("무슨모델"), "");
+
+    // (c) 에이전트 표시 이름 — 플레이스홀더 "Claude에게 요청".
+    const AG = ["claude", "Claude", "codex", "gemini", "cursor-agent", "", null, undefined];
+    bad = [];
+    for (const g of AG) if (M.agentDisplayName(g) !== A.agentDisplayName(g)) bad.push(JSON.stringify(g));
+    ok(`에이전트 표시 이름 동치 ${AG.length - bad.length}/${AG.length}`, !bad.length, bad.join(","));
+    eq("모르는 에이전트는 빈 문자열(기본 문구로 폴백)", M.agentDisplayName("cursor-agent"), "");
+
+    // (d) 음성 삽입(앱 전용 규칙이지만 **덮어쓰기**라는 성질을 실행으로 고정한다).
+    //   부분 결과가 연달아 오므로 같은 base/anchor 에 계속 덮어써야 한다 — 누적하면
+    //   "안녕안녕하세요안녕하세요" 가 된다(가장 흔한 STT 구현 버그).
+    let r = A.spliceSpeech("고쳐줘", 3, "안녕");
+    eq("커서 위치에 삽입 + 앞 공백 1칸", r, { value: "고쳐줘 안녕", cursor: 6 });
+    const base = "고쳐줘", anchor = 3;
+    const seq = ["안", "안녕", "안녕하세요"].map((t) => A.spliceSpeech(base, anchor, t).value);
+    eq("부분 결과는 누적되지 않고 덮어쓴다", seq, ["고쳐줘 안", "고쳐줘 안녕", "고쳐줘 안녕하세요"]);
+    eq("앵커가 범위를 넘으면 끝에 붙는다", A.spliceSpeech("ab", 99, "x").value, "ab x");
+    eq("앞이 이미 공백이면 더 넣지 않는다", A.spliceSpeech("ab ", 3, "x").value, "ab x");
+    eq("빈 초안이면 앞 공백 없음", A.spliceSpeech("", 0, "x"), { value: "x", cursor: 1 });
+    eq("상한을 넘기면 자른다", A.spliceSpeech("abc", 3, "defghij", 6).value, "abc de");
+  }
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");

@@ -601,13 +601,88 @@ test('chat.open — 바인딩 파일이 아직 없으면 not_started(남의 대�
   assert.strictEqual(T._internals.tails.size, 0);
 });
 
-test('chat.open — 바인딩 없고 후보 여러 개면 ambiguous(사용자에게 고르게 한다)', async () => {
+// 후보 파일을 원하는 mtime 으로 깔아둔 격리 워크스페이스를 만든다(라이브 판정 LIVE_MS=30s 기준).
+function mkCandWs(name, sessions) {
+  const abs = path.join(ROOT, name);
+  fs.mkdirSync(abs, { recursive: true });
+  const dir = T.projectDirOf(abs);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const s of sessions) {
+    const f = path.join(dir, s.id + '.jsonl');
+    fs.writeFileSync(f, JSON.stringify({ type: 'user', sessionId: s.id, timestamp: TS, cwd: abs, message: { role: 'user', content: s.id } }) + '\n');
+    if (s.ageMs) { const t = (Date.now() - s.ageMs) / 1000; fs.utimesSync(f, t, t); }
+  }
+  return abs;
+}
+
+test('chat.open — 바인딩 없고 후보가 전부 라이브면 ambiguous(사용자에게 고르게 한다)', async () => {
   const ws = fakeWs();
-  const open = await T.handle('chat.open', { cwd: 'ws', tid: 9999999 }, ws);
+  mkCandWs('amb', [{ id: 'amb-a' }, { id: 'amb-b' }, { id: 'amb-c' }]);
+  const open = await T.handle('chat.open', { cwd: 'amb', tid: 9999999 }, ws);
   assert.strictEqual(open.noSession, true);
   assert.strictEqual(open.reason, 'ambiguous');
   assert.ok(open.candidates >= 2, 'candidates=' + open.candidates);
   assert.strictEqual(T._internals.tails.size, 0);
+});
+
+// ★★ 2026-07-27 실사고 회귀 2 — "TUI 엔 대화가 멀쩡히 있는데 채팅은 빈 화면"
+//   사용자 기기 실측: 터미널 B(tid 958257768)는 2일 전부터 돌던 세션이라 바인딩이 없었고, 같은 슬러그에
+//   후보가 2개였다 → 위 회귀1 수정이 이걸 전부 ambiguous 로 밀어냈다. 그런데 후보 하나는 **다른 터미널이
+//   이미 바인딩**한 세션이었으므로, 그것만 빼면 답이 하나로 확정된다(추측이 아니라 소거법).
+test('chat.open — 다른 터미널이 점유한 후보를 소거하면 확정된다(scan-unclaimed)', async () => {
+  const ws = fakeWs();
+  const abs = mkCandWs('elim', [{ id: 'elim-mine' }, { id: 'elim-others' }]);
+  // 이웃 터미널(tid 111)이 elim-others 를 점유 중
+  T.noteHook({ sessionId: 'elim-others', transcriptPath: path.join(T.projectDirOf(abs), 'elim-others.jsonl'), cwd: abs, cwdRel: 'elim', tid: 111, event: 'prompt' });
+  const open = await T.handle('chat.open', { cwd: 'elim', tid: 222 }, ws);
+  assert.strictEqual(open.noSession, undefined, JSON.stringify(open));
+  assert.strictEqual(open.sessionId, 'elim-mine');
+  assert.strictEqual(open.source, 'scan-unclaimed');
+  assert.strictEqual(open.messages[0].text, 'elim-mine');
+  await T.handle('chat.close', { chatId: open.chatId });
+});
+
+test('chat.open — 후보 전부가 남의 것이면 claimed(남의 대화 금지 원칙 유지)', async () => {
+  const ws = fakeWs();
+  const abs = mkCandWs('allclaimed', [{ id: 'ac-1' }, { id: 'ac-2' }]);
+  T.noteHook({ sessionId: 'ac-1', transcriptPath: path.join(T.projectDirOf(abs), 'ac-1.jsonl'), cwd: abs, cwdRel: 'allclaimed', tid: 11, event: 'prompt' });
+  T.noteHook({ sessionId: 'ac-2', transcriptPath: path.join(T.projectDirOf(abs), 'ac-2.jsonl'), cwd: abs, cwdRel: 'allclaimed', tid: 22, event: 'prompt' });
+  const open = await T.handle('chat.open', { cwd: 'allclaimed', tid: 33 }, ws);
+  assert.strictEqual(open.noSession, true);
+  assert.strictEqual(open.reason, 'claimed');
+  assert.strictEqual(T._internals.tails.size, 0);
+});
+
+test('chat.open — 소거 후에도 여럿이면 지금 쓰이고 있는 것 하나로 확정(scan-live)', async () => {
+  const ws = fakeWs();
+  mkCandWs('livepick', [{ id: 'lp-live' }, { id: 'lp-old', ageMs: 10 * 60 * 1000 }, { id: 'lp-older', ageMs: 60 * 60 * 1000 }]);
+  const open = await T.handle('chat.open', { cwd: 'livepick', tid: 555 }, ws);
+  assert.strictEqual(open.noSession, undefined, JSON.stringify(open));
+  assert.strictEqual(open.sessionId, 'lp-live');
+  assert.strictEqual(open.source, 'scan-live');
+  await T.handle('chat.close', { chatId: open.chatId });
+});
+
+// 死 엔트리(`<ws>|`)가 점유로 세지면 살아있는 세션이 근거 없이 배제된다 — 사용자 기기에 실제로 있었다.
+test('claimedSessions — tid 빈 死 엔트리는 점유로 세지 않는다', async () => {
+  const ws = fakeWs();
+  const abs = mkCandWs('deadkey', [{ id: 'dk-real' }, { id: 'dk-other' }]);
+  T.noteHook({ sessionId: 'dk-other', transcriptPath: path.join(T.projectDirOf(abs), 'dk-other.jsonl'), cwd: abs, cwdRel: 'deadkey', tid: 1, event: 'prompt' });
+  // 구 버전이 남긴 死 엔트리를 손으로 주입(현재 noteHook 은 만들지 않는다)
+  const bp = path.join(ROOT, '.codingpt', 'chat-bind.json');
+  const j = JSON.parse(fs.readFileSync(bp, 'utf-8'));
+  j.binds['deadkey|'] = { sessionId: 'dk-real', at: Date.now(), source: 'hook' };
+  fs.writeFileSync(bp, JSON.stringify(j));
+  T._internals.resetBindsCache(); // 다음 loadBinds 가 디스크를 다시 읽게
+  const open = await T.handle('chat.open', { cwd: 'deadkey', tid: 2 }, ws);
+  assert.strictEqual(open.sessionId, 'dk-real', JSON.stringify(open));
+  assert.strictEqual(open.source, 'scan-unclaimed');
+  await T.handle('chat.close', { chatId: open.chatId });
+  // 주입한 死 엔트리를 되돌린다 — 뒤 테스트가 "死 엔트리가 없다"를 검사하고, 그 검사는 유지해야 한다.
+  const j2 = JSON.parse(fs.readFileSync(bp, 'utf-8'));
+  delete j2.binds['deadkey|'];
+  fs.writeFileSync(bp, JSON.stringify(j2));
+  T._internals.resetBindsCache();
 });
 
 test('chat.open — 후보가 정확히 1개면 그것으로 폴백(모호하지 않으므로 안전)', async () => {

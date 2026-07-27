@@ -51,7 +51,37 @@ export const icons = {
   check: (o) => svg('<path d="M5 12.5l4.5 4.5L19 7"/>', o),
   // 승인 카드 헤드 — 방패+체크(권한 요청). warning 삼각형은 "오류"로 읽히므로 피한다.
   shield: (o) => svg('<path d="M12 3l7 2.5v5.8c0 4-2.8 7.6-7 9.2-4.2-1.6-7-5.2-7-9.2V5.5z"/><path d="M9 12l2.2 2.2L15.5 10"/>', o),
+
+  // ── 에이전트 마크(탭 좌측) ─────────────────────────────────────────────
+  // 왜 로고인가: 사용자가 탭만 보고 "이 터미널엔 무엇이 붙어 있나"를 알아야 한다(요청 2026-07-27).
+  //  ⚠ **아는 경우에만** 그린다 — 모르면 터미널 글리프를 유지한다(모양은 사실 주장이다).
+  //  claude = 대화창 제목에 쓰이는 별표(✳)와 같은 의미의 8방향 버스트.
+  claudeMark: (o) => svg(
+    '<path d="M12 3.2v17.6M3.2 12h17.6M5.8 5.8l12.4 12.4M18.2 5.8L5.8 18.2"/>',
+    { ...o, sw: (o && o.sw) || 1.7 },
+  ),
+  // codex = OpenAI 마크 근사(회전 대칭 3겹). 정확한 상표 재현이 아니라 식별용 근사다.
+  codexMark: (o) => svg(
+    '<ellipse cx="12" cy="12" rx="3.6" ry="8.6"/>' +
+    '<ellipse cx="12" cy="12" rx="3.6" ry="8.6" transform="rotate(60 12 12)"/>' +
+    '<ellipse cx="12" cy="12" rx="3.6" ry="8.6" transform="rotate(120 12 12)"/>',
+    { ...o, sw: (o && o.sw) || 1.4 },
+  ),
+  // gemini = 4방향 스파클(제목 글리프 ✦ 와 같은 의미).
+  geminiMark: (o) => svg(
+    '<path d="M12 3c.7 3.6 1.7 4.6 5.3 5.3-3.6.7-4.6 1.7-5.3 5.3-.7-3.6-1.7-4.6-5.3-5.3C10.3 7.6 11.3 6.6 12 3z"/>' +
+    '<path d="M17.6 14.4c.4 1.9.9 2.4 2.8 2.8-1.9.4-2.4.9-2.8 2.8-.4-1.9-.9-2.4-2.8-2.8 1.9-.4 2.4-.9 2.8-2.8z"/>',
+    o,
+  ),
 };
+
+// 에이전트 이름 → 마크 HTML. 모르는 이름(null 포함)은 null 을 반환해 호출측이 기본 글리프를 쓰게 한다.
+export function agentMarkHtml(brand, o) {
+  if (brand === "claude") return icons.claudeMark(o);
+  if (brand === "codex") return icons.codexMark(o);
+  if (brand === "gemini") return icons.geminiMark(o);
+  return null;
+}
 
 // DOM 헬퍼: 아이콘 버튼.
 export function iconBtn(name, opts = {}) {

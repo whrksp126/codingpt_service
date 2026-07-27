@@ -4,7 +4,7 @@
 //  · 프리뷰 pane: URL 바 + iframe.
 //  로컬=Rust pty, 클라우드=백엔드 relay WS. OSC 9/777/99+벨 → 알림 콜백.
 import { api } from "./api.js";
-import { icons } from "./icons.js";
+import { icons, agentMarkHtml } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import lan from "./lan.js";
@@ -14,7 +14,7 @@ import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dt
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
-import { resolveAgentPresence, resolveToggleVisible } from "./agent-signal.js";
+import { resolveAgentPresence, resolveToggleVisible, resolveAgentBrand } from "./agent-signal.js";
 import { fitCorrection, fitRowsCorrection } from "./term-fit.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
@@ -646,7 +646,9 @@ export class PaneView {
         tab.draggable = true;
         const isT = isTermTab(t);
         // 프리뷰 탭은 열린 페이지의 메타(파비콘+제목)로 표현(cmux 미러).
-        const iconHtml = isT ? icons.terminal({ size: 13 })
+        //  터미널 탭은 **에이전트를 특정할 수 있을 때만** 그 로고로 바꾼다(모르면 터미널 글리프 유지 —
+        //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
+        const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
@@ -799,7 +801,8 @@ export class PaneView {
     const st = this.modeToggleState();
     b.classList.toggle("hidden", !st.on);
     if (!st.on) return;
-    b.classList.toggle("active", st.chat);
+    // ★ 채팅 모드를 **색으로** 표시하지 않는다(사용자 확정 2026-07-27). 액센트 배경은 "선택된 필터"처럼
+    //  읽혀 상태와 행동이 헷갈렸다 → 상태 표현은 글리프 교체 하나로만 한다(같은 이유로 `.active` 도 제거).
     b.title = st.chat ? "터미널(TUI) 보기" : "채팅으로 보기";
     // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다 — ② 항).
     //  크기 16 = 워크스페이스 헤더 추가 버튼과 같은 값(앱은 자기 헤더 기준 19).
@@ -826,6 +829,19 @@ export class PaneView {
   //  ③' 제목 글리프 → ④ 신호 없으면 **켠다**. push 가 비는 모든 순간(15분 스테일·WS 재접속 폐기·호스트
   //  오프라인·데몬 재기동·agentstate.v1 미선언)에 토글이 사라지던 것이 사용자 신고 증상이었고, ④ 가
   //  기본 ON 이라 ①→② 하강 전이에서 OFF 가 나올 수 없다(근거는 resolveAgentPresence 주석 ★ 항).
+  // 탭 좌측 로고 — 붙어 있는 에이전트를 특정할 수 있을 때만 HTML, 모르면 null(호출측이 터미널 글리프).
+  //  판정 입력은 _agentOn 과 **같은 재료**를 쓴다(신호 출처가 갈라지면 아이콘과 토글이 서로 다른 사실을
+  //  주장한다 — 이 라운드 직전에 겪은 "표시와 클릭이 다른 대상" 사고와 같은 계열).
+  _tabAgentMark(tab) {
+    if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return null;
+    const cwd = this.ctx.localPath || "";
+    const brand = resolveAgentBrand({
+      push: this.ctx.agentStateOf?.(cwd, tab.win) || null,
+      tab: { cmd: tab.cmd, title: tab.title, agent: tab.agent, agentState: tab.agentState, mode: tab.mode },
+    });
+    return agentMarkHtml(brand, { size: 13 });
+  }
+
   _agentOn(tab) {
     if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return false;
     const cwd = this.ctx.localPath || "";

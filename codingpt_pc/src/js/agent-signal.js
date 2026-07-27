@@ -152,7 +152,48 @@ export function resolveToggleVisible(input) {
   return !!(input.agentOn || input.chatMode);
 }
 
+/**
+ * **어떤** 에이전트인가 — 탭 좌측 로고용(2026-07-27 요청). 'claude'|'codex'|'gemini'|null.
+ *
+ * `resolveAgentPresence`(있나?)와 일부러 분리했다. 두 판정의 실패 비대칭이 **반대**다:
+ *  · 노출 판정은 애매하면 **켠다**(사라진 토글이 기능을 지운다).
+ *  · 로고 판정은 애매하면 **모른다고 답한다** — 모양은 사실 주장이라, codex 터미널에 claude 로고를
+ *    그리면 "표시 정직성 §2.7(거짓 색·거짓 자물쇠 금지)" 위반이다. null 이면 호출측이 터미널 글리프를 쓴다.
+ *
+ * 사다리(위에서 아래로, 처음 확정된 칸이 답):
+ *  ① push(agent_state).agent      : 데몬 정규화 이름이 실려 오면 정본.
+ *  ② 목록 행 tab.agent 문자열      : 위와 같은 이름 공간(구 데몬은 부재).
+ *  ③ tab.cmd 이름 패턴            : 구 CLI·gemini(`claude`/`codex`/`gemini`)에서 유효.
+ *  ④ 제목 글리프                  : ✳=claude, ✦/◇/✋=gemini(데몬 agent-watch 규칙 미러).
+ *                                  점자 스피너는 claude/codex 공용이라 **이름을 특정하지 않는다**.
+ *  ⑤ cmd 가 세마버 문자열          : 최신 Claude Code 의 pane_current_command 실측값(`2.1.219`).
+ *                                  cursor-agent 는 날짜형(`2025.09.18-…`)이라 이 패턴에 안 걸린다.
+ *  ⑥ 그 외                        : null(모름).
+ */
+export const AGENT_BRANDS = ["claude", "codex", "gemini"];
+const SEMVER_CMD_RE = /^\d+\.\d+\.\d+$/;
+
+export function resolveAgentBrand(input) {
+  const push = (input && input.push) || null;
+  const tab = (input && input.tab) || null;
+  const named = (v) => {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    return AGENT_BRANDS.includes(s) ? s : null;
+  };
+  if (push) { const n = named(push.agent); if (n) return n; }
+  if (tab) {
+    const n = named(tab.agent); if (n) return n;
+    const c = named(tab.cmd); if (c) return c;
+    const t = String(tab.title || "");
+    if (t.startsWith("✳")) return "claude";
+    if (t.includes("✦") || t.includes("◇") || t.includes("✋")) return "gemini";
+    if (SEMVER_CMD_RE.test(String(tab.cmd || "").trim())) return "claude";
+  }
+  return null;
+}
+
 export default {
   SHELL_CMDS, isShellCmd, agentTitleStatus, normalizeDaemonAgentFlag,
   AGENT_CMD_RE, hasAgentCmd, resolveAgentPresence, resolveToggleVisible,
+  AGENT_BRANDS, resolveAgentBrand,
 };

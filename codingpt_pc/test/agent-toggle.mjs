@@ -319,8 +319,13 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     eq("PC 토글 글리프 = PC 헤더 추가 버튼과 같은 크기", num(/size: (\d+)/, glyphLine), addsGlyph);
     ok("토글 두 글리프가 같은 크기(터미널/채팅)", (glyphLine.match(/size: (\d+)/g) || []).length === 2
       && new Set(glyphLine.match(/size: \d+/g)).size === 1, glyphLine.trim());
-    ok("chat 활성 색은 양쪽 다 accent 토큰",
-      /\.pane-mode-toggle\.active\s*\{[^}]*var\(--accent\)/.test(css) && /C\.accent/.test(mt));
+    // ★ 반전된 핀(사용자 확정 2026-07-27): 채팅 모드를 **색으로 표시하지 않는다**. 액센트 배경이
+    //  "선택된 필터"처럼 읽혀 상태(모드)와 행동(전환)이 헷갈렸다 → 표현은 글리프 교체 하나뿐이다.
+    //  한쪽만 되돌리면 두 화면이 같은 상태를 다르게 그리므로 양 플랫폼을 함께 못 박는다.
+    ok("chat 활성 색을 쓰지 않는다(PC: .active 규칙 부재)",
+      !/\.pane-mode-toggle\.active\s*\{/.test(css));
+    ok("PC 토글에 active 클래스를 붙이지도 않는다", !/classList\.toggle\("active"/.test(syncBody), syncBody.replace(/\s+/g, " ").trim());
+    ok("chat 활성 색을 쓰지 않는다(앱: accent 미사용)", !/C\.accent/.test(mt), mt.match(/.*C\.accent.*/)?.[0]);
     // 앱 쪽 배치는 앱 리포에서 별도로 옮기는 중이므로 **여기서 실패시키지 않는다**(리포 경계).
     //  대신 지금 어디서 렌더되는지 출력해 한쪽만 되돌리는 드리프트를 눈에 보이게 한다.
     const pv = path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx");
@@ -469,6 +474,49 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     // 셸 행 하나만 숨김이어야 한다 — claude 가 도는 행(/resume·제목 비활성·noPrefix 등)에서 숨으면
     //  그게 사용자 신고 증상이다.
     eq("13 시나리오 중 숨김은 '빈 셸' 하나뿐", hidden, 1);
+
+    // ══ 로고 판정(2026-07-27 추가) — 탭 좌측 아이콘을 에이전트 로고로 바꾼다 ══════════════
+    // 노출 판정과 **실패 비대칭이 반대**다: 애매하면 켜는 대신 **모른다고 답한다**(모양은 사실 주장).
+    //  두 화면이 다른 로고를 그리면 "폰에선 claude, PC 에선 터미널" 같은 비대칭이 생기므로 전 조합 대조.
+    ok("앱이 resolveAgentBrand 를 export 한다", typeof A.resolveAgentBrand === "function");
+    const BRAND_CMDS = ["", "zsh", "claude", "Claude", "CODEX", "codex", "gemini", "node",
+      "2.1.219", "2025.09.18-7ae6800", "vim", "npm", "1.2", "1.2.3.4"];
+    const BRAND_TITLES = ["", "✳ 히어로 섹션 추가", "✦ 생각 중", "◇ 대기", "✋ 승인 대기",
+      "⠹ 작업 중", "demo", "claude · resume", "codex"];
+    const BRAND_AGENTS = [undefined, null, true, false, "", "claude", "codex", "gemini", "none", "cursor-agent"];
+    let bn = 0, bm = 0; const bbad = [];
+    for (const cmd of BRAND_CMDS) for (const title of BRAND_TITLES) for (const agent of BRAND_AGENTS) {
+      bn += 1;
+      const inp = { push: null, tab: { cmd, title, agent } };
+      const a2 = A.resolveAgentBrand(inp), b2 = PC.resolveAgentBrand(inp);
+      if (a2 !== b2) { bm += 1; if (bbad.length < 3) bbad.push(`(${J(cmd)},${J(title)},${J(agent)}) app=${J(a2)} pc=${J(b2)}`); }
+    }
+    ok(`로고 판정 앱==PC ${bn - bm}/${bn} 조합`, bm === 0, bbad.join(" | "));
+    // 실측 근거 몇 가지를 값으로 고정(사다리가 조용히 뒤바뀌는 것을 막는다).
+    eq("최신 claude(cmd=버전문자열) → claude", PC.resolveAgentBrand({ tab: { cmd: "2.1.219", title: "demo" } }), "claude");
+    eq("제목 글리프 ✳ → claude", PC.resolveAgentBrand({ tab: { cmd: "", title: "✳ 작업" } }), "claude");
+    eq("gemini 글리프 → gemini", PC.resolveAgentBrand({ tab: { cmd: "", title: "✦ 생각 중" } }), "gemini");
+    eq("점자 스피너는 이름을 특정하지 않는다(claude/codex 공용)", PC.resolveAgentBrand({ tab: { cmd: "", title: "⠹ 작업 중" } }), null);
+    eq("cursor-agent(날짜형 cmd)는 모름", PC.resolveAgentBrand({ tab: { cmd: "2025.09.18-7ae6800", title: "demo" } }), null);
+    eq("push 가 이름을 실어 오면 그것이 정본", PC.resolveAgentBrand({ push: { agent: "codex" }, tab: { cmd: "claude" } }), "codex");
+    eq("빈 셸은 모름(터미널 글리프 유지)", PC.resolveAgentBrand({ tab: { cmd: "zsh", title: "demo" } }), null);
+    eq("입력이 없어도 죽지 않는다", PC.resolveAgentBrand(null), null);
+
+    // 렌더 핀 — 판정이 맞아도 그리는 쪽이 폴백을 잃으면 아이콘이 **사라진다**(실제로 한 번 냈던 실수:
+    //  `<AgentMark/> || <TerminalWindow/>` 는 JSX 요소가 항상 truthy 라 폴백이 도달 불가였다).
+    const paneTsx = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx"), "utf8");
+    ok("앱 탭 아이콘: brand 가 있을 때만 로고, 없으면 터미널 글리프(삼항)",
+      /brand \? \([\s\S]{0,200}<AgentMark[\s\S]{0,300}<TerminalWindow/.test(paneTsx));
+    // ⚠ 주석을 먼저 걷어낸다 — 이 함정을 **설명하는 주석 자체**가 정규식에 걸려 거짓 실패가 났다
+    //   (테스트가 자기 문서를 결함으로 신고하는 형태). 코드만 본다.
+    const paneCode = paneTsx.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+    ok("앱 탭 아이콘 폴백을 `||` 로 쓰지 않는다(JSX 요소는 항상 truthy)",
+      !/<AgentMark[^>]*\/>\s*\|\|/.test(paneCode));
+    // paneJs2 는 다른 블록 스코프의 변수다 — 여기서 참조하면 **테스트가 크래시**한다(실제로 냈다:
+    //  FAIL 이 아니라 ReferenceError 라서 필터로 요약만 보면 "통과"로 오독된다). 이 블록에서 다시 읽는다.
+    const pcPane = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
+    ok("PC 탭 아이콘도 같은 규칙(agentMarkHtml || 터미널 글리프)",
+      /this\._tabAgentMark\(t\) \|\| icons\.terminal/.test(pcPane));
   }
 }
 

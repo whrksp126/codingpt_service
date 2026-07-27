@@ -1052,7 +1052,7 @@ test('갭6 — chat.open 응답의 noSession/reason/candidates 가 서버를 그
     assert.strictEqual(data.reason, 'not_started');
     assert.strictEqual(data.candidates, 0);
     // reason 별로 클라 UI 가 갈린다(ambiguous 일 때만 '다른 대화 보기') → 문자열 도메인도 고정한다.
-    for (const r of ['not_started', 'ambiguous', 'none']) {
+    for (const r of ['not_started', 'ambiguous', 'none', 'claimed']) {
       assert.ok(typeof r === 'string' && r.length, r);
     }
   } finally { relay.callRpc = orig; }
@@ -1068,8 +1068,17 @@ test('갭6 — 데몬 resolveTarget 이 바인딩 파일 부재를 스캔으로 
   assert.ok(at > 0, 'resolveTarget 이 있어야 한다');
   const body = src.slice(at, src.indexOf('\n}', at));
   assert.match(body, /noSession: 'not_started'/, '바인딩 파일 부재 = not_started 여야 한다');
-  assert.match(body, /noSession: cands\.length \? 'ambiguous' : 'none'/, '바인딩 없음 = 모호/없음 이어야 한다');
-  assert.match(body, /cands\.length === 1/, '후보 1개면 폴백해야 한다(훅 미배선 에이전트 보호)');
-  // tid 가 주어진 경로에서 무조건 cands[0] 로 내려가면 안 된다.
+  // 바인딩이 없을 때: 소거법(다른 터미널 점유분 제외)을 반드시 거친다. 이 단계가 없으면 후보가 2개인
+  //  정상 상황이 전부 ambiguous(빈 화면)로 떨어져 "TUI 엔 대화가 있는데 채팅은 빈 화면"이 된다(실사고2).
+  assert.match(body, /claimedSessions\(cwdRel, p\.tid\)/, '점유 소거 단계가 사라졌다');
+  assert.match(body, /noSession: 'claimed'/, '후보 전부가 남의 것이면 claimed 여야 한다');
+  assert.match(body, /noSession: 'ambiguous'/, '끝까지 못 좁히면 ambiguous 여야 한다');
+  // tid 경로에서 채택은 free/live(소거를 통과한 집합)에서만 나온다 — cands[0] 로 바로 내려가면 실사고1 재발.
+  // tid 블록만 잘라낸다 — 뒤따르는 "tid 없음" 폴백은 cands[0] 를 정당하게 쓴다(터미널 좌표가 없는 호출).
+  const tidStart = body.indexOf('if (p.tid != null)');
+  const tidEnd = body.indexOf('if (!cands.length) return null;');
+  assert.ok(tidStart > 0 && tidEnd > tidStart, 'resolveTarget 구조가 바뀌었다 — 이 핀을 다시 맞춰야 한다');
+  const tidPath = body.slice(tidStart, tidEnd);
+  assert.doesNotMatch(tidPath, /cands\[0\]/, 'tid 경로가 소거 없이 최신 후보를 채택한다(실사고1 재발)');
   assert.doesNotMatch(body, /파일이 사라졌으면 스캔으로 폴백/, '구 주석/구 동작이 되살아났다');
 });

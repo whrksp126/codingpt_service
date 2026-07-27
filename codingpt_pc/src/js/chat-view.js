@@ -14,12 +14,13 @@
 //  캐치업/유실보정 = GET /chat/since(sinceSeq 워터마크). push 가 안 오면 폴링이 대신 따라잡는다.
 //  전송 = POST /chat/input(데몬이 그 tmux 세션에 bracketed paste + 지연 Enter). 실패 시 로컬 PTY 폴백.
 import { api } from "./api.js";
-import { icons } from "./icons.js";
+import { icons, agentMarkHtml } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, insertPathAt, flattenFiles, shouldReopenNoSession,
+  composerHasText, prettyModel, agentDisplayName,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -96,12 +97,18 @@ export class ChatView {
     el.innerHTML = `
       <div class="chat-banner hidden"></div>
       <div class="chat-scroll"></div>
-      <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
       <div class="chat-approvals"></div>
       <div class="chat-composer">
-        <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 17 })}</button>
-        <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
-        <button class="chat-send" type="button" title="보내기 (Enter)">${icons.arrowUp({ size: 16 })}</button>
+        <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
+        <div class="chat-box">
+          <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
+          <div class="chat-ctl">
+            <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
+            <span class="chat-model hidden"></span>
+            <span class="chat-ctl-gap"></span>
+            <button class="chat-send" type="button" title="보내기 (Enter)" disabled>${icons.arrowUp({ size: 17 })}</button>
+          </div>
+        </div>
       </div>`;
     this.host.appendChild(el);
     this.el = el;
@@ -113,9 +120,11 @@ export class ChatView {
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
+    this.modelEl = el.querySelector(".chat-model");
 
     this.inputEl.value = String(this.ctx.getDraft?.() || "");
     this._autoGrow();
+    this._syncComposer();
 
     this.scrollEl.addEventListener("scroll", () => {
       if (this._atBottom()) { this._unread = 0; this._syncJump(); }
@@ -125,6 +134,7 @@ export class ChatView {
     this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
     this.inputEl.addEventListener("input", () => {
       this._autoGrow();
+      this._syncComposer();
       this.ctx.setDraft?.(this.inputEl.value.slice(0, CHAT.DRAFT_MAX));
     });
     // 컴포저 키맵(PC): Enter=전송 · Shift+Enter=개행 · ⌘Enter=전송(Claude 앱 습관) · Esc=TUI 복귀.
@@ -218,6 +228,7 @@ export class ChatView {
           this._epoch = "";
           this._lastSeq = 0;
           this._sessionId = r.sessionId || null;
+          this._agent = r.agent || this._agent || null;
           this._openFailed = null;
           this._noSession = String(r.reason || "none");
           this._noSessionAt = Date.now();
@@ -228,6 +239,7 @@ export class ChatView {
         }
         this._noSession = null;
         this._probeUntil = 0;
+        this._agent = r.agent || this._agent || null;
         this._chatId = r.chatId || null;
         this._epoch = r.epoch || "";
         this._sessionId = r.sessionId || null;
@@ -375,6 +387,11 @@ export class ChatView {
     if (snapshot || wasBottom) { this._scrollToBottom(); this._unread = 0; }
     else if (added.length) this._unread += added.filter((m) => isVisible(m) && !isResult(m)).length;
     this._syncJump();
+    // 컴포저 모델 칩 — 트랜스크립트가 실어 보내는 assistant.model 중 **가장 최근 것**이 정본이다
+    //  (대화 중간에 /model 로 바뀌면 그 뒤부터 새 값이 온다). 우리가 정하는 값이 아니라 관측값이다.
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i] && list[i].model) { if (this._model !== list[i].model) { this._model = list[i].model; this._syncComposer(); } break; }
+    }
   }
 
   _rebuild() {
@@ -628,6 +645,7 @@ export class ChatView {
     this.inputEl.value = "";
     this.ctx.setDraft?.("");
     this._autoGrow();
+    this._syncComposer();   // 초안이 비었으므로 전송 버튼을 즉시 비활성(눌러도 할 일이 없다)
 
     // 첫 메시지가 곧 대화를 만든다(훅이 바인딩을 쓴다) → 짧은 탐색 창을 열어 붙는 순간을 잡는다.
     //  창이 지나면 다시 느린 재확인으로 돌아간다(폴링 폭주 금지 — shouldReopenNoSession).
@@ -673,10 +691,13 @@ export class ChatView {
     this._clearBlank();
     const wrap = document.createElement("div");
     wrap.className = "chat-blank";
+    // 글리프는 붙어 있는 에이전트를 알면 그 로고(참고 앱들도 자기 로고를 쓴다), 모르면 말풍선.
+    const mark = agentMarkHtml(this._agent, { size: 30 }) || icons.chat({ size: 30 });
     wrap.innerHTML =
-      `<span class="chat-blank-ic">${icons.chat({ size: 30 })}</span>` +
+      `<span class="chat-blank-ic">${mark}</span>` +
       `<div class="chat-blank-title">무엇이든 요청하세요</div>`;
-    if (this._noSession === "ambiguous") {
+    // 'claimed' = 후보가 있지만 전부 다른 터미널의 대화다 → 고를 여지가 있으니 같은 보조 액션을 준다.
+    if (this._noSession === "ambiguous" || this._noSession === "claimed") {
       const b = document.createElement("button");
       b.className = "chat-blank-alt";
       b.type = "button";
@@ -836,6 +857,7 @@ export class ChatView {
     ta.setSelectionRange(caret, caret);
     this.ctx.setDraft?.(ta.value.slice(0, CHAT.DRAFT_MAX));
     this._autoGrow();
+    this._syncComposer();   // 경로가 들어가 입력이 비지 않았으므로 전송 버튼을 활성화한다
     this._closePicker();
     ta.focus();
   }
@@ -868,6 +890,24 @@ export class ChatView {
     if (!t) return;
     t.style.height = "auto";
     t.style.height = Math.min(t.scrollHeight, 150) + "px";
+  }
+
+  // 컴포저 상태 동기화 — 전송 버튼 활성/모델 칩/플레이스홀더. 순수 판정은 chat-model 에 있다.
+  //  ★ 전송 버튼을 "빈 입력에도 눌리는 것처럼" 두지 않는다: 눌러도 아무 일이 없는 버튼은 거짓 affordance 다
+  //   (표시 정직성). 숨기지 않고 **disabled + 흐리게** 두는 이유는 위치 학습을 깨지 않기 위함이다.
+  _syncComposer() {
+    const has = !!composerHasText(this.inputEl?.value);
+    if (this.sendEl) this.sendEl.disabled = !has;
+    if (this.modelEl) {
+      const label = prettyModel(this._model);
+      this.modelEl.textContent = label;
+      this.modelEl.classList.toggle("hidden", !label);
+      this.modelEl.title = label ? "이 대화의 모델(" + String(this._model || "") + ") — 표시 전용" : "";
+    }
+    if (this.inputEl) {
+      const name = agentDisplayName(this._agent);
+      this.inputEl.placeholder = name ? name + "에게 요청" : "메시지 보내기";
+    }
   }
   _setBanner(msg, tone) {
     if (!this.bannerEl) return;
