@@ -22,6 +22,8 @@
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { termTheme, monoFontStack, termMinContrast } from "./theme.js";
+import { state } from "./state.js";
+import * as S from "./state.js";
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon && window.FitAddon.FitAddon;
@@ -274,13 +276,25 @@ export function closeAgentPanels() {
 //  "안 물어봄(기본 켜짐)" 으로 남기면 아니라고 답한 사용자가 켜진 채로 쓴다.
 //  둘 다 markOnboarded 를 남겨 다시 묻지 않는다. 기존 사용자는 이 화면을 못 보는데, 그때는
 //  "안 물어봄 = 켜짐" 기본값이 지금 동작(claude 배선됨)을 그대로 유지한다(호환).
+// 온보딩 노출은 **계정별 1회**다(2026-07-28 실사고: 회원탈퇴 → 같은 이메일 재가입 = 새 user id 인데
+//  데몬의 onboardedAt 이 머신 영속(agents.json — 배선 **설정**은 계정 전환에도 유지가 맞다)이라
+//  새 계정에게 온보딩이 영영 안 떴다). 노출 여부는 이 로컬 계정 키가 정본이고, 데몬 markOnboarded 는
+//  머신 기록으로 계속 남긴다(설정 유지와 노출 판정은 서로 다른 스코프다).
+const onbKey = () => (state.me && state.me.id != null ? `cpt.agentsOnboarded.${state.me.id}` : null);
+function markOnboardedLocal() { const k = onbKey(); if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} } }
+
 export async function maybeShowOnboarding() {
+  // 계정을 아직 모르면 판정하지 않는다(부팅 직후 loadMe 전) — 한 번 로드해 보고 없으면 보류.
+  if (!state.me) { try { await S.loadMe(); } catch (_) {} }
+  const k = onbKey();
+  if (!k) return false;
+  try { if (localStorage.getItem(k) === "1") return false; } catch (_) {}
   let c;
   try { c = await loadAgents(true); } catch (_) { return false; }   // 구 데몬 등 — 조용히 넘어간다
-  if (c.onboardedAt) return false;
   const wirables = c.agents.filter((a) => a.wirable);
   if (!wirables.some((a) => a.installed)) {
-    // 배선할 게 하나도 없으면 묻지 않는다(빈 질문).
+    // 배선할 게 하나도 없으면 묻지 않는다(빈 질문). 이 계정도 본 것으로 기록한다.
+    markOnboardedLocal();
     try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
     return false;
   }
@@ -335,6 +349,7 @@ export async function maybeShowOnboarding() {
         if (!a.installed && !on) continue;         // 미설치는 기록할 것이 없다
         try { await api.agentsLocal("agents.wire", { id: a.id, on }); } catch (_) { /* 개별 실패는 넘어간다 */ }
       }
+      markOnboardedLocal(); // 이 계정은 봤다 — [나중에]도 결정이다(계정마다 1회만 묻는다)
       try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
       try { await loadAgents(true); } catch (_) { /* noop */ }
       el.remove();

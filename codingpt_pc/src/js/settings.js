@@ -11,6 +11,7 @@ import {
 } from "./e2ee.js";
 import { hostE2eeEpoch, hostLockLabel, isHostRow } from "./host-lock.js";
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
+import { markPermGranted } from "./login-gate.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -444,7 +445,8 @@ function bindFolderPerms(rootEl) {
       b.textContent = "확인 중…";
       try {
         const ok = await api.probeFolder(b.dataset.f);
-        if (ok) { b.textContent = "허용됨"; return; } // disabled 유지
+        // 성공은 로컬에도 기록한다 — 온보딩(login-gate)이 "없는 권한만" 행으로 그리는 판정 근거.
+        if (ok) { markPermGranted(b.dataset.f); b.textContent = "허용됨"; return; } // disabled 유지
         b.dataset.denied = "1";
         b.textContent = "설정 열기";
         b.disabled = false;
@@ -537,6 +539,9 @@ async function doDeleteAccount(btn, go, msg) {
     state.me = null;
     state.devices = [];
     connMode = null;
+    // ★ 설정 모달을 닫는다(2026-07-28 실사고: 재가입 로그인 후 게이트가 걷히자 탈퇴 직전에 열려
+    //  있던 설정 모달이 그대로 다시 나타났다 — 새 계정은 기본 화면에서 시작해야 한다).
+    S.setView("workspace");
     state.daemon = await api.daemonStatus().catch(() => state.daemon);
     state.paired = !!state.daemon?.paired;
     const _elapsed = Date.now() - _t0; // 프로그래스 최소 노출(빠른 완료에도 스피너가 잠깐 보이게)

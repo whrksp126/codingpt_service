@@ -215,6 +215,31 @@ ok(/\.split-child \{[^}]*flex: 0 1 auto/.test(pcCss),
 ok(!/\.split-child \{[^}]*flex: 1 1 auto/.test(pcCss),
   'PC: grow 는 0 유지(1 이면 사용자가 잡은 분할 비율이 무너진다)');
 
+// ── 12. 온보딩/셋업은 **계정별 1회** + 권한은 없는 것만 하나씩 (2026-07-28 실사고) ─────────
+// 실사고: 회원탈퇴 → 같은 이메일 재가입(서버는 하드 삭제 = 새 user id)했는데 ① 이전 계정에서 열어 둔
+//  설정 모달이 그대로 다시 떴고 ② 온보딩이 안 떴다. 원인 = `cpt.setupDone` 머신 1회 플래그 +
+//  maybeShowOnboarding 이 부팅 시에만 실행 + view 상태 미초기화. 서버는 무죄였다(prod 실측: user id
+//  52 신규 생성 · 하드 삭제 확인) — 이 절은 클라이언트 3결함의 부재를 고정한다.
+const pcGate = strip(read(path.join(PC, 'login-gate.js')));
+const pcUiCh = strip(read(path.join(PC, 'ui-channel.js')));
+const pcSettings2 = strip(read(path.join(PC, 'settings.js')));
+ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem\("cpt\.setupDone"/.test(pcGate),
+  'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
+ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
+  'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
+ok(/data-perm=/.test(pcGate) && /missingPerms\(\)/.test(pcGate) && !/id="lgFolders"/.test(pcGate),
+  'PC: 권한은 없는 것만 개별 행으로 그린다(폴더 3종 일괄 버튼 금지 — 사용자 확정)');
+ok(/!missingPerms\(\)\.length/.test(pcGate),
+  'PC: 요청할 권한이 0개면 셋업 화면을 건너뛴다(빈 화면 금지)');
+ok(/maybeShowOnboarding/.test(pcGate),
+  'PC: 게이트 종료 시에도 에이전트 온보딩을 판정한다(재가입/계정 전환은 부팅 없이 온다)');
+ok(/setView\("workspace"\)/.test(pcUiCh),
+  'PC: 원격 탈퇴 수신 시 열려 있던 화면(설정 모달)을 기본 화면으로 되돌린다');
+ok(/S\.setView\("workspace"\)/.test(pcSettings2.slice(pcSettings2.indexOf('doDeleteAccount'))),
+  'PC: 이 기기에서 탈퇴해도 설정 모달을 닫는다(재가입 첫 화면에 잔상 금지)');
+ok(/markPermGranted\(b\.dataset\.f\)/.test(pcSettings2),
+  'PC: 설정의 폴더 허용 성공도 로컬 기록에 남긴다(온보딩의 "없는 권한만" 판정 근거)');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

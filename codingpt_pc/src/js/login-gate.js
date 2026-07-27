@@ -13,6 +13,30 @@ let step = "welcome"; // 'welcome' | 'login' | 'setup'
 let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 노출
 let autostartOn = true; // 셋업 토글 상태(기본 켬 — 진입 시 실제 적용)
 
+// ── 셋업/권한의 스코프 (2026-07-28 사용자 실사고로 개정) ─────────────────────
+// 실사고: 회원탈퇴 → 같은 이메일로 재가입(서버는 하드 삭제라 **새 user id**) → 이 PC 에서 온보딩이
+//  안 떴다. 원인 = `cpt.setupDone` 이 머신 1회 플래그였다. 새 계정은 새 사용자다 → **계정별 1회**.
+// 반면 macOS 권한(TCC 폴더 접근·알림)은 **앱(머신) 단위**다 — 계정을 바꿔도 이미 허용돼 있다.
+//  그래서 셋업 화면은 "이 계정이 처음 + 아직 없는 권한만 하나씩" 을 그린다(사용자 확정: 권한 없는
+//  것만 등장해 바로 허용 유도). 전부 허용돼 있으면 셋업 자체를 건너뛴다.
+const setupKey = () => (state.me && state.me.id != null ? `cpt.setupDone.${state.me.id}` : null);
+// 권한 허용 기록 — 프로브 성공 시에만 기록한다(모든 프롬프트는 우리 버튼에서 나가므로 이 기록이
+//  곧 "허용됨"의 로컬 정본이다. 사용자가 시스템 설정에서 뒤로 껐다면 다음 실제 접근이 실패하며
+//  settings 의 허용 버튼이 여전히 있다 — 온보딩은 유도 장치이지 판정 정본이 아니다).
+export function markPermGranted(name) { try { localStorage.setItem(`cpt.perm.${name}`, "1"); } catch (_) {} }
+const permGranted = (name) => { try { return localStorage.getItem(`cpt.perm.${name}`) === "1"; } catch (_) { return false; } };
+const FOLDER_PERMS = [
+  { id: "downloads", label: "다운로드 폴더 접근" },
+  { id: "desktop", label: "데스크탑 폴더 접근" },
+  { id: "documents", label: "문서 폴더 접근" },
+];
+function missingPerms() {
+  const out = [];
+  if (!permGranted("notif")) out.push({ id: "notif", label: "알림 허용", hint: "작업 완료를 바로 알려드려요" });
+  for (const f of FOLDER_PERMS) if (!permGranted(f.id)) out.push({ ...f, folder: true });
+  return out;
+}
+
 export function mountLoginGate(container) {
   el = container;
   el.className = "login-gate hidden";
@@ -69,7 +93,10 @@ function renderStep() {
     el.querySelector("#lgBack").addEventListener("click", () => { stopGateLogin(); step = "welcome"; renderStep(); });
     return;
   }
-  // setup
+  // setup — ★ 2026-07-28 개정(사용자 확정): 권한은 **없는 것만 하나씩** 행으로 등장해 그 자리에서
+  //  허용을 유도한다(설정 화면의 fpa 행과 동일 구성). 각 행의 [허용]이 그 폴더를 실제 프로브해
+  //  macOS 팝업을 띄우고, 성공하면 "허용됨"으로 굳는다(+ 로컬 기록 → 다음 계정에선 그 행이 안 나온다).
+  const perms = missingPerms();
   el.innerHTML = `
     <div class="lg-inner wide">
       <div class="lg-head">거의 다 됐어요</div>
@@ -78,14 +105,12 @@ function renderStep() {
           <span>로그인 시 자동 실행</span>
           <input type="checkbox" id="lgAuto" class="tgl" ${autostartOn ? "checked" : ""} />
         </label>
+        ${perms.map((p) => `
         <div class="lg-row">
-          <span>알림 허용<span class="lg-hint">작업 완료를 바로 알려드려요</span></span>
-          <button id="lgNotif" class="btn small">허용</button>
-        </div>
-        <div class="lg-row">
-          <span>폴더 접근<span class="lg-hint">다운로드·데스크탑·문서 — 한 번 허용하면 계속 적용</span></span>
-          <button id="lgFolders" class="btn small">허용</button>
-        </div>
+          <span>${p.label}${p.hint ? `<span class="lg-hint">${p.hint}</span>` : ""}</span>
+          <button class="btn small lg-perm" data-perm="${p.id}"${p.folder ? ' data-folder="1"' : ""}>허용</button>
+        </div>`).join("")}
+        ${perms.some((p) => p.folder) ? `<div class="lg-hint" style="padding:4px 2px 0">한 번 허용하면 모든 워크스페이스에 적용돼요</div>` : ""}
       </div>
       <button id="lgDone" class="btn primary lg">시작하기</button>
     </div>`;
@@ -94,38 +119,30 @@ function renderStep() {
     try { await (autostartOn ? api.autostartEnable() : api.autostartDisable()); }
     catch (_) { e.target.checked = autostartOn = !autostartOn; }
   });
-  // 알림 권한 — 진입 시 1회 자동 요청 + 버튼으로 재시도. granted 면 "허용됨" 고정.
-  const notifBtn = el.querySelector("#lgNotif");
-  const reqNotif = async () => {
+  el.querySelectorAll(".lg-perm").forEach((btn) => btn.addEventListener("click", async () => {
+    const id = btn.dataset.perm;
+    if (btn.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
+    btn.disabled = true;
+    btn.textContent = "확인 중…";
     try {
-      const ok = await api.notifPermission();
-      if (ok) { notifBtn.textContent = "허용됨"; notifBtn.disabled = true; }
-    } catch (_) { /* dev(비번들)에선 배너가 안 뜰 수 있음 — 릴리스에서 동작 */ }
-  };
-  notifBtn.addEventListener("click", reqNotif);
-  reqNotif();
-  // 폴더 접근 3종 일괄 프로브 — 각 폴더 최초 접근 시 macOS 팝업이 순서대로 뜬다(PC 앞에서 허용).
-  const fBtn = el.querySelector("#lgFolders");
-  fBtn.addEventListener("click", async () => {
-    if (fBtn.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
-    fBtn.disabled = true;
-    fBtn.textContent = "확인 중…";
-    try {
-      let all = true;
-      for (const f of ["downloads", "desktop", "documents"]) {
-        const ok = await api.probeFolder(f).catch(() => false);
-        if (!ok) all = false;
-      }
-      if (all) { fBtn.textContent = "허용됨"; return; } // disabled 유지
-      fBtn.dataset.denied = "1";
-      fBtn.textContent = "설정 열기";
-      fBtn.disabled = false;
-    } catch (_) { fBtn.textContent = "허용"; fBtn.disabled = false; }
-  });
+      const ok = btn.dataset.folder
+        ? await api.probeFolder(id).catch(() => false)
+        : await api.notifPermission().catch(() => false);
+      if (ok) { markPermGranted(id); btn.textContent = "허용됨"; return; } // disabled 유지
+      // 거부됨 — 시스템 설정으로 안내(폴더는 파일 및 폴더, 알림은 알림 설정이지만 진입점은 같다).
+      btn.dataset.denied = "1";
+      btn.textContent = "설정 열기";
+      btn.disabled = false;
+    } catch (_) { btn.textContent = "허용"; btn.disabled = false; }
+  }));
   el.querySelector("#lgDone").addEventListener("click", () => {
-    try { localStorage.setItem("cpt.setupDone", "1"); } catch (_) {} // 이 PC 셋업 완료 — 다음 로그인부턴 스킵
+    const k = setupKey();
+    if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} } // 이 계정+이 PC 셋업 완료
     pendingSetup = false;
     updateLoginGate();
+    // 다음 스텝: 에이전트 온보딩(계정별 1회 — agents-view 가 자체 판정). 부팅 시에만 돌던 것을
+    //  게이트 종료 시점에도 걸어 준다(재가입/계정 전환은 부팅 없이 일어난다 — 실사고).
+    import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
   });
 }
 
@@ -187,14 +204,19 @@ async function pollGateLogin() {
       state.paired = !!state.daemon?.paired;
       await S.loadMe();
       await S.loadWorkspaces();
-      // 셋업(자동 실행·알림·폴더 권한)은 계정이 아니라 "이 PC" 1회성 — 이미 완료한 기기면 건너뛴다
-      //  (재로그인/계정 전환마다 다시 나오던 문제의 수정).
+      // ★ 2026-07-28 개정: 셋업은 **계정별 1회**다(구 `cpt.setupDone` 머신 플래그는 회원탈퇴 →
+      //  같은 이메일 재가입(새 user id)에서 온보딩을 삼켰다 — 실사고). 단 이 계정이 처음이어도
+      //  요청할 권한이 하나도 없으면(전부 허용됨) 셋업 화면 자체를 건너뛴다(빈 화면 금지).
       let done = false;
-      try { done = localStorage.getItem("cpt.setupDone") === "1"; } catch (_) {}
-      if (done) {
+      const k = setupKey();
+      try { done = !!k && localStorage.getItem(k) === "1"; } catch (_) {}
+      if (done || !missingPerms().length) {
+        if (!done && k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
         pendingSetup = false;
         step = "welcome";
         S.emit(); // → render() → updateLoginGate() → 게이트 닫힘(바로 워크스페이스로)
+        // 에이전트 온보딩은 계정별로 따로 판정한다(부팅 없이 온 재가입/계정 전환 경로 — 실사고).
+        import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
         return;
       }
       // 셋업 단계로 — 자동 실행 기본 켬을 실제 적용(끄면 토글로 해제).

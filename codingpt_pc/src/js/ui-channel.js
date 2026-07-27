@@ -23,6 +23,10 @@ async function onAccountDeleted() {
   state.me = null;
   state.devices = [];
   resetHostLocks(); // 다음 계정 화면에 옛 계정 PC 의 자물쇠 배지가 새지 않게
+  // ★ 열려 있던 화면(설정 모달 등)을 기본 화면으로 되돌린다(2026-07-28 실사고: 탈퇴 → 재가입 후
+  //  로그인 게이트가 닫히자 이전 계정에서 열어 둔 설정 모달이 그대로 다시 나타났다 — 새 계정의
+  //  첫 화면이 남의 잔상으로 시작되면 "간섭"으로 읽힌다).
+  S.setView("workspace");
   state.daemon = await api.daemonStatus().catch(() => state.daemon);
   state.paired = !!state.daemon?.paired;
   S.emit();
