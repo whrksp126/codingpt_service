@@ -162,6 +162,9 @@ ok(/gutterPx: FIT_GUTTER_PX/.test(pcPane),
 ok(/setTimeout\([\s\S]{0,120}_fitNow\(\)/.test(pcPane),
   'PC: 채널 개설 후 지연 재검산이 있다(ResizeObserver 는 크기 불변 시 안 울린다)');
 
+ok(/this\._sentCols === cols && this\._sentRows === rows/.test(pcPane),
+  'PC: 크기가 안 바뀌면 resize 를 보내지 않는다(7초마다 tmux 창 재클레임 = 폰 크기 뺏기)');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

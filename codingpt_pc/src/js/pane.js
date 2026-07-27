@@ -1364,6 +1364,8 @@ export class PaneView {
     const { cols, rows } = this.term;
     if (this.ctx.isLocal) {
       this._attachedWin = typeof win === "number" ? win : null;
+      this._sentCols = cols || 80;   // ptyOpen 이 이미 이 크기를 전달했다 → 직후 no-op 을 걸러내게
+      this._sentRows = rows || 24;
       api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).then((resolved) => {
         // 요청 tid 가 스테일(닫힘/구버전 인덱스)이면 Rust 가 첫 터미널로 폴백해 실제 attach 한
         //  tid 를 돌려준다 — 탭을 실체에 맞게 보정(리컨실러가 목록은 따로 정리).
@@ -1628,7 +1630,16 @@ export class PaneView {
     } catch (_) {}
     this._correctFit();
     const { cols, rows } = this.term;
-    if (cols && rows) this._resize(cols, rows);
+    if (!cols || !rows) return;
+    // ★ 값이 안 바뀌었으면 보내지 않는다. 라이브 로그로 드러난 것: `_fitNow` 가 **7초마다**(리컨실
+    //  틱) 같은 결과로 재실행되며 매번 `ptyResize` 를 보냈다. tmux 는 `window-size latest` 라 그
+    //  resize 가 곧 **창 크기 재클레임**이다 → 폰이 같은 터미널을 보고 있으면 PC 가 7초마다 폰의
+    //  크기를 뺏는다(12R 에서 "포그라운드+입력포커스만 주장"으로 좁혀 놓은 규율을 무의미하게 만든다).
+    //  no-op 를 걸러내면 사용자가 실제로 창을 바꿀 때만 주장한다.
+    if (this._sentCols === cols && this._sentRows === rows) return;
+    this._sentCols = cols;
+    this._sentRows = rows;
+    this._resize(cols, rows);
   }
 
   // fit() 결과의 실측 검산 — FitAddon 은 "부모 computed 폭"(border-box 라 padding 포함) 에서
@@ -1657,8 +1668,10 @@ export class PaneView {
         // 진단 로그 — 다음에 또 "우측이 잘린다" 신고가 오면 추측 대신 이 숫자로 판정한다.
         //  (측정 실패로 보정이 조용히 건너뛰어지는 경우까지 드러난다)
         if (pass === 0) {
-          api.debugLog(`fit pane=${this.id} fitCols=${t.cols} cellW=${cell.width.toFixed(3)} `
-            + `vpW=${vp.clientWidth} vpOff=${vp.offsetWidth} → cols=${cols} rows=${rows}`);
+          // 같은 값이 반복되면 남기지 않는다(7초마다 같은 줄이 쌓이면 로그가 쓸모없어진다).
+          const line = `fit pane=${this.id} fitCols=${t.cols} cellW=${cell.width.toFixed(3)} `
+            + `vpW=${vp.clientWidth} vpOff=${vp.offsetWidth} → cols=${cols} rows=${rows}`;
+          if (line !== this._lastFitLog) { this._lastFitLog = line; api.debugLog(line); }
         }
       } catch (_) { return; }
       if (cols === t.cols && rows === t.rows) return;   // 더 줄일 것 없음
