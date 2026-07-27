@@ -73,6 +73,7 @@ export const e2ee = {
   verifyCode: null,       // 요청 구분용 4자리 — **대조값 아님**(서버가 1코어 1.3초에 같은 값을 만든다)
   fingerprint: null,      // 감사용 6자리(기기 목록 표기)
   recoverySet: false,
+  autoBootError: null,    // 개정 4 자동 부트스트랩 최근 실패(성공/불필요 시 null) — 행동 행 문구용
   reason: null,
   pending: [],            // 승인 대기 중인 다른 기기들(확인 숫자는 로컬 계산)
   devices: [],            // 열쇠를 가진 기기(키링)
@@ -273,6 +274,37 @@ export async function refreshE2ee() {
   const kr = await cpt("e2ee.keyring");
   e2ee.devices = kr && Array.isArray(kr.devices) ? kr.devices : [];
   deriveDisplay();
+  S.emit();
+  // ★ 개정 4(카피 감사 §3) — 상태가 확정된 이 시점에 자동화 2종을 건다(둘 다 멱등·스로틀).
+  void normalizeE2eePolicy();
+  void maybeAutoBootstrap();
+}
+
+// ── 개정 4 자동화 ────────────────────────────────────────────────────
+// ① 정책 '자동' 고정 — 정책 UI 는 삭제됐다(사용자 확정). 구 UI 로 '끄기/항상' 을 저장해 둔 기기는
+//    되돌릴 수단이 없어지므로 여기서 1회 복원한다(env 킬스위치 CPT_E2EE=0 은 데몬 쪽 판정이라 무관).
+let policyNormalized = false;
+async function normalizeE2eePolicy() {
+  if (policyNormalized || !e2ee.available) return;
+  if (!e2ee.policy || e2ee.policy === "preferred") { policyNormalized = true; return; }
+  policyNormalized = true; // 실패해도 재시도 폭주 금지 — 다음 앱 실행이 다시 시도한다
+  try { await setPolicy("preferred"); } catch (_) { /* noop */ }
+}
+// ② 자동 부트스트랩 — 계정 열쇠 0개가 **확정**되면(needsBootstrap = keyState 기반) 이 화면이 켠다.
+//    "데몬(헤드리스) 자동 부트스트랩 금지" 원칙은 유지된다: 주체가 사람이 보고 있는 앱 표면이라
+//    모바일 앱의 기존 자동 부트스트랩과 같은 등급이다. 동시 시도(폰+PC)는 서버 409 가 중재하고
+//    진 쪽은 자동으로 enroll 대기가 된다(e2ee-account.js 헤더).
+//    ⚠ 스로틀 60s: 실패를 즉시 재시도하면 refresh 주기(60s)와 겹쳐 폭주한다. 성공 시 refreshE2ee 가
+//    상태를 갱신하므로 다음 진입에서 needsBootstrap 이 꺼져 자연 종료된다.
+let autoBootAt = 0;
+async function maybeAutoBootstrap() {
+  if (!state.paired || !e2ee.available) return;
+  if (!needsBootstrap(e2ee)) { e2ee.autoBootError = null; return; }
+  const now = Date.now();
+  if (now - autoBootAt < 60000) return;
+  autoBootAt = now;
+  const r = await bootstrapAccount();
+  e2ee.autoBootError = r && r.ok ? null : (r && r.error) || "bootstrap_failed";
   S.emit();
 }
 

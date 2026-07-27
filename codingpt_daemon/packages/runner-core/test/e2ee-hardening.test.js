@@ -408,7 +408,9 @@ test('D11. 계정에 열쇠가 없어 사람을 기다리는 상태는 state=non
   assert.strictEqual(s.checking, false);
   assert.strictEqual(s.state, 'none',
     "PC 의 '열쇠 없음' 표기는 state==='none' 에서만 켜진다 — 'bootstrap' 으로 보내면 확정 평문이 노란 '준비 중' 으로 표시된다");
-  assert.match(String(s.reason || ''), /폰|앱/);
+  // ★ 개정 4(2026-07-27): 부트스트랩은 앱 표면이 자동 수행 — reason 은 수동 지시("폰에서 켜 주세요")
+  //  대신 진행형 + 평문 폴백 고지다(e2ee-account.test.js 1번과 같은 개정).
+  assert.match(String(s.reason || ''), /준비하는 중/);
 });
 
 // ══════════════════════════════════════════════════════════════════════════

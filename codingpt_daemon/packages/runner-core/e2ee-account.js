@@ -515,10 +515,12 @@ async function stepAcquire(e) {
     return { phase: 'pending', enrollmentId: st.enrollmentId };
   }
   if (state === 'bootstrap') {
-    // ★ 자동 부트스트랩 금지(파일 헤더 판단). 사람이 앱에서 켜면 우리는 pending 경로로 들어간다.
+    // ★ 자동 부트스트랩 금지는 **데몬(헤드리스)에만** 해당한다(파일 헤더 판단). 개정 4(2026-07-27)
+    //  이후 사람이 보고 있는 앱 표면(PC 렌더러 maybeAutoBootstrap / 모바일 services/e2ee.ts ③)이
+    //  자동으로 켜므로, 수동 지시("폰에서 켜 주세요")는 이제 거짓 안내다 — 진행형으로 바꾼다.
     st.keyState = 'none';
     st.phase = 'bootstrap';
-    st.reason = '계정에 아직 종단간 암호화 열쇠가 없어요 — 폰(앱)에서 먼저 켜 주세요. 그때까지는 기존 방식(평문)으로 그대로 동작합니다.';
+    st.reason = '계정 암호화 열쇠를 준비하는 중이에요. 그때까지는 기존 방식(평문)으로 그대로 동작합니다.';
     schedule('bootstrap');
     return { phase: 'bootstrap' };
   }

@@ -716,24 +716,44 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
       "한 글자라도 다르면",                   // 승인 지침 2문장 → 1문장('다르면 거절' 은 유지)
     ].filter((t) => settings.includes(t)), []);
 
+  // ①-b ★ 개정 4(2026-07-27 사용자 확정, 카피 감사 §3 개정 4 블록) — `자세히` 통삭제분.
+  //  주석에는 "왜 지웠는지"의 근거로 옛 명칭이 남으므로 **주석을 걷어낸 소스**로 검사한다(아래 ⑦과
+  //  같은 규율 — 원본 ① 목록은 주석에도 안 남는 문구라 raw 검사로 충분했다).
+  const bare = settings.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
+  eq("개정 4 로 삭제한 UI 문구·마크업이 없다(자세히·켜기 버튼·정책·안전 코드 행·복구·고지·지문)",
+    [
+      "암호화 켜기",                          // 수동 버튼 → 자동 부트스트랩(maybeAutoBootstrap)
+      "암호화 열쇠가 없어요",                 // 부트스트랩 행동 행 제목 → '암호화를 준비하고 있어요…'
+      "주로 쓰는 기기에서 켜세요",            // 부트스트랩 부제(수동 지시) — 자동화로 불필요
+      "자동 권장 · 항상 = 안 되면 조작 차단", // 정책 세그 삭제(자동 고정 · env 킬스위치만)
+      "이 기기 안전 코드",                    // 안전 코드 상시 행 삭제(대조는 승인 카드에서만)
+      "다른 기기 화면과 같은지 확인",         // 위 행의 부제
+      "복구 코드",                            // 만들기/복원 UI 삭제(현 스코프엔 잠긴 저장 데이터 없음)
+      "지금 적어두세요 · 다시 못 봅니다",     // 복구 1회 표시 블록
+      "기기가 없으면 자세히 → 복구 코드로 복원", // 자기 대기의 복구 힌트
+      "폴더명·알림 제목은 서버가 봅니다",     // 메타데이터 고지 → 문서 이관
+      "아래 코드가 새 기기 화면과 글자까지 같으면 승인, 다르면 거절하세요.", // → '왜'를 담은 새 지침(§5)
+      'id="e2eeAdvToggle"',                   // `자세히` 접기 자체가 없다
+      "🔒 ${k.fingerprint}",                  // 기기 행 메타의 지문(고아 열쇠 행만 예외)
+    ].filter((t) => bare.includes(t)), []);
+
   // ② 보안상 반드시 남는 문구 — 축약했어도 **행동 지시·정직성 신호**는 그대로다(§5).
   //  이 목록이 하나라도 사라지면 사람 눈 대조(= 서버 MITM 차단의 전부)가 흐려진다.
+  //  ★ 개정 4 로 목록이 줄었다: 정책/복구/안전 코드 상시 행/메타 고지의 문구는 UI 와 함께 삭제됐고
+  //   (위 ① 목록이 부재를 고정한다), 승인 지침은 "왜"를 담은 새 문구로 교체됐다(사용자 질문
+  //   "항상 같은 걸 왜 물어보나"가 근거 — 카피 감사 §3 개정 4-4).
   eq("보안 문구는 글자까지 그대로 남아 있다(§5)",
     [
-      "아래 코드가 새 기기 화면과 글자까지 같으면 승인, 다르면 거절하세요.", // §2.10 눈 대조 지침
+      "새 기기 화면에도 같은 코드가 보이면 승인하세요. 정상이라면 항상 같아요 — 다르면 연결이 안전하지 않은 것이니 거절하세요.", // §2.10 눈 대조 지침(개정 4)
       "· 대조용 아님",                                    // 4자리(13비트)는 대조 대상이 아니다
       "안전 코드를 아직 못 만들었어요 · 승인하지 마세요", // 대조 기준 없는 습관적 승인 차단(승인 카드)
       // 같은 상황의 **대기 화면**(이 PC 가 새 기기) 전용 문구 — 그 화면에는 승인 버튼이 없으므로
       //  누르지 말아야 할 곳을 명시한다. 승인자용 문구 재사용 = 지시 대상 어긋남(앱 COPY.wait.noSafety).
       "안전 코드를 아직 못 만들었어요 · 기존 기기에서 승인하지 마세요",
       "요청 번호는 서버 값 · 코드로만 대조하세요",        // verified=false = 표시값이 서버 지배
-      "자동 권장 · 항상 = 안 되면 조작 차단",             // '항상' 이 **무엇을** 막는지(목적어) 유지
       "연결된 PC 없음",                                   // host 행 0개여도 정직성 기제를 비우지 않는다
-      "기기가 없으면 자세히 → 복구 코드로 복원",          // 기기 전량 상실 시의 유일한 출구 안내
-      "지금 적어두세요 · 다시 못 봅니다",                 // 복구 코드 1회 표시·영구 소실
       "다시 눌러 해제 · 되돌릴 수 없음",                  // 신뢰 해제 비가역(결정 순간)
-      "폴더명·알림 제목은 서버가 봅니다",                 // 메타데이터 정직성 고지
-      "다른 기기 화면과 같은지 확인",                     // 안전 코드 대조 유도(자세히 안)
     ].filter((t) => !settings.includes(t)), []);
 
   // ③ 안전 코드 계산 불가 = 문구만이 아니라 **승인 버튼 비활성**까지가 계약이다(앱과 통일).
@@ -755,15 +775,25 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("verified=false 경고는 안전 코드가 있을 때만(경고 한 번에 하나 · 앱과 동일)",
     /\$\{!noSafety && p\.verified === false \?/.test(settings), true);
 
-  // ③-c 복구 코드 컨트롤은 `state` 값이 아니라 ready/canRestore 로 분기한다(계약 §2.4 규약 3 · 지적 #4).
-  //  앱과의 동치는 test/e2ee-crossimpl.mjs 5절이 격자로 대조하고, 여기서는 **화면이 그 판정을 실제로
-  //  호출하는지**를 고정한다(순수 함수만 맞고 화면이 옛 분기를 쓰면 아무 것도 달라지지 않는다).
-  eq("복구 코드 만들기 활성 = e2eeReady()(구 state==='trusted' 분기 제거)",
-    /id="e2eeRecBtn"\$\{e2eeReady\(\) \? "" : " disabled"\}/.test(settings)
-    && !/e2ee\.state === "trusted" \? "" : " disabled"/.test(settings), true);
-  eq("복원 행 노출 = e2eeCanRestore()(구 state 이중 부정 제거)",
-    /\$\{e2eeCanRestore\(\) \?/.test(settings)
-    && !/e2ee\.state !== "trusted" && e2ee\.state !== "off"/.test(settings), true);
+  // ③-c ★ 개정 4: 복구 코드 UI 는 통째로 없다(만들기 버튼·복원 입력·1회 표시 전부). 데몬 RPC
+  //  (e2ee.recovery.*)는 존치 — 스냅샷 봉인을 켜는 날 UI 만 되살린다. 여기서는 부재를 고정한다.
+  eq("복구 코드 UI 가 없다(개정 4 — 만들기/복원/1회 표시 전부)",
+    [/id="e2eeRecBtn"/, /id="e2eeRecIn"/, /id="e2eeRecRestore"/, /e2eeRecoveryShown/, /e2eeCanRestore/]
+      .filter((re) => re.test(bare)).map(String), []);
+  // ③-c′ 자동 부트스트랩 — 수동 버튼 대신 상호작용 화면이 켠다. settings 는 진행/실패 표시만 하고
+  //  실제 시도는 e2ee.js(maybeAutoBootstrap, refreshE2ee 끝에서 호출·60s 스로틀)가 한다.
+  {
+    const e2eeSrc = readFileSync(`${dir}/e2ee.js`, "utf8");
+    eq("자동 부트스트랩이 배선돼 있다(refreshE2ee → maybeAutoBootstrap, 버튼 없음)",
+      /void maybeAutoBootstrap\(\)/.test(e2eeSrc) && /async function maybeAutoBootstrap/.test(e2eeSrc)
+      && !/id="e2eeBootBtn"/.test(settings), true);
+    eq("정책은 '자동' 으로 고정·복원된다(normalizeE2eePolicy — 구 UI 로 저장한 끄기/항상 탈출로)",
+      /normalizeE2eePolicy/.test(e2eeSrc) && /setPolicy\("preferred"\)/.test(e2eeSrc)
+      && !/e2eePolicySeg/.test(settings), true);
+    eq("부트스트랩 진행/실패 표시가 있다(자동이 조용히 실패하면 영구 평문을 아무도 모른다)",
+      settings.includes("암호화를 준비하고 있어요…")
+      && settings.includes("암호화를 켜지 못했어요 · 잠시 후 다시 시도합니다"), true);
+  }
 
   // ③-d host 행 집합 = isHostRow(앱 필터와 동치 · 지적 #1/#6). 꺼둔 PC 를 나열하면 그 행은 오프라인이라
   //  epoch 항목이 삭제돼 **영구 '확인 중'** 이 되고, 폰 화면에는 그 행이 아예 없어 두 화면이 갈라진다.
@@ -801,12 +831,11 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   verified=false 를 동반하므로 겹치면 노이즈가 되고, 읽어야 하는 지시는 더 강한 쪽 하나다(앱 동일).
   eq("경고는 한 번에 하나만(noSafety 일 때 unverified 는 숨긴다)",
     settings.includes("!noSafety && p.verified === false"), true);
-  //  ⑤-3 복구 코드 컨트롤은 `state` 값이 아니라 ready/노출 판정 함수로 분기한다(계약 §2.4 규약 3).
-  eq("복구 코드 만들기 활성 = e2eeReady() · 복원 행 노출 = e2eeCanRestore()",
-    [settings.includes(`id="e2eeRecBtn"${"${"}e2eeReady() ? "" : " disabled"}`), settings.includes("e2eeCanRestore()")],
-    [true, true]);
-  eq("복구 컨트롤에서 state 분기가 사라졌다",
-    [`e2ee.state === "trusted" ? "" : " disabled"`, `e2ee.state !== "trusted" && e2ee.state !== "off"`]
+  //  ⑤-3 ★ 개정 4: 복구 코드 컨트롤은 UI 째로 없다(§3 개정 4 블록 — 데몬 RPC 만 존치). 노출 판정
+  //   함수(canRestore)의 계약 §2.4 규약 3 은 e2ee-label.js 단위 테스트가 계속 지킨다.
+  eq("복구 컨트롤이 화면에 없다(개정 4)",
+    [`id="e2eeRecBtn"`, "e2eeCanRestore()",
+     `e2ee.state === "trusted" ? "" : " disabled"`, `e2ee.state !== "trusted" && e2ee.state !== "off"`]
       .filter((t) => settings.includes(t)), []);
   //  ⑤-4 host 행 집합은 host-lock.js 의 규칙 함수를 쓴다(꺼둔 PC 가 영구 '확인 중' 으로 남던 결함).
   eq("host 행은 isHostRow 로 고른다(오프라인 PC 나열 금지)",
@@ -823,8 +852,10 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("목록은 하나다('열쇠를 가진 기기' 제목 · '내 기기' 표 · deviceTable 컨테이너가 없다)",
     ["열쇠를 가진 기기", ">내 기기<", "deviceTable", "dev-th"].filter((t) => code.includes(t)), []);
   eq("섹션 제목은 `기기` 이고 self 배지는 그 행 우측이다", code.includes(`<div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>`), true);
-  eq("기능명은 자세히 안 정책 행이 갖는다(화면에서 '종단간 암호화' 가 사라지지 않는다)",
-    code.includes("<span>종단간 암호화<br>"), true);
+  // ★ 개정 4: '종단간 암호화' 기능명 행도 정책 세그와 함께 삭제됐다(자동 고정 — 설정할 것이 없으면
+  //  기능명 행도 없다). 위 ①/③-c′ 핀이 세그 부재와 자동화 배선을 고정한다.
+  eq("정책 행(기능명 포함)이 화면에 없다(개정 4 — 자동 고정)",
+    code.includes("<span>종단간 암호화<br>"), false);
   // ★ 반전된 핀(사용자 확정 2026-07-27 3차): 행별 자물쇠 열('암호화됨'/'평문'/'확인 중')과 섹션
   //  '열쇠 있음' 배지, 그리고 OS 라벨을 **화면에서 제거**했다. 표시가 사라진 것이지 규칙이 사라진 것은
   //  아니다 — `host-lock.js` 의 판정(거짓 자물쇠 금지·세대 일치)은 그대로 있고 그쪽 단위 테스트가 지킨다.

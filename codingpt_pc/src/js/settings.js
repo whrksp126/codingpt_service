@@ -6,9 +6,8 @@ import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { ANDROID_QR, IOS_QR } from "./store-qr.js";
 import {
-  e2ee, e2eeReady, refreshE2ee, approveDevice, denyDevice, setPolicy as setE2eePolicy,
-  createRecoveryCode, restoreFromRecovery, revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap, bootstrapAccount,
-  e2eeCanRestore,
+  e2ee, e2eeReady, refreshE2ee, approveDevice, denyDevice,
+  revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap,
 } from "./e2ee.js";
 import { hostE2eeEpoch, hostLockLabel, isHostRow } from "./host-lock.js";
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
@@ -579,15 +578,16 @@ function fmtRecent(iso) {
 //  ★ 2026-07-27 개정 2(사용자 요구): 구 '종단간 암호화' 카드와 구 '내 기기' 표를 **한 섹션으로 합쳤다**.
 //   암호화 카드 안 '열쇠를 가진 기기' 목록 + 그 아래 '내 기기' 표 = 같은 기기가 한 화면에 두 번 나왔다.
 //   열쇠 보유·암호화 여부는 기기의 속성이므로 **기기 행이 단일 진실**이고 목록은 하나뿐이어야 한다.
-//  첫 화면(스크롤 없음, 설명문 0줄):
+//  첫 화면(스크롤 없음, 설명문 0줄 — ★ 개정 4 로 접기 섹션 없이 이것이 전부다):
 //    [섹션 제목 행] 기기 ......................... [self 배지 = 계정 열쇠 상태]
 //    ⚠ 행동 행 — **동시 1개만**: 새 기기 N대 승인(펼치면 그 자리에서 대조·승인) > 기존 기기에서 승인해
-//      주세요 > 암호화 열쇠가 없어요
+//      주세요 > 준비 중 1줄(자동 부트스트랩 — e2ee.js maybeAutoBootstrap 이 켠다, 버튼 없음)
 //    (배지 톤이 on 이 아니고 행동 행이 없을 때만) reason 1줄(2줄 클램프)
-//    기기 행: [아이콘] 이름 [이 기기] ............. [암호화 배지]  [🗑]
-//             {OS} · {최근 작업} · 🔒 {지문}
+//    기기 행: [아이콘] 이름 [이 기기] · {최근 작업} .......... [🗑]
 //    (온라인 PC 0대일 때) 🖥 연결된 PC 없음 ....... [확인 중]   ← §2.7 정직성 기제. **절대 접지 않는다**
-//    자세히 ▾ (기본 접힘) → ① 정책 ② 안전 코드 ④ 복구 코드 ⑥ 메타데이터 고지
+//  ★ 개정 4(2026-07-27 사용자 확정, 카피 감사 §3 개정 4 블록이 정본): 접기 섹션·수동 켜기 버튼·정책
+//    세그(자동 고정)·안전 코드 상시 행·복구 UI·메타 고지·행 메타 지문을 전부 삭제했다. 문자열 부재는
+//    test/contract.mjs ① 이 고정한다.
 //  ★ 암호화 배지는 **그 기기의 실제 상태**다: 근거(runner_status.e2eeEpoch)를 가진 **온라인 PC** 행에만
 //   그린다(isHostRow = 앱 필터와 동치). 오프라인·모바일 행에는 배지를 그리지 않는다 — 모름을 초록도
 //   평문도 아닌 상태로 남기는 유일한 정직한 표시다(배지 도메인 4종은 계약 = '오프라인' 을 새로 만들지
@@ -601,12 +601,10 @@ function fmtRecent(iso) {
 //  ★ 표시값은 전부 ikX 에서 **로컬 계산**한 것이다(e2ee.js deriveDisplay). 서버가 준 안전 코드는
 //    받지도 그리지도 않는다 — 서버가 이 채널을 위조하는 것을 막는 게 이 UX 의 존재 이유다.
 //  ★ 마스터키는 데몬에 있으므로 모든 조작은 e2ee.js → cpt.sock 위임이다(JS 에 MK 없음).
-let e2eeRecoveryShown = null; // 방금 만든 복구 문구(1회 표시 — 카드 재렌더에도 유지)
 let e2eeMsg = "";
 // 접기 상태는 **로컬 플래그**다(state.js 에 넣지 않는다 — 기기 간 동기화 대상이 아니다).
-//  PC 에는 접기 컴포넌트가 없어 `sett-row` 하나를 토글로 쓴다(카피 감사 §3-A 의 PC 적용 메모).
 //  리컨실러 emit 마다 renderE2ee 가 다시 도므로 모듈 스코프에 둬야 펼친 상태가 유지된다.
-let e2eeAdvOpen = false;   // '자세히'
+//  (개정 4: `자세히`(e2eeAdvOpen)·복구 1회 표시(e2eeRecoveryShown)는 UI 와 함께 삭제)
 let e2eeApprOpen = false;  // 행동 행(새 기기 N대 승인) → 승인 카드
 let e2eeWaitBusy = false;  // '승인됐는지 확인' 진행 중
 
@@ -691,7 +689,7 @@ function e2eeApprovalCard(p) {
       <span class="dev-ic">${icons.smartphone({ size: 15 })}</span>
       <span class="dev-name" style="flex:1;min-width:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.label || "새 기기")}</span>
     </div>
-    <div class="acct-msg" style="color:var(--text2)">아래 코드가 새 기기 화면과 글자까지 같으면 승인, 다르면 거절하세요.</div>
+    <div class="acct-msg" style="color:var(--text2)">새 기기 화면에도 같은 코드가 보이면 승인하세요. 정상이라면 항상 같아요 — 다르면 연결이 안전하지 않은 것이니 거절하세요.</div>
     ${noSafety ? noSafetyCodeWarn() : safetyChips(p.safetyCode, "var(--accent)")}
     ${requestNo(p.verifyCode)}
     ${!noSafety && p.verified === false ? `<div class="acct-msg" style="color:var(--warn,#FBBF24)">요청 번호는 서버 값 · 코드로만 대조하세요</div>` : ""}
@@ -727,69 +725,36 @@ function e2eeActionRow(pend) {
   //   [승인] 을 누른다 = 사람 눈 대조라는 유일한 MITM 방어가 그 승인에서 통째로 빠진다(§2.10).
   //   그래서 승인 카드와 **같은 3항**을 쓴다(앱 DeviceTrustWaiting 미러). 단 경고 **문구는 다르다**:
   //   이 화면에는 승인 버튼이 없으므로 누르지 말아야 할 곳을 명시한다(waitNoSafetyWarn).
-  //  ★ 부제 1줄만 예외적으로 붙인다: 기기를 전부 잃은 사용자에게 '기존 기기에서 승인' 은 실행 불가능한
-  //   지시이고 유일한 출구(복구 코드)는 접힌 `자세히` 안에 있다 → 경로를 알린다(앱 act.selfWaitHint 미러).
+  //  (개정 4: 구 '자세히 → 복구 코드로 복원' 힌트는 복구 UI 와 함께 삭제 — 현 스코프엔 잠긴 저장
+  //   데이터가 없어 기기 전손실 = 새 기기에서 자동으로 새 열쇠가 생긴다.)
   if (e2eeSelfWaiting()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px">
         <div style="font-size:13px;font-weight:700">기존 기기에서 승인해 주세요</div>
-        ${e2eeCanRestore() ? `<div class="acct-msg" style="padding-top:0">기기가 없으면 자세히 → 복구 코드로 복원</div>` : ""}
         ${e2ee.safetyCode ? safetyChips(e2ee.safetyCode, "var(--accent)") : waitNoSafetyWarn()}
         ${requestNo(e2ee.verifyCode)}
         <button class="btn small" id="e2eeWaitRefresh"${e2eeWaitBusy ? " disabled" : ""}>${e2eeWaitBusy ? "확인 중…" : "승인됐는지 확인"}</button>
       </div>
     </td></tr>`;
   }
-  // 계정에 열쇠가 0개 = 사람이 켜기 전까지 **영구 평문**. 데몬은 이 경로를 자동으로 타지 않는다.
+  // 계정에 열쇠가 0개 — ★ 개정 4(사용자 확정): 버튼 없이 **이 화면(사람이 보는 앱)이 자동으로 켠다**
+  //  (e2ee.js maybeAutoBootstrap). "데몬(헤드리스) 자동 부트스트랩 금지" 원칙은 그대로다 — 주체가
+  //  상호작용 표면이면 모바일 앱의 기존 자동 부트스트랩과 같은 등급이다. 여기는 진행/실패 표시만 한다.
   if (e2eeNeedsBootstrap()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-      <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px">
-        <div style="font-size:13px;font-weight:700">암호화 열쇠가 없어요</div>
-        <div class="acct-msg" style="padding-top:0">주로 쓰는 기기에서 켜세요</div>
-        <button class="btn small primary" id="e2eeBootBtn" style="margin-top:2px">암호화 켜기</button>
-      </div>
+      <div class="acct-msg" style="padding:2px 0">${e2ee.autoBootError ? "암호화를 켜지 못했어요 · 잠시 후 다시 시도합니다" : "암호화를 준비하고 있어요…"}</div>
     </td></tr>`;
   }
   return "";
 }
 
-/**
- * 자세히 안 — 순서 고정(정책 → 안전 코드 → 복구 → 메타데이터 고지).
- *  ★ 개정 2 에서 '열쇠를 가진 기기' 목록은 **삭제**했다: 그 정보(열쇠 보유 + 지문 + 해제)는 기기 행에
- *   흡수됐다(같은 기기가 두 목록에 중복 등장하던 화면을 하나로). 어느 기기 행에도 붙지 않는 열쇠만
- *   목록에 남는다 — 그래야 해제 경로를 잃지 않는다(e2eeDeviceRowsHtml).
- *  ★ ④ 복구 코드의 컨트롤 유무는 **`state` 값으로 분기하지 않는다**(계약 §2.4 규약 3): 만들기 활성 =
- *   `e2eeReady()`(구 `state==='trusted'` 은 policy='off' + 열쇠 보유에서 "열쇠는 있는데 만들 수 없다"
- *   였다), 복원 행 노출 = `e2eeCanRestore()`(구 `state!=='trusted'&&state!=='off'` 은 사용 불가 상태에도
- *   행을 띄워 눌러도 실패했다). 두 판정 모두 앱 E2eeSettingsCard 와 동치다(테스트가 대조한다).
- */
-function e2eeAdvancedHtml() {
-  return `
-    <div class="sett-row"><span>종단간 암호화<br><span class="dim" style="font-size:11px">자동 권장 · 항상 = 안 되면 조작 차단</span></span>
-      <span class="scale-seg" id="e2eePolicySeg">
-        <button class="scale-opt${e2ee.policy === "off" ? " active" : ""}" data-v="off">끄기</button>
-        <button class="scale-opt${e2ee.policy === "preferred" ? " active" : ""}" data-v="preferred">자동</button>
-        <button class="scale-opt${e2ee.policy === "required" ? " active" : ""}" data-v="required">항상</button>
-      </span></div>
-    <div class="sett-row" style="align-items:flex-start;gap:12px"><span>이 기기 안전 코드<br><span class="dim" style="font-size:11px">다른 기기 화면과 같은지 확인</span></span>
-      <span style="flex:none;font-family:var(--mono);font-size:18px;font-weight:800;letter-spacing:1.2px;user-select:text;text-align:right;word-break:break-all">${esc(e2ee.safetyCode || "—")}</span></div>
-    <!-- (구 ③ '지문' 행은 2026-07-27 삭제 — 아래 ⑤ 열쇠 목록의 자기 행이 같은 6자리를 '이 기기' 배지와
-         함께 이미 보여 준다. 대조는 안전 코드로 하므로 이 행은 아무 행동도 유발하지 않는 중복이었다) -->
-    <div class="sett-row"><span>복구 코드<br><span class="dim" style="font-size:11px">${e2ee.recoverySet ? "새로 만들면 이전 코드 무효" : "기기를 다 잃으면 복구 불가"}</span></span>
-      <button class="btn small" id="e2eeRecBtn"${e2eeReady() ? "" : " disabled"}>${e2ee.recoverySet ? "새로 만들기" : "만들기"}</button></div>
-    ${e2eeRecoveryShown ? `<div class="acct-msg" style="color:var(--accent)">지금 적어두세요 · 다시 못 봅니다</div>
-      <div style="display:flex;align-items:center;gap:10px;padding:4px 2px 8px">
-        <span style="flex:1;min-width:0;font-family:var(--mono);font-size:15px;font-weight:700;user-select:text;word-break:break-all">${esc(e2eeRecoveryShown)}</span>
-        <button class="btn small" id="e2eeRecDone" style="flex:none">적어뒀어요</button>
-      </div>` : ""}
-    ${e2eeCanRestore() ? `<div class="sett-row">
-      <span>복구 코드로 복원</span>
-      <span style="display:flex;gap:6px;align-items:center">
-        <input id="e2eeRecIn" class="prof-nick" placeholder="CPT1-XXXXX-…" style="width:200px;font-family:var(--mono);font-size:12px" spellcheck="false" />
-        <button class="btn small" id="e2eeRecRestore">복원</button>
-      </span></div>` : ""}
-    <div class="acct-msg">폴더명·알림 제목은 서버가 봅니다</div>`;
-}
+// (★ 개정 4, 2026-07-27 사용자 확정: `자세히` 섹션 전체 삭제 — 카피 감사 §3 개정 4 블록이 정본.
+//   ① 정책 [끄기|자동|항상] → **자동 고정**(env 킬스위치 CPT_E2EE=0 은 ops 용 존치, 클라는 정책을
+//     저장도 전송도 하지 않는다. 구 UI 로 '끄기/항상' 을 저장한 기기는 normalizeE2eePolicy 가 복원)
+//   ② 이 기기 안전 코드 행 → 대조는 승인 카드/자기 대기 행에서만 일어난다(상시 노출 가치 없음)
+//   ④ 복구 코드 만들기/복원 → 현 스코프(rpc)엔 암호화로 잠긴 저장 데이터가 없어 지킬 자산이 없다.
+//     데몬 RPC e2ee.recovery.* 는 존치(스냅샷 봉인을 켜는 날 UI 만 되살린다)
+//   ⑥ 메타데이터 고지 → 문서로 이관)
 
 /** 열쇠를 가진 기기 판정 — '이 기기' 는 **ikX(공개키) 우선**이다(지문은 userRef 미상이면 비어 있다). */
 function e2eeKeyIsMine(d) {
@@ -837,8 +802,9 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
     const canRevoke = typeof d.id === "number" && !d.isCurrent;
     // ★ OS 라벨(`macOS ·`)은 제거했다(사용자 확정 2026-07-27): 좌측 아이콘이 이미 PC/모바일을 구분하고,
     //  같은 정보를 글자로 또 쓰면 최근 접속 시각이 뒤로 밀린다.
-    const sub = [fmtRecent(d.lastSeenAt || d.createdAt), k && k.fingerprint ? `🔒 ${k.fingerprint}` : ""]
-      .filter(Boolean).join(" · ");
+    // ★ 개정 4: 🔒 지문은 기기 행 메타에서 삭제(사용자가 읽을 수 없는 값) — 열쇠 보유 여부는 🗑 동작
+    //  (해제+회전)에만 쓰고 표기하지 않는다. 고아 열쇠 행은 예외(지문이 유일한 식별자다).
+    const sub = fmtRecent(d.lastSeenAt || d.createdAt);
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
@@ -864,7 +830,8 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
   // 온라인 PC 가 0대여도 그 자리를 비우지 않는다: 초록 self 배지 한 줄만 남으면 사용자는 '내 데이터가
   //  안전하다' 로 읽는데 사실은 '이 기기에 열쇠가 있다' 뿐이다(§2.7 정직성 기제가 화면에서 사라진다).
   const hosts = (state.devices || []).filter(isHostRow);
-  const noHost = e2ee.policy !== "off" && !hosts.length
+  // 개정 4: 정책 UI 삭제로 '끄기' 는 존재하지 않는다 — env 킬스위치(state==='off')일 때만 이 행을 접는다.
+  const noHost = e2ee.state !== "off" && !hosts.length
     ? `<tr class="dev-tr">
         <td class="dev-c-ic"><span class="dev-ic">${icons.monitor({ size: 15 })}</span></td>
         <td class="dev-c-name"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></td>
@@ -893,17 +860,11 @@ function renderE2ee() {
   box.innerHTML = `
     ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
     ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
-    <table class="dev-tbl">${actionRowHtml}${e2eeDeviceRowsHtml(devs, selfReady)}</table>
-    <div class="sett-row" id="e2eeAdvToggle" style="cursor:pointer;border-top:1px solid var(--border)" role="button" tabindex="0">
-      <span>자세히</span><span class="dim" style="font-size:12px">${e2eeAdvOpen ? "▴" : "▾"}</span></div>
-    ${e2eeAdvOpen ? e2eeAdvancedHtml() : ""}`;
+    <table class="dev-tbl">${actionRowHtml}${e2eeDeviceRowsHtml(devs, selfReady)}</table>`;
   bindE2ee(box);
 }
 
 function bindE2ee(box) {
-  // 접기 토글 — 로컬 플래그만 뒤집고 다시 그린다(서버·state.js 왕복 없음).
-  const adv = box.querySelector("#e2eeAdvToggle");
-  if (adv) adv.addEventListener("click", () => { e2eeAdvOpen = !e2eeAdvOpen; renderE2ee(); });
   const apprRow = box.querySelector("#e2eeApprRow");
   if (apprRow) apprRow.addEventListener("click", () => { e2eeApprOpen = !e2eeApprOpen; renderE2ee(); });
   box.querySelectorAll("[data-e2ee-approve]").forEach((b) => b.addEventListener("click", async () => {
@@ -925,39 +886,8 @@ function bindE2ee(box) {
     renderE2ee();
     try { await refreshE2ee(); } finally { e2eeWaitBusy = false; renderE2ee(); }
   });
-  box.querySelectorAll("#e2eePolicySeg .scale-opt").forEach((b) => b.addEventListener("click", async () => {
-    e2eeMsg = "";
-    await setE2eePolicy(b.dataset.v);
-    renderE2ee();
-  }));
-  // 계정 최초 열쇠 생성 — 사람이 누르는 유일한 지점(데몬은 자동으로 하지 않는다).
-  const boot = box.querySelector("#e2eeBootBtn");
-  if (boot) boot.addEventListener("click", async () => {
-    boot.disabled = true;
-    boot.textContent = "켜는 중…";
-    const r = await bootstrapAccount();
-    e2eeMsg = r.ok ? "켜졌어요 · 다른 기기는 여기서 승인" : (r.error || "열쇠를 만들지 못했어요.");
-    renderE2ee();
-  });
-  const rec = box.querySelector("#e2eeRecBtn");
-  if (rec) rec.addEventListener("click", async () => {
-    rec.disabled = true;
-    const code = await createRecoveryCode();
-    e2eeRecoveryShown = code;
-    e2eeMsg = code ? "" : "복구 코드를 만들 수 없어요";
-    renderE2ee();
-  });
-  // 1회 표시를 사용자가 닫는다(적어뒀다고 확인) — 다시 볼 수 없는 값이라 화면에 남겨 두지 않는다.
-  const recDone = box.querySelector("#e2eeRecDone");
-  if (recDone) recDone.addEventListener("click", () => { e2eeRecoveryShown = null; renderE2ee(); });
-  const recIn = box.querySelector("#e2eeRecIn");
-  const recGo = box.querySelector("#e2eeRecRestore");
-  if (recGo) recGo.addEventListener("click", async () => {
-    recGo.disabled = true;
-    const r = await restoreFromRecovery(recIn ? recIn.value : "");
-    e2eeMsg = r.ok ? "복구 완료" : (r.error || "코드가 올바르지 않아요");
-    renderE2ee();
-  });
+  // (개정 4: 정책 세그/암호화 켜기/복구 코드 만들기·복원 핸들러 삭제 — 부트스트랩은
+  //  e2ee.js maybeAutoBootstrap 이 자동 수행, 정책은 normalizeE2eePolicy 가 '자동' 으로 고정)
   // 신뢰 해제(기기 행이 없는 고아 열쇠) = 휴지통 2탭. 비가역 경고는 **결정 순간에만** 인라인으로
   //  띄운다(상시 2줄 문단을 없앤 대신 정보량은 유지 — 카피 감사 §2 위치 이동).
   box.querySelectorAll("[data-e2ee-revoke]").forEach((b) => b.addEventListener("click", async () => {

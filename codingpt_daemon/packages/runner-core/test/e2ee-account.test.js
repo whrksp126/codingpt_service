@@ -346,7 +346,10 @@ test('1. state:bootstrap → 데몬은 /e2ee/bootstrap 을 부르지 않고 사�
   //  으로 나간다. 'bootstrap'(노란 "준비 중")은 실제로 왕복 중(checking)일 때만 쓴다.
   assert.strictEqual(s.state, 'none');
   assert.strictEqual(s.checking, false);
-  assert.match(s.reason || '', /폰|앱/, '사용자에게 무엇을 하면 되는지 알려야 한다');
+  // ★ 개정 4(2026-07-27): 부트스트랩은 사람이 보는 앱 표면이 **자동** 수행한다 — 수동 지시("폰에서
+  //  켜 주세요")는 거짓 안내가 됐다. reason 은 진행형 + 평문 폴백 고지를 유지한다.
+  assert.match(s.reason || '', /준비하는 중/, '자동 부트스트랩 진행을 알려야 한다(수동 지시 금지)');
+  assert.match(s.reason || '', /평문/, '그동안 평문으로 동작한다는 정직성 고지는 유지한다');
   assert.strictEqual(s.userRef, String(USER_ID), 'userRef 는 /api/daemon/me 로 채운다(back 이 아직 안 싣는다)');
   // 신원키는 이 단계에서 이미 만들어져 있어야 한다(멱등) — 파일 권한도 여기서 확정된다.
   assert.strictEqual(fs.statSync(stateFile()).mode & 0o777, 0o600, 'e2ee.json 권한이 0600 이 아니다');

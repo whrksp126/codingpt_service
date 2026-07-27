@@ -418,12 +418,13 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     //  `host-lock.js isHostRow()` 와 같은 이름의 화살표 함수 한 줄을 두고 그것만 배지 판정에 쓴다
     //  (그 이름이 사라지면 이 절이 즉시 터진다 = "앱이 규칙을 바꿨으니 PC 도 보라" 는 신호).
     const mHosts = card.match(/const isHostRow = \(d: AccountDevice\) =>([\s\S]*?);\n/);
-    const mRestore = card.match(/const canRestore =([\s\S]*?);\n/);
-    let appHost = null, appRestore = null;
+    let appHost = null;
     try { if (mHosts) appHost = new Function("d", `return (${mHosts[1]});`); } catch (_) { /* 아래 ok 가 잡는다 */ }
-    try { if (mRestore) appRestore = new Function("st", `return (${mRestore[1]});`); } catch (_) { /* 동일 */ }
     ok("앱 host 행 규칙(isHostRow)을 오려내 실행할 수 있다", !!appHost, mHosts ? "실행 실패(TS 문법 유입?)" : "isHostRow 식을 찾지 못했다");
-    ok("앱 canRestore 식을 오려내 실행할 수 있다", !!appRestore, mRestore ? "실행 실패(TS 문법 유입?)" : "canRestore 식을 찾지 못했다");
+    // ★ 개정 4: '복구 코드로 복원' 행은 **양쪽 다 UI 째로 삭제**됐다(카피 감사 §3 개정 4 블록).
+    //  canRestore 판정 함수(e2ee-label.js)는 존치하지만 화면이 참조하면 안 된다 — 참조가 되살아나면
+    //  "PC 만/앱만 복구 행이 있는" 비대칭이 된다.
+    ok("앱 카드에 canRestore 참조가 없다(복구 UI 삭제 — 개정 4)", !/canRestore/.test(card));
     if (appHost) {
       let n = 0, mism = 0;
       const bad = [];
@@ -451,27 +452,12 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
         !appHost({ role: "host", online: true, runnerKind: "cloud", id: "cloud" })
         && !HL.isHostRow({ role: "host", online: true, runnerKind: "cloud", id: "cloud" }));
     }
-    if (appRestore) {
-      const states = ["unavailable", "unsupported", "off", "bootstrap", "pending", "trusted", "error"];
-      let n = 0, mism = 0;
-      const bad = [];
-      for (const state of states) {
-        for (const ready of [true, false]) {
-          n += 1;
-          const a = !!appRestore({ state, ready });
-          const p = LB.canRestore({ state }, ready);
-          if (a !== p) { mism += 1; if (bad.length < 3) bad.push(`(${state},${ready}) app=${a} pc=${p}`); }
-        }
-      }
-      ok(`앱==PC '복구 코드로 복원' 행 노출 ${n - mism}/${n} 조합 일치`, mism === 0, bad.join(" | "));
-      ok("열쇠가 있으면 양쪽 다 감춘다 · 사용 불가면 양쪽 다 감춘다",
-        LB.canRestore({ state: "trusted" }, true) === false && LB.canRestore({ state: "unavailable" }, false) === false);
-      // policy='off' + 열쇠 보유(state='off') 에서 **복구 코드 만들기**가 비활성되던 결함의 앵커:
-      //  만들기 활성은 `e2eeReady()` 가 정본이고 여기(state 분기)가 아니다 — settings.js 소스는
-      //  test/contract.mjs 가 고정한다.
-      ok("복원 노출 판정은 keyState/ready 기반이다(state==='trusted' 분기 잔존 금지)",
-        LB.canRestore({ state: "bootstrap", keyState: "none", checking: false }, false) === true);
-    }
+    // ★ 개정 4: 복원 행 노출 격자 대조는 UI 삭제로 소멸했다. 판정 함수(e2ee-label.js canRestore)의
+    //  계약 §2.4 규약 3 앵커만 남긴다 — UI 를 되살리는 날 이 함수가 정본이다(재발명 금지).
+    ok("canRestore 판정 함수는 존치·규약 유지(keyState/ready 기반 · state 분기 아님)",
+      LB.canRestore({ state: "trusted" }, true) === false
+      && LB.canRestore({ state: "unavailable" }, false) === false
+      && LB.canRestore({ state: "bootstrap", keyState: "none", checking: false }, false) === true);
   }
 }
 
