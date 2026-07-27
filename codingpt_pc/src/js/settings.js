@@ -4,7 +4,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
-import { ANDROID_QR } from "./store-qr.js";
+import { ANDROID_QR, IOS_QR } from "./store-qr.js";
 import {
   e2ee, e2eeReady, refreshE2ee, approveDevice, denyDevice, setPolicy as setE2eePolicy,
   createRecoveryCode, restoreFromRecovery, revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap, bootstrapAccount,
@@ -174,8 +174,10 @@ function renderSection(force) {
             <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="Android 앱 설치 QR" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>Android</span></div>
           </div>
-          <div class="qr-tile qr-tile--soon">
-            <div class="qr-imgwrap qr-imgwrap--soon"><span class="qr-soonlbl">준비 중</span></div>
+          <!-- iOS 는 App Store 심사 통과(2026-07-27) → '준비 중' 자리표시를 실제 QR 로 교체.
+               두 타일은 같은 규격이어야 한다(한쪽만 자리표시였을 때 폭이 달라 줄이 어긋났다). -->
+          <div class="qr-tile">
+            <div class="qr-imgwrap"><img class="qr-img" src="${IOS_QR}" alt="iOS 앱 설치 QR" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>iOS</span></div>
           </div>
         </div>
@@ -677,7 +679,7 @@ function waitNoSafetyWarn() {
  */
 function e2eeApprovalCard(p) {
   const noSafety = !p.safetyCode;
-  return `<div class="dev-row" style="border-color:var(--warn,#FBBF24);flex-direction:column;align-items:stretch;gap:8px">
+  return `<div class="appr-card">
     <div style="display:flex;align-items:center;gap:6px">
       <span class="dev-ic" style="color:var(--warn,#FBBF24)">${icons.shield({ size: 15 })}</span>
       <span style="flex:1;font-size:13px;font-weight:700">새 기기 승인</span>
@@ -701,15 +703,20 @@ function e2eeApprovalCard(p) {
 /**
  * 행동 행 — **동시에 하나만** 그린다(우선순위 = 승인 > 자기 대기 > 부트스트랩).
  *  ⚠ 경고 삼각형(⚠)은 쓰지 않는다: PC 아이콘 규약상 "오류"로 읽힌다(icons.js:52) → 방패+체크.
+ *  ★ 2026-07-27 개정 3: 이 행들도 **표의 행**(`<tr>`)이다 — 기기 목록 맨 위에 들어간다. 예전에는
+ *   각자 `.dev-row` 카드였고 그 카드가 섹션 카드(sm-card2) 안에 또 있어서 "카드 안에 카드" 였다
+ *   (사용자 지적). 박스는 승인 카드(펼침 영역) 하나만 남긴다 = `.appr-card`.
+ *  ⚠ 반환 문자열은 `<tr>` 이어야 한다(renderE2ee 가 `<table class="dev-tbl">` 안에 넣는다) — div 를
+ *   돌려주면 브라우저가 표 밖으로 끌어올려(foster parenting) 행 정렬이 조용히 깨진다.
  */
 function e2eeActionRow(pend) {
   if (pend.length) {
-    return `<div class="dev-row" id="e2eeApprRow" style="border-color:var(--warn,#FBBF24);cursor:pointer" role="button" tabindex="0">
-      <span class="dev-ic" style="color:var(--warn,#FBBF24)">${icons.shield({ size: 15 })}</span>
-      <span style="flex:1;font-size:13px;font-weight:700">새 기기 ${pend.length}대 승인</span>
-      <span class="dim" style="font-size:12px;flex:none">${e2eeApprOpen ? "▴" : "▾"}</span>
-    </div>
-    ${e2eeApprOpen ? `<div class="dev-list" style="margin-top:6px">${pend.map(e2eeApprovalCard).join("")}</div>` : ""}`;
+    return `<tr class="dev-tr" id="e2eeApprRow" style="cursor:pointer" role="button" tabindex="0">
+      <td class="dev-c-ic"><span class="dev-ic" style="color:var(--warn,#FBBF24)">${icons.shield({ size: 15 })}</span></td>
+      <td colspan="3" style="font-size:13px;font-weight:700;color:var(--warn,#FBBF24)">새 기기 ${pend.length}대 승인</td>
+      <td class="dev-c-del"><span class="dim" style="font-size:12px">${e2eeApprOpen ? "▴" : "▾"}</span></td>
+    </tr>
+    ${e2eeApprOpen ? `<tr class="dev-tr-note"><td colspan="5"><div class="dev-list">${pend.map(e2eeApprovalCard).join("")}</div></td></tr>` : ""}`;
   }
   // 이 PC 가 승인을 기다린다 — 설명문 0줄. 대조는 **기존 기기 화면에서** 하므로 여기엔 지침이 없다.
   //  ★ 안전 코드를 계산할 수 없으면(userRef 미상 → e2ee.js deriveDisplay 가 null) 칩을 **무음으로
@@ -721,21 +728,25 @@ function e2eeActionRow(pend) {
   //  ★ 부제 1줄만 예외적으로 붙인다: 기기를 전부 잃은 사용자에게 '기존 기기에서 승인' 은 실행 불가능한
   //   지시이고 유일한 출구(복구 코드)는 접힌 `자세히` 안에 있다 → 경로를 알린다(앱 act.selfWaitHint 미러).
   if (e2eeSelfWaiting()) {
-    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:8px">
-      <div style="font-size:13px;font-weight:700">기존 기기에서 승인해 주세요</div>
-      ${e2eeCanRestore() ? `<div class="acct-msg" style="padding-top:0">기기가 없으면 자세히 → 복구 코드로 복원</div>` : ""}
-      ${e2ee.safetyCode ? safetyChips(e2ee.safetyCode, "var(--accent)") : waitNoSafetyWarn()}
-      ${requestNo(e2ee.verifyCode)}
-      <button class="btn small" id="e2eeWaitRefresh"${e2eeWaitBusy ? " disabled" : ""}>${e2eeWaitBusy ? "확인 중…" : "승인됐는지 확인"}</button>
-    </div>`;
+    return `<tr class="dev-tr"><td class="dev-c-full" colspan="5">
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:8px">
+        <div style="font-size:13px;font-weight:700">기존 기기에서 승인해 주세요</div>
+        ${e2eeCanRestore() ? `<div class="acct-msg" style="padding-top:0">기기가 없으면 자세히 → 복구 코드로 복원</div>` : ""}
+        ${e2ee.safetyCode ? safetyChips(e2ee.safetyCode, "var(--accent)") : waitNoSafetyWarn()}
+        ${requestNo(e2ee.verifyCode)}
+        <button class="btn small" id="e2eeWaitRefresh"${e2eeWaitBusy ? " disabled" : ""}>${e2eeWaitBusy ? "확인 중…" : "승인됐는지 확인"}</button>
+      </div>
+    </td></tr>`;
   }
   // 계정에 열쇠가 0개 = 사람이 켜기 전까지 **영구 평문**. 데몬은 이 경로를 자동으로 타지 않는다.
   if (e2eeNeedsBootstrap()) {
-    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
-      <div style="font-size:13px;font-weight:700">암호화 열쇠가 없어요</div>
-      <div class="acct-msg" style="padding-top:0">주로 쓰는 기기에서 켜세요</div>
-      <button class="btn small primary" id="e2eeBootBtn" style="margin-top:2px">암호화 켜기</button>
-    </div>`;
+    return `<tr class="dev-tr"><td class="dev-c-full" colspan="5">
+      <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px">
+        <div style="font-size:13px;font-weight:700">암호화 열쇠가 없어요</div>
+        <div class="acct-msg" style="padding-top:0">주로 쓰는 기기에서 켜세요</div>
+        <button class="btn small primary" id="e2eeBootBtn" style="margin-top:2px">암호화 켜기</button>
+      </div>
+    </td></tr>`;
   }
   return "";
 }
@@ -795,12 +806,19 @@ function e2eeKeyIsMine(d) {
  *    지운 기기가 이미 가진 MK_epoch 로 이후 트래픽까지 계속 열 수 있다.
  *  · 기기 행이 없는 열쇠(고아)는 마지막에 따로 그린다 — 그러지 않으면 **해제할 방법이 사라진 열쇠**가
  *    계정에 남는다(보안 후퇴).
+ *
+ * ★ 2026-07-27 개정 3(사용자 요구: "카드 안에 카드 구조인데 그렇게 안햇으면 좋겠어! 차라리 테이블
+ *  구조는 어떨까") — 행마다 `.dev-row` 카드를 그리던 구조를 **표**로 바꿨다. 열 = [아이콘]
+ *  [기기 이름] [운영체제·최근 작업·지문] [암호화 상태] [삭제], 행 구분은 1px 선 하나뿐이다.
+ *  헤더 행은 **두지 않는다**(지난 라운드에 표 헤더 3개를 텍스트 감축으로 지웠다 — 되살리면 그 감축을
+ *  되돌린다). 정렬은 <table> 자동 폭이 맞춘다(grid 로 하면 행마다 셀 폭을 다시 계산해 어긋난다).
+ *  반환값은 `<tr>` 들의 문자열이다 — 감싸는 `<table>` 은 renderE2ee 가 만든다.
  */
 function e2eeDeviceRowsHtml(devs, selfReady) {
   const all = (state.devices || []).filter((d) => d.runnerKind !== "cloud"); // 클라우드 러너는 숨긴다(BYO 피벗)
   // ⚠ 기기 목록이 아직 안 왔으면 **고아 판정을 하지 않는다**: 키링이 먼저 도착하면 모든 열쇠가 '고아' 로
   //  보여 같은 기기가 두 번 뜨는 화면(합치려던 그 중복)이 로딩 중에 재현된다.
-  if (!all.length) return `<div class="dim" style="font-size:12px;padding:10px">불러오는 중…</div>`;
+  if (!all.length) return `<tr class="dev-tr"><td class="dev-c-full dim" colspan="5" style="font-size:12px">불러오는 중…</td></tr>`;
   const keyByDevice = new Map();
   // 열쇠 보유 판정은 `state === "trusted"` 하나다(앱 trustedKeys 와 같은 조건 — pending/revoked 는 열쇠가 아니다).
   for (const k of devs) if (k.state === "trusted" && k.deviceId != null) keyByDevice.set(String(k.deviceId), k);
@@ -817,43 +835,43 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
     const canRevoke = typeof d.id === "number" && !d.isCurrent;
     const sub = [deviceOsLabel(d), fmtRecent(d.lastSeenAt || d.createdAt), k && k.fingerprint ? `🔒 ${k.fingerprint}` : ""]
       .filter(Boolean).join(" · ");
-    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
-      <div style="display:flex;align-items:center;gap:11px;min-width:0">
-        <span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span>
-        <span class="dev-meta"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : ""}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span>
-          <span class="dev-sub">${esc(sub)}</span></span>
-        ${hl ? `<span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C[hl.tone]}">${esc(hl.text)}</span>` : ""}
-        ${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}
-      </div>
-      ${canRevoke && k ? `<div class="acct-msg" data-dev-armnote="${d.id}" style="display:none;padding:0 2px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</div>` : ""}
-    </div>`;
+    // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
+    return `<tr class="dev-tr">
+      <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : ""}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
+      <td class="dev-c-meta">${esc(sub)}</td>
+      <td class="dev-c-lock"${hl ? ` style="color:${TONE_C[hl.tone]}"` : ""}>${hl ? esc(hl.text) : ""}</td>
+      <td class="dev-c-del">${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
+    </tr>
+    ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="5" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}`;
   }).join("");
 
   const orphanRows = orphans.map((k) => {
     const mine = e2eeKeyIsMine(k);
     const isPc = k.platform === "darwin" || k.platform === "win32" || k.platform === "linux";
-    return `<div class="dev-row" style="flex-direction:column;align-items:stretch;gap:6px">
-      <div style="display:flex;align-items:center;gap:11px;min-width:0">
-        <span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span>
-        <span class="dev-meta"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span>
-          <span class="dev-sub">${k.fingerprint ? `🔒 ${esc(k.fingerprint)}` : ""}</span></span>
-        ${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}
-      </div>
-      ${mine ? "" : `<div class="acct-msg" data-e2ee-armnote="${k.deviceKeyId}" style="display:none;padding:0 2px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</div>`}
-    </div>`;
+    return `<tr class="dev-tr">
+      <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span></td>
+      <td class="dev-c-meta">${k.fingerprint ? `🔒 ${esc(k.fingerprint)}` : ""}</td>
+      <td class="dev-c-lock"></td>
+      <td class="dev-c-del">${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}</td>
+    </tr>
+    ${mine ? "" : `<tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="5" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`}`;
   }).join("");
 
   // 온라인 PC 가 0대여도 그 자리를 비우지 않는다: 초록 self 배지 한 줄만 남으면 사용자는 '내 데이터가
   //  안전하다' 로 읽는데 사실은 '이 기기에 열쇠가 있다' 뿐이다(§2.7 정직성 기제가 화면에서 사라진다).
   const hosts = (state.devices || []).filter(isHostRow);
   const noHost = e2ee.policy !== "off" && !hosts.length
-    ? `<div class="dev-row">
-        <span class="dev-ic">${icons.monitor({ size: 15 })}</span>
-        <span class="dev-meta"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></span>
-        <span style="flex:none;font-size:11px;font-weight:800;white-space:nowrap;color:${TONE_C.wait}">확인 중</span>
-      </div>`
+    ? `<tr class="dev-tr">
+        <td class="dev-c-ic"><span class="dev-ic">${icons.monitor({ size: 15 })}</span></td>
+        <td class="dev-c-name"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></td>
+        <td class="dev-c-meta"></td>
+        <td class="dev-c-lock" style="color:${TONE_C.wait}">확인 중</td>
+        <td class="dev-c-del"></td>
+      </tr>`
     : "";
-  return `<div class="dev-list" style="padding:8px 0">${rows}${orphanRows}${noHost}</div>`;
+  return `${rows}${orphanRows}${noHost}`;
 }
 
 function renderE2ee() {
@@ -869,12 +887,14 @@ function renderE2ee() {
   //  켜기 버튼) 첫 화면의 '설명문 0줄' 이 무너진다. 정보 손실 0 = 행동 행이 사실 + 다음 행동을 말한다.
   //  ⚠ 앱 E2eeSettingsCard 의 `!action` 조건과 같은 규칙이다(한쪽만 고치면 두 화면의 줄 수가 달라진다).
   const actionRowHtml = e2eeActionRow(pend);
+  // ★ 개정 3: 행동 행 + 기기 행 + '연결된 PC 없음' 행이 **한 표**다(`<table class="dev-tbl">`). 예전에는
+  //  각 행이 독립 카드(.dev-row)여서 섹션 카드 안에 카드가 겹쳐 보였다(사용자 지적) → 바깥 카드
+  //  1겹 + 1px 구분선. reason/에러 문구는 표 밖 1줄이다(행이 아니라 섹션 전체에 대한 말이므로).
   box.innerHTML = `
-    ${actionRowHtml}
     ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
     ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
-    ${e2eeDeviceRowsHtml(devs, selfReady)}
-    <div class="sett-row" id="e2eeAdvToggle" style="cursor:pointer" role="button" tabindex="0">
+    <table class="dev-tbl">${actionRowHtml}${e2eeDeviceRowsHtml(devs, selfReady)}</table>
+    <div class="sett-row" id="e2eeAdvToggle" style="cursor:pointer;border-top:1px solid var(--border)" role="button" tabindex="0">
       <span>자세히</span><span class="dim" style="font-size:12px">${e2eeAdvOpen ? "▴" : "▾"}</span></div>
     ${e2eeAdvOpen ? e2eeAdvancedHtml() : ""}`;
   bindE2ee(box);

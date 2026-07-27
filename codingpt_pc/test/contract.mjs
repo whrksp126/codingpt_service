@@ -836,6 +836,35 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [code.includes("data-dev-key="), /revokeTrust\(keyId\)/.test(code), code.includes("api.revokeDevice(")], [true, true, true]);
   // 기기 행이 없는 열쇠(고아)는 목록에 남는다 — 아니면 **해제할 방법이 사라진 열쇠**가 계정에 남는다.
   eq("기기 행이 없는 열쇠는 목록에 남아 해제할 수 있다", /orphans\s*=\s*devs\.filter/.test(code), true);
+
+  // ⑦ **표(table) 구조**(2026-07-27 개정 3 · 사용자 요구: "기기 목록에서 카드 안에 카드 구조인데 그렇게
+  //  안햇으면 좋겠어! 차라리 테이블 구조는 어떨까") — 행마다 카드(`.dev-row`: 배경+테두리+라운드)를
+  //  그리면 섹션 카드(`.sm-card2`) 안에 카드가 겹쳐 보인다. 목록은 `<table class="dev-tbl">` 한 겹 +
+  //  1px 구분선이고 행동 행도 그 표의 행이다(모바일 E2eeSettingsCard 의 ROW 상수와 같은 시각 규칙).
+  eq("기기 목록은 표다(행 카드 .dev-row 폐기)",
+    [code.includes(`<table class="dev-tbl">`), /class="dev-tr"/.test(code), code.includes(`class="dev-row"`)],
+    [true, true, false]);
+  // 헤더 행은 두지 않는다 — 지난 라운드에 표 헤더 3개를 텍스트 감축으로 지웠다(되살리면 감축을 되돌린다).
+  eq("표에 헤더 행이 없다(카피 감축 유지)", /<th[\s>]|dev-th/.test(code), false);
+  // 박스는 **한 곳만** 남긴다: 펼친 승인 카드(대조 + [거절]/[승인] 이 한 덩어리여야 하고 경고색 테두리
+  //  자체가 보안 어포던스다). 여기가 2 이상이 되면 "카드 안에 카드" 로 되돌아간다.
+  eq("예외 박스는 승인 카드 하나뿐이다(.appr-card 1곳)", (code.match(/class="appr-card"/g) || []).length, 1);
+  // 행동 행·대기 행·로딩 행도 `<tr>` 이어야 한다: `<div>` 를 돌려주면 브라우저가 표 밖으로 끌어올려서
+  //  (foster parenting) 열 정렬이 **조용히** 깨진다 — 화면을 실행하지 않으면 안 보이는 종류의 결함이다.
+  eq("행동 행·대기 행·로딩 행도 표의 행(<tr>)이다", (code.match(/return `<tr/g) || []).length >= 3, true);
+  // 무장(1탭) 경고는 **별도 행**(colspan)이다 — 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
+  eq("무장 경고는 colspan 행이다", /class="dev-tr-note" data-dev-armnote/.test(code), true);
+
+  const css = readFileSync(`${dir}/../styles.css`, "utf8");
+  eq("행에 배경·테두리·라운드를 주지 않는다(.dev-row 규칙 삭제)", /^\.dev-row\s*\{/m.test(css), false);
+  // 구 '내 기기' 표(개정 2 에서 마크업이 사라진)의 죽은 규칙이 남아 있으면 안 된다 — `.dev-tr{display:grid}`
+  //  가 새 `<tr>` 에 걸려 셀이 제 열을 벗어났다(실측: tr display=grid, 휴지통이 왼쪽 아래로 내려감).
+  eq("죽은 grid 규칙이 없다(.dev-tr{display:grid} 가 <tr> 정렬을 깨뜨렸다)",
+    /^\.dev-tr \{[^}]*display: grid/m.test(css), false);
+  eq("행 구분은 1px 선 하나다(.dev-tbl td border-top)",
+    /\.dev-tbl td \{[^}]*border-top: 1px solid var\(--border\)/.test(css), true);
+  // 긴 기기명이 표를 밀어내지 않게 이름 열에 상한이 있다(상한 없으면 오른쪽 열들이 카드 밖으로 나갔다).
+  eq("이름 열에 폭 상한이 있다(긴 기기명이 열을 밀어내지 않는다)", /\.dev-c-name \{[^}]*max-width:/.test(css), true);
 }
 
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");

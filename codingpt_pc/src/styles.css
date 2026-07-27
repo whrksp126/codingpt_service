@@ -551,9 +551,9 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .qr-tile { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 9px; }
 .qr-imgwrap { width: 100%; aspect-ratio: 1; max-width: 168px; background: #fff; border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 10px rgba(0,0,0,.12); }
 .qr-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; -webkit-user-drag: none; }
-.qr-imgwrap--soon { background: var(--elevated2); border-style: dashed; box-shadow: none; }
-.qr-soonlbl { font-size: 12.5px; font-weight: 600; color: var(--dim); letter-spacing: .3px; }
-.qr-tile--soon { opacity: .72; }
+/* (구 `--soon` 자리표시 규칙 3개 삭제 — 2026-07-27 iOS App Store 심사 통과로 실제 QR 로 교체했다.
+   죽은 CSS 를 남기면 나중에 같은 클래스 이름을 재사용할 때 조용히 적용되어 정렬이 깨진다 —
+   같은 라운드에 구 '내 기기' 표의 죽은 `.dev-tr{display:grid}` 가 실제로 그 사고를 냈다.) */
 .qr-plat { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
 .qr-plat .ic { color: var(--dim); }
 /* 표시 배율 세그먼트(설정 행 우측) — 모바일 SettingsModal Seg 미러 */
@@ -576,19 +576,39 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .login-primary { display: flex; flex-direction: column; gap: 12px; align-items: stretch; padding: 6px 0 2px; }
 .login-primary .btn.lg { padding: 13px 16px; font-size: 15px; }
 .login-status { font-size: 12.5px; color: var(--text3); text-align: center; min-height: 16px; line-height: 1.5; }
-/* 내 기기 목록 */
+/* ── `기기` 섹션 = **표(table)** ─────────────────────────────────────────────
+   2026-07-27 개정 3(사용자 요구): "기기 목록에서 카드 안에 카드 구조인데 그렇게 안햇으면 좋겠어!
+   차라리 테이블 구조는 어떨까" → 행마다 카드(배경+테두리+라운드)를 그리던 `.dev-row` 를 없애고
+   섹션 카드(`.sm-card2`) **한 겹 안의 표**로 바꿨다. 행 구분은 1px 선 하나뿐이고, 열은 <table>
+   자동 폭으로 정렬된다(모바일 E2eeSettingsCard 와 같은 시각 구조).
+   ★ 헤더 행(<th>)은 두지 않는다 — 지난 라운드에 표 헤더 3개를 텍스트 감축으로 지웠으므로
+    되살리면 그 감축을 되돌리는 것이다. 열 정렬만으로 표로 읽히게 한다. */
 .dev-section { margin-top: 6px; }
 .dev-title { font-size: 12px; font-weight: 700; color: var(--text3); margin: 0 2px 8px; letter-spacing: -0.01em; }
 .dev-list { display: flex; flex-direction: column; gap: 6px; }
-.dev-row { display: flex; align-items: center; gap: 11px; background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 13px; }
+.dev-tbl { width: 100%; border-collapse: collapse; }
+.dev-tbl td { border-top: 1px solid var(--border); padding: 10px 0; vertical-align: middle; }
+.dev-tbl tr:first-child td { border-top: none; }
+/* 무장(1탭) 인라인 경고는 **그 기기 행에 붙는 줄**이다 → 위 구분선을 다시 그리지 않는다 */
+.dev-tbl tr.dev-tr-note td { border-top: none; padding: 0 0 8px; }
+/* 행동 행/대기 행 = 열이 없는 전폭 셀(colspan). 표 안이지만 박스를 만들지 않는다 */
+.dev-tbl td.dev-c-full { padding: 12px 0; }
+.dev-c-ic { width: 26px; }
+/* 긴 기기명이 표를 밀어내지 않게 이름 열에 상한을 둔다(상한 없으면 nowrap 이름의 min-content 가
+   그대로 열 폭이 돼 오른쪽 열들이 카드 밖으로 나간다 — 실측). 상한 안에서 안쪽 span 이 말줄임된다. */
+.dev-c-name { max-width: 260px; }
+.dev-c-meta { font-size: 11.5px; color: var(--dim); padding-left: 12px; white-space: nowrap; }
+.dev-c-lock { padding-left: 12px; text-align: right; font-size: 11px; font-weight: 800; white-space: nowrap; }
+.dev-c-del { width: 30px; text-align: right; }
 .dev-ic { display: inline-flex; color: var(--text3); flex: none; }
-.dev-meta { flex: 1; min-width: 0; }
-.dev-name { font-size: 13.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; }
-.dev-sub { font-size: 11.5px; color: var(--dim); margin-top: 1px; }
+.dev-name { font-size: 13.5px; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 7px; min-width: 0; }
 .dev-badge.cur { font-size: 10px; font-weight: 700; color: var(--accent); background: var(--accent-tint); border-radius: 999px; padding: 1px 7px; white-space: nowrap; flex: none; }
 .dev-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
 .dev-dot.on { background: var(--accent); }
 .dev-dot.off { background: var(--dim); }
+/* **유일한 예외 박스**: 승인 카드(펼친 승인 대기 행). 안전 코드 대조 + [거절]/[승인] 이 한 덩어리로
+   묶여야 하고 경고색 테두리가 그 자체로 보안 어포던스라 박스를 유지한다(표 행에는 박스 금지). */
+.appr-card { background: var(--elevated); border: 1px solid var(--warn, #FBBF24); border-radius: var(--r-md); padding: 11px 13px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 
 /* 계정 섹션 라인(로그아웃 / 회원탈퇴) */
 .acct-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 2px; border-bottom: 1px solid var(--border); }
@@ -607,12 +627,10 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .prof-nick:focus { border-color: var(--accent); }
 .prof-email { font-size: 12.5px; color: var(--dim); margin-top: 7px; }
 
-/* 내 기기 테이블 */
-.dev-table { display: flex; flex-direction: column; }
-.dev-tr { display: grid; grid-template-columns: 1.9fr 0.9fr 1.1fr 34px; align-items: center; gap: 10px; padding: 11px 6px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); }
-.dev-th { font-size: 11.5px; font-weight: 700; color: var(--dim); }
-.dc-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.dc-name .dev-ic { color: var(--text3); flex: none; }
+/* (구 '내 기기' 표의 죽은 규칙 삭제 — 2026-07-27 개정 3.
+   `.dev-table`/`.dev-tr{display:grid}`/`.dev-th`/`.dc-*` 는 개정 2(섹션 통합)에서 마크업이 사라졌는데
+   CSS 만 남아 있었다. 개정 3 이 행 클래스로 `.dev-tr` 를 다시 쓰자 그 grid 규칙이 <tr> 에 걸려
+   표 정렬이 통째로 깨졌다(실측: tr display=grid, 셀이 제 열을 벗어남) → 정본은 `.dev-tbl` 블록이다.) */
 /* 회원 탈퇴 이메일 확인(설정>계정) — 파괴적 작업 가드 */
 .acct-del-confirm { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; padding: 12px; border: 1px solid var(--danger, #f87171); border-radius: 8px; background: var(--elevated, #151a21); font-size: 12.5px; }
 .acct-del-input { background: var(--base, #0b0f14); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; color: var(--text); font-size: 13px; outline: none; }
@@ -664,15 +682,11 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .fp-dot { width: 7px; height: 7px; border-radius: 4px; background: var(--accent, #34D399); }
 .fp-caret { color: var(--dim); font-size: 16px; }
 
-.dc-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-weight: 600; min-width: 0; flex: 0 1 auto; } /* min-width:0 — 긴 기기명이 배지/점을 밀지 않고 말줄임 */
-.dc-os, .dc-date { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dc-act { display: flex; justify-content: flex-end; }
 .dev-del-btn { background: none; border: none; color: var(--dim); cursor: pointer; padding: 4px; border-radius: 6px; opacity: 0.55; display: inline-flex; }
 .dev-del-btn:hover { color: var(--text2); }
 .dev-del-btn.arm { color: var(--danger, #f87171); opacity: 1; }
+/* 기기 목록은 다시 표다(2026-07-27 개정 3 — 행 카드 `.dev-row` 폐기) → 행 호버에서 휴지통이 진해진다 */
 .dev-tr:hover .dev-del-btn { opacity: 1; }
-/* 기기 목록이 표(.dev-tr) → 행 카드(.dev-row)로 합쳐졌다(2026-07-27 `기기` 섹션 통합) — 같은 호버 규칙 */
-.dev-row:hover .dev-del-btn { opacity: 1; }
 .dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
 .conn-status { display: flex; align-items: center; gap: 12px; }
 .cst-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--dim); flex: none; }
@@ -983,7 +997,23 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
    헤더로 옮기면서 ⌘F 검색 위젯(top 8/right 14)과의 좌표 충돌도 함께 소멸 → search-open 예외 삭제.
    3플랫폼 동일: 글리프(말풍선/터미널) 16px · chat 활성 accent · 같은 헤더 우측 배치. */
 .mt-dyn { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-.mt-mode { margin-left: 6px; flex: none; }
+/* ★ 토글은 옆의 "추가" 버튼 3개와 **눈에 보이게 달라야 한다**. 처음엔 같은 `.pane-ctrl` 납작한
+   아이콘으로 두고 여백만 6px 줬는데, 사용자가 "채팅 전환 토글이 없다"고 신고했다 — 실제로는 있었고
+   **4번째 추가 버튼으로 읽힌** 것이다(추가=행동 / 토글=상태 라 의미가 다르다). 그래서
+   ①구분선(앱 헤더와 같은 1px) ②테두리+배경이 있는 컨트롤 형태(앱 ModeToggle 과 같은 토큰)로 분리한다. */
+.mt-mode {
+  margin-left: 12px; flex: none; position: relative;
+  width: 26px; height: 26px;
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text2);
+}
+.mt-mode::before {
+  content: ""; position: absolute; left: -7px; top: 50%; transform: translateY(-50%);
+  width: 1px; height: 20px; background: var(--border);
+}
+.mt-mode:hover { background: var(--hover); color: var(--text); }
+/* chat 활성 = accent 글리프 + accent 테두리(앱과 같은 규칙). `.pane-ctrl.active` 의 배경만으로는
+   납작한 추가 버튼들과 여전히 구별이 약하다. */
+.mt-mode.active { color: var(--accent); border-color: var(--accent); background: var(--elevated2); }
 .mt-mode.hidden { display: none; }
 /* 탭 라벨의 chat 모드 표식 — 탭 종류를 바꾸지 않고 작은 글리프만 덧붙인다. */
 .ptab-mode { display: inline-flex; color: var(--accent); margin-left: 3px; }
