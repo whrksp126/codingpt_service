@@ -668,6 +668,45 @@ test('e2ee 대기 목록 — 자기 요청은 빼고, 미신뢰 호출자에겐 
 // ★ 개정 6(2026-07-28 사용자 요구): 기기 목록의 [연동] 버튼 = 연동 절차 다시 시작. 방향은 **서버가**
 //  판단한다(클라가 정하면 폰과 PC 규칙이 갈라진다): 내가 대기 중이면 재알림 · 상대에게 열쇠가 없으면
 //  그 기기가 즉시 재신청하도록 nudge 팬아웃. 쿨다운이 없으면 버튼 연타가 곧 푸시 연타가 된다.
+// ★ 2026-07-28 실사고: 승인된 열쇠가 기기 행에 묶이지 않아 같은 폰이 "연동 안 됨" 행 + 고아 열쇠 행
+//  **둘**로 나왔다(모바일은 JWT 인증이라 서버가 deviceId 를 모른다 → 컨트롤러가 body.deviceId 를 검증해
+//  넘긴다). 신청 시점의 deviceId 가 승인까지 이어져야 화면이 한 줄이 된다.
+test('e2ee 승인 — 신청 시점 deviceId 가 열쇠에 묶인다(기기 행 = 열쇠, 고아 행 금지)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async () => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    const phone = newDevice('Android');
+    const p = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label });
+    assert.strictEqual(p.state, 'pending');
+    const sealedPhone = sealMk(mk, phone.x.raw, 1);
+    await deviceTrust.approve(7, {
+      enrollmentId: p.enrollmentId, ikX: phone.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedPhone), sig: signGrant(pc, 1, phone.x.raw, sealedPhone),
+    });
+    const ring = await deviceTrust.keyring(7, { ikX: phone.ikX });
+    const row = ring.devices.find((d) => d.ikX === phone.ikX);
+    assert.strictEqual(row.deviceId, 42, '승인된 열쇠는 신청 기기 행(42)에 묶여야 한다');
+    // deviceId 를 모르는 신청(구 클라이언트)은 여전히 null — 다음 enroll 에서 흡수된다(멱등 경로).
+    const other = newDevice('iPad');
+    const p2 = await deviceTrust.enroll(7, null, { ikX: other.ikX, ikEd: other.ikEd, label: other.label });
+    const sealedOther = sealMk(mk, other.x.raw, 1);
+    await deviceTrust.approve(7, {
+      enrollmentId: p2.enrollmentId, ikX: other.ikX, approverIkX: pc.ikX, epoch: 1,
+      sealed: b64u(sealedOther), sig: signGrant(pc, 1, other.x.raw, sealedOther),
+    });
+    const ring2 = await deviceTrust.keyring(7, { ikX: other.ikX });
+    assert.strictEqual(ring2.devices.find((d) => d.ikX === other.ikX).deviceId, null);
+    await deviceTrust.enroll(7, 77, { ikX: other.ikX, ikEd: other.ikEd, label: other.label });
+    const ring3 = await deviceTrust.keyring(7, { ikX: other.ikX });
+    assert.strictEqual(ring3.devices.find((d) => d.ikX === other.ikX).deviceId, 77, '다음 enroll 이 귀속을 흡수한다');
+  });
+});
+
 test('e2ee nudge — 대기 중이면 재알림 · 아니면 대상 기기에 재신청 팬아웃 · 쿨다운 429', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

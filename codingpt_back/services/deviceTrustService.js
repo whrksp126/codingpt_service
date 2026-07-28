@@ -353,6 +353,9 @@ async function enroll(userId, deviceId, body, meta) {
   //   계정 상한도 함께 둔다(기기당 상한만 두면 기기 수만큼 곱해져 무의미해진다).
   if (!allowRate(rateEnroll, `${safeUid(userId)}:${id.ikX}`, now, ENROLL_MAX_PER_MIN)
     || !allowRate(rateEnroll, `${safeUid(userId)}:*`, now, ENROLL_MAX_PER_MIN * 4)) {
+    //  누가 때리는지 남긴다 — 2026-07-28 에는 로그에 429 만 찍혀 있어 주체(앱/데몬)를 특정하는 데
+    //   시간이 걸렸다. ikX 앞 8글자면 기기 구분에 충분하고 비밀도 아니다(공개키의 일부).
+    console.warn(`[e2ee] enroll 레이트리밋 user=${userId} ikX=${String(id.ikX).slice(0, 8)} label="${id.label}"`);
     throw err('요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.', 429, 'RATE_LIMITED');
   }
   return withKeyring(userId, async () => {
@@ -395,6 +398,9 @@ async function enroll(userId, deviceId, body, meta) {
     const rec = {
       id: newEnrollmentId(), userId: Number(userId), ikX: id.ikX, ikEd: id.ikEd,
       label: id.label, platform: id.platform, kind: id.kind,
+      //  ★ 신청자의 기기 행 id — 승인 시 열쇠를 그 행에 묶는다(2026-07-28). 이게 없으면 승인된 기기가
+      //   목록에 "연동 안 됨" 행 + 고아 열쇠 행 둘로 나온다(모바일은 JWT 인증이라 서버가 못 알아낸다).
+      deviceId: deviceId != null ? Number(deviceId) : null,
       verifyCode: fp.verifyCode, fingerprint: fp.fingerprint,
       requestedAt: now, expiresAt: now + ENROLL_TTL_MS,
       requestIp: maskIp(meta && meta.ip), notifId: null, resolved: false,
@@ -641,7 +647,9 @@ async function approve(userId, body) {
     const keyId = k.nextKeyId++;
     k.keys.push({
       keyId, ikX: rec.ikX, ikEd: rec.ikEd, label: rec.label, platform: rec.platform, kind: rec.kind,
-      deviceId: null, state: 'trusted', enrolledAt: new Date(now).toISOString(), revokedAt: null, lastGrantEpoch: k.epoch,
+      //  신청 시점에 검증된 기기 행 id(rec.deviceId) 를 그대로 쓴다 — 승인자는 대상 기기를 모른다.
+      deviceId: rec.deviceId != null ? Number(rec.deviceId) : null,
+      state: 'trusted', enrolledAt: new Date(now).toISOString(), revokedAt: null, lastGrantEpoch: k.epoch,
     });
     k.grants.push({
       epoch: k.epoch, recipientKeyId: keyId, sealed: b64u(sealedRaw),

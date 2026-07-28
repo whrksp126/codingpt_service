@@ -10,7 +10,9 @@ import {
   e2ee, e2eeReady, refreshE2ee,
   revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap, e2eePendingApprovable, nudgeDevice,
 } from "./e2ee.js";
-import { hostE2eeEpoch, hostLockLabel, isHostRow } from "./host-lock.js";
+// (개정 7: hostLockLabel/isHostRow 는 이 화면에서 쓰지 않는다 — 행별 암호화 배지와 '연결된 PC 없음'
+//  행이 사라졌다. 판정 함수와 그 계약은 host-lock.js 에 그대로 남아 있다: 다시 노출하는 날 규칙을
+//  재발명하지 않기 위해서고, 교차검증 테스트가 계속 그 함수를 본다.)
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
 import { markPermGranted, permGranted } from "./login-gate.js";
 // 안전 코드 칩·요청번호·경고 = 승인 카드(device-approval.js)와 공유하는 조각(e2ee-card.js).
@@ -765,61 +767,50 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
   const ids = new Set(all.map((d) => String(d.id)));
   const orphans = devs.filter((k) => k.state === "trusted" && (k.deviceId == null || !ids.has(String(k.deviceId))));
 
-  const rows = all.map((d) => {
+  //  ★ 개정 7(2026-07-28 사용자 확정): **이 기기와 다른 기기를 나눈다.** 원문 — "기기 목록에 이 기기까지
+  //   표현하니까 보기도 안 좋고 복잡해지는 거 같은데! 이 기기와 내 기기 목록을 따로 구분하는 건 어떨까?
+  //   기기 목록에서는 이 기기는 안 보이게 하고!" → 목록은 **다른 기기 전용**이고 이 기기는 위에 한 줄이다.
+  //   그래서 `이 기기` accent 배지도 없앴다(자리로 이미 구분된다 = 사용자가 지적한 과한 포인트 컬러).
+  const row = (d) => {
     const k = keyByDevice.get(String(d.id));
-    // 이 PC 자신은 사이드카 데몬(e2ee.state)이 정본이다 — runner_status 프레임보다 빠르고 정확하다.
-    //  ★ 3번째 인자 = 내 열쇠 세대 · 4번째 = 서버가 말하는 계정 세대(자기 행이 항상 초록이던 결함 ③-2).
-    // ★ 행별 자물쇠 열('암호화됨'/'평문')은 **표시하지 않는다**(사용자 확정 2026-07-27: 제거 요청).
-    //  판정 함수(hostLockLabel)와 그 계약(거짓 자물쇠 금지 · 세대 일치 검사)은 그대로 남는다 —
-    //  다시 노출할 때 규칙을 재발명하지 않기 위해서다. 상태는 '자세히' 섹션에서 확인할 수 있다.
     const canRevoke = typeof d.id === "number" && !d.isCurrent;
-    // ★ OS 라벨(`macOS ·`)은 제거했다(사용자 확정 2026-07-27): 좌측 아이콘이 이미 PC/모바일을 구분하고,
-    //  같은 정보를 글자로 또 쓰면 최근 접속 시각이 뒤로 밀린다.
-    // ★ 개정 4: 🔒 지문은 기기 행 메타에서 삭제(사용자가 읽을 수 없는 값) — 열쇠 보유 여부는 🗑 동작
-    //  (해제+회전)에만 쓰고 표기하지 않는다. 고아 열쇠 행은 예외(지문이 유일한 식별자다).
     const sub = fmtRecent(d.lastSeenAt || d.createdAt);
-    //  ★ 개정 6(2026-07-28 사용자 확정): 기기 행은 **연동 여부**를 말한다 — "기기 목록은 뜨지만 연동
-    //   승인 절차를 완료하지 않으면 연동이 안 되는 거야". 열쇠가 없으면(k 없음) 연동 전 상태이고,
-    //   [연동] 버튼이 그 기기와의 승인 절차를 다시 시작한다(nudgeDevice → 서버가 방향 판단).
-    //   ⚠ '이 기기' 행에는 버튼을 두지 않는다: 자기 자신을 자기가 승인할 수는 없다(승인은 다른 기기의 일).
+    //  연동 여부 = 그 기기가 계정 열쇠를 갖고 있는가. 안 됐으면 [연동] 이 승인 절차를 다시 시작한다.
+    //  ⚠ 이 기기 행에는 [연동] 을 두지 않는다: 자기를 자기가 승인할 수는 없다.
     const linked = !!k || (d.isCurrent && selfReady);
     const link = !linked && typeof d.id === "number" && !d.isCurrent
       ? `<button class="sett-btn dev-link-btn" data-e2ee-link="${d.id}">연동</button>` : "";
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<span class="dev-badge cur">이 기기</span>` : ""}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span><span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
       <td class="dev-c-meta">${linked ? esc(sub) : `<span style="color:var(--text3)">연동 안 됨 · ${esc(sub)}</span>`}</td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
     ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}`;
-  }).join("");
+  };
+  const subhead = (t) => `<tr class="dev-tr-sub"><td colspan="4">${t}</td></tr>`;
 
-  const orphanRows = orphans.map((k) => {
-    const mine = e2eeKeyIsMine(k);
+  const mineRows = all.filter((d) => d.isCurrent).map(row).join("");
+  const otherRows = all.filter((d) => !d.isCurrent).map(row).join("");
+
+  //  기기 행이 없는 열쇠(고아) — 삭제 경로를 잃지 않게 목록에 남긴다. ★ 개정 7: 지문(🔒 숫자)은
+  //   표시하지 않는다(사용자: "저것도 사용자들은 몰라도 되는 정보 아닌가?"). 정상 경로에서는 이제
+  //   열쇠가 기기 행에 묶이므로(back enroll 이 deviceId 를 받는다) 이 행 자체가 예외 상황이다.
+  const orphanRows = orphans.filter((k) => !e2eeKeyIsMine(k)).map((k) => {
     const isPc = k.platform === "darwin" || k.platform === "win32" || k.platform === "linux";
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span>${mine ? `<span class="dev-badge cur">이 기기</span>` : ""}</span></td>
-      <td class="dev-c-meta">${k.fingerprint ? `🔒 ${esc(k.fingerprint)}` : ""}</td>
-      <td class="dev-c-del">${mine ? "" : `<button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="신뢰 해제">${icons.trash({ size: 15 })}</button>`}</td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span></span></td>
+      <td class="dev-c-meta"><span style="color:var(--text3)">이전에 연동된 기기</span></td>
+      <td class="dev-c-del"><button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="연동 해제">${icons.trash({ size: 15 })}</button></td>
     </tr>
-    ${mine ? "" : `<tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`}`;
+    <tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`;
   }).join("");
 
-  // 온라인 PC 가 0대여도 그 자리를 비우지 않는다: 초록 self 배지 한 줄만 남으면 사용자는 '내 데이터가
-  //  안전하다' 로 읽는데 사실은 '이 기기에 열쇠가 있다' 뿐이다(§2.7 정직성 기제가 화면에서 사라진다).
-  const hosts = (state.devices || []).filter(isHostRow);
-  // 개정 4: 정책 UI 삭제로 '끄기' 는 존재하지 않는다 — env 킬스위치(state==='off')일 때만 이 행을 접는다.
-  const noHost = e2ee.state !== "off" && !hosts.length
-    ? `<tr class="dev-tr">
-        <td class="dev-c-ic"><span class="dev-ic">${icons.monitor({ size: 15 })}</span></td>
-        <td class="dev-c-name"><span class="dev-name" style="color:var(--dim)">연결된 PC 없음</span></td>
-        <td class="dev-c-meta"></td>
-        <td class="dev-c-del"></td>
-      </tr>`
-    : "";
-  return `${rows}${orphanRows}${noHost}`;
+  const others = otherRows + orphanRows;
+  return `${mineRows ? subhead("이 기기") + mineRows : ""}`
+    + `${subhead("다른 기기")}${others || `<tr class="dev-tr"><td colspan="4" class="dim" style="font-size:12px">연결된 기기가 없어요</td></tr>`}`;
 }
 
 function renderE2ee() {

@@ -43,9 +43,29 @@ function ipOf(req) {
 
 // POST /api/daemon/e2ee/enroll — 모든 기기가 부팅/로그인 직후 호출(멱등).
 //  → { state:'bootstrap'|'trusted'|'pending', … }
+/**
+ * 요청자의 **기기 행 id** — 열쇠를 기기 행에 묶는 근거다.
+ *  ★ 2026-07-28 실사고: 모바일은 user JWT 로 인증하므로 `req.account.deviceId` 가 **null** 이다
+ *   (accountAuth.js:47). 그래서 승인된 열쇠가 어느 기기 행에도 붙지 않아 설정 화면에 같은 폰이
+ *   "연동 안 됨" 기기 행 + 고아 열쇠 행 **두 줄**로 나왔다(사용자 캡처). 클라이언트가 자기 deviceId 를
+ *   알려주게 하고, 여기서 **이 계정 소유인지 검증**한 뒤에만 쓴다 — 위조해도 남의 기기 행엔 못 붙는다.
+ */
+async function callerDeviceId(req) {
+  if (req.account.deviceId != null) return Number(req.account.deviceId);
+  const raw = (req.body || {}).deviceId;
+  const id = Number(raw);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  try {
+    const { DaemonDevice } = require('../models');
+    const row = await DaemonDevice.findOne({ where: { id, user_id: req.account.userId, revoked_at: null } });
+    return row ? Number(row.id) : null;
+  } catch (_) { return null; }
+}
+
 async function enroll(req, res) {
   try {
-    const r = await deviceTrustService.enroll(req.account.userId, req.account.deviceId, req.body || {}, { ip: ipOf(req) });
+    const deviceId = await callerDeviceId(req);
+    const r = await deviceTrustService.enroll(req.account.userId, deviceId, req.body || {}, { ip: ipOf(req) });
     return ok(res, req.account.userId, r);
   } catch (e) { return fail(res, e); }
 }
@@ -53,7 +73,7 @@ async function enroll(req, res) {
 // POST /api/daemon/e2ee/bootstrap — 계정 최초 1회(승인해 줄 기기가 없을 때). 409 로 레이스 차단.
 async function bootstrap(req, res) {
   try {
-    const r = await deviceTrustService.bootstrap(req.account.userId, req.account.deviceId, req.body || {});
+    const r = await deviceTrustService.bootstrap(req.account.userId, await callerDeviceId(req), req.body || {});
     return ok(res, req.account.userId, r);
   } catch (e) { return fail(res, e); }
 }

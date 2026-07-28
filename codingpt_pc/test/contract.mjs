@@ -810,11 +810,12 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
       && settings.includes("암호화를 켜지 못했어요 · 잠시 후 다시 시도합니다"), true);
   }
 
-  // ③-d host 행 집합 = isHostRow(앱 필터와 동치 · 지적 #1/#6). 꺼둔 PC 를 나열하면 그 행은 오프라인이라
-  //  epoch 항목이 삭제돼 **영구 '확인 중'** 이 되고, 폰 화면에는 그 행이 아예 없어 두 화면이 갈라진다.
-  eq("host 행 필터는 isHostRow 한 곳이다(인라인 role/runnerKind 조건 재등장 금지)",
-    /\.filter\(isHostRow\)/.test(settings)
-    && !/runnerKind !== "cloud" && d\.role !== "controller"/.test(settings), true);
+  // ③-d ★ 개정 7: host 행 집합(`isHostRow`)은 이 화면에서 **쓰지 않는다** — 행별 암호화 배지와
+  //  '연결된 PC 없음' 행이 사라졌기 때문이다(사용자: 열쇠 정보는 알 필요 없다). 규칙 함수는
+  //  host-lock.js 에 계약과 함께 남아 있고 교차검증(test/e2ee-crossimpl.mjs 5절)이 계속 실행한다.
+  //  여기서 고정하는 것은 **인라인 조건이 재등장하지 않는다**는 것뿐이다(규칙 복사 금지).
+  eq("host 행 인라인 조건이 재등장하지 않는다(규칙은 host-lock.js 한 곳)",
+    /runnerKind !== "cloud" && d\.role !== "controller"/.test(settings), false);
 
   // ③-2 행동 행이 있으면 `reason`(데몬·서버 원문 40~70자)을 그리지 않는다 — 두 줄이 같은 사실을 다시
   //  말하거나 서로 상충하면(부트스트랩) 축약 효과가 상쇄된다. 앱은 같은 조건을 `!action` 으로 쓴다.
@@ -899,11 +900,16 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [`id="e2eeRecBtn"`, "e2eeCanRestore()",
      `e2ee.state === "trusted" ? "" : " disabled"`, `e2ee.state !== "trusted" && e2ee.state !== "off"`]
       .filter((t) => settings.includes(t)), []);
-  //  ⑤-4 host 행 집합은 host-lock.js 의 규칙 함수를 쓴다(꺼둔 PC 가 영구 '확인 중' 으로 남던 결함).
-  eq("host 행은 isHostRow 로 고른다(오프라인 PC 나열 금지)",
-    [settings.includes(".filter(isHostRow)"),
-      settings.includes(`d.runnerKind !== "cloud" && d.role !== "controller"`)],
-    [true, false]);
+  //  ⑤-4 ★ 개정 7(2026-07-28 사용자 확정) — 목록은 **이 기기 / 다른 기기**로 나뉘고, 사용자가 몰라도
+  //   되는 값은 전부 뺐다. 원문: "기기 목록에 이 기기까지 표현하니까 보기도 안 좋고 복잡해지는 거
+  //   같은데! … 기기 목록에서는 이 기기는 안 보이게 하고!" · "최근 작업 … 저 자물쇠랑 숫자 표현은 왜
+  //   하고 있는 거야? 저것도 사용자들은 몰라도 되는 정보 아닌가?"
+  eq("목록은 이 기기/다른 기기로 나뉜다(소제목 2개 · 이 기기는 목록 밖)",
+    settings.includes('subhead("이 기기")') && settings.includes('subhead("다른 기기")')
+    && /all\.filter\(\(d\) => !d\.isCurrent\)/.test(settings), true);
+  eq("'이 기기' accent 배지·지문(🔒 숫자)·행별 암호화 배지가 없다(과한 포인트 컬러·불필요 정보 제거)",
+    [/dev-badge cur/, /🔒 \$\{esc\(k\.fingerprint\)\}/, /\.filter\(isHostRow\)/]
+      .filter((re) => re.test(settings)).map(String), []);
 
   // ⑥ **기기 목록 통합**(2026-07-27 개정 2 · 사용자 요구) — '종단간 암호화' 카드 안의 '열쇠를 가진 기기'
   //  목록 + 그 아래 '내 기기' 표 = 같은 기기가 한 화면에 두 번 나왔다. 한 섹션(`기기`)·한 목록으로 합쳤고

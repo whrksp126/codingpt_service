@@ -560,6 +560,10 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .sett-row { display: flex; justify-content: space-between; align-items: center; padding: 13px 0; font-size: 13.5px; }
 .sett-row + .sett-row, .sett-row + .sett-hint { border-top: 1px solid var(--border); } /* 행 구분선(모바일 미러) */
 .sett-hint { font-size: 11.5px; color: var(--dim); padding: 2px 0 4px; }
+/* 기기 표 소제목(`이 기기` / `다른 기기`) — 개정 7. 목록에서 이 기기를 빼서 위로 올렸다(사용자 요구).
+   구분선을 다시 그리지 않는다: 소제목이 곧 구분이고, 선을 겹치면 표가 조각나 보인다. */
+.dev-tr-sub > td { border-top: none !important; font-size: 11px; color: var(--dim); padding: 12px 0 2px !important; }
+.dev-tbl tr:first-child .dev-tr-sub > td, .dev-tbl .dev-tr-sub:first-child > td { padding-top: 4px !important; }
 /* 이미 허용된 권한 = 상태 **표기**(버튼 아님). 버튼처럼 보이면 사용자는 "아직 허용 안 됐나" 로 읽는다.
    accent 를 쓰지 않는다 — 여기서 초록은 "성공했다는 축하"가 아니라 그냥 현재 상태다. */
 .sett-done { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text3); }
