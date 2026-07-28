@@ -398,23 +398,24 @@ export class ChatView {
   }
 
   _appendAll(msgs) {
-    const held = this._heldToolIds();
+    const answered = this._answeredToolIds();
+    const carded = this._paneHasQuestionCard();
     for (const m of msgs) {
       if (m.seq > this._maxSeq) this._maxSeq = m.seq;
       // tool 결과는 앞선 tool_use 카드의 결과 슬롯으로 합친다(별도 카드 금지 — Claude 앱과 동일).
       //  hidden 결과(구버전 형태의 빈 자리표시)는 그리지 않는다.
       if (isResult(m)) {
-        // 아직 도크가 들고 있는 질문의 결과는 넘긴다 — 질문 카드가 없어 고아 행이 생긴다.
-        //  요청이 해소되면 held 가 비고 _rebuild 가 질문+결과를 함께 그린다.
-        if (m.result && m.result.toolUseId && held.has(m.result.toolUseId)) continue;
         if (!m.hidden) this._fillResult(m);
         continue;
       }
       if (!isVisible(m)) continue;
-      // ★ 답하기 전 질문은 **대화 내역에 넣지 않는다**(사용자 확정 2026-07-28). 컴포저 위 승인 카드가
-      //  같은 선택지를 이미 그리고 있어서, 넣으면 같은 질문이 화면에 두 번 보인다. 답하면 요청이
-      //  해소되고 held 에서 빠져 그때 대화에 자연스럽게 들어간다.
-      if (m.kind === "question" && m.tool && m.tool.id && held.has(m.tool.id)) continue;
+      // ★ **아직 답하지 않은** 질문은 대화 내역에 넣지 않는다(사용자 확정 2026-07-28).
+      //  판정은 트랜스크립트만 본다: 이 tool_use 에 짝 tool_result 가 없으면 = 미응답.
+      //  (예전엔 승인 요청의 toolUseId 와 대조했는데, claude 의 PermissionRequest 페이로드에
+      //   tool_use_id 가 없으면 대조가 통째로 빗나가 질문이 대화와 도크에 **둘 다** 그려졌다.)
+      //  단 이 pane 에 실제로 질문 카드가 떠 있을 때만 감춘다 — 카드가 없는데 감추면
+      //  "TUI 엔 질문이 있는데 채팅엔 아무것도 없다"가 된다(그게 더 나쁘다).
+      if (m.kind === "question" && carded && !(m.tool && m.tool.id && answered.has(m.tool.id))) continue;
       const el = this._buildRow(m);
       if (!el) continue;
       // 빈 상태 안내가 남아 있으면 첫 행을 넣을 때 치운다.
@@ -508,9 +509,9 @@ export class ChatView {
     wrap.innerHTML =
       (q.header ? `<div class="chat-q-head">${escapeHtml(q.header)}</div>` : "") +
       (q.question ? `<div class="chat-q-text">${escapeHtml(q.question)}</div>` : "") +
-      opts +
-      // 실제 응답은 승인 카드(기능1)로 한다 — 여기 버튼을 두면 두 경로가 경합한다.
-      `<div class="chat-q-note">선택은 아래 승인 카드에서 응답합니다</div>`;
+      opts;
+      // 안내 문구를 붙이지 않는다 — 여기 그려지는 질문은 **이미 답한** 질문이고(미응답은 도크가
+      //  그린다) "아래 승인 카드에서 응답하세요"는 그 시점엔 가리킬 카드가 없는 거짓말이 된다.
     return wrap;
   }
 
@@ -787,17 +788,26 @@ export class ChatView {
     ta.focus();
   }
 
-  // 지금 승인 카드가 들고 있는 질문의 tool_use id 집합 — 대화 내역에서 감출 대상.
-  //  (approvals.js 를 import 하면 순환이 된다 → 상태를 직접 읽는다. 규칙은 같다: cwd+win 엄격 일치.)
-  _heldToolIds() {
-    const cwd = this._cwd();
+  // 짝 tool_result 가 도착한 tool_use id 집합 = "이미 답한 질문".
+  //  트랜스크립트만으로 판정한다(승인 인박스와 대조하지 않는다) — TUI 가 질문을 계속 띄우는 근거와
+  //  똑같은 근거를 쓴다: 응답이 없으면 결과 줄도 없다.
+  _answeredToolIds() {
     const out = new Set();
-    if (!cwd || this._tid == null) return out;
-    for (const a of appState.approvals || []) {
-      if ((a.cwd || "") !== cwd || a.win !== this._tid) continue;
-      if (a.toolUseId) out.add(a.toolUseId);
+    for (const m of this._msgs || []) {
+      if (isResult(m) && m.result && m.result.toolUseId) out.add(m.result.toolUseId);
     }
     return out;
+  }
+
+  // 이 pane 에 지금 "선택형" 승인 카드가 떠 있는가(= 컴포저 위 도크가 같은 질문을 그리고 있다).
+  //  (approvals.js 를 import 하면 순환이 된다 → 상태를 직접 읽는다. 규칙은 같다: cwd+win 엄격 일치.)
+  _paneHasQuestionCard() {
+    const cwd = this._cwd();
+    if (!cwd || this._tid == null) return false;
+    return (appState.approvals || []).some(
+      (a) => (a.cwd || "") === cwd && a.win === this._tid &&
+        (a.prompt?.kind === "choice" || !!a.prompt?.questions?.length)
+    );
   }
 
   // ── 승인 카드 슬롯(기능1) ──
@@ -805,8 +815,8 @@ export class ChatView {
     if (!this.apprEl || !_approvalRenderer) return;
     const cwd = this._cwd();
     _approvalRenderer(this.apprEl, { cwd, win: this._tid, visible: this._visible });
-    // 들고 있는 질문 집합이 바뀌었으면 대화 내역을 다시 그린다(감췄던 질문이 답과 함께 들어온다).
-    const key = [...this._heldToolIds()].sort().join(",");
+    // 질문 카드가 떴다/사라졌으면 대화 내역을 다시 그린다(감췄던 질문이 답과 함께 들어온다).
+    const key = this._paneHasQuestionCard() ? "1" : "0";
     if (key !== this._heldKey) { this._heldKey = key; this._rebuild(); }
     this._syncWorking();
   }
@@ -820,7 +830,7 @@ export class ChatView {
     if (!this.scrollEl) return;
     const st = agentStateOf(this._cwd(), this._tid);
     const busy = !!st && (st.state === "working" || st.state === "needsInput");
-    const on = busy && !this._heldToolIds().size && !this._pending.length;
+    const on = busy && !this._paneHasQuestionCard() && !this._pending.length;
     let el = this.scrollEl.querySelector(".chat-working");
     if (!on) { el?.remove(); return; }
     if (!el) {

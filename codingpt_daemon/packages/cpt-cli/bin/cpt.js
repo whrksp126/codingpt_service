@@ -680,9 +680,14 @@ async function main() {
 //  `--wait-ms` 로 넘긴다(단일 출처=runner-core/approvals.js budget()). 순서 불변식:
 //    데몬 하드 타임아웃 < CLI 대기(--wait-ms) < claude 훅 config timeout
 //  이 순서가 깨지면 claude 가 먼저 훅을 잘라 우리가 defer 를 제어하지 못한다(카드 회수 누락).
+//  ★ 상한(MAX)은 **shim 이 넘기는 값보다 커야 한다**. 2026-07-28 실사고: 마감을 없애면서 데몬
+//   (24h)과 back(25h) 은 고쳤는데 여기 570000(9.5분)을 못 고쳐, shim 이 `--wait-ms 86410000` 을
+//   넘겨도 CLI 가 9.5분으로 잘라냈다 → 9.5분 뒤 훅 프로세스가 그냥 종료 → 소켓 close =
+//   데몬이 `hook_gone` 으로 defer → 전 기기에서 질문 카드 회수. 사용자에겐 "가만 뒀는데 폼이
+//   사라지고 TUI 에만 질문이 남는" 증상으로 보였다. 상한은 안전장치일 뿐 정책이 아니다.
 const APPROVAL_WAIT_DEFAULT_MS = 130000;
 const APPROVAL_WAIT_MIN_MS = 5000;
-const APPROVAL_WAIT_MAX_MS = 570000;
+const APPROVAL_WAIT_MAX_MS = 25 * 3600 * 1000;
 
 async function approvalHook(flags) {
   let payload = null;

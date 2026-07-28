@@ -187,6 +187,25 @@ test('Bash summary 는 값 단위로 시크릿을 지운다 (잠금화면·DB �
   }
 });
 
+// ★ 홉별 타임아웃 순서 — 데몬 하드마감 < CLI 대기(--wait-ms) < claude 훅 config timeout.
+//  이 순서는 **세 리포에 흩어진 상수**로 지켜지고, 그중 하나만 안 고치면 조용히 깨진다.
+//  2026-07-28 실사고: 마감을 없애면서 approvals.js(24h)·back TTL(25h)은 고쳤는데 cpt-cli 의
+//  APPROVAL_WAIT_MAX_MS(570000=9.5분)를 못 고쳐 shim 이 넘긴 86410000 이 9.5분으로 잘렸다.
+//  → 9.5분 뒤 훅 프로세스 종료 = 소켓 close = hook_gone defer = 전 기기에서 질문 카드 회수.
+//  budget() 만 보는 테스트로는 절대 못 잡는다(그 값은 맞았다) → CLI 소스의 상한을 직접 읽는다.
+test('CLI 대기 상한이 shim 이 넘기는 값을 잘라내지 않는다 (질문 카드가 저절로 사라지던 진범)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js'), 'utf8');
+  const m = /const APPROVAL_WAIT_MAX_MS\s*=\s*([^;]+);/.exec(src);
+  assert.ok(m, 'cpt-cli 에서 APPROVAL_WAIT_MAX_MS 를 찾지 못했다(이름이 바뀌었으면 이 테스트도 갱신)');
+  // eslint-disable-next-line no-new-func
+  const cliMax = Function(`"use strict"; return (${m[1]});`)();
+  const b = approvals.budget();
+  assert.ok(cliMax >= b.cliWaitMs,
+    `CLI 상한(${cliMax}ms)이 shim 이 넘기는 대기(${b.cliWaitMs}ms)보다 작다 — 훅이 먼저 죽어 카드가 회수된다`);
+  assert.ok(b.hookTimeoutSec * 1000 > b.cliWaitMs,
+    'claude 훅 timeout 이 CLI 대기보다 짧으면 claude 가 먼저 훅을 잘라 defer 를 우리가 제어하지 못한다');
+});
+
 // ★ 마지막 정리 — 이 파일은 대기 슬롯을 남긴 채 끝난다. 슬롯의 마감 타이머는 **ref 된 setTimeout**
 //  (데몬에서는 defer 를 반드시 발화시켜야 하므로 unref 하면 안 된다)이라, 정리하지 않으면 이 테스트
 //  프로세스가 승인 타임아웃(기본 540s)만큼 종료되지 않는다 — 스위트 전체가 그만큼 매달린다.

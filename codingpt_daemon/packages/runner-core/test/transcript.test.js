@@ -870,3 +870,35 @@ test('cleanup', () => {
   assert.strictEqual(T._internals.tails.size, 0);
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (_) { /* noop */ }
 });
+
+// ── 원격 응답 되돌리기(답한 질문이 대화에 들어가는 모양) ─────────────────────────
+//  선택형 답은 훅의 deny+message 로만 전달되므로 트랜스크립트엔 "거부된 도구"로 남는다.
+//  손대지 않으면 사용자는 자기가 방금 답한 질문에 ✕ 와 내부 문구가 붙은 걸 본다.
+test('원격 카드로 답한 결과는 ✓ 로, 고른 값만 남는다', async () => {
+  const { ANSWER_PREFIX } = require('../approvals');
+  const f = path.join(PROJECTS, 'ans-ok', 'a.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  const answer = ANSWER_PREFIX + '사용자가 원격 기기에서 다음과 같이 답했습니다.\n- 집중 시간: 이른 아침\n- 계절: 가을';
+  fs.writeFileSync(f, [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'AskUserQuestion', input: { questions: [{ question: '언제?', header: '집중 시간', options: [{ label: '이른 아침' }] }] } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', is_error: true, content: answer }] } },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const snap = await T.snapshot(f, { maxLines: 100 });
+  const res = snap.messages.find((m) => m.result);
+  assert.ok(res, 'tool_result 가 있어야 한다');
+  assert.strictEqual(res.result.ok, true, '사용자가 답한 것은 실패가 아니다(✕ 금지)');
+  assert.strictEqual(res.result.preview, '집중 시간: 이른 아침\n계절: 가을');
+  assert.doesNotMatch(res.result.preview, /CodingPT 원격응답|답했습니다/, '내부 문구가 새어나오면 안 된다');
+});
+
+test('실제 거절은 그대로 실패로 남는다', async () => {
+  const { ANSWER_PREFIX } = require('../approvals');
+  const f = path.join(PROJECTS, 'ans-deny', 'a.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'rm -rf /' } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tu1', is_error: true, content: ANSWER_PREFIX + '사용자가 원격 기기에서 거절했습니다.' }] } },
+  ].map((o) => JSON.stringify(o)).join('\n') + '\n');
+  const res = (await T.snapshot(f, { maxLines: 100 })).messages.find((m) => m.result);
+  assert.strictEqual(res.result.ok, false);
+});
