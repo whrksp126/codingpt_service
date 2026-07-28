@@ -23,6 +23,9 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
 import { setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
 
+// '기타' 선택 표식 — 실제 라벨과 부딪히지 않게 내부 전용 심볼 문자열을 쓴다.
+const ETC = "\u0000etc";
+
 let mounted = false;
 let tickTimer = null;
 
@@ -111,6 +114,33 @@ function buildCard(a) {
   el.dataset.id = a.id;
   if (a.deadlineAt) el.dataset.deadline = String(a.deadlineAt);
 
+  // ★ 질문(AskUserQuestion)은 **승인 카드가 아니라 질문 카드**다(사용자 확정 2026-07-28).
+  //  '승인 필요' 배지·도구명·「워크스페이스」·호스트·요청 상세는 전부 잡음이다 — 사용자가 볼 것은
+  //  질문 하나와 고를 항목뿐이다. 질문이 여러 개면 **한 번에 하나씩**, ‹ › 로 오가며 답한다
+  //  (전부 펼쳐 놓으면 화면을 가득 채운다 — 그 화면이 이 규칙을 만든 계기다).
+  const qsAll = questionsOf(a);
+  if (isChoice(a) && qsAll) {
+    el.classList.add("q");
+    el._qs = qsAll;
+    el._picks = new Map();
+    el._etc = new Map();   // qi → 기타 입력값
+    el._step = 0;
+    el._folded = false;
+    el.innerHTML = `<div class="apc-qwrap"></div><div class="apc-err hidden"></div>`;
+    renderQuestionStep(el, a);
+    el.addEventListener("click", (e) => onCardClick(e, el, a));
+    // '기타' 입력은 Enter 로 보낸다(별도 버튼을 두면 푸터가 복잡해진다).
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || !e.target.classList?.contains("apc-free-input")) return;
+      e.preventDefault();
+      syncEtc(el);
+      const i = el._step || 0;
+      if (i < (el._qs || []).length - 1) { el._step = i + 1; renderQuestionStep(el, a); return; }
+      submitQuestionCard(el, a).catch(() => {});
+    });
+    return el;
+  }
+
   const host = a.hostName ? ` · ${a.hostName}` : "";
   const where = a.wsName ? `「${a.wsName}」` : "";
   el.innerHTML =
@@ -169,57 +199,87 @@ function buildCard(a) {
   return el;
 }
 
+// ── 질문 카드(한 번에 하나) ─────────────────────────────────────────
+// 배치는 Claude 앱과 같다: [질문] … [‹ n개 중 m개 ›] [✕] / 번호 붙은 선택지 / [✎ 기타] [건너뛰기].
+//  · 선택 = 다음 질문으로 자동 진행(마지막이면 전송) — Enter 한 번으로 끝나는 흐름.
+//  · 고른 답은 el._picks 에 모아 두고 **마지막에 한 번에** 보낸다(첫 답만 가면 나머지가 미답이 된다).
+//  · 답을 되짚어 고칠 수 있어야 하므로 ‹ › 로 앞뒤 이동한다(선택은 유지된다).
+function renderQuestionStep(el, a) {
+  const qs = el._qs || [];
+  const i = Math.max(0, Math.min(qs.length - 1, el._step || 0));
+  el._step = i;
+  const q = qs[i] || {};
+  const picks = el._picks.get(i) || [];
+  const multi = !!q.multiSelect;
+  const wrap = el.querySelector(".apc-qwrap");
+  if (!wrap) return;
+  const etcOn = picks.includes(ETC);
+  const opts = (q.options || []).map((o, k) => {
+    const on = picks.includes(o.label);
+    return `<button class="apc-qopt${on ? " on" : ""}" type="button" data-act="qpick" data-label="${escapeHtml(o.label || "")}">` +
+      `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(o.label || `선택 ${k + 1}`)}</span>` +
+      (o.description ? `<span class="apc-qdesc">${escapeHtml(o.description)}</span>` : "") + `</span>` +
+      `<span class="apc-qnum">${k + 1}</span>` +
+    `</button>`;
+  }).join("");
+  // 기타 — 선택지에 없는 답. 행 자체가 하나의 선택지이고, 고르면 그 안에서 바로 입력한다.
+  const etcNum = (q.options || []).length + 1;
+  const etc =
+    `<div class="apc-qopt etc${etcOn ? " on" : ""}">` +
+      `<button class="apc-qetc-head" type="button" data-act="qetc">` +
+        `<span class="apc-qlabel">기타</span><span class="apc-qnum">${etcNum}</span>` +
+      `</button>` +
+      (etcOn ? `<input class="apc-free-input" type="text" placeholder="여기에 답변을 입력하세요" value="${escapeHtml(el._etc.get(i) || "")}" />` : "") +
+    `</div>`;
+  const lastOne = i === qs.length - 1;
+  const canGo = picks.length > 0 || !!String(el._etc.get(i) || "").trim();
+  wrap.innerHTML =
+    `<div class="apc-qtop">` +
+      (qs.length > 1 ? `<span class="apc-qbadge">${i + 1}/${qs.length}</span>` : "") +
+      `<span class="apc-qtitle">${escapeHtml(q.question || q.header || "")}</span>` +
+      `<button class="apc-nav" type="button" data-act="qfold" title="접기">${el._folded ? "⌃" : "⌄"}</button>` +
+      `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button>` +
+    `</div>` +
+    (el._folded ? "" :
+      `<div class="apc-qopts">${opts}${etc}</div>` +
+      `<div class="apc-qfoot">` +
+        `<button class="apc-btn ghost" type="button" data-act="qprev" ${i === 0 ? "disabled" : ""}>뒤로</button>` +
+        `<span class="apc-qspacer"></span>` +
+        `<button class="apc-btn ghost" type="button" data-act="qskip">건너뛰기</button>` +
+        `<button class="apc-btn primary" type="button" data-act="qadvance" ${canGo ? "" : "disabled"}>${lastOne ? "보내기" : "다음"} ↵</button>` +
+      `</div>`) +
+    (multi ? `<div class="apc-qhint">여러 개 고를 수 있어요</div>` : "");
+  if (etcOn) wrap.querySelector(".etc .apc-free-input")?.focus();
+}
+
+// 화면의 '기타' 입력값을 상태로 옮긴다 — 재렌더로 DOM 이 갈리기 전에 반드시 부른다.
+function syncEtc(el) {
+  const input = el.querySelector(".etc .apc-free-input");
+  if (input) el._etc.set(el._step || 0, String(input.value || ""));
+}
+
+// 지금까지 고른 답을 **한 번에** 보낸다. 아무것도 없으면 거절로 끝낸다(빈 응답 금지).
+async function submitQuestionCard(el, a) {
+  syncEtc(el);
+  const answers = [];
+  for (const [qi, labels] of [...el._picks.entries()].sort((x, y) => x[0] - y[0])) {
+    if (!labels || !labels.length) continue;
+    if (labels.includes(ETC)) {
+      const text = String(el._etc.get(qi) || "").trim();
+      if (text) answers.push({ questionIndex: qi, labels: [], text });
+      continue;
+    }
+    answers.push({ questionIndex: qi, labels });
+  }
+  if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: "원격 기기에서 건너뛰었습니다" }); return; }
+  await S.respondApproval(a.id, { decision: "answer", answers });
+}
+
 // 응답 UI — 선택형(choice)과 권한형(permission)이 완전히 다르다.
 function buildActions(el, a) {
   const acts = el.querySelector(".apc-actions");
   acts.innerHTML = "";
-  const qs = questionsOf(a);
-  if (isChoice(a) && qs) {
-    // ★ AskUserQuestion 은 질문이 **여러 개**일 수 있다(실측 4개). 전부 그리고 **한 번에** 보낸다 —
-    //  첫 답만 보내면 claude 가 나머지를 못 받은 채 턴을 끝낸다(사용자 신고 증상).
-    //  질문이 하나뿐인 단일선택은 예전처럼 **누르는 즉시 전송**(두 번 누르게 하지 않는다).
-    const wrap = document.createElement("div");
-    wrap.className = "apc-choices";
-    const instant = qs.length === 1 && !qs[0].multiSelect;
-    qs.forEach((q, qi) => {
-      const multi = !!q.multiSelect;
-      if (q.header || q.question) {
-        const h = document.createElement("div");
-        h.className = "apc-q";
-        h.textContent = (qs.length > 1 ? `${qi + 1}. ` : "") + (q.question || q.header);
-        wrap.appendChild(h);
-      }
-      (q.options || []).forEach((o, i) => {
-        const b2 = document.createElement("button");
-        b2.className = "apc-opt";
-        b2.type = "button";
-        b2.dataset.act = instant ? "pick" : (multi ? "toggle" : "one");
-        b2.dataset.label = o.label || "";
-        b2.dataset.qi = String(qi);
-        b2.innerHTML =
-          `<span class="apc-opt-label">${escapeHtml(o.label || `선택 ${i + 1}`)}</span>` +
-          (o.description ? `<span class="apc-opt-desc">${escapeHtml(o.description)}</span>` : "");
-        wrap.appendChild(b2);
-      });
-    });
-    // 자유 입력 — claude 의 "Type something." 에 해당(선택지에 없는 답을 보낼 수 있어야 한다).
-    const free = document.createElement("div");
-    free.className = "apc-free";
-    free.innerHTML =
-      `<input class="apc-free-input" type="text" placeholder="직접 답하기…" />` +
-      `<button class="apc-btn primary" type="button" data-act="answerText">보내기</button>`;
-    wrap.appendChild(free);
-    if (!instant) {
-      const ok = document.createElement("button");
-      ok.className = "apc-btn primary";
-      ok.type = "button";
-      ok.dataset.act = "pickMulti";
-      ok.textContent = qs.length > 1 ? "답변 보내기" : "선택 완료";
-      wrap.appendChild(ok);
-    }
-    acts.appendChild(wrap);
-    return;
-  }
+  // 질문(선택지) 카드는 buildCard 가 renderQuestionStep 으로 따로 그린다 — 여기 오지 않는다.
   if (isChoice(a)) {
     // 선택지가 없는 선택형 = ExitPlanMode(계획 승인). 데몬 규약상
     //  allow → "계획을 승인했습니다. 계획대로 진행하세요." / deny(+message) → "거절했습니다: …"
@@ -263,31 +323,47 @@ async function onCardClick(e, el, a) {
   if (a._busy) return;
   if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
   if (act === "deny") { await S.respondApproval(a.id, { decision: "deny" }); return; }
-  if (act === "toggle") { btn.classList.toggle("on"); return; }
-  // 단일선택(질문 여러 개) — 같은 질문 안에서만 배타 선택. 전송은 [답변 보내기] 가 한다.
-  if (act === "one") {
-    const qi = btn.dataset.qi;
-    for (const o of el.querySelectorAll(`.apc-opt[data-act="one"][data-qi="${qi}"]`)) o.classList.remove("on");
-    btn.classList.add("on");
+  // ── 질문 카드(한 번에 하나) ──
+  //  선택 = **고르기만** 한다(자동 진행 없음). 넘어가는 것은 [다음] / [건너뛰기] 뿐 —
+  //  누르자마자 넘어가면 잘못 눌렀을 때 되돌릴 틈이 없다(참고 UI 도 같은 규칙).
+  if (act === "qprev") { syncEtc(el); el._step = Math.max(0, (el._step || 0) - 1); renderQuestionStep(el, a); return; }
+  if (act === "qfold") { el._folded = !el._folded; renderQuestionStep(el, a); return; }
+  if (act === "qpick") {
+    syncEtc(el);
+    const i = el._step || 0;
+    const q = (el._qs || [])[i] || {};
+    const label = btn.dataset.label || "";
+    const cur = el._picks.get(i) || [];
+    if (q.multiSelect) el._picks.set(i, cur.includes(label) ? cur.filter((x) => x !== label) : [...cur.filter((x) => x !== ETC), label]);
+    else el._picks.set(i, cur.length === 1 && cur[0] === label ? [] : [label]);
+    renderQuestionStep(el, a);
     return;
   }
-  if (act === "pick") {
-    await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: Number(btn.dataset.qi) || 0, labels: [btn.dataset.label || ""] }] });
+  if (act === "qetc") {
+    syncEtc(el);
+    const i = el._step || 0;
+    const cur = el._picks.get(i) || [];
+    // 기타는 선택지와 배타 — 고르면 그 질문의 답은 자유 입력이 된다.
+    el._picks.set(i, cur.includes(ETC) ? [] : [ETC]);
+    renderQuestionStep(el, a);
     return;
   }
-  if (act === "pickMulti") {
-    // 질문별로 고른 것을 모아 **한 번에** 보낸다(questionIndex 로 원 질문에 매칭된다).
-    const byQ = new Map();
-    for (const o of el.querySelectorAll('.apc-opt.on')) {
-      const qi = Number(o.dataset.qi) || 0;
-      if (!byQ.has(qi)) byQ.set(qi, []);
-      if (o.dataset.label) byQ.get(qi).push(o.dataset.label);
-    }
-    const answers = [...byQ.entries()].sort((x, y) => x[0] - y[0]).map(([qi, labels]) => ({ questionIndex: qi, labels }));
-    if (!answers.length) { flashErr(el, "하나 이상 선택해 주세요"); return; }
-    await S.respondApproval(a.id, { decision: "answer", answers });
+  if (act === "qskip") {
+    const i = el._step || 0;
+    el._picks.delete(i);
+    el._etc.delete(i);
+    if (i < (el._qs || []).length - 1) { el._step = i + 1; renderQuestionStep(el, a); return; }
+    await submitQuestionCard(el, a);
     return;
   }
+  if (act === "qadvance") {
+    syncEtc(el);
+    const i = el._step || 0;
+    if (i < (el._qs || []).length - 1) { el._step = i + 1; renderQuestionStep(el, a); return; }
+    await submitQuestionCard(el, a);
+    return;
+  }
+  // (구 '전부 펼치기' 카드의 toggle/one/pick/pickMulti 핸들러는 질문 카드 스테퍼로 대체돼 삭제됐다.)
   if (act === "answerText") {
     const input = el.querySelector(".apc-free-input");
     const text = String(input?.value || "").trim();

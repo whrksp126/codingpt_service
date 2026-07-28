@@ -1399,6 +1399,34 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .apc-btn.ghost:hover { color: var(--text); background: var(--hover); }
 /* 선택형(AskUserQuestion / ExitPlanMode) — 선택지 버튼을 라벨+설명 그대로 그린다.
    ⚠ "항상 허용" 버튼은 존재하지 않는다(claude 2.1.220 훅에 그 개념이 없다 — 실측). */
+/* ── 질문 카드(AskUserQuestion) — 승인 크롬 없이 질문만. 한 번에 하나씩. ──
+   배치 참고 = Claude Code 의 질문 UI: [n/m] 질문 … [⌄][✕] / 선택지(번호는 오른쪽) / [뒤로] [건너뛰기] [다음 ↵] */
+.approval-card.q { padding: 12px; gap: 10px; }
+.apc-qwrap { display: flex; flex-direction: column; gap: 10px; }
+.apc-qtop { display: flex; align-items: center; gap: 8px; }
+.apc-qbadge { flex: none; font-size: 11.5px; font-weight: 700; color: var(--text2); background: var(--elevated2); border-radius: 999px; padding: 2px 8px; }
+.apc-qtitle { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apc-nav { flex: none; width: 26px; height: 26px; border: none; background: transparent; color: var(--text3); border-radius: 6px; cursor: pointer; font-size: 14px; line-height: 1; }
+.apc-nav:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.apc-nav:disabled { opacity: 0.3; cursor: default; }
+.apc-qopts { display: flex; flex-direction: column; gap: 4px; }
+.apc-qopt { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 12px; border: none; border-radius: 8px; background: var(--elevated2); color: var(--text); cursor: pointer; }
+.apc-qopt:hover { background: var(--hover); }
+.apc-qopt.on { background: var(--hover); box-shadow: inset 0 0 0 1px var(--text3); }
+.apc-qtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.apc-qlabel { font-size: 13px; color: var(--text); }
+.apc-qdesc { font-size: 11.5px; color: var(--dim); }
+.apc-qnum { flex: none; font-size: 12px; color: var(--dim); }
+/* 기타 = 선택지 행이면서 그 안에 입력칸을 품는다(고르면 펼쳐진다) */
+.apc-qopt.etc { flex-direction: column; align-items: stretch; gap: 8px; padding: 0; background: var(--elevated2); }
+.apc-qopt.etc:hover { background: var(--hover); }
+.apc-qetc-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: none; background: transparent; color: var(--text); cursor: pointer; }
+.apc-qopt.etc .apc-qlabel { flex: 1; text-align: left; }
+.apc-qopt.etc .apc-free-input { margin: 0 12px 10px; }
+.apc-qfoot { display: flex; align-items: center; gap: 8px; }
+.apc-qspacer { flex: 1; }
+.apc-qhint { font-size: 11.5px; color: var(--dim); }
+
 .apc-choices { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .apc-q { font-size: 12.5px; color: var(--text); }
 .apc-opt {
