@@ -353,6 +353,26 @@ unsafe fn install_webview_drag(v: *mut objc2::runtime::AnyObject, depth: u32) {
     }
 }
 
+// Space 전환 복귀 시 빈 화면 방지 — WKWebView 의 창 가림 감지(occlusion detection)를 끈다.
+//
+//  증상(2026-07-28 사용자 신고): 다른 Space/전체화면 앱에서 작업하다 돌아오면 CodingPT 만
+//  잠깐 아무것도 안 보이다가 나타난다. 원인: 창이 완전히 가려지면 WebKit 이 렌더 레이어를
+//  떼어(프로세스 절전) 복귀 시 재부착·재페인트까지 공백이 생기는데, 보통 앱은 불투명 웹뷰의
+//  마지막 백킹이 그대로 보여 티가 안 나지만 **우리는 punch-through 때문에 메인 웹뷰가 투명**
+//  (drawsBackground=false)이라 그 공백이 "빈 창"으로 그대로 노출된다.
+//  `_setWindowOcclusionDetectionEnabled:NO`(비공개 API — MAS 미배포·공증만이라 무방, 이 macOS
+//  에서 respondsToSelector 실측 true)로 가림 시 레이어 분리를 막는다. 미래 WebKit 이 셀렉터를
+//  없애면 조용히 no-op(respondsToSelector 가드) — 증상이 재발할 뿐 크래시는 없다.
+#[cfg(target_os = "macos")]
+unsafe fn disable_occlusion_detection(wk: *mut objc2::runtime::AnyObject) {
+    use objc2::msg_send;
+    let sel = objc2::sel!(_setWindowOcclusionDetectionEnabled:);
+    let responds: bool = msg_send![&*wk, respondsToSelector: sel];
+    if responds {
+        let _: () = msg_send![&*wk, _setWindowOcclusionDetectionEnabled: false];
+    }
+}
+
 // punch-through 설치(앱 시작 시 1회) — ①메인 앱 웹뷰 배경 투명화 ②contentView 클래스의
 //  hitTest IMP 교체(메서드 스위즐). 프리뷰 컨테이너는 wrap_in_container 가 아래층 삽입.
 pub fn install_punch_through(app: &AppHandle) {
@@ -373,6 +393,8 @@ pub fn install_punch_through(app: &AppHandle) {
                         let no: *mut AnyObject = msg_send![objc2::class!(NSNumber), numberWithBool: false];
                         let key = objc2_foundation::NSString::from_str("drawsBackground");
                         let _: () = msg_send![&*wk, setValue: no, forKey: &*key];
+                        // 투명 웹뷰는 가림 복귀 공백이 "빈 창"으로 노출된다 — 가림 감지 off(위 주석).
+                        disable_occlusion_detection(wk);
                     });
                 }
             }
@@ -487,6 +509,8 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String)
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
         let wk: *mut AnyObject = pw.inner().cast();
+        // 프리뷰 웹뷰도 동일 — 가림 복귀 시 프리뷰 슬롯만 비어 보이는 변형 증상을 막는다.
+        disable_occlusion_detection(wk);
         let superview: *mut AnyObject = msg_send![wk, superview];
         if superview.is_null() {
             return;
