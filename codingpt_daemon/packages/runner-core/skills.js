@@ -38,8 +38,15 @@ function writeIfChanged(file, content) {
 // ~/.claude/skills/cpt-cli/SKILL.md 설치(멱등). opt-out: env CPT_SKILL_INSTALL=0.
 //  codex/gemini 는 해당 홈 디렉토리(~/.codex, ~/.gemini)가 **이미 존재할 때만** 같은 스텁을 설치한다
 //  (그 에이전트를 실제로 쓰는 사용자에게만 add — 폴더를 새로 만들지 않는다).
+//  ⚠ opt-out 은 설치 중단이 아니라 **회수(sweep)까지** 다 — 스위치를 켜도 기설치분이 남아 있으면
+//   무관한 프로젝트의 에이전트가 cpt 를 계속 발견한다(2026-07-29 실사고: 다른 도구의 codex 가
+//   전역 스텁을 보고 cpt 를 집어 씀). Orca 도 off 스위치에서 기설치 훅을 sweep 한다(동일 결론).
 function ensureSkillStub() {
-  if (String(process.env.CPT_SKILL_INSTALL || '') === '0') return { installed: false, reason: 'opt-out' };
+  if (String(process.env.CPT_SKILL_INSTALL || '') === '0') {
+    let removed = false;
+    try { removed = removeSkillStub(); } catch (_) { /* noop */ }
+    return { installed: false, reason: 'opt-out', removed };
+  }
   let content;
   try { content = fs.readFileSync(stubSrc(), 'utf8'); }
   catch (_) { return { installed: false, reason: 'no-source' }; }

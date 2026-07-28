@@ -102,15 +102,19 @@ function ensureShims() {
   //      (그래서 훅을 늘릴 때 zdot/* 를 건드릴 이유가 없다 — 건드리면 healStaleTerminals 가 사용자의
   //       유휴 터미널을 전부 respawn 한다. §shim mtime 계약)
   const hooksFile = path.join(shim, 'claude-hooks.json');
+  // 훅 커맨드는 **절대경로**다(approval-hook 과 동일 규칙). 맨 이름 `cpt` 는 PATH 조회라
+  //  ① 전역 심링크에 배선이 묶이고(심링크는 이제 옵션 — 아래 §전역 링크) ② 워킹트리에 굴러온
+  //  동명 실행파일이 훅 페이로드를 가로챌 수 있다(Orca 가 절대경로를 쓰는 이유와 동일).
+  const cptAbs = path.join(bin, 'cpt');
   const hook = (event, timeout, sync) => [{
-    hooks: [{ type: 'command', command: `cpt claude-hook ${event}`, ...(sync ? {} : { async: true }), timeout }],
+    hooks: [{ type: 'command', command: `"${cptAbs}" claude-hook ${event}`, ...(sync ? {} : { async: true }), timeout }],
   }];
   // 승인 훅 예산의 단일 출처 = approvals.budget()(데몬 하드 타임아웃 < CLI 대기 < 훅 config timeout).
   //  실패해도 훅 배선 전체가 깨지지 않게 보수적 기본값으로 폴백한다.
   let ab = { cliWaitMs: 130000, hookTimeoutSec: 145 };
   try { ab = require('./approvals').budget(); } catch (_) { /* 기본값 유지 */ }
   // 절대경로 + 따옴표 — 옛 셸(PATH 에 <stateDir>/bin 이 없음)에서도 잡히고, 홈 경로에 공백이 있어도 안전.
-  const approvalCmd = `"${path.join(bin, 'cpt')}" approval-hook --wait-ms ${ab.cliWaitMs}`;
+  const approvalCmd = `"${cptAbs}" approval-hook --wait-ms ${ab.cliWaitMs}`;
   const hooks = {
     hooks: {
       SessionStart: hook('session-start', 5),
@@ -136,23 +140,46 @@ function ensureShims() {
   writeExec(path.join(bin, 'cpt'), `#!/bin/sh
 exec "${process.execPath}" "${cptCli}" "$@"
 `);
-  // cpt 를 PATH 에 이미 있는 전역 bin 에도 심링크(best-effort). shim env(ZDOTDIR/PATH)가 붙기 전에
-  //  시작된 "옛 셸"(persistent tmux window 등)에서는 ~/.codingpt/bin 이 PATH 에 없어 cpt 가 안 잡힌다.
-  //  cpt 는 CPT_WS/CPT_SOCK 없이도 TMUX_PANE 자체조회 + 기본 소켓으로 동작하므로, 전역 bin 에만 있으면
-  //  어느 셸에서든 실행된다. claude/codex 는 실제 바이너리와 충돌할 수 있어 cpt 만 링크한다.
-  //  ⚠ 이 심링크는 stateDir 밖(전역 PATH)을 건드리는 유일한 부작용이다. 격리 stateDir 로 이 함수를
-  //   테스트하면 사용자의 라이브 `cpt` 링크가 임시 디렉토리를 가리키게 덮인다(실제로 겪음) →
-  //   테스트/하네스는 CPT_SHIM_NO_GLOBAL_LINK=1 로 이 블록을 끈다.
+  // §전역 링크(옵션, 기본 OFF — 2026-07-29 강등). 과거엔 부팅마다 /opt/homebrew/bin 등에 cpt 를
+  //  무조건 심링크했는데, 그 결과 **CodingPT 와 무관한 터미널/프로젝트에서도** cpt 가 실행 가능해져
+  //  전역 스킬 스텁과 결합해 다른 도구의 에이전트가 사용자 화면을 조작하는 유출 경로가 됐다(실사고).
+  //  훅은 이제 절대경로라(§훅 커맨드) 심링크가 배선의 필수 요건이 아니고, CodingPT 터미널은
+  //  spawn env PATH + 셸 함수(§zdot)로 cpt 가 잡힌다. 남는 용도는 "옛 셸에서의 수동 실행" 편의뿐 —
+  //  원하는 사용자만 CPT_GLOBAL_LINK=1 로 켠다.
+  //  · 기본(OFF): 과거 버전이 만든 **자기 소유** 링크(우리 stateDir 의 bin/cpt 를 가리키는 심링크)를
+  //    회수한다(sweep) — 스킬 opt-out 과 같은 원칙(끄면 기설치분도 걷는다).
+  //  · ON: 그 자리가 비었거나 자기 소유일 때만 만든다 — 남의 파일/링크는 절대 덮지 않는다
+  //    (Orca "Refusing to replace" 와 동일 규율. 과거엔 lstat 후 무조건 unlink 했다 — 금지).
+  //  ⚠ stateDir 밖(전역 PATH)을 건드리는 유일한 블록 — 테스트/하네스는 CPT_SHIM_NO_GLOBAL_LINK=1 로 끈다.
   try {
     if (process.env.CPT_SHIM_NO_GLOBAL_LINK === '1') throw new Error('skip');
     const cptShim = path.join(bin, 'cpt');
-    for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin')]) {
+    // "자기 소유" 판정 — 심링크이고 대상이 어떤 CodingPT stateDir 의 bin/cpt 형태면 우리 것으로 본다
+    //  (과거 설치·다른 홈 경로 잔재까지 회수 대상). 일반 파일/타 도구 링크는 소유 아님.
+    const ownedBy = (link) => {
       try {
+        if (!fs.lstatSync(link).isSymbolicLink()) return false;
+        const target = fs.readlinkSync(link);
+        return target === cptShim || /[\\/]\.codingpt[\\/]bin[\\/]cpt$/.test(target);
+      } catch (_) { return false; }
+    };
+    const enabled = process.env.CPT_GLOBAL_LINK === '1';
+    let linked = false;
+    for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', path.join(os.homedir(), '.local', 'bin')]) {
+      const link = path.join(dir, 'cpt');
+      try {
+        if (!enabled || linked) {
+          // OFF(또는 이미 한 곳에 링크함): 자기 소유 잔재만 회수.
+          if (ownedBy(link)) fs.unlinkSync(link);
+          continue;
+        }
         fs.accessSync(dir, fs.constants.W_OK);
-        const link = path.join(dir, 'cpt');
-        try { const st = fs.lstatSync(link); if (st) fs.unlinkSync(link); } catch (_) { /* 없으면 그냥 생성 */ }
+        if (fs.existsSync(link) || ownedBy(link)) {
+          if (!ownedBy(link)) continue; // 남의 파일 — 덮지 않는다(다음 후보로)
+          fs.unlinkSync(link);
+        }
         fs.symlinkSync(cptShim, link);
-        break; // 한 곳만 성공하면 충분
+        linked = true;
       } catch (_) { /* 이 dir 는 쓰기불가/없음 — 다음 후보 */ }
     }
   } catch (_) { /* noop */ }
@@ -188,7 +215,7 @@ if [ "\${CPT_HOOKS_DISABLED:-0}" = "1" ]; then exec "$REAL" "$@"; fi
 case " $* " in
   *" notify"*) exec "$REAL" "$@" ;;
 esac
-exec "$REAL" -c 'notify=["cpt","codex-notify"]' "$@"
+exec "$REAL" -c 'notify=["${cptAbs}","codex-notify"]' "$@"
 `);
     wired.push('codex');
   } else {

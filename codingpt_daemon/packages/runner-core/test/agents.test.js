@@ -60,7 +60,10 @@ test('나중에 설치하면 다음 배선에서 래퍼가 생긴다 — 재시�
   await shim.ensureShimsAsync();
   assert.ok(wrapperExists('codex'), '감지되면 래퍼가 생겨야 한다');
   const body = fs.readFileSync(path.join(BIN(), 'codex'), 'utf8');
-  assert.match(body, /notify=\["cpt","codex-notify"\]/, 'codex 배선은 실행 인자 notify 주입이다');
+  // notify 프로그램은 **절대경로**여야 한다(2026-07-29) — 맨 이름 "cpt" 는 PATH 조회라 전역
+  //  심링크(이제 옵션)에 배선이 묶이고, 워킹트리의 동명 실행파일이 가로챌 수 있다.
+  assert.match(body, /notify=\["[^"]*[\\/]bin[\\/]cpt","codex-notify"\]/, 'codex 배선은 절대경로 notify 주입이다');
+  assert.doesNotMatch(body, /notify=\["cpt"/, '맨 이름 "cpt" 로 되돌리면 심링크 없는 환경에서 codex 알림이 죽는다');
   assert.doesNotMatch(body, /REAL=""/, '해석된 절대경로가 박혀야 한다(빈 REAL = 감지 실패 흔적)');
 });
 

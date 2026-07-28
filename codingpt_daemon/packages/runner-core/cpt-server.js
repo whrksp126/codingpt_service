@@ -434,6 +434,72 @@ async function resolveCtx(ctx) {
   return { cwdRel, pool, windowIndex, windowId };
 }
 
+// ── CodingPT 컨텍스트 게이트(2026-07-29) ─────────────────────────────────
+// 문제(실측): resolveCtx 는 CPT_WS/tmux 좌표가 없으면 프로세스 CWD 를 그대로 워크스페이스로
+//  승격한다 — 홈 아래 아무 폴더에서 cpt 를 실행해도 그 폴더가 ws 가 되고 공개 명령 전체
+//  (terminal.send·ws.delete·ui.previewOpen…)가 열렸다. 전역 스킬 스텁·전역 심링크와 결합해
+//  무관한 프로젝트의 codex/claude 가 cpt 로 사용자의 **활성 기기 화면**을 실제 조작할 수 있었다.
+// 규칙: CodingPT 가 만든 컨텍스트가 있으면 통과 —
+//  ① ctx.ws 가 문자열(CPT_WS env 주입 터미널 — 값이 '' 여도 env 존재 자체가 우리 터미널 증거)
+//  ② ctx.tmux.session 이 우리 세션(cpt-…) — CLI 가 -L codingpt 소켓 자기조회에 성공한 경우
+//  CWD 폴백만으로 온 요청은 그 CWD(또는 상위 폴더)가 **지금 열려 있는 워크스페이스**(-L codingpt
+//  에 세션 보유)일 때만 통과 — 워크스페이스 폴더 안 "옛 셸"의 수동 사용은 살리고 무관 폴더는 거부.
+//  (Orca 의 "전역 아티팩트는 컨텍스트 밖에서 무해화" 패턴의 데몬측 절반. 스킬 스텁의 자기-스코핑
+//   문구가 나머지 절반이다. env 위조까지 막는 게 목적이 아니다 — 위협 모델은 악의가 아니라
+//   다른 에이전트의 **우발적 간섭**이다.)
+// 예외(컨텍스트 불요): 진단(ping/capabilities/identify/hooks.doctor)과 훅 자기보고(hook.event/
+//  approval.*)뿐. 훅을 게이트하면 env 유실 상황에서 승인·알림이 통째로 죽는다 — 훅은 조작이
+//  아니라 자기보고라 위험도가 낮고, approval.request/respond 는 어차피 CAPABILITIES 비공개다.
+const CONTEXT_EXEMPT = new Set([
+  'ping', 'capabilities', 'identify', 'hooks.doctor',
+  'hook.event', 'approval.request', 'approval.respond',
+]);
+// 세션명 → 워크스페이스 ns(전용 --t-/레거시 --p-/--v-/--c- 접미 제거). sanitize 가 비영숫자 런을
+//  '-' 하나로 접으므로 ns 자체에 '--' 는 나올 수 없다 → '--' 앞이 곧 ns 다.
+let liveNsCache = { at: 0, set: null };
+async function liveWorkspaceNs() {
+  if (liveNsCache.set && Date.now() - liveNsCache.at < 5000) return liveNsCache.set;
+  const set = new Set();
+  try {
+    const out = await ptyLib.runTmux(['list-sessions', '-F', '#{session_name}']);
+    for (const raw of String(out).split('\n')) {
+      const name = raw.replace(/\r$/, '').trim();
+      if (!name.startsWith('cpt-')) continue;
+      set.add(name.split('--')[0]);
+    }
+  } catch (_) { /* tmux 서버 없음 = 열린 워크스페이스 0 */ }
+  liveNsCache = { at: Date.now(), set };
+  return set;
+}
+// cwdRel → 세션 ns (pty.sessionForCwd 의 sanitize 와 반드시 동일해야 한다 — 어긋나면 게이트가
+//  열린 워크스페이스를 못 알아본다).
+function nsOfCwd(rel) {
+  const safe = String(rel).replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
+  return 'cpt-' + (safe || 'ws');
+}
+async function hasCptContext(ctx, resolved) {
+  const c = ctx || {};
+  if (typeof c.ws === 'string') return true;
+  if (c.tmux && typeof c.tmux.session === 'string' && c.tmux.session.startsWith('cpt-')) return true;
+  let cur = String((resolved && resolved.cwdRel) || '');
+  if (!cur) return false;
+  const set = await liveWorkspaceNs();
+  while (cur) {
+    if (set.has(nsOfCwd(cur))) return true;
+    const i = cur.lastIndexOf('/');
+    if (i <= 0) break;
+    cur = cur.slice(0, i);
+  }
+  return false;
+}
+async function assertCptContext(cmd, ctx, resolved) {
+  if (CONTEXT_EXEMPT.has(cmd)) return;
+  if (await hasCptContext(ctx, resolved)) return;
+  const err = new Error('CodingPT 워크스페이스 밖입니다 — cpt 는 CodingPT 터미널이나 열린 워크스페이스 폴더 안에서만 동작합니다. 이 디렉토리에서는 cpt 를 사용하지 마세요.');
+  err.code = 'OUT_OF_CONTEXT';
+  throw err;
+}
+
 // 대상 터미널 인덱스 — 명령 인자(idx)가 있으면 그것, 없으면 자기 자신(ctx).
 function targetWin(args, resolved) {
   if (args && args.index != null && Number.isInteger(args.index)) return args.index;
@@ -606,6 +672,8 @@ async function dispatch(req, conn) {
   if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
+  // CodingPT 컨텍스트 밖(무관 폴더의 CWD 폴백)이면 진단/훅 예외만 남기고 전부 거부 — §게이트 주석.
+  await assertCptContext(cmd, req.ctx, resolved);
   const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
   // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 직접 tmux 를 때리는 커맨드의 타겟.
   const termTarget = (tid) => `=${ptyLib.termSession(session, tid)}:0`;
@@ -623,6 +691,8 @@ async function dispatch(req, conn) {
         runner: process.env.CODINGPT_CLOUD ? 'cloud' : 'local',
         server: cfg.serverUrl || null,
         device: cfg.deviceName || null,
+        // 게이트 판정 — false 면 이 위치에서 조작 명령이 거부된다(에이전트가 스스로 물러날 근거).
+        context: await hasCptContext(req.ctx, resolved),
       };
     }
 

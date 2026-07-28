@@ -352,9 +352,12 @@ test('shim: PermissionRequest 만 approval-hook 으로, 나머지 6종은 무변
       'claude 훅 timeout 이 데몬 하드 타임아웃보다 작으면 claude 가 먼저 훅을 잘라 카드가 남는다');
     assert.ok(h.statusMessage, '대기 중 사용자에게 이유를 보여줘야 한다');
 
+    // fire-and-forget 6종도 **절대경로**다(2026-07-29, approval-hook 과 동일 규칙) — 맨 이름 `cpt` 는
+    //  PATH 조회라 전역 심링크(이제 옵션)에 묶이고 워킹트리 동명 실행파일에 가로채일 수 있다.
+    const cptAbs = path.join(iso, '.codingpt', 'bin', 'cpt');
     for (const [ev, sub] of [['SessionStart', 'session-start'], ['UserPromptSubmit', 'prompt'], ['Notification', 'notification'],
       ['Stop', 'stop'], ['StopFailure', 'stop-failure'], ['SessionEnd', 'session-end']]) {
-      assert.strictEqual(hooks[ev][0].hooks[0].command, `cpt claude-hook ${sub}`, `${ev} 는 무변경(fire-and-forget)이어야 한다`);
+      assert.strictEqual(hooks[ev][0].hooks[0].command, `"${cptAbs}" claude-hook ${sub}`, `${ev} 는 절대경로 fire-and-forget 이어야 한다`);
       assert.strictEqual(hooks[ev][0].hooks[0].async, true, `${ev} 가 블로킹되면 claude 가 느려진다`);
     }
     // zdot(ZDOTDIR 체인)은 손대지 않는다 — mtime 이 바뀌면 healStaleTerminals 가 유휴 터미널을 전부 respawn 한다.
