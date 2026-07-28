@@ -872,6 +872,9 @@ async function approve(a) {
 const LINK_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 혼동 문자(0/O·1/I/L) 제외 — 앱과 동일
 let activeLink = null;   // { linkId, code, expiresAt }
 
+/** 계정이 바뀌었거나 열쇠가 갈렸다 → 발급해 둔 코드는 무효다(다른 계정에서 입력하면 404). */
+function linkForget() { activeLink = null; }
+
 async function linkStart() {
   const e = core();
   if (!e) return { ok: false, code: 'E2EE_UNSUPPORTED', error: '이 데몬은 종단간 암호화를 지원하지 않습니다.' };
@@ -891,6 +894,8 @@ async function linkStart() {
   }
 }
 function linkActive() {
+  //  ⚠ 만료된 코드는 **없는 것으로** 돌려준다 — 화면이 죽은 코드를 계속 보여 주면 사용자는 그것을
+  //   입력하고 404 를 본다(2026-07-28 실사고: 계정 전환 후 옛 코드 입력).
   if (!activeLink || Date.now() >= activeLink.expiresAt) return { ok: true, active: null };
   return { ok: true, active: { code: activeLink.code, linkId: activeLink.linkId, expiresAt: activeLink.expiresAt } };
 }
@@ -1133,7 +1138,7 @@ module.exports = {
   hintResync,
   // e2ee-local(cpt.sock) 위임 표면
   state, pending, keyring, approve, deny, revoke, setPolicy, bootstrap, noteKeyChanged,
-  linkStart, linkActive, linkCancel, linkFulfill, linkClaim,
+  linkStart, linkActive, linkCancel, linkFulfill, linkClaim, linkForget,
   // 페어링 경로(호출자는 packages/daemon·PC)
   acceptPairGrant, identityForPairing,
   // 테스트 노출 — 백오프 상한/보관 세대/내부 상태를 계약으로 고정한다
@@ -1141,6 +1146,7 @@ module.exports = {
   _state: st,
   _pruneEpochs: pruneEpochs,
   _reset: () => {
+    activeLink = null;
     stop();
     Object.assign(st, {
       running: false, lastRunAt: 0, lastKickAt: 0, nextAt: 0, phase: 'boot', keyState: 'none',

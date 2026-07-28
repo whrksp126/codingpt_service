@@ -679,11 +679,14 @@ function e2eeActionRow() {
  */
 let linkEntryFor = null;   // 코드 입력 칸을 연 기기 행 id
 let linkEntryMsg = "";     // 그 칸의 오류/진행 문구
-let myLink = null;      // { code, until } — 표시 중인 코드
+let myLink = null;      // { code, until, ref } — 표시 중인 코드(ref = 그 코드를 만든 계정)
 let myLinkOpen = false;
 let myLinkBusy = false;
 function e2eeMyCodeRow() {
   if (!e2eeReady()) return "";
+  //  ★ 계정이 바뀌면(재가입·계정 전환) 옛 코드는 **다른 계정의 코드**라 입력해도 404 다(실사고).
+  //   표시 중인 코드에 발급 계정(userRef)을 달아 두고, 달라지면 즉시 버린다.
+  if (myLink && myLink.ref && e2ee.userRef && myLink.ref !== e2ee.userRef) { myLink = null; }
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
   const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
@@ -872,7 +875,7 @@ function bindE2ee(box) {
     renderE2ee();
     const r = await linkStart();
     myLinkBusy = false;
-    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000) } : null;
+    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
     if (!r.ok) linkEntryMsg = r.error || "";
     renderE2ee();
   }));
@@ -880,7 +883,7 @@ function bindE2ee(box) {
     myLinkBusy = true; renderE2ee();
     const r = await linkStart();
     myLinkBusy = false;
-    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000) } : null;
+    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
     renderE2ee();
   }));
   // (개정 4: 정책 세그/암호화 켜기/복구 코드 만들기·복원 핸들러 삭제 — 부트스트랩은

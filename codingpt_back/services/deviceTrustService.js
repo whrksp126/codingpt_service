@@ -679,15 +679,17 @@ async function linkClaim(userId, deviceId, body) {
   if (!rec) {
     const ids = [...(linksByUser.get(String(userId)) || [])];
     const last = ids.length ? links.get(ids[ids.length - 1]) : null;
-    if (!last) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
+    //  ★ 2026-07-28 실사고: 사용자가 **다른 계정에서 만든 코드**(재가입 전 계정)를 입력했다. 그때
+    //   "찾을 수 없습니다" 만 말하면 다음에 뭘 해야 할지 알 수 없다 → 행동을 함께 말한다.
+    if (!last) throw err('코드를 찾을 수 없어요. 연결할 기기에서 코드를 새로 만들어 주세요.', 404, 'LINK_NOT_FOUND');
     rec = last;
   }
   if (String(rec.userId) !== String(userId)) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
-  if (now >= rec.expiresAt) throw err('연동 코드가 만료되었습니다.', 410, 'EXPIRED');
+  if (now >= rec.expiresAt) throw err('코드가 만료됐어요. 새로 만들어 주세요.', 410, 'LINK_EXPIRED');
   if (given !== rec.codeHash) {
     rec.tries += 1;
     if (rec.tries >= LINK_MAX_TRIES) { links.delete(rec.id); throw err('코드를 여러 번 틀렸습니다. 새 코드를 발급받아 주세요.', 429, 'LINK_BLOCKED'); }
-    throw err('코드가 올바르지 않습니다.', 400, 'LINK_CODE_MISMATCH', { triesLeft: LINK_MAX_TRIES - rec.tries });
+    throw err(`코드가 올바르지 않아요 · ${LINK_MAX_TRIES - rec.tries}회 남음`, 400, 'LINK_CODE_MISMATCH', { triesLeft: LINK_MAX_TRIES - rec.tries });
   }
   const id = normalizeIdentity(b);
   rec.claim = { ikX: id.ikX, ikEd: id.ikEd, label: id.label, platform: id.platform, kind: id.kind, deviceId: deviceId != null ? Number(deviceId) : null };
