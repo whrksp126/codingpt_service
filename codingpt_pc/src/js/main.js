@@ -18,7 +18,7 @@ import { startE2ee } from "./e2ee.js";
 import { ideDirtyPaths } from "./ide.js";
 import { initOsDrop } from "./os-drop.js";
 import { mountApprovals, updateApprovals } from "./approvals.js";
-// 기기 승인(계정 로그인 확인) — 설정 화면 밖 독립 표면(상단 중앙 카드). 설계 근거는 device-approval.js 헤더.
+// (★ 개정 12: 기기 승인 표면 삭제 — 승인 절차 자체가 없어졌다. 연동은 설정 > 계정 > 기기에서 코드로.)
 import { maybeShowOnboarding } from "./agents-view.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
@@ -59,7 +59,6 @@ mountWorkspaceView(wsViewEl);
 mountSettings(settingsEl);
 mountLoginGate(loginGateEl);
 mountApprovals(); // 승인 카드 스택(하단 중앙) — 워크스페이스/설정 어느 화면에서도 응답 가능해야 한다
-mountDeviceApprovals(); // 기기 승인 카드(상단 중앙) — 승인은 설정이 아니라 이 사건 표면에서 한다
 
 let lastActive = null;
 function render() {
@@ -71,7 +70,6 @@ function render() {
   updateSettings();
   updateWorkspaceView();
   updateApprovals(); // 승인 카드는 Chat 뷰 슬롯 판정을 위해 workspace 렌더 뒤에 갱신
-  updateDeviceApprovals(); // 기기 승인 카드(대기 요청이 있을 때만 존재)
   if (state.activeWsId !== lastActive) {
     lastActive = state.activeWsId;
     if (state.activeWsId && !settingsShown) setTimeout(focusCurrentPane, 40);

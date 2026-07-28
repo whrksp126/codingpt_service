@@ -677,6 +677,35 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
 //  실행할 수 없으므로 회귀를 잡을 수 있는 지점이 소스뿐이다. 한 번 지운 문단이 다음 라운드에 슬며시
 //  되살아나면 이 작업 전체가 무효가 되고, 앱(같은 표를 쓰는 E2eeSettingsCard)과도 어긋난다.
 //  ⚠ 조작 차단 오버레이 문구(e2ee.js e2eeGate)는 이 감사 범위 밖이다(§4-8) → 검사 대상 파일이 아니다.
+// ⑨ ★ 2026-07-28: **미해결 참조 금지**(빈 화면 사고 재발 방지 — 실제로 사용자가 겪었다).
+//   개정 12 에서 `device-approval.js` 를 지우면서 main.js 의 import 는 지웠는데 **호출 두 줄이 남아**
+//   앱이 부팅 즉시 ReferenceError 로 죽었다(창은 열리는데 아무것도 안 그려진다). `node --check` 는
+//   문법만 보므로 못 잡는다.
+//   범위를 **화면 배선 헬퍼**(mount*/update*/render*/dismiss*)로 좁힌다: 이 이름들은 전부 다른 모듈이
+//   export 하는 것을 가져다 쓰는 형태라, "호출은 있는데 그 파일에 선언도 import 도 없다" 면 100% 사고다.
+//   (일반 식별자까지 넓히면 콜백 인자·전역이 섞여 노이즈가 커진다 — 좁은 규칙이 실제로 잡는다.)
+{
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const dir = base.startsWith("file:") ? fileURLToPath(base) : base;
+  const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
+  const bad = [];
+  for (const f of files) {
+    const code = readFileSync(`${dir}/${f}`, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
+    const known = new Set();
+    for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
+      for (const n of m[1].split(",")) known.add(n.trim().split(/\s+as\s+/).pop().trim());
+    }
+    for (const m of code.matchAll(/(?:function|const|let|var|class)\s+(\w+)/g)) known.add(m[1]);
+    for (const m of code.matchAll(/^\s*(?:static\s+|async\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm)) known.add(m[1]);
+    for (const m of code.matchAll(/(?<![.\w$])((?:mount|update|render|dismiss|unDismiss)[A-Z]\w*)\s*\(/g)) {
+      if (!known.has(m[1])) bad.push(`${f}: ${m[1]}()`);
+    }
+  }
+  eq("삭제한 모듈의 호출이 남아 있지 않다(부팅 즉시 ReferenceError = 빈 화면)", [...new Set(bad)].sort(), []);
+}
+
 {
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
