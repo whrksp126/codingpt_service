@@ -957,5 +957,26 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("이름 열에 폭 상한이 있다(긴 기기명이 열을 밀어내지 않는다)", /\.dev-c-name \{[^}]*max-width:/.test(css), true);
 }
 
+// ── 질문 카드: 고른 것 → 와이어 answers[] (순수 로직) ─────────────────
+//  여기서 조용히 틀리면 에이전트가 엉뚱한 답을 받고 화면엔 오류가 0 건이다. 실제로 '질문 4개 중
+//  1개만 전달' 사고가 이 계열이었다(back 이 단수만 넘겨 나머지가 미답으로 끝났다).
+{
+  const A = await import(`${base}/approvals.js`);
+  const ETC = A._ETC;
+  const picks = new Map([[0, ["겨울 스포츠"]], [1, ["밤"]], [2, [ETC]], [3, []]]);
+  const etcs = new Map([[2, "  즉흥파요  "]]);
+  const out = A.buildAnswers(picks, etcs);
+  eq("질문 3개분이 실린다(건너뛴 질문은 빠진다)", out.length, 3);
+  eq("questionIndex 오름차순", out.map((x) => x.questionIndex).join(","), "0,1,2");
+  eq("라벨 선택은 labels 로", JSON.stringify(out[1]), JSON.stringify({ questionIndex: 1, labels: ["밤"] }));
+  eq("기타는 text 로(공백 정리)", JSON.stringify(out[2]), JSON.stringify({ questionIndex: 2, labels: [], text: "즉흥파요" }));
+  // 기타를 골랐지만 아무것도 안 썼다 = 그 질문은 미답. 빈 답을 실어 보내면 안 된다.
+  eq("기타 선택 + 빈 입력 = 그 질문은 미답", A.buildAnswers(new Map([[0, [ETC]]]), new Map()).length, 0);
+  // 다중 선택.
+  eq("multiSelect 는 라벨을 여러 개 싣는다",
+    JSON.stringify(A.buildAnswers(new Map([[0, ["봄", "가을"]]]), new Map())[0].labels), JSON.stringify(["봄", "가을"]));
+  eq("아무것도 안 골랐으면 빈 배열(호출측이 거절로 끝낸다)", A.buildAnswers(new Map(), new Map()).length, 0);
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");
 process.exit(fail ? 1 : 0);

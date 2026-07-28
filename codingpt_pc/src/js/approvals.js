@@ -258,19 +258,33 @@ function syncEtc(el) {
   if (input) el._etc.set(el._step || 0, String(input.value || ""));
 }
 
+/**
+ * 고른 것 → 와이어 answers[]. **순수 함수**로 뽑아 둔 이유: 여기서 조용히 틀리면(질문이 빠지거나
+ *  questionIndex 가 밀리면) 에이전트가 엉뚱한 답을 받고 화면에는 아무 오류도 안 뜬다. 실제로
+ *  '질문 4개 중 1개만 전달' 사고가 이 계열이었다 → contract 테스트가 이 함수를 직접 고정한다.
+ *  · 라벨 선택 → { questionIndex, labels }
+ *  · 기타(ETC) → { questionIndex, labels: [], text }  (빈 텍스트면 그 질문은 미답으로 둔다)
+ *  · 건너뛴 질문 → 아예 싣지 않는다(빈 labels 를 보내면 데몬이 무시하거나 오해한다)
+ */
+export function buildAnswers(picks, etcs) {
+  const out = [];
+  for (const [qi, labels] of [...(picks || new Map()).entries()].sort((x, y) => x[0] - y[0])) {
+    if (!labels || !labels.length) continue;
+    if (labels.includes(ETC)) {
+      const text = String((etcs && etcs.get(qi)) || "").trim();
+      if (text) out.push({ questionIndex: qi, labels: [], text });
+      continue;
+    }
+    out.push({ questionIndex: qi, labels });
+  }
+  return out;
+}
+export { ETC as _ETC };
+
 // 지금까지 고른 답을 **한 번에** 보낸다. 아무것도 없으면 거절로 끝낸다(빈 응답 금지).
 async function submitQuestionCard(el, a) {
   syncEtc(el);
-  const answers = [];
-  for (const [qi, labels] of [...el._picks.entries()].sort((x, y) => x[0] - y[0])) {
-    if (!labels || !labels.length) continue;
-    if (labels.includes(ETC)) {
-      const text = String(el._etc.get(qi) || "").trim();
-      if (text) answers.push({ questionIndex: qi, labels: [], text });
-      continue;
-    }
-    answers.push({ questionIndex: qi, labels });
-  }
+  const answers = buildAnswers(el._picks, el._etc);
   if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: "원격 기기에서 건너뛰었습니다" }); return; }
   await S.respondApproval(a.id, { decision: "answer", answers });
 }
