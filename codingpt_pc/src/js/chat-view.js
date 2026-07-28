@@ -14,6 +14,7 @@
 //  캐치업/유실보정 = GET /chat/since(sinceSeq 워터마크). push 가 안 오면 폴링이 대신 따라잡는다.
 //  전송 = POST /chat/input(데몬이 그 tmux 세션에 bracketed paste + 지연 Enter). 실패 시 로컬 PTY 폴백.
 import { api } from "./api.js";
+import { state as appState, agentStateOf } from "./state.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
@@ -370,6 +371,7 @@ export class ChatView {
     if (snapshot || wasBottom) { this._scrollToBottom(); this._unread = 0; }
     else if (added.length) this._unread += added.filter((m) => isVisible(m) && !isResult(m)).length;
     this._syncJump();
+    this._syncWorking();
   }
 
   _rebuild() {
@@ -396,12 +398,23 @@ export class ChatView {
   }
 
   _appendAll(msgs) {
+    const held = this._heldToolIds();
     for (const m of msgs) {
       if (m.seq > this._maxSeq) this._maxSeq = m.seq;
       // tool 결과는 앞선 tool_use 카드의 결과 슬롯으로 합친다(별도 카드 금지 — Claude 앱과 동일).
       //  hidden 결과(구버전 형태의 빈 자리표시)는 그리지 않는다.
-      if (isResult(m)) { if (!m.hidden) this._fillResult(m); continue; }
+      if (isResult(m)) {
+        // 아직 도크가 들고 있는 질문의 결과는 넘긴다 — 질문 카드가 없어 고아 행이 생긴다.
+        //  요청이 해소되면 held 가 비고 _rebuild 가 질문+결과를 함께 그린다.
+        if (m.result && m.result.toolUseId && held.has(m.result.toolUseId)) continue;
+        if (!m.hidden) this._fillResult(m);
+        continue;
+      }
       if (!isVisible(m)) continue;
+      // ★ 답하기 전 질문은 **대화 내역에 넣지 않는다**(사용자 확정 2026-07-28). 컴포저 위 승인 카드가
+      //  같은 선택지를 이미 그리고 있어서, 넣으면 같은 질문이 화면에 두 번 보인다. 답하면 요청이
+      //  해소되고 held 에서 빠져 그때 대화에 자연스럽게 들어간다.
+      if (m.kind === "question" && m.tool && m.tool.id && held.has(m.tool.id)) continue;
       const el = this._buildRow(m);
       if (!el) continue;
       // 빈 상태 안내가 남아 있으면 첫 행을 넣을 때 치운다.
@@ -774,11 +787,48 @@ export class ChatView {
     ta.focus();
   }
 
+  // 지금 승인 카드가 들고 있는 질문의 tool_use id 집합 — 대화 내역에서 감출 대상.
+  //  (approvals.js 를 import 하면 순환이 된다 → 상태를 직접 읽는다. 규칙은 같다: cwd+win 엄격 일치.)
+  _heldToolIds() {
+    const cwd = this._cwd();
+    const out = new Set();
+    if (!cwd || this._tid == null) return out;
+    for (const a of appState.approvals || []) {
+      if ((a.cwd || "") !== cwd || a.win !== this._tid) continue;
+      if (a.toolUseId) out.add(a.toolUseId);
+    }
+    return out;
+  }
+
   // ── 승인 카드 슬롯(기능1) ──
   _renderApprovals() {
     if (!this.apprEl || !_approvalRenderer) return;
     const cwd = this._cwd();
     _approvalRenderer(this.apprEl, { cwd, win: this._tid, visible: this._visible });
+    // 들고 있는 질문 집합이 바뀌었으면 대화 내역을 다시 그린다(감췄던 질문이 답과 함께 들어온다).
+    const key = [...this._heldToolIds()].sort().join(",");
+    if (key !== this._heldKey) { this._heldKey = key; this._rebuild(); }
+    this._syncWorking();
+  }
+
+  // ── 작업 중 표시 ──
+  // 없으면 '아무 반응이 없다' 로 보인다(사용자 신고: 채팅에서 물었는데 조용해서 TUI 로 바꿔 보니
+  //  실제로는 돌고 있었다). 판정은 데몬 push(agent_state)가 정본 — 트랜스크립트 모양만 보는 추정은
+  //  codex 처럼 중간 설명을 계속 뱉는 에이전트에서 '마지막이 assistant 텍스트 = 안 바쁨' 으로 접힌다.
+  //  승인 카드가 떠 있으면 표시하지 않는다 — 무엇을 기다리는지는 그 카드가 이미 말한다.
+  _syncWorking() {
+    if (!this.scrollEl) return;
+    const st = agentStateOf(this._cwd(), this._tid);
+    const busy = !!st && (st.state === "working" || st.state === "needsInput");
+    const on = busy && !this._heldToolIds().size && !this._pending.length;
+    let el = this.scrollEl.querySelector(".chat-working");
+    if (!on) { el?.remove(); return; }
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "chat-working";
+      el.innerHTML = `<span class="chat-working-dot"></span><span>작업 중…</span>`;
+    }
+    this.scrollEl.appendChild(el); // 항상 맨 아래로
   }
 
   // ── 보조 ──

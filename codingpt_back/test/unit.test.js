@@ -1029,3 +1029,26 @@ test('maybeNotify — 봉인 모드는 평문 hint 로, hint 없으면 기존 ev
     assert.strictEqual(b.cwd, null);
   } finally { notif.createNotification = orig; }
 });
+
+// ★ AskUserQuestion 은 질문이 여러 개일 수 있다. 예전 normalizeDecision 은 단수 `answer` 만 받아
+//  첫 질문의 답만 데몬에 넘겼고, claude 는 나머지를 미답으로 두고 턴을 끝냈다(사용자 신고 증상).
+test('승인 응답 — 복수 answers 를 그대로 싣고, 단수 answer 는 구 데몬 호환으로 남긴다', () => {
+  const out = approvalService._normalizeDecision({
+    decision: 'answer',
+    answers: [
+      { questionIndex: 0, labels: ['겨울 스포츠'] },
+      { questionIndex: 1, labels: ['밤'] },
+      { questionIndex: 2, labels: [], text: '즉흥파요' },
+    ],
+  });
+  assert.strictEqual(out.answers.length, 3, '세 답이 모두 전달돼야 한다');
+  assert.deepStrictEqual(out.answers[1], { questionIndex: 1, labels: ['밤'], text: null });
+  assert.strictEqual(out.answers[2].text, '즉흥파요');
+  assert.deepStrictEqual(out.answer, out.answers[0], '구 데몬은 단수만 읽는다');
+  // 구 클라이언트(단수만 보냄)도 그대로 동작해야 한다.
+  const one = approvalService._normalizeDecision({ decision: 'answer', answer: { questionIndex: 0, labels: ['Apple'] } });
+  assert.strictEqual(one.answers.length, 1);
+  assert.deepStrictEqual(one.answers[0].labels, ['Apple']);
+  // 빈 답은 여전히 거부(오응답 방지).
+  assert.throws(() => approvalService._normalizeDecision({ decision: 'answer', answers: [{ questionIndex: 0, labels: [] }] }), /BAD_ANSWER|labels/);
+});

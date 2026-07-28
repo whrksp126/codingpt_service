@@ -118,7 +118,6 @@ function buildCard(a) {
       `<span class="apc-ic">${icons.shield({ size: 15 })}</span>` +
       `<span class="apc-title">승인 필요</span>` +
       `<span class="apc-tool">${escapeHtml(a.tool || "Tool")}</span>` +
-      `<span class="apc-clock">${a.deadlineAt ? fmtRemain(remainMs(a.deadlineAt)) : ""}</span>` +
     `</div>` +
     `<div class="apc-where">${escapeHtml(where + host)}</div>` +
     `<div class="apc-body"></div>` +
@@ -176,27 +175,32 @@ function buildActions(el, a) {
   acts.innerHTML = "";
   const qs = questionsOf(a);
   if (isChoice(a) && qs) {
-    const q = qs[0];
-    const multi = !!q.multiSelect;
+    // ★ AskUserQuestion 은 질문이 **여러 개**일 수 있다(실측 4개). 전부 그리고 **한 번에** 보낸다 —
+    //  첫 답만 보내면 claude 가 나머지를 못 받은 채 턴을 끝낸다(사용자 신고 증상).
+    //  질문이 하나뿐인 단일선택은 예전처럼 **누르는 즉시 전송**(두 번 누르게 하지 않는다).
     const wrap = document.createElement("div");
     wrap.className = "apc-choices";
-    if (q.header || q.question) {
-      const h = document.createElement("div");
-      h.className = "apc-q";
-      h.textContent = q.question || q.header;
-      wrap.appendChild(h);
-    }
-    (q.options || []).forEach((o, i) => {
-      const b = document.createElement("button");
-      b.className = "apc-opt";
-      b.type = "button";
-      b.dataset.act = multi ? "toggle" : "pick";
-      b.dataset.label = o.label || "";
-      b.dataset.qi = "0";
-      b.innerHTML =
-        `<span class="apc-opt-label">${escapeHtml(o.label || `선택 ${i + 1}`)}</span>` +
-        (o.description ? `<span class="apc-opt-desc">${escapeHtml(o.description)}</span>` : "");
-      wrap.appendChild(b);
+    const instant = qs.length === 1 && !qs[0].multiSelect;
+    qs.forEach((q, qi) => {
+      const multi = !!q.multiSelect;
+      if (q.header || q.question) {
+        const h = document.createElement("div");
+        h.className = "apc-q";
+        h.textContent = (qs.length > 1 ? `${qi + 1}. ` : "") + (q.question || q.header);
+        wrap.appendChild(h);
+      }
+      (q.options || []).forEach((o, i) => {
+        const b2 = document.createElement("button");
+        b2.className = "apc-opt";
+        b2.type = "button";
+        b2.dataset.act = instant ? "pick" : (multi ? "toggle" : "one");
+        b2.dataset.label = o.label || "";
+        b2.dataset.qi = String(qi);
+        b2.innerHTML =
+          `<span class="apc-opt-label">${escapeHtml(o.label || `선택 ${i + 1}`)}</span>` +
+          (o.description ? `<span class="apc-opt-desc">${escapeHtml(o.description)}</span>` : "");
+        wrap.appendChild(b2);
+      });
     });
     // 자유 입력 — claude 의 "Type something." 에 해당(선택지에 없는 답을 보낼 수 있어야 한다).
     const free = document.createElement("div");
@@ -205,12 +209,12 @@ function buildActions(el, a) {
       `<input class="apc-free-input" type="text" placeholder="직접 답하기…" />` +
       `<button class="apc-btn primary" type="button" data-act="answerText">보내기</button>`;
     wrap.appendChild(free);
-    if (multi) {
+    if (!instant) {
       const ok = document.createElement("button");
       ok.className = "apc-btn primary";
       ok.type = "button";
       ok.dataset.act = "pickMulti";
-      ok.textContent = "선택 완료";
+      ok.textContent = qs.length > 1 ? "답변 보내기" : "선택 완료";
       wrap.appendChild(ok);
     }
     acts.appendChild(wrap);
@@ -248,11 +252,6 @@ function syncCard(el, a) {
     err.classList.toggle("hidden", !a._err);
     err.textContent = a._err || "";
   }
-  const clock = el.querySelector(".apc-clock");
-  if (clock && a.deadlineAt) {
-    const left = remainMs(a.deadlineAt);
-    clock.textContent = left > 0 ? fmtRemain(left) : "마감";
-  }
 }
 
 async function onCardClick(e, el, a) {
@@ -265,21 +264,35 @@ async function onCardClick(e, el, a) {
   if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
   if (act === "deny") { await S.respondApproval(a.id, { decision: "deny" }); return; }
   if (act === "toggle") { btn.classList.toggle("on"); return; }
+  // 단일선택(질문 여러 개) — 같은 질문 안에서만 배타 선택. 전송은 [답변 보내기] 가 한다.
+  if (act === "one") {
+    const qi = btn.dataset.qi;
+    for (const o of el.querySelectorAll(`.apc-opt[data-act="one"][data-qi="${qi}"]`)) o.classList.remove("on");
+    btn.classList.add("on");
+    return;
+  }
   if (act === "pick") {
-    await S.respondApproval(a.id, { decision: "answer", answer: { questionIndex: Number(btn.dataset.qi) || 0, labels: [btn.dataset.label || ""] } });
+    await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: Number(btn.dataset.qi) || 0, labels: [btn.dataset.label || ""] }] });
     return;
   }
   if (act === "pickMulti") {
-    const labels = [...el.querySelectorAll('.apc-opt[data-act="toggle"].on')].map((b) => b.dataset.label).filter(Boolean);
-    if (!labels.length) { flashErr(el, "하나 이상 선택해 주세요"); return; }
-    await S.respondApproval(a.id, { decision: "answer", answer: { questionIndex: 0, labels } });
+    // 질문별로 고른 것을 모아 **한 번에** 보낸다(questionIndex 로 원 질문에 매칭된다).
+    const byQ = new Map();
+    for (const o of el.querySelectorAll('.apc-opt.on')) {
+      const qi = Number(o.dataset.qi) || 0;
+      if (!byQ.has(qi)) byQ.set(qi, []);
+      if (o.dataset.label) byQ.get(qi).push(o.dataset.label);
+    }
+    const answers = [...byQ.entries()].sort((x, y) => x[0] - y[0]).map(([qi, labels]) => ({ questionIndex: qi, labels }));
+    if (!answers.length) { flashErr(el, "하나 이상 선택해 주세요"); return; }
+    await S.respondApproval(a.id, { decision: "answer", answers });
     return;
   }
   if (act === "answerText") {
     const input = el.querySelector(".apc-free-input");
     const text = String(input?.value || "").trim();
     if (!text) { flashErr(el, "보낼 내용을 입력해 주세요"); input?.focus(); return; }
-    await S.respondApproval(a.id, { decision: "answer", answer: { questionIndex: 0, labels: [], text } });
+    await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [], text }] });
     return;
   }
 }

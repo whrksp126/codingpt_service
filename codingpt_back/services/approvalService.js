@@ -145,15 +145,24 @@ function normalizeDecision(body) {
   }
   const out = { decision, message: str(b.message, 500), always: !!b.always };
   if (decision === 'answer') {
-    const a = b.answer && typeof b.answer === 'object' ? b.answer : null;
-    const labels = a && Array.isArray(a.labels)
-      ? a.labels.filter((x) => typeof x === 'string').slice(0, 8).map((x) => x.slice(0, 200)) : [];
-    const text = a ? str(a.text, 2000) : null;
-    if (!labels.length && !text) throw err('answer.labels 또는 answer.text 가 필요합니다.', 400, 'BAD_ANSWER');
-    out.answer = {
-      questionIndex: a && Number.isInteger(a.questionIndex) ? a.questionIndex : 0,
-      labels, text,
+    // ★ AskUserQuestion 은 질문이 **여러 개**일 수 있다(실측: 한 번에 4개). 예전엔 단수 `answer` 만
+    //  받아 첫 질문만 전달했고, claude 는 나머지를 못 받은 채 턴을 끝냈다 — 사용자 신고 증상 그대로다.
+    //  이제 복수 `answers` 를 정본으로 받고, 단수 `answer` 는 구 클라이언트 호환으로 남긴다.
+    //  데몬은 이미 `answers` 배열(최대 5)을 questionIndex 로 원 질문에 하이드레이트한다.
+    const one = (a) => {
+      if (!a || typeof a !== 'object') return null;
+      const labels = Array.isArray(a.labels)
+        ? a.labels.filter((x) => typeof x === 'string').slice(0, 8).map((x) => x.slice(0, 200)) : [];
+      const text = str(a.text, 2000);
+      if (!labels.length && !text) return null;
+      return { questionIndex: Number.isInteger(a.questionIndex) ? a.questionIndex : 0, labels, text };
     };
+    const many = Array.isArray(b.answers) ? b.answers.slice(0, 5).map(one).filter(Boolean) : [];
+    const single = one(b.answer);
+    const list = many.length ? many : (single ? [single] : []);
+    if (!list.length) throw err('answer.labels 또는 answer.text 가 필요합니다.', 400, 'BAD_ANSWER');
+    out.answers = list;
+    out.answer = list[0]; // 구 데몬 호환(단수만 읽는 버전)
   }
   return out;
 }
@@ -385,6 +394,7 @@ async function respond(userId, id, body, by) {
       decision: d.decision,
       message: d.message,
       answer: d.answer || null,
+      answers: d.answers || null,   // 복수 정본 — 데몬이 있으면 이쪽을 먼저 읽는다
       always: d.always,
       by,
     }, RESOLVE_RPC_TIMEOUT_MS, rec.hostDeviceId != null ? { runnerId: rec.hostDeviceId } : undefined);

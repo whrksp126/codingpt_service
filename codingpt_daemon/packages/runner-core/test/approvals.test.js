@@ -126,6 +126,39 @@ test('선택형 multiSelect → 라벨 복수, 자유 입력 → 그 텍스트',
   assert.match((await p2).hookOutput.hookSpecificOutput.decision.message, /Fruit: 둘 다 싫고 포도/);
 });
 
+// ★ 질문이 **여러 개**인 경우(실측: 한 번에 4개까지 왔다). 첫 답만 전달하면 claude 는 나머지를
+//  못 받은 채 턴을 끝낸다 — 사용자가 실제로 겪은 증상("4개 물었는데 1개만 답하니 바로 완료").
+//  questionIndex 만 오는 back 경로도 함께 고정한다(hydrateAnswers 가 원 질문의 header 를 채운다).
+const ASK4 = {
+  agent: 'claude', toolName: 'AskUserQuestion', sessionId: 'sess-A', toolUseId: 'toolu_4q',
+  toolInput: {
+    questions: [
+      { question: 'Q1?', header: '겨울 활동', multiSelect: false, options: [{ label: '겨울 스포츠' }, { label: '휴식' }] },
+      { question: 'Q2?', header: '집중 시간', multiSelect: false, options: [{ label: '아침' }, { label: '밤' }] },
+      { question: 'Q3?', header: '계획 성향', multiSelect: false, options: [{ label: '계획파' }, { label: '즉흥파' }] },
+    ],
+  },
+};
+
+test('질문 4개 — 답을 전부 모아 한 번에 전달한다(첫 답만 보내던 회귀)', async () => {
+  const p = approvals.request(ASK4, CTX, null);
+  const ad = await waitAdvertised();
+  assert.strictEqual(ad.questions.length, 3, '선택지 재료는 질문 전부가 실려야 한다');
+  // back 은 대역폭을 아끼려 questionIndex 만 보낸다 — 데몬이 원 질문의 header 를 채워야 한다.
+  await approvals.handle('approval.resolve', {
+    id: ad.id, decision: 'answer',
+    answers: [
+      { questionIndex: 0, labels: ['겨울 스포츠'] },
+      { questionIndex: 1, labels: ['밤'] },
+      { questionIndex: 2, labels: ['즉흥파'] },
+    ],
+  });
+  const msg = (await p).hookOutput.hookSpecificOutput.decision.message;
+  assert.match(msg, /겨울 활동: 겨울 스포츠/);
+  assert.match(msg, /집중 시간: 밤/);
+  assert.match(msg, /계획 성향: 즉흥파/, '세 번째 답이 빠지면 claude 가 그 질문을 미답으로 끝낸다');
+});
+
 test('선택형 거절도 deny+message (거절이 답으로 전달된다)', async () => {
   const p = approvals.request(ASK, CTX, null);
   const ad = await waitAdvertised();
