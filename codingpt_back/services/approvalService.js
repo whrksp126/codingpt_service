@@ -220,8 +220,11 @@ function buildPush(rec) {
   const a = rec.approval;
   const kind = (a.prompt && a.prompt.kind) || a.kind || 'permission';
   const choice = kind === 'choice';
-  // 첫 질문의 라벨만 싣는다(푸시 payload 는 4KB 상한이고, 카드 UI 도 첫 질문만 그린다).
-  const q = choice && a.prompt && Array.isArray(a.prompt.questions) ? a.prompt.questions[0] : null;
+  // 잠금화면 라벨 버튼은 **질문이 1개일 때만**(푸시 payload 4KB 상한 + 버튼은 첫 질문에만 답하므로
+  //  질문이 여러 개면 부분 답이 된다 — TUI 재광고 승인은 전부 답해야 전달돼 오류로 튕긴다).
+  //  여러 개면 라벨을 싣지 않아 클라이언트가 [답하기](앱 열기)로 폴백한다.
+  const qsAll = choice && a.prompt && Array.isArray(a.prompt.questions) ? a.prompt.questions : [];
+  const q = qsAll.length === 1 ? qsAll[0] : null;
   const labels = q && Array.isArray(q.options)
     ? q.options.map((o) => String((o && o.label) || '')).filter(Boolean).slice(0, 4)
     : [];

@@ -1141,9 +1141,9 @@ function normScreen(s) { return String(s || '').replace(/\s+/g, ''); }
 
 // 조작 본체 — io 주입형(테스트/격리 검증이 실제 코드 경로를 그대로 태울 수 있게 분리).
 //  io = { screen(): Promise<string>, key(k, literal): Promise<void>, sleep(ms) }
-async function driveQuestionDialog(io, { answers, expect } = {}) {
+async function driveQuestionDialog(io, { answers, expect, cancel } = {}) {
   const list = Array.isArray(answers) ? answers : [];
-  if (!list.length) throw Object.assign(new Error('답변이 비어 있습니다'), { code: 'BAD_REQUEST' });
+  if (!cancel && !list.length) throw Object.assign(new Error('답변이 비어 있습니다'), { code: 'BAD_REQUEST' });
   const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
 
   const s0 = await io.screen();
@@ -1152,6 +1152,16 @@ async function driveQuestionDialog(io, { answers, expect } = {}) {
   }
   if (expect && !normScreen(s0).includes(normScreen(String(expect).slice(0, 60)))) {
     throw Object.assign(new Error('화면의 질문이 답하려는 질문과 다릅니다'), { code: 'QUESTION_MISMATCH' });
+  }
+
+  // 거절(전부 건너뜀) = Esc — 다이얼로그의 자체 취소("Esc to cancel"). claude 가 declined 를 기록한다.
+  if (cancel) {
+    await io.key('Escape');
+    for (let i = 0; i < 10; i++) {
+      if (!/Enter to select/.test(await io.screen())) return { ok: true, canceled: true };
+      await sleep(300);
+    }
+    throw Object.assign(new Error('다이얼로그가 닫히지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
   }
 
   for (const a of list) {
@@ -1186,7 +1196,7 @@ async function driveQuestionDialog(io, { answers, expect } = {}) {
   throw Object.assign(new Error('다이얼로그가 예상대로 진행되지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
 }
 
-async function chatAnswer({ cwd, tid, answers, expect } = {}) {
+async function chatAnswer({ cwd, tid, answers, expect, cancel } = {}) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
@@ -1199,7 +1209,7 @@ async function chatAnswer({ cwd, tid, answers, expect } = {}) {
       await new Promise((r) => setTimeout(r, DRIVE_KEY_GAP_MS));
     },
   };
-  const r = await driveQuestionDialog(io, { answers, expect });
+  const r = await driveQuestionDialog(io, { answers, expect, cancel: cancel === true });
   return { ...r, tid: win };
 }
 

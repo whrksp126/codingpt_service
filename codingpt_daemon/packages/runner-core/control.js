@@ -717,6 +717,8 @@ function run(config) {
     try { const t = tryRequire('./transcript'); if (t && typeof t.pruneBinds === 'function') t.pruneBinds(); } catch (e) { console.error('[control] 바인딩 정리 실패:', e.message); }
     // 에이전트 완료 폴백 감지 — 훅이 안 걸린 터미널의 title/process-exit 전이를 관찰해 알림(안전망).
     try { require('./agent-watch').start(); } catch (e) { console.error('[control] agent-watch 시작 실패:', e.message); }
+    // TUI 폴백 질문 재광고 — 데몬 재시작이 회수한 승인 배너를 미응답 질문에 한해 되살린다.
+    try { require('./question-revive').start(); } catch (e) { console.error('[control] question-revive 시작 실패:', e.message); }
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
     //  tmux 소켓에 무한 누적되는 것을 막는다(attach 없는 뷰만·primary 셸은 보존). idleSec grace 로
     //  방금 만든 뷰는 안 건드림. 데몬 수명 내내 소켓을 스스로 청소한다.

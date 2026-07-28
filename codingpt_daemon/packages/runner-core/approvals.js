@@ -419,6 +419,82 @@ function request(args, resolved, conn) {
   });
 }
 
+/**
+ * TUI 폴백 질문 재광고 — **훅 없이** 등록되는 슬롯(question-revive 리컨실러가 호출).
+ *
+ * 왜 필요한가(2026-07-28 사용자 확정): 데몬 재시작(PC 앱 업데이트)이 대기 승인을 전부 취소하면
+ *  폰 배너까지 회수되는데, 질문 자체는 TUI 다이얼로그로 살아 있다. 사용자 관점에선 "답 안 한
+ *  질문이 있는데 알림이 소리소문없이 사라진" 상태 → 미응답 질문을 다시 광고해 배너를 되살린다.
+ *
+ * 훅 슬롯과의 차이:
+ *  · resolve 대기자가 없다(promise 소비자 없음) — 응답은 `tuiDrive`(다이얼로그 키 조작)로 전달된다.
+ *  · id 가 결정적(cwd|tid|toolUseId 해시) — 리컨실러가 몇 번을 돌아도, back 재광고가 겹쳐도 1건이다.
+ *  · 응답 전달이 실패하면(다이얼로그 소멸 등) 슬롯을 **유지**한다 — 폰 카드가 남아 재시도할 수 있고,
+ *    다이얼로그가 정말 사라졌다면 리컨실러가 다음 틱에 cancelTui 로 회수한다.
+ */
+function requestTui({ cwdRel, tid, sessionId, toolUseId, questions, drive }) {
+  if (gateReason()) return null;
+  const cwd = typeof cwdRel === 'string' ? cwdRel : '';
+  if (!Number.isInteger(tid) || !Array.isArray(questions) || !questions.length || typeof drive !== 'function') return null;
+  const id = 'aprt_' + crypto.createHash('sha256')
+    .update([cwd, tid, toolUseId || sessionId || ''].join('|')).digest('hex').slice(0, 24);
+  if (pending.has(id)) return id;                                  // 이미 광고됨(멱등)
+  if (paneCount(cwd, tid) >= MAX_PENDING_PER_PANE) return null;    // 훅 승인이 이미 차 있으면 양보
+  const t0 = Date.now();
+  const { hardMs } = budget();
+  const deadlineAt = t0 + hardMs;
+  const qs = questions.slice(0, 8);
+  const payload = {
+    id, agent: 'claude', hookEventName: 'PermissionRequest',
+    sessionId: sessionId || null, promptId: null, toolUseId: toolUseId || null,
+    tool: 'AskUserQuestion', kind: 'choice',
+    summary: (qs[0] && (qs[0].question || qs[0].header)) || `질문 ${qs.length}개`,
+    inputPreview: null, questions: qs,
+    prompt: { kind: 'choice', questions: qs },
+    relPath: null, permissionMode: null, transcriptPath: null,
+    cwd: cwd || undefined, wsName: cwd ? path.basename(cwd) : undefined,
+    win: tid, requestedAt: t0, deadlineAt, waitMs: hardMs,
+  };
+  const slot = {
+    id, cwdRel: cwd, tid,
+    meta: { tool: 'AskUserQuestion', choice: true, sessionId: sessionId || null, toolUseId: toolUseId || null, questions: qs },
+    payload, createdAt: t0, deadlineAt, advertised: false, done: false,
+    resolve: () => { /* 훅 대기자 없음 */ }, conn: null, onClose: null, timer: null,
+    tuiDrive: drive,
+  };
+  pending.set(id, slot);
+  slot.timer = setTimeout(() => { settle(id, { decision: 'defer', reason: 'timeout' }); }, hardMs);
+  Promise.resolve()
+    .then(() => deps.advertise(payload))
+    .then((res) => {
+      if (!pending.has(id)) { retractRemote(id, 'canceled'); return; }
+      slot.advertised = true;
+      if (res && (res.defer === true || (res.data && res.data.defer === true))) {
+        settle(id, { decision: 'defer', reason: 'server_defer' }, { retract: false });
+        return;
+      }
+      log(`TUI 질문 재광고 ${id} ws=${cwd || '-'} tid=${tid} 질문 ${qs.length}개`);
+    })
+    .catch((e) => {
+      log(`TUI 재광고 실패: ${(e && e.message) || e}`);
+      settle(id, { decision: 'defer', reason: 'advertise_failed' }, { retract: false });
+    });
+  return id;
+}
+
+/** 이 터미널의 TUI 재광고 슬롯(있으면). 리컨실러가 "다이얼로그 소멸 → 회수" 판정에 쓴다. */
+function tuiSlotFor(cwdRel, tid) {
+  for (const s of pending.values()) {
+    if (s.tuiDrive && s.cwdRel === (cwdRel || '') && s.tid === tid) return s;
+  }
+  return null;
+}
+
+/** TUI 재광고 회수 — 다이얼로그가 사라졌다(로컬에서 답함/세션 종료). retract=true 로 배너까지 걷는다. */
+function cancelTui(id, reason = 'dialog_gone') {
+  return settle(id, { decision: 'defer', reason });
+}
+
 // 단일 소비 지점 — pending.delete 를 **먼저** 한다. 두 번째 응답은 여기서 false 로 튕긴다.
 function settle(id, outcome, { retract = true } = {}) {
   const slot = pending.get(id);
@@ -489,6 +565,19 @@ function resolveRemote(p) {
     Array.isArray(p.answers) ? p.answers : (p.answer ? [p.answer] : null),
     pending.get(id),
   );
+  // ── TUI 재광고 슬롯 — 훅이 없으므로 응답을 **다이얼로그 조작**으로 전달한 뒤에야 해소한다. ──
+  //  순서가 생명이다: settle 을 먼저 하면 back 이 폰에 200 을 주는데 조작이 실패하면(다이얼로그가
+  //  그새 사라짐 등) 답이 조용히 증발한다. 실패는 throw → back 이 오류로 회신 → 폰 카드가 남아
+  //  재시도한다(다이얼로그가 정말 사라졌다면 리컨실러가 다음 틱에 회수한다).
+  const slot = pending.get(id);
+  if (slot && slot.tuiDrive && decision !== 'defer') {
+    return Promise.resolve(slot.tuiDrive({ decision, answers }))
+      .then(() => {
+        const ok = settle(id, { decision, reason, message: p.message, answers, by: p.by }, { retract: false });
+        if (!ok) throw notPending();
+        return { resolved: true, id, decision };
+      });
+  }
   const ok = settle(id, { decision, reason, message: p.message, answers, by: p.by }, { retract: false });
   if (!ok) throw notPending();
   return { resolved: true, id, decision };
@@ -563,6 +652,7 @@ function _reset() {
 
 module.exports = {
   request, handle, resync, list,
+  requestTui, tuiSlotFor, cancelTui, // TUI 폴백 질문 재광고(question-revive)
   cancelBySession, cancelAll, hasPending, pendingCount,
   buildHookOutput, budget, timeoutSec, configure,
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)
