@@ -94,6 +94,9 @@ test('approval normalizeCreate — id 형식 강제 · 캡 · 마감 클램프 �
   const now = 1_753_440_000_000;
   assert.throws(() => approvalService._normalizeCreate({ id: 'nope' }, now), /id 형식/);
   assert.throws(() => approvalService._normalizeCreate({}, now), /id 형식/);
+  // TUI 재광고(question-revive) 접두사 — 막히면 재광고 전량 400 이 되어 폰 알림이 조용히 0건이 된다
+  //  (2026-07-28 실사고: 데몬 0.1.149 가 20초마다 400 을 받으며 재시도했다).
+  assert.strictEqual(approvalService._normalizeCreate({ id: 'aprt_abc123' }, now).id, 'aprt_abc123');
   const a = approvalService._normalizeCreate({
     id: 'apr_9f2c', tool: 'Bash', summary: 'rm important.txt', win: '1234',
     cwd: 'other/project/codingpt', wsName: 'codingpt', waitMs: 570000, requestedAt: now,

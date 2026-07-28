@@ -67,7 +67,10 @@ const RESOLVED_MEMORY_MS = 2 * 60 * 1000;
 const RESOLVED_MEMORY_MAX = 500;
 
 // 상한/형식
-const ID_RE = /^apr_[A-Za-z0-9_-]{1,64}$/;
+// apr_ = 훅 승인(데몬 randomUUID) · aprt_ = TUI 폴백 질문 재광고(question-revive, 결정적 해시).
+//  ⚠ 2026-07-28 실사고: aprt_ 를 안 넣어 재광고가 전량 400(BAD_ID) — 데몬은 20초마다 재시도하고
+//  폰에는 아무 알림도 안 왔다. 데몬이 새 접두사를 만들면 여기부터 넓혀야 한다.
+const ID_RE = /^aprt?_[A-Za-z0-9_-]{1,64}$/;
 const INPUT_PREVIEW_MAX = 4 * 1024;    // 민감정보 유출면 축소(전문은 PC 로컬 로그만)
 const DIFF_SIDE_MAX = 32 * 1024;
 const PROMPT_MAX = 8 * 1024;
