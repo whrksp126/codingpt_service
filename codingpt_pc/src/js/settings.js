@@ -759,7 +759,9 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     //   같은거에서 지금 pc에 연동 승인 요청하거나 다른 pc에서 이 pc에 연동 승인 요청하는 방향".
     //   즉 연동을 **요청하는 쪽**은 모바일·다른 PC 이고, 이 화면에서 누를 이유가 있는 대상은 PC 뿐이다.
     //  ★ 개정 12: [연동] = **코드 입력 열기**(그 행 아래 인라인). 승인 요청을 보내던 구 nudge 는 폐기.
-    const link = !linked && typeof d.id === "number" && !d.isCurrent
+    //   ⚠ 조건은 "**이 기기**에 열쇠가 없고, 그 행이 **열쇠를 가진 기기**" 다: 연동이란 열쇠를 받는
+    //    일이고, 줄 수 있는 쪽은 열쇠를 가진 기기뿐이다(열쇠 없는 기기끼리는 서로 줄 것이 없다).
+    const link = !selfReady && k && typeof d.id === "number" && !d.isCurrent
       ? `<button class="sett-btn dev-link-btn" data-link-open="${d.id}">연동</button>` : "";
     //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
     //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
