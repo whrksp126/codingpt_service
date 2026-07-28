@@ -20,7 +20,12 @@ const pushService = require('./pushService');
 function relay() { return require('./daemonRelayService'); } // lazy — 순환 require 회피
 
 // ── 설정(env) ─────────────────────────────────────────────────────────
-const TTL_MS = intEnv('APPROVAL_TTL_MS', 600 * 1000);              // back pending 백스톱 TTL(데몬 마감 560s 뒤)
+// ★ back 백스톱 TTL — **데몬 마감보다 뒤**여야 한다. 앞이면 back 이 먼저 만료시켜, 데몬은 아직
+//  기다리는데 카드만 사라진다(2026-07-28 실사고: 데몬 9분 vs back 10분이었는데 그마저도 타이트했고,
+//  마감 없는 대기로 바꾸자 여기가 유일한 상한으로 남아 카드를 지웠다).
+//  원격 응답에는 마감을 두지 않는다 — 사람이 답하지 않았으면 TUI 도 무한정 기다린다. 같은 질문인데
+//  카드만 사라질 이유가 없다. 24h 는 '사실상 없음' 이자 메모리 백스톱이다.
+const TTL_MS = intEnv('APPROVAL_TTL_MS', 25 * 3600 * 1000);
 const MAX_PENDING_PER_USER = intEnv('APPROVAL_MAX_PENDING_PER_USER', 20); // 폭주 가드
 // 무응답 시 폰 에스컬레이션 지연. 데몬 하드 타임아웃(기본 180s) 안에서 "폰이 알림을 받은 뒤 남는 시간"이
 //  충분해야 한다 — 60s 로 두면 잠금화면 확인→앱 진입→선택에 남는 시간이 촉박했다(120s 예산 기준 절반).
@@ -85,7 +90,8 @@ function normalizeCreate(payload, now) {
   const winRaw = p.win;
   const win = Number.isInteger(winRaw) ? winRaw
     : (typeof winRaw === 'string' && /^\d+$/.test(winRaw) ? parseInt(winRaw, 10) : null);
-  // 마감: 데몬이 준 waitMs 를 존중하되 back TTL 안으로 클램프(back 이 먼저 만료시켜 유령 카드가 남지 않게).
+  // 마감: 데몬이 준 waitMs 를 존중하되 back TTL 안으로 클램프(back 이 먼저 만료시키면 안 된다 —
+  //  데몬은 기다리는데 카드만 사라진다. 그래서 TTL 은 데몬 마감보다 **뒤**에 둔다).
   const waitMs = Number(p.waitMs);
   const wait = Number.isFinite(waitMs) ? Math.min(Math.max(waitMs, 5000), TTL_MS) : TTL_MS;
   const requestedAt = Number.isFinite(Number(p.requestedAt)) ? Number(p.requestedAt) : now;

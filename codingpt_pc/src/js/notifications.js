@@ -5,7 +5,6 @@ import * as S from "./state.js";
 import { state } from "./state.js";
 import { icons } from "./icons.js";
 import { approvalForNotif, isChoiceApproval } from "./approvals.js";
-import { fmtRemain, remainMs } from "./chat-model.js";
 import { notifBodyText } from "./e2ee.js";
 
 // 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(pane 링).
@@ -88,7 +87,6 @@ export function renderNotifPanel(el, onJump) {
       //  잠금화면/배너는 subtitle(평문)로 도달하므로 알림 자체가 무내용이 되지는 않는다.
       ((n.body ? `<div class="notif-body">${escapeHtml(notifBodyText(n.body))}</div>` : "")) +
       `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}` +
-      (appr && appr.deadlineAt ? ` · 남은 ${fmtRemain(remainMs(appr.deadlineAt))}` : "") +
       (n.kind === "approval_request" && !appr ? " · 종료됨" : "") + `</div>`;
     if (appr) {
       const acts = document.createElement("div");

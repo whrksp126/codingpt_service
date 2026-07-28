@@ -1052,3 +1052,12 @@ test('승인 응답 — 복수 answers 를 그대로 싣고, 단수 answer 는 �
   // 빈 답은 여전히 거부(오응답 방지).
   assert.throws(() => approvalService._normalizeDecision({ decision: 'answer', answers: [{ questionIndex: 0, labels: [] }] }), /BAD_ANSWER|labels/);
 });
+
+// ★ 원격 응답에는 마감이 없다(2026-07-28 확정). 그리고 **back TTL 은 데몬 마감보다 뒤**여야 한다 —
+//  앞이면 데몬은 아직 기다리는데 back 이 먼저 만료시켜 카드만 사라진다(실사고). 이 순서가 계약이다.
+test('승인 TTL — back 백스톱이 데몬 마감보다 뒤에 있다(카드가 먼저 사라지지 않는다)', () => {
+  const daemonWaitMs = 24 * 3600 * 1000;   // runner-core approvals.budget().hardMs
+  const backTtlMs = approvalService._config && approvalService._config.TTL_MS;
+  assert.ok(backTtlMs > daemonWaitMs,
+    `back TTL(${backTtlMs}) 이 데몬 마감(${daemonWaitMs}) 보다 앞이면 카드가 먼저 사라진다`);
+});
