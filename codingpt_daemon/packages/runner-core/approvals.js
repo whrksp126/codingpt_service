@@ -27,7 +27,10 @@ const CAP = 'approval.v1';               // 서버 caps 교집합 게이트 키(
 //  180s 인 이유: 훅이 대기하는 동안에도 PC 터미널에는 다이얼로그가 그대로 떠 있다(실측 확인). 즉 이 시간은
 //  "PC 앞의 사용자를 붙잡는 시간"이 아니라 "원격 응답을 기다려주는 여유"일 뿐이라 길게 잡는 비용이 거의 없다.
 //  back 의 폰 에스컬레이션(25s) 이후 사용자가 잠금 해제→앱 진입→선택하기에 충분한 여유를 남긴다.
-const DEFAULT_TIMEOUT_SEC = 180;
+// 원격에서 답할 시간 — claude 훅 timeout 상한(600s) 안에서 **최대한** 준다(2026-07-28 사용자 확정:
+//  "보고 있던 질문이 사라진다"). 3분이면 폰을 꺼내 읽는 사이에 defer 로 넘어가 버렸다.
+//  이 값을 올리면 hookTimeoutSec(=+25s)도 함께 올라간다 — MAX_TIMEOUT_SEC 가 그 상한을 지킨다.
+const DEFAULT_TIMEOUT_SEC = 540;
 const MIN_TIMEOUT_SEC = 1;               // 하한 1s — 회귀 테스트가 만료 경로를 실제로 통과할 수 있게
 const MAX_TIMEOUT_SEC = 540;             // claude 훅 timeout 상한(600s) 안쪽에 CLI/훅 여유를 남긴다
 const MAX_PENDING_PER_PANE = 3;          // 같은 (cwd,tid) 동시 대기 상한 — 4번째부터 즉시 defer(폭주 가드)

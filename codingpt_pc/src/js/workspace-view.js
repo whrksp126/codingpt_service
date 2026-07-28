@@ -711,7 +711,10 @@ export function updateWorkspaceView() {
   measureRects();
 }
 
-// 미읽음 알림이 귀속된 win 을 탭으로 가진 터미널 pane 에 강조 테두리(읽기 전까지 유지 — 모바일 패리티).
+// 미읽음 알림 강조 테두리 — **지금 보이는 탭**의 것만(2026-07-28 사용자 확정).
+//  예전에는 pane 의 아무 탭에나 미읽음이 있으면 본문에 테두리를 둘렀는데, 그 탭은 다른 탭에 가려져
+//  화면에 없다 — 보이지도 않는 것을 가리키는 테두리라 어디를 보라는 건지 알 수 없었다.
+//  가려진 탭은 **탭의 점**(pane.js ptab-wait)이 맡는다. 읽기 전까지 유지 — 모바일과 같은 규칙.
 function updateUnreadRings(ws) {
   const cwd = ws?.localPath || "";
   const unreadWins = new Set(
@@ -722,9 +725,8 @@ function updateUnreadRings(ws) {
       : []
   );
   for (const [, p] of panes) {
-    const on =
-      p.node.kind === "terminal" &&
-      (p.node.tabs || []).some((t) => typeof t.win === "number" && unreadWins.has(t.win));
+    const act = p.node.kind === "terminal" ? (p.node.tabs || [])[p.node.active] : null;
+    const on = !!act && typeof act.win === "number" && unreadWins.has(act.win);
     const was = p.el.classList.contains("notif-unread");
     if (on) {
       p.el.classList.add("notif-unread");

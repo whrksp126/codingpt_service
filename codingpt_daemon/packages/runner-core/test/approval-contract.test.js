@@ -186,3 +186,12 @@ test('Bash summary 는 값 단위로 시크릿을 지운다 (잠금화면·DB �
       `시크릿이 summary 로 나갔다: ${advertised[0].summary}`);
   }
 });
+
+// ★ 마지막 정리 — 이 파일은 대기 슬롯을 남긴 채 끝난다. 슬롯의 마감 타이머는 **ref 된 setTimeout**
+//  (데몬에서는 defer 를 반드시 발화시켜야 하므로 unref 하면 안 된다)이라, 정리하지 않으면 이 테스트
+//  프로세스가 승인 타임아웃(기본 540s)만큼 종료되지 않는다 — 스위트 전체가 그만큼 매달린다.
+//  (2026-07-28: 기본값을 180→540 으로 올리자 3분이던 지연이 9분이 되어 드러났다.)
+test('cleanup — 남은 대기 슬롯 정리(타이머가 프로세스를 붙잡지 않게)', () => {
+  approvals._reset();
+  assert.strictEqual(approvals.pendingCount(), 0);
+});

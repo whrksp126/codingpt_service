@@ -557,9 +557,18 @@ export async function loadApprovals() {
     // 로컬 진행 상태(_busy/_err)는 재조회로 날리지 않는다 — 버튼 누른 직후 목록이 갱신되면
     //  스피너가 사라져 사용자가 두 번 누르게 된다.
     const prev = new Map(state.approvals.map((a) => [a.id, a]));
-    state.approvals = rows
+    const next = rows
       .filter((a) => a && a.id)
       .map((a) => ({ ...a, _busy: prev.get(a.id)?._busy || false, _err: prev.get(a.id)?._err || null }));
+    // ★ 마감이 지난 카드는 서버 목록에서 빠지지만 **화면에서 조용히 지우지 않는다**(사용자 확정
+    //  2026-07-28). 카드는 남아 '마감됐습니다 — PC 터미널에서 답해주세요' 로 바뀌고, 치우는 건
+    //  사용자의 [확인]이다. 이미 응답된 건은 resolved 이벤트가 id 로 걷어가므로 여기 남지 않는다.
+    const now = Date.now();
+    const have = new Set(next.map((a) => a.id));
+    for (const a of state.approvals) {
+      if (!have.has(a.id) && a.deadlineAt && a.deadlineAt <= now) next.push(a);
+    }
+    state.approvals = next;
     emit();
   } catch (_) { /* 미페어링/오프라인 — 기존 목록 유지 */ }
 }

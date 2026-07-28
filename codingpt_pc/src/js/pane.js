@@ -16,6 +16,7 @@ import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
+import { state as appState } from "./state.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -670,10 +671,16 @@ export class PaneView {
         // ★ 탭 우측의 채팅 글리프는 **폐기**했다(사용자 확정 2026-07-27): 좌측 로고 + pane 안의 토글로
         //  이미 모드가 드러나고, 탭마다 작은 글리프가 하나 더 붙으면 라벨 폭만 먹는다.
         const modeGlyph = "";
-        // 대기 점 — 승인/질문 카드는 그 탭을 열었을 때만 뜨므로(전역 스택 폐기), 이 점이 "어느 터미널이
-        //  나를 기다리는지" 를 말하는 유일한 화면 신호다. 활성 탭에는 안 찍는다(카드가 이미 보인다).
-        const waiting = isT && typeof t.win === "number" && i !== this.node.active
-          && paneApprovalCount(this.ctx.localPath || "", t.win) > 0;
+        // 탭의 점 = "이 탭이 나를 부른다" **하나의 신호**. 두 가지를 합친다:
+        //  · 대기 중인 승인/질문(카드는 그 탭을 열었을 때만 뜬다)
+        //  · 미읽음 알림(본문 테두리는 보이는 탭만 그리므로, 가려진 탭은 여기서만 드러난다)
+        //  활성 탭에는 안 찍는다 — 지금 보이고 있어서 본문이 이미 말하고 있다.
+        const twin = isT && typeof t.win === "number" ? t.win : null;
+        const tcwd = this.ctx.localPath || "";
+        const waiting = twin != null && i !== this.node.active && (
+          paneApprovalCount(tcwd, twin) > 0
+          || (!!tcwd && (appState.notifications || []).some((n) => !n.read && n.cwd === tcwd && n.win === twin))
+        );
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`
           + (waiting ? `<span class="ptab-wait" title="응답을 기다리는 중"></span>` : "");
         const x = document.createElement("span");
@@ -783,7 +790,6 @@ export class PaneView {
     this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
     if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
     this._buildChat();
-    this._buildApprDock();
     this._buildModeToggle();
   }
 
@@ -841,28 +847,6 @@ export class PaneView {
     this.chatHost.className = "pane-chat";
     this.chatHost.style.display = "none";
     this.body.appendChild(this.chatHost);
-  }
-
-  // TUI 모드의 질문 도크 — Chat 모드의 `.chat-approvals`(컴포저 위)와 **같은 카드를 같은 자리**에.
-  //  ★ 절대배치 오버레이여야 한다: 흐름에 넣으면 터미널 높이가 바뀌어 fit → tmux resize 가 나간다.
-  //  ★ 채우는 쪽은 approvals.js 다. import 하지 않고 DOM(.pane-appr-dock)으로 찾게 해 순환을 피한다.
-  _buildApprDock() {
-    this.apprDock = document.createElement("div");
-    this.apprDock.className = "pane-appr-dock";
-    this.body.appendChild(this.apprDock);
-  }
-
-  // 이 pane 이 지금 어느 터미널을 보여주는지 도크에 적어 둔다(빈 값 = 대상 없음 → 아무것도 안 그린다).
-  _syncApprDock() {
-    const d = this.apprDock;
-    if (!d) return;
-    const tab = this.node.tabs[this.node.active];
-    const chat = isTermTab(tab) && tab && tab.mode === "chat";
-    // Chat 모드에서는 ChatView 의 컴포저 위 슬롯이 그린다 — 여기서 또 그리면 같은 카드가 두 개 뜬다.
-    const on = isTermTab(tab) && tab && typeof tab.win === "number" && !chat;
-    d.dataset.cwd = on ? (this.ctx.localPath || "") : "";
-    d.dataset.win = on ? String(tab.win) : "";
-    if (!on) d.innerHTML = "";
   }
 
   // 활성 탭이 "에이전트가 붙은 터미널 탭"인가 — 판정 사다리 정본 = agent-signal.js(앱 agentPresence.ts 미러).
@@ -1316,7 +1300,6 @@ export class PaneView {
     //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
     if (isT && !chat) this._fitNow();
     this._syncModeToggle();
-    this._syncApprDock();
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나

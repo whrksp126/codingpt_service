@@ -5,9 +5,8 @@
 //  단 프리뷰 구멍 안의 클릭이 뒤로 내려가지 않게 main.js 의 previewShield SEL 에 `.approval-card` 를
 //  넣어야 한다 — 안 하면 카드가 보이는데 뒤의 프리뷰가 클릭을 받는다.
 //
-// ★ 표시 위치 = **그 터미널 탭을 보고 있을 때 그 pane 안**. 오직 여기 한 곳이다(2026-07-28 확정).
-//  ① Chat 모드  : 컴포저 위 슬롯 `.chat-approvals` (ChatView 가 소유)
-//  ② TUI 모드   : pane 하단 오버레이 `.pane-appr-dock` (pane.js 가 자리만 만들고 여기서 채운다)
+// ★ 표시 위치 = **Chat 모드의 컴포저 위 슬롯 `.chat-approvals` 하나뿐**(2026-07-28 확정).
+//  TUI 모드에는 띄우지 않는다 — 터미널 화면이 이미 그 질문을 그리고 있어서 같은 질문이 두 개로 보인다.
 //
 //  **전역 스택은 폐기했다.** 화면 하단 중앙에 모든 대기 카드를 띄웠더니, codex 탭을 보고 있는데
 //  claude 탭의 질문 카드가 떠 있었다(사용자 신고). 어느 터미널의 질문인지 화면이 말해주지 않으면
@@ -54,15 +53,9 @@ export function mountApprovals() {
   }, 1000);
 }
 
-// 매 emit 마다 호출(main.js render) — 보이는 pane 의 도크만 채운다.
+// 매 emit 마다 호출(main.js render) — Chat 슬롯(컴포저 위)을 동기화한다.
 export function updateApprovals() {
-  // TUI 도크: pane.js 가 자기 pane 의 현재 터미널 좌표를 data-* 로 적어 둔다(빈 값 = 대상 없음).
-  for (const dock of document.querySelectorAll(".pane-appr-dock")) {
-    const cwd = dock.dataset.cwd || "";
-    const win = dock.dataset.win === "" ? null : Number(dock.dataset.win);
-    renderList(dock, cwd && win != null && Number.isFinite(win) ? forPane(cwd, win) : []);
-  }
-  refreshChatApprovals(); // Chat 슬롯(컴포저 위)도 같은 타이밍에 동기화
+  refreshChatApprovals();
 }
 
 // 이 터미널의 대기 목록 — **엄격 일치**(cwd + win). win 이 없는 요청은 어느 pane 에도 붙이지 않는다.
@@ -72,8 +65,12 @@ export function forPane(cwd, win) {
   return state.approvals.filter((a) => (a.cwd || "") === cwd && a.win === win);
 }
 
-// 탭 점(대기 표시)용 — pane.js 가 탭을 그릴 때 센다.
-export function paneApprovalCount(cwd, win) { return forPane(cwd, win).length; }
+// 탭의 점용 — **아직 답할 수 있는** 요청만 센다. 마감이 지난 건(PC 터미널로 넘어감)은 그 탭을
+//  열어도 할 수 있는 일이 없으므로 부르지 않는다.
+export function paneApprovalCount(cwd, win) {
+  const now = Date.now();
+  return forPane(cwd, win).filter((a) => !a.deadlineAt || a.deadlineAt > now).length;
+}
 
 // Chat 뷰 슬롯용 — 그 (cwd,win) 카드만.
 function renderScoped(host, { cwd, win, visible }) {
