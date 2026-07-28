@@ -884,10 +884,14 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("알림 행에서도 바로 승인/거절한다(알림이 유일한 진입점인 경우가 있다)",
     /deviceApprovalForNotif/.test(notifSrc) && /approveDevice\(devAppr\.enrollmentId\)/.test(notifSrc)
     && /본인이 아니에요/.test(notifSrc), true);
-  //   ④ 설정의 기기 행은 **연동 상태**를 말하고 [연동] 로 절차를 다시 시작한다(nudge).
-  eq("기기 행에 연동 상태 + [연동] 버튼이 있다(승인 절차 미완료 = 연동 안 됨)",
-    /연동 안 됨/.test(settingsOnly) && /data-e2ee-link/.test(settingsOnly)
-    && /nudgeDevice\(/.test(settingsOnly), true);
+  //   ④ ★ 개정 11(2026-07-28 사용자 확정): 목록은 **연동됨/안 됨을 말하지 않는다**("기기 목록에서
+  //    연동됨 안됨 이런거 표현하지마!") — 남는 것은 최근 시각과 할 일(승인 대기)뿐이다. 그리고 [연동] 은
+  //    **PC(host) 행에만** 둔다(모바일에 연동을 요청해 봐야 이 화면에서는 이득이 없다 — 사용자 지적).
+  eq("목록에 연동 상태 텍스트가 없고 [연동] 은 PC 행에만 있다(개정 11)",
+    [/연동 안 됨/.test(bare) ? "잔존:연동 안 됨" : null,
+     /data-e2ee-link/.test(settingsOnly) ? null : "없음:연동 버튼",
+     /nudgeDevice\(/.test(settingsOnly) ? null : "없음:nudge",
+     /d\.role === "host" && typeof d\.id/.test(settingsOnly) ? null : "없음:host 전용 조건"].filter(Boolean), []);
   //  ⑤-2″ 승인 카드는 **승인할 수 있는 요청**만 그린다(2026-07-28 폰 실사고: 자기 자신의 옛 enrollment 를
   //   승인하라고 띄웠고 누르면 403 이었다) — 필터는 e2ee.js 가 갖고 화면은 그것만 쓴다.
   eq("승인 목록은 e2eePendingApprovable() 이다(자기 요청·미신뢰 기기 차단)",

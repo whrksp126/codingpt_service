@@ -794,12 +794,17 @@ function e2eeDeviceRowsHtml(devs, selfReady, pend, { mine } = {}) {
     //  ⚠ 이 기기 행에는 [연동] 을 두지 않는다: 자기를 자기가 승인할 수는 없다.
     //  ⚠ **승인 대기 중인 행에도 두지 않는다**(개정 9): 요청이 이미 갔고 지금 할 일은 승인/거절 하나다.
     const linked = !!k || (d.isCurrent && selfReady);
-    const link = !linked && !waitRec && typeof d.id === "number" && !d.isCurrent
+    //  ★ 개정 11(사용자 확정): [연동] 은 **PC(host) 행에만** 둔다. 원문 — "저 기기는 모바일 기기자나
+    //   android, ios 그러면 그 녀석을 연동요청해봐야 내 pc에서는 이득이 없자나? 모바일이나 태블릿
+    //   같은거에서 지금 pc에 연동 승인 요청하거나 다른 pc에서 이 pc에 연동 승인 요청하는 방향".
+    //   즉 연동을 **요청하는 쪽**은 모바일·다른 PC 이고, 이 화면에서 누를 이유가 있는 대상은 PC 뿐이다.
+    const link = !linked && !waitRec && d.role === "host" && typeof d.id === "number" && !d.isCurrent
       ? `<button class="sett-btn dev-link-btn" data-e2ee-link="${d.id}">연동</button>` : "";
     //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
     //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
-    const meta = waitRec ? `<span style="color:var(--text2)">승인 대기 · ${esc(sub)}</span>`
-      : linked ? esc(sub) : `<span style="color:var(--text3)">연동 안 됨 · ${esc(sub)}</span>`;
+    //  ★ 개정 11(사용자 확정): 목록에 **연동됨/안 됨을 쓰지 않는다** — "기기 목록에서 연동됨 안됨
+    //   이런거 표현하지마!". 남는 것은 최근 시각뿐이고, 할 일이 있는 상태(승인 대기)만 말한다.
+    const meta = waitRec ? `<span style="color:var(--text2)">승인 대기 · ${esc(sub)}</span>` : esc(sub);
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     return `<tr class="dev-tr${waitRec ? " dev-tr-wait" : ""}"${waitRec ? ` data-appr-open="${esc(waitRec.enrollmentId)}"` : ""}>
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
@@ -817,7 +822,11 @@ function e2eeDeviceRowsHtml(devs, selfReady, pend, { mine } = {}) {
   //  기기 행이 없는 열쇠(고아) — 삭제 경로를 잃지 않게 목록에 남긴다. ★ 개정 7: 지문(🔒 숫자)은
   //   표시하지 않는다(사용자: "저것도 사용자들은 몰라도 되는 정보 아닌가?"). 정상 경로에서는 이제
   //   열쇠가 기기 행에 묶이므로(back enroll 이 deviceId 를 받는다) 이 행 자체가 예외 상황이다.
-  const orphanRows = orphans.filter((k) => !e2eeKeyIsMine(k)).map((k) => {
+  //  ★ 개정 11: 같은 이름의 기기 행이 이미 있으면 고아 열쇠 행을 **그리지 않는다**. 승인 직후 신청서에
+  //   deviceId 가 없던 경우(로그인 직후 기기 등록 전에 enroll 이 나감) 열쇠가 잠시 기기 행에 안 묶여
+  //   같은 폰이 2줄로 보였다(사용자 지적) — 귀속은 다음 enroll 이 흡수하므로 표시만 합치면 된다.
+  const rowNames = new Set(all.map((d) => String(d.name || "")));
+  const orphanRows = orphans.filter((k) => !e2eeKeyIsMine(k) && !rowNames.has(String(k.label || ""))).map((k) => {
     const isPc = k.platform === "darwin" || k.platform === "win32" || k.platform === "linux";
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
@@ -881,8 +890,9 @@ function bindE2ee(box) {
     const r = await nudgeDevice(Number(b.dataset.e2eeLink));
     if (r.ok) {
       // 상태가 바뀌는 데는 상대 기기의 응답이 필요하다 → 버튼을 "요청됨"으로 굳히고 사실만 말한다.
+      //  ★ 개정 11(사용자 확정): 성공 안내 줄은 두지 않는다 — 버튼이 "요청 보냄" 으로 이미 말한다.
+      //   ("이 기기에 저런 멘트 제거해라니까! 깔끔하게 표현할거야!")
       b.textContent = "요청 보냄";
-      e2eeMsg = "연동 요청을 보냈어요 · 그 기기에서 승인하면 연결돼요";
       renderE2ee();
     } else {
       b.disabled = false;
