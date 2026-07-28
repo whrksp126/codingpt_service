@@ -681,7 +681,15 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const dir = base.startsWith("file:") ? fileURLToPath(base) : base;
-  const settings = readFileSync(`${dir}/settings.js`, "utf8");
+  //  ★ 개정 6(2026-07-28): 승인 표면이 설정 밖으로 나갔다 — 승인 카드 = `device-approval.js`(전역
+  //   상단 카드) + `notifications.js`(알림 행 인라인). 설정(settings.js)은 **연동 상태 관리**만 한다.
+  //   그래서 카피/구성 단정은 두 파일을 합친 소스로 보고, 아래 ⑧ 절이 "설정에는 승인 버튼이 없다" 를
+  //   따로 고정한다(합친 소스만 보면 승인 UI 가 설정으로 되돌아가도 통과한다).
+  const settingsOnly = readFileSync(`${dir}/settings.js`, "utf8");
+  const devApprSrc = readFileSync(`${dir}/device-approval.js`, "utf8");
+  const notifSrc = readFileSync(`${dir}/notifications.js`, "utf8");
+  const cardSrc = readFileSync(`${dir}/e2ee-card.js`, "utf8");
+  const settings = settingsOnly + devApprSrc + cardSrc;
   const labelSrc = readFileSync(`${dir}/e2ee-label.js`, "utf8") + readFileSync(`${dir}/host-lock.js`, "utf8");
 
   // ① 삭제된 상시 설명문 — 카드 첫 화면에서 설명문을 0줄로 만든 근거들.
@@ -856,6 +864,24 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   색 규율(사용자 확정: "과한 포인트 컬러는 AI 스러운 느낌") — 승인 카드·안전 코드에 accent 금지.
   eq("승인 화면에 포인트 컬러가 없다(accent 는 상태 신호 전용)",
     /safetyChips\([^)]*var\(--accent\)/.test(settings) || /appr-ok[^>]*var\(--accent\)/.test(settings), false);
+  //  ⑤-2‴ ★ 개정 6(2026-07-28 사용자 확정) — **승인 표면과 설정 화면의 분리**를 고정한다.
+  //   원문: "기기 목록 안에서 새 기기 승인을 처리하는 게 이상하지 않니? 승인하는 건 일시적으로
+  //   나타나는 거니까! 나눠야 할 것 같은데?" · "승인 같은 건 설정>계정에서 하려고 하지 말고 별도의
+  //   알림에서 바로 승인 … 구글에서 다른 기기로 로그인했을 때 승인된 기기에서 알림이 뜨는 것처럼".
+  //   ① 설정에는 승인/거절 버튼이 **없다**(연동 관리만) ② 전역 카드가 있다 ③ 알림 행에서도 승인한다.
+  eq("설정 화면에 승인/거절 버튼이 없다(개정 6 — 승인은 사건 표면의 일)",
+    [/data-e2ee-approve/, /data-e2ee-deny/, /approveDevice\(/, /denyDevice\(/]
+      .filter((re) => re.test(settingsOnly)).map(String), []);
+  eq("전역 승인 카드 표면이 있다(상단 스택 · 사건이 있을 때만 존재)",
+    /dev-appr-stack/.test(devApprSrc) && /e2eePendingApprovable\(\)/.test(devApprSrc)
+    && /본인이 맞나요\?/.test(devApprSrc), true);
+  eq("알림 행에서도 바로 승인/거절한다(알림이 유일한 진입점인 경우가 있다)",
+    /deviceApprovalForNotif/.test(notifSrc) && /approveDevice\(devAppr\.enrollmentId\)/.test(notifSrc)
+    && /본인이 아니에요/.test(notifSrc), true);
+  //   ④ 설정의 기기 행은 **연동 상태**를 말하고 [연동] 로 절차를 다시 시작한다(nudge).
+  eq("기기 행에 연동 상태 + [연동] 버튼이 있다(승인 절차 미완료 = 연동 안 됨)",
+    /연동 안 됨/.test(settingsOnly) && /data-e2ee-link/.test(settingsOnly)
+    && /nudgeDevice\(/.test(settingsOnly), true);
   //  ⑤-2″ 승인 카드는 **승인할 수 있는 요청**만 그린다(2026-07-28 폰 실사고: 자기 자신의 옛 enrollment 를
   //   승인하라고 띄웠고 누르면 403 이었다) — 필터는 e2ee.js 가 갖고 화면은 그것만 쓴다.
   eq("승인 목록은 e2eePendingApprovable() 이다(자기 요청·미신뢰 기기 차단)",
@@ -915,9 +941,11 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [true, true, false]);
   // 헤더 행은 두지 않는다 — 지난 라운드에 표 헤더 3개를 텍스트 감축으로 지웠다(되살리면 감축을 되돌린다).
   eq("표에 헤더 행이 없다(카피 감축 유지)", /<th[\s>]|dev-th/.test(code), false);
-  // 박스는 **한 곳만** 남긴다: 펼친 승인 카드(대조 + [거절]/[승인] 이 한 덩어리여야 하고 경고색 테두리
-  //  자체가 보안 어포던스다). 여기가 2 이상이 되면 "카드 안에 카드" 로 되돌아간다.
-  eq("예외 박스는 승인 카드 하나뿐이다(.appr-card 1곳)", (code.match(/class="appr-card"/g) || []).length, 1);
+  //  ★ 개정 6: 설정 화면(`code` = settings.js 의 주석 제거본)에는 **박스가 하나도 없다** — 유일한
+  //   예외였던 승인 카드가 전역 카드(device-approval.js)로 나갔기 때문이다. 여기에 박스가 다시 생기면
+  //   "카드 안에 카드"(개정 3 이 없앤 구조)로 되돌아가거나 승인이 설정으로 되돌아온 것이다.
+  eq("설정 화면에는 카드-속-카드 박스가 없다(승인 카드는 전역 표면으로 이동)",
+    (code.match(/class="appr-card"/g) || []).length, 0);
   // 행동 행·대기 행·로딩 행도 `<tr>` 이어야 한다: `<div>` 를 돌려주면 브라우저가 표 밖으로 끌어올려서
   //  (foster parenting) 열 정렬이 **조용히** 깨진다 — 화면을 실행하지 않으면 안 보이는 종류의 결함이다.
   eq("행동 행·대기 행·로딩 행도 표의 행(<tr>)이다", (code.match(/return `<tr/g) || []).length >= 3, true);

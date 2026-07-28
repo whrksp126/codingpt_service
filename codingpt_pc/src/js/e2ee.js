@@ -348,6 +348,10 @@ export function applyDeviceApprovalEvent(ev) {
     e2ee.pending = e2ee.pending.filter((p) => p.enrollmentId !== ev.enrollmentId);
     S.emit();
     void refreshE2ee();
+  } else if (ev.kind === "nudge") {
+    //  사용자가 다른 기기에서 [연동] 을 눌렀다 → 이 PC 가 대상이면 지금 재확인한다(데몬 백오프 무시).
+    //   deviceId 가 없으면 계정 전체 대상이므로 그대로 재확인한다(무해 — 왕복 1회).
+    void refreshE2ee();
   } else if (ev.kind === "rotated" || ev.kind === "policy" || ev.kind === "bootstrapped") {
     // 계정 세대/정책이 바뀌었다(다른 기기에서 회전·신뢰 해제·정책 변경·처음 켜기) → 즉시 재확인.
     //  ★ 이게 없으면 폰에서 회전해도 이 화면은 최대 60초(startE2ee 폴링 주기)간 **낡은 자물쇠**를
@@ -361,6 +365,29 @@ export function applyDeviceApprovalEvent(ev) {
     //   (= 자기 행이 그 창 내내 초록 = 거짓 자물쇠. 폰은 같은 순간 '확인 중' 이라 화면끼리도 어긋난다).
     if (noteAccountEpoch(ev.epoch)) S.emit();
     void refreshE2ee();
+  }
+}
+
+/**
+ * 연동 요청 다시 보내기 — 기기 목록의 [연동] 버튼(2026-07-28 사용자 요구).
+ *  · 이 PC 가 대기 중이면 → 신뢰 기기들에 승인 요청을 **다시 알린다**(알림을 놓쳤을 때의 정상 경로).
+ *  · 상대 기기에 열쇠가 없으면 → 그 기기가 즉시 재신청하도록 서버가 nudge 를 팬아웃한다.
+ *  판단은 서버(deviceTrustService.nudge)가 한다 — 클라가 방향을 정하면 두 화면의 규칙이 갈라진다.
+ *  ⚠ 데몬 RPC 가 아니라 back REST 를 직접 부른다(cpt.sock 에 이 명령이 없다 · back_api 는
+ *   `/api/daemon/*` 를 그대로 통과시킨다 = 새 배관 0개, 승인 인박스와 같은 선례).
+ */
+export async function nudgeDevice(deviceId) {
+  try {
+    const r = await api.backApi("POST", "/api/daemon/e2ee/nudge",
+      { ikX: e2ee.ikX || undefined, deviceId: deviceId ?? undefined }, 12);
+    const sent = r && (r.data ? r.data.sent : r.sent);
+    return { ok: true, sent: sent || "nudge" };
+  } catch (e) {
+    const msg = String((e && e.message) || e || "");
+    // 쿨다운(429)은 실패가 아니다 — 방금 보낸 요청이 유효하다는 뜻이므로 그렇게 말한다.
+    if (/NUDGE_COOLDOWN|429/.test(msg)) return { ok: true, sent: "cooldown" };
+    // 실패 문구는 앱과 글자까지 같아야 한다(카피표 err.link — 두 화면을 나란히 보는 사용자 규율).
+    return { ok: false, error: "연동 요청을 보내지 못했어요" };
   }
 }
 

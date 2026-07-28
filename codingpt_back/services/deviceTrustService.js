@@ -291,8 +291,10 @@ function pendingByIkX(userId, ikX) {
 }
 
 // 레이트 리밋(순수 판정) — 1분 창.
+//  ⚠ 두 번째 인자는 **레이트 키**다(유저 id 또는 `uid:ikX` 같은 복합 키 — enroll 은 기기별로 센다).
+//   safeUid 로 뭉개면 `:`·`*` 가 사라져 서로 다른 키가 같은 버킷에 들어간다 → 여기서만 허용 문자를 넓힌다.
 function allowRate(map, userId, now, max) {
-  const key = safeUid(userId);
+  const key = String(userId == null ? '' : userId).replace(/[^A-Za-z0-9_:*-]/g, '');
   let r = map.get(key);
   if (!r || now - r.windowStart >= 60000) { r = { windowStart: now, count: 0 }; map.set(key, r); }
   r.count += 1;
@@ -345,7 +347,12 @@ async function enroll(userId, deviceId, body, meta) {
   enabledGate();
   const now = Date.now();
   const id = normalizeIdentity(body);
-  if (!allowRate(rateEnroll, userId, now, ENROLL_MAX_PER_MIN)) {
+  //  ★ 2026-07-28: 레이트 키를 **기기별**(uid:ikX)로 바꿨다. 계정 단위 10회/분이었는데 enroll 은
+  //   승인 대기 중 폴링 경로이기도 해서(앱 20s + 데몬 백오프 + 다른 기기) 기기가 2~3대만 되면 정상
+  //   사용이 429 를 맞았다 — 그리고 그 429 가 앱에서 '오류' 로 굳어 대기 화면이 붕괴했다(실사고).
+  //   계정 상한도 함께 둔다(기기당 상한만 두면 기기 수만큼 곱해져 무의미해진다).
+  if (!allowRate(rateEnroll, `${safeUid(userId)}:${id.ikX}`, now, ENROLL_MAX_PER_MIN)
+    || !allowRate(rateEnroll, `${safeUid(userId)}:*`, now, ENROLL_MAX_PER_MIN * 4)) {
     throw err('요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.', 429, 'RATE_LIMITED');
   }
   return withKeyring(userId, async () => {
@@ -547,6 +554,50 @@ async function listPending(userId, { ikX } = {}) {
     .sort((a, b) => a.requestedAt - b.requestedAt)
     .map(publicPending);
   return { pending: items, epoch: k.epoch, policy: k.policy, trustedCount: trustedKeys(k).length };
+}
+
+// ── C-2. 연동 요청 재발송(nudge) ──────────────────────────────────────
+//  ★ 2026-07-28 사용자 요구: "사용자가 원하는 내 PC 를 모바일에서 클릭하거나 연동 버튼을 클릭하면
+//   그때 내 PC 에 다시 알림을 보내거나 승인을 받을 수 있게 해서 승인하면 연동" — 기기 목록이 곧
+//   **연동 관리 화면**이 되고, 승인 절차를 끝내지 않은 기기는 목록에 보여도 연동되지 않은 상태다.
+//
+//  두 방향을 한 엔드포인트가 덮는다(호출자가 어느 쪽인지는 서버가 판단한다):
+//   ① 호출자가 **대기 중**이다(자기 enrollment 가 pending) → 신뢰 기기들에 요청을 **다시 알린다**
+//      (알림을 놓쳤거나 지웠을 때의 정상 경로. 새 enrollment 를 만들지 않는다 = 같은 요청 재알림).
+//   ② 호출자는 열쇠가 있고 **대상 기기**에 열쇠가 없다 → 그 기기에 `nudge` 를 팬아웃해 즉시 재신청하게
+//      한다(대상이 요청을 올려야 승인 카드가 뜬다 — 서버가 대신 만들 수 없다: 신원키는 그 기기만 갖는다).
+//  쿨다운(NUDGE_COOLDOWN_MS)은 알림 폭탄 방지 — 연동 버튼 연타가 곧 푸시 연타가 되면 안 된다.
+const NUDGE_COOLDOWN_MS = intEnv('E2EE_NUDGE_COOLDOWN_MS', 20 * 1000);
+const nudgeAt = new Map(); // uid → 마지막 nudge 시각
+async function nudge(userId, { ikX, deviceId } = {}) {
+  enabledGate();
+  const now = Date.now();
+  const last = nudgeAt.get(safeUid(userId)) || 0;
+  if (now - last < NUDGE_COOLDOWN_MS) {
+    throw err('방금 요청을 보냈어요. 잠시 후 다시 시도해 주세요.', 429, 'NUDGE_COOLDOWN',
+      { retryInMs: NUDGE_COOLDOWN_MS - (now - last) });
+  }
+  const k = await loadKeyring(userId);
+  let callerIkX = null;
+  if (typeof ikX === 'string' && ikX) {
+    try { callerIkX = b64u(decodeExact(ikX, PUB_LEN, 'ikX')); } catch (_) { callerIkX = null; }
+  }
+  // ① 내 요청 재알림 — 대상은 "이 계정의 신뢰 기기 전체"다(사용자 요구: 등록된 PC 들에 일괄 전송).
+  const mine = callerIkX ? pendingByIkX(userId, callerIkX) : null;
+  if (mine) {
+    nudgeAt.set(safeUid(userId), now);
+    await announce(userId, mine);
+    console.log(`[e2ee] 연동 요청 재알림 user=${userId} id=${mine.id}`);
+    return { sent: 'reannounce', enrollmentId: mine.id, trustedCount: trustedKeys(k).length };
+  }
+  // ② 대상 기기에 재신청 요청 — 그 기기(데몬/앱)가 즉시 enroll 을 다시 올린다.
+  const target = deviceId != null ? Number(deviceId) : null;
+  const has = target != null && k.keys.some((x) => x.state === 'trusted' && Number(x.deviceId) === target);
+  if (has) return { sent: 'none', reason: 'already_linked' };
+  nudgeAt.set(safeUid(userId), now);
+  fanout(userId, { kind: 'nudge', deviceId: target, at: now });
+  console.log(`[e2ee] 연동 재신청 요청 팬아웃 user=${userId} device=#${target ?? '-'}`);
+  return { sent: 'nudge', deviceId: target };
 }
 
 // ── D. 승인 ───────────────────────────────────────────────────────────
@@ -858,7 +909,7 @@ const _sweeper = setInterval(() => { try { sweep(); } catch (e) { console.warn('
 if (_sweeper.unref) _sweeper.unref();
 
 module.exports = {
-  enroll, bootstrap, listPending, approve, deny, keyring, rotate, setPolicy, setRecovery,
+  enroll, bootstrap, listPending, nudge, approve, deny, keyring, rotate, setPolicy, setRecovery,
   grantForPairing, grantForDevice, onDeviceRevoked,
   ENABLED: E2EE_ENABLED,
   // 테스트 노출(순수 함수/인덱스) — approvalService `_` 컨벤션 미러.
@@ -875,12 +926,14 @@ module.exports = {
   _pending: pending,
   _byUser: byUser,
   _denyCount: denyCount,
+  _nudgeAt: nudgeAt,
   _cache: cache,
   _setStore: (s) => { store = s; },
-  _reset: () => { cache.clear(); chains.clear(); pending.clear(); byUser.clear(); denyCount.clear(); rateEnroll.clear(); rateDecide.clear(); },
+  _reset: () => { cache.clear(); chains.clear(); pending.clear(); byUser.clear(); denyCount.clear(); rateEnroll.clear(); rateDecide.clear(); nudgeAt.clear(); },
   _config: {
     SUITE, SEALED_LEN, SIG_LEN, PUB_LEN, KEY_MAX, GRANT_MAX, EPOCH_KEEP, POLICIES,
     ENROLL_TTL_MS, MAX_PENDING_PER_USER, ENROLL_MAX_PER_MIN, DECIDE_MAX_PER_MIN,
     DENY_BLOCK_MAX, DENY_BLOCK_MS, ANDROID_CHANNEL, VERIFY_SIG, FORBIDDEN_FIELDS, RECOVERY_MAX,
+    NUDGE_COOLDOWN_MS,
   },
 };

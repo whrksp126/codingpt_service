@@ -83,6 +83,18 @@ async function deny(req, res) {
   } catch (e) { return fail(res, e); }
 }
 
+// POST /api/daemon/e2ee/nudge {ikX?, deviceId?} — 연동 요청 다시 보내기(기기 목록의 [연동] 버튼).
+//  내가 대기 중이면 신뢰 기기들에 재알림 · 상대 기기에 열쇠가 없으면 그 기기가 즉시 재신청하게 팬아웃.
+async function nudge(req, res) {
+  try {
+    const b = req.body || {};
+    return ok(res, req.account.userId, await deviceTrustService.nudge(req.account.userId, {
+      ikX: typeof b.ikX === 'string' ? b.ikX : null,
+      deviceId: b.deviceId,
+    }));
+  } catch (e) { return fail(res, e); }
+}
+
 // GET /api/daemon/e2ee/keyring?ikX=… — 감사 UI(기기·지문 목록) + 내 봉인문 수령.
 async function keyring(req, res) {
   try {
@@ -112,4 +124,4 @@ async function recovery(req, res) {
   } catch (e) { return fail(res, e); }
 }
 
-module.exports = { enroll, bootstrap, pending, approve, deny, keyring, rotate, policy, recovery };
+module.exports = { enroll, bootstrap, pending, nudge, approve, deny, keyring, rotate, policy, recovery };

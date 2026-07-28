@@ -685,7 +685,10 @@ function fanoutDeviceApproval(userId, event) {
 //  ★ 'request'(새 기기가 승인 대기)는 **일부러 뺀다**: 데몬의 열쇠 사실은 하나도 바뀌지 않으므로
 //   왕복해도 같은 키링을 다시 읽을 뿐이고, PC 승인 시트는 데몬 keyring 이 아니라 PC 가 자체 60초
 //   주기로 cpt.sock `e2ee.pending` 을 당겨 그린다(데몬이 밀어주는 경로가 없다).
-const E2EE_HINT_KINDS = new Set(['rotated', 'rotate_needed', 'resolved', 'bootstrapped', 'policy', 'recovery']);
+//  · nudge                  — 사용자가 기기 목록에서 [연동] 을 눌렀다(2026-07-28): 열쇠 없는 그 PC 가
+//    **지금 바로** 등록을 재신청해야 승인 카드가 뜬다. 데몬 백오프는 최대 6시간까지 자란다 —
+//    사용자가 버튼을 눌렀는데 몇 시간 뒤에 반응하면 그 버튼은 무동작으로 읽힌다.
+const E2EE_HINT_KINDS = new Set(['rotated', 'rotate_needed', 'resolved', 'bootstrapped', 'policy', 'recovery', 'nudge']);
 
 /**
  * 데몬에게 "지금 keyring 을 다시 확인해 보라" 는 **힌트**를 내려보낸다(caps `e2ee.hint.v1` 게이팅).

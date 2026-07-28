@@ -476,7 +476,14 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     // 주석은 카피가 아니다(양쪽 다 "왜 지웠는가" 를 주석에 남긴다) → 비교 전에 제거한다.
     const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
     const copySrc = strip(readFileSync(APPCOPY, "utf8"));
+    //  ★ 개정 6(2026-07-28): 승인 카드 문구는 설정 밖으로 나갔다 — 전역 카드(device-approval.js) ·
+    //   공유 조각(e2ee-card.js) · 알림 행 인라인(notifications.js). 앱 카피표는 여전히 **한 표**이므로
+    //   PC 측 대조 대상에 그 파일들을 더한다(빠뜨리면 이 절이 "PC 에 문구가 없다" 로 오탐한다).
     const pcSrc = strip(readFileSync(path.resolve(here, "../src/js/settings.js"), "utf8"))
+      + strip(readFileSync(path.resolve(here, "../src/js/device-approval.js"), "utf8"))
+      + strip(readFileSync(path.resolve(here, "../src/js/e2ee-card.js"), "utf8"))
+      + strip(readFileSync(path.resolve(here, "../src/js/notifications.js"), "utf8"))
+      + strip(readFileSync(path.resolve(here, "../src/js/e2ee.js"), "utf8"))
       + strip(readFileSync(path.resolve(here, "../src/js/e2ee-label.js"), "utf8"))
       + strip(readFileSync(path.resolve(here, "../src/js/host-lock.js"), "utf8"));
     // 앱 전용(PC 에 대응 화면·상태가 없다):
@@ -495,8 +502,10 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     ok(`앱 카피표 문구 ${[...new Set(literals)].length}개가 PC 소스에 글자까지 있다`, missing.length === 0,
       missing.map((s) => `없음: "${s}"`).join(" | "));
     // 템플릿 문구(백틱)는 위 추출에 안 걸리므로 조립 결과를 따로 고정한다 — 치환값만 다르고 나머지는 같다.
-    ok("템플릿 문구도 같은 형태다(`새 기기 N대 승인` · `요청 NNNN · 대조용 아님`)",
-      /새 기기 \$\{[^}]+\}대 승인/.test(pcSrc) && /요청 [\s\S]{0,120}· 대조용 아님/.test(pcSrc));
+    //  개정 6: 설정의 대기 알림 줄은 "승인해 주세요"(행동)가 아니라 **사실**을 말한다(승인은 사건
+    //   표면에서 한다) → `새 기기 N대가 승인을 기다려요`. 앱 `act.approve` 도 같은 형태여야 한다.
+    ok("템플릿 문구도 같은 형태다(`새 기기 N대가 승인을 기다려요` · `요청 NNNN · 대조용 아님`)",
+      /새 기기 \$\{[^}]+\}대가 승인을 기다려요/.test(pcSrc) && /요청 [\s\S]{0,120}· 대조용 아님/.test(pcSrc));
     // 예외 목록이 조용히 늘어나는 것을 막는다(앱 전용 화면·상태 + 개정 5 짝 문구/시트 탈출로뿐).
     ok("by-design 예외는 5개뿐이다(needUpdate + 시트 2종 + 개정 5 짝 문구·나중에)", APP_ONLY.length === 5);
   }

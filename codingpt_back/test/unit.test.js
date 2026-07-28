@@ -665,6 +665,46 @@ test('e2ee 대기 목록 — 자기 요청은 빼고, 미신뢰 호출자에겐 
   });
 });
 
+// ★ 개정 6(2026-07-28 사용자 요구): 기기 목록의 [연동] 버튼 = 연동 절차 다시 시작. 방향은 **서버가**
+//  판단한다(클라가 정하면 폰과 PC 규칙이 갈라진다): 내가 대기 중이면 재알림 · 상대에게 열쇠가 없으면
+//  그 기기가 즉시 재신청하도록 nudge 팬아웃. 쿨다운이 없으면 버튼 연타가 곧 푸시 연타가 된다.
+test('e2ee nudge — 대기 중이면 재알림 · 아니면 대상 기기에 재신청 팬아웃 · 쿨다운 429', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async (seen) => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    // ① 대기 중인 폰이 누르면 = 같은 요청을 다시 알린다(새 enrollment 를 만들지 않는다).
+    const phone = newDevice('Android');
+    const p = await deviceTrust.enroll(7, null, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label });
+    const notifsBefore = seen.notifs.length;
+    const r1 = await deviceTrust.nudge(7, { ikX: phone.ikX });
+    assert.strictEqual(r1.sent, 'reannounce');
+    assert.strictEqual(r1.enrollmentId, p.enrollmentId);
+    assert.ok(seen.notifs.length > notifsBefore, '재알림이 실제로 발송돼야 한다');
+
+    // ② 쿨다운 — 연타는 429(NUDGE_COOLDOWN). 알림 폭탄 방지가 이 버튼의 전제다.
+    await assert.rejects(() => deviceTrust.nudge(7, { ikX: phone.ikX }),
+      (e) => e.statusCode === 429 && e.code === 'NUDGE_COOLDOWN');
+
+    // ③ 열쇠 있는 기기가 **열쇠 없는 대상**에 대해 누르면 → 그 기기가 재신청하도록 팬아웃.
+    deviceTrust._config.NUDGE_COOLDOWN_MS; // (문서용 참조 — 쿨다운은 아래에서 우회한다)
+    deviceTrust._nudgeAt.clear();
+    const r2 = await deviceTrust.nudge(7, { ikX: pc.ikX, deviceId: 99 });
+    assert.strictEqual(r2.sent, 'nudge');
+    const ev = seen.events.filter((e) => e.kind === 'nudge').pop();
+    assert.strictEqual(ev.deviceId, 99);
+
+    // ④ 이미 연동된 기기면 아무것도 보내지 않는다(무의미한 알림을 만들지 않는다).
+    deviceTrust._nudgeAt.clear();
+    const r3 = await deviceTrust.nudge(7, { ikX: pc.ikX, deviceId: 12 });
+    assert.deepStrictEqual([r3.sent, r3.reason], ['none', 'already_linked']);
+  });
+});
+
 test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

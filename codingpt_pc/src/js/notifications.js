@@ -5,6 +5,8 @@ import * as S from "./state.js";
 import { state } from "./state.js";
 import { icons } from "./icons.js";
 import { approvalForNotif, isChoiceApproval } from "./approvals.js";
+import { deviceApprovalForNotif, unDismissDeviceApproval } from "./device-approval.js";
+import { approveDevice, denyDevice } from "./e2ee.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
 import { notifBodyText } from "./e2ee.js";
 
@@ -76,10 +78,14 @@ export function renderNotifPanel(el, onJump) {
     // 승인 알림은 인박스에서도 바로 응답할 수 있어야 한다(알림 패널이 유일한 진입점인 경우가 있다).
     //  아직 대기 중인 승인(state.approvals 에 있는 것)만 버튼을 붙이고, 해소된 건 회색 처리.
     const appr = n.kind === "approval_request" ? approvalForNotif(n) : null;
+    //  기기 승인(계정 로그인 확인)도 **알림 행에서 바로** 처리한다(2026-07-28 사용자 요구: "알림이
+    //   오면 그 알림 목록 내부에서 승인 거절 할 수 있으면 좋겠는데?"). 대기 목록에 없으면(이미
+    //   처리·만료) 버튼을 붙이지 않는다 — 눌러도 404 인 버튼을 남기지 않는다.
+    const devAppr = n.kind === "device_approval" ? deviceApprovalForNotif(n) : null;
     const row = document.createElement("button");
     row.className = "notif-row" + (n.read ? "" : " unread") + (n.kind === "approval_request" ? " approval" : "") + (n.kind === "approval_request" && !appr ? " resolved" : "");
     row.innerHTML =
-      `<div class="notif-title">${n.kind === "approval_request" ? `<span class="notif-ic">${icons.shield({ size: 12 })}</span>` : ""}${escapeHtml(n.title)}</div>` +
+      `<div class="notif-title">${n.kind === "approval_request" || n.kind === "device_approval" ? `<span class="notif-ic">${icons.shield({ size: 12 })}</span>` : ""}${escapeHtml(n.title)}</div>` +
       (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
       // body 가 봉인문("cptenc:1:…")이면 데몬에 복호를 요청한다(비동기 → 도착 시 emit 으로 재렌더).
       //  잠금화면/배너는 subtitle(평문)로 도달하므로 알림 자체가 무내용이 되지는 않는다.
@@ -106,8 +112,30 @@ export function renderNotifPanel(el, onJump) {
       }
       row.appendChild(acts);
     }
+    if (devAppr) {
+      const acts = document.createElement("div");
+      acts.className = "notif-acts";
+      acts.innerHTML =
+        `<span class="notif-act ghost" data-act="deny">본인이 아니에요</span>` +
+        `<span class="notif-act" data-act="allow">승인</span>`;
+      acts.addEventListener("click", async (e) => {
+        const b = e.target.closest?.("[data-act]");
+        if (!b) return;
+        e.stopPropagation();
+        acts.innerHTML = `<span class="notif-act-hint">처리 중…</span>`;
+        const r = b.dataset.act === "allow"
+          ? await approveDevice(devAppr.enrollmentId)
+          : await denyDevice(devAppr.enrollmentId);
+        if (!r || r.ok === false) acts.innerHTML = `<span class="notif-act-hint">${escapeHtml((r && r.error) || "처리하지 못했어요")}</span>`;
+        else readOne(n); // 처리했으면 이 알림은 끝났다(크로스기기 dismiss 와 같은 타이밍)
+      });
+      row.appendChild(acts);
+    }
     row.addEventListener("click", () => {
       readOne(n);
+      // 기기 승인 알림을 누르면 ✕ 로 닫아 둔 카드도 다시 보여 준다 — 알림을 눌렀는데 아무 일도
+      //  일어나지 않으면(카드는 닫혀 있고 이 행은 점프 대상이 없다) 사용자는 승인할 곳을 못 찾는다.
+      if (n.kind === "device_approval") unDismissDeviceApproval(n.sessionId);
       onJump?.(n);
     });
     el.appendChild(row);
