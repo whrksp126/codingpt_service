@@ -388,8 +388,20 @@ async function enroll(userId, deviceId, body, meta) {
       throw err('이 기기의 열쇠는 해제되었습니다. 새 신원키로 다시 신청해 주세요.', 409, 'KEY_REVOKED');
     }
     // 계정에 열쇠가 없다 → 이 기기가 부트스트랩(승인해 줄 기기가 없으므로 서버가 1회 허용).
+    //  ★ 2026-07-28 개정 10(사용자 확정) — **누가 계정의 첫 열쇠를 만드는지는 경주로 정하지 않는다.**
+    //   실측(prod user=59): PC 페어링 02:07:25 → 폰 로그인 02:07:51 → 폰이 0.5초 만에 부트스트랩,
+    //   PC 의 enroll 이 0.5초 늦어 **PC 가 승인 대기**가 됐다. 두 경로의 속도가 구조적으로 다르기
+    //   때문이다: 폰은 자기 프로세스에서 enroll 응답 즉시 켜고(0.5초), PC 는 데몬이 phase 를 보고할
+    //   때까지 기다린다(데몬 bootstrap 재확인 기본 5분). 그래서 **PC 로그인 후 1분 안에 폰을 켜면
+    //   항상 폰이 이긴다** = 같은 코드가 순서에 따라 역할을 뒤집는다(사용자가 "엉망"이라 한 상태).
+    //   → 계정에 host 기기(PC)가 등록돼 있으면 controller(모바일)에게는 bootstrap 을 주지 않는다.
+    //   모바일은 대기(pending)가 되고, PC 가 켜져 열쇠를 만든 뒤 그 요청을 승인한다 = 순서가 항상 같다.
+    //   ⚠ 폴백: host 기기가 **0대**면(폰만 쓰는 사용자) 그대로 허용한다 — 아니면 영영 못 켠다.
     if (k.epoch === 0 && trustedKeys(k).length === 0) {
-      return { state: 'bootstrap', epoch: 0, policy: k.policy, suite: SUITE };
+      if (id.kind !== 'controller' || !(await accountHasHost(userId))) {
+        return { state: 'bootstrap', epoch: 0, policy: k.policy, suite: SUITE };
+      }
+      // (아래 pending 경로로 흘러간다 — 승인자는 곧 열쇠를 만들 PC 다)
     }
     if (denyBlocked(userId, id.ikX, now)) {
       throw err('이 기기의 승인 요청이 반복 거절되었습니다. 잠시 후 다시 시도해 주세요.', 429, 'ENROLL_BLOCKED');
@@ -511,6 +523,20 @@ async function announce(userId, rec) {
   }
 }
 
+/**
+ * 계정에 host 기기(PC)가 등록돼 있는가 — 개정 10 의 부트스트랩 우선권 판정(위 enroll 주석).
+ *  ⚠ 온라인 여부는 보지 않는다: PC 가 잠깐 꺼져 있다고 폰이 주인이 되면 다시 순서가 뒤집힌다.
+ *  ⚠ 조회 실패는 **false**(= 허용)로 본다 — DB 장애가 열쇠 생성을 영구 차단하면 안 된다.
+ *  테스트는 `_setDeviceLookup` 으로 이 조회를 갈아끼운다(모델 의존 없이 규칙만 검증).
+ */
+let deviceLookup = async (userId) => {
+  const { DaemonDevice } = require('../models');
+  return DaemonDevice.count({ where: { user_id: Number(userId), role: 'host', revoked_at: null } });
+};
+async function accountHasHost(userId) {
+  try { return (await deviceLookup(userId)) > 0; } catch (_) { return false; }
+}
+
 // ── B. 부트스트랩(계정 최초 1회) ──────────────────────────────────────
 // req { ikX, ikEd, label, platform, kind, sealed(자기 자신에게 봉인한 MK_1), sig, recovery? }
 async function bootstrap(userId, deviceId, body) {
@@ -527,6 +553,11 @@ async function bootstrap(userId, deviceId, body) {
     // ★ 1회 제약 — 이미 초기화된 계정에서 다시 부트스트랩하면 계정 열쇠가 갈라진다(전 기기 상호 복호 불가).
     if (k.epoch !== 0 || trustedKeys(k).length > 0) {
       throw err('이 계정은 이미 열쇠가 있습니다. 기존 기기에서 승인해 주세요.', 409, 'E2EE_ALREADY_INITIALIZED', { epoch: k.epoch });
+    }
+    //  ★ 개정 10 — enroll 과 **같은 규칙**을 여기서도 건다(직접 호출 경로 차단). 클라이언트가 enroll 을
+    //   건너뛰고 bootstrap 을 부르면 우선권 규칙이 통째로 우회된다.
+    if (id.kind === 'controller' && await accountHasHost(userId)) {
+      throw err('내 PC에서 먼저 켜 주세요.', 409, 'E2EE_HOST_FIRST');
     }
     const epoch = 1;
     if (VERIFY_SIG && !verifyGrantSig({ epoch, ikXRaw: id.ikXRaw, sealedRaw, sigRaw, approverIkEdRaw: id.ikEdRaw })) {
@@ -968,6 +999,7 @@ module.exports = {
   _allowRate: allowRate,
   _maskIp: maskIp,
   _publicPending: publicPending,
+  _setDeviceLookup: (fn) => { deviceLookup = fn; },
   _sweep: sweep,
   _pending: pending,
   _byUser: byUser,

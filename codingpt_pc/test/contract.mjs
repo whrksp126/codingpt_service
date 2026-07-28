@@ -857,11 +857,16 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   코드·대조 지침은 **접힘 안에서만** 그린다 = 접힌 상태(open=false)에서는 소스상 그려지지 않는다.
   eq("안전 코드·대조 지침은 접힌 '코드 확인' 안에만 있다",
     /\$\{open && !noSafety \? `<div class="appr-code">[\s\S]{0,600}safetyChips\(p\.safetyCode/.test(settings), true);
-  //   대기 화면: 스피너 + 안내 2줄, 수동 새로고침 버튼 없음(승인은 WS resolved 로 자동 반영).
-  eq("대기 화면은 스피너 + 안내 2줄이고 새로고침 버튼이 없다",
-    ['class="wait-spin"', "폰·태블릿에서 승인해 주세요", "이미 로그인된 기기에 요청을 보냈어요"]
-      // 부재 검사는 **주석을 걷어낸 소스**로(왜 없앴는지 근거가 주석에 남는다 — ①-b 와 같은 규율)
-      .filter((t) => !settings.includes(t)).concat(bare.includes("승인됐는지 확인") ? ["잔존:승인됐는지 확인"] : []), []);
+  //   ★ 개정 10(2026-07-28 사용자 확정): 설정의 `이 기기` 섹션에는 **대기 지시문·스피너를 두지 않는다**.
+  //    원문 — "이 기기에서 '폰·태블릿에서 승인해 주세요' 이게 왜 뜨지? … 물론 이기기 코드 확인은 이
+  //    기기에 잇는게 맞아!" → 접힌 `코드 확인`만 남기고, 대기 안내는 사건 표면(전역 카드·앱 안내 화면).
+  //    부재 검사는 **주석을 걷어낸 소스**로 본다(왜 없앴는지 근거가 주석에 남는다 — ①-b 와 같은 규율).
+  eq("이 기기 섹션에는 대기 지시문·스피너가 없고 코드 확인만 있다(개정 10)",
+    [bare.includes('class="wait-spin"') ? "잔존:wait-spin" : null,
+     bare.includes("폰·태블릿에서 승인해 주세요") ? "잔존:지시문" : null,
+     bare.includes("이미 로그인된 기기에 요청을 보냈어요") ? "잔존:부제" : null,
+     bare.includes("승인됐는지 확인") ? "잔존:승인됐는지 확인" : null,
+     settings.includes('data-e2ee-code="self"') ? null : "없음:코드 확인"].filter(Boolean), []);
   //   색 규율(사용자 확정: "과한 포인트 컬러는 AI 스러운 느낌") — 승인 카드·안전 코드에 accent 금지.
   eq("승인 화면에 포인트 컬러가 없다(accent 는 상태 신호 전용)",
     /safetyChips\([^)]*var\(--accent\)/.test(settings) || /appr-ok[^>]*var\(--accent\)/.test(settings), false);

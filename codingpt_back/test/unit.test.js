@@ -795,6 +795,47 @@ test('e2ee 등록 — announce:false 는 알리지도 보이지도 않고, nudge
   });
 });
 
+// ★ 개정 10(2026-07-28 사용자 확정): 계정 첫 열쇠의 주인은 **경주가 아니라 규칙**으로 정한다.
+//  실측(prod): PC 페어링 26초 뒤 폰 로그인 → 폰이 0.5초 만에 부트스트랩해 PC 가 '승인 대기'가 됐다
+//  (폰은 인프로세스 즉시, PC 는 데몬 phase 보고 대기 = 구조적 속도차). host 기기가 있으면 모바일은
+//  대기하고 PC 가 열쇠를 만든다. host 가 0대면(폰만 쓰는 사용자) 그대로 허용 = 영구 차단 금지.
+test('e2ee 부트스트랩 우선권 — host(PC)가 있으면 모바일은 대기, 없으면 허용(개정 10)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async () => {
+    const phone = newDevice('Android');
+    // ① host 0대(폰만 있는 계정) → 폰이 부트스트랩한다(폴백 — 아니면 영영 못 켠다)
+    deviceTrust._setDeviceLookup(async () => 0);
+    const r0 = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, kind: 'controller' });
+    assert.strictEqual(r0.state, 'bootstrap');
+
+    // ② host 1대(PC 등록됨) → 모바일은 bootstrap 을 받지 못하고 **대기**가 된다
+    deviceTrust._reset();
+    deviceTrust._setStore(fakeStore());
+    deviceTrust._setDeviceLookup(async () => 1);
+    const r1 = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, kind: 'controller' });
+    assert.strictEqual(r1.state, 'pending');
+    // ③ 같은 상황에서 PC(host)는 그대로 부트스트랩한다 = 순서가 항상 같다
+    const pc = newDevice('PC', 'host', 'darwin');
+    const r2 = await deviceTrust.enroll(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, label: pc.label, kind: 'host' });
+    assert.strictEqual(r2.state, 'bootstrap');
+    // ④ 모바일이 bootstrap 을 직접 호출해도 막힌다(enroll 을 건너뛰는 우회 차단)
+    const mk = crypto.randomBytes(32);
+    const sealed = sealMk(mk, phone.x.raw, 1);
+    await assert.rejects(() => deviceTrust.bootstrap(7, 42, {
+      ikX: phone.ikX, ikEd: phone.ikEd, kind: 'controller',
+      sealed: b64u(sealed), sig: signGrant(phone, 1, phone.x.raw, sealed),
+    }), (e) => e.statusCode === 409 && e.code === 'E2EE_HOST_FIRST');
+    // ⑤ 조회 실패는 허용으로 본다(DB 장애가 열쇠 생성을 영구 차단하면 안 된다)
+    deviceTrust._reset();
+    deviceTrust._setStore(fakeStore());
+    deviceTrust._setDeviceLookup(async () => { throw new Error('db down'); });
+    const r3 = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, kind: 'controller' });
+    assert.strictEqual(r3.state, 'bootstrap');
+    deviceTrust._setDeviceLookup(async () => 0);
+  });
+});
+
 test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

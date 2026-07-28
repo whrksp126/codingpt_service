@@ -521,7 +521,7 @@ async function onDeleteAccount() {
     btn.dataset.confirm = "1";
     btn.textContent = "취소";
     btn.classList.remove("danger");
-    msg.classList.add("warn");
+    //  ★ 개정 10(사용자 확정): 경고색은 **버튼 하나만**(과한 색은 AI 스러움). 문구·테두리·입력창은 일반색.
     msg.innerHTML = `
       <div class="acct-del-confirm">
         <div>계속하려면 <b>${DELETE_CONFIRM_WORD}</b> 를 입력하세요.</div>
@@ -704,18 +704,18 @@ function e2eeActionRow() {
   //   이 화면에는 승인 버튼이 없으므로 누르지 말아야 할 곳을 명시한다(waitNoSafetyWarn).
   //  (개정 4: 구 '자세히 → 복구 코드로 복원' 힌트는 복구 UI 와 함께 삭제 — 현 스코프엔 잠긴 저장
   //   데이터가 없어 기기 전손실 = 새 기기에서 자동으로 새 열쇠가 생긴다.)
+  //  ★ 개정 10(2026-07-28 사용자 확정): 이 섹션에는 **지시문을 두지 않는다.** 원문 — "이 기기에서
+  //   '폰·태블릿에서 승인해 주세요' 이게 왜 뜨지? 승인 요청을 보내는 거 어떤 기기겟니? 지금 이 기기가
+  //   아니라 다른 기기들에서 보내는 거겟지? … 물론 이기기 코드 확인은 이 기기에 잇는게 맞아!"
+  //   `이 기기` 섹션 = 이 기기에 대한 사실만(연동 상태는 행 메타가, 대조 코드는 접힌 `코드 확인`이).
+  //   승인 처리는 `다른 기기` 목록의 대기 행(미확인 표시 → 클릭)과 전역 승인 카드가 맡는다.
+  //   ⚠ 안전 코드를 만들 수 없는 상태의 경고만 남긴다 — 그건 지시가 아니라 **위험 고지**다(§2.10):
+  //    대조할 값이 없는데 사용자가 다른 기기에서 그냥 [승인] 을 누르면 MITM 방어가 통째로 빠진다.
   if (e2eeSelfWaiting()) {
     const noSafety = !e2ee.safetyCode;
     const open = e2eeCodeOpen.has("self");
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div style="display:flex;flex-direction:column;align-items:stretch;gap:6px">
-        <div class="wait-box">
-          <span class="wait-spin"></span>
-          <div style="min-width:0">
-            <div class="wait-title">폰·태블릿에서 승인해 주세요</div>
-            <div class="wait-sub">이미 로그인된 기기에 요청을 보냈어요</div>
-          </div>
-        </div>
         ${noSafety ? waitNoSafetyWarn() : `<button class="appr-reveal" data-e2ee-code="self">코드 확인 ${open ? "▴" : "▾"}</button>`}
         ${open && !noSafety ? `<div class="appr-code">${safetyChips(e2ee.safetyCode, "var(--text)")}${requestNo(e2ee.verifyCode)}</div>` : ""}
       </div>

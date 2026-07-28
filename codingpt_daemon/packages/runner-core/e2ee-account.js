@@ -60,7 +60,11 @@ const PENDING_MAX_MS = 60 * 1000;
 const TRUSTED_MS = 15 * 60 * 1000; // 열쇠 보유 중 정기 확인(rotate/revoke 감지) — 힌트가 없을 때의 유일한 경로
 const RESOLVED_BASE_MS = 10 * 60 * 1000;  // 거절/만료 후 재신청 — 알림이 다시 발사되는 경로라 느리게
 const RESOLVED_MAX_MS = 6 * 60 * 60 * 1000;
-const BOOTSTRAP_BASE_MS = 5 * 60 * 1000;  // 계정에 열쇠 없음(사람이 앱에서 켤 때까지 대기)
+// ★ 2026-07-28 개정 10: 5분 → 15초. 계정 첫 열쇠는 이제 **PC 가 만든다**(서버가 모바일에게
+//  bootstrap 을 주지 않는다 — deviceTrustService enroll 주석). 그런데 PC 앱은 이 데몬이
+//  `phase='bootstrap'` 을 보고해야 켤 수 있으므로, 5분 백오프면 **폰이 그 5분 내내 대기**한다.
+//  (실측: PC 페어링 후 26초가 지나도 PC 가 켜지지 않아 폰이 먼저 부트스트랩해 역할이 뒤집혔다)
+const BOOTSTRAP_BASE_MS = 15 * 1000;      // 계정에 열쇠 없음(사람이 앱에서 켤 때까지 대기)
 const BOOTSTRAP_MAX_MS = 60 * 60 * 1000;
 const OFF_MS = 60 * 60 * 1000;     // policy='off' — 승인 알림을 만들지 않기 위해 신청 자체를 멈춘다
 const KICK_MIN_GAP_MS = 30 * 1000; // 재접속 폭주가 폴링 폭주로 증폭되지 않게(kick 최소 간격)
