@@ -126,6 +126,7 @@ router.post('/chat/close', accountAuth, daemonController.chatClose);
 router.get('/chat/detail', accountAuth, daemonController.chatDetail);
 router.get('/chat/attachment', accountAuth, daemonController.chatAttachment);
 router.post('/chat/input', accountAuth, daemonController.chatInput);
+router.post('/chat/answer', accountAuth, daemonController.chatAnswer); // TUI 폴백 질문에 원격 답변(다이얼로그 조작)
 
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.
 router.get('/ws/root', authMiddleware, daemonController.wsGetRoot);

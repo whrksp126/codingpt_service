@@ -405,6 +405,15 @@ function dispatchRpc(ws, method, params, ok, fail) {
       .then(ok).catch(fail);
     return;
   }
+  // chat.answer — TUI 로 폴백된 AskUserQuestion 에 원격 카드로 답한다(다이얼로그 키 조작).
+  //  chat.input 과 같은 이유로 transcript(읽기 전용)가 아니라 cpt-server 구현으로 보낸다.
+  if (method === 'chat.answer') {
+    const p = params || {};
+    Promise.resolve()
+      .then(() => cptServer.chatAnswer({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, answers: p.answers, expect: p.expect }))
+      .then(ok).catch(fail);
+    return;
+  }
   if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }

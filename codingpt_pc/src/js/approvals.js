@@ -22,6 +22,11 @@ import { icons } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
 import { setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
+import { api } from "./api.js";
+
+// 사용자가 ✕ 로 접은 TUI 폴백 질문 카드 — 승인 인박스에 실체가 없어(합성 행) 로컬로만 기억한다.
+//  답이 트랜스크립트에 붙으면 tuiQuestion 자체가 사라지므로 영속할 필요 없다.
+const dismissedTui = new Set();
 
 // '기타' 선택 표식 — 실제 라벨과 부딪히지 않게 내부 전용 심볼 문자열을 쓴다.
 const ETC = "\u0000etc";
@@ -76,8 +81,32 @@ export function paneApprovalCount(cwd, win) {
 }
 
 // Chat 뷰 슬롯용 — 그 (cwd,win) 카드만.
-function renderScoped(host, { cwd, win, visible }) {
-  renderList(host, visible ? forPane(cwd, win) : []);
+//  승인 요청이 하나도 없는데 **TUI 로 폴백된 미응답 질문**이 있으면(훅 마감/데몬 재시작 뒤),
+//  같은 모양의 카드를 트랜스크립트 기준으로 세운다 — TUI 가 질문을 띄우고 있는 한 채팅에서도
+//  계속 답할 수 있어야 한다(2026-07-28 사용자 확정). 답은 chat.answer(다이얼로그 키 조작)로 간다.
+function renderScoped(host, { cwd, win, visible, tuiQuestion }) {
+  let rows = visible ? forPane(cwd, win) : [];
+  // 만료 카드("PC 터미널에서 답해주세요")보다 **답할 수 있는** TUI 카드가 우선 — 같은 질문이 TUI 로
+  //  넘어갔다면 이제 이 카드가 그 다이얼로그를 대신 조작한다.
+  if (rows.length && tuiQuestion && tuiQuestion.msg) {
+    const now = Date.now();
+    if (rows.every((a) => a.deadlineAt && a.deadlineAt <= now)) rows = [];
+  }
+  if (visible && !rows.length && tuiQuestion && tuiQuestion.msg
+      && !dismissedTui.has("tui:" + (tuiQuestion.msg.tool && tuiQuestion.msg.tool.id ? tuiQuestion.msg.tool.id : tuiQuestion.msg.seq))) {
+    const m = tuiQuestion.msg;
+    rows = [{
+      id: "tui:" + (m.tool && m.tool.id ? m.tool.id : m.seq),
+      prompt: { kind: "choice", questions: m.questions },
+      cwd, win,
+      _tui: {
+        cwd, win, hostDeviceId: tuiQuestion.hostDeviceId,
+        expect: (m.questions[0] && (m.questions[0].question || m.questions[0].header)) || "",
+        onAnswered: tuiQuestion.onAnswered,
+      },
+    }];
+  }
+  renderList(host, rows);
 }
 
 // ── 렌더 ──
@@ -232,7 +261,14 @@ function renderQuestionStep(el, a) {
       (etcOn ? `<input class="apc-free-input" type="text" placeholder="여기에 답변을 입력하세요" value="${escapeHtml(el._etc.get(i) || "")}" />` : "") +
     `</div>`;
   const lastOne = i === qs.length - 1;
-  const canGo = picks.length > 0 || !!String(el._etc.get(i) || "").trim();
+  let canGo = picks.length > 0 || !!String(el._etc.get(i) || "").trim();
+  // TUI 폴백 카드는 건너뛰기가 없다(다이얼로그가 질문을 순서대로 지나간다) — 마지막 [보내기]는
+  //  **모든 질문**이 답을 갖고 있어야 켠다(하나라도 비면 데몬 조작이 중간에 멈춘다).
+  const tui = !!a._tui;
+  if (tui && lastOne && canGo) {
+    const answered = (k) => (el._picks.get(k) || []).length > 0 || !!String(el._etc.get(k) || "").trim();
+    canGo = qs.every((_, k) => k === i || answered(k));
+  }
   wrap.innerHTML =
     `<div class="apc-qtop">` +
       (qs.length > 1 ? `<span class="apc-qbadge">${i + 1}/${qs.length}</span>` : "") +
@@ -245,7 +281,7 @@ function renderQuestionStep(el, a) {
       `<div class="apc-qfoot">` +
         `<button class="apc-btn ghost" type="button" data-act="qprev" ${i === 0 ? "disabled" : ""}>뒤로</button>` +
         `<span class="apc-qspacer"></span>` +
-        `<button class="apc-btn ghost" type="button" data-act="qskip">건너뛰기</button>` +
+        (tui ? "" : `<button class="apc-btn ghost" type="button" data-act="qskip">건너뛰기</button>`) +
         `<button class="apc-btn primary" type="button" data-act="qadvance" ${canGo ? "" : "disabled"}>${lastOne ? "보내기" : "다음"} ↵</button>` +
       `</div>`) +
     (multi ? `<div class="apc-qhint">여러 개 고를 수 있어요</div>` : "");
@@ -285,6 +321,38 @@ export { ETC as _ETC };
 async function submitQuestionCard(el, a) {
   syncEtc(el);
   const answers = buildAnswers(el._picks, el._etc);
+  // ── TUI 폴백 질문 — 훅이 없으므로 데몬이 다이얼로그를 키 입력으로 조작한다(chat.answer). ──
+  //  다이얼로그는 질문을 **순서대로** 지나가므로 건너뛰기가 없다: 전부 답해야 보낼 수 있다.
+  if (a._tui) {
+    const qs = el._qs || [];
+    if (answers.length !== qs.length) { flashErr(el, "모든 질문에 답해야 보낼 수 있어요"); return; }
+    const wire = qs.map((q, i) => {
+      const ans = answers.find((x) => x.questionIndex === i);
+      const optionCount = (q.options || []).length;
+      if (ans.text) return { optionIndexes: [], text: ans.text, multiSelect: !!q.multiSelect, optionCount };
+      return {
+        optionIndexes: ans.labels.map((l) => (q.options || []).findIndex((o) => o.label === l) + 1).filter((n) => n >= 1),
+        multiSelect: !!q.multiSelect, optionCount,
+      };
+    });
+    el.classList.add("busy");
+    try {
+      await api.chatAnswer({
+        cwd: a._tui.cwd, tid: a._tui.win, expect: a._tui.expect, answers: wire,
+        ...(a._tui.hostDeviceId != null ? { hostDeviceId: a._tui.hostDeviceId } : {}),   // 멀티 PC 라우팅
+      });
+      dismissedTui.add(a.id);          // 낙관적 회수 — 트랜스크립트에 답이 붙으면 어차피 사라진다
+      el.remove();
+      a._tui.onAnswered?.();
+    } catch (e) {
+      el.classList.remove("busy");
+      const msg = String(e || "");
+      flashErr(el, /QUESTION_NOT_ON_SCREEN/.test(msg) ? "터미널에 질문 다이얼로그가 떠 있지 않아요 — TUI 를 확인해 주세요"
+        : /QUESTION_MISMATCH/.test(msg) ? "화면의 질문이 바뀌었어요 — 잠시 후 다시 시도해 주세요"
+        : "답변을 전달하지 못했어요 — 다시 시도해 주세요");
+    }
+    return;
+  }
   if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: "원격 기기에서 건너뛰었습니다" }); return; }
   await S.respondApproval(a.id, { decision: "answer", answers });
 }
@@ -319,6 +387,7 @@ function buildActions(el, a) {
 }
 
 function syncCard(el, a) {
+  if (a._tui) return;   // 합성 행 — busy/err 는 submit 경로가 el 에 직접 관리한다(매 emit 재생성 값에 덮이면 안 됨)
   if (a.deadlineAt) el.dataset.deadline = String(a.deadlineAt);
   el.classList.toggle("busy", !!a._busy);
   const err = el.querySelector(".apc-err");
@@ -333,7 +402,11 @@ async function onCardClick(e, el, a) {
   if (!btn) return;
   e.stopPropagation();
   const act = btn.dataset.act;
-  if (act === "dismiss") { S.dismissApproval(a.id); return; }
+  if (act === "dismiss") {
+    if (a._tui) { dismissedTui.add(a.id); el.remove(); return; }   // 합성 행 — 로컬로만 접는다
+    S.dismissApproval(a.id);
+    return;
+  }
   if (a._busy) return;
   if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
   if (act === "deny") { await S.respondApproval(a.id, { decision: "deny" }); return; }

@@ -902,3 +902,40 @@ test('실제 거절은 그대로 실패로 남는다', async () => {
   const res = (await T.snapshot(f, { maxLines: 100 })).messages.find((m) => m.result);
   assert.strictEqual(res.result.ok, false);
 });
+
+// ── TUI 폴백 질문 카드의 근거 데이터 — questions 전체 배열 + interrupt 숨김 + 거절문구 한글화 ──
+test('AskUserQuestion 은 questions 전체 배열을 싣는다(카드 재건의 근거)', async () => {
+  const f = path.join(PROJECTS, 'qs-all', 'a.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: { questions: [
+    { question: '계절?', header: '계절', options: [{ label: '봄' }, { label: '겨울' }] },
+    { question: '간식?', header: '간식', multiSelect: true, options: [{ label: '과자' }] },
+  ] } }] } }) + '\n');
+  const snap = await T.snapshot(f, { maxLines: 50 });
+  const q = snap.messages.find((m) => m.kind === 'question');
+  assert.ok(q, 'question 승격');
+  assert.strictEqual(q.questions.length, 2, '전체 질문 배열');
+  assert.strictEqual(q.questions[1].multiSelect, true);
+  assert.strictEqual(q.question.question, '계절?', '구 클라 호환 필드 유지');
+});
+
+test('interrupt(사용자 Esc)는 hidden — 채팅에 "중단" 잡음을 넣지 않는다', async () => {
+  const f = path.join(PROJECTS, 'intr', 'a.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }) + '\n');
+  const snap = await T.snapshot(f, { maxLines: 50 });
+  assert.strictEqual(snap.messages[0].hidden, true);
+});
+
+test('TUI 거절의 영문 내부 문구는 한글 한 줄로 바뀐다', async () => {
+  const f = path.join(PROJECTS, 'decl', 'a.jsonl');
+  fs.mkdirSync(path.dirname(f), { recursive: true });
+  fs.writeFileSync(f, [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'AskUserQuestion', input: { questions: [{ question: 'q', header: 'h', options: [{ label: 'a' }] }] } }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: "The user doesn't want to proceed with this tool use. The tool use was rejected..." }] } }),
+  ].join('\n') + '\n');
+  const snap = await T.snapshot(f, { maxLines: 50 });
+  const r = snap.messages.find((m) => m.result);
+  assert.strictEqual(r.result.ok, false);
+  assert.strictEqual(r.result.preview, '사용자가 답하지 않고 넘어갔습니다');
+});

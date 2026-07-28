@@ -218,6 +218,8 @@ export const api = {
     invoke("back_api", { method: "GET", path: "/api/daemon/chat/attachment?" + qs(q), body: null, timeoutSecs: 25 }),
   // 채팅 전송 — 데몬이 그 터미널 세션에 bracketed paste + (지연) Enter 로 넣는다(새 세션/attach 금지).
   chatInput: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/input", body: body || {}, timeoutSecs: 20 }),
+  // TUI 로 폴백된 질문에 원격 답변 — 데몬이 다이얼로그를 키 조작(직렬 + 화면 폴링이라 여유 타임아웃).
+  chatAnswer: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/answer", body: body || {}, timeoutSecs: 35 }),
 
   // ── 작업 스냅샷(자동 체크포인트) ──
   //  1순위 = 사이드카 데몬 직결(cpt.sock). 같은 머신에서 나는 트리거인데 back → 제어 WS → 이 머신의

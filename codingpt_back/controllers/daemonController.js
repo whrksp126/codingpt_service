@@ -1284,6 +1284,13 @@ const chatInput = chatRpc('chat.input', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid, text: typeof bOf(req).text === 'string' ? bOf(req).text : '',
   submit: bOf(req).submit !== false, submitDelayMs: bOf(req).submitDelayMs,
 }), 15000);
+// POST /api/daemon/chat/answer   { cwd, tid, expect, answers:[{optionIndexes,text,multiSelect,optionCount}] }
+//  훅 승인이 끝나 TUI 로 폴백된 AskUserQuestion 에 답한다 — 데몬이 다이얼로그를 키 입력으로 조작.
+//  타임아웃 넉넉히: 질문 수 × 키 간격 + 화면 폴링(데몬 쪽 최대 ~3초 관찰)이 직렬로 돈다.
+const chatAnswer = chatRpc('chat.answer', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid, expect: bOf(req).expect,
+  answers: Array.isArray(bOf(req).answers) ? bOf(req).answers.slice(0, 8) : [],
+}), 30000);
 
 // ── BYO 로그인(M5 Slice2) — 활성 러너(주로 클라우드 컨테이너)에서 사용자 claude 계정 로그인 ──
 // 크레덴셜(토큰)은 그 러너의 CLAUDE_CONFIG_DIR 에만 안착. 우리는 인증 URL/코드만 중계한다.
@@ -1495,6 +1502,6 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
 };

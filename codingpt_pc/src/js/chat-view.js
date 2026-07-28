@@ -371,6 +371,9 @@ export class ChatView {
     if (snapshot || wasBottom) { this._scrollToBottom(); this._unread = 0; }
     else if (added.length) this._unread += added.filter((m) => isVisible(m) && !isResult(m)).length;
     this._syncJump();
+    // 새 메시지로 질문 카드 상태가 바뀌었을 수 있다(질문 도착 → 카드 세움 / 답 도착 → 카드 회수 +
+    //  감췄던 질문을 답과 함께 대화에 넣기). _renderApprovals 가 키 대조로 필요할 때만 재조립한다.
+    this._renderApprovals();
     this._syncWorking();
   }
 
@@ -399,7 +402,7 @@ export class ChatView {
 
   _appendAll(msgs) {
     const answered = this._answeredToolIds();
-    const carded = this._paneHasQuestionCard();
+    const carded = this._paneHasQuestionCard() || !!this._tuiQuestion();
     for (const m of msgs) {
       if (m.seq > this._maxSeq) this._maxSeq = m.seq;
       // tool 결과는 앞선 tool_use 카드의 결과 슬롯으로 합친다(별도 카드 금지 — Claude 앱과 동일).
@@ -634,6 +637,9 @@ export class ChatView {
     if (!raw.trim()) return;
     const tid = this._tid != null ? this._tid : this.ctx.tid();
     if (tid == null) { this._setBanner("보낼 터미널이 없습니다.", "warn"); return; }
+    // TUI 질문 다이얼로그가 떠 있는 동안의 chatInput 은 대화가 아니라 **다이얼로그에 타이핑**된다
+    //  (숫자는 선택지를 고른다). 오조작을 막고 카드로 답하게 안내한다.
+    if (this._tuiQuestion()) { this._setBanner("질문 다이얼로그가 떠 있어요 — 위 카드에서 답해주세요.", "warn"); return; }
     this.inputEl.value = "";
     this.ctx.setDraft?.("");
     this._autoGrow();
@@ -810,13 +816,35 @@ export class ChatView {
     );
   }
 
+  // TUI 로 폴백된(승인 카드가 회수된) 미응답 질문 — **마지막 표시 메시지**가 결과 없는 question 이고
+  //  전체 질문 배열(questions, 데몬 0.1.148+)이 있을 때만. TUI 다이얼로그가 떠 있는 한 트랜스크립트는
+  //  거기서 멈춰 있으므로 이 판정이 곧 "TUI 에 질문이 떠 있다"다(사용자 확정 2026-07-28: 채팅에도
+  //  같은 질문 카드가 계속 떠 있어야 한다). 실제 화면 대조는 데몬 chat.answer 의 스크린 가드가 한다.
+  _tuiQuestion() {
+    if (this._paneHasQuestionCard()) return null;   // 승인 카드가 있으면 그 경로가 정본
+    const answered = this._answeredToolIds();
+    let last = null;
+    for (const m of this._msgs || []) { if (isVisible(m) && !isResult(m)) last = m; }
+    if (!last || last.kind !== "question") return null;
+    if (last.tool && last.tool.id && answered.has(last.tool.id)) return null;
+    const qs = last.questions;
+    if (!Array.isArray(qs) || !qs.length || !qs.every((q) => Array.isArray(q.options) && q.options.length)) return null;
+    return last;
+  }
+
   // ── 승인 카드 슬롯(기능1) ──
   _renderApprovals() {
     if (!this.apprEl || !_approvalRenderer) return;
     const cwd = this._cwd();
-    _approvalRenderer(this.apprEl, { cwd, win: this._tid, visible: this._visible });
+    const tuiQ = this._tuiQuestion();
+    _approvalRenderer(this.apprEl, {
+      cwd, win: this._tid, visible: this._visible,
+      // TUI 폴백 질문 — 승인 카드가 없을 때 approvals.js 가 같은 모양의 카드를 세우고,
+      //  답은 chat.answer(다이얼로그 키 조작)로 보낸다. onAnswered = 낙관적 새로고침.
+      tuiQuestion: tuiQ ? { msg: tuiQ, hostDeviceId: this.ctx.hostDeviceId?.(), onAnswered: () => this._tick() } : null,
+    });
     // 질문 카드가 떴다/사라졌으면 대화 내역을 다시 그린다(감췄던 질문이 답과 함께 들어온다).
-    const key = this._paneHasQuestionCard() ? "1" : "0";
+    const key = (this._paneHasQuestionCard() ? "a" : "-") + "|" + (tuiQ ? tuiQ.seq : "-");
     if (key !== this._heldKey) { this._heldKey = key; this._rebuild(); }
     this._syncWorking();
   }
@@ -830,7 +858,7 @@ export class ChatView {
     if (!this.scrollEl) return;
     const st = agentStateOf(this._cwd(), this._tid);
     const busy = !!st && (st.state === "working" || st.state === "needsInput");
-    const on = busy && !this._paneHasQuestionCard() && !this._pending.length;
+    const on = busy && !this._paneHasQuestionCard() && !this._tuiQuestion() && !this._pending.length;
     let el = this.scrollEl.querySelector(".chat-working");
     if (!on) { el?.remove(); return; }
     if (!el) {

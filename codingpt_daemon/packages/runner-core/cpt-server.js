@@ -1123,6 +1123,86 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   return { ok: true, index: win, submitted: doSubmit, multiline };
 }
 
+// ── TUI 질문 다이얼로그 원격 조작(chat.answer) ─────────────────────────────
+// 승인 훅이 이미 끝난(defer → TUI 폴백) AskUserQuestion 에 원격 카드로 답하는 경로.
+//  훅 채널이 없으므로 **다이얼로그를 키 입력으로 대신 조작**한다 — TUI 앞에 앉은 사람과 동일한 입력.
+//
+// 키 프로토콜(claude 2.1.220, 2026-07-28 격리 tmux 실측 — 추측 아님):
+//  · 단일선택: 숫자키 = 선택 + 다음 질문 자동 진행
+//  · multiSelect: 숫자키 = 체크 토글, Tab = 다음 탭(마지막 질문이면 Review 화면)
+//  · 자유입력: "Type something." 행 숫자키(= 선택지수+1) → 그 행이 입력창이 됨 → 텍스트 → Enter
+//  · 질문이 1개면 Review 없이 즉시 제출, 여러 개면 "Ready to submit your answers?" → 1 = Submit
+//
+// 안전장치 — 다이얼로그가 실제로 떠 있을 때만 친다. 아니면 숫자가 **셸/컴포저에 타이핑**된다:
+//  ① 화면에 다이얼로그 푸터("Enter to select")가 있어야 하고
+//  ② 클라가 보낸 expect(질문 텍스트 조각)가 화면에 있어야 한다(다른 질문/다른 상태 오조작 방지).
+const DRIVE_KEY_GAP_MS = 160;
+function normScreen(s) { return String(s || '').replace(/\s+/g, ''); }
+
+// 조작 본체 — io 주입형(테스트/격리 검증이 실제 코드 경로를 그대로 태울 수 있게 분리).
+//  io = { screen(): Promise<string>, key(k, literal): Promise<void>, sleep(ms) }
+async function driveQuestionDialog(io, { answers, expect } = {}) {
+  const list = Array.isArray(answers) ? answers : [];
+  if (!list.length) throw Object.assign(new Error('답변이 비어 있습니다'), { code: 'BAD_REQUEST' });
+  const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+
+  const s0 = await io.screen();
+  if (!/Enter to select/.test(s0)) {
+    throw Object.assign(new Error('지금 이 터미널에 질문 다이얼로그가 떠 있지 않습니다'), { code: 'QUESTION_NOT_ON_SCREEN' });
+  }
+  if (expect && !normScreen(s0).includes(normScreen(String(expect).slice(0, 60)))) {
+    throw Object.assign(new Error('화면의 질문이 답하려는 질문과 다릅니다'), { code: 'QUESTION_MISMATCH' });
+  }
+
+  for (const a of list) {
+    const picks = (Array.isArray(a.optionIndexes) ? a.optionIndexes : []).map((n) => parseInt(n, 10)).filter((n) => n >= 1);
+    const optionCount = parseInt(a.optionCount, 10) || 0;
+    const text = typeof a.text === 'string' && a.text.trim() ? a.text.trim() : null;
+    if (text != null) {
+      const d = optionCount + 1;                       // "Type something." 행
+      if (d > 9) throw Object.assign(new Error('선택지가 너무 많아 자유입력을 조작할 수 없습니다'), { code: 'UNSUPPORTED' });
+      await io.key(String(d), true);
+      await sleep(120);
+      await io.key(text, true);
+      await io.key('Enter');
+    } else if (a.multiSelect) {
+      if (!picks.length || picks.some((n) => n > 9)) throw Object.assign(new Error('선택이 비었거나 조작할 수 없는 번호입니다'), { code: 'BAD_REQUEST' });
+      for (const n of picks) await io.key(String(n), true);
+      await io.key('Tab');
+    } else {
+      if (picks.length !== 1 || picks[0] > 9) throw Object.assign(new Error('단일선택 질문엔 정확히 1개를 골라야 합니다'), { code: 'BAD_REQUEST' });
+      await io.key(String(picks[0]), true);
+    }
+    await sleep(200);
+  }
+
+  // 마무리 — 질문이 여러 개면 Review 화면이 남는다. 최대 ~3초 관찰하며 제출을 완주시킨다.
+  for (let i = 0; i < 10; i++) {
+    const s = await io.screen();
+    if (/Ready to submit your answers\?/.test(s)) { await io.key('1', true); continue; }
+    if (!/Enter to select/.test(s)) return { ok: true };             // 다이얼로그 소멸 = 제출 완료
+    await sleep(300);
+  }
+  throw Object.assign(new Error('다이얼로그가 예상대로 진행되지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
+}
+
+async function chatAnswer({ cwd, tid, answers, expect } = {}) {
+  const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
+  if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
+  const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+  await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
+  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const io = {
+    screen: () => ptyLib.runTmux(['capture-pane', '-p', '-t', target]),
+    key: async (k, literal) => {
+      await ptyLib.runTmux(literal ? ['send-keys', '-t', target, '-l', '--', k] : ['send-keys', '-t', target, k]);
+      await new Promise((r) => setTimeout(r, DRIVE_KEY_GAP_MS));
+    },
+  };
+  const r = await driveQuestionDialog(io, { answers, expect });
+  return { ...r, tid: win };
+}
+
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
 function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
@@ -1311,6 +1391,8 @@ function start() {
 module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
+  chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
+  _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
