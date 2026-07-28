@@ -313,6 +313,15 @@ async function rpc(a) {
   return { ok: false, e: (out && out.e) || '요청이 실패했습니다', code: (out && out.code) || null };
 }
 
+/** 연동(개정 12) 위임 — 계정 모듈이 없으면 정직하게 미지원을 돌려준다(조용한 실패 금지). */
+function linkCall(name, args) {
+  const a = account();
+  if (!a || typeof a[name] !== 'function') {
+    return { ok: false, code: 'E2EE_UNSUPPORTED', error: '이 데몬은 기기 연동을 지원하지 않습니다(업데이트 필요).' };
+  }
+  return a[name](args);
+}
+
 /**
  * cpt.sock 디스패처 진입점 — `e2ee.` 로 시작하는 모든 커맨드.
  *  모르는 커맨드는 throw(= 이 데몬이 그 명령을 모른다는 정직한 신호).
@@ -323,6 +332,12 @@ async function handle(cmd, args = {}) {
     case 'e2ee.pending': return pending();
     case 'e2ee.keyring': return keyring();
     case 'e2ee.approve': return approve(args);
+    //  ★ 개정 12: 기기 연동(코드) — 승인 절차를 대체한다. 계정 모듈이 네트워크·암호를 다 한다.
+    case 'e2ee.link.start': return linkCall('linkStart');
+    case 'e2ee.link.active': return linkCall('linkActive');
+    case 'e2ee.link.cancel': return linkCall('linkCancel');
+    case 'e2ee.link.fulfill': return linkCall('linkFulfill', args);
+    case 'e2ee.link.claim': return linkCall('linkClaim', args);
     case 'e2ee.deny': return deny(args);
     case 'e2ee.revoke': return revoke(args);
     case 'e2ee.bootstrap': return bootstrap();

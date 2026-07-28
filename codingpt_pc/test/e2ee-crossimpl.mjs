@@ -480,8 +480,6 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     //   공유 조각(e2ee-card.js) · 알림 행 인라인(notifications.js). 앱 카피표는 여전히 **한 표**이므로
     //   PC 측 대조 대상에 그 파일들을 더한다(빠뜨리면 이 절이 "PC 에 문구가 없다" 로 오탐한다).
     const pcSrc = strip(readFileSync(path.resolve(here, "../src/js/settings.js"), "utf8"))
-      + strip(readFileSync(path.resolve(here, "../src/js/device-approval.js"), "utf8"))
-      + strip(readFileSync(path.resolve(here, "../src/js/e2ee-card.js"), "utf8"))
       + strip(readFileSync(path.resolve(here, "../src/js/notifications.js"), "utf8"))
       + strip(readFileSync(path.resolve(here, "../src/js/e2ee.js"), "utf8"))
       + strip(readFileSync(path.resolve(here, "../src/js/e2ee-label.js"), "utf8"))
@@ -496,16 +494,9 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     //  · ★ 개정 8 `link.*` = **모바일 첫 로그인의 연동 안내**(온보딩식 전체 화면)다. PC 에는 대응 화면이
     //    없다: PC 는 데몬을 가진 승인자 쪽이고, PC 가 대기하는 경우의 문구는 이미 `wait.titleFromMobile`
     //    짝으로 표에 있다(그쪽은 이 대조가 검사한다). 즉 이 7개는 요청자-모바일 전용 화면의 문구다.
-    const APP_ONLY = ["앱을 업데이트하면 켜집니다", "기기 승인", "승인할 기기가 없어요",
-      "내 PC에서 승인해 주세요", "나중에",
-      "승인된 내 PC가 없어요", "내 PC에 승인 요청 보내기", "내 PC에 요청을 보냈어요",
-      "PC 화면에 뜬 알림에서 [승인]을 눌러 주세요.", "연동됐어요", "보내는 중…",
-      "나중에 설정 > 계정 > 기기에서도 연동할 수 있어요.",
-      //  ★ 개정 10: PC `이 기기` 섹션에서 대기 지시문·부제를 없앴다(코드 확인만) → 이 부제는 앱 시트 전용.
-      "이미 로그인된 기기에 요청을 보냈어요",
-      //  ★ 개정 11: 목록에서 연동됨/안 됨 표기를 없앴다(사용자 확정) → 문구는 계약에 남지만 두 화면
-      //   어디에도 그려지지 않는다. 되살릴 때를 위해 표에는 두고 대조에서만 제외한다.
-      "연동 안 됨"];
+    //  ★ 개정 12: 승인 시대 문구(시트·승인 카드·대기 화면)가 통째로 사라졌다. 남은 예외는 앱에만
+    //   있는 상태 문구 하나뿐이다(PC 는 같은 상황을 데몬 reason 으로 말한다).
+    const APP_ONLY = ["앱을 업데이트하면 켜집니다"];
     const literals = [...copySrc.matchAll(/'([^'\\\n]*)'/g)].map((m) => m[1])
       .filter((s) => /[가-힣]/.test(s) || s.includes("…"))
       .filter((s) => !APP_ONLY.includes(s));
@@ -515,11 +506,11 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
     // 템플릿 문구(백틱)는 위 추출에 안 걸리므로 조립 결과를 따로 고정한다 — 치환값만 다르고 나머지는 같다.
     //  ★ 개정 9: 구 요약 줄(`새 기기 N대가 승인을 기다려요`)은 양쪽에서 삭제됐고, 대기 사실은 **기기 행**이
     //   말한다 → 양쪽 다 `승인 대기 · {최근}` 형태여야 한다(앱 `row.waitingApproval` = PC 인라인 문구).
-    ok("템플릿 문구도 같은 형태다(`승인 대기 · {최근}` · `요청 NNNN · 대조용 아님`)",
-      /승인 대기 · \$\{/.test(pcSrc) && /요청 [\s\S]{0,120}· 대조용 아님/.test(pcSrc));
+    //  ★ 개정 12: 승인·요청번호 템플릿은 사라졌다. 두 화면이 공유하는 템플릿은 **연동 코드 남은 시간**뿐.
+    ok("템플릿 문구도 같은 형태다(연동 코드 `m:ss 남음`)", /남음/.test(pcSrc) && /다른 기기에서 이 코드를 입력하세요/.test(pcSrc));
     // 예외 목록이 조용히 늘어나는 것을 막는다(앱 전용 화면·상태 + 개정 5 짝 문구/시트 탈출로 + 개정 8 안내).
-    ok("by-design 예외는 14개뿐이다(needUpdate + 시트 2종 + 개정 5 나중에·대기 부제 + 개정 8 안내 7 + 개정 11 연동 안 됨)",
-      APP_ONLY.length === 14);
+    //  ★ 개정 12: 승인 시대 문구가 통째로 사라져 예외도 줄었다(앱 전용 상태 문구 1개 + 시트 문구 폐기).
+    ok("by-design 예외는 1개뿐이다(needUpdate)", APP_ONLY.length === 1);
   }
 }
 

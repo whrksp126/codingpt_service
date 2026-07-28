@@ -865,6 +865,89 @@ async function approve(a) {
   }
 }
 
+// ── 기기 연동(코드) — ★ 개정 12. 승인 절차 대신 코드가 채널이다(e2ee.js linkSeal/linkOpen). ──
+//  owner: 코드를 만들어 서버엔 **해시만** 올린다 → 상대가 코드를 맞히면 back 이 link_claim 을 팬아웃 →
+//   PC UI 가 linkFulfill 을 부르고, 여기서 감싼 봉인문을 올린다(사람이 누를 것 없음).
+//  claimer: 코드를 제출하고 준비되면 받아서 연다.
+const LINK_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 혼동 문자(0/O·1/I/L) 제외 — 앱과 동일
+let activeLink = null;   // { linkId, code, expiresAt }
+
+async function linkStart() {
+  const e = core();
+  if (!e) return { ok: false, code: 'E2EE_UNSUPPORTED', error: '이 데몬은 종단간 암호화를 지원하지 않습니다.' };
+  if (!e.hasKey()) return { ok: false, code: 'E2EE_NO_KEY', error: '이 PC 에 계정 열쇠가 없어 연동 코드를 만들 수 없어요.' };
+  const raw = require('crypto').randomBytes(8);
+  let code = '';
+  for (let i = 0; i < 8; i += 1) code += LINK_ALPHABET[raw[i] % LINK_ALPHABET.length];
+  const codeHash = Buffer.from(require('crypto').createHash('sha256').update(code).digest()).toString('base64url');
+  try {
+    const r = unwrap(await backFetch('POST', '/api/daemon/e2ee/link/start', { codeHash, ikX: identityOf(e).ikX }));
+    const ttlMs = Number(r.ttlMs) || 180000;
+    activeLink = { linkId: String(r.linkId), code, expiresAt: Date.now() + ttlMs };
+    log(`연동 코드 발급 link=${activeLink.linkId}`);
+    return { ok: true, code, linkId: activeLink.linkId, ttlMs };
+  } catch (err) {
+    return { ok: false, code: (err && err.code) || null, error: (err && err.message) || '연동 코드를 만들지 못했어요.' };
+  }
+}
+function linkActive() {
+  if (!activeLink || Date.now() >= activeLink.expiresAt) return { ok: true, active: null };
+  return { ok: true, active: { code: activeLink.code, linkId: activeLink.linkId, expiresAt: activeLink.expiresAt } };
+}
+function linkCancel() { activeLink = null; return { ok: true }; }
+
+/** 상대가 코드를 맞혔다(link_claim) → 감싼 봉인문을 올린다. 사람 개입 0. */
+async function linkFulfill(a) {
+  const e = core();
+  if (!e || !e.hasKey()) return { ok: false, code: 'E2EE_NO_KEY' };
+  const linkId = String((a && a.linkId) || (activeLink && activeLink.linkId) || '');
+  const ikX = String((a && a.ikX) || '');
+  if (!activeLink || !linkId || linkId !== activeLink.linkId || !ikX) return { ok: false, error: '연동 정보가 없습니다.' };
+  try {
+    const kr = await callKeyring(e, { force: true });
+    const epoch = Number(kr.epoch) || e.epoch() | 0;
+    const s = e.linkSeal(activeLink.code, linkId, ikX, epoch);
+    const r = unwrap(await backFetch('POST', '/api/daemon/e2ee/link/fulfill', { linkId, epoch: s.epoch, wrapped: s.wrapped, sig: s.sig }));
+    activeLink = null;
+    st.cache.keyringAt = 0;
+    log(`연동 완료(코드) keyId=${r.keyId != null ? r.keyId : '?'}`);
+    return { ok: true, keyId: r.keyId != null ? Number(r.keyId) : null };
+  } catch (err) {
+    return { ok: false, code: (err && err.code) || null, error: (err && err.message) || '연동에 실패했습니다.' };
+  }
+}
+
+/** 이 PC 가 다른 기기의 코드를 입력한다 → 상대가 올려 준 봉인문을 받아 연다. */
+async function linkClaim(a) {
+  const e = core();
+  if (!e) return { ok: false, code: 'E2EE_UNSUPPORTED' };
+  const code = String((a && a.code) || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== 8) return { ok: false, error: '코드 8자를 입력해 주세요.' };
+  const id = identityOf(e);
+  try {
+    const c = unwrap(await backFetch('POST', '/api/daemon/e2ee/link/claim', {
+      code, ikX: id.ikX, ikEd: id.ikEd, label: id.label, platform: process.platform, kind: 'host',
+    }));
+    const linkId = String(c.linkId || '');
+    for (let i = 0; i < 20; i += 1) {
+      const g = unwrap(await backFetch('GET', `/api/daemon/e2ee/link/${encodeURIComponent(linkId)}`));
+      if (g && g.state === 'ready' && g.wrapped) {
+        e.linkOpen(code, linkId, g.wrapped, { sig: g.sig, epoch: g.epoch, approverIkEd: g.ownerIkEd || null });
+        st.cache.keyringAt = 0;
+        st.cache.pendingAt = 0;
+        if (typeof st.onKeyChange === 'function') { try { st.onKeyChange(); } catch (_) { /* noop */ } }
+        schedule('trusted', { reset: true });
+        log('연동 완료(코드 입력)');
+        return { ok: true };
+      }
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    return { ok: false, error: '상대 기기가 응답하지 않았어요. 다시 시도해 주세요.' };
+  } catch (err) {
+    return { ok: false, code: (err && err.code) || null, error: (err && err.message) || '연동에 실패했습니다.' };
+  }
+}
+
 async function deny(a) {
   const enrollmentId = String((a && a.enrollmentId) || '').trim();
   if (!enrollmentId) return { ok: false, error: '거절 대상 정보가 부족합니다.' };
@@ -1050,6 +1133,7 @@ module.exports = {
   hintResync,
   // e2ee-local(cpt.sock) 위임 표면
   state, pending, keyring, approve, deny, revoke, setPolicy, bootstrap, noteKeyChanged,
+  linkStart, linkActive, linkCancel, linkFulfill, linkClaim,
   // 페어링 경로(호출자는 packages/daemon·PC)
   acceptPairGrant, identityForPairing,
   // 테스트 노출 — 백오프 상한/보관 세대/내부 상태를 계약으로 고정한다

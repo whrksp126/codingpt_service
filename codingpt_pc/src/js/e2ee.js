@@ -328,6 +328,15 @@ async function maybeAutoBootstrap() {
 /** device_approval_event(WS) 반영 — push 는 즉시성 힌트, pull(refreshE2ee)이 정본. */
 export function applyDeviceApprovalEvent(ev) {
   if (!ev) return;
+  //  ★ 개정 12: 다른 기기가 이 PC 의 연동 코드를 맞혔다 → 데몬이 **자동으로** 봉인문을 올린다.
+  if (ev.kind === "link_claim") {
+    void (async () => {
+      try { await cpt("e2ee.link.fulfill", { linkId: ev.linkId, ikX: ev.ikX }); } catch (_) { /* 코드 만료 시 재발급 */ }
+      await refreshE2ee();
+    })();
+    return;
+  }
+  if (ev.kind === "link_done") { void refreshE2ee(); return; }
   if (ev.kind === "request") {
     if (ev.enrollmentId && ev.ikX) {
       const i = e2ee.pending.findIndex((p) => p.enrollmentId === ev.enrollmentId);
@@ -379,6 +388,24 @@ export function applyDeviceApprovalEvent(ev) {
  *  ⚠ 데몬 RPC 가 아니라 back REST 를 직접 부른다(cpt.sock 에 이 명령이 없다 · back_api 는
  *   `/api/daemon/*` 를 그대로 통과시킨다 = 새 배관 0개, 승인 인박스와 같은 선례).
  */
+// ── 기기 연동(코드) — ★ 개정 12. 승인 절차 대신 코드가 채널이다(데몬이 암호·네트워크를 다 한다). ──
+/** 이 PC 가 연동 코드를 띄운다(열쇠 보유 PC 만). */
+export async function linkStart() {
+  const r = await cpt("e2ee.link.start");
+  return r && r.ok ? { ok: true, code: r.code, ttlMs: r.ttlMs } : { ok: false, error: (r && r.error) || "연동 코드를 만들지 못했어요" };
+}
+export async function linkActive() {
+  const r = await cpt("e2ee.link.active");
+  return (r && r.active) || null;
+}
+export async function linkCancel() { try { await cpt("e2ee.link.cancel"); } catch (_) { /* noop */ } }
+/** 다른 기기의 코드를 입력해 이 PC 를 연동한다. */
+export async function linkClaim(code) {
+  const r = await cpt("e2ee.link.claim", { code });
+  if (r && r.ok) { await refreshE2ee(); return { ok: true }; }
+  return { ok: false, error: (r && r.error) || "연동에 실패했어요" };
+}
+
 export async function nudgeDevice(deviceId) {
   try {
     const r = await api.backApi("POST", "/api/daemon/e2ee/nudge",

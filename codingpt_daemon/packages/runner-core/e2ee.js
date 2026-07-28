@@ -438,6 +438,34 @@ function approvePayload(enrollmentId, recipientIkX, ep) {
   return { enrollmentId, ikX: typeof recipientIkX === 'string' ? recipientIkX : b64u(recipientIkX), epoch: e, sealed: s.sealed, sig: s.sig };
 }
 
+// ── 기기 연동(코드) — ★ 2026-07-28 개정 12 ────────────────────────────────────
+//  승인 절차를 없애고 **코드가 채널**이 된다: 코드는 owner 가 로컬에서 만들고 서버에는 해시만 간다.
+//  봉인문을 `HKDF(code)` 로 한 겹 더 감싸므로 코드를 모르는 서버는 만들 수도 열 수도 없다.
+//  ⚠ 앱(services/e2ee.ts linkWrapKey)과 **바이트 단위로 같은 규칙**이어야 한다:
+//    key = HKDF-SHA256(ikm=utf8(CODE), salt=utf8('cpt-link/1'), info=utf8(linkId), 32)
+//    wire = nonce(12) ‖ AEAD(key, nonce, aad=utf8(linkId), sealed)
+function linkWrapKey(code, linkId) {
+  return hkdf(Buffer.from(String(code || '').toUpperCase(), 'utf8'),
+    Buffer.from('cpt-link/1', 'utf8'), Buffer.from(String(linkId || ''), 'utf8'), 32);
+}
+/** owner: 새 기기 공개키로 MK 를 봉인하고 코드로 한 겹 더 감싼다. */
+function linkSeal(code, linkId, recipientIkX, ep) {
+  const e = ep == null ? epoch() : Number(ep);
+  const s = sealTo(recipientIkX, { epoch: e });
+  const nonce = crypto.randomBytes(12);
+  const wrapped = aeadSeal(linkWrapKey(code, linkId), nonce, Buffer.from(String(linkId), 'utf8'), unb64u(s.sealed), SUITE);
+  return { epoch: e, sig: s.sig, wrapped: b64u(Buffer.concat([nonce, wrapped])) };
+}
+/** claimer: 감싼 것을 코드로 풀고 봉인문을 열어 MK 를 채택한다. */
+function linkOpen(code, linkId, wrappedB64, opts) {
+  const blob = unb64u(wrappedB64);
+  if (blob.length <= 12) fail('E2EE_LINK', '감싼 봉인문이 너무 짧음');
+  const sealed = aeadOpen(linkWrapKey(code, linkId), blob.subarray(0, 12),
+    Buffer.from(String(linkId), 'utf8'), blob.subarray(12), SUITE);
+  const o = opts || {};
+  return acceptGrant({ sealed: b64u(sealed), sig: o.sig, epoch: o.epoch }, { approverIkEd: o.approverIkEd || null });
+}
+
 /** grant 수신 처리 — 복호·검증 후 상태 저장. */
 function acceptGrant(grant, opts) {
   const g = grant || {};
@@ -1265,7 +1293,7 @@ module.exports = {
   loadState, saveState, ensureIdentity, removeState, forgetState, stateCorrupt, identity, epoch, policy, setPolicy,
   setMasterKey, masterKey, hasKey, bootstrapMasterKey, accountKeys, clearCache, fingerprint,
   // MK 봉인/승인
-  sealTo, openFrom, approvePayload, acceptGrant, rotate,
+  sealTo, openFrom, approvePayload, acceptGrant, rotate, linkSeal, linkOpen, linkWrapKey,
   // 복구 코드
   recoveryCode, parseRecoveryCode, restoreFromRecoveryCode,
   // 세션

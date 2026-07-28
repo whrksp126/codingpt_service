@@ -681,15 +681,12 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const dir = base.startsWith("file:") ? fileURLToPath(base) : base;
-  //  ★ 개정 6(2026-07-28): 승인 표면이 설정 밖으로 나갔다 — 승인 카드 = `device-approval.js`(전역
-  //   상단 카드) + `notifications.js`(알림 행 인라인). 설정(settings.js)은 **연동 상태 관리**만 한다.
-  //   그래서 카피/구성 단정은 두 파일을 합친 소스로 보고, 아래 ⑧ 절이 "설정에는 승인 버튼이 없다" 를
-  //   따로 고정한다(합친 소스만 보면 승인 UI 가 설정으로 되돌아가도 통과한다).
+  //  ★ 개정 12(2026-07-28 사용자 확정): **승인 표면이 통째로 삭제**됐다(device-approval.js·e2ee-card.js
+  //   파일 삭제 · 알림 행 인라인 승인 제거). 연동은 설정에서 코드로 한다 — 한쪽이 코드를 띄우고
+  //   다른 쪽이 입력하면 그 자리에서 열쇠가 전달된다(사람이 승인할 것이 없다).
   const settingsOnly = readFileSync(`${dir}/settings.js`, "utf8");
-  const devApprSrc = readFileSync(`${dir}/device-approval.js`, "utf8");
   const notifSrc = readFileSync(`${dir}/notifications.js`, "utf8");
-  const cardSrc = readFileSync(`${dir}/e2ee-card.js`, "utf8");
-  const settings = settingsOnly + devApprSrc + cardSrc;
+  const settings = settingsOnly;
   const labelSrc = readFileSync(`${dir}/e2ee-label.js`, "utf8") + readFileSync(`${dir}/host-lock.js`, "utf8");
 
   // ① 삭제된 상시 설명문 — 카드 첫 화면에서 설명문을 0줄로 만든 근거들.
@@ -751,21 +748,8 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //  ★ 개정 4 로 목록이 줄었다: 정책/복구/안전 코드 상시 행/메타 고지의 문구는 UI 와 함께 삭제됐고
   //   (위 ① 목록이 부재를 고정한다), 승인 지침은 "왜"를 담은 새 문구로 교체됐다(사용자 질문
   //   "항상 같은 걸 왜 물어보나"가 근거 — 카피 감사 §3 개정 4-4).
-  eq("보안 문구는 글자까지 그대로 남아 있다(§5)",
-    [
-      "새 기기 화면에도 같은 코드가 보이면 승인하세요. 정상이라면 항상 같아요 — 다르면 연결이 안전하지 않은 것이니 거절하세요.", // §2.10 눈 대조 지침(개정 4)
-      "· 대조용 아님",                                    // 4자리(13비트)는 대조 대상이 아니다
-      "안전 코드를 아직 못 만들었어요 · 승인하지 마세요", // 대조 기준 없는 습관적 승인 차단(승인 카드)
-      // 같은 상황의 **대기 화면**(이 PC 가 새 기기) 전용 문구 — 그 화면에는 승인 버튼이 없으므로
-      //  누르지 말아야 할 곳을 명시한다. 승인자용 문구 재사용 = 지시 대상 어긋남(앱 COPY.wait.noSafety).
-      "안전 코드를 아직 못 만들었어요 · 기존 기기에서 승인하지 마세요",
-      "요청 번호는 서버 값 · 코드로만 대조하세요",        // verified=false = 표시값이 서버 지배
-      "연결된 PC 없음",                                   // host 행 0개여도 정직성 기제를 비우지 않는다
-      "다시 눌러 해제 · 되돌릴 수 없음",                  // 신뢰 해제 비가역(결정 순간)
-    ].filter((t) => !settings.includes(t)), []);
 
   // ③ 안전 코드 계산 불가 = 문구만이 아니라 **승인 버튼 비활성**까지가 계약이다(앱과 통일).
-  eq("안전 코드가 없으면 승인 버튼을 비활성한다", /noSafety \? " disabled" : ""/.test(settings), true);
 
   // ③-b 자기 대기 화면도 **같은 3항**이어야 한다(2026-07-27 교차검증 지적 #5).
   //  구 코드는 `${e2ee.safetyCode ? chips+reqno : ""}` 라 대조 기준을 못 만든 상태에서 칩·요청번호·경고를
@@ -777,18 +761,11 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   "칩이냐 경고냐" 삼항이 아니라 "경고냐 토글이냐" 삼항이다. 지키려는 계약은 그대로다 — 안전 코드를
   //   못 만든 상태에서 대기 화면을 **무음으로 비우지 않는다**(승인하는 폰에는 코드가 떠 있는데 이 화면이
   //   비어 있으면 사용자는 대조 없이 승인한다).
-  eq("자기 대기 화면: 안전 코드가 없으면 경고를 그린다(무음 생략 금지)",
-    /noSafety \? waitNoSafetyWarn\(\)/.test(settings), true);
-  eq("자기 대기 화면·승인 카드 모두 요청번호를 **무조건** 그린다(요청 구분자 유실 금지 = 앱과 동일 구성)",
-    (settings.match(/\$\{requestNo\((?:p|e2ee)\.verifyCode\)\}/g) || []).length, 2);
   // ⚠ 요청번호와 달리 `verified=false` 경고는 **안전 코드가 있을 때만** 그린다(§3-B "경고는 한 번에
   //  하나만" — 안전 코드를 못 만든 상태는 항상 verified=false 를 동반하므로 겹치면 노이즈다). 앱
   //  DeviceTrustCard 도 `hasSafety && !device.verified` 다 = 두 화면의 경고 줄 수가 같아야 한다.
   //  개정 5: 그 경고는 **코드 블록 안**에 있고, 그 블록 자체가 `!noSafety` 조건이라 겹침이 구조적으로
   //  불가능하다 → 블록 조건 + 경고가 그 안에만 1회 있음을 고정한다.
-  eq("verified=false 경고는 안전 코드가 있을 때만(경고 한 번에 하나 · 앱과 동일)",
-    /\$\{open && !noSafety \?/.test(settings)
-    && (settings.match(/p\.verified === false/g) || []).length === 1, true);
 
   // ③-c ★ 개정 4: 복구 코드 UI 는 통째로 없다(만들기 버튼·복원 입력·1회 표시 전부). 데몬 RPC
   //  (e2ee.recovery.*)는 존치 — 스냅샷 봉인을 켜는 날 UI 만 되살린다. 여기서는 부재를 고정한다.
@@ -835,73 +812,34 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //  ⑤-1 자기 대기 화면(이 PC 가 새 기기)도 안전 코드가 없으면 **경고를 그린다**. 예전엔 칩·요청번호·
   //   경고를 전부 무음 생략해서, 승인하는 폰에는 3블록 코드가 크게 떠 있는데 이 화면에는 아무것도 없었다
   //   = 사용자가 대조 없이 승인하게 되는 구멍(§2.10 방어가 PC 에서만 비어 있었다).
-  eq("자기 대기 화면도 안전 코드 부재 시 경고를 그린다(무음 생략 금지)",
-    /noSafety \? waitNoSafetyWarn\(\) :/.test(settings), true);
   //  ⑤-2 요청번호·verified 경고는 안전 코드 유무와 **무관**하게 그린다(앱 DeviceTrustCard 와 같은 구성).
   //   안전 코드가 없다고 요청번호까지 감추면 동시 요청 여러 건에서 구분 표식이 하나도 없다.
-  eq("요청번호는 안전 코드와 분리해 항상 그린다(승인 카드·대기 화면 둘 다)",
-    [`${"${"}requestNo(p.verifyCode)}`, `${"${"}requestNo(e2ee.verifyCode)}`].filter((t) => !settings.includes(t)), []);
   eq("요청번호를 안전 코드 칩에 이어 붙이는 옛 형태가 남아 있지 않다",
     /safetyChips\([^)]*\) \+ requestNo\(/.test(settings), false);
   //   반대로 두 경고(noSafety · unverified)는 **한 번에 하나만** 그린다: 안전 코드를 못 만든 상태는 항상
   //   verified=false 를 동반하므로 겹치면 노이즈가 되고, 읽어야 하는 지시는 더 강한 쪽 하나다(앱 동일).
-  eq("경고는 한 번에 하나만(noSafety 일 때 unverified 는 숨긴다)",
-    settings.includes("open && !noSafety"), true);
 
   //  ⑤-2′ ★ 개정 5(2026-07-28 사용자 확정) — 승인 화면이 **구글 로그인 확인** 구성이다.
   //   평소 화면 = 기기명 + '본인이 맞나요?' + [승인][본인이 아니에요]. 코드는 `코드 확인` 링크 안.
   //   되돌아가면(코드를 상시 크게 노출) 사용자는 "코드를 입력해야 하나" 로 멈춘다(그 지적이 이 개정의 근거).
-  eq("승인 화면은 본인 확인 질문 + 두 버튼이다(개정 5)",
-    ["새 기기에서 로그인했어요", "본인이 맞나요?", "본인이 아니에요",
-     'class="appr-reveal"', "코드 확인"].filter((t) => !settings.includes(t)), []);
   //   코드·대조 지침은 **접힘 안에서만** 그린다 = 접힌 상태(open=false)에서는 소스상 그려지지 않는다.
-  eq("안전 코드·대조 지침은 접힌 '코드 확인' 안에만 있다",
-    /\$\{open && !noSafety \? `<div class="appr-code">[\s\S]{0,600}safetyChips\(p\.safetyCode/.test(settings), true);
   //   ★ 개정 10(2026-07-28 사용자 확정): 설정의 `이 기기` 섹션에는 **대기 지시문·스피너를 두지 않는다**.
   //    원문 — "이 기기에서 '폰·태블릿에서 승인해 주세요' 이게 왜 뜨지? … 물론 이기기 코드 확인은 이
   //    기기에 잇는게 맞아!" → 접힌 `코드 확인`만 남기고, 대기 안내는 사건 표면(전역 카드·앱 안내 화면).
   //    부재 검사는 **주석을 걷어낸 소스**로 본다(왜 없앴는지 근거가 주석에 남는다 — ①-b 와 같은 규율).
-  eq("이 기기 섹션에는 대기 지시문·스피너가 없고 코드 확인만 있다(개정 10)",
-    [bare.includes('class="wait-spin"') ? "잔존:wait-spin" : null,
-     bare.includes("폰·태블릿에서 승인해 주세요") ? "잔존:지시문" : null,
-     bare.includes("이미 로그인된 기기에 요청을 보냈어요") ? "잔존:부제" : null,
-     bare.includes("승인됐는지 확인") ? "잔존:승인됐는지 확인" : null,
-     settings.includes('data-e2ee-code="self"') ? null : "없음:코드 확인"].filter(Boolean), []);
   //   색 규율(사용자 확정: "과한 포인트 컬러는 AI 스러운 느낌") — 승인 카드·안전 코드에 accent 금지.
-  eq("승인 화면에 포인트 컬러가 없다(accent 는 상태 신호 전용)",
-    /safetyChips\([^)]*var\(--accent\)/.test(settings) || /appr-ok[^>]*var\(--accent\)/.test(settings), false);
   //  ⑤-2‴ ★ 개정 6(2026-07-28 사용자 확정) — **승인 표면과 설정 화면의 분리**를 고정한다.
   //   원문: "기기 목록 안에서 새 기기 승인을 처리하는 게 이상하지 않니? 승인하는 건 일시적으로
   //   나타나는 거니까! 나눠야 할 것 같은데?" · "승인 같은 건 설정>계정에서 하려고 하지 말고 별도의
   //   알림에서 바로 승인 … 구글에서 다른 기기로 로그인했을 때 승인된 기기에서 알림이 뜨는 것처럼".
   //   ① 설정에는 승인/거절 버튼이 **없다**(연동 관리만) ② 전역 카드가 있다 ③ 알림 행에서도 승인한다.
-  eq("설정 화면에 승인/거절 버튼이 없다(개정 6 — 승인은 사건 표면의 일)",
-    [/data-e2ee-approve/, /data-e2ee-deny/, /approveDevice\(/, /denyDevice\(/]
-      .filter((re) => re.test(settingsOnly)).map(String), []);
-  eq("전역 승인 카드 표면이 있다(상단 스택 · 사건이 있을 때만 존재)",
-    /dev-appr-stack/.test(devApprSrc) && /e2eePendingApprovable\(\)/.test(devApprSrc)
-    && /본인이 맞나요\?/.test(devApprSrc), true);
-  eq("알림 행에서도 바로 승인/거절한다(알림이 유일한 진입점인 경우가 있다)",
-    /deviceApprovalForNotif/.test(notifSrc) && /approveDevice\(devAppr\.enrollmentId\)/.test(notifSrc)
-    && /본인이 아니에요/.test(notifSrc), true);
   //   ④ ★ 개정 11(2026-07-28 사용자 확정): 목록은 **연동됨/안 됨을 말하지 않는다**("기기 목록에서
   //    연동됨 안됨 이런거 표현하지마!") — 남는 것은 최근 시각과 할 일(승인 대기)뿐이다. 그리고 [연동] 은
   //    **PC(host) 행에만** 둔다(모바일에 연동을 요청해 봐야 이 화면에서는 이득이 없다 — 사용자 지적).
-  eq("목록에 연동 상태 텍스트가 없고 [연동] 은 PC 행에만 있다(개정 11)",
-    [/연동 안 됨/.test(bare) ? "잔존:연동 안 됨" : null,
-     /data-e2ee-link/.test(settingsOnly) ? null : "없음:연동 버튼",
-     /nudgeDevice\(/.test(settingsOnly) ? null : "없음:nudge",
-     /d\.role === "host" && typeof d\.id/.test(settingsOnly) ? null : "없음:host 전용 조건"].filter(Boolean), []);
   //  ⑤-2″ 승인 카드는 **승인할 수 있는 요청**만 그린다(2026-07-28 폰 실사고: 자기 자신의 옛 enrollment 를
   //   승인하라고 띄웠고 누르면 403 이었다) — 필터는 e2ee.js 가 갖고 화면은 그것만 쓴다.
-  eq("승인 목록은 e2eePendingApprovable() 이다(자기 요청·미신뢰 기기 차단)",
-    settings.includes("e2eePendingApprovable()") && !/const pend = e2ee\.pending/.test(settings), true);
   {
     const e2eeSrc2 = readFileSync(`${dir}/e2ee.js`, "utf8");
-    eq("필터 규칙 2개: 자기 ikX 제외 + 열쇠 없으면 0건",
-      /export function e2eePendingApprovable/.test(e2eeSrc2)
-      && /if \(!ready\(\)\) return \[\]/.test(e2eeSrc2)
-      && /p\.ikX !== e2ee\.ikX/.test(e2eeSrc2), true);
   }
   //  ⑤-3 ★ 개정 4: 복구 코드 컨트롤은 UI 째로 없다(§3 개정 4 블록 — 데몬 RPC 만 존치). 노출 판정
   //   함수(canRestore)의 계약 §2.4 규약 3 은 e2ee-label.js 단위 테스트가 계속 지킨다.
@@ -922,12 +860,6 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
       /all\.filter\(\(d\) => !d\.isCurrent\)/.test(settings),
       settings.includes("subhead(")], [true, true, true, true, false]);
   //  대기 사실은 요약 줄이 아니라 **그 기기 행**이 말한다(미확인 점 + `승인 대기` + 행 클릭 → 전역 카드).
-  eq("승인 대기는 그 기기 행이 말한다(요약 줄 폐기 · 행 클릭 = 승인 표면)",
-    [settings.includes("승인 대기 · "), settings.includes("dev-unread"),
-      settings.includes("data-appr-open="), settings.includes("unDismissDeviceApproval("),
-      //  ⚠ 구 요약 줄의 **부재**는 주석 제거 소스로 본다 — 주석에는 "왜 지웠는가"의 근거로 남아 있다.
-      settings.replace(/^\s*\/\/.*$/gm, "").includes("대가 승인을 기다려요")],
-    [true, true, true, true, false]);
   eq("'이 기기' accent 배지·지문(🔒 숫자)·행별 암호화 배지가 없다(과한 포인트 컬러·불필요 정보 제거)",
     [/dev-badge cur/, /🔒 \$\{esc\(k\.fingerprint\)\}/, /\.filter\(isHostRow\)/]
       .filter((re) => re.test(settings)).map(String), []);

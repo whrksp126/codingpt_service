@@ -19,7 +19,6 @@ import { ideDirtyPaths } from "./ide.js";
 import { initOsDrop } from "./os-drop.js";
 import { mountApprovals, updateApprovals } from "./approvals.js";
 // 기기 승인(계정 로그인 확인) — 설정 화면 밖 독립 표면(상단 중앙 카드). 설계 근거는 device-approval.js 헤더.
-import { mountDeviceApprovals, updateDeviceApprovals } from "./device-approval.js";
 import { maybeShowOnboarding } from "./agents-view.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──

@@ -836,6 +836,60 @@ test('e2ee 부트스트랩 우선권 — host(PC)가 있으면 모바일은 대�
   });
 });
 
+// ★ 개정 12(2026-07-28 사용자 확정): **승인 절차를 없애고 QR/코드로 연동한다.**
+//  코드는 owner 가 로컬에서 만든 난수이고 서버에는 해시만 온다 → 서버는 코드를 모른다. owner 가 봉인문을
+//  `HKDF(code)` 로 한 겹 더 감싸 올리므로 서버가 공개키를 바꿔치기해도 봉인문을 만들 수도 열 수도 없다
+//  (= 사람의 눈 대조가 필요 없다). 서버가 지켜야 할 것: 코드 대조 · 시도 제한 · 만료 · 키링 귀속.
+test('e2ee 연동(QR/코드) — 코드 대조로 열쇠가 전달되고, 틀린 코드는 5회에 폐기된다(개정 12)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async (seen) => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    // ① owner(PC)가 코드를 만든다 — 서버에는 해시만 올라간다.
+    const code = 'ABCD2345';
+    const codeHash = b64u(crypto.createHash('sha256').update(code).digest());
+    const started = await deviceTrust.linkStart(7, 12, { codeHash, ikX: pc.ikX });
+    assert.ok(started.linkId && started.state === 'waiting');
+    // 열쇠 없는 기기는 연동을 시작할 수 없다(코드 발급 주체는 열쇠 보유자뿐).
+    const phone = newDevice('Android');
+    await assert.rejects(() => deviceTrust.linkStart(7, 42, { codeHash, ikX: phone.ikX }),
+      (e) => e.statusCode === 403 && e.code === 'NOT_TRUSTED');
+
+    // ② 새 기기가 틀린 코드를 넣으면 남은 횟수를 알려주고, 5회에 폐기된다(온라인 무차별 대입 차단).
+    for (let i = 1; i < deviceTrust._config.LINK_MAX_TRIES; i += 1) {
+      await assert.rejects(() => deviceTrust.linkClaim(7, 42, { linkId: started.linkId, code: 'WRONG' + i, ikX: phone.ikX, ikEd: phone.ikEd }),
+        (e) => e.statusCode === 400 && e.code === 'LINK_CODE_MISMATCH');
+    }
+    await assert.rejects(() => deviceTrust.linkClaim(7, 42, { linkId: started.linkId, code: 'WRONGX', ikX: phone.ikX, ikEd: phone.ikEd }),
+      (e) => e.statusCode === 429 && e.code === 'LINK_BLOCKED');
+
+    // ③ 새 코드로 정상 경로 — 코드가 맞으면 owner 에게 팬아웃되고(사람 승인 없음) 열쇠가 등록된다.
+    const s2 = await deviceTrust.linkStart(7, 12, { codeHash, ikX: pc.ikX });
+    const claimed = await deviceTrust.linkClaim(7, 42, { linkId: s2.linkId, code: code.toLowerCase(), ikX: phone.ikX, ikEd: phone.ikEd, label: 'Android' });
+    assert.strictEqual(claimed.state, 'claimed');
+    assert.ok(seen.events.some((e) => e.kind === 'link_claim' && e.linkId === s2.linkId), 'owner 에게 즉시 알린다');
+    // 아직 봉인문이 없으므로 새 기기는 받을 게 없다.
+    assert.strictEqual((await deviceTrust.linkGet(7, s2.linkId)).state, 'claimed');
+
+    const wrapped = crypto.randomBytes(120); // (감싸기는 클라이언트 몫 — 서버는 불투명 바이트로만 다룬다)
+    await deviceTrust.linkFulfill(7, {
+      linkId: s2.linkId, epoch: 1, wrapped: b64u(wrapped), sig: signGrant(pc, 1, phone.x.raw, wrapped.slice(0, 80)),
+    });
+    const got = await deviceTrust.linkGet(7, s2.linkId);
+    assert.strictEqual(got.state, 'ready');
+    assert.strictEqual(got.wrapped, b64u(wrapped), '감싼 봉인문을 그대로 돌려준다(서버는 못 연다)');
+    // ④ 키링에 **신청 기기 행(42)으로 귀속**된다 — 목록에 새 줄이 생기지 않는다(사용자 요구).
+    const ring = await deviceTrust.keyring(7, { ikX: phone.ikX });
+    const row = ring.devices.find((d) => d.ikX === phone.ikX);
+    assert.strictEqual(row.state, 'trusted');
+    assert.strictEqual(row.deviceId, 42);
+  });
+});
+
 test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

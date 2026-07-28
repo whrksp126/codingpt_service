@@ -99,7 +99,12 @@ router.post('/e2ee/bootstrap', accountAuth, deviceTrustController.bootstrap); //
 router.get('/e2ee/pending', accountAuth, deviceTrustController.pending);      // 신뢰 기기 승인 시트(pull 이 정본)
 router.post('/e2ee/approve', accountAuth, deviceTrustController.approve);     // 승인 = 봉인문 업로드
 router.post('/e2ee/deny', accountAuth, deviceTrustController.deny);           // 거절
-router.post('/e2ee/nudge', accountAuth, deviceTrustController.nudge);         // 연동 요청 재발송(기기 목록 [연동])
+router.post('/e2ee/nudge', accountAuth, deviceTrustController.nudge);
+//  기기 연동(QR/코드) — 개정 12: 승인 절차 대신 코드가 채널이다(deviceTrustService C-0 주석).
+router.post('/e2ee/link/start', accountAuth, deviceTrustController.linkStart);
+router.post('/e2ee/link/claim', accountAuth, deviceTrustController.linkClaim);
+router.post('/e2ee/link/fulfill', accountAuth, deviceTrustController.linkFulfill);
+router.get('/e2ee/link/:linkId', accountAuth, deviceTrustController.linkGet);         // 연동 요청 재발송(기기 목록 [연동])
 router.get('/e2ee/keyring', accountAuth, deviceTrustController.keyring);      // 감사 UI + 내 봉인문 수령
 router.post('/e2ee/rotate', accountAuth, deviceTrustController.rotate);       // 기기 해제 후 epoch+1 재봉인
 router.patch('/e2ee/policy', accountAuth, deviceTrustController.policy);      // off|preferred|required

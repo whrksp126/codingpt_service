@@ -586,6 +586,170 @@ function normalizeRecovery(r) {
   return { alg: str(r.alg, 32) || 'cpt-recovery/1', blob: b64u(blobRaw), createdAt: new Date().toISOString() };
 }
 
+// ── C-0. 기기 연동(QR / 코드) — ★ 2026-07-28 개정 12(사용자 확정) ─────────────
+//
+// 사용자 요구: *"승인하기 뭐 그런건 다 제거하자! … 다른 기기 연동 하시겠어요? 물어보고 qr, code 입력
+//  이 방식 두가지 보여주고 선택하면 연결"*. 즉 **사람이 승인하는 절차를 없애고**, 이미 연결된 기기가
+//  띄운 QR/코드를 새 기기가 찍거나 입력하면 그 자리에서 열쇠가 전달된다.
+//
+// 왜 이게 승인보다 **더** 안전한가(설계 근거):
+//  · 지금까지의 방어는 "사람이 두 화면의 안전 코드를 눈으로 대조" 였다. 대조를 안 하면 방어가 0 이다.
+//  · 여기서는 **코드 자체가 채널**이다: 코드는 owner 기기가 로컬에서 만든 난수이고 서버에는 **해시만**
+//    올라간다. owner 는 MK 봉인문을 `HKDF(code)` 로 한 겹 더 감싸서 올리므로, 코드를 모르는 서버는
+//    중간에서 공개키를 바꿔치기해도 **봉인문을 만들 수도 열 수도 없다**(사람의 대조가 필요 없다).
+//  · 즉 이 경로에서는 안전 코드·요청 번호·승인 버튼이 전부 불필요해진다.
+//
+// 상태 기계(전부 인메모리 — pending 과 같은 수명 규율):
+//   start(owner)  → { linkId, expiresAt }        코드 해시만 서버에 둔다
+//   claim(new)    → 코드 대조 → owner 에게 팬아웃(link_claim)
+//   fulfill(owner)→ 감싼 봉인문 저장 + 키링 등록(claim.deviceId 로 귀속) → 팬아웃(link_done)
+//   get(new)      → { state, wrapped… }          새 기기가 받아 풀고 채택
+//
+// ⚠ 코드는 40비트(8자)라 **온라인 무차별 대입만** 막으면 된다: 시도 5회 + 3분 만료 + 1회용.
+const LINK_TTL_MS = intEnv('E2EE_LINK_TTL_MS', 3 * 60 * 1000);
+const LINK_MAX_TRIES = 5;
+const links = new Map();      // linkId → rec
+const linksByUser = new Map();
+
+function newLinkId() { return 'l_' + crypto.randomBytes(6).toString('hex'); }
+function linkPublic(rec) {
+  return {
+    linkId: rec.id, state: rec.state, expiresAt: new Date(rec.expiresAt).toISOString(),
+    claim: rec.claim ? { label: rec.claim.label, platform: rec.claim.platform, kind: rec.claim.kind } : null,
+  };
+}
+function sweepLinks(now) {
+  for (const [id, r] of links) {
+    if (now >= r.expiresAt) {
+      links.delete(id);
+      const set = linksByUser.get(String(r.userId));
+      if (set) { set.delete(id); if (!set.size) linksByUser.delete(String(r.userId)); }
+    }
+  }
+}
+
+/** ① owner(열쇠 보유 기기)가 QR/코드를 띄운다 — 서버는 코드의 **해시만** 받는다. */
+async function linkStart(userId, deviceId, body) {
+  enabledGate();
+  const now = Date.now();
+  sweepLinks(now);
+  if (!allowRate(rateDecide, `${safeUid(userId)}:link`, now, DECIDE_MAX_PER_MIN)) {
+    throw err('요청이 너무 잦습니다.', 429, 'RATE_LIMITED');
+  }
+  const b = body || {};
+  const codeHash = str(b.codeHash, 64) || '';
+  if (!/^[A-Za-z0-9_-]{32,64}$/.test(codeHash)) throw err('codeHash 형식이 잘못되었습니다.', 400, 'BAD_FIELD', { field: 'codeHash' });
+  const ownerIkX = str(b.ikX, 64) || '';
+  const k = await loadKeyring(userId);
+  const owner = keyByIkX(k, ownerIkX);
+  if (!owner || owner.state !== 'trusted') throw err('열쇠를 가진 기기에서만 연동을 시작할 수 있습니다.', 403, 'NOT_TRUSTED');
+  const rec = {
+    id: newLinkId(), userId: Number(userId), codeHash, state: 'waiting',
+    ownerIkX, ownerKeyId: owner.keyId, ownerDeviceId: deviceId != null ? Number(deviceId) : null,
+    expiresAt: now + LINK_TTL_MS, tries: 0, claim: null, wrapped: null,
+  };
+  links.set(rec.id, rec);
+  if (!linksByUser.has(String(userId))) linksByUser.set(String(userId), new Set());
+  linksByUser.get(String(userId)).add(rec.id);
+  console.log(`[e2ee] 연동 코드 생성 user=${userId} link=${rec.id} owner=#${rec.ownerDeviceId ?? '-'}`);
+  return { ...linkPublic(rec), ttlMs: LINK_TTL_MS };
+}
+
+/** ② 새 기기가 코드를 제출한다 — 대조 성공 시 owner 에게 팬아웃(사람의 승인 없음). */
+async function linkClaim(userId, deviceId, body) {
+  enabledGate();
+  const now = Date.now();
+  sweepLinks(now);
+  if (!allowRate(rateDecide, `${safeUid(userId)}:claim`, now, DECIDE_MAX_PER_MIN)) {
+    throw err('요청이 너무 잦습니다.', 429, 'RATE_LIMITED');
+  }
+  const b = body || {};
+  //  ★ 사용자는 **코드 8자만 입력한다** — linkId 를 따로 받지 않는다(QR 경로에서만 함께 온다).
+  //   그래서 그 계정의 살아 있는 링크들 중 해시가 맞는 것을 찾는다(계정 스코프라 탐색 범위가 작다).
+  const given = b64u(crypto.createHash('sha256').update(String(b.code || '').trim().toUpperCase()).digest());
+  const explicit = str(b.linkId, 64) || '';
+  let rec = explicit ? links.get(explicit) : null;
+  if (!rec) {
+    for (const id of (linksByUser.get(String(userId)) || [])) {
+      const r = links.get(id);
+      if (r && r.state !== 'ready' && r.codeHash === given) { rec = r; break; }
+    }
+  }
+  //  코드가 어느 링크와도 안 맞으면 **가장 최근 링크의 시도 횟수**를 태운다(무차별 대입 상한 유지).
+  if (!rec) {
+    const ids = [...(linksByUser.get(String(userId)) || [])];
+    const last = ids.length ? links.get(ids[ids.length - 1]) : null;
+    if (!last) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
+    rec = last;
+  }
+  if (String(rec.userId) !== String(userId)) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
+  if (now >= rec.expiresAt) throw err('연동 코드가 만료되었습니다.', 410, 'EXPIRED');
+  if (given !== rec.codeHash) {
+    rec.tries += 1;
+    if (rec.tries >= LINK_MAX_TRIES) { links.delete(rec.id); throw err('코드를 여러 번 틀렸습니다. 새 코드를 발급받아 주세요.', 429, 'LINK_BLOCKED'); }
+    throw err('코드가 올바르지 않습니다.', 400, 'LINK_CODE_MISMATCH', { triesLeft: LINK_MAX_TRIES - rec.tries });
+  }
+  const id = normalizeIdentity(b);
+  rec.claim = { ikX: id.ikX, ikEd: id.ikEd, label: id.label, platform: id.platform, kind: id.kind, deviceId: deviceId != null ? Number(deviceId) : null };
+  rec.state = 'claimed';
+  console.log(`[e2ee] 연동 코드 확인 user=${userId} link=${rec.id} label="${id.label}"`);
+  //  owner 가 이 팬아웃을 받아 **자동으로** 봉인문을 만들어 올린다(사람 개입 0).
+  fanout(userId, { kind: 'link_claim', linkId: rec.id, ikX: id.ikX, ikEd: id.ikEd, label: id.label, platform: id.platform, deviceKind: id.kind });
+  return linkPublic(rec);
+}
+
+/** ③ owner 가 감싼 봉인문을 올린다 — 이 순간 키링에 등록되고 새 기기는 그것을 받아 연다. */
+async function linkFulfill(userId, body) {
+  enabledGate();
+  const now = Date.now();
+  const b = body || {};
+  const rec = links.get(str(b.linkId, 64) || '');
+  if (!rec || String(rec.userId) !== String(userId)) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
+  if (now >= rec.expiresAt) throw err('연동 코드가 만료되었습니다.', 410, 'EXPIRED');
+  if (!rec.claim) throw err('아직 코드를 입력한 기기가 없습니다.', 409, 'LINK_NOT_CLAIMED');
+  const wrapped = decodeMax(b.wrapped, GRANT_MAX, 'wrapped');   // HKDF(code) 로 감싼 봉인문
+  const sigRaw = decodeExact(b.sig, SIG_LEN, 'sig');
+  const reqEpoch = Number(b.epoch);
+  return withKeyring(userId, async () => {
+    const k = await loadKeyring(userId);
+    if (!Number.isInteger(reqEpoch) || reqEpoch !== k.epoch) throw err('열쇠 세대가 달라졌습니다.', 409, 'EPOCH_MISMATCH', { epoch: k.epoch });
+    const owner = keyByIkX(k, rec.ownerIkX);
+    if (!owner || owner.state !== 'trusted') throw err('연동을 시작한 기기의 열쇠가 유효하지 않습니다.', 403, 'NOT_TRUSTED');
+    // 이미 그 공개키로 열쇠가 있으면 그대로 둔다(멱등) — 아니면 새 키를 등록한다.
+    let key = keyByIkX(k, rec.claim.ikX);
+    if (!key) {
+      if (k.keys.length >= KEY_MAX) throw err('계정에 등록된 기기 열쇠가 너무 많습니다.', 409, 'KEY_LIMIT');
+      key = {
+        keyId: k.nextKeyId++, ikX: rec.claim.ikX, ikEd: rec.claim.ikEd, label: rec.claim.label,
+        platform: rec.claim.platform, kind: rec.claim.kind, deviceId: rec.claim.deviceId,
+        state: 'trusted', enrolledAt: new Date(now).toISOString(), revokedAt: null, lastGrantEpoch: k.epoch,
+      };
+      k.keys.push(key);
+    } else {
+      key.state = 'trusted';
+      if (rec.claim.deviceId != null) key.deviceId = rec.claim.deviceId;
+      key.lastGrantEpoch = k.epoch;
+    }
+    await saveKeyring(userId, k);
+    rec.wrapped = { wrapped: b64u(wrapped), sig: b64u(sigRaw), epoch: k.epoch, ownerIkEd: owner.ikEd, keyId: key.keyId };
+    rec.state = 'ready';
+    console.log(`[e2ee] 연동 완료 user=${userId} link=${rec.id} keyId=${key.keyId} deviceId=${key.deviceId ?? '-'}`);
+    fanout(userId, { kind: 'link_done', linkId: rec.id, keyId: key.keyId, deviceId: key.deviceId ?? null });
+    return { ok: true, keyId: key.keyId };
+  });
+}
+
+/** ④ 새 기기가 결과를 가져간다(폴링/이벤트 후 1회). 감싼 봉인문은 코드를 아는 기기만 열 수 있다. */
+async function linkGet(userId, linkId) {
+  enabledGate();
+  const now = Date.now();
+  const rec = links.get(String(linkId || ''));
+  if (!rec || String(rec.userId) !== String(userId)) throw err('연동 코드를 찾을 수 없습니다.', 404, 'NOT_FOUND');
+  if (now >= rec.expiresAt && rec.state !== 'ready') throw err('연동 코드가 만료되었습니다.', 410, 'EXPIRED');
+  if (rec.state !== 'ready') return linkPublic(rec);
+  return { ...linkPublic(rec), ...rec.wrapped };
+}
+
 // ── C. 대기 목록(신뢰 기기의 승인 시트) ───────────────────────────────
 //  ★ 2026-07-28: 호출자가 자기 공개키(ikX)를 주면 **승인할 수 있는 것만** 돌려준다. 실사고 = 폰이
 //   "새 기기 승인 · Android" 카드를 보고 있었는데 그것은 자기 자신의 옛 enrollment 였다(재설치·계정
@@ -987,6 +1151,7 @@ if (_sweeper.unref) _sweeper.unref();
 
 module.exports = {
   enroll, bootstrap, listPending, nudge, approve, deny, keyring, rotate, setPolicy, setRecovery,
+  linkStart, linkClaim, linkFulfill, linkGet,
   grantForPairing, grantForDevice, onDeviceRevoked,
   ENABLED: E2EE_ENABLED,
   // 테스트 노출(순수 함수/인덱스) — approvalService `_` 컨벤션 미러.
@@ -1005,13 +1170,14 @@ module.exports = {
   _byUser: byUser,
   _denyCount: denyCount,
   _nudgeAt: nudgeAt,
+  _links: links,
   _cache: cache,
   _setStore: (s) => { store = s; },
-  _reset: () => { cache.clear(); chains.clear(); pending.clear(); byUser.clear(); denyCount.clear(); rateEnroll.clear(); rateDecide.clear(); nudgeAt.clear(); },
+  _reset: () => { cache.clear(); chains.clear(); pending.clear(); byUser.clear(); denyCount.clear(); rateEnroll.clear(); rateDecide.clear(); nudgeAt.clear(); links.clear(); linksByUser.clear(); },
   _config: {
     SUITE, SEALED_LEN, SIG_LEN, PUB_LEN, KEY_MAX, GRANT_MAX, EPOCH_KEEP, POLICIES,
     ENROLL_TTL_MS, MAX_PENDING_PER_USER, ENROLL_MAX_PER_MIN, DECIDE_MAX_PER_MIN,
     DENY_BLOCK_MAX, DENY_BLOCK_MS, ANDROID_CHANNEL, VERIFY_SIG, FORBIDDEN_FIELDS, RECOVERY_MAX,
-    NUDGE_COOLDOWN_MS,
+    NUDGE_COOLDOWN_MS, LINK_TTL_MS, LINK_MAX_TRIES,
   },
 };

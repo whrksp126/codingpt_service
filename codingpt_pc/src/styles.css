@@ -563,7 +563,12 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 /* (개정 9: 기기 표 소제목 `.dev-tr-sub` 삭제 — `이 기기`/`다른 기기` 가 이제 **섹션(카드) 제목**이다.
    사용자 요구: "이기기, 다른 기기로 그룹을 나눠서 해주고". 죽은 CSS 를 남기면 같은 클래스를 재사용할 때
    조용히 적용된다(구 `.dev-tr{display:grid}` 가 실제로 그 사고를 냈다) → 규칙째 지운다.) */
-/* 승인 대기 행 = **미확인 알림**(개정 9). 행 전체가 승인 표면으로 가는 문이라 커서/호버를 준다.
+/* ★ 개정 12: 연동 코드(이 기기) · 코드 입력(다른 기기 행) — 승인 UI 를 대체한다. */
+.link-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
+.link-code { font-family: var(--mono, ui-monospace, monospace); font-size: 26px; font-weight: 800; letter-spacing: 6px; color: var(--text); }
+.link-entry { display: flex; align-items: center; gap: 8px; }
+.link-entry .acct-del-input { flex: 1; min-width: 0; font-family: var(--mono, ui-monospace, monospace); }
+/* (구) 승인 대기 행 = 미확인 알림(개정 9). 행 전체가 승인 표면으로 가는 문이라 커서/호버를 준다.
    accent 점은 '상태 신호 전용' 규율에 맞는 유일한 포인트 컬러 사용이다(읽지 않은 사건이 있다는 신호). */
 .dev-tr-wait { cursor: pointer; }
 .dev-tr-wait:hover > td { background: var(--elevated2); }

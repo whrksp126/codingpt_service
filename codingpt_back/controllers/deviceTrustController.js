@@ -70,6 +70,32 @@ async function enroll(req, res) {
   } catch (e) { return fail(res, e); }
 }
 
+// ── 기기 연동(QR/코드) — 개정 12. 사람의 승인 없이 코드가 채널이 된다(서비스 C-0 주석 참조).
+// POST /api/daemon/e2ee/link/start   (열쇠 보유 기기) — 코드 **해시만** 올린다
+async function linkStart(req, res) {
+  try {
+    const r = await deviceTrustService.linkStart(req.account.userId, await callerDeviceId(req), req.body || {});
+    return ok(res, req.account.userId, r);
+  } catch (e) { return fail(res, e); }
+}
+// POST /api/daemon/e2ee/link/claim   (새 기기) — 코드를 제출한다
+async function linkClaim(req, res) {
+  try {
+    const r = await deviceTrustService.linkClaim(req.account.userId, await callerDeviceId(req), req.body || {});
+    return ok(res, req.account.userId, r);
+  } catch (e) { return fail(res, e); }
+}
+// POST /api/daemon/e2ee/link/fulfill (열쇠 보유 기기) — 감싼 봉인문 업로드 = 연동 완료
+async function linkFulfill(req, res) {
+  try { return ok(res, req.account.userId, await deviceTrustService.linkFulfill(req.account.userId, req.body || {})); }
+  catch (e) { return fail(res, e); }
+}
+// GET /api/daemon/e2ee/link/:linkId  (새 기기) — 결과 수령
+async function linkGet(req, res) {
+  try { return ok(res, req.account.userId, await deviceTrustService.linkGet(req.account.userId, req.params.linkId)); }
+  catch (e) { return fail(res, e); }
+}
+
 // POST /api/daemon/e2ee/bootstrap — 계정 최초 1회(승인해 줄 기기가 없을 때). 409 로 레이스 차단.
 async function bootstrap(req, res) {
   try {
@@ -144,4 +170,5 @@ async function recovery(req, res) {
   } catch (e) { return fail(res, e); }
 }
 
-module.exports = { enroll, bootstrap, pending, nudge, approve, deny, keyring, rotate, policy, recovery };
+module.exports = { enroll, bootstrap, pending, nudge, approve, deny, keyring, rotate, policy, recovery,
+  linkStart, linkClaim, linkFulfill, linkGet };
