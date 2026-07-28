@@ -744,6 +744,57 @@ test('e2ee nudge — 대기 중이면 재알림 · 아니면 대상 기기에 �
   });
 });
 
+// ★ 개정 8(2026-07-28 사용자 확정): **알리지 않는 등록**. 원문 — "그래도 그 전에 사용자한테
+//  android에서 내 pc 목록에 승인 요청할까요? 라고 물어보면서 뭔가 온보딩 식으로 알려줘야 하지 않을까?"
+//  로그인 즉시 알려버리면 앱이 "보낼까요?" 를 묻는 순간 이미 보낸 뒤에 묻는 거짓 화면이 된다.
+//  세 가지가 동시에 성립해야 이 UX 가 성립한다:
+//   ① announce:false 는 알림/팬아웃을 하지 않는다 ② 그 신청은 승인자 목록에도 안 보인다(PC 폴링이
+//   먼저 카드를 띄우면 순서가 또 깨진다) ③ nudge 가 첫 알림이 되고 **쿨다운에 걸리지 않는다**
+//   (걸리면 announced=false 로 남아 아무 기기에도 안 보이는 유령 요청이 된다 — 앱은 429 를 성공으로
+//   취급하므로 사용자는 보냈다고 믿는다).
+test('e2ee 등록 — announce:false 는 알리지도 보이지도 않고, nudge 가 첫 알림이 된다(개정 8)', async () => {
+  deviceTrust._reset();
+  deviceTrust._setStore(fakeStore());
+  await withStubs(async (seen) => {
+    const pc = newDevice('PC', 'host', 'darwin');
+    const mk = crypto.randomBytes(32);
+    const s0 = sealMk(mk, pc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, { ikX: pc.ikX, ikEd: pc.ikEd, kind: 'host', sealed: b64u(s0), sig: signGrant(pc, 1, pc.x.raw, s0) });
+
+    const phone = newDevice('Android');
+    const notifs0 = seen.notifs.length;
+    const events0 = seen.events.length;
+    const p = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, announce: false });
+    assert.strictEqual(p.state, 'pending');
+    assert.strictEqual(p.announced, false, '응답이 아직 안 알렸음을 알려야 한다(앱이 ① 화면을 그린다)');
+    // ① 알림 0건 · 팬아웃 0건
+    assert.strictEqual(seen.notifs.length, notifs0, 'announce:false 는 알림을 만들지 않는다');
+    assert.strictEqual(seen.events.length, events0, 'announce:false 는 승인 카드를 띄우지 않는다');
+    // ② 승인자(PC)의 대기 목록에도 없다 — 켜져 있는 PC 가 폴링으로 먼저 카드를 띄우면 안 된다.
+    assert.strictEqual((await deviceTrust.listPending(7, { ikX: pc.ikX })).pending.length, 0);
+    // ②-b 폴링(같은 ikX 재신청)도 알리지 않는다 — 앱은 대기 중 계속 enroll 을 올린다.
+    const again = await deviceTrust.enroll(7, 42, { ikX: phone.ikX, ikEd: phone.ikEd, label: phone.label, announce: false });
+    assert.strictEqual(again.enrollmentId, p.enrollmentId, '같은 신청서를 재사용한다');
+    assert.strictEqual(seen.events.length, events0, '억제된 신청은 폴링에서도 팬아웃하지 않는다');
+
+    // ③ 사용자가 [승인 요청 보내기] → nudge 가 첫 알림. **쿨다운이 있어도 통과**해야 한다.
+    deviceTrust._nudgeAt.set('7', Date.now()); // 방금 다른 nudge 를 보낸 상태를 강제
+    const r = await deviceTrust.nudge(7, { ikX: phone.ikX });
+    assert.strictEqual(r.sent, 'announce', '첫 알림은 reannounce 가 아니라 announce');
+    assert.ok(seen.notifs.length > notifs0, '이제야 알림이 나간다');
+    assert.strictEqual((await deviceTrust.listPending(7, { ikX: pc.ikX })).pending.length, 1, '이제 승인자 목록에 보인다');
+    // ④ 두 번째부터는 쿨다운이 정상 적용된다(알림 폭탄 방지는 그대로).
+    await assert.rejects(() => deviceTrust.nudge(7, { ikX: phone.ikX }),
+      (e) => e.statusCode === 429 && e.code === 'NUDGE_COOLDOWN');
+    // ⑤ 기본값은 알린다(구 클라이언트·데몬·PC 하위호환) + 응답에 deviceId 가 실린다(설정 화면이 행에 묶는다).
+    const ipad = newDevice('iPad');
+    const q = await deviceTrust.enroll(7, 55, { ikX: ipad.ikX, ikEd: ipad.ikEd, label: ipad.label });
+    assert.strictEqual(q.announced, true);
+    assert.strictEqual(q.deviceId, 55);
+    assert.ok(seen.events.some((e) => e.kind === 'request' && e.deviceId === 55), '팬아웃도 deviceId 를 싣는다');
+  });
+});
+
 test('e2ee 거절/만료 — 반복 거절은 차단, 만료는 스위퍼가 회수(알림도 함께)', async () => {
   deviceTrust._reset();
   deviceTrust._setStore(fakeStore());

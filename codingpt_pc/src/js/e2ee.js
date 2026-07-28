@@ -337,6 +337,9 @@ export function applyDeviceApprovalEvent(ev) {
         enrollmentId: ev.enrollmentId, label: ev.label || "새 기기", platform: ev.platform || null,
         ikX: ev.ikX, verifyCode: typeof ev.verifyCode === "string" ? ev.verifyCode : undefined,
         requestedAt: ev.requestedAt || new Date().toISOString(),
+        //  ★ 개정 9(2026-07-28): 신청 기기의 기기 행 id — 설정의 기기 목록이 이 값으로 대기 건을 행에
+        //   묶어 그 행에 '승인 대기' 를 붙인다(요약 줄은 사용자 요구로 삭제). 구 서버엔 없다 → null.
+        deviceId: Number.isInteger(Number(ev.deviceId)) && Number(ev.deviceId) > 0 ? Number(ev.deviceId) : null,
       };
       if (i >= 0) e2ee.pending[i] = row; else e2ee.pending.push(row);
       deriveDisplay();

@@ -904,9 +904,21 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //   되는 값은 전부 뺐다. 원문: "기기 목록에 이 기기까지 표현하니까 보기도 안 좋고 복잡해지는 거
   //   같은데! … 기기 목록에서는 이 기기는 안 보이게 하고!" · "최근 작업 … 저 자물쇠랑 숫자 표현은 왜
   //   하고 있는 거야? 저것도 사용자들은 몰라도 되는 정보 아닌가?"
-  eq("목록은 이 기기/다른 기기로 나뉜다(소제목 2개 · 이 기기는 목록 밖)",
-    settings.includes('subhead("이 기기")') && settings.includes('subhead("다른 기기")')
-    && /all\.filter\(\(d\) => !d\.isCurrent\)/.test(settings), true);
+  //  ★ 개정 9(2026-07-28 사용자 확정): `이 기기`/`다른 기기` 는 **그룹(섹션 카드) 자체**다(구 소제목
+  //   `subhead()` 는 폐기 — 제목 `기기` 아래 소제목 두 개면 계층이 3겹이었다).
+  eq("기기 = 두 섹션 카드(`이 기기` / `다른 기기`)이고 목록에 이 기기가 없다",
+    [/<div class="dev-title" style="margin:0 2px 8px">이 기기<\/div>/.test(settings),
+      /<div class="dev-title" style="margin:0 2px 8px">다른 기기<\/div>/.test(settings),
+      settings.includes('id="e2eeSelfBox"'),
+      /all\.filter\(\(d\) => !d\.isCurrent\)/.test(settings),
+      settings.includes("subhead(")], [true, true, true, true, false]);
+  //  대기 사실은 요약 줄이 아니라 **그 기기 행**이 말한다(미확인 점 + `승인 대기` + 행 클릭 → 전역 카드).
+  eq("승인 대기는 그 기기 행이 말한다(요약 줄 폐기 · 행 클릭 = 승인 표면)",
+    [settings.includes("승인 대기 · "), settings.includes("dev-unread"),
+      settings.includes("data-appr-open="), settings.includes("unDismissDeviceApproval("),
+      //  ⚠ 구 요약 줄의 **부재**는 주석 제거 소스로 본다 — 주석에는 "왜 지웠는가"의 근거로 남아 있다.
+      settings.replace(/^\s*\/\/.*$/gm, "").includes("대가 승인을 기다려요")],
+    [true, true, true, true, false]);
   eq("'이 기기' accent 배지·지문(🔒 숫자)·행별 암호화 배지가 없다(과한 포인트 컬러·불필요 정보 제거)",
     [/dev-badge cur/, /🔒 \$\{esc\(k\.fingerprint\)\}/, /\.filter\(isHostRow\)/]
       .filter((re) => re.test(settings)).map(String), []);
@@ -919,7 +931,12 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     .replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
   eq("목록은 하나다('열쇠를 가진 기기' 제목 · '내 기기' 표 · deviceTable 컨테이너가 없다)",
     ["열쇠를 가진 기기", ">내 기기<", "deviceTable", "dev-th"].filter((t) => code.includes(t)), []);
-  eq("섹션 제목은 `기기` 이고 self 배지는 그 행 우측이다", code.includes(`<div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>`), true);
+  //  개정 9: 구 단일 섹션 제목(`기기`)은 삭제됐다 — 위 두 섹션 핀이 새 구조를 고정한다.
+  eq("구 단일 섹션 제목(`기기`)이 없다", code.includes(`min-width:0">기기</div>`), false);
+  //  개정 9: 로그아웃·회원 탈퇴가 기기 섹션보다 **뒤**다(사용자 요구: "제일 아래로 내려줘").
+  eq("로그아웃·회원 탈퇴가 기기 섹션 뒤에 있다",
+    code.indexOf('id="e2eeBox"') < code.indexOf('id="unpairBtn"')
+    && code.indexOf('id="unpairBtn"') < code.indexOf('id="deleteAcctBtn"'), true);
   // ★ 개정 4: '종단간 암호화' 기능명 행도 정책 세그와 함께 삭제됐다(자동 고정 — 설정할 것이 없으면
   //  기능명 행도 없다). 위 ①/③-c′ 핀이 세그 부재와 자동화 배선을 고정한다.
   eq("정책 행(기능명 포함)이 화면에 없다(개정 4 — 자동 고정)",

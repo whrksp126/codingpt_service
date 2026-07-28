@@ -17,6 +17,8 @@ import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js"
 import { markPermGranted, permGranted } from "./login-gate.js";
 // 안전 코드 칩·요청번호·경고 = 승인 카드(device-approval.js)와 공유하는 조각(e2ee-card.js).
 import { safetyChips, requestNo, waitNoSafetyWarn } from "./e2ee-card.js";
+// 개정 9: 대기 기기 행 클릭 → 지워 둔 전역 승인 카드를 되살린다(승인은 그 카드가 한다).
+import { unDismissDeviceApproval } from "./device-approval.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
@@ -413,8 +415,22 @@ function ensureAccountCard() {
 // ── 로그인됨: 계정 + `기기` 섹션(기기 목록 = 암호화 상태 한 곳) ──
 function buildPaired() {
   stopWebLogin();
+  //  ★ 개정 9(2026-07-28 사용자 확정) — 계정 화면의 순서와 그룹:
+  //   ① 프로필 ② `이 기기` ③ `다른 기기` ④ 로그아웃 ⑤ 회원 탈퇴.
+  //   · 원문 "이기기, 다른 기기로 그룹을 나눠서 해주고" → 구 제목 `기기` 아래의 소제목 두 개(개정 7)를
+  //     **그룹(섹션) 자체**로 올렸다. 제목이 남으면 계층이 3겹(기기 > 이 기기 > 행)이었다.
+  //   · 원문 "로그아웃과 회원탈퇴는 설정 > 계정에서 제일 아래로 내려줘! pc, andorid, ios 다!" →
+  //     파괴적·희귀 동작이 프로필 바로 밑(첫 화면 상단)에서 매일 보는 기기 관리보다 먼저 읽혔다.
   connBody.innerHTML = `
     <div id="acctCard">${profileCardHtml()}</div>
+    <div class="dev-section">
+      <div class="dev-title" style="margin:0 2px 8px">이 기기</div>
+      <div id="e2eeSelfBox" class="sm-card2"></div>
+    </div>
+    <div class="dev-section">
+      <div class="dev-title" style="margin:0 2px 8px">다른 기기</div>
+      <div id="e2eeBox" class="sm-card2"></div>
+    </div>
     <div class="acct-line">
       <div class="acct-line-txt">이 기기에서 로그아웃</div>
       <button id="unpairBtn" class="btn small">로그아웃</button>
@@ -423,13 +439,7 @@ function buildPaired() {
       <div class="acct-line-txt">회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.</div>
       <button id="deleteAcctBtn" class="btn small danger">회원 탈퇴</button>
     </div>
-    <div id="acctMsg" class="acct-msg"></div>
-    <div class="dev-section">
-      <div style="display:flex;align-items:center;gap:10px;margin:0 2px 8px">
-        <div class="dev-title" style="margin:0;flex:1;min-width:0">기기</div>
-      </div>
-      <div id="e2eeBox" class="sm-card2"></div>
-    </div>`;
+    <div id="acctMsg" class="acct-msg"></div>`;
   bindUnpair(connBody.querySelector("#unpairBtn"));
   connBody.querySelector("#deleteAcctBtn").addEventListener("click", onDeleteAccount);
   bindNickname(); // 프로필 카드 닉네임 저장
@@ -666,7 +676,8 @@ function e2eeSelfWaiting() {
 //  처리하게 되고(어느 쪽을 눌러야 하나) 사용자가 지적한 그 구조로 되돌아간다.)
 
 /**
- * 행동 행 — **동시에 하나만** 그린다(우선순위 = 승인 > 자기 대기 > 부트스트랩).
+ * 행동 행 — **동시에 하나만** 그린다(우선순위 = 자기 대기 > 부트스트랩). 개정 9 로 승인 요약 줄이
+ *  사라졌으므로 이 함수는 **이 PC 자신의 상태**만 다룬다 = `이 기기` 섹션 소속이다.
  *  ⚠ 경고 삼각형(⚠)은 쓰지 않는다: PC 아이콘 규약상 "오류"로 읽힌다(icons.js:52) → 방패+체크.
  *  ★ 2026-07-27 개정 3: 이 행들도 **표의 행**(`<tr>`)이다 — 기기 목록 맨 위에 들어간다. 예전에는
  *   각자 `.dev-row` 카드였고 그 카드가 섹션 카드(sm-card2) 안에 또 있어서 "카드 안에 카드" 였다
@@ -674,18 +685,16 @@ function e2eeSelfWaiting() {
  *  ⚠ 반환 문자열은 `<tr>` 이어야 한다(renderE2ee 가 `<table class="dev-tbl">` 안에 넣는다) — div 를
  *   돌려주면 브라우저가 표 밖으로 끌어올려(foster parenting) 행 정렬이 조용히 깨진다.
  */
-function e2eeActionRow(pend) {
+function e2eeActionRow() {
   //  ★ 개정 6(2026-07-28 사용자 확정): **승인은 이 화면에서 하지 않는다.** 원문 — "기기 목록 안에서
   //   새 기기 승인을 처리하는 게 이상하지 않니? 승인하는 건 일시적으로 나타나는 거니까! 나눠야 할 것
   //   같은데?" → 승인은 사건 표면(전역 카드 device-approval.js · 알림 행 인라인)으로 옮겼고 여기는
   //   **연동 상태 관리**만 한다. 대기 건이 있으면 그 사실만 한 줄로 알린다(누를 것 없음 — 카드가 뜬다).
-  if (pend.length) {
-    return `<tr class="dev-tr">
-      <td class="dev-c-ic"><span class="dev-ic">${icons.shield({ size: 15 })}</span></td>
-      <td colspan="3" style="font-size:13px">새 기기 ${pend.length}대가 승인을 기다려요 · 알림에서 승인할 수 있어요</td>
-      <td class="dev-c-del"></td>
-    </tr>`;
-  }
+  //  ★ 개정 9(2026-07-28 사용자 확정): 요약 줄(`새 기기 N대가 승인을 기다려요 · 알림에서 승인할 수
+  //   있어요`)도 **삭제**했다. 원문 — "이런 멘트는 필요 없을 거 같은데? 만약 저런 승인이 왔다면 다른 기기
+  //   목록에 있는 기기 중에 하나에서 보낸 거겠지? 그렇다면 그 기기 미확인 알림처럼 표현해주고 …
+  //   클릭 시 아까 처음 이미지처럼 상단에 승인하는 알림이 뜨게 해줘!" → 대기 사실은 **그 기기 행**이
+  //   말한다(미확인 점 + `승인 대기` + 행 클릭 → 전역 승인 카드). 같은 사실을 두 군데서 말하지 않는다.
   // 이 PC 가 승인을 기다린다 — 설명문 0줄. 대조는 **기존 기기 화면에서** 하므로 여기엔 지침이 없다.
   //  ★ 안전 코드를 계산할 수 없으면(userRef 미상 → e2ee.js deriveDisplay 가 null) 칩을 **무음으로
   //   생략하지 않는다**: 승인하는 폰은 그 PC 의 ikX 로 안전 코드를 정상 파생해 크게 그리는데(폰은
@@ -756,7 +765,7 @@ function e2eeKeyIsMine(d) {
  *  되돌린다). 정렬은 <table> 자동 폭이 맞춘다(grid 로 하면 행마다 셀 폭을 다시 계산해 어긋난다).
  *  반환값은 `<tr>` 들의 문자열이다 — 감싸는 `<table>` 은 renderE2ee 가 만든다.
  */
-function e2eeDeviceRowsHtml(devs, selfReady) {
+function e2eeDeviceRowsHtml(devs, selfReady, pend, { mine } = {}) {
   const all = (state.devices || []).filter((d) => d.runnerKind !== "cloud"); // 클라우드 러너는 숨긴다(BYO 피벗)
   // ⚠ 기기 목록이 아직 안 왔으면 **고아 판정을 하지 않는다**: 키링이 먼저 도착하면 모든 열쇠가 '고아' 로
   //  보여 같은 기기가 두 번 뜨는 화면(합치려던 그 중복)이 로딩 중에 재현된다.
@@ -766,34 +775,45 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
   for (const k of devs) if (k.state === "trusted" && k.deviceId != null) keyByDevice.set(String(k.deviceId), k);
   const ids = new Set(all.map((d) => String(d.id)));
   const orphans = devs.filter((k) => k.state === "trusted" && (k.deviceId == null || !ids.has(String(k.deviceId))));
+  //  ★ 개정 9: 대기 중인 신청 → 기기 행 매칭(back publicPending.deviceId). 이 값이 없는 구 서버에서는
+  //   행에 아무 표시도 하지 않는다(없는 사실을 만들지 않는다 — 승인은 전역 카드·알림에서 그대로 된다).
+  const pendByDevice = new Map();
+  for (const p of (pend || [])) if (p && p.deviceId != null) pendByDevice.set(String(p.deviceId), p);
 
   //  ★ 개정 7(2026-07-28 사용자 확정): **이 기기와 다른 기기를 나눈다.** 원문 — "기기 목록에 이 기기까지
   //   표현하니까 보기도 안 좋고 복잡해지는 거 같은데! 이 기기와 내 기기 목록을 따로 구분하는 건 어떨까?
   //   기기 목록에서는 이 기기는 안 보이게 하고!" → 목록은 **다른 기기 전용**이고 이 기기는 위에 한 줄이다.
   //   그래서 `이 기기` accent 배지도 없앴다(자리로 이미 구분된다 = 사용자가 지적한 과한 포인트 컬러).
+  //  ★ 개정 9: 두 목록이 **각자의 섹션 카드**로 갈라졌다(소제목 폐기) → 이 함수는 `mine` 으로 한쪽만 그린다.
   const row = (d) => {
     const k = keyByDevice.get(String(d.id));
-    const canRevoke = typeof d.id === "number" && !d.isCurrent;
+    const waitRec = !k && !d.isCurrent ? pendByDevice.get(String(d.id)) : null;
+    const canRevoke = typeof d.id === "number" && !d.isCurrent && !waitRec;
     const sub = fmtRecent(d.lastSeenAt || d.createdAt);
     //  연동 여부 = 그 기기가 계정 열쇠를 갖고 있는가. 안 됐으면 [연동] 이 승인 절차를 다시 시작한다.
     //  ⚠ 이 기기 행에는 [연동] 을 두지 않는다: 자기를 자기가 승인할 수는 없다.
+    //  ⚠ **승인 대기 중인 행에도 두지 않는다**(개정 9): 요청이 이미 갔고 지금 할 일은 승인/거절 하나다.
     const linked = !!k || (d.isCurrent && selfReady);
-    const link = !linked && typeof d.id === "number" && !d.isCurrent
+    const link = !linked && !waitRec && typeof d.id === "number" && !d.isCurrent
       ? `<button class="sett-btn dev-link-btn" data-e2ee-link="${d.id}">연동</button>` : "";
+    //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
+    //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
+    const meta = waitRec ? `<span style="color:var(--text2)">승인 대기 · ${esc(sub)}</span>`
+      : linked ? esc(sub) : `<span style="color:var(--text3)">연동 안 됨 · ${esc(sub)}</span>`;
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
-    return `<tr class="dev-tr">
+    return `<tr class="dev-tr${waitRec ? " dev-tr-wait" : ""}"${waitRec ? ` data-appr-open="${esc(waitRec.enrollmentId)}"` : ""}>
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span><span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
-      <td class="dev-c-meta">${linked ? esc(sub) : `<span style="color:var(--text3)">연동 안 됨 · ${esc(sub)}</span>`}</td>
-      <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${waitRec ? `<span class="dev-unread" title="승인 대기"></span>` : `<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span>`}</span></td>
+      <td class="dev-c-meta">${meta}</td>
+      <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}${waitRec ? `<span class="dev-go">${icons.chevronRight({ size: 14 })}</span>` : ""}</td>
     </tr>
     ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}`;
   };
-  const subhead = (t) => `<tr class="dev-tr-sub"><td colspan="4">${t}</td></tr>`;
 
-  const mineRows = all.filter((d) => d.isCurrent).map(row).join("");
+  //  `이 기기` 섹션 = 이 기기 행만(행동 행은 renderE2ee 가 이 앞에 붙인다).
+  if (mine) return all.filter((d) => d.isCurrent).map(row).join("");
+
   const otherRows = all.filter((d) => !d.isCurrent).map(row).join("");
-
   //  기기 행이 없는 열쇠(고아) — 삭제 경로를 잃지 않게 목록에 남긴다. ★ 개정 7: 지문(🔒 숫자)은
   //   표시하지 않는다(사용자: "저것도 사용자들은 몰라도 되는 정보 아닌가?"). 정상 경로에서는 이제
   //   열쇠가 기기 행에 묶이므로(back enroll 이 deviceId 를 받는다) 이 행 자체가 예외 상황이다.
@@ -809,12 +829,12 @@ function e2eeDeviceRowsHtml(devs, selfReady) {
   }).join("");
 
   const others = otherRows + orphanRows;
-  return `${mineRows ? subhead("이 기기") + mineRows : ""}`
-    + `${subhead("다른 기기")}${others || `<tr class="dev-tr"><td colspan="4" class="dim" style="font-size:12px">연결된 기기가 없어요</td></tr>`}`;
+  return others || `<tr class="dev-tr"><td colspan="4" class="dim" style="font-size:12px">연결된 기기가 없어요</td></tr>`;
 }
 
 function renderE2ee() {
   const box = connBody?.querySelector("#e2eeBox");
+  const selfBox = connBody?.querySelector("#e2eeSelfBox");
   if (!box) return;
   const label = e2eeStateLabel();
   // ★ 승인 카드는 **승인할 수 있는 요청**만 그린다(e2ee.js e2eePendingApprovable — 자기 자신의 옛
@@ -827,20 +847,33 @@ function renderE2ee() {
   //  사실을 다른 문장으로 말하고(부트스트랩은 서로 상충한다 — reason 은 '폰에서 켜라', 행동 행은 이 PC 의
   //  켜기 버튼) 첫 화면의 '설명문 0줄' 이 무너진다. 정보 손실 0 = 행동 행이 사실 + 다음 행동을 말한다.
   //  ⚠ 앱 E2eeSettingsCard 의 `!action` 조건과 같은 규칙이다(한쪽만 고치면 두 화면의 줄 수가 달라진다).
-  const actionRowHtml = e2eeActionRow(pend);
-  // ★ 개정 3: 행동 행 + 기기 행 + '연결된 PC 없음' 행이 **한 표**다(`<table class="dev-tbl">`). 예전에는
-  //  각 행이 독립 카드(.dev-row)여서 섹션 카드 안에 카드가 겹쳐 보였다(사용자 지적) → 바깥 카드
-  //  1겹 + 1px 구분선. reason/에러 문구는 표 밖 1줄이다(행이 아니라 섹션 전체에 대한 말이므로).
-  box.innerHTML = `
-    ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
-    ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
-    <table class="dev-tbl">${actionRowHtml}${e2eeDeviceRowsHtml(devs, selfReady)}</table>`;
+  const actionRowHtml = e2eeActionRow();
+  // ★ 개정 3: 행동 행 + 기기 행이 **한 표**다(`<table class="dev-tbl">`). 예전에는 각 행이 독립 카드
+  //  (.dev-row)여서 섹션 카드 안에 카드가 겹쳐 보였다(사용자 지적) → 바깥 카드 1겹 + 1px 구분선.
+  //  reason/에러 문구는 표 밖 1줄이다(행이 아니라 섹션 전체에 대한 말이므로).
+  // ★ 개정 9: 표가 둘이다 — `이 기기`(이 PC 행 + 이 PC 자신의 상태 행) / `다른 기기`(목록 + 고아 열쇠).
+  if (selfBox) {
+    selfBox.innerHTML = `
+      ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
+      ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
+      <table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady, pend, { mine: true })}${actionRowHtml}</table>`;
+    bindE2ee(selfBox);
+  }
+  box.innerHTML = `<table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady, pend)}</table>`;
   bindE2ee(box);
 }
 
 function bindE2ee(box) {
   //  (개정 6: 승인/거절 핸들러는 이 파일에서 삭제 — device-approval.js(전역 카드)와
   //   notifications.js(알림 행)가 갖는다. 여기 남는 상호작용은 연동 요청·기기 삭제뿐이다.)
+  //  ★ 개정 9: 대기 행 클릭 = **승인 표면으로 가는 문**(승인은 여기서 하지 않는다 — 개정 6 유지).
+  //   설정 모달이 화면 상단 카드를 덮으므로 모달을 닫고(setView) 지워 둔 카드를 되살린다.
+  //   원문 — "클릭 시 아까 처음 이미지처럼 상단에 승인하는 알림이 뜨게 해줘!"
+  box.querySelectorAll("[data-appr-open]").forEach((tr) => tr.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return; // 행 안의 버튼(삭제 등)은 자기 동작만
+    unDismissDeviceApproval(tr.dataset.apprOpen);
+    S.setView("workspace");
+  }));
   //  [연동] — 그 기기와의 연동 절차를 다시 시작한다(서버가 방향을 판단: 재알림 or 상대 기기 재신청).
   box.querySelectorAll("[data-e2ee-link]").forEach((b) => b.addEventListener("click", async () => {
     b.disabled = true;

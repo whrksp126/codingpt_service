@@ -560,10 +560,15 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
 .sett-row { display: flex; justify-content: space-between; align-items: center; padding: 13px 0; font-size: 13.5px; }
 .sett-row + .sett-row, .sett-row + .sett-hint { border-top: 1px solid var(--border); } /* 행 구분선(모바일 미러) */
 .sett-hint { font-size: 11.5px; color: var(--dim); padding: 2px 0 4px; }
-/* 기기 표 소제목(`이 기기` / `다른 기기`) — 개정 7. 목록에서 이 기기를 빼서 위로 올렸다(사용자 요구).
-   구분선을 다시 그리지 않는다: 소제목이 곧 구분이고, 선을 겹치면 표가 조각나 보인다. */
-.dev-tr-sub > td { border-top: none !important; font-size: 11px; color: var(--dim); padding: 12px 0 2px !important; }
-.dev-tbl tr:first-child .dev-tr-sub > td, .dev-tbl .dev-tr-sub:first-child > td { padding-top: 4px !important; }
+/* (개정 9: 기기 표 소제목 `.dev-tr-sub` 삭제 — `이 기기`/`다른 기기` 가 이제 **섹션(카드) 제목**이다.
+   사용자 요구: "이기기, 다른 기기로 그룹을 나눠서 해주고". 죽은 CSS 를 남기면 같은 클래스를 재사용할 때
+   조용히 적용된다(구 `.dev-tr{display:grid}` 가 실제로 그 사고를 냈다) → 규칙째 지운다.) */
+/* 승인 대기 행 = **미확인 알림**(개정 9). 행 전체가 승인 표면으로 가는 문이라 커서/호버를 준다.
+   accent 점은 '상태 신호 전용' 규율에 맞는 유일한 포인트 컬러 사용이다(읽지 않은 사건이 있다는 신호). */
+.dev-tr-wait { cursor: pointer; }
+.dev-tr-wait:hover > td { background: var(--elevated2); }
+.dev-unread { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.dev-go { display: inline-flex; align-items: center; color: var(--text3); vertical-align: middle; }
 /* 이미 허용된 권한 = 상태 **표기**(버튼 아님). 버튼처럼 보이면 사용자는 "아직 허용 안 됐나" 로 읽는다.
    accent 를 쓰지 않는다 — 여기서 초록은 "성공했다는 축하"가 아니라 그냥 현재 상태다. */
 .sett-done { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; color: var(--text3); }
@@ -614,7 +619,11 @@ li.CodeMirror-hint-active { background: var(--accent-tint); color: var(--text); 
    자동 폭으로 정렬된다(모바일 E2eeSettingsCard 와 같은 시각 구조).
    ★ 헤더 행(<th>)은 두지 않는다 — 지난 라운드에 표 헤더 3개를 텍스트 감축으로 지웠으므로
     되살리면 그 감축을 되돌리는 것이다. 열 정렬만으로 표로 읽히게 한다. */
+/* 개정 9: 섹션이 둘(`이 기기`/`다른 기기`)이 되면서 연속된 섹션 사이에 숨 쉴 틈이 필요하다 —
+   6px 만으로는 두 카드가 한 덩어리로 붙어 보여 그룹을 나눈 의미가 사라진다. */
 .dev-section { margin-top: 6px; }
+.dev-section + .dev-section { margin-top: 18px; }
+.dev-section + .acct-line { margin-top: 18px; }
 .dev-title { font-size: 12px; font-weight: 700; color: var(--text3); margin: 0 2px 8px; letter-spacing: -0.01em; }
 .dev-list { display: flex; flex-direction: column; gap: 6px; }
 .dev-tbl { width: 100%; border-collapse: collapse; }

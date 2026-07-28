@@ -347,6 +347,17 @@ async function enroll(userId, deviceId, body, meta) {
   enabledGate();
   const now = Date.now();
   const id = normalizeIdentity(body);
+  //  ★ 2026-07-28 개정 8(사용자 확정): **알리지 않는 등록**. 원문 — "그래도 그 전에 사용자한테
+  //   android에서 내 pc 목록에 승인 요청할까요? 라고 물어보면서 뭔가 온보딩 식으로 알려줘야 하지
+  //   않을까?" 지금까지는 로그인하면 앱이 곧바로 enroll 을 올리고 서버가 그 자리에서 PC 에 알림 +
+  //   승인 카드를 팬아웃했다 → 앱에서 "보낼까요?" 를 묻는 순간 **이미 보낸 뒤에 묻는 거짓 화면**이 된다.
+  //   그래서 `announce:false` 로 신청서만 만들고(신원키 등록은 그대로 = 상태 판정은 정상 진행) 알림·
+  //   팬아웃은 보류한다. 사용자가 확인을 누르면 `nudge` 가 그때 알린다.
+  //  ⚠ 억제한 신청은 `listPending` 에서도 감춘다 — 감추지 않으면 켜져 있는 PC 가 10초 폴링으로 먼저
+  //   승인 카드를 띄워 사용자가 지적한 그 순서가 다시 깨진다(알림만 막아서는 부족하다).
+  //  ⚠ 기본값은 **알린다**(생략 시 true) — 구 클라이언트·데몬·PC 는 이 필드를 모르고 그들의 등록은
+  //   지금까지처럼 즉시 알려야 한다(하위호환).
+  const wantAnnounce = (body || {}).announce !== false;
   //  ★ 2026-07-28: 레이트 키를 **기기별**(uid:ikX)로 바꿨다. 계정 단위 10회/분이었는데 enroll 은
   //   승인 대기 중 폴링 경로이기도 해서(앱 20s + 데몬 백오프 + 다른 기기) 기기가 2~3대만 되면 정상
   //   사용이 429 를 맞았다 — 그리고 그 429 가 앱에서 '오류' 로 굳어 대기 화면이 붕괴했다(실사고).
@@ -384,9 +395,16 @@ async function enroll(userId, deviceId, body, meta) {
       throw err('이 기기의 승인 요청이 반복 거절되었습니다. 잠시 후 다시 시도해 주세요.', 429, 'ENROLL_BLOCKED');
     }
     // 이미 대기 중이면 같은 enrollment 를 반환하고 팬아웃만 다시 쏜다(새 기기 앱 재시작/폴링).
+    //  ★ 개정 8: 아직 **알리지 않은** 신청은 팬아웃도 하지 않는다(억제의 요점 — 아래 wantAnnounce 참고).
+    //   요청자가 이번엔 알리기를 원하면(announce 생략/true) 여기서 처음 알린다 = 재시도 경로도 덮는다.
     const already = pendingByIkX(userId, id.ikX);
     if (already) {
-      fanout(userId, { kind: 'request', ...publicPending(already) });
+      if (already.announced === false && wantAnnounce) {
+        already.announced = true;
+        await announce(userId, already);
+      } else if (already.announced !== false) {
+        fanout(userId, { kind: 'request', ...publicPending(already) });
+      }
       return { state: 'pending', ...publicPending(already), policy: k.policy };
     }
     if (pendingIds(userId).length >= MAX_PENDING_PER_USER) {
@@ -404,10 +422,12 @@ async function enroll(userId, deviceId, body, meta) {
       verifyCode: fp.verifyCode, fingerprint: fp.fingerprint,
       requestedAt: now, expiresAt: now + ENROLL_TTL_MS,
       requestIp: maskIp(meta && meta.ip), notifId: null, resolved: false,
+      //  ★ 개정 8 — 알림을 보냈는가. false 면 신청서만 서버에 있고 **다른 기기는 이 요청을 모른다**.
+      announced: wantAnnounce,
     };
     registerPending(rec);
-    console.log(`[e2ee] 등록 신청 user=${userId} id=${rec.id} label="${rec.label}" code=${rec.verifyCode} epoch=${k.epoch} trusted=${trustedKeys(k).length}`);
-    await announce(userId, rec);
+    console.log(`[e2ee] 등록 신청 user=${userId} id=${rec.id} label="${rec.label}" code=${rec.verifyCode} epoch=${k.epoch} trusted=${trustedKeys(k).length} announce=${wantAnnounce ? 1 : 0}`);
+    if (wantAnnounce) await announce(userId, rec);
     return { state: 'pending', ...publicPending(rec), policy: k.policy };
   });
 }
@@ -428,6 +448,13 @@ function publicPending(rec) {
     ikX: rec.ikX, ikEd: rec.ikEd, verifyCode: rec.verifyCode, fingerprint: rec.fingerprint,
     requestedAt: new Date(rec.requestedAt).toISOString(), expiresAt: new Date(rec.expiresAt).toISOString(),
     requestIp: rec.requestIp,
+    //  ★ 2026-07-28 개정 8: 신청자의 기기 행 id 를 **응답에도** 싣는다. 설정 화면이 대기 건을 기기 행에
+    //   묶어 그 행에 '승인 대기' 를 표시하고, 행을 누르면 승인 카드를 띄우기 위해서다(사용자 요구:
+    //   "그 기기 미확인 알림처럼 표현해주고 클릭 시 상단에 승인하는 알림이 뜨게"). 자기 계정의 기기
+    //   번호이므로 비밀이 아니다(기기 목록 API 가 이미 같은 값을 준다).
+    deviceId: rec.deviceId != null ? Number(rec.deviceId) : null,
+    //  알렸는가 — false 면 이 요청은 아직 **사용자가 보내지 않은** 신청이다(아래 announce 억제 참고).
+    announced: rec.announced !== false,
   };
 }
 
@@ -557,6 +584,9 @@ async function listPending(userId, { ikX } = {}) {
     .map((id) => pending.get(id))
     .filter((r) => r && !r.resolved && r.expiresAt > now)
     .filter((r) => !callerIkX || r.ikX !== callerIkX)
+    //  ★ 개정 8 — 아직 알리지 않은 신청은 **승인자에게 보이지 않는다**(위 enroll wantAnnounce 참고).
+    //   신청 당사자는 자기 상태를 enroll 응답으로 알므로 이 필터로 잃는 정보가 없다.
+    .filter((r) => r.announced !== false)
     .sort((a, b) => a.requestedAt - b.requestedAt)
     .map(publicPending);
   return { pending: items, epoch: k.epoch, policy: k.policy, trustedCount: trustedKeys(k).length };
@@ -578,11 +608,6 @@ const nudgeAt = new Map(); // uid → 마지막 nudge 시각
 async function nudge(userId, { ikX, deviceId } = {}) {
   enabledGate();
   const now = Date.now();
-  const last = nudgeAt.get(safeUid(userId)) || 0;
-  if (now - last < NUDGE_COOLDOWN_MS) {
-    throw err('방금 요청을 보냈어요. 잠시 후 다시 시도해 주세요.', 429, 'NUDGE_COOLDOWN',
-      { retryInMs: NUDGE_COOLDOWN_MS - (now - last) });
-  }
   const k = await loadKeyring(userId);
   let callerIkX = null;
   if (typeof ikX === 'string' && ikX) {
@@ -590,11 +615,24 @@ async function nudge(userId, { ikX, deviceId } = {}) {
   }
   // ① 내 요청 재알림 — 대상은 "이 계정의 신뢰 기기 전체"다(사용자 요구: 등록된 PC 들에 일괄 전송).
   const mine = callerIkX ? pendingByIkX(userId, callerIkX) : null;
+  //  ★ 개정 8 — 쿨다운은 **첫 알림을 막지 않는다**. 앱 온보딩의 [승인 요청 보내기] 는 억제된 신청을
+  //   처음 알리는 호출이고, 여기서 429 로 돌려보내면 announced 가 false 로 남아 그 요청은 **아무 기기에도
+  //   보이지 않는 유령**이 된다(앱은 429 를 성공으로 취급하므로 사용자는 보냈다고 믿는다 = 최악의 조합).
+  const firstAnnounce = !!mine && mine.announced === false;
+  const last = nudgeAt.get(safeUid(userId)) || 0;
+  if (!firstAnnounce && now - last < NUDGE_COOLDOWN_MS) {
+    throw err('방금 요청을 보냈어요. 잠시 후 다시 시도해 주세요.', 429, 'NUDGE_COOLDOWN',
+      { retryInMs: NUDGE_COOLDOWN_MS - (now - last) });
+  }
   if (mine) {
     nudgeAt.set(safeUid(userId), now);
+    //  ★ 개정 8 — 이 호출이 **첫 알림**일 수 있다(announce:false 로 만든 신청 = 앱 온보딩의 "요청
+    //   보내기"). 그때 announced 를 올려야 승인자 목록(listPending)에 나타난다.
+    const first = mine.announced === false;
+    mine.announced = true;
     await announce(userId, mine);
-    console.log(`[e2ee] 연동 요청 재알림 user=${userId} id=${mine.id}`);
-    return { sent: 'reannounce', enrollmentId: mine.id, trustedCount: trustedKeys(k).length };
+    console.log(`[e2ee] 연동 요청 ${first ? '첫' : '재'}알림 user=${userId} id=${mine.id}`);
+    return { sent: first ? 'announce' : 'reannounce', enrollmentId: mine.id, trustedCount: trustedKeys(k).length };
   }
   // ② 대상 기기에 재신청 요청 — 그 기기(데몬/앱)가 즉시 enroll 을 다시 올린다.
   const target = deviceId != null ? Number(deviceId) : null;
