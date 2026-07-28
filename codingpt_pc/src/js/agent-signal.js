@@ -182,6 +182,8 @@ export function resolveAgentBrand(input) {
   };
   if (push) { const n = named(push.agent); if (n) return n; }
   if (tab) {
+    // 데몬이 terminal.list 에 실어 보내는 정규화 이름 — push 다음으로 정확하다.
+    const dn = named(tab.agentName); if (dn) return dn;
     const n = named(tab.agent); if (n) return n;
     const c = named(tab.cmd); if (c) return c;
     const t = String(tab.title || "");

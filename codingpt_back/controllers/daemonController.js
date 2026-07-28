@@ -1258,10 +1258,13 @@ function chatRpc(method, paramsOf, timeoutMs) {
 const qOf = (req) => req.query || {};
 const bOf = (req) => req.body || {};
 // GET  /api/daemon/chat/sessions?cwd=            → { supported, agent, sessions:[…] }
-const chatSessions = chatRpc('chat.sessions', (req) => ({ cwd: qOf(req).cwd || '' }), 20000);
-// POST /api/daemon/chat/open      { cwd, tid?, sessionId?, limit? } → { chatId, epoch, headSeq, messages }
+const chatSessions = chatRpc('chat.sessions', (req) => ({ cwd: qOf(req).cwd || '', agent: qOf(req).agent }), 20000);
+// POST /api/daemon/chat/open      { cwd, tid?, agent?, sessionId?, limit? } → { chatId, epoch, headSeq, messages }
+//  agent = 그 터미널에서 도는 CLI('claude'|'codex'…). 클라이언트가 terminal.list 의 agentName 을 그대로
+//  넘긴다. **이 값이 빠지면 데몬이 claude 로 가정**하고 같은 폴더의 claude 대화를 열어서, codex 터미널에
+//  claude 대화가 뜨는 사고가 난다(2026-07-28 실사고). 미지정 시 데몬 기본값 유지 = 구 클라 하위호환.
 const chatOpen = chatRpc('chat.open', (req) => ({
-  cwd: bOf(req).cwd || '', tid: bOf(req).tid, sessionId: bOf(req).sessionId, limit: bOf(req).limit,
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid, agent: bOf(req).agent, sessionId: bOf(req).sessionId, limit: bOf(req).limit,
 }), 25000);
 // GET  /api/daemon/chat/since?chatId=&sinceSeq=&epoch=  → { epoch, headSeq, messages } | { epochChanged }
 const chatSince = chatRpc('chat.since', (req) => ({

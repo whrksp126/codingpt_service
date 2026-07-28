@@ -280,7 +280,7 @@ eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible
     && /classList\.toggle\("hidden"/.test(paneJs2));
   ok("토글 노드는 pane 생성 시 1회만 만든다(재생성 금지)",
     (paneJs2.match(/_buildModeToggle\(\)/g) || []).length === 2   // 정의 1 + 호출 1
-    && /this\._buildChat\(\);\n\s*this\._buildModeToggle\(\);/.test(paneJs2));
+    && /this\._buildChat\(\);(?:\n\s*this\._build\w+\(\);)*\n\s*this\._buildModeToggle\(\);/.test(paneJs2));
   ok("main-top 재렌더는 mtDyn 만 비운다(헤더 상주 노드 소멸 금지 핀 유지)",
     /mtDyn\.innerHTML = ""/.test(wvJs) && !/mainTop\.innerHTML = ""/.test(wvJs));
 

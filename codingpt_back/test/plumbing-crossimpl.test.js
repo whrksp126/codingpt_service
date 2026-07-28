@@ -1051,7 +1051,7 @@ test('갭6 — chat.open 응답의 noSession/reason/candidates 가 서버를 그
     assert.strictEqual(data.noSession, true, 'noSession 이 지워지면 클라가 빈 상태 안내를 못 그린다');
     assert.strictEqual(data.reason, 'not_started');
     assert.strictEqual(data.candidates, 0);
-    // reason 별로 클라 UI 가 갈린다(ambiguous 일 때만 '다른 대화 보기') → 문자열 도메인도 고정한다.
+    // reason 문자열 도메인 고정(클라는 전부 같은 빈 상태를 그린다 — 대화 선택 UI 는 2026-07-28 폐기).
     for (const r of ['not_started', 'ambiguous', 'none', 'claimed']) {
       assert.ok(typeof r === 'string' && r.length, r);
     }
@@ -1070,7 +1070,13 @@ test('갭6 — 데몬 resolveTarget 이 바인딩 파일 부재를 스캔으로 
   assert.match(body, /noSession: 'not_started'/, '바인딩 파일 부재 = not_started 여야 한다');
   // 바인딩이 없을 때: 소거법(다른 터미널 점유분 제외)을 반드시 거친다. 이 단계가 없으면 후보가 2개인
   //  정상 상황이 전부 ambiguous(빈 화면)로 떨어져 "TUI 엔 대화가 있는데 채팅은 빈 화면"이 된다(실사고2).
-  assert.match(body, /claimedSessions\(cwdRel, p\.tid\)/, '점유 소거 단계가 사라졌다');
+  //  ★ 점유 소거는 **에이전트별**이다(2026-07-28): claude 바인딩이 codex 후보를 점유로 세면
+  //   codex 대화가 근거 없이 배제된다(그 반대도 마찬가지).
+  assert.match(body, /claimedSessions\(cwdRel, p\.tid, adapter\.name\)/, '점유 소거 단계가 사라졌다(에이전트별)');
+  // 훅이 없는 에이전트(codex)는 시작시각 짝짓기로 확정하고 그 짝을 굳힌다 — 이 단계가 사라지면
+  //  codex 터미널이 매번 ambiguous 로 되돌아가 화면이 흔들린다.
+  assert.match(body, /scan-birth/, '훅 없는 에이전트의 시작시각 짝짓기가 사라졌다');
+  assert.match(body, /adapter\.hooks/, '훅 유무 분기가 사라졌다');
   assert.match(body, /noSession: 'claimed'/, '후보 전부가 남의 것이면 claimed 여야 한다');
   assert.match(body, /noSession: 'ambiguous'/, '끝까지 못 좁히면 ambiguous 여야 한다');
   // tid 경로에서 채택은 free/live(소거를 통과한 집합)에서만 나온다 — cands[0] 로 바로 내려가면 실사고1 재발.

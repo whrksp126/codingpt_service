@@ -5,10 +5,15 @@
 //  단 프리뷰 구멍 안의 클릭이 뒤로 내려가지 않게 main.js 의 previewShield SEL 에 `.approval-card` 를
 //  넣어야 한다 — 안 하면 카드가 보이는데 뒤의 프리뷰가 클릭을 받는다.
 //
-// 표시 위치 2곳(중복 없음)
-//  ① 전역 스택 — 화면 하단 중앙. 기본 위치.
-//  ② Chat 뷰 컴포저 위 — 그 터미널(cwd,win)의 Chat 이 지금 보이면 대화 맥락에 붙여 보여주고,
-//     전역 스택에서는 그 카드를 뺀다(같은 카드가 두 군데 뜨면 어느 쪽을 눌러야 하나 혼란).
+// ★ 표시 위치 = **그 터미널 탭을 보고 있을 때 그 pane 안**. 오직 여기 한 곳이다(2026-07-28 확정).
+//  ① Chat 모드  : 컴포저 위 슬롯 `.chat-approvals` (ChatView 가 소유)
+//  ② TUI 모드   : pane 하단 오버레이 `.pane-appr-dock` (pane.js 가 자리만 만들고 여기서 채운다)
+//
+//  **전역 스택은 폐기했다.** 화면 하단 중앙에 모든 대기 카드를 띄웠더니, codex 탭을 보고 있는데
+//  claude 탭의 질문 카드가 떠 있었다(사용자 신고). 어느 터미널의 질문인지 화면이 말해주지 않으면
+//  답이 엉뚱한 세션으로 간다 — 터미널 간 간섭 0 이 이 라운드의 요구사항이다.
+//  다른 탭에서 기다리는 건 **탭의 점**과 알림(패널/푸시)이 알린다. win 을 못 실은 구 요청은 알림 행에서
+//  바로 응답한다(notifications.js) — 답할 길이 사라지지는 않는다.
 //
 // 절대 만들지 않는 것: **"항상 허용"** 버튼. claude 2.1.220 의 PermissionRequest 훅에는 그 개념이 없고
 //  (실측), 있는 척 만들면 사용자가 "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가 된다.
@@ -17,16 +22,14 @@ import { state } from "./state.js";
 import { icons } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
-import { visibleChatScopes, setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
+import { setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
 
-let stackEl = null;
+let mounted = false;
 let tickTimer = null;
 
 export function mountApprovals() {
-  if (stackEl) return;
-  stackEl = document.createElement("div");
-  stackEl.className = "approval-stack";
-  document.body.appendChild(stackEl);
+  if (mounted) return;
+  mounted = true;
   // Chat 뷰가 자기 슬롯을 그릴 때 이 렌더러를 쓴다(순환 import 회피 — chat-view 는 우리를 모른다).
   setChatApprovalRenderer(renderScoped);
   // 카운트다운 — 카드가 있을 때만 1s 틱(없으면 타이머도 없다).
@@ -51,19 +54,30 @@ export function mountApprovals() {
   }, 1000);
 }
 
-// 전역 스택 갱신 — main.js render() 에서 매 emit 마다 호출.
+// 매 emit 마다 호출(main.js render) — 보이는 pane 의 도크만 채운다.
 export function updateApprovals() {
-  if (!stackEl) return;
-  const scoped = new Set(visibleChatScopes().map((s) => `${s.cwd}|${s.win}`));
-  const rows = state.approvals.filter((a) => !scoped.has(`${a.cwd || ""}|${a.win}`));
-  renderList(stackEl, rows);
-  refreshChatApprovals(); // Chat 슬롯도 같은 타이밍에 동기화
+  // TUI 도크: pane.js 가 자기 pane 의 현재 터미널 좌표를 data-* 로 적어 둔다(빈 값 = 대상 없음).
+  for (const dock of document.querySelectorAll(".pane-appr-dock")) {
+    const cwd = dock.dataset.cwd || "";
+    const win = dock.dataset.win === "" ? null : Number(dock.dataset.win);
+    renderList(dock, cwd && win != null && Number.isFinite(win) ? forPane(cwd, win) : []);
+  }
+  refreshChatApprovals(); // Chat 슬롯(컴포저 위)도 같은 타이밍에 동기화
 }
+
+// 이 터미널의 대기 목록 — **엄격 일치**(cwd + win). win 이 없는 요청은 어느 pane 에도 붙이지 않는다.
+//  "남의 터미널에 뜨는 것" 이 "그 탭에 안 뜨는 것" 보다 나쁘다(앱 paneApproval.ts 와 같은 규칙).
+export function forPane(cwd, win) {
+  if (!cwd || win == null) return [];
+  return state.approvals.filter((a) => (a.cwd || "") === cwd && a.win === win);
+}
+
+// 탭 점(대기 표시)용 — pane.js 가 탭을 그릴 때 센다.
+export function paneApprovalCount(cwd, win) { return forPane(cwd, win).length; }
 
 // Chat 뷰 슬롯용 — 그 (cwd,win) 카드만.
 function renderScoped(host, { cwd, win, visible }) {
-  const rows = visible ? state.approvals.filter((a) => (a.cwd || "") === cwd && a.win === win) : [];
-  renderList(host, rows);
+  renderList(host, visible ? forPane(cwd, win) : []);
 }
 
 // ── 렌더 ──

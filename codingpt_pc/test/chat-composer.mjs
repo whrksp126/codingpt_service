@@ -167,12 +167,13 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("noSession 은 오류 배너가 아니라 빈 상태 본문을 그린다",
     /if \(r && r\.noSession\)/.test(cv) && /this\._renderBlank\(\)/.test(cv));
   ok("빈 상태는 짧은 인사 한 줄(설명 문단 금지)", /무엇이든 요청하세요/.test(cv));
-  // 'claimed'(후보가 전부 남의 것)도 사람이 고를 여지가 있는 상태 → 같은 보조 액션을 준다.
-  //  나머지('not_started'/'none')는 고를 후보가 없으므로 링크를 두지 않는다(빈 UI 금지 규율).
-  ok("보조 액션 `다른 대화 보기` 는 ambiguous/claimed 에서만 나온다",
-    /this\._noSession === "ambiguous" \|\| this\._noSession === "claimed"[\s\S]{0,400}다른 대화 보기/.test(cv));
-  ok("고른 세션은 탭 객체에 기억한다(영속·탭 이동 승계)",
-    /setSessionPick\?\.\(sid\)/.test(cv) && /getSessionPick\?\.\(\)/.test(cv));
+  // ★ 2026-07-28 확정: 대화 선택(`다른 대화 보기`) UI 폐기. 채팅 = **지금 이 터미널에서 도는 대화 하나**.
+  //  고르게 하려면 사용자가 남의 대화를 열 수 있다는 뜻이고, 그게 실제로 'codex 탭에 claude 대화' 사고를
+  //  덮어 가리는 우회로였다. 대신 chat.open 에 **agent 를 실어** 데몬이 옳은 로그를 고르게 한다.
+  ok("대화 선택 UI 가 없다(다른 대화 보기 · 세션 시트 · 탭 선택 기억 전부 폐기)",
+    !/다른 대화 보기/.test(cv) && !/_openSessionPicker/.test(cv) && !/SessionPick/.test(cv));
+  ok("chat.open 에 이 터미널의 에이전트를 실어 보낸다(claude 로 가정하지 않는다)",
+    /const agent = this\.ctx\.agent\?\.\(\) \|\| null;/.test(cv) && /\.\.\.\(agent \? \{ agent \} : \{\}\)/.test(cv));
   ok("첫 메시지 전송이 탐색 창을 연다(전송 → 재오픈 경로)",
     /if \(this\._noSession\) this\._probeUntil = Date\.now\(\) \+ CHAT\.NO_SESSION_PROBE_MS;/.test(cv));
   ok("chat_event push 는 noSession 확정을 해제한다(트리거 ②)",

@@ -41,16 +41,6 @@ export function applyChatEvent(frame) {
   }
 }
 
-// 지금 화면에 보이는 Chat 뷰들의 스코프 — approvals.js 가 중복 카드를 피하는 데 사용.
-export function visibleChatScopes() {
-  const out = [];
-  for (const v of _live) {
-    if (!v._visible || !v._cwd() || v._tid == null) continue;
-    out.push({ cwd: v._cwd(), win: v._tid });
-  }
-  return out;
-}
-
 // 승인 카드 슬롯 갱신 요청 — approvals.js 가 렌더 콜백을 주입한다(순환 import 회피).
 let _approvalRenderer = null;
 export function setChatApprovalRenderer(fn) { _approvalRenderer = typeof fn === "function" ? fn : null; }
@@ -213,12 +203,12 @@ export class ChatView {
     this._setBanner("대화를 불러오는 중…", "info");
     this._opening = (async () => {
       try {
-        // 사용자가 목록에서 고른 대화가 있으면 그것을 명시한다(탭 객체에 얹혀 영속·탭 이동 승계 —
-        //  tab.mode 와 같은 규율). 지정 sessionId 는 데몬에서 스캔 폴백 없이 그 파일만 연다.
-        const pick = this.ctx.getSessionPick?.() || null;
+        // ★ 이 터미널에서 도는 CLI 를 반드시 실어 보낸다. 빠지면 데몬이 claude 로 가정해서
+        //  codex 터미널에 **같은 폴더의 claude 대화**가 뜬다(2026-07-28 실사고).
+        const agent = this.ctx.agent?.() || null;
         const r = await api.chatOpen({
           cwd, tid, limit: CHAT.SNAPSHOT_LIMIT,
-          ...(pick ? { sessionId: pick } : {}),
+          ...(agent ? { agent } : {}),
           ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
         });
         if (this._disposed || this._tid !== tid) return;
@@ -259,16 +249,7 @@ export class ChatView {
         //   (데몬 축출/삭제). 선택을 놓아주지 않으면 그 탭은 영구히 없는 대화를 요청하며 오류 배너에
         //   갇힌다(조용히 죽는 경로) → 선택 해제 + 빈 상태로 되돌린다. 다음 열기는 정상 판정을 탄다.
         if (/CHAT_NOT_FOUND|찾을 수 없습니다/.test(msg)) {
-          if (this.ctx.getSessionPick?.()) {
-            this.ctx.setSessionPick?.(null);
-            this._noSession = "none";
-            this._noSessionAt = Date.now();
-            this._openFailed = null;
-            this._setBanner("");
-            this._renderBlank();
-          } else {
-            this._setBanner("아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.", "info");
-          }
+          this._setBanner("아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.", "info");
         }
         else if (/HTTP 409|데몬/.test(msg)) this._setBanner("PC 가 연결돼 있지 않습니다.", "warn");
         else if (/TRANSCRIPT_DISABLED/.test(msg)) this._setBanner("서버에서 대화 기록 기능이 꺼져 있습니다.", "warn");
@@ -693,75 +674,9 @@ export class ChatView {
     wrap.innerHTML =
       `<span class="chat-blank-ic">${mark}</span>` +
       `<div class="chat-blank-title">무엇이든 요청하세요</div>`;
-    // 'claimed' = 후보가 있지만 전부 다른 터미널의 대화다 → 고를 여지가 있으니 같은 보조 액션을 준다.
-    if (this._noSession === "ambiguous" || this._noSession === "claimed") {
-      const b = document.createElement("button");
-      b.className = "chat-blank-alt";
-      b.type = "button";
-      b.textContent = "다른 대화 보기";
-      b.addEventListener("click", (e) => { e.stopPropagation(); this._openSessionPicker(); });
-      wrap.appendChild(b);
-    }
     this.scrollEl.appendChild(wrap);
   }
   _clearBlank() { this.scrollEl?.querySelector(".chat-blank")?.remove(); }
-
-  // 후보 대화 목록 시트 — `ambiguous` 에서만 도달한다. 고른 대화는 **탭 객체에 기억**하므로
-  //  영속(pc-ui.json)·탭 이동 승계가 자동이다(tab.mode 와 같은 규율).
-  async _openSessionPicker() {
-    if (this._sheetEl) return;
-    const sheet = document.createElement("div");
-    sheet.className = "chat-sheet";
-    sheet.innerHTML =
-      `<div class="chat-sheet-card">` +
-      `<div class="chat-sheet-title">대화 선택</div>` +
-      `<div class="chat-sheet-list"><div class="chat-sheet-empty">불러오는 중…</div></div>` +
-      `</div>`;
-    sheet.addEventListener("click", (e) => { if (e.target === sheet) this._closeSheet(); });
-    this.el.appendChild(sheet);
-    this._sheetEl = sheet;
-    const list = sheet.querySelector(".chat-sheet-list");
-    let sessions = [];
-    try {
-      const r = await api.chatSessions({
-        cwd: this._cwd(),
-        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
-      });
-      sessions = (r && r.sessions) || [];
-    } catch (e) {
-      // 실패를 빈 목록으로 위장하지 않는다(오프라인/권한 문제를 사용자가 알아야 한다 — 파일 피커와 같은 규율).
-      if (this._sheetEl) list.innerHTML = `<div class="chat-sheet-empty">목록을 불러오지 못했습니다</div>`;
-      return;
-    }
-    if (!this._sheetEl) return;
-    if (!sessions.length) { list.innerHTML = `<div class="chat-sheet-empty">대화가 없습니다</div>`; return; }
-    // 목록의 시각은 "오늘 몇 시"가 아니라 날짜까지 보여야 구분이 된다(후보가 여러 날에 걸쳐 있다).
-    const fmtWhen = (v) => {
-      const d = v == null ? null : new Date(v);
-      if (!d || isNaN(d.getTime())) return "";
-      const p = (x) => String(x).padStart(2, "0");
-      return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-    };
-    list.innerHTML = sessions.slice(0, 20).map((s) => {
-      const sub = [fmtWhen(s.lastAt), s.live ? "진행 중" : ""].filter(Boolean).join(" · ");
-      return `<button class="chat-sheet-row" type="button" data-sid="${escapeHtml(String(s.sessionId || ""))}">` +
-        `<span class="chat-sheet-name">${escapeHtml(String(s.title || "새 대화"))}</span>` +
-        (sub ? `<span class="chat-sheet-sub">${escapeHtml(sub)}</span>` : "") + `</button>`;
-    }).join("");
-    list.addEventListener("click", (e) => {
-      const row = e.target.closest?.(".chat-sheet-row");
-      if (!row) return;
-      const sid = row.dataset.sid;
-      this._closeSheet();
-      if (!sid) return;
-      this.ctx.setSessionPick?.(sid);   // 탭에 기억(영속·탭 이동 승계)
-      this._noSession = null;          // 사용자 선택 = 재판정 트리거
-      this._probeUntil = 0;
-      this._resetBuffer();
-      this._open();
-    });
-  }
-  _closeSheet() { this._sheetEl?.remove(); this._sheetEl = null; }
 
   // ── `+` 파일 넣기(일반 에이전트 앱과 같은 컴포저 좌측 버튼) ──────────────────────
   // 무엇을 하는가: 워크스페이스 파일을 골라 **그 경로를 입력에 삽입**한다(업로드가 아니다).
@@ -922,7 +837,6 @@ export class ChatView {
   dispose() {
     this._disposed = true;
     this._stopPoll();
-    this._closeSheet();
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,

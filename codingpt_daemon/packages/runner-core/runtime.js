@@ -21,6 +21,7 @@ function defaults() {
     root: home,                                 // fs 홈 jail 루트(safeResolve 기준)
     stateDir: path.join(home, '.codingpt'),     // 우리 상태(daemon.json·sessions·tmp)
     claudeHome: path.join(home, '.claude'),     // claude OAuth/대화로그(~/.claude)
+    codexHome: path.join(home, '.codex'),       // codex 인증/대화로그(~/.codex) — sessions/ 만 읽는다
     platform: process.platform,                 // 'darwin'|'linux' — 플랫폼별 가드(TCC/HIDDEN_DIRS 등)
   };
 }
@@ -39,7 +40,9 @@ function get() {
 const root = () => get().root;
 const stateDir = () => get().stateDir;
 const claudeHome = () => get().claudeHome;
+// codexHome 은 init(cfg) 로 덮어쓰지 않은 구 러너에서도 반드시 값이 있어야 한다(부분 override 대비).
+const codexHome = () => get().codexHome || path.join(os.homedir(), '.codex');
 const platform = () => get().platform;
 const isDarwin = () => get().platform === 'darwin';
 
-module.exports = { init, get, root, stateDir, claudeHome, platform, isDarwin };
+module.exports = { init, get, root, stateDir, claudeHome, codexHome, platform, isDarwin };

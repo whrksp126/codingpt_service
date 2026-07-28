@@ -14,8 +14,12 @@ const runtime = require('../runtime');
 const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-tx-')));
 const CLAUDE_HOME = path.join(ROOT, '.claude');
 const PROJECTS = path.join(CLAUDE_HOME, 'projects');
+const CODEX_HOME = path.join(ROOT, '.codex');
+const CODEX_SESSIONS = path.join(CODEX_HOME, 'sessions');
 fs.mkdirSync(PROJECTS, { recursive: true });
-runtime.init({ root: ROOT, stateDir: path.join(ROOT, '.codingpt'), claudeHome: CLAUDE_HOME });
+// ★ codexHome 도 반드시 격리한다 — 안 넣으면 기본값이 **사용자 실제 ~/.codex** 라 테스트가
+//  그 머신에 codex 가 깔렸는지에 따라 초록/빨강이 갈린다(2026-07-28 실제로 그렇게 깨졌다).
+runtime.init({ root: ROOT, stateDir: path.join(ROOT, '.codingpt'), claudeHome: CLAUDE_HOME, codexHome: CODEX_HOME });
 
 const T = require('../transcript');
 
@@ -332,18 +336,89 @@ test('metaOf — 제목은 ai-title 우선, tail 만 읽는다', async () => {
 });
 
 // ── 6. 어댑터 ──────────────────────────────────────────────────────
-test('adapterFor — claude 구현 / codex 미실측 / 미지원은 null', async () => {
+test('adapterFor — claude/codex 구현 · 미지원 에이전트는 null', async () => {
   assert.strictEqual(T.adapterFor('claude').name, 'claude');
   assert.strictEqual(T.adapterFor('claude').detect(), true);
-  assert.strictEqual(T.adapterFor('codex').detect(), false, 'codex 는 포맷 미실측 — 추측 구현 금지');
-  assert.strictEqual(T.adapterFor('codex').unmeasured, true);
+  assert.strictEqual(T.adapterFor('codex').name, 'codex');
+  // 아직 ~/.codex/sessions 를 안 만들었으므로 detect()=false — 설치 안 한 PC 와 같은 상태.
+  assert.strictEqual(T.adapterFor('codex').detect(), false, 'sessions 디렉토리가 없으면 꺼져 있어야 한다');
   assert.strictEqual(T.adapterFor('gemini'), null);
   const r = await T.handle('chat.sessions', { cwd: 'ws', agent: 'codex' });
   assert.strictEqual(r.supported, false);
-  assert.strictEqual(r.reason, 'unmeasured');
+  assert.strictEqual(r.reason, 'not_installed');
   const g = await T.handle('chat.sessions', { cwd: 'ws', agent: 'gemini' });
   assert.strictEqual(g.supported, false);
   assert.strictEqual(g.reason, 'unsupported_agent');
+});
+
+// ── 6-b. codex 롤아웃 파싱 (2026-07-28 실측 포맷) ────────────────────
+//  회귀 대상 = "codex 터미널에 claude 대화가 뜬다" 사고. 두 축을 같이 고정한다:
+//   ① codex 롤아웃이 우리 ChatMsg 로 **정확히** 정규화되는가(중복 없이, 도구 짝 맞춰서)
+//   ② agent 를 안 보내면 claude 로 열려 **codex 대화가 안 보이는가**(= 클라가 agent 를 반드시 보내야 함)
+const CODEX_DAY = path.join(CODEX_SESSIONS, '2026', '07', '28');
+function writeCodexRollout(name, cwd, lines) {
+  fs.mkdirSync(CODEX_DAY, { recursive: true });
+  const file = path.join(CODEX_DAY, name);
+  fs.writeFileSync(file, lines.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  return file;
+}
+
+test('codex 어댑터 — 롤아웃 → ChatMsg 정규화(중복 0 · 도구 짝)', async () => {
+  const sid = '019fa709-267a-7912-b1d0-9d760144c69d';
+  const file = writeCodexRollout(`rollout-2026-07-28T13-43-42-${sid}.jsonl`, WS, [
+    { timestamp: TS, type: 'session_meta', payload: { session_id: sid, cwd: WS, originator: 'codex-tui', cli_version: '0.145.0' } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'task_started', turn_id: 't1' } },
+    // 시스템 프롬프트 주입은 response_item/message 로 들어온다 → 화면에 나오면 안 된다.
+    { timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '<permissions instructions>' }] } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'user_message', message: '날씨 물어봐줘' } },
+    // ★ 같은 발화의 모델 원본(response_item/message)도 온다 — 둘 다 그리면 모든 말이 두 번 나온다.
+    { timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '날씨 물어봐줘' }] } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'agent_reasoning', text: '**Thinking**' } },
+    { timestamp: TS, type: 'response_item', payload: { type: 'function_call', name: 'exec_command', call_id: 'call_A', arguments: '{"cmd":"ls -al"}' } },
+    { timestamp: TS, type: 'response_item', payload: { type: 'function_call_output', call_id: 'call_A', output: 'Chunk ID: x\nWall time: 0.1 seconds\nProcess exited with code 0\nOriginal token count: 3\nOutput:\ntotal 0\n' } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'agent_message', message: '어떤 날씨를 좋아하세요?', phase: 'final_answer' } },
+    { timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '어떤 날씨를 좋아하세요?' }] } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'token_count', info: {} } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'task_complete', turn_id: 't1' } },
+  ]);
+  assert.strictEqual(T.adapterFor('codex').detect(), true, 'sessions 가 생기면 자동으로 켜진다');
+
+  const cands = await T.adapterFor('codex').candidates(WS, { limit: 10 });
+  assert.strictEqual(cands.length, 1);
+  assert.strictEqual(cands[0].sessionId, sid);
+  assert.strictEqual(cands[0].file, file);
+
+  const snap = await T.snapshot(file, { maxLines: 200, agent: 'codex' });
+  const kinds = snap.messages.map((m) => `${m.role}/${m.kind}`);
+  assert.deepStrictEqual(kinds, [
+    'user/text', 'assistant/thinking', 'assistant/tool_use', 'user/tool_result', 'assistant/text',
+  ], 'event_msg 만 그린다(response_item/message 중복 금지)');
+  assert.strictEqual(snap.messages[0].text, '날씨 물어봐줘');
+  assert.strictEqual(snap.messages[2].tool.title, '$ ls -al');
+  assert.strictEqual(snap.messages[2].tool.id, 'call_A');
+  assert.strictEqual(snap.messages[3].result.toolUseId, 'call_A', 'call_id 로 도구 결과가 짝지어진다');
+  assert.strictEqual(snap.messages[3].result.ok, true);
+  assert.strictEqual(snap.messages[3].result.preview.trim(), 'total 0', 'codex 머리말은 벗겨낸다');
+  assert.strictEqual(snap.messages[4].text, '어떤 날씨를 좋아하세요?');
+
+  // 목록 메타 — 제목은 첫 사람 발화.
+  const meta = await T.adapterFor('codex').meta(file);
+  assert.strictEqual(meta.title, '날씨 물어봐줘');
+  assert.strictEqual(meta.sessionId, sid);
+});
+
+test('codex — agent 를 안 보내면 claude 로 열려 이 대화가 안 보인다(클라 계약 고정)', async () => {
+  // claude 어댑터에는 이 워크스페이스의 후보가 없다 → noSession. 이게 "codex 터미널에 claude 대화" 사고의
+  //  반대 증명이다: agent 를 실어야만 codex 대화가 열린다.
+  const asClaude = await T.handle('chat.open', { cwd: 'ws-codex-only', tid: 7 });
+  assert.strictEqual(asClaude.agent, 'claude');
+  assert.strictEqual(asClaude.noSession, true);
+});
+
+test('codex — jail 은 sessions 아래로만. auth.json 은 절대 못 읽는다', () => {
+  assert.throws(() => T.safeTranscriptPath(path.join(CODEX_HOME, 'auth.json')), /허용되지 않은 경로/);
+  // 확장자를 .jsonl 로 위장해도 sessions 밖이면 거부.
+  assert.throws(() => T.safeTranscriptPath(path.join(CODEX_HOME, 'auth.jsonl')), /허용되지 않은 경로/);
 });
 
 // ── 7. RPC: 목록 / 스냅샷 / 캐치업 / 로테이션 ───────────────────────
