@@ -61,9 +61,10 @@ export default function DownloadPage() {
         </span>
       </section>
 
-      {/* macOS 미서명 안내(공증 전까지) */}
+      {/* 서명·공증 완료 — 받은 dmg 를 열어 Applications 로 끌어다 놓으면 끝 */}
       <p style={{ fontSize: 12.5, color: 'var(--dim, #6b7688)', textAlign: 'center', marginTop: 14, lineHeight: 1.6 }}>
-        macOS에서 “확인되지 않은 개발자” 안내가 뜨면, 앱을 <b>마우스 오른쪽 클릭 → 열기</b>로 한 번 실행하면 됩니다.
+        Apple 공증을 마친 정식 서명 앱입니다. 받은 파일을 열어 <b>응용 프로그램 폴더로 끌어다 놓으면</b> 설치가 끝나요.
+        설치 후에는 앱이 새 버전을 스스로 확인해 업데이트합니다.
       </p>
 
       {/* 사용 방법 */}

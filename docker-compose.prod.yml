@@ -45,6 +45,16 @@ services:
       - CLOUD_RUNNER_NETWORK=codingpt_prod_codingpt_prod
       # Docker 접근은 raw 소켓 직결 대신 socket-proxy 경유 — back(공개 API)이 호스트 소켓을 직접 안 만짐.
       - DOCKER_HOST=tcp://docker-socket-proxy:2375
+      # 클라우드 실행시간 쿼터 강제 OFF. BYO 피벗으로 SUBSCRIPTION_SALES_ENABLED=false 라 아무도 한도를
+      #  늘려 살 수 없다 — 강제만 켜두면 한도 초과 계정은 402 로 영구히 막힌다(심사 데모 계정이 실제로
+      #  이 상태였다). 실행시간 과금을 되살릴 때 이 줄을 지우고 판매를 함께 연다.
+      #  compose `environment` 가 env_file 보다 우선하므로 .env 의 값과 무관하게 여기가 정본이다.
+      - BILLING_ENFORCE=false
+      # 인앱 "업데이트 확인"(GET /api/app/version)이 비교할 **스토어에 실제로 게시된** 버전.
+      #  기본값이 0.1.0 이라 지금껏 아무에게도 업데이트 안내가 뜨지 않았다. 스토어 심사가 통과해
+      #  새 버전이 실제 게시된 뒤에 올린다 — 미게시 상태로 올리면 없는 버전으로 유도하게 된다.
+      - APP_LATEST_IOS=0.2.2
+      - APP_LATEST_ANDROID=0.2.2
     env_file:
       - ./codingpt_back/.env
     depends_on:
