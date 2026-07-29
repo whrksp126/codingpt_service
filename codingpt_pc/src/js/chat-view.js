@@ -857,7 +857,10 @@ export class ChatView {
   _syncWorking() {
     if (!this.scrollEl) return;
     const st = agentStateOf(this._cwd(), this._tid);
-    const busy = !!st && (st.state === "working" || st.state === "needsInput");
+    // ★ needsInput 은 busy 가 아니다(2026-07-30 실사고): 턴이 끝나고 60초 유휴가 지나면 훅
+    //  Notification(idle_prompt)이 needsInput 을 세우는데 — 이건 "**사용자** 입력 대기"다.
+    //  TUI 는 이때 그냥 유휴 컴포저인데 채팅만 "작업 중…"이 영영 남았다(사용자 신고).
+    const busy = !!st && st.state === "working";
     const on = busy && !this._paneHasQuestionCard() && !this._tuiQuestion() && !this._pending.length;
     let el = this.scrollEl.querySelector(".chat-working");
     if (!on) { el?.remove(); return; }
