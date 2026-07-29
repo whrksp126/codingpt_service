@@ -1387,6 +1387,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   border-radius: var(--r-sm); overflow-x: auto; max-width: 100%;
   font-family: var(--mono-font); font-size: 11.5px; line-height: 16px; color: var(--text3); white-space: pre-wrap;
 }
+/* TUI 미러 본문 — 화면에서 읽어온 줄 구조(명령/설명 줄)를 그대로 보존한다. */
+.apc-prewrap { white-space: pre-wrap; }
 /* diff 프리뷰 — 이전(빨간 표시) → 새(초록 표시) 순서. 데몬이 리댁션·캡을 이미 적용한 값이다. */
 .apc-pre.apc-diff-old { border-left: 2px solid var(--error); }
 .apc-pre.apc-diff-new { border-left: 2px solid var(--accent); }

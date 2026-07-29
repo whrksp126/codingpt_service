@@ -617,6 +617,11 @@ function tuiSlotFor(cwdRel, tid) {
   return null;
 }
 
+/** 모든 TUI 재광고 슬롯 — 리컨실러의 틱 끝 화해("화면에 없으면 카드도 없다")용. */
+function tuiSlots() {
+  return [...pending.values()].filter((s) => s.tuiDrive);
+}
+
 /** TUI 재광고 회수 — 다이얼로그가 사라졌다(로컬에서 답함/세션 종료). retract=true 로 배너까지 걷는다. */
 function cancelTui(id, reason = 'dialog_gone') {
   return settle(id, { decision: 'defer', reason });
@@ -788,7 +793,7 @@ function _reset() {
 
 module.exports = {
   request, handle, resync, list,
-  requestTui, tuiSlotFor, cancelTui, // TUI 폴백 질문 재광고(question-revive)
+  requestTui, tuiSlotFor, tuiSlots, cancelTui, // TUI 폴백 재광고(question-revive)
   cancelBySession, cancelAll, hasPending, pendingCount,
   buildHookOutput, budget, timeoutSec, configure, diffOf,
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)

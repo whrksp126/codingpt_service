@@ -356,6 +356,30 @@ test('FCM payload — 승인은 액션 가능(혼합 전송 + iOS 카테고리 +
   assert.strictEqual(m.apns.payload.aps['interruption-level'], 'time-sensitive');
 });
 
+test('멱등 재등록 — 내용(prompt 등)이 새 payload 로 갱신된다(데몬 업그레이드 반영)', async () => {
+  // 실사고(2026-07-29): 데몬이 0.1.154 로 올라 prompt.mirror 를 실어 재광고해도 back 이 옛 approval 을
+  //  유지해 클라이언트가 영영 옛 카드(기타/보내기 붙은 질문 카드)를 그렸다.
+  const id = 'aprt_' + 'a'.repeat(24);
+  const base = {
+    id, tool: 'AskUserQuestion', summary: 's', waitMs: 60000,
+    prompt: { kind: 'choice', questions: [{ question: 'q', options: [{ label: 'A' }] }] },
+    cwd: 'dev/x', win: 1, requestedAt: Date.now(),
+  };
+  await approvalService.create(7, 42, 'mac', base);
+  await approvalService.create(7, 42, 'mac', {
+    ...base,
+    prompt: { ...base.prompt, mirror: true },
+    summary: '새 요약',
+  });
+  const rec = approvalService._pending.get(id);
+  assert.strictEqual(rec.approval.prompt.mirror, true, '재등록 payload 의 새 필드가 반영돼야 한다');
+  assert.strictEqual(rec.approval.summary, '새 요약');
+  // 정리
+  const s = approvalService._byUser.get('7');
+  approvalService._pending.delete(id);
+  if (s) { s.delete(id); if (!s.size) approvalService._byUser.delete('7'); }
+});
+
 test('호스트 재기동 화해 — 재광고 안 된 유령 카드만 걷고 살아 있는 카드는 남긴다', async () => {
   // 실사고(2026-07-29): PC 앱 업데이트로 데몬이 죽으며 회수(cancel)가 유실 → 낡은 카드가
   //  "눌러야만 409 로 걷히는" 유령으로 잔존. 재접속 후 재광고(advertisedAt 갱신) 여부가 생사 판정.

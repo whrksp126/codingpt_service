@@ -282,7 +282,15 @@ async function create(userId, hostDeviceId, hostName, payload) {
   const existing = pending.get(a.id);
   if (existing) {
     if (String(existing.userId) !== String(userId)) throw err('승인 요청을 찾을 수 없습니다.', 404, 'NOT_FOUND');
-    existing.approval.deadlineAt = a.deadlineAt;
+    // ★ 내용도 갱신한다(2026-07-29 실사고): 데몬이 업그레이드 후 같은 id 로 재광고하면서 payload 에
+    //  새 필드(prompt.mirror 등)를 실어도, 여기서 옛 approval 을 유지하면 클라이언트는 영영 옛 모양
+    //  (기타/보내기 붙은 질문 카드)을 그린다. 알림/식별은 유지하고 표시 재료만 새 값으로 바꾼다.
+    existing.approval = {
+      ...a,
+      hostDeviceId: existing.approval.hostDeviceId,
+      hostName: existing.approval.hostName,
+      notifId: existing.notifId,
+    };
     existing.deadlineAt = a.deadlineAt;
     existing.advertisedAt = now;
     fanout(userId, { kind: 'pending', approval: existing.approval, alertClientKey: existing.alertClientKey || null });

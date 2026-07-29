@@ -1291,16 +1291,17 @@ function dialogIoFor(cwd, tid) {
 }
 
 // ── TUI 권한 다이얼로그 원격 조작(permission-revive 전용) ─────────────────────
-// 훅이 죽어 TUI 로 폴백된 "Do you want to proceed?" 다이얼로그에 카드 응답을 전달한다.
-//  키 프로토콜(claude 2.1.220, 2026-07-29 PTY 실측): **숫자키 한 번**이면 즉시 그 옵션이 실행된다
-//  (Enter 불필요 — '2' 한 키로 규칙 기록+명령 실행까지 확인).
+// 훅이 죽어 TUI 로 폴백된 승인 다이얼로그(claude "Do you want to proceed?" /
+//  codex "Would you like to run the following command?")에 카드 응답을 전달한다.
+//  키 프로토콜(claude 2.1.220 · codex 0.145, 각각 2026-07-29 PTY 실측): **숫자키 한 번**이면
+//  즉시 그 옵션이 실행된다(Enter 불필요).
 //  안전장치는 질문 조작과 동일: 다이얼로그가 실제로 떠 있고 + expect(명령 조각)가 화면에 있어야
 //  키를 친다 — 아니면 숫자가 셸/컴포저에 타이핑된다.
 async function drivePermissionDialog(io, { pick, expect } = {}) {
   const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const n = parseInt(pick, 10);
   if (!(n >= 1 && n <= 9)) throw Object.assign(new Error('선택 번호가 올바르지 않습니다'), { code: 'BAD_REQUEST' });
-  const up = (s) => /Do you want to .{0,120}\?/.test(s) && /Esc to cancel/.test(s);
+  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /esc to cancel/i.test(s);
   const s0 = await io.screen();
   if (!up(s0)) {
     throw Object.assign(new Error('지금 이 터미널에 승인 다이얼로그가 떠 있지 않습니다'), { code: 'QUESTION_NOT_ON_SCREEN' });

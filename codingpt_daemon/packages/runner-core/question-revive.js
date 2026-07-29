@@ -34,28 +34,61 @@ let pokeTimers = [];
 
 function log(msg) { console.log(`[q-revive] ${msg}`); }
 
+// 감시 대상 = **살아 있는 모든 CodingPT 터미널**(2026-07-29 확장 — claude 훅 바인딩 한정 폐지).
+//  codex 등 훅 바인딩이 없는 에이전트의 폴백 다이얼로그도 미러해야 하기 때문. 세션 이름
+//  (cpt-<ws>--t-<tid>)에서 tid 를 얻고, 워크스페이스 상대경로는 세션 env 의 CPT_WS(스폰 시점에
+//  주입되는 정본)로 되찾는다 — 이름 슬러그의 역해석은 손실이 있어 쓰지 않는다.
+const MAX_PANES_PER_TICK = 60; // 폭주 가드(capture-pane 는 로컬 tmux 조회지만 상한은 둔다)
+const cwdBySession = new Map(); // session → cwdRel 캐시(env 는 세션 수명 동안 불변)
+
+async function listPanes(ptyLib) {
+  let out = '';
+  try { out = await ptyLib.runTmux(['list-windows', '-a', '-F', '#{session_name}']); } catch (_) { return []; }
+  const seen = new Set();
+  const panes = [];
+  for (const raw of out.split('\n')) {
+    const sname = raw.trim();
+    const m = /^(.+)--t-(\d+)$/.exec(sname);
+    if (!m || !sname.startsWith('cpt-') || seen.has(sname)) continue;
+    seen.add(sname);
+    panes.push({ session: sname, tid: parseInt(m[2], 10) });
+    if (panes.length >= MAX_PANES_PER_TICK) break;
+  }
+  return panes;
+}
+
+async function cwdRelOf(ptyLib, session) {
+  if (cwdBySession.has(session)) return cwdBySession.get(session);
+  let rel = null;
+  try {
+    const out = await ptyLib.runTmux(['show-environment', '-t', `=${session}`, 'CPT_WS']);
+    const m = /^CPT_WS=(.*)$/m.exec(out || '');
+    if (m) rel = m[1].trim();
+  } catch (_) { rel = null; }
+  if (rel != null) cwdBySession.set(session, rel);
+  return rel;
+}
+
 async function poll() {
   const transcript = require('./transcript');
   const approvals = require('./approvals');
   const ptyLib = require('./pty');
   if (approvals.gateReason && approvals.gateReason()) return; // 승인 기능이 꺼져 있으면 전부 무의미
 
-  let binds = [];
-  try { binds = transcript.listClaudeBinds(); } catch (_) { return; }
-  for (const { cwdRel, tid } of binds) {
+  const panes = await listPanes(ptyLib);
+  const liveDialogs = new Set(); // `${cwdRel}|${tid}` — 이번 틱에 다이얼로그가 확인된 pane
+  for (const { session, tid } of panes) {
     let screen = null;
     try {
-      const { session } = ptyLib.sessionForCwd(cwdRel);
-      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', `=${ptyLib.termSession(session, tid)}:0`]);
-    } catch (_) { screen = null; } // 터미널 없음(닫힘) — 아래 dialogUp=false 경로가 슬롯을 걷는다
+      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', `=${session}:0`]);
+    } catch (_) { screen = null; } // 터미널 없음(닫힘) — 틱 끝의 슬롯 화해가 걷는다
     const questionUp = !!screen && /Enter to select/.test(screen);
     const perm = !questionUp && screen ? parsePermissionDialog(screen) : null;
+    if (!questionUp && !perm) continue;
+    const cwdRel = await cwdRelOf(ptyLib, session);
+    if (cwdRel == null) continue;   // CPT_WS 없는 세션(레거시) — 카드 좌표를 만들 수 없다
+    liveDialogs.add(`${cwdRel}|${tid}`);
     const slot = approvals.tuiSlotFor(cwdRel, tid);
-
-    if (!questionUp && !perm) {
-      if (slot) { approvals.cancelTui(slot.id, 'dialog_gone'); log(`회수 ${slot.id} (다이얼로그 소멸) ws=${cwdRel || '-'} tid=${tid}`); }
-      continue;
-    }
 
     // ── 권한형("Do you want to proceed?") — 화면이 유일한 근거(트랜스크립트에 안 적힌다) ──
     if (perm) {
@@ -91,65 +124,98 @@ async function poll() {
       drive: (outcome) => deliver(cwdRel, tid, q, outcome),
     });
   }
+
+  // ── 틱 끝 화해 — 다이얼로그가 확인되지 않은 pane 의 미러 슬롯을 걷는다(로컬에서 답함/Esc/
+  //  세션 종료/터미널 삭제 전부 이 한 규칙으로 수렴: 화면에 없으면 카드도 없다). ──
+  for (const slot of approvals.tuiSlots()) {
+    if (liveDialogs.has(`${slot.cwdRel}|${slot.tid}`)) continue;
+    approvals.cancelTui(slot.id, 'dialog_gone');
+    log(`회수 ${slot.id} (다이얼로그 소멸) ws=${slot.cwdRel || '-'} tid=${slot.tid}`);
+  }
 }
 
-// ── 권한 다이얼로그 화면 파싱 ────────────────────────────────────────────────
-// 실캡처(claude 2.1.220, 2026-07-29) 기준 구조:
-//   ────────────────────────────────  ← 구분선
-//    Bash command                     ← 제목(도구)
-//    rm …/approval-demo.txt && git -C ← 명령(줄바꿈될 수 있음)
-//    /Users/… status --short
-//    Remove the demo file and …       ← 설명(회색 한 줄, 없을 수 있음)
-//    This command requires approval   ← 있을 수도 없을 수도
-//    Do you want to proceed?
-//    ❯ 1. Yes
-//      2. Yes, and don't ask again for: git -C … status --short
-//      3. No
-//    Esc to cancel · Tab to amend · ctrl+e to explain
+// ── 권한 다이얼로그 화면 파싱(claude + codex 겸용) ──────────────────────────
+// 실캡처 2종(2026-07-29) 기준 구조:
+//  · claude 2.1.220:
+//    ───────────────────              ← 구분선
+//     Bash command                    ← 제목(도구)
+//     rm … && git -C                  ← 명령(줄바꿈될 수 있음)
+//     /Users/… status --short
+//     Remove the demo file and …      ← 설명(회색 한 줄, 없을 수 있음)
+//     This command requires approval
+//     Do you want to proceed?
+//     ❯ 1. Yes / 2. Yes, and don't ask again for: … / 3. No
+//     Esc to cancel · Tab to amend · ctrl+e to explain
+//  · codex 0.145:
+//     Would you like to run the following command?
+//     Environment: local
+//     $ rm x.txt                      ← 본문이 질문 **아래**에 온다
+//     › 1. Yes, proceed (y) / 2. Yes, and don't ask again … / 3. No, and tell Codex …
+//     Press enter to confirm or esc to cancel
+//  두 TUI 모두 **숫자키 한 번**으로 즉시 동작한다(각각 PTY 실측).
 //  ⚠ 화면엔 지난 대화의 다이얼로그 **잔상**이 남을 수 있다 → 질문 줄은 아래에서부터 찾는다(살아
 //   있는 다이얼로그는 항상 화면 맨 아래 블록이다). 옵션 문구는 줄바꿈 연속행을 이어 붙인다.
+//  본문은 **줄 구조를 보존**해 카드가 TUI 와 같은 모양(명령 줄들 + 설명 줄)으로 그리게 한다.
+const QUESTION_LINE_RE = /^\s*(Do you want to|Would you like to) .{0,160}\?\s*$/;
+const FOOTER_RE = /esc to cancel/i; // claude "Esc to cancel · …" / codex "… or esc to cancel"
+
 function parsePermissionDialog(screen) {
   const lines = String(screen || '').split('\n');
-  if (!lines.some((l) => /Esc to cancel/.test(l))) return null;
+  if (!lines.some((l) => FOOTER_RE.test(l))) return null;
   let pi = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^\s*Do you want to .{0,160}\?\s*$/.test(lines[i])) { pi = i; break; }
+    if (QUESTION_LINE_RE.test(lines[i])) { pi = i; break; }
   }
   if (pi < 0) return null;
 
-  // 옵션 — "N. 라벨" 행 + 연속(줄바꿈)행. 푸터를 만나면 끝.
+  // 옵션 + 질문-아래 본문(codex) — "N. 라벨" 행이 나오기 전의 비어있지 않은 줄은 본문이다.
   const options = [];
+  const midBody = [];
   for (let i = pi + 1; i < lines.length; i++) {
     const l = lines[i];
-    if (/Esc to cancel/.test(l)) break;
+    if (FOOTER_RE.test(l)) break;
     const m = /^\s*[❯›>]?\s*([1-9])\.\s+(.*\S)\s*$/.exec(l);
     if (m) { options.push({ n: parseInt(m[1], 10), label: m[2].trim() }); continue; }
     if (!l.trim()) { if (options.length) break; continue; }
     if (options.length) options[options.length - 1].label += ' ' + l.trim(); // 옵션 문구 줄바꿈
+    else midBody.push(l.trim());
   }
   if (options.length < 2) return null;
 
-  // 제목/본문 — 질문 줄 위로 구분선(───)까지 거슬러 올라간다.
+  // 질문-위 본문(claude) — 구분선(───)이나 트랜스크립트 글머리(⏺/•)까지 거슬러 올라간다.
   let top = pi;
   for (let i = pi - 1; i >= 0; i--) {
-    if (/^\s*─{4,}\s*$/.test(lines[i])) break;
+    if (/^\s*─{4,}\s*$/.test(lines[i]) || /^\s*[⏺•✓✳✶✻]/.test(lines[i])) break;
     top = i;
   }
-  const block = lines.slice(top, pi).map((l) => l.trim())
+  const preBody = lines.slice(top, pi).map((l) => l.trim())
     .filter((l) => l && !/^This command requires approval$/.test(l) && !/^─+$/.test(l));
-  const title = block[0] || 'Permission';
-  const body = block.slice(1).join(' ').replace(/\s+/g, ' ').trim();
+  const title = pickTitle(preBody, lines[pi]);
+  // 본문 = 제목을 뺀 나머지 줄들 — **줄바꿈 보존**(카드가 TUI 와 같은 줄 구조로 그린다).
+  const bodyLines = [...preBody.filter((l) => l !== title), ...midBody];
+  const body = bodyLines.join('\n').slice(0, 1000);
 
   // 카드는 화면 문구 그대로 — 질문 1개(단일선택)로 모델링해 기존 선택지 카드/조작 배관을 재사용한다.
   const question = {
-    question: body ? body.slice(0, 500) : (lines[pi] || '').trim(),
+    question: body || (lines[pi] || '').trim(),
     header: title,
     multiSelect: false,
     options: options.map((o) => ({ label: o.label.slice(0, 200) })),
   };
   const key = 'perm|' + crypto.createHash('sha256')
     .update([title, question.question, ...options.map((o) => `${o.n}.${o.label}`)].join('|')).digest('hex').slice(0, 16);
-  return { key, title, tool: toolOfDialogTitle(title), summary: body || title, question, options, expect: body || title };
+  // expect(조작 전 화면 검증용)는 한 줄이어야 한다 — 본문 첫 줄(명령)이 가장 특이적이다.
+  const expect = bodyLines[0] || title;
+  return { key, title, tool: toolOfDialogTitle(title), summary: bodyLines[0] || title, question, options, expect };
+}
+
+// 제목 고르기 — claude 는 질문-위 블록의 첫 줄("Bash command"), codex 는 질문 문구로 유추한다.
+function pickTitle(preBody, questionLine) {
+  if (preBody.length) return preBody[0];
+  const q = String(questionLine || '');
+  if (/run the following command/i.test(q)) return 'Bash command';
+  if (/edit|patch/i.test(q)) return 'Edit file';
+  return q.trim() || 'Permission';
 }
 
 // 다이얼로그 제목 → 도구명(느슨한 매핑 — 못 알아보면 제목 그대로. 카드 제목/푸시 머리에만 쓰인다).

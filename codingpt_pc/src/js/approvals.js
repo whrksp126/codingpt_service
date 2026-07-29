@@ -169,7 +169,8 @@ function buildCard(a) {
         `<span class="apc-qspacer"></span>` +
         `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button></div>` +
       `<div class="apc-body">` +
-        (q.question ? `<div class="apc-summary${a.tool === "Bash" ? " mono" : ""}">${escapeHtml(q.question)}</div>` : "") +
+        // 줄 구조 보존(pre-wrap) — TUI 와 같은 모양: 명령 줄들 + 설명 줄이 그대로 보인다.
+        (q.question ? `<div class="apc-summary apc-prewrap${a.tool === "Bash" ? " mono" : ""}">${escapeHtml(q.question)}</div>` : "") +
       `</div>` +
       `<div class="apc-err hidden"></div>` +
       `<div class="apc-actions"><div class="apc-qopts">` +

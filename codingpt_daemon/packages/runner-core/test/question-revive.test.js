@@ -162,13 +162,48 @@ test('권한 파서 — 실캡처에서 제목/명령/선택지를 화면 문구
   assert.ok(p, '다이얼로그를 인식하지 못했다');
   assert.strictEqual(p.tool, 'Bash');
   assert.strictEqual(p.question.header, 'Bash command');
-  assert.match(p.question.question, /rm \/Users\/u.*status --short/, '줄바꿈된 명령이 이어붙어야 한다');
-  assert.match(p.question.question, /Remove the demo file/);
+  const bodyLines = p.question.question.split('\n');
+  assert.match(bodyLines[0], /^rm \/Users\/u/, '첫 줄은 명령이어야 한다');
+  assert.ok(bodyLines.some((l) => /Remove the demo file/.test(l)), '설명 줄이 별도 줄로 보존돼야 한다(TUI 와 같은 모양)');
   assert.deepStrictEqual(p.options.map((o) => o.n), [1, 2, 3]);
   assert.strictEqual(p.options[0].label, 'Yes');
   assert.match(p.options[1].label, /^Yes, and don.t ask again for: git -C/);
   assert.strictEqual(p.options[2].label, 'No', '❯ 마커가 붙은 옵션도 인식해야 한다');
   assert.ok(p.key.startsWith('perm|'));
+  assert.match(p.expect, /^rm \/Users\/u/, 'expect 는 화면 검증용 한 줄(명령 첫 줄)이어야 한다');
+});
+
+// codex 0.145 실캡처(2026-07-29 PTY) — 질문 아래에 본문($ 명령)이 오는 반대 구조.
+const CODEX_SCREEN = `
+• Running rm x.txt
+
+ Would you like to run the following command?
+
+ Environment: local
+
+ $ rm x.txt
+
+ › 1. Yes, proceed (y)
+   2. Yes, and don't ask again for commands that start with \`rm x.txt\` (p)
+   3. No, and tell Codex what to do differently (esc)
+
+ Press enter to confirm or esc to cancel
+`;
+
+test('권한 파서(codex) — 질문 아래 본문·자체 문구·3옵션을 그대로 뽑는다', () => {
+  const p = qRevive._parsePermissionDialog(CODEX_SCREEN);
+  assert.ok(p, 'codex 다이얼로그를 인식하지 못했다');
+  assert.strictEqual(p.tool, 'Bash');
+  assert.strictEqual(p.question.header, 'Bash command');
+  const bodyLines = p.question.question.split('\n');
+  assert.ok(bodyLines.includes('$ rm x.txt'), '질문 아래 명령 줄이 본문에 있어야 한다');
+  assert.strictEqual(p.options.length, 3);
+  assert.match(p.options[0].label, /^Yes, proceed/);
+  assert.match(p.options[1].label, /don.t ask again for commands that start with/);
+  assert.match(p.options[2].label, /^No, and tell Codex/);
+  // 매핑: 라벨 없는 allow/deny 폴백도 codex 문구에서 동작해야 한다(잠금화면 버튼 등).
+  assert.strictEqual(qRevive._pickForOutcome(p.options, { decision: 'allow' }), 1);
+  assert.strictEqual(qRevive._pickForOutcome(p.options, { decision: 'deny' }), 3);
 });
 
 test('권한 파서 — 질문 다이얼로그/일반 화면은 건드리지 않는다', () => {
@@ -210,6 +245,15 @@ test('권한 조작 — 숫자키 1번으로 끝난다(실측 프로토콜) + �
     cptServer._drivePermissionDialog({ screen: async () => PERM_SCREEN, key: async () => {}, sleep: async () => {} }, { pick: 1, expect: '완전히 다른 명령' }),
     (e) => e.code === 'QUESTION_MISMATCH',
   );
+  // codex 화면도 같은 조작기로 동작해야 한다(문구만 다르고 프로토콜은 동일 — 실측).
+  const ck = [];
+  let cs = CODEX_SCREEN;
+  const cr = await cptServer._drivePermissionDialog(
+    { screen: async () => cs, key: async (k) => { ck.push(k); cs = '$ '; }, sleep: async () => {} },
+    { pick: 1, expect: '$ rm x.txt' },
+  );
+  assert.deepStrictEqual(ck, ['1']);
+  assert.strictEqual(cr.ok, true);
 });
 
 test('권한 재광고 왕복 — 카드(선택지 그대로) → 라벨 응답 → drive 번호 전달', async () => {
