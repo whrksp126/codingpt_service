@@ -226,6 +226,8 @@ test('권한 재광고 왕복 — 카드(선택지 그대로) → 라벨 응답 
   assert.ok(slot, '권한 슬롯이 광고돼야 한다');
   assert.strictEqual(slot.meta.revKind, 'perm');
   assert.strictEqual(slot.payload.tool, 'Bash');
+  assert.strictEqual(slot.payload.prompt.mirror, true,
+    'mirror 표식이 없으면 클라가 질문 카드 부속(기타/건너뛰기/보내기)을 붙인다 — TUI 에 없는 것');
   assert.strictEqual(slot.payload.prompt.questions[0].options.length, 3, 'TUI 선택지 3개가 그대로 실려야 한다');
   await approvals.handle('approval.resolve', {
     id: slot.id, decision: 'answer', answers: [{ questionIndex: 0, labels: [perm.options[1].label] }],

@@ -571,7 +571,10 @@ function requestTui({ cwdRel, tid, sessionId, toolUseId, questions, drive, tool,
     tool: toolName, kind: 'choice',
     summary: clip(summary, SUMMARY_MAX) || (qs[0] && (qs[0].question || qs[0].header)) || `질문 ${qs.length}개`,
     inputPreview: null, questions: qs,
-    prompt: { kind: 'choice', questions: qs },
+    // mirror = TUI 권한 다이얼로그의 화면 미러(2026-07-29). 클라이언트는 이 표식이 있으면 질문 카드
+    //  부속(기타/건너뛰기/보내기) 없이 **선택지만, 누르면 즉시 전송**으로 그린다 — TUI 의 숫자키
+    //  한 번과 동일한 상호작용(TUI 에 없는 것은 카드에도 없다).
+    prompt: { kind: 'choice', questions: qs, ...(revKind === 'perm' ? { mirror: true } : {}) },
     relPath: null, permissionMode: null, transcriptPath: null,
     cwd: cwd || undefined, wsName: cwd ? path.basename(cwd) : undefined,
     win: tid, requestedAt: t0, deadlineAt, waitMs: hardMs,
@@ -645,6 +648,11 @@ function settle(id, outcome, { retract = true } = {}) {
   if (retract && slot.advertised) retractRemote(id, result.reason || result.decision);
   log(`해소 ${id} → ${result.decision}${result.reason ? `(${result.reason})` : ''} ${result.waitedMs}ms`);
   slot.resolve(result);
+  // 훅이 죽거나 마감돼 defer 로 끝났다 = claude 가 곧(1~2초) TUI 다이얼로그를 띄운다 →
+  //  미러 리컨실러를 즉시 당겨 채팅 카드가 주기(4s)를 기다리지 않게 한다(채팅=TUI 원칙).
+  if (result.decision === 'defer' && (result.reason === 'hook_gone' || result.reason === 'timeout')) {
+    try { require('./question-revive').pokeSoon(); } catch (_) { /* 리컨실러 미기동 — 무해 */ }
+  }
   return true;
 }
 

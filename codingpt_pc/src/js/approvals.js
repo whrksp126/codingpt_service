@@ -158,6 +158,39 @@ function buildCard(a) {
   el.dataset.id = a.id;
   if (a.deadlineAt) el.dataset.deadline = String(a.deadlineAt);
 
+  // ★ TUI 미러(prompt.mirror) — 훅이 끊겨 TUI 로 폴백된 **권한 다이얼로그의 화면 미러**(2026-07-29).
+  //  선택지 문구는 화면 그대로이고, 상호작용도 TUI 와 동일하게 **누르면 즉시 전송**이다.
+  //  질문 카드 부속(기타/건너뛰기/보내기/스테퍼)은 TUI 다이얼로그에 없으므로 여기에도 없다.
+  const qsMirror = questionsOf(a);
+  if (isChoice(a) && qsMirror && a.prompt && a.prompt.mirror) {
+    const q = qsMirror[0] || {};
+    el.innerHTML =
+      `<div class="apc-head"><span class="apc-title">${escapeHtml(toolTitle(a.tool))}</span>` +
+        `<span class="apc-qspacer"></span>` +
+        `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button></div>` +
+      `<div class="apc-body">` +
+        (q.question ? `<div class="apc-summary${a.tool === "Bash" ? " mono" : ""}">${escapeHtml(q.question)}</div>` : "") +
+      `</div>` +
+      `<div class="apc-err hidden"></div>` +
+      `<div class="apc-actions"><div class="apc-qopts">` +
+        (q.options || []).map((o, i) => optRowHtml(`mirror:${i}`, o.label || `선택 ${i + 1}`, "", i + 1)).join("") +
+      `</div></div>`;
+    el.addEventListener("click", async (e) => {
+      const btn = e.target.closest?.("[data-act]");
+      if (!btn) return;
+      e.stopPropagation();
+      const act = btn.dataset.act;
+      if (act === "dismiss") { S.dismissApproval(a.id); return; }
+      const m = /^mirror:(\d+)$/.exec(act);
+      if (!m || a._busy) return;
+      const label = ((q.options || [])[parseInt(m[1], 10)] || {}).label;
+      if (!label) return;
+      // TUI 숫자키 한 번과 동일 — 고르는 즉시 전달(데몬이 그 번호를 터미널에 눌러준다).
+      await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [label] }] });
+    });
+    return el;
+  }
+
   // ★ 질문(AskUserQuestion)은 **승인 카드가 아니라 질문 카드**다(사용자 확정 2026-07-28).
   //  '승인 필요' 배지·도구명·「워크스페이스」·호스트·요청 상세는 전부 잡음이다 — 사용자가 볼 것은
   //  질문 하나와 고를 항목뿐이다. 질문이 여러 개면 **한 번에 하나씩**, ‹ › 로 오가며 답한다

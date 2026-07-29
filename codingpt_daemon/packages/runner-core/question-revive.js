@@ -25,9 +25,12 @@
 // 멱등/폭주 안전: requestTui 의 id 는 (cwd|tid|dedupeKey) 해시라 틱이 겹쳐도 1건이고,
 //  back advertise 도 id 멱등이다. 순회 대상은 바인딩 수(작다)이며 capture-pane 은 로컬 tmux 조회다.
 const crypto = require('crypto');
-const POLL_MS = 20 * 1000;
+// 4s: 미러의 체감 지연 상한. capture-pane 은 로컬 tmux 조회(ms 단위)라 바인딩 몇 개 수준에선 공짜에
+//  가깝다. 훅이 끊기는 순간(다이얼로그가 곧 뜨는 타이밍)은 pokeSoon() 이 별도로 즉시 당긴다.
+const POLL_MS = 4 * 1000;
 
 let timer = null;
+let pokeTimers = [];
 
 function log(msg) { console.log(`[q-revive] ${msg}`); }
 
@@ -230,13 +233,34 @@ function toWire(questions, answers) {
 function start() {
   if (timer) return;
   timer = setInterval(() => { poll().catch(() => { /* noop */ }); }, POLL_MS);
-  // 부팅 직후 1회 — 데몬 재시작으로 회수된 배너를 20초 기다리지 않고 되살린다.
-  //  (단 claude 가 다이얼로그를 다시 그리는 데 몇 초 걸리므로 짧은 지연 후.)
-  setTimeout(() => { poll().catch(() => { /* noop */ }); }, 8000);
+  // 부팅 직후 1회 — 데몬 재시작으로 회수된 배너를 주기만큼 기다리지 않고 되살린다.
+  //  (claude 가 다이얼로그를 다시 그리는 데 1~2초 걸리므로 짧은 지연 후.)
+  setTimeout(() => { poll().catch(() => { /* noop */ }); }, 3000);
 }
-function stop() { if (timer) { clearInterval(timer); timer = null; } }
+function stop() {
+  if (timer) { clearInterval(timer); timer = null; }
+  for (const t of pokeTimers) clearTimeout(t);
+  pokeTimers = [];
+}
+
+/**
+ * 즉시 화해 트리거 — "다이얼로그가 곧 뜬다/방금 사라졌다"를 아는 쪽(approvals.settle: 훅 사망·마감)이
+ *  당긴다. 주기(POLL_MS)를 기다리지 않고 1.2s/3.5s 두 번 본다(TUI 가 다이얼로그를 그리는 지연 흡수).
+ */
+function pokeSoon() {
+  if (!timer) return;                       // start 전/stop 후 — 리컨실러가 꺼져 있으면 무의미
+  if (pokeTimers.length >= 4) return;       // 폭주 가드(연쇄 settle 시 중복 예약 방지)
+  for (const ms of [1200, 3500]) {
+    const t = setTimeout(() => {
+      pokeTimers = pokeTimers.filter((x) => x !== t);
+      poll().catch(() => { /* noop */ });
+    }, ms);
+    if (t.unref) t.unref();
+    pokeTimers.push(t);
+  }
+}
 
 module.exports = {
-  start, stop, _poll: poll, _toWire: toWire,
+  start, stop, pokeSoon, _poll: poll, _toWire: toWire,
   _parsePermissionDialog: parsePermissionDialog, _pickForOutcome: pickForOutcome,
 };
