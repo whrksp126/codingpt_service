@@ -22,6 +22,8 @@ import {
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, insertPathAt, flattenFiles, shouldReopenNoSession,
   composerHasText, agentDisplayName, parseComposer, stripTokenOnce,
+  parseComposerScreen, composerCaret, composerCells, cellIndexOf, arrowSeq,
+  inputDelta, COMPOSER_KEYS, popupLines,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -77,8 +79,14 @@ export class ChatView {
     this._noSession = null;
     this._noSessionAt = 0;
     this._probeUntil = 0;   // 첫 메시지 전송 직후의 짧은 탐색 창(훅이 바인딩을 만드는 순간을 잡는다)
-    this._attach = [];      // 드롭 첨부 [{path,name,img,b64,token}] — 드롭 즉시 TUI 컴포저에도 실린다
+    this._attach = [];      // 드롭 첨부 [{path,name,img,b64,token,seen}] — 드롭 즉시 TUI 컴포저에도 실린다
     this._injectQ = null;   // TUI 주입/재동기화 직렬화 체인(연속 드롭·제거가 화면 읽기와 경합 금지)
+    this._agentGone = false;
+    // 컴포저 라이브 미러(2026-07-30 사용자 확정: "TUI 인풋과 채팅 인풋이 실시간 양방향 동기") —
+    //  정본은 **TUI 컴포저 하나**다. 채팅 입력칸은 그 화면을 예쁘게 렌더(토큰=썸네일 칩)하고,
+    //  타이핑은 키 단위로 즉시 PTY 로 흘린다(pane.js input-델타 방식과 동일 규율의 숨은 캡처칸).
+    //  → "글자는 지웠는데 첨부는 살아있는" 류의 불일치가 구조적으로 불가능해진다.
+    this._mirror = { on: false, parsed: null, caret: null, tBuf: "", composing: false, timer: null, iv: null };
     _live.add(this);
   }
 
@@ -96,8 +104,10 @@ export class ChatView {
       <div class="chat-approvals"></div>
       <div class="chat-composer">
         <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
+        <div class="chat-popup hidden"></div>
         <div class="chat-box">
           <div class="chat-att-strip hidden"></div>
+          <div class="chat-cmp hidden"></div>
           <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
@@ -115,6 +125,9 @@ export class ChatView {
     this.apprEl = el.querySelector(".chat-approvals");
     this.inputEl = el.querySelector(".chat-input");
     this.attachEl = el.querySelector(".chat-att-strip");
+    this.cmpEl = el.querySelector(".chat-cmp");
+    this.popupEl = el.querySelector(".chat-popup");
+    this.boxEl = el.querySelector(".chat-box");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
 
@@ -133,15 +146,12 @@ export class ChatView {
     this.jumpEl.addEventListener("click", () => { this._follow = true; this._scrollToBottom(); this._unread = 0; this._syncJump(); });
     this.sendEl.addEventListener("click", () => this._send());
     this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
-    this.inputEl.addEventListener("input", () => {
-      this._autoGrow();
-      this._syncComposer();
-      this.ctx.setDraft?.(this.inputEl.value.slice(0, CHAT.DRAFT_MAX));
-    });
-    // 컴포저 키맵(PC): Enter=전송 · Shift+Enter=개행 · ⌘Enter=전송(Claude 앱 습관) · Esc=TUI 복귀.
-    //  ⌘ 단축키(⌘F/⌘D/⌘W…)는 그대로 통과시켜 앱 동작을 유지한다.
+    // 컴포저 키맵(PC): Enter=전송 · Shift+Enter=개행 · Esc=TUI 복귀. ⌘ 단축키는 통과.
+    //  미러 모드에서는 편집 키(화살표/Home/End/Delete/Tab)를 **TUI 로 전달**한다 — 정본이 TUI 라
+    //  로컬 캐럿이 없다. 문자 입력은 input 델타(아래)로 흐른다.
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.ctrlKey) {
+        if (e.isComposing) return; // 한글 조합 확정 Enter — IME 에 맡긴다
         e.preventDefault();
         e.stopPropagation();
         this._send();
@@ -152,7 +162,61 @@ export class ChatView {
         e.stopPropagation();
         this.inputEl.blur(); // 네이티브/DOM 포커스 순서 사고 예방 — 항상 blur 선행 후 터미널 포커스
         this.ctx.exitChat?.();
+        return;
       }
+      if (!this._mirror.on || e.metaKey || e.ctrlKey || e.isComposing) return;
+      const K = COMPOSER_KEYS;
+      const fwd = e.key === "Enter" && e.shiftKey ? K.newline
+        : e.key === "ArrowLeft" ? K.left : e.key === "ArrowRight" ? K.right
+        : e.key === "ArrowUp" ? K.up : e.key === "ArrowDown" ? K.down
+        : e.key === "Home" ? K.home : e.key === "End" ? K.end
+        : e.key === "Delete" ? K.delete : e.key === "Tab" ? K.tab
+        : e.key === "Backspace" && !this.inputEl.value ? K.backspace : null;
+      if (fwd) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.ctx.tuiWrite?.(fwd);
+      }
+      // Backspace 인데 캡처칸에 로컬 글자가 남아 있으면 기본 동작 → input 델타가 \x7f 로 변환한다.
+    });
+    // 문자 입력(일반 타이핑·한글 IME 조합 전 과정) — pane.js 검증 방식: 캡처칸 값의 델타만 전송.
+    this.inputEl.addEventListener("compositionstart", () => { this._mirror.composing = true; });
+    this.inputEl.addEventListener("compositionend", () => { this._mirror.composing = false; });
+    this.inputEl.addEventListener("input", (e) => {
+      if (!this._mirror.on) {
+        this._autoGrow();
+        this._syncComposer();
+        this.ctx.setDraft?.(this.inputEl.value.slice(0, CHAT.DRAFT_MAX));
+        return;
+      }
+      const v = this.inputEl.value;
+      const d = inputDelta(this._mirror.tBuf, v);
+      if (d.bs) this.ctx.tuiWrite?.(COMPOSER_KEYS.backspace.repeat(d.bs));
+      if (d.add) this.ctx.tuiWrite?.(d.add.replace(/\r?\n/g, COMPOSER_KEYS.newline));
+      this._mirror.tBuf = v;
+      // 조합 중이 아니면 캡처칸을 비워 둔다(값은 TUI 가 정본 — 여기 쌓이면 커서 이동과 어긋난다).
+      if (!(e.isComposing || this._mirror.composing)) { this.inputEl.value = ""; this._mirror.tBuf = ""; }
+    });
+    // 붙여넣기 — TUI 로 bracketed paste(이미지 경로 [Image #N] 변환·멀티라인 안전).
+    this.inputEl.addEventListener("paste", (e) => {
+      if (!this._mirror.on) return;
+      e.preventDefault();
+      const txt = e.clipboardData?.getData("text/plain");
+      if (txt) this.ctx.tuiPaste?.(txt);
+    });
+    // 미러 렌더 영역 — 클릭=입력 포커스(캡처칸으로), 칩 ✕=원자 삭제, 칩 몸통=미리보기.
+    this.cmpEl.addEventListener("mousedown", (e) => {
+      const x = e.target.closest?.(".chat-chip-x");
+      if (x) { e.preventDefault(); this._chipDelete(x.closest(".chat-chip")?.dataset.tok); return; }
+      const chip = e.target.closest?.(".chat-chip");
+      if (chip) {
+        e.preventDefault();
+        const a = this._attach.find((t) => t.token === chip.dataset.tok);
+        if (a) this._openPreview(a);
+        return;
+      }
+      e.preventDefault();
+      try { this.inputEl.focus(); } catch (_) { /* noop */ }
     });
     // 본문 위임 클릭: 코드 복사 / 링크 외부 열기 / 결과 펼치기 / 파일 열기 / thinking 토글 / 첨부
     this.scrollEl.addEventListener("click", (e) => this._onBodyClick(e));
@@ -174,6 +238,10 @@ export class ChatView {
       this._retarget();          // 활성 터미널 탭 기준으로 열기(변경됐으면 재오픈)
       this._startPoll();
       this._renderApprovals();
+      // 컴포저 라이브 미러 — 즉시 1회 + 안전망 인터벌(출력 콜백이 유실돼도 2s 안에 따라잡는다).
+      this._mirrorTick();
+      clearInterval(this._mirror.iv);
+      this._mirror.iv = setInterval(() => this._mirrorTick(), 2000);
       // 진입 즉시 컴포저 포커스(레이아웃 확정 후 한 프레임 뒤 — display 전환 직후 focus 는 무시된다)
       requestAnimationFrame(() => {
         if (!this._visible || this._disposed) return;
@@ -182,6 +250,9 @@ export class ChatView {
       });
     } else {
       this._stopPoll();
+      clearInterval(this._mirror.iv);
+      this._mirror.iv = null;
+      clearTimeout(this._mirror.timer);
     }
   }
 
@@ -566,8 +637,8 @@ export class ChatView {
       added.push(a);
       if (a.img) {
         api.filePreviewB64(p)
-          .then((b64) => { a.b64 = b64; this._renderAttach(); })
-          .catch(() => { a.img = false; this._renderAttach(); }); // 8MB 초과 등 — 파일칩으로 강등
+          .then((b64) => { a.b64 = b64; this._renderAttach(); this.termActivity(); })
+          .catch(() => { a.img = false; this._renderAttach(); this.termActivity(); }); // 8MB 초과 등 — 칩 강등
       }
     }
     this._renderAttach();
@@ -606,7 +677,10 @@ export class ChatView {
       a.token = pasted ? (a.img && k < fresh.length ? `[Image #${fresh[k++]}]` : shq(a.path)) : null;
       if (a.token) toks.push(a.token);
     }
-    if (toks.length) this._insertAtCursor(toks.join(" ") + " ");
+    // 미러 모드는 파스가 토큰/칩을 알아서 그린다 — 폴백(미러 불가) 때만 입력칸에 토큰을 삽입.
+    if (toks.length && !this._mirror.on) this._insertAtCursor(toks.join(" ") + " ");
+    // 토큰 부여 직후 재렌더 트리거 — 이 시점엔 터미널 출력이 더 없어 파스 틱이 저절로 오지 않는다.
+    if (this._mirror.on) this.termActivity();
   }
 
   // 입력칸 커서 위치에 토큰 삽입(사용자 요구: "지금 커서가 있는 곳에") — 커서는 삽입분 뒤로.
@@ -694,6 +768,157 @@ export class ChatView {
     document.body.appendChild(ov);
   }
 
+  // ── 컴포저 라이브 미러 엔진 ──────────────────────────────────────────────
+  //  pane 이 터미널 출력마다 termActivity() 를 부른다(xterm write 콜백 — 파싱 완료 후라 화면이 최신).
+  //  디바운스 후 화면을 파싱해 렌더. 안전망으로 가시 상태 동안 2s 인터벌도 돈다.
+  termActivity() {
+    if (!this._visible || this._disposed) return;
+    clearTimeout(this._mirror.timer);
+    this._mirror.timer = setTimeout(() => this._mirrorTick(), 50);
+  }
+
+  // 빈 컴포저의 자리표시 힌트(dim 'Try "..."')는 텍스트가 아니다 — 실측 화면 기준 판별.
+  _placeholderText(t) { return /^Try ".*"?$/.test(String(t || "").trim()); }
+
+  _mirrorTick() {
+    if (!this._visible || this._disposed || !this.cmpEl) return;
+    const lines = this.ctx.screenLines?.();
+    const cur = this.ctx.cursorPos?.();
+    const cols = this.ctx.termCols?.();
+    let parsed = lines && lines.length ? parseComposerScreen(lines, cols) : { found: false };
+    // 미러 성립 조건: 컴포저가 실제로 화면에 있고(found), 다이얼로그 선택지(❯ 1. …)가 아니고,
+    //  에이전트가 살아 있어야 한다(죽으면 셸 프롬프트 ❯ 를 컴포저로 오인해 셸에 타이핑하게 된다).
+    const dialogish = parsed.found && /^\d+\.\s/.test(parsed.text.trimStart());
+    const on = !!(parsed.found && !dialogish && !this._agentGone && !this._tuiQuestion());
+    if (parsed.found && this._placeholderText(parsed.text)) parsed = { ...parsed, text: "", nums: [], empty: true };
+    this._mirror.parsed = on ? parsed : null;
+    this._mirror.caret = on && cur ? composerCaret(parsed, cur.x, cur.y) : null;
+    this._setMirrorMode(on);
+    if (on) {
+      this._reconcileAttach(parsed);
+      this._renderMirror(parsed, lines);
+    }
+    this._syncComposer();
+  }
+
+  _setMirrorMode(on) {
+    if (this._mirror.on === !!on) return;
+    this._mirror.on = !!on;
+    this.boxEl?.classList.toggle("mirror", this._mirror.on);
+    this.cmpEl?.classList.toggle("hidden", !this._mirror.on);
+    if (!this._mirror.on) {
+      this.popupEl?.classList.add("hidden");
+      this._mirror.tBuf = "";
+      if (this.inputEl) this.inputEl.value = "";
+    } else {
+      this._autoGrow(); // 캡처칸은 1px — 폴백 높이 잔재 제거
+    }
+    this._renderAttach(); // 폴백 전용 스트립 노출 갱신
+  }
+
+  // 파싱된 컴포저 → 렌더: 텍스트 런 + [Image #N] 칩(썸네일·✕) + 캐럿. 정본은 TUI 화면이다.
+  _renderMirror(parsed, lines) {
+    const caret = this._mirror.caret;
+    const cells = composerCells(parsed.text);
+    let html = "";
+    let pos = 0;
+    const caretHtml = `<span class="chat-caret"></span>`;
+    for (let i = 0; i < cells.length; i++) {
+      if (caret === pos) html += caretHtml;
+      const c = cells[i];
+      if (c.str) {
+        const a = this._attach.find((t) => t.token === c.str);
+        const thumb = a && a.img && a.b64
+          ? `<img class="chat-chip-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
+          : ""; // 경로를 모르는 토큰(TUI 쪽에서 넣은 것) — 라벨만
+
+        html += `<span class="chat-chip" data-tok="${escapeHtml(c.str)}" title="${escapeHtml(a ? a.path : c.str)}">` +
+          thumb + `<span class="chat-chip-label">Image #${c.img}</span>` +
+          `<button class="chat-chip-x" type="button" data-cell="${i}" title="빼기">✕</button></span>`;
+        pos += c.str.length;
+      } else if (c.ch === "\n") {
+        html += "<br>";
+        pos += 1;
+      } else {
+        html += escapeHtml(c.ch);
+        pos += 1;
+      }
+    }
+    if (caret != null && caret >= pos) html += caretHtml;
+    if (!cells.length) html = caretHtml + `<span class="chat-cmp-ph">${escapeHtml(this._mirrorPlaceholder())}</span>`;
+    // (조합 중 로컬 글자는 덧그리지 않는다 — 델타가 즉시 TUI 로 가서 에코가 파스에 이미 실린다.
+    //  여기서 또 그리면 이중 표시가 된다. 원격 지연 시 잠깐 늦게 보이는 쪽이 정직하다.)
+    this.cmpEl.innerHTML = html;
+    // TUI 자동완성 팝업 패스스루('/'·'@') — Enter 가 전송이 아니라 '선택'인 상태를 보여준다.
+    const pop = popupLines(lines, parsed);
+    this.popupEl.classList.toggle("hidden", !pop.length);
+    if (pop.length) this.popupEl.innerHTML = pop.map((l) => `<div class="chat-popup-row">${escapeHtml(l)}</div>`).join("");
+  }
+
+  _mirrorPlaceholder() {
+    const name = agentDisplayName(this._agent);
+    return name ? name + "에게 요청" : "메시지 보내기";
+  }
+
+  // 파스에서 사라진 토큰의 첨부는 걷는다(사용자가 TUI/백스페이스로 지웠다) — seen 마크 후에만.
+  _reconcileAttach(parsed) {
+    let changed = false;
+    this._attach = this._attach.filter((a) => {
+      if (!a.token || !a.token.startsWith("[Image")) return true; // 파일 경로 토큰은 텍스트라 파스로 판별
+      const present = parsed.text.includes(a.token);
+      if (present) a.seen = true;
+      else if (a.seen) { changed = true; return false; }
+      return true;
+    });
+    if (changed) this._renderAttach();
+  }
+
+  // 칩 ✕ — 셀 모델로 TUI 커서를 토큰 뒤에 세우고 백스페이스 1회(원자 삭제 실측).
+  //  클릭 시점 파스에서 토큰으로 셀을 재계산한다(렌더 후 컴포저가 변했을 수 있다 — 인덱스 고정 금지).
+  //  멀티라인 컴포저는 셀 걸음 수와 화면 행이 어긋날 수 있어 C-u 재동기화로 폴백.
+  _chipDelete(token) {
+    const p = this._mirror.parsed;
+    if (!p || !token) return;
+    if (p.multiRow) { this._tuiChain(() => this._resyncTui()); return; }
+    const cells = composerCells(p.text);
+    const cellIdx = cells.findIndex((c) => c.str === token);
+    if (cellIdx < 0) return;
+    const stepsFromEnd = cells.length - cellIdx - 1;
+    this.ctx.tuiWrite?.(COMPOSER_KEYS.end + arrowSeq(-stepsFromEnd) + COMPOSER_KEYS.backspace);
+    try { this.inputEl.focus(); } catch (_) { /* noop */ }
+  }
+
+  // 미러 전송 — 컴포저에 이미 다 실려 있으므로 Enter 만 보낸다. 팝업이 열려 있으면 Enter=선택
+  //  (전송 아님)이라 낙관 버블을 만들지 않는다 — 결과는 미러가 그대로 보여준다.
+  _mirrorSend() {
+    const p = this._mirror.parsed;
+    if (!p) return;
+    const lines = this.ctx.screenLines?.() || [];
+    const popOpen = popupLines(lines, p).length > 0;
+    const hasBody = !!String(p.text || "").trim();
+    if (!popOpen && !hasBody) return;
+    this.ctx.tuiWrite?.(COMPOSER_KEYS.enter);
+    this.inputEl.value = "";
+    this._mirror.tBuf = "";
+    if (popOpen) return;
+    if (this._noSession) this._probeUntil = Date.now() + CHAT.NO_SESSION_PROBE_MS;
+    this._clearBlank();
+    // 낙관 버블 — 표시 본문은 토큰을 걷어낸 텍스트, 썸네일은 매칭된 첨부.
+    const att = this._attach.filter((a) => a.token && p.text.includes(a.token));
+    let body = p.text;
+    for (const a of att) body = stripTokenOnce(body, a.token);
+    const seq = this._optSeq--;
+    const opt = { seq, role: "user", kind: "text", text: body.trim(), ts: Date.now(), hidden: false, optimistic: true, optAttach: att.slice() };
+    this._msgs = [...this._msgs, opt];
+    const el = this._buildRow(opt);
+    this._els.set(seq, el);
+    this.scrollEl.appendChild(el);
+    this._pending.push({ key: optimisticKey(body || "[첨부]"), at: Date.now(), seq, any: att.length > 0 || p.nums.length > 0 });
+    this._scrollToBottom();
+    this._attach = [];
+    this._renderAttach();
+  }
+
   _attachMime(a) {
     const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", heic: "image/heic", tiff: "image/tiff" };
     return MIME[a.ext] || "image/png";
@@ -710,7 +935,8 @@ export class ChatView {
 
   _renderAttach() {
     if (!this.attachEl) return;
-    this.attachEl.classList.toggle("hidden", !this._attach.length);
+    // 미러 모드에서는 위 스트립을 쓰지 않는다(사용자 확정: 인라인 칩만) — 폴백 모드 전용.
+    this.attachEl.classList.toggle("hidden", this._mirror.on || !this._attach.length);
     this.attachEl.innerHTML = this._attach.map((a, i) => this._attachChipHtml(a, i, true)).join("");
   }
 
@@ -853,6 +1079,8 @@ export class ChatView {
   async _send() {
     // 첨부 주입/재동기화가 진행 중이면 끝난 뒤에 — 토큰·컴포저가 반쯤 동기화된 채 Enter 금지.
     if (this._injectQ) { try { await this._injectQ; } catch (_) { /* noop */ } }
+    // 미러 모드 = TUI 컴포저가 정본 → Enter 만 보낸다(본문·첨부 모두 이미 실려 있다).
+    if (this._mirror.on) { this._mirrorSend(); return; }
     const raw = String(this.inputEl.value || "");
     const att = this._attach.slice();
     if (!raw.trim() && !att.length) return;
@@ -1024,10 +1252,17 @@ export class ChatView {
   }
 
   // 고른 파일 = 워크스페이스 상대 경로를 커서 위치에 삽입(뒤에 공백 1칸 — 이어서 문장을 쓰게).
+  //  미러 모드에서는 TUI 컴포저(정본)의 커서 위치에 paste — 렌더는 파스가 따라온다.
   _pickFile(full) {
     if (!full) return;
-    const ta = this.inputEl;
     const r = relToRoot(this._cwd() || "", full);
+    if (this._mirror.on) {
+      this.ctx.tuiPaste?.(r + " ");
+      this._closePicker();
+      try { this.inputEl.focus(); } catch (_) { /* noop */ }
+      return;
+    }
+    const ta = this.inputEl;
     const { value, caret } = insertPathAt(ta.value, ta.selectionStart, ta.selectionEnd, r);
     ta.value = value;
     ta.setSelectionRange(caret, caret);
@@ -1140,6 +1375,7 @@ export class ChatView {
   _autoGrow() {
     const t = this.inputEl;
     if (!t) return;
+    if (this._mirror.on) { t.style.height = ""; return; } // 미러 모드: 캡처칸은 CSS 가 1px 로 고정
     if (t.offsetParent === null) return;
     t.style.height = "auto";
     t.style.height = Math.min(Math.max(t.scrollHeight, 22), 150) + "px";
@@ -1149,7 +1385,10 @@ export class ChatView {
   //  ★ 전송 버튼을 "빈 입력에도 눌리는 것처럼" 두지 않는다: 눌러도 아무 일이 없는 버튼은 거짓 affordance 다
   //   (표시 정직성). 숨기지 않고 **disabled + 흐리게** 두는 이유는 위치 학습을 깨지 않기 위함이다.
   _syncComposer() {
-    const has = !!composerHasText(this.inputEl?.value) || !!(this._attach && this._attach.length);
+    // 미러 모드: 정본은 TUI 컴포저 — 파스된 본문(placeholder 제외)이 있으면 보낼 수 있다.
+    const has = this._mirror.on
+      ? !!String(this._mirror.parsed?.text || "").trim()
+      : (!!composerHasText(this.inputEl?.value) || !!(this._attach && this._attach.length));
     if (this.sendEl) this.sendEl.disabled = !has;
     if (this.inputEl) {
       const name = agentDisplayName(this._agent);
@@ -1164,14 +1403,19 @@ export class ChatView {
     this.bannerEl.textContent = msg || "";
   }
   // 에이전트가 종료됐을 때 pane 이 부른다 — 모드는 유지하고 배너만(사용자 의사 없이 화면 전환 금지).
+  //  미러도 여기서 내린다: 죽은 뒤의 ❯ 는 셸 프롬프트일 수 있어 타이핑이 셸로 새면 안 된다.
   setAgentGone(gone) {
+    this._agentGone = !!gone;
     if (gone) this._setBanner("에이전트가 종료됐어요 · 토글로 터미널(TUI)로 돌아갈 수 있습니다", "warn");
     else if (/에이전트가 종료/.test(this.bannerEl?.textContent || "")) this._setBanner("");
+    if (this._visible) this._mirrorTick();
   }
 
   dispose() {
     this._disposed = true;
     this._stopPoll();
+    clearInterval(this._mirror.iv);
+    clearTimeout(this._mirror.timer);
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,

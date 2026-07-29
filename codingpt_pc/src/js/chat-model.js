@@ -297,3 +297,132 @@ export function stripTokenOnce(s, tok) {
   else if (a.endsWith(" ")) a = a.slice(0, -1);
   return a + b;
 }
+
+// ── 컴포저 라이브 미러의 순수 규칙(2026-07-30 cptest 실측 계약 — 추측 아님) ──
+//  · 프롬프트는 "❯" + NBSP( ). 연속줄(랩·M-Enter 개행 모두)은 2칸 들여쓰기.
+//  · [Image #N] 토큰 = 커서 1스텝·백스페이스/DC 1회의 **원자 셀**.
+//  · 랩과 개행은 화면만으로 완전 구분 불가 → "이전 줄이 가득 찼으면 랩" 휴리스틱으로 이어붙인다.
+//  · 커서 좌표(xterm cursorX/Y)는 컴포저 행 안에서 col-2 가 텍스트 인덱스.
+
+export const IMG_TOKEN_RE = /\[Image #(\d+)\]/g;
+
+// 화면 lines(+cols) → 컴포저 구조. found=false 면 미러 불가(다이얼로그/에이전트 부재 등).
+//  rows: [{row, text}] — 화면 행 단위 원문. text: 랩 이어붙임+개행 보존한 논리 텍스트.
+export function parseComposerScreen(lines, cols) {
+  const arr = Array.isArray(lines) ? lines : [];
+  let s = -1;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (/^\s*❯/.test(String(arr[i] ?? ""))) { s = i; break; }
+  }
+  if (s < 0) return { found: false, row0: -1, rows: [], text: "", nums: [], multiRow: false };
+  const rows = [{ row: s, text: String(arr[s]).replace(/^\s*❯[\s ]?/, "") }];
+  for (let i = s + 1; i < arr.length; i++) {
+    const ln = String(arr[i] ?? "");
+    if (/^\s*─{4,}/.test(ln) || /^\s*$/.test(ln)) break;
+    rows.push({ row: i, text: ln.replace(/^ {0,2}/, "") });
+  }
+  // 랩 판정: 이전 행 텍스트가 폭을 가득 채웠으면(≥ cols-2) 랩 → 그대로 이어붙임, 아니면 개행.
+  const width = Number(cols) > 4 ? Number(cols) - 2 : Infinity;
+  let text = rows[0].text;
+  for (let k = 1; k < rows.length; k++) {
+    text += (rows[k - 1].text.length >= width ? "" : "\n") + rows[k].text;
+  }
+  const nums = [];
+  for (const m of text.matchAll(IMG_TOKEN_RE)) nums.push(parseInt(m[1], 10));
+  return { found: true, row0: s, rows, text, nums, multiRow: rows.length > 1, _width: width };
+}
+
+// 커서 좌표 → 논리 텍스트 인덱스. 컴포저 밖이면 null. 행 끝 너머(트림된 공백)는 행 끝으로 클램프.
+//  앞 행 합산은 parseComposerScreen 의 랩/개행 규칙과 **동일해야** 한다(개행이면 '\n' 1글자 가산).
+export function composerCaret(parsed, cx, cy) {
+  if (!parsed || !parsed.found) return null;
+  const ri = parsed.rows.findIndex((r) => r.row === cy);
+  if (ri < 0) return null;
+  let base = 0;
+  for (let k = 0; k < ri; k++) {
+    base += parsed.rows[k].text.length;
+    base += parsed.rows[k].text.length >= parsed._width ? 0 : 1;
+  }
+  const col = Math.max(0, Math.min(Number(cx) - 2, parsed.rows[ri].text.length));
+  return Math.min(base + col, parsed.text.length);
+}
+
+// 셀 목록: 텍스트를 [Image #N] 원자 토큰과 일반 글자로 분해. 커서/삭제 구동의 단위.
+export function composerCells(text) {
+  const src = String(text || "");
+  const cells = [];
+  let last = 0;
+  for (const m of src.matchAll(IMG_TOKEN_RE)) {
+    for (const ch of src.slice(last, m.index)) cells.push({ ch });
+    cells.push({ img: parseInt(m[1], 10), str: m[0] });
+    last = m.index + m[0].length;
+  }
+  for (const ch of src.slice(last)) cells.push({ ch });
+  return cells;
+}
+
+// 문자 인덱스 → 셀 인덱스(토큰 내부는 토큰 셀로 스냅).
+export function cellIndexOf(cells, charIdx) {
+  let pos = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const len = cells[i].str ? cells[i].str.length : 1;
+    if (charIdx < pos + len) return charIdx <= pos ? i : i + (cells[i].str ? 1 : 0);
+    pos += len;
+  }
+  return cells.length;
+}
+
+// 셀 델타 → 화살표 시퀀스(오른쪽 양수). 토큰=1스텝(실측 원자성)이 이 모델의 존재 이유다.
+export function arrowSeq(delta) {
+  const n = Math.abs(Number(delta) || 0);
+  if (!n) return "";
+  return (Number(delta) > 0 ? "\x1b[C" : "\x1b[D").repeat(n);
+}
+
+// 입력 델타(pane.js input-델타 방식과 동일 규율): 이전/현재 textarea 값 → {bs, add}.
+//  숨은 캡처칸은 끝에서만 자란다(화살표는 preventDefault) → 공통 접두사 비교로 충분하다.
+export function inputDelta(prev, next) {
+  const a = String(prev || "");
+  const b = String(next || "");
+  let p = 0;
+  const max = Math.min(a.length, b.length);
+  while (p < max && a[p] === b[p]) p++;
+  return { bs: a.length - p, add: b.slice(p) };
+}
+
+// 특수키 → PTY 시퀀스(claude 컴포저 실측: M-Enter=개행 · DC=forward delete · Home/End=\e[1~/\e[4~).
+export const COMPOSER_KEYS = {
+  enter: "\r",
+  newline: "\x1b\r",
+  backspace: "\x7f",
+  delete: "\x1b[3~",
+  left: "\x1b[D",
+  right: "\x1b[C",
+  up: "\x1b[A",
+  down: "\x1b[B",
+  home: "\x1b[1~",
+  end: "\x1b[4~",
+  tab: "\t",
+};
+
+// 미러 전송 가능 판정 — 컴포저가 실제로 화면에 있고(found) 다이얼로그가 아닐 때만.
+export function mirrorReady(parsed) {
+  return !!(parsed && parsed.found);
+}
+
+// 팝업 패스스루: 컴포저가 '/'·'@' 로 시작하면 컴포저 위 룰 위쪽의 인접 행들을 원문 그대로 보여준다
+//  (TUI 자동완성 — Enter 가 '전송'이 아니라 '선택'이 되는 상태를 사용자가 볼 수 있어야 한다).
+export function popupLines(lines, parsed, max = 8) {
+  if (!parsed || !parsed.found) return [];
+  const t = parsed.text.trimStart();
+  if (!(t.startsWith("/") || t.startsWith("@"))) return [];
+  const arr = Array.isArray(lines) ? lines : [];
+  // 컴포저 바로 위 룰(row0-1)을 건너뛰고, 빈 줄/다음 룰 전까지 위로 수집.
+  const out = [];
+  for (let i = parsed.row0 - 2; i >= 0 && out.length < max; i--) {
+    const ln = String(arr[i] ?? "");
+    if (/^\s*$/.test(ln) || /^\s*─{4,}/.test(ln)) break;
+    out.unshift(ln);
+  }
+  return out;
+}

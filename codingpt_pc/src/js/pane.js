@@ -1365,6 +1365,12 @@ export class PaneView {
       },
       // 라이브 화면(스크롤백 제외 하단 rows) — 채팅이 컴포저의 [Image #N] 번호를 읽는 근거.
       screenLines: () => this._screenLines(),
+      // 컴포저 라이브 미러용: 커서 좌표(뷰포트 기준)와 열 수 — 캐럿 매핑·랩 판정의 근거.
+      cursorPos: () => {
+        const b = this.term?.buffer?.active;
+        return b ? { x: b.cursorX, y: b.cursorY } : null;
+      },
+      termCols: () => this.term?.cols || 0,
       // 컴포저 `+` 파일 목록의 출처 — IDE 트리와 **같은 제공자**(로컬 api / 원격 makeRemoteFs).
       //  라이브 getter 인 이유는 `_ideFs()` 와 동일: 재클레임으로 host 가 바뀌면 그때의 값이어야 한다.
       fs: () => this._ideFs() || api,
@@ -1647,7 +1653,10 @@ export class PaneView {
     return out;
   }
   _termOut(data) {
-    this.term?.write(data);
+    // write 콜백 = xterm 파싱 완료 시점(화면 최신) — 채팅 컴포저 미러가 이 신호로 파스한다.
+    //  chat 미가동/비가시 시 termActivity 가 스스로 무시하므로 여기선 존재만 본다.
+    if (this.chat) this.term?.write(data, () => this.chat?.termActivity?.());
+    else this.term?.write(data);
   }
   _onData(b64) {
     this._termOut(b64ToBytes(b64));

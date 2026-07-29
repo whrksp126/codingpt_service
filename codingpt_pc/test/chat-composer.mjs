@@ -334,5 +334,94 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("주입은 insertText(bracketed paste) 경로다", /tuiPaste:\s*\(text\)[\s\S]{0,120}insertText\(text\)/.test(pj));
 }
 
+
+// ── 컴포저 라이브 미러 순수 규칙(2026-07-30 실측: 원자 토큰·NBSP 프롬프트·랩 휴리스틱·커서 매핑) ──
+{
+  // 실측: 프롬프트는 "❯"+NBSP. 커서 x=19 가 텍스트 끝(len 17)일 때의 실캡처 형태.
+  const ROW = "❯ abc [Image #1] de";
+  const P = M.parseComposerScreen(["────────", ROW, "────────", "   status"], 100);
+  ok("NBSP 프롬프트도 잡는다", P.found && P.text === "abc [Image #1] de", P.text);
+  eq("이미지 번호", P.nums, [1]);
+  eq("커서 끝(x=19)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 19, 1), 17);
+  eq("커서 토큰 뒤 공백(x=16 — Left×3 실측)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 16, 1), 14);
+  eq("커서 토큰 앞(x=6 — Left 1회가 토큰 전체를 건넌 실측)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 6, 1), 4);
+
+  // 셀 모델: 토큰=1셀(커서 1스텝·삭제 1회의 원자 단위)
+  const cells = M.composerCells("abc [Image #1] de");
+  eq("셀 수(3+1+토큰+1+2)", cells.length, 8);
+  ok("토큰 셀", cells[4].img === 1 && cells[4].str === "[Image #1]");
+  eq("토큰 시작 문자 → 토큰 셀", M.cellIndexOf(cells, 4), 4);
+  eq("토큰 뒤 문자 → 다음 셀", M.cellIndexOf(cells, 14), 5);
+  eq("화살표 시퀀스(←2)", M.arrowSeq(-2), "\x1b[D\x1b[D");
+
+  // 멀티라인(M-Enter): 이전 행이 짧으면 개행으로 잇는다(실측: 연속줄 2칸 들여쓰기)
+  const P2 = M.parseComposerScreen(["────", "❯ abc  de", "  line2", "────", " st"], 100);
+  eq("개행 보존", P2.text, "abc  de\nline2");
+  ok("multiRow", P2.multiRow === true);
+  eq("2행 커서(x=7)", M.composerCaret(P2, 7, 2), 13);
+  // 랩: 이전 행이 폭(cols-2)을 가득 채우면 이어붙인다 — 갈라진 토큰이 nums 에 잡히는 근거
+  const full = "x".repeat(6) + "[Image #";
+  const P3 = M.parseComposerScreen(["────", "❯ " + full, "  22]", "────"], 16);
+  eq("랩 이어붙임 — 갈라진 토큰", P3.nums, [22]);
+
+  // 입력 델타(pane.js input-델타 규율): 한글 조합 교체·추가·삭제
+  eq("조합 교체", M.inputDelta("싴", "시간"), { bs: 1, add: "시간" });
+  eq("추가", M.inputDelta("", "가"), { bs: 0, add: "가" });
+  eq("끝 삭제", M.inputDelta("ab", "a"), { bs: 1, add: "" });
+
+  // 팝업 패스스루: '/' 로 시작할 때 컴포저 위 룰 위쪽 인접 행(빈 줄/룰에서 멈춤)
+  const LINES = [
+    " notice", "", "  /model  desc1", "  /mobile desc2", "────────",
+    "❯ /mo", "────────", " status",
+  ];
+  const P4 = M.parseComposerScreen(LINES, 100);
+  eq("팝업 행 수집", M.popupLines(LINES, P4), ["  /model  desc1", "  /mobile desc2"]);
+  eq("일반 텍스트엔 팝업 없음", M.popupLines(["  row", "────", "❯ hello", "────"], M.parseComposerScreen(["  row", "────", "❯ hello", "────"], 100)), []);
+
+  // 특수키 시퀀스 — 실측값 핀(M-Enter=개행, DC, Home/End)
+  eq("개행 키", M.COMPOSER_KEYS.newline, "\x1b\r");
+  eq("forward delete", M.COMPOSER_KEYS.delete, "\x1b[3~");
+}
+
+
+// ── 라이브 미러 배선 소스 핀(순수 규칙은 위에서 실행 검증 — 여기는 접점만) ──
+{
+  const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
+  ok("미러 전송 = Enter 만(정본이 TUI 컴포저)", /_mirror\.on\)\s*\{\s*this\._mirrorSend\(\);\s*return;/.test(cv));
+  ok("문자 입력은 input 델타로 PTY 에 흐른다", /inputDelta\(this\._mirror\.tBuf/.test(cv));
+  ok("편집 키(화살표/Home/End/DC)를 TUI 로 전달한다", /ArrowLeft.*K\.left/.test(cv) && /Delete.*K\.delete/.test(cv));
+  ok("죽은 에이전트의 ❯(셸 프롬프트)엔 미러 금지", /_agentGone && !this\._tuiQuestion/.test(cv.replace(/\n/g, " ")) || /!this\._agentGone/.test(cv));
+  ok("다이얼로그 선택지(❯ 1.)를 컴포저로 오인하지 않는다", /dialogish/.test(cv));
+  ok("칩 ✕ 는 클릭 시점 파스에서 토큰으로 재계산", /_chipDelete\(token\)[\s\S]{0,300}findIndex\(\(c\) => c\.str === token\)/.test(cv));
+  ok("빈 컴포저 힌트(Try …)를 본문으로 오인하지 않는다", /_placeholderText/.test(cv));
+  const pj = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
+  ok("pane 이 커서/열수를 제공한다", /cursorPos:/.test(pj) && /termCols:/.test(pj));
+  ok("xterm write 콜백(파싱 완료 시점)으로 미러를 깨운다", /write\(data, \(\) => this\.chat\?\.termActivity/.test(pj));
+  const css = readFileSync(path.resolve(here, "../src/styles.css"), "utf8");
+  ok("미러 캡처칸은 시각적으로 숨는다(IME 는 산다)", /\.chat-box\.mirror \.chat-input[\s\S]{0,200}opacity: 0/.test(css));
+}
+
+
+// ── 앱(RN) 미러 패리티 핀 — 순수 규칙은 PC 와 같은 이름/계약이어야 한다(한쪽만 고치면 두 화면이 갈린다) ──
+{
+  const appComposer = path.resolve(here, "../../../codingpt_app/src/workspace/chat/composer.ts");
+  if (existsSync(appComposer)) {
+    const ac = readFileSync(appComposer, "utf8");
+    for (const fn of ["parseComposerScreen", "composerCaret", "composerCells", "arrowSeq", "inputDelta", "popupLines", "isComposerPlaceholder", "isDialogLine"]) {
+      ok(`앱 composer.ts 가 ${fn} 을 export`, new RegExp(`export (function|const) ${fn}`).test(ac));
+    }
+    ok("앱 랩 휴리스틱 동일(이전 행 가득이면 랩)", /rows\[k - 1\]\.text\.length >= width \? '' : '\\n'/.test(ac));
+    const cc = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8");
+    ok("앱 미러 입력 = 숨은 캡처칸 + ZWSP 센티널 델타", /MirrorInput/.test(cc) && /\\u200B/.test(cc) && /inputDelta\(prev, next\)/.test(cc));
+    ok("앱 칩 ✕ = 셀 모델 원자 삭제 구동", /arrowSeq\(-\(cells\.length - idx - 1\)\)/.test(cc));
+    const tw = readFileSync(path.resolve(here, "../../../codingpt_app/src/components/module/ide/TerminalWebView.tsx"), "utf8");
+    ok("앱 웹뷰가 컴포저 워치를 제공", /__term_composerWatch/.test(tw) && /type:'composer'/.test(tw));
+    const pv = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx"), "utf8");
+    ok("앱 PaneView 가 chat 모드에만 워치를 켠다", /composerWatch\(!!\(chatMode && wsUrl\)\)/.test(pv));
+    const cb = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatBody.tsx"), "utf8");
+    ok("앱 미러 전송 = Enter 만 + any 낙관 매칭", /COMPOSER_KEYS\.enter/.test(cb) && /addPending\(body \|\| '\(첨부 전송\)', true\)/.test(cb));
+  }
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
