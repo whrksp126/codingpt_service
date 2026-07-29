@@ -115,10 +115,15 @@ export class ChatView {
     this._autoGrow();
     this._syncComposer();
 
+    // 따라가기(follow) — 표준 LLM 앱 규칙(2026-07-30 사용자 확정): 맨 아래에 있으면 새 내용마다
+    //  자동으로 따라 내려가고, 사용자가 위로 스크롤해 두면 멈춘다(다시 맨 아래로 오면 재개).
+    //  스크롤 **이벤트**로만 갱신한다 — 내용이 붙어서 화면이 밀리는 건 사용자의 이탈이 아니다.
+    this._follow = true;
     this.scrollEl.addEventListener("scroll", () => {
-      if (this._atBottom()) { this._unread = 0; this._syncJump(); }
+      this._follow = this._atBottom();
+      if (this._follow) { this._unread = 0; this._syncJump(); }
     });
-    this.jumpEl.addEventListener("click", () => { this._scrollToBottom(); this._unread = 0; this._syncJump(); });
+    this.jumpEl.addEventListener("click", () => { this._follow = true; this._scrollToBottom(); this._unread = 0; this._syncJump(); });
     this.sendEl.addEventListener("click", () => this._send());
     this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
     this.inputEl.addEventListener("input", () => {
@@ -360,7 +365,6 @@ export class ChatView {
       this._els.delete(seq);
       this._msgs = this._msgs.filter((m) => m.seq !== seq);
     }
-    const wasBottom = this._atBottom();
     const { list, added } = mergeMsgs(this._msgs, incoming);
     this._msgs = list;
     this._lastSeq = lastSeqOf(list, this._lastSeq);
@@ -368,7 +372,9 @@ export class ChatView {
     const backfill = added.some((m) => m.seq < this._maxSeq);
     if (snapshot || backfill) this._rebuild();
     else this._appendAll(added);
-    if (snapshot || wasBottom) { this._scrollToBottom(); this._unread = 0; }
+    // follow 는 스크롤 이벤트에서만 꺼진다 — 큰 블록이 붙어 순간적으로 '맨 아래'에서 벗어나도
+    //  사용자가 위로 안 올렸으면 계속 따라간다(픽셀 근접 판정만 쓰면 여기서 조용히 끊긴다).
+    if (snapshot || this._follow) { this._scrollToBottom(); this._unread = 0; }
     else if (added.length) this._unread += added.filter((m) => isVisible(m) && !isResult(m)).length;
     this._syncJump();
     // 새 메시지로 질문 카드 상태가 바뀌었을 수 있다(질문 도착 → 카드 세움 / 답 도착 → 카드 회수 +
@@ -462,6 +468,10 @@ export class ChatView {
     }
     if (m.kind === "tool_use" || m.kind === "question") {
       row.className = "chat-tool";
+      // 도구 행 접기(TUI 미러 — 2026-07-30 사용자 확정): TUI 는 끝난 도구를 한 줄("Ran 1 shell
+      //  command")로 접는다. 채팅도 동일 — 진행 중엔 명령(argsPreview)을 보이고, 결과가 오면
+      //  한 줄로 접는다(.done). 머리 클릭으로 펼침/접기. 질문 행은 접지 않는다(내용이 곧 본문).
+      if (m.kind === "tool_use") row.dataset.fold = "1";
       const label = toolLabel(m);
       const path = m.tool && m.tool.path ? m.tool.path : "";
       const head = document.createElement("div");
@@ -482,7 +492,7 @@ export class ChatView {
       res.className = "chat-tool-result hidden";
       row.appendChild(res);
       const id = (m.tool && m.tool.id) || null;
-      if (id) this._toolCards.set(id, { mark: head.querySelector(".chat-tool-mark"), res });
+      if (id) this._toolCards.set(id, { mark: head.querySelector(".chat-tool-mark"), res, row });
       return row;
     }
     if (m.kind === "compact" || m.kind === "divider" || m.kind === "interrupt") {
@@ -543,6 +553,8 @@ export class ChatView {
       card.mark.className = "chat-tool-mark " + resultClass(res);
       card.res.className = "chat-tool-result";
       card.res.innerHTML = body;
+      // 결과 도착 = TUI 가 그 도구를 한 줄로 접는 순간(.done) — 사용자가 펼쳐 둔 행(.open)은 유지.
+      if (card.row && card.row.dataset.fold === "1") card.row.classList.add("done");
       return;
     }
     // 짝을 못 찾았고 보여줄 내용도 없으면 그리지 않는다(빈 카드 노이즈 방지).
@@ -601,6 +613,12 @@ export class ChatView {
       const p = open.dataset.path;
       if (p) this.ctx.openFile?.(p);
       return;
+    }
+    // 도구 행 머리 클릭 = 펼침/접기 토글(TUI 미러 — 접힌 한 줄이 기본, 상세는 눌러서).
+    const thead = e.target.closest?.(".chat-tool-head");
+    if (thead) {
+      const trow = thead.closest(".chat-tool");
+      if (trow && trow.dataset.fold === "1") { trow.classList.toggle("open"); return; }
     }
     const think = e.target.closest?.(".chat-thinking");
     if (think) {
