@@ -1322,12 +1322,13 @@ async function drivePermissionDialog(io, { pick, expect, text, flow } = {}) {
     throw Object.assign(new Error('다이얼로그가 닫히지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
   }
 
-  // flow 는 파서가 푸터로 판별해 넘긴다. 방어적으로 화면에서도 재판별(스테일 메타 대비).
-  const interrupt = flow === 'interrupt' || (flow !== 'amend' && /press enter to confirm/i.test(s0));
+  // flow 는 파서가 "Tab to amend" 힌트로 판별해 넘긴다. 방어적으로 화면에서도 재판별(스테일 메타 대비).
+  const interrupt = flow === 'interrupt' || (flow !== 'amend' && !/tab to amend/i.test(s0));
   if (interrupt) {
-    // codex(2026-07-29 실측): 인라인 입력이 없다. "No, and tell …" 선택 → 대화 인터럽트 →
-    //  컴포저에 지시 타이핑+Enter 하면 그 지시가 모델에 전달된다. 인터럽트 이후는 실패해도
-    //  복구 경로가 없으므로(거절은 이미 전달됨) 주입은 최선 노력으로 완주한다.
+    // 인라인 입력이 없는 다이얼로그(codex 전부 + claude Fetch 등 — 2026-07-29 각각 실측):
+    //  "tell … what to do differently" 선택 → 대화 인터럽트 → 컴포저에 코멘트 타이핑+Enter 하면
+    //  그 지시가 모델에 전달된다. 인터럽트 이후는 실패해도 복구 경로가 없으므로(거절은 이미 전달됨)
+    //  주입은 최선 노력으로 완주한다.
     await io.key(String(n), true);
     for (let i = 0; i < 10; i++) {
       if (!up(await io.screen())) break;

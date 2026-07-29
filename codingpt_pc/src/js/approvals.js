@@ -177,8 +177,8 @@ function buildCard(a) {
         `<span class="apc-qspacer"></span>` +
         `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button></div>` +
       `<div class="apc-body">` +
-        // 줄 구조 보존(pre-wrap) — TUI 와 같은 모양: 명령 줄들 + 설명 + 질문 줄이 화면 순서 그대로.
-        (q.question ? `<div class="apc-summary apc-prewrap${a.tool === "Bash" ? " mono" : ""}">${escapeHtml(q.question)}</div>` : "") +
+        // TUI 와 같은 위계 — 본문(모노) ↔ 질문 줄(굵게) 을 화면 배치 순서 그대로.
+        screenBodyHtml(q.question, q.ask, !!q.askFirst) +
       `</div>` +
       `<div class="apc-err hidden"></div>` +
       `<div class="apc-actions"><div class="apc-qopts">` +
@@ -262,11 +262,8 @@ function buildCard(a) {
   const body = el.querySelector(".apc-body");
   const plan = a.prompt && typeof a.prompt.plan === "string" ? a.prompt.plan : "";
   if (scr) {
-    // TUI 원문 — 줄 구조 보존(명령/설명/질문 줄이 화면 순서 그대로).
-    const s = document.createElement("div");
-    s.className = "apc-summary apc-prewrap" + (a.tool === "Bash" ? " mono" : "");
-    s.textContent = scr.body || "";
-    body.appendChild(s);
+    // TUI 원문 — 본문(모노) ↔ 질문 줄(굵게) 을 화면 배치 순서 그대로.
+    body.insertAdjacentHTML("beforeend", screenBodyHtml(scr.body, scr.ask, !!scr.askFirst));
   } else if (plan) {
     const p = document.createElement("div");
     p.className = "apc-plan";
@@ -469,16 +466,25 @@ function optRowHtml(act, label, desc, num) {
   `</button>`;
 }
 
-// 코멘트 입력칸이 달린 선택지 행 — TUI 인라인 입력의 동치(옵션 **옆에 바로** 쓴다).
+// 코멘트 입력칸이 달린 선택지 행 — TUI 와 같은 배치: **`N.` 이 앞에**, 라벨, 그 옆에 코멘트
+//  (입력 가능한 옵션만 — 다이얼로그마다 실측 판별된 input 표식. 2026-07-29 사용자 확정).
 //  버튼 안에 input 을 넣을 수 없어 div[role=button] 을 쓴다. 행 클릭(입력칸 제외) = 그 행의
 //  코멘트와 함께 즉시 전송, 입력칸에서 Enter = 동일.
 function optRowInputHtml(act, label, desc, num, canInput) {
   return `<div class="apc-qopt apc-rowline" role="button" tabindex="0" data-act="${act}">` +
+    `<span class="apc-qnum-pre">${num}.</span>` +
     `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(label)}</span>` +
     (desc ? `<span class="apc-qdesc">${escapeHtml(desc)}</span>` : "") + `</span>` +
     (canInput ? `<input class="apc-row-input" type="text" placeholder="코멘트 입력…" />` : `<span class="apc-qspacer"></span>`) +
-    `<span class="apc-qnum">${num}</span>` +
   `</div>`;
+}
+
+// 미러/보강 카드 본문 — TUI 와 같은 위계: 본문(모노·차분) ↔ 질문 줄(굵게·간격)을 화면 배치
+//  순서(askFirst)대로 그린다. 본문이 비어 질문 줄만 있는 다이얼로그는 질문 줄만.
+function screenBodyHtml(body, ask, askFirst) {
+  const b = body && body !== ask ? `<div class="apc-summary apc-prewrap mono">${escapeHtml(body)}</div>` : "";
+  const a = ask ? `<div class="apc-ask">${escapeHtml(ask)}</div>` : "";
+  return askFirst ? a + b : b + a;
 }
 
 // 응답 UI — **TUI 프롬프트와 같은 번호 선택지**(2026-07-29 사용자 확정: 순서·형태 3플랫폼 동일).

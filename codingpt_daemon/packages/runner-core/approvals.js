@@ -576,7 +576,9 @@ async function enrichFromScreen(slot) {
     ...(slot.payload.prompt || {}),
     screen: {
       title: parsed.title,
-      body: parsed.question.question,   // 줄 구조 보존(명령/설명/질문 줄 — 화면 순서 그대로)
+      body: parsed.question.question,     // 본문(줄 구조 보존 — 명령/설명 줄)
+      ask: parsed.question.ask,           // 질문 줄("Do you want to …?") — 카드가 다른 스타일로 구분해 그린다
+      askFirst: !!parsed.question.askFirst, // 화면에서 질문 줄이 본문보다 먼저 오는 배치(codex)
       flow: parsed.flow,
       expect: parsed.expect,
       options,

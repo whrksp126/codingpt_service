@@ -282,22 +282,24 @@ test('권한 재광고 왕복 — 카드(선택지 그대로) → 라벨 응답 
 });
 
 // ── 추가 지시 텍스트(2026-07-29 실측 — TUI 인라인 입력의 채팅 동치) ──────────────
-test('입력 가능 판별 — claude 는 Yes/No(always 계열 제외), codex 는 No(tell …)만', () => {
+test('입력 가능 판별 — amend 는 Yes/No(always 계열 제외), interrupt 는 tell-differently 옵션만', () => {
   const can = qRevive._optionAcceptsInput;
   assert.strictEqual(can('amend', 'Yes'), true);
   assert.strictEqual(can('amend', 'No'), true);
   assert.strictEqual(can('amend', 'Yes, and always allow access to ptyperm/ from this project'), false,
     '실측: always allow 옵션은 타이핑이 무반응이다');
   assert.strictEqual(can('amend', "Yes, and don't ask again for: git status"), false);
-  assert.strictEqual(can('interrupt', 'Yes, proceed (y)'), false, 'codex 는 Yes 에 지시를 붙일 경로가 없다');
+  assert.strictEqual(can('interrupt', 'Yes, proceed (y)'), false, 'interrupt 다이얼로그의 Yes 엔 코멘트 경로가 없다');
+  assert.strictEqual(can('interrupt', 'No'), false, '평범한 No 도 interrupt 에선 코멘트 경로가 없다');
   assert.strictEqual(can('interrupt', 'No, and tell Codex what to do differently (esc)'), true);
+  assert.strictEqual(can('interrupt', 'No, and tell Claude what to do differently (esc)'), true);
 
   const p = qRevive._parsePermissionDialog(PERM_SCREEN);
-  assert.strictEqual(p.flow, 'amend', 'claude 푸터(Esc to cancel · …) = amend flow');
+  assert.strictEqual(p.flow, 'amend', '푸터의 "Tab to amend" 힌트 = 인라인 입력 지원(실측 근거)');
   assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [true, false, true],
     '카드 옵션의 input 표식: Yes/No 만 입력창이 붙는다');
   const c = qRevive._parsePermissionDialog(CODEX_SCREEN);
-  assert.strictEqual(c.flow, 'interrupt', 'codex 푸터(Press enter to confirm) = interrupt flow');
+  assert.strictEqual(c.flow, 'interrupt', 'Tab 힌트 없음 = interrupt flow(codex)');
   assert.deepStrictEqual(c.question.options.map((o) => !!o.input), [false, false, true]);
 });
 
@@ -376,14 +378,15 @@ test('권한 재광고 왕복 — 라벨+텍스트 응답이 drive 까지 온전
 });
 
 // ── TUI 원문 표시(2026-07-29 사용자 확정: "TUI 에 나오는 건 다 채팅에도") ─────────
-test('파서 — 질문 줄이 화면 순서 그대로 본문에 들어간다(claude 는 뒤, codex 는 앞)', () => {
+test('파서 — 질문 줄은 ask 로 분리, askFirst 가 화면 배치 순서를 보존한다', () => {
   const p = qRevive._parsePermissionDialog(PERM_SCREEN);
-  const pl = p.question.question.split('\n');
-  assert.strictEqual(pl[pl.length - 1], 'Do you want to proceed?', 'claude: 질문 줄은 본문 끝');
+  assert.strictEqual(p.question.ask, 'Do you want to proceed?', '질문 줄은 ask 로(카드가 다른 스타일로 그린다)');
+  assert.strictEqual(p.question.askFirst, false, 'claude: 본문 뒤에 질문 줄');
+  assert.ok(!p.question.question.includes('Do you want to proceed?'), '본문에는 질문 줄이 중복되지 않는다');
   assert.match(p.expect, /^rm \/Users\/u/, 'expect 는 여전히 명령 줄(질문 줄이면 특이성이 없다)');
   const c = qRevive._parsePermissionDialog(CODEX_SCREEN);
-  const cl = c.question.question.split('\n');
-  assert.strictEqual(cl[0], 'Would you like to run the following command?', 'codex: 질문 줄은 본문 앞');
+  assert.strictEqual(c.question.ask, 'Would you like to run the following command?');
+  assert.strictEqual(c.question.askFirst, true, 'codex: 질문 줄이 본문 앞');
 });
 
 const CMD_FULL = 'rm /Users/u/other/project/tokin/approval-demo.txt && git -C /Users/u/other/project/tokin status --short';
@@ -405,7 +408,8 @@ test('화면 보강 — 훅 카드 payload 에 TUI 원문(제목/본문/선택�
     const scr = slot.payload.prompt.screen;
     assert.ok(scr, '보강이 실려야 한다');
     assert.strictEqual(scr.title, 'Bash command', 'TUI 제목 원문');
-    assert.ok(scr.body.includes('Do you want to proceed?'), '질문 줄 포함');
+    assert.strictEqual(scr.ask, 'Do you want to proceed?', '질문 줄은 ask 로(카드가 위계를 구분해 그린다)');
+    assert.strictEqual(scr.askFirst, false);
     assert.deepStrictEqual(scr.options.map((o) => o.act), ['allow', 'always', 'deny']);
     assert.deepStrictEqual(scr.options.map((o) => !!o.input), [true, false, true], '옵션별 입력 가능 표식');
     assert.strictEqual(advertised.length, 2, '보강 후 멱등 재광고(내용 갱신)');
@@ -501,10 +505,14 @@ test('푸터 없는 다이얼로그(Fetch) — 옵션 블록이 화면 맨 아�
   assert.ok(p, 'Fetch 다이얼로그를 인식해야 한다(실사고 회귀)');
   assert.strictEqual(p.title, 'Fetch');
   assert.strictEqual(p.tool, 'WebFetch');
-  assert.strictEqual(p.flow, 'amend');
+  // 실측(2026-07-29): Fetch 다이얼로그는 Tab·타이핑 무반응(인라인 입력 없음), 3번 선택 →
+  //  "Interrupted · What should Claude do instead?" → 컴포저 지시 전달. = interrupt flow 이고
+  //  코멘트는 3번(tell … differently)에만 실을 수 있다 — 카드도 그 행에만 입력칸을 그린다.
+  assert.strictEqual(p.flow, 'interrupt', 'Tab 힌트 없는 다이얼로그 = 인라인 입력 없음(실측)');
   assert.ok(p.question.question.includes('Claude wants to fetch content from example.com'), '회색 설명 줄');
-  assert.ok(p.question.question.includes('Do you want to allow Claude to fetch this content?'), '질문 줄');
-  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [true, false, true]);
+  assert.strictEqual(p.question.ask, 'Do you want to allow Claude to fetch this content?', '질문 줄은 ask 로');
+  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [false, false, true],
+    '코멘트 입력칸은 TUI 가 실제로 받는 옵션에만(상황별 판별 — 항상 고정 아님)');
   assert.strictEqual(approvals._screenActOf(p.question.options[1].label), 'always');
 
   // 잔상: 옵션 아래에 다른 출력이 쌓였으면(= 살아 있는 다이얼로그가 아니면) 무시해야 한다.

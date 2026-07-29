@@ -158,19 +158,21 @@ async function poll() {
 //  본문은 **줄 구조를 보존**해 카드가 TUI 와 같은 모양(명령 줄들 + 설명 줄)으로 그리게 한다.
 const QUESTION_LINE_RE = /^\s*(Do you want to|Would you like to) .{0,160}\?\s*$/;
 const FOOTER_RE = /esc to cancel/i; // claude "Esc to cancel · …" / codex "… or esc to cancel"
-// flow(추가 지시 텍스트 전달 방식) 판별은 **푸터**로 한다 — 질문 문구는 겹친다(claude 플랜
-//  다이얼로그도 "Would you like to proceed?"). codex 푸터만 "Press enter to confirm …" 형태.
-//  · amend(claude): 해당 옵션에 Tab → 인라인 타이핑 → Enter (2026-07-29 실측: Yes/No 만 입력
-//    가능, "always allow/don't ask again" 옵션은 타이핑 무반응. 옵션별 버퍼·한글 OK).
-//  · interrupt(codex): 숫자키로 "No, and tell …" 선택 → 대화 인터럽트 → 컴포저에 지시 타이핑
-//    +Enter (2026-07-29 실측: 인라인 입력 없음(Tab 무반응), 인터럽트 후 지시가 모델에 전달됨).
-const INTERRUPT_FOOTER_RE = /press enter to confirm/i;
+// flow(추가 코멘트 전달 방식) 판별 — **다이얼로그마다 실측 기반으로**(2026-07-29 사용자 확정:
+//  "코멘트 가능 여부를 정확히 파악해 상황에 맞게"). 근거는 푸터의 "Tab to amend" 힌트다:
+//  · amend: 푸터에 "Tab to amend" 가 있는 다이얼로그(claude Bash 등) — 해당 옵션에 Tab → 인라인
+//    타이핑 → Enter. 실측: Yes/No 만 입력 가능, "always allow/don't ask again" 옵션은 타이핑 무반응.
+//  · interrupt: 그 힌트가 없는 다이얼로그 전부 — claude Fetch(실측: Tab·타이핑 무반응, 3번 선택 →
+//    "Interrupted · What should Claude do instead?" → 컴포저 지시 전달)와 codex(동일 구조).
+//    코멘트는 "tell … what to do differently" 옵션에만 실을 수 있다(그 외엔 TUI 에도 경로가 없다).
+const AMEND_HINT_RE = /tab to amend/i;
 const NO_INPUT_LABEL_RE = /always allow|don.?t ask again/i;
+const TELL_DIFFERENTLY_RE = /tell .{0,30}what to do differently/i;
 
 function optionAcceptsInput(flow, label) {
   const l = String(label || '');
-  if (flow === 'interrupt') return /^No\b/i.test(l);            // codex: 거절+지시만
-  return /^(Yes|No)\b/i.test(l) && !NO_INPUT_LABEL_RE.test(l);  // claude: Yes/No (always 계열 제외)
+  if (flow === 'interrupt') return TELL_DIFFERENTLY_RE.test(l);
+  return /^(Yes|No)\b/i.test(l) && !NO_INPUT_LABEL_RE.test(l);  // amend: Yes/No (always 계열 제외)
 }
 
 function parsePermissionDialog(screen) {
@@ -218,19 +220,21 @@ function parsePermissionDialog(screen) {
     .filter((l) => l && !/^This command requires approval$/.test(l) && !/^─+$/.test(l));
   const title = pickTitle(preBody, lines[pi]);
   // 본문 = 제목을 뺀 나머지 줄들 — **줄바꿈 보존**(카드가 TUI 와 같은 줄 구조로 그린다).
-  //  질문 줄("Do you want to …?")도 **화면 순서 그대로** 넣는다(2026-07-29 사용자 지적: TUI 에
-  //  나오는 건 다 카드에도 — claude 는 본문 뒤, codex 는 본문 앞이 자연히 재현된다).
-  //  단 expect/summary(화면 검증·요약)는 질문 줄이 아니라 **명령 줄**이어야 특이적이다.
+  //  질문 줄("Do you want to …?")은 `ask` 로 분리해 싣는다 — 카드가 TUI 처럼 본문과 다른 스타일
+  //  (굵기·간격)로 구분해 그린다(2026-07-29 사용자 확정). askFirst = 화면에서 질문 줄이 본문보다
+  //  먼저 오는 배치(codex) — 카드도 같은 순서로 그린다.
   const qLine = (lines[pi] || '').trim();
   const coreLines = [...preBody.filter((l) => l !== title), ...midBody];
-  const bodyLines = [...preBody.filter((l) => l !== title), qLine, ...midBody];
-  const body = bodyLines.join('\n').slice(0, 1000);
+  const body = coreLines.join('\n').slice(0, 1000);
+  const askFirst = preBody.filter((l) => l !== title).length === 0 && midBody.length > 0;
 
   // 카드는 화면 문구 그대로 — 질문 1개(단일선택)로 모델링해 기존 선택지 카드/조작 배관을 재사용한다.
-  //  옵션의 input 표식 = 그 선택지에 추가 지시 텍스트를 같이 보낼 수 있다(카드가 입력창을 그린다).
-  const flow = lines.some((l) => INTERRUPT_FOOTER_RE.test(l)) ? 'interrupt' : 'amend';
+  //  옵션의 input 표식 = 그 선택지에 코멘트를 같이 보낼 수 있다(카드가 행내 입력칸을 그린다).
+  const flow = lines.some((l) => AMEND_HINT_RE.test(l)) ? 'amend' : 'interrupt';
   const question = {
-    question: body || (lines[pi] || '').trim(),
+    question: body || qLine,
+    ask: qLine,
+    askFirst,
     header: title,
     multiSelect: false,
     options: options.map((o) => ({
@@ -239,7 +243,7 @@ function parsePermissionDialog(screen) {
     })),
   };
   const key = 'perm|' + crypto.createHash('sha256')
-    .update([title, question.question, ...options.map((o) => `${o.n}.${o.label}`)].join('|')).digest('hex').slice(0, 16);
+    .update([title, body, qLine, ...options.map((o) => `${o.n}.${o.label}`)].join('|')).digest('hex').slice(0, 16);
   // expect(조작 전 화면 검증용)는 한 줄이어야 한다 — 본문 첫 줄(명령)이 가장 특이적이다.
   const expect = coreLines[0] || title;
   return { key, title, tool: toolOfDialogTitle(title), summary: coreLines[0] || title, question, options, expect, flow };
