@@ -277,11 +277,14 @@ async function create(userId, hostDeviceId, hostName, payload) {
   if (!APPROVAL_ENABLED) return { id: a.id, defer: true, reason: 'disabled' };
 
   // 멱등 재등록(데몬 resync / 재시도) — 같은 id 면 알림을 또 만들지 않고 마감만 갱신, pending 재팬아웃.
+  //  advertisedAt 갱신 = "이 호스트의 데몬이 지금도 이 슬롯을 들고 있다"는 생존 신고
+  //  (onHostConnected 의 유령 청소가 이 시각으로 살았는지/죽었는지를 가른다).
   const existing = pending.get(a.id);
   if (existing) {
     if (String(existing.userId) !== String(userId)) throw err('승인 요청을 찾을 수 없습니다.', 404, 'NOT_FOUND');
     existing.approval.deadlineAt = a.deadlineAt;
     existing.deadlineAt = a.deadlineAt;
+    existing.advertisedAt = now;
     fanout(userId, { kind: 'pending', approval: existing.approval, alertClientKey: existing.alertClientKey || null });
     return { id: existing.id, deadlineAt: existing.deadlineAt, notifId: existing.notifId, idempotent: true, defer: false };
   }
@@ -304,7 +307,7 @@ async function create(userId, hostDeviceId, hostName, payload) {
 
   const rec = {
     id: a.id, userId: Number(userId), hostDeviceId: hostDeviceId != null ? Number(hostDeviceId) : null,
-    notifId: null, approval: null, deadlineAt: a.deadlineAt, createdAt: now,
+    notifId: null, approval: null, deadlineAt: a.deadlineAt, createdAt: now, advertisedAt: now,
     claimedBy: null, finalized: false, gated, escalatedAt: 0, push: null,
     alertClientKey: present ? present.clientKey : null,
   };
@@ -496,6 +499,36 @@ function allowRespond(userId, now) {
   return r.count <= RESPOND_MAX_PER_MIN;
 }
 
+// ── 호스트 재기동 화해 — 유령 카드 청소(2026-07-29) ───────────────────
+// PC 앱 업데이트/데몬 크래시로 회수(cancel)가 유실되면 그 호스트의 카드가 "눌러야만 409 로
+//  걷히는" 유령으로 남는다(실사고: 앱 업데이트 직후 낡은 2버튼 카드가 계속 표시). 데몬은 재접속
+//  직후 살아 있는 슬롯을 전부 재광고(resync)하므로, **재접속 + 유예 뒤에도 재광고되지 않은 그
+//  호스트의 레코드 = 원본이 죽은 요청**이다 → host_restarted 로 정리해 전 기기에서 회수한다.
+//  ⚠ WS 순단(블립)에는 안전하다: 데몬 슬롯은 데몬 프로세스 수명을 따르고, 재접속 resync 가
+//   advertisedAt 을 갱신해 살아 있는 요청은 절대 걷히지 않는다.
+const HOST_RECONNECT_SWEEP_MS = 20000; // resync 왕복 여유
+const hostSweepTimers = new Map();     // `${userId}|${hostDeviceId}` → timer
+function onHostConnected(userId, hostDeviceId, graceMs = HOST_RECONNECT_SWEEP_MS) {
+  if (hostDeviceId == null) return;
+  const key = `${userId}|${hostDeviceId}`;
+  const connectedAt = Date.now();
+  const prev = hostSweepTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(() => {
+    hostSweepTimers.delete(key);
+    for (const id of idsOf(userId)) {
+      const rec = pending.get(id);
+      if (!rec || rec.finalized) continue;
+      if (Number(rec.hostDeviceId) !== Number(hostDeviceId)) continue;
+      if ((rec.advertisedAt || rec.createdAt) >= connectedAt) continue; // 재광고됨 = 살아 있음
+      console.log(`[approval] 유령 카드 청소 user=${userId} id=${rec.id} host=#${hostDeviceId} (재접속 후 미재광고)`);
+      finalize(rec, { decision: 'canceled', reason: 'host_restarted', by: null });
+    }
+  }, graceMs);
+  if (t.unref) t.unref();
+  hostSweepTimers.set(key, t);
+}
+
 // ── 스위퍼(30s) — 만료 정리 + 폰 에스컬레이션 ─────────────────────────
 function sweep(now = Date.now()) {
   for (const rec of [...pending.values()]) {
@@ -538,7 +571,7 @@ const _sweeper = setInterval(() => { try { sweep(); } catch (e) { console.warn('
 if (_sweeper.unref) _sweeper.unref(); // 테스트/종료를 붙잡지 않는다
 
 module.exports = {
-  create, respond, cancel, list, protectedNotifIds,
+  create, respond, cancel, list, protectedNotifIds, onHostConnected,
   // 테스트 노출(순수 함수) — 데몬 리포 `_states` 컨벤션 미러.
   _normalizeCreate: normalizeCreate,
   _normalizeDecision: normalizeDecision,

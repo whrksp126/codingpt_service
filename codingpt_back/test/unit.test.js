@@ -356,6 +356,36 @@ test('FCM payload — 승인은 액션 가능(혼합 전송 + iOS 카테고리 +
   assert.strictEqual(m.apns.payload.aps['interruption-level'], 'time-sensitive');
 });
 
+test('호스트 재기동 화해 — 재광고 안 된 유령 카드만 걷고 살아 있는 카드는 남긴다', async () => {
+  // 실사고(2026-07-29): PC 앱 업데이트로 데몬이 죽으며 회수(cancel)가 유실 → 낡은 카드가
+  //  "눌러야만 409 로 걷히는" 유령으로 잔존. 재접속 후 재광고(advertisedAt 갱신) 여부가 생사 판정.
+  const mk = (id, advertisedAt) => {
+    const rec = {
+      id, userId: 7, hostDeviceId: 42, notifId: null, deadlineAt: Date.now() + 3600_000,
+      createdAt: advertisedAt, advertisedAt, claimedBy: null, finalized: false,
+      approval: { id, requestedAt: advertisedAt },
+    };
+    approvalService._pending.set(id, rec);
+    let s = approvalService._byUser.get('7');
+    if (!s) { s = new Set(); approvalService._byUser.set('7', s); }
+    s.add(id);
+    return rec;
+  };
+  const past = Date.now() - 60_000;
+  const ghost = mk('apr_ghost1', past);           // 재접속 전 광고 → 유령
+  const otherHost = mk('apr_other1', past);
+  otherHost.hostDeviceId = 99;                     // 다른 호스트 — 건드리면 안 됨
+  approvalService.onHostConnected(7, 42, 30);      // 유예 30ms(테스트용)
+  const alive = mk('apr_alive1', Date.now() + 10); // 유예 중 재광고(=resync 도착) 시늉
+  await new Promise((r) => setTimeout(r, 120));
+  assert.strictEqual(ghost.finalized, true, '유령이 안 걷혔다');
+  assert.strictEqual(alive.finalized, false, '재광고된 살아 있는 카드를 걷어버렸다');
+  assert.strictEqual(otherHost.finalized, false, '다른 호스트의 카드를 걷어버렸다');
+  // 정리
+  for (const id of ['apr_ghost1', 'apr_other1', 'apr_alive1']) approvalService._pending.delete(id);
+  approvalService._byUser.delete('7');
+});
+
 test('FCM payload — alwaysLabel 이 있으면 3버튼(TUI 순서)과 전용 iOS 카테고리로 나간다', () => {
   // claude 가 규칙을 제안한 요청(alwaysLabel) → 잠금화면에도 "허용하고 묻지 않기"가 떠야
   //  표면마다 선택지 개수가 달라지지 않는다(2026-07-29 표면 통일).

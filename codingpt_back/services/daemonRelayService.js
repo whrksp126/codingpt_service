@@ -273,6 +273,9 @@ function registerControl(ws, device) {
       if (conn.caps.length) console.log(`[daemonRelay] 데몬 caps device=#${conn.deviceId} v=${conn.daemonVersion} caps=${conn.caps.join(',')}`);
       // serverCaps 는 additive — 구 데몬의 hello_ack 핸들러는 serverTime 만 읽고 나머지를 무시한다.
       try { ws.send(JSON.stringify({ type: 'hello_ack', serverTime: new Date().toISOString(), serverCaps: SERVER_CAPS })); } catch (_) { /* noop */ }
+      // 이 호스트의 유령 승인 카드 청소 예약 — 데몬은 hello 직후 살아 있는 슬롯을 재광고(resync)
+      //  하므로, 유예 뒤에도 재광고 안 된 이 호스트의 레코드는 죽은 요청이다(approvalService 주석).
+      try { require('./approvalService').onHostConnected(userId, conn.deviceId); } catch (_) { /* 배관 실패 무해 */ }
       return;
     }
     if (msg.type === 'lan_update') {
