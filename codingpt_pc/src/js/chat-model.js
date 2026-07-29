@@ -257,3 +257,43 @@ export function fmtRemain(ms) {
   const m = Math.floor(s / 60);
   return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
+
+// ── 드롭 첨부 ↔ TUI 컴포저 동기화의 순수 규칙(cptest 격리 실측 2026-07-30 — 추측 아님) ──
+//  · 이미지 경로는 **bracketed paste 로만** [Image #N] 으로 변환된다. literal 타이핑(send-keys -l)은
+//    변환이 안 된다 — 0.1.164 에서 채팅 전송 첨부가 TUI 에 안 실리던 진범. 그 외 파일은 경로 원문 유지.
+//  · N 은 claude 프로세스 전역 증가 카운터(토큰을 지워도 리셋 안 됨) → 예측하지 말고 화면에서 읽는다.
+//  · [Image #N] 토큰은 백스페이스 1회 원자 삭제, C-u 반복이 컴포저를 비주얼 라인 단위로 지운다.
+
+// 화면 lines → 컴포저 { text, nums }. 컴포저 = 아래에서부터 '❯' 로 시작하는 마지막 줄 + 랩 연속줄
+//  (다음 ─ 룰/빈 줄 전까지, 들여쓰기 2칸 제거 — 랩으로 갈라진 [Image #N] 도 이어 붙어 잡힌다).
+export function parseComposer(lines) {
+  const arr = Array.isArray(lines) ? lines : [];
+  let s = -1;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (/^\s*❯/.test(String(arr[i] ?? ""))) { s = i; break; }
+  }
+  if (s < 0) return { text: "", nums: [] };
+  let text = String(arr[s]).replace(/^\s*❯\s?/, "");
+  for (let i = s + 1; i < arr.length; i++) {
+    const ln = String(arr[i] ?? "");
+    if (/^\s*─{4,}/.test(ln) || /^\s*$/.test(ln)) break;
+    text += ln.replace(/^ {0,2}/, "");
+  }
+  const nums = [];
+  for (const m of text.matchAll(/\[Image #(\d+)\]/g)) nums.push(parseInt(m[1], 10));
+  return { text, nums };
+}
+
+// 입력 텍스트에서 토큰을 1회 제거(+붙은 공백 1개) — 전송 시 TUI 컴포저에 이미 실린 표식을 다시 보내지 않는다.
+export function stripTokenOnce(s, tok) {
+  const src = String(s || "");
+  const t = String(tok || "");
+  if (!t) return src;
+  const i = src.indexOf(t);
+  if (i < 0) return src;
+  let a = src.slice(0, i);
+  let b = src.slice(i + t.length);
+  if (b.startsWith(" ")) b = b.slice(1);
+  else if (a.endsWith(" ")) a = a.slice(0, -1);
+  return a + b;
+}

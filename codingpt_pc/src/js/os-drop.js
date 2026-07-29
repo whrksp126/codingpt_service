@@ -81,9 +81,10 @@ export function initOsDrop() {
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
       if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
       const { pane, tabIndex } = tgt;
-      // 채팅 모드 pane 에 떨어진 드롭은 **채팅 컴포저의 첨부**로(2026-07-30 사용자 확정) —
-      //  썸네일 미리보기를 보여주고, 전송 시 경로+메시지를 TUI 컴포저로 한 번에 보낸다.
-      //  (예전엔 채팅을 보고 있는데 PTY 로 꽂혀 TUI 에만 [Image #1] 이 생기고 채팅은 무반응이었다.)
+      // 채팅 모드 pane 에 떨어진 드롭은 채팅 뷰가 받아 **TUI 와 채팅 양쪽에 동시 반영**한다
+      //  (2026-07-30 사용자 확정 2차): 채팅 뷰가 직접 TUI 컴포저에 bracketed paste 로 주입하고
+      //  ([Image #N] 변환은 paste 에서만 일어난다 — 실측), 입력칸 커서에 같은 토큰을 미러하며,
+      //  스트립엔 썸네일(클릭=미리보기)을 띄운다. 전송은 토큰을 걷어낸 본문만 나간다.
       if (tabIndex === pane.node.active && pane._chatActive?.() && pane.chat) {
         pane.chat.addAttachments(paths);
         return;

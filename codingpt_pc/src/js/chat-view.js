@@ -21,7 +21,7 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, insertPathAt, flattenFiles, shouldReopenNoSession,
-  composerHasText, agentDisplayName,
+  composerHasText, agentDisplayName, parseComposer, stripTokenOnce,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -41,6 +41,9 @@ export function applyChatEvent(frame) {
     if (!v._chatId && v._noSession && frame.sessionId && v._sessionId === frame.sessionId) v._onPush(frame);
   }
 }
+
+// 셸 안전 작은따옴표 감싸기 — os-drop.shq 와 동일 규칙(순환 import 회피용 사본).
+function shq(p) { return "'" + String(p).replace(/'/g, "'\\''") + "'"; }
 
 // 승인 카드 슬롯 갱신 요청 — approvals.js 가 렌더 콜백을 주입한다(순환 import 회피).
 let _approvalRenderer = null;
@@ -74,7 +77,8 @@ export class ChatView {
     this._noSession = null;
     this._noSessionAt = 0;
     this._probeUntil = 0;   // 첫 메시지 전송 직후의 짧은 탐색 창(훅이 바인딩을 만드는 순간을 잡는다)
-    this._attach = [];      // 드롭 첨부 [{path,name,img,b64}] — 전송 시 경로로 TUI 컴포저에 실린다
+    this._attach = [];      // 드롭 첨부 [{path,name,img,b64,token}] — 드롭 즉시 TUI 컴포저에도 실린다
+    this._injectQ = null;   // TUI 주입/재동기화 직렬화 체인(연속 드롭·제거가 화면 읽기와 경합 금지)
     _live.add(this);
   }
 
@@ -152,13 +156,12 @@ export class ChatView {
     });
     // 본문 위임 클릭: 코드 복사 / 링크 외부 열기 / 결과 펼치기 / 파일 열기 / thinking 토글 / 첨부
     this.scrollEl.addEventListener("click", (e) => this._onBodyClick(e));
-    // 첨부 스트립 — ✕ 로 개별 제거.
+    // 첨부 스트립 — 칩 클릭=미리보기, ✕=제거(+TUI 컴포저 재동기화).
     this.attachEl.addEventListener("click", (e) => {
       const x = e.target.closest?.(".chat-att-x");
-      if (!x) return;
-      this._attach.splice(Number(x.dataset.i), 1);
-      this._renderAttach();
-      this._syncComposer();
+      if (x) { this._removeAttach(Number(x.dataset.i)); return; }
+      const chip = e.target.closest?.(".chat-att");
+      if (chip) this._openPreview(this._attach[Number(chip.dataset.i)]);
     });
     this._renderApprovals();
   }
@@ -543,19 +546,24 @@ export class ChatView {
     return wrap;
   }
 
-  // ── 드롭 첨부(2026-07-30 사용자 확정: 채팅에 드롭하면 썸네일 미리보기가 보여야 한다) ──
-  //  os-drop 이 채팅 모드 pane 드롭을 여기로 넘긴다. 이미지는 파일을 읽어 썸네일, 그 외는 파일칩.
-  //  전송 시 경로(셸 인용)+메시지를 TUI 컴포저로 한 번에 보낸다 — TUI 가 이미지 경로를
-  //  [Image #N] 으로 변환하는 기존 검증된 경로(OS 드롭→PTY 삽입)와 동일한 배관이다.
+  // ── 드롭 첨부(2026-07-30 사용자 확정 2차: 드롭 = TUI 와 채팅 **양쪽 동시**) ──
+  //  os-drop 이 채팅 모드 pane 드롭을 여기로 넘긴다. 즉시 하는 일 세 가지:
+  //   ① TUI 컴포저에 경로를 bracketed paste 로 주입(기존 OS 드롭→PTY 와 동일 — 이미지는 [Image #N] 변환)
+  //   ② 화면에서 그 번호를 읽어 채팅 입력칸 **커서 위치**에 같은 토큰을 미러(그 외 파일은 TUI 그대로 경로)
+  //   ③ 컴포저 위 첨부 스트립에 썸네일/파일칩(클릭=미리보기, ✕=제거+TUI 재동기화)
+  //  전송은 토큰을 걷어낸 본문만 보낸다(stripTokenOnce) — 첨부는 이미 TUI 컴포저에 실려 있다.
   addAttachments(paths) {
+    if (this._tuiQuestion()) { this._setBanner("질문 다이얼로그가 떠 있어요 — 답한 뒤 다시 드롭해 주세요.", "warn"); return; }
     const IMG = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "tiff"]);
+    const added = [];
     for (const p of (paths || []).filter(Boolean)) {
       if (this._attach.length >= 8) break;
       if (this._attach.some((a) => a.path === p)) continue;
       const name = String(p).split("/").pop() || p;
       const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
-      const a = { path: p, name, ext, img: IMG.has(ext), b64: null };
+      const a = { path: p, name, ext, img: IMG.has(ext), b64: null, token: null };
       this._attach.push(a);
+      added.push(a);
       if (a.img) {
         api.filePreviewB64(p)
           .then((b64) => { a.b64 = b64; this._renderAttach(); })
@@ -564,7 +572,126 @@ export class ChatView {
     }
     this._renderAttach();
     this._syncComposer();
+    if (added.length) this._tuiChain(() => this._injectToTui(added));
     try { this.inputEl?.focus(); } catch (_) { /* noop */ }
+  }
+
+  _tuiChain(fn) {
+    this._injectQ = (this._injectQ || Promise.resolve()).then(fn).catch(() => { /* 주입 실패 — 전송 시 경로 앞붙임 폴백 */ });
+    return this._injectQ;
+  }
+
+  _composer() { return parseComposer(this.ctx.screenLines?.() || []); }
+
+  // added 경로들을 TUI 컴포저에 싣고, 새로 생긴 [Image #N] 번호를 읽어 입력칸 토큰을 만든다.
+  //  번호를 못 읽으면(비이미지·변환 실패) 경로 원문이 토큰 = TUI 에 실린 실체 그대로의 미러.
+  async _injectToTui(added) {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const before = this._composer().nums;
+    const maxBefore = before.length ? Math.max(...before) : 0;
+    const pasted = this.ctx.tuiPaste?.(added.map((a) => shq(a.path)).join(" ") + " ");
+    const imgs = added.filter((a) => a.img);
+    let fresh = [];
+    if (pasted && imgs.length) {
+      for (const wait of [450, 600, 900]) {   // 변환은 보통 1초 안 — 최대 ~2s 만 기다린다
+        await sleep(wait);
+        fresh = this._composer().nums.filter((n) => n > maxBefore);
+        if (fresh.length >= imgs.length) break;
+      }
+      fresh.sort((x, y) => x - y);
+    }
+    let k = 0;
+    const toks = [];
+    for (const a of added) {
+      a.token = pasted ? (a.img && k < fresh.length ? `[Image #${fresh[k++]}]` : shq(a.path)) : null;
+      if (a.token) toks.push(a.token);
+    }
+    if (toks.length) this._insertAtCursor(toks.join(" ") + " ");
+  }
+
+  // 입력칸 커서 위치에 토큰 삽입(사용자 요구: "지금 커서가 있는 곳에") — 커서는 삽입분 뒤로.
+  _insertAtCursor(s) {
+    const el = this.inputEl;
+    if (!el || !s) return;
+    const v = String(el.value || "");
+    const st = typeof el.selectionStart === "number" ? el.selectionStart : v.length;
+    const en = typeof el.selectionEnd === "number" ? el.selectionEnd : st;
+    el.value = v.slice(0, st) + s + v.slice(en);
+    const pos = st + s.length;
+    try { el.setSelectionRange(pos, pos); } catch (_) { /* noop */ }
+    this._autoGrow();
+    this._syncComposer();
+    this.ctx.setDraft?.(el.value.slice(0, CHAT.DRAFT_MAX));
+  }
+
+  _stripFromInput(tok) {
+    const el = this.inputEl;
+    if (!el || !tok) return;
+    const next = stripTokenOnce(el.value, tok);
+    if (next === el.value) return;
+    el.value = next;
+    this._autoGrow();
+    this._syncComposer();
+    this.ctx.setDraft?.(el.value.slice(0, CHAT.DRAFT_MAX));
+  }
+
+  // ✕ 제거 — 칩/입력칸 토큰을 걷고 TUI 컴포저를 재동기화(클리어 후 남은 첨부 재주입·토큰 재부여).
+  //  컴포저에는 우리가 실은 것만 있으므로(채팅 본문은 전송 시점에만 간다) 클리어가 안전하다.
+  _removeAttach(i) {
+    const [a] = this._attach.splice(i, 1);
+    this._renderAttach();
+    this._syncComposer();
+    if (!a) return;
+    if (a.token) this._stripFromInput(a.token);
+    this._tuiChain(() => this._resyncTui());
+  }
+
+  async _resyncTui() {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // C-u 는 비주얼 라인 단위 삭제(실측) — 우리가 실은 흔적([Image #N]/인용 경로)이 남은 동안만 반복.
+    const dirty = (c) => c.nums.length > 0 || c.text.includes("'");
+    let c = this._composer();
+    for (let t = 0; t < 8 && dirty(c); t++) {
+      if (!this.ctx.tuiWrite?.("\x15")) break;
+      await sleep(160);
+      c = this._composer();
+    }
+    const rest = this._attach.slice();
+    for (const a of rest) { if (a.token) this._stripFromInput(a.token); a.token = null; }
+    if (rest.length) await this._injectToTui(rest);
+  }
+
+  // 칩 클릭 = 미리보기(일반 LLM 앱 관례) — 이미지는 앱 내 라이트박스, 그 외/대용량은 시스템 기본 앱.
+  async _openPreview(a) {
+    if (!a) return;
+    if (a.img) {
+      let b64 = a.b64;
+      if (!b64) { try { b64 = await api.filePreviewB64(a.path); } catch (_) { b64 = null; } }
+      if (b64) { this._showLightbox(`data:${this._attachMime(a)};base64,${b64}`, a); return; }
+    }
+    try { await api.openPath(a.path); } catch (e) {
+      this._setBanner("파일을 열 수 없습니다: " + String(e || "").slice(0, 80), "warn");
+    }
+  }
+
+  _showLightbox(src, a) {
+    document.querySelector(".chat-lightbox")?.remove();
+    const ov = document.createElement("div");
+    ov.className = "chat-lightbox";
+    ov.innerHTML =
+      `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path)}">${escapeHtml(a.name)}</span>` +
+      `<button class="chat-lb-open" type="button">원본 열기</button>` +
+      `<button class="chat-lb-close" type="button" title="닫기">✕</button></div>` +
+      `<img class="chat-lb-img" src="${src}" alt="">`;
+    let close;
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } };
+    close = () => { ov.remove(); document.removeEventListener("keydown", onKey, true); };
+    ov.addEventListener("click", (e) => {
+      if (e.target.closest?.(".chat-lb-open")) { api.openPath(a.path).catch(() => {}); return; }
+      if (e.target.closest?.(".chat-lb-close") || e.target === ov) close();
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(ov);
   }
 
   _attachMime(a) {
@@ -576,7 +703,7 @@ export class ChatView {
     const thumb = a.img && a.b64
       ? `<img class="chat-att-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
       : `<span class="chat-att-file">${escapeHtml(a.name)}</span>`;
-    return `<div class="chat-att" title="${escapeHtml(a.path)}">${thumb}` +
+    return `<div class="chat-att" data-i="${i}" title="${escapeHtml(a.path)}">${thumb}` +
       (removable ? `<button class="chat-att-x" type="button" data-i="${i}" title="빼기">✕</button>` : "") +
       `</div>`;
   }
@@ -646,6 +773,16 @@ export class ChatView {
 
   // ── 본문 위임 클릭 ──
   _onBodyClick(e) {
+    // 보낸 말풍선의 첨부 칩 — 클릭=미리보기(컴포저 스트립과 동일 규칙).
+    const sentAtt = e.target.closest?.(".chat-att-strip.sent .chat-att");
+    if (sentAtt) {
+      const rowEl = sentAtt.closest(".chat-msg");
+      const seq = rowEl ? Number(rowEl.dataset.seq) : NaN;
+      const m = this._msgs.find((mm) => mm.seq === seq);
+      const a = m && m.optAttach ? m.optAttach[Number(sentAtt.dataset.i)] : null;
+      if (a) this._openPreview(a);
+      return;
+    }
     const copy = e.target.closest?.(".chat-code-copy");
     if (copy) {
       const pre = copy.closest(".chat-code")?.querySelector(".chat-code-pre");
@@ -714,6 +851,8 @@ export class ChatView {
 
   // ── 전송 ──
   async _send() {
+    // 첨부 주입/재동기화가 진행 중이면 끝난 뒤에 — 토큰·컴포저가 반쯤 동기화된 채 Enter 금지.
+    if (this._injectQ) { try { await this._injectQ; } catch (_) { /* noop */ } }
     const raw = String(this.inputEl.value || "");
     const att = this._attach.slice();
     if (!raw.trim() && !att.length) return;
@@ -732,22 +871,38 @@ export class ChatView {
     if (this._noSession) this._probeUntil = Date.now() + CHAT.NO_SESSION_PROBE_MS;
     this._clearBlank();
 
-    // 첨부는 셸 인용 경로로 메시지 앞에 붙는다(OS 드롭→PTY 삽입과 동일 문법 — TUI 가 이미지
-    //  경로를 [Image #N] 으로 변환한다). 전송 즉시 스트립을 비운다.
-    const attText = att.map((a) => "'" + String(a.path).replace(/'/g, "'\\''") + "'").join(" ");
-    const sendText = attText ? attText + (raw.trim() ? " " + raw : "") : raw;
+    // 본문 = 입력칸에서 첨부 토큰을 걷어낸 나머지 — 첨부는 드롭 시점에 이미 TUI 컴포저에 실려 있어
+    //  다시 보내면 이중이 된다. 주입에 실패해 토큰이 없는 첨부만 예전 방식(경로 앞붙임)으로 동반.
+    let body = raw;
+    const orphan = [];
+    for (const a of att) {
+      if (a.token) body = stripTokenOnce(body, a.token);
+      else orphan.push(shq(a.path));
+    }
+    const prefix = orphan.join(" ");
+    const sendText = prefix ? prefix + (body.trim() ? " " + body : "") : body;
     if (att.length) { this._attach = []; this._renderAttach(); }
 
     // 낙관 렌더 — 트랜스크립트에 같은 텍스트의 user 메시지가 오면 치운다(dedup 키=trim 앞 200자/60s).
     //  첨부 동반 전송은 실제 트랜스크립트 문구를 예측할 수 없어 any 매칭(다음 user 메시지)으로 치운다.
     const seq = this._optSeq--;
-    const opt = { seq, role: "user", kind: "text", text: raw, ts: Date.now(), hidden: false, optimistic: true, optAttach: att };
+    const opt = { seq, role: "user", kind: "text", text: body.trim(), ts: Date.now(), hidden: false, optimistic: true, optAttach: att };
     this._msgs = [...this._msgs, opt];
     const el = this._buildRow(opt);
     this._els.set(seq, el);
     this.scrollEl.appendChild(el);
-    this._pending.push({ key: optimisticKey(sendText), at: Date.now(), seq, any: att.length > 0 });
+    this._pending.push({ key: optimisticKey(sendText || "[첨부]"), at: Date.now(), seq, any: att.length > 0 });
     this._scrollToBottom();
+
+    // 본문이 비었으면(첨부만 전송) 컴포저에 실린 것을 Enter 로만 제출 — 텍스트를 흘리지 않는다.
+    if (!sendText.trim()) {
+      const ok = this.ctx.tuiWrite?.("\r");
+      if (!ok) {
+        el.classList.add("failed");
+        this._setBanner("전송에 실패했습니다(터미널 채널 없음).", "warn");
+      }
+      return;
+    }
 
     try {
       await api.chatInput({
@@ -758,7 +913,7 @@ export class ChatView {
       // 데몬에 입력 주입기가 아직 배선되지 않았거나(NOT_IMPLEMENTED) 서버 경로가 막혔다 →
       //  이 pane 은 그 터미널에 이미 붙어 있으므로 로컬 PTY 로 같은 규칙(bracketed paste + 지연 Enter)
       //  으로 보낸다. 어느 경로든 "실행 중인 그 claude 세션"에 들어간다(별도 세션 금지).
-      const ok = this.ctx.sendFallback?.(raw);
+      const ok = this.ctx.sendFallback?.(sendText);
       if (!ok) {
         el.classList.add("failed");
         el.title = String(e || "전송 실패");

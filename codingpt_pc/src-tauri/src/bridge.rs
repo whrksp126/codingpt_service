@@ -784,6 +784,23 @@ pub fn open_external(url: String) -> Result<(), String> {
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
 }
 
+// 로컬 파일을 시스템 기본 앱으로 열기(채팅 첨부의 "원본 보기"). 존재하는 파일 절대경로만 —
+//  URL/스킴/디렉토리를 막아 open_external(원격 URL)과 관심사를 분리한다.
+#[tauri::command]
+pub fn open_path(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.is_absolute() || !p.is_file() {
+        return Err("존재하는 파일 절대경로만 열 수 있습니다.".into());
+    }
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("/usr/bin/open").arg(p).spawn();
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(p).spawn();
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let r = std::process::Command::new("xdg-open").arg(p).spawn();
+    r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
+}
+
 // 네이티브 알림(OSC/벨 → macOS 알림). 프론트 notifications.js 에서 호출.
 #[tauri::command]
 pub fn notify(app: AppHandle, title: String, body: String) {

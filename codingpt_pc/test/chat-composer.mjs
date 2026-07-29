@@ -280,5 +280,59 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   }
 }
 
+
+// ── 드롭 첨부 ↔ TUI 컴포저 동기화(2026-07-30, cptest 격리 실측 픽스처) ─────────────
+// 실측 계약: 이미지 경로는 bracketed paste 로만 [Image #N] 변환(literal 타이핑은 무변환 —
+//  0.1.164 채팅 전송이 TUI 에 안 실리던 진범), N 은 프로세스 전역 증가(리셋 없음) → 화면에서 읽는다.
+{
+  // 실제 capture-pane 출력(이미지 2 + 텍스트 파일 1 붙여넣은 컴포저 — 경로가 랩으로 갈라진다)
+  const SCREEN = [
+    "                                                                                   ● high · /effort",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "❯ [Image #1] [Image #2]'/private/tmp/claude-501/scratchpad/droptest/no",
+    "  tes.txt'",
+    "────────────────────────────────────────────────────────────────────────────────────────────────────",
+    "   [Opus 5 (1M context)] droptest | 5h:10%",
+    "  -- INSERT -- bypass permissions on (shift+tab to cycle)",
+  ];
+  const c = M.parseComposer(SCREEN);
+  eq("컴포저의 이미지 번호를 읽는다", c.nums, [1, 2]);
+  ok("랩으로 갈라진 경로가 이어 붙는다", c.text.includes("'/private/tmp/claude-501/scratchpad/droptest/notes.txt'"), c.text);
+
+  // 랩 경계가 [Image #N] 토큰 한가운데를 가르는 경우 — 들여쓰기 2칸 제거로 이어 붙어야 잡힌다
+  const WRAPPED = [
+    "────────",
+    "❯ 이 이미지 봐줘 [Image #",
+    "  14]",
+    "────────",
+    "   status",
+  ];
+  eq("랩으로 갈라진 토큰도 잡는다", M.parseComposer(WRAPPED).nums, [14]);
+
+  // 빈 컴포저(placeholder) — 번호 0개, 인용 경로 흔적 없음(재동기화 dirty 판정의 근거)
+  const EMPTY = ["────────", '❯ Try "write a test for <filepath>"', "────────", "   status"];
+  const e = M.parseComposer(EMPTY);
+  eq("빈 컴포저 = 번호 없음", e.nums, []);
+  ok("placeholder 에는 작은따옴표가 없다(dirty 오판 금지)", !e.text.includes("'"), e.text);
+  eq("❯ 줄이 없으면 빈 결과", M.parseComposer(["no prompt here"]), { text: "", nums: [] });
+
+  // 전송 시 토큰 제거 — TUI 컴포저에 이미 실린 표식을 다시 보내면 이중 전송이 된다
+  eq("본문 앞 토큰 제거(+공백 1)", M.stripTokenOnce("[Image #3] 이거 고쳐줘", "[Image #3]"), "이거 고쳐줘");
+  eq("본문 중간 토큰 제거", M.stripTokenOnce("이거 [Image #3] 고쳐줘", "[Image #3]"), "이거 고쳐줘");
+  eq("토큰만 있으면 빈 문자열(첨부만 전송 = Enter only)", M.stripTokenOnce("[Image #3] ", "[Image #3]"), "");
+  eq("없는 토큰은 무변화", M.stripTokenOnce("안녕", "[Image #9]"), "안녕");
+  eq("같은 토큰이 여럿이면 1회만", M.stripTokenOnce("[Image #3] [Image #3]", "[Image #3]"), "[Image #3]");
+  eq("파일 토큰(인용 경로)도 같은 규칙", M.stripTokenOnce("'/a/b c.txt' 읽어줘", "'/a/b c.txt'"), "읽어줘");
+
+  // 소스 핀 — 드롭이 TUI 주입 없이 채팅에만 쌓이는 회귀(사용자 실사고 2026-07-30) 방지
+  const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
+  ok("드롭 즉시 TUI 컴포저에 paste 주입한다", /tuiPaste/.test(cv) && /_injectToTui/.test(cv));
+  ok("전송은 토큰을 걷어낸 본문만 보낸다", /stripTokenOnce\(body, a\.token\)/.test(cv));
+  ok("첨부만 전송이면 Enter 만 보낸다", /tuiWrite\?\.\("\\r"\)/.test(cv));
+  ok("칩 클릭 = 미리보기(라이트박스/시스템 열기)", /_openPreview/.test(cv) && /chat-lightbox/.test(cv) && /openPath/.test(cv));
+  const pj = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
+  ok("주입은 insertText(bracketed paste) 경로다", /tuiPaste:\s*\(text\)[\s\S]{0,120}insertText\(text\)/.test(pj));
+}
+
 console.log(fail ? `\n${fail} FAILURE(S)` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
