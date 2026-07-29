@@ -259,3 +259,71 @@ test('always: 거절에는 규칙이 절대 붙지 않는다', () => {
   assert.strictEqual(out.hookSpecificOutput.decision.behavior, 'deny');
   assert.ok(!('updatedPermissions' in out.hookSpecificOutput.decision));
 });
+
+// ── codex 원격 승인(2026-07-29) ─────────────────────────────────────────────
+// 실측(codex 0.145.0, PTY): PermissionRequest 훅 입력이 claude 와 동형이고 allow 결정이 존중된다.
+// 단 updatedPermissions 는 **예약 필드 — 실으면 fail-closed** ("hook returned unsupported
+// updatedPermissions"). 따라서 codex 경로의 불변식: 어떤 경로로도 updatedPermissions 를 싣지 않는다.
+test('codex: always 플래그가 와도 updatedPermissions 를 절대 싣지 않는다(fail-closed 방지)', () => {
+  const meta = { tool: 'Bash', agent: 'codex', choice: false, alwaysUpdates: [RULE_SUG] };
+  const out = approvals.buildHookOutput(meta, { decision: 'allow', always: true });
+  assert.strictEqual(out.hookSpecificOutput.decision.behavior, 'allow');
+  assert.ok(!('updatedPermissions' in out.hookSpecificOutput.decision),
+    'codex 는 updatedPermissions 가 예약 필드라 실으면 훅 전체가 거부된다(fail-closed)');
+});
+
+test('codex: 왕복 — 제안이 와도 alwaysLabel 을 광고하지 않고, allow 는 순수 allow 로 나간다', async () => {
+  const p = approvals.request({
+    agent: 'codex', sessionId: 'cx-1', toolName: 'Bash',
+    toolInput: { command: 'rm x.txt' },
+    // codex 는 실제로 이 필드를 보내지 않지만, 보내더라도(방어) 3번째 선택지를 만들면 안 된다.
+    permissionSuggestions: [RULE_SUG],
+  }, RESOLVED, null);
+  await new Promise((r) => setTimeout(r, 10));
+  const ad = advertised[0];
+  assert.strictEqual(ad.agent, 'codex');
+  assert.strictEqual(ad.alwaysLabel, undefined,
+    'codex 카드에 3번째 선택지가 뜨면 눌러도 규칙이 안 생긴다(훅 계약에 없음) — 허위 약속');
+  await approvals.handle('approval.resolve', { id: ad.id, decision: 'allow', always: true });
+  const r = await p;
+  const d = r.hookOutput.hookSpecificOutput.decision;
+  assert.strictEqual(d.behavior, 'allow');
+  assert.ok(!('updatedPermissions' in d));
+});
+
+// ── diff 파이프라인(2026-07-29) — "무엇이 쓰이는지 못 보고 승인" 제거 ──────────
+test('diff: Write 는 내용 원문을 싣되 값 단위 리댁션을 거친다', () => {
+  const d = approvals.diffOf('Write', { file_path: '/x/.env', content: 'A=1\nAPI_KEY=sk-abcdefghijklmnop\nB=2' });
+  assert.strictEqual(d.kind, 'write');
+  assert.doesNotMatch(d.newContent, /sk-abcdef/, `시크릿이 diff 로 나갔다: ${d.newContent}`);
+  assert.match(d.newContent, /A=1/);
+});
+
+test('diff: Edit 는 old→new 양쪽을 싣고, 초과분은 truncated 로 표식한다', () => {
+  const d = approvals.diffOf('Edit', { old_string: 'foo()', new_string: 'bar()' });
+  assert.deepStrictEqual({ kind: d.kind, o: d.oldContent, n: d.newContent }, { kind: 'edit', o: 'foo()', n: 'bar()' });
+  const big = approvals.diffOf('Edit', { old_string: 'x'.repeat(20000), new_string: 'y' });
+  assert.strictEqual(big.truncated, true);
+  assert.ok(big.oldContent.length <= 16 * 1024);
+});
+
+test('diff: 광고 payload 에 실려 back normalizeDiff 화이트리스트 형태와 일치한다', async () => {
+  approvals.request({
+    agent: 'claude', sessionId: 's', toolName: 'Edit',
+    toolInput: { file_path: path.join(os.homedir(), CWD, 'a.js'), old_string: 'const a = 1', new_string: 'const a = 2' },
+  }, RESOLVED, null);
+  await new Promise((r) => setTimeout(r, 10));
+  const ad = advertised[advertised.length - 1];
+  assert.ok(ad.diff, 'diff 가 없으면 원격에서 변경 내용을 볼 수단이 없다');
+  // back normalizeDiff 가 받는 키만 사용해야 한다(kind/oldContent/newContent/truncated).
+  for (const k of Object.keys(ad.diff)) {
+    assert.ok(['kind', 'oldContent', 'newContent', 'truncated'].includes(k), `back 이 모르는 diff 키: ${k}`);
+  }
+  assert.strictEqual(ad.diff.oldContent, 'const a = 1');
+  assert.strictEqual(ad.diff.newContent, 'const a = 2');
+});
+
+test('cleanup(codex/diff) — 남은 대기 슬롯 정리', () => {
+  approvals._reset();
+  assert.strictEqual(approvals.pendingCount(), 0);
+});

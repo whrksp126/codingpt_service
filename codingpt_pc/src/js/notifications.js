@@ -95,14 +95,22 @@ export function renderNotifPanel(el, onJump) {
       if (isChoiceApproval(appr)) {
         acts.innerHTML = `<span class="notif-act-hint">선택형 요청 — 카드에서 응답</span>`;
       } else {
+        // 순서는 TUI/카드와 동일: 허용 → (제안이 있으면) 묻지 않기 → 거절(2026-07-29 표면 통일).
+        const always = appr.alwaysLabel
+          ? `<span class="notif-act" data-act="always" title="${escapeHtml(appr.alwaysLabel)}">허용하고 묻지 않기</span>`
+          : "";
         acts.innerHTML =
-          `<span class="notif-act ghost" data-act="deny">거절</span>` +
-          `<span class="notif-act primary" data-act="allow">허용</span>`;
+          `<span class="notif-act primary" data-act="allow">허용</span>` +
+          always +
+          `<span class="notif-act ghost" data-act="deny">거절</span>`;
         acts.addEventListener("click", (e) => {
           const b = e.target.closest?.("[data-act]");
           if (!b) return;
           e.stopPropagation();
-          S.respondApproval(appr.id, { decision: b.dataset.act === "allow" ? "allow" : "deny" });
+          const act = b.dataset.act;
+          S.respondApproval(appr.id, act === "deny"
+            ? { decision: "deny" }
+            : { decision: "allow", ...(act === "always" ? { always: true } : {}) });
         });
       }
       row.appendChild(acts);

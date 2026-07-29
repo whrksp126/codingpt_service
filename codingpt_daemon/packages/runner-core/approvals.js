@@ -42,6 +42,7 @@ const MIN_TIMEOUT_SEC = 1;               // 하한 1s — 회귀 테스트가 �
 const MAX_TIMEOUT_SEC = 24 * 3600;       // 상한은 claude 가 아니라 우리 안전장치일 뿐(24h)
 const MAX_PENDING_PER_PANE = 3;          // 같은 (cwd,tid) 동시 대기 상한 — 4번째부터 즉시 defer(폭주 가드)
 const PREVIEW_MAX_BYTES = 4 * 1024;      // inputPreview 상한(민감내용·용량)
+const DIFF_SIDE_MAX = 16 * 1024;         // diff 한쪽(old/new) 상한 — back 캡(32KB)보다 먼저 데몬이 자른다
 const SUMMARY_MAX = 200;
 const MESSAGE_MAX = 4000;
 const LABEL_MAX = 200;
@@ -212,6 +213,56 @@ function detailOf(tool, input) {
   }
 }
 
+// 파일 수정 도구의 변경 내용 — 카드의 '변경 내용' 접기가 그린다(back normalizeDiff 계약:
+//  {kind, oldContent?, newContent?, truncated?}). "무엇이 쓰이는지 원문을 못 보고 승인"을 없애는 경로라
+//  요약(detailOf)과 별개로 **원문**을 싣되, 값 단위 리댁션(redactValues)을 반드시 거친다 —
+//  Write 로 .env 를 쓰는 경우 content 에 시크릿 원문이 그대로 있다.
+function diffOf(tool, input) {
+  const d = input || {};
+  let truncated = false;
+  const side = (s) => {
+    const red = redactValues(String(s));
+    if (red.length > DIFF_SIDE_MAX) { truncated = true; return red.slice(0, DIFF_SIDE_MAX); }
+    return red;
+  };
+  switch (String(tool)) {
+    case 'Write': {
+      if (typeof d.content !== 'string' || !d.content) return undefined;
+      const out = { kind: 'write', newContent: side(d.content) };
+      if (truncated) out.truncated = true;
+      return out;
+    }
+    case 'Edit': {
+      const from = typeof d.old_string === 'string' ? d.old_string : '';
+      const to = typeof d.new_string === 'string' ? d.new_string : '';
+      if (!from && !to) return undefined;
+      const out = { kind: 'edit', oldContent: side(from), newContent: side(to) };
+      if (truncated) out.truncated = true;
+      return out;
+    }
+    case 'MultiEdit': {
+      const edits = Array.isArray(d.edits) ? d.edits.slice(0, 8) : [];
+      if (!edits.length) return undefined;
+      const SEP = '\n⋯\n';
+      const out = {
+        kind: 'multiedit',
+        oldContent: side(edits.map((e) => (e && e.old_string) || '').join(SEP)),
+        newContent: side(edits.map((e) => (e && e.new_string) || '').join(SEP)),
+      };
+      if (Array.isArray(d.edits) && d.edits.length > 8) truncated = true;
+      if (truncated) out.truncated = true;
+      return out;
+    }
+    case 'NotebookEdit': {
+      if (typeof d.new_source !== 'string' || !d.new_source) return undefined;
+      const out = { kind: 'notebook', newContent: side(d.new_source) };
+      if (truncated) out.truncated = true;
+      return out;
+    }
+    default: return undefined;
+  }
+}
+
 // 3번째 선택지("허용하고 다음부터 묻지 않기") 재료 — claude 가 준 addRules 제안만 추린다.
 //  ⚠ 제안이 없으면 undefined 를 돌려 **선택지 자체를 만들지 않는다**. claude TUI 도 addRules 제안이
 //   있을 때만 그 옵션을 띄우므로(바이너리 실측) 이 조건이 TUI 와의 동치성을 만든다. 없는데 만들면
@@ -284,7 +335,10 @@ function buildHookOutput(meta, outcome) {
     //  실측(2026-07-29, claude 2.1.220): destination 이 localSettings 면 프로젝트의
     //  .claude/settings.local.json 에 "Bash(ls:*)" 형태로 실제 기록되고, session 이면 그 세션에만 산다.
     //  destination 은 claude 가 정해서 보낸 값을 유지한다(우리가 범위를 넓히지 않는다 = 과대 허용 방지).
-    const updates = outcome.always && Array.isArray(m.alwaysUpdates) && m.alwaysUpdates.length
+    //  ⚠ codex 는 updatedPermissions 가 예약 필드라 **넣는 순간 fail-closed**(2026-07-29 바이너리 실측:
+    //   "PermissionRequest hook returned unsupported updatedPermissions") — claude 외에는 절대 싣지 않는다.
+    const updates = (m.agent || 'claude') === 'claude'
+      && outcome.always && Array.isArray(m.alwaysUpdates) && m.alwaysUpdates.length
       ? { updatedPermissions: m.alwaysUpdates } : {};
     return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', ...updates } } };
   }
@@ -366,9 +420,16 @@ function request(args, resolved, conn) {
   const r = resolved || {};
   const toolName = String(a.toolName || a.tool_name || '');
   const toolInput = (a.toolInput || a.tool_input || {}) || {};
-  const alwaysRule = alwaysRuleOf(a.permissionSuggestions || a.permission_suggestions);
+  // 에이전트 구분 — codex 도 같은 왕복을 탄다(2026-07-29 실측: codex 0.145 의 PermissionRequest 훅은
+  //  입력이 claude 와 동형(tool_name:"Bash"/tool_input.command)이고 출력 계약도 같은 hookSpecificOutput).
+  //  단 codex 는 permission_suggestions 를 주지 않고 updatedPermissions 는 예약 필드(넣으면 fail-closed)라
+  //  "다음부터 묻지 않기"가 없다 — alwaysRule 이 자연히 비어 카드도 2버튼이 된다.
+  const agent = String(a.agent || 'claude');
+  const alwaysRule = agent === 'claude'
+    ? alwaysRuleOf(a.permissionSuggestions || a.permission_suggestions) : undefined;
   const meta = {
     tool: toolName,
+    agent,
     choice: isChoiceTool(toolName, toolInput),
     sessionId: a.sessionId || a.session_id || null,
     toolUseId: a.toolUseId || a.tool_use_id || null,
@@ -392,7 +453,7 @@ function request(args, resolved, conn) {
   const deadlineAt = t0 + hardMs;
   const payload = {
     id,
-    agent: String(a.agent || 'claude'),
+    agent,
     hookEventName: 'PermissionRequest',
     sessionId: meta.sessionId,
     promptId: a.promptId || a.prompt_id || null,
@@ -403,6 +464,8 @@ function request(args, resolved, conn) {
     // 카드가 접기 없이 그릴 부가 설명(Bash description 등) + 3번째 선택지 라벨. 둘 다 없으면 미전송.
     detail: detailOf(toolName, toolInput),
     alwaysLabel: alwaysRule ? alwaysRule.label : undefined,
+    // 파일 수정 도구의 변경 원문(리댁션·캡 적용) — 카드 '변경 내용' 접기의 재료.
+    diff: diffOf(toolName, toolInput),
     inputPreview: inputPreviewOf(toolInput),
     questions: questionsOf(toolInput),
     // back 의 화이트리스트(normalizeCreate)가 통과시키는 정규화 프롬프트. 최상위 questions 는
@@ -713,7 +776,7 @@ module.exports = {
   request, handle, resync, list,
   requestTui, tuiSlotFor, cancelTui, // TUI 폴백 질문 재광고(question-revive)
   cancelBySession, cancelAll, hasPending, pendingCount,
-  buildHookOutput, budget, timeoutSec, configure,
+  buildHookOutput, budget, timeoutSec, configure, diffOf,
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)
   CAP, ANSWER_PREFIX, MAX_PENDING_PER_PANE,
   _reset, _settle: settle,

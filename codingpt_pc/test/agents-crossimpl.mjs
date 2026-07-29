@@ -45,10 +45,12 @@ for (const k of ['full', 'partial', 'launch']) {
     `app=${appLabel[k]} pc=${pcTier[k]?.label}`);
 }
 
-// ── 2. 등급 문구가 사실과 맞는다(원격 승인은 claude 뿐) ──────────────────────
-ok(/원격 승인/.test(pcTier.full?.desc || ''), 'full 만 원격 승인을 약속한다');
-ok(/원격 승인은 지원하지 않아요/.test(pcTier.partial?.desc || ''),
-  'partial 은 원격 승인이 안 된다고 **명시**한다(폰에서 오지 않는 카드를 기다리게 하지 않는다)');
+// ── 2. 등급 문구가 사실과 맞는다(2026-07-29: codex 도 원격 승인 지원 — hooks.json 병합) ──────
+ok(/원격 승인/.test(pcTier.full?.desc || ''), 'full 은 원격 승인을 약속한다');
+// partial(codex)은 이제 원격 승인을 약속하되, **훅 신뢰(최초 1회)** 조건을 함께 명시해야 한다 —
+//  조건 없이 약속하면 신뢰 전 상태에서 "폰에 카드가 안 온다"가 우리 버그로 읽힌다.
+ok(/원격 승인/.test(pcTier.partial?.desc || '') && /신뢰/.test(pcTier.partial?.desc || ''),
+  'partial 은 원격 승인 + 훅 신뢰 조건을 명시한다(신뢰 전 무카드가 버그로 읽히지 않게)');
 ok(/안 돼요/.test(pcTier.launch?.desc || ''), 'launch 는 알림·승인 불가를 명시한다');
 // 데몬 카탈로그의 tier 가 그 약속과 같아야 한다.
 const tierOf = (id) => {

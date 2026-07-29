@@ -1387,9 +1387,15 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   border-radius: var(--r-sm); overflow-x: auto; max-width: 100%;
   font-family: var(--mono-font); font-size: 11.5px; line-height: 16px; color: var(--text3); white-space: pre-wrap;
 }
+/* diff 프리뷰 — 이전(빨간 표시) → 새(초록 표시) 순서. 데몬이 리댁션·캡을 이미 적용한 값이다. */
+.apc-pre.apc-diff-old { border-left: 2px solid var(--error); }
+.apc-pre.apc-diff-new { border-left: 2px solid var(--accent); }
+.apc-diff-note { font-size: 11px; color: var(--dim); margin-top: 3px; }
 .apc-err { font-size: 11.5px; color: var(--error); }
 .apc-err.hidden { display: none; }
 .apc-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+/* 권한/계획 승인의 번호 선택지(TUI 동형)가 액션 영역을 전폭으로 쓴다 */
+.apc-actions .apc-qopts { width: 100%; }
 .apc-btn {
   border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
   font-size: 12.5px; border-radius: var(--r-sm); padding: 6px 14px; cursor: pointer;

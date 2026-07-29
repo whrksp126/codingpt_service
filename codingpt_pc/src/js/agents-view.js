@@ -34,7 +34,7 @@ function esc(s) {
 
 export const TIER = {
   full: { label: "완전 연동", desc: "상태 감지 · 원격 승인 · 알림까지 연동돼요" },
-  partial: { label: "알림 연동", desc: "작업 완료 알림이 와요. 원격 승인은 지원하지 않아요" },
+  partial: { label: "알림+승인 연동", desc: "작업 알림과 원격 승인이 와요. 처음 한 번 codex 화면에서 훅을 신뢰해 주세요" },
   launch: { label: "실행 전용", desc: "실행과 탭 표시까지만. 알림 · 원격 승인은 안 돼요" },
 };
 

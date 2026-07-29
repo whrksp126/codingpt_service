@@ -356,6 +356,23 @@ test('FCM payload — 승인은 액션 가능(혼합 전송 + iOS 카테고리 +
   assert.strictEqual(m.apns.payload.aps['interruption-level'], 'time-sensitive');
 });
 
+test('FCM payload — alwaysLabel 이 있으면 3버튼(TUI 순서)과 전용 iOS 카테고리로 나간다', () => {
+  // claude 가 규칙을 제안한 요청(alwaysLabel) → 잠금화면에도 "허용하고 묻지 않기"가 떠야
+  //  표면마다 선택지 개수가 달라지지 않는다(2026-07-29 표면 통일).
+  const push = approvalService._buildPush({
+    approval: { id: 'apr_al1', tool: 'Bash', summary: 'git status', alwaysLabel: 'git status:*', deadlineAt: 1, cwd: 'dev/x', win: 1 },
+  });
+  assert.strictEqual(push.data.actions, 'CPT_ALLOW,CPT_ALWAYS,CPT_DENY');
+  assert.strictEqual(push.data.alwaysLabel, 'git status:*');
+  assert.strictEqual(push.category, 'CPT_APPROVAL_ALWAYS');
+  // 선택형에는 절대 붙지 않는다(허용/거절이 답이 아닌 도구).
+  const cp = approvalService._buildPush({
+    approval: { id: 'apr_al2', tool: 'AskUserQuestion', alwaysLabel: 'x', prompt: { kind: 'choice', questions: [] }, deadlineAt: 1 },
+  });
+  assert.strictEqual(cp.data.actions, 'CPT_ANSWER');
+  assert.strictEqual(cp.data.alwaysLabel, undefined);
+});
+
 // ── 기능2 E2EE — 기기 승인(열쇠 배포) ────────────────────────────────
 //
 // 이 블록은 "서버는 봉인문만 만진다"를 코드로 고정한다. 아래 seal/open 헬퍼는 **클라이언트 구현의

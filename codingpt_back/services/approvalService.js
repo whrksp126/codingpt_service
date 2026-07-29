@@ -217,7 +217,7 @@ function fanout(userId, event) {
 
 // 푸시 표시/액션 힌트 — Android 는 혼합(notification+data), iOS 는 aps.category + data 액션 식별자.
 //  ⚠ 승인은 두 종류이고 필요한 액션이 다르다:
-//   · permission(Bash/Write…) → [허용]/[거절]
+//   · permission(Bash/Write…) → [허용]/([허용하고 묻지 않기])/[거절] — 3번째는 alwaysLabel 있을 때만
 //   · choice(AskUserQuestion/ExitPlanMode) → 고른 **라벨**을 되돌려야 한다. 허용/거절로는 답이 안 된다.
 //  그래서 종류를 푸시 메타에 실어 네이티브가 분기할 수 있게 한다:
 //   · Android: data.approvalKind + data.options(라벨 JSON) → 라벨 버튼 또는 [답하기] 폴백
@@ -236,13 +236,19 @@ function buildPush(rec) {
   const labels = q && Array.isArray(q.options)
     ? q.options.map((o) => String((o && o.label) || '')).filter(Boolean).slice(0, 4)
     : [];
+  // "허용하고 다음부터 묻지 않기"(TUI 2번) — claude 가 규칙을 제안한 요청에만 존재(alwaysLabel).
+  //  잠금화면/알림 패널에도 3번째 버튼을 그릴 수 있게 신호를 싣는다(표면별 선택지 개수 통일,
+  //  2026-07-29). 규칙 원문은 데몬이 보관하므로 라벨(표시용)만 나간다.
+  const always = !choice && a.alwaysLabel ? String(a.alwaysLabel).slice(0, 120) : '';
   const data = {
     approvalId: a.id,
     approvalKind: kind,
     deadlineAt: String(a.deadlineAt),
     tool: a.tool,
-    actions: choice ? 'CPT_ANSWER' : 'CPT_ALLOW,CPT_DENY',
+    // 순서도 TUI 와 동일(허용 → 묻지 않기 → 거절) — 네이티브가 이 순서대로 버튼을 그린다.
+    actions: choice ? 'CPT_ANSWER' : (always ? 'CPT_ALLOW,CPT_ALWAYS,CPT_DENY' : 'CPT_ALLOW,CPT_DENY'),
   };
+  if (always) data.alwaysLabel = always;
   if (labels.length) {
     try { data.options = JSON.stringify(labels); } catch (_) { /* 직렬화 실패 시 라벨 없이 = [답하기] 폴백 */ }
   }
@@ -250,8 +256,8 @@ function buildPush(rec) {
   return {
     channelId: ANDROID_CHANNEL,
     // iOS 는 등록된 카테고리만 액션을 표시한다. 선택형은 승인별 카테고리(옵션 라벨이 요청마다 다르므로)로,
-    //  권한형은 고정 카테고리로 보낸다.
-    category: choice ? `CPT_CHOICE_${a.id}` : 'CPT_APPROVAL',
+    //  권한형은 고정 카테고리 2종(2버튼/3버튼 — 라벨이 고정이라 콜드 상태에서도 뜬다)으로 보낸다.
+    category: choice ? `CPT_CHOICE_${a.id}` : (always ? 'CPT_APPROVAL_ALWAYS' : 'CPT_APPROVAL'),
     data,
   };
 }

@@ -690,15 +690,22 @@ const APPROVAL_WAIT_MIN_MS = 5000;
 const APPROVAL_WAIT_MAX_MS = 25 * 3600 * 1000;
 
 async function approvalHook(flags) {
+  // 에이전트 판별 — codex 는 `--agent codex` 로 온다(shim 이 ~/.codex/hooks.json 에 그렇게 등록).
+  //  codex 0.145 실측(2026-07-29): PermissionRequest 훅 입력이 claude 와 동형(session_id/cwd/
+  //  permission_mode/transcript_path/tool_name/tool_input)이고 출력 계약도 같은 hookSpecificOutput.
+  //  차이 2가지 — ① permission_suggestions 없음(→ "다음부터 묻지 않기" 선택지 없음)
+  //             ② updatedPermissions 는 예약 필드(넣으면 fail-closed) — 데몬이 agent 로 차단한다.
+  const agent = flags && flags.agent === 'codex' ? 'codex' : 'claude';
   let payload = null;
   try { payload = await readStdinJson({ waitMs: 2000 }); } catch (_) { return; }
   if (!payload || typeof payload !== 'object') return;      // 페이로드 파싱 실패 = 무출력(TUI 폴백)
 
   // 상태 보고(기능3)는 승인 기능과 독립이다 — 킬스위치/서버 미지원/오류와 무관하게 항상 자기보고한다.
   //  await 하지 않는다: 데몬이 느릴 때 그 지연이 곧 승인 대기(=claude 정지) 앞에 붙기 때문.
+  //  codex 도 같은 v2 이벤트를 재사용한다(필드 이름이 동형) — agent 만 바꿔 싣는다.
   try {
     const ev = mapClaudeHook('permission', payload);
-    if (ev) request('hook.event', ev, { timeoutMs: 3000 }).catch(() => {});
+    if (ev) { ev.agent = agent; request('hook.event', ev, { timeoutMs: 3000 }).catch(() => {}); }
   } catch (_) { /* noop */ }
 
   // 킬스위치 — 기능 도입 전과 100% 동일 동작(무출력 + exit 0 → TUI 대화상자).
@@ -711,7 +718,7 @@ async function approvalHook(flags) {
   let res = null;
   try {
     res = await request('approval.request', {
-      agent: 'claude',
+      agent,
       hookEventName: payload.hook_event_name || 'PermissionRequest',
       sessionId: payload.session_id || null,
       promptId: payload.prompt_id || null,

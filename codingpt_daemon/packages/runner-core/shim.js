@@ -9,6 +9,8 @@
  * 원칙:
  *  · 사용자 전역 설정(~/.claude/settings.json, ~/.codex/config.toml) 무오염 — 래퍼가 실행 시에만
  *    추가 설정(--settings / -c notify)을 얹는다. 사용자가 --settings 를 직접 주면 무간섭 통과.
+ *    유일한 예외 = codex 원격 승인 훅(§4.7): codex 는 실행 인자 훅 주입이 없어 ~/.codex/hooks.json
+ *    **비파괴 병합**만이 경로다(자기-스코핑 + 언와이어 시 회수 — 해당 절 주석 참조).
  *  · 자격증명 무접촉(ToS 경계) — 훅/설정 주입만, 크레덴셜은 다루지 않는다.
  *  · **설치된 것만 감싼다**(2026-07-27). 없는 바이너리의 래퍼를 만들면 OS 의 표준
  *    `command not found` 가 `cpt-shim: … 찾을 수 없습니다` 로 바뀌어 "우리가 망가뜨렸다"로 읽힌다
@@ -223,6 +225,23 @@ exec "$REAL" -c 'notify=["${cptAbs}","codex-notify"]' "$@"
     skipped.push('codex');
   }
 
+  // 4.7) codex 원격 승인 훅 — **~/.codex/hooks.json 비파괴 병합**(2026-07-29).
+  //   codex 는 claude 의 `--settings` 같은 실행 인자 훅 주입이 없다(실측: hooks.json 파일이 유일한
+  //   등록 경로, `-c` 는 config.toml 키만). 그래서 "개인 설정 파일 무수정" 원칙(agents.js 헤더,
+  //   2026-07-27)의 예외를 여기 한 곳만 둔다 — 그 원칙의 세 가지 근거를 전부 구조로 해소했기 때문:
+  //   ① 남의 파일 수정   → 우리 항목만 마커로 식별해 추가/갱신/제거(다른 도구 항목 무접촉),
+  //                        배선 OFF/미설치면 우리 항목을 걷는다(래퍼 삭제와 같은 규율).
+  //   ② CodingPT 밖 발화 → 명령 자체가 자기-스코핑: CPT_SOCK(CodingPT 터미널에만 주입되는 env)이
+  //                        없으면 stdin 만 비우고 무출력 종료(cpt 전역 유출 근본수정 라운드와 같은 원칙).
+  //   ③ 앱 제거 후 잔재  → Orca 와 같은 가드형 명령([ -x cpt ] 실패 시 cat) — cpt 가 사라져도
+  //                        에러 없이 무동작. "cpt 를 못 찾겠다" 사고가 구조적으로 불가능.
+  //   ⚠ codex 는 훅을 **사용자가 TUI 에서 1회 신뢰**해야 실행한다(Hooks need review → Trust all).
+  //     신뢰 전에는 훅이 비활성 = 기존 notify 경로 그대로(원격 승인만 없음, 회귀 0).
+  //   ⚠ CPT_SHIM_NO_GLOBAL_LINK=1(테스트/하네스의 "stateDir 밖 무접촉" 선언)이면 병합/회수 모두 스킵.
+  if (process.env.CPT_SHIM_NO_GLOBAL_LINK !== '1') {
+    ensureCodexApprovalHook(cptAbs, ab, !!(realCodex && agents.isWired('codex')));
+  }
+
   // 4.5) open 래퍼(macOS 전용) — `open http(s)://…` 를 워크스페이스 프리뷰로 라우팅한다(cmux 미러).
   //   PATH 선두에 bin 이 오므로 이 파일이 /usr/bin/open 보다 먼저 잡힌다. cpt 와 달리 전역 심링크·
   //   셸 함수는 만들지 않는다 — open 을 PATH 래핑하는 서드파티가 없어 함수 강제가 불필요하고, rc 가
@@ -310,6 +329,70 @@ ${cptTail}
   return { binDir: bin, hooksFile, zdotDir: zdot, wired, skipped };
 }
 
+// ── codex 훅 병합/회수(§4.7) ──────────────────────────────────────────────
+//  우리 항목 식별자 — 명령 문자열에 이 마커가 있으면 우리 것이다(경로가 바뀐 과거 설치 잔재 포함).
+const CODEX_HOOK_MARKER = 'approval-hook --agent codex';
+
+function codexHooksFile() { return path.join(os.homedir(), '.codex', 'hooks.json'); }
+
+function ensureCodexApprovalHook(cptAbs, ab, enabled, fileOverride) {
+  const file = fileOverride || codexHooksFile();
+  let raw = null;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (_) { raw = null; }
+  let root = null;
+  if (raw != null) {
+    try { root = JSON.parse(raw); } catch (_) {
+      // 파일이 있는데 파싱이 안 되면 **무접촉** — 우리가 재작성하면 타 도구의 항목(내용은 있는데
+      //  형식만 깨진 경우)을 통째로 날릴 수 있다. codex 원격 승인만 비활성으로 남는다.
+      return;
+    }
+  }
+  const existed = root != null;
+  if (!root || typeof root !== 'object' || Array.isArray(root)) root = {};
+  if (!root.hooks || typeof root.hooks !== 'object' || Array.isArray(root.hooks)) root.hooks = {};
+  const list = Array.isArray(root.hooks.PermissionRequest) ? root.hooks.PermissionRequest : [];
+  const isOurs = (m) => { try { return JSON.stringify(m).includes(CODEX_HOOK_MARKER); } catch (_) { return false; } };
+  const others = list.filter((m) => !isOurs(m));
+
+  if (!enabled) {
+    // 배선 OFF/미설치 — 우리 항목만 걷는다. 파일이 없거나 우리 항목이 없으면 아무것도 쓰지 않는다
+    //  (~/.codex 디렉토리를 우리가 만들지 않는다).
+    if (!existed || others.length === list.length) return;
+    if (others.length) root.hooks.PermissionRequest = others;
+    else delete root.hooks.PermissionRequest;
+    writeCodexHooks(file, root);
+    return;
+  }
+
+  // 자기-스코핑 가드형 명령(§4.7 ①②③). stdin 은 어느 분기에서든 소비/폐기된다.
+  //  ⚠ 이 문자열이 바뀌면 codex 가 "훅이 변경됐다"며 재신뢰를 요구한다 — 꼭 필요할 때만 바꿀 것.
+  const cmd = `if [ -n "$CPT_SOCK" ] && [ -x '${cptAbs}' ]; then '${cptAbs}' approval-hook --agent codex --wait-ms ${ab.cliWaitMs}; else cat >/dev/null 2>&1 || :; fi`;
+  const entry = {
+    hooks: [{
+      type: 'command',
+      command: cmd,
+      timeout: ab.hookTimeoutSec,
+      statusMessage: 'CodingPT — 원격 승인 대기 중…',
+    }],
+  };
+  const next = [...others, entry];
+  let same = false;
+  try { same = JSON.stringify(list) === JSON.stringify(next); } catch (_) { same = false; }
+  if (same) return;                                     // 무변경 — 재신뢰 유발 금지
+  root.hooks.PermissionRequest = next;
+  writeCodexHooks(file, root);
+}
+
+// 원자적 쓰기(tmp→rename) — codex 가 읽는 도중의 반쪽 JSON 을 만들지 않는다.
+function writeCodexHooks(file, root) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = file + '.cpt-tmp';
+    fs.writeFileSync(tmp, JSON.stringify(root, null, 2) + '\n');
+    fs.renameSync(tmp, file);
+  } catch (_) { /* 실패 = codex 원격 승인만 비활성(기존 notify 경로 유지) — 데몬을 세우지 않는다 */ }
+}
+
 /**
  * 감지를 **먼저** 끝낸 뒤 배선한다. 데몬은 PC 앱(Finder/launchd)이 띄우는 사이드카라 로그인 셸의
  *  PATH 를 물려받지 않는다 — 동기 경로만 쓰면 `~/.local/bin` 밖에 깐 에이전트를 놓칠 수 있다.
@@ -322,4 +405,8 @@ async function ensureShimsAsync() {
 
 function zdotDir() { return path.join(shimDir(), 'zdot'); }
 
-module.exports = { ensureShims, ensureShimsAsync, binDir, shimDir, zdotDir };
+module.exports = {
+  ensureShims, ensureShimsAsync, binDir, shimDir, zdotDir,
+  // 테스트 전용 — codex 훅 병합을 파일 단위로 검증한다(ensureShims 전체 실행 없이).
+  _codexHooks: { ensureCodexApprovalHook, codexHooksFile, CODEX_HOOK_MARKER },
+};

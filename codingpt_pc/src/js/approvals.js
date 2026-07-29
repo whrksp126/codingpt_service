@@ -14,8 +14,12 @@
 //  다른 탭에서 기다리는 건 **탭의 점**과 알림(패널/푸시)이 알린다. win 을 못 실은 구 요청은 알림 행에서
 //  바로 응답한다(notifications.js) — 답할 길이 사라지지는 않는다.
 //
-// 절대 만들지 않는 것: **"항상 허용"** 버튼. claude 2.1.220 의 PermissionRequest 훅에는 그 개념이 없고
-//  (실측), 있는 척 만들면 사용자가 "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가 된다.
+// "허용하고 다음부터 묻지 않기"(2번 선택지)는 **claude 가 그 요청에 규칙을 제안했을 때만** 그린다
+//  (a.alwaysLabel 존재 = TUI 2번과 동일 조건). ⚠ 옛 헤더 주석은 "훅에 그 개념이 없다(실측) → 절대
+//  만들지 말 것"이었으나 2026-07-29 재실측으로 **오판**으로 판명됐다(decision.updatedPermissions 로
+//  규칙이 실제 기록됨). 제안이 없는데 만들면 "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가
+//  된다는 경고 자체는 여전히 유효하다 — 그래서 무조건 그리지 않고 제안 존재를 조건으로 건다.
+//  codex 는 훅 계약에 이 개념이 없어(updatedPermissions 예약 필드) 항상 2개(허용/거절)다.
 import * as S from "./state.js";
 import { state } from "./state.js";
 import { icons } from "./icons.js";
@@ -223,11 +227,25 @@ function buildCard(a) {
       body.appendChild(d);
     }
   }
-  // diff(파일 수정) — 있으면 접힌 프리뷰. 데몬이 채우면 표시된다(없어도 정상).
+  // 전체 명령(Bash) — summary 는 200자 클립이라 긴 명령의 뒷부분이 잘린다. 원문(마스킹된
+  //  inputPreview.command, ~2KB)이 더 길면 접기로 전문을 제공한다(앱 도크와 같은 규칙).
+  const cmdFull = a.inputPreview && typeof a.inputPreview.command === "string" ? a.inputPreview.command : "";
+  if (cmdFull && cmdFull.length > String(a.summary || "").length) {
+    const d = document.createElement("details");
+    d.className = "apc-fold";
+    d.innerHTML = `<summary>전체 명령</summary><pre class="apc-pre">${escapeHtml(cmdFull.slice(0, 4000))}</pre>`;
+    body.appendChild(d);
+  }
+  // diff(파일 수정) — 접힌 프리뷰. Edit/MultiEdit 는 이전 → 새 내용을 나눠 보여준다(데몬 diffOf 가
+  //  리댁션·16KB 캡을 이미 적용한 값). "무엇이 쓰이는지 못 보고 승인"을 없애는 유일한 표면이다.
   if (a.diff && (a.diff.newContent || a.diff.oldContent)) {
     const d = document.createElement("details");
     d.className = "apc-fold";
-    d.innerHTML = `<summary>변경 내용</summary><pre class="apc-pre">${escapeHtml(String(a.diff.newContent || a.diff.oldContent).slice(0, 4000))}</pre>`;
+    const cap = (s) => escapeHtml(String(s).slice(0, 8000));
+    const old = a.diff.oldContent ? `<pre class="apc-pre apc-diff-old">${cap(a.diff.oldContent)}</pre>` : "";
+    const neu = a.diff.newContent ? `<pre class="apc-pre apc-diff-new">${cap(a.diff.newContent)}</pre>` : "";
+    const note = a.diff.truncated ? `<div class="apc-diff-note">내용이 길어 일부만 표시됩니다</div>` : "";
+    d.innerHTML = `<summary>${a.diff.kind === "write" ? "파일 내용" : "변경 내용"}</summary>${old}${neu}${note}`;
     body.appendChild(d);
   }
 
@@ -366,7 +384,18 @@ async function submitQuestionCard(el, a) {
   await S.respondApproval(a.id, { decision: "answer", answers });
 }
 
-// 응답 UI — 선택형(choice)과 권한형(permission)이 완전히 다르다.
+// 선택지 행 1개 — 질문 카드(.apc-qopt)와 같은 시각 언어(번호 붙은 세로 행). 앱 도크와 동일 형태.
+function optRowHtml(act, label, desc, num) {
+  return `<button class="apc-qopt" type="button" data-act="${act}">` +
+    `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(label)}</span>` +
+    (desc ? `<span class="apc-qdesc">${escapeHtml(desc)}</span>` : "") + `</span>` +
+    `<span class="apc-qnum">${num}</span>` +
+  `</button>`;
+}
+
+// 응답 UI — **TUI 프롬프트와 같은 번호 선택지**(2026-07-29 사용자 확정: 순서·형태 3플랫폼 동일).
+//  · 권한형: 1 허용 / 2 허용하고 다음부터 묻지 않기(제안 있을 때만 — TUI 동일 조건) / 3 거절
+//  · 계획 승인(ExitPlanMode): 1 계획대로 진행 / 2 거절 + 의견 입력(선택 — 고른 행에 실려 간다)
 function buildActions(el, a) {
   const acts = el.querySelector(".apc-actions");
   acts.innerHTML = "";
@@ -374,31 +403,29 @@ function buildActions(el, a) {
   if (isChoice(a)) {
     // 선택지가 없는 선택형 = ExitPlanMode(계획 승인). 데몬 규약상
     //  allow → "계획을 승인했습니다. 계획대로 진행하세요." / deny(+message) → "거절했습니다: …"
-    //  answer.text → "다음과 같이 답했습니다: …"(계획을 조금 고쳐 진행시키는 경로).
+    //  answer.text → "다음과 같이 답했습니다: …"(계획을 조금 고쳐 진행시키는 경로 — 의견이 있으면
+    //  '계획대로 진행'이 이 경로를 탄다. 앱 모달과 같은 규칙).
     const wrap = document.createElement("div");
     wrap.className = "apc-choices";
     wrap.innerHTML =
       `<div class="apc-free">` +
-        `<input class="apc-free-input" type="text" placeholder="의견을 붙여 답하기(선택)…" />` +
-        `<button class="apc-btn" type="button" data-act="answerText">의견 보내기</button>` +
+        `<input class="apc-free-input" type="text" placeholder="의견 남기기(선택)…" />` +
       `</div>` +
-      `<div class="apc-actions-inline">` +
-        `<button class="apc-btn ghost" type="button" data-act="deny">거절</button>` +
-        `<button class="apc-btn primary" type="button" data-act="allow">승인</button>` +
+      `<div class="apc-qopts">` +
+        optRowHtml("planAllow", "계획대로 진행", "", 1) +
+        optRowHtml("deny", "거절", "", 2) +
       `</div>`;
     acts.appendChild(wrap);
     return;
   }
-  // 권한형 — TUI 와 같은 선택지. 3번째("다음부터 묻지 않기")는 **claude 가 그 요청에 대해 규칙을
-  //  제안했을 때만**(a.alwaysLabel 존재) 그린다 — TUI 도 정확히 같은 조건에서만 2번을 띄운다.
-  //  제안이 없는데 만들면 "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가 된다.
-  const always = a.alwaysLabel
-    ? `<button class="apc-btn" type="button" data-act="allowAlways" title="${escapeHtml(a.alwaysLabel)}">허용 + 다음부터 묻지 않기</button>`
-    : "";
-  acts.innerHTML =
-    `<button class="apc-btn ghost" type="button" data-act="deny">거절</button>` +
-    always +
-    `<button class="apc-btn primary" type="button" data-act="allow">허용</button>`;
+  // 권한형 — 2번("다음부터 묻지 않기")은 **claude 가 그 요청에 대해 규칙을 제안했을 때만**
+  //  (a.alwaysLabel 존재) 그린다 — TUI 도 정확히 같은 조건에서만 2번을 띄운다. codex 는 항상 없음.
+  const rows = [
+    { act: "allow", label: "허용", desc: "" },
+    ...(a.alwaysLabel ? [{ act: "allowAlways", label: "허용하고 다음부터 묻지 않기", desc: a.alwaysLabel }] : []),
+    { act: "deny", label: "거절", desc: "" },
+  ];
+  acts.innerHTML = `<div class="apc-qopts">${rows.map((r, i) => optRowHtml(r.act, r.label, r.desc, i + 1)).join("")}</div>`;
 }
 
 function syncCard(el, a) {
@@ -426,7 +453,19 @@ async function onCardClick(e, el, a) {
   if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
   // 규칙은 데몬이 보관한 claude 제안 그대로 적용된다 — 우리는 "그걸 원한다"는 플래그만 보낸다.
   if (act === "allowAlways") { await S.respondApproval(a.id, { decision: "allow", always: true }); return; }
-  if (act === "deny") { await S.respondApproval(a.id, { decision: "deny" }); return; }
+  if (act === "deny") {
+    // 계획 승인 카드의 의견 입력은 거절 사유로도 실려 간다(앱 모달과 같은 규칙).
+    const text = isChoice(a) ? String(el.querySelector(".apc-free-input")?.value || "").trim() : "";
+    await S.respondApproval(a.id, { decision: "deny", ...(text ? { message: text } : {}) });
+    return;
+  }
+  // 계획 승인(1번 행) — 의견이 있으면 answer.text 로(계획을 조금 고쳐 진행), 없으면 순수 allow.
+  if (act === "planAllow") {
+    const text = String(el.querySelector(".apc-free-input")?.value || "").trim();
+    if (text) await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [], text }] });
+    else await S.respondApproval(a.id, { decision: "allow" });
+    return;
+  }
   // ── 질문 카드(한 번에 하나) ──
   //  선택 = **고르기만** 한다(자동 진행 없음). 넘어가는 것은 [다음] / [건너뛰기] 뿐 —
   //  누르자마자 넘어가면 잘못 눌렀을 때 되돌릴 틈이 없다(참고 UI 도 같은 규칙).
@@ -467,14 +506,8 @@ async function onCardClick(e, el, a) {
     await submitQuestionCard(el, a);
     return;
   }
-  // (구 '전부 펼치기' 카드의 toggle/one/pick/pickMulti 핸들러는 질문 카드 스테퍼로 대체돼 삭제됐다.)
-  if (act === "answerText") {
-    const input = el.querySelector(".apc-free-input");
-    const text = String(input?.value || "").trim();
-    if (!text) { flashErr(el, "보낼 내용을 입력해 주세요"); input?.focus(); return; }
-    await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [], text }] });
-    return;
-  }
+  // (구 '전부 펼치기' 카드의 toggle/one/pick/pickMulti 핸들러와 별도 '의견 보내기' 버튼(answerText)은
+  //  질문 카드 스테퍼·계획 승인 번호 행(의견이 행에 실려 감)으로 대체돼 삭제됐다.)
 }
 
 function flashErr(el, msg) {
