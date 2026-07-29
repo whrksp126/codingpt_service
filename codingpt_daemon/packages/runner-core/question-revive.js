@@ -159,19 +159,20 @@ async function poll() {
 const QUESTION_LINE_RE = /^\s*(Do you want to|Would you like to) .{0,160}\?\s*$/;
 const FOOTER_RE = /esc to cancel/i; // claude "Esc to cancel · …" / codex "… or esc to cancel"
 // flow(추가 코멘트 전달 방식) 판별 — **다이얼로그마다 실측 기반으로**(2026-07-29 사용자 확정:
-//  "코멘트 가능 여부를 정확히 파악해 상황에 맞게"). 근거는 푸터의 "Tab to amend" 힌트다:
-//  · amend: 푸터에 "Tab to amend" 가 있는 다이얼로그(claude Bash 등) — 해당 옵션에 Tab → 인라인
-//    타이핑 → Enter. 실측: Yes/No 만 입력 가능, "always allow/don't ask again" 옵션은 타이핑 무반응.
-//  · interrupt: 그 힌트가 없는 다이얼로그 전부 — claude Fetch(실측: Tab·타이핑 무반응, 3번 선택 →
-//    "Interrupted · What should Claude do instead?" → 컴포저 지시 전달)와 codex(동일 구조).
-//    코멘트는 "tell … what to do differently" 옵션에만 실을 수 있다(그 외엔 TUI 에도 경로가 없다).
+//  "코멘트 가능 여부는 근거로 판단해 상황에 맞게"). 근거 = 푸터의 "Tab to amend" 힌트:
+//  · amend: 힌트가 있는 다이얼로그(claude Bash 등) — 해당 옵션에 Tab → 인라인 타이핑 → Enter.
+//    실측: Yes/No 만 입력 가능, "always allow/don't ask again" 옵션은 타이핑 무반응.
+//  · interrupt: 힌트가 없는 다이얼로그 전부(claude Fetch·codex — 각각 실측: Tab·타이핑 무반응).
+//    ★ 카드에도 코멘트 입력칸을 **하나도 그리지 않는다** — TUI 화면에 입력 어포던스가 없는데
+//    카드에만 있으면 거짓말이다(2026-07-29 사용자 확정: "TUI 는 코멘트 다는 게 없는데 채팅엔
+//    왜 나오지"). "tell … what to do differently" 를 고른 뒤의 지시는 TUI 와 동일하게 **선택 후
+//    컴포저**(= 채팅 컴포저 메시지)로 이어서 보낸다 — 인터럽트되면 터미널이 입력 대기 상태다.
 const AMEND_HINT_RE = /tab to amend/i;
 const NO_INPUT_LABEL_RE = /always allow|don.?t ask again/i;
-const TELL_DIFFERENTLY_RE = /tell .{0,30}what to do differently/i;
 
 function optionAcceptsInput(flow, label) {
   const l = String(label || '');
-  if (flow === 'interrupt') return TELL_DIFFERENTLY_RE.test(l);
+  if (flow === 'interrupt') return false; // 화면에 입력 어포던스 없음 = 카드에도 없음
   return /^(Yes|No)\b/i.test(l) && !NO_INPUT_LABEL_RE.test(l);  // amend: Yes/No (always 계열 제외)
 }
 

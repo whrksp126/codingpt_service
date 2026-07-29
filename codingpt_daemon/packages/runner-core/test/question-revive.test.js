@@ -289,10 +289,12 @@ test('입력 가능 판별 — amend 는 Yes/No(always 계열 제외), interrupt
   assert.strictEqual(can('amend', 'Yes, and always allow access to ptyperm/ from this project'), false,
     '실측: always allow 옵션은 타이핑이 무반응이다');
   assert.strictEqual(can('amend', "Yes, and don't ask again for: git status"), false);
-  assert.strictEqual(can('interrupt', 'Yes, proceed (y)'), false, 'interrupt 다이얼로그의 Yes 엔 코멘트 경로가 없다');
-  assert.strictEqual(can('interrupt', 'No'), false, '평범한 No 도 interrupt 에선 코멘트 경로가 없다');
-  assert.strictEqual(can('interrupt', 'No, and tell Codex what to do differently (esc)'), true);
-  assert.strictEqual(can('interrupt', 'No, and tell Claude what to do differently (esc)'), true);
+  // interrupt = 화면에 입력 어포던스가 없다 → 카드에도 코멘트 입력칸 0개(2026-07-29 사용자 확정:
+  //  "TUI 는 코멘트 다는 게 없는데 채팅엔 왜 나오지"). tell-differently 지시는 선택 후 컴포저로.
+  assert.strictEqual(can('interrupt', 'Yes, proceed (y)'), false);
+  assert.strictEqual(can('interrupt', 'No'), false);
+  assert.strictEqual(can('interrupt', 'No, and tell Codex what to do differently (esc)'), false);
+  assert.strictEqual(can('interrupt', 'No, and tell Claude what to do differently (esc)'), false);
 
   const p = qRevive._parsePermissionDialog(PERM_SCREEN);
   assert.strictEqual(p.flow, 'amend', '푸터의 "Tab to amend" 힌트 = 인라인 입력 지원(실측 근거)');
@@ -300,7 +302,8 @@ test('입력 가능 판별 — amend 는 Yes/No(always 계열 제외), interrupt
     '카드 옵션의 input 표식: Yes/No 만 입력창이 붙는다');
   const c = qRevive._parsePermissionDialog(CODEX_SCREEN);
   assert.strictEqual(c.flow, 'interrupt', 'Tab 힌트 없음 = interrupt flow(codex)');
-  assert.deepStrictEqual(c.question.options.map((o) => !!o.input), [false, false, true]);
+  assert.deepStrictEqual(c.question.options.map((o) => !!o.input), [false, false, false],
+    'interrupt 다이얼로그는 입력칸 0개');
 });
 
 // claude 인라인 입력 드라이브 — 화살표 이동 → Tab(푸터에 있을 때만) → 타이핑 → Enter (실측 절차).
@@ -511,8 +514,8 @@ test('푸터 없는 다이얼로그(Fetch) — 옵션 블록이 화면 맨 아�
   assert.strictEqual(p.flow, 'interrupt', 'Tab 힌트 없는 다이얼로그 = 인라인 입력 없음(실측)');
   assert.ok(p.question.question.includes('Claude wants to fetch content from example.com'), '회색 설명 줄');
   assert.strictEqual(p.question.ask, 'Do you want to allow Claude to fetch this content?', '질문 줄은 ask 로');
-  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [false, false, true],
-    '코멘트 입력칸은 TUI 가 실제로 받는 옵션에만(상황별 판별 — 항상 고정 아님)');
+  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [false, false, false],
+    '화면에 입력 어포던스가 없으면 카드에도 입력칸 0개(상황별 판별 — 항상 고정 아님)');
   assert.strictEqual(approvals._screenActOf(p.question.options[1].label), 'always');
 
   // 잔상: 옵션 아래에 다른 출력이 쌓였으면(= 살아 있는 다이얼로그가 아니면) 무시해야 한다.

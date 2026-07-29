@@ -523,9 +523,11 @@ function buildActions(el, a) {
       label: o.label, desc: "", input: !!o.input,
     }))
     : [
-      { act: "allow", label: "허용", desc: "", input: a.agent !== "codex" },
+      // 폴백(보강 전) — 코멘트 입력칸 없음: 그 다이얼로그가 인라인 입력을 받는지 화면이 증명하기
+      //  전이다. 보강이 도착해 input 표식이 오면 그때 입력칸이 생긴다(TUI 어포던스 그대로).
+      { act: "allow", label: "허용", desc: "", input: false },
       ...(a.alwaysLabel ? [{ act: "allowAlways", label: "허용하고 다음부터 묻지 않기", desc: a.alwaysLabel, input: false }] : []),
-      { act: "deny", label: "거절", desc: "", input: true },
+      { act: "deny", label: "거절", desc: "", input: false },
     ];
   acts.innerHTML = `<div class="apc-qopts">${rows.map((r, i) => optRowInputHtml(r.act, r.label, r.desc, i + 1, r.input)).join("")}</div>`;
 }
