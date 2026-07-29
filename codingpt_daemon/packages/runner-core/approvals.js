@@ -528,6 +528,9 @@ function request(args, resolved, conn) {
           settle(id, { decision: 'defer', reason: 'server_defer' }, { retract: false });
           return;
         }
+        // 훅 대기 중 TUI 가 같은 다이얼로그를 그리고 있다(기실측) — 화면을 파싱해 카드 내용을
+        //  TUI 원문으로 갱신한다(멱등 재광고 = back 이 내용 갱신 후 pending 재팬아웃).
+        if (!meta.choice) scheduleScreenEnrich(slot);
         log(`대기 시작 ${id} tool=${toolName || '?'} ws=${cwdRel || '-'} tid=${tid != null ? tid : '-'} ${Math.round(hardMs / 1000)}s`);
       })
       .catch((e) => {
@@ -535,6 +538,62 @@ function request(args, resolved, conn) {
         settle(id, { decision: 'defer', reason: 'advertise_failed' }, { retract: false });
       });
   });
+}
+
+// ── 훅 카드 화면 보강(2026-07-29 사용자 확정: "TUI 에 나오는 건 다 채팅에도") ──────
+// 훅 대기 중 TUI 가 그린 다이얼로그를 파싱해 payload.prompt.screen 에 **TUI 원문**(제목/본문/질문
+//  줄/선택지 문구 + 옵션별 입력 가능 표식)을 싣고 재광고한다. 도구별 문구 템플릿을 흉내내지
+//  않는다 — 버전이 바뀌면 같이 틀린다. 화면이 정본이다.
+//  안전장치: 파싱된 다이얼로그가 **이 승인의 것**인지 summary(명령/URL 원문) 조각으로 검증하고,
+//  선택지 라벨이 전부 응답 어휘(allow/always/deny)로 짝지어질 때만 싣는다.
+const ENRICH_TRY_MS = [1200, 3000]; // TUI 가 다이얼로그를 그리는 지연 흡수(2회 시도)
+function scheduleScreenEnrich(slot) {
+  if (!Number.isInteger(slot.tid)) return;
+  for (const ms of ENRICH_TRY_MS) {
+    const t = setTimeout(() => {
+      enrichFromScreen(slot).catch(() => { /* 보강 실패 = 기존 카드 유지(무해) */ });
+    }, ms);
+    if (t.unref) t.unref(); // 보강은 보조 — 이벤트 루프를 붙잡지 않는다
+  }
+}
+
+async function enrichFromScreen(slot) {
+  if (slot.done || !pending.has(slot.id)) return;
+  if (slot.payload.prompt && slot.payload.prompt.screen) return; // 이미 보강됨
+  const parsed = await require('./cpt-server').captureDialog({ cwd: slot.cwdRel, tid: slot.tid });
+  if (!parsed) return;
+  const norm = (s) => String(s || '').replace(/\s+/g, '');
+  const frag = norm(slot.payload.summary).slice(0, 40);
+  if (frag && !norm(parsed.question.question + parsed.title).includes(frag)) return; // 다른 요청의 다이얼로그
+  const options = (parsed.question.options || []).map((o, i) => ({
+    n: (parsed.options[i] || {}).n || i + 1,
+    label: o.label,
+    act: screenActOf(o.label),
+    ...(o.input ? { input: true } : {}),
+  }));
+  if (options.length < 2 || options.some((o) => !o.act)) return; // 응답 어휘로 못 짝지으면 보류
+  slot.payload.prompt = {
+    ...(slot.payload.prompt || {}),
+    screen: {
+      title: parsed.title,
+      body: parsed.question.question,   // 줄 구조 보존(명령/설명/질문 줄 — 화면 순서 그대로)
+      flow: parsed.flow,
+      expect: parsed.expect,
+      options,
+    },
+  };
+  if (slot.done || !pending.has(slot.id)) return;
+  await deps.advertise(slot.payload);   // 멱등 재광고 — back 이 내용 갱신 + pending 재팬아웃
+  log(`카드 화면 보강 ${slot.id} (${parsed.title}, 옵션 ${options.length}개)`);
+}
+
+// 화면 선택지 라벨 → 훅 응답 어휘. 못 알아보면 null(보강 보류 — 카드가 거짓말하면 안 된다).
+function screenActOf(label) {
+  const l = String(label || '');
+  if (/^Yes, and (don.?t ask again|always allow)/i.test(l)) return 'always';
+  if (/^Yes\b/i.test(l)) return 'allow';
+  if (/^No\b/i.test(l)) return 'deny';
+  return null;
 }
 
 /**
@@ -719,21 +778,52 @@ function resolveRemote(p) {
         return { resolved: true, id, decision };
       });
   }
-  const ok = settle(id, { decision, reason, message: p.message, answers, always, by: p.by }, { retract: false });
-  if (!ok) throw notPending();
-  // "허용 + 추가 지시"(claude 권한형 훅 경로) — TUI 의 "Yes, and tell Claude what to do next" 동치.
-  //  훅 allow 출력엔 메시지 채널이 없으므로, 허용 직후 컴포저에 지시를 주입한다(실행 중엔 큐잉 —
-  //  터미널에 직접 치는 것과 동일 경로). 거절+메시지는 hookOutput 의 deny.message 로 이미 전달된다.
-  //  codex 훅은 TUI 에도 "Yes+지시" 개념이 없다(카드도 입력을 허용 쪽에 안 붙인다) — claude 한정.
-  if (decision === 'allow' && p.message && String(p.message).trim()
-    && slot && !slot.tuiDrive && !slot.meta.choice && (slot.meta.agent || 'claude') === 'claude'
-    && Number.isInteger(slot.tid)) {
-    try {
-      const inj = require('./cpt-server').composerInject({ cwd: slot.cwdRel, tid: slot.tid, text: p.message });
-      if (inj && typeof inj.catch === 'function') inj.catch((e) => log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`));
-    } catch (e) { log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`); }
+  // ── 화면 보강된 훅 카드 — **TUI 다이얼로그 조작을 우선**한다(2026-07-29). ──
+  //  이유: 카드가 TUI 선택지 문구 그대로를 보여주므로 응답도 TUI 자신이 처리하는 게 정확하다 —
+  //  특히 "don't ask again" 은 TUI 가 직접 규칙을 기록해 **codex 도 완전 동작**한다(훅 출력의
+  //  updatedPermissions 는 codex 에서 fail-closed). 로컬에서 다이얼로그가 답해지면 에이전트가 훅을
+  //  정리하므로(hook_gone 기실측) 훅 출력 없이 defer 로 해소해도 이중 응답이 없다.
+  //  조작 실패(다이얼로그 소멸/불일치)면 기존 훅 출력 경로로 폴백한다.
+  const scr = slot && !slot.tuiDrive && decision !== 'defer'
+    && slot.payload && slot.payload.prompt && slot.payload.prompt.screen ? slot.payload.prompt.screen : null;
+  const hookPathResolve = () => {
+    const ok = settle(id, { decision, reason, message: p.message, answers, always, by: p.by }, { retract: false });
+    if (!ok) throw notPending();
+    if (decision === 'allow' && p.message && String(p.message).trim()
+      && slot && !slot.meta.choice && (slot.meta.agent || 'claude') === 'claude'
+      && Number.isInteger(slot.tid)) {
+      try {
+        const inj = require('./cpt-server').composerInject({ cwd: slot.cwdRel, tid: slot.tid, text: p.message });
+        if (inj && typeof inj.catch === 'function') inj.catch((e) => log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`));
+      } catch (e) { log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`); }
+    }
+    return { resolved: true, id, decision };
+  };
+  if (scr) {
+    const wantAct = decision === 'deny' ? 'deny' : always ? 'always' : 'allow';
+    const opt = (scr.options || []).find((o) => o && o.act === wantAct);
+    if (opt) {
+      const text = opt.input && p.message && String(p.message).trim() ? String(p.message).trim() : null;
+      return Promise.resolve(require('./cpt-server').permissionAnswer({
+        cwd: slot.cwdRel, tid: slot.tid, pick: opt.n, expect: scr.expect, text, flow: scr.flow,
+      }))
+        .then(() => {
+          // 훅 무출력 defer — TUI 가 이미 답을 처리했다. 에이전트가 훅을 곧 정리한다(hook_gone).
+          const ok = settle(id, { decision: 'defer', reason: 'tui_driven' }, { retract: false });
+          if (!ok) throw notPending();
+          return { resolved: true, id, decision };
+        })
+        .catch((e) => {
+          if (e && e.code === 'ALREADY_RESOLVED') throw e;
+          log(`화면 조작 실패(${(e && e.code) || (e && e.message) || e}) — 훅 출력 경로로 폴백`);
+          return hookPathResolve();
+        });
+    }
   }
-  return { resolved: true, id, decision };
+  // 훅 출력 경로(비보강 카드/보강 조작 실패 폴백) — "허용+추가 지시"(claude)는 TUI 의
+  //  "Yes, and tell Claude what to do next" 동치로 허용 직후 컴포저에 지시를 주입한다(훅 allow
+  //  출력엔 메시지 채널이 없다). 거절+메시지는 hookOutput 의 deny.message 로 전달된다(양 에이전트).
+  return hookPathResolve();
 }
 
 // 응답에 원 질문의 라벨을 채운다 — back 은 대역폭을 아끼려 questionIndex 만 보낸다.
@@ -811,4 +901,6 @@ module.exports = {
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)
   CAP, ANSWER_PREFIX, MAX_PENDING_PER_PANE,
   _reset, _settle: settle,
+  _screenActOf: screenActOf, _enrichFromScreen: enrichFromScreen,
+  _slot: (id) => pending.get(id),
 };

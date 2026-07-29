@@ -1395,6 +1395,17 @@ async function composerInject({ cwd, tid, text } = {}) {
   return { ok: true, tid: win };
 }
 
+// ── 훅 대기 중 TUI 다이얼로그 캡처(승인 카드 내용 보강용) ─────────────────────
+// 훅이 결정을 기다리는 동안 TUI 는 같은 다이얼로그를 **동시에** 그린다(2026-07-29 기실측 —
+//  hook_state_f3 라운드). 그 화면을 파싱해 카드가 TUI 원문(제목/본문/질문 줄/선택지 문구)을
+//  그대로 싣게 한다 — 도구별 문구 템플릿 흉내가 아니라 화면이 정본(채팅=TUI 원칙).
+async function captureDialog({ cwd, tid } = {}) {
+  const { io } = dialogIoFor(cwd, tid);
+  await io.ready;
+  const screen = await io.screen();
+  return require('./question-revive')._parsePermissionDialog(screen);
+}
+
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
 function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
@@ -1586,6 +1597,7 @@ module.exports = {
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임
+  captureDialog, // 훅 대기 중 TUI 다이얼로그 캡처 — approvals 의 카드 내용 보강이 위임
   _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
   _drivePermissionDialog: drivePermissionDialog,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)

@@ -373,6 +373,111 @@ test('권한 재광고 왕복 — 라벨+텍스트 응답이 drive 까지 온전
     '카드 입력창의 텍스트가 answers[].text 로 drive 까지 와야 한다');
 });
 
+// ── TUI 원문 표시(2026-07-29 사용자 확정: "TUI 에 나오는 건 다 채팅에도") ─────────
+test('파서 — 질문 줄이 화면 순서 그대로 본문에 들어간다(claude 는 뒤, codex 는 앞)', () => {
+  const p = qRevive._parsePermissionDialog(PERM_SCREEN);
+  const pl = p.question.question.split('\n');
+  assert.strictEqual(pl[pl.length - 1], 'Do you want to proceed?', 'claude: 질문 줄은 본문 끝');
+  assert.match(p.expect, /^rm \/Users\/u/, 'expect 는 여전히 명령 줄(질문 줄이면 특이성이 없다)');
+  const c = qRevive._parsePermissionDialog(CODEX_SCREEN);
+  const cl = c.question.question.split('\n');
+  assert.strictEqual(cl[0], 'Would you like to run the following command?', 'codex: 질문 줄은 본문 앞');
+});
+
+const CMD_FULL = 'rm /Users/u/other/project/tokin/approval-demo.txt && git -C /Users/u/other/project/tokin status --short';
+
+test('화면 보강 — 훅 카드 payload 에 TUI 원문(제목/본문/선택지+act)이 실리고 재광고된다', async () => {
+  const cs = require('../cpt-server');
+  const origCapture = cs.captureDialog;
+  cs.captureDialog = async () => qRevive._parsePermissionDialog(PERM_SCREEN);
+  try {
+    const done = approvals.request(
+      { toolName: 'Bash', toolInput: { command: CMD_FULL } },
+      { cwdRel: CWD, windowIndex: TID }, null,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const id = advertised[0].id;
+    const slot = approvals._slot(id);
+    assert.ok(slot, '훅 슬롯이 있어야 한다');
+    await approvals._enrichFromScreen(slot);
+    const scr = slot.payload.prompt.screen;
+    assert.ok(scr, '보강이 실려야 한다');
+    assert.strictEqual(scr.title, 'Bash command', 'TUI 제목 원문');
+    assert.ok(scr.body.includes('Do you want to proceed?'), '질문 줄 포함');
+    assert.deepStrictEqual(scr.options.map((o) => o.act), ['allow', 'always', 'deny']);
+    assert.deepStrictEqual(scr.options.map((o) => !!o.input), [true, false, true], '옵션별 입력 가능 표식');
+    assert.strictEqual(advertised.length, 2, '보강 후 멱등 재광고(내용 갱신)');
+
+    // 다른 요청의 다이얼로그(내용 불일치)면 보강하지 않는다 — 카드가 거짓말하면 안 된다.
+    const done2 = approvals.request(
+      { toolName: 'Bash', toolInput: { command: 'echo 완전히-다른-명령' } },
+      { cwdRel: CWD, windowIndex: TID + 1 }, null,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const slot2 = approvals._slot(advertised[2].id);
+    await approvals._enrichFromScreen(slot2);
+    assert.strictEqual(slot2.payload.prompt.screen, undefined, '불일치 다이얼로그로는 보강 금지');
+    approvals._reset();
+    await done; await done2;
+  } finally {
+    cs.captureDialog = origCapture;
+  }
+});
+
+test('보강 카드 응답 — TUI 다이얼로그 조작 우선(always 는 2번 키 = codex 도 규칙 기록), 실패 시 훅 폴백', async () => {
+  const cs = require('../cpt-server');
+  const origCapture = cs.captureDialog;
+  const origAnswer = cs.permissionAnswer;
+  cs.captureDialog = async () => qRevive._parsePermissionDialog(PERM_SCREEN);
+  const driven = [];
+  cs.permissionAnswer = async (args) => { driven.push(args); return { ok: true }; };
+  try {
+    const done = approvals.request(
+      { toolName: 'Bash', toolInput: { command: CMD_FULL } },
+      { cwdRel: CWD, windowIndex: TID }, null,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    const id = advertised[0].id;
+    await approvals._enrichFromScreen(approvals._slot(id));
+    await approvals.handle('approval.resolve', { id, decision: 'allow', always: true, by: 'phone' });
+    assert.strictEqual(driven.length, 1);
+    assert.strictEqual(driven[0].pick, 2, 'always = 화면 2번 옵션을 눌러 TUI 가 직접 규칙을 기록한다');
+    assert.strictEqual(driven[0].flow, 'amend');
+    const r = await done;
+    assert.strictEqual(r.decision, 'defer');
+    assert.strictEqual(r.reason, 'tui_driven', 'TUI 가 답을 처리했으므로 훅은 무출력');
+    assert.strictEqual(r.hookOutput, null);
+
+    // 조작 실패(다이얼로그 소멸) → 훅 출력 경로 폴백. 코멘트는 deny.message 로 전달된다.
+    cs.permissionAnswer = async () => { throw Object.assign(new Error('없음'), { code: 'QUESTION_NOT_ON_SCREEN' }); };
+    const done2 = approvals.request(
+      { toolName: 'Bash', toolInput: { command: CMD_FULL } },
+      { cwdRel: CWD, windowIndex: TID }, null,
+    );
+    await new Promise((r2) => setTimeout(r2, 10));
+    const id2 = advertised[advertised.length - 1].id;
+    await approvals._enrichFromScreen(approvals._slot(id2));
+    await approvals.handle('approval.resolve', { id: id2, decision: 'deny', message: '대신 pwd 만', by: 'phone' });
+    const r2 = await done2;
+    assert.strictEqual(r2.decision, 'deny');
+    assert.match(r2.hookOutput.hookSpecificOutput.decision.message, /대신 pwd 만/, '폴백은 기존 훅 출력(deny.message)');
+  } finally {
+    cs.captureDialog = origCapture;
+    cs.permissionAnswer = origAnswer;
+  }
+});
+
+test('act 매핑 — 화면 라벨 → 훅 응답 어휘(못 알아보면 null)', () => {
+  const act = approvals._screenActOf;
+  assert.strictEqual(act('Yes'), 'allow');
+  assert.strictEqual(act('Yes, proceed (y)'), 'allow');
+  assert.strictEqual(act("Yes, and don't ask again for example.com"), 'always');
+  assert.strictEqual(act('Yes, and always allow access to ptyperm/ from this project'), 'always');
+  assert.strictEqual(act('No'), 'deny');
+  assert.strictEqual(act('No, and tell Claude what to do differently (esc)'), 'deny');
+  assert.strictEqual(act('Maybe later'), null);
+});
+
 // ── 정리 — 대기 슬롯의 ref 타이머가 프로세스를 붙잡지 않게(approval-contract.test.js 와 동일 이유) ──
 test('cleanup', () => {
   approvals._reset();

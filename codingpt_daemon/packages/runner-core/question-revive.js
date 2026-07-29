@@ -206,7 +206,12 @@ function parsePermissionDialog(screen) {
     .filter((l) => l && !/^This command requires approval$/.test(l) && !/^─+$/.test(l));
   const title = pickTitle(preBody, lines[pi]);
   // 본문 = 제목을 뺀 나머지 줄들 — **줄바꿈 보존**(카드가 TUI 와 같은 줄 구조로 그린다).
-  const bodyLines = [...preBody.filter((l) => l !== title), ...midBody];
+  //  질문 줄("Do you want to …?")도 **화면 순서 그대로** 넣는다(2026-07-29 사용자 지적: TUI 에
+  //  나오는 건 다 카드에도 — claude 는 본문 뒤, codex 는 본문 앞이 자연히 재현된다).
+  //  단 expect/summary(화면 검증·요약)는 질문 줄이 아니라 **명령 줄**이어야 특이적이다.
+  const qLine = (lines[pi] || '').trim();
+  const coreLines = [...preBody.filter((l) => l !== title), ...midBody];
+  const bodyLines = [...preBody.filter((l) => l !== title), qLine, ...midBody];
   const body = bodyLines.join('\n').slice(0, 1000);
 
   // 카드는 화면 문구 그대로 — 질문 1개(단일선택)로 모델링해 기존 선택지 카드/조작 배관을 재사용한다.
@@ -224,8 +229,8 @@ function parsePermissionDialog(screen) {
   const key = 'perm|' + crypto.createHash('sha256')
     .update([title, question.question, ...options.map((o) => `${o.n}.${o.label}`)].join('|')).digest('hex').slice(0, 16);
   // expect(조작 전 화면 검증용)는 한 줄이어야 한다 — 본문 첫 줄(명령)이 가장 특이적이다.
-  const expect = bodyLines[0] || title;
-  return { key, title, tool: toolOfDialogTitle(title), summary: bodyLines[0] || title, question, options, expect, flow };
+  const expect = coreLines[0] || title;
+  return { key, title, tool: toolOfDialogTitle(title), summary: coreLines[0] || title, question, options, expect, flow };
 }
 
 // 제목 고르기 — claude 는 질문-위 블록의 첫 줄("Bash command"), codex 는 질문 문구로 유추한다.
