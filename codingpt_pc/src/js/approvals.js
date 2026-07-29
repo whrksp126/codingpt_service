@@ -49,15 +49,17 @@ export function mountApprovals() {
     for (const el of document.querySelectorAll(".approval-card[data-deadline]")) {
       const left = remainMs(el.dataset.deadline);
       const t = el.querySelector(".apc-clock");
-      if (t) t.textContent = left > 0 ? fmtRemain(left) : "마감";
+      if (t) t.textContent = left > 0 ? fmtRemain(left) : "종료";
       const expired = left <= 0;
       if (expired !== (el.dataset.expired === "1")) {
         el.dataset.expired = expired ? "1" : "0";
-        // 마감 = 데몬이 defer 로 TUI 다이얼로그에 넘긴 상태. 여기서 답하면 410 이므로 응답 UI 를 걷는다.
+        // ⚠ 이건 "마감시간"이 아니다 — 원격 카드에는 마감이 없다(2026-07-28 폐지, TUI 와 동일하게
+        //  무기한 대기). 이 분기는 데몬의 좀비 청소 안전장치(24h)가 발동해 요청이 TUI 로 넘어간
+        //  **극단 상황**에서만 도달한다. 여기서 답하면 410 이므로 응답 UI 를 걷고 안내만 남긴다.
         el.classList.toggle("expired", expired);
         const acts = el.querySelector(".apc-actions");
         if (acts && expired) {
-          acts.innerHTML = `<div class="apc-expired-msg">마감됐습니다 — PC 터미널에서 답해주세요</div>` +
+          acts.innerHTML = `<div class="apc-expired-msg">이 요청은 종료됐어요 — PC 터미널에서 답해주세요</div>` +
             `<button class="apc-btn ghost" data-act="dismiss">확인</button>`;
         }
       }
