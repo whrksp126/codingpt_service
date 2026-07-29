@@ -279,6 +279,100 @@ test('권한 재광고 왕복 — 카드(선택지 그대로) → 라벨 응답 
   assert.deepStrictEqual(driven, [2], '카드에서 2번 라벨을 고르면 TUI 에 2를 눌러야 한다');
 });
 
+// ── 추가 지시 텍스트(2026-07-29 실측 — TUI 인라인 입력의 채팅 동치) ──────────────
+test('입력 가능 판별 — claude 는 Yes/No(always 계열 제외), codex 는 No(tell …)만', () => {
+  const can = qRevive._optionAcceptsInput;
+  assert.strictEqual(can('amend', 'Yes'), true);
+  assert.strictEqual(can('amend', 'No'), true);
+  assert.strictEqual(can('amend', 'Yes, and always allow access to ptyperm/ from this project'), false,
+    '실측: always allow 옵션은 타이핑이 무반응이다');
+  assert.strictEqual(can('amend', "Yes, and don't ask again for: git status"), false);
+  assert.strictEqual(can('interrupt', 'Yes, proceed (y)'), false, 'codex 는 Yes 에 지시를 붙일 경로가 없다');
+  assert.strictEqual(can('interrupt', 'No, and tell Codex what to do differently (esc)'), true);
+
+  const p = qRevive._parsePermissionDialog(PERM_SCREEN);
+  assert.strictEqual(p.flow, 'amend', 'claude 푸터(Esc to cancel · …) = amend flow');
+  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [true, false, true],
+    '카드 옵션의 input 표식: Yes/No 만 입력창이 붙는다');
+  const c = qRevive._parsePermissionDialog(CODEX_SCREEN);
+  assert.strictEqual(c.flow, 'interrupt', 'codex 푸터(Press enter to confirm) = interrupt flow');
+  assert.deepStrictEqual(c.question.options.map((o) => !!o.input), [false, false, true]);
+});
+
+// claude 인라인 입력 드라이브 — 화살표 이동 → Tab(푸터에 있을 때만) → 타이핑 → Enter (실측 절차).
+function mkClaudeDialog(hl, amended) {
+  return [
+    ' Bash command', '   rm x.txt', ' Do you want to proceed?',
+    ` ${hl === 1 ? '❯' : ' '} 1. Yes`,
+    ` ${hl === 2 ? '❯' : ' '} 2. Yes, and don't ask again for: rm x.txt`,
+    ` ${hl === 3 ? '❯' : ' '} 3. No`,
+    ` Esc to cancel${amended ? '' : ' · Tab to amend'} · ctrl+e to explain`,
+  ].join('\n');
+}
+
+test('권한 조작(claude+텍스트) — 이동→Tab→타이핑→Enter, 옵션별 Tab 토글 존중', async () => {
+  const cptServer = require('../cpt-server');
+  const st = { hl: 1, amended: false, typed: '', closed: false };
+  const keys = [];
+  const io = {
+    screen: async () => (st.closed ? '$ (셸)' : mkClaudeDialog(st.hl, st.amended)),
+    key: async (k, literal) => {
+      keys.push(k);
+      if (k === 'Down') st.hl = Math.min(3, st.hl + 1);
+      else if (k === 'Up') st.hl = Math.max(1, st.hl - 1);
+      else if (k === 'Tab') st.amended = true;
+      else if (k === 'Enter') st.closed = true;
+      else if (literal) st.typed += k;
+    },
+    sleep: async () => {},
+  };
+  const r = await cptServer._drivePermissionDialog(io, { pick: 3, expect: 'rm x.txt', text: '대신 pwd 만 실행해', flow: 'amend' });
+  assert.strictEqual(r.amended, true);
+  assert.deepStrictEqual(keys, ['Down', 'Down', 'Tab', '대신 pwd 만 실행해', 'Enter'],
+    '실측 절차: 하이라이트를 3으로 옮기고 Tab 으로 입력 모드를 켠 뒤 타이핑+Enter');
+  assert.strictEqual(st.typed, '대신 pwd 만 실행해');
+});
+
+// codex 인터럽트 드라이브 — 숫자키(거절) → 다이얼로그 소멸 → 컴포저에 지시 타이핑+Enter (실측 절차).
+test('권한 조작(codex+텍스트) — 숫자키 후 컴포저 주입', async () => {
+  const cptServer = require('../cpt-server');
+  const st = { closed: false, typed: '' };
+  const keys = [];
+  const io = {
+    screen: async () => (st.closed ? '■ Conversation interrupted - tell the model what to do differently.\n› ' : CODEX_SCREEN),
+    key: async (k, literal) => {
+      keys.push(k);
+      if (k === '3') st.closed = true;
+      else if (literal && k !== '3') st.typed += k;
+    },
+    sleep: async () => {},
+  };
+  const r = await cptServer._drivePermissionDialog(io, { pick: 3, expect: '$ rm x.txt', text: '파일 지우지 말고 pwd 만', flow: 'interrupt' });
+  assert.strictEqual(r.injected, true);
+  assert.deepStrictEqual(keys, ['3', '파일 지우지 말고 pwd 만', 'Enter']);
+});
+
+test('권한 재광고 왕복 — 라벨+텍스트 응답이 drive 까지 온전히 전달된다', async () => {
+  const perm = qRevive._parsePermissionDialog(PERM_SCREEN);
+  const seen = [];
+  approvals.requestTui({
+    cwdRel: CWD, tid: TID, sessionId: null, toolUseId: null,
+    dedupeKey: perm.key + '#txt', revKind: 'perm', tool: perm.tool, summary: perm.summary,
+    questions: [perm.question],
+    drive: async (o) => { seen.push(o); },
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  const slot = approvals.tuiSlotFor(CWD, TID);
+  await approvals.handle('approval.resolve', {
+    id: slot.id, decision: 'answer',
+    answers: [{ questionIndex: 0, labels: ['No'], text: '대신 상태만 봐줘' }],
+  });
+  assert.strictEqual(seen.length, 1);
+  assert.deepStrictEqual(seen[0].answers[0].labels, ['No']);
+  assert.strictEqual(seen[0].answers[0].text, '대신 상태만 봐줘',
+    '카드 입력창의 텍스트가 answers[].text 로 drive 까지 와야 한다');
+});
+
 // ── 정리 — 대기 슬롯의 ref 타이머가 프로세스를 붙잡지 않게(approval-contract.test.js 와 동일 이유) ──
 test('cleanup', () => {
   approvals._reset();

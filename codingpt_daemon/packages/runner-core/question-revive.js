@@ -158,6 +158,20 @@ async function poll() {
 //  본문은 **줄 구조를 보존**해 카드가 TUI 와 같은 모양(명령 줄들 + 설명 줄)으로 그리게 한다.
 const QUESTION_LINE_RE = /^\s*(Do you want to|Would you like to) .{0,160}\?\s*$/;
 const FOOTER_RE = /esc to cancel/i; // claude "Esc to cancel · …" / codex "… or esc to cancel"
+// flow(추가 지시 텍스트 전달 방식) 판별은 **푸터**로 한다 — 질문 문구는 겹친다(claude 플랜
+//  다이얼로그도 "Would you like to proceed?"). codex 푸터만 "Press enter to confirm …" 형태.
+//  · amend(claude): 해당 옵션에 Tab → 인라인 타이핑 → Enter (2026-07-29 실측: Yes/No 만 입력
+//    가능, "always allow/don't ask again" 옵션은 타이핑 무반응. 옵션별 버퍼·한글 OK).
+//  · interrupt(codex): 숫자키로 "No, and tell …" 선택 → 대화 인터럽트 → 컴포저에 지시 타이핑
+//    +Enter (2026-07-29 실측: 인라인 입력 없음(Tab 무반응), 인터럽트 후 지시가 모델에 전달됨).
+const INTERRUPT_FOOTER_RE = /press enter to confirm/i;
+const NO_INPUT_LABEL_RE = /always allow|don.?t ask again/i;
+
+function optionAcceptsInput(flow, label) {
+  const l = String(label || '');
+  if (flow === 'interrupt') return /^No\b/i.test(l);            // codex: 거절+지시만
+  return /^(Yes|No)\b/i.test(l) && !NO_INPUT_LABEL_RE.test(l);  // claude: Yes/No (always 계열 제외)
+}
 
 function parsePermissionDialog(screen) {
   const lines = String(screen || '').split('\n');
@@ -196,17 +210,22 @@ function parsePermissionDialog(screen) {
   const body = bodyLines.join('\n').slice(0, 1000);
 
   // 카드는 화면 문구 그대로 — 질문 1개(단일선택)로 모델링해 기존 선택지 카드/조작 배관을 재사용한다.
+  //  옵션의 input 표식 = 그 선택지에 추가 지시 텍스트를 같이 보낼 수 있다(카드가 입력창을 그린다).
+  const flow = lines.some((l) => INTERRUPT_FOOTER_RE.test(l)) ? 'interrupt' : 'amend';
   const question = {
     question: body || (lines[pi] || '').trim(),
     header: title,
     multiSelect: false,
-    options: options.map((o) => ({ label: o.label.slice(0, 200) })),
+    options: options.map((o) => ({
+      label: o.label.slice(0, 200),
+      ...(optionAcceptsInput(flow, o.label) ? { input: true } : {}),
+    })),
   };
   const key = 'perm|' + crypto.createHash('sha256')
     .update([title, question.question, ...options.map((o) => `${o.n}.${o.label}`)].join('|')).digest('hex').slice(0, 16);
   // expect(조작 전 화면 검증용)는 한 줄이어야 한다 — 본문 첫 줄(명령)이 가장 특이적이다.
   const expect = bodyLines[0] || title;
-  return { key, title, tool: toolOfDialogTitle(title), summary: bodyLines[0] || title, question, options, expect };
+  return { key, title, tool: toolOfDialogTitle(title), summary: bodyLines[0] || title, question, options, expect, flow };
 }
 
 // 제목 고르기 — claude 는 질문-위 블록의 첫 줄("Bash command"), codex 는 질문 문구로 유추한다.
@@ -259,7 +278,13 @@ async function deliverPermission(cwdRel, tid, perm, outcome) {
   if (pick == null) {
     throw Object.assign(new Error('화면의 선택지와 응답을 짝지을 수 없습니다 — TUI 를 확인해 주세요'), { code: 'QUESTION_MISMATCH' });
   }
-  await cptServer.permissionAnswer({ cwd: cwdRel, tid, pick, expect: perm.expect });
+  // 추가 지시 텍스트 — 카드 입력창의 값(answers[].text). 고른 옵션이 입력을 받는 옵션일 때만
+  //  싣는다(TUI 에서 불가능한 조합은 여기서도 만들지 않는다 — 텍스트는 버리고 선택만 전달).
+  const a = Array.isArray(outcome && outcome.answers)
+    ? outcome.answers.find((x) => x && typeof x.text === 'string' && x.text.trim()) : null;
+  const chosen = perm.options.find((o) => o.n === pick);
+  const text = a && chosen && optionAcceptsInput(perm.flow, chosen.label) ? a.text.trim() : null;
+  await cptServer.permissionAnswer({ cwd: cwdRel, tid, pick, expect: perm.expect, text, flow: perm.flow });
 }
 
 // 폰/PC 카드의 응답 → 다이얼로그 조작. throw = 전달 실패(슬롯 유지, 카드가 남아 재시도).
@@ -329,4 +354,5 @@ function pokeSoon() {
 module.exports = {
   start, stop, pokeSoon, _poll: poll, _toWire: toWire,
   _parsePermissionDialog: parsePermissionDialog, _pickForOutcome: pickForOutcome,
+  _optionAcceptsInput: optionAcceptsInput,
 };

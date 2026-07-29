@@ -721,6 +721,18 @@ function resolveRemote(p) {
   }
   const ok = settle(id, { decision, reason, message: p.message, answers, always, by: p.by }, { retract: false });
   if (!ok) throw notPending();
+  // "허용 + 추가 지시"(claude 권한형 훅 경로) — TUI 의 "Yes, and tell Claude what to do next" 동치.
+  //  훅 allow 출력엔 메시지 채널이 없으므로, 허용 직후 컴포저에 지시를 주입한다(실행 중엔 큐잉 —
+  //  터미널에 직접 치는 것과 동일 경로). 거절+메시지는 hookOutput 의 deny.message 로 이미 전달된다.
+  //  codex 훅은 TUI 에도 "Yes+지시" 개념이 없다(카드도 입력을 허용 쪽에 안 붙인다) — claude 한정.
+  if (decision === 'allow' && p.message && String(p.message).trim()
+    && slot && !slot.tuiDrive && !slot.meta.choice && (slot.meta.agent || 'claude') === 'claude'
+    && Number.isInteger(slot.tid)) {
+    try {
+      const inj = require('./cpt-server').composerInject({ cwd: slot.cwdRel, tid: slot.tid, text: p.message });
+      if (inj && typeof inj.catch === 'function') inj.catch((e) => log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`));
+    } catch (e) { log(`허용+지시 주입 실패(무해 — 지시만 유실): ${(e && e.message) || e}`); }
+  }
   return { resolved: true, id, decision };
 }
 

@@ -164,6 +164,13 @@ function buildCard(a) {
   const qsMirror = questionsOf(a);
   if (isChoice(a) && qsMirror && a.prompt && a.prompt.mirror) {
     const q = qsMirror[0] || {};
+    // 추가 지시 입력(2026-07-29 실측) — TUI 인라인 입력의 동치. input 표식이 있는 옵션(claude 의
+    //  Yes/No, codex 의 "No, and tell …")에만 텍스트를 실을 수 있다.
+    //  · 입력창이 비어 있으면: 행 탭 = 즉시 전송(TUI 숫자키 한 번과 동일 — 기존 그대로).
+    //  · 텍스트를 치면: 입력 가능한 행만 **선택** 모드가 되고 [보내기]로 전송(TUI 의 커서 이동 →
+    //    타이핑 → Enter 와 동일). 입력 불가 옵션은 흐려진다(TUI 도 그 옵션엔 타이핑이 안 된다).
+    const canInput = (q.options || []).some((o) => o && o.input);
+    el._msel = null;
     el.innerHTML =
       `<div class="apc-head"><span class="apc-title">${escapeHtml(toolTitle(a.tool))}</span>` +
         `<span class="apc-qspacer"></span>` +
@@ -175,19 +182,69 @@ function buildCard(a) {
       `<div class="apc-err hidden"></div>` +
       `<div class="apc-actions"><div class="apc-qopts">` +
         (q.options || []).map((o, i) => optRowHtml(`mirror:${i}`, o.label || `선택 ${i + 1}`, "", i + 1)).join("") +
-      `</div></div>`;
+      `</div>` +
+      (canInput ?
+        `<div class="apc-free"><input class="apc-free-input" type="text" placeholder="추가 지시 입력(선택)" /></div>` +
+        `<div class="apc-qfoot apc-mirror-foot hidden"><span class="apc-qspacer"></span>` +
+          `<button class="apc-btn primary" type="button" data-act="mirrorSend" disabled>보내기 ↵</button></div>`
+        : "") +
+      `</div>`;
+    const input = el.querySelector(".apc-free-input");
+    const foot = el.querySelector(".apc-mirror-foot");
+    const sendBtn = el.querySelector('[data-act="mirrorSend"]');
+    const textOf = () => String(input?.value || "").trim();
+    const paint = () => {
+      const t = textOf();
+      foot?.classList.toggle("hidden", !t);
+      if (sendBtn) sendBtn.disabled = !t || el._msel == null;
+      el.querySelectorAll(".apc-qopts .apc-qopt").forEach((row, i) => {
+        const o = (q.options || [])[i] || {};
+        row.classList.toggle("dim", !!t && !o.input);
+        row.classList.toggle("on", !!t && el._msel === i);
+      });
+    };
+    input?.addEventListener("input", () => { if (textOf() === "") el._msel = null; paint(); });
+    const send = async (label, text) => {
+      await S.respondApproval(a.id, {
+        decision: "answer",
+        answers: [{ questionIndex: 0, labels: [label], ...(text ? { text } : {}) }],
+      });
+    };
+    input?.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const t = textOf();
+      const label = el._msel != null ? ((q.options || [])[el._msel] || {}).label : null;
+      if (t && label && !a._busy) send(label, t).catch(() => {});
+    });
     el.addEventListener("click", async (e) => {
       const btn = e.target.closest?.("[data-act]");
       if (!btn) return;
       e.stopPropagation();
       const act = btn.dataset.act;
       if (act === "dismiss") { S.dismissApproval(a.id); return; }
+      if (a._busy) return;
+      if (act === "mirrorSend") {
+        const t = textOf();
+        const label = el._msel != null ? ((q.options || [])[el._msel] || {}).label : null;
+        if (t && label) await send(label, t);
+        return;
+      }
       const m = /^mirror:(\d+)$/.exec(act);
-      if (!m || a._busy) return;
-      const label = ((q.options || [])[parseInt(m[1], 10)] || {}).label;
-      if (!label) return;
+      if (!m) return;
+      const i = parseInt(m[1], 10);
+      const o = (q.options || [])[i] || {};
+      if (!o.label) return;
+      const t = textOf();
+      if (t) {
+        // 텍스트 입력 중 — 입력 가능한 행만 선택된다(전송은 [보내기]/Enter).
+        if (!o.input) return;
+        el._msel = el._msel === i ? null : i;
+        paint();
+        return;
+      }
       // TUI 숫자키 한 번과 동일 — 고르는 즉시 전달(데몬이 그 번호를 터미널에 눌러준다).
-      await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [label] }] });
+      await send(o.label, null);
     });
     return el;
   }
@@ -461,7 +518,22 @@ function buildActions(el, a) {
     ...(a.alwaysLabel ? [{ act: "allowAlways", label: "허용하고 다음부터 묻지 않기", desc: a.alwaysLabel }] : []),
     { act: "deny", label: "거절", desc: "" },
   ];
-  acts.innerHTML = `<div class="apc-qopts">${rows.map((r, i) => optRowHtml(r.act, r.label, r.desc, i + 1)).join("")}</div>`;
+  acts.innerHTML = `<div class="apc-qopts">${rows.map((r, i) => optRowHtml(r.act, r.label, r.desc, i + 1)).join("")}</div>` +
+    // 추가 지시 입력(2026-07-29) — TUI 인라인 입력의 훅 경로 동치. 허용+지시는 claude 만
+    //  (데몬이 허용 직후 컴포저에 지시를 주입 = "Yes, and tell Claude what to do next"),
+    //  거절+지시는 양 에이전트 모두 훅 deny.message 로 모델에 전달된다(실측).
+    `<div class="apc-free"><input class="apc-free-input" type="text" placeholder="추가 지시 입력(선택)" /></div>`;
+  // 텍스트 입력 중엔 텍스트를 실을 수 없는 행을 흐린다 — TUI 도 그 옵션엔 타이핑이 안 된다.
+  //  (always 는 양쪽 다 불가, 허용은 codex 불가.)
+  const input = acts.querySelector(".apc-free-input");
+  input?.addEventListener("input", () => {
+    const t = String(input.value || "").trim();
+    acts.querySelectorAll(".apc-qopt").forEach((row) => {
+      const act = row.dataset.act;
+      const ok = act === "deny" || (act === "allow" && a.agent !== "codex");
+      row.classList.toggle("dim", !!t && !ok);
+    });
+  });
 }
 
 function syncCard(el, a) {
@@ -479,6 +551,7 @@ async function onCardClick(e, el, a) {
   const btn = e.target.closest?.("[data-act]");
   if (!btn) return;
   e.stopPropagation();
+  if (btn.classList.contains("dim")) return; // 추가 지시 입력 중 — 텍스트를 실을 수 없는 행은 비활성
   const act = btn.dataset.act;
   if (act === "dismiss") {
     if (a._tui) { dismissedTui.add(a.id); el.remove(); return; }   // 합성 행 — 로컬로만 접는다
@@ -486,12 +559,20 @@ async function onCardClick(e, el, a) {
     return;
   }
   if (a._busy) return;
-  if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
+  if (act === "allow") {
+    // 허용 + 추가 지시(claude 만) — 데몬이 허용 직후 컴포저에 지시를 주입한다(TUI 의
+    //  "Yes, and tell Claude what to do next" 동치). codex 는 그 경로가 없어 텍스트를 싣지 않는다.
+    const text = !isChoice(a) && a.agent !== "codex"
+      ? String(el.querySelector(".apc-actions .apc-free-input")?.value || "").trim() : "";
+    await S.respondApproval(a.id, { decision: "allow", ...(text ? { message: text } : {}) });
+    return;
+  }
   // 규칙은 데몬이 보관한 claude 제안 그대로 적용된다 — 우리는 "그걸 원한다"는 플래그만 보낸다.
+  //  (추가 지시는 항상 옵션에 실을 수 없다 — TUI 도 그 옵션엔 타이핑이 안 된다.)
   if (act === "allowAlways") { await S.respondApproval(a.id, { decision: "allow", always: true }); return; }
   if (act === "deny") {
-    // 계획 승인 카드의 의견 입력은 거절 사유로도 실려 간다(앱 모달과 같은 규칙).
-    const text = isChoice(a) ? String(el.querySelector(".apc-free-input")?.value || "").trim() : "";
+    // 계획 승인 카드의 의견 입력은 거절 사유로, 권한 카드의 추가 지시는 훅 deny.message 로 실려 간다.
+    const text = String(el.querySelector(".apc-free-input")?.value || "").trim();
     await S.respondApproval(a.id, { decision: "deny", ...(text ? { message: text } : {}) });
     return;
   }

@@ -1297,7 +1297,7 @@ function dialogIoFor(cwd, tid) {
 //  즉시 그 옵션이 실행된다(Enter 불필요).
 //  안전장치는 질문 조작과 동일: 다이얼로그가 실제로 떠 있고 + expect(명령 조각)가 화면에 있어야
 //  키를 친다 — 아니면 숫자가 셸/컴포저에 타이핑된다.
-async function drivePermissionDialog(io, { pick, expect } = {}) {
+async function drivePermissionDialog(io, { pick, expect, text, flow } = {}) {
   const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const n = parseInt(pick, 10);
   if (!(n >= 1 && n <= 9)) throw Object.assign(new Error('선택 번호가 올바르지 않습니다'), { code: 'BAD_REQUEST' });
@@ -1309,19 +1309,90 @@ async function drivePermissionDialog(io, { pick, expect } = {}) {
   if (expect && !normScreen(s0).includes(normScreen(String(expect).slice(0, 60)))) {
     throw Object.assign(new Error('화면의 승인 요청이 답하려는 요청과 다릅니다'), { code: 'QUESTION_MISMATCH' });
   }
-  await io.key(String(n), true);
+  // 추가 지시 텍스트 없음 = 기존 프로토콜(숫자키 한 번, Enter 불필요 — 양 TUI 실측).
+  const msg = typeof text === 'string' && text.trim() ? text.trim().replace(/\s*\n\s*/g, ' ') : null;
+  if (!msg) {
+    await io.key(String(n), true);
+    for (let i = 0; i < 10; i++) {
+      if (!up(await io.screen())) return { ok: true, picked: n };   // 다이얼로그 소멸 = 전달 완료
+      await sleep(300);
+    }
+    throw Object.assign(new Error('다이얼로그가 닫히지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
+  }
+
+  // flow 는 파서가 푸터로 판별해 넘긴다. 방어적으로 화면에서도 재판별(스테일 메타 대비).
+  const interrupt = flow === 'interrupt' || (flow !== 'amend' && /press enter to confirm/i.test(s0));
+  if (interrupt) {
+    // codex(2026-07-29 실측): 인라인 입력이 없다. "No, and tell …" 선택 → 대화 인터럽트 →
+    //  컴포저에 지시 타이핑+Enter 하면 그 지시가 모델에 전달된다. 인터럽트 이후는 실패해도
+    //  복구 경로가 없으므로(거절은 이미 전달됨) 주입은 최선 노력으로 완주한다.
+    await io.key(String(n), true);
+    for (let i = 0; i < 10; i++) {
+      if (!up(await io.screen())) break;
+      await sleep(300);
+    }
+    await sleep(400);                    // 컴포저 포커스 복귀 대기
+    await io.key(msg, true);
+    await sleep(250);
+    await io.key('Enter');
+    return { ok: true, picked: n, injected: true };
+  }
+
+  // claude(2026-07-29 실측): 하이라이트를 대상 옵션으로 옮기고(❯), Tab 으로 인라인 입력을 켠 뒤
+  //  타이핑+Enter. Tab 은 옵션별 토글이라 푸터에 "Tab to amend" 가 있을 때만 누른다(이미 입력
+  //  모드거나 입력 불가 옵션이면 생략 — 불가 옵션은 타이핑이 무시되고 선택만 전달된다).
+  const hlOf = (s) => {
+    const m = /^\s*[❯›]\s*([1-9])\./m.exec(s);
+    return m ? parseInt(m[1], 10) : null;
+  };
+  let cur = hlOf(s0);
+  for (let hop = 0; hop < 3 && cur != null && cur !== n; hop++) {
+    const delta = n - cur;
+    for (let i = 0; i < Math.abs(delta) && i < 8; i++) await io.key(delta > 0 ? 'Down' : 'Up');
+    cur = hlOf(await io.screen());
+  }
+  if (cur != null && cur !== n) {
+    throw Object.assign(new Error('선택지로 이동하지 못했습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
+  }
+  if (/Tab to amend/i.test(await io.screen())) await io.key('Tab');
+  await io.key(msg, true);
+  await sleep(250);
+  await io.key('Enter');
   for (let i = 0; i < 10; i++) {
-    if (!up(await io.screen())) return { ok: true, picked: n };   // 다이얼로그 소멸 = 전달 완료
+    if (!up(await io.screen())) return { ok: true, picked: n, amended: true };
     await sleep(300);
   }
   throw Object.assign(new Error('다이얼로그가 닫히지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
 }
 
-async function permissionAnswer({ cwd, tid, pick, expect } = {}) {
+async function permissionAnswer({ cwd, tid, pick, expect, text, flow } = {}) {
   const { io, win } = dialogIoFor(cwd, tid);
   await io.ready;
-  const r = await drivePermissionDialog(io, { pick, expect });
+  const r = await drivePermissionDialog(io, { pick, expect, text, flow });
   return { ...r, tid: win };
+}
+
+// ── 컴포저 메시지 주입(훅 경로의 "허용하고 추가 지시" = TUI 의 "Yes, and tell Claude what to do
+//  next" 동치) ────────────────────────────────────────────────────────────────
+// 훅이 allow 로 답하면 다이얼로그가 닫히고 에이전트가 실행을 계속한다. 그 직후 컴포저에 지시를
+//  타이핑+Enter 하면 실행 중엔 큐잉, 유휴면 즉시 전달된다(터미널에 직접 치는 것과 동일 경로).
+//  다이얼로그가 아직 화면에 있으면(훅 응답 반영 지연) 닫힐 때까지 짧게 기다린다 — 다이얼로그 위에
+//  타이핑하면 입력이 무시되거나(비입력 모드) Enter 가 하이라이트 옵션을 눌러버린다.
+async function composerInject({ cwd, tid, text } = {}) {
+  const msg = typeof text === 'string' && text.trim() ? text.trim().replace(/\s*\n\s*/g, ' ') : null;
+  if (!msg) return { ok: false };
+  const { io, win } = dialogIoFor(cwd, tid);
+  await io.ready;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /esc to cancel/i.test(s);
+  for (let i = 0; i < 10; i++) {
+    if (!up(await io.screen())) break;
+    await sleep(300);
+  }
+  await io.key(msg, true);
+  await sleep(250);
+  await io.key('Enter');
+  return { ok: true, tid: win };
 }
 
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
@@ -1514,6 +1585,7 @@ module.exports = {
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
+  composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임
   _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
   _drivePermissionDialog: drivePermissionDialog,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
