@@ -1301,7 +1301,9 @@ async function drivePermissionDialog(io, { pick, expect, text, flow } = {}) {
   const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const n = parseInt(pick, 10);
   if (!(n >= 1 && n <= 9)) throw Object.assign(new Error('선택 번호가 올바르지 않습니다'), { code: 'BAD_REQUEST' });
-  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /esc to cancel/i.test(s);
+  // ⚠ 푸터("esc to cancel")를 조건으로 걸지 않는다 — claude Fetch 다이얼로그는 푸터가 없다
+  //  (2026-07-29 실사고). 질문 줄 + 번호 옵션 행 존재로 판정하고, expect(명령 조각)가 오조작을 막는다.
+  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /^\s*[❯›>]?\s*[1-9]\.\s+\S/m.test(s);
   const s0 = await io.screen();
   if (!up(s0)) {
     throw Object.assign(new Error('지금 이 터미널에 승인 다이얼로그가 떠 있지 않습니다'), { code: 'QUESTION_NOT_ON_SCREEN' });
@@ -1384,7 +1386,9 @@ async function composerInject({ cwd, tid, text } = {}) {
   const { io, win } = dialogIoFor(cwd, tid);
   await io.ready;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /esc to cancel/i.test(s);
+  // ⚠ 푸터("esc to cancel")를 조건으로 걸지 않는다 — claude Fetch 다이얼로그는 푸터가 없다
+  //  (2026-07-29 실사고). 질문 줄 + 번호 옵션 행 존재로 판정하고, expect(명령 조각)가 오조작을 막는다.
+  const up = (s) => /(Do you want to|Would you like to) .{0,160}\?/.test(s) && /^\s*[❯›>]?\s*[1-9]\.\s+\S/m.test(s);
   for (let i = 0; i < 10; i++) {
     if (!up(await io.screen())) break;
     await sleep(300);

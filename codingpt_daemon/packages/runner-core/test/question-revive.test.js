@@ -208,8 +208,10 @@ test('권한 파서(codex) — 질문 아래 본문·자체 문구·3옵션을 �
 
 test('권한 파서 — 질문 다이얼로그/일반 화면은 건드리지 않는다', () => {
   assert.strictEqual(qRevive._parsePermissionDialog('그냥 셸 출력\n$ ls\n'), null);
-  assert.strictEqual(qRevive._parsePermissionDialog('Do you want to proceed?\n 1. Yes\n 2. No'), null,
-    'Esc to cancel 푸터가 없으면(잔상) 라이브 다이얼로그가 아니다');
+  // ⚠ 규칙 정정(2026-07-29 실사고): "푸터 없으면 잔상"은 오판이었다 — claude Fetch 다이얼로그는
+  //  푸터가 없다. 잔상 판정은 "옵션 아래에 다른 출력이 쌓였는가"로 한다.
+  assert.strictEqual(qRevive._parsePermissionDialog('Do you want to proceed?\n 1. Yes\n 2. No\n$ 이후 셸 출력'), null,
+    '푸터 없는 다이얼로그는 화면 맨 아래일 때만 라이브다(아래에 출력 = 잔상)');
 });
 
 test('권한 매핑 — 라벨→번호, 라벨 없는 allow/deny 는 Yes/No 로', () => {
@@ -476,6 +478,48 @@ test('act 매핑 — 화면 라벨 → 훅 응답 어휘(못 알아보면 null)'
   assert.strictEqual(act('No'), 'deny');
   assert.strictEqual(act('No, and tell Claude what to do differently (esc)'), 'deny');
   assert.strictEqual(act('Maybe later'), null);
+});
+
+// ── 푸터 없는 다이얼로그(2026-07-29 실사고 — claude Fetch 는 "Esc to cancel" 푸터가 없다) ────
+// 실캡처(claude 2.1.220, tokin): 훅 마감 후 미러가 이 다이얼로그를 영영 못 잡아 카드가 실종됐다.
+const FETCH_SCREEN = `
+⏺ Fetch(https://example.com)
+────────────────────────────────────────────────────────────────────────────────────
+ Fetch
+   url: "https://example.com", prompt: "이 페이지의 제목과 본문 내용을 한 줄로
+   요약해줘."
+   Claude wants to fetch content from example.com
+
+ Do you want to allow Claude to fetch this content?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for example.com
+   3. No, and tell Claude what to do differently (esc)
+`;
+
+test('푸터 없는 다이얼로그(Fetch) — 옵션 블록이 화면 맨 아래면 라이브로 인식한다', () => {
+  const p = qRevive._parsePermissionDialog(FETCH_SCREEN);
+  assert.ok(p, 'Fetch 다이얼로그를 인식해야 한다(실사고 회귀)');
+  assert.strictEqual(p.title, 'Fetch');
+  assert.strictEqual(p.tool, 'WebFetch');
+  assert.strictEqual(p.flow, 'amend');
+  assert.ok(p.question.question.includes('Claude wants to fetch content from example.com'), '회색 설명 줄');
+  assert.ok(p.question.question.includes('Do you want to allow Claude to fetch this content?'), '질문 줄');
+  assert.deepStrictEqual(p.question.options.map((o) => !!o.input), [true, false, true]);
+  assert.strictEqual(approvals._screenActOf(p.question.options[1].label), 'always');
+
+  // 잔상: 옵션 아래에 다른 출력이 쌓였으면(= 살아 있는 다이얼로그가 아니면) 무시해야 한다.
+  assert.strictEqual(qRevive._parsePermissionDialog(FETCH_SCREEN + '\n$ ls\nfoo.txt\n'), null,
+    '푸터 없는 다이얼로그는 화면 맨 아래일 때만 라이브다');
+});
+
+test('푸터 없는 다이얼로그 — 드라이버도 조작할 수 있어야 한다(up 게이트가 푸터 비의존)', async () => {
+  const cptServer = require('../cpt-server');
+  const keys = [];
+  let screen = FETCH_SCREEN;
+  const io = { screen: async () => screen, key: async (k) => { keys.push(k); screen = '$ '; }, sleep: async () => {} };
+  const r = await cptServer._drivePermissionDialog(io, { pick: 1, expect: 'url: "https://example.com"' });
+  assert.deepStrictEqual(keys, ['1']);
+  assert.strictEqual(r.ok, true);
 });
 
 // ── 정리 — 대기 슬롯의 ref 타이머가 프로세스를 붙잡지 않게(approval-contract.test.js 와 동일 이유) ──

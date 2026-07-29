@@ -175,7 +175,12 @@ function optionAcceptsInput(flow, label) {
 
 function parsePermissionDialog(screen) {
   const lines = String(screen || '').split('\n');
-  if (!lines.some((l) => FOOTER_RE.test(l))) return null;
+  // ⚠ 푸터는 라이브 판정의 **충분조건이지 필요조건이 아니다**(2026-07-29 실사고): claude 의
+  //  Fetch(WebFetch) 다이얼로그는 "Esc to cancel …" 푸터 없이 옵션 3줄로 끝난다 — 푸터를 필수로
+  //  걸면 이 다이얼로그가 미러에서 영영 빠진다(사용자 신고: 훅 마감 후 카드 실종의 진범).
+  //  푸터가 없으면 "옵션 블록이 화면 **맨 아래**에 있다"로 라이브를 판정한다(살아 있는 다이얼로그는
+  //  항상 화면 끝이고, 잔상은 그 아래에 다른 출력이 쌓인다).
+  const hasFooter = lines.some((l) => FOOTER_RE.test(l));
   let pi = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     if (QUESTION_LINE_RE.test(lines[i])) { pi = i; break; }
@@ -185,16 +190,23 @@ function parsePermissionDialog(screen) {
   // 옵션 + 질문-아래 본문(codex) — "N. 라벨" 행이 나오기 전의 비어있지 않은 줄은 본문이다.
   const options = [];
   const midBody = [];
+  let lastOptIdx = -1; // 마지막 옵션(연속행 포함) 줄 번호 — 푸터 없는 다이얼로그의 맨-아래 판정용
   for (let i = pi + 1; i < lines.length; i++) {
     const l = lines[i];
     if (FOOTER_RE.test(l)) break;
     const m = /^\s*[❯›>]?\s*([1-9])\.\s+(.*\S)\s*$/.exec(l);
-    if (m) { options.push({ n: parseInt(m[1], 10), label: m[2].trim() }); continue; }
+    if (m) { options.push({ n: parseInt(m[1], 10), label: m[2].trim() }); lastOptIdx = i; continue; }
     if (!l.trim()) { if (options.length) break; continue; }
-    if (options.length) options[options.length - 1].label += ' ' + l.trim(); // 옵션 문구 줄바꿈
+    if (/^\s*\$\s/.test(l)) { if (options.length) break; midBody.push(l.trim()); continue; } // 셸 프롬프트 줄 = 옵션 연속행 아님(잔상 가드). 질문-아래 본문(codex "$ cmd")은 유지
+    if (options.length) { options[options.length - 1].label += ' ' + l.trim(); lastOptIdx = i; } // 옵션 문구 줄바꿈
     else midBody.push(l.trim());
   }
   if (options.length < 2) return null;
+  if (!hasFooter) {
+    let lastNonEmpty = -1;
+    for (let i = lines.length - 1; i >= 0; i--) { if (lines[i].trim()) { lastNonEmpty = i; break; } }
+    if (lastNonEmpty !== lastOptIdx) return null; // 옵션 아래에 다른 출력 = 잔상(라이브 아님)
+  }
 
   // 질문-위 본문(claude) — 구분선(───)이나 트랜스크립트 글머리(⏺/•)까지 거슬러 올라간다.
   let top = pi;
