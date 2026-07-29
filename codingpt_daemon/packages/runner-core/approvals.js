@@ -550,23 +550,26 @@ function request(args, resolved, conn) {
  *  · 응답 전달이 실패하면(다이얼로그 소멸 등) 슬롯을 **유지**한다 — 폰 카드가 남아 재시도할 수 있고,
  *    다이얼로그가 정말 사라졌다면 리컨실러가 다음 틱에 cancelTui 로 회수한다.
  */
-function requestTui({ cwdRel, tid, sessionId, toolUseId, questions, drive }) {
+function requestTui({ cwdRel, tid, sessionId, toolUseId, questions, drive, tool, summary, dedupeKey, revKind }) {
   if (gateReason()) return null;
   const cwd = typeof cwdRel === 'string' ? cwdRel : '';
   if (!Number.isInteger(tid) || !Array.isArray(questions) || !questions.length || typeof drive !== 'function') return null;
+  // dedupeKey: 권한 다이얼로그 재광고처럼 toolUseId 가 없는 슬롯의 결정적 id 재료(다이얼로그 내용 해시).
+  //  내용이 바뀌면 id 도 바뀌어, 리컨실러가 옛 슬롯을 걷고 새로 광고한다.
   const id = 'aprt_' + crypto.createHash('sha256')
-    .update([cwd, tid, toolUseId || sessionId || ''].join('|')).digest('hex').slice(0, 24);
+    .update([cwd, tid, dedupeKey || toolUseId || sessionId || ''].join('|')).digest('hex').slice(0, 24);
   if (pending.has(id)) return id;                                  // 이미 광고됨(멱등)
   if (paneCount(cwd, tid) >= MAX_PENDING_PER_PANE) return null;    // 훅 승인이 이미 차 있으면 양보
   const t0 = Date.now();
   const { hardMs } = budget();
   const deadlineAt = t0 + hardMs;
   const qs = questions.slice(0, 8);
+  const toolName = tool || 'AskUserQuestion';
   const payload = {
     id, agent: 'claude', hookEventName: 'PermissionRequest',
     sessionId: sessionId || null, promptId: null, toolUseId: toolUseId || null,
-    tool: 'AskUserQuestion', kind: 'choice',
-    summary: (qs[0] && (qs[0].question || qs[0].header)) || `질문 ${qs.length}개`,
+    tool: toolName, kind: 'choice',
+    summary: clip(summary, SUMMARY_MAX) || (qs[0] && (qs[0].question || qs[0].header)) || `질문 ${qs.length}개`,
     inputPreview: null, questions: qs,
     prompt: { kind: 'choice', questions: qs },
     relPath: null, permissionMode: null, transcriptPath: null,
@@ -575,7 +578,10 @@ function requestTui({ cwdRel, tid, sessionId, toolUseId, questions, drive }) {
   };
   const slot = {
     id, cwdRel: cwd, tid,
-    meta: { tool: 'AskUserQuestion', choice: true, sessionId: sessionId || null, toolUseId: toolUseId || null, questions: qs },
+    meta: {
+      tool: toolName, choice: true, sessionId: sessionId || null, toolUseId: toolUseId || null,
+      questions: qs, dedupeKey: dedupeKey || null, revKind: revKind || 'question',
+    },
     payload, createdAt: t0, deadlineAt, advertised: false, done: false,
     resolve: () => { /* 훅 대기자 없음 */ }, conn: null, onClose: null, timer: null,
     tuiDrive: drive,

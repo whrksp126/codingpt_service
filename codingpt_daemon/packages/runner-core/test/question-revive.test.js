@@ -131,6 +131,108 @@ test('deny 는 조작(drive)으로 전달되고, cancelTui 는 배너까지 회�
   assert.strictEqual(approvals.tuiSlotFor(CWD, TID), null);
 });
 
+// ── 권한 다이얼로그 되살리기(2026-07-29 — "채팅 카드 = TUI 화면의 미러") ─────────
+const qRevive = require('../question-revive');
+
+// 실캡처(claude 2.1.220, tokin 워크스페이스) — 명령 줄바꿈·❯ 마커·설명·잔상 대비 구조 그대로.
+const PERM_SCREEN = `
+⏺ Running 1 shell command…
+  ⎿  $ rm /Users/u/other/project/tokin/approval-demo.txt && git -C
+     /Users/u/other/project/tokin status --short
+
+──────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   rm /Users/u/other/project/tokin/approval-demo.txt && git -C
+   /Users/u/other/project/tokin status --short
+   Remove the demo file and check repo is clean
+
+ This command requires approval
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for: git -C /Users/u/other/project/tokin status --short
+ ❯ 3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain
+`;
+
+test('권한 파서 — 실캡처에서 제목/명령/선택지를 화면 문구 그대로 뽑는다', () => {
+  const p = qRevive._parsePermissionDialog(PERM_SCREEN);
+  assert.ok(p, '다이얼로그를 인식하지 못했다');
+  assert.strictEqual(p.tool, 'Bash');
+  assert.strictEqual(p.question.header, 'Bash command');
+  assert.match(p.question.question, /rm \/Users\/u.*status --short/, '줄바꿈된 명령이 이어붙어야 한다');
+  assert.match(p.question.question, /Remove the demo file/);
+  assert.deepStrictEqual(p.options.map((o) => o.n), [1, 2, 3]);
+  assert.strictEqual(p.options[0].label, 'Yes');
+  assert.match(p.options[1].label, /^Yes, and don.t ask again for: git -C/);
+  assert.strictEqual(p.options[2].label, 'No', '❯ 마커가 붙은 옵션도 인식해야 한다');
+  assert.ok(p.key.startsWith('perm|'));
+});
+
+test('권한 파서 — 질문 다이얼로그/일반 화면은 건드리지 않는다', () => {
+  assert.strictEqual(qRevive._parsePermissionDialog('그냥 셸 출력\n$ ls\n'), null);
+  assert.strictEqual(qRevive._parsePermissionDialog('Do you want to proceed?\n 1. Yes\n 2. No'), null,
+    'Esc to cancel 푸터가 없으면(잔상) 라이브 다이얼로그가 아니다');
+});
+
+test('권한 매핑 — 라벨→번호, 라벨 없는 allow/deny 는 Yes/No 로', () => {
+  const opts = qRevive._parsePermissionDialog(PERM_SCREEN).options;
+  const pick = qRevive._pickForOutcome;
+  assert.strictEqual(pick(opts, { decision: 'allow', answers: [{ questionIndex: 0, labels: [opts[1].label] }] }), 2,
+    '"don\'t ask again" 라벨을 고르면 2를 눌러야 한다');
+  assert.strictEqual(pick(opts, { decision: 'allow' }), 1, '라벨 없는 allow(잠금화면 허용) = Yes');
+  assert.strictEqual(pick(opts, { decision: 'deny' }), 3, '라벨 없는 deny = No(Esc 는 턴 취소라 금지)');
+  assert.strictEqual(pick(opts, { decision: 'allow', answers: [{ questionIndex: 0, labels: ['없는 라벨'] }] }), null);
+});
+
+test('권한 조작 — 숫자키 1번으로 끝난다(실측 프로토콜) + 안전장치', async () => {
+  const cptServer = require('../cpt-server');
+  const keys = [];
+  let screen = PERM_SCREEN;
+  const io = {
+    screen: async () => screen,
+    key: async (k) => { keys.push(k); screen = '$ (셸 프롬프트)'; }, // 한 키에 다이얼로그 소멸
+    sleep: async () => {},
+  };
+  const r = await cptServer._drivePermissionDialog(io, { pick: 2, expect: 'rm /Users/u' });
+  assert.deepStrictEqual(keys, ['2'], 'Enter 없이 숫자키 한 번이어야 한다(실측)');
+  assert.strictEqual(r.ok, true);
+
+  // 다이얼로그 없음 → 키를 절대 치지 않는다(숫자가 셸에 타이핑되는 사고 방지).
+  await assert.rejects(
+    cptServer._drivePermissionDialog({ screen: async () => '$ ls', key: async () => { throw new Error('쳤다'); }, sleep: async () => {} }, { pick: 1 }),
+    (e) => e.code === 'QUESTION_NOT_ON_SCREEN',
+  );
+  // 다른 명령의 다이얼로그 → 오조작 방지.
+  await assert.rejects(
+    cptServer._drivePermissionDialog({ screen: async () => PERM_SCREEN, key: async () => {}, sleep: async () => {} }, { pick: 1, expect: '완전히 다른 명령' }),
+    (e) => e.code === 'QUESTION_MISMATCH',
+  );
+});
+
+test('권한 재광고 왕복 — 카드(선택지 그대로) → 라벨 응답 → drive 번호 전달', async () => {
+  const perm = qRevive._parsePermissionDialog(PERM_SCREEN);
+  const driven = [];
+  approvals.requestTui({
+    cwdRel: CWD, tid: TID, sessionId: null, toolUseId: null,
+    dedupeKey: perm.key, revKind: 'perm', tool: perm.tool, summary: perm.summary,
+    questions: [perm.question],
+    drive: async (o) => { driven.push(qRevive._pickForOutcome(perm.options, o)); },
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  const slot = approvals.tuiSlotFor(CWD, TID);
+  assert.ok(slot, '권한 슬롯이 광고돼야 한다');
+  assert.strictEqual(slot.meta.revKind, 'perm');
+  assert.strictEqual(slot.payload.tool, 'Bash');
+  assert.strictEqual(slot.payload.prompt.questions[0].options.length, 3, 'TUI 선택지 3개가 그대로 실려야 한다');
+  await approvals.handle('approval.resolve', {
+    id: slot.id, decision: 'answer', answers: [{ questionIndex: 0, labels: [perm.options[1].label] }],
+  });
+  assert.deepStrictEqual(driven, [2], '카드에서 2번 라벨을 고르면 TUI 에 2를 눌러야 한다');
+});
+
 // ── 정리 — 대기 슬롯의 ref 타이머가 프로세스를 붙잡지 않게(approval-contract.test.js 와 동일 이유) ──
 test('cleanup', () => {
   approvals._reset();

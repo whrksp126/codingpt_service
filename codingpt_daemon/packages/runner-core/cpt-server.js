@@ -1267,19 +1267,59 @@ async function driveQuestionDialog(io, { answers, expect, cancel } = {}) {
 }
 
 async function chatAnswer({ cwd, tid, answers, expect, cancel } = {}) {
+  const { io, win } = dialogIoFor(cwd, tid);
+  await io.ready;
+  const r = await driveQuestionDialog(io, { answers, expect, cancel: cancel === true });
+  return { ...r, tid: win };
+}
+
+// tmux 조작 io 조립(질문/권한 다이얼로그 공용).
+function dialogIoFor(cwd, tid) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
-  await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
   const target = `=${ptyLib.termSession(session, win)}:0`;
   const io = {
+    ready: ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ }),
     screen: () => ptyLib.runTmux(['capture-pane', '-p', '-t', target]),
     key: async (k, literal) => {
       await ptyLib.runTmux(literal ? ['send-keys', '-t', target, '-l', '--', k] : ['send-keys', '-t', target, k]);
       await new Promise((r) => setTimeout(r, DRIVE_KEY_GAP_MS));
     },
   };
-  const r = await driveQuestionDialog(io, { answers, expect, cancel: cancel === true });
+  return { io, win };
+}
+
+// ── TUI 권한 다이얼로그 원격 조작(permission-revive 전용) ─────────────────────
+// 훅이 죽어 TUI 로 폴백된 "Do you want to proceed?" 다이얼로그에 카드 응답을 전달한다.
+//  키 프로토콜(claude 2.1.220, 2026-07-29 PTY 실측): **숫자키 한 번**이면 즉시 그 옵션이 실행된다
+//  (Enter 불필요 — '2' 한 키로 규칙 기록+명령 실행까지 확인).
+//  안전장치는 질문 조작과 동일: 다이얼로그가 실제로 떠 있고 + expect(명령 조각)가 화면에 있어야
+//  키를 친다 — 아니면 숫자가 셸/컴포저에 타이핑된다.
+async function drivePermissionDialog(io, { pick, expect } = {}) {
+  const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const n = parseInt(pick, 10);
+  if (!(n >= 1 && n <= 9)) throw Object.assign(new Error('선택 번호가 올바르지 않습니다'), { code: 'BAD_REQUEST' });
+  const up = (s) => /Do you want to .{0,120}\?/.test(s) && /Esc to cancel/.test(s);
+  const s0 = await io.screen();
+  if (!up(s0)) {
+    throw Object.assign(new Error('지금 이 터미널에 승인 다이얼로그가 떠 있지 않습니다'), { code: 'QUESTION_NOT_ON_SCREEN' });
+  }
+  if (expect && !normScreen(s0).includes(normScreen(String(expect).slice(0, 60)))) {
+    throw Object.assign(new Error('화면의 승인 요청이 답하려는 요청과 다릅니다'), { code: 'QUESTION_MISMATCH' });
+  }
+  await io.key(String(n), true);
+  for (let i = 0; i < 10; i++) {
+    if (!up(await io.screen())) return { ok: true, picked: n };   // 다이얼로그 소멸 = 전달 완료
+    await sleep(300);
+  }
+  throw Object.assign(new Error('다이얼로그가 닫히지 않았습니다 — TUI 를 직접 확인해 주세요'), { code: 'DRIVE_INCOMPLETE' });
+}
+
+async function permissionAnswer({ cwd, tid, pick, expect } = {}) {
+  const { io, win } = dialogIoFor(cwd, tid);
+  await io.ready;
+  const r = await drivePermissionDialog(io, { pick, expect });
   return { ...r, tid: win };
 }
 
@@ -1472,7 +1512,9 @@ module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
+  permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
+  _drivePermissionDialog: drivePermissionDialog,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
