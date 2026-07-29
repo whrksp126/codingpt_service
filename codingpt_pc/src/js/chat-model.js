@@ -222,7 +222,9 @@ export function dropMatchedOptimistic(pending, msgs) {
   for (const m of msgs) {
     if (!m || m.role !== "user" || (m.kind !== "text" && m.kind !== "slash")) continue;
     const k = optimisticKey(m.text);
-    const hit = pending.find((p) => p.key === k && now - p.at < OPTIMISTIC_WINDOW_MS);
+    // any: 첨부 동반 전송 — 실제 트랜스크립트 문구(경로가 [Image #N] 으로 변환 등)를 예측할 수
+    //  없으므로 "다음에 오는 user 메시지"와 짝지어 치운다(창 60s 동일).
+    const hit = pending.find((p) => (p.any || p.key === k) && now - p.at < OPTIMISTIC_WINDOW_MS);
     if (hit) { drop.push(hit.seq); pending.splice(pending.indexOf(hit), 1); }
   }
   // 창이 지난 낙관 버블은 그대로 남긴다(전송은 됐고 트랜스크립트 반영만 늦은 경우가 있으므로

@@ -74,6 +74,7 @@ export class ChatView {
     this._noSession = null;
     this._noSessionAt = 0;
     this._probeUntil = 0;   // 첫 메시지 전송 직후의 짧은 탐색 창(훅이 바인딩을 만드는 순간을 잡는다)
+    this._attach = [];      // 드롭 첨부 [{path,name,img,b64}] — 전송 시 경로로 TUI 컴포저에 실린다
     _live.add(this);
   }
 
@@ -92,6 +93,7 @@ export class ChatView {
       <div class="chat-composer">
         <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
         <div class="chat-box">
+          <div class="chat-att-strip hidden"></div>
           <textarea class="chat-input" rows="1" placeholder="메시지 보내기"></textarea>
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
@@ -108,6 +110,7 @@ export class ChatView {
     this.jumpNEl = el.querySelector(".chat-jump-n");
     this.apprEl = el.querySelector(".chat-approvals");
     this.inputEl = el.querySelector(".chat-input");
+    this.attachEl = el.querySelector(".chat-att-strip");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
 
@@ -149,6 +152,14 @@ export class ChatView {
     });
     // 본문 위임 클릭: 코드 복사 / 링크 외부 열기 / 결과 펼치기 / 파일 열기 / thinking 토글 / 첨부
     this.scrollEl.addEventListener("click", (e) => this._onBodyClick(e));
+    // 첨부 스트립 — ✕ 로 개별 제거.
+    this.attachEl.addEventListener("click", (e) => {
+      const x = e.target.closest?.(".chat-att-x");
+      if (!x) return;
+      this._attach.splice(Number(x.dataset.i), 1);
+      this._renderAttach();
+      this._syncComposer();
+    });
     this._renderApprovals();
   }
 
@@ -448,6 +459,13 @@ export class ChatView {
         ? `<span class="chat-slash">${escapeHtml(text)}</span>`
         : escapeHtml(text).replace(/\n/g, "<br>");
       if (m.attachments && m.attachments.length) row.appendChild(this._buildAttachments(m));
+      // 낙관 버블의 드롭 첨부 썸네일 — 보낸 것이 무엇인지 눈에 보이게(표준 LLM 앱 관례).
+      if (m.optAttach && m.optAttach.length) {
+        const wrap = document.createElement("div");
+        wrap.className = "chat-att-strip sent";
+        wrap.innerHTML = m.optAttach.map((a, i) => this._attachChipHtml(a, i, false)).join("");
+        row.appendChild(wrap);
+      }
       return row;
     }
     if (m.role === "assistant" && m.kind === "text") {
@@ -523,6 +541,50 @@ export class ChatView {
       (q.header ? `<div class="chat-q-head">${escapeHtml(q.header)}</div>` : "") +
       (q.question ? `<div class="chat-q-text">${escapeHtml(q.question)}</div>` : "");
     return wrap;
+  }
+
+  // ── 드롭 첨부(2026-07-30 사용자 확정: 채팅에 드롭하면 썸네일 미리보기가 보여야 한다) ──
+  //  os-drop 이 채팅 모드 pane 드롭을 여기로 넘긴다. 이미지는 파일을 읽어 썸네일, 그 외는 파일칩.
+  //  전송 시 경로(셸 인용)+메시지를 TUI 컴포저로 한 번에 보낸다 — TUI 가 이미지 경로를
+  //  [Image #N] 으로 변환하는 기존 검증된 경로(OS 드롭→PTY 삽입)와 동일한 배관이다.
+  addAttachments(paths) {
+    const IMG = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "tiff"]);
+    for (const p of (paths || []).filter(Boolean)) {
+      if (this._attach.length >= 8) break;
+      if (this._attach.some((a) => a.path === p)) continue;
+      const name = String(p).split("/").pop() || p;
+      const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+      const a = { path: p, name, ext, img: IMG.has(ext), b64: null };
+      this._attach.push(a);
+      if (a.img) {
+        api.filePreviewB64(p)
+          .then((b64) => { a.b64 = b64; this._renderAttach(); })
+          .catch(() => { a.img = false; this._renderAttach(); }); // 8MB 초과 등 — 파일칩으로 강등
+      }
+    }
+    this._renderAttach();
+    this._syncComposer();
+    try { this.inputEl?.focus(); } catch (_) { /* noop */ }
+  }
+
+  _attachMime(a) {
+    const MIME = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", heic: "image/heic", tiff: "image/tiff" };
+    return MIME[a.ext] || "image/png";
+  }
+
+  _attachChipHtml(a, i, removable) {
+    const thumb = a.img && a.b64
+      ? `<img class="chat-att-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
+      : `<span class="chat-att-file">${escapeHtml(a.name)}</span>`;
+    return `<div class="chat-att" title="${escapeHtml(a.path)}">${thumb}` +
+      (removable ? `<button class="chat-att-x" type="button" data-i="${i}" title="빼기">✕</button>` : "") +
+      `</div>`;
+  }
+
+  _renderAttach() {
+    if (!this.attachEl) return;
+    this.attachEl.classList.toggle("hidden", !this._attach.length);
+    this.attachEl.innerHTML = this._attach.map((a, i) => this._attachChipHtml(a, i, true)).join("");
   }
 
   _buildAttachments(m) {
@@ -653,7 +715,8 @@ export class ChatView {
   // ── 전송 ──
   async _send() {
     const raw = String(this.inputEl.value || "");
-    if (!raw.trim()) return;
+    const att = this._attach.slice();
+    if (!raw.trim() && !att.length) return;
     const tid = this._tid != null ? this._tid : this.ctx.tid();
     if (tid == null) { this._setBanner("보낼 터미널이 없습니다.", "warn"); return; }
     // TUI 질문 다이얼로그가 떠 있는 동안의 chatInput 은 대화가 아니라 **다이얼로그에 타이핑**된다
@@ -669,19 +732,26 @@ export class ChatView {
     if (this._noSession) this._probeUntil = Date.now() + CHAT.NO_SESSION_PROBE_MS;
     this._clearBlank();
 
+    // 첨부는 셸 인용 경로로 메시지 앞에 붙는다(OS 드롭→PTY 삽입과 동일 문법 — TUI 가 이미지
+    //  경로를 [Image #N] 으로 변환한다). 전송 즉시 스트립을 비운다.
+    const attText = att.map((a) => "'" + String(a.path).replace(/'/g, "'\\''") + "'").join(" ");
+    const sendText = attText ? attText + (raw.trim() ? " " + raw : "") : raw;
+    if (att.length) { this._attach = []; this._renderAttach(); }
+
     // 낙관 렌더 — 트랜스크립트에 같은 텍스트의 user 메시지가 오면 치운다(dedup 키=trim 앞 200자/60s).
+    //  첨부 동반 전송은 실제 트랜스크립트 문구를 예측할 수 없어 any 매칭(다음 user 메시지)으로 치운다.
     const seq = this._optSeq--;
-    const opt = { seq, role: "user", kind: "text", text: raw, ts: Date.now(), hidden: false, optimistic: true };
+    const opt = { seq, role: "user", kind: "text", text: raw, ts: Date.now(), hidden: false, optimistic: true, optAttach: att };
     this._msgs = [...this._msgs, opt];
     const el = this._buildRow(opt);
     this._els.set(seq, el);
     this.scrollEl.appendChild(el);
-    this._pending.push({ key: optimisticKey(raw), at: Date.now(), seq });
+    this._pending.push({ key: optimisticKey(sendText), at: Date.now(), seq, any: att.length > 0 });
     this._scrollToBottom();
 
     try {
       await api.chatInput({
-        cwd: this._cwd(), tid, text: raw, submit: true, submitDelayMs: CHAT.SEND_ENTER_DELAY_MS,
+        cwd: this._cwd(), tid, text: sendText, submit: true, submitDelayMs: CHAT.SEND_ENTER_DELAY_MS,
         ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
       });
     } catch (e) {
@@ -924,7 +994,7 @@ export class ChatView {
   //  ★ 전송 버튼을 "빈 입력에도 눌리는 것처럼" 두지 않는다: 눌러도 아무 일이 없는 버튼은 거짓 affordance 다
   //   (표시 정직성). 숨기지 않고 **disabled + 흐리게** 두는 이유는 위치 학습을 깨지 않기 위함이다.
   _syncComposer() {
-    const has = !!composerHasText(this.inputEl?.value);
+    const has = !!composerHasText(this.inputEl?.value) || !!(this._attach && this._attach.length);
     if (this.sendEl) this.sendEl.disabled = !has;
     if (this.inputEl) {
       const name = agentDisplayName(this._agent);

@@ -89,6 +89,8 @@ export const api = {
   fsTree: (rel, depth) => invoke("fs_tree", { rel, depth: depth ?? 2 }),
   fsSearch: (rel, query, max) => invoke("fs_search", { rel, query, max: max ?? 500 }),
   fsRead: (rel) => invoke("fs_read", { rel }),
+  // 드롭 파일 미리보기(채팅 첨부 썸네일) — 절대경로 base64. 8MB 초과/비파일이면 reject.
+  filePreviewB64: (path) => invoke("file_preview_b64", { path }),
   fsAbs: (rel) => invoke("fs_abs", { rel }), // 홈-상대 → 절대경로(파일트리→터미널 삽입용)
   fsWrite: (rel, content) => invoke("fs_write", { rel, content }),
   // base64 바이너리 저장(Design Mode 크롭샷 등) — 부모 mkdir 포함, 절대경로 문자열 반환.

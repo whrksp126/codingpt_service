@@ -206,6 +206,23 @@ pub fn fs_write(rel: String, content: String) -> Result<(), String> {
     std::fs::write(&abs, content).map_err(|e| format!("저장 실패: {e}"))
 }
 
+// 드롭 파일 미리보기(채팅 첨부 썸네일 — 2026-07-30) — 사용자가 방금 드래그한 파일을 그대로 읽어
+//  base64 로 준다. 홈 jail 을 걸지 않는다: 드롭 자체가 사용자의 명시적 선택이고 표시 외 어디로도
+//  나가지 않는다. 미리보기 용도라 8MB 캡(초과 시 썸네일만 생략 — 전송은 경로라 무관).
+#[tauri::command]
+pub fn file_preview_b64(path: String) -> Result<String, String> {
+    use base64::Engine;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("파일 확인 실패: {e}"))?;
+    if !meta.is_file() {
+        return Err("파일이 아닙니다".into());
+    }
+    if meta.len() > 8 * 1024 * 1024 {
+        return Err("미리보기 생략(8MB 초과)".into());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("읽기 실패: {e}"))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 // base64 바이너리 저장(Design Mode 크롭샷 등) — 부모 디렉토리 자동 생성 후 저장하고
 //  **절대경로를 반환**한다(클라가 터미널에 절대경로를 삽입해야 함 — 데몬 fs.write absPath 규약 미러).
 //  부모(~/.codingpt/attachments 등)가 아직 없으면 safe_abs(canonicalize)가 실패하므로

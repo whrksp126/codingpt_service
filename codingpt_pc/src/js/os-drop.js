@@ -81,6 +81,13 @@ export function initOsDrop() {
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
       if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
       const { pane, tabIndex } = tgt;
+      // 채팅 모드 pane 에 떨어진 드롭은 **채팅 컴포저의 첨부**로(2026-07-30 사용자 확정) —
+      //  썸네일 미리보기를 보여주고, 전송 시 경로+메시지를 TUI 컴포저로 한 번에 보낸다.
+      //  (예전엔 채팅을 보고 있는데 PTY 로 꽂혀 TUI 에만 [Image #1] 이 생기고 채팅은 무반응이었다.)
+      if (tabIndex === pane.node.active && pane._chatActive?.() && pane.chat) {
+        pane.chat.addAttachments(paths);
+        return;
+      }
       const text = paths.map(shq).join(" ") + " ";
       const doInsert = () => {
         pane.insertText(text);
