@@ -492,7 +492,7 @@ export class ChatView {
       res.className = "chat-tool-result hidden";
       row.appendChild(res);
       const id = (m.tool && m.tool.id) || null;
-      if (id) this._toolCards.set(id, { mark: head.querySelector(".chat-tool-mark"), res, row });
+      if (id) this._toolCards.set(id, { mark: head.querySelector(".chat-tool-mark"), res, row, q: m.kind === "question" });
       return row;
     }
     if (m.kind === "compact" || m.kind === "divider" || m.kind === "interrupt") {
@@ -514,17 +514,14 @@ export class ChatView {
   }
 
   _buildQuestion(q) {
+    // 내역의 질문은 **간결하게**(2026-07-30 사용자 확정: TUI 보다 많은 정보를 보여주지 말 것) —
+    //  TUI 내역도 질문 문구만 남긴다. 선택지 전체는 응답 카드가 이미 보여줬던 것이라 다시 안 그린다.
+    //  안내 문구도 안 붙인다 — 여기 그려지는 질문은 이미 답한 질문이다(미응답은 도크가 그린다).
     const wrap = document.createElement("div");
     wrap.className = "chat-q";
-    const opts = (q.options || []).map((o) =>
-      `<div class="chat-q-opt"><span class="chat-q-label">${escapeHtml(o.label)}</span>` +
-      (o.description ? `<span class="chat-q-desc">${escapeHtml(o.description)}</span>` : "") + `</div>`).join("");
     wrap.innerHTML =
       (q.header ? `<div class="chat-q-head">${escapeHtml(q.header)}</div>` : "") +
-      (q.question ? `<div class="chat-q-text">${escapeHtml(q.question)}</div>` : "") +
-      opts;
-      // 안내 문구를 붙이지 않는다 — 여기 그려지는 질문은 **이미 답한** 질문이고(미응답은 도크가
-      //  그린다) "아래 승인 카드에서 응답하세요"는 그 시점엔 가리킬 카드가 없는 거짓말이 된다.
+      (q.question ? `<div class="chat-q-text">${escapeHtml(q.question)}</div>` : "");
     return wrap;
   }
 
@@ -552,7 +549,11 @@ export class ChatView {
       card.mark.textContent = resultMark(res);
       card.mark.className = "chat-tool-mark " + resultClass(res);
       card.res.className = "chat-tool-result";
-      card.res.innerHTML = body;
+      // 질문 행의 결과는 박스/바이트 메타 없이 담백한 한 줄(TUI 의 "User declined …" 자리) —
+      //  "사용자가 답하지 않고 넘어갔습니다" 를 박스+바이트 수로 감싸던 게 못생김의 진범(사용자 지적).
+      card.res.innerHTML = card.q
+        ? `<div class="chat-q-res">${escapeHtml(String(res.preview || "").trim() || "응답됨")}</div>`
+        : body;
       // 결과 도착 = TUI 가 그 도구를 한 줄로 접는 순간(.done) — 사용자가 펼쳐 둔 행(.open)은 유지.
       if (card.row && card.row.dataset.fold === "1") card.row.classList.add("done");
       return;

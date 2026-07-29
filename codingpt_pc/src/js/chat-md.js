@@ -11,7 +11,9 @@
 //    api.openExternal 로 외부 브라우저에 넘긴다(앱 내 내비게이션 금지).
 //
 // 지원: 코드펜스(```lang) · 인라인코드 · 볼드 · 이탤릭 · 취소선 · 링크/자동링크 · 헤딩 · 목록(중첩) ·
-//       인용 · 수평선 · 단락. **미지원: 표, 이미지, 각주, HTML 통과**(표는 그냥 줄로 보인다 — v1 합의).
+//       인용 · 수평선 · 단락 · **표(GFM — 2026-07-30 추가**: 파이프 원문이 그대로 보여 TUI 의 ASCII
+//       표보다 못생겼다는 사용자 지적. 채팅은 TUI 보다 보기 좋아야 한다**)**.
+//       미지원: 이미지, 각주, HTML 통과.
 import { icons } from "./icons.js";
 
 export function escapeHtml(s) {
@@ -94,6 +96,17 @@ const HR_RE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
 const UL_RE = /^(\s*)[-*+]\s+(.*)$/;
 const OL_RE = /^(\s*)(\d{1,3})[.)]\s+(.*)$/;
 const QUOTE_RE = /^\s*>\s?(.*)$/;
+// 표(GFM) — `| a | b |` 행 + 바로 다음 줄이 구분행(`|---|:--:|`)일 때만 표다(파이프가 든 일반
+//  문장을 표로 오인하지 않게 구분행을 필수로 요구한다 — GFM 규격과 동일).
+const TABLE_ROW_RE = /^\s*\|.*\|\s*$/;
+const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$/;
+
+function splitTableRow(line) {
+  let t = String(line).trim();
+  if (t.startsWith("|")) t = t.slice(1);
+  if (t.endsWith("|")) t = t.slice(0, -1);
+  return t.split("|");
+}
 
 export function renderMarkdown(src) {
   const lines = String(src == null ? "" : src).replace(/\r\n?/g, "\n").split("\n");
@@ -143,6 +156,33 @@ export function renderMarkdown(src) {
     if (!line.trim()) { flushPara(); flushQuote(); closeLists(0); continue; }
 
     if (HR_RE.test(line)) { flushAll(); out.push('<hr class="chat-hr">'); continue; }
+
+    // 표(GFM) — 헤더행 + 구분행이 연속일 때. 셀 안 인라인 문법(코드/볼드/링크)은 그대로 렌더된다.
+    if (TABLE_ROW_RE.test(line) && i + 1 < lines.length && TABLE_SEP_RE.test(lines[i + 1])) {
+      flushAll();
+      const header = splitTableRow(line);
+      const aligns = splitTableRow(lines[i + 1]).map((c) => {
+        const s = c.trim();
+        if (/^:-+:$/.test(s)) return "center";
+        if (/^-+:$/.test(s)) return "right";
+        return "";
+      });
+      i += 1;
+      const rows = [];
+      while (i + 1 < lines.length && TABLE_ROW_RE.test(lines[i + 1]) && !TABLE_SEP_RE.test(lines[i + 1])) {
+        i += 1;
+        rows.push(splitTableRow(lines[i]));
+      }
+      const cells = (arr, tag) => arr.map((c, k) =>
+        `<${tag}${aligns[k] ? ` style="text-align:${aligns[k]}"` : ""}>${renderInline(c.trim())}</${tag}>`).join("");
+      out.push(
+        `<div class="chat-tablewrap"><table class="chat-table">` +
+        `<thead><tr>${cells(header, "th")}</tr></thead>` +
+        (rows.length ? `<tbody>${rows.map((r) => `<tr>${cells(r, "td")}</tr>`).join("")}</tbody>` : "") +
+        `</table></div>`,
+      );
+      continue;
+    }
 
     const head = HEAD_RE.exec(line);
     if (head) {
