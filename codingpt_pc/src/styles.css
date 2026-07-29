@@ -1378,6 +1378,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .apc-summary { font-size: 13px; line-height: 19px; color: var(--text2); word-break: break-word; }
 .apc-summary.mono { font-family: var(--mono-font); font-size: 12.5px; }
 .apc-path { font-size: 11.5px; color: var(--text3); font-family: var(--mono-font); word-break: break-all; }
+/* 설명 — TUI 가 명령 아래 회색으로 붙이는 한 줄(접지 않는다). */
+.apc-detail { font-size: 12px; line-height: 17px; color: var(--dim); word-break: break-word; }
 .apc-plan { font-size: 13px; line-height: 19px; color: var(--text2); }
 .apc-fold > summary { font-size: 11.5px; color: var(--dim); cursor: pointer; }
 .apc-pre {
@@ -1398,7 +1400,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .apc-btn.ghost { background: transparent; color: var(--text3); }
 .apc-btn.ghost:hover { color: var(--text); background: var(--hover); }
 /* 선택형(AskUserQuestion / ExitPlanMode) — 선택지 버튼을 라벨+설명 그대로 그린다.
-   ⚠ "항상 허용" 버튼은 존재하지 않는다(claude 2.1.220 훅에 그 개념이 없다 — 실측). */
+   "허용 + 다음부터 묻지 않기"는 claude 가 permission_suggestions(addRules)를 준 요청에만 나타난다
+   (2026-07-29 실측: 훅이 decision.updatedPermissions 로 되돌리면 settings 에 규칙이 실제로 기록된다). */
 /* ── 질문 카드(AskUserQuestion) — 승인 크롬 없이 질문만. 한 번에 하나씩. ──
    배치 참고 = Claude Code 의 질문 UI: [n/m] 질문 … [⌄][✕] / 선택지(번호는 오른쪽) / [뒤로] [건너뛰기] [다음 ↵] */
 .approval-card.q { padding: 12px; gap: 10px; }

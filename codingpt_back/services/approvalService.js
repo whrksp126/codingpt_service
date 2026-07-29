@@ -103,6 +103,11 @@ function normalizeCreate(payload, now) {
     agent: str(p.agent, 32) || 'claude',
     tool: str(p.tool, 64) || 'Tool',
     summary: str(p.summary, 200) || '',
+    // 카드가 접기 없이 그리는 부가 설명(Bash description 등) — 없으면 데몬이 안 보낸다.
+    detail: str(p.detail, 200),
+    // "허용하고 다음부터 묻지 않기" 선택지 라벨. **이 값이 있을 때만** 클라가 3번째 버튼을 그린다
+    //  (= claude 가 그 요청에 대해 규칙을 제안했다는 뜻). 실제 규칙은 데몬이 보관하고 서버는 안 만진다.
+    alwaysLabel: str(p.alwaysLabel, 200),
     inputPreview: capJson(p.inputPreview, INPUT_PREVIEW_MAX),
     // 선택형 도구(AskUserQuestion/ExitPlanMode)용 정규화 프롬프트 — 데몬이 채우면 클라가 그대로 그린다.
     //  부재 시 클라이언트는 inputPreview 로 폴백한다(구 데몬 호환).

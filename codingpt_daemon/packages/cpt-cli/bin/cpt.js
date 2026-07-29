@@ -721,6 +721,11 @@ async function approvalHook(flags) {
       permissionMode: payload.permission_mode || null,
       transcriptPath: payload.transcript_path || null,
       hookCwd: payload.cwd || null,
+      // "허용하고 다음부터 묻지 않기"(TUI 2번)의 재료 — claude 가 이 요청에 대해 제안한 권한 갱신.
+      //  실측(2026-07-29, claude 2.1.220): addRules/addDirectories/setMode 가 온다. 우리는 addRules 만
+      //  3번째 선택지로 쓰고(TUI 도 addRules 가 있을 때만 그 옵션을 띄운다), 사용자가 고르면 그대로
+      //  decision.updatedPermissions 로 되돌려준다 — claude 가 실제로 settings 에 규칙을 기록한다(실측).
+      permissionSuggestions: Array.isArray(payload.permission_suggestions) ? payload.permission_suggestions : null,
       waitMs,
     }, { timeoutMs: waitMs });
   } catch (_) {

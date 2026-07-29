@@ -4,6 +4,7 @@ import { state, wsRuntime, activeWs, isLocal, isThisHost } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { PaneView, isTermTab, newTid } from "./pane.js";
+import { paneApprovalCount } from "./approvals.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
@@ -726,7 +727,12 @@ function updateUnreadRings(ws) {
   );
   for (const [, p] of panes) {
     const act = p.node.kind === "terminal" ? (p.node.tabs || [])[p.node.active] : null;
-    const on = !!act && typeof act.win === "number" && unreadWins.has(act.win);
+    // 승인 대기는 **알림과 무관하게** 테두리를 켠다(2026-07-29). 예전엔 미읽음 알림에만 의존했는데,
+    //  알림이 이미 읽음이거나(다른 기기에서 읽음·목록에서 훑음) 생성에 실패하면 "에이전트가 답을
+    //  기다리는 중"인데도 테두리가 꺼져 있었다 — TUI 는 프롬프트가 떠 있는 한 계속 강조하는데
+    //  같은 요청을 채팅으로 보면 강조가 없던 비대칭의 원인이다. 대기 자체가 근거여야 한다.
+    const on = !!act && typeof act.win === "number"
+      && (unreadWins.has(act.win) || paneApprovalCount(cwd, act.win) > 0);
     const was = p.el.classList.contains("notif-unread");
     if (on) {
       p.el.classList.add("notif-unread");

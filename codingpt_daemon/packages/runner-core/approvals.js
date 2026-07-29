@@ -185,6 +185,48 @@ function inputPreviewOf(toolInput) {
   return { _truncated: true, preview: Buffer.from(s, 'utf8').subarray(0, PREVIEW_MAX_BYTES).toString('utf8').replace(/�+$/, '') };
 }
 
+// 부가 설명(≤200자) — "요청 상세를 펼치지 않아도 바로 이해되게" 하는 한 줄(2026-07-29).
+//  TUI 는 명령 아래에 회색으로 description 을 같이 보여주는데, 우리 카드는 그걸 접힌 JSON 안에만
+//  두고 있어서 사용자가 매번 펼쳐야 했다. summary 와 같은 값이면 중복이므로 내보내지 않는다.
+function detailOf(tool, input) {
+  const d = input || {};
+  switch (String(tool)) {
+    case 'Bash': return clip(redactValues(d.description), SUMMARY_MAX);
+    // 파일 도구는 summary 가 경로다 → 내용/변경의 규모를 한 줄로(무엇이 바뀌는지 감이 오게).
+    case 'Write': {
+      const body = typeof d.content === 'string' ? d.content : '';
+      return body ? clip(`${body.split('\n').length}줄 쓰기`, SUMMARY_MAX) : undefined;
+    }
+    case 'Edit': {
+      const from = typeof d.old_string === 'string' ? d.old_string : '';
+      const to = typeof d.new_string === 'string' ? d.new_string : '';
+      if (!from && !to) return undefined;
+      return clip(`${from.split('\n').length}줄 → ${to.split('\n').length}줄${d.replace_all ? ' (전체 치환)' : ''}`, SUMMARY_MAX);
+    }
+    case 'MultiEdit': {
+      const n = Array.isArray(d.edits) ? d.edits.length : 0;
+      return n ? clip(`${n}곳 수정`, SUMMARY_MAX) : undefined;
+    }
+    case 'WebFetch': return clip(redactValues(d.prompt), SUMMARY_MAX);
+    default: return undefined;
+  }
+}
+
+// 3번째 선택지("허용하고 다음부터 묻지 않기") 재료 — claude 가 준 addRules 제안만 추린다.
+//  ⚠ 제안이 없으면 undefined 를 돌려 **선택지 자체를 만들지 않는다**. claude TUI 도 addRules 제안이
+//   있을 때만 그 옵션을 띄우므로(바이너리 실측) 이 조건이 TUI 와의 동치성을 만든다. 없는데 만들면
+//   "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가 된다(이 파일의 옛 주석이 경계하던 바로 그것).
+function alwaysRuleOf(suggestions) {
+  if (!Array.isArray(suggestions)) return undefined;
+  const updates = suggestions.filter((s) => s && s.type === 'addRules' && Array.isArray(s.rules) && s.rules.length);
+  if (!updates.length) return undefined;
+  const flat = updates.flatMap((u) => u.rules).filter((r) => r && typeof r.ruleContent === 'string' && r.ruleContent);
+  if (!flat.length) return undefined;
+  // 라벨 = TUI 와 같은 문구를 만들 재료. 규칙이 하나면 그 내용을 그대로 보여준다.
+  const label = flat.length === 1 ? flat[0].ruleContent : `규칙 ${flat.length}개`;
+  return { label: clip(redactValues(label), SUMMARY_MAX), updates };
+}
+
 // 1줄 요약(≤200자) — 카드 제목/푸시 본문 재료. 도구별로 사람이 읽을 핵심만.
 function summaryOf(tool, input) {
   const d = input || {};
@@ -238,7 +280,13 @@ function buildHookOutput(meta, outcome) {
     };
   }
   if (decision === 'allow') {
-    return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
+    // "허용하고 다음부터 묻지 않기" — claude 가 이 요청에 대해 제안한 addRules 를 **그대로** 되돌린다.
+    //  실측(2026-07-29, claude 2.1.220): destination 이 localSettings 면 프로젝트의
+    //  .claude/settings.local.json 에 "Bash(ls:*)" 형태로 실제 기록되고, session 이면 그 세션에만 산다.
+    //  destination 은 claude 가 정해서 보낸 값을 유지한다(우리가 범위를 넓히지 않는다 = 과대 허용 방지).
+    const updates = outcome.always && Array.isArray(m.alwaysUpdates) && m.alwaysUpdates.length
+      ? { updatedPermissions: m.alwaysUpdates } : {};
+    return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow', ...updates } } };
   }
   const why = clip(outcome.message, 500);
   return {
@@ -318,11 +366,15 @@ function request(args, resolved, conn) {
   const r = resolved || {};
   const toolName = String(a.toolName || a.tool_name || '');
   const toolInput = (a.toolInput || a.tool_input || {}) || {};
+  const alwaysRule = alwaysRuleOf(a.permissionSuggestions || a.permission_suggestions);
   const meta = {
     tool: toolName,
     choice: isChoiceTool(toolName, toolInput),
     sessionId: a.sessionId || a.session_id || null,
     toolUseId: a.toolUseId || a.tool_use_id || null,
+    // 사용자가 3번째 선택지를 고르면 이 값을 그대로 decision.updatedPermissions 로 되돌린다.
+    //  ⚠ 서버/클라이언트가 보낸 값을 쓰지 않는다 — claude 가 준 제안만 돌려줘야 과대 허용이 안 생긴다.
+    alwaysUpdates: alwaysRule ? alwaysRule.updates : null,
   };
 
   const off = gateReason();
@@ -348,6 +400,9 @@ function request(args, resolved, conn) {
     tool: toolName,
     kind: meta.choice ? 'choice' : 'permission',
     summary: summaryOf(toolName, toolInput),
+    // 카드가 접기 없이 그릴 부가 설명(Bash description 등) + 3번째 선택지 라벨. 둘 다 없으면 미전송.
+    detail: detailOf(toolName, toolInput),
+    alwaysLabel: alwaysRule ? alwaysRule.label : undefined,
     inputPreview: inputPreviewOf(toolInput),
     questions: questionsOf(toolInput),
     // back 의 화이트리스트(normalizeCreate)가 통과시키는 정규화 프롬프트. 최상위 questions 는
@@ -569,16 +624,20 @@ function resolveRemote(p) {
   //  순서가 생명이다: settle 을 먼저 하면 back 이 폰에 200 을 주는데 조작이 실패하면(다이얼로그가
   //  그새 사라짐 등) 답이 조용히 증발한다. 실패는 throw → back 이 오류로 회신 → 폰 카드가 남아
   //  재시도한다(다이얼로그가 정말 사라졌다면 리컨실러가 다음 틱에 회수한다).
+  // "허용하고 다음부터 묻지 않기" — allow 일 때만 의미가 있다. 실제로 되돌릴 규칙은 요청 시점에
+  //  claude 가 준 제안(meta.alwaysUpdates)이고, 여기서는 "사용자가 그걸 원했다"는 사실만 전달한다.
+  //  TUI 재광고(훅 없는) 슬롯에는 규칙을 세울 경로가 없으므로 무시된다(카드도 그 선택지를 안 띄운다).
+  const always = decision === 'allow' && !!p.always;
   const slot = pending.get(id);
   if (slot && slot.tuiDrive && decision !== 'defer') {
     return Promise.resolve(slot.tuiDrive({ decision, answers }))
       .then(() => {
-        const ok = settle(id, { decision, reason, message: p.message, answers, by: p.by }, { retract: false });
+        const ok = settle(id, { decision, reason, message: p.message, answers, always, by: p.by }, { retract: false });
         if (!ok) throw notPending();
         return { resolved: true, id, decision };
       });
   }
-  const ok = settle(id, { decision, reason, message: p.message, answers, by: p.by }, { retract: false });
+  const ok = settle(id, { decision, reason, message: p.message, answers, always, by: p.by }, { retract: false });
   if (!ok) throw notPending();
   return { resolved: true, id, decision };
 }

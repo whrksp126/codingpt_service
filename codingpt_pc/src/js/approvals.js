@@ -132,6 +132,15 @@ function isChoice(a) {
   const k = (a.prompt && a.prompt.kind) || a.kind;
   return k === "choice";
 }
+// 카드 제목 — TUI 의 "Bash command" / "Edit file" 자리. 도구명만 던지지 않고 무엇을 하려는지로 읽히게 한다.
+const TOOL_TITLES = {
+  Bash: "명령 실행", Write: "파일 쓰기", Edit: "파일 수정", MultiEdit: "파일 여러 곳 수정",
+  NotebookEdit: "노트북 수정", Read: "파일 읽기", WebFetch: "웹 가져오기", WebSearch: "웹 검색",
+};
+function toolTitle(tool) {
+  const t = String(tool || "Tool");
+  return TOOL_TITLES[t] || t;
+}
 function questionsOf(a) {
   const qs = a.prompt && Array.isArray(a.prompt.questions) ? a.prompt.questions : null;
   return qs && qs.length ? qs : null;
@@ -170,20 +179,19 @@ function buildCard(a) {
     return el;
   }
 
-  const host = a.hostName ? ` · ${a.hostName}` : "";
-  const where = a.wsName ? `「${a.wsName}」` : "";
+  // ★ 권한형 카드도 TUI 프롬프트와 같은 것만 보여준다(2026-07-29 사용자 확정).
+  //  TUI 는 "무엇을 하려는가(도구 제목) / 대상(명령·경로) / 왜(설명) / 고를 것" 네 가지만 그린다.
+  //  우리가 덧붙였던 '승인 필요' 배지·「워크스페이스」·호스트명·접힌 '요청 상세' JSON 은 전부 잡음이었다
+  //  — 카드는 이미 그 워크스페이스의 그 터미널 안에 붙어 있으므로 출처를 다시 적을 이유가 없고,
+  //  정작 필요한 설명(Bash description)은 접혀 있어 매번 펼쳐야 했다. 출처가 필요한 표면(알림 패널·
+  //  OS 배너)은 별도 경로라 영향받지 않는다.
   el.innerHTML =
-    `<div class="apc-head">` +
-      `<span class="apc-ic">${icons.shield({ size: 15 })}</span>` +
-      `<span class="apc-title">승인 필요</span>` +
-      `<span class="apc-tool">${escapeHtml(a.tool || "Tool")}</span>` +
-    `</div>` +
-    `<div class="apc-where">${escapeHtml(where + host)}</div>` +
+    `<div class="apc-head"><span class="apc-title">${escapeHtml(toolTitle(a.tool))}</span></div>` +
     `<div class="apc-body"></div>` +
     `<div class="apc-err hidden"></div>` +
     `<div class="apc-actions"></div>`;
 
-  // 본문 — 도구 성격별로 보여줄 것이 다르다.
+  // 본문 — 도구 성격별로 보여줄 것이 다르다(TUI 와 같은 구성: 대상 → 설명).
   const body = el.querySelector(".apc-body");
   const plan = a.prompt && typeof a.prompt.plan === "string" ? a.prompt.plan : "";
   if (plan) {
@@ -191,17 +199,29 @@ function buildCard(a) {
     p.className = "apc-plan";
     p.innerHTML = renderMarkdown(plan);
     body.appendChild(p);
-  } else if (a.summary) {
-    const s = document.createElement("div");
-    s.className = "apc-summary" + (a.tool === "Bash" ? " mono" : "");
-    s.textContent = a.summary;
-    body.appendChild(s);
-  }
-  if (a.relPath) {
-    const p = document.createElement("div");
-    p.className = "apc-path";
-    p.textContent = a.relPath;
-    body.appendChild(p);
+  } else {
+    // 대상 = 명령 원문(Bash) 또는 파일 경로(Write/Edit/Read…). summary 가 그 값이다.
+    const target = a.summary || a.relPath || "";
+    if (target) {
+      const s = document.createElement("div");
+      s.className = "apc-summary" + (a.tool === "Bash" ? " mono" : "");
+      s.textContent = target;
+      body.appendChild(s);
+    }
+    // 경로가 summary 와 다르면(Bash 인데 파일이 특정된 경우 등) 따로 한 줄.
+    if (a.relPath && a.relPath !== target) {
+      const p = document.createElement("div");
+      p.className = "apc-path";
+      p.textContent = a.relPath;
+      body.appendChild(p);
+    }
+    // 설명 — TUI 가 명령 아래 회색으로 붙이는 그 한 줄. 접지 않는다(이걸 보려고 펼치던 게 문제였다).
+    if (a.detail) {
+      const d = document.createElement("div");
+      d.className = "apc-detail";
+      d.textContent = a.detail;
+      body.appendChild(d);
+    }
   }
   // diff(파일 수정) — 있으면 접힌 프리뷰. 데몬이 채우면 표시된다(없어도 정상).
   if (a.diff && (a.diff.newContent || a.diff.oldContent)) {
@@ -209,17 +229,6 @@ function buildCard(a) {
     d.className = "apc-fold";
     d.innerHTML = `<summary>변경 내용</summary><pre class="apc-pre">${escapeHtml(String(a.diff.newContent || a.diff.oldContent).slice(0, 4000))}</pre>`;
     body.appendChild(d);
-  }
-  // 원본 입력 — 명령 전문/인수는 접어둔다(카드가 길어지면 버튼이 화면 밖으로 밀린다).
-  if (a.inputPreview && typeof a.inputPreview === "object" && !a.inputPreview.truncated) {
-    let txt = "";
-    try { txt = JSON.stringify(a.inputPreview, null, 2); } catch (_) { txt = ""; }
-    if (txt && txt.length > 2) {
-      const d = document.createElement("details");
-      d.className = "apc-fold";
-      d.innerHTML = `<summary>요청 상세</summary><pre class="apc-pre">${escapeHtml(txt.slice(0, 4000))}</pre>`;
-      body.appendChild(d);
-    }
   }
 
   buildActions(el, a);
@@ -380,9 +389,15 @@ function buildActions(el, a) {
     acts.appendChild(wrap);
     return;
   }
-  // 권한형 — [거절][허용] 2버튼. "항상 허용"은 만들지 않는다(위 헤더 주석).
+  // 권한형 — TUI 와 같은 선택지. 3번째("다음부터 묻지 않기")는 **claude 가 그 요청에 대해 규칙을
+  //  제안했을 때만**(a.alwaysLabel 존재) 그린다 — TUI 도 정확히 같은 조건에서만 2번을 띄운다.
+  //  제안이 없는데 만들면 "다시 안 묻겠지" 하고 눌렀는데 계속 묻는 신뢰 붕괴가 된다.
+  const always = a.alwaysLabel
+    ? `<button class="apc-btn" type="button" data-act="allowAlways" title="${escapeHtml(a.alwaysLabel)}">허용 + 다음부터 묻지 않기</button>`
+    : "";
   acts.innerHTML =
     `<button class="apc-btn ghost" type="button" data-act="deny">거절</button>` +
+    always +
     `<button class="apc-btn primary" type="button" data-act="allow">허용</button>`;
 }
 
@@ -409,6 +424,8 @@ async function onCardClick(e, el, a) {
   }
   if (a._busy) return;
   if (act === "allow") { await S.respondApproval(a.id, { decision: "allow" }); return; }
+  // 규칙은 데몬이 보관한 claude 제안 그대로 적용된다 — 우리는 "그걸 원한다"는 플래그만 보낸다.
+  if (act === "allowAlways") { await S.respondApproval(a.id, { decision: "allow", always: true }); return; }
   if (act === "deny") { await S.respondApproval(a.id, { decision: "deny" }); return; }
   // ── 질문 카드(한 번에 하나) ──
   //  선택 = **고르기만** 한다(자동 진행 없음). 넘어가는 것은 [다음] / [건너뛰기] 뿐 —

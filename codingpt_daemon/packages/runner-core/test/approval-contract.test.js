@@ -214,3 +214,48 @@ test('cleanup — 남은 대기 슬롯 정리(타이머가 프로세스를 붙�
   approvals._reset();
   assert.strictEqual(approvals.pendingCount(), 0);
 });
+
+// ── "허용 + 다음부터 묻지 않기"(2026-07-29) ────────────────────────────────
+// 실측 근거(claude 2.1.220, PTY 로 진짜 PermissionRequest 를 발생시켜 확인):
+//  · 훅 **입력**에 `permission_suggestions` 가 온다. 종류는 요청에 따라 다르다
+//    (rm 은 addDirectories/setMode 만, 복합 명령의 안전한 부분은 addRules).
+//  · 훅 **출력** decision.updatedPermissions 를 되돌리면 claude 가 실제로 규칙을 기록한다
+//    (destination:'localSettings' → 프로젝트 .claude/settings.local.json 에 "Bash(ls:*)" 생성 확인).
+// 그래서 이 기능의 불변식은 두 가지다: ① 제안이 없으면 선택지를 만들지 않는다(허위 약속 금지)
+//  ② 우리가 규칙을 지어내지 않는다 — claude 가 준 제안을 **그대로** 되돌린다(과대 허용 금지).
+const RULE_SUG = {
+  type: 'addRules',
+  rules: [{ toolName: 'Bash', ruleContent: 'git status:*' }],
+  behavior: 'allow',
+  destination: 'localSettings',
+};
+
+test('always: 제안이 있으면 라벨이 실리고, 결정 시 그 제안이 그대로 updatedPermissions 로 나간다', () => {
+  const meta = { tool: 'Bash', choice: false, alwaysUpdates: [RULE_SUG] };
+  const out = approvals.buildHookOutput(meta, { decision: 'allow', always: true });
+  const d = out.hookSpecificOutput.decision;
+  assert.strictEqual(d.behavior, 'allow');
+  assert.deepStrictEqual(d.updatedPermissions, [RULE_SUG],
+    'claude 가 준 제안을 변형 없이 그대로 되돌려야 한다(우리가 규칙을 지어내면 과대 허용이 영구화된다)');
+});
+
+test('always: 사용자가 그 선택지를 고르지 않았으면 updatedPermissions 를 싣지 않는다', () => {
+  const meta = { tool: 'Bash', choice: false, alwaysUpdates: [RULE_SUG] };
+  const out = approvals.buildHookOutput(meta, { decision: 'allow' });
+  assert.ok(!('updatedPermissions' in out.hookSpecificOutput.decision),
+    '평범한 [허용]이 규칙을 영구화하면 사용자가 동의하지 않은 권한이 남는다');
+});
+
+test('always: claude 가 규칙을 제안하지 않았으면 always 여도 규칙을 만들지 않는다', () => {
+  const meta = { tool: 'Bash', choice: false, alwaysUpdates: null };
+  const out = approvals.buildHookOutput(meta, { decision: 'allow', always: true });
+  assert.ok(!('updatedPermissions' in out.hookSpecificOutput.decision),
+    '제안 없이 규칙을 지어내면 어떤 문자열이 유효한 규칙인지 우리가 추측하는 것이 된다');
+});
+
+test('always: 거절에는 규칙이 절대 붙지 않는다', () => {
+  const meta = { tool: 'Bash', choice: false, alwaysUpdates: [RULE_SUG] };
+  const out = approvals.buildHookOutput(meta, { decision: 'deny', always: true, message: '싫어요' });
+  assert.strictEqual(out.hookSpecificOutput.decision.behavior, 'deny');
+  assert.ok(!('updatedPermissions' in out.hookSpecificOutput.decision));
+});
