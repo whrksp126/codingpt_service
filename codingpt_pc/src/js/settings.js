@@ -159,9 +159,11 @@ function renderSection(force) {
   } else if (section === "general") {
     contentEl.innerHTML = `
       <div class="sm-card2">
-        <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
+        <label class="sett-row sett-row-action" for="autostartChk">
+          <span class="sett-copy"><span class="sett-label">로그인 시 자동 실행</span><span class="sett-desc">Mac에 로그인하면 CodingPT를 자동으로 시작해요.</span></span>
+          <input id="autostartChk" type="checkbox" class="tgl" aria-label="로그인 시 자동 실행" />
+        </label>
       </div>
-      <div class="sm-section-note">CodingPT가 시작되는 방식을 관리해요.</div>
       `;
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
@@ -195,8 +197,10 @@ function renderSection(force) {
     contentEl.innerHTML = `
       <div class="sm-section-title">데스크톱 알림</div>
       <div class="sm-card2">
-        <div class="sett-row"><span>알림 권한</span><span class="${granted ? "sett-done" : "sett-attn"}">${granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요"}</span></div>
-        <div class="sett-hint">작업 완료, 승인 요청, 연결 상태를 앱이 백그라운드에 있을 때 알려줘요.</div>
+        <div class="sett-row">
+          <span class="sett-copy"><span class="sett-label">알림 권한</span><span class="sett-desc">작업 완료와 승인 요청을 백그라운드에서도 알려줘요.</span></span>
+          <span class="${granted ? "sett-done" : "sett-attn"}">${granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요"}</span>
+        </div>
       </div>
       `;
   } else if (section === "security") {
@@ -206,7 +210,6 @@ function renderSection(force) {
         ${folderPermRow("downloads", "다운로드 폴더 접근")}
         ${folderPermRow("desktop", "데스크탑 폴더 접근")}
         ${folderPermRow("documents", "문서 폴더 접근")}
-        <div class="sett-hint">CodingPT가 워크스페이스 파일을 열고 수정하는 데 필요해요.</div>
       </div>
       <div class="sm-section-note">종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.</div>`;
     bindFolderPerms(contentEl);
@@ -482,10 +485,11 @@ function buildPaired() {
  *   즉시 '허용됨' 으로 바뀐다 — 기록이 없는 것이 손해가 아니다.
  */
 function folderPermRow(id, label) {
+  const copy = `<span class="sett-copy"><span class="sett-label">${label}</span><span class="sett-desc">워크스페이스 파일을 열고 수정하는 데 필요해요.</span></span>`;
   if (permGranted(id)) {
-    return `<div class="sett-row"><span>${label}</span><span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
+    return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
   }
-  return `<div class="sett-row"><span>${label}</span><button class="sett-btn fpa-btn" data-f="${id}">허용</button></div>`;
+  return `<div class="sett-row">${copy}<button class="sett-btn fpa-btn" data-f="${id}">허용</button></div>`;
 }
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
