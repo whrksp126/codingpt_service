@@ -50,6 +50,7 @@ const PERM_COPY = {
 };
 let permQueue = []; // 셋업 진입 시점의 "없는 권한" 스냅샷(슬라이드 순서)
 let permIdx = 0;
+let folderPermissionWatch = null;
 
 export function mountLoginGate(container) {
   el = container;
@@ -103,6 +104,10 @@ export function restorePendingSetup() {
 // ── 렌더 ──────────────────────────────────────────────────────────────
 function renderStep() {
   if (!el) return;
+  if (folderPermissionWatch) {
+    clearInterval(folderPermissionWatch);
+    folderPermissionWatch = null;
+  }
   if (step === "welcome") {
     el.innerHTML = `
       <div class="lg-inner">
@@ -215,44 +220,54 @@ function renderStep() {
       }
     });
   }
+  const completePermission = (id) => {
+    markPermGranted(id);
+    btn.textContent = "허용됐어요 ✓";
+    btn.disabled = true;
+    setTimeout(() => {
+      permIdx += 1;
+      const progressKey = setupProgressKey();
+      if (progressKey) {
+        try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {}
+      }
+      renderStep();
+    }, 450);
+  };
   btn.addEventListener("click", async () => {
+    if (p.folder && btn.dataset.denied === "1") {
+      btn.disabled = true;
+      btn.textContent = "시스템 설정 여는 중…";
+      await api.openFilesPrivacy().catch(() => {});
+      btn.textContent = "설정에서 권한을 켜주세요";
+      btn.disabled = false;
+      let checking = false;
+      folderPermissionWatch = setInterval(async () => {
+        if (checking) return;
+        checking = true;
+        const granted = await api.probeFolder(p.id).catch(() => false);
+        checking = false;
+        if (!granted) return;
+        clearInterval(folderPermissionWatch);
+        folderPermissionWatch = null;
+        completePermission(p.id);
+      }, 750);
+      return;
+    }
     btn.disabled = true;
     btn.textContent = "확인 중…";
     const ok = p.folder
       ? await api.probeFolder(p.id).catch(() => false)
       : await api.notifPermission().catch(() => false);
     if (ok) {
-      markPermGranted(p.id);
-      btn.textContent = "허용됐어요 ✓";
-      setTimeout(() => {
-        permIdx += 1;
-        const progressKey = setupProgressKey();
-        if (progressKey) {
-          try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {}
-        }
-        renderStep();
-      }, 450); // ✓ 를 잠깐 보여주고 다음 슬라이드
+      completePermission(p.id);
       return;
     }
-    // 거부/실패 — 승인될 때까지 재시도만 허용한다.
-    btn.textContent = "다시 확인";
+    // macOS는 한 번 거부한 보호 폴더 팝업을 다시 띄우지 않는다. 이후 CTA는 재요청이 아니라
+    // 파일 및 폴더 설정을 열고, 사용자가 토글을 켜는 순간까지 실제 접근을 폴링한다.
+    btn.dataset.denied = "1";
+    btn.textContent = "시스템 설정 열기";
     btn.disabled = false;
-    alt.innerHTML = `
-      <span>권한을 승인해야 계속할 수 있어요.</span>
-      <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>`;
-    alt.querySelector("#lgOpenPriv").addEventListener("click", async () => {
-      if (p.id === "notification") {
-        await openNotificationSettingsAndWatch(async (next) => {
-          if (next === "granted") {
-            markPermGranted("notification");
-            btn.textContent = "계속";
-            alt.innerHTML = "";
-          }
-        }).catch(() => {});
-      } else {
-        api.openFilesPrivacy().catch(() => {});
-      }
-    });
+    alt.textContent = "한 번 거부한 권한은 macOS 시스템 설정에서 켜야 해요.";
   });
 }
 

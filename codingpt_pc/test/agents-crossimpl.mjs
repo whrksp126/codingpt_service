@@ -260,6 +260,13 @@ ok(/test\.textContent = ok \? "다시 테스트"/.test(pcGate)
   && /soundSelect\?\.addEventListener\("change"[\s\S]*"테스트 알림 보내기"/.test(pcGate)
   && !/보냈어요 ✓/.test(pcGate),
   'PC: 테스트 알림은 성공 후에도 재전송할 수 있고 소리 변경 시 버튼 문구를 초기화한다');
+ok(/btn\.dataset\.denied === "1"/.test(pcGate)
+  && /api\.openFilesPrivacy\(\)/.test(pcGate)
+  && /folderPermissionWatch = setInterval/.test(pcGate)
+  && /api\.probeFolder\(p\.id\)/.test(pcGate)
+  && /btn\.textContent = "시스템 설정 열기"/.test(pcGate)
+  && !/btn\.textContent = "다시 확인"/.test(pcGate),
+  'PC: 보호 폴더를 한 번 거부하면 재팝업을 약속하지 않고 시스템 설정을 열어 ON 상태를 감시한다');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');

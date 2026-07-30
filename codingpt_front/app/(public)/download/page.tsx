@@ -9,7 +9,7 @@ export const metadata = {
 
 // 버전별 ObjectStore 객체는 장기 캐시한다. 새 릴리스는 새 URL이라 이전 CDN 캐시와 충돌하지 않는다.
 //  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
-const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.187-arm64.dmg';
+const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.188-arm64.dmg';
 const WIN_EXE_URL = ''; // 준비 중
 
 const STEPS = [
