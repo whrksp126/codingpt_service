@@ -9,7 +9,7 @@ export const metadata = {
 
 // 다운로드 파일 URL(objectstore 공개 경로). 새 버전 배포 시 이 상수만 갱신.
 //  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
-const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-arm64.dmg';
+const MAC_DMG_URL = 'https://codingpt-back.ghmate.com/api/pc/dl/CodingPT.dmg';
 const WIN_EXE_URL = ''; // 준비 중
 
 const STEPS = [
