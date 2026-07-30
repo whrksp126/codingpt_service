@@ -1,5 +1,5 @@
 // 릴리스 업로드 헬퍼 — release-pc.sh 전용. back 의 aws-sdk 로 objectstore 에 배포물을 올리고
-// latest.json 을 발행한다. 다운로드 URL 은 back 스트리밍 프록시(/api/pc/dl/*) — objectstore 는 비공개 prefix.
+// latest.json 을 발행한다. 웹 DMG는 공개 ObjectStore의 버전별 불변 객체로 직접 제공한다.
 const fs = require('fs');
 const path = require('path');
 
@@ -23,8 +23,11 @@ const client = new S3Client({
   },
 });
 
-async function put(key, body, contentType) {
-  await client.send(new PutObjectCommand({ Bucket: BUCKET, Key: PREFIX + key, Body: body, ContentType: contentType }));
+async function put(key, body, contentType, cacheControl) {
+  await client.send(new PutObjectCommand({
+    Bucket: BUCKET, Key: PREFIX + key, Body: body, ContentType: contentType,
+    ...(cacheControl ? { CacheControl: cacheControl } : {}),
+  }));
   console.log('  업로드:', key, typeof body === 'string' ? `${body.length}B` : `${body.length}B`);
 }
 
@@ -34,13 +37,15 @@ async function put(key, body, contentType) {
   await put(tarName, fs.readFileSync(targz), 'application/gzip');
   await put(dmgName, fs.readFileSync(dmg), 'application/x-apple-diskimage');
   await put('CodingPT.dmg', fs.readFileSync(dmg), 'application/x-apple-diskimage'); // back 프록시 별칭
-  // 다운로드 페이지(codingpt.ghmate.com/download)가 가리키는 objectstore 공개 키 갱신.
-  //  공개 URL = https://objectstore.ghmate.com/<bucket>/<key> — 키에 codingpt/ 접두사 없음(실측).
+  // 공개 URL = https://objectstore.ghmate.com/<bucket>/<key>. 버전별 객체는 내용이 변하지
+  // 않으므로 장기 캐시한다. 새 릴리스는 새 key라 이전 CDN 캐시와 충돌하지 않는다.
+  const publicDmgKey = `common/downloads/CodingPT-${version}-arm64.dmg`;
   await client.send(new PutObjectCommand({
-    Bucket: BUCKET, Key: 'common/downloads/CodingPT-arm64.dmg',
+    Bucket: BUCKET, Key: publicDmgKey,
     Body: fs.readFileSync(dmg), ContentType: 'application/x-apple-diskimage',
+    CacheControl: 'public, max-age=31536000, immutable',
   }));
-  console.log('  업로드: common/downloads/CodingPT-arm64.dmg (공개 다운로드 페이지)');
+  console.log(`  업로드: ${publicDmgKey} (공개·immutable)`);
   const latest = {
     version,
     pub_date: new Date().toISOString(),

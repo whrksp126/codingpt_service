@@ -150,6 +150,7 @@ function renderStep() {
           <div class="notif-onb-controls">
             <label><span>알림음</span><select id="lgNotifSound" class="sett-select">${soundOptionsHtml()}</select></label>
             <button id="lgNotifTest" class="sett-btn">테스트 알림 보내기</button>
+            <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
           </div>` : ""}
         <div id="lgPermAlt" class="lg-perm-alt"></div>
       </main>
@@ -163,6 +164,7 @@ function renderStep() {
   if (p.id === "notification") {
     bindSoundSelect(el.querySelector("#lgNotifSound"));
     const test = el.querySelector("#lgNotifTest");
+    const openSettings = el.querySelector("#lgOpenNotifSettings");
     const warning = el.querySelector("#lgNotifWarning");
     const paintNotifPermission = (value) => {
       const granted = value === "granted";
@@ -171,21 +173,20 @@ function renderStep() {
       warning.innerHTML = granted ? "" : `
         <div class="notif-warning">
           <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
-          <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
         </div>`;
-      warning.querySelector("#lgOpenNotifSettings")?.addEventListener("click", async (e) => {
-        const open = e.currentTarget;
-        open.disabled = true;
-        open.textContent = "여는 중…";
-        try {
-          await openNotificationSettingsAndWatch(paintNotifPermission);
-          open.textContent = "시스템 설정 열림";
-        } catch (_) {
-          open.disabled = false;
-          open.textContent = "다시 시도";
-        }
-      });
     };
+    openSettings?.addEventListener("click", async () => {
+      openSettings.disabled = true;
+      openSettings.textContent = "여는 중…";
+      try {
+        await openNotificationSettingsAndWatch(paintNotifPermission);
+        openSettings.textContent = "시스템 설정 열림";
+      } catch (_) {
+        openSettings.textContent = "다시 시도";
+      } finally {
+        openSettings.disabled = false;
+      }
+    });
     refreshNotificationPermission().then(paintNotifPermission);
     test?.addEventListener("click", async () => {
       test.disabled = true;

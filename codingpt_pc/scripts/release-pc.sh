@@ -26,6 +26,17 @@ NOTES=""
 VERSION="$(python3 -c "import json;print(json.load(open('$PC_DIR/src-tauri/tauri.conf.json'))['version'])")"
 echo "▸ 릴리스 버전: $VERSION"
 
+# 웹의 두 버튼이 같은 버전별 공개 DMG를 가리키는지 릴리스 전에 강제 검증한다.
+# 새 버전인데 URL 갱신을 잊으면 구 DMG가 영구 캐시된 것처럼 보이므로 발행 자체를 중단한다.
+EXPECTED_PUBLIC_DMG="https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-${VERSION}-arm64.dmg"
+for FRONT_FILE in "$PC_DIR/../codingpt_front/app/(public)/page.tsx" "$PC_DIR/../codingpt_front/app/(public)/download/page.tsx"; do
+  grep -Fq "$EXPECTED_PUBLIC_DMG" "$FRONT_FILE" || {
+    echo "✗ 웹 DMG URL 버전 불일치: $FRONT_FILE" >&2
+    echo "  다음 URL로 먼저 갱신하세요: $EXPECTED_PUBLIC_DMG" >&2
+    exit 1
+  }
+done
+
 # 1) 서명 릴리스 빌드 (beforeBuildCommand 가 CPT_RELEASE=1 로 사이드카 서명 필수화 수행)
 #  주의: _PATH 변형은 CLI 버전에 따라 무시됨(실측) — 키 내용을 직접 넘긴다.
 export TAURI_SIGNING_PRIVATE_KEY="$(cat "$KEY")"

@@ -51,7 +51,8 @@ bash scripts/release-pc.sh           # 릴리스: 서명 빌드→업데이터 �
   서명하고, 없으면 빌드가 실패한다(ad-hoc 릴리스 금지). dev 는 ad-hoc 허용.
 - **자동 업데이트**: 앱이 `/api/pc/update/{target}/{arch}/{ver}` 를 확인(설정>정보>업데이트).
   업데이터 개인키 `~/.codingpt-release/pc-updater.key` — 유출 금지, 분실 시 기존 설치본 업데이트 불가.
-  배포물은 objectstore `codingpt/pc-releases/`, 다운로드는 back 스트리밍(`/api/pc/dl/*`).
+  자동업데이트 배포물은 objectstore `codingpt/pc-releases/`에 두고 back 스트리밍(`/api/pc/dl/*`).
+  웹 DMG는 공개 버전별 객체 `common/downloads/CodingPT-<ver>-arm64.dmg`를 ObjectStore에서 직접 받는다.
 - **공증 필수**: release-pc.sh 가 키체인 프로필 `codingpt-notary`(App Store Connect API 키)로
   dmg 를 공증+스테이플한다(프로필 없으면 릴리스 중단). 업데이터 tar.gz 는 공증 무관(자체 서명 검증).
 

@@ -224,6 +224,7 @@ ok(!/\.split-child \{[^}]*flex: 1 1 auto/.test(pcCss),
 //  maybeShowOnboarding 이 부팅 시에만 실행 + view 상태 미초기화. 서버는 무죄였다(prod 실측: user id
 //  52 신규 생성 · 하드 삭제 확인) — 이 절은 클라이언트 3결함의 부재를 고정한다.
 const pcGate = strip(read(path.join(PC, 'login-gate.js')));
+const pcStyles = strip(read(path.join(PC, '..', 'styles.css')));
 const pcUiCh = strip(read(path.join(PC, 'ui-channel.js')));
 const pcSettings2 = strip(read(path.join(PC, 'settings.js')));
 ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem\("cpt\.setupDone"/.test(pcGate),
@@ -241,6 +242,12 @@ ok(/\{ id: "notification", label: "알림 설정" \}/.test(pcGate)
   && /p\.id === "notification"/.test(pcGate)
   && !/\{ id: "notif"/.test(pcGate),
   'PC: 알림 큐 id와 상세 설정 분기가 같아 온보딩에서 소리·테스트가 반드시 보인다');
+ok(/id="lgOpenNotifSettings"/.test(pcGate)
+  && !/warning\.querySelector\("#lgOpenNotifSettings"\)/.test(pcGate),
+  'PC: 시스템 설정 열기 버튼은 알림 권한 상태와 무관하게 항상 보인다');
+ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
+  && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
+  'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');
 ok(!/lg-glyph|lg-perm-ic|lg-brand|ag-onb-head/.test(pcGate + strip(pcView)),
   'PC 온보딩: CodingPT 로고·워드마크·텍스트 위 장식 아이콘·헤더를 사용하지 않는다');
 ok(/maybeShowOnboarding/.test(pcGate),
