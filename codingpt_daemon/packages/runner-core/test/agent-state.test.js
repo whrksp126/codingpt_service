@@ -24,6 +24,7 @@ test('전이표 — session_start→idle / prompt→working / stop(bg=0)→idle+
   reset();
   let r = await hook(1, { event: 'session_start', sessionSource: 'startup' });
   assert.strictEqual(r.state, 'idle');
+  assert.strictEqual(st.attachmentOf(KEY(1)).ready, true, 'SessionStart/sessionId 이후에만 채팅 준비 완료');
   assert.strictEqual(fired.length, 0);
 
   r = await hook(1, { event: 'prompt', promptId: 'p1' });

@@ -90,6 +90,14 @@ eq("node 는 이미 chat 모드였던 탭에서만 인정(기존 규칙)",
 eq("혼합 탭(IDE/프리뷰) 활성 → 숨김", PC.resolveToggleVisible({ isTerm: false, win: 5, chatMode: true, agentOn: true }), false);
 eq("win 미확정('new') → 숨김(chat 모드여도)", PC.resolveToggleVisible({ isTerm: true, win: "new", chatMode: true, agentOn: true }), false);
 eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible({ isTerm: true, win: 5, chatMode: true, agentOn: false }), true);
+eq("Codex SessionStart 전 → Chat 진입 토글 숨김",
+  PC.resolveToggleVisible({ isTerm: true, win: 5, chatMode: false, agentOn: true, chatReady: PC.resolveChatReady({ tab: { cmd: "codex" } }) }), false);
+eq("Codex SessionStart 후 → Chat 진입 토글 표시",
+  PC.resolveChatReady({ push: { agent: "codex", sessionId: "s-1" }, tab: { cmd: "codex" } }), true);
+eq("Claude SessionStart 전 → Chat 진입 토글 숨김",
+  PC.resolveChatReady({ tab: { cmd: "claude" } }), false);
+eq("Claude SessionStart 후 → Chat 진입 토글 표시",
+  PC.resolveChatReady({ push: { agent: "claude", sessionId: "s-2" }, tab: { cmd: "claude" } }), true);
 
 // ══════════════════════════════════════════════════════════════════════════
 // 2. 데몬 규칙 동치 — `runner-core/agent-watch.js` 의 실제 함수와 대조

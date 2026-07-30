@@ -212,7 +212,7 @@ function resyncAll() {
 //  신호로 내려간다 — agent-watch.agentSignalOf 참조).
 function attachmentOf(key) {
   const rec = states.get(String(key || ''));
-  if (!rec) return { attached: false, known: false, agent: null, state: null, source: null, hookGoverned: false };
+  if (!rec) return { attached: false, known: false, agent: null, state: null, source: null, hookGoverned: false, ready: null };
   const wire = wireStateOf(rec);
   return {
     attached: wire !== 'gone',
@@ -221,6 +221,8 @@ function attachmentOf(key) {
     state: wire,
     source: rec.source || null,
     hookGoverned: hookGoverned(rec.key),
+    // Codex의 SessionStart 훅이 도착해야 sessionId가 생긴다. 프로젝트 신뢰 질문 중에는 false.
+    ready: !!rec.sessionId,
   };
 }
 

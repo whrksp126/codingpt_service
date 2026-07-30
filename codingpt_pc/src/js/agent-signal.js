@@ -149,7 +149,16 @@ export function resolveAgentPresence(input) {
 export function resolveToggleVisible(input) {
   if (!input || !input.isTerm) return false;
   if (typeof input.win !== "number") return false;
+  if (input.chatReady === false && !input.chatMode) return false;
   return !!(input.agentOn || input.chatMode);
+}
+
+export function resolveChatReady(input) {
+  const brand = resolveAgentBrand(input);
+  if (brand !== "claude" && brand !== "codex") return true;
+  const push = (input && input.push) || null;
+  const tab = (input && input.tab) || null;
+  return !!(String((push && push.sessionId) || "").trim() || (tab && tab.agentReady === true));
 }
 
 /**
@@ -196,6 +205,6 @@ export function resolveAgentBrand(input) {
 
 export default {
   SHELL_CMDS, isShellCmd, agentTitleStatus, normalizeDaemonAgentFlag,
-  AGENT_CMD_RE, hasAgentCmd, resolveAgentPresence, resolveToggleVisible,
+  AGENT_CMD_RE, hasAgentCmd, resolveAgentPresence, resolveToggleVisible, resolveChatReady,
   AGENT_BRANDS, resolveAgentBrand,
 };

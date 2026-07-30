@@ -131,7 +131,7 @@ test('버전 문자열 cmd + 글리프 제목 = 목록에 agent ON(수동 rename
   const w = r.windows.find((x) => x.index === tid);
   assert.deepStrictEqual(
     Object.keys(w).sort(),
-    ['agent', 'agentName', 'agentSource', 'agentState', 'command', 'index', 'name'],
+    ['agent', 'agentName', 'agentReady', 'agentSource', 'agentState', 'command', 'index', 'name'],
     'terminal.list 응답 키가 바뀌었다(추가 전용 규율 위반 또는 내용성 정보 유출)',
   );
   assert.strictEqual(w.agent, true);

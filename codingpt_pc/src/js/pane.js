@@ -14,7 +14,7 @@ import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dt
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { CHAT } from "./chat-model.js";
-import { resolveAgentPresence, resolveToggleVisible, resolveAgentBrand } from "./agent-signal.js";
+import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { state as appState } from "./state.js";
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
@@ -885,6 +885,13 @@ export class PaneView {
       },
     }).on;
   }
+  _chatReady(tab) {
+    if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return false;
+    return resolveChatReady({
+      push: this.ctx.agentStateOf?.(this.ctx.localPath || "", tab.win) || null,
+      tab: { cmd: tab.cmd, title: tab.title, agent: tab.agent, agentName: tab.agentName, agentReady: tab.agentReady },
+    });
+  }
   // 지금 이 pane 이 Chat 모드를 그리고 있는가(리사이즈/크기주장 억제 판정의 단일 기준).
   //  ⚠ 판정은 **표시 조건(showActiveTab 의 chat)과 정확히 같아야 한다.** 여기에 _agentOn 을 AND 로 걸면
   //  claude 가 종료된 뒤에도 화면은 Chat 인데 억제 가드만 풀려, 창/분할 리사이즈 시 display:none 인 xterm 의
@@ -911,6 +918,7 @@ export class PaneView {
       win: tab && isTermTab(tab) ? tab.win : null,
       chatMode: chat,
       agentOn: this._agentOn(tab),
+      chatReady: this._chatReady(tab),
     });
     return { on, chat };
   }

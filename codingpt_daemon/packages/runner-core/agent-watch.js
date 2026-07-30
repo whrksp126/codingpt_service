@@ -128,9 +128,9 @@ function agentSignalOf(session, cmd, title) {
   const c = String(cmd || '').trim();
   const t = String(title || '');
   // 근거 0 = 모름. 부정으로 단정할 수 있는 것은 셸 확정 하나뿐이다(★★ 참조).
-  const unknown = { on: null, agent: null, state: null, source: null };
-  if (SHELL_CMDS.has(c)) return { on: false, agent: null, state: null, source: 'shell' }; // ① 셸 = 하드 OFF
-  let att = { attached: false, known: false, agent: null, state: null, source: null };
+  const unknown = { on: null, agent: null, state: null, source: null, ready: null };
+  if (SHELL_CMDS.has(c)) return { on: false, agent: null, state: null, source: 'shell', ready: null }; // ① 셸 = 하드 OFF
+  let att = { attached: false, known: false, agent: null, state: null, source: null, ready: null };
   try { att = agentState().attachmentOf(session) || att; } catch (_) { /* 로드 실패 = 제목 판정만 */ }
   const st = states.get(session) || null;               // 관찰 장부(sticky sawAgentTitle/agent)
   const tStatus = titleStatus(t);
@@ -144,6 +144,7 @@ function agentSignalOf(session, cmd, title) {
     //  구간(claude 의 /resume·agents 화면 등)이면 'idle' — 상태는 몰라도 **부착은 켠다**.
     state: att.attached ? att.state : (tStatus || 'idle'),
     source: att.attached ? (att.source || 'hook') : 'title',
+    ready: att.ready,
   };
 }
 

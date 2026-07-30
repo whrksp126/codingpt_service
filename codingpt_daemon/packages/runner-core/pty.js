@@ -118,10 +118,10 @@ function agentSignal(session, cmd, title) {
     // 3값 정규화 — true/false 외의 값(null·undefined)은 전부 모름으로 접는다.
     if (s) {
       const on = s.on === true ? true : (s.on === false ? false : null);
-      return { on, agent: s.agent || null, state: s.state || null, source: s.source || null };
+      return { on, agent: s.agent || null, state: s.state || null, source: s.source || null, ready: typeof s.ready === 'boolean' ? s.ready : null };
     }
   } catch (_) { /* noop */ }
-  return { on: null, agent: null, state: null, source: null };   // 조회 실패 = 모름(부정 아님)
+  return { on: null, agent: null, state: null, source: null, ready: null };   // 조회 실패 = 모름(부정 아님)
 }
 
 // 워크스페이스의 터미널 목록 — [{index(tid), name, command, session, agent, agentName, agentState, agentSource}]
@@ -155,7 +155,7 @@ async function listTerminals(ns) {
     const sig = agentSignal(sname, cmd, title);
     rows.push({
       index: tid, name: wname || '', command: (cmd || '').trim(), session: sname, created: parseInt(created, 10) || 0,
-      agent: sig.on, agentName: sig.agent, agentState: sig.state, agentSource: sig.source,
+      agent: sig.on, agentName: sig.agent, agentState: sig.state, agentSource: sig.source, agentReady: sig.ready,
     });
   }
   rows.sort((a, b) => (a.created - b.created) || (a.index - b.index));
@@ -735,6 +735,7 @@ async function handleTerminalRpc(method, params) {
       windows: list.map((t) => ({
         index: t.index, name: t.name, command: t.command,
         agent: t.agent, agentName: t.agentName, agentState: t.agentState, agentSource: t.agentSource,
+        agentReady: t.agentReady,
       })),
     };
   }
