@@ -27,6 +27,26 @@ function agentSkillDirs() {
 }
 // 스텁 정본 = cpt-cli 패키지에 커밋된 SKILL.md(cpt 바이너리와 함께 배포되어 버전 일치).
 function stubSrc() { return path.join(__dirname, '..', 'cpt-cli', 'SKILL.md'); }
+// 데몬이 설치하지 않는(했던 적도 없는) 레거시/실험 경로 — codex 는 ~/.agents/skills 도 전역으로
+//  읽는다. 2026-07-26 실험으로 수동 설치된 옛 스텁(자기-스코핑 이전)이 여기 남아 7-29 근본수정의
+//  sweep(.claude/.codex/.gemini)을 피해 무관 프로젝트의 codex 를 계속 오염시켰다(7-30 재발 실사고).
+//  볼 때마다 회수하되, **우리 스텁일 때만**(CodingPT 문구 확인) — 남의 동명 스킬은 절대 안 지운다.
+function legacySkillDirs() {
+  const home = path.dirname(runtime.claudeHome());
+  return [path.join(home, '.agents', 'skills', 'cpt-cli')];
+}
+function sweepLegacyStubs() {
+  let removed = false;
+  for (const dir of legacySkillDirs()) {
+    try {
+      const md = fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8');
+      if (!/CodingPT/.test(md)) continue; // 우리 것 아님 — 불가침
+      fs.rmSync(dir, { recursive: true, force: true });
+      removed = true;
+    } catch (_) { /* 없음/접근불가 — noop */ }
+  }
+  return removed;
+}
 
 // 내용이 같으면 안 쓴다(mtime 보존 — 불필요 재설치 신호 방지).
 function writeIfChanged(file, content) {
@@ -42,6 +62,7 @@ function writeIfChanged(file, content) {
 //   무관한 프로젝트의 에이전트가 cpt 를 계속 발견한다(2026-07-29 실사고: 다른 도구의 codex 가
 //   전역 스텁을 보고 cpt 를 집어 씀). Orca 도 off 스위치에서 기설치 훅을 sweep 한다(동일 결론).
 function ensureSkillStub() {
+  try { sweepLegacyStubs(); } catch (_) { /* noop */ }
   if (String(process.env.CPT_SKILL_INSTALL || '') === '0') {
     let removed = false;
     try { removed = removeSkillStub(); } catch (_) { /* noop */ }
@@ -71,7 +92,8 @@ function removeSkillStub() {
   for (const a of agentSkillDirs()) {
     try { if (fs.existsSync(a.dir)) { fs.rmSync(a.dir, { recursive: true, force: true }); removed = true; } } catch (_) { /* noop */ }
   }
+  try { if (sweepLegacyStubs()) removed = true; } catch (_) { /* noop */ }
   return removed;
 }
 
-module.exports = { ensureSkillStub, removeSkillStub, skillDir, agentSkillDirs };
+module.exports = { ensureSkillStub, removeSkillStub, skillDir, agentSkillDirs, legacySkillDirs, sweepLegacyStubs };
