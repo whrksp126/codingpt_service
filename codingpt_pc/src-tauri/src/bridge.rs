@@ -1032,11 +1032,30 @@ mod clipboard_tests {
     }
 }
 
-// 네이티브 알림(OSC/벨 → macOS 알림). 프론트 notifications.js 에서 호출.
+// 네이티브 알림(OSC/벨 → macOS 알림). macOS는 현대 UNUserNotificationCenter 경로를
+// 동기 호출해 실제 접수 실패를 프론트에 돌려준다. 이 백엔드는 foreground delegate에서
+// Banner|Sound를 명시하므로 CodingPT가 전면에 있어도 테스트 배너가 보인다.
 #[tauri::command]
-pub fn notify(app: AppHandle, title: String, body: String, sound: Option<String>) {
+pub fn notify(_app: AppHandle, title: String, body: String, sound: Option<String>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut notification = mac_usernotifications::Notification::new()
+            .title(if title.is_empty() { "CodingPT" } else { &title })
+            .message(&body);
+        notification = match sound.as_deref() {
+            Some("none") => notification,
+            Some("default") | None | Some("") => notification.default_sound(),
+            Some(name) => notification.sound(name),
+        };
+        notification
+            .send_blocking()
+            .map(|_| ())
+            .map_err(|e| format!("macOS 알림 전송 실패: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
     use tauri_plugin_notification::{NotificationExt, PermissionState};
-    let notif = app.notification();
+    let notif = _app.notification();
     // 권한 미허용이면 1회 요청 — tauri dev(비번들 바이너리)에선 배너가 안 뜰 수 있고,
     //  빌드된 .app 에선 이 요청으로 System Settings 알림 항목이 생성돼 배너가 표시된다.
     if !matches!(notif.permission_state(), Ok(PermissionState::Granted)) {
@@ -1050,7 +1069,8 @@ pub fn notify(app: AppHandle, title: String, body: String, sound: Option<String>
     if let Some(name) = sound.filter(|s| !s.is_empty() && s != "none") {
         builder = builder.sound(name);
     }
-    let _ = builder.show();
+    builder.show().map_err(|e| format!("알림 전송 실패: {e}"))
+    }
 }
 
 // ── 크롬 데브툴 별도 창(Undock) — devtools-frame.html?win=1 을 독립 WebviewWindow 로 ──

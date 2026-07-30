@@ -224,6 +224,7 @@ ok(!/\.split-child \{[^}]*flex: 1 1 auto/.test(pcCss),
 //  maybeShowOnboarding 이 부팅 시에만 실행 + view 상태 미초기화. 서버는 무죄였다(prod 실측: user id
 //  52 신규 생성 · 하드 삭제 확인) — 이 절은 클라이언트 3결함의 부재를 고정한다.
 const pcGate = strip(read(path.join(PC, 'login-gate.js')));
+const pcBridge = strip(read(path.resolve(PC, '../../src-tauri/src/bridge.rs')));
 const pcStyles = strip(read(path.join(PC, '..', 'styles.css')));
 const pcUiCh = strip(read(path.join(PC, 'ui-channel.js')));
 const pcSettings2 = strip(read(path.join(PC, 'settings.js')));
@@ -251,6 +252,14 @@ ok(/id="lgNotifControls" class="notif-onb-controls is-disabled"/.test(pcGate)
   && /btn\.disabled = !granted/.test(pcGate)
   && !/lgOpenNotifSettingsReady/.test(pcGate),
   'PC: 상태·설정 구조는 유지하고 OFF면 소리·테스트·계속만 비활성, ON이면 같은 자리에서 활성화한다');
+ok(/mac_usernotifications::Notification::new/.test(pcBridge)
+  && /\.send_blocking\(\)/.test(pcBridge)
+  && /\.default_sound\(\)/.test(pcBridge),
+  'PC: macOS 테스트 알림은 전면 배너를 지원하는 UNUserNotificationCenter로 보내고 실제 결과를 기다린다');
+ok(/test\.textContent = ok \? "다시 테스트"/.test(pcGate)
+  && /soundSelect\?\.addEventListener\("change"[\s\S]*"테스트 알림 보내기"/.test(pcGate)
+  && !/보냈어요 ✓/.test(pcGate),
+  'PC: 테스트 알림은 성공 후에도 재전송할 수 있고 소리 변경 시 버튼 문구를 초기화한다');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');

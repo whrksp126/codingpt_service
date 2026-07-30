@@ -200,12 +200,15 @@ function renderStep() {
     });
     bindOpenSettings(openSettings);
     refreshNotificationPermission().then(paintNotifPermission);
+    soundSelect?.addEventListener("change", () => {
+      test.textContent = "테스트 알림 보내기";
+    });
     test?.addEventListener("click", async () => {
       test.disabled = true;
       test.textContent = "보내는 중…";
       const ok = await sendTestNotification().catch(() => false);
       if (ok) markPermGranted("notification");
-      test.textContent = ok ? "보냈어요 ✓" : "시스템 설정 확인";
+      test.textContent = ok ? "다시 테스트" : "전송 실패 · 다시 시도";
       test.disabled = false;
       if (!ok) {
         paintNotifPermission("denied");
