@@ -795,20 +795,20 @@ export class ChatView {
     }
     const n = (m.attachments || []).length;
     if (!n) { push(text); return parts.join(""); }
+    // ⚠ 토큰 번호는 claude 의 **세션 전역** 카운터(예: #10)라 인덱스가 아니다 — 순서로 짝짓는다:
+    //  텍스트의 k번째 [Image #N] 토큰 ↔ attachments[k]. 라벨은 원문 번호 그대로("Image #10").
     const re = /\[Image #(\d+)\]/g;
     let last = 0;
-    let used = 0;
+    let k = 0;
     let mt;
-    while ((mt = re.exec(text))) {
-      const idx = parseInt(mt[1], 10) - 1;
-      if (!(idx >= 0 && idx < n)) continue; // 범위 밖 = 사용자가 친 문자열일 수 있다 → 텍스트로 남긴다
+    while ((mt = re.exec(text)) && k < n) {
       push(text.slice(last, mt.index));
-      parts.push(this._msgChipHtml({ kind: "remote", label: `Image #${idx + 1}`, idx, seq: m.seq }));
+      parts.push(this._msgChipHtml({ kind: "remote", label: mt[0].slice(1, -1), idx: k, seq: m.seq }));
       last = mt.index + mt[0].length;
-      used += 1;
+      k += 1;
     }
     push(text.slice(last));
-    for (let i2 = used; i2 < n; i2++) { // 마커 없는 레거시 라인 — 끝에 덧붙인다
+    for (let i2 = k; i2 < n; i2++) { // 토큰 없는 첨부(레거시 라인 등) — 끝에 덧붙인다
       parts.push(" " + this._msgChipHtml({ kind: "remote", label: `Image #${i2 + 1}`, idx: i2, seq: m.seq }));
     }
     return parts.join("");

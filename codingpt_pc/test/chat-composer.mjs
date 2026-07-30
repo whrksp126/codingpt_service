@@ -310,7 +310,10 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("보낸 메시지도 인라인 칩(마커/경로 자리) + 자동 썸네일", /_userTextHtml/.test(cv) && /_hydrateMsgChips/.test(cv) && /\[Image #\(/.test(cv.replace(/\\/g, "")));
   ok("레거시 첨부 표현(넓은 인라인 확장) 제거", !/chat-attach-img/.test(cv) && !/_loadAttachment/.test(cv));
   const ts = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/transcript.js"), "utf8");
-  ok("데몬이 user 이미지 자리에 위치 마커를 심는다(무접합 join)", /\[Image #\$\{attachments\.length\}\]/.test(ts) && /buf\.join\(''\)/.test(ts));
+  // ⚠ 실측 정정(2026-07-30 3차): claude 가 원문 텍스트에 [Image #N](세션 전역 번호)을 이미 남긴다 —
+  //  데몬이 마커를 합성하면 유령 토큰이 이중으로 생긴다(사용자 실사고: 끝에 "Image #1" 칩 + 원문은 텍스트).
+  ok("데몬은 이미지 마커를 합성하지 않는다(원문 토큰이 정본)", !/\[Image #\$\{/.test(ts) && /buf\.join\(''\)/.test(ts));
+  ok("클라 매핑 = k번째 토큰 ↔ attachments[k](번호는 라벨로만)", /k번째 \[Image #N\] 토큰/.test(cv) && /label: mt\[0\]\.slice\(1, -1\)/.test(cv));
 
   // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
   //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
