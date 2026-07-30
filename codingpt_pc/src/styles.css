@@ -883,8 +883,7 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
   padding: 32px;
   text-align: center;
 }
-/* 온보딩(웰컴→로그인→셋업) — 텍스트 최소, 글리프 하나만(워드마크 병행 금지) */
-.login-gate .lg-glyph { width: 96px; height: 96px; object-fit: contain; margin-bottom: 6px; filter: drop-shadow(0 6px 24px rgba(52, 211, 153, 0.25)); animation: lg-in 0.5s ease-out; }
+/* 온보딩(웰컴→로그인→셋업) — 로고·장식 아이콘 없이 텍스트와 컨트롤만. */
 .login-gate .lg-head { font-size: 20px; font-weight: 800; color: var(--text); letter-spacing: 0.2px; }
 .login-gate .lg-head.sm { font-size: 16px; font-weight: 700; }
 .login-gate .btn.lg { min-width: 220px; padding: 12px 22px; font-size: 14px; border-radius: 10px; }
@@ -912,7 +911,6 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
 .login-gate .lg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-ctrl); transition: background 0.2s; }
 .login-gate .lg-dot.on { background: var(--text2); }
 .login-gate .lg-dot.done { background: var(--text2); opacity: 0.45; }
-.login-gate .lg-perm-ic { width: 64px; height: 64px; border-radius: 18px; display: flex; align-items: center; justify-content: center; color: var(--text2); background: var(--elevated); border: 1px solid var(--border); }
 .login-gate .lg-perm-benefit { font-size: 13.5px; color: var(--text2); max-width: 340px; line-height: 1.55; }
 .login-gate .lg-perm-hint { font-size: 11.5px; color: var(--dim); max-width: 340px; line-height: 1.5; }
 .login-gate .lg-perm-alt { min-height: 22px; display: flex; align-items: center; gap: 8px; justify-content: center; color: var(--dim); font-size: 12px; }
@@ -924,15 +922,9 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
   background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg);
   box-shadow: 0 18px 50px rgba(0,0,0,.28); animation: lg-slide-in .28s ease-out;
 }
-.login-gate .lg-wizard-top, .ag-onb-head {
-  min-height: 68px; display: flex; align-items: center; justify-content: space-between;
-  padding: 0 28px; border-bottom: 1px solid var(--border);
-}
-.lg-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--text); font-size: 13px; font-weight: 700; }
-.lg-brand img { width: 23px; height: 23px; object-fit: contain; }
 .login-gate .lg-wizard-body {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 16px; padding: 48px 28px; text-align: center;
+  gap: 16px; padding: 54px 28px 42px; text-align: center;
 }
 .login-gate .lg-wizard-foot, .ag-onb-foot {
   min-height: 76px; display: flex; align-items: center; justify-content: space-between;
@@ -941,7 +933,6 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
 .login-gate .lg-step-count { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
 .login-gate .lg-wizard-foot .btn.lg { min-width: 190px; margin: 0; }
 @keyframes lg-spin { to { transform: rotate(360deg); } }
-@keyframes lg-in { from { opacity: 0; transform: translateY(6px) scale(0.96); } to { opacity: 1; transform: none; } }
 
 /* ── 앱 종료 가드(미저장 IDE 변경) ── */
 .quit-guard-backdrop {

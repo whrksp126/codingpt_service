@@ -6,7 +6,6 @@
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
-import { icons } from "./icons.js";
 import {
   bindSoundSelect, sendTestNotification, soundOptionsHtml,
 } from "./notification-prefs.js";
@@ -20,9 +19,8 @@ let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 �
 // ── 셋업/권한의 스코프 (2026-07-28 사용자 실사고로 개정) ─────────────────────
 // 실사고: 회원탈퇴 → 같은 이메일로 재가입(서버는 하드 삭제라 **새 user id**) → 이 PC 에서 온보딩이
 //  안 떴다. 원인 = `cpt.setupDone` 이 머신 1회 플래그였다. 새 계정은 새 사용자다 → **계정별 1회**.
-// 반면 macOS 권한(TCC 폴더 접근·알림)은 **앱(머신) 단위**다 — 계정을 바꿔도 이미 허용돼 있다.
-//  그래서 셋업 화면은 "이 계정이 처음 + 아직 없는 권한만 하나씩" 을 그린다(사용자 확정: 권한 없는
-//  것만 등장해 바로 허용 유도). 전부 허용돼 있으면 셋업 자체를 건너뛴다.
+// 반면 macOS 권한(TCC 폴더 접근·알림)은 **앱(머신) 단위**다. 그래도 새 계정 온보딩에서는 알림음
+// 선택·테스트를 반드시 보여준다. 권한이 이미 있으면 [계속]으로 통과하고 OS 팝업만 생략한다.
 const setupKey = () => (state.me && state.me.id != null ? `cpt.setupDone.${state.me.id}` : null);
 // 권한 허용 기록 — 프로브 성공 시에만 기록한다(모든 프롬프트는 우리 버튼에서 나가므로 이 기록이
 //  곧 "허용됨"의 로컬 정본이다. 사용자가 시스템 설정에서 뒤로 껐다면 다음 실제 접근이 실패하며
@@ -37,13 +35,13 @@ const FOLDER_PERMS = [
   { id: "documents", label: "문서 폴더 접근" },
 ];
 const requiredPerms = () => [
-  { id: "notif", label: "알림 허용" },
+  { id: "notification", label: "알림 설정" },
   ...FOLDER_PERMS.map((f) => ({ ...f, folder: true })),
 ];
 
 // 권한은 화면당 하나만 요청한다. 실제 승인 확인 전에는 다음 단계가 없다.
 const PERM_COPY = {
-  notif: { title: "알림을 허용해 주세요", benefit: "작업이 끝나면 바로 알려드려요" },
+  notification: { title: "알림 설정", benefit: "에이전트 작업이 끝나거나 도움이 필요할 때 알려드려요." },
   downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
   desktop: { title: "데스크탑 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
   documents: { title: "문서 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
@@ -84,7 +82,6 @@ function renderStep() {
   if (step === "welcome") {
     el.innerHTML = `
       <div class="lg-inner">
-        <img class="lg-glyph" src="assets/logo.png" alt="" draggable="false" />
         <div class="lg-head">폰과 태블릿에서, 내 PC 그대로</div>
         <button id="lgStart" class="btn primary lg">시작하기</button>
       </div>`;
@@ -108,7 +105,7 @@ function renderStep() {
     return;
   }
   // setup — ★ 2026-07-28 2차 개정(사용자 확정): **권한 위저드(슬라이드)**.
-  //  · 화면당 권한 하나 — 큰 아이콘 + 제목 + 이득 1줄 + 하단 [허용] 단일 CTA(필수 승인 프레이밍).
+  //  · 화면당 권한 하나 — 제목 + 이득 1줄 + 하단 단일 CTA. 장식 아이콘/브랜드 로고는 사용하지 않는다.
   //    행 목록 + 행별 작은 버튼은 "아무도 누르고 싶지 않은" 구성이었다(사용자 실사 피드백).
   //  · 자동 실행 토글은 게이트에서 제거 — 기본 켬(페어링 시 적용), 끄기는 설정 > 일반에서.
   //  · [허용] 성공 → ✓ 로 잠깐 굳었다가 자동으로 다음 슬라이드. 전부 끝나면 셋업 종료.
@@ -120,12 +117,8 @@ function renderStep() {
   const dots = permQueue.map((_, i) => `<span class="lg-dot${i === permIdx ? " on" : i < permIdx ? " done" : ""}"></span>`).join("");
   el.innerHTML = `
     <div class="lg-wizard">
-      <header class="lg-wizard-top">
-        <span class="lg-brand"><img src="assets/logo.png" alt="" draggable="false" />CodingPT</span>
-        ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
-      </header>
       <main class="lg-wizard-body">
-        <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 28 }) : icons.bell({ size: 28 })}</div>
+        ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
         <div class="lg-head">${c.title}</div>
         <div class="lg-perm-benefit">${c.benefit}</div>
         ${p.id === "notification" ? `
@@ -137,7 +130,7 @@ function renderStep() {
       </main>
       <footer class="lg-wizard-foot">
         <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
-        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">허용</button>
+        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">${p.id === "notification" && permGranted("notification") ? "계속" : "허용"}</button>
       </footer>
     </div>`;
   const btn = el.querySelector("#lgAllow");

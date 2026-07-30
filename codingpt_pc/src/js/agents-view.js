@@ -326,9 +326,6 @@ export async function maybeShowOnboarding() {
       el.innerHTML = `
         <div class="ag-sheet-back"></div>
         <div class="ag-sheet-card ag-onb-card" role="dialog" aria-modal="true">
-          <header class="ag-onb-head">
-            <span class="lg-brand"><img src="assets/logo.png" alt="" draggable="false" />CodingPT</span>
-          </header>
           <main class="ag-onb-body">
             <div class="ag-onb-title">사용할 AI 에이전트를 선택하세요</div>
             <div class="ag-onb-benefit">이 PC에서 발견된 에이전트예요.</div>

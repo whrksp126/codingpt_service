@@ -237,6 +237,12 @@ ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
   'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
 ok(!/lgSkipPerm/.test(pcGate) && /requiredPerms\(\)/.test(pcGate),
   'PC: 모든 필수 권한을 실제 승인하기 전에는 건너뛰거나 완료할 수 없다');
+ok(/\{ id: "notification", label: "알림 설정" \}/.test(pcGate)
+  && /p\.id === "notification"/.test(pcGate)
+  && !/\{ id: "notif"/.test(pcGate),
+  'PC: 알림 큐 id와 상세 설정 분기가 같아 온보딩에서 소리·테스트가 반드시 보인다');
+ok(!/lg-glyph|lg-perm-ic|lg-brand|ag-onb-head/.test(pcGate + strip(pcView)),
+  'PC 온보딩: CodingPT 로고·워드마크·텍스트 위 장식 아이콘·헤더를 사용하지 않는다');
 ok(/maybeShowOnboarding/.test(pcGate),
   'PC: 게이트 종료 시에도 에이전트 온보딩을 판정한다(재가입/계정 전환은 부팅 없이 온다)');
 ok(/setView\("workspace"\)/.test(pcUiCh),
