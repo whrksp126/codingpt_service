@@ -152,24 +152,37 @@ export class ChatView {
         this.ctx.exitChat?.();
         return;
       }
+      // 방향키는 **우리가 직접** 캐럿을 움직인다(Selection.modify — Shift 선택/⌥단어/⌘줄 보존).
+      //  한글 IME + WKWebView 가 방향키 기본 처리에서 기능키 전용 문자(PUA)를 텍스트로 흘리는
+      //  버그(□ 삽입, 2회 신고)의 원천 차단: 기본 경로가 아예 실행되지 않는다. 조합 중엔 IME 소유.
+      if (e.key.startsWith("Arrow") && !e.isComposing && !e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        const sel = window.getSelection();
+        if (!sel) return;
+        const dir = e.key === "ArrowLeft" || e.key === "ArrowUp" ? "backward" : "forward";
+        const gran = e.key === "ArrowUp" || e.key === "ArrowDown" ? "line"
+          : e.metaKey ? "lineboundary" : e.altKey ? "word" : "character";
+        try { sel.modify(e.shiftKey ? "extend" : "move", dir, gran); } catch (_) { /* noop */ }
+        return;
+      }
       // WebKit 은 contenteditable=false 인라인 요소 앞뒤에서 Backspace/Delete 를 자주 무시한다
       //  (실측: ✕ 는 되는데 키보드 삭제가 안 됨) — 캐럿에 인접한 칩을 직접 걷는다.
+      //  칩 뒤에 우리가 넣는 공백은 칩과 **한 단위**다: 첫 키가 공백만 지우면 "무반응"으로 보인다(신고).
       if ((e.key === "Backspace" || e.key === "Delete") && !e.isComposing) {
-        const chip = this._chipAtCaret(e.key === "Backspace" ? -1 : 1);
-        if (chip) {
+        const unit = this._chipUnitAtCaret(e.key === "Backspace" ? -1 : 1);
+        if (unit) {
           e.preventDefault();
           e.stopPropagation();
-          chip.remove();
-          this._reconcileChips();
-          this._syncComposer();
-          this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
+          this._removeChipUnit(unit);
         }
       }
     });
     // macOS 한글 IME + WKWebView 조합에서 방향키가 기능키 전용 문자(U+F700대 PUA)를 텍스트로
     //  흘리는 버그(실측: →/← 마다 □ 삽입) — 삽입 전 차단 + 삽입 후 소독의 이중 방어.
     this.inputEl.addEventListener("beforeinput", (e) => {
-      if (e.inputType === "insertText" && e.data && /[\uF700-\uF7FF]/.test(e.data)) e.preventDefault();
+      const GHOST = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uE000-\uF8FF]/;
+      if (e.inputType === "insertText" && e.data && GHOST.test(e.data)) e.preventDefault();
     });
     this.inputEl.addEventListener("input", () => {
       this._ceSanitize();     // PUA 잔여 소독(조합 경로로 새는 케이스)
@@ -659,10 +672,11 @@ export class ChatView {
   }
 
   _chipInnerHtml(a) {
-    const thumb = a.img && a.b64
+    // 이미지 = 썸네일 · 그 외 = 확장자 배지(사용자 요구: "[파일형식 파일명 닫기]") — 배지는 최대 4자.
+    const lead = a.img && a.b64
       ? `<img class="chat-chip-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
-      : "";
-    return thumb + `<span class="chat-chip-label">${escapeHtml(a.name)}</span>` +
+      : (a.ext ? `<span class="chat-chip-ext">${escapeHtml(String(a.ext).toUpperCase().slice(0, 4))}</span>` : "");
+    return lead + `<span class="chat-chip-label">${escapeHtml(a.name)}</span>` +
       `<button class="chat-chip-x" type="button" title="빼기">✕</button>`;
   }
 
@@ -678,32 +692,88 @@ export class ChatView {
     this._attach = this._attach.filter((a) => present.has(a.path));
   }
 
-  // 캐럿에 인접한 칩(dir=-1: 앞 / +1: 뒤) — Backspace/Delete 원자 삭제의 근거.
-  //  공백 하나를 사이에 둔 경우까지는 넘보지 않는다(공백 먼저 지워지는 것이 자연스러운 편집).
-  _chipAtCaret(dir) {
+  // 캐럿에 인접한 "칩 단위"(칩 + 우리가 넣은 뒤공백) — Backspace/Delete 원자 삭제의 근거.
+  //  실측(크롬 하네스): 칩 삽입 직후 캐럿은 **요소 컨테이너 좌표**(chat-ce@N)로 서고 공백은
+  //  독립 텍스트 노드다 — 텍스트 노드 내부 좌표만 보던 첫 구현이 놓친 케이스(신고 재현·확정).
+  //  판정: 캐럿 앞(또는 뒤)을 [빈 텍스트]* [공백-only 텍스트]? [칩] 순으로 걷어 칩에 닿으면 단위.
+  _chipUnitAtCaret(dir) {
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
     const r = sel.getRangeAt(0);
     if (!this.inputEl.contains(r.startContainer)) return null;
+    const isChip = (n) => n && n.nodeType === Node.ELEMENT_NODE && n.classList.contains("chat-chip");
+    const isWs = (n) => n && n.nodeType === Node.TEXT_NODE && /^[ \u00a0]*$/.test(n.data);
     let node = r.startContainer;
-    let off = r.startOffset;
+    const off = r.startOffset;
+    let spaceHop = null;
     if (node.nodeType === Node.TEXT_NODE) {
-      if (dir < 0 && off > 0) return null;                     // 텍스트 중간 — 기본 동작
-      if (dir > 0 && off < node.length) return null;
-      node = dir < 0 ? node.previousSibling : node.nextSibling;
+      if (dir < 0 && off > 0) {
+        // 캐럿 앞 글자가 이 노드의 유일한 선행 내용(공백)이고 그 앞이 칩일 때만 단위로 흡수
+        const before = node.data.slice(0, off);
+        if (!(/^[ \u00a0]$/.test(before) && isChip(node.previousSibling))) return null;
+        spaceHop = { node, from: 0, to: off };
+        node = node.previousSibling;
+      } else if (dir > 0 && off < node.length) {
+        // 캐럿 뒤 잔여가 공백뿐이고 다음 형제가 칩일 때만 단위로 흡수
+        if (!(/^[ \u00a0]+$/.test(node.data.slice(off)) && isChip(node.nextSibling))) return null;
+        spaceHop = { node, from: off, to: node.length };
+        node = node.nextSibling;
+      } else {
+        node = dir < 0 ? node.previousSibling : node.nextSibling;
+      }
     } else {
       node = node.childNodes[dir < 0 ? off - 1 : off] || null;
     }
-    // 빈 텍스트 노드는 건너뛴다(WebKit 이 칩 주변에 만들어 두는 경우가 있다)
-    while (node && node.nodeType === Node.TEXT_NODE && !node.length) {
+    // [빈/공백-only 텍스트 노드]를 걷어 칩까지 접근 — 그 공백들도 단위에 포함해 지운다.
+    const wsCuts = [];
+    while (node && node.nodeType === Node.TEXT_NODE) {
+      if (!isWs(node)) return null; // 실제 글자가 있다 — 일반 편집에 맡긴다
+      if (node.length) wsCuts.push({ node, from: 0, to: node.length });
       node = dir < 0 ? node.previousSibling : node.nextSibling;
     }
-    return node && node.nodeType === Node.ELEMENT_NODE && node.classList.contains("chat-chip") ? node : null;
+    if (!isChip(node)) return null;
+    // 칩 뒤에 우리가 넣은 공백(반대편 인접)도 단위에 포함 — 남으면 유령 공백이 쌓인다.
+    let tail = null;
+    if (dir > 0) {
+      const after = node.nextSibling;
+      if (after && isWs(after) && after.length) tail = { node: after, from: 0, to: Math.min(1, after.length) };
+    }
+    return { chip: node, spaceHop, wsCuts, tail };
   }
 
-  // U+F700대(맥 기능키 전용 PUA) 소독 — IME 경로로 새어 들어온 잔여를 걷는다(캐럿 보정 포함).
+  _removeChipUnit(unit) {
+    // 캐럿 기준점 = 칩 앞 노드(삭제 후에도 살아남는 참조) — normalize 뒤 명시 배치해
+    //  "캐럿이 칩 경계/줄 머리에 그려지는" 이상 렌더(신고 건)를 예방한다.
+    const chip = unit.chip;
+    const prev = chip.previousSibling;
+    for (const cut of [unit.spaceHop, unit.tail, ...(unit.wsCuts || [])]) {
+      if (!cut) continue;
+      cut.node.deleteData(cut.from, cut.to - cut.from);
+    }
+    chip.remove();
+    this.inputEl.normalize(); // 쪼개진 텍스트 노드 봉합 — 캐럿이 노드 경계에 끼지 않게
+    try {
+      const r2 = document.createRange();
+      if (prev && prev.parentNode) {
+        if (prev.nodeType === Node.TEXT_NODE) r2.setStart(prev, prev.length);
+        else r2.setStartAfter(prev);
+      } else {
+        r2.setStart(this.inputEl, 0);
+      }
+      r2.collapse(true);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(r2);
+    } catch (_) { /* noop */ }
+    this._reconcileChips();
+    this._syncComposer();
+    this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
+  }
+
+  // 유령문자 소독(제어문자 + PUA 전역) — IME/조합 경로로 새어 들어온 잔여를 걷는다(캐럿 보정 포함).
+  //  방향키는 keydown 에서 원천 가로채므로(Selection.modify) 이건 최후 안전망이다.
   _ceSanitize() {
-    const BAD = /[\uF700-\uF7FF]/g;
+    const BAD = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uE000-\uF8FF]/g;
     const sel = window.getSelection();
     const walker = document.createTreeWalker(this.inputEl, NodeFilter.SHOW_TEXT);
     let t;

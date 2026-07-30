@@ -305,8 +305,14 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("빈 입력 placeholder 는 :empty::before", /\.chat-ce:empty::before \{ content: attr\(data-ph\)/.test(css));
 
   // 실사용 신고 3종(2026-07-30 2차) 재발 방지 핀
-  ok("방향키 PUA(U+F700대) 문자 삽입 차단 — beforeinput + 소독", /beforeinput/.test(cv) && /\\uF700-\\uF7FF/.test(cv) && /_ceSanitize/.test(cv));
-  ok("Backspace/Delete 가 인접 칩을 원자 삭제(WebKit ncE 버그 우회)", /_chipAtCaret\(/.test(cv) && /e\.key === "Backspace" \|\| e\.key === "Delete"/.test(cv));
+  // 방향키 유령문자(2차 신고): insertText 필터만으론 조합 경로가 새서 재발 → **원천 가로채기**
+  //  (Selection.modify 로 커서를 직접 이동 — 기본 경로가 아예 실행되지 않는다) + 광역 소독 안전망.
+  ok("방향키는 Selection.modify 로 직접 이동(유령문자 원천 차단)", /sel\.modify\(e\.shiftKey \? "extend" : "move"/.test(cv));
+  ok("유령문자 소독은 제어문자+PUA 전역", /\\u0000-\\u0008[\s\S]{0,80}\\uE000-\\uF8FF/.test(cv) && /_ceSanitize/.test(cv));
+  ok("Backspace/Delete = 칩+뒤공백 **한 단위** 삭제(요소 좌표 캐럿·독립 공백 노드까지 — 크롬 하네스 실검증)",
+    /_chipUnitAtCaret\(/.test(cv) && /wsCuts/.test(cv) && /_removeChipUnit/.test(cv));
+  ok("단위 삭제 후 캐럿을 명시 배치(칩 경계 이상 렌더 예방)", /normalize\(\);/.test(cv) && /setStartAfter\(prev\)/.test(cv));
+  ok("비이미지 칩에 확장자 배지", /chat-chip-ext/.test(cv));
   ok("보낸 메시지도 인라인 칩(마커/경로 자리) + 자동 썸네일", /_userTextHtml/.test(cv) && /_hydrateMsgChips/.test(cv) && /\[Image #\(/.test(cv.replace(/\\/g, "")));
   ok("레거시 첨부 표현(넓은 인라인 확장) 제거", !/chat-attach-img/.test(cv) && !/_loadAttachment/.test(cv));
   const ts = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/transcript.js"), "utf8");
