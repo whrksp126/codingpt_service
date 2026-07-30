@@ -7,7 +7,8 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import {
-  bindSoundSelect, sendTestNotification, soundOptionsHtml,
+  bindSoundSelect, openNotificationSettingsAndWatch, refreshNotificationPermission,
+  sendTestNotification, soundOptionsHtml,
 } from "./notification-prefs.js";
 
 let el = null;
@@ -122,6 +123,7 @@ function renderStep() {
         <div class="lg-head">${c.title}</div>
         <div class="lg-perm-benefit">${c.benefit}</div>
         ${p.id === "notification" ? `
+          <div id="lgNotifWarning"></div>
           <div class="notif-onb-controls">
             <label><span>알림음</span><select id="lgNotifSound" class="sett-select">${soundOptionsHtml()}</select></label>
             <button id="lgNotifTest" class="sett-btn">테스트 알림 보내기</button>
@@ -138,6 +140,30 @@ function renderStep() {
   if (p.id === "notification") {
     bindSoundSelect(el.querySelector("#lgNotifSound"));
     const test = el.querySelector("#lgNotifTest");
+    const warning = el.querySelector("#lgNotifWarning");
+    const paintNotifPermission = (value) => {
+      const granted = value === "granted";
+      if (granted) markPermGranted("notification");
+      btn.textContent = granted ? "계속" : "허용";
+      warning.innerHTML = granted ? "" : `
+        <div class="notif-warning">
+          <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
+          <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
+        </div>`;
+      warning.querySelector("#lgOpenNotifSettings")?.addEventListener("click", async (e) => {
+        const open = e.currentTarget;
+        open.disabled = true;
+        open.textContent = "여는 중…";
+        try {
+          await openNotificationSettingsAndWatch(paintNotifPermission);
+          open.textContent = "시스템 설정 열림";
+        } catch (_) {
+          open.disabled = false;
+          open.textContent = "다시 시도";
+        }
+      });
+    };
+    refreshNotificationPermission().then(paintNotifPermission);
     test?.addEventListener("click", async () => {
       test.disabled = true;
       test.textContent = "보내는 중…";
@@ -146,8 +172,7 @@ function renderStep() {
       test.textContent = ok ? "보냈어요 ✓" : "시스템 설정 확인";
       test.disabled = false;
       if (!ok) {
-        alt.innerHTML = `<span>macOS에서 CodingPT 알림을 허용해 주세요.</span><button class="lg-link" id="lgOpenNotif">시스템 설정 열기</button>`;
-        alt.querySelector("#lgOpenNotif")?.addEventListener("click", () => api.openNotificationSettings().catch(() => {}));
+        paintNotifPermission("denied");
       }
     });
   }
@@ -169,8 +194,18 @@ function renderStep() {
     alt.innerHTML = `
       <span>권한을 승인해야 계속할 수 있어요.</span>
       <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>`;
-    alt.querySelector("#lgOpenPriv").addEventListener("click", () => {
-      (p.id === "notification" ? api.openNotificationSettings() : api.openFilesPrivacy()).catch(() => {});
+    alt.querySelector("#lgOpenPriv").addEventListener("click", async () => {
+      if (p.id === "notification") {
+        await openNotificationSettingsAndWatch(async (next) => {
+          if (next === "granted") {
+            markPermGranted("notification");
+            btn.textContent = "계속";
+            alt.innerHTML = "";
+          }
+        }).catch(() => {});
+      } else {
+        api.openFilesPrivacy().catch(() => {});
+      }
     });
   });
 }

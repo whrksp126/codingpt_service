@@ -785,11 +785,21 @@ pub fn notification_permission_state(app: AppHandle) -> String {
 pub fn open_notification_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
+        // macOS 26 실측:
+        //  · 일반 pane URL만 넘기면 CodingPT 행이 선택되지 않는다.
+        //  · `open <url>`만 쓰면 성공(0)을 돌려도 CodingPT가 계속 frontmost라 사용자는 "안 열림"으로 본다.
+        // 앱 bundle id를 쿼리에 싣고 System Settings를 명시한 뒤 전면 활성화한다.
+        let url = "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.ghmate.codingpt.pc";
         std::process::Command::new("/usr/bin/open")
-            .arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+            .args(["-b", "com.apple.systempreferences", url])
+            .spawn()
+            .map_err(|e| format!("알림 설정 열기 실패: {e}"))?;
+        // `application id`는 표시 언어(System Settings/시스템 설정)에 무관하다.
+        std::process::Command::new("/usr/bin/osascript")
+            .args(["-e", "tell application id \"com.apple.systempreferences\" to activate"])
             .spawn()
             .map(|_| ())
-            .map_err(|e| format!("알림 설정 열기 실패: {e}"))
+            .map_err(|e| format!("시스템 설정 활성화 실패: {e}"))
     }
     #[cfg(not(target_os = "macos"))]
     Ok(())

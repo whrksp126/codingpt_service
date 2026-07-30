@@ -17,7 +17,8 @@ import {
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
 import { markPermGranted, permGranted } from "./login-gate.js";
 import {
-  bindSoundSelect, sendTestNotification, soundOptionsHtml,
+  bindSoundSelect, openNotificationSettingsAndWatch, refreshNotificationPermission,
+  sendTestNotification, soundOptionsHtml,
 } from "./notification-prefs.js";
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
@@ -277,9 +278,20 @@ function bindNotificationSettings(host) {
         <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
         <button id="notifOpenSettings" class="sett-btn">시스템 설정 열기</button>
       </div>`;
-    warning.querySelector("#notifOpenSettings")?.addEventListener("click", () => api.openNotificationSettings().catch(() => {}));
+    warning.querySelector("#notifOpenSettings")?.addEventListener("click", async (e) => {
+      const open = e.currentTarget;
+      open.disabled = true;
+      open.textContent = "여는 중…";
+      try {
+        await openNotificationSettingsAndWatch((next) => paintPermission(next));
+        open.textContent = "시스템 설정 열림";
+      } catch (_) {
+        open.disabled = false;
+        open.textContent = "다시 시도";
+      }
+    });
   };
-  api.notifPermissionState().then(paintPermission).catch(() => paintPermission(permGranted("notification") ? "granted" : "unknown"));
+  refreshNotificationPermission().then((p) => paintPermission(p === "unknown" && permGranted("notification") ? "granted" : p));
 
   test.addEventListener("click", async () => {
     test.disabled = true;

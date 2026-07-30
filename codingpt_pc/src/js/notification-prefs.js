@@ -45,3 +45,34 @@ export async function sendTestNotification() {
   await api.notify("CodingPT 테스트 알림", "에이전트가 작업을 마치면 이렇게 알려드려요.", getNotificationSound());
   return true;
 }
+
+export async function refreshNotificationPermission() {
+  return api.notifPermissionState().catch(() => "unknown");
+}
+
+// 시스템 설정으로 포커스가 넘어가기 전에 복귀 리스너를 먼저 건다. 사용자가 CodingPT로 돌아오면
+// 바꾼 권한을 즉시 다시 읽어 경고/버튼을 갱신한다(재실행·수동 새로고침 불필요).
+export async function openNotificationSettingsAndWatch(onState) {
+  let active = true;
+  const onFocus = () => {
+    if (!active) return;
+    active = false;
+    window.removeEventListener("focus", onFocus);
+    setTimeout(async () => onState?.(await refreshNotificationPermission()), 250);
+  };
+  window.addEventListener("focus", onFocus);
+  try {
+    await api.openNotificationSettings();
+    // 돌아오지 않는 경우 리스너가 영구히 남지 않게 제한한다.
+    const expiry = setTimeout(() => {
+      if (!active) return;
+      active = false;
+      window.removeEventListener("focus", onFocus);
+    }, 5 * 60 * 1000);
+    expiry?.unref?.(); // Node 계약 테스트의 event loop는 붙들지 않는다(브라우저에선 숫자라 no-op).
+  } catch (e) {
+    active = false;
+    window.removeEventListener("focus", onFocus);
+    throw e;
+  }
+}
