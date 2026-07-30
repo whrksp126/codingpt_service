@@ -533,6 +533,78 @@ test('푸터 없는 다이얼로그 — 드라이버도 조작할 수 있어야 
   assert.strictEqual(r.ok, true);
 });
 
+// ── 훅 선택형(AskUserQuestion) 슬롯 화면 화해 — 실사고(2026-07-30) 회귀 ──
+// TUI 다이얼로그에서 직접 답하면 claude 가 (Bash 승인의 hook_gone 실측과 달리) PermissionRequest
+//  훅을 정리하지 않는다 → 훅 프로세스가 waitMs(24h) 내내 생존 → 카드가 전 기기 유령.
+//  화면이 정본: 다이얼로그 미노출 연속 2틱이면 무출력 defer 로 해소·철회해야 한다.
+const ASK_HOOK = {
+  agent: 'claude', toolName: 'AskUserQuestion', sessionId: 'sess-R', toolUseId: 'toolu_r1',
+  toolInput: { questions: QS.slice(0, 1) },
+};
+const SESSION = `cpt-other-project-proj--t-${TID}`;
+const DIALOG_SCREEN = ['⏺ 준비됐어요', '좋아하는 계절은?', '❯ 1. 봄', '  2. 겨울', 'Enter to select · Esc to cancel'].join('\n');
+const PLAIN_SCREEN = ['$ ls', 'src  test', '$ '].join('\n');
+
+function mockTmux(getScreen) {
+  const ptyLib = require('../pty');
+  const orig = ptyLib.runTmux;
+  ptyLib.runTmux = async (args) => {
+    if (args[0] === 'list-windows') return `${SESSION}\n`;
+    if (args[0] === 'show-environment') return `CPT_WS=${CWD}\n`;
+    if (args[0] === 'capture-pane') return getScreen();
+    return '';
+  };
+  return () => { ptyLib.runTmux = orig; };
+}
+
+test('훅 질문 슬롯: 다이얼로그 노출 중엔 유지, 미노출 연속 2틱이면 defer 회수 + 철회', async () => {
+  let screen = DIALOG_SCREEN;
+  const restore = mockTmux(() => screen);
+  try {
+    revive._hookRecon.minAgeMs = 0;
+    const p = approvals.request(ASK_HOOK, { cwdRel: CWD, windowIndex: TID }, null);
+    for (let i = 0; i < 200 && !advertised.length; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.strictEqual(approvals.hookChoiceSlots().length, 1, '훅 선택형 슬롯 등록');
+
+    await revive._poll(); await revive._poll(); await revive._poll();
+    assert.strictEqual(approvals.hookChoiceSlots().length, 1, '다이얼로그가 떠 있는 동안은 유지');
+
+    screen = PLAIN_SCREEN;                       // 사용자가 TUI 에서 직접 답함 — 다이얼로그 소멸
+    await revive._poll();
+    assert.strictEqual(approvals.hookChoiceSlots().length, 1, '1틱 miss 로는 회수하지 않는다(일시 오판 방지)');
+    await revive._poll();
+    assert.strictEqual(approvals.hookChoiceSlots().length, 0, '연속 2틱 miss = 회수');
+    const r = await p;
+    assert.strictEqual(r.decision, 'defer', '훅은 무출력 defer 로 풀린다(자동 허용 금지)');
+    assert.ok(!r.hookOutput, '훅 출력 없음 — claude 는 이미 로컬 응답을 처리했다');
+    assert.ok(retracted.some((x) => x.reason === 'dialog_gone'), '카드 철회(전 기기 회수)');
+  } finally { restore(); revive._hookRecon.minAgeMs = 12 * 1000; approvals._reset(); }
+});
+
+test('훅 질문 슬롯: 최소 나이 전엔 회수하지 않는다(다이얼로그 연출 지연 흡수)', async () => {
+  const restore = mockTmux(() => PLAIN_SCREEN);
+  try {
+    revive._hookRecon.minAgeMs = 60 * 1000;
+    approvals.request(ASK_HOOK, { cwdRel: CWD, windowIndex: TID }, null);
+    for (let i = 0; i < 200 && !advertised.length; i++) await new Promise((r) => setTimeout(r, 5));
+    await revive._poll(); await revive._poll(); await revive._poll();
+    assert.strictEqual(approvals.hookChoiceSlots().length, 1, '갓 만든 슬롯은 화면 미노출이어도 유지');
+  } finally { restore(); revive._hookRecon.minAgeMs = 12 * 1000; approvals._reset(); }
+});
+
+test('훅 권한 슬롯(비선택형)은 화면 화해 대상이 아니다(hook_gone 경로가 담당)', async () => {
+  const restore = mockTmux(() => PLAIN_SCREEN);
+  try {
+    revive._hookRecon.minAgeMs = 0;
+    approvals.request({ agent: 'claude', toolName: 'Bash', toolInput: { command: 'ls' }, sessionId: 's', toolUseId: 't' },
+      { cwdRel: CWD, windowIndex: TID }, null);
+    for (let i = 0; i < 200 && !advertised.length; i++) await new Promise((r) => setTimeout(r, 5));
+    assert.strictEqual(approvals.hookChoiceSlots().length, 0, 'Bash 는 선택형 목록에 없다');
+    await revive._poll(); await revive._poll(); await revive._poll();
+    assert.strictEqual(approvals.pendingCount(), 1, '권한 슬롯은 유지된다');
+  } finally { restore(); revive._hookRecon.minAgeMs = 12 * 1000; approvals._reset(); }
+});
+
 // ── 정리 — 대기 슬롯의 ref 타이머가 프로세스를 붙잡지 않게(approval-contract.test.js 와 동일 이유) ──
 test('cleanup', () => {
   approvals._reset();

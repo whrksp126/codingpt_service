@@ -40,6 +40,10 @@ function log(msg) { console.log(`[q-revive] ${msg}`); }
 //  주입되는 정본)로 되찾는다 — 이름 슬러그의 역해석은 손실이 있어 쓰지 않는다.
 const MAX_PANES_PER_TICK = 60; // 폭주 가드(capture-pane 는 로컬 tmux 조회지만 상한은 둔다)
 const cwdBySession = new Map(); // session → cwdRel 캐시(env 는 세션 수명 동안 불변)
+// 훅 선택형 슬롯 화해(아래 틱 끝) — 다이얼로그 미노출 연속 관측 횟수. 12s: 훅 발화 → claude 가
+//  다이얼로그를 그리기까지의 지연(실측 1~2s)에 넉넉한 여유를 둔 최소 나이(테스트가 _hookRecon 조정).
+const hookRecon = { minAgeMs: 12 * 1000 };
+const hookChoiceMiss = new Map(); // slotId → 연속 miss 횟수
 
 async function listPanes(ptyLib) {
   let out = '';
@@ -77,6 +81,7 @@ async function poll() {
 
   const panes = await listPanes(ptyLib);
   const liveDialogs = new Set(); // `${cwdRel}|${tid}` — 이번 틱에 다이얼로그가 확인된 pane
+  const paneQuestionUp = new Map(); // `${cwdRel}|${tid}` → 질문 다이얼로그 노출 여부(캡처 성공 pane 만)
   for (const { session, tid } of panes) {
     let screen = null;
     try {
@@ -84,6 +89,11 @@ async function poll() {
     } catch (_) { screen = null; } // 터미널 없음(닫힘) — 틱 끝의 슬롯 화해가 걷는다
     const questionUp = !!screen && /Enter to select/.test(screen);
     const perm = !questionUp && screen ? parsePermissionDialog(screen) : null;
+    if (screen != null) {
+      // 훅 선택형 슬롯 화해용 — 다이얼로그가 없어도 pane 의 화면 상태를 기록한다(아래 틱 끝 참조).
+      const rel0 = await cwdRelOf(ptyLib, session);
+      if (rel0 != null) paneQuestionUp.set(`${rel0}|${tid}`, questionUp);
+    }
     if (!questionUp && !perm) continue;
     const cwdRel = await cwdRelOf(ptyLib, session);
     if (cwdRel == null) continue;   // CPT_WS 없는 세션(레거시) — 카드 좌표를 만들 수 없다
@@ -132,6 +142,27 @@ async function poll() {
     approvals.cancelTui(slot.id, 'dialog_gone');
     log(`회수 ${slot.id} (다이얼로그 소멸) ws=${slot.cwdRel || '-'} tid=${slot.tid}`);
   }
+
+  // ── 훅 선택형(AskUserQuestion) 슬롯 화해 — 실사고(2026-07-30): TUI 다이얼로그에서 직접 답하면
+  //  claude 가 (Bash 승인의 hook_gone 실측과 달리) PermissionRequest 훅을 정리하지 않는다.
+  //  훅 프로세스가 waitMs(24h) 내내 살아 있어 슬롯이 안 죽고 카드가 전 기기에 유령으로 남았다.
+  //  화면이 정본: 질문 다이얼로그("Enter to select")가 안 보이는 상태가 **연속 2틱(~8s)** 이어지면
+  //  무출력 defer 로 해소·철회한다. 오판 안전판 3중 — ① 최소 나이(다이얼로그 연출 지연 흡수)
+  //  ② 캡처 성공한 pane 만 판정(터미널 소멸은 hook_gone/세션 화해가 담당) ③ 스크롤 등으로
+  //  일시적으로 안 보여 오판해도 다이얼로그가 다시 보이면 위 재광고 경로가 카드를 다시 세운다.
+  for (const s of approvals.hookChoiceSlots()) {
+    if (Date.now() - s.createdAt < hookRecon.minAgeMs) { hookChoiceMiss.delete(s.id); continue; }
+    const up = paneQuestionUp.get(`${s.cwdRel}|${s.tid}`);
+    if (up !== false) { hookChoiceMiss.delete(s.id); continue; } // 다이얼로그 있음/화면 미확인 — 유지
+    const n = (hookChoiceMiss.get(s.id) || 0) + 1;
+    if (n < 2) { hookChoiceMiss.set(s.id, n); continue; }
+    hookChoiceMiss.delete(s.id);
+    approvals.cancelHookChoice(s.id, 'dialog_gone');
+    log(`훅 질문 회수 ${s.id} (다이얼로그 소멸 — TUI 로컬 응답) ws=${s.cwdRel || '-'} tid=${s.tid}`);
+  }
+  // 사라진 슬롯의 miss 카운터 청소(누수 방지)
+  const liveIds = new Set(approvals.hookChoiceSlots().map((s) => s.id));
+  for (const id of [...hookChoiceMiss.keys()]) if (!liveIds.has(id)) hookChoiceMiss.delete(id);
 }
 
 // ── 권한 다이얼로그 화면 파싱(claude + codex 겸용) ──────────────────────────
@@ -376,5 +407,5 @@ function pokeSoon() {
 module.exports = {
   start, stop, pokeSoon, _poll: poll, _toWire: toWire,
   _parsePermissionDialog: parsePermissionDialog, _pickForOutcome: pickForOutcome,
-  _optionAcceptsInput: optionAcceptsInput,
+  _optionAcceptsInput: optionAcceptsInput, _hookRecon: hookRecon,
 };

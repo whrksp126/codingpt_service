@@ -336,6 +336,13 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 
 /* OS 파일 드래그(경로 삽입) — 대상 터미널 pane 하이라이트. 드롭존과 동일 액센트 톤(본문 한정). */
 .pane.os-drop > .pane-body { outline: 2px solid var(--text3); outline-offset: -2px; border-radius: 4px; background: var(--hover); }
+/* 채팅 모드 pane 도 같은 드롭 하이라이트 — .pane-chat(불투명 --base)이 .pane-body 를 덮어 위
+   아웃라인이 가려진다(2026-07-30 사용자 신고). 자식들의 불투명 배경 위에 그려지도록 오버레이
+   (::after, pointer-events 없음)로 같은 링을 채팅 레이어 최상단에 다시 그린다. */
+.pane.os-drop > .pane-body > .pane-chat::after {
+  content: ""; position: absolute; inset: 0; z-index: 40; pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--text3); border-radius: 4px;
+}
 
 /* pane 헤더(탭 + 컨트롤) — VS Code 식: 활성 탭이 아래 콘텐츠와 이음새 없이 연결. 낮은 높이. */
 .pane-head {

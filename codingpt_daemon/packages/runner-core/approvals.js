@@ -688,6 +688,23 @@ function cancelTui(id, reason = 'dialog_gone') {
   return settle(id, { decision: 'defer', reason });
 }
 
+/** 훅 대기 중인 선택형(AskUserQuestion 계열) 슬롯 — 리컨실러의 화면 화해용.
+ *  실사고(2026-07-30): TUI 다이얼로그에서 직접 답하면 claude 가 (Bash 승인의 hook_gone 실측과
+ *  달리) PermissionRequest 훅을 정리하지 않는다 — 훅 프로세스가 waitMs(24h) 내내 살아 있어
+ *  hook_gone 이 영영 안 오고, 카드가 전 기기에 유령으로 남는다. 그래서 이 슬롯들도 TUI 재광고
+ *  슬롯과 같은 "화면이 정본" 화해가 필요하다(question-revive 가 소비). */
+function hookChoiceSlots() {
+  return [...pending.values()]
+    .filter((s) => !s.tuiDrive && s.meta && s.meta.choice)
+    .map((s) => ({ id: s.id, cwdRel: s.cwdRel, tid: s.tid, createdAt: s.createdAt }));
+}
+
+/** 훅 선택형 슬롯 회수 — 질문 다이얼로그가 화면에서 사라졌다(로컬에서 답함/Esc).
+ *  훅 대기자는 무출력 defer 로 풀린다 — 다이얼로그가 이미 처리됐으므로 claude 는 훅 출력을 무시한다. */
+function cancelHookChoice(id, reason = 'dialog_gone') {
+  return settle(id, { decision: 'defer', reason });
+}
+
 // 단일 소비 지점 — pending.delete 를 **먼저** 한다. 두 번째 응답은 여기서 false 로 튕긴다.
 function settle(id, outcome, { retract = true } = {}) {
   const slot = pending.get(id);
@@ -898,6 +915,7 @@ function _reset() {
 module.exports = {
   request, handle, resync, list,
   requestTui, tuiSlotFor, tuiSlots, cancelTui, // TUI 폴백 재광고(question-revive)
+  hookChoiceSlots, cancelHookChoice, // 훅 선택형 슬롯의 화면 화해(question-revive)
   cancelBySession, cancelAll, hasPending, pendingCount,
   buildHookOutput, budget, timeoutSec, configure, diffOf,
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)

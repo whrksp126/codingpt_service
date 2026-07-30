@@ -344,6 +344,19 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
       /NSFilenamesPboardType/.test(br) && /pub fn clipboard_paths/.test(br));
     ok("이미지 데이터 = 임시 PNG 저장·파일 참조 있으면 무시(Finder 아이콘 이미지 함정) + TIFF 폴백",
       /pub fn clipboard_image_png/.test(br) && /clipboard_paths\(\)\.is_empty\(\)/.test(br) && /public\.tiff/.test(br));
+    // 드래그 오버 하이라이트 — chat 모드는 불투명 .pane-chat 이 .pane-body 아웃라인을 덮는다
+    //  (2026-07-30 사용자 신고) → 오버레이(::after)로 같은 링을 chat 레이어 위에 그린다.
+    ok("채팅 모드 pane 도 드롭 하이라이트(오버레이 링)",
+      /\.pane\.os-drop > \.pane-body > \.pane-chat::after/.test(css) && /pointer-events: none/.test(css));
+  }
+
+  // 훅 질문(AskUserQuestion) 유령 카드 — 실사고(2026-07-30): TUI 다이얼로그에서 직접 답하면
+  //  claude 가 훅을 정리하지 않아(hook_gone 부재) 카드가 24h 유령으로 남았다 → 데몬 q-revive 가
+  //  훅 선택형 슬롯도 화면 기준으로 화해한다(연속 2틱 미노출 = defer 회수). 상세 회귀는 데몬
+  //  question-revive.test.js — 여기서는 배관 존재만 고정한다.
+  {
+    const qr = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/question-revive.js"), "utf8");
+    ok("데몬이 훅 선택형 슬롯을 화면 기준으로 화해한다", /hookChoiceSlots/.test(qr) && /cancelHookChoice/.test(qr));
   }
 
   // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
