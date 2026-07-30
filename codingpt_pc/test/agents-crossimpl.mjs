@@ -133,15 +133,11 @@ ok(!/<Modal/.test(appSheet), '앱: 설치 패널은 Modal 이 아니다(설정 �
 ok(!/ag-methods|scale-seg/.test(pcView), 'PC: 설치 명령을 탭(세그먼트)으로 감추지 않는다');
 ok(/methods\.map/.test(appSheet), '앱: 설치 명령을 전부 나열한다');
 
-// ★ 3차 개정(2026-07-28, 사용자 확정): 온보딩의 "토글 목록 + 하단 [연동하기]" 는 선택과 적용이
-//  분리된 걸 화면이 말하지 않아 혼란("토글 켜면 바로 되는 건가?")을 만들었다 → 권한 위저드와 같은
-//  문법: 슬라이드 하나에 에이전트 하나, [연동하기] 클릭 = **그 자리에서 즉시** agents.wire.
-ok(!/class="tgl ag-onb"/.test(pcView) && /ag-onb-slide/.test(pcView),
-  'PC 온보딩: 토글 목록이 아니라 슬라이드다(선택→일괄 적용 모델 폐기)');
-{
-  const goBlock = (/ag-onb-go[\s\S]*?addEventListener\("click"[\s\S]*?\}\);/.exec(pcView) || [''])[0];
-  ok(/agents\.wire/.test(goBlock), 'PC 온보딩: [연동하기]가 그 자리에서 즉시 배선한다(버튼이 곧 행동)');
-}
+// 설치된 에이전트는 복수 선택하고 하나의 명확한 CTA에서 선택 상태를 일괄 적용한다.
+ok(/const selected = new Set/.test(pcView) && /ag-onb-option/.test(pcView),
+  'PC 온보딩: 발견된 에이전트를 복수 선택할 수 있다');
+ok(/for \(const a of queue\)/.test(pcView) && /selected\.has\(a\.id\)/.test(pcView),
+  'PC 온보딩: 선택한 에이전트는 켜고 선택 해제한 에이전트는 끈다');
 ok(/wirables\.filter\(\(a\) => a\.installed\)/.test(pcView),
   'PC 온보딩: 미설치 에이전트는 슬라이드에 없다(설치는 설정의 몫 — 첫 사용자에게 노이즈)');
 
@@ -234,16 +230,13 @@ ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem
   'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
 ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
   'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
-// ★ 2차 개정(같은 날): 행 목록 → **슬라이드 위저드**. 화면당 권한 하나 + 하단 [허용] 단일 CTA,
-//  자동 실행 토글 제거(기본 켬 · 끄기는 설정), 성공 시 자동 다음 슬라이드, 탈출로는 거부 후에만.
+// 화면당 권한 하나 + 하단 [허용] 단일 CTA. 모든 권한은 실제 승인 전까지 다음으로 못 넘어간다.
 ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate) && !/id="lgFolders"/.test(pcGate),
   'PC: 권한 위저드는 화면당 하나 + 단일 [허용] CTA 다(행 목록/일괄 버튼 금지 — 사용자 확정 2차)');
 ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
   'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
-ok(/lgSkipPerm/.test(pcGate) && pcGate.indexOf('lgSkipPerm') > pcGate.indexOf('거부/실패'),
-  'PC: 건너뛰기는 거부된 뒤에만 열린다(필수 승인 프레이밍 + 영구 가둠 방지)');
-ok(/!missingPerms\(\)\.length/.test(pcGate),
-  'PC: 요청할 권한이 0개면 셋업 화면을 건너뛴다(빈 화면 금지)');
+ok(!/lgSkipPerm/.test(pcGate) && /requiredPerms\(\)/.test(pcGate),
+  'PC: 모든 필수 권한을 실제 승인하기 전에는 건너뛰거나 완료할 수 없다');
 ok(/maybeShowOnboarding/.test(pcGate),
   'PC: 게이트 종료 시에도 에이전트 온보딩을 판정한다(재가입/계정 전환은 부팅 없이 온다)');
 ok(/setView\("workspace"\)/.test(pcUiCh),

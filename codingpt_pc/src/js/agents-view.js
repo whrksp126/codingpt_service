@@ -270,12 +270,8 @@ export function closeAgentPanels() {
   disposePanelTerm();
 }
 
-// ── 첫 실행 온보딩 1스텝 ──────────────────────────────────────────────────────
-// "이 PC 에서 찾은 에이전트" — 배선 가능한 것만 묻는다(권장 = 설치된 것 전부 체크).
-//  [연동하기] 체크된 것만 on / 나머지 off. **[나중에] 는 전부 off 로 명시 기록**한다 —
-//  "안 물어봄(기본 켜짐)" 으로 남기면 아니라고 답한 사용자가 켜진 채로 쓴다.
-//  둘 다 markOnboarded 를 남겨 다시 묻지 않는다. 기존 사용자는 이 화면을 못 보는데, 그때는
-//  "안 물어봄 = 켜짐" 기본값이 지금 동작(claude 배선됨)을 그대로 유지한다(호환).
+// ── 첫 실행 에이전트 선택 ─────────────────────────────────────────────────────
+// 설치된 에이전트를 복수 선택하고 [선택한 에이전트 연동]에서 한 번에 적용한다.
 // 온보딩 노출은 **계정별 1회**다(2026-07-28 실사고: 회원탈퇴 → 같은 이메일 재가입 = 새 user id 인데
 //  데몬의 onboardedAt 이 머신 영속(agents.json — 배선 **설정**은 계정 전환에도 유지가 맞다)이라
 //  새 계정에게 온보딩이 영영 안 떴다). 노출 여부는 이 로컬 계정 키가 정본이고, 데몬 markOnboarded 는
@@ -298,67 +294,79 @@ export async function maybeShowOnboarding() {
     try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
     return false;
   }
-  // ★ 2026-07-28 3차 개정(사용자 확정): 토글 목록 + 하단 [연동하기]는 "토글이 즉시 되는 건가?"라는
-  //  혼란을 만들었다(선택과 적용이 분리된 걸 화면이 말하지 않았다) → 권한 위저드와 **같은 문법**으로
-  //  통일: 슬라이드 하나에 에이전트 하나, 하단 큰 [연동하기] 단일 CTA(누르면 그 자리에서 즉시 배선),
-  //  '연동하지 않기'는 작은 링크. 미설치 에이전트는 온보딩에 아예 안 나온다(설치는 설정의 몫 —
-  //  "미설치 행 + 비활성 토글"은 처음 온 사용자에게 노이즈다).
   const queue = wirables.filter((a) => a.installed);
+  const selected = new Set(queue.filter((a) => a.wired).map((a) => a.id));
+  if (!selected.size) queue.forEach((a) => selected.add(a.id));
   const el = document.createElement("div");
   el.className = "ag-sheet";
   document.body.appendChild(el);
 
   return new Promise((resolve) => {
-    let idx = 0;
     const finishAll = async () => {
-      markOnboardedLocal(); // 이 계정은 봤다 — '연동하지 않기'도 결정이다(계정마다 1회만 묻는다)
+      markOnboardedLocal();
       try { await api.agentsLocal("agents.rescan", { markOnboarded: true }); } catch (_) { /* noop */ }
       try { await loadAgents(true); } catch (_) { /* noop */ }
       el.remove();
       resolve(true);
     };
-    const renderSlide = () => {
-      if (idx >= queue.length) { void finishAll(); return; }
-      const a = queue[idx];
-      const tier = TIER[a.tier] || {};
-      const dots = queue.length > 1
-        ? `<div class="ag-onb-dots">${queue.map((_, i) => `<span class="lg-dot${i === idx ? " on" : i < idx ? " done" : ""}"></span>`).join("")}</div>`
-        : "";
+    const renderSelection = () => {
+      const cards = queue.map((a) => {
+        const tier = TIER[a.tier] || {};
+        const checked = selected.has(a.id);
+        return `
+          <button class="ag-onb-option${checked ? " selected" : ""}" type="button" data-ag="${esc(a.id)}" aria-pressed="${checked}">
+            <span class="ag-onb-option-mark">${agentMarkHtml(a.id, { size: 22 }) || icons.terminal({ size: 22 })}</span>
+            <span class="ag-onb-option-copy">
+              <span class="ag-onb-option-name">${esc(a.name)}</span>
+              <span class="ag-onb-option-meta">${a.version ? esc(a.version) + " · " : ""}${esc(tier.label || "")}</span>
+            </span>
+            <span class="ag-onb-check">${checked ? "✓" : ""}</span>
+          </button>`;
+      }).join("");
       el.innerHTML = `
         <div class="ag-sheet-back"></div>
         <div class="ag-sheet-card ag-onb-card" role="dialog" aria-modal="true">
-          <div class="ag-onb-slide">
-            ${dots}
-            <div class="ag-onb-ic">${agentMarkHtml(a.id, { size: 30 }) || icons.terminal({ size: 30 })}</div>
-            <div class="ag-onb-title">${esc(a.name)}를 찾았어요</div>
-            <div class="ag-onb-meta">${a.version ? esc(a.version) + " · " : ""}${esc(tier.label || "")}</div>
-            <div class="ag-onb-benefit">${a.tier === "full"
-              ? "연동하면 작업 완료 알림이 오고, <b>휴대폰에서 승인</b>할 수 있어요"
-              : "연동하면 작업 완료 알림이 와요"}</div>
-            <button class="btn primary lg ag-onb-go" data-ag="${esc(a.id)}">연동하기</button>
-            <button class="lg-link ag-onb-skip">연동하지 않기</button>
-          </div>
+          <header class="ag-onb-head">
+            <span class="lg-brand"><img src="assets/logo.png" alt="" draggable="false" />CodingPT</span>
+          </header>
+          <main class="ag-onb-body">
+            <div class="ag-onb-title">사용할 AI 에이전트를 선택하세요</div>
+            <div class="ag-onb-benefit">이 PC에서 발견된 에이전트예요.</div>
+            <div class="ag-onb-options">${cards}</div>
+            <div class="ag-onb-error" aria-live="polite"></div>
+          </main>
+          <footer class="ag-onb-foot">
+            <span class="ag-onb-count">${selected.size}개 선택</span>
+            <button class="btn primary lg ag-onb-go"${selected.size ? "" : " disabled"}>선택한 에이전트 연동</button>
+          </footer>
         </div>`;
       const go = el.querySelector(".ag-onb-go");
-      const skip = el.querySelector(".ag-onb-skip");
-      // [연동하기] = 그 자리에서 **즉시** 배선한다(선택→나중에 일괄 적용 모델 폐기 — 버튼이 곧 행동이다).
+      el.querySelectorAll(".ag-onb-option").forEach((option) => {
+        option.addEventListener("click", () => {
+          const id = option.dataset.ag;
+          if (selected.has(id)) selected.delete(id);
+          else selected.add(id);
+          renderSelection();
+        });
+      });
       go.addEventListener("click", async () => {
         go.disabled = true;
-        skip.disabled = true;
         go.textContent = "연동하는 중…";
-        try { await api.agentsLocal("agents.wire", { id: a.id, on: true }); } catch (_) { /* 실패해도 다음으로 — 설정에서 재시도 */ }
-        go.textContent = "연동됐어요 ✓";
-        setTimeout(() => { idx += 1; renderSlide(); }, 450);
-      });
-      skip.addEventListener("click", async () => {
-        go.disabled = true;
-        skip.disabled = true;
-        try { await api.agentsLocal("agents.wire", { id: a.id, on: false }); } catch (_) { /* noop */ }
-        idx += 1;
-        renderSlide();
+        const error = el.querySelector(".ag-onb-error");
+        try {
+          for (const a of queue) {
+            await api.agentsLocal("agents.wire", { id: a.id, on: selected.has(a.id) });
+          }
+          go.textContent = "연동됐어요 ✓";
+          setTimeout(() => { void finishAll(); }, 450);
+        } catch (e) {
+          error.textContent = "연동하지 못했어요. 다시 시도해 주세요.";
+          go.textContent = "다시 시도";
+          go.disabled = false;
+        }
       });
     };
-    renderSlide();
+    renderSelection();
   });
 }
 

@@ -33,17 +33,12 @@ const FOLDER_PERMS = [
   { id: "desktop", label: "데스크탑 폴더 접근" },
   { id: "documents", label: "문서 폴더 접근" },
 ];
-function missingPerms() {
-  const out = [];
-  if (!permGranted("notif")) out.push({ id: "notif", label: "알림 허용" });
-  for (const f of FOLDER_PERMS) if (!permGranted(f.id)) out.push({ ...f, folder: true });
-  return out;
-}
+const requiredPerms = () => [
+  { id: "notif", label: "알림 허용" },
+  ...FOLDER_PERMS.map((f) => ({ ...f, folder: true })),
+];
 
-// ── 권한 위저드 카피 — 화면당 하나에 집중하므로 "왜 필요한가" 를 크게 말할 자리가 생긴다 ────────
-//  (사용자 확정 2026-07-28 2차: 목록+행별 버튼은 아무도 누르고 싶지 않은 구성이었다 → 슬라이드
-//   하나에 권한 하나 + 하단 [허용] 단일 CTA. Raycast/Warp 류 데스크톱 온보딩과 같은 패턴.)
-//  (4차 개정: 문구 다이어트 — 이득 1줄만. "macOS 창이 떠요" 류 절차 설명은 삭제, 창이 뜨면 그게 설명이다)
+// 권한은 화면당 하나만 요청한다. 실제 승인 확인 전에는 다음 단계가 없다.
 const PERM_COPY = {
   notif: { title: "알림을 허용해 주세요", benefit: "작업이 끝나면 바로 알려드려요" },
   downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
@@ -121,13 +116,21 @@ function renderStep() {
   const c = PERM_COPY[p.id] || { title: `${p.label}을 허용해 주세요`, benefit: "" };
   const dots = permQueue.map((_, i) => `<span class="lg-dot${i === permIdx ? " on" : i < permIdx ? " done" : ""}"></span>`).join("");
   el.innerHTML = `
-    <div class="lg-inner wide lg-slide">
-      ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
-      <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 30 }) : icons.bell({ size: 30 })}</div>
-      <div class="lg-head">${c.title}</div>
-      <div class="lg-perm-benefit">${c.benefit}</div>
-      <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">허용</button>
-      <div id="lgPermAlt" class="lg-perm-alt"></div>
+    <div class="lg-wizard">
+      <header class="lg-wizard-top">
+        <span class="lg-brand"><img src="assets/logo.png" alt="" draggable="false" />CodingPT</span>
+        ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
+      </header>
+      <main class="lg-wizard-body">
+        <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 28 }) : icons.bell({ size: 28 })}</div>
+        <div class="lg-head">${c.title}</div>
+        <div class="lg-perm-benefit">${c.benefit}</div>
+        <div id="lgPermAlt" class="lg-perm-alt"></div>
+      </main>
+      <footer class="lg-wizard-foot">
+        <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
+        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">허용</button>
+      </footer>
     </div>`;
   const btn = el.querySelector("#lgAllow");
   const alt = el.querySelector("#lgPermAlt");
@@ -143,14 +146,13 @@ function renderStep() {
       setTimeout(() => { permIdx += 1; renderStep(); }, 450); // ✓ 를 잠깐 보여주고 다음 슬라이드
       return;
     }
-    // 거부/실패 — 재시도 유지 + 시스템 설정 경로 + 최소 탈출로(이때만 연다).
-    btn.textContent = "허용";
+    // 거부/실패 — 승인될 때까지 재시도만 허용한다.
+    btn.textContent = "다시 확인";
     btn.disabled = false;
     alt.innerHTML = `
-      <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>
-      <button class="lg-link" id="lgSkipPerm">나중에 설정에서 허용</button>`;
+      <span>권한을 승인해야 계속할 수 있어요.</span>
+      <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>`;
     alt.querySelector("#lgOpenPriv").addEventListener("click", () => { api.openFilesPrivacy().catch(() => {}); });
-    alt.querySelector("#lgSkipPerm").addEventListener("click", () => { permIdx += 1; renderStep(); });
   });
 }
 
@@ -222,14 +224,12 @@ async function pollGateLogin() {
       state.paired = !!state.daemon?.paired;
       await S.loadMe();
       await S.loadWorkspaces();
-      // ★ 2026-07-28 개정: 셋업은 **계정별 1회**다(구 `cpt.setupDone` 머신 플래그는 회원탈퇴 →
-      //  같은 이메일 재가입(새 user id)에서 온보딩을 삼켰다 — 실사고). 단 이 계정이 처음이어도
-      //  요청할 권한이 하나도 없으면(전부 허용됨) 셋업 화면 자체를 건너뛴다(빈 화면 금지).
+      // 셋업은 계정별 1회다. 새 계정은 네 권한을 모두 실제 프로브해 승인 상태를 확인한다.
+      // 이미 승인된 OS 권한은 프롬프트 없이 즉시 성공하므로 중복 질문은 생기지 않는다.
       let done = false;
       const k = setupKey();
       try { done = !!k && localStorage.getItem(k) === "1"; } catch (_) {}
-      if (done || !missingPerms().length) {
-        if (!done && k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
+      if (done) {
         pendingSetup = false;
         step = "welcome";
         S.emit(); // → render() → updateLoginGate() → 게이트 닫힘(바로 워크스페이스로)
@@ -240,7 +240,7 @@ async function pollGateLogin() {
       // 셋업(권한 위저드)으로 — 자동 실행은 **묻지 않고 기본 켬**(2차 개정: 토글 제거, 끄기는 설정).
       pendingSetup = true;
       step = "setup";
-      permQueue = missingPerms(); // 이 시점 스냅샷이 슬라이드 순서다
+      permQueue = requiredPerms();
       permIdx = 0;
       api.autostartEnable().catch(() => { /* 설정 > 일반에서 다시 켤 수 있다 */ });
       renderStep();
