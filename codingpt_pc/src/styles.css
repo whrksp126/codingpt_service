@@ -547,7 +547,8 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .sm-search-ic { display: inline-flex; color: var(--dim); flex: none; }
 .sm-search-input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; }
 .sm-search-input::placeholder { color: var(--dim); }
-.sm-navgroup { font-size: 11px; font-weight: 700; color: var(--dim); text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 12px 4px; }
+.sm-navgroup { font-size: 10.5px; font-weight: 700; color: var(--dim); letter-spacing: 0.02em; padding: 14px 12px 4px; }
+.sm-navgroup:first-child { padding-top: 4px; }
 .sm-navlist { display: flex; flex-direction: column; gap: 2px; }
 .sm-navitem { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: none; background: transparent; color: var(--text2); font-size: 14px; font-weight: 500; text-align: left; border-radius: var(--r-md); cursor: pointer; transition: background 0.12s; }
 .sm-navitem:hover { background: var(--elevated); }
@@ -561,6 +562,9 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .sm-close { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: none; background: transparent; color: var(--text3); cursor: pointer; border-radius: var(--r-sm); }
 .sm-close:hover { background: var(--elevated2); color: var(--text); }
 .sm-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 44px; max-width: 760px; }
+.sm-section-title { margin: 0 2px 9px; color: var(--text3); font-size: 12px; font-weight: 700; }
+.sm-section-note { margin: 12px 2px 0; color: var(--dim); font-size: 11.5px; line-height: 1.5; }
+.sett-attn { color: var(--text2); font-size: 12.5px; font-weight: 600; }
 .sm-sub { font-size: 13px; color: var(--text3); line-height: 1.55; margin-bottom: 22px; }
 .sm-card2 { background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 8px 18px; }
 .sm-card2 + .sm-card2 { margin-top: 16px; } /* 카드(부류) 사이 갭 */

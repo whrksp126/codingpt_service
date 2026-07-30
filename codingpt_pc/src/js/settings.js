@@ -27,16 +27,20 @@ let navEl = null;
 let contentEl = null;
 let connBody = null; // 연결 탭 내부 컨테이너
 let autostartChk = null;
-let section = "general"; // 'general' | 'connection' | 'about'  — 일반 탭이 기본
+let section = "general";
 let connMode = null; // 'paired' | 'unpaired'
 let query = "";
 let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
-  { key: "general", label: "일반", icon: "gear" },
-  { key: "agents", label: "에이전트", icon: "tools" },
-  { key: "connection", label: "계정", icon: "user" },
-  { key: "about", label: "정보", icon: "monitor" },
+  { key: "general", label: "일반", group: "시작", icon: "gear", keywords: "자동 실행 시작 로그인" },
+  { key: "agents", label: "에이전트", group: "작업 환경", icon: "tools", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
+  { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
+  { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
+  { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
+  { key: "mobile", label: "모바일 연결", group: "연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
+  { key: "security", label: "권한 및 보안", group: "보안", icon: "shield", keywords: "알림 다운로드 데스크탑 문서 폴더 접근 암호화" },
+  { key: "about", label: "앱 정보", group: "시스템", icon: "monitor", keywords: "버전 업데이트" },
 ];
 
 export function mountSettings(container) {
@@ -50,7 +54,6 @@ export function mountSettings(container) {
           <span class="sm-search-ic">${icons.search({ size: 15 })}</span>
           <input class="sm-search-input" id="smSearch" placeholder="검색" />
         </div>
-        <div class="sm-navgroup">설정</div>
         <div class="sm-navlist" id="smNav"></div>
       </aside>
       <div class="sm-main">
@@ -93,8 +96,16 @@ export function updateSettings() {
 function renderNav() {
   navEl.innerHTML = "";
   const q = query.trim().toLowerCase();
+  let renderedGroup = "";
   for (const item of NAV) {
-    if (q && !item.label.toLowerCase().includes(q)) continue;
+    if (q && !`${item.label} ${item.group} ${item.keywords}`.toLowerCase().includes(q)) continue;
+    if (item.group !== renderedGroup) {
+      const group = document.createElement("div");
+      group.className = "sm-navgroup";
+      group.textContent = item.group;
+      navEl.appendChild(group);
+      renderedGroup = item.group;
+    }
     const b = document.createElement("button");
     b.className = "sm-navitem" + (item.key === section ? " active" : "");
     b.innerHTML = `<span class="sm-navic">${icons[item.icon]({ size: 17 })}</span><span>${item.label}</span>`;
@@ -150,6 +161,20 @@ function renderSection(force) {
       <div class="sm-card2">
         <div class="sett-row"><span>이 Mac 로그인 시 자동 실행</span><input id="autostartChk" type="checkbox" class="tgl" /></div>
       </div>
+      <div class="sm-section-note">CodingPT가 시작되는 방식을 관리해요.</div>
+      `;
+    autostartChk = contentEl.querySelector("#autostartChk");
+    autostartChk.addEventListener("change", async () => {
+      try {
+        await (autostartChk.checked ? api.autostartEnable() : api.autostartDisable());
+      } catch (_) {
+        autostartChk.checked = !autostartChk.checked;
+      }
+    });
+    syncAutostart();
+  } else if (section === "appearance") {
+    contentEl.innerHTML = `
+      <div class="sm-section-title">인터페이스</div>
       <div class="sm-card2">
         <div class="sett-row"><span>테마</span>
           <span class="scale-seg seg-ic" id="themeSeg">
@@ -163,48 +188,49 @@ function renderSection(force) {
         <div class="sett-col"><span>터미널 스타일</span><div class="ts-grid" id="termStyleGrid"></div></div>
         <div class="sett-hint">글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.</div>
       </div>
+      `;
+    bindAppearance(contentEl);
+  } else if (section === "notifications") {
+    const granted = permGranted("notification");
+    contentEl.innerHTML = `
+      <div class="sm-section-title">데스크톱 알림</div>
+      <div class="sm-card2">
+        <div class="sett-row"><span>알림 권한</span><span class="${granted ? "sett-done" : "sett-attn"}">${granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요"}</span></div>
+        <div class="sett-hint">작업 완료, 승인 요청, 연결 상태를 앱이 백그라운드에 있을 때 알려줘요.</div>
+      </div>
+      `;
+  } else if (section === "security") {
+    contentEl.innerHTML = `
+      <div class="sm-section-title">필수 권한</div>
       <div class="sm-card2">
         ${folderPermRow("downloads", "다운로드 폴더 접근")}
         ${folderPermRow("desktop", "데스크탑 폴더 접근")}
         ${folderPermRow("documents", "문서 폴더 접근")}
-        <div class="sett-hint">한 번 허용하면 모든 워크스페이스에 적용돼요</div>
+        <div class="sett-hint">CodingPT가 워크스페이스 파일을 열고 수정하는 데 필요해요.</div>
       </div>
-      `;
-    // 작업 스냅샷(자동 체크포인트) 카드는 MVP 범위 제외로 잠정 숨김(2026-07-21 결정) —
-    //  엔진(auto-checkpoint.js·데몬 sync·back)은 보존, 복원 시 이전 커밋에서 카드+바인딩 복원.
+      <div class="sm-section-note">종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.</div>`;
     bindFolderPerms(contentEl);
-    bindAppearance(contentEl);
-    autostartChk = contentEl.querySelector("#autostartChk");
-    autostartChk.addEventListener("change", async () => {
-      try {
-        await (autostartChk.checked ? api.autostartEnable() : api.autostartDisable());
-      } catch (_) {
-        autostartChk.checked = !autostartChk.checked;
-      }
-    });
-    syncAutostart();
-    if (state.paired && !state.me) S.loadMe(); // 프로필 지연 로드(계정 탭 프로필 카드용)
-  } else {
-    // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
-    // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
-    if (!force && contentEl.querySelector("#updBtn")) return;
+  } else if (section === "mobile") {
     contentEl.innerHTML = `
+      <div class="sm-section-title">휴대폰·태블릿에서 이어서 작업하기</div>
       <div class="sm-card2">
-        <div class="qr-head">휴대폰·태블릿에서 이어서 작업하기</div>
-        <div class="qr-sub">코드는 이 PC에서 실행하고, 화면은 폰·태블릿에서 이어받아요. 아래 QR을 휴대폰 카메라로 스캔하면 앱 설치 페이지로 바로 이동해요.</div>
+        <div class="qr-sub">코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.</div>
         <div class="qr-row">
           <div class="qr-tile">
             <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="Android 앱 설치 QR" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>Android</span></div>
           </div>
-          <!-- iOS 는 App Store 심사 통과(2026-07-27) → '준비 중' 자리표시를 실제 QR 로 교체.
-               두 타일은 같은 규격이어야 한다(한쪽만 자리표시였을 때 폭이 달라 줄이 어긋났다). -->
           <div class="qr-tile">
             <div class="qr-imgwrap"><img class="qr-img" src="${IOS_QR}" alt="iOS 앱 설치 QR" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>iOS</span></div>
           </div>
         </div>
-      </div>
+      </div>`;
+  } else {
+    // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
+    // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
+    if (!force && contentEl.querySelector("#updBtn")) return;
+    contentEl.innerHTML = `
       <div class="sm-card2">
         <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>업데이트</span>
