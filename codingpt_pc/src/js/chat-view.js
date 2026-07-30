@@ -21,7 +21,7 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
-  composerHasText, agentDisplayName, stripTokenOnce,
+  composerHasText, agentDisplayName,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -80,6 +80,7 @@ export class ChatView {
     // 드롭 첨부 [{path,name,ext,img,b64}] — 입력칸 안 **원자 칩**(contenteditable=false)으로 산다.
     //  TUI 반영은 전송 시 한 번(칩→인용 경로 직렬화, 데몬이 경로 조각 paste 로 [Image #N] 변환).
     this._attach = [];
+    this._attCache = new Map(); // 트랜스크립트 첨부(chatId:seq:idx → Promise) — 메시지 칩 썸네일/미리보기 공용
     _live.add(this);
   }
 
@@ -149,9 +150,29 @@ export class ChatView {
         e.stopPropagation();
         this.inputEl.blur(); // 네이티브/DOM 포커스 순서 사고 예방 — 항상 blur 선행 후 터미널 포커스
         this.ctx.exitChat?.();
+        return;
+      }
+      // WebKit 은 contenteditable=false 인라인 요소 앞뒤에서 Backspace/Delete 를 자주 무시한다
+      //  (실측: ✕ 는 되는데 키보드 삭제가 안 됨) — 캐럿에 인접한 칩을 직접 걷는다.
+      if ((e.key === "Backspace" || e.key === "Delete") && !e.isComposing) {
+        const chip = this._chipAtCaret(e.key === "Backspace" ? -1 : 1);
+        if (chip) {
+          e.preventDefault();
+          e.stopPropagation();
+          chip.remove();
+          this._reconcileChips();
+          this._syncComposer();
+          this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
+        }
       }
     });
+    // macOS 한글 IME + WKWebView 조합에서 방향키가 기능키 전용 문자(U+F700대 PUA)를 텍스트로
+    //  흘리는 버그(실측: →/← 마다 □ 삽입) — 삽입 전 차단 + 삽입 후 소독의 이중 방어.
+    this.inputEl.addEventListener("beforeinput", (e) => {
+      if (e.inputType === "insertText" && e.data && /[\uF700-\uF7FF]/.test(e.data)) e.preventDefault();
+    });
     this.inputEl.addEventListener("input", () => {
+      this._ceSanitize();     // PUA 잔여 소독(조합 경로로 새는 케이스)
       this._reconcileChips(); // 백스페이스/선택 삭제로 칩이 지워졌으면 첨부 목록도 걷는다
       this._syncComposer();
       this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
@@ -476,15 +497,8 @@ export class ChatView {
       row.className = "chat-msg chat-msg-user" + (m.kind === "slash" ? " slash" : "") + (m.optimistic ? " optimistic" : "");
       row.innerHTML = m.kind === "slash"
         ? `<span class="chat-slash">${escapeHtml(text)}</span>`
-        : escapeHtml(text).replace(/\n/g, "<br>");
-      if (m.attachments && m.attachments.length) row.appendChild(this._buildAttachments(m));
-      // 낙관 버블의 드롭 첨부 썸네일 — 보낸 것이 무엇인지 눈에 보이게(표준 LLM 앱 관례).
-      if (m.optAttach && m.optAttach.length) {
-        const wrap = document.createElement("div");
-        wrap.className = "chat-att-strip sent";
-        wrap.innerHTML = m.optAttach.map((a, i) => this._attachChipHtml(a, i, false)).join("");
-        row.appendChild(wrap);
-      }
+        : this._userTextHtml(m, text);
+      this._hydrateMsgChips(row, m); // 원격 첨부 썸네일 자동 로드(캐시)
       return row;
     }
     if (m.role === "assistant" && m.kind === "text") {
@@ -664,6 +678,55 @@ export class ChatView {
     this._attach = this._attach.filter((a) => present.has(a.path));
   }
 
+  // 캐럿에 인접한 칩(dir=-1: 앞 / +1: 뒤) — Backspace/Delete 원자 삭제의 근거.
+  //  공백 하나를 사이에 둔 경우까지는 넘보지 않는다(공백 먼저 지워지는 것이 자연스러운 편집).
+  _chipAtCaret(dir) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    if (!this.inputEl.contains(r.startContainer)) return null;
+    let node = r.startContainer;
+    let off = r.startOffset;
+    if (node.nodeType === Node.TEXT_NODE) {
+      if (dir < 0 && off > 0) return null;                     // 텍스트 중간 — 기본 동작
+      if (dir > 0 && off < node.length) return null;
+      node = dir < 0 ? node.previousSibling : node.nextSibling;
+    } else {
+      node = node.childNodes[dir < 0 ? off - 1 : off] || null;
+    }
+    // 빈 텍스트 노드는 건너뛴다(WebKit 이 칩 주변에 만들어 두는 경우가 있다)
+    while (node && node.nodeType === Node.TEXT_NODE && !node.length) {
+      node = dir < 0 ? node.previousSibling : node.nextSibling;
+    }
+    return node && node.nodeType === Node.ELEMENT_NODE && node.classList.contains("chat-chip") ? node : null;
+  }
+
+  // U+F700대(맥 기능키 전용 PUA) 소독 — IME 경로로 새어 들어온 잔여를 걷는다(캐럿 보정 포함).
+  _ceSanitize() {
+    const BAD = /[\uF700-\uF7FF]/g;
+    const sel = window.getSelection();
+    const walker = document.createTreeWalker(this.inputEl, NodeFilter.SHOW_TEXT);
+    let t;
+    while ((t = walker.nextNode())) {
+      if (!BAD.test(t.data)) { BAD.lastIndex = 0; continue; }
+      BAD.lastIndex = 0;
+      const inNode = sel && sel.rangeCount && sel.getRangeAt(0).startContainer === t;
+      const off = inNode ? sel.getRangeAt(0).startOffset : 0;
+      const before = t.data.slice(0, off);
+      t.data = t.data.replace(BAD, "");
+      if (inNode) {
+        const newOff = before.replace(BAD, "").length;
+        try {
+          const r = document.createRange();
+          r.setStart(t, Math.min(newOff, t.length));
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch (_) { /* noop */ }
+      }
+    }
+  }
+
   // 칩 클릭 = 미리보기(일반 LLM 앱 관례) — 이미지는 앱 내 라이트박스, 그 외/대용량은 시스템 기본 앱.
   async _openPreview(a) {
     if (!a) return;
@@ -682,8 +745,8 @@ export class ChatView {
     const ov = document.createElement("div");
     ov.className = "chat-lightbox";
     ov.innerHTML =
-      `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path)}">${escapeHtml(a.name)}</span>` +
-      `<button class="chat-lb-open" type="button">원본 열기</button>` +
+      `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path || a.name)}">${escapeHtml(a.name)}</span>` +
+      (a.path ? `<button class="chat-lb-open" type="button">원본 열기</button>` : "") +
       `<button class="chat-lb-close" type="button" title="닫기">✕</button></div>` +
       `<img class="chat-lb-img" src="${src}" alt="">`;
     let close;
@@ -702,28 +765,92 @@ export class ChatView {
     return MIME[a.ext] || "image/png";
   }
 
-  _attachChipHtml(a, i, removable) {
-    const thumb = a.img && a.b64
-      ? `<img class="chat-att-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
-      : `<span class="chat-att-file">${escapeHtml(a.name)}</span>`;
-    return `<div class="chat-att" data-i="${i}" title="${escapeHtml(a.path)}">${thumb}` +
-      (removable ? `<button class="chat-att-x" type="button" data-i="${i}" title="빼기">✕</button>` : "") +
-      `</div>`;
+  // ── user 본문 인라인 칩(2026-07-30 사용자 확정: 보낸 메시지도 컴포저와 같은 표현) ──
+  //  · 낙관 버블: 텍스트 속 인용 경로(shq) 자리 = 로컬 첨부 칩(즉시 썸네일)
+  //  · 트랜스크립트: 데몬이 심은 위치 마커 [Image #N] 자리 = attachments[N-1] 칩(썸네일 자동 로드)
+  _userTextHtml(m, text) {
+    const parts = [];
+    const push = (t) => { if (t) parts.push(escapeHtml(t).replace(/\n/g, "<br>")); };
+    const atts = m.optAttach || [];
+    if (atts.length) {
+      let rest = text;
+      while (rest) {
+        let best = -1;
+        let bestA = null;
+        let bestTok = "";
+        for (const a of atts) {
+          const tok = shq(a.path);
+          const at = rest.indexOf(tok);
+          if (at >= 0 && (best < 0 || at < best)) { best = at; bestA = a; bestTok = tok; }
+        }
+        if (best < 0) { push(rest); break; }
+        push(rest.slice(0, best));
+        parts.push(this._msgChipHtml({
+          kind: "local", label: bestA.name, path: bestA.path,
+          thumb: bestA.img && bestA.b64 ? `data:${this._attachMime(bestA)};base64,${bestA.b64}` : "",
+        }));
+        rest = rest.slice(best + bestTok.length).replace(/^ /, "");
+      }
+      return parts.join("");
+    }
+    const n = (m.attachments || []).length;
+    if (!n) { push(text); return parts.join(""); }
+    const re = /\[Image #(\d+)\]/g;
+    let last = 0;
+    let used = 0;
+    let mt;
+    while ((mt = re.exec(text))) {
+      const idx = parseInt(mt[1], 10) - 1;
+      if (!(idx >= 0 && idx < n)) continue; // 범위 밖 = 사용자가 친 문자열일 수 있다 → 텍스트로 남긴다
+      push(text.slice(last, mt.index));
+      parts.push(this._msgChipHtml({ kind: "remote", label: `Image #${idx + 1}`, idx, seq: m.seq }));
+      last = mt.index + mt[0].length;
+      used += 1;
+    }
+    push(text.slice(last));
+    for (let i2 = used; i2 < n; i2++) { // 마커 없는 레거시 라인 — 끝에 덧붙인다
+      parts.push(" " + this._msgChipHtml({ kind: "remote", label: `Image #${i2 + 1}`, idx: i2, seq: m.seq }));
+    }
+    return parts.join("");
   }
 
-  _buildAttachments(m) {
-    const wrap = document.createElement("div");
-    wrap.className = "chat-attach";
-    for (const a of m.attachments) {
-      const b = document.createElement("button");
-      b.className = "chat-attach-chip";
-      b.type = "button";
-      b.dataset.seq = String(m.seq);
-      b.dataset.idx = String(a.idx);
-      b.textContent = `이미지 ${fmtBytes(a.bytes)}`;
-      wrap.appendChild(b);
+  _msgChipHtml({ kind, label, thumb, path, idx, seq }) {
+    return `<span class="chat-chip msg" data-kind="${kind}"` +
+      (path ? ` data-path="${escapeHtml(path)}"` : "") +
+      (idx != null ? ` data-idx="${idx}" data-mseq="${escapeHtml(String(seq))}"` : "") +
+      ` title="${escapeHtml(path || label)}">` +
+      (thumb ? `<img class="chat-chip-thumb" src="${thumb}" alt="">` : "") +
+      `<span class="chat-chip-label">${escapeHtml(label)}</span></span>`;
+  }
+
+  // 원격 첨부 썸네일 자동 로드(사용자 확정) — 캐시로 1회만 받아 칩에 채운다. 실패 = 라벨 칩 유지.
+  _hydrateMsgChips(row, m) {
+    for (const chip of row.querySelectorAll('.chat-chip.msg[data-kind="remote"]')) {
+      this._fetchAttachment(m.seq, Number(chip.dataset.idx))
+        .then((att) => {
+          if (!att || !att.base64 || !chip.isConnected || chip.querySelector(".chat-chip-thumb")) return;
+          const img = document.createElement("img");
+          img.className = "chat-chip-thumb";
+          img.src = `data:${att.mediaType || "image/png"};base64,${att.base64}`;
+          chip.prepend(img);
+        })
+        .catch(() => { /* 썸네일 없음 — 라벨 칩으로 남는다 */ });
     }
-    return wrap;
+  }
+
+  _fetchAttachment(seq, idx) {
+    if (!this._chatId || !(idx >= 0)) return Promise.reject(new Error("첨부 없음"));
+    const key = `${this._chatId}:${seq}:${idx}`;
+    let pr = this._attCache.get(key);
+    if (!pr) {
+      pr = api.chatAttachment({
+        chatId: this._chatId, seq, idx,
+        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
+      });
+      this._attCache.set(key, pr);
+      pr.catch(() => this._attCache.delete(key));
+    }
+    return pr;
   }
 
   // tool_result → 앞선 tool_use 카드 갱신. 짝을 못 찾으면(스냅샷 경계로 tool_use 가 잘림) 독립 카드.
@@ -770,14 +897,23 @@ export class ChatView {
 
   // ── 본문 위임 클릭 ──
   _onBodyClick(e) {
-    // 보낸 말풍선의 첨부 칩 — 클릭=미리보기(컴포저 스트립과 동일 규칙).
-    const sentAtt = e.target.closest?.(".chat-att-strip.sent .chat-att");
-    if (sentAtt) {
-      const rowEl = sentAtt.closest(".chat-msg");
-      const seq = rowEl ? Number(rowEl.dataset.seq) : NaN;
-      const m = this._msgs.find((mm) => mm.seq === seq);
-      const a = m && m.optAttach ? m.optAttach[Number(sentAtt.dataset.i)] : null;
-      if (a) this._openPreview(a);
+    // 보낸 말풍선의 인라인 첨부 칩 — 클릭=미리보기(컴포저 칩과 동일 규칙).
+    const mchip = e.target.closest?.(".chat-chip.msg");
+    if (mchip) {
+      if (mchip.dataset.kind === "local") {
+        const rowEl = mchip.closest(".chat-msg");
+        const seq = rowEl ? Number(rowEl.dataset.seq) : NaN;
+        const msg = this._msgs.find((mm) => mm.seq === seq);
+        const a = msg && msg.optAttach ? msg.optAttach.find((t) => t.path === mchip.dataset.path) : null;
+        if (a) this._openPreview(a);
+        return;
+      }
+      this._fetchAttachment(Number(mchip.dataset.mseq), Number(mchip.dataset.idx))
+        .then((att) => {
+          if (att && att.base64) this._showLightbox(`data:${att.mediaType || "image/png"};base64,${att.base64}`, { name: mchip.textContent || "이미지", path: "" });
+          else this._setBanner("이미지를 불러올 수 없습니다.", "warn");
+        })
+        .catch(() => this._setBanner("이미지를 불러올 수 없습니다.", "warn"));
       return;
     }
     const copy = e.target.closest?.(".chat-code-copy");
@@ -826,24 +962,6 @@ export class ChatView {
       if (body) body.textContent = collapsed ? full : full.slice(0, CHAT.THINKING_CHARS) + (full.length > CHAT.THINKING_CHARS ? "…" : "");
       return;
     }
-    const chip = e.target.closest?.(".chat-attach-chip");
-    if (chip && !chip.dataset.loaded) this._loadAttachment(chip);
-  }
-
-  async _loadAttachment(chip) {
-    if (!this._chatId) return;
-    chip.disabled = true;
-    try {
-      const a = await api.chatAttachment({ chatId: this._chatId, seq: chip.dataset.seq, idx: chip.dataset.idx });
-      if (!a || a.missing || !a.base64) { chip.textContent = "이미지를 불러올 수 없습니다"; return; }
-      const img = document.createElement("img");
-      img.className = "chat-attach-img";
-      img.src = `data:${a.mediaType || "image/png"};base64,${a.base64}`;
-      chip.replaceWith(img);
-    } catch (_) {
-      chip.disabled = false;
-      chip.textContent = "다시 시도";
-    }
   }
 
   // ── 전송 ──
@@ -869,12 +987,11 @@ export class ChatView {
     if (this._noSession) this._probeUntil = Date.now() + CHAT.NO_SESSION_PROBE_MS;
     this._clearBlank();
 
-    // 낙관 렌더 — 표시 본문은 첨부 경로를 걷어낸 텍스트 + 썸네일. 이미지 경로가 실리는 전송은
-    //  트랜스크립트에 [Image #N] 으로 변환돼 남아 원문 예측이 불가 → any 매칭으로 걷는다.
-    let body = raw;
-    for (const a of att) body = stripTokenOnce(body, shq(a.path));
+    // 낙관 렌더 — 본문은 원문 그대로 두고, 첨부 경로 자리는 렌더러가 인라인 칩으로 그린다
+    //  (컴포저와 같은 표현 — 2026-07-30 사용자 확정). 이미지 경로가 실리는 전송은 트랜스크립트에
+    //  [Image #N] 으로 변환돼 남아 원문 예측이 불가 → any 매칭으로 걷는다.
     const seq = this._optSeq--;
-    const opt = { seq, role: "user", kind: "text", text: body.trim(), ts: Date.now(), hidden: false, optimistic: true, optAttach: att };
+    const opt = { seq, role: "user", kind: "text", text: raw.trim(), ts: Date.now(), hidden: false, optimistic: true, optAttach: att };
     this._msgs = [...this._msgs, opt];
     const el = this._buildRow(opt);
     this._els.set(seq, el);

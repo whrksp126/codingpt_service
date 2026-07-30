@@ -1239,18 +1239,6 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-q-res { margin-top: 3px; font-size: 12px; color: var(--dim); white-space: pre-wrap; }
 
 /* 드롭 첨부 스트립(컴포저 위) — 이미지 썸네일 / 파일칩 + ✕. 낙관 버블(.sent)에도 같은 칩 재사용 */
-.chat-att-strip { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 8px 0; }
-.chat-att-strip.hidden { display: none; }
-.chat-att-strip.sent { padding: 6px 0 0; justify-content: flex-end; }
-.chat-att { position: relative; width: 56px; height: 56px; border: 1px solid var(--border-ctrl); border-radius: 8px; overflow: hidden; background: var(--elevated2); display: flex; align-items: center; justify-content: center; }
-.chat-att-thumb { width: 100%; height: 100%; object-fit: cover; display: block; }
-.chat-att-file { font-size: 9.5px; color: var(--text2); padding: 4px; text-align: center; word-break: break-all; line-height: 1.25; max-height: 100%; overflow: hidden; }
-.chat-att-x {
-  position: absolute; top: 2px; right: 2px; width: 16px; height: 16px; border: none; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 9px; line-height: 16px; text-align: center;
-  cursor: pointer; padding: 0;
-}
-.chat-att-x:hover { background: rgba(0, 0, 0, 0.75); }
 
 /* 컴포저 = 로컬 contenteditable(2026-07-30 사용자 확정: 입력은 네이티브처럼 — 선택/⌘Z/IME 전부
    브라우저 기본). 첨부는 contenteditable=false 인라인 칩 = 커서/백스페이스에 원자 단위 */
@@ -1268,16 +1256,16 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-chip-thumb { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; display: block; }
 .chat-chip-label {
   font-size: 11.5px; color: var(--text2); white-space: nowrap;
-  max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+  max-width: 96px; overflow: hidden; text-overflow: ellipsis;
 }
+/* 말풍선 안 칩 — 버블 배경(elevated2)과 같으면 안 보인다 → 한 단계 톤 차이 + ✕ 없음 */
+.chat-msg-user .chat-chip { background: var(--elevated); }
 .chat-chip-x {
   border: none; background: none; color: var(--text3); font-size: 9.5px; cursor: pointer;
   padding: 2px 3px; line-height: 1; border-radius: 4px;
 }
 .chat-chip-x:hover { color: var(--text); background: var(--elevated); }
 
-.chat-att { cursor: zoom-in; }
-.chat-att:hover { border-color: var(--accent); }
 
 /* 첨부 라이트박스 — 칩 클릭 시 원본 크기 미리보기(일반 LLM 앱 관례). 배경/Esc/✕ 로 닫는다 */
 .chat-lightbox {
@@ -1328,9 +1316,6 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-divider { align-self: center; font-size: 11.5px; color: var(--text3); }
 .chat-divider.dim { color: var(--dim); }
 .chat-divider span { padding: 2px 10px; background: var(--elevated); border-radius: 999px; }
-.chat-attach { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.chat-attach-chip { border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text3); font-size: 11.5px; border-radius: var(--r-sm); padding: 3px 8px; cursor: pointer; }
-.chat-attach-img { max-width: 100%; border-radius: var(--r-sm); border: 1px solid var(--border); }
 
 /* 맨 아래로 FAB(+미읽음) — **컴포저의 자식**이다. 이유: 컴포저는 입력 줄 수에 따라 높이가 변하는데
    과거처럼 `.chat` 기준 고정 오프셋(bottom:76px)을 쓰면 여러 줄 입력 시 컴포저에 파묻힌다.

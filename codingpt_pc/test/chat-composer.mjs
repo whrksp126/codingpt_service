@@ -304,6 +304,14 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   const css = readFileSync(path.resolve(here, "../src/styles.css"), "utf8");
   ok("빈 입력 placeholder 는 :empty::before", /\.chat-ce:empty::before \{ content: attr\(data-ph\)/.test(css));
 
+  // 실사용 신고 3종(2026-07-30 2차) 재발 방지 핀
+  ok("방향키 PUA(U+F700대) 문자 삽입 차단 — beforeinput + 소독", /beforeinput/.test(cv) && /\\uF700-\\uF7FF/.test(cv) && /_ceSanitize/.test(cv));
+  ok("Backspace/Delete 가 인접 칩을 원자 삭제(WebKit ncE 버그 우회)", /_chipAtCaret\(/.test(cv) && /e\.key === "Backspace" \|\| e\.key === "Delete"/.test(cv));
+  ok("보낸 메시지도 인라인 칩(마커/경로 자리) + 자동 썸네일", /_userTextHtml/.test(cv) && /_hydrateMsgChips/.test(cv) && /\[Image #\(/.test(cv.replace(/\\/g, "")));
+  ok("레거시 첨부 표현(넓은 인라인 확장) 제거", !/chat-attach-img/.test(cv) && !/_loadAttachment/.test(cv));
+  const ts = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/transcript.js"), "utf8");
+  ok("데몬이 user 이미지 자리에 위치 마커를 심는다(무접합 join)", /\[Image #\$\{attachments\.length\}\]/.test(ts) && /buf\.join\(''\)/.test(ts));
+
   // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
   //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
   const ds = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");
@@ -321,6 +329,35 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
       eq("경로 없으면 통짜", fn("그냥 텍스트"), ["그냥 텍스트"]);
       eq("경로 하나면 그 조각뿐", fn("'/x/y.jpeg' "), ["'/x/y.jpeg' "]);
     }
+  }
+
+  // 앱 — 첨부 원자 토큰(칩 컴포저): 스냅/커서/전송 변환 규칙을 오려내 실행 검증
+  {
+    const ac = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/composer.ts"), "utf8");
+    const cut = (name) => {
+      const mm = ac.match(new RegExp(`export function ${name}[\\s\\S]*?\\n\\}`));
+      ok(`앱 ${name} 오려내기`, !!mm);
+      if (!mm) return null;
+      // eslint-disable-next-line no-eval
+      return eval(`(() => { ${mm[0].replace("export function", "function").replace(/: \{ text: string; removed: string\[\] \}|: string\[\]|: number|: string|: AttachEntry\[\]/g, "")}; return ${name}; })()`);
+    };
+    const snap = cut("snapAttachTokens");
+    if (snap) {
+      eq("온전한 토큰은 유지", snap("a [사진 1] b", ["[사진 1]"]), { text: "a [사진 1] b", removed: [] });
+      eq("토큰이 깨지면 잔해째 걷는다(끝 깎임)", snap("a [사진 1 b", ["[사진 1]"]), { text: "a  b", removed: ["[사진 1]"] });
+      eq("앞이 깎여도 걷는다", snap("a 사진 1] b", ["[사진 1]"]), { text: "a  b", removed: ["[사진 1]"] });
+      eq("전부 지워졌으면 removed 만", snap("a  b", ["[사진 1]"]), { text: "a  b", removed: ["[사진 1]"] });
+    }
+    const caret = cut("snapCaretOutOfToken");
+    if (caret) {
+      eq("토큰 내부 커서 → 끝으로", caret("a [사진 1] b", 5, ["[사진 1]"]), 8);
+      eq("토큰 밖 커서는 그대로", caret("a [사진 1] b", 1, ["[사진 1]"]), 1);
+    }
+    ok("전송 변환 = 토큰→인용 경로 + 고아 토큰 제거", /resolveAttachTokens/.test(ac) && /\[(\?:)?사진\|파일/.test(ac.replace(/\\/g, "")) || /\(\?:사진\|파일\)/.test(ac));
+    const cc2 = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8");
+    ok("앱 컴포저가 스냅+커서 스냅을 배선", /snapAttachTokens/.test(cc2) && /snapCaretOutOfToken/.test(cc2));
+    const cr = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatRow.tsx"), "utf8");
+    ok("앱 보낸 메시지 인라인 칩+자동 썸네일+미리보기", /UserRichText/.test(cr) && /MsgChip/.test(cr) && /onPreview/.test(cr));
   }
 
   // 앱 — 미러 입력은 철회(로컬 KeyTextInput 유지)하되 any 낙관 매칭은 공유
