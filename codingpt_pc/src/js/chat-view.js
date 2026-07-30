@@ -17,6 +17,8 @@ import { api } from "./api.js";
 import { state as appState, agentStateOf } from "./state.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
+import { ansiToHtml } from "./ansi.js";
+import { termTheme } from "./theme.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
@@ -96,6 +98,7 @@ export class ChatView {
       <div class="chat-banner hidden"></div>
       <div class="chat-scroll"></div>
       <div class="chat-approvals"></div>
+      <div class="chat-statusline hidden"></div>
       <div class="chat-composer">
         <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
         <div class="chat-box">
@@ -114,6 +117,7 @@ export class ChatView {
     this.jumpEl = el.querySelector(".chat-jump");
     this.jumpNEl = el.querySelector(".chat-jump-n");
     this.apprEl = el.querySelector(".chat-approvals");
+    this.statusEl = el.querySelector(".chat-statusline");
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
@@ -298,6 +302,7 @@ export class ChatView {
           this._noSession = String(r.reason || "none");
           this._noSessionAt = Date.now();
           this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
+          this._setStatusLines([]); // statusline 잔상도 함께
           this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
           this._renderBlank();
           return;
@@ -311,6 +316,7 @@ export class ChatView {
         this._truncated = !!r.headTruncated;
         this._lastSeq = Number(r.headSeq) || 0;
         this._openFailed = null;
+        this._setStatusLines(r.statusLines || []); // 새 대상의 statusline(없으면 이전 잔상 제거)
         this._ingest(r.messages || [], { snapshot: true });
         this._setBanner("");
       } catch (e) {
@@ -338,6 +344,8 @@ export class ChatView {
   _onPush(frame) {
     this._lastPushAt = Date.now();
     const ctl = frame.control && frame.control.kind;
+    // TUI statusline 미러(데몬 status-line.js) — chatId 정확 일치로만 도달한다(sessionId 미탑재).
+    if (ctl === "status_line") { this._setStatusLines(frame.control.lines || []); return; }
     // push 가 왔다 = 이 터미널에서 대화가 (다시) 살아 있다는 신호 → noSession 확정을 해제한다(트리거 ②).
     if (this._noSession) {
       this._noSession = null;
@@ -1349,6 +1357,18 @@ export class ChatView {
       const name = agentDisplayName(this._agent);
       this.inputEl.dataset.ph = name ? name + "에게 요청" : "메시지 보내기"; // :empty::before 가 그린다
     }
+  }
+  // TUI statusline 미러 — 데몬이 화면에서 뽑은 원문 줄(ANSI 포함)을 컴포저 위에 그대로 그린다
+  //  (2026-07-30 사용자 확정: 구조화 재구성이 아니라 **원문 미러**). 색은 터미널 팔레트와 동일.
+  _setStatusLines(lines) {
+    if (!this.statusEl) return;
+    const arr = Array.isArray(lines) ? lines.filter((l) => typeof l === "string" && l.trim()) : [];
+    if (!arr.length) { this.statusEl.classList.add("hidden"); this.statusEl.innerHTML = ""; return; }
+    const pal = termTheme();
+    this.statusEl.innerHTML = arr
+      .map((l) => `<div class="chat-statusline-row">${ansiToHtml(l, pal)}</div>`)
+      .join("");
+    this.statusEl.classList.remove("hidden");
   }
   _setBanner(msg, tone) {
     if (!this.bannerEl) return;
