@@ -1179,18 +1179,39 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
   const target = `=${ptyLib.termSession(session, win)}:0`;
   const multiline = /\n/.test(body);
-  if (multiline) {
-    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', `[200~${body}[201~`]);
-  } else {
-    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', body]);
+  // 항상 bracketed paste + **이미지 경로 조각 분리**(2026-07-30 격리 실측):
+  //  · claude 는 붙여넣은 내용이 "경로 그 자체"일 때만 [Image #N] 으로 변환한다 — 문장 중간에 섞인
+  //    경로는 변환되지 않는다. 그래서 인용 이미지 경로를 경계로 텍스트를 쪼개 조각마다 따로
+  //    paste 하면 문장 중간의 첨부도 제자리에서 변환된다(literal 타이핑은 아예 무변환 — 옛 진범).
+  const segs = splitImagePathSegments(body);
+  for (const seg of segs) {
+    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', `[200~${seg}[201~`]);
+    if (segs.length > 1) await new Promise((r) => setTimeout(r, 90)); // 조각 간 소화 시간
   }
   const doSubmit = submit !== false;
   if (doSubmit) {
     // 붙여넣기 직후 즉시 Enter 를 보내면 TUI 가 버퍼를 정리하기 전이라 일부만 제출되는 경우가 있다.
-    await new Promise((r) => setTimeout(r, multiline ? 120 : 30));
+    //  이미지 경로 조각이 있으면 변환(파일 읽기)이 비동기라 넉넉히 기다린다 — 미변환 제출이어도
+    //  경로 텍스트는 여전히 유효하다(에이전트가 Read 로 읽는다). 즉 안전한 지연일 뿐이다.
+    await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : 120));
     await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
   }
   return { ok: true, index: win, submitted: doSubmit, multiline };
+}
+
+// 인용 이미지 경로(뒤 공백 포함)를 독립 조각으로 분리 — chatInput 의 조각 paste 용 순수 함수.
+const IMG_PATH_SEG_RE = /('[^'\n]+\.(?:png|jpe?g|gif|webp|bmp|heic|tiff)' ?)/i;
+function splitImagePathSegments(text) {
+  const out = [];
+  let rest = String(text || '');
+  while (rest) {
+    const m = rest.match(IMG_PATH_SEG_RE);
+    if (!m) { out.push(rest); break; }
+    if (m.index > 0) out.push(rest.slice(0, m.index));
+    out.push(m[1]);
+    rest = rest.slice(m.index + m[1].length);
+  }
+  return out.length ? out : [''];
 }
 
 // ── TUI 질문 다이얼로그 원격 조작(chat.answer) ─────────────────────────────

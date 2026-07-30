@@ -81,10 +81,9 @@ export function initOsDrop() {
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
       if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
       const { pane, tabIndex } = tgt;
-      // 채팅 모드 pane 에 떨어진 드롭은 채팅 뷰가 받아 **TUI 와 채팅 양쪽에 동시 반영**한다
-      //  (2026-07-30 사용자 확정 2차): 채팅 뷰가 직접 TUI 컴포저에 bracketed paste 로 주입하고
-      //  ([Image #N] 변환은 paste 에서만 일어난다 — 실측), 입력칸 커서에 같은 토큰을 미러하며,
-      //  스트립엔 썸네일(클릭=미리보기)을 띄운다. 전송은 토큰을 걷어낸 본문만 나간다.
+      // 채팅 모드 pane 에 떨어진 드롭은 채팅 입력칸의 **원자 칩**(contenteditable=false)이 된다
+      //  (2026-07-30 사용자 확정 3차: 입력은 로컬 네이티브). TUI 반영은 전송 시 한 번 —
+      //  데몬이 이미지 경로 조각을 따로 paste 해 [Image #N] 으로 변환한다(문장 중간도 제자리).
       if (tabIndex === pane.node.active && pane._chatActive?.() && pane.chat) {
         pane.chat.addAttachments(paths);
         return;

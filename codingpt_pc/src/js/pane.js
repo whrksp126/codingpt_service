@@ -1351,26 +1351,6 @@ export class PaneView {
         return true;
       },
       openFile: (rel) => this.ctx.onOpenIde?.(rel),
-      // 드롭 첨부의 TUI 즉시 반영(2026-07-30 사용자 확정: 채팅 드롭도 TUI 컴포저에 바로 실려야 한다).
-      //  paste 는 insertText(bracketed paste — claude 가 이미지 경로를 [Image #N] 으로 변환하는 유일
-      //  경로. literal 타이핑은 변환이 안 된다: cptest 실측), write 는 원시 키(C-u 클리어·Enter 제출)용.
-      tuiPaste: (text) => {
-        if (!this.term || !text) return false;
-        this.insertText(text);
-        return true;
-      },
-      tuiWrite: (data) => {
-        if (!this.term || !data) return false;
-        try { this._write(data); return true; } catch (_) { return false; }
-      },
-      // 라이브 화면(스크롤백 제외 하단 rows) — 채팅이 컴포저의 [Image #N] 번호를 읽는 근거.
-      screenLines: () => this._screenLines(),
-      // 컴포저 라이브 미러용: 커서 좌표(뷰포트 기준)와 열 수 — 캐럿 매핑·랩 판정의 근거.
-      cursorPos: () => {
-        const b = this.term?.buffer?.active;
-        return b ? { x: b.cursorX, y: b.cursorY } : null;
-      },
-      termCols: () => this.term?.cols || 0,
       // 컴포저 `+` 파일 목록의 출처 — IDE 트리와 **같은 제공자**(로컬 api / 원격 makeRemoteFs).
       //  라이브 getter 인 이유는 `_ideFs()` 와 동일: 재클레임으로 host 가 바뀌면 그때의 값이어야 한다.
       fs: () => this._ideFs() || api,
@@ -1638,25 +1618,8 @@ export class PaneView {
     this._sentBuf = "";
     try { const ta = this.term?.textarea; if (ta) ta.value = ""; } catch (_) {}
   }
-  // 라이브 화면 텍스트(하단 rows 만, 스크롤 위치 무관 — baseY 기준). 채팅 드롭 첨부가 TUI 컴포저의
-  //  [Image #N] 번호를 읽을 때 쓴다. chat 모드에서도 xterm 은 데이터를 계속 수신하므로 유효하다.
-  _screenLines() {
-    const t = this.term;
-    const buf = t?.buffer?.active;
-    if (!t || !buf) return [];
-    const out = [];
-    const base = typeof buf.baseY === "number" ? buf.baseY : Math.max(0, buf.length - t.rows);
-    for (let i = 0; i < t.rows; i++) {
-      const line = buf.getLine(base + i);
-      out.push(line ? line.translateToString(true) : "");
-    }
-    return out;
-  }
   _termOut(data) {
-    // write 콜백 = xterm 파싱 완료 시점(화면 최신) — 채팅 컴포저 미러가 이 신호로 파스한다.
-    //  chat 미가동/비가시 시 termActivity 가 스스로 무시하므로 여기선 존재만 본다.
-    if (this.chat) this.term?.write(data, () => this.chat?.termActivity?.());
-    else this.term?.write(data);
+    this.term?.write(data);
   }
   _onData(b64) {
     this._termOut(b64ToBytes(b64));

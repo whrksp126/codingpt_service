@@ -92,10 +92,9 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   // 컴포저 배경 = 대화 본문과 같은 색(별색 띠가 "영역이 나뉜 것"으로 읽혔다).
   ok("컴포저에 별색 배경 띠가 없다",
     /\.chat-composer\s*\{[^}]*background:\s*transparent/.test(css));
-  // ★ 숨겨진 동안 autoGrow 가 도는 것이 "인풋이 처음에 납작하게 깨져 보인다"의 원인이었다.
-  ok("autoGrow 는 레이아웃에 없을 때(offsetParent===null) 높이를 쓰지 않는다",
-    /_autoGrow\(\) \{[\s\S]{0,300}offsetParent === null\) return;/.test(cv));
-  ok("보이게 되는 순간 rAF 안에서 autoGrow 를 다시 부른다", /this\._autoGrow\(\);\s*\/\/ 이제 레이아웃에/.test(cv));
+  // ★ contenteditable 전환(2026-07-30)으로 JS autoGrow 는 폐기 — 높이는 CSS(max-height+overflow)가
+  //  전담한다. "숨겨진 동안 측정 → 납작" 계열 사고의 재발 경로 자체가 사라졌는지 부재로 핀한다.
+  ok("JS autoGrow 가 없다(높이는 CSS 전담 — 측정 실패 사고 원천 차단)", !/_autoGrow/.test(cv));
   ok("입력에 min-height 바닥이 있다(측정 실패에도 납작해지지 않게)",
     /\.chat-input\s*\{[^}]*min-height:\s*22px/.test(css));
   ok("입력에는 자체 테두리·포커스 링이 없다(상자만 가진다 — '최초 모습이 이상하다'의 원인)",
@@ -117,7 +116,7 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("피커 목록 실패를 빈 목록으로 위장하지 않는다",
     /목록을 불러오지 못했습니다/.test(cv));
   // 삽입은 반드시 상대 경로다(절대경로를 넣으면 홈 경로의 계정명이 대화에 남는다).
-  ok("삽입 경로는 relToRoot 를 거친다", /insertPathAt\(ta\.value/.test(cv) && /relToRoot\(this\._cwd\(\)/.test(cv));
+  ok("삽입 경로는 relToRoot 를 거쳐 커서 위치에 들어간다", /_ceInsertText\(r \+ " "\)/.test(cv) && /relToRoot\(this\._cwd\(\)/.test(cv));
   ok("컴포저 placeholder 는 짧다(설명 문구 금지 — 사용자는 안 읽는다)",
     (/placeholder="([^"]*)"/.exec(comp)?.[1] || "").length <= 12, /placeholder="([^"]*)"/.exec(comp)?.[1]);
 }
@@ -281,145 +280,57 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
 }
 
 
-// ── 드롭 첨부 ↔ TUI 컴포저 동기화(2026-07-30, cptest 격리 실측 픽스처) ─────────────
-// 실측 계약: 이미지 경로는 bracketed paste 로만 [Image #N] 변환(literal 타이핑은 무변환 —
-//  0.1.164 채팅 전송이 TUI 에 안 실리던 진범), N 은 프로세스 전역 증가(리셋 없음) → 화면에서 읽는다.
+// ── 컴포저 = 로컬 contenteditable + 원자 칩(2026-07-30 사용자 확정 3차) ──────────────
+//  "입력은 네이티브처럼"(선택·⌘Z·Shift+방향키·IME = 브라우저 기본) — 라이브 미러의 키 포워딩은
+//  이를 원리적으로 못 살려 폐기했다. TUI 반영은 전송 시 한 번(데몬 조각 paste).
 {
-  // 실제 capture-pane 출력(이미지 2 + 텍스트 파일 1 붙여넣은 컴포저 — 경로가 랩으로 갈라진다)
-  const SCREEN = [
-    "                                                                                   ● high · /effort",
-    "────────────────────────────────────────────────────────────────────────────────────────────────────",
-    "❯ [Image #1] [Image #2]'/private/tmp/claude-501/scratchpad/droptest/no",
-    "  tes.txt'",
-    "────────────────────────────────────────────────────────────────────────────────────────────────────",
-    "   [Opus 5 (1M context)] droptest | 5h:10%",
-    "  -- INSERT -- bypass permissions on (shift+tab to cycle)",
-  ];
-  const c = M.parseComposer(SCREEN);
-  eq("컴포저의 이미지 번호를 읽는다", c.nums, [1, 2]);
-  ok("랩으로 갈라진 경로가 이어 붙는다", c.text.includes("'/private/tmp/claude-501/scratchpad/droptest/notes.txt'"), c.text);
+  // 전송 시 낙관 버블 본문 = 첨부 인용 경로를 걷어낸 텍스트(stripTokenOnce 재사용 — 실행 검증)
+  eq("첨부 경로 제거(+공백 1)", M.stripTokenOnce("'/a/b c.png' 이거 봐줘", "'/a/b c.png'"), "이거 봐줘");
+  eq("본문 중간 경로 제거", M.stripTokenOnce("이거 '/a/x.png' 봐줘", "'/a/x.png'"), "이거 봐줘");
+  eq("없으면 무변화", M.stripTokenOnce("안녕", "'/a/x.png'"), "안녕");
 
-  // 랩 경계가 [Image #N] 토큰 한가운데를 가르는 경우 — 들여쓰기 2칸 제거로 이어 붙어야 잡힌다
-  const WRAPPED = [
-    "────────",
-    "❯ 이 이미지 봐줘 [Image #",
-    "  14]",
-    "────────",
-    "   status",
-  ];
-  eq("랩으로 갈라진 토큰도 잡는다", M.parseComposer(WRAPPED).nums, [14]);
-
-  // 빈 컴포저(placeholder) — 번호 0개, 인용 경로 흔적 없음(재동기화 dirty 판정의 근거)
-  const EMPTY = ["────────", '❯ Try "write a test for <filepath>"', "────────", "   status"];
-  const e = M.parseComposer(EMPTY);
-  eq("빈 컴포저 = 번호 없음", e.nums, []);
-  ok("placeholder 에는 작은따옴표가 없다(dirty 오판 금지)", !e.text.includes("'"), e.text);
-  eq("❯ 줄이 없으면 빈 결과", M.parseComposer(["no prompt here"]), { text: "", nums: [] });
-
-  // 전송 시 토큰 제거 — TUI 컴포저에 이미 실린 표식을 다시 보내면 이중 전송이 된다
-  eq("본문 앞 토큰 제거(+공백 1)", M.stripTokenOnce("[Image #3] 이거 고쳐줘", "[Image #3]"), "이거 고쳐줘");
-  eq("본문 중간 토큰 제거", M.stripTokenOnce("이거 [Image #3] 고쳐줘", "[Image #3]"), "이거 고쳐줘");
-  eq("토큰만 있으면 빈 문자열(첨부만 전송 = Enter only)", M.stripTokenOnce("[Image #3] ", "[Image #3]"), "");
-  eq("없는 토큰은 무변화", M.stripTokenOnce("안녕", "[Image #9]"), "안녕");
-  eq("같은 토큰이 여럿이면 1회만", M.stripTokenOnce("[Image #3] [Image #3]", "[Image #3]"), "[Image #3]");
-  eq("파일 토큰(인용 경로)도 같은 규칙", M.stripTokenOnce("'/a/b c.txt' 읽어줘", "'/a/b c.txt'"), "읽어줘");
-
-  // 소스 핀 — 드롭이 TUI 주입 없이 채팅에만 쌓이는 회귀(사용자 실사고 2026-07-30) 방지
   const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
-  ok("드롭 즉시 TUI 컴포저에 paste 주입한다", /tuiPaste/.test(cv) && /_injectToTui/.test(cv));
-  ok("전송은 토큰을 걷어낸 본문만 보낸다", /stripTokenOnce\(body, a\.token\)/.test(cv));
-  ok("첨부만 전송이면 Enter 만 보낸다", /tuiWrite\?\.\("\\r"\)/.test(cv));
+  ok("컴포저는 contenteditable(네이티브 편집)", /class="chat-input chat-ce" contenteditable="true"/.test(cv));
+  ok("입력 이벤트를 PTY 로 포워딩하지 않는다(네이티브 보장)", !/tuiWrite/.test(cv) && !/inputDelta/.test(cv));
+  ok("칩은 contenteditable=false = 커서/백스페이스 원자 단위", /chip\.contentEditable = "false"/.test(cv));
+  ok("칩 삭제/undo 를 DOM 기준으로 리컨실", /_reconcileChips/.test(cv) && /querySelectorAll\(".chat-chip"\)/.test(cv));
+  ok("직렬화 = 칩→인용 경로(+공백)", /shq\(c\.dataset\.path \|\| ""\) \+ " "/.test(cv));
+  ok("삽입은 execCommand insertText(네이티브 undo 스택 유지)", /execCommand\("insertText"/.test(cv));
+  ok("붙여넣기는 plain text 강제(HTML 오염 방지)", /getData\("text\/plain"\)/.test(cv));
+  ok("전송은 chat.input(데몬)이 정본 + 로컬 paste 폴백", /api\.chatInput\(/.test(cv) && /sendFallback\?\.\(raw\)/.test(cv));
+  ok("이미지 경로 전송은 any 매칭(트랜스크립트 [Image #N] 변환으로 원문 예측 불가)",
+    /mayConvert/.test(cv) && /any: mayConvert/.test(cv));
   ok("칩 클릭 = 미리보기(라이트박스/시스템 열기)", /_openPreview/.test(cv) && /chat-lightbox/.test(cv) && /openPath/.test(cv));
-  const pj = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
-  ok("주입은 insertText(bracketed paste) 경로다", /tuiPaste:\s*\(text\)[\s\S]{0,120}insertText\(text\)/.test(pj));
-}
-
-
-// ── 컴포저 라이브 미러 순수 규칙(2026-07-30 실측: 원자 토큰·NBSP 프롬프트·랩 휴리스틱·커서 매핑) ──
-{
-  // 실측: 프롬프트는 "❯"+NBSP. 커서 x=19 가 텍스트 끝(len 17)일 때의 실캡처 형태.
-  const ROW = "❯ abc [Image #1] de";
-  const P = M.parseComposerScreen(["────────", ROW, "────────", "   status"], 100);
-  ok("NBSP 프롬프트도 잡는다", P.found && P.text === "abc [Image #1] de", P.text);
-  eq("이미지 번호", P.nums, [1]);
-  eq("커서 끝(x=19)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 19, 1), 17);
-  eq("커서 토큰 뒤 공백(x=16 — Left×3 실측)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 16, 1), 14);
-  eq("커서 토큰 앞(x=6 — Left 1회가 토큰 전체를 건넌 실측)", M.composerCaret({ ...P, rows: [{ row: 1, text: P.text }] }, 6, 1), 4);
-
-  // 셀 모델: 토큰=1셀(커서 1스텝·삭제 1회의 원자 단위)
-  const cells = M.composerCells("abc [Image #1] de");
-  eq("셀 수(3+1+토큰+1+2)", cells.length, 8);
-  ok("토큰 셀", cells[4].img === 1 && cells[4].str === "[Image #1]");
-  eq("토큰 시작 문자 → 토큰 셀", M.cellIndexOf(cells, 4), 4);
-  eq("토큰 뒤 문자 → 다음 셀", M.cellIndexOf(cells, 14), 5);
-  eq("화살표 시퀀스(←2)", M.arrowSeq(-2), "\x1b[D\x1b[D");
-
-  // 멀티라인(M-Enter): 이전 행이 짧으면 개행으로 잇는다(실측: 연속줄 2칸 들여쓰기)
-  const P2 = M.parseComposerScreen(["────", "❯ abc  de", "  line2", "────", " st"], 100);
-  eq("개행 보존", P2.text, "abc  de\nline2");
-  ok("multiRow", P2.multiRow === true);
-  eq("2행 커서(x=7)", M.composerCaret(P2, 7, 2), 13);
-  // 랩: 이전 행이 폭(cols-2)을 가득 채우면 이어붙인다 — 갈라진 토큰이 nums 에 잡히는 근거
-  const full = "x".repeat(6) + "[Image #";
-  const P3 = M.parseComposerScreen(["────", "❯ " + full, "  22]", "────"], 16);
-  eq("랩 이어붙임 — 갈라진 토큰", P3.nums, [22]);
-
-  // 입력 델타(pane.js input-델타 규율): 한글 조합 교체·추가·삭제
-  eq("조합 교체", M.inputDelta("싴", "시간"), { bs: 1, add: "시간" });
-  eq("추가", M.inputDelta("", "가"), { bs: 0, add: "가" });
-  eq("끝 삭제", M.inputDelta("ab", "a"), { bs: 1, add: "" });
-
-  // 팝업 패스스루: '/' 로 시작할 때 컴포저 위 룰 위쪽 인접 행(빈 줄/룰에서 멈춤)
-  const LINES = [
-    " notice", "", "  /model  desc1", "  /mobile desc2", "────────",
-    "❯ /mo", "────────", " status",
-  ];
-  const P4 = M.parseComposerScreen(LINES, 100);
-  eq("팝업 행 수집", M.popupLines(LINES, P4), ["  /model  desc1", "  /mobile desc2"]);
-  eq("일반 텍스트엔 팝업 없음", M.popupLines(["  row", "────", "❯ hello", "────"], M.parseComposerScreen(["  row", "────", "❯ hello", "────"], 100)), []);
-
-  // 특수키 시퀀스 — 실측값 핀(M-Enter=개행, DC, Home/End)
-  eq("개행 키", M.COMPOSER_KEYS.newline, "\x1b\r");
-  eq("forward delete", M.COMPOSER_KEYS.delete, "\x1b[3~");
-}
-
-
-// ── 라이브 미러 배선 소스 핀(순수 규칙은 위에서 실행 검증 — 여기는 접점만) ──
-{
-  const cv = readFileSync(path.resolve(here, "../src/js/chat-view.js"), "utf8");
-  ok("미러 전송 = Enter 만(정본이 TUI 컴포저)", /_mirror\.on\)\s*\{\s*this\._mirrorSend\(\);\s*return;/.test(cv));
-  ok("문자 입력은 input 델타로 PTY 에 흐른다", /inputDelta\(this\._mirror\.tBuf/.test(cv));
-  ok("편집 키(화살표/Home/End/DC)를 TUI 로 전달한다", /ArrowLeft.*K\.left/.test(cv) && /Delete.*K\.delete/.test(cv));
-  ok("죽은 에이전트의 ❯(셸 프롬프트)엔 미러 금지", /_agentGone && !this\._tuiQuestion/.test(cv.replace(/\n/g, " ")) || /!this\._agentGone/.test(cv));
-  ok("다이얼로그 선택지(❯ 1.)를 컴포저로 오인하지 않는다", /dialogish/.test(cv));
-  ok("칩 ✕ 는 클릭 시점 파스에서 토큰으로 재계산", /_chipDelete\(token\)[\s\S]{0,300}findIndex\(\(c\) => c\.str === token\)/.test(cv));
-  ok("빈 컴포저 힌트(Try …)를 본문으로 오인하지 않는다", /_placeholderText/.test(cv));
-  const pj = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
-  ok("pane 이 커서/열수를 제공한다", /cursorPos:/.test(pj) && /termCols:/.test(pj));
-  ok("xterm write 콜백(파싱 완료 시점)으로 미러를 깨운다", /write\(data, \(\) => this\.chat\?\.termActivity/.test(pj));
   const css = readFileSync(path.resolve(here, "../src/styles.css"), "utf8");
-  ok("미러 캡처칸은 시각적으로 숨는다(IME 는 산다)", /\.chat-box\.mirror \.chat-input[\s\S]{0,200}opacity: 0/.test(css));
-}
+  ok("빈 입력 placeholder 는 :empty::before", /\.chat-ce:empty::before \{ content: attr\(data-ph\)/.test(css));
 
+  // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
+  //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
+  const ds = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");
+  ok("데몬 chatInput 이 이미지 경로 조각을 분리 paste 한다", /splitImagePathSegments/.test(ds) && /IMG_PATH_SEG_RE/.test(ds));
+  ok("조각 전송 시 Enter 를 넉넉히 지연(변환은 비동기 파일 읽기)", /segs\.length > 1 \? 900 : 120/.test(ds));
 
-// ── 앱(RN) 미러 패리티 핀 — 순수 규칙은 PC 와 같은 이름/계약이어야 한다(한쪽만 고치면 두 화면이 갈린다) ──
-{
-  const appComposer = path.resolve(here, "../../../codingpt_app/src/workspace/chat/composer.ts");
-  if (existsSync(appComposer)) {
-    const ac = readFileSync(appComposer, "utf8");
-    for (const fn of ["parseComposerScreen", "composerCaret", "composerCells", "arrowSeq", "inputDelta", "popupLines", "isComposerPlaceholder", "isDialogLine"]) {
-      ok(`앱 composer.ts 가 ${fn} 을 export`, new RegExp(`export (function|const) ${fn}`).test(ac));
+  // 데몬 조각 분리 규칙 — 소스에서 오려내 실행(이미지만 분리·텍스트 파일은 인라인 유지)
+  {
+    const m = ds.match(/const IMG_PATH_SEG_RE[\s\S]*?\n\}/);
+    ok("splitImagePathSegments 를 오려낼 수 있다", !!m);
+    if (m) {
+      // eslint-disable-next-line no-eval
+      const fn = eval(`(() => { ${m[0]}; return splitImagePathSegments; })()`);
+      eq("이미지 경로만 독립 조각", fn("A '/a/i.png' B '/b/t.txt' C"), ["A ", "'/a/i.png' ", "B '/b/t.txt' C"]);
+      eq("경로 없으면 통짜", fn("그냥 텍스트"), ["그냥 텍스트"]);
+      eq("경로 하나면 그 조각뿐", fn("'/x/y.jpeg' "), ["'/x/y.jpeg' "]);
     }
-    ok("앱 랩 휴리스틱 동일(이전 행 가득이면 랩)", /rows\[k - 1\]\.text\.length >= width \? '' : '\\n'/.test(ac));
-    const cc = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8");
-    ok("앱 미러 입력 = 숨은 캡처칸 + ZWSP 센티널 델타", /MirrorInput/.test(cc) && /\\u200B/.test(cc) && /inputDelta\(prev, next\)/.test(cc));
-    ok("앱 칩 ✕ = 셀 모델 원자 삭제 구동", /arrowSeq\(-\(cells\.length - idx - 1\)\)/.test(cc));
-    const tw = readFileSync(path.resolve(here, "../../../codingpt_app/src/components/module/ide/TerminalWebView.tsx"), "utf8");
-    ok("앱 웹뷰가 컴포저 워치를 제공", /__term_composerWatch/.test(tw) && /type:'composer'/.test(tw));
-    const pv = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/PaneView.tsx"), "utf8");
-    ok("앱 PaneView 가 chat 모드에만 워치를 켠다", /composerWatch\(!!\(chatMode && wsUrl\)\)/.test(pv));
-    const cb = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatBody.tsx"), "utf8");
-    ok("앱 미러 전송 = Enter 만 + any 낙관 매칭", /COMPOSER_KEYS\.enter/.test(cb) && /addPending\(body \|\| '\(첨부 전송\)', true\)/.test(cb));
+  }
+
+  // 앱 — 미러 입력은 철회(로컬 KeyTextInput 유지)하되 any 낙관 매칭은 공유
+  const appCb = path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatBody.tsx");
+  if (existsSync(appCb)) {
+    const cb = readFileSync(appCb, "utf8");
+    ok("앱 채팅에 미러 입력이 없다(네이티브 입력 유지)", !/MirrorInput/.test(readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ChatComposer.tsx"), "utf8")));
+    ok("앱도 이미지 경로 전송은 any 매칭", /addPending\(text, /.test(cb));
+    const cm = readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chatModel.ts"), "utf8");
+    ok("앱 pruneOptimistic 이 any 를 지원", /p\.any \|\| keys\.has/.test(cm));
   }
 }
 

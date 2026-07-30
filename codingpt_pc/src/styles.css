@@ -1252,49 +1252,29 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 }
 .chat-att-x:hover { background: rgba(0, 0, 0, 0.75); }
 
-/* 컴포저 라이브 미러(정본=TUI) — 렌더 영역 + 1px 숨은 IME 캡처칸. 토큰=인라인 칩(썸네일+라벨+✕) */
-.chat-box.mirror { position: relative; }
-.chat-box.mirror .chat-input {
-  position: absolute; left: 8px; bottom: 8px; width: 2px; height: 2px; min-height: 0;
-  opacity: 0; padding: 0; border: none; resize: none; pointer-events: none;
-}
-.chat-cmp {
-  min-height: 24px; max-height: 150px; overflow-y: auto; padding: 9px 10px 2px;
-  font-size: 13.5px; line-height: 1.65; color: var(--text); cursor: text;
+/* 컴포저 = 로컬 contenteditable(2026-07-30 사용자 확정: 입력은 네이티브처럼 — 선택/⌘Z/IME 전부
+   브라우저 기본). 첨부는 contenteditable=false 인라인 칩 = 커서/백스페이스에 원자 단위 */
+.chat-ce {
+  /* 기본 규격은 .chat-input(공유)을 따른다 — 여기는 contenteditable 특유의 것만 */
   word-break: break-word; white-space: pre-wrap;
 }
-.chat-cmp.hidden { display: none; }
-.chat-cmp-ph { color: var(--text3); }
-.chat-caret {
-  display: inline-block; width: 1.5px; height: 1.05em; margin: 0 -0.5px; vertical-align: -0.18em;
-  background: var(--accent); animation: chat-caret-blink 1.05s steps(1) infinite;
-}
-@keyframes chat-caret-blink { 50% { opacity: 0; } }
-.chat-box.mirror:not(:focus-within) .chat-caret { animation: none; opacity: 0.45; }
+.chat-ce:empty::before { content: attr(data-ph); color: var(--text3); pointer-events: none; }
 .chat-chip {
   display: inline-flex; align-items: center; gap: 5px; margin: 0 2px; padding: 2px 6px 2px 3px;
   border: 1px solid var(--border-ctrl); border-radius: 7px; background: var(--elevated2);
-  vertical-align: -0.45em; cursor: zoom-in; user-select: none;
+  vertical-align: -0.45em; cursor: zoom-in; user-select: none; -webkit-user-select: none;
 }
 .chat-chip:hover { border-color: var(--accent); }
 .chat-chip-thumb { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; display: block; }
-.chat-chip-label { font-size: 11.5px; color: var(--text2); white-space: nowrap; }
+.chat-chip-label {
+  font-size: 11.5px; color: var(--text2); white-space: nowrap;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+}
 .chat-chip-x {
   border: none; background: none; color: var(--text3); font-size: 9.5px; cursor: pointer;
   padding: 2px 3px; line-height: 1; border-radius: 4px;
 }
 .chat-chip-x:hover { color: var(--text); background: var(--elevated); }
-
-/* TUI 자동완성 팝업 패스스루('/'·'@') — 컴포저 위 원문 미러(모노·담백) */
-.chat-popup {
-  margin: 0 2px 6px; padding: 7px 10px; border: 1px solid var(--border-ctrl); border-radius: 10px;
-  background: var(--elevated); max-height: 180px; overflow-y: auto;
-}
-.chat-popup.hidden { display: none; }
-.chat-popup-row {
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.55; color: var(--text2);
-  white-space: pre; overflow-x: hidden; text-overflow: ellipsis;
-}
 
 .chat-att { cursor: zoom-in; }
 .chat-att:hover { border-color: var(--accent); }
