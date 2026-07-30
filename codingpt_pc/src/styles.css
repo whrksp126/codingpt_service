@@ -1248,9 +1248,12 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 }
 .chat-ce:empty::before { content: attr(data-ph); color: var(--text3); pointer-events: none; }
 .chat-chip {
-  display: inline-flex; align-items: center; gap: 5px; margin: 0 2px; padding: 2px 6px 2px 3px;
+  /* 높이 고정 + middle 정렬 — 썸네일 칩(22px 이미지)과 배지 칩(작은 EXT 스팬)의 내용 높이가 달라
+     -0.45em 기준 정렬이 서로 다르게 떨어지던 문제(실측 신고: 파일 칩만 어긋나 보임) */
+  display: inline-flex; align-items: center; gap: 5px; margin: 0 2px; padding: 0 6px 0 3px;
+  height: 28px; box-sizing: border-box;
   border: 1px solid var(--border-ctrl); border-radius: 7px; background: var(--elevated2);
-  vertical-align: -0.45em; cursor: zoom-in; user-select: none; -webkit-user-select: none;
+  vertical-align: middle; cursor: zoom-in; user-select: none; -webkit-user-select: none;
 }
 .chat-chip:hover { border-color: var(--accent); }
 .chat-chip-thumb { width: 22px; height: 22px; border-radius: 4px; object-fit: cover; display: block; }
