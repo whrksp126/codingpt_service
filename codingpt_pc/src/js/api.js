@@ -111,6 +111,8 @@ export const api = {
   clipboardImagePng: () => invoke("clipboard_image_png"),
   openPrivacySettings: () => invoke("open_privacy_settings"), // macOS 전체 디스크 접근 설정(온보딩)
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
+  notifPermissionState: () => invoke("notification_permission_state"), // 요청 없이 현재 OS 권한만 조회
+  openNotificationSettings: () => invoke("open_notification_settings"), // macOS CodingPT 알림 설정
   probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents → 허용 여부(최초엔 macOS 팝업)
   openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
@@ -135,7 +137,7 @@ export const api = {
   previewZoom: (paneId, zoom) => invoke("preview_zoom", { pane: paneId, zoom }),
 
   // ── 네이티브 알림 ──
-  notify: (title, body) => invoke("notify", { title, body: body || "" }),
+  notify: (title, body, sound = "default") => invoke("notify", { title, body: body || "", sound }),
 
   // ── punch-through(프리뷰=앱 UI 아래층) ──
   previewShield: (on) => invoke("preview_shield", { on: !!on }), // DOM 오버레이 동안 프리뷰 이벤트 차단

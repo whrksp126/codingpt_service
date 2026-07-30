@@ -403,7 +403,10 @@ export function maybeOsNotify(n, alertForMe = true) {
   const title = String(n.title || n.wsName || "CodingPT");
   const body = String(n.body || "");
   try {
-    const r = api.notify(title, body);
+    // 순환 import 를 피하려고 알림 시점에만 로드한다. 설정 모듈 부재/구 캐시는 기본 소리로 폴백.
+    const r = import("./notification-prefs.js")
+      .then((m) => api.notify(title, body, m.getNotificationSound()))
+      .catch(() => api.notify(title, body, "default"));
     if (r && typeof r.catch === "function") r.catch(() => {});
   } catch (_) {}
 }

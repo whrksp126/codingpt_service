@@ -608,6 +608,8 @@ pub fn run() {
             bridge::clipboard_image_png,
             bridge::open_privacy_settings,
             bridge::notification_permission,
+            bridge::notification_permission_state,
+            bridge::open_notification_settings,
             bridge::probe_folder_access,
             bridge::open_files_privacy_settings,
             bridge::notify,

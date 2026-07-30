@@ -17,6 +17,9 @@ import {
 import { renderAgentList, loadAgents, closeAgentPanels } from "./agents-view.js";
 import { markPermGranted, permGranted } from "./login-gate.js";
 import {
+  bindSoundSelect, sendTestNotification, soundOptionsHtml,
+} from "./notification-prefs.js";
+import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
   TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
@@ -193,16 +196,24 @@ function renderSection(force) {
       `;
     bindAppearance(contentEl);
   } else if (section === "notifications") {
-    const granted = permGranted("notification");
     contentEl.innerHTML = `
       <div class="sm-section-title">데스크톱 알림</div>
+      <div id="notifWarning"></div>
       <div class="sm-card2">
         <div class="sett-row">
           <span class="sett-copy"><span class="sett-label">알림 권한</span><span class="sett-desc">작업 완료와 승인 요청을 백그라운드에서도 알려줘요.</span></span>
-          <span class="${granted ? "sett-done" : "sett-attn"}">${granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요"}</span>
+          <span id="notifPermState" class="sett-attn">확인 중…</span>
+        </div>
+        <div class="sett-row">
+          <span class="sett-copy"><span class="sett-label">알림음</span><span class="sett-desc">이 PC에서 전달되는 데스크톱 알림에 적용돼요.</span></span>
+          <span class="notif-controls">
+            <select id="notifSound" class="sett-select" aria-label="알림음">${soundOptionsHtml()}</select>
+            <button id="notifTest" class="sett-btn">테스트 알림</button>
+          </span>
         </div>
       </div>
       `;
+    bindNotificationSettings(contentEl);
   } else if (section === "security") {
     contentEl.innerHTML = `
       <div class="sm-section-title">필수 권한</div>
@@ -247,6 +258,47 @@ function renderSection(force) {
     api.appVersion().then((v) => { const el = contentEl.querySelector("#appVerLabel"); if (el && v) el.textContent = `CodingPT PC ${v}`; }).catch(() => {});
     bindUpdate();
   }
+}
+
+function bindNotificationSettings(host) {
+  const select = host.querySelector("#notifSound");
+  const test = host.querySelector("#notifTest");
+  const status = host.querySelector("#notifPermState");
+  const warning = host.querySelector("#notifWarning");
+  bindSoundSelect(select);
+
+  const paintPermission = (value) => {
+    const granted = value === "granted";
+    if (granted) markPermGranted("notification");
+    status.className = granted ? "sett-done" : "sett-attn";
+    status.innerHTML = granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요";
+    warning.innerHTML = granted ? "" : `
+      <div class="notif-warning">
+        <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
+        <button id="notifOpenSettings" class="sett-btn">시스템 설정 열기</button>
+      </div>`;
+    warning.querySelector("#notifOpenSettings")?.addEventListener("click", () => api.openNotificationSettings().catch(() => {}));
+  };
+  api.notifPermissionState().then(paintPermission).catch(() => paintPermission(permGranted("notification") ? "granted" : "unknown"));
+
+  test.addEventListener("click", async () => {
+    test.disabled = true;
+    test.textContent = "보내는 중…";
+    try {
+      const ok = await sendTestNotification();
+      if (ok) {
+        markPermGranted("notification");
+        paintPermission("granted");
+        test.textContent = "보냈어요 ✓";
+      } else {
+        paintPermission("denied");
+        test.textContent = "설정 확인";
+      }
+    } catch (_) {
+      test.textContent = "다시 시도";
+    }
+    setTimeout(() => { if (test.isConnected) { test.disabled = false; test.textContent = "테스트 알림"; } }, 1200);
+  });
 }
 
 // ── 자동 업데이트 — 정보 열리면 자동 확인. 새 버전 있으면 [업데이트] 버튼(클릭=다운로드/설치),

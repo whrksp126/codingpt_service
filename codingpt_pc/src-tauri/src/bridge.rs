@@ -766,6 +766,35 @@ pub fn notification_permission(app: AppHandle) -> bool {
     matches!(notif.request_permission(), Ok(PermissionState::Granted))
 }
 
+// 설정 화면은 열기만 해도 OS 권한 팝업을 띄우면 안 된다. 현재 상태만 읽는 별도 커맨드.
+#[tauri::command]
+pub fn notification_permission_state(app: AppHandle) -> String {
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+    match app.notification().permission_state() {
+        Ok(PermissionState::Granted) => "granted",
+        Ok(PermissionState::Denied) => "denied",
+        Ok(PermissionState::Prompt) => "prompt",
+        Ok(PermissionState::PromptWithRationale) => "prompt",
+        _ => "unknown",
+    }
+    .into()
+}
+
+// 거부된 알림 권한은 앱에서 다시 요청해도 macOS가 팝업을 내지 않는다 → 앱별 설정으로 복구.
+#[tauri::command]
+pub fn open_notification_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("/usr/bin/open")
+            .arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("알림 설정 열기 실패: {e}"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
 // 외부 브라우저로 URL 열기(프리뷰의 프레임 차단 사이트·웹검색용). http/https 만 허용.
 #[tauri::command]
 pub fn open_external(url: String) -> Result<(), String> {
@@ -926,7 +955,7 @@ mod clipboard_tests {
 
 // 네이티브 알림(OSC/벨 → macOS 알림). 프론트 notifications.js 에서 호출.
 #[tauri::command]
-pub fn notify(app: AppHandle, title: String, body: String) {
+pub fn notify(app: AppHandle, title: String, body: String, sound: Option<String>) {
     use tauri_plugin_notification::{NotificationExt, PermissionState};
     let notif = app.notification();
     // 권한 미허용이면 1회 요청 — tauri dev(비번들 바이너리)에선 배너가 안 뜰 수 있고,
@@ -934,11 +963,15 @@ pub fn notify(app: AppHandle, title: String, body: String) {
     if !matches!(notif.permission_state(), Ok(PermissionState::Granted)) {
         let _ = notif.request_permission();
     }
-    let _ = notif
+    let mut builder = notif
         .builder()
         .title(if title.is_empty() { "CodingPT".into() } else { title })
-        .body(body)
-        .show();
+        .body(body);
+    // macOS 시스템 사운드 이름. none 은 builder 에 sound 를 싣지 않아 무음으로 보낸다.
+    if let Some(name) = sound.filter(|s| !s.is_empty() && s != "none") {
+        builder = builder.sound(name);
+    }
+    let _ = builder.show();
 }
 
 // ── 크롬 데브툴 별도 창(Undock) — devtools-frame.html?win=1 을 독립 WebviewWindow 로 ──

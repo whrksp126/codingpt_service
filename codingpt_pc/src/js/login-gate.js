@@ -7,6 +7,9 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import {
+  bindSoundSelect, sendTestNotification, soundOptionsHtml,
+} from "./notification-prefs.js";
 
 let el = null;
 let session = null; // { code, secret, expiresAt, poll, busy }
@@ -125,6 +128,11 @@ function renderStep() {
         <div class="lg-perm-ic">${p.folder ? icons.folder({ size: 28 }) : icons.bell({ size: 28 })}</div>
         <div class="lg-head">${c.title}</div>
         <div class="lg-perm-benefit">${c.benefit}</div>
+        ${p.id === "notification" ? `
+          <div class="notif-onb-controls">
+            <label><span>알림음</span><select id="lgNotifSound" class="sett-select">${soundOptionsHtml()}</select></label>
+            <button id="lgNotifTest" class="sett-btn">테스트 알림 보내기</button>
+          </div>` : ""}
         <div id="lgPermAlt" class="lg-perm-alt"></div>
       </main>
       <footer class="lg-wizard-foot">
@@ -134,6 +142,22 @@ function renderStep() {
     </div>`;
   const btn = el.querySelector("#lgAllow");
   const alt = el.querySelector("#lgPermAlt");
+  if (p.id === "notification") {
+    bindSoundSelect(el.querySelector("#lgNotifSound"));
+    const test = el.querySelector("#lgNotifTest");
+    test?.addEventListener("click", async () => {
+      test.disabled = true;
+      test.textContent = "보내는 중…";
+      const ok = await sendTestNotification().catch(() => false);
+      if (ok) markPermGranted("notification");
+      test.textContent = ok ? "보냈어요 ✓" : "시스템 설정 확인";
+      test.disabled = false;
+      if (!ok) {
+        alt.innerHTML = `<span>macOS에서 CodingPT 알림을 허용해 주세요.</span><button class="lg-link" id="lgOpenNotif">시스템 설정 열기</button>`;
+        alt.querySelector("#lgOpenNotif")?.addEventListener("click", () => api.openNotificationSettings().catch(() => {}));
+      }
+    });
+  }
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "확인 중…";
@@ -152,7 +176,9 @@ function renderStep() {
     alt.innerHTML = `
       <span>권한을 승인해야 계속할 수 있어요.</span>
       <button class="lg-link" id="lgOpenPriv">시스템 설정 열기</button>`;
-    alt.querySelector("#lgOpenPriv").addEventListener("click", () => { api.openFilesPrivacy().catch(() => {}); });
+    alt.querySelector("#lgOpenPriv").addEventListener("click", () => {
+      (p.id === "notification" ? api.openNotificationSettings() : api.openFilesPrivacy()).catch(() => {});
+    });
   });
 }
 
