@@ -61,6 +61,11 @@ test('D. 정상 설치 경로는 그대로 — .claude 항상, .codex 는 기존
   const codexMd = path.join(HOME, '.codex', 'skills', 'cpt-cli', 'SKILL.md');
   assert.equal(fs.existsSync(claudeMd), true);
   assert.equal(fs.existsSync(codexMd), true);
-  assert.match(fs.readFileSync(claudeMd, 'utf8'), /CPT_WS/, '설치본은 자기-스코핑 스텁이어야 한다');
+  const md = fs.readFileSync(claudeMd, 'utf8');
+  assert.match(md, /CPT_WS/, '설치본은 자기-스코핑 스텁이어야 한다');
+  // 7-30 재발 2탄: CodingPT 소스 리포에서 도는 에이전트가 "여기가 CodingPT 환경"이라고 오독 —
+  //  가드는 "소스 리포 작업 중 ≠ CodingPT 터미널"을 명시해야 한다(영/한 양쪽).
+  assert.match(md, /does NOT make this a CodingPT terminal/, '영문 description 에 소스 리포 제외 명시');
+  assert.match(md, /근거가 아니다/, '본문에 소스 리포 제외 명시');
   assert.equal(fs.existsSync(path.join(HOME, '.gemini')), false, '없던 에이전트 홈은 새로 만들지 않는다');
 });
