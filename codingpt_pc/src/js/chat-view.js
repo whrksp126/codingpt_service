@@ -840,7 +840,26 @@ export class ChatView {
   //  · 트랜스크립트: 데몬이 심은 위치 마커 [Image #N] 자리 = attachments[N-1] 칩(썸네일 자동 로드)
   _userTextHtml(m, text) {
     const parts = [];
-    const push = (t) => { if (t) parts.push(escapeHtml(t).replace(/\n/g, "<br>")); };
+    // 텍스트 런 안의 인용 절대경로('/…/x.ext')도 칩으로 — 전송 원문은 경로지만 채팅 표현은
+    //  [확장자 배지·파일명] 칩(2026-07-30 사용자 확정: "전송은 경로 그대로, 표현은 칩").
+    const PATH_RE = /'(\/[^'\n]{1,300}?\.[A-Za-z0-9]{1,8})'/g;
+    const push = (t) => {
+      if (!t) return;
+      let last = 0;
+      let pm;
+      PATH_RE.lastIndex = 0;
+      while ((pm = PATH_RE.exec(t))) {
+        const path = pm[1];
+        const name = path.split("/").pop() || path;
+        const ext = name.includes(".") ? name.split(".").pop() : "";
+        if (pm.index > last) parts.push(escapeHtml(t.slice(last, pm.index)).replace(/\n/g, "<br>"));
+        parts.push(`<span class="chat-chip msg" data-kind="path" data-path="${escapeHtml(path)}" title="${escapeHtml(path)}">` +
+          (ext ? `<span class="chat-chip-ext">${escapeHtml(ext.toUpperCase().slice(0, 4))}</span>` : "") +
+          `<span class="chat-chip-label">${escapeHtml(name)}</span></span>`);
+        last = pm.index + pm[0].length;
+      }
+      if (last < t.length) parts.push(escapeHtml(t.slice(last)).replace(/\n/g, "<br>"));
+    };
     const atts = m.optAttach || [];
     if (atts.length) {
       let rest = text;
@@ -970,6 +989,14 @@ export class ChatView {
     // 보낸 말풍선의 인라인 첨부 칩 — 클릭=미리보기(컴포저 칩과 동일 규칙).
     const mchip = e.target.closest?.(".chat-chip.msg");
     if (mchip) {
+      if (mchip.dataset.kind === "path") {
+        const path = mchip.dataset.path || "";
+        const name = path.split("/").pop() || path;
+        const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
+        const IMG = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "tiff"]);
+        this._openPreview({ path, name, ext, img: IMG.has(ext), b64: null });
+        return;
+      }
       if (mchip.dataset.kind === "local") {
         const rowEl = mchip.closest(".chat-msg");
         const seq = rowEl ? Number(rowEl.dataset.seq) : NaN;

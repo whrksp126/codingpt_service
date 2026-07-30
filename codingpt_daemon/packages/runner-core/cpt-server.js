@@ -1179,6 +1179,10 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
   const target = `=${ptyLib.termSession(session, win)}:0`;
   const multiline = /\n/.test(body);
+  // 컴포저 잔재 청소(2026-07-30 실사고): TUI 컴포저에 남아 있던 초안 위에 paste 하면
+  //  "채팅에서 보낸 것"과 다른 메시지가 제출된다(경로 이중 전송 신고). 채팅 전송의 계약은
+  //  **채팅 텍스트 = 제출 본문** — claude 컴포저(❯)가 비어 있지 않으면 C-u 로 비운다.
+  await clearComposerResidue(target).catch(() => { /* 감지 실패 = 기존 동작(그대로 이어붙임) */ });
   // 항상 bracketed paste + **이미지 경로 조각 분리**(2026-07-30 격리 실측):
   //  · claude 는 붙여넣은 내용이 "경로 그 자체"일 때만 [Image #N] 으로 변환한다 — 문장 중간에 섞인
   //    경로는 변환되지 않는다. 그래서 인용 이미지 경로를 경계로 텍스트를 쪼개 조각마다 따로
@@ -1197,6 +1201,26 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
     await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
   }
   return { ok: true, index: win, submitted: doSubmit, multiline };
+}
+
+// claude 컴포저(❯ 프롬프트, NBSP 구분) 잔재를 C-u 로 비운다 — 최대 6회, 화면 확인 기반.
+//  · 빈 컴포저/힌트(Try "...")면 즉시 종료. 다이얼로그 선택지(❯ 1. …)면 절대 건드리지 않는다.
+//  · codex 등 ❯ 프롬프트가 아닌 TUI 는 감지되지 않아 그대로 통과(기존 동작 유지).
+async function clearComposerResidue(target) {
+  for (let i = 0; i < 6; i++) {
+    const out = await ptyLib.runTmux(['capture-pane', '-p', '-t', target]);
+    const lines = String(out || '').split('\n');
+    let idx = -1;
+    for (let k = lines.length - 1; k >= 0; k--) {
+      if (/^\s*❯/.test(lines[k])) { idx = k; break; }
+    }
+    if (idx < 0) return;
+    const text = lines[idx].replace(/^\s*❯[\s ]?/, '').trim();
+    if (!text || /^Try "/.test(text)) return;      // 비었다(힌트는 본문이 아니다)
+    if (/^\d+\.\s/.test(text)) return;             // 다이얼로그 — 오조작 금지
+    await ptyLib.runTmux(['send-keys', '-t', target, 'C-u']);
+    await new Promise((r) => setTimeout(r, 140));
+  }
 }
 
 // 인용 이미지 경로(뒤 공백 포함)를 독립 조각으로 분리 — chatInput 의 조각 paste 용 순수 함수.

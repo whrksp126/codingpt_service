@@ -321,6 +321,15 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   ok("데몬은 이미지 마커를 합성하지 않는다(원문 토큰이 정본)", !/\[Image #\$\{/.test(ts) && /buf\.join\(''\)/.test(ts));
   ok("클라 매핑 = k번째 토큰 ↔ attachments[k](번호는 라벨로만)", /k번째 \[Image #N\] 토큰/.test(cv) && /label: mt\[0\]\.slice\(1, -1\)/.test(cv));
 
+  // 채팅 전송 계약(2026-07-30 실사고: TUI 잔재 위에 이어붙어 경로 이중 전송) —
+  //  데몬이 paste 전에 claude 컴포저 잔재를 C-u 로 비운다(다이얼로그/빈 컴포저는 불가침).
+  {
+    const ds2 = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");
+    ok("chat.input 이 컴포저 잔재를 청소한다", /clearComposerResidue\(target\)/.test(ds2) && /Try "/.test(ds2));
+    ok("다이얼로그 선택지는 청소하지 않는다", /\^\\d\+\\\.\\s/.test(ds2.match(/async function clearComposerResidue[\s\S]*?\n\}/)[0]));
+  }
+  ok("보낸 메시지의 인용 경로도 칩([EXT 파일명])", /data-kind="path"/.test(cv) && /PATH_RE/.test(cv));
+
   // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
   //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
   const ds = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");
