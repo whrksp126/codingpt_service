@@ -604,6 +604,8 @@ pub fn run() {
             bridge::ui_state_save,
             bridge::open_external,
             bridge::open_path,
+            bridge::clipboard_paths,
+            bridge::clipboard_image_png,
             bridge::open_privacy_settings,
             bridge::notification_permission,
             bridge::probe_folder_access,

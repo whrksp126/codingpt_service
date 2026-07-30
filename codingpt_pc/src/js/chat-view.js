@@ -190,11 +190,14 @@ export class ChatView {
       this._syncComposer();
       this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
     });
-    // 붙여넣기는 항상 plain text 로 — 서식 있는 HTML 이 들어오면 직렬화가 오염된다.
+    // 붙여넣기 — 파일 참조(Finder ⌘C) > 이미지 데이터(스크린샷) > plain text 우선순위.
+    //  파일/이미지는 네이티브 pasteboard 에서만 경로가 나온다(웹뷰 clipboardData 로는 불가) —
+    //  Finder 복사는 text/plain 에 파일명이 실릴 수 있어 경로 확인이 항상 선행돼야 한다.
+    //  plain text 만 execCommand insertText(undo 스택 유지) — 서식 HTML 은 직렬화를 오염시켜 배제.
     this.inputEl.addEventListener("paste", (e) => {
       e.preventDefault();
-      const txt = e.clipboardData?.getData("text/plain");
-      if (txt) { try { document.execCommand("insertText", false, txt); } catch (_) { /* noop */ } }
+      const txt = e.clipboardData?.getData("text/plain") || "";
+      this._pasteRouted(txt);
     });
     // 칩 클릭 — ✕=제거(네이티브 undo 대상 아님·즉시), 몸통=미리보기(라이트박스/시스템 열기).
     this.inputEl.addEventListener("click", (e) => {
@@ -612,6 +615,19 @@ export class ChatView {
     this._syncComposer();
     this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
     try { this.inputEl?.focus(); } catch (_) { /* noop */ }
+  }
+
+  // 붙여넣기 라우팅 — 네이티브 pasteboard 의 파일 참조가 최우선(칩), 다음 이미지 데이터(임시
+  //  PNG 저장 후 칩), 마지막이 plain text. 비동기 왕복(로컬 invoke, ~ms)이지만 preventDefault
+  //  이후 캐럿은 그대로라 삽입 위치가 유지된다.
+  async _pasteRouted(txt) {
+    let paths = [];
+    try { paths = await api.clipboardPaths(); } catch (_) { /* noop */ }
+    if (Array.isArray(paths) && paths.length) { this.addAttachments(paths); return; }
+    let img = null;
+    try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
+    if (img) { this.addAttachments([img]); return; }
+    if (txt) { try { document.execCommand("insertText", false, txt); } catch (_) { /* noop */ } }
   }
 
   // ── contenteditable 컴포저 헬퍼 ──

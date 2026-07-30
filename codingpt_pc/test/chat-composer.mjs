@@ -330,6 +330,22 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   }
   ok("보낸 메시지의 인용 경로도 칩([EXT 파일명])", /data-kind="path"/.test(cv) && /PATH_RE/.test(cv));
 
+  // 클립보드 파일/이미지 붙여넣기(2026-07-30 실측: Finder ⌘C 는 NSPasteboard 에 파일 참조로
+  //  실리고 웹뷰 clipboardData 로는 경로가 안 나온다 → 네이티브 pasteboard 를 invoke 로 조회.
+  //  Finder 복사는 text/plain 에 파일명이 실릴 수 있어 **경로 확인이 텍스트보다 선행**돼야 한다.)
+  {
+    ok("채팅 paste = 파일 참조 > 이미지 데이터 > 텍스트 라우팅",
+      /_pasteRouted/.test(cv) && /clipboardPaths/.test(cv) && /clipboardImagePng/.test(cv));
+    const pj = readFileSync(path.resolve(here, "../src/js/pane.js"), "utf8");
+    ok("터미널 paste 도 파일 참조 우선('경로' 인용 삽입 = OS 드롭과 동일 규칙)",
+      /clipboardPaths/.test(pj) && /clipboardImagePng/.test(pj) && /map\(shqp\)/.test(pj));
+    const br = readFileSync(path.resolve(here, "../src-tauri/src/bridge.rs"), "utf8");
+    ok("Rust 가 NSFilenamesPboardType 에서 절대경로를 읽는다(Swift 실측 계약)",
+      /NSFilenamesPboardType/.test(br) && /pub fn clipboard_paths/.test(br));
+    ok("이미지 데이터 = 임시 PNG 저장·파일 참조 있으면 무시(Finder 아이콘 이미지 함정) + TIFF 폴백",
+      /pub fn clipboard_image_png/.test(br) && /clipboard_paths\(\)\.is_empty\(\)/.test(br) && /public\.tiff/.test(br));
+  }
+
   // 데몬 — 조각 paste(격리 실측: 이미지 경로는 "그 자체"가 paste 될 때만 [Image #N] 변환.
   //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
   const ds = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");

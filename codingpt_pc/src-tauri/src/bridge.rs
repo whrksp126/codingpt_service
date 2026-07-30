@@ -801,6 +801,129 @@ pub fn open_path(path: String) -> Result<(), String> {
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
 }
 
+// NSData → Vec<u8> (macOS 클립보드 헬퍼).
+#[cfg(target_os = "macos")]
+unsafe fn nsdata_bytes(d: *mut objc2::runtime::AnyObject) -> Option<Vec<u8>> {
+    use objc2::msg_send;
+    if d.is_null() {
+        return None;
+    }
+    let len: usize = msg_send![d, length];
+    let ptr: *const u8 = msg_send![d, bytes];
+    if len == 0 || ptr.is_null() {
+        return None;
+    }
+    Some(std::slice::from_raw_parts(ptr, len).to_vec())
+}
+
+// 클립보드의 파일 참조(Finder ⌘C/⌘X 등) → 절대경로 목록. 파일 참조가 없으면 빈 배열.
+//  실측(2026-07-30): Finder 파일 복사는 NSPasteboard 에 public.file-url + NSFilenamesPboardType
+//  (경로 NSArray)로 실린다 — 웹뷰 clipboardData 로는 경로가 안 나와 네이티브로 읽는다.
+#[tauri::command]
+pub fn clipboard_paths() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        use objc2_foundation::NSString;
+        let pb: *mut AnyObject = msg_send![objc2::class!(NSPasteboard), generalPasteboard];
+        if pb.is_null() {
+            return Vec::new();
+        }
+        let t = NSString::from_str("NSFilenamesPboardType");
+        let arr: *mut AnyObject = msg_send![pb, propertyListForType: &*t];
+        if arr.is_null() {
+            return Vec::new();
+        }
+        let is_arr: bool = msg_send![arr, isKindOfClass: objc2::class!(NSArray)];
+        if !is_arr {
+            return Vec::new();
+        }
+        let n: usize = msg_send![arr, count];
+        let mut out = Vec::new();
+        for i in 0..n.min(64) {
+            let s: *mut AnyObject = msg_send![arr, objectAtIndex: i];
+            if s.is_null() {
+                continue;
+            }
+            let is_str: bool = msg_send![s, isKindOfClass: objc2::class!(NSString)];
+            if is_str {
+                out.push((*(s as *mut NSString)).to_string());
+            }
+        }
+        out
+    }
+    #[cfg(not(target_os = "macos"))]
+    Vec::new()
+}
+
+// 클립보드의 이미지 데이터(스크린샷 ⌘⇧^4, 브라우저 이미지 복사 등) → 임시 PNG 파일로 저장 후
+//  경로 반환. 이미지가 없으면 null. 파일 참조가 함께 있으면(=복사한 파일 — Finder 가 아이콘
+//  이미지를 얹는 경우가 있다) 파일 쪽이 정본이므로 여기서는 무시한다.
+#[tauri::command]
+pub fn clipboard_image_png() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        use objc2_foundation::NSString;
+        if !clipboard_paths().is_empty() {
+            return None;
+        }
+        let pb: *mut AnyObject = msg_send![objc2::class!(NSPasteboard), generalPasteboard];
+        if pb.is_null() {
+            return None;
+        }
+        let png_t = NSString::from_str("public.png");
+        let d: *mut AnyObject = msg_send![pb, dataForType: &*png_t];
+        let mut bytes = nsdata_bytes(d);
+        if bytes.is_none() {
+            // PNG 미제공 소스(일부 앱은 TIFF 만) — NSBitmapImageRep 으로 PNG 재인코딩.
+            let tiff_t = NSString::from_str("public.tiff");
+            let td: *mut AnyObject = msg_send![pb, dataForType: &*tiff_t];
+            if !td.is_null() {
+                let rep: *mut AnyObject =
+                    msg_send![objc2::class!(NSBitmapImageRep), imageRepWithData: td];
+                if !rep.is_null() {
+                    let props: *mut AnyObject = msg_send![objc2::class!(NSDictionary), dictionary];
+                    // 4 = NSBitmapImageFileTypePNG
+                    let pd: *mut AnyObject =
+                        msg_send![rep, representationUsingType: 4usize, properties: props];
+                    bytes = nsdata_bytes(pd);
+                }
+            }
+        }
+        let bytes = bytes?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return None; // 비정상 크기 방어
+        }
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        let p = std::env::temp_dir().join(format!(
+            "cpt-paste-{}-{:06}.png",
+            ts.as_secs(),
+            ts.subsec_micros() % 1_000_000
+        ));
+        std::fs::write(&p, &bytes).ok()?;
+        Some(p.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+// 수동 실측용 스모크(클립보드 상태 의존이라 CI 부적합 — 항상 ignored).
+//  실행: 클립보드에 파일/이미지를 올린 뒤 `cargo test clipboard_smoke -- --ignored --nocapture`
+#[cfg(all(test, target_os = "macos"))]
+mod clipboard_tests {
+    #[test]
+    #[ignore]
+    fn clipboard_smoke() {
+        println!("paths: {:?}", super::clipboard_paths());
+        println!("image: {:?}", super::clipboard_image_png());
+    }
+}
+
 // 네이티브 알림(OSC/벨 → macOS 알림). 프론트 notifications.js 에서 호출.
 #[tauri::command]
 pub fn notify(app: AppHandle, title: String, body: String) {

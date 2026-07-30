@@ -1559,15 +1559,29 @@ export class PaneView {
     //  (버그: xterm 자체 paste 핸들러 onData→_write 와, textarea 에 붙은 텍스트의 input 델타→_write 가
     //   동시에 발화해 붙여넣기가 2번 들어갔다. preventDefault 로 네이티브 삽입(→input) 차단 +
     //   stopImmediatePropagation 으로 xterm paste 핸들러 차단 → 여기서 한 번만 보낸다.)
+    //  우선순위: 파일 참조(Finder ⌘C → '경로' 인용 삽입, OS 드롭과 동일 규칙) > 이미지 데이터
+    //  (스크린샷 → 임시 PNG 경로) > plain text. Finder 복사는 text/plain 에 파일명이 실릴 수
+    //  있어 경로 확인이 텍스트보다 항상 선행돼야 한다(네이티브 pasteboard 를 invoke 로 조회).
+    const shqp = (p) => "'" + String(p).replace(/'/g, "'\\''") + "'"; // os-drop.shq 사본(순환 import 회피)
     const onPaste = (e) => {
       if (e.target !== ta) return;
       e.preventDefault(); e.stopImmediatePropagation();
       const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
-      if (!text) return;
-      let t = text.replace(/\r?\n/g, "\r");                         // xterm 규칙: 개행 → CR
-      if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~"; // 앱이 bracketed paste 지원 시 감쌈
-      this._write(t);
-      resetBuf();                                                   // textarea 미변경 → 미러(_sentBuf) 동기 유지
+      (async () => {
+        let paths = [];
+        try { paths = await api.clipboardPaths(); } catch (_) { /* noop */ }
+        if (!Array.isArray(paths) || !paths.length) {
+          let img = null;
+          try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
+          if (img) paths = [img];
+        }
+        if (paths.length) { this.insertText(paths.map(shqp).join(" ") + " "); return; }
+        if (!text) return;
+        let t = text.replace(/\r?\n/g, "\r");                       // xterm 규칙: 개행 → CR
+        if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~"; // 앱이 bracketed paste 지원 시 감쌈
+        this._write(t);
+        resetBuf();                                                 // textarea 미변경 → 미러(_sentBuf) 동기 유지
+      })();
     };
     // xterm CompositionHelper 차단 — 조합 표시는 위 델타 에코가 터미널 안에서 직접 보여준다(모바일 동일).
     const onComp = (e) => { if (e.target === ta) e.stopImmediatePropagation(); };

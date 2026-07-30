@@ -107,6 +107,8 @@ export const api = {
   // ── 외부 브라우저 열기 ──
   openExternal: (url) => invoke("open_external", { url }),
   openPath: (path) => invoke("open_path", { path }),
+  clipboardPaths: () => invoke("clipboard_paths"),
+  clipboardImagePng: () => invoke("clipboard_image_png"),
   openPrivacySettings: () => invoke("open_privacy_settings"), // macOS 전체 디스크 접근 설정(온보딩)
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
   probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents → 허용 여부(최초엔 macOS 팝업)
