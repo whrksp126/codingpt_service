@@ -46,3 +46,4 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }
 block2 = "0.6"
+objc2-user-notifications = { version = "0.3", features = ["block2", "UNNotificationSettings", "UNUserNotificationCenter"] }

@@ -146,17 +146,20 @@ function renderStep() {
         <div class="lg-head">${c.title}</div>
         <div class="lg-perm-benefit">${c.benefit}</div>
         ${p.id === "notification" ? `
-          <div id="lgNotifWarning"></div>
-          <div class="notif-onb-controls">
+          <div id="lgNotifWarning" class="notif-warning">
+            <span class="notif-warning-copy"><b>macOS에서 CodingPT 알림을 켜주세요.</b><small>알림이 켜지면 알림음과 테스트를 설정할 수 있어요.</small></span>
+            <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
+          </div>
+          <div id="lgNotifControls" class="notif-onb-controls hidden">
             <label><span>알림음</span><select id="lgNotifSound" class="sett-select">${soundOptionsHtml()}</select></label>
             <button id="lgNotifTest" class="sett-btn">테스트 알림 보내기</button>
-            <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
+            <button id="lgOpenNotifSettingsReady" class="sett-btn">시스템 설정 열기</button>
           </div>` : ""}
         <div id="lgPermAlt" class="lg-perm-alt"></div>
       </main>
       <footer class="lg-wizard-foot">
         <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
-        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}">${p.id === "notification" && permGranted("notification") ? "계속" : "허용"}</button>
+        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}"${p.id === "notification" ? " disabled" : ""}>${p.id === "notification" ? "알림 상태 확인 중…" : "허용"}</button>
       </footer>
     </div>`;
   const btn = el.querySelector("#lgAllow");
@@ -165,28 +168,31 @@ function renderStep() {
     bindSoundSelect(el.querySelector("#lgNotifSound"));
     const test = el.querySelector("#lgNotifTest");
     const openSettings = el.querySelector("#lgOpenNotifSettings");
+    const openSettingsReady = el.querySelector("#lgOpenNotifSettingsReady");
     const warning = el.querySelector("#lgNotifWarning");
+    const controls = el.querySelector("#lgNotifControls");
     const paintNotifPermission = (value) => {
       const granted = value === "granted";
       if (granted) markPermGranted("notification");
-      btn.textContent = granted ? "계속" : "허용";
-      warning.innerHTML = granted ? "" : `
-        <div class="notif-warning">
-          <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
-        </div>`;
+      btn.textContent = granted ? "계속" : "알림을 켠 뒤 계속";
+      btn.disabled = !granted;
+      warning.classList.toggle("hidden", granted);
+      controls.classList.toggle("hidden", !granted);
     };
-    openSettings?.addEventListener("click", async () => {
-      openSettings.disabled = true;
-      openSettings.textContent = "여는 중…";
+    const bindOpenSettings = (open) => open?.addEventListener("click", async () => {
+      open.disabled = true;
+      open.textContent = "여는 중…";
       try {
         await openNotificationSettingsAndWatch(paintNotifPermission);
-        openSettings.textContent = "시스템 설정 열림";
+        open.textContent = "시스템 설정 열림";
       } catch (_) {
-        openSettings.textContent = "다시 시도";
+        open.textContent = "다시 시도";
       } finally {
-        openSettings.disabled = false;
+        open.disabled = false;
       }
     });
+    bindOpenSettings(openSettings);
+    bindOpenSettings(openSettingsReady);
     refreshNotificationPermission().then(paintNotifPermission);
     test?.addEventListener("click", async () => {
       test.disabled = true;

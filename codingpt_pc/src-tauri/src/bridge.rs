@@ -755,22 +755,90 @@ pub fn open_files_privacy_settings() -> Result<(), String> {
     Ok(())
 }
 
-// 알림 권한 요청(온보딩) — 릴리스 .app 에선 macOS 허용 배너가 뜨고, 허용 여부를 돌려준다.
+#[cfg(target_os = "macos")]
+fn macos_notification_permission_state() -> String {
+    use block2::RcBlock;
+    use objc2_user_notifications::{
+        UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter,
+    };
+    use std::{ptr::NonNull, sync::mpsc, time::Duration};
+
+    let (tx, rx) = mpsc::sync_channel(1);
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let block = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+        let status = unsafe { settings.as_ref() }.authorizationStatus();
+        let value = if status == UNAuthorizationStatus::Authorized
+            || status == UNAuthorizationStatus::Provisional
+            || status == UNAuthorizationStatus::Ephemeral
+        {
+            "granted"
+        } else if status == UNAuthorizationStatus::Denied {
+            "denied"
+        } else {
+            "prompt"
+        };
+        let _ = tx.send(value.to_string());
+    });
+    center.getNotificationSettingsWithCompletionHandler(&block);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap_or_else(|_| "unknown".into())
+}
+
+#[cfg(target_os = "macos")]
+fn request_macos_notification_permission() -> bool {
+    use block2::RcBlock;
+    use objc2::runtime::Bool;
+    use objc2_foundation::NSError;
+    use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
+    use std::{sync::mpsc, time::Duration};
+
+    let (tx, rx) = mpsc::sync_channel(1);
+    let center = UNUserNotificationCenter::currentNotificationCenter();
+    let block = RcBlock::new(move |granted: Bool, _error: *mut NSError| {
+        let _ = tx.send(granted.as_bool());
+    });
+    center.requestAuthorizationWithOptions_completionHandler(
+        UNAuthorizationOptions::Alert | UNAuthorizationOptions::Sound | UNAuthorizationOptions::Badge,
+        &block,
+    );
+    rx.recv_timeout(Duration::from_secs(30)).unwrap_or(false)
+}
+
+// 알림 권한 요청(온보딩) — 데스크톱에서 항상 Granted를 돌려주는 Tauri 플러그인 판정은 쓰지 않는다.
 #[tauri::command]
-pub fn notification_permission(app: AppHandle) -> bool {
+pub fn notification_permission(_app: AppHandle) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let state = macos_notification_permission_state();
+        if state == "granted" {
+            return true;
+        }
+        if state == "prompt" {
+            return request_macos_notification_permission();
+        }
+        return false;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
     use tauri_plugin_notification::{NotificationExt, PermissionState};
-    let notif = app.notification();
+    let notif = _app.notification();
     if matches!(notif.permission_state(), Ok(PermissionState::Granted)) {
         return true;
     }
     matches!(notif.request_permission(), Ok(PermissionState::Granted))
+    }
 }
 
 // 설정 화면은 열기만 해도 OS 권한 팝업을 띄우면 안 된다. 현재 상태만 읽는 별도 커맨드.
 #[tauri::command]
-pub fn notification_permission_state(app: AppHandle) -> String {
+pub fn notification_permission_state(_app: AppHandle) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        return macos_notification_permission_state();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
     use tauri_plugin_notification::{NotificationExt, PermissionState};
-    match app.notification().permission_state() {
+    match _app.notification().permission_state() {
         Ok(PermissionState::Granted) => "granted",
         Ok(PermissionState::Denied) => "denied",
         Ok(PermissionState::Prompt) => "prompt",
@@ -778,6 +846,7 @@ pub fn notification_permission_state(app: AppHandle) -> String {
         _ => "unknown",
     }
     .into()
+    }
 }
 
 // 거부된 알림 권한은 앱에서 다시 요청해도 macOS가 팝업을 내지 않는다 → 앱별 설정으로 복구.

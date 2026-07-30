@@ -245,6 +245,10 @@ ok(/\{ id: "notification", label: "알림 설정" \}/.test(pcGate)
 ok(/id="lgOpenNotifSettings"/.test(pcGate)
   && !/warning\.querySelector\("#lgOpenNotifSettings"\)/.test(pcGate),
   'PC: 시스템 설정 열기 버튼은 알림 권한 상태와 무관하게 항상 보인다');
+ok(/id="lgNotifControls" class="notif-onb-controls hidden"/.test(pcGate)
+  && /controls\.classList\.toggle\("hidden", !granted\)/.test(pcGate)
+  && /btn\.disabled = !granted/.test(pcGate),
+  'PC: macOS 알림이 OFF면 소리·테스트·계속을 잠그고 ON 감지 후에만 연다');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');

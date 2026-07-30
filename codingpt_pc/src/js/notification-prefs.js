@@ -54,25 +54,36 @@ export async function refreshNotificationPermission() {
 // 바꾼 권한을 즉시 다시 읽어 경고/버튼을 갱신한다(재실행·수동 새로고침 불필요).
 export async function openNotificationSettingsAndWatch(onState) {
   let active = true;
-  const onFocus = () => {
+  let poll = null;
+  let expiry = null;
+  const cleanup = () => {
     if (!active) return;
     active = false;
     window.removeEventListener("focus", onFocus);
-    setTimeout(async () => onState?.(await refreshNotificationPermission()), 250);
+    if (poll) clearInterval(poll);
+    if (expiry) clearTimeout(expiry);
+  };
+  const check = async () => {
+    if (!active) return;
+    const state = await refreshNotificationPermission();
+    onState?.(state);
+    if (state === "granted") cleanup();
+  };
+  const onFocus = () => {
+    if (!active) return;
+    setTimeout(check, 250);
   };
   window.addEventListener("focus", onFocus);
   try {
     await api.openNotificationSettings();
-    // 돌아오지 않는 경우 리스너가 영구히 남지 않게 제한한다.
-    const expiry = setTimeout(() => {
-      if (!active) return;
-      active = false;
-      window.removeEventListener("focus", onFocus);
-    }, 5 * 60 * 1000);
+    // 시스템 설정이 전면에 있는 동안에도 실제 macOS 상태를 감시한다. ON 되는 순간 소리/테스트
+    // 컨트롤을 열어 주며, 앱으로 돌아올 때까지 기다리지 않는다.
+    poll = setInterval(check, 750);
+    poll?.unref?.();
+    expiry = setTimeout(cleanup, 5 * 60 * 1000);
     expiry?.unref?.(); // Node 계약 테스트의 event loop는 붙들지 않는다(브라우저에선 숫자라 no-op).
   } catch (e) {
-    active = false;
-    window.removeEventListener("focus", onFocus);
+    cleanup();
     throw e;
   }
 }

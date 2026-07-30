@@ -2,6 +2,7 @@
 const calls = [];
 const store = new Map();
 const windowListeners = new Map();
+let notificationState = null;
 globalThis.localStorage = {
   getItem: (k) => store.get(k) ?? null,
   setItem: (k, v) => store.set(k, String(v)),
@@ -12,6 +13,7 @@ globalThis.window = {
       invoke: async (cmd, args) => {
         calls.push([cmd, args]);
         if (cmd === "notification_permission") return true;
+        if (cmd === "notification_permission_state") return notificationState;
         return null;
       },
     },
@@ -46,6 +48,9 @@ windowListeners.get("focus")?.();
 await new Promise((resolve) => setTimeout(resolve, 300));
 ok("앱 복귀 시 OS 권한 다시 확인", calls.at(-1)?.[0] === "notification_permission_state");
 ok("복귀 후 새 권한 상태를 화면에 전달", returnedState === null);
+notificationState = "granted";
+await new Promise((resolve) => setTimeout(resolve, 800));
+ok("시스템 설정에서 ON 되면 앱 복귀 전에도 감지", returnedState === "granted");
 
 if (fail) process.exit(1);
 console.log("\nALL PASS");
