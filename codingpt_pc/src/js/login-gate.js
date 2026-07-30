@@ -23,6 +23,7 @@ let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 �
 // 반면 macOS 권한(TCC 폴더 접근·알림)은 **앱(머신) 단위**다. 그래도 새 계정 온보딩에서는 알림음
 // 선택·테스트를 반드시 보여준다. 권한이 이미 있으면 [계속]으로 통과하고 OS 팝업만 생략한다.
 const setupKey = () => (state.me && state.me.id != null ? `cpt.setupDone.${state.me.id}` : null);
+const setupProgressKey = () => (state.me && state.me.id != null ? `cpt.setupProgress.${state.me.id}` : null);
 // 권한 허용 기록 — 프로브 성공 시에만 기록한다(모든 프롬프트는 우리 버튼에서 나가므로 이 기록이
 //  곧 "허용됨"의 로컬 정본이다. 사용자가 시스템 설정에서 뒤로 껐다면 다음 실제 접근이 실패하며
 //  settings 의 허용 버튼이 여전히 있다 — 온보딩은 유도 장치이지 판정 정본이 아니다).
@@ -75,6 +76,28 @@ export function updateLoginGate() {
   el.classList.toggle("hidden", !show);
   if (!show) stopGateLogin();
   if (need && step === "setup") { step = "welcome"; renderStep(); } // 재로그인 필요 상태로 회귀
+}
+
+// 앱을 ⌘Q로 완전히 종료해도 미완료 셋업을 다시 연다. 예전에는 pendingSetup이 프로세스
+// 메모리에만 있어 재실행 시 페어링된 사용자는 곧바로 워크스페이스로 빠졌다.
+export function restorePendingSetup() {
+  if (!state.daemon?.paired || !state.authChecked || !state.me) return false;
+  const doneKey = setupKey();
+  let done = false;
+  try { done = !!doneKey && localStorage.getItem(doneKey) === "1"; } catch (_) {}
+  if (done) {
+    pendingSetup = false;
+    return false;
+  }
+  pendingSetup = true;
+  step = "setup";
+  permQueue = requiredPerms();
+  let saved = 0;
+  try { saved = Number.parseInt(localStorage.getItem(setupProgressKey()) || "0", 10); } catch (_) {}
+  permIdx = Number.isFinite(saved) ? Math.max(0, Math.min(saved, permQueue.length - 1)) : 0;
+  renderStep();
+  updateLoginGate();
+  return true;
 }
 
 // ── 렌더 ──────────────────────────────────────────────────────────────
@@ -185,7 +208,14 @@ function renderStep() {
     if (ok) {
       markPermGranted(p.id);
       btn.textContent = "허용됐어요 ✓";
-      setTimeout(() => { permIdx += 1; renderStep(); }, 450); // ✓ 를 잠깐 보여주고 다음 슬라이드
+      setTimeout(() => {
+        permIdx += 1;
+        const progressKey = setupProgressKey();
+        if (progressKey) {
+          try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {}
+        }
+        renderStep();
+      }, 450); // ✓ 를 잠깐 보여주고 다음 슬라이드
       return;
     }
     // 거부/실패 — 승인될 때까지 재시도만 허용한다.
@@ -215,6 +245,8 @@ function renderStep() {
 function finishSetup() {
   const k = setupKey();
   if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} }
+  const progressKey = setupProgressKey();
+  if (progressKey) { try { localStorage.removeItem(progressKey); } catch (_) {} }
   pendingSetup = false;
   updateLoginGate();
   import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
@@ -296,6 +328,8 @@ async function pollGateLogin() {
       step = "setup";
       permQueue = requiredPerms();
       permIdx = 0;
+      const progressKey = setupProgressKey();
+      if (progressKey) { try { localStorage.setItem(progressKey, "0"); } catch (_) {} }
       api.autostartEnable().catch(() => { /* 설정 > 일반에서 다시 켤 수 있다 */ });
       renderStep();
       S.emit(); // → render() → updateLoginGate() (pendingSetup 이라 게이트 유지)

@@ -11,7 +11,7 @@ import {
   focusCurrentPane,
 } from "./workspace-view.js";
 import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
-import { mountLoginGate, updateLoginGate } from "./login-gate.js";
+import { mountLoginGate, restorePendingSetup, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
 import { startE2ee } from "./e2ee.js";
@@ -100,7 +100,8 @@ api.onDaemonChanged(async () => {
   // 로그인/계정 전환 → 새 계정 기준으로 워크스페이스·프로필·기기 새로고침. loadWorkspaces 는 활성
   //  워크스페이스가 새 목록에 없으면 자동으로 첫 항목으로 전환하므로 이전 계정 터미널이 정리된다.
   await S.loadWorkspaces().catch(() => {});
-  S.loadMe();
+  await S.loadMe();
+  restorePendingSetup();
   S.loadDevices();
   // 재페어링은 새 device 행을 만들 수 있다 → 옛 기기에 묶인 이 PC 워크스페이스를 즉시 재클레임
   //  (안 하면 터미널이 죽은 기기로 시작 요청 → 409 DAEMON_OFFLINE 영구화).
@@ -187,7 +188,8 @@ function startPreviewShieldWatch() {
   state.daemon = await api.daemonStatus().catch(() => null);
   state.paired = !!state.daemon?.paired;
   await S.loadWorkspaces();
-  S.loadMe();
+  await S.loadMe();
+  const setupPending = restorePendingSetup();
   S.loadDevices();
   S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
   S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
@@ -201,7 +203,7 @@ function startPreviewShieldWatch() {
   refreshWsMeta();
   // 첫 실행 1스텝: "이 PC 에서 찾은 에이전트 — 연동할까요?" (한 번만, 데몬이 기록).
   //  페어링 전이면 묻지 않는다(설정 저장 대상이 daemon.json 이라 페어링이 선행돼야 한다).
-  if (state.paired) maybeShowOnboarding().catch(() => {});
+  if (state.paired && !setupPending) maybeShowOnboarding().catch(() => {});
 
   // 백그라운드 폴링: 데몬 상태 / 워크스페이스 메타(브랜치·포트).
   setInterval(async () => {

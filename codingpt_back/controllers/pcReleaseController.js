@@ -29,6 +29,16 @@ async function download(req, res) {
       return res.status(400).json({ message: '잘못된 경로' });
     }
     const f = await pcReleaseService.streamFile(rel);
+    // CodingPT.dmg는 릴리스 때마다 내용이 바뀌는 최신판 별칭이다. CDN이 이 경로를 캐시하면
+    // 새로 설치해도 구버전이 내려가므로 모든 캐시 계층에 저장 금지를 명시한다.
+    if (rel === 'CodingPT.dmg') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('CDN-Cache-Control', 'no-store');
+      res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store');
+      res.setHeader('Surrogate-Control', 'no-store');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
     res.setHeader('Content-Type', f.contentType);
     if (f.contentLength) res.setHeader('Content-Length', f.contentLength);
     res.setHeader('Content-Disposition', `attachment; filename="${rel.split('/').pop()}"`);
