@@ -108,6 +108,7 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?
         .ok_or("이미 최신 버전입니다.")?;
+    authorize_app_update(&update.version.to_string());
     let handle = app.clone();
     // on_chunk 콜백의 chunk 는 "이번 조각의 바이트(델타)"라 그대로 total 로 나누면 언제나 ~0% 다
     //  (프론트가 chunk/total 로 계산 → 0 에서 안 올라가는 버그). 여기서 누적해 "받은 총 바이트"로 보낸다.
@@ -122,7 +123,12 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
             || {},
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            if let Some(fingerprint) = current_install_fingerprint() {
+                write_install_state(&fingerprint, &app.package_info().version.to_string(), None);
+            }
+            e.to_string()
+        })?;
     // 데몬 자식 정리 후 재시작(고아 방지 — quit_app 과 동일 규율).
     if let Some(state) = app.try_state::<Daemon>() {
         *state.should_run.lock().unwrap() = false;
@@ -159,6 +165,137 @@ struct Status {
 // ~/.codingpt/daemon.json (데몬이 pair 시 저장) 경로.
 fn config_path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".codingpt").join("daemon.json"))
+}
+
+fn install_state_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".codingpt").join("pc-install.json"))
+}
+
+// 앱 번들 삭제 후 DMG 재설치를 macOS가 알려주는 제거 훅은 없다. 대신 실행 파일 inode를 설치 지문으로
+// 기록한다. 같은 앱의 재실행에서는 유지되고 Finder가 DMG에서 앱을 다시 복사하면 바뀐다.
+// 자동 업데이트도 inode를 바꾸므로 update_install이 목표 버전을 먼저 승인해 두고 재시작한다.
+#[cfg(unix)]
+fn current_install_fingerprint() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let exe = std::env::current_exe().ok()?;
+    let m = std::fs::metadata(exe).ok()?;
+    Some(format!("{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime()))
+}
+
+#[cfg(not(unix))]
+fn current_install_fingerprint() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let m = std::fs::metadata(exe).ok()?;
+    let modified = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some(format!("{}:{modified}", m.len()))
+}
+
+fn write_install_state(fingerprint: &str, version: &str, authorized_version: Option<&str>) {
+    let Some(path) = install_state_path() else { return };
+    let Some(parent) = path.parent() else { return };
+    if std::fs::create_dir_all(parent).is_err() { return }
+    let tmp = path.with_extension("json.tmp");
+    let body = serde_json::json!({
+        "fingerprint": fingerprint,
+        "version": version,
+        "authorizedVersion": authorized_version,
+    });
+    if std::fs::write(&tmp, body.to_string()).is_ok() {
+        let _ = std::fs::rename(tmp, path);
+    }
+}
+
+fn authorize_app_update(version: &str) {
+    let Some(fingerprint) = current_install_fingerprint() else { return };
+    let current_version = install_state_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from))
+        .unwrap_or_default();
+    write_install_state(&fingerprint, &current_version, Some(version));
+}
+
+#[cfg(not(debug_assertions))]
+fn clear_local_account_credentials() {
+    let Some(path) = config_path() else { return };
+    let current = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+    let Some(current) = current else { return };
+    let mut keep = serde_json::Map::new();
+    for key in ["serverUrl", "workspaceRoot"] {
+        if let Some(value) = current.get(key) {
+            keep.insert(key.to_string(), value.clone());
+        }
+    }
+    if keep.is_empty() {
+        let _ = std::fs::remove_file(path);
+    } else {
+        let tmp = path.with_extension("json.tmp");
+        if std::fs::write(&tmp, serde_json::Value::Object(keep).to_string()).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            }
+            let _ = std::fs::rename(tmp, path);
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        let _ = std::fs::remove_file(home.join(".codingpt").join("e2ee.json"));
+    }
+}
+
+#[allow(dead_code)] // debug 빌드에서는 실제 재설치 판정을 비활성화하지만 단위 테스트는 이 순수 규칙을 검증한다.
+fn is_manual_reinstall(old_fingerprint: &str, fingerprint: &str, authorized_version: Option<&str>, version: &str) -> bool {
+    old_fingerprint != fingerprint && authorized_version != Some(version)
+}
+
+// 최초 도입 실행은 기존 사용자를 로그아웃시키지 않고 지문만 등록한다. 이후 앱 번들이 바뀌었는데
+// update_install이 그 버전을 승인하지 않았다면 수동 재설치이므로 계정 연결을 해제한다.
+fn reconcile_app_install(_version: &str) {
+    #[cfg(debug_assertions)]
+    return;
+
+    #[cfg(not(debug_assertions))]
+    {
+        let Some(fingerprint) = current_install_fingerprint() else { return };
+        let previous = install_state_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
+        let Some(previous) = previous else {
+            write_install_state(&fingerprint, _version, None);
+            return;
+        };
+        let old_fingerprint = previous.get("fingerprint").and_then(|v| v.as_str()).unwrap_or("");
+        let authorized_version = previous.get("authorizedVersion").and_then(|v| v.as_str());
+        if is_manual_reinstall(old_fingerprint, &fingerprint, authorized_version, _version) {
+            clear_local_account_credentials();
+            applog("수동 앱 재설치 감지 — 로컬 계정 연결 해제");
+        }
+        write_install_state(&fingerprint, _version, None);
+    }
+}
+
+#[cfg(test)]
+mod install_tests {
+    use super::is_manual_reinstall;
+
+    #[test]
+    fn same_bundle_keeps_account() {
+        assert!(!is_manual_reinstall("fp-a", "fp-a", None, "0.1.193"));
+    }
+
+    #[test]
+    fn updater_replacement_keeps_account() {
+        assert!(!is_manual_reinstall("fp-a", "fp-b", Some("0.1.193"), "0.1.193"));
+    }
+
+    #[test]
+    fn dmg_reinstall_clears_account() {
+        assert!(is_manual_reinstall("fp-a", "fp-b", None, "0.1.193"));
+        assert!(is_manual_reinstall("fp-a", "fp-b", Some("0.1.192"), "0.1.193"));
+    }
 }
 
 fn read_config() -> Option<serde_json::Value> {
@@ -680,6 +817,7 @@ pub fn run() {
         ])
         .setup(|app| {
             let handle = app.handle().clone();
+            reconcile_app_install(&app.package_info().version.to_string());
 
             // 풀 윈도우 앱: Dock 아이콘 표시(Regular). 메뉴바 트레이는 백그라운드 실행용으로 병행.
             #[cfg(target_os = "macos")]
