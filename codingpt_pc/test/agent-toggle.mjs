@@ -272,6 +272,10 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
   const tgRule = rule(".pane-mode-toggle");
   ok("PC 토글은 pane 본문 안 우측 상단 절대배치",
     /position:\s*absolute/.test(tgRule) && /top:\s*\d/.test(tgRule) && /right:\s*\d/.test(tgRule), tgRule.replace(/\s+/g, " "));
+  const chatScrollRule = rule(".chat-scroll");
+  ok("채팅 본문은 토글 아래에서 전체 폭을 쓴다(우측 44px 안전지대 금지)",
+    /padding:\s*44px 14px 10px/.test(chatScrollRule) && !/44px 10px 14px/.test(chatScrollRule),
+    chatScrollRule.replace(/\s+/g, " "));
   ok("★ `.pane-body` 에 position: relative(없으면 토글이 탭바 `.pane-head` 를 덮는다 — 사고 ①)",
     /\.pane-body \{[^}]*position:\s*relative/.test(css));
   ok("토글 노드는 pane 본문에 붙는다(this.body)",

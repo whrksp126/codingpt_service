@@ -38,7 +38,7 @@ let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
   { key: "general", label: "일반", group: "시작", icon: "sliders", keywords: "자동 실행 시작 로그인" },
-  { key: "agents", label: "에이전트", group: "작업 환경", icon: "tools", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
+  { key: "agents", label: "에이전트", group: "작업 환경", icon: "terminal", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
   { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },

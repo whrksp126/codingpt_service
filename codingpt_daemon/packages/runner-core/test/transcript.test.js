@@ -807,6 +807,10 @@ test('etimeToMs — ps etime 형식 전수([[dd-]hh:]mm:ss)', () => {
   assert.strictEqual(T._internals.etimeToMs(''), null);
 });
 
+test('Codex 신뢰 확인 지연 — 프로세스 시작 뒤 2분 8초 후 생성된 rollout도 매칭 범위', () => {
+  assert.ok(T._internals.PROC_SLOP_MS >= 5 * 60 * 1000);
+});
+
 // 死 엔트리(`<ws>|`)가 점유로 세지면 살아있는 세션이 근거 없이 배제된다 — 사용자 기기에 실제로 있었다.
 test('claimedSessions — tid 빈 死 엔트리는 점유로 세지 않는다', async () => {
   const ws = fakeWs();

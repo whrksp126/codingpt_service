@@ -1205,11 +1205,11 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 }
 .chat-banner.warn { color: var(--warn); }
 .chat-banner.hidden { display: none; }
-/* 우측 여백 44px = 본문 위에 떠 있는 모드 토글(right 12 + 폭 26)이 말풍선 글자를 덮지 않게 하는 안전지대.
-   터미널은 글자가 가려져도 스크롤로 다시 볼 수 있지만, 채팅은 첫 말풍선이 영구히 가려진다(실측). */
+/* 토글은 absolute로 떠 있고 본문 폭을 차지하지 않는다. 첫 줄과만 겹치지 않도록 세로 공간을 확보한다.
+   우측 전체에 안전지대를 두면 긴 대화 내내 본문이 좁아져 TUI보다 답답해진다. */
 .chat-scroll {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
-  padding: 14px 44px 10px 14px; display: flex; flex-direction: column; gap: 14px;
+  padding: 44px 14px 10px; display: flex; flex-direction: column; gap: 14px;
 }
 .chat-empty, .chat-headhint { align-self: center; color: var(--dim); font-size: 12px; padding: 6px 0; }
 /* 작업 중 한 줄 — 대화 맨 아래. 메시지가 아니라 상태 표시라 말풍선을 쓰지 않는다. */
