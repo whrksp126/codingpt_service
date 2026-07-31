@@ -16,6 +16,7 @@ let session = null; // { code, secret, expiresAt, poll, busy }
 let step = "welcome"; // 'welcome' | 'login' | 'setup'
 let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 노출
 let setupUpdate = null; // { version, progress } — 로그인 전 자동 업데이트 전용 표면
+let forceInstallOnboarding = false; // 재설치 실행에서는 WebKit이 되살린 옛 완료 키도 무시
 // (2026-07-28 2차 개정: 자동 실행 토글은 게이트에서 제거 — 기본 켬, 끄기는 설정 > 일반의 토글)
 
 // ── 셋업/권한의 스코프 (2026-07-28 사용자 실사고로 개정) ─────────────────────
@@ -58,6 +59,15 @@ export function mountLoginGate(container) {
   el.className = "login-gate hidden";
   el.setAttribute("data-tauri-drag-region", ""); // 게이트 상태에서도 창 이동 가능
   renderStep();
+}
+
+export function resetOnboardingForInstall() {
+  forceInstallOnboarding = true;
+  const prefixes = ["cpt.setupDone.", "cpt.setupProgress.", "cpt.perm.", "cpt.agentsOnboarded."];
+  for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+    const key = localStorage.key(i);
+    if (key && prefixes.some((prefix) => key.startsWith(prefix))) localStorage.removeItem(key);
+  }
 }
 
 // 로그인 여부 판정.
@@ -110,7 +120,7 @@ export function restorePendingSetup() {
   const doneKey = setupKey();
   let done = false;
   try { done = !!doneKey && localStorage.getItem(doneKey) === "1"; } catch (_) {}
-  if (done) {
+  if (done && !forceInstallOnboarding) {
     pendingSetup = false;
     return false;
   }
@@ -345,7 +355,9 @@ function finishSetup() {
   if (progressKey) { try { localStorage.removeItem(progressKey); } catch (_) {} }
   pendingSetup = false;
   updateLoginGate();
-  import("./agents-view.js").then((m) => m.maybeShowOnboarding().catch(() => {})).catch(() => {});
+  const forceAgents = forceInstallOnboarding;
+  forceInstallOnboarding = false;
+  import("./agents-view.js").then((m) => m.maybeShowOnboarding(forceAgents).catch(() => {})).catch(() => {});
 }
 
 function setStatus(msg) {
@@ -411,7 +423,7 @@ async function pollGateLogin() {
       let done = false;
       const k = setupKey();
       try { done = !!k && localStorage.getItem(k) === "1"; } catch (_) {}
-      if (done) {
+      if (done && !forceInstallOnboarding) {
         pendingSetup = false;
         step = "welcome";
         S.emit(); // → render() → updateLoginGate() → 게이트 닫힘(바로 워크스페이스로)

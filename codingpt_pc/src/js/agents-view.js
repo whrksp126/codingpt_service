@@ -279,12 +279,12 @@ export function closeAgentPanels() {
 const onbKey = () => (state.me && state.me.id != null ? `cpt.agentsOnboarded.${state.me.id}` : null);
 function markOnboardedLocal() { const k = onbKey(); if (k) { try { localStorage.setItem(k, "1"); } catch (_) {} } }
 
-export async function maybeShowOnboarding() {
+export async function maybeShowOnboarding(force = false) {
   // 계정을 아직 모르면 판정하지 않는다(부팅 직후 loadMe 전) — 한 번 로드해 보고 없으면 보류.
   if (!state.me) { try { await S.loadMe(); } catch (_) {} }
   const k = onbKey();
   if (!k) return false;
-  try { if (localStorage.getItem(k) === "1") return false; } catch (_) {}
+  try { if (!force && localStorage.getItem(k) === "1") return false; } catch (_) {}
   let c;
   try { c = await loadAgents(true); } catch (_) { return false; }   // 구 데몬 등 — 조용히 넘어간다
   const wirables = c.agents.filter((a) => a.wirable);
