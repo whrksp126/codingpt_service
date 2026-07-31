@@ -774,12 +774,14 @@ function e2eeActionRow() {
  */
 let linkEntryFor = null;   // 코드 입력 칸을 연 기기 행 id
 let linkEntryMsg = "";     // 그 칸의 오류/진행 문구
-let myLink = null;      // { code, until, ref } — 표시 중인 코드(ref = 그 코드를 만든 계정)
+let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
 
 function validMyLink() {
-  return !!(myLink && myLink.until > Date.now() && (!myLink.ref || !e2ee.userRef || myLink.ref === e2ee.userRef));
+  return !!(myLink && myLink.until > Date.now()
+    && myLink.revision === e2ee.linkRevision
+    && (!myLink.ref || !e2ee.userRef || myLink.ref === e2ee.userRef));
 }
 
 function scheduleMyLinkRenewal() {
@@ -800,7 +802,12 @@ async function ensureMyLink({ force = false } = {}) {
   renderE2ee();
   const r = await linkStart();
   myLinkBusy = false;
-  myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
+  myLink = r.ok ? {
+    code: r.code,
+    until: Date.now() + (r.ttlMs || 180000),
+    ref: e2ee.userRef || "",
+    revision: e2ee.linkRevision,
+  } : null;
   linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
   scheduleMyLinkRenewal();
   renderE2ee();
@@ -818,6 +825,10 @@ function e2eeMyCodeRow() {
   //  ★ 계정이 바뀌면(재가입·계정 전환) 옛 코드는 **다른 계정의 코드**라 입력해도 404 다(실사고).
   //   표시 중인 코드에 발급 계정(userRef)을 달아 두고, 달라지면 즉시 버린다.
   if (myLink && myLink.ref && e2ee.userRef && myLink.ref !== e2ee.userRef) {
+    myLink = null;
+    scheduleMyLinkRenewal();
+  }
+  if (myLink && myLink.revision !== e2ee.linkRevision) {
     myLink = null;
     scheduleMyLinkRenewal();
   }

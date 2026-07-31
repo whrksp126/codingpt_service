@@ -74,6 +74,7 @@ export const e2ee = {
   fingerprint: null,      // 감사용 6자리(기기 목록 표기)
   recoverySet: false,
   autoBootError: null,    // 개정 4 자동 부트스트랩 최근 실패(성공/불필요 시 null) — 행동 행 문구용
+  linkRevision: 0,        // 이 PC 코드가 소비될 때 증가 — 설정 화면이 즉시 다음 1회용 코드를 발급한다
   reason: null,
   pending: [],            // 승인 대기 중인 다른 기기들(확인 숫자는 로컬 계산)
   devices: [],            // 열쇠를 가진 기기(키링)
@@ -342,6 +343,7 @@ export function applyDeviceApprovalEvent(ev) {
   if (!ev) return;
   //  ★ 개정 12: 다른 기기가 이 PC 의 연동 코드를 맞혔다 → 데몬이 **자동으로** 봉인문을 올린다.
   if (ev.kind === "link_claim") {
+    e2ee.linkRevision += 1;
     void (async () => {
       try { await cpt("e2ee.link.fulfill", { linkId: ev.linkId, ikX: ev.ikX }); } catch (_) { /* 코드 만료 시 재발급 */ }
       await refreshE2ee();

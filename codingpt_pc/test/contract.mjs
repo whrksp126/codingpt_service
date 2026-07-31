@@ -716,6 +716,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   const settingsOnly = readFileSync(`${dir}/settings.js`, "utf8");
   const notifSrc = readFileSync(`${dir}/notifications.js`, "utf8");
   const settings = settingsOnly;
+  const e2eeWhole = readFileSync(`${dir}/e2ee.js`, "utf8");
   const labelSrc = readFileSync(`${dir}/e2ee-label.js`, "utf8") + readFileSync(`${dir}/host-lock.js`, "utf8");
 
   // ① 삭제된 상시 설명문 — 카드 첫 화면에서 설명문을 0줄로 만든 근거들.
@@ -938,6 +939,9 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     && code.includes('class="link-code"')
     && !code.includes("data-link-toggle")
     && !code.includes("myLinkOpen"), true);
+  eq("1회용 코드가 소비되면 즉시 다음 코드를 자동 발급한다",
+    code.includes("myLink.revision === e2ee.linkRevision")
+    && e2eeWhole.includes("e2ee.linkRevision += 1"), true);
 
   // ⑦ **표(table) 구조**(2026-07-27 개정 3 · 사용자 요구: "기기 목록에서 카드 안에 카드 구조인데 그렇게
   //  안햇으면 좋겠어! 차라리 테이블 구조는 어떨까") — 행마다 카드(`.dev-row`: 배경+테두리+라운드)를
