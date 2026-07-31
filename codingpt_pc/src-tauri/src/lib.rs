@@ -248,16 +248,18 @@ fn clear_local_account_credentials() {
 
 #[cfg(not(debug_assertions))]
 fn clear_install_onboarding_state() {
-    // Tauri WKWebView localStorage에는 권한 위저드 완료·에이전트 온보딩 완료 등 설치 단위 상태가 있다.
-    // 앱 번들만 지우면 WebKit 데이터는 남으므로 DMG 재설치에서도 온보딩을 건너뛰게 된다.
-    let Some(home) = dirs::home_dir() else { return };
-    let path = home
-        .join("Library")
-        .join("WebKit")
-        .join("com.ghmate.codingpt.pc")
-        .join("WebsiteData")
-        .join("LocalStorage");
-    let _ = std::fs::remove_dir_all(path);
+    // WebKit 저장 경로는 OS 버전에 따라 WebsiteData/Default/<origin>/...처럼 달라진다.
+    // 네이티브에서 DB 경로를 추측해 지우지 않고, 다음 웹뷰가 자기 localStorage 키를 직접 정리하게 한다.
+    if let Some(path) = dirs::home_dir().map(|h| h.join(".codingpt").join("reset-onboarding")) {
+        let _ = std::fs::write(path, b"1");
+    }
+}
+
+#[tauri::command]
+fn consume_install_onboarding_reset() -> bool {
+    let Some(path) = dirs::home_dir().map(|h| h.join(".codingpt").join("reset-onboarding")) else { return false };
+    if !path.exists() { return false }
+    std::fs::remove_file(path).is_ok()
 }
 
 #[allow(dead_code)] // debug 빌드에서는 실제 재설치 판정을 비활성화하지만 단위 테스트는 이 순수 규칙을 검증한다.
@@ -790,6 +792,7 @@ pub fn run() {
             app_version,
             update_check,
             update_install,
+            consume_install_onboarding_reset,
             // 서버 동기화 알림 + UI 실시간 채널
             bridge::notif_list,
             bridge::notif_create,

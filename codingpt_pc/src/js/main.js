@@ -244,6 +244,16 @@ async function maybeInstallSetupUpdate() {
 
 (async function init() {
   setBootstrap("앱 설정을 불러오는 중", 7);
+  // DMG 재설치 시 WebKit 저장소 위치를 네이티브가 추측해 지우지 않는다. 웹뷰가 자기 설치 단위
+  // 온보딩 키만 직접 정리한다(테마 등 일반 설정과 서버 작업 공간은 보존).
+  const resetOnboarding = await api.consumeInstallOnboardingReset().catch(() => false);
+  if (resetOnboarding) {
+    const prefixes = ["cpt.setupDone.", "cpt.setupProgress.", "cpt.perm.", "cpt.agentsOnboarded."];
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+      const key = localStorage.key(i);
+      if (key && prefixes.some((prefix) => key.startsWith(prefix))) localStorage.removeItem(key);
+    }
+  }
   await S.restorePersisted();
   setBootstrap("PC 연결 상태를 확인하는 중", 13);
   state.daemon = await api.daemonStatus().catch(() => null);

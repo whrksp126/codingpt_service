@@ -147,6 +147,7 @@ export const api = {
   appVersion: () => invoke("app_version"),
   updateCheck: () => invoke("update_check"),
   updateInstall: () => invoke("update_install"),
+  consumeInstallOnboardingReset: () => invoke("consume_install_onboarding_reset"),
   onUpdateProgress: (cb) => listen("cpt-update-progress", (e) => cb(e.payload)),
   onOpenSettings: (cb) => listen("cpt-open-settings", () => cb()),
   onCheckUpdate: (cb) => listen("cpt-check-update", () => cb()),
