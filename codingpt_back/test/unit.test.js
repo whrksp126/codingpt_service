@@ -10,6 +10,42 @@ const { _normCaps } = require('../services/daemonRelayService');
 const { SERVER_CAPS, computeServerCaps } = require('../config/caps');
 const approvalService = require('../services/approvalService');
 const { _buildFcmMessage } = require('../services/pushProviderService');
+const { _collapseLegacyHostDuplicates } = require('../controllers/daemonController');
+
+test('device list — legacy login duplicates collapse to the active stable host', () => {
+  const row = (id, extra = {}) => ({
+    id,
+    role: 'host',
+    runner_kind: 'local',
+    device_name: 'GH-MACui-MacBookPro',
+    platform: 'darwin',
+    machine_id: null,
+    ...extra,
+  });
+  const rows = [
+    row(1),
+    row(2),
+    row(3, { machine_id: 'stable-machine' }),
+    { ...row(4), role: 'controller', device_name: 'Android', platform: 'android' },
+  ];
+  const visible = _collapseLegacyHostDuplicates(rows, 3, new Set([3]));
+  assert.deepStrictEqual(visible.map((d) => d.id), [3, 4]);
+});
+
+test('device list — same-named computers with distinct stable ids stay separate', () => {
+  const rows = [1, 2].map((id) => ({
+    id,
+    role: 'host',
+    runner_kind: 'local',
+    device_name: 'MacBook Pro',
+    platform: 'darwin',
+    machine_id: `machine-${id}`,
+  }));
+  assert.deepStrictEqual(
+    _collapseLegacyHostDuplicates(rows, 1, new Set([1])).map((d) => d.id),
+    [1, 2],
+  );
+});
 
 test('normalizeRemote — ssh/https/포트/.git 흡수해 동일 키', () => {
   assert.strictEqual(normalizeRemote('git@github.com:Foo/Bar.git'), normalizeRemote('https://github.com/Foo/Bar'));

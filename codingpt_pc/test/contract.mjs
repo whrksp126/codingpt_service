@@ -924,6 +924,13 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [code.includes("data-dev-key="), /revokeTrust\(keyId\)/.test(code), code.includes("api.revokeDevice(")], [true, true, true]);
   // 기기 행이 없는 열쇠(고아)는 목록에 남는다 — 아니면 **해제할 방법이 사라진 열쇠**가 계정에 남는다.
   eq("기기 행이 없는 열쇠는 목록에 남아 해제할 수 있다", /orphans\s*=\s*devs\.filter/.test(code), true);
+  eq("인증된 기기는 이름 옆 체크 마크로 표시한다",
+    code.includes('class="dev-auth-mark"') && code.includes('aria-label="인증됨"'), true);
+  eq("연동은 휴지통 앞 아이콘 버튼이며 PC가 코드를 만들어 줄 수 있다",
+    code.indexOf("${link}${canRevoke") >= 0
+    && code.includes('data-link-show-code=')
+    && code.includes('icons.link({ size: 15 })')
+    && code.includes("await linkStart()"), true);
 
   // ⑦ **표(table) 구조**(2026-07-27 개정 3 · 사용자 요구: "기기 목록에서 카드 안에 카드 구조인데 그렇게
   //  안햇으면 좋겠어! 차라리 테이블 구조는 어떨까") — 행마다 카드(`.dev-row`: 배경+테두리+라운드)를

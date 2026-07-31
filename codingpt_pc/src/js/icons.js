@@ -32,6 +32,7 @@ export const icons = {
   pin: (o) => svg('<path d="M9 3.5h6l-1 5 2.5 2.5V13H7.5v-2L10 8.5z"/><line x1="12" y1="13" x2="12" y2="20.5"/>', o),
   dots: (o) => svg('<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>', o),
   trash: (o) => svg('<path d="M4 7h16"/><path d="M9 7V5h6v2"/><path d="M6 7l1 13h10l1-13"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>', o),
+  link: (o) => svg('<path d="M10 13a5 5 0 0 0 7.1.1l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1"/><path d="M14 11a5 5 0 0 0-7.1-.1l-2 2A5 5 0 0 0 12 20l1.1-1.1"/>', o),
   edit: (o) => svg('<path d="M4 20h4l10.5-10.5a2 2 0 0 0-2.8-2.8L5 17.2z"/><line x1="13.5" y1="6.5" x2="17.5" y2="10.5"/>', o),
   palette: (o) => svg('<path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.6 1.3-2 2.5-2H18a3 3 0 0 0 3-3 8 8 0 0 0-9-8z"/><circle cx="7.5" cy="11" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="16" cy="11" r="1"/>', o),
   arrowUp: (o) => svg('<line x1="12" y1="19" x2="12" y2="6"/><path d="M6 12l6-6 6 6"/>', o),

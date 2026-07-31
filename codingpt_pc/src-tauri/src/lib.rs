@@ -476,9 +476,11 @@ fn urldecode(s: &str) -> String {
 // 트레이 아이콘/메뉴 구성.
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open_i = MenuItem::with_id(app, "open", "CodingPT 열기", true, None::<&str>)?;
+    let settings_i = MenuItem::with_id(app, "settings", "설정…", true, None::<&str>)?;
+    let update_i = MenuItem::with_id(app, "check_update", "업데이트 확인…", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let quit_i = MenuItem::with_id(app, "quit", "종료", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_i, &sep, &quit_i])?;
+    let menu = Menu::with_items(app, &[&open_i, &settings_i, &update_i, &sep, &quit_i])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("CodingPT")
@@ -486,6 +488,14 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_window(app),
+            "settings" => {
+                show_window(app);
+                let _ = app.emit("cpt-open-settings", ());
+            }
+            "check_update" => {
+                show_window(app);
+                let _ = app.emit("cpt-check-update", ());
+            }
             "quit" => {
                 // 미저장 IDE 변경이 있으면 바로 끄지 않고 창을 띄워 확인(취소/종료) 받는다.
                 if ide_dirty(app) {

@@ -784,7 +784,7 @@ function e2eeMyCodeRow() {
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
   const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-    <button class="appr-reveal" data-link-toggle="1">자세히 보기 ${myLinkOpen ? "▴" : "▾"}</button>
+    <button class="appr-reveal" data-link-toggle="1">이 기기 인증 코드 · 자세히 보기 ${myLinkOpen ? "▴" : "▾"}</button>
     ${myLinkOpen ? `<div class="link-box">
       ${myLinkBusy ? `<div class="acct-msg">코드를 만드는 중…</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
@@ -858,8 +858,11 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     //  ★ 개정 12: [연동] = **코드 입력 열기**(그 행 아래 인라인). 승인 요청을 보내던 구 nudge 는 폐기.
     //   ⚠ 조건은 "**이 기기**에 열쇠가 없고, 그 행이 **열쇠를 가진 기기**" 다: 연동이란 열쇠를 받는
     //    일이고, 줄 수 있는 쪽은 열쇠를 가진 기기뿐이다(열쇠 없는 기기끼리는 서로 줄 것이 없다).
-    const link = !selfReady && k && typeof d.id === "number" && !d.isCurrent
-      ? `<button class="sett-btn dev-link-btn" data-link-open="${d.id}">연동</button>` : "";
+    const canLink = typeof d.id === "number" && !d.isCurrent && (selfReady ? !linked : !!k);
+    const link = canLink
+      ? `<button class="dev-link-btn" ${selfReady ? `data-link-show-code="${d.id}"` : `data-link-open="${d.id}"`} title="이 기기와 연동" aria-label="이 기기와 연동">${icons.link({ size: 15 })}</button>` : "";
+    const linkedMark = linked
+      ? `<span class="dev-auth-mark" title="인증됨" aria-label="인증됨">${icons.check({ size: 13 })}</span>` : "";
     //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
     //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
     //  ★ 개정 11(사용자 확정): 목록에 **연동됨/안 됨을 쓰지 않는다** — "기기 목록에서 연동됨 안됨
@@ -868,7 +871,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span><span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${linkedMark}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
       <td class="dev-c-meta">${meta}</td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
@@ -948,6 +951,17 @@ function bindE2ee(box) {
     renderE2ee();
     const inp = connBody?.querySelector("#linkCodeInput");
     if (inp) inp.focus();
+  }));
+  box.querySelectorAll("[data-link-show-code]").forEach((b) => b.addEventListener("click", async () => {
+    linkEntryFor = null;
+    myLinkOpen = true;
+    myLinkBusy = true;
+    renderE2ee();
+    const r = await linkStart();
+    myLinkBusy = false;
+    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
+    linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
+    renderE2ee();
   }));
   box.querySelectorAll("[data-link-submit]").forEach((b) => b.addEventListener("click", async () => {
     const inp = connBody?.querySelector("#linkCodeInput");
@@ -1195,6 +1209,12 @@ export function openAccountSection() {
   // 알림을 눌러 들어온 사용자는 곧바로 승인 카드를 봐야 한다(앱의 '기기 승인' 시트와 같은 진입).
   S.setView("settings");
   void refreshE2ee();
+}
+
+/** 트레이 메뉴의 설정/업데이트 진입. 로그인 전에도 로컬 설정과 업데이터는 사용할 수 있다. */
+export function openSettingsSection(nextSection = "general") {
+  section = NAV.some((item) => item.key === nextSection) ? nextSection : "general";
+  S.setView("settings");
 }
 
 export function deepLinkPair(payload) {

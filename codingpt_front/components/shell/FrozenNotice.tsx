@@ -11,11 +11,22 @@ export default function FrozenNotice({ title }: { title?: string }) {
           지금은 내 PC·서버에서 하던 작업을 모바일에서 이어서 하는 서비스로 전환 중이에요.
           웹 화면은 곧 새 모습으로 다시 찾아올게요.
         </p>
-        <a
-          href="/me"
-          style={{ display: 'inline-block', marginTop: 20, textDecoration: 'none', padding: '11px 20px', borderRadius: 12, background: 'var(--cta)', color: 'var(--on-accent)', fontWeight: 700, fontSize: 14.5 }}
-        >
-          내 정보로 가기
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 20 }}>
+          <a
+            href="/download"
+            style={{ textDecoration: 'none', padding: '11px 20px', borderRadius: 12, background: 'var(--cta)', color: 'var(--on-accent)', fontWeight: 700, fontSize: 14.5 }}
+          >
+            데스크톱 앱 받기
+          </a>
+          <a
+            href="/docs"
+            style={{ textDecoration: 'none', padding: '11px 20px', borderRadius: 12, border: '1px solid var(--border)', color: 'var(--text)', fontWeight: 700, fontSize: 14.5 }}
+          >
+            연결 방법 보기
+          </a>
+        </div>
+        <a href="/me" className="muted" style={{ display: 'inline-block', marginTop: 16, fontSize: 13 }}>
+          내 정보
         </a>
       </div>
     </div>

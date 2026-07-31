@@ -167,12 +167,12 @@ export default function Home() {
         <div className="container">
           <div className="kick">폰·태블릿으로 잇는 나만의 에이전트 개발 환경(ADE)</div>
           <h1>내 머신의 코딩 에이전트를, 폰에서 지휘하세요</h1>
-          <p className="sub">claude·codex 같은 에이전트를 내 머신에서 돌리고, 폰·태블릿에서 이어받아 지휘해요. 터미널·에디터·미리보기가 손안에 — 코드도 에이전트도 내 머신을 떠나지 않아요.</p>
+          <p className="sub">claude·codex 같은 에이전트를 내 머신에서 돌리고, 폰·태블릿에서 이어받아 지휘해요. 터미널·에디터·미리보기가 손안에 — 소스와 자격증명은 내 머신에 보관돼요.</p>
           <div className="ctas">
             <a className="btn" href="/#start"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" /></svg>다운로드</a>
             <a className="btn ghost" href="/docs">문서 보기</a>
           </div>
-          <div className="avail"><b>macOS · iOS · Android</b> 지원 · Windows 준비 중 · 무료 &amp; BYO</div>
+          <div className="avail"><b>Apple Silicon Mac · iOS · Android</b> 지원 · Windows 호스트 준비 중 · 무료 &amp; BYO</div>
         </div>
 
         <div className="shot-bleed">
@@ -237,10 +237,10 @@ export default function Home() {
         <div className="container">
           <h2>자주 묻는 질문</h2>
           <div className="faq">
-            <details open><summary>제 코드나 에이전트가 클라우드로 올라가나요?<span className="ic">+</span></summary><p>아니요. 에이전트도 코드도 내 머신에서 실행되고, 기기 사이는 암호화 릴레이로만 연결됩니다. 클라우드에 저장되지 않아요.</p></details>
+            <details open><summary>제 코드나 에이전트가 클라우드로 올라가나요?<span className="ic">+</span></summary><p>아니요. 에이전트와 소스 파일은 내 머신에서 실행·보관됩니다. 기기 사이의 암호화된 데이터는 연결용 릴레이를 통과하지만, 서버는 내용을 복호화하거나 저장할 수 없어요.</p></details>
             <details><summary>어떤 코딩 에이전트를 쓸 수 있나요?<span className="ic">+</span></summary><p>claude·codex·gemini·aider 등 터미널에서 도는 CLI라면 무엇이든. 구독과 API 키는 그대로 내 머신에 있고, CodingPT가 대신 호출하지 않아요.</p></details>
             <details><summary>데스크톱 에이전트 도구(ADE)와 뭐가 다른가요?<span className="ic">+</span></summary><p>그런 도구는 PC 앞에 앉아서 쓰죠. CodingPT는 내 머신의 그 환경을 폰·태블릿에서 원격으로 이어받게 해, 자리를 떠나도 에이전트를 계속 지휘하게 합니다.</p></details>
-            <details><summary>CodingPT가 제 파일이나 터미널을 볼 수 있나요?<span className="ic">+</span></summary><p>볼 수 없습니다. 서버는 연결을 이어주는 라우팅용 메타데이터(기기 ID·연결 상태)만 처리하고, 코드·명령·출력 같은 내용은 거치지 않습니다.</p></details>
+            <details><summary>CodingPT가 제 파일이나 터미널을 볼 수 있나요?<span className="ic">+</span></summary><p>볼 수 없습니다. 서버는 라우팅용 메타데이터와 종단 간 암호화된 데이터를 전달하지만, 코드·명령·출력의 평문 내용은 읽거나 저장할 수 없습니다.</p></details>
             <details><summary>비용이 있나요?<span className="ic">+</span></summary><p>무료입니다. 구독료 없이 사용해요. AI는 이미 쓰던 내 에이전트/구독을 그대로 쓰니 별도 과금도 없어요.</p></details>
           </div>
         </div>
@@ -251,13 +251,13 @@ export default function Home() {
         <div className="container">
           <div className="head">
             <h2>2분이면 시작해요</h2>
-            <p>내 머신에 데스크톱 앱을 설치하고, 폰·태블릿 앱에서 로그인하면 끝이에요.</p>
+            <p>내 머신과 모바일에 앱을 설치하고 같은 계정으로 로그인하면, 인증을 거쳐 내 기기끼리 프라이빗하게 연결돼요.</p>
           </div>
 
           <div className="dlz">
             <div className="dlgroup">
               <div className="dlh">데스크톱</div>
-              <a className="badge" href="https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.188-arm64.dmg">
+              <a className="badge" href="https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.189-arm64.dmg">
                 <span className="ic"><svg width="19" height="23" viewBox="0 0 20 24" fill="currentColor" aria-hidden="true"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z" /></svg></span>
                 <span className="tt"><small>다운로드 · .dmg</small><b>macOS</b></span>
                 <span className="arw">↓</span>
@@ -282,7 +282,7 @@ export default function Home() {
             </div>
           </div>
 
-          <p className="start-note">설치 후 두 앱에서 같은 계정으로 로그인하면 <b>내 머신이 자동으로 연결</b>돼요 — 페어링 코드도 필요 없어요.</p>
+          <p className="start-note">같은 계정으로 로그인하면 내 머신이 자동으로 나타납니다. 앱의 간단한 인증 안내를 마치면 <b>내 기기끼리 종단 간 암호화된 프라이빗 연결</b>이 완성돼요.</p>
           <div className="free">무료 · 구독 없음 · BYO 에이전트</div>
         </div>
       </section>

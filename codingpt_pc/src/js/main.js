@@ -10,7 +10,7 @@ import {
   focusNeighbor,
   focusCurrentPane,
 } from "./workspace-view.js";
-import { mountSettings, updateSettings, deepLinkPair } from "./settings.js";
+import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
 import { mountLoginGate, restorePendingSetup, updateLoginGate } from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
@@ -109,6 +109,8 @@ api.onDaemonChanged(async () => {
   S.emit();
 });
 api.onDeepLinkPair((payload) => deepLinkPair(payload));
+api.onOpenSettings(() => openSettingsSection("general"));
+api.onCheckUpdate(() => openSettingsSection("about"));
 
 function focusedPane() {
   const w = S.wsRuntime(state.activeWsId);

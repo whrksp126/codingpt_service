@@ -3,18 +3,19 @@
 //  ⚠️ 외부 import 금지(SSG 빈 본문 버그 회피) — 랜딩 페이지 규칙과 동일.
 
 export const metadata = {
-  title: 'CodingPT for Mac · Windows — 내 PC 연결',
-  description: '내 컴퓨터를 CodingPT에 연결해 폰에서 PC 폴더로 바이브코딩하세요. 설치만 하면 메뉴바에서 실행됩니다.',
+  title: 'CodingPT for Apple Silicon Mac — 내 PC 연결',
+  description: 'Apple Silicon Mac을 CodingPT에 연결해 폰에서 PC 폴더로 바이브코딩하세요. 설치하면 메뉴바에서 실행됩니다.',
 };
 
 // 버전별 ObjectStore 객체는 장기 캐시한다. 새 릴리스는 새 URL이라 이전 CDN 캐시와 충돌하지 않는다.
 //  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
-const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.188-arm64.dmg';
+const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.189-arm64.dmg';
 const WIN_EXE_URL = ''; // 준비 중
 
 const STEPS = [
   { t: '설치', d: '받은 파일을 실행해 CodingPT를 설치하면 메뉴바(트레이)에 아이콘이 상주합니다. Node·터미널 같은 별도 프로그램은 필요 없어요.' },
-  { t: '연결', d: 'CodingPT를 처음 열면 로그인 버튼 하나가 보여요. 누르면 브라우저가 열리고, CodingPT 계정으로 로그인 후 [이 PC 연결하기]를 누르면 끝 — 코드 입력도 필요 없습니다.' },
+  { t: '로그인', d: 'CodingPT를 처음 열고 로그인 버튼을 누르세요. 브라우저에서 같은 CodingPT 계정으로 로그인하면 모바일의 PC 목록에 자동으로 나타납니다.' },
+  { t: '프라이빗 연결', d: '앱의 간단한 인증 안내를 마치면 내 기기끼리 종단 간 암호화된 연결이 완성됩니다.' },
   { t: '어디서든', d: '연결되면 폰·태블릿·다른 PC에서 이 컴퓨터의 폴더를 IDE로 열어 편집하고, 터미널의 claude 같은 CLI 에이전트를 이어서 작업할 수 있어요.' },
 ];
 
@@ -27,7 +28,7 @@ export default function DownloadPage() {
           내 컴퓨터를 CodingPT에 연결하세요
         </h1>
         <p style={{ fontSize: 15, color: 'var(--text2, #aeb8c8)', marginTop: 12, lineHeight: 1.6 }}>
-          설치만 하면 메뉴바에서 항상 실행됩니다. 폰에서 내 PC 폴더로 바이브코딩하고,
+          Apple Silicon Mac에 설치하면 메뉴바에서 항상 실행됩니다. 폰에서 내 PC 폴더로 바이브코딩하고,
           PC 터미널을 이어서 작업할 수 있어요.
         </p>
       </section>
@@ -44,7 +45,7 @@ export default function DownloadPage() {
           }}
         >
           <span style={{ fontSize: 16 }}>macOS 다운로드</span>
-          <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.75 }}>.dmg · Apple Silicon</span>
+          <span style={{ fontSize: 12, fontWeight: 600, opacity: 0.75 }}>.dmg · Apple Silicon 전용</span>
         </a>
 
         <span

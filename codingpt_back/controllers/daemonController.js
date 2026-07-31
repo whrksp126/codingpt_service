@@ -90,6 +90,38 @@ function controllerTokenHash(deviceUuid) {
   return sha256('ctrl:' + String(deviceUuid || '').trim());
 }
 
+// machine_id 도입 전 재로그인으로 쌓인 같은 PC 행은 삭제하지 않고 목록에서만 접는다.
+// 안정 machine_id 보유 행을 대표로 남겨 기존 워크스페이스 참조와 감사 이력은 보존한다.
+function collapseLegacyHostDuplicates(rows) {
+  const groups = new Map();
+  const passthrough = [];
+  for (const d of rows) {
+    if ((d.role || 'host') !== 'host' || d.runner_kind === 'cloud') {
+      passthrough.push(d);
+      continue;
+    }
+    const key = [
+      String(d.device_name || '').trim().toLocaleLowerCase(),
+      String(d.platform || '').trim().toLocaleLowerCase(),
+      String(d.runner_kind || 'local'),
+    ].join('\u0000');
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(d);
+  }
+  const kept = new Set(passthrough);
+  for (const candidates of groups.values()) {
+    const stable = candidates.filter((d) => d.machine_id);
+    // 정확히 하나의 안정 식별 행이 있을 때만 그 이전의 식별자 없는 레거시 행을 표시상 접는다.
+    // 안정 식별 행이 둘 이상이면 같은 이름의 실제 PC 둘일 수 있으므로 아무것도 합치지 않는다.
+    if (stable.length !== 1) {
+      candidates.forEach((d) => kept.add(d));
+      continue;
+    }
+    kept.add(stable[0]);
+  }
+  return rows.filter((d) => kept.has(d));
+}
+
 // POST /api/daemon/devices/register  (JWT|deviceToken) — 컨트롤러가 로그인 시 자신을 계정에 등록.
 //  deviceUuid(앱 영구 보관) 로 upsert → "내 기기" 목록에 노출. role='controller'.
 async function registerController(req, res) {
@@ -270,8 +302,9 @@ async function daemonDevices(req, res) {
         if (self) currentDeviceId = self.id;
       }
     }
+    const visibleRows = collapseLegacyHostDuplicates(rows, currentDeviceId, online);
     const devices = [];
-    for (const d of rows) {
+    for (const d of visibleRows) {
       if (d.runner_kind === 'cloud') continue; // 클라우드 러너는 아래 논리 호스트로 통합
       devices.push({
         id: d.id,
@@ -303,7 +336,7 @@ async function daemonDevices(req, res) {
         isCurrent: false,
       });
     }
-    return successResponse(res, { devices, currentDeviceId: acct.deviceId });
+    return successResponse(res, { devices, currentDeviceId });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -1504,4 +1537,5 @@ module.exports = {
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
   chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
+  _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

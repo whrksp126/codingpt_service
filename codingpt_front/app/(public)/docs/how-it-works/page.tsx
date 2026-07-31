@@ -4,7 +4,7 @@ export default function Page() {
       <div className="dx-crumb">문서 · 기본 개념</div>
       <h1>작동 원리</h1>
       <p className="dx-lead">
-        CodingPT가 어떻게 내 머신과 폰을 잇는지 — 그리고 왜 코드가 서버를 거치지 않는지.
+        CodingPT가 어떻게 내 머신과 폰을 잇는지 — 그리고 서버가 왜 원격 작업 내용을 읽을 수 없는지.
       </p>
 
       <p>
@@ -21,7 +21,7 @@ export default function Page() {
         <span className="dx-wire">◀ 암호화 ▶</span>
         <div className="dx-node dx-node-mid">
           <div className="t">릴레이</div>
-          <div className="s">메타데이터만</div>
+          <div className="s">메타데이터·암호화 패킷</div>
         </div>
         <span className="dx-wire">◀ 암호화 ▶</span>
         <div className="dx-node">
@@ -33,7 +33,7 @@ export default function Page() {
       <h2>무엇이 내 머신에 남나</h2>
       <ul>
         <li>
-          <b>소스 코드·파일</b> — 디스크를 떠나지 않아요.
+          <b>소스 코드·파일</b> — 원본은 내 머신 디스크에만 보관돼요.
         </li>
         <li>
           <b>터미널 프로세스</b> — claude 같은 CLI가 내 머신에서 실행돼요.
@@ -45,8 +45,8 @@ export default function Page() {
 
       <h2>릴레이가 보는 것 / 못 보는 것</h2>
       <p>
-        릴레이는 연결을 이어주기 위한 최소한의 정보(기기 ID·연결 상태)만 다뤄요. 코드·명령·출력 같은{' '}
-        <b>내용</b>은 종단 간 암호화되어 서버가 읽을 수 없습니다.
+        릴레이는 연결을 위한 메타데이터와 암호화된 패킷을 전달해요. 코드·명령·출력 같은{' '}
+        <b>평문 내용</b>은 내 기기 사이에서 종단 간 암호화되어 서버가 읽거나 저장할 수 없습니다.
       </p>
 
       <div className="dx-callout">

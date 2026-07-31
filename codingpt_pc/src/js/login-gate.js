@@ -72,8 +72,11 @@ function needsLogin() {
 export function updateLoginGate() {
   if (!el) return;
   const need = needsLogin();
+  // 설정·업데이트는 계정 인증과 무관한 로컬 기능이다. 로그인 전에도 트레이 메뉴나 ⌘, 로
+  // 설정을 열 수 있고, 닫으면 다시 온보딩 게이트로 돌아온다.
+  const utilitySettingsOpen = state.view === "settings";
   // 로그인 완료 직후엔 셋업 단계를 이어서 보여준다(이 게이트로 로그인한 경우 1회).
-  const show = need || (pendingSetup && step === "setup");
+  const show = (need || (pendingSetup && step === "setup")) && !utilitySettingsOpen;
   el.classList.toggle("hidden", !show);
   if (!show) stopGateLogin();
   if (need && step === "setup") { step = "welcome"; renderStep(); } // 재로그인 필요 상태로 회귀

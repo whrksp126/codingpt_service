@@ -29,7 +29,7 @@ const css = `
 .cpt-docs h1{font-size:30px;font-weight:780;letter-spacing:-0.03em;}
 .cpt-docs h2{font-size:19px;font-weight:730;margin:36px 0 0;letter-spacing:-0.02em;}
 .cpt-docs p{color:var(--text2);font-size:15px;line-height:1.75;margin:12px 0 0;}
-.cpt-docs ul{color:var(--text2);font-size:15px;line-height:1.8;margin:12px 0 0;padding-left:20px;}
+.cpt-docs ul,.cpt-docs ol{color:var(--text2);font-size:15px;line-height:1.8;margin:12px 0 0;padding-left:20px;}
 .cpt-docs li{margin:0;}
 .cpt-docs code{font-family:var(--mono);color:var(--accent);}
 
