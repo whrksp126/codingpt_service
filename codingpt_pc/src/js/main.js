@@ -60,6 +60,22 @@ const sidebarEl = document.getElementById("sidebar");
 const wsViewEl = document.getElementById("wsView");
 const settingsEl = document.getElementById("settingsView");
 const loginGateEl = document.getElementById("loginGate");
+const bootstrapGateEl = document.getElementById("bootstrapGate");
+const bootstrapLabelEl = document.getElementById("bootstrapLabel");
+const bootstrapBarEl = document.getElementById("bootstrapBar");
+
+function setBootstrap(label, progress) {
+  if (bootstrapLabelEl) bootstrapLabelEl.textContent = label;
+  if (bootstrapBarEl) bootstrapBarEl.style.width = `${Math.max(4, Math.min(100, progress))}%`;
+}
+
+function finishBootstrap() {
+  setBootstrap("준비됐어요", 100);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    bootstrapGateEl?.classList.add("done");
+    setTimeout(() => bootstrapGateEl?.remove(), 220);
+  }));
+}
 
 mountSidebar(sidebarEl, {});
 mountWorkspaceView(wsViewEl);
@@ -184,7 +200,7 @@ function startPreviewShieldWatch() {
   //  클릭이 뒤의 프리뷰로 내려가 "허용 버튼이 안 눌리는" 사고가 난다(punch-through 규율).
   // .ag-sheet — 에이전트 설치 시트(설정 밖, 온보딩에서도 뜬다). 안에 실제 터미널이 있어 클릭·키
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
-  const SEL = ".settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
+  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   setInterval(() => {
     const on = !!document.querySelector(SEL);
@@ -196,6 +212,7 @@ function startPreviewShieldWatch() {
 // 네트워크/업데이트 서버 장애는 온보딩을 막지 않는다. 로그인된 기존 사용자는 설정의 일반 업데이트 흐름을 쓴다.
 async function maybeInstallSetupUpdate() {
   if (state.paired) return;
+  setBootstrap("최신 버전을 확인하는 중", 18);
   let result = null;
   try {
     result = await Promise.race([
@@ -206,10 +223,18 @@ async function maybeInstallSetupUpdate() {
     return;
   }
   if (!result?.available) return;
+  setBootstrap(`CodingPT ${result.version} 다운로드 중`, 22);
   showSetupUpdate(result.version);
   let unlisten = null;
   try {
-    unlisten = await api.onUpdateProgress(updateSetupProgress);
+    unlisten = await api.onUpdateProgress((payload) => {
+      updateSetupProgress(payload);
+      const pct = payload?.total ? Math.min(100, Math.round((payload.chunk / payload.total) * 100)) : null;
+      setBootstrap(
+        pct == null ? `CodingPT ${result.version} 다운로드 중` : `CodingPT ${result.version} 다운로드 중 · ${pct}%`,
+        pct == null ? 22 : 22 + (pct * 0.62),
+      );
+    });
     await api.updateInstall(); // 성공하면 네이티브가 앱을 재시작한다.
   } catch (_) {
     hideSetupUpdate(); // 오프라인·검증 실패 시 현재 버전으로 계속 진행
@@ -219,24 +244,31 @@ async function maybeInstallSetupUpdate() {
 }
 
 (async function init() {
+  setBootstrap("앱 설정을 불러오는 중", 7);
   await S.restorePersisted();
+  setBootstrap("PC 연결 상태를 확인하는 중", 13);
   state.daemon = await api.daemonStatus().catch(() => null);
   state.paired = !!state.daemon?.paired;
   await maybeInstallSetupUpdate();
-  await S.loadWorkspaces();
-  await S.loadMe();
+
+  setBootstrap("계정과 작업 공간을 불러오는 중", 38);
+  await Promise.allSettled([S.loadWorkspaces(), S.loadMe()]);
+  setBootstrap("연결된 기기와 알림을 불러오는 중", 64);
+  await Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]);
+  setBootstrap("권한과 보안 상태를 확인하는 중", 82);
+  await api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
+
   const setupPending = restorePendingSetup();
-  S.loadDevices();
-  S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
-  S.loadNotifications(); // 서버 알림 미러(실패해도 부팅 진행)
-  S.loadApprovals(); // 대기 중 승인 캐치업(부팅 중 폰이 아직 안 답한 카드가 있을 수 있다)
+  await S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
   startUiChannel(); // UI 실시간 채널(WS) — 알림/승인/채팅 이벤트 수신
   startE2ee(); // 종단간 암호화 상태(데몬 위임) — 실패해도 부팅/기능에 영향 없음(평문 폴백)
   startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
   initOsDrop(); // OS 파일 드래그앤드랍 → 터미널 pane 경로 삽입
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
+  setBootstrap("화면을 준비하는 중", 94);
   render();
   refreshWsMeta();
+  finishBootstrap();
   // 첫 실행 1스텝: "이 PC 에서 찾은 에이전트 — 연동할까요?" (한 번만, 데몬이 기록).
   //  페어링 전이면 묻지 않는다(설정 저장 대상이 daemon.json 이라 페어링이 선행돼야 한다).
   if (state.paired && !setupPending) maybeShowOnboarding().catch(() => {});

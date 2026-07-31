@@ -11,6 +11,15 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- 첫 페인트부터 보이는 부트스트랩 게이트. JS가 계정/워크스페이스/기기/권한을 모두 읽고
+         완성된 화면을 한 번 렌더한 뒤에만 제거한다. -->
+    <div id="bootstrapGate" class="bootstrap-gate">
+      <div class="boot-inner">
+        <div class="boot-title">CodingPT를 준비하고 있어요</div>
+        <div id="bootstrapLabel" class="boot-label">앱 설정을 불러오는 중</div>
+        <div class="boot-track"><div id="bootstrapBar" class="boot-bar"></div></div>
+      </div>
+    </div>
     <div class="shell">
       <aside id="sidebar"></aside>
       <main class="main">

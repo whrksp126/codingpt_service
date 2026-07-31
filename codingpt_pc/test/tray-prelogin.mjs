@@ -10,6 +10,7 @@ const main = read("src/js/main.js");
 const gate = read("src/js/login-gate.js");
 const settings = read("src/js/settings.js");
 const api = read("src/js/api.js");
+const html = read("src/index.html");
 
 const checks = [
   ["트레이에 설정 메뉴가 있다", rust.includes('"settings", "설정…"')],
@@ -22,6 +23,8 @@ const checks = [
   ["앱 정보 화면에서 기존 업데이터를 그대로 쓴다", settings.includes('export function openSettingsSection') && /\.updateCheck\(\)/.test(settings) && settings.includes('api.updateInstall()')],
   ["로그인 전 새 설치본은 자동 업데이트한다", main.includes("maybeInstallSetupUpdate") && main.includes("await api.updateInstall()")],
   ["자동 업데이트 실패는 온보딩을 막지 않는다", main.includes("hideSetupUpdate()") && gate.includes("최신 버전을 준비하고 있어요")],
+  ["첫 페인트부터 부트스트랩 게이트가 화면을 가린다", html.includes('id="bootstrapGate"') && main.includes("finishBootstrap()")],
+  ["초기 데이터와 권한을 모두 읽은 뒤 화면을 공개한다", main.includes("Promise.allSettled([S.loadWorkspaces(), S.loadMe()])") && main.includes("S.loadDevices()") && main.includes("api.notifPermissionState()")],
 ];
 
 let failed = 0;
