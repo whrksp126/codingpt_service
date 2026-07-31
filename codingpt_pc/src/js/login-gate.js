@@ -15,6 +15,7 @@ let el = null;
 let session = null; // { code, secret, expiresAt, poll, busy }
 let step = "welcome"; // 'welcome' | 'login' | 'setup'
 let pendingSetup = false; // 이 게이트로 페어링 완료 → 셋업 1회 노출
+let setupUpdate = null; // { version, progress } — 로그인 전 자동 업데이트 전용 표면
 // (2026-07-28 2차 개정: 자동 실행 토글은 게이트에서 제거 — 기본 켬, 끄기는 설정 > 일반의 토글)
 
 // ── 셋업/권한의 스코프 (2026-07-28 사용자 실사고로 개정) ─────────────────────
@@ -76,10 +77,30 @@ export function updateLoginGate() {
   // 설정을 열 수 있고, 닫으면 다시 온보딩 게이트로 돌아온다.
   const utilitySettingsOpen = state.view === "settings";
   // 로그인 완료 직후엔 셋업 단계를 이어서 보여준다(이 게이트로 로그인한 경우 1회).
-  const show = (need || (pendingSetup && step === "setup")) && !utilitySettingsOpen;
+  const show = (setupUpdate || need || (pendingSetup && step === "setup")) && !utilitySettingsOpen;
   el.classList.toggle("hidden", !show);
   if (!show) stopGateLogin();
   if (need && step === "setup") { step = "welcome"; renderStep(); } // 재로그인 필요 상태로 회귀
+}
+
+export function showSetupUpdate(version) {
+  setupUpdate = { version: String(version || ""), progress: null };
+  renderStep();
+  updateLoginGate();
+}
+
+export function updateSetupProgress(payload) {
+  if (!setupUpdate) return;
+  const pct = payload?.total ? Math.min(100, Math.round((payload.chunk / payload.total) * 100)) : null;
+  setupUpdate.progress = Number.isFinite(pct) ? pct : null;
+  renderStep();
+}
+
+export function hideSetupUpdate() {
+  if (!setupUpdate) return;
+  setupUpdate = null;
+  renderStep();
+  updateLoginGate();
 }
 
 // 앱을 ⌘Q로 완전히 종료해도 미완료 셋업을 다시 연다. 예전에는 pendingSetup이 프로세스
@@ -110,6 +131,15 @@ function renderStep() {
   if (folderPermissionWatch) {
     clearInterval(folderPermissionWatch);
     folderPermissionWatch = null;
+  }
+  if (setupUpdate) {
+    const progress = setupUpdate.progress == null ? "다운로드를 시작하는 중…" : `${setupUpdate.progress}%`;
+    el.innerHTML = `
+      <div class="lg-inner">
+        <div class="lg-head sm">최신 버전을 준비하고 있어요</div>
+        <div class="lg-status">CodingPT ${setupUpdate.version}${setupUpdate.version ? " · " : ""}${progress}</div>
+      </div>`;
+    return;
   }
   if (step === "welcome") {
     el.innerHTML = `

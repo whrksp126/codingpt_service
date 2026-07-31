@@ -11,7 +11,14 @@ import {
   focusCurrentPane,
 } from "./workspace-view.js";
 import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
-import { mountLoginGate, restorePendingSetup, updateLoginGate } from "./login-gate.js";
+import {
+  hideSetupUpdate,
+  mountLoginGate,
+  restorePendingSetup,
+  showSetupUpdate,
+  updateLoginGate,
+  updateSetupProgress,
+} from "./login-gate.js";
 import { dispatchData, dispatchExit, getPane } from "./pane.js";
 import { startUiChannel } from "./ui-channel.js";
 import { startE2ee } from "./e2ee.js";
@@ -185,10 +192,37 @@ function startPreviewShieldWatch() {
   }, 80);
 }
 
+// 새 설치본이 오래됐어도 로그인·권한 설정 전에 최신판으로 맞춘다.
+// 네트워크/업데이트 서버 장애는 온보딩을 막지 않는다. 로그인된 기존 사용자는 설정의 일반 업데이트 흐름을 쓴다.
+async function maybeInstallSetupUpdate() {
+  if (state.paired) return;
+  let result = null;
+  try {
+    result = await Promise.race([
+      api.updateCheck(),
+      new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
+    ]);
+  } catch (_) {
+    return;
+  }
+  if (!result?.available) return;
+  showSetupUpdate(result.version);
+  let unlisten = null;
+  try {
+    unlisten = await api.onUpdateProgress(updateSetupProgress);
+    await api.updateInstall(); // 성공하면 네이티브가 앱을 재시작한다.
+  } catch (_) {
+    hideSetupUpdate(); // 오프라인·검증 실패 시 현재 버전으로 계속 진행
+  } finally {
+    unlisten?.();
+  }
+}
+
 (async function init() {
   await S.restorePersisted();
   state.daemon = await api.daemonStatus().catch(() => null);
   state.paired = !!state.daemon?.paired;
+  await maybeInstallSetupUpdate();
   await S.loadWorkspaces();
   await S.loadMe();
   const setupPending = restorePendingSetup();

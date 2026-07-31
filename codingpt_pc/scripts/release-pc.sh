@@ -26,9 +26,9 @@ NOTES=""
 VERSION="$(python3 -c "import json;print(json.load(open('$PC_DIR/src-tauri/tauri.conf.json'))['version'])")"
 echo "▸ 릴리스 버전: $VERSION"
 
-# 웹의 두 버튼이 같은 버전별 공개 DMG를 가리키는지 릴리스 전에 강제 검증한다.
-# 새 버전인데 URL 갱신을 잊으면 구 DMG가 영구 캐시된 것처럼 보이므로 발행 자체를 중단한다.
-EXPECTED_PUBLIC_DMG="https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-${VERSION}-arm64.dmg"
+# 웹의 두 버튼은 영구 고정 다운로드 주소를 쓴다. 이 별칭은 매 릴리스 최신 DMG로 교체되고
+# back 이 no-store 헤더를 강제하므로 웹 소스의 버전 문자열을 매번 바꿀 필요가 없다.
+EXPECTED_PUBLIC_DMG="https://codingpt-back.ghmate.com/api/pc/dl/CodingPT.dmg"
 for FRONT_FILE in "$PC_DIR/../codingpt_front/app/(public)/page.tsx" "$PC_DIR/../codingpt_front/app/(public)/download/page.tsx"; do
   grep -Fq "$EXPECTED_PUBLIC_DMG" "$FRONT_FILE" || {
     echo "✗ 웹 DMG URL 버전 불일치: $FRONT_FILE" >&2

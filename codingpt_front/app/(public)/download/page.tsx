@@ -7,9 +7,9 @@ export const metadata = {
   description: 'Apple Silicon Mac을 CodingPT에 연결해 폰에서 PC 폴더로 바이브코딩하세요. 설치하면 메뉴바에서 실행됩니다.',
 };
 
-// 버전별 ObjectStore 객체는 장기 캐시한다. 새 릴리스는 새 URL이라 이전 CDN 캐시와 충돌하지 않는다.
+// 영구 고정 주소. 릴리스 때마다 최신 DMG로 교체되며 back이 no-store를 강제한다.
 //  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
-const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT-0.1.189-arm64.dmg';
+const MAC_DMG_URL = 'https://codingpt-back.ghmate.com/api/pc/dl/CodingPT.dmg';
 const WIN_EXE_URL = ''; // 준비 중
 
 const STEPS = [
