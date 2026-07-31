@@ -311,23 +311,30 @@ async function normalizeE2eePolicy() {
 //    "데몬(헤드리스) 자동 부트스트랩 금지" 원칙은 유지된다: 주체가 사람이 보고 있는 앱 표면이라
 //    모바일 앱의 기존 자동 부트스트랩과 같은 등급이다. 동시 시도(폰+PC)는 서버 409 가 중재하고
 //    진 쪽은 자동으로 enroll 대기가 된다(e2ee-account.js 헤더).
-//    ⚠ 스로틀 60s: 실패를 즉시 재시도하면 refresh 주기(60s)와 겹쳐 폭주한다. 성공 시 refreshE2ee 가
-//    상태를 갱신하므로 다음 진입에서 needsBootstrap 이 꺼져 자연 종료된다.
+//    ⚠ 진행 중 잠금 + 실패 스로틀: bootstrapAccount 안의 refreshE2ee 가 다시 이 함수를 부르므로
+//    동시 호출만 막는다. 확인 중(checking)은 "서버 상태를 읽는 중"일 뿐 키 생성 금지 조건이 아니다.
+//    여기에 !checking 을 걸면 재설치 PC가 pending/checking 상태에서 영원히 키를 만들지 못한다.
 let autoBootAt = 0;
+let autoBootBusy = false;
 async function maybeAutoBootstrap() {
   if (!state.paired || !e2ee.available) return;
   // 최초 계정뿐 아니라 완전 재설치 후 로컬 키가 없는 host도 자동으로 새 신뢰 기점을 준비한다.
   // pending/enrolled 상태를 제외하면 과거 키링 행 때문에 양쪽 새 기기가 서로를 기다린다.
   const missingHostKey = !ready()
-    && !e2ee.checking
     && ["none", "pending", "enrolled"].includes(String(e2ee.keyState || e2ee.state));
   if (!needsBootstrap(e2ee) && !missingHostKey) { e2ee.autoBootError = null; return; }
+  if (autoBootBusy) return;
   const now = Date.now();
-  if (now - autoBootAt < 60000) return;
+  if (now - autoBootAt < 10000) return;
   autoBootAt = now;
-  const r = await bootstrapAccount();
-  e2ee.autoBootError = r && r.ok ? null : (r && r.error) || "bootstrap_failed";
-  S.emit();
+  autoBootBusy = true;
+  try {
+    const r = await bootstrapAccount();
+    e2ee.autoBootError = r && r.ok ? null : (r && r.error) || "bootstrap_failed";
+    S.emit();
+  } finally {
+    autoBootBusy = false;
+  }
 }
 
 /** device_approval_event(WS) 반영 — push 는 즉시성 힌트, pull(refreshE2ee)이 정본. */

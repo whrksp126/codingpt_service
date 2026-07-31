@@ -808,6 +808,8 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     eq("자동 부트스트랩이 배선돼 있다(refreshE2ee → maybeAutoBootstrap, 버튼 없음)",
       /void maybeAutoBootstrap\(\)/.test(e2eeSrc) && /async function maybeAutoBootstrap/.test(e2eeSrc)
       && !/id="e2eeBootBtn"/.test(settings), true);
+    eq("재설치 키 복구는 checking 상태에도 막히지 않는다",
+      /missingHostKey[\s\S]{0,180}!e2ee\.checking/.test(e2eeSrc), false);
     eq("정책은 '자동' 으로 고정·복원된다(normalizeE2eePolicy — 구 UI 로 저장한 끄기/항상 탈출로)",
       /normalizeE2eePolicy/.test(e2eeSrc) && /setPolicy\("preferred"\)/.test(e2eeSrc)
       && !/e2eePolicySeg/.test(settings), true);
@@ -931,6 +933,11 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     && code.includes('data-link-show-code=')
     && code.includes('icons.link({ size: 15 })')
     && code.includes("await linkStart()"), true);
+  eq("이 기기 인증 코드는 접지 않고 준비 즉시 자동 발급한다",
+    code.includes("queueMicrotask(() => { void ensureMyLink(); })")
+    && code.includes('class="link-code"')
+    && !code.includes("data-link-toggle")
+    && !code.includes("myLinkOpen"), true);
 
   // ⑦ **표(table) 구조**(2026-07-27 개정 3 · 사용자 요구: "기기 목록에서 카드 안에 카드 구조인데 그렇게
   //  안햇으면 좋겠어! 차라리 테이블 구조는 어떨까") — 행마다 카드(`.dev-row`: 배경+테두리+라운드)를

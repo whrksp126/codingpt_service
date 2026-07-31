@@ -9,7 +9,7 @@ import {
   // (개정 6: approveDevice/denyDevice 는 더 이상 이 화면의 일이 아니다 — device-approval.js·notifications.js)
   e2ee, e2eeReady, refreshE2ee,
   revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap,
-  linkStart, linkClaim, linkCancel,
+  linkStart, linkClaim,
 } from "./e2ee.js";
 // (개정 7: hostLockLabel/isHostRow 는 이 화면에서 쓰지 않는다 — 행별 암호화 배지와 '연결된 PC 없음'
 //  행이 사라졌다. 판정 함수와 그 계약은 host-lock.js 에 그대로 남아 있다: 다시 노출하는 날 규칙을
@@ -767,18 +767,48 @@ function e2eeActionRow() {
 }
 
 /**
- * 이 기기의 **연동 코드**(★ 개정 12) — `자세히 보기` 를 누르면 코드를 만들어 보여 준다.
+ * 이 기기의 **연동 코드**(★ 개정 13) — 로그인 후 키가 준비되는 즉시 자동으로 만들어 항상 보여 준다.
  *  다른 기기가 이 코드를 입력하면 그 자리에서 열쇠가 전달된다(승인 화면 없음).
- *  코드는 3분 만료·1회용이고, 서버에는 **해시만** 올라간다(데몬 e2ee-account linkStart).
+ *  코드는 3분 만료·1회용이고, 이 화면을 보는 동안 만료되면 자동 갱신한다. 서버에는 **해시만**
+ *  올라간다(데몬 e2ee-account linkStart).
  */
 let linkEntryFor = null;   // 코드 입력 칸을 연 기기 행 id
 let linkEntryMsg = "";     // 그 칸의 오류/진행 문구
 let myLink = null;      // { code, until, ref } — 표시 중인 코드(ref = 그 코드를 만든 계정)
-let myLinkOpen = false;
 let myLinkBusy = false;
+let myLinkTimer = null;
+
+function validMyLink() {
+  return !!(myLink && myLink.until > Date.now() && (!myLink.ref || !e2ee.userRef || myLink.ref === e2ee.userRef));
+}
+
+function scheduleMyLinkRenewal() {
+  if (myLinkTimer) clearTimeout(myLinkTimer);
+  myLinkTimer = null;
+  if (!validMyLink()) return;
+  const wait = Math.max(1000, myLink.until - Date.now() - 1000);
+  myLinkTimer = setTimeout(() => {
+    myLinkTimer = null;
+    myLink = null;
+    if (state.view === "settings" && section === "connection" && e2eeReady()) void ensureMyLink();
+  }, wait);
+}
+
+async function ensureMyLink({ force = false } = {}) {
+  if (!e2eeReady() || myLinkBusy || (!force && validMyLink())) return;
+  myLinkBusy = true;
+  renderE2ee();
+  const r = await linkStart();
+  myLinkBusy = false;
+  myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
+  linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
+  scheduleMyLinkRenewal();
+  renderE2ee();
+}
+
 function e2eeMyCodeRow() {
-  // 로그인된 PC에서는 인증 코드 진입점이 항상 같은 자리에 있어야 한다. 키를 준비하는 수 초 동안
-  // 행 자체를 숨기면 사용자는 기능이 없는 것으로 받아들인다(재설치 교착의 실제 화면).
+  // 로그인된 PC에서는 인증 코드가 항상 같은 자리에 실제 값으로 보여야 한다. 키를 준비하는 짧은
+  // 구간만 진행 상태를 표시하고, 준비 완료 emit 직후 ensureMyLink 가 실제 8자리 코드를 채운다.
   if (!e2eeReady()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div class="appr-reveal" aria-label="이 기기 인증 코드 준비 중">이 기기 인증 코드</div>
@@ -787,17 +817,20 @@ function e2eeMyCodeRow() {
   }
   //  ★ 계정이 바뀌면(재가입·계정 전환) 옛 코드는 **다른 계정의 코드**라 입력해도 404 다(실사고).
   //   표시 중인 코드에 발급 계정(userRef)을 달아 두고, 달라지면 즉시 버린다.
-  if (myLink && myLink.ref && e2ee.userRef && myLink.ref !== e2ee.userRef) { myLink = null; }
+  if (myLink && myLink.ref && e2ee.userRef && myLink.ref !== e2ee.userRef) {
+    myLink = null;
+    scheduleMyLinkRenewal();
+  }
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
   const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-    <button class="appr-reveal" data-link-toggle="1">이 기기 인증 코드 · 자세히 보기 ${myLinkOpen ? "▴" : "▾"}</button>
-    ${myLinkOpen ? `<div class="link-box">
+    <div class="appr-reveal">이 기기 인증 코드</div>
+    <div class="link-box">
       ${myLinkBusy ? `<div class="acct-msg">코드를 만드는 중…</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
         <div class="acct-msg">다른 기기에서 이 코드를 입력하세요 · ${mm} 남음</div>` : ""}
-      ${myLink && left <= 0 ? `<button class="sett-btn" data-link-new="1">코드 새로 만들기</button>` : ""}
-    </div>` : ""}
+      ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">다시 시도</button>` : ""}
+    </div>
   </td></tr>`;
 }
 
@@ -943,6 +976,9 @@ function renderE2ee() {
       ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
       <table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady, { mine: true })}${actionRowHtml}${e2eeMyCodeRow()}</table>`;
     bindE2ee(selfBox);
+    // 렌더 함수에서 비동기 호출을 직접 await 하지 않는다. 상태 emit/render 스택이 끝난 뒤 한 번만
+    // 발급하고, myLinkBusy/validMyLink 가 이후의 모든 재렌더 중복 호출을 막는다.
+    if (selfReady && !validMyLink() && !myLinkBusy) queueMicrotask(() => { void ensureMyLink(); });
   }
   box.innerHTML = `<table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady)}</table>`;
   bindE2ee(box);
@@ -961,14 +997,7 @@ function bindE2ee(box) {
   }));
   box.querySelectorAll("[data-link-show-code]").forEach((b) => b.addEventListener("click", async () => {
     linkEntryFor = null;
-    myLinkOpen = true;
-    myLinkBusy = true;
-    renderE2ee();
-    const r = await linkStart();
-    myLinkBusy = false;
-    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
-    linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
-    renderE2ee();
+    await ensureMyLink({ force: true });
   }));
   box.querySelectorAll("[data-link-submit]").forEach((b) => b.addEventListener("click", async () => {
     const inp = connBody?.querySelector("#linkCodeInput");
@@ -982,24 +1011,9 @@ function bindE2ee(box) {
     if (r.ok) linkEntryFor = null;
     renderE2ee();
   }));
-  //  이 기기의 연동 코드 — `자세히 보기` 토글 · 만료 시 재발급.
-  box.querySelectorAll("[data-link-toggle]").forEach((b) => b.addEventListener("click", async () => {
-    myLinkOpen = !myLinkOpen;
-    if (!myLinkOpen) { myLink = null; void linkCancel(); renderE2ee(); return; }
-    myLinkBusy = true;
-    renderE2ee();
-    const r = await linkStart();
-    myLinkBusy = false;
-    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
-    if (!r.ok) linkEntryMsg = r.error || "";
-    renderE2ee();
-  }));
+  // 이 기기의 연동 코드는 자동 발급·자동 갱신한다. 실패했을 때만 명시적인 재시도 버튼을 둔다.
   box.querySelectorAll("[data-link-new]").forEach((b) => b.addEventListener("click", async () => {
-    myLinkBusy = true; renderE2ee();
-    const r = await linkStart();
-    myLinkBusy = false;
-    myLink = r.ok ? { code: r.code, until: Date.now() + (r.ttlMs || 180000), ref: e2ee.userRef || "" } : null;
-    renderE2ee();
+    await ensureMyLink({ force: true });
   }));
   // (개정 4: 정책 세그/암호화 켜기/복구 코드 만들기·복원 핸들러 삭제 — 부트스트랩은
   //  e2ee.js maybeAutoBootstrap 이 자동 수행, 정책은 normalizeE2eePolicy 가 '자동' 으로 고정)
