@@ -9,7 +9,7 @@ export const metadata = {
 
 // 영구 고정 주소. 릴리스 때마다 최신 DMG로 교체되며 back이 no-store를 강제한다.
 //  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
-const MAC_DMG_URL = 'https://codingpt-back.ghmate.com/api/pc/dl/CodingPT.dmg';
+const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT.dmg';
 const WIN_EXE_URL = ''; // 준비 중
 
 const STEPS = [

@@ -46,6 +46,16 @@ async function put(key, body, contentType, cacheControl) {
     CacheControl: 'public, max-age=31536000, immutable',
   }));
   console.log(`  업로드: ${publicDmgKey} (공개·immutable)`);
+  // 웹 다운로드 정본 = ObjectStore의 고정 공개 객체. 매 릴리스 같은 key를 최신 DMG로 교체하므로
+  // 브라우저/CDN이 예전 설치본을 붙들지 않게 no-store를 객체 메타데이터에 직접 기록한다.
+  const stablePublicDmgKey = 'common/downloads/CodingPT.dmg';
+  await client.send(new PutObjectCommand({
+    Bucket: BUCKET, Key: stablePublicDmgKey,
+    Body: fs.readFileSync(dmg), ContentType: 'application/x-apple-diskimage',
+    ContentDisposition: 'attachment; filename="CodingPT.dmg"',
+    CacheControl: 'no-store, no-cache, must-revalidate',
+  }));
+  console.log(`  업로드: ${stablePublicDmgKey} (공개·최신 별칭·no-store)`);
   const latest = {
     version,
     pub_date: new Date().toISOString(),
