@@ -226,9 +226,20 @@ function renderSection(force) {
       <div class="sm-section-note">종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.</div>`;
     bindFolderPerms(contentEl);
   } else if (section === "mobile") {
+    const codeHtml = e2eeReady()
+      ? `<div class="sett-col">
+          <span class="sett-label">이 기기 인증 코드</span>
+          <div class="link-box">
+            ${myLinkBusy ? `<div class="acct-msg">코드를 만드는 중…</div>` : ""}
+            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">모바일 앱에서 이 코드를 입력하세요.</div>` : ""}
+            ${!myLinkBusy && !validMyLink() ? `<button class="sett-btn" data-link-new="1">다시 시도</button>` : ""}
+          </div>
+        </div>`
+      : `<div class="sett-col"><span class="sett-label">이 기기 인증 코드</span><div class="acct-msg">암호화 연결을 준비하고 있어요…</div></div>`;
     contentEl.innerHTML = `
       <div class="sm-section-title">휴대폰·태블릿에서 이어서 작업하기</div>
       <div class="sm-card2">
+        ${codeHtml}
         <div class="qr-sub">코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.</div>
         <div class="qr-row">
           <div class="qr-tile">
@@ -241,6 +252,8 @@ function renderSection(force) {
           </div>
         </div>
       </div>`;
+    bindE2ee(contentEl);
+    if (e2eeReady() && !validMyLink() && !myLinkBusy) queueMicrotask(() => { void ensureMyLink(); });
   } else {
     // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
@@ -691,18 +704,6 @@ function fmtDate(iso) {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
 }
 
-// 최근 작업 시각 — 가까울수록 상대 표기(방금/분/시간), 하루 넘으면 날짜(모바일 fmtRecent 미러).
-function fmtRecent(iso) {
-  if (!iso) return "—";
-  const t = new Date(iso).getTime();
-  if (isNaN(t)) return "—";
-  const diff = Date.now() - t;
-  if (diff < 60_000) return "방금 전";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}분 전`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}시간 전`;
-  return fmtDate(iso);
-}
-
 // 기기 행의 부제용 라벨(운영체제) — `기기` 섹션(e2eeDeviceRowsHtml)이 쓴다.
 //  구 '내 기기' 표는 2026-07-27 통합으로 사라졌지만 이 라벨 규칙은 그 행에서 계속 쓰인다.
 // ── `기기` 섹션 — 모바일 E2eeSettingsCard/DeviceTrustCard 와 **동일 계층·동일 문구** ──
@@ -776,6 +777,7 @@ let linkEntryFor = null;   // 코드 입력 칸을 연 기기 행 id
 let linkEntryMsg = "";     // 그 칸의 오류/진행 문구
 let aliasEditFor = null;
 let aliasEditValue = "";
+let aliasEditError = "";
 let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
@@ -794,7 +796,7 @@ function scheduleMyLinkRenewal() {
   myLinkTimer = setTimeout(() => {
     myLinkTimer = null;
     myLink = null;
-    if (state.view === "settings" && section === "connection" && e2eeReady()) void ensureMyLink();
+    if (state.view === "settings" && (section === "connection" || section === "mobile") && e2eeReady()) void ensureMyLink();
   }, wait);
 }
 
@@ -812,7 +814,8 @@ async function ensureMyLink({ force = false } = {}) {
   } : null;
   linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
   scheduleMyLinkRenewal();
-  renderE2ee();
+  if (section === "mobile") renderSection(true);
+  else renderE2ee();
 }
 
 function e2eeMyCodeRow() {
@@ -899,7 +902,6 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
   const row = (d) => {
     const k = keyByDevice.get(String(d.id));
     const canRevoke = typeof d.id === "number" && !d.isCurrent;
-    const sub = fmtRecent(d.lastSeenAt || d.createdAt);
     //  연동 여부 = 그 기기가 계정 열쇠를 갖고 있는가. 안 됐으면 [연동] 이 승인 절차를 다시 시작한다.
     //  ⚠ 이 기기 행에는 [연동] 을 두지 않는다: 자기를 자기가 승인할 수는 없다.
     //  ⚠ **승인 대기 중인 행에도 두지 않는다**(개정 9): 요청이 이미 갔고 지금 할 일은 승인/거절 하나다.
@@ -915,12 +917,11 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     const link = canLink
       ? `<button class="dev-link-btn" ${selfReady ? `data-link-show-code="${d.id}"` : `data-link-open="${d.id}"`} title="이 기기와 연동" aria-label="이 기기와 연동">${icons.link({ size: 15 })}</button>` : "";
     const linkedMark = linked
-      ? `<span class="dev-auth-mark" title="인증됨" aria-label="인증됨">${icons.check({ size: 13 })}</span>` : "";
+      ? `<span class="dev-auth-mark" title="인증된 기기" aria-label="인증된 기기">${icons.verified({ size: 15 })}</span>` : "";
     //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
     //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
     //  ★ 개정 11(사용자 확정): 목록에 **연동됨/안 됨을 쓰지 않는다** — "기기 목록에서 연동됨 안됨
     //   이런거 표현하지마!". 남는 것은 최근 시각뿐이고, 할 일이 있는 상태(승인 대기)만 말한다.
-    const meta = esc(sub);
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     const editing = d.isCurrent && aliasEditFor === String(d.id);
     const nameCell = editing
@@ -928,8 +929,8 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
       : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="별칭 변경">${icons.edit({ size: 13 })}</button>` : ""}`;
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name">${nameCell}${linkedMark}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
-      <td class="dev-c-meta">${meta}</td>
+      <td class="dev-c-name"><span class="dev-name">${nameCell}${linkedMark}</span>${editing && aliasEditError ? `<div class="acct-msg" style="color:var(--error,#ef6b73)">${esc(aliasEditError)}</div>` : ""}</td>
+      <td class="dev-c-meta"></td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
     ${canRevoke ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4"><div class="dev-delete-confirm">${icons.shield({ size: 14 })}<span>한 번 더 누르면 이 기기를 삭제합니다 · 되돌릴 수 없음</span></div></td></tr>` : ""}
@@ -991,7 +992,7 @@ function renderE2ee() {
     selfBox.innerHTML = `
       ${label.tone !== "on" && e2ee.reason && !actionRowHtml ? `<div class="acct-msg" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(e2ee.reason)}</div>` : ""}
       ${e2eeMsg ? `<div class="acct-msg" style="color:var(--text2)">${esc(e2eeMsg)}</div>` : ""}
-      <table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady, { mine: true })}${actionRowHtml}${e2eeMyCodeRow()}</table>`;
+      <table class="dev-tbl">${e2eeDeviceRowsHtml(devs, selfReady, { mine: true })}${actionRowHtml}</table>`;
     bindE2ee(selfBox);
     // 렌더 함수에서 비동기 호출을 직접 await 하지 않는다. 상태 emit/render 스택이 끝난 뒤 한 번만
     // 발급하고, myLinkBusy/validMyLink 가 이후의 모든 재렌더 중복 호출을 막는다.
@@ -1082,11 +1083,11 @@ function bindE2ee(box) {
   box.querySelectorAll("[data-alias-edit]").forEach((b) => b.addEventListener("click", () => {
     const d = (state.devices || []).find((x) => String(x.id) === String(b.dataset.aliasEdit) && x.isCurrent);
     if (!d) return;
-    aliasEditFor = String(d.id); aliasEditValue = d.name || ""; renderE2ee();
+    aliasEditFor = String(d.id); aliasEditValue = d.name || ""; aliasEditError = ""; renderE2ee();
     setTimeout(() => box.querySelector(".dev-alias-input")?.focus(), 0);
   }));
   box.querySelectorAll("[data-alias-cancel]").forEach((b) => b.addEventListener("click", () => {
-    aliasEditFor = null; aliasEditValue = ""; renderE2ee();
+    aliasEditFor = null; aliasEditValue = ""; aliasEditError = ""; renderE2ee();
   }));
   const aliasInput = box.querySelector(".dev-alias-input");
   if (aliasInput) aliasInput.addEventListener("input", () => { aliasEditValue = aliasInput.value; });
@@ -1094,8 +1095,8 @@ function bindE2ee(box) {
     const name = aliasEditValue.trim();
     if (!name) return;
     b.disabled = true;
-    try { await api.renameOwnDevice(Number(b.dataset.aliasSave), name); aliasEditFor = null; await S.loadDevices(); }
-    catch (_) { b.disabled = false; }
+    try { await api.renameOwnDevice(Number(b.dataset.aliasSave), name); aliasEditFor = null; aliasEditError = ""; await S.loadDevices(); }
+    catch (e) { aliasEditError = e?.message || "별칭을 저장하지 못했어요."; b.disabled = false; }
     renderE2ee();
   }));
 }

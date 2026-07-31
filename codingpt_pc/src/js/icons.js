@@ -65,6 +65,8 @@ export const icons = {
   chat: (o) => svg('<path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7a2.5 2.5 0 0 1-2.5 2.5H9l-4.4 3.6a.4.4 0 0 1-.6-.3V16z"/><circle cx="8.5" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r=".9" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r=".9" fill="currentColor" stroke="none"/>', o),
   copy: (o) => svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 5.5A1.5 1.5 0 0 0 13.5 4H5.5A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15"/>', o),
   check: (o) => svg('<path d="M5 12.5l4.5 4.5L19 7"/>', o),
+  // 계정/기기 인증 표시 — 단순 체크가 아니라 공식 계정 배지에서 익숙한 로제트 형태.
+  verified: (o) => svg('<path d="M12 2.8l2.1 1.5 2.6-.1.8 2.5 2.2 1.4-.8 2.5.8 2.5-2.2 1.4-.8 2.5-2.6-.1-2.1 1.5-2.1-1.5-2.6.1-.8-2.5-2.2-1.4.8-2.5-.8-2.5 2.2-1.4.8-2.5 2.6.1z"/><path d="M8.5 12.1l2.2 2.2 4.8-5"/>', o),
   // 승인 카드 헤드 — 방패+체크(권한 요청). warning 삼각형은 "오류"로 읽히므로 피한다.
   shield: (o) => svg('<path d="M12 3l7 2.5v5.8c0 4-2.8 7.6-7 9.2-4.2-1.6-7-5.2-7-9.2V5.5z"/><path d="M9 12l2.2 2.2L15.5 10"/>', o),
 

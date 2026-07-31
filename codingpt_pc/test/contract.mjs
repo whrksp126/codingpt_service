@@ -927,8 +927,9 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
     [code.includes("data-dev-key="), /revokeTrust\(keyId\)/.test(code), code.includes("api.revokeDevice(")], [true, true, true]);
   // 기기 행이 없는 열쇠(고아)는 목록에 남는다 — 아니면 **해제할 방법이 사라진 열쇠**가 계정에 남는다.
   eq("기기 행이 없는 열쇠는 목록에 남아 해제할 수 있다", /orphans\s*=\s*devs\.filter/.test(code), true);
-  eq("인증된 기기는 이름 옆 체크 마크로 표시한다",
-    code.includes('class="dev-auth-mark"') && code.includes('aria-label="인증됨"'), true);
+  eq("인증된 기기는 이름 옆 공식 인증 배지로 표시한다",
+    code.includes('class="dev-auth-mark"') && code.includes('aria-label="인증된 기기"')
+    && code.includes('icons.verified('), true);
   eq("기기 별칭은 현재 기기에서만 편집할 수 있다",
     code.includes('d.isCurrent ? `<button class="dev-alias-btn"')
     && code.includes('x.isCurrent')

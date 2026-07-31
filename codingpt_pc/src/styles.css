@@ -696,9 +696,6 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .dev-link-btn { background: none; border: none; color: var(--text3); cursor: pointer; padding: 4px; border-radius: 6px; display: inline-flex; vertical-align: middle; margin-right: 3px; }
 .dev-link-btn:hover { color: var(--text); background: var(--hover); }
 .dev-badge.cur { font-size: 10px; font-weight: 700; color: var(--text2); background: var(--hover); border-radius: 999px; padding: 1px 7px; white-space: nowrap; flex: none; }
-.dev-dot { width: 8px; height: 8px; border-radius: 999px; flex: none; }
-.dev-dot.on { background: var(--accent); }
-.dev-dot.off { background: var(--dim); }
 /* **유일한 예외 박스**: 승인 카드(펼친 승인 대기 행). 결정 하나가 한 덩어리로 묶여야 한다.
    ★ 2026-07-28 개정 5: 테두리를 경고색(warn)에서 **중립**으로 바꿨다 — 승인은 사용자가 방금 자기
    기기에서 시작한 정상 흐름이고(구글 로그인 확인과 같은 등급), 노란 테두리는 "사고가 났다" 로 읽혔다.
