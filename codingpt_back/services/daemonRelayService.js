@@ -200,7 +200,8 @@ function registerControl(ws, device) {
   const conn = {
     deviceId: device.id,
     kind: device.runner_kind || 'local',
-    deviceName: device.device_name,
+    deviceName: device.device_alias || device.device_name,
+    systemDeviceName: device.device_name,
     platform: device.platform,
     daemonVersion: device.daemon_version,
     caps: [],                   // 데몬이 hello.caps 로 신고한 능력(구버전 데몬 = 영구 []). 게이팅/진단용.
@@ -244,7 +245,10 @@ function registerControl(ws, device) {
     conn.lastActivityAt = Date.now(); // 인바운드 메시지(rpc_result/agent_event/fs_event/sync_event 등)=러너 활동 → 동면 방지.
     if (msg.type === 'hello') {
       // 데몬 메타 갱신(버전업 반영). 이름/플랫폼/버전은 hello 가 정본.
-      if (msg.deviceName) conn.deviceName = String(msg.deviceName).slice(0, 128);
+      if (msg.deviceName) {
+        conn.systemDeviceName = String(msg.deviceName).slice(0, 128);
+        if (!device.device_alias) conn.deviceName = conn.systemDeviceName;
+      }
       if (msg.platform) conn.platform = String(msg.platform).slice(0, 32);
       if (msg.daemonVersion) conn.daemonVersion = String(msg.daemonVersion).slice(0, 32);
       // capability 협상(설계 §2-(d)) — 옵셔널 필드. 구버전 데몬은 안 보내므로 caps 가 [] 로 남고,
@@ -267,7 +271,7 @@ function registerControl(ws, device) {
       if ('lan' in msg) applyLanInfo(userId, conn, msg.lan);
       if (typeof msg.machineId === 'string') conn.machineId = msg.machineId.slice(0, 64);
       DaemonDevice.update(
-        { device_name: conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
+        { device_name: conn.systemDeviceName || conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
         { where: { id: conn.deviceId } }
       ).catch(() => { /* noop */ });
       if (conn.caps.length) console.log(`[daemonRelay] 데몬 caps device=#${conn.deviceId} v=${conn.daemonVersion} caps=${conn.caps.join(',')}`);
@@ -758,6 +762,17 @@ function fanoutAccountDeleted(userId) {
 function fanoutAppearance(userId, appearance) {
   const payload = { type: 'appearance_event', event: { appearance } };
   broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 기기 별칭 변경 — 각 클라이언트는 이 힌트를 받으면 GET /devices 정본을 다시 읽는다.
+function fanoutDeviceUpdated(userId, event) {
+  const entry = userEntry(userId, false);
+  const conn = entry && entry.runners.get(Number(event && event.deviceId));
+  if (conn && event && event.name) conn.deviceName = String(event.name).slice(0, 40);
+  const payload = { type: 'device_updated', event };
+  broadcastEvent(userId, payload);
   const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
@@ -1641,6 +1656,7 @@ module.exports = {
   hostE2eeEpoch,
   fanoutAccountDeleted,
   fanoutAppearance,
+  fanoutDeviceUpdated,
   hasActiveMobileClient,
   presentClient,
   listUiClients,

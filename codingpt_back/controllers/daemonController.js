@@ -273,7 +273,7 @@ async function daemonMe(req, res) {
       role: u.role,
       appearance: u.appearance || null,
       deviceId: device ? device.id : null,
-      deviceName: device ? device.device_name : null,
+      deviceName: device ? (device.device_alias || device.device_name) : null,
     });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
@@ -308,7 +308,7 @@ async function daemonDevices(req, res) {
       if (d.runner_kind === 'cloud') continue; // 클라우드 러너는 아래 논리 호스트로 통합
       devices.push({
         id: d.id,
-        name: d.device_name,
+        name: d.device_alias || d.device_name,
         platform: d.platform,
         role: d.role || 'host',
         runnerKind: d.runner_kind,
@@ -337,6 +337,37 @@ async function daemonDevices(req, res) {
       });
     }
     return successResponse(res, { devices, currentDeviceId });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
+// PATCH /api/daemon/devices/:deviceId/name — 이 요청을 보낸 기기는 자기 별칭만 변경할 수 있다.
+async function renameOwnDevice(req, res) {
+  try {
+    const acct = await resolveAccount(req);
+    if (!acct) return errorResponse(res, new Error('인증이 필요합니다.'), 401);
+    const targetId = Number(req.params.deviceId);
+    let currentId = acct.deviceId;
+    if (currentId == null) {
+      const uuid = String(req.headers['x-device-uuid'] || '').trim();
+      if (uuid) {
+        const self = await DaemonDevice.findOne({ where: { token_hash: controllerTokenHash(uuid), user_id: acct.userId, revoked_at: null } });
+        currentId = self ? self.id : null;
+      }
+    }
+    if (!Number.isFinite(targetId) || currentId == null || Number(currentId) !== targetId) {
+      const err = new Error('이 기기에서 자기 별칭만 변경할 수 있습니다.');
+      err.statusCode = 403;
+      return errorResponse(res, err, 403);
+    }
+    const name = String(req.body && req.body.name || '').trim().replace(/\s+/g, ' ');
+    if (!name || name.length > 40) return errorResponse(res, new Error('별칭은 1~40자로 입력해 주세요.'), 400);
+    const device = await DaemonDevice.findOne({ where: { id: targetId, user_id: acct.userId, revoked_at: null } });
+    if (!device) return errorResponse(res, new Error('기기를 찾을 수 없습니다.'), 404);
+    await device.update({ device_alias: name, updated_at: new Date() });
+    daemonRelayService.fanoutDeviceUpdated(acct.userId, { deviceId: device.id, name });
+    return successResponse(res, { deviceId: device.id, name });
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);
   }
@@ -714,7 +745,7 @@ async function getStatus(req, res) {
 
       devices: devices.map((d) => ({
         deviceId: d.id,
-        deviceName: d.device_name,
+        deviceName: d.device_alias || d.device_name,
         platform: d.platform,
         daemonVersion: d.daemon_version,
         lastSeenAt: d.last_seen_at,
@@ -1527,7 +1558,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
-  createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
+  createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   agentsList, agentsWire, agentsRescan, agentsLaunch,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,

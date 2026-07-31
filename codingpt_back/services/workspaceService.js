@@ -320,9 +320,9 @@ async function enrichHosts(userId, metas) {
   const daemonRelayService = require('./daemonRelayService');
   const rows = await DaemonDevice.findAll({
     where: { user_id: userId, revoked_at: null },
-    attributes: ['id', 'device_name'],
+    attributes: ['id', 'device_name', 'device_alias'],
   });
-  const nameById = new Map(rows.map((d) => [d.id, d.device_name]));
+  const nameById = new Map(rows.map((d) => [d.id, d.device_alias || d.device_name]));
   const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
   return metas.map((w) => {
     if (w.compute === 'cloud') return { ...w, hostName: '클라우드', hostOnline: true };

@@ -207,6 +207,10 @@ async function connect() {
         // 새 기기 열쇠 승인(기능2) — 요청 등장/해소. 구 클라이언트는 unknown type 이라 무시 = 안전.
         applyDeviceApprovalEvent(msg.event);
         break;
+      case "device_updated":
+        // 별칭 변경은 서버 목록이 정본 — 다른 기기에서 바뀐 이름도 즉시 다시 읽는다.
+        S.loadDevices();
+        break;
       case "chat_event":
         // 트랜스크립트(기능5) 라이브 델타 — 해당 chatId 를 구독 중인 Chat 뷰에만 배달.
         applyChatEvent(msg);

@@ -5,6 +5,7 @@ module.exports = (sequelize, DataTypes) => {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     user_id: { type: DataTypes.INTEGER, allowNull: false, references: { model: 'user', key: 'id' } },
     device_name: { type: DataTypes.STRING(128), allowNull: false }, // 예: "MacBook Pro"(hostname)
+    device_alias: { type: DataTypes.STRING(40), allowNull: true }, // 사용자가 이 기기에서 정한 별칭
     platform: { type: DataTypes.STRING(32), allowNull: true }, // darwin/win32/linux
     daemon_version: { type: DataTypes.STRING(32), allowNull: true },
     token_hash: { type: DataTypes.STRING(64), allowNull: false, unique: true }, // sha256(deviceToken)

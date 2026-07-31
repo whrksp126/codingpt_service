@@ -774,6 +774,8 @@ function e2eeActionRow() {
  */
 let linkEntryFor = null;   // 코드 입력 칸을 연 기기 행 id
 let linkEntryMsg = "";     // 그 칸의 오류/진행 문구
+let aliasEditFor = null;
+let aliasEditValue = "";
 let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
@@ -920,9 +922,13 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     //   이런거 표현하지마!". 남는 것은 최근 시각뿐이고, 할 일이 있는 상태(승인 대기)만 말한다.
     const meta = esc(sub);
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
+    const editing = d.isCurrent && aliasEditFor === String(d.id);
+    const nameCell = editing
+      ? `<span class="dev-alias-edit"><input class="dev-alias-input" maxlength="40" value="${esc(aliasEditValue)}" aria-label="기기 별칭" /><button class="dev-alias-save" data-alias-save="${d.id}">${icons.check({ size: 14 })}</button><button class="dev-alias-cancel" data-alias-cancel="1">${icons.x({ size: 14 })}</button></span>`
+      : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="별칭 변경">${icons.edit({ size: 13 })}</button>` : ""}`;
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${linkedMark}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
+      <td class="dev-c-name"><span class="dev-name">${nameCell}${linkedMark}<span class="dev-dot ${d.online ? "on" : "off"}" title="${d.online ? "온라인" : "오프라인"}"></span></span></td>
       <td class="dev-c-meta">${meta}</td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
@@ -1071,6 +1077,25 @@ function bindE2ee(box) {
     }
     try { await api.revokeDevice(Number(b.dataset.dev)); await S.loadDevices(); } catch (_) { b.disabled = false; }
     await refreshE2ee();
+    renderE2ee();
+  }));
+  box.querySelectorAll("[data-alias-edit]").forEach((b) => b.addEventListener("click", () => {
+    const d = (state.devices || []).find((x) => String(x.id) === String(b.dataset.aliasEdit) && x.isCurrent);
+    if (!d) return;
+    aliasEditFor = String(d.id); aliasEditValue = d.name || ""; renderE2ee();
+    setTimeout(() => box.querySelector(".dev-alias-input")?.focus(), 0);
+  }));
+  box.querySelectorAll("[data-alias-cancel]").forEach((b) => b.addEventListener("click", () => {
+    aliasEditFor = null; aliasEditValue = ""; renderE2ee();
+  }));
+  const aliasInput = box.querySelector(".dev-alias-input");
+  if (aliasInput) aliasInput.addEventListener("input", () => { aliasEditValue = aliasInput.value; });
+  box.querySelectorAll("[data-alias-save]").forEach((b) => b.addEventListener("click", async () => {
+    const name = aliasEditValue.trim();
+    if (!name) return;
+    b.disabled = true;
+    try { await api.renameOwnDevice(Number(b.dataset.aliasSave), name); aliasEditFor = null; await S.loadDevices(); }
+    catch (_) { b.disabled = false; }
     renderE2ee();
   }));
 }

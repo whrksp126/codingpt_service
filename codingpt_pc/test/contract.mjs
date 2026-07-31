@@ -929,6 +929,14 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("기기 행이 없는 열쇠는 목록에 남아 해제할 수 있다", /orphans\s*=\s*devs\.filter/.test(code), true);
   eq("인증된 기기는 이름 옆 체크 마크로 표시한다",
     code.includes('class="dev-auth-mark"') && code.includes('aria-label="인증됨"'), true);
+  eq("기기 별칭은 현재 기기에서만 편집할 수 있다",
+    code.includes('d.isCurrent ? `<button class="dev-alias-btn"')
+    && code.includes('x.isCurrent')
+    && code.includes('api.renameOwnDevice('), true);
+  eq("별칭 편집은 입력·저장·취소 상태를 제공한다",
+    code.includes('class="dev-alias-input"')
+    && code.includes('data-alias-save=')
+    && code.includes('data-alias-cancel='), true);
   eq("연동은 휴지통 앞 아이콘 버튼이며 PC가 코드를 만들어 줄 수 있다",
     code.indexOf("${link}${canRevoke") >= 0
     && code.includes('data-link-show-code=')

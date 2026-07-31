@@ -806,6 +806,10 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .dev-delete-confirm { display: flex; align-items: center; gap: 7px; color: var(--danger, #f87171); font-size: 12px; font-weight: 650; padding: 2px 0; }
 /* 기기 목록은 다시 표다(2026-07-27 개정 3 — 행 카드 `.dev-row` 폐기) → 행 호버에서 휴지통이 진해진다 */
 .dev-tr:hover .dev-del-btn { opacity: 1; }
+.dev-alias-btn,.dev-alias-save,.dev-alias-cancel { border:0; background:transparent; color:var(--dim); display:inline-flex; padding:3px; cursor:pointer; border-radius:5px; }
+.dev-alias-btn:hover,.dev-alias-save:hover,.dev-alias-cancel:hover { color:var(--text); background:var(--elevated2); }
+.dev-alias-edit { display:flex; align-items:center; gap:3px; min-width:0; flex:1; }
+.dev-alias-input { min-width:90px; width:min(220px,100%); height:29px; padding:0 8px; color:var(--text); background:var(--elevated2); border:1px solid var(--border-ctrl); border-radius:6px; font:inherit; outline:none; }
 .dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
 .conn-status { display: flex; align-items: center; gap: 12px; }
 .cst-dot { width: 10px; height: 10px; border-radius: 999px; background: var(--dim); flex: none; }

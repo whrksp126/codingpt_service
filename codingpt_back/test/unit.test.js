@@ -2,6 +2,8 @@
 //  실행: node --test test/
 const { test } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { normalizeRemote } = require('../services/workspaceService');
 const { cmpVersion } = require('../services/pcReleaseService');
@@ -11,6 +13,17 @@ const { SERVER_CAPS, computeServerCaps } = require('../config/caps');
 const approvalService = require('../services/approvalService');
 const { _buildFcmMessage } = require('../services/pushProviderService');
 const { _collapseLegacyHostDuplicates } = require('../controllers/daemonController');
+
+test('device alias — 별도 컬럼에 저장하고 현재 기기만 변경한다', () => {
+  const controller = fs.readFileSync(path.join(__dirname, '../controllers/daemonController.js'), 'utf8');
+  const model = fs.readFileSync(path.join(__dirname, '../models/daemon-device.js'), 'utf8');
+  const route = fs.readFileSync(path.join(__dirname, '../routes/daemonRoutes.js'), 'utf8');
+  assert.match(model, /device_alias:\s*\{/);
+  assert.match(controller, /d\.device_alias \|\| d\.device_name/);
+  assert.match(controller, /Number\(currentId\) !== targetId/);
+  assert.match(controller, /device\.update\(\{ device_alias: name/);
+  assert.match(route, /devices\/:deviceId\/name.*renameOwnDevice/);
+});
 
 test('device list — legacy login duplicates collapse to the active stable host', () => {
   const row = (id, extra = {}) => ({

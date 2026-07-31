@@ -21,6 +21,7 @@ router.patch('/me', daemonController.updateMe); // JWT|deviceToken — 닉네임
 router.delete('/account', daemonController.deleteAccount); // JWT|deviceToken — 회원 탈퇴(본인 계정)
 router.get('/devices', daemonController.daemonDevices); // deviceToken 인증 — 계정의 모든 기기 목록(멀티기기)
 router.post('/devices/register', daemonController.registerController); // JWT|deviceToken — 컨트롤러(모바일/태블릿) 자기 등록
+router.patch('/devices/:deviceId/name', daemonController.renameOwnDevice); // 자기 기기 별칭만 변경
 router.get('/workspaces', daemonController.daemonWorkspaces);
 router.post('/workspaces/:wsId/claim', daemonController.daemonClaimWorkspaceHost); // 호스트 귀속 클레임(deviceToken)
 router.get('/workspaces/:wsId/session', daemonController.daemonGetSession); // 세션 이어받기(deviceToken)
