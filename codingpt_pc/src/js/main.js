@@ -208,17 +208,16 @@ function startPreviewShieldWatch() {
   }, 80);
 }
 
-// 새 설치본이 오래됐어도 로그인·권한 설정 전에 최신판으로 맞춘다.
-// 네트워크/업데이트 서버 장애는 온보딩을 막지 않는다. 로그인된 기존 사용자는 설정의 일반 업데이트 흐름을 쓴다.
+// 설치본이 오래됐어도 로그인 여부와 관계없이 다른 초기 데이터보다 먼저 최신판으로 맞춘다.
+// 앱 번들을 지워도 ~/.codingpt/daemon.json 은 남으므로 재설치 직후 paired=true 일 수 있다.
+// 여기서 paired 를 업데이트 생략 조건으로 쓰면 바로 그 재설치 사용자가 구버전에 고정된다.
+// 네트워크/업데이트 서버 장애만 현재 버전으로 계속 진행하고, 업데이트가 있으면 본 화면을 열기 전에
+// 다운로드·설치·재시작까지 완료한다.
 async function maybeInstallSetupUpdate() {
-  if (state.paired) return;
   setBootstrap("최신 버전을 확인하는 중", 18);
-  let result = null;
+  let result;
   try {
-    result = await Promise.race([
-      api.updateCheck(),
-      new Promise((resolve) => setTimeout(() => resolve(null), 5000)),
-    ]);
+    result = await api.updateCheck();
   } catch (_) {
     return;
   }
