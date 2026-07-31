@@ -892,6 +892,14 @@ export class PaneView {
       tab: { cmd: tab.cmd, title: tab.title, agent: tab.agent, agentName: tab.agentName, agentReady: tab.agentReady },
     });
   }
+  _activeAgentBrand() {
+    const tab = this.node.tabs?.[this.node.active];
+    if (!tab || !isTermTab(tab) || typeof tab.win !== "number") return null;
+    return resolveAgentBrand({
+      push: this.ctx.agentStateOf?.(this.ctx.localPath || "", tab.win) || null,
+      tab: { cmd: tab.cmd, title: tab.title, agent: tab.agent, agentName: tab.agentName, agentState: tab.agentState, mode: tab.mode },
+    });
+  }
   // 지금 이 pane 이 Chat 모드를 그리고 있는가(리사이즈/크기주장 억제 판정의 단일 기준).
   //  ⚠ 판정은 **표시 조건(showActiveTab 의 chat)과 정확히 같아야 한다.** 여기에 _agentOn 을 AND 로 걸면
   //  claude 가 종료된 뒤에도 화면은 Chat 인데 억제 가드만 풀려, 창/분할 리사이즈 시 display:none 인 xterm 의
@@ -1497,6 +1505,21 @@ export class PaneView {
       Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
     };
     const resetBuf = () => { this._sentBuf = ""; try { ta.value = ""; } catch (_) {} };
+    // Codex는 재시작 뒤 복원된 alternate-screen에서 마우스 추적을 다시 켜지 않는 구간이 있다.
+    // 이때 xterm은 휠을 앱에도 스크롤백에도 전달하지 않아 화면이 고정된다. 마우스 추적이
+    // 실제로 켜져 있으면 xterm 정본 경로를 두고, 꺼진 Codex alternate 화면만 방향키로 보완한다.
+    const onWheel = (e) => {
+      if (this._activeAgentBrand() !== "codex") return;
+      if (this.term?.buffer?.active?.type !== "alternate") return;
+      if (this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none") return;
+      const dy = Number(e.deltaY) || 0;
+      if (!dy) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
+      this._write((dy < 0 ? "\x1b[A" : "\x1b[B").repeat(count));
+    };
+    this.termEl?.addEventListener("wheel", onWheel, { capture: true, passive: false });
     // ⌘/⌥ 편집 조합 — textarea 기본동작(delta 의존)이 아니라 셸 표준 시퀀스를 직접 보낸다.
     //  탭 자동완성·히스토리(↑) 등으로 셸 라인과 textarea 미러가 어긋나 있어도 항상 동작.
     const EDIT_COMBO = {
@@ -1625,6 +1648,7 @@ export class PaneView {
       ta.removeEventListener("blur", onBlur);
       ta.removeEventListener("focus", onFocus);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
+      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("paste", onPaste, true);

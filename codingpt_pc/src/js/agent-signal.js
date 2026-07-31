@@ -161,7 +161,12 @@ export function resolveChatReady(input) {
   // Codex는 SessionStart 훅이 빠져도 prompt/stop/notification push가 정상 도착하는 버전이 있다.
   // 실제 에이전트 push가 있으면 프로젝트 신뢰 단계는 이미 지난 것이므로 채팅 진입을 허용한다.
   if (brand === "codex" && push && push.state !== "gone") return true;
-  return !!(String((push && push.sessionId) || "").trim() || (tab && tab.agentReady === true));
+  if (String((push && push.sessionId) || "").trim() || (tab && tab.agentReady === true)) return true;
+  // PC 업데이트는 사이드카도 재시작한다. tmux 안의 에이전트는 계속 살아 있지만 메모리형 SessionStart
+  // 장부만 비므로, 훅 신호만 요구하면 업데이트 직후 진행 중인 Codex/Claude의 토글이 사라진다.
+  // 현재 프로세스로 브랜드가 확정된 경우에는 진입을 허용한다. 아직 첫 세션 파일이 없다면
+  // ChatView의 기존 "대화를 준비하는 중" 상태가 안전하게 받는다.
+  return brand === "codex" || brand === "claude";
 }
 
 /**

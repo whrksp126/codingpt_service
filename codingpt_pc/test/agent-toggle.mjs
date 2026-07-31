@@ -90,12 +90,12 @@ eq("node 는 이미 chat 모드였던 탭에서만 인정(기존 규칙)",
 eq("혼합 탭(IDE/프리뷰) 활성 → 숨김", PC.resolveToggleVisible({ isTerm: false, win: 5, chatMode: true, agentOn: true }), false);
 eq("win 미확정('new') → 숨김(chat 모드여도)", PC.resolveToggleVisible({ isTerm: true, win: "new", chatMode: true, agentOn: true }), false);
 eq("chat 모드는 에이전트가 사라져도 유지", PC.resolveToggleVisible({ isTerm: true, win: 5, chatMode: true, agentOn: false }), true);
-eq("Codex SessionStart 전 → Chat 진입 토글 숨김",
-  PC.resolveToggleVisible({ isTerm: true, win: 5, chatMode: false, agentOn: true, chatReady: PC.resolveChatReady({ tab: { cmd: "codex" } }) }), false);
+eq("Codex 재시작 복원(SessionStart 장부 없음) → 실행 프로세스로 Chat 진입 토글 복원",
+  PC.resolveToggleVisible({ isTerm: true, win: 5, chatMode: false, agentOn: true, chatReady: PC.resolveChatReady({ tab: { cmd: "codex" } }) }), true);
 eq("Codex SessionStart 후 → Chat 진입 토글 표시",
   PC.resolveChatReady({ push: { agent: "codex", sessionId: "s-1" }, tab: { cmd: "codex" } }), true);
-eq("Claude SessionStart 전 → Chat 진입 토글 숨김",
-  PC.resolveChatReady({ tab: { cmd: "claude" } }), false);
+eq("Claude 재시작 복원(SessionStart 장부 없음) → 실행 프로세스로 Chat 진입 토글 복원",
+  PC.resolveChatReady({ tab: { cmd: "claude" } }), true);
 eq("Claude SessionStart 후 → Chat 진입 토글 표시",
   PC.resolveChatReady({ push: { agent: "claude", sessionId: "s-2" }, tab: { cmd: "claude" } }), true);
 
@@ -280,6 +280,11 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
     /\.pane-body \{[^}]*position:\s*relative/.test(css));
   ok("토글 노드는 pane 본문에 붙는다(this.body)",
     /_buildModeToggle\(\)\s*\{[\s\S]{0,900}?this\.body\.appendChild\(b\)/.test(paneJs2));
+  ok("Codex alternate-screen에서 mouse tracking이 없으면 휠을 내부 이동으로 보완",
+    /_activeAgentBrand\(\) !== "codex"/.test(paneJs2)
+      && /buffer\?\.active\?\.type !== "alternate"/.test(paneJs2)
+      && /mouseTrackingMode !== "none"/.test(paneJs2)
+      && /addEventListener\("wheel", onWheel/.test(paneJs2));
   ok("유휴에도 테두리+불투명 배경이 있는 컨트롤 형태(추가 버튼과 구별 · 터미널 글자 위에서 읽힘)",
     /border:\s*1px solid var\(--border-ctrl\)/.test(tgRule) && /background:\s*var\(--elevated2\)/.test(tgRule));
   ok("⌘F 검색 중에는 토글을 숨긴다(좌표 충돌 — search-open 예외 복원)",
