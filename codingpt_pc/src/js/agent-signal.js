@@ -158,6 +158,9 @@ export function resolveChatReady(input) {
   if (brand !== "claude" && brand !== "codex") return true;
   const push = (input && input.push) || null;
   const tab = (input && input.tab) || null;
+  // Codex는 SessionStart 훅이 빠져도 prompt/stop/notification push가 정상 도착하는 버전이 있다.
+  // 실제 에이전트 push가 있으면 프로젝트 신뢰 단계는 이미 지난 것이므로 채팅 진입을 허용한다.
+  if (brand === "codex" && push && push.state !== "gone") return true;
   return !!(String((push && push.sessionId) || "").trim() || (tab && tab.agentReady === true));
 }
 

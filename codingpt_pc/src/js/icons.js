@@ -41,6 +41,7 @@ export const icons = {
   cloud: (o) => svg('<path d="M7 18a4 4 0 0 1-.5-8A5 5 0 0 1 16.5 9 3.5 3.5 0 0 1 17 18H7z"/>', o),
   refresh: (o) => svg('<path d="M20 11a8 8 0 1 0-2.3 5.3"/><path d="M20 5v6h-6"/>', o),
   gear: (o) => svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M18.9 5.1l-2.1 2.1M7.2 16.8l-2.1 2.1"/>', o),
+  sliders: (o) => svg('<line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2"/>', o),
   globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"/>', o),
   code: (o) => svg('<path d="M8.5 8l-4 4 4 4"/><path d="M15.5 8l4 4-4 4"/><path d="M13.5 6l-3 12"/>', o),
   user: (o) => svg('<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>', o),

@@ -37,7 +37,7 @@ let query = "";
 let webLogin = null; // 웹 로그인 폴링 세션
 
 const NAV = [
-  { key: "general", label: "일반", group: "시작", icon: "gear", keywords: "자동 실행 시작 로그인" },
+  { key: "general", label: "일반", group: "시작", icon: "sliders", keywords: "자동 실행 시작 로그인" },
   { key: "agents", label: "에이전트", group: "작업 환경", icon: "tools", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
@@ -926,7 +926,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
       <td class="dev-c-meta">${meta}</td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
-    ${canRevoke && k ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>` : ""}
+    ${canRevoke ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4"><div class="dev-delete-confirm">${icons.shield({ size: 14 })}<span>한 번 더 누르면 이 기기를 삭제합니다 · 되돌릴 수 없음</span></div></td></tr>` : ""}
     ${linkEntryFor === String(d.id) ? `<tr class="dev-tr-note"><td colspan="4" style="padding:0 0 10px">
       <div class="link-entry">
         <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="8자 코드" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
@@ -1034,8 +1034,15 @@ function bindE2ee(box) {
     const note = box.querySelector(`[data-e2ee-armnote="${b.dataset.e2eeRevoke}"]`);
     if (!b.classList.contains("arm")) {
       b.classList.add("arm");
+      b.setAttribute("aria-label", "한 번 더 눌러 기기 삭제");
+      b.title = "한 번 더 눌러 기기 삭제";
       if (note) note.style.display = "";
-      setTimeout(() => { b.classList.remove("arm"); if (note) note.style.display = "none"; }, 4000);
+      setTimeout(() => {
+        b.classList.remove("arm");
+        b.setAttribute("aria-label", "기기 삭제");
+        b.title = "기기 삭제";
+        if (note) note.style.display = "none";
+      }, 4000);
       return;
     }
     b.disabled = true;

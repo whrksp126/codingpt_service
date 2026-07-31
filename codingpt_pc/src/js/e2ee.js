@@ -347,6 +347,10 @@ export function applyDeviceApprovalEvent(ev) {
     void (async () => {
       try { await cpt("e2ee.link.fulfill", { linkId: ev.linkId, ikX: ev.ikX }); } catch (_) { /* 코드 만료 시 재발급 */ }
       await refreshE2ee();
+      // fulfill 직후 서버 트랜잭션/팬아웃과 첫 keyring 조회가 경합할 수 있다. 완료 행이 설정 재진입
+      // 때만 보이던 실제 경로를 닫기 위해 짧은 후속 pull을 둔다(모두 멱등).
+      setTimeout(() => { void refreshE2ee(); }, 500);
+      setTimeout(() => { void refreshE2ee(); }, 1500);
     })();
     return;
   }

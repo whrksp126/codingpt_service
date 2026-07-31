@@ -802,7 +802,8 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 
 .dev-del-btn { background: none; border: none; color: var(--dim); cursor: pointer; padding: 4px; border-radius: 6px; opacity: 0.55; display: inline-flex; }
 .dev-del-btn:hover { color: var(--text2); }
-.dev-del-btn.arm { color: var(--danger, #f87171); opacity: 1; }
+.dev-del-btn.arm { color: var(--danger, #f87171); background: color-mix(in srgb, var(--danger, #f87171) 12%, transparent); opacity: 1; }
+.dev-delete-confirm { display: flex; align-items: center; gap: 7px; color: var(--danger, #f87171); font-size: 12px; font-weight: 650; padding: 2px 0; }
 /* 기기 목록은 다시 표다(2026-07-27 개정 3 — 행 카드 `.dev-row` 폐기) → 행 호버에서 휴지통이 진해진다 */
 .dev-tr:hover .dev-del-btn { opacity: 1; }
 .dev-menu-btn:hover { background: var(--elevated2); color: var(--text); }
@@ -1433,12 +1434,12 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 /* TUI statusline 미러 — 데몬이 화면에서 뽑은 원문(ANSI→스팬)을 컴포저 바로 위에 얇게.
    폰트·색은 터미널 미러라 모노스페이스 + termTheme 팔레트(ansi.js 인라인 스타일). */
 .chat-statusline {
-  flex: none; padding: 3px 14px 1px; overflow: hidden;
+  flex: none; padding: 3px 14px 1px; overflow-x: auto; overflow-y: hidden;
 }
 .chat-statusline-row {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 11px; line-height: 16px; color: var(--text3);
-  white-space: pre; overflow: hidden; text-overflow: ellipsis;
+  white-space: pre; width: max-content; min-width: 100%;
 }
 .chat-composer {
   flex: none; position: relative;

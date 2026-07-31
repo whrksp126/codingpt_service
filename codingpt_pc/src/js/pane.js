@@ -941,6 +941,9 @@ export class PaneView {
     this._syncModeToggle();
     this.buildHead();
     this.showActiveTab();
+    // 알림을 통해 채팅 모드로 들어와 내용을 확인한 것도 실제 열람이다. TUI 탭 클릭만 읽음으로
+    // 처리하면 채팅을 다 보고도 알림 배지와 링이 남는다.
+    if (next === "chat" && typeof tab.win === "number") this.ctx.onTabActivated?.(tab.win);
     // TUI 복귀 시 fit 은 showActiveTab 이 이미 1회 수행한다(여기서 또 부르면 리사이즈가 2회 나간다 —
     //  하네스에서 실측). 포커스만 터미널로 돌린다.
     if (next === "tui") this.focus();
