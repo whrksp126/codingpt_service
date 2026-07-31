@@ -56,8 +56,8 @@ services:
       #  기본값이 0.1.0 이라 지금껏 아무에게도 업데이트 안내가 뜨지 않았다.
       #  0.2.3 은 제출 직후 사용자 요청으로 미리 올렸다 — 심사 통과 전까지는 안내를 보고 스토어에
       #  갔을 때 아직 0.2.2 만 보이는 창이 있다(무해·자동 해소). 다음부터는 게시 확인 후 올릴 것.
-      - APP_LATEST_IOS=0.2.3
-      - APP_LATEST_ANDROID=0.2.3
+      - APP_LATEST_IOS=0.2.5
+      - APP_LATEST_ANDROID=0.2.5
     env_file:
       - ./codingpt_back/.env
     depends_on:
