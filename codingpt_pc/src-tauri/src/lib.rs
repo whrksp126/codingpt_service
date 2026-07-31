@@ -246,6 +246,20 @@ fn clear_local_account_credentials() {
     }
 }
 
+#[cfg(not(debug_assertions))]
+fn clear_install_onboarding_state() {
+    // Tauri WKWebView localStorage에는 권한 위저드 완료·에이전트 온보딩 완료 등 설치 단위 상태가 있다.
+    // 앱 번들만 지우면 WebKit 데이터는 남으므로 DMG 재설치에서도 온보딩을 건너뛰게 된다.
+    let Some(home) = dirs::home_dir() else { return };
+    let path = home
+        .join("Library")
+        .join("WebKit")
+        .join("com.ghmate.codingpt.pc")
+        .join("WebsiteData")
+        .join("LocalStorage");
+    let _ = std::fs::remove_dir_all(path);
+}
+
 #[allow(dead_code)] // debug 빌드에서는 실제 재설치 판정을 비활성화하지만 단위 테스트는 이 순수 규칙을 검증한다.
 fn is_manual_reinstall(old_fingerprint: &str, fingerprint: &str, authorized_version: Option<&str>, version: &str) -> bool {
     old_fingerprint != fingerprint && authorized_version != Some(version)
@@ -271,6 +285,7 @@ fn reconcile_app_install(_version: &str) {
                 clear_local_account_credentials();
                 applog("신규 설치에서 잔존 계정 자격 감지 — 로컬 계정 연결 해제");
             }
+            clear_install_onboarding_state();
             write_install_state(&fingerprint, _version, None);
             return;
         };
@@ -278,6 +293,7 @@ fn reconcile_app_install(_version: &str) {
         let authorized_version = previous.get("authorizedVersion").and_then(|v| v.as_str());
         if is_manual_reinstall(old_fingerprint, &fingerprint, authorized_version, _version) {
             clear_local_account_credentials();
+            clear_install_onboarding_state();
             applog("수동 앱 재설치 감지 — 로컬 계정 연결 해제");
         }
         write_install_state(&fingerprint, _version, None);
