@@ -232,9 +232,11 @@ ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem
   'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
 ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
   'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
-// 화면당 권한 하나 + 하단 [허용] 단일 CTA. 모든 권한은 실제 승인 전까지 다음으로 못 넘어간다.
-ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate) && !/id="lgFolders"/.test(pcGate),
-  'PC: 권한 위저드는 화면당 하나 + 단일 [허용] CTA 다(행 목록/일괄 버튼 금지 — 사용자 확정 2차)');
+// 화면당 권한 하나 + 이전/확인/다음. 실제 승인 전에는 다음이 비활성이다.
+ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate)
+  && /id="lgPermBack"/.test(pcGate) && /id="lgPermNext"[^>]*disabled/.test(pcGate)
+  && !/id="lgFolders"/.test(pcGate),
+  'PC: 권한 위저드는 화면당 하나이며 이전/확인/다음을 제공하고 미승인 시 다음이 비활성이다');
 ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
   'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
 ok(!/lgSkipPerm/.test(pcGate) && /requiredPerms\(\)/.test(pcGate),
@@ -264,9 +266,9 @@ ok(/btn\.dataset\.denied === "1"/.test(pcGate)
   && /api\.openFilesPrivacy\(\)/.test(pcGate)
   && /folderPermissionWatch = setInterval/.test(pcGate)
   && /api\.probeFolder\(p\.id\)/.test(pcGate)
-  && /btn\.textContent = "시스템 설정 열기"/.test(pcGate)
-  && !/btn\.textContent = "다시 확인"/.test(pcGate),
-  'PC: 보호 폴더를 한 번 거부하면 재팝업을 약속하지 않고 시스템 설정을 열어 ON 상태를 감시한다');
+  && /id="lgOpenFolderSettings"/.test(pcGate)
+  && /btn\.textContent = "다시 확인"/.test(pcGate),
+  'PC: 보호 폴더는 설정 화면을 직접 열고 승인 상태를 다시 확인할 수 있다');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');

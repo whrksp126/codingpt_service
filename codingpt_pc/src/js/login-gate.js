@@ -167,10 +167,11 @@ function renderStep() {
     return;
   }
   // setup — ★ 2026-07-28 2차 개정(사용자 확정): **권한 위저드(슬라이드)**.
-  //  · 화면당 권한 하나 — 제목 + 이득 1줄 + 하단 단일 CTA. 장식 아이콘/브랜드 로고는 사용하지 않는다.
+  //  · 화면당 권한 하나 — 제목 + 이득 1줄. 장식 아이콘/브랜드 로고는 사용하지 않는다.
   //    행 목록 + 행별 작은 버튼은 "아무도 누르고 싶지 않은" 구성이었다(사용자 실사 피드백).
   //  · 자동 실행 토글은 게이트에서 제거 — 기본 켬(페어링 시 적용), 끄기는 설정 > 일반에서.
-  //  · [허용] 성공 → ✓ 로 잠깐 굳었다가 자동으로 다음 슬라이드. 전부 끝나면 셋업 종료.
+  //  · [허용] 성공 → 승인 상태를 굳히고 [다음]을 활성화한다. 자동으로 넘기지 않아 사용자가 확인한다.
+  //  · [이전]은 언제나 가능, [다음]은 현재 권한이 실제 승인된 경우에만 가능하다.
   //  · 거부됨 → 그때만 [시스템 설정 열기] + '나중에 설정에서 허용' 탈출로가 열린다. 처음부터
   //    건너뛰기를 주지 않는 것은 "필수 승인" 확정 — 단 거부로 막힌 사용자를 영구히 가두지 않는다.
   if (permIdx >= permQueue.length) { finishSetup(); return; }
@@ -191,16 +192,55 @@ function renderStep() {
           <div id="lgNotifControls" class="notif-onb-controls is-disabled">
             <label><span>알림음</span><select id="lgNotifSound" class="sett-select" disabled>${soundOptionsHtml()}</select></label>
             <button id="lgNotifTest" class="sett-btn" disabled>테스트 알림 보내기</button>
-          </div>` : ""}
+          </div>` : `
+          <button id="lgOpenFolderSettings" class="sett-btn lg-open-perm-settings">시스템 설정에서 직접 변경</button>`}
         <div id="lgPermAlt" class="lg-perm-alt"></div>
       </main>
       <footer class="lg-wizard-foot">
         <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
-        <button id="lgAllow" class="btn primary lg" data-perm="${p.id}"${p.id === "notification" ? " disabled" : ""}>${p.id === "notification" ? "알림 상태 확인 중…" : "허용"}</button>
+        <div class="lg-wizard-actions">
+          <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>이전</button>
+          <button id="lgAllow" class="btn secondary" data-perm="${p.id}"${p.id === "notification" ? " disabled" : ""}>${p.id === "notification" ? "알림 상태 확인 중…" : "권한 확인"}</button>
+          <button id="lgPermNext" class="btn primary" disabled>${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
+        </div>
       </footer>
     </div>`;
   const btn = el.querySelector("#lgAllow");
+  const backBtn = el.querySelector("#lgPermBack");
+  const nextBtn = el.querySelector("#lgPermNext");
   const alt = el.querySelector("#lgPermAlt");
+  let grantedNow = false;
+  const paintGranted = (granted) => {
+    grantedNow = !!granted;
+    nextBtn.disabled = !grantedNow;
+    if (grantedNow) {
+      btn.textContent = "허용됨 ✓";
+      btn.disabled = true;
+      alt.textContent = "이 권한은 허용되어 있어요.";
+    }
+  };
+  backBtn?.addEventListener("click", () => {
+    if (permIdx <= 0) return;
+    permIdx -= 1;
+    const progressKey = setupProgressKey();
+    if (progressKey) { try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {} }
+    renderStep();
+  });
+  nextBtn?.addEventListener("click", () => {
+    if (!grantedNow) return;
+    permIdx += 1;
+    const progressKey = setupProgressKey();
+    if (progressKey) { try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {} }
+    renderStep();
+  });
+  el.querySelector("#lgOpenFolderSettings")?.addEventListener("click", async (ev) => {
+    const open = ev.currentTarget;
+    open.disabled = true;
+    open.textContent = "시스템 설정 여는 중…";
+    await api.openFilesPrivacy().catch(() => {});
+    open.textContent = "시스템 설정에서 직접 변경";
+    open.disabled = false;
+  });
   if (p.id === "notification") {
     bindSoundSelect(el.querySelector("#lgNotifSound"));
     const test = el.querySelector("#lgNotifTest");
@@ -213,8 +253,9 @@ function renderStep() {
     const paintNotifPermission = (value) => {
       const granted = value === "granted";
       if (granted) markPermGranted("notification");
-      btn.textContent = granted ? "계속" : "알림을 켠 뒤 계속";
+      btn.textContent = granted ? "허용됨 ✓" : "권한 확인";
       btn.disabled = !granted;
+      paintGranted(granted);
       soundSelect.disabled = !granted;
       test.disabled = !granted;
       controls.classList.toggle("is-disabled", !granted);
@@ -255,16 +296,7 @@ function renderStep() {
   }
   const completePermission = (id) => {
     markPermGranted(id);
-    btn.textContent = "허용됐어요 ✓";
-    btn.disabled = true;
-    setTimeout(() => {
-      permIdx += 1;
-      const progressKey = setupProgressKey();
-      if (progressKey) {
-        try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {}
-      }
-      renderStep();
-    }, 450);
+    paintGranted(true);
   };
   btn.addEventListener("click", async () => {
     if (p.folder && btn.dataset.denied === "1") {
@@ -298,9 +330,9 @@ function renderStep() {
     // macOS는 한 번 거부한 보호 폴더 팝업을 다시 띄우지 않는다. 이후 CTA는 재요청이 아니라
     // 파일 및 폴더 설정을 열고, 사용자가 토글을 켜는 순간까지 실제 접근을 폴링한다.
     btn.dataset.denied = "1";
-    btn.textContent = "시스템 설정 열기";
+    btn.textContent = "다시 확인";
     btn.disabled = false;
-    alt.textContent = "한 번 거부한 권한은 macOS 시스템 설정에서 켜야 해요.";
+    alt.textContent = "시스템 설정에서 권한을 변경한 뒤 다시 확인해 주세요.";
   });
 }
 
