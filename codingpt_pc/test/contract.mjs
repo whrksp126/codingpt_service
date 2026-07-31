@@ -930,6 +930,8 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("인증된 기기는 이름 옆 공식 인증 배지로 표시한다",
     code.includes('class="dev-auth-mark"') && code.includes('aria-label="인증된 기기"')
     && code.includes('icons.verified('), true);
+  eq("인증 마크는 편집 상태에서도 기기명 바로 왼쪽에 고정한다",
+    code.includes('<span class="dev-name">${linkedMark}${nameCell}</span>'), true);
   eq("기기 별칭은 현재 기기에서만 편집할 수 있다",
     code.includes('d.isCurrent ? `<button class="dev-alias-btn"')
     && code.includes('x.isCurrent')

@@ -1128,6 +1128,7 @@ pub fn back_api(
     let req = match method.as_str() {
         "GET" => ureq::get(&url),
         "POST" => ureq::post(&url),
+        "PATCH" => ureq::patch(&url),
         _ => return Err("허용되지 않은 메서드입니다.".into()),
     }
     .set("Authorization", &format!("Bearer {token}"))
