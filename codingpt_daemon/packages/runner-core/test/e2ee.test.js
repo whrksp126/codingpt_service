@@ -56,10 +56,31 @@ test('상태 파일 — e2ee.json 은 0600 이고 daemon.json 과 분리된다',
   const mode = fs.statSync(config.e2eeFile()).mode & 0o777;
   assert.strictEqual(mode, 0o600, `mode=${mode.toString(8)}`);
   assert.notStrictEqual(config.e2eeFile(), config.configFile());
-  // unpair(clearCredentials) 는 열쇠도 폐기 — 계정 전환 = 클린 슬레이트.
+  // 로그아웃은 계정별 키를 보존한다. 새 계정 로그인 때 userRef 슬롯이 전환된다.
   config.save({ serverUrl: 'http://x', deviceToken: 'cptd_x' });
   config.clearCredentials();
-  assert.strictEqual(config.loadE2ee(), null);
+  assert.ok(config.loadE2ee());
+});
+
+test('계정별 열쇠 슬롯 — A→B→A 재로그인 시 각 계정 키를 재사용한다', () => {
+  bootAccount();
+  const a = e2ee.loadState();
+  a.userRef = '7';
+  e2ee.saveState(a);
+  const aPub = e2ee.identity().ikX;
+
+  assert.strictEqual(config.switchE2eeAccount('8'), true);
+  e2ee.clearCache();
+  const b = e2ee.ensureIdentity({ deviceId: 12 });
+  b.userRef = '8';
+  e2ee.saveState(b);
+  const bPub = e2ee.identity().ikX;
+  assert.notStrictEqual(bPub, aPub);
+
+  assert.strictEqual(config.switchE2eeAccount('7'), true);
+  e2ee.clearCache();
+  assert.strictEqual(e2ee.identity().ikX, aPub);
+  assert.strictEqual(e2ee.loadState().userRef, '7');
 });
 
 test('킬스위치 CPT_E2EE=0 → enabled/caps/협상 전부 off (평문 폴백)', () => {

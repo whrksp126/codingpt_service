@@ -316,7 +316,12 @@ async function normalizeE2eePolicy() {
 let autoBootAt = 0;
 async function maybeAutoBootstrap() {
   if (!state.paired || !e2ee.available) return;
-  if (!needsBootstrap(e2ee)) { e2ee.autoBootError = null; return; }
+  // 최초 계정뿐 아니라 완전 재설치 후 로컬 키가 없는 host도 자동으로 새 신뢰 기점을 준비한다.
+  // pending/enrolled 상태를 제외하면 과거 키링 행 때문에 양쪽 새 기기가 서로를 기다린다.
+  const missingHostKey = !ready()
+    && !e2ee.checking
+    && ["none", "pending", "enrolled"].includes(String(e2ee.keyState || e2ee.state));
+  if (!needsBootstrap(e2ee) && !missingHostKey) { e2ee.autoBootError = null; return; }
   const now = Date.now();
   if (now - autoBootAt < 60000) return;
   autoBootAt = now;

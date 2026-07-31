@@ -102,10 +102,9 @@ function removeE2ee() {
 // 페어링 해제 — 자격(deviceToken/deviceId)만 지우고 serverUrl 은 보존.
 //  serverUrl 까지 지우면 dev 빌드가 기본값(localhost)으로 떨어져, 재로그인 버튼이
 //  로컬 프론트(localhost:3400)를 여는 사고가 난다(실측). 서버 좌표는 비밀이 아니므로 유지.
-// E2EE 열쇠도 함께 폐기한다(설계 §7-9 확정): 계정 전환 = 클린 슬레이트. 남기면 이전 계정의
-// 마스터키가 파일로 잔존하고, 새 계정 승인 시 epoch 가 뒤섞인다. 재승인은 신뢰 기기 1탭.
+// E2EE 열쇠는 로그아웃만으로 지우지 않는다. 계정 전환 시 e2ee-account가 userRef를 확인해
+// 계정별 보관소로 전환한다. 앱 완전 재설치는 네이티브가 active+보관소를 모두 삭제한다.
 function clearCredentials() {
-  removeE2ee();
   const cur = load();
   if (!cur) return false;
   const keep = {};
@@ -113,6 +112,35 @@ function clearCredentials() {
   if (cur.workspaceRoot) keep.workspaceRoot = cur.workspaceRoot;
   if (Object.keys(keep).length) { save(keep); return true; }
   return remove();
+}
+
+// 계정 전환용 E2EE 슬롯. 활성 파일 형식/경로는 암호 코어와의 기존 계약을 유지하고, 비활성 계정만
+// e2ee-accounts/<userRef>.json 에 둔다. userRef는 서버 숫자 id만 허용해 경로 탈출을 원천 차단한다.
+function switchE2eeAccount(userRef) {
+  const next = String(userRef == null ? '' : userRef);
+  if (!/^\d+$/.test(next)) return false;
+  const active = e2eeFile();
+  const slots = path.join(runtime.stateDir(), 'e2ee-accounts');
+  let old = '';
+  try {
+    const cur = JSON.parse(fs.readFileSync(active, 'utf8'));
+    old = /^\d+$/.test(String(cur && cur.userRef || '')) ? String(cur.userRef) : '';
+  } catch (_) { /* 활성 키 없음 */ }
+  if (old === next) return false;
+  fs.mkdirSync(slots, { recursive: true });
+  if (old && fs.existsSync(active)) {
+    const oldPath = path.join(slots, `${old}.json`);
+    fs.copyFileSync(active, oldPath);
+    fs.chmodSync(oldPath, 0o600);
+  }
+  const nextPath = path.join(slots, `${next}.json`);
+  if (fs.existsSync(nextPath)) {
+    fs.copyFileSync(nextPath, active);
+    fs.chmodSync(active, 0o600);
+  } else {
+    try { fs.unlinkSync(active); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }
+  }
+  return true;
 }
 
 // 물리 머신 영속 식별자 — <stateDir>/machine.json (unpair/재로그인에도 유지, 자격증명 아님).
@@ -134,6 +162,6 @@ function machineId() {
 }
 
 module.exports = {
-  load, save, remove, clearCredentials, configFile, machineId,
+  load, save, remove, clearCredentials, configFile, machineId, switchE2eeAccount,
   e2eeFile, loadE2ee, readE2ee, saveE2ee, removeE2ee,
 };

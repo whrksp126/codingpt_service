@@ -537,8 +537,8 @@ async function accountHasHost(userId) {
   try { return (await deviceLookup(userId)) > 0; } catch (_) { return false; }
 }
 
-// ── B. 부트스트랩(계정 최초 1회) ──────────────────────────────────────
-// req { ikX, ikEd, label, platform, kind, sealed(자기 자신에게 봉인한 MK_1), sig, recovery? }
+// ── B. 부트스트랩(최초 또는 완전 재설치 후 host 재생성) ─────────────────
+// req { ikX, ikEd, label, platform, kind, sealed, sig, recovery?, replace?, previousEpoch? }
 async function bootstrap(userId, deviceId, body) {
   enabledGate();
   const now = Date.now();
@@ -550,18 +550,34 @@ async function bootstrap(userId, deviceId, body) {
   const recovery = normalizeRecovery(b.recovery);
   return withKeyring(userId, async () => {
     const k = await loadKeyring(userId);
-    // ★ 1회 제약 — 이미 초기화된 계정에서 다시 부트스트랩하면 계정 열쇠가 갈라진다(전 기기 상호 복호 불가).
-    if (k.epoch !== 0 || trustedKeys(k).length > 0) {
+    const replace = b.replace === true;
+    // 일반 부트스트랩의 1회 제약은 유지한다. 완전 재설치로 로컬 키가 사라진 로그인된 host만
+    // replace를 사용할 수 있다. 기존 키와 새 키를 함께 남기지 않고 원자적으로 새 세대로 교체한다.
+    if (!replace && (k.epoch !== 0 || trustedKeys(k).length > 0)) {
       throw err('이 계정은 이미 열쇠가 있습니다. 기존 기기에서 승인해 주세요.', 409, 'E2EE_ALREADY_INITIALIZED', { epoch: k.epoch });
+    }
+    if (replace) {
+      if (id.kind !== 'host' || deviceId == null) {
+        throw err('PC에서 로그인한 경우에만 암호화 열쇠를 다시 만들 수 있습니다.', 403, 'E2EE_HOST_REQUIRED');
+      }
+      const previousEpoch = Number(b.previousEpoch);
+      if (!Number.isInteger(previousEpoch) || previousEpoch !== k.epoch || previousEpoch < 1) {
+        throw err('열쇠 세대가 달라졌습니다. 다시 확인해 주세요.', 409, 'EPOCH_MISMATCH', { epoch: k.epoch });
+      }
     }
     //  ★ 개정 10 — enroll 과 **같은 규칙**을 여기서도 건다(직접 호출 경로 차단). 클라이언트가 enroll 을
     //   건너뛰고 bootstrap 을 부르면 우선권 규칙이 통째로 우회된다.
     if (id.kind === 'controller' && await accountHasHost(userId)) {
       throw err('내 PC에서 먼저 켜 주세요.', 409, 'E2EE_HOST_FIRST');
     }
-    const epoch = 1;
+    const epoch = replace ? k.epoch + 1 : 1;
     if (VERIFY_SIG && !verifyGrantSig({ epoch, ikXRaw: id.ikXRaw, sealedRaw, sigRaw, approverIkEdRaw: id.ikEdRaw })) {
       throw err('봉인문 서명 검증에 실패했습니다.', 400, 'SIG_INVALID');
+    }
+    if (replace) {
+      k.keys = [];
+      k.grants = [];
+      k.recovery = null;
     }
     const keyId = k.nextKeyId++;
     k.keys.push({
@@ -573,7 +589,10 @@ async function bootstrap(userId, deviceId, body) {
     k.epoch = epoch;
     if (recovery) k.recovery = { ...recovery, epoch };
     await saveKeyring(userId, k);
-    console.log(`[e2ee] 부트스트랩 user=${userId} keyId=${keyId} epoch=1 recovery=${recovery ? 1 : 0}`);
+    // 같은 공개키로 만들어 둔 승인 대기가 있으면 새 기점 생성으로 해소한다.
+    const pendingSelf = pendingByIkX(userId, id.ikX);
+    if (pendingSelf) resolvePending(pendingSelf, { approved: true, byKeyId: keyId });
+    console.log(`[e2ee] ${replace ? 'host 재생성' : '부트스트랩'} user=${userId} keyId=${keyId} epoch=${epoch} recovery=${recovery ? 1 : 0}`);
     fanout(userId, { kind: 'bootstrapped', epoch, keyId });
     return { epoch, keyId, policy: k.policy, recoverySet: !!k.recovery };
   });

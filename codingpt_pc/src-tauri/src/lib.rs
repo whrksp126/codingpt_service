@@ -243,6 +243,7 @@ fn clear_local_account_credentials() {
     }
     if let Some(home) = dirs::home_dir() {
         let _ = std::fs::remove_file(home.join(".codingpt").join("e2ee.json"));
+        let _ = std::fs::remove_dir_all(home.join(".codingpt").join("e2ee-accounts"));
     }
 }
 

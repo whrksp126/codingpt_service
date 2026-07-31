@@ -309,12 +309,14 @@ function masterKey(ep) {
 }
 const hasKey = (ep) => { try { masterKey(ep); return true; } catch (_) { return false; } };
 
-/** 계정 최초 기기 — MK_1 자가 생성(부트스트랩). 이미 열쇠가 있으면 그대로 반환. */
-function bootstrapMasterKey() {
+/** 계정 기점 MK 자가 생성. 최초는 epoch 1, 재설치 복구는 서버 현재 epoch+1을 명시한다. */
+function bootstrapMasterKey(targetEpoch = 1) {
   const st = ensureIdentity();
   if ((st.epoch | 0) >= 1 && st.keys[String(st.epoch)]) return { epoch: st.epoch | 0, created: false };
-  setMasterKey(1, randomBytes(32));
-  return { epoch: 1, created: true };
+  const epoch = Number(targetEpoch);
+  if (!Number.isInteger(epoch) || epoch < 1) fail('E2EE_EPOCH', '부트스트랩 epoch 가 올바르지 않음');
+  setMasterKey(epoch, randomBytes(32));
+  return { epoch, created: true };
 }
 
 // 계정키(K_rpc/K_notif/…) 캐시 — MK 당 1회 파생.

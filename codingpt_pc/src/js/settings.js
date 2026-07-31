@@ -777,7 +777,14 @@ let myLink = null;      // { code, until, ref } — 표시 중인 코드(ref = �
 let myLinkOpen = false;
 let myLinkBusy = false;
 function e2eeMyCodeRow() {
-  if (!e2eeReady()) return "";
+  // 로그인된 PC에서는 인증 코드 진입점이 항상 같은 자리에 있어야 한다. 키를 준비하는 수 초 동안
+  // 행 자체를 숨기면 사용자는 기능이 없는 것으로 받아들인다(재설치 교착의 실제 화면).
+  if (!e2eeReady()) {
+    return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
+      <div class="appr-reveal" aria-label="이 기기 인증 코드 준비 중">이 기기 인증 코드</div>
+      <div class="acct-msg">${e2ee.autoBootError ? "암호화 연결을 준비하지 못했어요 · 잠시 후 다시 시도합니다" : "암호화 연결을 준비하고 있어요…"}</div>
+    </td></tr>`;
+  }
   //  ★ 계정이 바뀌면(재가입·계정 전환) 옛 코드는 **다른 계정의 코드**라 입력해도 404 다(실사고).
   //   표시 중인 코드에 발급 계정(userRef)을 달아 두고, 달라지면 즉시 버린다.
   if (myLink && myLink.ref && e2ee.userRef && myLink.ref !== e2ee.userRef) { myLink = null; }

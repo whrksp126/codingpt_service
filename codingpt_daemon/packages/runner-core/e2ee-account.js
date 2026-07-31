@@ -233,15 +233,31 @@ function loadUserRef(e) {
   return st.userRef;
 }
 async function ensureUserRef(e) {
-  if (loadUserRef(e)) return st.userRef;
+  const stored = loadUserRef(e);
   try {
     const me = unwrap(await backFetch('GET', '/api/daemon/me'));
-    if (me && me.id != null) { st.userRef = String(me.id); persistUserRef(); }
+    if (me && me.id != null) {
+      const current = String(me.id);
+      if (stored && stored !== current) {
+        // 로그아웃 뒤 다른 계정 로그인: 이전 키는 계정 슬롯에 보관하고 현재 계정 슬롯을 활성화한다.
+        // 같은 계정으로 돌아오면 기존 신원/MK가 복원되고, 처음 보는 계정이면 빈 상태에서 새로 만든다.
+        configLib.switchE2eeAccount(current);
+        e.clearCache();
+        st.keyState = 'none';
+        st.phase = 'boot';
+        st.enrollmentId = null;
+        st.pendingSince = null;
+        st.devices = [];
+        st.cache = { pending: null, pendingAt: 0, keyring: null, keyringAt: 0 };
+      }
+      st.userRef = current;
+      persistUserRef();
+    }
   } catch (e2) {
     // 실패는 무해 — 확인 숫자 대조 UI 만 나중에 등장한다(열쇠 취득 자체는 진행된다).
     st.lastError = (e2 && e2.message) || String(e2);
   }
-  return st.userRef;
+  return st.userRef || stored;
 }
 
 // ── 열쇠 보관(기존 e2ee.js 저장 경로만 사용) ─────────────────────────────────
@@ -1071,25 +1087,37 @@ async function bootstrap() {
   if (e.hasKey()) return { ok: true, epoch: e.epoch(), already: true };
   try {
     const pre = await callEnroll(e);
-    if (String(pre.state) !== 'bootstrap') {
-      return { ok: false, code: 'E2EE_NOT_BOOTSTRAP', error: '이 계정에는 이미 열쇠가 있어요. 다른 기기에서 승인해 주세요.' };
+    const first = String(pre.state) === 'bootstrap';
+    // 완전 재설치에서는 로컬 키가 사라지는 것이 맞다. 그렇다고 과거 키링 행 때문에 이 PC가 영구히
+    // 다른 기기의 승인을 기다리면, 새 모바일도 키가 없는 순간 양쪽이 서로를 기다리는 교착이 된다.
+    // 로그인된 host는 서버의 현재 세대 다음 값으로 새 신뢰 기점을 세운다. 백엔드는 이 요청에서
+    // 과거 키를 폐기하므로 계정 열쇠가 갈라지지 않는다. controller는 이 경로를 절대 타지 않는다.
+    let replace = false;
+    let previousEpoch = 0;
+    if (!first) {
+      const kr = await callKeyring(e, { force: true });
+      previousEpoch = Number(kr.epoch) || 0;
+      if (previousEpoch < 1) {
+        return { ok: false, code: 'E2EE_NOT_BOOTSTRAP', error: '암호화 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+      }
+      replace = true;
     }
     const id = identityOf(e);
-    const boot = e.bootstrapMasterKey();          // 로컬 커밋(epoch 1) — 실패 시 되돌린다
+    const boot = e.bootstrapMasterKey(replace ? previousEpoch + 1 : 1);
     try {
       const s = e.sealTo(id.ikX, { epoch: boot.epoch });   // 자기 자신에게 봉인
       const r = unwrap(await backFetch('POST', '/api/daemon/e2ee/bootstrap', {
         ikX: id.ikX, ikEd: id.ikEd, label: id.label, platform: process.platform, kind: 'host',
-        sealed: s.sealed, sig: s.sig,
+        sealed: s.sealed, sig: s.sig, replace, previousEpoch,
       }));
       st.keyState = 'trusted';
       st.phase = 'trusted';
       st.accountEpoch = Number(r.epoch) || boot.epoch;
       notifyKeyChange();
-      log(`계정 최초 열쇠 생성(사용자 요청) epoch=${st.accountEpoch}`);
+      log(`${replace ? '재설치 후 계정 열쇠 재생성' : '계정 최초 열쇠 생성'} epoch=${st.accountEpoch}`);
       return { ok: true, epoch: st.accountEpoch };
     } catch (err) {
-      // ★ 409 ALREADY_INITIALIZED 등 — 로컬 MK_1 을 남기면 계정 열쇠가 갈라진다(전 기기 상호 복호 불가).
+      // 서버가 받지 않은 로컬 MK를 남기면 계정 열쇠가 갈라진다.
       rollbackEpoch(e, 0, boot.epoch);
       warn(`부트스트랩 실패 — 로컬 열쇠 폐기: ${(err && err.message) || err}`);
       return { ok: false, code: (err && err.code) || null, error: (err && err.message) || '열쇠 생성에 실패했습니다.' };

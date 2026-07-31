@@ -715,6 +715,43 @@ test('e2ee 기기 승인 전 과정 — 부트스트랩 → 대기 → 1탭 승�
     assert.strictEqual(ring.devices[1].verifyCode, pend.verifyCode);
   });
 });
+
+test('e2ee 완전 재설치 — 로그인된 host가 새 세대로 열쇠를 자동 재생성한다', async () => {
+  deviceTrust._reset();
+  const store = fakeStore();
+  deviceTrust._setStore(store);
+  await withStubs(async () => {
+    const oldPc = newDevice('MacBook Pro', 'host', 'darwin');
+    const freshPc = newDevice('MacBook Pro', 'host', 'darwin');
+    const mk1 = crypto.randomBytes(32);
+    const sealed1 = sealMk(mk1, oldPc.x.raw, 1);
+    await deviceTrust.bootstrap(7, 12, {
+      ikX: oldPc.ikX, ikEd: oldPc.ikEd, label: oldPc.label, kind: 'host', platform: 'darwin',
+      sealed: b64u(sealed1), sig: signGrant(oldPc, 1, oldPc.x.raw, sealed1),
+    });
+
+    // 앱 완전 삭제로 로컬 키가 없어진 같은 host 설치가 새 신원키로 로그인했다.
+    const pending = await deviceTrust.enroll(7, 12, {
+      ikX: freshPc.ikX, ikEd: freshPc.ikEd, label: freshPc.label, kind: 'host', platform: 'darwin',
+    });
+    assert.strictEqual(pending.state, 'pending');
+    const mk2 = crypto.randomBytes(32);
+    const sealed2 = sealMk(mk2, freshPc.x.raw, 2);
+    const replaced = await deviceTrust.bootstrap(7, 12, {
+      ikX: freshPc.ikX, ikEd: freshPc.ikEd, label: freshPc.label, kind: 'host', platform: 'darwin',
+      sealed: b64u(sealed2), sig: signGrant(freshPc, 2, freshPc.x.raw, sealed2),
+      replace: true, previousEpoch: 1,
+    });
+    assert.strictEqual(replaced.epoch, 2);
+
+    const ring = await deviceTrust.keyring(7, { ikX: freshPc.ikX });
+    assert.strictEqual(ring.myState, 'trusted');
+    assert.strictEqual(ring.devices.length, 1);
+    assert.strictEqual(ring.devices[0].ikX, freshPc.ikX);
+    assert.strictEqual(ring.grants.length, 1);
+    assert.deepStrictEqual(openMk(Buffer.from(ring.grants[0].sealed, 'base64url'), freshPc.x, 2), mk2);
+  });
+});
 function n_id(seen) { return seen.notifs.length ? 701 : null; } // withStubs 의 첫 알림 id(700+1)
 
 test('e2ee — 열쇠는 ikX(공개키) 기준으로만 발급된다(deviceId 재귀속 함정 #12)', async () => {
