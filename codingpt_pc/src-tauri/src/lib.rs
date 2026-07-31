@@ -264,6 +264,13 @@ fn reconcile_app_install(_version: &str) {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
         let Some(previous) = previous else {
+            // 설치 지문이 없는데 계정 자격은 남아 있다면 앱 번들만 삭제한 뒤 DMG로 다시 설치한 경우다.
+            // 기능 도입 전 버전에서 넘어온 사용자도 한 번 로그아웃되지만, "앱 삭제 = 계정 연결 해제"라는
+            // 명시적 제품 계약을 지키는 편이 이전 자격을 새 설치에 조용히 승계하는 것보다 안전하다.
+            if is_paired() {
+                clear_local_account_credentials();
+                applog("신규 설치에서 잔존 계정 자격 감지 — 로컬 계정 연결 해제");
+            }
             write_install_state(&fingerprint, _version, None);
             return;
         };
