@@ -38,6 +38,10 @@ export ASC_ISSUER_ID=f1908b5f-e631-41e0-b723-3b46c7c13041
 
 node codingpt_service/scripts/store/asc.mjs status    # 버전별 심사 상태(한국어 해설)
 node codingpt_service/scripts/store/asc.mjs builds     # 업로드된 빌드 처리 상태
+node codingpt_service/scripts/store/asc.mjs prepare 0.3.0 --notes "..."  # 버전+빌드+노트
+node codingpt_service/scripts/store/asc.mjs preflight  # 제출해도 되는지 점검(무해)
+node codingpt_service/scripts/store/asc.mjs submit --yes    # 심사 제출
+node codingpt_service/scripts/store/asc.mjs cancel --yes    # 제출 철회
 node codingpt_service/scripts/store/asc.mjs watch      # 상태 전이를 주기 감시(무인 폴링)
 node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버전을 출시
 
@@ -59,8 +63,21 @@ node codingpt_service/scripts/store/play.mjs watch     # Play 상태 전이 감�
 | `READY_FOR_SALE` | 게시 완료 | `APP_LATEST_*` 갱신 |
 | `REJECTED` | 거절 | 사유는 ASC 웹/Resolution Center |
 
-**의도적으로 안 하는 것**: 심사 제출(submit). 제출은 되돌리기 번거롭고, 리스팅·스크린샷·
-개인정보 설문이 갖춰졌는지는 사람이 봐야 한다. 그래서 이 스크립트에는 제출 명령을 넣지 않았다.
+### 심사 제출도 자동화된다 — 단 preflight 를 통과해야 한다
+
+사람이 "제출 버튼 누르기 전에 눈으로 보던 것" 을 코드가 대신 확인한다. 이게 없으면 자동 제출은
+**거절을 쌓는 기계**가 된다(거절 사유는 어느 스토어 API 로도 못 읽으니 원인 파악까지 사람 몫).
+
+`preflight` 가 막는 것(하나라도 걸리면 제출 안 함):
+- 제출 가능한 상태의 버전이 없음(이미 심사 중이거나 게시됨)
+- 버전에 **빌드가 연결 안 됨**
+- 빌드의 **수출규정 미답변** → WAITING_FOR_EXPORT_COMPLIANCE 에 걸려 심사가 시작도 안 된다
+- **릴리스 노트가 전부 비어 있음**
+- 데모 계정이 "필요" 인데 계정/비번이 빈 칸(로그인 앱에서 거의 확실한 거절 사유)
+
+경고만 하는 것(제출은 진행): 일부 로케일 릴리스 노트 누락, 심사 연락처 공란.
+
+제출은 **되돌릴 수 있다** — `cancel --yes` 로 철회한다. 그래서 `--yes` 한 겹만 두었다.
 
 ## 자동화 가능 범위 (양 스토어)
 
@@ -72,7 +89,7 @@ node codingpt_service/scripts/store/play.mjs watch     # Play 상태 전이 감�
 | 업로드 | ✅ `xcrun altool --upload-app`(ASC 키로) | ⛔→✅ 서비스계정만 있으면 자동(`edits.bundles.upload`) |
 | 트랙·단계적 출시 | ✅ API | ⛔→✅ 서비스계정(`edits.tracks`, userFraction) |
 | 리스팅·스크린샷·릴리스 노트 | ✅ API | ⛔→✅ 서비스계정(`edits.listings/images`) |
-| **심사 제출** | ✅ API 로 가능하지만 **의도적으로 자동화 안 함** | ⛔→✅ 서비스계정(`edits.commit`) |
+| **심사 제출** | ✅ **자동**(`submit --yes`, preflight 통과 시) | 서비스계정 있으면 ✅(`edits.commit`) |
 | **심사 상태 조회** | ✅ **자동**(`asc.mjs status/watch`) | ✅ **자동**(`play.mjs status/watch` — 2026 신규 API) |
 | **승인 후 출시** | ✅ **자동**(`release --yes`) | ✅ 트랙 `status: completed` 로 게시 |
 | **게시 버전 조회**(안내값 자동화) | ✅ **자동**(iTunes lookup) | ✅ **자동**(공개 페이지 파싱 — 보조) |
@@ -119,8 +136,8 @@ DRAFT · NOT_SENT_FOR_REVIEW · IN_REVIEW · APPROVED_NOT_PUBLISHED · NOT_APPRO
 [공통]   안내 버전은 자동 반영(수동 갱신 불필요) → verify-deploy.sh
 ```
 
-사람이 남는 것: Apple 은 **심사 제출 1클릭 + 배포 인증서 최초 생성**, Play 는 **거절 시 확인·재제출**
-(영구 수동) + 콘텐츠 등급·앱 콘텐츠 선언(최초 1회, 이후 재사용).
+사람이 남는 것: **거절 사유 읽기와 대응**(양 스토어 모두 API 없음), Play 의 콘텐츠 등급·앱 콘텐츠
+선언(최초 1회, 이후 재사용), 그리고 Apple 배포 인증서 최초 생성(이것도 API 로 가능 — 아래).
 
 ## 함정
 
