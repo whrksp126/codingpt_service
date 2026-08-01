@@ -206,6 +206,35 @@ async function cmdPrepare(argv) {
   console.log('\n다음: node asc.mjs preflight → submit --yes');
 }
 
+// ── 수출규정(암호화) 신고 ─────────────────────────────────────────────
+// **법적 신고다 — 절대 자동으로 값을 정하지 않는다.** 미답변이면 심사가 WAITING_FOR_EXPORT_COMPLIANCE
+// 에 걸려 시작조차 안 하므로 매 빌드 필요하다. 그래서 "이전 빌드에 뭐라고 답했는지" 를 보여 주고,
+// 사람이 같은 값을 명시적으로 지정하게 한다(--exempt / --non-exempt).
+//  ※ 영구히 안 묻게 하려면 Info.plist 에 ITSAppUsesNonExemptEncryption 를 넣으면 된다 —
+//    그건 리포에 신고를 박는 일이라 사용자가 직접 판단할 몫으로 남긴다.
+async function cmdCompliance(argv) {
+  const app = await appId();
+  const r = await api(`/v1/builds?filter[app]=${app.id}&limit=6&sort=-uploadedDate`);
+  const builds = r?.data || [];
+  const target = builds.find((b) => b.attributes?.usesNonExemptEncryption === null || b.attributes?.usesNonExemptEncryption === undefined);
+  console.log('최근 빌드의 수출규정 신고:');
+  for (const b of builds) console.log(`  build ${String(b.attributes?.version).padEnd(4)} ${b.attributes?.usesNonExemptEncryption ?? '미답변'}`);
+  if (!target) { console.log('\n미답변 빌드가 없습니다.'); return; }
+  const exempt = argv.includes('--exempt');
+  const nonExempt = argv.includes('--non-exempt');
+  if (!exempt && !nonExempt) {
+    console.log(`\nbuild ${target.attributes?.version} 이 미답변입니다. --exempt(면제) 또는 --non-exempt 를 지정하세요.`);
+    console.log('  이전 빌드와 같은 값을 쓰는 것이 보통이지만, 암호화 사용이 바뀌었다면 달라질 수 있습니다.');
+    process.exitCode = 1;
+    return;
+  }
+  await api(`/v1/builds/${target.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ data: { type: 'builds', id: target.id, attributes: { usesNonExemptEncryption: !!nonExempt } } }),
+  });
+  console.log(`\n✅ build ${target.attributes?.version} → usesNonExemptEncryption=${!!nonExempt}`);
+}
+
 // ── 제출 preflight ────────────────────────────────────────────────────
 // 사람이 "제출 버튼을 누르기 전에 눈으로 보던 것" 을 대신 확인한다. 이게 없으면 자동 제출은
 //  빈 릴리스 노트·빌드 미연결·수출규정 미답변으로 **거절을 쌓는 기계**가 된다(거절 사유는 API 로
@@ -374,9 +403,9 @@ async function cmdWatch(argv) {
 
 const [, , cmd = 'status', ...argv] = process.argv;
 const run = {
-  status: cmdStatus, builds: cmdBuilds, preflight: cmdPreflight, prepare: () => cmdPrepare(argv),
+  status: cmdStatus, builds: cmdBuilds, preflight: cmdPreflight, prepare: () => cmdPrepare(argv), compliance: () => cmdCompliance(argv),
   submit: () => cmdSubmit(argv), cancel: () => cmdCancel(argv),
   release: () => cmdRelease(argv), watch: () => cmdWatch(argv),
 }[cmd];
-if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
+if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | compliance | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
 run().catch((e) => die(String(e.message || e)));
