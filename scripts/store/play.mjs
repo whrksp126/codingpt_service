@@ -12,6 +12,7 @@
  * 사용:
  *   node play.mjs status                 트랙별 릴리스와 심사 상태
  *   node play.mjs watch [--interval 900] 상태 전이를 주기 감시(무인 폴링)
+ *   ... --pkg com.ghmate.heyvoca          다른 앱 대상(같은 서비스계정에 권한이 있으면)
  *
  * 안전 규율: 조회만 한다. 업로드·트랙 변경·게시는 되돌리기 어려우므로 여기 넣지 않았다.
  *  (넣게 되면 commit 에 반드시 `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 를 명시할 것 —
@@ -22,7 +23,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const PKG = 'com.ghmate.codingpt.app';
+// 대상 앱 — 기본은 CodingPT. 같은 서비스계정에 다른 앱 권한도 줬다면 --pkg 로 바꿔 쓴다
+//  (예: heyvoca `--pkg com.ghmate.heyvoca`). 권한이 없는 앱을 물으면 403 이 난다.
+const PKG = (() => {
+  const i = process.argv.indexOf('--pkg');
+  return i >= 0 && process.argv[i + 1] ? String(process.argv[i + 1]) : (process.env.PLAY_PKG || 'com.ghmate.codingpt.app');
+})();
 const API = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
 const SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
 const TRACKS = ['production', 'beta', 'alpha', 'internal'];
@@ -95,6 +101,7 @@ async function releases(token) {
 }
 
 async function cmdStatus() {
+  console.log(`앱: ${PKG}`);
   const rs = await releases(await accessToken());
   if (!rs.length) { console.log('릴리스 없음(또는 권한 부족).'); return; }
   for (const r of rs) console.log(`  ${r.track.padEnd(11)} ${String(r.name || '-').padEnd(14)} ${ko(r.state)}`);

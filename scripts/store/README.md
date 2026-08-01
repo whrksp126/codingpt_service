@@ -11,7 +11,7 @@
 | **ASC Issuer ID(UUID)** | ✅ `f1908b5f-e631-41e0-b723-3b46c7c13041` (2026-08-01 실호출 확인) | — |
 | Apple 배포 인증서 | ❌ 이 키체인엔 Development 만 | **Xcode 없이도 생성 가능** — `openssl` 로 CSR 만들어 `POST /v1/certificates` (Team 키 한정) |
 | Android 서명 키스토어 | ✅ `codingpt_app/android/app/release-key.keystore` | — |
-| **Play 서비스계정 JSON** | ❌ 없음 | Play 업로드·상태조회 전부 수동 |
+| **Play 서비스계정 JSON** | ✅ `~/other/secrets/play/service-account.json` (2026-08-01, 권한 600) | — |
 
 Issuer ID 는 App Store Connect → 사용자 및 액세스 → **통합(Integrations)** 상단에서 얻는다.
 비밀이 아니지만(계정 식별자) 값은 env 로 넘긴다(`ASC_ISSUER_ID`).
@@ -116,15 +116,22 @@ DRAFT · NOT_SENT_FOR_REVIEW · IN_REVIEW · APPROVED_NOT_PUBLISHED · NOT_APPRO
 **진행 중인 심사를 취소하고 대기열 순번을 잃는다.** 자동화에서는 반드시 `ERROR_IF_IN_REVIEW` 를
 명시할 것(디스커버리 문서에서 enum 실측 확인).
 
-### Play 를 자동화하려면(사용자 1회 작업)
+### Play 서비스계정 — 발급 완료(2026-08-01)
 
-1. Play Console → 설정 → **API 액세스** → Google Cloud 프로젝트 연결
-2. GCP 에서 서비스계정 생성 → JSON 키 다운로드
-3. Play Console 에서 그 서비스계정에 **앱 릴리스 권한** 부여
-4. JSON 을 `~/other/secrets/play/` 에 두고 알려주기
+- 계정: `play-publisher@codingpt-464903.iam.gserviceaccount.com` (GCP 프로젝트 `codingpt-464903`)
+- 권한 부여 앱: **CodingPT + 헤이보카**(GHK VPN 은 의도적으로 제외 — 필요할 때 추가)
+- 부여한 권한: 앱 정보 보기 · 프로덕션 출시 · 테스트 트랙 출시/관리 · 앱 정보 관리 · 정책 선언 관리
+- ⚠ 키 하나가 **두 앱의 출시 권한**을 갖는다 — 유출 시 두 앱 모두 영향. 앱별 분리가 더 안전하지만
+  1인 운영에서는 관리 비용이 커서 통합을 택했다.
+- **전파 지연 없었음** — 초대 직후 바로 200 이 떨어졌다(자료들이 말하는 24~36h 는 항상 걸리는 게 아니다).
 
-그러면 **업로드·트랙 승격·단계적 출시·리스팅 갱신**이 자동화된다(심사 상태 조회는 여전히 불가).
-우리 앱은 이미 게시된 상태라 "최초 1회 수동 업로드" 전제도 이미 충족돼 있다.
+다른 앱을 보려면 `--pkg`:
+```bash
+node scripts/store/play.mjs status --pkg com.ghmate.heyvoca
+```
+
+(참고: 예전 절차의 "Play Console → API 액세스에서 GCP 프로젝트 연결" 단계는 이제 없어졌다.
+GCP 에서 API 활성화 + 서비스계정 생성 → Play Console 에서 사용자로 초대, 두 갈래면 끝이다.)
 
 ## 무인 릴리스 루프(자격증명이 갖춰졌을 때)
 
