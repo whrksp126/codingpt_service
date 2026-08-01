@@ -33,7 +33,12 @@ const PKG = (() => {
 })();
 const API = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
 const SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
-const TRACKS = ['production', 'beta', 'alpha', 'internal'];
+// ⚠ `tracks/{track}/releases` 는 **쿼터가 빡빡하다** — 몇 번만 훑어도 403
+//  "Listing releases quota exceeded"(status: PERMISSION_DENIED) 가 난다. 권한 오류처럼 보이지만
+//  아니다(2026-08-01 실측: 초대 직후엔 200 이던 것이 몇 십 분 뒤 403). 그래서 기본은 production
+//  한 트랙만 본다. 전부 보려면 --all-tracks.
+const ALL_TRACKS = ['production', 'beta', 'alpha', 'internal'];
+const TRACKS = process.argv.includes('--all-tracks') ? ALL_TRACKS : ['production'];
 
 function die(msg) { console.error(msg); process.exit(1); }
 
@@ -94,7 +99,10 @@ async function releases(token) {
     if (res.status === 404) continue; // 그 트랙에 릴리스 없음
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) die(`권한 없음(${res.status}) — Play Console 에서 이 서비스계정에 앱 권한을 줬는지, 전파(최대 24~36h)가 끝났는지 확인.`);
+      const msg = j?.error?.message || '';
+      // 쿼터 초과도 403/PERMISSION_DENIED 로 온다 — 권한 문제로 오진하면 엉뚱한 곳을 고치게 된다.
+      if (/quota/i.test(msg)) { const e = new Error(`Play 조회 쿼터 초과 — 잠시 뒤 다시 시도하세요(권한 문제 아님).\n  ${msg}`); e.quota = true; throw e; }
+      if (res.status === 401 || res.status === 403) die(`권한 없음(${res.status}) — Play Console 에서 이 서비스계정에 앱 권한을 줬는지 확인.\n  ${msg}`);
       continue;
     }
     for (const r of j.releases || []) out.push({ track, name: r.releaseName, state: r.releaseLifecycleState, artifacts: r.activeArtifacts });
@@ -116,6 +124,7 @@ async function cmdWatch(argv) {
   const sec = i >= 0 ? Math.max(60, Number(argv[i + 1]) || 900) : 900;
   console.log(`Play 심사 상태 감시 시작(${sec}s 간격). Ctrl+C 로 종료.`);
   let last = '';
+  let wait = sec;
   for (;;) {
     try {
       const rs = await releases(await accessToken());
@@ -125,8 +134,12 @@ async function cmdWatch(argv) {
         for (const r of rs) console.log(`  ${r.track.padEnd(11)} ${String(r.name || '-').padEnd(14)} ${ko(r.state)}`);
         last = cur;
       }
-    } catch (e) { console.error('조회 실패(계속 재시도):', String(e.message || e).split('\n')[0]); }
-    await new Promise((r) => setTimeout(r, sec * 1000));
+      wait = sec;
+    } catch (e) {
+      console.error('조회 실패(계속 재시도):', String(e.message || e).split('\n')[0]);
+      if (e.quota) { wait = Math.min(wait * 2, 3600); console.error(`  쿼터 백오프 → ${wait}s`); }
+    }
+    await new Promise((r) => setTimeout(r, wait * 1000));
   }
 }
 
