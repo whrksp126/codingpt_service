@@ -61,13 +61,34 @@ test('C. 스토어 전파 지연으로 조회가 낮게 나와도 안내 버전�
   assert.equal(r.source, 'env');
 });
 
-test('D. Android 는 네트워크를 치지 않고 env 를 쓴다', async () => {
+test('D. Android 도 공개 페이지에서 읽되, 파싱이 깨지면 env 로 안전 폴백한다', async () => {
+  // 파싱 실패(HTML 에 버전 슬롯 없음) → env 유지 = 기존 동작.
   reset({ APP_LATEST_ANDROID: '0.2.5' });
-  const calls = stubFetch('9.9.9');
-  const r = await appRelease.latestFor('android');
+  global.fetch = async () => ({ ok: true, text: async () => '<html>구조가 바뀐 페이지</html>' });
+  let r = await appRelease.latestFor('android');
   assert.equal(r.version, '0.2.5');
-  assert.equal(calls(), 0, 'Play 는 공식 조회 경로가 없다 — 호출 자체를 하면 안 된다');
+  assert.equal(r.source, 'env');
   assert.match(r.url, /play\.google\.com/);
+  // 정상 파싱(실측 형태) → 자동 반영.
+  reset({ APP_LATEST_ANDROID: '0.2.5' });
+  global.fetch = async () => ({ ok: true, text: async () => 'x"141":[[["0.2.9"]],[[[35]]' });
+  r = await appRelease.latestFor('android');
+  assert.equal(r.version, '0.2.9');
+  assert.equal(r.source, 'store');
+});
+
+test('D-2. 스토어 조회는 캐시버스터를 붙인다 — 없으면 CDN 이 낡은 값을 고정한다', async () => {
+  // 2026-08-01 실측: plain URL 은 게시된 0.2.9 대신 0.2.5 를 계속 돌려줬다(재현됨).
+  reset({});
+  const seen = [];
+  global.fetch = async (u) => { seen.push(String(u)); return { ok: true, json: async () => ({ results: [{ version: '0.2.9' }] }) }; };
+  await appRelease.latestFor('ios');
+  assert.match(seen[0], /_cb=/, 'iTunes 조회 URL 에 캐시버스터가 없다');
+  reset({});
+  seen.length = 0;
+  global.fetch = async (u) => { seen.push(String(u)); return { ok: true, text: async () => '"141":[[["0.2.9"]]' }; };
+  await appRelease.latestFor('android');
+  assert.match(seen[0], /_cb=/, 'Play 조회 URL 에 캐시버스터가 없다');
 });
 
 test('E. 조회 결과는 캐시된다(요청마다 스토어를 치지 않는다)', async () => {

@@ -10,9 +10,10 @@
  *   1) 스토어 실조회 성공 → **그게 진실**(env 가 낡았어도 자동 보정)
  *   2) 조회 실패/미지원 → env(APP_LATEST_*) → 그마저 없으면 '0.1.0'
  *
- * iOS 는 무인증 공개 lookup API 가 있어 자동. Android 는 공식 조회 경로가 없어(Play Developer API 는
- * 서비스계정 필요) env 가 정본이다 — 게시 때 `docker-compose.prod.yml` 의 APP_LATEST_ANDROID 를
- * 같이 올려야 한다. 조회 실패는 예외가 아니라 폴백이다(이 API 가 앱 부팅 경로를 막으면 안 됨).
+ * iOS 는 무인증 공개 lookup API 로 자동. Android 는 공식 조회 API 가 없어(Play Developer API 는
+ * 서비스계정 필요) 공개 상세 페이지의 내장 데이터를 읽는 **보조 경로**를 쓴다 — 부서지기 쉬우므로
+ * "env 보다 높을 때만 채택" 규칙으로 감싼다(파싱이 깨져도 최악이 기존 동작 유지).
+ * 조회 실패는 예외가 아니라 폴백이다(이 API 가 앱 부팅 경로를 막으면 안 됨).
  */
 
 const IOS_APP_ID = '6751457159';
@@ -40,10 +41,15 @@ function cmpVersion(a, b) {
 }
 
 // App Store 공개 lookup — 인증/키 불필요. 실패는 전부 null(호출측이 env 로 폴백).
+//  ⚠ **캐시버스터 필수**(2026-08-01 실측): 같은 URL 을 반복 조회하면 iTunes CDN 이 오래된 값을
+//   고정으로 돌려준다. 실제로 ASC 는 0.2.9 게시(READY_FOR_SALE)인데 plain URL 은 계속 0.2.5 를
+//   답했고, 쿼리 하나만 덧붙이면 즉시 0.2.9 가 나왔다(재현됨). 이걸 빼면 "자동 감지" 가
+//   조용히 낡은 값을 고정해 손으로 고치던 시절과 똑같아진다.
 async function fetchIosStoreVersion() {
-  const url = `https://itunes.apple.com/lookup?id=${IOS_APP_ID}&country=${encodeURIComponent(STORE_COUNTRY)}`;
+  const url = `https://itunes.apple.com/lookup?id=${IOS_APP_ID}&country=${encodeURIComponent(STORE_COUNTRY)}`
+    + `&_cb=${Date.now().toString(36)}`;
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS), cache: 'no-store' });
     if (!res.ok) return null;
     const body = await res.json();
     const v = body?.results?.[0]?.version;
@@ -53,12 +59,32 @@ async function fetchIosStoreVersion() {
   }
 }
 
-// 캐시된 스토어 조회. Android 는 공식 경로가 없어 항상 null.
+// Play 는 공식 조회 API 가 없다(Developer API = 서비스계정 필요). 대신 공개 상세 페이지의
+//  내장 데이터에서 버전을 읽는다 — **부서지기 쉬운 경로라 보조로만 쓴다.**
+//  안전장치: 아래 latestFor 가 "env 보다 높을 때만" 채택하므로, 파싱이 깨지거나 엉뚱한 값이
+//  나와도 최악이 "env 그대로"다(현재 동작 유지). 낮은 값으로 안내가 역행하는 일은 없다.
+async function fetchAndroidStoreVersion() {
+  const url = `https://play.google.com/store/apps/details?id=${ANDROID_PKG}&hl=ko&_cb=${Date.now().toString(36)}`;
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    // 내장 JSON 블롭의 버전 슬롯: "141":[[["0.2.9"]]  (2026-08-01 실측 형태)
+    const m = /"141":\s*\[\[\["([0-9]+(?:\.[0-9]+)*)"\]\]/.exec(html);
+    return m && isVersion(m[1]) ? m[1] : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// 캐시된 스토어 조회.
 async function storeVersion(platform) {
-  if (platform !== 'ios') return null;
   const hit = cache.get(platform);
   if (hit && Date.now() - hit.at < LOOKUP_TTL_MS) return hit.version;
-  const version = await fetchIosStoreVersion();
+  const version = platform === 'ios' ? await fetchIosStoreVersion() : await fetchAndroidStoreVersion();
   if (version) cache.set(platform, { version, at: Date.now() });
   // 조회 실패 시엔 만료된 캐시라도 쓴다 — env 보다 최근 사실일 가능성이 높다.
   return version || hit?.version || null;

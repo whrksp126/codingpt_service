@@ -57,11 +57,11 @@ services:
       #   업데이트 확인이 영구히 "최신 버전입니다" 를 돌려주고 있었다(안내 도달 0).
       #  그래서 iOS 는 back 이 App Store 공개 lookup 으로 **자동 감지**한다(services/appReleaseService.js).
       #   → APP_LATEST_IOS 는 조회 실패 시의 폴백일 뿐이라 낡아도 안전하다.
-      #  Android 는 공식 조회 경로가 없어(Play Developer API = 서비스계정 필요) 여기가 정본이다.
-      #   → **Play 게시가 끝나면 APP_LATEST_ANDROID 를 반드시 같이 올릴 것.**
+      #  Android 도 공개 상세 페이지에서 자동 감지한다(보조 경로 — 깨지면 아래 env 로 폴백).
+      #   → 이 값들은 이제 "조회가 막혔을 때의 폴백" 이라 낡아도 안전하다(게시 때 맞춰두면 더 좋음).
       #  APP_MIN_IOS/APP_MIN_ANDROID 는 강제 업데이트 킬스위치(평소 비워 둠).
-      - APP_LATEST_IOS=0.2.5
-      - APP_LATEST_ANDROID=0.2.5
+      - APP_LATEST_IOS=0.2.9
+      - APP_LATEST_ANDROID=0.2.9
     env_file:
       - ./codingpt_back/.env
     depends_on:

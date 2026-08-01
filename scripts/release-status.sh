@@ -57,8 +57,13 @@ app_ver_json=$(curl -s --max-time 12 "$BACK_PROD/api/app/version" 2>/dev/null ||
 back_ios=$(echo "$app_ver_json" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['ios']['version'],d['ios'].get('source','?'))" 2>/dev/null || echo '? ?')
 back_and=$(echo "$app_ver_json" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['android']['version'],d['android'].get('source','?'))" 2>/dev/null || echo '? ?')
 # 스토어 실게시 버전(iOS 만 공개 조회 가능)
-store_ios=$(curl -s --max-time 12 "https://itunes.apple.com/lookup?id=$IOS_APP_ID&country=kr" 2>/dev/null \
+# ⚠ 캐시버스터 필수 — plain URL 은 iTunes CDN 이 낡은 값을 고정한다(2026-08-01 실측, 재현됨).
+store_ios=$(curl -s --max-time 12 "https://itunes.apple.com/lookup?id=$IOS_APP_ID&country=kr&_cb=$(date +%s)" 2>/dev/null \
   | python3 -c "import sys,json;r=json.load(sys.stdin).get('results') or [];print(r[0]['version'] if r else '미게시')" 2>/dev/null || echo '?')
+# Play 는 공식 API 가 없어 공개 상세 페이지의 내장 데이터에서 읽는다(보조 경로 — 실패하면 '?').
+store_and=$(curl -s --max-time 12 -A "Mozilla/5.0" "https://play.google.com/store/apps/details?id=com.ghmate.codingpt.app&hl=ko&_cb=$(date +%s)" 2>/dev/null \
+  | grep -oE '"141":\[\[\["[0-9.]+"\]\]' | grep -oE '[0-9]+(\.[0-9]+)+' | head -1)
+store_and="${store_and:-?}"
 
 read -r svc_dirty svc_unpushed svc_branch <<<"$(repo_state "$SVC")"
 read -r app_dirty app_unpushed app_branch <<<"$(repo_state "$APP")"
@@ -90,7 +95,7 @@ printf "  admin    %-6s 미커밋 %s · 미푸시 %s\n" "$adm_branch" "$adm_dirt
 
 hdr "버전 (리포 → 라이브)"
 printf "  PC        %s → 발행됨 %s\n" "$pc_ver" "$pc_live"
-printf "  Android   %s (code %s) → 스토어 조회불가(공개 API 없음)\n" "$and_name" "$and_code"
+printf "  Android   %s (code %s) → 스토어 %s\n" "$and_name" "$and_code" "$store_and"
 printf "  iOS       %s (build %s) → 스토어 %s\n" "$ios_ver" "$ios_build" "$store_ios"
 printf "  안내기준   back ios=%s · android=%s   (compose ios=%s android=%s)\n" "$back_ios" "$back_and" "$cmp_ios" "$cmp_and"
 
@@ -107,7 +112,9 @@ note() { todo=$((todo+1)); printf "  %d) %s\n" "$todo" "$*"; }
 [ "${app_unpushed:-0}" != 0 ] && note "app 미푸시 $app_unpushed 건"
 [ "$pc_ver" != "$pc_live" ] && note "PC $pc_ver 미발행(발행됨=$pc_live) — bash codingpt_pc/scripts/release-pc.sh"
 [ "$store_ios" != "$ios_ver" ] && [ "$store_ios" != "?" ] && note "iOS $ios_ver 미게시(스토어=$store_ios) — 제출/심사 대기"
-# Android 안내 기준은 compose 가 정본이라, 스토어 게시 후에만 올려야 한다.
-[ "$cmp_and" != "$and_name" ] && note "Play 게시가 끝났다면 APP_LATEST_ANDROID 를 $and_name 로 올리고 재배포(게시 전이면 두지 말 것)"
+[ "$store_and" != "$and_name" ] && [ "$store_and" != "?" ] && note "Android $and_name 미게시(스토어=$store_and) — 제출/심사 대기"
+# 안내 버전은 이제 양 스토어 실조회로 자동 반영된다 — env 는 조회 실패 시의 폴백일 뿐.
+#  다만 조회가 막힌 환경에서는 env 가 정본이 되므로, 크게 뒤처져 있으면 알려 준다.
+[ "$cmp_and" != "$and_name" ] && [ "$store_and" = "$and_name" ] && note "(선택) APP_LATEST_ANDROID 폴백값이 $cmp_and 로 낡음 — 조회 실패 대비해 $and_name 로 올려두면 좋음"
 [ "$todo" = 0 ] && echo "  없음 — 전부 최신"
 echo

@@ -21,7 +21,7 @@ bash codingpt_service/scripts/release-status.sh --json   # 기계가 읽는 진�
 | back/front 코드가 바뀜 | `./deploy.sh prod` | **필요**(prod는 명시 요청 시만) |
 | PC 리포 버전 ≠ 발행됨 | `bash codingpt_pc/scripts/release-pc.sh` | 필요(공증 수 분 + 사용자 계정 사용) |
 | 앱 코드가 바뀜 | 버전 범프 → 빌드 → 스토어 제출 | 필요 |
-| 스토어 게시 완료됨 | `APP_LATEST_ANDROID` 갱신 → prod 재배포 | 불필요(게시 확인 후 자동 진행 가능) |
+| 스토어 게시 완료됨 | 안내값은 자동 반영 — 폴백값(`APP_LATEST_*`)만 맞춰 두면 됨 | 불필요 |
 
 **아무것도 안 바뀐 표면은 건드리지 않는다.** 예: 데몬/PC 만 고쳤으면 back 배포는 불필요하고,
 back 만 고쳤으면 PC 릴리스는 불필요하다(데몬은 PC 앱 사이드카라 PC 릴리스에 실린다).
@@ -66,11 +66,11 @@ cd codingpt_app && npm run build:android-aab  # 서명된 AAB (prod env)
 자동화 범위는 `scripts/store/README.md` 참조(자격증명이 갖춰진 만큼만 자동화된다).
 자격증명이 없으면 사용자가 Play Console / Xcode Organizer 로 올린다.
 
-**순서 불변식**: 스토어에 **게시가 끝난 뒤에** `APP_LATEST_*` 를 올린다. 먼저 올리면 사용자가
-"업데이트하세요" 를 보고 스토어에 갔을 때 아직 이전 버전만 있다.
+**안내 버전은 손댈 필요가 없다** — back 이 양 스토어를 실조회해 자동 반영한다(iOS=iTunes lookup,
+Android=공개 페이지 파싱). `docker-compose.prod.yml` 의 `APP_LATEST_*` 는 조회가 막혔을 때의
+폴백일 뿐이라 낡아도 안전하다. 다만 게시가 끝났으면 폴백값도 맞춰 두는 게 좋다.
 
-- iOS 는 back 이 App Store 를 실조회해 자동 반영되므로 손댈 필요 없다.
-- **Android 만** `docker-compose.prod.yml` 의 `APP_LATEST_ANDROID` 를 올리고 재배포한다.
+심사 상태는 `node scripts/store/asc.mjs status`(승인 대기면 `release --yes` 로 출시).
 
 ## 4. 완료 보고 전 필수
 

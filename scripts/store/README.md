@@ -8,19 +8,33 @@
 | 자격 | 상태 | 없으면 |
 |---|---|---|
 | App Store Connect API 키(.p8) | ✅ `~/.appstoreconnect/private_keys/AuthKey_N5ZVQFND28.p8` | — |
-| **ASC Issuer ID(UUID)** | ❌ **사용자가 알려줘야 함** | 조회·출시 전부 불가 |
+| **ASC Issuer ID(UUID)** | ✅ `f1908b5f-e631-41e0-b723-3b46c7c13041` (2026-08-01 실호출 확인) | — |
 | Apple 배포 인증서 | ❌ 이 키체인엔 Development 만 | Archive 를 Xcode 로 해야 함 |
 | Android 서명 키스토어 | ✅ `codingpt_app/android/app/release-key.keystore` | — |
 | **Play 서비스계정 JSON** | ❌ 없음 | Play 업로드·상태조회 전부 수동 |
 
-Issuer ID 얻는 법: App Store Connect → 사용자 및 액세스 → **통합(Integrations)** → 상단에 표시.
-비밀이 아니지만 값은 env 로만 넘긴다(`ASC_ISSUER_ID`).
+Issuer ID 는 App Store Connect → 사용자 및 액세스 → **통합(Integrations)** 상단에서 얻는다.
+비밀이 아니지만(계정 식별자) 값은 env 로 넘긴다(`ASC_ISSUER_ID`).
+
+### ⚠ 스토어 버전 조회에는 캐시버스터가 필수다 (2026-08-01 실측)
+
+같은 URL 로 반복 조회하면 **iTunes CDN 이 낡은 값을 고정으로 돌려준다.** ASC 는 0.2.9 게시
+(READY_FOR_SALE)라고 답하는데 plain lookup 은 계속 0.2.5 를 줬고, 쿼리 파라미터 하나만 덧붙이면
+즉시 0.2.9 가 나왔다(반복 재현). 이걸 빼면 "자동 감지" 가 조용히 낡은 값을 고정해 손으로 고치던
+시절과 똑같아진다. `appReleaseService.js` 와 `release-status.sh` 둘 다 `_cb=` 를 붙인다.
+
+### Android 도 자동 감지된다
+
+Play 는 공식 조회 API 가 없지만(Developer API = 서비스계정 필요) 공개 상세 페이지의 내장 데이터
+(`"141":[[["0.2.9"]]`)에서 버전을 읽는다. **부서지기 쉬운 경로라 "env 보다 높을 때만 채택"** 규칙으로
+감싸므로, 파싱이 깨져도 최악이 기존 동작(env 유지)이다. 덕분에 게시 후 손으로 값을 올리는 단계가
+사라졌다 — env 는 조회가 막혔을 때의 폴백일 뿐이다.
 
 ## asc.mjs — App Store Connect (의존성 0, 지금 동작 확인됨)
 
 ```bash
 export ASC_KEY_ID=N5ZVQFND28
-export ASC_ISSUER_ID=<Issuer ID>
+export ASC_ISSUER_ID=f1908b5f-e631-41e0-b723-3b46c7c13041
 
 node codingpt_service/scripts/store/asc.mjs status    # 버전별 심사 상태(한국어 해설)
 node codingpt_service/scripts/store/asc.mjs builds     # 업로드된 빌드 처리 상태
@@ -48,6 +62,7 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 | 빌드 생성 | ✅ `xcodebuild archive`(단, **배포 인증서 필요** → 현재 Xcode 로) | ✅ `gradlew bundleRelease`(서명키 있음) |
 | 업로드 | ✅ `xcrun altool --upload-app`(ASC 키로) | ⛔ 서비스계정 JSON 필요 |
 | 릴리스 노트 입력 | ✅ API | ⛔ 서비스계정 필요 |
+| **게시 버전 조회**(안내값 자동화) | ✅ **자동**(iTunes lookup) | ✅ **자동**(공개 페이지 파싱 — 보조) |
 | **심사 제출** | ✅ API 로 가능하지만 **의도적으로 자동화 안 함** | ⛔ 서비스계정 필요 |
 | **심사 상태 조회** | ✅ **자동** (`status`/`watch`) | ⛔ 서비스계정 필요 |
 | **승인 후 출시** | ✅ **자동** (`release --yes`) | ⛔ 서비스계정 필요 |
@@ -67,7 +82,7 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 ```
 버전 범프 → 빌드 → 업로드 → (사람: 심사 제출 1클릭)
    → watch 가 승인 감지 → release --yes → READY_FOR_SALE 확인
-   → APP_LATEST_ANDROID 갱신 → prod 재배포 → verify-deploy.sh
+   → 안내 버전은 자동 반영(수동 갱신 불필요) → verify-deploy.sh
 ```
 
 이 중 사람이 남는 건 **심사 제출 1회**뿐이다(그리고 Apple 이 요구하는 배포 인증서 최초 생성).
@@ -78,4 +93,5 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 - 401 이 나면 대개 Issuer ID 오타이거나 키 권한이 "앱 관리자" 미만이다.
 - 스토어 게시(`READY_FOR_SALE`)를 **확인한 뒤에만** `APP_LATEST_*` 를 올린다 — 먼저 올리면
   사용자가 "업데이트하세요" 를 보고 스토어에 갔을 때 아직 이전 버전만 있다.
-- iOS 안내 버전은 back 이 App Store 를 실조회하므로 자동 반영된다(손댈 필요 없음). Android 만 수동.
+- 안내 버전(`APP_LATEST_*`)은 **양 스토어 모두 자동 반영**된다. env 는 조회가 막혔을 때의 폴백일 뿐이라
+  낡아도 안전하다(맞춰두면 더 좋음).
