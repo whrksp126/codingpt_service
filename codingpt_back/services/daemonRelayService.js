@@ -1142,6 +1142,9 @@ function registerAgentWs(ws, userId, client) {
         deviceName: typeof msg.deviceName === 'string' ? msg.deviceName.slice(0, 128) : '',
         // 이 화면이 처리할 수 있는 신규 기능(§2-(d)). 구 클라는 안 보냄 → [] → 게이팅이 기존 동작으로 폴백.
         caps: normCaps(msg.caps),
+        // 이 화면의 앱 버전(표시·진단 전용, 분기 금지 — 분기는 항상 caps 로 한다).
+        //  구 클라는 안 보냄 → '' → "알 수 없음". 버전 스큐 문의가 왔을 때 조합을 확인하는 유일한 단서다.
+        appVersion: typeof msg.appVersion === 'string' ? msg.appVersion.slice(0, 32) : '',
         // 이 화면이 들고 있는 E2EE 열쇠 세대(0=없음). 호스트 epoch 과 같아야 봉인 모드를 켠다(§2.8).
         e2eeEpoch: Number.isInteger(msg.e2eeEpoch) && msg.e2eeEpoch > 0 ? msg.e2eeEpoch : 0,
         lastActivityAt: Date.now(),

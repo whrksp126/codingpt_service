@@ -139,6 +139,14 @@ function addSurfaceGated(rt, kind, opts) {
   return rt.focusId;
 }
 
+// 이 PC 앱의 버전(ui_hello 진단 필드). 1회만 조회해 캐시한다 — 실패는 빈 문자열(신고 생략).
+let appVer = "";
+async function ensureAppVer() {
+  if (appVer) return appVer;
+  try { appVer = String((await api.appVersion()) || ""); } catch (_) { appVer = ""; }
+  return appVer;
+}
+
 async function connect() {
   clearTimeout(retryTimer);
   let url = null;
@@ -147,6 +155,8 @@ async function connect() {
   } catch (_) {
     return scheduleRetry(); // 미페어링/서버 미가용 — 로컬 폴백으로 동작 유지
   }
+  // hello 는 onopen 에서 동기로 나가므로 버전은 **소켓을 열기 전에** 확보해야 한다(첫 접속 누락 방지).
+  await ensureAppVer();
   if (!url) return scheduleRetry();
   let ws;
   try {
@@ -181,6 +191,8 @@ async function connect() {
       //   state.setAgentState). 팬아웃은 caps 로 게이팅하지 않으므로(모르는 type 은 무시) 이 신고는
       //   진단·통계용이지만, "구현한 것만 신고" 규약을 지켜 수신기와 같은 커밋에서만 실린다.
       caps: ["caps.v1", "approval.v1", "transcript.v1", "agentstate.v1", ...e2eeCaps()],
+      // 진단 전용(분기 금지 — 분기는 항상 caps). 서버가 "누가 어떤 조합인지" 를 알 유일한 단서.
+      appVersion: appVer || undefined,
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)

@@ -384,6 +384,10 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
     cmd.arg(script);
     // 부모(Mac 화면)의 tmux 중첩 가드 회피 — 데몬은 전용 소켓(-L codingpt) 사용.
     cmd.env_remove("TMUX");
+    // 데몬이 서버에 신고할 버전 = **이 PC 앱의 버전**. 데몬은 사이드카로만 배포되어 앱 버전에
+    // 종속인데, 자기 package.json(영구 0.1.0)을 보고해 왔다 — 전 사용자가 같은 값이라 "누가 어떤
+    // 조합을 쓰는지"를 서버가 알 수 없었다(버전 스큐 진단 불가).
+    cmd.env("CPT_APP_VERSION", app.package_info().version.to_string());
     // 번들 tmux(사이드카 base/tmux/bin/tmux)가 있으면 주입 → 데몬이 무설치 tmux 사용.
     if let Some(base) = node.parent() {
         let bundled_tmux = base.join("tmux").join("bin").join("tmux");

@@ -16,6 +16,17 @@ const runnerCore = require('@codingpt/runner-core');
 const configLib = runnerCore.config;
 const pkg = require('./package.json');
 
+// 서버·사용자에게 보고할 데몬 버전.
+//  데몬은 **PC 앱 사이드카로만** 배포되므로 실질 버전 = PC 앱 버전이다. 그런데 자기
+//  package.json 은 최초 커밋 이후 한 번도 안 올라 영구 '0.1.0' 이었고, 그 결과 모든 사용자가
+//  같은 값으로 보고돼 "누가 어떤 조합을 쓰는지"를 서버가 알 수 없었다(스큐 진단 불가).
+//  PC 앱이 CPT_APP_VERSION 을 주입하므로 그것을 우선한다. 단독 실행(개발·클라우드 러너)에서는
+//  주입이 없으니 package.json 으로 폴백한다.
+const VERSION = (() => {
+  const v = String(process.env.CPT_APP_VERSION || '').trim();
+  return /^\d+(\.\d+)*/.test(v) ? v : pkg.version;
+})();
+
 const DEFAULT_SERVER = 'https://codingpt-back.ghmate.com';
 
 // PTY 스트림 WS(leg B)를 CF 우회 직결 도메인으로 보낼지 결정. prod back 이면 자동으로 직결(저지연),
@@ -57,7 +68,7 @@ async function cmdPair() {
       code,
       deviceName: os.hostname().replace(/\.local$/, ''),
       platform: process.platform,
-      daemonVersion: pkg.version,
+      daemonVersion: VERSION,
       machineId: configLib.machineId(), // 같은 머신 재페어링 시 서버가 기존 device 행 재사용(고아 방지)
     }),
   });
@@ -88,7 +99,7 @@ async function cmdPairSession() {
     body: JSON.stringify({
       deviceName: os.hostname().replace(/\.local$/, ''),
       platform: process.platform,
-      daemonVersion: pkg.version,
+      daemonVersion: VERSION,
       machineId: configLib.machineId(), // approve 시 서버가 기존 device 행 재사용(고아 방지)
     }),
   });
@@ -128,13 +139,13 @@ function cmdRun() {
     console.error('페어링이 필요합니다: node index.js pair --server <URL>');
     process.exit(1);
   }
-  console.log(`CodingPT 데몬 v${pkg.version} — ${config.deviceName} → ${config.serverUrl}`);
+  console.log(`CodingPT 데몬 v${VERSION} — ${config.deviceName} → ${config.serverUrl}`);
   console.log(`로컬에서 같은 터미널 보기: tmux -L codingpt attach -t codingpt`);
   // 터미널 PTY 스트림 WS(leg B)를 CF 우회 직결로 — prod 는 자동, env 로 명시 override 가능.
   //  dev/local 은 undefined 로 두어 serverUrl(CF/로컬) 파생 유지. 클라우드러너는 이 경로를 안 탐(내부 back).
   const relayWsUrl = relayWsFor(config.serverUrl);
   if (relayWsUrl) console.log(`릴레이 WS(직결): ${relayWsUrl}`);
-  runnerCore.control.run({ ...config, daemonVersion: pkg.version, relayWsUrl });
+  runnerCore.control.run({ ...config, daemonVersion: VERSION, relayWsUrl });
 }
 
 function cmdStatus() {
@@ -185,7 +196,7 @@ const cmd = process.argv[2];
     case 'setup': cmdSetup(); break;
     case 'unpair': cmdUnpair(); break;
     default:
-      console.log(`CodingPT PC 에이전트 v${pkg.version}`);
+      console.log(`CodingPT PC 에이전트 v${VERSION}`);
       console.log('사용법: node index.js <pair [--server URL] | run | status | setup | unpair>');
       process.exit(cmd ? 1 : 0);
   }
