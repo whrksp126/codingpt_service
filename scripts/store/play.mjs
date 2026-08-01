@@ -12,11 +12,13 @@
  * 사용:
  *   node play.mjs status                 트랙별 릴리스와 심사 상태
  *   node play.mjs watch [--interval 900] 상태 전이를 주기 감시(무인 폴링)
+ *   node play.mjs upload --aab <경로> [--track production] [--notes "..."] [--yes]
+ *                                        AAB 업로드 + 트랙 릴리스 + 커밋(=심사 제출)
  *   ... --pkg com.ghmate.heyvoca          다른 앱 대상(같은 서비스계정에 권한이 있으면)
  *
- * 안전 규율: 조회만 한다. 업로드·트랙 변경·게시는 되돌리기 어려우므로 여기 넣지 않았다.
- *  (넣게 되면 commit 에 반드시 `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 를 명시할 것 —
- *   기본값 CANCEL_IN_REVIEW_AND_SUBMIT 은 **진행 중인 심사를 취소하고 대기열 순번을 잃는다.**)
+ * 안전 규율: 조회는 자유. **바깥으로 나가는 행위(업로드·트랙 변경·제출)는 `--yes` 를 요구**한다.
+ *  ⚠ commit 에 반드시 `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 를 붙인다 — 기본값
+ *   `CANCEL_IN_REVIEW_AND_SUBMIT` 은 **진행 중인 심사를 취소하고 대기열 순번을 잃는다.**
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -128,7 +130,70 @@ async function cmdWatch(argv) {
   }
 }
 
+// ── 업로드 + 트랙 릴리스 + 커밋(=심사 제출) ───────────────────────────
+async function papi(token, pathname, init = {}) {
+  const res = await fetch(`${API}${pathname}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+  });
+  const text = await res.text();
+  let j = null; try { j = text ? JSON.parse(text) : null; } catch (_) { /* noop */ }
+  if (!res.ok) throw new Error(`Play ${res.status} ${pathname}\n  ${j?.error?.message || text.slice(0, 300)}`);
+  return j;
+}
+
+async function cmdUpload(argv) {
+  const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
+  const aab = arg('--aab');
+  const track = arg('--track') || 'production';
+  const notes = arg('--notes') || '';
+  if (!aab || !fs.existsSync(aab)) die('사용: upload --aab <파일경로> [--track production] [--notes "..."] [--yes]');
+  const size = fs.statSync(aab).size;
+  console.log(`앱: ${PKG}\n파일: ${aab} (${(size / 1048576).toFixed(1)}MB)\n트랙: ${track}`);
+  if (!argv.includes('--yes')) {
+    console.log('\n실제로 업로드·제출하려면 --yes 를 붙이세요. (심사 대기열에 들어갑니다)');
+    return;
+  }
+  const token = await accessToken();
+
+  // 1) edit 열기 — 사용자당 동시에 1개. 누가 Play Console 에서 손대면 무효화된다.
+  const edit = await papi(token, `/applications/${PKG}/edits`, { method: 'POST', body: '{}' });
+  const editId = edit.id;
+  console.log(`edit ${editId} 열림`);
+
+  try {
+    // 2) AAB 업로드 — 별도 upload 엔드포인트(uploadType=media).
+    const up = await fetch(
+      `https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PKG}/edits/${editId}/bundles?uploadType=media`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' }, body: fs.readFileSync(aab) },
+    );
+    const upText = await up.text();
+    if (!up.ok) throw new Error(`업로드 실패 ${up.status}: ${upText.slice(0, 300)}`);
+    const versionCode = JSON.parse(upText).versionCode;
+    console.log(`업로드 완료 — versionCode ${versionCode}`);
+
+    // 3) 트랙 릴리스 — status:'completed' = 승인되면 100% 게시.
+    await papi(token, `/applications/${PKG}/edits/${editId}/tracks/${track}`, {
+      method: 'PUT',
+      body: JSON.stringify({ track, releases: [{
+        versionCodes: [String(versionCode)],
+        status: 'completed',
+        ...(notes ? { releaseNotes: [{ language: 'ko-KR', text: notes }] } : {}),
+      }] }),
+    });
+    console.log(`트랙 ${track} 에 릴리스 구성`);
+
+    // 4) 커밋 = 심사 제출. ERROR_IF_IN_REVIEW 필수(기본값은 진행 중 심사를 취소한다).
+    await papi(token, `/applications/${PKG}/edits/${editId}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`, { method: 'POST' });
+    console.log(`\n✅ 제출 완료 — \`play.mjs watch\` 로 심사 상태를 감시하세요.`);
+  } catch (e) {
+    // 실패하면 edit 을 버린다 — 열린 채 두면 다음 시도가 "이미 edit 이 있다" 로 막힌다.
+    try { await papi(token, `/applications/${PKG}/edits/${editId}`, { method: 'DELETE' }); console.log('edit 정리됨'); } catch (_) { /* noop */ }
+    throw e;
+  }
+}
+
 const [, , cmd = 'status', ...argv] = process.argv;
-const run = { status: cmdStatus, watch: () => cmdWatch(argv) }[cmd];
-if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | watch [--interval 900]`);
+const run = { status: cmdStatus, watch: () => cmdWatch(argv), upload: () => cmdUpload(argv) }[cmd];
+if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | watch [--interval 900] | upload --aab <경로> [--yes]`);
 run().catch((e) => die(String(e.message || e)));

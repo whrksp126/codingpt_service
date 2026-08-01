@@ -56,15 +56,49 @@ cd codingpt_service/codingpt_pc && bash scripts/release-pc.sh --notes "한 줄 �
   (0.1.208 부터는 조용한 순간에 앱이 스스로 적용하므로, 사용자가 아무것도 안 해도 결국 최신이 된다.)
 - 검증: `curl -s "https://codingpt-back.ghmate.com/api/pc/update/darwin/aarch64/0.0.1"` 의 version.
 
-## 3. 모바일(스토어)
+## 3. 모바일(스토어) — 업로드·제출·출시까지 무인
+
+자격증명은 이미 갖춰져 있다(`scripts/store/README.md`). **사용자에게 다시 묻지 말 것.**
 
 ```bash
-bash codingpt_service/scripts/bump-version.sh app 0.3.0        # versionName+versionCode+MARKETING+BUILD 를 한 번에
-cd codingpt_app && npm run build:android-aab  # 서명된 AAB (prod env)
+export ASC_KEY_ID=N5ZVQFND28 ASC_ISSUER_ID=f1908b5f-e631-41e0-b723-3b46c7c13041
+
+bash codingpt_service/scripts/bump-version.sh app 0.3.0   # 4곳을 한 번에(하향·누락 거부)
+cd codingpt_app && git add -A && git commit -m "chore: release mobile 0.3.0" && git push
 ```
 
-자동화 범위는 `scripts/store/README.md` 참조(자격증명이 갖춰진 만큼만 자동화된다).
-자격증명이 없으면 사용자가 Play Console / Xcode Organizer 로 올린다.
+**Android** — 빌드 → 업로드 → 제출이 한 줄:
+```bash
+cd codingpt_app/android && ENVFILE=.env ./gradlew bundleRelease
+node codingpt_service/scripts/store/play.mjs upload \
+  --aab codingpt_app/android/app/build/outputs/bundle/release/app-release.aab \
+  --track production --notes "..." --yes
+node codingpt_service/scripts/store/play.mjs status     # IN_REVIEW 확인
+```
+
+**iOS** — 아카이브에 **API 키를 넘겨야** 인증서·프로파일이 자동 생성된다(Xcode 로 사람이 할 필요 없음):
+```bash
+cd codingpt_app/ios
+xcodebuild -workspace codingpt.xcworkspace -scheme codingpt -configuration Release \
+  -destination 'generic/platform=iOS' -archivePath build/codingpt.xcarchive \
+  -allowProvisioningUpdates \
+  -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8" \
+  -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" archive
+# → export IPA → altool 업로드 → 아래 3단계
+node codingpt_service/scripts/store/asc.mjs prepare 0.3.0 --notes "..."
+node codingpt_service/scripts/store/asc.mjs preflight     # 통과해야 제출
+node codingpt_service/scripts/store/asc.mjs submit --yes
+```
+
+**심사 감시 → 승인되면 출시**(양 스토어 모두 무인):
+```bash
+node codingpt_service/scripts/store/asc.mjs status   # PENDING_DEVELOPER_RELEASE 면 release --yes
+node codingpt_service/scripts/store/play.mjs status  # APPROVED_NOT_PUBLISHED / PUBLISHED
+node codingpt_service/scripts/store/asc.mjs release --yes
+```
+
+⚠ **거절되면 사유는 어느 스토어 API 로도 못 읽는다** — 사람이 콘솔에서 봐야 한다. 거절 상태를
+발견하면 추측으로 재제출하지 말고 사용자에게 알린다.
 
 **안내 버전은 손댈 필요가 없다** — back 이 양 스토어를 실조회해 자동 반영한다(iOS=iTunes lookup,
 Android=공개 페이지 파싱). `docker-compose.prod.yml` 의 `APP_LATEST_*` 는 조회가 막혔을 때의
