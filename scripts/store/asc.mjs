@@ -85,20 +85,30 @@ async function appId() {
 }
 
 // 심사 상태를 사람 말로. Apple 의 상태 문자열은 그대로 두면 뜻이 안 보인다.
+//  ⚠ enum 이 바뀌었다(실측 2026-08-01): 같은 버전이 구 필드 appStoreState=READY_FOR_SALE,
+//   신 필드 appVersionState=READY_FOR_DISTRIBUTION 으로 **동시에** 내려온다. 구 이름으로만
+//   매칭하면 어느 날 조용히 안 걸린다 → 신 필드를 우선하고 양쪽 이름을 모두 해석한다.
 const STATE_KO = {
   PREPARE_FOR_SUBMISSION: '제출 준비 중(아직 심사 안 보냄)',
+  READY_FOR_REVIEW: '제출 준비 완료(아직 안 보냄)',
   WAITING_FOR_REVIEW: '심사 대기열',
   IN_REVIEW: '심사 중',
+  ACCEPTED: '승인됨',
   PENDING_DEVELOPER_RELEASE: '승인됨 — 출시 대기(내가 눌러야 나감)',
   PENDING_APPLE_RELEASE: '승인됨 — Apple 출시 대기',
-  PROCESSING_FOR_APP_STORE: '스토어 반영 처리 중',
-  READY_FOR_SALE: '게시됨',
+  WAITING_FOR_EXPORT_COMPLIANCE: '수출규정 답변 대기',
+  PROCESSING_FOR_APP_STORE: '스토어 반영 처리 중(구 이름)',
+  PROCESSING_FOR_DISTRIBUTION: '스토어 반영 처리 중',
+  READY_FOR_SALE: '게시됨(구 이름)',
+  READY_FOR_DISTRIBUTION: '게시됨',
   REJECTED: '거절됨',
   METADATA_REJECTED: '메타데이터 거절',
   DEVELOPER_REJECTED: '개발자가 철회',
   INVALID_BINARY: '바이너리 무효',
   REPLACED_WITH_NEW_VERSION: '새 버전으로 대체됨',
 };
+// 게시 완료로 볼 상태(구·신 이름 둘 다).
+const PUBLISHED = new Set(['READY_FOR_SALE', 'READY_FOR_DISTRIBUTION']);
 const ko = (s) => `${s}${STATE_KO[s] ? ` — ${STATE_KO[s]}` : ''}`;
 
 async function versions(appid) {
@@ -106,7 +116,8 @@ async function versions(appid) {
   return (r?.data || []).map((v) => ({
     id: v.id,
     version: v.attributes?.versionString,
-    state: v.attributes?.appStoreState || v.attributes?.appVersionState,
+    // appVersionState 가 정본(appStoreState 는 deprecated — 값 이름도 다르다).
+    state: v.attributes?.appVersionState || v.attributes?.appStoreState,
     created: v.attributes?.createdDate,
     releaseType: v.attributes?.releaseType,
   }));
@@ -118,7 +129,7 @@ async function cmdStatus() {
   const vs = await versions(app.id);
   if (!vs.length) { console.log('버전 없음'); return; }
   for (const v of vs) console.log(`  ${v.version.padEnd(8)} ${ko(v.state)}`);
-  const live = vs.find((v) => v.state === 'READY_FOR_SALE');
+  const live = vs.find((v) => PUBLISHED.has(v.state));
   const pend = vs.find((v) => v.state === 'PENDING_DEVELOPER_RELEASE');
   console.log('');
   if (live) console.log(`게시 중: ${live.version}`);

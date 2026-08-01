@@ -9,7 +9,7 @@
 |---|---|---|
 | App Store Connect API 키(.p8) | ✅ `~/.appstoreconnect/private_keys/AuthKey_N5ZVQFND28.p8` | — |
 | **ASC Issuer ID(UUID)** | ✅ `f1908b5f-e631-41e0-b723-3b46c7c13041` (2026-08-01 실호출 확인) | — |
-| Apple 배포 인증서 | ❌ 이 키체인엔 Development 만 | Archive 를 Xcode 로 해야 함 |
+| Apple 배포 인증서 | ❌ 이 키체인엔 Development 만 | **Xcode 없이도 생성 가능** — `openssl` 로 CSR 만들어 `POST /v1/certificates` (Team 키 한정) |
 | Android 서명 키스토어 | ✅ `codingpt_app/android/app/release-key.keystore` | — |
 | **Play 서비스계정 JSON** | ❌ 없음 | Play 업로드·상태조회 전부 수동 |
 
@@ -40,7 +40,14 @@ node codingpt_service/scripts/store/asc.mjs status    # 버전별 심사 상태(
 node codingpt_service/scripts/store/asc.mjs builds     # 업로드된 빌드 처리 상태
 node codingpt_service/scripts/store/asc.mjs watch      # 상태 전이를 주기 감시(무인 폴링)
 node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버전을 출시
+
+node codingpt_service/scripts/store/play.mjs status    # Play 트랙별 심사 상태
+node codingpt_service/scripts/store/play.mjs watch     # Play 상태 전이 감시
 ```
+
+⚠ **상태 enum 이 바뀌었다(실측)**: 같은 버전이 구 필드 `appStoreState=READY_FOR_SALE` 와
+신 필드 `appVersionState=READY_FOR_DISTRIBUTION` 로 **동시에** 내려온다. 구 이름으로만 매칭하면
+어느 날 조용히 안 걸린다 — `asc.mjs` 는 신 필드를 우선하고 양쪽 이름을 모두 해석한다.
 
 `status` 가 보여주는 상태와 뜻:
 
@@ -66,22 +73,31 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 | 트랙·단계적 출시 | ✅ API | ⛔→✅ 서비스계정(`edits.tracks`, userFraction) |
 | 리스팅·스크린샷·릴리스 노트 | ✅ API | ⛔→✅ 서비스계정(`edits.listings/images`) |
 | **심사 제출** | ✅ API 로 가능하지만 **의도적으로 자동화 안 함** | ⛔→✅ 서비스계정(`edits.commit`) |
-| **심사 상태 조회** | ✅ **자동**(`status`/`watch`) | ❌ **API 자체가 없음**(아래 참조) |
-| **승인 후 출시** | ✅ **자동**(`release --yes`) | ✅ 단계적 출시 %로 대체(별도 출시 버튼 없음) |
+| **심사 상태 조회** | ✅ **자동**(`asc.mjs status/watch`) | ✅ **자동**(`play.mjs status/watch` — 2026 신규 API) |
+| **승인 후 출시** | ✅ **자동**(`release --yes`) | ✅ 트랙 `status: completed` 로 게시 |
 | **게시 버전 조회**(안내값 자동화) | ✅ **자동**(iTunes lookup) | ✅ **자동**(공개 페이지 파싱 — 보조) |
-| 콘텐츠 등급 설문 | ⛔ 사람(최초 1회) | ❌ **API 없음**(영구 GUI) |
-| 데이터 안전 양식 | ⛔ 사람 | ✅ CSV 를 API 로 갱신 가능(최초 1회는 GUI → CSV 내보내기) |
+| 연령/콘텐츠 등급 | ✅ `ageRatingDeclarations` API | ❌ IARC 는 영구 GUI |
+| 개인정보 양식 | ❌ App Privacy 는 API 없음 | ✅ `dataSafety` 에 CSV 전송(최초 1회만 GUI) |
 | 앱 콘텐츠 선언(광고·타깃연령·건강 등) | ⛔ 사람 | ❌ **API 없음**(영구 GUI) |
 
-### ⚠ Play 는 심사 상태를 API 로 알 수 없다 (Apple 과 결정적 차이)
+### ★ Play 에도 심사 상태 API 가 있다 (2026 신규 — 오래된 자료는 전부 "불가능" 이라 말한다)
 
-`androidpublisher` v3 와 Play Developer Reporting API 양쪽 모두에 리뷰/정책 상태 필드가 **0건**이다
-(`reviewStatus`/`policy`/`rejection` 전부 없음). `TrackRelease.status` 는 배포 상태
-(`draft|inProgress|halted|completed`)일 뿐 심사 상태가 아니다. 게다가 거절 후 재제출은 Google 이
-API 문서에서 **"Play Console UI 에서 명시적으로 보내야 한다"** 고 못 박는다(`changesNotSentForReview`).
+`GET /applications/{pkg}/tracks/{track}/releases` 가 `releaseLifecycleState` 를 준다.
+**라이브 디스커버리 문서(rev 20260730)에서 직접 확인**했다 — `TrackRelease.status`(배포 상태:
+draft/inProgress/halted/completed)와는 **다른 필드**라, 그걸로 grep 하면 없다고 오판한다.
 
-→ **"승인되면 자동 출시" 루프는 Apple 에서만 성립한다.** Play 는 거절 확인·재제출이 영구 수동이고,
-게시 여부는 우리가 하는 것처럼 **공개 페이지의 버전을 폴링**해 사후 확인하는 게 최선이다.
+```
+DRAFT · NOT_SENT_FOR_REVIEW · IN_REVIEW · APPROVED_NOT_PUBLISHED · NOT_APPROVED · PUBLISHED
+```
+
+→ **"승인되면 자동 출시" 루프가 양 스토어 모두 성립한다.** 다만 **거절 사유는 어느 쪽 API에도 없다** —
+자동화가 알 수 있는 건 "거절됐다" 까지고 "왜" 는 사람이 콘솔에서 봐야 한다.
+
+### 🔴 Play 커밋 시 필수 파라미터
+
+`edits.commit` 의 `changesInReviewBehavior` 기본값이 `CANCEL_IN_REVIEW_AND_SUBMIT` 라
+**진행 중인 심사를 취소하고 대기열 순번을 잃는다.** 자동화에서는 반드시 `ERROR_IF_IN_REVIEW` 를
+명시할 것(디스커버리 문서에서 enum 실측 확인).
 
 ### Play 를 자동화하려면(사용자 1회 작업)
 
