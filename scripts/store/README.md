@@ -57,16 +57,31 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 
 ## 자동화 가능 범위 (양 스토어)
 
+2026-08 기준, Play 는 `androidpublisher` v3 디스커버리 문서(rev 20260730)를 직접 훑어 확인했다.
+
 | 단계 | Apple | Google Play |
 |---|---|---|
 | 빌드 생성 | ✅ `xcodebuild archive`(단, **배포 인증서 필요** → 현재 Xcode 로) | ✅ `gradlew bundleRelease`(서명키 있음) |
-| 업로드 | ✅ `xcrun altool --upload-app`(ASC 키로) | ⛔ 서비스계정 JSON 필요 |
-| 릴리스 노트 입력 | ✅ API | ⛔ 서비스계정 필요 |
+| 업로드 | ✅ `xcrun altool --upload-app`(ASC 키로) | ⛔→✅ 서비스계정만 있으면 자동(`edits.bundles.upload`) |
+| 트랙·단계적 출시 | ✅ API | ⛔→✅ 서비스계정(`edits.tracks`, userFraction) |
+| 리스팅·스크린샷·릴리스 노트 | ✅ API | ⛔→✅ 서비스계정(`edits.listings/images`) |
+| **심사 제출** | ✅ API 로 가능하지만 **의도적으로 자동화 안 함** | ⛔→✅ 서비스계정(`edits.commit`) |
+| **심사 상태 조회** | ✅ **자동**(`status`/`watch`) | ❌ **API 자체가 없음**(아래 참조) |
+| **승인 후 출시** | ✅ **자동**(`release --yes`) | ✅ 단계적 출시 %로 대체(별도 출시 버튼 없음) |
 | **게시 버전 조회**(안내값 자동화) | ✅ **자동**(iTunes lookup) | ✅ **자동**(공개 페이지 파싱 — 보조) |
-| **심사 제출** | ✅ API 로 가능하지만 **의도적으로 자동화 안 함** | ⛔ 서비스계정 필요 |
-| **심사 상태 조회** | ✅ **자동** (`status`/`watch`) | ⛔ 서비스계정 필요 |
-| **승인 후 출시** | ✅ **자동** (`release --yes`) | ⛔ 서비스계정 필요 |
-| 스크린샷·개인정보 설문 | ⛔ 사람(최초 1회, 이후 재사용) | ⛔ 사람 |
+| 콘텐츠 등급 설문 | ⛔ 사람(최초 1회) | ❌ **API 없음**(영구 GUI) |
+| 데이터 안전 양식 | ⛔ 사람 | ✅ CSV 를 API 로 갱신 가능(최초 1회는 GUI → CSV 내보내기) |
+| 앱 콘텐츠 선언(광고·타깃연령·건강 등) | ⛔ 사람 | ❌ **API 없음**(영구 GUI) |
+
+### ⚠ Play 는 심사 상태를 API 로 알 수 없다 (Apple 과 결정적 차이)
+
+`androidpublisher` v3 와 Play Developer Reporting API 양쪽 모두에 리뷰/정책 상태 필드가 **0건**이다
+(`reviewStatus`/`policy`/`rejection` 전부 없음). `TrackRelease.status` 는 배포 상태
+(`draft|inProgress|halted|completed`)일 뿐 심사 상태가 아니다. 게다가 거절 후 재제출은 Google 이
+API 문서에서 **"Play Console UI 에서 명시적으로 보내야 한다"** 고 못 박는다(`changesNotSentForReview`).
+
+→ **"승인되면 자동 출시" 루프는 Apple 에서만 성립한다.** Play 는 거절 확인·재제출이 영구 수동이고,
+게시 여부는 우리가 하는 것처럼 **공개 페이지의 버전을 폴링**해 사후 확인하는 게 최선이다.
 
 ### Play 를 자동화하려면(사용자 1회 작업)
 
@@ -75,17 +90,21 @@ node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버�
 3. Play Console 에서 그 서비스계정에 **앱 릴리스 권한** 부여
 4. JSON 을 `~/other/secrets/play/` 에 두고 알려주기
 
-그러면 업로드·트랙 승격·단계적 출시·상태 조회까지 Apple 과 같은 수준으로 자동화된다.
+그러면 **업로드·트랙 승격·단계적 출시·리스팅 갱신**이 자동화된다(심사 상태 조회는 여전히 불가).
+우리 앱은 이미 게시된 상태라 "최초 1회 수동 업로드" 전제도 이미 충족돼 있다.
 
 ## 무인 릴리스 루프(자격증명이 갖춰졌을 때)
 
 ```
-버전 범프 → 빌드 → 업로드 → (사람: 심사 제출 1클릭)
-   → watch 가 승인 감지 → release --yes → READY_FOR_SALE 확인
-   → 안내 버전은 자동 반영(수동 갱신 불필요) → verify-deploy.sh
+[Apple]  버전 범프 → 빌드 → 업로드 → (사람: 심사 제출 1클릭)
+           → watch 가 승인 감지 → release --yes → READY_FOR_SALE 확인
+[Play]   버전 범프 → 빌드 → (서비스계정 있으면) 업로드+롤아웃 자동
+           → 심사 상태는 조회 불가 → 공개 페이지 버전 폴링으로 게시 확인
+[공통]   안내 버전은 자동 반영(수동 갱신 불필요) → verify-deploy.sh
 ```
 
-이 중 사람이 남는 건 **심사 제출 1회**뿐이다(그리고 Apple 이 요구하는 배포 인증서 최초 생성).
+사람이 남는 것: Apple 은 **심사 제출 1클릭 + 배포 인증서 최초 생성**, Play 는 **거절 시 확인·재제출**
+(영구 수동) + 콘텐츠 등급·앱 콘텐츠 선언(최초 1회, 이후 재사용).
 
 ## 함정
 
