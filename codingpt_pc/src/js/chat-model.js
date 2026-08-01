@@ -36,6 +36,44 @@ export const CHAT = {
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;
 
+// ── 에이전트 권한 모드 카탈로그(양 플랫폼 동일 — app 미러: chatModel.ts AGENT_MODES) ──────────
+// TUI 에서 shift+tab 으로만 바꿀 수 있는 그 모드다. 채팅에서는 컴포저 알약 → 목록으로 고르고,
+//  데몬이 TUI 를 대신 순환시킨다(runner-core/cpt-server.js chatMode).
+//  · label = **TUI 원문 그대로**(사용자 확정 2026-08-01) — 화면과 채팅이 같은 단어를 쓰게. 번역 금지.
+//  · desc  = 한 줄 설명(우리 문장) — 원문 라벨만으로는 무엇이 자동인지 알 수 없어서 곁들인다.
+//  · bypassPermissions 는 `--dangerously-skip-permissions` 로 띄운 세션에만 있으므로 목록에서
+//    숨긴다(hidden). 지금 그 모드면 현재 항목으로만 보인다 — 없는 선택지를 눌러 실패시키지 않는다.
+export const AGENT_MODES = [
+  { id: "default", symbol: "⏸", label: "manual mode on", desc: "매번 승인받고 진행" },
+  { id: "acceptEdits", symbol: "⏵⏵", label: "accept edits on", desc: "파일 편집은 자동 수락" },
+  { id: "plan", symbol: "⏸", label: "plan mode on", desc: "계획만, 변경 안 함" },
+  { id: "auto", symbol: "⏵⏵", label: "auto mode on", desc: "안전한 작업은 자동 진행" },
+  { id: "bypassPermissions", symbol: "⏵⏵", label: "bypassing permissions", desc: "모든 승인 건너뜀", hidden: true },
+];
+
+/** 모드 id → 카탈로그 항목(모르는 id 는 null — 데몬이 새 모드를 보내도 화면이 깨지지 않게). */
+export function agentModeOf(id) {
+  const s = String(id == null ? "" : id);
+  return AGENT_MODES.find((m) => m.id === s) || null;
+}
+
+/** 알약/목록에 쓸 표시값 — 데몬이 준 label/symbol 을 우선하고, 없으면 카탈로그로 메운다. */
+export function agentModeView(mode) {
+  if (!mode || !mode.id) return null;
+  const cat = agentModeOf(mode.id);
+  return {
+    id: mode.id,
+    symbol: mode.symbol || (cat && cat.symbol) || "",
+    label: mode.label || (cat && cat.label) || mode.id,
+    desc: (cat && cat.desc) || "",
+  };
+}
+
+/** 목록에 그릴 선택지 — 숨김 모드는 "지금 그 모드일 때"만 포함한다. */
+export function agentModeChoices(currentId) {
+  return AGENT_MODES.filter((m) => !m.hidden || m.id === currentId);
+}
+
 // ── 컴포저 순수 규칙(양 플랫폼 동일 — app 미러: src/workspace/chat/composer.ts) ────────────────
 // 전송 가능 판정. 공백/개행만 있는 입력은 **보내지 않는다**(TUI 에 빈 Enter 를 넣으면 에이전트가
 //  프롬프트를 한 번 삼켜서 사용자는 "먹혔다"고 느낀다 — 실측 사고 계열).

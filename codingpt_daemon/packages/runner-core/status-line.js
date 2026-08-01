@@ -30,7 +30,77 @@ function stripAnsi(s) {
 }
 
 const RULE_RE = /^\s*─{8,}\s*$/;
-const CLAUDE_FOOTER_RE = /(⏵⏵|-- INSERT --|\? for shortcuts|shift\+tab to cycle|plan mode on|bypassing permissions)/;
+// 푸터(모드 표시줄) 식별자 — claude 는 컴포저 아래 한 **행**(Ink flex row)에 vim 표시(-- INSERT --) +
+//  모드 알약(⏸ manual/plan · ⏵⏵ accept edits/auto) + 힌트를 나란히 그린다. 2.1.220 실측 라벨:
+//  `⏸ manual mode on` / `⏵⏵ accept edits on` / `⏸ plan mode on` / `⏵⏵ auto mode on` / `bypassing permissions`.
+const CLAUDE_FOOTER_RE = /(⏵⏵|⏸|--\s*(INSERT|NORMAL|VISUAL|REPLACE)|\? for shortcuts|shift\+tab to cycle|mode on|bypassing permissions|for agents)/;
+// 줄바꿈 부스러기 — 위 푸터 행이 **터미널 폭보다 길면 Ink 가 그 행을 감싸서** 꼬리(대개 vim 표시의
+//  닫는 `--`)만 다음 줄에 남는다(2026-08-01 48컬럼 실측: `  --` 한 줄). 내용이 아니므로 미러하지 않는다.
+const JUNK_RE = /^[-–—─·…\s]*$/;
+
+// ── 에이전트 모드(권한 모드) — 채팅 알약의 원천 ────────────────────────────────
+// claude 2.1.220 실측(격리 tmux, 40·60컬럼 모두 동일): shift+tab 이 아래 순서로 **한 방향 순환**하고
+//  푸터에 라벨이 그대로 뜬다. 폭이 좁아도 **라벨은 안 잘린다**(힌트 쪽이 먼저 잘림) → 화면 파싱이 안전.
+//  순환 순서는 세션 조건에 따라 달라진다(bypass 는 --dangerously-skip-permissions 세션에서만 낀다)
+//  → 어디에도 순서를 박지 않는다. 조작은 "라벨 읽고 → BTab → 다시 읽기" 반복(cpt-server.chatMode).
+const CLAUDE_MODES = [
+  // id            푸터 라벨 판별            표시용 라벨(TUI 원문 그대로 — 사용자 확정 2026-08-01)
+  { id: 'bypassPermissions', re: /bypassing permissions/, label: 'bypassing permissions', symbol: '⏵⏵' },
+  { id: 'acceptEdits', re: /accept edits on/, label: 'accept edits on', symbol: '⏵⏵' },
+  { id: 'plan', re: /plan mode on/, label: 'plan mode on', symbol: '⏸' },
+  { id: 'auto', re: /auto mode on/, label: 'auto mode on', symbol: '⏵⏵' },
+  { id: 'default', re: /manual mode on/, label: 'manual mode on', symbol: '⏸' },
+];
+
+/** 푸터 텍스트(ANSI 제거 여부 무관) → { id, label, symbol } | null. 순수 함수 — 테스트 정본. */
+function parseMode(footerText) {
+  const plain = stripAnsi(footerText || '');
+  if (!plain) return null;
+  for (const m of CLAUDE_MODES) {
+    if (m.re.test(plain)) return { id: m.id, label: m.label, symbol: m.symbol };
+  }
+  return null;
+}
+
+/** 화면 → 현재 모드({id,label,symbol}) | null. claude 전용(codex 는 모드 개념이 달라 미지원). */
+function extractMode(screen, agent) {
+  if (agent !== 'claude') return null;
+  const footer = claudeFooterOf(screen);
+  return footer ? parseMode(footer) : null;
+}
+
+/** 화면 → claude 푸터 행(원문) | null. 모드 파싱과 statusline 분리가 같은 규칙을 쓰게 하는 지점. */
+function claudeFooterOf(screen) {
+  const parts = splitClaude(screen);
+  return parts ? parts.footer : null;
+}
+
+/** claude 화면 → { status:[], footer:string|null } | null(구분선 없음 = 판정 불가). */
+function splitClaude(screen) {
+  if (!screen) return null;
+  const lines = String(screen).split('\n').map((l) => l.replace(/\s+$/, ''));
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (!lines.length) return null;
+  let ri = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (RULE_RE.test(stripAnsi(lines[i]))) { ri = i; break; }
+  }
+  if (ri < 0) return null;
+  // 푸터는 **항상 마지막**이다(statusLine 스크립트 출력 위 → 푸터 행 → 그 행의 줄바꿈 꼬리).
+  //  그래서 "첫 푸터 표식이 나온 줄부터 끝까지 = 푸터"로 자른다. 줄 단위로 푸터를 걸러내던 옛 규칙은
+  //  표식이 없는 **꼬리 줄(`--`)을 statusline 으로 오인**해 채팅에 그대로 흘렸다(사용자 신고).
+  const status = [];
+  let footer = null;
+  for (let i = ri + 1; i < lines.length; i++) {
+    const plain = stripAnsi(lines[i]);
+    if (!plain.trim()) continue;
+    if (footer == null && CLAUDE_FOOTER_RE.test(plain)) { footer = lines[i].slice(0, MAX_LINE_BYTES); continue; }
+    if (footer != null) continue;                                  // 푸터 이후(꼬리)는 전부 버린다
+    if (JUNK_RE.test(plain)) continue;                             // 부스러기 방어(푸터 표식이 꼬리에 실린 경우)
+    if (status.length < CLAUDE_MAX_LINES) status.push(lines[i].slice(0, MAX_LINE_BYTES));
+  }
+  return { status, footer };
+}
 
 /** 화면(ANSI 포함) → 미러할 statusline 줄 목록. 추출 불가면 null(이전 값 유지). 순수 함수 — 테스트 정본. */
 function extractStatusLines(screen, agent) {
@@ -53,28 +123,17 @@ function extractStatusLines(screen, agent) {
     return out.length ? out : null;
   }
 
-  // claude — 마지막 구분선 뒤 구간.
-  let ri = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (RULE_RE.test(stripAnsi(lines[i]))) { ri = i; break; }
-  }
-  if (ri < 0) return null;
-  const status = [];
-  let footer = null;
-  for (let i = ri + 1; i < lines.length; i++) {
-    const plain = stripAnsi(lines[i]);
-    if (!plain.trim()) continue;
-    if (CLAUDE_FOOTER_RE.test(plain)) { footer = lines[i].slice(0, MAX_LINE_BYTES); continue; }
-    if (status.length < CLAUDE_MAX_LINES) status.push(lines[i].slice(0, MAX_LINE_BYTES));
-  }
-  if (status.length) return status;
-  return footer ? [footer] : null;
+  // claude — 마지막 구분선 뒤 구간(모드 파싱과 같은 분리 규칙을 쓴다).
+  const parts = splitClaude(screen);
+  if (!parts) return null;
+  if (parts.status.length) return parts.status;
+  return parts.footer ? [parts.footer] : null;
 }
 
 function watch(chatId, { cwdRel, tid, agent } = {}) {
   if (!chatId || !Number.isInteger(tid)) return;
   if (agent !== 'claude' && agent !== 'codex') return; // 추출 규칙이 있는 에이전트만
-  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null });
+  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null, lastMode: null });
   ensureTimer();
   // 첫 페인트를 틱까지 기다리지 않는다 — 즉시 1회.
   pollOne(chatId).catch(() => { /* noop */ });
@@ -102,24 +161,40 @@ async function pollOne(chatId) {
   let screen = null;
   try { screen = await ptyLib.runTmux(['capture-pane', '-e', '-p', '-t', target]); }
   catch (_) { return; } // 터미널 없음 — tail 수명은 transcript 가 관리, 여기선 침묵
+  // 모드는 statusline 과 **독립**으로 갱신한다 — 커스텀 statusline 이 있으면 푸터(=모드 원천)는
+  //  미러 대상에서 빠지므로, 여기서 뽑아 두지 않으면 채팅 알약이 영영 갱신되지 않는다.
+  const mode = extractMode(screen, w.agent);
+  const modeKey = mode ? mode.id : null;
+  const modeChanged = mode != null && modeKey !== w.lastMode;
+  if (modeChanged) w.lastMode = modeKey;
   const lines = extractStatusLines(screen, w.agent);
-  if (!lines) return;                       // 추출 불가 — 이전 값 유지(깜빡임 방지)
-  const key = lines.join('\n');
-  if (key === w.last) return;
-  w.last = key;
-  if (emitFn) emitFn(chatId, lines);
+  const key = lines ? lines.join('\n') : null;
+  const linesChanged = key != null && key !== w.last;
+  if (linesChanged) w.last = key;
+  if (!linesChanged && !modeChanged) return;  // 변화 없음(추출 불가면 이전 값 유지 — 깜빡임 방지)
+  if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w));
+}
+
+/** watch 엔트리의 마지막 모드 → 와이어 객체({id,label,symbol}) | null. */
+function modeOf(w) {
+  if (!w || !w.lastMode) return null;
+  const m = CLAUDE_MODES.find((x) => x.id === w.lastMode);
+  return m ? { id: m.id, label: m.label, symbol: m.symbol } : null;
 }
 
 /** transcript.js 가 push 이미터를 주입한다(순환 require 회피). */
 function setEmitter(fn) { emitFn = typeof fn === 'function' ? fn : null; }
 
-/** chat.open 응답용 — 즉시 1회 추출(캐시가 있으면 그것). */
+/** chat.open 응답용 — 즉시 1회 추출(캐시가 있으면 그것). → { lines, mode } | null */
 async function snapshotFor(chatId) {
   const w = watches.get(chatId);
   if (!w) return null;
-  if (w.last != null) return w.last.split('\n');
-  try { await pollOne(chatId); } catch (_) { /* noop */ }
-  return w.last != null ? w.last.split('\n') : null;
+  if (w.last == null && w.lastMode == null) {
+    try { await pollOne(chatId); } catch (_) { /* noop */ }
+  }
+  const lines = w.last != null ? w.last.split('\n') : null;
+  const mode = modeOf(w);
+  return lines || mode ? { lines, mode } : null;
 }
 
 function stop() {
@@ -127,4 +202,8 @@ function stop() {
   watches.clear();
 }
 
-module.exports = { watch, unwatch, setEmitter, snapshotFor, stop, _extract: extractStatusLines, _watches: watches };
+module.exports = {
+  watch, unwatch, setEmitter, snapshotFor, stop,
+  parseMode, extractMode, MODE_IDS: CLAUDE_MODES.map((m) => m.id),
+  _extract: extractStatusLines, _watches: watches,
+};

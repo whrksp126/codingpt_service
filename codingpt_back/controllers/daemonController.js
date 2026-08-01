@@ -1369,6 +1369,13 @@ const chatAnswer = chatRpc('chat.answer', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid, expect: bOf(req).expect,
   answers: Array.isArray(bOf(req).answers) ? bOf(req).answers.slice(0, 8) : [],
 }), 30000);
+// POST /api/daemon/chat/mode  { cwd, tid, mode? } → { ok, mode:{id,label,symbol}, tid }
+//  에이전트 권한 모드(manual/accept edits/plan/auto/bypass) 조회·전환. mode 생략 = 현재값만 읽기.
+//  데몬이 TUI 를 shift+tab 으로 드라이브하고 화면으로 검증한다(순환이라 최대 한 바퀴 = 여유 타임아웃).
+const chatMode = chatRpc('chat.mode', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid,
+  mode: typeof bOf(req).mode === 'string' ? bOf(req).mode : undefined,
+}), 20000);
 
 // ── BYO 로그인(M5 Slice2) — 활성 러너(주로 클라우드 컨테이너)에서 사용자 claude 계정 로그인 ──
 // 크레덴셜(토큰)은 그 러너의 CLAUDE_CONFIG_DIR 에만 안착. 우리는 인증 URL/코드만 중계한다.
@@ -1580,7 +1587,7 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

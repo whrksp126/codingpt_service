@@ -414,6 +414,15 @@ function dispatchRpc(ws, method, params, ok, fail) {
       .then(ok).catch(fail);
     return;
   }
+  // chat.mode — 에이전트 권한 모드(manual/accept edits/plan/auto…) 조회·전환. chat.input/answer 과
+  //  같은 이유로 transcript(읽기 전용)가 아니라 tmux 를 만지는 cpt-server 구현으로 보낸다.
+  if (method === 'chat.mode') {
+    const p = params || {};
+    Promise.resolve()
+      .then(() => cptServer.chatMode({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, mode: p.mode }))
+      .then(ok).catch(fail);
+    return;
+  }
   if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }

@@ -23,7 +23,7 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
-  composerHasText, agentDisplayName,
+  composerHasText, agentDisplayName, agentModeView, agentModeChoices,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -83,6 +83,9 @@ export class ChatView {
     //  TUI 반영은 전송 시 한 번(칩→인용 경로 직렬화, 데몬이 경로 조각 paste 로 [Image #N] 변환).
     this._attach = [];
     this._attCache = new Map(); // 트랜스크립트 첨부(chatId:seq:idx → Promise) — 메시지 칩 썸네일/미리보기 공용
+    // 에이전트 권한 모드({id,label,symbol}) — chat.open 응답 + status_line push 로 갱신, 알약이 그린다.
+    this._mode = null;
+    this._modeBusy = false;   // 전환 요청 진행 중(중복 클릭·역주행 방지)
     _live.add(this);
   }
 
@@ -105,6 +108,9 @@ export class ChatView {
           <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph="메시지 보내기"></div>
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
+            <button class="chat-mode hidden" type="button" title="에이전트 모드 (TUI 의 shift+tab)">
+              <span class="chat-mode-sym"></span><span class="chat-mode-label"></span><span class="chat-mode-caret">▾</span>
+            </button>
             <span class="chat-ctl-gap"></span>
             <button class="chat-send" type="button" title="보내기 (Enter)" disabled>${icons.arrowUp({ size: 17 })}</button>
           </div>
@@ -121,6 +127,9 @@ export class ChatView {
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
+    this.modeEl = el.querySelector(".chat-mode");
+    this.modeEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleModeMenu(); });
+    this._setMode(this._mode);
 
     this.inputEl.textContent = String(this.ctx.getDraft?.() || "");
     this._syncComposer();
@@ -303,6 +312,7 @@ export class ChatView {
           this._noSessionAt = Date.now();
           this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
           this._setStatusLines([]); // statusline 잔상도 함께
+          this._setMode(r.statusMode || null); // 모드 알약도 새 대상 기준(대화가 없어도 TUI 는 돌 수 있다)
           this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
           this._renderBlank();
           return;
@@ -317,6 +327,7 @@ export class ChatView {
         this._lastSeq = Number(r.headSeq) || 0;
         this._openFailed = null;
         this._setStatusLines(r.statusLines || []); // 새 대상의 statusline(없으면 이전 잔상 제거)
+        this._setMode(r.statusMode || null);       // 모드 알약(claude 만 — 없으면 숨김)
         this._ingest(r.messages || [], { snapshot: true });
         this._setBanner("");
       } catch (e) {
@@ -345,7 +356,7 @@ export class ChatView {
     this._lastPushAt = Date.now();
     const ctl = frame.control && frame.control.kind;
     // TUI statusline 미러(데몬 status-line.js) — chatId 정확 일치로만 도달한다(sessionId 미탑재).
-    if (ctl === "status_line") { this._setStatusLines(frame.control.lines || []); return; }
+    if (ctl === "status_line") { this._applyStatusFrame(frame.control); return; }
     // push 가 왔다 = 이 터미널에서 대화가 (다시) 살아 있다는 신호 → noSession 확정을 해제한다(트리거 ②).
     if (this._noSession) {
       this._noSession = null;
@@ -1370,6 +1381,101 @@ export class ChatView {
       .join("");
     this.statusEl.classList.remove("hidden");
   }
+  // statusline push(control) 반영 — 줄(미러)과 모드(알약)는 **독립 필드**다(커스텀 statusline 이
+  //  있으면 모드가 실린 푸터는 미러 대상에서 빠지기 때문).
+  //  ★ 전환 요청 중에는 모드를 무시한다: 데몬 폴링(3s)이 전환 **직전** 화면을 들고 있다가 도착하면
+  //   방금 바꾼 값이 옛 모드로 한 번 되돌아 그려진다(앱도 같은 이유로 에코 가드를 둔다).
+  _applyStatusFrame(control) {
+    this._setStatusLines((control && control.lines) || []);
+    if (!this._modeBusy && control && control.mode) this._setMode(control.mode);
+  }
+
+  // ── 에이전트 권한 모드 알약 + 목록 ─────────────────────────────────────────────
+  // TUI 에서 shift+tab 으로만 바꿀 수 있는 모드를, 채팅에서도 **보이고 바꿀 수 있게** 한다
+  //  (2026-08-01 사용자 요청). 표시 라벨은 TUI 원문 그대로 — 화면과 채팅이 같은 단어를 쓴다.
+  //  전환은 데몬이 그 터미널에 shift+tab 을 눌러 주고 화면으로 검증한다(chat.mode).
+  _setMode(mode) {
+    const view = agentModeView(mode);
+    this._mode = view ? { id: view.id, label: view.label, symbol: view.symbol } : null;
+    if (!this.modeEl) return;
+    if (!view) { this.modeEl.classList.add("hidden"); this._closeModeMenu(); return; }
+    this.modeEl.classList.remove("hidden");
+    this.modeEl.querySelector(".chat-mode-sym").textContent = view.symbol || "";
+    this.modeEl.querySelector(".chat-mode-label").textContent = view.label;
+    this.modeEl.dataset.mode = view.id;
+    if (this.modeMenuEl) this._renderModeMenu();
+  }
+
+  _toggleModeMenu() {
+    if (this.modeMenuEl) { this._closeModeMenu(); return; }
+    if (!this._mode) return;
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu";
+    this.el.querySelector(".chat-composer").appendChild(wrap);
+    this.modeMenuEl = wrap;
+    this._renderModeMenu();
+    wrap.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-mode-row");
+      if (row && !row.classList.contains("busy")) this._pickMode(row.dataset.mode);
+    });
+    // 바깥 클릭으로 닫기 — 이 클릭 자체가 닫지 않도록 다음 틱에 등록(`+` 피커와 같은 관례).
+    this._modeCloser = (e) => { if (!wrap.contains(e.target) && !this.modeEl.contains(e.target)) this._closeModeMenu(); };
+    setTimeout(() => document.addEventListener("mousedown", this._modeCloser, true), 0);
+  }
+
+  _closeModeMenu() {
+    if (this._modeCloser) document.removeEventListener("mousedown", this._modeCloser, true);
+    this._modeCloser = null;
+    this.modeMenuEl?.remove();
+    this.modeMenuEl = null;
+  }
+
+  _renderModeMenu() {
+    if (!this.modeMenuEl) return;
+    const cur = this._mode ? this._mode.id : null;
+    this.modeMenuEl.innerHTML = agentModeChoices(cur).map((m) => {
+      const on = m.id === cur;
+      const busy = this._modeBusy;
+      return `<div class="chat-mode-row${on ? " on" : ""}${busy ? " busy" : ""}" data-mode="${m.id}">` +
+        `<span class="chat-mode-row-sym">${escapeHtml(m.symbol)}</span>` +
+        `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
+        `<span class="chat-mode-row-desc">${escapeHtml(m.desc)}</span></span>` +
+        `<span class="chat-mode-row-mark">${on ? "✓" : ""}</span></div>`;
+    }).join("") + `<div class="chat-mode-hint">TUI 에서는 shift+tab 으로 순환합니다</div>`;
+  }
+
+  async _pickMode(id) {
+    if (!id || this._modeBusy) return;
+    if (this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
+    const tid = this._tid;
+    if (tid == null) return;
+    this._modeBusy = true;
+    this._renderModeMenu();
+    this.modeEl?.classList.add("busy");
+    try {
+      const r = await api.chatMode({
+        cwd: this._cwd(), tid, mode: id,
+        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
+      });
+      if (this._disposed) return;
+      this._setMode((r && r.mode) || null);
+      this._closeModeMenu();
+      this._setBanner("");
+    } catch (e) {
+      if (this._disposed) return;
+      const msg = String(e || "");
+      // 실패를 조용히 삼키지 않는다 — 모드가 안 바뀐 채로 "바꿨다"고 보이는 것이 최악이다.
+      if (/MODE_BLOCKED/.test(msg)) this._setBanner("지금은 승인/질문 다이얼로그가 떠 있어 모드를 바꿀 수 없어요.", "warn");
+      else if (/MODE_UNREACHABLE/.test(msg)) this._setBanner("이 세션에서는 그 모드로 바꿀 수 없어요.", "warn");
+      else if (/MODE_UNKNOWN/.test(msg)) this._setBanner("터미널 화면에서 모드를 읽지 못했어요 — TUI 를 확인해 주세요.", "warn");
+      else this._setBanner("모드를 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.", "warn");
+    } finally {
+      this._modeBusy = false;
+      this.modeEl?.classList.remove("busy");
+      if (this.modeMenuEl) this._renderModeMenu();
+    }
+  }
+
   _setBanner(msg, tone) {
     if (!this.bannerEl) return;
     const on = !!msg;
@@ -1387,6 +1493,7 @@ export class ChatView {
     this._disposed = true;
     this._stopPoll();
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
+    this._closeModeMenu();
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,
     //  이 창을 닫으면 같은 대화를 보고 있는 다른 기기(폰)의 chatId 까지 무효화된다(그쪽은 CHAT_GONE →

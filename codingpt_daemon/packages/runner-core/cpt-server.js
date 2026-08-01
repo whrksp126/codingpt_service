@@ -1420,6 +1420,62 @@ async function permissionAnswer({ cwd, tid, pick, expect, text, flow } = {}) {
   return { ...r, tid: win };
 }
 
+// ── 에이전트 모드 전환(chat.mode) — 채팅 알약 → TUI shift+tab ────────────────────
+// claude 는 권한 모드를 **shift+tab 한 방향 순환**으로만 바꾼다(직접 지정 키/명령 없음, 2.1.220 실측).
+//  순환 순서는 세션 조건에 따라 달라지므로(bypass 는 --dangerously-skip-permissions 세션에서만 낀다)
+//  순서를 코드에 박지 않는다 — **화면의 라벨을 읽고 → BTab → 다시 읽기**를 목표가 나올 때까지 반복한다
+//  (드라이브 후 화면으로 검증하는 기존 다이얼로그 조작과 같은 규율).
+// 안전장치: 다이얼로그가 떠 있으면 조작하지 않는다(그 화면에서 shift+tab 은 모드 키가 아니다).
+const MODE_HOP_MS = 220;
+const MODE_MAX_HOPS = 6;   // 현재 최대 5모드 — 한 바퀴를 넘기면 순환 불가로 본다
+
+async function driveMode(io, { mode } = {}) {
+  const statusLib = require('./status-line');
+  const want = String(mode || '');
+  if (!statusLib.MODE_IDS.includes(want)) {
+    throw Object.assign(new Error('알 수 없는 모드입니다'), { code: 'BAD_REQUEST' });
+  }
+  const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const dialogUp = (s) => /Enter to select/.test(s)
+    || (/(Do you want to|Would you like to) .{0,160}\?/.test(s) && /^\s*[❯›>]?\s*[1-9]\.\s+\S/m.test(s));
+
+  const read = async () => {
+    const s = await io.screen();
+    if (dialogUp(s)) {
+      throw Object.assign(new Error('지금은 이 터미널에 다이얼로그가 떠 있어 모드를 바꿀 수 없습니다'), { code: 'MODE_BLOCKED' });
+    }
+    return statusLib.extractMode(s, 'claude');
+  };
+
+  let cur = await read();
+  if (!cur) {
+    throw Object.assign(new Error('화면에서 현재 모드를 읽을 수 없습니다 — TUI 를 확인해 주세요'), { code: 'MODE_UNKNOWN' });
+  }
+  for (let hop = 0; hop < MODE_MAX_HOPS && cur.id !== want; hop++) {
+    await io.key('BTab');                    // = shift+tab(\e[Z)
+    await sleep(MODE_HOP_MS);
+    const next = await read();
+    if (next) cur = next;                    // 읽기 실패는 한 틱 건너뛴다(다음 hop 에서 다시 확인)
+  }
+  if (cur.id !== want) {
+    throw Object.assign(new Error('그 모드로 전환하지 못했습니다(이 세션에서 지원하지 않는 모드일 수 있어요)'), { code: 'MODE_UNREACHABLE' });
+  }
+  return { ok: true, mode: cur };
+}
+
+/** chat.mode — { cwd, tid, mode } → { ok, mode:{id,label,symbol}, tid }. mode 생략 시 현재 모드만 읽는다. */
+async function chatMode({ cwd, tid, mode } = {}) {
+  const { io, win } = dialogIoFor(cwd, tid);
+  await io.ready;
+  if (mode == null || mode === '') {
+    const statusLib = require('./status-line');
+    const cur = statusLib.extractMode(await io.screen(), 'claude');
+    return { ok: true, mode: cur, tid: win };
+  }
+  const r = await driveMode(io, { mode });
+  return { ...r, tid: win };
+}
+
 // ── 컴포저 메시지 주입(훅 경로의 "허용하고 추가 지시" = TUI 의 "Yes, and tell Claude what to do
 //  next" 동치) ────────────────────────────────────────────────────────────────
 // 훅이 allow 로 답하면 다이얼로그가 닫히고 에이전트가 실행을 계속한다. 그 직후 컴포저에 지시를
@@ -1645,11 +1701,13 @@ module.exports = {
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
+  chatMode, // 에이전트 모드 전환(shift+tab 드라이브) — control.js 의 chat.mode 가 위임
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임
   captureDialog, // 훅 대기 중 TUI 다이얼로그 캡처 — approvals 의 카드 내용 보강이 위임
   _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
   _drivePermissionDialog: drivePermissionDialog,
+  _driveMode: driveMode,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.

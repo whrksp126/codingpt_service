@@ -118,7 +118,9 @@ test('E. control.js rpc 디스패치가 approval.*/chat.* 을 모듈로 위임�
     'rpc 프레임은 단일 디스패처(dispatchRpc)로 넘겨야 한다(평문/봉투 분기 이중화 금지)');
   const j = SRC_CONTROL.indexOf('function dispatchRpc');
   assert.ok(j > 0, 'rpc 디스패처 함수가 있어야 한다');
-  const block = SRC_CONTROL.slice(j, j + 3000);
+  // 창 크기는 디스패처 본문 전체를 덮을 만큼(주석이 길다 — 각 위임에 사고 이력이 붙어 있다).
+  //  ★ 2026-08-01 chat.mode 위임이 늘며 3000 을 넘겨 이 핀이 **계약이 살아 있는데도** 깨졌다.
+  const block = SRC_CONTROL.slice(j, j + 6000);
   assert.match(block, /approval\.'\)\).*callLazy\('\.\/approvals'|startsWith\('approval\.'\)\)\s*\{\s*callLazy\('\.\/approvals'/s,
     "back 의 approval.* rpc 가 approvals 로 위임돼야 블록된 훅이 풀린다");
   assert.match(block, /startsWith\('chat\.'\)\)\s*\{\s*callLazy\('\.\/transcript'/,
