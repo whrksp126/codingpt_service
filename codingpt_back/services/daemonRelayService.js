@@ -145,6 +145,35 @@ function normCaps(v) {
   return out;
 }
 
+// ui_hello.uiCmds 정규화 — "이 화면이 실행할 수 있는 ui_command 이름들".
+//  ★ 미신고(구 클라)와 빈 배열은 다르다: 미신고 = null = "모름"(기존 동작 폴백),
+//   빈 배열 = "아무것도 못 함"(그 화면은 명령 대상에서 제외). 이 구분이 없으면 구 클라가
+//   전부 후보에서 빠지거나 반대로 무능한 화면이 계속 선택된다.
+const UI_CMDS_MAX = 64;
+function normCmdNames(v) {
+  if (!Array.isArray(v)) return null;
+  const out = [];
+  for (const c of v) {
+    if (typeof c !== 'string') continue;
+    const s = c.trim().slice(0, 64);
+    if (!s || out.includes(s)) continue;
+    out.push(s);
+    if (out.length >= UI_CMDS_MAX) break;
+  }
+  return out;
+}
+
+// 그 화면이 이 명령을 실행할 수 있는가. 'browser.*' 처럼 접두사 계열 신고를 지원한다.
+//  미신고(null)는 **모름 → 가능으로 간주**한다(구 클라 배제 금지 — 무마찰 불변식).
+function clientCanRun(meta, cmd) {
+  const list = meta && meta.uiCmds;
+  if (!Array.isArray(list)) return true;
+  if (list.includes(cmd)) return true;
+  const dot = String(cmd || '').indexOf('.');
+  if (dot > 0 && list.includes(cmd.slice(0, dot) + '.*')) return true;
+  return false;
+}
+
 // ── 제어 채널 ─────────────────────────────────────────────────────────
 
 // 인증 실패 negative cache — 폐기 토큰의 구버전 데몬(401 을 무시하고 백오프 없이 재시도하는
@@ -227,6 +256,10 @@ function registerControl(ws, device) {
   if (entry.activeRunnerId == null || !entry.runners.has(entry.activeRunnerId)) entry.activeRunnerId = device.id;
   console.log(`[daemonRelay] 러너 연결 userId=${userId} kind=${conn.kind} device=${device.device_name}(#${device.id}) active=${entry.activeRunnerId}`);
   touchLastSeen(conn, true);
+  clearHostUpdating(device.id); // 돌아왔으면 표식 소멸(다음 끊김을 업데이트로 오인하지 않게)
+  // 새 버전으로 돌아왔으니 "적용 대기" 도 소멸한다. 남겨 두면 폰에 이미 적용한 업데이트 버튼이
+  //  계속 떠 있고, 눌러도 아무 일이 없다(PC 는 최신이라 준비된 바이트가 없다).
+  updateReadyHosts.delete(device.id);
   fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName, e2eeEpoch: conn.e2eeEpoch || 0 });
 
   let alive = true;
@@ -381,7 +414,13 @@ function registerControl(ws, device) {
       }
       if (entry.runners.size === 0) connections.delete(userId);
       console.log(`[daemonRelay] 러너 연결 종료 userId=${userId} kind=${conn.kind} device=#${conn.deviceId} aliveMs=${Date.now() - conn.connectedAt} 남은러너=${entry.runners.size}`);
-      fanoutRunnerStatus(userId, { deviceId: conn.deviceId, online: false, kind: conn.kind, deviceName: conn.deviceName });
+      // 직전에 "업데이트로 내려간다" 고 알려 왔으면 사유를 실어 보낸다 — 클라가 일반 연결 끊김이
+      //  아니라 "업데이트 중, 곧 다시 연결" 로 보여 준다. 구 클라는 모르는 필드를 무시한다.
+      const upd = takeHostUpdating(conn.deviceId);
+      fanoutRunnerStatus(userId, {
+        deviceId: conn.deviceId, online: false, kind: conn.kind, deviceName: conn.deviceName,
+        ...(upd ? { reason: 'updating', toVersion: upd.version } : {}),
+      });
     }
     // 이 호스트의 에이전트 상태 라스트-스테이트는 폐기한다 — 오프라인 호스트의 'working' 을
     //  다음 ui_hello 에 리플레이하면 폰이 "아직 돌고 있음"으로 오판하고 폴백이 영구 비활성된다.
@@ -778,6 +817,54 @@ function fanoutDeviceUpdated(userId, event) {
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
 
+// ── "업데이트로 잠시 내려감" 표식 ────────────────────────────────────
+//  PC 앱은 자동 업데이트를 적용할 때 스스로 재시작한다(20~30초). 그 사이 원격에서 보고 있던 사용자는
+//  일반 "연결 끊김" 화면을 보게 되는데, PC 가 죽은 건지 인터넷이 끊긴 건지 알 수 없어 불안하다.
+//  같은 끊김이라도 **이유를 알면 사람은 기다린다** — 그래서 PC 가 내려가기 직전에 사유를 알리고,
+//  이어지는 오프라인 팬아웃에 그 사유를 실어 보낸다.
+//  값은 인메모리 + 짧은 TTL 이다(정본 아님, 놓쳐도 일반 오프라인으로 안전 폴백).
+const UPDATING_TTL_MS = 5 * 60 * 1000; // 이보다 오래 안 돌아오면 업데이트 실패로 보고 일반 오프라인 취급
+const updatingHosts = new Map(); // deviceId -> { at, version }
+
+// 그 PC 가 "받아 두었고 적용만 남은" 업데이트. 폰에서 원격으로 적용시키기 위한 재료다.
+//  왜 필요한가: 사용자는 PC 앞에 없는 채로 폰에서 작업한다. 그 상태에서 "PC 를 업데이트하세요" 라고만
+//  하면 PC 앞에 갈 때까지 아무것도 못 한다 — 안내가 무의미해진다. 폰에서 바로 적용할 수 있어야 한다.
+const updateReadyHosts = new Map(); // deviceId -> version
+
+function markHostUpdating(deviceId, version) {
+  if (!Number.isInteger(deviceId)) return false;
+  updatingHosts.set(deviceId, { at: Date.now(), version: String(version || '').slice(0, 32) });
+  return true;
+}
+function takeHostUpdating(deviceId) {
+  const m = updatingHosts.get(deviceId);
+  if (!m) return null;
+  if (Date.now() - m.at > UPDATING_TTL_MS) { updatingHosts.delete(deviceId); return null; }
+  return m;
+}
+function clearHostUpdating(deviceId) { updatingHosts.delete(deviceId); }
+
+/**
+ * 폰(또는 다른 화면)에서 그 PC 에 "지금 업데이트 적용" 을 요청한다.
+ *  ui_command 왕복(rate limit·executor 선정·pending)을 재사용하지 않는 이유: 이건 executor 라우팅
+ *  대상이 아니라 **특정 PC 한 대**에 대한 지시이고, 응답은 곧이어 오는 runner_status(updating→오프라인
+ *  →온라인)가 대신한다. 구 PC 는 모르는 type 을 무시하므로 아무 일도 일어나지 않는다(안전 실패).
+ *  @returns {'sent'|'no_client'|'not_ready'}
+ */
+function requestPcUpdate(userId, deviceId) {
+  if (!Number.isInteger(deviceId)) return 'no_client';
+  if (!updateReadyHosts.has(deviceId)) return 'not_ready';
+  const set = agentWsClients.get(String(userId));
+  let sent = false;
+  if (set) for (const ws of set) {
+    const m = ws._cptMeta;
+    if (!m || m.kind !== 'pc' || m.deviceId !== deviceId) continue;
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    try { ws.send(JSON.stringify({ type: 'pc_update_request', version: updateReadyHosts.get(deviceId) })); sent = true; } catch (_) { /* noop */ }
+  }
+  return sent ? 'sent' : 'no_client';
+}
+
 // 러너(데몬) 연결 상태 팬아웃 — 접속/종료 즉시 {type:'runner_status', event:{deviceId, online, kind, deviceName}}.
 //  클라이언트 사이드바의 호스트 온라인 점/오프라인 UX 를 라이브로 갱신하는 용도(구 클라이언트는 무시해도 안전).
 function fanoutRunnerStatus(userId, event) {
@@ -808,6 +895,11 @@ function replayRunnerStatus(userId, ws) {
         e2eeEpoch: conn.e2eeEpoch || 0,
         lanCapable: !!(conn.lan && (conn.caps || []).includes('lan.v1') && lanCfg.lanEnabled()),
         lanEpoch: conn.lanEpoch || 0,
+        // 그 PC 가 적용만 남겨 둔 업데이트 — **리플레이에 반드시 실어야 한다.** 폰이 나중에 접속하면
+        //  라이브 팬아웃은 이미 지나갔으므로, 여기서 안 주면 "원격 업데이트" 버튼이 영영 안 뜬다
+        //  (e2eeEpoch 자물쇠가 '확인 중' 에 고착하던 것과 똑같은 함정).
+        ...(updateReadyHosts.has(conn.deviceId)
+          ? { updateReady: true, toVersion: updateReadyHosts.get(conn.deviceId) } : {}),
         replay: true,
       },
     };
@@ -1034,7 +1126,17 @@ function handleUiCommand(userId, conn, msg) {
     ((b._cptMeta.foreground ? 1 : 0) - (a._cptMeta.foreground ? 1 : 0)) ||
     (b._cptMeta.lastActivityAt - a._cptMeta.lastActivityAt) ||
     ((b._cptMeta.kind === 'pc' ? 1 : 0) - (a._cptMeta.kind === 'pc' ? 1 : 0)));
-  let executor = clients[0];
+  // ★ 능력 우선 — "방금 만진 기기" 이기만 하면 **그 명령을 모르는 화면**에도 보내던 버그의 수정.
+  //  실패 시나리오: 폰(구버전)을 잠깐 봤고 PC 는 백그라운드 → 폰이 executor → 새 명령이 폰으로 가서
+  //  "지원하지 않는 명령" 으로 조용히 실패. 사용자에겐 "폰을 켜두면 PC 기능이 안 되는" 비결정적
+  //  버그로 보인다. 할 줄 아는 화면이 하나라도 있으면 그 안에서만 고른다(정렬 순서는 그대로 존중).
+  const capable = clients.filter((ws) => clientCanRun(ws._cptMeta, msg.cmd));
+  if (capable.length === 0) {
+    // 아무도 못 하는 명령을 아무에게나 보내 실패시키지 않는다 — 명확한 실패로 되돌린다.
+    reply(false, { error: '이 명령을 실행할 수 있는 화면이 없습니다(앱/PC 업데이트 필요)', code: 'NO_CAPABLE_CLIENT' });
+    return;
+  }
+  let executor = capable[0];
   // 명시 타겟(mode:'target' + target:{deviceId|clientKey}) — 지정한 기기 1곳으로만 라우팅.
   //  매칭 기기가 접속 중이 아니면 즉시 실패(마법 폴백 금지 — 에이전트가 cpt devices 로 재시도).
   if (msg.target && typeof msg.target === 'object') {
@@ -1044,6 +1146,12 @@ function handleUiCommand(userId, conn, msg) {
       (t.clientKey && ws._cptMeta.clientKey === t.clientKey));
     if (!match) {
       reply(false, { error: '대상 기기가 접속돼 있지 않습니다', code: 'TARGET_OFFLINE' });
+      return;
+    }
+    // 명시 타겟이 그 명령을 못 하면 **다른 기기로 몰래 넘기지 않는다**(--on 의 의미가 사라진다).
+    //  대신 이유를 분명히 말해 준다 — 조용한 실패보다 낫다.
+    if (!clientCanRun(match._cptMeta, msg.cmd)) {
+      reply(false, { error: '대상 기기가 이 명령을 지원하지 않습니다(그 기기 업데이트 필요)', code: 'TARGET_UNSUPPORTED' });
       return;
     }
     executor = match;
@@ -1062,7 +1170,8 @@ function handleUiCommand(userId, conn, msg) {
   }, timeoutMs);
   uiPending.set(uiId, { conn, daemonMsgId: msg.id, timer, executorWs: executor });
 
-  const targets = msg.mode === 'broadcast' ? clients : [executor];
+  // 브로드캐스트도 할 줄 아는 화면에만 — 못 하는 화면에 던지면 그쪽 로그만 에러로 더럽힌다.
+  const targets = msg.mode === 'broadcast' ? capable : [executor];
   for (const ws of targets) {
     try {
       ws.send(JSON.stringify({ type: 'ui_command', uiId, cmd: msg.cmd, params: msg.params || {}, executor: ws === executor }));
@@ -1146,6 +1255,9 @@ function registerAgentWs(ws, userId, client) {
         // 이 화면의 앱 버전(표시·진단 전용, 분기 금지 — 분기는 항상 caps 로 한다).
         //  구 클라는 안 보냄 → '' → "알 수 없음". 버전 스큐 문의가 왔을 때 조합을 확인하는 유일한 단서다.
         appVersion: typeof msg.appVersion === 'string' ? msg.appVersion.slice(0, 32) : '',
+        // 이 화면이 **실행할 수 있는** ui_command 이름들. executor 선정의 필수 근거다(아래 pickExecutor).
+        //  구 클라는 안 보냄 → null = "모름" → 기존 동작(능력 무시 선정)으로 폴백한다.
+        uiCmds: normCmdNames(msg.uiCmds),
         // 이 화면이 들고 있는 E2EE 열쇠 세대(0=없음). 호스트 epoch 과 같아야 봉인 모드를 켠다(§2.8).
         e2eeEpoch: Number.isInteger(msg.e2eeEpoch) && msg.e2eeEpoch > 0 ? msg.e2eeEpoch : 0,
         lastActivityAt: Date.now(),
@@ -1158,6 +1270,30 @@ function registerAgentWs(ws, userId, client) {
       // 러너 상태 캐치업 — 붙어 있는 호스트의 열쇠 세대(e2eeEpoch)를 이 화면에만 재전송한다.
       //  없으면 이미 붙어 있는 데몬에 대해 클라의 자물쇠 배지가 '확인 중' 에 영구 고착한다(위 함수 주석).
       replayRunnerStatus(userId, ws);
+      return;
+    }
+    if (msg.type === 'host_update_ready') {
+      // PC 가 업데이트를 받아 두었다(적용만 남음). 폰에서 원격으로 적용할 수 있게 전 화면에 알린다.
+      //  version 이 빈 값이면 "이제 없음"(적용 완료/취소) 으로 해석해 표식을 지운다.
+      const id = ws._cptMeta?.deviceId;
+      if (ws._cptMeta?.kind === 'pc' && Number.isInteger(id)) {
+        const v = String(msg.version || '').slice(0, 32);
+        if (v) updateReadyHosts.set(id, v); else updateReadyHosts.delete(id);
+        fanoutRunnerStatus(userId, { deviceId: id, online: true, updateReady: !!v, toVersion: v || undefined });
+      }
+      return;
+    }
+    if (msg.type === 'host_updating') {
+      // PC 앱이 업데이트를 적용하기 **직전**에 보낸다(재시작 20~30초 예고).
+      //  이걸 받아 두면 이어지는 데몬 끊김을 "업데이트 중" 으로 설명할 수 있다 — 이유를 알면
+      //  사용자는 기다리지만, 모르면 고장으로 읽는다. 놓쳐도 일반 오프라인으로 안전 폴백.
+      //  주체는 자기 자신뿐이다: ui_hello 로 신고한 자기 deviceId 만 표시할 수 있다(타 기기 사칭 금지).
+      const id = ws._cptMeta?.deviceId;
+      if (ws._cptMeta?.kind === 'pc' && Number.isInteger(id)) {
+        markHostUpdating(id, msg.version);
+        // 아직 온라인이지만 곧 내려간다 — 원격 화면이 미리 문구를 바꿀 수 있게 알린다.
+        fanoutRunnerStatus(userId, { deviceId: id, online: true, updating: true, toVersion: String(msg.version || '').slice(0, 32) });
+      }
       return;
     }
     if (msg.type === 'ui_activity') {
@@ -1664,6 +1800,7 @@ module.exports = {
   hasActiveMobileClient,
   presentClient,
   listUiClients,
+  requestPcUpdate,
   issueUiTicket,
   addEventClient,
   removeEventClient,
@@ -1671,6 +1808,8 @@ module.exports = {
   proxyWs,
   pickConn,
   _normCaps: normCaps, // 테스트 노출(순수 함수) — 데몬 리포의 `_states` 컨벤션 미러
+  _normCmdNames: normCmdNames,
+  _clientCanRun: clientCanRun,
   _maybeNotify: maybeNotify, // 테스트 노출 — hint/event 폴백 계약 고정(기능2)
   _e2eeHintKinds: E2EE_HINT_KINDS, // 테스트 노출 — 어떤 kind 가 데몬 힌트를 유발하는지 계약 고정
   _normAgentState: normAgentState, // 테스트 노출 — 데몬이 실제로 보내는 프레임으로 계약 고정(기능3)

@@ -21,6 +21,7 @@
 import { api } from "./api.js";
 import { state, agentStates } from "./state.js";
 import { anyAgentWorking, judgeQuiet, remoteViewers } from "./update-policy.js";
+import { announceUpdateReady, announceUpdating, isReallyFocused, setRemoteUpdateHandler } from "./ui-channel.js";
 
 // 확인 주기 — 앱이 며칠씩 떠 있으므로 하루 1회면 충분하다. 실패는 1시간 뒤 재시도(6시간까지 백오프).
 const CHECK_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +55,9 @@ async function currentQuiet() {
     agentWorking: anyAgentWorking(agentStates),
     approvals: (state.approvals || []).length,
     viewers: remoteViewers(clients),
-    focused: typeof document !== "undefined" && document.hasFocus(),
+    // ⚠ document.hasFocus() 를 쓰지 않는다 — WKWebView 에서는 OS 앱 전환에 안 따라온다(실측).
+    //  ui-channel 이 present 판정에 쓰는 것과 **같은 진실源**(NSWindow key 상태)을 쓴다.
+    focused: isReallyFocused(),
   });
 }
 
@@ -62,6 +65,9 @@ async function currentQuiet() {
 export async function applyNow() {
   if (applying) return;
   applying = true;
+  // 내려가기 **직전**에 사유를 알린다 — 원격 화면이 "연결 끊김" 대신 "업데이트 중" 을 보게.
+  //  실패해도 그냥 진행한다(문구가 일반 오프라인으로 폴백될 뿐, 업데이트를 막을 이유가 못 된다).
+  try { announceUpdating(stagedVersion || ""); } catch (_) { /* noop */ }
   try {
     await api.updateInstall(); // 준비돼 있으면 즉시 설치+재시작(성공 시 이 아래는 실행되지 않는다)
   } catch (e) {
@@ -95,6 +101,8 @@ async function tryStage() {
   } catch (_) {
     return "error"; // 다음 주기에 재시도(부분 다운로드는 Rust 쪽에서 버려진다)
   }
+  // 받아 두었음을 전 화면에 알린다 — 폰에서 원격으로 적용할 수 있게(사용자는 PC 앞에 없을 수 있다).
+  try { announceUpdateReady(stagedVersion || ""); } catch (_) { /* noop */ }
   startQuietWatch();
   return "staged";
 }
@@ -143,6 +151,8 @@ export function startUpdateScheduler(renderBanner) {
   if (started) return;
   started = true;
   onBanner = typeof renderBanner === "function" ? renderBanner : null;
+  // 폰에서 온 "지금 업데이트" 지시 — 준비된 게 있을 때만 의미가 있다(없으면 조용히 무시).
+  setRemoteUpdateHandler(() => { if (stagedVersion) void applyNow().catch(() => {}); });
   // 이미 준비된 게 있으면(이전 세션에서 받아둔 건 메모리라 없지만, 방어적으로) 감시부터 건다.
   api.updateStaged().then((v) => { if (v) { stagedVersion = v; startQuietWatch(); } }).catch(() => {});
   scheduleCheck(CHECK_MS);

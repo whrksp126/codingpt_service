@@ -38,6 +38,7 @@ router.post('/runner/cloud/ensure', authMiddleware, daemonController.ensureCloud
 router.post('/terminal/start', authMiddleware, daemonController.startTerminal);
 router.post('/ui/ticket', accountAuth, daemonController.uiTicket); // deviceToken 기기(PC)용 agent/stream 1회용 티켓
 router.get('/ui/clients', accountAuth, daemonController.uiClients); // 접속 중 UI 화면 목록(기기 타겟팅 --on / cpt devices)
+router.post('/pc/update', accountAuth, daemonController.pcUpdate); // 폰에서 그 PC 에 업데이트 적용 지시(원격)
 router.get('/terminal/list', authMiddleware, daemonController.terminalList);
 router.post('/terminal/new', authMiddleware, daemonController.terminalNew);
 router.post('/terminal/select', authMiddleware, daemonController.terminalSelect);

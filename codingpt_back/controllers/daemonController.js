@@ -552,6 +552,20 @@ async function uiClients(req, res) {
   }
 }
 
+// POST /api/daemon/pc/update  (accountAuth) → { result: 'sent'|'no_client'|'not_ready' }
+//  폰에서 "지금 PC 업데이트" — 사용자는 PC 앞에 없는 채로 원격 작업 중일 수 있다. 그때 "PC 를
+//  업데이트하세요" 안내만 주면 PC 앞에 갈 때까지 아무것도 못 하므로, 여기서 원격 적용을 건다.
+//  실제 진행 상황은 이어지는 runner_status(updating → 오프라인 → 온라인)로 전달된다.
+async function pcUpdate(req, res) {
+  try {
+    const deviceId = Number(req.body?.deviceId);
+    const result = daemonRelayService.requestPcUpdate(req.user.id, Number.isFinite(deviceId) ? deviceId : null);
+    return successResponse(res, { result });
+  } catch (e) {
+    return errorResponse(res, e, e.statusCode || 500);
+  }
+}
+
 // POST /api/daemon/pair/code  (인증) → { code, expiresAt }   [레거시 — 앱이 코드 발급]
 async function createPairCode(req, res) {
   try {
@@ -1558,7 +1572,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
-  createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients,
+  createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
   agentsList, agentsWire, agentsRescan, agentsLaunch,
   fsList, fsTree, fsRead, fsWrite, fsMkdir, fsCreateFile, fsRename, fsDelete, fsWatch, fsUnwatch, fsGrep, streamEvents,

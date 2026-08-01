@@ -193,6 +193,10 @@ async function connect() {
       caps: ["caps.v1", "approval.v1", "transcript.v1", "agentstate.v1", ...e2eeCaps()],
       // 진단 전용(분기 금지 — 분기는 항상 caps). 서버가 "누가 어떤 조합인지" 를 알 유일한 단서.
       appVersion: appVer || undefined,
+      // 이 화면이 **실제로 실행할 수 있는** ui_command 이름. 서버는 이 목록으로 명령을 보낼 화면을
+      //  고른다 — 예전엔 "방금 만진 기기" 만 보고 골라, 그 기기가 모르는 명령이면 조용히 실패했다
+      //  (폰을 켜두면 PC 기능이 안 되는 비결정적 버그). 핸들러 테이블에서 직접 뽑으므로 어긋나지 않는다.
+      uiCmds: [...Object.keys(handlers), "browser.*"],
     });
     sendPresence(); // 접속 시 현재 가시 상태를 present 신호로 보고
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
@@ -210,6 +214,11 @@ async function connect() {
     switch (msg.type) {
       case "notif_event":
         if (msg.event) S.applyNotifEvent(msg.event);
+        break;
+      case "pc_update_request":
+        // 폰에서 "지금 이 PC 업데이트" 를 눌렀다 — 준비된 바이트가 있으면 즉시 적용+재시작한다.
+        //  요청자가 원격이므로 여기서 되묻지 않는다(물어볼 화면이 이 PC 앞에 없다).
+        try { _onRemoteUpdate?.(); } catch (_) { /* noop */ }
         break;
       case "approval_event":
         // 원격 승인 인박스(기능1) — pending/resolved. 라이브 전용(버퍼 없음)이라 놓친 건 pull 이 메운다.
@@ -279,6 +288,29 @@ function send(ws, frame) {
   } catch (_) {}
 }
 
+/**
+ * 업데이트 적용으로 곧 재시작한다고 서버에 예고한다(재시작 직전 1회).
+ *  이걸 보내 두면 이어지는 데몬 끊김이 원격 화면에 "업데이트 중 · 곧 다시 연결" 로 설명된다.
+ *  같은 끊김이라도 이유를 알면 사람은 기다린다 — 모르면 고장으로 읽는다.
+ *  전송 실패는 무시한다(일반 오프라인 문구로 안전 폴백 — 업데이트를 막을 이유가 못 된다).
+ */
+export function announceUpdating(version) {
+  send(sock, { type: "host_updating", version: String(version || "") });
+}
+
+/**
+ * 업데이트를 받아 두었음을 서버에 알린다(빈 값 = 이제 없음).
+ *  이걸 알려야 **폰에서 원격으로** 적용을 걸 수 있다 — 사용자는 PC 앞에 없는 채로 일하는 일이 많고,
+ *  그때 "PC 를 업데이트하세요" 안내만 주면 PC 앞에 갈 때까지 아무것도 못 한다.
+ */
+export function announceUpdateReady(version) {
+  send(sock, { type: "host_update_ready", version: String(version || "") });
+}
+
+// 서버(폰의 원격 요청)가 "지금 적용" 을 지시했을 때 실행할 콜백. update-scheduler 가 등록한다.
+let _onRemoteUpdate = null;
+export function setRemoteUpdateHandler(fn) { _onRemoteUpdate = typeof fn === "function" ? fn : null; }
+
 // 표면 닫힘 전파(surface_broadcast) 발신은 폐지됨 — 기기-타겟 라우팅에선 프리뷰가 기기마다 독립이라
 //  한 기기에서 닫아도 다른 기기 것을 닫으면 안 된다(오동작). 수신측 previewClose 핸들러와
 //  _applyingRemoteClose 가드는 구 클라 호환 + 핸드오프(P3) 복원 재사용 위해 유지한다.
@@ -328,7 +360,10 @@ function wireNativeFocus() {
   if (wired) _nativeFocusWired = true; // 하나라도 배선되면 네이티브를 진실源으로
 }
 // "지금 실제로 최전면(key)인가" — 네이티브 우선, 미배선 시 DOM 폴백.
-function isReallyFocused() {
+//  ⚠ export 되어 업데이트 스케줄러도 **같은 진실源**을 쓴다. WKWebView 의 document.hasFocus() 는
+//   OS 앱 전환에 안 따라오므로(위 주석의 실측), 그걸 쓰면 "PC 앞에 있다" 를 오판해 조용한 순간을
+//   영영 못 잡거나 반대로 보고 있는데 재시작하게 된다.
+export function isReallyFocused() {
   if (_nativeFocusWired) return _nativeFocused;
   try { return typeof document.hasFocus === "function" ? document.hasFocus() : true; } catch (_) { return true; }
 }
