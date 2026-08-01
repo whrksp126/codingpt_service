@@ -64,6 +64,7 @@ cd codingpt_service/codingpt_pc && bash scripts/release-pc.sh --notes "한 줄 �
 export ASC_KEY_ID=N5ZVQFND28 ASC_ISSUER_ID=f1908b5f-e631-41e0-b723-3b46c7c13041
 
 bash codingpt_service/scripts/bump-version.sh app 0.3.0   # 4곳을 한 번에(하향·누락 거부)
+# 같은 버전을 다시 올려야 하면(빌드만 교체): bump-version.sh app-build
 cd codingpt_app && git add -A && git commit -m "chore: release mobile 0.3.0" && git push
 ```
 
@@ -76,19 +77,33 @@ node codingpt_service/scripts/store/play.mjs upload \
 node codingpt_service/scripts/store/play.mjs status     # IN_REVIEW 확인
 ```
 
-**iOS** — 아카이브에 **API 키를 넘겨야** 인증서·프로파일이 자동 생성된다(Xcode 로 사람이 할 필요 없음):
+**iOS** — 서명 자산은 API 로 준비한다(Xcode 수동 작업 없음). 인증서가 이미 있으면 건너뛴다:
 ```bash
+bash codingpt_service/scripts/store/ios-signing.sh    # 인증서+프로파일(멱등)
+
 cd codingpt_app/ios
 xcodebuild -workspace codingpt.xcworkspace -scheme codingpt -configuration Release \
-  -destination 'generic/platform=iOS' -archivePath build/codingpt.xcarchive \
-  -allowProvisioningUpdates \
-  -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_$ASC_KEY_ID.p8" \
-  -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" archive
-# → export IPA → altool 업로드 → 아래 3단계
-node codingpt_service/scripts/store/asc.mjs prepare 0.3.0 --notes "..."
+  -destination 'generic/platform=iOS' -archivePath build/codingpt.xcarchive archive
+xcodebuild -exportArchive -archivePath build/codingpt.xcarchive -exportPath build/ipa \
+  -exportOptionsPlist exportOptions-auto.plist      # 수동 서명(자동 서명은 아래 함정 참조)
+xcrun altool --upload-app -f build/ipa/codingpt.ipa -t ios \
+  --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+# 빌드 처리(수 분)를 기다린 뒤:
+node codingpt_service/scripts/store/asc.mjs builds        # VALID 확인
+node codingpt_service/scripts/store/asc.mjs prepare 0.3.0 --build <n> --notes "..."
 node codingpt_service/scripts/store/asc.mjs preflight     # 통과해야 제출
 node codingpt_service/scripts/store/asc.mjs submit --yes
 ```
+
+**iOS 함정 3개(전부 실측):**
+- `xcodebuild -allowProvisioningUpdates`(클라우드 서명)는 **막힌다** — "No signing certificate
+  iOS Distribution found". 같은 API 키로 REST 인증서 발급은 201 이다. 권한이 아니라 경로 문제라
+  `ios-signing.sh` 로 CSR 을 직접 만들어 발급받고 **수동 서명**으로 export 한다.
+- PKCS12 는 `-legacy` 없으면 macOS 가 "MAC verification failed" 로 거부한다(암호가 맞아도).
+- **수출규정**은 `Info.plist` 의 `ITSAppUsesNonExemptEncryption` 으로 고정돼 있어 더는 묻지 않는다.
+  이게 없으면 심사가 WAITING_FOR_EXPORT_COMPLIANCE 에 걸려 시작조차 안 한다. 값을 바꿔야 하면
+  법적 신고이므로 사용자 확인을 받고 plist 를 고친다(`asc.mjs compliance` 는 이미 올라간 빌드용).
 
 **심사 감시 → 승인되면 출시**(양 스토어 모두 무인):
 ```bash
