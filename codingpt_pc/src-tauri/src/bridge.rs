@@ -221,6 +221,29 @@ pub fn fetch_devices() -> Result<Option<serde_json::Value>, String> {
     }
 }
 
+// 지금 접속해 있는 UI 화면(기기) 목록 — 업데이트 재시작이 **원격에서 보고 있는 사람을 끊는지**
+//  판정하는 근거(update-scheduler.js). 미페어링/오프라인이면 Ok(null) → 판정은 보수적으로 처리.
+#[tauri::command]
+pub fn fetch_ui_clients() -> Result<Option<serde_json::Value>, String> {
+    let token = match device_token() {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    let url = format!("{}/api/daemon/ui/clients", server_url().trim_end_matches('/'));
+    match ureq::get(&url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .timeout(std::time::Duration::from_secs(8))
+        .call()
+    {
+        Ok(resp) => resp
+            .into_json::<serde_json::Value>()
+            .map(Some)
+            .map_err(|e| format!("응답 파싱 실패: {e}")),
+        Err(ureq::Error::Status(401, _)) => Ok(None),
+        Err(e) => Err(format!("화면 목록 조회 실패: {e}")),
+    }
+}
+
 // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필/클레임).
 #[tauri::command]
 pub fn claim_workspace(ws_id: String) -> Result<serde_json::Value, String> {

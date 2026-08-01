@@ -1756,3 +1756,41 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .ag-onb-count { color: var(--dim); font-size: 12px; }
 .ag-onb-foot .btn.lg { min-width: 210px; }
 .ag-onb-error { min-height: 18px; margin-top: 12px; color: var(--error); font-size: 12px; text-align: center; }
+
+/* ── 업데이트 준비됨 배너 ─────────────────────────────────────────────
+   조용한 순간(아무도 안 보고 아무것도 안 돎)엔 뜨지 않는다 — 그땐 묻지 않고 적용한다.
+   이 배너는 "누군가 쓰고 있을 때" 만 나오는 선택지이고, 문구는 **작업이 유지된다는 사실**을
+   반드시 포함한다(그게 없으면 사용자는 날아갈까 봐 영원히 미룬다 — 실제로는 tmux 가 세션을
+   들고 있어 재시작해도 터미널·에이전트가 죽지 않는다). */
+.update-banner {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 9500;
+  width: 320px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: var(--panel, #12151c);
+  border: 1px solid var(--border-ctrl);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.update-banner.hidden { display: none; }
+.update-banner .ub-title { font-weight: 700; font-size: 13px; margin-bottom: 3px; }
+.update-banner .ub-body { color: var(--text-dim, #98a2b3); }
+.update-banner .ub-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 11px; }
+.update-banner button {
+  border-radius: 8px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid var(--border-ctrl);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.update-banner button.primary { background: var(--accent); border-color: var(--accent); color: #06231a; }
+.update-banner button.primary:hover { background: var(--accent-hover); }
+.update-banner button[disabled] { opacity: 0.6; cursor: default; }

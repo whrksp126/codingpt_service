@@ -28,6 +28,7 @@ import { initOsDrop } from "./os-drop.js";
 import { mountApprovals, updateApprovals } from "./approvals.js";
 // (★ 개정 12: 기기 승인 표면 삭제 — 승인 절차 자체가 없어졌다. 연동은 설정 > 계정 > 기기에서 코드로.)
 import { maybeShowOnboarding } from "./agents-view.js";
+import { startUpdateScheduler, applyNow, deferApply } from "./update-scheduler.js";
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
 //  스펙(사용자 확정): 취소 / (저장 안 하고) 종료 2택. 저장은 탭의 ● 표시 + ⌘S(또는 자동저장 완료 대기).
@@ -286,4 +287,36 @@ async function maybeInstallSetupUpdate() {
   setInterval(() => refreshWsMeta(), 15000);
   // 신선도(미커밋/미푸시)·타 호스트 브랜치는 서버 메타에 실림 — 목록을 주기 재로드해 배지 갱신.
   setInterval(() => { S.loadWorkspaces().catch(() => {}); }, 60000);
+
+  // 켜져 있는 동안의 자동 업데이트. 부팅 확인(maybeInstallSetupUpdate)은 위에서 이미 했고,
+  //  여기서부터는 "며칠씩 안 끄는 PC" 를 맡는다 — 주기 확인 → 사전 다운로드 → 조용한 순간에 적용.
+  startUpdateScheduler(renderUpdateBanner);
 })();
+
+// 업데이트 준비 배너 — **누군가 쓰고 있을 때만** 나온다(조용하면 묻지 않고 적용).
+//  문구에 "작업은 그대로 유지" 를 넣는 것이 핵심이다: tmux 가 세션을 들고 있어 재시작해도
+//  터미널·에이전트가 죽지 않는다(실측). 이 사실을 안 알리면 사용자는 영원히 미룬다.
+function renderUpdateBanner(info) {
+  const el = document.getElementById("updateBanner");
+  if (!el) return;
+  if (!info) { el.classList.add("hidden"); el.innerHTML = ""; return; }
+  el.innerHTML = `
+    <div class="ub-title">업데이트 준비됨 · ${info.version}</div>
+    <div class="ub-body">지금 적용하면 약 20초 연결이 끊겨요. <b>하던 터미널 작업은 그대로 유지</b>됩니다.</div>
+    <div class="ub-row">
+      <button id="ubLater">나중에</button>
+      <button id="ubNow" class="primary">지금 적용</button>
+    </div>`;
+  el.classList.remove("hidden");
+  el.querySelector("#ubLater").onclick = () => deferApply();
+  el.querySelector("#ubNow").onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "적용 중…";
+    try { await applyNow(); } catch (err) {
+      btn.disabled = false;
+      btn.textContent = "지금 적용";
+      el.querySelector(".ub-body").textContent = "적용 실패: " + err;
+    }
+  };
+}

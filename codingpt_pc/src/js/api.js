@@ -32,6 +32,7 @@ export const api = {
   previewSuggest: (q) => invoke("preview_suggest", { q }),
   // 계정의 모든 기기 목록(멀티기기 "내 기기"). 미로그인이면 null.
   fetchDevices: () => invoke("fetch_devices"),
+  fetchUiClients: () => invoke("fetch_ui_clients"), // 지금 접속 중인 화면(원격 시청자 판정)
   updateNickname: (nickname) => invoke("update_nickname", { nickname }),
   updateAppearance: (appearance) => invoke("update_appearance", { appearance }),
   deleteAccount: () => invoke("delete_account"),
@@ -150,7 +151,9 @@ export const api = {
   // ── 자동 업데이트(번들 앱 전용 — tauri dev 에선 updateCheck 가 error 반환) ──
   appVersion: () => invoke("app_version"),
   updateCheck: () => invoke("update_check"),
-  updateInstall: () => invoke("update_install"),
+  updateDownload: () => invoke("update_download"), // 받아만 둔다(설치 X) — 적용은 조용한 순간에
+  updateStaged: () => invoke("update_staged"), // 준비된 버전(없으면 null)
+  updateInstall: () => invoke("update_install"), // 준비돼 있으면 즉시 설치+재시작
   consumeInstallOnboardingReset: () => invoke("consume_install_onboarding_reset"),
   onUpdateProgress: (cb) => listen("cpt-update-progress", (e) => cb(e.payload)),
   onOpenSettings: (cb) => listen("cpt-open-settings", () => cb()),

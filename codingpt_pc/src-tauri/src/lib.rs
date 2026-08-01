@@ -98,24 +98,54 @@ async fn update_check(app: AppHandle) -> Result<serde_json::Value, String> {
     }
 }
 
-// 다운로드+설치+재시작. 진행률은 cpt-update-progress 이벤트(받은 바이트/전체)로 프론트에 중계.
+// 다운로드가 끝나 **설치만 남은** 업데이트. 서명 검증까지 통과한 바이트를 메모리에 들고 있는다.
+//
+// 왜 분리하나: 우리 사용자는 원격 접속을 위해 PC 를 며칠씩 켜 둔다. 그래서 "발견→다운로드→설치→
+// 재시작" 이 한 덩어리면 적용을 누르는 순간 몇 분이 통째로 묶이고, 그 시간이 무서워 아무도 안 누른다.
+// 다운로드를 미리 끝내 두면 실제로 끊기는 구간이 십몇 초로 줄어 "조용한 순간에 조용히" 적용할 수 있다.
+// 디스크가 아니라 메모리에 두는 이유 = 검증된 바이트를 그대로 설치하기 위함(파일로 내리면 검증 이후
+// 교체 여지가 생긴다). 아티팩트는 ~51MB.
+struct StagedUpdate {
+    version: String,
+    bytes: Vec<u8>,
+    update: tauri_plugin_updater::Update,
+}
+#[derive(Default)]
+struct PendingUpdate(std::sync::Mutex<Option<StagedUpdate>>);
+
+fn staged_version(app: &AppHandle) -> Option<String> {
+    let state = app.try_state::<PendingUpdate>()?;
+    let guard = state.0.lock().ok()?;
+    guard.as_ref().map(|s| s.version.clone())
+}
+
+// 준비된 업데이트가 있으면 그 버전을 알려준다(없으면 null). 프론트의 적용 배너 판단용.
 #[tauri::command]
-async fn update_install(app: AppHandle) -> Result<(), String> {
+fn update_staged(app: AppHandle) -> Option<String> {
+    staged_version(&app)
+}
+
+// 다운로드만 수행하고 **설치는 하지 않는다**. 진행률은 cpt-update-progress 로 중계.
+//  같은 버전이 이미 준비돼 있으면 즉시 반환(재다운로드 금지 — 주기 확인이 반복 호출한다).
+#[tauri::command]
+async fn update_download(app: AppHandle) -> Result<serde_json::Value, String> {
     use tauri_plugin_updater::UpdaterExt;
+    if let Some(v) = staged_version(&app) {
+        return Ok(serde_json::json!({ "version": v, "staged": true }));
+    }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater
         .check()
         .await
         .map_err(|e| e.to_string())?
         .ok_or("이미 최신 버전입니다.")?;
-    authorize_app_update(&update.version.to_string());
     let handle = app.clone();
     // on_chunk 콜백의 chunk 는 "이번 조각의 바이트(델타)"라 그대로 total 로 나누면 언제나 ~0% 다
     //  (프론트가 chunk/total 로 계산 → 0 에서 안 올라가는 버그). 여기서 누적해 "받은 총 바이트"로 보낸다.
     let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let dl = downloaded.clone();
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             move |chunk, total| {
                 let got = dl.fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed) + chunk as u64;
                 let _ = handle.emit("cpt-update-progress", serde_json::json!({ "chunk": got, "total": total }));
@@ -123,12 +153,59 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
             || {},
         )
         .await
-        .map_err(|e| {
-            if let Some(fingerprint) = current_install_fingerprint() {
-                write_install_state(&fingerprint, &app.package_info().version.to_string(), None);
-            }
-            e.to_string()
-        })?;
+        .map_err(|e| e.to_string())?;
+    let version = update.version.to_string();
+    let size = bytes.len();
+    if let Some(state) = app.try_state::<PendingUpdate>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = Some(StagedUpdate { version: version.clone(), bytes, update });
+        }
+    }
+    let _ = app.emit("cpt-update-staged", serde_json::json!({ "version": version, "bytes": size }));
+    Ok(serde_json::json!({ "version": version, "staged": true, "bytes": size }))
+}
+
+// 설치+재시작. 준비된 바이트가 있으면 즉시(다운로드 없이), 없으면 지금 받아서 적용한다.
+//  ※ 호출 전에 프론트가 "지금 끊어도 되는가" 를 판정한다(update-scheduler.js).
+#[tauri::command]
+async fn update_install(app: AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let staged = app
+        .try_state::<PendingUpdate>()
+        .and_then(|s| s.0.lock().ok().and_then(|mut g| g.take()));
+    let (version, bytes, update) = match staged {
+        Some(s) => (s.version, s.bytes, s.update),
+        None => {
+            let updater = app.updater().map_err(|e| e.to_string())?;
+            let update = updater
+                .check()
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("이미 최신 버전입니다.")?;
+            let handle = app.clone();
+            let downloaded = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+            let dl = downloaded.clone();
+            let bytes = update
+                .download(
+                    move |chunk, total| {
+                        let got = dl.fetch_add(chunk as u64, std::sync::atomic::Ordering::Relaxed) + chunk as u64;
+                        let _ = handle.emit("cpt-update-progress", serde_json::json!({ "chunk": got, "total": total }));
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let v = update.version.to_string();
+            (v, bytes, update)
+        }
+    };
+    authorize_app_update(&version);
+    update.install(bytes).map_err(|e| {
+        if let Some(fingerprint) = current_install_fingerprint() {
+            write_install_state(&fingerprint, &app.package_info().version.to_string(), None);
+        }
+        e.to_string()
+    })?;
     // 데몬 자식 정리 후 재시작(고아 방지 — quit_app 과 동일 규율).
     if let Some(state) = app.try_state::<Daemon>() {
         *state.should_run.lock().unwrap() = false;
@@ -731,6 +808,7 @@ pub fn run() {
             None,
         ))
         .manage(Daemon::default())
+        .manage(PendingUpdate::default())
         .manage(IdeDirty::default())
         .manage(pty::PtyManager::default())
         .manage(preview::PreviewManager::default())
@@ -764,6 +842,7 @@ pub fn run() {
             bridge::delete_account,
             bridge::revoke_device,
             bridge::fetch_devices,
+            bridge::fetch_ui_clients,
             bridge::claim_workspace,
             bridge::ws_delete,
             bridge::remote_fs_list,
@@ -796,6 +875,8 @@ pub fn run() {
             // 자동 업데이트
             app_version,
             update_check,
+            update_download,
+            update_staged,
             update_install,
             consume_install_onboarding_reset,
             // 서버 동기화 알림 + UI 실시간 채널

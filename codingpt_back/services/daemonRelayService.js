@@ -634,6 +634,7 @@ function listUiClients(userId) {
       // ui_hello.caps — "이 화면이 응답할 수 있는 기능"(예: 승인 카드). 데몬이 "요청을 만들어도 되는가"를
       //  판단하는 근거(§2-(d) 게이팅). 구 클라이언트는 안 보내므로 [].
       caps: m.caps || [],
+      appVersion: m.appVersion || '', // 진단 전용(분기 금지) — 버전 스큐 문의 때 조합을 확인할 단서.
       e2eeEpoch: m.e2eeEpoch || 0, // 이 화면의 열쇠 세대(0=열쇠 없음) — 잠금 배지/게이팅 진단용.
     });
   }

@@ -31,6 +31,10 @@
     <!-- 미로그인 게이트(로그인 전 앱 사용 차단) — 최상위 오버레이. -->
     <div id="loginGate"></div>
 
+    <!-- 업데이트 준비됨 배너(하단 우측). 조용한 순간엔 뜨지 않고 조용히 적용된다 — 이건
+         "누군가 쓰고 있을 때" 만 나오는 선택지다. update-scheduler.js 가 채운다. -->
+    <div id="updateBanner" class="update-banner hidden"></div>
+
     <!-- 벤더(전역): xterm. 모듈보다 먼저 실행돼 window.Terminal/FitAddon 노출. -->
     <script src="vendor/xterm/xterm.js"></script>
     <script src="vendor/xterm/xterm-addon-fit.js"></script>
