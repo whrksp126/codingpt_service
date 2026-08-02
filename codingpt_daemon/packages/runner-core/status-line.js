@@ -178,6 +178,38 @@ async function pollOne(chatId) {
 /** 캐치업(chat.since)용 — 지금 알고 있는 모드({id,label,symbol}) | null. 캡처하지 않는다(캐시 읽기). */
 function modeFor(chatId) { return modeOf(watches.get(chatId)); }
 
+// ── 즉시 확인(poke) ────────────────────────────────────────────────────────────
+// 3초 폴링은 **놓쳤을 때의 안전망**이고, 모드가 바뀌는 순간을 알 수 있으면 그때 바로 확인하는 게
+//  사용자가 느끼는 반응이다(사용자 요청 2026-08-02). 지금 아는 "그 순간" 두 가지:
+//   ① 우리 터미널 입력 경로로 shift+tab(CSI Z)이 지나갈 때(pty.js) — TUI 에서 사람이 누른 그 키.
+//   ② 채팅으로 전환(chat.open)할 때 — 화면을 여는 순간의 값은 캐시가 아니라 실제 화면이어야 한다.
+//  TUI 가 다시 그리는 데 한 틱이 걸리므로 짧은 지연 뒤 1회 + 한 번 더(느린 리페인트 보정) 확인한다.
+const POKE_DELAY_MS = 120;
+const POKE_RETRY_MS = 500;
+
+/** 특정 tmux 터미널 세션(cpt-…--t-<tid>)을 보는 감시자들을 즉시 확인시킨다. */
+function pokeTermSession(termName) {
+  const name = String(termName || '');
+  if (!name || !watches.size) return;
+  const ptyLib = require('./pty');
+  for (const [chatId, w] of watches) {
+    let mine = '';
+    try { mine = ptyLib.termSession(ptyLib.sessionForCwd(w.cwdRel).session, w.tid); } catch (_) { continue; }
+    if (mine !== name) continue;
+    setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, POKE_DELAY_MS);
+    setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, POKE_RETRY_MS);
+  }
+}
+
+/** 입력 바이트에 shift+tab(CSI Z)이 들어 있으면 그 터미널을 즉시 확인시킨다(pty.js 가 호출). */
+const CSI_Z = '\x1b[Z';
+function onTerminalInput(termName, bytes) {
+  if (!watches.size) return;
+  const s = typeof bytes === 'string' ? bytes : (bytes && bytes.toString ? bytes.toString('latin1') : '');
+  if (!s || s.indexOf(CSI_Z) < 0) return;
+  pokeTermSession(termName);
+}
+
 /** watch 엔트리의 마지막 모드 → 와이어 객체({id,label,symbol}) | null. */
 function modeOf(w) {
   if (!w || !w.lastMode) return null;
@@ -188,13 +220,16 @@ function modeOf(w) {
 /** transcript.js 가 push 이미터를 주입한다(순환 require 회피). */
 function setEmitter(fn) { emitFn = typeof fn === 'function' ? fn : null; }
 
-/** chat.open 응답용 — 즉시 1회 추출(캐시가 있으면 그것). → { lines, mode } | null */
+/**
+ * chat.open 응답용 → { lines, mode } | null.
+ *  ★ 항상 **화면을 새로 읽는다**(캐시로 대충 답하지 않는다): TUI ↔ 채팅 토글은 "지금 화면을 보겠다"는
+ *   행위라 그 순간의 값이 정본이어야 한다(사용자 요청 2026-08-02 — 토글할 때도 즉시 갱신).
+ *   비용은 capture-pane 한 번이고, 감시자가 이미 등록돼 있으므로 폴링 주기와도 충돌하지 않는다.
+ */
 async function snapshotFor(chatId) {
   const w = watches.get(chatId);
   if (!w) return null;
-  if (w.last == null && w.lastMode == null) {
-    try { await pollOne(chatId); } catch (_) { /* noop */ }
-  }
+  try { await pollOne(chatId); } catch (_) { /* noop */ }
   const lines = w.last != null ? w.last.split('\n') : null;
   const mode = modeOf(w);
   return lines || mode ? { lines, mode } : null;
@@ -206,7 +241,7 @@ function stop() {
 }
 
 module.exports = {
-  watch, unwatch, setEmitter, snapshotFor, modeFor, stop,
+  watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
   parseMode, extractMode, MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,
 };

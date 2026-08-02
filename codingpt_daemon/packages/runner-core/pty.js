@@ -586,7 +586,15 @@ async function attachPty(params, io) {
 
   // ── 와이어 의미(stdin / text) 처리기 한 벌 — 모든 전송·암호 모드가 공유한다 ──
   // 옛 "바이너리 프레임" 경로.
+  // 입력이 지나갈 때 **모드 감시자에게 알린다** — shift+tab(CSI Z)이면 그 터미널을 즉시 다시 읽어
+  //  채팅 알약이 3초 폴링을 기다리지 않고 곧바로 따라온다(사용자 요청 2026-08-02). 다른 키는 무시.
+  //  ⚠ 우리 입력 경로를 지나가는 키만 보인다 — 사용자가 Mac 터미널에서 직접 누른 건 폴링/캐치업이 잡는다.
+  const notifyInput = (payload) => {
+    if (!paneId) return;
+    try { require('./status-line').onTerminalInput(termSession(session, tid), payload); } catch (_) { /* noop */ }
+  };
   const handleStdin = (buf) => {
+    notifyInput(buf);
     try { pty.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
   };
   // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
@@ -610,6 +618,7 @@ async function attachPty(params, io) {
         return;
       }
     } catch (_) { /* JSON 아니면 일반 입력 */ }
+    notifyInput(str);
     try { pty.write(str); } catch (_) { /* noop */ }
   };
 

@@ -240,6 +240,10 @@ export class ChatView {
     if (this._visible) {
       this._retarget();          // 활성 터미널 탭 기준으로 열기(변경됐으면 재오픈)
       this._startPoll();
+      // 같은 터미널로 돌아온 경우 _retarget 은 아무것도 하지 않는다(폭주 방지) → 여기서 한 번
+      //  캐치업한다. TUI 에서 모드를 바꾸고 채팅으로 넘어오는 순간 알약이 **즉시** 맞아야 하기
+      //  때문이다(사용자 요청 2026-08-02). since 응답이 현재 모드를 싣고 온다.
+      if (this._chatId) this._catchUp();
       this._renderApprovals();
       // 진입 즉시 컴포저 포커스(레이아웃 확정 후 한 프레임 뒤 — display 전환 직후 focus 는 무시된다)
       requestAnimationFrame(() => {

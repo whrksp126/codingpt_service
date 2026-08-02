@@ -156,6 +156,47 @@ test('unwatch 후엔 폴링·emit 이 없다', async () => {
   } finally { restore(); sl.stop(); }
 });
 
+test('shift+tab(CSI Z)이 입력 경로를 지나가면 3초 폴링을 기다리지 않고 즉시 다시 읽는다', async () => {
+  // 사용자 요청(2026-08-02): "바꾸는 순간 바로" — 폴링은 놓쳤을 때의 안전망이고, 우리 터미널
+  //  입력으로 지나가는 그 키는 즉시 확인한다. (Mac 터미널에서 직접 누른 건 폴링/캐치업이 잡는다.)
+  const ptyLib = require('../pty');
+  let screen = claudeScreen({ footer: CLAUDE_FOOTER });          // auto
+  const restore = mockTmux(() => screen);
+  const emitted = [];
+  sl.setEmitter((chatId, lines, mode) => emitted.push(mode && mode.id));
+  try {
+    sl.watch('c_poke', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepStrictEqual(emitted, ['auto']);
+    const term = ptyLib.termSession(ptyLib.sessionForCwd(CWD).session, TID);
+    // 화면이 plan 으로 바뀐 직후 그 키가 지나간다 → 폴링 주기(3s) 전에 emit 돼야 한다.
+    screen = claudeScreen({ footer: '  -- INSERT -- ⏸ plan mode on (shift+tab to cycle)' });
+    sl.onTerminalInput(term, Buffer.from('\x1b[Z'));
+    await new Promise((r) => setTimeout(r, 250));
+    assert.deepStrictEqual(emitted, ['auto', 'plan'], '즉시 확인이 새 모드를 알린다(폴링 3s 전에)');
+    await new Promise((r) => setTimeout(r, 500));   // 리페인트 보정용 2차 확인까지 소진시킨다
+    // 다른 키/다른 터미널은 아무 일도 하지 않는다(폴링 폭주 방지).
+    screen = claudeScreen({ footer: CLAUDE_FOOTER });
+    sl.onTerminalInput(term, 'abc');
+    sl.onTerminalInput('cpt-other--t-1', Buffer.from('\x1b[Z'));
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepStrictEqual(emitted, ['auto', 'plan'], '무관한 입력에는 재확인하지 않는다');
+  } finally { restore(); sl.stop(); }
+});
+
+test('chat.open 스냅샷은 캐시가 아니라 지금 화면을 읽는다(토글 즉시 정확)', async () => {
+  let screen = claudeScreen({ footer: CLAUDE_FOOTER });          // auto
+  const restore = mockTmux(() => screen);
+  sl.setEmitter(() => {});
+  try {
+    sl.watch('c_fresh', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    screen = claudeScreen({ footer: '  -- INSERT -- ⏸ plan mode on (shift+tab to cycle)' });
+    const snap = await sl.snapshotFor('c_fresh');
+    assert.strictEqual(snap.mode.id, 'plan', '토글 시점의 화면이 정본(캐시 auto 가 아니다)');
+  } finally { restore(); sl.stop(); }
+});
+
 test('지원 외 에이전트/tid 없음은 등록되지 않는다', () => {
   sl.watch('c_x', { cwdRel: CWD, tid: TID, agent: 'gemini' });
   sl.watch('c_y', { cwdRel: CWD, tid: null, agent: 'claude' });
