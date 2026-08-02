@@ -21,7 +21,7 @@ import { ansiToHtml } from "./ansi.js";
 import { termTheme } from "./theme.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
-  mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
+  mergeMsgs, lastSeqOf, clampLines, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
   composerHasText, agentDisplayName, agentModeView, agentModeChoices, patchLines,
   TOOL_GROUP_MIN, toolRunLabel,
@@ -536,8 +536,9 @@ export class ChatView {
   _buildRow(m) {
     const row = document.createElement("div");
     row.dataset.seq = String(m.seq);
-    // 시각은 행마다 노출하지 않고 툴팁으로만 — 말풍선마다 시간을 박으면 대화 리듬이 깨진다(Claude 앱 동일).
-    if (m.ts) row.title = fmtTime(m.ts);
+    // ★ 행에 title 을 달지 않는다(사용자 요구 2026-08-02): 대화 어디에 마우스를 올려도 OS 툴팁으로
+    //  시각이 따라다녀서 읽는 데 방해가 됐다. 시각은 어차피 화면에 안 쓰는 값이라(말풍선마다 시간을
+    //  박지 않는 것이 원래 규칙) 툴팁까지 없애면 그냥 조용해진다.
     const text = String(m.text || "");
 
     if (m.role === "user" && (m.kind === "text" || m.kind === "slash")) {

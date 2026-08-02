@@ -355,14 +355,6 @@ export function clampLines(text, n) {
   return { head: lines.slice(0, n).join("\n"), rest: lines.length - n };
 }
 
-// 시각(HH:MM) — 알림 패널(notifications.js fmtTime)과 같은 규칙.
-export function fmtTime(ts) {
-  const d = ts == null ? null : new Date(ts);
-  if (!d || isNaN(d.getTime())) return "";
-  const p = (x) => String(x).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
 // 남은 시간(승인 카운트다운) — "2:43" / "0:07" / 만료면 null.
 export function remainMs(deadlineAt) {
   const left = Number(deadlineAt) - Date.now();
