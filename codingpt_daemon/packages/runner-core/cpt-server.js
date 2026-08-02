@@ -687,6 +687,7 @@ async function dispatch(req, conn) {
   }
   if (cmd === 'chat.mode') return chatMode(req.args || {});
   if (cmd === 'chat.commands') return chatCommands(req.args || {});
+  if (cmd === 'chat.dialog') return chatDialog(req.args || {});
   // 채팅 스냅샷/캐치업도 같은 이유로 로컬 직결(PC 앱 전용) — 토글할 때마다 back 왕복 255ms 를
   //  물던 자리다. 데몬 구현은 back 경로와 **같은 transcript.handle** 이고, ws 를 넘기지 않으므로
   //  push 대상(제어 WS)은 그대로 유지된다(transcript.js:1513 `if (ws) pushWs = ws`).
@@ -1617,6 +1618,56 @@ async function driveCodexMode(io, { mode } = {}) {
 }
 
 /**
+ * chat.dialog — 채팅 카드로 미러한 TUI 선택 화면을 조작한다. { cwd, tid, pick|cancel, expect? }
+ *  · pick   = 그 번호 키를 누른다(실측: claude /model · codex /permissions 모두 숫자 한 번에 적용).
+ *             일부 화면은 번호가 커서만 옮기므로, 그대로 남아 있으면 Enter 를 **한 번만** 덧붙인다.
+ *  · cancel = Escape.
+ * ★ expect(제목)를 반드시 대조한다: 카드를 누르는 사이 화면이 바뀌었으면 **다른 질문에 대신 답하는**
+ *   사고가 된다(승인 다이얼로그 조작에서 확립된 규율 — QUESTION_MISMATCH 와 같은 이유).
+ */
+async function driveDialog(io, { pick, cancel, expect } = {}) {
+  const statusLib = require('./status-line');
+  const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const cur = statusLib.extractDialog(await io.screen());
+  if (!cur) throw Object.assign(new Error('지금 이 터미널에 선택 화면이 떠 있지 않습니다'), { code: 'DIALOG_GONE' });
+  if (expect && String(expect).trim() && cur.title !== String(expect).trim()) {
+    throw Object.assign(new Error('화면의 선택지가 카드와 다릅니다 — 다시 확인해 주세요'), { code: 'DIALOG_MISMATCH' });
+  }
+  if (cancel) {
+    await io.key('Escape');
+    await sleep(CODEX_STEP_MS);
+    return { ok: true, dialog: statusLib.extractDialog(await io.screen()) };
+  }
+  const n = parseInt(pick, 10);
+  if (!(n >= 1 && n <= cur.options.length)) {
+    throw Object.assign(new Error('선택 번호가 올바르지 않습니다'), { code: 'BAD_REQUEST' });
+  }
+  await io.key(String(n), true);
+  let enterTried = false;
+  for (let i = 0; i < CODEX_WAIT_TRIES; i++) {
+    await sleep(CODEX_STEP_MS);
+    const next = statusLib.extractDialog(await io.screen());
+    // 같은 화면이 그대로면(번호가 커서만 옮기는 형식) Enter 로 확정 — 딱 한 번만 시도한다.
+    if (!next || next.title !== cur.title) return { ok: true, dialog: next || null };
+    if (!enterTried && i >= 2) { enterTried = true; await io.key('Enter'); }
+  }
+  throw Object.assign(new Error('선택이 반영되지 않았습니다 — TUI 를 확인해 주세요'), { code: 'DIALOG_STUCK' });
+}
+
+/** chat.dialog — { cwd, tid, pick|cancel, expect? } → { ok, tid, dialog }. */
+async function chatDialog({ cwd, tid, pick, cancel, expect } = {}) {
+  const { io, win } = dialogIoFor(cwd, tid, { keyGapMs: MODE_KEY_GAP_MS });
+  await io.ready;
+  const r = await driveDialog(io, { pick, cancel, expect });
+  // 감시자를 깨워 다른 기기의 카드도 즉시 갱신한다(폴링 3초를 기다리지 않는다).
+  try {
+    const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+    require('./status-line').pokeTermSession(ptyLib.termSession(session, win));
+  } catch (_) { /* noop */ }
+  return { ...r, tid: win };
+}
+
+/**
  * chat.commands — { cwd, tid, agent? } → { agent, items:[{name,desc,chat,source}] }.
  *  TUI 의 `/` 목록을 채팅 팔레트로 내준다(commands.js 헤더가 카탈로그 정본).
  *  에이전트는 호출측이 주면 그걸 쓰고(대화에서 이미 안다), 없으면 화면으로 판정한다.
@@ -1883,6 +1934,8 @@ module.exports = {
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
   chatMode, // 에이전트 모드 전환(shift+tab 드라이브) — control.js 의 chat.mode 가 위임
   chatCommands, // 슬래시 명령 팔레트 목록 — control.js 의 chat.commands 가 위임
+  chatDialog, // TUI 선택 화면 카드 조작 — control.js 의 chat.dialog 가 위임
+  _driveChatDialog: driveDialog, // 테스트/격리 검증용(io 주입)
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임
   captureDialog, // 훅 대기 중 TUI 다이얼로그 캡처 — approvals 의 카드 내용 보강이 위임

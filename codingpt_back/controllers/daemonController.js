@@ -1384,6 +1384,13 @@ const chatMode = chatRpc('chat.mode', (req) => ({
 }), 20000);
 // POST /api/daemon/chat/commands  { cwd, tid, agent? } → { agent, items:[{name,desc,chat,source}] }
 //  TUI 의 `/` 명령 목록(빌트인 실측표 + 그 PC 디스크에서 발견한 스킬/커스텀 명령). 읽기 전용.
+// POST /api/daemon/chat/dialog  { cwd, tid, pick?|cancel?, expect? } → { ok, dialog }
+//  채팅 카드로 미러한 TUI 선택 화면 조작. 데몬이 화면을 대조(expect)한 뒤에만 키를 친다.
+const chatDialog = chatRpc('chat.dialog', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid,
+  pick: bOf(req).pick, cancel: !!bOf(req).cancel,
+  expect: typeof bOf(req).expect === 'string' ? bOf(req).expect.slice(0, 200) : undefined,
+}), 20000);
 const chatCommands = chatRpc('chat.commands', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid,
   agent: typeof bOf(req).agent === 'string' ? bOf(req).agent : undefined,
@@ -1599,7 +1606,7 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatFile,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatDialog, chatFile,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

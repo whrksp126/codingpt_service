@@ -89,6 +89,84 @@ function parseCodexMode(statusText) {
   };
 }
 
+// ── TUI 선택 다이얼로그 미러 ───────────────────────────────────────────────────
+// `/model`·`/permissions` 처럼 **번호 선택 화면**을 여는 명령이 많다(claude 95개·codex 46개 중 상당수).
+//  채팅에서 그 명령을 보내면 TUI 에는 화면이 뜨는데 채팅에는 아무것도 안 보여서 "먹통"으로 읽힌다.
+//  → 화면을 파싱해 카드로 그대로 미러하고, 카드의 버튼이 그 번호를 눌러 준다(사용자 확정 2026-08-02).
+//
+// 판정(실캡처 기준 — claude 2.1.220 `/model`, codex 0.146.0 `/permissions`·`Enable full access?`):
+//  ① 아래쪽에 **푸터 힌트**가 있다: `Esc to cancel` / `Press enter to confirm or esc to go back` 등.
+//     이 조건이 오탐 방어의 핵심이다 — 대화 본문의 "1. …" 목록은 이 줄이 없다.
+//  ② 그 위로 **번호 옵션**이 2개 이상. 들여쓴 다음 줄은 그 옵션의 설명으로 이어 붙인다.
+//  ③ 제목 = 옵션 위의 가장 가까운 비어있지 않은 줄.
+//  ⚠ 승인/질문 다이얼로그(`Do you want to …`)는 **제외**한다 — 훅 경로의 자기 카드가 이미 있어서
+//    여기서 또 그리면 같은 질문이 화면에 두 번 뜬다(과거 실사고와 같은 계열).
+const DIALOG_FOOTER_RE = /(esc to (cancel|go back)|press enter|enter to (confirm|select|set|choose))/i;
+const DIALOG_OPT_RE = /^\s*[❯›>]?\s*([1-9])\.\s+(.+?)\s*$/;
+const DIALOG_OWN_CARD_RE = /(Do you want to|Would you like to)/;
+const DIALOG_MAX_OPTS = 9;
+const DIALOG_SCAN_LINES = 40;
+
+/** 화면 → { title, desc, options:[{n,label,desc}], footer } | null. 순수 함수 — 테스트 정본. */
+function extractDialog(screen) {
+  const raw = stripAnsi(screen || '');
+  if (!raw.trim() || DIALOG_OWN_CARD_RE.test(raw)) return null;
+  const lines = raw.split('\n').map((l) => l.replace(/\s+$/, ''));
+  let fi = -1;
+  for (let i = lines.length - 1; i >= 0; i--) { if (DIALOG_FOOTER_RE.test(lines[i])) { fi = i; break; } }
+  if (fi < 0) return null;
+
+  const opts = [];
+  let firstIdx = -1;
+  // ⚠ 아래에서 위로 훑는다 → 줄바꿈된 설명은 **자기 옵션보다 먼저** 만난다. 바로 담아 두었다가
+  //  다음(위쪽) 옵션에 붙인다. 만나는 즉시 opts[0] 에 붙이면 **아래 옵션의 설명**이 되어 어긋난다.
+  let pending = [];
+  for (let i = fi - 1; i >= 0 && fi - i < DIALOG_SCAN_LINES; i--) {
+    const m = DIALOG_OPT_RE.exec(lines[i]);
+    if (m) {
+      const [label, desc] = splitCols(m[2]);
+      const full = [desc, ...pending].filter(Boolean).join(' ');
+      pending = [];
+      opts.unshift({ n: parseInt(m[1], 10), label, desc: full });
+      firstIdx = i;
+      continue;
+    }
+    if (!lines[i].trim()) continue;
+    if (/^\s{4,}/.test(lines[i])) { pending.unshift(lines[i].trim()); continue; }  // 옵션 줄바꿈(설명 이어짐)
+    if (opts.length) break;                       // 옵션 블록 위 = 제목 구역
+  }
+  if (opts.length < 2 || firstIdx < 0) return null;
+  // 번호가 1부터 이어져야 한다(대화 본문의 목록이 우연히 걸리는 것 방지).
+  if (opts[0].n !== 1 || opts.some((o, i) => o.n !== i + 1) || opts.length > DIALOG_MAX_OPTS) return null;
+
+  const head = [];
+  for (let i = firstIdx - 1; i >= 0 && firstIdx - i < 8; i--) {
+    const t = lines[i].trim();
+    if (!t) { if (head.length) break; else continue; }
+    if (/^[─━▔═\-]{6,}$/.test(t)) break;
+    head.unshift(t);
+    if (head.length >= 4) break;
+  }
+  if (!head.length) return null;
+  return {
+    title: head[0],
+    desc: head.slice(1).join(' ').slice(0, 400),
+    options: opts.map((o) => ({ n: o.n, label: o.label.slice(0, 120), desc: (o.desc || '').slice(0, 200) })),
+    footer: lines[fi].trim().slice(0, 160),
+  };
+}
+
+/** "라벨   설명" (2칸 이상 공백) → [라벨, 설명]. TUI 가 열로 그리는 그 구분. */
+function splitCols(s) {
+  const m = /^(.*?)\s{2,}(.*)$/.exec(String(s || ''));
+  return m ? [m[1].trim(), m[2].trim()] : [String(s || '').trim(), ''];
+}
+
+/** 다이얼로그 동일성 키 — 같은 화면이면 다시 push 하지 않는다. */
+function dialogKeyOf(d) {
+  return d ? `${d.title}|${d.options.map((o) => o.n + o.label).join('|')}` : null;
+}
+
 /** 화면 → 어느 CLI 인가('claude'|'codex'|null). 터미널만 알고 에이전트를 모르는 경로(chat.mode)용. */
 function detectAgent(screen) {
   const plain = stripAnsi(screen || '');
@@ -196,7 +274,7 @@ function extractStatusLines(screen, agent) {
 function watch(chatId, { cwdRel, tid, agent } = {}) {
   if (!chatId || !Number.isInteger(tid)) return;
   if (agent !== 'claude' && agent !== 'codex') return; // 추출 규칙이 있는 에이전트만
-  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null, lastMode: null, mode: null });
+  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null, lastMode: null, mode: null, dialog: null, dialogKey: null });
   ensureTimer();
   // 첫 페인트를 틱까지 기다리지 않는다 — 즉시 1회.
   pollOne(chatId).catch(() => { /* noop */ });
@@ -236,12 +314,20 @@ async function pollOne(chatId) {
   const key = lines ? lines.join('\n') : null;
   const linesChanged = key != null && key !== w.last;
   if (linesChanged) w.last = key;
-  if (!linesChanged && !modeChanged) return;  // 변화 없음(추출 불가면 이전 값 유지 — 깜빡임 방지)
-  if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w));
+  // 선택 다이얼로그(/model 류)는 **떴다/사라졌다**가 곧 상태 변화다 — 사라지면 null 로 밀어 카드를 걷는다.
+  const dialog = extractDialog(screen);
+  const dKey = dialogKeyOf(dialog);
+  const dialogChanged = dKey !== w.dialogKey;
+  if (dialogChanged) { w.dialogKey = dKey; w.dialog = dialog; }
+  if (!linesChanged && !modeChanged && !dialogChanged) return;  // 변화 없음(추출 불가면 이전 값 유지)
+  if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w), w.dialog || null);
 }
 
 /** 캐치업(chat.since)용 — 지금 알고 있는 모드({id,label,symbol}) | null. 캡처하지 않는다(캐시 읽기). */
 function modeFor(chatId) { return modeOf(watches.get(chatId)); }
+
+/** 캐치업용 — 지금 화면에 떠 있는 선택 다이얼로그 | null(push 를 놓쳐도 pull 로 화해된다). */
+function dialogFor(chatId) { const w = watches.get(chatId); return (w && w.dialog) || null; }
 
 // ── 즉시 확인(poke) ────────────────────────────────────────────────────────────
 // 3초 폴링은 **놓쳤을 때의 안전망**이고, 모드가 바뀌는 순간을 알 수 있으면 그때 바로 확인하는 게
@@ -300,7 +386,8 @@ async function snapshotFor(chatId) {
   try { await pollOne(chatId); } catch (_) { /* noop */ }
   const lines = w.last != null ? w.last.split('\n') : null;
   const mode = modeOf(w);
-  return lines || mode ? { lines, mode } : null;
+  const dialog = w.dialog || null;
+  return lines || mode || dialog ? { lines, mode, dialog } : null;
 }
 
 function stop() {
@@ -310,7 +397,7 @@ function stop() {
 
 module.exports = {
   watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
-  parseMode, parseCodexMode, extractMode, detectAgent, modeSpec,
+  parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, detectAgent, modeSpec,
   MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   CODEX_MODE_IDS: CODEX_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,

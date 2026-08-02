@@ -432,6 +432,16 @@ function dispatchRpc(ws, method, params, ok, fail) {
       .then(ok).catch(fail);
     return;
   }
+  // chat.dialog — 채팅 카드로 미러한 TUI 선택 화면 조작(번호 누르기/취소). 화면을 만지므로 cpt-server.
+  if (method === 'chat.dialog') {
+    const p = params || {};
+    Promise.resolve()
+      .then(() => cptServer.chatDialog({
+        cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, pick: p.pick, cancel: p.cancel, expect: p.expect,
+      }))
+      .then(ok).catch(fail);
+    return;
+  }
   if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }

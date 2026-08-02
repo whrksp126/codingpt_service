@@ -103,6 +103,7 @@ export class ChatView {
       <div class="chat-banner hidden"></div>
       <div class="chat-scroll"></div>
       <div class="chat-approvals"></div>
+      <div class="chat-tuidlg hidden"></div>
       <div class="chat-statusline hidden"></div>
       <div class="chat-composer">
         <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
@@ -126,6 +127,13 @@ export class ChatView {
     this.jumpNEl = el.querySelector(".chat-jump-n");
     this.apprEl = el.querySelector(".chat-approvals");
     this.statusEl = el.querySelector(".chat-statusline");
+    this.dlgEl = el.querySelector(".chat-tuidlg");
+    // 카드 조작 — 옵션 버튼 = 그 번호 키, ✕ = Esc(둘 다 데몬이 화면을 대조한 뒤에만 친다).
+    this.dlgEl.addEventListener("click", (e) => {
+      if (e.target.closest(".chat-tuidlg-x")) { void this._pickDialog(0, true); return; }
+      const opt = e.target.closest(".chat-tuidlg-opt");
+      if (opt) void this._pickDialog(parseInt(opt.dataset.n, 10), false);
+    });
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
@@ -341,6 +349,7 @@ export class ChatView {
           this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
           this._setStatusLines([]); // statusline 잔상도 함께
           this._setMode(r.statusMode || null); // 모드 알약도 새 대상 기준(대화가 없어도 TUI 는 돌 수 있다)
+          this._setDialog(r.statusDialog || null);
           this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
           this._renderBlank();
           return;
@@ -356,6 +365,7 @@ export class ChatView {
         this._openFailed = null;
         this._setStatusLines(r.statusLines || []); // 새 대상의 statusline(없으면 이전 잔상 제거)
         this._setMode(r.statusMode || null);       // 모드 알약(claude 만 — 없으면 숨김)
+        this._setDialog(r.statusDialog || null);   // TUI 선택 화면이 떠 있으면 카드로(토글 즉시 정확)
         this._ingest(r.messages || [], { snapshot: true });
         this._setBanner("");
       } catch (e) {
@@ -453,6 +463,8 @@ export class ChatView {
       // 모드는 **캐치업이 정본**이다 — push 는 변경 순간 1회뿐이라 그때 소켓이 끊겨 있었으면(앱 백그라운드·
       //  재접속) 영영 놓치고, 그 뒤로 화면이 안 변하면 알약이 옛 모드로 굳는다(2026-08-02 사용자 신고).
       if (r && r.statusMode && !this._modeBusy) this._setMode(r.statusMode);
+      // 캐치업이 다이얼로그의 **정본**이다(push 를 놓쳐도 유령 카드가 남지 않는다).
+      if (r && "statusDialog" in r && !this._dlgBusy) this._setDialog(r.statusDialog || null);
       if (r && r.epochChanged) {
         this._epoch = r.epoch || this._epoch;
         this._resetBuffer();
@@ -1740,6 +1752,69 @@ export class ChatView {
   _applyStatusFrame(control) {
     this._setStatusLines((control && control.lines) || []);
     if (!this._modeBusy && control && control.mode) this._setMode(control.mode);
+    // dialog 는 **항상** 반영한다(null 이면 카드를 걷는다) — 없어진 화면의 유령 카드가 최악이다.
+    if (control && "dialog" in control) this._setDialog(control.dialog);
+  }
+
+  // ── TUI 선택 화면 미러 카드 ────────────────────────────────────────────────────
+  // `/model`·`/permissions` 처럼 선택 화면을 여는 명령을 채팅에서 보내면, TUI 에는 화면이 뜨는데
+  //  채팅은 아무 반응이 없어 "먹통"으로 읽힌다(사용자 확정 2026-08-02: 카드로 미러하고 채팅에서 고른다).
+  //  카드의 버튼 = 그 번호 키. 데몬이 **화면 제목을 대조한 뒤에만** 키를 친다(다른 질문 오답 방지).
+  _setDialog(d) {
+    const same = JSON.stringify(this._dialog || null) === JSON.stringify(d || null);
+    this._dialog = d || null;
+    if (same) return;
+    this._renderDialog();
+  }
+
+  _renderDialog() {
+    const d = this._dialog;
+    if (!this.dlgEl) return;
+    if (!d) { this.dlgEl.classList.add("hidden"); this.dlgEl.innerHTML = ""; return; }
+    this.dlgEl.classList.remove("hidden");
+    this.dlgEl.innerHTML =
+      `<div class="chat-tuidlg-head">` +
+        `<span class="chat-tuidlg-title">${escapeHtml(d.title || "")}</span>` +
+        `<button class="chat-tuidlg-x" type="button" title="닫기(Esc)">✕</button>` +
+      `</div>` +
+      (d.desc ? `<div class="chat-tuidlg-desc">${escapeHtml(d.desc)}</div>` : "") +
+      `<div class="chat-tuidlg-opts">` +
+        (d.options || []).map((o) =>
+          `<button class="chat-tuidlg-opt" type="button" data-n="${o.n}">` +
+          `<span class="chat-tuidlg-n">${o.n}</span>` +
+          `<span class="chat-tuidlg-label">${escapeHtml(o.label || "")}</span>` +
+          (o.desc ? `<span class="chat-tuidlg-odesc">${escapeHtml(o.desc)}</span>` : "") +
+          `</button>`).join("") +
+      `</div>` +
+      (d.footer ? `<div class="chat-tuidlg-foot">${escapeHtml(d.footer)}</div>` : "");
+  }
+
+  async _driveDialog(body) {
+    const cwd = this._cwd(), tid = this._tid;
+    if (this.ctx.isLocal?.()) return api.chatLocal("chat.dialog", { cwd, tid, ...body });
+    return api.chatDialog({ cwd, tid, ...body, hostDeviceId: this.ctx.hostDeviceId?.() });
+  }
+
+  async _pickDialog(n, cancel) {
+    const d = this._dialog;
+    if (!d || this._dlgBusy) return;
+    this._dlgBusy = true;
+    this.dlgEl?.classList.add("busy");
+    try {
+      const r = await this._driveDialog(cancel ? { cancel: true, expect: d.title } : { pick: n, expect: d.title });
+      if (this._disposed) return;
+      this._setDialog((r && r.dialog) || null);   // 이어지는 확인 화면이 있으면 그게 곧 다음 카드가 된다
+      this._setBanner("");
+    } catch (e) {
+      if (this._disposed) return;
+      const msg = String(e || "");
+      if (/DIALOG_MISMATCH/.test(msg)) this._setBanner("터미널 화면이 바뀌었어요 — 다시 확인해 주세요.", "warn");
+      else if (/DIALOG_GONE/.test(msg)) { this._setDialog(null); }
+      else this._setBanner("선택을 전달하지 못했어요 — TUI 를 확인해 주세요.", "warn");
+    } finally {
+      this._dlgBusy = false;
+      this.dlgEl?.classList.remove("busy");
+    }
   }
 
   // ── 에이전트 권한 모드 알약 + 목록 ─────────────────────────────────────────────

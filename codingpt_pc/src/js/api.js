@@ -252,6 +252,7 @@ export const api = {
   // 대화가 참조한 파일 바이트(이미지/영상 인라인) — 권한 판정은 데몬(그 대화에 적힌 경로만).
   chatFile: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/file", body: body || {}, timeoutSecs: 40 }),
   // TUI `/` 명령 목록(팔레트) — 읽기 전용. 로컬 터미널이면 chatLocal 로 사이드카 직결이 더 빠르다.
+  chatDialog: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/dialog", body: body || {}, timeoutSecs: 25 }),
   chatCommands: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/commands", body: body || {}, timeoutSecs: 20 }),
 
   // ── 작업 스냅샷(자동 체크포인트) ──

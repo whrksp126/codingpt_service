@@ -122,5 +122,27 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   ok("앱: 서비스가 /chat/commands 를 친다", /chat\/commands/.test(app("src/services/chatService.ts")));
 }
 
+// ── TUI 선택 화면 미러(카드) 배관 핀 ──────────────────────────────────────────
+{
+  const sl = read("../../codingpt_daemon/packages/runner-core/status-line.js");
+  ok("데몬: 화면에서 선택 다이얼로그를 읽는다(푸터 힌트 + 번호 옵션)", /function extractDialog/.test(sl) && /DIALOG_FOOTER_RE/.test(sl));
+  ok("데몬: 승인/질문 다이얼로그는 미러 제외(자기 카드가 이미 있다)", /DIALOG_OWN_CARD_RE/.test(sl));
+  const ts0 = read("../../codingpt_daemon/packages/runner-core/transcript.js");
+  ok("데몬: 사라지면 null 을 실어 카드를 걷는다(필드를 빼면 유령 카드가 남는다)", /dialog: dialog \|\| null/.test(ts0));
+  const cs2 = read("../../codingpt_daemon/packages/runner-core/cpt-server.js");
+  ok("데몬: 카드 조작은 제목을 대조한 뒤에만 키를 친다", /DIALOG_MISMATCH/.test(cs2) && /cur\.title !== String\(expect\)/.test(cs2));
+  ok("데몬: 번호로 안 닫히면 Enter 를 한 번만 덧붙인다", /enterTried/.test(cs2));
+  const ts3 = read("../../codingpt_daemon/packages/runner-core/transcript.js");
+  ok("데몬: 캐치업이 다이얼로그의 정본(null 포함해서 항상 싣는다)", /statusDialog/.test(ts3) && /dialogFor\(/.test(ts3));
+  const back3 = read("../../codingpt_back/routes/daemonRoutes.js");
+  ok("back: POST /chat/dialog 라우트", /\/chat\/dialog/.test(back3));
+  const cv6 = read("../src/js/chat-view.js");
+  ok("PC: 카드 렌더 + 버튼이 번호를 보낸다", /chat-tuidlg/.test(cv6) && /_pickDialog\(/.test(cv6));
+  ok("PC: 캐치업으로 카드를 화해한다(유령 카드 방지)", /"statusDialog" in r/.test(cv6));
+  const appd = (p) => read(path.resolve(here, "../../../codingpt_app", p));
+  ok("앱: 카드 컴포넌트 + 조작", /TuiDialogCard/.test(appd("src/workspace/chat/ChatBody.tsx")) && /chatService\.chatDialog/.test(appd("src/workspace/chat/ChatBody.tsx")));
+  ok("앱: 스트림이 다이얼로그를 push/pull 양쪽으로 잇는다", /statusDialog/.test(appd("src/workspace/chat/useChatStream.ts")));
+}
+
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
 console.log("\nALL PASS");
