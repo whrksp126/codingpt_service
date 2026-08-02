@@ -52,6 +52,59 @@ const CLAUDE_MODES = [
   { id: 'default', re: /manual mode on/, label: 'manual mode on', symbol: '⏸' },
 ];
 
+// ── codex 모드 — claude 와 **구조가 다르다**(0.146.0 실측 2026-08-02, 격리 tmux) ───────────────
+// 상태줄 원문:
+//   `gpt-5.6-sol low fast · Context 0% used · Fast on · Approve for me · 1M window       Plan mode`
+//  ① 권한 3종은 `/permissions` 다이얼로그로 바꾸고(숫자키 한 번에 즉시 적용 — Enter 불필요),
+//     지금 값이 상태줄에 **원문 라벨 그대로** 뜬다: Ask for approval / Approve for me / Full Access.
+//  ② 계획 모드는 shift+tab **토글**이다(claude 처럼 순환이 아니다). 켜지면 상태줄 오른쪽 끝에 `Plan mode`.
+//  ③ 둘은 **독립**이다 — 계획 모드를 켜도 권한 라벨은 그대로 남는다. 그래서 알약 하나에 둘 다 싣고
+//     (`Plan mode · Approve for me`), 선택 목록에서도 계획은 토글, 권한은 라디오로 다룬다.
+//  ⚠ 판정은 반드시 **상태줄 구역**(컴포저 `›` 아래)에서만 한다: 본문에는 `• Permissions updated to
+//   Ask for approval` / `• Model changed to … for Plan mode.` 같은 기록이 남아 화면 전체를 훑으면 오독한다.
+//  ④ ★ Full Access 만 상태줄 표기가 다르다: 다이얼로그에서는 `Full Access` 인데 상태줄에는
+//     **`· never ·`**(승인 정책 원값)로 뜬다 — 라이브 실측 2026-08-02. 판별은 둘 다 받아 주고,
+//     보여줄 라벨은 사용자가 고른 이름(`Full Access`)으로 통일한다("never" 만 보면 무엇이 never 인지
+//     알 수 없다). 이 세션은 확인 다이얼로그(`Enable full access?`)도 한 번 더 띄운다(cpt-server).
+const CODEX_MODES = [
+  { id: 'codexPlan', kind: 'plan', re: /\bPlan mode\b/, label: 'Plan mode' },
+  { id: 'codexAsk', kind: 'perm', re: /Ask for approval/, label: 'Ask for approval' },
+  { id: 'codexAuto', kind: 'perm', re: /Approve for me/, label: 'Approve for me' },
+  { id: 'codexFull', kind: 'perm', re: /(Full Access|·\s*never\b)/, label: 'Full Access' },
+];
+
+/** codex 상태줄 텍스트 → { id, label, symbol, plan } | null. 순수 함수 — 테스트 정본. */
+function parseCodexMode(statusText) {
+  const plain = stripAnsi(statusText || '');
+  if (!plain) return null;
+  const plan = /\bPlan mode\b/.test(plain);
+  const perm = CODEX_MODES.find((m) => m.kind === 'perm' && m.re.test(plain));
+  if (!perm) return plan ? { id: 'codexPlan', label: 'Plan mode', symbol: '', plan: true } : null;
+  return {
+    id: perm.id,
+    // 알약 한 줄에 화면의 두 값을 그대로 싣는다(둘 다 TUI 원문 — 번역 금지 규율).
+    label: plan ? `Plan mode · ${perm.label}` : perm.label,
+    symbol: '',
+    plan,
+  };
+}
+
+/** 화면 → 어느 CLI 인가('claude'|'codex'|null). 터미널만 알고 에이전트를 모르는 경로(chat.mode)용. */
+function detectAgent(screen) {
+  const plain = stripAnsi(screen || '');
+  if (!plain) return null;
+  // codex 를 먼저 본다 — 표식이 훨씬 특이하다(컴포저 `›` + 상태줄의 `Context n% used`).
+  if (/^\s*›/m.test(plain) && /Context\s+\d+%\s+used/.test(plain)) return 'codex';
+  if (CLAUDE_FOOTER_RE.test(plain)) return 'claude';
+  return null;
+}
+
+/** 모드 id → 카탈로그 항목(에이전트 무관) | null. 조작(cpt-server)이 kind 로 분기하는 지점. */
+function modeSpec(id) {
+  const s = String(id || '');
+  return CODEX_MODES.find((m) => m.id === s) || CLAUDE_MODES.find((m) => m.id === s) || null;
+}
+
 /** 푸터 텍스트(ANSI 제거 여부 무관) → { id, label, symbol } | null. 순수 함수 — 테스트 정본. */
 function parseMode(footerText) {
   const plain = stripAnsi(footerText || '');
@@ -62,8 +115,13 @@ function parseMode(footerText) {
   return null;
 }
 
-/** 화면 → 현재 모드({id,label,symbol}) | null. claude 전용(codex 는 모드 개념이 달라 미지원). */
+/** 화면 → 현재 모드({id,label,symbol[,plan]}) | null. 에이전트마다 원천이 다르다(위 주석 참조). */
 function extractMode(screen, agent) {
+  if (agent === 'codex') {
+    // 상태줄 구역만 본다(대화 본문의 "Permissions updated to …" 기록을 현재값으로 오독하지 않게).
+    const lines = extractStatusLines(screen, 'codex');
+    return lines ? parseCodexMode(lines.join(' ')) : null;
+  }
   if (agent !== 'claude') return null;
   const footer = claudeFooterOf(screen);
   return footer ? parseMode(footer) : null;
@@ -111,9 +169,14 @@ function extractStatusLines(screen, agent) {
 
   if (agent === 'codex') {
     // 마지막 `›` 줄(컴포저) 아래의 비어있지 않은 줄들.
+    //  ⚠ codex 는 **다이얼로그의 선택 커서도 `›`** 다(`› 1. Ask for approval (current)` — /permissions
+    //   실측 2026-08-02). 그걸 컴포저로 오인하면 그 아래 선택지 줄들이 상태줄로 미러되고, 모드 파싱은
+    //   "2. Approve for me" 를 현재 값으로 읽어 **틀린 모드**를 보여준다. 번호 옵션 줄은 컴포저가 아니다.
     let ci = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (/^\s*›/.test(stripAnsi(lines[i]))) { ci = i; break; }
+      const plain = stripAnsi(lines[i]);
+      if (/^\s*›\s*[1-9]\.\s/.test(plain)) continue;
+      if (/^\s*›/.test(plain)) { ci = i; break; }
     }
     if (ci < 0) return null;
     const out = [];
@@ -133,7 +196,7 @@ function extractStatusLines(screen, agent) {
 function watch(chatId, { cwdRel, tid, agent } = {}) {
   if (!chatId || !Number.isInteger(tid)) return;
   if (agent !== 'claude' && agent !== 'codex') return; // 추출 규칙이 있는 에이전트만
-  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null, lastMode: null });
+  watches.set(chatId, { cwdRel: typeof cwdRel === 'string' ? cwdRel : '', tid, agent, last: null, lastMode: null, mode: null });
   ensureTimer();
   // 첫 페인트를 틱까지 기다리지 않는다 — 즉시 1회.
   pollOne(chatId).catch(() => { /* noop */ });
@@ -164,9 +227,11 @@ async function pollOne(chatId) {
   // 모드는 statusline 과 **독립**으로 갱신한다 — 커스텀 statusline 이 있으면 푸터(=모드 원천)는
   //  미러 대상에서 빠지므로, 여기서 뽑아 두지 않으면 채팅 알약이 영영 갱신되지 않는다.
   const mode = extractMode(screen, w.agent);
-  const modeKey = mode ? mode.id : null;
+  // 키에 plan 을 넣는다 — codex 는 권한이 그대로여도 계획 모드만 바뀔 수 있고, id 만 보면 그 변화를
+  //  "변화 없음"으로 삼켜 알약이 안 갱신된다.
+  const modeKey = modeKeyOf(mode);
   const modeChanged = mode != null && modeKey !== w.lastMode;
-  if (modeChanged) w.lastMode = modeKey;
+  if (modeChanged) { w.lastMode = modeKey; w.mode = mode; }
   const lines = extractStatusLines(screen, w.agent);
   const key = lines ? lines.join('\n') : null;
   const linesChanged = key != null && key !== w.last;
@@ -210,11 +275,14 @@ function onTerminalInput(termName, bytes) {
   pokeTermSession(termName);
 }
 
-/** watch 엔트리의 마지막 모드 → 와이어 객체({id,label,symbol}) | null. */
+/** 모드 → 변화 판정 키(같은 값이면 push 하지 않는다). */
+function modeKeyOf(mode) {
+  return mode ? `${mode.id}|${mode.plan ? 1 : 0}` : null;
+}
+
+/** watch 엔트리의 마지막 모드 → 와이어 객체({id,label,symbol[,plan]}) | null. */
 function modeOf(w) {
-  if (!w || !w.lastMode) return null;
-  const m = CLAUDE_MODES.find((x) => x.id === w.lastMode);
-  return m ? { id: m.id, label: m.label, symbol: m.symbol } : null;
+  return (w && w.mode) || null;
 }
 
 /** transcript.js 가 push 이미터를 주입한다(순환 require 회피). */
@@ -242,6 +310,8 @@ function stop() {
 
 module.exports = {
   watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
-  parseMode, extractMode, MODE_IDS: CLAUDE_MODES.map((m) => m.id),
+  parseMode, parseCodexMode, extractMode, detectAgent, modeSpec,
+  MODE_IDS: CLAUDE_MODES.map((m) => m.id),
+  CODEX_MODE_IDS: CODEX_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,
 };

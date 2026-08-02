@@ -241,5 +241,84 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
     /Gesture\.Pinch/.test(appf2("src/workspace/chat/ImageViewer.tsx")) && /Gesture\.Pan/.test(appf2("src/workspace/chat/ImageViewer.tsx")));
 }
 
+// ── codex 모드 패리티(2026-08-02) ──────────────────────────────────────────────
+// codex 는 구조가 다르다: 계획 모드 = shift+tab **토글**(권한과 독립), 권한 3종 = /permissions 라디오.
+//  그래서 목록은 "체크 두 개"가 켜질 수 있고, 알약 라벨은 두 값을 조합한다. 세 구현이 같아야 한다.
+{
+  const codexCat = PC.CODEX_MODES.map((m) => ({ id: m.id, symbol: m.symbol, label: m.label, desc: m.desc, toggle: !!m.toggle }));
+  eq("PC codex 카탈로그 = 계획 토글 + 권한 3종", codexCat.map((m) => m.id),
+    ["codexPlan", "codexAsk", "codexAuto", "codexFull"]);
+  eq("PC codex 라벨 = TUI 원문", codexCat.map((m) => m.label),
+    ["Plan mode", "Ask for approval", "Approve for me", "Full Access"]);
+  eq("PC: 지금 모드 id 로 카탈로그가 갈린다(에이전트를 따로 몰라도 된다)", [
+    PC.agentModeChoices({ id: "codexAuto" }).map((m) => m.id),
+    PC.agentModeChoices({ id: "auto" }).map((m) => m.id),
+  ], [["codexPlan", "codexAsk", "codexAuto", "codexFull"], ["default", "acceptEdits", "plan", "auto"]]);
+  // 계획 모드는 권한과 **동시에** 켜질 수 있다 = 체크 두 개(TUI 상태줄과 같은 사실).
+  const cur = { id: "codexAuto", plan: true };
+  eq("PC: 계획+권한 체크가 동시에 켜진다", PC.agentModeChoices(cur).filter((m) => PC.agentModeIsOn(m, cur)).map((m) => m.id),
+    ["codexPlan", "codexAuto"]);
+  eq("PC: 계획이 꺼져 있으면 권한만", PC.agentModeChoices({ id: "codexAuto" }).filter((m) => PC.agentModeIsOn(m, { id: "codexAuto" })).map((m) => m.id), ["codexAuto"]);
+  eq("PC: 알약 라벨 조합(낙관 적용 경로)", [
+    PC.agentModeLabel({ id: "codexAuto", plan: true }),
+    PC.agentModeLabel({ id: "codexAuto" }),
+    PC.agentModeLabel({ id: "auto" }),
+  ], ["Plan mode · Approve for me", "Approve for me", "auto mode on"]);
+
+  const tsPath2 = path.resolve(here, "../../../codingpt_app/src/workspace/chatModel.ts");
+  const r2 = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+    `import(${JSON.stringify(url.pathToFileURL(tsPath2).href)}).then((m) => {
+       const cur = { id: "codexAuto", plan: true };
+       console.log(JSON.stringify({
+         cat: m.CODEX_MODES.map((x) => ({ id: x.id, symbol: x.symbol, label: x.label, desc: x.desc, toggle: !!x.toggle })),
+         choices: m.agentModeChoices(cur).map((x) => x.id),
+         on: m.agentModeChoices(cur).filter((x) => m.agentModeIsOn(x, cur)).map((x) => x.id),
+         labels: [m.agentModeLabel({ id: "codexAuto", plan: true }), m.agentModeLabel({ id: "codexAuto" }), m.agentModeLabel({ id: "auto" })],
+       }));
+     });`], { encoding: "utf8" });
+  let appx = null;
+  try { appx = JSON.parse((r2.stdout || "").trim().split("\n").pop()); } catch (_) { appx = null; }
+  eq("앱 codex 카탈로그 = PC 와 동일", appx && appx.cat, codexCat);
+  eq("앱 codex 선택지/체크 규칙 동일", appx && [appx.choices, appx.on],
+    [["codexPlan", "codexAsk", "codexAuto", "codexFull"], ["codexPlan", "codexAuto"]]);
+  eq("앱 알약 라벨 조합 동일", appx && appx.labels, ["Plan mode · Approve for me", "Approve for me", "auto mode on"]);
+
+  // 데몬이 그 id 들을 전부 알아야 한다(클라가 보낼 수 있는 값 = 데몬이 조작할 수 있는 값).
+  const sl2 = require("../../codingpt_daemon/packages/runner-core/status-line");
+  eq("데몬이 아는 codex 모드 id = 클라 카탈로그", sl2.CODEX_MODE_IDS.slice().sort(), codexCat.map((m) => m.id).sort());
+  // 실캡처 상태줄(0.146.0) → 파싱
+  const LINE = (perm, plan) => `  gpt-5.6-sol low fast · Context 0% used · Fast on · ${perm} · 1M window${plan ? "        Plan mode" : ""}`;
+  eq("데몬 파싱: 권한 3종 + 계획 조합", [
+    sl2.parseCodexMode(LINE("Ask for approval", false)),
+    sl2.parseCodexMode(LINE("Approve for me", true)),
+    sl2.parseCodexMode(LINE("never", false)),
+  ], [
+    { id: "codexAsk", label: "Ask for approval", symbol: "", plan: false },
+    { id: "codexAuto", label: "Plan mode · Approve for me", symbol: "", plan: true },
+    { id: "codexFull", label: "Full Access", symbol: "", plan: false },
+  ]);
+  // 데몬 라벨(알약 정본) 과 클라 카탈로그 라벨이 같은 문자열이어야 한다.
+  for (const m of codexCat) {
+    if (m.toggle) continue;
+    const perm = m.id === "codexFull" ? "never" : m.label;   // Full Access 는 상태줄 표기가 다르다(실측)
+    eq(`데몬 라벨 = 클라 카탈로그(${m.id})`, sl2.parseCodexMode(LINE(perm, false)).label, m.label);
+  }
+
+  const cs2 = read("../../codingpt_daemon/packages/runner-core/cpt-server.js");
+  ok("데몬: codex 는 계획=BTab 토글 · 권한=/permissions 다이얼로그", /driveCodexMode/.test(cs2) && /CODEX_PERM_CMD/.test(cs2));
+  ok("데몬: 어느 CLI 인지 화면으로 판정해 분기", /detectAgent\(screen0\)/.test(cs2));
+  ok("★ 데몬: 컴포저에 사용자의 글이 있으면 Enter 를 치지 않는다(전송 사고 방지)",
+    /typed !== CODEX_PERM_CMD/.test(cs2) && /MODE_BLOCKED/.test(cs2));
+  ok("데몬: Full Access 확인 다이얼로그는 그 제목일 때만 누른다", /codexFullAccessConfirm/.test(cs2) && /Enable full access/.test(cs2));
+  const sl3 = read("../../codingpt_daemon/packages/runner-core/status-line.js");
+  ok("데몬: 다이얼로그 선택 커서(`› 1.`)를 컴포저로 오인하지 않는다", /\[1-9\]\\\.\\s/.test(sl3) || /1-9\]\\.\\s/.test(sl3));
+  const cv5 = read("../src/js/chat-view.js");
+  ok("PC: 토글 항목은 '이미 그 모드'여도 통과시킨다(끄기)", /spec && spec\.toggle/.test(cv5));
+  const appc = (p) => read(path.resolve(here, "../../../codingpt_app", p));
+  ok("앱: 시트가 토글/라디오를 같은 규칙으로 표시", /agentModeIsOn/.test(appc("src/workspace/chat/AgentModeSheet.tsx")));
+  ok("앱: 모드 선택도 낙관 적용 후 실패 시 되돌린다", /setStatusMode\(prev\)/.test(appc("src/workspace/chat/ChatBody.tsx")));
+}
+
+
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
 console.log("\nALL PASS");

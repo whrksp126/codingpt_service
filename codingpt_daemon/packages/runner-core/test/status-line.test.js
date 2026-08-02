@@ -99,7 +99,8 @@ test('모드: 커스텀 statusline 이 있어도 화면에서 모드를 뽑는�
   const screen = claudeScreen({ status: [CLAUDE_STATUS], footer: CLAUDE_FOOTER_INSERT });
   assert.deepStrictEqual(sl._extract(screen, 'claude'), [CLAUDE_STATUS]);
   assert.strictEqual(sl.extractMode(screen, 'claude').id, 'auto');
-  assert.strictEqual(sl.extractMode(screen, 'codex'), null, 'codex 는 모드 개념이 달라 미지원');
+  // claude 화면을 codex 규칙으로 읽으면 아무것도 안 나온다(에이전트별 원천이 완전히 다르다).
+  assert.strictEqual(sl.extractMode(screen, 'codex'), null);
 });
 
 test('모드: 좁은 폭에서 감싸진 푸터에서도 라벨이 살아 있다(40컬럼 실측)', () => {
@@ -194,6 +195,26 @@ test('chat.open 스냅샷은 캐시가 아니라 지금 화면을 읽는다(토�
     screen = claudeScreen({ footer: '  -- INSERT -- ⏸ plan mode on (shift+tab to cycle)' });
     const snap = await sl.snapshotFor('c_fresh');
     assert.strictEqual(snap.mode.id, 'plan', '토글 시점의 화면이 정본(캐시 auto 가 아니다)');
+  } finally { restore(); sl.stop(); }
+});
+
+test('codex: 권한이 그대로여도 계획 모드만 바뀌면 다시 알린다(변화 판정에 plan 포함)', async () => {
+  // 실측(0.146.0): 상태줄 한 줄에 권한과 계획이 함께 뜬다. id 만 비교하면 계획 토글이
+  //  "변화 없음"으로 삼켜져 알약이 안 바뀐다 — 사용자에겐 "반영이 안 되는 버그"로 보인다.
+  const line = (plan) => `  gpt-5.6-sol low fast · Context 0% used · Fast on · Approve for me · 1M window${plan ? '        Plan mode' : ''}`;
+  let screen = ['본문', '', '› ', '', line(false), ''].join('\n');
+  const restore = mockTmux(() => screen);
+  const modes = [];
+  sl.setEmitter((chatId, lines, mode) => modes.push(mode && `${mode.id}|${mode.plan ? 1 : 0}`));
+  try {
+    sl.watch('c_codex', { cwdRel: CWD, tid: TID, agent: 'codex' });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepStrictEqual(modes, ['codexAuto|0']);
+    screen = ['본문', '', '› ', '', line(true), ''].join('\n');
+    const snap = await sl.snapshotFor('c_codex');
+    assert.strictEqual(snap.mode.plan, true);
+    assert.deepStrictEqual(modes, ['codexAuto|0', 'codexAuto|1'], '계획만 바뀌어도 emit');
+    assert.strictEqual(sl.modeFor('c_codex').label, 'Plan mode · Approve for me');
   } finally { restore(); sl.stop(); }
 });
 

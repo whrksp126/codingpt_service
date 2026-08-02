@@ -23,7 +23,8 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
-  composerHasText, agentDisplayName, agentModeView, agentModeChoices, patchLines,
+  composerHasText, agentDisplayName, agentModeView, agentModeChoices, agentModeIsOn,
+  agentModeOf, agentModeLabel, patchLines,
   TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
 
@@ -1615,7 +1616,8 @@ export class ChatView {
   //  전환은 데몬이 그 터미널에 shift+tab 을 눌러 주고 화면으로 검증한다(chat.mode).
   _setMode(mode) {
     const view = agentModeView(mode);
-    this._mode = view ? { id: view.id, label: view.label, symbol: view.symbol } : null;
+    // plan 은 codex 전용 부가 상태다 — 여기서 떨어뜨리면 목록의 계획 체크가 영영 꺼진 채로 남는다.
+    this._mode = view ? { id: view.id, label: view.label, symbol: view.symbol, plan: !!(mode && mode.plan) } : null;
     if (!this.modeEl) return;
     if (!view) { this.modeEl.classList.add("hidden"); this._closeModeMenu(); return; }
     this.modeEl.classList.remove("hidden");
@@ -1681,35 +1683,46 @@ export class ChatView {
 
   _renderModeMenu() {
     if (!this.modeMenuEl) return;
-    const cur = this._mode ? this._mode.id : null;
+    const cur = this._mode || null;
+    // codex 는 계획 모드가 권한과 **독립 토글**이라 체크가 두 개 켜질 수 있다(TUI 상태줄과 같은 사실).
+    const hint = agentModeChoices(cur).some((m) => m.toggle)
+      ? "TUI 에서는 shift+tab(계획) · /permissions(권한)"
+      : "TUI 에서는 shift+tab 으로 순환합니다";
     this.modeMenuEl.innerHTML = agentModeChoices(cur).map((m) => {
-      const on = m.id === cur;
+      const on = agentModeIsOn(m, cur);
       const busy = this._modeBusy;
       // 모드 심볼(⏸/⏵⏵)은 그리지 않는다(사용자 확정 2026-08-02: 왼쪽 아이콘 제거) — 라벨이 정본.
       return `<div class="chat-mode-row${on ? " on" : ""}${busy ? " busy" : ""}" data-mode="${m.id}">` +
         `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
         `<span class="chat-mode-row-desc">${escapeHtml(m.desc)}</span></span>` +
         `<span class="chat-mode-row-mark">${on ? "✓" : ""}</span></div>`;
-    }).join("") + `<div class="chat-mode-hint">TUI 에서는 shift+tab 으로 순환합니다</div>`;
+    }).join("") + `<div class="chat-mode-hint">${escapeHtml(hint)}</div>`;
   }
 
   async _pickMode(id) {
     if (!id || this._modeBusy) return;
-    if (this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
+    const spec = agentModeOf(id);
+    // 토글 항목(codex 계획 모드)은 "이미 그거면 아무 일 없음"이 아니라 **끄기**다 — 그래서 통과시킨다.
+    if (!(spec && spec.toggle) && this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
     const tid = this._tid;
     if (tid == null) return;
     // ★ 낙관 적용(사용자 신고 2026-08-02 "선택하면 즉시 닫히고 적용돼야 하는데 느리다"):
     //  누른 즉시 **목록을 닫고 알약을 목표 모드로** 바꾼다. 실제 전환(데몬이 TUI 를 순환)은 뒤에서
     //  끝나고, 실패하면 아래 catch 가 옛 모드로 되돌리고 사유를 배너로 알린다(조용한 거짓 금지).
     const prev = this._mode;
+    // 토글은 현재 값을 뒤집고(권한은 그대로), 라디오는 권한만 바꾼다(계획 모드는 유지) — 라벨은 같은 규칙으로 조합.
+    const next = spec && spec.toggle
+      ? { ...(prev || { id }), plan: !(prev && prev.plan) }
+      : { id, plan: !!(prev && prev.plan) };
+    next.label = agentModeLabel(next);
     this._modeBusy = true;
-    this._setMode({ id });                 // 카탈로그가 라벨/설명을 채운다
+    this._setMode(next);
     this._closeModeMenu();
     this.modeEl?.classList.add("busy");    // 확정 전까지 흐리게(진행 중 표시)
     try {
       const r = await this._modeRpc(id);
       if (this._disposed) return;
-      this._setMode((r && r.mode) || { id });
+      this._setMode((r && r.mode) || next);
       this._setBanner("");
     } catch (e) {
       if (!this._disposed) this._setMode(prev);   // 낙관 적용 취소 — 화면이 거짓말하지 않게
