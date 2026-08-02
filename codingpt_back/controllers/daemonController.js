@@ -1369,6 +1369,12 @@ const chatAnswer = chatRpc('chat.answer', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid, expect: bOf(req).expect,
   answers: Array.isArray(bOf(req).answers) ? bOf(req).answers.slice(0, 8) : [],
 }), 30000);
+// POST /api/daemon/chat/file  { chatId, path } → { mediaType, base64, bytes, name } | { missing, reason }
+//  대화에 적힌 파일(스크린샷·영상)을 채팅 UI 가 실제로 띄우기 위한 바이트. 권한 판정은 데몬이 한다
+//  (그 대화가 내보낸 메시지에 적힌 경로만) — back 은 크기만 넉넉히 잡고 그대로 중계한다.
+const chatFile = chatRpc('chat.file', (req) => ({
+  chatId: bOf(req).chatId || '', path: typeof bOf(req).path === 'string' ? bOf(req).path : '',
+}), 30000);
 // POST /api/daemon/chat/mode  { cwd, tid, mode? } → { ok, mode:{id,label,symbol}, tid }
 //  에이전트 권한 모드(manual/accept edits/plan/auto/bypass) 조회·전환. mode 생략 = 현재값만 읽기.
 //  데몬이 TUI 를 shift+tab 으로 드라이브하고 화면으로 검증한다(순환이라 최대 한 바퀴 = 여유 타임아웃).
@@ -1587,7 +1593,7 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatFile,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

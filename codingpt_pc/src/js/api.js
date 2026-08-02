@@ -249,6 +249,8 @@ export const api = {
   // 에이전트 권한 모드 조회/전환 — 데몬이 TUI 를 shift+tab 으로 순환시키고 화면으로 검증한다.
   //  mode 를 빼면 현재 모드만 읽는다. 한 바퀴(최대 5회) 드라이브가 직렬이라 여유 타임아웃.
   chatMode: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/mode", body: body || {}, timeoutSecs: 25 }),
+  // 대화가 참조한 파일 바이트(이미지/영상 인라인) — 권한 판정은 데몬(그 대화에 적힌 경로만).
+  chatFile: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/file", body: body || {}, timeoutSecs: 40 }),
 
   // ── 작업 스냅샷(자동 체크포인트) ──
   //  1순위 = 사이드카 데몬 직결(cpt.sock). 같은 머신에서 나는 트리거인데 back → 제어 WS → 이 머신의

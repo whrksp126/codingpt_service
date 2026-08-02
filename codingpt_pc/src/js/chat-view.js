@@ -549,6 +549,7 @@ export class ChatView {
     if (m.role === "assistant" && m.kind === "text") {
       row.className = "chat-msg chat-msg-assistant";
       row.innerHTML = renderMarkdown(text);
+      this._hydrateMedia(row);   // ![라벨](경로) 자리 → 실제 이미지/영상(화면에 보일 때 로드)
       if (m.truncated) row.appendChild(this._truncNote());
       return row;
     }
@@ -842,6 +843,114 @@ export class ChatView {
     }
   }
 
+  // ── 대화가 참조한 미디어(`![라벨](경로)`) 하이드레이션 ──────────────────────────────
+  // 규칙(사용자 확정 2026-08-02): 이미지 문법은 **실제로 그린다**. 경로는 캡션으로 항상 남긴다
+  //  ("경로를 보여주려던 의도"였어도 잃는 정보가 0 — 그래서 오판 비용이 없다).
+  //  로드는 **화면에 들어올 때**(IntersectionObserver) — 긴 대화를 열자마자 수십 장을 받지 않는다.
+  //  바이트 출처: 이 PC 터미널이면 Tauri 로컬 읽기(즉시), 원격 PC 면 데몬 chat.file(권한 = 그 대화가
+  //  내보낸 메시지에 적힌 경로만). URL 이면 그대로 <img src>.
+  _hydrateMedia(row) {
+    const nodes = row.querySelectorAll?.(".chat-media");
+    if (!nodes || !nodes.length) return;
+    if (!this._mediaObs) {
+      this._mediaObs = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          this._mediaObs.unobserve(e.target);
+          this._loadMedia(e.target);
+        }
+      }, { root: this.scrollEl, rootMargin: "300px 0px" });
+    }
+    for (const el of nodes) {
+      el.dataset.state = "idle";
+      el.appendChild(this._mediaCaption(el));
+      this._mediaObs.observe(el);
+    }
+  }
+
+  _mediaCaption(el) {
+    const cap = document.createElement("span");
+    cap.className = "chat-media-cap";
+    const alt = el.dataset.alt || "";
+    cap.innerHTML = (alt ? `<span class="chat-media-alt">${escapeHtml(alt)}</span>` : "")
+      + `<span class="chat-media-path" title="${escapeHtml(el.dataset.target || "")}">${escapeHtml(el.dataset.name || "")}</span>`;
+    return cap;
+  }
+
+  async _loadMedia(el) {
+    if (!el || el.dataset.state === "done" || el.dataset.state === "loading") return;
+    el.dataset.state = "loading";
+    const target = el.dataset.target || "";
+    const kind = el.dataset.kind || "image";
+    const put = (node) => { el.insertBefore(node, el.firstChild); el.dataset.state = "done"; };
+    const fail = (why) => {
+      el.dataset.state = "done";
+      const n = document.createElement("span");
+      n.className = "chat-media-fail";
+      n.textContent = why;
+      el.insertBefore(n, el.firstChild);
+    };
+    try {
+      let src = null;
+      if (el.dataset.via === "url") src = target;
+      else {
+        const r = await this._mediaBytes(target);
+        if (!r || r.missing) {
+          fail(r && r.reason === "too_large" ? "파일이 너무 커서 여기서는 못 보여줘요(눌러서 열기)"
+            : r && r.reason === "not_found" ? "파일을 찾을 수 없어요"
+              : r && r.reason === "unsupported" ? "미리보기를 지원하지 않는 형식이에요"
+                : "불러오지 못했어요");
+          el.dataset.openable = "1";
+          return;
+        }
+        src = `data:${r.mediaType};base64,${r.base64}`;
+      }
+      if (kind === "video") {
+        const v = document.createElement("video");
+        v.className = "chat-media-el";
+        v.controls = true;
+        v.preload = "metadata";
+        v.src = src;
+        put(v);
+      } else {
+        const img = document.createElement("img");
+        img.className = "chat-media-el";
+        img.loading = "lazy";
+        img.alt = el.dataset.alt || "";
+        img.src = src;
+        img.addEventListener("click", () => {
+          this._showLightbox(src, { name: el.dataset.name || "", path: el.dataset.via === "url" ? null : target });
+        });
+        put(img);
+      }
+    } catch (_) { fail("불러오지 못했어요"); }
+  }
+
+  /** 미디어 바이트 — 로컬은 Tauri 직접 읽기(왕복 0), 원격은 데몬 chat.file(권한 검사 포함). */
+  async _mediaBytes(target) {
+    if (this.ctx.isLocal?.()) {
+      const abs = /^[~/]/.test(target) ? target : null;
+      try {
+        const b64 = await api.filePreviewB64(abs || target);
+        if (b64) return { mediaType: this._mediaMime(target), base64: b64 };
+      } catch (e) {
+        // 로컬 읽기 실패(경로 상대·권한·용량) — 데몬 경로로 폴백한다(권한 규칙은 그쪽이 정본).
+      }
+    }
+    if (!this._chatId) return { missing: true, reason: "not_found" };
+    return api.chatFile({ chatId: this._chatId, path: target });
+  }
+
+  _mediaMime(target) {
+    const ext = String(target.split(/[?#]/)[0].split(".").pop() || "").toLowerCase();
+    const MIME = {
+      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
+      bmp: "image/bmp", svg: "image/svg+xml", heic: "image/heic", tif: "image/tiff", tiff: "image/tiff",
+      mp4: "video/mp4", m4v: "video/mp4", mov: "video/quicktime", webm: "video/webm", pdf: "application/pdf",
+    };
+    return MIME[ext] || "application/octet-stream";
+  }
+
   // 칩 클릭 = 미리보기(일반 LLM 앱 관례) — 이미지는 앱 내 라이트박스, 그 외/대용량은 시스템 기본 앱.
   async _openPreview(a) {
     if (!a) return;
@@ -1074,7 +1183,25 @@ export class ChatView {
     if (link) {
       e.preventDefault();
       const href = link.dataset.href;
-      if (href) api.openExternal(href).catch(() => {});
+      if (href) { api.openExternal(href).catch(() => {}); return; }
+      // 파일 칩(`[라벨](경로)`) — 자동 로드는 안 하지만 누르면 연다: 이미지/영상은 앱 안에서 보고,
+      //  그 외는 시스템 기본 앱(로컬)·IDE 로. 원격 PC 는 앱 안 미리보기만 가능하다.
+      const chip = e.target.closest?.(".chat-file");
+      if (chip) {
+        const target = chip.dataset.target || "";
+        const kind = chip.dataset.kind || "file";
+        if (kind === "image" || kind === "video") {
+          this._mediaBytes(target).then((r) => {
+            if (r && !r.missing) this._showLightbox(`data:${r.mediaType};base64,${r.base64}`, { name: chip.dataset.name || "", path: target });
+            else if (this.ctx.isLocal?.()) api.openPath(target).catch(() => {});
+            else this._setBanner("이 파일은 미리 볼 수 없어요.", "warn");
+          }).catch(() => { /* noop */ });
+        } else if (this.ctx.isLocal?.()) {
+          api.openPath(target).catch(() => this._setBanner("파일을 열 수 없어요.", "warn"));
+        } else {
+          this.ctx.openFile?.(target);
+        }
+      }
       return;
     }
     const more = e.target.closest?.(".chat-out-more");

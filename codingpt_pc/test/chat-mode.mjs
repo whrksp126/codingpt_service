@@ -150,5 +150,50 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   ok("앱: 서비스가 /chat/mode 를 친다", /chat\/mode/.test(app("src/services/chatService.ts")));
 }
 
+
+// ── 대화가 참조한 미디어(`![라벨](경로)`) 표현 규칙 — 3구현 패리티 + 배관 핀 ──────────────────
+// 규칙(사용자 확정 2026-08-02): 의도 판별은 **마크다운 문법**이 한다. `![]()` = 그린다,
+//  `[]()`·맨 경로 = 칩. 어느 쪽이든 경로는 화면에 남는다(오판 비용 0).
+{
+  const cases = [
+    ["/var/folders/x/screenshot-7.jpg", { via: "path", kind: "image", name: "screenshot-7.jpg" }],
+    ["docs/demo.mp4", { via: "path", kind: "video", name: "demo.mp4" }],
+    ["report.md", { via: "path", kind: "file", name: "report.md" }],
+    ["https://a.com/b/c.png?v=2", { via: "url", kind: "image", name: "c.png" }],
+  ];
+  for (const [target, want] of cases) {
+    const got = PC.mediaRefOf(target);
+    eq(`PC 미디어 분류: ${target}`, { via: got.via, kind: got.kind, name: got.name }, want);
+  }
+  ok("PC: 빈 값은 null", PC.mediaRefOf("") === null && PC.mediaRefOf(null) === null);
+
+  const tsPath = path.resolve(here, "../../../codingpt_app/src/workspace/chatModel.ts");
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+    `import(${JSON.stringify(url.pathToFileURL(tsPath).href)}).then((m) => {
+       const t = ${JSON.stringify(cases.map(([t]) => t))};
+       console.log(JSON.stringify(t.map((x) => { const g = m.mediaRefOf(x); return { via: g.via, kind: g.kind, name: g.name }; })));
+     });`], { encoding: "utf8" });
+  let app = null;
+  try { app = JSON.parse((r.stdout || "").trim().split("\n").pop()); } catch (_) { app = null; }
+  eq("앱 미디어 분류 = PC 와 동일", app, cases.map(([, w]) => w));
+
+  const md = read("../src/js/chat-md.js");
+  ok("PC 마크다운: 이미지 문법 → 미디어 자리, 링크형 경로 → 칩",
+    /class="chat-media"/.test(md) && /class="chat-file"/.test(md));
+  const cv3 = read("../src/js/chat-view.js");
+  ok("PC: 화면에 들어올 때 로드(IntersectionObserver) + 캡션에 경로", /IntersectionObserver/.test(cv3) && /chat-media-cap/.test(cv3));
+  ok("PC: 로컬은 직접 읽고 원격은 데몬 chat.file", /filePreviewB64/.test(cv3) && /chatFile\(/.test(cv3));
+  const ts2 = read("../../codingpt_daemon/packages/runner-core/transcript.js");
+  ok("데몬: chat.file 은 그 대화가 내보낸 경로만 서빙(권한 = 트랜스크립트)",
+    /case 'chat\.file'/.test(ts2) && /not_referenced/.test(ts2) && /noteMediaRefs/.test(ts2));
+  ok("데몬: 크기 상한과 형식 allowlist", /MEDIA_IMAGE_CAP/.test(ts2) && /MEDIA_VIDEO_CAP/.test(ts2) && /MEDIA_MIME/.test(ts2));
+  const back2 = read("../../codingpt_back/routes/daemonRoutes.js");
+  ok("back: POST /chat/file 라우트", /\/chat\/file/.test(back2));
+  const appf = (p) => read(path.resolve(here, "../../../codingpt_app", p));
+  ok("앱: 이미지/링크 규칙 + 미디어 컴포넌트", /ChatMedia/.test(appf("src/workspace/chat/ChatMarkdown.tsx")) && /image:/.test(appf("src/workspace/chat/ChatMarkdown.tsx")));
+  ok("앱: 영상은 캐시 파일로 떨어뜨려 재생(데이터 URI 재생 회피)", /writeFile/.test(appf("src/workspace/chat/ChatMedia.tsx")) && /react-native-video/.test(appf("src/workspace/chat/ChatMedia.tsx")));
+  ok("앱: 실패 사유를 화면에 적는다(조용한 빈 자리 금지)", /reasonText/.test(appf("src/workspace/chat/ChatMedia.tsx")));
+}
+
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
 console.log("\nALL PASS");

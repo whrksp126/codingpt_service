@@ -36,6 +36,30 @@ export const CHAT = {
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;
 
+// ── 대화에 적힌 파일(이미지/영상/문서) 표현 규칙 — app 미러: chatModel.ts mediaRefOf ─────────────
+// 사용자 확정(2026-08-02): **의도 판별은 마크다운 문법이 이미 해준다.**
+//  · `![라벨](경로)` = "그려라"(이미지 문법을 고른 것 자체가 의사표시) → 실제로 띄운다.
+//  · `[라벨](경로)` · 맨 경로 = 참조 → **칩**으로만(자동 로드 안 함, 누르면 열림).
+//  그리고 어느 쪽이든 **경로를 화면에 남긴다** → "경로를 보여주려던 의도"였어도 잃는 정보가 0이다
+//  (오판 비용 0 = 이 규칙을 고른 이유). TUI 는 경로 텍스트, 채팅은 그림+경로 = 상위집합.
+const MEDIA_EXT = {
+  image: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "tif", "tiff", "svg"],
+  video: ["mp4", "m4v", "mov", "webm"],
+};
+
+/** 타깃 문자열 → { via:'url'|'path', kind:'image'|'video'|'file', name, ext }. 빈 값이면 null. */
+export function mediaRefOf(target) {
+  const raw = String(target == null ? "" : target).trim();
+  if (!raw) return null;
+  const url = /^(https?:)?\/\//i.test(raw) || raw.startsWith("data:");
+  // 쿼리/해시를 뺀 뒤 확장자를 본다(URL 에 ?v=1 이 붙는 경우).
+  const clean = raw.split(/[?#]/)[0];
+  const base = clean.replace(/\/+$/, "").split("/").pop() || clean;
+  const ext = (base.includes(".") ? base.split(".").pop() : "").toLowerCase();
+  const kind = MEDIA_EXT.image.includes(ext) ? "image" : MEDIA_EXT.video.includes(ext) ? "video" : "file";
+  return { via: url ? "url" : "path", kind, name: base || raw, ext, target: raw };
+}
+
 // ── 에이전트 권한 모드 카탈로그(양 플랫폼 동일 — app 미러: chatModel.ts AGENT_MODES) ──────────
 // TUI 에서 shift+tab 으로만 바꿀 수 있는 그 모드다. 채팅에서는 컴포저 알약 → 목록으로 고르고,
 //  데몬이 TUI 를 대신 순환시킨다(runner-core/cpt-server.js chatMode).

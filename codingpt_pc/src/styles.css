@@ -1541,6 +1541,39 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 /* 빈 입력 = 눌러도 할 일이 없다 → 실제로 못 누르게(disabled) + 흐리게. 숨기지는 않는다(위치 학습 유지). */
 .chat-send:disabled { opacity: 0.38; cursor: default; }
 
+/* ── 대화가 참조한 미디어(`![라벨](경로)`) — 실제 이미지/영상 + 캡션(라벨·파일명) ──────────────
+   사용자 확정 2026-08-02: 채팅은 TUI 가 못 하는 걸 해야 한다(그림). 단 **경로는 항상 남긴다**. */
+.chat-media {
+  display: block; margin: 8px 0; max-width: 100%;
+}
+.chat-media-el {
+  display: block; max-width: 100%; max-height: 420px; width: auto; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--elevated); cursor: zoom-in;
+}
+video.chat-media-el { cursor: default; }
+.chat-media-cap {
+  display: flex; align-items: baseline; gap: 6px; margin-top: 4px;
+  font-size: 11.5px; color: var(--dim); min-width: 0;
+}
+.chat-media-alt { color: var(--text3); }
+.chat-media-path {
+  font-family: var(--mono-font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  direction: rtl; text-align: left; min-width: 0;
+}
+.chat-media-fail {
+  display: inline-block; padding: 8px 10px; border-radius: var(--r-sm);
+  border: 1px dashed var(--border-ctrl); color: var(--dim); font-size: 12px;
+}
+/* 파일 칩 — 링크형 `[라벨](경로)`. 자동 로드하지 않는다(에이전트가 '표시'를 안 고른 것). */
+.chat-file {
+  display: inline-flex; align-items: center; gap: 5px; vertical-align: baseline;
+  max-width: 100%; padding: 1px 7px; border-radius: 999px;
+  border: 1px solid var(--border-ctrl); background: var(--elevated);
+  color: var(--text2); font-size: 12.5px; cursor: pointer;
+}
+.chat-file:hover { background: var(--hover); color: var(--text); }
+.chat-file svg { width: 12px; height: 12px; flex: none; opacity: .8; }
+
 /* ══ 승인 카드 (기능1) ═════════════════════════════════════════════════════════════════════
    전역 스택은 화면 하단 중앙. Chat 뷰 안에서는 컴포저 위 슬롯(.chat-approvals)에 같은 카드가 뜬다
    (전역 스택은 그 카드를 제외 — 같은 카드가 두 군데 뜨는 혼란 방지). */

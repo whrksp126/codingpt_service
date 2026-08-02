@@ -13,8 +13,10 @@
 // 지원: 코드펜스(```lang) · 인라인코드 · 볼드 · 이탤릭 · 취소선 · 링크/자동링크 · 헤딩 · 목록(중첩) ·
 //       인용 · 수평선 · 단락 · **표(GFM — 2026-07-30 추가**: 파이프 원문이 그대로 보여 TUI 의 ASCII
 //       표보다 못생겼다는 사용자 지적. 채팅은 TUI 보다 보기 좋아야 한다**)**.
-//       미지원: 이미지, 각주, HTML 통과.
+//       **이미지/파일 참조(2026-08-02 추가)**: `![라벨](경로|URL)` → 실제 미디어, `[라벨](경로)` → 파일 칩.
+//       미지원: 각주, HTML 통과.
 import { icons } from "./icons.js";
+import { mediaRefOf } from "./chat-model.js";
 
 export function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
@@ -49,7 +51,24 @@ export function renderInline(src) {
     codes.push(c);
     return S0 + (codes.length - 1) + S1;
   });
-  // ② 링크 [텍스트](url)
+  // ② 이미지 `![라벨](타깃)` — 마크다운의 "그려라" 문법이다(사용자 확정 2026-08-02: 의도 판별은
+  //  문법이 해준다). 여기서는 **자리만** 만든다: 실제 바이트 로드는 chat-view 가 화면에 보일 때
+  //  수행한다(대화 전체를 여는 순간 이미지 수십 장을 받지 않도록). 라벨/경로는 캡션으로 남는다.
+  t = t.replace(/!\[([^\]\n]*)\]\(([^)\s]+)\)/g, (m, alt, target) => {
+    const ref = mediaRefOf(target);
+    if (!ref) return m;
+    return `<span class="chat-media" data-target="${escapeHtml(ref.target)}" data-kind="${ref.kind}"`
+      + ` data-via="${ref.via}" data-alt="${escapeHtml(alt || "")}" data-name="${escapeHtml(ref.name)}"></span>`;
+  });
+  // ③ 링크 [텍스트](url) — http/https 는 외부 링크, **파일 경로면 칩**(누르면 열림, 자동 로드 안 함).
+  t = t.replace(/\[([^\]\n]+)\]\(((?!https?:|mailto:)[^)\s]+)\)/g, (m, label, target) => {
+    const ref = mediaRefOf(target);
+    if (!ref || ref.via !== "path") return m;
+    const glyph = ref.kind === "video" ? icons.play({ size: 12 }) : ref.kind === "image" ? icons.image({ size: 12 }) : icons.file({ size: 12 });
+    return `<span class="chat-file" data-target="${escapeHtml(ref.target)}" data-kind="${ref.kind}"`
+      + ` data-name="${escapeHtml(ref.name)}">${glyph}${escapeHtml(label)}</span>`;
+  });
+  // ④ 링크 [텍스트](url)
   t = t.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (m, label, url) => {
     const u = safeUrl(url);
     // 허용 스킴이 아니면(javascript:/data: 등) 링크를 만들지 않고 **원문 그대로** 남긴다.
@@ -57,13 +76,13 @@ export function renderInline(src) {
     if (!u) return m;
     return `<a class="chat-a" href="#" data-href="${escapeHtml(u)}">${label}</a>`;
   });
-  // ③ 자동링크(맨 URL) — 이미 만든 <a> 안의 href 는 건드리지 않도록 앞에 " 나 = 가 없을 때만.
+  // ⑤ 자동링크(맨 URL) — 이미 만든 <a> 안의 href 는 건드리지 않도록 앞에 " 나 = 가 없을 때만.
   t = t.replace(/(^|[\s(])((?:https?:\/\/)[^\s<>"')]+)/g, (m, pre, url) => {
     const u = safeUrl(url);
     if (!u) return m;
     return `${pre}<a class="chat-a" href="#" data-href="${escapeHtml(u)}">${url}</a>`;
   });
-  // ④ 강조 — 볼드 먼저(** 가 * 에 먹히지 않게), 그다음 이탤릭/취소선.
+  // ⑥ 강조 — 볼드 먼저(** 가 * 에 먹히지 않게), 그다음 이탤릭/취소선.
   t = t.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   t = t.replace(/__([^_\n]+)__/g, "<strong>$1</strong>");
   t = t.replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/g, "$1<em>$2</em>");
