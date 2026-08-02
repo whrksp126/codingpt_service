@@ -194,6 +194,22 @@ pub fn mode_poke(cwd: String, tid: i64) -> Result<serde_json::Value, String> {
     cpt_request("status.poke", serde_json::json!({ "cwd": cwd, "tid": tid }))
 }
 
+// 에이전트 모드 조회/전환 — **이 PC 의 터미널일 때만** 쓴다(원격 PC 는 back 릴레이가 정본).
+//  실측(2026-08-02): 같은 머신인데 back 을 왕복하면 150~285ms, 이 소켓은 1~2ms. 모드 선택이
+//  "묘하게 느리다"던 체감의 절반이 이 왕복이었다. 데몬 구현은 back 경로와 **같은 함수**를 탄다.
+//  울타리는 e2ee_local/agents_local 과 같은 모양이다: 허용 목록에 있는 채팅 명령만 통과시킨다
+//  (임의 cpt 명령 통로를 웹뷰에 열지 않는다). 전송(chat.input)은 넣지 않는다 — 이 경로의 목적은
+//  **읽기/상태 왕복 제거**이고, 입력은 지금도 체감 문제가 없다(추가 표면을 만들 이유가 없다).
+const CHAT_LOCAL_OK: [&str; 3] = ["chat.open", "chat.since", "chat.mode"];
+
+#[tauri::command]
+pub fn chat_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !CHAT_LOCAL_OK.contains(&cmd.as_str()) {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // ── 로컬 UI 채널(같은 기기 ui_command 왕복 제거) ─────────────────────────────────
 //  터미널의 `cpt` → 로컬 데몬 → (지금까지) back WSS → 다시 이 앱. 같은 기기 안에서 서버를 왕복했다.
 //  `ui.attach` 로 cpt.sock 커넥션을 유지하면 데몬이 이 앱에 직접 명령을 밀어 넣을 수 있다.

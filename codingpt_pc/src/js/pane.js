@@ -1331,6 +1331,9 @@ export class PaneView {
       //  라우팅하는데, 여러 PC 가 붙어 있으면 다른 PC 의 트랜스크립트를 읽어오는 오배달이 된다
       //  (승인 resolve 가 runnerId 를 필수로 두는 이유와 같다).
       hostDeviceId: () => this.ctx.hostDeviceId ?? null,
+      // 이 PC 의 터미널인가 — 맞으면 채팅 조회/모드를 **사이드카 데몬 직결**로 보낸다(back 왕복 제거).
+      //  라이브 getter 인 이유는 hostDeviceId 와 같다(재클레임으로 로컬/원격이 바뀔 수 있다).
+      isLocal: () => !!this.ctx.isLocal,
       tid: () => {
         const t = this.node.tabs?.[this.node.active];
         return t && isTermTab(t) && typeof t.win === "number" ? t.win : null;

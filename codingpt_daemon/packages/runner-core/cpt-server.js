@@ -670,6 +670,27 @@ async function dispatch(req, conn) {
   //   되기 때문이다(approval.respond 를 닫는 것과 같은 이유 — 승인 게이트의 자기해제 금지).
   //   `agents.list` 만 공개한다(어차피 AI 는 `which claude` 로 알 수 있는 정보).
   if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
+  // ── 에이전트 모드(PC 앱 내부용) — 같은 머신인데 back 을 왕복하던 것을 없앤다 ────────────────
+  //  실측(2026-08-02): back 왕복 150~285ms vs 이 소켓 1~2ms. 사용자가 "묘하게 느리다"고 한 그 차이다.
+  //  · status.poke = "지금 다시 봐"(부작용 없음) · chat.mode = 조회/전환(control.js 와 같은 구현 위임)
+  //  CAPABILITIES 에는 넣지 않는다(터미널 안 AI 용 명령이 아니라 앱 내부 배관 — forward.*/sync.* 와 동일).
+  //  resolveCtx 앞에 두는 이유: 인자로 (cwd,tid)를 명시하므로 tmux ctx 가 필요 없고, 워크스페이스
+  //  컨텍스트 게이트(cpt 오사용 방지)는 터미널에서 실행되는 명령을 위한 것이라 여기선 무의미하다.
+  if (cmd === 'status.poke') {
+    const a = req.args || {};
+    const win = Number.isInteger(a.tid) ? a.tid : parseInt(a.tid, 10);
+    if (!Number.isInteger(win)) throw Object.assign(new Error('tid 가 필요합니다'), { code: 'BAD_REQUEST' });
+    const { session: s0 } = ptyLib.sessionForCwd(typeof a.cwd === 'string' ? a.cwd : '');
+    require('./status-line').pokeTermSession(ptyLib.termSession(s0, win));
+    return { ok: true };
+  }
+  if (cmd === 'chat.mode') return chatMode(req.args || {});
+  // 채팅 스냅샷/캐치업도 같은 이유로 로컬 직결(PC 앱 전용) — 토글할 때마다 back 왕복 255ms 를
+  //  물던 자리다. 데몬 구현은 back 경로와 **같은 transcript.handle** 이고, ws 를 넘기지 않으므로
+  //  push 대상(제어 WS)은 그대로 유지된다(transcript.js:1513 `if (ws) pushWs = ws`).
+  if (cmd === 'chat.open' || cmd === 'chat.since') {
+    return require('./transcript').handle(cmd, req.args || {}, null);
+  }
   const args = req.args || {};
   const resolved = await resolveCtx(req.ctx);
   // CodingPT 컨텍스트 밖(무관 폴더의 CWD 폴백)이면 진단/훅 예외만 남기고 전부 거부 — §게이트 주석.
@@ -883,19 +904,6 @@ async function dispatch(req, conn) {
     }
 
     // ── 사이드바 메타(status/progress/log) ──
-    // 모드 즉시 확인(2026-08-02) — PC 앱은 **로컬 tmux 직결**이라 shift+tab 이 데몬 입력 경로를
-    //  지나가지 않는다(원격 기기만 지나간다). 그래서 PC 가 그 키를 보낼 때 이 명령으로 알려 주면
-    //  데몬이 해당 터미널을 즉시 다시 읽어 **모든 기기**(그 PC + 폰)의 알약을 함께 갱신한다.
-    //  조작이 아니라 "지금 다시 봐" 신호라 부작용이 없다(감시자가 없으면 no-op).
-    case 'status.poke': {
-      const cwd = typeof args.cwd === 'string' ? args.cwd : '';
-      const win = Number.isInteger(args.tid) ? args.tid : parseInt(args.tid, 10);
-      if (!Number.isInteger(win)) throw Object.assign(new Error('tid 가 필요합니다'), { code: 'BAD_REQUEST' });
-      const { session } = ptyLib.sessionForCwd(cwd);
-      require('./status-line').pokeTermSession(ptyLib.termSession(session, win));
-      return { ok: true };
-    }
-
     case 'status.set': {
       if (!args.key) throw new Error('키가 필요합니다');
       const m = metaFor(resolved.cwdRel);
@@ -1332,7 +1340,7 @@ async function chatAnswer({ cwd, tid, answers, expect, cancel } = {}) {
 }
 
 // tmux 조작 io 조립(질문/권한 다이얼로그 공용).
-function dialogIoFor(cwd, tid) {
+function dialogIoFor(cwd, tid, opts) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
@@ -1342,7 +1350,9 @@ function dialogIoFor(cwd, tid) {
     screen: () => ptyLib.runTmux(['capture-pane', '-p', '-t', target]),
     key: async (k, literal) => {
       await ptyLib.runTmux(literal ? ['send-keys', '-t', target, '-l', '--', k] : ['send-keys', '-t', target, k]);
-      await new Promise((r) => setTimeout(r, DRIVE_KEY_GAP_MS));
+      // 다이얼로그 조작은 키 사이 간격이 필요하지만(그 값이 실측 정본), 모드 순환은 키 1개마다
+      //  화면을 다시 읽어 검증하므로 고정 대기를 짧게 잡는다(체감 반응 — 사용자 신고 2026-08-02).
+      await new Promise((r) => setTimeout(r, (opts && opts.keyGapMs != null) ? opts.keyGapMs : DRIVE_KEY_GAP_MS));
     },
   };
   return { io, win };
@@ -1439,7 +1449,8 @@ async function permissionAnswer({ cwd, tid, pick, expect, text, flow } = {}) {
 //  순서를 코드에 박지 않는다 — **화면의 라벨을 읽고 → BTab → 다시 읽기**를 목표가 나올 때까지 반복한다
 //  (드라이브 후 화면으로 검증하는 기존 다이얼로그 조작과 같은 규율).
 // 안전장치: 다이얼로그가 떠 있으면 조작하지 않는다(그 화면에서 shift+tab 은 모드 키가 아니다).
-const MODE_HOP_MS = 220;
+const MODE_HOP_MS = 90;    // 키 전송 후 TUI 리페인트 대기(실측: 이 이하로는 옛 화면을 읽는다)
+const MODE_KEY_GAP_MS = 0; // 모드 순환은 매 키마다 화면으로 검증하므로 다이얼로그용 고정 간격이 불필요
 const MODE_MAX_HOPS = 6;   // 현재 최대 5모드 — 한 바퀴를 넘기면 순환 불가로 본다
 
 async function driveMode(io, { mode } = {}) {
@@ -1478,7 +1489,7 @@ async function driveMode(io, { mode } = {}) {
 
 /** chat.mode — { cwd, tid, mode } → { ok, mode:{id,label,symbol}, tid }. mode 생략 시 현재 모드만 읽는다. */
 async function chatMode({ cwd, tid, mode } = {}) {
-  const { io, win } = dialogIoFor(cwd, tid);
+  const { io, win } = dialogIoFor(cwd, tid, { keyGapMs: MODE_KEY_GAP_MS });
   await io.ready;
   if (mode == null || mode === '') {
     const statusLib = require('./status-line');
@@ -1541,7 +1552,7 @@ const CAPABILITIES = [
   'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
   'ws.list', 'ws.create', 'ws.clone', 'ws.delete',
   'notify', 'notification.list', 'notification.readAll',
-  'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list', 'status.poke',
+  'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
   'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewInspect', 'ui.previewHandoff',
@@ -1727,6 +1738,8 @@ module.exports = {
   _driveQuestionDialog: driveQuestionDialog, // 테스트/격리 검증용(io 주입)
   _drivePermissionDialog: drivePermissionDialog,
   _driveMode: driveMode,
+  // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
+  _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.

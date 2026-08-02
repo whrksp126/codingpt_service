@@ -92,3 +92,33 @@ test('알 수 없는 모드 id 는 요청 자체를 거절한다', async () => {
   await assert.rejects(() => driveMode(io, { mode: 'yolo' }), (e) => e.code === 'BAD_REQUEST');
   assert.deepStrictEqual(io.keys, []);
 });
+
+// ── 앱 내부용 명령은 워크스페이스 컨텍스트 게이트를 타지 않는다(2026-08-02 실사고) ──
+// PC 앱이 로컬 데몬 소켓으로 부르는 status.poke / chat.mode 는 "cpt 오사용 방지" 게이트
+//  (터미널에서 실행되는 cpt 를 위한 것)에 걸려 조용히 실패했다 — 그래서 PC 의 즉시 반영이 무효였다.
+//  sync.checkpoint·forward.*·agents.* 와 같은 자리(resolveCtx 이전)에 두는 것이 정답이고,
+//  이 테스트가 그 자리를 고정한다(다시 switch 안으로 옮기면 즉시 빨간불).
+const { _dispatch: dispatch } = require('../cpt-server');
+
+test('앱 내부용 명령(status.poke/chat.mode)은 컨텍스트 게이트 밖에서도 도달한다', async () => {
+  const ptyLib = require('../pty');
+  const orig = ptyLib.runTmux;
+  const calls = [];
+  ptyLib.runTmux = async (args) => {
+    calls.push(args[0]);
+    if (args[0] === 'capture-pane') return ['본문', '─'.repeat(20), '❯ ', '─'.repeat(20), '  -- INSERT -- ⏸ plan mode on'].join('\n');
+    return '';
+  };
+  try {
+    // ctx 없음 = 워크스페이스 밖(옛 코드에서 OUT_OF_CONTEXT 로 거부되던 상황)
+    const poke = await dispatch({ cmd: 'status.poke', args: { cwd: 'x/y', tid: 4242 } });
+    assert.deepStrictEqual(poke, { ok: true });
+    const mode = await dispatch({ cmd: 'chat.mode', args: { cwd: 'x/y', tid: 4242 } });
+    assert.strictEqual(mode.mode.id, 'plan', '조회는 화면을 읽어 현재 모드를 준다');
+    assert.ok(calls.includes('capture-pane'), '실제로 화면을 읽는다');
+  } finally { ptyLib.runTmux = orig; }
+});
+
+test('알 수 없는 명령은 그대로 거부된다(통로를 넓히지 않았다)', async () => {
+  await assert.rejects(() => dispatch({ cmd: 'chat.input', args: {} }), (e) => /OUT_OF_CONTEXT|워크스페이스|BAD_REQUEST|알 수 없는/.test(String(e.code || e.message)));
+});

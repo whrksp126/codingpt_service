@@ -203,6 +203,10 @@ export const api = {
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
   //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).
   modePoke: (cwd, tid) => invoke("mode_poke", { cwd, tid }),
+  // 채팅 조회/모드 **로컬 직결**(이 PC 터미널 전용) — back 왕복 150~285ms → 1~2ms(실측 2026-08-02).
+  //  허용 명령: chat.open · chat.since · chat.mode. 원격 PC 터미널은 이 경로를 쓰면 안 된다
+  //  (그 PC 의 데몬이어야 한다) → 호출측이 isLocal 로 가른다.
+  chatLocal: (cmd, args) => invoke("chat_local", { cmd, args: args || {} }),
 
   // ── 로컬 UI 채널(cpt.sock 지속 연결) — 터미널의 cpt 명령이 back 을 왕복하지 않고 바로 이 앱에 온다 ──
   //  uiLocalStart: 멱등(args 갱신만) · onLocalUiCommand: 데몬 push 수신 · uiLocalSend: ui_result/presence 회신.

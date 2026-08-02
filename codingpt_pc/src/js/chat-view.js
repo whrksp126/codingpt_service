@@ -299,7 +299,7 @@ export class ChatView {
         // ★ 이 터미널에서 도는 CLI 를 반드시 실어 보낸다. 빠지면 데몬이 claude 로 가정해서
         //  codex 터미널에 **같은 폴더의 claude 대화**가 뜬다(2026-07-28 실사고).
         const agent = this.ctx.agent?.() || null;
-        const r = await api.chatOpen({
+        const r = await this._openRpc({
           cwd, tid, limit: CHAT.SNAPSHOT_LIMIT,
           ...(agent ? { agent } : {}),
           ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
@@ -427,7 +427,7 @@ export class ChatView {
     if (!this._chatId || this._catching) return;
     this._catching = true;
     try {
-      const r = await api.chatSince({ chatId: this._chatId, sinceSeq: this._lastSeq, epoch: this._epoch });
+      const r = await this._sinceRpc({ chatId: this._chatId, sinceSeq: this._lastSeq, epoch: this._epoch });
       if (this._disposed) return;
       // 모드는 **캐치업이 정본**이다 — push 는 변경 순간 1회뿐이라 그때 소켓이 끊겨 있었으면(앱 백그라운드·
       //  재접속) 영영 놓치고, 그 뒤로 화면이 안 변하면 알약이 옛 모드로 굳는다(2026-08-02 사용자 신고).
@@ -1415,15 +1415,33 @@ export class ChatView {
     if (this.modeMenuEl) this._renderModeMenu();
   }
 
+  // 모드 RPC 한 곳 — 이 PC 터미널이면 사이드카 데몬 직결(1~2ms), 원격 PC 면 back 릴레이(그 PC 의 데몬).
+  //  같은 머신인데 클라우드를 왕복하던 것이 체감 지연의 큰 몫이었다(2026-08-02 실측).
+  _modeRpc(mode) {
+    const cwd = this._cwd(), tid = this._tid;
+    if (this.ctx.isLocal?.()) return api.chatLocal("chat.mode", { cwd, tid, ...(mode ? { mode } : {}) });
+    return api.chatMode({
+      cwd, tid, ...(mode ? { mode } : {}),
+      ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
+    });
+  }
+  // 스냅샷/캐치업도 같은 규칙 — 이 PC 터미널이면 사이드카 직결, 원격이면 back 릴레이.
+  //  ★ 로컬 직결은 **오프라인에서도** 동작한다(같은 머신) — 서버가 죽어도 내 PC 채팅은 열린다.
+  _openRpc(body) {
+    if (this.ctx.isLocal?.()) return api.chatLocal("chat.open", body);
+    return api.chatOpen(body);
+  }
+  _sinceRpc(q) {
+    if (this.ctx.isLocal?.()) return api.chatLocal("chat.since", q);
+    return api.chatSince(q);
+  }
+
   // 모드만 즉시 재확인(조회 전용 — mode 를 안 보내면 데몬이 **지금 화면**을 읽어 현재 값을 준다).
   async _refreshMode() {
     const tid = this._tid;
     if (tid == null || this._modeBusy) return;
     try {
-      const r = await api.chatMode({
-        cwd: this._cwd(), tid,
-        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
-      });
+      const r = await this._modeRpc(null);
       if (!this._disposed && !this._modeBusy && r && r.mode) this._setMode(r.mode);
     } catch (_) { /* 폴링/캐치업이 안전망 */ }
   }
@@ -1471,19 +1489,21 @@ export class ChatView {
     if (this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
     const tid = this._tid;
     if (tid == null) return;
+    // ★ 낙관 적용(사용자 신고 2026-08-02 "선택하면 즉시 닫히고 적용돼야 하는데 느리다"):
+    //  누른 즉시 **목록을 닫고 알약을 목표 모드로** 바꾼다. 실제 전환(데몬이 TUI 를 순환)은 뒤에서
+    //  끝나고, 실패하면 아래 catch 가 옛 모드로 되돌리고 사유를 배너로 알린다(조용한 거짓 금지).
+    const prev = this._mode;
     this._modeBusy = true;
-    this._renderModeMenu();
-    this.modeEl?.classList.add("busy");
+    this._setMode({ id });                 // 카탈로그가 라벨/설명을 채운다
+    this._closeModeMenu();
+    this.modeEl?.classList.add("busy");    // 확정 전까지 흐리게(진행 중 표시)
     try {
-      const r = await api.chatMode({
-        cwd: this._cwd(), tid, mode: id,
-        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
-      });
+      const r = await this._modeRpc(id);
       if (this._disposed) return;
-      this._setMode((r && r.mode) || null);
-      this._closeModeMenu();
+      this._setMode((r && r.mode) || { id });
       this._setBanner("");
     } catch (e) {
+      if (!this._disposed) this._setMode(prev);   // 낙관 적용 취소 — 화면이 거짓말하지 않게
       if (this._disposed) return;
       const msg = String(e || "");
       // 실패를 조용히 삼키지 않는다 — 모드가 안 바뀐 채로 "바꿨다"고 보이는 것이 최악이다.
