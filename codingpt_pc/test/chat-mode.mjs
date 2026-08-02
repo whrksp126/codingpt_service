@@ -118,6 +118,14 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   ok("데몬: chat.open 스냅샷은 캐시가 아니라 새로 읽는다", /await pollOne\(chatId\)/.test(sl) && !/w\.last == null && w\.lastMode == null/.test(sl));
   ok("PC: 실패를 배너로 알린다(조용한 실패 금지)", /MODE_UNREACHABLE/.test(cv) && /MODE_BLOCKED/.test(cv));
   const api = read("../src/js/api.js");
+  const cv2 = read("../src/js/pane.js");
+  const rs = read("../src-tauri/src/cptsock.rs");
+  // PC 로컬 터미널은 tmux 직결이라 데몬이 그 키를 못 본다 → PC 가 직접 "다시 봐"를 알린다.
+  ok("데몬: 로컬 PC 용 재확인 신호(status.poke)", /case 'status\.poke'/.test(cs) && /'status\.poke'/.test(cs));
+  ok("PC: 로컬 shift+tab 을 보낼 때 데몬에 재확인을 알린다", /_pokeMode\(\)/.test(cv2) && /modePoke/.test(api));
+  ok("PC: Rust 브리지(mode_poke)가 status.poke 로 위임", /fn mode_poke/.test(rs) && /status\.poke/.test(rs));
+  ok("PC: 채팅으로 토글하면 모드를 '지금 화면'으로 다시 읽는다", /_refreshMode\(\)/.test(cv));
+  ok("데몬: 모드 전환 직후 다른 기기도 즉시 갱신(감시자 깨움)", /driveMode\(io[\s\S]{0,400}pokeTermSession/.test(cs));
   ok("PC: api.chatMode → /api/daemon/chat/mode", /chat\/mode/.test(api));
   const css = read("../src/styles.css");
   ok("PC: 알약/목록 CSS", /\.chat-mode\b/.test(css) && /\.chat-mode-menu/.test(css));

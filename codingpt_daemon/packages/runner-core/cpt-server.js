@@ -883,6 +883,19 @@ async function dispatch(req, conn) {
     }
 
     // ── 사이드바 메타(status/progress/log) ──
+    // 모드 즉시 확인(2026-08-02) — PC 앱은 **로컬 tmux 직결**이라 shift+tab 이 데몬 입력 경로를
+    //  지나가지 않는다(원격 기기만 지나간다). 그래서 PC 가 그 키를 보낼 때 이 명령으로 알려 주면
+    //  데몬이 해당 터미널을 즉시 다시 읽어 **모든 기기**(그 PC + 폰)의 알약을 함께 갱신한다.
+    //  조작이 아니라 "지금 다시 봐" 신호라 부작용이 없다(감시자가 없으면 no-op).
+    case 'status.poke': {
+      const cwd = typeof args.cwd === 'string' ? args.cwd : '';
+      const win = Number.isInteger(args.tid) ? args.tid : parseInt(args.tid, 10);
+      if (!Number.isInteger(win)) throw Object.assign(new Error('tid 가 필요합니다'), { code: 'BAD_REQUEST' });
+      const { session } = ptyLib.sessionForCwd(cwd);
+      require('./status-line').pokeTermSession(ptyLib.termSession(session, win));
+      return { ok: true };
+    }
+
     case 'status.set': {
       if (!args.key) throw new Error('키가 필요합니다');
       const m = metaFor(resolved.cwdRel);
@@ -1473,6 +1486,12 @@ async function chatMode({ cwd, tid, mode } = {}) {
     return { ok: true, mode: cur, tid: win };
   }
   const r = await driveMode(io, { mode });
+  // 바꾼 직후 **다른 기기들**도 바로 알아야 한다(폰에서 바꾸면 PC 알약도 즉시) — 감시자를 깨워
+  //  다음 폴링(3초)을 기다리지 않고 emit 하게 한다. 요청한 기기는 이미 응답으로 받았다.
+  try {
+    const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+    require('./status-line').pokeTermSession(ptyLib.termSession(session, win));
+  } catch (_) { /* noop */ }
   return { ...r, tid: win };
 }
 
@@ -1522,7 +1541,7 @@ const CAPABILITIES = [
   'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
   'ws.list', 'ws.create', 'ws.clone', 'ws.delete',
   'notify', 'notification.list', 'notification.readAll',
-  'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list',
+  'status.set', 'status.clear', 'status.progress', 'status.log', 'status.list', 'status.poke',
   'ui.devices',
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewInspect', 'ui.previewHandoff',

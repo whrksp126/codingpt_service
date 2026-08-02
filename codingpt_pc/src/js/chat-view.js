@@ -243,6 +243,9 @@ export class ChatView {
       // 같은 터미널로 돌아온 경우 _retarget 은 아무것도 하지 않는다(폭주 방지) → 여기서 한 번
       //  캐치업한다. TUI 에서 모드를 바꾸고 채팅으로 넘어오는 순간 알약이 **즉시** 맞아야 하기
       //  때문이다(사용자 요청 2026-08-02). since 응답이 현재 모드를 싣고 온다.
+      //  ⚠ since 는 데몬 **캐시**(≤3초 전 화면)라 맥 터미널에서 직접 바꾼 직후엔 한 틱 늦을 수 있다
+      //   → 모드만 따로 한 번 더, **지금 화면을 읽는** 경로(chat.mode 조회)로 확인한다.
+      this._refreshMode();
       if (this._chatId) this._catchUp();
       this._renderApprovals();
       // 진입 즉시 컴포저 포커스(레이아웃 확정 후 한 프레임 뒤 — display 전환 직후 focus 는 무시된다)
@@ -1410,6 +1413,19 @@ export class ChatView {
     this.modeEl.querySelector(".chat-mode-label").textContent = view.label;
     this.modeEl.dataset.mode = view.id;
     if (this.modeMenuEl) this._renderModeMenu();
+  }
+
+  // 모드만 즉시 재확인(조회 전용 — mode 를 안 보내면 데몬이 **지금 화면**을 읽어 현재 값을 준다).
+  async _refreshMode() {
+    const tid = this._tid;
+    if (tid == null || this._modeBusy) return;
+    try {
+      const r = await api.chatMode({
+        cwd: this._cwd(), tid,
+        ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
+      });
+      if (!this._disposed && !this._modeBusy && r && r.mode) this._setMode(r.mode);
+    } catch (_) { /* 폴링/캐치업이 안전망 */ }
   }
 
   _toggleModeMenu() {

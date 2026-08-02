@@ -185,6 +185,15 @@ pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
     cpt_request(&cmd, args)
 }
 
+// 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
+//  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
+//  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**
+//  갱신된다(3초 폴링 대기 없음). 조작이 아니라 재확인 신호라 인자도 (cwd, tid) 뿐이다.
+#[tauri::command]
+pub fn mode_poke(cwd: String, tid: i64) -> Result<serde_json::Value, String> {
+    cpt_request("status.poke", serde_json::json!({ "cwd": cwd, "tid": tid }))
+}
+
 // ── 로컬 UI 채널(같은 기기 ui_command 왕복 제거) ─────────────────────────────────
 //  터미널의 `cpt` → 로컬 데몬 → (지금까지) back WSS → 다시 이 앱. 같은 기기 안에서 서버를 왕복했다.
 //  `ui.attach` 로 cpt.sock 커넥션을 유지하면 데몬이 이 앱에 직접 명령을 밀어 넣을 수 있다.

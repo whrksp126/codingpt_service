@@ -199,6 +199,11 @@ export const api = {
   //  agents.launch {cwd,index,id}  → 그 터미널에 명령을 타이핑(셸 준비 대기는 데몬이 판정)
   agentsLocal: (cmd, args) => invoke("agents_local", { cmd, args: args || {} }),
 
+  // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
+  //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
+  //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).
+  modePoke: (cwd, tid) => invoke("mode_poke", { cwd, tid }),
+
   // ── 로컬 UI 채널(cpt.sock 지속 연결) — 터미널의 cpt 명령이 back 을 왕복하지 않고 바로 이 앱에 온다 ──
   //  uiLocalStart: 멱등(args 갱신만) · onLocalUiCommand: 데몬 push 수신 · uiLocalSend: ui_result/presence 회신.
   uiLocalStart: (args) => invoke("ui_local_start", { args: args || {} }),

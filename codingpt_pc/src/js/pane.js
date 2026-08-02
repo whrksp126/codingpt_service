@@ -1480,8 +1480,18 @@ export class PaneView {
     }, delay);
   }
   _write(d) {
+    // shift+tab(CSI Z) = 에이전트 모드 순환. **로컬 터미널은 tmux 직결**이라 데몬이 이 키를 못 본다
+    //  → 데몬에 즉시 재확인을 알려 이 PC·폰의 모드 알약이 3초 폴링을 기다리지 않게 한다(2026-08-02).
+    //  원격 터미널은 입력이 데몬 pty 를 지나가므로 데몬이 알아서 감지한다(중복 통지 불필요).
+    if (this.ctx.isLocal && typeof d === "string" && d.includes("\x1b[Z")) this._pokeMode();
     if (this.ctx.isLocal) api.ptyWrite(this.id, d).catch(() => {});
     else if (this.ws && this.ws.readyState === 1) this.ws.send(new TextEncoder().encode(d));
+  }
+  _pokeMode() {
+    const t = this.node.tabs?.[this.node.active];
+    const win = t && isTermTab(t) && typeof t.win === "number" ? t.win : null;
+    if (win == null) return;
+    api.modePoke(this.ctx.localPath || "", win).catch(() => { /* 폴링이 안전망 */ });
   }
   _resize(cols, rows) {
     if (this.ctx.isLocal) api.ptyResize(this.id, cols, rows).catch(() => {});
