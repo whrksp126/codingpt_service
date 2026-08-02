@@ -251,6 +251,8 @@ export const api = {
   chatMode: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/mode", body: body || {}, timeoutSecs: 25 }),
   // 대화가 참조한 파일 바이트(이미지/영상 인라인) — 권한 판정은 데몬(그 대화에 적힌 경로만).
   chatFile: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/file", body: body || {}, timeoutSecs: 40 }),
+  // TUI `/` 명령 목록(팔레트) — 읽기 전용. 로컬 터미널이면 chatLocal 로 사이드카 직결이 더 빠르다.
+  chatCommands: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/commands", body: body || {}, timeoutSecs: 20 }),
 
   // ── 작업 스냅샷(자동 체크포인트) ──
   //  1순위 = 사이드카 데몬 직결(cpt.sock). 같은 머신에서 나는 트리거인데 back → 제어 WS → 이 머신의

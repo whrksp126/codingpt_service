@@ -27,12 +27,51 @@ export const CHAT = {
   MAX_MSGS: 1200,          // 로컬 버퍼 상한(오래된 것부터 버림 — 과거는 "이전 대화 더 보기")
   DRAFT_MAX: 4096,         // 컴포저 초안 영속 상한
   SEND_ENTER_DELAY_MS: 90, // paste 후 Enter 분리 전송(TUI 가 paste 종료 마커 전에 처리하는 것 방지)
+  CMD_MAX: 60,             // 슬래시 팔레트에 한 번에 그리는 최대 행수(검색으로 좁혀 쓰는 전제)
   PICK_LIMIT: 200,         // 컴포저 `+` 파일 목록에 한 번에 그리는 최대 행수(필터로 좁혀 쓰는 전제)
   POLL_MS: 4000,           // 캐치업 폴링 주기(push 가 살아 있으면 사실상 no-op)
   OPEN_FAIL_RETRY_MS: 8000,// 열기 **실패**(오류) 후 재시도 간격
   NO_SESSION_IDLE_MS: 30000, // 열기 성공 + noSession(정상 상태) 일 때의 느린 재확인 간격
   NO_SESSION_PROBE_MS: 30000, // 첫 메시지 전송 후 "훅이 바인딩을 만들었는지" 짧게 탐색하는 창
 };
+
+
+// ── 슬래시 명령 팔레트(TUI 의 `/` 목록) — app 미러: chatModel.ts slashQuery/filterCommands ────────
+// 여는 조건과 정렬을 **양 플랫폼이 같은 함수로** 판정한다(한쪽만 고치면 폰/PC 가 다르게 뜬다).
+//  · 여는 조건 = 초안 전체가 `/토큰` 한 개(공백을 치면 인자 모드 → 닫는다). TUI 팝업과 같은 감각.
+//  · 정렬 = 접두사 일치 먼저, 그다음 부분 일치. 목록 자체의 순서(프로젝트→개인→빌트인)는 데몬이 준다.
+export function slashQuery(text) {
+  // ⚠ trim() 을 쓰지 않는다: 뒤 공백은 "인자를 치기 시작했다"는 신호라 팔레트가 **닫혀야** 한다
+  //  (`/dep ` 에서 목록이 계속 떠 있으면 Enter 가 전송이 아니라 채워넣기로 가로채인다).
+  const m = /^\s*\/([A-Za-z0-9:_-]*)$/.exec(String(text == null ? "" : text));
+  return m ? m[1] : null;
+}
+
+export function filterCommands(items, q, max) {
+  const all = Array.isArray(items) ? items : [];
+  const s = String(q || "").toLowerCase();
+  const cap = max || CHAT.CMD_MAX;
+  if (!s) return all.slice(0, cap);
+  const pre = [];
+  const rest = [];
+  for (const c of all) {
+    const n = String(c.name || "").slice(1).toLowerCase();
+    if (n.startsWith(s)) pre.push(c);
+    else if (n.includes(s)) rest.push(c);
+  }
+  return pre.concat(rest).slice(0, cap);
+}
+
+/** 팔레트 행 배지 — 출처/제약을 한 단어로. 없으면 빈 배열. */
+export function commandBadges(cmd) {
+  const out = [];
+  if (!cmd) return out;
+  if (cmd.source === "project") out.push("프로젝트");
+  else if (cmd.source === "user") out.push("내 것");
+  if (cmd.chat === "dialog") out.push("선택 화면");
+  if (cmd.chat === "tui") out.push("터미널에서");
+  return out;
+}
 
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;

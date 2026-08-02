@@ -1382,6 +1382,12 @@ const chatMode = chatRpc('chat.mode', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid,
   mode: typeof bOf(req).mode === 'string' ? bOf(req).mode : undefined,
 }), 20000);
+// POST /api/daemon/chat/commands  { cwd, tid, agent? } → { agent, items:[{name,desc,chat,source}] }
+//  TUI 의 `/` 명령 목록(빌트인 실측표 + 그 PC 디스크에서 발견한 스킬/커스텀 명령). 읽기 전용.
+const chatCommands = chatRpc('chat.commands', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid,
+  agent: typeof bOf(req).agent === 'string' ? bOf(req).agent : undefined,
+}), 15000);
 
 // ── BYO 로그인(M5 Slice2) — 활성 러너(주로 클라우드 컨테이너)에서 사용자 claude 계정 로그인 ──
 // 크레덴셜(토큰)은 그 러너의 CLAUDE_CONFIG_DIR 에만 안착. 우리는 인증 URL/코드만 중계한다.
@@ -1593,7 +1599,7 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatFile,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatFile,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

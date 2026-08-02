@@ -423,6 +423,15 @@ function dispatchRpc(ws, method, params, ok, fail) {
       .then(ok).catch(fail);
     return;
   }
+  // chat.commands — TUI `/` 목록(빌트인 표 + 디스크에서 발견한 스킬/명령). 파일을 읽고 화면을
+  //  볼 수 있어야 하므로 transcript(트랜스크립트 전용)가 아니라 cpt-server 구현으로 보낸다.
+  if (method === 'chat.commands') {
+    const p = params || {};
+    Promise.resolve()
+      .then(() => cptServer.chatCommands({ cwd: p.cwd, tid: p.tid != null ? p.tid : p.win, agent: p.agent }))
+      .then(ok).catch(fail);
+    return;
+  }
   if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }

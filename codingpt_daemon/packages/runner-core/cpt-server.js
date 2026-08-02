@@ -672,7 +672,8 @@ async function dispatch(req, conn) {
   if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
   // ── 에이전트 모드(PC 앱 내부용) — 같은 머신인데 back 을 왕복하던 것을 없앤다 ────────────────
   //  실측(2026-08-02): back 왕복 150~285ms vs 이 소켓 1~2ms. 사용자가 "묘하게 느리다"고 한 그 차이다.
-  //  · status.poke = "지금 다시 봐"(부작용 없음) · chat.mode = 조회/전환(control.js 와 같은 구현 위임)
+  //  · status.poke = "지금 다시 봐"(부작용 없음) · chat.mode = 조회/전환 · chat.commands = 슬래시 목록
+  //    (전부 control.js 와 **같은 구현**에 위임한다 — 경로만 다르고 동작이 갈리면 안 된다)
   //  CAPABILITIES 에는 넣지 않는다(터미널 안 AI 용 명령이 아니라 앱 내부 배관 — forward.*/sync.* 와 동일).
   //  resolveCtx 앞에 두는 이유: 인자로 (cwd,tid)를 명시하므로 tmux ctx 가 필요 없고, 워크스페이스
   //  컨텍스트 게이트(cpt 오사용 방지)는 터미널에서 실행되는 명령을 위한 것이라 여기선 무의미하다.
@@ -685,6 +686,7 @@ async function dispatch(req, conn) {
     return { ok: true };
   }
   if (cmd === 'chat.mode') return chatMode(req.args || {});
+  if (cmd === 'chat.commands') return chatCommands(req.args || {});
   // 채팅 스냅샷/캐치업도 같은 이유로 로컬 직결(PC 앱 전용) — 토글할 때마다 back 왕복 255ms 를
   //  물던 자리다. 데몬 구현은 back 경로와 **같은 transcript.handle** 이고, ws 를 넘기지 않으므로
   //  push 대상(제어 WS)은 그대로 유지된다(transcript.js:1513 `if (ws) pushWs = ws`).
@@ -1614,6 +1616,24 @@ async function driveCodexMode(io, { mode } = {}) {
   throw Object.assign(new Error('그 모드로 전환하지 못했습니다'), { code: 'MODE_UNREACHABLE' });
 }
 
+/**
+ * chat.commands — { cwd, tid, agent? } → { agent, items:[{name,desc,chat,source}] }.
+ *  TUI 의 `/` 목록을 채팅 팔레트로 내준다(commands.js 헤더가 카탈로그 정본).
+ *  에이전트는 호출측이 주면 그걸 쓰고(대화에서 이미 안다), 없으면 화면으로 판정한다.
+ */
+async function chatCommands({ cwd, tid, agent } = {}) {
+  const cwdRel = typeof cwd === 'string' ? cwd : '';
+  const { abs } = ptyLib.sessionForCwd(cwdRel);
+  let a = agent === 'claude' || agent === 'codex' ? agent : null;
+  if (!a && (Number.isInteger(tid) || /^\d+$/.test(String(tid || '')))) {
+    try {
+      const { io } = dialogIoFor(cwdRel, tid);
+      a = require('./status-line').detectAgent(await io.screen());
+    } catch (_) { /* 터미널이 없거나 화면을 못 읽음 — 아래 기본값 */ }
+  }
+  return require('./commands').listCommands({ agent: a || 'claude', cwdAbs: abs });
+}
+
 /** chat.mode — { cwd, tid, mode } → { ok, mode:{id,label,symbol[,plan]}, tid }. mode 생략 시 읽기만. */
 async function chatMode({ cwd, tid, mode } = {}) {
   const { io, win } = dialogIoFor(cwd, tid, { keyGapMs: MODE_KEY_GAP_MS });
@@ -1862,6 +1882,7 @@ module.exports = {
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임
   chatMode, // 에이전트 모드 전환(shift+tab 드라이브) — control.js 의 chat.mode 가 위임
+  chatCommands, // 슬래시 명령 팔레트 목록 — control.js 의 chat.commands 가 위임
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임
   captureDialog, // 훅 대기 중 TUI 다이얼로그 캡처 — approvals 의 카드 내용 보강이 위임

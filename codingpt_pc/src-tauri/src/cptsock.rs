@@ -200,7 +200,7 @@ pub fn mode_poke(cwd: String, tid: i64) -> Result<serde_json::Value, String> {
 //  울타리는 e2ee_local/agents_local 과 같은 모양이다: 허용 목록에 있는 채팅 명령만 통과시킨다
 //  (임의 cpt 명령 통로를 웹뷰에 열지 않는다). 전송(chat.input)은 넣지 않는다 — 이 경로의 목적은
 //  **읽기/상태 왕복 제거**이고, 입력은 지금도 체감 문제가 없다(추가 표면을 만들 이유가 없다).
-const CHAT_LOCAL_OK: [&str; 3] = ["chat.open", "chat.since", "chat.mode"];
+const CHAT_LOCAL_OK: [&str; 4] = ["chat.open", "chat.since", "chat.mode", "chat.commands"];
 
 #[tauri::command]
 pub fn chat_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {

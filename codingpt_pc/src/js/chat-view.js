@@ -24,7 +24,7 @@ import {
   mergeMsgs, lastSeqOf, clampLines, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
   composerHasText, agentDisplayName, agentModeView, agentModeChoices, agentModeIsOn,
-  agentModeOf, agentModeLabel, patchLines,
+  agentModeOf, agentModeLabel, patchLines, slashQuery, filterCommands, commandBadges,
   TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
 
@@ -153,6 +153,24 @@ export class ChatView {
     //  커서 이동·백스페이스에 **한 덩어리**로 동작한다(TUI 의 [Image #N] 원자성과 동일한 감각).
     //  TUI 전달은 전송 시 한 번 — 데몬이 이미지 경로 조각을 따로 paste 해 [Image #N] 으로 변환한다.
     this.inputEl.addEventListener("keydown", (e) => {
+      // 슬래시 팔레트가 떠 있으면 ↑↓/Enter/Tab 은 목록 조작이다(TUI 팝업과 같은 감각).
+      //  Enter 는 **채워넣기**지 전송이 아니다 — 실행은 언제나 사용자가 한 번 더 눌러야 일어난다.
+      if (this.cmdsEl && !e.isComposing) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault(); e.stopPropagation();
+          this._moveCmd(e.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+        if (e.key === "Enter" || e.key === "Tab") {
+          const row = (this._cmdRows || [])[this._cmdIdx];
+          if (row && row.chat !== "tui") {
+            e.preventDefault(); e.stopPropagation();
+            this._pickCmd(row.name);
+            return;
+          }
+        }
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this._closeCmds(); return; }
+      }
       if (e.key === "Enter" && !e.shiftKey && !e.altKey && !e.isComposing) {
         // Enter=전송 · ⌘Enter/Ctrl+Enter=전송(요구사항) · Shift+Enter=개행(기본 동작).
         e.preventDefault();
@@ -202,6 +220,7 @@ export class ChatView {
     this.inputEl.addEventListener("input", () => {
       this._ceSanitize();     // PUA 잔여 소독(조합 경로로 새는 케이스)
       this._reconcileChips(); // 백스페이스/선택 삭제로 칩이 지워졌으면 첨부 목록도 걷는다
+      this._syncSlash();      // `/` 로 시작하면 명령 팔레트(공백을 치면 닫힌다)
       this._syncComposer();
       this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
     });
@@ -1581,6 +1600,119 @@ export class ChatView {
   // 컴포저 상태 동기화 — 전송 버튼 활성/모델 칩/플레이스홀더. 순수 판정은 chat-model 에 있다.
   //  ★ 전송 버튼을 "빈 입력에도 눌리는 것처럼" 두지 않는다: 눌러도 아무 일이 없는 버튼은 거짓 affordance 다
   //   (표시 정직성). 숨기지 않고 **disabled + 흐리게** 두는 이유는 위치 학습을 깨지 않기 위함이다.
+  // ── 슬래시 명령 팔레트 ────────────────────────────────────────────────────────
+  // TUI 에서 `/` 를 치면 뜨는 그 목록을 채팅에서도 낸다(사용자 요청 2026-08-02).
+  //  · 여는 조건 = **초안 전체가 `/토큰` 한 개**일 때(공백을 치면 인자 모드 → 닫힌다). TUI 와 같은 감각.
+  //  · 고르면 **컴포저에 채워 넣는다**(사용자 확정) — 인자 있는 명령(`/objectstore 백업 위치`)을 위해서,
+  //    그리고 실수로 실행되지 않게 하려고. 실행은 언제나 사용자가 전송을 눌러야 일어난다.
+  //  · 목록의 'tui' 분류(편집기 열림·세션 종료 등)는 **고를 수 없게** 흐리게 둔다(죽은 실행 금지).
+  //    직접 타이핑하면 그대로 나가므로 막는 게 아니라 권하지 않는 것이다.
+  _slashQuery() { return slashQuery(this._ceText()); }
+
+  _syncSlash() {
+    const q = this._slashQuery();
+    if (q == null) { this._closeCmds(); return; }
+    if (!this.cmdsEl) this._openCmds();
+    this._renderCmds(q);
+    void this._loadCmds();
+  }
+
+  _openCmds() {
+    const wrap = document.createElement("div");
+    wrap.className = "chat-cmds";
+    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">불러오는 중…</div></div>`;
+    this.el.querySelector(".chat-composer").appendChild(wrap);
+    this.cmdsEl = wrap;
+    this._cmdIdx = 0;
+    wrap.addEventListener("mousedown", (e) => {
+      // mousedown 으로 처리한다 — click 은 컴포저 blur 뒤라 캐럿이 날아간다.
+      const row = e.target.closest?.(".chat-cmds-row");
+      if (!row || row.classList.contains("off")) return;
+      e.preventDefault();
+      this._pickCmd(row.dataset.name);
+    });
+  }
+
+  _closeCmds() {
+    this.cmdsEl?.remove();
+    this.cmdsEl = null;
+  }
+
+  async _loadCmds() {
+    if (this._cmds || this._cmdsLoading) return;
+    this._cmdsLoading = true;
+    try {
+      const r = await this._cmdsRpc();
+      this._cmds = Array.isArray(r && r.items) ? r.items : [];
+    } catch (_) {
+      this._cmds = [];   // 실패해도 팔레트만 비는 것이고, 직접 타이핑은 그대로 동작한다
+    } finally {
+      this._cmdsLoading = false;
+      if (this.cmdsEl) this._renderCmds(this._slashQuery() || "");
+    }
+  }
+
+  _cmdsRpc() {
+    const cwd = this._cwd(), tid = this._tid, agent = this._agent || undefined;
+    if (this.ctx.isLocal?.()) return api.chatLocal("chat.commands", { cwd, tid, agent });
+    return api.chatCommands({ cwd, tid, agent, hostDeviceId: this.ctx.hostDeviceId?.() });
+  }
+
+  _cmdMatches(q) { return filterCommands(this._cmds || [], q, CHAT.CMD_MAX); }
+
+  _renderCmds(q) {
+    if (!this.cmdsEl) return;
+    const list = this.cmdsEl.querySelector(".chat-cmds-list");
+    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">불러오는 중…</div>`; return; }
+    const rows = this._cmdMatches(q);
+    this._cmdRows = rows;
+    if (this._cmdIdx >= rows.length) this._cmdIdx = 0;
+    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">맞는 명령이 없습니다</div>`; return; }
+    list.innerHTML = rows.map((c, i) => {
+      const off = c.chat === "tui";
+      return `<div class="chat-cmds-row${i === this._cmdIdx ? " on" : ""}${off ? " off" : ""}" data-name="${escapeHtml(c.name)}">` +
+        `<span class="chat-cmds-name">${escapeHtml(c.name)}</span>` +
+        `<span class="chat-cmds-desc">${escapeHtml(c.desc || "")}</span>` +
+        commandBadges(c).map((b) => `<span class="chat-cmds-badge">${escapeHtml(b)}</span>`).join("") +
+        `</div>`;
+    }).join("");
+    list.querySelector(".chat-cmds-row.on")?.scrollIntoView({ block: "nearest" });
+  }
+
+  _moveCmd(d) {
+    const rows = this._cmdRows || [];
+    if (!rows.length) return;
+    let i = this._cmdIdx;
+    for (let n = 0; n < rows.length; n++) {
+      i = (i + d + rows.length) % rows.length;
+      if (rows[i].chat !== "tui") break;      // 고를 수 없는 행은 건너뛴다
+    }
+    this._cmdIdx = i;
+    this._renderCmds(this._slashQuery() || "");
+  }
+
+  _pickCmd(name) {
+    const n = String(name || "").trim();
+    if (!n) return;
+    this._closeCmds();
+    // 채워넣기 = 이름 + 공백 한 칸. 인자를 이어 치거나 그대로 전송한다.
+    this.inputEl.textContent = n + " ";
+    this._caretToEnd();
+    this._syncComposer();
+    this.ctx.setDraft?.(this._ceText().slice(0, CHAT.DRAFT_MAX));
+    this.inputEl.focus();
+  }
+
+  _caretToEnd() {
+    const sel = window.getSelection();
+    if (!sel || !this.inputEl) return;
+    const r = document.createRange();
+    r.selectNodeContents(this.inputEl);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
   _syncComposer() {
     const has = !!composerHasText(this._ceText());
     if (this.sendEl) this.sendEl.disabled = !has;
@@ -1757,6 +1889,7 @@ export class ChatView {
     this._disposed = true;
     this._stopPoll();
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
+    this._closeCmds();
     this._closeModeMenu();
     _live.delete(this);
     // ⚠ chat.close 를 부르지 않는다. 데몬의 tail 은 **파일 단위로 공유**되고 구독자 refcount 가 없어서,
