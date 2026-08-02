@@ -204,5 +204,42 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
     && !/height: 220/.test(appf("src/workspace/chat/ChatMedia.tsx")));
 }
 
+
+// ── TUI 패리티: 편집 diff 표시 + 끝난 도구 묶기(2026-08-02 사용자 요청) ────────────────────────
+{
+  // 묶음 라벨 규칙 3구현 동일(PC 는 이름 배열, 앱은 행 배열을 받는다 — 결과 문자열이 같아야 한다).
+  const names = ["mcp__claude-in-chrome__navigate", "mcp__claude-in-chrome__computer", "Bash", "Bash", "Edit"];
+  eq("PC 묶음 라벨", PC.toolRunLabel(names), "claude-in-chrome 2 · 셸 2 · 편집 1");
+  const tsPath2 = path.resolve(here, "../../../codingpt_app/src/workspace/chatModel.ts");
+  const r2 = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+    `import(${JSON.stringify(url.pathToFileURL(tsPath2).href)}).then((m) => {
+       const rows = ${JSON.stringify(names)}.map((n, i) => ({ key: String(i), msg: { seq: i, kind: 'tool_use', tool: { id: 't'+i, name: n } }, result: { ok: true } }));
+       const patchRows = [{ key: 'p', msg: { seq: 99, kind: 'tool_use', tool: { id: 'p', name: 'Edit' } }, result: { ok: true, patch: { hunks: [] } } }];
+       const grouped = m.groupToolRuns([...rows]);
+       const withPatch = m.groupToolRuns([...rows.slice(0,4), ...patchRows]);
+       const pl = m.patchLines({ hunks: [{ oldStart: 10, newStart: 10, lines: [' a', '-b', '+c'] }] });
+       console.log(JSON.stringify({ label: m.toolRunLabel(rows), groupedLen: grouped.length, isGroup: !!grouped[0].group,
+         patchNotGrouped: withPatch[withPatch.length-1].group === undefined, lines: pl.lines }));
+     });`], { encoding: "utf8" });
+  let app2 = null;
+  try { app2 = JSON.parse((r2.stdout || "").trim().split("\n").pop()); } catch (_) { app2 = null; }
+  eq("앱 묶음 라벨 = PC 와 동일", app2 && app2.label, PC.toolRunLabel(names));
+  ok("앱: 연속 도구 5개가 한 행으로 묶인다", app2 && app2.groupedLen === 1 && app2.isGroup);
+  ok("앱: diff 가 붙은 편집 행은 묶지 않는다(TUI 도 Update 는 펼쳐 둔다)", app2 && app2.patchNotGrouped);
+  eq("앱 patchLines = PC 와 동일(줄번호·부호)", app2 && app2.lines, PC.patchLines({ hunks: [{ oldStart: 10, newStart: 10, lines: [" a", "-b", "+c"] }] }).lines);
+
+  const ts3 = read("../../codingpt_daemon/packages/runner-core/transcript.js");
+  ok("데몬: 편집 결과에서 structuredPatch 를 뽑고 상투 문구는 비운다",
+    /summarizePatch/.test(ts3) && /preview: patch \? '' :/.test(ts3));
+  const cv4 = read("../src/js/chat-view.js");
+  ok("PC: diff 렌더 + 묶기 후처리 + 편집행 제외", /_patchHtml/.test(cv4) && /_regroupTools/.test(cv4) && /!el\.querySelector\("\.chat-diff"\)/.test(cv4));
+  const css2 = read("../src/styles.css");
+  ok("PC: diff 는 자기 박스 안에서만 가로 스크롤(아래 줄을 덮지 않게)", /\.chat-diff \{[\s\S]{0,200}overflow-x: auto/.test(css2));
+  const appf2 = (p) => read(path.resolve(here, "../../../codingpt_app", p));
+  ok("앱: diff 뷰 + 도구 묶음 행", /DiffView/.test(appf2("src/workspace/chat/ChatRow.tsx")) && /ToolGroup/.test(appf2("src/workspace/chat/ChatRow.tsx")));
+  ok("앱: 이미지 전체화면은 핀치 확대/이동 가능(사진 뷰어 관례)",
+    /Gesture\.Pinch/.test(appf2("src/workspace/chat/ImageViewer.tsx")) && /Gesture\.Pan/.test(appf2("src/workspace/chat/ImageViewer.tsx")));
+}
+
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
 console.log("\nALL PASS");

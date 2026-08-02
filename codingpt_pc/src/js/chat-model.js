@@ -22,6 +22,7 @@ export const CHAT = {
   SNAPSHOT_LIMIT: 200,     // chat.open limit
   AT_BOTTOM_PX: 48,        // 이 이내면 "맨 아래" → 새 메시지 자동 스크롤
   OUTPUT_CLAMP_LINES: 6,   // tool 결과 본문 접힘 줄수
+  PATCH_CLAMP_LINES: 12,   // 편집 diff 접힘 줄수(넘으면 '더 보기')
   THINKING_CHARS: 120,     // thinking 접힘 글자수
   MAX_MSGS: 1200,          // 로컬 버퍼 상한(오래된 것부터 버림 — 과거는 "이전 대화 더 보기")
   DRAFT_MAX: 4096,         // 컴포저 초안 영속 상한
@@ -35,6 +36,59 @@ export const CHAT = {
 
 // 에이전트 판정에 쓰는 명령 이름 — 리컨실러가 채우는 tab.cmd(pane_current_command)와 대조.
 export const AGENT_CMD_RE = /^(claude|codex|gemini)$/i;
+
+// ── 끝난 도구 행 묶기(TUI 미러) — app 미러: chatModel.ts TOOL_GROUP_MIN/toolRunLabel ─────────
+// TUI 는 연속으로 끝난 도구 호출을 한 줄로 접는다("Called claude-in-chrome 6 times, ran 5 shell
+//  commands"). 채팅이 한 줄짜리 도구 행을 열몇 개씩 쌓으면 정작 읽어야 할 본문이 묻힌다
+//  (2026-08-02 사용자 지적). 진행 중 도구·질문 행은 절대 접지 않는다.
+export const TOOL_GROUP_MIN = 4;
+
+function toolRunName(name) {
+  const n = String(name || "").trim();
+  if (!n) return "도구";
+  if (n === "Bash" || n === "shell") return "셸";
+  if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "apply_patch") return "편집";
+  if (n === "Read" || n === "NotebookRead") return "읽기";
+  if (n === "Grep" || n === "Glob" || n === "Search") return "검색";
+  if (n.startsWith("mcp__")) return n.split("__")[1] || n;
+  return n;
+}
+
+/** 도구 이름 배열 → "claude-in-chrome 6 · 셸 5"(많은 순, 최대 3종). */
+export function toolRunLabel(names) {
+  const count = new Map();
+  for (const nm of names || []) {
+    const k = toolRunName(nm);
+    count.set(k, (count.get(k) || 0) + 1);
+  }
+  const top = [...count.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return top.map(([k, n]) => `${k} ${n}`).join(" · ") + (count.size > 3 ? " 외" : "");
+}
+
+// ── 편집 diff(TUI 미러) — app 미러: chatModel.ts patchLines ────────────────────────────────
+// 데몬이 claude 의 structuredPatch 를 그대로 실어 준다(result.patch). TUI 는 이걸 초록/빨강으로
+//  그리는데, 채팅은 예전엔 "The file … updated successfully" 문구만 보여줬다(정보 0 — 사용자 지적).
+//  여기서는 **행 목록**으로만 바꾸고(순수), 색·박스는 각 플랫폼이 그린다.
+//  줄 번호는 헌크의 oldStart/newStart 에서 증가시킨다(삭제행은 old 만, 추가행은 new 만 증가).
+export function patchLines(patch, limit) {
+  const hunks = (patch && Array.isArray(patch.hunks)) ? patch.hunks : [];
+  const out = [];
+  const cap = limit || 200;
+  for (const h of hunks) {
+    let oldNo = h.oldStart || 0;
+    let newNo = h.newStart || 0;
+    if (out.length) out.push({ type: "gap", text: "⋯", no: null });
+    for (const raw of (h.lines || [])) {
+      if (out.length >= cap) return { lines: out, more: true };
+      const sign = raw.charAt(0);
+      const text = raw.slice(1);
+      if (sign === "+") out.push({ type: "add", text, no: newNo++ });
+      else if (sign === "-") out.push({ type: "del", text, no: oldNo++ });
+      else { out.push({ type: "ctx", text, no: newNo }); oldNo++; newNo++; }
+    }
+  }
+  return { lines: out, more: !!(patch && patch.truncated) };
+}
 
 // ── 대화에 적힌 파일(이미지/영상/문서) 표현 규칙 — app 미러: chatModel.ts mediaRefOf ─────────────
 // 사용자 확정(2026-08-02): **의도 판별은 마크다운 문법이 이미 해준다.**

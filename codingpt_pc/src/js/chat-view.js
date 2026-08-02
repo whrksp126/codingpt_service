@@ -23,7 +23,8 @@ import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
   mergeMsgs, lastSeqOf, clampLines, fmtTime, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
-  composerHasText, agentDisplayName, agentModeView, agentModeChoices,
+  composerHasText, agentDisplayName, agentModeView, agentModeChoices, patchLines,
+  TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -477,6 +478,7 @@ export class ChatView {
     //  감췄던 질문을 답과 함께 대화에 넣기). _renderApprovals 가 키 대조로 필요할 때만 재조립한다.
     this._renderApprovals();
     this._syncWorking();
+    this._regroupTools();   // 끝난 도구 행 묶기(TUI 미러) — 증분 append 뒤 경계 재계산
   }
 
   _rebuild() {
@@ -569,6 +571,7 @@ export class ChatView {
       //  command")로 접는다. 채팅도 동일 — 진행 중엔 명령(argsPreview)을 보이고, 결과가 오면
       //  한 줄로 접는다(.done). 머리 클릭으로 펼침/접기. 질문 행은 접지 않는다(내용이 곧 본문).
       if (m.kind === "tool_use") row.dataset.fold = "1";
+      if (m.tool && m.tool.name) row.dataset.toolName = m.tool.name;   // 묶음 요약 라벨의 근거
       const label = toolLabel(m);
       const path = m.tool && m.tool.path ? m.tool.path : "";
       const head = document.createElement("div");
@@ -601,6 +604,64 @@ export class ChatView {
     row.className = "chat-divider dim";
     row.innerHTML = `<span>${escapeHtml(text || m.kind || "?")}</span>`;
     return row;
+  }
+
+  // ── 끝난 도구 행 묶기(TUI 미러) ────────────────────────────────────────────────
+  // 렌더가 증분(append)이라 데이터 단계에서 묶지 않고 **후처리**로 접는다: 연속으로 끝난 도구 행이
+  //  TOOL_GROUP_MIN 개 이상이면 그 앞에 요약 한 줄을 넣고 본체는 감춘다. 요약을 누르면 펼친다.
+  //  진행 중(.done 아님)·펼쳐 둔(.open)·질문 행은 대상이 아니다 — 지금 무슨 일이 일어나는지는 항상 보인다.
+  _regroupTools() {
+    if (!this.scrollEl) return;
+    // 멱등: 지난 요약을 걷고 다시 계산한다(증분 append 뒤에도 경계가 정확해진다).
+    for (const g of [...this.scrollEl.querySelectorAll(".chat-tool-group")]) g.remove();
+    for (const r of [...this.scrollEl.querySelectorAll(".grouped")]) r.classList.remove("grouped");
+    const kids = [...this.scrollEl.children];
+    let run = [];
+    const flush = () => {
+      const tools = run.filter((el) => el.classList.contains("chat-tool"));
+      if (tools.length >= TOOL_GROUP_MIN) {
+        const names = tools.map((el) => el.dataset.toolName || "");
+        const bad = run.filter((el) => el.querySelector(".chat-tool-mark.err")).length;
+        const sum = document.createElement("div");
+        sum.className = "chat-tool-group";
+        sum.innerHTML = `<span class="chat-tool-mark ${bad ? "err" : "ok"}">${bad ? "✕" : "✓"}</span>`
+          + `<span class="chat-tool-group-label">도구 ${tools.length}개 실행 · ${escapeHtml(toolRunLabel(names))}${bad ? ` · 실패 ${bad}` : ""}</span>`
+          + `<span class="chat-tool-group-caret">›</span>`;
+        run[0].before(sum);
+        for (const el of run) el.classList.add("grouped");
+      }
+      run = [];
+    };
+    for (const el of kids) {
+      // ★ diff 가 붙은 편집 행은 묶지 않는다 — TUI 도 Update 는 diff 를 펼쳐 두고 나머지만 접는다.
+      const isDoneTool = el.classList?.contains("chat-tool") && el.classList.contains("done")
+        && !el.classList.contains("open") && el.dataset.fold === "1"
+        && !el.querySelector(".chat-diff");
+      if (isDoneTool) { run.push(el); continue; }
+      // '생각 중' 줄은 묶음을 끊지 않는다 — 도구 사이에 섞여 들어와 run 을 토막내면 실제로는 연속인
+      //  도구 열몇 개가 하나도 안 접힌다(실기기 실측). 함께 접히고, 펼치면 원래 순서 그대로.
+      if (el.classList?.contains("chat-thinking") && run.length) { run.push(el); continue; }
+      flush();
+    }
+    flush();
+  }
+
+  // 편집 diff — TUI 와 같은 모양(줄번호 + 초록/빨강). 길면 접고 "더 보기".
+  _patchHtml(patch) {
+    const { lines, more } = patchLines(patch, CHAT.PATCH_CLAMP_LINES * 4);
+    const rowHtml = (l) => (
+      `<div class="chat-diff-row ${l.type}">` +
+      `<span class="chat-diff-no">${l.no == null ? "" : l.no}</span>` +
+      `<span class="chat-diff-sign">${l.type === "add" ? "+" : l.type === "del" ? "-" : " "}</span>` +
+      `<span class="chat-diff-txt">${escapeHtml(l.text)}</span></div>`
+    );
+    const head = lines.slice(0, CHAT.PATCH_CLAMP_LINES).map(rowHtml).join("");
+    const rest = lines.slice(CHAT.PATCH_CLAMP_LINES);
+    return `<div class="chat-diff">${head}`
+      + (rest.length ? `<div class="chat-diff-rest hidden">${rest.map(rowHtml).join("")}</div>`
+        + `<button class="chat-diff-more" type="button">${rest.length}줄 더 보기</button>` : "")
+      + (more ? `<div class="chat-diff-cut">…이후 생략(원문은 터미널)</div>` : "")
+      + `</div>`;
   }
 
   _truncNote() {
@@ -1111,7 +1172,10 @@ export class ChatView {
         ? `<div class="chat-q-res">${escapeHtml(String(res.preview || "").trim() || "응답됨")}</div>`
         : body;
       // 결과 도착 = TUI 가 그 도구를 한 줄로 접는 순간(.done) — 사용자가 펼쳐 둔 행(.open)은 유지.
+      // 편집 diff 는 접지 않는다 — TUI 도 Update 는 diff 를 펼쳐 둔다(이 대화의 핵심 정보).
+      if (res.patch && card.row) card.row.dataset.diff = "1";
       if (card.row && card.row.dataset.fold === "1") card.row.classList.add("done");
+      this._regroupTools();   // 방금 끝난 행이 묶음 경계를 바꿨을 수 있다
       return;
     }
     // 짝을 못 찾았고 보여줄 내용도 없으면 그리지 않는다(빈 카드 노이즈 방지).
@@ -1127,6 +1191,8 @@ export class ChatView {
   }
 
   _resultBodyHtml(res) {
+    // 편집 결과는 **diff** 가 본문이다(TUI 와 같은 데이터). 상투 문구는 데몬이 이미 비웠다.
+    if (res.patch) return this._patchHtml(res.patch);
     const preview = String(res.preview || "");
     const meta = resultMeta(res);
     if (!preview) return meta ? `<div class="chat-tool-meta">${escapeHtml(meta)}</div>` : "";
@@ -1165,6 +1231,21 @@ export class ChatView {
           else this._setBanner("이미지를 불러올 수 없습니다.", "warn");
         })
         .catch(() => this._setBanner("이미지를 불러올 수 없습니다.", "warn"));
+      return;
+    }
+    // 도구 묶음 요약 클릭 = 그 구간 펼치기(요약 제거 + 감춘 행 복구).
+    const grp = e.target.closest?.(".chat-tool-group");
+    if (grp) {
+      let n = grp.nextElementSibling;
+      while (n && n.classList?.contains("grouped")) { n.classList.remove("grouped"); n = n.nextElementSibling; }
+      grp.remove();
+      return;
+    }
+    // 편집 diff 더 보기 — 접힌 나머지 줄을 펼친다.
+    const dmore = e.target.closest?.(".chat-diff-more");
+    if (dmore) {
+      const rest = dmore.parentElement?.querySelector(".chat-diff-rest");
+      if (rest) { rest.classList.remove("hidden"); dmore.remove(); }
       return;
     }
     const copy = e.target.closest?.(".chat-code-copy");
