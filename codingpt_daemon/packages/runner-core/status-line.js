@@ -310,17 +310,47 @@ async function pollOne(chatId) {
   const modeKey = modeKeyOf(mode);
   const modeChanged = mode != null && modeKey !== w.lastMode;
   if (modeChanged) { w.lastMode = modeKey; w.mode = mode; }
-  const lines = extractStatusLines(screen, w.agent);
+  // 다이얼로그가 떠 있는 동안엔 상태줄을 갱신하지 않는다(위 screenFor 와 같은 이유 — 오독 방지).
+  const dialogNow = extractDialog(screen);
+  const lines = dialogNow ? null : extractStatusLines(screen, w.agent);
   const key = lines ? lines.join('\n') : null;
   const linesChanged = key != null && key !== w.last;
   if (linesChanged) w.last = key;
   // 선택 다이얼로그(/model 류)는 **떴다/사라졌다**가 곧 상태 변화다 — 사라지면 null 로 밀어 카드를 걷는다.
-  const dialog = extractDialog(screen);
+  const dialog = dialogNow;
   const dKey = dialogKeyOf(dialog);
   const dialogChanged = dKey !== w.dialogKey;
   if (dialogChanged) { w.dialogKey = dKey; w.dialog = dialog; }
   if (!linesChanged && !modeChanged && !dialogChanged) return;  // 변화 없음(추출 불가면 이전 값 유지)
   if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w), w.dialog || null);
+}
+
+/**
+ * 대화 바인딩과 **무관하게** 그 터미널 화면을 한 번 읽어 { lines, mode, dialog } 를 준다.
+ *
+ * ★ 2026-08-03 실사고: 상태줄·모드 알약·선택 화면 카드는 전부 **화면**에서 오는데, 감시자는
+ *  chat.open 이 성공(=대화 파일과 짝이 지어짐)해야만 등록됐다. codex 터미널이 `noSession:
+ *  ambiguous`(어느 rollout 이 이 터미널인지 단정 불가)면 채팅에 아무것도 안 떴다 —
+ *  사용자 신고: "codex 에서 /model 했는데 TUI 엔 목록이 뜨는데 채팅엔 아무것도 없다".
+ *  화면 정보는 대화 유무와 독립이어야 한다. 그래서 상태 없는 1회 읽기를 따로 둔다.
+ */
+async function screenFor({ cwdRel, tid, agent } = {}) {
+  if (!Number.isInteger(tid)) return null;
+  const ptyLib = require('./pty');
+  const { session } = ptyLib.sessionForCwd(typeof cwdRel === 'string' ? cwdRel : '');
+  const target = `=${ptyLib.termSession(session, tid)}:0`;
+  let screen = null;
+  try { screen = await ptyLib.runTmux(['capture-pane', '-e', '-p', '-t', target]); }
+  catch (_) { return null; }                    // 터미널 없음 — 조용히(호출측이 이전 값 유지)
+  const a = agent === 'claude' || agent === 'codex' ? agent : detectAgent(screen);
+  const dialog = extractDialog(screen);
+  return {
+    // 다이얼로그가 화면을 덮고 있으면 상태줄은 **보이지 않는 것**이다 → null(이전 값 유지).
+    //  codex 는 컴포저 줄이 본문에 남아 있어서 그 아래(=다이얼로그 영역)를 상태줄로 오독한다(실측).
+    lines: dialog ? null : (extractStatusLines(screen, a) || null),
+    mode: extractMode(screen, a),
+    dialog,
+  };
 }
 
 /** 캐치업(chat.since)용 — 지금 알고 있는 모드({id,label,symbol}) | null. 캡처하지 않는다(캐시 읽기). */
@@ -397,7 +427,7 @@ function stop() {
 
 module.exports = {
   watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
-  parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, detectAgent, modeSpec,
+  parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, detectAgent, modeSpec, screenFor,
   MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   CODEX_MODE_IDS: CODEX_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,

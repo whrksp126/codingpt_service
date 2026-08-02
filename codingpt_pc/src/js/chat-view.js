@@ -435,6 +435,10 @@ export class ChatView {
   _tick() {
     if (!this._visible || this._disposed) return;
     if (!this._chatId) {
+      // ★ 대화가 없어도 **화면**은 갱신한다(2026-08-03 실사고): 상태줄·모드 알약·선택 화면 카드는
+      //  전부 화면에서 오므로 대화 바인딩(짝짓기)이 실패한 터미널에서도 보여야 한다. codex 가
+      //  `ambiguous` 일 때 /model 선택 화면이 채팅에 아예 안 뜨던 원인이 이 자리였다.
+      this._pollScreen();
       // ★ noSession(성공 응답이지만 chatId 가 없다)은 **확정된 상태**다 → 매 틱 재오픈 금지.
       //   규칙은 chat-model.shouldReopenNoSession(순수·실행 검증). 여기서 안 막으면 4초마다
       //   chat.open 을 영원히 때리는 조용한 퇴행이 된다(화면은 정상, 데몬·릴레이만 두들긴다).
@@ -452,6 +456,25 @@ export class ChatView {
     }
     if (Date.now() - this._lastPushAt < 3500) return; // push 가 살아있다
     this._catchUp();
+  }
+
+  // 대화 바인딩이 없는 터미널의 화면 상태 폴링 — 감시자(push)는 chatId 로만 라우팅되기 때문에
+  //  여기서는 우리가 직접 읽는다. 로컬 터미널이면 사이드카 직결(1~2ms).
+  async _pollScreen() {
+    const tid = this.ctx.tid?.();
+    if (tid == null || this._screening) return;
+    this._screening = true;
+    try {
+      const cwd = this._cwd(), agent = this._agent || undefined;
+      const r = this.ctx.isLocal?.()
+        ? await api.chatLocal("chat.screen", { cwd, tid, agent })
+        : await api.chatScreen({ cwd, tid, agent, hostDeviceId: this.ctx.hostDeviceId?.() });
+      if (this._disposed || !r) return;
+      this._setStatusLines(r.lines || []);
+      if (r.mode && !this._modeBusy) this._setMode(r.mode);
+      if (!this._dlgBusy) this._setDialog(r.dialog || null);
+    } catch (_) { /* 조용히 — 다음 틱에 다시 본다 */ }
+    finally { this._screening = false; }
   }
 
   async _catchUp() {

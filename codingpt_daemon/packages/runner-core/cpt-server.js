@@ -688,6 +688,7 @@ async function dispatch(req, conn) {
   if (cmd === 'chat.mode') return chatMode(req.args || {});
   if (cmd === 'chat.commands') return chatCommands(req.args || {});
   if (cmd === 'chat.dialog') return chatDialog(req.args || {});
+  if (cmd === 'chat.screen') return chatScreen(req.args || {});
   // 채팅 스냅샷/캐치업도 같은 이유로 로컬 직결(PC 앱 전용) — 토글할 때마다 back 왕복 255ms 를
   //  물던 자리다. 데몬 구현은 back 경로와 **같은 transcript.handle** 이고, ws 를 넘기지 않으므로
   //  push 대상(제어 WS)은 그대로 유지된다(transcript.js:1513 `if (ws) pushWs = ws`).
@@ -1694,6 +1695,18 @@ async function chatDialog({ cwd, tid, pick, cancel, expect } = {}) {
 }
 
 /**
+ * chat.screen — { cwd, tid, agent? } → { lines, mode, dialog }. 대화 바인딩과 **무관한** 화면 상태.
+ *  대화 파일과 짝이 안 지어진 터미널(codex ambiguous 등)에서도 상태줄·모드 알약·선택 화면 카드가
+ *  나와야 하기 때문에 둔다(2026-08-03 실사고). 감시자는 chatId 로만 라우팅되므로 이 경로는 폴링용.
+ */
+async function chatScreen({ cwd, tid, agent } = {}) {
+  const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
+  if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
+  const r = await require('./status-line').screenFor({ cwdRel: typeof cwd === 'string' ? cwd : '', tid: win, agent });
+  return { lines: (r && r.lines) || null, mode: (r && r.mode) || null, dialog: (r && r.dialog) || null, tid: win };
+}
+
+/**
  * chat.commands — { cwd, tid, agent? } → { agent, items:[{name,desc,chat,source}] }.
  *  TUI 의 `/` 목록을 채팅 팔레트로 내준다(commands.js 헤더가 카탈로그 정본).
  *  에이전트는 호출측이 주면 그걸 쓰고(대화에서 이미 안다), 없으면 화면으로 판정한다.
@@ -1961,6 +1974,7 @@ module.exports = {
   chatMode, // 에이전트 모드 전환(shift+tab 드라이브) — control.js 의 chat.mode 가 위임
   chatCommands, // 슬래시 명령 팔레트 목록 — control.js 의 chat.commands 가 위임
   chatDialog, // TUI 선택 화면 카드 조작 — control.js 의 chat.dialog 가 위임
+  chatScreen, // 대화 바인딩 없는 터미널의 화면 상태(상태줄·모드·선택 화면)
   _driveChatDialog: driveDialog, // 테스트/격리 검증용(io 주입)
   permissionAnswer, // TUI 권한 다이얼로그 원격 조작 — question-revive 의 권한 카드 drive 가 위임
   composerInject, // 훅 경로 "허용+추가 지시" — approvals.resolveRemote 가 allow 후 위임

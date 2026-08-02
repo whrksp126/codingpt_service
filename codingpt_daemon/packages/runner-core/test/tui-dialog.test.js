@@ -149,3 +149,37 @@ test('취소는 Escape 한 번', async () => {
   assert.strictEqual(r.ok, true);
   assert.deepStrictEqual(t.st.keys, ['Escape']);
 });
+
+// ── 대화 바인딩이 없어도 화면은 보인다 — 2026-08-03 실사고 회귀 ─────────────────
+// 사용자 신고: "codex 에서 /model 했는데 TUI 엔 목록이 뜨는데 채팅엔 아무것도 없다".
+//  진범 = 감시자가 chat.open 성공(대화 파일 짝짓기)에만 등록돼서, codex 가 `noSession: ambiguous`
+//  이면 상태줄·모드·선택 화면이 **전부** 막혔다. 화면에서 오는 것은 대화 유무와 독립이어야 한다.
+test('screenFor 는 대화 없이 화면만으로 상태를 준다(+다이얼로그 중엔 상태줄을 갱신하지 않는다)', async () => {
+  const ptyLib = require('../pty');
+  const orig = ptyLib.runTmux;
+  const CODEX_DLG = [
+    '• GPT-5.4 기반 Codex 모델을 사용 중입니다.',
+    '',
+    '› //model',                                   // 본문에 남은 컴포저 줄(오독 유발 지점)
+    '',
+    '  Select Model and Effort',
+    '  Access legacy models by running codex -m <model>',
+    '  1. gpt-5.6-sol (current)  Latest frontier agentic coding model.',
+    '  2. gpt-5.6-terra          Balanced agentic coding model for everyday work.',
+    '  3. gpt-5.6-luna           Fast and affordable agentic coding model.',
+    '',
+    '  Press enter to confirm or esc to go back',
+    '',
+  ].join('\n');
+  ptyLib.runTmux = async (args) => (args[0] === 'capture-pane' ? CODEX_DLG : '');
+  try {
+    const r = await sl.screenFor({ cwdRel: 'ws', tid: 7, agent: 'codex' });
+    assert.strictEqual(r.dialog.title, 'Select Model and Effort');
+    assert.strictEqual(r.dialog.options.length, 3);
+    assert.strictEqual(r.lines, null, '다이얼로그가 화면을 덮는 동안 상태줄은 보이지 않는 것이다');
+  } finally { ptyLib.runTmux = orig; }
+});
+
+test('tid 가 없으면 화면을 읽지 않는다(추측 조작 금지와 같은 규율)', async () => {
+  assert.strictEqual(await sl.screenFor({ cwdRel: 'ws', tid: null }), null);
+});

@@ -132,6 +132,7 @@ router.post('/chat/answer', accountAuth, daemonController.chatAnswer); // TUI �
 router.post('/chat/mode', accountAuth, daemonController.chatMode);
 router.post('/chat/commands', accountAuth, daemonController.chatCommands); // TUI `/` 명령 목록(팔레트)
 router.post('/chat/dialog', accountAuth, daemonController.chatDialog);     // TUI 선택 화면 카드 조작
+router.post('/chat/screen', accountAuth, daemonController.chatScreen);     // 바인딩 없는 터미널의 화면 상태
 router.post('/chat/file', accountAuth, daemonController.chatFile);   // 대화가 참조한 파일 바이트(이미지/영상 인라인 표시)   // 에이전트 권한 모드 조회/전환(TUI shift+tab 드라이브)
 
 // 워크스페이스(Slice2) — PC 에 결정적 스캐폴드. 데몬 오프라인이면 409.

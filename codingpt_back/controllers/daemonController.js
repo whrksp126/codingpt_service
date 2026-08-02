@@ -1391,6 +1391,12 @@ const chatDialog = chatRpc('chat.dialog', (req) => ({
   pick: bOf(req).pick, cancel: !!bOf(req).cancel,
   expect: typeof bOf(req).expect === 'string' ? bOf(req).expect.slice(0, 200) : undefined,
 }), 20000);
+// POST /api/daemon/chat/screen  { cwd, tid, agent? } → { lines, mode, dialog }
+//  대화 바인딩이 없는 터미널(codex ambiguous 등)에서도 상태줄·모드·선택 화면을 그리기 위한 폴링 경로.
+const chatScreen = chatRpc('chat.screen', (req) => ({
+  cwd: bOf(req).cwd || '', tid: bOf(req).tid,
+  agent: typeof bOf(req).agent === 'string' ? bOf(req).agent : undefined,
+}), 15000);
 const chatCommands = chatRpc('chat.commands', (req) => ({
   cwd: bOf(req).cwd || '', tid: bOf(req).tid,
   agent: typeof bOf(req).agent === 'string' ? bOf(req).agent : undefined,
@@ -1606,7 +1612,7 @@ module.exports = {
   wsGetRoot, wsSetRoot, wsCreate, wsClone, wsSetFullDisk,
   agentStart, agentInput, agentApprove, agentInterrupt, agentStop, agentStatus, agentBacklog, agentSessions, agentDoctor,
   agentLogin, agentLoginSubmit, agentLoginCancel, agentLoginStatus,
-  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatDialog, chatFile,
+  chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatDialog, chatScreen, chatFile,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
 };

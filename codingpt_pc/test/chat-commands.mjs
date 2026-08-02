@@ -142,6 +142,18 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   const appd = (p) => read(path.resolve(here, "../../../codingpt_app", p));
   ok("앱: 카드 컴포넌트 + 조작", /TuiDialogCard/.test(appd("src/workspace/chat/ChatBody.tsx")) && /chatService\.chatDialog/.test(appd("src/workspace/chat/ChatBody.tsx")));
   ok("앱: 스트림이 다이얼로그를 push/pull 양쪽으로 잇는다", /statusDialog/.test(appd("src/workspace/chat/useChatStream.ts")));
+  const sl2 = read("../../codingpt_daemon/packages/runner-core/status-line.js");
+  ok("데몬: 대화 바인딩 없이도 화면 상태를 준다(screenFor)", /function screenFor/.test(sl2));
+  const ts4 = read("../../codingpt_daemon/packages/runner-core/transcript.js");
+  ok("데몬: noSession 응답에도 화면 필드를 싣는다", /noSession: true[\s\S]{0,400}statusDialog/.test(ts4));
+  const cs3 = read("../../codingpt_daemon/packages/runner-core/cpt-server.js");
+  ok("데몬: chat.screen RPC(폴링 경로)", /async function chatScreen/.test(cs3) && /cmd === 'chat\.screen'/.test(cs3));
+  const back4 = read("../../codingpt_back/routes/daemonRoutes.js");
+  ok("back: POST /chat/screen 라우트", /\/chat\/screen/.test(back4));
+  const cv7 = read("../src/js/chat-view.js");
+  ok("PC: 대화가 없을 때 화면 상태를 폴링한다", /_pollScreen\(\)/.test(cv7));
+  const appe = (p) => read(path.resolve(here, "../../../codingpt_app", p));
+  ok("앱: 대화가 없을 때 화면 상태를 폴링한다", /chatScreen\(/.test(appe("src/workspace/chat/useChatStream.ts")));
 }
 
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
