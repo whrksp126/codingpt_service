@@ -1227,22 +1227,48 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   return { ok: true, index: win, submitted: doSubmit, multiline };
 }
 
-// claude 컴포저(❯ 프롬프트, NBSP 구분) 잔재를 C-u 로 비운다 — 최대 6회, 화면 확인 기반.
-//  · 빈 컴포저/힌트(Try "...")면 즉시 종료. 다이얼로그 선택지(❯ 1. …)면 절대 건드리지 않는다.
-//  · codex 등 ❯ 프롬프트가 아닌 TUI 는 감지되지 않아 그대로 통과(기존 동작 유지).
+// TUI 컴포저 잔재를 비운다 — 최대 6회, **화면 확인 기반**. 채팅 전송의 계약은 "채팅 텍스트 = 제출 본문"이다.
+//  · claude(`❯`): C-u 로 한 번에 지운다.
+//  · codex(`›`) : ★ 2026-08-02 사용자 신고 — 채팅에서 `/model` 을 보냈는데 TUI 에 `//model` 이 들어갔다.
+//    TUI 컴포저에 사용자가 쳐 둔 `/` 가 남아 있었는데 이 함수가 claude 만 감지해 codex 는 그냥 통과했다.
+//    codex 는 C-u 가 먹지 않는다(실측) → Backspace 를 글자 수만큼 보낸다.
+//    ★ 글자 수는 **커서 위치**로 잰다: codex 는 빈 컴포저에 회색 플레이스홀더("Write tests for @filename")를
+//    같은 자리에 그려서 화면 텍스트만 보면 초안과 구분할 수 없다. 실측(0.146.0): 빈 컴포저의 커서는
+//    `› ` 바로 뒤(x=2), `/mo` 를 치면 x=5 다. 즉 x-2 = 실제 입력 글자 수이고, x<=2 면 비어 있다.
+//  · 어느 쪽이든 다이얼로그 선택지 줄(`❯ 1.` / `› 1.`)은 절대 건드리지 않는다(오조작 금지).
+const RESIDUE_PROMPT_COLS = 2;  // `› ` 폭(실측)
+const RESIDUE_MAX_BS = 200;     // 폭주 방어(긴 초안이 남아 있어도 이 이상은 지우지 않는다)
+
 async function clearComposerResidue(target) {
   for (let i = 0; i < 6; i++) {
     const out = await ptyLib.runTmux(['capture-pane', '-p', '-t', target]);
     const lines = String(out || '').split('\n');
     let idx = -1;
+    let codex = false;
     for (let k = lines.length - 1; k >= 0; k--) {
+      if (/^\s*[❯›]\s*[1-9]\.\s/.test(lines[k])) continue;   // 다이얼로그 커서 — 컴포저가 아니다
       if (/^\s*❯/.test(lines[k])) { idx = k; break; }
+      if (/^\s*›/.test(lines[k])) { idx = k; codex = true; break; }
     }
     if (idx < 0) return;
-    const text = lines[idx].replace(/^\s*❯[\s ]?/, '').trim();
-    if (!text || /^Try "/.test(text)) return;      // 비었다(힌트는 본문이 아니다)
+    const text = lines[idx].replace(/^\s*[❯›][\s ]?/, '').trim();
     if (/^\d+\.\s/.test(text)) return;             // 다이얼로그 — 오조작 금지
-    await ptyLib.runTmux(['send-keys', '-t', target, 'C-u']);
+    if (codex) {
+      let cx = -1;
+      let cy = -1;
+      try {
+        const pos = await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{cursor_x} #{cursor_y}']);
+        const m = /(\d+)\s+(\d+)/.exec(String(pos || ''));
+        if (m) { cx = parseInt(m[1], 10); cy = parseInt(m[2], 10); }
+      } catch (_) { return; }                       // 커서를 못 읽으면 건드리지 않는다(추측 조작 금지)
+      if (cy !== idx) return;                        // 커서가 컴포저 줄이 아니다 = 지금 입력 자리가 아니다
+      const n = cx - RESIDUE_PROMPT_COLS;
+      if (n <= 0) return;                            // 비어 있다(보이는 건 플레이스홀더)
+      await ptyLib.runTmux(['send-keys', '-t', target, '-N', String(Math.min(n, RESIDUE_MAX_BS)), 'BSpace']);
+    } else {
+      if (!text || /^Try "/.test(text)) return;      // 비었다(힌트는 본문이 아니다)
+      await ptyLib.runTmux(['send-keys', '-t', target, 'C-u']);
+    }
     await new Promise((r) => setTimeout(r, 140));
   }
 }
@@ -1946,6 +1972,7 @@ module.exports = {
   _codexComposerText: codexComposerText,    // 순수 파서 — 컴포저 오염 가드의 정본
   _codexPermOptions: codexPermOptions,
   _codexFullAccessConfirm: codexFullAccessConfirm,
+  _clearComposerResidue: clearComposerResidue, // 테스트/격리 검증용
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)

@@ -221,3 +221,64 @@ test('알 수 없는 모드 id 는 요청 자체를 거절한다', async () => {
   await assert.rejects(() => driveCodexMode(io, { mode: 'yolo' }), (e) => e.code === 'BAD_REQUEST');
   assert.deepStrictEqual(io.keys, []);
 });
+
+// ── 컴포저 잔재 청소(codex) — 2026-08-02 실사고 회귀 ─────────────────────────
+// 사용자 신고: 채팅에서 `/model` 을 보냈는데 TUI 에 `//model` 이 들어갔다.
+//  진범 = 잔재 청소가 claude(`❯`)만 감지해 codex 는 그냥 통과 → TUI 컴포저에 남아 있던 `/` 위에
+//  붙어 버렸다. 채팅 전송의 계약은 "채팅 텍스트 = 제출 본문" 이므로 이건 계약 위반이다.
+//  ★ 글자 수는 커서로 잰다: codex 는 빈 컴포저에도 회색 플레이스홀더를 같은 자리에 그려서
+//   화면 텍스트만으로는 초안과 구분할 수 없다(실측: 빈 컴포저 커서 x=2, `/mo` 면 x=5).
+const { _clearComposerResidue: clearResidue } = require('../cpt-server');
+
+// 진짜 codex 처럼: Backspace 를 받으면 지워지고, 비면 회색 플레이스홀더가 같은 자리에 남는다.
+function tmuxStub({ line, cursor }) {
+  const ptyLib = require('../pty');
+  const orig = ptyLib.runTmux;
+  const calls = [];
+  const st = { line, cursor };
+  ptyLib.runTmux = async (args) => {
+    calls.push(args);
+    if (args[0] === 'capture-pane') return ['본문', '', st.line, '  gpt-5.6-sol low · Context 0% used'].join('\n');
+    if (args[0] === 'display-message') return st.cursor;
+    if (args[0] === 'send-keys' && args.includes('BSpace')) {
+      st.line = '› Write tests for @filename';   // 비었으니 플레이스홀더
+      st.cursor = '2 2';
+    }
+    return '';
+  };
+  return { calls, restore: () => { ptyLib.runTmux = orig; } };
+}
+
+test('★ codex 컴포저에 남은 글자만큼 Backspace 를 보낸다(`//model` 사고)', async () => {
+  const t = tmuxStub({ line: '› /model', cursor: '8 2' });   // 커서 x=8 → 입력 6자(`/model`)
+  try {
+    await clearResidue('=t:0');
+    const bs = t.calls.filter((a) => a[0] === 'send-keys');
+    assert.strictEqual(bs.length, 1);
+    assert.deepStrictEqual(bs[0].slice(-3), ['-N', '6', 'BSpace'], '커서로 잰 글자 수(=6)만큼 정확히');
+  } finally { t.restore(); }
+});
+
+test('플레이스홀더(빈 컴포저)는 건드리지 않는다', async () => {
+  const t = tmuxStub({ line: '› Write tests for @filename', cursor: '2 2' });  // 커서가 프롬프트 바로 뒤 = 비었다
+  try {
+    await clearResidue('=t:0');
+    assert.deepStrictEqual(t.calls.filter((a) => a[0] === 'send-keys'), [], '키를 한 개도 보내지 않는다');
+  } finally { t.restore(); }
+});
+
+test('커서가 컴포저 줄이 아니면(다이얼로그 등) 손대지 않는다', async () => {
+  const t = tmuxStub({ line: '› /model', cursor: '8 9' });
+  try {
+    await clearResidue('=t:0');
+    assert.deepStrictEqual(t.calls.filter((a) => a[0] === 'send-keys'), []);
+  } finally { t.restore(); }
+});
+
+test('다이얼로그 선택 커서(`› 1.`)는 컴포저로 보지 않는다', async () => {
+  const t = tmuxStub({ line: '› 1. Ask for approval', cursor: '8 2' });
+  try {
+    await clearResidue('=t:0');
+    assert.deepStrictEqual(t.calls.filter((a) => a[0] === 'send-keys'), []);
+  } finally { t.restore(); }
+});

@@ -943,3 +943,25 @@ test('TUI 거절의 영문 내부 문구는 한글 한 줄로 바뀐다', async 
   assert.strictEqual(r.result.ok, false);
   assert.strictEqual(r.result.preview, '사용자가 답하지 않고 넘어갔습니다');
 });
+
+// ── 캐치업이 카드의 정본 — 2026-08-02 실사고 회귀 ───────────────────────────
+// 사용자 신고: "모델 선택 카드가 나타났다가 바로 사라졌다(아직 고르지도 않았는데)".
+//  진범 = 이 핸들러가 `dialogFor(chatId)` 로 **범위에 없는 변수**를 읽어 예외 → catch → null 을
+//  실어 보냈고, 4초 폴링마다 클라가 그 null 로 카드를 걷었다(화면엔 다이얼로그가 그대로 있는데).
+//  push 는 정상이었기 때문에 "떴다가 사라진다"로만 보였다.
+test('chat.since 는 감시자가 보고 있는 선택 화면을 그대로 실어 준다', async () => {
+  const f = sessFile(WS, 'dlg');
+  writeJsonl(f, [{ type: 'user', uuid: 'd1', timestamp: TS, cwd: WS, sessionId: 'dlg', origin: { kind: 'human' }, promptSource: 'typed', message: { role: 'user', content: '안녕' } }]);
+  const open = await T.handle('chat.open', { cwd: 'ws', sessionId: 'dlg' }, fakeWs());
+  const sl = require('../status-line');
+  const DIALOG = { title: 'Select model', desc: '', options: [{ n: 1, label: 'Default' }, { n: 2, label: 'Opus' }], footer: 'Esc to cancel' };
+  sl._watches.set(open.chatId, { cwdRel: 'ws', tid: 1, agent: 'claude', last: null, lastMode: null, mode: null, dialog: DIALOG, dialogKey: 'k' });
+  try {
+    const r = await T.handle('chat.since', { chatId: open.chatId, sinceSeq: open.headSeq, epoch: open.epoch });
+    assert.deepStrictEqual(r.statusDialog, DIALOG, '카드가 살아 있어야 한다');
+    // 화면에서 사라지면 **null 이 실려야** 클라가 카드를 걷는다(필드 누락은 "변화 없음"으로 읽힌다).
+    sl._watches.get(open.chatId).dialog = null;
+    const r2 = await T.handle('chat.since', { chatId: open.chatId, sinceSeq: r.headSeq, epoch: open.epoch });
+    assert.ok('statusDialog' in r2 && r2.statusDialog === null);
+  } finally { sl._watches.delete(open.chatId); }
+});
