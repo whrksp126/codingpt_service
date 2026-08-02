@@ -107,16 +107,25 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   ok("PC: 컴포저 컨트롤 행에 모드 알약", /chat-mode/.test(cv) && /this\.modeEl/.test(cv));
   ok("PC: 목록에서 고르면 chat.mode 호출", /api\.chatMode\(/.test(cv));
   ok("PC: 전환 중 push 로 되돌아가지 않는다", /_modeBusy/.test(cv));
+  // ★ 2026-08-02 실사고: push 는 '변경 순간 1회'라 그때 끊겨 있으면 알약이 옛 모드로 굳는다.
+  //  캐치업(chat.since)이 모드의 정본이어야 자가 치유가 된다 — 데몬·양 클라 3곳 전부 핀.
+  ok("PC: 캐치업(chat.since) 응답의 모드로 화해한다", /r\.statusMode/.test(cv));
   ok("PC: 실패를 배너로 알린다(조용한 실패 금지)", /MODE_UNREACHABLE/.test(cv) && /MODE_BLOCKED/.test(cv));
   const api = read("../src/js/api.js");
   ok("PC: api.chatMode → /api/daemon/chat/mode", /chat\/mode/.test(api));
   const css = read("../src/styles.css");
   ok("PC: 알약/목록 CSS", /\.chat-mode\b/.test(css) && /\.chat-mode-menu/.test(css));
+  // 모드 심볼(⏸/⏵⏵)은 화면에 그리지 않는다 — 사용자 확정 2026-08-02(왼쪽 아이콘 제거).
+  ok("PC: 모드 심볼을 그리지 않는다", !/chat-mode-row-sym/.test(cv) && !/chat-mode-sym/.test(cv));
 
   const app = (p) => read(path.resolve(here, "../../../codingpt_app", p));
   ok("앱: 컴포저 알약 + 바텀시트", /modeView/.test(app("src/workspace/chat/ChatComposer.tsx")) && /AgentModeSheet/.test(app("src/workspace/chat/ChatComposer.tsx")));
   ok("앱: 시트가 카탈로그 선택지를 그린다", /agentModeChoices/.test(app("src/workspace/chat/AgentModeSheet.tsx")));
+  ok("앱: 모드 심볼을 그리지 않는다",
+    !/\{m\.symbol\}/.test(app("src/workspace/chat/AgentModeSheet.tsx")) && !/modeView\.symbol/.test(app("src/workspace/chat/ChatComposer.tsx")));
   ok("앱: ChatBody 가 chat.mode 를 부르고 실패를 표시", /chatService\.chatMode/.test(app("src/workspace/chat/ChatBody.tsx")) && /modeErr/.test(app("src/workspace/chat/ChatBody.tsx")));
+  ok("데몬: chat.since 가 현재 모드를 실어 준다(캡처 없이 캐시)", /statusMode/.test(ts) && /modeFor\(/.test(ts));
+  ok("앱: 캐치업 응답의 모드로 화해한다", /statusMode\?: AgentMode/.test(app("src/workspace/chat/useChatStream.ts")));
   ok("앱: 스트림이 초기값+push 로 모드를 잇는다(에코 가드 포함)", /statusMode/.test(app("src/workspace/chat/useChatStream.ts")) && /MODE_ECHO_GUARD_MS/.test(app("src/workspace/chat/useChatStream.ts")));
   ok("앱: 서비스가 /chat/mode 를 친다", /chat\/mode/.test(app("src/services/chatService.ts")));
 }

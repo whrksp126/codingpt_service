@@ -109,7 +109,7 @@ export class ChatView {
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
             <button class="chat-mode hidden" type="button" title="에이전트 모드 (TUI 의 shift+tab)">
-              <span class="chat-mode-sym"></span><span class="chat-mode-label"></span><span class="chat-mode-caret">▾</span>
+              <span class="chat-mode-label"></span><span class="chat-mode-caret">▾</span>
             </button>
             <span class="chat-ctl-gap"></span>
             <button class="chat-send" type="button" title="보내기 (Enter)" disabled>${icons.arrowUp({ size: 17 })}</button>
@@ -422,6 +422,9 @@ export class ChatView {
     try {
       const r = await api.chatSince({ chatId: this._chatId, sinceSeq: this._lastSeq, epoch: this._epoch });
       if (this._disposed) return;
+      // 모드는 **캐치업이 정본**이다 — push 는 변경 순간 1회뿐이라 그때 소켓이 끊겨 있었으면(앱 백그라운드·
+      //  재접속) 영영 놓치고, 그 뒤로 화면이 안 변하면 알약이 옛 모드로 굳는다(2026-08-02 사용자 신고).
+      if (r && r.statusMode && !this._modeBusy) this._setMode(r.statusMode);
       if (r && r.epochChanged) {
         this._epoch = r.epoch || this._epoch;
         this._resetBuffer();
@@ -1400,7 +1403,6 @@ export class ChatView {
     if (!this.modeEl) return;
     if (!view) { this.modeEl.classList.add("hidden"); this._closeModeMenu(); return; }
     this.modeEl.classList.remove("hidden");
-    this.modeEl.querySelector(".chat-mode-sym").textContent = view.symbol || "";
     this.modeEl.querySelector(".chat-mode-label").textContent = view.label;
     this.modeEl.dataset.mode = view.id;
     if (this.modeMenuEl) this._renderModeMenu();
@@ -1436,8 +1438,8 @@ export class ChatView {
     this.modeMenuEl.innerHTML = agentModeChoices(cur).map((m) => {
       const on = m.id === cur;
       const busy = this._modeBusy;
+      // 모드 심볼(⏸/⏵⏵)은 그리지 않는다(사용자 확정 2026-08-02: 왼쪽 아이콘 제거) — 라벨이 정본.
       return `<div class="chat-mode-row${on ? " on" : ""}${busy ? " busy" : ""}" data-mode="${m.id}">` +
-        `<span class="chat-mode-row-sym">${escapeHtml(m.symbol)}</span>` +
         `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
         `<span class="chat-mode-row-desc">${escapeHtml(m.desc)}</span></span>` +
         `<span class="chat-mode-row-mark">${on ? "✓" : ""}</span></div>`;

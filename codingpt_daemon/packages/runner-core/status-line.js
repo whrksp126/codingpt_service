@@ -175,6 +175,9 @@ async function pollOne(chatId) {
   if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w));
 }
 
+/** 캐치업(chat.since)용 — 지금 알고 있는 모드({id,label,symbol}) | null. 캡처하지 않는다(캐시 읽기). */
+function modeFor(chatId) { return modeOf(watches.get(chatId)); }
+
 /** watch 엔트리의 마지막 모드 → 와이어 객체({id,label,symbol}) | null. */
 function modeOf(w) {
   if (!w || !w.lastMode) return null;
@@ -203,7 +206,7 @@ function stop() {
 }
 
 module.exports = {
-  watch, unwatch, setEmitter, snapshotFor, stop,
+  watch, unwatch, setEmitter, snapshotFor, modeFor, stop,
   parseMode, extractMode, MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,
 };
