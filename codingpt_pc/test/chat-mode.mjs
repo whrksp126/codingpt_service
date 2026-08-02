@@ -193,6 +193,15 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   ok("앱: 이미지/링크 규칙 + 미디어 컴포넌트", /ChatMedia/.test(appf("src/workspace/chat/ChatMarkdown.tsx")) && /image:/.test(appf("src/workspace/chat/ChatMarkdown.tsx")));
   ok("앱: 영상은 캐시 파일로 떨어뜨려 재생(데이터 URI 재생 회피)", /writeFile/.test(appf("src/workspace/chat/ChatMedia.tsx")) && /react-native-video/.test(appf("src/workspace/chat/ChatMedia.tsx")));
   ok("앱: 실패 사유를 화면에 적는다(조용한 빈 자리 금지)", /reasonText/.test(appf("src/workspace/chat/ChatMedia.tsx")));
+  // ★ 2026-08-02 실사고 2건(안드로이드): ① 리스트 갱신마다 이미지가 다시 그려짐 ② 고정 박스 배치.
+  //  ①의 방어는 **모듈 캐시(경로→캐시 파일 URI) + 리스트 문맥 memo** 둘 다여야 한다(하나만으론 샌다).
+  ok("앱: 미디어는 캐시 파일 URI 로 재사용한다(리마운트해도 재다운로드 없음)",
+    /mediaCache/.test(appf("src/workspace/chat/ChatMedia.tsx")) && /cachePut\(/.test(appf("src/workspace/chat/ChatMedia.tsx")));
+  ok("앱: 리스트에 넘기는 미디어 문맥이 memo 로 고정(인라인 객체 금지)",
+    /const mediaCtx = useMemo/.test(appf("src/workspace/chat/ChatBody.tsx")) && /media=\{mediaCtx\}/.test(appf("src/workspace/chat/ChatBody.tsx")));
+  ok("앱: 원본 비율로 그린다(고정 높이 박스 금지, PC max-height 420 미러)",
+    /MAX_H = 420/.test(appf("src/workspace/chat/ChatMedia.tsx")) && /aspect/.test(appf("src/workspace/chat/ChatMedia.tsx"))
+    && !/height: 220/.test(appf("src/workspace/chat/ChatMedia.tsx")));
 }
 
 if (fails) { console.error(`\n${fails} FAIL`); process.exit(1); }
