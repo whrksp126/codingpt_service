@@ -1,13 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const authMiddleware = require('../middlewares/authMiddleware');
+const accountAuth = require('../middlewares/accountAuth');
 const billingController = require('../controllers/billingController');
 const rcWebhookController = require('../controllers/rcWebhookController');
 
 // 월 구독 결제. (크레딧 충전 모델 제거됨)
 router.post('/checkout', authMiddleware, billingController.checkout);
-router.post('/lemonsqueezy/checkout', authMiddleware, billingController.lemonSqueezyCheckout);
-router.get('/lemonsqueezy/portal', authMiddleware, billingController.lemonSqueezyPortal);
+// Supporter 설정은 PC 앱(deviceToken)과 웹(JWT)에서 같은 계정으로 접근한다.
+router.post('/lemonsqueezy/checkout', accountAuth, billingController.lemonSqueezyCheckout);
+router.get('/lemonsqueezy/portal', accountAuth, billingController.lemonSqueezyPortal);
 router.post('/subscribe', authMiddleware, billingController.subscribe);
 router.get('/payments', authMiddleware, billingController.getPayments);
 router.get('/payments/:id', authMiddleware, billingController.getPaymentReceipt);
