@@ -315,9 +315,7 @@ async function renderSupporter() {
       <div class="sm-section-title">선택 후원 구독</div>
       <div class="sm-card2 supporter-card">
         <div class="supporter-copy">
-          <span class="supporter-plan">CodingPT Supporter</span>
           <b>월 ₩4,900으로 CodingPT를 응원해 주세요.</b>
-          <span>모든 기기와 핵심 기능은 Personal에서도 계속 무료예요.</span>
         </div>
         <button id="supporterAction" class="sett-btn">웹에서 구독하기</button>
       </div>`;
