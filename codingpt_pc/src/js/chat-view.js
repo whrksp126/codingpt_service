@@ -1914,9 +1914,9 @@ export class ChatView {
   _renderModeMenu() {
     if (!this.modeMenuEl) return;
     const cur = this._mode || null;
-    // codex 는 계획 모드가 권한과 **독립 토글**이라 체크가 두 개 켜질 수 있다(TUI 상태줄과 같은 사실).
-    const hint = agentModeChoices(cur).some((m) => m.toggle)
-      ? "TUI 에서는 shift+tab(계획) · /permissions(권한)"
+    // 양쪽 다 shift+tab 이 바꾸는 것만 담는다 — claude 는 순환, codex 는 두 상태 전환.
+    const hint = agentModeChoices(cur).some((m) => m.id.startsWith("codex"))
+      ? "TUI 에서는 shift+tab 으로 전환합니다 · 권한은 /permissions"
       : "TUI 에서는 shift+tab 으로 순환합니다";
     this.modeMenuEl.innerHTML = agentModeChoices(cur).map((m) => {
       const on = agentModeIsOn(m, cur);
@@ -1931,20 +1931,14 @@ export class ChatView {
 
   async _pickMode(id) {
     if (!id || this._modeBusy) return;
-    const spec = agentModeOf(id);
-    // 토글 항목(codex 계획 모드)은 "이미 그거면 아무 일 없음"이 아니라 **끄기**다 — 그래서 통과시킨다.
-    if (!(spec && spec.toggle) && this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
+    if (this._mode && this._mode.id === id) { this._closeModeMenu(); return; }
     const tid = this._tid;
     if (tid == null) return;
     // ★ 낙관 적용(사용자 신고 2026-08-02 "선택하면 즉시 닫히고 적용돼야 하는데 느리다"):
     //  누른 즉시 **목록을 닫고 알약을 목표 모드로** 바꾼다. 실제 전환(데몬이 TUI 를 순환)은 뒤에서
     //  끝나고, 실패하면 아래 catch 가 옛 모드로 되돌리고 사유를 배너로 알린다(조용한 거짓 금지).
     const prev = this._mode;
-    // 토글은 현재 값을 뒤집고(권한은 그대로), 라디오는 권한만 바꾼다(계획 모드는 유지) — 라벨은 같은 규칙으로 조합.
-    const next = spec && spec.toggle
-      ? { ...(prev || { id }), plan: !(prev && prev.plan) }
-      : { id, plan: !!(prev && prev.plan) };
-    next.label = agentModeLabel(next);
+    const next = { id, label: agentModeLabel({ id }) };
     this._modeBusy = true;
     this._setMode(next);
     this._closeModeMenu();

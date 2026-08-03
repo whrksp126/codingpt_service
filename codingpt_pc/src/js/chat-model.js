@@ -168,14 +168,13 @@ export const AGENT_MODES = [
   { id: "bypassPermissions", symbol: "⏵⏵", label: "bypassing permissions", desc: "모든 승인 건너뜀", hidden: true },
 ];
 
-// codex 는 모드 구조가 다르다(0.146.0 실측 2026-08-02 — 데몬 status-line.js CODEX_MODES 가 정본):
-//  · 계획 모드 = shift+tab **토글**(다른 항목과 배타가 아니다 — 권한과 동시에 켜져 있을 수 있다)
-//  · 권한 3종 = `/permissions` 다이얼로그(라디오). 라벨은 claude 와 같은 규율로 **TUI 원문 그대로**.
+// codex 알약은 **shift+tab 이 바꾸는 것만** 담는다(사용자 확정 2026-08-03).
+//  실측: codex 의 shift+tab 은 Default ↔ Plan 두 상태 토글이고, 권한 3종(`/permissions`)은
+//  **다른 축**이라 섞지 않는다 — 권한은 팔레트에서 `/permissions` 를 실행하면 선택 화면 카드가
+//  떠서 거기서 고른다(제자리). 섞어 두면 체크가 둘 켜져 "중복 선택"처럼 보인다(그 지적의 원인).
 export const CODEX_MODES = [
-  { id: "codexPlan", symbol: "", label: "Plan mode", desc: "계획만 세우고 실행하지 않음", toggle: true },
-  { id: "codexAsk", symbol: "", label: "Ask for approval", desc: "작업 폴더 안에서 실행 · 그 밖은 승인" },
-  { id: "codexAuto", symbol: "", label: "Approve for me", desc: "위험해 보이는 것만 승인 요청" },
-  { id: "codexFull", symbol: "", label: "Full Access", desc: "폴더 밖·인터넷까지 승인 없이" },
+  { id: "codexDefault", symbol: "", label: "Default mode", desc: "평소대로 실행" },
+  { id: "codexPlan", symbol: "", label: "Plan mode", desc: "계획만 세우고 실행하지 않음" },
 ];
 
 /** 모드 id 가 속한 카탈로그(모르면 claude). 알약/목록이 에이전트를 따로 몰라도 되게 하는 지점. */
@@ -189,11 +188,10 @@ export function agentModeOf(id) {
   return AGENT_MODES.find((m) => m.id === s) || CODEX_MODES.find((m) => m.id === s) || null;
 }
 
-/** 목록 항목이 "지금 켜진" 것인가. codex 계획 모드는 권한과 **동시에** 켜질 수 있다(토글). */
+/** 목록 항목이 "지금 켜진" 것인가 — 양쪽 카탈로그 모두 **하나만** 켜진다(라디오). */
 export function agentModeIsOn(item, current) {
   if (!item || !current) return false;
   const cur = typeof current === "string" ? { id: current } : current;
-  if (item.toggle) return !!cur.plan;
   return item.id === cur.id;
 }
 
@@ -209,15 +207,11 @@ export function agentModeView(mode) {
   };
 }
 
-/**
- * 알약에 그릴 라벨(낙관 적용용) — 데몬이 label 을 실어 주기 전에 클라이언트가 같은 규칙으로 만든다.
- *  codex 는 계획 모드가 권한과 독립이라 **둘 다** 싣는다(데몬 status-line.parseCodexMode 와 같은 조합).
- */
+/** 알약에 그릴 라벨(낙관 적용용) — 데몬 label 이 오기 전에 클라이언트가 카탈로그로 만든다. */
 export function agentModeLabel(mode) {
   if (!mode || !mode.id) return "";
   const cat = agentModeOf(mode.id);
-  const base = (cat && cat.label) || mode.label || mode.id;
-  return mode.plan && !(cat && cat.toggle) ? `Plan mode · ${base}` : base;
+  return (cat && cat.label) || mode.label || mode.id;
 }
 
 /** 목록에 그릴 선택지 — 지금 모드(id 또는 모드 객체)가 속한 카탈로그. 숨김은 "지금 그 모드일 때"만. */

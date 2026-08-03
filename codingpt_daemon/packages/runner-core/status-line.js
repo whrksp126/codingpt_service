@@ -52,41 +52,27 @@ const CLAUDE_MODES = [
   { id: 'default', re: /manual mode on/, label: 'manual mode on', symbol: '⏸' },
 ];
 
-// ── codex 모드 — claude 와 **구조가 다르다**(0.146.0 실측 2026-08-02, 격리 tmux) ───────────────
-// 상태줄 원문:
-//   `gpt-5.6-sol low fast · Context 0% used · Fast on · Approve for me · 1M window       Plan mode`
-//  ① 권한 3종은 `/permissions` 다이얼로그로 바꾸고(숫자키 한 번에 즉시 적용 — Enter 불필요),
-//     지금 값이 상태줄에 **원문 라벨 그대로** 뜬다: Ask for approval / Approve for me / Full Access.
-//  ② 계획 모드는 shift+tab **토글**이다(claude 처럼 순환이 아니다). 켜지면 상태줄 오른쪽 끝에 `Plan mode`.
-//  ③ 둘은 **독립**이다 — 계획 모드를 켜도 권한 라벨은 그대로 남는다. 그래서 알약 하나에 둘 다 싣고
-//     (`Plan mode · Approve for me`), 선택 목록에서도 계획은 토글, 권한은 라디오로 다룬다.
-//  ⚠ 판정은 반드시 **상태줄 구역**(컴포저 `›` 아래)에서만 한다: 본문에는 `• Permissions updated to
-//   Ask for approval` / `• Model changed to … for Plan mode.` 같은 기록이 남아 화면 전체를 훑으면 오독한다.
-//  ④ ★ Full Access 만 상태줄 표기가 다르다: 다이얼로그에서는 `Full Access` 인데 상태줄에는
-//     **`· never ·`**(승인 정책 원값)로 뜬다 — 라이브 실측 2026-08-02. 판별은 둘 다 받아 주고,
-//     보여줄 라벨은 사용자가 고른 이름(`Full Access`)으로 통일한다("never" 만 보면 무엇이 never 인지
-//     알 수 없다). 이 세션은 확인 다이얼로그(`Enable full access?`)도 한 번 더 띄운다(cpt-server).
+// ── codex 모드 — 알약이 다루는 것은 **shift+tab 이 바꾸는 것**뿐이다 ─────────────────────────
+// 실측(0.146.0, 2026-08-02~03): codex 의 shift+tab 은 Default ↔ Plan **두 상태 토글**이고
+//  (`• Model changed to … for Plan mode.` / `… for Default mode.`), 켜지면 상태줄 오른쪽 끝에
+//  `Plan mode` 가 뜬다. 권한 3종(`/permissions`)은 **다른 축**이라 알약에 섞지 않는다
+//  (사용자 확정 2026-08-03: "shift+tab 으로 동작하는 것만 알약에서 조작한다").
+//  권한은 팔레트에서 `/permissions` 를 실행하면 선택 화면 카드가 떠서 거기서 고른다 = 제자리.
+//  ⚠ 판정은 반드시 **상태줄 구역**(컴포저 `›` 아래)에서만: 본문에 `• Model changed … for Plan mode.`
+//   기록이 남아 화면 전체를 훑으면 지나간 일을 현재 상태로 오독한다.
 const CODEX_MODES = [
-  { id: 'codexPlan', kind: 'plan', re: /\bPlan mode\b/, label: 'Plan mode' },
-  { id: 'codexAsk', kind: 'perm', re: /Ask for approval/, label: 'Ask for approval' },
-  { id: 'codexAuto', kind: 'perm', re: /Approve for me/, label: 'Approve for me' },
-  { id: 'codexFull', kind: 'perm', re: /(Full Access|·\s*never\b)/, label: 'Full Access' },
+  { id: 'codexPlan', label: 'Plan mode' },
+  { id: 'codexDefault', label: 'Default mode' },
 ];
 
 /** codex 상태줄 텍스트 → { id, label, symbol, plan } | null. 순수 함수 — 테스트 정본. */
 function parseCodexMode(statusText) {
   const plain = stripAnsi(statusText || '');
-  if (!plain) return null;
+  if (!plain.trim()) return null;                 // 상태줄을 못 읽었다 = 모른다(이전 값 유지)
   const plan = /\bPlan mode\b/.test(plain);
-  const perm = CODEX_MODES.find((m) => m.kind === 'perm' && m.re.test(plain));
-  if (!perm) return plan ? { id: 'codexPlan', label: 'Plan mode', symbol: '', plan: true } : null;
-  return {
-    id: perm.id,
-    // 알약 한 줄에 화면의 두 값을 그대로 싣는다(둘 다 TUI 원문 — 번역 금지 규율).
-    label: plan ? `Plan mode · ${perm.label}` : perm.label,
-    symbol: '',
-    plan,
-  };
+  return plan
+    ? { id: 'codexPlan', label: 'Plan mode', symbol: '', plan: true }
+    : { id: 'codexDefault', label: 'Default mode', symbol: '', plan: false };
 }
 
 // ── TUI 선택 다이얼로그 미러 ───────────────────────────────────────────────────
@@ -196,7 +182,10 @@ function parseMode(footerText) {
 /** 화면 → 현재 모드({id,label,symbol[,plan]}) | null. 에이전트마다 원천이 다르다(위 주석 참조). */
 function extractMode(screen, agent) {
   if (agent === 'codex') {
-    // 상태줄 구역만 본다(대화 본문의 "Permissions updated to …" 기록을 현재값으로 오독하지 않게).
+    // 다이얼로그가 화면을 덮고 있으면 상태줄이 안 보인다 → 모른다(이전 값 유지). 이걸 빼면
+    //  다이얼로그 영역을 상태줄로 오독해 "Plan mode 아님 = Default" 로 잘못 단정한다.
+    if (extractDialog(screen)) return null;
+    // 상태줄 구역만 본다(대화 본문의 "Model changed … for Plan mode." 기록을 현재값으로 오독하지 않게).
     const lines = extractStatusLines(screen, 'codex');
     return lines ? parseCodexMode(lines.join(' ')) : null;
   }

@@ -198,9 +198,9 @@ test('chat.open 스냅샷은 캐시가 아니라 지금 화면을 읽는다(토�
   } finally { restore(); sl.stop(); }
 });
 
-test('codex: 권한이 그대로여도 계획 모드만 바뀌면 다시 알린다(변화 판정에 plan 포함)', async () => {
-  // 실측(0.146.0): 상태줄 한 줄에 권한과 계획이 함께 뜬다. id 만 비교하면 계획 토글이
-  //  "변화 없음"으로 삼켜져 알약이 안 바뀐다 — 사용자에겐 "반영이 안 되는 버그"로 보인다.
+test('codex: 계획 모드가 바뀌면 다시 알린다(알약은 shift+tab 축만 본다)', async () => {
+  // 실측(0.146.0): 상태줄 오른쪽 끝의 `Plan mode` 유무가 곧 모드다. 권한(`Approve for me`)이
+  //  같은 줄에 있어도 알약 값에는 섞지 않는다(사용자 확정 2026-08-03 — 축이 다르다).
   const line = (plan) => `  gpt-5.6-sol low fast · Context 0% used · Fast on · Approve for me · 1M window${plan ? '        Plan mode' : ''}`;
   let screen = ['본문', '', '› ', '', line(false), ''].join('\n');
   const restore = mockTmux(() => screen);
@@ -209,12 +209,12 @@ test('codex: 권한이 그대로여도 계획 모드만 바뀌면 다시 알린�
   try {
     sl.watch('c_codex', { cwdRel: CWD, tid: TID, agent: 'codex' });
     await new Promise((r) => setTimeout(r, 30));
-    assert.deepStrictEqual(modes, ['codexAuto|0']);
+    assert.deepStrictEqual(modes, ['codexDefault|0']);
     screen = ['본문', '', '› ', '', line(true), ''].join('\n');
     const snap = await sl.snapshotFor('c_codex');
     assert.strictEqual(snap.mode.plan, true);
-    assert.deepStrictEqual(modes, ['codexAuto|0', 'codexAuto|1'], '계획만 바뀌어도 emit');
-    assert.strictEqual(sl.modeFor('c_codex').label, 'Plan mode · Approve for me');
+    assert.deepStrictEqual(modes, ['codexDefault|0', 'codexPlan|1'], '계획 모드 전환이 곧 모드 변경');
+    assert.strictEqual(sl.modeFor('c_codex').label, 'Plan mode');
   } finally { restore(); sl.stop(); }
 });
 

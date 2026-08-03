@@ -1517,65 +1517,19 @@ async function driveMode(io, { mode } = {}) {
   return { ok: true, mode: cur };
 }
 
-// ── codex 모드 전환 ────────────────────────────────────────────────────────────
-// codex 0.146.0 실측(2026-08-02): 조작 방법이 claude 와 **다르다**.
-//  · 계획 모드 = shift+tab **토글**(누르면 켜지고 다시 누르면 꺼진다 — 순환이 아니다).
-//  · 권한 3종 = `/permissions` 슬래시 명령 → 번호 다이얼로그(숫자키 한 번에 즉시 적용, Enter 불필요).
-//
-// ★ 슬래시 명령은 **컴포저에 타이핑**하는 것이라 claude 의 순수 키 조작보다 위험하다: 컴포저에
-//  사용자가 쓰던 글이 남아 있으면 `내가쓰던글/permissions` 가 되고 Enter 가 그걸 **전송**해 버린다.
-//  그래서 "치고 → 화면으로 확인 → 그때만 Enter" 순서를 지킨다: 타이핑 직후 컴포저 줄이 정확히
-//  `/permissions` 여야 진행하고, 아니면 친 만큼 지우고 실패로 돌려준다(사용자 글은 그대로 남는다).
-const CODEX_PERM_CMD = '/permissions';
-const CODEX_STEP_MS = 160;   // 슬래시 팝업/다이얼로그 리페인트 대기
-const CODEX_WAIT_TRIES = 12; // 다이얼로그·상태줄 확인 재시도(× CODEX_STEP_MS)
+// 화면 확인 주기 — 키를 보낸 뒤 TUI 리페인트를 기다리는 값(실측). 카드 조작·모드 전환 공용.
+const DIALOG_STEP_MS = 160;
+const DIALOG_WAIT_TRIES = 12;
 
-/** codex 화면 → 컴포저 줄의 입력 텍스트(`›` 뒤). 없으면 null. */
-function codexComposerText(screen) {
-  const lines = String(screen || '').split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    // 다이얼로그 선택 커서도 `›` 다(`› 1. Ask for approval`) — 컴포저가 아니다(status-line 과 같은 규칙).
-    if (/^\s*›\s*[1-9]\.\s/.test(lines[i])) continue;
-    const m = /^\s*›\s?(.*)$/.exec(lines[i]);
-    if (m) return m[1].replace(/\s+$/, '');
-  }
-  return null;
-}
-
-/** codex `/permissions` 다이얼로그 → [{ n, text }] | null(다이얼로그 아님). */
-function codexPermOptions(screen) {
-  const s = String(screen || '');
-  if (!/Update Model Permissions/i.test(s)) return null;
-  const out = [];
-  for (const line of s.split('\n')) {
-    const m = /^\s*[❯›>]?\s*([1-9])\.\s+(.+?)\s*$/.exec(line);
-    if (m) out.push({ n: parseInt(m[1], 10), text: m[2] });
-  }
-  return out.length ? out : null;
-}
-
-/**
- * codex 가 Full Access 선택 뒤에 한 번 더 묻는 확인 다이얼로그의 "예" 번호 | null (0.146.0 실측).
- *   `Enable full access?` … `› 1. Yes, continue anyway  Apply full access for this session`
- * ★ 아무 번호 다이얼로그나 눌러 주지 않는다 — 이 제목일 때만. 모르는 다이얼로그에서 숫자를 치면
- *  승인 요청 같은 **다른 질문에 대신 답해 버린다**(권한 다이얼로그 조작의 오랜 규율과 같은 이유).
- */
-function codexFullAccessConfirm(screen) {
-  const s = String(screen || '');
-  if (!/Enable full access\?/i.test(s)) return null;
-  const opts = [];
-  for (const line of s.split('\n')) {
-    const m = /^\s*[❯›>]?\s*([1-9])\.\s+(.+?)\s*$/.exec(line);
-    if (m) opts.push({ n: parseInt(m[1], 10), text: m[2] });
-  }
-  const yes = opts.find((o) => /^Yes\b/i.test(o.text));
-  return yes ? yes.n : null;
-}
-
+// ── codex 모드 전환 — shift+tab(Default ↔ Plan) 그 하나뿐 ─────────────────────
+// 사용자 확정(2026-08-03): 알약은 **shift+tab 이 바꾸는 것만** 조작한다. 권한(`/permissions`)은
+//  다른 축이고, 팔레트에서 그 명령을 실행하면 선택 화면 카드가 떠서 거기서 고른다(제자리).
+//  덕분에 모드 전환은 **컴포저를 한 글자도 건드리지 않는다** — 슬래시를 타이핑하던 옛 경로가
+//  사라지면서 "사용자가 쓰던 글 위에 붙어 전송" 같은 사고 표면 자체가 없어진다.
 async function driveCodexMode(io, { mode } = {}) {
   const statusLib = require('./status-line');
-  const spec = statusLib.modeSpec(mode);
-  if (!spec || !statusLib.CODEX_MODE_IDS.includes(spec.id)) {
+  const want = String(mode || '');
+  if (!statusLib.CODEX_MODE_IDS.includes(want)) {
     throw Object.assign(new Error('알 수 없는 모드입니다'), { code: 'BAD_REQUEST' });
   }
   const sleep = io.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
@@ -1585,63 +1539,14 @@ async function driveCodexMode(io, { mode } = {}) {
   if (!cur) {
     throw Object.assign(new Error('화면에서 현재 모드를 읽을 수 없습니다 — TUI 를 확인해 주세요'), { code: 'MODE_UNKNOWN' });
   }
-
-  // ① 계획 모드 = 토글. 이미 원하는 상태면 키를 누르지 않는다(누르면 반대로 간다).
-  if (spec.kind === 'plan') {
-    await io.key('BTab');
-    for (let i = 0; i < CODEX_WAIT_TRIES; i++) {
-      await sleep(MODE_HOP_MS);
-      const next = await read();
-      if (next && !!next.plan !== !!cur.plan) return { ok: true, mode: next };
-    }
-    throw Object.assign(new Error('계획 모드를 전환하지 못했습니다'), { code: 'MODE_UNREACHABLE' });
+  if (cur.id === want) return { ok: true, mode: cur };   // 이미 그 상태 — 누르면 반대로 간다
+  await io.key('BTab');
+  for (let i = 0; i < DIALOG_WAIT_TRIES; i++) {
+    await sleep(MODE_HOP_MS);
+    const next = await read();
+    if (next && next.id === want) return { ok: true, mode: next };
   }
-
-  // ② 권한 = 슬래시 다이얼로그. 이미 그 값이면 아무것도 하지 않는다(컴포저를 건드릴 이유가 없다).
-  if (cur.id === spec.id) return { ok: true, mode: cur };
-
-  await io.key(CODEX_PERM_CMD, true);
-  await sleep(CODEX_STEP_MS);
-  const typed = codexComposerText(await io.screen());
-  if (typed !== CODEX_PERM_CMD) {
-    // 컴포저에 사용자의 글이 있었거나(앞에 붙었다) 화면이 다른 상태다 → 친 만큼 되돌리고 중단.
-    for (let i = 0; i < CODEX_PERM_CMD.length; i++) await io.key('BSpace');
-    throw Object.assign(
-      new Error('터미널 컴포저에 입력 중인 내용이 있어 모드를 바꿀 수 없습니다 — 비우고 다시 시도해 주세요'),
-      { code: 'MODE_BLOCKED' },
-    );
-  }
-  await io.key('Enter');
-
-  let opts = null;
-  for (let i = 0; i < CODEX_WAIT_TRIES && !opts; i++) {
-    await sleep(CODEX_STEP_MS);
-    opts = codexPermOptions(await io.screen());
-  }
-  if (!opts) {
-    throw Object.assign(new Error('권한 설정 화면을 열지 못했습니다 — TUI 를 확인해 주세요'), { code: 'MODE_UNREACHABLE' });
-  }
-  // 번호는 화면에서 읽는다 — 카탈로그에 1/2/3 을 박으면 codex 가 항목을 늘리는 날 조용히 오작동한다.
-  const hit = opts.find((o) => o.text.includes(spec.label));
-  if (!hit) {
-    await io.key('Escape');
-    throw Object.assign(new Error('이 세션에서 지원하지 않는 모드입니다'), { code: 'MODE_UNREACHABLE' });
-  }
-  await io.key(String(hit.n), true);
-
-  let confirmed = false;
-  for (let i = 0; i < CODEX_WAIT_TRIES; i++) {
-    await sleep(CODEX_STEP_MS);
-    const s = await io.screen();
-    const next = statusLib.extractMode(s, 'codex');
-    if (next && next.id === spec.id) return { ok: true, mode: next };
-    // Full Access 는 한 번 더 확인을 받는다(실측) → 그 다이얼로그일 때만 "예"를 누른다. 한 번만.
-    if (!confirmed) {
-      const yes = codexFullAccessConfirm(s);
-      if (yes) { await io.key(String(yes), true); confirmed = true; }
-    }
-  }
-  throw Object.assign(new Error('그 모드로 전환하지 못했습니다'), { code: 'MODE_UNREACHABLE' });
+  throw Object.assign(new Error('모드를 전환하지 못했습니다'), { code: 'MODE_UNREACHABLE' });
 }
 
 /**
@@ -1662,7 +1567,7 @@ async function driveDialog(io, { pick, cancel, expect } = {}) {
   }
   if (cancel) {
     await io.key('Escape');
-    await sleep(CODEX_STEP_MS);
+    await sleep(DIALOG_STEP_MS);
     return { ok: true, dialog: statusLib.extractDialog(await io.screen()) };
   }
   const n = parseInt(pick, 10);
@@ -1671,8 +1576,8 @@ async function driveDialog(io, { pick, cancel, expect } = {}) {
   }
   await io.key(String(n), true);
   let enterTried = false;
-  for (let i = 0; i < CODEX_WAIT_TRIES; i++) {
-    await sleep(CODEX_STEP_MS);
+  for (let i = 0; i < DIALOG_WAIT_TRIES; i++) {
+    await sleep(DIALOG_STEP_MS);
     const next = statusLib.extractDialog(await io.screen());
     // 같은 화면이 그대로면(번호가 커서만 옮기는 형식) Enter 로 확정 — 딱 한 번만 시도한다.
     if (!next || next.title !== cur.title) return { ok: true, dialog: next || null };
@@ -1983,9 +1888,6 @@ module.exports = {
   _drivePermissionDialog: drivePermissionDialog,
   _driveMode: driveMode,
   _driveCodexMode: driveCodexMode,          // 테스트/격리 검증용(io 주입)
-  _codexComposerText: codexComposerText,    // 순수 파서 — 컴포저 오염 가드의 정본
-  _codexPermOptions: codexPermOptions,
-  _codexFullAccessConfirm: codexFullAccessConfirm,
   _clearComposerResidue: clearComposerResidue, // 테스트/격리 검증용
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,
