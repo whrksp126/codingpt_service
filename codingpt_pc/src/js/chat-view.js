@@ -21,6 +21,7 @@ import { ansiToHtml } from "./ansi.js";
 import { termTheme } from "./theme.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
+  statusChips, statusDetail, hasStatus,
   mergeMsgs, lastSeqOf, clampLines, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
   composerHasText, agentDisplayName, agentModeView, agentModeChoices, agentModeIsOn,
@@ -62,6 +63,8 @@ export class ChatView {
     this._visible = false;
     this._disposed = false;
     this._screenBurst = [];     // 제출 직후 화면 확인 연쇄 타이머(dispose 에서 걷는다)
+    this._status = null;       // 에이전트 상태(공식 채널) — 있으면 화면 미러 대신 이걸 그린다
+    this._statusOpen = false;  // 상세 펼침
     this._msgs = [];
     this._els = new Map();      // seq → 메시지 DOM
     this._toolCards = new Map(); // tool_use id → { resultEl }
@@ -128,6 +131,12 @@ export class ChatView {
     this.jumpNEl = el.querySelector(".chat-jump-n");
     this.apprEl = el.querySelector(".chat-approvals");
     this.statusEl = el.querySelector(".chat-statusline");
+    // 탭 = 상세 펼침(사용자 확정 2026-08-03). 값이 없을 땐 아무 일도 하지 않는다.
+    this.statusEl.addEventListener("click", () => {
+      if (!this._status) return;
+      this._statusOpen = !this._statusOpen;
+      this._renderStatus();
+    });
     this.dlgEl = el.querySelector(".chat-tuidlg");
     // 카드 조작 — 옵션 버튼 = 그 번호 키, ✕ = Esc(둘 다 데몬이 화면을 대조한 뒤에만 친다).
     this.dlgEl.addEventListener("click", (e) => {
@@ -348,7 +357,7 @@ export class ChatView {
           this._noSession = String(r.reason || "none");
           this._noSessionAt = Date.now();
           this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
-          this._setStatusLines([]); // statusline 잔상도 함께
+          this._resetStatus();      // statusline·상태 잔상도 함께(새 대상)
           this._setMode(r.statusMode || null); // 모드 알약도 새 대상 기준(대화가 없어도 TUI 는 돌 수 있다)
           this._setDialog(r.statusDialog || null);
           this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
@@ -364,7 +373,11 @@ export class ChatView {
         this._truncated = !!r.headTruncated;
         this._lastSeq = Number(r.headSeq) || 0;
         this._openFailed = null;
-        this._setStatusLines(r.statusLines || []); // 새 대상의 statusline(없으면 이전 잔상 제거)
+        // 새 대상 기준으로 세운다(둘 다 없으면 잔상 제거). agentStatus 가 있으면 그게 정본,
+        //  없으면 statusLines 폴백을 그린다.
+        this._resetStatus();
+        this._setStatus(r.agentStatus || null);
+        this._setStatusLines(r.statusLines || []);
         this._setMode(r.statusMode || null);       // 모드 알약(claude 만 — 없으면 숨김)
         this._setDialog(r.statusDialog || null);   // TUI 선택 화면이 떠 있으면 카드로(토글 즉시 정확)
         this._ingest(r.messages || [], { snapshot: true });
@@ -396,6 +409,8 @@ export class ChatView {
     const ctl = frame.control && frame.control.kind;
     // TUI statusline 미러(데몬 status-line.js) — chatId 정확 일치로만 도달한다(sessionId 미탑재).
     if (ctl === "status_line") { this._applyStatusFrame(frame.control); return; }
+    // 에이전트 상태(공식 채널) — 값이 바뀌는 순간에만 온다. 화면 폴링과 무관한 별도 프레임.
+    if (ctl === "agent_status") { this._setStatus(frame.control.status || null); return; }
     // push 가 왔다 = 이 터미널에서 대화가 (다시) 살아 있다는 신호 → noSession 확정을 해제한다(트리거 ②).
     if (this._noSession) {
       this._noSession = null;
@@ -483,7 +498,7 @@ export class ChatView {
         ? await api.chatLocal("chat.screen", { cwd, tid, agent })
         : await api.chatScreen({ cwd, tid, agent, hostDeviceId: this.ctx.hostDeviceId?.() });
       if (this._disposed || !r) return;
-      this._setStatusLines(r.lines || []);
+      this._setStatusLines(r.lines || null);   // 못 읽었으면 유지(다이얼로그 중엔 null 이 온다)
       if (r.mode && !this._modeBusy) this._setMode(r.mode);
       if (!this._dlgBusy) this._setDialog(r.dialog || null);
     } catch (_) { /* 조용히 — 다음 틱에 다시 본다 */ }
@@ -501,6 +516,9 @@ export class ChatView {
       if (r && r.statusMode && !this._modeBusy) this._setMode(r.statusMode);
       // 캐치업이 다이얼로그의 **정본**이다(push 를 놓쳐도 유령 카드가 남지 않는다).
       if (r && "statusDialog" in r && !this._dlgBusy) this._setDialog(r.statusDialog || null);
+      // ★ 상태·statusline 도 캐치업이 정본이다 — push 를 놓쳐도 4초 안에 스스로 화해한다.
+      if (r && r.agentStatus) this._setStatus(r.agentStatus);
+      if (r && Array.isArray(r.statusLines)) this._setStatusLines(r.statusLines);
       if (r && r.epochChanged) {
         this._epoch = r.epoch || this._epoch;
         this._resetBuffer();
@@ -1780,14 +1798,61 @@ export class ChatView {
   }
   // TUI statusline 미러 — 데몬이 화면에서 뽑은 원문 줄(ANSI 포함)을 컴포저 위에 그대로 그린다
   //  (2026-07-30 사용자 확정: 구조화 재구성이 아니라 **원문 미러**). 색은 터미널 팔레트와 동일.
+  // ── 상태 표시 ────────────────────────────────────────────────────────────────
+  // ★ 2026-08-03 재설계. 원천이 **화면 스크랩 → 공식 채널**로 바뀌었다(데몬 agent-status.js:
+  //  claude statusLine 훅 / codex rollout). 그래서 TUI 문자열을 흉내내지 않고 구조화 값으로 직접 그린다
+  //  (사용자 확정: "채팅 UI답게 새로 그리기"). 규칙은 chat-model.js statusChips/statusDetail 이 정본이고
+  //  앱과 공유한다.
+  //  · 폴백: 아직 공식 값이 없으면(훅 미부착·codex 첫 턴 전) 종전처럼 TUI 원문을 미러한다.
+  //  · 값은 **모를 때 지우지 않는다**(null=유지) — 이 규칙이 "한 번 놓치면 영영 빈칸"을 없앤 지점.
+  /** 리타깃(다른 터미널/대화) — 이전 대상의 상태 잔상을 지운다. */
+  _resetStatus() {
+    this._status = null;
+    this._statusLines = [];
+    this._statusOpen = false;
+    this._renderStatus();
+  }
+
+  _setStatus(st) {
+    if (st == null) return;                      // 모름 = 유지
+    if (JSON.stringify(this._status || null) === JSON.stringify(st)) return;
+    this._status = st;
+    this._renderStatus();
+  }
+
   _setStatusLines(lines) {
-    if (!this.statusEl) return;
+    if (lines == null) return;                   // 모름 = 유지(빈 배열만이 "없음"이다)
     const arr = Array.isArray(lines) ? lines.filter((l) => typeof l === "string" && l.trim()) : [];
+    this._statusLines = arr;
+    this._renderStatus();
+  }
+
+  _renderStatus() {
+    if (!this.statusEl) return;
+    const st = this._status;
+    if (hasStatus(st)) {
+      const chips = statusChips(st)
+        .map((c) => `<span class="chat-status-chip">${escapeHtml(c.text)}</span>`).join("");
+      const rows = this._statusOpen
+        ? statusDetail(st, Date.now()).map((r) =>
+          `<div class="chat-status-row"><span class="chat-status-k">${escapeHtml(r.label)}</span>`
+          + `<span class="chat-status-v">${escapeHtml(r.value)}</span>`
+          + (r.sub ? `<span class="chat-status-s">${escapeHtml(r.sub)}</span>` : "") + "</div>").join("")
+        : "";
+      this.statusEl.innerHTML = `<div class="chat-status-chips">${chips}</div>`
+        + (rows ? `<div class="chat-status-detail">${rows}</div>` : "");
+      this.statusEl.classList.toggle("open", this._statusOpen);
+      this.statusEl.classList.remove("hidden");
+      return;
+    }
+    // 폴백 — TUI 원문 미러(ANSI 그대로).
+    const arr = Array.isArray(this._statusLines) ? this._statusLines : [];
     if (!arr.length) { this.statusEl.classList.add("hidden"); this.statusEl.innerHTML = ""; return; }
     const pal = termTheme();
     this.statusEl.innerHTML = arr
       .map((l) => `<div class="chat-statusline-row">${ansiToHtml(l, pal)}</div>`)
       .join("");
+    this.statusEl.classList.remove("open");
     this.statusEl.classList.remove("hidden");
   }
   // statusline push(control) 반영 — 줄(미러)과 모드(알약)는 **독립 필드**다(커스텀 statusline 이
@@ -1795,7 +1860,9 @@ export class ChatView {
   //  ★ 전환 요청 중에는 모드를 무시한다: 데몬 폴링(3s)이 전환 **직전** 화면을 들고 있다가 도착하면
   //   방금 바꾼 값이 옛 모드로 한 번 되돌아 그려진다(앱도 같은 이유로 에코 가드를 둔다).
   _applyStatusFrame(control) {
-    this._setStatusLines((control && control.lines) || []);
+    // ★ lines 는 **있을 때만** 반영한다(2026-08-03): 데몬이 "아직 모름"이면 필드를 아예 빼고 보낸다.
+    //  종전엔 빈 배열이 와서 strip 을 지웠고, pull 이 없어 되살아나지 않았다(claude 가 안 보이던 진범).
+    if (control && Array.isArray(control.lines)) this._setStatusLines(control.lines);
     if (!this._modeBusy && control && control.mode) this._setMode(control.mode);
     // dialog 는 **항상** 반영한다(null 이면 카드를 걷는다) — 없어진 화면의 유령 카드가 최악이다.
     if (control && "dialog" in control) this._setDialog(control.dialog);

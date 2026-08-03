@@ -311,7 +311,10 @@ async function pollOne(chatId) {
   const dialogChanged = dKey !== w.dialogKey;
   if (dialogChanged) { w.dialogKey = dKey; w.dialog = dialog; }
   if (!linesChanged && !modeChanged && !dialogChanged) return;  // 변화 없음(추출 불가면 이전 값 유지)
-  if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : [], modeOf(w), w.dialog || null);
+  // ★ 아직 한 번도 못 읽었으면 **빈 배열이 아니라 null** 을 준다(2026-08-03). 종전엔 [] 를 실었고
+  //  클라는 그걸 "감춰라"로 읽었다 — 모드/다이얼로그 변화로 나간 프레임 하나가 statusline 을 지우고,
+  //  pull 이 없어 되살아나지 않았다. 모름(null)=유지, 값 있음=교체 로 계약을 나눈다.
+  if (emitFn) emitFn(chatId, w.last != null ? w.last.split('\n') : null, modeOf(w), w.dialog || null);
 }
 
 /**
@@ -347,6 +350,17 @@ function modeFor(chatId) { return modeOf(watches.get(chatId)); }
 
 /** 캐치업용 — 지금 화면에 떠 있는 선택 다이얼로그 | null(push 를 놓쳐도 pull 로 화해된다). */
 function dialogFor(chatId) { const w = watches.get(chatId); return (w && w.dialog) || null; }
+
+/**
+ * 캐치업용 — 마지막으로 읽은 statusline 줄들 | null. 캡처하지 않는다(캐시 읽기).
+ *  ★ 2026-08-03: 종전엔 statusLines 가 **push 전용**이었다. 유휴 터미널은 내용이 안 바뀌어
+ *   push 가 나가지 않고(실측 60초 0건), 한 번 놓치면 채팅이 영영 빈칸이었다 — claude 가 아예
+ *   안 보이던 진범. mode·dialog 가 이미 하던 것처럼 pull 에도 실어 스스로 화해하게 한다.
+ */
+function linesFor(chatId) {
+  const w = watches.get(chatId);
+  return w && w.last != null ? w.last.split('\n') : null;
+}
 
 // ── 즉시 확인(poke) ────────────────────────────────────────────────────────────
 // 3초 폴링은 **놓쳤을 때의 안전망**이고, 화면이 바뀌는 순간을 알 수 있으면 그때 바로 확인하는 게
@@ -430,7 +444,7 @@ function stop() {
 
 module.exports = {
   watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
-  parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, detectAgent, modeSpec, screenFor,
+  parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, linesFor, detectAgent, modeSpec, screenFor,
   POKE_BURST_MS,
   MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   CODEX_MODE_IDS: CODEX_MODES.map((m) => m.id),

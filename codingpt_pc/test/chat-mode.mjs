@@ -96,7 +96,10 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   const ctl = read("../../codingpt_daemon/packages/runner-core/control.js");
   ok("데몬: chat.mode 를 cpt-server 로 라우팅(transcript 는 읽기 전용)", /method === 'chat\.mode'/.test(ctl) && /cptServer\.chatMode/.test(ctl));
   const ts = read("../../codingpt_daemon/packages/runner-core/transcript.js");
-  ok("데몬: chat.open 응답 + status_line push 에 모드 동봉", /statusMode/.test(ts) && /kind: 'status_line', lines, \.\.\.\(mode/.test(ts));
+  // lines 도 mode 와 같은 "모를 땐 필드를 뺀다" 규칙으로 바뀌었다(2026-08-03) — 빈 배열을 실으면
+  //  클라가 statusline 을 지웠고 pull 이 없어 되살아나지 않았다. 핀도 그 모양을 따라간다.
+  ok("데몬: chat.open 응답 + status_line push 에 모드 동봉",
+    /statusMode/.test(ts) && /kind: 'status_line', \.\.\.\(lines \? \{ lines \} : \{\}\), \.\.\.\(mode/.test(ts));
 
   const back = read("../../codingpt_back/routes/daemonRoutes.js");
   ok("back: POST /chat/mode 라우트", /\/chat\/mode/.test(back) && /chatMode/.test(back));

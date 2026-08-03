@@ -451,3 +451,80 @@ export function stripTokenOnce(s, tok) {
   else if (a.endsWith(" ")) a = a.slice(0, -1);
   return a + b;
 }
+
+// ── 에이전트 상태(공식 채널) — 표시 규칙 ─────────────────────────────────────────
+// ★ 2026-08-03 사용자 확정: "채팅 UI답게 새로 그리기". 원천이 화면 스크랩에서 **구조화 데이터**로
+//  바뀌었다(데몬 agent-status.js — claude statusLine 훅 / codex rollout). 그래서 채팅은 TUI 문자열을
+//  흉내내지 않고 자기 화면에 맞는 표시를 직접 만든다.
+//  · 평소 = 한 줄 칩(모델 · 컨텍스트% · 한도들) — 폰 폭에서 잘리면 뒤부터 버린다.
+//  · 탭 = 상세(토큰 절대값 · 리셋까지 남은 시간 · 비용/수정 줄수).
+//  ⚠ 시간 계산은 **표시 시점**에 한다(데몬이 "3시간 21분 후" 문자열을 만들면 화면에 굳는다).
+//  ⚠ 앱 `chatModel.ts` 의 같은 절과 **동시 수정 대상**(test/chat-status.mjs 가 실행 대조로 고정).
+
+/** 토큰 수 → '310k' / '1.0M' / '820'. */
+export function fmtTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+  if (v >= 1000) return Math.round(v / 1000) + "k";
+  return String(v);
+}
+
+/** epoch 초 → '3시간 21분 후 리셋' / '4일 후 리셋' / 지났으면 ''. now 는 ms. */
+export function fmtReset(resetsAt, now) {
+  const at = Number(resetsAt) || 0;
+  if (!at) return "";
+  const ms = at * 1000 - (Number(now) || 0);
+  if (ms <= 0) return "";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${Math.max(1, min)}분 후 리셋`;
+  const h = Math.floor(min / 60);
+  if (h < 24) { const m = min % 60; return m ? `${h}시간 ${m}분 후 리셋` : `${h}시간 후 리셋`; }
+  // 일 단위는 **반올림**한다 — floor 면 95시간(≈4일)이 "3일 후"로 읽혀 하루를 손해 본다
+  //  (경계에서 몇 초 차이로 눈금이 통째로 떨어지는 것도 같은 이유).
+  return `${Math.max(1, Math.round(h / 24))}일 후 리셋`;
+}
+
+/**
+ * 상태 → 한 줄 칩 목록 [{key,text}]. **왼쪽이 더 중요**하다(좁으면 뒤부터 버린다).
+ *  모델 → 컨텍스트 → 한도들 순서. 값이 없는 항목은 아예 만들지 않는다(빈 칩 금지).
+ */
+export function statusChips(st) {
+  if (!st) return [];
+  const out = [];
+  if (st.model) out.push({ key: "model", text: String(st.model) });
+  if (st.contextPct != null) out.push({ key: "ctx", text: `컨텍스트 ${st.contextPct}%` });
+  for (const l of Array.isArray(st.limits) ? st.limits : []) {
+    if (l && l.pct != null) out.push({ key: "lim:" + l.id, text: `${l.label} ${l.pct}%` });
+  }
+  return out;
+}
+
+/** 상태 → 상세 행 목록 [{key,label,value,sub}]. now 는 ms(리셋 남은 시간 계산 시점). */
+export function statusDetail(st, now) {
+  if (!st) return [];
+  const rows = [];
+  if (st.contextUsed != null || st.contextPct != null) {
+    const size = st.contextMax ? `${fmtTokens(st.contextUsed)} / ${fmtTokens(st.contextMax)}` : fmtTokens(st.contextUsed);
+    rows.push({
+      key: "ctx", label: "컨텍스트",
+      value: st.contextPct != null ? `${size} (${st.contextPct}%)` : size, sub: "",
+    });
+  }
+  for (const l of Array.isArray(st.limits) ? st.limits : []) {
+    if (!l || l.pct == null) continue;
+    rows.push({ key: "lim:" + l.id, label: `${l.label} 한도`, value: `${l.pct}%`, sub: fmtReset(l.resetsAt, now) });
+  }
+  const bits = [];
+  if (st.costUsd != null) bits.push("$" + Number(st.costUsd).toFixed(2));
+  if (st.linesAdded != null || st.linesRemoved != null) bits.push(`+${st.linesAdded || 0} / -${st.linesRemoved || 0} 줄`);
+  if (bits.length) rows.push({ key: "cost", label: "이번 세션", value: bits.join(" · "), sub: "" });
+  const meta = [];
+  if (st.effort) meta.push("추론 " + st.effort);
+  if (st.fast) meta.push("고속");
+  if (st.approvalPolicy) meta.push("승인 " + st.approvalPolicy);
+  if (meta.length) rows.push({ key: "meta", label: "설정", value: meta.join(" · "), sub: "" });
+  return rows;
+}
+
+/** 상태 표시를 그릴 값이 하나라도 있는가(없으면 화면 미러 폴백을 쓴다). */
+export function hasStatus(st) { return statusChips(st).length > 0; }

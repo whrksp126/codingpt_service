@@ -685,6 +685,14 @@ async function dispatch(req, conn) {
     require('./status-line').pokeTermSession(ptyLib.termSession(s0, win));
     return { ok: true };
   }
+  // ★ claude statusLine 중계 보고(2026-08-03) — 화면 스크랩을 대체하는 공식 상태 원천.
+  //  bin/cpt-statusline(statusline-relay.js)이 claude 에게 받은 stdin JSON 을 그대로 넘긴다.
+  //  resolveCtx 앞에 두는 이유 = 앱 내부 배관(터미널 안 AI 용 명령이 아니다) + 인자가 자족적이다.
+  //  ⚠ 보고자는 응답을 기다리지 않는다(화면을 붙잡지 않기 위해) → 여기서 실패해도 조용히 끝난다.
+  if (cmd === 'status.report') {
+    const file = require('./agent-status').noteClaudeHook((req.args || {}).payload);
+    return { ok: true, ...(file ? { file: fsLib.relOf(file) } : {}) };
+  }
   if (cmd === 'chat.mode') return chatMode(req.args || {});
   if (cmd === 'chat.commands') return chatCommands(req.args || {});
   if (cmd === 'chat.dialog') return chatDialog(req.args || {});

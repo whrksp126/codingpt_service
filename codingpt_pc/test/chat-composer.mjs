@@ -175,8 +175,11 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
     /const agent = this\.ctx\.agent\?\.\(\) \|\| null;/.test(cv) && /\.\.\.\(agent \? \{ agent \} : \{\}\)/.test(cv));
   ok("첫 메시지 전송이 탐색 창을 연다(전송 → 재오픈 경로)",
     /if \(this\._noSession\) this\._probeUntil = Date\.now\(\) \+ CHAT\.NO_SESSION_PROBE_MS;/.test(cv));
+  // 창을 800자로 둔다 — `_onPush` 머리에 control 분기(status_line·agent_status)가 늘어나면서
+  //  400자로는 이 핀이 **내용과 무관하게** 깨진다(2026-08-03). 지키려는 계약은 "push 가 noSession
+  //  확정을 해제한다" 하나이고, 그건 아래 라우팅 핀과 짝으로 성립한다.
   ok("chat_event push 는 noSession 확정을 해제한다(트리거 ②)",
-    /_onPush\(frame\) \{[\s\S]{0,400}if \(this\._noSession\) \{/.test(cv));
+    /_onPush\(frame\) \{[\s\S]{0,800}if \(this\._noSession\) \{/.test(cv));
   // ★ 그 트리거가 **도달 가능**해야 한다: noSession 뷰는 chatId 가 null 이라 chatId 매칭으로는 절대
   //   배달되지 않는다 → sessionId 라우팅이 없으면 위 핀은 죽은 코드를 지키는 셈이 된다.
   ok("push 라우팅이 noSession 뷰에도 닿는다(sessionId 매칭)",

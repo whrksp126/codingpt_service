@@ -117,6 +117,25 @@ html{scroll-behavior:smooth}
 .cpt-landing .card .cbody{padding:15px 16px;font-family:var(--mono);font-size:12px;line-height:1.9;color:var(--text2);}
 .cpt-landing .cdot{width:9px;height:9px;border-radius:50%;display:inline-block;}
 
+/* 개인 플랜 — 지금 제공하는 가치에 집중하고, Supporter/팀 상품은 예고만 한다. */
+.cpt-landing .personal-sec{margin-top:96px;padding:72px 0;background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);}
+.cpt-landing .personal-head{text-align:center;max-width:620px;margin:0 auto;}
+.cpt-landing .personal-head .eyebrow{font-size:12px;color:var(--accent);font-weight:750;letter-spacing:.08em;text-transform:uppercase;}
+.cpt-landing .personal-head h2{font-size:clamp(25px,4vw,34px);margin-top:10px;}
+.cpt-landing .personal-head p{color:var(--text3);font-size:15.5px;line-height:1.7;margin:14px auto 0;}
+.cpt-landing .personal-grid{display:grid;grid-template-columns:1.35fr .85fr;gap:16px;max-width:820px;margin:34px auto 0;}
+.cpt-landing .plan-card{background:var(--base);border:1px solid var(--border-2);border-radius:16px;padding:24px;}
+.cpt-landing .plan-card.primary{border-color:rgba(52,211,153,.46);box-shadow:0 18px 48px -34px rgba(52,211,153,.55);}
+.cpt-landing .plan-top{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;}
+.cpt-landing .plan-name{font-size:19px;font-weight:750;color:var(--text);}
+.cpt-landing .plan-price{font-size:14px;color:var(--text3);margin-top:5px;}
+.cpt-landing .plan-price b{font-size:23px;color:var(--text);font-weight:780;margin-right:4px;}
+.cpt-landing .plan-tag{flex:none;font-size:11px;font-weight:750;color:var(--accent);border:1px solid rgba(52,211,153,.35);background:rgba(52,211,153,.08);padding:5px 9px;border-radius:999px;}
+.cpt-landing .plan-list{list-style:none;padding:0;margin:20px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;color:var(--text2);font-size:13.5px;line-height:1.45;}
+.cpt-landing .plan-list li::before{content:'✓';color:var(--accent);font-weight:800;margin-right:8px;}
+.cpt-landing .support-copy{color:var(--text3);font-size:14px;line-height:1.7;margin:18px 0 0;}
+.cpt-landing .future-note{text-align:center;color:var(--dim);font-size:12.5px;line-height:1.65;margin:22px auto 0;}
+
 /* FAQ */
 .cpt-landing .faq-sec{margin-top:96px;}
 .cpt-landing .faq-sec h2{font-size:26px;font-weight:750;text-align:center;}
@@ -154,6 +173,7 @@ html{scroll-behavior:smooth}
 @media(max-width:820px){.cpt-landing .app-body{min-width:760px;} .cpt-landing .app-scroll{overflow-x:auto;}}
 @media(max-width:780px){.cpt-landing .row2,.cpt-landing .row2.rev{grid-template-columns:1fr;gap:26px;} .cpt-landing .row2.rev .fig{order:0;}}
 @media(max-width:680px){.cpt-landing .dlz{grid-template-columns:1fr;}}
+@media(max-width:700px){.cpt-landing .personal-grid{grid-template-columns:1fr;} .cpt-landing .plan-list{grid-template-columns:1fr;}}
 @media(max-width:820px){.cpt-landing .phone{display:none;}}
 @media(prefers-reduced-motion:reduce){.cpt-landing .cur{animation:none;}}
 `;
@@ -165,14 +185,14 @@ export default function Home() {
 
       <section className="hero">
         <div className="container">
-          <div className="kick">폰·태블릿으로 잇는 나만의 에이전트 개발 환경(ADE)</div>
-          <h1>내 머신의 코딩 에이전트를, 폰에서 지휘하세요</h1>
-          <p className="sub">claude·codex 같은 에이전트를 내 머신에서 돌리고, 폰·태블릿에서 이어받아 지휘해요. 터미널·에디터·미리보기가 손안에 — 소스와 자격증명은 내 머신에 보관돼요.</p>
+          <div className="kick">개인 개발자를 위한 무료 원격 에이전트 워크스페이스</div>
+          <h1>Claude Code와 Codex를 두고, 자리에서 벗어나세요</h1>
+          <p className="sub">내 머신에서 실행 중인 코딩 에이전트를 폰·태블릿에서 확인하고, 질문에 답하고, diff와 localhost 결과까지 검토하세요. 개인 사용은 무료예요.</p>
           <div className="ctas">
             <a className="btn" href="/#start"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" /></svg>다운로드</a>
             <a className="btn ghost" href="/docs">문서 보기</a>
           </div>
-          <div className="avail"><b>Apple Silicon Mac · iOS · Android</b> 지원 · Windows 호스트 준비 중 · 무료 &amp; BYO</div>
+          <div className="avail"><b>Apple Silicon Mac · iOS · Android</b> 지원 · Windows 호스트 준비 중 · 개인 무료 &amp; BYO</div>
         </div>
 
         <div className="shot-bleed">
@@ -194,9 +214,9 @@ export default function Home() {
       {/* 신뢰 한 줄 */}
       <div className="container">
         <div className="oneline">
-          <span><b>내 머신에서 실행</b> · 코드도 에이전트도 안 나감</span>
+          <span><b>내 머신에서 실행</b> · 소스와 AI 자격증명은 내 PC에</span>
           <span><b>BYO 에이전트</b> · claude·codex 구독 그대로</span>
-          <span><b>무료</b> · 구독료 없음</span>
+          <span><b>개인 무료</b> · 외부망 연결과 푸시 포함</span>
         </div>
       </div>
 
@@ -232,16 +252,57 @@ export default function Home() {
         </div>
       </div>
 
+      {/* 개인 사용은 완결된 무료 경험. Supporter는 기능 잠금이 아닌 자발적 후원 상품으로 준비한다. */}
+      <section className="personal-sec" id="personal">
+        <div className="container">
+          <div className="personal-head">
+            <div className="eyebrow">Personal</div>
+            <h2>혼자 쓰는 CodingPT는 무료예요</h2>
+            <p>밖에서도 내 개발 머신을 찾고, 푸시를 받고, 에이전트에게 응답하는 핵심 경험을 무료로 제공합니다. 무료 체험판이 아니라 개인 개발자가 계속 사용할 수 있는 플랜이에요.</p>
+          </div>
+          <div className="personal-grid">
+            <div className="plan-card primary">
+              <div className="plan-top">
+                <div>
+                  <div className="plan-name">Personal</div>
+                  <div className="plan-price"><b>무료</b> 개인 사용</div>
+                </div>
+                <span className="plan-tag">지금 이용 가능</span>
+              </div>
+              <ul className="plan-list">
+                <li>외부망 원격 연결</li>
+                <li>모바일 푸시 알림</li>
+                <li>터미널과 에이전트 채팅</li>
+                <li>권한 요청·질문 응답</li>
+                <li>파일·diff 검토</li>
+                <li>localhost 실시간 프리뷰</li>
+              </ul>
+            </div>
+            <div className="plan-card">
+              <div className="plan-top">
+                <div>
+                  <div className="plan-name">Supporter</div>
+                  <div className="plan-price">자발적 후원 플랜</div>
+                </div>
+                <span className="plan-tag">준비 중</span>
+              </div>
+              <p className="support-copy">무료 기능을 잠그는 상품이 아니에요. CodingPT를 자주 사용하고 지속적인 개발과 운영을 응원하는 분을 위한 선택형 플랜으로 준비하고 있습니다.</p>
+            </div>
+          </div>
+          <p className="future-note">팀 공유 머신·조직 권한·감사 로그가 필요한 Team과 Enterprise 플랜은 추후 제공할 예정입니다.</p>
+        </div>
+      </section>
+
       {/* FAQ */}
       <section className="faq-sec">
         <div className="container">
           <h2>자주 묻는 질문</h2>
           <div className="faq">
-            <details open><summary>제 코드나 에이전트가 클라우드로 올라가나요?<span className="ic">+</span></summary><p>아니요. 에이전트와 소스 파일은 내 머신에서 실행·보관됩니다. 기기 사이의 암호화된 데이터는 연결용 릴레이를 통과하지만, 서버는 내용을 복호화하거나 저장할 수 없어요.</p></details>
+            <details open><summary>제 코드나 에이전트가 클라우드에서 실행되나요?<span className="ic">+</span></summary><p>아니요. 에이전트와 소스 파일은 내 머신에서 실행·보관됩니다. 외부망에서는 CodingPT 서버가 기기 사이의 연결을 중계하며, 계정의 기기 인증과 E2EE 연결 상태를 앱에서 확인할 수 있어요.</p></details>
             <details><summary>어떤 코딩 에이전트를 쓸 수 있나요?<span className="ic">+</span></summary><p>claude·codex·gemini·aider 등 터미널에서 도는 CLI라면 무엇이든. 구독과 API 키는 그대로 내 머신에 있고, CodingPT가 대신 호출하지 않아요.</p></details>
             <details><summary>데스크톱 에이전트 도구(ADE)와 뭐가 다른가요?<span className="ic">+</span></summary><p>그런 도구는 PC 앞에 앉아서 쓰죠. CodingPT는 내 머신의 그 환경을 폰·태블릿에서 원격으로 이어받게 해, 자리를 떠나도 에이전트를 계속 지휘하게 합니다.</p></details>
-            <details><summary>CodingPT가 제 파일이나 터미널을 볼 수 있나요?<span className="ic">+</span></summary><p>볼 수 없습니다. 서버는 라우팅용 메타데이터와 종단 간 암호화된 데이터를 전달하지만, 코드·명령·출력의 평문 내용은 읽거나 저장할 수 없습니다.</p></details>
-            <details><summary>비용이 있나요?<span className="ic">+</span></summary><p>무료입니다. 구독료 없이 사용해요. AI는 이미 쓰던 내 에이전트/구독을 그대로 쓰니 별도 과금도 없어요.</p></details>
+            <details><summary>외부에서 연결할 때 CodingPT 서버를 사용하나요?<span className="ic">+</span></summary><p>네. 서로 다른 네트워크에 있는 내 기기를 찾고 연결하기 위해 CodingPT의 관리형 릴레이와 푸시 서버를 사용합니다. 소스 파일과 AI 자격증명은 내 머신에 보관돼요.</p></details>
+            <details><summary>비용이 있나요?<span className="ic">+</span></summary><p>현재 Personal 플랜은 외부망 연결과 기본 푸시를 포함해 무료입니다. AI는 이미 쓰던 내 에이전트와 구독을 그대로 사용합니다. 선택형 Supporter 플랜과 조직용 플랜은 추후 제공할 예정이에요.</p></details>
           </div>
         </div>
       </section>
@@ -283,7 +344,7 @@ export default function Home() {
           </div>
 
           <p className="start-note">같은 계정으로 로그인하면 내 머신이 자동으로 나타납니다. 앱의 간단한 인증 안내를 마치면 <b>내 기기끼리 종단 간 암호화된 프라이빗 연결</b>이 완성돼요.</p>
-          <div className="free">무료 · 구독 없음 · BYO 에이전트</div>
+          <div className="free">Personal 무료 · 외부망 연결과 푸시 포함 · BYO 에이전트</div>
         </div>
       </section>
     </div>

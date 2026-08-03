@@ -252,6 +252,39 @@ test('burst 는 무관한 터미널을 깨우지 않는다', async () => {
   } finally { restore(); sl.stop(); }
 });
 
+test('★ 아직 못 읽었으면 lines 는 null 로 나간다(빈 배열로 지우지 않는다)', async () => {
+  // 2026-08-03 사용자 신고 "claude statusline 이 안 나온다"의 진범 중 하나.
+  //  종전엔 캐시가 비어 있을 때 **빈 배열**을 실었고 클라는 그걸 "감춰라"로 읽었다. 그리고
+  //  statusLines 에는 pull 이 없어서(mode/dialog 와 달리) 되살아날 계기가 오지 않았다.
+  //  → 모름 = null(유지) / 값 = 교체 로 계약을 나눈다.
+  const DIALOG_ONLY = [
+    '  Select model', '', '❯ 1. Default  Opus 5', '  2. Sonnet  Sonnet 5', '', '  Esc to cancel', '',
+  ].join('\n');
+  const restore = mockTmux(() => DIALOG_ONLY);      // 상태줄을 한 번도 못 읽는 화면
+  const seen = [];
+  sl.setEmitter((chatId, lines) => seen.push(lines));
+  try {
+    sl.watch('c_null', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(seen.length >= 1, '다이얼로그 변화로 프레임은 나간다');
+    assert.strictEqual(seen[0], null, '빈 배열이 아니라 null — 클라는 이전 값을 유지한다');
+  } finally { restore(); sl.stop(); }
+});
+
+test('★ 캐치업(pull)이 statusline 의 정본이다 — push 를 놓쳐도 복구된다', async () => {
+  // 실측: 유휴 터미널 3개를 60초 관측했더니 내용 변화 0회 = push 0건이었다. push 만으로는
+  //  "한 번 놓치면 영영"이 구조적으로 불가피하다 → 캐시를 pull 응답에 싣는다.
+  const restore = mockTmux(() => claudeScreen());
+  sl.setEmitter(() => {});
+  try {
+    sl.watch('c_pull', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 60));
+    const lines = sl.linesFor('c_pull');
+    assert.ok(Array.isArray(lines) && lines.length, 'chat.since 가 실어 줄 값이 있다');
+    assert.strictEqual(sl.linesFor('없는채팅'), null);
+  } finally { restore(); sl.stop(); }
+});
+
 test('chat.open 스냅샷은 캐시가 아니라 지금 화면을 읽는다(토글 즉시 정확)', async () => {
   let screen = claudeScreen({ footer: CLAUDE_FOOTER });          // auto
   const restore = mockTmux(() => screen);

@@ -1483,6 +1483,23 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   font-size: 11px; line-height: 16px; color: var(--text3);
   white-space: pre; width: max-content; min-width: 100%;
 }
+/* 에이전트 상태(공식 채널) — 평소 한 줄 칩, 탭하면 상세. 색은 무채색(accent=상태 신호 전용). */
+.chat-statusline:has(.chat-status-chips) { cursor: pointer; overflow-x: hidden; }
+.chat-status-chips {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 11px; line-height: 16px; color: var(--text3);
+  overflow: hidden; white-space: nowrap;
+}
+.chat-status-chip { flex: 0 0 auto; }
+.chat-status-chip + .chat-status-chip { position: relative; padding-left: 10px; }
+.chat-status-chip + .chat-status-chip::before {
+  content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 1px; background: var(--border);
+}
+.chat-status-detail { display: flex; flex-direction: column; gap: 2px; padding: 5px 0 2px; }
+.chat-status-row { display: flex; align-items: baseline; gap: 8px; font-size: 11px; line-height: 16px; }
+.chat-status-k { color: var(--dim); min-width: 72px; }
+.chat-status-v { color: var(--text2); }
+.chat-status-s { color: var(--dim); }
 .chat-composer {
   flex: none; position: relative;
   /* ★ 배경을 두지 않는다(사용자 확정 2026-07-27): `--surface` 띠가 "영역이 나뉜 것"으로 읽혀

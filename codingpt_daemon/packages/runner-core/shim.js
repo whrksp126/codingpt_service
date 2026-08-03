@@ -117,7 +117,18 @@ function ensureShims() {
   try { ab = require('./approvals').budget(); } catch (_) { /* 기본값 유지 */ }
   // 절대경로 + 따옴표 — 옛 셸(PATH 에 <stateDir>/bin 이 없음)에서도 잡히고, 홈 경로에 공백이 있어도 안전.
   const approvalCmd = `"${cptAbs}" approval-hook --wait-ms ${ab.cliWaitMs}`;
+  // ★ statusLine 중계(2026-08-03) — 채팅 UI 의 상태 표시를 **화면 스크랩이 아니라 공식 채널**로
+  //  받는다. claude 는 값이 바뀌는 순간에만 이 명령을 실행하며 stdin 으로 JSON 을 준다(모델·컨텍스트·
+  //  5h/7d 한도·비용). 실측: shift+tab 을 누르면 즉시 1회 발화한다.
+  //  ⚠ 슬롯은 **1개뿐**이라 우리가 지정하면 사용자 설정이 밀린다 → 중계기가 사용자 명령을 찾아
+  //   같은 stdin 으로 실행하고 그 stdout 을 그대로 내보낸다(터미널 화면 무변경). statusline-relay.js.
+  const statusRelay = path.join(bin, 'cpt-statusline');
+  const relayJs = path.join(__dirname, 'statusline-relay.js');
+  writeExec(statusRelay, `#!/bin/sh
+exec "${process.execPath}" "${relayJs}"
+`);
   const hooks = {
+    statusLine: { type: 'command', command: `"${statusRelay}"`, padding: 1 },
     hooks: {
       SessionStart: hook('session-start', 5),
       UserPromptSubmit: hook('prompt', 5),
