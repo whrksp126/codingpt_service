@@ -5,8 +5,8 @@ module.exports = (sequelize, DataTypes) => {
     user_id: { type: DataTypes.INTEGER, allowNull: false },
     plan_id: { type: DataTypes.INTEGER, allowNull: false },
     status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'active' }, // active|past_due|canceled|paused
-    source: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'portone' }, // portone(웹 PG) | revenuecat(스토어 IAP)
-    billing_key: { type: DataTypes.STRING(255), allowNull: true }, // PortOne 빌링키 | RC original_transaction_id
+    source: { type: DataTypes.STRING(16), allowNull: false, defaultValue: 'portone' }, // lemonsqueezy(글로벌 웹) | portone(레거시 웹) | revenuecat(IAP)
+    billing_key: { type: DataTypes.STRING(255), allowNull: true }, // LS subscription id | PortOne 빌링키 | RC original_transaction_id
     card_brand: { type: DataTypes.STRING(32), allowNull: true }, // 표시용 카드 브랜드/발급사
     card_last4: { type: DataTypes.STRING(4), allowNull: true }, // 표시용 카드 끝 4자리
     current_period_start: { type: DataTypes.DATE, allowNull: true },

@@ -1134,7 +1134,8 @@ pub fn devtools_window(app: AppHandle, pv: String, open: bool) -> Result<(), Str
 }
 
 // ── 범용 back REST(deviceToken) — 원격 PC 워크스페이스의 fs/프리뷰 릴레이 호출용 ──
-//  /api/daemon/ 경로만 허용(최소 울타리). 성공 응답은 data 직접 반환 규약이라 JSON 그대로 넘긴다.
+//  기본은 /api/daemon/ 경로만 허용한다. 설정의 Supporter 화면에 필요한 읽기/체크아웃/포털
+//  세 경로만 별도로 허용한다. 임의 billing API 를 열지 않아 deviceToken 의 권한 표면을 최소화한다.
 //  에러는 back 의 { message } 를 살려 "HTTP <code>: <message>" 로 전달(409=대상 데몬 오프라인 등).
 #[tauri::command]
 pub fn back_api(
@@ -1144,7 +1145,13 @@ pub fn back_api(
     timeout_secs: Option<u64>,
 ) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
-    if !path.starts_with("/api/daemon/") {
+    let billing_path = matches!(
+        path.as_str(),
+        "/api/subscription/me"
+            | "/api/billing/lemonsqueezy/checkout"
+            | "/api/billing/lemonsqueezy/portal"
+    );
+    if !path.starts_with("/api/daemon/") && !billing_path {
         return Err("허용되지 않은 경로입니다.".into());
     }
     let url = format!("{}{}", server_url().trim_end_matches('/'), path);

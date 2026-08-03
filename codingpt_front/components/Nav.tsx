@@ -17,8 +17,9 @@ export default function Nav() {
       <a
         href="/#start"
         style={{
-          background: 'var(--accent)',
-          color: 'var(--on-accent)',
+          background: 'var(--elevated2)',
+          color: 'var(--text)',
+          border: '1px solid var(--border-control)',
           padding: '8px 16px',
           borderRadius: 9,
           fontWeight: 680,

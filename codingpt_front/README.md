@@ -1,11 +1,11 @@
 # CodingPT 결제 웹 (`codingpt_front`)
 
-인앱 결제(스토어 수수료) 회피를 위한 **별도 결제 웹**. 구독(정기결제 빌링키)·크레딧 충전(신용카드 일시불, 환금성)을 PortOne V2 로 처리. **Next.js App Router(SSR)** — PG 심사 크롤러가 상품·가격·사업자정보·약관을 JS 실행 없이 읽을 수 있게 서버 렌더한다.
+CodingPT 공개 웹. Supporter 월 구독은 글로벌 Merchant of Record인 Lemon Squeezy의 호스팅 체크아웃으로 처리한다. **Next.js App Router(SSR)** — 결제사 심사와 사용자 확인을 위해 상품·가격·사업자정보·약관을 JS 실행 없이 읽을 수 있게 서버 렌더한다.
 
 ## 로컬 실행
 ```bash
 cd codingpt_service/codingpt_front
-cp .env.example .env.local   # 값 채우기 (PortOne 키 등)
+cp .env.example .env.local   # 공개 백엔드 URL과 판매 게이트 설정
 npm install                  # @portone/browser-sdk, next 등 (사용자 승인 후)
 npm run dev                  # http://localhost:3400
 ```
@@ -13,8 +13,7 @@ npm run dev                  # http://localhost:3400
 ## 환경변수 (.env.local)
 - `BACKEND_INTERNAL_URL` — SSR 서버사이드 호출 대상(도커 내부망). 미설정 시 PUBLIC 사용.
 - `NEXT_PUBLIC_BACKEND_URL` — 클라이언트 호출 대상(codingpt_back).
-- `NEXT_PUBLIC_PORTONE_STORE_ID` / `..._CHANNEL_KEY_CHARGE` / `..._CHANNEL_KEY_BILLING` — PortOne publishable.
-  - **테스트 단계**: PortOne 테스트 채널(INIpayTest) 키. 카드사 심사 통과 후 실채널 키로 교체.
+- `NEXT_PUBLIC_SUBSCRIPTION_SALES_ENABLED` — Supporter 판매 버튼 게이트. Lemon Squeezy 비밀키는 백엔드에만 둔다.
 - 백엔드(`codingpt_back/.env`)엔 `PORTONE_API_SECRET`, `PORTONE_WEBHOOK_SECRET`, `PORTONE_CHANNEL_KEY_CHARGE`, `PORTONE_CHANNEL_KEY_BILLING`, `PORTONE_STORE_ID` 필요(시크릿은 백엔드만).
 
 ## 인증 흐름

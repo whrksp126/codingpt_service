@@ -176,6 +176,17 @@ export const api = {
   backApi: (method, path, body, timeoutSecs) =>
     invoke("back_api", { method, path, body: body ?? null, timeoutSecs: timeoutSecs ?? null }),
   backBase: () => invoke("back_base"),
+  // ── Supporter 웹 결제(deviceToken 인증, 브라우저에는 자격증명 미전달) ──
+  subscriptionMe: () => invoke("back_api", {
+    method: "GET", path: "/api/subscription/me", body: null, timeoutSecs: 15,
+  }),
+  supporterCheckout: () => invoke("back_api", {
+    method: "POST", path: "/api/billing/lemonsqueezy/checkout",
+    body: { code: "supporter" }, timeoutSecs: 25,
+  }),
+  supporterPortal: () => invoke("back_api", {
+    method: "GET", path: "/api/billing/lemonsqueezy/portal", body: null, timeoutSecs: 25,
+  }),
 
   // ── 원격 프리뷰 로컬 포트 포워더 — 사이드카 데몬(cpt.sock)에 리스너 기동/정리 지시 ──
   //  결과 { ok:true } | { ok:false, error:'EADDRINUSE'… } (실패는 프록시 폴백 신호).

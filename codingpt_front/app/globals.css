@@ -1,4 +1,5 @@
-/* CodingPT V2 디자인 토큰 (app/src/theme/v2Tokens.ts 와 동일 값) — modern dark dev-tool 톤 */
+/* CodingPT PC 앱과 같은 중립적인 dark dev-tool 톤.
+   포인트 색은 온라인/성공처럼 의미가 있는 상태에만 사용한다. */
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 
 :root {
@@ -6,21 +7,22 @@
   --surface: #0E1320;
   --elevated: #11151F;
   --elevated2: #1B1F2A;
-  --hover: #22304A;
+  --hover: #1A202C;
   --border: #1C2230;
   --border-control: #2A2F3A;
   --text: #F8FAFC;
   --text2: #CBD5E1;
   --text3: #94A3B8;
   --dim: #64748B;
-  --accent: #34D399;
-  --accent-hover: #2CC08A;
-  --cta: #08875D;
-  --cta-hover: #0A9E6D;
+  --accent: #CBD5E1;
+  --accent-hover: #F1F5F9;
+  --cta: #334155;
+  --cta-hover: #475569;
+  --success: #34D399;
   --info: #60A5FA;
   --error: #F87171;
-  --on-accent: #06281C;
-  --accent-tint: rgba(52, 211, 153, 0.12);
+  --on-accent: #0A0D14;
+  --accent-tint: rgba(148, 163, 184, 0.10);
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 12px;
@@ -35,7 +37,8 @@ html, body {
   -webkit-font-smoothing: antialiased;
   line-height: 1.5;
 }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--text2); text-decoration: none; }
+a:hover { color: var(--text); }
 .container { max-width: 1020px; margin: 0 auto; padding: 0 20px; }
 
 .btn {
@@ -47,7 +50,7 @@ a { color: var(--accent); text-decoration: none; }
 }
 .btn:hover { background: var(--accent-hover); }
 .btn:active { transform: translateY(1px); }
-.btn.cta { background: var(--cta); color: #fff; }
+.btn.cta { background: var(--cta); color: var(--text); border: 1px solid var(--border-control); }
 .btn.cta:hover { background: var(--cta-hover); }
 .btn.secondary { background: var(--elevated2); color: var(--text); border: 1px solid var(--border-control); }
 .btn.secondary:hover { background: var(--hover); }
@@ -77,7 +80,7 @@ th { color: var(--dim); font-weight: 600; }
 .footer a { color: var(--text3); }
 .notice { background: var(--elevated2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 14px; font-size: 13px; color: var(--text3); }
 
-.pill { display: inline-block; background: var(--accent-tint); color: var(--accent); border: 1px solid rgba(52,211,153,0.25);
+.pill { display: inline-block; background: var(--accent-tint); color: var(--text2); border: 1px solid var(--border-control);
   border-radius: 999px; padding: 5px 12px; font-size: 12.5px; font-weight: 600; }
 .hero { padding: 56px 0 40px; }
 .hero h1 { font-size: 44px; line-height: 1.1; }
@@ -121,7 +124,7 @@ th { color: var(--dim); font-weight: 600; }
   background: transparent; color: var(--text2); font-size: 14.5px; font-weight: 600; letter-spacing: -0.02em;
 }
 .shell-nav-item:hover { background: var(--hover); color: var(--text); }
-.shell-nav-item.active { background: var(--accent-tint); color: var(--accent); }
+.shell-nav-item.active { background: var(--elevated2); color: var(--text); }
 .shell-session-item {
   display: block; width: 100%; text-align: left; padding: 8px 12px; border-radius: var(--radius-sm);
   border: none; cursor: pointer; background: transparent; color: var(--text3); font-size: 13px;

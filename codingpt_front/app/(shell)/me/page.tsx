@@ -17,7 +17,7 @@ interface SubInfo {
   scheduledPlan: { code: string; name: string; priceKrw: number } | null;
   pastDue: { since: string; attempts: number; graceEndsAt: string | null } | null;
   paymentMethod: { brand: string | null; last4: string } | null;
-  manageInStore: boolean;
+  manageInStore: boolean; manageInPortal?: boolean;
 }
 interface Receipt {
   id: number; kindLabel: string; planName: string | null; amountKrw: number;
@@ -64,7 +64,7 @@ function Row({ label, value, onClick, danger, center, last, chevron = true, righ
   );
 }
 function ConnRow({ name, meta, status, tone, action, onAction, last }: { name: string; meta: string; status?: string; tone: 'on' | 'wait' | 'off'; action?: string; onAction?: () => void; last?: boolean }) {
-  const dot = tone === 'on' ? 'var(--accent)' : tone === 'wait' ? 'var(--warn, #FBBF24)' : 'var(--dim)';
+  const dot = tone === 'on' ? 'var(--success)' : tone === 'wait' ? 'var(--warn, #FBBF24)' : 'var(--dim)';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', borderBottom: last ? 'none' : '1px solid var(--border)' }}>
       <div style={{ minWidth: 0, flex: 1 }}>
@@ -176,6 +176,14 @@ export default function MyPage() {
       if (r.ok) { setMsg(r.recovered ? '결제 수단을 변경했고 결제가 정상 처리됐어요.' : '결제 수단을 변경했어요.'); load(); } else setMsg(r.message || '결제 수단 변경에 실패했습니다.');
     } finally { setBusy(null); }
   };
+  const openSupporterPortal = async () => {
+    const token = getToken(); if (!token) return;
+    setBusy('portal'); setMsg(null);
+    const r = await clientFetch<{ url: string }>('/api/billing/lemonsqueezy/portal', { token });
+    setBusy(null);
+    if (r.ok && r.data?.url) window.location.href = r.data.url;
+    else setMsg(r.message || '구독 관리 페이지를 열지 못했어요.');
+  };
   const connectGithub = async () => {
     const token = getToken(); if (!token) return;
     const r = await clientFetch<{ authorizeUrl: string }>('/api/github/authorize', { token });
@@ -192,10 +200,11 @@ export default function MyPage() {
     if (r.ok) { clearToken(); window.location.href = '/'; } else setMsg(r.message || '탈퇴에 실패했습니다.');
   };
 
-  const planName = sub?.planName || (status?.plan === 'free' ? 'Free' : status?.plan || 'Free');
+  const planName = sub?.planName || (status?.plan === 'free' ? 'Personal' : status?.plan || 'Personal');
   const periodEnd = fmtDate(sub?.currentPeriodEnd);
   const isStore = !!sub?.manageInStore;
-  const isPaid = !!sub && (sub.planCode === 'pro' || sub.planCode === 'max'); // 유료 구독(해지/결제수단 대상)
+  const isPortalManaged = !!sub?.manageInPortal;
+  const isPaid = !!sub && ['supporter', 'pro', 'max'].includes(String(sub.planCode)); // supporter + 레거시 유료 구독
   const hasWindowLimit = !!(status && status.windowLimitUnits);
   const cardLabel = paymentMethod ? `${paymentMethod.brand ? paymentMethod.brand + ' ' : '카드 '}···· ${paymentMethod.last4}` : null;
   const avatar = String(user?.nickname || user?.name || '코').trim().charAt(0).toUpperCase();
@@ -227,7 +236,7 @@ export default function MyPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                 <span style={{ fontSize: 18, fontWeight: 700 }}>{user?.nickname || user?.name || '사용자'}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', border: '1px solid rgba(52,211,153,0.4)', borderRadius: 999, padding: '1px 8px' }}>{planName}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', border: '1px solid var(--border-control)', borderRadius: 999, padding: '1px 8px' }}>{planName}</span>
               </div>
               <div className="dim" style={{ fontSize: 12.5, marginTop: 3 }}>{user?.email}</div>
             </div>
@@ -247,10 +256,10 @@ export default function MyPage() {
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
               {isPaid
                 ? <>{sub!.status === 'past_due' ? '결제 실패' : sub!.cancelAtPeriodEnd ? `${periodEnd}까지 이용 가능` : periodEnd ? `다음 갱신 ${periodEnd}` : '이용 중'}{sub!.scheduledPlan ? ` · ${sub!.scheduledPlan.name}로 변경 예정` : ''}{isStore ? ' · 스토어 결제' : ''}</>
-                : '무료로 채팅을 이용 중이에요. 워크스페이스 바이브코딩은 Pro부터예요.'}
+                : '내 PC의 채팅·터미널·IDE·웹 프리뷰를 무료로 이용 중이에요.'}
             </div>
             {!isStore ? (
-              <button onClick={() => goPanel('plans')} className="btn secondary" style={{ width: '100%', marginTop: 14, padding: '9px 16px', fontSize: 13.5 }}>{isPaid ? '플랜 변경' : '업그레이드'}</button>
+              <button onClick={() => goPanel('plans')} className="btn secondary" style={{ width: '100%', marginTop: 14, padding: '9px 16px', fontSize: 13.5 }}>{isPaid ? 'Supporter 관리' : 'CodingPT 응원하기'}</button>
             ) : (
               <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>스토어 구독이에요. 변경·해지는 앱에서 진행해 주세요.</p>
             )}
@@ -294,6 +303,17 @@ export default function MyPage() {
       {panel === 'billing' ? (
         isStore ? (
           <p className="muted" style={{ fontSize: 13.5, lineHeight: 1.6 }}>스토어(App Store / Google Play)에서 구독한 플랜이에요. 결제 수단·해지·영수증은 앱의 구독 관리에서 확인해 주세요.</p>
+        ) : isPortalManaged ? (
+          <>
+            <Group label="Supporter 구독">
+              <div style={{ padding: '15px' }}>
+                <div style={{ fontSize: 15, fontWeight: 700 }}>{planName} · {formatKRW(sub?.priceKrw || 4900)} / 월</div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 5 }}>{sub?.cancelAtPeriodEnd ? `${periodEnd || '현재 이용 기간'}까지 이용 가능` : periodEnd ? `다음 갱신 ${periodEnd}` : '매월 자동 갱신'}</div>
+                <button className="btn" onClick={openSupporterPortal} disabled={busy === 'portal'} style={{ width: '100%', marginTop: 14, padding: '9px 16px', fontSize: 13.5 }}>{busy === 'portal' ? '여는 중…' : '결제 수단·영수증·해지 관리'}</button>
+              </div>
+            </Group>
+            <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.6 }}>결제 정보와 구독 변경은 Lemon Squeezy의 안전한 고객 포털에서 관리돼요.</p>
+          </>
         ) : (
           <>
             {/* 결제 수단 — 무료 계정도 등록/변경 가능 */}
@@ -328,8 +348,8 @@ export default function MyPage() {
                   </>
                 ) : (
                   <>
-                    <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>무료로 채팅을 이용 중이에요. 워크스페이스 바이브코딩은 Pro부터예요.</div>
-                    <button onClick={() => goPanel('plans')} className="btn" style={{ marginTop: 12, padding: '8px 16px', fontSize: 13.5 }}>업그레이드</button>
+                    <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>Personal의 원격 채팅·터미널·IDE·웹 프리뷰를 무료로 이용 중이에요.</div>
+                    <button onClick={() => goPanel('plans')} className="btn" style={{ marginTop: 12, padding: '8px 16px', fontSize: 13.5 }}>CodingPT 응원하기</button>
                   </>
                 )}
               </div>
@@ -347,7 +367,7 @@ export default function MyPage() {
                     </div>
                     <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <div style={{ fontSize: 14.5, fontWeight: 800 }}>{formatKRW(r.amountKrw)}</div>
-                      <div style={{ fontSize: 11.5, marginTop: 1, color: r.status === 'paid' ? 'var(--accent)' : 'var(--dim)' }}>{RECEIPT_STATUS[r.status] || r.status}{r.refundedAmountKrw > 0 ? ` · ${formatKRW(r.refundedAmountKrw)} 환불` : ''}</div>
+                      <div style={{ fontSize: 11.5, marginTop: 1, color: r.status === 'paid' ? 'var(--success)' : 'var(--dim)' }}>{RECEIPT_STATUS[r.status] || r.status}{r.refundedAmountKrw > 0 ? ` · ${formatKRW(r.refundedAmountKrw)} 환불` : ''}</div>
                     </div>
                   </div>
                 </a>
@@ -364,7 +384,7 @@ export default function MyPage() {
           <Group label="환경">
             <Row label="테마" value="다크" onClick={() => goPanel('theme')} />
             <Row label="알림" onClick={() => setNotify((v) => !v)} chevron={false} last right={
-              <span style={{ width: 42, height: 25, borderRadius: 999, background: notify ? 'var(--accent)' : 'var(--borderControl, #2A2F3A)', position: 'relative', transition: 'background .2s' }}>
+              <span style={{ width: 42, height: 25, borderRadius: 999, background: notify ? 'var(--text3)' : 'var(--borderControl, #2A2F3A)', position: 'relative', transition: 'background .2s' }}>
                 <span style={{ position: 'absolute', top: 3, left: notify ? 20 : 3, width: 19, height: 19, borderRadius: 999, background: '#fff', transition: 'left .2s' }} />
               </span>
             } />
@@ -423,15 +443,10 @@ export default function MyPage() {
             <h2 style={{ fontSize: 19, fontWeight: 800 }}>정말 해지하시겠어요?</h2>
             <p className="muted" style={{ fontSize: 13.5, marginTop: 8, lineHeight: 1.6 }}>
               현재 <b style={{ color: 'var(--text)' }}>{planName}</b> 플랜을 이용 중이에요.
-              {periodEnd ? <> 지금 해지해도 <b style={{ color: 'var(--text)' }}>{periodEnd}까지</b>는 그대로 이용할 수 있고, 이후 Free로 전환돼요.</> : <> 다음 결제일부터 자동 갱신이 중단돼요.</>}
+              {periodEnd ? <> 지금 해지해도 <b style={{ color: 'var(--text)' }}>{periodEnd}까지</b> Supporter 상태가 유지되고, 이후 Personal로 돌아가요.</> : <> 다음 결제일부터 자동 갱신이 중단돼요.</>}
             </p>
             <div style={{ marginTop: 16, padding: 14, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10 }}>
-              <div className="dim" style={{ fontSize: 12, fontWeight: 700, marginBottom: 8 }}>해지하면 이런 점이 달라져요</div>
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 7 }}>
-                {['워크스페이스 바이브코딩(Pro 이상 전용) 사용이 중단돼요.', '사용량 한도가 Free 수준으로 줄어들어요.', '진행 중인 프로젝트의 실행·편집이 제한될 수 있어요.'].map((t) => (
-                  <li key={t} style={{ display: 'flex', gap: 8, fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.5 }}><span style={{ color: 'var(--danger, #F87171)', fontWeight: 800 }}>·</span><span>{t}</span></li>
-                ))}
-              </ul>
+              <div className="muted" style={{ fontSize: 13, lineHeight: 1.6 }}>해지해도 Personal의 원격 채팅·터미널·IDE·웹 프리뷰는 그대로 무료로 사용할 수 있어요.</div>
             </div>
             <div style={{ marginTop: 14 }}>
               <div className="dim" style={{ fontSize: 12, marginBottom: 6 }}>해지 이유 (선택)</div>

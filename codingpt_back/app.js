@@ -77,6 +77,11 @@ app.use(cors({
 // (authMiddleware 없음 — 서명 검증 + getPayment 재조회로 신뢰)
 const webhookController = require('./controllers/webhookController');
 app.post('/api/billing/webhook', express.raw({ type: '*/*' }), webhookController.handlePortoneWebhook);
+app.post(
+  '/api/billing/lemonsqueezy/webhook',
+  express.raw({ type: '*/*', limit: '256kb' }),
+  require('./controllers/lemonSqueezyWebhookController').handleLemonSqueezyWebhook,
+);
 
 // BYO-PC 프리뷰 — dpv 쿠키가 있는 non-/api 루트 요청을 데몬 dev 서버로 프록시(Vite 절대경로/에셋).
 //  JSON 파서 "앞": 프록시는 요청 본문을 raw 로 파이프하므로 파서가 먼저 소비하면 안 됨. (/api 요청은 즉시 next)

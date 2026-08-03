@@ -13,13 +13,13 @@ interface PlanRow {
 }
 interface SubInfo {
   status: string; planCode: string | null; source: string; currentPeriodEnd: string | null;
-  scheduledPlan: { code: string; name: string } | null; manageInStore: boolean;
+  scheduledPlan: { code: string; name: string } | null; manageInStore: boolean; manageInPortal?: boolean;
 }
 const fmtDate = (s?: string | null) => (s ? new Date(s).toLocaleDateString('ko-KR') : null);
 
 // 신규 구독 판매 on/off (M0 BYO 피벗). 'false' 면 비구독자 '구독하기' CTA 를 감춘다.
 // 기존 구독자의 업그레이드/다운그레이드/해지는 그대로 노출된다.
-const SALES_OPEN = process.env.NEXT_PUBLIC_SUBSCRIPTION_SALES_ENABLED !== 'false';
+const SALES_OPEN = process.env.NEXT_PUBLIC_SUBSCRIPTION_SALES_ENABLED === 'true';
 
 // 구독 플랜 선택/변경 본문 (페이지 헤더 없음). /plans 페이지 + /me 의 '플랜' 패널이 공유.
 // onAfterChange: 변경 성공 시 부모가 자기 데이터를 다시 불러올 수 있게 알림.
@@ -68,15 +68,22 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
   if (loading) return <div style={{ padding: 48, textAlign: 'center', color: 'var(--dim)' }}>불러오는 중…</div>;
 
   const paid = plans.filter((p) => p.price_krw > 0).sort((a, b) => (a.sort_order || a.price_krw || 0) - (b.sort_order || b.price_krw || 0));
-  const isPaidNow = current === 'pro' || current === 'max';
+  const isPaidNow = current === 'supporter' || current === 'pro' || current === 'max';
   const isStore = !!sub?.manageInStore;
+  const isPortalManaged = !!sub?.manageInPortal;
   const currentPrice = plans.find((p) => p.code === current)?.price_krw ?? 0;
 
   return (
     <div>
-      <p className="muted" style={{ fontSize: 13.5 }}>
-        매월 자동 갱신되며, 언제든 해지할 수 있어요. 업그레이드는 즉시 적용(남은 기간 비례정산), 다운그레이드는 다음 갱신부터 적용돼요.
-      </p>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 14, padding: '18px', background: !isPaidNow ? 'var(--accent-tint)' : 'transparent' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 18 }}>Personal</div>
+            <div className="muted" style={{ fontSize: 13, marginTop: 5 }}>내 PC의 AI 코딩을 어디서나 그대로. 개인 사용은 무료예요.</div>
+          </div>
+          <div style={{ fontWeight: 800, fontSize: 18 }}>무료</div>
+        </div>
+      </div>
       {isStore ? <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>스토어(App Store / Google Play)에서 구독한 플랜이에요. 변경은 앱의 구독 관리에서 진행해 주세요.</p> : null}
 
       <div style={{ display: 'grid', gap: 16, marginTop: 18 }}>
@@ -84,16 +91,16 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
           const isCurrent = p.code === current;
           const isScheduled = sub?.scheduledPlan?.code === p.code;
           const isUpgrade = isPaidNow ? p.price_krw > currentPrice : true;
-          const label = isPaidNow ? (isUpgrade ? '업그레이드' : '다운그레이드') : '구독하기';
+          const label = isPaidNow ? '플랜 변경' : 'Supporter 시작하기';
           return (
-            <div key={p.code} style={{ border: `1px solid ${isCurrent ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 14, padding: '18px 18px 20px', background: isCurrent ? 'var(--accent-tint, rgba(52,211,153,0.06))' : 'transparent' }}>
+            <div key={p.code} style={{ border: `1px solid ${isCurrent ? 'var(--border-control)' : 'var(--border)'}`, borderRadius: 14, padding: '18px 18px 20px', background: isCurrent ? 'var(--accent-tint)' : 'transparent' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontWeight: 800, fontSize: 18 }}>{p.name}</span>
                   {isScheduled ? (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-tint, rgba(52,211,153,0.1))', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 999, padding: '2px 8px' }}>변경 예정</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', background: 'var(--accent-tint)', border: '1px solid var(--border-control)', borderRadius: 999, padding: '2px 8px' }}>변경 예정</span>
                   ) : !isCurrent && p.badge ? (
-                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', background: 'var(--accent-tint, rgba(52,211,153,0.1))', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 999, padding: '2px 8px' }}>{p.badge}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text2)', background: 'var(--accent-tint)', border: '1px solid var(--border-control)', borderRadius: 999, padding: '2px 8px' }}>{p.badge}</span>
                   ) : null}
                   {p.display_multiplier ? <span className="dim" style={{ fontSize: 12 }}>{p.display_multiplier}</span> : null}
                 </div>
@@ -103,13 +110,20 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
               {p.features && p.features.length ? (
                 <ul style={{ listStyle: 'none', padding: 0, margin: '14px 0 0', display: 'grid', gap: 7 }}>
                   {p.features.map((f) => (
-                    <li key={f} style={{ display: 'flex', gap: 8, fontSize: 13, color: 'var(--text2)' }}><span style={{ color: 'var(--accent)', fontWeight: 800 }}>✓</span><span>{f}</span></li>
+                    <li key={f} style={{ display: 'flex', gap: 8, fontSize: 13, color: 'var(--text2)' }}><span style={{ color: 'var(--dim)', fontWeight: 800 }}>✓</span><span>{f}</span></li>
                   ))}
                 </ul>
               ) : null}
               <div style={{ marginTop: 16 }}>
                 {isCurrent ? (
-                  <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.6, cursor: 'default' }}>현재 이용 중</button>
+                  isPortalManaged ? (
+                    <button className="btn secondary" onClick={async () => {
+                      const token = getToken(); if (!token) return;
+                      const r = await clientFetch<{ url: string }>('/api/billing/lemonsqueezy/portal', { token });
+                      if (r.ok && r.data?.url) window.location.href = r.data.url;
+                      else setMsg(r.message || '구독 관리 페이지를 열지 못했어요.');
+                    }} style={{ width: '100%' }}>결제·구독 관리</button>
+                  ) : <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.6, cursor: 'default' }}>현재 이용 중</button>
                 ) : isStore ? (
                   <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.5 }}>앱에서 변경</button>
                 ) : isPaidNow ? (
@@ -117,7 +131,7 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
                 ) : SALES_OPEN ? (
                   <CheckoutButtons code={p.code} label={label} />
                 ) : (
-                  <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.6, cursor: 'default' }}>구독 준비 중</button>
+                  <button className="btn secondary" disabled style={{ width: '100%', opacity: 0.6, cursor: 'default' }}>Supporter 준비 중</button>
                 )}
               </div>
             </div>
@@ -126,7 +140,7 @@ export default function PlansPanel({ onAfterChange }: { onAfterChange?: () => vo
       </div>
 
       <p className="muted" style={{ fontSize: 12.5, marginTop: 22, lineHeight: 1.6 }}>
-        구독은 매월 자동 갱신되며, 마이페이지에서 언제든 해지할 수 있어요. 환불은 <a href="/legal/refund">환불·취소 정책</a>을 따릅니다.
+        Supporter는 선택형 월 후원 구독이며 언제든 해지할 수 있어요. Personal의 핵심 기능은 구독 여부와 관계없이 무료입니다. 환불은 <a href="/legal/refund">환불·취소 정책</a>을 따릅니다.
       </p>
 
       {confirm ? (

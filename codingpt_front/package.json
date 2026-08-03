@@ -2,7 +2,7 @@
   "name": "codingpt_front",
   "version": "1.0.0",
   "private": true,
-  "description": "CodingPT 공개 사이트 (랜딩 + 구독/크레딧 결제 + 약관, PortOne V2, Next.js SSR). codingpt-front.ghmate.com",
+  "description": "CodingPT 공개 사이트 (랜딩 + Lemon Squeezy Supporter 구독 + 약관, Next.js SSR). codingpt.ghmate.com",
   "scripts": {
     "dev": "next dev -p 3400",
     "build": "next build",

@@ -110,7 +110,8 @@ class SubscriptionService {
         ? { since: sub.past_due_since, attempts: sub.renewal_attempts, graceEndsAt }
         : null,
       paymentMethod: sub.card_last4 ? { brand: sub.card_brand || null, last4: sub.card_last4 } : null,
-      manageInStore: sub.source !== 'portone',
+      manageInStore: sub.source === 'revenuecat',
+      manageInPortal: sub.source === 'lemonsqueezy',
     };
   }
 

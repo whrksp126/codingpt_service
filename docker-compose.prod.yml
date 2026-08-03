@@ -52,6 +52,10 @@ services:
       #  실행시간 과금을 되살릴 땐 데모 계정 예외/한도부터 준 뒤 이 줄을 지운다.
       #  compose `environment` 가 env_file 보다 우선하므로 .env 의 값과 무관하게 여기가 정본이다.
       - BILLING_ENFORCE=false
+      # Personal은 계속 무료·무제한. Supporter 후원 구독만 운영에서 판매한다.
+      - SUBSCRIPTION_SALES_ENABLED=true
+      - LEMON_SQUEEZY_STORE_ID=436537
+      - LEMON_SQUEEZY_SUPPORTER_VARIANT_ID=1979075
       # 인앱 "업데이트 확인"(GET /api/app/version)이 비교할 스토어 게시 버전.
       #  ⚠ 이 값은 손으로 고치면 반드시 썩는다 — 실제로 앱이 0.2.9 인데 여기가 0.2.5 라
       #   업데이트 확인이 영구히 "최신 버전입니다" 를 돌려주고 있었다(안내 도달 0).
@@ -103,6 +107,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_BACKEND_URL: https://codingpt-back.ghmate.com
+        NEXT_PUBLIC_SUBSCRIPTION_SALES_ENABLED: "true"
         NEXT_PUBLIC_PORTONE_STORE_ID: ${PORTONE_STORE_ID:-}
         NEXT_PUBLIC_PORTONE_CHANNEL_KEY_CHARGE: ${PORTONE_CHANNEL_KEY_CHARGE:-}
         NEXT_PUBLIC_PORTONE_CHANNEL_KEY_BILLING: ${PORTONE_CHANNEL_KEY_BILLING:-}

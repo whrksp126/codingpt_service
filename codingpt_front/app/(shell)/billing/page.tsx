@@ -53,7 +53,7 @@ export default function BillingPage() {
               </div>
               <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>{formatKRW(r.amountKrw)}</div>
-                <div className="dim" style={{ fontSize: 11.5, marginTop: 2, color: r.status === 'paid' ? 'var(--accent)' : 'var(--dim)' }}>
+                <div className="dim" style={{ fontSize: 11.5, marginTop: 2, color: r.status === 'paid' ? 'var(--success)' : 'var(--dim)' }}>
                   {STATUS_LABEL[r.status] || r.status}{r.refundedAmountKrw > 0 ? ` · ${formatKRW(r.refundedAmountKrw)} 환불` : ''}
                 </div>
               </div>

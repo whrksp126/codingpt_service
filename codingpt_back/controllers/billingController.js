@@ -3,6 +3,8 @@ const billingService = require('../services/billingService');
 const rcBillingService = require('../services/rcBillingService');
 const portoneService = require('../services/portoneService');
 const BILLING = require('../config/billing');
+const lemonSqueezyService = require('../services/lemonSqueezyService');
+const { User, UserSubscription } = require('../models');
 const { successResponse, errorResponse, paginatedResponse } = require('../utils/response');
 
 // GET /api/billing/portone-config — 결제수단 변경 등 결제창에 필요한 storeId/channelKey (시크릿 아님)
@@ -22,9 +24,36 @@ const checkout = async (req, res) => {
   try {
     const { type, code } = req.body || {};
     if (!code) return errorResponse(res, new Error('code 가 필요합니다.'), 400);
+    if (code === 'supporter') return errorResponse(res, new Error('Supporter는 글로벌 결제 페이지를 이용해 주세요.'), 400);
     const result = await billingService.createCheckout(req.user.id, { type: type || 'subscription', code });
     return successResponse(res, result);
   } catch (error) { return errorResponse(res, error, 400); }
+};
+
+// 글로벌 웹 구독 — Lemon Squeezy 호스팅 체크아웃/고객 포털.
+const lemonSqueezyCheckout = async (req, res) => {
+  try {
+    if (!BILLING.SALES_OPEN) return errorResponse(res, new Error('Supporter 결제를 준비하고 있어요.'), 403);
+    const { code } = req.body || {};
+    if (code !== 'supporter') return errorResponse(res, new Error('지원하지 않는 플랜입니다.'), 400);
+    const current = await UserSubscription.findOne({ where: { user_id: req.user.id, status: ['active', 'past_due'] } });
+    if (current) return errorResponse(res, new Error('이미 이용 중인 구독이 있어요.'), 409);
+    const user = await User.findByPk(req.user.id, { attributes: ['id', 'email', 'nickname'] });
+    if (!user) return errorResponse(res, new Error('사용자를 찾을 수 없습니다.'), 404);
+    const url = await lemonSqueezyService.createSupporterCheckout({ userId: user.id, email: user.email, name: user.nickname });
+    if (!url) throw new Error('결제 URL을 생성하지 못했습니다.');
+    return successResponse(res, { url });
+  } catch (error) { return errorResponse(res, error, error.statusCode || 400); }
+};
+
+const lemonSqueezyPortal = async (req, res) => {
+  try {
+    const sub = await UserSubscription.findOne({ where: { user_id: req.user.id, source: 'lemonsqueezy', status: ['active', 'past_due', 'paused'] } });
+    if (!sub || !sub.billing_key) return errorResponse(res, new Error('관리할 Supporter 구독이 없습니다.'), 404);
+    const url = await lemonSqueezyService.getCustomerPortalUrl(sub.billing_key);
+    if (!url) throw new Error('구독 관리 페이지를 열지 못했습니다.');
+    return successResponse(res, { url });
+  } catch (error) { return errorResponse(res, error, error.statusCode || 400); }
 };
 
 // POST /api/billing/subscribe — 빌링키 발급 후 구독 활성화. body: { paymentId, billingKey }
@@ -88,4 +117,4 @@ const iapSync = async (req, res) => {
   } catch (error) { return errorResponse(res, error, 400); }
 };
 
-module.exports = { checkout, subscribe, getPayments, getPaymentReceipt, getPaymentMethodInfo, updatePaymentMethod, portoneConfig, createWebSession, iapSync };
+module.exports = { checkout, lemonSqueezyCheckout, lemonSqueezyPortal, subscribe, getPayments, getPaymentReceipt, getPaymentMethodInfo, updatePaymentMethod, portoneConfig, createWebSession, iapSync };

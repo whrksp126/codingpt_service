@@ -2,7 +2,7 @@ module.exports = (sequelize, DataTypes) => {
   // 구독 플랜 카탈로그 (서버 권위 가격/한도). 가격·한도는 placeholder — 실측 후 시드 갱신.
   const SubscriptionPlan = sequelize.define('SubscriptionPlan', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    code: { type: DataTypes.STRING(32), allowNull: false, unique: true }, // free | pro | max
+    code: { type: DataTypes.STRING(32), allowNull: false, unique: true }, // free(=Personal) | supporter | legacy pro/max
     name: { type: DataTypes.STRING(64), allowNull: false },
     price_krw: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // 월 구독료(원)
     window_seconds: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 18000 }, // 롤링 윈도우 길이(5h)

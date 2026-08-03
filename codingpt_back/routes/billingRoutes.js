@@ -6,6 +6,8 @@ const rcWebhookController = require('../controllers/rcWebhookController');
 
 // 월 구독 결제. (크레딧 충전 모델 제거됨)
 router.post('/checkout', authMiddleware, billingController.checkout);
+router.post('/lemonsqueezy/checkout', authMiddleware, billingController.lemonSqueezyCheckout);
+router.get('/lemonsqueezy/portal', authMiddleware, billingController.lemonSqueezyPortal);
 router.post('/subscribe', authMiddleware, billingController.subscribe);
 router.get('/payments', authMiddleware, billingController.getPayments);
 router.get('/payments/:id', authMiddleware, billingController.getPaymentReceipt);

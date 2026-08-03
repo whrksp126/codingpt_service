@@ -162,7 +162,7 @@ async function registerController(req, res) {
     return successResponse(res, { deviceId: device.id, deviceName: device.device_name, role: 'controller' });
   } catch (e) {
     console.error('registerController 오류:', e && e.name, e && e.message);
-    return errorResponse(res, e, 500);
+    return errorResponse(res, e, e.statusCode || 500);
   }
 }
 

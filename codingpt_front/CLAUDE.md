@@ -1,13 +1,13 @@
 # Public Web Rules (`codingpt_front/`)
 
-**Next.js (App Router, SSR)** 공개 사이트 — 랜딩 + **월 구독 결제(PortOne V2 정기결제/빌링키)** + 약관/사업자정보 + **웹 바이브코딩(`/app`)**.
+**Next.js (App Router, SSR)** 공개 사이트 — 랜딩 + **Lemon Squeezy 글로벌 월 구독** + 약관/사업자정보 + **웹 바이브코딩(`/app`)**.
 
 > **2026-07 상태**: BYO 피벗으로 구독 판매 중단(SALES_OPEN=false), 웹 바이브코딩 chat/workspace
 > 라우트는 FrozenNotice로 동결(코드 완성, 라우트만 봉인 — 복원 시 라우트만 되돌리면 됨).
 배포: **`codingpt.ghmate.com`**(정식, PG 계약 URL) / `codingpt-front.ghmate.com`(별칭). compose 서비스명 `front`, port 3400. 어드민은 독립 프로젝트 `../../codingpt_admin`.
 
 ## 왜 SSR인가 (중요)
-PG(KG이니시스 정기결제) 심사 크롤러가 **상품·가격·사업자정보·약관을 JS 실행 없이 정적 HTML로** 읽어야 통과한다.
+상품·가격·사업자정보·약관은 결제사 심사와 사용자 확인을 위해 JS 실행 없이 정적 HTML로 읽을 수 있어야 한다.
 → 랜딩(상품/가격)·법적·푸터는 **서버 컴포넌트(SSR)** 로 유지. 웹 바이브코딩(`/app`)은 인증 기반 client 영역.
 
 ## 구조

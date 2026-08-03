@@ -42,6 +42,7 @@ const NAV = [
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
   { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
+  { key: "supporter", label: "Supporter", group: "연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
   { key: "mobile", label: "모바일 연결", group: "연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
   { key: "security", label: "권한 및 보안", group: "보안", icon: "shield", keywords: "알림 다운로드 데스크탑 문서 폴더 접근 암호화" },
   { key: "about", label: "앱 정보", group: "시스템", icon: "monitor", keywords: "버전 업데이트" },
@@ -144,6 +145,8 @@ function renderSection(force) {
       ensureAccountCard(); // 프로필 지연 로드 반영(닉네임 재바인딩 포함)
       renderE2ee();        // 기기 목록 + 암호화 상태(한 섹션 — 2026-07-27 통합)
     }
+  } else if (section === "supporter") {
+    renderSupporter();
   } else if (section === "agents") {
     // 이 PC 의 AI CLI 목록. 데몬 감지가 정본이라 화면은 그 결과를 그대로 비춘다(추측 표기 금지).
     if (force || !contentEl.querySelector("#agentsBody")) {
@@ -271,6 +274,80 @@ function renderSection(force) {
     // 실제 앱 버전으로 채움(하드코딩 금지 — 업데이트되면 자동 반영). 실패해도 조용히(dev 등).
     api.appVersion().then((v) => { const el = contentEl.querySelector("#appVerLabel"); if (el && v) el.textContent = `CodingPT PC ${v}`; }).catch(() => {});
     bindUpdate();
+  }
+}
+
+// Personal 기능은 기기 수 제한 없이 무료다. Supporter는 기능 잠금 해제가 아니라 개발과
+// 릴레이 서버 운영을 돕는 선택 구독이므로, 설정에서도 과장된 비교표 없이 상태와 한 행동만 보여준다.
+async function renderSupporter() {
+  if (!state.daemon?.paired) {
+    contentEl.innerHTML = `
+      <div class="sm-card2 supporter-card">
+        <div class="supporter-copy"><b>로그인 후 Supporter를 구독할 수 있어요.</b><span>Personal의 모든 원격 작업 기능은 무료로 제공돼요.</span></div>
+        <button id="supporterLogin" class="sett-btn">로그인하기</button>
+      </div>`;
+    contentEl.querySelector("#supporterLogin")?.addEventListener("click", () => {
+      section = "connection"; renderNav(); renderSection(true);
+    });
+    return;
+  }
+
+  contentEl.innerHTML = `
+    <div class="sm-card2 supporter-card">
+      <div class="supporter-copy"><b>구독 상태를 확인하고 있어요…</b><span>Personal의 모든 원격 작업 기능은 무료로 제공돼요.</span></div>
+    </div>`;
+  try {
+    const sub = await api.subscriptionMe();
+    if (section !== "supporter") return;
+    const active = sub && sub.planCode === "supporter" && ["active", "past_due"].includes(sub.status);
+    const pastDue = active && sub.status === "past_due";
+    const end = sub?.currentPeriodEnd ? fmtDate(sub.currentPeriodEnd) : "";
+    contentEl.innerHTML = active ? `
+      <div class="sm-section-title">현재 플랜</div>
+      <div class="sm-card2 supporter-card">
+        <div class="supporter-copy">
+          <span class="supporter-plan">CodingPT Supporter</span>
+          <b>${pastDue ? "결제 확인이 필요해요" : "함께해 주셔서 고마워요."}</b>
+          <span>${pastDue ? "구독 관리에서 결제 수단을 확인해 주세요." : (end ? `${end}까지 이용 중이에요.` : "월 ₩4,900 구독을 이용 중이에요.")}</span>
+        </div>
+        <button id="supporterAction" class="sett-btn">구독 관리</button>
+      </div>` : `
+      <div class="sm-section-title">선택 후원 구독</div>
+      <div class="sm-card2 supporter-card">
+        <div class="supporter-copy">
+          <span class="supporter-plan">CodingPT Supporter</span>
+          <b>월 ₩4,900으로 CodingPT를 응원해 주세요.</b>
+          <span>모든 기기와 핵심 기능은 Personal에서도 계속 무료예요.</span>
+        </div>
+        <button id="supporterAction" class="sett-btn">웹에서 구독하기</button>
+      </div>`;
+    const action = contentEl.querySelector("#supporterAction");
+    action?.addEventListener("click", async () => {
+      action.disabled = true;
+      const original = action.textContent;
+      action.textContent = "브라우저 여는 중…";
+      try {
+        const result = active ? await api.supporterPortal() : await api.supporterCheckout();
+        if (!result?.url) throw new Error("결제 페이지 주소가 없습니다.");
+        await api.openExternal(result.url);
+        action.textContent = active ? "구독 관리 열림" : "결제 페이지 열림";
+      } catch (e) {
+        action.disabled = false;
+        action.textContent = original;
+        const msg = document.createElement("div");
+        msg.className = "supporter-error";
+        msg.textContent = String(e?.message || e).replace(/^HTTP \d+\s*:?\s*/, "");
+        contentEl.querySelector(".supporter-card")?.appendChild(msg);
+      }
+    });
+  } catch (e) {
+    if (section !== "supporter") return;
+    contentEl.innerHTML = `
+      <div class="sm-card2 supporter-card">
+        <div class="supporter-copy"><b>구독 상태를 불러오지 못했어요.</b><span>잠시 후 다시 시도해 주세요.</span></div>
+        <button id="supporterRetry" class="sett-btn">다시 시도</button>
+      </div>`;
+    contentEl.querySelector("#supporterRetry")?.addEventListener("click", renderSupporter);
   }
 }
 

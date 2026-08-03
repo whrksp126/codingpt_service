@@ -43,7 +43,7 @@ export default function DesktopLogin() {
   if (done) {
     return (
       <div className="card" style={wrap}>
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent, #34d399)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }} aria-hidden>
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--success, #34d399)" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto' }} aria-hidden>
           <circle cx="12" cy="12" r="10" /><path d="M8 12.5l2.5 2.5L16 9.5" />
         </svg>
         <h1 style={{ fontSize: 20, marginTop: 8 }}>PC에 로그인되었습니다</h1>
