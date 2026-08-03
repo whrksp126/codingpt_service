@@ -185,6 +185,73 @@ test('shift+tab(CSI Z)이 입력 경로를 지나가면 3초 폴링을 기다리
   } finally { restore(); sl.stop(); }
 });
 
+test('★ 제출 직후 burst 는 선택 화면을 폴링 주기(3s) 한참 전에 알린다', async () => {
+  // 사용자 신고(2026-08-03): "채팅에서 /model 을 쳤는데 선택 UI 가 너무 늦게 뜬다".
+  //  격리 tmux 실측: claude 는 제출(Enter) **51ms** 뒤에 이미 선택 화면을 그려 놨다 — 즉 CLI 는
+  //  즉시였고 늦은 건 우리 3초 폴링뿐이었다. chatInput 이 제출 직후 burst 로 깨우는 것이 그 수정.
+  const ptyLib = require('../pty');
+  let screen = claudeScreen({ footer: CLAUDE_FOOTER });
+  const restore = mockTmux(() => screen);
+  const dialogs = [];
+  sl.setEmitter((chatId, lines, mode, dialog) => dialogs.push(dialog && dialog.title));
+  try {
+    sl.watch('c_burst', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    const n0 = dialogs.length;
+    const term = ptyLib.termSession(ptyLib.sessionForCwd(CWD).session, TID);
+    // 제출 직후 화면에 선택 화면이 떴다고 치고 burst 를 건다.
+    screen = [
+      '  Select model', '  Switch between Claude models.', '',
+      '❯ 1. Default (recommended)  Opus 5 with 1M context',
+      '  2. Sonnet                 Sonnet 5 · Efficient for routine tasks',
+      '', '  Esc to cancel', '',
+    ].join('\n');
+    sl.pokeTermSession(term, { burst: true });
+    await new Promise((r) => setTimeout(r, 200));   // 첫 확인은 80ms — 3s 폴링과는 비교가 안 된다
+    assert.deepStrictEqual(dialogs.slice(n0), ['Select model'], '제출 직후 200ms 안에 카드가 실린다');
+    // 사라지면 null 을 실어 카드를 걷는다(같은 burst 안에서).
+    screen = claudeScreen({ footer: CLAUDE_FOOTER });
+    await new Promise((r) => setTimeout(r, 400));
+    assert.strictEqual(dialogs[dialogs.length - 1], null, '없어지면 null 로 걷힌다');
+  } finally { restore(); sl.stop(); }
+});
+
+test('★ chatInput 이 제출 직후 그 터미널을 스스로 깨운다(배선 자체를 고정)', async () => {
+  // 위 테스트는 burst 가 동작함을, 이건 **전송 경로가 실제로 burst 를 건다**는 것을 고정한다.
+  //  (배선이 빠지면 화면 파싱이 아무리 빨라도 사용자는 3초를 기다린다 — 그게 원래 버그였다.)
+  let screen = claudeScreen({ footer: CLAUDE_FOOTER });
+  const restore = mockTmux(() => screen);
+  const dialogs = [];
+  sl.setEmitter((chatId, lines, mode, dialog) => dialogs.push(dialog && dialog.title));
+  try {
+    sl.watch('c_wire', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    const n0 = dialogs.length;
+    // 제출 = 사용자가 채팅에서 `/model` 을 보낸 그 호출. 보내는 동안 TUI 에 선택 화면이 떴다.
+    screen = [
+      '  Select model', '', '❯ 1. Default (recommended)  Opus 5', '  2. Sonnet  Sonnet 5',
+      '', '  Esc to cancel', '',
+    ].join('\n');
+    await require('../cpt-server').chatInput({ cwd: CWD, tid: TID, text: '/model', submit: true });
+    await new Promise((r) => setTimeout(r, 400));
+    assert.deepStrictEqual(dialogs.slice(n0), ['Select model'], '제출 경로가 burst 를 걸어야 한다');
+  } finally { restore(); sl.stop(); }
+});
+
+test('burst 는 무관한 터미널을 깨우지 않는다', async () => {
+  const restore = mockTmux(() => claudeScreen());
+  const emitted = [];
+  sl.setEmitter(() => emitted.push(1));
+  try {
+    sl.watch('c_burst2', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    const n = emitted.length;
+    sl.pokeTermSession('cpt-other--t-9', { burst: true });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual(emitted.length, n, '다른 세션 이름이면 아무 확인도 하지 않는다');
+  } finally { restore(); sl.stop(); }
+});
+
 test('chat.open 스냅샷은 캐시가 아니라 지금 화면을 읽는다(토글 즉시 정확)', async () => {
   let screen = claudeScreen({ footer: CLAUDE_FOOTER });          // auto
   const restore = mockTmux(() => screen);

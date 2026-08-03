@@ -202,6 +202,53 @@ test('normalize — 사람 프롬프트/슬래시/meta/interrupt 분류', async 
   assert.ok(!JSON.stringify(img).includes('aGVsbG8='));
 });
 
+// ── 로컬 명령 래퍼(슬래시 출력 · `!` 셸) ────────────────────────────────────────
+// ★ 2026-08-03 사용자 신고: 채팅에 `<local-command-stdout>Set model to ␛[1mOpus 5 (1M context)␛[22m
+//  …</local-command-stdout>` 가 태그·ANSI 까지 **원문 그대로** 사람 말풍선으로 떴다("깨지는 느낌").
+//  TUI 는 같은 것을 `⎿ Set model to Opus 5 (1M context) …` 로 그린다 = 명령의 **결과**다.
+//  아래 픽스처는 홈 트랜스크립트 전수 스캔에서 실제로 나온 4종 래퍼 그대로다.
+const ESC = String.fromCharCode(27);   // 소스에 생 ESC 를 심지 않는다(보이지 않아 편집 사고가 난다)
+const userLine = (content, extra) => ({ type: 'user', uuid: 'w1', timestamp: TS, cwd: WS, sessionId: 's1', message: { role: 'user', content }, ...(extra || {}) });
+const one = (o) => { const r = T.normalize(o, 100); assert.strictEqual(r.length, 1); return r[0]; };
+
+test('★ 슬래시 명령 출력은 결과 줄로(태그 제거 + ANSI 제거)', () => {
+  const m = one(userLine(`<local-command-stdout>Set model to ${ESC}[1mOpus 5 (1M context)${ESC}[22m and saved as your default for new sessions</local-command-stdout>`));
+  assert.strictEqual(m.kind, 'tool_result', '와이어 kind 는 늘리지 않는다(구 클라 호환)');
+  assert.strictEqual(m.text, 'Set model to Opus 5 (1M context) and saved as your default for new sessions');
+  assert.strictEqual(m.hidden, false);
+  assert.strictEqual(m.result.ok, true);
+  assert.strictEqual(m.result.toolUseId, null, 'tool_use 짝이 없다 = 독립 행');
+  assert.ok(!/[<]/.test(m.text) && m.text.indexOf(ESC) < 0, '태그도 ANSI 도 남지 않는다');
+});
+
+test('빈 출력은 접는다(취소한 /model 등)', () => {
+  assert.strictEqual(one(userLine('<local-command-stdout></local-command-stdout>')).hidden, true);
+});
+
+test('`!` 셸 입력은 말풍선, 출력은 결과 줄(stderr 면 실패)', () => {
+  const i = one(userLine("<bash-input>printf 'x' > /tmp/a</bash-input>"));
+  assert.strictEqual(i.kind, 'slash');
+  assert.strictEqual(i.text, "! printf 'x' > /tmp/a");
+  const o = one(userLine('<bash-stdout>OK       80 bytes</bash-stdout><bash-stderr></bash-stderr>'));
+  assert.strictEqual(o.kind, 'tool_result');
+  assert.strictEqual(o.text, 'OK       80 bytes');
+  assert.strictEqual(o.result.ok, true);
+  const e = one(userLine('<bash-stdout></bash-stdout><bash-stderr>(eval):1: unmatched "</bash-stderr>'));
+  assert.strictEqual(e.result.ok, false, 'stderr 가 있으면 실패로 표시한다');
+});
+
+test('사람 말은 그대로 둔다(ANSI 제거를 본문에 번지게 하지 않는다)', () => {
+  // ⚠ 본문 텍스트에 일괄 stripAnsi 를 걸면 ANSI 자체를 설명하는 코드블록이 훼손된다
+  //  (이 프로젝트 대화에 실제로 흔하다) → 래퍼 안에서만 지운다.
+  const m = one(userLine(`ESC 시퀀스는 ${ESC}[1m 이렇게 씁니다`));
+  assert.strictEqual(m.kind, 'text');
+  assert.ok(m.text.includes(`${ESC}[1m`));
+});
+
+test('caveat 는 여전히 접혀 있다(isMeta)', () => {
+  assert.strictEqual(one(userLine('<local-command-caveat>Caveat: …</local-command-caveat>', { isMeta: true })).hidden, true);
+});
+
 test('normalize — compact 경계는 토큰 수를 실어 divider 로', async () => {
   const msgs = await allMsgs(FIX_FILE);
   const c = msgs.find((m) => m.kind === 'compact');

@@ -30,6 +30,10 @@ export const CHAT = {
   CMD_MAX: 60,             // 슬래시 팔레트에 한 번에 그리는 최대 행수(검색으로 좁혀 쓰는 전제)
   PICK_LIMIT: 200,         // 컴포저 `+` 파일 목록에 한 번에 그리는 최대 행수(필터로 좁혀 쓰는 전제)
   POLL_MS: 4000,           // 캐치업 폴링 주기(push 가 살아 있으면 사실상 no-op)
+  // 제출 직후 화면(선택 화면 카드·상태줄) 확인 연쇄(ms). 데몬 status-line.POKE_BURST_MS 와 같은 목적.
+  //  근거(격리 tmux 실측 2026-08-03): claude 는 제출 51ms 뒤에 이미 `/model` 선택 화면을 그린다 —
+  //  늦은 건 CLI 가 아니라 우리 폴링뿐이었다. 앱 useChatStream.SCREEN_BURST_MS 와 같은 값.
+  SCREEN_BURST_MS: [120, 260, 450, 700, 1000, 1500, 2200],
   OPEN_FAIL_RETRY_MS: 8000,// 열기 **실패**(오류) 후 재시도 간격
   NO_SESSION_IDLE_MS: 30000, // 열기 성공 + noSession(정상 상태) 일 때의 느린 재확인 간격
   NO_SESSION_PROBE_MS: 30000, // 첫 메시지 전송 후 "훅이 바인딩을 만들었는지" 짧게 탐색하는 창

@@ -1225,6 +1225,12 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
     await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : 120));
     await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
   }
+  // ★ 제출 직후 화면 확인을 앞당긴다(2026-08-03 사용자 신고: "/model 선택 UI 가 늦게 뜬다").
+  //  격리 실측: Enter 후 51ms 면 TUI 에 선택 화면이 이미 있다 — 늦은 건 우리 3초 폴링뿐이었다.
+  //  제출은 화면이 바뀌는 게 **확실한 순간**이라 여기가 burst 를 걸 자리다(슬래시든 일반 문장이든
+  //  상태줄·모드도 같이 갱신되므로 조건을 달지 않는다).
+  try { require('./status-line').pokeTermSession(ptyLib.termSession(session, win), { burst: true }); }
+  catch (_) { /* 감시자 없음 — 무해 */ }
   return { ok: true, index: win, submitted: doSubmit, multiline };
 }
 
@@ -1592,9 +1598,10 @@ async function chatDialog({ cwd, tid, pick, cancel, expect } = {}) {
   await io.ready;
   const r = await driveDialog(io, { pick, cancel, expect });
   // 감시자를 깨워 다른 기기의 카드도 즉시 갱신한다(폴링 3초를 기다리지 않는다).
+  //  burst 인 이유: 고른 뒤 화면이 두 번 움직인다(카드가 걷히고 → 상태줄/후속 확인 화면이 뜬다).
   try {
     const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
-    require('./status-line').pokeTermSession(ptyLib.termSession(session, win));
+    require('./status-line').pokeTermSession(ptyLib.termSession(session, win), { burst: true });
   } catch (_) { /* noop */ }
   return { ...r, tid: win };
 }

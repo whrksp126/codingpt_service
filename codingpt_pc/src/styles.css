@@ -1396,6 +1396,9 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   border-radius: var(--r-sm); overflow-x: auto; max-width: 100%;
   font-family: var(--mono-font); font-size: 12px; line-height: 17px; color: var(--text3); white-space: pre;
 }
+/* 로컬 명령 출력(`/model` 결과 등)은 산문이라 감싼다 — TUI 도 감싸고, 앱(Text)도 원래 감싼다.
+   셸/도구 출력은 열 정렬이 정보라 기본(가로 스크롤)을 유지한다. */
+.chat-out.wrap { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
 /* 끝난 도구 묶음 요약(TUI 의 "Called X 6 times, ran 5 shell commands") — 누르면 펼침 */
 .chat-tool.grouped, .chat-thinking.grouped { display: none; }
 .chat-tool-group {

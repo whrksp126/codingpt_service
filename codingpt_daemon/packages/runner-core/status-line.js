@@ -349,25 +349,39 @@ function modeFor(chatId) { return modeOf(watches.get(chatId)); }
 function dialogFor(chatId) { const w = watches.get(chatId); return (w && w.dialog) || null; }
 
 // ── 즉시 확인(poke) ────────────────────────────────────────────────────────────
-// 3초 폴링은 **놓쳤을 때의 안전망**이고, 모드가 바뀌는 순간을 알 수 있으면 그때 바로 확인하는 게
-//  사용자가 느끼는 반응이다(사용자 요청 2026-08-02). 지금 아는 "그 순간" 두 가지:
+// 3초 폴링은 **놓쳤을 때의 안전망**이고, 화면이 바뀌는 순간을 알 수 있으면 그때 바로 확인하는 게
+//  사용자가 느끼는 반응이다(사용자 요청 2026-08-02). 지금 아는 "그 순간" 세 가지:
 //   ① 우리 터미널 입력 경로로 shift+tab(CSI Z)이 지나갈 때(pty.js) — TUI 에서 사람이 누른 그 키.
 //   ② 채팅으로 전환(chat.open)할 때 — 화면을 여는 순간의 값은 캐시가 아니라 실제 화면이어야 한다.
+//   ③ **채팅에서 무언가를 제출한 직후**(chatInput) — 아래 burst.
 //  TUI 가 다시 그리는 데 한 틱이 걸리므로 짧은 지연 뒤 1회 + 한 번 더(느린 리페인트 보정) 확인한다.
 const POKE_DELAY_MS = 120;
 const POKE_RETRY_MS = 500;
 
-/** 특정 tmux 터미널 세션(cpt-…--t-<tid>)을 보는 감시자들을 즉시 확인시킨다. */
-function pokeTermSession(termName) {
+// ★ 제출 직후 연쇄 확인(2026-08-03 사용자 신고: "채팅에서 /model 을 쳤는데 선택 UI 가 늦게 뜬다").
+//  격리 tmux 실측(claude 2.1.220): 제출(Enter) 후 **51ms** 면 TUI 에 선택 화면이 이미 그려져 있다.
+//  즉 CLI 는 즉시인데 우리가 3초 폴링으로 늦추고 있었다(평균 1.5s·최악 3s). capture-pane 은 로컬
+//  수 ms 짜리라 제출 직후 잠깐 촘촘히 보는 비용이 사실상 없다 → 첫 확인을 80ms 에 둔다.
+//  뒤쪽 간격을 벌리는 이유: 스킬 로딩처럼 화면이 늦게 도는 명령도 있어서(꼬리로 덮는다).
+const POKE_BURST_MS = [80, 180, 320, 520, 800, 1200, 1700, 2400];
+
+/**
+ * 특정 tmux 터미널 세션(cpt-…--t-<tid>)을 보는 감시자들을 즉시 확인시킨다.
+ *  burst=true 면 제출 직후용 촘촘한 연쇄로 확인한다(선택 화면이 뜨는 순간을 놓치지 않는다).
+ */
+function pokeTermSession(termName, { burst = false } = {}) {
   const name = String(termName || '');
   if (!name || !watches.size) return;
   const ptyLib = require('./pty');
+  const delays = burst ? POKE_BURST_MS : [POKE_DELAY_MS, POKE_RETRY_MS];
   for (const [chatId, w] of watches) {
     let mine = '';
     try { mine = ptyLib.termSession(ptyLib.sessionForCwd(w.cwdRel).session, w.tid); } catch (_) { continue; }
     if (mine !== name) continue;
-    setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, POKE_DELAY_MS);
-    setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, POKE_RETRY_MS);
+    for (const d of delays) {
+      const t = setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, d);
+      if (t.unref) t.unref();
+    }
   }
 }
 
@@ -417,6 +431,7 @@ function stop() {
 module.exports = {
   watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
   parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, detectAgent, modeSpec, screenFor,
+  POKE_BURST_MS,
   MODE_IDS: CLAUDE_MODES.map((m) => m.id),
   CODEX_MODE_IDS: CODEX_MODES.map((m) => m.id),
   _extract: extractStatusLines, _watches: watches,

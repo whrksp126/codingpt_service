@@ -61,6 +61,7 @@ export class ChatView {
     this.ctx = ctx;
     this._visible = false;
     this._disposed = false;
+    this._screenBurst = [];     // 제출 직후 화면 확인 연쇄 타이머(dispose 에서 걷는다)
     this._msgs = [];
     this._els = new Map();      // seq → 메시지 DOM
     this._toolCards = new Map(); // tool_use id → { resultEl }
@@ -460,9 +461,21 @@ export class ChatView {
 
   // 대화 바인딩이 없는 터미널의 화면 상태 폴링 — 감시자(push)는 chatId 로만 라우팅되기 때문에
   //  여기서는 우리가 직접 읽는다. 로컬 터미널이면 사이드카 직결(1~2ms).
+  /** 제출 직후 화면 확인 연쇄 — 데몬 status-line.POKE_BURST_MS 와 같은 목적/같은 값. */
+  _pokeScreen() {
+    if (this._chatId) return;                       // 바인딩 있음 = 데몬이 push 로 밀어 준다
+    for (const d of CHAT.SCREEN_BURST_MS) {
+      this._screenBurst.push(setTimeout(() => this._pollScreen(), d));
+    }
+  }
+  _clearScreenBurst() {
+    for (const t of this._screenBurst) clearTimeout(t);
+    this._screenBurst = [];
+  }
+
   async _pollScreen() {
     const tid = this.ctx.tid?.();
-    if (tid == null || this._screening) return;
+    if (tid == null || this._screening || this._disposed || this._chatId) return;
     this._screening = true;
     try {
       const cwd = this._cwd(), agent = this._agent || undefined;
@@ -1217,7 +1230,9 @@ export class ChatView {
   _fillResult(m) {
     const res = m.result || {};
     const card = res.toolUseId ? this._toolCards.get(res.toolUseId) : null;
-    const body = this._resultBodyHtml(res);
+    // 로컬 명령 출력(`/model` 결과 등)은 **산문**이라 TUI 처럼 감싸 준다 — 셸 출력은 열 정렬이
+    //  깨지면 안 되므로 기존대로 가로 스크롤. (앱은 Text 라 원래 감싸므로 이걸로 양쪽이 같아진다.)
+    const body = this._resultBodyHtml(res, { wrap: !!(m.tool && m.tool.name === "local-command") });
     if (card) {
       card.mark.textContent = resultMark(res);
       card.mark.className = "chat-tool-mark " + resultClass(res);
@@ -1241,12 +1256,15 @@ export class ChatView {
     row.dataset.seq = String(m.seq);
     row.innerHTML =
       `<div class="chat-tool-head"><span class="chat-tool-mark ${resultClass(res)}">${resultMark(res)}</span>` +
-      `<span class="chat-tool-label">도구 결과</span></div><div class="chat-tool-result">${body}</div>`;
+      // 라벨은 데몬이 준 title 을 신뢰한다(toolLabel) — 로컬 명령 출력(`/model` 결과 · `!` 셸 결과)은
+      //  '명령 결과'/'셸 결과' 로 온다. 여기서 '도구 결과'로 굳히면 앱(toolLabel 사용)과 갈라진다.
+      `<span class="chat-tool-label">${escapeHtml(m.tool ? toolLabel(m) : "도구 결과")}</span></div>` +
+      `<div class="chat-tool-result">${body}</div>`;
     this._els.set(m.seq, row);
     this.scrollEl.appendChild(row);
   }
 
-  _resultBodyHtml(res) {
+  _resultBodyHtml(res, { wrap = false } = {}) {
     // 편집 결과는 **diff** 가 본문이다(TUI 와 같은 데이터). 상투 문구는 데몬이 이미 비웠다.
     if (res.patch) return this._patchHtml(res.patch);
     const preview = String(res.preview || "");
@@ -1254,7 +1272,7 @@ export class ChatView {
     if (!preview) return meta ? `<div class="chat-tool-meta">${escapeHtml(meta)}</div>` : "";
     const { head, rest } = clampLines(preview, CHAT.OUTPUT_CLAMP_LINES);
     return (
-      `<pre class="chat-out" data-full="${escapeHtml(preview)}">${escapeHtml(head)}</pre>` +
+      `<pre class="chat-out${wrap ? " wrap" : ""}" data-full="${escapeHtml(preview)}">${escapeHtml(head)}</pre>` +
       (rest ? `<button class="chat-out-more" type="button">${rest}줄 더 보기</button>` : "") +
       (meta ? `<div class="chat-tool-meta">${escapeHtml(meta)}</div>` : "")
     );
@@ -1411,6 +1429,10 @@ export class ChatView {
         cwd: this._cwd(), tid, text: raw, submit: true, submitDelayMs: CHAT.SEND_ENTER_DELAY_MS,
         ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
       });
+      // ★ 제출 직후 화면(선택 화면 카드·상태줄)을 촘촘히 확인한다 — `/model` 류는 제출 51ms 뒤면
+      //  TUI 에 이미 떠 있는데(격리 실측) 4초 폴링을 기다리면 "먹통"으로 읽힌다. 대화 바인딩이 있으면
+      //  데몬이 같은 시점에 burst push 하므로 _pollScreen 은 스스로 no-op 이 된다(chatId 있음).
+      this._pokeScreen();
     } catch (e) {
       // 데몬에 입력 주입기가 아직 배선되지 않았거나(NOT_IMPLEMENTED) 서버 경로가 막혔다 →
       //  이 pane 은 그 터미널에 이미 붙어 있으므로 로컬 PTY 로 같은 규칙(bracketed paste + 지연 Enter)
@@ -1980,6 +2002,7 @@ export class ChatView {
   dispose() {
     this._disposed = true;
     this._stopPoll();
+    this._clearScreenBurst();
     this._closePicker(); // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 계속 산다
     this._closeCmds();
     this._closeModeMenu();
