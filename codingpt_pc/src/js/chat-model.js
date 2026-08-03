@@ -526,5 +526,16 @@ export function statusDetail(st, now) {
   return rows;
 }
 
+/**
+ * 한 줄 요약 = **사용자가 설정한 그 줄**(claude=statusline 스크립트 출력 · codex=[tui] status_line 항목).
+ *  ★ 2026-08-04 사용자 지적: 우리가 항목을 고르고 있었다(claude 에 없는 7일을 넣고, codex 의 모델을 빼먹음).
+ *   표시할 내용의 정본은 **사용자 설정**이다 → 데몬이 그대로 만들어 주는 line 을 쓴다.
+ *   line 이 없을 때만(설정 없음/구 데몬) 우리 칩으로 폴백한다. 추가 정보는 탭 펼침(statusDetail)에.
+ */
+export function statusLine(st) {
+  const l = st && typeof st.line === 'string' ? st.line : '';
+  return l.trim() ? l : null;
+}
+
 /** 상태 표시를 그릴 값이 하나라도 있는가(없으면 화면 미러 폴백을 쓴다). */
-export function hasStatus(st) { return statusChips(st).length > 0; }
+export function hasStatus(st) { return !!statusLine(st) || statusChips(st).length > 0; }

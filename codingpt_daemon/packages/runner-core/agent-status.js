@@ -62,8 +62,13 @@ function limit(id, label, used, resetsAt) {
   return { id, label, pct: p, resetsAt: num(resetsAt) };
 }
 
-/** claude statusLine stdin JSON → 정규 상태. 순수 함수 — 테스트 정본. */
-function fromClaude(j) {
+/**
+ * claude statusLine stdin JSON → 정규 상태. 순수 함수 — 테스트 정본.
+ *  rendered = **사용자 스크립트가 실제로 출력한 줄**(릴레이가 사본을 뜬 것). 이게 "사용자가 설정한
+ *  콘텐츠"의 정본이라 채팅의 한 줄 요약은 이걸 그대로 쓴다(사용자 지적 2026-08-04) — 구조화 값은
+ *  탭 펼침 상세에서만 쓴다. 스크립트가 없으면 line 이 없고, 그때만 우리가 항목을 골라 조립한다.
+ */
+function fromClaude(j, rendered) {
   if (!j || typeof j !== 'object') return null;
   const cw = j.context_window || {};
   const rl = j.rate_limits || {};
@@ -92,8 +97,23 @@ function fromClaude(j) {
     linesAdded: num(cost.total_lines_added),
     linesRemoved: num(cost.total_lines_removed),
     sessionName: str(j.session_name),
+    // 사용자 줄(ANSI 포함) — 한 줄 요약의 정본.
+    line: oneLine(rendered),
     source: 'hook',
   });
+}
+
+/**
+ * 여러 줄일 수 있는 출력 → 미러할 한 줄. 빈 값이면 null.
+ *  statusLine 은 멀티라인을 허용하지만 채팅 스트립은 한 줄이므로 첫 비어있지 않은 줄을 쓴다
+ *  (사용자 스크립트가 여러 줄을 쓰면 나머지는 상세에서 볼 값들과 겹친다).
+ */
+function oneLine(s) {
+  const t = String(s == null ? '' : s).replace(/\r/g, '');
+  for (const ln of t.split('\n')) {
+    if (ln.replace(/\x1b\[[0-9;:]*[A-Za-z]/g, '').trim()) return ln.replace(/\s+$/, '');
+  }
+  return null;
 }
 
 /**
@@ -141,6 +161,8 @@ function windowLabel(minutes) {
 function fromCodexTurnContext(p) {
   return compact({
     agent: 'codex',
+    // ⚠ turn_context 에는 service_tier 가 없다 → fast 는 여기서 만들지 않는다(모름 유지).
+    //  thread_settings_applied 가 오면 그때 채워진다. 모르면 그 칸은 아예 안 그린다.
     model: str(p.model),
     effort: str(p.effort) || str(p.reasoning_effort),
     planMode: (p.collaboration_mode || {}).mode === 'plan' ? true
@@ -156,12 +178,90 @@ function fromCodexThreadSettings(p) {
     agent: 'codex',
     model: str(ts.model),
     effort: str(ts.reasoning_effort),
+    // 실측: service_tier==='priority' 일 때 상태줄이 `fast` / `Fast on` 을 그린다.
+    fast: ts.service_tier === 'priority' ? true : (ts.service_tier ? false : null),
     // collaboration_mode.mode = shift+tab 축('default'|'plan') — 알약의 **파일 기반 원천**이다.
     planMode: (ts.collaboration_mode || {}).mode === 'plan' ? true
       : (ts.collaboration_mode || {}).mode === 'default' ? false : null,
     approvalPolicy: str(ts.approval_policy),
     source: 'file',
   });
+}
+
+// ── codex: 사용자가 고른 항목대로 한 줄 만들기 ────────────────────────────────
+// codex 에는 사용자 스크립트가 없다. 대신 `~/.codex/config.toml` 의 `[tui] status_line` 에
+//  **항목 목록이 그대로 적혀 있다**(사용자 실측: ["model-with-reasoning","context-used","fast-mode",
+//  "approval-mode","context-window-size","used-tokens"]). 그 순서대로 우리 구조화 값으로 조립하면
+//  화면과 같은 내용이 된다 — 우리가 항목을 고르지 않는다(사용자 지적 2026-08-04).
+//  ⚠ 화면을 긁지 않는다: 설정 파일 + 공식 이벤트 값만 쓴다.
+const CODEX_DEFAULT_ITEMS = ['model-with-reasoning', 'context-used'];
+let itemsCache = null;   // { at, items } — 설정 파일은 자주 안 바뀐다(짧은 캐시로 디스크 절약)
+const ITEMS_TTL_MS = 20000;
+
+/** `[tui] status_line = [...]` → 항목 id 배열. 못 읽으면 기본값. */
+function codexStatusItems(readFile) {
+  const now = Date.now();
+  // readFile 주입은 테스트/특수 경로 — 캐시를 쓰지도, 남기지도 않는다(실파일 캐시와 섞이면 안 된다).
+  if (!readFile && itemsCache && now - itemsCache.at < ITEMS_TTL_MS) return itemsCache.items;
+  let items = CODEX_DEFAULT_ITEMS;
+  try {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const txt = (readFile || ((f) => fs.readFileSync(f, 'utf8')))(path.join(os.homedir(), '.codex', 'config.toml'));
+    // `[tui]` 절 안의 status_line 만 본다(다른 절에 같은 이름이 있어도 오독하지 않게).
+    const tui = /\[tui\][\s\S]*?(?=\n\[|$)/.exec(String(txt || ''));
+    const m = tui && /status_line\s*=\s*\[([^\]]*)\]/.exec(tui[0]);
+    if (m) {
+      const got = [...m[1].matchAll(/"([^"]+)"|'([^']+)'/g)].map((x) => x[1] || x[2]);
+      if (got.length) items = got;
+    }
+  } catch (_) { /* 설정 없음/읽기 실패 — 기본값 */ }
+  if (!readFile) itemsCache = { at: now, items };
+  return items;
+}
+
+/** 항목 id + 상태 → 표시 조각 | null(값 모름 = 그 칸을 아예 안 만든다). */
+function codexItemText(id, st) {
+  switch (id) {
+    case 'model': return st.model || null;
+    // 실측 표기: `gpt-5.6-sol low fast` — 고속 모드면 꼬리에 붙는다(fast-mode 항목과 별개로).
+    case 'model-with-reasoning': return st.model
+      ? [st.model, st.effort || null, st.fast ? 'fast' : null].filter(Boolean).join(' ') : null;
+    case 'reasoning': return st.effort || null;
+    case 'context-used': return st.contextPct != null ? `Context ${st.contextPct}% used` : null;
+    case 'context-left': return st.contextPct != null ? `Context ${100 - st.contextPct}% left` : null;
+    case 'context-window-size': return st.contextMax ? `${fmtK(st.contextMax)} window` : null;
+    case 'used-tokens': return st.contextUsed != null ? `${fmtK(st.contextUsed)} used` : null;
+    case 'fast-mode': return st.fast === true ? 'Fast on' : st.fast === false ? 'Fast off' : null;
+    case 'approval-mode': return st.approvalPolicy ? approvalLabel(st.approvalPolicy) : null;
+    case 'plan-mode': return st.planMode ? 'Plan mode' : null;
+    default: return null;
+  }
+}
+
+/** codex 가 화면에 쓰는 승인 정책 표기(실측 라벨). 모르는 값은 원문 그대로. */
+function approvalLabel(p) {
+  if (p === 'on-request') return 'Approve for me';
+  if (p === 'never') return 'Full Access';
+  if (p === 'untrusted' || p === 'on-failure') return 'Ask for approval';
+  return String(p);
+}
+
+/** codex 표기 실측: 258400 → '258K', 8780 → '8.78K'(작은 값은 소수 2자리). */
+function fmtK(n) {
+  const v = num(n) || 0;
+  if (v >= 1000000) return (v / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (v >= 100000) return Math.round(v / 1000) + 'K';
+  if (v >= 1000) return (v / 1000).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + 'K';
+  return String(v);
+}
+
+/** 상태 → 사용자가 고른 항목대로 조립한 한 줄 | null. */
+function codexLine(st, readFile) {
+  if (!st) return null;
+  const parts = codexStatusItems(readFile).map((id) => codexItemText(id, st)).filter(Boolean);
+  return parts.length ? parts.join(' \u00b7 ') : null;
 }
 
 /** null/undefined 필드를 떨어뜨린다 — 부분 상태를 merge 할 때 "모름"이 기존 값을 지우지 않게. */
@@ -210,9 +310,9 @@ function noteCodexLines(file, lines) {
 }
 
 /** claude 훅 페이로드 흡수 — cpt-server 의 status.report 가 부른다. */
-function noteClaudeHook(json) {
+function noteClaudeHook(json, rendered) {
   const file = str(json && json.transcript_path);
-  const norm = fromClaude(json);
+  const norm = fromClaude(json, rendered);
   if (!file || !norm) return null;
   const sid = str(json && json.session_id);
   if (sid) bySession.set(sid, file);
@@ -231,6 +331,11 @@ function set(file, patch) {
   const prev = status.get(file) || null;
   const next = merge(prev, patch);
   if (!next) return false;
+  // codex 는 사용자 스크립트가 없으므로 여기서 **설정된 항목대로** 한 줄을 만든다(claude 는 릴레이가 준다).
+  if (next.agent === 'codex') {
+    const line = codexLine(next);
+    if (line) next.line = line; else delete next.line;
+  }
   if (prev && sameStatus(prev, next)) { prev.at = Date.now(); return false; }
   next.at = Date.now();
   status.set(file, next);
@@ -262,11 +367,12 @@ function view(s) {
 /** 파일 경로 → 지금 아는 상태 | null. chat.open/chat.since 가 응답에 싣는다. */
 function get(file) { return file ? view(status.get(file) || null) : null; }
 
-function clear() { status.clear(); bySession.clear(); }
+function clear() { status.clear(); bySession.clear(); itemsCache = null; }
 
 module.exports = {
   setEmitter, noteCodexLines, noteClaudeHook, get, getBySession, set, clear,
   // 순수 함수(테스트 정본)
   fromClaude, fromCodexLine, fromCodexTokenCount, fromCodexThreadSettings, fromCodexTurnContext, merge, windowLabel,
+  codexStatusItems, codexLine, _oneLine: oneLine,
   _status: status, _bySession: bySession,
 };

@@ -44,13 +44,13 @@ function sockPath() {
 }
 
 /** 데몬에 한 줄 보고(응답을 기다리지 않는다). 실패는 전부 무시한다. */
-function report(payload, done) {
+function report(payload, rendered, done) {
   let finished = false;
   const end = () => { if (!finished) { finished = true; done(); } };
   let sock;
   try {
     sock = net.connect(sockPath(), () => {
-      try { sock.write(JSON.stringify({ cmd: 'status.report', args: { payload } }) + '\n'); } catch (_) { /* noop */ }
+      try { sock.write(JSON.stringify({ cmd: 'status.report', args: { payload, ...(rendered ? { rendered } : {}) } }) + '\n'); } catch (_) { /* noop */ }
       // 응답은 필요 없다 — 쓰기만 하고 끊는다.
       try { sock.end(); } catch (_) { /* noop */ }
       end();
@@ -61,15 +61,30 @@ function report(payload, done) {
   sock.on('close', end);
 }
 
-/** 사용자 명령을 같은 stdin 으로 실행하고 stdout 을 그대로 흘려 보낸다. */
+// 사용자 줄 사본 상한 — 채팅에 미러할 한 줄이면 충분하다(폭주 방어).
+const RENDER_CAP = 4096;
+
+/**
+ * 사용자 명령을 같은 stdin 으로 실행하고 stdout 을 **그대로 흘려 보내면서 사본을 뜬다**.
+ *
+ * ★ 사본을 뜨는 이유(2026-08-04 사용자 지적): 채팅에 우리가 고른 항목(7일 한도 등)을 그리고 있었는데,
+ *  사용자가 statusline 에 설정해 둔 내용과 달랐다. "설정한 콘텐츠에 맞게" 가 맞다 — 그리고 그 콘텐츠의
+ *  정본은 **이 스크립트의 출력** 그 자체다(우리가 스크립트를 해석할 수는 없다).
+ *  ⚠ 통과가 먼저다: 청크가 오는 즉시 stdout 에 쓰고, 사본은 곁다리로만 모은다(화면 지연 0).
+ */
 function chain(cmd, raw, done) {
-  if (!cmd) { done(); return; }
+  if (!cmd) { done(''); return; }
   let ch;
   try {
-    ch = spawn('/bin/sh', ['-c', cmd], { stdio: ['pipe', 'inherit', 'inherit'] });
-  } catch (_) { done(); return; }
-  ch.on('error', () => done());
-  ch.on('close', () => done());
+    ch = spawn('/bin/sh', ['-c', cmd], { stdio: ['pipe', 'pipe', 'inherit'] });
+  } catch (_) { done(''); return; }
+  let buf = '';
+  ch.stdout.on('data', (d) => {
+    try { process.stdout.write(d); } catch (_) { /* 파이프가 닫혔다 */ }
+    if (buf.length < RENDER_CAP) buf += d.toString('utf8');
+  });
+  ch.on('error', () => done(''));
+  ch.on('close', () => done(buf.slice(0, RENDER_CAP)));
   try { ch.stdin.end(raw); } catch (_) { /* 자식이 stdin 을 안 읽었다 — 무해 */ }
 }
 
@@ -81,10 +96,11 @@ function main() {
     let payload = null;
     try { payload = JSON.parse(raw); } catch (_) { /* 형식이 바뀌었다 — 체인만 한다 */ }
     const cmd = userStatusLine(payload && payload.cwd);
-    let left = 2;
-    const done = () => { if (--left === 0) process.exit(0); };
-    chain(cmd, raw, done);
-    if (payload) report(payload, done); else done();
+    // 보고는 **사용자 줄이 나온 뒤** 보낸다(그 사본을 함께 싣기 위해). 화면 출력은 이미 흘러갔다.
+    chain(cmd, raw, (rendered) => {
+      if (payload) report(payload, rendered, () => process.exit(0));
+      else process.exit(0);
+    });
     // 어떤 이유로든 매달리지 않게 하드 상한(사용자 스크립트가 hang 해도 claude 는 타임아웃을 갖지만
     //  우리가 그 위에 또 매달릴 이유는 없다).
     setTimeout(() => process.exit(0), 5000).unref();

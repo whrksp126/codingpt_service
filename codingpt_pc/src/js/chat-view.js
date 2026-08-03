@@ -21,7 +21,7 @@ import { ansiToHtml } from "./ansi.js";
 import { termTheme } from "./theme.js";
 import {
   CHAT, isVisible, isResult, toolLabel, resultMark, resultClass, resultMeta,
-  statusChips, statusDetail, hasStatus,
+  statusChips, statusDetail, statusLine, hasStatus,
   mergeMsgs, lastSeqOf, clampLines, optimisticKey, dropMatchedOptimistic, fmtBytes,
   relToRoot, filterFiles, flattenFiles, shouldReopenNoSession,
   composerHasText, agentDisplayName, agentModeView, agentModeChoices, agentModeIsOn,
@@ -1834,15 +1834,19 @@ export class ChatView {
     if (!this.statusEl) return;
     const st = this._status;
     if (hasStatus(st)) {
-      const chips = statusChips(st)
-        .map((c) => `<span class="chat-status-chip">${escapeHtml(c.text)}</span>`).join("");
+      // 한 줄 요약 = 사용자가 설정한 그 줄. claude 는 ANSI 가 실려 오므로 터미널 팔레트로 그린다
+      //  (모노 폰트 — 게이지 블록 문자가 정렬돼야 한다). 없으면 우리 칩으로 폴백.
+      const line = statusLine(st);
+      const chips = line
+        ? `<div class="chat-statusline-row">${ansiToHtml(line, termTheme())}</div>`
+        : statusChips(st).map((c) => `<span class="chat-status-chip">${escapeHtml(c.text)}</span>`).join("");
       const rows = this._statusOpen
         ? statusDetail(st, Date.now()).map((r) =>
           `<div class="chat-status-row"><span class="chat-status-k">${escapeHtml(r.label)}</span>`
           + `<span class="chat-status-v">${escapeHtml(r.value)}</span>`
           + (r.sub ? `<span class="chat-status-s">${escapeHtml(r.sub)}</span>` : "") + "</div>").join("")
         : "";
-      this.statusEl.innerHTML = `<div class="chat-status-chips">${chips}</div>`
+      this.statusEl.innerHTML = (line ? chips : `<div class="chat-status-chips">${chips}</div>`)
         + (rows ? `<div class="chat-status-detail">${rows}</div>` : "");
       this.statusEl.classList.toggle("open", this._statusOpen);
       this.statusEl.classList.remove("hidden");

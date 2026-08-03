@@ -690,7 +690,10 @@ async function dispatch(req, conn) {
   //  resolveCtx 앞에 두는 이유 = 앱 내부 배관(터미널 안 AI 용 명령이 아니다) + 인자가 자족적이다.
   //  ⚠ 보고자는 응답을 기다리지 않는다(화면을 붙잡지 않기 위해) → 여기서 실패해도 조용히 끝난다.
   if (cmd === 'status.report') {
-    const file = require('./agent-status').noteClaudeHook((req.args || {}).payload);
+    const a = req.args || {};
+    // rendered = 사용자 statusline 스크립트가 실제로 출력한 줄(릴레이가 사본을 떠 준다).
+    //  채팅의 한 줄 요약은 **그 줄** 이다 — 우리가 항목을 고르지 않는다(사용자 지적 2026-08-04).
+    const file = require('./agent-status').noteClaudeHook(a.payload, a.rendered);
     return { ok: true, ...(file ? { file: fsLib.relOf(file) } : {}) };
   }
   if (cmd === 'chat.mode') return chatMode(req.args || {});

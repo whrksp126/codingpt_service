@@ -237,3 +237,60 @@ test('배선 핀 — 대화 없는 응답 경로도 상태를 싣는다', () => 
   const cs = fs.readFileSync(path.join(__dirname, '..', 'cpt-server.js'), 'utf8');
   assert.match(cs, /agentStatusForTerm\(cwdRel, win/, 'chat.screen(폴링 경로)도 같이');
 });
+
+// ── 사용자가 설정한 콘텐츠를 따른다(2026-08-04 사용자 지적) ─────────────────────
+// 종전엔 우리가 항목을 골랐다: claude 사용자 스크립트에 없는 '7일'을 넣고, codex 화면에 있는
+//  모델·추론강도·승인정책을 빼먹었다. 표시 내용의 정본은 **사용자 설정**이다.
+//   · claude = statusline 스크립트의 **출력 그 자체**(릴레이가 사본을 뜬다 — 해석 불가능하므로)
+//   · codex  = `~/.codex/config.toml` 의 `[tui] status_line` 항목 목록(기계가 읽을 수 있다)
+const RENDERED = '\x1b[1m\x1b[36m◆ Opus 5 (1M context)\x1b[0m  \x1b[32m███░ 3%\x1b[0m \x1b[90m34k/1.0M\x1b[0m  5h 3%';
+
+test('★ claude 한 줄 요약 = 사용자 스크립트 출력 그대로(ANSI 포함)', () => {
+  const s = A.fromClaude(CLAUDE, RENDERED);
+  assert.strictEqual(s.line, RENDERED, '재조립하지 않는다');
+  assert.strictEqual(s.contextPct, 3, '구조화 값은 상세용으로 그대로 남는다');
+});
+
+test('스크립트가 없으면 line 이 없다(그때만 우리 칩 폴백)', () => {
+  assert.ok(!('line' in A.fromClaude(CLAUDE)));
+  assert.ok(!('line' in A.fromClaude(CLAUDE, '   \n')), '공백뿐이면 줄이 아니다');
+});
+
+test('멀티라인 출력은 첫 줄만 미러한다(스트립은 한 줄)', () => {
+  assert.strictEqual(A._oneLine('\n\n첫 줄\n둘째 줄\n'), '첫 줄');
+  assert.strictEqual(A._oneLine(''), null);
+});
+
+test('★ codex 항목 목록을 설정에서 읽는다([tui] 절만)', () => {
+  const toml = [
+    '[history]', 'status_line = ["절대-읽으면-안-되는-항목"]', '',
+    '[tui]', 'status_line = ["model-with-reasoning", "context-used", "fast-mode"]', 'status_line_use_colors = true',
+  ].join('\n');
+  A.clear();
+  assert.deepStrictEqual(A.codexStatusItems(() => toml),
+    ['model-with-reasoning', 'context-used', 'fast-mode']);
+});
+
+test('★ codex 한 줄 = 설정된 항목·순서 그대로(실측 표기와 글자까지 일치)', () => {
+  const st = {
+    agent: 'codex', model: 'gpt-5.6-sol', effort: 'low', fast: true, approvalPolicy: 'on-request',
+    contextPct: 2, contextUsed: 8780, contextMax: 258400,
+  };
+  const items = ['model-with-reasoning', 'context-used', 'fast-mode', 'approval-mode', 'context-window-size', 'used-tokens'];
+  const line = A.codexLine(st, () => `[tui]\nstatus_line = ${JSON.stringify(items)}\n`);
+  // 사용자 실제 TUI 화면(2026-08-04 스크린샷)과 동일해야 한다.
+  assert.strictEqual(line,
+    'gpt-5.6-sol low fast · Context 2% used · Fast on · Approve for me · 258K window · 8.78K used');
+});
+
+test('모르는 값의 칸은 아예 안 만든다(빈 칸으로 자리 차지 금지)', () => {
+  const st = { agent: 'codex', contextPct: 7 };
+  const line = A.codexLine(st, () => '[tui]\nstatus_line = ["model-with-reasoning","context-used","fast-mode"]\n');
+  assert.strictEqual(line, 'Context 7% used');
+});
+
+test('설정을 못 읽으면 최소 기본 항목으로 만든다', () => {
+  const st = { agent: 'codex', model: 'gpt-5.6-sol', effort: 'low', contextPct: 7 };
+  const line = A.codexLine(st, () => { throw new Error('없음'); });
+  assert.strictEqual(line, 'gpt-5.6-sol low · Context 7% used');
+});

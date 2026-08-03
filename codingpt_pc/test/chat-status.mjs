@@ -111,5 +111,29 @@ eq("★ 시간은 그리는 시점 기준이다(같은 상태라도 나중에 �
   eq("앱 hasStatus 동일", app && app.has, [PC.hasStatus(CLAUDE), PC.hasStatus(EARLY), PC.hasStatus(null)]);
 }
 
+// ── 한 줄 요약 = 사용자가 설정한 그 줄(2026-08-04) ────────────────────────────
+const WITH_LINE = { ...CLAUDE, line: "\u001b[1m◆ Opus 5 (1M context)\u001b[0m  ███░ 3% 34k/1.0M  5h 3%" };
+eq("line 이 있으면 그게 한 줄 요약", PC.statusLine(WITH_LINE), WITH_LINE.line);
+eq("line 이 없으면 null(칩 폴백)", PC.statusLine(CLAUDE), null);
+eq("공백뿐이면 줄이 아니다", PC.statusLine({ ...CLAUDE, line: "   " }), null);
+ok("line 만 있어도 그릴 게 있다", PC.hasStatus({ line: "x" }));
+eq("★ 상세는 그대로 구조화(추가 정보는 여기)", PC.statusDetail(WITH_LINE, NOW).length, PC.statusDetail(CLAUDE, NOW).length);
+
+{
+  const tsPath2 = path.resolve(here, "../../../codingpt_app/src/workspace/chatModel.ts");
+  const r2 = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+    `import(${JSON.stringify(url.pathToFileURL(tsPath2).href)}).then((m) => {
+       const W = ${JSON.stringify(WITH_LINE)}, C = ${JSON.stringify(CLAUDE)};
+       console.log(JSON.stringify({
+         withLine: m.statusLine(W), without: m.statusLine(C), blank: m.statusLine({ ...C, line: "   " }),
+         has: m.hasStatus({ line: "x" }),
+       }));
+     });`], { encoding: "utf8" });
+  let app2 = null;
+  try { app2 = JSON.parse((r2.stdout || "").trim().split("\n").pop()); } catch (_) { app2 = null; }
+  eq("앱 statusLine 규칙 동일", app2 && [app2.withLine, app2.without, app2.blank, app2.has],
+    [PC.statusLine(WITH_LINE), PC.statusLine(CLAUDE), PC.statusLine({ ...CLAUDE, line: "   " }), PC.hasStatus({ line: "x" })]);
+}
+
 console.log(fail ? `\n${fail} FAIL` : "\nALL PASS");
 process.exit(fail ? 1 : 0);
