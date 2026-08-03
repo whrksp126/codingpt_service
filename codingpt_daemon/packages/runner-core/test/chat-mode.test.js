@@ -122,3 +122,49 @@ test('앱 내부용 명령(status.poke/chat.mode)은 컨텍스트 게이트 밖�
 test('알 수 없는 명령은 그대로 거부된다(통로를 넓히지 않았다)', async () => {
   await assert.rejects(() => dispatch({ cmd: 'chat.input', args: {} }), (e) => /OUT_OF_CONTEXT|워크스페이스|BAD_REQUEST|알 수 없는/.test(String(e.code || e.message)));
 });
+
+// ── 전환 비용 · 안전성(2026-08-03 격리 claude 2.1.220 실측) ─────────────────────
+// ★ 실측 정본:
+//  · 순환 순서 = default → acceptEdits → plan → auto (한 방향, 일반 세션 4개).
+//    bypassPermissions 는 `--dangerously-skip-permissions` 세션에만 낀다 → 순서를 코드에 박지 않는다.
+//  · shift+tab 한 칸의 **화면 반영은 8~30ms**. 종전엔 90ms 고정 sleep 이라 3칸에 270ms 를 그냥
+//    기다렸다 → "바뀔 때까지 짧게 폴링"으로 바꿔 실제 전환 37~98ms(진짜 claude 왕복 6회 측정).
+//  · shift+tab 은 **컴포저 초안을 건드리지 않는다**(실측 확인) — 그래서 사용자가 쓰던 글이 살아 있다.
+//  · 대체 경로는 없다: claude `/permissions` 는 allow/deny **규칙** 관리(다른 축), `/plan` 은 plan 만,
+//    settings 의 permissions.defaultMode 는 세션 시작값. **shift+tab 순환이 유일한 계약**이다.
+
+test('★ 고정 sleep 이 아니라 화면이 바뀔 때까지 확인한다(느린 리페인트도 기다린다)', async () => {
+  // 첫 두 번 읽을 때는 아직 옛 화면이 보이는 상황을 흉내낸다 — 고정 1회 확인이면 여기서 어긋난다.
+  const order = ['default', 'acceptEdits', 'plan', 'auto'];
+  let idx = 0;
+  let lag = 0;
+  const keys = [];
+  const io = {
+    keys,
+    screen: async () => {
+      // lag 이 남아 있으면 **이전** 모드를 보여준다(리페인트 지연 재현).
+      const shown = lag > 0 ? order[(idx - 1 + order.length) % order.length] : order[idx];
+      if (lag > 0) lag -= 1;
+      return screenOf(shown);
+    },
+    key: async (k) => { keys.push(k); if (k === 'BTab') { idx = (idx + 1) % order.length; lag = 2; } },
+    sleep: async () => {},
+  };
+  const r = await driveMode(io, { mode: 'plan' });
+  assert.strictEqual(r.mode.id, 'plan');
+  assert.deepStrictEqual(keys, ['BTab', 'BTab'], '지연 때문에 키를 더 누르지 않는다');
+});
+
+test('★ 모드 전환은 컴포저를 한 글자도 건드리지 않는다(사용자 초안 보존)', async () => {
+  const io = cycleIo('default');
+  await driveMode(io, { mode: 'auto' });
+  assert.ok(io.keys.every((k) => k === 'BTab'), `보낸 키: ${JSON.stringify(io.keys)}`);
+  // 텍스트 주입(-l)·삭제(C-u/BSpace) 계열이 하나도 없어야 한다 — 슬래시 타이핑 경로의 재발 방지.
+  assert.ok(!io.keys.some((k) => /^(C-u|BSpace|Enter)$/.test(k) || /\x1b\[200~/.test(k)));
+});
+
+test('세션에 없는 모드는 한 바퀴 돌고 실패한다(조용한 성공 금지)', async () => {
+  const io = cycleIo('default');   // 4모드 순환 — bypassPermissions 는 없다
+  await assert.rejects(() => driveMode(io, { mode: 'bypassPermissions' }), (e) => e.code === 'MODE_UNREACHABLE');
+  assert.ok(io.keys.length <= 6, '무한히 누르지 않는다');
+});

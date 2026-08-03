@@ -176,3 +176,12 @@ test('상태 이벤트가 아닌 라인은 JSON.parse 조차 하지 않는다(ro
   junk.push('{"broken json');
   assert.strictEqual(A.noteCodexLines('/x/r4.jsonl', junk), false, '변화 없음 + 예외 없음');
 });
+
+// ── 배선 핀 — 상태 갱신이 화면 재확인 트리거로 이어져야 한다 ────────────────────
+test('★ transcript 가 agent-status 갱신을 pokeChat 으로 잇는다', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'transcript.js'), 'utf8');
+  assert.match(src, /agent-status'\)\.setEmitter/);
+  assert.match(src, /kind: 'agent_status', status: st/);
+  assert.match(src, /require\('\.\/status-line'\)\.pokeChat\(chatId\)/,
+    '배선이 빠지면 "훅은 오는데 알약은 3초 늦는" 조용한 퇴행이 된다');
+});

@@ -1493,9 +1493,27 @@ async function permissionAnswer({ cwd, tid, pick, expect, text, flow } = {}) {
 //  순서를 코드에 박지 않는다 — **화면의 라벨을 읽고 → BTab → 다시 읽기**를 목표가 나올 때까지 반복한다
 //  (드라이브 후 화면으로 검증하는 기존 다이얼로그 조작과 같은 규율).
 // 안전장치: 다이얼로그가 떠 있으면 조작하지 않는다(그 화면에서 shift+tab 은 모드 키가 아니다).
-const MODE_HOP_MS = 90;    // 키 전송 후 TUI 리페인트 대기(실측: 이 이하로는 옛 화면을 읽는다)
+// ★ 2026-08-03 실측(격리 claude 2.1.220): shift+tab 한 칸의 화면 반영은 **8~30ms** 다.
+//  종전엔 90ms 고정 sleep 이라 3칸 이동에 270ms 를 그냥 기다렸다. 고정 대기 대신 **바뀔 때까지
+//  짧게 폴링**한다 — 대부분 첫 폴에서 끝나고, 느린 순간에도 상한 안에서 알아서 기다린다.
+const MODE_SETTLE_MS = 20;    // 폴링 간격
+const MODE_SETTLE_TRIES = 25; // 상한 500ms(느린 머신/큰 화면 대비)
+const MODE_HOP_MS = 90;    // (구) 고정 대기 — codex 2상태 토글의 확인 주기로만 남는다
 const MODE_KEY_GAP_MS = 0; // 모드 순환은 매 키마다 화면으로 검증하므로 다이얼로그용 고정 간격이 불필요
 const MODE_MAX_HOPS = 6;   // 현재 최대 5모드 — 한 바퀴를 넘기면 순환 불가로 본다
+
+/**
+ * 키를 보낸 뒤 **모드가 실제로 바뀔 때까지** 짧게 폴링한다(고정 sleep 대신).
+ *  실측 8~30ms 라 보통 1~2회면 끝난다. 상한을 넘기면 null — 호출측이 다음 hop 에서 다시 본다.
+ */
+async function waitModeChange(read, from, sleep) {
+  for (let i = 0; i < MODE_SETTLE_TRIES; i++) {
+    await sleep(MODE_SETTLE_MS);
+    const m = await read();
+    if (m && m.id !== from) return m;
+  }
+  return null;
+}
 
 async function driveMode(io, { mode } = {}) {
   const statusLib = require('./status-line');
@@ -1519,11 +1537,13 @@ async function driveMode(io, { mode } = {}) {
   if (!cur) {
     throw Object.assign(new Error('화면에서 현재 모드를 읽을 수 없습니다 — TUI 를 확인해 주세요'), { code: 'MODE_UNKNOWN' });
   }
+  // 실측 순환(2.1.220 일반 세션): default → acceptEdits → plan → auto (한 방향). bypassPermissions 는
+  //  `--dangerously-skip-permissions` 세션에만 낀다 → 순서를 코드에 박지 않고 **화면으로 확인하며** 돈다.
   for (let hop = 0; hop < MODE_MAX_HOPS && cur.id !== want; hop++) {
+    const from = cur.id;
     await io.key('BTab');                    // = shift+tab(\e[Z)
-    await sleep(MODE_HOP_MS);
-    const next = await read();
-    if (next) cur = next;                    // 읽기 실패는 한 틱 건너뛴다(다음 hop 에서 다시 확인)
+    const next = await waitModeChange(read, from, sleep);
+    if (next) cur = next;                    // 상한까지 안 바뀌면 한 틱 건너뛴다(다음 hop 에서 다시 확인)
   }
   if (cur.id !== want) {
     throw Object.assign(new Error('그 모드로 전환하지 못했습니다(이 세션에서 지원하지 않는 모드일 수 있어요)'), { code: 'MODE_UNREACHABLE' });
@@ -1555,11 +1575,8 @@ async function driveCodexMode(io, { mode } = {}) {
   }
   if (cur.id === want) return { ok: true, mode: cur };   // 이미 그 상태 — 누르면 반대로 간다
   await io.key('BTab');
-  for (let i = 0; i < DIALOG_WAIT_TRIES; i++) {
-    await sleep(MODE_HOP_MS);
-    const next = await read();
-    if (next && next.id === want) return { ok: true, mode: next };
-  }
+  const next = await waitModeChange(read, cur.id, sleep);
+  if (next && next.id === want) return { ok: true, mode: next };
   throw Object.assign(new Error('모드를 전환하지 못했습니다'), { code: 'MODE_UNREACHABLE' });
 }
 

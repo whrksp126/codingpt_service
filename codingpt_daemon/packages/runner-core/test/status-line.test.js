@@ -323,3 +323,35 @@ test('지원 외 에이전트/tid 없음은 등록되지 않는다', () => {
   sl.watch('c_y', { cwdRel: CWD, tid: null, agent: 'claude' });
   assert.strictEqual(sl._watches.size, 0);
 });
+
+test('★ pokeChat — 공식 상태 갱신을 "지금 확인해" 신호로 쓴다(TUI 에서 직접 눌러도 즉시)', async () => {
+  // 종전 신호는 **우리 pty 를 지나가는 CSI Z** 하나뿐이라, 사용자가 Mac 터미널에 attach 해서
+  //  직접 shift+tab 을 누르면 알약이 최대 3초 늦었다. 이제 claude statusLine 훅(shift+tab 에 즉시
+  //  발화)·codex rollout(106ms) 이 그 순간을 알려 준다 → agent-status 갱신을 트리거로 삼는다.
+  //  ⚠ 모드의 정본은 여전히 **화면 하나**다(두 원천이 어긋나면 판정 근거가 사라진다).
+  let screen = claudeScreen({ footer: CLAUDE_FOOTER });        // auto
+  const restore = mockTmux(() => screen);
+  const modes = [];
+  sl.setEmitter((chatId, lines, mode) => modes.push(mode && mode.id));
+  try {
+    sl.watch('c_hook', { cwdRel: CWD, tid: TID, agent: 'claude' });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepStrictEqual(modes, ['auto']);
+    // 사용자가 TUI 에서 직접 눌렀다 → 우리 입력 경로엔 아무것도 안 지나간다. 훅만 온다.
+    screen = claudeScreen({ footer: '  -- INSERT -- ⏸ plan mode on (shift+tab to cycle)' });
+    sl.pokeChat('c_hook');
+    await new Promise((r) => setTimeout(r, 120));
+    assert.deepStrictEqual(modes, ['auto', 'plan'], '3초 폴링을 기다리지 않는다');
+  } finally { restore(); sl.stop(); }
+});
+
+test('pokeChat 은 모르는 chatId 에 아무 일도 하지 않는다', async () => {
+  const restore = mockTmux(() => claudeScreen());
+  const seen = [];
+  sl.setEmitter(() => seen.push(1));
+  try {
+    sl.pokeChat('없는채팅');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.strictEqual(seen.length, 0);
+  } finally { restore(); sl.stop(); }
+});

@@ -399,6 +399,26 @@ function pokeTermSession(termName, { burst = false } = {}) {
   }
 }
 
+/**
+ * 특정 채팅(chatId)의 감시자를 즉시 확인시킨다.
+ *
+ * ★ 2026-08-03. 왜 필요한가: 종전엔 "지금 확인해" 신호가 **우리 pty 를 지나가는 CSI Z** 하나뿐이라,
+ *  사용자가 Mac 터미널에 attach 해서 직접 shift+tab 을 누르면 채팅 알약이 최대 3초 늦었다.
+ *  이제 그 순간을 알려주는 공식 신호가 생겼다 —
+ *   · claude: statusLine 훅이 shift+tab 에 **즉시 1회** 발화한다(실측).
+ *   · codex : rollout 에 thread_settings_applied 가 **106ms** 만에 적힌다(실측).
+ *  둘 다 agent-status 를 갱신하므로, 그 갱신을 **poke 트리거**로 쓴다.
+ *  ⚠ 모드의 **정본은 여전히 화면 하나**다. 훅/파일 값을 알약에 직접 꽂지 않는 이유 = 두 원천이
+ *   어긋나면 어느 쪽이 맞는지 판정할 근거가 사라진다. 신호와 정본을 분리해 둔다.
+ */
+function pokeChat(chatId) {
+  if (!watches.has(chatId)) return;
+  for (const d of [0, POKE_DELAY_MS, POKE_RETRY_MS]) {
+    const t = setTimeout(() => { pollOne(chatId).catch(() => { /* noop */ }); }, d);
+    if (t.unref) t.unref();
+  }
+}
+
 /** 입력 바이트에 shift+tab(CSI Z)이 들어 있으면 그 터미널을 즉시 확인시킨다(pty.js 가 호출). */
 const CSI_Z = '\x1b[Z';
 function onTerminalInput(termName, bytes) {
@@ -443,7 +463,7 @@ function stop() {
 }
 
 module.exports = {
-  watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, onTerminalInput, stop,
+  watch, unwatch, setEmitter, snapshotFor, modeFor, pokeTermSession, pokeChat, onTerminalInput, stop,
   parseMode, parseCodexMode, extractMode, extractDialog, dialogFor, linesFor, detectAgent, modeSpec, screenFor,
   POKE_BURST_MS,
   MODE_IDS: CLAUDE_MODES.map((m) => m.id),
