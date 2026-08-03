@@ -34,6 +34,10 @@
 
 const MAX_ENTRIES = 64;          // 파일 경로별 상태 캐시 상한(LRU)
 const status = new Map();        // file(abs) → { ...normalized, at }
+// sessionId → file. claude 훅은 **첫 턴 전에도** 온다(transcript_path 는 아직 없는 파일을 가리킨다).
+//  그 구간엔 대화 바인딩이 없어 file 로 찾을 길이 없으므로, 훅이 함께 주는 session_id 로도 색인한다
+//  (터미널의 sessionId 는 훅 바인딩 레지스트리가 이미 안다 → transcript.lookupBind).
+const bySession = new Map();
 let emitFn = null;               // transcript.js 주입 — (file, status) => void
 
 /** transcript.js 가 push 이미터를 주입한다(순환 require 회피 — status-line.js 와 같은 관례). */
@@ -127,6 +131,25 @@ function windowLabel(minutes) {
   return `${m}분`;
 }
 
+/**
+ * codex `turn_context` → 부분 상태. **매 턴 기록되는** 줄이라 이쪽이 더 믿을 만한 원천이다.
+ *  ★ 2026-08-03 실측 정정: `thread_settings_applied` 는 **설정이 바뀔 때만** 적힌다 — 새 세션의
+ *   rollout 14줄에는 하나도 없었다(모델·계획모드가 영영 비어 보이던 원인). turn_context 에는
+ *   model·effort·approval_policy·collaboration_mode 가 전부 들어 있고 매 턴 갱신된다.
+ *  ⚠ 이 줄은 `{type:'turn_context', payload:{...}}` 로 **payload 안에 type 이 없다**(다른 줄과 모양이 다르다).
+ */
+function fromCodexTurnContext(p) {
+  return compact({
+    agent: 'codex',
+    model: str(p.model),
+    effort: str(p.effort) || str(p.reasoning_effort),
+    planMode: (p.collaboration_mode || {}).mode === 'plan' ? true
+      : (p.collaboration_mode || {}).mode === 'default' ? false : null,
+    approvalPolicy: str(p.approval_policy),
+    source: 'file',
+  });
+}
+
 function fromCodexThreadSettings(p) {
   const ts = (p && p.thread_settings) || {};
   return compact({
@@ -160,11 +183,13 @@ function fromCodexLine(o) {
   if (!p || typeof p !== 'object') return null;
   if (p.type === 'token_count') return fromCodexTokenCount(p);
   if (p.type === 'thread_settings_applied') return fromCodexThreadSettings(p);
+  // turn_context 만 payload 에 type 이 없다 — 바깥 type 으로 판별한다(실측 모양).
+  if (o.type === 'turn_context' && !p.type) return fromCodexTurnContext(p);
   return null;
 }
 
 // codex rollout 은 초대형이다(사용자 실파일 2.4GB) → **문자열 선검사**로 JSON.parse 를 아낀다.
-const CODEX_HINT = /"(token_count|thread_settings_applied)"/;
+const CODEX_HINT = /"(token_count|thread_settings_applied|turn_context)"/;
 
 /**
  * codex 원시 라인들에서 상태를 흡수한다. transcript.js 의 tail/스냅샷이 부른다.
@@ -189,8 +214,16 @@ function noteClaudeHook(json) {
   const file = str(json && json.transcript_path);
   const norm = fromClaude(json);
   if (!file || !norm) return null;
+  const sid = str(json && json.session_id);
+  if (sid) bySession.set(sid, file);
   set(file, norm);
   return file;
+}
+
+/** sessionId → 상태 | null. 대화가 아직 없는 터미널(첫 턴 전)의 유일한 조회 경로다. */
+function getBySession(sessionId) {
+  const f = sessionId ? bySession.get(String(sessionId)) : null;
+  return f ? get(f) : null;
 }
 
 /** 상태 갱신 + 변화 시 emit. 같은 값이면 조용히 넘어간다(프레임 절약). */
@@ -229,11 +262,11 @@ function view(s) {
 /** 파일 경로 → 지금 아는 상태 | null. chat.open/chat.since 가 응답에 싣는다. */
 function get(file) { return file ? view(status.get(file) || null) : null; }
 
-function clear() { status.clear(); }
+function clear() { status.clear(); bySession.clear(); }
 
 module.exports = {
-  setEmitter, noteCodexLines, noteClaudeHook, get, set, clear,
+  setEmitter, noteCodexLines, noteClaudeHook, get, getBySession, set, clear,
   // 순수 함수(테스트 정본)
-  fromClaude, fromCodexLine, fromCodexTokenCount, fromCodexThreadSettings, merge, windowLabel,
-  _status: status,
+  fromClaude, fromCodexLine, fromCodexTokenCount, fromCodexThreadSettings, fromCodexTurnContext, merge, windowLabel,
+  _status: status, _bySession: bySession,
 };

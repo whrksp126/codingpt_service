@@ -358,6 +358,8 @@ export class ChatView {
           this._noSessionAt = Date.now();
           this._resetBuffer();   // 이전 대화 잔상 제거(다른 터미널에서 넘어온 경우)
           this._resetStatus();      // statusline·상태 잔상도 함께(새 대상)
+          // 대화가 없어도 공식 상태는 있을 수 있다(claude 훅은 첫 턴 전에도 온다).
+          this._setStatus(r.agentStatus || null);
           this._setMode(r.statusMode || null); // 모드 알약도 새 대상 기준(대화가 없어도 TUI 는 돌 수 있다)
           this._setDialog(r.statusDialog || null);
           this._setBanner("");   // ★ 오류·경고 프레이밍 금지(사용자 확정)
@@ -499,6 +501,7 @@ export class ChatView {
         : await api.chatScreen({ cwd, tid, agent, hostDeviceId: this.ctx.hostDeviceId?.() });
       if (this._disposed || !r) return;
       this._setStatusLines(r.lines || null);   // 못 읽었으면 유지(다이얼로그 중엔 null 이 온다)
+      if (r.agentStatus) this._setStatus(r.agentStatus);
       if (r.mode && !this._modeBusy) this._setMode(r.mode);
       if (!this._dlgBusy) this._setDialog(r.dialog || null);
     } catch (_) { /* 조용히 — 다음 틱에 다시 본다 */ }

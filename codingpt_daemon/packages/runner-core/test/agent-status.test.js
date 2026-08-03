@@ -185,3 +185,55 @@ test('★ transcript 가 agent-status 갱신을 pokeChat 으로 잇는다', () =
   assert.match(src, /require\('\.\/status-line'\)\.pokeChat\(chatId\)/,
     '배선이 빠지면 "훅은 오는데 알약은 3초 늦는" 조용한 퇴행이 된다');
 });
+
+// ── turn_context (2026-08-03 실측 정정) ────────────────────────────────────────
+// ★ `thread_settings_applied` 는 **설정이 바뀔 때만** 적힌다 — 새 codex 세션의 rollout 14줄에는
+//  하나도 없었다(모델·계획모드가 영영 비어 보이던 원인). `turn_context` 는 **매 턴** 기록되고
+//  model·effort·approval_policy·collaboration_mode 를 전부 담는다 → 이쪽이 주 원천이다.
+//  ⚠ 이 줄만 `{type:'turn_context', payload:{...}}` 로 payload 안에 type 이 없다.
+const TURN_CONTEXT = {
+  type: 'turn_context',
+  payload: {
+    turn_id: '019fc808', cwd: '/Users/x/other/project/tokin',
+    approval_policy: 'on-request', model: 'gpt-5.6-sol', effort: 'low',
+    collaboration_mode: { mode: 'default', settings: { model: 'gpt-5.6-sol' } },
+  },
+};
+
+test('★ turn_context 에서 모델·추론강도·승인정책·계획모드를 얻는다', () => {
+  const s = A.fromCodexLine(TURN_CONTEXT);
+  assert.strictEqual(s.model, 'gpt-5.6-sol');
+  assert.strictEqual(s.effort, 'low');
+  assert.strictEqual(s.approvalPolicy, 'on-request');
+  assert.strictEqual(s.planMode, false);
+});
+
+test('새 세션(설정 변경 이벤트가 없는)에서도 모델이 채워진다', () => {
+  A.clear();
+  const F = '/x/fresh.jsonl';
+  A.noteCodexLines(F, [JSON.stringify(TURN_CONTEXT), JSON.stringify(TOKEN_COUNT)]);
+  const s = A.get(F);
+  assert.strictEqual(s.model, 'gpt-5.6-sol', 'thread_settings_applied 없이도');
+  assert.strictEqual(s.contextPct, 3);
+});
+
+// ── 첫 턴 전 조회(sessionId 색인) ─────────────────────────────────────────────
+// claude 훅은 **대화 파일이 생기기 전에도** 온다(transcript_path 는 아직 없는 파일을 가리킨다).
+//  그 구간엔 file→chatId 매핑이 없어 조회가 막혔다 → 훅이 함께 주는 session_id 로도 색인한다.
+test('★ 첫 턴 전에도 sessionId 로 상태를 찾을 수 있다', () => {
+  A.clear();
+  A.noteClaudeHook({ ...CLAUDE, session_id: 'sess-1', transcript_path: '/x/not-yet.jsonl' });
+  const s = A.getBySession('sess-1');
+  assert.ok(s && s.model === 'Opus 5 (1M context)');
+  assert.strictEqual(A.getBySession('모르는세션'), null);
+  assert.strictEqual(A.getBySession(null), null);
+});
+
+test('배선 핀 — 대화 없는 응답 경로도 상태를 싣는다', () => {
+  const ts = fs.readFileSync(path.join(__dirname, '..', 'transcript.js'), 'utf8');
+  assert.match(ts, /function agentStatusForTerm/);
+  assert.match(ts, /agentStatusForTerm\(fsLib\.relOf\(absCwd\), tidNum, adapter\.name\)/,
+    'noSession 응답에 상태가 빠지면 새 터미널이 첫 메시지 전까지 옛 모양으로 보인다');
+  const cs = fs.readFileSync(path.join(__dirname, '..', 'cpt-server.js'), 'utf8');
+  assert.match(cs, /agentStatusForTerm\(cwdRel, win/, 'chat.screen(폴링 경로)도 같이');
+});

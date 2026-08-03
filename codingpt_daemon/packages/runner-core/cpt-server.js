@@ -1639,8 +1639,17 @@ async function chatDialog({ cwd, tid, pick, cancel, expect } = {}) {
 async function chatScreen({ cwd, tid, agent } = {}) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
-  const r = await require('./status-line').screenFor({ cwdRel: typeof cwd === 'string' ? cwd : '', tid: win, agent });
-  return { lines: (r && r.lines) || null, mode: (r && r.mode) || null, dialog: (r && r.dialog) || null, tid: win };
+  const cwdRel = typeof cwd === 'string' ? cwd : '';
+  const r = await require('./status-line').screenFor({ cwdRel, tid: win, agent });
+  // 대화 바인딩이 없는 터미널도 **공식 상태**는 있을 수 있다(claude 훅은 첫 턴 전에도 온다).
+  const st = (() => {
+    try { return require('./transcript').agentStatusForTerm(cwdRel, win, agent || (r && r.agent) || 'claude'); }
+    catch (_) { return null; }
+  })();
+  return {
+    lines: (r && r.lines) || null, mode: (r && r.mode) || null, dialog: (r && r.dialog) || null,
+    ...(st ? { agentStatus: st } : {}), tid: win,
+  };
 }
 
 /**
