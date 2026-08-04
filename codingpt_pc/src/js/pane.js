@@ -239,11 +239,13 @@ function fillPreviewEmpty(host) {
     return b;
   };
   row.append(
-    mkb("dev 열기", async () => {
+    // 종전엔 "첫 번째 dev 포트"를 알아서 열었다(못 찾으면 "dev 포트 없음" 토스트가 전부).
+    //  포트가 여러 개인 게 보통이라, 무엇이 열릴지 모른 채 누르는 버튼이었다 → 목록에서 고르게 한다.
+    mkb("dev 열기", async (ev) => {
       try {
-        const [uic, wv] = await Promise.all([import("./ui-channel.js"), import("./workspace-view.js")]);
-        const r = await uic.openDevPortPC();
-        if (!r.ok) wv.wvToast(r.error || "dev 포트 없음");
+        const m = await import("./ports.js");
+        const uic = await import("./ui-channel.js");
+        m.openPortsMenu(ev.currentTarget, { onPick: (port) => uic.openPortPC(port) });
       } catch (_) { /* noop */ }
     }),
     mkb("내려받기 (이어하기)", async () => {
@@ -395,10 +397,17 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
         row.innerHTML =
           (it.f ? `<img class="pvs-fav" src="${escapeHtml(it.f)}" onerror="this.style.visibility='hidden'">` : `<span class="pvs-ic">${icons.globe({ size: 13 })}</span>`) +
           `<span class="pvs-title">${escapeHtml(it.t || displayPreviewUrl(it.u))}</span><span class="pvs-url">${escapeHtml(displayPreviewUrl(it.u))}</span>`;
+      } else if (it.kind === "p") {
+        // 열린 포트 — 기록/검색보다 위에 온다. 지금 실제로 떠 있는 것이라 가장 확실한 후보다.
+        row.innerHTML =
+          `<span class="pvs-ic">${icons.globe({ size: 13 })}</span>`
+          + `<span class="pvs-title">localhost:${it.port}</span>`
+          + `<span class="pvs-url">${escapeHtml(it.command || "")}${it.other ? " · 다른 곳" : ""}</span>`;
       } else {
         row.innerHTML = `<span class="pvs-ic">${icons.search({ size: 13 })}</span><span class="pvs-title">${escapeHtml(it.q)}</span><span class="pvs-url">Google 검색</span>`;
       }
-      row.addEventListener("mousedown", (e) => { e.preventDefault(); navTo(it.kind === "h" ? it.u : smartUrl(it.q)); });
+      const pick = () => navTo(it.kind === "h" ? it.u : it.kind === "p" ? `http://localhost:${it.port}` : smartUrl(it.q));
+      row.addEventListener("mousedown", (e) => { e.preventDefault(); pick(); });
       row.addEventListener("mousemove", () => { if (sugSel !== i) { sugSel = i; markSel(); } });
       sugEl.append(row);
     });
@@ -407,12 +416,17 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     const seq = ++sugSeq;
     const q = input.value.trim();
     const typed = !!q && q !== st.url && q !== (st.rawUrl || "");
-    const [hist, sugg] = await Promise.all([
+    // 포트는 **지금 실제로 떠 있는 것**이라 기록·검색추천보다 확실한 후보다 → 맨 위.
+    //  실패해도 나머지는 그대로 뜬다(ports.js 가 빈 배열로 떨어진다).
+    const portsMod = await import("./ports.js").catch(() => null);
+    const [ports, hist, sugg] = await Promise.all([
+      portsMod ? portsMod.portSuggestItems(getCtx?.(), typed ? q : "") : Promise.resolve([]),
       queryHistory(getCtx?.(), typed ? q : "", 5),
       typed ? googleSuggest(q, 5) : Promise.resolve([]),
     ]);
     if (seq !== sugSeq || document.activeElement !== input) return;
     sugItems = [
+      ...ports,
       ...hist.map((e) => ({ kind: "h", u: e.u, t: e.t, f: e.f })),
       ...sugg.map((t) => ({ kind: "s", q: t })),
     ];
@@ -435,7 +449,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     if (e.key !== "Enter") return;
     if (sugEl && sugSel >= 0 && sugItems[sugSel]) {
       const it = sugItems[sugSel];
-      navTo(it.kind === "h" ? it.u : smartUrl(it.q));
+      navTo(it.kind === "h" ? it.u : it.kind === "p" ? `http://localhost:${it.port}` : smartUrl(it.q));
       return;
     }
     const u = smartUrl(input.value);

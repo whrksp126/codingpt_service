@@ -206,6 +206,29 @@ pub fn fs_write(rel: String, content: String) -> Result<(), String> {
     std::fs::write(&abs, content).map_err(|e| format!("저장 실패: {e}"))
 }
 
+// IDE 미리보기용 바이트 읽기(2026-08-04) — 이미지·PDF·미디어를 그리려면 원본 바이트가 필요하다.
+//  ⚠ 위의 file_preview_b64 와 달리 **홈 jail(safe_abs)을 건다**: 이건 사용자가 방금 드래그한
+//   파일이 아니라 워크스페이스 상대 경로를 받는 경로라, 임의 절대경로를 열 수 있으면 안 된다.
+//  8MB 캡은 데몬(fs.js MAX_IMAGE_BYTES)과 같은 값이다 — 같은 파일이 로컬/원격에서 다르게
+//  동작하면 안 된다.
+#[tauri::command]
+pub fn fs_read_b64(rel: String) -> Result<serde_json::Value, String> {
+    use base64::Engine;
+    let abs = safe_abs(&rel)?;
+    let meta = std::fs::metadata(&abs).map_err(|e| format!("파일 확인 실패: {e}"))?;
+    if !meta.is_file() {
+        return Err("파일이 아닙니다".into());
+    }
+    if meta.len() > 8 * 1024 * 1024 {
+        return Err("미리보기 생략(8MB 초과)".into());
+    }
+    let bytes = std::fs::read(&abs).map_err(|e| format!("읽기 실패: {e}"))?;
+    Ok(serde_json::json!({
+        "base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+        "size": meta.len(),
+    }))
+}
+
 // 드롭 파일 미리보기(채팅 첨부 썸네일 — 2026-07-30) — 사용자가 방금 드래그한 파일을 그대로 읽어
 //  base64 로 준다. 홈 jail 을 걸지 않는다: 드롭 자체가 사용자의 명시적 선택이고 표시 외 어디로도
 //  나가지 않는다. 미리보기 용도라 8MB 캡(초과 시 썸네일만 생략 — 전송은 경로라 무관).

@@ -832,7 +832,6 @@ pub fn run() {
             tmux::tmux_list_windows,
             tmux::tmux_new_window,
             tmux::tmux_kill_window,
-            tmux::tmux_listen_ports,
             // 브리지(워크스페이스/영속화/알림)
             bridge::fetch_workspaces,
             bridge::fetch_me,
@@ -894,6 +893,7 @@ pub fn run() {
             cptsock::e2ee_local,
             cptsock::agents_local,
             cptsock::qc_local,
+            cptsock::ports_local,
             cptsock::mode_poke,
             cptsock::chat_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)
@@ -924,6 +924,7 @@ pub fn run() {
             fsapi::fs_abs,
             fsapi::fs_write,
             fsapi::fs_write_b64,
+            fsapi::fs_read_b64,
             fsapi::file_preview_b64,
             fsapi::fs_mkdir,
             fsapi::fs_create_file,

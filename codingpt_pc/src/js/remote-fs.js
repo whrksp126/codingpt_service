@@ -73,6 +73,15 @@ export function makeRemoteFs(hostDeviceId) {
       return r?.content ?? "";
     },
     // 변형 계열도 같은 규율(봉투 우선 → 미지원이면 평문). 반환값은 쓰지 않으므로 then(()=>{}) 유지.
+    // IDE 미리보기용 바이트(base64) — fs.read 의 base64 모드. 상한 초과·바이너리 오류는
+    //  호출부가 '미리보기 지원 안 함' 안내로 떨어뜨린다(조용히 빈 화면을 만들지 않는다).
+    async fsReadBytes(rel) {
+      const e = (await direct("fs.read", { path: rel || "", base64: true }))
+        || await sealed("fs.read", { path: rel || "", base64: true });
+      const r = e || await api.backApi("GET", `/api/daemon/fs/read?${q(rel)}&base64=1`);
+      if (!r?.base64) throw "파일을 읽을 수 없습니다.";
+      return { base64: r.base64, size: r.size || 0 };
+    },
     async fsWrite(rel, content) { if (!(await direct("fs.write", { path: rel, content })) && !(await sealed("fs.write", { path: rel, content }))) await post("write", { path: rel, content }); },
     async fsMkdir(rel) { if (!(await sealed("fs.mkdir", { path: rel }))) await post("mkdir", { path: rel }); },
     async fsCreateFile(rel) { if (!(await sealed("fs.createFile", { path: rel }))) await post("create", { path: rel }); },

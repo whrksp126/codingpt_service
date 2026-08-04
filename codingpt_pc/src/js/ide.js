@@ -7,6 +7,13 @@ import { fileIcon, folderIcon } from "./fileicons.js";
 import * as T from "./tiling.js";
 import { cmThemeName } from "./theme.js";
 import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
+import * as PV from "./preview-kind.js";
+import { tx as pvTx } from "./text/index.js";
+import { FILE_PREVIEW_TEXT } from "./text/file-preview.js";
+const FPT = pvTx(FILE_PREVIEW_TEXT);
+// 마크다운은 **채팅과 같은 렌더러**를 쓴다 — 같은 문서가 두 곳에서 다르게 보이면 안 되고,
+//  이미 안전 이스케이프가 검증된 코드다(새 렌더러를 들이면 XSS 표면이 하나 더 생긴다).
+import { renderMarkdown, escapeHtml as pvEsc } from "./chat-md.js";
 
 const CM = window.CodeMirror;
 
@@ -139,7 +146,12 @@ export class IdeView {
     g.empty = document.createElement("div");
     g.empty.className = "ide-empty";
     g.empty.textContent = "왼쪽에서 파일을 선택하세요";
-    g.wrap.append(g.tabsBar, g.editorHost, g.empty);
+    // 미리보기 자리 — 에디터와 **형제**로 두고 한 번에 하나만 보인다(CodeMirror 를 없애지 않는다:
+    //  텍스트로 돌아올 때 다시 만들면 스크롤·커서·linkedDoc 공유가 전부 리셋된다).
+    g.previewHost = document.createElement("div");
+    g.previewHost.className = "ide-preview";
+    g.previewHost.style.display = "none";
+    g.wrap.append(g.tabsBar, g.editorHost, g.previewHost, g.empty);
     g.cm = CM(g.editorHost, {
       value: "", mode: "javascript", theme: cmThemeName(),
       lineNumbers: true, autoCloseBrackets: true, matchBrackets: true, styleActiveLine: true,
@@ -603,17 +615,131 @@ export class IdeView {
         const e = g.open.find((o) => o.path === path);
         if (e) { doc = e.doc.linkedDoc({ sharedHist: false, mode: modeFor(baseName(path)) }); break; }
       }
+      // 확장자로 표시 방식을 정한다. 기본은 text(코드 파일이 압도적) — 확실한 것만 미리보기로.
+      const kind = PV.previewKind(path);
+      let preview = null;
+      if (!doc && PV.opensAsPreview(kind)) {
+        if (PV.needsBytes(kind)) {
+          // 이미지·PDF·미디어는 원본 바이트가 필요하다. 데몬이 8MB 상한을 건다 — 넘으면 안내로 떨어진다.
+          try {
+            const r = await this.fs.fsReadBytes(path);
+            preview = { kind, base64: r.base64, size: r.size };
+          } catch (e) {
+            preview = { kind: "unsupported", size: 0, error: String(e && e.message || e) };
+          }
+          doc = CM.Doc("", "text/plain"); // 자리만 — 미리보기 탭은 에디터를 안 쓴다
+        } else {
+          const content = await this.fs.fsRead(path);
+          preview = { kind, text: content };
+          doc = CM.Doc(content, modeFor(baseName(path))); // 원문 보기로 바로 전환되게 같이 들고 있는다
+        }
+      }
       if (!doc) {
         const content = await this.fs.fsRead(path);
         doc = CM.Doc(content, modeFor(baseName(path)));
       }
-      group.open.push({ path, doc, dirty: false });
+      group.open.push({ path, doc, dirty: false, ...(preview ? { preview } : {}) });
       this._activate(group, group.open.length - 1, focusEditor);
       if (line) this._jumpTo(group, line);
     } catch (e) {
       this._toast(String(e));
     }
   }
+  /**
+   * 미리보기 렌더 — 종류별로 previewHost 를 채운다.
+   *  ⚠ 원문 보기 토글(canFallBackToText)은 **텍스트로 읽는 종류에만** 준다. 이미지·PDF 를 텍스트로
+   *   열면 깨진 글자만 쏟아진다(사용자 확정: 그러지 말 것).
+   */
+  _renderPreview(group, f) {
+    const host = group.previewHost;
+    host.innerHTML = "";
+    const K = f.preview;
+    const bar = document.createElement("div");
+    bar.className = "ide-pv-bar";
+    const name = document.createElement("span");
+    name.className = "ide-pv-name";
+    name.textContent = baseName(f.path);
+    bar.append(name);
+    if (PV.canFallBackToText(K.kind)) {
+      const t = document.createElement("button");
+      t.className = "ide-pv-btn";
+      t.textContent = FPT.asText;
+      t.addEventListener("click", () => { f.asText = true; this._activate(group, group.open.indexOf(f)); });
+      bar.append(t);
+    }
+    const body = document.createElement("div");
+    body.className = "ide-pv-body";
+    host.append(bar, body);
+
+    if (K.kind === "markdown") {
+      body.className += " ide-pv-md";
+      body.innerHTML = renderMarkdown(K.text || "");
+    } else if (K.kind === "svg") {
+      const img = document.createElement("img");
+      img.className = "ide-pv-img";
+      img.src = "data:image/svg+xml;base64," + b64Utf8(K.text || "");
+      body.append(img);
+    } else if (K.kind === "image") {
+      const img = document.createElement("img");
+      img.className = "ide-pv-img";
+      img.src = PV.dataUri(f.path, K.base64 || "");
+      body.append(img);
+    } else if (K.kind === "pdf") {
+      const fr = document.createElement("iframe");
+      fr.className = "ide-pv-frame";
+      fr.src = PV.dataUri(f.path, K.base64 || "");
+      body.append(fr);
+    } else if (K.kind === "audio" || K.kind === "video") {
+      const el = document.createElement(K.kind === "audio" ? "audio" : "video");
+      el.className = K.kind === "audio" ? "ide-pv-audio" : "ide-pv-video";
+      el.controls = true;
+      el.src = PV.dataUri(f.path, K.base64 || "");
+      body.append(el);
+    } else if (K.kind === "table") {
+      const { rows, truncated } = PV.parseTable(K.text || "", PV.extOf(f.path));
+      const tbl = document.createElement("table");
+      tbl.className = "ide-pv-table";
+      rows.forEach((r, ri) => {
+        const tr = document.createElement("tr");
+        r.forEach((c) => {
+          const cell = document.createElement(ri === 0 ? "th" : "td");
+          cell.textContent = c;
+          tr.append(cell);
+        });
+        tbl.append(tr);
+      });
+      body.append(tbl);
+      if (truncated) {
+        const n = document.createElement("div");
+        n.className = "ide-pv-note";
+        n.textContent = FPT.tableTruncated;
+        body.append(n);
+      }
+    } else if (K.kind === "json") {
+      let obj = null, bad = false;
+      try { obj = JSON.parse(K.text || ""); } catch (_) { bad = true; }
+      if (bad) {
+        // 깨진 JSON 을 트리인 척 그리지 않는다 — 사실대로 말하고 원문을 보게 한다.
+        const n = document.createElement("div");
+        n.className = "ide-pv-note";
+        n.textContent = FPT.badJson;
+        body.append(n);
+      } else {
+        body.append(jsonTree(obj));
+      }
+    } else {
+      // unsupported — 무엇인지·얼마나 큰지 말해 주고, 그래도 열고 싶으면 열 수 있게 둔다.
+      const n = document.createElement("div");
+      n.className = "ide-pv-note";
+      n.textContent = FPT.unsupported + (K.size ? ` · ${fmtBytes(K.size)}` : "");
+      const b = document.createElement("button");
+      b.className = "ide-pv-btn";
+      b.textContent = FPT.openAsText;
+      b.addEventListener("click", () => { f.asText = true; this._activate(group, group.open.indexOf(f)); });
+      body.append(n, b);
+    }
+  }
+
   // ── ui.ideDiff — 읽기 전용 가상 diff 문서(CodeMirror 'diff' 모드) ──
   //  실파일이 아니므로 저장(⌘S)/자동저장/디스크 리컨실러 어디에도 태우지 않는다(virtual 플래그로 격리).
   //  같은 path 의 diff 문서가 이미 열려 있으면 내용만 갱신 + 활성화(중복 탭 금지).
@@ -652,6 +778,16 @@ export class IdeView {
     this._setActiveGroup(group.id);
     const f = group.open[i];
     group.empty.style.display = "none";
+    // 미리보기 탭이면 에디터 대신 미리보기를 보여준다(둘 다 살아 있고 표시만 바꾼다).
+    if (f.preview && !f.asText) {
+      group.editorHost.style.display = "none";
+      group.previewHost.style.display = "";
+      this._renderPreview(group, f);
+      this._renderTabs();
+      this._renderBody();
+      return;
+    }
+    group.previewHost.style.display = "none";
     group.editorHost.style.display = "";
     group.cm.swapDoc(f.doc);
     // 가상 diff 문서 = 'diff' 모드 + 읽기 전용. 일반 파일로 돌아오면 반드시 해제.
@@ -748,7 +884,12 @@ export class IdeView {
     group.open.splice(i, 1);
     syncGlobalDirty();
     if (group.active >= group.open.length) group.active = group.open.length - 1;
-    if (group.active < 0) { group.cm.swapDoc(CM.Doc("", "text/plain")); group.editorHost.style.display = "none"; group.empty.style.display = ""; }
+    if (group.active < 0) {
+      group.cm.swapDoc(CM.Doc("", "text/plain"));
+      group.editorHost.style.display = "none";
+      group.previewHost.style.display = "none";
+      group.empty.style.display = "";
+    }
     else this._activate(group, group.active);
     // 빈 그룹은 제거(마지막 하나는 유지).
     if (!group.open.length && this.groups.size > 1) {
@@ -1317,3 +1458,59 @@ function closeMenuOnce(e) {
   if (activeMenu && !activeMenu.contains(e.target)) { closeMenu(); document.removeEventListener("mousedown", closeMenuOnce, true); }
 }
 function cssEsc(s) { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/"/g, '\\"'); }
+
+
+// ── 미리보기 보조 ─────────────────────────────────────────────────────────────
+/** UTF-8 문자열 → base64(한글 SVG 도 안전하게). btoa 는 라틴1만 받는다. */
+function b64Utf8(s) {
+  const bytes = new TextEncoder().encode(String(s || ""));
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + "MB";
+  if (v >= 1024) return Math.round(v / 1024) + "KB";
+  return v + "B";
+}
+
+/** JSON 트리 — 객체/배열은 접었다 펼 수 있게. 잎은 값 그대로. */
+function jsonTree(value, key = null, depth = 0) {
+  const wrap = document.createElement("div");
+  wrap.className = "ide-json-node";
+  const isObj = value && typeof value === "object";
+  if (!isObj) {
+    wrap.innerHTML = (key != null ? `<span class="ide-json-key">${pvEsc(String(key))}</span><span class="ide-json-sep">:</span>` : "")
+      + `<span class="ide-json-val ide-json-${value === null ? "null" : typeof value}">${pvEsc(JSON.stringify(value))}</span>`;
+    return wrap;
+  }
+  const arr = Array.isArray(value);
+  const entries = arr ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const head = document.createElement("div");
+  head.className = "ide-json-head";
+  const caret = document.createElement("span");
+  caret.className = "ide-json-caret";
+  head.append(caret);
+  const label = document.createElement("span");
+  label.innerHTML = (key != null ? `<span class="ide-json-key">${pvEsc(String(key))}</span><span class="ide-json-sep">:</span>` : "")
+    + `<span class="ide-json-brace">${arr ? "[" : "{"}</span>`
+    + `<span class="ide-json-count">${entries.length}</span>`
+    + `<span class="ide-json-brace">${arr ? "]" : "}"}</span>`;
+  head.append(label);
+  const kids = document.createElement("div");
+  kids.className = "ide-json-kids";
+  // 깊은 문서가 열자마자 수천 줄이 되지 않게 3단계까지만 펼친다.
+  const open = depth < 3;
+  kids.style.display = open ? "" : "none";
+  caret.textContent = open ? "▾" : "▸";
+  head.addEventListener("click", () => {
+    const now = kids.style.display === "none";
+    kids.style.display = now ? "" : "none";
+    caret.textContent = now ? "▾" : "▸";
+  });
+  for (const [k, v] of entries) kids.append(jsonTree(v, k, depth + 1));
+  wrap.append(head, kids);
+  return wrap;
+}

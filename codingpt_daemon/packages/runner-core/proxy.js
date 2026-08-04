@@ -32,19 +32,27 @@ function lsof(args, timeout = 4000) {
   });
 }
 
-// LISTEN 소켓 → [{ pid, port }] (127.0.0.1/*/::1 등 로컬 바인딩만, dev 포트대만).
+// LISTEN 소켓 → [{ pid, port, command }] (127.0.0.1/*/::1 등 로컬 바인딩만, dev 포트대만).
+//  ⚠ `c`(명령 이름)를 같은 호출에서 받는다 — lsof 를 한 번 더 돌리지 않는다. 이름이 있어야
+//   사용자가 목록에서 "3000 이 뭐였더라"를 판단할 수 있다(포트 번호만으로는 못 고른다).
 async function listListenSockets() {
-  // -Fpn: p<pid> 블록 + n<name> 라인(프로세스별로 그룹핑됨).
-  const out = await lsof(['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn']);
+  // -Fpcn: p<pid>·c<command> 블록 + n<name> 라인(프로세스별로 그룹핑됨).
+  return parseListenSockets(await lsof(['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']));
+}
+
+/** lsof -F 출력 파서(순수) — 테스트가 실제 출력 픽스처로 이 함수를 직접 돌린다. */
+function parseListenSockets(out) {
   const rows = [];
   let pid = null;
+  let command = '';
   for (const line of out.split('\n')) {
-    if (line[0] === 'p') { pid = parseInt(line.slice(1), 10) || null; continue; }
+    if (line[0] === 'p') { pid = parseInt(line.slice(1), 10) || null; command = ''; continue; }
+    if (line[0] === 'c') { command = line.slice(1); continue; }
     if (line[0] !== 'n' || !pid) continue;
     const m = line.slice(1).match(/(?:^\*|127\.0\.0\.1|\[::1\]|\[::\]|0\.0\.0\.0):(\d+)$/);
     if (!m) continue;
     const port = Number(m[1]);
-    if (port > 1024 && port <= MAX_DEV_PORT && !IGNORE_PORTS.has(port)) rows.push({ pid, port });
+    if (port > 1024 && port <= MAX_DEV_PORT && !IGNORE_PORTS.has(port)) rows.push({ pid, port, command });
   }
   return rows;
 }
@@ -62,28 +70,53 @@ async function cwdsForPids(pids) {
   return map;
 }
 
-// 127.0.0.1 에 LISTEN 중인 TCP 포트 감지(macOS/Linux: lsof). 실패하면 빈 목록.
-//  opts.cwd(홈-기준 상대) 를 주면 그 워크스페이스 폴더 아래에서 실행 중인 프로세스의 포트만 반환
-//  (그 폴더 안 터미널에서 띄운 dev 서버만 감지 — 시스템/타 폴더 포트는 제외).
+// 같은 포트를 여러 프로세스가 잡고 있을 수 있다(IPv4/IPv6 이중 바인딩이 흔하다) → 포트로 접는다.
+//  이름은 처음 본 것을 쓴다 — 같은 포트의 두 소켓은 사실상 같은 프로세스다.
+function foldByPort(rows) {
+  const byPort = new Map();
+  for (const r of rows) {
+    if (!byPort.has(r.port)) byPort.set(r.port, { port: r.port, pid: r.pid, command: r.command || '' });
+  }
+  return Array.from(byPort.values()).sort((a, b) => a.port - b.port);
+}
+
+/**
+ * LISTEN 중인 로컬 포트.
+ *
+ * 반환(전부 추가 전용 — 구 클라이언트는 `ports` 만 보면 된다):
+ *  · ports  : 포트 번호 배열. **기존 의미 그대로** — cwd 를 주면 그 워크스페이스 것만, 안 주면 전부.
+ *  · items  : 위 `ports` 와 같은 집합에 { port, pid, command } 를 붙인 것.
+ *  · others : cwd 를 줬을 때만. **그 워크스페이스 밖**에서 열린 포트들.
+ *
+ * ★ others 를 함께 주는 이유: cwd 필터는 "프로세스의 현재 작업 디렉토리"로 판정한다. 그런데
+ *  `npm --prefix` 로 띄웠거나, 워크스페이스를 만들기 전부터 돌던 서버는 cwd 가 달라 **목록에서
+ *  통째로 사라진다**. 그러면 사용자는 "분명 3000 이 떠 있는데 왜 안 보이지"가 된다. 화면이
+ *  "이 워크스페이스 / 다른 곳"으로 나눠 보여줄 수 있게 둘 다 준다(감추지 않되 섞지도 않는다).
+ */
 async function listPorts(opts = {}) {
   const rows = await listListenSockets();
-  if (rows.length === 0) return { ports: [] };
+  if (rows.length === 0) return { ports: [], items: [] };
   const cwdRel = opts && typeof opts.cwd === 'string' ? opts.cwd.trim() : '';
   if (!cwdRel) {
-    const ports = Array.from(new Set(rows.map((r) => r.port))).sort((a, b) => a - b);
-    return { ports };
+    const items = foldByPort(rows);
+    return { ports: items.map((i) => i.port), items };
   }
   let base;
-  try { base = fsLib.safeResolve(cwdRel); } catch (_) { return { ports: [] }; }
+  try { base = fsLib.safeResolve(cwdRel); } catch (_) { return { ports: [], items: [] }; }
   const prefix = base.replace(/\/+$/, '') + '/';
   const pids = Array.from(new Set(rows.map((r) => r.pid)));
   const cwds = await cwdsForPids(pids);
-  const ports = new Set();
+  const inside = [];
+  const outside = [];
   for (const r of rows) {
     const c = cwds[r.pid];
-    if (c && (c === base || c.startsWith(prefix))) ports.add(r.port);
+    (c && (c === base || c.startsWith(prefix)) ? inside : outside).push(r);
   }
-  return { ports: Array.from(ports).sort((a, b) => a - b) };
+  const items = foldByPort(inside);
+  const insidePorts = new Set(items.map((i) => i.port));
+  // 안쪽에 이미 있는 포트는 바깥 목록에서 뺀다(같은 포트가 양쪽에 보이면 뭐가 뭔지 알 수 없다).
+  const others = foldByPort(outside).filter((i) => !insidePorts.has(i.port));
+  return { ports: items.map((i) => i.port), items, others };
 }
 
 // back 지시(stream_open kind:'tcp')에 대한 dial-back → 로컬 포트로 raw TCP 브리지.
@@ -166,4 +199,4 @@ function openTcpStream({ serverUrl, deviceToken }, { streamToken, params }) {
   ws.on('error', (e) => console.error(`[proxy] 스트림 WS 오류: ${e.message}`));
 }
 
-module.exports = { listPorts, openTcpStream };
+module.exports = { listPorts, openTcpStream, _parseListenSockets: parseListenSockets, _foldByPort: foldByPort };

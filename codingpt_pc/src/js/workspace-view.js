@@ -561,11 +561,25 @@ function renderMainTop(ws) {
       ev.stopPropagation();
       import("./quick-commands.js").then((m) => m.openQuickCommandsMenu(qcBtn));
     });
+    // 웹뷰 버튼도 드롭다운 — [빈 웹뷰] + **지금 열려 있는 포트**. 프리뷰 탭이 없을 때도
+    //  포트 목록에 닿는 유일한 자리다(주소창 드롭다운은 프리뷰가 이미 열려 있어야 보인다).
+    const webBtn = document.createElement("button");
+    webBtn.className = "pane-ctrl";
+    webBtn.title = "웹뷰 추가";
+    webBtn.innerHTML = icons.globe({ size: 16 });
+    webBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      import("./ports.js").then((m) => m.openPortsMenu(webBtn, {
+        ws: activeWs(),
+        onBlank: () => smartAdd("preview"),
+        onPick: (port) => smartAdd("preview", { url: m.portUrl(port) }),
+      }));
+    });
     adds.append(
       qcBtn,
       termBtn,
       mkBtn(icons.code, "IDE 추가", "ide"),
-      mkBtn(icons.globe, "웹뷰 추가", "preview"),
+      webBtn,
     );
     mtDyn.append(spacer, adds);
   }

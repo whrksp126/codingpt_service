@@ -934,6 +934,17 @@ export async function saveSnapshotPC() {
 }
 
 // dev 열기 — 활성 워크스페이스의 리스닝 포트를 감지해 활성 프리뷰를 그 포트로 이동.
+/** 고른 포트를 활성 프리뷰로 연다 — 포트 목록 UI(빈 프리뷰의 "dev 열기")가 쓰는 길. */
+export function openPortPC(port) {
+  const meta = state.workspaces.find((w) => w.id === state.activeWsId);
+  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  const rt = S.ensureRuntime(meta.id);
+  const target = findPreviewTarget(rt);
+  if (!target) return { ok: false, error: "프리뷰 없음" };
+  navigatePreview(target, "http://localhost:" + port);
+  return { ok: true, port };
+}
+
 export async function openDevPortPC() {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
   if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };

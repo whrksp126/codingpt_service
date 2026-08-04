@@ -806,6 +806,16 @@ async function dispatch(req, conn) {
   //   경로가 되면 안 된다(agents.wire 를 닫아둔 것과 같은 이유 — 사용자 의도의 자기해제 금지).
   //   에이전트가 명령을 실행해야 하면 자기 셸에서 직접 치면 된다.
   if (cmd.startsWith('qc.')) return handleQuickCommandsRpc(cmd, req.args || {});
+  // 열린 포트 목록(2026-08-04) — PC 앱이 back 을 왕복하지 않고 바로 묻는 길.
+  //  ★ 이걸 여는 이유: PC 에 **같은 로직의 Rust 사본**(tmux.rs listen_ports_in)이 따로 있었다.
+  //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
+  //   이번에 데몬 쪽에만 프로세스 이름을 붙이면서 갈릴 뻔했다. Rust 사본은 제거하고 여기로 모은다.
+  //  CAPABILITIES 비공개(앱 내부 배관) — 터미널 안 AI 는 자기 셸에서 lsof 를 쓰면 된다.
+  if (cmd === 'net.ports') {
+    const proxyLib = lazyMod('./proxy');
+    if (!proxyLib) throw new Error('이 데몬은 포트 조회를 지원하지 않습니다(PC 앱 업데이트 필요)');
+    return proxyLib.listPorts({ cwd: typeof (req.args || {}).cwd === 'string' ? req.args.cwd : '' });
+  }
   // ── 에이전트 모드(PC 앱 내부용) — 같은 머신인데 back 을 왕복하던 것을 없앤다 ────────────────
   //  실측(2026-08-02): back 왕복 150~285ms vs 이 소켓 1~2ms. 사용자가 "묘하게 느리다"고 한 그 차이다.
   //  · status.poke = "지금 다시 봐"(부작용 없음) · chat.mode = 조회/전환 · chat.commands = 슬래시 목록

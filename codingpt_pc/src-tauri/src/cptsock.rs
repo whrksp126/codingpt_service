@@ -197,6 +197,17 @@ pub fn qc_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Valu
     cpt_request_coded(&cmd, args, true)
 }
 
+// 열린 포트 목록(2026-08-04) — 종전엔 tmux.rs 에 **같은 로직의 Rust 사본**이 있었다.
+//  포트 판정 규칙(무시 포트·dev 포트대·워크스페이스 귀속·프로세스 이름)이 데몬과 두 벌이면
+//  한쪽만 고쳐진다 → 데몬 한 벌로 모으고 그 사본은 제거했다. 울타리는 위와 같은 모양.
+#[tauri::command]
+pub fn ports_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if cmd != "net.ports" {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

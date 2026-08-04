@@ -83,7 +83,28 @@ export const api = {
   listWindows: (localPath) => invoke("tmux_list_windows", { localPath }),
   newWindow: (localPath, paneId) => invoke("tmux_new_window", { localPath, paneId: paneId || null }),
   killWindow: (localPath, index) => invoke("tmux_kill_window", { localPath, index }),
-  listenPorts: (localPath = "") => invoke("tmux_listen_ports", { localPath }),
+  // ── 열린 포트 ────────────────────────────────────────────────────────────
+  //  종전엔 Rust(tmux.rs)에 **같은 판정 로직의 사본**이 있었다. 무시 포트·dev 포트대·워크스페이스
+  //  귀속 규칙이 데몬과 두 벌이면 한쪽만 고쳐진다 → 데몬 한 벌로 모으고 사본은 제거했다.
+  //  `listenPorts` 는 기존 호출부(사이드바 배지·프리뷰 자동열기)를 위해 **번호 배열 그대로** 유지한다.
+  portsLocal: (args) => invoke("ports_local", { cmd: "net.ports", args: args || {} }),
+  listenPorts: async (localPath = "") => {
+    try {
+      const r = await invoke("ports_local", { cmd: "net.ports", args: { cwd: localPath } });
+      const d = (r && r.data) || r || {};
+      return Array.isArray(d.ports) ? d.ports : [];
+    } catch (_) {
+      return []; // 데몬 재시작 중 등 — 배지가 잠깐 비는 것은 무해하다(다음 폴링이 채운다)
+    }
+  },
+  // 다른 PC 의 워크스페이스는 back 릴레이(기존 라우트 그대로 — 응답에 items/others 가 추가됐다).
+  previewPortsRemote: (cwd, hostDeviceId) =>
+    invoke("back_api", {
+      method: "GET",
+      path: "/api/daemon/preview/ports?" + qs({ cwd, hostDeviceId }),
+      body: null,
+      timeoutSecs: 15,
+    }),
 
   // ── 클라우드 터미널(relay) ──
   // 원격 터미널(back 릴레이) — hostDeviceId 지정=다른 PC 의 워크스페이스(활성 러너 무변경).
@@ -94,6 +115,8 @@ export const api = {
   fsTree: (rel, depth) => invoke("fs_tree", { rel, depth: depth ?? 2 }),
   fsSearch: (rel, query, max) => invoke("fs_search", { rel, query, max: max ?? 500 }),
   fsRead: (rel) => invoke("fs_read", { rel }),
+  // IDE 미리보기(이미지·PDF·미디어) — 홈 jail 을 건 base64 읽기. 8MB 상한은 데몬과 같은 값이다.
+  fsReadBytes: (rel) => invoke("fs_read_b64", { rel }),
   // 드롭 파일 미리보기(채팅 첨부 썸네일) — 절대경로 base64. 8MB 초과/비파일이면 reject.
   filePreviewB64: (path) => invoke("file_preview_b64", { path }),
   fsAbs: (rel) => invoke("fs_abs", { rel }), // 홈-상대 → 절대경로(파일트리→터미널 삽입용)
