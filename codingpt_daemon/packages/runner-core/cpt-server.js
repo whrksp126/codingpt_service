@@ -839,6 +839,14 @@ async function dispatch(req, conn) {
   if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 목록/켜기/프레임/입력.
   //  프레임은 수십~수백 KB 라 **부르는 쪽이 당겨 간다**(푸시하면 느린 회선에서 지연이 쌓인다).
+  // 플러그인 마켓플레이스 — 목록/미리보기/설치/삭제.
+  //  ⚠ 설치는 **사람이 화면에서 동의**한 지문이 있어야 통과한다(plugins.js). 터미널의 AI 가
+  //   `cpt` 로 이 길에 닿아도 지문을 만들 수 없다 — 미리보기와 설치가 분리된 이유가 그것이다.
+  if (cmd.startsWith('plugins.')) {
+    const pl = lazyMod('./plugins');
+    if (!pl) throw new Error('이 데몬은 플러그인을 지원하지 않습니다(PC 앱 업데이트 필요)');
+    return pl.handle(cmd, req.args || {});
+  }
   if (cmd.startsWith('emulator.')) {
     const emuLib = lazyMod('./emulator');
     if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -1972,6 +1980,9 @@ const CAPABILITIES = [
   'ui.review',
   // 모바일 화면 — 조회·조작 전부 공개다. 에이전트가 "고친 화면이 어떻게 나오는지" 스스로 확인하고
   //  탭까지 해 보는 것이 이 기능의 값이다(승인·자기주입 같은 "사람만 해야 하는 일"이 아니다).
+  // 플러그인 — **조회만** 공개다. 설치/삭제/켜고끄기는 사람이 화면에서 동의해야 하는 일이라
+  //  터미널의 AI 에게 열지 않는다(approval.respond·agents.wire 를 닫은 것과 같은 판단).
+  'plugins.list', 'plugins.marketplace', 'plugins.preview', 'plugins.contributions',
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',

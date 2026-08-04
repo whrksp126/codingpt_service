@@ -246,6 +246,12 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
                                         그 결과가 JSON 으로 돌아온다(파일 생략 = 변경된 파일 전부).
                                         결과: {status:"submitted"|"cancelled"|"timeout", files:[...]}
 
+  # 플러그인 (조회만 — 설치는 사람이 화면에서)
+  plugins list                          설치된 플러그인과 무엇을 꽂았는지
+  plugins marketplace <git-url>         그 저장소의 플러그인 목록(codingpt-marketplace.json)
+  plugins show <git-url> [--ref <r>]    설치 전 미리보기(무엇을 허용하는지)
+  plugins contributions [--lang <l>]    켜진 플러그인이 실제로 꽂은 것들
+
   # 모바일 화면 (안드로이드 에뮬레이터/실기기 · iOS 시뮬레이터)
   #  좌표는 **0~1 비율**이다(0.5 0.5 = 화면 한가운데). 픽셀이 아니다 — 기기마다 해상도가 달라서.
   emulator list                         붙어 있는 기기 목록(켜짐/꺼짐, 조작 가능 여부 포함)
@@ -510,6 +516,16 @@ async function main() {
         if (r && r.noChanges) return out(r, flags, '변경 없음 — 리뷰할 것이 없습니다');
         return printJson(r);
       }
+      // 플러그인 — **조회만** 된다. 설치는 사람이 화면에서 허용 내용을 보고 눌러야 한다
+      //  (설치 명령을 여기 두면 터미널의 AI 가 남의 코드를 이 PC 에 스스로 깔 수 있게 된다).
+      case 'plugins': {
+        if (c2 === 'list' || c2 == null) return printJson(await request('plugins.list', {}));
+        if (c2 === 'marketplace') return printJson(await request('plugins.marketplace', { url: rest[1] || flags.url, ref: flags.ref }, { timeoutMs: 120000 }));
+        if (c2 === 'show') return printJson(await request('plugins.preview', { url: rest[1] || flags.url, ref: flags.ref, subdir: flags.subdir }, { timeoutMs: 120000 }));
+        if (c2 === 'contributions') return printJson(await request('plugins.contributions', { lang: flags.lang }));
+        break;
+      }
+
       // 모바일 화면 — 에이전트가 "내가 고친 화면이 실제로 어떻게 나오는지" 스스로 본다.
       //  screenshot 은 기본으로 파일에 저장한다(base64 를 stdout 에 쏟으면 컨텍스트가 통째로 날아간다).
       case 'emulator': {

@@ -46,6 +46,7 @@ const NAV = [
   { key: "shortcuts", label: "단축키", group: "작업 환경", icon: "sliders", keywords: "키보드 keyboard shortcut 키 조합 팔레트 command palette 재바인딩 rebind" },
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일 언어 language locale 다국어 영어 english 日本語 中文" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
+  { key: "plugins", label: "플러그인", group: "작업 환경", icon: "tools", keywords: "마켓플레이스 marketplace 확장 extension 스킬 skill 저장한 명령 번역" },
   { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
   { key: "supporter", label: "Supporter", group: "연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
   { key: "mobile", label: "모바일 연결", group: "연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
@@ -235,6 +236,11 @@ function renderSection(force) {
       </div>
       `;
     bindAppearance(contentEl);
+  } else if (section === "plugins") {
+    // 화면 전체를 plugins-view 가 그린다(설치·동의·마켓플레이스가 한 흐름이라 쪼개면 상태가 흩어진다).
+    import("./plugins-view.js").then((m) => m.renderPlugins(contentEl)).catch(() => {
+      contentEl.innerHTML = `<div class="sett-hint">${i18n.t('플러그인 화면을 불러오지 못했어요')}</div>`;
+    });
   } else if (section === "notifications") {
     contentEl.innerHTML = `
       <div class="sm-section-title">${i18n.t('데스크톱 알림')}</div>

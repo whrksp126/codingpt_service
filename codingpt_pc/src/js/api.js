@@ -276,6 +276,16 @@ export const api = {
   emulatorPower: (id, action) =>
     invoke("emulator_local", { cmd: action === "shutdown" ? "emulator.shutdown" : "emulator.boot", args: { id } }),
 
+  // ── 플러그인 마켓플레이스 — **이 PC 의 데몬**이 설치 주체다(유닉스 소켓 직결).
+  //  git clone 이 걸리므로 목록·미리보기·설치는 타임아웃이 길다.
+  pluginsList: () => invoke("plugins_local", { cmd: "plugins.list", args: {} }),
+  pluginsMarketplace: (url, ref) => invoke("plugins_local", { cmd: "plugins.marketplace", args: { url, ref } }),
+  pluginsPreview: (url, ref, subdir) => invoke("plugins_local", { cmd: "plugins.preview", args: { url, ref, subdir } }),
+  pluginsInstall: (url, ref, subdir, consent) =>
+    invoke("plugins_local", { cmd: "plugins.install", args: { url, ref, subdir, consent } }),
+  pluginsUninstall: (key) => invoke("plugins_local", { cmd: "plugins.uninstall", args: { key } }),
+  pluginsSetEnabled: (key, enabled) => invoke("plugins_local", { cmd: "plugins.setEnabled", args: { key, enabled } }),
+
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
   //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).

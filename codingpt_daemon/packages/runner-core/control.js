@@ -401,6 +401,8 @@ function dispatchRpc(ws, method, params, ok, fail) {
   // 모바일 화면(emulator.*) — 폰·태블릿 화면이 프레임을 당겨 가고 탭을 되돌려보내는 유일한 경로.
   //  ⚠ 이 줄이 없으면 폰에서 에뮬레이터 탭이 "알 수 없는 메서드"로 조용히 죽는다(리뷰에서 겪은 그 사고).
   if (method.startsWith('emulator.')) { require('./emulator').handle(method, params || {}).then(ok).catch(fail); return; }
+  // 플러그인(plugins.*) — 폰·다른 PC 화면이 목록을 보고 설치를 누르는 유일한 경로.
+  if (method.startsWith('plugins.')) { require('./plugins').handle(method, params || {}).then(ok).catch(fail); return; }
   // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
   if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.

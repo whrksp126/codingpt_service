@@ -45,4 +45,11 @@ const codexHome = () => get().codexHome || path.join(os.homedir(), '.codex');
 const platform = () => get().platform;
 const isDarwin = () => get().platform === 'darwin';
 
-module.exports = { init, get, root, stateDir, claudeHome, codexHome, platform, isDarwin };
+/**
+ * 이 호스트(PC 앱)의 버전 — 플러그인 `engines.codingpt` 게이트가 쓴다.
+ *  PC 앱이 데몬을 띄울 때 `CPT_APP_VERSION` 을 넣어 준다(lib.rs). 없으면 빈 문자열이고,
+ *  그때는 게이트를 **통과시킨다** — 버전을 모른다고 설치를 막으면 헤드리스 데몬에서 아무것도 못 깐다.
+ */
+const hostVersion = () => String(process.env.CPT_APP_VERSION || '');
+
+module.exports = { init, get, root, stateDir, claudeHome, codexHome, platform, isDarwin, hostVersion };

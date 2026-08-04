@@ -71,6 +71,15 @@ router.post('/emulator/input', accountAuth, daemonController.emulatorInput);
 router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
 
+// 플러그인 마켓플레이스 — 서버는 통과만 시킨다(목록·설치 판단은 전부 그 PC 의 데몬).
+router.post('/plugins/list', accountAuth, daemonController.pluginsList);
+router.post('/plugins/contributions', accountAuth, daemonController.pluginsContributions);
+router.post('/plugins/marketplace', accountAuth, daemonController.pluginsMarketplace);
+router.post('/plugins/preview', accountAuth, daemonController.pluginsPreview);
+router.post('/plugins/install', accountAuth, daemonController.pluginsInstall);
+router.post('/plugins/uninstall', accountAuth, daemonController.pluginsUninstall);
+router.post('/plugins/enabled', accountAuth, daemonController.pluginsSetEnabled);
+
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.
 //  ?hostDeviceId= / body.hostDeviceId 로 대상 호스트 지정(활성 러너 무변경), 미지정=활성 러너.

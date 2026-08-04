@@ -29,6 +29,17 @@ fn cpt_request_coded(
     args: serde_json::Value,
     with_code: bool,
 ) -> Result<serde_json::Value, String> {
+    cpt_request_timed(cmd, args, with_code, 10)
+}
+
+// 오래 걸리는 명령(git clone·시뮬레이터 부팅)은 읽기 타임아웃을 늘려야 한다.
+//  10초 고정이던 시절엔 `plugins.install` 이 **항상** 타임아웃으로 끝났다(데몬은 멀쩡히 설치 중).
+fn cpt_request_timed(
+    cmd: &str,
+    args: serde_json::Value,
+    with_code: bool,
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
     #[cfg(unix)]
     {
         use std::io::{BufRead, BufReader, Write};
@@ -36,7 +47,7 @@ fn cpt_request_coded(
         let path = sock_path()?;
         let mut stream = UnixStream::connect(&path)
             .map_err(|e| format!("cpt.sock 연결 실패(데몬 미기동?): {e}"))?;
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)));
         let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
         let req = serde_json::json!({ "id": 1, "cmd": cmd, "args": args });
         let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
@@ -231,7 +242,18 @@ pub fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json
     if !cmd.starts_with("emulator.") {
         return Err("허용되지 않은 명령입니다.".to_string());
     }
-    cpt_request_coded(&cmd, args, true)
+    // 시뮬레이터 부팅이 60초까지 걸린다(프레임 한 장은 1~2초).
+    cpt_request_timed(&cmd, args, true, 90)
+}
+
+// 플러그인 마켓플레이스 — 설치 주체는 **이 PC 의 데몬**이다(남의 PC 에 깔 일이 아니다).
+//  git clone 이 최대 90초까지 걸리므로 이 경로는 넉넉한 타임아웃을 쓴다.
+#[tauri::command]
+pub fn plugins_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("plugins.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_timed(&cmd, args, true, 180)
 }
 
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이

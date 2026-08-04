@@ -1038,6 +1038,61 @@ async function reviewSubmit(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+// ── 플러그인 마켓플레이스 ────────────────────────────────────────────────────
+// 서버는 **아무것도 모른다** — 목록도 설치도 전부 데몬(그 PC)이 한다. 여기는 통과 지점일 뿐이다.
+//  마켓플레이스가 git 저장소라 서버가 중간에 낄 이유가 없다(우리가 배포·심사를 떠안지 않는다).
+//
+// ⚠ 메서드 이름을 **리터럴로** 적는다(헬퍼에 변수로 넘기지 않는다). 대조 테스트가 이 파일에서
+//   `callRpc(req.user.id, 'xxx.` 를 긁어 "back 이 릴레이하는 계열"을 뽑고, 그게 데몬 control.js 에
+//   라우트가 있는지 본다 — 헬퍼로 감싸면 그 검사가 **조용히 아무것도 안 보게** 된다(실제로 그랬다).
+async function pluginsList(req, res) {
+  try {
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.list', {}, undefined, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsContributions(req, res) {
+  try {
+    const lang = String((req.body || {}).lang || '') || undefined;
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.contributions', { lang }, undefined, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsMarketplace(req, res) {
+  try {
+    const b = req.body || {};
+    // git clone 이 걸린다 — 기본 타임아웃으로는 짧다.
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.marketplace',
+      { url: String(b.url || ''), ref: b.ref }, 120000, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsPreview(req, res) {
+  try {
+    const b = req.body || {};
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.preview',
+      { url: String(b.url || ''), ref: b.ref, subdir: b.subdir }, 120000, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsInstall(req, res) {
+  try {
+    const b = req.body || {};
+    // consent(동의 지문)는 **그대로** 넘긴다 — 서버가 만들어 주면 동의라는 개념이 무너진다.
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.install',
+      { url: String(b.url || ''), ref: b.ref, subdir: b.subdir, consent: String(b.consent || '') }, 150000, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsUninstall(req, res) {
+  try {
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.uninstall',
+      { key: String((req.body || {}).key || '') }, undefined, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function pluginsSetEnabled(req, res) {
+  try {
+    const b = req.body || {};
+    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.setEnabled',
+      { key: String(b.key || ''), enabled: !!b.enabled }, undefined, connOptsOf(req)));
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // ── 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) ────────────────────────
 // 프레임은 base64 라 응답이 수십~수백 KB 다. **서버는 그냥 통과시킨다** — 해석하거나 캐시하지
 //  않는다(캐시하면 "왜 화면이 안 바뀌지"가 되고, 해석하면 데몬과 규칙이 두 벌이 된다).
@@ -1802,6 +1857,13 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   quickCommandsList, quickCommandsListAll, quickCommandsSave, quickCommandsRemove, quickCommandsReorder, quickCommandsRun,
+  pluginsList,
+  pluginsContributions,
+  pluginsMarketplace,
+  pluginsPreview,
+  pluginsInstall,
+  pluginsUninstall,
+  pluginsSetEnabled,
   emulatorList,
   emulatorFrame,
   emulatorInput,
