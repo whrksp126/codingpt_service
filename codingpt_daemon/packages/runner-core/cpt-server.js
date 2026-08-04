@@ -167,6 +167,27 @@ function sendLocalUiCommand(c, cmd, params, timeoutMs) {
 // ui_command 를 back 으로 보내고 ui_result 를 기다린다(P3 왕복).
 //  mode: 'broadcast'(전 기기) | 'target'(지정 기기 1곳, target 없으면 활성 기기) | 'executor'(구 호환=활성 기기).
 //  target: {deviceId}|{clientKey} — mode:'target' 에서 명시 기기. undefined 면 back 이 활성 기기 선정.
+/**
+ * 코드 리뷰 RPC — **화면이 부르는 쪽**(제출/취소/조회).
+ *
+ * ★ 유닉스 소켓(이 PC 화면)과 back 릴레이(폰·다른 PC)가 **같은 함수**를 탄다. 종전엔 소켓
+ *   디스패치에만 달아 둬서 **폰에서 보낸 제출이 데몬에 닿지 못했다**(control.js 에 라우트가 없어
+ *   "알 수 없는 메서드"로 떨어졌다). 새 RPC 계열을 만들 때는 두 입구를 함께 배선한다.
+ */
+async function handleReviewRpc(cmd, args) {
+  const reviewLib = lazyMod('./review');
+  const a = args || {};
+  if (cmd === 'review.pending') return { items: reviewLib.listPending(typeof a.ws === 'string' ? a.ws : undefined) };
+  if (cmd === 'review.get') {
+    const s2 = reviewLib.get(a.id);
+    // 없으면 **없다고 분명히 답한다** — 화면이 유령 리뷰를 붙들지 않게.
+    return s2 ? reviewLib.payload(s2) : { reviewId: String(a.id || ''), status: 'gone' };
+  }
+  if (cmd === 'review.submit') { reviewLib.submit(a.id, a.body || a); return { ok: true }; }
+  if (cmd === 'review.cancel') { reviewLib.cancel(a.id, a.reason); return { ok: true }; }
+  throw new Error('알 수 없는 리뷰 명령: ' + cmd);
+}
+
 function sendUiCommand(cmd, params, { mode = 'broadcast', target, timeoutMs } = {}) {
   const backLive = !!(controlWs && controlWs.readyState === 1);
   // ① 명시 타겟이 이 머신의 화면 → back 미경유(같은 기기 왕복 제거)
@@ -815,19 +836,7 @@ async function dispatch(req, conn) {
   //  띄우는 쪽(`ui.review`)은 아래 ui.* 와 함께 있다 — 그쪽은 워크스페이스 컨텍스트가 필요하다.
   //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 **자기가 요청한 리뷰를 스스로 승인**할 경로가
   //   되면 리뷰라는 것 자체가 무의미해진다(approval.respond·agents.wire 를 닫은 것과 같은 이유).
-  if (cmd.startsWith('review.')) {
-    const reviewLib = lazyMod('./review');
-    const a = req.args || {};
-    if (cmd === 'review.pending') return { items: reviewLib.listPending(typeof a.ws === 'string' ? a.ws : undefined) };
-    if (cmd === 'review.get') {
-      const s2 = reviewLib.get(a.id);
-      // 없으면 **없다고 분명히 답한다** — 화면이 유령 리뷰를 붙들지 않게.
-      return s2 ? reviewLib.payload(s2) : { reviewId: String(a.id || ''), status: 'gone' };
-    }
-    if (cmd === 'review.submit') { reviewLib.submit(a.id, a.body || a); return { ok: true }; }
-    if (cmd === 'review.cancel') { reviewLib.cancel(a.id, a.reason); return { ok: true }; }
-    throw new Error('알 수 없는 리뷰 명령: ' + cmd);
-  }
+  if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
     if (!proxyLib) throw new Error('이 데몬은 포트 조회를 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -2125,6 +2134,7 @@ function start() {
 }
 
 module.exports = {
+  handleReviewRpc,
   start, setControlWs, resolveUi, sockPath, takeoverExisting, killStrayDaemons, backFetch,
   chatInput, // 채팅 입력(PTY 하네스) — control.js 의 back rpc 경로도 이 구현을 쓴다
   chatAnswer, // TUI 질문 다이얼로그 원격 조작 — control.js 의 chat.answer 가 위임

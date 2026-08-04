@@ -5,8 +5,11 @@
 //    PC 와 폰이 같은 diff 에서 덩어리를 다르게 세면 **엉뚱한 곳을 승인한 결과**가 간다.
 //    → 두 파서를 실제로 돌려 같은 diff 코퍼스에서 같은 결과가 나오는지 본다.
 //  ② **취소가 승인으로 둔갑하는 것.** 사용자가 창을 닫았는데 "전부 승인"이 가면 안 본 변경이 통과한다.
-//  ③ **에이전트가 자기 리뷰를 스스로 승인하는 것.** 그러면 리뷰라는 것 자체가 무의미해진다
-//    → 데몬 CAPABILITIES 에 `review.*` 가 없어야 한다(요청 `ui.review` 만 공개).
+//  ③ **제출·취소를 에이전트에게 광고하지 않는 것.** CAPABILITIES 는 광고 목록이지 차단 게이트가
+//    아니다(실측: 소켓으로 직접 부르면 핸들러까지 닿는다 — `agents.wire` 도 같다). 그래도 광고하지
+//    않는 이유는 footgun 을 문서화하지 않기 위해서다. 실제로 이게 방어가 되는 근거는 따로 있다:
+//    `cpt review` 는 **에이전트가 스스로 부르는 도구**라(사용자 확정: 강제 관문 아님) 자기 리뷰를
+//    승인해 봐야 얻는 게 없다 — 리뷰를 아예 안 부르면 그만이다.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -152,7 +155,7 @@ const server = read(path.join(DAEMON, 'cpt-server.js'));
 const capsBlock = server.slice(server.indexOf('const CAPABILITIES'), server.indexOf('const CAPABILITIES') + 3000);
 ok(/'ui\.review'/.test(capsBlock), '요청(ui.review)은 에이전트에게 공개한다');
 ok(!/'review\.(submit|cancel|get|pending)'/.test(capsBlock),
-  '★ 제출·취소는 비공개다(자기가 요청한 리뷰를 스스로 승인하면 리뷰가 무의미해진다)');
+  '제출·취소는 에이전트에게 광고하지 않는다(CAPABILITIES 는 광고 목록 — 차단 게이트가 아니다)');
 ok(/cmd\.startsWith\('review\.'\)/.test(server), '화면이 부르는 review.* RPC 는 따로 열려 있다');
 
 // ── 4. 3플랫폼 배선이 전부 있다 ──────────────────────────────────────────────
@@ -166,6 +169,25 @@ ok(/review_local/.test(read(path.resolve('src-tauri/src/cptsock.rs'))), 'PC 는 
 ok(/review\/submit/.test(read(path.join(BACK, 'routes/daemonRoutes.js'))), 'back 이 제출 경로를 중계한다');
 ok(/reviewSubmit/.test(read(path.join(APP, 'services/daemonService.ts'))), '앱이 제출 경로를 갖는다');
 ok(/case 'review':/.test(read(CLI)), 'cpt CLI 에 review 명령이 있다');
+
+// ── ★ back 이 릴레이하는 RPC 는 **데몬 control.js 에 라우트가 있어야 한다** ──────────
+//  실측으로 잡힌 결함: review.* 를 유닉스 소켓 디스패치(cpt-server)에만 달아 둬서, 폰의 [보내기]가
+//  back → 데몬 control WS 로 들어온 뒤 "알 수 없는 메서드"로 조용히 실패했다. "back 라우트가 있다"와
+//  "앱에 함수가 있다"만 보면 이 구멍을 못 본다 — 데몬 입구를 함께 본다.
+const control = strip(read(path.join(DAEMON, 'control.js')));
+const backCtl = strip(read(path.join(BACK, 'controllers/daemonController.js')));
+const relayed = [...new Set((backCtl.match(/callRpc\(req\.user\.id,\s*'([a-zA-Z]+)\./g) || [])
+  .map((m) => (/'([a-zA-Z]+)\./.exec(m) || [])[1]))].filter(Boolean);
+// 라우팅은 접두사(`startsWith('qc.')`)일 수도 정확 일치(`method === 'net.ports'`)일 수도 있다 —
+//  둘 다 인정한다(접두사만 보면 net.ports 를 오탐한다).
+const missing = relayed.filter((fam) => !new RegExp(
+  `startsWith\\('${fam}\\.'\\)|method === '${fam}\\.`).test(control));
+ok(missing.length === 0,
+  `back 이 릴레이하는 RPC 계열 ${relayed.length}종이 전부 데몬 control.js 에 라우트가 있다`,
+  '라우트 없음: ' + missing.join(', '));
+ok(relayed.includes('review'), '리뷰가 그 검사 대상에 실제로 포함돼 있다', relayed.join(','));
+ok(/handleReviewRpc/.test(control) && /handleReviewRpc/.test(read(path.join(DAEMON, 'cpt-server.js'))),
+  '소켓 입구와 릴레이 입구가 **같은 함수**를 탄다');
 
 // ── 5. 문구 사전 ─────────────────────────────────────────────────────────────
 const pcText = await import(path.join(PC, 'text/review.js'));
