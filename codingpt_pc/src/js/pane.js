@@ -1230,6 +1230,30 @@ export class PaneView {
     this.ctx.onSurfacesChanged?.();
     this.focus();
   }
+  /**
+   * 이 pane 에서 파일을 연다(명령 팔레트의 파일 열기). 열 수 있으면 true.
+   *  **이미 있는 IDE 를 먼저 쓴다** — 파일 하나 열 때마다 IDE 를 새로 만들면 화면이 순식간에
+   *  IDE 로 뒤덮인다(cmux 를 쓰는 사람이 가장 싫어하는 결과).
+   */
+  openFileHere(rel) {
+    if (!rel) return false;
+    if (this.node.kind === "ide" && this.ide) {
+      try { this.ide.openFile(rel)?.catch?.(() => {}); } catch (_) { /* noop */ }
+      return true;
+    }
+    const i = (this.node.tabs || []).findIndex((t) => t.kind === "ide");
+    if (i < 0) return false;
+    const tab = this.node.tabs[i];
+    tab.openPath = rel;                       // 아직 본문이 없으면 mount 때 이 경로로 연다
+    const after = () => {
+      const m = this._mixed.get(tab.tid);
+      if (m && m.ide) { try { m.ide.openFile(rel)?.catch?.(() => {}); } catch (_) { /* noop */ } }
+    };
+    if (this.node.active !== i) this.switchTab(i).then(after, after);
+    else after();
+    return true;
+  }
+
   async switchTab(i) {
     if (i === this.node.active) {
       this.focus();

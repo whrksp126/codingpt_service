@@ -15,7 +15,11 @@ description: >-
   "이 요소 어디서 왔어", "디자인 모드", "요소 선택", or whenever you want the
   user — who may be watching from a phone or tablet — to see a URL, a running
   dev server, a source file, or your code changes; there, prefer
-  `cpt preview open <url>` and `cpt ide open <path> --line <n>`.
+  `cpt preview open <url>` and `cpt ide open <path> --line <n>`. Also use it when
+  you want the user to actually **review** what you changed — "리뷰해줘",
+  "확인해줘", "review my changes", or when a change is big or risky enough that
+  you'd rather get approval before moving on: `cpt review` opens a review screen
+  and blocks until the user approves/rejects each hunk and sends comments back.
 ---
 
 # CodingPT cpt CLI

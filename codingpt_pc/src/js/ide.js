@@ -8,8 +8,10 @@ import * as T from "./tiling.js";
 import { cmThemeName } from "./theme.js";
 import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
 import * as PV from "./preview-kind.js";
+import * as RV from "./review-view.js";
 import { tx as pvTx } from "./text/index.js";
 import { FILE_PREVIEW_TEXT } from "./text/file-preview.js";
+import { REVIEW_TEXT } from "./text/review.js";
 const FPT = pvTx(FILE_PREVIEW_TEXT);
 // 마크다운은 **채팅과 같은 렌더러**를 쓴다 — 같은 문서가 두 곳에서 다르게 보이면 안 되고,
 //  이미 안전 이스케이프가 검증된 코드다(새 렌더러를 들이면 XSS 표면이 하나 더 생긴다).
@@ -762,6 +764,116 @@ export class IdeView {
     this._activate(group, group.open.length - 1);
   }
 
+  /**
+   * 코드 리뷰 열기(ui.review) — 파일마다 가상 탭 하나를 만들고, IDE 바닥에 조작 바를 붙인다.
+   *  탭으로도 넘길 수 있고 바의 [◀][▶] 로도 넘어간다(사용자 확정 배치).
+   *  같은 리뷰를 다시 받으면 **갱신**한다(에이전트가 재요청했거나 화면이 재접속한 경우).
+   */
+  openReview(payload, ws, group = this.activeGroup) {
+    if (this.review && this.review.reviewId !== payload.reviewId) this.closeReview("replaced");
+    this.review = RV.createReview(payload, ws);
+    // 이전 리뷰 탭 정리 후 파일마다 하나씩.
+    for (const g of this.groups.values()) {
+      for (let i = g.open.length - 1; i >= 0; i--) if (g.open[i].review) g.open.splice(i, 1);
+      if (g.active >= g.open.length) g.active = g.open.length - 1;
+    }
+    this.review.files.forEach((f, i) => {
+      group.open.push({
+        path: `review:${this.review.reviewId}:${f.path}`,
+        label: baseName(f.path),
+        doc: CM.Doc("", "text/plain"),   // 에디터로 새지 않게 빈 문서를 물려 둔다
+        dirty: false, virtual: true,
+        review: { index: i },
+      });
+    });
+    this._mountReviewBar();
+    this._activate(group, group.open.length - this.review.files.length);
+    this._renderTabs();
+  }
+
+  /** 리뷰 종료 — 탭·바를 걷어내고 상태를 버린다. 데몬 통지는 호출부가 한다(취소/제출 구분). */
+  closeReview() {
+    this.review = null;
+    if (this.reviewBar) { this.reviewBar.remove(); this.reviewBar = null; }
+    for (const g of this.groups.values()) {
+      for (let i = g.open.length - 1; i >= 0; i--) if (g.open[i].review) g.open.splice(i, 1);
+      if (g.active >= g.open.length) g.active = g.open.length - 1;
+      if (g.active < 0) g.active = 0;
+    }
+    this._renderTabs();
+    for (const g of this.groups.values()) this._activate(g, g.active, false);
+  }
+
+  _mountReviewBar() {
+    if (!this.reviewBar) {
+      this.reviewBar = document.createElement("div");
+      this.el.appendChild(this.reviewBar);
+    }
+    this._paintReviewBar();
+  }
+
+  _paintReviewBar() {
+    const st = this.review;
+    if (!st || !this.reviewBar) return;
+    RV.renderReviewBar(this.reviewBar, st, {
+      onNav: (d) => {
+        const next = Math.max(0, Math.min(st.files.length - 1, st.index + d));
+        if (next === st.index) return;
+        st.index = next;
+        // 탭 선택도 함께 옮긴다 — 바와 탭이 다른 파일을 가리키면 어느 쪽이 진실인지 알 수 없다.
+        for (const g of this.groups.values()) {
+          const i = g.open.findIndex((o) => o.review && o.review.index === next);
+          if (i >= 0) { this._activate(g, i, false); break; }
+        }
+        this._paintReviewBar();
+      },
+      onApproveFile: () => {
+        const f = st.files[st.index];
+        if (!f) return;
+        for (let i = 0; i < f.hunks; i++) st.decisions[`${f.path}#${i}`] = "approve";
+        this._refreshReviewBody();
+      },
+      onApproveAll: () => {
+        for (const f of st.files) for (let i = 0; i < f.hunks; i++) st.decisions[`${f.path}#${i}`] = "approve";
+        this._refreshReviewBody();
+      },
+      onSubmit: () => this._finishReview("submit"),
+      onCancel: () => this._finishReview("cancel"),
+    });
+  }
+
+  /**
+   * 보내기/취소 — **결과를 감추지 않는다**. 못 보냈으면 바에 그대로 적고 리뷰를 닫지 않는다
+   *  (닫아 버리면 사용자가 적은 코멘트가 통째로 사라진다).
+   *  전송 경로: 이 PC 워크스페이스면 소켓 직결(opts.fs 없음 = 로컬 fsapi), 아니면 back 릴레이.
+   */
+  async _finishReview(kind) {
+    const st = this.review;
+    if (!st || st.sending) return;
+    if (kind === "cancel" && !window.confirm(pvTx(REVIEW_TEXT).cancelConfirm)) return;
+    st.sending = true;
+    st.error = null;
+    this._paintReviewBar();
+    const isLocal = !this.opts.fs;   // 원격 어댑터가 주입돼 있으면 다른 PC 의 워크스페이스다
+    try {
+      if (kind === "cancel") await RV.cancelReview(st, isLocal, "user");
+      else await RV.submitReview(st, isLocal);
+      this.closeReview();
+    } catch (e) {
+      st.sending = false;
+      st.error = String((e && e.message) || e);
+      this._paintReviewBar();
+    }
+  }
+
+  _refreshReviewBody() {
+    for (const g of this.groups.values()) {
+      const f = g.open[g.active];
+      if (f && f.review) RV.renderReviewFile(g.previewHost, this.review, () => this._paintReviewBar());
+    }
+    this._paintReviewBar();
+  }
+
   _jumpTo(group, line) {
     setTimeout(() => {
       const l = Math.max(0, (line | 0) - 1);
@@ -773,6 +885,22 @@ export class IdeView {
     }, 30);
   }
   _activate(group, i, focusEditor = true) {
+    // 리뷰 탭 — 에디터가 아니라 리뷰 화면을 그린다(미리보기와 같은 자리를 쓴다).
+    {
+      const rf = group.open[i];
+      if (rf && rf.review && this.review) {
+        group.active = i;
+        this.review.index = rf.review.index;
+        group.editorHost.style.display = "none";
+        group.empty.style.display = "none";
+        group.previewHost.style.display = "";
+        RV.renderReviewFile(group.previewHost, this.review, () => this._paintReviewBar());
+        this._renderTabs();
+        this._renderBody();
+        this._paintReviewBar();
+        return;
+      }
+    }
     if (this._find && this._find.group === group) this.closeSearch();
     group.active = i;
     this._setActiveGroup(group.id);

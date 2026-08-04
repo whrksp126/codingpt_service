@@ -172,11 +172,43 @@ const APPEARANCE_KEYS = {
   codeFont: ['default', 'jetbrains', 'fira', 'd2coding'],
   termStyle: ['auto', 'ghostty', 'one', 'dracula', 'solarized'],
 };
+
+// 단축키 재바인딩(2026-08-04) — 계정 전체 동기화. PC 를 여러 대 쓰는 사용자가 한 대에서 바꾼
+//  단축키를 다른 대에서 다시 잡을 이유가 없다(기존 글꼴/터미널 스타일과 같은 성격).
+//
+// 여기서는 **모양만 검사한다**. 어떤 id 가 유효한지는 클라이언트의 명령 표가 정본이고, 서버가
+//  그 표를 따라 다니면 앱/PC 를 올릴 때마다 서버도 같이 올려야 한다(구 서버가 새 명령을 버리는
+//  사고). 대신 값이 저장소를 오염시키지 못하게 개수·길이·문자 종류를 조인다.
+//  값 `null` = "이 명령은 단축키 없음"이라는 **유효한 사용자 의사**다 — 지우지 않는다.
+const SC_MAX_ITEMS = 200;
+const SC_ID_RE = /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z0-9]+)+$/;
+const SC_COMBO_RE = /^[A-Za-z0-9+]{1,48}$/;
+function sanitizeShortcuts(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out = {};
+  let n = 0;
+  for (const [id, v] of Object.entries(raw)) {
+    if (n >= SC_MAX_ITEMS) break;
+    if (!SC_ID_RE.test(id)) continue;
+    if (v === null) { out[id] = null; n++; continue; }
+    if (typeof v !== 'string' || !SC_COMBO_RE.test(v)) continue;
+    out[id] = v;
+    n++;
+  }
+  return out; // 빈 객체도 유효하다(전부 기본값으로 되돌림)
+}
+
 function sanitizeAppearance(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const out = {};
   for (const [k, allowed] of Object.entries(APPEARANCE_KEYS)) {
     if (typeof raw[k] === 'string' && allowed.includes(raw[k])) out[k] = raw[k];
+  }
+  // shortcuts 는 통째로 교체한다(병합이 아니다) — 사용자가 "지운" 항목이 서버의 옛 값으로
+  //  되살아나면 설정 화면과 실제 동작이 갈린다.
+  if (Object.prototype.hasOwnProperty.call(raw, 'shortcuts')) {
+    const sc = sanitizeShortcuts(raw.shortcuts);
+    if (sc) out.shortcuts = sc;
   }
   return Object.keys(out).length ? out : null;
 }
@@ -965,6 +997,53 @@ async function agentsLaunch(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── 코드 리뷰(2026-08-04) ─────────────────────────────────────────────────────
+// POST /api/daemon/review/get      body:{ id }        → { reviewId, title, files, status }
+// POST /api/daemon/review/submit   body:{ id, ...결과 } → { ok }
+// POST /api/daemon/review/cancel   body:{ id, reason } → { ok }
+// POST /api/daemon/review/pending  body:{ ws? }        → { items }  (화면 재접속 시 되살리기)
+//
+// 세션은 **그 PC 데몬 메모리**에 있다. 서버는 판정도 보관도 하지 않고 그대로 중계한다.
+//  왜 세션이 데몬에 있는지는 daemon `packages/runner-core/review.js` 머리주석 참조
+//  (요약: 사람이 리뷰하는 시간은 ui_command 왕복 상한 60초보다 길다).
+//
+// ⚠ 여기도 조회가 POST 다 — `ws` 는 홈-상대 경로이고 **빈 문자열이 홈 루트라는 유효한 값**이라
+//  쿼리스트링으로 실으면 조용히 사라진다(저장한 명령과 같은 이유).
+async function reviewGet(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'review.get',
+      { id: String((req.body && req.body.id) || '') }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function reviewPending(req, res) {
+  try {
+    const b = req.body || {};
+    const hasWs = Object.prototype.hasOwnProperty.call(b, 'ws') && typeof b.ws === 'string';
+    const result = await daemonRelayService.callRpc(req.user.id, 'review.pending',
+      hasWs ? { ws: b.ws } : {}, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function reviewSubmit(req, res) {
+  try {
+    const b = req.body || {};
+    // 본문(판정·코멘트)은 **그대로** 넘긴다 — 서버가 해석하면 판정 규칙이 두 벌이 된다.
+    //  길이·모양 검사는 데몬(review.js submit)이 한다.
+    const result = await daemonRelayService.callRpc(req.user.id, 'review.submit',
+      { id: String(b.id || ''), body: { files: b.files, note: b.note } }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function reviewCancel(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'review.cancel',
+      { id: String(b.id || ''), reason: b.reason }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // ── 저장한 명령(Quick Commands, 2026-08-04) ────────────────────────────────────
 // POST /api/daemon/quick-commands/list     body:{ ws? } → { items }  (전역 + 그 워크스페이스)
 // GET  /api/daemon/quick-commands/all      → { items, limits }       (설정 화면 — 전부)
@@ -1669,6 +1748,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   quickCommandsList, quickCommandsListAll, quickCommandsSave, quickCommandsRemove, quickCommandsReorder, quickCommandsRun,
+  reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,
@@ -1681,4 +1761,5 @@ module.exports = {
   chatSessions, chatOpen, chatSince, chatClose, chatDetail, chatAttachment, chatInput, chatAnswer, chatMode, chatCommands, chatDialog, chatScreen, chatFile,
   previewPorts, previewStart, forwardStart, lanGrant, previewEntry, previewCookieMiddleware, resolvePreviewToken,
   _collapseLegacyHostDuplicates: collapseLegacyHostDuplicates,
+  _sanitizeAppearance: sanitizeAppearance,
 };

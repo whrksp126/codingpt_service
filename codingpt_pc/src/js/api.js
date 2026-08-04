@@ -253,6 +253,20 @@ export const api = {
   qcRun: (body) =>
     invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/run", body: body || {}, timeoutSecs: 45 }),
 
+  // ── 코드 리뷰(2026-08-04) ──
+  //  세션은 **그 워크스페이스를 호스팅하는 PC 데몬의 메모리**에 있다. 이 PC 면 소켓 직결,
+  //  다른 PC 면 back 릴레이 — 데몬 구현은 한 벌이다(저장한 명령과 같은 구조).
+  //  조회가 POST 인 이유도 같다(`ws:''` 를 쿼리스트링이 삼킨다).
+  reviewLocal: (cmd, args) => invoke("review_local", { cmd, args: args || {} }),
+  reviewGet: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/review/get", body: body || {}, timeoutSecs: 15 }),
+  reviewPending: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/review/pending", body: body || {}, timeoutSecs: 15 }),
+  reviewSubmit: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/review/submit", body: body || {}, timeoutSecs: 20 }),
+  reviewCancel: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/review/cancel", body: body || {}, timeoutSecs: 15 }),
+
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
   //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).

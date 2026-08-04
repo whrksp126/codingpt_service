@@ -6,7 +6,7 @@
   "scripts": {
     "tauri": "tauri",
     "dev": "bash scripts/bundle-sidecar.sh && tauri dev",
-    "test": "node test/parse-esm.mjs && node test/tray-prelogin.mjs && node test/notification-prefs.mjs && node test/contract.mjs && node test/agentstate-reconnect.mjs && node test/agent-toggle.mjs && node test/agents-crossimpl.mjs && node test/chat-composer.mjs && node test/statusline.mjs && node test/chat-mode.mjs && node test/chat-commands.mjs && node test/chat-localcmd.mjs && node test/chat-status.mjs && node test/quick-commands-crossimpl.mjs && node test/ports-crossimpl.mjs && node test/preview-kind.mjs && node test/file-preview-crossimpl.mjs && node test/update-scheduler.mjs && node test/lan-crossimpl.mjs && node test/e2ee-crossimpl.mjs"
+    "test": "node test/parse-esm.mjs && node test/tray-prelogin.mjs && node test/notification-prefs.mjs && node test/contract.mjs && node test/agentstate-reconnect.mjs && node test/agent-toggle.mjs && node test/agents-crossimpl.mjs && node test/chat-composer.mjs && node test/statusline.mjs && node test/chat-mode.mjs && node test/chat-commands.mjs && node test/chat-localcmd.mjs && node test/chat-status.mjs && node test/quick-commands-crossimpl.mjs && node test/ports-crossimpl.mjs && node test/palette-crossimpl.mjs && node test/review-crossimpl.mjs && node test/preview-kind.mjs && node test/file-preview-crossimpl.mjs && node test/update-scheduler.mjs && node test/lan-crossimpl.mjs && node test/e2ee-crossimpl.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

@@ -2109,3 +2109,175 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .update-banner button.primary { background: var(--accent); border-color: var(--accent); color: #06231a; }
 .update-banner button.primary:hover { background: var(--accent-hover); }
 .update-banner button[disabled] { opacity: 0.6; cursor: default; }
+
+/* ── 명령 팔레트(⌘P) ──
+   창은 하나다 — `>` 접두어로 파일 모드/명령 모드가 갈린다(사용자 확정). 색은 전부 무채색 명암:
+   선택 행도 accent 가 아니라 배경 밝기로 표현한다(accent = 상태 신호 전용). */
+.cp-overlay {
+  position: fixed; inset: 0; z-index: 9100;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 12vh; background: rgba(0,0,0,0.34);
+}
+.cp-card {
+  width: min(680px, 88vw); max-height: 66vh; display: flex; flex-direction: column;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 12px;
+  box-shadow: 0 22px 60px rgba(0,0,0,0.45); overflow: hidden;
+}
+.cp-inputrow {
+  display: flex; align-items: center; gap: 9px; padding: 12px 14px;
+  border-bottom: 1px solid var(--border-ctrl);
+}
+.cp-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
+.cp-input {
+  flex: 1 1 auto; min-width: 0; border: none; outline: none; background: transparent;
+  color: var(--text); font-size: 14.5px; font-family: inherit;
+}
+.cp-input::placeholder { color: var(--dim); }
+.cp-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 6px; }
+.cp-sec {
+  padding: 8px 10px 4px; font-size: 11px; color: var(--dim); letter-spacing: 0.02em;
+}
+.cp-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  padding: 7px 10px; border: none; background: transparent; color: var(--text);
+  border-radius: 7px; font-size: 13px; cursor: pointer;
+}
+.cp-row.sel { background: var(--elevated2); }
+/* 지금 쓸 수 없는 명령 — 감추지 않고 흐리게 둔다(있다는 사실과 왜 안 되는지를 같이 보여준다). */
+.cp-row.off { color: var(--dim); cursor: default; }
+.cp-row-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; width: 15px; }
+.cp-row-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 맞은 글자 — 굵기로만 표시(색을 쓰면 accent 규율과 충돌한다). */
+.cp-row-label b { font-weight: 700; }
+.cp-row-sub {
+  flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--dim); font-size: 11.5px;
+}
+.cp-row-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; margin-left: auto; }
+.cp-empty { padding: 22px 12px; text-align: center; color: var(--dim); font-size: 12.5px; }
+.cp-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 7px 12px; border-top: 1px solid var(--border-ctrl);
+  color: var(--dim); font-size: 11.5px;
+}
+
+/* ── 단축키 설정 ──
+   행을 눌러 새 조합을 받는다. 겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
+.sc-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.sc-search {
+  flex: 1 1 auto; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
+  font-size: 13px; font-family: inherit; outline: none;
+}
+.sc-reset-all {
+  flex: 0 0 auto; padding: 7px 11px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2); font-size: 12.5px;
+}
+.sc-reset-all:hover { background: var(--elevated2); }
+.sc-conflict-note { margin: 0 0 10px; color: var(--text2); font-size: 12px; line-height: 1.45; }
+.sc-list { padding: 4px 6px; }
+.sc-group {
+  padding: 10px 6px 5px; font-size: 11px; color: var(--dim); letter-spacing: 0.02em;
+}
+.sc-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px;
+  border-top: 1px solid var(--border-ctrl);
+}
+.sc-group + .sc-row { border-top: none; }
+.sc-name { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 13px; }
+.sc-badge {
+  flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; font-size: 10.5px;
+  border: 1px solid var(--border-ctrl); color: var(--text2); background: var(--elevated2);
+}
+.sc-key {
+  flex: 0 0 auto; min-width: 82px; text-align: center; padding: 5px 10px; border-radius: 7px;
+  border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
+  font-size: 12.5px; font-family: inherit; cursor: pointer;
+}
+.sc-key:hover { background: var(--elevated2); }
+.sc-key.empty { color: var(--dim); }
+/* 조합을 받는 중 — 점선으로 "지금 기다린다"를 표시(색이 아니라 테두리 모양으로). */
+.sc-key.rec { border-style: dashed; color: var(--text2); }
+.sc-mini {
+  flex: 0 0 auto; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: var(--dim); font-size: 11.5px;
+}
+.sc-mini:hover { color: var(--text2); border-color: var(--border-ctrl); }
+.sc-empty { padding: 18px 8px; text-align: center; color: var(--dim); font-size: 12.5px; }
+
+/* ── 코드 리뷰(에이전트가 요청했을 때만 뜬다) ──
+   색은 전부 무채색 명암 + 좌측 띠로만 구분한다(accent = 상태 신호 전용). 추가/삭제 줄을
+   초록/빨강으로 칠하지 않는다 — 이 앱의 색 규율이고, +/− 기호와 배경 명암으로 충분히 읽힌다. */
+.ide-review { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px 12px 12px; }
+.rv-why { color: var(--dim); font-size: 11.5px; padding: 2px 2px 10px; }
+.rv-empty { color: var(--dim); font-size: 12.5px; padding: 24px; text-align: center; }
+.rv-hunk {
+  border: 1px solid var(--border-ctrl); border-radius: 9px; overflow: hidden; margin-bottom: 10px;
+}
+.rv-hunk-head {
+  display: flex; align-items: center; gap: 10px; padding: 6px 10px;
+  background: var(--elevated2); border-bottom: 1px solid var(--border-ctrl);
+}
+.rv-hunk-loc { color: var(--text2); font-size: 11.5px; font-family: var(--cpt-mono, monospace); }
+.rv-hunk-stat { color: var(--dim); font-size: 11px; }
+.rv-hunk-btns { margin-left: auto; display: flex; gap: 5px; }
+.rv-btn {
+  padding: 4px 10px; border-radius: 7px; cursor: pointer; font-size: 12px; font-family: inherit;
+  border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2);
+}
+.rv-btn:hover { background: var(--elevated); color: var(--text); }
+/* 고른 것 = 채움(색 아님) */
+.rv-btn.on { background: var(--elevated); color: var(--text); border-color: var(--text3, var(--dim)); }
+.rv-lines { font-family: var(--cpt-mono, monospace); font-size: 12px; line-height: 1.55; }
+.rv-line { display: flex; align-items: flex-start; gap: 0; padding: 0 8px; position: relative; }
+.rv-line.rv-add { background: rgba(255,255,255,0.045); }
+.rv-line.rv-del { background: rgba(0,0,0,0.16); }
+.rv-line.rv-meta { color: var(--dim); font-style: italic; }
+.rv-no { flex: 0 0 44px; text-align: right; padding-right: 10px; color: var(--dim); user-select: none; }
+.rv-sign { flex: 0 0 12px; color: var(--dim); user-select: none; }
+.rv-text { flex: 1 1 auto; white-space: pre-wrap; word-break: break-word; color: var(--text); }
+.rv-line-comment {
+  position: absolute; right: 6px; top: 1px; opacity: 0; transition: opacity 0.1s;
+  border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--dim);
+  border-radius: 5px; padding: 1px 5px; cursor: pointer; line-height: 1;
+}
+.rv-line:hover .rv-line-comment { opacity: 1; }
+.rv-comment {
+  display: flex; align-items: flex-start; gap: 8px; margin: 4px 8px 6px 56px; padding: 7px 9px;
+  border-left: 2px solid var(--dim); background: var(--elevated2); border-radius: 0 7px 7px 0;
+}
+.rv-comment-text { flex: 1 1 auto; white-space: pre-wrap; font-family: inherit; font-size: 12px; color: var(--text); }
+.rv-comment-x { border: none; background: transparent; color: var(--dim); cursor: pointer; padding: 0 2px; }
+.rv-comment-x:hover { color: var(--text2); }
+.rv-cbox { margin: 4px 8px 8px 56px; display: flex; flex-direction: column; gap: 6px; }
+.rv-cbox-input {
+  width: 100%; resize: vertical; padding: 7px 9px; border-radius: 7px;
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
+  font-family: inherit; font-size: 12px; outline: none;
+}
+.rv-cbox-btns { display: flex; gap: 6px; }
+.rv-trunc { color: var(--dim); font-size: 11.5px; padding: 8px 2px; }
+
+/* 하단 조작 바 — [◀ 이전][파일 i/N][다음 ▶] … [상태][취소][보내기] (사용자 확정 배치) */
+.ide-review-bar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-top: 1px solid var(--border-ctrl); background: var(--surface, var(--elevated));
+}
+.rvb-nav, .rvb-mid, .rvb-right { display: flex; align-items: center; gap: 6px; }
+.rvb-mid { margin-left: 6px; }
+.rvb-right { margin-left: auto; }
+.rvb-name {
+  min-width: 120px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--text); font-size: 12.5px; text-align: center;
+}
+.rvb-btn {
+  padding: 5px 10px; border-radius: 7px; cursor: pointer; font-size: 12px; font-family: inherit;
+  border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2);
+  display: inline-flex; align-items: center;
+}
+.rvb-btn:hover:not([disabled]) { background: var(--elevated2); color: var(--text); }
+.rvb-btn[disabled] { opacity: 0.4; cursor: default; }
+.rvb-btn.wide { padding: 5px 12px; }
+.rvb-btn.primary { background: var(--elevated2); color: var(--text); border-color: var(--dim); }
+.rvb-status { color: var(--dim); font-size: 11.5px; margin-right: 4px; }
+.rvb-status.err { color: var(--text2); }

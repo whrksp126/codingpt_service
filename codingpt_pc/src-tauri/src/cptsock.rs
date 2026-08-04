@@ -208,6 +208,20 @@ pub fn ports_local(cmd: String, args: serde_json::Value) -> Result<serde_json::V
     cpt_request_coded(&cmd, args, true)
 }
 
+// 코드 리뷰(2026-08-04) — 세션이 **이 PC 데몬 메모리**에 있다. 이 PC 워크스페이스면 back 을
+//  왕복할 이유가 없다(다른 PC 워크스페이스는 프런트가 back 릴레이로 보낸다 — 데몬 구현은 한 벌).
+//  울타리는 위와 같은 모양: `review.` 접두사만 통과시킨다.
+//  ⚠ 여기가 열려 있어도 **터미널 안의 AI 는 이 길을 못 쓴다** — cpt 컨트롤 소켓의 CAPABILITIES 에
+//   review.* 가 없기 때문이다(자기가 요청한 리뷰를 스스로 승인하는 경로 차단). 이 커맨드는 앱
+//   웹뷰 전용 배관이다.
+#[tauri::command]
+pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("review.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

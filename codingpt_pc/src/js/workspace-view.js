@@ -3,7 +3,7 @@
 import { state, wsRuntime, activeWs, isLocal, isThisHost } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
-import { PaneView, isTermTab, newTid } from "./pane.js";
+import { PaneView, isTermTab, newTid, termTabLabel } from "./pane.js";
 import { paneApprovalCount } from "./approvals.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
@@ -12,6 +12,9 @@ import { icons, agentMarkHtml } from "./icons.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
 import { QC_TEXT } from "./text/quick-commands.js";
+import { PALETTE_TEXT } from "./text/palette.js";
+import { bindings, IS_APPLE } from "./shortcuts.js";
+import { formatCombo } from "./commands.js";
 
 // 헤더 버튼 툴팁만 여기서 쓴다 — 나머지 문구는 quick-commands.js 가 같은 사전에서 읽는다.
 //  (동적 import 로 여는 모듈이라 버튼 자체는 여기 있어야 한다)
@@ -538,16 +541,36 @@ function renderMainTop(ws) {
       const b = document.createElement("button");
       b.className = "pane-ctrl";
       b.title = title;
+      b.dataset.cmd = "ws.add" + kind[0].toUpperCase() + kind.slice(1);
       b.innerHTML = icon({ size: 16 });
       b.addEventListener("click", () => smartAdd(kind));
       return b;
     };
+    // 명령 팔레트(2026-08-04) — **추가 3종의 왼쪽에 구분선을 두고** 놓는다.
+    //  왼쪽 = 찾아 열기, 오른쪽 = 새로 추가. 워크스페이스 단위인 이유(사용자 확정): 기본 모드가
+    //  파일 열기라 워크스페이스가 없으면 보여줄 것이 없고, `>` 명령도 대부분 이 워크스페이스의
+    //  터미널·탭에서 벌어진다. 전역 명령(설정 등)은 팔레트 안의 행으로 들어간다.
+    const palBtn = document.createElement("button");
+    palBtn.className = "pane-ctrl";
+    palBtn.dataset.cmd = "palette.open";
+    // 툴팁에 **지금 걸린 조합**을 붙인다(기본값이 아니라). 사용자가 바꿔 놓고 옛 조합이 적혀
+    //  있으면 그 툴팁은 거짓말이 된다.
+    const palCombo = bindings()["palette.open"];
+    palBtn.title = tx(PALETTE_TEXT).open + (palCombo ? "  " + formatCombo(palCombo, IS_APPLE) : "");
+    palBtn.innerHTML = icons.search({ size: 16 });
+    palBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      import("./palette.js").then((m) => m.openPalette());
+    });
+    const palDiv = document.createElement("span");
+    palDiv.className = "mt-div";
     // 터미널 버튼만 드롭다운 — [터미널] + 이 PC 에 **설치된** 에이전트들(사용자 확정 2026-07-27).
     //  에이전트를 고르면 새 터미널을 만들고 그 경로에서 명령을 타이핑해 실행한다. 탭 이름·아이콘은
     //  손대지 않는다 — tmux 자동 이름과 로고 감지가 이미 claude/codex 를 알아본다(사용자 확정).
     const termBtn = document.createElement("button");
     termBtn.className = "pane-ctrl";
     termBtn.title = "터미널 추가";
+    termBtn.dataset.cmd = "ws.addTerminal";
     termBtn.innerHTML = icons.terminal({ size: 16 });
     termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
     // 저장한 명령(2026-08-04) — **추가 버튼들의 왼쪽**. 사이드바 토글 줄(전역)이 아니라 여기인
@@ -556,6 +579,7 @@ function renderMainTop(ws) {
     const qcBtn = document.createElement("button");
     qcBtn.className = "pane-ctrl";
     qcBtn.title = QC_TITLE;
+    qcBtn.dataset.cmd = "ws.quickCommands";
     qcBtn.innerHTML = icons.play({ size: 16 });
     qcBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -566,6 +590,7 @@ function renderMainTop(ws) {
     const webBtn = document.createElement("button");
     webBtn.className = "pane-ctrl";
     webBtn.title = "웹뷰 추가";
+    webBtn.dataset.cmd = "ws.ports";
     webBtn.innerHTML = icons.globe({ size: 16 });
     webBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
@@ -576,6 +601,8 @@ function renderMainTop(ws) {
       }));
     });
     adds.append(
+      palBtn,
+      palDiv,
       qcBtn,
       termBtn,
       mkBtn(icons.code, "IDE 추가", "ide"),
@@ -686,6 +713,55 @@ export function smartAdd(kind, extra) {
       : extra?.openPath ? { openPath: extra.openPath } : undefined;
   S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
   return wsRuntime(state.activeWsId)?.focusId || null;
+}
+
+// ── 명령 팔레트가 쓰는 열기 동작 ──────────────────────────────────────────────
+// 팔레트는 화면 조립을 모른다(알면 안 된다). "이 파일을 열어라 / 이 탭으로 가라"만 말하고,
+//  **어디에 어떻게** 는 여기가 정한다 — 탭 클릭·드래그·Chat 의 "열기"와 같은 길을 타야
+//  한 곳만 고쳐도 전부 맞는다.
+
+/** 지금 열려 있는 표면 목록(팔레트 "열린 탭" 구역). 화면에 보이는 순서 그대로. */
+export function openSurfaces() {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout) return [];
+  const out = [];
+  T.eachLeaf(rt.layout, (leaf) => {
+    if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
+    if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || "프리뷰" }); return; }
+    (leaf.tabs || []).forEach((t, i) => {
+      const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : "terminal";
+      const label = kind === "terminal" ? termTabLabel(t) : kind === "ide" ? "IDE" : (t.url || "프리뷰");
+      out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });
+    });
+  });
+  return out;
+}
+
+/** 팔레트에서 고른 표면으로 이동. 탭 클릭과 같은 경로(switchTab)를 탄다. */
+export function activateSurface(paneId, index) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout || !T.findLeaf(rt.layout, paneId)) return;
+  const p = panes.get(paneId);
+  if (p && index >= 0) p.switchTab(index);
+  S.focusPane(paneId);
+}
+
+/** 파일 열기 — 이미 있는 IDE 를 먼저 쓰고, 없을 때만 새로 만든다. */
+export function openFileSmart(rel) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rel || !rt || !rt.layout) return null;
+  const focusId = rt.focusId || T.firstLeafId(rt.layout);
+  if (focusId && panes.get(focusId)?.openFileHere?.(rel)) { S.focusPane(focusId); return focusId; }
+  for (const id of T.leafIds(rt.layout)) {
+    if (id === focusId) continue;
+    if (panes.get(id)?.openFileHere?.(rel)) { S.focusPane(id); return id; }
+  }
+  return smartAdd("ide", { openPath: rel });
+}
+
+/** 헤더의 저장한 명령/포트 버튼을 명령으로도 열 수 있게(팔레트·단축키에서 같은 메뉴). */
+export function headerButton(which) {
+  return mtDyn ? mtDyn.querySelector(`.mt-adds [data-cmd="${which}"]`) : null;
 }
 
 export function updateWorkspaceView() {

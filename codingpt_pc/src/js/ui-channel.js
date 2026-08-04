@@ -255,6 +255,7 @@ async function connect() {
       case "appearance_event":
         // 모양 설정(계정 동기화) — 다른 기기서 변경 → 즉시 반영(서버로 되밀지 않음)
         import("./theme.js").then((t) => t.applyRemoteAppearance(msg.event && msg.event.appearance)).catch(() => {});
+        import("./shortcuts.js").then((s) => s.applyRemoteShortcuts(msg.event && msg.event.appearance && msg.event.appearance.shortcuts)).catch(() => {});
         break;
       case "account_deleted":
         // 다른 기기에서 회원 탈퇴 — 이 PC 도 즉시 페어링 해제(데몬 정지 포함) → 로그인 게이트.
@@ -1176,6 +1177,43 @@ const handlers = {
       m?.ide?.openDiff(path, diffText);
     } else {
       pane?.ide?.openDiff(path, diffText);
+    }
+    S.focusPane(target.leaf.id);
+    S.emit();
+    return { ok: true, result: { paneId: target.leaf.id } };
+  },
+
+  /**
+   * 코드 리뷰 띄우기(ui.review) — **에이전트가 스스로 요청했을 때만** 온다(사용자 확정: 강제
+   *  관문이 아니라 도구). 대상 IDE 탐색·생성은 ideDiff 미러다.
+   *
+   * ★ 여기서는 **띄우기만** 한다. 결과는 사용자가 보내기를 누를 때 `review.submit` RPC 로
+   *   따로 간다 — 한 번의 ui_command 왕복(최대 60초)으로 사람의 리뷰 시간을 기다릴 수 없기
+   *   때문이다(daemon review.js 머리주석).
+   */
+  review: async (p) => {
+    const { meta, rt } = requireWs(p);
+    if (!p || !p.reviewId || !Array.isArray(p.files) || !p.files.length) throw new Error("리뷰 내용이 없습니다");
+    const target = findIdeTarget(rt);
+    const open = (pane, m) => {
+      const ide = m ? m.ide : pane?.ide;
+      ide?.openReview(p, meta);
+    };
+    if (!target) {
+      const focusId = rt.focusId || T.firstLeafId(rt.layout);
+      if (!focusId) throw new Error("분할할 pane 없음");
+      S.splitPane(focusId, "h", "ide", {});
+      open(getPane(rt.focusId), null);
+      return { ok: true, result: { paneId: rt.focusId } };
+    }
+    const pane = getPane(target.leaf.id);
+    if (target.tab) {
+      target.leaf.active = target.index;
+      pane?.buildHead();
+      pane?.showActiveTab?.();
+      open(pane, target.tab.tid ? pane?._mixed?.get(target.tab.tid) : null);
+    } else {
+      open(pane, null);
     }
     S.focusPane(target.leaf.id);
     S.emit();

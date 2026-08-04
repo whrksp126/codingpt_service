@@ -58,6 +58,11 @@ router.post('/quick-commands', accountAuth, daemonController.quickCommandsSave);
 router.post('/quick-commands/remove', accountAuth, daemonController.quickCommandsRemove);
 router.post('/quick-commands/reorder', accountAuth, daemonController.quickCommandsReorder);
 router.post('/quick-commands/run', accountAuth, daemonController.quickCommandsRun);
+// 코드 리뷰(2026-08-04) — 세션은 데몬 메모리, 서버는 중계만. 조회가 POST 인 이유는 컨트롤러 주석.
+router.post('/review/get', accountAuth, daemonController.reviewGet);
+router.post('/review/pending', accountAuth, daemonController.reviewPending);
+router.post('/review/submit', accountAuth, daemonController.reviewSubmit);
+router.post('/review/cancel', accountAuth, daemonController.reviewCancel);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.

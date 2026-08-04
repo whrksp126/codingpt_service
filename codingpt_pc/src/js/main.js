@@ -3,13 +3,19 @@ import "./theme.js"; // 모양(테마·글꼴) — 첫 페인트 전에 data-the
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
-import { mountSidebar, updateSidebar, refreshWsMeta, toggleLatestUnread } from "./sidebar.js";
+import { mountSidebar, updateSidebar, refreshWsMeta, toggleLatestUnread, toggleNotifPanel } from "./sidebar.js";
 import {
   mountWorkspaceView,
   updateWorkspaceView,
   focusNeighbor,
   focusCurrentPane,
+  smartAdd,
+  headerButton,
 } from "./workspace-view.js";
+import { registerCommands, runCommand } from "./command-run.js";
+import { commandForCombo } from "./commands.js";
+import { bindings, comboOf } from "./shortcuts.js";
+import { openPalette, isPaletteOpen } from "./palette.js";
 import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
 import {
   hideSetupUpdate,
@@ -145,52 +151,71 @@ function focusedPane() {
 // (구) 앱 활성화 시 창 크기 회수(resize-window 클레임)는 폐지 — 전용 세션 모델에선 window-size
 //  latest 가 입력/리사이즈하는 클라이언트를 자동으로 따라간다(수동 클레임 = 크기 뺏기 전쟁의 근원).
 
-// ── 활성 영역 검색(⌘F / Ctrl+F) ──
-//  ⌘F = 터미널·IDE 모두. Ctrl+F 는 터미널의 셸 forward-char 를 살리려 IDE 에서만.
+// ── Ctrl+F(터미널 아닌 곳에서만) ──
+//  ⌘F 는 아래 단축키 표(find.open)가 처리한다. Ctrl+F 만 여기 남는 이유: 터미널에서는 셸의
+//  forward-char 를 살려야 해서 **pane 종류를 봐야** 하는데, 이건 조합이 아니라 상황 판정이라
+//  재바인딩 표에 담기지 않는다.
 window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() !== "f") return;
+  if (!e.ctrlKey || e.metaKey) return;
   if (state.view === "settings") return;
-  const meta = e.metaKey && !e.ctrlKey;
-  const ctrl = e.ctrlKey && !e.metaKey;
-  if (!meta && !ctrl) return;
   const p = focusedPane();
-  if (!p) return;
-  if (ctrl && p.node.kind === "terminal") return; // 셸 Ctrl+F 보존
+  if (!p || p.node.kind === "terminal") return; // 셸 Ctrl+F 보존
   e.preventDefault();
   p.openSearch?.();
 });
 
-// ── 키보드 단축키(cmux 유사) ──
+// ── 명령 동작 등록 ──
+//  단축키와 팔레트가 **같은 함수**를 부른다. 예전엔 여기 if-else 사슬에 조합이 박혀 있어
+//  재바인딩이 불가능했고, 팔레트에서 같은 일을 하려면 코드를 한 벌 더 써야 했다.
+registerCommands({
+  "palette.open": () => (isPaletteOpen() ? null : openPalette()),
+  "find.open": () => focusedPane()?.openSearch?.(),
+
+  // 추가 3종은 **바로 추가한다**(헤더 버튼의 드롭다운이 아니라). 단축키를 눌렀는데 메뉴가 뜨면
+  //  손이 한 번 더 간다 — 에이전트 고르기·포트 고르기는 버튼에 그대로 남아 있다.
+  "ws.addTerminal": () => smartAdd("terminal"),
+  "ws.addIde": () => smartAdd("ide"),
+  "ws.addPreview": () => smartAdd("preview"),
+  // 이 둘은 고르는 것이 목적이라 메뉴를 연다(헤더 버튼과 같은 자리에서).
+  "ws.quickCommands": () => headerButton("ws.quickCommands")?.click(),
+  "ws.ports": () => headerButton("ws.ports")?.click(),
+
+  "pane.splitRight": () => S.splitFocused("h", "terminal"),
+  "pane.splitDown": () => S.splitFocused("v", "terminal"),
+  "pane.close": () => S.closeFocused(),
+  "pane.focusLeft": () => focusNeighbor("left"),
+  "pane.focusRight": () => focusNeighbor("right"),
+  "pane.focusUp": () => focusNeighbor("up"),
+  "pane.focusDown": () => focusNeighbor("down"),
+
+  "sidebar.toggle": () => S.toggleSidebar(),
+  "notif.panel": () => toggleNotifPanel(),
+  "notif.latestUnread": () => toggleLatestUnread(),
+
+  "app.settings": () => S.setView(state.view === "settings" ? "workspace" : "settings"),
+  "settings.commands": () => openSettingsSection("commands"),
+  "settings.shortcuts": () => openSettingsSection("shortcuts"),
+
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [
+    `ws.select${n}`,
+    () => { const w = state.workspaces[n - 1]; if (w) S.setActive(w.id); },
+  ])),
+});
+
+// ── 단축키 배선 ──
+//  조합 → 명령 id → 동작. 표는 commands.js, 사용자가 바꾼 값은 shortcuts.js 가 들고 있다.
+//  ★ 팔레트가 떠 있으면 아무것도 가로채지 않는다 — 팔레트 입력창에서 ⌘W 를 치면 pane 이 닫히는
+//    식의 사고를 막는다(팔레트는 자기 키를 스스로 처리한다).
 window.addEventListener("keydown", (e) => {
-  if (!e.metaKey) return;
-  const k = e.key.toLowerCase();
-  if (e.altKey && ["arrowleft", "arrowright", "arrowup", "arrowdown"].includes(k)) {
-    e.preventDefault();
-    focusNeighbor(k.replace("arrow", ""));
-    return;
-  }
-  if (k === "d" && !e.shiftKey) {
-    e.preventDefault();
-    S.splitFocused("h", "terminal");
-  } else if (k === "d" && e.shiftKey) {
-    e.preventDefault();
-    S.splitFocused("v", "terminal");
-  } else if (k === "w") {
-    e.preventDefault();
-    S.closeFocused();
-  } else if (k === "u" && e.shiftKey) {
-    e.preventDefault();
-    toggleLatestUnread();
-  } else if (k === "," ) {
-    e.preventDefault();
-    S.setView(state.view === "settings" ? "workspace" : "settings");
-  } else if (/^[1-8]$/.test(e.key)) {
-    const w = state.workspaces[parseInt(e.key, 10) - 1];
-    if (w) {
-      e.preventDefault();
-      S.setActive(w.id);
-    }
-  }
+  if (isPaletteOpen()) return;
+  const combo = comboOf(e);
+  if (!combo) return;
+  const id = commandForCombo(bindings(), combo);
+  if (!id) return;
+  // 처리할 수 있을 때만 기본 동작을 막는다. 못 쓰는 상황에서 preventDefault 만 하면
+  //  "브라우저 기본 동작도 안 되고 우리 동작도 안 되는" 죽은 키가 된다.
+  if (runCommand(id)) e.preventDefault();
 });
 
 // ── 초기화 ──

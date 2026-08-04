@@ -1221,3 +1221,40 @@ test('승인 TTL — back 백스톱이 데몬 마감보다 뒤에 있다(카드�
   assert.ok(backTtlMs > daemonWaitMs,
     `back TTL(${backTtlMs}) 이 데몬 마감(${daemonWaitMs}) 보다 앞이면 카드가 먼저 사라진다`);
 });
+
+// ── 모양 설정 화이트리스트 — 단축키 동기화(2026-08-04) ──
+//  단축키는 계정 전체 동기화다(PC 여러 대에서 같은 값을 쓴다). 서버는 **모양만 검사**한다:
+//  어떤 명령 id 가 유효한지는 클라이언트의 명령 표가 정본이고, 서버가 그 표를 따라 다니면
+//  앱/PC 를 올릴 때마다 서버도 같이 올려야 한다(구 서버가 새 명령을 조용히 버리는 사고).
+test('appearance.shortcuts — 모양만 검사하고 저장소를 오염시키지 않는다', () => {
+  const { _sanitizeAppearance } = require('../controllers/daemonController');
+
+  // 값 null = "이 명령은 단축키 없음"이라는 유효한 사용자 의사 → 지우지 않는다.
+  const ok = _sanitizeAppearance({ shortcuts: { 'ws.addIde': null, 'pane.close': 'Mod+Shift+K' } });
+  assert.deepStrictEqual(ok.shortcuts, { 'ws.addIde': null, 'pane.close': 'Mod+Shift+K' });
+
+  // 서버가 모르는 명령 id 라도 모양만 맞으면 통과해야 한다(신규 클라이언트 하위호환).
+  const future = _sanitizeAppearance({ shortcuts: { 'brand.newThing': 'Mod+J' } });
+  assert.deepStrictEqual(future.shortcuts, { 'brand.newThing': 'Mod+J' });
+
+  // 모양이 아닌 것은 버린다 — 키가 아닌 문자열, 객체 값, 너무 긴 값.
+  const dirty = _sanitizeAppearance({
+    shortcuts: {
+      'good.one': 'Mod+K',
+      'bad key': 'Mod+K',            // id 모양 아님(공백)
+      nodot: 'Mod+K',                // id 모양 아님(점 없음)
+      'bad.two': { a: 1 },           // 문자열/ null 아님
+      'bad.three': 'Mod+' + 'K'.repeat(80), // 길이 초과
+      'bad.four': '한글조합',          // 허용 문자 아님
+    },
+  });
+  assert.deepStrictEqual(dirty.shortcuts, { 'good.one': 'Mod+K' });
+
+  // 빈 객체 = "전부 기본값으로" 라는 유효한 상태다(누락과 구분).
+  assert.deepStrictEqual(_sanitizeAppearance({ shortcuts: {} }).shortcuts, {});
+  // 아예 안 보내면 shortcuts 키가 생기지 않는다(기존 값 보존).
+  assert.strictEqual('shortcuts' in (_sanitizeAppearance({ uiFont: 'gowun' }) || {}), false);
+
+  // 기존 키는 그대로 화이트리스트로 걸러진다(회귀 확인).
+  assert.deepStrictEqual(_sanitizeAppearance({ uiFont: 'nope', codeFont: 'fira' }), { codeFont: 'fira' });
+});

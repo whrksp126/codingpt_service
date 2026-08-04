@@ -240,6 +240,11 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   ide close                             IDE pane 닫기
   ide close-file <파일경로>             열린 파일 탭 하나 닫기
   ide list                              지금 열린 파일 목록
+  review [<파일>...] [--staged] [--title <t>] [--timeout <초>=1800]
+                                        지금 변경한 것을 사용자에게 **리뷰받는다**. IDE 가 리뷰 모드로
+                                        바뀌고 사용자가 덩어리마다 승인/거절·코멘트를 단 뒤 보내면
+                                        그 결과가 JSON 으로 돌아온다(파일 생략 = 변경된 파일 전부).
+                                        결과: {status:"submitted"|"cancelled"|"timeout", files:[...]}
 
   # 브라우저 자동화 (프리뷰 페이지 — 한 기기에서 실행해 결과 회신)
   browser snapshot                      인터랙티브 요소 트리(ref 포함)
@@ -470,6 +475,25 @@ async function main() {
         // 이어받기: 현재(또는 --on) 기기의 프리뷰를 --to 기기로 세션·쿠키째 옮긴다.
         if (c2 === 'handoff') return out(await request('ui.previewHandoff', { to: flags.to, timeoutMs: 35000 }), flags, 'ok');
         break;
+      }
+      /**
+       * 사용자 리뷰 요청 — **에이전트가 스스로 판단해서** 쓰는 도구다. 강제 관문이 아니다.
+       *  사람이 읽는 시간을 기다리므로 기본 타임아웃이 길다(30분). 그동안 이 프로세스는 블록된다 —
+       *  터미널에서 `cpt review` 를 친 그 자리에서 결과 JSON 이 나온다.
+       */
+      case 'review': {
+        const secs = flags.timeout != null && flags.timeout !== true ? Number(flags.timeout) : undefined;
+        const timeoutMs = Number.isFinite(secs) && secs > 0 ? Math.round(secs * 1000) : 30 * 60 * 1000;
+        const r = await request('ui.review', {
+          files: rest.filter(Boolean),
+          staged: !!flags.staged,
+          title: typeof flags.title === 'string' ? flags.title : undefined,
+          timeoutMs,
+          // CLI 요청 타임아웃은 리뷰 대기보다 넉넉해야 한다 — 여기서 먼저 끊으면 사용자가
+          //  화면에서 보내기를 눌러도 받을 사람이 없다.
+        }, { timeoutMs: timeoutMs + 30000 });
+        if (r && r.noChanges) return out(r, flags, '변경 없음 — 리뷰할 것이 없습니다');
+        return printJson(r);
       }
       case 'ide': {
         const sid = flags.sid || undefined;

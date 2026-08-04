@@ -149,6 +149,43 @@ diff 문서에는 반영되지 않는다(최신을 보려면 다시 `ide diff`).
 띄우지 않고 "변경 없음"을 돌려준다. 큰 diff 는 256KB 에서 잘리고(truncated), git 저장소가
 아니거나 워크스페이스 밖 경로면 에러다.
 
+### 사용자에게 리뷰받기 (review)
+
+```
+cpt review                              # 지금 변경한 파일 전부를 사용자에게 리뷰 요청
+cpt review src/a.ts src/b.ts            # 특정 파일만
+cpt review --staged                     # 스테이징된 변경만
+cpt review --title "인증 리팩터링"        # 리뷰 제목(화면 상단)
+cpt review --timeout 600                # 기다릴 시간(초, 기본 1800)
+```
+
+사용자 화면(PC/폰)의 IDE 가 리뷰 모드로 바뀐다. 사용자는 **덩어리마다 승인/거절**하고 바뀐 줄에
+코멘트를 달 수 있고, 다 되면 [보내기]를 누른다. 그때까지 이 명령은 **블록**된다.
+
+결과(stdout, JSON):
+
+```json
+{ "reviewId": "rv_...", "status": "submitted",
+  "files": [{ "path": "src/a.ts", "verdict": "rejected",
+              "hunks": [{ "index": 0, "decision": "approve" },
+                        { "index": 1, "decision": "reject" }],
+              "comments": [{ "hunk": 1, "side": "new", "line": 42, "text": "여기 상수로 빼줘" }] }],
+  "note": "전체적으로 좋아요" }
+```
+
+- `status`: `submitted`(사용자가 보냄) / `cancelled`(사용자가 취소) / `timeout`(시간 초과).
+  **`cancelled` 는 승인이 아니다** — 안 본 변경을 통과시키지 말 것.
+- `verdict`: 덩어리 판정에서 파생 — `approved`(전부 승인) / `rejected`(하나라도 거절) /
+  `partial`(안 정한 것이 있음). `decision: "skipped"` = 사용자가 그 덩어리를 안 정했다.
+- `side`/`line`: 코멘트 좌표. `new` = 지금 파일의 줄 번호, `old` = 고치기 전 파일의 줄 번호.
+- 코멘트는 **모아서 한 번에** 온다(한 줄 달 때마다 깨우지 않는다). 되돌리기는 없다 — 거절과
+  코멘트를 읽고 **네가 고친다**.
+
+정직성 계약: 이 도구는 **네가 판단해서 쓰는 것**이지 강제 관문이 아니다. 사용자가 다 보고 싶어
+할 만한 변경일 때 쓰면 되고, 자잘한 수정까지 매번 부르면 방해가 된다. 화면이 하나도 안 켜져
+있으면 리뷰를 띄우지 못하고 에러가 난다(그때는 그냥 평소대로 진행하면 된다). 변경이 없으면
+"변경 없음"을 돌려준다.
+
 ## 4. 화면 배치 (layout)
 
 ```

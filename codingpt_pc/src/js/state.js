@@ -107,6 +107,9 @@ export async function loadMe() {
     // 모양 설정(계정 동기화) 부트 적용 — 서버 정본을 로컬 캐시/화면에 반영(서버로 되밀지 않음).
     if (state.me && state.me.appearance) {
       try { (await import("./theme.js")).applyRemoteAppearance(state.me.appearance); } catch (_) {}
+      // 단축키도 같은 봉투(appearance.shortcuts)로 온다 — PC 를 여러 대 쓰면 한 대에서 바꾼 것을
+      //  다른 대에서 다시 잡을 이유가 없다.
+      try { (await import("./shortcuts.js")).applyRemoteShortcuts(state.me.appearance.shortcuts); } catch (_) {}
     }
     state.authChecked = true; // 페어링됐는데 me 가 null 이면(=토큰 폐기됨) 로그인 게이트가 뜬다.
   } catch (_) {

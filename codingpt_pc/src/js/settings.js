@@ -35,11 +35,13 @@ let section = "general";
 let connMode = null; // 'paired' | 'unpaired'
 let query = "";
 let webLogin = null; // 웹 로그인 폴링 세션
+let scCleanup = null; // 단축키 화면의 키 가로채기 해제자(섹션 이동 시 반드시 호출)
 
 const NAV = [
   { key: "general", label: "일반", group: "시작", icon: "sliders", keywords: "자동 실행 시작 로그인" },
   { key: "agents", label: "에이전트", group: "작업 환경", icon: "terminal", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
   { key: "commands", label: "저장한 명령", group: "작업 환경", icon: "play", keywords: "퀵 커맨드 quick command 단축 실행 프롬프트 npm run dev" },
+  { key: "shortcuts", label: "단축키", group: "작업 환경", icon: "sliders", keywords: "키보드 keyboard shortcut 키 조합 팔레트 command palette 재바인딩 rebind" },
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
   { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
@@ -92,6 +94,8 @@ export function updateSettings() {
   if (!show) {
     stopWebLogin();
     closeAgentPanels();   // 설치 패널의 xterm/PTY 스트림 정리(닫힌 화면이 스트림을 붙들지 않게)
+    // 단축키 화면이 keydown 을 물고 있으면 설정을 닫아도 앱이 먹통이다.
+    if (scCleanup) { try { scCleanup(); } catch (_) { /* noop */ } scCleanup = null; }
     connMode = null;
     return;
   }
@@ -127,6 +131,9 @@ function renderNav() {
 
 // force = 탭 전환 등으로 강제 재구성. 아니면 상태만 갱신.
 function renderSection(force) {
+  // 단축키 화면이 keydown 을 capture 로 가로챈 채로 떠나면 앱 전체가 먹통이 된다 — 어떤 경로로
+  //  섹션이 바뀌든 여기서 먼저 푼다(단축키 섹션 자신이 다시 걸어 준다).
+  if (scCleanup && section !== "shortcuts") { try { scCleanup(); } catch (_) { /* noop */ } scCleanup = null; }
   // 메인 영역 상단 헤더의 제목을 현재 섹션으로(사이드바 말고 메인에 명확히 구분된 헤더).
   const titleEl = root && root.querySelector("#smTitle");
   if (titleEl) titleEl.textContent = (NAV.find((n) => n.key === section) || {}).label || "";
@@ -195,6 +202,18 @@ function renderSection(force) {
     import("./quick-commands.js")
       .then((m) => m.renderManageInto(host, null, { title: false }))
       .catch(() => { host.textContent = "목록을 불러오지 못했어요."; });
+  } else if (section === "shortcuts") {
+    // 단축키 — 명령 팔레트의 목록과 **같은 표**를 그린다(commands.js). 표에 줄을 더하면 두 곳에
+    //  동시에 나타난다.
+    contentEl.innerHTML = `
+      <div class="sm-section-title">단축키</div>
+      <div id="scHost"></div>`;
+    const host = contentEl.querySelector("#scHost");
+    // 조합을 받는 중에 화면을 떠나면 키를 계속 삼킨다 → 섹션이 바뀔 때 반드시 해제한다.
+    if (scCleanup) { try { scCleanup(); } catch (_) {} scCleanup = null; }
+    import("./shortcuts-view.js")
+      .then((m) => { scCleanup = m.renderShortcutsInto(host); })
+      .catch(() => { host.textContent = "단축키 목록을 불러오지 못했어요."; });
   } else if (section === "appearance") {
     contentEl.innerHTML = `
       <div class="sm-section-title">인터페이스</div>

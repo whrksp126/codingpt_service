@@ -121,6 +121,12 @@ export function toggleLatestUnread() {
   jumpLatestUnread((n) => jumpToNotification(n));
 }
 
+/** 알림 패널 열고/닫기 — 명령 팔레트(notif.panel)가 벨 클릭과 같은 길을 타게 한다. */
+export function toggleNotifPanel() {
+  if (!notifPanel) return;
+  notifOpen ? closeNotif() : openNotif();
+}
+
 // 알림 패널 — punch-through(프리뷰=아래층) 덕에 평범한 DOM 으로 프리뷰 위에 뜬다.
 function openNotif() {
   notifOpen = true;

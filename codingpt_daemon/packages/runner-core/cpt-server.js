@@ -811,6 +811,23 @@ async function dispatch(req, conn) {
   //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
   //   이번에 데몬 쪽에만 프로세스 이름을 붙이면서 갈릴 뻔했다. Rust 사본은 제거하고 여기로 모은다.
   //  CAPABILITIES 비공개(앱 내부 배관) — 터미널 안 AI 는 자기 셸에서 lsof 를 쓰면 된다.
+  // 코드 리뷰(2026-08-04) — **화면이 부르는 쪽**만 여기에 있다(제출/조회/취소).
+  //  띄우는 쪽(`ui.review`)은 아래 ui.* 와 함께 있다 — 그쪽은 워크스페이스 컨텍스트가 필요하다.
+  //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 **자기가 요청한 리뷰를 스스로 승인**할 경로가
+  //   되면 리뷰라는 것 자체가 무의미해진다(approval.respond·agents.wire 를 닫은 것과 같은 이유).
+  if (cmd.startsWith('review.')) {
+    const reviewLib = lazyMod('./review');
+    const a = req.args || {};
+    if (cmd === 'review.pending') return { items: reviewLib.listPending(typeof a.ws === 'string' ? a.ws : undefined) };
+    if (cmd === 'review.get') {
+      const s2 = reviewLib.get(a.id);
+      // 없으면 **없다고 분명히 답한다** — 화면이 유령 리뷰를 붙들지 않게.
+      return s2 ? reviewLib.payload(s2) : { reviewId: String(a.id || ''), status: 'gone' };
+    }
+    if (cmd === 'review.submit') { reviewLib.submit(a.id, a.body || a); return { ok: true }; }
+    if (cmd === 'review.cancel') { reviewLib.cancel(a.id, a.reason); return { ok: true }; }
+    throw new Error('알 수 없는 리뷰 명령: ' + cmd);
+  }
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
     if (!proxyLib) throw new Error('이 데몬은 포트 조회를 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -1132,6 +1149,48 @@ async function dispatch(req, conn) {
       const target = await resolveTargetDevice(args.on);
       return sendUiCommand('ideDiff', { path: rel, staged, diffText, truncated, sid: args.sid, ws: resolved.cwdRel },
         { mode: 'target', target, timeoutMs: args.timeoutMs });
+    }
+    /**
+     * 코드 리뷰 요청(2026-08-04) — 에이전트가 **스스로 판단해서** 부르는 도구다(사용자 확정:
+     *  "우리는 agent 가 사용할 수 있는 도구를 만들어준 거고, 자기가 판단이 들면 알아서 쓴다").
+     *  강제로 이 모드를 거치게 하지 않는다.
+     *
+     * 흐름: 여기서 세션을 만들고 화면에 **띄우기만** 한 뒤(짧은 왕복), 결과는 데몬-로컬 대기로
+     *  받는다. 한 번의 ui_command 로 사람을 기다릴 수 없기 때문이다(60초 상한) — 자세한 이유는
+     *  review.js 머리주석.
+     */
+    case 'ui.review': {
+      const reviewLib = lazyMod('./review');
+      const staged = !!args.staged;
+      // 파일을 지정하지 않으면 지금 변경된 것 전부. 에이전트가 방금 고친 것을 그대로 보여 주는
+      //  가장 흔한 쓰임이라 기본값으로 둔다.
+      let paths = Array.isArray(args.files) ? args.files.map((p2) => String(p2 || '')).filter(Boolean) : [];
+      if (!paths.length) {
+        paths = (await runGit(abs, ['diff', '--name-only', ...(staged ? ['--staged'] : [])]))
+          .split('\n').map((x) => x.trim()).filter(Boolean);
+      }
+      if (!paths.length) return { noChanges: true };
+      const files = [];
+      for (const f of paths.slice(0, reviewLib.MAX_FILES)) {
+        const rel = wsRelPath(abs, f);
+        const raw = await runGit(abs, ['diff', ...(staged ? ['--staged'] : []), '--', rel]).catch(() => '');
+        if (!raw.trim()) continue;               // 변경 없는 파일은 리뷰에 올리지 않는다
+        const { diffText, truncated } = capDiff(raw);
+        files.push({ path: rel, diffText, truncated });
+      }
+      if (!files.length) return { noChanges: true };
+      const session = reviewLib.create({ title: args.title, files, cwd: abs, ws: resolved.cwdRel });
+      const target = await resolveTargetDevice(args.on);
+      try {
+        await sendUiCommand('review', reviewLib.payload(session), { mode: 'target', target, timeoutMs: 15000 });
+      } catch (e) {
+        // 화면에 못 띄웠으면 **기다리지 않는다** — 아무도 안 보는 리뷰를 30분 붙들면 그 터미널이
+        //  죽은 것처럼 보인다. 세션을 닫고 실패를 그대로 올린다.
+        reviewLib.cancel(session.id, 'no_screen');
+        throw e;
+      }
+      const outcome = await reviewLib.waitFor(session.id, args.timeoutMs);
+      return { reviewId: session.id, ...outcome };
     }
     // 변경 파일 일괄 열기 — name-only 후 기존 ideOpen/ideDiff 를 150ms 간격 순차 발행(신규 클라 핸들러 불필요).
     case 'ui.ideOpenChanged': {
@@ -1892,6 +1951,9 @@ const CAPABILITIES = [
   'ui.wsSelect', 'ui.wsClose', 'ui.layoutTree', 'ui.layoutSplit', 'ui.newPane', 'ui.focusPane', 'ui.moveSurface', 'ui.closeSurface', 'ui.setRatio',
   'ui.previewOpen', 'ui.previewNavigate', 'ui.previewReload', 'ui.previewClose', 'ui.previewDevtools', 'ui.previewInfo', 'ui.previewInspect', 'ui.previewHandoff',
   'ui.ideOpen', 'ui.ideClose', 'ui.ideCloseFile', 'ui.ideList', 'ui.ideDiff', 'ui.ideOpenChanged',
+  // 리뷰는 **요청만** 공개한다. 제출/취소(review.*)는 비공개 — 자기가 요청한 리뷰를 스스로
+  //  승인할 수 있으면 리뷰가 무의미해진다.
+  'ui.review',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
