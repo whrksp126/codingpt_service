@@ -81,9 +81,27 @@ for (const lang of ['ko', 'en']) {
 // ── 3. 화면 규율 ────────────────────────────────────────────────────────────
 const pcIde = strip(read(path.join(PC, 'ide.js')));
 ok(/previewHost/.test(pcIde), 'PC 는 에디터를 없애지 않고 형제로 둔다');
-ok(/PV\.canFallBackToText\(K\.kind\)/.test(pcIde), 'PC: 원문 보기는 되돌릴 수 있는 종류에만');
+ok(/PV\.canFallBackToText\(f\.preview\.kind\)/.test(pcIde), 'PC: 전환 토글은 되돌릴 수 있는 종류에만');
 const appPv = strip(read(path.join(APP, 'workspace/ide/FilePreview.tsx')));
-ok(/PV\.canFallBackToText\(data\.kind\)/.test(appPv), '앱: 원문 보기는 되돌릴 수 있는 종류에만');
+
+// ── ★ 미리보기 ⇄ 원문 토글은 **양방향**이고 **본문 밖**에 있다 ──────────────────
+//  사용자 신고(2026-08-04): 미리보기 헤더 안의 [원문 보기]를 누르면 원문으로 가는데, 그 헤더가
+//  통째로 사라져 **되돌아올 버튼이 없었다**. 두 플랫폼 모두 같은 증상이었다.
+//  고친 계약: ① 헤더 바 제거 ② 터미널 TUI⇄채팅 토글과 같은 우측 상단 버튼 ③ **원문 모드에서도 노출**.
+ok(!/ide-pv-bar/.test(pcIde) && !/ide-pv-bar/.test(read(path.join(PC, '../styles.css'))
+  .replace(/\/\*[\s\S]*?\*\//g, '')),
+  'PC: 한 방향뿐이던 미리보기 헤더 바가 남아 있지 않다');
+ok(/ide-mode-toggle/.test(pcIde), 'PC: 우측 상단 토글이 있다');
+ok(/f\.asText = !f\.asText/.test(pcIde), '★ PC: 토글이 양방향이다(true 고정이 아니다)');
+// 토글은 미리보기 분기 **밖**에서도 동기화돼야 한다 — 원문 분기에서도 호출하는지 센다.
+ok((pcIde.match(/_syncPreviewToggle\(group\)/g) || []).length >= 3,
+  '★ PC: 원문 분기를 포함한 모든 활성화 경로에서 토글을 갱신한다');
+ok(!/flexDirection: 'row'[\s\S]{0,200}TX\.asText/.test(appPv),
+  '앱: 한 방향뿐이던 미리보기 헤더 바가 남아 있지 않다');
+ok(/asText: !c\[rel\]\.asText/.test(strip(read(path.join(APP, 'workspace/IdeBody.tsx')))),
+  '★ 앱: 토글이 양방향이다(true 고정이 아니다)');
+ok(/canFallBackToText\(buf\.preview\.kind\)/.test(strip(read(path.join(APP, 'workspace/IdeBody.tsx')))),
+  '앱: 전환 토글은 되돌릴 수 있는 종류에만');
 ok(/Platform\.OS !== 'ios'[\s\S]{0,80}notOnThisDevice/.test(appPv),
   '앱: 안드로이드 PDF 는 빈 화면 대신 사실을 말한다');
 const appIde = strip(read(path.join(APP, 'workspace/IdeBody.tsx')));

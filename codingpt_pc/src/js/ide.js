@@ -153,7 +153,18 @@ export class IdeView {
     g.previewHost = document.createElement("div");
     g.previewHost.className = "ide-preview";
     g.previewHost.style.display = "none";
-    g.wrap.append(g.tabsBar, g.editorHost, g.previewHost, g.empty);
+    // 미리보기 ⇄ 원문 토글 — 터미널의 TUI⇄채팅 토글과 **같은 모양·같은 자리**(본문 우측 상단),
+    //  사용자 확정 2026-08-04. 종전엔 미리보기 위에 제목+[원문 보기] 바가 한 줄 있었는데,
+    //  원문으로 가면 그 바가 통째로 사라져 **되돌아올 길이 없었다**(사용자 신고).
+    //  ★ 이 노드는 한 번만 만들고 절대 remove 하지 않는다 — 매 렌더마다 다시 만들면 mousedown
+    //   타깃이 mouseup 전에 소멸해 WebKit 이 click 을 아예 발화하지 않는다(pane.js 의 같은 함정을
+    //   그대로 답습하지 않기 위한 것). 숨김은 `.hidden` 클래스로만.
+    g.modeBtn = document.createElement("button");
+    g.modeBtn.className = "ide-mode-toggle hidden";
+    g.modeBtn.type = "button";
+    g._modeGlyph = "";
+    g.modeBtn.addEventListener("click", (e) => { e.stopPropagation(); this._togglePreviewMode(g); });
+    g.wrap.append(g.tabsBar, g.editorHost, g.previewHost, g.empty, g.modeBtn);
     g.cm = CM(g.editorHost, {
       value: "", mode: "javascript", theme: cmThemeName(),
       lineNumbers: true, autoCloseBrackets: true, matchBrackets: true, styleActiveLine: true,
@@ -656,22 +667,11 @@ export class IdeView {
     const host = group.previewHost;
     host.innerHTML = "";
     const K = f.preview;
-    const bar = document.createElement("div");
-    bar.className = "ide-pv-bar";
-    const name = document.createElement("span");
-    name.className = "ide-pv-name";
-    name.textContent = baseName(f.path);
-    bar.append(name);
-    if (PV.canFallBackToText(K.kind)) {
-      const t = document.createElement("button");
-      t.className = "ide-pv-btn";
-      t.textContent = FPT.asText;
-      t.addEventListener("click", () => { f.asText = true; this._activate(group, group.open.indexOf(f)); });
-      bar.append(t);
-    }
+    // 제목 줄은 없다(사용자 확정 2026-08-04) — 파일명은 탭이 이미 말하고 있고, 전환은 우측 상단
+    //  토글(`ide-mode-toggle`)이 맡는다. 그 토글은 원문 모드에서도 그대로 떠 있어야 한다.
     const body = document.createElement("div");
     body.className = "ide-pv-body";
-    host.append(bar, body);
+    host.append(body);
 
     if (K.kind === "markdown") {
       body.className += " ide-pv-md";
@@ -897,6 +897,7 @@ export class IdeView {
         RV.renderReviewFile(group.previewHost, this.review, () => this._paintReviewBar());
         this._renderTabs();
         this._renderBody();
+        this._syncPreviewToggle(group);   // 리뷰 탭엔 preview 가 없다 → 자동으로 숨는다
         this._paintReviewBar();
         return;
       }
@@ -913,6 +914,7 @@ export class IdeView {
       this._renderPreview(group, f);
       this._renderTabs();
       this._renderBody();
+      this._syncPreviewToggle(group);
       return;
     }
     group.previewHost.style.display = "none";
@@ -924,8 +926,40 @@ export class IdeView {
     setTimeout(() => group.cm.refresh(), 0);
     this._renderTabs();
     this._renderBody();
+    // ★ 원문 모드에서도 토글을 유지한다 — 종전엔 이 분기에 버튼이 아예 없어서 한 번 원문으로
+    //   가면 미리보기로 되돌아올 길이 없었다(사용자 신고 증상).
+    this._syncPreviewToggle(group);
     if (focusEditor) group.cm.focus();
   }
+  /** 미리보기 ⇄ 원문. **양방향**이다 — 한쪽만 있으면 되돌아올 길이 없다(그게 이 라운드의 신고 증상). */
+  _togglePreviewMode(group) {
+    const f = group.open[group.active];
+    if (!f || !f.preview || !PV.canFallBackToText(f.preview.kind)) return;
+    f.asText = !f.asText;
+    this._activate(group, group.active);
+  }
+
+  /**
+   * 토글의 노출/글리프를 활성 파일에 맞춘다. 터미널 모드 토글(_syncModeToggle)의 규칙을 그대로 쓴다:
+   *  · 글리프는 **눌렀을 때 갈 곳**을 가리킨다(지금 상태가 아니라).
+   *  · 상태를 색으로 칠하지 않는다(accent = 상태 신호 전용) — 글리프 교체로만 표현한다.
+   *  · 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다).
+   */
+  _syncPreviewToggle(group) {
+    const b = group.modeBtn;
+    if (!b) return;
+    const f = group.open[group.active];
+    const on = !!(f && f.preview && PV.canFallBackToText(f.preview.kind));
+    b.classList.toggle("hidden", !on);
+    if (!on) return;
+    b.title = f.asText ? FPT.asPreview : FPT.asText;
+    const want = f.asText ? "preview" : "code";
+    if (group._modeGlyph !== want) {
+      group._modeGlyph = want;
+      b.innerHTML = f.asText ? icons.eye({ size: 15 }) : icons.code({ size: 15 });
+    }
+  }
+
   _renderTabs() {
     for (const group of this.groups.values()) this._renderGroupTabs(group);
   }

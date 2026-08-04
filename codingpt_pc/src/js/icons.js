@@ -46,6 +46,9 @@ export const icons = {
   gear: (o) => svg('<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.1 5.1l2.1 2.1M16.8 16.8l2.1 2.1M18.9 5.1l-2.1 2.1M7.2 16.8l-2.1 2.1"/>', o),
   sliders: (o) => svg('<line x1="4" y1="6" x2="20" y2="6"/><circle cx="9" cy="6" r="2"/><line x1="4" y1="12" x2="20" y2="12"/><circle cx="15" cy="12" r="2"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="11" cy="18" r="2"/>', o),
   globe: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.6 2.4 2.6 15.6 0 18M12 3c-2.6 2.4-2.6 15.6 0 18"/>', o),
+  // 미리보기 ⇄ 원문 토글의 '미리보기' 쪽 글리프(코드는 code). 터미널의 TUI⇄채팅 토글과 같은 규칙 —
+  //  글리프는 **지금 상태가 아니라 눌렀을 때 갈 곳**을 가리킨다.
+  eye: (o) => svg('<path d="M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', o),
   code: (o) => svg('<path d="M8.5 8l-4 4 4 4"/><path d="M15.5 8l4 4-4 4"/><path d="M13.5 6l-3 12"/>', o),
   user: (o) => svg('<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>', o),
   caretRight: (o) => svg('<path d="M9 5l7 7-7 7"/>', o),

@@ -3,6 +3,7 @@
 export const FILE_PREVIEW_TEXT = {
   ko: {
     asText: '원문 보기',
+    asPreview: '미리보기로 보기',
     openAsText: '텍스트로 열기',
     unsupported: '미리보기를 지원하지 않는 형식이에요',
     badJson: 'JSON 형식이 아니에요. 원문 보기로 확인하세요.',
@@ -13,6 +14,7 @@ export const FILE_PREVIEW_TEXT = {
   },
   en: {
     asText: 'View source',
+    asPreview: 'Back to preview',
     openAsText: 'Open as text',
     unsupported: 'Preview is not supported for this format',
     badJson: 'Not valid JSON. Use \u201cView source\u201d instead.',
