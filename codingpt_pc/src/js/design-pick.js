@@ -268,7 +268,7 @@ async function _finish(mode, payload) {
   const deadline = Date.now() + 10000;
   for (;;) {
     await sleep(200);
-    const raw = await api.previewEval(mode.pvId, i18n.t("JSON.stringify(window.__cptPick&&window.__cptPick.takeCrop?window.__cptPick.takeCrop():{error:'픽커 없음'})"));
+    const raw = await api.previewEval(mode.pvId, "JSON.stringify(window.__cptPick&&window.__cptPick.takeCrop?window.__cptPick.takeCrop():{error:'픽커 없음'})");
     let c = null;
     try { c = JSON.parse(raw); } catch (_) { /* null 등 */ }
     if (c) {
