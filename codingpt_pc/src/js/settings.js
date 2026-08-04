@@ -47,9 +47,9 @@ const NAV = [
   { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일 언어 language locale 다국어 영어 english 日本語 中文" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
   { key: "plugins", label: "플러그인", group: "작업 환경", icon: "tools", keywords: "마켓플레이스 marketplace 확장 extension 스킬 skill 저장한 명령 번역" },
-  { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
-  { key: "supporter", label: "Supporter", group: "연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
-  { key: "mobile", label: "모바일 연결", group: "연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
+  { key: "connection", label: "계정 및 기기", group: "기기 연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
+  { key: "supporter", label: "Supporter", group: "기기 연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
+  { key: "mobile", label: "모바일 연결", group: "기기 연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
   { key: "security", label: "권한 및 보안", group: "보안", icon: "shield", keywords: "알림 다운로드 데스크탑 문서 폴더 접근 암호화" },
   { key: "about", label: "앱 정보", group: "시스템", icon: "monitor", keywords: "버전 업데이트" },
 ];
@@ -111,17 +111,18 @@ function renderNav() {
   const q = query.trim().toLowerCase();
   let renderedGroup = "";
   for (const item of NAV) {
-    if (q && !`${item.label} ${item.group} ${item.keywords}`.toLowerCase().includes(q)) continue;
+    // 검색은 번역된 이름과 원문 둘 다로 찾는다(영어로 보다가 한국어로 쳐도 찾히게).
+    if (q && !`${i18n.t(item.label)} ${i18n.t(item.group)} ${item.label} ${item.group} ${item.keywords}`.toLowerCase().includes(q)) continue;
     if (item.group !== renderedGroup) {
       const group = document.createElement("div");
       group.className = "sm-navgroup";
-      group.textContent = item.group;
+      group.textContent = i18n.t(item.group);
       navEl.appendChild(group);
       renderedGroup = item.group;
     }
     const b = document.createElement("button");
     b.className = "sm-navitem" + (item.key === section ? " active" : "");
-    b.innerHTML = `<span class="sm-navic">${icons[item.icon]({ size: 17 })}</span><span>${item.label}</span>`;
+    b.innerHTML = `<span class="sm-navic">${icons[item.icon]({ size: 17 })}</span><span>${i18n.t(item.label)}</span>`;
     b.addEventListener("click", () => {
       if (section === item.key) return;
       section = item.key;
@@ -139,7 +140,7 @@ function renderSection(force) {
   if (scCleanup && section !== "shortcuts") { try { scCleanup(); } catch (_) { /* noop */ } scCleanup = null; }
   // 메인 영역 상단 헤더의 제목을 현재 섹션으로(사이드바 말고 메인에 명확히 구분된 헤더).
   const titleEl = root && root.querySelector("#smTitle");
-  if (titleEl) titleEl.textContent = (NAV.find((n) => n.key === section) || {}).label || "";
+  if (titleEl) titleEl.textContent = i18n.t((NAV.find((n) => n.key === section) || {}).label || "");
   if (section === "connection") {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
