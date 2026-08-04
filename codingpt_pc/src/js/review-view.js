@@ -15,6 +15,7 @@ import { icons } from "./icons.js";
 import { tx } from "./text/index.js";
 import { REVIEW_TEXT } from "./text/review.js";
 import * as D from "./diff-parse.js";
+import * as i18n from './i18n/index.js';
 
 const TX = () => tx(REVIEW_TEXT);
 
@@ -53,7 +54,7 @@ async function call(state, cmd, args, isLocal) {
   if (cmd === "review.submit") return api.reviewSubmit(body);
   if (cmd === "review.cancel") return api.reviewCancel(body);
   if (cmd === "review.get") return api.reviewGet(body);
-  throw new Error("알 수 없는 리뷰 명령: " + cmd);
+  throw new Error(i18n.t('알 수 없는 리뷰 명령: ') + cmd);
 }
 
 export async function submitReview(state, isLocal) {

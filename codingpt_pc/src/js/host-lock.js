@@ -1,3 +1,4 @@
+import * as i18n from './i18n/index.js';
 // host-lock.js — 호스트(내 PC)별 열쇠 세대 보관소 = **정직한 자물쇠 표시**의 근거.
 //
 // 왜 이 모듈이 필요한가:
@@ -106,16 +107,16 @@ export function isHostRow(d) {
  *    이 함수는 순수하므로 그 신선도를 스스로 지킬 수 없다 = 호출부(설정 렌더)의 입력이 정본이다.
  */
 export function hostLockLabel(selfReady, hostEpoch, myEpoch, accountEpoch) {
-  if (!selfReady) return { text: "평문", tone: "off" };            // 이 기기에 열쇠가 없다
-  if (hostEpoch == null) return { text: "확인 중", tone: "wait" }; // 아직 모름(구 back 포함)
-  if (Number(hostEpoch) <= 0) return { text: "평문(열쇠 없음)", tone: "off" };
+  if (!selfReady) return { text: i18n.t('평문'), tone: "off" };            // 이 기기에 열쇠가 없다
+  if (hostEpoch == null) return { text: i18n.t('확인 중'), tone: "wait" }; // 아직 모름(구 back 포함)
+  if (Number(hostEpoch) <= 0) return { text: i18n.t('평문(열쇠 없음)'), tone: "off" };
   const mine = myEpoch == null ? 0 : Number(myEpoch);
   // 세대 불일치 = 지금 보내는 봉투가 그 PC 에서 거절된다(또는 그 PC 의 봉투를 내가 못 연다) = 평문 폴백.
-  if (mine > 0 && mine !== Number(hostEpoch)) return { text: "확인 중", tone: "wait" };
+  if (mine > 0 && mine !== Number(hostEpoch)) return { text: i18n.t('확인 중'), tone: "wait" };
   // 내가 계정 세대에 뒤처졌다 = 상대가 같은 옛 세대라도 회전이 이미 일어났다 → 초록 금지.
   const acct = accountEpoch == null ? 0 : Number(accountEpoch);
-  if (mine > 0 && acct > 0 && mine !== acct) return { text: "확인 중", tone: "wait" };
-  return { text: "암호화됨", tone: "on" };
+  if (mine > 0 && acct > 0 && mine !== acct) return { text: i18n.t('확인 중'), tone: "wait" };
+  return { text: i18n.t('암호화됨'), tone: "on" };
 }
 
 export default { setHostE2eeEpoch, applyRunnerStatus, hostE2eeEpoch, resetHostLocks, hostLockLabel, isHostRow };

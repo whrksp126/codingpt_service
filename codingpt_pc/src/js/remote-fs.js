@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import { sealedRpc } from "./e2ee.js";
 import lan from "./lan.js";
+import * as i18n from './i18n/index.js';
 
 const enc = encodeURIComponent;
 
@@ -68,8 +69,8 @@ export function makeRemoteFs(hostDeviceId) {
     async fsRead(rel) {
       const e = (await direct("fs.read", { path: rel || "" })) || await sealed("fs.read", { path: rel || "" });
       const r = e || await api.backApi("GET", `/api/daemon/fs/read?${q(rel)}`);
-      if (r?.binary) throw "바이너리 파일은 열 수 없습니다.";
-      if (r?.tooLarge) throw "파일이 너무 큽니다(2MB 초과).";
+      if (r?.binary) throw i18n.t('바이너리 파일은 열 수 없습니다.');
+      if (r?.tooLarge) throw i18n.t('파일이 너무 큽니다(2MB 초과).');
       return r?.content ?? "";
     },
     // 변형 계열도 같은 규율(봉투 우선 → 미지원이면 평문). 반환값은 쓰지 않으므로 then(()=>{}) 유지.
@@ -79,7 +80,7 @@ export function makeRemoteFs(hostDeviceId) {
       const e = (await direct("fs.read", { path: rel || "", base64: true }))
         || await sealed("fs.read", { path: rel || "", base64: true });
       const r = e || await api.backApi("GET", `/api/daemon/fs/read?${q(rel)}&base64=1`);
-      if (!r?.base64) throw "파일을 읽을 수 없습니다.";
+      if (!r?.base64) throw i18n.t('파일을 읽을 수 없습니다.');
       return { base64: r.base64, size: r.size || 0 };
     },
     async fsWrite(rel, content) { if (!(await direct("fs.write", { path: rel, content })) && !(await sealed("fs.write", { path: rel, content }))) await post("write", { path: rel, content }); },

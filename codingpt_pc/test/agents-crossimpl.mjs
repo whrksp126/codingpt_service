@@ -17,7 +17,19 @@ const ok = (cond, name, extra) => {
   if (cond) { pass++; console.log('PASS ' + name); }
   else { fail++; console.log('FAIL ' + name + (extra ? '  ' + extra : '')); }
 };
-const read = (p) => fs.readFileSync(p, 'utf8');
+// i18n 벗기기 — 이 아래 검사들은 **소스에 어떤 문구가 어디 쓰였는지**를 본다. 다국어를 켜면서
+//  화면 문구가 `i18n.t("…")` 로 감싸졌는데, 그건 이 검사들이 보려는 구조가 아니다(감싸는 방식이
+//  바뀔 때마다 무관한 검사가 무더기로 깨진다) → 비교 전에 껍데기만 벗긴다.
+const unwrapT = (s) => String(s)
+  // ① HTML 안에 끼운 형태: `>${i18n.t('이 기기')}</div>` → `>이 기기</div>` (텍스트 그 자체로).
+  .replace(/\$\{i18n\.t\((?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\)\}/g,
+    (_m, dq, sq) => String(dq != null ? dq : sq))
+  // ② 값으로 쓰인 형태: `L(i18n.t('열쇠 있음'), "on")` → `L("열쇠 있음", "on")`.
+  //  따옴표 **모양까지 통일**한다. 치환기는 홑따옴표를 쓰는데 옛 소스는 겹따옴표라, 벗기기만 하면
+  //  검사 문자열과 계속 어긋난다.
+  .replace(/i18n\.t\((?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\)/g,
+    (_m, dq, sq) => '"' + String(dq != null ? dq : sq).replace(/"/g, '\\"') + '"');
+const read = (p) => unwrapT(fs.readFileSync(p, 'utf8'));
 // 소스 핀은 **주석을 걷어낸 뒤** 검사한다 — 함정을 설명하는 주석 자체에 걸려 거짓 실패/거짓 성공을
 //  내는 사고를 이 라운드 이전에 세 번 겪었다.
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

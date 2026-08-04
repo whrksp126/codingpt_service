@@ -17,6 +17,7 @@ import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { state as appState } from "./state.js";
+import * as i18n from './i18n/index.js';
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -134,7 +135,7 @@ export function stripAgentGlyph(name) {
   return out.trim() || s.trim();   // 글리프만 있는 제목이면 원본을 남긴다(빈 라벨 금지)
 }
 export function termTabLabel(t) {
-  return stripAgentGlyph(t.title) || "터미널";
+  return stripAgentGlyph(t.title) || i18n.t('터미널');
 }
 
 // ── 원격 워크스페이스 프리뷰 — 로컬 포트 포워더 우선, back HTTP 프록시 폴백 ──
@@ -156,7 +157,7 @@ function ensureLocalForward(port, hostDeviceId) {
   if (hit && Date.now() - hit.at < FORWARD_REFRESH_MS) return hit.promise;
   const promise = (async () => {
     const r = await api.backApi("POST", "/api/daemon/forward/start", { port, hostDeviceId });
-    if (!r?.token) throw new Error("포워딩 토큰 발급 실패");
+    if (!r?.token) throw new Error(i18n.t('포워딩 토큰 발급 실패'));
     // LAN 직결(기능4) — 같은 Wi-Fi 면 직결 좌표를 함께 넘긴다. 데몬이 **연결마다** 직결을 먼저 쓰고,
     //  실패하면 버퍼를 승계해 그 연결만 릴레이(token)로 넘긴다 → 사용자 무자각.
     //  grant 취득 실패/미지원은 null 이라 여기서 아무 일도 일어나지 않는다(기존 동작 그대로).
@@ -228,7 +229,7 @@ function fillPreviewEmpty(host) {
   box.className = "preview-empty";
   const msg = document.createElement("div");
   msg.className = "preview-empty-msg";
-  msg.textContent = "URL 또는 데브서버 포트를 입력하세요";
+  msg.textContent = i18n.t('URL 또는 데브서버 포트를 입력하세요');
   const row = document.createElement("div");
   row.className = "preview-empty-row";
   const mkb = (label, handler) => {
@@ -241,14 +242,14 @@ function fillPreviewEmpty(host) {
   row.append(
     // 종전엔 "첫 번째 dev 포트"를 알아서 열었다(못 찾으면 "dev 포트 없음" 토스트가 전부).
     //  포트가 여러 개인 게 보통이라, 무엇이 열릴지 모른 채 누르는 버튼이었다 → 목록에서 고르게 한다.
-    mkb("dev 열기", async (ev) => {
+    mkb(i18n.t('dev 열기'), async (ev) => {
       try {
         const m = await import("./ports.js");
         const uic = await import("./ui-channel.js");
         m.openPortsMenu(ev.currentTarget, { onPick: (port) => uic.openPortPC(port) });
       } catch (_) { /* noop */ }
     }),
-    mkb("내려받기 (이어하기)", async () => {
+    mkb(i18n.t('내려받기 (이어하기)'), async () => {
       try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
     }),
   );
@@ -266,12 +267,12 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     b.innerHTML = iconFn({ size: 14 });
     return b;
   };
-  const back = mk(icons.chevronLeft, "뒤로");
-  const fwd = mk(icons.chevronRight, "앞으로");
-  const reload = mk(icons.refresh, "새로고침");
+  const back = mk(icons.chevronLeft, i18n.t('뒤로'));
+  const fwd = mk(icons.chevronRight, i18n.t('앞으로'));
+  const reload = mk(icons.refresh, i18n.t('새로고침'));
   const input = document.createElement("input");
   input.className = "preview-url";
-  input.placeholder = "URL 또는 검색어 (예: localhost:3000 · 날씨)";
+  input.placeholder = i18n.t('URL 또는 검색어 (예: localhost:3000 · 날씨)');
   // macOS 자동수정/자동대문자 제안 풍선이 추천 드롭다운 위에 겹치는 것 방지.
   input.setAttribute("autocorrect", "off");
   input.setAttribute("autocapitalize", "off");
@@ -279,7 +280,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
   input.setAttribute("autocomplete", "off");
   input.value = initialUrl || "";
   // 테마·개발자도구·올리기·외부열기 → ⋯ 메뉴 하나로 통합.
-  const more = mk(icons.dots, "더보기");
+  const more = mk(icons.dots, i18n.t('더보기'));
   bar.append(back, fwd, reload, input, more);
 
   const st = { url: initialUrl || "", dark: !!initialDark, disposed: false, meta: { title: "", favicon: "" } };
@@ -340,10 +341,10 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
       });
       menu.appendChild(b);
     };
-    row(icons.moon, "다크모드", { toggle: { get: () => st.dark, set: doTheme } });
-    row(icons.tools, "개발자 도구", { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
+    row(icons.moon, i18n.t('다크모드'), { toggle: { get: () => st.dark, set: doTheme } });
+    row(icons.tools, i18n.t('개발자 도구'), { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
     // Design Mode — 1회성 요소 선택(토글 아님): 선택 → 소스 위치+크롭샷을 터미널에 [디자인] 줄로 첨부.
-    row(icons.crosshair, "요소 선택", {
+    row(icons.crosshair, i18n.t('요소 선택'), {
       onClick: () => {
         const ctx = getCtx?.();
         import("./design-pick.js")
@@ -351,8 +352,8 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
           .catch(() => {});
       },
     });
-    row(icons.handoffOut, "스냅샷 등록", { onClick: doSave });
-    row(icons.external, "외부 열기", { onClick: doExt });
+    row(icons.handoffOut, i18n.t('스냅샷 등록'), { onClick: doSave });
+    row(icons.external, i18n.t('외부 열기'), { onClick: doExt });
     const r = more.getBoundingClientRect();
     menu.style.top = (r.bottom + 4) + "px";
     menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
@@ -404,7 +405,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
           + `<span class="pvs-title">localhost:${it.port}</span>`
           + `<span class="pvs-url">${escapeHtml(it.command || "")}${it.other ? " · 다른 곳" : ""}</span>`;
       } else {
-        row.innerHTML = `<span class="pvs-ic">${icons.search({ size: 13 })}</span><span class="pvs-title">${escapeHtml(it.q)}</span><span class="pvs-url">Google 검색</span>`;
+        row.innerHTML = `<span class="pvs-ic">${icons.search({ size: 13 })}</span><span class="pvs-title">${escapeHtml(it.q)}</span><span class="pvs-url">${i18n.t('Google 검색')}</span>`;
       }
       const pick = () => navTo(it.kind === "h" ? it.u : it.kind === "p" ? `http://localhost:${it.port}` : smartUrl(it.q));
       row.addEventListener("mousedown", (e) => { e.preventDefault(); pick(); });
@@ -649,6 +650,7 @@ export class PaneView {
 
     if (node.kind === "terminal") this._buildTerminal();
     else if (node.kind === "ide") this._buildIde();
+    else if (node.kind === "emulator") this._buildEmulator();
     else this._buildFrame(node.kind);
     this.buildHead();
   }
@@ -679,7 +681,7 @@ export class PaneView {
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
-          : t.kind === "ide" ? "IDE" : (t.metaTitle || "프리뷰");
+          : t.kind === "ide" ? "IDE" : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
         // ★ 탭 우측의 채팅 글리프는 **폐기**했다(사용자 확정 2026-07-27): 좌측 로고 + pane 안의 토글로
@@ -696,7 +698,7 @@ export class PaneView {
           || (!!tcwd && (appState.notifications || []).some((n) => !n.read && n.cwd === tcwd && n.win === twin))
         );
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`
-          + (waiting ? `<span class="ptab-wait" title="응답을 기다리는 중"></span>` : "");
+          + (waiting ? `<span class="ptab-wait" title="${i18n.t('응답을 기다리는 중')}"></span>` : "");
         const x = document.createElement("span");
         x.className = "ptab-x";
         x.innerHTML = icons.x({ size: 11 });
@@ -727,7 +729,7 @@ export class PaneView {
       const lbl = document.createElement("div");
       lbl.className = "ptab active static";
       const icHtml = isIde ? icons.code({ size: 13 }) : previewTabIconHtml(this.node.metaFav);
-      const lblText = isIde ? "IDE" : (this.node.metaTitle || "프리뷰");
+      const lblText = isIde ? "IDE" : (this.node.metaTitle || i18n.t('프리뷰'));
       lbl.innerHTML = `<span class="ptab-ic">${icHtml}</span><span class="ptab-title">${escapeHtml(lblText)}</span>`;
       const x = document.createElement("span");
       x.className = "ptab-x";
@@ -768,10 +770,10 @@ export class PaneView {
     this.emptyEl.style.display = "none";
     const msg = document.createElement("div");
     msg.className = "pane-term-empty-msg";
-    msg.textContent = "열린 터미널이 없습니다";
+    msg.textContent = i18n.t('열린 터미널이 없습니다');
     const btn = document.createElement("button");
     btn.className = "pane-term-empty-btn";
-    btn.innerHTML = `${icons.terminal({ size: 14 })}<span>새 터미널</span>`;
+    btn.innerHTML = `${icons.terminal({ size: 14 })}<span>${i18n.t('새 터미널')}</span>`;
     btn.addEventListener("click", () => this.addTab());
     this.emptyEl.append(msg, btn);
     this.body.appendChild(this.emptyEl);
@@ -802,7 +804,7 @@ export class PaneView {
       if (parts[0] === "notify") this.ctx.onNotify?.(this.id, this._streamWin(), parts[1] || "", parts.slice(2).join(";"));
     });
     this._registerOsc(99, (data) => this.ctx.onNotify?.(this.id, this._streamWin(), "", String(data).replace(/^.*?;/, "")));
-    if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", "알림"));
+    if (this.term.onBell) this.term.onBell(() => this.ctx.onNotify?.(this.id, this._streamWin(), "", i18n.t('알림')));
     this._buildChat();
     this._buildModeToggle();
   }
@@ -842,7 +844,7 @@ export class PaneView {
     if (!st.on) return;
     // ★ 채팅 모드를 **색으로** 표시하지 않는다(사용자 확정 2026-07-27). 액센트 배경은 "선택된 필터"처럼
     //  읽혀 상태와 행동이 헷갈렸다 → 상태 표현은 글리프 교체 하나로만 한다(같은 이유로 `.active` 도 제거).
-    b.title = st.chat ? "터미널(TUI) 보기" : "채팅으로 보기";
+    b.title = st.chat ? i18n.t('터미널(TUI) 보기') : i18n.t('채팅으로 보기');
     // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다 — ② 항).
     //  크기 16 = 워크스페이스 헤더 추가 버튼과 같은 값(앱은 자기 헤더 기준 19).
     const want = st.chat ? "term" : "chat";
@@ -1002,6 +1004,17 @@ export class PaneView {
     return this.ctx.isLocal ? null : makeRemoteFs(this.ctx.hostDeviceId);
   }
 
+  // 모바일 화면 — 프리뷰와 달리 네이티브 웹뷰가 아니라 그냥 <img> 다(겹침·좌표 보정이 없다).
+  _buildEmulator() {
+    import("./emulator-view.js").then((m) => {
+      if (this._disposed) return;
+      this.emu = new m.EmulatorView(this.body, {
+        deviceId: this.node.deviceId || null,
+        onDeviceChange: (id) => { this.node.deviceId = id; this.ctx.persist?.(); },
+      });
+    }).catch(() => { /* 모듈 로드 실패 = 화면이 비어 있을 뿐 — pane 전체를 죽이지 않는다 */ });
+  }
+
   _buildIde() {
     this.ide = new IdeView(this.ctx.localPath || "", this.body, {
       openPath: this.node.openPath || null,
@@ -1064,7 +1077,7 @@ export class PaneView {
   _refreshStaticTabMeta() {
     if (this.node.kind !== "preview") return;
     const t = this.head.querySelector(".ptab-title");
-    if (t) t.textContent = this.node.metaTitle || "프리뷰";
+    if (t) t.textContent = this.node.metaTitle || i18n.t('프리뷰');
     const ic = this.head.querySelector(".ptab-ic");
     if (ic) ic.innerHTML = previewTabIconHtml(this.node.metaFav);
   }
@@ -1482,7 +1495,7 @@ export class PaneView {
         }
       }).catch((e) => {
         this._attachedWin = null;
-        this.term.write("\r\n\x1b[31m터미널 연결 실패: " + e + "\x1b[0m\r\n");
+        this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
         this._scheduleReopen(2500); // 일시 오류(서버 재기동 중 등)에 고착되지 않게 자동 재시도
       });
     } else {
@@ -1498,11 +1511,11 @@ export class PaneView {
         // 끊기면 자동 재연결 — 반드시 새 토큰 발급(만료 dterm 토큰 재시도 = 서버 502 스팸의 근원).
         ws.onclose = () => {
           if (this._reopenStop || !this.mounted) return;
-          this.term.write("\r\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\r\n");
+          this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
           this._scheduleRemoteReopen();
         };
       } catch (e) {
-        this.term.write("\r\n\x1b[31m원격 터미널 실패: " + e + "\x1b[0m\r\n");
+        this.term.write(i18n.t("\n\x1b[31m원격 터미널 실패: ") + e + "\x1b[0m\r\n");
         this._scheduleRemoteReopen();
       }
     }
@@ -1730,7 +1743,7 @@ export class PaneView {
   _onExit() {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
     if (this._expectExit) { this._expectExit = false; return; } // 탭 전환의 의도된 교체 — 무시
-    this.term?.write("\r\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\r\n");
+    this.term?.write(i18n.t("\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\n"));
     this._attachedWin = null;
     this._reopenTries = 0;
     this._scheduleReopen(1500);
@@ -1763,7 +1776,7 @@ export class PaneView {
       api.ptyOpen(this.id, this.ctx.localPath || "", tab.win ?? 0, cols || 80, rows || 24)
         .then((resolved) => {
           this._attachedWin = typeof resolved === "number" ? resolved : tab.win;
-          this.term?.write("\x1b[90m[재연결됨]\x1b[0m\r\n");
+          this.term?.write(i18n.t("\x1b[90m[재연결됨]\x1b[0m\n"));
         })
         .catch(() => this._scheduleReopen(3000));
     }, delay);
@@ -1896,11 +1909,11 @@ export class PaneView {
     bar.className = "pane-search";
     bar.innerHTML = `
       <span class="pane-search-ic">${icons.search({ size: 13 })}</span>
-      <input class="pane-search-input" type="text" placeholder="터미널 검색" />
+      <input class="pane-search-input" type="text" placeholder="${i18n.t('터미널 검색')}" />
       <span class="pane-search-count">0/0</span>
-      <button class="pane-search-btn" data-a="prev" title="이전 (⇧Enter)">${icons.chevronUp({ size: 14 })}</button>
-      <button class="pane-search-btn" data-a="next" title="다음 (Enter)">${icons.chevronDown({ size: 14 })}</button>
-      <button class="pane-search-btn" data-a="close" title="닫기 (Esc)">${icons.x({ size: 14 })}</button>`;
+      <button class="pane-search-btn" data-a="prev" title="${i18n.t('이전 (⇧Enter)')}">${icons.chevronUp({ size: 14 })}</button>
+      <button class="pane-search-btn" data-a="next" title="${i18n.t('다음 (Enter)')}">${icons.chevronDown({ size: 14 })}</button>
+      <button class="pane-search-btn" data-a="close" title="${i18n.t('닫기 (Esc)')}">${icons.x({ size: 14 })}</button>`;
     this.body.appendChild(bar);
     // 검색 위젯(top:8/right:14/z-index:40)과 모드 토글(top:6/right:12/z-index:36)은 좌표가 겹친다.
     //  z-index 를 40 위로 올리면 검색 입력을 가리므로, 검색이 열려 있는 동안 토글을 비활성 은닉한다.
@@ -1961,6 +1974,9 @@ export class PaneView {
     this._mixed.clear();
     try { this.chat?.dispose(); } catch (_) {}
     this.chat = null;
+    // 모바일 화면 — 프레임 루프가 계속 돌면 pane 을 닫아도 데이터를 계속 먹는다.
+    try { this.emu?.dispose(); } catch (_) {}
+    this.emu = null;
     try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {

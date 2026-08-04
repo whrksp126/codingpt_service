@@ -1,5 +1,6 @@
 // main.js — 엔트리. 셸 마운트 + 상태 구독 + 이벤트/단축키 배선 + 초기 로드.
-import "./theme.js"; // 모양(테마·글꼴) — 첫 페인트 전에 data-theme/폰트 변수 적용(최상단 유지)
+import { bootLang } from "./theme.js"; // 모양(테마·글꼴·언어) — 첫 페인트 전에 data-theme/폰트/언어 적용(최상단 유지)
+bootLang(); // ★ 어떤 화면 코드보다 먼저. 이 뒤에 그려지는 문구부터 선택된 언어로 나온다.
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
@@ -35,6 +36,7 @@ import { mountApprovals, updateApprovals } from "./approvals.js";
 // (★ 개정 12: 기기 승인 표면 삭제 — 승인 절차 자체가 없어졌다. 연동은 설정 > 계정 > 기기에서 코드로.)
 import { maybeShowOnboarding } from "./agents-view.js";
 import { startUpdateScheduler, applyNow, deferApply } from "./update-scheduler.js";
+import * as i18n from './i18n/index.js';
 
 // ── 앱 종료 가드 — Rust 가 미저장 변경을 감지해 종료를 막고 cpt-quit-guard 를 보낸다. ──
 //  스펙(사용자 확정): 취소 / (저장 안 하고) 종료 2택. 저장은 탭의 ● 표시 + ⌘S(또는 자동저장 완료 대기).
@@ -48,12 +50,12 @@ function initQuitGuard() {
     bd.className = "quit-guard-backdrop";
     bd.innerHTML = `
       <div class="quit-guard">
-        <div class="qg-title">저장되지 않은 변경이 있습니다</div>
+        <div class="qg-title">${i18n.t('저장되지 않은 변경이 있습니다')}</div>
         <div class="qg-desc">${files.length}개 파일이 아직 저장되지 않았습니다. 지금 종료하면 변경 내용이 사라집니다.</div>
         <div class="qg-files">${list}</div>
         <div class="qg-actions">
-          <button class="qg-btn qg-cancel">취소</button>
-          <button class="qg-btn qg-quit">저장 안 하고 종료</button>
+          <button class="qg-btn qg-cancel">${i18n.t('취소')}</button>
+          <button class="qg-btn qg-quit">${i18n.t('저장 안 하고 종료')}</button>
         </div>
       </div>`;
     bd.querySelector(".qg-cancel").addEventListener("click", () => bd.remove());
@@ -78,7 +80,7 @@ function setBootstrap(label, progress) {
 }
 
 function finishBootstrap() {
-  setBootstrap("준비됐어요", 100);
+  setBootstrap(i18n.t('준비됐어요'), 100);
   requestAnimationFrame(() => requestAnimationFrame(() => {
     bootstrapGateEl?.classList.add("done");
     setTimeout(() => bootstrapGateEl?.remove(), 220);
@@ -177,6 +179,7 @@ registerCommands({
   "ws.addTerminal": () => smartAdd("terminal"),
   "ws.addIde": () => smartAdd("ide"),
   "ws.addPreview": () => smartAdd("preview"),
+  "ws.addEmulator": () => smartAdd("emulator"),
   // 이 둘은 고르는 것이 목적이라 메뉴를 연다(헤더 버튼과 같은 자리에서).
   "ws.quickCommands": () => headerButton("ws.quickCommands")?.click(),
   "ws.ports": () => headerButton("ws.ports")?.click(),
@@ -241,7 +244,7 @@ function startPreviewShieldWatch() {
 // 네트워크/업데이트 서버 장애만 현재 버전으로 계속 진행하고, 업데이트가 있으면 본 화면을 열기 전에
 // 다운로드·설치·재시작까지 완료한다.
 async function maybeInstallSetupUpdate() {
-  setBootstrap("최신 버전을 확인하는 중", 18);
+  setBootstrap(i18n.t('최신 버전을 확인하는 중'), 18);
   let result;
   try {
     result = await api.updateCheck();
@@ -270,22 +273,22 @@ async function maybeInstallSetupUpdate() {
 }
 
 (async function init() {
-  setBootstrap("앱 설정을 불러오는 중", 7);
+  setBootstrap(i18n.t('앱 설정을 불러오는 중'), 7);
   // DMG 재설치 시 WebKit 저장소 위치를 네이티브가 추측해 지우지 않는다. 웹뷰가 자기 설치 단위
   // 온보딩 키만 직접 정리한다(테마 등 일반 설정과 서버 작업 공간은 보존).
   const resetOnboarding = await api.consumeInstallOnboardingReset().catch(() => false);
   if (resetOnboarding) resetOnboardingForInstall();
   await S.restorePersisted();
-  setBootstrap("PC 연결 상태를 확인하는 중", 13);
+  setBootstrap(i18n.t('PC 연결 상태를 확인하는 중'), 13);
   state.daemon = await api.daemonStatus().catch(() => null);
   state.paired = !!state.daemon?.paired;
   await maybeInstallSetupUpdate();
 
-  setBootstrap("계정과 작업 공간을 불러오는 중", 38);
+  setBootstrap(i18n.t('계정과 작업 공간을 불러오는 중'), 38);
   await Promise.allSettled([S.loadWorkspaces(), S.loadMe()]);
-  setBootstrap("연결된 기기와 알림을 불러오는 중", 64);
+  setBootstrap(i18n.t('연결된 기기와 알림을 불러오는 중'), 64);
   await Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]);
-  setBootstrap("권한과 보안 상태를 확인하는 중", 82);
+  setBootstrap(i18n.t('권한과 보안 상태를 확인하는 중'), 82);
   await api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
 
   const setupPending = restorePendingSetup();
@@ -295,7 +298,7 @@ async function maybeInstallSetupUpdate() {
   startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
   initOsDrop(); // OS 파일 드래그앤드랍 → 터미널 pane 경로 삽입
   initQuitGuard(); // 미저장 IDE 변경이 있을 때 앱 종료(Cmd+Q·트레이) 확인 다이얼로그
-  setBootstrap("화면을 준비하는 중", 94);
+  setBootstrap(i18n.t('화면을 준비하는 중'), 94);
   render();
   refreshWsMeta();
   finishBootstrap();
@@ -327,21 +330,21 @@ function renderUpdateBanner(info) {
   if (!info) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.innerHTML = `
     <div class="ub-title">업데이트 준비됨 · ${info.version}</div>
-    <div class="ub-body">지금 적용하면 약 20초 연결이 끊겨요. <b>하던 터미널 작업은 그대로 유지</b>됩니다.</div>
+    <div class="ub-body">${i18n.t('지금 적용하면 약 20초 연결이 끊겨요.')} <b>${i18n.t('하던 터미널 작업은 그대로 유지')}</b>${i18n.t('됩니다.')}</div>
     <div class="ub-row">
-      <button id="ubLater">나중에</button>
-      <button id="ubNow" class="primary">지금 적용</button>
+      <button id="ubLater">${i18n.t('나중에')}</button>
+      <button id="ubNow" class="primary">${i18n.t('지금 적용')}</button>
     </div>`;
   el.classList.remove("hidden");
   el.querySelector("#ubLater").onclick = () => deferApply();
   el.querySelector("#ubNow").onclick = async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true;
-    btn.textContent = "적용 중…";
+    btn.textContent = i18n.t('적용 중…');
     try { await applyNow(); } catch (err) {
       btn.disabled = false;
-      btn.textContent = "지금 적용";
-      el.querySelector(".ub-body").textContent = "적용 실패: " + err;
+      btn.textContent = i18n.t('지금 적용');
+      el.querySelector(".ub-body").textContent = i18n.t('적용 실패: ') + err;
     }
   };
 }

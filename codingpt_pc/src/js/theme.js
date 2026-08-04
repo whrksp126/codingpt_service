@@ -7,6 +7,7 @@
 //  · 글꼴은 전부 앱 내장(styles.css @font-face) — 3플랫폼 동일 목록. 값 키는 백엔드
 //    화이트리스트(daemonController.APPEARANCE_KEYS)와 반드시 일치.
 import { api } from "./api.js";
+import * as I18N from "./i18n/index.js";
 
 const KEY_THEME = "cpt.theme";
 const KEY_UI_FONT = "cpt.uiFont";
@@ -119,12 +120,44 @@ if (media) {
   media.addEventListener ? media.addEventListener("change", onMedia) : media.addListener(onMedia);
 }
 
+// ── 화면 언어(계정 동기화) ─────────────────────────────────────────────────────
+// 'system' = 브라우저(=OS) 언어를 따른다. 기본값을 한국어로 박으면 해외 사용자가 읽을 수 없는
+//  화면에서 설정을 찾아 들어가야 한다.
+// 적용은 **창 새로고침**이다 — PC 화면은 명령형 DOM 이라 문구가 바뀌어도 저절로 다시 안 그려진다.
+//  언어 전환은 드문 행위라 이 편이 화면마다 구독을 심는 것보다 확실하다(빠뜨린 화면이 없다).
+const KEY_LANG = "cpt.lang";
+let langSetting = "system";
+try { const v = localStorage.getItem(KEY_LANG); if (v) langSetting = v; } catch (_) {}
+
+export function getLangSetting() { return langSetting; }
+export function isValidLangSetting(v) { return v === "system" || I18N.isLang(v); }
+export function effectiveLang(v = langSetting) {
+  return v === "system" ? I18N.matchDeviceLang(navigator.language || "en") : v;
+}
+export function langOptions() {
+  return [
+    { value: "system", label: "시스템 언어" },
+    ...I18N.LANGS.map((l) => ({ value: l, label: I18N.LANG_LABELS[l] })),
+  ];
+}
+/** 부팅 시 1회 — 화면을 그리기 전에 불러야 한다(그 전에 그린 것은 한국어로 굳는다). */
+export function bootLang() { I18N.setLangRuntime(effectiveLang()); }
+export function setLangSetting(v) {
+  if (!isValidLangSetting(v) || v === langSetting) return;
+  langSetting = v;
+  try { localStorage.setItem(KEY_LANG, v); } catch (_) {}
+  I18N.setLangRuntime(effectiveLang());
+  schedulePush();
+  // 새로고침 전에 서버 저장이 나가도록 한 틱 준다(디바운스 400ms — 그보다 넉넉히).
+  setTimeout(() => { try { location.reload(); } catch (_) {} }, 500);
+}
+
 // ── 계정 동기화 — 로컬 변경은 디바운스 후 서버로, 서버발(appearance_event)은 push 없이 적용만. ──
 let pushTimer = 0;
 function schedulePush() {
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
-    api.updateAppearance({ uiFont, codeFont: monoFont, termStyle }).catch(() => {});
+    api.updateAppearance({ uiFont, codeFont: monoFont, termStyle, lang: langSetting }).catch(() => {});
   }, 400);
 }
 function persist() {
@@ -141,6 +174,12 @@ export function applyRemoteAppearance(a) {
   if (UI_VALUES.includes(a.uiFont) && a.uiFont !== uiFont) { uiFont = a.uiFont; changed = true; }
   if (MONO_VALUES.includes(a.codeFont) && a.codeFont !== monoFont) { monoFont = a.codeFont; changed = true; }
   if (STYLE_VALUES.includes(a.termStyle) && a.termStyle !== termStyle) { termStyle = a.termStyle; changed = true; }
+  // 언어는 다른 기기에서 바뀌어도 **여기서 새로고침하지 않는다** — 작업 중인 터미널을 남이 끊는
+  //  꼴이 된다. 값만 저장해 두고 다음 실행부터 적용한다.
+  if (isValidLangSetting(a.lang) && a.lang !== langSetting) {
+    langSetting = a.lang;
+    try { localStorage.setItem(KEY_LANG, langSetting); } catch (_) {}
+  }
   if (changed) { persist(); emit(); }
 }
 

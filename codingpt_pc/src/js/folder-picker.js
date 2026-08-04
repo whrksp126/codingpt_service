@@ -4,6 +4,7 @@
 //  PC 가 여러 대(이 PC + 외부)면 폴더 선택 전 PC 선택 카드를 먼저 띄운다.
 import { api } from "./api.js";
 import { state, loadWorkspaces, ensureRuntime, emit, createLocalWorkspace, blockedOffline } from "./state.js";
+import * as i18n from './i18n/index.js';
 
 let el = null; // 오버레이
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -21,7 +22,7 @@ function close() { if (el) { el.classList.add("hidden"); el.innerHTML = ""; } }
 // ── 진입 ──────────────────────────────────────────────────────────────
 export async function openNewWorkspace() {
   // 오프라인(캐시 목록) — 생성은 서버 메타가 원천이라 불가(사이드바 + 버튼도 같은 가드를 쓴다).
-  if (blockedOffline("워크스페이스 추가")) return;
+  if (blockedOffline(i18n.t('워크스페이스 추가'))) return;
   let devices = [];
   try {
     const res = await api.fetchDevices();
@@ -48,10 +49,10 @@ function renderPcSelect(self, externals) {
     b.addEventListener("click", onClick);
     return b;
   };
-  el.innerHTML = `<div class="fp-card fp-card-sm"><div class="fp-head"><div class="fp-title">어느 PC에 만들까요?</div></div><div class="fp-sub">워크스페이스를 만들 PC를 선택하세요.</div><div class="fp-pc-list"></div><div class="fp-actions"><button class="fp-btn fp-cancel">취소</button></div></div>`;
+  el.innerHTML = `<div class="fp-card fp-card-sm"><div class="fp-head"><div class="fp-title">${i18n.t('어느 PC에 만들까요?')}</div></div><div class="fp-sub">${i18n.t('워크스페이스를 만들 PC를 선택하세요.')}</div><div class="fp-pc-list"></div><div class="fp-actions"><button class="fp-btn fp-cancel">${i18n.t('취소')}</button></div></div>`;
   const list = el.querySelector(".fp-pc-list");
   // 이 PC(로컬) — 네이티브 피커.
-  list.appendChild(row(self ? `${self.name} (이 PC)` : "이 PC", self && self.platform, () => { close(); createLocalWorkspace(); }, true));
+  list.appendChild(row(self ? `${self.name} (이 PC)` : i18n.t('이 PC'), self && self.platform, () => { close(); createLocalWorkspace(); }, true));
   // 외부 PC — 컬럼 브라우저.
   externals.forEach((d) => list.appendChild(row(d.name || "PC", d.platform, () => renderColumnBrowser(d.id, d.name || "PC"), true)));
   el.querySelector(".fp-cancel").addEventListener("click", close);
@@ -72,7 +73,7 @@ async function loadCol(path) {
 function renderColumnBrowser(host, hostName) {
   ensureOverlay();
   B = { host, hostName, cols: [{ path: "", items: [], loading: true }], sel: [], editingCol: null, creating: false };
-  el.innerHTML = `<div class="fp-card"><div class="fp-head"><div class="fp-title">폴더 선택</div><button class="fp-newfolder">+ 새 폴더</button></div><div class="fp-path"></div><div class="fp-cols"></div><div class="fp-actions"><button class="fp-btn fp-cancel">취소</button><button class="fp-btn fp-designate">이 폴더로 지정</button></div></div>`;
+  el.innerHTML = `<div class="fp-card"><div class="fp-head"><div class="fp-title">${i18n.t('폴더 선택')}</div><button class="fp-newfolder">${i18n.t('+ 새 폴더')}</button></div><div class="fp-path"></div><div class="fp-cols"></div><div class="fp-actions"><button class="fp-btn fp-cancel">${i18n.t('취소')}</button><button class="fp-btn fp-designate">${i18n.t('이 폴더로 지정')}</button></div></div>`;
   el.querySelector(".fp-newfolder").addEventListener("click", () => { B.editingCol = B.cols.length - 1; paint(); });
   el.querySelector(".fp-cancel").addEventListener("click", close);
   el.querySelector(".fp-designate").addEventListener("click", designate);
@@ -87,7 +88,7 @@ function paint() {
   if (!el || !B) return;
   const tp = targetPath();
   const pathEl = el.querySelector(".fp-path");
-  if (pathEl) pathEl.textContent = `${B.hostName} / ${tp ? tp.split("/").join(" / ") : "홈"}`;
+  if (pathEl) pathEl.textContent = `${B.hostName} / ${tp ? tp.split("/").join(" / ") : i18n.t('홈')}`;
   const colsEl = el.querySelector(".fp-cols");
   if (!colsEl) return;
   colsEl.innerHTML = "";
@@ -100,7 +101,7 @@ function paint() {
       wrap.className = "fp-row fp-row-edit";
       wrap.innerHTML = `<span class="fp-folder">📁</span>`;
       const inp = document.createElement("input");
-      inp.className = "fp-newinput"; inp.placeholder = "새 폴더"; inp.spellcheck = false;
+      inp.className = "fp-newinput"; inp.placeholder = i18n.t('새 폴더'); inp.spellcheck = false;
       const commit = () => commitNewFolder(ci, inp.value);
       inp.addEventListener("keydown", (e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") { B.editingCol = null; paint(); } });
       inp.addEventListener("blur", commit);
@@ -109,9 +110,9 @@ function paint() {
       setTimeout(() => inp.focus(), 0);
     }
     if (col.loading) {
-      colEl.insertAdjacentHTML("beforeend", `<div class="fp-empty">불러오는 중…</div>`);
+      colEl.insertAdjacentHTML("beforeend", `<div class="fp-empty">${i18n.t('불러오는 중…')}</div>`);
     } else if (col.items.length === 0) {
-      if (B.editingCol !== ci) colEl.insertAdjacentHTML("beforeend", `<div class="fp-empty">하위 폴더 없음</div>`);
+      if (B.editingCol !== ci) colEl.insertAdjacentHTML("beforeend", `<div class="fp-empty">${i18n.t('하위 폴더 없음')}</div>`);
     } else {
       col.items.forEach((d) => {
         const selected = B.sel[ci] === d.path;
@@ -157,7 +158,7 @@ async function commitNewFolder(ci, name) {
 async function designate() {
   if (B.creating) return;
   const btn = el && el.querySelector(".fp-designate");
-  if (btn) { btn.disabled = true; btn.textContent = "지정 중…"; }
+  if (btn) { btn.disabled = true; btn.textContent = i18n.t('지정 중…'); }
   try {
     const w = await api.remoteWsCreate(targetPath(), B.host);
     close();
@@ -165,6 +166,6 @@ async function designate() {
     if (w && w.id) { state.activeWsId = w.id; ensureRuntime(w.id); state.view = "workspace"; emit(); }
   } catch (e) {
     console.error("워크스페이스 지정 실패:", e);
-    if (btn) { btn.disabled = false; btn.textContent = "이 폴더로 지정"; }
+    if (btn) { btn.disabled = false; btn.textContent = i18n.t('이 폴더로 지정'); }
   }
 }

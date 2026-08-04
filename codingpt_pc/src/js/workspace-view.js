@@ -15,6 +15,7 @@ import { QC_TEXT } from "./text/quick-commands.js";
 import { PALETTE_TEXT } from "./text/palette.js";
 import { bindings, IS_APPLE } from "./shortcuts.js";
 import { formatCombo } from "./commands.js";
+import * as i18n from './i18n/index.js';
 
 // 헤더 버튼 툴팁만 여기서 쓴다 — 나머지 문구는 quick-commands.js 가 같은 사전에서 읽는다.
 //  (동적 import 로 여는 모듈이라 버튼 자체는 여기 있어야 한다)
@@ -34,30 +35,30 @@ export function wvToast(msg) {
 export async function saveSnapshotAndToast() {
   const m = await import("./ui-channel.js");
   const r = await m.saveSnapshotPC();
-  wvToast(r.ok ? ("스냅샷 저장됨" + (r.label ? " · " + r.label : "")) : (r.error || "저장 실패"));
+  wvToast(r.ok ? (i18n.t('스냅샷 저장됨') + (r.label ? " · " + r.label : "")) : (r.error || i18n.t('저장 실패')));
 }
 
 // 내려받기 — PC 저장 스냅샷 목록 시트에서 선택해 활성 프리뷰로 복원.
 export async function pickSnapshotAndApply() {
   const m = await import("./ui-channel.js");
   const list = await m.listSnapshotsPC();
-  if (!list.length) { wvToast("저장된 스냅샷이 없어요 — 다른 기기에서 올리기로 저장해 보세요"); return; }
+  if (!list.length) { wvToast(i18n.t('저장된 스냅샷이 없어요 — 다른 기기에서 올리기로 저장해 보세요')); return; }
   const fmt = (t) => { const d = new Date(t); const p = (n) => String(n).padStart(2, "0"); return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
-  const applyOne = async (id) => { wvToast("불러오는 중…"); const r = await m.applySnapshotPC(id); if (!r.ok) wvToast(r.error || "복원 실패"); };
+  const applyOne = async (id) => { wvToast(i18n.t('불러오는 중…')); const r = await m.applySnapshotPC(id); if (!r.ok) wvToast(r.error || i18n.t('복원 실패')); };
   const overlay = document.createElement("div");
   overlay.className = "wv-sheet-overlay";
   const sheet = document.createElement("div");
   sheet.className = "wv-sheet";
   const title = document.createElement("div");
   title.className = "wv-sheet-title";
-  title.textContent = "이어할 스냅샷 선택";
+  title.textContent = i18n.t('이어할 스냅샷 선택');
   sheet.append(title);
   const close = () => overlay.remove();
   for (const s of list.slice(0, 12)) {
     const row = document.createElement("button");
     row.className = "wv-sheet-row";
     row.innerHTML = icons.globe({ size: 16 }) +
-      '<span>' + (s.label || "프리뷰") + '<small style="opacity:.6"> · ' + (s.device || "") + " " + fmt(s.createdAt) + '</small></span>';
+      '<span>' + (s.label || i18n.t('프리뷰')) + '<small style="opacity:.6"> · ' + (s.device || "") + " " + fmt(s.createdAt) + '</small></span>';
     row.addEventListener("click", async () => {
       close();
       await applyOne(s.id);
@@ -180,10 +181,10 @@ function beginTabDrag(srcId, index, e) {
   const tab = wholePane ? null : src.tabs[index];
   const tabIsTerm = tab ? isTermTab(tab) : false;
   const label = wholePane
-    ? (src.kind === "ide" ? "IDE" : "프리뷰")
+    ? (src.kind === "ide" ? "IDE" : i18n.t('프리뷰'))
     : tabIsTerm
-      ? tab?.title || (typeof tab?.win === "number" ? "터미널 " + tab.win : "터미널")
-      : tab?.kind === "ide" ? "IDE" : "프리뷰";
+      ? tab?.title || (typeof tab?.win === "number" ? i18n.t('터미널 ') + tab.win : i18n.t('터미널 '))
+      : tab?.kind === "ide" ? "IDE" : i18n.t('프리뷰');
   const ghostIcon = wholePane
     ? (src.kind === "ide" ? icons.code : icons.globe)
     : tabIsTerm ? icons.terminal : tab?.kind === "ide" ? icons.code : icons.globe;
@@ -529,7 +530,7 @@ function renderMainTop(ws) {
   }
   const name = document.createElement("span");
   name.className = "mt-name";
-  name.textContent = ws?.name || "워크스페이스";
+  name.textContent = ws?.name || i18n.t('워크스페이스');
   mtDyn.append(name);
   // 통합 추가 버튼(터미널/IDE/웹뷰) — pane 별 버튼 대신 여기 고정. 활성 pane 기준 자동 배치.
   if (ws) {
@@ -569,7 +570,7 @@ function renderMainTop(ws) {
     //  손대지 않는다 — tmux 자동 이름과 로고 감지가 이미 claude/codex 를 알아본다(사용자 확정).
     const termBtn = document.createElement("button");
     termBtn.className = "pane-ctrl";
-    termBtn.title = "터미널 추가";
+    termBtn.title = i18n.t('터미널 추가');
     termBtn.dataset.cmd = "ws.addTerminal";
     termBtn.innerHTML = icons.terminal({ size: 16 });
     termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
@@ -589,7 +590,7 @@ function renderMainTop(ws) {
     //  포트 목록에 닿는 유일한 자리다(주소창 드롭다운은 프리뷰가 이미 열려 있어야 보인다).
     const webBtn = document.createElement("button");
     webBtn.className = "pane-ctrl";
-    webBtn.title = "웹뷰 추가";
+    webBtn.title = i18n.t('웹뷰 추가');
     webBtn.dataset.cmd = "ws.ports";
     webBtn.innerHTML = icons.globe({ size: 16 });
     webBtn.addEventListener("click", (ev) => {
@@ -605,8 +606,10 @@ function renderMainTop(ws) {
       palDiv,
       qcBtn,
       termBtn,
-      mkBtn(icons.code, "IDE 추가", "ide"),
+      mkBtn(icons.code, i18n.t('IDE 추가'), "ide"),
       webBtn,
+      // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
+      mkBtn(icons.smartphone, i18n.t('모바일 화면 추가'), "emulator"),
     );
     mtDyn.append(spacer, adds);
   }
@@ -632,7 +635,7 @@ function openAddTermMenu(anchor) {
       b.addEventListener("click", () => { close(); onClick(); });
       menu.appendChild(b);
     };
-    row(`<span class="pvm-ic">${icons.terminal({ size: 15 })}</span><span class="pvm-label">터미널</span>`,
+    row(`<span class="pvm-ic">${icons.terminal({ size: 15 })}</span><span class="pvm-label">${i18n.t('터미널 ')}</span>`,
       () => smartAdd("terminal"));
     for (const a of cachedAgents().agents) {
       if (!a.installed) continue;
@@ -727,10 +730,10 @@ export function openSurfaces() {
   const out = [];
   T.eachLeaf(rt.layout, (leaf) => {
     if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
-    if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || "프리뷰" }); return; }
+    if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || i18n.t('프리뷰') }); return; }
     (leaf.tabs || []).forEach((t, i) => {
       const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : "terminal";
-      const label = kind === "terminal" ? termTabLabel(t) : kind === "ide" ? "IDE" : (t.url || "프리뷰");
+      const label = kind === "terminal" ? termTabLabel(t) : kind === "ide" ? "IDE" : (t.url || i18n.t('프리뷰'));
       out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });
     });
   });
@@ -769,7 +772,7 @@ export function updateWorkspaceView() {
   const rt = ws ? wsRuntime(ws.id) : null;
   if (!ws || !rt) {
     renderMainTop(null);
-    if (gridEl) gridEl.innerHTML = '<div class="ws-empty">워크스페이스를 선택하거나 추가하세요</div>';
+    if (gridEl) gridEl.innerHTML = `<div class="ws-empty">${i18n.t('워크스페이스를 선택하거나 추가하세요')}</div>`;
     disposeAll();
     return;
   }

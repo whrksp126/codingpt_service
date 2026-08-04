@@ -167,11 +167,15 @@ const appBody = appSrc.slice(appSrc.indexOf('export const PALETTE_TEXT'));
 const appDict = (await import('data:text/javascript,' + encodeURIComponent(
   appBody.replace('export const PALETTE_TEXT: Dict<PaletteText> =', 'export const PALETTE_TEXT =')))).PALETTE_TEXT;
 
-for (const lang of ['ko', 'en']) {
+// 2026-08-05 다국어를 켜면서 사전은 **한국어 한 벌**이 됐다(번역은 i18n 카탈로그가 갖는다).
+//  옛 `en` 반쪽은 지우기 전에 전부 카탈로그로 회수했다 — 여기서 en 을 찾으면 undefined 다.
+for (const lang of ['ko']) {
   const a = appDict[lang], p = pcText.PALETTE_TEXT[lang];
   ok(JSON.stringify(a) === JSON.stringify(p), `문구 사전이 통째로 일치(${lang})`);
 }
-for (const lang of ['ko', 'en']) {
+ok(appDict.en === undefined && pcText.PALETTE_TEXT.en === undefined,
+  'en 반쪽이 남아 있지 않다(두 메커니즘 공존 금지)');
+for (const lang of ['ko']) {
   const d = pcText.PALETTE_TEXT[lang];
   const ids = pcCmd.all.map((r) => r[0]).sort();
   const keys = Object.keys(d.cmd).sort();

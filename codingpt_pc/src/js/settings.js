@@ -23,8 +23,10 @@ import {
 import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
+  getLangSetting, setLangSetting, langOptions,
   TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
 } from "./theme.js";
+import * as i18n from './i18n/index.js';
 
 let root = null;
 let navEl = null;
@@ -42,7 +44,7 @@ const NAV = [
   { key: "agents", label: "에이전트", group: "작업 환경", icon: "terminal", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
   { key: "commands", label: "저장한 명령", group: "작업 환경", icon: "play", keywords: "퀵 커맨드 quick command 단축 실행 프롬프트 npm run dev" },
   { key: "shortcuts", label: "단축키", group: "작업 환경", icon: "sliders", keywords: "키보드 keyboard shortcut 키 조합 팔레트 command palette 재바인딩 rebind" },
-  { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일" },
+  { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일 언어 language locale 다국어 영어 english 日本語 中文" },
   { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
   { key: "connection", label: "계정 및 기기", group: "연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
   { key: "supporter", label: "Supporter", group: "연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
@@ -60,14 +62,14 @@ export function mountSettings(container) {
       <aside class="sm-nav">
         <div class="sm-search">
           <span class="sm-search-ic">${icons.search({ size: 15 })}</span>
-          <input class="sm-search-input" id="smSearch" placeholder="검색" />
+          <input class="sm-search-input" id="smSearch" placeholder="${i18n.t('검색')}" />
         </div>
         <div class="sm-navlist" id="smNav"></div>
       </aside>
       <div class="sm-main">
         <div class="sm-head">
           <div class="sm-head-title" id="smTitle"></div>
-          <button class="sm-close" id="smClose" title="닫기">${icons.x({ size: 18 })}</button>
+          <button class="sm-close" id="smClose" title="${i18n.t('닫기')}">${icons.x({ size: 18 })}</button>
         </div>
         <div class="sm-content" id="smContent"></div>
       </div>
@@ -161,7 +163,7 @@ function renderSection(force) {
       // 하단 요약/설명 문단은 사용자 확정으로 제거(2026-07-27) — 목록만 둔다.
       contentEl.innerHTML = `
         <div class="sm-card2">
-          <div class="sett-col"><span>이 PC의 AI 에이전트</span><div id="agentsBody" class="ag-list"></div></div>
+          <div class="sett-col"><span>${i18n.t('이 PC의 AI 에이전트')}</span><div id="agentsBody" class="ag-list"></div></div>
         </div>`;
       const body = contentEl.querySelector("#agentsBody");
       const paint = () => renderAgentList(body, { onChange: paint });
@@ -175,8 +177,8 @@ function renderSection(force) {
     contentEl.innerHTML = `
       <div class="sm-card2">
         <label class="sett-row sett-row-action" for="autostartChk">
-          <span class="sett-copy"><span class="sett-label">로그인 시 자동 실행</span><span class="sett-desc">Mac에 로그인하면 CodingPT를 자동으로 시작해요.</span></span>
-          <input id="autostartChk" type="checkbox" class="tgl" aria-label="로그인 시 자동 실행" />
+          <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
+          <input id="autostartChk" type="checkbox" class="tgl" aria-label="${i18n.t('로그인 시 자동 실행')}" />
         </label>
       </div>
       `;
@@ -193,59 +195,60 @@ function renderSection(force) {
     // 저장한 명령 — 관리(추가/수정/삭제) 전용. 실행은 워크스페이스 헤더 버튼과 팔레트가 맡는다.
     //  목록·편집기는 헤더 메뉴의 "명령 관리"와 **같은 함수**를 쓴다(두 곳에 따로 만들지 않는다).
     contentEl.innerHTML = `
-      <div class="sm-section-title">저장한 명령</div>
-      <div class="sm-section-note">자주 치는 터미널 명령이나 AI 에게 보낼 프롬프트를 저장해 두면,
-        워크스페이스 헤더의 실행 버튼과 명령 팔레트에서 한 번에 실행할 수 있어요.
-        저장 위치는 그 워크스페이스가 있는 PC 예요.</div>
+      <div class="sm-section-title">${i18n.t('저장한 명령')}</div>
+      <div class="sm-section-note">${i18n.t('자주 치는 터미널 명령이나 AI 에게 보낼 프롬프트를 저장해 두면,\n        워크스페이스 헤더의 실행 버튼과 명령 팔레트에서 한 번에 실행할 수 있어요.\n        저장 위치는 그 워크스페이스가 있는 PC 예요.')}</div>
       <div class="sm-card2" id="qcHost"></div>`;
     const host = contentEl.querySelector("#qcHost");
     import("./quick-commands.js")
       .then((m) => m.renderManageInto(host, null, { title: false }))
-      .catch(() => { host.textContent = "목록을 불러오지 못했어요."; });
+      .catch(() => { host.textContent = i18n.t('목록을 불러오지 못했어요.'); });
   } else if (section === "shortcuts") {
     // 단축키 — 명령 팔레트의 목록과 **같은 표**를 그린다(commands.js). 표에 줄을 더하면 두 곳에
     //  동시에 나타난다.
     contentEl.innerHTML = `
-      <div class="sm-section-title">단축키</div>
+      <div class="sm-section-title">${i18n.t('단축키')}</div>
       <div id="scHost"></div>`;
     const host = contentEl.querySelector("#scHost");
     // 조합을 받는 중에 화면을 떠나면 키를 계속 삼킨다 → 섹션이 바뀔 때 반드시 해제한다.
     if (scCleanup) { try { scCleanup(); } catch (_) {} scCleanup = null; }
     import("./shortcuts-view.js")
       .then((m) => { scCleanup = m.renderShortcutsInto(host); })
-      .catch(() => { host.textContent = "단축키 목록을 불러오지 못했어요."; });
+      .catch(() => { host.textContent = i18n.t('단축키 목록을 불러오지 못했어요.'); });
   } else if (section === "appearance") {
     contentEl.innerHTML = `
-      <div class="sm-section-title">인터페이스</div>
+      <div class="sm-section-title">${i18n.t('인터페이스')}</div>
       <div class="sm-card2">
-        <div class="sett-row"><span>테마</span>
+        <!-- 언어 — 계정 동기화. 목록 이름은 그 언어 자신의 표기라 번역하지 않는다
+             (영어로 "Japanese" 라고 쓰면 일본어 쓰는 사람이 못 찾는다). -->
+        <div class="sett-row"><span>${i18n.t('언어')}</span><div class="fd" id="langDd"></div></div>
+        <div class="sett-row"><span>${i18n.t('테마')}</span>
           <span class="scale-seg seg-ic" id="themeSeg">
-            <button class="scale-opt" data-v="system" title="시스템" aria-label="시스템">${icons.monitor({ size: 15 })}</button>
-            <button class="scale-opt" data-v="light" title="라이트" aria-label="라이트">${icons.sun({ size: 15 })}</button>
-            <button class="scale-opt" data-v="dark" title="다크" aria-label="다크">${icons.moon({ size: 15 })}</button>
+            <button class="scale-opt" data-v="system" title="${i18n.t('시스템')}" aria-label="${i18n.t('시스템')}">${icons.monitor({ size: 15 })}</button>
+            <button class="scale-opt" data-v="light" title="${i18n.t('라이트')}" aria-label="${i18n.t('라이트')}">${icons.sun({ size: 15 })}</button>
+            <button class="scale-opt" data-v="dark" title="${i18n.t('다크')}" aria-label="${i18n.t('다크')}">${icons.moon({ size: 15 })}</button>
           </span>
         </div>
-        <div class="sett-row"><span>인터페이스 글꼴</span><div class="fd" id="uiFontDd"></div></div>
-        <div class="sett-row"><span>코드·터미널 글꼴</span><div class="fd" id="monoFontDd"></div></div>
-        <div class="sett-col"><span>터미널 스타일</span><div class="ts-grid" id="termStyleGrid"></div></div>
-        <div class="sett-hint">글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.</div>
+        <div class="sett-row"><span>${i18n.t('인터페이스 글꼴')}</span><div class="fd" id="uiFontDd"></div></div>
+        <div class="sett-row"><span>${i18n.t('코드·터미널 글꼴')}</span><div class="fd" id="monoFontDd"></div></div>
+        <div class="sett-col"><span>${i18n.t('터미널 스타일')}</span><div class="ts-grid" id="termStyleGrid"></div></div>
+        <div class="sett-hint">${i18n.t('글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.')}</div>
       </div>
       `;
     bindAppearance(contentEl);
   } else if (section === "notifications") {
     contentEl.innerHTML = `
-      <div class="sm-section-title">데스크톱 알림</div>
+      <div class="sm-section-title">${i18n.t('데스크톱 알림')}</div>
       <div id="notifWarning"></div>
       <div class="sm-card2">
         <div class="sett-row">
-          <span class="sett-copy"><span class="sett-label">알림 권한</span><span class="sett-desc">작업 완료와 승인 요청을 백그라운드에서도 알려줘요.</span></span>
-          <span id="notifPermState" class="sett-attn">확인 중…</span>
+          <span class="sett-copy"><span class="sett-label">${i18n.t('알림 권한')}</span><span class="sett-desc">${i18n.t('작업 완료와 승인 요청을 백그라운드에서도 알려줘요.')}</span></span>
+          <span id="notifPermState" class="sett-attn">${i18n.t('확인 중…')}</span>
         </div>
         <div class="sett-row">
-          <span class="sett-copy"><span class="sett-label">알림음</span><span class="sett-desc">이 PC에서 전달되는 데스크톱 알림에 적용돼요.</span></span>
+          <span class="sett-copy"><span class="sett-label">${i18n.t('알림음')}</span><span class="sett-desc">${i18n.t('이 PC에서 전달되는 데스크톱 알림에 적용돼요.')}</span></span>
           <span class="notif-controls">
-            <select id="notifSound" class="sett-select" aria-label="알림음">${soundOptionsHtml()}</select>
-            <button id="notifTest" class="sett-btn">테스트 알림</button>
+            <select id="notifSound" class="sett-select" aria-label="${i18n.t('알림음')}">${soundOptionsHtml()}</select>
+            <button id="notifTest" class="sett-btn">${i18n.t('테스트 알림')}</button>
           </span>
         </div>
       </div>
@@ -253,37 +256,37 @@ function renderSection(force) {
     bindNotificationSettings(contentEl);
   } else if (section === "security") {
     contentEl.innerHTML = `
-      <div class="sm-section-title">필수 권한</div>
+      <div class="sm-section-title">${i18n.t('필수 권한')}</div>
       <div class="sm-card2">
         ${folderPermRow("downloads", "다운로드 폴더 접근")}
         ${folderPermRow("desktop", "데스크탑 폴더 접근")}
         ${folderPermRow("documents", "문서 폴더 접근")}
       </div>
-      <div class="sm-section-note">종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.</div>`;
+      <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.')}</div>`;
     bindFolderPerms(contentEl);
   } else if (section === "mobile") {
     const codeHtml = e2eeReady()
       ? `<div class="sett-col">
-          <span class="sett-label">이 기기 인증 코드</span>
+          <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="link-box">
-            ${myLinkBusy ? `<div class="acct-msg">코드를 만드는 중…</div>` : ""}
-            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">모바일 앱에서 이 코드를 입력하세요.</div>` : ""}
-            ${!myLinkBusy && !validMyLink() ? `<button class="sett-btn" data-link-new="1">다시 시도</button>` : ""}
+            ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
+            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>` : ""}
+            ${!myLinkBusy && !validMyLink() ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
           </div>
         </div>`
-      : `<div class="sett-col"><span class="sett-label">이 기기 인증 코드</span><div class="acct-msg">암호화 연결을 준비하고 있어요…</div></div>`;
+      : `<div class="sett-col"><span class="sett-label">${i18n.t('이 기기 인증 코드')}</span><div class="acct-msg">${i18n.t('암호화 연결을 준비하고 있어요…')}</div></div>`;
     contentEl.innerHTML = `
-      <div class="sm-section-title">휴대폰·태블릿에서 이어서 작업하기</div>
+      <div class="sm-section-title">${i18n.t('휴대폰·태블릿에서 이어서 작업하기')}</div>
       <div class="sm-card2">
         ${codeHtml}
-        <div class="qr-sub">코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.</div>
+        <div class="qr-sub">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
         <div class="qr-row">
           <div class="qr-tile">
-            <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="Android 앱 설치 QR" draggable="false"></div>
+            <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="${i18n.t('Android 앱 설치 QR')}" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>Android</span></div>
           </div>
           <div class="qr-tile">
-            <div class="qr-imgwrap"><img class="qr-img" src="${IOS_QR}" alt="iOS 앱 설치 QR" draggable="false"></div>
+            <div class="qr-imgwrap"><img class="qr-img" src="${IOS_QR}" alt="${i18n.t('iOS 앱 설치 QR')}" draggable="false"></div>
             <div class="qr-plat">${icons.smartphone({ size: 15 })}<span>iOS</span></div>
           </div>
         </div>
@@ -296,11 +299,11 @@ function renderSection(force) {
     if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
       <div class="sm-card2">
-        <div class="sett-row"><span>버전</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
-        <div class="sett-row"><span>업데이트</span>
+        <div class="sett-row"><span>${i18n.t('버전')}</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
+        <div class="sett-row"><span>${i18n.t('업데이트')}</span>
           <span style="display:inline-flex;align-items:center;gap:14px;">
             <span class="dim" id="updStatus" style="min-width:76px;text-align:right;">-</span>
-            <button class="sett-btn" id="updBtn">확인</button>
+            <button class="sett-btn" id="updBtn">${i18n.t('확인')}</button>
           </span>
         </div>
       </div>`;
@@ -316,8 +319,8 @@ async function renderSupporter() {
   if (!state.daemon?.paired) {
     contentEl.innerHTML = `
       <div class="sm-card2 supporter-card">
-        <div class="supporter-copy"><b>로그인 후 Supporter를 구독할 수 있어요.</b><span>Personal의 모든 원격 작업 기능은 무료로 제공돼요.</span></div>
-        <button id="supporterLogin" class="sett-btn">로그인하기</button>
+        <div class="supporter-copy"><b>${i18n.t('로그인 후 Supporter를 구독할 수 있어요.')}</b><span>${i18n.t('Personal의 모든 원격 작업 기능은 무료로 제공돼요.')}</span></div>
+        <button id="supporterLogin" class="sett-btn">${i18n.t('로그인하기')}</button>
       </div>`;
     contentEl.querySelector("#supporterLogin")?.addEventListener("click", () => {
       section = "connection"; renderNav(); renderSection(true);
@@ -327,7 +330,7 @@ async function renderSupporter() {
 
   contentEl.innerHTML = `
     <div class="sm-card2 supporter-card">
-      <div class="supporter-copy"><b>구독 상태를 확인하고 있어요…</b><span>Personal의 모든 원격 작업 기능은 무료로 제공돼요.</span></div>
+      <div class="supporter-copy"><b>${i18n.t('구독 상태를 확인하고 있어요…')}</b><span>${i18n.t('Personal의 모든 원격 작업 기능은 무료로 제공돼요.')}</span></div>
     </div>`;
   try {
     const sub = await api.subscriptionMe();
@@ -336,32 +339,32 @@ async function renderSupporter() {
     const pastDue = active && sub.status === "past_due";
     const end = sub?.currentPeriodEnd ? fmtDate(sub.currentPeriodEnd) : "";
     contentEl.innerHTML = active ? `
-      <div class="sm-section-title">현재 플랜</div>
+      <div class="sm-section-title">${i18n.t('현재 플랜')}</div>
       <div class="sm-card2 supporter-card">
         <div class="supporter-copy">
           <span class="supporter-plan">CodingPT Supporter</span>
           <b>${pastDue ? "결제 확인이 필요해요" : "함께해 주셔서 고마워요."}</b>
           <span>${pastDue ? "구독 관리에서 결제 수단을 확인해 주세요." : (end ? `${end}까지 이용 중이에요.` : "월 ₩4,900 구독을 이용 중이에요.")}</span>
         </div>
-        <button id="supporterAction" class="sett-btn">구독 관리</button>
+        <button id="supporterAction" class="sett-btn">${i18n.t('구독 관리')}</button>
       </div>` : `
-      <div class="sm-section-title">선택 후원 구독</div>
+      <div class="sm-section-title">${i18n.t('선택 후원 구독')}</div>
       <div class="sm-card2 supporter-card">
         <div class="supporter-copy">
-          <b>월 ₩4,900으로 CodingPT를 응원해 주세요.</b>
+          <b>${i18n.t('월 ₩4,900으로 CodingPT를 응원해 주세요.')}</b>
         </div>
-        <button id="supporterAction" class="sett-btn">웹에서 구독하기</button>
+        <button id="supporterAction" class="sett-btn">${i18n.t('웹에서 구독하기')}</button>
       </div>`;
     const action = contentEl.querySelector("#supporterAction");
     action?.addEventListener("click", async () => {
       action.disabled = true;
       const original = action.textContent;
-      action.textContent = "브라우저 여는 중…";
+      action.textContent = i18n.t('브라우저 여는 중…');
       try {
         const result = active ? await api.supporterPortal() : await api.supporterCheckout();
-        if (!result?.url) throw new Error("결제 페이지 주소가 없습니다.");
+        if (!result?.url) throw new Error(i18n.t('결제 페이지 주소가 없습니다.'));
         await api.openExternal(result.url);
-        action.textContent = active ? "구독 관리 열림" : "결제 페이지 열림";
+        action.textContent = active ? i18n.t('구독 관리 열림') : i18n.t('결제 페이지 열림');
       } catch (e) {
         action.disabled = false;
         action.textContent = original;
@@ -375,8 +378,8 @@ async function renderSupporter() {
     if (section !== "supporter") return;
     contentEl.innerHTML = `
       <div class="sm-card2 supporter-card">
-        <div class="supporter-copy"><b>구독 상태를 불러오지 못했어요.</b><span>잠시 후 다시 시도해 주세요.</span></div>
-        <button id="supporterRetry" class="sett-btn">다시 시도</button>
+        <div class="supporter-copy"><b>${i18n.t('구독 상태를 불러오지 못했어요.')}</b><span>${i18n.t('잠시 후 다시 시도해 주세요.')}</span></div>
+        <button id="supporterRetry" class="sett-btn">${i18n.t('다시 시도')}</button>
       </div>`;
     contentEl.querySelector("#supporterRetry")?.addEventListener("click", renderSupporter);
   }
@@ -393,22 +396,22 @@ function bindNotificationSettings(host) {
     const granted = value === "granted";
     if (granted) markPermGranted("notification");
     status.className = granted ? "sett-done" : "sett-attn";
-    status.innerHTML = granted ? `${icons.check({ size: 14 })}허용됨` : "확인 필요";
+    status.innerHTML = granted ? `${icons.check({ size: 14 })}허용됨` : i18n.t('확인 필요');
     warning.innerHTML = granted ? "" : `
       <div class="notif-warning">
-        <span class="notif-warning-copy"><b>macOS가 CodingPT 알림을 전달하지 않고 있어요.</b><small>시스템 설정에서 CodingPT 알림을 허용해 주세요.</small></span>
-        <button id="notifOpenSettings" class="sett-btn">시스템 설정 열기</button>
+        <span class="notif-warning-copy"><b>${i18n.t('macOS가 CodingPT 알림을 전달하지 않고 있어요.')}</b><small>${i18n.t('시스템 설정에서 CodingPT 알림을 허용해 주세요.')}</small></span>
+        <button id="notifOpenSettings" class="sett-btn">${i18n.t('시스템 설정 열기')}</button>
       </div>`;
     warning.querySelector("#notifOpenSettings")?.addEventListener("click", async (e) => {
       const open = e.currentTarget;
       open.disabled = true;
-      open.textContent = "여는 중…";
+      open.textContent = i18n.t('여는 중…');
       try {
         await openNotificationSettingsAndWatch((next) => paintPermission(next));
-        open.textContent = "시스템 설정 열림";
+        open.textContent = i18n.t('시스템 설정 열림');
       } catch (_) {
         open.disabled = false;
-        open.textContent = "다시 시도";
+        open.textContent = i18n.t('다시 시도');
       }
     });
   };
@@ -416,21 +419,21 @@ function bindNotificationSettings(host) {
 
   test.addEventListener("click", async () => {
     test.disabled = true;
-    test.textContent = "보내는 중…";
+    test.textContent = i18n.t('보내는 중…');
     try {
       const ok = await sendTestNotification();
       if (ok) {
         markPermGranted("notification");
         paintPermission("granted");
-        test.textContent = "보냈어요 ✓";
+        test.textContent = i18n.t('보냈어요 ✓');
       } else {
         paintPermission("denied");
-        test.textContent = "설정 확인";
+        test.textContent = i18n.t('설정 확인');
       }
     } catch (_) {
-      test.textContent = "다시 시도";
+      test.textContent = i18n.t('다시 시도');
     }
-    setTimeout(() => { if (test.isConnected) { test.disabled = false; test.textContent = "테스트 알림"; } }, 1200);
+    setTimeout(() => { if (test.isConnected) { test.disabled = false; test.textContent = i18n.t('테스트 알림'); } }, 1200);
   });
 }
 
@@ -456,29 +459,29 @@ function bindUpdate() {
       await api.updateInstall(); // 성공 시 앱이 재시작되므로 이후 코드는 실행 안 될 수 있음
       un?.();
     } catch (e) {
-      st.textContent = "실패: " + e;
+      st.textContent = i18n.t('실패: ') + e;
       btn.disabled = false;
-      btn.textContent = "업데이트";
+      btn.textContent = i18n.t('업데이트');
     }
   };
 
   // 열릴 때 자동 확인 — 버튼은 새 버전이 있을 때만 노출.
   btn.style.display = "none";
-  st.textContent = "확인 중…";
+  st.textContent = i18n.t('확인 중…');
   api
     .updateCheck()
     .then((r) => {
       if (r && r.available) {
         st.textContent = "";
-        btn.textContent = "업데이트";
+        btn.textContent = i18n.t('업데이트');
         btn.style.display = "";
         btn.onclick = doInstall;
       } else {
-        st.textContent = r && r.error ? "확인 불가(개발 실행에선 미지원)" : "최신 버전입니다";
+        st.textContent = r && r.error ? i18n.t('확인 불가(개발 실행에선 미지원)') : i18n.t('최신 버전입니다');
       }
     })
     .catch(() => {
-      st.textContent = "확인 실패";
+      st.textContent = i18n.t('확인 실패');
     });
 }
 
@@ -541,8 +544,12 @@ function bindAppearance(rootEl) {
     paintBtn();
     host._repaint = paintBtn;
   };
-  buildFontDd(rootEl.querySelector("#uiFontDd"), uiFontOptions(), getUiFont, setUiFont, "한글과 English 123");
-  buildFontDd(rootEl.querySelector("#monoFontDd"), monoFontOptions(), getMonoFont, setMonoFont, "const 한글 = i => 0;");
+  // 언어 드롭다운 — 글꼴 드롭다운과 같은 부품을 쓴다(옵션을 그 글꼴로 그리는 기능만 안 쓴다).
+  //  고르면 theme.js 가 서버 저장 후 창을 새로고침한다(명령형 DOM 이라 다시 그려야 반영된다).
+  buildFontDd(rootEl.querySelector("#langDd"), langOptions().map((o) => ({ value: o.value, label: o.label })),
+    getLangSetting, setLangSetting, "");
+  buildFontDd(rootEl.querySelector("#uiFontDd"), uiFontOptions(), getUiFont, setUiFont, i18n.t('한글과 English 123'));
+  buildFontDd(rootEl.querySelector("#monoFontDd"), monoFontOptions(), getMonoFont, setMonoFont, i18n.t('const 한글 = i => 0;'));
 
   // 터미널 스타일 카드(라디오) — 실제 팔레트로 "진짜 터미널에 보이는 모습"(파워라인 프롬프트·claude·diff)을
   //  그려 미리보기. 세그먼트 글자색은 배경 밝기에 따라 자동(실제 xterm 의 최소 대비 보정과 동일한 결).
@@ -571,7 +578,7 @@ function bindAppearance(rootEl) {
           <div class="ts-pline">
             <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@mac</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
           </div>
-          <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">코드 설명해줘</span></div>
+          <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">${i18n.t('코드 설명해줘')}</span></div>
         </div>
         <div class="ts-pick"><span class="ts-radio"></span></div>`;
       card.addEventListener("click", () => {
@@ -593,7 +600,7 @@ async function syncAutostart() {
 // 프로필 카드(로그인된 사용자 · 닉네임 편집 + 이메일). 계정 탭 최상단. state.me 없으면 안내 문구.
 function profileCardHtml() {
   const me = state.me;
-  if (!me) return `<div class="sm-card2"><div class="dim" style="font-size:13px">로그인하면 프로필이 표시됩니다.</div></div>`;
+  if (!me) return `<div class="sm-card2"><div class="dim" style="font-size:13px">${i18n.t('로그인하면 프로필이 표시됩니다.')}</div></div>`;
   const initial = (me.nickname || me.email || "U").trim().charAt(0).toUpperCase();
   const avatar = me.profileImg
     ? `<img class="acct-img" src="${esc(me.profileImg)}" alt="" />`
@@ -603,8 +610,8 @@ function profileCardHtml() {
         <div class="acct-avatar big">${avatar}</div>
         <div class="prof-main">
           <div class="prof-nick-row">
-            <input id="nickInput" class="prof-nick" value="${esc(me.nickname || "")}" placeholder="닉네임" maxlength="40" spellcheck="false" />
-            <button id="nickSave" class="btn small">저장</button>
+            <input id="nickInput" class="prof-nick" value="${esc(me.nickname || "")}" placeholder="${i18n.t('닉네임')}" maxlength="40" spellcheck="false" />
+            <button id="nickSave" class="btn small">${i18n.t('저장')}</button>
           </div>
           <div class="prof-email">${esc(me.email || "")}</div>
         </div>
@@ -635,20 +642,20 @@ function buildPaired() {
   connBody.innerHTML = `
     <div id="acctCard">${profileCardHtml()}</div>
     <div class="dev-section">
-      <div class="dev-title" style="margin:0 2px 8px">이 기기</div>
+      <div class="dev-title" style="margin:0 2px 8px">${i18n.t('이 기기')}</div>
       <div id="e2eeSelfBox" class="sm-card2"></div>
     </div>
     <div class="dev-section">
-      <div class="dev-title" style="margin:0 2px 8px">다른 기기</div>
+      <div class="dev-title" style="margin:0 2px 8px">${i18n.t('다른 기기')}</div>
       <div id="e2eeBox" class="sm-card2"></div>
     </div>
     <div class="acct-line">
-      <div class="acct-line-txt">이 기기에서 로그아웃</div>
-      <button id="unpairBtn" class="btn small">로그아웃</button>
+      <div class="acct-line-txt">${i18n.t('이 기기에서 로그아웃')}</div>
+      <button id="unpairBtn" class="btn small">${i18n.t('로그아웃')}</button>
     </div>
     <div class="acct-line">
-      <div class="acct-line-txt">회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.</div>
-      <button id="deleteAcctBtn" class="btn small danger">회원 탈퇴</button>
+      <div class="acct-line-txt">${i18n.t('회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.')}</div>
+      <button id="deleteAcctBtn" class="btn small danger">${i18n.t('회원 탈퇴')}</button>
     </div>
     <div id="acctMsg" class="acct-msg"></div>`;
   bindUnpair(connBody.querySelector("#unpairBtn"));
@@ -670,11 +677,11 @@ function buildPaired() {
  *   즉시 '허용됨' 으로 바뀐다 — 기록이 없는 것이 손해가 아니다.
  */
 function folderPermRow(id, label) {
-  const copy = `<span class="sett-copy"><span class="sett-label">${label}</span><span class="sett-desc">워크스페이스 파일을 열고 수정하는 데 필요해요.</span></span>`;
+  const copy = `<span class="sett-copy"><span class="sett-label">${label}</span><span class="sett-desc">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</span></span>`;
   if (permGranted(id)) {
     return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
   }
-  return `<div class="sett-row">${copy}<button class="sett-btn fpa-btn" data-f="${id}">허용</button></div>`;
+  return `<div class="sett-row">${copy}<button class="sett-btn fpa-btn" data-f="${id}">${i18n.t('허용')}</button></div>`;
 }
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
@@ -685,7 +692,7 @@ function bindFolderPerms(rootEl) {
       if (b.dataset.denied) { api.openFilesPrivacy().catch(() => {}); return; }
       b.disabled = true;
       const prev = b.textContent;
-      b.textContent = "확인 중…";
+      b.textContent = i18n.t('확인 중…');
       try {
         const ok = await api.probeFolder(b.dataset.f);
         // 성공은 로컬에도 기록한다 — 온보딩(login-gate)이 "없는 권한만" 행으로 그리는 판정 근거.
@@ -696,7 +703,7 @@ function bindFolderPerms(rootEl) {
           return;
         }
         b.dataset.denied = "1";
-        b.textContent = "설정 열기";
+        b.textContent = i18n.t('설정 열기');
         b.disabled = false;
       } catch (_) { b.textContent = prev; b.disabled = false; }
     });
@@ -713,7 +720,7 @@ function bindNickname() {
     if (!v || v === (state.me?.nickname || "")) return;
     save.disabled = true;
     const prev = save.textContent;
-    save.textContent = "저장 중…";
+    save.textContent = i18n.t('저장 중…');
     try { await api.updateNickname(v); await S.loadMe(); }
     catch (_) { save.disabled = false; save.textContent = prev; }
   };
@@ -731,15 +738,15 @@ async function onDeleteAccount() {
   if (!btn || !msg) return;
   if (!btn.dataset.confirm) {
     btn.dataset.confirm = "1";
-    btn.textContent = "취소";
+    btn.textContent = i18n.t('취소');
     btn.classList.remove("danger");
     //  ★ 개정 10(사용자 확정): 경고색은 **버튼 하나만**(과한 색은 AI 스러움). 문구·테두리·입력창은 일반색.
     msg.innerHTML = `
       <div class="acct-del-confirm">
-        <div>계속하려면 <b>${DELETE_CONFIRM_WORD}</b> 를 입력하세요.</div>
+        <div>${i18n.t('계속하려면')} <b>${DELETE_CONFIRM_WORD}</b> ${i18n.t('를 입력하세요.')}</div>
         <input id="acctDelEmail" class="acct-del-input" placeholder="${DELETE_CONFIRM_WORD}" autocomplete="off" spellcheck="false" />
         <button id="acctDelGo" class="acct-del-go">
-          <span class="acct-del-spin"></span><span class="acct-del-go-txt">영구 삭제</span>
+          <span class="acct-del-spin"></span><span class="acct-del-go-txt">${i18n.t('영구 삭제')}</span>
         </button>
         <div id="acctDelErr" class="acct-del-err"></div>
       </div>`;
@@ -756,7 +763,7 @@ async function onDeleteAccount() {
   }
   // confirm 상태에서 버튼(=취소) 클릭 — 접기.
   delete btn.dataset.confirm;
-  btn.textContent = "회원 탈퇴";
+  btn.textContent = i18n.t('회원 탈퇴');
   btn.classList.add("danger");
   msg.textContent = "";
   msg.classList.remove("warn");
@@ -775,7 +782,7 @@ async function doDeleteAccount(btn, go, msg) {
   const goTxt = go?.querySelector(".acct-del-go-txt");
   const errEl = msg?.querySelector("#acctDelErr");
   if (go) { go.disabled = true; go.classList.add("deleting"); }
-  if (goTxt) goTxt.textContent = "탈퇴 처리 중…";
+  if (goTxt) goTxt.textContent = i18n.t('탈퇴 처리 중…');
   if (btn) btn.disabled = true;
   if (errEl) errEl.textContent = "";
   // 스피너가 반드시 한 프레임 그려진 뒤 네트워크 작업 시작 — 빠른 완료/즉시 재렌더로 프로그래스가 안 보이던 문제 방지.
@@ -797,9 +804,9 @@ async function doDeleteAccount(btn, go, msg) {
     S.emit();
   } catch (e) {
     if (go) { go.disabled = false; go.classList.remove("deleting"); }
-    if (goTxt) goTxt.textContent = "영구 삭제";
+    if (goTxt) goTxt.textContent = i18n.t('영구 삭제');
     if (btn) btn.disabled = false;
-    if (errEl) errEl.textContent = "탈퇴 실패: " + (e?.message || e);
+    if (errEl) errEl.textContent = i18n.t('탈퇴 실패: ') + (e?.message || e);
   }
   acctDeleting = false;
 }
@@ -920,7 +927,7 @@ async function ensureMyLink({ force = false } = {}) {
     ref: e2ee.userRef || "",
     revision: e2ee.linkRevision,
   } : null;
-  linkEntryMsg = r.ok ? "" : (r.error || "인증 코드를 만들지 못했어요");
+  linkEntryMsg = r.ok ? "" : (r.error || i18n.t('인증 코드를 만들지 못했어요'));
   scheduleMyLinkRenewal();
   if (section === "mobile") renderSection(true);
   else renderE2ee();
@@ -931,7 +938,7 @@ function e2eeMyCodeRow() {
   // 구간만 진행 상태를 표시하고, 준비 완료 emit 직후 ensureMyLink 가 실제 8자리 코드를 채운다.
   if (!e2eeReady()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-      <div class="appr-reveal" aria-label="이 기기 인증 코드 준비 중">이 기기 인증 코드</div>
+      <div class="appr-reveal" aria-label="${i18n.t('이 기기 인증 코드 준비 중')}">${i18n.t('이 기기 인증 코드')}</div>
       <div class="acct-msg">${e2ee.autoBootError ? "암호화 연결을 준비하지 못했어요 · 잠시 후 다시 시도합니다" : "암호화 연결을 준비하고 있어요…"}</div>
     </td></tr>`;
   }
@@ -948,12 +955,12 @@ function e2eeMyCodeRow() {
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
   const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-    <div class="appr-reveal">이 기기 인증 코드</div>
+    <div class="appr-reveal">${i18n.t('이 기기 인증 코드')}</div>
     <div class="link-box">
-      ${myLinkBusy ? `<div class="acct-msg">코드를 만드는 중…</div>` : ""}
+      ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
         <div class="acct-msg">다른 기기에서 이 코드를 입력하세요 · ${mm} 남음</div>` : ""}
-      ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">다시 시도</button>` : ""}
+      ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
     </div>
   </td></tr>`;
 }
@@ -995,7 +1002,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
   const all = (state.devices || []).filter((d) => d.runnerKind !== "cloud"); // 클라우드 러너는 숨긴다(BYO 피벗)
   // ⚠ 기기 목록이 아직 안 왔으면 **고아 판정을 하지 않는다**: 키링이 먼저 도착하면 모든 열쇠가 '고아' 로
   //  보여 같은 기기가 두 번 뜨는 화면(합치려던 그 중복)이 로딩 중에 재현된다.
-  if (!all.length) return `<tr class="dev-tr"><td class="dev-c-full dim" colspan="4" style="font-size:12px">불러오는 중…</td></tr>`;
+  if (!all.length) return `<tr class="dev-tr"><td class="dev-c-full dim" colspan="4" style="font-size:12px">${i18n.t('불러오는 중…')}</td></tr>`;
   const keyByDevice = new Map();
   // 열쇠 보유 판정은 `state === "trusted"` 하나다(앱 trustedKeys 와 같은 조건 — pending/revoked 는 열쇠가 아니다).
   for (const k of devs) if (k.state === "trusted" && k.deviceId != null) keyByDevice.set(String(k.deviceId), k);
@@ -1023,9 +1030,9 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     //    일이고, 줄 수 있는 쪽은 열쇠를 가진 기기뿐이다(열쇠 없는 기기끼리는 서로 줄 것이 없다).
     const canLink = typeof d.id === "number" && !d.isCurrent && (selfReady ? !linked : !!k);
     const link = canLink
-      ? `<button class="dev-link-btn" ${selfReady ? `data-link-show-code="${d.id}"` : `data-link-open="${d.id}"`} title="이 기기와 연동" aria-label="이 기기와 연동">${icons.link({ size: 15 })}</button>` : "";
+      ? `<button class="dev-link-btn" ${selfReady ? `data-link-show-code="${d.id}"` : `data-link-open="${d.id}"`} title="${i18n.t('이 기기와 연동')}" aria-label="${i18n.t('이 기기와 연동')}">${icons.link({ size: 15 })}</button>` : "";
     const linkedMark = linked
-      ? `<span class="dev-auth-mark" title="인증된 기기" aria-label="인증된 기기">${icons.verified({ size: 15 })}</span>` : "";
+      ? `<span class="dev-auth-mark" title="${i18n.t('인증된 기기')}" aria-label="${i18n.t('인증된 기기')}">${icons.verified({ size: 15 })}</span>` : "";
     //  ★ 개정 9: 대기 행 = **미확인 알림**이다. 이름 옆 점(accent = 상태 신호 전용) + 메타 `승인 대기` +
     //   행 클릭 → 화면 상단 전역 승인 카드(설정 모달을 닫고 그 카드를 되살린다).
     //  ★ 개정 11(사용자 확정): 목록에 **연동됨/안 됨을 쓰지 않는다** — "기기 목록에서 연동됨 안됨
@@ -1033,19 +1040,19 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     // ⚠ 무장 경고는 **별도 행**(colspan)이다: 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
     const editing = d.isCurrent && aliasEditFor === String(d.id);
     const nameCell = editing
-      ? `<span class="dev-alias-edit"><input class="dev-alias-input" maxlength="40" value="${esc(aliasEditValue)}" aria-label="기기 별칭" /><button class="dev-alias-save" data-alias-save="${d.id}">${icons.check({ size: 14 })}</button><button class="dev-alias-cancel" data-alias-cancel="1">${icons.x({ size: 14 })}</button></span>`
-      : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="별칭 변경">${icons.edit({ size: 13 })}</button>` : ""}`;
+      ? `<span class="dev-alias-edit"><input class="dev-alias-input" maxlength="40" value="${esc(aliasEditValue)}" aria-label="${i18n.t('기기 별칭')}" /><button class="dev-alias-save" data-alias-save="${d.id}">${icons.check({ size: 14 })}</button><button class="dev-alias-cancel" data-alias-cancel="1">${icons.x({ size: 14 })}</button></span>`
+      : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="${i18n.t('별칭 변경')}">${icons.edit({ size: 13 })}</button>` : ""}`;
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
       <td class="dev-c-name"><span class="dev-name">${linkedMark}${nameCell}</span>${editing && aliasEditError ? `<div class="acct-msg" style="color:var(--error,#ef6b73)">${esc(aliasEditError)}</div>` : ""}</td>
       <td class="dev-c-meta"></td>
-      <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="기기 삭제">${icons.trash({ size: 15 })}</button>` : ""}</td>
+      <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="${i18n.t('기기 삭제')}">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
-    ${canRevoke ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4"><div class="dev-delete-confirm">${icons.shield({ size: 14 })}<span>한 번 더 누르면 이 기기를 삭제합니다 · 되돌릴 수 없음</span></div></td></tr>` : ""}
+    ${canRevoke ? `<tr class="dev-tr-note" data-dev-armnote="${d.id}" style="display:none"><td colspan="4"><div class="dev-delete-confirm">${icons.shield({ size: 14 })}<span>${i18n.t('한 번 더 누르면 이 기기를 삭제합니다 · 되돌릴 수 없음')}</span></div></td></tr>` : ""}
     ${linkEntryFor === String(d.id) ? `<tr class="dev-tr-note"><td colspan="4" style="padding:0 0 10px">
       <div class="link-entry">
-        <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="8자 코드" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
-        <button class="sett-btn" data-link-submit="${d.id}">연결</button>
+        <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="${i18n.t('8자 코드')}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
+        <button class="sett-btn" data-link-submit="${d.id}">${i18n.t('연결')}</button>
       </div>
       ${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}
     </td></tr>` : ""}`;
@@ -1067,14 +1074,14 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
       <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span></span></td>
-      <td class="dev-c-meta"><span style="color:var(--text3)">이전에 연동된 기기</span></td>
-      <td class="dev-c-del"><button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="연동 해제">${icons.trash({ size: 15 })}</button></td>
+      <td class="dev-c-meta"><span style="color:var(--text3)">${i18n.t('이전에 연동된 기기')}</span></td>
+      <td class="dev-c-del"><button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="${i18n.t('연동 해제')}">${icons.trash({ size: 15 })}</button></td>
     </tr>
-    <tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">다시 눌러 해제 · 되돌릴 수 없음</td></tr>`;
+    <tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">${i18n.t('다시 눌러 해제 · 되돌릴 수 없음')}</td></tr>`;
   }).join("");
 
   const others = otherRows + orphanRows;
-  return others || `<tr class="dev-tr"><td colspan="4" class="dim" style="font-size:12px">연결된 기기가 없어요</td></tr>`;
+  return others || `<tr class="dev-tr"><td colspan="4" class="dim" style="font-size:12px">${i18n.t('연결된 기기가 없어요')}</td></tr>`;
 }
 
 function renderE2ee() {
@@ -1128,12 +1135,12 @@ function bindE2ee(box) {
   box.querySelectorAll("[data-link-submit]").forEach((b) => b.addEventListener("click", async () => {
     const inp = connBody?.querySelector("#linkCodeInput");
     const code = String(inp?.value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (code.length !== 8) { linkEntryMsg = "코드 8자를 입력해 주세요"; renderE2ee(); return; }
+    if (code.length !== 8) { linkEntryMsg = i18n.t('코드 8자를 입력해 주세요'); renderE2ee(); return; }
     b.disabled = true;
-    linkEntryMsg = "연결 중…";
+    linkEntryMsg = i18n.t('연결 중…');
     renderE2ee();
     const r = await linkClaim(code);
-    linkEntryMsg = r.ok ? "" : (r.error || "연동에 실패했어요");
+    linkEntryMsg = r.ok ? "" : (r.error || i18n.t('연동에 실패했어요'));
     if (r.ok) linkEntryFor = null;
     renderE2ee();
   }));
@@ -1149,20 +1156,20 @@ function bindE2ee(box) {
     const note = box.querySelector(`[data-e2ee-armnote="${b.dataset.e2eeRevoke}"]`);
     if (!b.classList.contains("arm")) {
       b.classList.add("arm");
-      b.setAttribute("aria-label", "한 번 더 눌러 기기 삭제");
-      b.title = "한 번 더 눌러 기기 삭제";
+      b.setAttribute("aria-label", i18n.t('한 번 더 눌러 기기 삭제'));
+      b.title = i18n.t('한 번 더 눌러 기기 삭제');
       if (note) note.style.display = "";
       setTimeout(() => {
         b.classList.remove("arm");
-        b.setAttribute("aria-label", "기기 삭제");
-        b.title = "기기 삭제";
+        b.setAttribute("aria-label", i18n.t('기기 삭제'));
+        b.title = i18n.t('기기 삭제');
         if (note) note.style.display = "none";
       }, 4000);
       return;
     }
     b.disabled = true;
     const r = await revokeTrust(Number(b.dataset.e2eeRevoke));
-    e2eeMsg = r.ok ? "" : r.error || "해제하지 못했어요";
+    e2eeMsg = r.ok ? "" : r.error || i18n.t('해제하지 못했어요');
     renderE2ee();
   }));
   // 기기 삭제 = 휴지통 2탭(모바일과 동일 규율). **열쇠를 가진 기기면 열쇠 해제 + 세대 회전까지** 한다:
@@ -1182,7 +1189,7 @@ function bindE2ee(box) {
     const keyId = b.dataset.devKey ? Number(b.dataset.devKey) : 0;
     if (keyId && e2eeReady()) {
       const r = await revokeTrust(keyId);
-      if (!r.ok) e2eeMsg = r.error || "해제하지 못했어요";
+      if (!r.ok) e2eeMsg = r.error || i18n.t('해제하지 못했어요');
     }
     try { await api.revokeDevice(Number(b.dataset.dev)); await S.loadDevices(); } catch (_) { b.disabled = false; }
     await refreshE2ee();
@@ -1204,7 +1211,7 @@ function bindE2ee(box) {
     if (!name) return;
     b.disabled = true;
     try { await api.renameOwnDevice(Number(b.dataset.aliasSave), name); aliasEditFor = null; aliasEditError = ""; await S.loadDevices(); }
-    catch (e) { aliasEditError = e?.message || "별칭을 저장하지 못했어요."; b.disabled = false; }
+    catch (e) { aliasEditError = e?.message || i18n.t('별칭을 저장하지 못했어요.'); b.disabled = false; }
     renderE2ee();
   }));
 }
@@ -1221,9 +1228,9 @@ function updatePairedStatus() {
   const run = connBody.querySelector("#toggleRunBtn");
   if (!dot) return;
   dot.className = "cst-dot " + (d.running ? "on" : "off");
-  title.textContent = d.running ? "연결됨 · 실행 중" : "중지됨";
+  title.textContent = d.running ? i18n.t('연결됨 · 실행 중') : i18n.t('중지됨');
   desc.textContent = [d.device_name, d.server].filter(Boolean).join(" · ");
-  if (run) run.textContent = d.running ? "중지" : "시작";
+  if (run) run.textContent = d.running ? i18n.t('중지') : i18n.t('시작');
 }
 
 async function toggleRun() {
@@ -1244,13 +1251,13 @@ function bindUnpair(btn) {
   const reset = () => {
     armed = false;
     if (timer) clearTimeout(timer);
-    btn.textContent = "로그아웃";
+    btn.textContent = i18n.t('로그아웃');
     btn.classList.remove("danger");
   };
   btn.addEventListener("click", async () => {
     if (!armed) {
       armed = true;
-      btn.textContent = "다시 클릭";
+      btn.textContent = i18n.t('다시 클릭');
       btn.classList.add("danger");
       timer = setTimeout(reset, 3000);
       return;
@@ -1258,7 +1265,7 @@ function bindUnpair(btn) {
     if (timer) clearTimeout(timer);
     armed = false;
     btn.disabled = true;
-    btn.textContent = "로그아웃 중…";
+    btn.textContent = i18n.t('로그아웃 중…');
     try {
       state.daemon = await api.unpair();
       state.me = null;
@@ -1273,7 +1280,7 @@ function buildUnpaired() {
   stopWebLogin();
   connBody.innerHTML = `
     <div class="login-primary">
-      <button id="webLoginBtn" class="btn primary lg">로그인</button>
+      <button id="webLoginBtn" class="btn primary lg">${i18n.t('로그인')}</button>
       <div id="webLoginStatus" class="login-status"></div>
     </div>`;
   connBody.querySelector("#webLoginBtn").addEventListener("click", startWebLogin);
@@ -1284,7 +1291,7 @@ function startWebLogin() {
   stopWebLogin();
   const btn = connBody?.querySelector("#webLoginBtn");
   const statusEl = connBody?.querySelector("#webLoginStatus");
-  if (btn) { btn.disabled = true; btn.textContent = "브라우저 여는 중…"; }
+  if (btn) { btn.disabled = true; btn.textContent = i18n.t('브라우저 여는 중…'); }
   (async () => {
     try {
       // 서버는 null 로 넘겨 Rust(resolve_server=config→DEFAULT)가 정하게 한다.
@@ -1299,12 +1306,12 @@ function startWebLogin() {
         poll: null,
         busy: false,
       };
-      if (statusEl) statusEl.textContent = "브라우저에서 로그인 후 ‘이 PC 연결하기’를 누르세요…";
-      if (btn) btn.textContent = "브라우저에서 로그인 대기 중…";
+      if (statusEl) statusEl.textContent = i18n.t('브라우저에서 로그인 후 ‘이 PC 연결하기’를 누르세요…');
+      if (btn) btn.textContent = i18n.t('브라우저에서 로그인 대기 중…');
       webLogin.poll = setInterval(pollWebLogin, 2500);
     } catch (e) {
-      if (statusEl) statusEl.textContent = "로그인 세션 생성 실패: " + e;
-      if (btn) { btn.disabled = false; btn.textContent = "로그인"; }
+      if (statusEl) statusEl.textContent = i18n.t('로그인 세션 생성 실패: ') + e;
+      if (btn) { btn.disabled = false; btn.textContent = i18n.t('로그인'); }
     }
   })();
 }
@@ -1318,8 +1325,8 @@ async function pollWebLogin() {
     stopWebLogin();
     const s = connBody?.querySelector("#webLoginStatus");
     const b = connBody?.querySelector("#webLoginBtn");
-    if (s) s.textContent = "코드가 만료됐어요. 다시 시도하세요.";
-    if (b) { b.disabled = false; b.textContent = "로그인"; }
+    if (s) s.textContent = i18n.t('코드가 만료됐어요. 다시 시도하세요.');
+    if (b) { b.disabled = false; b.textContent = i18n.t('로그인'); }
     return;
   }
   webLogin.busy = true;
@@ -1349,13 +1356,13 @@ async function doPair() {
   const errEl = connBody.querySelector("#pairError");
   errEl.classList.add("hidden");
   if (!code) {
-    errEl.textContent = "페어링 코드를 입력하세요.";
+    errEl.textContent = i18n.t('페어링 코드를 입력하세요.');
     errEl.classList.remove("hidden");
     return;
   }
   const btn = connBody.querySelector("#pairBtn");
   btn.disabled = true;
-  btn.textContent = "연결 중…";
+  btn.textContent = i18n.t('연결 중…');
   try {
     state.daemon = await api.pair(code, server || null);
     state.paired = !!state.daemon?.paired;
@@ -1371,7 +1378,7 @@ async function doPair() {
     errEl.classList.remove("hidden");
   } finally {
     btn.disabled = false;
-    btn.textContent = "코드로 연결";
+    btn.textContent = i18n.t('코드로 연결');
   }
 }
 

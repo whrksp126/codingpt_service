@@ -1,3 +1,4 @@
+import * as i18n from './i18n/index.js';
 // e2ee-label.js — "이 PC 의 열쇠 상태" 한 줄 라벨의 **판정 정본**(순수 함수, import 0개).
 //
 // 왜 이 파일인가:
@@ -43,37 +44,37 @@ export function selfStateLabel(s, ready) {
 
   // 사용자가 끈 것이 최우선이다(열쇠가 있어도 '켜짐' 을 그리면 반대 방향의 거짓말이 된다 — 데몬
   //  pcState() 도 같은 순서다).
-  if (policy === "off") return L("꺼짐", "off");
+  if (policy === "off") return L(i18n.t('꺼짐'), "off");
   // '켜짐' 이 아니라 '열쇠 있음' 이다: 자기 열쇠 보유 ≠ 트래픽 암호화(상대 호스트도 열쇠가 있어야 한다).
   //  실제 자물쇠는 host-lock.js 가 PC 별로 그린다 — 계약 §2.7 거짓 자물쇠 금지.
-  if (isReady) return L("열쇠 있음", "on");
+  if (isReady) return L(i18n.t('열쇠 있음'), "on");
   // 데몬이 명령을 모르면(구 번들) 진행상태 필드도 신뢰할 수 없다 → 먼저 미지원으로 눕힌다.
-  if (!available || state === "unsupported") return L("미지원", "off");
-  if (state === "unavailable") return L("사용 불가", "off");
+  if (!available || state === "unsupported") return L(i18n.t('미지원'), "off");
+  if (state === "unavailable") return L(i18n.t('사용 불가'), "off");
   // 승인 대기: keyState 가 정본이고 state 확장값은 방어적으로 함께 본다.
   //  enrolled = 승인은 끝났고 봉인문(열쇠) 전달을 기다리는 중 — 사용자가 할 일은 없다.
   if (keyState === "pending" || keyState === "enrolled" || state === "pending" || state === "enrolled") {
-    return L("승인 대기", "wait");
+    return L(i18n.t('승인 대기'), "wait");
   }
-  if (state === "error") return L("오류", "off");
+  if (state === "error") return L(i18n.t('오류'), "off");
   // 서버/스코프에서 꺼진 경우(policy 는 preferred 인데 데몬이 'off') — 대기색을 쓰지 않는다.
-  if (state === "off") return L("꺼짐", "off");
+  if (state === "off") return L(i18n.t('꺼짐'), "off");
   if (keyState === "none") {
     // ★ 여기가 이 파일의 존재 이유: 같은 state('bootstrap')인데 두 화면이어야 한다.
     //  checking=true  → 지금 왕복 중(또는 재시도 예약됨) = "확인 중"
     //  checking=false → 확인이 끝났고 열쇠가 없다 = **평문**. 사람이 켜기 전엔 바뀌지 않는다.
-    return st.checking === true ? L("확인 중", "wait") : L("열쇠 없음", "off");
+    return st.checking === true ? L(i18n.t('확인 중'), "wait") : L(i18n.t('열쇠 없음'), "off");
   }
-  if (st.checking === true) return L("확인 중", "wait");
+  if (st.checking === true) return L(i18n.t('확인 중'), "wait");
   // 구 데몬(keyState 없음) — 모르는 것을 '열쇠 없음' 으로 단정하지 않는다. 예전 라벨 '준비 중' 은
   //  "곧 켜진다" 는 오해를 주는 유일한 문구였으므로 '확인 중' 으로 흡수했다(카피 감사 §2-A).
-  if (state === "bootstrap") return L("확인 중", "wait");
+  if (state === "bootstrap") return L(i18n.t('확인 중'), "wait");
   // 여기까지 온 값은 **알 수 없는 state** 다(사용자가 끈 것도 아니고 — policy≠off 는 첫 줄에서 걸렀다 —
   //  데몬이 껐다고 말한 것도 아니다 — state!=='off' 는 위에서 걸렀다) = 미결정. '꺼짐' 으로 단정하면
   //  사용자는 자기가 끈 적 없는 '꺼짐' 을 읽고 자세히 안에서는 '암호화 사용 = 자동' 이 선택된 자기모순
   //  화면을 본다(§2.7 모름을 단정하지 않는다). 앱 stateLabel() 의 마지막 줄과 **같은 값**이고,
   //  test/e2ee-crossimpl.mjs 4-B 절이 전 조합을 대조한다 — 한쪽만 바꾸면 즉시 터진다.
-  return L("확인 중", "wait");
+  return L(i18n.t('확인 중'), "wait");
 }
 
 /**

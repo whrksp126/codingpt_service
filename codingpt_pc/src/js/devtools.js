@@ -9,6 +9,7 @@
 //     / 페이지 chobitsu 출력 → 페이지 내 큐(__cptCdpQ) → preview_eval 폴링(120ms) → __cptDeliver.
 //   · 페이지 리로드 시: chobitsu 재주입 + 켜져 있던 *.enable 리플레이(응답 드랍) + documentUpdated 통지.
 import { api } from "./api.js";
+import * as i18n from './i18n/index.js';
 
 const CDN_CHOBITSU = "https://cdn.jsdelivr.net/npm/chobitsu@1.8.6";
 const CDN_CHII_FE = "https://cdn.jsdelivr.net/npm/chii@1.15.5/public/front_end/";
@@ -83,14 +84,14 @@ async function injectChobitsu(pvId) {
   const src = await loadChobitsu();
   const s = sessions.get(pvId);
   if (!s || !s.active) return;
-  if (!src) { dtStatus(s, "chobitsu 소스 로드 실패(CDN)"); return; }
+  if (!src) { dtStatus(s, i18n.t('chobitsu 소스 로드 실패(CDN)')); return; }
   try {
     await api.previewEval(pvId, chobitsuBootJs(src));
     // 주입 결과 확인 — 페이지 환경 문제(스토리지 차단 등)로 chobitsu 부트가 죽으면 사용자에게 표시.
     const chk = String(await api.previewEval(pvId, "typeof window.chobitsu + ' err=' + (window.__cptCdpErr||'-')"));
-    if (!chk.startsWith("object") && !chk.startsWith("function")) dtStatus(s, "페이지 CDP 부트 실패: " + chk.slice(0, 140));
+    if (!chk.startsWith("object") && !chk.startsWith("function")) dtStatus(s, i18n.t('페이지 CDP 부트 실패: ') + chk.slice(0, 140));
   } catch (e) {
-    dtStatus(s, "주입 오류: " + String(e).slice(0, 120));
+    dtStatus(s, i18n.t('주입 오류: ') + String(e).slice(0, 120));
   }
 }
 
@@ -226,7 +227,7 @@ function buildDockUi(s) {
   slot.className = "cpt-dt-slot";
   const status = document.createElement("div");
   status.className = "cpt-dt-status";
-  status.textContent = "DevTools 로딩 중…";
+  status.textContent = i18n.t('DevTools 로딩 중…');
   wrap.appendChild(status);
   host.append(wrap, slot);
   s.wrap = wrap;
@@ -239,7 +240,7 @@ function buildDockUi(s) {
   window.addEventListener("message", s.msgHandler);
   iframe.src = "devtools-frame.html?ws=cpt&can_dock=true";
   setTimeout(() => {
-    if (!s.opened && s.active && s.mode === "dock" && s.status) s.status.textContent = "DevTools 로드 실패 — 네트워크(CDN) 연결을 확인하세요";
+    if (!s.opened && s.active && s.mode === "dock" && s.status) s.status.textContent = i18n.t('DevTools 로드 실패 — 네트워크(CDN) 연결을 확인하세요');
   }, 8000);
 }
 function destroyDockUi(s) {
@@ -261,7 +262,7 @@ function undockToWindow(s) {
     s.mode = "dock";
     buildDockUi(s);
     startPoll(s);
-    setTimeout(() => dtStatus(s, "별도 창 열기 실패: " + String(e).slice(0, 140)), 1200);
+    setTimeout(() => dtStatus(s, i18n.t('별도 창 열기 실패: ') + String(e).slice(0, 140)), 1200);
   });
 }
 

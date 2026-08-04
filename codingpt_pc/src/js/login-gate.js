@@ -10,6 +10,7 @@ import {
   bindSoundSelect, openNotificationSettingsAndWatch, refreshNotificationPermission,
   sendTestNotification, soundOptionsHtml,
 } from "./notification-prefs.js";
+import * as i18n from './i18n/index.js';
 
 let el = null;
 let session = null; // { code, secret, expiresAt, poll, busy }
@@ -39,7 +40,7 @@ const FOLDER_PERMS = [
   { id: "documents", label: "문서 폴더 접근" },
 ];
 const requiredPerms = () => [
-  { id: "notification", label: "알림 설정" },
+  { id: "notification", label: i18n.t('알림 설정') },
   ...FOLDER_PERMS.map((f) => ({ ...f, folder: true })),
 ];
 
@@ -143,10 +144,10 @@ function renderStep() {
     folderPermissionWatch = null;
   }
   if (setupUpdate) {
-    const progress = setupUpdate.progress == null ? "다운로드를 시작하는 중…" : `${setupUpdate.progress}%`;
+    const progress = setupUpdate.progress == null ? i18n.t('다운로드를 시작하는 중…') : `${setupUpdate.progress}%`;
     el.innerHTML = `
       <div class="lg-inner">
-        <div class="lg-head sm">최신 버전을 준비하고 있어요</div>
+        <div class="lg-head sm">${i18n.t('최신 버전을 준비하고 있어요')}</div>
         <div class="lg-status">CodingPT ${setupUpdate.version}${setupUpdate.version ? " · " : ""}${progress}</div>
       </div>`;
     return;
@@ -154,8 +155,8 @@ function renderStep() {
   if (step === "welcome") {
     el.innerHTML = `
       <div class="lg-inner">
-        <div class="lg-head">폰과 태블릿에서, 내 PC 그대로</div>
-        <button id="lgStart" class="btn primary lg">시작하기</button>
+        <div class="lg-head">${i18n.t('폰과 태블릿에서, 내 PC 그대로')}</div>
+        <button id="lgStart" class="btn primary lg">${i18n.t('시작하기')}</button>
       </div>`;
     // 시작하기 = 바로 브라우저 로그인(클릭 수 최소 — Cursor 식).
     el.querySelector("#lgStart").addEventListener("click", () => { step = "login"; renderStep(); startGateLogin(); });
@@ -165,11 +166,11 @@ function renderStep() {
     // 뒤로 = 좌상단 화살표 · 스피너 = 주 버튼 안 · 재열기 = 아래 텍스트 버튼 · 코드/안내문 없음
     //  (웹이 로그인 즉시 자동 연결하므로 별도 설명 불필요 — 사용자 확정 스펙)
     el.innerHTML = `
-      <button id="lgBack" class="lg-back" title="처음으로">←</button>
+      <button id="lgBack" class="lg-back" title="${i18n.t('처음으로')}">←</button>
       <div class="lg-inner">
-        <div class="lg-head sm">브라우저에서 로그인하세요</div>
-        <button id="lgMain" class="btn primary lg lg-wait" disabled><span class="lg-btnspin" id="lgSpin"></span><span id="lgMainTxt">브라우저 여는 중…</span></button>
-        <button id="lgRetry" class="lg-link">브라우저 다시 열기</button>
+        <div class="lg-head sm">${i18n.t('브라우저에서 로그인하세요')}</div>
+        <button id="lgMain" class="btn primary lg lg-wait" disabled><span class="lg-btnspin" id="lgSpin"></span><span id="lgMainTxt">${i18n.t('브라우저 여는 중…')}</span></button>
+        <button id="lgRetry" class="lg-link">${i18n.t('브라우저 다시 열기')}</button>
         <div id="gateLoginStatus" class="lg-status"></div>
       </div>`;
     el.querySelector("#lgRetry").addEventListener("click", startGateLogin);
@@ -196,20 +197,20 @@ function renderStep() {
         <div class="lg-perm-benefit">${c.benefit}</div>
         ${p.id === "notification" ? `
           <div id="lgNotifWarning" class="notif-warning notif-onb-status">
-            <span class="notif-warning-copy"><b id="lgNotifStatusTitle">macOS에서 CodingPT 알림을 켜주세요.</b><small id="lgNotifStatusBody">시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.</small></span>
-            <button id="lgOpenNotifSettings" class="sett-btn">시스템 설정 열기</button>
+            <span class="notif-warning-copy"><b id="lgNotifStatusTitle">${i18n.t('macOS에서 CodingPT 알림을 켜주세요.')}</b><small id="lgNotifStatusBody">${i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.')}</small></span>
+            <button id="lgOpenNotifSettings" class="sett-btn">${i18n.t('시스템 설정 열기')}</button>
           </div>
           <div id="lgNotifControls" class="notif-onb-controls is-disabled">
-            <label><span>알림음</span><select id="lgNotifSound" class="sett-select" disabled>${soundOptionsHtml()}</select></label>
-            <button id="lgNotifTest" class="sett-btn" disabled>테스트 알림 보내기</button>
+            <label><span>${i18n.t('알림음')}</span><select id="lgNotifSound" class="sett-select" disabled>${soundOptionsHtml()}</select></label>
+            <button id="lgNotifTest" class="sett-btn" disabled>${i18n.t('테스트 알림 보내기')}</button>
           </div>` : `
-          <button id="lgOpenFolderSettings" class="sett-btn lg-open-perm-settings">시스템 설정에서 직접 변경</button>`}
+          <button id="lgOpenFolderSettings" class="sett-btn lg-open-perm-settings">${i18n.t('시스템 설정에서 직접 변경')}</button>`}
         <div id="lgPermAlt" class="lg-perm-alt"></div>
       </main>
       <footer class="lg-wizard-foot">
         <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
         <div class="lg-wizard-actions">
-          <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>이전</button>
+          <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>${i18n.t('이전')}</button>
           <button id="lgAllow" class="btn secondary" data-perm="${p.id}"${p.id === "notification" ? " disabled" : ""}>${p.id === "notification" ? "알림 상태 확인 중…" : "권한 확인"}</button>
           <button id="lgPermNext" class="btn primary" disabled>${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
         </div>
@@ -224,9 +225,9 @@ function renderStep() {
     grantedNow = !!granted;
     nextBtn.disabled = !grantedNow;
     if (grantedNow) {
-      btn.textContent = "허용됨 ✓";
+      btn.textContent = i18n.t('허용됨 ✓');
       btn.disabled = true;
-      alt.textContent = "이 권한은 허용되어 있어요.";
+      alt.textContent = i18n.t('이 권한은 허용되어 있어요.');
     }
   };
   backBtn?.addEventListener("click", () => {
@@ -246,9 +247,9 @@ function renderStep() {
   el.querySelector("#lgOpenFolderSettings")?.addEventListener("click", async (ev) => {
     const open = ev.currentTarget;
     open.disabled = true;
-    open.textContent = "시스템 설정 여는 중…";
+    open.textContent = i18n.t('시스템 설정 여는 중…');
     await api.openFilesPrivacy().catch(() => {});
-    open.textContent = "시스템 설정에서 직접 변경";
+    open.textContent = i18n.t('시스템 설정에서 직접 변경');
     open.disabled = false;
   });
   if (p.id === "notification") {
@@ -263,26 +264,26 @@ function renderStep() {
     const paintNotifPermission = (value) => {
       const granted = value === "granted";
       if (granted) markPermGranted("notification");
-      btn.textContent = granted ? "허용됨 ✓" : "권한 확인";
+      btn.textContent = granted ? i18n.t('허용됨 ✓') : i18n.t('권한 확인');
       btn.disabled = !granted;
       paintGranted(granted);
       soundSelect.disabled = !granted;
       test.disabled = !granted;
       controls.classList.toggle("is-disabled", !granted);
       warning.classList.toggle("is-on", granted);
-      statusTitle.textContent = granted ? "CodingPT 알림이 켜져 있어요." : "macOS에서 CodingPT 알림을 켜주세요.";
+      statusTitle.textContent = granted ? i18n.t('CodingPT 알림이 켜져 있어요.') : i18n.t('macOS에서 CodingPT 알림을 켜주세요.');
       statusBody.textContent = granted
-        ? "아래에서 알림음을 선택하고 테스트할 수 있어요."
-        : "시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.";
+        ? i18n.t('아래에서 알림음을 선택하고 테스트할 수 있어요.')
+        : i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.');
     };
     const bindOpenSettings = (open) => open?.addEventListener("click", async () => {
       open.disabled = true;
-      open.textContent = "여는 중…";
+      open.textContent = i18n.t('여는 중…');
       try {
         await openNotificationSettingsAndWatch(paintNotifPermission);
-        open.textContent = "시스템 설정 열림";
+        open.textContent = i18n.t('시스템 설정 열림');
       } catch (_) {
-        open.textContent = "다시 시도";
+        open.textContent = i18n.t('다시 시도');
       } finally {
         open.disabled = false;
       }
@@ -290,14 +291,14 @@ function renderStep() {
     bindOpenSettings(openSettings);
     refreshNotificationPermission().then(paintNotifPermission);
     soundSelect?.addEventListener("change", () => {
-      test.textContent = "테스트 알림 보내기";
+      test.textContent = i18n.t('테스트 알림 보내기');
     });
     test?.addEventListener("click", async () => {
       test.disabled = true;
-      test.textContent = "보내는 중…";
+      test.textContent = i18n.t('보내는 중…');
       const ok = await sendTestNotification().catch(() => false);
       if (ok) markPermGranted("notification");
-      test.textContent = ok ? "다시 테스트" : "전송 실패 · 다시 시도";
+      test.textContent = ok ? i18n.t('다시 테스트') : i18n.t('전송 실패 · 다시 시도');
       test.disabled = false;
       if (!ok) {
         paintNotifPermission("denied");
@@ -311,9 +312,9 @@ function renderStep() {
   btn.addEventListener("click", async () => {
     if (p.folder && btn.dataset.denied === "1") {
       btn.disabled = true;
-      btn.textContent = "시스템 설정 여는 중…";
+      btn.textContent = i18n.t('시스템 설정 여는 중…');
       await api.openFilesPrivacy().catch(() => {});
-      btn.textContent = "설정에서 권한을 켜주세요";
+      btn.textContent = i18n.t('설정에서 권한을 켜주세요');
       btn.disabled = false;
       let checking = false;
       folderPermissionWatch = setInterval(async () => {
@@ -329,7 +330,7 @@ function renderStep() {
       return;
     }
     btn.disabled = true;
-    btn.textContent = "확인 중…";
+    btn.textContent = i18n.t('확인 중…');
     const ok = p.folder
       ? await api.probeFolder(p.id).catch(() => false)
       : await api.notifPermission().catch(() => false);
@@ -340,9 +341,9 @@ function renderStep() {
     // macOS는 한 번 거부한 보호 폴더 팝업을 다시 띄우지 않는다. 이후 CTA는 재요청이 아니라
     // 파일 및 폴더 설정을 열고, 사용자가 토글을 켜는 순간까지 실제 접근을 폴링한다.
     btn.dataset.denied = "1";
-    btn.textContent = "다시 확인";
+    btn.textContent = i18n.t('다시 확인');
     btn.disabled = false;
-    alt.textContent = "시스템 설정에서 권한을 변경한 뒤 다시 확인해 주세요.";
+    alt.textContent = i18n.t('시스템 설정에서 권한을 변경한 뒤 다시 확인해 주세요.');
   });
 }
 
@@ -369,7 +370,7 @@ function setWaiting() {
   const spin = el?.querySelector("#lgSpin");
   const txt = el?.querySelector("#lgMainTxt");
   if (spin) spin.classList.add("on");
-  if (txt) txt.textContent = "로그인 대기 중…";
+  if (txt) txt.textContent = i18n.t('로그인 대기 중…');
 }
 
 // ── 로그인(브라우저 device-code) — 기존 로직 유지 ─────────────────────
@@ -391,7 +392,7 @@ function startGateLogin() {
       setWaiting();
       session.poll = setInterval(pollGateLogin, 2500);
     } catch (e) {
-      setStatus("연결 실패 — 다시 시도하세요");
+      setStatus(i18n.t('연결 실패 — 다시 시도하세요'));
       console.warn("[gate] 로그인 세션 생성 실패:", e);
     }
   })();
@@ -406,7 +407,7 @@ async function pollGateLogin() {
   if (!session || session.busy) return;
   if (Date.now() > session.expiresAt) {
     stopGateLogin();
-    setStatus("코드가 만료됐어요 — 다시 시도하세요");
+    setStatus(i18n.t('코드가 만료됐어요 — 다시 시도하세요'));
     return;
   }
   session.busy = true;

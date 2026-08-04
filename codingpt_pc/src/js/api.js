@@ -267,6 +267,15 @@ export const api = {
   reviewCancel: (body) =>
     invoke("back_api", { method: "POST", path: "/api/daemon/review/cancel", body: body || {}, timeoutSecs: 15 }),
 
+  // ── 모바일 화면 — **이 PC 에 붙은 기기는 유닉스 소켓 직결**(프레임이 커서 서버 왕복이 아깝다).
+  //  원격 PC 의 기기는 아직 안 본다(프레임을 릴레이로 끌어오는 값보다 비용이 크다 — 필요해지면 연다).
+  emulatorList: () => invoke("emulator_local", { cmd: "emulator.list", args: {} }),
+  emulatorFrame: (id, opts) =>
+    invoke("emulator_local", { cmd: "emulator.frame", args: { id, ...(opts || {}) } }),
+  emulatorInput: (body) => invoke("emulator_local", { cmd: "emulator.input", args: body || {} }),
+  emulatorPower: (id, action) =>
+    invoke("emulator_local", { cmd: action === "shutdown" ? "emulator.shutdown" : "emulator.boot", args: { id } }),
+
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
   //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).

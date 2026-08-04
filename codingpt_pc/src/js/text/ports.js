@@ -15,16 +15,5 @@ export const PORTS_TEXT = {
     loading: '확인 중…',
     failed: '포트를 확인하지 못했어요',
   },
-  en: {
-    title: 'Open ports',
-    thisWorkspace: 'This workspace',
-    elsewhere: 'Elsewhere',
-    elsewhereHint: 'Servers started from another folder (e.g. Docker) show up here.',
-    empty: 'No open ports',
-    emptyHint: 'Start your dev server first.',
-    blank: 'Blank web view',
-    refresh: 'Refresh',
-    loading: 'Checking…',
-    failed: 'Could not check ports',
-  },
+
 };

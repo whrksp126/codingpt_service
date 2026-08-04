@@ -1,3 +1,4 @@
+import * as i18n from '../i18n/index.js';
 // 코드 리뷰 화면의 문구. text/index.js 의 규율을 따른다.
 //  ⚠ 앱(codingpt_app/src/text/review.ts)에 같은 키·같은 뜻의 사전이 있다(대조 테스트).
 
@@ -23,9 +24,9 @@ export const REVIEW_TEXT = {
     sending: "보내는 중…",
     cancel: "리뷰 취소",
     /** 남은 개수는 어순이 언어마다 달라 함수로 둔다(text/index.js 규율). */
-    remaining: (n) => `${n}곳 남음`,
+    remaining: (n) => i18n.t('{n}곳 남음', { n }),
     allDecided: "전부 정했어요",
-    commentCount: (n) => (n ? `코멘트 ${n}개` : "코멘트 없음"),
+    commentCount: (n) => (n ? i18n.t('코멘트 {n}개', { n }) : i18n.t('코멘트 없음')),
     truncated: "변경이 너무 커서 앞부분만 보여요",
     empty: "이 파일에 표시할 변경이 없어요",
     gone: "이 리뷰는 이미 끝났어요",
@@ -35,34 +36,4 @@ export const REVIEW_TEXT = {
     why: "터미널의 AI 가 이 변경을 봐 달라고 요청했어요",
   },
 
-  en: {
-    title: "Code review",
-    prev: "Previous file",
-    next: "Next file",
-    approve: "Approve",
-    reject: "Reject",
-    approved: "Approved",
-    rejected: "Rejected",
-    approveAll: "Approve this file",
-    approveEverything: "Approve all",
-    comment: "Comment",
-    commentPlaceholder: "What do you want to say about this line?",
-    commentSave: "Add",
-    commentCancel: "Cancel",
-    removeComment: "Remove comment",
-    note: "Overall note",
-    notePlaceholder: "Anything to say about the change as a whole (optional)",
-    send: "Send",
-    sending: "Sending…",
-    cancel: "Cancel review",
-    remaining: (n) => `${n} left`,
-    allDecided: "All decided",
-    commentCount: (n) => (n ? `${n} comments` : "No comments"),
-    truncated: "The change is too large — showing the beginning only",
-    empty: "No changes to show for this file",
-    gone: "This review has already ended",
-    sendFailed: "Could not send",
-    cancelConfirm: "Cancelling sends “cancelled” back to the agent. Continue?",
-    why: "The AI in your terminal asked you to look at this change",
-  },
 };

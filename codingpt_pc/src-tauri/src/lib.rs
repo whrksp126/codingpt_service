@@ -895,6 +895,7 @@ pub fn run() {
             cptsock::qc_local,
             cptsock::ports_local,
             cptsock::review_local,
+            cptsock::emulator_local,
             cptsock::mode_poke,
             cptsock::chat_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)

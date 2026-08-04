@@ -14,6 +14,7 @@ import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
 import { QC_TEXT } from "./text/quick-commands.js";
 import { wvToast } from "./workspace-view.js";
+import * as i18n from './i18n/index.js';
 
 const TX = tx(QC_TEXT);
 
@@ -34,7 +35,7 @@ async function call(cmd, args, ws) {
   if (cmd === "qc.remove") return api.qcRemove(body);
   if (cmd === "qc.reorder") return api.qcReorder(body);
   if (cmd === "qc.run") return api.qcRun(body);
-  throw new Error("알 수 없는 명령: " + cmd);
+  throw new Error(i18n.t('알 수 없는 명령: ') + cmd);
 }
 
 /** back 응답은 successResponse 라 data 가 최상위로 펼쳐져 온다. 로컬 소켓은 그대로다. */

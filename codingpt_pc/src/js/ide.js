@@ -12,6 +12,7 @@ import * as RV from "./review-view.js";
 import { tx as pvTx } from "./text/index.js";
 import { FILE_PREVIEW_TEXT } from "./text/file-preview.js";
 import { REVIEW_TEXT } from "./text/review.js";
+import * as i18n from './i18n/index.js';
 const FPT = pvTx(FILE_PREVIEW_TEXT);
 // 마크다운은 **채팅과 같은 렌더러**를 쓴다 — 같은 문서가 두 곳에서 다르게 보이면 안 되고,
 //  이미 안전 이스케이프가 검증된 코드다(새 렌더러를 들이면 XSS 표면이 하나 더 생긴다).
@@ -138,7 +139,7 @@ export class IdeView {
     //  IDE 가 다른 pane 의 혼합 탭으로 들어가도 항상 보인다(독립 pane/혼합 탭 무관).
     g.treeToggle = document.createElement("button");
     g.treeToggle.className = "ide-tabtoggle"; // 액티브(색) 표시 제거 — 채운/빈 아이콘으로만 구분
-    g.treeToggle.title = "탐색기 토글";
+    g.treeToggle.title = i18n.t('탐색기 토글');
     // 열림=채운 아이콘, 닫힘=빈 아이콘.
     g.treeToggle.innerHTML = icons[this.treeVisible ? "sidebarFilled" : "sidebar"]({ size: 15 });
     g.treeToggle.addEventListener("click", (e) => { e.stopPropagation(); this.toggleTree(); });
@@ -147,7 +148,7 @@ export class IdeView {
     g.editorHost.className = "ide-editor";
     g.empty = document.createElement("div");
     g.empty.className = "ide-empty";
-    g.empty.textContent = "왼쪽에서 파일을 선택하세요";
+    g.empty.textContent = i18n.t('왼쪽에서 파일을 선택하세요');
     // 미리보기 자리 — 에디터와 **형제**로 두고 한 번에 하나만 보인다(CodeMirror 를 없애지 않는다:
     //  텍스트로 돌아올 때 다시 만들면 스크롤·커서·linkedDoc 공유가 전부 리셋된다).
     g.previewHost = document.createElement("div");
@@ -287,11 +288,11 @@ export class IdeView {
     bar.className = "ide-find";
     bar.innerHTML = `
       <span class="ide-find-ic">${icons.search({ size: 13 })}</span>
-      <input class="ide-find-input" type="text" placeholder="파일 내 검색" />
+      <input class="ide-find-input" type="text" placeholder="${i18n.t('파일 내 검색')}" />
       <span class="ide-find-count">0/0</span>
-      <button class="ide-find-btn" data-a="prev" title="이전 (⇧Enter)">${icons.chevronUp({ size: 14 })}</button>
-      <button class="ide-find-btn" data-a="next" title="다음 (Enter)">${icons.chevronDown({ size: 14 })}</button>
-      <button class="ide-find-btn" data-a="close" title="닫기 (Esc)">${icons.x({ size: 14 })}</button>`;
+      <button class="ide-find-btn" data-a="prev" title="${i18n.t('이전 (⇧Enter)')}">${icons.chevronUp({ size: 14 })}</button>
+      <button class="ide-find-btn" data-a="next" title="${i18n.t('다음 (Enter)')}">${icons.chevronDown({ size: 14 })}</button>
+      <button class="ide-find-btn" data-a="close" title="${i18n.t('닫기 (Esc)')}">${icons.x({ size: 14 })}</button>`;
     g.wrap.appendChild(bar);
     const input = bar.querySelector(".ide-find-input");
     const countEl = bar.querySelector(".ide-find-count");
@@ -433,9 +434,9 @@ export class IdeView {
       return b;
     };
     acts.append(
-      mini(icons.plus, "새 파일", () => this._startCreate(this.root, false)),
-      mini(icons.folder, "새 폴더", () => this._startCreate(this.root, true)),
-      mini(icons.refresh, "새로고침", () => { this.tree = null; this.searchTree = null; this._reload(); })
+      mini(icons.plus, i18n.t('새 파일'), () => this._startCreate(this.root, false)),
+      mini(icons.folder, i18n.t('새 폴더'), () => this._startCreate(this.root, true)),
+      mini(icons.refresh, i18n.t('새로고침'), () => { this.tree = null; this.searchTree = null; this._reload(); })
     );
     hdr.append(title, acts);
     const search = document.createElement("div");
@@ -443,7 +444,7 @@ export class IdeView {
     search.innerHTML = `<span class="ide-search-ic">${icons.search({ size: 13 })}</span>`;
     const input = document.createElement("input");
     input.className = "ide-search-input";
-    input.placeholder = "프로젝트 전체 검색 (파일 내용)";
+    input.placeholder = i18n.t('프로젝트 전체 검색 (파일 내용)');
     input.value = this.query || "";
     input.addEventListener("input", () => {
       this.query = input.value;
@@ -474,12 +475,12 @@ export class IdeView {
   // 프로젝트 전체 텍스트 검색(파일 내용 기반) — 파일별 그룹 + 매칭 줄, 클릭 시 해당 줄로 이동.
   async _renderSearch(q) {
     const token = ++this._searchToken;
-    this.bodyEl.innerHTML = `<div class="ide-empty">검색 중…</div>`;
+    this.bodyEl.innerHTML = `<div class="ide-empty">${i18n.t('검색 중…')}</div>`;
     let hits = [];
     try { hits = await this.fs.fsSearch(this.root, q, 500); } catch (_) { hits = []; }
     if (token !== this._searchToken) return; // 그 사이 쿼리 변경 → 취소
     this.bodyEl.innerHTML = "";
-    if (!hits.length) { this.bodyEl.innerHTML = `<div class="ide-empty">일치하는 결과가 없어요</div>`; return; }
+    if (!hits.length) { this.bodyEl.innerHTML = `<div class="ide-empty">${i18n.t('일치하는 결과가 없어요')}</div>`; return; }
     // 파일별 그룹.
     const byFile = new Map();
     for (const h of hits) {
@@ -1293,11 +1294,11 @@ export class IdeView {
     closeMenu();
     const dirTarget = n.dir ? n.path : parentOf(n.path);
     const items = [];
-    items.push(["새 파일", () => this._startCreate(dirTarget, false)]);
-    items.push(["새 폴더", () => this._startCreate(dirTarget, true)]);
+    items.push([i18n.t('새 파일'), () => this._startCreate(dirTarget, false)]);
+    items.push([i18n.t('새 폴더'), () => this._startCreate(dirTarget, true)]);
     if (n.path !== this.root) {
-      items.push(["이름 변경", () => this._startRename(n)]);
-      items.push(["삭제", () => this._delete(n), "danger"]);
+      items.push([i18n.t('이름 변경'), () => this._startRename(n)]);
+      items.push([i18n.t('삭제'), () => this._delete(n), "danger"]);
     }
     const menu = document.createElement("div");
     menu.className = "ctx-menu";
@@ -1331,7 +1332,7 @@ export class IdeView {
     row.innerHTML = `<span class="ide-caret ghost"></span><span class="ide-icon">${isDir ? folderIcon(false, 15) : fileIcon("x", 15)}</span>`;
     const input = document.createElement("input");
     input.className = "ide-rename-input";
-    input.placeholder = isDir ? "폴더 이름" : "파일 이름";
+    input.placeholder = isDir ? i18n.t('폴더 이름') : i18n.t('파일 이름');
     row.appendChild(input);
     box.prepend(row);
     input.focus();

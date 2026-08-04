@@ -8,6 +8,7 @@ import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
+import * as i18n from './i18n/index.js';
 
 let el = null;
 let notifPanel = null;
@@ -166,11 +167,11 @@ export function updateSidebar() {
 
   // 서버 미가용 — 목록은 로컬 캐시(last-known)다. 이 PC 폴더 작업은 그대로 되지만 서버가 원천인
   //  조작(추가/삭제/그룹핑)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
-  if (state.wsStale) list.appendChild(note("오프라인 — 마지막으로 본 목록"));
+  if (state.wsStale) list.appendChild(note(i18n.t('오프라인 — 마지막으로 본 목록')));
   if (state.wsError && !state.workspaces.length) {
-    list.appendChild(note(state.paired ? "목록을 불러오지 못했습니다" : "PC를 연결하세요"));
+    list.appendChild(note(state.paired ? i18n.t('목록을 불러오지 못했습니다') : i18n.t('PC를 연결하세요')));
   } else if (!state.workspaces.length) {
-    list.appendChild(note("+ 로 워크스페이스를 추가하세요"));
+    list.appendChild(note(i18n.t('+ 로 워크스페이스를 추가하세요')));
   }
   // 프로젝트 그룹 — projectId 가 같은 워크스페이스(다른 PC의 사본)를 인접 묶음으로.
   //  정렬 순서 유지(그룹 위치=첫 멤버), 단독 그룹은 기존 행 그대로. 항상 전부 펼침.
@@ -211,10 +212,10 @@ export function updateSidebar() {
       : icons.user({ size: 16 });
   const txt = document.createElement("span");
   txt.className = "me-text";
-  const name = me?.nickname || "내 정보";
+  const name = me?.nickname || i18n.t('내 정보');
   const sub = me
-    ? me.email || state.daemon?.device_name || "로그인됨"
-    : state.daemon?.device_name || (state.paired ? "연결됨" : "로그인 필요");
+    ? me.email || state.daemon?.device_name || i18n.t('로그인됨')
+    : state.daemon?.device_name || (state.paired ? i18n.t('연결됨') : i18n.t('로그인 필요'));
   txt.innerHTML = `<span class="me-name">${escapeHtml(name)}</span><span class="me-sub">${escapeHtml(sub)}</span>`;
   foot.append(av, txt);
   foot.addEventListener("click", () => S.setView(state.view === "settings" ? "workspace" : "settings"));
@@ -243,7 +244,7 @@ function attachPullToRefresh(list) {
     if (__ptrBusy) return;
     ind.style.height = v > 3 ? Math.min(6 + v * 0.5, 44) + "px" : "0px";
     ind.style.opacity = v > 3 ? "1" : "0";
-    ind.textContent = pull >= THRESH ? "놓으면 새로고침 ↑" : "당겨서 새로고침 ↓";
+    ind.textContent = pull >= THRESH ? i18n.t('놓으면 새로고침 ↑') : i18n.t('당겨서 새로고침 ↓');
   };
   const reset = () => { pull = 0; render(); };
   const fire = () => {
@@ -251,7 +252,7 @@ function attachPullToRefresh(list) {
       __ptrBusy = true;
       ind.style.height = "30px";
       ind.style.opacity = "1";
-      ind.textContent = "새로고침 중…";
+      ind.textContent = i18n.t('새로고침 중…');
       Promise.resolve(S.loadWorkspaces()).finally(() => {
         setTimeout(() => { __ptrBusy = false; }, 400);
       });
@@ -314,8 +315,8 @@ export function buildTopControls(withAdd = true) {
   const frag = document.createDocumentFragment();
   const totalUnread = state.notifications.filter((n) => !n.read).length;
   // 열림=채운 아이콘, 닫힘=빈 아이콘(색이 아니라 채움 유무로 상태 표현).
-  const toggle = ctlBtn(state.sidebarCollapsed ? "sidebar" : "sidebarFilled", state.sidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기", () => S.toggleSidebar());
-  const bell = ctlBtn("bell", "알림", (e) => {
+  const toggle = ctlBtn(state.sidebarCollapsed ? "sidebar" : "sidebarFilled", state.sidebarCollapsed ? i18n.t('사이드바 펼치기') : i18n.t('사이드바 접기'), () => S.toggleSidebar());
+  const bell = ctlBtn("bell", i18n.t('알림'), (e) => {
     e.stopPropagation();
     notifOpen ? closeNotif() : openNotif();
   });
@@ -328,7 +329,7 @@ export function buildTopControls(withAdd = true) {
   }
   frag.append(toggle, bell);
   if (withAdd) {
-    const add = ctlBtn("plus", "새 워크스페이스", () => { if (S.blockedOffline("워크스페이스 추가")) return; openNewWorkspace(); });
+    const add = ctlBtn("plus", i18n.t('새 워크스페이스'), () => { if (S.blockedOffline(i18n.t('워크스페이스 추가'))) return; openNewWorkspace(); });
     if (state.creatingWs) add.classList.add("busy");
     frag.append(add);
   }
@@ -358,7 +359,7 @@ function wsRow(w, group) {
   const pinned = S.wsPinned(w.id);
   const grouped = !!group;
   const online = local ? (w.hostOnline !== false) : true;
-  const hostLabel = local ? (w.hostName || "내 PC") : "클라우드";
+  const hostLabel = local ? (w.hostName || i18n.t('내 PC')) : i18n.t('클라우드');
   const row = document.createElement("button");
   row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "") + (online ? "" : " ws-off");
   row.draggable = true;
@@ -369,10 +370,10 @@ function wsRow(w, group) {
   name.className = "wsr-name";
   // 그룹 멤버 행은 제목=호스트명(프로젝트 이름은 그룹 헤더에 1회) + 상태점.
   name.innerHTML =
-    (pinned ? `<span class="wsr-pin" title="고정됨">${icons.pin({ size: 12 })}</span>` : "") +
+    (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
     (grouped ? `<span class="wsr-kind">${local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(grouped ? hostLabel : S.wsDisplayName(w))}</span>` +
-    (grouped && online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="같은 Wi-Fi 직접 연결">직결</span>` : "") +
+    (grouped && online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="${i18n.t('같은 Wi-Fi 직접 연결')}">${i18n.t('직결')}</span>` : "") +
     (grouped ? `<span class="wsr-dot ${online ? "on" : "off"}"></span>` : "") +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
 
@@ -381,7 +382,7 @@ function wsRow(w, group) {
   const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
   meta.innerHTML = grouped
     ? ""
-    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}${online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="같은 Wi-Fi 직접 연결">직결</span>` : ""}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
+    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}${online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="${i18n.t('같은 Wi-Fi 직접 연결')}">${i18n.t('직결')}</span>` : ""}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -401,7 +402,7 @@ function wsRow(w, group) {
     // 유령 — 경로 서브라벨 대신 소실 라벨(오프라인 라벨 톤, 위험 뉘앙스 과하지 않게).
     const miss = document.createElement("div");
     miss.className = "wsr-path wsr-missing";
-    miss.textContent = "폴더를 찾을 수 없음";
+    miss.textContent = i18n.t('폴더를 찾을 수 없음');
     row.appendChild(miss);
   } else if (w.localPath) {
     const path = document.createElement("div");
@@ -423,7 +424,7 @@ function wsRow(w, group) {
     // 오프라인(캐시 목록): 이 PC 것만 진입. 캐시의 hostOnline 은 옛 판정이므로 "온라인 사본 제안"
     //  흐름(=거짓 정보)을 태우지 않고, 내 PC 워크스페이스는 로컬 직결로 그냥 연다.
     if (state.wsStale) {
-      if (!S.isThisHost(w)) { S.blockedOffline("다른 기기의 워크스페이스 열기"); return; }
+      if (!S.isThisHost(w)) { S.blockedOffline(i18n.t('다른 기기의 워크스페이스 열기')); return; }
       S.setActive(w.id);
       return;
     }
@@ -534,22 +535,22 @@ function wsMenuItems(w) {
   const projKey = w.projectId || w.id;
   const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
   const items = [
-    { icon: icons.edit({ size: 15 }), label: "이름 변경", onClick: () => inlineRename(w) },
-    { icon: icons.pin({ size: 15 }), label: pinned ? "고정 해제" : "고정", onClick: () => S.togglePinWs(w.id) },
-    { type: "colors", icon: icons.palette({ size: 15 }), label: "색상", colors: WS_COLORS.map(([title, c]) => ({ title, c, sel: (S.wsColor(w.id) || "") === c, onClick: () => S.setWsColor(w.id, c) })) },
+    { icon: icons.edit({ size: 15 }), label: i18n.t('이름 변경'), onClick: () => inlineRename(w) },
+    { icon: icons.pin({ size: 15 }), label: pinned ? i18n.t('고정 해제') : i18n.t('고정'), onClick: () => S.togglePinWs(w.id) },
+    { type: "colors", icon: icons.palette({ size: 15 }), label: i18n.t('색상'), colors: WS_COLORS.map(([title, c]) => ({ title, c, sel: (S.wsColor(w.id) || "") === c, onClick: () => S.setWsColor(w.id, c) })) },
     { type: "sep" },
-    { icon: icons.arrowUp({ size: 15 }), label: "위로 이동", onClick: () => S.moveWs(w.id, "up") },
-    { icon: icons.arrowDown({ size: 15 }), label: "아래로 이동", onClick: () => S.moveWs(w.id, "down") },
-    { icon: icons.arrowTop({ size: 15 }), label: "맨 위로 이동", onClick: () => S.moveWs(w.id, "top") },
+    { icon: icons.arrowUp({ size: 15 }), label: i18n.t('위로 이동'), onClick: () => S.moveWs(w.id, "up") },
+    { icon: icons.arrowDown({ size: 15 }), label: i18n.t('아래로 이동'), onClick: () => S.moveWs(w.id, "down") },
+    { icon: icons.arrowTop({ size: 15 }), label: i18n.t('맨 위로 이동'), onClick: () => S.moveWs(w.id, "top") },
     { type: "sep" },
   ];
   // 서버가 원천인 조작 3종(분리/합치기/삭제)은 오프라인(캐시 목록)에서 막는다 — 캐시 기준으로
   //  실행하면 서버 메타를 옛 상태로 되돌리거나(그룹핑) 실패만 남는다.
-  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: "프로젝트에서 분리", onClick: async () => { if (S.blockedOffline("프로젝트 분리")) return; try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
-  else items.push({ icon: icons.folder({ size: 15 }), label: "다른 프로젝트와 합치기", onClick: () => { if (S.blockedOffline("프로젝트 합치기")) return; showAttachMenu(w); } });
+  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: i18n.t('프로젝트에서 분리'), onClick: async () => { if (S.blockedOffline(i18n.t('프로젝트 분리'))) return; try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
+  else items.push({ icon: icons.folder({ size: 15 }), label: i18n.t('다른 프로젝트와 합치기'), onClick: () => { if (S.blockedOffline(i18n.t('프로젝트 합치기'))) return; showAttachMenu(w); } });
   // 기기(호스트)/클라우드 행 공통 — 목록 메타만 삭제(폴더/파일 무영향). 그룹 헤더에는 메뉴 없음.
   items.push({ type: "sep" });
-  items.push({ icon: icons.trash({ size: 15 }), label: "워크스페이스 삭제", danger: true, onClick: () => { if (S.blockedOffline("워크스페이스 삭제")) return; confirmDeleteWs(w); } });
+  items.push({ icon: icons.trash({ size: 15 }), label: i18n.t('워크스페이스 삭제'), danger: true, onClick: () => { if (S.blockedOffline(i18n.t('워크스페이스 삭제'))) return; confirmDeleteWs(w); } });
   return items;
 }
 
@@ -564,7 +565,7 @@ function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
       <div class="qg-title">${escapeHtml(title)}</div>
       <div class="qg-desc">${lines.map((l) => escapeHtml(l)).join("<br/>")}</div>
       <div class="qg-actions">
-        <button class="qg-btn qg-cancel">취소</button>
+        <button class="qg-btn qg-cancel">${i18n.t('취소')}</button>
         <button class="qg-btn qg-quit qg-confirm">${escapeHtml(confirmLabel)}</button>
       </div>
     </div>`;
@@ -576,9 +577,9 @@ function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
 
 function confirmDeleteWs(w) {
   confirmDialog({
-    title: "워크스페이스 삭제",
+    title: i18n.t('워크스페이스 삭제'),
     lines: [`‘${S.wsDisplayName(w)}’을(를) 목록에서 삭제할까요? PC의 폴더와 파일은 그대로 유지됩니다.`],
-    confirmLabel: "삭제",
+    confirmLabel: i18n.t('삭제'),
     onConfirm: () => deleteWs(w),
   });
 }
@@ -586,18 +587,18 @@ function confirmDeleteWs(w) {
 // 유령(폴더 소실) 행 클릭 — 열지 않고 안내 + 목록에서 삭제 제안(경로 다시 지정은 스코프 제외).
 function showMissingDialog(w) {
   confirmDialog({
-    title: "폴더를 찾을 수 없습니다",
+    title: i18n.t('폴더를 찾을 수 없습니다'),
     lines: [
       "~/" + (w.localPath || ""),
-      "폴더가 이동되었거나 삭제된 것 같습니다. 목록에서 삭제해도 폴더/파일에는 영향이 없습니다.",
+      i18n.t('폴더가 이동되었거나 삭제된 것 같습니다. 목록에서 삭제해도 폴더/파일에는 영향이 없습니다.'),
     ],
-    confirmLabel: "목록에서 삭제",
+    confirmLabel: i18n.t('목록에서 삭제'),
     onConfirm: () => deleteWs(w),
   });
 }
 
 async function deleteWs(w) {
-  if (S.blockedOffline("워크스페이스 삭제")) return;
+  if (S.blockedOffline(i18n.t('워크스페이스 삭제'))) return;
   try {
     await api.wsDelete(w.id);
     localMissing.delete(w.id);
@@ -640,10 +641,10 @@ function showPopupMenu(x, y, items) {
 
 // 꺼진 호스트 사본 클릭 — 같은 프로젝트의 켜진 사본으로 원탭 폴백 제안.
 function showOfflineFallback(e, w, alt) {
-  const altHost = isLocal(alt) ? (alt.hostName || "내 PC") : "클라우드";
+  const altHost = isLocal(alt) ? (alt.hostName || i18n.t('내 PC')) : i18n.t('클라우드');
   showPopupMenu(e.clientX, e.clientY, [
     { icon: isLocal(alt) ? icons.monitor({ size: 15 }) : icons.cloud({ size: 15 }), label: `${altHost}로 열기`, onClick: () => S.setActive(alt.id) },
-    { icon: icons.monitor({ size: 15 }), label: "그냥 열기", onClick: () => S.setActive(w.id) },
+    { icon: icons.monitor({ size: 15 }), label: i18n.t('그냥 열기'), onClick: () => S.setActive(w.id) },
   ]);
 }
 

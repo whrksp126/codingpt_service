@@ -28,11 +28,16 @@ const appSrc = read(path.join(APP, 'text/quickCommands.ts'));
 
 // 앱 사전은 TS 라 import 할 수 없다 → 본문을 오려내 실행한다(집 규율: 소스에서 실제로 실행).
 const appBody = appSrc.slice(appSrc.indexOf('export const QC_TEXT'));
+// 사전을 **소스에서 잘라** 실행하므로 import 가 없다 → `i18n.t` 스텁을 앞에 붙인다.
+//  스텁은 원문을 그대로 돌려준다(= 번역 미적용 상태). 여기서 보는 건 "두 사전이 같은가"이지
+//  "번역이 됐는가"가 아니다 — 번역 정합성은 i18n-crossimpl.mjs 가 따로 본다.
+const I18N_STUB = "const i18n={t:(s,v)=>String(s).replace(/\\{(\\w+)\\}/g,(w,k)=>(v&&v[k]!=null?String(v[k]):w))};\n";
 const appDict = (await import(
-  'data:text/javascript,' + encodeURIComponent(appBody.replace('export const QC_TEXT: Dict<QcText> =', 'export const QC_TEXT ='))
+  'data:text/javascript,' + encodeURIComponent(I18N_STUB + appBody.replace('export const QC_TEXT: Dict<QcText> =', 'export const QC_TEXT ='))
 )).QC_TEXT;
 
-for (const lang of ['ko', 'en']) {
+// 2026-08-05 다국어를 켜면서 사전은 **한국어 한 벌**이 됐다(번역은 i18n 카탈로그가 갖는다).
+for (const lang of ['ko']) {
   const a = appDict[lang];
   const p = pcText.QC_TEXT[lang];
   ok(!!a && !!p, `사전을 양쪽에서 읽어냈다(${lang})`);
@@ -49,7 +54,11 @@ for (const lang of ['ko', 'en']) {
   ok(diff.length === 0, `문구 ${same}/${pKeys.length} 글자까지 일치(${lang})`, diff.join(' | '));
 }
 // ko 와 en 이 서로 다른 언어인지(복사만 해두고 번역을 잊는 사고 방지) — title 은 실제로 다르다.
-ok(pcText.QC_TEXT.ko.title !== pcText.QC_TEXT.en.title, 'ko/en 이 실제로 다른 언어다');
+// 옛 검사("ko/en 이 실제로 다른 언어다")는 사전이 두 벌이던 시절의 것이다. 이제 번역은
+//  i18n 카탈로그에 있으므로, 여기서는 **en 반쪽이 남아 있지 않은지**를 대신 못박는다
+//  (두 메커니즘이 공존하면 어느 쪽을 고쳐야 하는지가 사람마다 달라진다).
+ok(pcText.QC_TEXT.en === undefined && appDict.en === undefined,
+  'en 반쪽이 남아 있지 않다(번역은 i18n 카탈로그가 갖는다)');
 
 // ── 2. ws:'' 격하 방지 — 목록 조회는 POST 다 ────────────────────────────────
 const routes = strip(read(path.join(BACK, 'routes/daemonRoutes.js')));

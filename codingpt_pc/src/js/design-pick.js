@@ -10,6 +10,7 @@ import { api } from "./api.js";
 import { state, ensureRuntime } from "./state.js";
 import * as T from "./tiling.js";
 import { getPane, isTermTab } from "./pane.js";
+import * as i18n from './i18n/index.js';
 
 // 페이지 주입 픽커 — 계약(round2 §2) 사양 그대로: 오버레이+hover 하이라이트+라벨 툴팁,
 //  클릭=선택 확정(기본 동작·전파 차단), ESC=취소, 1회성. payload = { rect, selector, tag, cls, text, src? }.
@@ -204,7 +205,7 @@ export function isPicking() {
 
 // 선택 모드 시작(1회성) — 픽커 주입(멱등)+start 후 폴링. 이미 켜져 있으면 재시작.
 export async function startDesignPick({ pvId, localPath }) {
-  if (_busy) { toast("이전 선택을 처리하는 중이에요"); return false; }
+  if (_busy) { toast(i18n.t('이전 선택을 처리하는 중이에요')); return false; }
   if (_mode) await cancelDesignPick();
   await api.previewEval(pvId, PICKER_JS);
   await api.previewEval(pvId, "JSON.stringify((function(){try{return !!window.__cptPick.start();}catch(e){return false;}})())");
@@ -245,7 +246,7 @@ async function _poll(mode) {
     if (r && r.picked) {
       _busy = true;
       try { await _finish(mode, r.picked); }
-      catch (e) { toast("요소 첨부 실패: " + ((e && e.message) || e)); }
+      catch (e) { toast(i18n.t('요소 첨부 실패: ') + ((e && e.message) || e)); }
       finally { _busy = false; }
     }
     return;
@@ -254,7 +255,7 @@ async function _poll(mode) {
 
 // 선택 완료 → 뷰포트 스크린샷 → 페이지 canvas 크롭 → 저장 → 터미널 [디자인] 줄 삽입.
 async function _finish(mode, payload) {
-  toast("요소 캡처 중…");
+  toast(i18n.t('요소 캡처 중…'));
   // 1) 뷰포트 스크린샷(기존 preview_screenshot 경로 — JPEG base64)
   const shot = await api.previewScreenshot(mode.pvId);
   // 2) 페이지 안 canvas 크롭 — crop 은 시작만(evaluateJavaScript 는 Promise 를 안 기다림), takeCrop 폴링 회수.
@@ -267,26 +268,26 @@ async function _finish(mode, payload) {
   const deadline = Date.now() + 10000;
   for (;;) {
     await sleep(200);
-    const raw = await api.previewEval(mode.pvId, "JSON.stringify(window.__cptPick&&window.__cptPick.takeCrop?window.__cptPick.takeCrop():{error:'픽커 없음'})");
+    const raw = await api.previewEval(mode.pvId, i18n.t("JSON.stringify(window.__cptPick&&window.__cptPick.takeCrop?window.__cptPick.takeCrop():{error:'픽커 없음'})"));
     let c = null;
     try { c = JSON.parse(raw); } catch (_) { /* null 등 */ }
     if (c) {
-      if (c.error || !c.b64) throw new Error(c.error || "크롭 실패");
+      if (c.error || !c.b64) throw new Error(c.error || i18n.t('크롭 실패'));
       b64 = c.b64;
       break;
     }
-    if (Date.now() > deadline) throw new Error("크롭 시간 초과");
+    if (Date.now() > deadline) throw new Error(i18n.t('크롭 시간 초과'));
   }
   // 3) 저장 — ~/.codingpt/attachments/design-<yyyymmdd-hhmmss>-<rand4>.jpg (절대경로 회수)
   const rel = ".codingpt/attachments/design-" + tsName() + "-" + Math.random().toString(36).slice(2, 6) + ".jpg";
   const absPath = await api.fsWriteB64(rel, b64);
   // 4) 터미널 삽입 — 포커스 터미널 pane 우선, 없으면 첫 터미널 pane. 없으면 안내(파일은 저장 유지).
   const pane = findTermPane();
-  if (!pane) { toast("터미널이 없어 파일만 저장했어요: " + absPath); return; }
+  if (!pane) { toast(i18n.t('터미널이 없어 파일만 저장했어요: ') + absPath); return; }
   pane.insertText(designLine(mode.localPath, payload, absPath));
   pane.ctx?.onFocus?.(pane.id);
   pane.focus();
-  toast("디자인 요소를 터미널에 첨부했어요");
+  toast(i18n.t('디자인 요소를 터미널에 첨부했어요'));
 }
 
 function tsName() {
@@ -308,7 +309,7 @@ function normSrcFile(file, localPath) {
 
 // 삽입 한 줄: `[디자인] ` + (src 있으면 `<file>:<line> `) + `<selector>` + (text 있으면 ` "<text 40자>"`) + ` '<absPath>' `
 function designLine(localPath, payload, absPath) {
-  let s = "[디자인] ";
+  let s = i18n.t('[디자인] ');
   if (payload.src && payload.src.file) s += normSrcFile(payload.src.file, localPath) + ":" + (payload.src.line || 0) + " ";
   s += payload.selector || payload.tag || "";
   const t = String(payload.text || "").trim();

@@ -17,6 +17,7 @@
 //       미지원: 각주, HTML 통과.
 import { icons } from "./icons.js";
 import { mediaRefOf } from "./chat-model.js";
+import * as i18n from './i18n/index.js';
 
 export function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => (
@@ -101,7 +102,7 @@ function codeBlockHtml(lang, code) {
     `<div class="chat-code">` +
     `<div class="chat-code-bar">` +
     `<span class="chat-code-lang">${escapeHtml(label || "text")}</span>` +
-    `<button class="chat-code-copy" type="button" title="코드 복사">${icons.copy({ size: 13 })}</button>` +
+    `<button class="chat-code-copy" type="button" title="${i18n.t('코드 복사')}">${icons.copy({ size: 13 })}</button>` +
     `</div>` +
     `<pre class="chat-code-pre"><code>${escapeHtml(code)}</code></pre>` +
     `</div>`

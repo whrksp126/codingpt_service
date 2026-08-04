@@ -30,6 +30,7 @@
 //  · 임계값 정본은 모바일 `codingpt_app/src/services/lanPath.ts`(단위 테스트 위치). 데몬도 자체 사본을
 //    갖고 있으므로 숫자를 바꿀 때는 세 곳을 함께 본다.
 import { api } from "./api.js";
+import * as i18n from './i18n/index.js';
 
 const GRANT_REFRESH_MS = 8 * 60 * 1000;   // 서버 TTL 10분보다 짧게 선제 갱신
 const COOLDOWN_BASE_MS = 60 * 1000;       // 실패 후 재시도 금지 구간
@@ -309,7 +310,7 @@ export async function lanRpc(hostDeviceId, method, params) {
   } catch (_) {
     // lan.rpc 커맨드만 없는 사이드카(예: forward upstream 은 지원하는데 lan.* 핸들러는 아직 없는 버전)
     //  → **rpc 만** 쉰다. 여기서 markUnsupported 를 부르면 프리뷰 직결(tcp)까지 30분 죽는다.
-    markRpcUnsupported(s, "lan.rpc 없음");
+    markRpcUnsupported(s, i18n.t('lan.rpc 없음'));
     return null;
   }
   if (r && r.ok === true) return r.result === undefined ? null : r.result;
@@ -317,7 +318,7 @@ export async function lanRpc(hostDeviceId, method, params) {
   if (code === "LAN_SCOPE") { markRpcUnsupported(s, code); return null; }
   if (code === "LAN_UNSUPPORTED") { markUnsupported(s, code); return null; }
   if (code === "LAN_TIMEOUT" || code === "LAN_UNREACHABLE" || code === "LAN_AUTH_FAILED") { markFail(s, code); return null; }
-  throw new Error((r && r.error) || "직결 RPC 실패");
+  throw new Error((r && r.error) || i18n.t('직결 RPC 실패'));
 }
 
 // 창 포커스 복귀 = 부활 트리거(모바일 AppState active 와 같은 역할).

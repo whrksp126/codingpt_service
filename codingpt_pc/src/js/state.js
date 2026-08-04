@@ -2,6 +2,7 @@
 import { api } from "./api.js";
 import * as T from "./tiling.js";
 import { getPane } from "./pane.js";
+import * as i18n from './i18n/index.js';
 
 export const state = {
   paired: false,
@@ -33,7 +34,7 @@ export const state = {
 export const wsPrefs = { order: [], pinned: [], color: {}, rename: {}, seeded: [] };
 
 export function wsDisplayName(w) {
-  return (w && (wsPrefs.rename[w.id] || w.name)) || "워크스페이스";
+  return (w && (wsPrefs.rename[w.id] || w.name)) || i18n.t('워크스페이스');
 }
 export function wsColor(id) {
   return wsPrefs.color[id] || null;
@@ -252,7 +253,7 @@ export function setActive(id) {
   //  있어야 조작되므로 열면 빈 화면 + 실패 폭풍이 된다(캐시가 원격 조작 허가는 아니다).
   if (id && state.wsStale) {
     const meta = state.workspaces.find((w) => w.id === id);
-    if (meta && !isThisHostStrict(meta)) { blockedOffline("다른 기기의 워크스페이스 열기"); return; }
+    if (meta && !isThisHostStrict(meta)) { blockedOffline(i18n.t('다른 기기의 워크스페이스 열기')); return; }
   }
   state.activeWsId = id;
   state.view = "workspace";
@@ -595,7 +596,7 @@ export function applyApprovalEvent(ev) {
     //  단 알림 행 생성이 실패한 경우(notifId 없음)만 폴백으로 직접 울린다.
     if (a.notifId == null) {
       maybeOsNotify(
-        { title: `승인 필요 — ${a.agent === "claude" ? "Claude Code" : a.agent || "에이전트"}`,
+        { title: `승인 필요 — ${a.agent === "claude" ? "Claude Code" : a.agent || i18n.t('에이전트')}`,
           body: `${a.tool || "Tool"}${a.relPath || a.summary ? " · " + String(a.relPath || a.summary).slice(0, 80) : ""}`,
           read: false },
         ev.alertClientKey == null ? true : ev.alertClientKey === deviceKey()
@@ -635,7 +636,7 @@ export async function respondApproval(id, body) {
       return { ok: false, code };
     }
     a._busy = false;
-    a._err = code === "HOST_OFFLINE" ? "PC 가 연결돼 있지 않습니다" : msg.replace(/^HTTP \d+( [A-Z_]+)?: ?/, "") || "응답 실패";
+    a._err = code === "HOST_OFFLINE" ? i18n.t('PC 가 연결돼 있지 않습니다') : msg.replace(/^HTTP \d+( [A-Z_]+)?: ?/, "") || i18n.t('응답 실패');
     emit();
     return { ok: false, code: code || "FAILED" };
   }
@@ -797,7 +798,7 @@ export async function loadWorkspaces() {
 
 // ── 새 워크스페이스(폴더 피커 → 로컬 워크스페이스 생성 → 터미널 열기) ──
 export async function createLocalWorkspace() {
-  if (blockedOffline("워크스페이스 추가")) return;
+  if (blockedOffline(i18n.t('워크스페이스 추가'))) return;
   if (state.creatingWs) return;
   state.creatingWs = true;
   try {

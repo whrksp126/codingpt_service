@@ -1,3 +1,4 @@
+import * as i18n from './i18n/index.js';
 // tiling.js — pane 분할 트리(순수 로직). 렌더/영속화가 이 트리를 소비한다.
 //
 //  노드:
@@ -23,6 +24,8 @@ export function bumpSeq(fromIds) {
 export function leaf(kind, opts = {}) {
   if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null };
   if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null };
+  // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — deviceId 만 기억한다.
+  if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null };
   // empty: 터미널 0개 상태의 자리 pane — 자동 생성 금지(닫힘=전 기기 공통 의사), 사용자가 + 로 추가.
   if (opts.empty) return { id: newPaneId(), kind: "terminal", tabs: [], active: 0 };
   return {
@@ -71,7 +74,7 @@ export function nextTerminalTitle(root) {
       else if (!t.title && typeof t.win === "number") max = Math.max(max, t.win);
     }
   });
-  return "터미널 " + (max + 1);
+  return i18n.t('터미널 ') + (max + 1);
 }
 
 // leaf 를 branch 로 치환(분할). before=true 면 newLeaf 를 first(좌/상)에 둔다.

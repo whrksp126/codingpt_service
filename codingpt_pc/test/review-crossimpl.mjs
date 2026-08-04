@@ -193,11 +193,16 @@ ok(/handleReviewRpc/.test(control) && /handleReviewRpc/.test(read(path.join(DAEM
 const pcText = await import(path.join(PC, 'text/review.js'));
 const appSrc = read(path.join(APP, 'text/review.ts'));
 const appBody = appSrc.slice(appSrc.indexOf('export const REVIEW_TEXT'));
+// 사전을 **소스에서 잘라** 실행하므로 import 가 없다 → `i18n.t` 스텁을 앞에 붙인다.
+//  스텁은 원문을 그대로 돌려준다(= 번역 미적용 상태). 여기서 보는 건 "두 사전이 같은가"이지
+//  "번역이 됐는가"가 아니다 — 번역 정합성은 i18n-crossimpl.mjs 가 따로 본다.
+const I18N_STUB = "const i18n={t:(s,v)=>String(s).replace(/\\{(\\w+)\\}/g,(w,k)=>(v&&v[k]!=null?String(v[k]):w))};\n";
 const appDict = (await import('data:text/javascript,' + encodeURIComponent(
-  appBody.replace('export const REVIEW_TEXT: Dict<ReviewText> =', 'export const REVIEW_TEXT =')
+  I18N_STUB + appBody.replace('export const REVIEW_TEXT: Dict<ReviewText> =', 'export const REVIEW_TEXT =')
     .replace(/\(n: number\)/g, '(n)')))).REVIEW_TEXT;
 
-for (const lang of ['ko', 'en']) {
+// 2026-08-05 다국어를 켜면서 사전은 **한국어 한 벌**이 됐다(번역은 i18n 카탈로그가 갖는다).
+for (const lang of ['ko']) {
   const a = appDict[lang], p = pcText.REVIEW_TEXT[lang];
   const aK = Object.keys(a).sort(), pK = Object.keys(p).sort();
   ok(JSON.stringify(aK) === JSON.stringify(pK), `키 집합 일치(${lang}) — ${pK.length}개`,

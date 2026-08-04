@@ -34,6 +34,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import nc from "node:crypto";
 
+// 소스를 **오려내 실행**하므로 import 가 없다 → `i18n.t` 스텁을 앞에 붙인다(원문 그대로 반환).
+const I18N_STUB = "const i18n={t:(s,v)=>String(s).replace(/\\{(\\w+)\\}/g,(w,k)=>(v&&v[k]!=null?String(v[k]):w))};\n";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.resolve(here, "../../codingpt_daemon/packages/runner-core/e2ee.js");
 const BACK = path.resolve(here, "../../codingpt_back/services/deviceTrustService.js");
@@ -258,7 +261,8 @@ ok(`표기 형식(4-4-4 / NNN NNN / NNNN) ${mFmt}/${N}`, mFmt === N);
         if (close < 0) return { why: `${name} 본문을 오려낼 수 없다(형식 변경)` };
         const body = src.slice(open + 1, close);
         if (/\breturn\b/.test(body)) {
-          try { return { fn: new Function(...args, body) }; }
+          // 오려낸 본문은 import 가 없다 → `i18n` 스텁을 앞에 붙여 실행한다(원문 그대로 반환).
+          try { return { fn: new Function(...args, I18N_STUB + body) }; }
           catch (e) { return { why: `${name} 본문을 실행할 수 없다(TS 문법 유입?): ${e.message}` }; }
         }
         open = src.indexOf("{", close + 1);

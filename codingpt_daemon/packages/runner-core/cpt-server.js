@@ -837,6 +837,13 @@ async function dispatch(req, conn) {
   //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 **자기가 요청한 리뷰를 스스로 승인**할 경로가
   //   되면 리뷰라는 것 자체가 무의미해진다(approval.respond·agents.wire 를 닫은 것과 같은 이유).
   if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
+  // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 목록/켜기/프레임/입력.
+  //  프레임은 수십~수백 KB 라 **부르는 쪽이 당겨 간다**(푸시하면 느린 회선에서 지연이 쌓인다).
+  if (cmd.startsWith('emulator.')) {
+    const emuLib = lazyMod('./emulator');
+    if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
+    return emuLib.handle(cmd, req.args || {});
+  }
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
     if (!proxyLib) throw new Error('이 데몬은 포트 조회를 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -1963,6 +1970,9 @@ const CAPABILITIES = [
   // 리뷰는 **요청만** 공개한다. 제출/취소(review.*)는 비공개 — 자기가 요청한 리뷰를 스스로
   //  승인할 수 있으면 리뷰가 무의미해진다.
   'ui.review',
+  // 모바일 화면 — 조회·조작 전부 공개다. 에이전트가 "고친 화면이 어떻게 나오는지" 스스로 확인하고
+  //  탭까지 해 보는 것이 이 기능의 값이다(승인·자기주입 같은 "사람만 해야 하는 일"이 아니다).
+  'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.

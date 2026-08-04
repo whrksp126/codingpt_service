@@ -28,6 +28,7 @@ import {
   agentModeOf, agentModeLabel, patchLines, slashQuery, filterCommands, commandBadges,
   TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
+import * as i18n from './i18n/index.js';
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
 //  보여주고 있는가"를 판정하는 데 쓴다(전역 카드 스택과 중복 표시 방지).
@@ -110,16 +111,16 @@ export class ChatView {
       <div class="chat-tuidlg hidden"></div>
       <div class="chat-statusline hidden"></div>
       <div class="chat-composer">
-        <button class="chat-jump hidden" type="button" title="맨 아래로">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
+        <button class="chat-jump hidden" type="button" title="${i18n.t('맨 아래로')}">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
         <div class="chat-box">
           <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph="메시지 보내기"></div>
           <div class="chat-ctl">
-            <button class="chat-plus" type="button" title="파일 넣기">${icons.plus({ size: 18 })}</button>
-            <button class="chat-mode hidden" type="button" title="에이전트 모드 (TUI 의 shift+tab)">
+            <button class="chat-plus" type="button" title="${i18n.t('파일 넣기')}">${icons.plus({ size: 18 })}</button>
+            <button class="chat-mode hidden" type="button" title="${i18n.t('에이전트 모드 (TUI 의 shift+tab)')}">
               <span class="chat-mode-label"></span><span class="chat-mode-caret">▾</span>
             </button>
             <span class="chat-ctl-gap"></span>
-            <button class="chat-send" type="button" title="보내기 (Enter)" disabled>${icons.arrowUp({ size: 17 })}</button>
+            <button class="chat-send" type="button" title="${i18n.t('보내기 (Enter)')}" disabled>${icons.arrowUp({ size: 17 })}</button>
           </div>
         </div>
       </div>`;
@@ -302,7 +303,7 @@ export class ChatView {
 
   _retarget() {
     const tid = this.ctx.tid();
-    if (tid == null) { this._setBanner("터미널이 선택되지 않았습니다."); return; }
+    if (tid == null) { this._setBanner(i18n.t('터미널이 선택되지 않았습니다.')); return; }
     // 같은 터미널이면 아무것도 하지 않는다 — 캐치업은 폴링(_tick)이 담당. 여기서 매번 since 를
     //  치면 리컨실러가 7s 주기로 showActiveTab 을 부를 때마다 왕복이 늘어난다.
     //  ★ noSession 도 "그 터미널의 확정 상태"다 → 같은 tid 면 다시 열지 않는다(폭주 방지의 일부).
@@ -332,7 +333,7 @@ export class ChatView {
     if (this._opening) return this._opening;
     const tid = this._tid;
     const cwd = this._cwd();
-    this._setBanner("대화를 불러오는 중…", "info");
+    this._setBanner(i18n.t('대화를 불러오는 중…'), "info");
     this._opening = (async () => {
       try {
         // ★ 이 터미널에서 도는 CLI 를 반드시 실어 보낸다. 빠지면 데몬이 claude 로 가정해서
@@ -344,7 +345,7 @@ export class ChatView {
           ...(this.ctx.hostDeviceId() != null ? { hostDeviceId: this.ctx.hostDeviceId() } : {}),
         });
         if (this._disposed || this._tid !== tid) return;
-        if (r && r.supported === false) { this._setBanner("이 에이전트의 대화 기록은 아직 지원하지 않습니다.", "warn"); return; }
+        if (r && r.supported === false) { this._setBanner(i18n.t('이 에이전트의 대화 기록은 아직 지원하지 않습니다.'), "warn"); return; }
         // ── 대화가 아직 없다(정상 상태) — 오류 배너 금지, 빈 상태 본문을 그린다 ──
         //  데몬은 "남의 대화를 보여주는 것보다 아무것도 안 보여주는 것이 낫다" 규칙으로 여기에 온다.
         if (r && r.noSession) {
@@ -393,11 +394,11 @@ export class ChatView {
         //   (데몬 축출/삭제). 선택을 놓아주지 않으면 그 탭은 영구히 없는 대화를 요청하며 오류 배너에
         //   갇힌다(조용히 죽는 경로) → 선택 해제 + 빈 상태로 되돌린다. 다음 열기는 정상 판정을 탄다.
         if (/CHAT_NOT_FOUND|찾을 수 없습니다/.test(msg)) {
-          this._setBanner("아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.", "info");
+          this._setBanner(i18n.t('아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.'), "info");
         }
-        else if (/HTTP 409|데몬/.test(msg)) this._setBanner("PC 가 연결돼 있지 않습니다.", "warn");
-        else if (/TRANSCRIPT_DISABLED/.test(msg)) this._setBanner("서버에서 대화 기록 기능이 꺼져 있습니다.", "warn");
-        else this._setBanner("대화를 불러오지 못했습니다 — 잠시 후 자동으로 다시 시도합니다.", "warn");
+        else if (/HTTP 409|데몬/.test(msg)) this._setBanner(i18n.t('PC 가 연결돼 있지 않습니다.'), "warn");
+        else if (/TRANSCRIPT_DISABLED/.test(msg)) this._setBanner(i18n.t('서버에서 대화 기록 기능이 꺼져 있습니다.'), "warn");
+        else this._setBanner(i18n.t('대화를 불러오지 못했습니다 — 잠시 후 자동으로 다시 시도합니다.'), "warn");
       } finally {
         this._opening = null;
       }
@@ -579,7 +580,7 @@ export class ChatView {
     if (this._truncated) {
       const hint = document.createElement("div");
       hint.className = "chat-headhint";
-      hint.textContent = "이전 대화는 생략되었습니다(최근 " + CHAT.SNAPSHOT_LIMIT + "줄만 표시)";
+      hint.textContent = i18n.t('이전 대화는 생략되었습니다(최근 ') + CHAT.SNAPSHOT_LIMIT + i18n.t('줄만 표시)');
       this.scrollEl.appendChild(hint);
     }
     this._appendAll(this._msgs);
@@ -588,7 +589,7 @@ export class ChatView {
     if (!this._els.size) {
       const empty = document.createElement("div");
       empty.className = "chat-empty";
-      empty.textContent = "아직 표시할 대화가 없습니다";
+      empty.textContent = i18n.t('아직 표시할 대화가 없습니다');
       this.scrollEl.appendChild(empty);
     }
   }
@@ -652,7 +653,7 @@ export class ChatView {
       row.innerHTML = `<span class="chat-think-body">${escapeHtml(text.slice(0, CHAT.THINKING_CHARS))}${text.length > CHAT.THINKING_CHARS ? "…" : ""}</span>`;
       row.dataset.full = text;
       row.dataset.collapsed = "1";
-      row.title = "눌러서 전체 보기";
+      row.title = i18n.t('눌러서 전체 보기');
       return row;
     }
     if (m.kind === "tool_use" || m.kind === "question") {
@@ -669,7 +670,7 @@ export class ChatView {
       head.innerHTML =
         `<span class="chat-tool-mark pending">…</span>` +
         `<span class="chat-tool-label">${escapeHtml(label)}</span>` +
-        (path ? `<button class="chat-tool-open" type="button" data-path="${escapeHtml(path)}" title="IDE 로 열기">열기</button>` : "");
+        (path ? `<button class="chat-tool-open" type="button" data-path="${escapeHtml(path)}" title="${i18n.t('IDE 로 열기')}">${i18n.t('열기')}</button>` : "");
       row.appendChild(head);
       if (m.tool && m.tool.argsPreview) {
         const pre = document.createElement("div");
@@ -750,14 +751,14 @@ export class ChatView {
     return `<div class="chat-diff">${head}`
       + (rest.length ? `<div class="chat-diff-rest hidden">${rest.map(rowHtml).join("")}</div>`
         + `<button class="chat-diff-more" type="button">${rest.length}줄 더 보기</button>` : "")
-      + (more ? `<div class="chat-diff-cut">…이후 생략(원문은 터미널)</div>` : "")
+      + (more ? `<div class="chat-diff-cut">${i18n.t('…이후 생략(원문은 터미널)')}</div>` : "")
       + `</div>`;
   }
 
   _truncNote() {
     const n = document.createElement("div");
     n.className = "chat-trunc";
-    n.textContent = "…내용이 잘렸습니다(원문은 터미널에서 확인)";
+    n.textContent = i18n.t('…내용이 잘렸습니다(원문은 터미널에서 확인)');
     return n;
   }
 
@@ -874,7 +875,7 @@ export class ChatView {
       ? `<img class="chat-chip-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
       : (a.ext ? `<span class="chat-chip-ext">${escapeHtml(String(a.ext).toUpperCase().slice(0, 4))}</span>` : "");
     return lead + `<span class="chat-chip-label">${escapeHtml(a.name)}</span>` +
-      `<button class="chat-chip-x" type="button" title="빼기">✕</button>`;
+      `<button class="chat-chip-x" type="button" title="${i18n.t('빼기')}">✕</button>`;
   }
 
   _refreshChip(a) {
@@ -1047,10 +1048,10 @@ export class ChatView {
       else {
         const r = await this._mediaBytes(target);
         if (!r || r.missing) {
-          fail(r && r.reason === "too_large" ? "파일이 너무 커서 여기서는 못 보여줘요(눌러서 열기)"
-            : r && r.reason === "not_found" ? "파일을 찾을 수 없어요"
-              : r && r.reason === "unsupported" ? "미리보기를 지원하지 않는 형식이에요"
-                : "불러오지 못했어요");
+          fail(r && r.reason === "too_large" ? i18n.t('파일이 너무 커서 여기서는 못 보여줘요(눌러서 열기)')
+            : r && r.reason === "not_found" ? i18n.t('파일을 찾을 수 없어요')
+              : r && r.reason === "unsupported" ? i18n.t('미리보기를 지원하지 않는 형식이에요')
+                : i18n.t('불러오지 못했어요'));
           el.dataset.openable = "1";
           return;
         }
@@ -1074,7 +1075,7 @@ export class ChatView {
         });
         put(img);
       }
-    } catch (_) { fail("불러오지 못했어요"); }
+    } catch (_) { fail(i18n.t('불러오지 못했어요')); }
   }
 
   /** 미디어 바이트 — 로컬은 Tauri 직접 읽기(왕복 0), 원격은 데몬 chat.file(권한 검사 포함). */
@@ -1111,7 +1112,7 @@ export class ChatView {
       if (b64) { this._showLightbox(`data:${this._attachMime(a)};base64,${b64}`, a); return; }
     }
     try { await api.openPath(a.path); } catch (e) {
-      this._setBanner("파일을 열 수 없습니다: " + String(e || "").slice(0, 80), "warn");
+      this._setBanner(i18n.t('파일을 열 수 없습니다: ') + String(e || "").slice(0, 80), "warn");
     }
   }
 
@@ -1121,8 +1122,8 @@ export class ChatView {
     ov.className = "chat-lightbox";
     ov.innerHTML =
       `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path || a.name)}">${escapeHtml(a.name)}</span>` +
-      (a.path ? `<button class="chat-lb-open" type="button">원본 열기</button>` : "") +
-      `<button class="chat-lb-close" type="button" title="닫기">✕</button></div>` +
+      (a.path ? `<button class="chat-lb-open" type="button">${i18n.t('원본 열기')}</button>` : "") +
+      `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">✕</button></div>` +
       `<img class="chat-lb-img" src="${src}" alt="">`;
     let close;
     const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } };
@@ -1233,7 +1234,7 @@ export class ChatView {
   }
 
   _fetchAttachment(seq, idx) {
-    if (!this._chatId || !(idx >= 0)) return Promise.reject(new Error("첨부 없음"));
+    if (!this._chatId || !(idx >= 0)) return Promise.reject(new Error(i18n.t('첨부 없음')));
     const key = `${this._chatId}:${seq}:${idx}`;
     let pr = this._attCache.get(key);
     if (!pr) {
@@ -1322,10 +1323,10 @@ export class ChatView {
       }
       this._fetchAttachment(Number(mchip.dataset.mseq), Number(mchip.dataset.idx))
         .then((att) => {
-          if (att && att.base64) this._showLightbox(`data:${att.mediaType || "image/png"};base64,${att.base64}`, { name: mchip.textContent || "이미지", path: "" });
-          else this._setBanner("이미지를 불러올 수 없습니다.", "warn");
+          if (att && att.base64) this._showLightbox(`data:${att.mediaType || "image/png"};base64,${att.base64}`, { name: mchip.textContent || i18n.t('이미지'), path: "" });
+          else this._setBanner(i18n.t('이미지를 불러올 수 없습니다.'), "warn");
         })
-        .catch(() => this._setBanner("이미지를 불러올 수 없습니다.", "warn"));
+        .catch(() => this._setBanner(i18n.t('이미지를 불러올 수 없습니다.'), "warn"));
       return;
     }
     // 도구 묶음 요약 클릭 = 그 구간 펼치기(요약 제거 + 감춘 행 복구).
@@ -1370,10 +1371,10 @@ export class ChatView {
           this._mediaBytes(target).then((r) => {
             if (r && !r.missing) this._showLightbox(`data:${r.mediaType};base64,${r.base64}`, { name: chip.dataset.name || "", path: target });
             else if (this.ctx.isLocal?.()) api.openPath(target).catch(() => {});
-            else this._setBanner("이 파일은 미리 볼 수 없어요.", "warn");
+            else this._setBanner(i18n.t('이 파일은 미리 볼 수 없어요.'), "warn");
           }).catch(() => { /* noop */ });
         } else if (this.ctx.isLocal?.()) {
-          api.openPath(target).catch(() => this._setBanner("파일을 열 수 없어요.", "warn"));
+          api.openPath(target).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn"));
         } else {
           this.ctx.openFile?.(target);
         }
@@ -1418,10 +1419,10 @@ export class ChatView {
     const att = this._attach.slice();
     if (!raw.trim()) return;
     const tid = this._tid != null ? this._tid : this.ctx.tid();
-    if (tid == null) { this._setBanner("보낼 터미널이 없습니다.", "warn"); return; }
+    if (tid == null) { this._setBanner(i18n.t('보낼 터미널이 없습니다.'), "warn"); return; }
     // TUI 질문 다이얼로그가 떠 있는 동안의 chatInput 은 대화가 아니라 **다이얼로그에 타이핑**된다
     //  (숫자는 선택지를 고른다). 오조작을 막고 카드로 답하게 안내한다.
-    if (this._tuiQuestion()) { this._setBanner("질문 다이얼로그가 떠 있어요 — 위 카드에서 답해주세요.", "warn"); return; }
+    if (this._tuiQuestion()) { this._setBanner(i18n.t('질문 다이얼로그가 떠 있어요 — 위 카드에서 답해주세요.'), "warn"); return; }
     this._ceClear();
     this.ctx.setDraft?.("");
     this._attach = [];
@@ -1461,8 +1462,8 @@ export class ChatView {
       const ok = this.ctx.sendFallback?.(raw);
       if (!ok) {
         el.classList.add("failed");
-        el.title = String(e || "전송 실패");
-        this._setBanner("전송에 실패했습니다: " + String(e || "").slice(0, 120), "warn");
+        el.title = String(e || i18n.t('전송 실패'));
+        this._setBanner(i18n.t('전송에 실패했습니다: ') + String(e || "").slice(0, 120), "warn");
       }
     }
   }
@@ -1482,7 +1483,7 @@ export class ChatView {
     const mark = agentMarkHtml(this._agent, { size: 30 }) || icons.chat({ size: 30 });
     wrap.innerHTML =
       `<span class="chat-blank-ic">${mark}</span>` +
-      `<div class="chat-blank-title">무엇이든 요청하세요</div>`;
+      `<div class="chat-blank-title">${i18n.t('무엇이든 요청하세요')}</div>`;
     this.scrollEl.appendChild(wrap);
   }
   _clearBlank() { this.scrollEl?.querySelector(".chat-blank")?.remove(); }
@@ -1498,8 +1499,8 @@ export class ChatView {
     const wrap = document.createElement("div");
     wrap.className = "chat-pick";
     wrap.innerHTML =
-      `<input class="chat-pick-q" type="text" placeholder="파일 이름" />` +
-      `<div class="chat-pick-list"><div class="chat-pick-empty">불러오는 중…</div></div>`;
+      `<input class="chat-pick-q" type="text" placeholder="${i18n.t('파일 이름')}" />` +
+      `<div class="chat-pick-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.querySelector(".chat-composer").appendChild(wrap);
     this.pickEl = wrap;
     this._pickFiles = null;
@@ -1547,17 +1548,17 @@ export class ChatView {
       this._pickFiles = [];
       // 실패를 조용히 빈 목록으로 만들지 않는다(원격 오프라인·권한 문제를 사용자가 알아야 한다).
       const list = this.pickEl.querySelector(".chat-pick-list");
-      list.innerHTML = `<div class="chat-pick-empty">목록을 불러오지 못했습니다</div>`;
+      list.innerHTML = `<div class="chat-pick-empty">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
     }
   }
 
   _renderPicker(query) {
     if (!this.pickEl) return;
     const list = this.pickEl.querySelector(".chat-pick-list");
-    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">불러오는 중…</div>`; return; }
+    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div>`; return; }
     const root = this._cwd() || "";
     const hit = filterFiles(this._pickFiles, root, query, CHAT.PICK_LIMIT);
-    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">일치하는 파일 없음</div>`; return; }
+    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('일치하는 파일 없음')}</div>`; return; }
     list.innerHTML = hit.map((p) => {
       const r = relToRoot(root, p);
       const i = r.lastIndexOf("/");
@@ -1649,7 +1650,7 @@ export class ChatView {
     if (!el) {
       el = document.createElement("div");
       el.className = "chat-working";
-      el.innerHTML = `<span class="chat-working-dot"></span><span>작업 중…</span>`;
+      el.innerHTML = `<span class="chat-working-dot"></span><span>${i18n.t('작업 중…')}</span>`;
     }
     this.scrollEl.appendChild(el); // 항상 맨 아래로
   }
@@ -1698,7 +1699,7 @@ export class ChatView {
   _openCmds() {
     const wrap = document.createElement("div");
     wrap.className = "chat-cmds";
-    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">불러오는 중…</div></div>`;
+    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.querySelector(".chat-composer").appendChild(wrap);
     this.cmdsEl = wrap;
     this._cmdIdx = 0;
@@ -1741,11 +1742,11 @@ export class ChatView {
   _renderCmds(q) {
     if (!this.cmdsEl) return;
     const list = this.cmdsEl.querySelector(".chat-cmds-list");
-    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">불러오는 중…</div>`; return; }
+    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div>`; return; }
     const rows = this._cmdMatches(q);
     this._cmdRows = rows;
     if (this._cmdIdx >= rows.length) this._cmdIdx = 0;
-    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">맞는 명령이 없습니다</div>`; return; }
+    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
     list.innerHTML = rows.map((c, i) => {
       const off = c.chat === "tui";
       return `<div class="chat-cmds-row${i === this._cmdIdx ? " on" : ""}${off ? " off" : ""}" data-name="${escapeHtml(c.name)}">` +
@@ -1796,7 +1797,7 @@ export class ChatView {
     if (this.sendEl) this.sendEl.disabled = !has;
     if (this.inputEl) {
       const name = agentDisplayName(this._agent);
-      this.inputEl.dataset.ph = name ? name + "에게 요청" : "메시지 보내기"; // :empty::before 가 그린다
+      this.inputEl.dataset.ph = name ? name + i18n.t('에게 요청') : i18n.t('메시지 보내기'); // :empty::before 가 그린다
     }
   }
   // TUI statusline 미러 — 데몬이 화면에서 뽑은 원문 줄(ANSI 포함)을 컴포저 위에 그대로 그린다
@@ -1894,7 +1895,7 @@ export class ChatView {
     this.dlgEl.innerHTML =
       `<div class="chat-tuidlg-head">` +
         `<span class="chat-tuidlg-title">${escapeHtml(d.title || "")}</span>` +
-        `<button class="chat-tuidlg-x" type="button" title="닫기(Esc)">✕</button>` +
+        `<button class="chat-tuidlg-x" type="button" title="${i18n.t('닫기(Esc)')}">✕</button>` +
       `</div>` +
       (d.desc ? `<div class="chat-tuidlg-desc">${escapeHtml(d.desc)}</div>` : "") +
       `<div class="chat-tuidlg-opts">` +
@@ -1927,9 +1928,9 @@ export class ChatView {
     } catch (e) {
       if (this._disposed) return;
       const msg = String(e || "");
-      if (/DIALOG_MISMATCH/.test(msg)) this._setBanner("터미널 화면이 바뀌었어요 — 다시 확인해 주세요.", "warn");
+      if (/DIALOG_MISMATCH/.test(msg)) this._setBanner(i18n.t('터미널 화면이 바뀌었어요 — 다시 확인해 주세요.'), "warn");
       else if (/DIALOG_GONE/.test(msg)) { this._setDialog(null); }
-      else this._setBanner("선택을 전달하지 못했어요 — TUI 를 확인해 주세요.", "warn");
+      else this._setBanner(i18n.t('선택을 전달하지 못했어요 — TUI 를 확인해 주세요.'), "warn");
     } finally {
       this._dlgBusy = false;
       this.dlgEl?.classList.remove("busy");
@@ -2012,8 +2013,8 @@ export class ChatView {
     const cur = this._mode || null;
     // 양쪽 다 shift+tab 이 바꾸는 것만 담는다 — claude 는 순환, codex 는 두 상태 전환.
     const hint = agentModeChoices(cur).some((m) => m.id.startsWith("codex"))
-      ? "TUI 에서는 shift+tab 으로 전환합니다 · 권한은 /permissions"
-      : "TUI 에서는 shift+tab 으로 순환합니다";
+      ? i18n.t('TUI 에서는 shift+tab 으로 전환합니다 · 권한은 /permissions')
+      : i18n.t('TUI 에서는 shift+tab 으로 순환합니다');
     this.modeMenuEl.innerHTML = agentModeChoices(cur).map((m) => {
       const on = agentModeIsOn(m, cur);
       const busy = this._modeBusy;
@@ -2049,10 +2050,10 @@ export class ChatView {
       if (this._disposed) return;
       const msg = String(e || "");
       // 실패를 조용히 삼키지 않는다 — 모드가 안 바뀐 채로 "바꿨다"고 보이는 것이 최악이다.
-      if (/MODE_BLOCKED/.test(msg)) this._setBanner("지금은 승인/질문 다이얼로그가 떠 있어 모드를 바꿀 수 없어요.", "warn");
-      else if (/MODE_UNREACHABLE/.test(msg)) this._setBanner("이 세션에서는 그 모드로 바꿀 수 없어요.", "warn");
-      else if (/MODE_UNKNOWN/.test(msg)) this._setBanner("터미널 화면에서 모드를 읽지 못했어요 — TUI 를 확인해 주세요.", "warn");
-      else this._setBanner("모드를 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.", "warn");
+      if (/MODE_BLOCKED/.test(msg)) this._setBanner(i18n.t('지금은 승인/질문 다이얼로그가 떠 있어 모드를 바꿀 수 없어요.'), "warn");
+      else if (/MODE_UNREACHABLE/.test(msg)) this._setBanner(i18n.t('이 세션에서는 그 모드로 바꿀 수 없어요.'), "warn");
+      else if (/MODE_UNKNOWN/.test(msg)) this._setBanner(i18n.t('터미널 화면에서 모드를 읽지 못했어요 — TUI 를 확인해 주세요.'), "warn");
+      else this._setBanner(i18n.t('모드를 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.'), "warn");
     } finally {
       this._modeBusy = false;
       this.modeEl?.classList.remove("busy");
@@ -2069,7 +2070,7 @@ export class ChatView {
   }
   // 에이전트가 종료됐을 때 pane 이 부른다 — 모드는 유지하고 배너만(사용자 의사 없이 화면 전환 금지).
   setAgentGone(gone) {
-    if (gone) this._setBanner("에이전트가 종료됐어요 · 토글로 터미널(TUI)로 돌아갈 수 있습니다", "warn");
+    if (gone) this._setBanner(i18n.t('에이전트가 종료됐어요 · 토글로 터미널(TUI)로 돌아갈 수 있습니다'), "warn");
     else if (/에이전트가 종료/.test(this.bannerEl?.textContent || "")) this._setBanner("");
   }
 

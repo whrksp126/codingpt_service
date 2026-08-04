@@ -1,6 +1,7 @@
 // notification-prefs.js — 온보딩과 설정이 공유하는 데스크톱 알림 소리 설정.
 // 기기 로컬 성격(OS 소리 선택)이므로 계정/서버가 아니라 localStorage 에 둔다.
 import { api } from "./api.js";
+import * as i18n from './i18n/index.js';
 
 const KEY = "cpt.notificationSound.v1";
 export const NOTIFICATION_SOUNDS = [
@@ -42,7 +43,7 @@ export function bindSoundSelect(select) {
 export async function sendTestNotification() {
   const granted = await api.notifPermission();
   if (!granted) return false;
-  await api.notify("CodingPT 테스트 알림", "에이전트가 작업을 마치면 이렇게 알려드려요.", getNotificationSound());
+  await api.notify(i18n.t('CodingPT 테스트 알림'), i18n.t('에이전트가 작업을 마치면 이렇게 알려드려요.'), getNotificationSound());
   return true;
 }
 

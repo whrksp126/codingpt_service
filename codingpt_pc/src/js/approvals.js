@@ -27,6 +27,7 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
 import { setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
 import { api } from "./api.js";
+import * as i18n from './i18n/index.js';
 
 // 사용자가 ✕ 로 접은 TUI 폴백 질문 카드 — 승인 인박스에 실체가 없어(합성 행) 로컬로만 기억한다.
 //  답이 트랜스크립트에 붙으면 tuiQuestion 자체가 사라지므로 영속할 필요 없다.
@@ -49,7 +50,7 @@ export function mountApprovals() {
     for (const el of document.querySelectorAll(".approval-card[data-deadline]")) {
       const left = remainMs(el.dataset.deadline);
       const t = el.querySelector(".apc-clock");
-      if (t) t.textContent = left > 0 ? fmtRemain(left) : "종료";
+      if (t) t.textContent = left > 0 ? fmtRemain(left) : i18n.t('종료');
       const expired = left <= 0;
       if (expired !== (el.dataset.expired === "1")) {
         el.dataset.expired = expired ? "1" : "0";
@@ -59,8 +60,8 @@ export function mountApprovals() {
         el.classList.toggle("expired", expired);
         const acts = el.querySelector(".apc-actions");
         if (acts && expired) {
-          acts.innerHTML = `<div class="apc-expired-msg">이 요청은 종료됐어요 — PC 터미널에서 답해주세요</div>` +
-            `<button class="apc-btn ghost" data-act="dismiss">확인</button>`;
+          acts.innerHTML = `<div class="apc-expired-msg">${i18n.t('이 요청은 종료됐어요 — PC 터미널에서 답해주세요')}</div>` +
+            `<button class="apc-btn ghost" data-act="dismiss">${i18n.t('확인')}</button>`;
         }
       }
     }
@@ -175,7 +176,7 @@ function buildCard(a) {
     el.innerHTML =
       `<div class="apc-head"><span class="apc-title">${escapeHtml(q.header || toolTitle(a.tool))}</span>` +
         `<span class="apc-qspacer"></span>` +
-        `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button></div>` +
+        `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">✕</button></div>` +
       `<div class="apc-body">` +
         // TUI 와 같은 위계 — 본문(모노) ↔ 질문 줄(굵게) 을 화면 배치 순서 그대로.
         screenBodyHtml(q.question, q.ask, !!q.askFirst) +
@@ -299,7 +300,7 @@ function buildCard(a) {
   if (cmdFull && cmdFull.length > String(a.summary || "").length) {
     const d = document.createElement("details");
     d.className = "apc-fold";
-    d.innerHTML = `<summary>전체 명령</summary><pre class="apc-pre">${escapeHtml(cmdFull.slice(0, 4000))}</pre>`;
+    d.innerHTML = `<summary>${i18n.t('전체 명령')}</summary><pre class="apc-pre">${escapeHtml(cmdFull.slice(0, 4000))}</pre>`;
     body.appendChild(d);
   }
   // diff(파일 수정) — 접힌 프리뷰. Edit/MultiEdit 는 이전 → 새 내용을 나눠 보여준다(데몬 diffOf 가
@@ -310,7 +311,7 @@ function buildCard(a) {
     const cap = (s) => escapeHtml(String(s).slice(0, 8000));
     const old = a.diff.oldContent ? `<pre class="apc-pre apc-diff-old">${cap(a.diff.oldContent)}</pre>` : "";
     const neu = a.diff.newContent ? `<pre class="apc-pre apc-diff-new">${cap(a.diff.newContent)}</pre>` : "";
-    const note = a.diff.truncated ? `<div class="apc-diff-note">내용이 길어 일부만 표시됩니다</div>` : "";
+    const note = a.diff.truncated ? `<div class="apc-diff-note">${i18n.t('내용이 길어 일부만 표시됩니다')}</div>` : "";
     d.innerHTML = `<summary>${a.diff.kind === "write" ? "파일 내용" : "변경 내용"}</summary>${old}${neu}${note}`;
     body.appendChild(d);
   }
@@ -356,9 +357,9 @@ function renderQuestionStep(el, a) {
   const etc =
     `<div class="apc-qopt etc${etcOn ? " on" : ""}">` +
       `<button class="apc-qetc-head" type="button" data-act="qetc">` +
-        `<span class="apc-qlabel">기타</span><span class="apc-qnum">${etcNum}</span>` +
+        `<span class="apc-qlabel">${i18n.t('기타')}</span><span class="apc-qnum">${etcNum}</span>` +
       `</button>` +
-      (etcOn ? `<input class="apc-free-input" type="text" placeholder="여기에 답변을 입력하세요" value="${escapeHtml(el._etc.get(i) || "")}" />` : "") +
+      (etcOn ? `<input class="apc-free-input" type="text" placeholder="${i18n.t('여기에 답변을 입력하세요')}" value="${escapeHtml(el._etc.get(i) || "")}" />` : "") +
     `</div>`;
   const lastOne = i === qs.length - 1;
   let canGo = picks.length > 0 || !!String(el._etc.get(i) || "").trim();
@@ -373,18 +374,18 @@ function renderQuestionStep(el, a) {
     `<div class="apc-qtop">` +
       (qs.length > 1 ? `<span class="apc-qbadge">${i + 1}/${qs.length}</span>` : "") +
       `<span class="apc-qtitle">${escapeHtml(q.question || q.header || "")}</span>` +
-      `<button class="apc-nav" type="button" data-act="qfold" title="접기">${el._folded ? "⌃" : "⌄"}</button>` +
-      `<button class="apc-nav" type="button" data-act="dismiss" title="닫기">✕</button>` +
+      `<button class="apc-nav" type="button" data-act="qfold" title="${i18n.t('접기')}">${el._folded ? "⌃" : "⌄"}</button>` +
+      `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">✕</button>` +
     `</div>` +
     (el._folded ? "" :
       `<div class="apc-qopts">${opts}${etc}</div>` +
       `<div class="apc-qfoot">` +
-        `<button class="apc-btn ghost" type="button" data-act="qprev" ${i === 0 ? "disabled" : ""}>뒤로</button>` +
+        `<button class="apc-btn ghost" type="button" data-act="qprev" ${i === 0 ? "disabled" : ""}>${i18n.t('뒤로')}</button>` +
         `<span class="apc-qspacer"></span>` +
-        (tui ? "" : `<button class="apc-btn ghost" type="button" data-act="qskip">건너뛰기</button>`) +
+        (tui ? "" : `<button class="apc-btn ghost" type="button" data-act="qskip">${i18n.t('건너뛰기')}</button>`) +
         `<button class="apc-btn primary" type="button" data-act="qadvance" ${canGo ? "" : "disabled"}>${lastOne ? "보내기" : "다음"} ↵</button>` +
       `</div>`) +
-    (multi ? `<div class="apc-qhint">여러 개 고를 수 있어요</div>` : "");
+    (multi ? `<div class="apc-qhint">${i18n.t('여러 개 고를 수 있어요')}</div>` : "");
   if (etcOn) wrap.querySelector(".etc .apc-free-input")?.focus();
 }
 
@@ -425,7 +426,7 @@ async function submitQuestionCard(el, a) {
   //  다이얼로그는 질문을 **순서대로** 지나가므로 건너뛰기가 없다: 전부 답해야 보낼 수 있다.
   if (a._tui) {
     const qs = el._qs || [];
-    if (answers.length !== qs.length) { flashErr(el, "모든 질문에 답해야 보낼 수 있어요"); return; }
+    if (answers.length !== qs.length) { flashErr(el, i18n.t('모든 질문에 답해야 보낼 수 있어요')); return; }
     const wire = qs.map((q, i) => {
       const ans = answers.find((x) => x.questionIndex === i);
       const optionCount = (q.options || []).length;
@@ -447,13 +448,13 @@ async function submitQuestionCard(el, a) {
     } catch (e) {
       el.classList.remove("busy");
       const msg = String(e || "");
-      flashErr(el, /QUESTION_NOT_ON_SCREEN/.test(msg) ? "터미널에 질문 다이얼로그가 떠 있지 않아요 — TUI 를 확인해 주세요"
-        : /QUESTION_MISMATCH/.test(msg) ? "화면의 질문이 바뀌었어요 — 잠시 후 다시 시도해 주세요"
-        : "답변을 전달하지 못했어요 — 다시 시도해 주세요");
+      flashErr(el, /QUESTION_NOT_ON_SCREEN/.test(msg) ? i18n.t('터미널에 질문 다이얼로그가 떠 있지 않아요 — TUI 를 확인해 주세요')
+        : /QUESTION_MISMATCH/.test(msg) ? i18n.t('화면의 질문이 바뀌었어요 — 잠시 후 다시 시도해 주세요')
+        : i18n.t('답변을 전달하지 못했어요 — 다시 시도해 주세요'));
     }
     return;
   }
-  if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: "원격 기기에서 건너뛰었습니다" }); return; }
+  if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: i18n.t('원격 기기에서 건너뛰었습니다') }); return; }
   await S.respondApproval(a.id, { decision: "answer", answers });
 }
 
@@ -475,7 +476,7 @@ function optRowInputHtml(act, label, desc, num, canInput) {
     `<span class="apc-qnum-pre">${num}.</span>` +
     `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(label)}</span>` +
     (desc ? `<span class="apc-qdesc">${escapeHtml(desc)}</span>` : "") + `</span>` +
-    (canInput ? `<input class="apc-row-input" type="text" placeholder="코멘트 입력…" />` : `<span class="apc-qspacer"></span>`) +
+    (canInput ? `<input class="apc-row-input" type="text" placeholder="${i18n.t('코멘트 입력…')}" />` : `<span class="apc-qspacer"></span>`) +
   `</div>`;
 }
 
@@ -503,11 +504,11 @@ function buildActions(el, a) {
     wrap.className = "apc-choices";
     wrap.innerHTML =
       `<div class="apc-free">` +
-        `<input class="apc-free-input" type="text" placeholder="의견 남기기(선택)…" />` +
+        `<input class="apc-free-input" type="text" placeholder="${i18n.t('의견 남기기(선택)…')}" />` +
       `</div>` +
       `<div class="apc-qopts">` +
-        optRowHtml("planAllow", "계획대로 진행", "", 1) +
-        optRowHtml("deny", "거절", "", 2) +
+        optRowHtml("planAllow", i18n.t('계획대로 진행'), "", 1) +
+        optRowHtml("deny", i18n.t('거절'), "", 2) +
       `</div>`;
     acts.appendChild(wrap);
     return;
@@ -525,9 +526,9 @@ function buildActions(el, a) {
     : [
       // 폴백(보강 전) — 코멘트 입력칸 없음: 그 다이얼로그가 인라인 입력을 받는지 화면이 증명하기
       //  전이다. 보강이 도착해 input 표식이 오면 그때 입력칸이 생긴다(TUI 어포던스 그대로).
-      { act: "allow", label: "허용", desc: "", input: false },
-      ...(a.alwaysLabel ? [{ act: "allowAlways", label: "허용하고 다음부터 묻지 않기", desc: a.alwaysLabel, input: false }] : []),
-      { act: "deny", label: "거절", desc: "", input: false },
+      { act: "allow", label: i18n.t('허용'), desc: "", input: false },
+      ...(a.alwaysLabel ? [{ act: "allowAlways", label: i18n.t('허용하고 다음부터 묻지 않기'), desc: a.alwaysLabel, input: false }] : []),
+      { act: "deny", label: i18n.t('거절'), desc: "", input: false },
     ];
   acts.innerHTML = `<div class="apc-qopts">${rows.map((r, i) => optRowInputHtml(r.act, r.label, r.desc, i + 1, r.input)).join("")}</div>`;
 }

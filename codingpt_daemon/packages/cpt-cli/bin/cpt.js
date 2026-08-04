@@ -246,6 +246,21 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
                                         그 결과가 JSON 으로 돌아온다(파일 생략 = 변경된 파일 전부).
                                         결과: {status:"submitted"|"cancelled"|"timeout", files:[...]}
 
+  # 모바일 화면 (안드로이드 에뮬레이터/실기기 · iOS 시뮬레이터)
+  #  좌표는 **0~1 비율**이다(0.5 0.5 = 화면 한가운데). 픽셀이 아니다 — 기기마다 해상도가 달라서.
+  emulator list                         붙어 있는 기기 목록(켜짐/꺼짐, 조작 가능 여부 포함)
+  emulator boot --device <id>           꺼진 에뮬레이터/시뮬레이터 켜기(수십 초 걸림 — 기다리지 않는다)
+  emulator shutdown --device <id>       끄기
+  emulator screenshot --device <id> [--out <파일>] [--width <px>=720] [--quality <n>=80]
+                                        지금 화면을 파일로 저장(경로를 알려 준다 — Read 로 보면 된다)
+  emulator tap --device <id> <x> <y>    탭. 예: emulator tap --device android:emulator-5554 0.5 0.9
+  emulator long-press --device <id> <x> <y>
+  emulator swipe --device <id> <x> <y> <x2> <y2> [--ms <n>=220]
+  emulator key --device <id> <키>       home|back|recents|enter|del|tab|escape|up|down|left|right
+                                        |volumeUp|volumeDown|power (iOS: home|lock|siri|appSwitch)
+  emulator text --device <id> <문자열>  글자 입력
+  emulator open --device <id> <url>     주소/딥링크 열기
+
   # 브라우저 자동화 (프리뷰 페이지 — 한 기기에서 실행해 결과 회신)
   browser snapshot                      인터랙티브 요소 트리(ref 포함)
   browser click <ref|selector>          또는 좌표: browser click --x <n> --y <n>
@@ -494,6 +509,42 @@ async function main() {
         }, { timeoutMs: timeoutMs + 30000 });
         if (r && r.noChanges) return out(r, flags, '변경 없음 — 리뷰할 것이 없습니다');
         return printJson(r);
+      }
+      // 모바일 화면 — 에이전트가 "내가 고친 화면이 실제로 어떻게 나오는지" 스스로 본다.
+      //  screenshot 은 기본으로 파일에 저장한다(base64 를 stdout 에 쏟으면 컨텍스트가 통째로 날아간다).
+      case 'emulator': {
+        const id = flags.device || flags.id || rest[0];
+        const num = (n, d) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : d);
+        if (c2 === 'list' || c2 == null) return printJson(await request('emulator.list', {}));
+        if (c2 === 'boot') return out(await request('emulator.boot', { id }), flags, '켜는 중…');
+        if (c2 === 'shutdown') return out(await request('emulator.shutdown', { id }), flags, 'ok');
+        if (c2 === 'open') return out(await request('emulator.openUrl', { id, url: rest[1] || flags.url }), flags, 'ok');
+        if (c2 === 'tap' || c2 === 'long-press') {
+          return out(await request('emulator.input', {
+            id, type: c2 === 'tap' ? 'tap' : 'longPress', x: Number(rest[1]), y: Number(rest[2]),
+          }), flags, 'ok');
+        }
+        if (c2 === 'swipe') {
+          return out(await request('emulator.input', {
+            id, type: 'swipe', x: Number(rest[1]), y: Number(rest[2]), x2: Number(rest[3]), y2: Number(rest[4]),
+            durationMs: num('ms', undefined),
+          }), flags, 'ok');
+        }
+        if (c2 === 'key') return out(await request('emulator.input', { id, type: 'key', key: rest[1] }), flags, 'ok');
+        if (c2 === 'text') return out(await request('emulator.input', { id, type: 'text', text: rest.slice(1).join(' ') }), flags, 'ok');
+        if (c2 === 'screenshot') {
+          const r = await request('emulator.frame', { id, maxWidth: num('width', 720), quality: num('quality', 80) }, { timeoutMs: 60000 });
+          const ext = r.mime === 'image/png' ? 'png' : (r.mime === 'image/bmp' ? 'bmp' : 'jpg');
+          let dest = flags.out ? String(flags.out) : null;
+          if (!dest) {
+            const dir = path.join(os.homedir(), '.codingpt', 'tmp');
+            fs.mkdirSync(dir, { recursive: true });
+            dest = path.join(dir, `emu-${Date.now()}.${ext}`);
+          }
+          fs.writeFileSync(dest, Buffer.from(r.base64, 'base64'));
+          return out({ saved: dest, width: r.width, height: r.height, bytes: r.bytes }, flags, `저장됨: ${dest}`);
+        }
+        break;
       }
       case 'ide': {
         const sid = flags.sid || undefined;

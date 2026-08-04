@@ -25,7 +25,8 @@ const appBody = appSrc.slice(appSrc.indexOf('export const PORTS_TEXT'));
 const appDict = (await import('data:text/javascript,' + encodeURIComponent(
   appBody.replace('export const PORTS_TEXT: Dict<PortsText> =', 'export const PORTS_TEXT =')))).PORTS_TEXT;
 
-for (const lang of ['ko', 'en']) {
+// 2026-08-05 다국어를 켜면서 사전은 **한국어 한 벌**이 됐다(번역은 i18n 카탈로그가 갖는다).
+for (const lang of ['ko']) {
   const a = appDict[lang], p = pcText.PORTS_TEXT[lang];
   const aK = Object.keys(a).sort(), pK = Object.keys(p).sort();
   ok(JSON.stringify(aK) === JSON.stringify(pK), `키 집합 일치(${lang}) — ${aK.length}개`,

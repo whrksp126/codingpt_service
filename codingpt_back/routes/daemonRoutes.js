@@ -64,6 +64,13 @@ router.post('/review/pending', accountAuth, daemonController.reviewPending);
 router.post('/review/submit', accountAuth, daemonController.reviewSubmit);
 router.post('/review/cancel', accountAuth, daemonController.reviewCancel);
 
+// 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 폰에서 PC 의 기기 화면을 보고 조작한다.
+router.post('/emulator/list', accountAuth, daemonController.emulatorList);
+router.post('/emulator/frame', accountAuth, daemonController.emulatorFrame);
+router.post('/emulator/input', accountAuth, daemonController.emulatorInput);
+router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
+router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
+
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.
 //  ?hostDeviceId= / body.hostDeviceId 로 대상 호스트 지정(활성 러너 무변경), 미지정=활성 러너.

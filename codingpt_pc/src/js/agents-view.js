@@ -24,6 +24,7 @@ import { icons, agentMarkHtml } from "./icons.js";
 import { termTheme, monoFontStack, termMinContrast } from "./theme.js";
 import { state } from "./state.js";
 import * as S from "./state.js";
+import * as i18n from './i18n/index.js';
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon && window.FitAddon.FitAddon;
@@ -61,7 +62,7 @@ export function renderAgentList(container, opt) {
   const items = cached.agents;
   container.innerHTML = "";
   if (!items.length) {
-    container.innerHTML = `<div class="sett-hint">에이전트를 확인하는 중…</div>`;
+    container.innerHTML = `<div class="sett-hint">${i18n.t('에이전트를 확인하는 중…')}</div>`;
     return;
   }
   for (const a of items) {
@@ -83,7 +84,7 @@ export function renderAgentList(container, opt) {
     if (!a.installed) {
       const b = document.createElement("button");
       b.className = "sett-btn";
-      b.textContent = openPanelId === a.id ? "닫기" : "설치";
+      b.textContent = openPanelId === a.id ? i18n.t('닫기') : i18n.t('설치');
       b.addEventListener("click", () => {
         openPanelId = openPanelId === a.id ? null : a.id;
         renderAgentList(container, o);
@@ -94,7 +95,7 @@ export function renderAgentList(container, opt) {
       cb.type = "checkbox";
       cb.className = "tgl";
       cb.checked = !!a.wired;
-      cb.title = "연동 켜기/끄기";
+      cb.title = i18n.t('연동 켜기/끄기');
       cb.addEventListener("change", async () => {
         const on = cb.checked;
         cb.disabled = true;
@@ -151,35 +152,35 @@ function buildInstallPanel(a, onDone) {
   el.className = "ag-panel";
   el.innerHTML = `
     <div class="ag-panel-step">
-      <div class="ag-panel-h">1. 설치 명령</div>
+      <div class="ag-panel-h">${i18n.t('1. 설치 명령')}</div>
       <div class="ag-cmds">${methods.map((m, i) => `
         <div class="ag-cmdrow">
           <span class="ag-cmd-label">${esc(m.label)}</span>
           <code class="ag-cmd" data-ci="${i}">${esc(m.cmd)}</code>
-          <button class="sett-btn ag-copy" data-ci="${i}">복사</button>
+          <button class="sett-btn ag-copy" data-ci="${i}">${i18n.t('복사')}</button>
         </div>`).join("")}</div>
-      <div class="ag-note">설치 방법은 바뀔 수 있어요 — 잘 안 되면 <a href="#" class="ag-docs">공식 문서</a>를 확인하세요.</div>
+      <div class="ag-note">${i18n.t('설치 방법은 바뀔 수 있어요 — 잘 안 되면')} <a href="#" class="ag-docs">${i18n.t('공식 문서')}</a>${i18n.t('를 확인하세요.')}</div>
     </div>
     <div class="ag-panel-step">
       <div class="ag-panel-h ag-panel-h--act">
-        <span>2. 터미널에서 실행</span>
-        <button class="sett-btn ag-run">첫 번째 명령 실행</button>
+        <span>${i18n.t('2. 터미널에서 실행')}</span>
+        <button class="sett-btn ag-run">${i18n.t('첫 번째 명령 실행')}</button>
       </div>
       <div class="ag-termwrap"><div class="ag-term"></div></div>
     </div>
     <div class="ag-panel-step">
       <div class="ag-panel-h ag-panel-h--act">
-        <span>3. CodingPT 연동</span>
+        <span>${i18n.t('3. CodingPT 연동')}</span>
         <span class="ag-result"></span>
-        <button class="sett-btn ag-verify">설치 확인하고 연동</button>
+        <button class="sett-btn ag-verify">${i18n.t('설치 확인하고 연동')}</button>
       </div>
     </div>`;
 
   el.querySelectorAll(".ag-copy").forEach((b) => b.addEventListener("click", async () => {
     const i = parseInt(b.getAttribute("data-ci"), 10) || 0;
     try { await navigator.clipboard.writeText(methods[i]?.cmd || ""); } catch (_) { /* 거부됨 — 직접 선택 */ }
-    b.textContent = "복사됨";
-    setTimeout(() => { b.textContent = "복사"; }, 1200);
+    b.textContent = i18n.t('복사됨');
+    setTimeout(() => { b.textContent = i18n.t('복사'); }, 1200);
   }));
   el.querySelector(".ag-docs").addEventListener("click", (ev) => {
     ev.preventDefault();
@@ -189,7 +190,7 @@ function buildInstallPanel(a, onDone) {
   // 터미널 — 실패해도 패널은 살린다(명령을 복사해 자기 터미널에서 쓸 수 있다).
   const host = el.querySelector(".ag-term");
   (async () => {
-    if (!Terminal || !FitAddon) { host.textContent = "터미널을 열 수 없어요 — 명령을 복사해 직접 실행해 주세요."; return; }
+    if (!Terminal || !FitAddon) { host.textContent = i18n.t('터미널을 열 수 없어요 — 명령을 복사해 직접 실행해 주세요.'); return; }
     try {
       if (installTid == null) {
         const info = await api.newWindow("", PANEL_PANE_ID);
@@ -220,12 +221,12 @@ function buildInstallPanel(a, onDone) {
       }));
       panelUnlisten.push(await api.onPtyExit((p) => {
         if (p.paneId !== PANEL_PANE_ID || panelTerm !== term) return;
-        term.write("\r\n\x1b[2m[터미널이 종료됐어요]\x1b[0m\r\n");
+        term.write(i18n.t("\n\x1b[2m[터미널이 종료됐어요]\x1b[0m\n"));
       }));
       const resolved = await api.ptyOpen(PANEL_PANE_ID, "", installTid, term.cols || 80, term.rows || 12);
       if (resolved != null && resolved !== installTid) installTid = resolved; // 스테일 tid → 데몬이 잡아준 것 승계
     } catch (e) {
-      host.textContent = "터미널을 열 수 없어요: " + String(e && e.message ? e.message : e);
+      host.textContent = i18n.t('터미널을 열 수 없어요: ') + String(e && e.message ? e.message : e);
     }
   })();
 
@@ -240,7 +241,7 @@ function buildInstallPanel(a, onDone) {
   el.querySelector(".ag-verify").addEventListener("click", async (ev) => {
     const btn = ev.currentTarget;
     btn.disabled = true;
-    resultEl.textContent = "확인 중…";
+    resultEl.textContent = i18n.t('확인 중…');
     resultEl.className = "ag-result";
     try {
       const r = await api.agentsLocal("agents.rescan", {});
@@ -327,14 +328,14 @@ export async function maybeShowOnboarding(force = false) {
         <div class="ag-sheet-back"></div>
         <div class="ag-sheet-card ag-onb-card" role="dialog" aria-modal="true">
           <main class="ag-onb-body">
-            <div class="ag-onb-title">사용할 AI 에이전트를 선택하세요</div>
-            <div class="ag-onb-benefit">이 PC에서 발견된 에이전트예요.</div>
+            <div class="ag-onb-title">${i18n.t('사용할 AI 에이전트를 선택하세요')}</div>
+            <div class="ag-onb-benefit">${i18n.t('이 PC에서 발견된 에이전트예요.')}</div>
             <div class="ag-onb-options">${cards}</div>
             <div class="ag-onb-error" aria-live="polite"></div>
           </main>
           <footer class="ag-onb-foot">
             <span class="ag-onb-count">${selected.size}개 선택</span>
-            <button class="btn primary lg ag-onb-go"${selected.size ? "" : " disabled"}>선택한 에이전트 연동</button>
+            <button class="btn primary lg ag-onb-go"${selected.size ? "" : " disabled"}>${i18n.t('선택한 에이전트 연동')}</button>
           </footer>
         </div>`;
       const go = el.querySelector(".ag-onb-go");
@@ -348,17 +349,17 @@ export async function maybeShowOnboarding(force = false) {
       });
       go.addEventListener("click", async () => {
         go.disabled = true;
-        go.textContent = "연동하는 중…";
+        go.textContent = i18n.t('연동하는 중…');
         const error = el.querySelector(".ag-onb-error");
         try {
           for (const a of queue) {
             await api.agentsLocal("agents.wire", { id: a.id, on: selected.has(a.id) });
           }
-          go.textContent = "연동됐어요 ✓";
+          go.textContent = i18n.t('연동됐어요 ✓');
           setTimeout(() => { void finishAll(); }, 450);
         } catch (e) {
-          error.textContent = "연동하지 못했어요. 다시 시도해 주세요.";
-          go.textContent = "다시 시도";
+          error.textContent = i18n.t('연동하지 못했어요. 다시 시도해 주세요.');
+          go.textContent = i18n.t('다시 시도');
           go.disabled = false;
         }
       });

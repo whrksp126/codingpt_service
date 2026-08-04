@@ -171,6 +171,9 @@ const APPEARANCE_KEYS = {
   uiFont: ['pretendard', 'notoserif', 'gowun', 'gmarket'],
   codeFont: ['default', 'jetbrains', 'fira', 'd2coding'],
   termStyle: ['auto', 'ghostty', 'one', 'dracula', 'solarized'],
+  // 화면 언어(2026-08-05) — 'system' 은 "기기 언어를 따른다"는 유효한 의사다(기본값).
+  //  기기마다 다른 언어를 쓰고 싶은 사람은 드물고, 여기 있어야 새 기기가 처음부터 제 언어로 뜬다.
+  lang: ['system', 'ko', 'en', 'ja', 'zh-CN', 'es', 'de', 'fr'],
 };
 
 // 단축키 재바인딩(2026-08-04) — 계정 전체 동기화. PC 를 여러 대 쓰는 사용자가 한 대에서 바꾼
@@ -1035,6 +1038,57 @@ async function reviewSubmit(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+// ── 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) ────────────────────────
+// 프레임은 base64 라 응답이 수십~수백 KB 다. **서버는 그냥 통과시킨다** — 해석하거나 캐시하지
+//  않는다(캐시하면 "왜 화면이 안 바뀌지"가 되고, 해석하면 데몬과 규칙이 두 벌이 된다).
+async function emulatorList(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.list', {}, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function emulatorFrame(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.frame', {
+      id: String(b.id || ''),
+      maxWidth: Number(b.maxWidth) || undefined,
+      quality: Number(b.quality) || undefined,
+      // 프레임 한 장이 느린 기기에서 1초 넘게 걸린다(실측 1.3s) — 기본 타임아웃으로는 짧다.
+    }, 45000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function emulatorInput(req, res) {
+  try {
+    const b = req.body || {};
+    // 좌표·키 검사는 **데몬**이 한다(0~1 클램프·키 화이트리스트). 서버가 따라 하면 두 벌이 된다.
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.input', {
+      id: String(b.id || ''), type: String(b.type || ''),
+      x: b.x, y: b.y, x2: b.x2, y2: b.y2, durationMs: b.durationMs,
+      key: b.key, text: b.text,
+    }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function emulatorPower(req, res) {
+  try {
+    const b = req.body || {};
+    const method = b.action === 'shutdown' ? 'emulator.shutdown' : 'emulator.boot';
+    const result = await daemonRelayService.callRpc(req.user.id, method,
+      { id: String(b.id || '') }, 70000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function emulatorOpenUrl(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.openUrl',
+      { id: String(b.id || ''), url: String(b.url || '') }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 async function reviewCancel(req, res) {
   try {
     const b = req.body || {};
@@ -1748,6 +1802,11 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   quickCommandsList, quickCommandsListAll, quickCommandsSave, quickCommandsRemove, quickCommandsReorder, quickCommandsRun,
+  emulatorList,
+  emulatorFrame,
+  emulatorInput,
+  emulatorPower,
+  emulatorOpenUrl,
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

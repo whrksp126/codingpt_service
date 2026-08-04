@@ -46,6 +46,7 @@ import { b64uDec } from "../vendor/e2ee/e2ee-core.js";
 import { selfStateLabel, needsBootstrap, canRestore } from "./e2ee-label.js";
 import { classifyRpcFail, isDaemonUnsupported, mayFallback, rpcFailCode } from "./e2ee-fallback.js";
 import { hostE2eeEpoch } from "./host-lock.js";
+import * as i18n from './i18n/index.js';
 
 // UI 가 읽는 단일 상태(모바일 e2ee.ts getStatus() 와 같은 정보 구조).
 export const e2ee = {
@@ -164,16 +165,16 @@ export function e2eeGate() {
   // keyState 가 진행상태 정본이다. 'enrolled' = 승인은 끝났고 봉인문(열쇠) 전달 대기.
   //  (state 확장값 none|enrolled 도 방어적으로 함께 본다 — 구/미래 데몬)
   if (e2ee.keyState === "pending" || e2ee.keyState === "enrolled"
-    || e2ee.state === "pending" || e2ee.state === "enrolled") return "승인 대기 중 — 기존 기기에서 이 PC 를 승인해 주세요.";
-  if (!e2ee.available || e2ee.state === "unsupported") return "이 PC 데몬이 아직 종단간 암호화를 지원하지 않아요(업데이트 필요).";
+    || e2ee.state === "pending" || e2ee.state === "enrolled") return i18n.t('승인 대기 중 — 기존 기기에서 이 PC 를 승인해 주세요.');
+  if (!e2ee.available || e2ee.state === "unsupported") return i18n.t('이 PC 데몬이 아직 종단간 암호화를 지원하지 않아요(업데이트 필요).');
   // ★ 확인이 끝났는데 열쇠가 없다 = 저절로 풀리지 않는다. "준비하는 중" 이라고 말하면 사용자는
   //   기다리기만 하고 required 정책 아래에서 조작이 영구히 막힌다(무엇을 해야 하는지 알려야 한다).
   if (e2ee.keyState === "none" && !e2ee.checking) {
     return e2ee.phase === "bootstrap"
-      ? "이 계정에 아직 암호화 열쇠가 없어요 — 설정 → 종단간 암호화 에서 '이 계정에 암호화 처음 켜기' 를 눌러 주세요."
-      : "이 PC 에 아직 열쇠가 없어요(열쇠 확인을 기다리는 중이에요).";
+      ? i18n.t("이 계정에 아직 암호화 열쇠가 없어요 — 설정 → 종단간 암호화 에서 '이 계정에 암호화 처음 켜기' 를 눌러 주세요.")
+      : i18n.t('이 PC 에 아직 열쇠가 없어요(열쇠 확인을 기다리는 중이에요).');
   }
-  return "종단간 암호화를 준비하는 중이에요.";
+  return i18n.t('종단간 암호화를 준비하는 중이에요.');
 }
 
 /**
@@ -361,7 +362,7 @@ export function applyDeviceApprovalEvent(ev) {
       // verifyCode(요청 번호)는 서버가 실어 보내면 그대로 받아 두고 deriveDisplay 가 로컬 값과 대조한다.
       //  안전 코드는 여기서 만들지 않는다 — ikX 에서 로컬 계산이 원칙이다(deriveDisplay).
       const row = {
-        enrollmentId: ev.enrollmentId, label: ev.label || "새 기기", platform: ev.platform || null,
+        enrollmentId: ev.enrollmentId, label: ev.label || i18n.t('새 기기'), platform: ev.platform || null,
         ikX: ev.ikX, verifyCode: typeof ev.verifyCode === "string" ? ev.verifyCode : undefined,
         requestedAt: ev.requestedAt || new Date().toISOString(),
         //  ★ 개정 9(2026-07-28): 신청 기기의 기기 행 id — 설정의 기기 목록이 이 값으로 대기 건을 행에
@@ -410,7 +411,7 @@ export function applyDeviceApprovalEvent(ev) {
 /** 이 PC 가 연동 코드를 띄운다(열쇠 보유 PC 만). */
 export async function linkStart() {
   const r = await cpt("e2ee.link.start");
-  return r && r.ok ? { ok: true, code: r.code, ttlMs: r.ttlMs } : { ok: false, error: (r && r.error) || "연동 코드를 만들지 못했어요" };
+  return r && r.ok ? { ok: true, code: r.code, ttlMs: r.ttlMs } : { ok: false, error: (r && r.error) || i18n.t('연동 코드를 만들지 못했어요') };
 }
 export async function linkActive() {
   const r = await cpt("e2ee.link.active");
@@ -421,7 +422,7 @@ export async function linkCancel() { try { await cpt("e2ee.link.cancel"); } catc
 export async function linkClaim(code) {
   const r = await cpt("e2ee.link.claim", { code });
   if (r && r.ok) { await refreshE2ee(); return { ok: true }; }
-  return { ok: false, error: (r && r.error) || "연동에 실패했어요" };
+  return { ok: false, error: (r && r.error) || i18n.t('연동에 실패했어요') };
 }
 
 export async function nudgeDevice(deviceId) {
@@ -435,15 +436,15 @@ export async function nudgeDevice(deviceId) {
     // 쿨다운(429)은 실패가 아니다 — 방금 보낸 요청이 유효하다는 뜻이므로 그렇게 말한다.
     if (/NUDGE_COOLDOWN|429/.test(msg)) return { ok: true, sent: "cooldown" };
     // 실패 문구는 앱과 글자까지 같아야 한다(카피표 err.link — 두 화면을 나란히 보는 사용자 규율).
-    return { ok: false, error: "연동 요청을 보내지 못했어요" };
+    return { ok: false, error: i18n.t('연동 요청을 보내지 못했어요') };
   }
 }
 
 export async function approveDevice(enrollmentId) {
   const row = e2ee.pending.find((p) => p.enrollmentId === enrollmentId);
-  if (!row) return { ok: false, error: "요청을 찾을 수 없어요." };
+  if (!row) return { ok: false, error: i18n.t('요청을 찾을 수 없어요.') };
   const r = await cpt("e2ee.approve", { enrollmentId, ikX: row.ikX });
-  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || "승인을 전달하지 못했어요." };
+  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || i18n.t('승인을 전달하지 못했어요.') };
   e2ee.pending = e2ee.pending.filter((p) => p.enrollmentId !== enrollmentId);
   S.emit();
   void refreshE2ee();
@@ -453,7 +454,7 @@ export async function denyDevice(enrollmentId) {
   const r = await cpt("e2ee.deny", { enrollmentId });
   e2ee.pending = e2ee.pending.filter((p) => p.enrollmentId !== enrollmentId);
   S.emit();
-  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || "거절을 전달하지 못했어요." };
+  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || i18n.t('거절을 전달하지 못했어요.') };
   return { ok: true };
 }
 export async function setPolicy(policy) {
@@ -472,7 +473,7 @@ export async function setPolicy(policy) {
 export async function bootstrapAccount() {
   const r = await cpt("e2ee.bootstrap");
   await refreshE2ee();
-  if (!r || r.ok === false) return { ok: false, error: (r && (r.error || r.e)) || "열쇠를 만들지 못했어요(잠시 후 다시 시도해 주세요)." };
+  if (!r || r.ok === false) return { ok: false, error: (r && (r.error || r.e)) || i18n.t('열쇠를 만들지 못했어요(잠시 후 다시 시도해 주세요).') };
   return { ok: true, epoch: Number(r.epoch || 0) };
 }
 export async function createRecoveryCode() {
@@ -486,13 +487,13 @@ export async function createRecoveryCode() {
 export async function restoreFromRecovery(code) {
   const r = await cpt("e2ee.recovery.restore", { code: String(code || "") });
   await refreshE2ee();
-  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || "복구 코드가 올바르지 않아요(오타 확인)." };
+  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || i18n.t('복구 코드가 올바르지 않아요(오타 확인).') };
   return { ok: true };
 }
 export async function revokeTrust(deviceKeyId) {
   const r = await cpt("e2ee.revoke", { deviceKeyId });
   await refreshE2ee();
-  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || "신뢰 해제에 실패했어요." };
+  if (!r || r.ok === false) return { ok: false, error: (r && r.error) || i18n.t('신뢰 해제에 실패했어요.') };
   return { ok: true };
 }
 
@@ -567,7 +568,7 @@ function epochGated(h) {
  */
 function noFallbackError() {
   return new Error(e2eeGate()
-    || "종단간 암호화가 '항상' 으로 설정돼 있어 평문으로 보낼 수 없어요(암호화가 준비되면 자동으로 됩니다).");
+    || i18n.t("종단간 암호화가 '항상' 으로 설정돼 있어 평문으로 보낼 수 없어요(암호화가 준비되면 자동으로 됩니다)."));
 }
 
 export async function sealedRpc(method, params, hostDeviceId, timeoutMs) {
@@ -595,7 +596,7 @@ export async function sealedRpc(method, params, hostDeviceId, timeoutMs) {
   // ★ 여기부터는 봉투가 **왕복했다**: 호스트가 요청을 실제로 실행했고 그 처리가 실패한 것이다.
   //  절대 null 을 돌려주지 않는다 — 호출부가 폴백으로 오해해 같은 변형(fs.write)을 평문으로 한 번 더
   //  실행하는 이중 실행이 된다(계약 §2.7 표 2행 = 유일한 폴백 금지 행).
-  if (r.ok === false) throw new Error(r.e || r.error || "요청이 실패했어요.");
+  if (r.ok === false) throw new Error(r.e || r.error || i18n.t('요청이 실패했어요.'));
   // ⚠ 성공했는데 결과가 비어 있어도 **절대 null 을 돌려주지 않는다** — 호출부가 폴백으로 오해해
   //   같은 변형(fs.write 등)을 평문으로 한 번 더 실행하는 이중 실행이 된다.
   const out = r.r === undefined ? r : r.r;
@@ -608,14 +609,14 @@ export async function sealedRpc(method, params, hostDeviceId, timeoutMs) {
 const bodyCache = new Map(); // sealed body → 평문 | null
 export function notifBodyText(body) {
   if (!isSealedBody(body)) return body || "";
-  if (bodyCache.has(body)) return bodyCache.get(body) || "🔒 암호화된 내용(이 기기에 열쇠 없음)";
+  if (bodyCache.has(body)) return bodyCache.get(body) || i18n.t('🔒 암호화된 내용(이 기기에 열쇠 없음)');
   bodyCache.set(body, null);
   void (async () => {
     const r = await cpt("e2ee.openText", { text: body });
     bodyCache.set(body, r && r.text ? String(r.text) : null);
     S.emit();
   })();
-  return "🔒 복호화 중…";
+  return i18n.t('🔒 복호화 중…');
 }
 
 /** QR 핀 대조(다른 기기가 이 PC 를 승인할 때 쓰는 값을 화면에 노출하기 위함). */

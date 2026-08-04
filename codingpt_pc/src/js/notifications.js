@@ -6,6 +6,7 @@ import { state } from "./state.js";
 import { icons } from "./icons.js";
 import { approvalForNotif, isChoiceApproval } from "./approvals.js";
 import { notifBodyText } from "./e2ee.js";
+import * as i18n from './i18n/index.js';
 
 // 터미널 OSC/벨 → 서버에 기록(reportNotification — 실패 시 로컬 폴백) + 즉시 피드백(pane 링).
 //  win = 발생한 터미널의 풀 window 인덱스(스코프 읽음 처리·점프의 키).
@@ -50,10 +51,10 @@ export function renderNotifPanel(el, onJump) {
   el.innerHTML = "";
   const head = document.createElement("div");
   head.className = "notif-head";
-  head.innerHTML = "<span>알림</span>";
+  head.innerHTML = `<span>${i18n.t('알림')}</span>`;
   const clear = document.createElement("button");
   clear.className = "btn small ghost";
-  clear.textContent = "모두 읽음";
+  clear.textContent = i18n.t('모두 읽음');
   clear.addEventListener("click", () => {
     S.markAllRead();
     renderNotifPanel(el, onJump);
@@ -64,7 +65,7 @@ export function renderNotifPanel(el, onJump) {
   if (!state.notifications.length) {
     const empty = document.createElement("div");
     empty.className = "notif-empty";
-    empty.textContent = "알림이 없습니다";
+    empty.textContent = i18n.t('알림이 없습니다');
     el.appendChild(empty);
     return;
   }
@@ -87,22 +88,22 @@ export function renderNotifPanel(el, onJump) {
       //  잠금화면/배너는 subtitle(평문)로 도달하므로 알림 자체가 무내용이 되지는 않는다.
       ((n.body ? `<div class="notif-body">${escapeHtml(notifBodyText(n.body))}</div>` : "")) +
       `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}` +
-      (n.kind === "approval_request" && !appr ? " · 종료됨" : "") + `</div>`;
+      (n.kind === "approval_request" && !appr ? i18n.t(' · 종료됨') : "") + `</div>`;
     if (appr) {
       const acts = document.createElement("div");
       acts.className = "notif-acts";
       // 선택형(AskUserQuestion 등)은 선택지가 여러 개라 이 좁은 행에 담을 수 없다 → 카드로 유도.
       if (isChoiceApproval(appr)) {
-        acts.innerHTML = `<span class="notif-act-hint">선택형 요청 — 카드에서 응답</span>`;
+        acts.innerHTML = `<span class="notif-act-hint">${i18n.t('선택형 요청 — 카드에서 응답')}</span>`;
       } else {
         // 순서는 TUI/카드와 동일: 허용 → (제안이 있으면) 묻지 않기 → 거절(2026-07-29 표면 통일).
         const always = appr.alwaysLabel
-          ? `<span class="notif-act" data-act="always" title="${escapeHtml(appr.alwaysLabel)}">허용하고 묻지 않기</span>`
+          ? `<span class="notif-act" data-act="always" title="${escapeHtml(appr.alwaysLabel)}">${i18n.t('허용하고 묻지 않기')}</span>`
           : "";
         acts.innerHTML =
-          `<span class="notif-act primary" data-act="allow">허용</span>` +
+          `<span class="notif-act primary" data-act="allow">${i18n.t('허용')}</span>` +
           always +
-          `<span class="notif-act ghost" data-act="deny">거절</span>`;
+          `<span class="notif-act ghost" data-act="deny">${i18n.t('거절')}</span>`;
         acts.addEventListener("click", (e) => {
           const b = e.target.closest?.("[data-act]");
           if (!b) return;

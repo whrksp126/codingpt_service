@@ -222,6 +222,18 @@ pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
     cpt_request_coded(&cmd, args, true)
 }
 
+// 모바일 화면(에뮬레이터·시뮬레이터·실기기) — **이 PC 에 붙은 기기**를 볼 때 쓰는 직결 경로.
+//  왜 back 을 안 거치나: 프레임 한 장이 base64 로 수십~수백 KB 다. 같은 머신인데 그걸 서버까지
+//  올렸다 내리면 왕복 지연이 프레임 시간(실측 1.3s)에 그대로 얹힌다. 원격 PC 는 기존대로 back 릴레이.
+//  타임아웃이 긴 이유: `emulator.boot` 는 시뮬레이터가 뜰 때까지 기다린다.
+#[tauri::command]
+pub fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("emulator.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

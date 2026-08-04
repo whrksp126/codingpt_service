@@ -16,6 +16,7 @@ import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 import { applyChatEvent } from "./chat-view.js";
 import { applyDeviceApprovalEvent, e2eeCaps, refreshE2ee } from "./e2ee.js";
 import { applyRunnerStatus, resetHostLocks } from "./host-lock.js";
+import * as i18n from './i18n/index.js';
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
 async function onAccountDeleted() {
@@ -112,7 +113,7 @@ function onPreviewFocus(payload) {
 function addSurfaceGated(rt, kind, opts) {
   opts = opts || {};
   const focusId = rt.focusId || T.firstLeafId(rt.layout);
-  if (!focusId) throw new Error("분할할 pane 없음");
+  if (!focusId) throw new Error(i18n.t('분할할 pane 없음'));
   const focusLeaf = T.findLeaf(rt.layout, focusId);
   const rect = getPane(focusId)?.el?.getBoundingClientRect?.();
   const width = rect && rect.width > 1 ? rect.width : ((typeof window !== "undefined" && window.innerWidth) || 9999);
@@ -429,7 +430,7 @@ async function handleUiCommand(msg, reply) {
       res = await handleBrowserCommand(cmd.slice("browser.".length), params || {});
     } else {
       const handler = handlers[cmd];
-      if (!handler) res = { ok: false, error: "알 수 없는 명령: " + cmd };
+      if (!handler) res = { ok: false, error: i18n.t('알 수 없는 명령: ') + cmd };
       else res = (await handler(params || {}, executor)) || { ok: true };
     }
   } catch (e) {
@@ -447,7 +448,7 @@ function wsByCwd(cwd) {
 // 대상 워크스페이스 확보 + 활성화(setActive 는 동기 render 까지 수행 → pane DOM 접근 가능).
 function requireWs(params) {
   const meta = wsByCwd(params.ws);
-  if (!meta) throw new Error("워크스페이스 없음");
+  if (!meta) throw new Error(i18n.t('워크스페이스 없음'));
   if (state.activeWsId !== meta.id || state.view !== "workspace") S.setActive(meta.id);
   return { meta, rt: S.ensureRuntime(meta.id) };
 }
@@ -607,8 +608,8 @@ function findPreviewSurface(rt) {
 //  네이티브 webview 자체가 없으므로 에러.
 function requirePreviewId(rt) {
   const target = findPreviewTarget(rt);
-  if (!target) throw new Error("프리뷰 없음");
-  if (target.tab && !target.tab.tid) throw new Error("프리뷰 표면 미생성(탭을 한 번 표시해야 함)");
+  if (!target) throw new Error(i18n.t('프리뷰 없음'));
+  if (target.tab && !target.tab.tid) throw new Error(i18n.t('프리뷰 표면 미생성(탭을 한 번 표시해야 함)'));
   return target.tab ? "pv-" + target.tab.tid : "pv-" + (target.leaf.tid || target.leaf.id);
 }
 
@@ -619,7 +620,7 @@ async function assertLocalOrigin(pvId) {
   let host = "";
   try { host = new URL(info.url || "").hostname; } catch (_) {}
   if (host !== "localhost" && host !== "127.0.0.1" && host !== "[::1]" && host !== "::1") {
-    throw new Error("로컬(localhost) 페이지가 아니어서 조작 거부: " + (info.url || "(URL 없음)"));
+    throw new Error(i18n.t('로컬(localhost) 페이지가 아니어서 조작 거부: ') + (info.url || i18n.t('(URL 없음)')));
   }
 }
 
@@ -633,9 +634,9 @@ async function agentCall(pvId, expr) {
   const raw = await api.previewEval(pvId, js);
   let out = null;
   try { out = JSON.parse(raw); } catch (_) {
-    throw new Error("에이전트 응답 파싱 실패: " + String(raw).slice(0, 200));
+    throw new Error(i18n.t('에이전트 응답 파싱 실패: ') + String(raw).slice(0, 200));
   }
-  if (!out || out.ok !== true) throw new Error((out && out.error) || "에이전트 실행 실패");
+  if (!out || out.ok !== true) throw new Error((out && out.error) || i18n.t('에이전트 실행 실패'));
   return out.result;
 }
 
@@ -708,7 +709,7 @@ async function handleBrowserCommand(op, p) {
       if (p.level) entries = entries.filter((en) => en && en.lv === String(p.level));
       if (p.pattern) {
         let re;
-        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error("pattern 정규식 오류: " + p.pattern); }
+        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error(i18n.t('pattern 정규식 오류: ') + p.pattern); }
         entries = entries.filter((en) => en && re.test(String(en.msg || "")));
       }
       const limit = Math.max(1, Math.min(Number(p.limit) || 100, 500));
@@ -726,7 +727,7 @@ async function handleBrowserCommand(op, p) {
       try { entries = JSON.parse(raw) || []; } catch (_) { entries = []; }
       if (p.pattern) {
         let re;
-        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error("pattern 정규식 오류: " + p.pattern); }
+        try { re = new RegExp(String(p.pattern)); } catch (_) { throw new Error(i18n.t('pattern 정규식 오류: ') + p.pattern); }
         entries = entries.filter((en) => en && re.test(String(en.u || "")));
       }
       if (p.status != null && p.status !== "") {
@@ -743,7 +744,7 @@ async function handleBrowserCommand(op, p) {
       return { ok: true, result: { entries: entries.slice(-limit), device: "pc" } };
     }
     default:
-      return { ok: false, error: "알 수 없는 browser 명령: " + op };
+      return { ok: false, error: i18n.t('알 수 없는 browser 명령: ') + op };
   }
 }
 
@@ -758,7 +759,7 @@ function requireWsOrActive(p) {
     if (m) { if (state.activeWsId !== m.id || state.view !== "workspace") S.setActive(m.id); return { meta: m, rt: S.ensureRuntime(m.id) }; }
   }
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) throw new Error("활성 워크스페이스 없음");
+  if (!meta) throw new Error(i18n.t('활성 워크스페이스 없음'));
   if (state.view !== "workspace") S.setActive(meta.id);
   return { meta, rt: S.ensureRuntime(meta.id) };
 }
@@ -849,8 +850,8 @@ function waitPreviewLoaded(pvId, timeoutMs = 6000) {
 async function restoreManifestPC(rt, manifest) {
   const url = manifest.externalUrl ||
     (manifest.logical ? "http://localhost:" + (manifest.logical.port || 80) + (manifest.logical.path || "/") : "");
-  if (!url) throw new Error("복원할 URL 없음");
-  let target; try { target = new URL(url); } catch (_) { throw new Error("URL 파싱 실패"); }
+  if (!url) throw new Error(i18n.t('복원할 URL 없음'));
+  let target; try { target = new URL(url); } catch (_) { throw new Error(i18n.t('URL 파싱 실패')); }
   // 표면 확보 — 기존 프리뷰 재사용 or 우측 분할.
   let pvId;
   const existing = findPreviewTarget(rt);
@@ -859,12 +860,12 @@ async function restoreManifestPC(rt, manifest) {
     pvId = existing.tab ? "pv-" + existing.tab.tid : "pv-" + (existing.leaf.tid || existing.leaf.id);
   } else {
     const focusId = rt.focusId || T.firstLeafId(rt.layout);
-    if (!focusId) throw new Error("분할할 pane 없음");
+    if (!focusId) throw new Error(i18n.t('분할할 pane 없음'));
     S.splitPane(focusId, "h", "preview", { url });
     const sf = findPreviewSurface(rt);
     pvId = sf.surface ? sf.surface.pvId : (sf.target ? ("pv-" + (sf.target.leaf.tid || sf.target.leaf.id)) : null);
   }
-  if (!pvId) throw new Error("프리뷰 표면 생성 실패");
+  if (!pvId) throw new Error(i18n.t('프리뷰 표면 생성 실패'));
   await waitPreviewLoaded(pvId, 6000); // webview 존재 보장
   const cookies = rewriteCookiesForTarget(manifest.cookies, target);
   if (cookies.length) { try { await api.previewSetCookies(pvId, JSON.stringify(cookies)); } catch (_) { /* 쿠키 실패 무시 */ } }
@@ -879,7 +880,7 @@ async function restoreManifestPC(rt, manifest) {
 const SNAP_MAX = 20;
 const snapDir = (wsLocal) => String(wsLocal).replace(/\/+$/, "") + "/.codingpt/snapshots";
 function snapLabel(url) {
-  if (!url) return "프리뷰";
+  if (!url) return i18n.t('프리뷰');
   const m = /^:(\d+)(.*)$/.exec(url);
   if (m) return ":" + m[1] + (m[2] ? m[2].split(/[?#]/)[0] : "");
   return String(url).replace(/^https?:\/\//, "").slice(0, 40);
@@ -902,7 +903,7 @@ function captureIdePC(meta, rt) {
 // 올리기 — 활성 프리뷰 + IDE 상태 캡처 → PC 워크스페이스에 스냅샷 저장(작업 전체 이어하기).
 export async function saveSnapshotPC() {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  if (!meta) return { ok: false, error: i18n.t('활성 워크스페이스 없음') };
   const rt = S.ensureRuntime(meta.id);
   // 프리뷰(있으면)
   let manifest = null;
@@ -913,7 +914,7 @@ export async function saveSnapshotPC() {
   }
   // IDE(있으면)
   const ide = captureIdePC(meta, rt);
-  if (!manifest && !ide) return { ok: false, error: "저장할 프리뷰나 IDE가 없어요" };
+  if (!manifest && !ide) return { ok: false, error: i18n.t('저장할 프리뷰나 IDE가 없어요') };
   try {
     const root = String(meta.localPath).replace(/\/+$/, "");
     // fs_mkdir 는 부모가 없으면 실패하고, 이미 있으면 "이미 존재해요"로 throw → 단계별 생성 + 존재 에러 무시.
@@ -931,30 +932,30 @@ export async function saveSnapshotPC() {
     for (const p of pruned) { try { await api.fsDelete(snapDir(meta.localPath) + "/" + p.id + ".json"); } catch (_) { /* noop */ } }
     await api.fsWrite(snapDir(meta.localPath) + "/index.json", JSON.stringify(list));
     return { ok: true, label: m.label };
-  } catch (e) { return { ok: false, error: (e && e.message) || (typeof e === "string" ? e : "") || "저장 실패" }; }
+  } catch (e) { return { ok: false, error: (e && e.message) || (typeof e === "string" ? e : "") || i18n.t('저장 실패') }; }
 }
 
 // dev 열기 — 활성 워크스페이스의 리스닝 포트를 감지해 활성 프리뷰를 그 포트로 이동.
 /** 고른 포트를 활성 프리뷰로 연다 — 포트 목록 UI(빈 프리뷰의 "dev 열기")가 쓰는 길. */
 export function openPortPC(port) {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  if (!meta) return { ok: false, error: i18n.t('활성 워크스페이스 없음') };
   const rt = S.ensureRuntime(meta.id);
   const target = findPreviewTarget(rt);
-  if (!target) return { ok: false, error: "프리뷰 없음" };
+  if (!target) return { ok: false, error: i18n.t('프리뷰 없음') };
   navigatePreview(target, "http://localhost:" + port);
   return { ok: true, port };
 }
 
 export async function openDevPortPC() {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  if (!meta) return { ok: false, error: i18n.t('활성 워크스페이스 없음') };
   let ports = [];
   try { ports = (await api.listenPorts(meta.localPath)) || []; } catch (_) { ports = []; }
-  if (!ports.length) return { ok: false, error: "감지된 dev 포트가 없어요" };
+  if (!ports.length) return { ok: false, error: i18n.t('감지된 dev 포트가 없어요') };
   const rt = S.ensureRuntime(meta.id);
   const target = findPreviewTarget(rt);
-  if (!target) return { ok: false, error: "프리뷰 없음" };
+  if (!target) return { ok: false, error: i18n.t('프리뷰 없음') };
   navigatePreview(target, "http://localhost:" + ports[0]);
   return { ok: true, port: ports[0] };
 }
@@ -969,14 +970,14 @@ export async function listSnapshotsPC() {
 // 내려받기 — 선택한 스냅샷을 활성 워크스페이스로 복원(프리뷰 + IDE).
 export async function applySnapshotPC(id) {
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
-  if (!meta) return { ok: false, error: "활성 워크스페이스 없음" };
+  if (!meta) return { ok: false, error: i18n.t('활성 워크스페이스 없음') };
   const rt = S.ensureRuntime(meta.id);
   let obj;
   try { const s = await api.fsRead(snapDir(meta.localPath) + "/" + id + ".json"); obj = JSON.parse(s || "{}"); }
-  catch (_) { return { ok: false, error: "스냅샷 로드 실패" }; }
-  if (!obj || (!obj.manifest && !obj.ide)) return { ok: false, error: "스냅샷 없음" };
+  catch (_) { return { ok: false, error: i18n.t('스냅샷 로드 실패') }; }
+  if (!obj || (!obj.manifest && !obj.ide)) return { ok: false, error: i18n.t('스냅샷 없음') };
   let err = null;
-  if (obj.manifest) { try { await restoreManifestPC(rt, obj.manifest); } catch (e) { err = (e && e.message) || "프리뷰 복원 실패"; } }
+  if (obj.manifest) { try { await restoreManifestPC(rt, obj.manifest); } catch (e) { err = (e && e.message) || i18n.t('프리뷰 복원 실패'); } }
   if (obj.ide && obj.ide.path) {
     try { await handlers.ideOpen({ ws: meta.localPath, path: obj.ide.path, line: obj.ide.line }); } catch (_) { /* IDE 복원 실패는 무시(프리뷰 우선) */ }
   }
@@ -995,7 +996,7 @@ const handlers = {
 
   // 작업 상태 스트림 — cwd 키로 저장만(사이드바 뱃지 표시). 활성 전환은 하지 않는다(수동적 갱신).
   "status.changed": async (p) => {
-    if (!p.ws) throw new Error("ws 필요");
+    if (!p.ws) throw new Error(i18n.t('ws 필요'));
     S.setWsStatus(p.ws, { status: p.status || [], progress: p.progress ?? null, logTail: p.logTail || "" });
     return { ok: true };
   },
@@ -1003,7 +1004,7 @@ const handlers = {
   // 서버 워크스페이스 id 로 활성 전환.
   wsSelect: async (p) => {
     const meta = state.workspaces.find((w) => w.id === p.id);
-    if (!meta) throw new Error("워크스페이스 없음");
+    if (!meta) throw new Error(i18n.t('워크스페이스 없음'));
     S.setActive(meta.id);
     return { ok: true };
   },
@@ -1017,10 +1018,10 @@ const handlers = {
   // pane 분할 — paneId 생략 시 포커스 pane. 터미널={win:'new'}, preview=url, ide=openPath.
   layoutSplit: async (p) => {
     const { meta, rt } = requireWs(p);
-    if (!PANE_TYPES.includes(p.type)) throw new Error("알 수 없는 type: " + p.type);
+    if (!PANE_TYPES.includes(p.type)) throw new Error(i18n.t('알 수 없는 type: ') + p.type);
     const targetId = p.paneId || rt.focusId || T.firstLeafId(rt.layout);
-    if (!targetId) throw new Error("분할할 pane 없음");
-    if (!T.findLeaf(rt.layout, targetId)) throw new Error("pane 없음: " + targetId);
+    if (!targetId) throw new Error(i18n.t('분할할 pane 없음'));
+    if (!T.findLeaf(rt.layout, targetId)) throw new Error(i18n.t('pane 없음: ') + targetId);
     const dir = p.direction === "v" || p.direction === "down" || p.direction === "bottom" ? "v" : "h";
     const opts =
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
@@ -1033,13 +1034,13 @@ const handlers = {
   // 포커스 pane 기준 자동 배치(헤더 통합 추가와 동일 규칙 — smartAdd 재사용).
   newPane: async (p) => {
     const { meta } = requireWs(p);
-    if (!PANE_TYPES.includes(p.type)) throw new Error("알 수 없는 type: " + p.type);
+    if (!PANE_TYPES.includes(p.type)) throw new Error(i18n.t('알 수 없는 type: ') + p.type);
     const extra =
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
       : p.type === "ide" ? { openPath: normPath(meta, p.path) }
       : undefined;
     const paneId = smartAdd(p.type, extra);
-    if (!paneId) throw new Error("pane 생성 실패");
+    if (!paneId) throw new Error(i18n.t('pane 생성 실패'));
     return { ok: true, paneId };
   },
 
@@ -1055,7 +1056,7 @@ const handlers = {
   // pane 닫기.
   closeSurface: async (p) => {
     const { meta, rt } = requireWs(p);
-    if (!p.paneId || !T.findLeaf(rt.layout, p.paneId)) throw new Error("pane 없음: " + (p.paneId || ""));
+    if (!p.paneId || !T.findLeaf(rt.layout, p.paneId)) throw new Error(i18n.t('pane 없음: ') + (p.paneId || ""));
     // 원격에서 온 close 적용 — 프리뷰가 포함돼도 재전파하지 않는다(루프 차단).
     _applyingRemoteClose = true;
     try { S.closePane(meta.id, p.paneId); } finally { _applyingRemoteClose = false; }
@@ -1065,9 +1066,9 @@ const handlers = {
   // branch 분할 비율 조정 — path 는 루트부터 'first'|'second' 배열.
   setRatio: async (p) => {
     requireWs(p);
-    if (!Array.isArray(p.path)) throw new Error("path 는 branch 경로 배열");
+    if (!Array.isArray(p.path)) throw new Error(i18n.t('path 는 branch 경로 배열'));
     const ratio = Number(p.ratio);
-    if (!isFinite(ratio)) throw new Error("ratio 필요");
+    if (!isFinite(ratio)) throw new Error(i18n.t('ratio 필요'));
     S.setRatio(p.path, ratio);
     return { ok: true };
   },
@@ -1078,7 +1079,7 @@ const handlers = {
   previewOpen: async (p) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
-    if (!url) throw new Error("url 필요");
+    if (!url) throw new Error(i18n.t('url 필요'));
     const target = findPreviewTarget(rt);
     if (target) {
       navigatePreview(target, url); // previewOpen = 처음 여는 신호 → 포그라운드(기본 foreground=true)
@@ -1093,9 +1094,9 @@ const handlers = {
   previewNavigate: async (p) => {
     const { rt } = requireWs(p);
     const url = resolveUrl(p.url);
-    if (!url) throw new Error("url 필요");
+    if (!url) throw new Error(i18n.t('url 필요'));
     const target = findPreviewTarget(rt);
-    if (!target) throw new Error("프리뷰 없음");
+    if (!target) throw new Error(i18n.t('프리뷰 없음'));
     navigatePreview(target, url, false);
     return { ok: true };
   },
@@ -1104,7 +1105,7 @@ const handlers = {
   previewReload: async (p) => {
     const { rt } = requireWs(p);
     const target = findPreviewTarget(rt);
-    if (!target) throw new Error("프리뷰 없음");
+    if (!target) throw new Error(i18n.t('프리뷰 없음'));
     // 혼합 탭인데 표면이 아직 없으면(한 번도 안 띄움) 새로고침 대상 없음.
     if (target.tab && !target.tab.tid) return { ok: true, skipped: true };
     const pvId = target.tab ? "pv-" + target.tab.tid : "pv-" + (target.leaf.tid || target.leaf.id);
@@ -1116,7 +1117,7 @@ const handlers = {
   ideOpen: async (p) => {
     const { meta, rt } = requireWs(p);
     const path = normPath(meta, p.path);
-    if (!path) throw new Error("path 필요");
+    if (!path) throw new Error(i18n.t('path 필요'));
     const line = p.line || null;
     const check = (l) => {
       if (l.kind === "ide") return { leaf: l, tab: null };
@@ -1156,13 +1157,13 @@ const handlers = {
   ideDiff: async (p) => {
     const { meta, rt } = requireWs(p);
     const path = normPath(meta, p.path);
-    if (!path) throw new Error("path 필요");
+    if (!path) throw new Error(i18n.t('path 필요'));
     const diffText = typeof p.diffText === "string" ? p.diffText : "";
     const target = findIdeTarget(rt);
     if (!target) {
       // IDE 없음 → 포커스 pane 우측 분할로 생성 후 diff 문서 열기(splitPane 은 동기 render).
       const focusId = rt.focusId || T.firstLeafId(rt.layout);
-      if (!focusId) throw new Error("분할할 pane 없음");
+      if (!focusId) throw new Error(i18n.t('분할할 pane 없음'));
       S.splitPane(focusId, "h", "ide", {});
       getPane(rt.focusId)?.ide?.openDiff(path, diffText);
       return { ok: true, result: { paneId: rt.focusId } };
@@ -1193,7 +1194,7 @@ const handlers = {
    */
   review: async (p) => {
     const { meta, rt } = requireWs(p);
-    if (!p || !p.reviewId || !Array.isArray(p.files) || !p.files.length) throw new Error("리뷰 내용이 없습니다");
+    if (!p || !p.reviewId || !Array.isArray(p.files) || !p.files.length) throw new Error(i18n.t('리뷰 내용이 없습니다'));
     const target = findIdeTarget(rt);
     const open = (pane, m) => {
       const ide = m ? m.ide : pane?.ide;
@@ -1201,7 +1202,7 @@ const handlers = {
     };
     if (!target) {
       const focusId = rt.focusId || T.firstLeafId(rt.layout);
-      if (!focusId) throw new Error("분할할 pane 없음");
+      if (!focusId) throw new Error(i18n.t('분할할 pane 없음'));
       S.splitPane(focusId, "h", "ide", {});
       open(getPane(rt.focusId), null);
       return { ok: true, result: { paneId: rt.focusId } };
@@ -1235,8 +1236,8 @@ const handlers = {
   previewDevtools: async (p) => {
     const { rt } = requireWs(p);
     const { target, surface } = findPreviewSurface(rt);
-    if (!target) throw new Error("프리뷰 없음");
-    if (!surface) throw new Error("프리뷰가 아직 로드되지 않았어요");
+    if (!target) throw new Error(i18n.t('프리뷰 없음'));
+    if (!surface) throw new Error(i18n.t('프리뷰가 아직 로드되지 않았어요'));
     const on = typeof p.on === "boolean" ? p.on : undefined;
     const cur = dtActive(surface.pvId);
     const want = on === undefined ? !cur : on;
@@ -1262,7 +1263,7 @@ const handlers = {
   previewInfo: async (p) => {
     const { rt } = requireWs(p);
     const { target, surface } = findPreviewSurface(rt);
-    if (!target) throw new Error("프리뷰 없음");
+    if (!target) throw new Error(i18n.t('프리뷰 없음'));
     if (!surface) return { ok: true, result: { url: "", device: "pc" } };
     const out = { url: surface.bar?.url || "", device: "pc" };
     if (surface.title) out.title = surface.title;
@@ -1275,10 +1276,10 @@ const handlers = {
   surfaceCapture: async (p) => {
     const kind = p.kind === "ide" ? "ide" : "preview";
     const { rt } = requireWsOrActive(p);
-    if (kind === "ide") return { ok: false, code: "NO_PREVIEW", error: "IDE 핸드오프 미지원" };
+    if (kind === "ide") return { ok: false, code: "NO_PREVIEW", error: i18n.t('IDE 핸드오프 미지원') };
     const target = findPreviewTarget(rt);
-    if (!target) return { ok: false, code: "NO_PREVIEW", error: "프리뷰 없음" };
-    if (target.tab && !target.tab.tid) return { ok: false, code: "NO_PREVIEW", error: "프리뷰 표면 미생성" };
+    if (!target) return { ok: false, code: "NO_PREVIEW", error: i18n.t('프리뷰 없음') };
+    if (target.tab && !target.tab.tid) return { ok: false, code: "NO_PREVIEW", error: i18n.t('프리뷰 표면 미생성') };
     const pvId = target.tab ? "pv-" + target.tab.tid : "pv-" + (target.leaf.tid || target.leaf.id);
     const manifest = await captureManifestPC(pvId);
     return { ok: true, result: { manifest, kind: "preview" } };
@@ -1286,7 +1287,7 @@ const handlers = {
 
   // 핸드오프: 매니페스트를 이 기기에 복원(push 타겟/CLI). ws 있으면 그 워크스페이스, 없으면 활성.
   previewHandoff: async (p) => {
-    if (!p.manifest || typeof p.manifest !== "object") throw new Error("manifest 필요");
+    if (!p.manifest || typeof p.manifest !== "object") throw new Error(i18n.t('manifest 필요'));
     const { rt } = requireWsOrActive(p);
     return await restoreManifestPC(rt, p.manifest);
   },
@@ -1304,9 +1305,9 @@ const handlers = {
   ideCloseFile: async (p) => {
     const { meta, rt } = requireWs(p);
     const path = normPath(meta, p.path);
-    if (!path) throw new Error("path 필요");
+    if (!path) throw new Error(i18n.t('path 필요'));
     const target = findIdeTarget(rt);
-    if (!target) throw new Error("IDE 없음");
+    if (!target) throw new Error(i18n.t('IDE 없음'));
     const ide = ideInstanceOf(target);
     const closed = ide?.closeFileByPath ? ide.closeFileByPath(path) : false;
     return { ok: true, result: { skipped: !closed } };
@@ -1316,7 +1317,7 @@ const handlers = {
   ideList: async (p) => {
     const { meta, rt } = requireWs(p);
     const target = findIdeTarget(rt);
-    if (!target) throw new Error("IDE 없음");
+    if (!target) throw new Error(i18n.t('IDE 없음'));
     const ide = ideInstanceOf(target);
     const list = ide?.listOpenFiles ? ide.listOpenFiles() : [];
     const files = list.map((f) => ({ path: relPath(meta, f.path), active: !!f.active }));

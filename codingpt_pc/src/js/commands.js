@@ -32,6 +32,8 @@ export const COMMANDS = [
   { id: "ws.addTerminal", key: "Mod+T", scope: "workspace", group: "add", pc: true, app: true, palette: true },
   { id: "ws.addIde", key: "Mod+E", scope: "workspace", group: "add", pc: true, app: true, palette: true },
   { id: "ws.addPreview", key: "Mod+Shift+E", scope: "workspace", group: "add", pc: true, app: true, palette: true },
+  // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 단축키는 안 준다(앱 commands.ts 주석 참조).
+  { id: "ws.addEmulator", key: null, scope: "workspace", group: "add", pc: true, app: true, palette: true },
 
   // ── 실행 ──
   { id: "ws.quickCommands", key: "Mod+R", scope: "workspace", group: "run", pc: true, app: true, palette: true },

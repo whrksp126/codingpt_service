@@ -20,6 +20,9 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
+// 소스를 **오려내 실행**하므로 import 가 없다 → `i18n.t` 스텁을 앞에 붙인다(원문 그대로 반환).
+const I18N_STUB = "const i18n={t:(s,v)=>String(s).replace(/\\{(\\w+)\\}/g,(w,k)=>(v&&v[k]!=null?String(v[k]):w))};\\n";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PC = await import("../src/js/agent-signal.js");
 

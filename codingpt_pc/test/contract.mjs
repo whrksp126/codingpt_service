@@ -1,3 +1,16 @@
+
+// i18n 벗기기 — 이 아래 검사들은 **소스에 어떤 문구가 어디 쓰였는지**를 본다. 다국어를 켜면서
+//  화면 문구가 `i18n.t("…")` 로 감싸졌는데, 그건 이 검사들이 보려는 구조가 아니다(감싸는 방식이
+//  바뀔 때마다 무관한 검사가 무더기로 깨진다) → 비교 전에 껍데기만 벗긴다.
+const unwrapT = (s) => String(s)
+  // ① HTML 안에 끼운 형태: `>${i18n.t('이 기기')}</div>` → `>이 기기</div>` (텍스트 그 자체로).
+  .replace(/\$\{i18n\.t\((?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\)\}/g,
+    (_m, dq, sq) => String(dq != null ? dq : sq))
+  // ② 값으로 쓰인 형태: `L(i18n.t('열쇠 있음'), "on")` → `L("열쇠 있음", "on")`.
+  //  따옴표 **모양까지 통일**한다. 치환기는 홑따옴표를 쓰는데 옛 소스는 겹따옴표라, 벗기기만 하면
+  //  검사 문자열과 계속 어긋난다.
+  .replace(/i18n\.t\((?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\)/g,
+    (_m, dq, sq) => '"' + String(dq != null ? dq : sq).replace(/"/g, '\\"') + '"');
 // contract.mjs — 와이어 계약 회귀 테스트(PC 수신측). `npm test` 로 실행.
 //
 // 왜 이 형태인가
@@ -691,7 +704,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   const files = readdirSync(dir).filter((f) => f.endsWith(".js"));
   const bad = [];
   for (const f of files) {
-    const code = readFileSync(`${dir}/${f}`, "utf8")
+    const code = unwrapT(readFileSync(`${dir}/${f}`, "utf8"))
       .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/\s\/\/.*$/gm, "");
     const known = new Set();
     for (const m of code.matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
@@ -708,16 +721,17 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
 
 {
   const { readFileSync } = await import("node:fs");
+
   const { fileURLToPath } = await import("node:url");
   const dir = base.startsWith("file:") ? fileURLToPath(base) : base;
   //  ★ 개정 12(2026-07-28 사용자 확정): **승인 표면이 통째로 삭제**됐다(device-approval.js·e2ee-card.js
   //   파일 삭제 · 알림 행 인라인 승인 제거). 연동은 설정에서 코드로 한다 — 한쪽이 코드를 띄우고
   //   다른 쪽이 입력하면 그 자리에서 열쇠가 전달된다(사람이 승인할 것이 없다).
-  const settingsOnly = readFileSync(`${dir}/settings.js`, "utf8");
-  const notifSrc = readFileSync(`${dir}/notifications.js`, "utf8");
+  const settingsOnly = unwrapT(readFileSync(`${dir}/settings.js`, "utf8"));
+  const notifSrc = unwrapT(readFileSync(`${dir}/notifications.js`, "utf8"));
   const settings = settingsOnly;
-  const e2eeWhole = readFileSync(`${dir}/e2ee.js`, "utf8");
-  const labelSrc = readFileSync(`${dir}/e2ee-label.js`, "utf8") + readFileSync(`${dir}/host-lock.js`, "utf8");
+  const e2eeWhole = unwrapT(readFileSync(`${dir}/e2ee.js`, "utf8"));
+  const labelSrc = unwrapT(readFileSync(`${dir}/e2ee-label.js`, "utf8")) + unwrapT(readFileSync(`${dir}/host-lock.js`, "utf8"));
 
   // ① 삭제된 상시 설명문 — 카드 첫 화면에서 설명문을 0줄로 만든 근거들.
   eq("삭제한 상시 설명문이 settings.js 에 없다(§3-A 삭제 목록)",
@@ -805,7 +819,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   // ③-c′ 자동 부트스트랩 — 수동 버튼 대신 상호작용 화면이 켠다. settings 는 진행/실패 표시만 하고
   //  실제 시도는 e2ee.js(maybeAutoBootstrap, refreshE2ee 끝에서 호출·60s 스로틀)가 한다.
   {
-    const e2eeSrc = readFileSync(`${dir}/e2ee.js`, "utf8");
+    const e2eeSrc = unwrapT(readFileSync(`${dir}/e2ee.js`, "utf8"));
     eq("자동 부트스트랩이 배선돼 있다(refreshE2ee → maybeAutoBootstrap, 버튼 없음)",
       /void maybeAutoBootstrap\(\)/.test(e2eeSrc) && /async function maybeAutoBootstrap/.test(e2eeSrc)
       && !/id="e2eeBootBtn"/.test(settings), true);
@@ -871,7 +885,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   //  ⑤-2″ 승인 카드는 **승인할 수 있는 요청**만 그린다(2026-07-28 폰 실사고: 자기 자신의 옛 enrollment 를
   //   승인하라고 띄웠고 누르면 403 이었다) — 필터는 e2ee.js 가 갖고 화면은 그것만 쓴다.
   {
-    const e2eeSrc2 = readFileSync(`${dir}/e2ee.js`, "utf8");
+    const e2eeSrc2 = unwrapT(readFileSync(`${dir}/e2ee.js`, "utf8"));
   }
   //  ⑤-3 ★ 개정 4: 복구 코드 컨트롤은 UI 째로 없다(§3 개정 4 블록 — 데몬 RPC 만 존치). 노출 판정
   //   함수(canRestore)의 계약 §2.4 규약 3 은 e2ee-label.js 단위 테스트가 계속 지킨다.
@@ -974,7 +988,7 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   // 무장(1탭) 경고는 **별도 행**(colspan)이다 — 같은 셀에 넣으면 그 행만 높이가 늘어 열 정렬이 흔들린다.
   eq("무장 경고는 colspan 행이다", /class="dev-tr-note" data-dev-armnote/.test(code), true);
 
-  const css = readFileSync(`${dir}/../styles.css`, "utf8");
+  const css = unwrapT(readFileSync(`${dir}/../styles.css`, "utf8"));
   eq("행에 배경·테두리·라운드를 주지 않는다(.dev-row 규칙 삭제)", /^\.dev-row\s*\{/m.test(css), false);
   // 구 '내 기기' 표(개정 2 에서 마크업이 사라진)의 죽은 규칙이 남아 있으면 안 된다 — `.dev-tr{display:grid}`
   //  가 새 `<tr>` 에 걸려 셀이 제 열을 벗어났다(실측: tr display=grid, 휴지통이 왼쪽 아래로 내려감).
