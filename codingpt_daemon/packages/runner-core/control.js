@@ -388,6 +388,11 @@ function dispatchRpc(ws, method, params, ok, fail) {
   //  ⚠ `agents.` 와 `agent.` 는 다른 접두사다(위 분기가 먼저 걸리지 않는다) — 순서를 바꿔도 안전.
   //  LAN 직결 allowlist 에는 넣지 않는다(lan.js 불변식: 승인·에이전트류는 서버 릴레이로 남긴다).
   if (method.startsWith('agents.')) { cptServer.handleAgentsRpc(method, params || {}).then(ok).catch(fail); return; }
+  // 저장한 명령(qc.list/save/remove/reorder/run) — 폰·PC 가 같은 구현을 탄다.
+  //  저장소는 이 PC 로컬(<stateDir>/quick-commands.json)이라 폰이 편집하면 지금 붙어 있는 이 PC 에
+  //  즉시 반영된다(사용자 확정 2026-08-04). LAN 직결 allowlist 에는 넣지 않는다 — `qc.run` 은
+  //  터미널에 명령을 실행시키는 조작이라 lan.js 불변식(승인·에이전트류는 서버 릴레이)에 걸린다.
+  if (method.startsWith('qc.')) { cptServer.handleQuickCommandsRpc(method, params || {}).then(ok).catch(fail); return; }
   // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
   if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.

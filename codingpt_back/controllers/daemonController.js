@@ -965,6 +965,71 @@ async function agentsLaunch(req, res) {
   } catch (e) { return mapRpcError(res, e); }
 }
 
+// ── 저장한 명령(Quick Commands, 2026-08-04) ────────────────────────────────────
+// POST /api/daemon/quick-commands/list     body:{ ws? } → { items }  (전역 + 그 워크스페이스)
+// GET  /api/daemon/quick-commands/all      → { items, limits }       (설정 화면 — 전부)
+// POST /api/daemon/quick-commands          body:{ item } → { ok, item, items }
+// POST /api/daemon/quick-commands/remove   body:{ id }   → { ok, removed, items }
+// POST /api/daemon/quick-commands/reorder  body:{ ids }  → { ok, items }
+// POST /api/daemon/quick-commands/run      body:{ id, cwd, tid? } → { ok, index, ready }
+//
+// 저장소는 **그 PC 데몬 로컬**이다. 서버는 내용을 보관하지도 해석하지도 않고 그대로 중계만 한다
+//  (agents.* 와 같은 규율 — 서버가 실행 문자열을 만들면 그게 곧 원격 코드 실행 통로다).
+//
+// ⚠ 목록 조회가 GET 이 아니라 POST 인 이유(설계 결정, 되돌리지 말 것): `ws` 는 홈-상대 경로이고
+//  **빈 문자열이 '홈 루트 워크스페이스'라는 유효한 값**이다. 그런데 클라이언트들의 쿼리스트링
+//  헬퍼는 빈 값을 관례적으로 버린다(PC `api.js qs()` 가 실제로 그렇다) → 루트 워크스페이스에서
+//  조회하면 ws 가 통째로 사라져 "전역만" 으로 조용히 격하된다. 본문 JSON 은 '' 을 그대로 옮긴다.
+async function quickCommandsList(req, res) {
+  try {
+    const b = req.body || {};
+    const hasWs = Object.prototype.hasOwnProperty.call(b, 'ws') && typeof b.ws === 'string';
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.list',
+      hasWs ? { ws: b.ws } : {}, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function quickCommandsListAll(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.listAll', {}, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function quickCommandsSave(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.save',
+      { item: b.item || b }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function quickCommandsRemove(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.remove',
+      { id: String(b.id || '') }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function quickCommandsReorder(req, res) {
+  try {
+    const b = req.body || {};
+    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)) : [];
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.reorder', { ids }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+async function quickCommandsRun(req, res) {
+  try {
+    const b = req.body || {};
+    // tid 는 '지금 보고 있는 터미널'이라 없을 수 있다(target:'new' 항목) → 있을 때만 싣는다.
+    const tid = Number.isInteger(b.tid) ? b.tid : (typeof b.tid === 'string' && /^\d+$/.test(b.tid) ? parseInt(b.tid, 10) : null);
+    const result = await daemonRelayService.callRpc(req.user.id, 'qc.run',
+      { id: String(b.id || ''), cwd: b.cwd || '', ...(tid != null ? { tid } : {}) }, undefined, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 // 데몬 오프라인 시 통일된 409.
 function mapRpcError(res, e) {
   if (e.message === 'DAEMON_OFFLINE') {
@@ -1603,6 +1668,7 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
+  quickCommandsList, quickCommandsListAll, quickCommandsSave, quickCommandsRemove, quickCommandsReorder, quickCommandsRun,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,
   terminalList, terminalNew, terminalSelect, terminalClose, terminalUnview,

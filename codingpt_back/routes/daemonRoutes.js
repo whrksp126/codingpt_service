@@ -51,6 +51,13 @@ router.get('/agents', accountAuth, daemonController.agentsList);
 router.post('/agents/wire', accountAuth, daemonController.agentsWire);
 router.post('/agents/rescan', accountAuth, daemonController.agentsRescan);
 router.post('/agents/launch', accountAuth, daemonController.agentsLaunch);
+// 저장한 명령(Quick Commands) — 저장소는 PC 데몬 로컬, 서버는 중계만.
+router.post('/quick-commands/list', accountAuth, daemonController.quickCommandsList); // POST 인 이유는 컨트롤러 주석
+router.get('/quick-commands/all', accountAuth, daemonController.quickCommandsListAll);
+router.post('/quick-commands', accountAuth, daemonController.quickCommandsSave);
+router.post('/quick-commands/remove', accountAuth, daemonController.quickCommandsRemove);
+router.post('/quick-commands/reorder', accountAuth, daemonController.quickCommandsReorder);
+router.post('/quick-commands/run', accountAuth, daemonController.quickCommandsRun);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.

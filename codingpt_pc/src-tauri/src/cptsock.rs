@@ -185,6 +185,18 @@ pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
     cpt_request(&cmd, args)
 }
 
+// 저장한 명령(Quick Commands, 2026-08-04) — 저장소가 **이 PC 데몬 로컬 파일**이라, 이 PC 의
+//  워크스페이스라면 back 을 왕복할 이유가 없다(실측 150~285ms vs 이 소켓 1~2ms). 다른 PC 의
+//  워크스페이스는 프런트가 back 릴레이로 보낸다 — 데몬 구현은 어느 경로든 **같은 함수**를 탄다.
+//  울타리는 agents_local 과 동일한 모양: `qc.` 접두사만 통과시킨다.
+#[tauri::command]
+pub fn qc_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("qc.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

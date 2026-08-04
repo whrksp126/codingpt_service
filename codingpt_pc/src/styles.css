@@ -1153,6 +1153,68 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pvm-label { flex: 1 1 auto; }
 .pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
+/* ── 저장한 명령(Quick Commands) ──
+   색은 전부 무채색 명암이다 — accent 는 상태 신호 전용(2026-07-28 색 규율). 켜짐/선택은
+   배경 밝기와 글자색 대비로만 표현한다. */
+.pvm-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; }
+.pv-menu-note { padding: 8px 10px; color: var(--dim); font-size: 12px; line-height: 1.45; }
+.pv-menu-div { height: 1px; margin: 5px 6px; background: var(--border-ctrl); }
+
+.qc-sheet, .qc-editor { max-width: 420px; width: 420px; max-height: 76vh; overflow-y: auto; }
+.qc-empty { padding: 10px; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
+.qc-row {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px;
+  border-radius: 9px; border: 1px solid transparent;
+}
+.qc-row:hover { background: var(--elevated2); border-color: var(--border-ctrl); }
+.qc-row-main { flex: 1 1 auto; min-width: 0; }
+.qc-row-label { font-size: 13px; color: var(--text); font-weight: 600; }
+.qc-row-body {
+  font-size: 12px; color: var(--text2, var(--text)); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.qc-row-meta { font-size: 11px; color: var(--dim); margin-top: 3px; }
+.qc-row-btn {
+  flex: 0 0 auto; padding: 5px 9px; font-size: 11.5px; cursor: pointer;
+  background: transparent; color: var(--text2, var(--text));
+  border: 1px solid var(--border-ctrl); border-radius: 7px;
+}
+.qc-row-btn:hover { background: var(--elevated); }
+.qc-row-btn.danger:hover { color: var(--error, #d9534f); border-color: var(--error, #d9534f); }
+.qc-add {
+  display: block; width: calc(100% - 12px); margin: 8px 6px 4px; padding: 9px;
+  background: var(--elevated2); color: var(--text); border: 1px solid var(--border-ctrl);
+  border-radius: 9px; font-size: 12.5px; cursor: pointer;
+}
+.qc-add:hover { border-color: var(--text2); }
+
+.qc-field { padding: 6px 6px 2px; }
+.qc-field-label { font-size: 11.5px; color: var(--dim); margin-bottom: 5px; }
+.qc-hint { padding: 2px 6px 6px; font-size: 11.5px; color: var(--dim); line-height: 1.45; }
+.qc-input {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px;
+  background: var(--elevated2); color: var(--text);
+  border: 1px solid var(--border-ctrl); border-radius: 8px; outline: none;
+}
+.qc-input:focus { border-color: var(--text2); }
+.qc-textarea { resize: vertical; min-height: 62px; font-family: inherit; line-height: 1.45; }
+.qc-seg { display: flex; gap: 6px; }
+.qc-seg-btn {
+  flex: 1 1 0; padding: 7px 8px; font-size: 12.5px; cursor: pointer;
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--border-ctrl); border-radius: 8px;
+}
+.qc-seg-btn:hover { background: var(--elevated2); }
+.qc-seg-btn.on { background: var(--elevated2); color: var(--text); border-color: var(--text2); }
+.qc-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 6px 4px; }
+.qc-btn {
+  padding: 8px 16px; font-size: 12.5px; cursor: pointer; border-radius: 8px;
+  background: transparent; color: var(--text2, var(--text)); border: 1px solid var(--border-ctrl);
+}
+.qc-btn:hover { background: var(--elevated2); }
+.qc-btn.primary { background: var(--elevated2); color: var(--text); border-color: var(--text2); }
+.qc-btn:disabled { opacity: 0.5; cursor: default; }
+
 /* ── 주소창 방문 기록 + 검색 추천 드롭다운(크롬식) ── */
 .pv-suggest {
   position: fixed; z-index: 9002; padding: 5px; max-height: 340px; overflow-y: auto;

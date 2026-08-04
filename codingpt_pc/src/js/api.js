@@ -210,6 +210,26 @@ export const api = {
   //  agents.launch {cwd,index,id}  → 그 터미널에 명령을 타이핑(셸 준비 대기는 데몬이 판정)
   agentsLocal: (cmd, args) => invoke("agents_local", { cmd, args: args || {} }),
 
+  // ── 저장한 명령(Quick Commands, 2026-08-04) ────────────────────────────────
+  //  저장소 = 그 PC 데몬 로컬 파일. 이 PC 워크스페이스면 사이드카 직결(qcLocal), 다른 PC 면
+  //  back 릴레이. **데몬 구현은 한 벌**이라 경로만 다르고 동작은 같다(chatLocal 과 같은 구조).
+  //  목록 조회가 POST 인 이유: `ws:''`(홈 루트 워크스페이스)를 쿼리스트링이 삼키기 때문 —
+  //  아래 qs() 는 빈 값을 버린다. 자세한 근거는 back daemonController 주석.
+  qcLocal: (cmd, args) => invoke("qc_local", { cmd, args: args || {} }),
+  qcList: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/list", body: body || {}, timeoutSecs: 15 }),
+  qcListAll: () =>
+    invoke("back_api", { method: "GET", path: "/api/daemon/quick-commands/all", body: null, timeoutSecs: 15 }),
+  qcSave: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands", body: body || {}, timeoutSecs: 15 }),
+  qcRemove: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/remove", body: body || {}, timeoutSecs: 15 }),
+  qcReorder: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/reorder", body: body || {}, timeoutSecs: 15 }),
+  // 실행은 에이전트 기동·준비 대기까지 데몬이 직렬로 하므로 여유 타임아웃(최대 25초 대기).
+  qcRun: (body) =>
+    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/run", body: body || {}, timeoutSecs: 45 }),
+
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와
   //  폰의 모드 알약이 함께 갱신된다(폴링 3초 대기 없음). 실패는 무시해도 안전(폴링이 안전망).

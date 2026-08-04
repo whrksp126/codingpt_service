@@ -10,6 +10,12 @@ import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
+import { tx } from "./text/index.js";
+import { QC_TEXT } from "./text/quick-commands.js";
+
+// 헤더 버튼 툴팁만 여기서 쓴다 — 나머지 문구는 quick-commands.js 가 같은 사전에서 읽는다.
+//  (동적 import 로 여는 모듈이라 버튼 자체는 여기 있어야 한다)
+const QC_TITLE = tx(QC_TEXT).title;
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -544,7 +550,19 @@ function renderMainTop(ws) {
     termBtn.title = "터미널 추가";
     termBtn.innerHTML = icons.terminal({ size: 16 });
     termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
+    // 저장한 명령(2026-08-04) — **추가 버튼들의 왼쪽**. 사이드바 토글 줄(전역)이 아니라 여기인
+    //  이유: 저장한 명령은 결국 "이 워크스페이스의 터미널에서" 돈다. 전역 자리에 두면 눌렀을 때
+    //  어느 워크스페이스에서 실행되는지가 모호해진다(사용자 확정).
+    const qcBtn = document.createElement("button");
+    qcBtn.className = "pane-ctrl";
+    qcBtn.title = QC_TITLE;
+    qcBtn.innerHTML = icons.play({ size: 16 });
+    qcBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      import("./quick-commands.js").then((m) => m.openQuickCommandsMenu(qcBtn));
+    });
     adds.append(
+      qcBtn,
       termBtn,
       mkBtn(icons.code, "IDE 추가", "ide"),
       mkBtn(icons.globe, "웹뷰 추가", "preview"),
