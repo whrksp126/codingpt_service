@@ -268,9 +268,12 @@ class ServeSimSession {
     }
   }
 
-  _fetchJson(url) {
+  /** 접근성 트리(원본 JSON) — 화면을 "글자"로 읽는 유일한 길이다. */
+  axJson() { return this._fetchJson(`${this.baseUrl}/ax`, 8000); }
+
+  _fetchJson(url, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const req = http.get(url, { timeout: 2000 }, (res) => {
+      const req = http.get(url, { timeout: timeoutMs || 2000 }, (res) => {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (d) => { body += d; });

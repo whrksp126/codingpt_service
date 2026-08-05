@@ -2256,10 +2256,12 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-img { width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
 .emu-boot { position: absolute; padding: 7px 14px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12.5px; }
-.emu-keys { display: flex; align-items: center; justify-content: space-around; height: 34px;
-  border-top: 1px solid var(--border); flex: 0 0 auto; }
-.emu-key { background: none; border: 0; color: var(--text2); cursor: pointer; font-size: 15px; padding: 2px 18px; }
-.emu-key:hover { color: var(--text); }
+/* 기기 조작 버튼 — 상단바 오른쪽. 좁아지면 이름이 줄고 버튼은 유지된다(조작이 먼저다).
+   에뮬레이터를 끄는 ⏻ 와 붙지 않게 오른쪽에 살짝 여백을 준다. */
+.emu-bar-keys { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; margin-right: 2px; }
+.emu-key { display: inline-flex; align-items: center; justify-content: center;
+  padding: 3px 5px; border-radius: 5px; }
+.emu-key:hover { color: var(--text); background: var(--hover); }
 .emu-hint, .emu-err { color: var(--dim); font-size: 11px; padding: 6px 10px; text-align: center; flex: 0 0 auto; }
 .emu-err { color: var(--error); }
 .emu-err:empty { display: none; }

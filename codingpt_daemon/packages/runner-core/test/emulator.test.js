@@ -276,13 +276,22 @@ test('idb 호출은 전부 idbRun 을 거친다(맨손 run(t.idb) 금지)', () =
 // ── 버튼줄은 기기가 정한다 ──────────────────────────────────────────────────
 test('★ iOS 버튼줄에 안드로이드 전용 키가 없다(누를 때마다 오류만 났다)', () => {
   const emu = require('../emulator');
+  //  serve-sim 이 있는 기계의 버튼줄 — 그 경로로 전부 보낼 수 있어야 한다.
   for (const k of emu.IOS_KEY_ROW) {
-    //  두 경로(serve-sim 우선 · idb 폴백) **모두** 보낼 수 있어야 화면에 그린다.
     assert.ok(emu.IOS_SS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 serve-sim 으로 못 보낸다`);
-    assert.ok(emu.IOS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 idb 로 못 보낸다`);
   }
+  //  ★ idb 폴백만 있는 기계는 **줄이 더 짧다.** idb 의 버튼 어휘에는 볼륨이 아예 없어서
+  //   같은 줄을 그리면 누를 때마다 오류만 난다(2026-08-06 테스트가 잡아낸 결함).
+  for (const k of emu.IOS_KEY_ROW_IDB) {
+    assert.ok(emu.IOS_BUTTONS[k], `idb 폴백 버튼줄의 ${k} 를 idb 로 못 보낸다`);
+  }
+  assert.ok(emu.IOS_KEY_ROW_IDB.length <= emu.IOS_KEY_ROW.length);
   assert.ok(!emu.IOS_KEY_ROW.includes('back') && !emu.IOS_KEY_ROW.includes('recents'));
-  for (const k of emu.ANDROID_KEY_ROW) assert.ok(emu.ANDROID_KEYS[k], `안드로이드 버튼줄의 ${k} 가 없다`);
+  //  회전은 키코드가 아니라 전용 처리다(settings user_rotation) — 그래서 KEYCODE 표에 없다.
+  const SPECIAL = new Set(['rotate']);
+  for (const k of emu.ANDROID_KEY_ROW) {
+    assert.ok(emu.ANDROID_KEYS[k] || SPECIAL.has(k), `안드로이드 버튼줄의 ${k} 를 보낼 방법이 없다`);
+  }
 });
 
 test('appSwitch→APPLE_PAY 라는 거짓 매핑이 없다(앱 전환이 아니라 페이다)', () => {
@@ -368,4 +377,54 @@ test('iOS 도 라이브 화면을 요청할 수 있다(예전엔 android 만 통
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
   assert.match(src, /p\.scheme !== 'android' && p\.scheme !== 'ios'/,
     'streamStart 가 iOS 를 막으면 화면은 영원히 폴링으로 남는다');
+});
+
+// ── 화면을 글자로 읽기(에이전트용) ──────────────────────────────────────────
+// ★ 이게 있으면 에이전트가 스크린샷을 눈으로 보고 좌표를 찍지 않아도 된다. 좌표를 찍어서 틀리면
+//  기기는 아무 반응이 없고 rc 는 0 이다 — 오늘 하루 종일 나를 속인 그 실패 모양이다.
+test('★ 접근성 트리 좌표는 0~1 정규화다(그대로 tap 에 넣을 수 있어야 한다)', () => {
+  const emu = require('../emulator');
+  const r = emu._normalizeIosAx([{
+    frame: { x: 0, y: 0, width: 400, height: 800 }, AXLabel: '', children: [
+      { frame: { x: 100, y: 200, width: 200, height: 100 }, AXLabel: '설정', type: 'Button', enabled: true, children: [] },
+    ],
+  }]);
+  assert.deepEqual(r.screen, { w: 400, h: 800 });
+  assert.equal(r.elements.length, 1);
+  const e = r.elements[0];
+  assert.equal(e.label, '설정');
+  assert.equal(e.x, 0.5);        // (100+200/2)/400 = 중심
+  assert.equal(e.y, 0.3125);     // (200+100/2)/800
+  assert.equal(e.w, 0.5);
+});
+
+test('화면 전체를 덮는 껍데기는 요소로 세지 않는다(누르면 아무 데나 누른 것)', () => {
+  const emu = require('../emulator');
+  const r = emu._normalizeIosAx([{
+    frame: { x: 0, y: 0, width: 400, height: 800 }, AXLabel: '배경', children: [
+      { frame: { x: 0, y: 0, width: 400, height: 800 }, AXLabel: '전체', type: 'Group', children: [] },
+    ],
+  }]);
+  assert.equal(r.elements.length, 0);
+});
+
+test('★ 안드로이드 uiautomator 덤프에서 라벨과 사각형을 뽑는다', () => {
+  const emu = require('../emulator');
+  const xml = '<?xml version="1.0"?><hierarchy rotation="0">'
+    + '<node index="0" text="" resource-id="" class="android.widget.FrameLayout" clickable="false" enabled="true" bounds="[0,0][1080,2400]" />'
+    + '<node index="1" text="설정" resource-id="com.x:id/s" class="android.widget.TextView" clickable="true" enabled="true" bounds="[100,200][300,300]" />'
+    + '<node index="2" text="" content-desc="" class="android.view.View" clickable="false" enabled="true" bounds="[0,0][10,10]" />'
+    + '</hierarchy>';
+  const r = emu._parseAndroidAx(xml);
+  assert.deepEqual(r.screen, { w: 1080, h: 2400 });
+  //  전체 껍데기와 이름 없는 비클릭 요소는 빠지고 '설정' 만 남는다.
+  assert.equal(r.elements.length, 1);
+  assert.equal(r.elements[0].label, '설정');
+  assert.equal(r.elements[0].x, Math.round((200 / 1080) * 10000) / 10000);
+  assert.equal(r.elements[0].y, Math.round((250 / 2400) * 10000) / 10000);
+});
+
+test('덤프가 쓰레기면 요소를 지어내지 않는다', () => {
+  const emu = require('../emulator');
+  assert.deepEqual(emu._parseAndroidAx('망가진 출력'), { screen: { w: 0, h: 0 }, elements: [] });
 });

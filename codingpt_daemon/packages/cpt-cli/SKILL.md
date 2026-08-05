@@ -20,6 +20,12 @@ description: >-
   "확인해줘", "review my changes", or when a change is big or risky enough that
   you'd rather get approval before moving on: `cpt review` opens a review screen
   and blocks until the user approves/rejects each hunk and sends comments back.
+  It also drives the **Android emulator / iOS Simulator attached to this Mac** — use it
+  whenever you changed a mobile app and want to see the result yourself, or the user says
+  "앱에서 확인해줘", "에뮬레이터 켜줘", "시뮬레이터에서 눌러봐", "화면 어떻게 나와?",
+  "run it on the simulator", "tap the settings button": `cpt emulator list` / `boot` /
+  `ax` (read the screen as text) / `tap-label "설정"` / `screenshot`. Read the screen
+  with `ax` before tapping — never guess coordinates from a screenshot.
 ---
 
 # CodingPT cpt CLI

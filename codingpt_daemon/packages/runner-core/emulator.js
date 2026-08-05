@@ -194,7 +194,7 @@ async function iosSimulators() {
           //  조작할 방법이 하나도 없으면 **보기 전용**이라고 적는다 — 눌리는 척하다 아무 일도
           //  안 일어나는 게 제일 나쁘다.
           input: booted && canInput,
-          keys: IOS_KEY_ROW,
+          keys: serveSim().available() ? IOS_KEY_ROW : IOS_KEY_ROW_IDB,
           //  이제 조작은 우리가 번들한 serve-sim 이 한다. 그게 못 도는 환경(인텔 맥 등)에서만
           //  idb 를 안내한다 — 무엇이 빠졌는지까지 말해 준다.
           inputHint: canInput ? ''
@@ -569,9 +569,21 @@ const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', sideButton: 'SID
  *  (안 그러면 iOS 에서 안드로이드 3버튼이 그려지고, '뒤로'·'최근 앱' 을 누를 때마다
  *   "보낼 수 없는 키예요" 오류만 나온다 — 2026-08-06 실사고.)
  */
-const ANDROID_KEY_ROW = ['recents', 'home', 'back'];
-//  Siri 는 뺐다 — 시뮬레이터에서 실제로 뜨지 않는 걸 확인했다. 되는 것만 그린다.
-const IOS_KEY_ROW = ['home', 'lock'];
+//  순서 = 화면에 그릴 순서(왼쪽부터). 자리가 모자라면 화면이 뒤쪽부터 접는다.
+const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotate', 'volumeUp', 'volumeDown', 'power'];
+//  ★ 되는 것만 그린다(실측으로 하나씩 확인했다):
+//   · Siri — 시뮬레이터에서 뜨지 않는다.
+//   · 회전 — serve-sim 이 방향 변경을 **접수했다고 답하는데**(config 프레임까지 새로 쏜다) 화면은
+//     그대로였다(1206x2622 유지, 접근성 트리도 402x874 그대로). 되지도 않는 버튼을 그리면
+//     사용자는 기기가 멈춘 줄 안다 — 그래서 iOS 에는 회전 버튼을 두지 않는다.
+//  ★ 어떤 버튼을 그릴지는 **그 PC 에서 어느 경로가 살아 있는지**에 달렸다. idb 폴백은 볼륨을
+//   아예 못 보낸다(idb 의 버튼 어휘는 HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐) — serve-sim 이
+//   없는 기계에 볼륨 버튼을 그려 놓으면 누를 때마다 오류만 난다.
+const IOS_KEY_ROW = ['home', 'lock', 'volumeUp', 'volumeDown'];
+const IOS_KEY_ROW_IDB = ['home', 'lock'];
+
+/** 시계방향 한 칸씩. serve-sim 이 쓰는 이름 그대로다(회전이 되살아나면 여기서 쓴다). */
+const IOS_ORIENTATIONS = ['portrait', 'landscape_right', 'portrait_upside_down', 'landscape_left'];
 
 /**
  * serve-sim HID 버튼 표.
@@ -633,6 +645,10 @@ async function inputViaScrcpy(a, p) {
     return { ok: true, via: 'scrcpy' };
   }
   if (type === 'key') {
+    //  ★ 회전은 여기서 처리하지 않는다. scrcpy 의 ROTATE_DEVICE(11) 는 우리 서버 jar 에서
+    //   **ok 를 돌려주면서 아무 일도 안 했다**(2026-08-06 실측: 1080x2400 그대로). null 을 돌려
+    //   아래 adb 경로(settings user_rotation)로 보낸다 — 그쪽은 실제로 돈다.
+    if (String(a.key || '') === 'rotate') return null;
     const code = S.KEYCODES[String(a.key || '')];
     if (code == null) return null;   // 우리가 여는 키가 아니다 — adb 경로의 검증에 맡긴다
     if (!sess.send(S.encodeKeycode({ action: 'down', keycode: code }))) return null;
@@ -693,7 +709,15 @@ async function inputViaServeSim(a, p) {
     return { ok: true, via: 'serve-sim' };
   }
   if (type === 'key') {
-    const btn = IOS_SS_BUTTONS[String(a.key || '')];
+    const key = String(a.key || '');
+    //  회전은 버튼이 아니라 전용 메시지다. 지금 방향에서 시계방향으로 한 칸 돌린다.
+    if (key === 'rotate') {
+      const cur = IOS_ORIENTATIONS.indexOf(sess.orientation);
+      const next = IOS_ORIENTATIONS[((cur < 0 ? 0 : cur) + 1) % IOS_ORIENTATIONS.length];
+      if (!sess.rotate(next)) return null;
+      return { ok: true, via: 'serve-sim', orientation: next };
+    }
+    const btn = IOS_SS_BUTTONS[key];
     if (!btn) return null;                 // 우리가 여는 버튼이 아니다 — 아래 검증에 맡긴다
     if (!sess.button(btn)) return null;
     return { ok: true, via: 'serve-sim' };
@@ -717,6 +741,14 @@ async function input(args) {
     const viaControl = await inputViaScrcpy(a, p);
     if (viaControl) return viaControl;
     const adb = (rest, timeoutMs) => run(t.adb, ['-s', p.value, 'shell', ...rest], { timeoutMs: timeoutMs || 10000 });
+    //  회전 폴백 — 라이브 세션이 없을 때. 자동회전을 끄고 사용자 회전값을 한 칸 돌린다
+    //  (`adb emu rotate` 는 에뮬레이터에만 있어서 실기기에서 안 된다).
+    if (type === 'key' && String(a.key || '') === 'rotate') {
+      const cur = Number(String(await adb(['settings', 'get', 'system', 'user_rotation'])).trim()) || 0;
+      await adb(['settings', 'put', 'system', 'accelerometer_rotation', '0']);
+      await adb(['settings', 'put', 'system', 'user_rotation', String((cur + 1) % 4)]);
+      return { ok: true, rotation: (cur + 1) % 4 };
+    }
     if (type === 'tap' || type === 'longPress') {
       const s = await screenSize(a.id, p);
       const x = px(a.x, s.w); const y = px(a.y, s.h);
@@ -790,6 +822,136 @@ async function input(args) {
   throw new Error('꺼져 있는 기기예요 — 먼저 켜 주세요');
 }
 
+// ── 화면을 "글자"로 읽기 ─────────────────────────────────────────────────────
+
+/** 트리 한 번에 돌려주는 최대 요소 수 — 화면 하나에 이보다 많으면 어차피 사람이 못 읽는다. */
+const AX_MAX_ELEMENTS = 400;
+
+/**
+ * 접근성 트리 — **AI 가 스크린샷을 눈으로 찍어 좌표를 추측하지 않게** 해 주는 것.
+ *
+ * 왜 필요한가: 지금까지 에이전트가 화면을 조작하려면 스크린샷을 받아 "설정 아이콘이 대충
+ *  오른쪽 아래" 라고 찍어야 했다. 그건 맞을 때도 있고 아닐 때도 있는데, **틀려도 rc=0** 이라
+ *  아무 일도 안 일어난 걸 알 방법이 없다(오늘 내가 세 번 당한 그 함정이다).
+ *  라벨과 사각형을 글자로 주면 "'설정' 을 눌러" 가 결정적인 동작이 된다.
+ *
+ * 좌표는 우리 계약대로 **0~1 정규화**로 돌려준다(x,y = 중심). 그대로 `emulator.input tap` 에
+ *  넣으면 된다 — 단위 환산을 클라이언트가 하지 않는다.
+ */
+async function axTree(args) {
+  const a = args || {};
+  const p = parseId(a.id);
+  if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme === 'ios') return iosAx(a, p);
+  if (p.scheme === 'android') return androidAx(a, p);
+  throw new Error('꺼져 있는 기기예요 — 먼저 켜 주세요');
+}
+
+async function iosAx(a, p) {
+  if (!serveSim().available()) throw new Error('이 PC 에서는 iOS 화면 읽기를 쓸 수 없어요');
+  const stream = lazyStream();
+  let sess = stream.sessionFor(p.value);
+  if (!sess) { await streamStart({ id: a.id }); sess = stream.sessionFor(p.value); }
+  if (!sess || typeof sess.axJson !== 'function') throw new Error('화면 읽기 준비가 안 됐어요');
+  try { stream.keepAlive(p.value); } catch (_) { /* noop */ }
+  const raw = await sess.axJson();
+  return { kind: 'ios', ...normalizeIosAx(raw) };
+}
+
+/**
+ * serve-sim `/ax` 는 **포인트** 좌표의 트리를 준다. 화면 크기는 별도로 안 주므로
+ *  최상위 노드의 사각형을 화면으로 본다(serve-sim 자신도 같은 규칙을 쓴다).
+ */
+function normalizeIosAx(raw) {
+  const roots = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  const screen = (roots[0] && roots[0].frame) || { x: 0, y: 0, width: 1, height: 1 };
+  const W = Number(screen.width) || 1;
+  const H = Number(screen.height) || 1;
+  const out = [];
+  const walk = (node) => {
+    if (!node || out.length >= AX_MAX_ELEMENTS) return;
+    const f = node.frame || {};
+    const label = String(node.AXLabel || '').trim();
+    const value = String(node.AXValue || '').trim();
+    //  화면 전체를 덮는 껍데기 노드는 버린다 — 그걸 누르면 아무 데나 누른 것과 같다.
+    const isScreen = Math.abs((f.width || 0) - W) < 0.5 && Math.abs((f.height || 0) - H) < 0.5;
+    if ((label || value) && !isScreen && f.width > 0 && f.height > 0) {
+      out.push({
+        label, value,
+        role: String(node.role_description || node.type || ''),
+        enabled: node.enabled !== false,
+        x: clamp01((f.x + f.width / 2 - screen.x) / W),
+        y: clamp01((f.y + f.height / 2 - screen.y) / H),
+        w: clamp01(f.width / W),
+        h: clamp01(f.height / H),
+      });
+    }
+    for (const c of node.children || []) walk(c);
+  };
+  for (const r of roots) walk(r);
+  return { screen: { w: W, h: H }, elements: out };
+}
+
+async function androidAx(a, p) {
+  const t = tools();
+  if (!t.adb) throw new Error('adb 를 찾을 수 없어요');
+  const xml = await run(t.adb, ['-s', p.value, 'exec-out', 'uiautomator', 'dump', '/dev/tty'], { timeoutMs: 20000 });
+  return { kind: 'android', ...parseAndroidAx(String(xml)) };
+}
+
+/**
+ * `uiautomator dump` 의 XML → 우리 형식.
+ *  bounds 는 `[x1,y1][x2,y2]` **픽셀**이다. 화면 크기는 최상위 노드의 bounds 로 잡는다
+ *  (기기에 다시 물어보면 회전 직후 값이 어긋날 수 있다 — 같은 덤프 안에서 끝낸다).
+ */
+function parseAndroidAx(xml) {
+  const nodes = String(xml).match(/<node\b[^>]*>/g) || [];
+  const attr = (s, k) => {
+    const m = new RegExp(`\\s${k}="([^"]*)"`).exec(s);
+    return m ? m[1] : '';
+  };
+  const rect = (s) => {
+    const m = /bounds="\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]"/.exec(s);
+    return m ? { x1: +m[1], y1: +m[2], x2: +m[3], y2: +m[4] } : null;
+  };
+  let W = 0, H = 0;
+  for (const n of nodes) {
+    const r = rect(n);
+    if (r) { W = Math.max(W, r.x2); H = Math.max(H, r.y2); }
+  }
+  if (!W || !H) return { screen: { w: 0, h: 0 }, elements: [] };
+  const out = [];
+  for (const n of nodes) {
+    if (out.length >= AX_MAX_ELEMENTS) break;
+    const r = rect(n);
+    if (!r) continue;
+    const label = (attr(n, 'text') || attr(n, 'content-desc') || '').trim();
+    //  글자도 설명도 없는 레이아웃 껍데기는 버린다(누를 수 있는 것만 예외로 남긴다).
+    const clickable = attr(n, 'clickable') === 'true';
+    if (!label && !clickable) continue;
+    const w = r.x2 - r.x1, h = r.y2 - r.y1;
+    if (w <= 0 || h <= 0) continue;
+    if (w >= W && h >= H) continue;                 // 화면 전체 껍데기
+    out.push({
+      label,
+      value: attr(n, 'resource-id'),
+      role: (attr(n, 'class') || '').split('.').pop(),
+      enabled: attr(n, 'enabled') !== 'false',
+      x: clamp01((r.x1 + w / 2) / W),
+      y: clamp01((r.y1 + h / 2) / H),
+      w: clamp01(w / W),
+      h: clamp01(h / H),
+    });
+  }
+  return { screen: { w: W, h: H }, elements: out };
+}
+
+function clamp01(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(Math.max(0, Math.min(1, v)) * 10000) / 10000;
+}
+
 /** 주소 열기 — 딥링크·프리뷰 확인에 쓴다(탭이 안 되는 iOS 에서도 이건 된다). */
 async function openUrl(args) {
   const p = parseId(args && args.id);
@@ -860,6 +1022,8 @@ async function handle(method, params) {
   if (m === 'emulator.frame') return frame(params);
   if (m === 'emulator.input') return input(params);
   if (m === 'emulator.openUrl') return openUrl(params);
+  //  화면을 글자로 읽는다 — 에이전트가 좌표를 추측하지 않게 하는 유일한 길.
+  if (m === 'emulator.ax') return axTree(params);
   //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 세션 관리는 webrtc.js 가 한다.
   //   프레임은 이 파일이 만든 스트림에 **뷰어로 붙어서** 받으므로 바이트 계약이 갈라지지 않는다.
   if (m === 'emulator.webrtc.offer') {
@@ -873,12 +1037,13 @@ async function handle(method, params) {
 }
 
 module.exports = {
-  handle, list, boot, shutdown, frame, input, openUrl, streamStart,
+  handle, list, boot, shutdown, frame, input, openUrl, streamStart, axTree,
   // 테스트용
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
   _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg,
   _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   _idbReady: idbReady, _idbEnv: idbEnv,
-  ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW,
+  _normalizeIosAx: normalizeIosAx, _parseAndroidAx: parseAndroidAx,
+  ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW, IOS_KEY_ROW_IDB,
 };

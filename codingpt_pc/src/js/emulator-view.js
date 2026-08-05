@@ -37,6 +37,21 @@ const H264_CODEC = 'avc1.640028';
 const FLAG_CONFIG = 1;
 const FLAG_KEY = 2;
 
+/**
+ * 기기 조작 버튼의 **그림과 이름**. 어떤 버튼을 그릴지는 기기가 정한다(`caps.keys`) —
+ *  여기 없는 키가 오면 그냥 안 그린다(모르는 걸 그려 놓고 눌리면 오류만 난다).
+ */
+const EMU_KEYS = {
+  back: { icon: 'navBack', title: '뒤로' },
+  home: { icon: 'navHome', title: '홈' },
+  recents: { icon: 'navRecents', title: '최근 앱' },
+  rotate: { icon: 'rotateDevice', title: '화면 회전' },
+  volumeUp: { icon: 'volumeUp', title: '볼륨 올리기' },
+  volumeDown: { icon: 'volumeDown', title: '볼륨 내리기' },
+  power: { icon: 'devicePower', title: '기기 전원(화면)' },
+  lock: { icon: 'devicePower', title: '잠금(화면)' },
+};
+
 /** 이 웹뷰가 H.264 를 풀 수 있는가 — 없으면 조용히 폴링으로 돌아간다(빈 화면 금지). */
 function canDecodeVideo() {
   return typeof globalThis.VideoDecoder === 'function' && typeof globalThis.EncodedVideoChunk === 'function';
@@ -301,6 +316,16 @@ export class EmulatorView {
   }
 
   /**
+   * 그릴 버튼 목록 — 기기가 알려 준 것(`caps.keys`)만, 우리가 그림을 아는 것만.
+   *  구 데몬은 목록을 안 준다 → 그때만 안드로이드 3버튼으로 폴백한다(그 시절 동작 유지).
+   */
+  keyRow(dev) {
+    const ks = dev && dev.caps && Array.isArray(dev.caps.keys) && dev.caps.keys.length
+      ? dev.caps.keys : ["recents", "home", "back"];
+    return ks.filter((k) => EMU_KEYS[k]);
+  }
+
+  /**
    * 받을 프레임의 가로 픽셀 수.
    *
    * ★ 480 고정이었다(2026-08-06 실사고). 3배 밀도 아이폰(1179px)을 480 으로 줄여 보내고 레티나
@@ -451,7 +476,25 @@ export class EmulatorView {
     pw.title = booted ? i18n.t('끄기') : i18n.t('켜기');
     pw.textContent = booted ? "⏻" : "⏵";
     pw.addEventListener("click", () => this.power(booted ? "shutdown" : "boot"));
-    bar.append(back, pw);
+    bar.append(back);
+    //  ★ 기기 조작 버튼은 **상단바 오른쪽**에 둔다(2026-08-06 사용자 확정). 아래에 따로 줄을
+    //   만들면 화면(=우리가 보여 줘야 할 것)이 그만큼 줄어들고, 실제 시뮬레이터/에뮬레이터도
+    //   조작부를 창 테두리에 붙여 둔다. 오른쪽 끝의 ⏻(에뮬레이터 끄기)와는 아이콘을 다르게 둔다.
+    if (canInput) {
+      const keys = document.createElement("div");
+      keys.className = "emu-bar-keys";
+      for (const k of this.keyRow(dev)) {
+        const spec = EMU_KEYS[k];
+        const b = document.createElement("button");
+        b.className = "emu-bar-btn emu-key";
+        b.innerHTML = icons[spec.icon]({ size: 14 });
+        b.title = i18n.t(spec.title);
+        b.addEventListener("click", () => this.send({ type: "key", key: k }));
+        keys.appendChild(b);
+      }
+      bar.appendChild(keys);
+    }
+    bar.appendChild(pw);
 
     const stage = document.createElement("div");
     stage.className = "emu-stage";
@@ -507,27 +550,7 @@ export class EmulatorView {
       this.el.appendChild(note);
     }
 
-    if (canInput) {
-      const keys = document.createElement("div");
-      keys.className = "emu-keys";
-      //  ★ 버튼줄은 **기기가 알려 준 목록**(caps.keys)만 그린다. 예전엔 안드로이드 3버튼을 iOS 에도
-      //   그려서 '뒤로'·'최근 앱' 이 누를 때마다 오류만 냈다(iOS 엔 그 버튼이 없다).
-      const LABELS = {
-        recents: ["▢", i18n.t('최근 앱')], home: ["○", i18n.t('홈')], back: ["◁", i18n.t('뒤로')],
-        lock: ["⏻", i18n.t('잠금')], siri: ["◍", "Siri"],
-      };
-      const wanted = (dev && dev.caps && Array.isArray(dev.caps.keys) && dev.caps.keys.length)
-        ? dev.caps.keys : ["recents", "home", "back"];
-      for (const [label, key, title] of wanted.filter((k) => LABELS[k]).map((k) => [LABELS[k][0], k, LABELS[k][1]])) {
-        const b = document.createElement("button");
-        b.className = "emu-key";
-        b.textContent = label;
-        b.title = title;
-        b.addEventListener("click", () => this.send({ type: "key", key }));
-        keys.appendChild(b);
-      }
-      this.el.appendChild(keys);
-    } else if (dev && dev.caps && dev.caps.inputHint) {
+    if (!canInput && dev && dev.caps && dev.caps.inputHint) {
       const hint = document.createElement("div");
       hint.className = "emu-hint";
       hint.textContent = dev.caps.inputHint;

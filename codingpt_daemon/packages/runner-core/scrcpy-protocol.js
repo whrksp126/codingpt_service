@@ -118,7 +118,9 @@ function parseFrames(pending, chunk) {
 // ── 컨트롤 메시지 ────────────────────────────────────────────────────────────
 // 전부 빅엔디언이다(서버가 DataInputStream 으로 읽는다).
 
-const MSG = { KEYCODE: 0, TEXT: 1, TOUCH: 2, SCROLL: 3, BACK_OR_SCREEN_ON: 4 };
+//  ROTATE_DEVICE 는 **몸통 없는 1바이트** 메시지다(누를 때마다 90도). scrcpy 2.x 의 번호 11 —
+//   우리가 쓰는 서버 jar 가 그 버전이라 여기 박아 둔다.
+const MSG = { KEYCODE: 0, TEXT: 1, TOUCH: 2, SCROLL: 3, BACK_OR_SCREEN_ON: 4, ROTATE_DEVICE: 11 };
 const TOUCH_ACTION = { down: 0, up: 1, move: 2 };
 const KEY_ACTION = { down: 0, up: 1 };
 const BUTTON_PRIMARY = 1;
@@ -180,6 +182,9 @@ function encodeScroll(p) {
  * 안드로이드 keycode — 화면에 보이는 것만 연다(우리 `emulator.input` 의 키 목록과 같은 규율:
  *  임의 keyevent 를 열면 전원·공장초기화까지 닿는다).
  */
+/** 화면 회전 — 인자가 없다(한 번에 90도). */
+function encodeRotate() { return Buffer.from([MSG.ROTATE_DEVICE]); }
+
 const KEYCODES = {
   home: 3, back: 4, recents: 187, enter: 66, del: 67, tab: 61, escape: 111,
   volumeUp: 24, volumeDown: 25, power: 26,
@@ -187,6 +192,7 @@ const KEYCODES = {
 };
 
 module.exports = {
+  encodeRotate,
   SCRCPY_VERSION, DEVICE_JAR_PATH,
   DUMMY_BYTE, DEVICE_NAME_BYTES, CODEC_META_SIZE, FRAME_HEADER_SIZE, MAX_FRAME_BYTES,
   pushArgs, forwardArgs, removeForwardArgs, serverArgs,

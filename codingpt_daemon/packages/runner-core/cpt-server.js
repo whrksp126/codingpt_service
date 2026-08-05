@@ -1836,7 +1836,9 @@ const CAPABILITIES = [
   'ui.review',
   // 모바일 화면 — 조회·조작 전부 공개다. 에이전트가 "고친 화면이 어떻게 나오는지" 스스로 확인하고
   //  탭까지 해 보는 것이 이 기능의 값이다(승인·자기주입 같은 "사람만 해야 하는 일"이 아니다).
-  'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl',
+  //  `emulator.ax` = 화면을 글자로 읽기. 스크린샷을 눈으로 보고 좌표를 찍는 것보다 정확하고,
+  //   무엇보다 **틀렸을 때 틀렸다고 말할 수 있다**(못 찾은 라벨은 오류다 — 조용한 실패가 아니다).
+  'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl', 'emulator.ax',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.

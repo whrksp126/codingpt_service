@@ -158,6 +158,16 @@ function request(cmd, args, { timeoutMs = 65000 } = {}) {
 
 function printJson(v) { process.stdout.write(JSON.stringify(v, null, 2) + '\n'); }
 
+/**
+ * 접근성 요소가 검색어와 맞는가 — 라벨 우선, 값(리소스 id·본문)도 본다.
+ *  대소문자를 무시하고 **부분 일치**다: 화면의 라벨은 "설정 1개의 새로운 알림" 처럼 뒤에 상태가
+ *  붙어 오는 일이 흔해서, 정확히 일치만 허용하면 사람이 보는 것과 어긋난다.
+ */
+function matchesEl(e, q) {
+  const s = `${e.label || ''}\n${e.value || ''}`.toLowerCase();
+  return s.includes(q);
+}
+
 function out(v, flags, human) {
   if (flags.json || human == null) printJson(v);
   else process.stdout.write(human + '\n');
@@ -513,25 +523,59 @@ async function main() {
       // 모바일 화면 — 에이전트가 "내가 고친 화면이 실제로 어떻게 나오는지" 스스로 본다.
       //  screenshot 은 기본으로 파일에 저장한다(base64 를 stdout 에 쏟으면 컨텍스트가 통째로 날아간다).
       case 'emulator': {
-        const id = flags.device || flags.id || rest[0];
+        //  ★ 기기 id 는 `--device` 로도, 첫 위치인자로도 줄 수 있다. **위치인자로 준 경우에만**
+        //   첫 자리를 소비한다 — 예전엔 무조건 rest[0] 을 id 로 치고 rest[1] 부터 인자로 읽어서,
+        //   `--device` 를 쓰면 좌표가 통째로 한 칸씩 밀렸다(2026-08-06 실사용에서 발견).
+        const idFlag = flags.device || flags.id || null;
+        const id = idFlag || rest[0];
+        const a1 = idFlag ? rest : rest.slice(1);
         const num = (n, d) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : d);
         if (c2 === 'list' || c2 == null) return printJson(await request('emulator.list', {}));
         if (c2 === 'boot') return out(await request('emulator.boot', { id }), flags, '켜는 중…');
         if (c2 === 'shutdown') return out(await request('emulator.shutdown', { id }), flags, 'ok');
-        if (c2 === 'open') return out(await request('emulator.openUrl', { id, url: rest[1] || flags.url }), flags, 'ok');
+        if (c2 === 'open') return out(await request('emulator.openUrl', { id, url: a1[0] || flags.url }), flags, 'ok');
         if (c2 === 'tap' || c2 === 'long-press') {
           return out(await request('emulator.input', {
-            id, type: c2 === 'tap' ? 'tap' : 'longPress', x: Number(rest[1]), y: Number(rest[2]),
+            id, type: c2 === 'tap' ? 'tap' : 'longPress', x: Number(a1[0]), y: Number(a1[1]),
           }), flags, 'ok');
         }
         if (c2 === 'swipe') {
           return out(await request('emulator.input', {
-            id, type: 'swipe', x: Number(rest[1]), y: Number(rest[2]), x2: Number(rest[3]), y2: Number(rest[4]),
+            id, type: 'swipe', x: Number(a1[0]), y: Number(a1[1]), x2: Number(a1[2]), y2: Number(a1[3]),
             durationMs: num('ms', undefined),
           }), flags, 'ok');
         }
-        if (c2 === 'key') return out(await request('emulator.input', { id, type: 'key', key: rest[1] }), flags, 'ok');
-        if (c2 === 'text') return out(await request('emulator.input', { id, type: 'text', text: rest.slice(1).join(' ') }), flags, 'ok');
+        if (c2 === 'key') return out(await request('emulator.input', { id, type: 'key', key: a1[0] }), flags, 'ok');
+        //  화면을 **글자로** 읽는다 — 스크린샷을 눈으로 보고 좌표를 찍는 것보다 훨씬 정확하다.
+        if (c2 === 'ax' || c2 === 'screen') {
+          const r = await request('emulator.ax', { id }, { timeoutMs: 40000 });
+          const q = (a1.join(' ') || flags.match || '').toString().trim().toLowerCase();
+          const els = q ? r.elements.filter((e) => matchesEl(e, q)) : r.elements;
+          if (flags.json) return printJson({ ...r, elements: els });
+          console.log(`${r.kind} · ${r.screen.w}x${r.screen.h} · ${els.length}개`);
+          for (const e of els) console.log(`  (${e.x}, ${e.y})  ${e.label || '(이름 없음)'}${e.value ? `  [${e.value}]` : ''}  ${e.role}`);
+          return 0;
+        }
+        //  라벨로 누르기 — 에이전트가 가장 많이 쓸 명령. 후보가 여럿이면 **누르지 않고** 보여 준다.
+        if (c2 === 'tap-label' || c2 === 'tap-text') {
+          const q = a1.join(' ').trim().toLowerCase();
+          if (!q) throw new Error('누를 라벨을 알려 주세요 — cpt emulator tap-label "설정"');
+          const r = await request('emulator.ax', { id }, { timeoutMs: 40000 });
+          const hits = r.elements.filter((e) => matchesEl(e, q));
+          if (!hits.length) {
+            throw new Error(`"${a1.join(' ')}" 를 화면에서 못 찾았어요 — cpt emulator ax 로 지금 보이는 것을 확인하세요`);
+          }
+          //  완전히 같은 라벨이 있으면 그것부터(부분일치가 엉뚱한 걸 집는 걸 막는다).
+          const exact = hits.filter((e) => String(e.label || '').toLowerCase() === q);
+          const pick = (exact.length ? exact : hits)[0];
+          if ((exact.length ? exact : hits).length > 1 && !flags.first) {
+            const list = (exact.length ? exact : hits).map((e) => `  (${e.x}, ${e.y})  ${e.label}  ${e.role}`).join('\n');
+            throw new Error(`후보가 ${hits.length}개예요 — 좌표로 누르거나 --first 를 쓰세요:\n${list}`);
+          }
+          await request('emulator.input', { id, type: 'tap', x: pick.x, y: pick.y });
+          return out({ ok: true, tapped: pick }, flags, `눌렀어요: ${pick.label} (${pick.x}, ${pick.y})`);
+        }
+        if (c2 === 'text') return out(await request('emulator.input', { id, type: 'text', text: a1.join(' ') }), flags, 'ok');
         if (c2 === 'screenshot') {
           const r = await request('emulator.frame', { id, maxWidth: num('width', 720), quality: num('quality', 80) }, { timeoutMs: 60000 });
           const ext = r.mime === 'image/png' ? 'png' : (r.mime === 'image/bmp' ? 'bmp' : 'jpg');
