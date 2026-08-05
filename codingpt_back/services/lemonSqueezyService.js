@@ -45,7 +45,7 @@ async function createSupporterCheckout({ userId, email, name }) {
             custom: { user_id: String(userId), plan_code: 'supporter' },
           },
           product_options: {
-            redirect_url: `${BILLING.PAYMENT_WEB_URL}/me?supporter=success`,
+            redirect_url: `${BILLING.PAYMENT_WEB_URL}/?support=success#pricing`,
           },
         },
         relationships: {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 
@@ -14,9 +14,12 @@ export default function CheckoutButtons({ code, label }: { code: string; label: 
     setAuthed(!!getToken());
   }, []);
 
-  const onClick = async () => {
+  const startCheckout = useCallback(async () => {
     const token = getToken();
-    if (!token) { window.location.href = '/login?next=/me'; return; }
+    if (!token) {
+      window.location.href = `/login?next=${encodeURIComponent('/?support=1#pricing')}`;
+      return;
+    }
     setBusy(true); setMsg(null);
     try {
       const r = await clientFetch<{ url: string }>('/api/billing/lemonsqueezy/checkout', {
@@ -29,12 +32,21 @@ export default function CheckoutButtons({ code, label }: { code: string; label: 
     } finally {
       setBusy(false);
     }
-  };
+  }, [code]);
+
+  useEffect(() => {
+    if (!authed) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('support') !== '1') return;
+    url.searchParams.delete('support');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    void startCheckout();
+  }, [authed, startCheckout]);
 
   return (
     <div>
-      <button className="btn" disabled={busy} onClick={onClick} style={{ width: '100%' }}>
-        {busy ? '처리 중…' : authed ? label : '로그인 후 구독'}
+      <button className="btn" disabled={busy} onClick={startCheckout} style={{ width: '100%' }}>
+        {busy ? '결제 페이지 여는 중…' : label}
       </button>
       {msg ? <p className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>{msg}</p> : null}
     </div>

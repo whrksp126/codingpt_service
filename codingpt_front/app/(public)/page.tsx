@@ -3,6 +3,8 @@
 // 샘플 다크 디자인(codingpt-sample.html)의 <div id="view-landing"> 섹션을 그대로 포팅.
 // CSS 는 .cpt-landing 스코프로 격리(globals/Nav/Footer 와 충돌 방지).
 
+import CheckoutButtons from '@/components/CheckoutButtons';
+
 const APP_STORE_URL = 'https://apps.apple.com/app/id6751457159';
 
 const css = `
@@ -280,12 +282,11 @@ export default function Home() {
           <article className="support-card">
             <div className="copy">
               <div className="label">선택 후원</div>
-              <div className="title">CodingPT를 응원해 주세요</div>
-              <p className="desc">후원금은 지속적인 개발과 릴레이·푸시 서버 운영에 사용됩니다.</p>
+              <div className="title">CodingPT 응원하기</div>
             </div>
             <div className="action">
-              <div className="price">월 ₩4,900 <small>· 자동갱신</small></div>
-              <a className="btn" href="/plans">후원하기</a>
+              <div className="price">월 ₩4,900</div>
+              <CheckoutButtons code="supporter" label="후원하기" />
             </div>
           </article>
           <p className="pricing-note">결제는 Lemon Squeezy에서 안전하게 처리됩니다. 해지와 환불은 서로 다른 절차예요. <a href="/legal/refund">환불·취소 정책 보기</a></p>
@@ -302,7 +303,7 @@ export default function Home() {
             <details><summary>데스크톱 에이전트 도구(ADE)와 뭐가 다른가요?<span className="ic">+</span></summary><p>그런 도구는 PC 앞에 앉아서 쓰죠. CodingPT는 내 머신의 그 환경을 폰·태블릿에서 원격으로 이어받게 해, 자리를 떠나도 에이전트를 계속 지휘하게 합니다.</p></details>
             <details><summary>외부에서 연결할 때 CodingPT 서버를 사용하나요?<span className="ic">+</span></summary><p>네. 서로 다른 네트워크에 있는 내 기기를 찾고 연결하기 위해 CodingPT의 관리형 릴레이와 푸시 서버를 사용합니다. 소스 파일과 AI 자격증명은 내 머신에 보관돼요.</p></details>
             <details><summary>정말 무료인가요?<span className="ic">+</span></summary><p>네. 개인 사용은 기기 수와 핵심 기능 제한 없이 무료예요. 월 4,900원 후원은 CodingPT의 개발과 서버 운영을 돕고 싶은 분만 선택하면 됩니다.</p></details>
-            <details><summary>후원은 어떻게 해지하거나 환불받나요?<span className="ic">+</span></summary><p>구독 관리에서 다음 결제 전에 자동갱신을 해지할 수 있어요. 환불은 별도 요청 후 주문과 이용 내역을 확인해 처리합니다. 자세한 기준은 <a href="/legal/refund" style={{ color: 'var(--text2)', textDecoration: 'underline' }}>환불·취소 정책</a>에서 확인할 수 있습니다.</p></details>
+            <details><summary>후원은 어떻게 해지하거나 환불받나요?<span className="ic">+</span></summary><p>결제 후 Lemon Squeezy에서 제공하는 구독 관리 링크로 언제든 다음 결제를 해지할 수 있어요. 환불은 별도 요청 후 주문과 이용 내역을 확인해 처리합니다. 자세한 기준은 <a href="/legal/refund" style={{ color: 'var(--text2)', textDecoration: 'underline' }}>환불·취소 정책</a>에서 확인할 수 있습니다.</p></details>
           </div>
         </div>
       </section>

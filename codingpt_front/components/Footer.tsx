@@ -70,7 +70,7 @@ export default function Footer() {
           <p>{b.address}</p>
           <p>고객문의 {b.customerPhone} · {b.customerEmail}</p>
           <p style={{ marginTop: 12, color: 'var(--dim)' }}>
-            개인 사용은 무료입니다. 월 4,900원 후원은 선택 사항이며 매월 자동갱신되고 다음 결제 전 언제든 해지할 수 있습니다.
+            개인 사용은 무료이며 월 4,900원 후원은 선택 사항입니다.
           </p>
         </div>
       </div>
