@@ -643,6 +643,13 @@ function openAddTermMenu(anchor) {
 //  · 둘 다 부족하고 활성 pane 이 터미널 pane 이면 같은 영역에 탭으로 추가(혼합 탭 — IDE/웹뷰 포함).
 //  extra: { url?, openPath? } — 원격 명령(ui-channel newPane)이 초기 URL/파일을 지정할 때 사용.
 //  반환: 새 내용이 배치된 paneId(탭 추가면 기존 pane id) | null.
+/** 터미널 pane 의 혼합 탭 한 칸 — 나눌 자리가 없을 때 쓰는 표현(kind 별 기본값이 여기 한 곳에 있다). */
+function mixedTabFor(kind, extra) {
+  if (kind === "ide") return { kind: "ide", openPath: extra?.openPath || null, tid: newTid() };
+  if (kind === "emulator") return { kind: "emulator", deviceId: extra?.deviceId || null, tid: newTid() };
+  return { kind: "preview", url: extra?.url || "", tid: newTid() };
+}
+
 export function smartAdd(kind, extra) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt || !rt.layout) return null;
@@ -654,9 +661,7 @@ export function smartAdd(kind, extra) {
     if (kind === "terminal") {
       panes.get(focusId)?.addTab(extra?.launchAgent);
     } else {
-      const tab = kind === "ide"
-        ? { kind: "ide", openPath: extra?.openPath || null, tid: newTid() }
-        : { kind: "preview", url: extra?.url || "", tid: newTid() };
+      const tab = mixedTabFor(kind, extra);
       focusLeaf.tabs.push(tab);
       focusLeaf.active = 0;
       panes.get(focusId)?.buildHead();
@@ -680,9 +685,7 @@ export function smartAdd(kind, extra) {
       S.focusPane(focusId);
       return focusId;
     }
-    const tab = kind === "ide"
-      ? { kind: "ide", openPath: extra?.openPath || null, tid: newTid() }
-      : { kind: "preview", url: extra?.url || "", tid: newTid() };
+    const tab = mixedTabFor(kind, extra);
     focusLeaf.tabs.push(tab);
     focusLeaf.active = focusLeaf.tabs.length - 1;
     panes.get(focusId)?.buildHead();
@@ -713,9 +716,12 @@ export function openSurfaces() {
   T.eachLeaf(rt.layout, (leaf) => {
     if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
     if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || i18n.t('프리뷰') }); return; }
+    if (leaf.kind === "emulator") { out.push({ paneId: leaf.id, index: -1, kind: "emulator", label: i18n.t('모바일 화면') }); return; }
     (leaf.tabs || []).forEach((t, i) => {
-      const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : "terminal";
-      const label = kind === "terminal" ? termTabLabel(t) : kind === "ide" ? "IDE" : (t.url || i18n.t('프리뷰'));
+      const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : t.kind === "emulator" ? "emulator" : "terminal";
+      const label = kind === "terminal" ? termTabLabel(t)
+        : kind === "ide" ? "IDE"
+          : kind === "emulator" ? i18n.t('모바일 화면') : (t.url || i18n.t('프리뷰'));
       out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });
     });
   });

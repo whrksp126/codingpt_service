@@ -313,7 +313,10 @@ export function splitPane(paneId, dir, kind, opts) {
   if (!w || !paneId) return;
   // 새 터미널 pane = 풀에 새 터미널('new' → _ensureWin 이 생성, 전 기기에 나타남).
   //  opts.fresh: 사용자가 명시적으로 "터미널 추가"한 경우 — 입양(claim) 없이 반드시 새로 생성.
-  const node = kind === "preview" || kind === "ide" ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new" });
+  //  ⚠ 여기에 새 pane 종류를 더할 때는 **반드시 이 목록에 넣어라**. 빠지면 조용히 터미널이 하나
+  //   생긴다(오류도 로그도 없다) — 2026-08-05 실사고: 헤더 [모바일 화면] 버튼이 터미널을 만들었다.
+  const node = kind === "preview" || kind === "ide" || kind === "emulator"
+    ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new" });
   if (node.kind === "terminal" && opts && opts.fresh) node.tabs[0].fresh = true;
   // opts.launchAgent: 터미널이 준비되면 그 에이전트를 실행(pane.js _ensureWin 이 tid 를 알 때 수행).
   if (node.kind === "terminal" && opts && opts.launchAgent) node.tabs[0].launchAgent = opts.launchAgent;

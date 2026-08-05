@@ -678,10 +678,13 @@ export class PaneView {
         //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
+          : t.kind === "emulator" ? icons.smartphone({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
-          : t.kind === "ide" ? "IDE" : (t.metaTitle || i18n.t('프리뷰'));
+          : t.kind === "ide" ? "IDE"
+            : t.kind === "emulator" ? i18n.t('모바일 화면')
+              : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
         // ★ 탭 우측의 채팅 글리프는 **폐기**했다(사용자 확정 2026-07-27): 좌측 로고 + pane 안의 토글로
@@ -1328,6 +1331,17 @@ export class PaneView {
         fs: this._ideFs(),
       });
       m.ide.mount();
+    } else if (tab.kind === "emulator") {
+      // 동적 import 라 탭 객체에 먼저 자리를 잡아 둔다 — 로드 전에 showActiveTab 이 돌아도
+      //  `m.emu?.setVisible` 이 조용히 넘어가고, 로드되면 그때의 가시성으로 시작한다.
+      import("./emulator-view.js").then((mod) => {
+        if (!this._mixed.has(tab.tid)) return;   // 그 사이 닫혔다
+        m.emu = new mod.EmulatorView(host, {
+          deviceId: tab.deviceId || null,
+          onDeviceChange: (id) => { tab.deviceId = id; this.ctx.persist?.(); },
+        });
+        m.emu.setVisible(host.style.display !== "none");
+      }).catch(() => { /* 모듈 로드 실패 = 탭이 비어 있을 뿐 — pane 전체를 죽이지 않는다 */ });
     } else {
       m.preview = new PreviewSurface(host, tab.tid, tab, () => this.ctx.persist?.(), () => this.buildHead(), this.ctx);
     }
@@ -1338,6 +1352,7 @@ export class PaneView {
     const m = tab && tab.tid ? this._mixed.get(tab.tid) : null;
     if (!m) return;
     m.ide?.dispose();
+    m.emu?.dispose();
     m.preview?.dispose(keepWebview);
     m.host.remove();
     this._mixed.delete(tab.tid);
@@ -1364,6 +1379,7 @@ export class PaneView {
       const on = !isT && tab && tab.tid === tid;
       m.host.style.display = on ? "flex" : "none";
       if (on && m.ide) m.ide.refresh();
+      m.emu?.setVisible(!!on);
       m.preview?.setVisible(!!on);
     }
     // ★ Chat 모드에서는 fit 을 부르지 않는다 — fit → ptyResize → tmux window 리사이즈가 되고,

@@ -38,6 +38,9 @@ export class EmulatorView {
     this.lastTouch = Date.now();
     this.disposed = false;
     this.running = false;
+    //  가려진 탭(혼합 탭에서 다른 탭이 앞에 있음)은 프레임을 당기지 않는다. 한 장이 수십 KB 라
+    //   "안 보이는데 계속 받는" 상태는 그 자체로 결함이다. 독립 pane 은 늘 보이므로 기본 true.
+    this.visible = true;
 
     this.el = document.createElement("div");
     this.el.className = "emu";
@@ -49,6 +52,14 @@ export class EmulatorView {
   dispose() {
     this.disposed = true;
     try { this.el.remove(); } catch (_) { /* noop */ }
+  }
+
+  /** 탭 전환 — 보이면 루프 재개, 가려지면 다음 장부터 멈춘다(받는 중이던 한 장은 그냥 버린다). */
+  setVisible(on) {
+    const next = !!on;
+    if (next === this.visible) return;
+    this.visible = next;
+    if (next) { this.lastTouch = Date.now(); this.ensureLoop(); }
   }
 
   async loadDevices() {
@@ -81,10 +92,10 @@ export class EmulatorView {
 
   /** 프레임 루프 — **한 장을 받고 나서** 다음 장을 요청한다(겹쳐 쏘지 않는다). */
   ensureLoop() {
-    if (this.running || !this.deviceId || this.disposed) return;
+    if (this.running || !this.deviceId || this.disposed || !this.visible) return;
     this.running = true;
     (async () => {
-      while (!this.disposed && this.deviceId) {
+      while (!this.disposed && this.deviceId && this.visible) {
         if (Date.now() - this.lastTouch > IDLE_AFTER_MS) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
