@@ -344,7 +344,7 @@ export default function Home() {
           </div>
 
           <p className="start-note">같은 계정으로 로그인하면 내 머신이 자동으로 나타납니다. 앱의 간단한 인증 안내를 마치면 <b>내 기기끼리 종단 간 암호화된 프라이빗 연결</b>이 완성돼요.</p>
-          <div className="free">Personal 무료 · 외부망 연결과 푸시 포함 · BYO 에이전트</div>
+          <div className="free">개인 무료 · 외부망 연결과 푸시 포함 · BYO 에이전트</div>
         </div>
       </section>
     </div>
