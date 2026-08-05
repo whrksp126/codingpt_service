@@ -239,3 +239,51 @@ test('우리가 설치한 idb(전용 venv)를 찾는다', () => {
   assert.ok(/\.codingpt['"],\s*['"]idb['"],\s*['"]bin['"],\s*['"]idb['"]/.test(src),
     '전용 venv 경로가 탐지 목록에 없으면 설치해도 보기 전용으로 남는다');
 });
+
+// ── idb 는 혼자 못 돈다 ──────────────────────────────────────────────────────
+// ★ 2026-08-06 실사고(두 번째): idb 를 깔고 좌표까지 고쳤는데도 **PC 앱에서만** iOS 조작이
+//  안 됐다. 진범은 PATH — 파이썬 CLI 인 idb 는 실제 작업을 `idb_companion` 에 시키고 그 위치를
+//  `shutil.which("idb_companion")` 로 **PATH 에서만** 찾는다. 앱이 띄운 데몬의 PATH 는
+//  `/usr/bin:/bin:/usr/sbin:/sbin` 이라 /opt/homebrew/bin 이 안 보이고, idb 는
+//  "/usr/local/bin/idb_companion 없음" 으로 죽는다(터미널에서는 brew PATH 라 됐다).
+
+test('★ idb 실행 env 에 companion 디렉터리가 PATH 맨 앞에 붙는다', () => {
+  const emu = require('../emulator');
+  const env = emu._idbEnv({ idb: '/x/idb', idbCompanion: '/opt/homebrew/bin/idb_companion' },
+    { PATH: '/usr/bin:/bin' });
+  assert.equal(env.PATH, '/opt/homebrew/bin:/usr/bin:/bin',
+    'companion 디렉터리를 얹지 않으면 앱이 띄운 데몬에서 idb 가 100% 실패한다');
+});
+
+test('companion 을 못 찾았으면 PATH 를 건드리지 않는다', () => {
+  const emu = require('../emulator');
+  assert.equal(emu._idbEnv({ idb: '/x/idb', idbCompanion: null }, { PATH: '/usr/bin' }).PATH, '/usr/bin');
+});
+
+test('★ 반쪽 설치(companion 없음)는 조작 가능으로 표시하지 않는다', () => {
+  const emu = require('../emulator');
+  assert.equal(emu._idbReady({ idb: '/x/idb', idbCompanion: null }), false);
+  assert.equal(emu._idbReady({ idb: null, idbCompanion: '/opt/homebrew/bin/idb_companion' }), false);
+  assert.equal(emu._idbReady({ idb: '/x/idb', idbCompanion: '/y/idb_companion' }), true);
+});
+
+test('idb 호출은 전부 idbRun 을 거친다(맨손 run(t.idb) 금지)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
+  const bare = src.split('\n').filter((l) => /\brun\(t\.idb\b/.test(l) && !/return run\(t\.idb, args/.test(l));
+  assert.deepEqual(bare, [], `PATH 를 안 얹고 idb 를 부르는 자리가 남아 있다:\n${bare.join('\n')}`);
+});
+
+// ── 버튼줄은 기기가 정한다 ──────────────────────────────────────────────────
+test('★ iOS 버튼줄에 안드로이드 전용 키가 없다(누를 때마다 오류만 났다)', () => {
+  const emu = require('../emulator');
+  for (const k of emu.IOS_KEY_ROW) {
+    assert.ok(emu.IOS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 데몬이 못 보낸다`);
+  }
+  assert.ok(!emu.IOS_KEY_ROW.includes('back') && !emu.IOS_KEY_ROW.includes('recents'));
+  for (const k of emu.ANDROID_KEY_ROW) assert.ok(emu.ANDROID_KEYS[k], `안드로이드 버튼줄의 ${k} 가 없다`);
+});
+
+test('appSwitch→APPLE_PAY 라는 거짓 매핑이 없다(앱 전환이 아니라 페이다)', () => {
+  const emu = require('../emulator');
+  assert.equal(emu.IOS_BUTTONS.appSwitch, undefined);
+});

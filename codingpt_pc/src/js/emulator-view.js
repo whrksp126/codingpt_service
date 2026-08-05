@@ -494,7 +494,15 @@ export class EmulatorView {
     if (canInput) {
       const keys = document.createElement("div");
       keys.className = "emu-keys";
-      for (const [label, key, title] of [["▢", "recents", i18n.t('최근 앱')], ["○", "home", i18n.t('홈')], ["◁", "back", i18n.t('뒤로')]]) {
+      //  ★ 버튼줄은 **기기가 알려 준 목록**(caps.keys)만 그린다. 예전엔 안드로이드 3버튼을 iOS 에도
+      //   그려서 '뒤로'·'최근 앱' 이 누를 때마다 오류만 냈다(iOS 엔 그 버튼이 없다).
+      const LABELS = {
+        recents: ["▢", i18n.t('최근 앱')], home: ["○", i18n.t('홈')], back: ["◁", i18n.t('뒤로')],
+        lock: ["⏻", i18n.t('잠금')], siri: ["◍", "Siri"],
+      };
+      const wanted = (dev && dev.caps && Array.isArray(dev.caps.keys) && dev.caps.keys.length)
+        ? dev.caps.keys : ["recents", "home", "back"];
+      for (const [label, key, title] of wanted.filter((k) => LABELS[k]).map((k) => [LABELS[k][0], k, LABELS[k][1]])) {
         const b = document.createElement("button");
         b.className = "emu-key";
         b.textContent = label;

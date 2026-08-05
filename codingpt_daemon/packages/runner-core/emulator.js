@@ -34,6 +34,7 @@ function run(cmd, args, opts) {
       timeout: (opts && opts.timeoutMs) || DEFAULT_TIMEOUT,
       maxBuffer: EXEC_MAX,
       encoding: (opts && opts.encoding) === 'buffer' ? 'buffer' : 'utf8',
+      ...((opts && opts.env) ? { env: opts.env } : {}),
     }, (err, stdout, stderr) => {
       if (err) { err.stderr = String(stderr || ''); reject(err); return; }
       resolve(stdout);
@@ -67,11 +68,40 @@ function tools() {
       path.join(os.homedir(), '.codingpt', 'idb', 'bin', 'idb'),
       '/usr/local/bin/idb', '/opt/homebrew/bin/idb', path.join(os.homedir(), '.local', 'bin', 'idb'),
     ]),
+    //  ★ idb 는 **혼자 못 돈다** — 파이썬 CLI 는 실제 작업을 `idb_companion`(brew 로 깔리는 네이티브
+    //   바이너리)에 시키고, 그 위치를 `shutil.which("idb_companion")` 로 **PATH 에서만** 찾는다.
+    //   앱이 띄운 데몬의 PATH 는 `/usr/bin:/bin:/usr/sbin:/sbin` 뿐이라(2026-08-06 실사고) 애플
+    //   실리콘의 /opt/homebrew/bin 이 안 보이고, idb 는 "/usr/local/bin/idb_companion 없음" 으로
+    //   죽는다. 터미널에서만 되고 앱에서는 안 되던 진짜 이유. → 우리가 찾아서 PATH 에 얹어 준다.
+    idbCompanion: firstExisting([
+      '/opt/homebrew/bin/idb_companion', '/usr/local/bin/idb_companion',
+      path.join(os.homedir(), '.codingpt', 'idb', 'bin', 'idb_companion'),
+    ]),
   };
   return toolCache;
 }
 /** 테스트용 — 도구 경로 캐시를 비운다(설치 직후 재조회). */
 function _resetTools() { toolCache = null; }
+
+/** idb 는 이 둘이 **모두** 있어야 동작한다 — 하나만 있으면 조작은 100% 실패한다. */
+function idbReady(t) { return !!(t.idb && t.idbCompanion); }
+
+/**
+ * idb 실행 — companion 이 있는 디렉터리를 PATH 앞에 얹는다.
+ *  (PATH 를 통째로 갈아끼우지 않고 앞에만 붙인다 — 사용자가 자기 PATH 로 다른 companion 을
+ *   쓰고 있을 수도 있지만, 우리가 찾은 게 확실히 존재하는 것이므로 우선한다.)
+ */
+function idbEnv(t, base) {
+  const env = { ...(base || process.env) };
+  if (!t || !t.idbCompanion) return env;
+  const dir = path.dirname(t.idbCompanion);
+  env.PATH = `${dir}${env.PATH ? `:${env.PATH}` : ''}`;
+  return env;
+}
+function idbRun(args, opts) {
+  const t = tools();
+  return run(t.idb, args, { ...(opts || {}), env: idbEnv(t) });
+}
 
 // ── 목록 ─────────────────────────────────────────────────────────────────────
 
@@ -102,7 +132,7 @@ async function androidDevices() {
       name: (model ? model[1].replace(/_/g, ' ') : serial) + (isEmu ? '' : ' (실기기)'),
       state: state === 'device' ? 'booted' : state,
       physical: !isEmu,
-      caps: { frame: state === 'device', input: state === 'device' },
+      caps: { frame: state === 'device', input: state === 'device', keys: ANDROID_KEY_ROW },
     });
   }
   // 에뮬레이터의 AVD 이름 — 목록 중복 제거와 "켜기 후 따라가기" 가 **같은 근거**를 쓰게 한 번만 묻는다.
@@ -143,7 +173,7 @@ async function iosSimulators() {
   catch (_) { return []; }
   let parsed;
   try { parsed = JSON.parse(json); } catch (_) { return []; }
-  const canInput = !!t.idb;
+  const canInput = idbReady(t);
   const rows = [];
   for (const runtime of Object.keys(parsed.devices || {})) {
     // "com.apple.CoreSimulator.SimRuntime.iOS-18-5" → "iOS 18.5"
@@ -161,7 +191,12 @@ async function iosSimulators() {
           frame: booted,
           // idb 가 없으면 **보기 전용**이다. 눌리는 척하는 것보다 못 한다고 말하는 게 낫다.
           input: booted && canInput,
-          inputHint: canInput ? '' : 'iOS 시뮬레이터를 조작하려면 idb 가 필요해요 (brew install facebook/fb/idb-companion)',
+          keys: IOS_KEY_ROW,
+          //  무엇이 빠졌는지까지 말해 준다 — 둘은 설치 방법이 다르다(idb=파이썬, companion=brew).
+          inputHint: canInput ? ''
+            : (t.idb && !t.idbCompanion)
+              ? 'iOS 조작에 필요한 idb_companion 을 찾지 못했어요 (brew install facebook/fb/idb-companion)'
+              : 'iOS 시뮬레이터를 조작하려면 idb 가 필요해요 (brew install facebook/fb/idb-companion)',
         },
       });
     }
@@ -181,7 +216,8 @@ async function list() {
   const [avds, ios] = await Promise.all([androidAvds(android), iosSimulators()]);
   return {
     devices: sortDevices([...android, ...avds, ...ios]),
-    tools: { adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, idb: !!t.idb, resize: !!t.sips },
+    //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
+    tools: { adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, idb: idbReady(t), resize: !!t.sips },
   };
 }
 
@@ -454,9 +490,9 @@ async function screenSize(id, p) {
   const hit = lastSize.get(id);
   if (hit) return hit;
   const t = tools();
-  if (p.scheme === 'ios' && t.idb) {
+  if (p.scheme === 'ios' && idbReady(t)) {
     try {
-      const out = await run(t.idb, ['describe', '--udid', p.value, '--json'], { timeoutMs: 20000 });
+      const out = await idbRun(['describe', '--udid', p.value, '--json'], { timeoutMs: 20000 });
       const s2 = pointsFromIdbDescribe(out);
       if (s2) { lastSize.set(id, s2); return s2; }
     } catch (_) { /* 아래 오류로 떨어진다 */ }
@@ -495,7 +531,17 @@ const ANDROID_KEYS = {
   volumeUp: 'KEYCODE_VOLUME_UP', volumeDown: 'KEYCODE_VOLUME_DOWN', power: 'KEYCODE_POWER',
   up: 'KEYCODE_DPAD_UP', down: 'KEYCODE_DPAD_DOWN', left: 'KEYCODE_DPAD_LEFT', right: 'KEYCODE_DPAD_RIGHT',
 };
-const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', appSwitch: 'APPLE_PAY' };
+//  ★ `appSwitch: 'APPLE_PAY'` 라는 옛 항목은 **거짓말**이었다 — APPLE_PAY 는 앱 전환이 아니라
+//   측면 버튼 두 번(페이) 이다. iOS 시뮬레이터에는 앱 전환 버튼 자체가 없다.
+const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', sideButton: 'SIDE_BUTTON', applePay: 'APPLE_PAY' };
+
+/**
+ * 이 기기가 **실제로 받는** 버튼 목록. 화면은 이 목록만 그린다.
+ *  (안 그러면 iOS 에서 안드로이드 3버튼이 그려지고, '뒤로'·'최근 앱' 을 누를 때마다
+ *   "보낼 수 없는 키예요" 오류만 나온다 — 2026-08-06 실사고.)
+ */
+const ANDROID_KEY_ROW = ['recents', 'home', 'back'];
+const IOS_KEY_ROW = ['home', 'lock', 'siri'];
 
 /**
  * 컨트롤 소켓으로 보내기 — 세션이 없거나 소켓이 죽었으면 **null 을 돌려** 호출측이 adb 로 물러선다.
@@ -606,9 +652,11 @@ async function input(args) {
   }
 
   if (p.scheme === 'ios') {
-    if (!t.idb) {
+    if (!idbReady(t)) {
       // 정직하게 못 한다고 말한다 — 조용히 성공을 돌려주면 사용자는 기기가 멈춘 줄 안다.
-      throw new Error('iOS 시뮬레이터 조작에는 idb 가 필요해요 (brew install facebook/fb/idb-companion)');
+      throw new Error(t.idb && !t.idbCompanion
+        ? 'iOS 조작에 필요한 idb_companion 을 찾지 못했어요 (brew install facebook/fb/idb-companion)'
+        : 'iOS 시뮬레이터 조작에는 idb 가 필요해요 (brew install facebook/fb/idb-companion)');
     }
     const s = await screenSize(a.id, p).catch(() => null);
     const dev = ['--udid', p.value];
@@ -616,23 +664,23 @@ async function input(args) {
       if (!s) throw new Error('화면을 한 번 불러온 뒤 조작해 주세요');
       const args2 = ['ui', 'tap', ...dev, String(px(a.x, s.w)), String(px(a.y, s.h))];
       if (type === 'longPress') args2.push('--duration', '0.6');
-      await run(t.idb, args2, { timeoutMs: 10000 });
+      await idbRun(args2, { timeoutMs: 10000 });
       return { ok: true };
     }
     if (type === 'swipe') {
       if (!s) throw new Error('화면을 한 번 불러온 뒤 조작해 주세요');
-      await run(t.idb, ['ui', 'swipe', ...dev,
+      await idbRun(['ui', 'swipe', ...dev,
         String(px(a.x, s.w)), String(px(a.y, s.h)), String(px(a.x2, s.w)), String(px(a.y2, s.h))], { timeoutMs: 10000 });
       return { ok: true };
     }
     if (type === 'key') {
       const btn = IOS_BUTTONS[String(a.key || '')];
       if (!btn) throw new Error('보낼 수 없는 키예요');
-      await run(t.idb, ['ui', 'button', ...dev, btn], { timeoutMs: 10000 });
+      await idbRun(['ui', 'button', ...dev, btn], { timeoutMs: 10000 });
       return { ok: true };
     }
     if (type === 'text') {
-      await run(t.idb, ['ui', 'text', ...dev, String(a.text || '')], { timeoutMs: 10000 });
+      await idbRun(['ui', 'text', ...dev, String(a.text || '')], { timeoutMs: 10000 });
       return { ok: true };
     }
     throw new Error('알 수 없는 입력이에요');
@@ -714,5 +762,6 @@ module.exports = {
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
   _lastSize: lastSize, _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
-  ANDROID_KEYS, IOS_BUTTONS,
+  _idbReady: idbReady, _idbEnv: idbEnv,
+  ANDROID_KEYS, IOS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW,
 };
