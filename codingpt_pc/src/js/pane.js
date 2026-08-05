@@ -111,6 +111,22 @@ function b64ToBytes(b64) {
 
 // 혼합 탭 — 터미널 pane 의 탭은 터미널(tmux window) 외에 IDE/프리뷰일 수도 있다.
 //  kind 미지정 = 터미널(하위호환 — 기존 영속 레이아웃의 탭은 전부 터미널).
+/**
+ * pane/탭 종류의 **이름과 아이콘** — pane 헤더와 드래그 고스트가 같은 표를 본다.
+ *  예전엔 `kind === "ide" ? … : 프리뷰` 식 삼항이 두 곳에 흩어져 있었고, 그래서 모바일 화면 pane 이
+ *  "프리뷰" 라는 이름과 지구본 아이콘을 달고 다녔다(2026-08-05).
+ */
+export function surfaceLabel(kind, node) {
+  if (kind === "ide") return "IDE";
+  if (kind === "emulator") return i18n.t('모바일 화면');
+  return (node && node.metaTitle) || i18n.t('프리뷰');
+}
+export function surfaceIcon(kind) {
+  if (kind === "ide") return icons.code;
+  if (kind === "emulator") return icons.smartphone;
+  return icons.globe;
+}
+
 export function isTermTab(t) {
   return !t || !t.kind || t.kind === "term";
 }
@@ -728,11 +744,15 @@ export class PaneView {
         tabsEl.appendChild(tab);
       });
     } else {
-      const isIde = this.node.kind === "ide";
+      //  ⚠ 종류를 여기서 다시 나열하지 않는다 — 예전엔 `isIde ? … : 프리뷰` 라서 모바일 화면 pane 이
+      //   "프리뷰" 라는 이름과 지구본 아이콘을 달고 다녔다(2026-08-05). 이름·아이콘 표는 한 벌이다.
+      const kind = this.node.kind;
       const lbl = document.createElement("div");
       lbl.className = "ptab active static";
-      const icHtml = isIde ? icons.code({ size: 13 }) : previewTabIconHtml(this.node.metaFav);
-      const lblText = isIde ? "IDE" : (this.node.metaTitle || i18n.t('프리뷰'));
+      const icHtml = kind === "preview"
+        ? previewTabIconHtml(this.node.metaFav)
+        : surfaceIcon(kind)({ size: 13 });
+      const lblText = surfaceLabel(kind, this.node);
       lbl.innerHTML = `<span class="ptab-ic">${icHtml}</span><span class="ptab-title">${escapeHtml(lblText)}</span>`;
       const x = document.createElement("span");
       x.className = "ptab-x";

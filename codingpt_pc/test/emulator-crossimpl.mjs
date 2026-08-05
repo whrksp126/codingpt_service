@@ -31,6 +31,7 @@ ok(KINDS.includes('emulator'), 'emulator 가 그중 하나다', KINDS.join(','))
 
 // ── 2. ★ 불변식 — 그 종류를 splitPane 이 전부 알아야 한다 ────────────────────
 //  하나라도 빠지면 그 버튼은 **터미널을 만든다**(조용히).
+const T = await import(path.join(PC, 'tiling.js'));
 const state = read(path.join(PC, 'state.js'));
 const splitBody = state.slice(state.indexOf('export function splitPane'), state.indexOf('export function splitFocused'));
 const missing = KINDS.filter((k) => !new RegExp(`kind === "${k}"`).test(splitBody));
@@ -42,7 +43,6 @@ ok(/T\.leaf\("terminal"/.test(splitBody), 'splitPane 의 기본값은 여전히 
 //  위는 소스 검사라 "그 줄이 있다"까지만 말한다. splitPane 이 실제로 부르는 식을 **그대로 떼어
 //  진짜 tiling 모듈에 태워** 결과 노드의 kind 를 확인한다(state.js 는 api.js→Tauri 를 물고 있어
 //  통째로 import 할 수 없다 — 그래서 결정식만 가져온다).
-const T = await import(path.join(PC, 'tiling.js'));
 const decideExpr = /const node = ([\s\S]*?);\n/.exec(splitBody)?.[1];
 ok(!!decideExpr, 'splitPane 의 node 결정식을 찾았다');
 const decide = new Function('kind', 'opts', 'T', `return (${decideExpr});`);
@@ -52,19 +52,47 @@ for (const k of KINDS) {
 }
 ok(decide('terminal', { win: 'new' }, T).kind === 'terminal', '모르는 종류는 여전히 터미널로 떨어진다');
 
-// ── 3. 나눌 자리가 없을 때 — 혼합 탭도 같은 종류를 만들어야 한다 ─────────────
+// ── 3. pane ↔ 탭 변환 — **한 곳**에서, 모든 종류가 왕복해야 한다 ──────────────
+//  이 변환이 종류마다 흩어져 있으면 새 종류는 반드시 어딘가에서 누락된다(실제로 emulator 가
+//  joinPaneAsTab·mergeAsTabs·moveTabToNewSplit·헤더 라벨에서 **전부** 빠져 있었다 → 모바일 화면
+//  pane 을 잡아 끌 수는 있는데 다른 pane 안으로 들어가지지 않았다).
 const wsv = read(path.join(PC, 'workspace-view.js'));
-const mixedBody = wsv.slice(wsv.indexOf('function mixedTabFor'), wsv.indexOf('export function smartAdd'));
-ok(mixedBody.length > 0, '혼합 탭 생성이 한 곳(mixedTabFor)에 모여 있다');
-ok(/kind === "emulator"/.test(mixedBody),
-  '★ 좁아서 못 나눌 때도 모바일 화면 탭을 만든다(예전엔 프리뷰 탭이 됐다)');
-//  smartAdd 안에 옛 인라인 삼항이 되살아나면(두 곳으로 갈라지면) 다시 한쪽만 고쳐진다.
-const smartBody = wsv.slice(wsv.indexOf('export function smartAdd'), wsv.indexOf('export function openSurfaces'));
-ok(!/kind === "ide"\s*\n?\s*\?\s*\{ kind: "ide"/.test(smartBody),
-  'smartAdd 안에 탭 생성 삼항이 다시 인라인되지 않았다');
+ok(Array.isArray(T.TAB_KINDS) && T.TAB_KINDS.length >= 3, `혼합 탭이 될 수 있는 종류 ${T.TAB_KINDS?.length}`);
+ok(T.TAB_KINDS.includes('emulator'), '★ 모바일 화면이 그 목록에 있다', String(T.TAB_KINDS));
+for (const k of T.TAB_KINDS) {
+  const tab = T.leafToTab({ kind: k, id: 'p9' });
+  ok(tab && tab.kind === k, `leafToTab: ${k} → 같은 종류의 탭`, JSON.stringify(tab));
+  const back = T.tabToLeaf(tab, 'p10');
+  ok(back && back.kind === k, `★ tabToLeaf: ${k} 탭 → 다시 ${k} pane(왕복해도 잃는 것이 없다)`, JSON.stringify(back));
+}
+ok(T.leafToTab({ kind: 'terminal' }) === null, '터미널은 이 경로로 오지 않는다(탭 배열을 이미 갖는다)');
+
+//  변환을 쓰는 자리들이 **자기만의 표를 다시 만들지 않았는지** — 인라인 삼항이 되살아나면
+//  또 한쪽만 고쳐진다.
+for (const [fn, end] of [
+  ['function joinPaneAsTab', 'function mergeAsTabs'],
+  ['function mergeAsTabs', 'function movePane'],
+  ['async function moveTabToNewSplit', 'function joinPaneAsTab'],
+  ['function mixedTabFor', 'export function smartAdd'],
+]) {
+  const a = wsv.indexOf(fn);
+  const body = a < 0 ? '' : wsv.slice(a, wsv.indexOf(end, a) > a ? wsv.indexOf(end, a) : a + 2000);
+  ok(a >= 0, `${fn} 이 있다`);
+  ok(/T\.(leafToTab|tabToLeaf)/.test(body), `★ ${fn} 이 변환 함수를 쓴다(자기 표를 다시 만들지 않는다)`);
+  ok(!/kind: "preview", url:/.test(body), `${fn} 안에 프리뷰 탭 리터럴이 되살아나지 않았다`);
+}
+
+//  다른 pane 안으로 들어갈 수 있는가를 손으로 나열하지 않는다.
+ok(/T\.TAB_KINDS\.includes\(src\.kind\)/.test(wsv),
+  '★ 병합 가능 판정이 종류 목록을 쓴다(예전엔 ide/preview 만 손으로 적혀 있었다)');
+
+//  헤더·드래그 고스트의 이름/아이콘도 한 표에서 온다.
+const pane = read(path.join(PC, 'pane.js'));
+ok(/export function surfaceLabel/.test(pane) && /kind === "emulator"/.test(pane),
+  '★ pane 헤더가 모바일 화면을 "프리뷰" 라고 부르지 않는다');
+ok(/surfaceLabel|surfaceIcon/.test(wsv), '드래그 고스트도 같은 표를 쓴다');
 
 // ── 4. 만든 탭을 실제로 그리고·치우고·가린다 ─────────────────────────────────
-const pane = read(path.join(PC, 'pane.js'));
 ok(/tab\.kind === "emulator"/.test(pane) && /new mod\.EmulatorView\(host/.test(pane),
   '혼합 탭 emulator 를 EmulatorView 로 그린다');
 ok(/m\.emu\?\.dispose\(\)/.test(pane), '탭을 닫으면 EmulatorView 도 정리한다(프레임 루프 누수 금지)');

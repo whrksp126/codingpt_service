@@ -3,7 +3,7 @@
 import { state, wsRuntime, activeWs, isLocal, isThisHost } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
-import { PaneView, isTermTab, newTid, termTabLabel } from "./pane.js";
+import { PaneView, isTermTab, termTabLabel, surfaceLabel, surfaceIcon } from "./pane.js";
 import { paneApprovalCount } from "./approvals.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
@@ -175,14 +175,11 @@ function beginTabDrag(srcId, index, e) {
   const wholePane = src.kind !== "terminal" || index < 0;
   const tab = wholePane ? null : src.tabs[index];
   const tabIsTerm = tab ? isTermTab(tab) : false;
-  const label = wholePane
-    ? (src.kind === "ide" ? "IDE" : i18n.t('프리뷰'))
-    : tabIsTerm
-      ? tab?.title || (typeof tab?.win === "number" ? i18n.t('터미널 ') + tab.win : i18n.t('터미널 '))
-      : tab?.kind === "ide" ? "IDE" : i18n.t('프리뷰');
-  const ghostIcon = wholePane
-    ? (src.kind === "ide" ? icons.code : icons.globe)
-    : tabIsTerm ? icons.terminal : tab?.kind === "ide" ? icons.code : icons.globe;
+  const kind = wholePane ? src.kind : (tabIsTerm ? "terminal" : tab?.kind);
+  const label = tabIsTerm
+    ? tab?.title || (typeof tab?.win === "number" ? i18n.t('터미널 ') + tab.win : i18n.t('터미널 '))
+    : surfaceLabel(kind);
+  const ghostIcon = tabIsTerm ? icons.terminal : surfaceIcon(kind);
   const pointerId = e.pointerId;
   const startX = e.clientX, startY = e.clientY;
   let dragging = false;
@@ -336,7 +333,9 @@ function beginTabDrag(srcId, index, e) {
         //  대상이 터미널 = joinPaneAsTab, 대상이 IDE/프리뷰 = mergeAsTabs(탭 host 로 승격).
         const rt2 = wsRuntime(state.activeWsId);
         const tl = rt2 && T.findLeaf(rt2.layout, drop.paneId);
-        const mergeable = (src.kind === "ide" || src.kind === "preview") && drop.paneId !== srcId &&
+        //  ⚠ 종류를 손으로 나열하지 않는다 — `emulator` 가 여기 빠져 있어서 모바일 화면 pane 만
+        //   다른 pane 안으로 안 들어갔다(잡히긴 하는데 스왑/분할로 처리돼 "안 되는" 것처럼 보였다).
+        const mergeable = T.TAB_KINDS.includes(src.kind) && drop.paneId !== srcId &&
           tl && (drop.zone === "tabbar" || drop.zone === "center");
         if (mergeable && tl.kind === "terminal") {
           joinPaneAsTab(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
@@ -423,12 +422,11 @@ async function moveTabToNewSplit(srcId, index, targetId, side) {
   const ws = activeWs();
   src.tabs.splice(index, 1);
   if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
+  //  표면 ID(tid)·메타 승계는 tabToLeaf 가 한다 — 같은 "pv-"+tid 로 재생성돼 webview 가 유지된다.
   const newLeaf = isT
     ? { id: newId, kind: "terminal", tabs: [tab], active: 0 }
-    : tab.kind === "ide"
-      ? { id: newId, kind: "ide", openPath: tab.openPath || null }
-      // 표면 ID(tid)·다크·메타 승계 — 같은 "pv-"+tid 로 재생성돼 webview 가 유지된다.
-      : { id: newId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav };
+    : T.tabToLeaf(tab, newId);
+  if (!newLeaf) return;
   const dir = side === "left" || side === "right" ? "h" : "v";
   const before = side === "left" || side === "top";
   const r = T.split(rt.layout, targetId, dir, newLeaf, before);
@@ -454,11 +452,9 @@ function joinPaneAsTab(srcId, dstId, insertIndex) {
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   const dst = T.findLeaf(rt.layout, dstId);
-  if (!src || !dst || dst.kind !== "terminal" || (src.kind !== "ide" && src.kind !== "preview")) return;
-  const tab = src.kind === "ide"
-    ? { kind: "ide", openPath: src.openPath || null, tid: newTid() }
-    // 표면 ID 승계(pane→탭): 기존 독립 pane 의 "pv-"+(tid||paneId) webview 를 그대로 쓴다.
-    : { kind: "preview", url: src.url || null, tid: src.tid || src.id, dark: src.dark, metaTitle: src.metaTitle, metaFav: src.metaFav };
+  if (!src || !dst || dst.kind !== "terminal" || !T.TAB_KINDS.includes(src.kind)) return;
+  const tab = T.leafToTab(src);
+  if (!tab) return;
   const at = insertIndex == null ? dst.tabs.length : Math.max(0, Math.min(dst.tabs.length, insertIndex));
   dst.tabs.splice(at, 0, tab);
   dst.active = at;
@@ -485,13 +481,9 @@ function mergeAsTabs(srcId, dstId, insertIndex) {
   const dst = T.findLeaf(rt.layout, dstId);
   if (!src || !dst || srcId === dstId) return;
   const mkTab = (leaf, pane) => {
-    if (leaf.kind === "ide") return { kind: "ide", openPath: leaf.openPath || null, tid: newTid() };
-    if (leaf.kind === "preview") {
-      // 표면 ID 승계(pane→탭): 기존 "pv-"+(tid||id) webview 를 그대로 넘긴다 → dispose 가 보존.
-      if (pane) pane._preservePreview = true;
-      return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav };
-    }
-    return null; // 터미널은 이 경로로 오지 않음
+    //  프리뷰는 webview 표면을 넘긴다 → 원본 pane 의 dispose 가 그걸 닫지 않게 표시해 둔다.
+    if (leaf.kind === "preview" && pane) pane._preservePreview = true;
+    return T.leafToTab(leaf);   // 터미널이면 null(이 경로로 오지 않는다)
   };
   const dstTab = mkTab(dst, panes.get(dstId));
   const srcTab = mkTab(src, panes.get(srcId));
@@ -645,9 +637,10 @@ function openAddTermMenu(anchor) {
 //  반환: 새 내용이 배치된 paneId(탭 추가면 기존 pane id) | null.
 /** 터미널 pane 의 혼합 탭 한 칸 — 나눌 자리가 없을 때 쓰는 표현(kind 별 기본값이 여기 한 곳에 있다). */
 function mixedTabFor(kind, extra) {
-  if (kind === "ide") return { kind: "ide", openPath: extra?.openPath || null, tid: newTid() };
-  if (kind === "emulator") return { kind: "emulator", deviceId: extra?.deviceId || null, tid: newTid() };
-  return { kind: "preview", url: extra?.url || "", tid: newTid() };
+  //  leafToTab 과 같은 모양을 쓴다(새로 만드는 것이라 승계할 표면 ID 는 없다).
+  //  ⚠ 모르는 종류에 기본값(프리뷰 등)을 주지 않는다 — 그런 "그럴듯한 기본값"이 바로
+  //   [모바일 화면] 버튼이 터미널을 만들던 사고의 모양이다. 모르면 아무것도 안 한다.
+  return T.leafToTab({ kind, ...(extra || {}) });
 }
 
 export function smartAdd(kind, extra) {
@@ -662,6 +655,7 @@ export function smartAdd(kind, extra) {
       panes.get(focusId)?.addTab(extra?.launchAgent);
     } else {
       const tab = mixedTabFor(kind, extra);
+      if (!tab) return null;
       focusLeaf.tabs.push(tab);
       focusLeaf.active = 0;
       panes.get(focusId)?.buildHead();
@@ -686,6 +680,7 @@ export function smartAdd(kind, extra) {
       return focusId;
     }
     const tab = mixedTabFor(kind, extra);
+    if (!tab) return null;
     focusLeaf.tabs.push(tab);
     focusLeaf.active = focusLeaf.tabs.length - 1;
     panes.get(focusId)?.buildHead();

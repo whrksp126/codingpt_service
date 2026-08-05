@@ -36,6 +36,41 @@ export function leaf(kind, opts = {}) {
   };
 }
 
+/**
+ * pane ↔ 혼합 탭 변환 — **여기 한 곳에만** 둔다.
+ *
+ * 왜(2026-08-05 실사고): pane 종류를 다루는 분기가 `joinPaneAsTab`·`mergeAsTabs`·
+ *  `moveTabToNewSplit`·`smartAdd`·헤더 라벨에 흩어져 있었고, 새로 들어온 `emulator` 가 그중
+ *  **한 곳도 빠짐없이 누락**돼 있었다. 그 결과 모바일 화면 pane 은 잡아서 끌 수는 있는데
+ *  다른 pane 안으로 들어가지지가 않았다(조용히 스왑/분할로 처리됐다).
+ *  종류를 늘릴 때 고쳐야 할 자리를 하나로 만든다 — 빠뜨릴 자리가 없으면 빠뜨릴 수 없다.
+ */
+export const TAB_KINDS = ["ide", "preview", "emulator"];
+
+/** 독립 pane(leaf) → 혼합 탭 한 칸. 터미널은 이 경로로 오지 않는다(탭 배열을 이미 갖는다). */
+export function leafToTab(leaf) {
+  if (!leaf) return null;
+  if (leaf.kind === "ide") return { kind: "ide", openPath: leaf.openPath || null, tid: newPaneId() };
+  if (leaf.kind === "preview") {
+    //  표면 ID 승계: 기존 "pv-"+(tid||id) webview 를 그대로 넘긴다(dispose 가 보존한다).
+    return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav };
+  }
+  if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, tid: newPaneId() };
+  return null;
+}
+
+/** 혼합 탭 한 칸 → 독립 pane(leaf). 위와 정확히 짝이어야 한다(왕복해도 잃는 것이 없게). */
+export function tabToLeaf(tab, id) {
+  if (!tab) return null;
+  const paneId = id || newPaneId();
+  if (tab.kind === "ide") return { id: paneId, kind: "ide", openPath: tab.openPath || null };
+  if (tab.kind === "preview") {
+    return { id: paneId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav };
+  }
+  if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null };
+  return null;
+}
+
 export function isLeaf(n) {
   return n && !n.dir;
 }
