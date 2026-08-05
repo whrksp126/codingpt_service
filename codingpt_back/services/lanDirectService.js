@@ -14,7 +14,11 @@
 //   실제 전송/conn 조회는 daemonRelayService.issueLanGrant 가 한다.
 const crypto = require('crypto');
 
-const SCOPES_ALL = ['tcp', 'rpc', 'pty']; // config/lanDirect.js 와 같은 집합(여기선 데몬 신고 정규화용)
+// ★ scope 어휘는 **한 곳**에만 둔다(config/lanDirect.js). 예전엔 여기에 같은 배열을 "같은 집합"이라는
+//  주석과 함께 베껴 뒀는데, 2026-08-05 에 emu 를 config 쪽에만 추가하자 이 사본이 데몬 신고에서
+//  emu 를 조용히 걸러 버렸다 — 데몬은 tcp,emu 를 신고하고 서버는 tcp,rpc,emu 를 허용하는데
+//  grant 에는 tcp 만 실려 나갔고, 아무 데도 오류가 안 남았다(영상이 그냥 릴레이로 갔다).
+const { SCOPES_ALL } = require('../config/lanDirect');
 const ADDRS_MAX = 8;          // 인터페이스 후보 상한(응답/메모리 비대 방지)
 const IFNAME_MAX = 24;
 const HOST_MAX = 45;          // IPv6 최대 표기 길이

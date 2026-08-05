@@ -125,6 +125,14 @@ test('lanDirect env — fail-closed 기본값 + 단계 개방', () => {
   assert.ok(lanCfg.SCOPES_ALL.includes('emu'), 'emu 가 어휘에 없으면 grant 에서 통째로 버려진다');
   assert.ok(!lanCfg.allowedScopes({}).includes('emu'), '기본은 여전히 닫혀 있다(명시적으로 켜야 한다)');
   assert.deepStrictEqual(lanCfg.allowedScopes({ LAN_SCOPES: 'tcp,emu' }), ['tcp', 'emu']);
+
+  //  ★ 어휘가 두 벌이면 조용히 갈린다. 2026-08-05 실사고: lanDirectService 가 SCOPES_ALL 사본을
+  //   들고 있어서 config 에만 emu 를 넣자 데몬 신고에서 emu 가 사라졌다(grant 는 tcp 만, 오류 0).
+  //   그래서 "같은 값인가"가 아니라 **데몬이 신고한 scope 가 정규화를 통과하는가**로 못박는다.
+  for (const sc of lanCfg.SCOPES_ALL) {
+    const norm = lan.normLanInfo({ proto: 1, port: 47321, addrs: [{ host: '192.168.0.16', family: 4 }], scopes: [sc] });
+    assert.deepStrictEqual(norm.daemonScopes, [sc], `데몬이 신고한 ${sc} 가 서버 정규화에서 사라진다`);
+  }
   // TTL 은 상식 범위 밖이면 무시(오타로 영구 grant 가 되는 것 방지)
   assert.strictEqual(lanCfg.grantTtlMs({}), 600000);
   assert.strictEqual(lanCfg.grantTtlMs({ LAN_GRANT_TTL_MS: '120000' }), 120000);
