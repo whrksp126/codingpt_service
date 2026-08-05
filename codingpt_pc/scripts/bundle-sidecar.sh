@@ -98,6 +98,16 @@ if [ -d "$PTY" ]; then
   fi
 fi
 
+# serve-sim(iOS 시뮬레이터 라이브 화면·조작) 슬림.
+#  · Sources/ 는 Swift 원본이라 런타임에 필요 없다.
+#  · simcam(카메라 주입 dylib)은 **일부러 뺀다.** 우리는 카메라를 안 쓰는데, 서명된 채 공증 티켓이
+#    없는 dylib 을 앱 번들에 넣으면 Gatekeeper(syspolicyd)를 건드릴 수 있다 — Orca 가 런타임을
+#    통째로 밖에 복사하는 이유가 바로 이 파일이다. 안 쓰는 위험은 아예 들이지 않는다.
+SS="$OUT/app/node_modules/serve-sim"
+if [ -d "$SS" ]; then
+  rm -rf "$SS/Sources" "$SS/Package.swift" "$SS/dist/simcam" "$SS/README.md" 2>/dev/null || true
+fi
+
 # ── 4) Node 바이너리 배치 ──────────────────────────────────────────
 rm -f "$OUT/$NODE_OUT" # in-place 덮어쓰기 금지 — vnode 서명 캐시 불일치로 exec 시 SIGKILL(재빌드 반복 시 재현)
 cp "$CACHE/$NODE_PKG/$NODE_BIN_REL" "$OUT/$NODE_OUT"

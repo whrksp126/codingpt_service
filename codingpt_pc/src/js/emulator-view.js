@@ -170,7 +170,9 @@ export class EmulatorView {
    */
   async startVideo() {
     if (this.videoOn || this.disposed || !this.deviceId) return false;
-    if (!this.deviceId.startsWith('android:')) return false;   // iOS 시뮬레이터는 인코더 경로가 없다
+    //  안드로이드=scrcpy · iOS=serve-sim. 둘 다 같은 바이트를 주므로 여기서 갈라질 이유가 없다.
+    //  (해당 PC 에 경로가 없으면 stream.start 가 실패하고 아래에서 조용히 폴링으로 돌아간다.)
+    if (!/^(android|ios):/.test(this.deviceId)) return false;
     if (!canDecodeVideo()) { this.videoNote = i18n.t('이 창은 영상 디코딩을 지원하지 않아 화면을 한 장씩 받아요.'); return false; }
     let info;
     try { info = await api.emulatorStreamStart(this.deviceId); }

@@ -277,7 +277,9 @@ test('idb 호출은 전부 idbRun 을 거친다(맨손 run(t.idb) 금지)', () =
 test('★ iOS 버튼줄에 안드로이드 전용 키가 없다(누를 때마다 오류만 났다)', () => {
   const emu = require('../emulator');
   for (const k of emu.IOS_KEY_ROW) {
-    assert.ok(emu.IOS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 데몬이 못 보낸다`);
+    //  두 경로(serve-sim 우선 · idb 폴백) **모두** 보낼 수 있어야 화면에 그린다.
+    assert.ok(emu.IOS_SS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 serve-sim 으로 못 보낸다`);
+    assert.ok(emu.IOS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 idb 로 못 보낸다`);
   }
   assert.ok(!emu.IOS_KEY_ROW.includes('back') && !emu.IOS_KEY_ROW.includes('recents'));
   for (const k of emu.ANDROID_KEY_ROW) assert.ok(emu.ANDROID_KEYS[k], `안드로이드 버튼줄의 ${k} 가 없다`);
@@ -340,4 +342,30 @@ test('★ maxWidth 는 가로 픽셀이다(세로가 긴 화면에서도)', asyn
 test('원본보다 크게 요구해도 늘리지 않는다(용량만 커진다)', () => {
   const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
   assert.match(src, /!srcSize \|\| srcSize\.w > want/, '원본보다 클 때 확대를 막는 조건이 사라졌다');
+});
+
+// ── serve-sim 버튼 어휘 ─────────────────────────────────────────────────────
+// ★ 2026-08-06 실측: 이름이 **소문자**여야 한다. idb 어휘(대문자 HOME)를 그대로 넘기면
+//  serve-sim 은 아무 일도 하지 않으면서 오류도 안 낸다 — 조용한 실패의 교과서다.
+test('★ serve-sim 버튼 이름은 소문자다(대문자는 조용히 무시된다)', () => {
+  const emu = require('../emulator');
+  for (const [k, v] of Object.entries(emu.IOS_SS_BUTTONS)) {
+    assert.equal(v.button, v.button.toLowerCase(), `${k} 가 대문자다`);
+  }
+  assert.equal(emu.IOS_SS_BUTTONS.home.button, 'home');
+});
+
+test('★ 전원·볼륨은 HID page/usage 를 함께 보낸다(이름만으로는 안 눌린다)', () => {
+  const emu = require('../emulator');
+  //  'lock' 은 serve-sim 어휘에 없다 — 전원 버튼이 곧 잠금이다(실측으로 확인).
+  assert.deepEqual(emu.IOS_SS_BUTTONS.lock, { button: 'power', page: 12, usage: 48 });
+  for (const k of ['lock', 'volumeUp', 'volumeDown']) {
+    assert.ok(emu.IOS_SS_BUTTONS[k].page > 0 && emu.IOS_SS_BUTTONS[k].usage > 0, `${k} 에 page/usage 가 없다`);
+  }
+});
+
+test('iOS 도 라이브 화면을 요청할 수 있다(예전엔 android 만 통과시켰다)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
+  assert.match(src, /p\.scheme !== 'android' && p\.scheme !== 'ios'/,
+    'streamStart 가 iOS 를 막으면 화면은 영원히 폴링으로 남는다');
 });

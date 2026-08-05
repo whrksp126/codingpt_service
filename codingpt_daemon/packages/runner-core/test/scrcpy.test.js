@@ -170,10 +170,14 @@ test('컨트롤 소켓이 죽어 있으면 null 을 돌려 adb 로 물러선다(
   } finally { streamMod.sessionFor = origSessionFor; }
 });
 
-test('iOS 시뮬레이터에는 라이브 화면을 약속하지 않는다(인코더 경로가 없다)', async () => {
+// ★ 2026-08-06: iOS 도 라이브 화면을 갖게 됐다(serve-sim). 예전 테스트는 "iOS 는 못 한다" 를
+//  고정하고 있었는데, 이제 그 단정이 틀렸다 — 대신 **모르는 기기 종류**를 막는지 확인한다.
+//  (실재하지 않는 udid 로 iOS 스트림을 요청하면 진짜 헬퍼를 띄우려다 테스트가 멈춘다 — 그래서
+//   여기서는 iOS 경로를 부르지 않는다. 그쪽은 실기기로 검증했다.)
+test('모르는 기기 종류에는 라이브 화면을 약속하지 않는다', async () => {
   const emu = require('../emulator');
   await assert.rejects(
-    () => emu.handle('emulator.stream.start', { id: 'ios:ABC-123' }),
+    () => emu.handle('emulator.stream.start', { id: 'avd:Pixel_6' }),
     /지원하지 않아요/,
   );
 });
@@ -320,4 +324,37 @@ test('★ 한 시청자의 예외가 나머지 화면을 멈추지 않는다', (
     catch (_) { /* 이 한 명만 실패 */ }
   }
   assert.equal(got.length, 1, '멀쩡한 시청자는 그대로 받아야 한다');
+});
+
+// ── 조작도 "쓰는 중" 이다 ───────────────────────────────────────────────────
+// 영상 없이 조작만 하는 화면(폴링)이 있다. 시청자가 0이라고 16초 뒤 세션을 닫아 버리면
+//  다음 탭이 헬퍼를 다시 띄우느라 1초 가까이 걸린다 — 조작을 사용의 증거로 친다.
+test('★ keepAlive 는 시청자가 없어도 세션을 살려 둔다(타이머를 다시 센다)', () => {
+  const S = require('../emulator-stream');
+  const fake = {
+    id: 'x1', serial: 'UDID-1', clients: new Set(), gop: [], gopBytes: 0,
+    session: { closed: false, configPacket: null },
+    closeTimer: setTimeout(() => {}, 60_000),
+  };
+  const first = fake.closeTimer;
+  S._streams.set('x1', fake);
+  try {
+    assert.equal(S.keepAlive('UDID-1'), true);
+    assert.notEqual(fake.closeTimer, first, '타이머를 새로 걸지 않으면 곧 닫힌다');
+    assert.equal(S.keepAlive('없는기기'), false);
+    clearTimeout(fake.closeTimer);
+  } finally { clearTimeout(first); S._streams.delete('x1'); }
+});
+
+test('보는 사람이 있으면 타이머를 만들지 않는다(닫을 이유가 없다)', () => {
+  const S = require('../emulator-stream');
+  const fake = {
+    id: 'x2', serial: 'UDID-2', clients: new Set([{}]), gop: [], gopBytes: 0,
+    session: { closed: false, configPacket: null }, closeTimer: null,
+  };
+  S._streams.set('x2', fake);
+  try {
+    assert.equal(S.keepAlive('UDID-2'), true);
+    assert.equal(fake.closeTimer, null);
+  } finally { S._streams.delete('x2'); }
 });

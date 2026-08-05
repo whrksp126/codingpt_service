@@ -144,7 +144,7 @@ function send(viewer, flags, data) {
  * 스트림을 연다(같은 기기면 기존 세션을 재사용한다 — 화면 두 개가 각자 인코더를 띄우면 안 된다).
  * @returns {{ streamId, url, token, width, height, codec }}
  */
-async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
+async function start({ adb, serial, deviceId, kind, maxSize, maxFps, bitRate }) {
   const port = await ensureServer();
   for (const [, e] of streams) {
     if (e.serial === serial && !e.session.closed) {
@@ -160,10 +160,20 @@ async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
     //  마지막 키프레임 이후의 프레임들(늦게 들어온 화면에게 되감아 준다 — rememberFrame 주석).
     gop: [], gopBytes: 0,
   };
-  entry.session = await ScrcpySession.start(
+  //  ★ 기기 종류마다 화면을 얻는 방법이 다르다 — **바이트 계약은 같다.**
+  //   안드로이드=scrcpy(adb), iOS=serve-sim(시뮬레이터 프레임버퍼). 둘 다 Annex-B H.264 를
+  //   `{config,keyFrame,data}` 로 올려 주므로, 아래 뷰어·GOP·배압 배관은 한 벌로 끝난다.
+  const makeSession = (cbs) => {
+    if (kind === 'ios') {
+      const { ServeSimSession } = require('./serve-sim-session');
+      return ServeSimSession.start({ udid: serial }, cbs);
+    }
     //  긴 변 1280 — pane 폭이 800~900px 인 경우가 흔해서 1024 는 눈에 띄게 무르다. 픽셀은 1.5배지만
     //   H.264 라 대역폭은 그만큼 안 오른다(정지 화면은 여전히 사실상 0).
-    { adb, serial, maxSize: maxSize || 1280, maxFps: maxFps || 30, bitRate: bitRate || 6_000_000 },
+    return ScrcpySession.start(
+      { adb, serial, maxSize: maxSize || 1280, maxFps: maxFps || 30, bitRate: bitRate || 6_000_000 }, cbs);
+  };
+  entry.session = await makeSession(
     {
       onMeta: (m) => { entry.meta = m; },
       onFrame: (f) => {
@@ -216,6 +226,24 @@ function stop(streamId) {
 function sessionFor(serial) {
   for (const [, e] of streams) if (e.serial === serial && !e.session.closed) return e.session;
   return null;
+}
+
+/**
+ * "아직 쓰는 중" 이라고 알린다 — linger 타이머를 처음부터 다시 센다.
+ *
+ * 왜 필요한가: 영상 없이 **조작만** 하는 경우가 있다(폴링으로 보는 화면). 그때는 시청자가 없어서
+ *  세션이 16초 뒤 스스로 닫히고, 다음 탭은 헬퍼를 다시 띄우느라 1초 가까이 걸린다. 조작도 사용의
+ *  증거로 친다 — 마지막 조작 뒤 16초가 지나야 닫힌다.
+ */
+function keepAlive(serial) {
+  for (const [id, e] of streams) {
+    if (e.serial !== serial || e.session.closed) continue;
+    if (e.clients.size) return true;                  // 보는 사람이 있으면 타이머 자체가 없다
+    if (e.closeTimer) clearTimeout(e.closeTimer);
+    e.closeTimer = setTimeout(() => stop(id), LINGER_MS * 2);
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -303,7 +331,7 @@ function stopAll() {
 process.once('exit', () => { try { stopAll(); } catch (_) { /* noop */ } });
 
 module.exports = {
-  start, stop, stopAll, sessionFor, openRelayStream, openLanStream,
+  start, stop, stopAll, sessionFor, keepAlive, openRelayStream, openLanStream,
   attach, attachWs, detach, wsViewer, rememberFrame,
   _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS, BACKPRESSURE_MAX, GOP_MAX_BYTES,
 };

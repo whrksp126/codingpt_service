@@ -2,19 +2,20 @@
  * emulator — 이 PC 에 붙어 있는 **모바일 화면**(안드로이드 에뮬레이터/실기기, iOS 시뮬레이터)을
  *  폰·태블릿에서 보고 조작하게 해 주는 RPC.
  *
- * 왜 영상이 아니라 **프레임 폴링**인가(사용자 확정 2026-08-05):
- *  · scrcpy 는 부드럽지만 바이너리 번들 + H.264 디코딩을 웹뷰에 얹어야 하고 iOS 를 아예 못 한다.
- *  · 우리가 필요한 건 "고친 화면이 어떻게 보이는지"이지 60fps 게임이 아니다.
- *  · 폴링은 **클라이언트가 당겨 간다** — 느린 회선에서 저절로 느려질 뿐 밀리지 않는다(푸시였다면
- *    프레임이 큐에 쌓여 지연이 눈덩이처럼 커진다).
+ * 화면을 얻는 길은 **둘**이고, 어느 쪽이든 바이트 계약은 같다([플래그 1바이트][Annex-B H.264]):
+ *  · 라이브 영상 — 안드로이드는 scrcpy, iOS 는 serve-sim(시뮬레이터 프레임버퍼). 부드럽고 즉시다.
+ *  · 프레임 폴링 — 위가 안 되는 환경(구형 웹뷰·인텔 맥 등)의 폴백. 클라이언트가 한 장씩 당겨 간다.
+ *    느린 회선에서 저절로 느려질 뿐 밀리지 않는다(푸시였다면 지연이 눈덩이처럼 커진다).
  *
  * 좌표는 **0~1 정규화**로 주고받는다. 화면 크기를 클라이언트가 알 필요가 없고, 표시 배율·회전이
  *  달라도 어긋나지 않는다. 픽셀로 주고받으면 "폰에서 본 그림의 픽셀"과 "기기 실제 픽셀"이 갈린다.
+ *  ★ iOS 는 여기에 더해 **표시 픽셀과 입력 단위가 다르다**(픽셀 vs 포인트) — 그래서 입력 좌표계
+ *   캐시(inputSize)를 표시 크기(lastSize)와 따로 둔다. serve-sim 경로는 정규화 그대로라 환산이 없다.
  *
  * 입력 지원은 기기마다 다르다 — `caps.input` 으로 **정직하게** 알린다:
- *  · 안드로이드: `adb shell input` 으로 탭·스와이프·키·글자 전부 된다.
- *  · iOS 시뮬레이터: `simctl` 에는 탭 주입이 없다. `idb`(설치돼 있으면)로만 된다.
- *    없으면 보기 전용이라고 화면에 적는다 — 눌리는 척하다 아무 일도 안 일어나는 게 제일 나쁘다.
+ *  · 안드로이드: scrcpy 컨트롤 소켓(빠름) → `adb shell input`(폴백).
+ *  · iOS 시뮬레이터: serve-sim HID(항상 열려 있는 WS, 즉시) → idb(폴백, 탭마다 프로세스 기동).
+ *    둘 다 없으면 보기 전용이라고 화면에 적는다 — 눌리는 척하다 아무 일도 안 일어나는 게 제일 나쁘다.
  */
 //  ⚠ `spawn` 을 구조분해로 꺼내 두지 않는다 — 그러면 테스트가 stub 을 끼울 수 없고, 실제로
 //   "부팅 계약을 확인하는 테스트가 진짜 에뮬레이터를 띄우는" 사고가 났다(2026-08-05).
@@ -173,7 +174,8 @@ async function iosSimulators() {
   catch (_) { return []; }
   let parsed;
   try { parsed = JSON.parse(json); } catch (_) { return []; }
-  const canInput = idbReady(t);
+  //  ★ serve-sim 이 있으면 idb 없이도 조작된다(우리가 번들한다) — idb 는 글자 입력용 폴백으로만 남는다.
+  const canInput = serveSim().available() || idbReady(t);
   const rows = [];
   for (const runtime of Object.keys(parsed.devices || {})) {
     // "com.apple.CoreSimulator.SimRuntime.iOS-18-5" → "iOS 18.5"
@@ -189,14 +191,16 @@ async function iosSimulators() {
         physical: false,
         caps: {
           frame: booted,
-          // idb 가 없으면 **보기 전용**이다. 눌리는 척하는 것보다 못 한다고 말하는 게 낫다.
+          //  조작할 방법이 하나도 없으면 **보기 전용**이라고 적는다 — 눌리는 척하다 아무 일도
+          //  안 일어나는 게 제일 나쁘다.
           input: booted && canInput,
           keys: IOS_KEY_ROW,
-          //  무엇이 빠졌는지까지 말해 준다 — 둘은 설치 방법이 다르다(idb=파이썬, companion=brew).
+          //  이제 조작은 우리가 번들한 serve-sim 이 한다. 그게 못 도는 환경(인텔 맥 등)에서만
+          //  idb 를 안내한다 — 무엇이 빠졌는지까지 말해 준다.
           inputHint: canInput ? ''
             : (t.idb && !t.idbCompanion)
               ? 'iOS 조작에 필요한 idb_companion 을 찾지 못했어요 (brew install facebook/fb/idb-companion)'
-              : 'iOS 시뮬레이터를 조작하려면 idb 가 필요해요 (brew install facebook/fb/idb-companion)',
+              : 'iOS 시뮬레이터 조작은 Apple 실리콘 Mac 에서만 돼요 (또는 brew install facebook/fb/idb-companion)',
         },
       });
     }
@@ -217,7 +221,11 @@ async function list() {
   return {
     devices: sortDevices([...android, ...avds, ...ios]),
     //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
-    tools: { adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, idb: idbReady(t), resize: !!t.sips },
+    tools: {
+      adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, resize: !!t.sips,
+      //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
+      idb: idbReady(t), serveSim: serveSim().available(),
+    },
   };
 }
 
@@ -562,7 +570,22 @@ const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', sideButton: 'SID
  *   "보낼 수 없는 키예요" 오류만 나온다 — 2026-08-06 실사고.)
  */
 const ANDROID_KEY_ROW = ['recents', 'home', 'back'];
-const IOS_KEY_ROW = ['home', 'lock', 'siri'];
+//  Siri 는 뺐다 — 시뮬레이터에서 실제로 뜨지 않는 걸 확인했다. 되는 것만 그린다.
+const IOS_KEY_ROW = ['home', 'lock'];
+
+/**
+ * serve-sim HID 버튼 표.
+ *
+ * ★ 이름이 **소문자**다(idb 는 대문자 — 그대로 넘기면 조용히 무시된다, 실측).
+ * ★ 전원·볼륨처럼 HID 로 가는 버튼은 page/usage 를 같이 보내야 실제로 눌린다(serve-sim CLI 와 동일).
+ * ★ 'lock' 은 serve-sim 어휘에 없다 — 전원 버튼이 곧 잠금이다.
+ */
+const IOS_SS_BUTTONS = {
+  home: { button: 'home' },
+  lock: { button: 'power', page: 12, usage: 48 },
+  volumeUp: { button: 'volume-up', page: 12, usage: 233 },
+  volumeDown: { button: 'volume-down', page: 12, usage: 234 },
+};
 
 /**
  * 컨트롤 소켓으로 보내기 — 세션이 없거나 소켓이 죽었으면 **null 을 돌려** 호출측이 adb 로 물러선다.
@@ -624,6 +647,61 @@ async function inputViaScrcpy(a, p) {
   return null;
 }
 
+/**
+ * iOS 조작 — **살아 있는 serve-sim 세션의 HID 채널**로 보낸다.
+ *
+ * 왜 idb 보다 이게 먼저인가: idb 는 탭 한 번마다 파이썬 CLI 를 띄우고 companion 을 붙잡아
+ *  왕복이 수백 ms 다. serve-sim 은 이미 열려 있는 WebSocket 에 한 줄 쓰는 것이라 즉시 간다.
+ *  게다가 좌표가 **0~1 정규화 그대로** 라 포인트/픽셀 환산이 아예 없다 — 오늘 두 번 터진 사고의
+ *  근원(단위 불일치)이 구조적으로 사라진다.
+ *
+ * 화면을 폴링으로 보고 있어도(영상이 아직 안 붙었어도) 조작은 돼야 하므로, 세션이 없으면
+ *  여기서 만든다. 세션은 linger 뒤 스스로 정리된다.
+ *
+ * @returns {Promise<{ok:true,via:string}|null>} null 이면 호출측이 idb 로 물러선다.
+ */
+async function inputViaServeSim(a, p) {
+  if (p.scheme !== 'ios' || !serveSim().available()) return null;
+  const stream = lazyStream();
+  let sess = null;
+  try { sess = stream.sessionFor(p.value); } catch (_) { return null; }
+  if (!sess) {
+    try { await streamStart({ id: a.id }); sess = stream.sessionFor(p.value); }
+    catch (_) { return null; }
+  }
+  if (!sess || typeof sess.touch !== 'function') return null;
+  //  영상 없이 조작만 하는 화면(폴링)도 세션을 살려 둔다 — 안 그러면 16초마다 헬퍼를 다시 띄운다.
+  try { stream.keepAlive(p.value); } catch (_) { /* noop */ }
+  const type = String(a.type || '');
+
+  if (type === 'tap' || type === 'longPress') {
+    if (!sess.touch('begin', a.x, a.y)) return null;
+    await new Promise((r) => setTimeout(r, type === 'longPress' ? 600 : 60));
+    sess.touch('end', a.x, a.y);
+    return { ok: true, via: 'serve-sim' };
+  }
+  if (type === 'swipe') {
+    const ms = Math.max(30, Math.min(3000, Number(a.durationMs) || 220));
+    const steps = Math.max(2, Math.min(24, Math.round(ms / 16)));
+    if (!sess.touch('begin', a.x, a.y)) return null;
+    for (let i = 1; i <= steps; i++) {
+      const k = i / steps;
+      await new Promise((r) => setTimeout(r, ms / steps));
+      sess.touch('move', Number(a.x) + (Number(a.x2) - Number(a.x)) * k, Number(a.y) + (Number(a.y2) - Number(a.y)) * k);
+    }
+    sess.touch('end', a.x2, a.y2);
+    return { ok: true, via: 'serve-sim' };
+  }
+  if (type === 'key') {
+    const btn = IOS_SS_BUTTONS[String(a.key || '')];
+    if (!btn) return null;                 // 우리가 여는 버튼이 아니다 — 아래 검증에 맡긴다
+    if (!sess.button(btn)) return null;
+    return { ok: true, via: 'serve-sim' };
+  }
+  //  글자 입력은 아직 HID 태그로 옮기지 않았다(usage 코드 표가 필요하다) → idb 로 보낸다.
+  return null;
+}
+
 async function input(args) {
   const a = args || {};
   const p = parseId(a.id);
@@ -673,6 +751,9 @@ async function input(args) {
   }
 
   if (p.scheme === 'ios') {
+    //  라이브 세션이 있으면 그 HID 채널이 항상 이긴다(즉시·정규화 좌표). idb 는 폴백이다.
+    const live = await inputViaServeSim(a, p);
+    if (live) return live;
     if (!idbReady(t)) {
       // 정직하게 못 한다고 말한다 — 조용히 성공을 돌려주면 사용자는 기기가 멈춘 줄 안다.
       throw new Error(t.idb && !t.idbCompanion
@@ -735,12 +816,16 @@ async function streamStart(args) {
   const a = args || {};
   const p = parseId(a.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme !== 'android') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
+  if (p.scheme !== 'android' && p.scheme !== 'ios') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
   const t = tools();
-  if (!t.adb) throw new Error('adb 를 찾을 수 없어요');
+  if (p.scheme === 'android' && !t.adb) throw new Error('adb 를 찾을 수 없어요');
+  if (p.scheme === 'ios' && !serveSim().available()) {
+    //  ★ 실패해야 클라이언트가 폴링으로 물러선다 — 조용히 빈 스트림을 주면 화면이 검게 남는다.
+    throw new Error('이 PC 에서는 iOS 라이브 화면을 쓸 수 없어요');
+  }
   const stream = lazyStream();
   const r = await stream.start({
-    adb: t.adb, serial: p.value, deviceId: a.id,
+    adb: t.adb, serial: p.value, deviceId: a.id, kind: p.scheme,
     maxSize: a.maxSize, maxFps: a.maxFps, bitRate: a.bitRate,
   });
   //  화면 크기는 **기기 실제 픽셀**이어야 한다(스트림 해상도가 아니라) — 좌표 환산의 기준이다.
@@ -752,6 +837,16 @@ let _streamMod = null;
 function lazyStream() {
   if (!_streamMod) _streamMod = require('./emulator-stream');
   return _streamMod;
+}
+
+/** serve-sim(iOS 라이브 화면·조작) 모듈 — 없는 환경에서도 목록·폴링은 돌아야 하므로 지연 로드. */
+let _serveSimMod = null;
+function serveSim() {
+  if (!_serveSimMod) {
+    try { _serveSimMod = require('./serve-sim-session'); }
+    catch (_) { _serveSimMod = { available: () => false }; }
+  }
+  return _serveSimMod;
 }
 
 /** RPC 진입점 — 유닉스 소켓(cpt)과 백엔드 릴레이(control.js)가 **둘 다** 여기로 온다. */
@@ -785,5 +880,5 @@ module.exports = {
   _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg,
   _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   _idbReady: idbReady, _idbEnv: idbEnv,
-  ANDROID_KEYS, IOS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW,
+  ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW,
 };
