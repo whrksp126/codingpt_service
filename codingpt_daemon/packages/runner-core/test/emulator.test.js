@@ -165,3 +165,53 @@ test('목록 정렬 — 켜진 것이 항상 위다', () => {
   assert.deepStrictEqual(rows.map((r) => r.state), ['booted', 'booted', 'shutdown', 'shutdown']);
   assert.deepStrictEqual(rows.slice(0, 2).map((r) => r.name), ['a', 'b']);
 });
+
+// ── 켜기 후 따라가기 · 캡처 방식 ─────────────────────────────────────────────
+//  2026-08-05 실사고 둘을 고정한다.
+
+test('★ 켜기 응답이 avdName 을 준다 — 켜지면 id 가 바뀌므로 화면이 따라갈 끈이 필요하다', async () => {
+  // 실제로 에뮬레이터를 띄우지 않고, spawn 이 불릴 때의 반환 계약만 본다.
+  const cp = require('node:child_process');
+  const orig = cp.spawn;
+  let spawned = null;
+  cp.spawn = (bin, args) => { spawned = { bin, args }; return { unref() {} }; };
+  try {
+    E._resetTools();
+    const r = await E.boot('avd:Pixel_9a').catch((e) => ({ err: e.message }));
+    if (r && r.err && /찾을 수 없어요/.test(r.err)) return;   // 이 머신에 SDK 가 없다 — 건너뛴다
+    assert.equal(r.ok, true);
+    assert.equal(r.booting, true);
+    //  ★ 이게 없으면 앱은 죽은 `avd:` id 를 붙든 채 영원히 '꺼짐' 을 보여 준다.
+    assert.equal(r.avdName, 'Pixel_9a');
+    assert.ok(spawned && spawned.args.includes('Pixel_9a'));
+  } finally { cp.spawn = orig; }
+});
+
+test('★ 꺼진 AVD 행에도 avdName 이 있다 — 켜진 행과 이름으로 이어져야 한다', async () => {
+  //  androidAvds 는 내부 함수라 list() 로 확인한다. SDK 가 없으면 빈 목록이니 건너뛴다.
+  const r = await E.list();
+  const avds = r.devices.filter((d) => d.id.startsWith('avd:'));
+  if (!avds.length) return;
+  for (const d of avds) {
+    assert.equal(d.avdName, d.id.slice('avd:'.length),
+      '꺼진 AVD 의 avdName 은 id 에서 바로 나온다');
+  }
+  //  켜진 에뮬레이터가 있으면 그쪽에도 이름이 붙어 있어야 한다(둘을 잇는 유일한 끈).
+  const runningEmu = r.devices.filter((d) => /^android:emulator-/.test(d.id) && d.state === 'booted');
+  for (const d of runningEmu) {
+    assert.ok(typeof d.avdName === 'string' && d.avdName,
+      `켜진 에뮬레이터(${d.id})에 avdName 이 없다 — 화면이 따라갈 방법이 사라진다`);
+  }
+});
+
+test('★ 안드로이드 캡처는 기기 안에서 압축해 가져온다(전송량이 지배적이다)', async () => {
+  //  실측(SM-N960N 1440x2960 USB): raw 1288ms/16.3MB · png 439ms · raw|gzip 297ms.
+  //  raw 를 그대로 끌어오는 코드로 되돌아가면 4배 느려진다 — 그 선택을 여기서 못박는다.
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'emulator.js'), 'utf8');
+  assert.match(src, /screencap \| toybox gzip -1/, '기기 안 gzip 파이프가 사라졌다');
+  assert.match(src, /gunzipSync/, '받은 것을 풀지 않는다');
+  //  매직바이트 판정이 없으면 gzip 이 없는 기기에서 쓰레기를 파싱한다.
+  assert.match(src, /0x1f && \w+\[1\] === 0x8b/, 'gzip 매직바이트 판정이 없다');
+  //  실패한 기기를 매 프레임 다시 시도하면 왕복이 두 배가 된다.
+  assert.match(src, /capMode\.set\(serial, 'raw'\)/, '실패한 기기를 raw 로 고정하지 않는다');
+});

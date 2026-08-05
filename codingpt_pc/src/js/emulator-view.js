@@ -21,6 +21,9 @@ const IDLE_AFTER_MS = 60_000;
  */
 const MIN_FRAME_GAP_MS = 120;
 
+/** 에뮬레이터 콜드 부팅을 기다리는 상한. 1분을 넘기는 기기가 흔해서 넉넉히 잡는다. */
+const BOOT_WAIT_MS = 150_000;
+
 export class EmulatorView {
   /**
    * @param {HTMLElement} host  본문 컨테이너
@@ -41,6 +44,13 @@ export class EmulatorView {
     //  가려진 탭(혼합 탭에서 다른 탭이 앞에 있음)은 프레임을 당기지 않는다. 한 장이 수십 KB 라
     //   "안 보이는데 계속 받는" 상태는 그 자체로 결함이다. 독립 pane 은 늘 보이므로 기본 true.
     this.visible = true;
+    /**
+     * 켜는 중인 AVD 이름 — **id 가 바뀌기 때문에** 필요하다(2026-08-05 실사고).
+     *  꺼진 AVD 는 `avd:Pixel_9a`, 켜지면 `android:emulator-5554` 다. 켜기를 누른 뒤 들고 있던
+     *  id 는 목록에서 사라지고, 화면은 그 죽은 id 를 붙든 채 영원히 '꺼짐' 으로 남았다.
+     *  이 이름이 남아 있는 동안 목록을 다시 읽을 때마다 같은 이름의 새 행을 찾아 **따라간다**.
+     */
+    this.bootingAvd = null;
 
     this.el = document.createElement("div");
     this.el.className = "emu";
@@ -74,8 +84,33 @@ export class EmulatorView {
       this.devices = [];
       this.err = e && e.message ? e.message : String(e);
     }
+    // 켜는 중이던 AVD 가 떴으면 **새 id 로 갈아탄다**(id 가 바뀌므로 여기서 안 따라가면 영원히 '꺼짐').
+    if (this.bootingAvd) {
+      const hit = (this.devices || []).find((d) => d.avdName === this.bootingAvd && d.state === "booted");
+      if (hit) {
+        this.bootingAvd = null;
+        if (hit.id !== this.deviceId) { this.select(hit.id); return; }
+      }
+    }
     this.render();
     this.ensureLoop();
+  }
+
+  /**
+   * 켜질 때까지 목록을 다시 읽는다. 콜드 부팅은 1분을 넘기기도 해서 고정 타이머 몇 개로는 늘 놓친다
+   *  (그게 '꺼짐' 으로 굳던 이유다).
+   */
+  watchBoot(avdName) {
+    this.bootingAvd = avdName || null;
+    if (!this.bootingAvd) return;
+    const started = Date.now();
+    const tick = async () => {
+      if (this.disposed || !this.bootingAvd) return;
+      if (Date.now() - started > BOOT_WAIT_MS) { this.bootingAvd = null; this.render(); return; }
+      await this.loadDevices();
+      if (!this.disposed && this.bootingAvd) setTimeout(tick, 2500);
+    };
+    setTimeout(tick, 2500);
   }
 
   device() { return (this.devices || []).find((d) => d.id === this.deviceId) || null; }
@@ -148,12 +183,21 @@ export class EmulatorView {
     catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
   }
 
-  async power(action) {
-    if (!this.deviceId) return;
-    try { await api.emulatorPower(this.deviceId, action); }
+  async power(action, target) {
+    const id = (target && target.id) || this.deviceId;
+    if (!id) return;
+    let reply = null;
+    try { reply = await api.emulatorPower(id, action); }
     catch (e) { this.err = e && e.message ? e.message : String(e); }
-    // 켜는 데 수십 초가 걸린다 — 목록을 몇 번 다시 읽어 상태 변화를 잡는다.
-    for (const d of [1500, 5000, 12000, 25000]) setTimeout(() => { if (!this.disposed) this.loadDevices(); }, d);
+    if (action === "boot") {
+      const avd = (reply && reply.avdName)
+        || (target && target.avdName)
+        || ((this.devices || []).find((d) => d.id === id) || {}).avdName
+        || null;
+      this.render();
+      this.watchBoot(avd);
+    }
+    if (!this.disposed) void this.loadDevices();
   }
 
   paintFrame() {
@@ -188,14 +232,25 @@ export class EmulatorView {
           : i18n.t('켜져 있는 기기가 없어요.')}</div>`;
       } else {
         for (const d of this.devices) {
+          const booting = !!this.bootingAvd && d.avdName === this.bootingAvd;
           const row = document.createElement("button");
           row.className = "emu-row" + (d.state === "booted" ? " on" : "");
-          const sub = (d.state === "booted" ? i18n.t('켜짐') : i18n.t('꺼짐'))
+          const sub = (booting ? i18n.t('켜는 중…') : d.state === "booted" ? i18n.t('켜짐') : i18n.t('꺼짐'))
             + (d.caps && d.caps.frame && !d.caps.input ? ` · ${i18n.t('보기 전용')}` : "");
           row.innerHTML = `${icons.smartphone({ size: 15 })}<span class="emu-row-t"><b></b><i></i></span>`;
           row.querySelector("b").textContent = d.name;
           row.querySelector("i").textContent = sub;
-          row.addEventListener("click", () => this.select(d.id));
+          //  꺼진 기기는 목록에서 바로 켠다 — 예전엔 골라 들어가야 전원 버튼이 보였는데, 꺼진 기기를
+          //   고르면 화면이 없어서 "고를 이유가 없는 것을 골라야" 하는 흐름이었다.
+          if (d.state !== "booted" && !d.physical && !booting) {
+            const pw = document.createElement("span");
+            pw.className = "emu-row-pw";
+            pw.title = i18n.t('켜기');
+            pw.innerHTML = icons.play({ size: 14 });
+            pw.addEventListener("click", (ev) => { ev.stopPropagation(); void this.power("boot", d); });
+            row.appendChild(pw);
+          }
+          row.addEventListener("click", () => { if (d.state === "booted") this.select(d.id); else void this.power("boot", d); });
           list.appendChild(row);
         }
       }

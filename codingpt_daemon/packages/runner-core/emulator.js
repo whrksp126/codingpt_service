@@ -16,7 +16,11 @@
  *  · iOS 시뮬레이터: `simctl` 에는 탭 주입이 없다. `idb`(설치돼 있으면)로만 된다.
  *    없으면 보기 전용이라고 화면에 적는다 — 눌리는 척하다 아무 일도 안 일어나는 게 제일 나쁘다.
  */
-const { execFile, spawn } = require('child_process');
+//  ⚠ `spawn` 을 구조분해로 꺼내 두지 않는다 — 그러면 테스트가 stub 을 끼울 수 없고, 실제로
+//   "부팅 계약을 확인하는 테스트가 진짜 에뮬레이터를 띄우는" 사고가 났다(2026-08-05).
+const cp = require('child_process');
+const { execFile } = cp;
+const zlib = require('zlib');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -66,7 +70,14 @@ function _resetTools() { toolCache = null; }
 
 // ── 목록 ─────────────────────────────────────────────────────────────────────
 
-/** `adb devices -l` → 붙어 있는 안드로이드(에뮬레이터 + **실기기**). */
+/**
+ * `adb devices -l` → 붙어 있는 안드로이드(에뮬레이터 + **실기기**).
+ *
+ * ★ 에뮬레이터 행에는 `avdName` 을 반드시 실어 준다(2026-08-05 실사고). 꺼진 AVD 는 `avd:Pixel_9a`,
+ *  켜지면 `android:emulator-5554` 로 **id 자체가 바뀐다**. 그래서 "켜기"를 누른 화면은 자기가 고른
+ *  id 가 목록에서 사라진 채 남아 영원히 '꺼짐' 으로 보였다. 클라이언트가 새 행을 따라가려면
+ *  두 행을 잇는 이름이 필요하다.
+ */
 async function androidDevices() {
   const t = tools();
   if (!t.adb) return [];
@@ -89,6 +100,16 @@ async function androidDevices() {
       caps: { frame: state === 'device', input: state === 'device' },
     });
   }
+  // 에뮬레이터의 AVD 이름 — 목록 중복 제거와 "켜기 후 따라가기" 가 **같은 근거**를 쓰게 한 번만 묻는다.
+  await Promise.all(rows.map(async (d) => {
+    if (d.physical || d.state !== 'booted') return;
+    const serial = d.id.slice('android:'.length);
+    try {
+      const n = await run(t.adb, ['-s', serial, 'emu', 'avd', 'name'], { timeoutMs: 4000 });
+      const name = String(n).split('\n')[0].trim();
+      if (name && !/^(KO|error)/i.test(name)) d.avdName = name;
+    } catch (_) { /* 이름을 못 얻으면 클라이언트가 '새로 나타난 에뮬레이터' 로 폴백한다 */ }
+  }));
   return rows;
 }
 
@@ -98,20 +119,12 @@ async function androidAvds(booted) {
   if (!t.emulator) return [];
   let out;
   try { out = await run(t.emulator, ['-list-avds']); } catch (_) { return []; }
-  // 이미 떠 있는 에뮬레이터의 AVD 이름은 adb 로 알 수 있다 — 중복 표시를 막는다.
-  const running = new Set();
-  for (const d of booted) {
-    if (d.kind !== 'android' || d.physical) continue;
-    const serial = d.id.slice('android:'.length);
-    try {
-      const n = await run(t.adb, ['-s', serial, 'emu', 'avd', 'name'], { timeoutMs: 4000 });
-      running.add(String(n).split('\n')[0].trim());
-    } catch (_) { /* 이름을 못 얻으면 중복이 보일 뿐 — 기능은 멀쩡하다 */ }
-  }
+  // 이미 떠 있는 에뮬레이터는 androidDevices 가 avdName 을 붙여 왔다 — 중복 표시를 막는다.
+  const running = new Set(booted.map((d) => d.avdName).filter(Boolean));
   return String(out).split('\n').map((s) => s.trim()).filter(Boolean)
     .filter((n) => !n.startsWith('INFO') && !running.has(n))
     .map((n) => ({
-      id: `avd:${n}`, kind: 'android', name: n.replace(/_/g, ' '),
+      id: `avd:${n}`, kind: 'android', name: n.replace(/_/g, ' '), avdName: n,
       state: 'shutdown', physical: false, caps: { frame: false, input: false },
     }));
 }
@@ -189,9 +202,11 @@ async function boot(id) {
   if (p.scheme === 'avd') {
     if (!t.emulator) throw new Error('안드로이드 에뮬레이터를 찾을 수 없어요');
     // 켜는 데 수십 초가 걸린다 — 기다리지 않고 띄우기만 하고, 목록 갱신으로 확인하게 한다.
-    const child = spawn(t.emulator, ['-avd', p.value, '-no-boot-anim'], { detached: true, stdio: 'ignore' });
+    const child = cp.spawn(t.emulator, ['-avd', p.value, '-no-boot-anim'], { detached: true, stdio: 'ignore' });
     child.unref();
-    return { ok: true, booting: true };
+    //  ★ avdName 을 돌려준다: 켜지면 이 기기의 id 가 `android:emulator-N` 으로 **바뀌므로**,
+    //   화면은 이 이름으로 새 행을 찾아 따라가야 한다(안 그러면 영원히 '꺼짐' 이다).
+    return { ok: true, booting: true, avdName: p.value };
   }
   if (p.scheme === 'ios') {
     if (!t.xcrun) throw new Error('Xcode 명령줄 도구를 찾을 수 없어요');
@@ -202,6 +217,7 @@ async function boot(id) {
     }
     // 시뮬레이터 창을 띄운다(창이 없어도 스크린샷은 되지만, 사람이 직접 만질 수 있어야 한다).
     try { await run('/usr/bin/open', ['-a', 'Simulator'], { timeoutMs: 8000 }); } catch (_) { /* noop */ }
+    //  iOS 는 id(udid)가 그대로다 — 따라갈 필요가 없다.
     return { ok: true, booting: true };
   }
   throw new Error('이미 켜져 있는 기기예요');
@@ -267,10 +283,8 @@ function pngSize(buf) {
 /**
  * 안드로이드 `screencap`(압축 없는 raw) 파서.
  *
- * ★ 왜 `-p`(PNG) 를 안 쓰나 — **폰이 PNG 를 압축하느라 느리다.** 실측(SM-N960N, 1440x2960):
- *    `screencap -p` 2.68s / `screencap`(raw) 1.29s. raw 는 17MB 로 2.4배 크지만 USB 는
- *    13MB/s 라 전송이 1.3초, 나머지 1.4초가 전부 기기 안 PNG 인코딩이었다. 즉 **더 많이 보내는
- *    쪽이 더 빠르다**. (짐작이 아니라 두 경로를 각각 재서 나온 결론이다.)
+ * 왜 `-p`(PNG) 가 아니라 raw 인가 — raw 는 픽셀 배열이라 우리가 **그대로 줄여 쓸 수 있다**(PNG 는
+ *  디코더가 필요하다). 전송량 문제는 기기 안 gzip 으로 푼다(androidRaw 주석에 실측이 있다).
  *
  * 헤더는 w,h,format(각 4B LE) + 안드로이드 13+ 는 colorspace 4B 가 더 붙는다 →
  *  전체 길이에서 역산해 헤더 크기를 정한다(버전 분기보다 정확하다).
@@ -336,6 +350,45 @@ function rawToBmp(raw, maxWidth) {
 
 const lastSize = new Map();   // id → {w,h} — 입력 좌표 환산용(프레임을 본 적 있어야 조작한다)
 
+/**
+ * 기기별 화면 캡처 방식 — serial → 'gzip' | 'raw'. 한 번 정하면 유지한다(매 프레임 탐색 금지).
+ */
+const capMode = new Map();
+
+/**
+ * 안드로이드 화면 한 장(raw RGBA).
+ *
+ * ★ **기기 안에서 gzip 으로 눌러서 가져온다.** 실측(SM-N960N 1440x2960, USB):
+ *
+ *    화면        raw          png          raw|gzip -1
+ *    다크 UI    1288ms 16.3MB  439ms 0.1MB   297ms 0.05MB   ← 4.3배
+ *    컬러풀     1227ms 16.3MB  908ms 1.6MB   719ms 2.7MB    ← 1.7배
+ *
+ *  이전 주석은 "더 많이 보내는 쪽(raw)이 더 빠르다 — PNG 인코딩이 2.68s" 라고 적어 두었는데,
+ *  같은 기기에서 다시 재니 PNG 는 0.44~0.91s 였다. 그때 무엇을 쟀든 **지금은 틀린 전제**다.
+ *  raw 가 느린 이유는 단순하다: 16.3MB 를 USB 로 밀어야 한다(≈1.2s). gzip 은 그 16.3MB 를
+ *  기기에서 0.05~2.7MB 로 줄이고, 압축 비용은 PNG 인코딩보다 훨씬 싸다. 푸는 값은 node 에서
+ *  4ms 다(실측). 그래서 **화면이 단순하든 복잡하든** gzip 이 이긴다.
+ *
+ *  ⚠ `toybox gzip` 이 없는 기기가 있을 수 있다 → 첫 시도의 매직바이트로 판정하고, 아니면
+ *   그 기기는 영원히 raw 로 간다(매 프레임 두 번 왕복하는 것이 제일 나쁘다).
+ */
+async function androidRaw(adb, serial) {
+  if (capMode.get(serial) !== 'raw') {
+    try {
+      const gz = await run(adb, ['-s', serial, 'exec-out', 'sh', '-c', 'screencap | toybox gzip -1'],
+        { encoding: 'buffer', timeoutMs: 25000 });
+      if (gz && gz.length > 2 && gz[0] === 0x1f && gz[1] === 0x8b) {
+        const buf = zlib.gunzipSync(gz, { maxOutputLength: EXEC_MAX * 4 });
+        capMode.set(serial, 'gzip');
+        return buf;
+      }
+    } catch (_) { /* 아래 raw 로 물러선다 */ }
+    capMode.set(serial, 'raw');
+  }
+  return run(adb, ['-s', serial, 'exec-out', 'screencap'], { encoding: 'buffer', timeoutMs: 25000 });
+}
+
 async function frame(args) {
   const p = parseId(args && args.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
@@ -345,8 +398,8 @@ async function frame(args) {
   let size = null;
   if (p.scheme === 'android') {
     if (!t.adb) throw new Error('adb 를 찾을 수 없어요');
-    // raw 로 받아 여기서 축소한다(왜 PNG 가 아닌지는 parseRawScreencap 주석 — 실측 2.7s → 1.3s).
-    const buf = await run(t.adb, ['-s', p.value, 'exec-out', 'screencap'], { encoding: 'buffer', timeoutMs: 25000 });
+    // raw 로 받아 여기서 축소한다(가져오는 방법과 그 실측은 androidRaw 주석).
+    const buf = await androidRaw(t.adb, p.value);
     const raw = parseRawScreencap(buf);
     if (raw) {
       size = { w: raw.w, h: raw.h };
