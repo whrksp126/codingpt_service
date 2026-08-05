@@ -287,3 +287,57 @@ test('appSwitch→APPLE_PAY 라는 거짓 매핑이 없다(앱 전환이 아니�
   const emu = require('../emulator');
   assert.equal(emu.IOS_BUTTONS.appSwitch, undefined);
 });
+
+// ── 표시 크기와 입력 좌표계는 다른 칸에 산다 ────────────────────────────────
+// ★ 2026-08-06 실사고(세 번째): 포인트를 lastSize 에 캐시했더니 frame() 이 픽셀로 덮어썼다.
+//  실사용은 항상 "화면 먼저 → 조작" 이라 고친 좌표가 첫 프레임과 함께 사라졌고, iOS 는 계속
+//  조작이 안 됐다. 프레임 없이 새 프로세스에서 돌린 내 검증만 통과했던 것 — 순서를 못박는다.
+test('★ 프레임이 들어와도 iOS 입력 좌표계는 포인트로 남는다', async () => {
+  const emu = require('../emulator');
+  const id = 'ios:TEST-UDID';
+  emu._lastSize.set(id, { w: 1179, h: 2556 });          // frame() 이 넣는 표시 픽셀
+  emu._inputSize.set(id, { w: 393, h: 852 });           // idb 가 알려 준 입력 포인트
+  const s = await emu._screenSize(id, { scheme: 'ios', value: 'TEST-UDID' });
+  assert.deepEqual(s, { w: 393, h: 852 }, '표시 픽셀이 입력 좌표계를 덮어썼다 — 3배 밖을 누르게 된다');
+  assert.equal(emu._px(0.5, s.w), 197);   // 화면 한가운데 = 197pt (픽셀이었다면 590 — 화면 밖)
+  emu._lastSize.delete(id); emu._inputSize.delete(id);
+});
+
+test('안드로이드는 표시 픽셀이 곧 입력 좌표계다(adb 는 픽셀을 받는다)', async () => {
+  const emu = require('../emulator');
+  const id = 'android:TEST';
+  emu._lastSize.set(id, { w: 1080, h: 2400 });
+  const s = await emu._screenSize(id, { scheme: 'android', value: 'TEST' });
+  assert.deepEqual(s, { w: 1080, h: 2400 });
+  emu._lastSize.delete(id);
+});
+
+// ── 축소는 "가로" 기준이다 ──────────────────────────────────────────────────
+// ★ 2026-08-06 실사고(네 번째): `sips -Z` 는 **긴 변**을 맞춘다. 세로 폰(1179x2556)에
+//  maxWidth=480 을 주면 가로는 221px 이 됐다 — "480 을 보내는 중" 이라 믿은 화면이 실제로는
+//  절반도 안 됐고, 그걸 레티나에서 늘려 그리니 글씨가 안 읽혔다. --resampleWidth 여야 한다.
+test('★ maxWidth 는 가로 픽셀이다(세로가 긴 화면에서도)', async () => {
+  const emu = require('../emulator');
+  const fsx = require('fs'), pathx = require('path'), osx = require('os');
+  const { execFile } = require('child_process');
+  if (!emu._tools().sips) return;                       // 비-macOS 에선 건너뛴다
+  const sips = (args) => new Promise((res, rej) =>
+    execFile('/usr/bin/sips', args, (e, so) => (e ? rej(e) : res(String(so)))));
+  const tmp = (ext) => pathx.join(osx.tmpdir(), `cpt-sipstest-${process.pid}.${ext}`);
+  const [bmpPath, pngPath, jpgPath] = ['bmp', 'png', 'jpg'].map(tmp);
+  //  세로가 긴 가짜 화면(300x800) → 가로 150 요구. (하한이 120 이라 그보다 커야 의미가 있다.)
+  fsx.writeFileSync(bmpPath, emu._rawToBmp({ w: 300, h: 800, offset: 0, data: Buffer.alloc(300 * 800 * 4, 0x80) }, 4000));
+  try {
+    await sips(['-s', 'format', 'png', bmpPath, '--out', pngPath]);
+    const out = await emu._toJpeg(fsx.readFileSync(pngPath), 'png', 150, 70, { w: 300, h: 800 });
+    fsx.writeFileSync(jpgPath, out.buf);
+    const w = Number(/pixelWidth:\s*(\d+)/.exec(await sips(['-g', 'pixelWidth', jpgPath]))[1]);
+    //  -Z(긴 변) 였다면 150x(300/800)= 56px 이 됐을 것이다.
+    assert.equal(w, 150, `가로가 150 이어야 하는데 ${w} — -Z(긴 변 기준)로 되돌아갔다`);
+  } finally { for (const f of [bmpPath, pngPath, jpgPath]) { try { fsx.unlinkSync(f); } catch (_) {} } }
+});
+
+test('원본보다 크게 요구해도 늘리지 않는다(용량만 커진다)', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
+  assert.match(src, /!srcSize \|\| srcSize\.w > want/, '원본보다 클 때 확대를 막는 조건이 사라졌다');
+});

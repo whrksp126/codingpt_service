@@ -278,7 +278,7 @@ export class EmulatorView {
         }
         const t0 = Date.now();
         try {
-          const f = await api.emulatorFrame(this.deviceId, { maxWidth: 480, quality: 60 });
+          const f = await api.emulatorFrame(this.deviceId, { maxWidth: this.wantWidth(), quality: 72 });
           if (this.disposed) break;
           this.frameUrl = `data:${f.mime};base64,${f.base64}`;
           if (f.width && f.height) this.frameAspect = f.width / f.height;
@@ -296,6 +296,20 @@ export class EmulatorView {
       }
       this.running = false;
     })();
+  }
+
+  /**
+   * 받을 프레임의 가로 픽셀 수.
+   *
+   * ★ 480 고정이었다(2026-08-06 실사고). 3배 밀도 아이폰(1179px)을 480 으로 줄여 보내고 레티나
+   *  화면에서 다시 늘려 그리니 **두 번 뭉개져** 글씨가 안 읽혔다. 보이는 폭 x 화면 배율,
+   *  즉 "실제로 찍히는 점의 수" 만큼만 받는다 — 그보다 크면 낭비, 작으면 뿌옇다.
+   */
+  wantWidth() {
+    const el = this.canvasEl || this.imgEl;
+    const css = el && el.clientWidth ? el.clientWidth : 0;
+    const dpr = window.devicePixelRatio || 1;
+    return Math.max(360, Math.min(1200, Math.round(css * dpr) || 480));
   }
 
   /** 화면 좌표 → 0~1. `object-fit: contain` 의 **여백을 빼고** 계산한다. */

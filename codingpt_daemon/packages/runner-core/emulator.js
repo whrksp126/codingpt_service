@@ -292,7 +292,15 @@ function tmpFile(ext) {
  * PNG 원본 → 화면에 보낼 JPEG.
  *  sips 가 없으면(비-macOS) **원본 PNG 를 그대로** 보낸다 — 느릴 뿐 안 보이는 것보다 낫다.
  */
-async function toJpeg(imgBuf, ext, maxWidth, quality) {
+/**
+ * @param {{w:number,h:number}|null} srcSize 원본 픽셀 크기(알면 넘긴다). 넓히기를 막는 근거다.
+ *
+ * ★ 예전엔 `sips -Z` 를 썼다(2026-08-06 실사고). `-Z` 는 **긴 변**을 맞춘다 —
+ *  세로 폰(1179x2556)에 maxWidth=480 을 주면 가로는 480x(1179/2556)= **221px** 이 된다.
+ *  "480 을 보내고 있다" 고 믿은 화면이 실제로는 221px 이었고, 그걸 레티나에서 늘려 그리니
+ *  글씨가 안 읽혔다. 가로를 맞추려면 `--resampleWidth` 여야 한다.
+ */
+async function toJpeg(imgBuf, ext, maxWidth, quality, srcSize) {
   const t = tools();
   const passthroughMime = ext === 'bmp' ? 'image/bmp' : 'image/png';
   if (!t.sips) return { mime: passthroughMime, buf: imgBuf };   // 비-macOS: 느릴 뿐, 안 보이는 것보다 낫다
@@ -302,7 +310,9 @@ async function toJpeg(imgBuf, ext, maxWidth, quality) {
     fs.writeFileSync(src, imgBuf);
     const args = [];
     // BMP 는 이미 우리가 줄여 놓았다 — 다시 줄이면 두 번 깎여 흐려진다.
-    if (ext !== 'bmp') args.push('-Z', String(Math.max(120, Math.min(2000, maxWidth || 480))));
+    const want = Math.max(120, Math.min(2000, maxWidth || 480));
+    //  원본보다 크게 요청하면 늘리지 않는다 — 늘려 봐야 용량만 커지고 더 선명해지지 않는다.
+    if (ext !== 'bmp' && (!srcSize || srcSize.w > want)) args.push('--resampleWidth', String(want));
     args.push('-s', 'format', 'jpeg',
       '-s', 'formatOptions', String(Math.max(20, Math.min(95, quality || 60))),
       src, '--out', dst);
@@ -389,7 +399,10 @@ function rawToBmp(raw, maxWidth) {
   return out;
 }
 
-const lastSize = new Map();   // id → {w,h} — 입력 좌표 환산용(프레임을 본 적 있어야 조작한다)
+const lastSize = new Map();   // id → {w,h} — **표시** 픽셀 크기(프레임이 알려 준다)
+//  id → {w,h} — **입력** 좌표계. iOS 는 포인트라 표시 픽셀과 다르다(위 screenSize 주석 참고).
+//  절대 lastSize 와 합치지 말 것: 합치는 순간 프레임이 입력 좌표를 덮어써 조작이 통째로 죽는다.
+const inputSize = new Map();
 
 /**
  * 기기별 화면 캡처 방식 — serial → 'gzip' | 'raw'. 한 번 정하면 유지한다(매 프레임 탐색 금지).
@@ -462,8 +475,8 @@ async function frame(args) {
   if (!size) size = pngSize(png);
   if (size) lastSize.set(args.id, size);
   const img = bmp
-    ? await toJpeg(bmp, 'bmp', args && args.maxWidth, args && args.quality)
-    : await toJpeg(png, 'png', args && args.maxWidth, args && args.quality);
+    ? await toJpeg(bmp, 'bmp', args && args.maxWidth, args && args.quality, size)
+    : await toJpeg(png, 'png', args && args.maxWidth, args && args.quality, size);
   return {
     mime: img.mime,
     base64: img.buf.toString('base64'),
@@ -475,28 +488,36 @@ async function frame(args) {
 
 // ── 입력 ─────────────────────────────────────────────────────────────────────
 
-/** 화면 크기(픽셀) — 프레임에서 이미 봤으면 그 값을, 아니면 기기에 물어본다. */
 /**
- * 조작 좌표계의 크기.
+ * 조작 좌표계의 크기. **표시 크기(lastSize)와 절대 섞지 않는다.**
  *
- * ★ 안드로이드와 iOS 는 **단위가 다르다**(2026-08-06 실사고):
- *  · adb 는 기기 픽셀을 받는다 → 스크린샷 픽셀과 같은 좌표계라 그대로 쓰면 된다.
+ * ★ 안드로이드와 iOS 는 단위가 다르다(2026-08-06 실사고):
+ *  · adb 는 기기 픽셀을 받는다 → 스크린샷 픽셀과 같은 좌표계라 lastSize 를 그대로 써도 된다.
  *  · idb 는 **포인트**를 받는다(iPhone 16 = 393x852). 스크린샷은 1179x2556 픽셀이라,
  *    픽셀을 그대로 넘기면 3배 밖을 눌러 **아무 일도 안 일어난다** — idb 는 rc=0 을 돌려주므로
- *    조용한 실패가 된다(idb 를 깔아도 "보기 전용" 처럼 보이던 진짜 이유).
- *  그래서 iOS 는 idb 가 알려 주는 포인트 크기를 쓴다(추측한 배율로 나누지 않는다).
+ *    조용한 실패가 된다.
+ *
+ * ★★ 그리고 두 번째 실사고(같은 날): 포인트를 `lastSize` 에 캐시했더니 **frame() 이 그 자리에
+ *  픽셀을 덮어썼다**. 실사용 순서는 항상 "화면 먼저 → 조작" 이라, 고친 좌표는 첫 프레임과 함께
+ *  사라지고 iOS 는 여전히 조작이 안 됐다. 내 검증이 프레임 없이 새 프로세스에서 돌아 통과했던 것.
+ *  → iOS 입력 좌표계는 **전용 캐시**(inputSize)에 둔다. 표시 크기와 절대 같은 칸을 쓰지 않는다.
  */
 async function screenSize(id, p) {
+  const t = tools();
+  if (p.scheme === 'ios') {
+    const hitPt = inputSize.get(id);
+    if (hitPt) return hitPt;
+    if (idbReady(t)) {
+      try {
+        const out = await idbRun(['describe', '--udid', p.value, '--json'], { timeoutMs: 20000 });
+        const s2 = pointsFromIdbDescribe(out);
+        if (s2) { inputSize.set(id, s2); return s2; }
+      } catch (_) { /* 아래 오류로 떨어진다 */ }
+    }
+    throw new Error('화면 크기를 알 수 없어요 — 화면을 한 번 불러온 뒤 조작해 주세요');
+  }
   const hit = lastSize.get(id);
   if (hit) return hit;
-  const t = tools();
-  if (p.scheme === 'ios' && idbReady(t)) {
-    try {
-      const out = await idbRun(['describe', '--udid', p.value, '--json'], { timeoutMs: 20000 });
-      const s2 = pointsFromIdbDescribe(out);
-      if (s2) { lastSize.set(id, s2); return s2; }
-    } catch (_) { /* 아래 오류로 떨어진다 */ }
-  }
   if (p.scheme === 'android') {
     const out = await run(t.adb, ['-s', p.value, 'shell', 'wm', 'size'], { timeoutMs: 8000 });
     const m = /(\d+)x(\d+)/.exec(String(out).split('\n').reverse().join('\n'));
@@ -761,7 +782,8 @@ module.exports = {
   // 테스트용
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
-  _lastSize: lastSize, _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
+  _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg,
+  _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   _idbReady: idbReady, _idbEnv: idbEnv,
   ANDROID_KEYS, IOS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW,
 };
