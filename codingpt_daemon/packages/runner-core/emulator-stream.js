@@ -45,24 +45,52 @@ function ensureServer() {
       const ok = entry && token.length === entry.token.length
         && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(entry.token));
       if (!ok) { ws.close(4001, 'unauthorized'); return; }
-      attach(entry, ws);
+      attachWs(entry, ws);
     });
   });
 }
 
-function attach(entry, ws) {
-  entry.clients.add(ws);
-  if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
+/**
+ * **뷰어** — 프레임을 받는 한 사람. 전송 수단만 다르고 바이트는 같다.
+ *  로컬 웹뷰(127.0.0.1 WS) · 릴레이(back 다이얼백 WS) · LAN 직결(cpt-lan 채널) 셋이
+ *  전부 이 인터페이스로 들어온다. 예전엔 ws 를 직접 다뤄서 새 경로가 생길 때마다 바이트 조립이
+ *  한 벌씩 늘어날 뻔했다 — 여기 한 곳만 남긴다.
+ *
+ *  { alive() , backlog() , write(buf) , close(code, reason) }
+ */
+function wsViewer(ws) {
   ws.binaryType = 'nodebuffer';
+  return {
+    ws,
+    alive: () => ws.readyState === 1,
+    backlog: () => ws.bufferedAmount,
+    write: (buf) => { try { ws.send(buf); } catch (_) { /* noop */ } },
+    close: (code, reason) => { try { ws.close(code, reason); } catch (_) { /* noop */ } },
+  };
+}
+
+function attach(entry, viewer) {
+  entry.clients.add(viewer);
+  if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
   //  새로 붙은 화면에 **먼저 SPS/PPS 를 준다** — 없으면 다음 키프레임이 올 때까지 검은 화면이다.
-  if (entry.session.configPacket) send(ws, FLAG_CONFIG, entry.session.configPacket);
-  ws.on('close', () => {
-    entry.clients.delete(ws);
-    if (entry.clients.size === 0 && !entry.closeTimer) {
-      entry.closeTimer = setTimeout(() => stop(entry.id), LINGER_MS);
-    }
-  });
+  if (entry.session.configPacket) send(viewer, FLAG_CONFIG, entry.session.configPacket);
+}
+
+/** 뷰어가 떠났다 — 마지막 한 명이면 조금 기다렸다 인코더를 끈다. */
+function detach(entry, viewer) {
+  if (!entry.clients.delete(viewer)) return;
+  if (entry.clients.size === 0 && !entry.closeTimer) {
+    entry.closeTimer = setTimeout(() => stop(entry.id), LINGER_MS);
+  }
+}
+
+/** ws 를 붙일 때의 편의 — 수명 배선까지 한 번에. */
+function attachWs(entry, ws) {
+  const viewer = wsViewer(ws);
+  attach(entry, viewer);
+  ws.on('close', () => detach(entry, viewer));
   ws.on('error', () => { try { ws.close(); } catch (_) { /* noop */ } });
+  return viewer;
 }
 
 /**
@@ -70,19 +98,19 @@ function attach(entry, ws) {
  */
 const BACKPRESSURE_MAX = 8 * 1024 * 1024;
 
-function send(ws, flags, data) {
-  if (ws.readyState !== 1) return;
+function send(viewer, flags, data) {
+  if (!viewer.alive()) return;
   //  ★ 밀린다고 프레임을 **버리면 안 된다.** H.264 델타는 앞 프레임에 기대어 있어서, 하나를 빼면
   //   다음 키프레임이 올 때까지 화면이 깨진 채로 남는다. 그런데 scrcpy 는 화면이 바뀔 때만 보내고
   //   키프레임은 몇 분에 한 번이라(실측: 11초에 1장), "잠깐 깨짐"이 아니라 "한참 깨짐"이 된다.
   //   그래서 밀리면 **끊는다** — 화면이 다시 붙으면 config 를 먼저 받아 깨끗하게 시작한다.
-  if (ws.bufferedAmount > BACKPRESSURE_MAX) {
-    try { ws.close(4003, 'too slow'); } catch (_) { /* noop */ }
+  if (viewer.backlog() > BACKPRESSURE_MAX) {
+    viewer.close(4003, 'too slow');
     return;
   }
   const head = Buffer.alloc(1);
   head.writeUInt8(flags, 0);
-  try { ws.send(Buffer.concat([head, data])); } catch (_) { /* noop */ }
+  viewer.write(Buffer.concat([head, data]));
 }
 
 /**
@@ -111,7 +139,7 @@ async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
       onMeta: (m) => { entry.meta = m; },
       onFrame: (f) => {
         const flags = (f.config ? FLAG_CONFIG : 0) | (f.keyFrame ? FLAG_KEY : 0);
-        for (const ws of entry.clients) send(ws, flags, f.data);
+        for (const v of entry.clients) send(v, flags, f.data);
       },
       onError: () => { closeClients(entry, 4002, 'stream error'); },
       onClose: () => { closeClients(entry, 1000, 'closed'); streams.delete(id); },
@@ -134,7 +162,7 @@ function descriptor(entry, port) {
 }
 
 function closeClients(entry, code, reason) {
-  for (const ws of entry.clients) { try { ws.close(code, reason); } catch (_) { /* noop */ } }
+  for (const v of entry.clients) v.close(code, reason);
   entry.clients.clear();
 }
 
@@ -169,13 +197,10 @@ function openRelayStream({ serverUrl, deviceToken }, { streamToken, params }, de
   const url = String(serverUrl).replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
   const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${deviceToken}` } });
   let entry = null;
-  const detach = () => {
-    if (!entry) return;
-    entry.clients.delete(ws);
-    if (entry.clients.size === 0 && !entry.closeTimer) {
-      entry.closeTimer = setTimeout(() => stop(entry.id), LINGER_MS);
-    }
-    entry = null;
+  let viewer = null;
+  const leave = () => {
+    if (entry && viewer) detach(entry, viewer);
+    entry = null; viewer = null;
   };
   ws.on('open', async () => {
     try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ }
@@ -186,14 +211,48 @@ function openRelayStream({ serverUrl, deviceToken }, { streamToken, params }, de
       if (!entry) throw new Error('스트림을 찾지 못했어요');
       //  화면이 먼저 알아야 하는 것: 영상 크기(좌표 환산의 기준). 프레임 앞에 텍스트 한 줄로 보낸다.
       ws.send(JSON.stringify({ type: 'meta', width: info.width, height: info.height, codec: info.codec }));
-      attach(entry, ws);
+      viewer = wsViewer(ws);
+      attach(entry, viewer);
     } catch (e) {
       try { ws.send(JSON.stringify({ type: 'error', message: (e && e.message) || String(e) })); } catch (_) { /* noop */ }
       try { ws.close(); } catch (_) { /* noop */ }
     }
   });
-  ws.on('close', detach);
-  ws.on('error', detach);
+  ws.on('close', leave);
+  ws.on('error', leave);
+}
+
+/**
+ * LAN 직결 스트림 — **같은 Wi-Fi 에 있는 폰**이 이 화면을 볼 때 쓰는 길(lan.js 의 `emu` 채널).
+ *
+ * 왜 이게 필요한가(2026-08-05 실측). 폰의 화면 지연을 시계 화면으로 재 봤다:
+ *   릴레이(폰→CF→홈서버→CF→PC)   310~420 ms
+ *   LAN 직결(폰→PC)                 96~109 ms   ← 같은 디코딩 코드, 같은 바이트
+ *  인코딩 자체는 64ms 다(터치→첫 프레임). 즉 **남는 250ms 는 전부 우회 경로 값**이었다.
+ *  릴레이는 지우지 않는다 — 셀룰러·외부 접속의 영구 폴백이다.
+ *
+ * ⚠ 흘리는 바이트는 로컬/릴레이와 **글자 그대로 같다**([플래그 1바이트][H.264]). 화면 코드가
+ *  경로마다 갈라지면 반드시 한쪽만 고쳐진다 — 그래서 뷰어 인터페이스 하나로 모은다.
+ *
+ * @param {{ id?: string }} params  emulator.streamStart 와 같은 인자
+ * @param {{ sendText, sendBinary, closed:()=>boolean, backlog:()=>number, close:Function }} chan
+ * @param {{ startFor: Function }} deps
+ * @returns {Promise<{ detach: Function }>}
+ */
+async function openLanStream(params, chan, deps) {
+  const info = await deps.startFor(params || {});
+  const entry = streams.get(info.streamId);
+  if (!entry) throw new Error('스트림을 찾지 못했어요');
+  //  릴레이와 같은 순서: meta(텍스트) 먼저, 그 다음 config, 그 다음 프레임.
+  chan.sendText(JSON.stringify({ type: 'meta', width: info.width, height: info.height, codec: info.codec }));
+  const viewer = {
+    alive: () => !chan.closed(),
+    backlog: () => chan.backlog(),
+    write: (buf) => chan.sendBinary(buf),
+    close: () => chan.close(),
+  };
+  attach(entry, viewer);
+  return { detach: () => detach(entry, viewer) };
 }
 
 /** 프로세스 종료·데몬 재시작 때 인코더를 남기지 않는다. */
@@ -207,4 +266,8 @@ function stopAll() {
 //   그건 서버가 연결이 끊긴 걸 알아챈 뒤의 이야기다 — 우리가 먼저 확실히 끊는다.
 process.once('exit', () => { try { stopAll(); } catch (_) { /* noop */ } });
 
-module.exports = { start, stop, stopAll, sessionFor, openRelayStream, _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS };
+module.exports = {
+  start, stop, stopAll, sessionFor, openRelayStream, openLanStream,
+  attach, attachWs, detach, wsViewer,
+  _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS, BACKPRESSURE_MAX,
+};

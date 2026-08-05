@@ -120,6 +120,11 @@ test('lanDirect env — fail-closed 기본값 + 단계 개방', () => {
   assert.deepStrictEqual(lanCfg.allowedScopes({ LAN_SCOPES: 'rpc,tcp,rpc' }), ['rpc', 'tcp']);
   assert.deepStrictEqual(lanCfg.allowedScopes({ LAN_SCOPES: '' }), []);       // 전면 차단
   assert.deepStrictEqual(lanCfg.allowedScopes({ LAN_SCOPES: 'ssh,pty' }), ['pty']); // 미지의 값 폐기
+  //  화면 영상(emu)도 서버 한 줄로만 열린다 — 어휘에는 있지만 **기본값에는 없다**.
+  //   (2026-08-05: 폰 화면 지연 릴레이 310~420ms vs LAN 직결 96~109ms 실측으로 추가된 scope)
+  assert.ok(lanCfg.SCOPES_ALL.includes('emu'), 'emu 가 어휘에 없으면 grant 에서 통째로 버려진다');
+  assert.ok(!lanCfg.allowedScopes({}).includes('emu'), '기본은 여전히 닫혀 있다(명시적으로 켜야 한다)');
+  assert.deepStrictEqual(lanCfg.allowedScopes({ LAN_SCOPES: 'tcp,emu' }), ['tcp', 'emu']);
   // TTL 은 상식 범위 밖이면 무시(오타로 영구 grant 가 되는 것 방지)
   assert.strictEqual(lanCfg.grantTtlMs({}), 600000);
   assert.strictEqual(lanCfg.grantTtlMs({ LAN_GRANT_TTL_MS: '120000' }), 120000);

@@ -65,7 +65,7 @@ const MAX_UNAUTH = 8;               // 미인증 소켓
 const AUTH_FAIL_MAX = 3;            // 60s 내 실패 3회 → 그 IP 60s 차단
 const AUTH_FAIL_WINDOW_MS = 60000;
 const AUTH_BLOCK_MS = 60000;
-const ALL_SCOPES = ['tcp', 'rpc', 'pty'];
+const ALL_SCOPES = ['tcp', 'rpc', 'pty', 'emu'];
 
 // LAN RPC 허용 집합 — "지연 이득이 큰 읽기/쓰기"만. 승인·에이전트·동기화·트랜스크립트는 서버가
 //  단일 순서 권위를 갖고(이벤트 push 가 제어 WS 에 바인딩돼 있다) 릴레이로 남긴다.
@@ -79,11 +79,16 @@ function scope() {
   return ['off', 'tcp', 'rpc', 'all'].includes(v) ? v : 'tcp';
 }
 function enabled() { return scope() !== 'off'; }
-// kind: 'tcp' | 'rpc' | 'pty'
+// kind: 'tcp' | 'rpc' | 'pty' | 'emu'
 function allows(kind) {
   const s = scope();
   if (s === 'off') return false;
   if (kind === 'tcp') return true;              // tcp/rpc/all 전부
+  //  emu(모바일 화면 영상)를 tcp 와 같은 등급에 둔다. 이유는 "화면이 덜 민감해서"가 아니라
+  //   **경로가 둘 다 평문 LAN 이고, 정본 게이트는 서버(LAN_SCOPES)** 이기 때문이다 — 데몬쪽
+  //   CPT_LAN_SCOPE 는 기본이 'tcp' 라, 여기서 상위 등급에 넣으면 서버가 열어 줘도 영원히 안 열린다
+  //   (= 기능이 조용히 죽는다). 실제 개방 여부는 서버 한 줄로 통제한다는 원칙은 그대로다.
+  if (kind === 'emu') return true;
   if (kind === 'rpc') return s === 'rpc' || s === 'all';
   if (kind === 'pty') return s === 'all';
   return false;
@@ -619,7 +624,58 @@ function onConnection(sock) {
     if (!scopeOk(kind)) { sendCtrl({ t: 'openfail', ch, code: 'LAN_SCOPE' }); return; }
     if (kind === 'tcp') { openTcpChannel(ch, params); return; }
     if (kind === 'pty') { openPtyChannel(ch, params); return; }
+    if (kind === 'emu') { openEmuChannel(ch, params); return; }
     sendCtrl({ t: 'openfail', ch, code: 'LAN_KIND' });
+  }
+
+  /**
+   * 모바일 화면 라이브 영상(H.264) — emulator-stream 의 뷰어로 이 채널을 꽂는다.
+   *  프레임 조립·백프레셔·수명은 전부 emulator-stream 에 있다(경로마다 갈라지면 안 되므로).
+   *  여기가 하는 일은 "이 채널을 뷰어처럼 보이게" 하는 어댑터뿐이다.
+   */
+  function openEmuChannel(ch, params) {
+    let lib = null;
+    try { lib = require('./emulator-stream'); } catch (_) { sendCtrl({ t: 'openfail', ch, code: 'LAN_EMU_UNAVAILABLE' }); return; }
+    let closed = false;
+    let leave = null;
+    //  ★ `opened` 를 보내기 전에 나간 프레임은 **사라진다** — 클라이언트가 open 응답을 받고 나서야
+    //   수신 핸들러를 다는 게 정상 순서이기 때문이다. 그런데 스트림은 붙는 즉시 meta 와
+    //   config(SPS/PPS)를 뱉는다. 그 둘을 놓치면 다음 키프레임까지(실측 몇 분) 검은 화면이라,
+    //   여기서 큐에 담았다가 `opened` 뒤에 흘린다. (E-3 테스트가 이 순서를 못박는다.)
+    let openedSent = false;
+    const preflight = [];
+    const emit = (buf) => {
+      if (closed || sock.destroyed) return;
+      if (!openedSent) { preflight.push(buf); return; }
+      sock.write(buf);
+    };
+    const chan = {
+      closed: () => closed || sock.destroyed,
+      //  이 소켓에 아직 못 나간 바이트 = 이 뷰어의 밀린 양. 릴레이의 ws.bufferedAmount 와 같은 뜻.
+      backlog: () => (sock.writableLength || 0),
+      sendText: (s) => emit(encodeFrame(T_TEXT, ch, s)),
+      sendBinary: (buf) => emit(encodeFrame(T_DATA, ch, buf)),
+      close: () => { if (!closed) { closed = true; if (channels.get(ch) === entry) channels.delete(ch); send(encodeFrame(T_CLOSE, ch, '')); } },
+    };
+    const entry = {
+      kind: 'emu',
+      write() { /* 화면은 단방향이다 — 조작은 emulator.input RPC 로 간다 */ },
+      close() { closed = true; if (leave) { const f = leave; leave = null; f(); } },
+    };
+    channels.set(ch, entry);
+    Promise.resolve()
+      .then(() => lib.openLanStream(params, chan, { startFor: (p) => require('./emulator').streamStart(p) }))
+      .then((h) => {
+        if (closed) { h.detach(); return; }
+        leave = h.detach;
+        sendCtrl({ t: 'opened', ch });
+        openedSent = true;
+        for (const b of preflight.splice(0)) { if (!sock.destroyed) sock.write(b); }
+      })
+      .catch((e) => {
+        if (channels.get(ch) === entry) channels.delete(ch);
+        sendCtrl({ t: 'openfail', ch, code: 'LAN_EMU', message: (e && e.message) || String(e) });
+      });
   }
 
   // 프리뷰 포워딩(F1) — loopback 고정(proxy.js:120 의 SSRF 금지 원칙 승계. 임의 호스트 금지).
@@ -864,7 +920,7 @@ function connect(o = {}) {
       }
       if (type === T_DATA || type === T_TEXT) {
         const c = chans.get(ch);
-        if (c && c.onData) { try { c.onData(payload, type === T_TEXT); } catch (_) { /* noop */ } }
+        if (c) c._deliver(payload, type === T_TEXT);
         return true;
       }
       if (type === T_CLOSE) {
@@ -894,8 +950,23 @@ function connect(o = {}) {
         if (!session.alive) { rej(codedErr('LAN_CLOSED', '직결이 끊겼습니다')); return; }
         if (nextCh > 65535) { rej(codedErr('LAN_CH_EXHAUSTED', '채널 번호 고갈')); return; }
         const ch = nextCh++;
+        //  ★ open 응답과 첫 데이터가 **같은 TCP 세그먼트로** 온다. 호출측은 await 뒤에 onData 를
+        //   다는데, 그 사이(마이크로태스크 한 틱)에 도착한 프레임은 예전엔 조용히 사라졌다.
+        //   화면 스트림에서는 그게 곧 config(SPS/PPS) 유실 = 검은 화면이라 여기서 큐에 담는다.
+        //   (pty/tcp 도 같은 경합이 있었다 — 다만 그쪽은 먼저 말을 거는 쪽이 우리라 안 터졌을 뿐이다.)
+        const early = [];
+        let dataCb = null;
         const channel = {
-          ch, onData: null, onClose: null,
+          ch, onClose: null,
+          get onData() { return dataCb; },
+          set onData(fn) {
+            dataCb = fn;
+            if (fn) for (const [b, t] of early.splice(0)) { try { fn(b, t); } catch (_) { /* noop */ } }
+          },
+          _deliver(payload, isText) {
+            if (dataCb) { try { dataCb(payload, isText); } catch (_) { /* noop */ } return; }
+            early.push([payload, isText]);
+          },
           write(buf) { send(encodeFrame(T_DATA, ch, buf)); },
           sendText(s) { send(encodeFrame(T_TEXT, ch, s)); },
           close() { if (chans.delete(ch)) send(encodeFrame(T_CLOSE, ch, '')); },
@@ -914,6 +985,8 @@ function connect(o = {}) {
     }
     session.openTcp = (p) => openChannel('tcp', { port: Number(p) });
     session.openPty = (params) => openChannel('pty', params || {});
+    //  모바일 화면 영상 — onData(payload, isText) 로 meta(텍스트) 한 줄 뒤 `[플래그][H.264]` 가 온다.
+    session.openEmu = (params) => openChannel('emu', params || {});
     session.rpc = (method, params, ms = 15000) => new Promise((res, rej) => {
       if (!session.alive) { rej(codedErr('LAN_CLOSED', '직결이 끊겼습니다')); return; }
       const id = nextId++;

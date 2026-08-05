@@ -24,7 +24,10 @@ function lanEnabled(env = process.env) {
 
 // 존재하는 scope 전체(와이어 계약 §2.3 의 scopes) — 이 밖의 문자열은 전부 버린다.
 //  tcp = 프리뷰 포트 포워딩(raw TCP 채널) / rpc = fs 등 제어 RPC / pty = 터미널 스트림
-const SCOPES_ALL = ['tcp', 'rpc', 'pty'];
+//  emu = 모바일 화면 라이브 영상(H.264). 2026-08-05 실측으로 들어왔다 — 폰의 화면 지연이
+//        릴레이 310~420ms vs LAN 직결 96~109ms 였다(인코딩 자체는 64ms). 남는 250ms 가
+//        전부 "폰→CF→홈서버→CF→PC" 우회 값이라, 같은 Wi-Fi 일 때만 그 우회를 뺀다.
+const SCOPES_ALL = ['tcp', 'rpc', 'pty', 'emu'];
 
 // 서버가 grant 에 실어 줄 수 있는 scope 집합. 미설정 기본 = ['tcp'] (프리뷰만).
 //  LAN_SCOPES='tcp,rpc' 로 fs 를, 'tcp,rpc,pty' 로 터미널까지 단계 개방한다.

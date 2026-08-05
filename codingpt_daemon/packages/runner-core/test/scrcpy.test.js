@@ -177,3 +177,84 @@ test('iOS 시뮬레이터에는 라이브 화면을 약속하지 않는다(인�
     /지원하지 않아요/,
   );
 });
+
+// ── 경로가 늘어도 바이트는 하나 ────────────────────────────────────────────
+// 2026-08-05: 폰의 화면 지연을 실측하고(릴레이 310~420ms vs LAN 직결 96~109ms) LAN 경로를 더했다.
+//  이제 같은 프레임이 세 갈래로 나간다 — 로컬 웹뷰 WS · 릴레이 WS · LAN 채널.
+//  ★ 여기서 못박는 것: **셋이 같은 바이트를 낸다.** 갈라지면 화면 코드가 세 벌이 되고,
+//   그러면 반드시 한쪽만 고쳐진다(이 리포에서 이미 여러 번 그랬다).
+test('★ LAN 직결과 릴레이는 같은 바이트를 낸다(meta 한 줄 + [플래그][H.264])', async () => {
+  const stream = require('../emulator-stream');
+  const CONFIG = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42]);   // SPS 흉내
+  const KEY = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x65, 0xaa]);
+  const DELTA = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x41, 0xbb]);
+
+  // 살아 있는 스트림 하나를 손으로 만든다(실제 기기·adb 없이 배선만 본다).
+  const entry = {
+    id: 'S1', serial: 'emulator-5554', deviceId: 'android:emulator-5554',
+    token: 't', clients: new Set(), meta: { codec: 'h264', width: 576, height: 1280 },
+    closeTimer: setTimeout(() => {}, 60000), session: { closed: false, configPacket: CONFIG, close() {} },
+  };
+  stream._streams.set(entry.id, entry);
+
+  const lanOut = [];
+  const chan = {
+    closed: () => false,
+    backlog: () => 0,
+    sendText: (s) => lanOut.push(['text', s]),
+    sendBinary: (b) => lanOut.push(['bin', Buffer.from(b)]),
+    close: () => lanOut.push(['close']),
+  };
+  const startFor = async () => ({ streamId: entry.id, width: 576, height: 1280, codec: 'h264' });
+  const handle = await stream.openLanStream({ id: entry.deviceId }, chan, { startFor });
+
+  // 릴레이 쪽은 ws 를 흉내 낸다(같은 attach/send 를 타는지 본다).
+  const wsOut = [];
+  const fakeWs = { readyState: 1, bufferedAmount: 0, binaryType: '', send: (b) => wsOut.push(Buffer.from(b)) };
+  stream.attach(entry, stream.wsViewer(fakeWs));
+
+  // 프레임을 흘린다 — start() 의 onFrame 과 같은 방식으로.
+  for (const [flags, data] of [[stream.FLAG_CONFIG, CONFIG], [stream.FLAG_KEY, KEY], [0, DELTA]]) {
+    for (const v of entry.clients) {
+      const head = Buffer.alloc(1); head.writeUInt8(flags, 0);
+      if (v.backlog() <= stream.BACKPRESSURE_MAX && v.alive()) v.write(Buffer.concat([head, data]));
+    }
+  }
+
+  // meta 가 **먼저** 나간다(화면이 좌표계를 알아야 입력을 보낸다).
+  assert.equal(lanOut[0][0], 'text');
+  assert.deepEqual(JSON.parse(lanOut[0][1]), { type: 'meta', width: 576, height: 1280, codec: 'h264' });
+
+  // 그 다음 바이너리는 붙는 순간의 config(attach) + 흘린 3장.
+  const lanBins = lanOut.filter((x) => x[0] === 'bin').map((x) => x[1]);
+  assert.deepEqual(lanBins.map((b) => b[0]), [1, 1, 2, 0], 'attach 시 config 선행 → config/key/delta');
+  assert.deepEqual(lanBins[1].subarray(1), CONFIG);
+  assert.deepEqual(lanBins[2].subarray(1), KEY);
+  assert.deepEqual(lanBins[3].subarray(1), DELTA);
+
+  // ★ 릴레이(ws) 가 받은 것과 LAN 이 받은 것이 **같아야** 한다.
+  assert.deepEqual(wsOut.map((b) => b.toString('hex')), lanBins.map((b) => b.toString('hex')));
+
+  const before = entry.clients.size;
+  handle.detach();
+  assert.equal(entry.clients.size, before - 1, 'detach 하면 뷰어 집합에서 빠진다');
+  clearTimeout(entry.closeTimer);
+  stream._streams.delete(entry.id);
+});
+
+test('★ 느린 뷰어는 프레임을 버리는 게 아니라 끊는다(델타를 빼면 몇 분간 깨진 화면이 남는다)', () => {
+  const stream = require('../emulator-stream');
+  const events = [];
+  const viewer = {
+    alive: () => true,
+    backlog: () => stream.BACKPRESSURE_MAX + 1,
+    write: () => events.push('write'),
+    close: () => events.push('close'),
+  };
+  const entry = { clients: new Set([viewer]), session: { configPacket: null }, closeTimer: null };
+  for (const v of entry.clients) {
+    if (v.backlog() > stream.BACKPRESSURE_MAX) v.close(4003, 'too slow');
+    else v.write(Buffer.alloc(1));
+  }
+  assert.deepEqual(events, ['close'], '밀리면 그 뷰어만 끊는다(프레임 드롭 금지)');
+});

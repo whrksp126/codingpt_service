@@ -131,12 +131,18 @@ const dstream = read(path.resolve('../codingpt_daemon/packages/runner-core/emula
 ok(/const FLAG_CONFIG = 1;/.test(dstream) && /const FLAG_KEY = 2;/.test(dstream),
   '데몬의 플래그 값이 두 화면과 같다');
 ok(/openRelayStream/.test(dstream), '릴레이 경로가 있다(폰·다른 PC)');
-//  ★ 로컬 WS 와 릴레이가 **같은 send() 를 탄다** — 다른 함수로 갈라지면 형식이 갈라진다.
-const attachBody = dstream.slice(dstream.indexOf('function attach('), dstream.indexOf('function send('));
-ok(/send\(ws, FLAG_CONFIG/.test(attachBody),
+ok(/openLanStream/.test(dstream), 'LAN 직결 경로가 있다(같은 Wi-Fi — 실측 릴레이 310~420ms vs 96~109ms)');
+//  ★ 세 경로(로컬 웹뷰 WS · 릴레이 WS · LAN 채널)가 **같은 attach() 를 탄다** — 갈라지면 형식이 갈라진다.
+const attachBody = dstream.slice(dstream.indexOf('function attach('), dstream.indexOf('function detach('));
+ok(/send\(viewer, FLAG_CONFIG/.test(attachBody),
   '★ 새로 붙은 시청자에게 config 를 먼저 준다(없으면 다음 키프레임까지 검은 화면)');
-ok(/entry\.clients\.add\(ws\)/.test(attachBody) && /openRelayStream[\s\S]*attach\(entry, ws\)/.test(dstream),
-  '★ 릴레이 시청자도 로컬과 같은 clients 집합에 들어간다(브로드캐스트 한 벌)');
+ok(/entry\.clients\.add\(viewer\)/.test(attachBody), '뷰어 집합은 attach 한 곳에서만 늘어난다');
+for (const [fn, label] of [['attachWs', '로컬 웹뷰'], ['openRelayStream', '릴레이'], ['openLanStream', 'LAN 직결']]) {
+  const start = dstream.indexOf(`function ${fn}(`);
+  const body = dstream.slice(start, start + 2200);
+  ok(start > 0 && /attach\(entry, viewer\)/.test(body),
+    `★ ${label} 시청자도 같은 clients 집합에 들어간다(브로드캐스트 한 벌)`);
+}
 
 // ── 7. back 릴레이 배관이 실제로 이어져 있다 ─────────────────────────────────
 const BACK = path.resolve('../codingpt_back');

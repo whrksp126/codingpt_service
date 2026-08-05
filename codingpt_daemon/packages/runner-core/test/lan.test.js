@@ -587,6 +587,58 @@ test('F-2. 소진된 grant 로 시작해도 refresh 1회로 직결 유지(릴레
   lan.resetPaths();
 });
 
+// ── E-3. 모바일 화면 영상(emu) 채널 ──────────────────────────────────────
+// 2026-08-05 실측으로 들어온 경로다. 폰의 화면 지연을 시계 화면으로 재 보니
+//   릴레이(폰→CF→홈서버→CF→PC) 310~420ms  ·  LAN 직결(폰→PC) 96~109ms  (인코딩 자체는 64ms)
+// 여기서 못 박는 것: 실제 소켓·실제 핸드셰이크로 열었을 때 **meta 가 먼저 오고, 그 뒤 바이트가
+//  릴레이와 같은 [플래그][H.264] 형식**이라는 것. 그리고 채널을 닫으면 뷰어에서 빠진다는 것
+//  (안 빠지면 아무도 안 보는데 인코더가 계속 돌아 배터리를 먹는다).
+test('E-3. emu 채널 — meta 선행 + 릴레이와 같은 바이트 + 닫으면 뷰어에서 빠진다', async () => {
+  const stream = require('../emulator-stream');
+  const emuMod = require('../emulator');
+  const CONFIG = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x67, 0x42]);
+  const KEY = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x65, 0xaa]);
+
+  const entry = {
+    id: 'LANTEST', serial: 'emulator-9999', deviceId: 'android:emulator-9999',
+    token: 't', clients: new Set(), meta: { codec: 'h264', width: 576, height: 1280 },
+    closeTimer: null, session: { closed: false, configPacket: CONFIG, close() {} },
+  };
+  stream._streams.set(entry.id, entry);
+  const prevStart = emuMod.streamStart;
+  emuMod.streamStart = async () => ({ streamId: entry.id, width: 576, height: 1280, codec: 'h264' });
+
+  const { g } = newGrant({ scopes: ['emu'] });
+  const s = await lan.connect({ host: '127.0.0.1', port: LAN_PORT, grantId: g.grantId, secret: g.secret, clientKey: g.clientKey, kind: 'phone' });
+  try {
+    assert.ok(s.scopes.includes('emu'), '데몬이 emu 를 서 준다고 알려야 한다');
+    const rx = [];
+    const ch = await s.openEmu({ id: entry.deviceId });
+    ch.onData = (b, isText) => rx.push([isText ? 'text' : 'bin', Buffer.from(b)]);
+    for (let i = 0; i < 60 && rx.length < 2; i++) await sleep(25);
+
+    assert.strictEqual(rx[0][0], 'text', 'meta 가 먼저다(화면이 좌표계를 알아야 입력을 보낸다)');
+    assert.deepStrictEqual(JSON.parse(rx[0][1].toString()), { type: 'meta', width: 576, height: 1280, codec: 'h264' });
+    assert.strictEqual(rx[1][0], 'bin');
+    assert.strictEqual(rx[1][1][0], stream.FLAG_CONFIG, '붙는 즉시 SPS/PPS — 없으면 다음 키프레임까지 검은 화면');
+    assert.deepStrictEqual(rx[1][1].subarray(1), CONFIG);
+
+    // 살아 있는 스트림에 프레임을 흘리면 그대로 온다.
+    assert.strictEqual(entry.clients.size, 1, '뷰어로 등록돼 있어야 한다');
+    for (const v of entry.clients) v.write(Buffer.concat([Buffer.from([stream.FLAG_KEY]), KEY]));
+    for (let i = 0; i < 60 && rx.length < 3; i++) await sleep(25);
+    assert.deepStrictEqual(rx[2][1], Buffer.concat([Buffer.from([stream.FLAG_KEY]), KEY]));
+
+    ch.close();
+    for (let i = 0; i < 60 && entry.clients.size; i++) await sleep(25);
+    assert.strictEqual(entry.clients.size, 0, '채널을 닫으면 뷰어에서 빠진다(안 빠지면 인코더가 계속 돈다)');
+  } finally {
+    s.close();
+    emuMod.streamStart = prevStart;
+    stream._streams.delete(entry.id);
+  }
+});
+
 // ── H. 문구 규약 + 킬스위치 ──────────────────────────────────────────────
 test('H. 실패 문구 규약(호스트 오프라인 오탐 금지) + 킬스위치 한 스위치 원복', () => {
   // 주석은 규율을 **설명**하므로 제외하고 실제 코드만 훑는다.
@@ -607,11 +659,18 @@ test('H. 실패 문구 규약(호스트 오프라인 오탐 금지) + 킬스위�
     assert.strictEqual(lan.allows('tcp'), false);
     delete process.env.CPT_LAN;
     process.env.CPT_LAN_SCOPE = 'tcp';
-    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp'], '기본 스코프는 프리뷰(tcp)만');
+    //  기본 등급(tcp)에서 데몬이 서 줄 수 있는 것 = 프리뷰(tcp)와 모바일 화면 영상(emu).
+    //   ★ "데몬이 서 줄 수 있다" ≠ "열린다". 실제 개방은 back 의 LAN_SCOPES 가 grant 에 실어 줄 때만
+    //    일어나고 그 기본값은 여전히 ['tcp'] 다(back/config/lanDirect.js). 단계 개방의 정본 게이트가
+    //    서버 한 줄이라는 규율은 그대로다 — 데몬쪽을 상위 등급에 두면 서버가 열어도 안 열려서
+    //    기능이 조용히 죽는다(그 조합은 아무 로그도 안 남긴다).
+    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp', 'emu'], '기본 등급 = 프리뷰 + 화면영상');
+    assert.strictEqual(lan.allows('pty'), false, '터미널은 기본 등급에서 절대 열리지 않는다');
+    assert.strictEqual(lan.allows('rpc'), false, 'fs RPC 도 기본 등급 아님');
     process.env.CPT_LAN_SCOPE = 'rpc';
-    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp', 'rpc']);
+    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp', 'rpc', 'emu']);
     process.env.CPT_LAN_SCOPE = 'all';
-    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp', 'rpc', 'pty']);
+    assert.deepStrictEqual(lan.scopesForDaemon(), ['tcp', 'rpc', 'pty', 'emu']);
   } finally {
     if (prev === undefined) delete process.env.CPT_LAN; else process.env.CPT_LAN = prev;
     process.env.CPT_LAN_SCOPE = prevScope;
