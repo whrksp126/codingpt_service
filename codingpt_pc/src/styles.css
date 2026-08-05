@@ -2240,7 +2240,9 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 /* ── 모바일 화면 pane(emulator-view.js) ─────────────────────────────────────
    프리뷰와 달리 네이티브 웹뷰가 아니라 <img> 다 — 겹침·좌표 보정 문제가 통째로 없다.
    화면은 `object-fit: contain` 이라 여백이 생기고, 클릭 좌표는 그 여백을 빼고 환산한다. */
-.emu { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--base); }
+/*  ⚠ width/flex 를 명시한다: 혼합 탭의 호스트(.pane-mixed)가 flex 컨테이너라, 이게 없으면
+    .emu 가 내용 폭(=기기 화면 폭)으로 쪼그라들어 pane 오른쪽이 통째로 빈다. */
+.emu { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0; background: var(--base); }
 .emu-bar { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px;
   border-bottom: 1px solid var(--border); flex: 0 0 auto; }
 .emu-bar-name { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0;
@@ -2279,6 +2281,8 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-row-t b { font-weight: 500; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .emu-row-t i { font-style: normal; color: var(--dim); font-size: 10.5px; margin-top: 1px; }
 .emu-empty { color: var(--dim); font-size: 12px; padding: 10px 2px; line-height: 1.7; }
+/* 영상이 안 돼 폴링으로 돌아갔을 때의 이유 한 줄 — 느린 까닭을 짐작하게 두지 않는다. */
+.emu-note { color: var(--dim); font-size: 11px; padding: 6px 10px; line-height: 1.5; border-top: 1px solid var(--border); }
 .emu-again { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 0;
   background: none; border: 0; color: var(--text3); font-size: 12px; cursor: pointer; }
 

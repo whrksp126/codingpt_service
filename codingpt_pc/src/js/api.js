@@ -255,6 +255,13 @@ export const api = {
   emulatorInput: (body) => invoke("emulator_local", { cmd: "emulator.input", args: body || {} }),
   emulatorPower: (id, action) =>
     invoke("emulator_local", { cmd: action === "shutdown" ? "emulator.shutdown" : "emulator.boot", args: { id } }),
+  //  라이브 화면(H.264) — 데몬이 로컬 WebSocket 주소를 돌려주고, 웹뷰가 거기에 직접 붙는다.
+  //   프레임을 이 invoke 통로로 실어 나르지 않는 이유: 초당 20~30개의 바이너리를 요청/응답
+  //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
+  emulatorStreamStart: (id, opts) =>
+    invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
+  emulatorStreamStop: (streamId) =>
+    invoke("emulator_local", { cmd: "emulator.stream.stop", args: { streamId } }),
 
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와

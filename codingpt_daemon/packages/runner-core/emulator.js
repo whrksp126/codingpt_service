@@ -462,6 +462,66 @@ const ANDROID_KEYS = {
 };
 const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', appSwitch: 'APPLE_PAY' };
 
+/**
+ * 컨트롤 소켓으로 보내기 — 세션이 없거나 소켓이 죽었으면 **null 을 돌려** 호출측이 adb 로 물러선다.
+ *  조용히 성공을 돌려주면 사용자는 기기가 멈춘 줄 안다.
+ */
+async function inputViaScrcpy(a, p) {
+  let sess = null;
+  try { sess = require('./emulator-stream').sessionFor(p.value); } catch (_) { return null; }
+  if (!sess) return null;
+  const S = require('./scrcpy-protocol');
+  const type = String(a.type || '');
+  /**
+   * ★ 좌표는 **영상 좌표계**여야 한다(기기 픽셀이 아니다). scrcpy 의 `getPhysicalPoint` 는 클라이언트가
+   *  보낸 화면 크기가 지금 인코딩 중인 영상 크기와 다르면 그 이벤트를 **조용히 버린다**. 기기 픽셀
+   *  (1440x2960)을 보내던 동안 RPC 는 `ok:true, via:'scrcpy'` 를 돌려주는데 화면은 꼼짝도 안 했다
+   *  (2026-08-05 실측: 같은 드래그가 영상 좌표계로는 34프레임, 기기 좌표계로는 0프레임).
+   *  회전하면 영상 크기가 바뀌므로, 화면이 지금 보고 있는 크기를 실어 보내면 그걸 우선한다.
+   */
+  const vw = Number(a.videoWidth) || (sess.meta && sess.meta.width) || 0;
+  const vh = Number(a.videoHeight) || (sess.meta && sess.meta.height) || 0;
+  if (!vw || !vh) return null;
+  const W = vw, H = vh;
+  const pt = (x, y) => ({ x: px(x, W), y: px(y, H), screenWidth: W, screenHeight: H, pointerId: 0 });
+
+  if (type === 'tap' || type === 'longPress') {
+    if (!sess.send(S.encodeTouch({ action: 'down', ...pt(a.x, a.y) }))) return null;
+    //  롱프레스는 누른 채로 기다렸다 뗀다(스와이프와 달리 좌표가 안 움직인다).
+    await new Promise((r) => setTimeout(r, type === 'longPress' ? 600 : 60));
+    sess.send(S.encodeTouch({ action: 'up', ...pt(a.x, a.y) }));
+    return { ok: true, via: 'scrcpy' };
+  }
+  if (type === 'swipe') {
+    const ms = Math.max(30, Math.min(3000, Number(a.durationMs) || 220));
+    const steps = Math.max(2, Math.min(24, Math.round(ms / 16)));
+    if (!sess.send(S.encodeTouch({ action: 'down', ...pt(a.x, a.y) }))) return null;
+    for (let i = 1; i <= steps; i++) {
+      const k = i / steps;
+      await new Promise((r) => setTimeout(r, ms / steps));
+      sess.send(S.encodeTouch({
+        action: 'move',
+        ...pt(Number(a.x) + (Number(a.x2) - Number(a.x)) * k, Number(a.y) + (Number(a.y2) - Number(a.y)) * k),
+      }));
+    }
+    sess.send(S.encodeTouch({ action: 'up', ...pt(a.x2, a.y2) }));
+    return { ok: true, via: 'scrcpy' };
+  }
+  if (type === 'key') {
+    const code = S.KEYCODES[String(a.key || '')];
+    if (code == null) return null;   // 우리가 여는 키가 아니다 — adb 경로의 검증에 맡긴다
+    if (!sess.send(S.encodeKeycode({ action: 'down', keycode: code }))) return null;
+    sess.send(S.encodeKeycode({ action: 'up', keycode: code }));
+    return { ok: true, via: 'scrcpy' };
+  }
+  if (type === 'text') {
+    //  ★ 컨트롤 소켓은 UTF-8 을 그대로 받는다 — `adb shell input text` 가 못 넣던 한글·기호도 들어간다.
+    if (!sess.send(S.encodeText(String(a.text || '')))) return null;
+    return { ok: true, via: 'scrcpy' };
+  }
+  return null;
+}
+
 async function input(args) {
   const a = args || {};
   const p = parseId(a.id);
@@ -471,6 +531,11 @@ async function input(args) {
 
   if (p.scheme === 'android') {
     if (!t.adb) throw new Error('adb 를 찾을 수 없어요');
+    //  ★ 라이브 스트림이 떠 있으면 **이미 열려 있는 컨트롤 소켓**으로 보낸다. `adb shell input tap`
+    //   은 탭 한 번에 프로세스를 새로 띄워 100ms 가 넘게 든다 — 화면이 30fps 로 흘러도 손끝이
+    //   그만큼 늦으면 여전히 굼떠 보인다. 소켓은 바이트만 쓴다.
+    const viaControl = await inputViaScrcpy(a, p);
+    if (viaControl) return viaControl;
     const adb = (rest, timeoutMs) => run(t.adb, ['-s', p.value, 'shell', ...rest], { timeoutMs: timeoutMs || 10000 });
     if (type === 'tap' || type === 'longPress') {
       const s = await screenSize(a.id, p);
@@ -558,10 +623,39 @@ async function openUrl(args) {
   throw new Error('꺼져 있는 기기예요 — 먼저 켜 주세요');
 }
 
+/**
+ * 라이브 스트림 시작 — 화면이 H.264 를 직접 받는다(폴링이 아니라).
+ *  안드로이드만 된다. iOS 시뮬레이터는 이런 인코더 경로가 없어 계속 프레임 폴링을 쓴다.
+ */
+async function streamStart(args) {
+  const a = args || {};
+  const p = parseId(a.id);
+  if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme !== 'android') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
+  const t = tools();
+  if (!t.adb) throw new Error('adb 를 찾을 수 없어요');
+  const stream = lazyStream();
+  const r = await stream.start({
+    adb: t.adb, serial: p.value, deviceId: a.id,
+    maxSize: a.maxSize, maxFps: a.maxFps, bitRate: a.bitRate,
+  });
+  //  화면 크기는 **기기 실제 픽셀**이어야 한다(스트림 해상도가 아니라) — 좌표 환산의 기준이다.
+  if (!lastSize.get(a.id)) { try { await screenSize(a.id, p); } catch (_) { /* 조작할 때 다시 잰다 */ } }
+  return r;
+}
+
+let _streamMod = null;
+function lazyStream() {
+  if (!_streamMod) _streamMod = require('./emulator-stream');
+  return _streamMod;
+}
+
 /** RPC 진입점 — 유닉스 소켓(cpt)과 백엔드 릴레이(control.js)가 **둘 다** 여기로 온다. */
 async function handle(method, params) {
   const m = String(method || '');
   if (m === 'emulator.list') return list();
+  if (m === 'emulator.stream.start') return streamStart(params);
+  if (m === 'emulator.stream.stop') return lazyStream().stop(String((params || {}).streamId || ''));
   if (m === 'emulator.boot') return boot(params && params.id);
   if (m === 'emulator.shutdown') return shutdown(params && params.id);
   if (m === 'emulator.frame') return frame(params);
@@ -571,7 +665,7 @@ async function handle(method, params) {
 }
 
 module.exports = {
-  handle, list, boot, shutdown, frame, input, openUrl,
+  handle, list, boot, shutdown, frame, input, openUrl, streamStart,
   // 테스트용
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,

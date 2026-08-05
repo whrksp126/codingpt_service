@@ -6,7 +6,11 @@
 //   ① 프레임은 **당겨** 온다(한 장 받고 다음 장 요청). 밀면 느린 회선에서 지연이 눈덩이가 된다.
 //   ② 좌표는 **0~1 비율**로 보낸다. 픽셀은 기기만 안다 — 여기서 환산하면 배율·회전에 어긋난다.
 //
-// 프리뷰와 달리 네이티브 웹뷰를 안 쓴다(그냥 <img> 다) — 겹침·좌표 보정 문제가 통째로 없다.
+// ★ 2026-08-05 — 안드로이드는 **라이브 H.264**(scrcpy)를 받아 <canvas> 에 그린다. 프레임 폴링은
+//  iOS 시뮬레이터와, 스트리밍이 안 되는 상황의 폴백으로만 남는다. 왜 바꿨는지는 데몬
+//  scrcpy-protocol.js 머리주석에 실측과 함께 있다(요약: 폴링 3.4fps/300ms 지연 → 20fps/6KB·s 유휴).
+//
+// 프리뷰와 달리 네이티브 웹뷰를 안 쓴다(그냥 <img>/<canvas> 다) — 겹침·좌표 보정 문제가 통째로 없다.
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import * as i18n from "./i18n/index.js";
@@ -23,6 +27,20 @@ const MIN_FRAME_GAP_MS = 120;
 
 /** 에뮬레이터 콜드 부팅을 기다리는 상한. 1분을 넘기는 기기가 흔해서 넉넉히 잡는다. */
 const BOOT_WAIT_MS = 150_000;
+
+/**
+ * H.264 Annex-B 로 디코딩한다. `description` 없이 configure 하면 WebCodecs 가 Annex-B 로 읽고,
+ *  첫 키프레임 앞에 SPS/PPS(config 패킷)를 붙여 주면 된다.
+ */
+const H264_CODEC = 'avc1.640028';
+/** 데몬이 프레임 앞에 붙이는 1바이트 머리(emulator-stream.js 와 같은 값). */
+const FLAG_CONFIG = 1;
+const FLAG_KEY = 2;
+
+/** 이 웹뷰가 H.264 를 풀 수 있는가 — 없으면 조용히 폴링으로 돌아간다(빈 화면 금지). */
+function canDecodeVideo() {
+  return typeof globalThis.VideoDecoder === 'function' && typeof globalThis.EncodedVideoChunk === 'function';
+}
 
 export class EmulatorView {
   /**
@@ -51,6 +69,14 @@ export class EmulatorView {
      *  이 이름이 남아 있는 동안 목록을 다시 읽을 때마다 같은 이름의 새 행을 찾아 **따라간다**.
      */
     this.bootingAvd = null;
+    /** 라이브 스트림(있으면 폴링을 안 돈다) */
+    this.stream = null;      // { streamId, url }
+    this.ws = null;
+    this.decoder = null;
+    this.canvasEl = null;
+    this.configBytes = null;
+    this.sawKeyFrame = false;
+    this.videoOn = false;    // 지금 영상으로 보고 있는가(폴링과 배타)
 
     this.el = document.createElement("div");
     this.el.className = "emu";
@@ -61,6 +87,7 @@ export class EmulatorView {
 
   dispose() {
     this.disposed = true;
+    this.stopVideo();
     try { this.el.remove(); } catch (_) { /* noop */ }
   }
 
@@ -69,7 +96,15 @@ export class EmulatorView {
     const next = !!on;
     if (next === this.visible) return;
     this.visible = next;
-    if (next) { this.lastTouch = Date.now(); this.ensureLoop(); }
+    if (next) {
+      this.lastTouch = Date.now();
+      //  숨어 있는 동안 데몬이 유휴 정리로 스트림을 접었을 수 있다 — 다시 붙여 본다.
+      if (this.deviceId && !this.videoOn) void this.startVideo().then((ok) => { if (!ok) this.ensureLoop(); });
+      else this.ensureLoop();
+    } else {
+      //  가려졌으면 인코더도 끈다(안 보이는 화면을 계속 인코딩하는 건 그 자체로 결함이다).
+      this.stopVideo();
+    }
   }
 
   async loadDevices() {
@@ -116,21 +151,127 @@ export class EmulatorView {
   device() { return (this.devices || []).find((d) => d.id === this.deviceId) || null; }
 
   select(id) {
+    this.stopVideo();               // 기기를 바꾸면 이전 기기의 인코더를 반드시 끈다
     this.deviceId = id;
     this.frameUrl = null;
     this.frameAspect = null;
+    this.videoNote = '';
     this.lastTouch = Date.now();
     this.onDeviceChange(id);
+    this.render();
+    //  영상이 붙으면 폴링은 시작도 안 한다. 안 붙으면 그때 폴링을 돈다.
+    if (id) void this.startVideo().then((ok) => { if (!ok && !this.disposed) this.ensureLoop(); });
+  }
+
+  /**
+   * 라이브 영상 붙이기. 되면 폴링을 아예 안 돈다.
+   *  ⚠ 실패는 **조용히** 폴링으로 돌아간다 — 안드로이드 SDK 는 있는데 인터넷이 없어 도우미를 못
+   *   받는 상황 등에서 화면이 통째로 비면 안 된다. 대신 왜 느린지는 아래 힌트 줄에 적는다.
+   */
+  async startVideo() {
+    if (this.videoOn || this.disposed || !this.deviceId) return false;
+    if (!this.deviceId.startsWith('android:')) return false;   // iOS 시뮬레이터는 인코더 경로가 없다
+    if (!canDecodeVideo()) { this.videoNote = i18n.t('이 창은 영상 디코딩을 지원하지 않아 화면을 한 장씩 받아요.'); return false; }
+    let info;
+    try { info = await api.emulatorStreamStart(this.deviceId); }
+    catch (e) { this.videoNote = e && e.message ? e.message : String(e); return false; }
+    if (this.disposed || !this.deviceId) { void api.emulatorStreamStop(info.streamId).catch(() => {}); return false; }
+    this.stream = info;
+    this.videoNote = '';
+    this.videoOn = true;
+    this.frameAspect = info.width && info.height ? info.width / info.height : this.frameAspect;
+    this.render();                       // <img> → <canvas> 로 갈아끼운다
+    this.openVideoSocket();
+    return true;
+  }
+
+  openVideoSocket() {
+    const decoder = new globalThis.VideoDecoder({
+      output: (frame) => {
+        const cv = this.canvasEl;
+        if (!this.disposed && cv) {
+          //  캔버스 크기를 매 프레임 만지면 백스토어가 다시 잡히고 리플로우가 난다 — 바뀔 때만.
+          if (cv.width !== frame.displayWidth || cv.height !== frame.displayHeight) {
+            cv.width = frame.displayWidth;
+            cv.height = frame.displayHeight;
+            this.frameAspect = frame.displayWidth / frame.displayHeight;
+          }
+          cv.getContext('2d')?.drawImage(frame, 0, 0);
+          if (this.errEl && this.err) { this.err = null; this.errEl.textContent = ''; }
+        }
+        frame.close();
+      },
+      error: () => this.fallbackToPolling(i18n.t('영상을 그리지 못해 한 장씩 받는 방식으로 돌아갔어요.')),
+    });
+    decoder.configure({ codec: H264_CODEC, optimizeForLatency: true });
+    this.decoder = decoder;
+
+    const ws = new WebSocket(this.stream.url);
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    //  10초 안에 한 장도 못 받으면 뭔가 잘못된 것이다 — 검은 화면으로 두지 않고 폴링으로 돌아간다.
+    let firstTimer = setTimeout(() => this.fallbackToPolling(i18n.t('화면이 오지 않아 한 장씩 받는 방식으로 돌아갔어요.')), 10000);
+    ws.onmessage = (ev) => {
+      const buf = new Uint8Array(ev.data);
+      const flags = buf[0];
+      const body = buf.subarray(1);
+      if (flags & FLAG_CONFIG) { this.configBytes = body.slice(); return; }
+      const isKey = !!(flags & FLAG_KEY);
+      //  Annex-B 는 첫 IDR 앞에 SPS/PPS 가 있어야 한다 — 첫 키프레임에 붙여 준다.
+      if (!this.sawKeyFrame) {
+        if (!isKey) return;                       // 키프레임 전의 델타는 풀 수 없다(버린다)
+        this.sawKeyFrame = true;
+      }
+      let data = body;
+      if (isKey && this.configBytes) {
+        data = new Uint8Array(this.configBytes.length + body.length);
+        data.set(this.configBytes, 0);
+        data.set(body, this.configBytes.length);
+      }
+      if (firstTimer) { clearTimeout(firstTimer); firstTimer = null; }
+      try {
+        this.decoder.decode(new globalThis.EncodedVideoChunk({
+          type: isKey ? 'key' : 'delta',
+          timestamp: (this.vpts = (this.vpts || 0) + 1000),
+          data,
+        }));
+      } catch (_) { /* 한 장 못 풀어도 다음 키프레임에서 복구된다 */ }
+    };
+    ws.onerror = () => { /* close 에서 처리 */ };
+    ws.onclose = () => {
+      if (firstTimer) { clearTimeout(firstTimer); firstTimer = null; }
+      if (this.disposed || !this.videoOn) return;
+      this.fallbackToPolling(i18n.t('영상 연결이 끊겨 한 장씩 받는 방식으로 돌아갔어요.'));
+    };
+  }
+
+  /** 영상을 접고 폴링으로 — 화면이 비는 것보다 느린 게 낫다. */
+  fallbackToPolling(note) {
+    if (!this.videoOn) return;
+    this.stopVideo();
+    this.videoNote = note || '';
+    if (this.disposed) return;
     this.render();
     this.ensureLoop();
   }
 
+  stopVideo() {
+    this.videoOn = false;
+    this.sawKeyFrame = false;
+    this.configBytes = null;
+    const { ws, decoder, stream } = this;
+    this.ws = null; this.decoder = null; this.stream = null; this.canvasEl = null;
+    if (ws) { ws.onclose = null; ws.onmessage = null; try { ws.close(); } catch (_) { /* noop */ } }
+    if (decoder) { try { decoder.close(); } catch (_) { /* noop */ } }
+    if (stream) api.emulatorStreamStop(stream.streamId).catch(() => {});
+  }
+
   /** 프레임 루프 — **한 장을 받고 나서** 다음 장을 요청한다(겹쳐 쏘지 않는다). */
   ensureLoop() {
-    if (this.running || !this.deviceId || this.disposed || !this.visible) return;
+    if (this.running || !this.deviceId || this.disposed || !this.visible || this.videoOn) return;
     this.running = true;
     (async () => {
-      while (!this.disposed && this.deviceId && this.visible) {
+      while (!this.disposed && this.deviceId && this.visible && !this.videoOn) {
         if (Date.now() - this.lastTouch > IDLE_AFTER_MS) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
@@ -159,7 +300,7 @@ export class EmulatorView {
 
   /** 화면 좌표 → 0~1. `object-fit: contain` 의 **여백을 빼고** 계산한다. */
   ratioOf(ev) {
-    const img = this.imgEl;
+    const img = this.imgEl || this.canvasEl;
     if (!img) return null;
     const r = img.getBoundingClientRect();
     const ar = this.frameAspect;
@@ -179,7 +320,14 @@ export class EmulatorView {
   async send(body) {
     if (!this.deviceId) return;
     this.lastTouch = Date.now();
-    try { await api.emulatorInput({ id: this.deviceId, ...body }); this.err = null; }
+    //  ★ 라이브 영상일 때는 **지금 보고 있는 영상 크기**를 같이 보낸다. scrcpy 는 클라이언트가 말한
+    //   화면 크기가 인코딩 중인 영상 크기와 다르면 그 입력을 조용히 버린다(기기 픽셀을 보내면
+    //   눌러도 아무 일도 안 일어난다 — 2026-08-05 실측). 회전하면 캔버스 크기가 따라 바뀌므로
+    //   여기서 읽는 값이 항상 정답이다.
+    const cv = this.canvasEl;
+    const vs = this.videoOn && cv && cv.width && cv.height
+      ? { videoWidth: cv.width, videoHeight: cv.height } : {};
+    try { await api.emulatorInput({ id: this.deviceId, ...vs, ...body }); this.err = null; }
     catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
   }
 
@@ -212,6 +360,7 @@ export class EmulatorView {
   render() {
     this.el.innerHTML = "";
     this.imgEl = null;
+    this.canvasEl = null;
     this.errEl = null;
 
     // ── 기기 선택 ──
@@ -290,12 +439,20 @@ export class EmulatorView {
 
     const stage = document.createElement("div");
     stage.className = "emu-stage";
-    const img = document.createElement("img");
-    img.className = "emu-img";
-    img.draggable = false;
-    if (this.frameUrl) img.src = this.frameUrl;
-    this.imgEl = img;
-    stage.appendChild(img);
+    //  라이브 영상이면 <canvas>, 폴링이면 <img>. 좌표 환산(ratioOf)은 둘 다 같은 규칙을 쓴다.
+    if (this.videoOn) {
+      const cv = document.createElement("canvas");
+      cv.className = "emu-img";
+      this.canvasEl = cv;
+      stage.appendChild(cv);
+    } else {
+      const img = document.createElement("img");
+      img.className = "emu-img";
+      img.draggable = false;
+      if (this.frameUrl) img.src = this.frameUrl;
+      this.imgEl = img;
+      stage.appendChild(img);
+    }
 
     if (canInput) {
       // 누른 자리와 뗀 자리로 탭/스와이프/롱프레스를 가른다(앱과 같은 판정).
@@ -326,6 +483,13 @@ export class EmulatorView {
     }
 
     this.el.append(bar, stage);
+    //  폴링으로 돌아갔으면 **왜** 인지 한 줄로 적는다(느린 이유를 사용자가 짐작하게 두지 않는다).
+    if (this.videoNote) {
+      const note = document.createElement("div");
+      note.className = "emu-note";
+      note.textContent = this.videoNote;
+      this.el.appendChild(note);
+    }
 
     if (canInput) {
       const keys = document.createElement("div");
