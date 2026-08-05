@@ -65,13 +65,23 @@ function attach(entry, ws) {
   ws.on('error', () => { try { ws.close(); } catch (_) { /* noop */ } });
 }
 
+/**
+ * 회선이 못 따라갈 때의 상한. 넘으면 **그 시청자만 끊는다**(아래 이유).
+ */
+const BACKPRESSURE_MAX = 8 * 1024 * 1024;
+
 function send(ws, flags, data) {
   if (ws.readyState !== 1) return;
+  //  ★ 밀린다고 프레임을 **버리면 안 된다.** H.264 델타는 앞 프레임에 기대어 있어서, 하나를 빼면
+  //   다음 키프레임이 올 때까지 화면이 깨진 채로 남는다. 그런데 scrcpy 는 화면이 바뀔 때만 보내고
+  //   키프레임은 몇 분에 한 번이라(실측: 11초에 1장), "잠깐 깨짐"이 아니라 "한참 깨짐"이 된다.
+  //   그래서 밀리면 **끊는다** — 화면이 다시 붙으면 config 를 먼저 받아 깨끗하게 시작한다.
+  if (ws.bufferedAmount > BACKPRESSURE_MAX) {
+    try { ws.close(4003, 'too slow'); } catch (_) { /* noop */ }
+    return;
+  }
   const head = Buffer.alloc(1);
   head.writeUInt8(flags, 0);
-  //  ⚠ 프레임이 밀리면 **버리지 않고 쌓인다** — 느린 회선에서 지연이 눈덩이가 되므로,
-  //   보낼 것이 이미 쌓여 있으면 키프레임이 아닌 프레임은 흘려보낸다.
-  if (ws.bufferedAmount > 4 * 1024 * 1024 && !(flags & (FLAG_KEY | FLAG_CONFIG))) return;
   try { ws.send(Buffer.concat([head, data])); } catch (_) { /* noop */ }
 }
 
