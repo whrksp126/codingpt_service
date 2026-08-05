@@ -38,17 +38,17 @@ function probe(modPath, body) {
 // ── 1. 검색 판정 — 두 구현을 실제로 돌려 대조 ────────────────────────────────
 // 실제 이 리포에서 뽑은 경로들. 인위적인 문자열이 아니라 사용자가 진짜 칠 법한 것으로 본다.
 const CORPUS = [
-  'src/js/workspace-view.js', 'src/js/pane.js', 'src/js/ide.js', 'src/js/quick-commands.js',
-  'src/js/text/quick-commands.js', 'src/js/text/ports.js', 'src/js/preview-kind.js',
+  'src/js/workspace-view.js', 'src/js/pane.js', 'src/js/ide.js', 'src/js/emulator-view.js',
+  'src/js/text/ports.js', 'src/js/preview-kind.js',
   'src/workspace/WorkspaceView.tsx', 'src/workspace/PaneView.tsx', 'src/workspace/IdeBody.tsx',
-  'src/workspace/ide/FilePreview.tsx', 'src/workspace/QuickCommandsSheet.tsx',
+  'src/workspace/ide/FilePreview.tsx', 'src/workspace/EmulatorBody.tsx',
   'src/services/daemonService.ts', 'src/components/keyboard/KeyAssist.tsx',
   'package.json', 'README.md', 'src-tauri/src/tmux.rs', 'src-tauri/src/fsapi.rs',
-  'packages/runner-core/cpt-server.js', 'packages/runner-core/quick-commands.js',
+  'packages/runner-core/cpt-server.js', 'packages/runner-core/emulator.js',
   'docs/byo-pc-design.md', 'a.js', 'ab/c.js',
 ];
 const TERMS = [
-  '', 'wsv', 'workspaceview', 'pane', 'ide', 'qc', 'quick', 'tsx', 'src/js', 'text ports',
+  '', 'wsv', 'workspaceview', 'pane', 'ide', 'emu', 'mobile', 'tsx', 'src/js', 'text ports',
   'PANE', 'daemon', 'ppp', 'a', 'json', 'kb', 'runner core', '  ', 'cpt server',
 ];
 const QUERIES = ['', 'pane', '>', '> ', '>ide', '>  add terminal ', '  file.ts', '>>x'];

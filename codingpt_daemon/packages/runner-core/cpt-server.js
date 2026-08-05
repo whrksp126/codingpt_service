@@ -295,137 +295,6 @@ async function handleAgentsRpc(cmd, a) {
   throw new Error('알 수 없는 명령: ' + cmd);
 }
 
-// ── 저장한 명령(Quick Commands) ────────────────────────────────────────────────
-// 저장·검증은 quick-commands.js(순수)가, **실행**은 여기가 맡는다. 실행이 여기 있는 이유는
-//  launchAgentInTerminal 과 똑같다 — 새 셸의 "준비됨" 판정을 PC/모바일이 각자 구현하면 한쪽만
-//  고쳐지는 결함이 된다.
-//
-// 실행 경로는 kind 로 갈린다(터미널에 에이전트가 떠 있는지 **감지하지 않는다**):
-//  · shell  → send-keys 리터럴 + Enter. 셸에 치는 문장이다.
-//  · agent  → chatInput. 에이전트 컴포저 계약(bracketed paste·잔재 청소·이미지 조각)을 그대로 탄다.
-// 감지로 갈리게 하면 같은 버튼이 터미널 상태에 따라 다르게 동작해 예측이 불가능해진다.
-
-// 대기 상한 — 실제 값은 사용자 체감에 맞춘 것이고, 환경변수는 **테스트가 타임아웃 경로를 빠르게
-//  밟기 위한 탈출구**다(CPT_SOCK 과 같은 용도). 와이어 인자로 받지 않는다 — 호출자가 대기 정책을
-//  정하기 시작하면 PC/모바일이 서로 다른 타이밍을 갖게 된다(이 로직을 데몬에 둔 이유가 그것이다).
-const QC_PROMPT_WAIT_MS = Number(process.env.CPT_QC_PROMPT_MS) || 6000;
-const QC_AGENT_READY_WAIT_MS = Number(process.env.CPT_QC_AGENT_READY_MS) || 25000;
-
-/** 새로 만든 터미널의 프롬프트가 그려질 때까지 기다린다. 새 터미널은 busy 일 수 없어 판정이 단순하다. */
-async function waitFreshPrompt(target, timeoutMs = QC_PROMPT_WAIT_MS) {
-  const deadline = Date.now() + Math.max(500, timeoutMs);
-  while (Date.now() < deadline) {
-    let screen = '';
-    try { screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', target, '-S', '-5']); } catch (_) { return false; }
-    if (screen.trim()) return true;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return false;
-}
-
-/**
- * 에이전트가 입력을 받을 수 있을 때까지 기다린다.
- *  판정 = terminal.list 의 `agent === true`(데몬이 훅/프로세스/타이틀로 종합한 신호).
- *  타임아웃이면 false 로 정직하게 알리되 **프롬프트는 그래도 보낸다** — TUI 가 늦게 떴을 뿐일 수
- *  있고, 안 보내면 사용자는 버튼이 아무 일도 안 한 것으로 본다.
- */
-async function waitAgentReady(session, tid, timeoutMs = QC_AGENT_READY_WAIT_MS) {
-  const deadline = Date.now() + Math.max(1000, timeoutMs);
-  while (Date.now() < deadline) {
-    let list = [];
-    try { list = await ptyLib.listTerminals(session); } catch (_) { /* 조회 실패 — 다시 */ }
-    const hit = list.find((t) => t.index === tid);
-    if (hit && hit.agent === true) {
-      // TUI 가 첫 화면을 다 그리기 전에 붙여넣으면 일부가 씹힌다 — 한 박자 쉰다.
-      await new Promise((r) => setTimeout(r, 500));
-      return true;
-    }
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return false;
-}
-
-/**
- * 저장한 명령 실행. 반환은 항상 `{ ok, index, ready }` 모양이라 UI 가 한 벌로 처리한다.
- *  · target 'current' — 인자 tid 필수. 지금 보고 있는 터미널에 넣는다.
- *  · target 'new'     — 새 터미널을 만들고 거기서 실행한다(에이전트형이면 에이전트도 띄운다).
- */
-async function runQuickCommand(item, a) {
-  const cwdRel = typeof a.cwd === 'string' ? a.cwd : '';
-  const { session, abs } = ptyLib.sessionForCwd(cwdRel);
-  await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
-  const body = item.kind === 'agent' ? item.prompt : item.text;
-
-  if (item.target === 'current') {
-    const tid = Number.isInteger(a.tid) ? a.tid : parseInt(a.tid, 10);
-    if (!Number.isInteger(tid)) {
-      throw Object.assign(new Error('보낼 터미널이 없습니다'), { code: 'BAD_REQUEST' });
-    }
-    if (item.kind === 'agent') {
-      await chatInput({ cwd: cwdRel, tid, text: body, submit: true });
-    } else {
-      const target = `=${ptyLib.termSession(session, tid)}:0`;
-      await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', body]);
-      await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
-    }
-    return { ok: true, index: tid, ready: true, created: false };
-  }
-
-  // target === 'new'
-  const created = await ptyLib.handleTerminalRpc('terminal.new', { cwd: cwdRel });
-  const tid = created.index;
-  notifyPoolChanged();
-  const target = `=${ptyLib.termSession(session, tid)}:0`;
-  const promptReady = await waitFreshPrompt(target);
-
-  if (item.kind === 'agent') {
-    const agentsLib = lazyMod('./agents');
-    if (!agentsLib) throw new Error('이 데몬은 에이전트 실행을 지원하지 않습니다(PC 앱 업데이트 필요)');
-    const launched = await launchAgentInTerminal(agentsLib, { id: item.agent, index: tid, cwd: cwdRel });
-    if (!launched.ok) return { ok: false, busy: true, index: tid, created: true };
-    const ready = await waitAgentReady(session, tid);
-    await chatInput({ cwd: cwdRel, tid, text: body, submit: true });
-    return { ok: true, index: tid, ready, created: true, agent: item.agent };
-  }
-  await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', body]);
-  await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
-  return { ok: true, index: tid, ready: promptReady, created: true };
-}
-
-async function handleQuickCommandsRpc(cmd, a) {
-  const qc = lazyMod('./quick-commands');
-  if (!qc) throw new Error('이 데몬은 저장한 명령을 지원하지 않습니다(PC 앱 업데이트 필요)');
-  if (cmd === 'qc.list') {
-    // ws 를 준 경우에만 그 워크스페이스 명령을 섞는다(quick-commands.listFor 계약).
-    const ws = typeof a.ws === 'string' ? a.ws : (typeof a.cwd === 'string' ? a.cwd : undefined);
-    return { items: qc.listFor(ws) };
-  }
-  if (cmd === 'qc.listAll') return { items: qc.listAll(), limits: {
-    maxItems: qc.MAX_ITEMS, maxLabel: qc.MAX_LABEL, maxShellText: qc.MAX_SHELL_TEXT, maxAgentPrompt: qc.MAX_AGENT_PROMPT,
-  } };
-  if (cmd === 'qc.save') {
-    const r = qc.upsert(a.item || a);
-    if (!r.ok) throw Object.assign(new Error(r.error), { code: 'BAD_REQUEST' });
-    return { ok: true, item: r.item, items: qc.listAll() };
-  }
-  if (cmd === 'qc.remove') {
-    const r = qc.remove(String(a.id || ''));
-    if (!r.ok) throw new Error(r.error);
-    return { ok: true, removed: r.removed, items: qc.listAll() };
-  }
-  if (cmd === 'qc.reorder') {
-    const r = qc.reorder(a.ids);
-    if (!r.ok) throw Object.assign(new Error(r.error), { code: 'BAD_REQUEST' });
-    return { ok: true, items: r.items };
-  }
-  if (cmd === 'qc.run') {
-    const item = qc.get(String(a.id || ''));
-    if (!item) throw Object.assign(new Error('저장한 명령을 찾을 수 없습니다'), { code: 'NOT_FOUND' });
-    return runQuickCommand(item, a);
-  }
-  throw new Error('알 수 없는 명령: ' + cmd);
-}
-
 /**
  * 이미 만들어진 터미널(tid)에서 에이전트를 **타이핑해 실행**한다. "터미널 추가 ▾ → Claude" 의 뒷단.
  *
@@ -822,11 +691,6 @@ async function dispatch(req, conn) {
   //   되기 때문이다(approval.respond 를 닫는 것과 같은 이유 — 승인 게이트의 자기해제 금지).
   //   `agents.list` 만 공개한다(어차피 AI 는 `which claude` 로 알 수 있는 정보).
   if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
-  // 저장한 명령(2026-08-04) — resolveCtx 전 처리(인자로 ws/cwd/tid 를 명시하므로 tmux ctx 불필요).
-  //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 사용자의 저장 명령을 읽거나 고치거나 **실행**할
-  //   경로가 되면 안 된다(agents.wire 를 닫아둔 것과 같은 이유 — 사용자 의도의 자기해제 금지).
-  //   에이전트가 명령을 실행해야 하면 자기 셸에서 직접 치면 된다.
-  if (cmd.startsWith('qc.')) return handleQuickCommandsRpc(cmd, req.args || {});
   // 열린 포트 목록(2026-08-04) — PC 앱이 back 을 왕복하지 않고 바로 묻는 길.
   //  ★ 이걸 여는 이유: PC 에 **같은 로직의 Rust 사본**(tmux.rs listen_ports_in)이 따로 있었다.
   //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
@@ -839,14 +703,6 @@ async function dispatch(req, conn) {
   if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 목록/켜기/프레임/입력.
   //  프레임은 수십~수백 KB 라 **부르는 쪽이 당겨 간다**(푸시하면 느린 회선에서 지연이 쌓인다).
-  // 플러그인 마켓플레이스 — 목록/미리보기/설치/삭제.
-  //  ⚠ 설치는 **사람이 화면에서 동의**한 지문이 있어야 통과한다(plugins.js). 터미널의 AI 가
-  //   `cpt` 로 이 길에 닿아도 지문을 만들 수 없다 — 미리보기와 설치가 분리된 이유가 그것이다.
-  if (cmd.startsWith('plugins.')) {
-    const pl = lazyMod('./plugins');
-    if (!pl) throw new Error('이 데몬은 플러그인을 지원하지 않습니다(PC 앱 업데이트 필요)');
-    return pl.handle(cmd, req.args || {});
-  }
   if (cmd.startsWith('emulator.')) {
     const emuLib = lazyMod('./emulator');
     if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -1980,9 +1836,6 @@ const CAPABILITIES = [
   'ui.review',
   // 모바일 화면 — 조회·조작 전부 공개다. 에이전트가 "고친 화면이 어떻게 나오는지" 스스로 확인하고
   //  탭까지 해 보는 것이 이 기능의 값이다(승인·자기주입 같은 "사람만 해야 하는 일"이 아니다).
-  // 플러그인 — **조회만** 공개다. 설치/삭제/켜고끄기는 사람이 화면에서 동의해야 하는 일이라
-  //  터미널의 AI 에게 열지 않는다(approval.respond·agents.wire 를 닫은 것과 같은 판단).
-  'plugins.list', 'plugins.marketplace', 'plugins.preview', 'plugins.contributions',
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
@@ -2175,7 +2028,6 @@ module.exports = {
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
-  handleQuickCommandsRpc, // 저장한 명령(qc.*) — 위와 같은 이유로 구현은 여기 한 벌뿐이다
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
   _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },

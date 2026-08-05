@@ -17,7 +17,7 @@ const checks = [
   ["트레이에 업데이트 확인 메뉴가 있다", rust.includes('"check_update", "업데이트 확인…"')],
   ["설정 메뉴가 프론트 이벤트를 보낸다", rust.includes('app.emit("cpt-open-settings"')],
   ["업데이트 메뉴가 프론트 이벤트를 보낸다", rust.includes('app.emit("cpt-check-update"')],
-  ["프론트가 설정 이벤트를 구독한다", api.includes('listen("cpt-open-settings"') && main.includes('onOpenSettings(() => openSettingsSection("general"))')],
+  ["프론트가 설정 이벤트를 구독한다", api.includes('listen("cpt-open-settings"') && main.includes('onOpenSettings(() => openSettingsSection("appearance"))')],
   ["프론트가 업데이트 이벤트를 앱 정보로 연결한다", api.includes('listen("cpt-check-update"') && main.includes('onCheckUpdate(() => openSettingsSection("about"))')],
   ["로그인 게이트가 설정 화면을 가리지 않는다", gate.includes('state.view === "settings"') && gate.includes('&& !utilitySettingsOpen')],
   ["앱 정보 화면에서 기존 업데이터를 그대로 쓴다", settings.includes('export function openSettingsSection') && /\.updateCheck\(\)/.test(settings) && settings.includes('api.updateInstall()')],

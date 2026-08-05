@@ -142,7 +142,7 @@ api.onDaemonChanged(async () => {
   S.emit();
 });
 api.onDeepLinkPair((payload) => deepLinkPair(payload));
-api.onOpenSettings(() => openSettingsSection("general"));
+api.onOpenSettings(() => openSettingsSection("appearance"));
 api.onCheckUpdate(() => openSettingsSection("about"));
 
 function focusedPane() {
@@ -181,7 +181,6 @@ registerCommands({
   "ws.addPreview": () => smartAdd("preview"),
   "ws.addEmulator": () => smartAdd("emulator"),
   // 이 둘은 고르는 것이 목적이라 메뉴를 연다(헤더 버튼과 같은 자리에서).
-  "ws.quickCommands": () => headerButton("ws.quickCommands")?.click(),
   "ws.ports": () => headerButton("ws.ports")?.click(),
 
   "pane.splitRight": () => S.splitFocused("h", "terminal"),
@@ -197,7 +196,6 @@ registerCommands({
   "notif.latestUnread": () => toggleLatestUnread(),
 
   "app.settings": () => S.setView(state.view === "settings" ? "workspace" : "settings"),
-  "settings.commands": () => openSettingsSection("commands"),
   "settings.shortcuts": () => openSettingsSection("shortcuts"),
 
   ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [

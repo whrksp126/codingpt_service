@@ -51,13 +51,6 @@ router.get('/agents', accountAuth, daemonController.agentsList);
 router.post('/agents/wire', accountAuth, daemonController.agentsWire);
 router.post('/agents/rescan', accountAuth, daemonController.agentsRescan);
 router.post('/agents/launch', accountAuth, daemonController.agentsLaunch);
-// 저장한 명령(Quick Commands) — 저장소는 PC 데몬 로컬, 서버는 중계만.
-router.post('/quick-commands/list', accountAuth, daemonController.quickCommandsList); // POST 인 이유는 컨트롤러 주석
-router.get('/quick-commands/all', accountAuth, daemonController.quickCommandsListAll);
-router.post('/quick-commands', accountAuth, daemonController.quickCommandsSave);
-router.post('/quick-commands/remove', accountAuth, daemonController.quickCommandsRemove);
-router.post('/quick-commands/reorder', accountAuth, daemonController.quickCommandsReorder);
-router.post('/quick-commands/run', accountAuth, daemonController.quickCommandsRun);
 // 코드 리뷰(2026-08-04) — 세션은 데몬 메모리, 서버는 중계만. 조회가 POST 인 이유는 컨트롤러 주석.
 router.post('/review/get', accountAuth, daemonController.reviewGet);
 router.post('/review/pending', accountAuth, daemonController.reviewPending);
@@ -70,15 +63,6 @@ router.post('/emulator/frame', accountAuth, daemonController.emulatorFrame);
 router.post('/emulator/input', accountAuth, daemonController.emulatorInput);
 router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
-
-// 플러그인 마켓플레이스 — 서버는 통과만 시킨다(목록·설치 판단은 전부 그 PC 의 데몬).
-router.post('/plugins/list', accountAuth, daemonController.pluginsList);
-router.post('/plugins/contributions', accountAuth, daemonController.pluginsContributions);
-router.post('/plugins/marketplace', accountAuth, daemonController.pluginsMarketplace);
-router.post('/plugins/preview', accountAuth, daemonController.pluginsPreview);
-router.post('/plugins/install', accountAuth, daemonController.pluginsInstall);
-router.post('/plugins/uninstall', accountAuth, daemonController.pluginsUninstall);
-router.post('/plugins/enabled', accountAuth, daemonController.pluginsSetEnabled);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.

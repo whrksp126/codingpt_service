@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- 설정 화면 확인용 하네스(개발 전용) — Tauri 없이 브라우저에서 settings.js 를 그대로 띄운다.
+     실행: cd src && python3 -m http.server 8899  →  http://localhost:8899/settings-harness.html -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>설정 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<div id="settingsRoot"></div>
+<!-- settings.js → state.js → pane.js 가 xterm 전역을 module 평가 시점에 읽는다(없으면 TypeError). -->
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  // Tauri 브리지 스텁 — 설정 화면이 부르는 것만 최소로 답한다.
+  const ANSWERS = {
+    'plugin:autostart|is_enabled': true,
+    daemon_status: { paired: true, running: true, device_name: '이 Mac', server: 'https://codingpt-back.ghmate.com' },
+    app_version: '0.1.236',
+  };
+  window.__TAURI__ = {
+    core: { invoke: async (cmd) => (cmd in ANSWERS ? ANSWERS[cmd] : {}) },
+    event: { listen: async () => () => {} },
+  };
+  const { mountSettings, updateSettings } = await import('./js/settings.js');
+  const S = await import('./js/state.js');
+  const { bootLang } = await import('./js/theme.js');
+  bootLang();
+  S.state.me = { nickname: '테스트', email: 'test@codingpt.app' };
+  S.state.daemon = ANSWERS.daemon_status;
+  S.state.devices = [];
+  mountSettings(document.getElementById('settingsRoot'));
+  S.state.view = 'settings';
+  updateSettings();
+  // 섹션 전환은 사이드바 클릭으로 — 스크린샷을 찍을 때 URL 해시로도 고를 수 있게 해 둔다.
+  window.__section = (key) => {
+    [...document.querySelectorAll('.sm-navitem')].find((b) => b.textContent.trim() === key)?.click();
+  };
+</script>
+</body>
+</html>

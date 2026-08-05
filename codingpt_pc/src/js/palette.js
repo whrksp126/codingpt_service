@@ -2,7 +2,7 @@
 //
 // **창은 하나다**(사용자 확정). 접두어 `>` 로 두 모드가 갈린다:
 //  · 그냥 치면  → 열린 탭 + 이 워크스페이스의 파일
-//  · `>` 로 치면 → 명령(앱 명령 + 저장한 명령)
+//  · `>` 로 치면 → 명령
 // 모드가 갈려도 창·조작·키는 같다. 두 창을 만들면 "어느 걸 열어야 하지"를 매번 생각하게 된다.
 //
 // 스코프는 **워크스페이스 단위**다(사용자 확정 2026-08-04). 기본 모드가 파일 열기라 워크스페이스가
@@ -22,7 +22,6 @@ import { bindings, IS_APPLE } from "./shortcuts.js";
 import { isAvailable, runCommand } from "./command-run.js";
 import * as M from "./palette-match.js";
 import { openSurfaces, activateSurface, openFileSmart } from "./workspace-view.js";
-import { listQuickCommands, runQuickCommand } from "./quick-commands.js";
 
 const TX = () => tx(PALETTE_TEXT);
 
@@ -153,27 +152,6 @@ function commandRows(term) {
   return M.rankRows(rows, term, MAX_CMDS);
 }
 
-function quickRows(items, term, ws) {
-  const T = TX();
-  const rows = [];
-  for (const it of items || []) {
-    const body = it.kind === "agent" ? it.prompt : it.text;
-    const score = M.scoreLabeled(it.label, String(body || "").slice(0, 120), term);
-    if (score == null) continue;
-    rows.push({
-      key: "qc:" + it.id,
-      section: T.secQuickCommands,
-      score,
-      sortKey: it.label,
-      icon: icons.play({ size: 15 }),
-      label: it.label,
-      sub: String(body || "").replace(/\s+/g, " ").trim().slice(0, 80),
-      run: () => runQuickCommand(it, ws),
-    });
-  }
-  return M.rankRows(rows, term, MAX_CMDS);
-}
-
 // ── 화면 ─────────────────────────────────────────────────────────────────────
 
 export function isPaletteOpen() {
@@ -213,7 +191,6 @@ export function openPalette(initial) {
   let files = null;         // null = 아직 안 읽음
   let filesErr = null;
   let truncated = false;
-  let quick = null;
 
   overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) closePalette(); });
 
@@ -223,8 +200,8 @@ export function openPalette(initial) {
     const { mode, term } = M.parseQuery(input.value);
     input.placeholder = mode === M.MODE_COMMAND ? T.placeholderCommand : T.placeholder;
     if (mode === M.MODE_COMMAND) {
-      rows = [...commandRows(term), ...quickRows(quick, term, ws)];
-      setFoot(quick === null ? "" : "");
+      rows = commandRows(term);
+      setFoot("");
     } else {
       const tabs = tabRows(term);
       let fr = [];
@@ -315,17 +292,13 @@ export function openPalette(initial) {
   build();
   input.focus();
 
-  // 파일 목록·저장한 명령은 창을 띄운 **뒤** 읽는다. 읽는 동안에도 열린 탭과 명령은 이미 쓸 수 있다.
+  // 파일 목록은 창을 띄운 **뒤** 읽는다. 읽는 동안에도 열린 탭과 명령은 이미 쓸 수 있다.
   if (ws) {
     loadFiles(ws)
       .then((r) => { if (!overlay) return; files = r.files; truncated = r.truncated; build(); })
       .catch((e) => { if (!overlay) return; files = []; filesErr = String((e && e.message) || e); build(); });
-    listQuickCommands(ws)
-      .then((items) => { if (!overlay) return; quick = items; build(); })
-      .catch(() => { if (!overlay) return; quick = []; });
   } else {
     files = [];
-    quick = [];
   }
 }
 

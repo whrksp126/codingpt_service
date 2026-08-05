@@ -33,25 +33,31 @@ let navEl = null;
 let contentEl = null;
 let connBody = null; // 연결 탭 내부 컨테이너
 let autostartChk = null;
-let section = "general";
+let section = "appearance";
 let connMode = null; // 'paired' | 'unpaired'
 let query = "";
 let webLogin = null; // 웹 로그인 폴링 세션
 let scCleanup = null; // 단축키 화면의 키 가로채기 해제자(섹션 이동 시 반드시 호출)
 
+//  ★ 2026-08-05 재편(사용자 확정) — 그룹 3개. 원문: "일반 카테고리가 너무 약한거 같은데? 일반
+//   카테고리는 없어도 될거 같은데? 재배치하면서". 옛 `일반`(자동 실행 1행)·`보안`·`시스템`은 항목이
+//   하나뿐인 그룹이었다 — 그룹 머리글이 항목 수보다 많으면 그건 분류가 아니라 장식이다.
+//   · 옛 `일반`(로그인 시 자동 실행) + 옛 `권한 및 보안`(폴더 접근) → `시스템` 한 화면.
+//     둘 다 "macOS 와의 연동"이라는 같은 성격이고, 각자 혼자서는 화면 하나를 채우지 못한다.
+//   · 옛 `화면 및 편집` → `모양`(언어가 여기 산다 — 화면에 무엇이 보이는지를 정하는 설정들).
+//   · 옛 `모바일 연결` → `연결`(사용자 확정: "모바일 연결 말고 연결 이라고 만 해줘").
+//  ⚠ 아이콘은 항목마다 **다른 것**을 쓴다: 예전엔 sliders 가 일반·단축키 두 곳에, monitor 가
+//   화면·앱 정보 두 곳에 있었다(같은 그림 = 다른 뜻 → 사이드바에서 눈이 미끄러진다).
 const NAV = [
-  { key: "general", label: "일반", group: "시작", icon: "sliders", keywords: "자동 실행 시작 로그인" },
   { key: "agents", label: "에이전트", group: "작업 환경", icon: "terminal", keywords: "AI CLI Claude Codex Gemini 설치 연결" },
-  { key: "commands", label: "저장한 명령", group: "작업 환경", icon: "play", keywords: "퀵 커맨드 quick command 단축 실행 프롬프트 npm run dev" },
-  { key: "shortcuts", label: "단축키", group: "작업 환경", icon: "sliders", keywords: "키보드 keyboard shortcut 키 조합 팔레트 command palette 재바인딩 rebind" },
-  { key: "appearance", label: "화면 및 편집", group: "작업 환경", icon: "monitor", keywords: "테마 글꼴 폰트 터미널 스타일 언어 language locale 다국어 영어 english 日本語 中文" },
-  { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한" },
-  { key: "plugins", label: "플러그인", group: "작업 환경", icon: "tools", keywords: "마켓플레이스 marketplace 확장 extension 스킬 skill 저장한 명령 번역" },
-  { key: "connection", label: "계정 및 기기", group: "기기 연결", icon: "user", keywords: "프로필 로그인 암호화 PC 기기 로그아웃 탈퇴" },
-  { key: "supporter", label: "Supporter", group: "기기 연결", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
-  { key: "mobile", label: "모바일 연결", group: "기기 연결", icon: "smartphone", keywords: "휴대폰 태블릿 Android iOS QR" },
-  { key: "security", label: "권한 및 보안", group: "보안", icon: "shield", keywords: "알림 다운로드 데스크탑 문서 폴더 접근 암호화" },
-  { key: "about", label: "앱 정보", group: "시스템", icon: "monitor", keywords: "버전 업데이트" },
+  { key: "appearance", label: "모양", group: "작업 환경", icon: "palette", keywords: "테마 다크 라이트 글꼴 폰트 터미널 스타일 언어 language locale 다국어 영어 english 日本語 中文 화면 편집" },
+  { key: "shortcuts", label: "단축키", group: "작업 환경", icon: "keyboard", keywords: "키보드 keyboard shortcut 키 조합 팔레트 command palette 재바인딩 rebind" },
+  { key: "notifications", label: "알림", group: "작업 환경", icon: "bell", keywords: "완료 승인 요청 데스크톱 권한 알림음" },
+  { key: "connection", label: "계정", group: "계정 및 기기", icon: "user", keywords: "프로필 닉네임 로그인 암호화 PC 기기 로그아웃 탈퇴" },
+  { key: "mobile", label: "연결", group: "계정 및 기기", icon: "smartphone", keywords: "휴대폰 태블릿 모바일 Android iOS QR 인증 코드" },
+  { key: "supporter", label: "Supporter", group: "계정 및 기기", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
+  { key: "system", label: "시스템", group: "앱", icon: "monitor", keywords: "자동 실행 시작 로그인 권한 다운로드 데스크탑 문서 폴더 접근" },
+  { key: "about", label: "앱 정보", group: "앱", icon: "info", keywords: "버전 업데이트" },
 ];
 
 export function mountSettings(container) {
@@ -165,7 +171,7 @@ function renderSection(force) {
       // 하단 요약/설명 문단은 사용자 확정으로 제거(2026-07-27) — 목록만 둔다.
       contentEl.innerHTML = `
         <div class="sm-card2">
-          <div class="sett-col"><span>${i18n.t('이 PC의 AI 에이전트')}</span><div id="agentsBody" class="ag-list"></div></div>
+          <div class="sett-col"><div id="agentsBody" class="ag-list"></div></div>
         </div>`;
       const body = contentEl.querySelector("#agentsBody");
       const paint = () => renderAgentList(body, { onChange: paint });
@@ -175,15 +181,25 @@ function renderSection(force) {
         body.firstChild.textContent = String(e && e.message ? e.message : e);
       });
     }
-  } else if (section === "general") {
+  } else if (section === "system") {
+    // 시스템 — macOS 와의 연동만 모은다(로그인 항목 + 보호 폴더 접근). 각각은 카드 하나를 채우지
+    //  못하는 설정이라 예전엔 `일반`·`보안` 이라는 1항목짜리 그룹으로 흩어져 있었다(2026-08-05 통합).
     contentEl.innerHTML = `
+      <div class="sm-section-title">${i18n.t('시작')}</div>
       <div class="sm-card2">
         <label class="sett-row sett-row-action" for="autostartChk">
           <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
           <input id="autostartChk" type="checkbox" class="tgl" aria-label="${i18n.t('로그인 시 자동 실행')}" />
         </label>
       </div>
-      `;
+      <div class="sm-section-title">${i18n.t('폴더 접근 권한')}</div>
+      <div class="sm-card2">
+        ${folderPermRow("downloads", i18n.t('다운로드 폴더'))}
+        ${folderPermRow("desktop", i18n.t('데스크탑 폴더'))}
+        ${folderPermRow("documents", i18n.t('문서 폴더'))}
+        <div class="sett-hint">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</div>
+      </div>
+      <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정’에서 관리할 수 있어요.')}</div>`;
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {
@@ -193,23 +209,11 @@ function renderSection(force) {
       }
     });
     syncAutostart();
-  } else if (section === "commands") {
-    // 저장한 명령 — 관리(추가/수정/삭제) 전용. 실행은 워크스페이스 헤더 버튼과 팔레트가 맡는다.
-    //  목록·편집기는 헤더 메뉴의 "명령 관리"와 **같은 함수**를 쓴다(두 곳에 따로 만들지 않는다).
-    contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('저장한 명령')}</div>
-      <div class="sm-section-note">${i18n.t('자주 치는 터미널 명령이나 AI 에게 보낼 프롬프트를 저장해 두면,\n        워크스페이스 헤더의 실행 버튼과 명령 팔레트에서 한 번에 실행할 수 있어요.\n        저장 위치는 그 워크스페이스가 있는 PC 예요.')}</div>
-      <div class="sm-card2" id="qcHost"></div>`;
-    const host = contentEl.querySelector("#qcHost");
-    import("./quick-commands.js")
-      .then((m) => m.renderManageInto(host, null, { title: false }))
-      .catch(() => { host.textContent = i18n.t('목록을 불러오지 못했어요.'); });
+    bindFolderPerms(contentEl);
   } else if (section === "shortcuts") {
     // 단축키 — 명령 팔레트의 목록과 **같은 표**를 그린다(commands.js). 표에 줄을 더하면 두 곳에
     //  동시에 나타난다.
-    contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('단축키')}</div>
-      <div id="scHost"></div>`;
+    contentEl.innerHTML = `<div id="scHost"></div>`;
     const host = contentEl.querySelector("#scHost");
     // 조합을 받는 중에 화면을 떠나면 키를 계속 삼킨다 → 섹션이 바뀔 때 반드시 해제한다.
     if (scCleanup) { try { scCleanup(); } catch (_) {} scCleanup = null; }
@@ -218,7 +222,6 @@ function renderSection(force) {
       .catch(() => { host.textContent = i18n.t('단축키 목록을 불러오지 못했어요.'); });
   } else if (section === "appearance") {
     contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('인터페이스')}</div>
       <div class="sm-card2">
         <!-- 언어 — 계정 동기화. 목록 이름은 그 언어 자신의 표기라 번역하지 않는다
              (영어로 "Japanese" 라고 쓰면 일본어 쓰는 사람이 못 찾는다). -->
@@ -237,14 +240,8 @@ function renderSection(force) {
       </div>
       `;
     bindAppearance(contentEl);
-  } else if (section === "plugins") {
-    // 화면 전체를 plugins-view 가 그린다(설치·동의·마켓플레이스가 한 흐름이라 쪼개면 상태가 흩어진다).
-    import("./plugins-view.js").then((m) => m.renderPlugins(contentEl)).catch(() => {
-      contentEl.innerHTML = `<div class="sett-hint">${i18n.t('플러그인 화면을 불러오지 못했어요')}</div>`;
-    });
   } else if (section === "notifications") {
     contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('데스크톱 알림')}</div>
       <div id="notifWarning"></div>
       <div class="sm-card2">
         <div class="sett-row">
@@ -261,16 +258,6 @@ function renderSection(force) {
       </div>
       `;
     bindNotificationSettings(contentEl);
-  } else if (section === "security") {
-    contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('필수 권한')}</div>
-      <div class="sm-card2">
-        ${folderPermRow("downloads", "다운로드 폴더 접근")}
-        ${folderPermRow("desktop", "데스크탑 폴더 접근")}
-        ${folderPermRow("documents", "문서 폴더 접근")}
-      </div>
-      <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정 및 기기’에서 관리할 수 있어요.')}</div>`;
-    bindFolderPerms(contentEl);
   } else if (section === "mobile") {
     const codeHtml = e2eeReady()
       ? `<div class="sett-col">
@@ -283,10 +270,9 @@ function renderSection(force) {
         </div>`
       : `<div class="sett-col"><span class="sett-label">${i18n.t('이 기기 인증 코드')}</span><div class="acct-msg">${i18n.t('암호화 연결을 준비하고 있어요…')}</div></div>`;
     contentEl.innerHTML = `
-      <div class="sm-section-title">${i18n.t('휴대폰·태블릿에서 이어서 작업하기')}</div>
       <div class="sm-card2">
         ${codeHtml}
-        <div class="qr-sub">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
+        <div class="sett-hint">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
         <div class="qr-row">
           <div class="qr-tile">
             <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="${i18n.t('Android 앱 설치 QR')}" draggable="false"></div>
@@ -519,17 +505,23 @@ function bindAppearance(rootEl) {
     btn.className = "fd-btn";
     const menu = document.createElement("div");
     menu.className = "fd-menu hidden";
+    //  ⚠ `stack`(글꼴 스택)은 **선택**이다 — 언어 드롭다운은 같은 부품을 쓰지만 옵션을 특정 글꼴로
+    //   그리지 않는다. 여기서 `cur.stack.replace(...)` 를 무조건 부르면 언어 목록에서 TypeError 가
+    //   나고, 그러면 이 함수 이후의 **글꼴 2개와 터미널 스타일까지 통째로 안 그려진다**(2026-08-05
+    //   실사고 — 화면에는 빈 알약 하나와 빈 행 셋만 남았다). 없으면 없는 대로 그린다.
     const paintBtn = () => {
       const cur = opts.find((o) => o.value === getCur()) || opts[0];
-      btn.innerHTML = `<span style="font-family:${cur.stack.replace(/"/g, "&quot;")}">${esc(cur.label)}</span><span class="fd-caret">▾</span>`;
+      if (!cur) return;
+      const font = cur.stack ? ` style="font-family:${String(cur.stack).replace(/"/g, "&quot;")}"` : "";
+      btn.innerHTML = `<span${font}>${esc(cur.label)}</span><span class="fd-caret">${icons.chevronDown({ size: 13 })}</span>`;
       menu.querySelectorAll(".fd-opt").forEach((el) => el.classList.toggle("sel", el.dataset.v === getCur()));
     };
     for (const o of opts) {
       const it = document.createElement("button");
       it.className = "fd-opt";
       it.dataset.v = o.value;
-      it.style.fontFamily = o.stack;
-      it.innerHTML = `<span class="fd-name">${esc(o.label)}</span><span class="fd-sample">${esc(sample)}</span>`;
+      if (o.stack) it.style.fontFamily = o.stack;
+      it.innerHTML = `<span class="fd-name">${esc(o.label)}</span>${sample ? `<span class="fd-sample">${esc(sample)}</span>` : ""}`;
       it.addEventListener("click", (e) => {
         e.stopPropagation();
         onPick(o.value);
@@ -543,7 +535,7 @@ function bindAppearance(rootEl) {
       // 다른 드롭다운은 먼저 닫는다(하나만 열림 — 겹침 방지).
       document.querySelectorAll(".fd-menu").forEach((m) => { if (m !== menu) m.classList.add("hidden"); });
       // 열 때 내장 웹폰트 로드 트리거(lazy) — 옵션이 폴백 글꼴로 보이지 않게
-      try { opts.forEach((o) => document.fonts?.load?.(`13px ${o.stack}`)); } catch (_) {}
+      try { opts.forEach((o) => { if (o.stack) document.fonts?.load?.(`13px ${o.stack}`); }); } catch (_) {}
       menu.classList.toggle("hidden");
     });
     document.addEventListener("click", () => menu.classList.add("hidden"));
@@ -683,8 +675,10 @@ function buildPaired() {
  *   기록이 없지만 실제로 허용된 경우(구버전에서 이미 허용)는 [허용] 을 한 번 누르면 팝업 없이
  *   즉시 '허용됨' 으로 바뀐다 — 기록이 없는 것이 손해가 아니다.
  */
+//  ⚠ 행마다 같은 설명("워크스페이스 파일을 열고…")을 붙이지 않는다: 세 줄이 글자까지 같으면
+//   그건 정보가 아니라 소음이고, 행 높이만 두 배가 된다. 설명은 카드 아래 한 줄로 모았다.
 function folderPermRow(id, label) {
-  const copy = `<span class="sett-copy"><span class="sett-label">${label}</span><span class="sett-desc">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</span></span>`;
+  const copy = `<span class="sett-copy"><span class="sett-label">${label}</span></span>`;
   if (permGranted(id)) {
     return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
   }
@@ -1399,8 +1393,8 @@ export function openAccountSection() {
 }
 
 /** 트레이 메뉴의 설정/업데이트 진입. 로그인 전에도 로컬 설정과 업데이터는 사용할 수 있다. */
-export function openSettingsSection(nextSection = "general") {
-  section = NAV.some((item) => item.key === nextSection) ? nextSection : "general";
+export function openSettingsSection(nextSection = "appearance") {
+  section = NAV.some((item) => item.key === nextSection) ? nextSection : "appearance";
   S.setView("settings");
 }
 

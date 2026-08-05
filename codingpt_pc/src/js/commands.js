@@ -27,6 +27,9 @@ export const COMMANDS = [
   // 앱은 pc:false 가 아니라 **app:false** 다 — 폰 IDE 는 트리 헤더에 검색창이 상시 떠 있어서
   //  "찾기를 연다"는 명령 자체가 필요 없다(늘 흐린 행이 하나 남는 것보다 없는 게 낫다).
   { id: "find.open", key: "Mod+F", scope: "pane", group: "open", pc: true, app: false, palette: true },
+  //  ★ 2026-08-05: 옛 `실행` 묶음의 마지막 한 줄이었다(저장한 명령이 사라지면서 혼자 남음).
+  //   한 줄짜리 묶음은 분류가 아니라 장식이라 `열기` 로 옮겼다 — 하는 일도 "열린 포트를 본다" 다.
+  { id: "ws.ports", key: null, scope: "workspace", group: "open", pc: true, app: true, palette: true },
 
   // ── 워크스페이스에 추가 ──
   { id: "ws.addTerminal", key: "Mod+T", scope: "workspace", group: "add", pc: true, app: true, palette: true },
@@ -34,10 +37,6 @@ export const COMMANDS = [
   { id: "ws.addPreview", key: "Mod+Shift+E", scope: "workspace", group: "add", pc: true, app: true, palette: true },
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 단축키는 안 준다(앱 commands.ts 주석 참조).
   { id: "ws.addEmulator", key: null, scope: "workspace", group: "add", pc: true, app: true, palette: true },
-
-  // ── 실행 ──
-  { id: "ws.quickCommands", key: "Mod+R", scope: "workspace", group: "run", pc: true, app: true, palette: true },
-  { id: "ws.ports", key: null, scope: "workspace", group: "run", pc: true, app: true, palette: true },
 
   // ── pane 조작 ──
   { id: "pane.splitRight", key: "Mod+D", scope: "pane", group: "pane", pc: true, app: false, palette: true },
@@ -55,7 +54,6 @@ export const COMMANDS = [
 
   // ── 설정 ──
   { id: "app.settings", key: "Mod+Comma", scope: "global", group: "settings", pc: true, app: true, palette: true },
-  { id: "settings.commands", key: null, scope: "global", group: "settings", pc: true, app: true, palette: true },
   { id: "settings.shortcuts", key: null, scope: "global", group: "settings", pc: true, app: true, palette: true },
 
   // ── 워크스페이스 이동(단축키 전용) ──

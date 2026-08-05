@@ -388,11 +388,6 @@ function dispatchRpc(ws, method, params, ok, fail) {
   //  ⚠ `agents.` 와 `agent.` 는 다른 접두사다(위 분기가 먼저 걸리지 않는다) — 순서를 바꿔도 안전.
   //  LAN 직결 allowlist 에는 넣지 않는다(lan.js 불변식: 승인·에이전트류는 서버 릴레이로 남긴다).
   if (method.startsWith('agents.')) { cptServer.handleAgentsRpc(method, params || {}).then(ok).catch(fail); return; }
-  // 저장한 명령(qc.list/save/remove/reorder/run) — 폰·PC 가 같은 구현을 탄다.
-  //  저장소는 이 PC 로컬(<stateDir>/quick-commands.json)이라 폰이 편집하면 지금 붙어 있는 이 PC 에
-  //  즉시 반영된다(사용자 확정 2026-08-04). LAN 직결 allowlist 에는 넣지 않는다 — `qc.run` 은
-  //  터미널에 명령을 실행시키는 조작이라 lan.js 불변식(승인·에이전트류는 서버 릴레이)에 걸린다.
-  if (method.startsWith('qc.')) { cptServer.handleQuickCommandsRpc(method, params || {}).then(ok).catch(fail); return; }
   // 코드 리뷰(review.get/pending/submit/cancel) — 폰·다른 PC 화면이 결과를 돌려보내는 유일한 경로.
   //  세션은 이 PC 데몬 메모리에 있고, 유닉스 소켓(이 PC 화면)과 **같은 함수**를 탄다.
   //  ⚠ 이 줄이 없으면 폰의 [보내기]가 "알 수 없는 메서드"로 조용히 실패한다(실측으로 잡힌 결함).
@@ -401,8 +396,6 @@ function dispatchRpc(ws, method, params, ok, fail) {
   // 모바일 화면(emulator.*) — 폰·태블릿 화면이 프레임을 당겨 가고 탭을 되돌려보내는 유일한 경로.
   //  ⚠ 이 줄이 없으면 폰에서 에뮬레이터 탭이 "알 수 없는 메서드"로 조용히 죽는다(리뷰에서 겪은 그 사고).
   if (method.startsWith('emulator.')) { require('./emulator').handle(method, params || {}).then(ok).catch(fail); return; }
-  // 플러그인(plugins.*) — 폰·다른 PC 화면이 목록을 보고 설치를 누르는 유일한 경로.
-  if (method.startsWith('plugins.')) { require('./plugins').handle(method, params || {}).then(ok).catch(fail); return; }
   // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
   if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.

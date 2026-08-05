@@ -11,15 +11,10 @@ import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
-import { QC_TEXT } from "./text/quick-commands.js";
 import { PALETTE_TEXT } from "./text/palette.js";
 import { bindings, IS_APPLE } from "./shortcuts.js";
 import { formatCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
-
-// 헤더 버튼 툴팁만 여기서 쓴다 — 나머지 문구는 quick-commands.js 가 같은 사전에서 읽는다.
-//  (동적 import 로 여는 모듈이라 버튼 자체는 여기 있어야 한다)
-const QC_TITLE = tx(QC_TEXT).title;
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -574,18 +569,6 @@ function renderMainTop(ws) {
     termBtn.dataset.cmd = "ws.addTerminal";
     termBtn.innerHTML = icons.terminal({ size: 16 });
     termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
-    // 저장한 명령(2026-08-04) — **추가 버튼들의 왼쪽**. 사이드바 토글 줄(전역)이 아니라 여기인
-    //  이유: 저장한 명령은 결국 "이 워크스페이스의 터미널에서" 돈다. 전역 자리에 두면 눌렀을 때
-    //  어느 워크스페이스에서 실행되는지가 모호해진다(사용자 확정).
-    const qcBtn = document.createElement("button");
-    qcBtn.className = "pane-ctrl";
-    qcBtn.title = QC_TITLE;
-    qcBtn.dataset.cmd = "ws.quickCommands";
-    qcBtn.innerHTML = icons.play({ size: 16 });
-    qcBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      import("./quick-commands.js").then((m) => m.openQuickCommandsMenu(qcBtn));
-    });
     // 웹뷰 버튼도 드롭다운 — [빈 웹뷰] + **지금 열려 있는 포트**. 프리뷰 탭이 없을 때도
     //  포트 목록에 닿는 유일한 자리다(주소창 드롭다운은 프리뷰가 이미 열려 있어야 보인다).
     const webBtn = document.createElement("button");
@@ -604,7 +587,6 @@ function renderMainTop(ws) {
     adds.append(
       palBtn,
       palDiv,
-      qcBtn,
       termBtn,
       mkBtn(icons.code, i18n.t('IDE 추가'), "ide"),
       webBtn,
@@ -762,7 +744,7 @@ export function openFileSmart(rel) {
   return smartAdd("ide", { openPath: rel });
 }
 
-/** 헤더의 저장한 명령/포트 버튼을 명령으로도 열 수 있게(팔레트·단축키에서 같은 메뉴). */
+/** 헤더의 포트 버튼을 명령으로도 열 수 있게(팔레트·단축키에서 같은 메뉴). */
 export function headerButton(which) {
   return mtDyn ? mtDyn.querySelector(`.mt-adds [data-cmd="${which}"]`) : null;
 }

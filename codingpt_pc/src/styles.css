@@ -542,15 +542,15 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .settings-modal.hidden { display: none; }
 .sm-backdrop { position: absolute; inset: 0; background: rgba(3, 6, 12, 0.62); backdrop-filter: blur(2px); }
 .sm-card { position: relative; z-index: 1; display: flex; width: min(1040px, 92vw); height: min(720px, 88vh); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6); overflow: hidden; }
-.sm-nav { flex: none; width: 264px; background: var(--base); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
-.sm-search { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; margin-bottom: 12px; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-md); transition: border-color .14s, box-shadow .14s; }
+.sm-nav { flex: none; width: 264px; min-height: 0; background: var(--base); border-right: 1px solid var(--border); padding: 16px 12px; display: flex; flex-direction: column; overflow: hidden; }
+.sm-search { flex: none; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 11px; margin-bottom: 12px; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-md); transition: border-color .14s, box-shadow .14s; }
 .sm-search:focus-within { border-color: var(--text3); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text3) 16%, transparent); }
 .sm-search-ic { display: inline-flex; color: var(--dim); flex: none; }
 .sm-search-input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font-size: 14px; }
 .sm-search-input::placeholder { color: var(--dim); }
 .sm-navgroup { font-size: 10.5px; font-weight: 700; color: var(--dim); letter-spacing: 0.02em; padding: 14px 12px 4px; }
 .sm-navgroup:first-child { padding-top: 4px; }
-.sm-navlist { display: flex; flex-direction: column; gap: 2px; }
+.sm-navlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .sm-navitem { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 8px 12px; border: 1px solid transparent; background: transparent; color: var(--text2); font-size: 14px; font-weight: 500; text-align: left; border-radius: var(--r-md); cursor: pointer; transition: background 0.12s, border-color .12s, transform .08s; }
 .sm-navitem:hover { background: var(--elevated); }
 .sm-navitem:active { transform: scale(.985); }
@@ -567,6 +567,7 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .sm-close:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--text3) 16%, transparent); }
 .sm-content { flex: 1; min-height: 0; overflow-y: auto; padding: 28px 44px; max-width: 760px; }
 .sm-section-title { margin: 0 2px 9px; color: var(--text3); font-size: 12px; font-weight: 700; }
+.sm-card2 + .sm-section-title { margin-top: 24px; }
 .sm-section-note { margin: 12px 2px 0; color: var(--dim); font-size: 11.5px; line-height: 1.5; }
 .sett-attn { color: var(--text2); font-size: 12.5px; font-weight: 600; }
 .sm-sub { font-size: 13px; color: var(--text3); line-height: 1.55; margin-bottom: 22px; }
@@ -1001,7 +1002,7 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
 
 /* 설정 소형 버튼(업데이트 확인 등) */
 .sett-btn {
-  min-width: 64px; min-height: 32px; font-size: 12px; padding: 5px 12px; border-radius: 7px; cursor: pointer;
+  min-width: 64px; min-height: 34px; font-size: 12px; padding: 5px 12px; border-radius: 7px; cursor: pointer;
   border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
   transition: background .12s, transform .08s, box-shadow .12s;
 }
@@ -1020,13 +1021,14 @@ input[type="checkbox"].tgl:focus-visible { outline: none; box-shadow: 0 0 0 3px 
 /* 글꼴 미리보기 드롭다운 — 옵션을 실제 그 글꼴로 렌더 */
 .fd { position: relative; }
 .fd-btn {
-  display: inline-flex; align-items: center; gap: 8px;
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 34px; min-width: 132px;
   background: var(--elevated2); color: var(--text);
   border: 1px solid var(--border-ctrl); border-radius: 7px;
   font-size: 12.5px; font-weight: 600; padding: 6px 10px; cursor: pointer; max-width: 260px;
 }
 .fd-btn:hover { border-color: var(--border-focus); }
-.fd-caret { color: var(--dim); font-size: 10px; }
+.fd-caret { display: inline-flex; flex: none; color: var(--dim); }
 .fd-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; min-width: 280px;
   background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-md);
@@ -1153,9 +1155,6 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pvm-label { flex: 1 1 auto; }
 .pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
-/* ── 저장한 명령(Quick Commands) ──
-   색은 전부 무채색 명암이다 — accent 는 상태 신호 전용(2026-07-28 색 규율). 켜짐/선택은
-   배경 밝기와 글자색 대비로만 표현한다. */
 .pvm-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; }
 .pv-menu-note { padding: 8px 10px; color: var(--dim); font-size: 12px; line-height: 1.45; }
 .pv-menu-div { height: 1px; margin: 5px 6px; background: var(--border-ctrl); }
@@ -1232,61 +1231,6 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .ide-json-val { color: var(--text2, var(--text)); }
 .ide-json-string { color: var(--text2, var(--text)); }
 .ide-json-number, .ide-json-boolean, .ide-json-null { color: var(--text); }
-
-.qc-sheet, .qc-editor { max-width: 420px; width: 420px; max-height: 76vh; overflow-y: auto; }
-.qc-empty { padding: 10px; color: var(--dim); font-size: 12.5px; line-height: 1.5; }
-.qc-row {
-  display: flex; align-items: center; gap: 8px; padding: 9px 10px;
-  border-radius: 9px; border: 1px solid transparent;
-}
-.qc-row:hover { background: var(--elevated2); border-color: var(--border-ctrl); }
-.qc-row-main { flex: 1 1 auto; min-width: 0; }
-.qc-row-label { font-size: 13px; color: var(--text); font-weight: 600; }
-.qc-row-body {
-  font-size: 12px; color: var(--text2, var(--text)); margin-top: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.qc-row-meta { font-size: 11px; color: var(--dim); margin-top: 3px; }
-.qc-row-btn {
-  flex: 0 0 auto; padding: 5px 9px; font-size: 11.5px; cursor: pointer;
-  background: transparent; color: var(--text2, var(--text));
-  border: 1px solid var(--border-ctrl); border-radius: 7px;
-}
-.qc-row-btn:hover { background: var(--elevated); }
-.qc-row-btn.danger:hover { color: var(--error, #d9534f); border-color: var(--error, #d9534f); }
-.qc-add {
-  display: block; width: calc(100% - 12px); margin: 8px 6px 4px; padding: 9px;
-  background: var(--elevated2); color: var(--text); border: 1px solid var(--border-ctrl);
-  border-radius: 9px; font-size: 12.5px; cursor: pointer;
-}
-.qc-add:hover { border-color: var(--text2); }
-
-.qc-field { padding: 6px 6px 2px; }
-.qc-field-label { font-size: 11.5px; color: var(--dim); margin-bottom: 5px; }
-.qc-hint { padding: 2px 6px 6px; font-size: 11.5px; color: var(--dim); line-height: 1.45; }
-.qc-input {
-  width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 13px;
-  background: var(--elevated2); color: var(--text);
-  border: 1px solid var(--border-ctrl); border-radius: 8px; outline: none;
-}
-.qc-input:focus { border-color: var(--text2); }
-.qc-textarea { resize: vertical; min-height: 62px; font-family: inherit; line-height: 1.45; }
-.qc-seg { display: flex; gap: 6px; }
-.qc-seg-btn {
-  flex: 1 1 0; padding: 7px 8px; font-size: 12.5px; cursor: pointer;
-  background: transparent; color: var(--dim);
-  border: 1px solid var(--border-ctrl); border-radius: 8px;
-}
-.qc-seg-btn:hover { background: var(--elevated2); }
-.qc-seg-btn.on { background: var(--elevated2); color: var(--text); border-color: var(--text2); }
-.qc-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 6px 4px; }
-.qc-btn {
-  padding: 8px 16px; font-size: 12.5px; cursor: pointer; border-radius: 8px;
-  background: transparent; color: var(--text2, var(--text)); border: 1px solid var(--border-ctrl);
-}
-.qc-btn:hover { background: var(--elevated2); }
-.qc-btn.primary { background: var(--elevated2); color: var(--text); border-color: var(--text2); }
-.qc-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── 주소창 방문 기록 + 검색 추천 드롭다운(크롬식) ── */
 .pv-suggest {
@@ -2333,37 +2277,3 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-again { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 0;
   background: none; border: 0; color: var(--text3); font-size: 12px; cursor: pointer; }
 
-/* ── 플러그인(plugins-view.js) ─────────────────────────────────────────────
-   설치 = 남의 코드를 이 PC 에 놓는 일이라, **허용 목록을 보여 주는 화면**(.plug-consent)이
-   목록과 설치 사이에 반드시 들어간다. 목록에서 바로 설치되는 버튼은 없다. */
-.plug { display: flex; flex-direction: column; }
-.plug-row { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border); }
-.plug-row:last-child { border-bottom: 0; }
-.plug-row.off { opacity: .5; }
-.plug-row-t { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-.plug-row-t b { font-weight: 500; font-size: 12.5px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plug-row-t i { font-style: normal; color: var(--dim); font-size: 11px; margin-top: 2px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plug-sw { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px;
-  color: var(--text2); font-size: 11px; cursor: pointer; }
-.plug-sw.on { background: var(--hover); color: var(--text); }
-.plug-del { background: none; border: 0; color: var(--dim); cursor: pointer; padding: 3px 5px; font-size: 11px; }
-.plug-del:hover { color: var(--error); }
-.plug-empty { color: var(--dim); font-size: 12px; padding: 12px 2px; }
-.plug-add { display: flex; gap: 6px; padding: 4px 0 8px; }
-.plug-add .sett-input { flex: 1; }
-.plug-sugg { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; color: var(--dim); font-size: 11.5px; }
-.plug-sugg-b { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 9px;
-  color: var(--text2); font-size: 11.5px; cursor: pointer; }
-.plug-mkt-h { color: var(--text2); font-size: 11.5px; padding: 6px 2px; border-top: 1px solid var(--border); }
-.plug-consent { padding: 4px 2px; }
-.plug-consent-h { color: var(--text); font-size: 15px; font-weight: 700; }
-.plug-consent-sub { color: var(--dim); font-size: 12px; margin: 4px 0 16px; }
-.plug-consent-t { color: var(--text2); font-size: 12px; margin-bottom: 6px; }
-.plug-perms { margin: 0 0 14px; padding-left: 18px; color: var(--text); font-size: 12.5px; line-height: 1.9; }
-.plug-kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 11.5px; }
-.plug-kv span { color: var(--dim); }
-.plug-kv b { font-weight: 400; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plug-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.plug-err { color: var(--error); font-size: 11.5px; padding: 8px 2px; }
-.plug-err:empty { display: none; }

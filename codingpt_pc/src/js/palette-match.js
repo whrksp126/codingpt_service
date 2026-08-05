@@ -30,7 +30,7 @@ const BOUNDARY = "/-_. \\";
 
 /**
  * 여기서 낱말이 시작되는가.
- *  구분자 뒤(`quick-commands` 의 c)뿐 아니라 **camelCase 의 대문자**(`WorkspaceView` 의 V)도
+ *  구분자 뒤(`workspace-view` 의 v)뿐 아니라 **camelCase 의 대문자**(`WorkspaceView` 의 V)도
  *  낱말의 시작이다. 이걸 빼면 `wsv` 가 `WorkspaceView.tsx` 를 못 잡는다(실측으로 확인 — 대시가
  *  있는 `workspace-view.js` 만 가산점을 받아 위로 올라갔다).
  *  `orig` 은 **대소문자를 지운 문자열이 아니어야** 한다 — 판정에 원본 글자가 필요하다.

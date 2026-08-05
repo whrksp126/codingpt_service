@@ -233,29 +233,9 @@ export const api = {
   //  agents.launch {cwd,index,id}  → 그 터미널에 명령을 타이핑(셸 준비 대기는 데몬이 판정)
   agentsLocal: (cmd, args) => invoke("agents_local", { cmd, args: args || {} }),
 
-  // ── 저장한 명령(Quick Commands, 2026-08-04) ────────────────────────────────
-  //  저장소 = 그 PC 데몬 로컬 파일. 이 PC 워크스페이스면 사이드카 직결(qcLocal), 다른 PC 면
-  //  back 릴레이. **데몬 구현은 한 벌**이라 경로만 다르고 동작은 같다(chatLocal 과 같은 구조).
-  //  목록 조회가 POST 인 이유: `ws:''`(홈 루트 워크스페이스)를 쿼리스트링이 삼키기 때문 —
-  //  아래 qs() 는 빈 값을 버린다. 자세한 근거는 back daemonController 주석.
-  qcLocal: (cmd, args) => invoke("qc_local", { cmd, args: args || {} }),
-  qcList: (body) =>
-    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/list", body: body || {}, timeoutSecs: 15 }),
-  qcListAll: () =>
-    invoke("back_api", { method: "GET", path: "/api/daemon/quick-commands/all", body: null, timeoutSecs: 15 }),
-  qcSave: (body) =>
-    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands", body: body || {}, timeoutSecs: 15 }),
-  qcRemove: (body) =>
-    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/remove", body: body || {}, timeoutSecs: 15 }),
-  qcReorder: (body) =>
-    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/reorder", body: body || {}, timeoutSecs: 15 }),
-  // 실행은 에이전트 기동·준비 대기까지 데몬이 직렬로 하므로 여유 타임아웃(최대 25초 대기).
-  qcRun: (body) =>
-    invoke("back_api", { method: "POST", path: "/api/daemon/quick-commands/run", body: body || {}, timeoutSecs: 45 }),
-
   // ── 코드 리뷰(2026-08-04) ──
   //  세션은 **그 워크스페이스를 호스팅하는 PC 데몬의 메모리**에 있다. 이 PC 면 소켓 직결,
-  //  다른 PC 면 back 릴레이 — 데몬 구현은 한 벌이다(저장한 명령과 같은 구조).
+  //  다른 PC 면 back 릴레이 — 데몬 구현은 한 벌이다.
   //  조회가 POST 인 이유도 같다(`ws:''` 를 쿼리스트링이 삼킨다).
   reviewLocal: (cmd, args) => invoke("review_local", { cmd, args: args || {} }),
   reviewGet: (body) =>
@@ -275,16 +255,6 @@ export const api = {
   emulatorInput: (body) => invoke("emulator_local", { cmd: "emulator.input", args: body || {} }),
   emulatorPower: (id, action) =>
     invoke("emulator_local", { cmd: action === "shutdown" ? "emulator.shutdown" : "emulator.boot", args: { id } }),
-
-  // ── 플러그인 마켓플레이스 — **이 PC 의 데몬**이 설치 주체다(유닉스 소켓 직결).
-  //  git clone 이 걸리므로 목록·미리보기·설치는 타임아웃이 길다.
-  pluginsList: () => invoke("plugins_local", { cmd: "plugins.list", args: {} }),
-  pluginsMarketplace: (url, ref) => invoke("plugins_local", { cmd: "plugins.marketplace", args: { url, ref } }),
-  pluginsPreview: (url, ref, subdir) => invoke("plugins_local", { cmd: "plugins.preview", args: { url, ref, subdir } }),
-  pluginsInstall: (url, ref, subdir, consent) =>
-    invoke("plugins_local", { cmd: "plugins.install", args: { url, ref, subdir, consent } }),
-  pluginsUninstall: (key) => invoke("plugins_local", { cmd: "plugins.uninstall", args: { key } }),
-  pluginsSetEnabled: (key, enabled) => invoke("plugins_local", { cmd: "plugins.setEnabled", args: { key, enabled } }),
 
   // ── 에이전트 모드 즉시 확인 — 이 PC 의 터미널은 로컬 tmux 직결이라 shift+tab 이 데몬 입력 경로를
   //  지나가지 않는다. 그 키를 보낼 때 이걸 불러 주면 데몬이 그 터미널을 즉시 다시 읽어 이 PC 와

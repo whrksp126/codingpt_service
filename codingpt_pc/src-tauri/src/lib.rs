@@ -892,11 +892,9 @@ pub fn run() {
             cptsock::forward_stop,
             cptsock::e2ee_local,
             cptsock::agents_local,
-            cptsock::qc_local,
             cptsock::ports_local,
             cptsock::review_local,
             cptsock::emulator_local,
-            cptsock::plugins_local,
             cptsock::mode_poke,
             cptsock::chat_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)

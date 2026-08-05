@@ -188,7 +188,7 @@ ok(missing.length === 0,
 ok(relayed.includes('review'), '리뷰가 그 검사 대상에 실제로 포함돼 있다', relayed.join(','));
 // 이번 차수에 늘어난 계열도 **실제로 이 검사에 걸려 있는지** 못박는다(정규식이 못 잡으면
 //  "0개 누락"이 나오는데, 그건 안전한 게 아니라 아무것도 안 본 것이다).
-for (const fam of ['emulator', 'plugins']) {
+for (const fam of ['emulator']) {
   ok(relayed.includes(fam), `${fam} 이 릴레이 라우트 검사 대상에 포함돼 있다`, relayed.join(','));
 }
 ok(/handleReviewRpc/.test(control) && /handleReviewRpc/.test(read(path.join(DAEMON, 'cpt-server.js'))),

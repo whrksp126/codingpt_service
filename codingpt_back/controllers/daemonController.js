@@ -1011,7 +1011,7 @@ async function agentsLaunch(req, res) {
 //  (요약: 사람이 리뷰하는 시간은 ui_command 왕복 상한 60초보다 길다).
 //
 // ⚠ 여기도 조회가 POST 다 — `ws` 는 홈-상대 경로이고 **빈 문자열이 홈 루트라는 유효한 값**이라
-//  쿼리스트링으로 실으면 조용히 사라진다(저장한 명령과 같은 이유).
+//  쿼리스트링으로 실으면 조용히 사라진다(빈 값을 헬퍼가 버린다).
 async function reviewGet(req, res) {
   try {
     const result = await daemonRelayService.callRpc(req.user.id, 'review.get',
@@ -1038,61 +1038,6 @@ async function reviewSubmit(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
-// ── 플러그인 마켓플레이스 ────────────────────────────────────────────────────
-// 서버는 **아무것도 모른다** — 목록도 설치도 전부 데몬(그 PC)이 한다. 여기는 통과 지점일 뿐이다.
-//  마켓플레이스가 git 저장소라 서버가 중간에 낄 이유가 없다(우리가 배포·심사를 떠안지 않는다).
-//
-// ⚠ 메서드 이름을 **리터럴로** 적는다(헬퍼에 변수로 넘기지 않는다). 대조 테스트가 이 파일에서
-//   `callRpc(req.user.id, 'xxx.` 를 긁어 "back 이 릴레이하는 계열"을 뽑고, 그게 데몬 control.js 에
-//   라우트가 있는지 본다 — 헬퍼로 감싸면 그 검사가 **조용히 아무것도 안 보게** 된다(실제로 그랬다).
-async function pluginsList(req, res) {
-  try {
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.list', {}, undefined, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsContributions(req, res) {
-  try {
-    const lang = String((req.body || {}).lang || '') || undefined;
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.contributions', { lang }, undefined, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsMarketplace(req, res) {
-  try {
-    const b = req.body || {};
-    // git clone 이 걸린다 — 기본 타임아웃으로는 짧다.
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.marketplace',
-      { url: String(b.url || ''), ref: b.ref }, 120000, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsPreview(req, res) {
-  try {
-    const b = req.body || {};
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.preview',
-      { url: String(b.url || ''), ref: b.ref, subdir: b.subdir }, 120000, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsInstall(req, res) {
-  try {
-    const b = req.body || {};
-    // consent(동의 지문)는 **그대로** 넘긴다 — 서버가 만들어 주면 동의라는 개념이 무너진다.
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.install',
-      { url: String(b.url || ''), ref: b.ref, subdir: b.subdir, consent: String(b.consent || '') }, 150000, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsUninstall(req, res) {
-  try {
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.uninstall',
-      { key: String((req.body || {}).key || '') }, undefined, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function pluginsSetEnabled(req, res) {
-  try {
-    const b = req.body || {};
-    return successResponse(res, await daemonRelayService.callRpc(req.user.id, 'plugins.setEnabled',
-      { key: String(b.key || ''), enabled: !!b.enabled }, undefined, connOptsOf(req)));
-  } catch (e) { return mapRpcError(res, e); }
-}
-
 // ── 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) ────────────────────────
 // 프레임은 base64 라 응답이 수십~수백 KB 다. **서버는 그냥 통과시킨다** — 해석하거나 캐시하지
 //  않는다(캐시하면 "왜 화면이 안 바뀌지"가 되고, 해석하면 데몬과 규칙이 두 벌이 된다).
@@ -1149,71 +1094,6 @@ async function reviewCancel(req, res) {
     const b = req.body || {};
     const result = await daemonRelayService.callRpc(req.user.id, 'review.cancel',
       { id: String(b.id || ''), reason: b.reason }, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-
-// ── 저장한 명령(Quick Commands, 2026-08-04) ────────────────────────────────────
-// POST /api/daemon/quick-commands/list     body:{ ws? } → { items }  (전역 + 그 워크스페이스)
-// GET  /api/daemon/quick-commands/all      → { items, limits }       (설정 화면 — 전부)
-// POST /api/daemon/quick-commands          body:{ item } → { ok, item, items }
-// POST /api/daemon/quick-commands/remove   body:{ id }   → { ok, removed, items }
-// POST /api/daemon/quick-commands/reorder  body:{ ids }  → { ok, items }
-// POST /api/daemon/quick-commands/run      body:{ id, cwd, tid? } → { ok, index, ready }
-//
-// 저장소는 **그 PC 데몬 로컬**이다. 서버는 내용을 보관하지도 해석하지도 않고 그대로 중계만 한다
-//  (agents.* 와 같은 규율 — 서버가 실행 문자열을 만들면 그게 곧 원격 코드 실행 통로다).
-//
-// ⚠ 목록 조회가 GET 이 아니라 POST 인 이유(설계 결정, 되돌리지 말 것): `ws` 는 홈-상대 경로이고
-//  **빈 문자열이 '홈 루트 워크스페이스'라는 유효한 값**이다. 그런데 클라이언트들의 쿼리스트링
-//  헬퍼는 빈 값을 관례적으로 버린다(PC `api.js qs()` 가 실제로 그렇다) → 루트 워크스페이스에서
-//  조회하면 ws 가 통째로 사라져 "전역만" 으로 조용히 격하된다. 본문 JSON 은 '' 을 그대로 옮긴다.
-async function quickCommandsList(req, res) {
-  try {
-    const b = req.body || {};
-    const hasWs = Object.prototype.hasOwnProperty.call(b, 'ws') && typeof b.ws === 'string';
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.list',
-      hasWs ? { ws: b.ws } : {}, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function quickCommandsListAll(req, res) {
-  try {
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.listAll', {}, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function quickCommandsSave(req, res) {
-  try {
-    const b = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.save',
-      { item: b.item || b }, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function quickCommandsRemove(req, res) {
-  try {
-    const b = req.body || {};
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.remove',
-      { id: String(b.id || '') }, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function quickCommandsReorder(req, res) {
-  try {
-    const b = req.body || {};
-    const ids = Array.isArray(b.ids) ? b.ids.map((x) => String(x)) : [];
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.reorder', { ids }, undefined, connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
-async function quickCommandsRun(req, res) {
-  try {
-    const b = req.body || {};
-    // tid 는 '지금 보고 있는 터미널'이라 없을 수 있다(target:'new' 항목) → 있을 때만 싣는다.
-    const tid = Number.isInteger(b.tid) ? b.tid : (typeof b.tid === 'string' && /^\d+$/.test(b.tid) ? parseInt(b.tid, 10) : null);
-    const result = await daemonRelayService.callRpc(req.user.id, 'qc.run',
-      { id: String(b.id || ''), cwd: b.cwd || '', ...(tid != null ? { tid } : {}) }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -1856,14 +1736,6 @@ function previewCookieMiddleware(req, res, next) {
 
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
-  quickCommandsList, quickCommandsListAll, quickCommandsSave, quickCommandsRemove, quickCommandsReorder, quickCommandsRun,
-  pluginsList,
-  pluginsContributions,
-  pluginsMarketplace,
-  pluginsPreview,
-  pluginsInstall,
-  pluginsUninstall,
-  pluginsSetEnabled,
   emulatorList,
   emulatorFrame,
   emulatorInput,

@@ -196,18 +196,6 @@ pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
     cpt_request(&cmd, args)
 }
 
-// 저장한 명령(Quick Commands, 2026-08-04) — 저장소가 **이 PC 데몬 로컬 파일**이라, 이 PC 의
-//  워크스페이스라면 back 을 왕복할 이유가 없다(실측 150~285ms vs 이 소켓 1~2ms). 다른 PC 의
-//  워크스페이스는 프런트가 back 릴레이로 보낸다 — 데몬 구현은 어느 경로든 **같은 함수**를 탄다.
-//  울타리는 agents_local 과 동일한 모양: `qc.` 접두사만 통과시킨다.
-#[tauri::command]
-pub fn qc_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    if !cmd.starts_with("qc.") {
-        return Err("허용되지 않은 명령입니다.".to_string());
-    }
-    cpt_request_coded(&cmd, args, true)
-}
-
 // 열린 포트 목록(2026-08-04) — 종전엔 tmux.rs 에 **같은 로직의 Rust 사본**이 있었다.
 //  포트 판정 규칙(무시 포트·dev 포트대·워크스페이스 귀속·프로세스 이름)이 데몬과 두 벌이면
 //  한쪽만 고쳐진다 → 데몬 한 벌로 모으고 그 사본은 제거했다. 울타리는 위와 같은 모양.
@@ -244,16 +232,6 @@ pub fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json
     }
     // 시뮬레이터 부팅이 60초까지 걸린다(프레임 한 장은 1~2초).
     cpt_request_timed(&cmd, args, true, 90)
-}
-
-// 플러그인 마켓플레이스 — 설치 주체는 **이 PC 의 데몬**이다(남의 PC 에 깔 일이 아니다).
-//  git clone 이 최대 90초까지 걸리므로 이 경로는 넉넉한 타임아웃을 쓴다.
-#[tauri::command]
-pub fn plugins_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    if !cmd.starts_with("plugins.") {
-        return Err("허용되지 않은 명령입니다.".to_string());
-    }
-    cpt_request_timed(&cmd, args, true, 180)
 }
 
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
