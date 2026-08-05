@@ -46,6 +46,7 @@ export default function Footer() {
           <div>
             <h4 style={colHead}>제품</h4>
             <a href="/#features" style={colLink}>기능</a>
+            <a href="/#pricing" style={colLink}>요금</a>
             <a href="/#start" style={colLink}>다운로드</a>
           </div>
           <div>
@@ -68,6 +69,9 @@ export default function Footer() {
           </p>
           <p>{b.address}</p>
           <p>고객문의 {b.customerPhone} · {b.customerEmail}</p>
+          <p style={{ marginTop: 12, color: 'var(--dim)' }}>
+            Personal은 무료이며, Supporter는 월 4,900원의 선택 후원 구독입니다. 결제는 매월 자동갱신되고 다음 결제 전 언제든 해지할 수 있습니다.
+          </p>
         </div>
       </div>
     </footer>

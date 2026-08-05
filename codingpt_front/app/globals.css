@@ -74,6 +74,7 @@ th { color: var(--dim); font-weight: 600; }
 .nav { display: flex; gap: 18px; align-items: center; padding: 16px 0; }
 .nav a { color: var(--text2); font-weight: 600; font-size: 14.5px; }
 .nav a:hover { color: var(--text); }
+@media (max-width: 640px) { .nav-secondary { display: none; } }
 .brand { font-weight: 800; font-size: 17px; color: var(--text) !important; letter-spacing: -0.02em; }
 
 .footer { border-top: 1px solid var(--border); margin-top: 56px; padding: 28px 0 52px; color: var(--dim); font-size: 12.5px; line-height: 1.75; }

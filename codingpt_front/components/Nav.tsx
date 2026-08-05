@@ -14,6 +14,8 @@ export default function Nav() {
         <img src="/logo.png" alt="CodingPT" height={22} style={{ display: 'block' }} />
       </a>
       <span style={{ flex: 1 }} />
+      <a href="/#features" className="nav-secondary">기능</a>
+      <a href="/#pricing" className="nav-secondary">요금</a>
       <a
         href="/#start"
         style={{
@@ -24,6 +26,7 @@ export default function Nav() {
           borderRadius: 9,
           fontWeight: 680,
           fontSize: 13.5,
+          marginLeft: 8,
           marginRight: 18,
         }}
       >
