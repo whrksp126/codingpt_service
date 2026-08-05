@@ -1656,6 +1656,25 @@ async function previewStart(req, res) {
 // POST /api/daemon/forward/start  (인증) body:{ port, hostDeviceId? } — 원격 기기 로컬 포트 포워딩 토큰.
 //  원격 기기가 자기 127.0.0.1:<port> 리스너의 TCP 연결 1개당 WS(/api/daemon/forward/:token) 1개를 열어
 //  raw 바이트를 파이프(ssh -L 모델). hostDeviceId 규약은 previewStart 와 동일.
+/**
+ * POST /api/daemon/emulator/stream  body:{ id, hostDeviceId? } → { token }
+ *  폰·다른 PC 가 그 PC 에 붙은 기기 화면(H.264)을 보기 위한 스트림 토큰. 바이트는 WS 로만 흐른다
+ *  (`/api/daemon/emustream/:token`) — 이 라우트는 표를 끊어 줄 뿐이다.
+ */
+async function emulatorStream(req, res) {
+  const id = String((req.body || {}).id || '');
+  if (!id) return errorResponse(res, new Error('기기 id 가 필요합니다.'), 400);
+  const opts = connOptsOf(req);
+  const runnerId = opts ? opts.runnerId : null;
+  if (opts && !daemonRelayService.pickConn(req.user.id, opts)) {
+    return errorResponse(res, new Error('해당 PC 데몬이 연결되어 있지 않습니다.'), 409);
+  }
+  try {
+    const token = daemonRelayService.issueEmulatorStreamToken(req.user.id, id, runnerId);
+    return successResponse(res, { token });
+  } catch (e) { return errorResponse(res, e, e.statusCode || 500); }
+}
+
 async function forwardStart(req, res) {
   const port = parseInt((req.body || {}).port, 10);
   if (!Number.isFinite(port) || port <= 0 || port >= 65536) {
@@ -1737,6 +1756,7 @@ function previewCookieMiddleware(req, res, next) {
 module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   emulatorList,
+  emulatorStream,
   emulatorFrame,
   emulatorInput,
   emulatorPower,

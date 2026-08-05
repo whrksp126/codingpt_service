@@ -110,7 +110,47 @@ ok(/leaf\.kind === "emulator"/.test(surfBody), '독립 pane 도 목록에 나온
 ok(/t\.kind === "emulator" \? "emulator"/.test(surfBody),
   '★ 혼합 탭의 모바일 화면이 "terminal" 로 분류되지 않는다');
 
-// ── 6. 앱도 같은 종류를 안다(한쪽만 고치면 기기마다 다른 것이 열린다) ────────
+// ── 6. 라이브 영상 — PC 와 앱이 **같은 바이트 계약**을 푼다 ──────────────────
+//  폰은 back 릴레이로, PC 는 로컬 WS 로 받지만 **보내는 바이트는 글자 그대로 같다**. 두 경로가
+//  다른 모양이면 화면 코드가 두 벌이 되고, 그러면 반드시 한쪽만 고쳐진다.
+const appVideo = read(path.join(APP, 'workspace/EmulatorVideo.tsx'));
+const pcEmu = read(path.join(PC, 'emulator-view.js'));
+for (const [who, src] of [['PC', pcEmu], ['앱', appVideo]]) {
+  ok(/avc1\.640028/.test(src), `${who}: 같은 코덱 문자열로 디코더를 연다`);
+  ok(/optimizeForLatency/.test(src), `${who}: 지연 우선으로 설정한다(버퍼링하면 조작이 굼떠 보인다)`);
+  //  Annex-B 는 첫 IDR 앞에 SPS/PPS 가 있어야 한다 — 이걸 빼면 첫 키프레임을 못 푼다.
+  ok(/configBytes/.test(src) && /isKey && configBytes|isKey \? 'key'/.test(src),
+    `★ ${who}: config(SPS/PPS)를 첫 키프레임에 붙인다`);
+  ok(/flags & 1|FLAG_CONFIG/.test(src) && /flags & 2|FLAG_KEY/.test(src),
+    `${who}: 플래그 비트 해석이 같다(1=config · 2=keyframe)`);
+  //  키프레임 전의 델타를 디코더에 넣으면 오류가 난다 — 버려야 한다.
+  ok(/sawKey|sawKeyFrame/.test(src), `${who}: 첫 키프레임 전의 조각은 버린다`);
+}
+//  데몬이 그 바이트를 실제로 그렇게 만든다.
+const dstream = read(path.resolve('../codingpt_daemon/packages/runner-core/emulator-stream.js'));
+ok(/const FLAG_CONFIG = 1;/.test(dstream) && /const FLAG_KEY = 2;/.test(dstream),
+  '데몬의 플래그 값이 두 화면과 같다');
+ok(/openRelayStream/.test(dstream), '릴레이 경로가 있다(폰·다른 PC)');
+//  ★ 로컬 WS 와 릴레이가 **같은 send() 를 탄다** — 다른 함수로 갈라지면 형식이 갈라진다.
+const attachBody = dstream.slice(dstream.indexOf('function attach('), dstream.indexOf('function send('));
+ok(/send\(ws, FLAG_CONFIG/.test(attachBody),
+  '★ 새로 붙은 시청자에게 config 를 먼저 준다(없으면 다음 키프레임까지 검은 화면)');
+ok(/entry\.clients\.add\(ws\)/.test(attachBody) && /openRelayStream[\s\S]*attach\(entry, ws\)/.test(dstream),
+  '★ 릴레이 시청자도 로컬과 같은 clients 집합에 들어간다(브로드캐스트 한 벌)');
+
+// ── 7. back 릴레이 배관이 실제로 이어져 있다 ─────────────────────────────────
+const BACK = path.resolve('../codingpt_back');
+const backApp = read(path.join(BACK, 'app.js'));
+const backRelay = read(path.join(BACK, 'services/daemonRelayService.js'));
+const backRoutes = read(path.join(BACK, 'routes/daemonRoutes.js'));
+ok(/emustream/.test(backApp) && /handleEmulatorStreamUpgrade/.test(backApp),
+  '★ back 이 /api/daemon/emustream 업그레이드를 라우팅한다(없으면 폰이 조용히 못 붙는다)');
+ok(/router\.post\('\/emulator\/stream'/.test(backRoutes), 'back 에 표 끊는 라우트가 있다');
+ok(/openStream\(sess\.userId, 'emu'/.test(backRelay), "back 이 kind='emu' 로 데몬에 지시한다");
+const dcontrol = read(path.resolve('../codingpt_daemon/packages/runner-core/control.js'));
+ok(/msg\.kind === 'emu'/.test(dcontrol), "★ 데몬이 kind='emu' 를 안다(없으면 '지원하지 않는 스트림 종류')");
+
+// ── 8. 앱도 같은 종류를 안다(한쪽만 고치면 기기마다 다른 것이 열린다) ────────
 const appTiling = read(path.join(APP, 'workspace/tiling.ts'));
 const appKinds = /export type PaneKind = ([^;]+);/.exec(appTiling)?.[1] || '';
 for (const k of KINDS) {

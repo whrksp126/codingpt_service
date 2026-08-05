@@ -12,6 +12,7 @@
  * 수명: 보는 사람이 없으면 끈다. 화면을 닫고도 인코더가 계속 돌면 배터리·CPU 를 조용히 먹는다.
  */
 const crypto = require('crypto');
+const WebSocket = require('ws');
 const { WebSocketServer } = require('ws');
 const { ScrcpySession } = require('./scrcpy-session');
 
@@ -143,6 +144,48 @@ function sessionFor(serial) {
   return null;
 }
 
+/**
+ * back 릴레이용 스트림 — **폰·다른 PC** 가 이 화면을 볼 때 쓰는 길.
+ *
+ * 로컬 웹뷰는 위의 127.0.0.1 WebSocket 에 직접 붙지만, 다른 기기는 그 주소에 닿을 수 없다.
+ *  대신 back 이 `stream_open kind='emu'` 를 지시하면 데몬이 back 으로 **다이얼백**해서 같은
+ *  프레임을 흘린다(터미널 pty·프리뷰 tcp 스트림과 같은 배관 — 새로 여는 포트가 없다).
+ *
+ * ⚠ 보내는 바이트는 로컬 WS 와 **글자 그대로 같다**([플래그 1바이트][H.264]). 두 경로가 다른 모양이면
+ *  화면 코드가 두 벌이 되고, 그러면 반드시 한쪽만 고쳐진다.
+ */
+function openRelayStream({ serverUrl, deviceToken }, { streamToken, params }, deps) {
+  const a = params || {};
+  const url = String(serverUrl).replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
+  const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${deviceToken}` } });
+  let entry = null;
+  const detach = () => {
+    if (!entry) return;
+    entry.clients.delete(ws);
+    if (entry.clients.size === 0 && !entry.closeTimer) {
+      entry.closeTimer = setTimeout(() => stop(entry.id), LINGER_MS);
+    }
+    entry = null;
+  };
+  ws.on('open', async () => {
+    try { if (ws._socket) ws._socket.setNoDelay(true); } catch (_) { /* noop */ }
+    try {
+      //  세션 준비는 emulator.js 가 한다(도구 찾기·id 검증이 거기 있다) — 여기서 다시 만들지 않는다.
+      const info = await deps.startFor(a);
+      entry = streams.get(info.streamId);
+      if (!entry) throw new Error('스트림을 찾지 못했어요');
+      //  화면이 먼저 알아야 하는 것: 영상 크기(좌표 환산의 기준). 프레임 앞에 텍스트 한 줄로 보낸다.
+      ws.send(JSON.stringify({ type: 'meta', width: info.width, height: info.height, codec: info.codec }));
+      attach(entry, ws);
+    } catch (e) {
+      try { ws.send(JSON.stringify({ type: 'error', message: (e && e.message) || String(e) })); } catch (_) { /* noop */ }
+      try { ws.close(); } catch (_) { /* noop */ }
+    }
+  });
+  ws.on('close', detach);
+  ws.on('error', detach);
+}
+
 /** 프로세스 종료·데몬 재시작 때 인코더를 남기지 않는다. */
 function stopAll() {
   for (const id of [...streams.keys()]) stop(id);
@@ -154,4 +197,4 @@ function stopAll() {
 //   그건 서버가 연결이 끊긴 걸 알아챈 뒤의 이야기다 — 우리가 먼저 확실히 끊는다.
 process.once('exit', () => { try { stopAll(); } catch (_) { /* noop */ } });
 
-module.exports = { start, stop, stopAll, sessionFor, _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS };
+module.exports = { start, stop, stopAll, sessionFor, openRelayStream, _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS };

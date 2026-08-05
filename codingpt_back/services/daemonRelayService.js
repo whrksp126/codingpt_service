@@ -1545,6 +1545,58 @@ function handleForwardUpgrade(token, req, socket, head) {
   });
 }
 
+// ── 모바일 화면 라이브 영상 릴레이 ────────────────────────────────────
+// 폰·다른 PC 가 그 PC 에 붙은 기기 화면(H.264)을 보는 길. 터미널(pty)·포워딩(tcp)과 **같은 배관**이고
+// kind 만 'emu' 다. 서버는 프레임을 해석하지 않는다 — 바이트를 그대로 잇기만 한다.
+//
+// ⚠ 왜 폴링(emulator.frame)을 안 쓰나: 그건 매 장 전체 화면을 떠서 JPEG 로 만들어 base64 로
+//  실어 나른다. 폰에서 1~2 fps 였고, 화면이 안 바뀌어도 계속 그 값을 태웠다. H.264 는 변한 것만
+//  보내서 정지 화면이 사실상 0 이다(실측: 6 KB/s vs 55 KB/s).
+const EMU_TOKEN_TTL_MS = 60 * 60 * 1000;
+const emuTokens = new Map(); // token → { userId, deviceId, runnerId, expiresAt }
+
+/** POST /api/daemon/emulator/stream 에서 호출(인증 후). 대상 러너 오프라인이면 throw. */
+function issueEmulatorStreamToken(userId, deviceId, runnerId) {
+  const rid = Number.isInteger(runnerId) ? runnerId
+    : (typeof runnerId === 'string' && /^\d+$/.test(runnerId) ? parseInt(runnerId, 10) : null);
+  if (!pickConn(userId, rid != null ? { runnerId: rid } : undefined)) {
+    const err = new Error(rid != null ? '대상 PC 데몬이 연결되어 있지 않습니다.' : 'PC 데몬이 연결되어 있지 않습니다.');
+    err.statusCode = 409;
+    throw err;
+  }
+  const token = 'demu-' + crypto.randomBytes(18).toString('hex');
+  const nowTs = Date.now();
+  for (const [t, sess] of emuTokens) { if (sess.expiresAt < nowTs) emuTokens.delete(t); }
+  emuTokens.set(token, { userId, deviceId: String(deviceId || ''), runnerId: rid, expiresAt: nowTs + EMU_TOKEN_TTL_MS });
+  return token;
+}
+
+function resolveEmulatorStreamToken(token) {
+  const sess = emuTokens.get(token);
+  if (!sess || sess.expiresAt < Date.now()) { if (sess) emuTokens.delete(token); return null; }
+  sess.expiresAt = Date.now() + EMU_TOKEN_TTL_MS;
+  return sess;
+}
+
+/** GET /api/daemon/emustream/:token 업그레이드(앱→back). 한 시청자 = WS 1개. */
+function handleEmulatorStreamUpgrade(token, req, socket, head) {
+  const sess = resolveEmulatorStreamToken(token);
+  if (!sess) { try { socket.destroy(); } catch (_) { /* noop */ } return; }
+  wss.handleUpgrade(req, socket, head, async (appWs) => {
+    let daemonWs = null;
+    try {
+      daemonWs = await openStream(sess.userId, 'emu', { id: sess.deviceId },
+        sess.runnerId != null ? { runnerId: sess.runnerId } : undefined);
+    } catch (e) {
+      //  화면이 "왜 안 되는지" 를 알아야 폴링으로 돌아갈지 판단한다 — 조용히 닫지 않는다.
+      const message = e.message === 'DAEMON_OFFLINE' ? 'PC 데몬이 오프라인입니다.' : e.message;
+      try { appWs.send(JSON.stringify({ type: 'error', message })); appWs.close(); } catch (_) { /* noop */ }
+      return;
+    }
+    bridge(appWs, daemonWs, `emu userId=${sess.userId} dev=${sess.deviceId}`);
+  });
+}
+
 // ── LAN 직결 시그널링(기능4) ───────────────────────────────────────────
 // 서버는 "소개장"만 낸다: 데몬의 사설 IP 후보를 보관하고, 뷰어가 요청하면 단명 grant 를 만들어
 //  ① 대상 데몬에 제어 WS 로 미리 통지 ② 뷰어에 (주소 후보 + grant) 회신.
@@ -1778,6 +1830,8 @@ module.exports = {
   callRpc,
   issueTerminalToken,
   issueForwardToken,
+  issueEmulatorStreamToken,
+  handleEmulatorStreamUpgrade,
   issueLanGrant,
   handleForwardUpgrade,
   getConnection,

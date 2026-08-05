@@ -223,6 +223,12 @@ const startServer = async () => {
         daemonRelayService.handleAppTerminalUpgrade(dtm[1], req, socket, head);
         return;
       }
+      // BYO-PC 모바일 화면 — 라이브 H.264 프레임(시청자 1명당 WS 1개)
+      const dem = url.match(/^\/api\/daemon\/emustream\/([^/?]+)/);
+      if (dem) {
+        daemonRelayService.handleEmulatorStreamUpgrade(dem[1], req, socket, head);
+        return;
+      }
       // BYO-PC 포트 포워딩 — 원격 기기 로컬 리스너의 TCP 연결 1개당 WS 1개(raw 바이트 파이프)
       const dfm = url.match(/^\/api\/daemon\/forward\/([^/?]+)/);
       if (dfm) {

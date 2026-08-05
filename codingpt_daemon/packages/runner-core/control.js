@@ -640,6 +640,13 @@ function run(config) {
             ptyLib.openPtyStream(config, msg);
           } else if (msg.kind === 'tcp') {
             proxyLib.openTcpStream(config, msg); // 프리뷰 — 로컬 포트 raw TCP 터널
+          } else if (msg.kind === 'emu') {
+            //  모바일 화면 라이브 영상(H.264) — 폰·다른 PC 가 보는 길. 세션 준비는 emulator.js 가 한다
+            //   (도구 찾기·id 검증이 거기 한 벌뿐이라, 여기서 다시 만들면 두 벌이 된다).
+            const emuLib = require('./emulator');
+            require('./emulator-stream').openRelayStream(config, msg, {
+              startFor: (params) => emuLib.streamStart(params),
+            });
           } else {
             throw new Error(`지원하지 않는 스트림 종류: ${msg.kind}`);
           }
