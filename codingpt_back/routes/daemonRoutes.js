@@ -65,6 +65,11 @@ router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);
+//  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 시그널링만 여기를 지나고 영상은 안 지난다.
+router.post('/turn/credentials', accountAuth, daemonController.turnCredentials);
+router.post('/emulator/webrtc/offer', accountAuth, daemonController.emulatorWebrtcOffer);
+router.post('/emulator/webrtc/answer', accountAuth, daemonController.emulatorWebrtcAnswer);
+router.post('/emulator/webrtc/close', accountAuth, daemonController.emulatorWebrtcClose);
 
 // 파일시스템(P1) — 제어 채널 RPC 프록시. 데몬 오프라인이면 409.
 //  accountAuth(JWT|deviceToken 겸용) — PC 앱이 다른 PC 워크스페이스 IDE 를 열 때 deviceToken 으로 호출.

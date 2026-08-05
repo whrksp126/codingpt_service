@@ -1071,6 +1071,57 @@ async function emulatorInput(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+/**
+ * 직접 연결(WebRTC) 준비물 — ICE 서버 + 단명 TURN 크리덴셜.
+ *  폰과 데몬이 **같은 목록**을 쓴다: 폰은 이걸 그대로 RTCPeerConnection 에 넣고,
+ *  데몬에는 offer 요청의 인자로 실어 보낸다(데몬에 TURN 시크릿을 두지 않기 위해서다).
+ */
+async function turnCredentials(req, res) {
+  const turn = require('../config/turn');
+  return successResponse(res, {
+    iceServers: turn.iceServers(req.user.id),
+    ttlSec: turn.ttlSec(),
+  });
+}
+
+/**
+ * 시그널링 — offer/answer 를 데몬 RPC 로 그대로 중계한다.
+ *  ICE 후보는 **SDP 안에 이미 들어 있다**(non-trickle). 데몬 실측 수집 시간이 131ms 라
+ *  trickle 로 얻을 게 거의 없고, 대신 새 이벤트 타입·순서 문제·중복 배관이 통째로 사라진다.
+ */
+async function emulatorWebrtcOffer(req, res) {
+  try {
+    const b = req.body || {};
+    const turn = require('../config/turn');
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.webrtc.offer', {
+      id: String(b.id || ''),
+      //  클라이언트가 보낸 목록은 믿지 않는다 — **서버가 방금 만든 것**을 쓴다(임의 TURN 주입 금지).
+      iceServers: turn.iceServers(req.user.id),
+    }, 30000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+async function emulatorWebrtcAnswer(req, res) {
+  try {
+    const b = req.body || {};
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.webrtc.answer', {
+      sessionId: String(b.sessionId || ''),
+      sdp: String(b.sdp || ''),
+    }, 20000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
+async function emulatorWebrtcClose(req, res) {
+  try {
+    const result = await daemonRelayService.callRpc(req.user.id, 'emulator.webrtc.close', {
+      sessionId: String((req.body || {}).sessionId || ''),
+    }, 10000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+
 async function emulatorPower(req, res) {
   try {
     const b = req.body || {};
@@ -1757,6 +1808,10 @@ module.exports = {
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   emulatorList,
   emulatorStream,
+  turnCredentials,
+  emulatorWebrtcOffer,
+  emulatorWebrtcAnswer,
+  emulatorWebrtcClose,
   emulatorFrame,
   emulatorInput,
   emulatorPower,
