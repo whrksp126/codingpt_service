@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { getToken } from '@/lib/auth';
+import { clearToken, getToken } from '@/lib/auth';
 import { clientFetch } from '@/lib/api';
 
 // 글로벌 웹 구독: 서버가 생성한 Lemon Squeezy 호스팅 체크아웃으로 이동한다.
@@ -14,10 +14,14 @@ export default function CheckoutButtons({ code, label }: { code: string; label: 
     setAuthed(!!getToken());
   }, []);
 
+  const goToLogin = useCallback(() => {
+    window.location.href = `/login?next=${encodeURIComponent('/?support=1#pricing')}`;
+  }, []);
+
   const startCheckout = useCallback(async () => {
     const token = getToken();
     if (!token) {
-      window.location.href = `/login?next=${encodeURIComponent('/?support=1#pricing')}`;
+      goToLogin();
       return;
     }
     setBusy(true); setMsg(null);
@@ -25,14 +29,21 @@ export default function CheckoutButtons({ code, label }: { code: string; label: 
       const r = await clientFetch<{ url: string }>('/api/billing/lemonsqueezy/checkout', {
         method: 'POST', body: { code }, token,
       });
-      if (r.ok && r.data?.url) { window.location.href = r.data.url; }
-      else setMsg(r.message || '결제에 실패했습니다.');
+      if (r.ok && r.data?.url) {
+        window.location.href = r.data.url;
+      } else if (r.status === 401) {
+        // 만료된 토큰을 그대로 두면 로그인 페이지가 다시 랜딩으로 보내는 루프가 생긴다.
+        clearToken();
+        goToLogin();
+      } else {
+        setMsg('결제 페이지를 열지 못했어요. 잠시 후 다시 시도해 주세요.');
+      }
     } catch (e) {
       setMsg(e instanceof Error ? e.message : '결제 오류');
     } finally {
       setBusy(false);
     }
-  }, [code]);
+  }, [code, goToLogin]);
 
   useEffect(() => {
     if (!authed) return;
