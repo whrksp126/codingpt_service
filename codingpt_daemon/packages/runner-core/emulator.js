@@ -61,7 +61,12 @@ function tools() {
     emulator: firstExisting([path.join(sdk, 'emulator', 'emulator'), '/usr/local/bin/emulator']),
     xcrun: firstExisting(['/usr/bin/xcrun']),
     sips: firstExisting(['/usr/bin/sips']),
-    idb: firstExisting(['/usr/local/bin/idb', '/opt/homebrew/bin/idb', path.join(os.homedir(), '.local', 'bin', 'idb')]),
+    //  우리가 만들어 둔 전용 venv 를 **먼저** 본다 — 시스템 파이썬을 더럽히지 않고 설치하는 위치라
+    //   여기 있는 게 우리가 버전을 아는 유일한 idb 다(fb-idb 는 파이썬 패키지다).
+    idb: firstExisting([
+      path.join(os.homedir(), '.codingpt', 'idb', 'bin', 'idb'),
+      '/usr/local/bin/idb', '/opt/homebrew/bin/idb', path.join(os.homedir(), '.local', 'bin', 'idb'),
+    ]),
   };
   return toolCache;
 }
@@ -435,16 +440,46 @@ async function frame(args) {
 // ── 입력 ─────────────────────────────────────────────────────────────────────
 
 /** 화면 크기(픽셀) — 프레임에서 이미 봤으면 그 값을, 아니면 기기에 물어본다. */
+/**
+ * 조작 좌표계의 크기.
+ *
+ * ★ 안드로이드와 iOS 는 **단위가 다르다**(2026-08-06 실사고):
+ *  · adb 는 기기 픽셀을 받는다 → 스크린샷 픽셀과 같은 좌표계라 그대로 쓰면 된다.
+ *  · idb 는 **포인트**를 받는다(iPhone 16 = 393x852). 스크린샷은 1179x2556 픽셀이라,
+ *    픽셀을 그대로 넘기면 3배 밖을 눌러 **아무 일도 안 일어난다** — idb 는 rc=0 을 돌려주므로
+ *    조용한 실패가 된다(idb 를 깔아도 "보기 전용" 처럼 보이던 진짜 이유).
+ *  그래서 iOS 는 idb 가 알려 주는 포인트 크기를 쓴다(추측한 배율로 나누지 않는다).
+ */
 async function screenSize(id, p) {
   const hit = lastSize.get(id);
   if (hit) return hit;
   const t = tools();
+  if (p.scheme === 'ios' && t.idb) {
+    try {
+      const out = await run(t.idb, ['describe', '--udid', p.value, '--json'], { timeoutMs: 20000 });
+      const s2 = pointsFromIdbDescribe(out);
+      if (s2) { lastSize.set(id, s2); return s2; }
+    } catch (_) { /* 아래 오류로 떨어진다 */ }
+  }
   if (p.scheme === 'android') {
     const out = await run(t.adb, ['-s', p.value, 'shell', 'wm', 'size'], { timeoutMs: 8000 });
     const m = /(\d+)x(\d+)/.exec(String(out).split('\n').reverse().join('\n'));
     if (m) { const s = { w: +m[1], h: +m[2] }; lastSize.set(id, s); return s; }
   }
   throw new Error('화면 크기를 알 수 없어요 — 화면을 한 번 불러온 뒤 조작해 주세요');
+}
+
+/**
+ * `idb describe --json` 에서 **포인트** 크기를 꺼낸다.
+ *  픽셀(width/height)이 아니라 width_points/height_points 여야 한다 — 배율로 나누지 않는 이유는
+ *  기기마다 2배/3배가 다르고, idb 가 정답을 이미 알려 주기 때문이다.
+ */
+function pointsFromIdbDescribe(out) {
+  let j = null;
+  try { j = JSON.parse(String(out)); } catch (_) { return null; }
+  const d = (j && j.screen_dimensions) || {};
+  const w = Number(d.width_points), h = Number(d.height_points);
+  return (w > 0 && h > 0) ? { w, h } : null;
 }
 
 /** 0~1 → 픽셀. 범위를 벗어난 값은 잘라 낸다(밖을 누르면 기기가 이상하게 반응한다). */
@@ -678,6 +713,6 @@ module.exports = {
   // 테스트용
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
-  _lastSize: lastSize, _sortDevices: sortDevices,
+  _lastSize: lastSize, _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   ANDROID_KEYS, IOS_BUTTONS,
 };

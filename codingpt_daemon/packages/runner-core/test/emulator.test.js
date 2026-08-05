@@ -215,3 +215,27 @@ test('★ 안드로이드 캡처는 기기 안에서 압축해 가져온다(전�
   //  실패한 기기를 매 프레임 다시 시도하면 왕복이 두 배가 된다.
   assert.match(src, /capMode\.set\(serial, 'raw'\)/, '실패한 기기를 raw 로 고정하지 않는다');
 });
+
+// ── iOS 조작 좌표계 ────────────────────────────────────────────────────────
+// ★ 2026-08-06 실사고: iOS 는 **포인트**, 안드로이드는 **픽셀** 이다. 스크린샷 픽셀(1179x2556)을
+//  idb 에 그대로 넘기면 3배 밖을 눌러 아무 일도 안 일어나는데, idb 는 rc=0 을 돌려준다 —
+//  즉 **조용한 실패**다. idb 를 깔고도 "보기 전용" 처럼 보이던 진짜 이유가 이것이었다.
+test('★ iOS 화면 크기는 idb 의 포인트 값을 쓴다(스크린샷 픽셀이 아니다)', () => {
+  const emu = require('../emulator');
+  const describe = JSON.stringify({
+    udid: 'X', screen_dimensions: { width: 1179, height: 2556, density: 3.0, width_points: 393, height_points: 852 },
+  });
+  assert.deepEqual(emu._pointsFromIdbDescribe(describe), { w: 393, h: 852 });
+});
+
+test('idb 응답이 이상하면 크기를 지어내지 않는다(밖을 누르는 것보다 못 한다고 말하는 게 낫다)', () => {
+  const emu = require('../emulator');
+  assert.equal(emu._pointsFromIdbDescribe('쓰레기'), null);
+  assert.equal(emu._pointsFromIdbDescribe(JSON.stringify({ screen_dimensions: { width: 1179, height: 2556 } })), null);
+});
+
+test('우리가 설치한 idb(전용 venv)를 찾는다', () => {
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'emulator.js'), 'utf8');
+  assert.ok(/\.codingpt['"],\s*['"]idb['"],\s*['"]bin['"],\s*['"]idb['"]/.test(src),
+    '전용 venv 경로가 탐지 목록에 없으면 설치해도 보기 전용으로 남는다');
+});
