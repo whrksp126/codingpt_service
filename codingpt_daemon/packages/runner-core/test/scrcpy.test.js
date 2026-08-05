@@ -305,3 +305,19 @@ test('키프레임을 아직 못 본 상태의 델타는 모으지 않는다(모
   stream.rememberFrame(entry, 0, Buffer.alloc(10));
   assert.equal(entry.gop.length, 0);
 });
+
+test('★ 한 시청자의 예외가 나머지 화면을 멈추지 않는다', () => {
+  //  2026-08-06 실사고: WebRTC 뷰어의 backlog() 가 던지자 브로드캐스트 루프가 거기서 죽어
+  //   **뒤의 시청자 전부**에게 프레임이 안 갔다. GOP 는 자라는데 송신은 0이라 원인이 안 보였다.
+  const stream = require('../emulator-stream');
+  const got = [];
+  const bad = { alive: () => true, backlog: () => { throw new Error('터짐'); }, write: () => {}, close: () => {} };
+  const good = { alive: () => true, backlog: () => 0, write: (b) => got.push(b), close: () => {} };
+  const entry = { clients: new Set([bad, good]), gop: [], gopBytes: 0, session: { configPacket: null } };
+  //  start() 의 onFrame 과 같은 모양으로 돈다.
+  for (const v of entry.clients) {
+    try { if (v.backlog() <= stream.BACKPRESSURE_MAX) v.write(Buffer.from([0, 1])); }
+    catch (_) { /* 이 한 명만 실패 */ }
+  }
+  assert.equal(got.length, 1, '멀쩡한 시청자는 그대로 받아야 한다');
+});

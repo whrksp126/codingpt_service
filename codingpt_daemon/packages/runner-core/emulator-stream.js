@@ -169,7 +169,13 @@ async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
       onFrame: (f) => {
         const flags = (f.config ? FLAG_CONFIG : 0) | (f.keyFrame ? FLAG_KEY : 0);
         rememberFrame(entry, flags, f.data);
-        for (const v of entry.clients) send(v, flags, f.data);
+        //  ★ 한 시청자에서 난 예외가 **나머지 전부의 화면을 멈추면 안 된다.** 예전엔 여기서 던지면
+        //   상위 try/catch 가 삼켜서, 두 번째 시청자부터는 프레임이 영영 안 갔다(2026-08-06 실사고:
+        //   WebRTC 뷰어 하나가 조용히 전체 브로드캐스트를 죽였다 — GOP 는 자라는데 송신은 0이었다).
+        for (const v of entry.clients) {
+          try { send(v, flags, f.data); }
+          catch (e) { console.warn(`[emulator] 시청자 전송 실패: ${(e && e.message) || e}`); }
+        }
       },
       onError: () => { closeClients(entry, 4002, 'stream error'); },
       onClose: () => { closeClients(entry, 1000, 'closed'); streams.delete(id); },

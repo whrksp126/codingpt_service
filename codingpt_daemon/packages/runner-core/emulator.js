@@ -661,6 +661,15 @@ async function handle(method, params) {
   if (m === 'emulator.frame') return frame(params);
   if (m === 'emulator.input') return input(params);
   if (m === 'emulator.openUrl') return openUrl(params);
+  //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 세션 관리는 webrtc.js 가 한다.
+  //   프레임은 이 파일이 만든 스트림에 **뷰어로 붙어서** 받으므로 바이트 계약이 갈라지지 않는다.
+  if (m === 'emulator.webrtc.offer') {
+    const w = require('./webrtc');
+    const p = params || {};
+    return w.createOffer({ id: p.id }, p.iceServers, { startFor: (a) => streamStart(a) });
+  }
+  if (m === 'emulator.webrtc.answer') return require('./webrtc').acceptAnswer(String((params || {}).sessionId || ''), (params || {}).sdp);
+  if (m === 'emulator.webrtc.close') return require('./webrtc').close(String((params || {}).sessionId || ''));
   throw new Error(`알 수 없는 메서드: ${m}`);
 }
 
