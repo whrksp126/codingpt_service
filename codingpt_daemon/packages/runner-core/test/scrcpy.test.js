@@ -258,3 +258,50 @@ test('★ 느린 뷰어는 프레임을 버리는 게 아니라 끊는다(델타
   }
   assert.deepEqual(events, ['close'], '밀리면 그 뷰어만 끊는다(프레임 드롭 금지)');
 });
+
+// ── 늦게 들어온 화면 ────────────────────────────────────────────────────────
+// ★ 2026-08-05 실사고. scrcpy 2.4 는 키프레임을 세션 시작 때 한 번 보내고 그 뒤엔 거의 안 보낸다
+//  (5.3초 세션에서 0장). 그래서 **두 번째 시청자**는 config + 델타만 받고 H.264 를 못 푼다 —
+//  폰이 12초를 기다리다 "화면이 오지 않아요" 로 폴링에 떨어지는 걸 실제로 확인했다.
+//  키프레임 요청(RESET_VIDEO)은 scrcpy 3.x 기능이라 2.4 에선 못 쓴다 → 지금 GOP 를 되감아 준다.
+test('★ 이미 돌고 있는 세션에 붙어도 즉시 풀 수 있다(마지막 키프레임부터 되감기)', () => {
+  const stream = require('../emulator-stream');
+  const CONFIG = Buffer.from([0x67, 0x42]);
+  const K = Buffer.from([0x65, 0x01]);
+  const D1 = Buffer.from([0x41, 0x02]);
+  const D2 = Buffer.from([0x41, 0x03]);
+  const entry = {
+    clients: new Set(), closeTimer: null, gop: [], gopBytes: 0,
+    session: { closed: false, configPacket: CONFIG },
+  };
+  //  세션이 한동안 혼자 돌았다(키프레임 1장 + 델타들). 첫 시청자는 없었다고 치자.
+  for (const [f, d] of [[stream.FLAG_KEY, K], [0, D1], [0, D2]]) stream.rememberFrame(entry, f, d);
+
+  const out = [];
+  stream.attach(entry, { alive: () => true, backlog: () => 0, write: (b) => out.push(Buffer.from(b)), close: () => {} });
+
+  assert.deepEqual(out.map((b) => b[0]), [1, 2, 0, 0], 'config → 키프레임 → 그 뒤 델타 순서 그대로');
+  assert.deepEqual(out[1].subarray(1), K);
+  assert.deepEqual(out[2].subarray(1), D1);
+  assert.deepEqual(out[3].subarray(1), D2);
+});
+
+test('키프레임을 다시 만나면 되감기 창이 새로 시작한다(무한히 안 쌓인다)', () => {
+  const stream = require('../emulator-stream');
+  const entry = { clients: new Set(), closeTimer: null, gop: [], gopBytes: 0, session: { configPacket: null } };
+  stream.rememberFrame(entry, stream.FLAG_KEY, Buffer.alloc(10));
+  stream.rememberFrame(entry, 0, Buffer.alloc(10));
+  stream.rememberFrame(entry, stream.FLAG_KEY, Buffer.alloc(10));
+  assert.equal(entry.gop.length, 1, '새 키프레임이 오면 이전 것들은 필요 없다');
+
+  //  상한을 넘으면 통째로 버린다 — 늦게 온 사람 하나 때문에 메모리를 무한히 쓰지 않는다.
+  stream.rememberFrame(entry, 0, Buffer.alloc(stream.GOP_MAX_BYTES + 1));
+  assert.equal(entry.gop.length, 0);
+});
+
+test('키프레임을 아직 못 본 상태의 델타는 모으지 않는다(모아도 못 푼다)', () => {
+  const stream = require('../emulator-stream');
+  const entry = { gop: [], gopBytes: 0 };
+  stream.rememberFrame(entry, 0, Buffer.alloc(10));
+  assert.equal(entry.gop.length, 0);
+});

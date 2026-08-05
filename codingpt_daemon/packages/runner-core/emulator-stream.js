@@ -69,11 +69,38 @@ function wsViewer(ws) {
   };
 }
 
+/**
+ * 지금 GOP(마지막 키프레임 + 그 뒤 델타 전부)의 보관 상한. 넘으면 버린다 —
+ *  늦게 들어온 사람 하나 때문에 메모리를 무한히 쓰지 않는다.
+ */
+const GOP_MAX_BYTES = 6 * 1024 * 1024;
+
+/**
+ * 이미 돌고 있는 세션에 **나중에 들어온 화면**을 위한 되감기.
+ *
+ * ★ 2026-08-05 실측으로 잡은 것: scrcpy 2.4 는 키프레임을 **세션이 시작할 때 한 번** 보내고
+ *  그 뒤엔 거의 안 보낸다(5.3초 세션에서 0장, 정지 화면에서는 영영 0장). 그래서 두 번째 시청자는
+ *  config 만 받고 델타만 계속 받는데, H.264 델타는 키프레임 없이 못 푼다 → 화면이 영영 안 뜬다.
+ *  실제로 폰이 12초를 기다리다 "화면이 오지 않아요" 로 폴링에 떨어졌다.
+ *  키프레임 요청 메시지(RESET_VIDEO)는 scrcpy 3.x 에서 생겼고 우리 서버 jar 는 2.4 라 못 쓴다.
+ *  → 대신 **마지막 키프레임부터 지금까지를 그대로 다시 틀어 준다**. 그러면 디코더가 즉시 따라잡는다.
+ */
+function rememberFrame(entry, flags, data) {
+  if (flags & FLAG_CONFIG) return;                 // config 는 session.configPacket 이 들고 있다
+  if (flags & FLAG_KEY) { entry.gop = [[flags, data]]; entry.gopBytes = data.length; return; }
+  if (!entry.gop || !entry.gop.length) return;     // 키프레임을 아직 못 봤다 — 모아 봐야 못 푼다
+  entry.gopBytes += data.length;
+  if (entry.gopBytes > GOP_MAX_BYTES) { entry.gop = []; entry.gopBytes = 0; return; }
+  entry.gop.push([flags, data]);
+}
+
 function attach(entry, viewer) {
   entry.clients.add(viewer);
   if (entry.closeTimer) { clearTimeout(entry.closeTimer); entry.closeTimer = null; }
   //  새로 붙은 화면에 **먼저 SPS/PPS 를 준다** — 없으면 다음 키프레임이 올 때까지 검은 화면이다.
   if (entry.session.configPacket) send(viewer, FLAG_CONFIG, entry.session.configPacket);
+  //  그 다음 지금 GOP 를 되감아 준다(위 주석). 첫 시청자면 비어 있고, 곧 키프레임이 온다.
+  if (entry.gop) for (const [f, d] of entry.gop) send(viewer, f, d);
 }
 
 /** 뷰어가 떠났다 — 마지막 한 명이면 조금 기다렸다 인코더를 끈다. */
@@ -130,6 +157,8 @@ async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
     id, serial, deviceId,
     token: crypto.randomBytes(24).toString('base64url'),
     clients: new Set(), meta: null, closeTimer: null, session: null,
+    //  마지막 키프레임 이후의 프레임들(늦게 들어온 화면에게 되감아 준다 — rememberFrame 주석).
+    gop: [], gopBytes: 0,
   };
   entry.session = await ScrcpySession.start(
     //  긴 변 1280 — pane 폭이 800~900px 인 경우가 흔해서 1024 는 눈에 띄게 무르다. 픽셀은 1.5배지만
@@ -139,6 +168,7 @@ async function start({ adb, serial, deviceId, maxSize, maxFps, bitRate }) {
       onMeta: (m) => { entry.meta = m; },
       onFrame: (f) => {
         const flags = (f.config ? FLAG_CONFIG : 0) | (f.keyFrame ? FLAG_KEY : 0);
+        rememberFrame(entry, flags, f.data);
         for (const v of entry.clients) send(v, flags, f.data);
       },
       onError: () => { closeClients(entry, 4002, 'stream error'); },
@@ -268,6 +298,6 @@ process.once('exit', () => { try { stopAll(); } catch (_) { /* noop */ } });
 
 module.exports = {
   start, stop, stopAll, sessionFor, openRelayStream, openLanStream,
-  attach, attachWs, detach, wsViewer,
-  _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS, BACKPRESSURE_MAX,
+  attach, attachWs, detach, wsViewer, rememberFrame,
+  _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS, BACKPRESSURE_MAX, GOP_MAX_BYTES,
 };
