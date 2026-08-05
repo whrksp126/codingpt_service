@@ -15,7 +15,7 @@ export default function Nav() {
       </a>
       <span style={{ flex: 1 }} />
       <a href="/#features" className="nav-secondary">기능</a>
-      <a href="/#pricing" className="nav-secondary">요금</a>
+      <a href="/#pricing" className="nav-secondary">후원</a>
       <a
         href="/#start"
         style={{

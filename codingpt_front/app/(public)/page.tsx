@@ -123,20 +123,20 @@ html{scroll-behavior:smooth}
 .cpt-landing .bubble.agent{align-self:flex-start;background:var(--elevated);border:1px solid var(--line);color:var(--text2);font-family:var(--sans);}
 .cpt-landing .tool-row{font-family:var(--mono);font-size:11px;color:var(--text3);border:1px solid var(--line);background:var(--base);border-radius:8px;padding:8px 10px;}
 
-/* 요금 — 기능 차등이 아닌 무료 Personal + 선택 후원 BM */
+/* 후원 — 무료 사용 안내 + 단일 선택 후원 */
 .cpt-landing .pricing-sec{margin-top:96px;padding:72px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);}
 .cpt-landing .pricing-head{text-align:center;}
 .cpt-landing .pricing-head h2{font-size:clamp(25px,4vw,32px);}
 .cpt-landing .pricing-head p{max-width:48ch;margin:13px auto 0;color:var(--text3);font-size:15px;line-height:1.7;}
-.cpt-landing .plans{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:780px;margin:36px auto 0;}
-.cpt-landing .plan{background:var(--base);border:1px solid var(--border-2);border-radius:16px;padding:25px;display:flex;flex-direction:column;min-height:260px;}
-.cpt-landing .plan .label{font-size:13px;color:var(--text3);font-weight:680;}
-.cpt-landing .plan .price{font-size:30px;font-weight:780;letter-spacing:-.04em;margin-top:12px;}
-.cpt-landing .plan .price small{font-size:13px;color:var(--text3);font-weight:550;letter-spacing:0;}
-.cpt-landing .plan .desc{color:var(--text3);font-size:14px;line-height:1.65;margin:11px 0 0;}
-.cpt-landing .plan ul{list-style:none;margin:20px 0 24px;padding:0;display:grid;gap:9px;color:var(--text2);font-size:13.5px;}
-.cpt-landing .plan li::before{content:'✓';color:var(--dim);margin-right:9px;}
-.cpt-landing .plan .btn{margin-top:auto;width:100%;}
+.cpt-landing .support-card{max-width:560px;margin:34px auto 0;background:var(--base);border:1px solid var(--border-2);border-radius:16px;padding:25px;display:flex;align-items:center;gap:24px;}
+.cpt-landing .support-card .copy{flex:1;min-width:0;}
+.cpt-landing .support-card .label{font-size:13px;color:var(--text3);font-weight:680;}
+.cpt-landing .support-card .title{font-size:19px;font-weight:740;margin-top:7px;}
+.cpt-landing .support-card .desc{color:var(--text3);font-size:13.5px;line-height:1.65;margin:7px 0 0;}
+.cpt-landing .support-card .action{flex:none;text-align:right;}
+.cpt-landing .support-card .price{font-size:18px;font-weight:750;margin-bottom:10px;}
+.cpt-landing .support-card .price small{font-size:12px;color:var(--text3);font-weight:550;}
+.cpt-landing .support-card .btn{padding:10px 17px;}
 .cpt-landing .pricing-note{text-align:center;color:var(--text3);font-size:12.5px;line-height:1.65;margin:18px auto 0;}
 .cpt-landing .pricing-note a{color:var(--text2);border-bottom:1px solid var(--border-2);}
 
@@ -177,7 +177,7 @@ html{scroll-behavior:smooth}
 @media(max-width:820px){.cpt-landing .app-body{min-width:760px;} .cpt-landing .app-scroll{overflow-x:auto;}}
 @media(max-width:780px){.cpt-landing .row2,.cpt-landing .row2.rev{grid-template-columns:1fr;gap:26px;} .cpt-landing .row2.rev .fig{order:0;}}
 @media(max-width:680px){.cpt-landing .dlz{grid-template-columns:1fr;}}
-@media(max-width:680px){.cpt-landing .plans{grid-template-columns:1fr;}.cpt-landing .plan{min-height:0;}}
+@media(max-width:680px){.cpt-landing .support-card{align-items:flex-start;flex-direction:column;}.cpt-landing .support-card .action{width:100%;text-align:left;}.cpt-landing .support-card .btn{width:100%;}}
 @media(max-width:820px){.cpt-landing .phone{display:none;}}
 @media(prefers-reduced-motion:reduce){.cpt-landing .cur{animation:none;}}
 `;
@@ -270,37 +270,24 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 요금과 BM */}
+      {/* 선택 후원 */}
       <section className="pricing-sec" id="pricing">
         <div className="container">
           <div className="pricing-head">
             <h2>개인 사용은 무료예요</h2>
-            <p>모든 핵심 기능과 기기 연결은 Personal에 포함됩니다. CodingPT의 개발과 서버 운영을 응원하고 싶을 때만 Supporter를 선택하세요.</p>
+            <p>기기 수와 핵심 기능에 제한이 없습니다. CodingPT가 계속 운영되길 바란다면 선택적으로 후원해 주세요.</p>
           </div>
-          <div className="plans">
-            <article className="plan">
-              <div className="label">Personal</div>
-              <div className="price">무료</div>
-              <p className="desc">혼자 쓰는 원격 바이브 코딩에 필요한 기능을 제한 없이.</p>
-              <ul>
-                <li>기기 수 제한 없음</li>
-                <li>채팅·터미널·IDE·웹 미리보기</li>
-                <li>외부망 릴레이와 푸시 알림</li>
-              </ul>
-              <a className="btn ghost" href="/#start">무료로 시작하기</a>
-            </article>
-            <article className="plan">
-              <div className="label">Supporter · 선택 후원</div>
-              <div className="price">₩4,900 <small>/ 월</small></div>
-              <p className="desc">Personal과 같은 기능을 쓰면서 CodingPT의 지속적인 개발과 운영을 후원합니다.</p>
-              <ul>
-                <li>기능 잠금 해제 상품이 아님</li>
-                <li>매월 자동갱신</li>
-                <li>언제든 다음 결제 전 해지</li>
-              </ul>
-              <a className="btn" href="/plans">Supporter 시작하기</a>
-            </article>
-          </div>
+          <article className="support-card">
+            <div className="copy">
+              <div className="label">선택 후원</div>
+              <div className="title">CodingPT를 응원해 주세요</div>
+              <p className="desc">후원금은 지속적인 개발과 릴레이·푸시 서버 운영에 사용됩니다.</p>
+            </div>
+            <div className="action">
+              <div className="price">월 ₩4,900 <small>· 자동갱신</small></div>
+              <a className="btn" href="/plans">후원하기</a>
+            </div>
+          </article>
           <p className="pricing-note">결제는 Lemon Squeezy에서 안전하게 처리됩니다. 해지와 환불은 서로 다른 절차예요. <a href="/legal/refund">환불·취소 정책 보기</a></p>
         </div>
       </section>
@@ -314,8 +301,8 @@ export default function Home() {
             <details><summary>어떤 코딩 에이전트를 쓸 수 있나요?<span className="ic">+</span></summary><p>claude·codex·gemini·aider 등 터미널에서 도는 CLI라면 무엇이든. 구독과 API 키는 그대로 내 머신에 있고, CodingPT가 대신 호출하지 않아요.</p></details>
             <details><summary>데스크톱 에이전트 도구(ADE)와 뭐가 다른가요?<span className="ic">+</span></summary><p>그런 도구는 PC 앞에 앉아서 쓰죠. CodingPT는 내 머신의 그 환경을 폰·태블릿에서 원격으로 이어받게 해, 자리를 떠나도 에이전트를 계속 지휘하게 합니다.</p></details>
             <details><summary>외부에서 연결할 때 CodingPT 서버를 사용하나요?<span className="ic">+</span></summary><p>네. 서로 다른 네트워크에 있는 내 기기를 찾고 연결하기 위해 CodingPT의 관리형 릴레이와 푸시 서버를 사용합니다. 소스 파일과 AI 자격증명은 내 머신에 보관돼요.</p></details>
-            <details><summary>Personal과 Supporter는 무엇이 다른가요?<span className="ic">+</span></summary><p>핵심 기능에는 차이가 없어요. Personal은 기기 수 제한 없이 무료이고, Supporter는 CodingPT의 개발과 관리형 릴레이·푸시 서버 운영을 응원하는 월 4,900원의 선택 후원 구독입니다.</p></details>
-            <details><summary>Supporter는 어떻게 해지하거나 환불받나요?<span className="ic">+</span></summary><p>구독 관리에서 다음 결제 전에 자동갱신을 해지할 수 있고, 이미 결제한 기간까지 Supporter 상태가 유지됩니다. 환불은 별도 요청 후 주문과 이용 내역을 확인해 처리해요. 자세한 기준은 <a href="/legal/refund" style={{ color: 'var(--text2)', textDecoration: 'underline' }}>환불·취소 정책</a>에서 확인할 수 있습니다.</p></details>
+            <details><summary>정말 무료인가요?<span className="ic">+</span></summary><p>네. 개인 사용은 기기 수와 핵심 기능 제한 없이 무료예요. 월 4,900원 후원은 CodingPT의 개발과 서버 운영을 돕고 싶은 분만 선택하면 됩니다.</p></details>
+            <details><summary>후원은 어떻게 해지하거나 환불받나요?<span className="ic">+</span></summary><p>구독 관리에서 다음 결제 전에 자동갱신을 해지할 수 있어요. 환불은 별도 요청 후 주문과 이용 내역을 확인해 처리합니다. 자세한 기준은 <a href="/legal/refund" style={{ color: 'var(--text2)', textDecoration: 'underline' }}>환불·취소 정책</a>에서 확인할 수 있습니다.</p></details>
           </div>
         </div>
       </section>
