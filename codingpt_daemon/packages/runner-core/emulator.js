@@ -582,6 +582,16 @@ const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotate', 'volumeUp', 'volum
 const IOS_KEY_ROW = ['home', 'lock', 'volumeUp', 'volumeDown'];
 const IOS_KEY_ROW_IDB = ['home', 'lock'];
 
+/**
+ * 손가락을 따라가는 입력의 단계.
+ *  begin=눌렀다 · move=끄는 중 · end=뗐다. 좌표는 **절대값(0~1)** 이라 중간 move 를 몇 개
+ *  흘려도 화면이 어긋나지 않는다(느린 회선에서 마음 놓고 버릴 수 있다는 뜻이다 — H.264 델타와
+ *  정반대다). cancel 은 end 와 같게 다룬다: 손이 화면 밖으로 나가도 기기에는 뗀 것으로 보여야 한다.
+ */
+const TOUCH_PHASES = new Set(['begin', 'move', 'end']);
+/** 같은 단계를 scrcpy 어휘로. (iOS 는 serve-sim 이 begin/move/end 를 그대로 받는다.) */
+const TOUCH_TO_SCRCPY = { begin: 'down', move: 'move', end: 'up' };
+
 /** 시계방향 한 칸씩. serve-sim 이 쓰는 이름 그대로다(회전이 되살아나면 여기서 쓴다). */
 const IOS_ORIENTATIONS = ['portrait', 'landscape_right', 'portrait_upside_down', 'landscape_left'];
 
@@ -622,6 +632,14 @@ async function inputViaScrcpy(a, p) {
   const W = vw, H = vh;
   const pt = (x, y) => ({ x: px(x, W), y: px(y, H), screenWidth: W, screenHeight: H, pointerId: 0 });
 
+  //  ★ 손가락을 따라가는 입력 — iOS 쪽 주석과 같은 이유다. scrcpy 컨트롤 소켓은 down/move/up 을
+  //   그대로 받으므로, 화면이 보내 주는 단계를 바꿔 끼우기만 하면 된다.
+  if (type === 'touch') {
+    const action = TOUCH_TO_SCRCPY[String(a.phase || '')];
+    if (!action) throw new Error('알 수 없는 터치 단계예요');
+    if (!sess.send(S.encodeTouch({ action, ...pt(a.x, a.y) }))) return null;
+    return { ok: true, via: 'scrcpy' };
+  }
   if (type === 'tap' || type === 'longPress') {
     if (!sess.send(S.encodeTouch({ action: 'down', ...pt(a.x, a.y) }))) return null;
     //  롱프레스는 누른 채로 기다렸다 뗀다(스와이프와 달리 좌표가 안 움직인다).
@@ -690,6 +708,16 @@ async function inputViaServeSim(a, p) {
   try { stream.keepAlive(p.value); } catch (_) { /* noop */ }
   const type = String(a.type || '');
 
+  //  ★ 손가락을 **따라가는** 입력. 화면이 누르는 순간부터 begin/move/…/end 를 그대로 흘린다.
+  //   왜 이게 따로 필요한가(2026-08-06, Orca 대조): 예전엔 손을 뗀 뒤에 swipe(시작→끝) 한 방을
+  //   보내고 데몬이 직선으로 재생했다. 그러면 (1) 드래그하는 동안 화면이 안 움직이고,
+  //   (2) iOS 제스처 인식기가 "뗀 뒤 몰아친 입력"을 아예 무시하기도 한다.
+  if (type === 'touch') {
+    const phase = String(a.phase || '');
+    if (!TOUCH_PHASES.has(phase)) throw new Error('알 수 없는 터치 단계예요');
+    if (!sess.touch(phase, a.x, a.y)) return null;
+    return { ok: true, via: 'serve-sim' };
+  }
   if (type === 'tap' || type === 'longPress') {
     if (!sess.touch('begin', a.x, a.y)) return null;
     await new Promise((r) => setTimeout(r, type === 'longPress' ? 600 : 60));

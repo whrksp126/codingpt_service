@@ -358,3 +358,41 @@ test('보는 사람이 있으면 타이머를 만들지 않는다(닫을 이유�
     assert.equal(fake.closeTimer, null);
   } finally { S._streams.delete('x2'); }
 });
+
+// ── 손가락을 따라가는 입력 ──────────────────────────────────────────────────
+// ★ 2026-08-06 (Orca 대조): 예전엔 손을 뗀 뒤에 swipe(시작→끝) 한 방을 보내고 데몬이 직선으로
+//  재생했다. 그러면 (1) 끄는 동안 화면이 꿈쩍도 안 하고 (2) iOS 제스처 인식기가 그렇게 몰아친
+//  입력을 통째로 무시하기도 한다(Orca 소스 주석이 같은 이유를 적어 뒀다).
+//  이제 화면이 begin/move/end 를 그대로 흘린다 — 그 단계가 scrcpy 어휘로 정확히 옮겨지는지 본다.
+test('★ touch 단계가 scrcpy down/move/up 으로 그대로 간다', async () => {
+  const emu = require('../emulator');
+  const streamMod = require('../emulator-stream');
+  const sent = [];
+  const orig = streamMod.sessionFor;
+  streamMod.sessionFor = () => ({ meta: { width: 496, height: 1024 }, closed: false, send: (b) => { sent.push(b); return true; } });
+  try {
+    for (const [phase, action] of [['begin', 0], ['move', 2], ['end', 1]]) {
+      const r = await emu.handle('emulator.input', { id: 'android:FAKE', type: 'touch', phase, x: 0.5, y: 0.25 });
+      assert.equal(r.via, 'scrcpy', phase);
+      const msg = sent[sent.length - 1];
+      assert.equal(msg.readUInt8(0), 2, 'TOUCH 메시지여야 한다');
+      assert.equal(msg.readUInt8(1), action, `${phase} → ${action}`);
+      assert.equal(msg.readInt32BE(10), 248, '좌표는 영상 좌표계다');
+    }
+    //  ★ 한 번의 드래그가 **여러 메시지**로 나간다 — 이게 미러링처럼 보이는 이유의 전부다.
+    assert.equal(sent.length, 3);
+  } finally { streamMod.sessionFor = orig; }
+});
+
+test('모르는 단계는 조용히 성공하지 않는다', async () => {
+  const emu = require('../emulator');
+  const streamMod = require('../emulator-stream');
+  const orig = streamMod.sessionFor;
+  streamMod.sessionFor = () => ({ meta: { width: 496, height: 1024 }, closed: false, send: () => true });
+  try {
+    await assert.rejects(
+      () => emu.handle('emulator.input', { id: 'android:FAKE', type: 'touch', phase: 'wiggle', x: 0.5, y: 0.5 }),
+      /알 수 없는 터치 단계/,
+    );
+  } finally { streamMod.sessionFor = orig; }
+});

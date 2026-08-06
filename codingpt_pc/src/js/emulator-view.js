@@ -368,8 +368,8 @@ export class EmulatorView {
     const cv = this.canvasEl;
     const vs = this.videoOn && cv && cv.width && cv.height
       ? { videoWidth: cv.width, videoHeight: cv.height } : {};
-    try { await api.emulatorInput({ id: this.deviceId, ...vs, ...body }); this.err = null; }
-    catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
+    try { await api.emulatorInput({ id: this.deviceId, ...vs, ...body }); this.err = null; return true; }
+    catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); return false; }
   }
 
   async power(action, target) {
@@ -514,25 +514,61 @@ export class EmulatorView {
     }
 
     if (canInput) {
-      // 누른 자리와 뗀 자리로 탭/스와이프/롱프레스를 가른다(앱과 같은 판정).
+      /**
+       * ★ 손가락을 **따라가는** 입력(2026-08-06). 예전엔 누를 때 아무것도 안 보내고, 뗀 뒤에
+       *  `swipe(시작→끝)` 한 방을 보내 데몬이 직선으로 재생했다. 그러면 드래그하는 동안 화면이
+       *  꿈쩍도 안 하고(사용자가 "미러링이 아니다" 라고 느끼는 지점), iOS 제스처 인식기는 그렇게
+       *  몰아친 입력을 아예 무시하기도 한다.
+       *  이제 누르는 순간부터 begin → move… → end 를 그대로 흘린다.
+       *
+       *  좌표는 절대값이라 중간 move 를 몇 개 흘려도 화면이 어긋나지 않는다 — 그래서 4px 미만은
+       *  버리고, 앞 요청이 아직 안 끝났으면 그 프레임의 move 는 그냥 건너뛴다(큐를 쌓지 않는다).
+       */
       let down = null;
-      stage.addEventListener("mousedown", (ev) => {
-        const r = this.ratioOf(ev);
-        if (!r) return;
-        down = { ...r, t: Date.now(), cx: ev.clientX, cy: ev.clientY };
-      });
-      stage.addEventListener("mouseup", (ev) => {
+      let inFlight = false;
+      const stream = (phase, r) => {
+        if (this.touchStreamOff) return false;
+        if (phase === "move" && inFlight) return true;      // 밀린 것은 버린다(절대좌표라 안전)
+        inFlight = true;
+        this.send({ type: "touch", phase, x: r.x, y: r.y }).then((ok) => {
+          inFlight = false;
+          //  ★ **begin 이 실패했을 때만** 스트리밍을 끈다. 그 드래그는 어차피 통째로 못 살리고,
+          //   구 데몬(=touch 를 모르는 데몬)이면 항상 여기서 걸린다. move/end 의 일시적 실패로
+          //   꺼 버리면 되던 기능이 한 번의 딸꾹질로 영영 레거시가 된다.
+          if (!ok && phase === "begin") this.touchStreamOff = true;
+        });
+        return true;
+      };
+      const finish = (ev) => {
         if (!down) return;
         const start = down; down = null;
+        const end = this.ratioOf(ev) || { x: start.x, y: start.y };
+        //  begin 이 (구 데몬이라) 실패했다면 이미 touchStreamOff 다 — 그 드래그도 레거시로 살린다.
+        if (start.streamed && !this.touchStreamOff) { stream("end", end); return; }
+        //  레거시(구 데몬): 누른 자리와 뗀 자리로 탭/스와이프/롱프레스를 가른다.
         const dist = Math.hypot(ev.clientX - start.cx, ev.clientY - start.cy);
         if (dist > 18) {
-          const b = this.ratioOf(ev);
-          if (b) this.send({ type: "swipe", x: start.x, y: start.y, x2: b.x, y2: b.y, durationMs: Math.max(80, Math.min(800, Date.now() - start.t)) });
+          this.send({ type: "swipe", x: start.x, y: start.y, x2: end.x, y2: end.y, durationMs: Math.max(80, Math.min(800, Date.now() - start.t)) });
           return;
         }
         this.send({ type: Date.now() - start.t > 550 ? "longPress" : "tap", x: start.x, y: start.y });
+      };
+      stage.addEventListener("mousedown", (ev) => {
+        const r = this.ratioOf(ev);
+        if (!r) return;
+        down = { ...r, t: Date.now(), cx: ev.clientX, cy: ev.clientY, streamed: stream("begin", r) };
       });
-      stage.addEventListener("mouseleave", () => { down = null; });
+      stage.addEventListener("mousemove", (ev) => {
+        if (!down || !down.streamed) return;
+        if (Math.hypot(ev.clientX - down.cx, ev.clientY - down.cy) < 4) return;
+        const r = this.ratioOf(ev);
+        if (!r) return;
+        down.cx = ev.clientX; down.cy = ev.clientY;
+        stream("move", r);
+      });
+      stage.addEventListener("mouseup", finish);
+      //  화면 밖으로 나가도 **뗀 것으로** 마무리한다 — 안 그러면 기기가 계속 눌린 줄 안다.
+      stage.addEventListener("mouseleave", finish);
     } else if (!booted) {
       const b = document.createElement("button");
       b.className = "emu-boot";

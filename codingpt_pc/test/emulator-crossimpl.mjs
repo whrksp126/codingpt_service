@@ -166,5 +166,22 @@ const appPane = read(path.join(APP, 'workspace/PaneView.tsx'));
 ok(/active=\{isActive\}/.test(appPane),
   '앱도 가려진 탭에 프레임을 안 당긴다(EmulatorBody active)');
 
+
+// ── 9. 드래그는 **끄는 동안** 흘러야 한다(PC·앱 공통) ───────────────────────
+// ★ 2026-08-06 (Orca 대조): 예전엔 뗀 뒤에 swipe(시작→끝) 한 방만 보냈다. 그러면 끄는 동안
+//  화면이 꿈쩍도 안 하고(사용자가 "미러링이 아니다" 라고 느낀 지점), iOS 제스처 인식기는 그렇게
+//  몰아친 입력을 아예 무시하기도 한다. 두 화면이 **같이** 스트리밍이어야 한다 — 한쪽만 고치면
+//  PC 에서는 부드럽고 폰에서는 뚝뚝 끊기는, 설명할 수 없는 차이가 생긴다.
+const pcView = read(path.join(PC, 'emulator-view.js'));
+const appEmu = read(path.join(APP, 'workspace/EmulatorBody.tsx'));
+for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
+  ok(/type:\s*['"]touch['"]/.test(src), `${name} 이 touch 스트리밍을 보낸다`);
+  for (const phase of ['begin', 'move', 'end']) {
+    ok(new RegExp(`['"]${phase}['"]`).test(src), `${name} 에 ${phase} 단계가 있다`);
+  }
+  //  구 데몬을 만나면 예전 방식으로 물러설 길이 남아 있어야 한다.
+  ok(/type:\s*['"]swipe['"]/.test(src), `${name} 에 레거시 swipe 폴백이 남아 있다`);
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
