@@ -259,6 +259,10 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   # 모바일 화면 (안드로이드 에뮬레이터/실기기 · iOS 시뮬레이터)
   #  좌표는 **0~1 비율**이다(0.5 0.5 = 화면 한가운데). 픽셀이 아니다 — 기기마다 해상도가 달라서.
   emulator list                         붙어 있는 기기 목록(켜짐/꺼짐, 조작 가능 여부 포함)
+  emulator show [--device <id>]         사용자가 보고 있는 기기에 **모바일 화면 탭을 띄운다**
+                                        (--device 생략 = 켜져 있는 기기 중 첫 번째 · --on <기기> 로
+                                        어느 화면에 띄울지 지정). 프리뷰/IDE 를 여는 것과 같은 급.
+  emulator hide                         띄운 모바일 화면 탭 닫기
   emulator boot --device <id>           꺼진 에뮬레이터/시뮬레이터 켜기(수십 초 걸림 — 기다리지 않는다)
   emulator shutdown --device <id>       끄기
   emulator screenshot --device <id> [--out <파일>] [--width <px>=720] [--quality <n>=80]
@@ -534,6 +538,13 @@ async function main() {
         const a1 = idFlag ? rest : rest.slice(1);
         const num = (n, d) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : d);
         if (c2 === 'list' || c2 == null) return printJson(await request('emulator.list', {}));
+        //  화면에 띄우기 — 사용자가 지금 보고 있는 기기(--on 으로 지정 가능)에 모바일 화면 탭을 연다.
+        //   id 생략 = 켜져 있는 기기 중 첫 번째(데몬이 고른다 — 화면의 낡은 목록으로 고르지 않게).
+        if (c2 === 'show') {
+          const r = await request('ui.emulatorOpen', { device: id || undefined, timeoutMs: 8000 });
+          return out(r, flags, `띄웠어요${r && r.device ? `: ${r.device}` : ''}`);
+        }
+        if (c2 === 'hide') return out(await request('ui.emulatorClose', {}), flags, 'ok');
         if (c2 === 'boot') return out(await request('emulator.boot', { id }), flags, '켜는 중…');
         if (c2 === 'shutdown') return out(await request('emulator.shutdown', { id }), flags, 'ok');
         if (c2 === 'open') return out(await request('emulator.openUrl', { id, url: a1[0] || flags.url }), flags, 'ok');

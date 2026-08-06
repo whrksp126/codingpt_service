@@ -28,6 +28,9 @@ const MIN_FRAME_GAP_MS = 120;
 /** 에뮬레이터 콜드 부팅을 기다리는 상한. 1분을 넘기는 기기가 흔해서 넉넉히 잡는다. */
 const BOOT_WAIT_MS = 150_000;
 
+/** "아직 조작할 수 없는" 기기를 다시 물어보는 횟수 상한(4초 간격 = 약 1분). */
+const CAP_RETRY_MAX = 15;
+
 /**
  * H.264 Annex-B 로 디코딩한다. `description` 없이 configure 하면 WebCodecs 가 Annex-B 로 읽고,
  *  첫 키프레임 앞에 SPS/PPS(config 패킷)를 붙여 주면 된다.
@@ -125,6 +128,7 @@ export class EmulatorView {
   dispose() {
     this.disposed = true;
     this.stopVideo();
+    clearTimeout(this._capTimer);
     try { this.el.remove(); } catch (_) { /* noop */ }
   }
 
@@ -135,6 +139,10 @@ export class EmulatorView {
     this.visible = next;
     if (next) {
       this.lastTouch = Date.now();
+      //  ★ 돌아올 때마다 기기 목록을 다시 읽는다(2026-08-06 폰 실사고와 같은 이유): 기기의 조작 능력
+      //   (caps.input/keys)은 목록을 읽은 그 순간의 상태다. 시뮬레이터가 아직 안 떠 있을 때 읽으면
+      //   "조작 불가" 로 굳어 다 뜬 뒤에도 영영 버튼이 안 나온다.
+      void this.loadDevices();
       //  숨어 있는 동안 데몬이 유휴 정리로 스트림을 접었을 수 있다 — 다시 붙여 본다.
       if (this.deviceId && !this.videoOn) void this.startVideo().then((ok) => { if (!ok) this.ensureLoop(); });
       else this.ensureLoop();
@@ -168,6 +176,24 @@ export class EmulatorView {
     if (this.deviceId && this.deviceName()) this.onDeviceChange(this.deviceId, this.deviceName());
     this.render();
     this.ensureLoop();
+    this.retryCaps();
+  }
+
+  /**
+   * 아직 조작할 수 없는 기기를 보고 있으면 잠깐씩 다시 물어본다(부팅 중·serve-sim 준비 중).
+   *  상한을 둔다 — 정말 조작을 지원하지 않는 기기도 있고, 그때 무한 폴링은 그냥 낭비다.
+   */
+  retryCaps() {
+    if (this.disposed || !this.visible || !this.deviceId) return;
+    const d = this.device();
+    if (d && d.caps && d.caps.input) { this.capRetry = 0; return; }
+    if ((this.capRetry || 0) >= CAP_RETRY_MAX) return;
+    clearTimeout(this._capTimer);
+    this._capTimer = setTimeout(() => {
+      if (this.disposed || !this.visible) return;
+      this.capRetry = (this.capRetry || 0) + 1;
+      void this.loadDevices();
+    }, 4000);
   }
 
   /**
@@ -200,6 +226,7 @@ export class EmulatorView {
     this.videoNote = '';
     this.visualRot = 0;             // 기기를 바꾸면 표시 회전도 처음으로
     this.wantLandscape = null;      //  (다음 기기의 첫 프레임을 보고 다시 정한다)
+    this.capRetry = 0;              // 새 기기는 조작 준비 재시도도 처음부터
     this.lastTouch = Date.now();
     //  ★ 이름까지 같이 올린다 — 탭 제목이 기기명이 되어야 어느 탭이 어느 기기인지 한눈에 보인다
     //   (id 는 `ios:8B21…` 라 사람이 읽을 수 없다). 목록을 아직 못 받았으면 빈 문자열 →
@@ -784,10 +811,18 @@ export class EmulatorView {
       this.el.appendChild(note);
     }
 
-    if (!canInput && dev && dev.caps && dev.caps.inputHint) {
+    //  ★ 조작이 안 되면 **이유가 항상 있어야 한다**(2026-08-06): 예전엔 데몬이 준 inputHint 가 있을
+    //   때만 적었는데, "아직 안 켜짐" 처럼 힌트가 빈 경우가 있어 버튼도 없고 터치도 안 먹는데 설명이
+    //   한 줄도 없는 상태가 됐다 — 사용자에겐 그냥 고장으로 보인다.
+    if (!canInput && dev) {
       const hint = document.createElement("div");
       hint.className = "emu-hint";
-      hint.textContent = dev.caps.inputHint;
+      hint.textContent = dev.caps?.inputHint
+        || (dev.state !== "booted"
+          ? i18n.t('기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요')
+          : (this.capRetry || 0) < CAP_RETRY_MAX
+            ? i18n.t('조작 준비를 기다리는 중이에요…')
+            : i18n.t('이 기기는 조작을 지원하지 않아요 (보기 전용)'));
       this.el.appendChild(hint);
     }
 

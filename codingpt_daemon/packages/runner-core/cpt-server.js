@@ -1104,6 +1104,34 @@ async function dispatch(req, conn) {
       return { files, opened, skipped };
     }
 
+    /**
+     * 모바일 화면 띄우기 — 에이전트가 **사용자가 지금 보고 있는 기기**에 에뮬레이터 탭을 연다.
+     *  프리뷰(`ui.previewOpen`)·IDE(`ui.ideOpen`) 와 같은 급이다: 고친 화면을 사용자가 볼 수 있게
+     *  띄우는 것까지가 에이전트의 일이다("띄우는 건 사용자가 손으로" 는 반쪽이었다).
+     *
+     *  기기 id 를 생략하면 **지금 켜져 있는 것 중 첫 번째**를 여기서 골라 준다. 이유:
+     *   ① 대부분 켜진 기기는 하나다 ② 에이전트가 목록을 한 번 더 당겨 고르는 왕복이 사라진다
+     *   ③ 화면(앱/PC)은 기기 목록을 캐시하고 있어 그쪽에서 고르면 낡은 목록으로 고를 수 있다.
+     *  켜진 게 하나도 없으면 **조용히 빈 탭을 띄우지 않고** 오류로 알린다(무엇을 해야 하는지까지).
+     */
+    case 'ui.emulatorOpen': {
+      let device = typeof args.device === 'string' ? args.device.trim() : '';
+      if (!device) {
+        const emuLib = lazyMod('./emulator');
+        if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
+        const r = await emuLib.handle('emulator.list', {});
+        const hit = emuLib.pickVisibleDevice((r && r.devices) || []);
+        if (!hit) {
+          throw new Error('켜져 있는 모바일 기기가 없어요 — `cpt emulator list` 로 확인한 뒤 '
+            + '`cpt emulator boot --device <id>` 로 켜거나 `--device <id>` 로 지정하세요');
+        }
+        device = hit.id;
+      }
+      const target = await resolveTargetDevice(args.on);
+      return sendUiCommand('emulatorOpen', { ...args, device, ws: resolved.cwdRel },
+        { mode: 'target', target, timeoutMs: args.timeoutMs });
+    }
+
     // ── 화면 조작(ui_command — back/클라이언트 왕복) — 기기-타겟 라우팅 ──
     case 'ui.wsSelect':
     case 'ui.wsClose':
@@ -1124,6 +1152,7 @@ async function dispatch(req, conn) {
     case 'ui.ideOpen':
     case 'ui.ideClose':
     case 'ui.ideCloseFile':
+    case 'ui.emulatorClose':
     case 'ui.ideList': {
       const uiCmd = cmd.slice(3, 4).toLowerCase() + cmd.slice(4); // ui.layoutTree → layoutTree
       // 기기-타겟 라우팅: 화면 조작/조회는 "사용자가 보고 있는 활성 기기" 1곳에서만 실행·회신.
@@ -1839,6 +1868,8 @@ const CAPABILITIES = [
   //  `emulator.ax` = 화면을 글자로 읽기. 스크린샷을 눈으로 보고 좌표를 찍는 것보다 정확하고,
   //   무엇보다 **틀렸을 때 틀렸다고 말할 수 있다**(못 찾은 라벨은 오류다 — 조용한 실패가 아니다).
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl', 'emulator.ax',
+  //  화면에 띄우기 — 프리뷰/IDE 와 같은 급으로 연다(사용자가 보고 있는 기기 1곳).
+  'ui.emulatorOpen', 'ui.emulatorClose',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.

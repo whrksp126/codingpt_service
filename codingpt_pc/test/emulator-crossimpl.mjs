@@ -248,5 +248,45 @@ ok(!/shouldDirect\(host, 'emu'\)/.test(appDaemonSvc),
 ok(/EMU_RPC_ALLOW/.test(read(path.resolve('../codingpt_daemon/packages/runner-core/lan.js'))),
   '데몬이 emulator.input 을 emu 등급으로 연다');
 
+// ── 13. 에이전트가 **띄워 준다** — 세 화면이 같은 명령을 안다 ────────────────
+// 2026-08-06 사용자 지적: 프리뷰·IDE·터미널은 에이전트가 사용자가 보고 있는 기기에 띄워 주는데
+//  모바일 화면만 빠져 있었다(사용자가 손으로 열어야 했다). 명령 이름이 **네 곳에서 같아야** 한다:
+//  cpt CLI → 데몬 라우팅/공개목록 → PC 핸들러 → 앱 핸들러 + 앱의 "내가 할 줄 아는 명령" 신고.
+//  하나라도 빠지면 조용히 실패한다 — 서버는 그 명령을 할 줄 아는 화면이 없다고 보고 안 보내거나,
+//  보내 놓고 아무 일도 일어나지 않는다.
+const pcUi = read(path.join(PC, 'ui-channel.js'));
+const appBridge = read(path.join(APP, 'workspace/UiCommandBridge.tsx'));
+const appNames = read(path.join(APP, 'workspace/uiCommandNames.ts'));
+const dsrv = read(path.resolve('../codingpt_daemon/packages/runner-core/cpt-server.js'));
+ok(/case 'ui\.emulatorOpen'/.test(dsrv) && /'ui\.emulatorOpen', 'ui\.emulatorClose'/.test(dsrv),
+  '데몬이 ui.emulatorOpen/Close 를 라우팅하고 공개한다');
+ok(/emulatorOpen: async/.test(pcUi) && /emulatorClose: async/.test(pcUi), 'PC 가 두 명령을 실행할 줄 안다');
+ok(/case 'emulatorOpen'/.test(appBridge) && /case 'emulatorClose'/.test(appBridge), '앱도 실행할 줄 안다');
+ok(/'emulatorOpen', 'emulatorClose'/.test(appNames),
+  "★ 앱이 그 능력을 **신고**한다(신고 안 하면 서버가 폰을 고르고도 안 보낸다)");
+//  이미 열려 있으면 또 만들지 않고 그 표면의 기기만 바꾼다 — 양쪽 같은 규칙.
+ok(/findEmulatorTarget/.test(pcUi), 'PC 가 이미 열린 모바일 화면을 찾는다');
+ok(/findEmulator\(/.test(appBridge), '앱도 이미 열린 모바일 화면을 찾는다');
+ok(/PANE_TYPES = \["terminal", "ide", "preview", "emulator"\]/.test(pcUi),
+  'PC 의 pane 종류 목록에 모바일 화면이 들어 있다(layout split --type emulator)');
+ok(/type === 'emulator'/.test(appBridge), '앱의 pane 생성기도 모바일 화면을 만들 줄 안다');
+
+// ── 14. 조작 능력은 **낡을 수 있다** — 돌아올 때마다 다시 묻는다 ─────────────
+// 2026-08-06 실사고(폰 → iOS 시뮬레이터): 버튼이 하나도 없고 터치도 안 먹었다. 기기의 조작 능력
+//  (caps.input/keys)은 목록을 읽은 **그 순간**의 상태인데, 목록은 탭을 처음 열 때 한 번만 읽었다.
+//  시뮬레이터가 아직 안 떠 있었으면 "조작 불가" 로 굳어 다 뜬 뒤에도 영영 버튼이 안 나온다.
+for (const [name, src, hook] of [['PC', pcView, /setVisible[\s\S]{0,600}?this\.loadDevices\(\)/],
+  ['앱', appEmu, /if \(!active\) return;\s*\n\s*void loadDevices\(\)/]]) {
+  ok(hook.test(src), `${name} 이 탭으로 돌아올 때 기기 목록을 다시 읽는다`);
+  ok(/CAP_RETRY_MAX/.test(src), `${name} 이 조작 준비를 상한 안에서 다시 물어본다(무한 폴링 금지)`);
+}
+//  왜 안 되는지는 **항상** 적는다 — 버튼도 없고 설명도 없으면 사용자에겐 그냥 고장이다.
+ok(/if \(!canInput && dev\) \{/.test(pcView) && !/!canInput && dev && dev\.caps && dev\.caps\.inputHint/.test(pcView),
+  'PC 의 이유 표시가 데몬 힌트 유무에 묶여 있지 않다');
+ok(/!canInput && dev \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
+  '앱의 이유 표시도 힌트 유무에 묶여 있지 않다');
+ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
+
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

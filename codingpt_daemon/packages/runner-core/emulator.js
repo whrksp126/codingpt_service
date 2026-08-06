@@ -208,6 +208,19 @@ async function iosSimulators() {
   return rows;
 }
 
+/**
+ * 화면에 띄울 기기 고르기(`cpt emulator show` 에서 --device 를 생략했을 때).
+ *
+ *  ★ **켜져 있는 것만** 고른다. 꺼진 AVD 를 골라 띄우면 사용자에게는 빈 검은 액자가 뜨고,
+ *   왜 안 나오는지 알 방법이 없다("띄웠어요" 라고 답한 뒤 아무것도 안 보이는 게 최악이다).
+ *  ★ 조작까지 되는 기기를 **우선**한다 — 어차피 에이전트가 보여 주는 이유는 "만져 보라"는 것이다.
+ *  고를 것이 없으면 null 을 돌려주고, 무엇을 해야 하는지는 부르는 쪽이 말한다.
+ */
+function pickVisibleDevice(devices) {
+  const booted = (devices || []).filter((d) => d && d.state === 'booted');
+  return booted.find((d) => d.caps && d.caps.input) || booted[0] || null;
+}
+
 /** 켜진 것 먼저, 그 다음 이름순. 사용자가 찾는 건 거의 항상 "지금 떠 있는 것"이다. */
 function sortDevices(rows) {
   const rank = (d) => (d.state === 'booted' ? 0 : 1);
@@ -1146,4 +1159,5 @@ module.exports = {
   _normalizeIosAx: normalizeIosAx, _parseAndroidAx: parseAndroidAx,
   ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW, IOS_KEY_ROW_IDB, ROTATE_KEYS,
   ROTATE_TARGETS, IOS_ROTATE_TARGET,
+  pickVisibleDevice,   // cpt-server 의 ui.emulatorOpen 이 쓴다(테스트도 여기를 본다)
 };

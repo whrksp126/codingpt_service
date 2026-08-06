@@ -458,3 +458,39 @@ test('★ 화면 잠금 키 이름이 두 OS 에서 같다', () => {
   //  idb 폴백은 회전을 못 한다 — 그 기계에서는 회전 버튼을 아예 안 그린다.
   assert.ok(!emu.IOS_KEY_ROW_IDB.includes('rotate'));
 });
+
+// ── 화면에 띄우기(cpt emulator show) ────────────────────────────────────────
+// 2026-08-06: 에이전트가 에뮬레이터를 조작할 수는 있었는데 **사용자에게 보여 줄 수가 없었다**
+//  (프리뷰·IDE 는 되는데 모바일 화면만 빠져 있었다 — 사용자가 손으로 탭을 열어야 했다).
+//  기기 id 를 생략했을 때 무엇을 고르는가가 이 기능의 유일한 판단이라, 그것만 순수 함수로 고정한다.
+test('★ 띄울 기기는 켜져 있는 것 중에서, 조작 가능한 쪽을 먼저 고른다', () => {
+  const emu = require('../emulator');
+  const off = { id: 'avd:Pixel_6', state: 'shutdown', caps: { input: false } };
+  const viewOnly = { id: 'ios:AAA', state: 'booted', caps: { input: false } };
+  const usable = { id: 'android:emulator-5554', state: 'booted', caps: { input: true } };
+  //  꺼진 기기는 절대 고르지 않는다 — 띄워 봐야 검은 액자다("띄웠어요" 라 답하고 아무것도 안 보이는 것).
+  assert.equal(emu.pickVisibleDevice([off]), null);
+  assert.equal(emu.pickVisibleDevice([]), null);
+  assert.equal(emu.pickVisibleDevice(null), null);
+  //  조작까지 되는 기기가 있으면 그쪽 — 보여 주는 이유가 "만져 보라" 이기 때문이다.
+  assert.equal(emu.pickVisibleDevice([off, viewOnly, usable]).id, 'android:emulator-5554');
+  //  보기 전용뿐이면 그거라도 띄운다(안 띄우는 것보다 낫다).
+  assert.equal(emu.pickVisibleDevice([off, viewOnly]).id, 'ios:AAA');
+});
+
+// 명령이 **네 곳에서 같은 이름**이어야 실제로 동작한다: CLI → 데몬 라우팅 → CAPABILITIES(터미널 AI
+//  에게 보이는 목록) → 화면(uiCmds 신고). 하나라도 빠지면 조용히 실패한다 — 서버는 그 명령을 할 줄
+//  아는 화면이 없다고 보고 그냥 안 보내거나, 보내 놓고 아무 일도 일어나지 않는다.
+test('★ emulator show 가 CLI·라우팅·공개목록에 모두 있다', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'cpt-server.js'), 'utf8');
+  assert.ok(/case 'ui\.emulatorOpen'/.test(src), '데몬이 ui.emulatorOpen 을 라우팅한다');
+  assert.ok(/case 'ui\.emulatorClose'/.test(src), '데몬이 ui.emulatorClose 를 라우팅한다');
+  assert.ok(/'ui\.emulatorOpen', 'ui\.emulatorClose'/.test(src), 'CAPABILITIES 에 공개돼 있다');
+  const cli = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js'), 'utf8');
+  assert.ok(/c2 === 'show'/.test(cli) && /ui\.emulatorOpen/.test(cli), 'cpt emulator show');
+  assert.ok(/c2 === 'hide'/.test(cli) && /ui\.emulatorClose/.test(cli), 'cpt emulator hide');
+  const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'GUIDE.md'), 'utf8');
+  assert.ok(/cpt emulator show/.test(guide), '에이전트 안내서에 적혀 있다(안 적으면 아무도 안 쓴다)');
+});

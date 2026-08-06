@@ -123,7 +123,9 @@ function addSurfaceGated(rt, kind, opts) {
     if (host) {
       const tab = kind === "ide"
         ? { kind: "ide", openPath: opts.openPath || null, tid: newTid() }
-        : { kind: "preview", url: opts.url || "", tid: newTid() };
+        : kind === "emulator"
+          ? { kind: "emulator", deviceId: opts.deviceId || null, metaName: "", tid: newTid() }
+          : { kind: "preview", url: opts.url || "", tid: newTid() };
       host.tabs.push(tab);
       host.active = host.tabs.length - 1;
       const pane = getPane(host.id);
@@ -135,7 +137,9 @@ function addSurfaceGated(rt, kind, opts) {
       return host.id;
     }
   }
-  const sopts = kind === "ide" ? { openPath: opts.openPath } : { url: opts.url || "" };
+  const sopts = kind === "ide" ? { openPath: opts.openPath }
+    : kind === "emulator" ? { deviceId: opts.deviceId || null }
+      : { url: opts.url || "" };
   S.splitPane(focusId, "h", kind, sopts);
   return rt.focusId;
 }
@@ -984,7 +988,39 @@ export async function applySnapshotPC(id) {
   return err ? { ok: false, error: err } : { ok: true };
 }
 
-const PANE_TYPES = ["terminal", "ide", "preview"];
+const PANE_TYPES = ["terminal", "ide", "preview", "emulator"];
+
+// 모바일 화면 표면 찾기 — 독립 pane 우선, 없으면 혼합 탭. (findPreviewTarget/findIdeTarget 미러)
+function findEmulatorTarget(rt) {
+  const check = (l) => {
+    if (l.kind === "emulator") return { leaf: l, tab: null };
+    if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "emulator");
+      if (i >= 0) return { leaf: l, tab: l.tabs[i], index: i };
+    }
+    return null;
+  };
+  let hit = null;
+  const focusLeaf = rt.focusId ? T.findLeaf(rt.layout, rt.focusId) : null;
+  if (focusLeaf) hit = check(focusLeaf);
+  if (!hit) T.eachLeaf(rt.layout, (l) => { if (!hit) hit = check(l); });
+  return hit;
+}
+
+/**
+ * 표면(EmulatorView)이 붙을 때까지 기다린다. emulator-view.js 는 **동적 import** 라 pane 을 만든
+ *  직후엔 `.emu` 가 아직 없다 — 동기로 조회하면 `?.select` 가 조용히 no-op 되고 "명령은 ok 인데
+ *  기기가 안 바뀌는" 버그가 된다(previewOpen 의 waitPreviewControl 과 같은 이유·같은 처방).
+ */
+async function waitEmuView(getter, ms = 4000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = getter();
+    if (v) return v;
+    if (Date.now() >= until) return null;
+    await new Promise((r) => setTimeout(r, 60));
+  }
+}
 
 // 명령 → 핸들러. 반환 객체가 ui_result 프레임에 그대로 병합된다({ok, ...}).
 const handlers = {
@@ -1026,6 +1062,7 @@ const handlers = {
     const opts =
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
       : p.type === "ide" ? { openPath: normPath(meta, p.path) }
+      : p.type === "emulator" ? { deviceId: p.device || null }
       : { fresh: true };
     S.splitPane(targetId, dir, p.type, opts);
     return { ok: true, paneId: rt.focusId };
@@ -1038,6 +1075,7 @@ const handlers = {
     const extra =
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
       : p.type === "ide" ? { openPath: normPath(meta, p.path) }
+      : p.type === "emulator" ? { deviceId: p.device || null }
       : undefined;
     const paneId = smartAdd(p.type, extra);
     if (!paneId) throw new Error(i18n.t('pane 생성 실패'));
@@ -1088,6 +1126,46 @@ const handlers = {
     // 신규 프리뷰 — 좁은 화면이면 분할 대신 활성 터미널 pane 에 탭으로(R1).
     const paneId = addSurfaceGated(rt, "preview", { url });
     return { ok: true, paneId };
+  },
+
+  /**
+   * 모바일 화면 띄우기 — 에이전트가 "내가 고친 화면"을 사용자 눈앞에 올린다(previewOpen 미러).
+   *  이미 열려 있으면 **그 표면의 기기만 바꾼다**(탭을 또 만들지 않는다). 기기 id 는 데몬이
+   *  이미 켜진 것으로 골라 보내므로 여기서 목록을 다시 뒤지지 않는다.
+   */
+  emulatorOpen: async (p) => {
+    const { rt } = requireWs(p);
+    const device = typeof p.device === "string" && p.device ? p.device : null;
+    const target = findEmulatorTarget(rt);
+    if (target) {
+      const pane = getPane(target.leaf.id);
+      if (target.tab) {
+        target.leaf.active = target.index;      // 뒤에 숨어 있었으면 앞으로 끌어온다
+        pane?.buildHead();
+        pane?.showActiveTab?.();                // _ensureMixed 가 tid 부여 + EmulatorView 생성
+      }
+      S.focusPane(target.leaf.id);
+      S.emit();
+      if (device) {
+        const view = await waitEmuView(() => (target.tab
+          ? (target.tab.tid ? pane?._mixed?.get(target.tab.tid)?.emu : null)
+          : getPane(target.leaf.id)?.emu));
+        if (!view) throw new Error(i18n.t('모바일 화면이 준비되지 않았어요'));
+        view.select(device);
+      }
+      return { ok: true, paneId: target.leaf.id, device };
+    }
+    const paneId = addSurfaceGated(rt, "emulator", { deviceId: device });
+    return { ok: true, paneId, device };
+  },
+
+  // 모바일 화면 닫기 — 독립 pane 은 통째로, 혼합 탭이면 그 탭만.
+  emulatorClose: async (p) => {
+    const { meta, rt } = requireWs(p);
+    const target = findEmulatorTarget(rt);
+    if (!target) return { ok: true, skipped: true };
+    closeSurfaceTarget(meta, target);
+    return { ok: true };
   },
 
   // 첫(포커스 우선) 프리뷰 대상에 URL 이동 — 백그라운드(사용자 활성 탭을 강제 전환하지 않음, R2).
