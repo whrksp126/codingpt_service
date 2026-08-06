@@ -5,11 +5,10 @@
 //  · 크롭은 페이지 안 canvas 로 수행(새 의존성 금지). evaluateJavaScript 는 Promise 를 기다리지
 //    않으므로 crop() 은 시작만 하고 takeCrop() 폴링으로 결과(b64)를 회수한다.
 //  · 저장 = Rust fs_write_b64(홈 jail, ~/.codingpt/attachments/design-*.jpg) → 절대경로 반환 →
-//    포커스(없으면 첫) 터미널 pane 에 insertText. 터미널이 없으면 안내만 하고 파일은 저장 유지.
+//    **보고 있는 방식대로** 삽입(TUI 한 줄 / 채팅 칩 — attach-insert.js). 터미널이 없으면 안내만 하고
+//    파일은 저장 유지.
 import { api } from "./api.js";
-import { state, ensureRuntime } from "./state.js";
-import * as T from "./tiling.js";
-import { getPane, isTermTab } from "./pane.js";
+import { insertAttachment, attachName, shq } from "./attach-insert.js";
 import * as i18n from './i18n/index.js';
 
 // 페이지 주입 픽커 — 계약(round2 §2) 사양 그대로: 오버레이+hover 하이라이트+라벨 툴팁,
@@ -279,20 +278,16 @@ async function _finish(mode, payload) {
     if (Date.now() > deadline) throw new Error(i18n.t('크롭 시간 초과'));
   }
   // 3) 저장 — ~/.codingpt/attachments/design-<yyyymmdd-hhmmss>-<rand4>.jpg (절대경로 회수)
-  const rel = ".codingpt/attachments/design-" + tsName() + "-" + Math.random().toString(36).slice(2, 6) + ".jpg";
+  const rel = ".codingpt/attachments/" + attachName("design-", "jpg");
   const absPath = await api.fsWriteB64(rel, b64);
-  // 4) 터미널 삽입 — 포커스 터미널 pane 우선, 없으면 첫 터미널 pane. 없으면 안내(파일은 저장 유지).
-  const pane = findTermPane();
-  if (!pane) { toast(i18n.t('터미널이 없어 파일만 저장했어요: ') + absPath); return; }
-  pane.insertText(designLine(mode.localPath, payload, absPath));
-  pane.ctx?.onFocus?.(pane.id);
-  pane.focus();
-  toast(i18n.t('디자인 요소를 터미널에 첨부했어요'));
-}
-
-function tsName() {
-  const d = new Date(), p = (n) => String(n).padStart(2, "0");
-  return "" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  // 4) 삽입 — **사용자가 그 터미널을 보고 있는 방식**에 맞게(TUI 한 줄 / 채팅 칩). 판단은 attach-insert 한 곳.
+  const where = insertAttachment({
+    text: designText(mode.localPath, payload),
+    line: designLine(mode.localPath, payload, absPath),
+    path: absPath,
+  });
+  if (!where) { toast(i18n.t('터미널이 없어 파일만 저장했어요: ') + absPath); return; }
+  toast(where === "chat" ? i18n.t('디자인 요소를 채팅에 첨부했어요') : i18n.t('디자인 요소를 터미널에 첨부했어요'));
 }
 
 // 소스 파일 경로 정규화 — 워크스페이스 루트(홈-상대 localPath) 세그먼트가 절대경로 안에 보이면
@@ -307,25 +302,19 @@ function normSrcFile(file, localPath) {
   return f;
 }
 
-// 삽입 한 줄: `[디자인] ` + (src 있으면 `<file>:<line> `) + `<selector>` + (text 있으면 ` "<text 40자>"`) + ` '<absPath>' `
-function designLine(localPath, payload, absPath) {
+// 설명 부분: `[디자인] ` + (src 있으면 `<file>:<line> `) + `<selector>` + (text 있으면 ` "<text 40자>"`)
+//  경로는 붙이지 않는다 — 채팅에서는 경로 대신 **칩**이 그 자리에 들어간다(같은 정보, 다른 모양).
+function designText(localPath, payload) {
   let s = i18n.t('[디자인] ');
   if (payload.src && payload.src.file) s += normSrcFile(payload.src.file, localPath) + ":" + (payload.src.line || 0) + " ";
   s += payload.selector || payload.tag || "";
   const t = String(payload.text || "").trim();
   if (t) s += ' "' + t.slice(0, 40).replace(/"/g, "'") + '"';
-  s += " '" + String(absPath).replace(/'/g, "'\\''") + "' ";
   return s;
 }
 
-// 삽입 대상 터미널 pane — 포커스 pane 이 터미널이면 그것, 아니면 레이아웃 첫 터미널 pane(터미널 탭 보유).
-function findTermPane() {
-  const rt = state.activeWsId ? ensureRuntime(state.activeWsId) : null;
-  if (!rt) return null;
-  const ok = (l) => l && l.kind === "terminal" && (l.tabs || []).some(isTermTab);
-  let hit = null;
-  const focusLeaf = rt.focusId ? T.findLeaf(rt.layout, rt.focusId) : null;
-  if (ok(focusLeaf)) hit = focusLeaf;
-  if (!hit) T.eachLeaf(rt.layout, (l) => { if (!hit && ok(l)) hit = l; });
-  return hit ? getPane(hit.id) : null;
+// TUI 한 줄 = 설명 + 인용한 절대경로(claude 가 그 경로를 읽는다).
+function designLine(localPath, payload, absPath) {
+  return designText(localPath, payload) + " " + shq(absPath) + " ";
 }
+

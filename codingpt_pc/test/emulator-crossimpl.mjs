@@ -293,5 +293,35 @@ ok(/!canInput && dev \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu)
 ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
 
 
+// ── 15. 캡처 — "내가 본 것"을 **보고 있는 곳**으로 건넨다 ────────────────────────
+// 2026-08-06 사용자 요구: 모바일 화면에 캡처 버튼을 붙이고, 그 결과가 TUI 든 채팅이든 **지금 보고
+//  있는 쪽**으로 들어가야 한다. 프리뷰 요소 선택(Design Mode)도 같은 규칙으로 맞춘다 — 예전엔
+//  무조건 PTY 라, 채팅 모드로 보고 있으면 화면에 없는 컴포저로 들어가 사라진 것처럼 보였다.
+const pcAttach = read(path.join(PC, 'attach-insert.js'));
+const appUiCtl = read(path.join(APP, 'workspace/uiControls.ts'));
+const pcDesign = read(path.join(PC, 'design-pick.js'));
+//  ① 판단은 **한 곳에만** 있다(캡처가 늘 때마다 같은 분기를 복제하지 않게).
+ok(/export function insertAttachment/.test(pcAttach), 'PC 에 삽입 판단 한 곳(attach-insert)');
+ok(/export function insertAttachment/.test(appUiCtl), '앱에도 같은 이름의 한 곳(uiControls)');
+//  ② 채팅으로 보고 있으면 채팅으로 간다.
+ok(/_chatActive\(\)/.test(pcAttach) && /attachWithText/.test(pcAttach), 'PC 가 채팅 모드면 채팅 컴포저로');
+ok(/chatKey/.test(appUiCtl) && /getChatAttach/.test(appUiCtl), '앱이 채팅 모드면 채팅 컴포저로');
+ok(/attachWithText\(text, paths\)/.test(read(path.join(PC, 'chat-view.js'))), 'PC 채팅 뷰에 첨부 창구가 있다');
+//  ③ 두 캡처(모바일 화면·프리뷰 요소)가 **같은 길**을 쓴다 — 한쪽만 고쳐지는 일을 막는다.
+ok(/insertAttachment\(/.test(pcView), 'PC 모바일 화면 캡처가 그 길을 쓴다');
+ok(/insertAttachment\(/.test(pcDesign), 'PC 프리뷰 요소 캡처도 같은 길');
+ok(/insertAttachment\(/.test(appEmu), '앱 모바일 화면 캡처가 그 길을 쓴다');
+ok(/insertAttachment\(/.test(appPane), '앱 프리뷰 요소 캡처도 같은 길');
+ok(!/const t = pickTermInsert\(\);\s*\n\s*if \(t\) t\.insert\(line\)/.test(appPane),
+  '앱 요소 선택이 더 이상 PTY 로 직행하지 않는다');
+//  ④ 캡처 버튼은 **조작 가능 여부와 무관**하다 — 보기 전용 기기도 "이 화면 좀 봐"는 뜻이 있다.
+ok(/caps && dev\.caps\.frame/.test(pcView) || /caps\.frame/.test(pcView), 'PC 캡처 버튼 조건 = 화면을 받을 수 있는가');
+ok(/dev\?\.caps\?\.frame \? \(/.test(appEmu), '앱 캡처 버튼 조건도 같다(canInput 아님)');
+//  ⑤ 캡처는 **원본을 다시 받는다**(화면에 그려진 것을 긁지 않는다 — 줄인 해상도·돌린 그림이 나간다).
+for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
+  ok(/emulatorFrame\(/.test(src), `${name} 캡처가 데몬에게 원본을 다시 받는다`);
+}
+
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

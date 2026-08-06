@@ -13,6 +13,7 @@
 // 프리뷰와 달리 네이티브 웹뷰를 안 쓴다(그냥 <img>/<canvas> 다) — 겹침·좌표 보정 문제가 통째로 없다.
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { insertAttachment, attachName, shq, toast } from "./attach-insert.js";
 import * as i18n from "./i18n/index.js";
 
 /** 아무도 안 만진 채 이만큼 지나면 쉰다 — 배경에서 계속 도는 화면이 제일 나쁘다. */
@@ -576,6 +577,35 @@ export class EmulatorView {
     if (!ok) { this.wantLandscape = cur; this.syncRotation(); }
   }
 
+  /**
+   * 지금 화면을 캡처해 에이전트에게 첨부한다.
+   *  · 라이브 영상이 돌고 있어도 **데몬에게 한 장 다시 달라고 한다** — 캔버스에서 긁으면 우리가 이미
+   *   줄여 놓은 해상도(wantWidth)로 굳고, 회전해 그린 경우엔 돌아간 그림이 나간다. 원본이 정답이다.
+   *  · 저장 위치·삽입 규칙은 프리뷰 요소 캡처(design-pick)와 **같은 길**을 쓴다.
+   */
+  async capture(btn) {
+    if (!this.deviceId || this._capturing) return;
+    this._capturing = true;
+    if (btn) btn.disabled = true;
+    try {
+      const dev = this.device();
+      const r = await api.emulatorFrame(this.deviceId, { maxWidth: 1080, quality: 85 });
+      if (!r || !r.base64) throw new Error(i18n.t('화면을 받지 못했어요'));
+      const ext = r.mime === "image/png" ? "png" : (r.mime === "image/bmp" ? "bmp" : "jpg");
+      const abs = await api.fsWriteB64(".codingpt/attachments/" + attachName("emu-", ext), r.base64);
+      const text = i18n.t('[화면] ') + ((dev && dev.name) || this.deviceId);
+      const where = insertAttachment({ text, line: text + " " + shq(abs) + " ", path: abs });
+      if (!where) { void toast(i18n.t('터미널이 없어 파일만 저장했어요: ') + abs); return; }
+      void toast(where === "chat" ? i18n.t('화면을 채팅에 첨부했어요') : i18n.t('화면을 터미널에 첨부했어요'));
+    } catch (e) {
+      this.err = e && e.message ? e.message : String(e);
+      this.render();
+    } finally {
+      this._capturing = false;
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async power(action, target) {
     const id = (target && target.id) || this.deviceId;
     if (!id) return;
@@ -683,6 +713,23 @@ export class EmulatorView {
      */
     const keys = document.createElement("div");
     keys.className = "emu-keys";
+    /**
+     * ★ 캡처 — 지금 이 화면을 **에이전트에게 건네는** 버튼(2026-08-06 사용자 요구).
+     *  기기 조작 키가 아니라 **우리 기능**이라 `caps.keys` 와 무관하게 그린다. 조건은 하나:
+     *  화면을 받을 수 있는가(`caps.frame`). 조작이 안 되는 보기 전용 기기도 캡처는 뜻이 있다.
+     *  넣을 곳(TUI 한 줄 / 채팅 칩)은 attach-insert 가 정한다 — 프리뷰 요소 캡처와 같은 길.
+     */
+    if (dev && dev.caps && dev.caps.frame) {
+      const cap = document.createElement("button");
+      cap.className = "emu-key";
+      cap.title = i18n.t('이 화면을 캡처해 에이전트에게 첨부');
+      cap.innerHTML = icons.camera({ size: 22 });
+      cap.addEventListener("click", () => void this.capture(cap));
+      keys.appendChild(cap);
+      const s0 = document.createElement("span");
+      s0.className = "emu-keys-sep";
+      keys.appendChild(s0);
+    }
     if (canInput) {
       const ios = dev && dev.kind === "ios";
       for (const k of this.keyRow(dev)) {

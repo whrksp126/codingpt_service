@@ -799,6 +799,16 @@ export class ChatView {
     try { this.inputEl?.focus(); } catch (_) { /* noop */ }
   }
 
+  /**
+   * 설명 글 + 첨부를 한 번에 — 화면에서 집어 온 것(프리뷰 요소 캡처·모바일 화면 캡처)이 쓴다.
+   *  TUI 로 보고 있을 때의 "한 줄"과 **같은 정보**를 채팅 모양으로 넣는다: 앞에 무엇인지, 뒤에 칩.
+   *  (attach-insert.js 가 이 메서드를 부른다 — 바깥에서 _ce* 사적 헬퍼를 만지지 않게 창구를 연다.)
+   */
+  attachWithText(text, paths) {
+    if (text) this._ceInsertText(String(text));
+    this.addAttachments(paths || []);
+  }
+
   // 붙여넣기 라우팅 — 네이티브 pasteboard 의 파일 참조가 최우선(칩), 다음 이미지 데이터(임시
   //  PNG 저장 후 칩), 마지막이 plain text. 비동기 왕복(로컬 invoke, ~ms)이지만 preventDefault
   //  이후 캐럿은 그대로라 삽입 위치가 유지된다.

@@ -118,6 +118,10 @@ export const icons = {
   rotate: (o) => svg(
     '<path d="M4 5.5v5h5"/>'
     + '<path d="M4.6 10.4a8 8 0 1 1 .3 4.6"/>', o),
+  //  화면 캡처 = 카메라(phosphor Camera 톤). "지금 이 화면을 에이전트에게 준다".
+  camera: (o) => svg(
+    '<path d="M3.5 8.8h3.3l1.7-2.4h7l1.7 2.4h3.3v9.6H3.5z" stroke-linejoin="round"/>'
+    + '<circle cx="12" cy="13.4" r="3.3"/>', o),
   //  화면 잠금 = 자물쇠.
   lockScreen: (o) => svg(
     '<rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/>'
