@@ -14,9 +14,13 @@
  *   node asc.mjs status                 앱/버전/심사 상태 요약
  *   node asc.mjs builds                 최근 업로드된 빌드(처리 상태 포함)
  *   node asc.mjs prepare 0.3.0 --build 23 --notes "..."   버전 생성+빌드 연결+릴리스 노트
+ *   node asc.mjs review-set --demo-file <json> [--notes-file <txt>] [--yes]
+ *                                       심사원용 데모 계정·심사 메모 기록(값은 **파일로만** 받는다)
  *   node asc.mjs preflight              지금 제출해도 되는지 점검(무해 — 아무것도 안 바꿈)
  *   node asc.mjs submit [--yes]         심사 제출(preflight 통과해야 진행)
  *   node asc.mjs cancel [--yes]         제출 철회
+ *   node asc.mjs release-type <manual|after-approval> [--yes]
+ *                                       승인 후 자동 출시로 둘지, 사람이 눌러 출시할지
  *   node asc.mjs release [--yes]        승인 대기(PENDING_DEVELOPER_RELEASE) 버전을 출시
  *   node asc.mjs watch [--interval 600] 심사 상태를 주기 확인하며 전이를 출력(무인 폴링용)
  *
@@ -206,6 +210,78 @@ async function cmdPrepare(argv) {
   console.log('\n다음: node asc.mjs preflight → submit --yes');
 }
 
+/**
+ * 심사원용 데모 계정 · 심사 메모 기록(appStoreReviewDetail).
+ *
+ * ★ 비밀번호는 **파일로만** 받는다 — 명령줄 인자로 주면 셸 히스토리와 `ps` 에 남는다(전역 규율).
+ *   --demo-file 은 `{"name":"...","password":"...","required":true}` 모양의 JSON.
+ *   --notes-file 은 심사원이 읽을 안내문(텍스트). 로그인 앱은 이게 없으면 거의 확실히 거절된다.
+ *
+ * 값은 **버전마다 새로 쓰인다**(appStoreReviewDetail 은 버전에 딸린 리소스라 새 버전엔 비어 있을 수
+ * 있다). 그래서 릴리스 때마다 이 명령을 돌리는 것이 정상 절차다.
+ */
+async function cmdReviewSet(argv) {
+  const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
+  const demoFile = arg('--demo-file');
+  const notesFile = arg('--notes-file');
+  const contactFile = arg('--contact-file');
+  if (!demoFile && !notesFile && !contactFile) {
+    die('사용: review-set --demo-file <json> [--notes-file <txt>] [--contact-file <json>] [--yes]');
+  }
+  const app = await appId();
+  const vs = await versions(app.id);
+  const target = vs.find((v) => SUBMITTABLE.has(v.state));
+  if (!target) die(`고칠 수 있는 버전이 없습니다(제출 전 상태의 버전이 필요합니다). 현재: ${vs.slice(0, 3).map((v) => `${v.version} ${ko(v.state)}`).join(' · ')}`);
+
+  const attrs = {};
+  if (demoFile) {
+    const d = JSON.parse(fs.readFileSync(demoFile, 'utf8'));
+    const name = d.name || d.email || d.username;
+    const pw = d.password;
+    if (!name || !pw) die('데모 파일에 name(또는 email)과 password 가 필요합니다.');
+    attrs.demoAccountRequired = d.required !== false;
+    attrs.demoAccountName = String(name);
+    attrs.demoAccountPassword = String(pw);
+  }
+  if (notesFile) attrs.notes = fs.readFileSync(notesFile, 'utf8').trim();
+  if (contactFile) {
+    const c = JSON.parse(fs.readFileSync(contactFile, 'utf8'));
+    if (c.firstName) attrs.contactFirstName = String(c.firstName);
+    if (c.lastName) attrs.contactLastName = String(c.lastName);
+    if (c.phone) attrs.contactPhone = String(c.phone);
+    if (c.email) attrs.contactEmail = String(c.email);
+  }
+
+  //  화면에 **비밀번호를 찍지 않는다** — 길이만 보여 준다(기록됐는지 확인엔 충분).
+  const shown = { ...attrs };
+  if (shown.demoAccountPassword) shown.demoAccountPassword = `<${shown.demoAccountPassword.length}자>`;
+  if (shown.notes) shown.notes = `${shown.notes.length}자`;
+  console.log(`대상: ${target.version} (${ko(target.state)})`);
+  console.log(Object.entries(shown).map(([k, v]) => `  ${k} = ${v}`).join('\n'));
+  if (!argv.includes('--yes')) { console.log('\n실제로 기록하려면 --yes 를 붙이세요.'); return; }
+
+  //  기존 리소스가 있으면 PATCH, 없으면 POST(버전에 새로 붙인다).
+  let existing = null;
+  try { existing = (await api(`/v1/appStoreVersions/${target.id}/appStoreReviewDetail`))?.data || null; } catch (_) { existing = null; }
+  if (existing) {
+    await api(`/v1/appStoreReviewDetails/${existing.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ data: { type: 'appStoreReviewDetails', id: existing.id, attributes: attrs } }),
+    });
+    console.log('심사 상세 갱신 완료');
+  } else {
+    await api('/v1/appStoreReviewDetails', {
+      method: 'POST',
+      body: JSON.stringify({ data: {
+        type: 'appStoreReviewDetails',
+        attributes: attrs,
+        relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: target.id } } },
+      } }),
+    });
+    console.log('심사 상세 생성 완료');
+  }
+}
+
 // ── 수출규정(암호화) 신고 ─────────────────────────────────────────────
 // **법적 신고다 — 절대 자동으로 값을 정하지 않는다.** 미답변이면 심사가 WAITING_FOR_EXPORT_COMPLIANCE
 // 에 걸려 시작조차 안 하므로 매 빌드 필요하다. 그래서 "이전 빌드에 뭐라고 답했는지" 를 보여 주고,
@@ -364,6 +440,28 @@ async function cmdCancel(argv) {
   console.log('✅ 철회 요청 완료.');
 }
 
+/**
+ * 출시 방식 전환 — MANUAL(승인 뒤 사람이 누름) ↔ AFTER_APPROVAL(승인되면 애플이 바로 게시).
+ *  심사 대기/심사 중에도 바꿀 수 있다(실측). Play 쪽은 트랙 릴리스가 `status: completed` 라
+ *  승인 즉시 게시되므로, 두 스토어를 같은 규칙으로 두려면 여기서 after-approval 을 쓴다.
+ */
+async function cmdReleaseType(argv) {
+  const want = (argv.find((a) => /^(manual|after-approval)$/.test(a)) || '').toLowerCase();
+  if (!want) die('사용: release-type <manual|after-approval> [--yes]');
+  const releaseType = want === 'manual' ? 'MANUAL' : 'AFTER_APPROVAL';
+  const app = await appId();
+  const vs = await versions(app.id);
+  const target = vs.find((v) => !PUBLISHED.has(v.state));
+  if (!target) die('게시 전 버전이 없습니다.');
+  console.log(`대상: ${target.version} (${ko(target.state)}) → ${releaseType}`);
+  if (!argv.includes('--yes')) { console.log('\n실제로 바꾸려면 --yes 를 붙이세요.'); return; }
+  await api(`/v1/appStoreVersions/${target.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ data: { type: 'appStoreVersions', id: target.id, attributes: { releaseType } } }),
+  });
+  console.log(releaseType === 'AFTER_APPROVAL' ? '승인되면 자동 게시됩니다.' : '승인 뒤 release --yes 로 출시해야 합니다.');
+}
+
 async function cmdRelease(argv) {
   const app = await appId();
   const vs = await versions(app.id);
@@ -404,8 +502,9 @@ async function cmdWatch(argv) {
 const [, , cmd = 'status', ...argv] = process.argv;
 const run = {
   status: cmdStatus, builds: cmdBuilds, preflight: cmdPreflight, prepare: () => cmdPrepare(argv), compliance: () => cmdCompliance(argv),
+  'review-set': () => cmdReviewSet(argv), 'release-type': () => cmdReleaseType(argv),
   submit: () => cmdSubmit(argv), cancel: () => cmdCancel(argv),
   release: () => cmdRelease(argv), watch: () => cmdWatch(argv),
 }[cmd];
-if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | compliance | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
+if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | compliance | review-set --demo-file <json> | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
 run().catch((e) => die(String(e.message || e)));

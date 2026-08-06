@@ -39,6 +39,9 @@ export ASC_ISSUER_ID=f1908b5f-e631-41e0-b723-3b46c7c13041
 node codingpt_service/scripts/store/asc.mjs status    # 버전별 심사 상태(한국어 해설)
 node codingpt_service/scripts/store/asc.mjs builds     # 업로드된 빌드 처리 상태
 node codingpt_service/scripts/store/asc.mjs prepare 0.3.0 --notes "..."  # 버전+빌드+노트
+node codingpt_service/scripts/store/asc.mjs review-set --demo-file demo.json --notes-file notes.txt --yes
+                                                      # 심사원용 데모 계정·심사 메모(값은 **파일로만**)
+node codingpt_service/scripts/store/asc.mjs release-type after-approval --yes   # 승인되면 자동 게시
 node codingpt_service/scripts/store/asc.mjs preflight  # 제출해도 되는지 점검(무해)
 node codingpt_service/scripts/store/asc.mjs submit --yes    # 심사 제출
 node codingpt_service/scripts/store/asc.mjs cancel --yes    # 제출 철회
@@ -142,6 +145,27 @@ GCP 에서 API 활성화 + 서비스계정 생성 → Play Console 에서 사용
            → 심사 상태는 조회 불가 → 공개 페이지 버전 폴링으로 게시 확인
 [공통]   안내 버전은 자동 반영(수동 갱신 불필요) → verify-deploy.sh
 ```
+
+### 심사원용 데모 계정도 자동화된다 (2026-08-07 추가)
+
+`appStoreReviewDetail` 은 **버전에 딸린 리소스**라 새 버전을 만들면 비어 있을 수 있다 — 그래서
+릴리스마다 `review-set` 을 돌리는 것이 정상 절차다. 비밀번호는 **파일로만** 받는다(인자로 주면
+셸 히스토리·`ps` 에 남는다). 화면에는 길이만 찍는다.
+
+```json
+// demo.json  — 커밋 금지. 임시 디렉토리에 두고 쓰고 나면 지운다.
+{ "name": "demo@codingpt.app", "password": "...", "required": true }
+```
+
+제출 **전에** 데모 계정이 실제로 되는지 확인하는 것이 정본 절차다(2026-07-28 에 402 로 막혀 있던
+전례): 로그인 → `POST /api/daemon/runner/cloud/ensure` 가 **200** 이어야 한다. 이것만 확인해도
+"로그인 직후 아무것도 안 되는" 거절 사유는 거의 다 막힌다.
+
+### Play 는 `status: completed`, Apple 은 `release-type after-approval`
+
+두 스토어를 같은 규칙("승인되면 바로 게시")으로 두면 승인 뒤 사람이 누를 것이 없다. Apple 기본값은
+MANUAL 이라 승인돼도 `PENDING_DEVELOPER_RELEASE` 에서 멈춘다 — 이걸 모르면 "승인됐는데 왜 안 올라오지"
+가 된다. 심사 대기/심사 중에도 전환된다(실측).
 
 사람이 남는 것: **거절 사유 읽기와 대응**(양 스토어 모두 API 없음), Play 의 콘텐츠 등급·앱 콘텐츠
 선언(최초 1회, 이후 재사용), 그리고 Apple 배포 인증서 최초 생성(이것도 API 로 가능 — 아래).
