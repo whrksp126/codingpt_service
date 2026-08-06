@@ -570,16 +570,19 @@ const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', sideButton: 'SID
  *   "보낼 수 없는 키예요" 오류만 나온다 — 2026-08-06 실사고.)
  */
 //  순서 = 화면에 그릴 순서(왼쪽부터). 자리가 모자라면 화면이 뒤쪽부터 접는다.
-const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotate', 'volumeUp', 'volumeDown', 'power'];
-//  ★ 되는 것만 그린다(실측으로 하나씩 확인했다):
-//   · Siri — 시뮬레이터에서 뜨지 않는다.
-//   · 회전 — serve-sim 이 방향 변경을 **접수했다고 답하는데**(config 프레임까지 새로 쏜다) 화면은
-//     그대로였다(1206x2622 유지, 접근성 트리도 402x874 그대로). 되지도 않는 버튼을 그리면
-//     사용자는 기기가 멈춘 줄 안다 — 그래서 iOS 에는 회전 버튼을 두지 않는다.
+const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotateLeft', 'rotateRight', 'volumeUp', 'volumeDown', 'power'];
+//  ★ 되는 것만 그린다(실측으로 하나씩 확인했다). Siri 는 시뮬레이터에서 뜨지 않아 뺐다.
+//
+//  ★★ 회전은 **한 번 잘못 빼고 되살렸다**(2026-08-06). 처음엔 "serve-sim 이 접수했다고 답하는데
+//   화면은 그대로" 라고 판정했는데, 그 근거가 **스크린샷 픽셀 크기**였다. iOS 시뮬레이터는 회전해도
+//   프레임버퍼 크기가 1206x2622 그대로고 **내용만 돈다** — 안드로이드(1080x2400 ↔ 2400x1080)와
+//   달라서 같은 잣대를 쓴 게 틀렸다. 그림을 눈으로 보니 멀쩡히 돌아 있었다. Simulator 앱의
+//   'Rotate Left' 메뉴로 대조해도 똑같이 크기는 그대로였다(= 크기는 회전의 증거가 아니다).
 //  ★ 어떤 버튼을 그릴지는 **그 PC 에서 어느 경로가 살아 있는지**에 달렸다. idb 폴백은 볼륨을
 //   아예 못 보낸다(idb 의 버튼 어휘는 HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐) — serve-sim 이
 //   없는 기계에 볼륨 버튼을 그려 놓으면 누를 때마다 오류만 난다.
-const IOS_KEY_ROW = ['home', 'lock', 'volumeUp', 'volumeDown'];
+const IOS_KEY_ROW = ['home', 'rotateLeft', 'rotateRight', 'lock', 'volumeUp', 'volumeDown'];
+//  idb 폴백은 회전도 볼륨도 못 한다(어휘에 HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐).
 const IOS_KEY_ROW_IDB = ['home', 'lock'];
 
 /**
@@ -592,8 +595,16 @@ const TOUCH_PHASES = new Set(['begin', 'move', 'end']);
 /** 같은 단계를 scrcpy 어휘로. (iOS 는 serve-sim 이 begin/move/end 를 그대로 받는다.) */
 const TOUCH_TO_SCRCPY = { begin: 'down', move: 'move', end: 'up' };
 
-/** 시계방향 한 칸씩. serve-sim 이 쓰는 이름 그대로다(회전이 되살아나면 여기서 쓴다). */
+/**
+ * 방향 고리 — 시계방향 순서다. serve-sim 이 쓰는 이름 그대로.
+ *  ⚠ 아이폰은 `portrait_upside_down` 을 앱이 대개 거부한다(그 한 칸은 화면이 안 바뀐다).
+ *   그래서 **좌/우 두 버튼**을 준다 — 실제 시뮬레이터 메뉴(Rotate Left/Right)와 안드로이드
+ *   에뮬레이터 패널도 그렇게 두 개다. 한 버튼으로 네 방향을 돌리면 그 한 칸이 "고장" 처럼 보인다.
+ */
 const IOS_ORIENTATIONS = ['portrait', 'landscape_right', 'portrait_upside_down', 'landscape_left'];
+
+/** 회전 키 → 방향(+1=시계, -1=반시계). `rotate` 는 옛 이름(=시계)으로 계속 받는다. */
+const ROTATE_KEYS = { rotateRight: 1, rotateLeft: -1, rotate: 1 };
 
 /**
  * serve-sim HID 버튼 표.
@@ -666,7 +677,7 @@ async function inputViaScrcpy(a, p) {
     //  ★ 회전은 여기서 처리하지 않는다. scrcpy 의 ROTATE_DEVICE(11) 는 우리 서버 jar 에서
     //   **ok 를 돌려주면서 아무 일도 안 했다**(2026-08-06 실측: 1080x2400 그대로). null 을 돌려
     //   아래 adb 경로(settings user_rotation)로 보낸다 — 그쪽은 실제로 돈다.
-    if (String(a.key || '') === 'rotate') return null;
+    if (ROTATE_KEYS[String(a.key || '')]) return null;
     const code = S.KEYCODES[String(a.key || '')];
     if (code == null) return null;   // 우리가 여는 키가 아니다 — adb 경로의 검증에 맡긴다
     if (!sess.send(S.encodeKeycode({ action: 'down', keycode: code }))) return null;
@@ -738,10 +749,12 @@ async function inputViaServeSim(a, p) {
   }
   if (type === 'key') {
     const key = String(a.key || '');
-    //  회전은 버튼이 아니라 전용 메시지다. 지금 방향에서 시계방향으로 한 칸 돌린다.
-    if (key === 'rotate') {
+    //  회전은 버튼이 아니라 전용 메시지다. 지금 방향에서 한 칸 돌린다.
+    const dir = ROTATE_KEYS[key];
+    if (dir) {
+      const n = IOS_ORIENTATIONS.length;
       const cur = IOS_ORIENTATIONS.indexOf(sess.orientation);
-      const next = IOS_ORIENTATIONS[((cur < 0 ? 0 : cur) + 1) % IOS_ORIENTATIONS.length];
+      const next = IOS_ORIENTATIONS[(((cur < 0 ? 0 : cur) + dir) % n + n) % n];
       if (!sess.rotate(next)) return null;
       return { ok: true, via: 'serve-sim', orientation: next };
     }
@@ -771,11 +784,15 @@ async function input(args) {
     const adb = (rest, timeoutMs) => run(t.adb, ['-s', p.value, 'shell', ...rest], { timeoutMs: timeoutMs || 10000 });
     //  회전 폴백 — 라이브 세션이 없을 때. 자동회전을 끄고 사용자 회전값을 한 칸 돌린다
     //  (`adb emu rotate` 는 에뮬레이터에만 있어서 실기기에서 안 된다).
-    if (type === 'key' && String(a.key || '') === 'rotate') {
+    if (type === 'key' && ROTATE_KEYS[String(a.key || '')]) {
+      //  안드로이드의 user_rotation 은 **반시계** 방향으로 증가한다(0=세로, 1=왼쪽으로 눕힘).
+      //   그래서 '왼쪽으로 회전' 이 +1 이다 — 화면에 그리는 방향과 값이 반대라 헷갈리는 자리다.
+      const dir = ROTATE_KEYS[String(a.key || '')] === -1 ? 1 : -1;
       const cur = Number(String(await adb(['settings', 'get', 'system', 'user_rotation'])).trim()) || 0;
+      const next = ((cur + dir) % 4 + 4) % 4;
       await adb(['settings', 'put', 'system', 'accelerometer_rotation', '0']);
-      await adb(['settings', 'put', 'system', 'user_rotation', String((cur + 1) % 4)]);
-      return { ok: true, rotation: (cur + 1) % 4 };
+      await adb(['settings', 'put', 'system', 'user_rotation', String(next)]);
+      return { ok: true, rotation: next };
     }
     if (type === 'tap' || type === 'longPress') {
       const s = await screenSize(a.id, p);
@@ -1073,5 +1090,5 @@ module.exports = {
   _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   _idbReady: idbReady, _idbEnv: idbEnv,
   _normalizeIosAx: normalizeIosAx, _parseAndroidAx: parseAndroidAx,
-  ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW, IOS_KEY_ROW_IDB,
+  ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW, IOS_KEY_ROW_IDB, ROTATE_KEYS,
 };

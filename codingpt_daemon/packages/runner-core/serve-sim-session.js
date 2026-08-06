@@ -175,6 +175,16 @@ class ServeSimSession {
     this.configPacket = null;
     /** 헬퍼가 알려 준 화면 크기·방향(WS 태그 130). 좌표는 정규화라 표시용이다. */
     this.orientation = 'portrait';
+    /**
+     * 그 방향을 **믿어도 되는가**.
+     *
+     * ★ serve-sim 헬퍼는 새로 뜰 때 무조건 'portrait' 로 시작한다 — 기기에 지금 방향을 묻지 않는다.
+     *  그래서 이미 눕혀 놓은 기기에 새로 붙으면 "세로" 라고 **틀리게** 말한다(실측). 화면이 그 말을
+     *  믿고 그리면 눕힌 채로 보인다. 우리가 직접 돌렸을 때만 참으로 친다.
+     *  (접근성 트리로 가로/세로는 알 수 있지만 **좌/우 어느 쪽인지는 알 수 없다** — 반만 아는 값으로
+     *   찍으면 절반은 위아래가 뒤집힌다. 모르면 모른다고 두는 편이 낫다.)
+     */
+    this.orientationKnown = false;
   }
 
   static async start(opts, cb) {
@@ -187,6 +197,7 @@ class ServeSimSession {
       //  ★ 크기를 모르는 채로 돌려주면 안 된다. 화면은 이 값으로 캔버스를 잡고 좌표를 환산한다 —
       //   0 을 받으면 첫 프레임이 올 때까지 아무것도 못 그린다(실측: streamStart 가 0x0 을 반환).
       await s._waitMeta();
+      await s._syncOrientation();
     } catch (e) {
       s.close();
       throw e;
@@ -266,6 +277,31 @@ class ServeSimSession {
       this.meta = { codec: 'h264', width: j.width, height: j.height };
       try { this.cb.onMeta?.(this.meta); } catch (_) { /* noop */ }
     }
+  }
+
+  /**
+   * 헬퍼가 말하는 방향을 **기기의 진짜 방향과 맞춘다.**
+   *
+   * ★ 왜(2026-08-06 실측): 새로 뜬 serve-sim 헬퍼는 기기에 방향을 묻지 않고 무조건 'portrait' 로
+   *  시작한다. 이미 눕혀 둔 기기에 붙으면 헬퍼도 우리도 "세로" 라고 믿는데 화면은 누워 있고,
+   *  그 상태에서 회전 버튼을 누르면 **180도 어긋난 그림**이 나온다(위아래가 뒤집힌다 — 실제로 봤다).
+   *
+   * 접근성 트리는 진짜를 안다(눕혀 두면 874x402 로 보고한다). 다만 **좌/우 어느 쪽인지는 모른다** —
+   *  그래서 누워 있으면 세로로 한 번 세워 **양쪽이 아는 상태**로 맞춘다. 기기 상태를 건드리는
+   *  일이지만, 대안은 "화면이 뒤집혀 보이는데 이유를 알 수 없는" 것이라 이쪽이 낫다.
+   */
+  async _syncOrientation() {
+    let landscape = false;
+    try {
+      const raw = await this.axJson();
+      const roots = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+      const f = roots[0] && roots[0].frame;
+      if (!f || !(f.width > 0) || !(f.height > 0)) return;   // 못 읽으면 아무것도 단정하지 않는다
+      landscape = f.width > f.height;
+    } catch (_) { return; }
+    if (this.closed) return;
+    if (landscape) this.rotate('portrait');       // rotate 가 orientationKnown 을 세운다
+    else { this.orientation = 'portrait'; this.orientationKnown = true; }
   }
 
   /** 접근성 트리(원본 JSON) — 화면을 "글자"로 읽는 유일한 길이다. */
@@ -377,7 +413,11 @@ class ServeSimSession {
     if (!o || !o.button) return false;
     return this._sendControl(WS_TAG.BUTTON, o);
   }
-  rotate(orientation) { return this._sendControl(WS_TAG.ROTATE, { orientation }); }
+  rotate(orientation) {
+    const ok = this._sendControl(WS_TAG.ROTATE, { orientation });
+    if (ok) this.orientationKnown = true;      // 우리가 돌렸으니 이제 안다
+    return ok;
+  }
 
   _fail(msg) {
     if (this.closed) return;

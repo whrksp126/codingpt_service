@@ -183,5 +183,31 @@ for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
   ok(/type:\s*['"]swipe['"]/.test(src), `${name} 에 레거시 swipe 폴백이 남아 있다`);
 }
 
+
+// ── 10. pane 종류를 손으로 나열한 자리가 없어야 한다 ────────────────────────
+// ★ 2026-08-06 실사고(두 번째): 드롭 **처리**는 TAB_KINDS 로 고쳤는데 드롭 **판정/미리보기** 만
+//  `ide || preview` 로 남아 있었다. 그래서 모바일 화면 pane 은 탭바에 대도 삽입선이 안 뜨고
+//  가장자리 분할로 처리됐다 — "고쳐서 잘 되던 게 갑자기 이상해졌다" 의 정체.
+//  종류를 늘릴 때 빠뜨릴 자리가 없게, 나열 자체를 금지한다.
+const wsView = read(path.join(PC, 'workspace-view.js'));
+const enumLeft = wsView.split('\n')
+  .map((l, i) => [i + 1, l])
+  .filter(([, l]) => /kind === ['"]ide['"]\s*\|\|[^\n]*kind === ['"]preview['"]/.test(l));
+ok(enumLeft.length === 0,
+  'PC 드래그 판정에 종류를 손으로 나열한 자리가 없다',
+  enumLeft.map(([n, l]) => `${n}: ${l.trim()}`).join(' / '));
+
+const appWs = read(path.join(APP, 'workspace/WorkspaceView.tsx'));
+const enumLeftApp = appWs.split('\n')
+  .map((l, i) => [i + 1, l])
+  .filter(([, l]) => /kind === ['"]ide['"]\s*\|\|[^\n]*kind === ['"]preview['"]/.test(l));
+ok(enumLeftApp.length === 0,
+  '앱 드래그 판정에도 종류를 손으로 나열한 자리가 없다',
+  enumLeftApp.map(([n, l]) => `${n}: ${l.trim()}`).join(' / '));
+
+// 탭 제목 = 기기명(양쪽) — 탭이 여러 개일 때 어느 게 어느 기기인지 알 수 있어야 한다.
+ok(/metaName/.test(read(path.join(PC, 'pane.js'))), 'PC 탭 제목이 기기명(metaName)을 쓴다');
+ok(/metaName/.test(read(path.join(APP, 'workspace/PaneView.tsx'))), '앱 탭 제목도 기기명을 쓴다');
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

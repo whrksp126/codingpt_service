@@ -244,12 +244,18 @@ function beginTabDrag(srcId, index, e) {
     const headR = head ? head.getBoundingClientRect() : null;
     const headH = headR ? headR.height : 0;
     // 탭바 위 = 순서 재배치/편입. 삽입 위치 라인 표시.
-    //  IDE/프리뷰 pane 통째 드래그도 다른 pane 탭바에 놓으면 "탭"으로 편입(혼합 탭).
-    //  대상: 터미널 pane(join) + IDE/프리뷰 pane(merge — 탭 host 로 승격). 단 자기 자신 제외.
+    //  pane 통째 드래그도 다른 pane 탭바에 놓으면 "탭"으로 편입(혼합 탭).
+    //  대상: 터미널 pane(join) + 탭이 될 수 있는 pane(merge — 탭 host 로 승격). 단 자기 자신 제외.
+    //
+    //  ★ 여기서도 **종류를 나열하지 않는다**(2026-08-06 실사고). 드롭 처리(onUp)는 이미 `TAB_KINDS`
+    //   로 고쳤는데 **이 판정만** `ide || preview` 로 남아 있었다. 그래서 모바일 화면 pane 은
+    //   탭바에 대도 삽입선이 안 뜨고(=탭바 드롭이 아예 성립 안 함) 가장자리 분할로 처리됐다 —
+    //   "고쳐서 잘 되던 게 갑자기 이상해졌다" 의 정체. 판정의 정본은 `TAB_KINDS` 하나다.
     const targetLeaf = T.findLeaf(rt.layout, paneId);
+    const canBeTab = (leaf) => !!leaf && (leaf.kind === "terminal" || T.TAB_KINDS.includes(leaf.kind));
     const termTabbar = !wholePane && targetLeaf && targetLeaf.kind === "terminal";
-    const mergeTabbar = wholePane && (src.kind === "ide" || src.kind === "preview") &&
-      targetLeaf && paneId !== srcId && (targetLeaf.kind === "terminal" || targetLeaf.kind === "ide" || targetLeaf.kind === "preview");
+    const mergeTabbar = wholePane && T.TAB_KINDS.includes(src.kind)
+      && targetLeaf && paneId !== srcId && canBeTab(targetLeaf);
     if ((termTabbar || mergeTabbar) && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom) {
       const tabsRegion = pane.querySelector(".pane-tabs");
       // 끝단 자동 스크롤 판정 — 넘친 탭바에서만, 좌/우 36px 밴드.
@@ -339,7 +345,7 @@ function beginTabDrag(srcId, index, e) {
           tl && (drop.zone === "tabbar" || drop.zone === "center");
         if (mergeable && tl.kind === "terminal") {
           joinPaneAsTab(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
-        } else if (mergeable && (tl.kind === "ide" || tl.kind === "preview")) {
+        } else if (mergeable && T.TAB_KINDS.includes(tl.kind)) {
           mergeAsTabs(srcId, drop.paneId, drop.zone === "tabbar" ? drop.index : undefined);
         } else if (drop.paneId !== srcId) {
           // 가운데 = 스왑, 가장자리 = 그 방향 분할 이동.
@@ -393,10 +399,11 @@ function displayDrop(layout, src, wholePane, srcId, drop) {
     //  다중 탭 pane 의 가장자리는 실제 분할이므로 그대로.
     if (wholePane || singleTab) zone = "center";
   } else if (wholePane) {
-    // IDE/프리뷰 pane 을 다른 pane 가운데 = 탭 편입/병합(src 제거), 자기 자신 가운데 = 스왑(유지),
-    //  가장자리 = movePane(src 제거 후 분할). 대상 종류(터미널/IDE/프리뷰) 무관하게 병합은 src 제거.
-    const join = (src.kind === "ide" || src.kind === "preview") &&
-      (dstLeaf.kind === "terminal" || dstLeaf.kind === "ide" || dstLeaf.kind === "preview") && zone === "center";
+    //  탭이 될 수 있는 pane 을 다른 pane 가운데 = 탭 편입/병합(src 제거), 자기 자신 가운데 = 스왑(유지),
+    //  가장자리 = movePane(src 제거 후 분할). 대상 종류와 무관하게 병합은 src 제거.
+    //  ★ 종류 나열 금지 — 여기가 어긋나면 **드롭 미리보기만** 틀려서(실제 동작은 맞는데) 더 헷갈린다.
+    const join = T.TAB_KINDS.includes(src.kind)
+      && (dstLeaf.kind === "terminal" || T.TAB_KINDS.includes(dstLeaf.kind)) && zone === "center";
     removed = join || zone !== "center";
   } else {
     // 터미널 pane 의 탭 드래그: 비터미널 pane 가운데는 이동 불가(no-op) → 숨김.
@@ -711,12 +718,12 @@ export function openSurfaces() {
   T.eachLeaf(rt.layout, (leaf) => {
     if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
     if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || i18n.t('프리뷰') }); return; }
-    if (leaf.kind === "emulator") { out.push({ paneId: leaf.id, index: -1, kind: "emulator", label: i18n.t('모바일 화면') }); return; }
+    if (leaf.kind === "emulator") { out.push({ paneId: leaf.id, index: -1, kind: "emulator", label: leaf.metaName || i18n.t('모바일 화면') }); return; }
     (leaf.tabs || []).forEach((t, i) => {
       const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : t.kind === "emulator" ? "emulator" : "terminal";
       const label = kind === "terminal" ? termTabLabel(t)
         : kind === "ide" ? "IDE"
-          : kind === "emulator" ? i18n.t('모바일 화면') : (t.url || i18n.t('프리뷰'));
+          : kind === "emulator" ? (t.metaName || i18n.t('모바일 화면')) : (t.url || i18n.t('프리뷰'));
       out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });
     });
   });

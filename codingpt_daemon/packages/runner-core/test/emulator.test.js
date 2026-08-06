@@ -277,8 +277,9 @@ test('idb 호출은 전부 idbRun 을 거친다(맨손 run(t.idb) 금지)', () =
 test('★ iOS 버튼줄에 안드로이드 전용 키가 없다(누를 때마다 오류만 났다)', () => {
   const emu = require('../emulator');
   //  serve-sim 이 있는 기계의 버튼줄 — 그 경로로 전부 보낼 수 있어야 한다.
+  //  회전은 버튼(HID)이 아니라 전용 메시지라 버튼 표가 아닌 ROTATE_KEYS 에 있다.
   for (const k of emu.IOS_KEY_ROW) {
-    assert.ok(emu.IOS_SS_BUTTONS[k], `iOS 버튼줄의 ${k} 를 serve-sim 으로 못 보낸다`);
+    assert.ok(emu.IOS_SS_BUTTONS[k] || emu.ROTATE_KEYS[k], `iOS 버튼줄의 ${k} 를 serve-sim 으로 못 보낸다`);
   }
   //  ★ idb 폴백만 있는 기계는 **줄이 더 짧다.** idb 의 버튼 어휘에는 볼륨이 아예 없어서
   //   같은 줄을 그리면 누를 때마다 오류만 난다(2026-08-06 테스트가 잡아낸 결함).
@@ -288,9 +289,8 @@ test('★ iOS 버튼줄에 안드로이드 전용 키가 없다(누를 때마다
   assert.ok(emu.IOS_KEY_ROW_IDB.length <= emu.IOS_KEY_ROW.length);
   assert.ok(!emu.IOS_KEY_ROW.includes('back') && !emu.IOS_KEY_ROW.includes('recents'));
   //  회전은 키코드가 아니라 전용 처리다(settings user_rotation) — 그래서 KEYCODE 표에 없다.
-  const SPECIAL = new Set(['rotate']);
   for (const k of emu.ANDROID_KEY_ROW) {
-    assert.ok(emu.ANDROID_KEYS[k] || SPECIAL.has(k), `안드로이드 버튼줄의 ${k} 를 보낼 방법이 없다`);
+    assert.ok(emu.ANDROID_KEYS[k] || emu.ROTATE_KEYS[k], `안드로이드 버튼줄의 ${k} 를 보낼 방법이 없다`);
   }
 });
 
@@ -427,4 +427,16 @@ test('★ 안드로이드 uiautomator 덤프에서 라벨과 사각형을 뽑는
 test('덤프가 쓰레기면 요소를 지어내지 않는다', () => {
   const emu = require('../emulator');
   assert.deepEqual(emu._parseAndroidAx('망가진 출력'), { screen: { w: 0, h: 0 }, elements: [] });
+});
+
+// ── 회전은 좌/우 두 개다 ────────────────────────────────────────────────────
+// ★ 2026-08-06: 한 버튼으로 네 방향을 도는 방식은 아이폰에서 **한 칸이 무동작**으로 보인다
+//  (앱이 portrait_upside_down 을 대개 거부한다). 실제 시뮬레이터 메뉴도 Rotate Left/Right 둘이다.
+test('★ 회전은 좌/우가 서로 반대 방향이다', () => {
+  const emu = require('../emulator');
+  assert.equal(emu.ROTATE_KEYS.rotateLeft, -emu.ROTATE_KEYS.rotateRight);
+  assert.equal(emu.ROTATE_KEYS.rotate, emu.ROTATE_KEYS.rotateRight, '옛 이름은 시계방향으로 계속 받는다');
+  for (const row of [emu.IOS_KEY_ROW, emu.ANDROID_KEY_ROW]) {
+    assert.ok(row.includes('rotateLeft') && row.includes('rotateRight'), '버튼줄에 좌/우가 둘 다 있다');
+  }
 });

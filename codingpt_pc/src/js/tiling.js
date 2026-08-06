@@ -55,7 +55,9 @@ export function leafToTab(leaf) {
     //  표면 ID 승계: 기존 "pv-"+(tid||id) webview 를 그대로 넘긴다(dispose 가 보존한다).
     return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav };
   }
-  if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, tid: newPaneId() };
+  //  metaName = 탭 제목에 쓰는 기기 이름. 안 넘기면 다른 pane 으로 옮기는 순간 제목이 "모바일 화면"
+  //   으로 되돌아간다(프리뷰의 metaTitle 과 같은 이유로 왕복 보존한다).
+  if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, metaName: leaf.metaName || "", tid: newPaneId() };
   return null;
 }
 
@@ -67,7 +69,7 @@ export function tabToLeaf(tab, id) {
   if (tab.kind === "preview") {
     return { id: paneId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav };
   }
-  if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null };
+  if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null, metaName: tab.metaName || "" };
   return null;
 }
 

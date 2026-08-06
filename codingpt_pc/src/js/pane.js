@@ -118,7 +118,9 @@ function b64ToBytes(b64) {
  */
 export function surfaceLabel(kind, node) {
   if (kind === "ide") return "IDE";
-  if (kind === "emulator") return i18n.t('모바일 화면');
+  //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
+  //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
+  if (kind === "emulator") return (node && node.metaName) || i18n.t('모바일 화면');
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
 export function surfaceIcon(kind) {
@@ -699,7 +701,7 @@ export class PaneView {
         const label = isT
           ? termTabLabel(t)
           : t.kind === "ide" ? "IDE"
-            : t.kind === "emulator" ? i18n.t('모바일 화면')
+            : t.kind === "emulator" ? (t.metaName || i18n.t('모바일 화면'))
               : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
@@ -1033,7 +1035,12 @@ export class PaneView {
       if (this._disposed) return;
       this.emu = new m.EmulatorView(this.body, {
         deviceId: this.node.deviceId || null,
-        onDeviceChange: (id) => { this.node.deviceId = id; this.ctx.persist?.(); },
+        onDeviceChange: (id, name) => {
+          this.node.deviceId = id;
+          this.node.metaName = name || "";
+          this.ctx.persist?.();
+          this.buildHead();               // 탭 제목이 곧 기기명 — 고른 즉시 반영한다
+        },
       });
     }).catch(() => { /* 모듈 로드 실패 = 화면이 비어 있을 뿐 — pane 전체를 죽이지 않는다 */ });
   }
@@ -1358,7 +1365,12 @@ export class PaneView {
         if (!this._mixed.has(tab.tid)) return;   // 그 사이 닫혔다
         m.emu = new mod.EmulatorView(host, {
           deviceId: tab.deviceId || null,
-          onDeviceChange: (id) => { tab.deviceId = id; this.ctx.persist?.(); },
+          onDeviceChange: (id, name) => {
+            tab.deviceId = id;
+            tab.metaName = name || "";
+            this.ctx.persist?.();
+            this.buildHead();
+          },
         });
         m.emu.setVisible(host.style.display !== "none");
       }).catch(() => { /* 모듈 로드 실패 = 탭이 비어 있을 뿐 — pane 전체를 죽이지 않는다 */ });

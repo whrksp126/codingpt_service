@@ -45,11 +45,12 @@ const EMU_KEYS = {
   back: { icon: 'navBack', title: '뒤로' },
   home: { icon: 'navHome', title: '홈' },
   recents: { icon: 'navRecents', title: '최근 앱' },
-  rotate: { icon: 'rotateDevice', title: '화면 회전' },
+  rotateLeft: { icon: 'rotateLeft', title: '왼쪽으로 회전' },
+  rotateRight: { icon: 'rotateRight', title: '오른쪽으로 회전' },
   volumeUp: { icon: 'volumeUp', title: '볼륨 올리기' },
   volumeDown: { icon: 'volumeDown', title: '볼륨 내리기' },
-  power: { icon: 'devicePower', title: '기기 전원(화면)' },
-  lock: { icon: 'devicePower', title: '잠금(화면)' },
+  power: { icon: 'devicePower', title: '기기 전원(화면 켜기/끄기)' },
+  lock: { icon: 'devicePower', title: '잠금(화면 끄기)' },
 };
 
 /** 이 웹뷰가 H.264 를 풀 수 있는가 — 없으면 조용히 폴링으로 돌아간다(빈 화면 금지). */
@@ -60,7 +61,7 @@ function canDecodeVideo() {
 export class EmulatorView {
   /**
    * @param {HTMLElement} host  본문 컨테이너
-   * @param {{ deviceId: string|null, onDeviceChange: (id: string|null) => void }} opts
+   * @param {{ deviceId: string|null, onDeviceChange: (id: string|null, name: string) => void }} opts
    */
   constructor(host, opts = {}) {
     this.host = host;
@@ -92,6 +93,15 @@ export class EmulatorView {
     this.configBytes = null;
     this.sawKeyFrame = false;
     this.videoOn = false;    // 지금 영상으로 보고 있는가(폴링과 배타)
+    /**
+     * 보여 줄 때 돌려야 하는 각도(0/90/180/270).
+     *
+     * ★ 왜 필요한가: iOS 시뮬레이터는 **회전해도 프레임버퍼가 세로 그대로**고 내용만 눕는다
+     *  (안드로이드는 인코딩 크기 자체가 바뀌어 이게 필요 없다). 그대로 그리면 세로 액자 안에
+     *  옆으로 누운 화면이 들어앉는다 — Orca 도 같은 이유로 스트림을 CSS 로 되돌린다.
+     *  ⚠ 그림을 돌리면 **입력 좌표도 같이 돌려야 한다**(안 그러면 회전 뒤 엉뚱한 데가 눌린다).
+     */
+    this.visualRot = 0;
 
     this.el = document.createElement("div");
     this.el.className = "emu";
@@ -142,6 +152,8 @@ export class EmulatorView {
         if (hit.id !== this.deviceId) { this.select(hit.id); return; }
       }
     }
+    //  ★ 복원 직후에는 id 만 있고 이름은 목록을 받아야 안다 — 알게 된 그 순간 탭 제목에 올린다.
+    if (this.deviceId && this.deviceName()) this.onDeviceChange(this.deviceId, this.deviceName());
     this.render();
     this.ensureLoop();
   }
@@ -165,14 +177,21 @@ export class EmulatorView {
 
   device() { return (this.devices || []).find((d) => d.id === this.deviceId) || null; }
 
+  /** 사람이 읽는 기기 이름. 목록을 아직 못 받았으면 빈 문자열(추측한 이름을 탭에 박지 않는다). */
+  deviceName() { const d = this.device(); return d ? d.name : ""; }
+
   select(id) {
     this.stopVideo();               // 기기를 바꾸면 이전 기기의 인코더를 반드시 끈다
     this.deviceId = id;
     this.frameUrl = null;
     this.frameAspect = null;
     this.videoNote = '';
+    this.visualRot = 0;             // 기기를 바꾸면 표시 회전도 처음으로
     this.lastTouch = Date.now();
-    this.onDeviceChange(id);
+    //  ★ 이름까지 같이 올린다 — 탭 제목이 기기명이 되어야 어느 탭이 어느 기기인지 한눈에 보인다
+    //   (id 는 `ios:8B21…` 라 사람이 읽을 수 없다). 목록을 아직 못 받았으면 빈 문자열 →
+    //   목록이 들어온 뒤 render 에서 다시 올린다.
+    this.onDeviceChange(id, this.deviceName());
     this.render();
     //  영상이 붙으면 폴링은 시작도 안 한다. 안 붙으면 그때 폴링을 돈다.
     if (id) void this.startVideo().then((ok) => { if (!ok && !this.disposed) this.ensureLoop(); });
@@ -196,6 +215,8 @@ export class EmulatorView {
     this.stream = info;
     this.videoNote = '';
     this.videoOn = true;
+    //  ★ 이미 눕혀 놓은 기기에 붙었을 수도 있다 — 데몬이 알려 준 지금 방향으로 시작한다.
+    if (typeof info.orientation === 'string') this.visualRot = EmulatorView.rotForOrientation(info.orientation);
     this.frameAspect = info.width && info.height ? info.width / info.height : this.frameAspect;
     this.render();                       // <img> → <canvas> 로 갈아끼운다
     this.openVideoSocket();
@@ -339,6 +360,43 @@ export class EmulatorView {
     return Math.max(360, Math.min(1200, Math.round(css * dpr) || 480));
   }
 
+  /** iOS 방향 이름 → 보여 줄 때 돌릴 각도. 세로 프레임버퍼 안에 누운 내용을 되돌린다. */
+  static rotForOrientation(o) {
+    //  ★ 부호는 실측으로 정했다(2026-08-06): landscape_right 에 +90 을 주면 **위아래가 뒤집혀**
+    //   보였다. 세로 프레임버퍼 안에 누운 내용을 되돌리는 방향이라 직관과 반대다.
+    if (o === 'landscape_right') return 270;
+    if (o === 'landscape_left') return 90;
+    if (o === 'portrait_upside_down') return 180;
+    return 0;
+  }
+
+  /** 표시 회전을 화면에 반영한다(그림 + 액자 비율). */
+  applyVisualRot() {
+    const el = this.canvasEl || this.imgEl;
+    if (!el) return;
+    const deg = this.visualRot % 360;
+    el.style.transform = deg ? `rotate(${deg}deg)` : "";
+    //  90/270 도면 액자의 가로세로가 바뀐다 — 안 바꾸면 돌린 그림이 액자 밖으로 나간다.
+    el.style.width = "100%";
+    el.style.height = "100%";
+    if (deg === 90 || deg === 270) {
+      const st = this.el.querySelector(".emu-stage");
+      if (st) {
+        const r = st.getBoundingClientRect();
+        //  회전 전 기준으로 폭/높이를 맞바꿔 둔다(transform 은 레이아웃을 안 바꾼다).
+        el.style.width = r.height + "px";
+        el.style.height = r.width + "px";
+        el.style.position = "absolute";
+        el.style.left = `${(r.width - r.height) / 2}px`;
+        el.style.top = `${(r.height - r.width) / 2}px`;
+      }
+    } else {
+      el.style.position = "";
+      el.style.left = "";
+      el.style.top = "";
+    }
+  }
+
   /** 화면 좌표 → 0~1. `object-fit: contain` 의 **여백을 빼고** 계산한다. */
   ratioOf(ev) {
     const img = this.imgEl || this.canvasEl;
@@ -355,6 +413,12 @@ export class EmulatorView {
     const x = (ev.clientX - ox) / dw;
     const y = (ev.clientY - oy) / dh;
     if (x < 0 || x > 1 || y < 0 || y > 1) return null;   // 여백을 눌렀다 — 기기 밖이다
+    //  ★ 그림을 돌려 보여 주고 있으면 **좌표도 같은 만큼 되돌려** 기기 좌표계로 옮긴다.
+    //   안 하면 회전 직후부터 누르는 곳과 눌리는 곳이 어긋난다(그리고 그건 조용한 실패다).
+    const deg = ((this.visualRot % 360) + 360) % 360;
+    if (deg === 90) return { x: y, y: 1 - x };
+    if (deg === 180) return { x: 1 - x, y: 1 - y };
+    if (deg === 270) return { x: 1 - y, y: x };
     return { x, y };
   }
 
@@ -368,8 +432,11 @@ export class EmulatorView {
     const cv = this.canvasEl;
     const vs = this.videoOn && cv && cv.width && cv.height
       ? { videoWidth: cv.width, videoHeight: cv.height } : {};
-    try { await api.emulatorInput({ id: this.deviceId, ...vs, ...body }); this.err = null; return true; }
-    catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); return false; }
+    try {
+      const r = await api.emulatorInput({ id: this.deviceId, ...vs, ...body });
+      this.err = null;
+      return r || true;
+    } catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); return false; }
   }
 
   async power(action, target) {
@@ -392,6 +459,8 @@ export class EmulatorView {
   paintFrame() {
     if (this.imgEl && this.frameUrl) this.imgEl.src = this.frameUrl;
     if (this.errEl) this.errEl.textContent = "";
+    //  폴링으로 떨어져도 회전은 유지돼야 한다 — 영상이 끊긴 순간 화면이 갑자기 옆으로 눕지 않게.
+    if (this.visualRot) this.applyVisualRot();
   }
 
   paintError() {
@@ -465,10 +534,11 @@ export class EmulatorView {
 
     const bar = document.createElement("div");
     bar.className = "emu-bar";
+    //  ★ 기기 이름은 **탭 제목**이 말한다(2026-08-06 사용자 확정) — 여기 또 쓰면 같은 글자가
+    //   두 줄에 겹쳐 조작 버튼 자리만 먹는다. 목록으로 돌아가는 길은 남겨야 하므로 아이콘만 둔다.
     const back = document.createElement("button");
     back.className = "emu-bar-name";
-    back.innerHTML = `${icons.smartphone({ size: 13 })}<span></span>`;
-    back.querySelector("span").textContent = dev ? dev.name : this.deviceId;
+    back.innerHTML = icons.smartphone({ size: 13 });
     back.title = i18n.t('기기 목록으로');
     back.addEventListener("click", () => this.select(null));
     const pw = document.createElement("button");
@@ -489,7 +559,15 @@ export class EmulatorView {
         b.className = "emu-bar-btn emu-key";
         b.innerHTML = icons[spec.icon]({ size: 14 });
         b.title = i18n.t(spec.title);
-        b.addEventListener("click", () => this.send({ type: "key", key: k }));
+        b.addEventListener("click", async () => {
+          const r = await this.send({ type: "key", key: k });
+          //  ★ iOS 는 회전해도 프레임버퍼가 그대로라 **우리가 돌려 그려야** 한다(위 visualRot 주석).
+          //   안드로이드는 인코딩 크기 자체가 바뀌므로 여기서 아무것도 안 한다.
+          if (r && typeof r === "object" && typeof r.orientation === "string") {
+            this.visualRot = EmulatorView.rotForOrientation(r.orientation);
+            this.applyVisualRot();
+          }
+        });
         keys.appendChild(b);
       }
       bar.appendChild(keys);
@@ -578,6 +656,8 @@ export class EmulatorView {
     }
 
     this.el.append(bar, stage);
+    //  render 는 <canvas>/<img> 를 새로 만든다 — 표시 회전은 그 위에 다시 얹어야 한다.
+    if (this.visualRot) setTimeout(() => this.applyVisualRot(), 0);
     //  폴링으로 돌아갔으면 **왜** 인지 한 줄로 적는다(느린 이유를 사용자가 짐작하게 두지 않는다).
     if (this.videoNote) {
       const note = document.createElement("div");

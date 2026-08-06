@@ -204,6 +204,11 @@ function descriptor(entry, port) {
     width: entry.meta ? entry.meta.width : 0,
     height: entry.meta ? entry.meta.height : 0,
     codec: entry.meta ? entry.meta.codec : 'h264',
+    //  ★ 지금 기기가 어느 방향인가 — **아는 경우에만** 싣는다. serve-sim 헬퍼는 새로 뜰 때
+    //   무조건 'portrait' 라고 말하므로(기기에 묻지 않는다) 그걸 그대로 넘기면 이미 눕혀 둔 기기에서
+    //   화면이 거짓말을 믿게 된다. 모르면 필드를 아예 빼서 화면이 "안 돌린 상태" 로 두게 한다.
+    //   안드로이드는 인코딩 크기 자체가 바뀌므로 이 값이 애초에 없다.
+    orientation: entry.session && entry.session.orientationKnown ? entry.session.orientation : undefined,
   };
 }
 
