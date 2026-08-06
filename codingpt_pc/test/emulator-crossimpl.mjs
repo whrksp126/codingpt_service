@@ -302,11 +302,16 @@ const appUiCtl = read(path.join(APP, 'workspace/uiControls.ts'));
 const pcDesign = read(path.join(PC, 'design-pick.js'));
 //  ① 판단은 **한 곳에만** 있다(캡처가 늘 때마다 같은 분기를 복제하지 않게).
 ok(/export function insertAttachment/.test(pcAttach), 'PC 에 삽입 판단 한 곳(attach-insert)');
-ok(/export function insertAttachment/.test(appUiCtl), '앱에도 같은 이름의 한 곳(uiControls)');
+ok(/export async function insertAttachment/.test(appUiCtl), '앱에도 같은 이름의 한 곳(uiControls)');
 //  ② 채팅으로 보고 있으면 채팅으로 간다.
-ok(/_chatActive\(\)/.test(pcAttach) && /attachWithText/.test(pcAttach), 'PC 가 채팅 모드면 채팅 컴포저로');
+ok(/tab\.mode === "chat"/.test(pcAttach) && /attachWithText/.test(pcAttach), 'PC 가 채팅 모드면 채팅 컴포저로');
 ok(/chatKey/.test(appUiCtl) && /getChatAttach/.test(appUiCtl), '앱이 채팅 모드면 채팅 컴포저로');
 ok(/attachWithText\(text, paths\)/.test(read(path.join(PC, 'chat-view.js'))), 'PC 채팅 뷰에 첨부 창구가 있다');
+//  ★ 혼합 탭 규칙: 활성 탭이 터미널이 아니면(폰에서 모바일 화면은 터미널 pane 의 **탭**이다)
+//   터미널 탭을 앞으로 끌어온 뒤 그 탭의 모드로 판정한다. 안 하면 캡처가 늘 TUI 로 떨어진다.
+ok(/ensureTermTab/.test(pcAttach), 'PC 가 터미널 탭을 앞으로 끌어온다');
+ok(/prepare\?\.\(\)/.test(appUiCtl) && /prepare: \(\) =>/.test(appPane), '앱도 터미널 탭을 앞으로 끌어온다');
+ok(/n\.tabs\.find\(isTermTab\)/.test(appPane), '앱 채팅 판정이 활성 탭이 아닌 **터미널 탭** 기준이다');
 //  ③ 두 캡처(모바일 화면·프리뷰 요소)가 **같은 길**을 쓴다 — 한쪽만 고쳐지는 일을 막는다.
 ok(/insertAttachment\(/.test(pcView), 'PC 모바일 화면 캡처가 그 길을 쓴다');
 ok(/insertAttachment\(/.test(pcDesign), 'PC 프리뷰 요소 캡처도 같은 길');

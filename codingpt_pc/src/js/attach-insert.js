@@ -37,10 +37,14 @@ export function findTermPane() {
 export function insertAttachment({ text, path, line }) {
   const pane = findTermPane();
   if (!pane) return null;
-  if (pane._chatActive && pane._chatActive()) {
+  //  ★ 활성 탭이 터미널이 아니면(모바일 화면·IDE·프리뷰 탭) 터미널 탭을 앞으로 끌어온다 —
+  //   들어간 곳이 눈에 보여야 하고, "지금 보고 있는 방식" 판정도 그 탭 기준이어야 한다.
+  const tab = ensureTermTab(pane);
+  if (tab && tab.mode === "chat") {
     //  채팅 뷰는 첫 진입 때 lazy 생성이라, 아직 없으면 여기서 만든다(안 만들면 조용히 아무 일도 안 난다).
     const chat = pane._ensureChat ? pane._ensureChat() : pane.chat;
     if (chat && chat.attachWithText) {
+      chat.retarget?.();                 // 활성 터미널 탭이 바뀌었으면 그 대화로
       chat.attachWithText(text, [path]);
       pane.ctx?.onFocus?.(pane.id);
       return "chat";
@@ -50,6 +54,21 @@ export function insertAttachment({ text, path, line }) {
   pane.ctx?.onFocus?.(pane.id);
   pane.focus();
   return "tui";
+}
+
+/** 이 pane 의 터미널 탭을 활성으로 — 이미 터미널이면 그대로. 터미널 탭이 없으면 null. */
+function ensureTermTab(pane) {
+  const n = pane.node;
+  if (!n || n.kind !== "terminal") return null;
+  const tabs = n.tabs || [];
+  if (isTermTab(tabs[n.active])) return tabs[n.active];
+  const i = tabs.findIndex(isTermTab);
+  if (i < 0) return null;
+  n.active = i;
+  pane.buildHead?.();
+  pane.showActiveTab?.();
+  pane.ctx?.persist?.();
+  return tabs[i];
 }
 
 /** 첨부 파일명 규칙 — `<prefix><yyyymmdd-hhmmss>-<rand4>.<ext>` (두 캡처 경로가 같은 규칙을 쓴다). */
