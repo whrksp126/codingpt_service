@@ -239,6 +239,17 @@ test('★ LAN 직결과 릴레이는 같은 바이트를 낸다(meta 한 줄 + [
   // ★ 릴레이(ws) 가 받은 것과 LAN 이 받은 것이 **같아야** 한다.
   assert.deepEqual(wsOut.map((b) => b.toString('hex')), lanBins.map((b) => b.toString('hex')));
 
+  // ★ 뒤늦게 붙는 시청자에게 되감아 주는 GOP 는 **마지막 한 장만 그리라고** 표시해서 보낸다.
+  //  안 그러면 방금 지나간 몇 초가 빨리감기로 재생된다("탭 갔다 오면 화면이 저절로 움직인다").
+  entry.gop = [[stream.FLAG_KEY, KEY], [0, DELTA], [0, DELTA]];
+  const lateOut = [];
+  stream.attach(entry, {
+    alive: () => true, backlog: () => 0, write: (b) => lateOut.push(Buffer.from(b)), close: () => {},
+  });
+  assert.deepEqual(lateOut.map((b) => b[0]),
+    [stream.FLAG_CONFIG, stream.FLAG_KEY | stream.FLAG_CATCHUP, stream.FLAG_CATCHUP, 0],
+    'config → (키프레임+따라잡기) → 따라잡기 → 마지막만 표시 없이');
+
   const before = entry.clients.size;
   handle.detach();
   assert.equal(entry.clients.size, before - 1, 'detach 하면 뷰어 집합에서 빠진다');
@@ -284,7 +295,11 @@ test('★ 이미 돌고 있는 세션에 붙어도 즉시 풀 수 있다(마지�
   const out = [];
   stream.attach(entry, { alive: () => true, backlog: () => 0, write: (b) => out.push(Buffer.from(b)), close: () => {} });
 
-  assert.deepEqual(out.map((b) => b[0]), [1, 2, 0, 0], 'config → 키프레임 → 그 뒤 델타 순서 그대로');
+  //  ★ 되감아 주는 조각은 **마지막 한 장만** 그리게 표시해 보낸다(FLAG_CATCHUP) — 전부 그리면
+  //   방금 지나간 몇 초가 빨리감기로 재생된다(2026-08-06 폰 보고: "탭 갔다 오면 저절로 움직인다").
+  assert.deepEqual(out.map((b) => b[0]),
+    [stream.FLAG_CONFIG, stream.FLAG_KEY | stream.FLAG_CATCHUP, stream.FLAG_CATCHUP, 0],
+    'config → 키프레임 → 델타 순서는 그대로, 마지막 빼고 따라잡기 표시');
   assert.deepEqual(out[1].subarray(1), K);
   assert.deepEqual(out[2].subarray(1), D1);
   assert.deepEqual(out[3].subarray(1), D2);

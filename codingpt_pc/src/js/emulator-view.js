@@ -36,6 +36,8 @@ const H264_CODEC = 'avc1.640028';
 /** 데몬이 프레임 앞에 붙이는 1바이트 머리(emulator-stream.js 와 같은 값). */
 const FLAG_CONFIG = 1;
 const FLAG_KEY = 2;
+/** 4 = 따라잡기용 조각(디코딩만 하고 **그리지 않는다**) — 데몬 emulator-stream.js 의 같은 이름 주석. */
+const FLAG_CATCHUP = 4;
 
 /**
  * 기기 조작 버튼의 **그림과 이름**. 어떤 버튼을 그릴지는 기기가 정한다(`caps.keys`) —
@@ -236,8 +238,20 @@ export class EmulatorView {
   }
 
   openVideoSocket() {
+    /**
+     * 디코더에 넣어 놓고 아직 안 나온 프레임 수. **밀려 있으면 그리지 않는다**(마지막 것만 그린다).
+     *  왜: 화면에 새로 붙으면 데몬이 **지금 GOP 를 통째로 되감아** 준다(키프레임부터 지금까지 —
+     *  안 그러면 다음 키프레임까지 검은 화면이다). 그걸 순서대로 다 그리면 방금 지나간 몇 초가
+     *  빨리감기로 재생된다(폰에서 "탭 갔다 오면 화면이 저절로 움직인다" 로 보고된 그 움직임).
+     *  디코딩은 다 해야 한다(델타가 앞 프레임을 참조한다) — **그리기만** 건너뛴다.
+     */
+    let queued = 0;
+    /** 디코더에 넣은 순서대로 "그릴 것인가" — 따라잡기용 조각은 false 다(위 FLAG_CATCHUP). */
+    const skipQ = [];
     const decoder = new globalThis.VideoDecoder({
       output: (frame) => {
+        if (queued > 0) queued--;
+        const skip = skipQ.length ? skipQ.shift() : false;
         const cv = this.canvasEl;
         if (!this.disposed && cv) {
           //  캔버스 크기를 매 프레임 만지면 백스토어가 다시 잡히고 리플로우가 난다 — 바뀔 때만.
@@ -250,7 +264,7 @@ export class EmulatorView {
             //   회전 표시를 다시 계산한다 — 이게 없으면 기기가 돈 뒤에도 우리가 덧돌려 그린다.
             if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();
           }
-          cv.getContext('2d')?.drawImage(frame, 0, 0);
+          if (!skip && queued === 0) cv.getContext('2d')?.drawImage(frame, 0, 0);   // 따라잡기·밀린 것은 안 그린다
           if (this.errEl && this.err) { this.err = null; this.errEl.textContent = ''; }
         }
         frame.close();
@@ -284,6 +298,8 @@ export class EmulatorView {
       }
       if (firstTimer) { clearTimeout(firstTimer); firstTimer = null; }
       try {
+        queued++;
+        skipQ.push(!!(flags & FLAG_CATCHUP));
         this.decoder.decode(new globalThis.EncodedVideoChunk({
           type: isKey ? 'key' : 'delta',
           timestamp: (this.vpts = (this.vpts || 0) + 1000),

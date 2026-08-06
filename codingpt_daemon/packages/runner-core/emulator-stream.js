@@ -22,6 +22,18 @@ const LINGER_MS = 8000;
 /** 프레임 앞에 붙이는 1바이트 머리 — 화면이 config/키프레임을 구분해야 디코더를 켤 수 있다. */
 const FLAG_CONFIG = 1;
 const FLAG_KEY = 2;
+/**
+ * **따라잡기용** 조각 — 디코더를 지금 시점까지 데려오려고 되감아 주는 것이지, **보여 줄 그림이 아니다.**
+ *
+ * ★ 왜 필요한가(2026-08-06 폰 실측): 새 시청자가 붙으면 지금 GOP(키프레임~현재)를 통째로 되감아
+ *  준다 — 안 그러면 다음 키프레임까지 검은 화면이다. 그런데 받는 쪽이 그걸 **한 장씩 다 그리면**
+ *  방금 지나간 몇 초가 빨리감기로 재생된다. 사용자에겐 "탭을 갔다 오면 화면이 저절로 올라갔다
+ *  내려간다" 로 보인다(기기 화면은 1바이트도 안 바뀌었는데도).
+ * ★ 받는 쪽에서 "밀린 프레임은 안 그린다" 만으로는 부족하다 — 조각이 몇 tick 에 나눠 도착하면
+ *  그 사이사이 그려져서 결국 재생된다. **보내는 쪽이 표시**해야 결정적으로 막힌다.
+ * ★ 이 비트를 모르는 구 화면은 그냥 다 그린다(= 예전 동작) — 하위호환이 깨지지 않는다.
+ */
+const FLAG_CATCHUP = 4;
 
 let wss = null;
 let wssPort = 0;
@@ -100,7 +112,13 @@ function attach(entry, viewer) {
   //  새로 붙은 화면에 **먼저 SPS/PPS 를 준다** — 없으면 다음 키프레임이 올 때까지 검은 화면이다.
   if (entry.session.configPacket) send(viewer, FLAG_CONFIG, entry.session.configPacket);
   //  그 다음 지금 GOP 를 되감아 준다(위 주석). 첫 시청자면 비어 있고, 곧 키프레임이 온다.
-  if (entry.gop) for (const [f, d] of entry.gop) send(viewer, f, d);
+  //  되감아 주되 **마지막 한 장만 그리게** 한다(위 FLAG_CATCHUP 주석).
+  if (entry.gop) {
+    for (let i = 0; i < entry.gop.length; i++) {
+      const [f, d] = entry.gop[i];
+      send(viewer, i === entry.gop.length - 1 ? f : (f | FLAG_CATCHUP), d);
+    }
+  }
 }
 
 /** 뷰어가 떠났다 — 마지막 한 명이면 조금 기다렸다 인코더를 끈다. */
@@ -338,5 +356,5 @@ process.once('exit', () => { try { stopAll(); } catch (_) { /* noop */ } });
 module.exports = {
   start, stop, stopAll, sessionFor, keepAlive, openRelayStream, openLanStream,
   attach, attachWs, detach, wsViewer, rememberFrame,
-  _streams: streams, FLAG_CONFIG, FLAG_KEY, LINGER_MS, BACKPRESSURE_MAX, GOP_MAX_BYTES,
+  _streams: streams, FLAG_CONFIG, FLAG_KEY, FLAG_CATCHUP, LINGER_MS, BACKPRESSURE_MAX, GOP_MAX_BYTES,
 };
