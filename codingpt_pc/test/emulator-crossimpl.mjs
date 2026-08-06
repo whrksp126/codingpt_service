@@ -232,5 +232,21 @@ ok(/const ANDROID_KEY_ROW = \[[^\]]*'rotate'/.test(demu) && /const IOS_KEY_ROW =
 ok(/const IOS_KEY_ROW = \[[^\]]*'home'/.test(demu) && /iosIcon/.test(pcView) && /ios \?\s*<House/.test(appEmu),
   '★ 아이폰 홈은 **집** 아이콘이다(안드로이드 ○ 를 돌려쓰지 않는다)');
 
+// ── 12. 손가락은 **그림과 같은 길**로 간다(폰) ─────────────────────────────
+// ★ 2026-08-06 실측: 영상은 LAN 직결로 흐르는데 조작만 프로덕션 back 을 왕복(260~490ms)하고 있었다.
+//  게이트가 둘로 갈린 게 원인이다 — 영상은 openEmu(링크만 살아 있으면 감), 조작은 rpc(경로 상태기가
+//  'lan' 으로 승격돼야 감). 같은 링크 위 같은 화면인데 게이트가 둘이면 언제든 다시 어긋난다.
+const appDaemonSvc = read(path.join(APP, 'services/daemonService.ts'));
+const appLan = read(path.join(APP, 'services/lanLink.ts'));
+ok(/emuRpc/.test(appLan) && /link\.scopes\.includes\('emu'\)/.test(appLan),
+  '앱 LAN 에 조작 전용 왕복(emuRpc)이 있고 게이트가 영상과 같다');
+ok(/lanLink\.emuRpc<[^>]*>\(host, 'emulator\.input'/.test(appDaemonSvc),
+  '★ 앱이 조작을 LAN 직결로 보낸다(서버를 안 지난다)');
+ok(!/shouldDirect\(host, 'emu'\)/.test(appDaemonSvc),
+  "조작이 경로 상태기 승격(shouldDirect)에 다시 묶이지 않았다");
+//  데몬도 같은 등급으로 연다.
+ok(/EMU_RPC_ALLOW/.test(read(path.resolve('../codingpt_daemon/packages/runner-core/lan.js'))),
+  '데몬이 emulator.input 을 emu 등급으로 연다');
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);
