@@ -104,6 +104,8 @@ export const icons = {
   //   · 회전 = 세로 폰과 가로 폰을 **둘 다** 그리고 그 사이에 방향 화살표(왼쪽/오른쪽이 갈린다).
   //   · 기기 전원 = 폰 **옆면의 버튼**(측면 돌기) — 전원 기호(⏻)는 오른쪽 끝의 "에뮬레이터 끄기"가
   //     이미 쓰고 있어서, 같은 기호를 두 번 쓰면 둘 다 못 읽는다.
+  //  에뮬레이터 자체를 끄고 켜는 전원(⏻). 기기 화면 전원(devicePower, 폰 옆면 버튼)과 **다른 것**이다.
+  power: (o) => svg('<path d="M12 3.5v7.5"/><path d="M7.4 6.4a7 7 0 1 0 9.2 0"/>', o),
   navBack: (o) => svg('<path d="M15 5.5 6.5 12 15 18.5z" fill="currentColor" stroke="none"/>', o),
   navHome: (o) => svg('<circle cx="12" cy="12" r="6.5"/>', o),
   navRecents: (o) => svg('<rect x="6" y="6" width="12" height="12" rx="1.6"/>', o),

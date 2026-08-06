@@ -370,6 +370,29 @@ export class EmulatorView {
     return 0;
   }
 
+  /**
+   * 버튼 스트립을 **여백이 생기는 쪽**에 붙인다.
+   *  · 액자가 화면보다 가로로 넓다 → 좌우가 남는다 → 오른쪽 세로줄
+   *  · 그 반대 → 위아래가 남는다 → 아래 가로줄
+   *  세로 기기든 가로 기기든, 회전했든 아니든 같은 규칙 하나로 정해진다.
+   */
+  applyLayout() {
+    const wrap = this.mainEl;
+    if (!wrap) return;
+    const r = wrap.getBoundingClientRect();
+    //  지금 **보이는** 화면 비율(회전을 반영한 값). 모르면 세로로 가정한다(대부분 세로 기기다).
+    const raw = this.frameAspect || 0.46;
+    const deg = ((this.visualRot % 360) + 360) % 360;
+    const shown = (deg === 90 || deg === 270) ? 1 / raw : raw;
+    //  스트립이 차지할 폭/높이를 빼고 견줘야 왔다갔다(레이아웃 진동)하지 않는다.
+    const side = this.keysEl ? 44 : 0;
+    const roomIfRight = (r.width - side) / Math.max(1, r.height);
+    const right = roomIfRight > shown;      // 옆에 세워도 화면이 안 줄어드는가
+    wrap.classList.toggle("keys-right", right);
+    wrap.classList.toggle("keys-bottom", !right);
+    this.applyVisualRot();
+  }
+
   /** 표시 회전을 화면에 반영한다(그림 + 액자 비율). */
   applyVisualRot() {
     const el = this.canvasEl || this.imgEl;
@@ -532,32 +555,23 @@ export class EmulatorView {
     const booted = dev ? dev.state === "booted" : false;
     const canInput = !!(dev && dev.caps && dev.caps.input);
 
-    const bar = document.createElement("div");
-    bar.className = "emu-bar";
-    //  ★ 기기 이름은 **탭 제목**이 말한다(2026-08-06 사용자 확정) — 여기 또 쓰면 같은 글자가
-    //   두 줄에 겹쳐 조작 버튼 자리만 먹는다. 목록으로 돌아가는 길은 남겨야 하므로 아이콘만 둔다.
-    const back = document.createElement("button");
-    back.className = "emu-bar-name";
-    back.innerHTML = icons.smartphone({ size: 13 });
-    back.title = i18n.t('기기 목록으로');
-    back.addEventListener("click", () => this.select(null));
-    const pw = document.createElement("button");
-    pw.className = "emu-bar-btn";
-    pw.title = booted ? i18n.t('끄기') : i18n.t('켜기');
-    pw.textContent = booted ? "⏻" : "⏵";
-    pw.addEventListener("click", () => this.power(booted ? "shutdown" : "boot"));
-    bar.append(back);
-    //  ★ 기기 조작 버튼은 **상단바 오른쪽**에 둔다(2026-08-06 사용자 확정). 아래에 따로 줄을
-    //   만들면 화면(=우리가 보여 줘야 할 것)이 그만큼 줄어들고, 실제 시뮬레이터/에뮬레이터도
-    //   조작부를 창 테두리에 붙여 둔다. 오른쪽 끝의 ⏻(에뮬레이터 끄기)와는 아이콘을 다르게 둔다.
+    /**
+     * ★ 조작 버튼은 **화면 옆의 남는 자리**에 세운다(2026-08-06 사용자 확정).
+     *
+     *  기기 화면은 늘 액자(pane)와 비율이 달라서 한쪽에 여백이 생긴다 — 세로 기기면 좌우가,
+     *  가로 기기면 위아래가 남는다. 예전처럼 탭바 아래에 **줄을 하나 더 두면** 그 줄만큼
+     *  화면이 통째로 줄어드는데, 정작 옆의 빈 자리는 그대로 비어 있었다.
+     *  그래서 버튼을 그 빈 자리로 옮긴다: 세로면 오른쪽 세로줄, 가로면 아래 가로줄.
+     *  덤으로 버튼을 크게 키울 수 있다(같은 자리에 더 큰 과녁).
+     */
+    const keys = document.createElement("div");
+    keys.className = "emu-keys";
     if (canInput) {
-      const keys = document.createElement("div");
-      keys.className = "emu-bar-keys";
       for (const k of this.keyRow(dev)) {
         const spec = EMU_KEYS[k];
         const b = document.createElement("button");
-        b.className = "emu-bar-btn emu-key";
-        b.innerHTML = icons[spec.icon]({ size: 14 });
+        b.className = "emu-key";
+        b.innerHTML = icons[spec.icon]({ size: 19 });
         b.title = i18n.t(spec.title);
         b.addEventListener("click", async () => {
           const r = await this.send({ type: "key", key: k });
@@ -565,14 +579,28 @@ export class EmulatorView {
           //   안드로이드는 인코딩 크기 자체가 바뀌므로 여기서 아무것도 안 한다.
           if (r && typeof r === "object" && typeof r.orientation === "string") {
             this.visualRot = EmulatorView.rotForOrientation(r.orientation);
-            this.applyVisualRot();
+            this.applyLayout();
           }
         });
         keys.appendChild(b);
       }
-      bar.appendChild(keys);
     }
-    bar.appendChild(pw);
+    //  기기 전원(에뮬레이터 자체를 끄고 켠다)과 목록으로 돌아가기 — 조작 키와 구분선으로 나눈다.
+    const sep = document.createElement("span");
+    sep.className = "emu-keys-sep";
+    keys.appendChild(sep);
+    const pw = document.createElement("button");
+    pw.className = "emu-key";
+    pw.title = booted ? i18n.t('에뮬레이터 끄기') : i18n.t('에뮬레이터 켜기');
+    pw.innerHTML = icons.power({ size: 18 });
+    pw.addEventListener("click", () => this.power(booted ? "shutdown" : "boot"));
+    keys.appendChild(pw);
+    const back = document.createElement("button");
+    back.className = "emu-key";
+    back.title = i18n.t('기기 목록으로');
+    back.innerHTML = icons.chevronLeft({ size: 18 });
+    back.addEventListener("click", () => this.select(null));
+    keys.appendChild(back);
 
     const stage = document.createElement("div");
     stage.className = "emu-stage";
@@ -655,9 +683,21 @@ export class EmulatorView {
       stage.appendChild(b);
     }
 
-    this.el.append(bar, stage);
-    //  render 는 <canvas>/<img> 를 새로 만든다 — 표시 회전은 그 위에 다시 얹어야 한다.
-    if (this.visualRot) setTimeout(() => this.applyVisualRot(), 0);
+    //  화면 + 버튼 스트립. 어느 쪽에 붙일지는 **여백이 어디 생기는지**로 정한다(applyLayout).
+    const wrap2 = document.createElement("div");
+    wrap2.className = "emu-main";
+    wrap2.append(stage, keys);
+    this.el.append(wrap2);
+    this.mainEl = wrap2;
+    this.keysEl = keys;
+    //  render 는 <canvas>/<img> 를 새로 만든다 — 배치·표시 회전을 그 위에 다시 얹는다.
+    setTimeout(() => this.applyLayout(), 0);
+    //  창 크기가 바뀌면 남는 자리도 바뀐다 — 그때마다 다시 판정한다.
+    if (this._ro) { try { this._ro.disconnect(); } catch (_) { /* noop */ } }
+    if (typeof ResizeObserver === "function") {
+      this._ro = new ResizeObserver(() => this.applyLayout());
+      this._ro.observe(wrap2);
+    }
     //  폴링으로 돌아갔으면 **왜** 인지 한 줄로 적는다(느린 이유를 사용자가 짐작하게 두지 않는다).
     if (this.videoNote) {
       const note = document.createElement("div");

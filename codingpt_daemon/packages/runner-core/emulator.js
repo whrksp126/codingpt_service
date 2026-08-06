@@ -756,7 +756,11 @@ async function inputViaServeSim(a, p) {
       const cur = IOS_ORIENTATIONS.indexOf(sess.orientation);
       const next = IOS_ORIENTATIONS[(((cur < 0 ? 0 : cur) + dir) % n + n) % n];
       if (!sess.rotate(next)) return null;
-      return { ok: true, via: 'serve-sim', orientation: next };
+      //  ★ 기기가 **실제로 돌았는지** 확인해서 돌려준다. 아이폰 홈 화면처럼 회전을 거부하는
+      //   화면이 있는데, 요청한 방향을 그대로 믿으면 똑바로 선 화면을 옆으로 눕혀 그리게 된다.
+      const actual = typeof sess.confirmOrientation === 'function'
+        ? await sess.confirmOrientation(next) : next;
+      return { ok: true, via: 'serve-sim', orientation: actual };
     }
     const btn = IOS_SS_BUTTONS[key];
     if (!btn) return null;                 // 우리가 여는 버튼이 아니다 — 아래 검증에 맡긴다
