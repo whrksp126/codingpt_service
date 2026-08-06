@@ -1059,14 +1059,25 @@ async function emulatorFrame(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+/**
+ * 조작 한 번을 데몬으로 그대로 넘긴다.
+ *
+ * ★ 필드를 **하나씩 베껴 적지 않는다**(2026-08-06 실사고). 예전엔 `{id,type,x,y,x2,y2,durationMs,
+ *  key,text}` 만 골라 담았는데, 그 뒤에 늘어난 필드가 여기서만 **조용히 잘렸다**:
+ *   · `phase`(손가락을 따라가는 터치) → 데몬이 "알 수 없는 터치 단계" 로 거절 → 폰은 옛 swipe 로
+ *     물러섬. 그래서 폰에서만 드래그가 뚝뚝 끊겼다(PC 는 이 길을 안 지난다).
+ *   · `orientation`(세로/가로) → 없으니 데몬이 기본값 'portrait' 로 읽음 → **회전 버튼을 눌러도
+ *     기기가 안 돌았다**(요청은 성공을 돌려준다 — 조용한 실패 중에서도 가장 나쁜 모양).
+ *  검사는 어차피 데몬이 한다(0~1 클램프·키/단계 화이트리스트 — 위 주석 그대로). 서버가 아는 척
+ *  고르는 순간, 새 기능마다 여기를 고쳐야 하는 걸 아무도 기억하지 못한다.
+ */
 async function emulatorInput(req, res) {
   try {
     const b = req.body || {};
     // 좌표·키 검사는 **데몬**이 한다(0~1 클램프·키 화이트리스트). 서버가 따라 하면 두 벌이 된다.
     const result = await daemonRelayService.callRpc(req.user.id, 'emulator.input', {
+      ...b,
       id: String(b.id || ''), type: String(b.type || ''),
-      x: b.x, y: b.y, x2: b.x2, y2: b.y2, durationMs: b.durationMs,
-      key: b.key, text: b.text,
     }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
