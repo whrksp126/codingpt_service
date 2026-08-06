@@ -376,6 +376,24 @@ test('D. RPC 왕복(주입된 디스패처) + 허용 집합 게이팅(fs.watch �
   } finally { s.close(); }
 });
 
+// ── D-1b. 모바일 화면 **조작**은 영상과 같은 'emu' 등급으로 연다 ─────────────
+// ★ 2026-08-06 실측: 영상은 LAN 직결(96~109ms)로 흐르는데 손가락만 프로덕션 back 을 왕복(260~490ms)
+//  하고 있었다 — 폰에서 "스와이프가 굼뜨다" 던 체감의 정체. 등급을 'rpc' 로 걸면 데몬 기본
+//  스코프가 'tcp' 라 **영원히 안 열린다**(그 함정은 lan.js allows() 주석에 이미 있다).
+test("D-1b. emulator.input 은 'emu' 등급이고, 나머지 emulator.* 는 직결로 안 간다", () => {
+  assert.strictEqual(lan.scopeForRpc('emulator.input'), 'emu');
+  assert.strictEqual(lan.scopeForRpc('fs.read'), 'rpc');
+  assert.strictEqual(lan.rpcAllowedIn('emulator.input', 'emu'), true);
+  //  조작만 연다 — 목록·켜기·스트림 개설은 지연 이득이 없고 서버가 권위를 갖는 편이 낫다.
+  for (const m of ['emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.stream.start', 'emulator.frame']) {
+    assert.strictEqual(lan.rpcAllowedIn(m, 'emu'), false, `${m} 이 직결로 열렸다`);
+    assert.strictEqual(lan.rpcAllowed(m), false, `${m} 이 rpc 등급으로 열렸다`);
+  }
+  //  'emu' 등급으로 fs 를 밀어 넣어 등급을 우회할 수 없어야 한다.
+  assert.strictEqual(lan.rpcAllowedIn('fs.read', 'emu'), false);
+  assert.strictEqual(lan.rpcAllowedIn('emulator.input', 'rpc'), false, 'rpc 등급에는 emulator 가 없다');
+});
+
 // ── D-2. scope 게이팅 ────────────────────────────────────────────────────
 test('D-2. grant scope 밖 채널/RPC 은 열리지 않는다(CPT_LAN_SCOPE 와 교집합)', async () => {
   const { g } = newGrant({ scopes: ['tcp'] }); // rpc/pty 없음

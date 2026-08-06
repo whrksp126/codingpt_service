@@ -73,6 +73,22 @@ const ALL_SCOPES = ['tcp', 'rpc', 'pty', 'emu'];
 const RPC_ALLOW_PREFIX = ['fs.', 'net.', 'terminal.', 'ws.'];
 const RPC_DENY = new Set(['fs.watch', 'fs.unwatch', 'sealed']);
 
+/**
+ * 모바일 화면 **조작**은 영상(emu)과 같은 등급으로 연다 — `rpc` 가 아니라 `emu` 다.
+ *
+ * ★ 왜(2026-08-06 실측): 영상은 이미 LAN 직결로 흐르는데 손가락은 서버를 왕복하고 있었다.
+ *  프로덕션 back 왕복이 **260~490ms**(Cloudflare+홈서버)다. 30fps 로 흐르는 그림 위에서 손끝만
+ *  0.3초 뒤에 따라오면 "미러링이 아니다" 로 느껴진다 — 사용자가 폰에서 스와이프가 굼뜨다고 한
+ *  그 체감의 정체다(PC 는 데몬과 같은 기계라 이 왕복이 애초에 없다).
+ * ★ `rpc` 등급이 아니라 `emu` 인 이유: 데몬 기본 스코프가 'tcp' 라 rpc 에 걸어 두면 서버가 열어
+ *  줘도 **영원히 안 열린다**(위 allows() 주석의 같은 함정). 조작과 영상은 같은 평문 LAN 경로이고
+ *  정본 게이트는 서버(LAN_SCOPES)다 — 그림을 보내는 길이 열려 있는데 그 그림을 누르는 길만
+ *  막아 둘 이유가 없다.
+ * ★ 여는 것은 **조작 한 번(emulator.input)** 뿐이다. 목록·켜기·끄기·스트림 개설은 지연 이득이
+ *  없고(사람이 한 번 누르는 동작), 릴레이에 두면 서버가 계속 단일 권위를 갖는다.
+ */
+const EMU_RPC_ALLOW = new Set(['emulator.input']);
+
 function scope() {
   if (String(process.env.CPT_LAN || '') === '0') return 'off';
   const v = String(process.env.CPT_LAN_SCOPE || 'tcp').trim().toLowerCase();
@@ -99,6 +115,11 @@ function rpcAllowed(method) {
   const m = String(method || '');
   if (!m || RPC_DENY.has(m) || m.startsWith('e2ee.')) return false;
   return RPC_ALLOW_PREFIX.some((p) => m.startsWith(p));
+}
+/** 이 메서드를 여는 등급 — 모바일 화면 조작만 영상과 같은 'emu' 다(위 EMU_RPC_ALLOW 주석). */
+function scopeForRpc(method) { return EMU_RPC_ALLOW.has(String(method || '')) ? 'emu' : 'rpc'; }
+function rpcAllowedIn(method, kind) {
+  return kind === 'emu' ? EMU_RPC_ALLOW.has(String(method || '')) : rpcAllowed(method);
 }
 
 // ── 주소 분류(사설/링크로컬/루프백) ────────────────────────────────────────
@@ -762,8 +783,10 @@ function onConnection(sock) {
     const id = m.id;
     const method = String(m.method || '');
     const reply = (obj) => sendCtrl({ t: 'rpc_result', id, ...obj });
-    if (!scopeOk('rpc')) { reply({ ok: false, error: '직결 RPC 가 이 데몬에서 꺼져 있습니다', code: 'LAN_SCOPE' }); return; }
-    if (!rpcAllowed(method)) { reply({ ok: false, error: `직결로는 지원하지 않는 요청입니다(${method})`, code: 'LAN_METHOD_NOT_ALLOWED' }); return; }
+    //  등급은 메서드가 정한다 — 모바일 화면 조작은 영상과 같은 'emu'(위 EMU_RPC_ALLOW 주석).
+    const kind = scopeForRpc(method);
+    if (!scopeOk(kind)) { reply({ ok: false, error: '직결 RPC 가 이 데몬에서 꺼져 있습니다', code: 'LAN_SCOPE' }); return; }
+    if (!rpcAllowedIn(method, kind)) { reply({ ok: false, error: `직결로는 지원하지 않는 요청입니다(${method})`, code: 'LAN_METHOD_NOT_ALLOWED' }); return; }
     if (typeof srvHooks.rpc !== 'function') { reply({ ok: false, error: '직결 RPC 배선이 없습니다', code: 'LAN_RPC_UNAVAILABLE' }); return; }
     Promise.resolve()
       .then(() => srvHooks.rpc(method, m.params))
@@ -1253,7 +1276,7 @@ function resetPaths() { paths.clear(); }
 
 module.exports = {
   // 게이팅
-  enabled, scope, allows, scopesForDaemon, rpcAllowed,
+  enabled, scope, allows, scopesForDaemon, rpcAllowed, rpcAllowedIn, scopeForRpc,
   // 호스트
   start, stop, info, addGrant, sweepGrants, grantCount, clearGrants, localAddrs,
   // 뷰어
