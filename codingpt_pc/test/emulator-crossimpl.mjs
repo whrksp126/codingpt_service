@@ -270,6 +270,11 @@ ok(/findEmulator\(/.test(appBridge), '앱도 이미 열린 모바일 화면을 �
 ok(/PANE_TYPES = \["terminal", "ide", "preview", "emulator"\]/.test(pcUi),
   'PC 의 pane 종류 목록에 모바일 화면이 들어 있다(layout split --type emulator)');
 ok(/type === 'emulator'/.test(appBridge), '앱의 pane 생성기도 모바일 화면을 만들 줄 안다');
+//  회신·조회에도 **어느 기기인지**가 실려야 한다(2026-08-06 실측으로 잡음):
+//   · PC 핸들러가 알맹이를 `result` 밖에 두면 `cpt emulator show --json` 이 undefined 를 뱉는다
+//   · `layout tree` 가 deviceId 를 안 실으면 에이전트는 "emulator" 라는 것만 알고 무엇이 떠 있는지 모른다
+ok(/return \{ ok: true, result: \{ paneId[^}]*device \}/.test(pcUi), 'PC 가 띄운 기기를 회신에 싣는다');
+ok(/if \(node\.deviceId\) out\.deviceId = node\.deviceId/.test(pcUi), 'PC layout tree 가 기기를 싣는다');
 
 // ── 14. 조작 능력은 **낡을 수 있다** — 돌아올 때마다 다시 묻는다 ─────────────
 // 2026-08-06 실사고(폰 → iOS 시뮬레이터): 버튼이 하나도 없고 터치도 안 먹었다. 기기의 조작 능력

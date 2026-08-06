@@ -486,12 +486,16 @@ function serializeNode(node) {
         if (t.title) tab.title = t.title;
         if (t.url) tab.url = t.url;
         if (t.openPath) tab.openPath = t.openPath;
+        if (t.deviceId) tab.deviceId = t.deviceId;   // 모바일 화면 탭이 보고 있는 기기
         return tab;
       });
       out.active = node.active || 0;
     }
     if (node.url) out.url = node.url;
     if (node.openPath) out.openPath = node.openPath;
+    //  ★ 모바일 화면은 **어느 기기를 보고 있는지**가 그 pane 의 내용이다 — url/openPath 와 같은 자리.
+    //   빠뜨리면 `cpt layout tree` 로는 "emulator" 라는 것만 알고 무엇이 떠 있는지 알 수 없다.
+    if (node.deviceId) out.deviceId = node.deviceId;
     return out;
   }
   return { dir: node.dir, ratio: node.ratio, first: serializeNode(node.first), second: serializeNode(node.second) };
@@ -1153,10 +1157,12 @@ const handlers = {
         if (!view) throw new Error(i18n.t('모바일 화면이 준비되지 않았어요'));
         view.select(device);
       }
-      return { ok: true, paneId: target.leaf.id, device };
+      //  ★ 회신 알맹이는 `result` 에 담는다(layoutTree 와 같은 규약). 여기 밖에 두면 부르는 쪽에는
+      //   `undefined` 만 간다 — 실제로 `cpt emulator show --json` 이 undefined 를 뱉었다(실측).
+      return { ok: true, result: { paneId: target.leaf.id, device } };
     }
     const paneId = addSurfaceGated(rt, "emulator", { deviceId: device });
-    return { ok: true, paneId, device };
+    return { ok: true, result: { paneId, device } };
   },
 
   // 모바일 화면 닫기 — 독립 pane 은 통째로, 혼합 탭이면 그 탭만.
