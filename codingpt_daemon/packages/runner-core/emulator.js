@@ -557,7 +557,10 @@ function px(n, max) {
 const ANDROID_KEYS = {
   home: 'KEYCODE_HOME', back: 'KEYCODE_BACK', recents: 'KEYCODE_APP_SWITCH',
   enter: 'KEYCODE_ENTER', del: 'KEYCODE_DEL', tab: 'KEYCODE_TAB', escape: 'KEYCODE_ESCAPE',
-  volumeUp: 'KEYCODE_VOLUME_UP', volumeDown: 'KEYCODE_VOLUME_DOWN', power: 'KEYCODE_POWER',
+  //  ★ 화면 끄기/켜기는 두 OS 가 같은 일이다 — 이름을 `lock` 으로 맞췄다(화면이 아이콘을 한 벌만
+  //   그리면 되고, 에뮬레이터 자체를 끄는 ⏻ 와 헷갈릴 자리도 사라진다). `power` 는 옛 이름으로 계속 받는다.
+  volumeUp: 'KEYCODE_VOLUME_UP', volumeDown: 'KEYCODE_VOLUME_DOWN',
+  lock: 'KEYCODE_POWER', power: 'KEYCODE_POWER',
   up: 'KEYCODE_DPAD_UP', down: 'KEYCODE_DPAD_DOWN', left: 'KEYCODE_DPAD_LEFT', right: 'KEYCODE_DPAD_RIGHT',
 };
 //  ★ `appSwitch: 'APPLE_PAY'` 라는 옛 항목은 **거짓말**이었다 — APPLE_PAY 는 앱 전환이 아니라
@@ -570,7 +573,9 @@ const IOS_BUTTONS = { home: 'HOME', lock: 'LOCK', siri: 'SIRI', sideButton: 'SID
  *   "보낼 수 없는 키예요" 오류만 나온다 — 2026-08-06 실사고.)
  */
 //  순서 = 화면에 그릴 순서(왼쪽부터). 자리가 모자라면 화면이 뒤쪽부터 접는다.
-const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotateLeft', 'rotateRight', 'volumeUp', 'volumeDown', 'power'];
+//  ★ 회전은 **버튼 하나**다(2026-08-06 사용자 확정). 좌/우 두 개였는데, 실제 기기·Orca 모두 하나이고
+//   두 개가 나란히 있으면 무엇이 다른지 아이콘만 보고는 알 수 없었다. 하나가 세로↔가로를 오간다.
+const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotate', 'volumeUp', 'volumeDown', 'lock'];
 //  ★ 되는 것만 그린다(실측으로 하나씩 확인했다). Siri 는 시뮬레이터에서 뜨지 않아 뺐다.
 //
 //  ★★ 회전은 **한 번 잘못 빼고 되살렸다**(2026-08-06). 처음엔 "serve-sim 이 접수했다고 답하는데
@@ -581,7 +586,7 @@ const ANDROID_KEY_ROW = ['back', 'home', 'recents', 'rotateLeft', 'rotateRight',
 //  ★ 어떤 버튼을 그릴지는 **그 PC 에서 어느 경로가 살아 있는지**에 달렸다. idb 폴백은 볼륨을
 //   아예 못 보낸다(idb 의 버튼 어휘는 HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐) — serve-sim 이
 //   없는 기계에 볼륨 버튼을 그려 놓으면 누를 때마다 오류만 난다.
-const IOS_KEY_ROW = ['home', 'rotateLeft', 'rotateRight', 'lock', 'volumeUp', 'volumeDown'];
+const IOS_KEY_ROW = ['home', 'rotate', 'volumeUp', 'volumeDown', 'lock'];
 //  idb 폴백은 회전도 볼륨도 못 한다(어휘에 HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐).
 const IOS_KEY_ROW_IDB = ['home', 'lock'];
 
@@ -597,11 +602,35 @@ const TOUCH_TO_SCRCPY = { begin: 'down', move: 'move', end: 'up' };
 
 /**
  * 방향 고리 — 시계방향 순서다. serve-sim 이 쓰는 이름 그대로.
- *  ⚠ 아이폰은 `portrait_upside_down` 을 앱이 대개 거부한다(그 한 칸은 화면이 안 바뀐다).
- *   그래서 **좌/우 두 버튼**을 준다 — 실제 시뮬레이터 메뉴(Rotate Left/Right)와 안드로이드
- *   에뮬레이터 패널도 그렇게 두 개다. 한 버튼으로 네 방향을 돌리면 그 한 칸이 "고장" 처럼 보인다.
+ *  (`key: rotateLeft|rotateRight` 로 한 칸씩 돌리는 옛 경로 = cpt CLI 전용. 화면은 아래 `rotate` 를 쓴다.)
  */
 const IOS_ORIENTATIONS = ['portrait', 'landscape_right', 'portrait_upside_down', 'landscape_left'];
+
+/**
+ * **회전의 정본**(2026-08-06 전면 재설계) — `input {type:'rotate', orientation:'portrait'|'landscape'}`.
+ *
+ * ★ 왜 "한 칸 돌리기" 를 버리고 세로/가로 **두 상태**로 바꿨나. 앞 설계는 요청한 방향을 기기가
+ *  **받아들였는지** 확인해서(접근성 트리) 받아들였을 때만 화면을 돌렸다. 그런데 실측하면
+ *   · 아이폰 **홈 화면**은 회전을 거부한다(Plus/Max 만 눕는다)
+ *   · 안드로이드 **런처**도 세로 고정이다 — `user_rotation=3` 을 써 놨는데 `mCurrentRotation=0`,
+ *     프레임버퍼도 1080x2400 그대로였다(2026-08-06 Pixel 6 실측)
+ *  즉 사용자가 회전 버튼을 처음 누르는 자리(홈 화면)가 하필 **양 OS 모두 거부하는 자리**여서,
+ *  "회전이 아예 동작하지 않는다" 로 보였다. Orca 스크린샷을 보면 홈 화면 아이콘 글자까지 옆으로
+ *  누워 있다 — OS 가 다시 그린 게 아니라 **보는 쪽이 그림을 돌린** 것이다.
+ *
+ * 그래서 계약을 이렇게 바꾼다: 데몬은 기기에 회전을 **요청**하고(되면 OS 가 다시 그린다),
+ *  **화면은 요청한 방향을 그대로 믿고 자기 그림을 돌린다**(거부당해도 돌린다 = 기기를 실제로
+ *  손에 들고 돌린 모습). 그래서 여기서 접근성 트리로 되묻지 않는다 — 되물어 봐야 화면이 할 일이 없다.
+ *
+ * 화면이 각도를 정하는 규칙은 한 줄이다(PC·앱 공통):
+ *   `보이는 프레임이 원하는 방향과 다르면 90도 돌려 그린다`
+ *  · iOS 는 회전해도 프레임버퍼가 세로 그대로라 → 늘 90도(정확히 맞는 값이다)
+ *  · 안드로이드는 OS 가 받아들이면 프레임 자체가 가로가 되므로 → 0도(우리가 돌릴 게 없다)
+ *  · 거부당하면 프레임이 세로 그대로니 → 90도(Orca 와 같은 모습)
+ */
+const ROTATE_TARGETS = { portrait: 0, landscape: 1 };
+/** iOS 에서 '가로' 는 왼쪽으로 눕힌 것(실제 시뮬레이터의 Rotate Left 와 같은 방향). */
+const IOS_ROTATE_TARGET = { portrait: 'portrait', landscape: 'landscape_left' };
 
 /** 회전 키 → 방향(+1=시계, -1=반시계). `rotate` 는 옛 이름(=시계)으로 계속 받는다. */
 const ROTATE_KEYS = { rotateRight: 1, rotateLeft: -1, rotate: 1 };
@@ -747,20 +776,23 @@ async function inputViaServeSim(a, p) {
     sess.touch('end', a.x2, a.y2);
     return { ok: true, via: 'serve-sim' };
   }
+  //  세로/가로 — 화면이 쓰는 정본 경로(위 ROTATE_TARGETS 주석).
+  if (type === 'rotate') {
+    const want = ROTATE_TARGETS[String(a.orientation || '')] == null ? 'portrait' : String(a.orientation);
+    const target = IOS_ROTATE_TARGET[want];
+    if (!sess.rotate(target)) return null;
+    return { ok: true, via: 'serve-sim', orientation: want, iosOrientation: target };
+  }
   if (type === 'key') {
     const key = String(a.key || '');
-    //  회전은 버튼이 아니라 전용 메시지다. 지금 방향에서 한 칸 돌린다.
+    //  회전은 버튼이 아니라 전용 메시지다. 지금 방향에서 한 칸 돌린다(cpt CLI 전용 경로).
     const dir = ROTATE_KEYS[key];
     if (dir) {
       const n = IOS_ORIENTATIONS.length;
       const cur = IOS_ORIENTATIONS.indexOf(sess.orientation);
       const next = IOS_ORIENTATIONS[(((cur < 0 ? 0 : cur) + dir) % n + n) % n];
       if (!sess.rotate(next)) return null;
-      //  ★ 기기가 **실제로 돌았는지** 확인해서 돌려준다. 아이폰 홈 화면처럼 회전을 거부하는
-      //   화면이 있는데, 요청한 방향을 그대로 믿으면 똑바로 선 화면을 옆으로 눕혀 그리게 된다.
-      const actual = typeof sess.confirmOrientation === 'function'
-        ? await sess.confirmOrientation(next) : next;
-      return { ok: true, via: 'serve-sim', orientation: actual };
+      return { ok: true, via: 'serve-sim', orientation: next };
     }
     const btn = IOS_SS_BUTTONS[key];
     if (!btn) return null;                 // 우리가 여는 버튼이 아니다 — 아래 검증에 맡긴다
@@ -786,8 +818,23 @@ async function input(args) {
     const viaControl = await inputViaScrcpy(a, p);
     if (viaControl) return viaControl;
     const adb = (rest, timeoutMs) => run(t.adb, ['-s', p.value, 'shell', ...rest], { timeoutMs: timeoutMs || 10000 });
-    //  회전 폴백 — 라이브 세션이 없을 때. 자동회전을 끄고 사용자 회전값을 한 칸 돌린다
-    //  (`adb emu rotate` 는 에뮬레이터에만 있어서 실기기에서 안 된다).
+    /**
+     * 세로/가로 — 화면이 쓰는 정본 경로. 자동회전을 끄고 **절대값**을 쓴다(0=세로, 1=왼쪽으로 눕힘).
+     *  ★ 한 칸씩 더하던 옛 방식은 값이 어디서부터 도는지 알 수 없었다(실측 중 0 인 줄 알았던 값이
+     *   2 였고, 2 는 '거꾸로 세로' 라 프레임이 안 바뀌어 "아무 일도 안 일어난다" 로 보였다).
+     *  ⚠ 여기서 성공을 돌려줘도 **기기가 정말 눕는다는 뜻은 아니다** — 런처처럼 세로 고정인 화면은
+     *   user_rotation 을 무시한다(Pixel 6 실측: 써 놓아도 mCurrentRotation=0). 그래서 화면 쪽은
+     *   프레임 모양을 보고 스스로 판단한다(위 ROTATE_TARGETS 주석).
+     *  `adb emu rotate` 는 에뮬레이터 전용이라 안 쓴다(실기기에서 없다).
+     */
+    if (type === 'rotate') {
+      const want = ROTATE_TARGETS[String(a.orientation || '')] == null ? 'portrait' : String(a.orientation);
+      const next = ROTATE_TARGETS[want];
+      await adb(['settings', 'put', 'system', 'accelerometer_rotation', '0']);
+      await adb(['settings', 'put', 'system', 'user_rotation', String(next)]);
+      return { ok: true, orientation: want, rotation: next };
+    }
+    //  한 칸 돌리기 — cpt CLI 전용(`key rotateLeft|rotateRight`).
     if (type === 'key' && ROTATE_KEYS[String(a.key || '')]) {
       //  안드로이드의 user_rotation 은 **반시계** 방향으로 증가한다(0=세로, 1=왼쪽으로 눕힘).
       //   그래서 '왼쪽으로 회전' 이 +1 이다 — 화면에 그리는 방향과 값이 반대라 헷갈리는 자리다.
@@ -843,6 +890,9 @@ async function input(args) {
     }
     const s = await screenSize(a.id, p).catch(() => null);
     const dev = ['--udid', p.value];
+    //  idb 어휘에는 회전이 없다(HOME/LOCK/SIRI/SIDE_BUTTON/APPLE_PAY 뿐) — 그래서 이 기계에서는
+    //   회전 버튼을 아예 안 그린다(IOS_KEY_ROW_IDB). 그래도 불리면 정직하게 못 한다고 말한다.
+    if (type === 'rotate') throw new Error('이 Mac 에서는 시뮬레이터 회전을 보낼 수 없어요 (serve-sim 이 필요해요)');
     if (type === 'tap' || type === 'longPress') {
       if (!s) throw new Error('화면을 한 번 불러온 뒤 조작해 주세요');
       const args2 = ['ui', 'tap', ...dev, String(px(a.x, s.w)), String(px(a.y, s.h))];
@@ -1095,4 +1145,5 @@ module.exports = {
   _idbReady: idbReady, _idbEnv: idbEnv,
   _normalizeIosAx: normalizeIosAx, _parseAndroidAx: parseAndroidAx,
   ANDROID_KEYS, IOS_BUTTONS, IOS_SS_BUTTONS, ANDROID_KEY_ROW, IOS_KEY_ROW, IOS_KEY_ROW_IDB, ROTATE_KEYS,
+  ROTATE_TARGETS, IOS_ROTATE_TARGET,
 };

@@ -2249,16 +2249,17 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-main { display: flex; flex: 1 1 auto; min-width: 0; min-height: 0; }
 .emu-main.keys-right { flex-direction: row; }
 .emu-main.keys-bottom { flex-direction: column; }
-.emu-keys { display: flex; align-items: center; justify-content: center; gap: 2px; flex: 0 0 auto; }
-.emu-main.keys-right .emu-keys { flex-direction: column; padding: 6px 5px; }
-.emu-main.keys-bottom .emu-keys { flex-direction: row; padding: 5px 6px; }
+.emu-keys { display: flex; align-items: center; justify-content: center; gap: 3px; flex: 0 0 auto; }
+.emu-main.keys-right .emu-keys { flex-direction: column; padding: 6px 4px; }
+.emu-main.keys-bottom .emu-keys { flex-direction: row; padding: 4px 6px; }
 /*  구분선 — 조작 키와 "에뮬레이터 전원·목록" 을 가른다(같은 줄이지만 성격이 다르다). */
 .emu-keys-sep { flex: 0 0 auto; background: var(--border); }
 .emu-main.keys-right .emu-keys-sep { width: 18px; height: 1px; margin: 5px 0; }
 .emu-main.keys-bottom .emu-keys-sep { width: 1px; height: 18px; margin: 0 5px; }
+/*  과녁은 크게 — 이 스트립은 화면 옆의 **원래 비어 있던 자리**를 쓰므로 키우는 데 드는 비용이 없다. */
 .emu-key { display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border: 0; background: none; color: var(--text2);
-  cursor: pointer; border-radius: 7px; padding: 0; }
+  width: 38px; height: 38px; border: 0; background: none; color: var(--text2);
+  cursor: pointer; border-radius: 9px; padding: 0; }
 .emu-key:hover { color: var(--text); background: var(--hover); }
 .emu-key:active { transform: scale(0.92); }
 .emu-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex;

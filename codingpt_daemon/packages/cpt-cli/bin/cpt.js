@@ -267,7 +267,10 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   emulator long-press --device <id> <x> <y>
   emulator swipe --device <id> <x> <y> <x2> <y2> [--ms <n>=220]
   emulator key --device <id> <키>       home|back|recents|enter|del|tab|escape|up|down|left|right
-                                        |volumeUp|volumeDown|power (iOS: home|lock|siri|appSwitch)
+                                        |volumeUp|volumeDown|lock (iOS: home|lock|siri)
+  emulator rotate --device <id> [portrait|landscape]
+                                        기기를 세로/가로로 (생략하면 landscape). 홈 화면처럼 세로
+                                        고정인 화면은 OS 가 거부한다 — 그때는 화면만 눕는다.
   emulator text --device <id> <문자열>  글자 입력
   emulator open --device <id> <url>     주소/딥링크 열기
 
@@ -546,6 +549,11 @@ async function main() {
           }), flags, 'ok');
         }
         if (c2 === 'key') return out(await request('emulator.input', { id, type: 'key', key: a1[0] }), flags, 'ok');
+        if (c2 === 'rotate') {
+          const want = String(a1[0] || flags.orientation || 'landscape').toLowerCase();
+          if (want !== 'portrait' && want !== 'landscape') throw new Error('portrait 또는 landscape 로 알려 주세요');
+          return out(await request('emulator.input', { id, type: 'rotate', orientation: want }), flags, 'ok');
+        }
         //  화면을 **글자로** 읽는다 — 스크린샷을 눈으로 보고 좌표를 찍는 것보다 훨씬 정확하다.
         if (c2 === 'ax' || c2 === 'screen') {
           const r = await request('emulator.ax', { id }, { timeoutMs: 40000 });

@@ -304,33 +304,10 @@ class ServeSimSession {
     else { this.orientation = 'portrait'; this.orientationKnown = true; }
   }
 
-  /**
-   * 회전을 **기기가 실제로 받아들였는지** 확인한다.
-   *
-   * ★ 왜(2026-08-06 실측): 아이폰 홈 화면은 회전을 거부한다(Plus/Max 만 돈다). 그런데 serve-sim 은
-   *  "내가 방향을 바꿨다" 고만 답하지 앱이 따랐는지는 모른다. 그 말을 믿고 화면을 돌려 그리면
-   *  **똑바로 서 있는 홈 화면이 옆으로 누워** 보인다(회전을 거부한 앱마다 같은 일이 생긴다).
-   *  접근성 트리는 진짜를 안다 — 눕지 않았으면 여전히 세로(402x874)로 보고한다.
-   *
-   * @returns {Promise<string>} 지금 **실제** 방향(우리가 아는 만큼)
-   */
-  async confirmOrientation(want) {
-    await new Promise((r) => setTimeout(r, 700));      // 회전 애니메이션이 끝날 때까지
-    let axLandscape = null;
-    try {
-      const raw = await this.axJson();
-      const roots = Array.isArray(raw) ? raw : (raw ? [raw] : []);
-      const f = roots[0] && roots[0].frame;
-      if (f && f.width > 0 && f.height > 0) axLandscape = f.width > f.height;
-    } catch (_) { /* 못 읽으면 아래에서 want 를 그대로 믿는다 */ }
-    if (axLandscape === null) { this.orientation = want; return want; }
-    const wantLandscape = /^landscape/.test(want);
-    if (wantLandscape === axLandscape) { this.orientation = want; return want; }
-    //  기기가 거부했다. 세로로 남았으면 세로라고 정확히 말할 수 있다.
-    //  가로로 남았는데 우리가 세로를 요청한 경우(드물다)는 좌/우를 모르니 알던 값을 유지한다.
-    if (!axLandscape) { this.orientation = 'portrait'; return 'portrait'; }
-    return this.orientation;
-  }
+  //  ★ 예전엔 회전 뒤 접근성 트리로 "기기가 정말 받아들였는지" 되묻는 confirmOrientation 이 있었다.
+  //   지웠다(2026-08-06): 화면은 이제 기기의 대답과 무관하게 자기 그림을 돌린다(= 기기를 손에 들고
+  //   돌린 모습). 거부당했는지 알아도 화면이 할 일이 달라지지 않으니 700ms 를 쓸 이유가 없다.
+  //   자세한 이유는 emulator.js 의 ROTATE_TARGETS 주석에 있다.
 
   /** 접근성 트리(원본 JSON) — 화면을 "글자"로 읽는 유일한 길이다. */
   axJson() { return this._fetchJson(`${this.baseUrl}/ax`, 8000); }

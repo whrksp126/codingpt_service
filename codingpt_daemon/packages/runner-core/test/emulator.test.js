@@ -429,14 +429,32 @@ test('덤프가 쓰레기면 요소를 지어내지 않는다', () => {
   assert.deepEqual(emu._parseAndroidAx('망가진 출력'), { screen: { w: 0, h: 0 }, elements: [] });
 });
 
-// ── 회전은 좌/우 두 개다 ────────────────────────────────────────────────────
-// ★ 2026-08-06: 한 버튼으로 네 방향을 도는 방식은 아이폰에서 **한 칸이 무동작**으로 보인다
-//  (앱이 portrait_upside_down 을 대개 거부한다). 실제 시뮬레이터 메뉴도 Rotate Left/Right 둘이다.
-test('★ 회전은 좌/우가 서로 반대 방향이다', () => {
+// ── 회전은 세로/가로 두 상태다 ──────────────────────────────────────────────
+// ★ 2026-08-06 재설계: 좌/우 두 버튼 → **하나**. 그리고 "한 칸 돌리기" 가 아니라 **절대값**이다.
+//  왜: 한 칸씩 더하면 값이 어디서부터 도는지 알 수 없다(실측 중 0 인 줄 알았던 user_rotation 이
+//  2 였고, 2 는 '거꾸로 세로' 라 프레임이 안 바뀌어 "아무 일도 안 일어난다" 로 보였다).
+test('★ 회전은 세로/가로 두 상태를 절대값으로 쓴다', () => {
   const emu = require('../emulator');
-  assert.equal(emu.ROTATE_KEYS.rotateLeft, -emu.ROTATE_KEYS.rotateRight);
-  assert.equal(emu.ROTATE_KEYS.rotate, emu.ROTATE_KEYS.rotateRight, '옛 이름은 시계방향으로 계속 받는다');
+  assert.deepEqual(emu.ROTATE_TARGETS, { portrait: 0, landscape: 1 }, '안드로이드 user_rotation 절대값');
+  assert.equal(emu.IOS_ROTATE_TARGET.landscape, 'landscape_left', 'iOS 의 가로 = 왼쪽으로 눕힘');
+  assert.equal(emu.IOS_ROTATE_TARGET.portrait, 'portrait');
   for (const row of [emu.IOS_KEY_ROW, emu.ANDROID_KEY_ROW]) {
-    assert.ok(row.includes('rotateLeft') && row.includes('rotateRight'), '버튼줄에 좌/우가 둘 다 있다');
+    assert.ok(row.includes('rotate'), '버튼줄에 회전이 있다');
+    assert.ok(!row.includes('rotateLeft') && !row.includes('rotateRight'), '좌/우 두 버튼은 없다');
   }
+  //  옛 이름(한 칸 돌리기)은 cpt CLI 를 위해 계속 받는다 — 화면만 새 경로를 쓴다.
+  assert.equal(emu.ROTATE_KEYS.rotateLeft, -emu.ROTATE_KEYS.rotateRight);
+});
+
+// ★ 화면 잠금은 두 OS 가 같은 일이다 — 이름을 `lock` 으로 맞췄다(아이콘도 한 벌).
+//  `power` 는 구 데몬/구 화면이 쓰던 옛 이름이라 계속 받는다.
+test('★ 화면 잠금 키 이름이 두 OS 에서 같다', () => {
+  const emu = require('../emulator');
+  assert.ok(emu.ANDROID_KEY_ROW.includes('lock'), '안드로이드 버튼줄이 lock 을 쓴다');
+  assert.ok(emu.IOS_KEY_ROW.includes('lock') && emu.IOS_KEY_ROW_IDB.includes('lock'));
+  assert.equal(emu.ANDROID_KEYS.lock, 'KEYCODE_POWER');
+  assert.equal(emu.ANDROID_KEYS.power, 'KEYCODE_POWER', '옛 이름도 계속 받는다');
+  assert.ok(emu.IOS_SS_BUTTONS.lock, 'iOS 잠금은 전원 HID 다');
+  //  idb 폴백은 회전을 못 한다 — 그 기계에서는 회전 버튼을 아예 안 그린다.
+  assert.ok(!emu.IOS_KEY_ROW_IDB.includes('rotate'));
 });

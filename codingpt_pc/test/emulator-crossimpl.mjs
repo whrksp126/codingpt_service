@@ -209,5 +209,28 @@ ok(enumLeftApp.length === 0,
 ok(/metaName/.test(read(path.join(PC, 'pane.js'))), 'PC 탭 제목이 기기명(metaName)을 쓴다');
 ok(/metaName/.test(read(path.join(APP, 'workspace/PaneView.tsx'))), '앱 탭 제목도 기기명을 쓴다');
 
+// ── 11. 회전 — **두 화면이 같은 규칙**이어야 한다 ───────────────────────────
+// ★ 2026-08-06: 회전을 "기기가 받아 줬는지 확인하고 나서" 그리던 앞 설계는, 사용자가 버튼을 처음
+//  누르는 자리(아이폰 홈 화면·안드로이드 런처 = 둘 다 세로 고정)에서 **아무 일도 안 일어났다**.
+//  이제 두 화면 모두 ① 세로/가로 두 상태를 스스로 들고 ② 보이는 프레임과 다르면 90도 돌려 그리고
+//  ③ 좌표도 같은 만큼 되돌린다. 한쪽만 고치면 PC 에서만 도는 버튼이 된다.
+for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
+  ok(/type:\s*['"]rotate['"]/.test(src) && /orientation:\s*!?\w+\s*\?\s*['"]landscape['"]/.test(src),
+    `${name} 이 세로/가로를 **절대값**으로 보낸다(한 칸 돌리기가 아니다)`);
+  ok(/wantLandscape/.test(src), `${name} 이 원하는 방향 상태를 들고 있다`);
+  //  ★ 돌려 그릴 때 여백 계산에 쓰는 비율도 뒤집어야 한다 — 안 뒤집으면 화면 한복판을 눌러도
+  //   "기기 밖" 으로 판정돼 조용히 무시된다(2026-08-06 실측으로 잡은 결함).
+  ok(/1 \/ raw/.test(src), `${name} 이 돌린 상태의 **보이는 비율**로 여백을 계산한다`);
+  ok(/x: (ry|y), y: 1 - (rx|x)/.test(src), `${name} 이 좌표를 같은 만큼 되돌린다`);
+  //  회전 버튼은 하나다(좌/우 두 개는 아이콘만 보고 구분이 안 됐다).
+  ok(!/rotateLeft|rotateRight/.test(src), `${name} 에 좌/우 회전 버튼이 남아 있지 않다`);
+}
+//  데몬이 그리라고 알려 주는 목록도 같은 어휘여야 한다(화면은 이 목록만 그린다).
+const demu = read(path.resolve('../codingpt_daemon/packages/runner-core/emulator.js'));
+ok(/const ANDROID_KEY_ROW = \[[^\]]*'rotate'/.test(demu) && /const IOS_KEY_ROW = \[[^\]]*'rotate'/.test(demu),
+  '데몬 키 목록도 회전이 하나다(양 OS)');
+ok(/const IOS_KEY_ROW = \[[^\]]*'home'/.test(demu) && /iosIcon/.test(pcView) && /ios \?\s*<House/.test(appEmu),
+  '★ 아이폰 홈은 **집** 아이콘이다(안드로이드 ○ 를 돌려쓰지 않는다)');
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

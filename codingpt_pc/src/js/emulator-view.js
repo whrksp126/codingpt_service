@@ -43,14 +43,16 @@ const FLAG_KEY = 2;
  */
 const EMU_KEYS = {
   back: { icon: 'navBack', title: '뒤로' },
-  home: { icon: 'navHome', title: '홈' },
+  //  ★ 같은 이름이라도 **OS 마다 그림이 다르다** — 안드로이드 홈은 내비바의 ○, 아이폰 홈은 집이다.
+  //   두 OS 에 ○ 를 함께 쓰던 앞 버전은 iOS 에서 무슨 버튼인지 알 수 없었다(2026-08-06 지적).
+  home: { icon: 'navHome', iosIcon: 'homeIos', title: '홈' },
   recents: { icon: 'navRecents', title: '최근 앱' },
-  rotateLeft: { icon: 'rotateLeft', title: '왼쪽으로 회전' },
-  rotateRight: { icon: 'rotateRight', title: '오른쪽으로 회전' },
+  rotate: { icon: 'rotate', title: '세로/가로 회전' },
   volumeUp: { icon: 'volumeUp', title: '볼륨 올리기' },
   volumeDown: { icon: 'volumeDown', title: '볼륨 내리기' },
-  power: { icon: 'devicePower', title: '기기 전원(화면 켜기/끄기)' },
-  lock: { icon: 'devicePower', title: '잠금(화면 끄기)' },
+  lock: { icon: 'lockScreen', title: '화면 잠금/깨우기' },
+  //  구 데몬 호환 — 예전 목록에는 화면 전원이 `power` 라는 이름으로 들어 있었다.
+  power: { icon: 'lockScreen', title: '화면 잠금/깨우기' },
 };
 
 /** 이 웹뷰가 H.264 를 풀 수 있는가 — 없으면 조용히 폴링으로 돌아간다(빈 화면 금지). */
@@ -94,11 +96,19 @@ export class EmulatorView {
     this.sawKeyFrame = false;
     this.videoOn = false;    // 지금 영상으로 보고 있는가(폴링과 배타)
     /**
-     * 보여 줄 때 돌려야 하는 각도(0/90/180/270).
+     * 지금 기기를 **가로로 눕혀 놓았는가**(회전 버튼이 오가는 두 상태). null = 아직 모름 →
+     *  첫 프레임을 보고 "지금 보이는 그대로" 로 정한다(가로가 자연스러운 태블릿도 안 돌아간다).
+     */
+    this.wantLandscape = null;
+    /**
+     * 보여 줄 때 돌려야 하는 각도(0 또는 90). 규칙은 딱 한 줄이다:
+     *  **보이는 프레임이 원하는 방향과 다르면 90도 돌려 그린다.**
      *
-     * ★ 왜 필요한가: iOS 시뮬레이터는 **회전해도 프레임버퍼가 세로 그대로**고 내용만 눕는다
-     *  (안드로이드는 인코딩 크기 자체가 바뀌어 이게 필요 없다). 그대로 그리면 세로 액자 안에
-     *  옆으로 누운 화면이 들어앉는다 — Orca 도 같은 이유로 스트림을 CSS 로 되돌린다.
+     *  · iOS 는 눕혀도 프레임버퍼가 세로 그대로라(내용만 돈다) → 늘 90도가 정답이다.
+     *  · 안드로이드는 OS 가 회전을 받아들이면 프레임 자체가 가로가 된다 → 우리가 돌릴 게 없다(0도).
+     *  · 두 OS 모두 **거부하는 화면이 있다**(아이폰 홈 화면·안드로이드 런처는 세로 고정이다).
+     *    그때는 프레임이 세로 그대로니 우리가 90도 돌린다 = 기기를 손에 들고 돌린 모습.
+     *    Orca 도 같은 그림을 보여 준다(홈 화면 아이콘 글자까지 옆으로 눕는다).
      *  ⚠ 그림을 돌리면 **입력 좌표도 같이 돌려야 한다**(안 그러면 회전 뒤 엉뚱한 데가 눌린다).
      */
     this.visualRot = 0;
@@ -187,6 +197,7 @@ export class EmulatorView {
     this.frameAspect = null;
     this.videoNote = '';
     this.visualRot = 0;             // 기기를 바꾸면 표시 회전도 처음으로
+    this.wantLandscape = null;      //  (다음 기기의 첫 프레임을 보고 다시 정한다)
     this.lastTouch = Date.now();
     //  ★ 이름까지 같이 올린다 — 탭 제목이 기기명이 되어야 어느 탭이 어느 기기인지 한눈에 보인다
     //   (id 는 `ios:8B21…` 라 사람이 읽을 수 없다). 목록을 아직 못 받았으면 빈 문자열 →
@@ -215,8 +226,9 @@ export class EmulatorView {
     this.stream = info;
     this.videoNote = '';
     this.videoOn = true;
-    //  ★ 이미 눕혀 놓은 기기에 붙었을 수도 있다 — 데몬이 알려 준 지금 방향으로 시작한다.
-    if (typeof info.orientation === 'string') this.visualRot = EmulatorView.rotForOrientation(info.orientation);
+    //  ★ 이미 눕혀 놓은 기기에 붙었을 수도 있다 — 데몬이 아는 방향이 있으면 그걸 출발점으로 삼는다
+    //   (iOS 는 붙는 순간 세로로 맞춰지므로 대개 'portrait' 다).
+    if (typeof info.orientation === 'string') this.wantLandscape = /^landscape/.test(info.orientation);
     this.frameAspect = info.width && info.height ? info.width / info.height : this.frameAspect;
     this.render();                       // <img> → <canvas> 로 갈아끼운다
     this.openVideoSocket();
@@ -230,9 +242,13 @@ export class EmulatorView {
         if (!this.disposed && cv) {
           //  캔버스 크기를 매 프레임 만지면 백스토어가 다시 잡히고 리플로우가 난다 — 바뀔 때만.
           if (cv.width !== frame.displayWidth || cv.height !== frame.displayHeight) {
+            const wasLandscape = this.frameIsLandscape();
             cv.width = frame.displayWidth;
             cv.height = frame.displayHeight;
             this.frameAspect = frame.displayWidth / frame.displayHeight;
+            //  ★ 세로↔가로가 바뀌었다 = 기기가 실제로 돌았다(안드로이드는 인코딩 크기가 바뀐다).
+            //   회전 표시를 다시 계산한다 — 이게 없으면 기기가 돈 뒤에도 우리가 덧돌려 그린다.
+            if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();
           }
           cv.getContext('2d')?.drawImage(frame, 0, 0);
           if (this.errEl && this.err) { this.err = null; this.errEl.textContent = ''; }
@@ -319,7 +335,11 @@ export class EmulatorView {
           const f = await api.emulatorFrame(this.deviceId, { maxWidth: this.wantWidth(), quality: 72 });
           if (this.disposed) break;
           this.frameUrl = `data:${f.mime};base64,${f.base64}`;
-          if (f.width && f.height) this.frameAspect = f.width / f.height;
+          if (f.width && f.height) {
+            const wasLandscape = this.frameIsLandscape();
+            this.frameAspect = f.width / f.height;
+            if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();   // 영상과 같은 규율
+          }
           this.err = null;
           this.paintFrame();
         } catch (e) {
@@ -360,14 +380,39 @@ export class EmulatorView {
     return Math.max(360, Math.min(1200, Math.round(css * dpr) || 480));
   }
 
-  /** iOS 방향 이름 → 보여 줄 때 돌릴 각도. 세로 프레임버퍼 안에 누운 내용을 되돌린다. */
-  static rotForOrientation(o) {
-    //  ★ 부호는 실측으로 정했다(2026-08-06): landscape_right 에 +90 을 주면 **위아래가 뒤집혀**
-    //   보였다. 세로 프레임버퍼 안에 누운 내용을 되돌리는 방향이라 직관과 반대다.
-    if (o === 'landscape_right') return 270;
-    if (o === 'landscape_left') return 90;
-    if (o === 'portrait_upside_down') return 180;
-    return 0;
+  /** 지금 받고 있는 프레임이 가로 모양인가(모르면 null). */
+  frameIsLandscape() {
+    const cv = this.canvasEl;
+    if (cv && cv.width && cv.height) return cv.width > cv.height;
+    if (this.frameAspect) return this.frameAspect > 1;
+    return null;
+  }
+
+  /**
+   * 프레임 모양이 바뀔 때마다·회전 버튼을 누를 때마다 각도를 다시 계산한다(위 visualRot 주석).
+   *
+   * ★ 프레임이 **스스로** 우리가 아는 방향과 다르게 바뀌었으면 그건 기기 쪽에서 돌린 것이다
+   *  (에뮬레이터 창의 회전 버튼·기기 자동회전). 우리 상태를 그쪽에 맞춘다 — 안 맞추면 그 뒤로
+   *  계속 90도 어긋난 그림을 그린다.
+   */
+  syncRotation() {
+    const fl = this.frameIsLandscape();
+    if (fl === null) return;
+    if (this.wantLandscape === null) this.wantLandscape = fl;      // 처음 본 모습을 기준으로 삼는다
+    const deg = this.wantLandscape === fl ? 0 : 90;
+    if (deg === this.visualRot) return;
+    this.visualRot = deg;
+    this.applyLayout();
+  }
+
+  /**
+   * 프레임 **모양이 바뀌었다**. 우리가 요청한 방향으로 바뀌었으면 기기가 받아들인 것이고(각도만
+   *  다시 세면 된다), 우리가 모르는 방향으로 바뀌었으면 기기 쪽에서 돌린 것이다 → 그쪽에 맞춘다.
+   */
+  onFrameShapeChange() {
+    const fl = this.frameIsLandscape();
+    if (fl !== null && this.wantLandscape !== null && this.wantLandscape !== fl) this.wantLandscape = fl;
+    this.syncRotation();
   }
 
   /**
@@ -384,8 +429,8 @@ export class EmulatorView {
     const raw = this.frameAspect || 0.46;
     const deg = ((this.visualRot % 360) + 360) % 360;
     const shown = (deg === 90 || deg === 270) ? 1 / raw : raw;
-    //  스트립이 차지할 폭/높이를 빼고 견줘야 왔다갔다(레이아웃 진동)하지 않는다.
-    const side = this.keysEl ? 44 : 0;
+    //  스트립이 차지할 폭/높이를 빼고 견줘야 왔다갔다(레이아웃 진동)하지 않는다(= .emu-key + padding).
+    const side = this.keysEl ? 46 : 0;
     const roomIfRight = (r.width - side) / Math.max(1, r.height);
     const right = roomIfRight > shown;      // 옆에 세워도 화면이 안 줄어드는가
     wrap.classList.toggle("keys-right", right);
@@ -425,7 +470,16 @@ export class EmulatorView {
     const img = this.imgEl || this.canvasEl;
     if (!img) return null;
     const r = img.getBoundingClientRect();
-    const ar = this.frameAspect;
+    const deg = ((this.visualRot % 360) + 360) % 360;
+    /**
+     * 여백을 뺄 때 쓰는 비율은 **지금 눈에 보이는** 비율이다 — 90/270 도로 돌려 그리고 있으면
+     *  가로세로가 뒤집힌다.
+     *  ★ 여기가 틀리면 회전 뒤 화면 한복판을 눌러도 "기기 밖" 으로 판정돼 **아무 일도 안 일어난다**
+     *   (2026-08-06 실측: 세로 폰을 눕혀 놓고 크롬 아이콘을 눌렀는데 ratioOf 가 null 을 돌려줬다.
+     *   오류도 안 나고 조용히 무시되니, 겉보기엔 "회전하면 조작이 죽는다" 로 보인다).
+     */
+    const raw = this.frameAspect;
+    const ar = raw && (deg === 90 || deg === 270) ? 1 / raw : raw;
     let dw = r.width;
     let dh = r.height;
     if (ar) {
@@ -438,7 +492,6 @@ export class EmulatorView {
     if (x < 0 || x > 1 || y < 0 || y > 1) return null;   // 여백을 눌렀다 — 기기 밖이다
     //  ★ 그림을 돌려 보여 주고 있으면 **좌표도 같은 만큼 되돌려** 기기 좌표계로 옮긴다.
     //   안 하면 회전 직후부터 누르는 곳과 눌리는 곳이 어긋난다(그리고 그건 조용한 실패다).
-    const deg = ((this.visualRot % 360) + 360) % 360;
     if (deg === 90) return { x: y, y: 1 - x };
     if (deg === 180) return { x: 1 - x, y: 1 - y };
     if (deg === 270) return { x: 1 - y, y: x };
@@ -462,6 +515,24 @@ export class EmulatorView {
     } catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); return false; }
   }
 
+  /**
+   * 세로 ↔ 가로. **우리 그림을 먼저 돌리고** 기기에도 회전을 요청한다.
+   *
+   * ★ 기기가 받아 줬는지 기다리지 않는 게 핵심이다(2026-08-06 재설계). 아이폰 홈 화면·안드로이드
+   *  런처는 세로 고정이라 회전을 무시한다 — 기기의 대답을 기다렸다가 돌리던 앞 버전은 사용자가
+   *  버튼을 처음 누르는 그 자리에서 **아무 일도 안 일어났다**. 기기를 손에 들고 돌리면 화면이
+   *  다시 그려지든 말든 눕는다. 그 모습을 그대로 보여 준다(Orca 도 같다).
+   */
+  async rotate() {
+    const cur = this.wantLandscape === null ? (this.frameIsLandscape() || false) : this.wantLandscape;
+    this.wantLandscape = !cur;
+    this.syncRotation();
+    const ok = await this.send({ type: "rotate", orientation: !cur ? "landscape" : "portrait" });
+    //  보낼 수 없는 기기(회전을 못 하는 폴백 경로)면 돌린 그림을 되돌린다 — 오류만 나고 화면은
+    //   돌아간 채로 두면 사용자는 조작이 어긋난 줄 안다.
+    if (!ok) { this.wantLandscape = cur; this.syncRotation(); }
+  }
+
   async power(action, target) {
     const id = (target && target.id) || this.deviceId;
     if (!id) return;
@@ -476,6 +547,9 @@ export class EmulatorView {
       this.render();
       this.watchBoot(avd);
     }
+    //  ★ 끄면 기기 목록으로 돌아간다(2026-08-06). 예전엔 '‹ 목록으로' 버튼이 그 자리를 대신했는데
+    //   버튼을 뺐다 — 꺼진 기기 화면에 남아 있어 봐야 볼 것도 조작할 것도 없다.
+    if (action === "shutdown" && !this.disposed) { this.select(null); return; }
     if (!this.disposed) void this.loadDevices();
   }
 
@@ -567,40 +641,28 @@ export class EmulatorView {
     const keys = document.createElement("div");
     keys.className = "emu-keys";
     if (canInput) {
+      const ios = dev && dev.kind === "ios";
       for (const k of this.keyRow(dev)) {
         const spec = EMU_KEYS[k];
         const b = document.createElement("button");
         b.className = "emu-key";
-        b.innerHTML = icons[spec.icon]({ size: 19 });
+        b.innerHTML = icons[(ios && spec.iosIcon) || spec.icon]({ size: 22 });
         b.title = i18n.t(spec.title);
-        b.addEventListener("click", async () => {
-          const r = await this.send({ type: "key", key: k });
-          //  ★ iOS 는 회전해도 프레임버퍼가 그대로라 **우리가 돌려 그려야** 한다(위 visualRot 주석).
-          //   안드로이드는 인코딩 크기 자체가 바뀌므로 여기서 아무것도 안 한다.
-          if (r && typeof r === "object" && typeof r.orientation === "string") {
-            this.visualRot = EmulatorView.rotForOrientation(r.orientation);
-            this.applyLayout();
-          }
-        });
+        b.addEventListener("click", () => (k === "rotate" ? this.rotate() : this.send({ type: "key", key: k })));
         keys.appendChild(b);
       }
     }
-    //  기기 전원(에뮬레이터 자체를 끄고 켠다)과 목록으로 돌아가기 — 조작 키와 구분선으로 나눈다.
+    //  에뮬레이터 자체를 끄는 전원 — 기기 조작 키와 하는 일이 다르니 구분선으로 나눈다.
+    //  ★ '기기 목록으로'(‹) 버튼은 뺐다(2026-08-06 사용자 지시). 끄면 목록으로 돌아간다.
     const sep = document.createElement("span");
     sep.className = "emu-keys-sep";
     keys.appendChild(sep);
     const pw = document.createElement("button");
     pw.className = "emu-key";
     pw.title = booted ? i18n.t('에뮬레이터 끄기') : i18n.t('에뮬레이터 켜기');
-    pw.innerHTML = icons.power({ size: 18 });
+    pw.innerHTML = icons.power({ size: 21 });
     pw.addEventListener("click", () => this.power(booted ? "shutdown" : "boot"));
     keys.appendChild(pw);
-    const back = document.createElement("button");
-    back.className = "emu-key";
-    back.title = i18n.t('기기 목록으로');
-    back.innerHTML = icons.chevronLeft({ size: 18 });
-    back.addEventListener("click", () => this.select(null));
-    keys.appendChild(back);
 
     const stage = document.createElement("div");
     stage.className = "emu-stage";

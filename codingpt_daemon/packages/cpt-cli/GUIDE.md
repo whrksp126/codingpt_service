@@ -238,7 +238,8 @@ cpt emulator ax --device <id> 설정        # 검색어로 거르기
 cpt emulator tap-label --device <id> "설정"   # ★ 라벨로 누르기(후보가 여럿이면 안 누르고 알려 준다)
 cpt emulator tap --device <id> 0.5 0.5  # 좌표로 누르기(0~1 정규화)
 cpt emulator swipe --device <id> 0.5 0.8 0.5 0.2 --ms 250
-cpt emulator key --device <id> home     # back|home|recents|rotate|volumeUp|volumeDown|power|lock
+cpt emulator key --device <id> home     # back|home|recents|volumeUp|volumeDown|lock
+cpt emulator rotate --device <id> landscape   # 세로/가로(portrait|landscape). 반응형 확인용
 cpt emulator text --device <id> "안녕"
 cpt emulator open --device <id> https://…   # 주소/딥링크 열기
 ```
@@ -252,6 +253,10 @@ cpt emulator open --device <id> https://…   # 주소/딥링크 열기
 1. `cpt emulator ax` 로 지금 화면에 **무엇이 있는지** 읽는다
 2. `cpt emulator tap-label "…"` 로 누른다 — 못 찾으면 **오류로** 알려 준다
 3. 확인이 필요하면 `cpt emulator screenshot` 으로 눈으로도 본다
+
+★ **회전은 "요청"이다.** 홈 화면(아이폰·안드로이드 런처)이나 세로 고정 앱은 OS 가 회전을 거부한다 —
+`rotate` 는 성공을 돌려주지만 기기 화면은 그대로다. 반응형 레이아웃을 확인하려면 **가로를 지원하는
+앱을 앞에 띄운 뒤** 돌리고, `ax` 또는 스크린샷으로 **실제로 바뀌었는지 확인**하라.
 
 정직성 계약: `ax` 는 그 순간 화면의 접근성 트리다. 애니메이션 중이거나 커스텀 렌더링(캔버스·게임)
 이면 요소가 비어 있을 수 있다 — 그때는 스크린샷 + 좌표로 가라. 어떤 키를 받는지는 기기마다 다르니
