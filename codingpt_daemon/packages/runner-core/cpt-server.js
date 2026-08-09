@@ -44,13 +44,12 @@ const pendingUi = new Map();   // uiId → { resolve, reject, timer }
 const wsMeta = new Map();
 const LOG_MAX = 200;
 
-// 유닉스 소켓 경로 — sun_path 한계(macOS 104B) 초과 시 /tmp 짧은 폴백(경로 해시로 인스턴스 구분).
-//  초과 경로는 커널이 조용히 잘라 바인딩해 유령 소켓(연결은 되는데 파일이 안 보임)이 된다.
+// 소켓/파이프 경로 — 단일 출처(sock-path.js, Windows 포팅 계약 2).
+//  darwin/linux: <stateDir>/cpt.sock + sun_path 한계(104B) 초과 시 /tmp 짧은 폴백(기존 규칙 그대로).
+//  win32: \\.\pipe\codingpt-cpt-<sha8> — 파일이 아니므로 unlink/chmod/existsSync 를 스킵한다.
+const sockPathLib = require('./sock-path');
 function sockPath() {
-  const p = path.join(runtime.stateDir(), 'cpt.sock');
-  if (Buffer.byteLength(p) <= 100) return p;
-  const h = crypto.createHash('sha1').update(runtime.stateDir()).digest('hex').slice(0, 8);
-  return path.join('/tmp', `cpt-${typeof process.getuid === 'function' ? process.getuid() : 0}-${h}.sock`);
+  return sockPathLib.serverSockPath(runtime.stateDir());
 }
 
 function setControlWs(ws) {
@@ -626,7 +625,9 @@ async function dispatch(req, conn) {
       }
     } catch (_) { /* noop */ }
     setTimeout(() => {
-      try { fs.unlinkSync(sockPath()); } catch (_) { /* noop */ }
+      // named pipe(win32)는 파일이 아니다 — 프로세스 종료로 자동 소멸(unlink 스킵).
+      const sp = sockPath();
+      if (!sockPathLib.isPipePath(sp)) { try { fs.unlinkSync(sp); } catch (_) { /* noop */ } }
       process.exit(0);
     }, 200); // 응답 flush 여유
     return { shuttingDown: true, pid: process.pid };
@@ -1906,7 +1907,41 @@ const CAPABILITIES = [
 //  세션 churn·"can't find session" 을 유발한다(실측 데몬 3개 공존). ps 로 데몬 진입 프로세스를 직접 훑어
 //  자기 자신만 남기고 SIGTERM→(잔존 시)SIGKILL. 새 인스턴스 승리 = 앱 재시작 시맨틱과 일치.
 //  전용 소켓(-L codingpt)은 stateDir 무관 머신 전역이라, 머신당 데몬 1개가 올바른 불변식.
+// 데몬 진입 프로세스 판정 — <node 실행파일> <...>/daemon/index.js run 형태만.
+//  node 실행 토큰 + 스크립트 경로 + run 을 함께 요구 → 셸/에디터/grep 이 그 경로 문자열을 인자로
+//  담고 있어도(오탐) 안 잡힌다. 번들(@codingpt/daemon/index.js)·dev(packages/daemon/index.js) 공통.
+//  경로 구분자는 양방향([\\/]) — win32 CommandLine 은 `"C:\…\node.exe" "C:\…\daemon\index.js" run`
+//  처럼 역슬래시·따옴표가 섞인다(darwin ps 출력은 따옴표/역슬래시가 없어 판정 불변).
+function isDaemonEntryCmd(cmd) {
+  return /(^|[\\/"])node(\.exe)?"?\s+("[^"]*daemon[\\/]index\.js"|\S*daemon[\\/]index\.js)\s+run\b/.test(String(cmd || ''));
+}
+
+// win32 프로세스 목록 — Get-CimInstance(JSON). wmic 은 deprecated 라 PowerShell 을 정본으로 한다.
+function listProcessesWin() {
+  return new Promise((resolve) => {
+    const script = 'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress';
+    const tryOne = (bins) => {
+      if (!bins.length) return resolve([]);
+      execFile(bins[0], ['-NoProfile', '-NonInteractive', '-Command', script],
+        { maxBuffer: 16 * 1024 * 1024, timeout: 15000, windowsHide: true, encoding: 'utf8' },
+        (err, stdout) => { if (err) return tryOne(bins.slice(1)); resolve(parseWinProcessJson(stdout)); });
+    };
+    tryOne(['pwsh.exe', 'powershell.exe']);
+  });
+}
+
+/** Get-CimInstance JSON 파서(순수 — 테스트용 분리). 1건이면 객체를 벗기는 ConvertTo-Json 관례 흡수. */
+function parseWinProcessJson(out) {
+  let v;
+  try { v = JSON.parse(String(out || '').trim() || '[]'); } catch (_) { return []; }
+  const arr = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v] : []);
+  return arr
+    .map((r) => ({ pid: Number(r && r.ProcessId) || 0, cmd: String((r && r.CommandLine) || '') }))
+    .filter((r) => r.pid);
+}
+
 function killStrayDaemons() {
+  if (process.platform === 'win32') return killStrayDaemonsWin();
   return new Promise((resolve) => {
     let strays = [];
     execFile('/bin/ps', ['-A', '-o', 'pid=,command='], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
@@ -1918,10 +1953,7 @@ function killStrayDaemons() {
         const pid = parseInt(m[1], 10);
         const cmd = m[2] || '';
         if (!pid || pid === self) continue;
-        // 데몬 진입 프로세스만: <node 실행파일> <...>/daemon/index.js run 형태.
-        //  node 실행 토큰 + 공백없는 스크립트 경로 + run 을 함께 요구 → 셸/에디터/grep 이 그 경로
-        //  문자열을 인자로 담고 있어도(오탐) 안 잡힌다. 번들(@codingpt/daemon/index.js)·dev(packages/daemon/index.js) 공통.
-        if (!/(^|\/)node(\.exe)?\s+\S*daemon\/index\.js\s+run\b/.test(cmd)) continue;
+        if (!isDaemonEntryCmd(cmd)) continue;
         strays.push(pid);
       }
       if (!strays.length) return resolve(0);
@@ -1937,13 +1969,28 @@ function killStrayDaemons() {
   });
 }
 
+// win32 등가 — 시그널 graceful 이 없으므로 taskkill /T /F(트리 강제 종료)로 바로 정리한다.
+async function killStrayDaemonsWin() {
+  const procs = await listProcessesWin();
+  const self = process.pid;
+  const strays = procs.filter((r) => r.pid !== self && isDaemonEntryCmd(r.cmd)).map((r) => r.pid);
+  for (const pid of strays) {
+    try { execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 8000 }, () => {}); }
+    catch (_) { /* noop */ }
+  }
+  return strays.length;
+}
+
 // 같은 stateDir 의 기존 데몬 인스턴스 감지·인수 — 살아있으면 shutdown 을 지시하고 소켓이 빌 때까지 대기.
 //  (tauri dev 재시작·수동 재실행이 남긴 인스턴스와 단일 control WS 를 서로 뺏는 replaced 재접속
 //   폭주(~2s 간격)를 원천 차단. 새 인스턴스 승리 = PC 앱 재시작 시맨틱과 일치)
 function takeoverExisting(timeoutMs = 4000) {
   return new Promise((resolve) => {
     const sock = sockPath();
-    if (!fs.existsSync(sock)) return resolve(false);
+    const isPipe = sockPathLib.isPipePath(sock);
+    // named pipe 는 파일이 아니라 existsSync 로 못 본다(열어 보는 것 자체가 인스턴스를 소비한다)
+    //  → win32 는 바로 접속 시도로 존재를 판정한다(없으면 error 콜백 = 인수 불필요).
+    if (!isPipe && !fs.existsSync(sock)) return resolve(false);
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     const probe = net.createConnection(sock);
@@ -1954,6 +2001,18 @@ function takeoverExisting(timeoutMs = 4000) {
       probe.on('close', () => {
         clearTimeout(guard);
         const t0 = Date.now();
+        if (isPipe) {
+          // 파이프는 마지막 핸들이 닫히면 자동 소멸 — 재접속이 실패할 때까지 폴링한다.
+          const pollPipe = () => {
+            if (Date.now() - t0 > timeoutMs) return finish(true);
+            const p2 = net.createConnection(sock);
+            const g2 = setTimeout(() => { try { p2.destroy(); } catch (_) { /* noop */ } finish(true); }, 500);
+            p2.on('connect', () => { clearTimeout(g2); try { p2.destroy(); } catch (_) { /* noop */ } setTimeout(pollPipe, 150); });
+            p2.on('error', () => { clearTimeout(g2); finish(true); }); // 파이프 소멸 = 기존 인스턴스 종료
+          };
+          setTimeout(pollPipe, 150);
+          return;
+        }
         const poll = setInterval(() => {
           // 기존 인스턴스가 exit 하며 소켓을 unlink 한다 — 사라지면(또는 타임아웃) 진행.
           if (!fs.existsSync(sock) || Date.now() - t0 > timeoutMs) { clearInterval(poll); finish(true); }
@@ -1967,8 +2026,12 @@ function takeoverExisting(timeoutMs = 4000) {
 function start() {
   if (server) return server;
   const sock = sockPath();
-  try { fs.mkdirSync(path.dirname(sock), { recursive: true }); } catch (_) { /* noop */ }
-  try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
+  const isPipe = sockPathLib.isPipePath(sock);
+  if (!isPipe) {
+    // named pipe(win32)는 파일이 아니다 — mkdir/unlink/chmod 전부 스킵(계약 2).
+    try { fs.mkdirSync(path.dirname(sock), { recursive: true }); } catch (_) { /* noop */ }
+    try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
+  }
   server = net.createServer((conn) => {
     let buf = '';
     let handled = false; // 한 커넥션 = 한 요청(one-shot). 블로킹 대기 중 도착한 추가 데이터는 무시한다.
@@ -2026,7 +2089,7 @@ function start() {
     //  실패 시 unlink 후 1회 재시도(EADDRINUSE 는 unlink 전 크래시/중복 기동 잔재가 대부분).
     if (e && e.code === 'EADDRINUSE') {
       const probe = net.createConnection(sock);
-      const retry = () => { try { fs.unlinkSync(sock); } catch (_) { /* noop */ } server.listen(sock); };
+      const retry = () => { if (!isPipe) { try { fs.unlinkSync(sock); } catch (_) { /* noop */ } } server.listen(sock); };
       probe.on('connect', () => { probe.end(); console.error('[cpt] 소켓을 다른 데몬이 사용 중 — 이 인스턴스는 cpt 비활성'); });
       probe.on('error', retry);
       return;
@@ -2034,7 +2097,9 @@ function start() {
     console.error('[cpt] 소켓 오류:', e.message);
   });
   server.listen(sock, () => {
-    try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ }
+    // 파이프는 chmod 대상이 아니다 — 기본 DACL(로컬 사용자)로 충분. TODO(win32): 보안 강화 시
+    //  파이프 SD(현재 사용자 SID 한정)를 네이티브로 지정하는 방안 검토(§보고).
+    if (!isPipe) { try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ } }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);
   });
   return server;
@@ -2057,6 +2122,8 @@ module.exports = {
   _drivePermissionDialog: drivePermissionDialog,
   _driveMode: driveMode,
   _driveCodexMode: driveCodexMode,          // 테스트/격리 검증용(io 주입)
+  _isDaemonEntryCmd: isDaemonEntryCmd,      // 테스트용(win32 CommandLine 판정 포함)
+  _parseWinProcessJson: parseWinProcessJson, // 테스트용(Get-CimInstance JSON 파서)
   _clearComposerResidue: clearComposerResidue, // 테스트/격리 검증용
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,

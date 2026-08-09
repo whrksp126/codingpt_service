@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: lan.json 0600 퍼미션 단정 + 순차 의존(B-2 가 LAN_PORT 를 세움) — win32 정리 후
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('lan.test.js: win32 스킵 — lan.json 0600 퍼미션 단정 + 순차 의존(B-2 가 LAN_PORT 를 세움)', { skip: true }, () => {});
+  return;
+}
+
 // LAN 직결(임무 F) 회귀/계약 테스트 — node --test
 //   실행: node --test packages/runner-core/test/lan.test.js
 //

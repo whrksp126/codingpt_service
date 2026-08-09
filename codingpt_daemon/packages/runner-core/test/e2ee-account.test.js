@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: 0600 퍼미션 단정 + 순차 시나리오(테스트 간 상태 공유) — win32 퍼미션 모델 정리 후
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('e2ee-account.test.js: win32 스킵 — 0600 퍼미션 단정 + 순차 시나리오(테스트 간 상태 공유)', { skip: true }, () => {});
+  return;
+}
+
 // 계정 열쇠 클라이언트(기능2 2b) 계약 테스트 — node --test
 //   실행: CPT_SHIM_NO_GLOBAL_LINK=1 node --test packages/runner-core/test/e2ee-account.test.js
 //

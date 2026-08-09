@@ -51,6 +51,12 @@ v=$(curl -s --max-time 15 "$BACK/api/pc/update/darwin/aarch64/0.0.1" 2>/dev/null
   | python3 -c "import sys,json;s=sys.stdin.read().strip();print(json.loads(s)['version'] if s else '')" 2>/dev/null || echo '')
 [ -n "$v" ] && ok "PC 업데이트 채널 응답 (발행 최신 $v)" || bad "PC 업데이트 채널이 버전을 안 줌(latest.json 확인)"
 
+# 5) PC Windows 채널 — 아직 미발행이 정상(실기 검증 전이라 FAIL 로 치지 않는다). 발행되면 버전 표시.
+vw=$(curl -s --max-time 15 "$BACK/api/pc/update/windows/x86_64/0.0.1" 2>/dev/null \
+  | python3 -c "import sys,json;s=sys.stdin.read().strip();print(json.loads(s)['version'] if s else '')" 2>/dev/null || echo '')
+if [ -n "$vw" ]; then ok "PC Windows 업데이트 채널 응답 (발행 최신 $vw)"
+else printf "  INFO  PC Windows 채널 미발행(정상 — 실기 검증 전)\n"; fi
+
 echo
 if [ "$fails" != 0 ]; then echo "❌ $fails 건 실패 — 완료 보고 금지"; exit 1; fi
 echo "✅ 검증 통과"

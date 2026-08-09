@@ -32,10 +32,52 @@ function lsof(args, timeout = 4000) {
   });
 }
 
+// ── win32 병렬 구현(Windows 포팅 §D-4) — darwin lsof 경로는 아래 그대로 무수정 ─────────────
+// PowerShell Get-NetTCPConnection 으로 LISTEN 소켓 + 프로세스 이름을 **한 번에** JSON 으로 받는다
+//  (lsof -Fpcn 과 같은 이유 — 명령 이름이 있어야 사용자가 포트를 고를 수 있다).
+const PS_BINS = ['pwsh.exe', 'powershell.exe'];
+const WIN_PORTS_SCRIPT =
+  'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [pscustomobject]@{'
+  + ' address=$_.LocalAddress; port=[int]$_.LocalPort; pid=[int]$_.OwningProcess;'
+  + ' command=(Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName } }'
+  + ' | ConvertTo-Json -Compress';
+
+function psExec(script, timeout = 8000) {
+  return new Promise((resolve) => {
+    const tryOne = (bins) => {
+      if (!bins.length) return resolve('');
+      execFile(bins[0], ['-NoProfile', '-NonInteractive', '-Command', script],
+        { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true, encoding: 'utf8' },
+        (err, stdout) => { if (err) return tryOne(bins.slice(1)); resolve(String(stdout || '')); });
+    };
+    tryOne(PS_BINS);
+  });
+}
+
+/** Get-NetTCPConnection JSON 파서(순수) — 테스트가 고정 샘플로 이 함수를 직접 돌린다. */
+function parseWinListenRows(jsonText) {
+  let v;
+  try { v = JSON.parse(String(jsonText || '').trim() || '[]'); } catch (_) { return []; }
+  const arr = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v] : []); // ConvertTo-Json 은 1건이면 객체를 벗긴다
+  const rows = [];
+  for (const r of arr) {
+    if (!r || typeof r !== 'object') continue;
+    const port = Number(r.port);
+    const addr = String(r.address || '');
+    if (!Number.isFinite(port)) continue;
+    // lsof 파서와 같은 규칙: 로컬 바인딩(루프백/와일드카드)만, dev 포트대만.
+    if (!/^(127\.0\.0\.1|::1|::|0\.0\.0\.0)$/.test(addr)) continue;
+    if (!(port > 1024 && port <= MAX_DEV_PORT) || IGNORE_PORTS.has(port)) continue;
+    rows.push({ pid: Number(r.pid) || null, port, command: String(r.command || '') });
+  }
+  return rows;
+}
+
 // LISTEN 소켓 → [{ pid, port, command }] (127.0.0.1/*/::1 등 로컬 바인딩만, dev 포트대만).
 //  ⚠ `c`(명령 이름)를 같은 호출에서 받는다 — lsof 를 한 번 더 돌리지 않는다. 이름이 있어야
 //   사용자가 목록에서 "3000 이 뭐였더라"를 판단할 수 있다(포트 번호만으로는 못 고른다).
 async function listListenSockets() {
+  if (process.platform === 'win32') return parseWinListenRows(await psExec(WIN_PORTS_SCRIPT));
   // -Fpcn: p<pid>·c<command> 블록 + n<name> 라인(프로세스별로 그룹핑됨).
   return parseListenSockets(await lsof(['-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']));
 }
@@ -58,7 +100,11 @@ function parseListenSockets(out) {
 }
 
 // pid[] → { pid: cwdAbs } (각 프로세스의 현재 작업 디렉토리).
+//  win32: 프로세스 CWD 를 표준 도구로는 못 얻는다(NtQueryInformationProcess 네이티브 필요) → 빈 맵.
+//   결과: cwd 필터를 준 호출에서 모든 포트가 others("다른 곳")로 분류된다 — 감추지는 않는다.
+//   TODO(win32): 네이티브 애드온/wmic ExecutablePath 휴리스틱으로 워크스페이스 귀속을 복원할 것.
 async function cwdsForPids(pids) {
+  if (process.platform === 'win32') return {};
   if (!pids.length) return {};
   const out = await lsof(['-a', '-d', 'cwd', '-Fn', '-p', pids.join(',')]);
   const map = {};
@@ -199,4 +245,8 @@ function openTcpStream({ serverUrl, deviceToken }, { streamToken, params }) {
   ws.on('error', (e) => console.error(`[proxy] 스트림 WS 오류: ${e.message}`));
 }
 
-module.exports = { listPorts, openTcpStream, _parseListenSockets: parseListenSockets, _foldByPort: foldByPort };
+module.exports = {
+  listPorts, openTcpStream,
+  _parseListenSockets: parseListenSockets, _foldByPort: foldByPort,
+  _parseWinListenRows: parseWinListenRows,
+};

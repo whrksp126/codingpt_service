@@ -68,6 +68,32 @@ export const COMMANDS = [
   { id: "ws.select8", key: "Mod+8", scope: "global", group: "goto", pc: true, app: true, palette: false },
 ];
 
+// ── win32 기본값 오버라이드(2026-08, Windows 포팅 계약 5) ────────────────────
+//  왜 표가 따로인가: 비-Apple 에서 `Mod` 는 Ctrl 로 풀리는데, 터미널 앱에서 Ctrl+글자는
+//  셸 제어문자(^P ^F ^T ^D ^W ^B …)와 정면 충돌한다. 그래서 win32 기본값은 Windows Terminal/
+//  VS Code 관용대로 **Ctrl+Shift 계열**로 옮긴다(팔레트 Ctrl+Shift+P, 검색 Ctrl+Shift+F …).
+//  · Ctrl+Alt 조합은 win32 기본값으로 쓰지 않는다 — AltGr(유럽 자판의 문자 입력)가 곧
+//    ctrl+alt 라서, 걸어 두면 문자 입력을 삼킨다. pane 포커스 이동은 WT 관용(Alt+화살표).
+//  · 여기 없는 명령(Mod+Comma, Mod+1~8, Mod+Shift+U)은 Ctrl 로 풀려도 제어문자가 아니라
+//    mac 표 그대로 쓴다.
+//  ⚠ COMMANDS 의 `key` 는 앱(commands.ts)과 대조 테스트로 묶여 있어 건드리지 않는다 —
+//    win32 차이는 이 오버라이드 한 겹으로만 표현한다.
+const WIN_KEYS = {
+  "palette.open": "Mod+Shift+P",
+  "find.open": "Mod+Shift+F",
+  "ws.addTerminal": "Mod+Shift+T",
+  "ws.addIde": "Mod+Shift+E",
+  "ws.addPreview": "Mod+Shift+O",
+  "pane.splitRight": "Mod+Shift+D",
+  "pane.splitDown": "Alt+Shift+D",
+  "pane.close": "Mod+Shift+W",
+  "pane.focusLeft": "Alt+ArrowLeft",
+  "pane.focusRight": "Alt+ArrowRight",
+  "pane.focusUp": "Alt+ArrowUp",
+  "pane.focusDown": "Alt+ArrowDown",
+  "sidebar.toggle": "Mod+Shift+B",
+};
+
 /** 이 플랫폼에서 쓰는 것만. platform: 'pc' | 'app' */
 export function commandsFor(platform) {
   return COMMANDS.filter((c) => (platform === "app" ? c.app : c.pc));
@@ -77,10 +103,13 @@ export function commandById(id) {
   return COMMANDS.find((c) => c.id === id) || null;
 }
 
-/** id → 기본 조합. 사용자가 바꾸지 않은 값의 출처. */
-export function defaultBindings(platform) {
+/** id → 기본 조합. 사용자가 바꾸지 않은 값의 출처.
+ *  `windows` 가 참이면 win32 오버라이드(WIN_KEYS)를 덮는다 — 생략 시 기존 동작 그대로. */
+export function defaultBindings(platform, windows = false) {
   const out = {};
-  for (const c of commandsFor(platform)) out[c.id] = c.key;
+  for (const c of commandsFor(platform)) {
+    out[c.id] = windows && Object.prototype.hasOwnProperty.call(WIN_KEYS, c.id) ? WIN_KEYS[c.id] : c.key;
+  }
   return out;
 }
 
@@ -177,8 +206,28 @@ export function formatCombo(combo, apple) {
     if (parts.includes("Shift")) out += "⇧";
     return out + sym;
   }
-  const words = parts.map((p) => (p === "Mod" ? "Ctrl" : p));
+  // 비-Apple 은 Mod=Ctrl 이다. `Mod+Ctrl+X`(mac 의 ⌘⌃X 저장값)가 오면 Ctrl 이 두 번 찍히지
+  //  않게 하나로 접는다(combo 포맷의 Ctrl 명시 수식어 허용 — Windows 포팅 계약 5).
+  const words = [];
+  for (const p of parts) {
+    const w = p === "Mod" ? "Ctrl" : p;
+    if (!words.includes(w)) words.push(w);
+  }
   return [...words, sym].join("+");
+}
+
+/**
+ * 비-Apple(Mod=Ctrl) 정규화 — 명시 `Ctrl` 수식어를 `Mod` 로 접는다.
+ *  손으로 적은 `Ctrl+Shift+P` 저장값이 실제 키 이벤트(comboFromEvent 는 Mod 로 보고)와
+ *  같은 문자열이 되어야 매칭이 산다. Apple 에선 ⌘(Mod)과 ⌃(Ctrl)이 딴 키라 접지 않는다.
+ */
+export function foldCtrlIntoMod(combo) {
+  const norm = normalizeCombo(combo);
+  if (!norm) return null;
+  const parts = norm.split("+");
+  const key = parts.pop();
+  const mods = new Set(parts.map((p) => (p === "Ctrl" ? "Mod" : p)));
+  return [...MOD_ORDER.filter((m) => mods.has(m)), key].join("+");
 }
 
 /**
@@ -198,6 +247,9 @@ export function comboFromEvent(e, apple) {
   if (key == null) return null;
   // 수식어 키 자체는 조합이 아니다.
   if (["Shift", "Control", "Alt", "Meta"].includes(String(e && e.key))) return null;
+  // AltGr(비-Apple 의 ctrl+alt 동시) = 문자 입력이다 — 조합으로 잡으면 유럽 자판의 글자를
+  //  삼킨다. 항상 null 을 돌려 셸/입력칸으로 통과시킨다(Windows 포팅 계약 5).
+  if (!apple && e && e.ctrlKey && e.altKey) return null;
   const mods = [];
   const modDown = apple ? !!(e && e.metaKey) : !!(e && e.ctrlKey);
   const ctrlDown = apple ? !!(e && e.ctrlKey) : false;
@@ -229,13 +281,16 @@ export function findConflicts(bindings) {
   return out;
 }
 
-/** 저장값 + 기본값 → 실제 적용 조합표. 사용자가 비운 것(null)은 "안 걸림"이다. */
-export function resolveBindings(platform, saved) {
+/** 저장값 + 기본값 → 실제 적용 조합표. 사용자가 비운 것(null)은 "안 걸림"이다.
+ *  `windows` 가 참이면 ① 기본값에 WIN_KEYS 를 덮고 ② 명시 Ctrl 을 Mod 로 접는다
+ *  (comboFromEvent 가 비-Apple 에서 Ctrl 을 Mod 로 보고하므로 — 매칭 표기 통일). */
+export function resolveBindings(platform, saved, windows = false) {
+  const defaults = defaultBindings(platform, windows);
   const out = {};
   for (const c of commandsFor(platform)) {
     const has = saved && Object.prototype.hasOwnProperty.call(saved, c.id);
-    const v = has ? saved[c.id] : c.key;
-    out[c.id] = v == null ? null : normalizeCombo(v);
+    const v = has ? saved[c.id] : defaults[c.id];
+    out[c.id] = v == null ? null : (windows ? foldCtrlIntoMod(v) : normalizeCombo(v));
   }
   return out;
 }

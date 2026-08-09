@@ -26,11 +26,106 @@ const DEFAULT_SERVER: &str = "https://codingpt-back.ghmate.com";
 #[cfg(debug_assertions)]
 const DEFAULT_SERVER: &str = "http://localhost:5300";
 
+// ── win32 Job Object — Child::kill() 은 직계 프로세스만 죽여 데몬의 자식(손자)이 고아로 남는다
+//  (유닉스 프로세스 그룹 등가물이 없다). 스폰 직후 데몬을 KILL_ON_JOB_CLOSE Job 에 넣으면 앱이
+//  어떤 경로로 죽어도(크래시 포함 — 핸들 소멸=Job 소멸) 트리가 함께 정리된다.
+//  BREAKAWAY_OK 를 함께 켜는 이유: term-host(윈도우 세션 호스트, 포팅 계약 1)는 데몬이 죽어도
+//  터미널이 살아야 하므로, 데몬이 CREATE_BREAKAWAY_FROM_JOB 으로 탈출시킬 길을 열어 둔다.
+#[cfg(windows)]
+mod winjob {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    pub struct Job(HANDLE);
+    // Job 핸들 조작은 스레드 무관(커널 오브젝트) — raw pointer 필드 때문에 자동 유도만 막혀 있다.
+    unsafe impl Send for Job {}
+
+    impl Job {
+        pub fn new() -> Option<Job> {
+            unsafe {
+                let h = CreateJobObjectW(None, PCWSTR::null()).ok()?;
+                let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                info.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+                if SetInformationJobObject(
+                    h,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+                .is_err()
+                {
+                    let _ = CloseHandle(h);
+                    return None;
+                }
+                Some(Job(h))
+            }
+        }
+
+        pub fn assign(&self, child: &std::process::Child) {
+            use std::os::windows::io::AsRawHandle;
+            unsafe {
+                let _ = AssignProcessToJobObject(self.0, HANDLE(child.as_raw_handle() as _));
+            }
+        }
+
+        // 잔여 트리 즉시 종료. TerminateJobObject 이후에도 Job 오브젝트는 유효 — 재스폰 자식을
+        //  같은 Job 에 다시 assign 할 수 있다(재시작 감시 스레드가 이 성질에 의존).
+        pub fn terminate(&self) {
+            unsafe {
+                let _ = TerminateJobObject(self.0, 1);
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+}
+
 // ── 데몬 생명주기 상태(Tauri managed state) ──────────────────────────
 #[derive(Default)]
 struct Daemon {
     child: Mutex<Option<Child>>, // run 프로세스 핸들
     should_run: Mutex<bool>,     // 감시 스레드 재시작 여부
+    #[cfg(windows)]
+    job: Mutex<Option<winjob::Job>>, // win32 프로세스 트리 묶음(손자 고아 방지)
+}
+
+// 스폰 직후 데몬 자식을 Job 에 편입(win32). 비-win 은 no-op — 유닉스는 kill 이 충분하다
+//  (데몬의 실작업 자식인 tmux 서버는 애초에 독립 생존이 계약이라 트리 정리 대상이 아니다).
+fn attach_daemon_job(state: &Daemon, child: &Child) {
+    #[cfg(windows)]
+    {
+        let mut g = state.job.lock().unwrap();
+        if g.is_none() {
+            *g = winjob::Job::new();
+        }
+        if let Some(job) = g.as_ref() {
+            job.assign(child);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (state, child);
+}
+
+// 데몬 kill 지점 공통 후처리 — win32 는 Job 을 종료해 손자까지 정리한다. 비-win no-op.
+fn kill_daemon_tree(state: &Daemon) {
+    #[cfg(windows)]
+    if let Some(job) = state.job.lock().unwrap().as_ref() {
+        job.terminate();
+    }
+    #[cfg(not(windows))]
+    let _ = state;
 }
 
 // ── 앱 종료 가드 — IDE 미저장 변경 여부(JS 가 dirty 전이마다 set_ide_dirty 로 미러) ──
@@ -212,6 +307,7 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
         if let Some(mut ch) = state.child.lock().unwrap().take() {
             let _ = ch.kill();
         }
+        kill_daemon_tree(&state);
     }
     app.restart();
 }
@@ -225,6 +321,7 @@ fn quit_app(app: AppHandle) {
         if let Some(mut ch) = state.child.lock().unwrap().take() {
             let _ = ch.kill();
         }
+        kill_daemon_tree(&state);
     }
     app.exit(0);
 }
@@ -315,6 +412,8 @@ fn clear_local_account_credentials() {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
             }
+            // TODO(win32): %USERPROFILE%\.codingpt 하위라 기본 ACL 로 타 사용자 접근이 이미 막힌다.
+            //  0600 등가의 명시 DACL(icacls /inheritance:r 상당)은 후속 하드닝으로.
             let _ = std::fs::rename(tmp, path);
         }
     }
@@ -466,6 +565,8 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
     // 조합을 쓰는지"를 서버가 알 수 없었다(버전 스큐 진단 불가).
     cmd.env("CPT_APP_VERSION", app.package_info().version.to_string());
     // 번들 tmux(사이드카 base/tmux/bin/tmux)가 있으면 주입 → 데몬이 무설치 tmux 사용.
+    //  win32 는 tmux 부재(세션 호스트 = term-host, 포팅 계약 1) — 주입하지 않는다.
+    #[cfg(not(windows))]
     if let Some(base) = node.parent() {
         let bundled_tmux = base.join("tmux").join("bin").join("tmux");
         if bundled_tmux.exists() {
@@ -586,6 +687,7 @@ async fn daemon_pair_poll(
                 let _ = ch.wait();
             }
         }
+        kill_daemon_tree(&state);
         start_run(&app, &state)?;
     }
     Ok(v)
@@ -606,6 +708,7 @@ fn start_run(app: &AppHandle, state: &State<Daemon>) -> Result<(), String> {
         let mut cmd = build_command(app)?;
         cmd.arg("run");
         let child = cmd.spawn().map_err(|e| format!("데몬 run 실패: {e}"))?;
+        attach_daemon_job(state, &child);
         *guard = Some(child);
     }
     *state.should_run.lock().unwrap() = true;
@@ -627,6 +730,7 @@ fn daemon_stop(app: AppHandle, state: State<Daemon>) -> Status {
         let _ = ch.kill();
         let _ = ch.wait();
     }
+    kill_daemon_tree(&state);
     let _ = app.emit("daemon-changed", ());
     daemon_status(state)
 }
@@ -753,6 +857,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                     if let Some(mut ch) = state.child.lock().unwrap().take() {
                         let _ = ch.kill();
                     }
+                    kill_daemon_tree(&state);
                 }
                 app.exit(0);
             }
@@ -763,11 +868,21 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_window(tray.app_handle());
             }
         });
-    // 메뉴바 트레이 아이콘: 흰 글리프(alpha=모양)를 템플릿 이미지로 지정 → macOS 라이트/다크
+    // 메뉴바 트레이 아이콘: macOS 는 흰 글리프(alpha=모양)를 템플릿 이미지로 지정 → 라이트/다크
     //  메뉴바에 맞춰 자동 틴트. 앱/독 아이콘(초록)과 분리한다.
-    match tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")) {
+    //  win32 는 템플릿 개념이 없어 흰 글리프가 라이트 작업표시줄에서 안 보인다 — 다크 원형 배지 위
+    //  글리프(무채색, tray.png 에서 생성한 tray-win.png)를 쓴다.
+    #[cfg(target_os = "macos")]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray.png");
+    #[cfg(not(target_os = "macos"))]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray-win.png");
+    match tauri::image::Image::from_bytes(tray_bytes) {
         Ok(icon) => {
-            builder = builder.icon(icon).icon_as_template(true);
+            builder = builder.icon(icon);
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder.icon_as_template(true);
+            }
         }
         Err(_) => {
             if let Some(icon) = app.default_window_icon() {
@@ -1023,6 +1138,7 @@ pub fn run() {
                         if let Ok(mut cmd) = build_command(&h) {
                             cmd.arg("run");
                             if let Ok(child) = cmd.spawn() {
+                                attach_daemon_job(&state, &child);
                                 *state.child.lock().unwrap() = Some(child);
                                 let _ = h.emit("daemon-changed", ());
                             }
@@ -1108,6 +1224,7 @@ pub fn run() {
                         let _ = ch.kill();
                         let _ = ch.wait();
                     }
+                    kill_daemon_tree(&state);
                 }
                 // grouped view 세션 정리(primary/window 는 폰과 공유하므로 보존).
                 if let Some(ctx) = app_handle.try_state::<tmux::TmuxCtx>() {

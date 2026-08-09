@@ -7,6 +7,7 @@
 //  · 글꼴은 전부 앱 내장(styles.css @font-face) — 3플랫폼 동일 목록. 값 키는 백엔드
 //    화이트리스트(daemonController.APPEARANCE_KEYS)와 반드시 일치.
 import { api } from "./api.js";
+import { IS_WINDOWS } from "./path-utils.js";
 import * as I18N from "./i18n/index.js";
 
 const KEY_THEME = "cpt.theme";
@@ -16,7 +17,11 @@ const KEY_TERM_STYLE = "cpt.termStyle";
 
 const SANS_TAIL = '-apple-system, system-ui, "Segoe UI", sans-serif';
 const UI_FONT_DEFAULT = `"PretendardVariable", "Pretendard", ${SANS_TAIL}`;
-const MONO_FONT_DEFAULT = 'Menlo, Monaco, "SF Mono", Consolas, monospace';
+// 기본 코드 글꼴 — mac=Menlo(종전 그대로), win32=Consolas + 한글 폴백(번들 D2Coding → Malgun Gothic).
+//  설정값 키('default')는 플랫폼 공통이라 계정 동기화 값이 그대로 유효하다(계약 5).
+const MONO_FONT_DEFAULT = IS_WINDOWS
+  ? 'Consolas, "Cascadia Mono", "D2Coding", "Malgun Gothic", monospace'
+  : 'Menlo, Monaco, "SF Mono", Consolas, monospace';
 
 // 인터페이스 글꼴 — 결이 확연히 다른 4종(전부 내장). 기본 = Pretendard.
 export const UI_FONT_OPTIONS = [
@@ -29,7 +34,13 @@ export const UI_FONT_OPTIONS = [
 // 코드·터미널 글꼴 — 통일 목록(내장). "Symbols Nerd Font Mono"는 파워라인 글리프 폴백.
 const MONO_FALLBACK = '"Symbols Nerd Font Mono", ' + MONO_FONT_DEFAULT;
 export const MONO_FONT_OPTIONS = [
-  { value: "default", label: "기본 (Menlo)", stack: 'Menlo, Monaco, "SF Mono", Consolas, "Symbols Nerd Font Mono", monospace' },
+  {
+    value: "default",
+    label: IS_WINDOWS ? "기본 (Consolas)" : "기본 (Menlo)", // 라벨만 플랫폼 표기 — 값 키는 공통
+    stack: IS_WINDOWS
+      ? 'Consolas, "Cascadia Mono", "D2Coding", "Symbols Nerd Font Mono", "Malgun Gothic", monospace'
+      : 'Menlo, Monaco, "SF Mono", Consolas, "Symbols Nerd Font Mono", monospace',
+  },
   { value: "jetbrains", label: "JetBrains Mono", stack: `"JetBrains Mono", ${MONO_FALLBACK}` },
   { value: "fira", label: "Fira Code", stack: `"Fira Code", ${MONO_FALLBACK}` },
   { value: "d2coding", label: "D2Coding", stack: `"D2Coding", ${MONO_FALLBACK}` },

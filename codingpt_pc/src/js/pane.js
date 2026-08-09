@@ -17,6 +17,9 @@ import { CHAT } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { state as appState } from "./state.js";
+import { shellQuote } from "./path-utils.js";
+import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
+import { commandForCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
@@ -1609,6 +1612,9 @@ export class PaneView {
   _setupInput() {
     const ta = this.term?.textarea;
     if (!ta) return;
+    // win32(WebView2=Chromium): WKWebView 한글 IME 우회가 필요 없다 — xterm 표준 키 경로를
+    //  그대로 쓴다(계약 5). 아래 macOS 델타 경로는 한 줄도 건드리지 않는다(회귀 0 원칙).
+    if (IS_WINDOWS) { this._setupInputWin(ta); return; }
     this.term.attachCustomKeyEventHandler(() => false); // xterm 키 처리 비활성(전송은 아래가 전담)
     this._sentBuf = "";
     const SEQ = {
@@ -1708,7 +1714,7 @@ export class PaneView {
     //  우선순위: 파일 참조(Finder ⌘C → '경로' 인용 삽입, OS 드롭과 동일 규칙) > 이미지 데이터
     //  (스크린샷 → 임시 PNG 경로) > plain text. Finder 복사는 text/plain 에 파일명이 실릴 수
     //  있어 경로 확인이 텍스트보다 항상 선행돼야 한다(네이티브 pasteboard 를 invoke 로 조회).
-    const shqp = (p) => "'" + String(p).replace(/'/g, "'\\''") + "'"; // os-drop.shq 사본(순환 import 회피)
+    const shqp = shellQuote; // 대상 셸별 인용(path-utils — macOS 에선 종전 POSIX 인용과 동일 문자열)
     const onPaste = (e) => {
       if (e.target !== ta) return;
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1767,6 +1773,79 @@ export class PaneView {
       document.removeEventListener("compositionstart", onComp, true);
       document.removeEventListener("compositionupdate", onComp, true);
       document.removeEventListener("compositionend", onCompEnd, true);
+    };
+  }
+  // ── win32 입력 배선(계약 5) — xterm 표준 키 경로 + 앱 예약 조합만 위로 흘린다 ──
+  //  · Chromium(WebView2) IME 는 표준 경로에서 한글이 정상이라 WKWebView 델타 우회가 필요 없다.
+  //  · attachCustomKeyEventHandler: 예약 조합(현재 바인딩 표에 걸린 것)이면 false → xterm 이
+  //    무시하고 이벤트가 버블 → main.js 전역 단축키 핸들러가 실행한다. 나머지(Ctrl+* 포함)는
+  //    true → xterm 이 제어문자로 변환해 셸로 보낸다. AltGr(ctrl+alt 동시)는 comboOf 가
+  //    null 을 돌려줘 항상 문자 입력으로 통과한다(유럽 자판 보호).
+  //  · 입력 전송은 xterm 정본(onData → _write, mount 에서 이미 배선됨). Shift+Tab(CSI Z)·
+  //    Shift+PageUp/Down 스크롤백도 xterm 기본 동작이다.
+  _setupInputWin(ta) {
+    this.term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== "keydown") return true;
+      this._claimSize(); // 타이핑 = 이 pane 크기 주장(mac 경로와 동일 규칙)
+      if (ev.shiftKey && ev.key === "Enter" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        // 멀티라인 개행(Claude Code 등 REPL) — 3플랫폼 공통 UX(mac 경로와 동일 시퀀스).
+        ev.preventDefault();
+        this._write("\x1b\r");
+        return false;
+      }
+      const combo = comboOf(ev);
+      if (combo && commandForCombo(bindings(), combo)) return false; // 앱 예약 → 전역 핸들러 몫
+      return true; // 그 외 전부 xterm 표준 경로(제어문자·IME 포함)
+    });
+    // Codex alternate-screen 휠 보완 — mac 경로와 동일(xterm 동작 보정이라 플랫폼 무관).
+    const onWheel = (e) => {
+      if (this._activeAgentBrand() !== "codex") return;
+      if (this.term?.buffer?.active?.type !== "alternate") return;
+      if (this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none") return;
+      const dy = Number(e.deltaY) || 0;
+      if (!dy) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
+      this._write((dy < 0 ? "\x1b[A" : "\x1b[B").repeat(count));
+    };
+    this.termEl?.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    // 붙여넣기 — mac 과 같은 우선순위(파일 참조 > 이미지 데이터 > plain text). 경로/이미지 확인이
+    //  비동기라 기본 paste 를 막고 여기서 1회만 보낸다(중복 전송 방지 규칙 동일). 네이티브 클립보드
+    //  조회가 이 플랫폼 빌드에 없으면 조용히 텍스트로 폴백한다.
+    const onPaste = (e) => {
+      if (e.target !== ta) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+      (async () => {
+        let paths = [];
+        try { paths = await api.clipboardPaths(); } catch (_) { /* noop */ }
+        if (!Array.isArray(paths) || !paths.length) {
+          let img = null;
+          try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
+          if (img) paths = [img];
+        }
+        if (paths.length) { this.insertText(paths.map((p) => shellQuote(p)).join(" ") + " "); return; }
+        if (!text) return;
+        let t = text.replace(/\r?\n/g, "\r");                       // xterm 규칙: 개행 → CR
+        if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~";
+        this._write(t);
+      })();
+    };
+    document.addEventListener("paste", onPaste, true);
+    const onFocus = () => this._claimSize();
+    ta.addEventListener("focus", onFocus);
+    const onMouseDown = () => {
+      const at = this.node.tabs?.[this.node.active];
+      if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
+      this._claimSize();
+    };
+    this.termEl?.addEventListener("mousedown", onMouseDown);
+    this._inputDispose = () => {
+      ta.removeEventListener("focus", onFocus);
+      this.termEl?.removeEventListener("mousedown", onMouseDown);
+      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
+      document.removeEventListener("paste", onPaste, true);
     };
   }
   // 프로그램적 텍스트 삽입(OS 파일 드롭 등) — 붙여넣기(onPaste)와 동일 규칙:

@@ -34,6 +34,24 @@ DAEMON_SRC="$(cd "$PC_DIR/../codingpt_daemon" && pwd)"
 OUT="$PC_DIR/src-tauri/resources/daemon"
 CACHE="$PC_DIR/.node-cache"
 
+# ── win32 번들은 Windows 빌드머신 전제 ──
+#  node-datachannel 은 prebuild 가 아니라 빌드머신 컴파일 산물을 node_modules 채로 복사한다.
+#  mac 에서 win32 를 조립하면 mac 용 .node 가 들어가 사용자 PC 에서 조용히 깨진다 →
+#  Windows(GH windows-latest 러너 등)에서 `npm ci` 한 node_modules 로만 조립을 허용한다.
+#  (교차 조립이 정말 필요하면 CPT_ALLOW_CROSS_BUNDLE=1 로 명시 우회 — 산출물은 실행 불가 테스트용.)
+if [[ "$TARGET" == win32-* ]]; then
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) : ;;
+    *)
+      if [ "${CPT_ALLOW_CROSS_BUNDLE:-}" != "1" ]; then
+        echo "✗ win32 번들은 Windows 빌드머신에서 npm ci 한 node_modules 가 필요합니다(node-datachannel 컴파일 산물)." >&2
+        echo "  GH Actions windows-latest 러너를 사용하세요. (강제 교차 조립: CPT_ALLOW_CROSS_BUNDLE=1)" >&2
+        exit 1
+      fi
+      echo "⚠ CPT_ALLOW_CROSS_BUNDLE=1 — 비-Windows 에서 win32 조립(네이티브 모듈은 실행 불가, 테스트 전용)" >&2 ;;
+  esac
+fi
+
 echo "▸ target=$TARGET  node=v$NODE_VERSION"
 echo "▸ daemon src: $DAEMON_SRC"
 echo "▸ out:        $OUT"
@@ -53,7 +71,12 @@ if [ ! -f "$CACHE/$NODE_ARC" ]; then
 fi
 rm -rf "$CACHE/$NODE_PKG"
 if [[ "$NODE_ARC" == *.zip ]]; then
-  ( cd "$CACHE" && unzip -q "$NODE_ARC" )
+  # unzip 우선(GH windows 러너 Git Bash 에 있음), 없으면 bsdtar(Windows 내장 tar.exe)가 zip 을 푼다.
+  if command -v unzip >/dev/null 2>&1; then
+    ( cd "$CACHE" && unzip -q "$NODE_ARC" )
+  else
+    ( cd "$CACHE" && tar -xf "$NODE_ARC" )
+  fi
 else
   ( cd "$CACHE" && tar xzf "$NODE_ARC" )
 fi
@@ -75,6 +98,21 @@ cp -R "$DAEMON_SRC/packages/runner-core"  "$OUT/app/node_modules/@codingpt/runne
 cp -R "$DAEMON_SRC/packages/cpt-cli"      "$OUT/app/node_modules/@codingpt/cpt-cli"
 # 각 패키지 내부의 중첩 node_modules(있으면) 제거 — 루트로 통일
 rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" 2>/dev/null || true
+
+# ── win32 전용 구성 ──
+#  · term-host(계약 1 — tmux 등가 세션 호스트)는 데몬 워크스페이스 패키지라 별도 바이너리 없이 동봉.
+#    darwin 은 tmux 경로 그대로이므로 win32 에서만 넣는다(darwin 번들 불변 원칙).
+#  · serve-sim(iOS 시뮬레이터 라이브 화면)은 darwin+arm64 전용 — win32 번들에서 통째 제외.
+if [[ "$TARGET" == win32-* ]]; then
+  if [ -d "$DAEMON_SRC/packages/term-host" ]; then
+    cp -R "$DAEMON_SRC/packages/term-host" "$OUT/app/node_modules/@codingpt/term-host"
+    rm -rf "$OUT/app/node_modules/@codingpt/term-host/node_modules" 2>/dev/null || true
+    echo "▸ term-host 동봉 → @codingpt/term-host"
+  else
+    echo "⚠ packages/term-host 미존재 — win32 터미널 세션 호스트 없이 조립(WS A 완성 전 테스트 번들)" >&2
+  fi
+  rm -rf "$OUT/app/node_modules/serve-sim" 2>/dev/null || true
+fi
 
 # .bin 워크스페이스 심링크 제거 — cloud-runner 등 미번들 대상을 가리키는 깨진 심링크가
 #  Tauri 리소스 수집을 실패시킨다(런타임엔 node index.js 로 직접 실행하므로 불필요).

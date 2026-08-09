@@ -28,6 +28,7 @@ import {
   agentModeOf, agentModeLabel, patchLines, slashQuery, filterCommands, commandBadges,
   TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
+import { basename, isAbs, IS_WINDOWS } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -207,7 +208,9 @@ export class ChatView {
       // 방향키는 **우리가 직접** 캐럿을 움직인다(Selection.modify — Shift 선택/⌥단어/⌘줄 보존).
       //  한글 IME + WKWebView 가 방향키 기본 처리에서 기능키 전용 문자(PUA)를 텍스트로 흘리는
       //  버그(□ 삽입, 2회 신고)의 원천 차단: 기본 경로가 아예 실행되지 않는다. 조합 중엔 IME 소유.
-      if (e.key.startsWith("Arrow") && !e.isComposing && !e.ctrlKey) {
+      //  win32(Chromium)에는 이 버그가 없다 — 표준 캐럿 이동(Ctrl+화살표 단어 점프·Home/End 줄
+      //  이동이 Windows 관용)을 그대로 쓴다(mac 전용 우회의 플랫폼 가드, 계약 5).
+      if (!IS_WINDOWS && e.key.startsWith("Arrow") && !e.isComposing && !e.ctrlKey) {
         e.preventDefault();
         e.stopPropagation();
         const sel = window.getSelection();
@@ -232,12 +235,13 @@ export class ChatView {
     });
     // macOS 한글 IME + WKWebView 조합에서 방향키가 기능키 전용 문자(U+F700대 PUA)를 텍스트로
     //  흘리는 버그(실측: →/← 마다 □ 삽입) — 삽입 전 차단 + 삽입 후 소독의 이중 방어.
-    this.inputEl.addEventListener("beforeinput", (e) => {
+    //  win32(Chromium)엔 이 버그가 없다 — mac 에서만 건다(mac 전용 우회의 플랫폼 가드, 계약 5).
+    if (!IS_WINDOWS) this.inputEl.addEventListener("beforeinput", (e) => {
       const GHOST = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uE000-\uF8FF]/;
       if (e.inputType === "insertText" && e.data && GHOST.test(e.data)) e.preventDefault();
     });
     this.inputEl.addEventListener("input", () => {
-      this._ceSanitize();     // PUA 잔여 소독(조합 경로로 새는 케이스)
+      if (!IS_WINDOWS) this._ceSanitize(); // PUA 잔여 소독(조합 경로로 새는 케이스 — mac 전용 우회)
       this._reconcileChips(); // 백스페이스/선택 삭제로 칩이 지워졌으면 첨부 목록도 걷는다
       this._syncSlash();      // `/` 로 시작하면 명령 팔레트(공백을 치면 닫힌다)
       this._syncComposer();
@@ -783,7 +787,7 @@ export class ChatView {
     for (const p of (paths || []).filter(Boolean)) {
       if (this._attach.length >= 8) break;
       if (this._attach.some((a) => a.path === p)) continue;
-      const name = String(p).split("/").pop() || p;
+      const name = basename(p) || p;
       const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
       const a = { path: p, name, ext, img: IMG.has(ext), b64: null };
       this._attach.push(a);
@@ -1091,7 +1095,7 @@ export class ChatView {
   /** 미디어 바이트 — 로컬은 Tauri 직접 읽기(왕복 0), 원격은 데몬 chat.file(권한 검사 포함). */
   async _mediaBytes(target) {
     if (this.ctx.isLocal?.()) {
-      const abs = /^[~/]/.test(target) ? target : null;
+      const abs = (target.startsWith("~") || isAbs(target)) ? target : null; // win32 드라이브 경로 포함
       try {
         const b64 = await api.filePreviewB64(abs || target);
         if (b64) return { mediaType: this._mediaMime(target), base64: b64 };
@@ -1158,7 +1162,8 @@ export class ChatView {
     const parts = [];
     // 텍스트 런 안의 인용 절대경로('/…/x.ext')도 칩으로 — 전송 원문은 경로지만 채팅 표현은
     //  [확장자 배지·파일명] 칩(2026-07-30 사용자 확정: "전송은 경로 그대로, 표현은 칩").
-    const PATH_RE = /'(\/[^'\n]{1,300}?\.[A-Za-z0-9]{1,8})'/g;
+    //  win32 는 드라이브 문자 절대경로('C:\…\x.ext')도 인식한다(POSIX 판정은 종전 그대로).
+    const PATH_RE = /'((?:\/|[A-Za-z]:[\\/])[^'\n]{1,300}?\.[A-Za-z0-9]{1,8})'/g;
     const push = (t) => {
       if (!t) return;
       let last = 0;
@@ -1166,7 +1171,7 @@ export class ChatView {
       PATH_RE.lastIndex = 0;
       while ((pm = PATH_RE.exec(t))) {
         const path = pm[1];
-        const name = path.split("/").pop() || path;
+        const name = basename(path) || path;
         const ext = name.includes(".") ? name.split(".").pop() : "";
         if (pm.index > last) parts.push(escapeHtml(t.slice(last, pm.index)).replace(/\n/g, "<br>"));
         parts.push(`<span class="chat-chip msg" data-kind="path" data-path="${escapeHtml(path)}" title="${escapeHtml(path)}">` +
@@ -1317,7 +1322,7 @@ export class ChatView {
     if (mchip) {
       if (mchip.dataset.kind === "path") {
         const path = mchip.dataset.path || "";
-        const name = path.split("/").pop() || path;
+        const name = basename(path) || path;
         const ext = (name.includes(".") ? name.split(".").pop() : "").toLowerCase();
         const IMG = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "tiff"]);
         this._openPreview({ path, name, ext, img: IMG.has(ext), b64: null });
@@ -1571,7 +1576,7 @@ export class ChatView {
     if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('일치하는 파일 없음')}</div>`; return; }
     list.innerHTML = hit.map((p) => {
       const r = relToRoot(root, p);
-      const i = r.lastIndexOf("/");
+      const i = Math.max(r.lastIndexOf("/"), r.lastIndexOf("\\")); // `/`·`\` 양쪽 인식(win32 대비)
       return `<div class="chat-pick-row" data-path="${escapeHtml(p)}">` +
         `<span class="chat-pick-name">${escapeHtml(i < 0 ? r : r.slice(i + 1))}</span>` +
         (i < 0 ? "" : `<span class="chat-pick-dir">${escapeHtml(r.slice(0, i))}</span>`) +

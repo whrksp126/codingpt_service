@@ -9,6 +9,12 @@ use std::sync::{Arc, Mutex};
 use tauri::webview::PageLoadEvent;
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, State, Url, Webview, WebviewUrl};
 
+// Windows punch-through 구현체(WebView2 CompositionController + DirectComposition).
+//  아래 각 커맨드의 비-mac 자리에서 위임만 한다 — macOS 경로 무수정(계약 3).
+#[cfg(target_os = "windows")]
+#[path = "preview_win.rs"]
+mod preview_win;
+
 #[derive(Default)]
 pub struct PreviewManager {
     inner: Mutex<HashMap<String, Entry>>,
@@ -70,7 +76,9 @@ static DRAG_APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 pub fn preview_shield(on: bool) {
     #[cfg(target_os = "macos")]
     PUNCH_SHIELD.store(on, std::sync::atomic::Ordering::Relaxed);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    preview_win::shield(on);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = on;
 }
 
@@ -79,6 +87,13 @@ pub fn preview_shield(on: bool) {
 //  (스크린캐스트 없는 진짜 렌더링·반응형 실동작). 1.0 = 복원.
 #[tauri::command]
 pub fn preview_zoom(mgr: State<PreviewManager>, pane: String, zoom: f64) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::zoom(&pane, zoom);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let map = mgr.inner.lock().map_err(|e| e.to_string())?;
     let Some(entry) = map.get(&pane) else { return Ok(()) };
     #[cfg(target_os = "macos")]
@@ -94,6 +109,7 @@ pub fn preview_zoom(mgr: State<PreviewManager>, pane: String, zoom: f64) -> Resu
     #[cfg(not(target_os = "macos"))]
     let _ = (entry, zoom);
     Ok(())
+    }
 }
 
 // 메인 창 배경색 — 투명 슬롯의 "누수" 영역이 앱 배경과 동일해 보이게 테마 base 색으로 맞춘다.
@@ -116,8 +132,14 @@ pub fn window_set_bg(app: AppHandle, hex: String) -> Result<(), String> {
             let _: () = msg_send![nsw, setBackgroundColor: color];
         });
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = app;
+        return preview_win::window_set_bg(&hex);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     { let (_, _) = (app, hex); }
+    #[cfg(not(target_os = "windows"))]
     Ok(())
 }
 
@@ -433,7 +455,9 @@ pub fn install_punch_through(app: &AppHandle) {
             PUNCH_ORIG_HITTEST.store(orig_imp as usize, Ordering::SeqCst);
         });
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    preview_win::install(app);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let _ = app;
 }
 
@@ -568,6 +592,13 @@ pub fn preview_sync(
     h: f64,
     visible: bool,
 ) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (&app, &mgr);
+        return preview_win::sync(&pane_id, &url, x, y, w, h, visible, CONSOLE_HOOK_JS);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let mut map = mgr.inner.lock().map_err(|e| e.to_string())?;
     let sized = w > 1.0 && h > 1.0;
     let (px, py) = if visible && sized { (x, y) } else { (-30000.0, -30000.0) };
@@ -628,10 +659,18 @@ pub fn preview_sync(
     wrap_in_container(&webview, container.clone(), pane_id.clone());
     map.insert(pane_id, Entry { webview, url, container });
     Ok(())
+    }
 }
 
 #[tauri::command]
 pub fn preview_navigate(mgr: State<PreviewManager>, pane_id: String, url: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::navigate(&pane_id, &url);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let mut map = mgr.inner.lock().map_err(|e| e.to_string())?;
     if let Some(e) = map.get_mut(&pane_id) {
         if let Ok(u) = Url::parse(&url) {
@@ -640,6 +679,7 @@ pub fn preview_navigate(mgr: State<PreviewManager>, pane_id: String, url: String
         }
     }
     Ok(())
+    }
 }
 
 // 상시 콘솔+네트워크 후크(browser.console / browser.network) — 프리뷰 webview 생성 시
@@ -740,6 +780,13 @@ const DARK_OFF_JS: &str = r#"(function(){var s=document.getElementById('__cpt_da
 //  theme_on/off 는 페이지에 다크 필터 주입.
 #[tauri::command]
 pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::control(&pane_id, &action, DARK_ON_JS, DARK_OFF_JS);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let map = mgr.inner.lock().map_err(|e| e.to_string())?;
     let entry = map.get(&pane_id).ok_or("프리뷰 없음")?;
     // macOS: 전부 WKWebView 네이티브로 처리(뒤/앞/리로드=히스토리 API, devtools=WKInspector,
@@ -810,6 +857,7 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
             _ => Err("알 수 없는 action".into()),
         }
     }
+    }
 }
 
 #[derive(serde::Serialize, Default)]
@@ -823,6 +871,13 @@ pub struct PreviewInfo {
 // 현재 페이지 정보(주소/제목/히스토리 가능 여부) — 주소창·탭 메타·버튼 활성화용.
 #[tauri::command]
 pub fn preview_info(mgr: State<PreviewManager>, pane_id: String) -> Result<PreviewInfo, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::info(&pane_id);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let map = mgr.inner.lock().map_err(|e| e.to_string())?;
     let entry = map.get(&pane_id).ok_or("프리뷰 없음")?;
     #[cfg(target_os = "macos")]
@@ -863,6 +918,7 @@ pub fn preview_info(mgr: State<PreviewManager>, pane_id: String) -> Result<Previ
     #[cfg(not(target_os = "macos"))]
     {
         Ok(PreviewInfo { url: entry.url.clone(), ..Default::default() })
+    }
     }
 }
 
@@ -978,6 +1034,13 @@ fn webview_of(mgr: &State<PreviewManager>, pane_id: &str) -> Result<Webview, Str
 // 프리뷰 페이지에서 JS 평가 후 결과 회수. 호출측이 JSON.stringify 문자열 반환을 보장할 것.
 #[tauri::command]
 pub async fn preview_eval(mgr: State<'_, PreviewManager>, pane: String, js: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::eval(pane, js);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let webview = webview_of(&mgr, &pane)?;
     #[cfg(target_os = "macos")]
     {
@@ -1005,11 +1068,19 @@ pub async fn preview_eval(mgr: State<'_, PreviewManager>, pane: String, js: Stri
         let _ = (webview, js);
         Err("preview_eval 은 macOS 전용입니다".into())
     }
+    }
 }
 
 // 프리뷰 보이는 영역 스크린샷 → JPEG base64 문자열.
 #[tauri::command]
 pub async fn preview_screenshot(mgr: State<'_, PreviewManager>, pane: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::screenshot(pane);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let webview = webview_of(&mgr, &pane)?;
     #[cfg(target_os = "macos")]
     {
@@ -1035,6 +1106,7 @@ pub async fn preview_screenshot(mgr: State<'_, PreviewManager>, pane: String) ->
     {
         let _ = webview;
         Err("preview_screenshot 은 macOS 전용입니다".into())
+    }
     }
 }
 
@@ -1088,6 +1160,13 @@ unsafe fn cookies_to_json(cookies: *mut objc2::runtime::AnyObject) -> String {
 // 프리뷰의 모든 쿠키(httpOnly 포함) → JSON 배열 문자열.
 #[tauri::command]
 pub async fn preview_cookies(mgr: State<'_, PreviewManager>, pane: String) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::cookies(pane);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let webview = webview_of(&mgr, &pane)?;
     #[cfg(target_os = "macos")]
     {
@@ -1113,6 +1192,7 @@ pub async fn preview_cookies(mgr: State<'_, PreviewManager>, pane: String) -> Re
         let _ = webview;
         Err("preview_cookies 은 macOS 전용입니다".into())
     }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1133,6 +1213,13 @@ struct CookieSpec {
 //  httpOnly 는 NSHTTPCookie 생성 시 지정 불가(HTTPOnly 프로퍼티 키는 읽기 전용) → 소실되나 값·전송은 동일.
 #[tauri::command]
 pub async fn preview_set_cookies(mgr: State<'_, PreviewManager>, pane: String, cookies_json: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &mgr;
+        return preview_win::set_cookies(pane, cookies_json);
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
     let webview = webview_of(&mgr, &pane)?;
     #[cfg(target_os = "macos")]
     {
@@ -1202,10 +1289,17 @@ pub async fn preview_set_cookies(mgr: State<'_, PreviewManager>, pane: String, c
         let _ = (webview, cookies_json);
         Err("preview_set_cookies 은 macOS 전용입니다".into())
     }
+    }
 }
 
 #[tauri::command]
 pub fn preview_close(app: AppHandle, mgr: State<PreviewManager>, pane_id: String) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (&app, &mgr);
+        return preview_win::close(&pane_id);
+    }
+    #[cfg(not(target_os = "windows"))]
     if let Ok(mut map) = mgr.inner.lock() {
         if let Some(e) = map.remove(&pane_id) {
             let _ = e.webview.close();
@@ -1219,6 +1313,8 @@ pub fn preview_close(app: AppHandle, mgr: State<PreviewManager>, pane_id: String
 
 // 앱 종료/정리 시 전부 닫기.
 pub fn close_all(mgr: &PreviewManager) {
+    #[cfg(target_os = "windows")]
+    preview_win::close_all();
     if let Ok(mut map) = mgr.inner.lock() {
         for (_, e) in map.drain() {
             let _ = e.webview.close();

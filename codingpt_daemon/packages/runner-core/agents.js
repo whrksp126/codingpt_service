@@ -31,9 +31,10 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFile, execFileSync } = require('child_process');
+const { execFile } = require('child_process');
 const runtime = require('./runtime');
 const config = require('./config');
+const { execFileCliSync } = require('./spawn-util');
 
 // 우리 래퍼 디렉토리 — 감지에서 **반드시 제외**한다(제외 안 하면 우리 래퍼를 발견하고
 //  "설치됨"이라 답한다 = 자기 자신을 근거로 하는 순환 판정).
@@ -121,6 +122,29 @@ const FALLBACK_DIRS = [
   '/bin',
 ];
 
+// win32 표준 설치 위치(Windows 포팅 §D-3) — darwin 목록은 위 그대로 무수정.
+//  · ~/.local/bin        claude 공식 인스톨러(install.ps1) 기본 위치
+//  · %APPDATA%\npm       npm 전역 prefix 의 bin(.cmd shim 이 여기 생긴다)
+//  · WinGet\Links        winget 이 심링크를 모아 두는 곳
+//  · %LOCALAPPDATA%\Programs  사용자 단위 앱 설치 루트
+function winFallbackDirs() {
+  const home = os.homedir();
+  const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const roaming = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+  return [
+    path.join(home, '.local', 'bin'),
+    path.join(roaming, 'npm'),
+    path.join(local, 'Microsoft', 'WinGet', 'Links'),
+    path.join(home, '.bun', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+    path.join(local, 'Programs'),
+  ];
+}
+
+function fallbackDirs() {
+  return process.platform === 'win32' ? winFallbackDirs() : FALLBACK_DIRS;
+}
+
 let loginPathCache = null; // string[] | null — 프로세스 수명 동안 1회만 조사
 
 /**
@@ -130,13 +154,32 @@ let loginPathCache = null; // string[] | null — 프로세스 수명 동안 1�
  */
 function probeLoginPath() {
   if (loginPathCache) return Promise.resolve(loginPathCache);
+  if (process.platform === 'win32') return probeLoginPathWin();
   return new Promise((resolve) => {
     const shell = process.env.SHELL || '/bin/zsh';
     execFile(shell, ['-lc', 'printf %s "$PATH"'], { timeout: 2500, encoding: 'utf8' }, (err, stdout) => {
-      const dirs = String(stdout || '').trim().split(':').filter(Boolean);
+      const dirs = String(stdout || '').trim().split(path.delimiter).filter(Boolean);
       loginPathCache = err ? [] : dirs;
       resolve(loginPathCache);
     });
+  });
+}
+
+// win32 등가물 — "로그인 셸" 개념이 없으니 레지스트리 기반 Machine+User PATH 를 PowerShell 로
+//  1회 조회한다(GUI 로 뜬 프로세스의 stale PATH 를 보강). pwsh → powershell 순, 실패 시 조용히 포기.
+function probeLoginPathWin() {
+  return new Promise((resolve) => {
+    const script = "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')";
+    const tryOne = (bins) => {
+      if (!bins.length) { loginPathCache = []; return resolve(loginPathCache); }
+      execFile(bins[0], ['-NoProfile', '-NonInteractive', '-Command', script],
+        { timeout: 4000, encoding: 'utf8', windowsHide: true }, (err, stdout) => {
+          if (err) return tryOne(bins.slice(1));
+          loginPathCache = String(stdout || '').trim().split(';').filter(Boolean);
+          resolve(loginPathCache);
+        });
+    };
+    tryOne(['pwsh.exe', 'powershell.exe']);
   });
 }
 
@@ -154,22 +197,57 @@ function searchDirs(extra) {
     seen.add(d);
     out.push(d);
   };
-  for (const d of String(process.env.PATH || '').split(':')) push(d);
+  for (const d of String(process.env.PATH || '').split(path.delimiter)) push(d);
   for (const d of extra || []) push(d);
-  for (const d of FALLBACK_DIRS) push(d);
+  for (const d of fallbackDirs()) push(d);
   return out;
 }
 
-/** 실행 가능한 파일을 후보 디렉토리에서 찾는다(첫 히트). */
-function findBin(name, dirs) {
+// win32 실행 파일 판정용 확장자 — PATHEXT env 우선(관례), 없으면 표준 기본값.
+const DEFAULT_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
+function winPathext() {
+  const list = String(process.env.PATHEXT || '').split(';').map((s) => s.trim()).filter(Boolean);
+  return list.length ? list : DEFAULT_PATHEXT;
+}
+
+/**
+ * 실행 가능한 파일을 후보 디렉토리에서 찾는다(첫 히트).
+ *  win32 는 X_OK 가 무의미하다(실행 비트 없음) → PATHEXT 확장자 매칭(.exe/.cmd/.bat …)으로 판정.
+ * @param {{win?:boolean, pathext?:string[]}} [opts] 테스트 주입용(기본 = process.platform)
+ */
+function findBin(name, dirs, opts) {
+  const win = opts && opts.win !== undefined ? !!opts.win : process.platform === 'win32';
+  if (!win) {
+    for (const d of dirs) {
+      const p = path.join(d, name);
+      try {
+        fs.accessSync(p, fs.constants.X_OK);
+        const st = fs.statSync(p);            // 디렉토리가 X_OK 를 통과하므로 파일 확인 필수
+        if (st.isDirectory()) continue;
+        return p;
+      } catch (_) { /* 다음 후보 */ }
+    }
+    return null;
+  }
+  const exts = (opts && opts.pathext) || winPathext();
   for (const d of dirs) {
-    const p = path.join(d, name);
-    try {
-      fs.accessSync(p, fs.constants.X_OK);
-      const st = fs.statSync(p);            // 디렉토리가 X_OK 를 통과하므로 파일 확인 필수
-      if (st.isDirectory()) continue;
-      return p;
-    } catch (_) { /* 다음 후보 */ }
+    // 이미 확장자가 있으면 그대로, 아니면 PATHEXT 순서대로 시도(cmd.exe 의 탐색 순서와 동일 의미론).
+    //  NTFS 는 대소문자 무시지만 테스트(대소문자 구분 FS)를 위해 원형·소문자 둘 다 본다.
+    const cands = path.extname(name)
+      ? [path.join(d, name)]
+      : exts.flatMap((e) => {
+        // 소문자 후보를 먼저 — 실제 파일(npm shim 등)은 소문자가 관례고, 대소문자 무시 FS(NTFS·APFS)
+        //  에서는 어느 쪽이든 열리므로 정본 표기를 소문자로 통일한다.
+        const a = path.join(d, name + e.toLowerCase());
+        const b = path.join(d, name + e);
+        return a === b ? [a] : [a, b];
+      });
+    for (const p of cands) {
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile()) return p;
+      } catch (_) { /* 다음 후보 */ }
+    }
   }
   return null;
 }
@@ -189,10 +267,11 @@ function probeVersion(binPath) {
   if (hit && Date.now() - hit.at < VERSION_MS) return hit.version;
   let version = null;
   try {
-    const out = execFileSync(binPath, ['--version'], {
+    // win32 의 .cmd shim 은 shell 없이 spawn 불가(EINVAL) — execFileCliSync 가 cmd.exe 경유를 처리.
+    const out = execFileCliSync(binPath, ['--version'], {
       encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'ignore'],
       // 우리 래퍼를 타지 않게 PATH 에서 binDir 제외(래퍼 → REAL 재귀 방지의 안전벨트).
-      env: { ...process.env, PATH: searchDirs([]).join(':') },
+      env: { ...process.env, PATH: searchDirs([]).join(path.delimiter) },
     });
     // 에이전트마다 형식이 다르다: "2.1.220 (Claude Code)" · "codex-cli 0.145.0" 등.
     //  버전처럼 보이는 첫 토큰만 뽑고, 없으면 첫 줄을 그대로 쓴다(추측해서 꾸미지 않는다).
@@ -342,6 +421,9 @@ module.exports = {
   _internals: {
     findBin,
     searchDirs,
+    fallbackDirs,
+    winFallbackDirs,
+    winPathext,
     probeVersion,
     resetCache: () => { cache = { at: 0, items: null }; versionCache.clear(); loginPathCache = null; },
     setLoginPath: (dirs) => { loginPathCache = dirs; },

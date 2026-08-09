@@ -105,7 +105,8 @@ test('slugOf — 실측 케이스(점/언더스코어/비ASCII)', () => {
 });
 
 // ── 2. 홈 jail (크레덴셜 접근 차단) ─────────────────────────────────
-test('safeTranscriptPath — projects 밖·비 jsonl·심링크 탈출 거부', () => {
+// win32 스킵: symlinkSync 권한 의존 — CI 러너에서 비결정적 (windows-port 게이트)
+test('safeTranscriptPath — projects 밖·비 jsonl·심링크 탈출 거부', { skip: process.platform === 'win32' }, () => {
   fs.writeFileSync(path.join(CLAUDE_HOME, '.credentials.json'), '{"secret":1}');
   assert.throws(() => T.safeTranscriptPath(path.join(CLAUDE_HOME, '.credentials.json')), /허용되지 않은 경로/);
   assert.throws(() => T.safeTranscriptPath('../.credentials.json'), /허용되지 않은 경로/);
@@ -692,7 +693,8 @@ test('noteHook — jail 밖 transcriptPath 는 채택하지 않고, 예외도 �
   assert.strictEqual(T.noteHook({ sessionId: '../../etc/passwd' }).ok, false);
 });
 
-test('noteHook / lookupBind — 훅 좌표가 chat.open 의 P0 경로가 된다', async () => {
+// win32 스킵: chat-bind.json 0600 퍼미션 단정(win32 는 0666 으로 보임) — (windows-port 게이트)
+test('noteHook / lookupBind — 훅 좌표가 chat.open 의 P0 경로가 된다', { skip: process.platform === 'win32' }, async () => {
   writeJsonl(sessFile(WS, 'bound'), [{ type: 'user', uuid: 'a', timestamp: TS, cwd: WS, sessionId: 'bound', origin: { kind: 'human' }, promptSource: 'typed', message: { role: 'user', content: '바인딩됨' } }]);
   T.noteHook({ sessionId: 'bound', transcriptPath: sessFile(WS, 'bound'), cwd: WS, cwdRel: 'ws', tid: 1000002, event: 'prompt' });
   const b = T.lookupBind('ws', 1000002);

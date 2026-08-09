@@ -12,6 +12,7 @@
 //  두 기기가 덩어리를 다르게 세면 엉뚱한 곳을 승인한 결과가 에이전트에게 간다.
 import { api } from "./api.js";
 import { icons } from "./icons.js";
+import { basename } from "./path-utils.js";
 import { tx } from "./text/index.js";
 import { REVIEW_TEXT } from "./text/review.js";
 import * as D from "./diff-parse.js";
@@ -248,7 +249,7 @@ export function renderReviewBar(bar, state, cbs) {
   const nameEl = document.createElement("span");
   nameEl.className = "rvb-name";
   nameEl.title = f ? f.path : "";
-  nameEl.textContent = `${f ? f.path.split("/").pop() : ""} ${state.index + 1}/${state.files.length}`;
+  nameEl.textContent = `${f ? basename(f.path) : ""} ${state.index + 1}/${state.files.length}`;
   const next = document.createElement("button");
   next.className = "rvb-btn";
   next.title = T.next;

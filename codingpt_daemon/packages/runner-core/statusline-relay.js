@@ -38,9 +38,9 @@ function userStatusLine(cwd) {
   return null;
 }
 
-/** 보고할 소켓 경로. CPT_SOCK 은 테스트/비표준 stateDir 용 탈출구. */
+/** 보고할 소켓 경로 — 단일 출처(sock-path.js). CPT_SOCK 은 테스트/비표준 stateDir 용 탈출구(우선). */
 function sockPath() {
-  return process.env.CPT_SOCK || path.join(os.homedir(), '.codingpt', 'cpt.sock');
+  return require('./sock-path').clientSockPath();
 }
 
 /** 데몬에 한 줄 보고(응답을 기다리지 않는다). 실패는 전부 무시한다. */
@@ -76,7 +76,11 @@ function chain(cmd, raw, done) {
   if (!cmd) { done(''); return; }
   let ch;
   try {
-    ch = spawn('/bin/sh', ['-c', cmd], { stdio: ['pipe', 'pipe', 'inherit'] });
+    // 사용자 statusLine 명령은 "셸 한 줄"이다 — darwin/linux 는 /bin/sh(기존 그대로), win32 는 cmd /c.
+    ch = process.platform === 'win32'
+      ? spawn(process.env.comspec || process.env.COMSPEC || 'cmd.exe', ['/d', '/s', '/c', cmd],
+        { stdio: ['pipe', 'pipe', 'inherit'], windowsVerbatimArguments: true, windowsHide: true })
+      : spawn('/bin/sh', ['-c', cmd], { stdio: ['pipe', 'pipe', 'inherit'] });
   } catch (_) { done(''); return; }
   let buf = '';
   ch.stdout.on('data', (d) => {

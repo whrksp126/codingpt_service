@@ -8,9 +8,11 @@ export const metadata = {
 };
 
 // 영구 고정 주소. 릴리스 때마다 최신 DMG로 교체되며 back이 no-store를 강제한다.
-//  Windows 는 준비되면 EXE_URL 을 채우고 아래 disabled 를 해제.
+//  Windows: 파이프라인은 준비됨 — release 업로더(_release-upload.cjs --target windows-x86_64)가
+//  'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT.exe' (고정 별칭·no-store)를
+//  발행한다. **실기 Windows 검증 전에는 활성화 금지** — 검증 후 위 URL 을 채우고 disabled 해제.
 const MAC_DMG_URL = 'https://objectstore.ghmate.com/codingpt/common/downloads/CodingPT.dmg';
-const WIN_EXE_URL = ''; // 준비 중
+const WIN_EXE_URL = ''; // 준비 중(실기 검증 대기)
 
 const STEPS = [
   { t: '설치', d: '받은 파일을 실행해 CodingPT를 설치하면 메뉴바(트레이)에 아이콘이 상주합니다. Node·터미널 같은 별도 프로그램은 필요 없어요.' },

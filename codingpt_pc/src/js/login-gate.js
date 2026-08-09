@@ -10,6 +10,7 @@ import {
   bindSoundSelect, openNotificationSettingsAndWatch, refreshNotificationPermission,
   sendTestNotification, soundOptionsHtml,
 } from "./notification-prefs.js";
+import { IS_WINDOWS } from "./shortcuts.js";
 import * as i18n from './i18n/index.js';
 
 let el = null;
@@ -39,10 +40,13 @@ const FOLDER_PERMS = [
   { id: "desktop", label: "데스크탑 폴더 접근" },
   { id: "documents", label: "문서 폴더 접근" },
 ];
-const requiredPerms = () => [
+// win32: TCC 보호 폴더도, macOS 알림 설정 슬라이드도 없다 — 위저드 단계 자체를 비운다(계약 5).
+//  빈 큐면 renderStep 이 곧장 finishSetup 으로 빠져 온보딩이 즉시 끝난다(안 비우면 macOS 전용
+//  프로브가 전부 실패해 온보딩이 영구 차단된다).
+const requiredPerms = () => (IS_WINDOWS ? [] : [
   { id: "notification", label: i18n.t('알림 설정') },
   ...FOLDER_PERMS.map((f) => ({ ...f, folder: true })),
-];
+]);
 
 // 권한은 화면당 하나만 요청한다. 실제 승인 확인 전에는 다음 단계가 없다.
 const PERM_COPY = {

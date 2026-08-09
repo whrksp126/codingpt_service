@@ -5,6 +5,11 @@
  *
  * 경로는 runtime.stateDir() 지연 평가 — 로컬=홈, 클라우드 러너=주입된 상태 볼륨.
  * (클라우드 러너는 인증을 env 로 주입받으므로 이 파일에 의존하지 않을 수 있다.)
+ *
+ * TODO(win32, Windows 포팅 §D-6): 이 파일의 mode:0o600 들은 win32 에서 사실상 무시된다(NTFS 는
+ *  POSIX mode 미지원 — chmod 는 read-only 플래그만 건드린다). %USERPROFILE% 하위 기본 ACL 이
+ *  "소유자+SYSTEM+Administrators" 라 실질 노출은 없지만, 0600 등가의 명시적 보호가 필요하면
+ *  icacls /inheritance:r 류의 ACL 조정을 별도 라운드에서 검토할 것(현재는 의도적 미구현).
  */
 const fs = require('fs');
 const path = require('path');

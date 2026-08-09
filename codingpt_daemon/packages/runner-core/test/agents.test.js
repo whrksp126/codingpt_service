@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: '#!/bin/sh' 스텁 실행 파일로 버전 탐지 — win32 는 PATHEXT 래퍼(계약 4) 정비 후
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('agents.test.js: win32 스킵 — #!/bin/sh 스텁 실행 파일로 버전 탐지', { skip: true }, () => {});
+  return;
+}
+
 // agents.test.js — 에이전트 감지·배선·shim 조건부 래핑의 회귀 방지.
 //
 // 이 라운드가 고친 실제 사고: `ensureShims` 가 설치 여부와 무관하게 `codex` 래퍼를 만들어,

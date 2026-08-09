@@ -5,7 +5,30 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 fn home() -> PathBuf {
+    // 폴백은 사실상 도달 불가(dirs 가 HOME/USERPROFILE 을 본다)지만, 플랫폼별 유효 루트로.
+    #[cfg(windows)]
+    return dirs::home_dir().unwrap_or_else(|| PathBuf::from(r"C:\"));
+    #[cfg(not(windows))]
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+}
+
+// 홈 jail 판정 — 양쪽 다 canonicalize 된 경로를 받는다.
+//  win32 canonicalize 는 `\\?\` verbatim 접두사를 붙이며(붙는 조건이 호출 경로에 따라 달라
+//  접두사 유무가 섞이면 starts_with 가 오탐한다), 경로 비교는 대소문자 무시여야 한다 —
+//  접두사 제거+소문자화 후 컴포넌트 단위 비교. 비-win 은 기존 starts_with 그대로.
+fn starts_with_home(checked: &Path, home_c: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        fn norm(p: &Path) -> String {
+            let s = p.to_string_lossy();
+            let s: &str = s.strip_prefix(r"\\?\").unwrap_or(&s);
+            s.to_lowercase()
+        }
+        let (c, h) = (norm(checked), norm(home_c));
+        Path::new(&c).starts_with(Path::new(&h))
+    }
+    #[cfg(not(windows))]
+    checked.starts_with(home_c)
 }
 
 // 홈-상대 경로를 절대경로로 안전 변환(홈 밖 거부). 신규 파일은 부모 디렉토리로 검증.
@@ -21,7 +44,7 @@ fn safe_abs(rel: &str) -> Result<PathBuf, String> {
         cp.join(joined.file_name().ok_or("파일명 없음")?)
     };
     let home_c = home.canonicalize().unwrap_or(home);
-    if !checked.starts_with(&home_c) {
+    if !starts_with_home(&checked, &home_c) {
         return Err("홈 디렉토리 밖은 접근할 수 없어요.".into());
     }
     Ok(checked)
@@ -29,7 +52,11 @@ fn safe_abs(rel: &str) -> Result<PathBuf, String> {
 
 fn rel_of(abs: &Path) -> String {
     let home = home().canonicalize().unwrap_or_else(|_| home());
-    abs.strip_prefix(&home).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| abs.to_string_lossy().to_string())
+    let s = abs.strip_prefix(&home).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| abs.to_string_lossy().to_string());
+    // 홈-상대 경로의 와이어 규약은 '/' 구분(전 플랫폼 공통 — localPath 규칙) — win32 역슬래시 정규화.
+    #[cfg(windows)]
+    let s = s.replace('\\', "/");
+    s
 }
 
 // 홈-상대 경로 → 절대경로 문자열(홈 jail 검증). 파일트리 노드를 터미널에 절대경로로 삽입할 때 사용.
@@ -260,7 +287,12 @@ pub fn fs_write_b64(rel: String, b64: String) -> Result<String, String> {
         return Err("파일이 너무 큽니다(6MB 제한)".into());
     }
     let cleaned = rel.trim_start_matches('/');
-    if cleaned.is_empty() || cleaned.split('/').any(|s| s == "..") {
+    // win32 는 '\\' 도 구분자다 — `..\` 세그먼트 우회를 함께 거부(비-win 은 '\\' 가 파일명 문자).
+    #[cfg(windows)]
+    let has_dotdot = cleaned.split(['/', '\\']).any(|s| s == "..");
+    #[cfg(not(windows))]
+    let has_dotdot = cleaned.split('/').any(|s| s == "..");
+    if cleaned.is_empty() || has_dotdot {
         return Err("잘못된 경로".into());
     }
     if let Some(parent) = home().join(cleaned).parent() {

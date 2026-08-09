@@ -77,6 +77,8 @@ fi`;
 }
 
 function ensureShims() {
+  // win32 는 병렬 생성 경로(계약 4) — 아래 darwin/POSIX 본문은 무수정 보존(macOS 무회귀 최우선).
+  if (process.platform === 'win32') return ensureShimsWin32();
   const bin = binDir();
   const shim = shimDir();
   fs.mkdirSync(bin, { recursive: true, mode: 0o700 });
@@ -249,8 +251,10 @@ exec "$REAL" -c 'notify=["${cptAbs}","codex-notify"]' "$@"
   //   ⚠ codex 는 훅을 **사용자가 TUI 에서 1회 신뢰**해야 실행한다(Hooks need review → Trust all).
   //     신뢰 전에는 훅이 비활성 = 기존 notify 경로 그대로(원격 승인만 없음, 회귀 0).
   //   ⚠ CPT_SHIM_NO_GLOBAL_LINK=1(테스트/하네스의 "stateDir 밖 무접촉" 선언)이면 병합/회수 모두 스킵.
+  //   ⚠ 첫 인자는 cpt **CLI JS 경로**다(래퍼 아님) — 명령이 Node 원라이너로 바뀌면서(§4.7 명령 주석)
+  //     node 가 직접 실행할 파일을 가리켜야 한다.
   if (process.env.CPT_SHIM_NO_GLOBAL_LINK !== '1') {
-    ensureCodexApprovalHook(cptAbs, ab, !!(realCodex && agents.isWired('codex')));
+    ensureCodexApprovalHook(cptCli, ab, !!(realCodex && agents.isWired('codex')));
   }
 
   // 4.5) open 래퍼(macOS 전용) — `open http(s)://…` 를 워크스페이스 프리뷰로 라우팅한다(cmux 미러).
@@ -346,7 +350,8 @@ const CODEX_HOOK_MARKER = 'approval-hook --agent codex';
 
 function codexHooksFile() { return path.join(os.homedir(), '.codex', 'hooks.json'); }
 
-function ensureCodexApprovalHook(cptAbs, ab, enabled, fileOverride) {
+// cptCliJs = cpt CLI 의 **JS 파일** 절대경로(node 로 직접 실행된다 — 셸 래퍼가 아님).
+function ensureCodexApprovalHook(cptCliJs, ab, enabled, fileOverride) {
   const file = fileOverride || codexHooksFile();
   let raw = null;
   try { raw = fs.readFileSync(file, 'utf8'); } catch (_) { raw = null; }
@@ -375,9 +380,21 @@ function ensureCodexApprovalHook(cptAbs, ab, enabled, fileOverride) {
     return;
   }
 
-  // 자기-스코핑 가드형 명령(§4.7 ①②③). stdin 은 어느 분기에서든 소비/폐기된다.
+  // 자기-스코핑 가드형 명령(§4.7 ①②③) — **Node 원라이너**(2026-08-10, Windows 포팅 계약 4).
+  //  이전의 sh 조건문은 win32 에 sh 가 없어 못 쓴다 → 양 플랫폼 동일 코드로 치환:
+  //   · 자기-스코핑: CPT_SOCK 없으면 stdin 만 드레인하고 무출력 종료(② 동일)
+  //   · 가드형: cpt CLI(js) 부재 시에도 드레인 후 exit 0 — "cpt 못 찾음" 에러가 구조적으로 불가(③)
+  //   · 마커 호환: `approval-hook --agent codex` 리터럴을 인자 문자열로 통째로 실어 기존 설치본
+  //     항목 식별(CODEX_HOOK_MARKER)이 그대로 동작한다.
+  //  ⚠ JS 코드에 큰따옴표·$·%·역슬래시를 넣지 말 것 — 이 한 줄이 sh("…")/cmd("…") 어느 셸에서
+  //    문자열로 감싸여도 원형이 보존되는 교집합 문법이다.
   //  ⚠ 이 문자열이 바뀌면 codex 가 "훅이 변경됐다"며 재신뢰를 요구한다 — 꼭 필요할 때만 바꿀 것.
-  const cmd = `if [ -n "$CPT_SOCK" ] && [ -x '${cptAbs}' ]; then '${cptAbs}' approval-hook --agent codex --wait-ms ${ab.cliWaitMs}; else cat >/dev/null 2>&1 || :; fi`;
+  //  ⚠ 알려진 트레이드오프: node 실행 파일(process.execPath)이 앱 제거로 사라지면 이 명령 자체가
+  //    실패한다(옛 sh 가드는 sh 가 항상 있어 무에러였다). §최종 보고 TODO 참조.
+  const guardJs = "var fs=require('fs'),cp=require('child_process');var cli=process.argv[1];var a=(process.argv[2]||'').split(' ');"
+    + "if(!process.env.CPT_SOCK||!fs.existsSync(cli)){process.stdin.resume();process.stdin.on('end',function(){process.exit(0)});process.stdin.on('error',function(){process.exit(0)})}"
+    + "else{var c=cp.spawn(process.execPath,[cli].concat(a),{stdio:'inherit'});c.on('error',function(){process.exit(0)});c.on('exit',function(n){process.exit(n||0)})}";
+  const cmd = `"${process.execPath}" -e "${guardJs}" "${cptCliJs}" "approval-hook --agent codex --wait-ms ${ab.cliWaitMs}"`;
   const entry = {
     hooks: [{
       type: 'command',
@@ -404,6 +421,132 @@ function writeCodexHooks(file, root) {
   } catch (_) { /* 실패 = codex 원격 승인만 비활성(기존 notify 경로 유지) — 데몬을 세우지 않는다 */ }
 }
 
+// ── win32 shim(계약 4) — darwin 경로와 완전 병렬(공유 함수: writeIfChanged·removeExec·훅 구조) ──
+//
+//  <stateDir>\bin\{cpt.cmd, claude.cmd, codex.cmd, cpt-statusline.cmd}   (sh 래퍼의 등가물)
+//  <stateDir>\shim\claude-hooks.json                                     (훅 7종 — 명령만 win32 문법)
+//  <stateDir>\shim\ps\cpt-profile.ps1    pwsh 프로필(사용자 $PROFILE dot-source → PATH → 함수 3종)
+//  <stateDir>\shim\cmd\cpt-init.cmd      cmd.exe 선택 시 초기화(PATH prepend)
+//
+//  래퍼 로직(원본 재탐색·--settings/notify 무간섭·훅 주입)은 배치가 아니라 node(win-agent-wrapper.js)
+//  에 둔다 — 배치 인용 함정 회피 + mac 에서 유닛테스트 가능.
+//
+//  ★ claude 훅 command 의 win32 문법(2026-08-10 웹 조사 결론 — claude-code-guide):
+//   네이티브 Windows claude 는 훅/셸 명령을 **PowerShell**(Git Bash 설정 시 bash)로 실행한다.
+//   `.cmd` 직접 호출(`"C:\…\cpt.cmd" args`)은 PowerShell 문자열 파싱(& 호출 연산자 필요)에서 깨질
+//   수 있다 → PowerShell·Git Bash·cmd **3셸 교집합에서 동일 동작**하는 `cmd.exe /d /s /c "…"` 형태를
+//   쓴다(첫 토큰이 무인용 실행파일명이라 어느 셸에서도 명령으로 해석된다).
+//   ⚠ 한계: 내부 명령은 인용을 겹칠 수 없어 **경로에 공백이 있으면 깨진다**(예: C:\Users\Ho Lee\…).
+//   실기 검증(웨이브 3)에서 확정 전까지 이 빌더 한 곳만 고치면 되게 격리해 둔다.
+function winHookCommand(inner) {
+  return `cmd.exe /d /s /c "${inner}"`;
+}
+
+/** PowerShell 단일 인용 — ' 는 '' 로 이스케이프(PS 인용 규칙의 전부다). */
+function psQuote(s) { return "'" + String(s).replace(/'/g, "''") + "'"; }
+
+// pwsh 프로필 — ① 사용자 $PROFILE dot-source ② PATH prepend ③ claude/codex/cpt 함수(zsh 함수 등가).
+//  함수는 PATH 조회보다 우선하므로 타 도구의 PATH 래핑을 이긴다(§zdot 과 같은 원리). 래퍼(.cmd)가
+//  없으면(미설치/배선 OFF) 자기 bin 을 제외하고 원본을 재탐색해 통과시킨다(_cpt_passthru 등가).
+//  ⚠ darwin §zdot 과 같은 계약: 이 내용은 **정적**이어야 한다 — 감지 결과를 넣지 말 것.
+function buildPsProfile(bin) {
+  const q = psQuote;
+  return `# CodingPT shim profile — 사용자 프로필을 먼저 위임한 뒤 우리 배선을 확정(우리 터미널 전용).
+if (($null -ne $PROFILE) -and (Test-Path $PROFILE)) { . $PROFILE }
+$env:Path = ${q(bin + ';')} + $env:Path
+function global:_cptPassthru {
+  param([string]$name, [object[]]$rest)
+  $cand = Get-Command -Name $name -CommandType Application -All -ErrorAction SilentlyContinue |
+    Where-Object { $_.Source -and -not $_.Source.StartsWith(${q(bin)}, [System.StringComparison]::OrdinalIgnoreCase) } |
+    Select-Object -First 1
+  if ($cand) { & $cand.Source @rest }
+  else { Write-Error ($name + ': command not found') }
+}
+function global:claude { if (Test-Path ${q(path.win32.join(bin, 'claude.cmd'))}) { & ${q(path.win32.join(bin, 'claude.cmd'))} @args } else { _cptPassthru 'claude' $args } }
+function global:codex  { if (Test-Path ${q(path.win32.join(bin, 'codex.cmd'))}) { & ${q(path.win32.join(bin, 'codex.cmd'))} @args } else { _cptPassthru 'codex' $args } }
+function global:cpt    { & ${q(path.win32.join(bin, 'cpt.cmd'))} @args }
+`;
+}
+
+function ensureShimsWin32() {
+  const bin = binDir();
+  const shim = shimDir();
+  const psDir = path.join(shim, 'ps');
+  const cmdDir = path.join(shim, 'cmd');
+  // 0700 등 POSIX mode 는 win32 에서 무의미(%USERPROFILE% 기본 ACL = 소유자 전용) — mode 미지정.
+  fs.mkdirSync(bin, { recursive: true });
+  fs.mkdirSync(psDir, { recursive: true });
+  fs.mkdirSync(cmdDir, { recursive: true });
+
+  const cptCli = path.join(__dirname, '..', 'cpt-cli', 'bin', 'cpt.js');
+  const wrapperJs = path.join(__dirname, 'win-agent-wrapper.js');
+  const relayJs = path.join(__dirname, 'statusline-relay.js');
+  const cptCmd = path.join(bin, 'cpt.cmd');
+  const statuslineCmd = path.join(bin, 'cpt-statusline.cmd');
+
+  // 1) cpt.cmd / cpt-statusline.cmd — 데몬의 node 로 실행(터미널 PATH 에 node 불요, darwin §2 동일).
+  //    배치는 두 줄 고정 — 로직은 전부 node 쪽(cpt.js / relay)에 있다. CRLF(cmd.exe 관례).
+  writeIfChanged(cptCmd, `@echo off\r\n"${process.execPath}" "${cptCli}" %*\r\n`);
+  writeIfChanged(statuslineCmd, `@echo off\r\n"${process.execPath}" "${relayJs}"\r\n`);
+
+  // 2) 훅 설정 — 구조는 darwin §1 과 동일(훅 7종 + statusLine 중계), 명령 문자열만 win32 문법.
+  const hooksFile = path.join(shim, 'claude-hooks.json');
+  let ab = { cliWaitMs: 130000, hookTimeoutSec: 145 };
+  try { ab = require('./approvals').budget(); } catch (_) { /* 기본값 유지 */ }
+  const hook = (event, timeout, sync) => [{
+    hooks: [{ type: 'command', command: winHookCommand(`${cptCmd} claude-hook ${event}`), ...(sync ? {} : { async: true }), timeout }],
+  }];
+  const hooks = {
+    // ⚠ 알려진 상류 이슈: claude 2.1.34 에서 win32 statusLine command 미실행(#23994) — 설정은
+    //  구조 동일하게 심어 두고, 수정 릴리스에서 자동으로 살아난다(우리 쪽 무해).
+    statusLine: { type: 'command', command: winHookCommand(`${statuslineCmd}`), padding: 1 },
+    hooks: {
+      SessionStart: hook('session-start', 5),
+      UserPromptSubmit: hook('prompt', 5),
+      PermissionRequest: [{
+        hooks: [{
+          type: 'command',
+          command: winHookCommand(`${cptCmd} approval-hook --wait-ms ${ab.cliWaitMs}`),
+          timeout: ab.hookTimeoutSec,
+          statusMessage: 'CodingPT — 원격 승인 대기 중…',
+        }],
+      }],
+      Notification: hook('notification', 5),
+      Stop: hook('stop', 8),
+      StopFailure: hook('stop-failure', 5),
+      SessionEnd: hook('session-end', 5),
+    },
+  };
+  writeIfChanged(hooksFile, JSON.stringify(hooks, null, 2) + '\n');
+
+  // 3) 에이전트 래퍼 — darwin §3·§4 와 같은 규율: 설치돼 있고 배선 ON 일 때만 만들고, 아니면 지운다.
+  const wired = [];
+  const skipped = [];
+  for (const id of ['claude', 'codex']) {
+    const real = resolveReal(id);
+    const file = path.join(bin, `${id}.cmd`);
+    if (real && agents.isWired(id)) {
+      writeIfChanged(file, `@echo off\r\n"${process.execPath}" "${wrapperJs}" ${id} %*\r\n`);
+      wired.push(id);
+    } else {
+      removeExec(file);
+      skipped.push(id);
+    }
+  }
+
+  // 4) codex 원격 승인 훅 — darwin §4.7 과 **같은 함수/같은 명령**(Node 원라이너, 플랫폼 무분기).
+  if (process.env.CPT_SHIM_NO_GLOBAL_LINK !== '1') {
+    ensureCodexApprovalHook(cptCli, ab, wired.includes('codex'));
+  }
+
+  // 5) 셸 프로필 — pwsh(기본 셸, 계약 4)·cmd.exe(선택) 초기화. 사용자 프로필 파일 무수정 원칙 유지.
+  writeIfChanged(path.join(psDir, 'cpt-profile.ps1'), buildPsProfile(bin));
+  writeIfChanged(path.join(cmdDir, 'cpt-init.cmd'), `@echo off\r\nset "PATH=${bin};%PATH%"\r\n`);
+
+  // (win32 는 zdot·open 래퍼·전역 심링크 없음 — zdot 등가물은 위 ps 프로필, open 라우팅은 후속 TODO)
+  return { binDir: bin, hooksFile, zdotDir: null, wired, skipped };
+}
+
 /**
  * 감지를 **먼저** 끝낸 뒤 배선한다. 데몬은 PC 앱(Finder/launchd)이 띄우는 사이드카라 로그인 셸의
  *  PATH 를 물려받지 않는다 — 동기 경로만 쓰면 `~/.local/bin` 밖에 깐 에이전트를 놓칠 수 있다.
@@ -420,4 +563,6 @@ module.exports = {
   ensureShims, ensureShimsAsync, binDir, shimDir, zdotDir,
   // 테스트 전용 — codex 훅 병합을 파일 단위로 검증한다(ensureShims 전체 실행 없이).
   _codexHooks: { ensureCodexApprovalHook, codexHooksFile, CODEX_HOOK_MARKER },
+  // 테스트 전용(win32) — mac 에서 win32 생성물을 검증한다(플랫폼 게이트 밖에서 직접 호출).
+  _win: { ensureShimsWin32, buildPsProfile, psQuote, winHookCommand },
 };

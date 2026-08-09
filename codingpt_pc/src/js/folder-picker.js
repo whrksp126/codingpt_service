@@ -4,6 +4,7 @@
 //  PC 가 여러 대(이 PC + 외부)면 폴더 선택 전 PC 선택 카드를 먼저 띄운다.
 import { api } from "./api.js";
 import { state, loadWorkspaces, ensureRuntime, emit, createLocalWorkspace, blockedOffline } from "./state.js";
+import { splitSegs } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 let el = null; // 오버레이
@@ -88,7 +89,7 @@ function paint() {
   if (!el || !B) return;
   const tp = targetPath();
   const pathEl = el.querySelector(".fp-path");
-  if (pathEl) pathEl.textContent = `${B.hostName} / ${tp ? tp.split("/").join(" / ") : i18n.t('홈')}`;
+  if (pathEl) pathEl.textContent = `${B.hostName} / ${tp ? splitSegs(tp).join(" / ") : i18n.t('홈')}`;
   const colsEl = el.querySelector(".fp-cols");
   if (!colsEl) return;
   colsEl.innerHTML = "";

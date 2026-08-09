@@ -7,6 +7,7 @@ import { fileIcon, folderIcon } from "./fileicons.js";
 import * as T from "./tiling.js";
 import { cmThemeName } from "./theme.js";
 import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
+import { basename, dirname, joinPath, splitSegs } from "./path-utils.js";
 import * as PV from "./preview-kind.js";
 import * as RV from "./review-view.js";
 import { tx as pvTx } from "./text/index.js";
@@ -41,8 +42,9 @@ function modeFor(name) {
     default: return "text/plain";
   }
 }
-const baseName = (p) => p.split("/").pop() || p;
-const parentOf = (p) => p.split("/").slice(0, -1).join("/");
+// `/`·`\` 양쪽 인식(path-utils) — `/` 경로에선 종전 split("/") 구현과 동일 결과(계약 5).
+const baseName = (p) => basename(p) || p;
+const parentOf = (p) => dirname(p);
 const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 // ── 전역 미저장 상태 — 앱 종료 가드용. dirty 전이 때마다 Rust(set_ide_dirty)에 미러한다. ──
@@ -492,7 +494,7 @@ export class IdeView {
     wrap.className = "ide-search-results";
     for (const [path, { name, list }] of byFile) {
       const rel = path.slice(rootLen);
-      const dir = rel.split("/").slice(0, -1).join("/");
+      const dir = dirname(rel);
       const lineHits = list.filter((h) => h.line > 0);
       const fh = document.createElement("div");
       fh.className = "ide-search-file";
@@ -1325,7 +1327,7 @@ export class IdeView {
     const box = dirPath === this.root ? this.bodyEl.querySelector(".ide-tree-list") : this.bodyEl.querySelector(`.ide-children[data-parent="${cssEsc(dirPath)}"]`);
     if (!box) return;
     if (dirPath !== this.root) box.style.display = "";
-    const depth = dirPath === this.root ? 0 : (dirPath.slice(this.root.length).split("/").filter(Boolean).length);
+    const depth = dirPath === this.root ? 0 : splitSegs(dirPath.slice(this.root.length)).length;
     const row = document.createElement("div");
     row.className = "ide-node new";
     row.style.paddingLeft = 6 + (dirPath === this.root ? 0 : depth) * 12 + "px";
@@ -1340,7 +1342,7 @@ export class IdeView {
       const name = input.value.trim();
       row.remove();
       if (!commit || !name) return;
-      const dest = dirPath + "/" + name;
+      const dest = joinPath(dirPath, name);
       try {
         if (isDir) await this.fs.fsMkdir(dest); else await this.fs.fsCreateFile(dest);
         const node = this._findNode(dirPath);
@@ -1366,7 +1368,7 @@ export class IdeView {
       const name = input.value.trim();
       if (!commit || !name || name === n.name) { this._renderTree(); return; }
       try {
-        const dest = parentOf(n.path) + "/" + name;
+        const dest = joinPath(parentOf(n.path), name);
         await this.fs.fsRename(n.path, dest);
         if (this.selectedPath === n.path) this.selectedPath = dest; // 이름변경 후 선택 유지
         for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
@@ -1508,7 +1510,7 @@ export class IdeView {
         } catch (e) { this._toast(String(e)); }
       } else if (dragging && dropFolder) {
         try {
-          const dest = dropFolder + "/" + n.name;
+          const dest = joinPath(dropFolder, n.name);
           await this.fs.fsRename(n.path, dest);
           for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
           this.tree = null;

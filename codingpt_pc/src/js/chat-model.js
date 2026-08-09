@@ -152,7 +152,8 @@ export function mediaRefOf(target) {
   const url = /^(https?:)?\/\//i.test(raw) || raw.startsWith("data:");
   // 쿼리/해시를 뺀 뒤 확장자를 본다(URL 에 ?v=1 이 붙는 경우).
   const clean = raw.split(/[?#]/)[0];
-  const base = clean.replace(/\/+$/, "").split("/").pop() || clean;
+  // 구분자 `/`·`\` 양쪽 인식(win32 경로) — URL 엔 `\` 가 없어 종전 판정과 동일하다.
+  const base = clean.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || clean;
   const ext = (base.includes(".") ? base.split(".").pop() : "").toLowerCase();
   const kind = MEDIA_EXT.image.includes(ext) ? "image" : MEDIA_EXT.video.includes(ext) ? "video" : "file";
   return { via: url ? "url" : "path", kind, name: base || raw, ext, target: raw };

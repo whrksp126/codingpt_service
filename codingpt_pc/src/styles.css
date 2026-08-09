@@ -28,6 +28,10 @@
   --r-md: 10px;
   --r-lg: 12px;
   --sb-w: 264px;
+  /* 창틀 여백 — mac: 좌측 macOS 트래픽라이트 72px(종전 하드코딩의 변수화, 값 동일).
+     win32(html[data-os="windows"], main.js 가 세팅)는 좌측 0 대신 최소 여백 + 우측 캡션 버튼 폭. */
+  --titlebar-inset-left: 72px;
+  --titlebar-inset-right: 0px;
   /* 별칭 — 본문 곳곳의 var(--x, #폴백) 가 참조하는 미정의 변수들을 정식 등록(테마 전환 시 폴백 고착 방지) */
   --text-2: var(--text2);
   --text-dim: var(--dim);
@@ -123,7 +127,7 @@ body.resizing-row { cursor: row-resize; }
 .sb-resizer:hover, .sb-resizer.dragging { background: var(--border-ctrl); }
 .sb-top {
   display: flex; align-items: center; gap: 2px;
-  height: 40px; padding: 0 8px 0 72px; /* 좌: macOS 트래픽 라이트 여백 */
+  height: 40px; padding: 0 8px 0 var(--titlebar-inset-left); /* 좌: macOS 트래픽 라이트 여백(win32=0 근처) */
   flex: none; border-bottom: 1px solid var(--border); /* main-top 과 헤더 라인 연속 */
 }
 .sb-top .ic-btn, .main-top .ic-btn { width: 28px; height: 28px; }
@@ -257,7 +261,27 @@ body.resizing-row { cursor: row-resize; }
   height: 40px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border);
   user-select: none; -webkit-user-select: none;
 }
-.shell.sb-collapsed .main-top { padding-left: 72px; } /* sb-top 과 동일 트래픽라이트 여백 */
+.shell.sb-collapsed .main-top { padding-left: var(--titlebar-inset-left); } /* sb-top 과 동일 트래픽라이트 여백 */
+
+/* ── win32 창틀(decorations:false) — 트래픽라이트 없음 + 우측 상단 캡션 버튼(win-caption.js) ── */
+html[data-os="windows"] {
+  --titlebar-inset-left: 10px;
+  --titlebar-inset-right: 138px; /* 46px 버튼 3개 */
+}
+html[data-os="windows"] .main-top { padding-right: calc(14px + var(--titlebar-inset-right)); }
+/* 게이트(로그인/부트스트랩, z-index 10000)가 떠 있어도 창 조작은 가능해야 한다 → 그 위. */
+.win-caption { position: fixed; top: 0; right: 0; height: 40px; display: flex; z-index: 12000; }
+/* Windows 관용: 칸 전체 사각 하이라이트(둥근 모서리 없음), 무채색 명암. 닫기 hover 만 --error
+   (파괴적 동작 신호 = 상태색 허용 범위, OS 관용과도 일치). */
+.win-cap-btn {
+  width: 46px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 0; padding: 0;
+  color: var(--text3); cursor: default; transition: background 0.12s, color 0.12s;
+}
+.win-cap-btn:hover { background: var(--elevated2); color: var(--text); }
+.win-cap-btn:active { background: var(--hover); }
+.win-cap-btn.win-cap-close:hover { background: var(--error); color: #fff; }
+.win-cap-btn.win-cap-close:active { background: var(--error); opacity: 0.85; }
 .mt-ctl { display: inline-flex; align-items: center; gap: 2px; }
 .mt-div { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
 .mt-folder { display: inline-flex; color: var(--text2); }
@@ -1219,7 +1243,7 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .ide-pv-md .chat-list { margin: 0 0 12px 20px; }
 .ide-pv-md .chat-list li { margin: 4px 0; }
 /* JSON 트리 */
-.ide-json-node { font-size: 12.5px; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ide-json-node { font-size: 12.5px; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ide-json-head { cursor: pointer; user-select: none; display: flex; align-items: baseline; gap: 4px; }
 .ide-json-head:hover { background: var(--elevated2); border-radius: 5px; }
 .ide-json-caret { color: var(--dim); width: 11px; flex: none; }

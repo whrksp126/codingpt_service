@@ -16,6 +16,7 @@ import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 import { applyChatEvent } from "./chat-view.js";
 import { applyDeviceApprovalEvent, e2eeCaps, refreshE2ee } from "./e2ee.js";
 import { applyRunnerStatus, resetHostLocks } from "./host-lock.js";
+import { basename, IS_WINDOWS } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 // 원격 탈퇴 수신 — 로컬 자격 정리 후 로그인 게이트로(설정의 탈퇴 후처리와 동일 시퀀스).
@@ -458,8 +459,11 @@ function requireWs(params) {
 }
 
 // 워크스페이스 상대 경로 정규화 — back 이 ws 상대 경로를 줘도 홈-상대(IDE jail 기준)로 맞춘다.
+//  win32: 호스트발 경로에 `\` 가 섞여 올 수 있어 내부 표기(`/`)로 먼저 접는다(mac 은 무변환 —
+//  macOS 파일명의 합법적 `\` 를 건드리지 않기 위한 플랫폼 가드).
 function normPath(meta, path) {
-  const p = String(path || "").replace(/^\/+/, "");
+  const raw = IS_WINDOWS ? String(path || "").replace(/\\/g, "/") : String(path || "");
+  const p = raw.replace(/^\/+/, "");
   if (!p) return null;
   const root = (meta.localPath || "").replace(/\/+$/, "");
   if (!root || p === root || p.startsWith(root + "/")) return p;
@@ -590,7 +594,8 @@ function ideInstanceOf(target) {
 // 홈-상대(IDE 내부) 경로 → ws 상대 경로(normPath 역변환) — ideList 출력용(모바일 rel 규칙과 정합).
 function relPath(meta, full) {
   const root = (meta.localPath || "").replace(/\/+$/, "");
-  const p = String(full || "");
+  // win32 가드 — normPath 와 같은 이유(내부 표기 `/` 통일, mac 은 무변환).
+  const p = IS_WINDOWS ? String(full || "").replace(/\\/g, "/") : String(full || "");
   if (root && p.startsWith(root + "/")) return p.slice(root.length + 1);
   return p.replace(/^\/+/, "");
 }
@@ -932,7 +937,7 @@ export async function saveSnapshotPC() {
     try { await api.fsWrite(root + "/.codingpt/.gitignore", "*\n"); } catch (_) { /* gitignore 실패 무시 */ }
     const id = String(Date.now()) + "-" + Math.floor(Math.random() * 1e6).toString(36);
     const url = manifest ? (manifest.externalUrl || (manifest.logical ? ":" + manifest.logical.port + (manifest.logical.path || "") : "")) : "";
-    const label = manifest ? snapLabel(url) : ("IDE · " + String(ide.path).split("/").pop());
+    const label = manifest ? snapLabel(url) : ("IDE · " + (basename(ide.path) || String(ide.path)));
     const m = { id, label, createdAt: Date.now(), device: state.daemon?.device_name || "PC", url, has: { preview: !!manifest, ide: !!ide } };
     await api.fsWrite(snapDir(meta.localPath) + "/" + id + ".json", JSON.stringify({ ...m, manifest, ide }));
     let list = [m, ...(await snapReadIndex(meta.localPath)).filter((s) => s.id !== id)];

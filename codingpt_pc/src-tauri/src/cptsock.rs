@@ -5,10 +5,53 @@
 //  (runner-core/cpt-server.js one-shot 규약 미러).
 
 // 경로는 tmux.rs pool_env_args 와 동일 가정(~/.codingpt/cpt.sock — 홈 경로는 sun_path 한계 안).
+#[cfg(unix)]
 fn sock_path() -> Result<std::path::PathBuf, String> {
     dirs::home_dir()
         .map(|h| h.join(".codingpt").join("cpt.sock"))
         .ok_or_else(|| "홈 디렉토리를 찾을 수 없습니다.".to_string())
+}
+
+// win32 는 유닉스 도메인 소켓 대신 named pipe(윈도우 포팅 계약 2).
+//  이름 = \\.\pipe\codingpt-cpt-<sha256(homedir) 앞 8자> — 데몬(runner-core sockPath)과 유도 규칙이
+//  정확히 같아야 같은 파이프를 본다(홈 경로 문자열을 그대로 해시 — 대소문자·구분자도 os.homedir() 원문).
+#[cfg(windows)]
+fn pipe_path() -> Result<String, String> {
+    use sha2::Digest;
+    let home = dirs::home_dir().ok_or_else(|| "홈 디렉토리를 찾을 수 없습니다.".to_string())?;
+    let digest = sha2::Sha256::digest(home.to_string_lossy().as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    Ok(format!(r"\\.\pipe\codingpt-cpt-{}", &hex[..8]))
+}
+
+// 플랫폼별 커넥션 타입 — 둘 다 Read+Write+try_clone 을 제공하므로 이후 NDJSON 로직은 전부 공유한다.
+//  win32 named pipe 는 파일 핸들(read+write open)로 바이트 모드 통신(계약 2: Rust 측 규정).
+#[cfg(unix)]
+type CptStream = std::os::unix::net::UnixStream;
+#[cfg(windows)]
+type CptStream = std::fs::File;
+
+#[cfg(unix)]
+fn cpt_connect() -> Result<CptStream, String> {
+    let path = sock_path()?;
+    std::os::unix::net::UnixStream::connect(&path)
+        .map_err(|e| format!("cpt.sock 연결 실패(데몬 미기동?): {e}"))
+}
+
+#[cfg(windows)]
+fn cpt_connect() -> Result<CptStream, String> {
+    let path = pipe_path()?;
+    // 서버가 다음 파이프 인스턴스를 아직 안 걸어 둔 찰나는 ERROR_PIPE_BUSY(231) — 짧게 재시도.
+    for _ in 0..20 {
+        match std::fs::OpenOptions::new().read(true).write(true).open(&path) {
+            Ok(f) => return Ok(f),
+            Err(e) if e.raw_os_error() == Some(231) => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("cpt 파이프 연결 실패(데몬 미기동?): {e}")),
+        }
+    }
+    Err("cpt 파이프 연결 실패: 파이프가 계속 사용 중입니다(ERROR_PIPE_BUSY).".to_string())
 }
 
 // one-shot 요청/응답. ok:false 는 Err(error 메시지)로 승격 — 단, dispatch 가 정상 반환한
@@ -40,15 +83,20 @@ fn cpt_request_timed(
     with_code: bool,
     timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixStream;
-        let path = sock_path()?;
-        let mut stream = UnixStream::connect(&path)
-            .map_err(|e| format!("cpt.sock 연결 실패(데몬 미기동?): {e}"))?;
-        let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)));
-        let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+        let mut stream = cpt_connect()?;
+        #[cfg(unix)]
+        {
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)));
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
+        }
+        // TODO(win32): 파일 핸들로 연 named pipe 에는 읽기 타임아웃 API 가 없다(std 한계).
+        //  데몬 one-shot 규약상 서버가 응답 후 즉시 닫으므로 hang 은 드물지만, 실사용에서 문제가
+        //  보이면 overlapped I/O(windows crate) 로 교체한다. sync 커맨드는 Tauri 스레드풀에서 돈다.
+        #[cfg(windows)]
+        let _ = timeout_secs;
         let req = serde_json::json!({ "id": 1, "cmd": cmd, "args": args });
         let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         line.push('\n');
@@ -78,9 +126,9 @@ fn cpt_request_timed(
             }
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
-        let _ = (cmd, args, with_code);
+        let _ = (cmd, args, with_code, timeout_secs);
         Err("이 플랫폼에서는 아직 지원되지 않습니다.".to_string())
     }
 }
@@ -265,9 +313,9 @@ pub fn chat_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Va
 //  one-shot 헬퍼(cpt_request)로는 불가능하므로 전용 스레드 + 이벤트(cpt-local-ui) + 회신 커맨드로 구성한다.
 //  데몬 재시작(업데이트·takeover)으로 소켓이 끊기면 2초 간격으로 재접속한다 — 이 루프가 없으면
 //  "데몬 갱신 후 로컬 채널만 조용히 죽는" 상태가 된다.
-#[cfg(unix)]
-fn ui_writer() -> &'static std::sync::Mutex<Option<std::os::unix::net::UnixStream>> {
-    static W: std::sync::OnceLock<std::sync::Mutex<Option<std::os::unix::net::UnixStream>>> =
+#[cfg(any(unix, windows))]
+fn ui_writer() -> &'static std::sync::Mutex<Option<CptStream>> {
+    static W: std::sync::OnceLock<std::sync::Mutex<Option<CptStream>>> =
         std::sync::OnceLock::new();
     W.get_or_init(|| std::sync::Mutex::new(None))
 }
@@ -282,7 +330,7 @@ static UI_LOCAL_STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 // 채널 기동(멱등) — args = { clientKey, deviceId?, kind, foreground }.
 #[tauri::command]
 pub fn ui_local_start(app: tauri::AppHandle, args: serde_json::Value) -> Result<(), String> {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         if let Ok(mut g) = ui_attach_args().lock() {
             *g = args;
@@ -293,30 +341,23 @@ pub fn ui_local_start(app: tauri::AppHandle, args: serde_json::Value) -> Result<
         std::thread::spawn(move || ui_local_loop(app));
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (app, args);
         Err("이 플랫폼에서는 아직 지원되지 않습니다.".to_string())
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn ui_local_loop(app: tauri::AppHandle) {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
     use tauri::Emitter;
     loop {
-        let path = match sock_path() {
-            Ok(p) => p,
-            Err(_) => {
-                std::thread::sleep(std::time::Duration::from_secs(5));
-                continue;
-            }
-        };
-        let stream = match UnixStream::connect(&path) {
+        // 연결 실패(홈 미해석 포함) = 데몬 미기동/재기동 중 — 2초 후 재시도.
+        let stream = match cpt_connect() {
             Ok(s) => s,
             Err(_) => {
-                std::thread::sleep(std::time::Duration::from_secs(2)); // 데몬 미기동/재기동 중
+                std::thread::sleep(std::time::Duration::from_secs(2));
                 continue;
             }
         };
@@ -372,7 +413,7 @@ fn ui_local_loop(app: tauri::AppHandle) {
 // 프런트 → 데몬 회신/신호({t:'ui_result',…} · {t:'presence',active}).
 #[tauri::command]
 pub fn ui_local_send(frame: serde_json::Value) -> Result<(), String> {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         use std::io::Write;
         let mut g = ui_writer().lock().map_err(|_| "채널 상태 오류".to_string())?;
@@ -382,7 +423,7 @@ pub fn ui_local_send(frame: serde_json::Value) -> Result<(), String> {
         s.write_all((frame.to_string() + "\n").as_bytes())
             .map_err(|e| format!("전송 실패: {e}"))
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = frame;
         Err("이 플랫폼에서는 아직 지원되지 않습니다.".to_string())

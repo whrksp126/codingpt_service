@@ -42,6 +42,37 @@ tauri-plugin-updater = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 
+# Windows 포팅(워크스트림 B1+B2) — 전부 win32 전용. 각 용도:
+#  sha2          cpt named pipe 이름 유도(\\.\pipe\codingpt-cpt-<sha256(homedir) 앞 8자> — 계약 2, 데몬과 동일 규칙)
+#  clipboard-win CF_HDROP(파일 복사)·PNG/CF_DIB(이미지) 클립보드 조회(bridge.rs — NSPasteboard 등가)
+#  image         CF_DIB(BMP) → PNG 재인코딩(클립보드 이미지 계약) + 프리뷰 스크린샷 PNG→JPEG 재인코딩
+#                (0.8 → 2MB 초과 시 0.4 — macOS 와 동일 규칙, preview_win.rs)
+#  windows       Job Object(데몬 고아 방지, B1) + DirectComposition/D3D11/서브클래스(프리뷰 punch-through, B2)
+#  webview2-com  프리뷰 WebView2 CompositionController(preview_win.rs).
+#                버전은 반드시 wry 와 동일 계열(webview2-com 0.38 / windows 0.61)로 고정 — 다르면
+#                tauri PlatformWebview::controller()/environment() 가 돌려주는 COM 타입과 불일치해 컴파일 불가.
+[target.'cfg(target_os = "windows")'.dependencies]
+sha2 = "0.10"
+clipboard-win = "5"
+image = { version = "0.25", default-features = false, features = ["bmp", "png", "jpeg"] }
+webview2-com = "0.38"
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString"] }

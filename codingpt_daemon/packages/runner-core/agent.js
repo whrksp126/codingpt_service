@@ -16,14 +16,25 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
-const { spawn, execFileSync } = require('child_process');
 const fsLib = require('./fs');
 const runtime = require('./runtime');
+const sockPathLib = require('./sock-path');
+const { spawnCli, execFileCliSync, ptyCommand, killTree } = require('./spawn-util');
 
-const CLAUDE_BIN = process.env.CODINGPT_CLAUDE_BIN || 'claude';
 const NODE_BIN = process.execPath;
 const APPROVAL_MCP = path.join(__dirname, 'approval-mcp.js');
-const APPROVAL_SOCK = path.join(os.tmpdir(), `cpt-approval-${process.pid}.sock`);
+// win32 는 named pipe(\\.\pipe\cpt-approval-<pid>) — 계약 2. darwin/linux 는 기존 tmpdir 소켓 그대로.
+const APPROVAL_SOCK = sockPathLib.approvalSockPath(process.pid);
+
+// claude 바이너리 좌표 — darwin 은 기존 그대로 'claude'(PATH 조회). win32 는 .cmd shim 일 수 있어
+//  PATH 이름만으로는 spawn 이 안 된다(EINVAL) → 감지 카탈로그(agents.js)로 절대경로를 확정한다.
+function claudeBin() {
+  if (process.env.CODINGPT_CLAUDE_BIN) return process.env.CODINGPT_CLAUDE_BIN;
+  if (process.platform === 'win32') {
+    try { const p = require('./agents').resolveBinSync('claude'); if (p) return p; } catch (_) { /* 폴백 */ }
+  }
+  return 'claude';
+}
 const MAX_LOG = 3000;        // 세션별 이벤트 링버퍼(백로그 리플레이용 — 인메모리)
 const COALESCE_MS = 50;      // 텍스트 델타 코얼레싱 주기
 const INIT_TIMEOUT_MS = 15000;
@@ -216,7 +227,8 @@ function bindSessionId(session, claudeId) {
 // ── spawn ──────────────────────────────────────────────────────────
 function ensureApprovalServer() {
   if (approvalServer) return;
-  try { fs.unlinkSync(APPROVAL_SOCK); } catch (_) { /* noop */ }
+  // named pipe(win32)는 파일이 아니다 — unlink 대상 아님(마지막 핸들이 닫히면 자동 소멸).
+  if (!sockPathLib.isPipePath(APPROVAL_SOCK)) { try { fs.unlinkSync(APPROVAL_SOCK); } catch (_) { /* noop */ } }
   approvalServer = net.createServer((sock) => {
     let buf = '';
     sock.on('data', (d) => {
@@ -252,7 +264,8 @@ function spawnClaude(session) {
     '--permission-prompt-tool', 'mcp__cptapproval__approval_prompt',
   ];
   if (session.resumeId) args.push('--resume', session.resumeId);
-  session.proc = spawn(CLAUDE_BIN, args, {
+  // spawnCli: darwin 은 cp.spawn 그대로, win32 의 .cmd shim 만 cmd.exe 경유(§spawn-util).
+  session.proc = spawnCli(claudeBin(), args, {
     cwd: session.absCwd,
     env: process.env,          // 사용자 환경 그대로(자격증명은 우리가 안 건드림).
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -314,11 +327,12 @@ function listSessions(absCwd) {
 // ~/.claude OAuth 토큰 파일을 직접 열지 않는다. (M5 Slice2: 클라우드 러너는 사용자가
 // 컨테이너 안에서 자기 claude 에 직접 로그인해야 첫 턴이 가능하므로 실제 점검이 필요.)
 function detectClaude() {
+  const bin = claudeBin();
   try {
-    const version = execFileSync(CLAUDE_BIN, ['--version'], { encoding: 'utf-8', timeout: 4000 }).trim();
-    return { installed: true, version, bin: CLAUDE_BIN };
+    const version = execFileCliSync(bin, ['--version'], { encoding: 'utf-8', timeout: 4000 }).trim();
+    return { installed: true, version, bin };
   } catch (e) {
-    return { installed: false, version: null, bin: CLAUDE_BIN, error: (e && (e.code || e.message)) || 'unknown' };
+    return { installed: false, version: null, bin, error: (e && (e.code || e.message)) || 'unknown' };
   }
 }
 function doctor() {
@@ -351,7 +365,7 @@ function endLogin() {
 // claude 자체 상태 리포트(auth status --json) — 토큰은 노출되지 않고 loggedIn + 계정 라벨만.
 function authStatus() {
   try {
-    const out = execFileSync(CLAUDE_BIN, ['auth', 'status', '--json'], { encoding: 'utf-8', timeout: 6000 });
+    const out = execFileCliSync(claudeBin(), ['auth', 'status', '--json'], { encoding: 'utf-8', timeout: 6000 });
     return JSON.parse(out);
   } catch (e) {
     const out = e && e.stdout ? String(e.stdout) : ''; // 비로그인 시 non-zero exit + stdout 에 json
@@ -370,7 +384,9 @@ async function startLogin({ useConsole } = {}) {
   const args = ['auth', 'login', useConsole ? '--console' : '--claudeai'];
   // BROWSER=true → CLI 가 브라우저 대신 `true`(무동작)를 실행 → 데스크톱에서도 탭이 안 열림.
   //  컨테이너엔 브라우저가 없어 어차피 "visit: <URL>" 폴백만 출력된다.
-  const proc = nodePty.spawn(CLAUDE_BIN, args, {
+  // win32 의 .cmd shim 은 ConPTY 도 직접 못 띄운다 — ptyCommand 가 cmd.exe 경유 좌표로 변환(darwin 무변경).
+  const cmd = ptyCommand(claudeBin(), args);
+  const proc = nodePty.spawn(cmd.file, cmd.args, {
     name: 'xterm-256color', cols: 100, rows: 30, cwd: runtime.root(),
     env: { ...process.env, BROWSER: 'true' },
   });
@@ -428,7 +444,14 @@ async function handle(method, params, ws) {
       if (p.prompt) writeUser(session, p.prompt);
       const timer = setTimeout(() => { if (session._rejectInit) { session._rejectInit(new Error('에이전트 초기화 시간 초과')); session._rejectInit = null; } }, INIT_TIMEOUT_MS);
       try { const id = await initP; clearTimeout(timer); return { sessionId: id }; }
-      catch (e) { clearTimeout(timer); try { session.proc && session.proc.kill('SIGKILL'); } catch (_) {} spawns.delete(session.spawnId); throw e; }
+      catch (e) {
+        clearTimeout(timer);
+        if (session.proc) {
+          if (process.platform === 'win32') killTree(session.proc.pid, 'SIGKILL'); // cmd.exe 경유 스폰은 트리째
+          else { try { session.proc.kill('SIGKILL'); } catch (_) {} }
+        }
+        spawns.delete(session.spawnId); throw e;
+      }
     }
     case 'agent.input': {
       const s = sessions.get(p.sessionId); if (!s) { const e = new Error('세션을 찾을 수 없습니다.'); e.code = 'SESSION_GONE'; throw e; }
@@ -444,11 +467,24 @@ async function handle(method, params, ws) {
       return { ok: true };
     }
     case 'agent.interrupt': {
-      const s = sessions.get(p.sessionId); if (s && s.proc) { try { s.proc.kill('SIGINT'); } catch (_) {} }
+      const s = sessions.get(p.sessionId);
+      if (s && s.proc) {
+        if (process.platform === 'win32') {
+          // TODO(win32, §D-5): "턴만 중단"은 ConPTY(node-pty) 경유 스폰으로 바꿔 \x03 을 주입해야
+          //  가능하다 — 현재 구조화 스폰은 파이프 stdio 라 SIGINT 등가가 없다. 1차는 트리 종료
+          //  (= 세션 종료와 동일한 강도)로 동작만 보장한다. 실기 검증 라운드에서 승격할 것.
+          killTree(s.proc.pid, 'SIGINT');
+        } else { try { s.proc.kill('SIGINT'); } catch (_) {} }
+      }
       return { ok: true };
     }
     case 'agent.stop': {
-      const s = sessions.get(p.sessionId); if (s && s.proc) { try { s.proc.stdin.end(); } catch (_) {} try { s.proc.kill('SIGTERM'); } catch (_) {} }
+      const s = sessions.get(p.sessionId);
+      if (s && s.proc) {
+        try { s.proc.stdin.end(); } catch (_) {}
+        if (process.platform === 'win32') killTree(s.proc.pid, 'SIGTERM'); // cmd.exe 경유 스폰은 직계만 죽이면 claude 가 남는다
+        else { try { s.proc.kill('SIGTERM'); } catch (_) {} }
+      }
       return { ok: true };
     }
     case 'agent.status': {

@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: 유닉스 도메인 소켓 실청취(cpt.sock 지속 연결) — 계약 2 named pipe 재배선 전
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('local-checkpoint.test.js: win32 스킵 — 유닉스 도메인 소켓 실청취(cpt.sock 지속 연결)', { skip: true }, () => {});
+  return;
+}
+
 // 로컬 자동 체크포인트 + 로컬 UI 채널(cpt.sock 지속 연결) 회귀 테스트 — node --test
 //
 // 배경(F0): 같은 기기 안에서 서버를 왕복하던 두 경로를 끊는다.

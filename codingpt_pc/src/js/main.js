@@ -15,7 +15,9 @@ import {
 } from "./workspace-view.js";
 import { registerCommands, runCommand } from "./command-run.js";
 import { commandForCombo } from "./commands.js";
-import { bindings, comboOf } from "./shortcuts.js";
+import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
+import { basename } from "./path-utils.js";
+import { initWinCaption } from "./win-caption.js";
 import { openPalette, isPaletteOpen } from "./palette.js";
 import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
 import {
@@ -44,7 +46,7 @@ function initQuitGuard() {
   api.onQuitGuard(() => {
     if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
     const files = ideDirtyPaths();
-    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${p.split("/").pop()}</div>`).join("")
+    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${basename(p) || p}</div>`).join("")
       + (files.length > 6 ? `<div class="qg-file">… 외 ${files.length - 6}개</div>` : "");
     const bd = document.createElement("div");
     bd.className = "quit-guard-backdrop";
@@ -63,6 +65,13 @@ function initQuitGuard() {
     bd.addEventListener("click", (e) => { if (e.target === bd) bd.remove(); });
     document.body.appendChild(bd);
   });
+}
+
+// win32 표식 + 창틀 — styles.css 의 트래픽라이트 여백 변수(--titlebar-inset-*)가 이 속성을 보고,
+//  decorations:false 창의 우측 상단 min/max/close 버튼(win-caption.js)을 단다. mac 은 아무 것도 안 한다.
+if (IS_WINDOWS) {
+  document.documentElement.dataset.os = "windows";
+  initWinCaption();
 }
 
 const shellEl = document.querySelector(".shell");
@@ -153,11 +162,13 @@ function focusedPane() {
 // (구) 앱 활성화 시 창 크기 회수(resize-window 클레임)는 폐지 — 전용 세션 모델에선 window-size
 //  latest 가 입력/리사이즈하는 클라이언트를 자동으로 따라간다(수동 클레임 = 크기 뺏기 전쟁의 근원).
 
-// ── Ctrl+F(터미널 아닌 곳에서만) ──
+// ── Ctrl+F(터미널 아닌 곳에서만) — macOS 전용 ──
 //  ⌘F 는 아래 단축키 표(find.open)가 처리한다. Ctrl+F 만 여기 남는 이유: 터미널에서는 셸의
 //  forward-char 를 살려야 해서 **pane 종류를 봐야** 하는데, 이건 조합이 아니라 상황 판정이라
 //  재바인딩 표에 담기지 않는다.
-window.addEventListener("keydown", (e) => {
+//  win32 에선 걸지 않는다 — Ctrl 이 곧 Mod 라 사용자가 find.open 을 Ctrl+F 로 재바인딩하면
+//  이 핸들러와 이중 처리가 되고, 기본값(Ctrl+Shift+F)은 표가 이미 처리한다(계약 5).
+if (!IS_WINDOWS) window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() !== "f") return;
   if (!e.ctrlKey || e.metaKey) return;
   if (state.view === "settings") return;
@@ -232,7 +243,8 @@ function startPreviewShieldWatch() {
   let cur = null;
   setInterval(() => {
     const on = !!document.querySelector(SEL);
-    if (on !== cur) { cur = on; api.previewShield(on); }
+    // win32 프리뷰(B2 preview_win)가 아직 없는 빌드에서도 폴링이 콘솔 오류를 쏟지 않게 삼킨다.
+    if (on !== cur) { cur = on; Promise.resolve(api.previewShield(on)).catch(() => {}); }
   }, 80);
 }
 

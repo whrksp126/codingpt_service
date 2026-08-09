@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: 유닉스 도메인 소켓 실청취(cpt.sock 경로 listen/existsSync/unlink) — 계약 2 named pipe 재배선 전
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('socket-wiring.test.js: win32 스킵 — 유닉스 도메인 소켓 실청취(cpt.sock 경로 listen/existsSync/unlink)', { skip: true }, () => {});
+  return;
+}
+
 // cpt 소켓 / 제어 WS 배선 회귀 테스트 — node --test
 //
 // 이 파일이 지키는 것은 "기능 로직"이 아니라 **배선 불변식**이다. 전부 과거 사고 유형이거나

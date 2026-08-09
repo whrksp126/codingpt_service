@@ -93,6 +93,8 @@ fn ws_cache_save_at(p: &std::path::Path, token: &str, server: &str, data: &serde
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
         }
+        // TODO(win32): %USERPROFILE%\.codingpt 하위라 기본 ACL(본인+SYSTEM+관리자)로 이미 타 사용자
+        //  접근이 막힌다. 0600 등가의 명시 DACL(icacls /inheritance:r 상당)은 후속 하드닝으로.
     }
 }
 
@@ -893,8 +895,26 @@ pub fn open_notification_settings() -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("시스템 설정 활성화 실패: {e}"))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 설정 앱의 알림 페이지(ms-settings: URI). 앱별 행 딥링크는 UWP 패키지 앱 전용이라
+        //  목록 페이지까지만 연다. cmd /C start 는 URI 스킴 핸들러를 그대로 태운다.
+        win_cmd_hidden(&["/C", "start", "", "ms-settings:notifications"])
+            .map(|_| ())
+            .map_err(|e| format!("알림 설정 열기 실패: {e}"))
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     Ok(())
+}
+
+// win32 cmd.exe 스폰 공통 헬퍼 — CREATE_NO_WINDOW 필수(없으면 콘솔 창이 깜빡인다).
+#[cfg(target_os = "windows")]
+fn win_cmd_hidden(args: &[&str]) -> std::io::Result<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("cmd")
+        .args(args)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
 }
 
 // 외부 브라우저로 URL 열기(프리뷰의 프레임 차단 사이트·웹검색용). http/https 만 허용.
@@ -909,7 +929,7 @@ pub fn open_external(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("/usr/bin/open").arg(u).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", u]).spawn();
+    let r = win_cmd_hidden(&["/C", "start", "", u]);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(u).spawn();
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
@@ -926,7 +946,7 @@ pub fn open_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("/usr/bin/open").arg(p).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(p).spawn();
+    let r = win_cmd_hidden(&["/C", "start", "", &path]);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(p).spawn();
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
@@ -984,7 +1004,15 @@ pub fn clipboard_paths() -> Vec<String> {
         }
         out
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // 탐색기 파일 복사(Ctrl+C/X)는 CF_HDROP 로 실린다 — 절대경로 목록으로 변환(계약 동일:
+        //  파일 참조가 없으면 빈 배열). clipboard-win 이 open/close·재시도를 내부 처리한다.
+        let paths: Vec<String> =
+            clipboard_win::get_clipboard(clipboard_win::formats::FileList).unwrap_or_default();
+        paths.into_iter().take(64).collect()
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     Vec::new()
 }
 
@@ -1039,8 +1067,49 @@ pub fn clipboard_image_png() -> Option<String> {
         std::fs::write(&p, &bytes).ok()?;
         Some(p.to_string_lossy().into_owned())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // 파일 참조가 함께 있으면 파일 쪽이 정본(macOS 경로와 동일 규칙).
+        if !clipboard_paths().is_empty() {
+            return None;
+        }
+        let bytes = win_clipboard_png_bytes()?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return None; // 비정상 크기 방어(macOS 와 동일 캡)
+        }
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        let p = std::env::temp_dir().join(format!(
+            "cpt-paste-{}-{:06}.png",
+            ts.as_secs(),
+            ts.subsec_micros() % 1_000_000
+        ));
+        std::fs::write(&p, &bytes).ok()?;
+        Some(p.to_string_lossy().into_owned())
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     None
+}
+
+// win32 클립보드 이미지 → PNG 바이트. ① 등록 포맷 "PNG"(브라우저 이미지 복사 등)를 우선 —
+//  재인코딩 없이 원본 그대로. ② 없으면 CF_DIB(V5) 계열(Win+Shift+S 스크린샷 등)을 BMP 로 받아
+//  PNG 재인코딩(임시파일 계약은 항상 .png — macOS 의 TIFF→PNG 재인코딩과 같은 자리).
+#[cfg(target_os = "windows")]
+fn win_clipboard_png_bytes() -> Option<Vec<u8>> {
+    use clipboard_win::{formats, get_clipboard, register_format};
+    if let Some(png) = register_format("PNG") {
+        if let Ok(data) = get_clipboard::<Vec<u8>, _>(formats::RawData(png.get())) {
+            if !data.is_empty() {
+                return Some(data);
+            }
+        }
+    }
+    let bmp: Vec<u8> = get_clipboard(formats::Bitmap).ok()?;
+    let img = image::load_from_memory_with_format(&bmp, image::ImageFormat::Bmp).ok()?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
 }
 
 // 수동 실측용 스모크(클립보드 상태 의존이라 CI 부적합 — 항상 ignored).

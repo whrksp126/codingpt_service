@@ -37,6 +37,9 @@ function parseArgv(argv) {
 
 // ── tmux 자기조회 — 이 CLI 가 어느 세션/window 에서 실행됐는지 ──
 function findTmuxBin() {
+  // win32: tmux 없음 — 세션 호스트는 term-host(웨이브 2, 계약 1) 경유 예정. 자기 좌표는
+  //  env 패스트패스(CPT_TID/CPT_TSESSION)만으로 해석되므로 여기서는 조용히 포기한다.
+  if (process.platform === 'win32') return null;
   const candidates = [];
   if (process.env.CPT_TMUX) candidates.push(process.env.CPT_TMUX);
   if (process.env.CODINGPT_TMUX) candidates.push(process.env.CODINGPT_TMUX);
@@ -100,6 +103,16 @@ function resolveWs(tmuxInfo) {
 
 function sockPath() {
   if (process.env.CPT_SOCK) return process.env.CPT_SOCK;
+  // 단일 출처(runner-core/sock-path.js) — 데몬 번들/워크스페이스 배치 모두 runner-core 가 옆에 있다
+  //  (shim 이 이 파일을 절대경로로 exec 하는 구조라 상대 위치가 보존된다). 의존성 0 원칙은 "옆에
+  //  없으면 최소 폴백으로 자립"으로 지킨다 — 폴백은 sock-path.js 의 기본 규칙과 반드시 일치할 것.
+  try {
+    return require(path.join(__dirname, '..', '..', 'runner-core', 'sock-path.js')).clientSockPath();
+  } catch (_) { /* 독립 배치 — 아래 최소 폴백 */ }
+  if (process.platform === 'win32') {
+    const h = require('crypto').createHash('sha256').update(os.homedir()).digest('hex').slice(0, 8);
+    return '\\\\.\\pipe\\codingpt-cpt-' + h;
+  }
   return path.join(os.homedir(), '.codingpt', 'cpt.sock');
 }
 

@@ -47,9 +47,18 @@ function run(cmd, args, opts) {
 // PATH 에만 기대면 안 된다 — 데몬은 로그인 셸이 아니라 **런치 에이전트**로도 뜨고, 그때 PATH 는
 //  거의 비어 있다(터미널에서 되는데 앱에서만 안 되는 전형적 사고).
 function androidHome() {
-  return process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT
-    || path.join(os.homedir(), 'Library', 'Android', 'sdk');
+  if (process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT) {
+    return process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT;
+  }
+  if (process.platform === 'win32') {
+    // Android Studio 의 win32 기본 설치 위치.
+    const local = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+    return path.join(local, 'Android', 'Sdk');
+  }
+  return path.join(os.homedir(), 'Library', 'Android', 'sdk');
 }
+// win32 실행 파일 접미사 — adb/emulator 는 SDK 안에서 .exe 다(darwin 후보 경로는 무수정).
+const EXE = process.platform === 'win32' ? '.exe' : '';
 function firstExisting(cands) {
   for (const p of cands) { try { if (p && fs.existsSync(p)) return p; } catch (_) { /* noop */ } }
   return null;
@@ -59,8 +68,8 @@ function tools() {
   if (toolCache) return toolCache;
   const sdk = androidHome();
   toolCache = {
-    adb: firstExisting([path.join(sdk, 'platform-tools', 'adb'), '/usr/local/bin/adb', '/opt/homebrew/bin/adb']),
-    emulator: firstExisting([path.join(sdk, 'emulator', 'emulator'), '/usr/local/bin/emulator']),
+    adb: firstExisting([path.join(sdk, 'platform-tools', 'adb' + EXE), '/usr/local/bin/adb', '/opt/homebrew/bin/adb']),
+    emulator: firstExisting([path.join(sdk, 'emulator', 'emulator' + EXE), '/usr/local/bin/emulator']),
     xcrun: firstExisting(['/usr/bin/xcrun']),
     sips: firstExisting(['/usr/bin/sips']),
     //  우리가 만들어 둔 전용 venv 를 **먼저** 본다 — 시스템 파이썬을 더럽히지 않고 설치하는 위치라
@@ -96,7 +105,7 @@ function idbEnv(t, base) {
   const env = { ...(base || process.env) };
   if (!t || !t.idbCompanion) return env;
   const dir = path.dirname(t.idbCompanion);
-  env.PATH = `${dir}${env.PATH ? `:${env.PATH}` : ''}`;
+  env.PATH = `${dir}${env.PATH ? `${path.delimiter}${env.PATH}` : ''}`;
   return env;
 }
 function idbRun(args, opts) {

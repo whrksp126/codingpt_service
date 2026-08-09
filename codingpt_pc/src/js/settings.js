@@ -26,6 +26,7 @@ import {
   getLangSetting, setLangSetting, langOptions,
   TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
 } from "./theme.js";
+import { IS_WINDOWS } from "./shortcuts.js";
 import * as i18n from './i18n/index.js';
 
 let root = null;
@@ -184,21 +185,23 @@ function renderSection(force) {
   } else if (section === "system") {
     // 시스템 — macOS 와의 연동만 모은다(로그인 항목 + 보호 폴더 접근). 각각은 카드 하나를 채우지
     //  못하는 설정이라 예전엔 `일반`·`보안` 이라는 1항목짜리 그룹으로 흩어져 있었다(2026-08-05 통합).
+    //  win32: 보호 폴더(TCC)는 macOS 개념이라 카드 자체를 숨긴다. 자동 실행은 양 OS 공통(Tauri).
     contentEl.innerHTML = `
       <div class="sm-section-title">${i18n.t('시작')}</div>
       <div class="sm-card2">
         <label class="sett-row sett-row-action" for="autostartChk">
-          <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
+          <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${IS_WINDOWS ? i18n.t('Windows에 로그인하면 CodingPT를 자동으로 시작해요.') : i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
           <input id="autostartChk" type="checkbox" class="tgl" aria-label="${i18n.t('로그인 시 자동 실행')}" />
         </label>
       </div>
+      ${IS_WINDOWS ? "" : `
       <div class="sm-section-title">${i18n.t('폴더 접근 권한')}</div>
       <div class="sm-card2">
         ${folderPermRow("downloads", i18n.t('다운로드 폴더'))}
         ${folderPermRow("desktop", i18n.t('데스크탑 폴더'))}
         ${folderPermRow("documents", i18n.t('문서 폴더'))}
         <div class="sett-hint">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</div>
-      </div>
+      </div>`}
       <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정’에서 관리할 수 있어요.')}</div>`;
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
@@ -575,7 +578,7 @@ function bindAppearance(rootEl) {
         <div class="ts-name">${esc(o.label)}</div>
         <div class="ts-prev" style="background:${p.background}">
           <div class="ts-pline">
-            <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@mac</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
+            <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@${IS_WINDOWS ? "pc" : "mac"}</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
           </div>
           <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">${i18n.t('코드 설명해줘')}</span></div>
         </div>
