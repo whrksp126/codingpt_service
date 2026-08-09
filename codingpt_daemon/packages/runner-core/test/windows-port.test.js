@@ -27,7 +27,9 @@ const wrapper = require('../win-agent-wrapper');
 
 test('sock-path: darwin 은 기존 규칙 그대로 — <stateDir>/cpt.sock', () => {
   const dir = '/Users/u/.codingpt';
-  assert.strictEqual(sockPath.serverSockPath(dir, 'darwin'), path.join(dir, 'cpt.sock'));
+  // 기대값은 POSIX 조인 — win32 호스트에서 darwin 규칙을 검증할 때 path.join 은 '\\' 를 섞는다
+  //  (제품은 path.posix 고정이라 어느 호스트에서든 이 값이 정답이다).
+  assert.strictEqual(sockPath.serverSockPath(dir, 'darwin'), dir + '/cpt.sock');
 });
 
 test('sock-path: darwin sun_path 한계(104B) 초과 시 /tmp 짧은 폴백(기존 규칙 보존)', () => {

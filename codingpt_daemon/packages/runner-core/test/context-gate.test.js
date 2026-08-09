@@ -16,6 +16,9 @@ if (process.platform === 'win32') {
 //  C. "열려 있는 워크스페이스" 폴더(와 그 하위)에서의 CWD 폴백은 통과한다 — 옛 셸 수동 사용 보존.
 //  D. 진단(ping/identify)은 컨텍스트 없이도 응답하고, identify.context 가 게이트 판정을 알려준다.
 //  E. 예외 목록(CONTEXT_EXEMPT)에 조작 계열(terminal./ws./ui./browser./notify)이 끼어들지 않는다.
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

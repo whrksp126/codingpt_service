@@ -3,6 +3,9 @@
 // 배경(2026-07-28 사용자 확정): 데몬 재시작이 승인 배너를 회수해도, TUI 다이얼로그로 살아 있는
 // 미응답 질문은 다시 광고되어야 한다("답 안 한 질문이 있으면 폰 알림도 정확히 1개").
 // 여기서 조용히 틀리면: 배너 중복(멱등 깨짐) / 부분 답 증발 / 실패했는데 폰은 성공 표시.
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

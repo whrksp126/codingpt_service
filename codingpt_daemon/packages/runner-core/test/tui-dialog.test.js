@@ -9,6 +9,9 @@
 //  · 푸터 힌트가 없는 화면은 다이얼로그가 아니다(대화 본문의 "1. …" 목록 오탐 차단)
 //  · 승인/질문 다이얼로그는 미러하지 않는다(훅 경로의 자기 카드가 이미 있다 — 이중 표시 금지)
 //  · 카드를 누르는 사이 화면이 바뀌었으면 **키를 치지 않는다**(다른 질문에 대신 답하는 사고 방지)
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

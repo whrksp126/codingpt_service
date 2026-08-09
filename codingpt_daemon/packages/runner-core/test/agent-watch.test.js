@@ -2,6 +2,9 @@
 //  실행: node --test packages/runner-core/test/agent-watch.test.js
 //  tmux/서버 무접촉: pty(runTmux)·cpt-server(backFetch)를 require 캐시로 스텁하고
 //  observe() 에 스냅샷을 직접 주입한다. 발사는 QUIET_MS(3s) 실타이머 — 테스트가 기다린다.
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');

@@ -1,5 +1,8 @@
 // TUI statusline 미러(status-line.js) — 추출 규칙은 2026-07-30 라이브 tmux 캡처 원문이 정본.
 //  (capture-pane -e 실측: claude = 구분선 뒤 statusLine 스크립트 출력 + 푸터, codex = › 아래 한 줄)
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test, beforeEach, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

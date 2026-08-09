@@ -66,7 +66,17 @@ function pipePath() {
 }
 
 // 이 프로세스에서 파이프 백엔드가 활성인가 — win32 항상, 그 외엔 테스트/개발 env 로만.
+//
+// CPT_TERM_BACKEND(테스트 주입 훅): 'tmux' = win32 에서도 tmux 구현(term-backend-tmux) 강제.
+//  존재 이유 — runTmux 몽키패치로 도는 스텁 테스트 7종(agent-watch/chat-mode/codex-mode/
+//  context-gate/question-revive/status-line/tui-dialog)이 win32 CI 에서 파이프 경로를 타면
+//  스텁이 백엔드에 안 걸린다(합성 화면 미도달·파이프 접속 시도). tmux 구현은 실행을
+//  `pty().runTmux` **호출 시점 지연 참조**로 하므로, 이 훅으로 강제하면 tmux 바이너리 없이도
+//  몽키패치가 그대로 걸린다. 'host' = 반대 방향 강제(대칭 완비 — 현재 소비자 없음).
+//  ⚠ 프로덕션 경로에서 이 env 를 세우지 말 것 — win32 실사용은 항상 파이프다.
 function isHostBackend() {
+  if (process.env.CPT_TERM_BACKEND === 'tmux') return false;
+  if (process.env.CPT_TERM_BACKEND === 'host') return true;
   return process.platform === 'win32' || !!process.env.CPT_TERMHOST_SOCK;
 }
 

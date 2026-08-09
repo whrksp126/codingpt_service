@@ -13,6 +13,9 @@
 //  ① 대화 본문에 `• Model changed … for Plan mode.` 기록이 남는다 — 화면 전체를 훑으면 오독한다.
 //  ② 다이얼로그가 화면을 덮으면 상태줄이 안 보인다 → "Plan 아님 = Default" 로 단정하면 안 된다.
 //  ③ 채팅 전송 전 컴포저 잔재 청소는 codex(`›`)도 해야 한다(`//model` 사고).
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
