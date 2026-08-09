@@ -34,6 +34,16 @@ tmux 서버의 Windows 등가물. **별도 상주 프로세스**(데몬이 죽�
 
 `packages/runner-core/term-backend.js`(신규)가 유일한 진입점: darwin → 기존 `runTmux` 경로 위임, win32 → term-host 파이프 클라이언트. 시그니처는 위 op 목록과 1:1.
 
+### 계약 1 — 웨이브 2 확정 사항 (2026-08-10)
+
+- **재배선 완료**: pty.js/cpt-server.js/status-line.js/agent-watch.js/question-revive.js 의 tmux 호출은 전부 term-backend op 경유. darwin 구현은 `term-backend-tmux.js` — 종전 호출부와 같은 tmux 인자를 조립하고 실행은 `pty.runTmux`(저수준 단일 실행기, 테스트 몽키패치 지점) 경유. tmux 전용 유지보수(레거시 풀 마이그레이션·뷰 리퍼·zdot 자가치유·automatic-rename 옵션 주입)만 pty.js 에 남고 호스트 백엔드에선 no-op.
+- **listSessionNames**(백엔드 op 추가): 모든 세션 이름 — darwin `list-sessions -F`, win32 는 list 의 이름 사상(컨텍스트 게이트 소비자).
+- **win32 호스트 스폰 = WMI 1차**: PC 앱(Rust)이 데몬을 Job Object(KILL_ON_JOB_CLOSE)에 넣으므로 평범한 spawn 은 자식이 Job 에 상속돼 앱 종료 시 터미널이 죽는다. `powershell Invoke-CimMethod Win32_Process.Create`(생성 프로세스 = WmiPrvSE 자식 = Job 밖, ShowWindow=0)로 스폰하고, env(CPT_TERMHOST_SOCK/CODINGPT_STATE_DIR)는 `cmd /d /s /c "set … && node … run"` 체인으로 전달(WMI 는 부모 env 미상속). 실패 시 기존 detached 스폰 폴백(Job 상속 감수). 조립은 순수 함수 `_buildWmiSpawnSpec`(유닛테스트).
+- **win32 파이프 정규화**: `CPT_TERMHOST_SOCK` 에 파이프 형식이 아닌 파일 경로가 오면 `\\.\pipe\cpt-termhost-test-<sha8(경로)>` 로 접는다(클라 term-backend·호스트 paths 동일 규칙 — win32 net.listen 은 파이프 외 경로 불가).
+- **win32 기본 셸 = 프로필 내장(계약 4 연결)**: 세션 생성 주체가 둘(데몬 create·PC 앱 create op)이므로 PowerShell 프로필 주입(`pwsh -NoLogo -NoExit -Command ". <stateDir>\shim\ps\cpt-profile.ps1"`, cmd 폴백 `/K cpt-init.cmd`)은 term-host `session.defaultShellSpec()` **한 곳**의 기본값이다. create 가 shell/args 를 명시하면 그것이 우선, 프로필 파일 부재 시 민짜 셸(터미널은 항상 열린다). 저널은 args 포함(크래시 복원 후에도 프로필 유지).
+- **win32 데몬 create env 최소셋**: `CPT_WS`·`CPT_SOCK`(계약 2 파이프)·`CPT_TID`/`CPT_TSESSION`(cpt CLI 좌표 — win32 는 tmux 자기조회가 없어 필수)·`PATH`(`<stateDir>\bin;` prepend). ZDOTDIR/CPT_TMUX 는 win32 제외 — PC 앱 create 규칙과 정합.
+- **cpt CLI win32 위임**: CPT_WS env 유실 시 CPT_TSESSION 좌표로 term-host 파이프에 getEnv op 를 직접 물어 복원(darwin show-environment 폴백 등가).
+
 ## 계약 2 — cpt 컨트롤 플레인 파이프
 
 - win32 경로: `\\.\pipe\codingpt-cpt-<sha256(homedir) 앞 8자>`. `CPT_SOCK` env에 이 문자열을 그대로 넣는다(기존 소비자들은 문자열을 `net.connect`/파일 open에 그대로 사용).

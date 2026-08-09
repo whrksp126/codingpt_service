@@ -20,6 +20,9 @@ const { execFile } = require('child_process');
 const runtime = require('./runtime');
 const configLib = require('./config');
 const ptyLib = require('./pty');
+// 터미널 세션 백엔드 유일 진입점(웨이브2) — 이 파일의 tmux 서브커맨드 직행은 전부 이걸 경유한다
+//  (darwin: term-backend-tmux 가 종전과 동일한 인자를 조립, win32: term-host 파이프).
+const termBackend = require('./term-backend');
 const wsRpc = require('./workspace');
 const fsLib = require('./fs');
 const forwardLib = require('./forward');
@@ -316,22 +319,26 @@ async function launchAgentInTerminal(agentsLib, a) {
   if (!Number.isFinite(tid)) throw new Error('터미널 index 가 필요합니다');
   const { session, abs } = ptyLib.sessionForCwd(a.cwd);
   await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-  const target = `=${ptyLib.termSession(session, tid)}:0`;
-  const SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login']);
+  const target = ptyLib.termSession(session, tid);
+  // win32 셸 프로세스명 포함(pwsh/cmd) — term-host 의 command 판정과 정합(계약 4).
+  const SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login',
+    'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']);
   const deadline = Date.now() + Math.max(1000, Math.min(20000, (a.timeoutMs | 0) || 6000));
   let ready = false;
   let busy = false;
   while (Date.now() < deadline) {
     let cur = '';
     try {
-      cur = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{pane_current_command}'])).trim();
+      cur = String((await termBackend.info(target)).command || '').trim();
     } catch (e) {
       throw new Error('터미널을 찾을 수 없습니다 (index=' + tid + ')');
     }
-    if (cur && !SHELLS.has(cur)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
+    // win32 는 process 가 전체 경로/대문자 확장자일 수 있다 — basename 소문자까지 셸 판정에 포함.
+    const curBase = cur.split(/[\\/]/).pop().toLowerCase();
+    if (cur && !SHELLS.has(cur) && !SHELLS.has(curBase)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
     let screen = '';
     try {
-      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', target, '-S', '-5']);
+      screen = await termBackend.capture(target, { lines: 5 });
     } catch (_) { screen = ''; }
     if (screen.trim()) { ready = true; break; }            // 프롬프트가 그려졌다
     await new Promise((r) => setTimeout(r, 120));
@@ -346,14 +353,14 @@ async function launchAgentInTerminal(agentsLib, a) {
   const sizeDeadline = Date.now() + 1500;
   while (Date.now() < sizeDeadline) {
     let w = null;
-    try { w = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{window_width}'])).trim(); } catch (_) { break; }
+    try { w = (await termBackend.info(target)).cols; } catch (_) { break; }
     if (lastW !== null && w === lastW) break;   // 두 번 연속 동일 = 안정
     lastW = w;
     await new Promise((r) => setTimeout(r, 220));
   }
   const command = agentsLib.launchCommand(id);
-  await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', command]);
-  await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+  await termBackend.sendKeys(target, { keys: [command], literal: true });
+  await termBackend.sendKeys(target, { keys: ['Enter'] });
   return { ok: true, ready, index: tid, command };
 }
 
@@ -443,7 +450,8 @@ async function resolveCtx(ctx) {
   } else {
     if (sessionName.includes('--p-')) pool = sessionName.split('--p-')[0];
     // 레거시: windowId 로 풀 index 확정(가능하면) — 뷰 세션 index 는 폴백으로 어긋날 수 있다.
-    if (pool && windowId) {
+    //  (tmux 전용 잔재 — term-host 백엔드엔 레거시 풀/windowId 개념이 없다.)
+    if (pool && windowId && !termBackend.isHostBackend()) {
       try {
         const wins = await ptyLib.poolWindows(pool);
         const hit = wins.find((w) => w.id === windowId);
@@ -481,13 +489,12 @@ async function liveWorkspaceNs() {
   if (liveNsCache.set && Date.now() - liveNsCache.at < 5000) return liveNsCache.set;
   const set = new Set();
   try {
-    const out = await ptyLib.runTmux(['list-sessions', '-F', '#{session_name}']);
-    for (const raw of String(out).split('\n')) {
-      const name = raw.replace(/\r$/, '').trim();
+    for (const raw of await termBackend.listSessionNames()) {
+      const name = String(raw).trim();
       if (!name.startsWith('cpt-')) continue;
       set.add(name.split('--')[0]);
     }
-  } catch (_) { /* tmux 서버 없음 = 열린 워크스페이스 0 */ }
+  } catch (_) { /* 백엔드 서버 없음 = 열린 워크스페이스 0 */ }
   liveNsCache = { at: Date.now(), set };
   return set;
 }
@@ -755,8 +762,9 @@ async function dispatch(req, conn) {
   // CodingPT 컨텍스트 밖(무관 폴더의 CWD 폴백)이면 진단/훅 예외만 남기고 전부 거부 — §게이트 주석.
   await assertCptContext(cmd, req.ctx, resolved);
   const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
-  // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 직접 tmux 를 때리는 커맨드의 타겟.
-  const termTarget = (tid) => `=${ptyLib.termSession(session, tid)}:0`;
+  // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 백엔드 op 의 타겟은 세션명 그대로
+  //  ('=' 정확 일치·':0' 장식은 백엔드 tmux 구현이 붙인다 — 웨이브2).
+  const termName = (tid) => ptyLib.termSession(session, tid);
 
   switch (cmd) {
     case 'ping': return { pong: true, at: Date.now() };
@@ -787,7 +795,7 @@ async function dispatch(req, conn) {
     case 'terminal.new': {
       const r = await ptyLib.handleTerminalRpc('terminal.new', { cwd: resolved.cwdRel });
       if (args.name) {
-        await ptyLib.runTmux(['rename-window', '-t', termTarget(r.index), String(args.name)]).catch(() => {});
+        await termBackend.rename(termName(r.index), String(args.name)).catch(() => {});
         r.name = String(args.name);
       }
       notifyPoolChanged();
@@ -803,7 +811,7 @@ async function dispatch(req, conn) {
       const win = targetWin(args, resolved);
       if (!args.name) throw new Error('새 이름이 필요합니다');
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['rename-window', '-t', termTarget(win), String(args.name)]);
+      await termBackend.rename(termName(win), String(args.name));
       notifyPoolChanged();
       return { ok: true, index: win, name: String(args.name) };
     }
@@ -811,8 +819,8 @@ async function dispatch(req, conn) {
       const win = targetWin(args, resolved);
       const lines = Math.max(1, Math.min(5000, (args.lines | 0) || 200));
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      // -p: stdout, -S -N: 스크롤백 N줄 위부터, -E -: 화면 끝까지. -J: 랩 줄 병합.
-      const out = await ptyLib.runTmux(['capture-pane', '-p', '-J', '-t', termTarget(win), '-S', `-${lines}`]);
+      // capture 등가(-p stdout, lines=스크롤백 N줄 위부터, join=랩 줄 병합).
+      const out = await termBackend.capture(termName(win), { lines, join: true });
       return { text: out.replace(/\s+$/, ''), index: win };
     }
     case 'terminal.send': {
@@ -823,8 +831,8 @@ async function dispatch(req, conn) {
       }
       if (typeof args.text !== 'string' || !args.text.length) throw new Error('보낼 텍스트가 필요합니다');
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), '-l', '--', args.text]);
-      if (args.enter) await ptyLib.runTmux(['send-keys', '-t', termTarget(win), 'Enter']);
+      await termBackend.sendKeys(termName(win), { keys: [args.text], literal: true });
+      if (args.enter) await termBackend.sendKeys(termName(win), { keys: ['Enter'] });
       return { ok: true, index: win };
     }
     case 'terminal.sendKey': {
@@ -834,7 +842,7 @@ async function dispatch(req, conn) {
         throw new Error('자기 자신 터미널에 키를 보내려 합니다. 의도한 것이면 --force 를 붙이세요.');
       }
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), String(args.key)]);
+      await termBackend.sendKeys(termName(win), { keys: [String(args.key)] });
       return { ok: true, index: win };
     }
     case 'terminal.wait': {
@@ -1328,7 +1336,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(cwdRel);
   await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
-  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const target = ptyLib.termSession(session, win);
   const multiline = /\n/.test(body);
   // 컴포저 잔재 청소(2026-07-30 실사고): TUI 컴포저에 남아 있던 초안 위에 paste 하면
   //  "채팅에서 보낸 것"과 다른 메시지가 제출된다(경로 이중 전송 신고). 채팅 전송의 계약은
@@ -1340,7 +1348,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   //    paste 하면 문장 중간의 첨부도 제자리에서 변환된다(literal 타이핑은 아예 무변환 — 옛 진범).
   const segs = splitImagePathSegments(body);
   for (const seg of segs) {
-    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', `[200~${seg}[201~`]);
+    await termBackend.sendKeys(target, { keys: [`[200~${seg}[201~`], literal: true });
     if (segs.length > 1) await new Promise((r) => setTimeout(r, 90)); // 조각 간 소화 시간
   }
   const doSubmit = submit !== false;
@@ -1349,7 +1357,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
     //  이미지 경로 조각이 있으면 변환(파일 읽기)이 비동기라 넉넉히 기다린다 — 미변환 제출이어도
     //  경로 텍스트는 여전히 유효하다(에이전트가 Read 로 읽는다). 즉 안전한 지연일 뿐이다.
     await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : 120));
-    await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+    await termBackend.sendKeys(target, { keys: ['Enter'] });
   }
   // ★ 제출 직후 화면 확인을 앞당긴다(2026-08-03 사용자 신고: "/model 선택 UI 가 늦게 뜬다").
   //  격리 실측: Enter 후 51ms 면 TUI 에 선택 화면이 이미 있다 — 늦은 건 우리 3초 폴링뿐이었다.
@@ -1374,7 +1382,7 @@ const RESIDUE_MAX_BS = 200;     // 폭주 방어(긴 초안이 남아 있어도 
 
 async function clearComposerResidue(target) {
   for (let i = 0; i < 6; i++) {
-    const out = await ptyLib.runTmux(['capture-pane', '-p', '-t', target]);
+    const out = await termBackend.capture(target);
     const lines = String(out || '').split('\n');
     let idx = -1;
     let codex = false;
@@ -1390,17 +1398,17 @@ async function clearComposerResidue(target) {
       let cx = -1;
       let cy = -1;
       try {
-        const pos = await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{cursor_x} #{cursor_y}']);
-        const m = /(\d+)\s+(\d+)/.exec(String(pos || ''));
-        if (m) { cx = parseInt(m[1], 10); cy = parseInt(m[2], 10); }
+        const inf = await termBackend.info(target);
+        if (inf && inf.cursor) { cx = inf.cursor.x | 0; cy = inf.cursor.y | 0; }
+        else return;                                // 커서를 못 읽으면 건드리지 않는다(추측 조작 금지)
       } catch (_) { return; }                       // 커서를 못 읽으면 건드리지 않는다(추측 조작 금지)
       if (cy !== idx) return;                        // 커서가 컴포저 줄이 아니다 = 지금 입력 자리가 아니다
       const n = cx - RESIDUE_PROMPT_COLS;
       if (n <= 0) return;                            // 비어 있다(보이는 건 플레이스홀더)
-      await ptyLib.runTmux(['send-keys', '-t', target, '-N', String(Math.min(n, RESIDUE_MAX_BS)), 'BSpace']);
+      await termBackend.sendKeys(target, { keys: ['BSpace'], count: Math.min(n, RESIDUE_MAX_BS) });
     } else {
       if (!text || /^Try "/.test(text)) return;      // 비었다(힌트는 본문이 아니다)
-      await ptyLib.runTmux(['send-keys', '-t', target, 'C-u']);
+      await termBackend.sendKeys(target, { keys: ['C-u'] });
     }
     await new Promise((r) => setTimeout(r, 140));
   }
@@ -1506,12 +1514,12 @@ function dialogIoFor(cwd, tid, opts) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
-  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const target = ptyLib.termSession(session, win);
   const io = {
     ready: ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ }),
-    screen: () => ptyLib.runTmux(['capture-pane', '-p', '-t', target]),
+    screen: () => termBackend.capture(target),
     key: async (k, literal) => {
-      await ptyLib.runTmux(literal ? ['send-keys', '-t', target, '-l', '--', k] : ['send-keys', '-t', target, k]);
+      await termBackend.sendKeys(target, literal ? { keys: [k], literal: true } : { keys: [k] });
       // 다이얼로그 조작은 키 사이 간격이 필요하지만(그 값이 실측 정본), 모드 순환은 키 1개마다
       //  화면을 다시 읽어 검증하므로 고정 대기를 짧게 잡는다(체감 반응 — 사용자 신고 2026-08-02).
       await new Promise((r) => setTimeout(r, (opts && opts.keyGapMs != null) ? opts.keyGapMs : DRIVE_KEY_GAP_MS));

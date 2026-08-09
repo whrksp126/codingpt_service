@@ -40,11 +40,13 @@ function serverSockPath(stateDir, platform) {
     const key = dir === defaultStateDir() ? os.homedir() : dir;
     return PIPE_PREFIX + 'codingpt-cpt-' + sha8(key);
   }
-  const p = path.join(dir, 'cpt.sock');
+  // POSIX 분기는 path.posix 고정 — platform 파라미터가 진짜 크로스로 동작해야 한다(win32 호스트에서
+  //  darwin 규칙을 검증하는 CI 가 path.join 의 '\\' 를 받으면 유령 경로가 된다. darwin 실행에선 동일).
+  const p = path.posix.join(dir, 'cpt.sock');
   // sun_path 한계(macOS 104B) 초과 경로는 커널이 조용히 잘라 유령 소켓이 된다 → /tmp 짧은 폴백.
   if (Buffer.byteLength(p) <= 100) return p;
   const h = crypto.createHash('sha1').update(dir).digest('hex').slice(0, 8);
-  return path.join('/tmp', `cpt-${typeof process.getuid === 'function' ? process.getuid() : 0}-${h}.sock`);
+  return path.posix.join('/tmp', `cpt-${typeof process.getuid === 'function' ? process.getuid() : 0}-${h}.sock`);
 }
 
 /** 클라이언트(cpt CLI·statusline-relay) 측 — CPT_SOCK env 가 항상 우선(테스트/비표준 stateDir 탈출구). */

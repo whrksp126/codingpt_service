@@ -21,7 +21,9 @@ const { test, after } = require('node:test');
 const assert = require('node:assert');
 const backend = require('../term-backend');
 
-const CAT = '/bin/cat';
+// 테스트 셸 — posix 는 /bin/cat(에코·라인킬 의미론이 결정적), win32 CI 는 cmd.exe(ConPTY 에코만 검증).
+const IS_WIN = process.platform === 'win32';
+const CAT = IS_WIN ? (process.env.ComSpec || 'cmd.exe') : '/bin/cat';
 const NAME = 'cpt-backend--t-7000007';
 
 async function until(fn, ms = 8000, label = '조건') {
@@ -42,7 +44,15 @@ after(async () => {
 
 test('활성 판정 — env 오버라이드로 비-win32 에서도 파이프 백엔드', () => {
   assert.strictEqual(backend.isHostBackend(), true);
-  assert.strictEqual(backend.pipePath(), process.env.CPT_TERMHOST_SOCK);
+  if (process.platform === 'win32') {
+    // win32: 파일 경로 스타일 오버라이드는 파이프 이름으로 정규화된다(net.listen 제약) —
+    //  클라이언트(term-backend)와 호스트(term-host paths)가 같은 규칙이어야 유령 호스트가 없다.
+    const hostPaths = require('../../term-host/lib/paths');
+    assert.match(backend.pipePath(), /^\\\\\.\\pipe\\cpt-termhost-test-[0-9a-f]{8}$/);
+    assert.strictEqual(backend.pipePath(), hostPaths.pipePath(), '클라/호스트 파이프 규칙 불일치');
+  } else {
+    assert.strictEqual(backend.pipePath(), process.env.CPT_TERMHOST_SOCK);
+  }
   assert.ok(backend.hostEntry() && fs.existsSync(backend.hostEntry()), 'term-host 엔트리 해석');
 });
 
@@ -62,15 +72,22 @@ test('create → list/has — tmux 세션명 관례 그대로', async () => {
 
 test('sendKeys/capture — 데이터·키 표기 두 경로 모두', async () => {
   await backend.sendKeys(NAME, { data: 'ping-pong\r' });
-  await until(async () => (await backend.capture(NAME)).includes('ping-pong') ? true : null, 8000, 'cat 에코');
-  await backend.sendKeys(NAME, { keys: ['zzz'], literal: true });
-  await backend.sendKeys(NAME, { keys: ['C-u'] });          // 라인 삭제(잔여 청소 실사용 패턴)
-  await backend.sendKeys(NAME, { keys: ['ok'], literal: true });
-  await backend.sendKeys(NAME, { keys: ['Enter'] });
-  await until(async () => {
-    const t = await backend.capture(NAME);
-    return t.includes('ok') && !t.includes('zzzok') ? true : null;
-  }, 8000, 'C-u 로 zzz 삭제 후 ok 제출');
+  await until(async () => (await backend.capture(NAME)).includes('ping-pong') ? true : null, 8000, '셸 에코');
+  if (IS_WIN) {
+    // cmd.exe 는 C-u 라인킬 의미론이 없다 — 키 표기(literal)·Enter 경로만 검증.
+    await backend.sendKeys(NAME, { keys: ['win-keys'], literal: true });
+    await backend.sendKeys(NAME, { keys: ['Enter'] });
+    await until(async () => (await backend.capture(NAME)).includes('win-keys') ? true : null, 8000, '키 표기 에코');
+  } else {
+    await backend.sendKeys(NAME, { keys: ['zzz'], literal: true });
+    await backend.sendKeys(NAME, { keys: ['C-u'] });          // 라인 삭제(잔여 청소 실사용 패턴)
+    await backend.sendKeys(NAME, { keys: ['ok'], literal: true });
+    await backend.sendKeys(NAME, { keys: ['Enter'] });
+    await until(async () => {
+      const t = await backend.capture(NAME);
+      return t.includes('ok') && !t.includes('zzzok') ? true : null;
+    }, 8000, 'C-u 로 zzz 삭제 후 ok 제출');
+  }
   const esc = await backend.capture(NAME, { escapes: true });
   assert.ok(typeof esc === 'string' && esc.includes('ping-pong'));
 });
@@ -104,9 +121,9 @@ test('kill 멱등 + killServer 로 호스트 종료', async () => {
   assert.strictEqual(await backend.has(NAME), false);
   await backend.kill(NAME); // 멱등
   await backend.killServer();
-  // 호스트 소켓이 실제로 닫혔는지 프로브(상주 프로세스 정리 확인).
+  // 호스트 소켓이 실제로 닫혔는지 프로브(상주 프로세스 정리 확인) — win32 는 정규화된 파이프 경로.
   await until(() => new Promise((resolve) => {
-    const probe = net.connect(process.env.CPT_TERMHOST_SOCK);
+    const probe = net.connect(backend.pipePath());
     probe.once('connect', () => { probe.destroy(); resolve(null); });
     probe.once('error', () => resolve(true));
   }), 6000, '호스트 종료');

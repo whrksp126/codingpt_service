@@ -251,7 +251,8 @@ test('★ idb 실행 env 에 companion 디렉터리가 PATH 맨 앞에 붙는다
   const emu = require('../emulator');
   const env = emu._idbEnv({ idb: '/x/idb', idbCompanion: '/opt/homebrew/bin/idb_companion' },
     { PATH: '/usr/bin:/bin' });
-  assert.equal(env.PATH, '/opt/homebrew/bin:/usr/bin:/bin',
+  // 구분자는 실행 플랫폼의 path.delimiter(win32 CI 에선 ';') — 하드코딩 ':' 는 win32 에서 거짓 실패.
+  assert.equal(env.PATH, `/opt/homebrew/bin${require('path').delimiter}/usr/bin:/bin`,
     'companion 디렉터리를 얹지 않으면 앱이 띄운 데몬에서 idb 가 100% 실패한다');
 });
 

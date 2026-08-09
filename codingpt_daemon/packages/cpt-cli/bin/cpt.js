@@ -101,6 +101,45 @@ function resolveWs(tmuxInfo) {
   return null;
 }
 
+// ── win32 백엔드 위임(웨이브2, 계약 1) — CPT_WS env 유실 시 term-host 세션 env 를 직접 조회 ──
+//  darwin 의 `tmux show-environment` 등가. env 패스트패스(CPT_TSESSION)가 세션명을 주므로,
+//  파이프(one-shot NDJSON getEnv op)로 그 세션의 CPT_WS 를 되찾는다. 의존성 0 원칙 유지 —
+//  파이프 이름 규칙은 term-host paths.pipePath 의 최소 복제(sockPath 폴백과 같은 접근).
+function termhostPipePath() {
+  if (process.env.CPT_TERMHOST_SOCK) {
+    const p = process.env.CPT_TERMHOST_SOCK;
+    if (process.platform === 'win32' && !/^\\\\[.?]\\pipe\\/.test(p)) {
+      const h = require('crypto').createHash('sha256').update(String(p)).digest('hex').slice(0, 8);
+      return `\\\\.\\pipe\\cpt-termhost-test-${h}`;
+    }
+    return p;
+  }
+  const h = require('crypto').createHash('sha256').update(os.homedir()).digest('hex').slice(0, 8);
+  return `\\\\.\\pipe\\cpt-termhost-${h}`;
+}
+
+function termhostGetEnv(session, key, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    let conn;
+    try { conn = net.createConnection(termhostPipePath()); } catch (_) { return resolve(null); }
+    let buf = '';
+    let done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(t); try { conn.destroy(); } catch (_) { /* noop */ } resolve(v); };
+    const t = setTimeout(() => finish(null), timeoutMs);
+    conn.on('connect', () => conn.write(JSON.stringify({ id: 1, op: 'getEnv', name: session, k: key }) + '\n'));
+    conn.on('data', (d) => {
+      buf += d.toString('utf8');
+      const i = buf.indexOf('\n');
+      if (i < 0) return;
+      try {
+        const msg = JSON.parse(buf.slice(0, i));
+        finish(msg && msg.ok && typeof msg.value === 'string' ? msg.value : null);
+      } catch (_) { finish(null); }
+    });
+    conn.on('error', () => finish(null)); // 호스트 미기동 = 조용히 포기(CWD 폴백은 데몬이 해석)
+  });
+}
+
 function sockPath() {
   if (process.env.CPT_SOCK) return process.env.CPT_SOCK;
   // 단일 출처(runner-core/sock-path.js) — 데몬 번들/워크스페이스 배치 모두 runner-core 가 옆에 있다
@@ -120,12 +159,19 @@ function sockPath() {
 // 전역 --on <기기> — 화면 조작/브라우저 명령을 지정 기기로 라우팅(미지정=활성 기기). run() 에서 채움.
 let GLOBAL_ON = null;
 
-function request(cmd, args, { timeoutMs = 65000 } = {}) {
+async function request(cmd, args, { timeoutMs = 65000 } = {}) {
+  const tmuxInfo = tmuxSelf();
+  let ws = resolveWs(tmuxInfo);
+  // win32 백엔드 위임: env 유실(CPT_WS 부재)이어도 세션 좌표가 있으면 term-host 에 물어 되찾는다
+  //  — darwin 의 show-environment 폴백 등가(없으면 데몬의 CWD 해석 폴백 그대로).
+  if (ws == null && process.platform === 'win32') {
+    const sess = (tmuxInfo && tmuxInfo.session) || process.env.CPT_TSESSION || '';
+    if (sess) ws = await termhostGetEnv(sess, 'CPT_WS').catch(() => null);
+  }
   return new Promise((resolve, reject) => {
-    const tmuxInfo = tmuxSelf();
     const ctx = {
       cwd: process.cwd(),
-      ws: resolveWs(tmuxInfo),
+      ws,
       tmux: tmuxInfo || undefined,
     };
     // --on 은 ui.*/browser.* 계열에만 의미 있음(기기 타겟팅) — 데몬 dispatch 가 args.on 으로 해석.

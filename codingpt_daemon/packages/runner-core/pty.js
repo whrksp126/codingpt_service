@@ -35,10 +35,14 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const WebSocket = require('ws');
-const nodePty = require('node-pty');
 const fsLib = require('./fs');
 const runtime = require('./runtime');
 const e2eeGate = require('./e2ee-gate');
+// 터미널 세션 백엔드 유일 진입점(웨이브2) — darwin: tmux 구현(term-backend-tmux, 동작 불변),
+//  win32/CPT_TERMHOST_SOCK: term-host 파이프. tmux 전용 유지보수(레거시 풀 마이그레이션·리퍼·
+//  자가치유·automatic-rename 주입)만 runTmux 직행으로 남고 usingHost() 에서 건너뛴다.
+const termBackend = require('./term-backend');
+const usingHost = () => termBackend.isHostBackend();
 
 // tmux -L codingpt (사용자 기본 tmux 서버와 격리). 기본은 'codingpt' — 프로덕션은 이 값을 절대
 //  바꾸지 않는다. 격리 소켓(재연결 레이스 재현 테스트 등)만 CODINGPT_TMUX_SOCKET 로 덮어써 실사용
@@ -136,25 +140,22 @@ function agentSignal(session, cmd, title) {
 //  수동 rename 하면 automatic-rename 이 꺼져 얼어붙는다(그 터미널만 영구 미감지가 된다). 제목 원문은
 //  사용자 프롬프트가 들어 있어 응답에 싣지 않는다 — 판정 입력으로만 쓰고 버린다.
 async function listTerminals(ns) {
-  let out;
+  let sessions;
   try {
-    out = await runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{session_created}\t#{window_name}\t#{pane_current_command}\t#{pane_title}']);
+    // 백엔드 list = tmux list-windows -a 5필드 포맷(darwin, 종전과 동일) / term-host meta(win32).
+    //  cmd/title 매핑은 웨이브1 주의점 6: pane_current_command→command, pane_title→title.
+    sessions = await termBackend.list();
   } catch (_) { return []; }
   const prefix = ns + '--t-';
   const rows = [];
-  const seen = new Set();
-  for (const l of out.split('\n').map((s) => s.replace(/\r$/, '')).filter(Boolean)) {
-    const parts = l.split('\t');
-    const [sname, created, wname, cmd] = parts;
-    const title = parts.slice(4).join('\t'); // 제목은 마지막 필드(구분자가 섞여도 뒤를 전부 되붙인다)
-    if (!sname || !sname.startsWith(prefix)) continue;
-    if (seen.has(sname)) continue; // 세션당 첫 window 만(사용자가 tmux 로 window 를 더 만들어도 1터미널)
-    seen.add(sname);
+  for (const s of sessions) {
+    const sname = String(s.name || '');
+    if (!sname.startsWith(prefix)) continue;
     const tid = parseInt(sname.slice(prefix.length), 10);
     if (!Number.isFinite(tid)) continue;
-    const sig = agentSignal(sname, cmd, title);
+    const sig = agentSignal(sname, s.command, s.title);
     rows.push({
-      index: tid, name: wname || '', command: (cmd || '').trim(), session: sname, created: parseInt(created, 10) || 0,
+      index: tid, name: s.windowName || '', command: (s.command || '').trim(), session: sname, created: s.createdAt || 0,
       agent: sig.on, agentName: sig.agent, agentState: sig.state, agentSource: sig.source, agentReady: sig.ready,
     });
   }
@@ -172,28 +173,44 @@ async function listTerminals(ns) {
 //  tmux display-message 서브프로세스 없이 자기 좌표를 알게 된다. 훅은 한 턴에 여러 번 뜨므로 그 비용이
 //  그대로 체감 지연이다). ⚠ 넘기지 않으면 아예 주입하지 않는다 — 잘못된/undefined tid 를 주입하면 CLI 가
 //  틀린 터미널을 자기라고 보고해 알림 win·읽음 처리 scope 가 어긋난다.
-function poolEnvArgs(abs, tid, tsession) {
-  const out = [];
-  const push = (k, v) => { out.push('-e', `${k}=${v}`); };
+function poolEnvMap(abs, tid, tsession) {
+  const out = {};
   try {
     const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
-    push('CPT_WS', rel == null ? '' : String(rel));
-    push('CPT_SOCK', require('./cpt-server').sockPath());
+    out.CPT_WS = rel == null ? '' : String(rel);
+    out.CPT_SOCK = require('./cpt-server').sockPath();
     if (Number.isFinite(Number(tid)) && Number(tid) > 0 && tsession) {
-      push('CPT_TID', String(Number(tid)));
-      push('CPT_TSESSION', String(tsession));
+      out.CPT_TID = String(Number(tid));
+      out.CPT_TSESSION = String(tsession);
     }
-    const tmuxBin = findTmux();
-    if (tmuxBin) push('CPT_TMUX', tmuxBin);
+    if (process.platform === 'win32') {
+      // win32 최소셋(PC 앱의 create 주입 규칙과 정합 — 계약 4): CPT_WS·CPT_SOCK·좌표·PATH prepend.
+      //  ZDOTDIR(zsh 전용)·CPT_TMUX(tmux 없음)는 제외. 셸 프로필 주입은 term-host defaultShell 이 담당.
+      const shimBin = path.join(runtime.stateDir(), 'bin');
+      out.PATH = `${shimBin}${path.delimiter}${process.env.PATH || ''}`;
+      // 격리 소켓 오버라이드(테스트/멀티 인스턴스)만 명시 전파 — 기본 파이프명은 homedir 로 계산 가능.
+      if (process.env.CPT_TERMHOST_SOCK) out.CPT_TERMHOST_SOCK = process.env.CPT_TERMHOST_SOCK;
+      return out;
+    }
+    if (process.env.CPT_TERMHOST_SOCK) out.CPT_TERMHOST_SOCK = process.env.CPT_TERMHOST_SOCK;
+    const tmuxBin = usingHost() ? null : findTmux();
+    if (tmuxBin) out.CPT_TMUX = tmuxBin;
     const shimBin = path.join(runtime.stateDir(), 'bin');
-    push('PATH', `${shimBin}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`);
+    out.PATH = `${shimBin}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`;
     const zdot = require('./shim').zdotDir();
     if (fs.existsSync(zdot)) {
-      push('ZDOTDIR', zdot);
+      out.ZDOTDIR = zdot;
       const origZdot = process.env.ZDOTDIR || '';
-      if (origZdot && origZdot !== zdot) push('CPT_ORIG_ZDOTDIR', origZdot);
+      if (origZdot && origZdot !== zdot) out.CPT_ORIG_ZDOTDIR = origZdot;
     }
   } catch (_) { /* shim 미생성 등 — 넣을 수 있는 것만 */ }
+  return out;
+}
+
+// 레거시 풀 마이그레이션(tmux 직행 new-session)용 -e 인자 형태 — poolEnvMap 과 한 벌.
+function poolEnvArgs(abs, tid, tsession) {
+  const out = [];
+  for (const [k, v] of Object.entries(poolEnvMap(abs, tid, tsession))) out.push('-e', `${k}=${v}`);
   return out;
 }
 
@@ -205,16 +222,16 @@ async function createTerminal(ns, abs) {
     const id = newTid();
     const name = termSession(ns, id);
     try {
-      await runTmux([...CONF_ARGS, 'new-session', '-d', '-s', name, '-c', abs, ...poolEnvArgs(abs, id, name)]);
+      await termBackend.create({ name, cwd: abs, env: poolEnvMap(abs, id, name) });
     } catch (e) {
       lastErr = e;
-      if (/duplicate session/.test(String(e.message || ''))) continue; // tid 충돌 — 재시도
+      if (/duplicate session/i.test(String(e.message || ''))) continue; // tid 충돌 — 재시도
       throw e;
     }
     await injectPoolEnv(name, abs).catch(() => {});
     await ensureAutoRename(name).catch(() => {});
-    const w = (await poolWindows(name))[0];
-    return { index: id, name: (w && w.name) || '', session: name };
+    const inf = await termBackend.info(name).catch(() => null);
+    return { index: id, name: (inf && inf.windowName) || '', session: name };
   }
   throw lastErr || new Error('터미널 생성 실패');
 }
@@ -226,6 +243,8 @@ async function createTerminal(ns, abs) {
 const migratedNs = new Set(); // 프로세스 수명 동안 ns 당 1회(풀 부재 확인 후 캐시)
 async function migrateLegacyPool(ns, abs) {
   if (migratedNs.has(ns)) return;
+  // term-host 백엔드(win32/env)엔 레거시 tmux 풀이 존재할 수 없다 — tmux 직행 경로 전체 스킵.
+  if (usingHost()) { migratedNs.add(ns); return; }
   // 홈 공유 세션(codingpt)은 풀이 아니라 레거시 직결 attach 세션(Mac attach 하위호환) — 옮기지 않는다.
   if (ns === TMUX_SESSION) { migratedNs.add(ns); return; }
   try { await runTmux(['has-session', '-t', '=' + ns]); } catch (_) { migratedNs.add(ns); return; }
@@ -262,7 +281,7 @@ async function migrateLegacyPool(ns, abs) {
 async function resolveTid(ns, want) {
   const tid = Number(want);
   if (Number.isFinite(tid) && tid > 0) {
-    try { await runTmux(['has-session', '-t', '=' + termSession(ns, tid)]); return tid; } catch (_) { /* 폴백 */ }
+    if (await termBackend.has(termSession(ns, tid)).catch(() => false)) return tid;
   }
   const list = await listTerminals(ns);
   return list.length ? list[0].index : null;
@@ -403,8 +422,7 @@ function wsPtyIo(ws, sid) {
 
 // back 지시(stream_open)에 대한 dial-back. 실패 시 throw → control 이 stream_fail 회신.
 function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
-  const tmux = findTmux();
-  if (!tmux) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
+  if (!usingHost() && !findTmux()) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
 
   const wsUrl = serverUrl.replace(/^http/, 'ws') + '/api/daemon/stream/' + streamToken;
   const ws = new WebSocket(wsUrl, { headers: { Authorization: `Bearer ${deviceToken}` } });
@@ -446,14 +464,10 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
  *  지키는 것이 정석이지만, 데몬이 마지막 방어선을 갖는다(클라 순서 역전에도 클라이언트는 항상 1개).
  */
 async function attachPty(params, io) {
-  const tmux = findTmux();
-  if (!tmux) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
+  if (!usingHost() && !findTmux()) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
   const cols = (params && params.cols) || 80;
   const rows = (params && params.rows) || 24;
   const sendOut = (chunk) => { try { io.send(chunk); } catch (_) { /* noop */ } };
-
-  // TMUX 해제 + UTF-8 로케일 강제 — 정본은 tmuxEnv()(0.1.29 의 근본 원인 항목, 규율 설명은 거기).
-  const env = tmuxEnv();
 
   // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
   //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
@@ -464,10 +478,11 @@ async function attachPty(params, io) {
   const client = params && params.client ? String(params.client) : '';
   const pkey = paneId ? paneKeyOf(session, paneId, client) : '';
 
-  let spawnArgs;
   // 이 스트림이 attach 하는 터미널(tid) — params.win 은 스테일(닫힘/구버전 인덱스)일 수 있어
   //  resolveTid 가 확정한다. select 이후 재접속이면 데몬이 기억하는 현재 터미널을 우선한다.
   let tid = 0;
+  let attachName;   // 백엔드 attach 대상 세션명
+  let shared = false; // 하위호환(paneId 없음) — 공유 세션 create-or-attach
   if (paneId) {
     await migrateLegacyPool(session, abs);
     const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
@@ -480,14 +495,18 @@ async function attachPty(params, io) {
       return;
     }
     paneCurrent.set(pkey, tid);
-    // -u: UTF-8. -d 금지 — 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다
-    //  (죽은 앱의 스테일 클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). 크기는 전역
-    //  window-size latest — 마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 resize-window
-    //  클레임 전면 폐지 — 기기 간 크기 뺏기/SIGWINCH 핑퐁의 근원이었다).
-    spawnArgs = ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, tid), ';', 'set', '-g', 'window-size', 'latest'];
+    // 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다(-d 금지 등가 —
+    //  term-host 는 다중 attach 브로드캐스트가 기본). 크기는 window-size latest 등가 —
+    //  마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 클레임 전면 폐지).
+    attachName = termSession(session, tid);
   } else {
-    // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach.
-    spawnArgs = ['-L', TMUX_SOCKET, '-u', ...CONF_ARGS, 'new-session', '-A', '-s', session, '-c', abs, ';', 'set', '-g', 'window-size', 'latest'];
+    // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach(tmux: new-session -A 등가).
+    attachName = session;
+    shared = true;
+    // term-host 백엔드엔 -A(create-or-attach)가 없다 — 없으면 만들어 항상 열리게 한다.
+    if (usingHost() && !(await termBackend.has(session).catch(() => false))) {
+      await termBackend.create({ name: session, cwd: abs, env: poolEnvMap(abs) }).catch(() => { /* 경쟁 생성 등 — attach 가 판정 */ });
+    }
   }
 
   // 쿨다운 중이면 스폰 시도 없이 거절 — 실패 스폰마다 pty 마스터가 새는 것을 차단.
@@ -496,22 +515,6 @@ async function attachPty(params, io) {
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }
-  let pty;
-  try {
-    pty = nodePty.spawn(tmux, spawnArgs, {
-      name: 'xterm-256color',
-      cols, rows,
-      cwd: abs,
-      env,
-    });
-  } catch (e) {
-    lastSpawnFailAt = Date.now();
-    console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
-    sendOut(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`);
-    try { io.close(); } catch (_) { /* noop */ }
-    return;
-  }
-  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + termSession(session, tid) : ''}, cwd=${abs}, ${cols}x${rows}${io.label || ''})`);
 
   // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
   let lastW = cols, lastH = rows;
@@ -522,20 +525,40 @@ async function attachPty(params, io) {
   //  사고가 난다.
   let nudgeTimer = null;
 
-  // pty 이벤트 배선 — swap(탭 전환)마다 새 pty 에 재배선. 구 pty 의 exit 는 무시(교체 정상경로).
-  const wirePty = (p) => {
-    p.onData((data) => {
+  // 백엔드 attach 핸들 + 세대 토큰 — swap(탭 전환)으로 교체된 구 핸들의 exit/close 는 무시한다
+  //  (구 nodePty 시절의 `p !== pty` 가드 등가. 콜백이 핸들 확정 전에 발화해도 안전하게 gen 으로 판정).
+  let term = null;
+  let gen = 0;
+  const mkHandlers = (myGen) => ({
+    onData: (data) => {
       // 출력은 어댑터가 전송 형태를 결정한다(릴레이 평문=텍스트 프레임, 봉인/LAN=바이너리).
-      //  멀티바이트 분할은 node-pty 단계에서 이미 결정되므로 어느 경로든 바이트는 동일하다.
+      //  멀티바이트 분할은 백엔드(node-pty/term-host) 단계에서 이미 결정되므로 어느 경로든 동일하다.
       sendOut(data);
-    });
-    p.onExit(({ exitCode }) => {
-      if (p !== pty) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
+    },
+    onExit: (exitCode) => {
+      if (myGen !== gen) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
       console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
       try { io.close(); } catch (_) { /* noop */ }
+    },
+    onClose: () => {
+      if (myGen !== gen) return; // 교체된 구 attach 의 소켓 정리(win32) — 무시
+      try { io.close(); } catch (_) { /* noop */ }
+    },
+  });
+  try {
+    gen = 1;
+    term = await termBackend.attach(attachName, {
+      cols, rows, cwd: abs, setLatest: true, sharedCreate: shared && !usingHost(),
+      ...mkHandlers(1),
     });
-  };
-  wirePty(pty);
+  } catch (e) {
+    lastSpawnFailAt = Date.now();
+    console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
+    sendOut(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`);
+    try { io.close(); } catch (_) { /* noop */ }
+    return;
+  }
+  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + attachName : ''}, cwd=${abs}, ${cols}x${rows}${io.label || ''})`);
 
   // (선언 순서 주의: cleanup 이 handle 을 참조하므로 먼저 선언한다 — TDZ 사고 방지)
   let handle = null;
@@ -543,31 +566,34 @@ async function attachPty(params, io) {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
-    // tmux 클라이언트만 종료(detach) — 세션(터미널 실체)은 tmux 서버에 살아남는다.
+    // 터미널 클라이언트만 종료(detach) — 세션(터미널 실체)은 백엔드(tmux 서버/term-host)에 살아남는다.
     if (typeof io.dispose === 'function') { try { io.dispose(); } catch (_) { /* noop */ } }
     if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
     if (handle && paneStreams.get(pkey) === handle) paneStreams.delete(pkey);
-    try { pty.kill(); } catch (_) { /* noop */ }
+    try { term.close(); } catch (_) { /* noop */ }
   };
 
   // terminal.select → 이 스트림의 attach 대상을 즉석 교체(구 모델의 select-window 대체).
-  //  뷰어 연결은 유지한 채 tmux 클라이언트만 갈아끼운다 — attach 시 tmux 가 전체 화면을
-  //  다시 그리므로 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
+  //  뷰어 연결은 유지한 채 백엔드 attach 만 갈아끼운다 — attach 가 전체 화면을 다시 그리므로
+  //  (tmux 리페인트 / term-host serializeRepaint) 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
   if (pkey) {
     const swap = (newTid) => {
-      const np = nodePty.spawn(tmux, ['-L', TMUX_SOCKET, '-u', 'attach-session', '-t', '=' + termSession(session, newTid)], {
-        name: 'xterm-256color',
-        cols: lastW || cols, rows: lastH || rows,
-        cwd: abs,
-        env,
+      const myGen = ++gen; // 이 시점부터 구 핸들의 exit/close 는 무시된다
+      termBackend.attach(termSession(session, newTid), {
+        cols: lastW || cols, rows: lastH || rows, cwd: abs,
+        ...mkHandlers(myGen),
+      }).then((np) => {
+        if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }
+        const old = term;
+        term = np;
+        tid = newTid;
+        if (handle) handle.tid = newTid;
+        paneCurrent.set(pkey, newTid);
+        try { old.close(); } catch (_) { /* noop */ }
+      }).catch((e) => {
+        // 스트림 사망/세션 소멸 직후 등 — 재접속 경로가 paneCurrent 로 잇는다.
+        console.warn(`[pty] 탭 전환 attach 실패: ${(e && e.message) || e}`);
       });
-      const old = pty;
-      pty = np;
-      wirePty(np);
-      tid = newTid;
-      if (handle) handle.tid = newTid;
-      paneCurrent.set(pkey, newTid);
-      try { old.kill(); } catch (_) { /* noop */ }
     };
     // 같은 pane 아이덴티티의 기존 스트림 축출 — 경로 전환/재접속이 겹쳐도 tmux 클라이언트는 1개.
     const prev = paneStreams.get(pkey);
@@ -595,7 +621,7 @@ async function attachPty(params, io) {
   };
   const handleStdin = (buf) => {
     notifyInput(buf);
-    try { pty.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
+    try { term.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
   };
   // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
   //  payload 가 **그대로** 이 함수로 들어온다(원문 JSON 보존 = 리사이즈 의미 불변).
@@ -604,22 +630,22 @@ async function attachPty(params, io) {
       const m = JSON.parse(str);
       if (m && m.type === 'resize' && m.cols && m.rows) {
         const w = m.cols | 0, h = m.rows | 0;
-        try { pty.resize(w, h); } catch (_) { /* noop */ }
+        try { term.resize(w, h); } catch (_) { /* noop */ }
         lastW = w; lastH = h;
-        // 창 크기는 window-size latest 가 클라이언트 리사이즈/입력을 따라 자동 반영 —
+        // 창 크기는 window-size latest(등가)가 클라이언트 리사이즈/입력을 따라 자동 반영 —
         //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
         if (!firstResizeDone) {
           firstResizeDone = true;
           if (nudgeTimer) clearTimeout(nudgeTimer);
           nudgeTimer = setTimeout(() => {
-            try { pty.resize(Math.max(2, lastW - 1), lastH); pty.resize(lastW, lastH); } catch (_) { /* noop */ }
+            try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ }
           }, 600);
         }
         return;
       }
     } catch (_) { /* JSON 아니면 일반 입력 */ }
     notifyInput(str);
-    try { pty.write(str); } catch (_) { /* noop */ }
+    try { term.write(str); } catch (_) { /* noop */ }
   };
 
   // 핸들러 등록 = 어댑터가 버퍼해 둔 셋업 중 메시지(첫 resize 등)의 순서 재생 시점.
@@ -658,6 +684,7 @@ function runTmux(args) {
 const AUTO_RENAME_FMT = '#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{?#{&&:#{!=:#{pane_title},},#{&&:#{!=:#{pane_title},#{host}},#{&&:#{!=:#{pane_title},#{host_short}},#{?#{m:*@#{host_short}*,#{pane_title}},0,1}}}},#{pane_title},#{pane_current_command}}}';
 const autoRenameDone = new Set(); // 세션당 1회(데몬 수명 동안)
 async function ensureAutoRename(session) {
+  if (usingHost()) return; // term-host 는 자동 개명이 세션 내장(session.windowName) — tmux 옵션 주입 불요
   if (autoRenameDone.has(session)) return;
   await runTmux(['set-window-option', '-g', 'automatic-rename-format', AUTO_RENAME_FMT]).catch(() => {});
   await runTmux(['set-window-option', '-g', 'automatic-rename', 'on']).catch(() => {});
@@ -684,31 +711,34 @@ async function injectPoolEnv(session, abs) {
   const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
   // 소켓 경로는 cpt-server 와 동일 규칙(sun_path 한계 폴백 포함) — 어긋나면 CLI 가 유령 소켓을 본다.
   const sock = require('./cpt-server').sockPath();
-  const tmuxBin = findTmux();
-  await runTmux(['set-environment', '-t', '=' + session, 'CPT_WS', rel == null ? '' : String(rel)]);
-  await runTmux(['set-environment', '-t', '=' + session, 'CPT_SOCK', sock]);
+  const tmuxBin = usingHost() ? null : findTmux();
+  await termBackend.setEnv(session, 'CPT_WS', rel == null ? '' : String(rel));
+  await termBackend.setEnv(session, 'CPT_SOCK', sock);
   // 전용 세션("<ns>--t-<tid>")만 터미널 좌표를 가진다. 레거시 홈 세션(codingpt)/풀 세션은 tid 가 없으므로
   //  주입하지 않는다(틀린 tid 주입 = 알림 win·읽음 scope 오류).
   const tm = /--t-(\d+)$/.exec(session);
   if (tm) {
-    await runTmux(['set-environment', '-t', '=' + session, 'CPT_TID', tm[1]]).catch(() => {});
-    await runTmux(['set-environment', '-t', '=' + session, 'CPT_TSESSION', session]).catch(() => {});
+    await termBackend.setEnv(session, 'CPT_TID', tm[1]).catch(() => {});
+    await termBackend.setEnv(session, 'CPT_TSESSION', session).catch(() => {});
   }
-  if (tmuxBin) await runTmux(['set-environment', '-t', '=' + session, 'CPT_TMUX', tmuxBin]);
+  if (tmuxBin) await termBackend.setEnv(session, 'CPT_TMUX', tmuxBin);
   // shim(cpt/claude/codex 래퍼) 경로를 PATH 선두에 — 새 window 셸부터 적용.
   //  zsh 는 rc 가 PATH 를 재구성해 이 값이 밀린다(실측) → ZDOTDIR 체인으로 rc 이후에 재-prepend.
+  //  (win32: ZDOTDIR 무의미 — PATH prepend 만. 셸 프로필 주입은 term-host defaultShell 이 담당.)
   const shimBin = path.join(runtime.stateDir(), 'bin');
-  const basePath = process.env.PATH || '/usr/local/bin:/usr/bin:/bin';
-  await runTmux(['set-environment', '-t', '=' + session, 'PATH', `${shimBin}:${basePath}`]).catch(() => {});
-  try {
-    const shimLib = require('./shim');
-    const zdot = shimLib.zdotDir();
-    if (fs.existsSync(zdot)) {
-      const origZdot = process.env.ZDOTDIR || '';
-      await runTmux(['set-environment', '-t', '=' + session, 'ZDOTDIR', zdot]);
-      if (origZdot && origZdot !== zdot) await runTmux(['set-environment', '-t', '=' + session, 'CPT_ORIG_ZDOTDIR', origZdot]);
-    }
-  } catch (_) { /* shim 미생성 — PATH 주입만으로 동작(제한적) */ }
+  const basePath = process.env.PATH || (process.platform === 'win32' ? '' : '/usr/local/bin:/usr/bin:/bin');
+  await termBackend.setEnv(session, 'PATH', `${shimBin}${path.delimiter}${basePath}`).catch(() => {});
+  if (process.platform !== 'win32') {
+    try {
+      const shimLib = require('./shim');
+      const zdot = shimLib.zdotDir();
+      if (fs.existsSync(zdot)) {
+        const origZdot = process.env.ZDOTDIR || '';
+        await termBackend.setEnv(session, 'ZDOTDIR', zdot);
+        if (origZdot && origZdot !== zdot) await termBackend.setEnv(session, 'CPT_ORIG_ZDOTDIR', origZdot);
+      }
+    } catch (_) { /* shim 미생성 — PATH 주입만으로 동작(제한적) */ }
+  }
   poolEnvDone.add(session);
 }
 
@@ -774,14 +804,9 @@ async function handleTerminalRpc(method, params) {
     return { ok: true };
   }
   if (method === 'terminal.close') {
-    // 완전 삭제(전 기기 공통) = kill-session. 세션이 이미 없거나 서버가 죽었어도 멱등 성공.
+    // 완전 삭제(전 기기 공통) = kill 등가. 세션이 이미 없거나 서버가 죽었어도 멱등 성공(백엔드 규칙).
     const tid = Number(params && params.index);
-    try {
-      await runTmux(['kill-session', '-t', '=' + termSession(session, tid)]);
-    } catch (e) {
-      const msg = String(e.message || '');
-      if (!/no server running|can't find session|session not found/i.test(msg)) throw e;
-    }
+    await termBackend.kill(termSession(session, tid));
     return { ok: true };
   }
   throw new Error('unknown terminal method: ' + method);
@@ -797,6 +822,7 @@ async function handleTerminalRpc(method, params) {
 //  grace(idleSec): ensureView 로 막 만들어져 stream attach 직전(수백 ms)인 뷰를 죽이지 않도록,
 //   session_activity 가 idleSec 이상 지난(=아무도 안 붙은 채 방치된) 뷰만 대상으로 한다.
 async function reapStaleViews(idleSec = 90) {
+  if (usingHost()) return 0; // 뷰 세션은 tmux 레거시 산물 — term-host 백엔드엔 존재하지 않는다
   let out;
   try {
     out = await runTmux(['list-sessions', '-F', '#{session_name}\t#{session_attached}\t#{session_activity}']);
@@ -837,6 +863,7 @@ function procStartMs(pid) {
 }
 
 async function healStaleTerminals(idleSec = 45) {
+  if (usingHost()) return 0; // zdot(zsh) 훅 배선 치유 = darwin tmux 전용(win32 셸 프로필은 계약 4 별도)
   const ourZdot = path.join(runtime.stateDir(), 'shim', 'zdot');
   let shimMtime = 0;
   try { shimMtime = fs.statSync(path.join(ourZdot, '.zlogin')).mtimeMs; } catch (_) { return 0; }
@@ -874,4 +901,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, TMUX_SOCKET, TMUX_SESSION };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };

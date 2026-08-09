@@ -168,8 +168,10 @@ test('ensureShimsWin32: 파일 세트·훅 7종·미설치 래퍼 미생성', ()
 
 test('ensureShimsWin32: 설치+배선 ON 이면 래퍼 생성(wired) — node 위임 본문', () => {
   const fakeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-winbin-'));
-  // 감지는 호스트 판정(process.platform=darwin)으로 돌므로 실행 비트 있는 파일로 설치를 흉내낸다.
-  fs.writeFileSync(path.join(fakeDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+  // 감지는 **호스트 플랫폼 판정**으로 돈다 — darwin 은 실행 비트 있는 맨 이름, win32(실 CI)는
+  //  PATHEXT 확장자(.cmd)로 설치를 흉내내야 findBin 이 잡는다(안 그러면 wired 가 비어 거짓 실패).
+  if (process.platform === 'win32') fs.writeFileSync(path.join(fakeDir, 'claude.cmd'), '@echo off\r\n');
+  else fs.writeFileSync(path.join(fakeDir, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
   agents._internals.setSearchOverride([fakeDir]);
   try {
     const r = shim._win.ensureShimsWin32();
@@ -252,4 +254,62 @@ test('parseWinProcessJson: Get-CimInstance JSON — 단건 언랩·null CommandL
     [{ pid: 5, cmd: 'x' }, { pid: 7, cmd: '' }]);
   assert.deepStrictEqual(p(JSON.stringify({ ProcessId: 9, CommandLine: 'z' })), [{ pid: 9, cmd: 'z' }]);
   assert.deepStrictEqual(p('garbage'), []);
+});
+
+// ── 웨이브2: term-backend win32 스폰(Job 탈출)·파이프 정규화 — 순수 함수 검증 ─────────
+
+test('term-backend: WMI 스폰 스펙(Job 탈출) — cmd set 체인·인용·ShowWindow=0·PS 이스케이프', () => {
+  const tb = require('../term-backend');
+  const spec = tb._buildWmiSpawnSpec({
+    nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+    entry: 'C:\\Users\\Ho Lee\\CodingPT\\term-host\\index.js',
+    sockPath: '\\\\.\\pipe\\cpt-termhost-deadbeef',
+    stateDir: 'C:\\Users\\Ho Lee\\.codingpt',
+  });
+  assert.strictEqual(spec.file, 'powershell.exe');
+  assert.ok(spec.args.includes('-NoProfile') && spec.args.includes('-NonInteractive'));
+  const script = spec.args[spec.args.length - 1];
+  // WMI 생성 = WmiPrvSE 자식 → PC 앱 Job Object 밖(계약 1: 앱 종료에도 터미널 생존).
+  assert.match(script, /Invoke-CimMethod -ClassName Win32_Process -MethodName Create/);
+  assert.match(script, /Win32_ProcessStartup/, '콘솔 창 무표시(ShowWindow) 스타트업 정보가 필요하다');
+  assert.match(script, /ShowWindow = 0/);
+  assert.match(script, /CPT_TERMHOST_PID=/, '성공 판정(폴백 분기)의 파싱 마커');
+  // cmd /d /s /c — 양끝 따옴표 제거 모드에서 내부 인용 보존(공백 경로 안전).
+  assert.match(spec.cmdLine, /^cmd\.exe \/d \/s \/c "/);
+  assert.ok(spec.cmdLine.includes('set "CPT_TERMHOST_SOCK=\\\\.\\pipe\\cpt-termhost-deadbeef"'), 'env 는 set 체인으로 전달(WMI 는 부모 env 를 안 물려준다 — 유령 호스트 방지 필수값)');
+  assert.ok(spec.cmdLine.includes('set "CODINGPT_STATE_DIR=C:\\Users\\Ho Lee\\.codingpt"'));
+  assert.ok(spec.cmdLine.includes('"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Ho Lee\\CodingPT\\term-host\\index.js" run'), '공백 경로는 각각 인용돼야 한다');
+  // PowerShell 단일 인용 — ' 는 '' 로(경로에 아포스트로피가 있어도 스크립트가 깨지지 않는다).
+  const spec2 = tb._buildWmiSpawnSpec({ nodePath: "C:\\node's\\node.exe", entry: 'e.js', sockPath: 'p', stateDir: 's' });
+  assert.ok(spec2.args[spec2.args.length - 1].includes("node''s"), "PS 인용 이스케이프('')가 빠졌다");
+});
+
+test('term-host paths: win32 파이프 정규화 — 파일 경로 오버라이드는 해시 파이프로, 파이프는 통과', () => {
+  const hp = require('../../term-host/lib/paths');
+  const n = hp.normalizeWinPipe('C:\\Users\\u\\AppData\\Local\\Temp\\x\\backend.sock');
+  assert.match(n, /^\\\\\.\\pipe\\cpt-termhost-test-[0-9a-f]{8}$/, 'win32 net.listen 은 \\\\.\\pipe\\ 밖 경로에서 실패한다');
+  assert.strictEqual(hp.normalizeWinPipe(n), n, '정규화는 멱등이어야 한다');
+  assert.strictEqual(hp.normalizeWinPipe('\\\\.\\pipe\\abc'), '\\\\.\\pipe\\abc');
+  assert.strictEqual(hp.normalizeWinPipe('\\\\?\\pipe\\abc'), '\\\\?\\pipe\\abc');
+  // 같은 입력 = 같은 파이프(클라이언트 term-backend 와 호스트가 각자 계산해도 만나야 한다).
+  assert.strictEqual(hp.normalizeWinPipe('C:\\t\\a.sock'), hp.normalizeWinPipe('C:\\t\\a.sock'));
+});
+
+test('term-host session: win32 기본 셸 스펙 — 프로필 주입은 defaultShellSpec 한 곳(계약 4)', () => {
+  const sess = require('../../term-host/lib/session');
+  // mac 에서는 win32 분기를 직접 못 돌리지만, 계약의 형태(함수 존재·posix 무인자)는 고정한다.
+  assert.strictEqual(typeof sess.defaultShellSpec, 'function');
+  const spec = sess.defaultShellSpec();
+  if (process.platform !== 'win32') {
+    assert.deepStrictEqual(spec.args, [], 'posix 기본 셸엔 인자가 없어야 한다(darwin 무회귀)');
+  } else {
+    // win32(실 CI): pwsh/powershell 이면 프로필 파일이 있을 때만 -Command 주입, cmd 는 /K.
+    assert.ok(spec.shell, 'win32 기본 셸 해석 실패');
+  }
+  // 소스 계약: 프로필 규칙이 session.js 의 defaultShellSpec 에 있다(데몬 create 와 앱 create op 이
+  //  자동으로 한 벌이 되는 유일 지점 — 다른 곳으로 옮기면 두 생성 주체가 갈라진다).
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', '..', 'term-host', 'lib', 'session.js'), 'utf8');
+  assert.match(src, /cpt-profile\.ps1/);
+  assert.match(src, /cpt-init\.cmd/);
+  assert.match(src, /-NoLogo/);
 });

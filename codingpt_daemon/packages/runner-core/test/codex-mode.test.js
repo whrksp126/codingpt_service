@@ -145,7 +145,11 @@ function tmuxStub({ line, cursor }) {
   ptyLib.runTmux = async (args) => {
     calls.push(args);
     if (args[0] === 'capture-pane') return ['본문', '', st.line, '  gpt-5.6-sol low · Context 0% used'].join('\n');
-    if (args[0] === 'display-message') return st.cursor;
+    if (args[0] === 'display-message') {
+      // 웨이브2: 커서는 term-backend.info 의 결합 포맷(cmd\tcols\trows\tcx\tcy\tpid\twname\ttitle)으로 온다.
+      const [cx, cy] = String(st.cursor).split(' ');
+      return `codex\t80\t24\t${cx}\t${cy}\t111\tw\t\n`;
+    }
     if (args[0] === 'send-keys' && args.includes('BSpace')) {
       st.line = '› Write tests for @filename';   // 비었으니 플레이스홀더
       st.cursor = '2 2';

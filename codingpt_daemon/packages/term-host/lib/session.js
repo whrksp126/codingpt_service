@@ -18,6 +18,7 @@ const path = require('path');
 const nodePty = require('node-pty');
 const { Screen } = require('./screen');
 const { keysToBytes } = require('./keys');
+const paths = require('./paths');
 
 // 셸 판정(자동 rename 용) — darwin/linux + win32 셸 전부.
 const SHELL_NAMES = new Set([
@@ -43,6 +44,39 @@ function defaultShell() {
   return process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
 }
 
+/**
+ * 기본 셸 스펙 {shell, args} — win32 셸 프로필 주입(계약 4)을 **여기 한 곳**에 내장한다.
+ *
+ * 세션 생성 주체가 둘이다(데몬 create + PC 앱의 create op). 프로필 규칙을 term-host 의 기본값으로
+ * 두면 두 주체가 자동으로 한 벌이 된다:
+ *  · pwsh/powershell: `-NoLogo -NoExit -Command ". '<stateDir>\shim\ps\cpt-profile.ps1'"`
+ *    (cpt-profile.ps1 = ① 사용자 $PROFILE dot-source ② PATH prepend ③ claude/codex/cpt 함수)
+ *  · cmd.exe 폴백:    `/K "<stateDir>\shim\cmd\cpt-init.cmd"` (PATH prepend 동형)
+ *  · 프로필 파일이 아직 없으면(데몬 미가동·shim 미생성) 인자 없이 민짜 셸 — 조용한 실패 대신
+ *    "터미널은 항상 열린다" 를 지키고, 다음 세션부터 프로필이 적용된다.
+ * create op 이 shell/args 를 명시하면 그것이 우선한다(호출자 의도 존중 — 테스트/특수 세션).
+ */
+function defaultShellSpec() {
+  const shell = defaultShell();
+  if (process.platform !== 'win32') return { shell, args: [] };
+  const base = path.basename(String(shell)).toLowerCase();
+  if (base === 'pwsh.exe' || base === 'powershell.exe' || base === 'pwsh' || base === 'powershell') {
+    const profile = path.join(paths.stateDir(), 'shim', 'ps', 'cpt-profile.ps1');
+    if (fileExists(profile)) {
+      return { shell, args: ['-NoLogo', '-NoExit', '-Command', `. '${profile.replace(/'/g, "''")}'`] };
+    }
+    return { shell, args: [] };
+  }
+  // cmd.exe 계열
+  const init = path.join(paths.stateDir(), 'shim', 'cmd', 'cpt-init.cmd');
+  if (fileExists(init)) return { shell, args: ['/K', init] };
+  return { shell, args: [] };
+}
+
+function fileExists(p) {
+  try { return fs.existsSync(p); } catch (_) { return false; }
+}
+
 // 자식 env 규율 — tmuxEnv() 등가: TMUX 제거(중첩 가드), UTF-8 로케일 강제(비-win32).
 function childEnv(extra) {
   const env = { ...process.env, ...(extra || {}) };
@@ -63,8 +97,16 @@ class Session {
     this.name = String(o.name);
     this.cwd = o.cwd && fs.existsSync(o.cwd) ? o.cwd : os.homedir();
     this.env = { ...(o.env || {}) };            // 세션 env맵(set-environment 등가 — respawn 시 반영)
-    this.shell = o.shell || defaultShell();
-    this.args = Array.isArray(o.args) ? o.args : [];
+    // 셸/인자: 호출자가 명시하면 그대로, 미지정이면 기본 스펙(win32 = 프로필 주입 pwsh — 계약 4.
+    //  데몬 create 와 PC 앱 create op 이 여기 한 곳으로 한 벌이 된다).
+    if (o.shell) {
+      this.shell = o.shell;
+      this.args = Array.isArray(o.args) ? o.args : [];
+    } else {
+      const spec = defaultShellSpec();
+      this.shell = spec.shell;
+      this.args = Array.isArray(o.args) && o.args.length ? o.args : spec.args;
+    }
     this.manualName = null;                      // rename{} 수동 이름(automatic-rename off 등가)
     this.createdAt = Date.now();
     this.dead = false;
@@ -227,10 +269,11 @@ class Session {
     };
   }
 
-  // 저널 레코드(크래시 복원 = respawn 정책의 재료).
+  // 저널 레코드(크래시 복원 = respawn 정책의 재료). args 포함 — win32 프로필 주입 셸(계약 4)이
+  //  크래시 복원 후에도 같은 인자로 되살아난다.
   journalEntry() {
-    return { name: this.name, cwd: this.cwd, env: this.env, title: this.manualName, createdAt: this.createdAt, shell: this.shell };
+    return { name: this.name, cwd: this.cwd, env: this.env, title: this.manualName, createdAt: this.createdAt, shell: this.shell, args: this.args };
   }
 }
 
-module.exports = { Session, defaultShell, childEnv, SHELL_NAMES };
+module.exports = { Session, defaultShell, defaultShellSpec, childEnv, SHELL_NAMES };

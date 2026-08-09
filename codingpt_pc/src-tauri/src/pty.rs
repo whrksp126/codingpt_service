@@ -11,16 +11,22 @@
 //  와이어: 출력=raw 바이트(base64 로 emit "pty://data"), 입력=UTF-8 문자열(pty_write), 리사이즈=pty_resize.
 
 use std::collections::HashMap;
+#[cfg(not(windows))]
 use std::io::{Read, Write};
+#[cfg(windows)]
+use std::io::{BufRead, BufReader, Write};
 use std::sync::Mutex;
 
+#[cfg(not(windows))]
 use base64::Engine;
+#[cfg(not(windows))]
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::tmux::{self, TmuxCtx};
 
+#[cfg(not(windows))]
 struct PtyHandle {
     master: Box<dyn portable_pty::MasterPty + Send>,
     writer: Box<dyn Write + Send>,
@@ -30,6 +36,18 @@ struct PtyHandle {
     epoch: u64,
     // attach 대상 터미널 세션 + 마지막 클라이언트 크기 — pty_claim(크기 주장)용.
     target: String,
+    last_cols: u16,
+    last_rows: u16,
+}
+
+// win32 pane 핸들 — tmux attach 자식 대신 term-host 파이프 attach 커넥션(포팅 계약 1).
+//  writer = 파이프 쓰기 클론(i/r 프레임), reader = NDJSON 수신 스레드(o/x 프레임 → 기존 이벤트).
+//  epoch/target/last_* 의미는 mac 과 동일(위 주석 참조).
+#[cfg(windows)]
+struct PtyHandle {
+    writer: std::fs::File,
+    reader: Option<std::thread::JoinHandle<()>>,
+    epoch: u64,
     last_cols: u16,
     last_rows: u16,
 }
@@ -56,6 +74,7 @@ struct ExitEvent {
 // pane 열기: 터미널(tid) 확정 → 전용 세션에 직접 PTY attach + reader 스레드.
 //  반환 = 실제로 attach 한 tid — 요청 win_index 가 스테일(닫힘/구버전 인덱스)이면 첫 터미널로
 //  폴백되므로, 호출측(pane.js)은 반환값으로 탭을 보정해야 한다.
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_open(
     app: AppHandle,
@@ -132,6 +151,7 @@ pub fn pty_open(
 }
 
 // 키 입력(UTF-8 문자열) → PTY stdin.
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Result<(), String> {
     let mut panes = mgr.panes.lock().unwrap();
@@ -145,6 +165,7 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
 // 리사이즈(xterm FitAddon → PTY). 클라이언트 리사이즈(SIGWINCH→MSG_RESIZE)가 그 클라이언트를
 //  window-size latest 의 "latest" 로 만들어 창 크기가 자동으로 따라온다 — 수동 resize-window
 //  클레임(구 모델의 기기 간 크기 뺏기 전쟁 근원)은 전면 폐지.
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_resize(
     mgr: State<PtyManager>,
@@ -167,6 +188,7 @@ pub fn pty_resize(
 //  크기로 잡혀 있으면 클라이언트 pty 를 1칸 줄였다 복원(nudge)한다. 리사이즈 신호가 이 클라이언트를
 //  window-size latest 의 "latest" 로 만들어 창이 이 pane 크기로 따라온다 — resize-window(manual 고정)
 //  없이 성립하므로 기기 간 크기 뺏기 전쟁이 없다. 창이 이미 내 크기면 완전 no-op.
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
     let (target, cols, rows) = {
@@ -211,6 +233,7 @@ pub fn pty_alive(mgr: State<PtyManager>, pane_id: String) -> bool {
 // pane 스트림 닫기: attach 클라이언트(PTY child)만 종료 — 세션/셸은 tmux 서버에 생존.
 //  (워크스페이스 전환/재렌더 dispose 에서 호출되므로 여기서 세션을 kill 하면 안 된다.
 //   터미널 완전 삭제는 탭 닫기/pane 닫기의 kill_window 가 담당 — 마지막 window kill 시 세션 자동 소멸.)
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_close(_ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
     if let Some(mut h) = mgr.panes.lock().unwrap().remove(&pane_id) {
@@ -220,6 +243,7 @@ pub fn pty_close(_ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) 
 
 // 앱 시작/종료 시 레거시 grouped view 세션 정리("--view--" 만 — 독립 pane 세션(--p-)은
 //  실제 셸이 사는 곳이라 절대 건드리지 않는다: 앱 재실행 시 레이아웃 복원이 재attach 한다).
+#[cfg(not(windows))]
 pub fn sweep_views(ctx: &TmuxCtx) {
     let out = match tmux::run(
         ctx,
@@ -235,3 +259,170 @@ pub fn sweep_views(ctx: &TmuxCtx) {
         }
     }
 }
+
+// ═══ win32 — term-host 파이프 attach 클라이언트(포팅 계약 1) ═══════════════════
+//  tmux attach 자식 프로세스 대신 named pipe NDJSON 스트림으로 같은 의미론을 재현한다:
+//   · attach 핸드셰이크 1줄 → {ok} 응답 → o프레임(첫 프레임=전체 리페인트, tmux 리페인트 등가)
+//     을 base64 그대로 pty://data 로 통과(와이어 표현이 동일해 재인코딩 불필요).
+//   · 입력 = i프레임(b64) · 리사이즈 = r프레임(latest wins — window-size latest 등가).
+//   · pty_claim 의 "1칸 nudge" 등가 = 현재 크기 r프레임 1회(서버가 같은 크기면 no-op).
+//   · 세션 부재/호스트 미기동 에러 의미론은 mac 경로와 동일(resolve_tid 가 "열린 터미널이
+//     없습니다"를 돌려주고, 호스트 미기동은 목록 0개 → 프론트 리컨실러가 기존 tmux 부재 UX 로 대기).
+//  프레임 인코딩/디코딩은 termhost.rs 순수 함수(유닛테스트 완비)를 사용한다.
+
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_open(
+    app: AppHandle,
+    ctx: State<TmuxCtx>,
+    mgr: State<PtyManager>,
+    pane_id: String,
+    local_path: String,
+    win_index: i64,
+    cols: u16,
+    rows: u16,
+) -> Result<i64, String> {
+    use crate::termhost;
+    let (ns, abs) = tmux::session_for(&local_path);
+    tmux::migrate_legacy_pool(&ctx, &ns, &abs); // win32 no-op(레거시 tmux 풀 없음) — 시그니처 유지
+    let tid = tmux::resolve_tid(&ctx, &ns, win_index)?;
+    if mgr.panes.lock().unwrap().contains_key(&pane_id) {
+        return Ok(tid); // 이미 열림(중복 방지)
+    }
+    let target = tmux::term_session(&ns, tid);
+
+    // 파이프 열기(ERROR_PIPE_BUSY 재시도 포함) + attach 핸드셰이크. 핸드셰이크 응답을 읽은
+    //  BufReader 를 그대로 reader 스레드에 넘긴다 — 응답 뒤에 버퍼링된 첫 리페인트 프레임을 잃지 않게.
+    let stream = termhost::connect().map_err(|e| e.message())?;
+    let mut writer = stream.try_clone().map_err(|e| format!("파이프 클론 실패: {e}"))?;
+    let mut reader = BufReader::new(stream);
+    writer
+        .write_all(termhost::attach_line(termhost::next_id(), &target, cols, rows).as_bytes())
+        .map_err(|e| format!("attach 요청 전송 실패: {e}"))?;
+    let mut resp = String::new();
+    let n = reader.read_line(&mut resp).map_err(|e| format!("attach 응답 수신 실패: {e}"))?;
+    if n == 0 {
+        return Err("attach 응답 없음(term-host 종료?)".to_string());
+    }
+    termhost::parse_op_response(&resp).map_err(|e| format!("attach 실패: {}", e.message()))?;
+
+    let epoch = PTY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    mgr.panes.lock().unwrap().insert(
+        pane_id.clone(),
+        PtyHandle { writer, reader: None, epoch, last_cols: cols, last_rows: rows },
+    );
+
+    // reader 스레드: o프레임 b64 → 그대로 emit, x프레임/EOF/오류 → exit emit + 매니저 정리(자기 세대만).
+    let app2 = app.clone();
+    let pid = pane_id.clone();
+    let jh = std::thread::spawn(move || {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) | Err(_) => break, // EOF/파이프 단절/CancelSynchronousIo(pty_close)
+                Ok(_) => {}
+            }
+            match crate::termhost::parse_stream_line(&line) {
+                Some(crate::termhost::Frame::Output(b64)) => {
+                    let _ = app2.emit("pty://data", DataEvent { pane_id: pid.clone(), b64 });
+                }
+                Some(crate::termhost::Frame::Exit(_)) => break, // 세션 종료(셸 exit/kill)
+                _ => {} // bell 은 o프레임 안의 BEL 바이트로 이미 전달됨 — 별도 처리 불요
+            }
+        }
+        let _ = app2.emit("pty://exit", ExitEvent { pane_id: pid.clone() });
+        if let Some(mgr) = app2.try_state::<PtyManager>() {
+            let mut panes = mgr.panes.lock().unwrap();
+            if panes.get(&pid).map(|h| h.epoch) == Some(epoch) {
+                panes.remove(&pid);
+            }
+        }
+    });
+    // JoinHandle 을 핸들에 되건다(pty_close 가 블로킹 read 를 CancelSynchronousIo 로 깨우는 재료).
+    if let Some(h) = mgr.panes.lock().unwrap().get_mut(&pane_id) {
+        if h.epoch == epoch {
+            h.reader = Some(jh);
+        }
+    }
+    Ok(tid)
+}
+
+// 키 입력(UTF-8 문자열) → i프레임.
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Result<(), String> {
+    let mut panes = mgr.panes.lock().unwrap();
+    if let Some(h) = panes.get_mut(&pane_id) {
+        h.writer
+            .write_all(crate::termhost::input_frame(data.as_bytes()).as_bytes())
+            .map_err(|e| format!("write 실패: {e}"))?;
+        let _ = h.writer.flush();
+    }
+    Ok(())
+}
+
+// 리사이즈 → r프레임(latest wins — 마지막 프레임이 이긴다. mac 의 SIGWINCH→window-size latest 등가).
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_resize(mgr: State<PtyManager>, pane_id: String, cols: u16, rows: u16) -> Result<(), String> {
+    let mut panes = mgr.panes.lock().unwrap();
+    if let Some(h) = panes.get_mut(&pane_id) {
+        h.writer
+            .write_all(crate::termhost::resize_frame(cols, rows).as_bytes())
+            .map_err(|e| format!("resize 실패: {e}"))?;
+        let _ = h.writer.flush();
+        h.last_cols = cols;
+        h.last_rows = rows;
+    }
+    Ok(())
+}
+
+// 크기 주장(claim) — mac 의 "1칸 nudge" 등가는 r프레임 1회다: 세션이 다른 기기 크기로 잡혀 있으면
+//  이 프레임이 latest 가 되어 내 크기로 따라오고, 이미 내 크기면 서버 session.resize 가 no-op 라
+//  SIGWINCH 소음도 없다(비교 왕복 불필요 — mac 의 display-message 프리체크와 같은 효과).
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_claim(_app: AppHandle, _ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+    let mut panes = mgr.panes.lock().unwrap();
+    if let Some(h) = panes.get_mut(&pane_id) {
+        if h.last_cols < 4 || h.last_rows < 2 {
+            return;
+        }
+        let _ = h.writer.write_all(crate::termhost::resize_frame(h.last_cols, h.last_rows).as_bytes());
+        let _ = h.writer.flush();
+    }
+}
+
+// pane 스트림 닫기 = attach 커넥션만 종료(세션/셸은 term-host 에 생존 — mac 과 동일 의미론).
+//  reader 스레드는 동기 ReadFile 에 블로킹돼 있어 쓰기 핸들 drop 만으론 안 깨어난다 —
+//  CancelSynchronousIo 로 깨워 스레드가 자기 File 을 drop 해야 서버가 detach 를 본다.
+//  (커맨드 스레드를 붙잡지 않게 정리는 백그라운드에서 반복 시도 — 스레드가 syscall 밖이면
+//   ERROR_NOT_FOUND 로 헛빵일 수 있어 종료 확인까지 재시도한다.)
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_close(_ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+    if let Some(h) = mgr.panes.lock().unwrap().remove(&pane_id) {
+        drop(h.writer);
+        if let Some(t) = h.reader {
+            std::thread::spawn(move || {
+                use std::os::windows::io::AsRawHandle;
+                for _ in 0..100 {
+                    if t.is_finished() {
+                        break;
+                    }
+                    unsafe {
+                        let _ = windows::Win32::System::IO::CancelSynchronousIo(
+                            windows::Win32::Foundation::HANDLE(t.as_raw_handle() as _),
+                        );
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            });
+        }
+    }
+}
+
+// win32: 레거시 grouped view 세션이라는 개념 자체가 없다(tmux 시절 산물) — no-op.
+#[cfg(windows)]
+pub fn sweep_views(_ctx: &TmuxCtx) {}

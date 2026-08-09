@@ -45,8 +45,12 @@ test('E. 클라이언트도 자기 버전을 신고한다(ui_hello) — 서버�
   const pc = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'codingpt_pc', 'src', 'js', 'ui-channel.js'), 'utf8');
   assert.match(pc, /appVersion: appVer \|\| undefined/);
   assert.match(pc, /await ensureAppVer\(\);/, 'hello 는 onopen 동기 전송이라 소켓 열기 전에 확보해야 한다');
-  const app = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', '..', 'codingpt_app', 'src', 'services', 'notificationService.ts'), 'utf8');
-  assert.match(app, /appVersion: appVersionLabel\(\)/);
+  // codingpt_app 은 별도 리포 — CI(이 리포 단독 체크아웃)엔 없다. 있을 때만 검증(로컬 멀티 리포 배치).
+  const appFile = path.join(__dirname, '..', '..', '..', '..', '..', 'codingpt_app', 'src', 'services', 'notificationService.ts');
+  if (fs.existsSync(appFile)) {
+    const app = fs.readFileSync(appFile, 'utf8');
+    assert.match(app, /appVersion: appVersionLabel\(\)/);
+  }
   const back = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'codingpt_back', 'services', 'daemonRelayService.js'), 'utf8');
   assert.match(back, /appVersion: typeof msg\.appVersion === 'string'/);
 });

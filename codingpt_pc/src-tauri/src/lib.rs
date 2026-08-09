@@ -9,6 +9,10 @@ mod cptsock;
 mod fsapi;
 mod preview;
 mod pty;
+// term-host 파이프 클라이언트(포팅 계약 1) — 프레이밍은 플랫폼 중립(유닛테스트), 커넥션만 win32.
+//  mac 빌드에선 테스트 전용이라 dead_code 를 허용한다(런타임 사용처는 win32 pty/tmux 분기).
+#[cfg_attr(not(windows), allow(dead_code))]
+mod termhost;
 mod tmux;
 
 use std::path::PathBuf;

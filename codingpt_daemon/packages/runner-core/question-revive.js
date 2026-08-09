@@ -45,29 +45,26 @@ const cwdBySession = new Map(); // session → cwdRel 캐시(env 는 세션 수�
 const hookRecon = { minAgeMs: 12 * 1000 };
 const hookChoiceMiss = new Map(); // slotId → 연속 miss 횟수
 
-async function listPanes(ptyLib) {
-  let out = '';
-  try { out = await ptyLib.runTmux(['list-windows', '-a', '-F', '#{session_name}']); } catch (_) { return []; }
-  const seen = new Set();
+async function listPanes(termBackend) {
+  let sessions = [];
+  try { sessions = await termBackend.list(); } catch (_) { return []; }
   const panes = [];
-  for (const raw of out.split('\n')) {
-    const sname = raw.trim();
+  for (const s of sessions) {
+    const sname = String(s.name || '').trim();
     const m = /^(.+)--t-(\d+)$/.exec(sname);
-    if (!m || !sname.startsWith('cpt-') || seen.has(sname)) continue;
-    seen.add(sname);
+    if (!m || !sname.startsWith('cpt-')) continue;
     panes.push({ session: sname, tid: parseInt(m[2], 10) });
     if (panes.length >= MAX_PANES_PER_TICK) break;
   }
   return panes;
 }
 
-async function cwdRelOf(ptyLib, session) {
+async function cwdRelOf(termBackend, session) {
   if (cwdBySession.has(session)) return cwdBySession.get(session);
   let rel = null;
   try {
-    const out = await ptyLib.runTmux(['show-environment', '-t', `=${session}`, 'CPT_WS']);
-    const m = /^CPT_WS=(.*)$/m.exec(out || '');
-    if (m) rel = m[1].trim();
+    const v = await termBackend.getEnv(session, 'CPT_WS');
+    if (typeof v === 'string') rel = v.trim();
   } catch (_) { rel = null; }
   if (rel != null) cwdBySession.set(session, rel);
   return rel;
@@ -76,26 +73,26 @@ async function cwdRelOf(ptyLib, session) {
 async function poll() {
   const transcript = require('./transcript');
   const approvals = require('./approvals');
-  const ptyLib = require('./pty');
+  const termBackend = require('./term-backend');
   if (approvals.gateReason && approvals.gateReason()) return; // 승인 기능이 꺼져 있으면 전부 무의미
 
-  const panes = await listPanes(ptyLib);
+  const panes = await listPanes(termBackend);
   const liveDialogs = new Set(); // `${cwdRel}|${tid}` — 이번 틱에 다이얼로그가 확인된 pane
   const paneQuestionUp = new Map(); // `${cwdRel}|${tid}` → 질문 다이얼로그 노출 여부(캡처 성공 pane 만)
   for (const { session, tid } of panes) {
     let screen = null;
     try {
-      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', `=${session}:0`]);
+      screen = await termBackend.capture(session);
     } catch (_) { screen = null; } // 터미널 없음(닫힘) — 틱 끝의 슬롯 화해가 걷는다
     const questionUp = !!screen && /Enter to select/.test(screen);
     const perm = !questionUp && screen ? parsePermissionDialog(screen) : null;
     if (screen != null) {
       // 훅 선택형 슬롯 화해용 — 다이얼로그가 없어도 pane 의 화면 상태를 기록한다(아래 틱 끝 참조).
-      const rel0 = await cwdRelOf(ptyLib, session);
+      const rel0 = await cwdRelOf(termBackend, session);
       if (rel0 != null) paneQuestionUp.set(`${rel0}|${tid}`, questionUp);
     }
     if (!questionUp && !perm) continue;
-    const cwdRel = await cwdRelOf(ptyLib, session);
+    const cwdRel = await cwdRelOf(termBackend, session);
     if (cwdRel == null) continue;   // CPT_WS 없는 세션(레거시) — 카드 좌표를 만들 수 없다
     liveDialogs.add(`${cwdRel}|${tid}`);
     const slot = approvals.tuiSlotFor(cwdRel, tid);

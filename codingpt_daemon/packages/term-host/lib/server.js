@@ -246,7 +246,7 @@ class TermHostServer {
           const orphan = this.orphans.get(name);
           if (!orphan) return this._replyErr(sock, id, `세션이 없습니다: ${name}`, 'NO_SESSION');
           const s = new Session(
-            { name, cwd: msg.cwd || orphan.cwd, env: orphan.env, cols: msg.cols, rows: msg.rows, shell: orphan.shell },
+            { name, cwd: msg.cwd || orphan.cwd, env: orphan.env, cols: msg.cols, rows: msg.rows, shell: orphan.shell, args: orphan.args },
             {
               onDeath: (sess) => { this.sessions.delete(sess.name); this.orphans.delete(sess.name); this._writeJournal(); },
               onMutate: () => this._writeJournal(),

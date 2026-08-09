@@ -30,8 +30,22 @@ function homeHash8() {
   return crypto.createHash('sha256').update(os.homedir()).digest('hex').slice(0, 8);
 }
 
+/**
+ * win32 파이프 경로 정규화 — env 오버라이드(CPT_TERMHOST_SOCK)에 파일 경로(유닉스 소켓 스타일)가
+ * 오면 그 문자열을 해시해 파이프 이름으로 접는다. win32 net.listen 은 `\\.\pipe\` 접두사가 아니면
+ * 실패하므로(EACCES/ENOENT), 테스트·격리 시나리오가 임시 디렉토리 경로를 그대로 넘겨도 클라이언트
+ * (term-backend)와 호스트가 **같은 규칙**으로 같은 파이프를 보게 된다. 파이프 형식은 그대로 통과.
+ */
+function normalizeWinPipe(p) {
+  if (/^\\\\[.?]\\pipe\\/.test(p)) return p;
+  return `\\\\.\\pipe\\cpt-termhost-test-${crypto.createHash('sha256').update(String(p)).digest('hex').slice(0, 8)}`;
+}
+
 function pipePath() {
-  if (process.env.CPT_TERMHOST_SOCK) return process.env.CPT_TERMHOST_SOCK;
+  if (process.env.CPT_TERMHOST_SOCK) {
+    const p = process.env.CPT_TERMHOST_SOCK;
+    return process.platform === 'win32' ? normalizeWinPipe(p) : p;
+  }
   if (process.platform === 'win32') {
     return `\\\\.\\pipe\\cpt-termhost-${homeHash8()}`;
   }
@@ -43,4 +57,4 @@ function pipePath() {
   return path.join(os.tmpdir(), `cpt-termhost-${uid}-${h}.sock`);
 }
 
-module.exports = { stateDir, journalDir, journalPath, pipePath, homeHash8 };
+module.exports = { stateDir, journalDir, journalPath, pipePath, homeHash8, normalizeWinPipe };

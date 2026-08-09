@@ -42,7 +42,9 @@ const AGENT_CMDS = new Map([
   ['codex', 'Codex'],
   ['gemini', 'Gemini CLI'],
 ]);
-const SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh']);
+// win32(term-host 백엔드) 셸 이름 포함 — term-host session.SHELL_NAMES 와 정합(웨이브2).
+const SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh',
+  'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']);
 const UNKNOWN_AGENT_NAME = 'AI 에이전트'; // 이름을 특정할 수 없을 때의 표시 문자열(agent-state.fire 와 동일 문구)
 
 /**
@@ -166,9 +168,8 @@ async function cwdRelOf(session) {
   if (cwdCache.has(session)) return cwdCache.get(session);
   let rel = null;
   try {
-    const out = await pty().runTmux(['show-environment', '-t', '=' + session, 'CPT_WS']);
-    const m = /^CPT_WS=(.*)$/m.exec(String(out).trim());
-    if (m) rel = m[1];
+    const v = await require('./term-backend').getEnv(session, 'CPT_WS');
+    if (typeof v === 'string') rel = v;
   } catch (_) { /* 레거시 세션 등 — cwd 미상으로 발송 */ }
   cwdCache.set(session, rel);
   return rel;
@@ -305,18 +306,17 @@ function applyObservationNow(session, obs) {
 }
 
 async function poll() {
-  let out;
+  let sessions;
   try {
-    out = await pty().runTmux(['list-windows', '-a', '-F', '#{session_name}\t#{pane_current_command}\t#{pane_title}']);
-  } catch (_) { return; } // tmux 서버 없음 = 관찰할 것 없음
+    // 백엔드 list — darwin: list-windows -a(세션당 첫 window, 종전 규칙 그대로), win32: term-host.
+    //  pane_current_command→command, pane_title→title 매핑(웨이브1 주의점 6).
+    sessions = await require('./term-backend').list();
+  } catch (_) { return; } // 백엔드 서버 없음 = 관찰할 것 없음
   const rows = [];
-  const seen = new Set();
-  for (const l of String(out).split('\n').map((s) => s.replace(/\r$/, '')).filter(Boolean)) {
-    const [session, cmd, ...rest] = l.split('\t');
+  for (const s of sessions) {
+    const session = String(s.name || '');
     if (!session || !/--t-\d+$/.test(session)) continue;
-    if (seen.has(session)) continue; // 세션당 첫 window 만(listTerminals 와 동일 규칙)
-    seen.add(session);
-    rows.push({ session, cmd, title: rest.join('\t') });
+    rows.push({ session, cmd: s.command, title: s.title });
   }
   observe(rows);
 }
