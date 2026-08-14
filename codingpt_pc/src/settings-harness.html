@@ -37,6 +37,33 @@
   window.__section = (key) => {
     [...document.querySelectorAll('.sm-navitem')].find((b) => b.textContent.trim() === key)?.click();
   };
+  // ── E2EE 상태를 손으로 세워 `연결` 화면의 분기를 확인한다(2026-08-15) ──
+  //  ① 열쇠 있음 = 인증 코드 · ② 이 PC 만 열쇠 없음(다른 기기는 있음) = 이유 + 코드 입력 + 최후 수단
+  const e2eeMod = await import('./js/e2ee.js');
+  window.__e2ee = (mode) => {
+    const e = e2eeMod.e2ee;
+    e.available = true; e.policy = 'preferred';
+    if (mode === 'keyed') {
+      e.state = 'trusted'; e.keyState = 'trusted'; e.reason = null;
+      e.devices = [{ deviceKeyId: 1, label: '이 Mac', state: 'trusted', isThisDevice: true }];
+    } else {
+      // 실사고 재현: 다른 PC 가 계정 열쇠를 다시 만들어 이 PC 가 링에서 빠졌다.
+      e.state = 'none'; e.keyState = 'none';
+      e.reason = '다른 기기에서 계정 열쇠를 다시 만들어 이 PC 의 열쇠가 빠졌어요. 새 신원키로 다시 신청합니다 — 열쇠를 가진 기기에서 승인해 주세요.';
+      e.devices = [{ deviceKeyId: 4, label: 'YEHYEON_LAPTOP', state: 'trusted', isThisDevice: false }];
+    }
+    S.emit();
+    window.__section('연결');
+  };
+  // 화면에 실제로 남은 것만 뽑아 본다(스크린샷과 대조용).
+  window.__probe = () => {
+    const root = document.getElementById('settingsRoot');
+    return {
+      msg: [...root.querySelectorAll('.acct-msg, .sett-hint')].map((n) => n.textContent.trim()),
+      buttons: [...root.querySelectorAll('.sm-body button')].map((b) => b.textContent.trim()),
+      hasCodeInput: !!root.querySelector('#linkCodeInput'),
+    };
+  };
 </script>
 </body>
 </html>

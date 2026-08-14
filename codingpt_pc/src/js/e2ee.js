@@ -324,6 +324,14 @@ async function maybeAutoBootstrap() {
   // pending/enrolled 상태를 제외하면 과거 키링 행 때문에 양쪽 새 기기가 서로를 기다린다.
   const missingHostKey = !ready()
     && ["none", "pending", "enrolled"].includes(String(e2ee.keyState || e2ee.state));
+  // ★ 그런데 **다른 기기가 열쇠를 갖고 있으면 자동으로 만들지 않는다**(2026-08-15).
+  //  데몬의 bootstrap 은 로컬 키가 없는 host 에서 `replace` = 계정 링을 통째로 갈아 끼운다.
+  //  PC 두 대가 서로를 링에서 밀어내는 상황에서 이걸 자동으로 돌리면 **핑퐁**이 된다:
+  //  A 가 만들면 B 가 빠지고, B 가 켜지면 다시 만들어 A 가 빠지고 — 매번 열쇠가 무효화된다.
+  //  승인해 줄 수 있는 기기가 실제로 있으면 기다리는 쪽이 맞고(재신청은 데몬이 이미 한다),
+  //  그래도 되돌려야 하면 사람이 설정 > 연결에서 명시적으로 다시 만든다(경고를 읽고 누른다).
+  const otherKeyed = (e2ee.devices || []).some((d) => d && !d.isThisDevice && d.state === "trusted");
+  if (otherKeyed) { e2ee.autoBootError = null; return; }
   if (!needsBootstrap(e2ee) && !missingHostKey) { e2ee.autoBootError = null; return; }
   if (autoBootBusy) return;
   const now = Date.now();

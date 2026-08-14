@@ -9,7 +9,7 @@ import {
   // (개정 6: approveDevice/denyDevice 는 더 이상 이 화면의 일이 아니다 — device-approval.js·notifications.js)
   e2ee, e2eeReady, refreshE2ee,
   revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap,
-  linkStart, linkClaim,
+  linkStart, linkClaim, bootstrapAccount,
 } from "./e2ee.js";
 // (개정 7: hostLockLabel/isHostRow 는 이 화면에서 쓰지 않는다 — 행별 암호화 배지와 '연결된 PC 없음'
 //  행이 사라졌다. 판정 함수와 그 계약은 host-lock.js 에 그대로 남아 있다: 다시 노출하는 날 규칙을
@@ -321,7 +321,9 @@ function renderSection(force) {
       : `<div class="sett-col">
           <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="acct-msg">${esc(e2ee.reason || i18n.t('암호화 연결을 준비하고 있어요…'))}</div>
-          ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}` : ""}
+          ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}
+          <div class="sett-hint" style="margin-top:10px">${i18n.t('그 기기를 쓸 수 없다면 이 PC 를 새 기준으로 삼을 수 있어요 — 다른 기기는 모두 다시 연결해야 해요.')}</div>
+          <div><button class="sett-btn" data-e2ee-reboot="1">${i18n.t('이 PC 로 열쇠 다시 만들기')}</button></div>` : ""}
         </div>`;
     contentEl.innerHTML = `
       <div class="sm-card2">
@@ -1224,6 +1226,22 @@ function bindE2ee(box) {
     const r = await linkClaim(code);
     linkEntryMsg = r.ok ? "" : (r.error || i18n.t('연동에 실패했어요'));
     if (r.ok) linkEntryFor = null;
+    repaint();
+  }));
+  //  ★ 최후 수단 — 이 PC 를 새 신뢰 기점으로(계정 링 교체). 자동으로는 절대 돌지 않는다(핑퐁 방지,
+  //   e2ee.js maybeAutoBootstrap) → 사람이 경고를 읽고 **두 번** 눌러야 한다.
+  box.querySelectorAll("[data-e2ee-reboot]").forEach((b) => b.addEventListener("click", async () => {
+    if (!b.classList.contains("arm")) {
+      b.classList.add("arm");
+      b.textContent = i18n.t('한 번 더 누르면 다시 만듭니다 · 다른 기기는 모두 재연결');
+      setTimeout(() => { if (b.isConnected) { b.classList.remove("arm"); b.textContent = i18n.t('이 PC 로 열쇠 다시 만들기'); } }, 6000);
+      return;
+    }
+    b.disabled = true;
+    linkEntryMsg = i18n.t('열쇠를 다시 만드는 중…');
+    repaint();
+    const r = await bootstrapAccount();
+    linkEntryMsg = r && r.ok ? "" : ((r && r.error) || i18n.t('열쇠를 만들지 못했어요(잠시 후 다시 시도해 주세요).'));
     repaint();
   }));
   // 이 기기의 연동 코드는 자동 발급·자동 갱신한다. 실패했을 때만 명시적인 재시도 버튼을 둔다.
