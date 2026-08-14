@@ -838,6 +838,13 @@ export class PaneView {
       theme: termTheme(),
       // 최소 대비 자동 보정 — 프롬프트(p10k 등)가 팔레트 밖 256색 배경을 써도 글자가 항상 읽히게.
       minimumContrastRatio: termMinContrast(),
+      // ★ TUI 가 마우스를 잡고 있어도 ⌥(Option)+드래그면 **우리 선택**을 만든다(2026-08-15).
+      //  claude·vim 처럼 마우스 리포팅을 켠 앱이 떠 있으면 드래그가 전부 그 앱으로 가서, 화면에
+      //  보이는 하이라이트는 **그 앱이 칠한 색**이다(claude 는 256색 66번=#5F8787 청록을 쓴다).
+      //  그 색은 우리가 못 바꾼다(16색 팔레트 밖 = 표준 색 큐브). 대신 여기 스위치를 켜 두면
+      //  사용자가 ⌥ 를 누른 채 끌어 우리 선택색(#264F78)으로 복사할 길이 생긴다 — 기본값은 꺼짐이라
+      //  지금까지는 그 길 자체가 없었다.
+      macOptionClickForcesSelection: true,
       allowProposedApi: true,
     });
     this.fit = new FitAddon();
