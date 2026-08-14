@@ -322,8 +322,10 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
   //     (헤더 전역 1개 판본의 잔재가 남아 있으면 두 벌이 동시에 그려진다).
   ok("workspace-view 는 토글 DOM 을 만들지 않는다(헤더 전역 1개 판본 잔재 없음)",
     !/mt-mode/.test(wvJs) && !/buildModeToggle/.test(wvJs) && !/\.mt-mode/.test(css));
+  // 본문이 한 줄에서 블록으로 늘었다(빈 자리표시 문구도 같은 루프에서 맞춘다 — 2026-08-14).
+  //  고정할 것은 "모든 pane 을 순회해 _syncModeToggle 을 부른다"이지 그 줄의 생김새가 아니다.
   ok("syncModeToggle 은 모든 pane 을 순회해 맞춘다(빠뜨린 pane = 사라진 기능)",
-    /export function syncModeToggle\(\) \{\s*for \(const \[, p\] of panes\) p\._syncModeToggle\?\.\(\);/.test(wvJs));
+    /export function syncModeToggle\(\) \{[\s\S]{0,400}for \(const \[, p\] of panes\)[\s\S]{0,200}p\._syncModeToggle\?\.\(\)/.test(wvJs));
   ok("판정은 여전히 modeToggleState(공용 규칙)에서만 온다",
     /modeToggleState\(\)\s*\{/.test(paneJs2) && /const st = this\.modeToggleState\(\);/.test(syncBody));
 

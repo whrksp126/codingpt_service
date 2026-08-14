@@ -98,7 +98,13 @@ export function mountWorkspaceView(container) {
 //  → 버튼 노드와 그리기는 **pane 이 소유**한다(pane.js 의 토글 빌더/싱크 메서드 참조).
 //    여기서는 리컨실 후 "모든 pane 을 한 번 맞춰라"만 시킨다(빠뜨린 pane = 사라진 기능).
 export function syncModeToggle() {
-  for (const [, p] of panes) p._syncModeToggle?.();
+  for (const [, p] of panes) {
+    p._syncModeToggle?.();
+    // 빈 터미널 자리표시의 문구도 여기서 맞춘다 — 호스트 온/오프라인은 push(runner_status)로
+    //  바뀌고 그때 showActiveTab 은 돌지 않는다(리컨실러 틱에서만 돈다). 그러면 PC 를 켰는데도
+    //  "이 PC 가 꺼져 있어요" 가 몇 초 남는다. 판정은 pane 이 하고 여기선 "맞춰라"만 시킨다.
+    p._paintEmptyState?.();
+  }
 }
 
 function structureSig(node) {
@@ -116,6 +122,9 @@ function paneCtx(ws) {
     localPath: ws?.localPath || "",
     get isLocal() { return isThisHost(live()); },
     get hostDeviceId() { return live()?.hostDeviceId ?? null; },
+    // 그 워크스페이스를 들고 있는 PC 가 꺼져 있는가 — 빈 화면의 문구·버튼이 이걸 봐야 한다.
+    //  ⚠ 라이브 getter 다: 호스트가 켜지면(runner_status push) 다음 렌더에서 바로 정상 문구로 돌아온다.
+    get hostOffline() { const w = live(); return !!w && isLocal(w) && w.hostOnline === false; },
     onFocus: (id) => S.focusPane(id),
     // ws 는 클로저로 고정 — 알림이 늦게 와도 발생한 워크스페이스로 귀속(activeWsId 는 이미 딴 곳일 수 있음).
     onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),

@@ -676,5 +676,6 @@ export default {
   "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.": "Shows the terminal's AI conversation as a chat screen. Still being refined, so it's off by default.",
   "이 PC의 폴더를 추가하세요": "Add a folder from this PC",
   "실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.": "Lab features are still being refined and may change or disappear without notice.",
-  "실험실": "Lab"
+  "실험실": "Lab",
+  "이 PC가 꺼져 있어요 · 켜면 여기에 터미널이 나타나요": "This PC is off · turn it on and your terminals will appear here"
 };

@@ -38,6 +38,19 @@ export const state = {
 //  각 PC 의 로컬 폴더이므로 이쪽이 실제 소유 관계와 같다(사용자: "워크스페이스 단위가 각 PC
 //  로컬마다로 내려가는 거겠지").
 const ACTIVE_DEVICE_KEY = "cpt.activeDeviceId.v1";
+// PC 마다 **마지막으로 보던 워크스페이스** — PC 를 바꾸면 그 PC 에서 하던 자리로 돌아간다
+//  (2026-08-14 사용자 요구). 이게 없으면 목록만 갈리고 화면은 이전 PC 의 워크스페이스를 계속
+//  띄운 채라, 헤더 제목과 사이드바 선택이 서로 다른 PC 를 가리키는 상태가 된다(실사고 스크린샷).
+const LAST_WS_KEY = "cpt.lastWsByDevice.v1";
+function lastWsMap() {
+  try { return JSON.parse(localStorage.getItem(LAST_WS_KEY) || "{}") || {}; } catch (_) { return {}; }
+}
+function rememberLastWs(deviceId, wsId) {
+  if (deviceId == null || !wsId) return;
+  const m = lastWsMap();
+  m[String(deviceId)] = wsId;
+  try { localStorage.setItem(LAST_WS_KEY, JSON.stringify(m)); } catch (_) {}
+}
 
 /** 사이드바에 그릴 기기 = **PC 뿐**. 모바일(controller)과 클라우드 러너는 여기 대상이 아니다. */
 export function pcDevices() {
@@ -61,6 +74,14 @@ export function activeDeviceId() {
 export function setActiveDevice(id) {
   state.activeDeviceId = id;
   try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(id)); } catch (_) {}
+  // 그 PC 에서 마지막으로 보던 워크스페이스로 이동한다. 기억이 없거나 사라졌으면 첫 번째,
+  //  그마저 없으면(워크스페이스 0개) 활성 워크스페이스를 비운다 — 다른 PC 의 것을 계속 띄우면
+  //  헤더 제목과 사이드바 선택이 서로 다른 PC 를 가리킨다.
+  const list = workspacesForDevice(id);
+  const wanted = lastWsMap()[String(id)];
+  const next = (wanted && list.find((w) => w.id === wanted)) || list[0] || null;
+  if (next) { setActive(next.id); return; }   // setActive 가 emit 까지 한다
+  state.activeWsId = null;
   emit();
 }
 
@@ -345,6 +366,8 @@ export function setActive(id) {
       state.activeDeviceId = meta.hostDeviceId;
       try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(meta.hostDeviceId)); } catch (_) {}
     }
+    // 이 PC 에서 마지막으로 본 워크스페이스로 기억 — 나중에 이 PC 로 되돌아오면 여기로 온다.
+    rememberLastWs(meta?.hostDeviceId ?? state.activeDeviceId, id);
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
   }

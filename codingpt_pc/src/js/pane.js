@@ -826,6 +826,8 @@ export class PaneView {
     btn.innerHTML = `${icons.terminal({ size: 14 })}<span>${i18n.t('새 터미널')}</span>`;
     btn.addEventListener("click", () => this.addTab());
     this.emptyEl.append(msg, btn);
+    this._emptyMsg = msg;
+    this._emptyBtn = btn;
     this.body.appendChild(this.emptyEl);
     this.term = new Terminal({
       cursorBlink: true,
@@ -1429,7 +1431,13 @@ export class PaneView {
     // 베타 꺼짐 → 채팅 본문을 띄우지 않는다(토글도 없으므로 돌아올 길 없는 화면이 되면 안 된다).
     const chat = !empty && isT && !!tab && tab.mode === "chat" && chatBetaEnabled();
     if (chat) this._ensureChat();
-    if (this.emptyEl) this.emptyEl.style.display = empty ? "flex" : "none";
+    if (this.emptyEl) {
+      this.emptyEl.style.display = empty ? "flex" : "none";
+      // ★ 호스트가 꺼져 있으면 "열린 터미널이 없습니다 + [새 터미널]" 을 보여 주지 않는다
+      //  (2026-08-14 사용자 지적: "안 켜진 PC 인데?"). 그건 **모른다는 사실을 아는 것처럼** 말하는
+      //  화면이다 — 데몬이 없으니 터미널이 있는지 없는지 알 수 없고, 버튼을 눌러도 만들 수 없다.
+      if (empty) this._paintEmptyState();
+    }
     this.termEl.style.display = !empty && isT && !chat ? "" : "none";
     if (this.chatHost) this.chatHost.style.display = chat ? "flex" : "none";
     this.chat?.setVisible(chat);
@@ -1448,6 +1456,19 @@ export class PaneView {
     //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
     if (isT && !chat) this._fitNow();
     this._syncModeToggle();
+  }
+
+  /** 빈 터미널 자리표시의 문구·버튼 — 호스트가 꺼져 있으면 "만들 수 있다"고 말하지 않는다. */
+  _paintEmptyState() {
+    const off = !!this.ctx.hostOffline;
+    if (this._emptyOff === off) return;   // 바뀔 때만 손댄다(매 렌더 DOM 수정 금지)
+    this._emptyOff = off;
+    if (this._emptyMsg) {
+      this._emptyMsg.textContent = off
+        ? i18n.t('이 PC가 꺼져 있어요 · 켜면 여기에 터미널이 나타나요')
+        : i18n.t('열린 터미널이 없습니다');
+    }
+    if (this._emptyBtn) this._emptyBtn.style.display = off ? "none" : "";
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나
