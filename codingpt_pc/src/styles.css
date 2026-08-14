@@ -1217,6 +1217,11 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pvm-label { flex: 1 1 auto; }
 /* "여기서 끝나지 않는다"(하위 메뉴로 이어짐) 표시 — 헤더 [+] 의 터미널·웹뷰 행에만 붙는다. */
 .pvm-more { display: inline-flex; color: var(--text3); flex: 0 0 auto; margin-left: 6px; }
+/* 캐스케이드 하위 메뉴(Windows 식) — 부모 옆에 뜨고, 부모 목록은 그대로 남는다.
+   부모보다 위에 그려야 겹칠 때 가려지지 않는다. 목록이 길 수 있어 자체 스크롤을 준다. */
+.pv-submenu { z-index: 9003; min-width: 196px; max-height: min(60vh, 420px); overflow-y: auto; }
+/* 하위 메뉴가 열려 있는 행 — 포인터가 하위 패널로 넘어가 hover 가 풀려도 "여기서 왔다"를 유지한다. */
+.pv-menu-item.is-open { background: var(--hover); }
 .pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
 .pvm-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; }

@@ -179,10 +179,11 @@ export function updateSidebar() {
   //  그래서 PC 를 먼저 고르고, 고른 PC 의 워크스페이스만 아래에 그린다.
   const devices = S.pcDevices();
   const activeDev = S.activeDeviceId();
+  // 새 PC 는 이 화면에서 만들 수 없다(그 PC 에 앱을 깔고 로그인해야 나타난다) → + 버튼 없음.
+  //  ★ `PC 연결하기` 안내도 뺐다(2026-08-14 사용자 확정: "PC 에서는 필요 없을 것 같다") —
+  //   PC 앱을 쓰고 있다는 것 자체가 이미 그 방법을 아는 것이다. 폰에서는 그 안내가 여전히 필요해
+  //   앱(SidebarContent) 쪽에는 남겨 둔다.
   list.appendChild(sectionHead(i18n.t('내 PC'), [
-    // 새 PC 는 이 화면에서 만들 수 없다(그 PC 에 앱을 깔고 로그인해야 나타난다) → + 버튼을 두지
-    //  않는다. 누르면 아무것도 못 만드는 + 는 거짓 어포던스다(사용자 확정: ⋯ 메뉴만).
-    { icon: icons.plus({ size: 14 }), label: i18n.t('PC 연결하기'), onClick: showConnectPcDialog },
     { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
   ]));
   if (!devices.length) {
@@ -192,9 +193,11 @@ export function updateSidebar() {
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
   const wss = devices.length ? S.workspacesForDevice(activeDev) : [];
+  //  ★ [+] 와 ⋯ 을 함께 두지 않는다(2026-08-14 사용자 확정) — 둘 다 "워크스페이스 추가" 하나를
+  //   가리켜서, 같은 일을 하는 버튼이 나란히 두 개 있는 꼴이었다. ⋯ 하나로 통일한다.
   list.appendChild(sectionHead(i18n.t('워크스페이스'), [
     { icon: icons.plus({ size: 14 }), label: i18n.t('워크스페이스 추가'), onClick: () => startNewWorkspace(activeDev) },
-  ], { addBtn: () => startNewWorkspace(activeDev) }));
+  ]));
   if (devices.length && !wss.length) {
     if (state.wsError && !state.workspaces.length) list.appendChild(note(i18n.t('목록을 불러오지 못했습니다')));
     else list.appendChild(note(i18n.t('+ 로 이 PC의 폴더를 추가하세요')));
@@ -347,13 +350,14 @@ function note(text) {
 
 // ── 기기 우선 사이드바의 조각들 (2026-08-14) ────────────────────────────────
 /**
- * 섹션 머리 — 제목 + (선택) 즉시 실행 [+] + ⋯ 메뉴.
- *  · `addBtn` 이 있으면 [+] 를 그린다. **없으면 안 그린다** — 이 화면에서 만들 수 없는 것(새 PC)에
- *    + 를 두면 눌러도 아무것도 못 만드는 거짓 어포던스가 된다(사용자 확정).
+ * 섹션 머리 — 제목 + ⋯ 메뉴.
+ *  ★ [+] 는 두지 않는다(2026-08-14 사용자 확정: "그냥 옆에 ... 으로만 하자"). 처음엔 워크스페이스
+ *   섹션에 [+] 와 ⋯ 을 나란히 뒀는데, ⋯ 안의 유일한 항목도 `워크스페이스 추가` 라서 **같은 일을
+ *   하는 버튼이 두 개** 있는 꼴이었다.
  *  · 메뉴 항목은 워크스페이스 우클릭 메뉴(buildMenu)와 **같은 모양**을 쓴다 — 사이드바 안에서
  *    메뉴가 두 종류로 보이면 그건 디자인이 아니라 누락이다.
  */
-function sectionHead(title, items, { addBtn } = {}) {
+function sectionHead(title, items) {
   const head = document.createElement("div");
   head.className = "sb-sec";
   const nm = document.createElement("span");
@@ -362,18 +366,9 @@ function sectionHead(title, items, { addBtn } = {}) {
   head.appendChild(nm);
   const acts = document.createElement("span");
   acts.className = "sb-sec-acts";
-  if (addBtn) {
-    const b = document.createElement("button");
-    b.className = "sb-sec-btn";
-    b.title = title === i18n.t('워크스페이스') ? i18n.t('워크스페이스 추가') : title;
-    b.innerHTML = icons.plus({ size: 14 });
-    b.addEventListener("click", (e) => { e.stopPropagation(); addBtn(); });
-    if (state.creatingWs) b.classList.add("busy");
-    acts.appendChild(b);
-  }
   if (items && items.length) {
     const m = document.createElement("button");
-    m.className = "sb-sec-btn";
+    m.className = "sb-sec-btn" + (state.creatingWs && title === i18n.t('워크스페이스') ? " busy" : "");
     m.title = i18n.t('더 보기');
     m.innerHTML = icons.dots({ size: 15 });
     m.addEventListener("click", (e) => {
@@ -410,19 +405,6 @@ function deviceRow(d, activeId) {
 function startNewWorkspace(deviceId) {
   if (S.blockedOffline(i18n.t('워크스페이스 추가'))) return;
   openNewWorkspace({ hostDeviceId: deviceId });
-}
-
-/** PC 연결하기 — 여기서 만들 수 있는 게 아니라 **어떻게 하면 나타나는지**를 말해 준다. */
-function showConnectPcDialog() {
-  confirmDialog({
-    title: i18n.t('PC 연결하기'),
-    lines: [
-      i18n.t('연결할 PC에서 CodingPT를 설치하고 지금 계정으로 로그인하세요.'),
-      i18n.t('로그인하면 이 목록에 그 PC가 자동으로 나타납니다.'),
-    ],
-    confirmLabel: i18n.t('다운로드 페이지 열기'),
-    onConfirm: () => { api.frontBase().then((u) => api.openExternal(u)).catch(() => {}); },
-  });
 }
 
 // ── 유령(폴더 소실) 감지 ──

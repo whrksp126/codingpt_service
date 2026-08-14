@@ -581,25 +581,116 @@ function openAddMenu(anchor) {
   const menu = document.createElement("div");
   menu.className = "pv-menu";
   menu.style.minWidth = "180px";
-  const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
-  const closer = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
-  const row = (iconFn, label, onClick, more) => {
+
+  // ── 하위 메뉴(캐스케이드) ────────────────────────────────────────────────
+  //  ★ 2026-08-14 사용자 확정: "호버하면 옆에 나타나고, 기존 목록은 안 사라지게"(Windows 식).
+  //   예전엔 클릭하면 이 메뉴를 지우고 하위 메뉴로 **교체**했다 — 어디로 왔는지 사라져 버린다.
+  //  내용은 각각의 정본 함수가 그린다(openAddTermMenu / openPortsMenu 에 `into` 로 패널을 넘긴다).
+  let sub = null;         // 지금 떠 있는 하위 패널
+  let subRow = null;      // 그걸 연 행
+  let hideTimer = null;   // 포인터가 부모→하위로 건너가는 동안의 유예
+  const closeSub = () => {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    if (sub) { sub._cptObs?.disconnect(); sub.remove(); sub = null; }
+    if (subRow) { subRow.classList.remove("is-open"); subRow = null; }
+  };
+  const scheduleCloseSub = () => {
+    if (hideTimer) clearTimeout(hideTimer);
+    // 180ms — 행과 패널 사이 4px 틈을 대각선으로 건너가는 시간. 이보다 짧으면 도중에 닫힌다.
+    hideTimer = setTimeout(closeSub, 180);
+  };
+  const keepSub = () => { if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; } };
+
+  /** 행 옆에 하위 패널을 띄운다. `fill(panel, done)` 이 내용을 채운다. */
+  const openSub = (rowEl, fill) => {
+    if (subRow === rowEl && sub) { keepSub(); return; }  // 이미 그 행의 것이 떠 있다
+    closeSub();
+    subRow = rowEl;
+    rowEl.classList.add("is-open");
+    const panel = document.createElement("div");
+    sub = panel;
+    panel.className = "pv-menu pv-submenu";
+    document.body.appendChild(panel);
+    panel.addEventListener("mouseenter", keepSub);
+    panel.addEventListener("mouseleave", scheduleCloseSub);
+    // 위치: 기본은 부모 오른쪽. 오른쪽 공간이 모자라면 왼쪽으로 뒤집는다(Windows 동작).
+    //  세로는 행 상단에 맞추되 화면 아래를 넘지 않게 끌어올린다.
+    //  ⚠ requestAnimationFrame 으로 미루지 않는다 — 배경 탭에서는 rAF 가 아예 안 돌아 패널이
+    //   영영 (0,0) 에 숨은 채로 남는다(하네스에서 실측). 이미 DOM 에 붙였으니 지금 재면 된다.
+    const place = () => {
+      if (panel !== sub || !panel.isConnected) return;   // 그 사이 다른 하위 메뉴로 바뀜
+      const pr = menu.getBoundingClientRect();
+      const rr = rowEl.getBoundingClientRect();
+      const w = panel.offsetWidth, h = panel.offsetHeight;
+      const right = pr.right + 4;
+      const left = right + w <= window.innerWidth - 8 ? right : Math.max(8, pr.left - 4 - w);
+      let top = rr.top - 6;
+      if (top + h > window.innerHeight - 8) top = Math.max(8, window.innerHeight - 8 - h);
+      panel.style.left = left + "px";
+      panel.style.top = top + "px";
+    };
+    fill(panel, () => { closeSub(); close(); });
+    place();
+    // 목록이 늦게 오는 경우(에이전트 재조회·포트 조회)에는 높이가 변한다 → 내용이 바뀌면 다시 잡는다.
+    //  그러지 않으면 아래로 자란 패널이 화면 밖으로 삐져나간다.
+    const obs = new MutationObserver(place);
+    obs.observe(panel, { childList: true, subtree: true });
+    panel._cptObs = obs;
+  };
+
+  const close = () => {
+    closeSub();
+    menu.remove();
+    document.removeEventListener("mousedown", closer, true);
+  };
+  const closer = (e) => {
+    if (menu.contains(e.target) || anchor.contains(e.target)) return;
+    if (sub && sub.contains(e.target)) return;   // 하위 패널 클릭은 바깥이 아니다
+    close();
+  };
+
+  /**
+   * @param fill 있으면 하위 메뉴가 있는 행 — 호버로 열리고, 클릭해도 같은 것이 열린다(닫히지 않는다).
+   *             없으면 바로 실행하고 메뉴를 닫는다.
+   */
+  const row = (iconFn, label, { onClick, fill } = {}) => {
     const b = document.createElement("button");
     b.className = "pv-menu-item";
     b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`
-      + (more ? `<span class="pvm-more">${icons.chevronRight({ size: 13 })}</span>` : "");
-    b.addEventListener("click", () => { close(); onClick(); });
+      + (fill ? `<span class="pvm-more">${icons.chevronRight({ size: 13 })}</span>` : "");
+    if (fill) {
+      b.addEventListener("mouseenter", () => openSub(b, fill));
+      b.addEventListener("mouseleave", scheduleCloseSub);
+      b.addEventListener("click", (e) => { e.stopPropagation(); openSub(b, fill); });
+    } else {
+      // 하위 메뉴가 없는 행 위로 오면 열려 있던 하위 패널은 치운다(둘이 동시에 떠 있으면 헷갈린다).
+      b.addEventListener("mouseenter", closeSub);
+      b.addEventListener("click", () => { close(); onClick(); });
+    }
     menu.appendChild(b);
   };
-  row(icons.terminal, i18n.t('터미널'), () => openAddTermMenu(anchor), true);
-  row(icons.code, i18n.t('IDE'), () => smartAdd("ide"));
-  row(icons.globe, i18n.t('웹뷰'), () => openWebviewMenu(anchor), true);
+
+  row(icons.terminal, i18n.t('터미널'), {
+    fill: (panel, done) => openAddTermMenu(anchor, { into: panel, onDone: done }),
+  });
+  row(icons.code, i18n.t('IDE'), { onClick: () => smartAdd("ide") });
+  row(icons.globe, i18n.t('웹뷰'), {
+    fill: (panel, done) => import("./ports.js").then((m) => m.openPortsMenu(anchor, {
+      ws: activeWs(),
+      onBlank: () => smartAdd("preview"),
+      onPick: (port) => smartAdd("preview", { url: m.portUrl(port) }),
+      into: panel,
+      onDone: done,
+    })),
+  });
   // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
-  row(icons.smartphone, i18n.t('모바일 화면'), () => smartAdd("emulator"));
+  row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
+
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
   menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
   menu.style.top = r.bottom + 6 + "px";
+  menu.addEventListener("mouseleave", scheduleCloseSub);
   setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
 }
 
@@ -607,12 +698,19 @@ function openAddMenu(anchor) {
 //  목록은 데몬 감지가 정본이라 **설치된 것만** 나온다(미설치를 회색으로 걸어두지 않는다 — 여기서
 //  할 일은 "지금 띄우기"이고, 설치 안내는 설정 > 에이전트가 담당한다).
 //  캐시가 비어 있으면 먼저 [터미널]만 그린 뒤 조회 결과가 오면 다시 그린다(메뉴가 늦게 뜨지 않게).
-function openAddTermMenu(anchor) {
-  document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
-  const menu = document.createElement("div");
-  menu.className = "pv-menu";
-  menu.style.minWidth = "196px";
-  const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+function openAddTermMenu(anchor, { into, onDone } = {}) {
+  // `into` = **이미 만들어진 패널에 그려 넣는다**(헤더 [+] 의 `터미널 ›` 하위 메뉴). 이때는 자기
+  //  위치를 잡지도, 바깥 클릭 감시를 걸지도 않는다 — 그건 부모 메뉴가 한다.
+  //  이 옵션이 있는 이유: 설치된 에이전트 목록은 여기가 정본이라 하위 메뉴에서 다시 구현하면 두 벌이 된다.
+  const nested = !!into;
+  if (!nested) document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+  const menu = into || document.createElement("div");
+  if (!nested) { menu.className = "pv-menu"; menu.style.minWidth = "196px"; }
+  const close = () => {
+    if (nested) { onDone?.(); return; }
+    menu.remove();
+    document.removeEventListener("mousedown", closer, true);
+  };
   const closer = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
   const paint = () => {
     menu.innerHTML = "";
@@ -633,11 +731,13 @@ function openAddTermMenu(anchor) {
     }
   };
   paint();
-  const r = anchor.getBoundingClientRect();
-  menu.style.top = (r.bottom + 4) + "px";
-  menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
-  document.body.append(menu);
-  setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  if (!nested) {
+    const r = anchor.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + "px";
+    menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
+    document.body.append(menu);
+    setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  }
   // 목록이 없거나 낡았으면(4초 초과) 갱신 — 메뉴가 열린 동안 조용히 다시 그린다.
   if (!cachedAgents().agents.length || Date.now() - cachedAgents().at > 4000) {
     loadAgents(false).then(() => { if (menu.isConnected) paint(); }).catch(() => { /* 구 데몬 = 터미널만 */ });
