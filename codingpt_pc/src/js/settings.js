@@ -332,7 +332,7 @@ function renderSection(force) {
     if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
       <div class="sm-card2">
-        <div class="sett-row"><span>${i18n.t('버전')}</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
+        <div class="sett-row"><span>${i18n.t('버전')}</span><span class="dim sel-text" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>${i18n.t('업데이트')}</span>
           <span style="display:inline-flex;align-items:center;gap:14px;">
             <span class="dim" id="updStatus" style="min-width:76px;text-align:right;">-</span>

@@ -385,6 +385,24 @@ ok(/LAB_FEATURES/.test(pcSet) && /sec === 'lab'/.test(appSet),
 ok(!/chatBetaChk/.test(pcSet) && !/chatBetaOn.*\n.*AgentsCard|AgentsCard[\s\S]{0,200}chatBetaOn/.test(appSet),
   '에이전트 화면에는 더 이상 베타 토글이 없다(실험실로 이사 완료)');
 
+// ── 15. 텍스트 선택 정책 (2026-08-14 사용자 실사고) ──────────────────────────
+// 증상: 설정 창의 제목·소제목·라벨이 드래그로 잡혀 매우 불편했다.
+// 진범: 전역 `user-select: none` 은 처음부터 있었지만 **`-webkit-` 접두사가 없었다**. WKWebView 는
+//  접두사 선언을 봐야 해서 전역 규칙이 통째로 무시됐고, 개별적으로 접두사를 적어 둔 곳만 살아남아
+//  "어떤 건 잡히고 어떤 건 안 잡히는" 화면이 됐다. 이 검사는 그 누락이 되돌아오는 것을 막는다.
+const rootBlock = (/html, body \{[\s\S]*?\n\}/.exec(pcCss) || [""])[0];
+ok(/user-select: none;/.test(rootBlock) && /-webkit-user-select: none;/.test(rootBlock),
+  '★ 앱 셸의 기본은 선택 불가 — 접두사 있는 선언까지 함께 있다(WKWebView 는 이것만 본다)');
+// 되돌리는 곳도 마찬가지다: 접두사 없는 `user-select: text` 는 이 웹뷰에서 아무 일도 하지 않는다.
+const textOnly = pcCss.split("\n").filter((l) => /user-select: text/.test(l) && !/-webkit-user-select: text/.test(l)
+  && !/^\s*-webkit-/.test(l));
+ok(textOnly.length === 0, '★ 선택 허용 선언은 항상 접두사와 짝으로 쓴다', textOnly.slice(0, 3).join(" | "));
+// 복사·편집이 목적인 표면은 실제로 열려 있어야 한다(전역 none 이 이것들까지 덮으면 기능이 죽는다).
+for (const sel of ['input, textarea', '\\.cm-editor', '\\.pane-chat', '\\.rv-lines', '\\.link-code']) {
+  ok(new RegExp(sel + '[^{]*\\{[^}]*user-select: text').test(pcCss),
+    `선택 가능한 표면 유지: ${sel.replace(/\\\\/g, "")}`);
+}
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');
