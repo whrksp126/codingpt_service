@@ -602,6 +602,14 @@ class PreviewSurface {
           this._key = key;
           if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
         }
+        // 안 보이는 프리뷰(가려진 탭·숨은 워크스페이스)는 60fps 로 rect 를 잴 이유가 없다 —
+        //  300ms 저속으로 내려 강제 레이아웃/CPU 를 줄인다(2026-08-15 성능 라운드). 다시 보이는
+        //  전환 프레임은 다음 저속 틱(≤300ms)에서 잡혀 즉시 고속으로 복귀한다.
+        if (!visible) {
+          this._raf = null;
+          this._slowTimer = setTimeout(() => { this._slowTimer = null; this._raf = requestAnimationFrame(tick); }, 300);
+          return;
+        }
       }
       this._raf = requestAnimationFrame(tick);
     };
@@ -626,6 +634,7 @@ class PreviewSurface {
   dispose(keepWebview) {
     this._disposed = true;
     cancelAnimationFrame(this._raf);
+    clearTimeout(this._slowTimer);
     clearInterval(this._infoTimer);
     this.bar.dispose();
     dtDispose(this.id, keepWebview, this.host);
@@ -840,10 +849,9 @@ export class PaneView {
       minimumContrastRatio: termMinContrast(),
       // ★ TUI 가 마우스를 잡고 있어도 ⌥(Option)+드래그면 **우리 선택**을 만든다(2026-08-15).
       //  claude·vim 처럼 마우스 리포팅을 켠 앱이 떠 있으면 드래그가 전부 그 앱으로 가서, 화면에
-      //  보이는 하이라이트는 **그 앱이 칠한 색**이다(claude 는 256색 66번=#5F8787 청록을 쓴다).
-      //  그 색은 우리가 못 바꾼다(16색 팔레트 밖 = 표준 색 큐브). 대신 여기 스위치를 켜 두면
-      //  사용자가 ⌥ 를 누른 채 끌어 우리 선택색(#264F78)으로 복사할 길이 생긴다 — 기본값은 꺼짐이라
-      //  지금까지는 그 길 자체가 없었다.
+      //  보이는 하이라이트는 **그 앱이 칠한 색**이다. claude 가 쓰던 256색 66번(#5F8787 세이지)은
+      //  트루컬러 강등 산물이라 (a) 데몬의 COLORTERM/RGB 광고로 근본 차단하고 (b) theme.extendedAnsi
+      //  가 66번을 선택색으로 리맵해(기존 세션용) 화면에선 항상 일반 선택색으로 보인다.
       macOptionClickForcesSelection: true,
       allowProposedApi: true,
     });
@@ -1289,8 +1297,9 @@ export class PaneView {
     this._expectExit = true;
     clearTimeout(this._expectExitTimer);
     this._expectExitTimer = setTimeout(() => { this._expectExit = false; }, 2000);
-    try { await api.ptyClose(this.id); } catch (_) {}
-    this._openChannel(win);
+    // pty_close 왕복을 기다리지 않는다(2026-08-15 성능 라운드) — pty_open(replace=true)이 Rust 안에서
+    //  구 attach 를 원자적으로 교체한다. IPC 1왕복 = 탭 전환 즉시성.
+    this._openChannel(win, true);
   }
 
   // ── 탭 조작 ──
@@ -1577,7 +1586,7 @@ export class PaneView {
   }
 
   // ── 채널(로컬 pty / 클라우드 WS) ──
-  async _openChannel(win) {
+  async _openChannel(win, replace) {
     this._fitLocalOnly();          // 스테일 치수로 창을 만들지 않는다(§_fitLocalOnly)
     // 첫 측정은 폰트 로드·레이아웃 확정 전일 수 있다. ResizeObserver 는 **컨테이너 크기가 바뀔 때만**
     //  울리므로 "크기는 그대로인데 측정이 나중에 정확해지는" 경우를 아무도 바로잡지 않는다
@@ -1590,7 +1599,7 @@ export class PaneView {
       this._attachedWin = typeof win === "number" ? win : null;
       this._sentCols = cols || 80;   // ptyOpen 이 이미 이 크기를 전달했다 → 직후 no-op 을 걸러내게
       this._sentRows = rows || 24;
-      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).then((resolved) => {
+      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24, !!replace).then((resolved) => {
         // 요청 tid 가 스테일(닫힘/구버전 인덱스)이면 Rust 가 첫 터미널로 폴백해 실제 attach 한
         //  tid 를 돌려준다 — 탭을 실체에 맞게 보정(리컨실러가 목록은 따로 정리).
         if (typeof resolved !== "number") return;
@@ -2056,6 +2065,12 @@ export class PaneView {
             api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
           }
         }
+        // 안 보일 땐 300ms 저속(위 PreviewSurface 와 동일 규칙 — 숨은 워크스페이스 CPU 절약).
+        if (!visible) {
+          this._previewRaf = null;
+          this._previewSlowTimer = setTimeout(() => { this._previewSlowTimer = null; this._previewRaf = requestAnimationFrame(tick); }, 300);
+          return;
+        }
       }
       this._previewRaf = requestAnimationFrame(tick);
     };
@@ -2168,6 +2183,7 @@ export class PaneView {
     if (this.node.kind === "preview") {
       this._disposed = true;
       if (this._previewRaf) cancelAnimationFrame(this._previewRaf);
+      if (this._previewSlowTimer) clearTimeout(this._previewSlowTimer);
       if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
       this.previewBar?.dispose();
       // 탭 편입(joinPaneAsTab/mergeAsTabs) 등 표면 승계 경로에선 webview 를 닫지 않는다.

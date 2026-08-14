@@ -216,6 +216,30 @@ export function formatCombo(combo, apple) {
   return [...words, sym].join("+");
 }
 
+/** formatCombo 의 키캡 분해판 — 설정 화면이 조합을 낱개 키캡(⌘ ⇧ E)으로 그릴 때 쓴다.
+ *  표기 규칙(수식어 순서·Mod 접기)은 formatCombo 와 동일해야 한다 — 한쪽만 고치지 말 것. */
+export function formatComboParts(combo, apple) {
+  const norm = normalizeCombo(combo);
+  if (!norm) return [];
+  const parts = norm.split("+");
+  const key = parts.pop();
+  const sym = NAME_TO_SYMBOL[key] || key;
+  if (apple) {
+    const out = [];
+    if (parts.includes("Mod")) out.push("⌘");
+    if (parts.includes("Ctrl")) out.push("⌃");
+    if (parts.includes("Alt")) out.push("⌥");
+    if (parts.includes("Shift")) out.push("⇧");
+    return [...out, sym];
+  }
+  const words = [];
+  for (const p of parts) {
+    const w = p === "Mod" ? "Ctrl" : p;
+    if (!words.includes(w)) words.push(w);
+  }
+  return [...words, sym];
+}
+
 /**
  * 비-Apple(Mod=Ctrl) 정규화 — 명시 `Ctrl` 수식어를 `Mod` 로 접는다.
  *  손으로 적은 `Ctrl+Shift+P` 저장값이 실제 키 이벤트(comboFromEvent 는 Mod 로 보고)와

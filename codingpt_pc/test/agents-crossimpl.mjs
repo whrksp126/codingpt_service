@@ -158,7 +158,7 @@ ok(/wirables\.filter\(\(a\) => a\.installed\)/.test(pcView),
 
 // ── 9. 새 터미널은 스테일 치수로 열지 않는다(TUI 첫 화면이 영구히 어긋난다) ──
 ok(/_fitLocalOnly\(\);\s*\n?\s*const \{ cols, rows \} = this\.term;/.test(pcPane)
-   || /_fitLocalOnly\(\)/.test(pcPane) && /_openChannel\(win\) \{[\s\S]{0,200}_fitLocalOnly/.test(pcPane),
+   || /_fitLocalOnly\(\)/.test(pcPane) && /_openChannel\(win(?:, replace)?\) \{[\s\S]{0,200}_fitLocalOnly/.test(pcPane),
   'PC: _openChannel 이 크기를 읽기 전에 실측 재맞춤한다(라이브 실측 42x15 사고)');
 ok(/termBackend\.info\(target\)\)\.cols/.test(daemonSrv) && /lastW !== null && w === lastW/.test(daemonSrv),  // 폭이 두 번 연속 같을 때만 전송
   '데몬 launch: 창 폭이 안정된 뒤 명령을 보낸다(TUI 는 첫 화면을 그 순간 폭으로 그린다)');
@@ -468,6 +468,29 @@ ok(/::selection \{[^}]*background: #264F78/.test(pcCss)
 // 선택색은 **비활성까지** 지정한다 — 안 주면 포커스가 빠지는 순간 xterm 이 30% 로 깔아 묻힌다.
 ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveBackground/g) || []).length >= 2,
   '선택색은 활성·비활성 둘 다 지정한다');
+// ★ 스타일은 4종(CodingPT 디자인, 2026-08-15 사용자 확정) — 값 키는 동기화 계약이라 유지하되
+//  'solarized' 키의 **팔레트 블록**이 되살아나면 5종 회귀다. (이관 매핑의 문자열은 허용)
+{
+  const pcThemeSrc = strip(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'));
+  const appSchemeSrc = strip(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8'));
+  ok(!/solarized:\s*\{/.test(pcThemeSrc) && !/solarized:\s*\{/.test(appSchemeSrc),
+    '★ 터미널 스타일은 4종이다(solarized 팔레트 블록 부활 금지)');
+  // ★ 256색 66번 리맵 — claude 가 트루컬러 강등으로 칠하는 #5F8787(48;5;66)을 선택색으로 되돌린다.
+  //  기존 세션(COLORTERM 미주입) 대비책이라 한쪽만 지우면 그 플랫폼만 세이지가 재발한다.
+  ok(/TERM_REMAP_ANSI_IDX = 66/.test(pcThemeSrc) && /extendedAnsi/.test(pcThemeSrc),
+    '★ PC: 66번 리맵(extendedAnsi)이 있다');
+  ok(/TERM_REMAP_ANSI_IDX = 66/.test(appSchemeSrc)
+    && /a\[50\] = p\.selectionBackground/.test(strip(fs.readFileSync(path.join(APP, 'components/module/ide/TerminalWebView.tsx'), 'utf8'))),
+    '★ 앱: 66번 리맵이 웹뷰 안에서 조립된다(JSON 희소배열 함정 회피)');
+  // ★ 근본책: 데몬이 새 세션에 트루컬러를 광고한다(COLORTERM + tmux RGB). 둘 중 하나만 있으면
+  //  앱이 색을 못 그리거나(RGB 미관통) TUI 가 강등을 계속한다(COLORTERM 부재).
+  const daemonPty = strip(fs.readFileSync(path.join(DAEMON, 'pty.js'), 'utf8'));
+  const tmuxConf = fs.readFileSync(path.resolve('../codingpt_daemon/tmux.conf'), 'utf8');
+  ok(/COLORTERM = 'truecolor'/.test(daemonPty) && /xterm-256color:RGB/.test(tmuxConf),
+    '★ 데몬: COLORTERM 주입 + tmux RGB 광고가 한 쌍으로 있다');
+  ok(/ensureTruecolor/.test(daemonPty),
+    '★ 데몬: 이미 떠 있는 tmux 서버에도 RGB 를 소급 적용한다(conf 는 첫 기동에만 읽힌다)');
+}
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

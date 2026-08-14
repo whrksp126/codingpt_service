@@ -198,7 +198,8 @@ for (const k of KINDS) {
   ok(appKinds.includes(`'${k}'`), `앱 PaneKind 에도 ${k} 가 있다`, appKinds.trim());
 }
 const appPane = read(path.join(APP, 'workspace/PaneView.tsx'));
-ok(/active=\{isActive\}/.test(appPane),
+// hidden(LRU 로 눕힌 워크스페이스)도 비활성이다 — `isActive && !hidden` 이 현행(2026-08-15).
+ok(/active=\{isActive(?: && !hidden)?\}/.test(appPane),
   '앱도 가려진 탭에 프레임을 안 당긴다(EmulatorBody active)');
 
 

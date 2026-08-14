@@ -795,7 +795,7 @@ export function setAgentState(ev) {
   if (prev && Number.isFinite(version) && Number.isFinite(prev.version)
       && prev.hostDeviceId === host && version <= prev.version
       && Number.isFinite(sentAt) && Number.isFinite(prev.at) && sentAt <= prev.at) return;
-  agentStates.set(key, {
+  const next = {
     agent: ev.agent || "claude",
     state: st || "idle",
     sessionId: ev.sessionId || null,
@@ -804,7 +804,13 @@ export function setAgentState(ev) {
     hostDeviceId: host,
     // stale 판정은 **수신 시각** 기준이다 — 호스트 시계가 어긋나도 판정이 뒤집히지 않게.
     recvAt: Date.now(),
-  });
+  };
+  agentStates.set(key, next);
+  // 화면에 보이는 값이 그대로면 렌더를 깨우지 않는다(2026-08-15 성능 라운드) — agent_state push 는
+  //  claude 가 도는 내내 초당 여러 번 오고, 그때마다 emit 하면 전 화면 재도장이 그 빈도로 돈다.
+  //  recvAt/at/version 은 표시에 안 쓰이므로 갱신만 하고 조용히 넘어간다.
+  if (prev && prev.agent === next.agent && prev.state === next.state && prev.sessionId === next.sessionId
+      && prev.hostDeviceId === next.hostDeviceId) return;
   emit();
 }
 export function agentStateOf(cwd, win) {

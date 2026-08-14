@@ -24,7 +24,7 @@ import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
   getLangSetting, setLangSetting, langOptions,
-  TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
+  TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme, onAppearanceChange,
 } from "./theme.js";
 import { IS_WINDOWS } from "./shortcuts.js";
 import { chatBetaEnabled, setChatBetaEnabled } from "./chat-model.js";
@@ -171,6 +171,13 @@ function renderSection(force) {
   // 메인 영역 상단 헤더의 제목을 현재 섹션으로(사이드바 말고 메인에 명확히 구분된 헤더).
   const titleEl = root && root.querySelector("#smTitle");
   if (titleEl) titleEl.textContent = i18n.t((NAV.find((n) => n.key === section) || {}).label || "");
+  // ── 한 번 그린 섹션은 emit 마다 다시 그리지 않는다(2026-08-15 성능 라운드) ─────────────
+  //  예전엔 설정이 열려 있는 동안 모든 emit(에이전트 상태 push·리컨실러 등)이 섹션 innerHTML 을
+  //  통째로 재생성했다 — 열어 둔 드롭다운이 닫히고, 입력 중이던 코드가 지워지고, document 클릭
+  //  리스너가 누적됐다. 라이브 값이 필요한 섹션(connection/mobile/기본)은 각자 가드가 있다.
+  const BUILD_ONCE = ["lab", "system", "shortcuts", "appearance", "notifications", "supporter"];
+  if (!force && BUILD_ONCE.includes(section) && contentEl.dataset.sec === section) return;
+  contentEl.dataset.sec = section;
   if (section === "connection") {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
@@ -305,13 +312,18 @@ function renderSection(force) {
     //  그리고 이 PC 에 열쇠가 없을 때는 기다리라고만 하지 않는다 — 열쇠를 가진 기기가 있으면
     //  **그 기기의 코드를 여기서 입력**하는 길(=유일한 회복 경로)을 같은 자리에 둔다.
     const otherKeyed = (e2ee.devices || []).some((d) => !d.isThisDevice && d.state === "trusted");
+    // 라이브 값이 그대로면 재구축 생략 — emit 마다 innerHTML 재생성하면 **입력 중이던 8자 코드가
+    //  지워진다**(2026-08-15 성능 라운드에서 발견된 실버그). 화면에 나가는 값만 시그니처로 잡는다.
+    const mobileSig = JSON.stringify([e2eeReady(), myLinkBusy, validMyLink() ? myLink.code : null,
+      linkEntryMsg, otherKeyed, e2ee.reason]);
+    if (!force && contentEl.dataset.mobileSig === mobileSig) return;
+    contentEl.dataset.mobileSig = mobileSig;
     const claimBox = `<div class="link-entry">
         <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="${i18n.t('8자 코드')}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
         <button class="sett-btn" data-link-submit="self">${i18n.t('연결')}</button>
       </div>`;
     const codeHtml = e2eeReady()
       ? `<div class="sett-col">
-          <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="link-box">
             ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
             ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>` : ""}
@@ -319,16 +331,22 @@ function renderSection(force) {
           </div>
         </div>`
       : `<div class="sett-col">
-          <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="acct-msg">${esc(e2ee.reason || i18n.t('암호화 연결을 준비하고 있어요…'))}</div>
           ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}
           <div class="sett-hint" style="margin-top:10px">${i18n.t('그 기기를 켤 수 없다면 이 PC 를 새 기준으로 삼으세요. 워크스페이스·기기 등록·로그인은 그대로예요 — 다른 기기는 다음에 켜질 때 자동으로 다시 신청하고, 여기서 승인만 하면 돼요.')}</div>
           <div><button class="sett-btn" data-e2ee-reboot="1">${i18n.t('이 PC 로 열쇠 다시 만들기')}</button></div>` : ""}
         </div>`;
+    // ★ 인증 코드와 스토어 QR 은 **딴 일**이다(2026-08-15 사용자 확정: 카드 분리) — 한 카드에 섞여
+    //  있으면 "코드 아래 QR 을 찍어야 하나?" 같은 오독이 난다. 제목 달린 카드 둘로 나눈다.
     contentEl.innerHTML = `
+      <div class="sm-section-title">${i18n.t('이 기기 인증 코드')}</div>
       <div class="sm-card2">
         ${codeHtml}
-        <div class="sett-hint">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
+        <div class="sett-hint">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요.')}</div>
+      </div>
+      <div class="sm-section-title">${i18n.t('모바일 앱 설치')}</div>
+      <div class="sm-card2">
+        <div class="sett-hint" style="margin-top:0">${i18n.t('카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
         <div class="qr-row">
           <div class="qr-tile">
             <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="${i18n.t('Android 앱 설치 QR')}" draggable="false"></div>
@@ -555,6 +573,12 @@ function bindAppearance(rootEl) {
     paintSeg();
   }
 
+  // 바깥 클릭으로 드롭다운 닫기 — **모듈에 1회만** 건다. 예전엔 buildFontDd 마다 document 리스너를
+  //  추가하고 제거하지 않아, 설정을 오래 열수록 클릭 리스너가 선형으로 쌓였다(2026-08-15 누수 수정).
+  if (!window.__cptFdClose) {
+    window.__cptFdClose = true;
+    document.addEventListener("click", () => document.querySelectorAll(".fd-menu").forEach((m) => m.classList.add("hidden")));
+  }
   // 글꼴 미리보기 드롭다운 — 옵션을 실제 그 글꼴로 렌더 + 샘플 문구.
   const buildFontDd = (host, opts, getCur, onPick, sample) => {
     if (!host) return;
@@ -596,7 +620,6 @@ function bindAppearance(rootEl) {
       try { opts.forEach((o) => { if (o.stack) document.fonts?.load?.(`13px ${o.stack}`); }); } catch (_) {}
       menu.classList.toggle("hidden");
     });
-    document.addEventListener("click", () => menu.classList.add("hidden"));
     host.append(btn, menu);
     paintBtn();
     host._repaint = paintBtn;
@@ -646,6 +669,13 @@ function bindAppearance(rootEl) {
     }
   };
   paintStyleGrid();
+  // 다른 기기발 모양 변경(appearance_event) 라이브 반영 — 섹션이 emit 마다 재구축되지 않게 된 대신
+  //  (BUILD_ONCE), 원격 변경은 이 구독이 그린다. 화면이 교체되면 스스로 해제한다(누수 방지).
+  const off = onAppearanceChange(() => {
+    if (!rootEl.isConnected) { off(); return; }
+    paintStyleGrid();
+    ["#langDd", "#uiFontDd", "#monoFontDd"].forEach((s) => rootEl.querySelector(s)?._repaint?.());
+  });
 }
 
 async function syncAutostart() {

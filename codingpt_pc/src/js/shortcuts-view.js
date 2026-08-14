@@ -8,7 +8,7 @@
 //    실행된다(⌘W 를 새로 걸려다 pane 이 닫히는 사고).
 //  · 목록은 명령 표 순서 그대로다. 알파벳순으로 다시 줄 세우면 "추가/실행/영역" 같은 묶음이
 //    흩어져 찾기 어려워진다.
-import { commandsFor, formatCombo, findConflicts, normalizeCombo } from "./commands.js";
+import { commandsFor, formatCombo, formatComboParts, findConflicts, normalizeCombo } from "./commands.js";
 import * as SC from "./shortcuts.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
@@ -48,38 +48,38 @@ export function renderShortcutsInto(host) {
     paint();
   }
 
+  // 크롬(안내/검색바)은 1회만 만들고 paint 는 **목록만** 다시 그린다 — 예전엔 검색 한 글자마다
+  //  host 전체를 재구축하고 input 을 새로 만들어 focus 를 되살렸다(2026-08-15 성능/UX 개편).
+  host.innerHTML = "";
+  const note = document.createElement("div");
+  note.className = "sm-section-note";
+  note.textContent = SCT.note + " " + SCT.modHint;
+  const bar = document.createElement("div");
+  bar.className = "sc-bar";
+  bar.innerHTML = `<input class="sc-search" placeholder="${esc(SCT.search)}" spellcheck="false" />`;
+  const resetAll = document.createElement("button");
+  resetAll.className = "sc-reset-all";
+  resetAll.textContent = SCT.resetAll;
+  resetAll.addEventListener("click", () => { SC.resetAll(); paint(); });
+  bar.appendChild(resetAll);
+  const conflictNote = document.createElement("div");
+  conflictNote.className = "sc-conflict-note hidden";
+  conflictNote.textContent = SCT.conflictNote;
+  const list = document.createElement("div");
+  list.className = "sm-card2 sc-list";
+  const recHint = document.createElement("div");
+  recHint.className = "sm-section-note hidden";
+  recHint.textContent = SCT.recordingHint;
+  host.append(note, bar, conflictNote, list, recHint);
+  const search = bar.querySelector(".sc-search");
+  search.addEventListener("input", () => { filter = search.value; paint(); });
+
   function paint() {
     const binds = SC.bindings();
     const conflicts = findConflicts(binds);
-    host.innerHTML = "";
-
-    const note = document.createElement("div");
-    note.className = "sm-section-note";
-    note.textContent = SCT.note + " " + SCT.modHint;
-    host.appendChild(note);
-
-    const bar = document.createElement("div");
-    bar.className = "sc-bar";
-    bar.innerHTML = `<input class="sc-search" placeholder="${esc(SCT.search)}" value="${esc(filter)}" spellcheck="false" />`;
-    const resetAll = document.createElement("button");
-    resetAll.className = "sc-reset-all";
-    resetAll.textContent = SCT.resetAll;
-    resetAll.addEventListener("click", () => { SC.resetAll(); paint(); });
-    bar.appendChild(resetAll);
-    host.appendChild(bar);
-    const search = bar.querySelector(".sc-search");
-    search.addEventListener("input", () => { filter = search.value; paint(); search.focus(); });
-
-    if (Object.keys(conflicts).length) {
-      const w = document.createElement("div");
-      w.className = "sc-conflict-note";
-      w.textContent = SCT.conflictNote;
-      host.appendChild(w);
-    }
-
-    const list = document.createElement("div");
-    list.className = "sm-card2 sc-list";
-    host.appendChild(list);
+    conflictNote.classList.toggle("hidden", !Object.keys(conflicts).length);
+    recHint.classList.toggle("hidden", !recording);
+    list.innerHTML = "";
 
     const q = filter.trim().toLowerCase();
     let lastGroup = null;
@@ -98,31 +98,38 @@ export function renderShortcutsInto(host) {
         h.textContent = groupName;
         list.appendChild(h);
       }
+      // ── 행 전체가 버튼이다(2026-08-15 UI 개편) — 예전엔 우측 작은 알약만 클릭 대상이라
+      //  "행을 누르고 새 조합" 안내와 실제 히트영역이 어긋났다. 조합은 낱개 키캡(⌘ ⇧ E)으로
+      //  그리고, 보조 동작(기본값으로/지우기)은 평소엔 숨겼다가 hover 에만 보인다(노이즈 제거).
       const row = document.createElement("div");
-      row.className = "sc-row";
       const isRec = recording === c.id;
       const clash = combo && conflicts[combo];
+      row.className = "sc-row" + (isRec ? " rec" : "") + (clash ? " clash" : "");
+      row.tabIndex = 0;
+      const keysHtml = isRec
+        ? `<span class="sc-waiting">${esc(SCT.recording)}</span>`
+        : combo
+          ? formatComboParts(combo, SC.IS_APPLE).map((k) => `<kbd class="sc-cap">${esc(k)}</kbd>`).join("")
+          : `<span class="sc-none">${esc(SCT.none)}</span>`;
       row.innerHTML =
         `<span class="sc-name">${esc(label)}</span>`
         + (clash ? `<span class="sc-badge">${esc(SCT.conflict)}</span>` : "")
-        + `<button class="sc-key${isRec ? " rec" : ""}${combo ? "" : " empty"}">`
-        + esc(isRec ? SCT.recording : combo ? shownCombo : SCT.none)
-        + `</button>`;
-      const keyBtn = row.querySelector(".sc-key");
-      keyBtn.addEventListener("click", () => (isRec ? (stopRecording(), paint()) : startRecording(c.id)));
-      if (!SC.isDefault(c.id)) {
-        const rst = document.createElement("button");
-        rst.className = "sc-mini";
-        rst.textContent = SCT.reset;
-        rst.addEventListener("click", () => { SC.resetBinding(c.id); paint(); });
-        row.appendChild(rst);
-      } else if (combo) {
-        const clr = document.createElement("button");
-        clr.className = "sc-mini";
-        clr.textContent = SCT.unbind;
-        clr.addEventListener("click", () => { SC.setBinding(c.id, null); paint(); });
-        row.appendChild(clr);
-      }
+        + `<span class="sc-acts"></span>`
+        + `<span class="sc-keys" title="${esc(shownCombo)}">${keysHtml}</span>`;
+      row.addEventListener("click", () => (isRec ? (stopRecording(), paint()) : startRecording(c.id)));
+      row.addEventListener("keydown", (e) => {
+        if (!isRec && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); startRecording(c.id); }
+      });
+      const acts = row.querySelector(".sc-acts");
+      const mini = (text, onClick) => {
+        const b = document.createElement("button");
+        b.className = "sc-mini";
+        b.textContent = text;
+        b.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+        acts.appendChild(b);
+      };
+      if (!SC.isDefault(c.id)) mini(SCT.reset, () => { SC.resetBinding(c.id); paint(); });
+      else if (combo) mini(SCT.unbind, () => { SC.setBinding(c.id, null); paint(); });
       list.appendChild(row);
     }
     if (!shown) {
@@ -130,12 +137,6 @@ export function renderShortcutsInto(host) {
       e.className = "sc-empty";
       e.textContent = T.empty;
       list.appendChild(e);
-    }
-    if (recording) {
-      const hint = document.createElement("div");
-      hint.className = "sm-section-note";
-      hint.textContent = SCT.recordingHint;
-      host.appendChild(hint);
     }
   }
 

@@ -179,6 +179,10 @@ function poolEnvMap(abs, tid, tsession) {
     const rel = fsLib.relOf ? fsLib.relOf(abs) : '';
     out.CPT_WS = rel == null ? '' : String(rel);
     out.CPT_SOCK = require('./cpt-server').sockPath();
+    // 트루컬러 광고 — chalk 계열(claude 등)은 COLORTERM=truecolor 없이는 TERM=xterm-256color 를
+    //  256색으로 판정해 hex 색을 근사 인덱스로 강등한다(#264F78 → 48;5;66 세이지 실측). tmux 쪽
+    //  RGB 관통은 tmux.conf terminal-features 가 담당 — 이 한 쌍이어야 색이 끝까지 산다.
+    out.COLORTERM = 'truecolor';
     if (Number.isFinite(Number(tid)) && Number(tid) > 0 && tsession) {
       out.CPT_TID = String(Number(tid));
       out.CPT_TSESSION = String(tsession);
@@ -463,8 +467,25 @@ function openPtyStream({ serverUrl, deviceToken }, { streamToken, params }) {
  *  채택해 SIGWINCH 핑퐁(프롬프트 누적)이 난다 — 12R/17R 에서 실측한 사고. 뷰어가 "닫고-열기"를
  *  지키는 것이 정석이지만, 데몬이 마지막 방어선을 갖는다(클라 순서 역전에도 클라이언트는 항상 1개).
  */
+// 실행 중인 tmux 서버에 트루컬러 광고 소급 — tmux.conf 는 서버 "첫 기동" 때(-f)만 읽히는데,
+//  tmux 서버는 데몬/앱 재시작을 넘어 살아남는다. 그래서 업데이트로 conf 에 RGB 를 넣어도 기존
+//  서버엔 영영 반영이 안 된다(설정만 고치고 "왜 그대로지" 하는 함정). 데몬 수명당 1회, 이미
+//  들어가 있으면 no-op. 서버가 아직 없으면 조용히 넘어간다(첫 create 가 conf 로 커버).
+let tcApplied = false;
+async function ensureTruecolor() {
+  if (tcApplied || usingHost()) return;
+  try {
+    const cur = await runTmux(['show-options', '-s', '-v', 'terminal-features']).catch(() => '');
+    if (!/xterm-256color:RGB/.test(String(cur))) {
+      await runTmux(['set-option', '-s', '-a', 'terminal-features', ',xterm-256color:RGB']);
+    }
+    tcApplied = true;
+  } catch (_) { /* 서버 미기동/구버전 tmux — conf 폴백 */ }
+}
+
 async function attachPty(params, io) {
   if (!usingHost() && !findTmux()) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
+  await ensureTruecolor();
   const cols = (params && params.cols) || 80;
   const rows = (params && params.rows) || 24;
   const sendOut = (chunk) => { try { io.send(chunk); } catch (_) { /* noop */ } };
@@ -516,13 +537,26 @@ async function attachPty(params, io) {
     return;
   }
 
+  // 첫 attach 크기 = tmux 가 기억하는 **현재 창 크기**(조회되면) — 릴레이 params 는 항상 80x24
+  //  (back ptyStreamParams 고정 기본값)라, 그 크기로 붙였다가 클라이언트의 실크기 resize 가 오면
+  //  전체 화면 재도장이 연달아 났다(TUI 는 레이아웃이 통째로 깨졌다 다시 그려짐 — 2026-08-15
+  //  "떴는데 새로 그린다" 진단). window-size latest 덕에 창 크기는 대개 "마지막으로 이 터미널을
+  //  보던 기기"의 크기 = 재접속하는 그 기기의 직전 크기다. 조회 실패/0 은 params 폴백.
+  let attachW = cols, attachH = rows;
+  if (paneId) {
+    try {
+      const inf = await termBackend.info(attachName);
+      if (inf && inf.cols > 1 && inf.rows > 1) { attachW = inf.cols; attachH = inf.rows; }
+    } catch (_) { /* 폴백: params 크기 */ }
+  }
   // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
-  let lastW = cols, lastH = rows;
+  let lastW = attachW, lastH = attachH;
   let firstResizeDone = !paneId;
   // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
-  //  클라이언트 크기가 80x24 로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
-  //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 80x24 화면만 그려지는(반쪽 화면)
-  //  사고가 난다.
+  //  클라이언트 크기가 attach 크기로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
+  //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 옛 크기 화면만 그려지는(반쪽 화면)
+  //  사고가 난다. ⚠ 첫 resize 가 attach 크기와 **같으면 고착이 곧 정답**이라 nudge 를 걸지 않는다
+  //  — 무조건 걸던 시절엔 화면이 뜨고 0.6초 뒤 SIGWINCH 2회로 멀쩡한 TUI 를 두 번 재도장했다.
   let nudgeTimer = null;
 
   // 백엔드 attach 핸들 + 세대 토큰 — swap(탭 전환)으로 교체된 구 핸들의 exit/close 는 무시한다
@@ -548,7 +582,7 @@ async function attachPty(params, io) {
   try {
     gen = 1;
     term = await termBackend.attach(attachName, {
-      cols, rows, cwd: abs, setLatest: true, sharedCreate: shared && !usingHost(),
+      cols: attachW, rows: attachH, cwd: abs, setLatest: true, sharedCreate: shared && !usingHost(),
       ...mkHandlers(1),
     });
   } catch (e) {
@@ -558,7 +592,7 @@ async function attachPty(params, io) {
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }
-  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + attachName : ''}, cwd=${abs}, ${cols}x${rows}${io.label || ''})`);
+  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + attachName : ''}, cwd=${abs}, ${attachW}x${attachH}${io.label || ''})`);
 
   // (선언 순서 주의: cleanup 이 handle 을 참조하므로 먼저 선언한다 — TDZ 사고 방지)
   let handle = null;
@@ -636,10 +670,13 @@ async function attachPty(params, io) {
         //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
         if (!firstResizeDone) {
           firstResizeDone = true;
-          if (nudgeTimer) clearTimeout(nudgeTimer);
-          nudgeTimer = setTimeout(() => {
-            try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ }
-          }, 600);
+          // attach 크기와 동일한 첫 resize 는 고착돼도 정답 — nudge(=SIGWINCH 2회 재도장) 생략.
+          if (w !== attachW || h !== attachH) {
+            if (nudgeTimer) clearTimeout(nudgeTimer);
+            nudgeTimer = setTimeout(() => {
+              try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ }
+            }, 600);
+          }
         }
         return;
       }

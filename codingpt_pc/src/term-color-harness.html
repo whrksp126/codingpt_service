@@ -15,10 +15,13 @@
 <script src="vendor/xterm/xterm-addon-canvas.js"></script>
 <script type="module">
   window.__TAURI__ = { core: { invoke: async () => ({}) }, event: { listen: async () => () => {} } };
-  const { TERM_STYLES } = await import('./js/theme.js?v=3');
-  window.__run = async ({ style = 'auto', mode = 'dark', webgl = true, minContrast = 3, renderer = '' } = {}) => {
+  const { TERM_STYLES, termExtendedAnsi } = await import('./js/theme.js?v=4');
+  window.__run = async ({ style = 'auto', mode = 'dark', webgl = true, minContrast = 3, renderer = '', select = true } = {}) => {
     document.getElementById('t').innerHTML = '';
-    const theme = TERM_STYLES[style][mode];
+    // pane.js 의 termTheme() 과 동일하게 extendedAnsi(66번 리맵)까지 싣는다 — claude 가 트루컬러
+    //  강등으로 칠하는 48;5;66 하이라이트가 선택색으로 보이는지 실측하는 하네스.
+    const pal = TERM_STYLES[style][mode];
+    const theme = { ...pal, extendedAnsi: termExtendedAnsi(pal) };
     const term = new Terminal({
       cursorBlink: true, fontSize: 14, rows: 10, cols: 74, scrollback: 1000, convertEol: false,
       theme, minimumContrastRatio: minContrast, allowProposedApi: true,
@@ -31,8 +34,10 @@
     term.write('  \x1b[36mOpus 5 (1M context)\x1b[0m · Claude Max\r\n');
     term.write('  ~/other/project/tokin\r\n\r\n');
     term.write('\x1b[33m⚠ 1 MCP server needs authentication\x1b[0m · run /mcp\r\n');
+    // claude 가 실제로 쓰던 강등 하이라이트(48;5;66) — 리맵되면 이 블록이 선택색(네이비)으로 보인다.
+    term.write('\x1b[48;5;66m  claude 드래그 하이라이트(48;5;66) — 리맵 확인  \x1b[0m\r\n');
     await new Promise((r) => setTimeout(r, 200));
-    term.selectAll();
+    if (select) term.selectAll();
     term.focus();
     document.getElementById('lab').textContent =
       `${style}/${mode} · webgl=${webgl} · minContrast=${minContrast} · theme.selection=${theme.selectionBackground} · theme.cursor=${theme.cursor}`;

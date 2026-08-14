@@ -241,11 +241,20 @@ function startPreviewShieldWatch() {
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
   const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
-  setInterval(() => {
+  const check = () => {
     const on = !!document.querySelector(SEL);
-    // win32 프리뷰(B2 preview_win)가 아직 없는 빌드에서도 폴링이 콘솔 오류를 쏟지 않게 삼킨다.
+    // win32 프리뷰(B2 preview_win)가 아직 없는 빌드에서도 검사가 콘솔 오류를 쏟지 않게 삼킨다.
     if (on !== cur) { cur = on; Promise.resolve(api.previewShield(on)).catch(() => {}); }
-  }, 80);
+  };
+  // 80ms 폴링 → DOM 변화 때만 검사(2026-08-15 성능 라운드: 유휴에도 초당 12.5회 전체 셀렉터
+  //  매칭이 돌았다). 변화 폭주는 마이크로태스크로 합쳐 버스트당 1회만 검사한다. 오히려 폴링보다
+  //  빠르다(오버레이 등장 즉시 같은 프레임에 실드 on).
+  let queued = false;
+  const schedule = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; check(); }); };
+  const mo = new MutationObserver(schedule);
+  mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  check();
+  setInterval(check, 1000); // 안전망(관찰 사각 대비) — 저빈도라 비용 무시 가능
 }
 
 // 설치본이 오래됐어도 로그인 여부와 관계없이 다른 초기 데이터보다 먼저 최신판으로 맞춘다.
@@ -257,7 +266,12 @@ async function maybeInstallSetupUpdate() {
   setBootstrap(i18n.t('최신 버전을 확인하는 중'), 18);
   let result;
   try {
-    result = await api.updateCheck();
+    // 확인 자체는 3초 상한 — 업데이트 서버가 느리면 첫 화면이 그만큼 늦게 뜬다(체감 기동 시간).
+    //  상한 초과 = 이번 기동은 현재 버전으로 진행(다음 기동/설정>정보 확인이 다시 잡는다).
+    result = await Promise.race([
+      api.updateCheck(),
+      new Promise((res) => setTimeout(() => res(null), 3000)),
+    ]);
   } catch (_) {
     return;
   }
@@ -296,10 +310,11 @@ async function maybeInstallSetupUpdate() {
 
   setBootstrap(i18n.t('계정과 작업 공간을 불러오는 중'), 38);
   await Promise.allSettled([S.loadWorkspaces(), S.loadMe()]);
-  setBootstrap(i18n.t('연결된 기기와 알림을 불러오는 중'), 64);
-  await Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]);
-  setBootstrap(i18n.t('권한과 보안 상태를 확인하는 중'), 82);
-  await api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
+  setBootstrap(i18n.t('연결된 기기와 알림을 불러오는 중'), 70);
+  // 기기/알림/승인·OS 알림권한은 첫 화면을 막을 이유가 없다(2026-08-15 성능 라운드) —
+  //  백그라운드로 돌리고 도착하면 emit 이 그린다. 워크스페이스/계정만 첫 페인트의 전제다.
+  void Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]).then(() => S.emit());
+  void api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
 
   const setupPending = restorePendingSetup();
   await S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필

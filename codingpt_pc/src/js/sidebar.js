@@ -150,9 +150,35 @@ function closeNotif() {
   notifPanel.classList.add("hidden");
 }
 
+// 직전 렌더의 내용 시그니처 — 화면에 나가는 값이 그대로면 DOM 재구축을 통째로 건너뛴다.
+//  (emit 은 agent_state·리컨실러 등으로 수시로 오는데, 사이드바는 매번 아바타 <img> 까지 새로
+//   만들고 있었다 — 2026-08-15 성능 라운드. 여기 없는 값을 행 렌더에 새로 쓰면 반드시 추가할 것.)
+let sbSig = "";
 export function updateSidebar() {
   if (!el) return;
   const totalUnread = state.notifications.filter((n) => !n.read).length;
+  {
+    const devices0 = S.pcDevices();
+    const activeDev0 = S.activeDeviceId();
+    const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
+    const sig = JSON.stringify([
+      state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
+      !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
+      state.me?.nickname, state.me?.email, state.me?.profileImg,
+      notifOpen, state.notifications.length, state.notifications[0]?.id, state.notifications[0]?.read,
+      activeDev0,
+      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0)]),
+      wss0.map((w) => {
+        const rt = S.wsRuntime(w.id);
+        const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
+        return [w.id, S.wsDisplayName(w), S.unreadForWs(w), S.wsPinned(w.id), S.wsColor(w.id),
+          w.hostOnline, wsMissing(w), w.localPath, st?.status?.[0]?.value, st?.progress,
+          (rt?.ports || []).slice(0, 3)];
+      }),
+    ]);
+    if (sig === sbSig) return;
+    sbSig = sig;
+  }
   el.innerHTML = "";
   if (sbGrip) el.appendChild(sbGrip); // 리사이즈 핸들 재부착(innerHTML 초기화로 떨어짐)
 

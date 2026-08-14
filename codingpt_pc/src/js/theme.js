@@ -48,10 +48,11 @@ export const MONO_FONT_OPTIONS = [
 
 // 과거 로컬 저장값(구 키체계) 마이그레이션
 const LEGACY_MONO = { "JetBrains Mono": "jetbrains", "Fira Code": "fira", D2Coding: "d2coding" };
-const LEGACY_STYLE = { "one-dark": "one", "solarized-dark": "solarized", "solarized-light": "solarized" };
+// 'solarized' 는 2026-08-15 4종 개편으로 은퇴 — 가장 가까운 페이퍼(dracula 키)로 이관.
+const LEGACY_STYLE = { "one-dark": "one", "solarized-dark": "dracula", "solarized-light": "dracula", "solarized": "dracula" };
 const UI_VALUES = UI_FONT_OPTIONS.map((o) => o.value);
 const MONO_VALUES = MONO_FONT_OPTIONS.map((o) => o.value);
-const STYLE_VALUES = ["auto", "ghostty", "one", "dracula", "solarized"];
+const STYLE_VALUES = ["auto", "ghostty", "one", "dracula"];
 
 let themeMode = "system"; // 기기 로컬
 let uiFont = "pretendard";
@@ -184,7 +185,8 @@ export function applyRemoteAppearance(a) {
   let changed = false;
   if (UI_VALUES.includes(a.uiFont) && a.uiFont !== uiFont) { uiFont = a.uiFont; changed = true; }
   if (MONO_VALUES.includes(a.codeFont) && a.codeFont !== monoFont) { monoFont = a.codeFont; changed = true; }
-  if (STYLE_VALUES.includes(a.termStyle) && a.termStyle !== termStyle) { termStyle = a.termStyle; changed = true; }
+  const remoteStyle = LEGACY_STYLE[a.termStyle] || a.termStyle; // 타 기기(구버전)발 'solarized' 도 이관
+  if (STYLE_VALUES.includes(remoteStyle) && remoteStyle !== termStyle) { termStyle = remoteStyle; changed = true; }
   // 언어는 다른 기기에서 바뀌어도 **여기서 새로고침하지 않는다** — 작업 중인 터미널을 남이 끊는
   //  꼴이 된다. 값만 저장해 두고 다음 실행부터 적용한다.
   if (isValidLangSetting(a.lang) && a.lang !== langSetting) {
@@ -223,12 +225,15 @@ export function onAppearanceChange(fn) {
 // ── 터미널 스타일(xterm 팔레트) — 스타일 "계열" × 앱 테마(다크/라이트) 변형 자동 선택. ──
 //    claude/codex/vim 등 모든 TUI 는 ANSI 색 번호로만 그리므로 이 팔레트가 곧 TUI 스타일이 된다.
 //    값은 모바일(terminalSchemes.ts)과 반드시 동일하게 유지.
+// ★ 2026-08-15 전면 교체(사용자 확정): 서드파티 이식(Ghostty/One/Dracula/Solarized)을 버리고
+//   CodingPT 디자인 언어로 직접 설계한 4종으로 통일. 값 키(ghostty/one/dracula)는 **동기화
+//   계약**(백엔드 APPEARANCE_KEYS 화이트리스트 + 기존 저장값)이라 그대로 두고 표시 이름/팔레트만
+//   교체 — 키를 바꾸면 back 배포와 락스텝이 되고 구버전 클라이언트 동기화가 깨진다.
 export const TERM_STYLE_OPTIONS = [
   { value: "auto", label: "CodingPT (권장)" },
-  { value: "ghostty", label: "Ghostty (cmux)" },
-  { value: "one", label: "One" },
-  { value: "dracula", label: "Dracula" },
-  { value: "solarized", label: "Solarized" },
+  { value: "ghostty", label: "미드나이트" },
+  { value: "one", label: "모노" },
+  { value: "dracula", label: "페이퍼" },
 ];
 const TERM_AUTO_DARK = {
   // CodingPT 다크 — 배경=앱 배경(--base), 16색 전부 가독 튜닝
@@ -255,78 +260,64 @@ const TERM_AUTO_LIGHT = {
 export const TERM_STYLES = {
   auto: { dark: TERM_AUTO_DARK, light: TERM_AUTO_LIGHT },
   ghostty: {
-    // 다크 = Ghostty Default Style Dark(cmux 기본), 라이트 = Ghostty Builtin Light
+    // 미드나이트 — CodingPT 보다 한 단계 깊은 한밤 톤. 배경을 거의 검정까지 내리고
+    //  색은 전부 차가운 쪽(블루 틴트)으로 정렬 — OLED/야간 작업용 고대비.
     dark: {
-      background: "#282C34", foreground: "#FFFFFF", cursor: "#FFFFFF", cursorAccent: "#353A44",
-      selectionBackground: "#FFFFFF", selectionForeground: "#282C34",
-      black: "#1D1F21", red: "#CC6566", green: "#B6BD68", yellow: "#F0C674",
-      blue: "#82A2BE", magenta: "#B294BB", cyan: "#8ABEB7", white: "#C4C8C6",
-      brightBlack: "#666666", brightRed: "#D54E53", brightGreen: "#B9CA4B", brightYellow: "#E7C547",
-      brightBlue: "#7AA6DA", brightMagenta: "#C397D8", brightCyan: "#70C0B1", brightWhite: "#EAEAEA",
+      background: "#060810", foreground: "#DCE3EE", cursor: "#DCE3EE", cursorAccent: "#060810",
+      selectionBackground: "#1E3A5F", selectionInactiveBackground: "#1E3A5F",
+      black: "#111624", red: "#F26D6D", green: "#41CF8F", yellow: "#E8B94E",
+      blue: "#5B9DFF", magenta: "#A98BF5", cyan: "#3EC5DE", white: "#C2CBD8",
+      brightBlack: "#4E5A70", brightRed: "#FF9191", brightGreen: "#71E4AE", brightYellow: "#F4CE74",
+      brightBlue: "#8CBAFF", brightMagenta: "#C7B0FA", brightCyan: "#6FD9EC", brightWhite: "#F4F7FB",
     },
     light: {
-      background: "#FFFFFF", foreground: "#000000", cursor: "#000000", cursorAccent: "#FFFFFF",
-      selectionBackground: "#B5D5FF", selectionForeground: "#000000",
-      black: "#000000", red: "#BB0000", green: "#00BB00", yellow: "#BBBB00",
-      blue: "#0000BB", magenta: "#BB00BB", cyan: "#00BBBB", white: "#BBBBBB",
-      brightBlack: "#555555", brightRed: "#FF5555", brightGreen: "#2FD92F", brightYellow: "#BFBF15",
-      brightBlue: "#5555FF", brightMagenta: "#FF55FF", brightCyan: "#22CCCC", brightWhite: "#FFFFFF",
+      // 라이트 변형 = 순백 배경 + 진한 잉크(고대비 쌍둥이)
+      background: "#FFFFFF", foreground: "#111827", cursor: "#111827", cursorAccent: "#FFFFFF",
+      selectionBackground: "#CBDFF7", selectionInactiveBackground: "#CBDFF7",
+      black: "#1F2937", red: "#C81E1E", green: "#047857", yellow: "#A16207",
+      blue: "#1D4ED8", magenta: "#7E22CE", cyan: "#0E7490", white: "#D1D5DB",
+      brightBlack: "#4B5563", brightRed: "#DC2626", brightGreen: "#059669", brightYellow: "#B45309",
+      brightBlue: "#2563EB", brightMagenta: "#9333EA", brightCyan: "#0891B2", brightWhite: "#111827",
     },
   },
   one: {
+    // 모노 — 무채색 지향. "포인트 컬러는 신호 전용" 원칙의 터미널판: ANSI 색의 채도를 크게
+    //  낮춰 화면 전체가 회색조로 가라앉되, diff/에러 판독에 필요한 색상 구분만 은은히 남긴다.
     dark: {
-      background: "#282C34", foreground: "#ABB2BF", cursor: "#528BFF", cursorAccent: "#282C34",
-      selectionBackground: "#3E4451",
-      black: "#282C34", red: "#E06C75", green: "#98C379", yellow: "#E5C07B",
-      blue: "#61AFEF", magenta: "#C678DD", cyan: "#56B6C2", white: "#ABB2BF",
-      brightBlack: "#5C6370", brightRed: "#E06C75", brightGreen: "#98C379", brightYellow: "#E5C07B",
-      brightBlue: "#61AFEF", brightMagenta: "#C678DD", brightCyan: "#56B6C2", brightWhite: "#FFFFFF",
+      background: "#0D0F13", foreground: "#D6DAE0", cursor: "#D6DAE0", cursorAccent: "#0D0F13",
+      selectionBackground: "#39414F", selectionInactiveBackground: "#39414F",
+      black: "#1A1E26", red: "#D99A94", green: "#9DC6AC", yellow: "#CFC09A",
+      blue: "#9AB3CF", magenta: "#B8A8CC", cyan: "#98C2C8", white: "#B7BEC7",
+      brightBlack: "#5A626E", brightRed: "#E8B4AF", brightGreen: "#B7D8C3", brightYellow: "#E0D3B0",
+      brightBlue: "#B4C9E0", brightMagenta: "#CCBFDD", brightCyan: "#B0D4D9", brightWhite: "#EEF1F5",
     },
     light: {
-      // One Light(Atom) — Ghostty 'Atom One Light' 팔레트
-      background: "#F9F9F9", foreground: "#2A2C33", cursor: "#2A2C33", cursorAccent: "#FFFFFF",
-      selectionBackground: "#EDEDED", selectionForeground: "#2A2C33",
-      black: "#000000", red: "#DE3E35", green: "#3F953A", yellow: "#D2B67C",
-      blue: "#2F5AF3", magenta: "#950095", cyan: "#3F953A", white: "#BBBBBB",
-      brightBlack: "#000000", brightRed: "#DE3E35", brightGreen: "#3F953A", brightYellow: "#D2B67C",
-      brightBlue: "#2F5AF3", brightMagenta: "#A00095", brightCyan: "#3F953A", brightWhite: "#FFFFFF",
+      background: "#F6F7F9", foreground: "#252A31", cursor: "#252A31", cursorAccent: "#FFFFFF",
+      selectionBackground: "#D5DBE3", selectionInactiveBackground: "#D5DBE3",
+      black: "#3B424C", red: "#9C4F45", green: "#43705A", yellow: "#7D6A38",
+      blue: "#4A6584", magenta: "#6F5C86", cyan: "#417983", white: "#C9CED5",
+      brightBlack: "#6E7580", brightRed: "#B26055", brightGreen: "#52856C", brightYellow: "#94804A",
+      brightBlue: "#5B7899", brightMagenta: "#836F9B", brightCyan: "#528D97", brightWhite: "#14181D",
     },
   },
   dracula: {
+    // 페이퍼 — 따뜻한 종이 톤(구 Solarized 사용자의 이관처). 라이트=크림 종이,
+    //  다크=따뜻한 차콜. 색도 전부 웜 쪽으로 정렬해 장시간 독서형 작업에 편하게.
     dark: {
-      background: "#282A36", foreground: "#F8F8F2", cursor: "#F8F8F2", cursorAccent: "#282A36",
-      selectionBackground: "#44475A",
-      black: "#21222C", red: "#FF5555", green: "#50FA7B", yellow: "#F1FA8C",
-      blue: "#BD93F9", magenta: "#FF79C6", cyan: "#8BE9FD", white: "#F8F8F2",
-      brightBlack: "#6272A4", brightRed: "#FF6E6E", brightGreen: "#69FF94", brightYellow: "#FFFFA5",
-      brightBlue: "#D6ACFF", brightMagenta: "#FF92DF", brightCyan: "#A4FFFF", brightWhite: "#FFFFFF",
+      background: "#16120C", foreground: "#EAE3D4", cursor: "#EAE3D4", cursorAccent: "#16120C",
+      selectionBackground: "#4A3E28", selectionInactiveBackground: "#4A3E28",
+      black: "#262016", red: "#E07A5F", green: "#A3B368", yellow: "#DCA54C",
+      blue: "#7E9CBF", magenta: "#C08FB3", cyan: "#82BCA9", white: "#D3CAB8",
+      brightBlack: "#756B58", brightRed: "#EE9880", brightGreen: "#BBC989", brightYellow: "#E9BC6F",
+      brightBlue: "#9FB7D4", brightMagenta: "#D2A9C7", brightCyan: "#9FD0C0", brightWhite: "#F8F3E7",
     },
     light: {
-      // Alucard(Dracula 공식 라이트) — draculatheme.com/spec ANSI 매핑
-      background: "#FFFBEB", foreground: "#1F1F1F", cursor: "#1F1F1F", cursorAccent: "#FFFBEB",
-      selectionBackground: "#CFCFDE",
-      black: "#FFFBEB", red: "#CB3A2A", green: "#14710A", yellow: "#846E15",
-      blue: "#644AC9", magenta: "#A3144D", cyan: "#036A96", white: "#1F1F1F",
-      brightBlack: "#6C664B", brightRed: "#D74C3D", brightGreen: "#198D0C", brightYellow: "#9E841A",
-      brightBlue: "#7862D0", brightMagenta: "#BF185A", brightCyan: "#047FB4", brightWhite: "#2C2B31",
-    },
-  },
-  solarized: {
-    dark: {
-      background: "#002B36", foreground: "#839496", cursor: "#839496", cursorAccent: "#002B36",
-      selectionBackground: "#073642",
-      black: "#073642", red: "#DC322F", green: "#859900", yellow: "#B58900",
-      blue: "#268BD2", magenta: "#D33682", cyan: "#2AA198", white: "#EEE8D5",
-      brightBlack: "#586E75", brightRed: "#CB4B16", brightGreen: "#586E75", brightYellow: "#657B83",
-      brightBlue: "#839496", brightMagenta: "#6C71C4", brightCyan: "#93A1A1", brightWhite: "#FDF6E3",
-    },
-    light: {
-      background: "#FDF6E3", foreground: "#657B83", cursor: "#657B83", cursorAccent: "#FDF6E3",
-      selectionBackground: "#EEE8D5",
-      black: "#073642", red: "#DC322F", green: "#859900", yellow: "#B58900",
-      blue: "#268BD2", magenta: "#D33682", cyan: "#2AA198", white: "#EEE8D5",
-      brightBlack: "#586E75", brightRed: "#CB4B16", brightGreen: "#93A1A1", brightYellow: "#839496",
-      brightBlue: "#657B83", brightMagenta: "#6C71C4", brightCyan: "#586E75", brightWhite: "#FDF6E3",
+      background: "#FAF5EA", foreground: "#3E362A", cursor: "#3E362A", cursorAccent: "#FFFFFF",
+      selectionBackground: "#E4D8BC", selectionInactiveBackground: "#E4D8BC",
+      black: "#57503F", red: "#B54E3B", green: "#5F7D33", yellow: "#95712A",
+      blue: "#41678F", magenta: "#95588C", cyan: "#3E8577", white: "#DCD3C0",
+      brightBlack: "#7C725E", brightRed: "#C96047", brightGreen: "#6F9040", brightYellow: "#A98336",
+      brightBlue: "#527AA3", brightMagenta: "#A96CA0", brightCyan: "#4E9788", brightWhite: "#2A251C",
     },
   },
 };
@@ -342,9 +333,23 @@ export function termStylePalette(style, variant) {
   const fam = TERM_STYLES[style] || TERM_STYLES.auto;
   return fam[variant] || fam.dark;
 }
-/** 현재 xterm 팔레트 — 선택된 스타일 계열의 현재 테마(다크/라이트) 변형. */
+/** 현재 xterm 팔레트 — 선택된 스타일 계열의 현재 테마(다크/라이트) 변형.
+ *  extendedAnsi(66번 리맵)까지 실어 보낸다 — 아래 termExtendedAnsi 주석 참조. */
 export function termTheme() {
-  return termStylePalette(termStyle, resolvedTheme());
+  const p = termStylePalette(termStyle, resolvedTheme());
+  return { ...p, extendedAnsi: termExtendedAnsi(p) };
+}
+/** 256색 확장 팔레트 리맵(인덱스 66) — claude 등 chalk 계열은 COLORTERM=truecolor 가 없던
+ *  환경에서 자기 선택색 hex(#264F78)를 256색으로 강등하는데, 그 결과가 인덱스 66(#5F8787
+ *  세이지)이다(2026-08-15 capture-pane 실측 + 변환식 검산). 데몬이 새 세션엔 COLORTERM 을
+ *  주입하지만 **이미 떠 있는 셸/TUI 는 env 를 다시 못 받으므로**, 이 인덱스를 스타일의
+ *  선택색으로 되돌려 그린다. 66 을 본색으로 쓰는 TUI 는 사실상 없어 부작용 무시 가능.
+ *  (모바일 terminalSchemes.ts termExtendedAnsi 와 한 벌 — 한쪽만 수정 금지) */
+export const TERM_REMAP_ANSI_IDX = 66;
+export function termExtendedAnsi(palette) {
+  const ext = [];
+  ext[TERM_REMAP_ANSI_IDX - 16] = palette.selectionBackground;
+  return ext;
 }
 /** 현재 테마의 CodeMirror theme 이름 — 라이트는 코어 내장 default(별도 CSS 불필요). */
 export function cmThemeName() {

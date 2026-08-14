@@ -74,6 +74,45 @@ let lastSig = "";
 let lastWsId = null;
 let paneRects = {};
 
+// ── 워크스페이스 화면 LRU 캐시(2026-08-15 성능 라운드) ─────────────────────────
+// 예전엔 전환마다 disposeAll() — 모든 xterm/WebGL 파괴 → 복귀 시 재생성 + tmux 전체 리페인트로
+//  전환이 "재기동"처럼 느렸다. 이제 최근 워크스페이스의 pane 트리를 **display:none 으로 눕혀 두고**
+//  전환은 컨테이너 표시 토글이 된다(모바일 WorkspaceView 의 KEEP=3 겹침과 같은 결정).
+//  · 숨김 컨테이너의 xterm 은 자체 IntersectionObserver 로 렌더를 멈춘다(파서 비용만 남음).
+//  · 숨김 pane 은 fit/resize 를 안 쏘므로 다른 기기의 window-size latest 를 뺏지 않는다.
+//  · WS_KEEP 초과분만 진짜 dispose — WebGL 컨텍스트 상한(~16)을 넘보지 않는 선.
+const WS_KEEP = 3;                 // 활성 1 + 대기 2
+const wsViewCache = new Map();     // wsId → { container, panes, sig, usedAt }
+let activeContainer = null;        // 활성 워크스페이스의 pane 트리 컨테이너(gridEl 자식)
+
+function ensureActiveContainer() {
+  if (activeContainer) return activeContainer;
+  activeContainer = document.createElement("div");
+  activeContainer.className = "ws-stack";
+  gridEl.appendChild(activeContainer);
+  return activeContainer;
+}
+// 현 활성 화면을 캐시에 눕힌다(숨김) — 전환/비우기 공용.
+function stashActive() {
+  if (lastWsId != null && activeContainer) {
+    activeContainer.style.display = "none";
+    wsViewCache.set(lastWsId, { container: activeContainer, panes, sig: lastSig, usedAt: Date.now() });
+  }
+  activeContainer = null;
+  panes = new Map();
+  lastSig = "";
+}
+function evictLru() {
+  while (wsViewCache.size > WS_KEEP - 1) {
+    let oldK = null, oldT = Infinity;
+    for (const [k, v] of wsViewCache) if (v.usedAt < oldT) { oldT = v.usedAt; oldK = k; }
+    const v = wsViewCache.get(oldK);
+    wsViewCache.delete(oldK);
+    try { for (const p of v.panes.values()) p.dispose(); } catch (_) { /* noop */ }
+    v.container.remove();
+  }
+}
+
 export function mountWorkspaceView(container) {
   hostEl = container;
   hostEl.innerHTML = "";
@@ -894,18 +933,32 @@ export function updateWorkspaceView() {
   const rt = ws ? wsRuntime(ws.id) : null;
   if (!ws || !rt) {
     renderMainTop(null);
+    disposeAll(); // 워크스페이스가 정말 없다 — 캐시까지 전부 정리
     if (gridEl) gridEl.innerHTML = `<div class="ws-empty">${i18n.t('워크스페이스를 선택하거나 추가하세요')}</div>`;
-    disposeAll();
     return;
   }
   renderMainTop(ws);
   const ctx = paneCtx(ws);
 
   if (lastWsId !== ws.id) {
-    disposeAll();
+    stashActive();
+    // 빈 상태 안내가 남아 있으면 걷어낸다(캐시 컨테이너와 공존 금지).
+    const emptyEl = gridEl.querySelector(":scope > .ws-empty");
+    if (emptyEl) emptyEl.remove();
+    const hit = wsViewCache.get(ws.id);
+    if (hit) {
+      wsViewCache.delete(ws.id);
+      activeContainer = hit.container;
+      panes = hit.panes;
+      lastSig = hit.sig;
+      activeContainer.style.display = "";
+      // 숨겨진 사이 창/글꼴 크기가 바뀌었을 수 있다 — 보이는 프레임에서 한 번 재맞춤.
+      requestAnimationFrame(() => refitAll());
+    }
     lastWsId = ws.id;
-    lastSig = "";
+    evictLru();
   }
+  ensureActiveContainer();
 
   // reconcile
   const wanted = new Map();
@@ -930,8 +983,8 @@ export function updateWorkspaceView() {
   const sig = structureSig(rt.layout);
   if (sig !== lastSig) {
     lastSig = sig;
-    gridEl.innerHTML = "";
-    gridEl.appendChild(buildNode(rt.layout, []));
+    activeContainer.innerHTML = "";
+    activeContainer.appendChild(buildNode(rt.layout, []));
     fresh.forEach((p) => p.mount());
     requestAnimationFrame(() => refitAll());
   }
@@ -942,7 +995,9 @@ export function updateWorkspaceView() {
   //  (pane 마다 1개. 노드는 보존하고 상태·글리프만 갱신한다 — 글리프는 바뀔 때만.)
   syncModeToggle();
   updateUnreadRings(ws);
-  measureRects();
+  // measureRects 는 여기서 부르지 않는다(2026-08-15 성능 라운드) — 매 렌더 모든 pane 의
+  //  getBoundingClientRect = 강제 동기 레이아웃이었고, 결과는 focusNeighbor(방향키 이동)만 쓴다.
+  //  → 쓰는 순간(focusNeighbor)에 재서 항상 정확한 값을 쓴다.
 }
 
 // 미읽음 알림 강조 테두리 — **지금 보이는 탭**의 것만(2026-07-28 사용자 확정).
@@ -1239,6 +1294,7 @@ function measureRects() {
 export function focusNeighbor(dir) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt || !rt.focusId) return;
+  measureRects(); // 호출 시점 측정 — 렌더마다 재는 것보다 싸고(빈도 차이) 항상 정확하다
   const id = T.neighbor(paneRects, rt.focusId, dir);
   if (id) {
     S.focusPane(id);
@@ -1250,7 +1306,15 @@ export function focusCurrentPane() {
   panes.get(rt?.focusId)?.focus();
 }
 function disposeAll() {
+  // 활성 + LRU 캐시 전부 파괴 — "워크스페이스 없음" 같은 진짜 리셋에서만 부른다(전환은 stashActive).
   for (const p of panes.values()) p.dispose();
   panes.clear();
   lastSig = "";
+  lastWsId = null;
+  if (activeContainer) { activeContainer.remove(); activeContainer = null; }
+  for (const v of wsViewCache.values()) {
+    try { for (const p of v.panes.values()) p.dispose(); } catch (_) { /* noop */ }
+    v.container.remove();
+  }
+  wsViewCache.clear();
 }

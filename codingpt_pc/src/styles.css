@@ -359,6 +359,9 @@ html[data-os="windows"] .main-top { padding-right: calc(14px + var(--titlebar-in
 .mt-adds { display: inline-flex; align-items: center; gap: 2px; }
 
 .ws-grid { flex: 1; min-height: 0; background: transparent; } /* punch-through 경로(창 bg 가 base) */
+/* 워크스페이스 화면 LRU 캐시 컨테이너 — 활성 1개만 보이고 나머지는 display:none 으로 눕는다.
+   (전환 시 xterm 파괴/재생성 대신 표시 토글 — workspace-view.js WS_KEEP 참조) */
+.ws-stack { width: 100%; height: 100%; min-height: 0; }
 .ws-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--dim); }
 
 /* 분할 — 여백 없이 flush, 얇은 1px 구분선(넓은 히트영역). */
@@ -2220,45 +2223,60 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
   color: var(--dim); font-size: 11.5px;
 }
 
-/* ── 단축키 설정 ──
-   행을 눌러 새 조합을 받는다. 겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
-.sc-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+/* ── 단축키 설정 (2026-08-15 개편) ──
+   행 전체가 클릭 대상(누르면 새 조합 대기), 조합은 낱개 키캡(⌘ ⇧ E), 보조 동작은 hover 에만.
+   겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
+.sc-bar {
+  display: flex; align-items: center; gap: 8px; margin: 2px 0 12px;
+  /* 스크롤해도 검색이 상단에 붙는다 — 목록이 길어도 검색/초기화가 항상 손에 있게. */
+  position: sticky; top: 0; z-index: 3; padding: 8px 0; background: var(--base);
+}
 .sc-search {
-  flex: 1 1 auto; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  flex: 1 1 auto; min-width: 0; padding: 8px 12px; border-radius: 9px;
   border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
   font-size: 13px; font-family: inherit; outline: none;
 }
+.sc-search:focus { border-color: var(--text3, var(--text2)); }
 .sc-reset-all {
-  flex: 0 0 auto; padding: 7px 11px; border-radius: 8px; cursor: pointer;
+  flex: 0 0 auto; padding: 8px 12px; border-radius: 9px; cursor: pointer;
   border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2); font-size: 12.5px;
 }
 .sc-reset-all:hover { background: var(--elevated2); }
 .sc-conflict-note { margin: 0 0 10px; color: var(--text2); font-size: 12px; line-height: 1.45; }
-.sc-list { padding: 4px 6px; }
+.sc-list { padding: 2px 4px 6px; }
 .sc-group {
-  padding: 10px 6px 5px; font-size: 11px; color: var(--dim); letter-spacing: 0.02em;
+  padding: 16px 10px 6px; font-size: 11px; font-weight: 700; color: var(--dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
 }
+.sc-list > .sc-group:first-child { padding-top: 10px; }
 .sc-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 6px;
-  border-top: 1px solid var(--border-ctrl);
+  display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 10px;
+  border-radius: 8px; cursor: pointer; outline: none;
 }
-.sc-group + .sc-row { border-top: none; }
+.sc-row:hover, .sc-row:focus-visible { background: var(--elevated); }
+.sc-row + .sc-row { margin-top: 1px; }
 .sc-name { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 13px; }
 .sc-badge {
   flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; font-size: 10.5px;
   border: 1px solid var(--border-ctrl); color: var(--text2); background: var(--elevated2);
 }
-.sc-key {
-  flex: 0 0 auto; min-width: 82px; text-align: center; padding: 5px 10px; border-radius: 7px;
-  border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
-  font-size: 12.5px; font-family: inherit; cursor: pointer;
+/* 키캡 — 낱개 키(⌘/⇧/E)를 실제 키보드 캡처럼. 조합 전체가 한 덩어리 알약이던 예전보다 판독이 빠르다. */
+.sc-keys { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; }
+.sc-cap {
+  min-width: 20px; height: 22px; padding: 0 6px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-ctrl); border-bottom-width: 2px; border-radius: 5px;
+  background: var(--elevated); color: var(--text); font-size: 12px; font-family: inherit;
 }
-.sc-key:hover { background: var(--elevated2); }
-.sc-key.empty { color: var(--dim); }
-/* 조합을 받는 중 — 점선으로 "지금 기다린다"를 표시(색이 아니라 테두리 모양으로). */
-.sc-key.rec { border-style: dashed; color: var(--text2); }
+.sc-none { color: var(--dim); font-size: 12.5px; padding-right: 2px; }
+/* 조합을 받는 중 — 점선 테두리로 "지금 기다린다"(색이 아니라 모양으로). */
+.sc-waiting { color: var(--text2); font-size: 12.5px; }
+.sc-row.rec { outline: 1.5px dashed var(--border-ctrl); outline-offset: -1.5px; background: var(--elevated); }
+/* 보조 동작(기본값으로/지우기) — 평소엔 숨김: 모든 행에 항상 떠 있으면 표가 아니라 소음이다. */
+.sc-acts { flex: 0 0 auto; display: inline-flex; gap: 4px; visibility: hidden; }
+.sc-row:hover .sc-acts, .sc-row:focus-visible .sc-acts { visibility: visible; }
 .sc-mini {
-  flex: 0 0 auto; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
   border: 1px solid transparent; background: transparent; color: var(--dim); font-size: 11.5px;
 }
 .sc-mini:hover { color: var(--text2); border-color: var(--border-ctrl); }

@@ -87,14 +87,27 @@ pub fn pty_open(
     win_index: i64,
     cols: u16,
     rows: u16,
+    replace: Option<bool>,
 ) -> Result<i64, String> {
     let (ns, abs) = tmux::session_for(&local_path);
     // 구 풀 잔재가 있으면 무손실 승격(멱등) → 요청 tid 확정. 전용 세션은 리퍼 불가침 + durable 이라
     //  앱이 얼마나 죽어 있었든 여기서의 attach 는 "이름으로 다시 붙기"일 뿐 레이스가 없다.
     tmux::migrate_legacy_pool(&ctx, &ns, &abs);
     let tid = tmux::resolve_tid(&ctx, &ns, win_index)?;
-    if mgr.panes.lock().unwrap().contains_key(&pane_id) {
-        return Ok(tid); // 이미 열림(중복 방지)
+    {
+        // replace=true(탭 전환): 같은 pane 의 기존 attach 를 여기서 원자적으로 교체한다 — 예전엔
+        //  JS 가 pty_close 완료를 await 한 뒤 pty_open 을 불러 IPC 2왕복이 직렬이었고, 그만큼
+        //  탭 전환이 늦었다. 구 핸들 정리는 epoch 가드(reader 스레드)가 자기 세대만 지우므로 안전.
+        let mut panes = mgr.panes.lock().unwrap();
+        if panes.contains_key(&pane_id) {
+            if replace.unwrap_or(false) {
+                if let Some(mut old) = panes.remove(&pane_id) {
+                    let _ = old.child.kill();
+                }
+            } else {
+                return Ok(tid); // 이미 열림(중복 방지)
+            }
+        }
     }
     let target = tmux::term_session(&ns, tid);
 
@@ -283,13 +296,38 @@ pub fn pty_open(
     win_index: i64,
     cols: u16,
     rows: u16,
+    replace: Option<bool>,
 ) -> Result<i64, String> {
     use crate::termhost;
     let (ns, abs) = tmux::session_for(&local_path);
     tmux::migrate_legacy_pool(&ctx, &ns, &abs); // win32 no-op(레거시 tmux 풀 없음) — 시그니처 유지
     let tid = tmux::resolve_tid(&ctx, &ns, win_index)?;
-    if mgr.panes.lock().unwrap().contains_key(&pane_id) {
-        return Ok(tid); // 이미 열림(중복 방지)
+    {
+        // 탭 전환(replace=true, mac 경로와 동일 계약): 구 attach 를 여기서 원자적으로 교체.
+        //  정리 절차는 pty_close(win32)와 동일 — writer drop + 블로킹 read 를 CancelSynchronousIo 로 해제.
+        let removed = {
+            let mut panes = mgr.panes.lock().unwrap();
+            if panes.contains_key(&pane_id) {
+                if replace.unwrap_or(false) { panes.remove(&pane_id) } else { return Ok(tid); }
+            } else { None }
+        };
+        if let Some(h) = removed {
+            drop(h.writer);
+            if let Some(t) = h.reader {
+                std::thread::spawn(move || {
+                    use std::os::windows::io::AsRawHandle;
+                    for _ in 0..100 {
+                        if t.is_finished() { break; }
+                        unsafe {
+                            let _ = windows::Win32::System::IO::CancelSynchronousIo(
+                                windows::Win32::Foundation::HANDLE(t.as_raw_handle() as _),
+                            );
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                });
+            }
+        }
     }
     let target = tmux::term_session(&ns, tid);
 

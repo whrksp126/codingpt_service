@@ -68,8 +68,10 @@ export const api = {
   remoteWsCreate: (path, hostDeviceId) => invoke("remote_ws_create", { path: path || "", hostDeviceId: hostDeviceId ?? null }),
 
   // ── 로컬 터미널 pane (tmux) ──
-  ptyOpen: (paneId, localPath, winIndex, cols, rows) =>
-    invoke("pty_open", { paneId, localPath, winIndex, cols, rows }),
+  // replace=true(탭 전환): 같은 pane 의 기존 attach 를 Rust 가 원자적으로 교체 — JS 가 pty_close
+  //  완료를 기다렸다 여는 직렬 2왕복(전환 지연)을 없앤다.
+  ptyOpen: (paneId, localPath, winIndex, cols, rows, replace) =>
+    invoke("pty_open", { paneId, localPath, winIndex, cols, rows, replace: !!replace }),
   ptyWrite: (paneId, data) => invoke("pty_write", { paneId, data }),
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).

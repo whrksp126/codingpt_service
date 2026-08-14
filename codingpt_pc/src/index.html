@@ -35,36 +35,39 @@
          "누군가 쓰고 있을 때" 만 나오는 선택지다. update-scheduler.js 가 채운다. -->
     <div id="updateBanner" class="update-banner hidden"></div>
 
-    <!-- 벤더(전역): xterm. 모듈보다 먼저 실행돼 window.Terminal/FitAddon 노출. -->
-    <script src="vendor/xterm/xterm.js"></script>
-    <script src="vendor/xterm/xterm-addon-fit.js"></script>
-    <script src="vendor/xterm/xterm-addon-search.js"></script>
-    <script src="vendor/xterm/xterm-addon-webgl.js"></script>
-    <script src="vendor/xterm/xterm-addon-canvas.js"></script>
+    <!-- 벤더(전역): xterm. 모듈보다 먼저 실행돼 window.Terminal/FitAddon 노출.
+         defer(2026-08-15) — 1.2MB 동기 파싱이 HTML 파싱(부트스트랩 게이트 첫 페인트)을 막고
+         있었다. defer 스크립트는 문서 순서대로, module(main.js)보다 먼저 실행되므로 전역 노출
+         순서는 그대로다. -->
+    <script defer src="vendor/xterm/xterm.js"></script>
+    <script defer src="vendor/xterm/xterm-addon-fit.js"></script>
+    <script defer src="vendor/xterm/xterm-addon-search.js"></script>
+    <script defer src="vendor/xterm/xterm-addon-webgl.js"></script>
+    <script defer src="vendor/xterm/xterm-addon-canvas.js"></script>
     <!-- CodeMirror(내장 IDE 에디터) — core → modes → addons. window.CodeMirror 전역. -->
-    <script src="vendor/codemirror/codemirror.js"></script>
-    <script src="vendor/codemirror/mode/xml/xml.js"></script>
-    <script src="vendor/codemirror/mode/javascript/javascript.js"></script>
-    <script src="vendor/codemirror/mode/css/css.js"></script>
-    <script src="vendor/codemirror/mode/htmlmixed/htmlmixed.js"></script>
-    <script src="vendor/codemirror/mode/jsx/jsx.js"></script>
-    <script src="vendor/codemirror/mode/markdown/markdown.js"></script>
-    <script src="vendor/codemirror/mode/python/python.js"></script>
-    <script src="vendor/codemirror/mode/clike/clike.js"></script>
-    <script src="vendor/codemirror/mode/shell/shell.js"></script>
-    <script src="vendor/codemirror/mode/diff/diff.js"></script>
-    <script src="vendor/codemirror/addon/edit/closebrackets.js"></script>
-    <script src="vendor/codemirror/addon/edit/matchbrackets.js"></script>
-    <script src="vendor/codemirror/addon/comment/comment.js"></script>
-    <script src="vendor/codemirror/addon/selection/active-line.js"></script>
+    <script defer src="vendor/codemirror/codemirror.js"></script>
+    <script defer src="vendor/codemirror/mode/xml/xml.js"></script>
+    <script defer src="vendor/codemirror/mode/javascript/javascript.js"></script>
+    <script defer src="vendor/codemirror/mode/css/css.js"></script>
+    <script defer src="vendor/codemirror/mode/htmlmixed/htmlmixed.js"></script>
+    <script defer src="vendor/codemirror/mode/jsx/jsx.js"></script>
+    <script defer src="vendor/codemirror/mode/markdown/markdown.js"></script>
+    <script defer src="vendor/codemirror/mode/python/python.js"></script>
+    <script defer src="vendor/codemirror/mode/clike/clike.js"></script>
+    <script defer src="vendor/codemirror/mode/shell/shell.js"></script>
+    <script defer src="vendor/codemirror/mode/diff/diff.js"></script>
+    <script defer src="vendor/codemirror/addon/edit/closebrackets.js"></script>
+    <script defer src="vendor/codemirror/addon/edit/matchbrackets.js"></script>
+    <script defer src="vendor/codemirror/addon/comment/comment.js"></script>
+    <script defer src="vendor/codemirror/addon/selection/active-line.js"></script>
     <!-- 자동완성(show-hint) — core 뒤, 각 언어 힌트. -->
-    <script src="vendor/codemirror/addon/hint/show-hint.js"></script>
-    <script src="vendor/codemirror/addon/hint/anyword-hint.js"></script>
-    <script src="vendor/codemirror/addon/hint/javascript-hint.js"></script>
-    <script src="vendor/codemirror/addon/hint/xml-hint.js"></script>
-    <script src="vendor/codemirror/addon/hint/html-hint.js"></script>
-    <script src="vendor/codemirror/addon/hint/css-hint.js"></script>
-    <script src="vendor/codemirror/addon/search/searchcursor.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/show-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/anyword-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/javascript-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/xml-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/html-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/hint/css-hint.js"></script>
+    <script defer src="vendor/codemirror/addon/search/searchcursor.js"></script>
     <script type="module" src="js/main.js"></script>
   </body>
 </html>
