@@ -274,7 +274,12 @@ test('term-backend: WMI 스폰 스펙(Job 탈출) — cmd set 체인·인용·Sh
   // WMI 생성 = WmiPrvSE 자식 → PC 앱 Job Object 밖(계약 1: 앱 종료에도 터미널 생존).
   assert.match(script, /Invoke-CimMethod -ClassName Win32_Process -MethodName Create/);
   assert.match(script, /Win32_ProcessStartup/, '콘솔 창 무표시(ShowWindow) 스타트업 정보가 필요하다');
-  assert.match(script, /ShowWindow = 0/);
+  // ★ 회귀 방지: ShowWindow 는 스키마상 uint16 이다. `ShowWindow = 0` 이면 PowerShell 이 Int32 로
+  //  추론해 WMI 가 0x80041005(InvalidType)로 거절하고, 스폰은 조용히 detached 폴백으로 떨어진다.
+  //  그 폴백은 term-host 를 PC 앱의 Job Object 에 상속시켜 "앱 종료 시 터미널 전멸"(계약 1 위반)로
+  //  이어진다 — 2026-08-12 실기에서 실제로 이 경로를 밟았다. 캐스트와 스키마 조회를 함께 고정한다.
+  assert.match(script, /Get-CimClass -ClassName Win32_ProcessStartup/, '속성 타입은 스키마에서 받아야 추론 사고가 없다');
+  assert.match(script, /ShowWindow = \[uint16\]0/, 'uint16 캐스트가 빠지면 WMI 가 InvalidType 으로 거절한다');
   assert.match(script, /CPT_TERMHOST_PID=/, '성공 판정(폴백 분기)의 파싱 마커');
   // cmd /d /s /c — 양끝 따옴표 제거 모드에서 내부 인용 보존(공백 경로 안전).
   assert.match(spec.cmdLine, /^cmd\.exe \/d \/s \/c "/);
@@ -314,4 +319,8 @@ test('term-host session: win32 기본 셸 스펙 — 프로필 주입은 default
   assert.match(src, /cpt-profile\.ps1/);
   assert.match(src, /cpt-init\.cmd/);
   assert.match(src, /-NoLogo/);
+  // ★ 회귀 방지: 기본 실행 정책(Restricted)에서는 .ps1 dot-source 가 PSSecurityException 으로 막혀
+  //  프로필이 안 실린다 — 터미널은 멀쩡히 열리는데 claude/codex/cpt 래퍼만 조용히 사라진다.
+  //  프로세스 한정 우회라 머신/사용자 정책은 무수정이다(2026-08-14 실기에서 실제로 밟은 경로).
+  assert.match(src, /'-ExecutionPolicy',\s*'Bypass'/, '프로필 dot-source 는 실행 정책 우회 없이는 항상 실패한다');
 });

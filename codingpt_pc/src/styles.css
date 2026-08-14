@@ -179,10 +179,43 @@ body.resizing-row { cursor: row-resize; }
 .wsr-badge { background: var(--error); color: #fff; font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 999px; padding: 0 4px; }
 .wsr-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dim); }
 .wsr-kind { display: inline-flex; align-items: center; gap: 4px; }
-/* 프로젝트 그룹(같은 프로젝트의 PC별 사본 묶음) — 헤더 1회 + 멤버 들여쓰기 + 상태점 */
-.ws-proj-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px 3px; color: var(--text-2, #aab2c5); font-size: 12.5px; font-weight: 700; }
-.ws-proj-head .wsp-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-proj-members { margin-left: 14px; border-left: 1px solid var(--border); padding-left: 4px; }
+/* ── 기기 우선 사이드바(2026-08-14) — `내 PC` 섹션 + 고른 PC 의 워크스페이스 섹션 ──
+   옛 `.ws-proj-*`(프로젝트 그룹 헤더/멤버 들여쓰기)는 그룹핑 폐기와 함께 삭제했다.
+   죽은 CSS 를 남기면 다음 사람이 그 클래스를 다시 쓰면서 폐기된 구조가 조용히 부활한다. */
+.sb-sec {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 6px 4px 10px; color: var(--dim);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sb-sec + .sb-sec { margin-top: 6px; }
+.sb-sec-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-sec-acts { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.sb-sec-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--dim); cursor: pointer;
+  padding: 3px; border-radius: var(--r-sm);
+}
+.sb-sec-btn:hover { background: var(--elevated2); color: var(--text2); }
+.sb-sec-btn.busy { opacity: 0.5; pointer-events: none; }
+/* PC 행 — 선택 상태는 배경으로만(포인트 컬러 금지). 상태점은 워크스페이스 행과 같은 것을 쓴다.
+   ⚠ 클래스 이름이 `.pc-row` 인 이유: `.dev-row` 는 설정 기기 표가 "행에 배경/테두리를 주지 않는다"로
+   확정하며 규칙 자체를 지운 이름이다(contract.mjs 가 그 부재를 고정한다). 다른 화면의 결정을
+   같은 이름으로 되살리지 않는다. */
+.pc-row {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px; margin-bottom: 2px;
+  background: transparent; border: none; border-radius: var(--r-md);
+  color: var(--text2); text-align: left; cursor: pointer; font-size: 13px; font-weight: 600;
+  user-select: none; -webkit-user-select: none;
+}
+.pc-row:hover { background: var(--elevated); }
+.pc-row.active { background: var(--hover); color: var(--text); }
+.pc-row.pc-off { opacity: 0.55; }
+.pc-row .pc-ic { display: inline-flex; flex: none; opacity: 0.85; }
+.pc-row .pc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pc-row .pc-here { font-size: 9.5px; font-weight: 700; color: var(--dim); letter-spacing: -0.2px; flex: none; }
+.pc-row .wsr-dot, .pc-row .wsr-badge { margin-left: auto; }
+.pc-row .wsr-badge + .wsr-dot { margin-left: 4px; }
 .wsr-dot { width: 6px; height: 6px; border-radius: 3px; display: inline-block; flex: none; }
 .wsr-dot.on { background: var(--accent); }
 .wsr-dot.off { background: var(--text-dim, #8b93a7); }
@@ -602,6 +635,11 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .sett-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .sett-label { color: var(--text); font-weight: 550; line-height: 1.35; }
 .sett-desc { color: var(--dim); font-size: 11.5px; line-height: 1.45; }
+/* 베타 배지 — accent 를 쓰지 않는다(포인트 컬러 = 상태 신호 전용). 무채색 테두리 알약. */
+.sett-beta {
+  margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); vertical-align: 1px;
+}
 .sett-row + .sett-row, .sett-row + .sett-hint { border-top: 1px solid var(--border); } /* 행 구분선(모바일 미러) */
 .sett-hint { font-size: 11.5px; color: var(--dim); padding: 2px 0 4px; }
 .sett-select {
@@ -1177,6 +1215,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pv-menu-item.active { color: var(--text2); }
 .pvm-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
 .pvm-label { flex: 1 1 auto; }
+/* "여기서 끝나지 않는다"(하위 메뉴로 이어짐) 표시 — 헤더 [+] 의 터미널·웹뷰 행에만 붙는다. */
+.pvm-more { display: inline-flex; color: var(--text3); flex: 0 0 auto; margin-left: 6px; }
 .pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
 .pvm-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; }

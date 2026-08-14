@@ -27,6 +27,7 @@ import {
   TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
 } from "./theme.js";
 import { IS_WINDOWS } from "./shortcuts.js";
+import { chatBetaEnabled, setChatBetaEnabled } from "./chat-model.js";
 import * as i18n from './i18n/index.js';
 
 let root = null;
@@ -170,10 +171,20 @@ function renderSection(force) {
     // 이 PC 의 AI CLI 목록. 데몬 감지가 정본이라 화면은 그 결과를 그대로 비춘다(추측 표기 금지).
     if (force || !contentEl.querySelector("#agentsBody")) {
       // 하단 요약/설명 문단은 사용자 확정으로 제거(2026-07-27) — 목록만 둔다.
+      //  ★ 채팅 모드(베타)는 여기 산다(2026-08-14). 별도 `실험실` 섹션을 만들지 않는 이유는 이
+      //   파일의 기존 규율 그대로다: 항목 하나짜리 그룹은 분류가 아니라 장식이다. 그리고 이 설정은
+      //   "에이전트 대화를 어떻게 볼 것인가" 라 이 화면의 목록과 같은 주제다.
       contentEl.innerHTML = `
+        <div class="sm-card2">
+          <label class="sett-row sett-row-action" for="chatBetaChk">
+            <span class="sett-copy"><span class="sett-label">${i18n.t('채팅 모드')}<span class="sett-beta">${i18n.t('베타')}</span></span><span class="sett-desc">${i18n.t('터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.')}</span></span>
+            <input id="chatBetaChk" type="checkbox" class="tgl" aria-label="${i18n.t('채팅 모드')}" />
+          </label>
+        </div>
         <div class="sm-card2">
           <div class="sett-col"><div id="agentsBody" class="ag-list"></div></div>
         </div>`;
+      bindChatBeta(contentEl);
       const body = contentEl.querySelector("#agentsBody");
       const paint = () => renderAgentList(body, { onChange: paint });
       paint();
@@ -200,6 +211,8 @@ function renderSection(force) {
         ${folderPermRow("downloads", i18n.t('다운로드 폴더'))}
         ${folderPermRow("desktop", i18n.t('데스크탑 폴더'))}
         ${folderPermRow("documents", i18n.t('문서 폴더'))}
+        ${folderPermRow("icloud", "iCloud Drive")}
+        ${folderPermRow("media", i18n.t('음악 보관함'))}
         <div class="sett-hint">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</div>
       </div>`}
       <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정’에서 관리할 수 있어요.')}</div>`;
@@ -690,6 +703,19 @@ function folderPermRow(id, label) {
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
 //  허용=버튼 '허용됨' 고정, 거부=버튼이 '설정 열기'(파일 및 폴더 설정)로 전환.
+// 채팅 모드(베타) 토글 — 켜고 끄면 **열려 있는 pane 이 즉시** 따라야 한다(설정을 닫고 다시 열
+//  필요가 없게). 워크스페이스 뷰의 재렌더가 pane 마다 _syncModeToggle + showActiveTab 을 돌린다.
+function bindChatBeta(rootEl) {
+  const chk = rootEl.querySelector("#chatBetaChk");
+  if (!chk) return;
+  chk.checked = chatBetaEnabled();
+  chk.addEventListener("change", () => {
+    setChatBetaEnabled(chk.checked);
+    import("./pane.js").then((m) => m.refreshPaneSurfaces()).catch(() => {});
+    S.emit();
+  });
+}
+
 function bindFolderPerms(rootEl) {
   rootEl.querySelectorAll(".fpa-btn").forEach((b) => {
     b.addEventListener("click", async () => {

@@ -11,7 +11,7 @@ import {
   focusNeighbor,
   focusCurrentPane,
   smartAdd,
-  headerButton,
+  openWebviewMenu,
 } from "./workspace-view.js";
 import { registerCommands, runCommand } from "./command-run.js";
 import { commandForCombo } from "./commands.js";
@@ -191,8 +191,8 @@ registerCommands({
   "ws.addIde": () => smartAdd("ide"),
   "ws.addPreview": () => smartAdd("preview"),
   "ws.addEmulator": () => smartAdd("emulator"),
-  // 이 둘은 고르는 것이 목적이라 메뉴를 연다(헤더 버튼과 같은 자리에서).
-  "ws.ports": () => headerButton("ws.ports")?.click(),
+  // 이것은 고르는 것이 목적이라 메뉴를 연다(헤더 [+] 와 같은 자리·같은 함수).
+  "ws.ports": () => openWebviewMenu(),
 
   "pane.splitRight": () => S.splitFocused("h", "terminal"),
   "pane.splitDown": () => S.splitFocused("v", "terminal"),

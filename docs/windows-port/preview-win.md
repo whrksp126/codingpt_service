@@ -100,7 +100,71 @@ NSWindow backgroundColor (누수 색)       DComp 배경 비주얼(단색 서페
   (sanitize/webview_of/Entry 필드 등) — 무해.
 - 실기 동작 검증은 웨이브 3(Windows 머신) — 아래 리스크가 그 체크리스트다.
 
-## 실기에서 확인할 리스크 (중요도순)
+## 실기 결과 (2026-08-14, 웨이브3 · YEHYEON_LAPTOP Win11 24H2)
+
+### 리스크 1 — 해결. 진범 = **DComp 타깃을 자식 HWND 에 걸었던 것**
+
+증상: 프리뷰 pane 의 크롬(탭·주소창·제목)은 뜨는데 **내용이 백지**. 창이 불투명일 땐 흰색,
+`transparent:true` 로 바꾸면 그 자리에 데스크톱이 비침 — **우리 비주얼이 한 번도 화면에 안 나왔다.**
+
+계측(eprintln) 결과 체인 전 단계가 전부 성공이었다:
+`env3 캐스팅 ok → 컨트롤러 생성 ok → D3D11 HARDWARE ok → DComp 장치 ok → CreateTargetForHwnd ok
+→ 배경 서페이스 ok → Commit`. **에러가 하나도 없는데 화면만 없었다.**
+
+원인: `CreateTargetForHwnd` 를 **WRY_WEBVIEW(자식 HWND)** 에 걸었다. DirectComposition 타깃은
+최상위 창에 바인딩해야 합성된다 — 자식 HWND 면 **호출은 성공하고 렌더는 안 된다**(무증상 실패).
+타깃을 `main_hwnd` 로 옮기자 즉시 렌더됐다. **폴백 ① 채택. 폴백 ②(`transparent:true`)는 불필요**
+— 실측으로 배제했다(함께 켜면 투명 창 부작용만 떠안는다).
+
+교훈: 이 문서의 초기 진단 방향("DWM 합성 의미론이 성립하는가")이 틀렸다. 의미론이 아니라
+**API 바인딩 대상** 문제였다. 무증상 실패라 계측 없이는 못 찾는다 — 배선 실패를 삼키는
+`Err(_)` 자리에 반드시 로그를 남길 것.
+
+### 리스크 2 — 채택 = **입력 오버레이(A)**. 클릭 동작 확인, 휠은 별 경로 필요
+
+슬롯 위에 **우리 프로세스 소유의 투명 자식 창**(`CptPreviewInputOverlay`, 부모=WRY_WEBVIEW)을 얹어
+그 창이 마우스를 받고 기존 `route_mouse` 에 넘긴다. 렌더는 그대로 DComp(앱 웹뷰 아래)라
+**DOM 이 프리뷰 위에 그려지는 성질은 보존**된다(메뉴가 프리뷰 위에 뜨는 것으로 실측 확인).
+
+- 좌표계: 부모가 WRY_WEBVIEW 라서 pane 의 `px/py`(호스트 클라이언트 물리 px)와 그대로 일치한다.
+- 투명: `WS_EX_LAYERED` + `alpha=1`. **alpha=0 은 안 된다** — 클릭이 통과해 오버레이가 무의미해진다.
+- shield(모달/메뉴) 중에는 **숨긴다**. 보이는 채로 두면 우리가 삼켜 DOM 이 입력을 잃는다.
+- ★ **함정**: `WS_EX_LAYERED` 를 `CreateWindowExW` 인자로 주면 **자식 창 생성이 실패**한다
+  (널 반환 + `GetLastError()==0` → windows-rs 가 "작업을 완료했습니다" 에러로 감싼다). 생성 후
+  `SetWindowLongPtrW(GWL_EXSTYLE, …)` 로 얹어야 한다. 또 하나의 무증상 실패다.
+
+**실측(2026-08-14)**: 프리뷰 안 클릭 동작(YouTube 햄버거 → 드로어 펼침). URL 바 내비게이션·리플로우 정상.
+
+**남은 것 = 휠(스크롤)**: `WM_MOUSEWHEEL` 은 **커서 아래 창이 아니라 포커스를 가진 창**으로 간다.
+오버레이는 포커스를 받지 않게(`SW_SHOWNA`) 띄우므로 휠 메시지를 **아예 못 본다** — 오버레이만으로는
+해결 불가다. 휠은 앱 웹뷰(Chromium)가 받으니 **DOM 에서 슬롯 위 `wheel` 을 받아 Rust 로 넘기는
+경로**(`preview_wheel(paneId, dx, dy)` → `SendMouseInput(WHEEL)`)를 추가해야 한다. mac 은 네이티브가
+직접 받으므로 **win32 전용 분기**로 둘 것(양쪽에 걸면 mac 에서 이중 스크롤).
+
+### 리스크 2 원인 — `SetWindowSubclass` 가 통하지 않는 이유
+
+입력 라우팅이 전혀 동작하지 않는다. `subclass_proc` 가 **단 한 번도 호출되지 않는다**
+(앱 UI 클릭·프리뷰 클릭 모두. SHIELD 무관이고, 서브클래싱 대상 목록에는 정상적으로 들어가 있다).
+
+원인: **WebView2 는 별도 프로세스**다(`CodingPT.exe` pid=16180 → `msedgewebview2.exe` pid=15168 확인).
+창 안의 `Chrome_WidgetWin_*` / `Chrome_RenderWidgetHostHWND` 는 전부 **그 프로세스 소유**이고,
+`SetWindowSubclass` 는 **다른 프로세스의 창에는 걸리지 않는다**. macOS 는 WKWebView 의 뷰 계층이
+같은 프로세스라 hitTest 스위즐이 통했지만, 그 등가물이 Windows 에는 없다.
+
+후보(택일 필요):
+- **(A) 입력 전용 오버레이 HWND** — 슬롯 rect 위에 **우리 프로세스의** 투명 자식 창을 얹어 마우스를
+  받고 `SendMouseInput` 으로 프리뷰에 전달. shield 시 숨김. 렌더는 현행 컴포지션 유지라
+  "DOM 이 프리뷰 위에 그려진다"는 성질도 보존된다. 구현량 중간.
+- **(B) 프리뷰를 windowed WebView2 로** — 입력이 네이티브 처리라 포워딩 자체가 불요. 대신 DOM 이
+  프리뷰 **위**에 못 그려진다(모달·메뉴·플로팅 버튼) → shield 시 프리뷰 숨김으로 근사.
+- (C) 전역 훅(WH_MOUSE) — DLL 주입 필요. 비권장.
+
+### 계측 주의
+
+**GDI 캡처는 DComp 내용을 못 잡을 수 있다.** `CopyFromScreen` 스크린샷만으로 "안 보인다"를
+판정하지 말 것(이번 건은 육안 교차확인으로 캡처가 정확했음을 따로 확인했다).
+
+## 실기에서 확인할 리스크 (원문 — 1·2 는 위 결과로 갱신됨)
 
 1. **투명 합성 체인**: "DComp 비주얼(WRY_WEBVIEW 타깃, topmost=FALSE) 이 투명 앱 웹뷰
    (Chrome_WidgetWin, WS_EX_NOREDIRECTIONBITMAP 계열) 뒤로 비치는가"가 이 설계의 근간.

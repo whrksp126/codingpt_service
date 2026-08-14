@@ -21,7 +21,14 @@ function ensureOverlay() {
 function close() { if (el) { el.classList.add("hidden"); el.innerHTML = ""; } }
 
 // ── 진입 ──────────────────────────────────────────────────────────────
-export async function openNewWorkspace() {
+/**
+ * 새 워크스페이스 만들기.
+ * @param {{hostDeviceId?: number|string|null}} [opts]
+ *   hostDeviceId 를 주면 **PC 선택 카드를 건너뛴다** — 사이드바가 기기 우선으로 바뀌면서
+ *   "어느 PC 에?" 는 이미 화면 위에서 골라져 있다(2026-08-14). 두 번 묻는 것은 같은 질문의 반복이다.
+ *   안 주면 종전대로 PC 선택 카드를 띄운다(팔레트 등 대상이 정해지지 않은 진입점).
+ */
+export async function openNewWorkspace(opts = {}) {
   // 오프라인(캐시 목록) — 생성은 서버 메타가 원천이라 불가(사이드바 + 버튼도 같은 가드를 쓴다).
   if (blockedOffline(i18n.t('워크스페이스 추가'))) return;
   let devices = [];
@@ -34,6 +41,20 @@ export async function openNewWorkspace() {
   const isHost = (d) => (d.role || "host") === "host" && d.runnerKind !== "cloud" && d.id !== "cloud";
   const externals = devices.filter((d) => isHost(d) && d.online && !d.isCurrent);
   const self = devices.find((d) => d.isCurrent);
+
+  const want = opts && opts.hostDeviceId != null ? String(opts.hostDeviceId) : null;
+  if (want) {
+    // 이 PC → 네이티브 폴더 다이얼로그. 다른 PC → 그 PC 의 컬럼 브라우저로 직행.
+    if (self && String(self.id) === want) { createLocalWorkspace(); return; }
+    const target = devices.find((d) => isHost(d) && String(d.id) === want);
+    if (target) {
+      // 오프라인 PC 는 원격 폴더 목록(fsList)을 못 받는다 → 무엇도 고를 수 없는 빈 화면 대신 안내.
+      if (target.online === false) { blockedOffline(`${target.name || "PC"} ${i18n.t('에 워크스페이스 추가')}`); return; }
+      renderColumnBrowser(target.id, target.name || "PC");
+      return;
+    }
+    // 목록에 없는 기기(방금 사라짐) — 아래 기존 경로로 떨어져 사용자가 다시 고르게 둔다.
+  }
 
   // 외부 PC 가 없으면 곧장 이 PC 네이티브 폴더 피커(기존 동작).
   if (externals.length === 0) { createLocalWorkspace(); return; }

@@ -658,5 +658,21 @@ export default {
   "회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.": "Deleting your account removes it and all your data — this can't be undone.",
   "휴대폰·태블릿에서 이어서 작업하기": "Pick up where you left off on your phone or tablet",
   "🔒 복호화 중…": "🔒 Decrypting…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Encrypted content (no key on this device)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Encrypted content (no key on this device)",
+  "시스템 설정에서 권한을 켜면 자동으로 확인해요.": "Turn the permission on in System Settings and we'll check automatically.",
+  "음악 보관함": "Music library",
+  "+ 로 이 PC의 폴더를 추가하세요": "Use + to add a folder on this PC",
+  "PC 연결하기": "Connect a PC",
+  "기기 관리": "Manage devices",
+  "다운로드 페이지 열기": "Open download page",
+  "더 보기": "Show more",
+  "로그인하면 이 목록에 그 PC가 자동으로 나타납니다.": "Once signed in, that PC appears in this list automatically.",
+  "베타": "Beta",
+  "에 워크스페이스 추가": " — add a workspace",
+  "연결할 PC에서 CodingPT를 설치하고 지금 계정으로 로그인하세요.": "Install CodingPT on the PC you want to connect and sign in with this account.",
+  "웹뷰": "Web view",
+  "채팅 모드": "Chat mode",
+  "채팅 모드로 보기 (베타)": "View as chat (Beta)",
+  "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.": "Shows the terminal's AI conversation as a chat screen. Still being refined, so it's off by default.",
+  "이 PC의 폴더를 추가하세요": "Add a folder from this PC"
 };

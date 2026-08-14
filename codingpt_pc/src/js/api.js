@@ -51,6 +51,7 @@ export const api = {
   pathExists: (rel) => invoke("path_exists", { rel }),
   // 웹 로그인 URL(프론트 /desktop-login?code=) — Rust 가 서버에서 프론트 주소 파생.
   desktopLoginUrl: (code) => invoke("desktop_login_url", { code }),
+  frontBase: () => invoke("front_base_url"), // 공개 사이트(다운로드 안내에서 연다)
   // 워크스페이스 세션 상태(이어받기) — 열린 터미널/IDE/프리뷰 + 레이아웃.
   fetchWsSession: (wsId) => invoke("fetch_ws_session", { wsId }),
   saveWsSession: (wsId, session) => invoke("save_ws_session", { wsId, session }),
@@ -141,7 +142,7 @@ export const api = {
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
   notifPermissionState: () => invoke("notification_permission_state"), // 요청 없이 현재 OS 권한만 조회
   openNotificationSettings: () => invoke("open_notification_settings"), // macOS CodingPT 알림 설정
-  probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents → 허용 여부(최초엔 macOS 팝업)
+  probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents|icloud|media → 허용 여부(최초엔 macOS 팝업)
   openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──

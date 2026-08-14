@@ -118,8 +118,14 @@ function buildWmiSpawnSpec({ nodePath, entry, sockPath, stateDir }) {
   ].join(' && ');
   const cmdLine = `cmd.exe /d /s /c "${inner}"`;
   const psq = cmdLine.replace(/'/g, "''");
+  // ★ ShowWindow 는 스키마상 uint16 이다. `ShowWindow = 0` 으로 두면 PowerShell 이 Int32 로 추론하고
+  //  WMI 가 타입 불일치로 **0x80041005(WBEM_E_INVALID_PARAMETER)** 를 던진다(에러 카테고리 InvalidType).
+  //  그러면 조용히 detached 폴백으로 떨어져 term-host 가 앱의 Job Object 에 상속되고, 결국
+  //  "앱을 끄면 터미널이 전멸" 하는 계약 1 위반이 된다 — 2026-08-12 실기에서 실제로 이 경로였다.
+  //  Get-CimClass 로 스키마를 받아 인스턴스를 만들면 속성 타입이 스키마에서 결정돼 추론 사고가 없다.
   const script = [
-    '$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = 0 };',
+    '$c = Get-CimClass -ClassName Win32_ProcessStartup;',
+    '$si = New-CimInstance -CimClass $c -ClientOnly -Property @{ ShowWindow = [uint16]0 };',
     `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${psq}'; ProcessStartupInformation = $si };`,
     'if ($null -eq $r -or $r.ReturnValue -ne 0) { exit 1 };',
     "Write-Output ('CPT_TERMHOST_PID=' + $r.ProcessId)",

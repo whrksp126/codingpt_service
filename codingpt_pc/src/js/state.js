@@ -26,7 +26,56 @@ export const state = {
   authChecked: false, // loadMe 를 최소 1회 시도했는지(로그인 게이트 판정용 — 페어링돼도 계정 확인 실패 시 게이트)
   devices: [], // 계정의 모든 기기(멀티기기 "내 기기")
   currentDeviceId: null, // 이 기기의 DaemonDevice id
+  // 사이드바에서 지금 보고 있는 PC(2026-08-14 기기 우선 개편). null = 아직 안 정해짐 → 이 PC.
+  //  ⚠ 이것은 **표시 선택**이지 접속 상태가 아니다. 워크스페이스를 여는 것은 여전히 setActive 이고,
+  //   어느 PC 로 붙을지는 그 워크스페이스의 hostDeviceId 가 정한다(선택은 목록을 거를 뿐이다).
+  activeDeviceId: null,
 };
+
+// ── 기기 우선 사이드바 (2026-08-14 사용자 확정) ──────────────────────────────
+// 옛 구조: 프로젝트(projectId) 묶음 ⊃ 기기별 사본. "워크스페이스가 위, PC 가 아래" 였다.
+// 새 구조: **PC 를 먼저 고르고, 그 PC 에 등록된 워크스페이스만 본다.** 워크스페이스는 원래
+//  각 PC 의 로컬 폴더이므로 이쪽이 실제 소유 관계와 같다(사용자: "워크스페이스 단위가 각 PC
+//  로컬마다로 내려가는 거겠지").
+const ACTIVE_DEVICE_KEY = "cpt.activeDeviceId.v1";
+
+/** 사이드바에 그릴 기기 = **PC 뿐**. 모바일(controller)과 클라우드 러너는 여기 대상이 아니다. */
+export function pcDevices() {
+  return (state.devices || []).filter((d) => d && d.role !== "controller" && d.runnerKind !== "cloud");
+}
+
+/** 지금 선택된 PC 의 id — 저장값이 사라진 기기를 가리키면 이 PC 로, 그것도 없으면 첫 기기로 떨어진다. */
+export function activeDeviceId() {
+  const list = pcDevices();
+  if (!list.length) return null;
+  const has = (id) => id != null && list.some((d) => String(d.id) === String(id));
+  if (has(state.activeDeviceId)) return state.activeDeviceId;
+  // 마지막 선택 기억(사용자 확정) → 없거나 사라졌으면 이 PC → 그것도 없으면 첫 기기.
+  let saved = null;
+  try { saved = localStorage.getItem(ACTIVE_DEVICE_KEY); } catch (_) {}
+  if (has(saved)) return list.find((d) => String(d.id) === String(saved)).id;
+  const mine = list.find((d) => d.isCurrent) || list.find((d) => String(d.id) === String(state.currentDeviceId));
+  return (mine || list[0]).id;
+}
+
+export function setActiveDevice(id) {
+  state.activeDeviceId = id;
+  try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(id)); } catch (_) {}
+  emit();
+}
+
+/** 그 PC 에 등록된 워크스페이스만(표시 순서는 기존 정렬 규칙 그대로). 클라우드 워크스페이스는 제외. */
+export function workspacesForDevice(id) {
+  const list = sortedWorkspaces().filter((w) => isLocal(w));
+  if (id == null) return list;
+  const isMine = pcDevices().some((d) => String(d.id) === String(id) && (d.isCurrent || String(d.id) === String(state.currentDeviceId)));
+  return list.filter((w) => {
+    // hostDeviceId 가 없는 레거시 항목(멀티 PC 이전에 만든 것)은 **이 PC** 것이다 → 이 PC 를
+    //  고른 경우에만 보인다. 다른 PC 목록에 섞여 보이면 "그 PC 에 없는 폴더"를 열게 된다.
+    if (w.hostDeviceId == null) return isMine;
+    return String(w.hostDeviceId) === String(id);
+  });
+}
 
 // 워크스페이스 로컬 표시 설정(순서/고정/색/이름/터미널 시드 여부) — 백엔드 목록과 별개로 pc-ui.json 영속.
 //  seeded: 이 기기에서 그 워크스페이스에 "최초 1회 터미널 자동 준비"를 이미 했는가 — 이후엔
@@ -258,6 +307,13 @@ export function setActive(id) {
   state.activeWsId = id;
   state.view = "workspace";
   if (id) {
+    // 사이드바 선택 PC 를 이 워크스페이스의 호스트로 맞춘다 — 팔레트·알림 점프로 다른 PC 의
+    //  워크스페이스가 열렸는데 목록은 옛 PC 를 보여 주면, 사용자는 지금 어느 PC 를 보는지 잃는다.
+    const meta = state.workspaces.find((w) => w.id === id);
+    if (meta && meta.hostDeviceId != null && String(meta.hostDeviceId) !== String(state.activeDeviceId)) {
+      state.activeDeviceId = meta.hostDeviceId;
+      try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(meta.hostDeviceId)); } catch (_) {}
+    }
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
   }

@@ -393,6 +393,13 @@ pub fn desktop_login_url(code: String) -> String {
     )
 }
 
+// 공개 사이트 주소 — "다른 PC 에 설치하세요" 안내에서 다운로드 페이지를 열 때 쓴다.
+//  desktop_login_url 에서 경로를 잘라내는 식으로 유추하지 않는다(그건 문자열 운이지 계약이 아니다).
+#[tauri::command]
+pub fn front_base_url() -> String {
+    front_base().trim_end_matches('/').to_string()
+}
+
 fn front_base() -> String {
     // 명시적 override 우선(daemon.json.frontUrl), 없으면 서버 주소에서 파생.
     if let Some(f) = read_config()
@@ -745,9 +752,14 @@ pub fn open_privacy_settings() -> Result<(), String> {
     Ok(())
 }
 
-// 보호 폴더(다운로드/데스크탑/문서) 접근 프로브 — 최초 호출 시 macOS 허용 팝업이 뜨고(릴리스 .app),
-//  이후엔 즉시 허용/거부가 판정된다. 한 번 허용되면 앱 단위 영구 → 모든 워크스페이스에서 유효.
+// 보호 경로 접근 프로브 — 최초 호출 시 macOS 허용 팝업이 뜨고(릴리스 .app), 이후엔 즉시 허용/거부가
+//  판정된다. 한 번 허용되면 앱 단위 영구 → 모든 워크스페이스에서 유효.
 //  read_dir 은 팝업 응답까지 블로킹되므로 spawn_blocking 으로 UI 를 막지 않는다.
+//
+// ★ TCC 는 폴더 세 개(다운로드/데스크탑/문서)만이 아니다. 에이전트가 홈 폴더를 훑는 순간
+//  **iCloud Drive(kTCCServiceUbiquity)** 와 **음악 보관함(kTCCServiceMediaLibrary)** 팝업이 작업
+//  도중에 튀어나온다(2026-08-14 실사고). 온보딩에서 같이 받아 두려고 여기에 경로를 더했다.
+//  경로 판정은 파일시스템 위치가 정본이다 — TCC 는 이 경로들의 **내용 열람**에만 걸린다.
 #[tauri::command]
 pub async fn probe_folder_access(folder: String) -> Result<bool, String> {
     let dir = {
@@ -756,12 +768,26 @@ pub async fn probe_folder_access(folder: String) -> Result<bool, String> {
             "downloads" => h.join("Downloads"),
             "desktop" => h.join("Desktop"),
             "documents" => h.join("Documents"),
+            // iCloud Drive 가 관리하는 파일 — Desktop/Documents 동기화도 이 아래로 온다.
+            "icloud" => h.join("Library").join("Mobile Documents"),
+            // Apple Music 보관함 — 홈 훑기가 여기에 닿는 순간 미디어 보관함 팝업이 뜬다.
+            "media" => h.join("Music").join("Music").join("Music Library.musiclibrary"),
             _ => return Err("지원하지 않는 폴더".into()),
         }
     };
-    let granted = tauri::async_runtime::spawn_blocking(move || std::fs::read_dir(&dir).is_ok())
-        .await
-        .map_err(|e| format!("프로브 실패: {e}"))?;
+    let granted = tauri::async_runtime::spawn_blocking(move || {
+        // 없는 경로는 물을 것이 없다 → 통과(iCloud 미사용·음악 보관함 없는 Mac). 여기서 false 를
+        //  돌려주면 승인할 수단이 없는 온보딩 화면에 사용자가 영구히 갇힌다.
+        //  stat 은 TCC 에 걸리지 않으므로(막히는 것은 내용 열람) 팝업 없이 존재만 판정된다.
+        if let Err(e) = std::fs::symlink_metadata(&dir) {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return true;
+            }
+        }
+        std::fs::read_dir(&dir).is_ok()
+    })
+    .await
+    .map_err(|e| format!("프로브 실패: {e}"))?;
     Ok(granted)
 }
 

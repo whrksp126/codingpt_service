@@ -35,10 +35,15 @@ export function markPermGranted(name) { try { localStorage.setItem(`cpt.perm.${n
 //  설정 화면도 같은 기록을 읽는다(2026-07-28: 이미 허용된 권한을 계속 [허용] 버튼으로 그리면
 //  사용자는 "아직 허용이 안 됐나" 로 읽는다 → 기록이 있으면 '허용됨' 표기) — 그래서 export 다.
 export const permGranted = (name) => { try { return localStorage.getItem(`cpt.perm.${name}`) === "1"; } catch (_) { return false; } };
+// ★ TCC 는 폴더 세 개로 끝나지 않는다(2026-08-14 실사고): 에이전트가 홈 폴더를 훑는 순간
+//  iCloud Drive·음악 보관함 팝업이 **작업 도중에** 튀어나온다. 온보딩에서 한 번에 받아 둔다.
+//  경로 정본은 Rust(bridge.rs probe_folder_access) — 여기 id 는 그 표와 한 벌이다.
 const FOLDER_PERMS = [
   { id: "downloads", label: "다운로드 폴더 접근" },
   { id: "desktop", label: "데스크탑 폴더 접근" },
   { id: "documents", label: "문서 폴더 접근" },
+  { id: "icloud", label: "iCloud Drive 접근" },
+  { id: "media", label: "음악 보관함 접근" },
 ];
 // win32: TCC 보호 폴더도, macOS 알림 설정 슬라이드도 없다 — 위저드 단계 자체를 비운다(계약 5).
 //  빈 큐면 renderStep 이 곧장 finishSetup 으로 빠져 온보딩이 즉시 끝난다(안 비우면 macOS 전용
@@ -54,10 +59,16 @@ const PERM_COPY = {
   downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
   desktop: { title: "데스크탑 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
   documents: { title: "문서 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
+  icloud: { title: "iCloud Drive 접근을 허용해 주세요", benefit: "iCloud 에 있는 프로젝트를 열 때 필요해요" },
+  media: { title: "음악 보관함 접근을 허용해 주세요", benefit: "홈 폴더를 훑는 작업 도중에 macOS 가 갑자기 묻지 않도록 미리 받아 둬요" },
 };
 let permQueue = []; // 셋업 진입 시점의 "없는 권한" 스냅샷(슬라이드 순서)
 let permIdx = 0;
-let folderPermissionWatch = null;
+// 슬라이드가 건 감시(폴링/포커스 리스너)의 해제 함수 — 렌더마다 정리한다.
+let permWatchStop = null;
+// 렌더 세대 — 자동 프로브는 비동기(팝업 응답까지 블로킹)라, 그 사이 사용자가 [이전]으로 이동하면
+//  낡은 응답이 새 슬라이드를 칠할 수 있다. 세대가 다르면 버린다.
+let renderGen = 0;
 
 export function mountLoginGate(container) {
   el = container;
@@ -143,10 +154,8 @@ export function restorePendingSetup() {
 // ── 렌더 ──────────────────────────────────────────────────────────────
 function renderStep() {
   if (!el) return;
-  if (folderPermissionWatch) {
-    clearInterval(folderPermissionWatch);
-    folderPermissionWatch = null;
-  }
+  renderGen += 1;
+  stopPermWatch();
   if (setupUpdate) {
     const progress = setupUpdate.progress == null ? i18n.t('다운로드를 시작하는 중…') : `${setupUpdate.progress}%`;
     el.innerHTML = `
@@ -185,10 +194,15 @@ function renderStep() {
   //  · 화면당 권한 하나 — 제목 + 이득 1줄. 장식 아이콘/브랜드 로고는 사용하지 않는다.
   //    행 목록 + 행별 작은 버튼은 "아무도 누르고 싶지 않은" 구성이었다(사용자 실사 피드백).
   //  · 자동 실행 토글은 게이트에서 제거 — 기본 켬(페어링 시 적용), 끄기는 설정 > 일반에서.
-  //  · [허용] 성공 → 승인 상태를 굳히고 [다음]을 활성화한다. 자동으로 넘기지 않아 사용자가 확인한다.
   //  · [이전]은 언제나 가능, [다음]은 현재 권한이 실제 승인된 경우에만 가능하다.
   //  · 거부됨 → 그때만 [시스템 설정 열기] + '나중에 설정에서 허용' 탈출로가 열린다. 처음부터
   //    건너뛰기를 주지 않는 것은 "필수 승인" 확정 — 단 거부로 막힌 사용자를 영구히 가두지 않는다.
+  //
+  // ★ 2026-08-14 3차 개정(사용자 확정): **판정은 우리가 한다.** 예전엔 [권한 확인]을 눌러야만
+  //  프로브가 돌아서, 이미 허용된 권한 앞에서도 사용자가 버튼을 한 번 눌러야 [다음]이 열렸다.
+  //  이제 슬라이드에 들어오는 순간 프로브를 돌린다 — 허용돼 있으면 팝업 없이 즉시 [다음]이 열리고,
+  //  미결정이면 그 자리에서 OS 팝업이 뜨고, 거부면 유도 문구 + 감시(설정에서 켜면 자동 반영)로 간다.
+  //  버튼은 이제 "거부 뒤 재확인" 전용이라 정상 경로에서는 아무도 누를 필요가 없다.
   if (permIdx >= permQueue.length) { finishSetup(); return; }
   const p = permQueue[permIdx];
   const c = PERM_COPY[p.id] || { title: `${p.label}을 허용해 주세요`, benefit: "" };
@@ -215,11 +229,13 @@ function renderStep() {
         <span class="lg-step-count">${permIdx + 1} / ${permQueue.length}</span>
         <div class="lg-wizard-actions">
           <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>${i18n.t('이전')}</button>
-          <button id="lgAllow" class="btn secondary" data-perm="${p.id}"${p.id === "notification" ? " disabled" : ""}>${p.id === "notification" ? "알림 상태 확인 중…" : "권한 확인"}</button>
+          <button id="lgAllow" class="btn secondary" data-perm="${p.id}" disabled>${i18n.t('확인 중…')}</button>
           <button id="lgPermNext" class="btn primary" disabled>${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
         </div>
       </footer>
     </div>`;
+  const gen = renderGen; // 이 슬라이드의 세대 — 비동기 응답이 늦게 오면 이걸로 버린다.
+  const alive = () => gen === renderGen;
   const btn = el.querySelector("#lgAllow");
   const backBtn = el.querySelector("#lgPermBack");
   const nextBtn = el.querySelector("#lgPermNext");
@@ -231,8 +247,13 @@ function renderStep() {
     if (grantedNow) {
       btn.textContent = i18n.t('허용됨 ✓');
       btn.disabled = true;
+      delete btn.dataset.denied;
       alt.textContent = i18n.t('이 권한은 허용되어 있어요.');
     }
+  };
+  const completePermission = (id) => {
+    markPermGranted(id);
+    paintGranted(true);
   };
   backBtn?.addEventListener("click", () => {
     if (permIdx <= 0) return;
@@ -248,6 +269,10 @@ function renderStep() {
     if (progressKey) { try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {} }
     renderStep();
   });
+  // 이 슬라이드의 자동 판정 진입점 — 아래 두 분기(알림/폴더)가 각각 채운다. 화면 조립이 끝난 뒤
+  //  한 번 호출되고, [다시 확인] 버튼도 같은 것을 부른다(두 경로가 갈라지지 않게).
+  let permAutoCheck = null;
+  let watchNotifPermission = null;
   el.querySelector("#lgOpenFolderSettings")?.addEventListener("click", async (ev) => {
     const open = ev.currentTarget;
     open.disabled = true;
@@ -266,10 +291,11 @@ function renderStep() {
     const statusTitle = el.querySelector("#lgNotifStatusTitle");
     const statusBody = el.querySelector("#lgNotifStatusBody");
     const paintNotifPermission = (value) => {
+      if (!alive()) return;
       const granted = value === "granted";
       if (granted) markPermGranted("notification");
-      btn.textContent = granted ? i18n.t('허용됨 ✓') : i18n.t('권한 확인');
-      btn.disabled = !granted;
+      btn.textContent = granted ? i18n.t('허용됨 ✓') : i18n.t('다시 확인');
+      btn.disabled = !!granted;
       paintGranted(granted);
       soundSelect.disabled = !granted;
       test.disabled = !granted;
@@ -293,7 +319,43 @@ function renderStep() {
       }
     });
     bindOpenSettings(openSettings);
-    refreshNotificationPermission().then(paintNotifPermission);
+    // 자동 판정 — 읽기(state)로 끝내지 않고 **미결정이면 그 자리에서 요청**한다(팝업). 사용자가
+    //  [권한 확인]을 눌러야만 팝업이 뜨던 예전 구성의 대체다. 거부 상태면 macOS 가 다시 묻지
+    //  않으므로 요청하지 않고(무의미한 대기) 시스템 설정 유도 + 감시로 간다.
+    permAutoCheck = async () => {
+      btn.disabled = true;
+      btn.textContent = i18n.t('확인 중…');
+      let value = await refreshNotificationPermission();
+      if (!alive()) return;
+      if (value === "prompt") {
+        value = (await api.notifPermission().catch(() => false)) ? "granted" : "denied";
+        if (!alive()) return;
+      }
+      paintNotifPermission(value);
+      if (value !== "granted") watchNotifPermission();
+    };
+    // 시스템 설정에서 켜는 순간 자동 반영 — 폴링 + 복귀 포커스. 렌더가 바뀌면 permWatchStop 이 건다.
+    watchNotifPermission = () => {
+      stopPermWatch();
+      let checking = false;
+      const check = async () => {
+        if (checking || !alive()) return;
+        checking = true;
+        const value = await refreshNotificationPermission();
+        checking = false;
+        if (!alive() || value !== "granted") return;
+        stopPermWatch();
+        paintNotifPermission("granted");
+      };
+      const timer = setInterval(check, 1200);
+      const onFocus = () => setTimeout(check, 250);
+      window.addEventListener("focus", onFocus);
+      permWatchStop = () => {
+        clearInterval(timer);
+        window.removeEventListener("focus", onFocus);
+        permWatchStop = null;
+      };
+    };
     soundSelect?.addEventListener("change", () => {
       test.textContent = i18n.t('테스트 알림 보내기');
     });
@@ -309,46 +371,44 @@ function renderStep() {
       }
     });
   }
-  const completePermission = (id) => {
-    markPermGranted(id);
-    paintGranted(true);
-  };
-  btn.addEventListener("click", async () => {
-    if (p.folder && btn.dataset.denied === "1") {
+  if (p.folder) {
+    // 보호 경로 프로브 = 미결정이면 곧 OS 팝업이고(응답까지 블로킹), 결정돼 있으면 즉답이다.
+    //  그래서 슬라이드 진입 시 그냥 돌린다 — 허용된 권한 앞에서는 아무 팝업도 뜨지 않는다.
+    permAutoCheck = async () => {
       btn.disabled = true;
-      btn.textContent = i18n.t('시스템 설정 여는 중…');
-      await api.openFilesPrivacy().catch(() => {});
-      btn.textContent = i18n.t('설정에서 권한을 켜주세요');
+      btn.textContent = i18n.t('확인 중…');
+      const ok = await api.probeFolder(p.id).catch(() => false);
+      if (!alive()) return;
+      if (ok) { completePermission(p.id); return; }
+      // macOS 는 한 번 거부한 보호 경로 팝업을 다시 띄우지 않는다 → 재요청이 아니라 설정 유도 +
+      //  사용자가 토글을 켜는 순간까지 실제 접근을 폴링한다(켜지면 [다음]이 저절로 열린다).
+      btn.dataset.denied = "1";
+      btn.textContent = i18n.t('다시 확인');
       btn.disabled = false;
+      alt.textContent = i18n.t('시스템 설정에서 권한을 켜면 자동으로 확인해요.');
+      stopPermWatch();
       let checking = false;
-      folderPermissionWatch = setInterval(async () => {
-        if (checking) return;
+      const timer = setInterval(async () => {
+        if (checking || !alive()) return;
         checking = true;
         const granted = await api.probeFolder(p.id).catch(() => false);
         checking = false;
-        if (!granted) return;
-        clearInterval(folderPermissionWatch);
-        folderPermissionWatch = null;
+        if (!alive() || !granted) return;
+        stopPermWatch();
         completePermission(p.id);
       }, 750);
-      return;
-    }
-    btn.disabled = true;
-    btn.textContent = i18n.t('확인 중…');
-    const ok = p.folder
-      ? await api.probeFolder(p.id).catch(() => false)
-      : await api.notifPermission().catch(() => false);
-    if (ok) {
-      completePermission(p.id);
-      return;
-    }
-    // macOS는 한 번 거부한 보호 폴더 팝업을 다시 띄우지 않는다. 이후 CTA는 재요청이 아니라
-    // 파일 및 폴더 설정을 열고, 사용자가 토글을 켜는 순간까지 실제 접근을 폴링한다.
-    btn.dataset.denied = "1";
-    btn.textContent = i18n.t('다시 확인');
-    btn.disabled = false;
-    alt.textContent = i18n.t('시스템 설정에서 권한을 변경한 뒤 다시 확인해 주세요.');
-  });
+      permWatchStop = () => { clearInterval(timer); permWatchStop = null; };
+    };
+  }
+  // [다시 확인] = 자동 판정과 **같은 것**을 다시 부른다(경로가 갈라지면 둘 중 하나가 낡는다).
+  btn.addEventListener("click", () => { permAutoCheck?.(); });
+  permAutoCheck?.();
+}
+
+function stopPermWatch() {
+  if (!permWatchStop) return;
+  try { permWatchStop(); } catch (_) {}
+  permWatchStop = null;
 }
 
 // 셋업 종료 — 계정별 완료 기록 + 게이트 닫기 + 다음 스텝(에이전트 온보딩, 계정별 1회 자체 판정).

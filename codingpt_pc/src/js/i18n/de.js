@@ -658,5 +658,21 @@ export default {
   "회원 탈퇴 시 계정과 모든 데이터가 삭제되며 되돌릴 수 없습니다.": "Beim Löschen des Kontos werden es und alle Daten entfernt — das ist nicht rückgängig zu machen.",
   "휴대폰·태블릿에서 이어서 작업하기": "Auf Handy oder Tablet weiterarbeiten",
   "🔒 복호화 중…": "🔒 Wird entschlüsselt…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Verschlüsselter Inhalt (kein Schlüssel auf diesem Gerät)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Verschlüsselter Inhalt (kein Schlüssel auf diesem Gerät)",
+  "시스템 설정에서 권한을 켜면 자동으로 확인해요.": "Aktiviere die Berechtigung in den Systemeinstellungen — wir prüfen das automatisch.",
+  "음악 보관함": "Musikmediathek",
+  "+ 로 이 PC의 폴더를 추가하세요": "Mit + einen Ordner auf diesem PC hinzufügen",
+  "PC 연결하기": "PC verbinden",
+  "기기 관리": "Geräte verwalten",
+  "다운로드 페이지 열기": "Download-Seite öffnen",
+  "더 보기": "Mehr anzeigen",
+  "로그인하면 이 목록에 그 PC가 자동으로 나타납니다.": "Nach der Anmeldung erscheint dieser PC automatisch in dieser Liste.",
+  "베타": "Beta",
+  "에 워크스페이스 추가": " — Workspace hinzufügen",
+  "연결할 PC에서 CodingPT를 설치하고 지금 계정으로 로그인하세요.": "Installiere CodingPT auf dem PC, den du verbinden willst, und melde dich mit diesem Konto an.",
+  "웹뷰": "Webansicht",
+  "채팅 모드": "Chat-Modus",
+  "채팅 모드로 보기 (베타)": "Als Chat ansehen (Beta)",
+  "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.": "Zeigt die KI-Unterhaltung des Terminals als Chat-Ansicht. Noch in Arbeit, daher standardmäßig aus.",
+  "이 PC의 폴더를 추가하세요": "Ordner von diesem PC hinzufügen"
 };

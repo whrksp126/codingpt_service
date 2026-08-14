@@ -86,6 +86,41 @@ for (const [fn, end] of [
 ok(/T\.TAB_KINDS\.includes\(src\.kind\)/.test(wsv),
   '★ 병합 가능 판정이 종류 목록을 쓴다(예전엔 ide/preview 만 손으로 적혀 있었다)');
 
+// ── 2-b. **탭 하나**를 옮기는 경로도 종류로 막지 않는다 (2026-08-14 재발) ─────────
+//  증상: 터미널 탭을 잡아 프리뷰/IDE/시뮬레이터 pane 에 놓으면 아무 일도 안 났다.
+//  원인: `mergeTabbar`(pane 통째)만 TAB_KINDS 로 고쳐지고, 단일 탭 판정 `termTabbar` 와
+//   실제 이동(moveTab/moveTabToIndex)은 **받는 쪽이 터미널일 때만** 성립하도록 남아 있었다.
+//  계약: 단일 표면 pane 은 거절이 아니라 **탭 host 로 승격**시켜 받는다.
+ok(/const termTabbar = !wholePane && canBeTab\(targetLeaf\)/.test(wsv),
+  '★ 단일 탭 탭바 드롭 판정이 canBeTab 을 쓴다(받는 쪽 종류를 손으로 적지 않는다)');
+ok(!/const termTabbar = !wholePane && targetLeaf && targetLeaf\.kind === "terminal"/.test(wsv),
+  '★ termTabbar 가 다시 === "terminal" 로 굳지 않았다');
+ok(/async function moveTabIntoSurfacePane/.test(wsv),
+  '단일 표면 pane 을 탭 host 로 승격해 받는 경로가 있다');
+for (const fn of ['async function moveTab(', 'async function moveTabToIndex(']) {
+  const a = wsv.indexOf(fn);
+  const body = a < 0 ? '' : wsv.slice(a, a + 900);
+  ok(a >= 0, `${fn} 이 있다`);
+  ok(!/dst\.kind !== "terminal"\) return;/.test(body),
+    `★ ${fn} 이 비터미널 대상을 그냥 거절하지 않는다`);
+  ok(/moveTabIntoSurfacePane\(srcId, index, dstId/.test(body),
+    `★ ${fn} 이 비터미널 대상을 승격 경로로 넘긴다`);
+}
+//  드롭 미리보기(존 하이라이트)도 같은 규칙이어야 한다 — 여기만 어긋나면 "동작은 되는데
+//  표시가 안 떠서" 사용자가 못 놓는다(더 헷갈리는 실패).
+ok(/zone === "center" && !\(dstLeaf\.kind === "terminal" \|\| T\.TAB_KINDS\.includes\(dstLeaf\.kind\)\)/.test(wsv),
+  '★ 미리보기의 no-op 판정도 TAB_KINDS 를 쓴다');
+//  승격은 mergeAsTabs 와 같은 방식(새 host leaf 로 교체)이어야 한다 — 두 경로가 갈라지면 또 어긋난다.
+{
+  const a = wsv.indexOf('async function moveTabIntoSurfacePane');
+  const body = a < 0 ? '' : wsv.slice(a, wsv.indexOf('// 탭을 다른 pane 으로 이동', a));
+  ok(/T\.leafToTab\(dst\)/.test(body), '승격 경로가 변환 함수를 쓴다(자기 표를 만들지 않는다)');
+  ok(/kind: "terminal", tabs/.test(body) && /T\.replaceLeaf\(rt\.layout, dstId, host\)/.test(body),
+    '★ 승격 = dst 자리를 새 host leaf 로 교체(mergeAsTabs 와 동형)');
+  ok(/_preservePreview = true/.test(body),
+    '★ 프리뷰를 받을 때 webview 를 닫지 않고 승계한다(표면 보존)');
+}
+
 //  헤더·드래그 고스트의 이름/아이콘도 한 표에서 온다.
 const pane = read(path.join(PC, 'pane.js'));
 ok(/export function surfaceLabel/.test(pane) && /kind === "emulator"/.test(pane),

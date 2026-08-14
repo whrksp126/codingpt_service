@@ -45,7 +45,9 @@ struct PtyHandle {
 //  epoch/target/last_* 의미는 mac 과 동일(위 주석 참조).
 #[cfg(windows)]
 struct PtyHandle {
-    writer: std::fs::File,
+    // 겹침 I/O 파이프 뷰 — reader 스레드가 출력 대기로 영구 블로킹 중이어도 입력 쓰기가 막히지 않는다.
+    //  std::fs::File 이면 동기 핸들 직렬화로 첫 키 입력에서 메인 스레드가 정지한다(winpipe.rs 주석).
+    writer: crate::winpipe::PipeClient,
     reader: Option<std::thread::JoinHandle<()>>,
     epoch: u64,
     last_cols: u16,

@@ -253,7 +253,11 @@ function beginTabDrag(srcId, index, e) {
     //   "고쳐서 잘 되던 게 갑자기 이상해졌다" 의 정체. 판정의 정본은 `TAB_KINDS` 하나다.
     const targetLeaf = T.findLeaf(rt.layout, paneId);
     const canBeTab = (leaf) => !!leaf && (leaf.kind === "terminal" || T.TAB_KINDS.includes(leaf.kind));
-    const termTabbar = !wholePane && targetLeaf && targetLeaf.kind === "terminal";
+    //  ★ 재발(2026-08-14): 위 주석대로 `mergeTabbar` 만 TAB_KINDS 로 고쳐졌고 **이 줄만** 다시
+    //   `=== "terminal"` 로 남아 있었다. 그래서 **탭 하나를 프리뷰/IDE/시뮬레이터 pane 에 못 옮겼다**
+    //   (받는 쪽이 터미널 pane 일 때만 성립). 단일 표면 pane 은 드롭 시 탭 host 로 승격시키면 되므로
+    //   종류로 막을 이유가 없다 — 판정의 정본은 `canBeTab` 하나다.
+    const termTabbar = !wholePane && canBeTab(targetLeaf);
     const mergeTabbar = wholePane && T.TAB_KINDS.includes(src.kind)
       && targetLeaf && paneId !== srcId && canBeTab(targetLeaf);
     if ((termTabbar || mergeTabbar) && headR && ev.clientY >= headR.top && ev.clientY <= headR.bottom) {
@@ -406,8 +410,9 @@ function displayDrop(layout, src, wholePane, srcId, drop) {
       && (dstLeaf.kind === "terminal" || T.TAB_KINDS.includes(dstLeaf.kind)) && zone === "center";
     removed = join || zone !== "center";
   } else {
-    // 터미널 pane 의 탭 드래그: 비터미널 pane 가운데는 이동 불가(no-op) → 숨김.
-    if (zone === "center" && dstLeaf.kind !== "terminal") return null;
+    // 탭 드래그: 단일 표면 pane(preview/ide/emulator) 가운데도 이제 받는다(탭 host 로 승격).
+    //  탭이 될 수 없는 종류만 no-op → 숨김.
+    if (zone === "center" && !(dstLeaf.kind === "terminal" || T.TAB_KINDS.includes(dstLeaf.kind))) return null;
     removed = singleTab; // 마지막 탭 이동 = src pane 닫힘
   }
   const rect = removed ? T.rectAfterRemoval(layout, srcId, drop.paneId, rectOf) : rectOf(drop.paneId);
@@ -526,22 +531,19 @@ function renderMainTop(ws) {
   name.className = "mt-name";
   name.textContent = ws?.name || i18n.t('워크스페이스');
   mtDyn.append(name);
-  // 통합 추가 버튼(터미널/IDE/웹뷰) — pane 별 버튼 대신 여기 고정. 활성 pane 기준 자동 배치.
+  // 헤더 우측 = [찾기] │ [+] (2026-08-14 사용자 확정).
+  //  예전엔 터미널·IDE·웹뷰·모바일화면 4개가 나란히 있었다. 아이콘 4개는 "무엇을 여는 버튼인지"를
+  //  모양만으로 구분해야 해서 매번 툴팁을 읽어야 했고, 종류가 늘 때마다 헤더가 길어졌다.
+  //  → 추가는 [+] 하나로 모으고, 무엇을 추가할지는 메뉴가 **이름으로** 말한다.
+  //  ⚠ `data-cmd` 는 팔레트·단축키가 이 버튼을 찾아 하이라이트하는 열쇠다. 옛 4버튼의 명령
+  //   (ws.addTerminal/ws.addIde/ws.ports/ws.addEmulator)은 그대로 살아 있고(팔레트에서 직접 실행),
+  //   여기서는 [+] 하나가 `ws.add` 를 갖는다.
   if (ws) {
     const spacer = document.createElement("span");
     spacer.className = "mt-spacer";
     const adds = document.createElement("span");
     adds.className = "mt-adds";
-    const mkBtn = (icon, title, kind) => {
-      const b = document.createElement("button");
-      b.className = "pane-ctrl";
-      b.title = title;
-      b.dataset.cmd = "ws.add" + kind[0].toUpperCase() + kind.slice(1);
-      b.innerHTML = icon({ size: 16 });
-      b.addEventListener("click", () => smartAdd(kind));
-      return b;
-    };
-    // 명령 팔레트(2026-08-04) — **추가 3종의 왼쪽에 구분선을 두고** 놓는다.
+    // 명령 팔레트(2026-08-04) — **[+] 의 왼쪽에 구분선을 두고** 놓는다.
     //  왼쪽 = 찾아 열기, 오른쪽 = 새로 추가. 워크스페이스 단위인 이유(사용자 확정): 기본 모드가
     //  파일 열기라 워크스페이스가 없으면 보여줄 것이 없고, `>` 명령도 대부분 이 워크스페이스의
     //  터미널·탭에서 벌어진다. 전역 명령(설정 등)은 팔레트 안의 행으로 들어간다.
@@ -559,41 +561,46 @@ function renderMainTop(ws) {
     });
     const palDiv = document.createElement("span");
     palDiv.className = "mt-div";
-    // 터미널 버튼만 드롭다운 — [터미널] + 이 PC 에 **설치된** 에이전트들(사용자 확정 2026-07-27).
-    //  에이전트를 고르면 새 터미널을 만들고 그 경로에서 명령을 타이핑해 실행한다. 탭 이름·아이콘은
-    //  손대지 않는다 — tmux 자동 이름과 로고 감지가 이미 claude/codex 를 알아본다(사용자 확정).
-    const termBtn = document.createElement("button");
-    termBtn.className = "pane-ctrl";
-    termBtn.title = i18n.t('터미널 추가');
-    termBtn.dataset.cmd = "ws.addTerminal";
-    termBtn.innerHTML = icons.terminal({ size: 16 });
-    termBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddTermMenu(termBtn); });
-    // 웹뷰 버튼도 드롭다운 — [빈 웹뷰] + **지금 열려 있는 포트**. 프리뷰 탭이 없을 때도
-    //  포트 목록에 닿는 유일한 자리다(주소창 드롭다운은 프리뷰가 이미 열려 있어야 보인다).
-    const webBtn = document.createElement("button");
-    webBtn.className = "pane-ctrl";
-    webBtn.title = i18n.t('웹뷰 추가');
-    webBtn.dataset.cmd = "ws.ports";
-    webBtn.innerHTML = icons.globe({ size: 16 });
-    webBtn.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      import("./ports.js").then((m) => m.openPortsMenu(webBtn, {
-        ws: activeWs(),
-        onBlank: () => smartAdd("preview"),
-        onPick: (port) => smartAdd("preview", { url: m.portUrl(port) }),
-      }));
-    });
-    adds.append(
-      palBtn,
-      palDiv,
-      termBtn,
-      mkBtn(icons.code, i18n.t('IDE 추가'), "ide"),
-      webBtn,
-      // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
-      mkBtn(icons.smartphone, i18n.t('모바일 화면 추가'), "emulator"),
-    );
+    const addBtn = document.createElement("button");
+    addBtn.className = "pane-ctrl";
+    addBtn.title = i18n.t('추가');
+    addBtn.dataset.cmd = "ws.add";
+    addBtn.innerHTML = icons.plus({ size: 16 });
+    addBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddMenu(addBtn); });
+    adds.append(palBtn, palDiv, addBtn);
     mtDyn.append(spacer, adds);
   }
+}
+
+// "+" 메뉴 — 추가할 수 있는 표면 4종. 터미널·웹뷰는 곧바로 만들지 않고 **기존 드롭다운**으로
+//  넘긴다(에이전트 목록 / 열린 포트 목록). 그 두 메뉴가 이 기능의 정본이라 여기서 다시 구현하지
+//  않는다 — 두 벌이 되면 한쪽만 고쳐지는 결함이 된다.
+//  · `›` 는 "여기서 끝나지 않는다"는 표시다. IDE·모바일 화면에는 없다(누르면 바로 생긴다).
+function openAddMenu(anchor) {
+  document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+  const menu = document.createElement("div");
+  menu.className = "pv-menu";
+  menu.style.minWidth = "180px";
+  const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+  const closer = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const row = (iconFn, label, onClick, more) => {
+    const b = document.createElement("button");
+    b.className = "pv-menu-item";
+    b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`
+      + (more ? `<span class="pvm-more">${icons.chevronRight({ size: 13 })}</span>` : "");
+    b.addEventListener("click", () => { close(); onClick(); });
+    menu.appendChild(b);
+  };
+  row(icons.terminal, i18n.t('터미널'), () => openAddTermMenu(anchor), true);
+  row(icons.code, i18n.t('IDE'), () => smartAdd("ide"));
+  row(icons.globe, i18n.t('웹뷰'), () => openWebviewMenu(anchor), true);
+  // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
+  row(icons.smartphone, i18n.t('모바일 화면'), () => smartAdd("emulator"));
+  document.body.appendChild(menu);
+  const r = anchor.getBoundingClientRect();
+  menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8)) + "px";
+  menu.style.top = r.bottom + 6 + "px";
+  setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
 }
 
 // "터미널 추가 ▾" — [터미널] + 이 PC 에 설치된 에이전트. 스타일은 프리뷰 ⋯ 메뉴(.pv-menu) 재사용.
@@ -752,9 +759,25 @@ export function openFileSmart(rel) {
   return smartAdd("ide", { openPath: rel });
 }
 
-/** 헤더의 포트 버튼을 명령으로도 열 수 있게(팔레트·단축키에서 같은 메뉴). */
+/** 헤더 버튼 찾기 — 팔레트·단축키가 같은 자리에서 같은 메뉴를 열 수 있게. */
 export function headerButton(which) {
   return mtDyn ? mtDyn.querySelector(`.mt-adds [data-cmd="${which}"]`) : null;
+}
+
+/**
+ * "웹뷰 추가" 메뉴 — [빈 웹뷰] + **지금 열려 있는 포트**. 프리뷰 탭이 없을 때도 포트 목록에 닿는
+ *  유일한 자리다(주소창 드롭다운은 프리뷰가 이미 열려 있어야 보인다).
+ *  헤더 [+] 의 `웹뷰 ›` 행과 명령(`ws.ports`)이 **같은 함수**를 부른다 — 두 벌이 되면 한쪽만 낡는다.
+ *  anchor 를 안 주면 헤더의 [+] 에 건다(명령/단축키 경로).
+ */
+export function openWebviewMenu(anchor) {
+  const at = anchor || headerButton("ws.add");
+  if (!at) return;
+  import("./ports.js").then((m) => m.openPortsMenu(at, {
+    ws: activeWs(),
+    onBlank: () => smartAdd("preview"),
+    onPick: (port) => smartAdd("preview", { url: m.portUrl(port) }),
+  }));
 }
 
 export function updateWorkspaceView() {
@@ -905,6 +928,51 @@ function attachDrag(divider, box, firstWrap, secondWrap, dir, path) {
   });
 }
 
+// 탭 하나를 **단일 표면 pane**(preview/ide/emulator)에 떨어뜨린 경우 — 그 pane 을 탭 host 로
+//  승격시켜 받는다. "모든 표면 탭은 모든 pane 으로 옮길 수 있다"의 하부 구현이며, 승격 방식은
+//  mergeAsTabs(pane 통째 병합)와 동일하게 맞춘다(두 경로가 갈라지면 또 종류별로 어긋난다).
+//
+//  ★ 승격은 dst 자리를 **새 id 의 host leaf** 로 교체한다 → 기존 dst PaneView 는 리컨실러가
+//   dispose 한다. 그러므로 이 함수에서 panes.get(dstId) 의 갱신 메서드를 부르면 안 된다
+//   (곧 사라질 뷰를 건드리는 것 = 표면이 두 번 생성되거나 프리뷰 webview 가 닫힌다).
+async function moveTabIntoSurfacePane(srcId, index, dstId, insertIndex) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt) return;
+  const src = T.findLeaf(rt.layout, srcId);
+  const dst = T.findLeaf(rt.layout, dstId);
+  if (!src || !dst || srcId === dstId) return;
+  if (src.kind !== "terminal" || !T.TAB_KINDS.includes(dst.kind)) return;
+  if (index < 0 || index >= src.tabs.length) return;
+  const moved = src.tabs[index];
+  // dst 표면을 탭으로 — 프리뷰는 webview 를 닫지 않고 승계한다(dispose 가 이 표식을 본다).
+  if (dst.kind === "preview") {
+    const dp = panes.get(dstId);
+    if (dp) dp._preservePreview = true;
+  }
+  const dstTab = T.leafToTab(dst);
+  if (!dstTab) return;
+  const ws = activeWs();
+  src.tabs.splice(index, 1);
+  if (src.active >= src.tabs.length) src.active = Math.max(0, src.tabs.length - 1);
+  // host 는 탭이 둘뿐이므로 삽입 위치는 앞/뒤 둘 중 하나다(탭바 좌측 절반 = 앞).
+  const before = insertIndex != null && insertIndex <= 0;
+  const tabs = before ? [moved, dstTab] : [dstTab, moved];
+  const host = { id: T.newPaneId(), kind: "terminal", tabs, active: tabs.indexOf(moved) };
+  rt.layout = T.replaceLeaf(rt.layout, dstId, host);
+  rt.focusId = host.id;
+  // 옮긴 것이 혼합 탭(비터미널 표면)이면 src 쪽 본문 정리 — 프리뷰는 보존·승계.
+  if (!isTermTab(moved)) panes.get(srcId)?.disposeMixedTab?.(moved, true);
+  if (!src.tabs.length) {
+    S.closePane(state.activeWsId, srcId);
+    return; // closePane → emit → 재렌더
+  }
+  panes.get(srcId)?.buildHead();
+  panes.get(srcId)?.showActiveTab?.();
+  const w = src.tabs[src.active].win;
+  if (typeof w === "number" && isThisHost(ws)) panes.get(srcId)?._reattach?.(w); // src 스트림을 남은 활성 탭으로
+  S.emit();
+}
+
 // 탭을 다른 pane 으로 이동(드롭). src 가 비면 pane 닫기.
 //  전용 세션 모델: 탭(win=tid) 데이터만 이동 — dst 는 activateWin(재attach), src 는 남은 탭 재attach.
 async function moveTab(srcId, index, dstId) {
@@ -912,7 +980,9 @@ async function moveTab(srcId, index, dstId) {
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   const dst = T.findLeaf(rt.layout, dstId);
-  if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
+  if (!src || !dst || src.kind !== "terminal") return;
+  // 받는 쪽이 아직 단일 표면 pane 이면 탭 host 로 승격해서 받는다(종류로 거절하지 않는다).
+  if (dst.kind !== "terminal") return moveTabIntoSurfacePane(srcId, index, dstId, null);
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
   const isT = isTermTab(tab);
@@ -963,7 +1033,9 @@ async function moveTabToIndex(srcId, index, dstId, insertIndex) {
   if (!rt) return;
   const src = T.findLeaf(rt.layout, srcId);
   const dst = T.findLeaf(rt.layout, dstId);
-  if (!src || !dst || src.kind !== "terminal" || dst.kind !== "terminal") return;
+  if (!src || !dst || src.kind !== "terminal") return;
+  // 받는 쪽이 아직 단일 표면 pane 이면 탭 host 로 승격해서 받는다(종류로 거절하지 않는다).
+  if (dst.kind !== "terminal") return moveTabIntoSurfacePane(srcId, index, dstId, insertIndex);
   if (index < 0 || index >= src.tabs.length) return;
   const tab = src.tabs[index];
   const isT = isTermTab(tab);

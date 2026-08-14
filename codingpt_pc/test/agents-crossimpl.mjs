@@ -101,8 +101,11 @@ ok(/launchAgent: undefined/.test(appPane),
 ok(/agents\.launch/.test(pcPane), 'PC: 실행은 데몬 agents.launch 에 맡긴다');
 ok(/launchAgent\(/.test(appPane), '앱: 실행은 데몬 launchAgent RPC 에 맡긴다');
 const daemonSrv = strip(read(path.join(DAEMON, 'cpt-server.js')));
-ok(/pane_current_command/.test(daemonSrv) && /capture-pane/.test(daemonSrv),
-  '데몬: 셸 준비를 tmux 에 직접 물어 판정한다(프롬프트 전 전송 = 입력 씹힘)');
+// ★ 2026-08-14: 판정은 그대로지만 **묻는 통로**가 tmux 직결에서 termBackend(win32 포팅)로 바뀌었다.
+//  고정할 것은 "무엇을 근거로 판정하는가"(실행 중 명령 + 화면에 그려진 것)이지 tmux 명령 문자열이
+//  아니다 — 옛 정규식(pane_current_command/capture-pane)은 리팩터링 이후 계속 빨간 채였다.
+ok(/termBackend\.info\(target\)/.test(daemonSrv) && /termBackend\.capture\(target/.test(daemonSrv),
+  '데몬: 셸 준비를 터미널에 직접 물어 판정한다(프롬프트 전 전송 = 입력 씹힘)');
 
 // ── 6. 배선 대상은 claude/codex 뿐 — 남의 개인 설정 파일을 쓰지 않는다 ────────
 ok(!/\.gemini\/settings\.json|\.cursor\/|writeFileSync\([^)]*gemini/.test(strip(daemonAgents)),
@@ -157,7 +160,7 @@ ok(/wirables\.filter\(\(a\) => a\.installed\)/.test(pcView),
 ok(/_fitLocalOnly\(\);\s*\n?\s*const \{ cols, rows \} = this\.term;/.test(pcPane)
    || /_fitLocalOnly\(\)/.test(pcPane) && /_openChannel\(win\) \{[\s\S]{0,200}_fitLocalOnly/.test(pcPane),
   'PC: _openChannel 이 크기를 읽기 전에 실측 재맞춤한다(라이브 실측 42x15 사고)');
-ok(/window_width/.test(daemonSrv),
+ok(/termBackend\.info\(target\)\)\.cols/.test(daemonSrv) && /lastW !== null && w === lastW/.test(daemonSrv),  // 폭이 두 번 연속 같을 때만 전송
   '데몬 launch: 창 폭이 안정된 뒤 명령을 보낸다(TUI 는 첫 화면을 그 순간 폭으로 그린다)');
 
 
@@ -263,7 +266,7 @@ ok(/id="lgOpenNotifSettings"/.test(pcGate)
 ok(/id="lgNotifControls" class="notif-onb-controls is-disabled"/.test(pcGate)
   && /soundSelect\.disabled = !granted/.test(pcGate)
   && /test\.disabled = !granted/.test(pcGate)
-  && /btn\.disabled = !granted/.test(pcGate)
+  && /nextBtn\.disabled = !grantedNow/.test(pcGate)
   && !/lgOpenNotifSettingsReady/.test(pcGate),
   'PC: 상태·설정 구조는 유지하고 OFF면 소리·테스트·계속만 비활성, ON이면 같은 자리에서 활성화한다');
 ok(/mac_usernotifications::Notification::new/.test(pcBridge)
@@ -274,13 +277,28 @@ ok(/test\.textContent = ok \? "다시 테스트"/.test(pcGate)
   && /soundSelect\?\.addEventListener\("change"[\s\S]*"테스트 알림 보내기"/.test(pcGate)
   && !/보냈어요 ✓/.test(pcGate),
   'PC: 테스트 알림은 성공 후에도 재전송할 수 있고 소리 변경 시 버튼 문구를 초기화한다');
-ok(/btn\.dataset\.denied === "1"/.test(pcGate)
+ok(/btn\.dataset\.denied = "1"/.test(pcGate)
   && /api\.openFilesPrivacy\(\)/.test(pcGate)
-  && /folderPermissionWatch = setInterval/.test(pcGate)
-  && /api\.probeFolder\(p\.id\)/.test(pcGate)
+  && /setInterval\(async \(\)[\s\S]{0,400}api\.probeFolder\(p\.id\)/.test(pcGate)
   && /id="lgOpenFolderSettings"/.test(pcGate)
   && /btn\.textContent = "다시 확인"/.test(pcGate),
   'PC: 보호 폴더는 설정 화면을 직접 열고 승인 상태를 다시 확인할 수 있다');
+// ★ 2026-08-14 사용자 확정: 권한 판정은 **슬라이드 진입 시 자동**이다. 예전엔 이미 허용된 권한
+//  앞에서도 [권한 확인] 을 한 번 눌러야 [다음] 이 열렸다("굳이 사용자가 누르지 않아도 되게").
+//  알림도 상태만 읽지 않고 미결정이면 그 자리에서 요청한다(팝업). 버튼은 거부 뒤 재확인 전용.
+ok(/permAutoCheck\?\.\(\)/.test(pcGate)
+  && /btn\.addEventListener\("click", \(\) => \{ permAutoCheck\?\.\(\); \}\)/.test(pcGate)
+  && /value === "prompt"/.test(pcGate) && /api\.notifPermission\(\)/.test(pcGate)
+  && !/알림 상태 확인 중…|"권한 확인"|'권한 확인'/.test(pcGate),
+  'PC: 권한은 슬라이드 진입 시 자동 판정한다(사용자가 [권한 확인] 을 누를 필요가 없다)');
+// ★ TCC 는 폴더 세 개가 아니다 — 홈 훑기가 iCloud Drive·음악 보관함에 닿으면 **작업 도중** 팝업이
+//  뜬다(2026-08-14 실사고). 온보딩에서 함께 받고, 없는 경로는 통과시켜 승인 수단 없는 화면에
+//  사용자를 가두지 않는다.
+ok(/\{ id: "icloud"/.test(pcGate) && /\{ id: "media"/.test(pcGate)
+  && /"icloud" => h\.join\("Library"\)\.join\("Mobile Documents"\)/.test(pcBridge)
+  && /Music Library\.musiclibrary/.test(pcBridge)
+  && /ErrorKind::NotFound/.test(pcBridge),
+  'PC: iCloud Drive·음악 보관함 TCC 도 온보딩에서 미리 받는다(없는 경로는 통과)');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');
@@ -294,6 +312,69 @@ ok(/S\.setView\("workspace"\)/.test(pcSettings2.slice(pcSettings2.indexOf('doDel
   'PC: 이 기기에서 탈퇴해도 설정 모달을 닫는다(재가입 첫 화면에 잔상 금지)');
 ok(/markPermGranted\(b\.dataset\.f\)/.test(pcSettings2),
   'PC: 설정의 폴더 허용 성공도 로컬 기록에 남긴다(온보딩의 "없는 권한만" 판정 근거)');
+
+// ── 13. 미읽음 강조 테두리는 "사용자가 봤다"로 꺼진다 (2026-08-14 실사고) ─────
+// 실사고: 알림이 온 터미널을 클릭해도 강조 테두리가 안 꺼졌다. 원인 둘 —
+//  ① 읽음 판정이 **터미널 본문(termEl)** 클릭에만 걸려 있어 같은 탭을 **채팅 모드**로 보고 있으면
+//     아무리 읽어도 안 꺼졌다 → 판정 자리를 pane 전체(el mousedown, isTrusted)로 올렸다.
+//  ② 알림 행을 눌러 점프해도 누른 그 한 건만 읽음이라(readOne) 같은 터미널의 나머지 미읽음이
+//     테두리를 계속 켜 뒀다 → 점프 시 그 (cwd,win) 을 통째로 읽음 처리한다.
+ok(/this\.el\.addEventListener\("mousedown"[\s\S]{0,600}onTabActivated\?\.\(at\.win\)/.test(pcPane),
+  'PC: pane 어디를 클릭해도(채팅 모드 포함) 그 터미널의 알림이 읽음 처리된다');
+const pcSidebar = strip(read(path.join(PC, 'sidebar.js')));
+ok(/S\.readScope\(n\.cwd, Number\(n\.win\)\)/.test(pcSidebar),
+  'PC: 알림에서 터미널로 점프하면 그 터미널의 미읽음을 통째로 읽음 처리한다(테두리 잔존 방지)');
+
+// ── 14. 기기 우선 사이드바 + 채팅 모드(베타) — 2026-08-14 사용자 확정 ─────────
+// 사용자 지적: "워크스페이스 안에 PC 가 보이는 구조는 이해도 안 가고 사용성도 안 좋다".
+//  실제 소유 관계는 반대다 — 워크스페이스는 **그 PC 의 로컬 폴더**다. 그래서 PC 를 먼저 고르고
+//  고른 PC 의 워크스페이스만 그린다. 이 절은 그 구조가 되돌아가지 않게 못박는다.
+const pcState = strip(read(path.join(PC, 'state.js')));
+const appSidebar = strip(read(path.join(APP, 'components/SidebarContent.tsx')));
+const appShell = strip(read(path.join(APP, 'contexts/WorkspaceShellContext.tsx')));
+
+// (1) 기기 선택 = 양 플랫폼 같은 규칙(PC 만 · 마지막 선택 기억 · 사라진 기기는 폴백).
+for (const [name, src] of [['PC', pcState], ['앱', appShell]]) {
+  ok(/role !== ["\']controller["\']/.test(src) && /runnerKind !== ["\']cloud["\']/.test(src),
+    `${name}: 기기 목록은 PC 뿐이다(모바일 controller·클라우드 러너 제외)`);
+  ok(/cpt\.activeDeviceId\.v1/.test(src), `${name}: 마지막으로 고른 PC 를 기억한다(같은 저장 키)`);
+  ok(/workspacesForDevice/.test(src), `${name}: 워크스페이스 목록은 고른 PC 로 거른다`);
+}
+// 저장 키 문자열이 실제로 **같은가** — 다르면 "폰에선 됐는데 PC 는" 이 조용히 생긴다.
+ok(/cpt\.activeDeviceId\.v1/.test(pcState) && /cpt\.activeDeviceId\.v1/.test(appShell),
+  '★ 선택한 PC 저장 키가 두 플랫폼에서 같은 문자열이다');
+
+// (2) 상단 + 제거 — 워크스페이스 추가는 사이드바 안 `워크스페이스` 섹션 머리로 내려갔다.
+ok(!/i18n\.t\('새 워크스페이스'\)|"새 워크스페이스"/.test(pcSidebar) && /sb-sec/.test(pcSidebar),
+  'PC: 사이드바 상단 + 를 없애고 섹션 머리에서 추가한다');
+ok(/SectionHead/.test(appSidebar) && !/onPress=\{onNewWorkspace\} disabled=\{creating\}><Plus/.test(appSidebar),
+  '앱: 상단 컨트롤의 + 를 없애고 섹션 머리에서 추가한다');
+
+// (3) 프로젝트 그룹핑 폐기 — 화면·CSS·메뉴 어디에도 남기지 않는다(죽은 코드는 조용히 부활한다).
+ok(!/projectId/.test(pcSidebar), 'PC: 사이드바가 projectId(프로젝트 묶음)를 더 이상 쓰지 않는다');
+ok(!/projectId/.test(appSidebar), '앱: 사이드바가 projectId 를 더 이상 쓰지 않는다');
+ok(!/ws-proj-head|ws-proj-members/.test(pcCss), 'PC: 프로젝트 그룹 CSS 가 남아 있지 않다');
+ok(!/프로젝트에서 분리|다른 프로젝트와 합치기/.test(pcSidebar + appSidebar),
+  '분리/합치기 메뉴가 두 플랫폼 모두에서 사라졌다');
+
+// (4) 헤더 추가 버튼 = [+] 하나. 옛 4버튼(터미널/IDE/웹뷰/모바일화면)이 남아 있으면 걸린다.
+const appWv = strip(read(path.join(APP, 'workspace/WorkspaceView.tsx')));
+ok(/addBtn\.dataset\.cmd = "ws\.add"/.test(pcWv) && !/mkBtn\(icons\.code/.test(pcWv),
+  'PC: 헤더 추가는 [+] 하나다(옛 4버튼 폐기)');
+ok(/setAddSheet\(true\)/.test(appWv) && !/smartAdd\('emulator'\)\}><DeviceMobile/.test(appWv),
+  '앱: 헤더 추가는 [+] 하나다(옛 4버튼 폐기)');
+
+// (5) 채팅 모드(베타) — 판정은 **공용 함수 인자**로 들어가야 한다. 한쪽에서만 바깥 가드로 막으면
+//  §agent-toggle 의 조합 동치 검증이 그 차이를 못 본다(그래서 여기서 인자 존재를 고정한다).
+const pcSignal = strip(read(path.join(PC, 'agent-signal.js')));
+const appPresence = strip(read(path.join(APP, 'workspace/agentPresence.ts')));
+ok(/input\.betaOn === false/.test(pcSignal) && /input\.betaOn === false/.test(appPresence),
+  '★ 채팅 모드 베타 게이트가 두 구현의 resolveToggleVisible 안에 같은 규칙으로 있다');
+ok(/cpt\.chatBeta\.v1/.test(strip(read(path.join(PC, 'chat-model.js'))))
+  && /cpt\.chatBeta\.v1/.test(strip(read(path.join(APP, 'services/chatBeta.ts')))),
+  '★ 채팅 모드 베타 저장 키가 두 플랫폼에서 같은 문자열이다');
+ok(/베타/.test(strip(read(path.join(PC, 'settings.js')))) && /BetaTag/.test(strip(read(path.join(APP, 'components/SettingsModal.tsx')))),
+  '설정 화면이 베타임을 표시한다(양 플랫폼)');
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

@@ -25,11 +25,14 @@ fn pipe_path() -> Result<String, String> {
 }
 
 // 플랫폼별 커넥션 타입 — 둘 다 Read+Write+try_clone 을 제공하므로 이후 NDJSON 로직은 전부 공유한다.
-//  win32 named pipe 는 파일 핸들(read+write open)로 바이트 모드 통신(계약 2: Rust 측 규정).
+//  win32 named pipe 는 **겹침(overlapped) I/O** 클라이언트로 연다(계약 2: Rust 측 규정).
+//  ★ std::fs::File 로 열면 안 된다: 동기 핸들은 파일 오브젝트 단위로 I/O 가 직렬화돼,
+//   UI 채널처럼 "읽기는 영구 대기 + 쓰기는 수시" 인 duplex 사용에서 쓰기가 읽기 뒤에 막힌다
+//   (메인 스레드에서 쓰면 앱 전체 정지 — 2026-08-12 실기 실측). 상세는 winpipe.rs 주석.
 #[cfg(unix)]
 type CptStream = std::os::unix::net::UnixStream;
 #[cfg(windows)]
-type CptStream = std::fs::File;
+type CptStream = crate::winpipe::PipeClient;
 
 #[cfg(unix)]
 fn cpt_connect() -> Result<CptStream, String> {
@@ -41,17 +44,9 @@ fn cpt_connect() -> Result<CptStream, String> {
 #[cfg(windows)]
 fn cpt_connect() -> Result<CptStream, String> {
     let path = pipe_path()?;
-    // 서버가 다음 파이프 인스턴스를 아직 안 걸어 둔 찰나는 ERROR_PIPE_BUSY(231) — 짧게 재시도.
-    for _ in 0..20 {
-        match std::fs::OpenOptions::new().read(true).write(true).open(&path) {
-            Ok(f) => return Ok(f),
-            Err(e) if e.raw_os_error() == Some(231) => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(e) => return Err(format!("cpt 파이프 연결 실패(데몬 미기동?): {e}")),
-        }
-    }
-    Err("cpt 파이프 연결 실패: 파이프가 계속 사용 중입니다(ERROR_PIPE_BUSY).".to_string())
+    // ERROR_PIPE_BUSY(231) 재시도는 PipeClient::connect 안에 들어 있다.
+    crate::winpipe::PipeClient::connect(&path)
+        .map_err(|e| format!("cpt 파이프 연결 실패(데몬 미기동?): {e}"))
 }
 
 // one-shot 요청/응답. ok:false 는 Err(error 메시지)로 승격 — 단, dispatch 가 정상 반환한
@@ -92,11 +87,10 @@ fn cpt_request_timed(
             let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)));
             let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(10)));
         }
-        // TODO(win32): 파일 핸들로 연 named pipe 에는 읽기 타임아웃 API 가 없다(std 한계).
-        //  데몬 one-shot 규약상 서버가 응답 후 즉시 닫으므로 hang 은 드물지만, 실사용에서 문제가
-        //  보이면 overlapped I/O(windows crate) 로 교체한다. sync 커맨드는 Tauri 스레드풀에서 돈다.
+        // win32: 겹침 I/O 라 유닉스와 동일하게 읽기 타임아웃이 걸린다(winpipe 가 WaitForSingleObject
+        //  + CancelIoEx 로 구현). 예전엔 동기 파일 핸들이라 타임아웃 API 자체가 없어 이 값이 버려졌다.
         #[cfg(windows)]
-        let _ = timeout_secs;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(timeout_secs)));
         let req = serde_json::json!({ "id": 1, "cmd": cmd, "args": args });
         let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
         line.push('\n');

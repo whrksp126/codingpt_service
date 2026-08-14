@@ -13,7 +13,7 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
-import { CHAT } from "./chat-model.js";
+import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { state as appState } from "./state.js";
@@ -34,6 +34,14 @@ const SearchAddon = window.SearchAddon?.SearchAddon;
 const registry = new Map();
 export function getPane(paneId) {
   return registry.get(paneId) || null;
+}
+// 채팅 모드(베타) 토글처럼 **모든 pane 의 본문 표시를 즉시** 다시 정해야 하는 설정 변경용.
+//  emit() 만으로는 부족하다: 워크스페이스 렌더는 토글 글리프만 동기화하고, 본문 전환은
+//  showActiveTab 이 하는데 그건 리컨실러 틱에서야 돈다(설정을 껐다 켠 사용자에겐 "몇 초 뒤 반영").
+export function refreshPaneSurfaces() {
+  for (const [, p] of registry) {
+    try { p.showActiveTab?.(); p._syncModeToggle?.(); } catch (_) { /* 하나가 실패해도 나머지는 갱신 */ }
+  }
 }
 // 현재 살아있는 terminal-kind pane 목록 — OS 파일 드롭 좌표가 pane 을 못 짚을 때 폴백용.
 export function terminalPanes() {
@@ -659,7 +667,21 @@ export class PaneView {
     this.el = document.createElement("div");
     this.el.className = "pane";
     this.el.dataset.paneId = this.id;
-    this.el.addEventListener("mousedown", () => this.ctx.onFocus?.(this.id), true);
+    this.el.addEventListener("mousedown", (e) => {
+      this.ctx.onFocus?.(this.id);
+      // 사용자가 이 pane 을 실제로 클릭 = 이 터미널을 봤다 → 활성 터미널 탭의 미읽음 알림을 읽음
+      //  처리(= 강조 테두리 소멸).
+      //  ★ 예전엔 이 판정이 **터미널 본문(termEl)** 에만 걸려 있었다. 그래서 같은 탭이라도
+      //   **채팅 모드**로 보고 있으면(본문이 채팅 뷰) 아무리 읽고 답해도 테두리가 안 꺼졌다
+      //   (2026-08-14 실사고). 읽음의 근거는 "사용자가 봤다"이지 어느 레이어를 눌렀냐가 아니다 →
+      //   판정 자리는 pane 전체 하나다.
+      //  "프로그램적 포커스로는 읽음 처리하지 않는다"(state.focusPane 주석)는 그대로다 — 그 경로는
+      //   S.focusPane() 직접 호출이라 애초에 DOM 이벤트를 만들지 않는다. 이 앱에서 pane 에 합성
+      //   mousedown 을 쏘는 곳은 없다(page-agent 의 합성 클릭은 **프리뷰 안 페이지** 대상이다).
+      if (this.node.kind !== "terminal") return;
+      const at = this.node.tabs?.[this.node.active];
+      if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
+    }, true);
     registry.set(this.id, this);
 
     this.head = document.createElement("div");
@@ -872,7 +894,8 @@ export class PaneView {
     if (!st.on) return;
     // ★ 채팅 모드를 **색으로** 표시하지 않는다(사용자 확정 2026-07-27). 액센트 배경은 "선택된 필터"처럼
     //  읽혀 상태와 행동이 헷갈렸다 → 상태 표현은 글리프 교체 하나로만 한다(같은 이유로 `.active` 도 제거).
-    b.title = st.chat ? i18n.t('터미널(TUI) 보기') : i18n.t('채팅으로 보기');
+    // 이름은 설정 항목과 **한 벌**이다 — 설정에서 켠 것이 화면의 무엇인지 이어지지 않으면 토글이다.
+    b.title = st.chat ? i18n.t('터미널(TUI) 보기') : i18n.t('채팅 모드로 보기 (베타)');
     // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다 — ② 항).
     //  크기 16 = 워크스페이스 헤더 추가 버튼과 같은 값(앱은 자기 헤더 기준 19).
     const want = st.chat ? "term" : "chat";
@@ -951,7 +974,9 @@ export class PaneView {
   //  다른 기기가 쓰는 tmux 창 크기를 뺏는 과거 사고(12R·17R) 계열의 재발 경로다.
   _chatActive() {
     const tab = this.node.tabs?.[this.node.active];
-    return !!(tab && isTermTab(tab) && tab.mode === "chat");
+    // 베타가 꺼져 있으면 mode 가 'chat' 이어도 화면은 터미널이다 → 여기서도 chat 이 아니다.
+    //  (tab.mode 는 지우지 않는다 — 다시 켜면 보던 탭이 그대로 채팅으로 돌아온다.)
+    return !!(tab && isTermTab(tab) && tab.mode === "chat" && chatBetaEnabled());
   }
 
   // TUI ↔ Chat 토글의 **노출/모드 판정**(그리기는 `_syncModeToggle` — 같은 pane 안이지만 분리해 둔다:
@@ -971,6 +996,7 @@ export class PaneView {
       chatMode: chat,
       agentOn: this._agentOn(tab),
       chatReady: this._chatReady(tab),
+      betaOn: chatBetaEnabled(), // 베타 꺼짐 = 토글 자체가 없다(설정 > 작업 환경 > 채팅 모드)
     });
     return { on, chat };
   }
@@ -1400,7 +1426,8 @@ export class PaneView {
     if (!isT && tab) this._ensureMixed(tab);
     const empty = !this.node.tabs.length;
     // Chat 모드 = 터미널 탭이지만 본문은 채팅. 터미널 레이어는 살아 있는 채로 가려진다.
-    const chat = !empty && isT && !!tab && tab.mode === "chat";
+    // 베타 꺼짐 → 채팅 본문을 띄우지 않는다(토글도 없으므로 돌아올 길 없는 화면이 되면 안 된다).
+    const chat = !empty && isT && !!tab && tab.mode === "chat" && chatBetaEnabled();
     if (chat) this._ensureChat();
     if (this.emptyEl) this.emptyEl.style.display = empty ? "flex" : "none";
     this.termEl.style.display = !empty && isT && !chat ? "" : "none";

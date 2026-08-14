@@ -63,7 +63,15 @@ function defaultShellSpec() {
   if (base === 'pwsh.exe' || base === 'powershell.exe' || base === 'pwsh' || base === 'powershell') {
     const profile = path.join(paths.stateDir(), 'shim', 'ps', 'cpt-profile.ps1');
     if (fileExists(profile)) {
-      return { shell, args: ['-NoLogo', '-NoExit', '-Command', `. '${profile.replace(/'/g, "''")}'`] };
+      // ★ -ExecutionPolicy Bypass 는 필수다. Windows 기본 정책(Restricted)에서는 .ps1 dot-source 가
+      //  PSSecurityException(UnauthorizedAccess)로 막혀 프로필이 통째로 안 실린다 → claude/codex/cpt
+      //  래퍼가 정의되지 않아 **터미널은 열리는데 BYO 연동만 조용히 죽는다**(2026-08-14 실기 실측).
+      //  이 플래그는 **이 프로세스에만** 적용된다 — 머신/사용자 정책은 건드리지 않는다(무수정 원칙).
+      //  단, GPO 로 정책이 강제된 환경에서는 무시될 수 있다. 그때도 셸 자체는 열린다(아래 폴백과 동일 취지).
+      return {
+        shell,
+        args: ['-NoLogo', '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', `. '${profile.replace(/'/g, "''")}'`],
+      };
     }
     return { shell, args: [] };
   }

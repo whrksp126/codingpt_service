@@ -40,8 +40,8 @@ use webview2_com::{
     CursorChangedEventHandler, ExecuteScriptCompletedHandler, GetCookiesCompletedHandler,
     NavigationCompletedEventHandler,
 };
-use windows::core::{Interface, HSTRING, PCWSTR, PWSTR, BOOL};
-use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::core::{w, Interface, HSTRING, PCWSTR, PWSTR, BOOL};
+use windows::Win32::Foundation::{COLORREF, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11DeviceContext1,
@@ -58,13 +58,17 @@ use windows::Win32::System::Com::{IStream, STREAM_SEEK_SET};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::Shell::{DefSubclassProc, SHCreateMemStream, SetWindowSubclass};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumChildWindows, GetClassNameW, GetCursorPos, GetParent, GetSystemMetrics, IsWindow,
-    LoadCursorW, SetCursor, HCURSOR, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    WM_CAPTURECHANGED, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK,
-    WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, EnumChildWindows, GetClassNameW, GetCursorPos,
+    GetParent, GetSystemMetrics, GetWindowLongPtrW, IsWindow, LoadCursorW, RegisterClassExW,
+    SetCursor, SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    GWL_EXSTYLE, HCURSOR, HWND_TOP, IDC_ARROW, LWA_ALPHA, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SW_HIDE, SW_SHOWNA, WM_CAPTURECHANGED,
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN,
+    WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     WM_RBUTTONDBLCLK, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_XBUTTONDBLCLK,
-    WM_XBUTTONDOWN, WM_XBUTTONUP,
+    WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED, WS_EX_NOPARENTNOTIFY,
 };
 
 use super::PreviewInfo;
@@ -111,6 +115,9 @@ struct Pane {
     py: i32,
     pw: i32,
     ph: i32,
+    // 입력 오버레이 HWND(우리 프로세스 소유) — 이 pane 의 마우스 입구. 0 = 아직 없음.
+    //  왜 필요한지는 아래 "입력 오버레이" 절 주석 참조.
+    overlay: isize,
 }
 
 struct WinState {
@@ -227,6 +234,154 @@ unsafe fn find_wry_host(main: HWND) -> Option<HWND> {
         EnumChildWindows(Some(main), Some(ep), LPARAM(&mut ctx as *mut Ctx as isize))
     };
     ctx.found
+}
+
+// ── 입력 오버레이 ────────────────────────────────────────────────────────────
+//  macOS 는 앱 웹뷰(WKWebView)가 **같은 프로세스**라 contentView 의 hitTest 를 스위즐해
+//  슬롯 위 이벤트를 프리뷰로 돌릴 수 있었다. Windows 에는 그 등가물이 없다:
+//  **WebView2 는 별도 프로세스**(msedgewebview2.exe)이고 창 안의 `Chrome_WidgetWin_*`,
+//  `Chrome_RenderWidgetHostHWND` 는 전부 그 프로세스 소유라 `SetWindowSubclass` 가 걸리지 않는다
+//  (호출은 성공하는데 프로시저가 영영 안 불린다 — 2026-08-14 실기 확인).
+//
+//  그래서 슬롯 위에 **우리 프로세스 소유의 투명 자식 창**을 얹어 그 창이 마우스를 받는다.
+//  받은 메시지는 기존 `route_mouse` 에 그대로 넘긴다(로직은 이미 있었고 입구만 없었다).
+//   · 부모 = WRY_WEBVIEW → 좌표계가 pane 의 px/py(호스트 클라이언트)와 그대로 일치한다.
+//   · WS_EX_LAYERED + alpha=1 : 화면상 사실상 안 보이지만(0.4%) **히트테스트는 살아 있다**.
+//     alpha=0 으로 두면 클릭이 통과해 버려 의미가 없다 — 1 이어야 한다.
+//   · shield(모달/메뉴) 중에는 **숨긴다**. 보이는 채로 두면 우리가 삼켜서 DOM 이 입력을 잃는다.
+//   · 렌더는 여전히 DComp(앱 웹뷰 아래) — DOM 이 프리뷰 **위**에 그려지는 성질은 그대로다.
+const OVERLAY_CLASS: PCWSTR = w!("CptPreviewInputOverlay");
+static OVERLAY_CLASS_ONCE: std::sync::Once = std::sync::Once::new();
+
+fn ensure_overlay_class() {
+    OVERLAY_CLASS_ONCE.call_once(|| unsafe {
+        let hinst = GetModuleHandleW(None).unwrap_or_default();
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(overlay_proc),
+            hInstance: hinst.into(),
+            lpszClassName: OVERLAY_CLASS,
+            // 커서는 WM_SETCURSOR 에서 프리뷰가 알려준 모양으로 우리가 그린다 → 클래스 커서 없음.
+            hCursor: HCURSOR::default(),
+            ..Default::default()
+        };
+        let atom = RegisterClassExW(&wc);
+        if atom == 0 {
+            eprintln!(
+                "[preview_win] 오버레이 창 클래스 등록 실패 err={:?}",
+                windows::Win32::Foundation::GetLastError()
+            );
+        }
+    });
+}
+
+// pane 하나당 오버레이 하나. 실패하면 0 을 돌려주고 조용히 입력 없는 상태가 된다
+//  (프리뷰가 보이기는 하므로 앱 전체를 죽이지 않는다).
+unsafe fn create_overlay(host: HWND) -> isize {
+    ensure_overlay_class();
+    let hinst = unsafe { GetModuleHandleW(None) }.unwrap_or_default();
+    let h = unsafe {
+        CreateWindowExW(
+            // ★ WS_EX_LAYERED 를 여기서 주면 자식 창 생성이 실패한다(널 반환·GetLastError 0).
+            //  생성 후 SetWindowLongPtr 로 얹어야 한다.
+            WS_EX_NOPARENTNOTIFY,
+            OVERLAY_CLASS,
+            PCWSTR::null(),
+            WS_CHILD, // 처음엔 숨김 — 첫 배치에서 보인다
+            0,
+            0,
+            1,
+            1,
+            Some(host),
+            None,
+            Some(hinst.into()),
+            None,
+        )
+    };
+    let h = match h {
+        Ok(h) if !h.is_invalid() => h,
+        other => {
+            // 조용히 실패하면 "프리뷰는 보이는데 클릭만 안 되는" 상태가 되고 원인 추적이 어렵다.
+            eprintln!(
+                "[preview_win] 입력 오버레이 생성 실패 host={:#x} err={:?}",
+                host.0 as isize,
+                other.err()
+            );
+            return 0;
+        }
+    };
+    // 레이어드 전환 → alpha=1. 눈에 안 보이면서 히트테스트는 살아 있는 유일한 값
+    //  (0 이면 클릭이 통과해 버려 오버레이의 의미가 없다).
+    let ex = unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) } as u32 | WS_EX_LAYERED.0;
+    unsafe { SetWindowLongPtrW(h, GWL_EXSTYLE, ex as isize) };
+    let _ = unsafe { SetLayeredWindowAttributes(h, COLORREF(0), 1, LWA_ALPHA) };
+    h.0 as isize
+}
+
+// 슬롯 rect 에 맞춰 위치·크기·표시를 갱신한다. 앱 웹뷰(Chrome_*) 위로 올려야 우리가 먼저 받는다.
+unsafe fn place_overlay(p: &Pane) {
+    if p.overlay == 0 {
+        return;
+    }
+    let h = HWND(p.overlay as _);
+    if !unsafe { IsWindow(Some(h)) }.as_bool() {
+        return;
+    }
+    // shield 중이거나 슬롯이 화면 밖이면 숨긴다 → 입력이 DOM(앱 웹뷰)으로 그대로 간다.
+    let show = !SHIELD.load(Ordering::Relaxed) && p.px > OFFSCREEN / 2 && p.pw > 1 && p.ph > 1;
+    if !show {
+        let _ = unsafe { ShowWindow(h, SW_HIDE) };
+        return;
+    }
+    let _ = unsafe {
+        SetWindowPos(
+            h,
+            Some(HWND_TOP),
+            p.px,
+            p.py,
+            p.pw,
+            p.ph,
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+        )
+    };
+    let _ = unsafe { ShowWindow(h, SW_SHOWNA) }; // 포커스를 뺏지 않고 표시
+}
+
+unsafe fn destroy_overlay(p: &mut Pane) {
+    if p.overlay == 0 {
+        return;
+    }
+    let h = HWND(p.overlay as _);
+    p.overlay = 0;
+    if unsafe { IsWindow(Some(h)) }.as_bool() {
+        let _ = unsafe { DestroyWindow(h) };
+    }
+}
+
+// 오버레이 창 프로시저 — 서브클래스 프로시저와 **같은 판정**을 쓴다(로직 이원화 금지).
+unsafe extern "system" fn overlay_proc(
+    hwnd: HWND,
+    msg: u32,
+    wp: WPARAM,
+    lp: LPARAM,
+) -> LRESULT {
+    if !SHIELD.load(Ordering::Relaxed) {
+        if is_mouse_msg(msg) {
+            if let Some(r) = unsafe { route_mouse(hwnd, msg, wp, lp) } {
+                return r;
+            }
+        } else if msg == WM_MOUSELEAVE {
+            unsafe { forward_hover_leave() };
+        } else if msg == WM_CAPTURECHANGED {
+            with_state(|st| st.capture = None);
+        } else if msg == WM_SETCURSOR {
+            if let Some(c) = cursor_for_point() {
+                unsafe { SetCursor(Some(c)) };
+                return LRESULT(1);
+            }
+        }
+    }
+    unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
 }
 
 // ── 입력 서브클래스 ──────────────────────────────────────────────────────────
@@ -553,7 +708,16 @@ unsafe fn ensure_dcomp(st: &mut WinState) -> Result<(), String> {
     let dev: IDCompositionDevice =
         unsafe { DCompositionCreateDevice(&dxgi) }.map_err(|e| format!("DComp 장치 실패: {e}"))?;
     // topmost=FALSE → 비주얼 트리를 "자식 HWND(투명한 앱 웹뷰) 아래, 이 창 표면 위"에 합성.
-    let target = unsafe { dev.CreateTargetForHwnd(host, false) }.map_err(|e| e.to_string())?;
+    //
+    // ★ 타깃은 반드시 **최상위 창(main_hwnd)** 이다. 자식 HWND(WRY_WEBVIEW)에 걸면
+    //  CreateTargetForHwnd 가 **성공을 리턴하는데 합성이 전혀 일어나지 않는다** — 장치·타깃·서페이스
+    //  생성이 전 단계 ok 인데 화면은 백지라, 로그 없이는 추적이 사실상 불가능한 형태의 실패다.
+    //  2026-08-14 실기에서 이 경로를 밟았고(웨이브3), 타깃을 최상위로 옮기자 즉시 렌더됐다.
+    //  (preview-win.md 리스크 1 의 폴백 ①. 폴백 ② `transparent:true` 는 **불필요** — 함께 켜면
+    //   투명 창 부작용만 떠안는다. 실측으로 배제했다.)
+    let top = HWND(st.main_hwnd as _);
+    let target = unsafe { dev.CreateTargetForHwnd(top, false) }.map_err(|e| e.to_string())?;
+    let _ = host; // 입력 라우팅용으로만 쓰인다(합성 타깃 아님)
     let root = unsafe { dev.CreateVisual() }.map_err(|e| e.to_string())?;
     unsafe { target.SetRoot(&root) }.map_err(|e| e.to_string())?;
     // 배경 비주얼 — 투명 슬롯의 "누수" 영역이 앱 배경색으로 보이게(macOS NSWindow bg 등가).
@@ -696,6 +860,10 @@ unsafe fn sync_on_main(
                 }
             }
         }
+        // 입력 오버레이도 슬롯을 따라간다(숨김=화면 밖 이동도 여기서 처리된다 — px 가 바뀌므로 moved).
+        if moved || resized {
+            unsafe { place_overlay(p) };
+        }
         if let Some((core, u)) = nav {
             let _ = unsafe { core.Navigate(&HSTRING::from(u.as_str())) };
         }
@@ -732,6 +900,7 @@ unsafe fn sync_on_main(
                 cursor: default_cursor(),
                 url: url.clone(),
                 closed: false,
+                overlay: 0,
                 px: (lx * scale).round() as i32,
                 py: (ly * scale).round() as i32,
                 pw: ((((if sized { w } else { 1.0 }) * scale).round()) as i32).max(1),
@@ -832,6 +1001,15 @@ unsafe fn finish_create(pane_id: String, comp: ICoreWebView2CompositionControlle
         let _ = unsafe { ctrl.SetBounds(RECT { left: 0, top: 0, right: p.pw, bottom: p.ph }) };
         let _ = unsafe { ctrl.SetIsVisible(true) };
         let _ = unsafe { dc.dev.Commit() };
+        // 입력 오버레이 — 이 pane 의 마우스 입구(위 "입력 오버레이" 절 참조).
+        if p.overlay == 0 {
+            p.overlay = unsafe { create_overlay(HWND(st.host_hwnd as _)) };
+            eprintln!(
+                "[preview_win] 입력 오버레이 pane={} host={:#x} hwnd={:#x}",
+                pane_id, st.host_hwnd, p.overlay
+            );
+        }
+        unsafe { place_overlay(p) };
         p.comp = Some(comp.clone());
         p.ctrl = Some(ctrl.clone());
         p.core = Some(core.clone());
@@ -858,6 +1036,15 @@ unsafe fn finish_create(pane_id: String, comp: ICoreWebView2CompositionControlle
 
 pub fn shield(on: bool) {
     SHIELD.store(on, Ordering::Relaxed);
+    // 오버레이는 "보이면 삼킨다" 이므로 shield 중에는 반드시 숨겨야 DOM(모달·메뉴)이 입력을 받는다.
+    //  다음 sync 를 기다리면 그 사이 클릭이 사라지므로 즉시 반영한다.
+    let _ = on_main(move || {
+        with_state(|st| {
+            for p in st.panes.values() {
+                unsafe { place_overlay(p) };
+            }
+        });
+    });
 }
 
 pub fn navigate(pane_id: &str, url: &str) -> Result<(), String> {
@@ -1217,6 +1404,7 @@ pub fn close(pane_id: &str) {
             }
             if let Some(mut p) = st.panes.remove(&pane) {
                 p.closed = true;
+                unsafe { destroy_overlay(&mut p) };
                 if let Some(ctrl) = p.ctrl.take() {
                     let _ = unsafe { ctrl.Close() };
                 }
@@ -1239,6 +1427,7 @@ pub fn close_all() {
             let ids: Vec<String> = st.panes.keys().cloned().collect();
             for id in ids {
                 if let Some(mut p) = st.panes.remove(&id) {
+                    unsafe { destroy_overlay(&mut p) };
                     if let Some(ctrl) = p.ctrl.take() {
                         let _ = unsafe { ctrl.Close() };
                     }

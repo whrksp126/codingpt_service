@@ -334,8 +334,9 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
     // ★ 글리프 픽셀을 앱=PC 로 못 박지 않는다: 두 플랫폼의 다른 버튼 크기가 애초에 다르다
     //  (PC 추가 버튼 16 / 앱 19). 억지로 같은 숫자로 맞추면 각자 줄에서 어긋난다.
     const glyphLine = /b\.innerHTML = st\.chat[^\n]*/.exec(paneJs2)?.[0] || "";
-    const addsGlyph = num(/mkBtn\(icons\.terminal[\s\S]*?size: (\d+)/, wvJs)
-      ?? num(/b\.innerHTML = icon\(\{ size: (\d+) \}\)/, wvJs);
+    // ★ 2026-08-14: 헤더 추가 버튼은 **[+] 하나**가 됐다(옛 터미널/IDE/웹뷰/모바일 4버튼 폐기).
+    //  크기 계약("토글 글리프 = 헤더 추가 버튼")은 그대로라 뽑는 자리만 옮긴다.
+    const addsGlyph = num(/addBtn\.innerHTML = icons\.plus\(\{ size: (\d+) \}\)/, wvJs);
     eq("PC 토글 글리프 = PC 헤더 추가 버튼과 같은 크기", num(/size: (\d+)/, glyphLine), addsGlyph);
     ok("토글 두 글리프가 같은 크기(터미널/채팅)", (glyphLine.match(/size: (\d+)/g) || []).length === 2
       && new Set(glyphLine.match(/size: \d+/g)).size === 1, glyphLine.trim());

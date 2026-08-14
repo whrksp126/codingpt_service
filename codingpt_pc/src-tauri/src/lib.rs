@@ -14,6 +14,10 @@ mod pty;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod termhost;
 mod tmux;
+// win32 named pipe 겹침 I/O 클라이언트(계약 2 하부) — 동기 핸들의 읽기/쓰기 직렬화로
+//  duplex 채널이 메인 스레드를 영구 블록시키던 문제의 해소. 파일 안 주석이 정본.
+#[cfg(windows)]
+mod winpipe;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -970,6 +974,7 @@ pub fn run() {
             bridge::devtools_window,
             bridge::project_attach,
             bridge::desktop_login_url,
+            bridge::front_base_url,
             bridge::fetch_ws_session,
             bridge::save_ws_session,
             bridge::cloud_terminal_start,

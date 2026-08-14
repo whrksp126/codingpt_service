@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 워크스페이스 헤더([찾기] │ [+]) 확인용 하네스(개발 전용).
+     실행: cd src && python3 -m http.server 8901  →  http://localhost:8901/header-harness.html -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>헤더 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
+<style>body { margin: 0; } .main-top { border-bottom: 1px solid var(--border); }</style></head>
+<body>
+<div class="main" id="wsRoot"></div>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === 'daemon_status') return { paired: true, running: true, deviceId: 11 };
+        if (cmd === 'agents_list' || cmd === 'daemon_rpc') return { agents: [] };
+        return {};
+      },
+    },
+    event: { listen: async () => () => {} },
+  };
+  const S = await import('./js/state.js');
+  const { bootLang } = await import('./js/theme.js');
+  const wv = await import('./js/workspace-view.js');
+  bootLang();
+  S.state.paired = true;
+  S.state.daemon = { paired: true, running: true, deviceId: 11 };
+  S.state.workspaces = [{ id: 1, name: 'codingpt', localPath: 'other/project/codingpt', compute: 'local', hostDeviceId: 11, hostOnline: true }];
+  S.state.activeWsId = 1;
+  S.ensureRuntime(1);
+  wv.mountWorkspaceView(document.getElementById('wsRoot'));
+  wv.updateWorkspaceView();
+  window.__header = () => ({
+    // 헤더에 남아야 하는 것 = 찾기 + 추가 **둘뿐**(옛 4버튼이 남아 있으면 여기서 드러난다).
+    cmds: [...document.querySelectorAll('.mt-adds [data-cmd]')].map((b) => b.dataset.cmd),
+    menu: [...document.querySelectorAll('.pv-menu .pvm-label')].map((n) => n.textContent),
+    more: [...document.querySelectorAll('.pv-menu .pv-menu-item')].map((b) => !!b.querySelector('.pvm-more')),
+  });
+  window.__openAdd = () => document.querySelector('.mt-adds [data-cmd="ws.add"]').click();
+</script>
+</body>
+</html>

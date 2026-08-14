@@ -158,24 +158,22 @@ pub fn cpt_sock_name() -> Option<String> {
 
 // 파이프 열기 — cptsock::cpt_connect 패턴 미러: 서버가 다음 파이프 인스턴스를 아직 안 걸어 둔
 //  찰나는 ERROR_PIPE_BUSY(231) → 짧게 재시도. 파이프 부재(NotFound)는 NotRunning(호스트 미기동).
+//  ★ 겹침(overlapped) I/O 로 연다 — 터미널 attach 는 "출력 읽기 영구 대기 + 입력 쓰기 수시" 인
+//   전형적 duplex 라, 동기 파일 핸들이면 파일 오브젝트 직렬화로 **첫 키 입력에서 앱이 정지**한다
+//   (pty_write 는 동기 커맨드 = 메인 스레드). 상세는 winpipe.rs 주석.
 #[cfg(windows)]
-pub fn connect() -> Result<std::fs::File, ThError> {
+pub fn connect() -> Result<crate::winpipe::PipeClient, ThError> {
     let path = pipe_path().map_err(ThError::NotRunning)?;
-    for _ in 0..20 {
-        match std::fs::OpenOptions::new().read(true).write(true).open(&path) {
-            Ok(f) => return Ok(f),
-            Err(e) if e.raw_os_error() == Some(231) => {
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(ThError::NotRunning(format!(
-                    "term-host 미기동(파이프 없음 — 데몬이 세션 호스트를 아직 안 띄움): {e}"
-                )));
-            }
-            Err(e) => return Err(ThError::Proto(format!("term-host 파이프 연결 실패: {e}"))),
+    // ERROR_PIPE_BUSY(231) 재시도는 PipeClient::connect 안에 있다.
+    crate::winpipe::PipeClient::connect(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            ThError::NotRunning(format!(
+                "term-host 미기동(파이프 없음 — 데몬이 세션 호스트를 아직 안 띄움): {e}"
+            ))
+        } else {
+            ThError::Proto(format!("term-host 파이프 연결 실패: {e}"))
         }
-    }
-    Err(ThError::Proto("term-host 파이프 연결 실패: 파이프가 계속 사용 중입니다(ERROR_PIPE_BUSY).".into()))
+    })
 }
 
 // 단발 op 왕복 — 접속→요청 1줄→응답 1줄→종료(term-backend request/cpt-server one-shot 관례).
@@ -183,6 +181,9 @@ pub fn connect() -> Result<std::fs::File, ThError> {
 pub fn oneshot(op: &str, args: Value) -> Result<Value, ThError> {
     use std::io::{BufRead, BufReader, Write};
     let mut stream = connect()?;
+    // 단발 op 는 곧 답이 온다 — 호스트가 죽어가는 중이면 무한 대기 대신 실패로 끝낸다.
+    //  (attach 스트림은 타임아웃을 걸지 않는다 — 출력이 언제 올지 모른다.)
+    stream.set_read_timeout(Some(std::time::Duration::from_secs(15)));
     let line = op_line(next_id(), op, args);
     stream
         .write_all(line.as_bytes())
