@@ -1,51 +1,45 @@
 <!doctype html>
-<!-- 터미널 선택색/커서색 실측 하네스(개발 전용) — 눈으로 짐작하지 말고 픽셀을 읽는다.
-     실행: cd src && python3 -m http.server 8908  →  http://localhost:8908/term-color-harness.html -->
+<!-- 터미널 선택색 실측 하네스(개발 전용) — pane.js 와 **같은 옵션**으로 띄워 눈으로 대조한다.
+     실행: cd src && python3 -m http.server 8912  →  http://localhost:8912/term-color-harness.html
+     사용: __run({ webgl:true, minContrast:3 })  → 전체 선택 후 스크린샷을 찍어 색을 본다. -->
 <html lang="ko" data-theme="dark">
 <head><meta charset="utf-8"><title>터미널 색 하네스</title>
 <link rel="stylesheet" href="vendor/xterm/xterm.css">
-<style>body{margin:0;background:#000} #t{width:900px;height:340px}</style></head>
+<style>body{margin:0;background:#0A0D14;color:#888;font:12px monospace} #t{width:820px;height:260px} #lab{padding:6px}</style></head>
 <body>
+<div id="lab">-</div>
 <div id="t"></div>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="vendor/xterm/xterm-addon-webgl.js"></script>
 <script src="vendor/xterm/xterm-addon-canvas.js"></script>
 <script type="module">
-  // theme.js → api.js 가 모듈 평가 시점에 Tauri 전역을 읽는다(없으면 TypeError).
   window.__TAURI__ = { core: { invoke: async () => ({}) }, event: { listen: async () => () => {} } };
-  const { TERM_STYLES } = await import('./js/theme.js');
-  // 어느 팔레트가 어떤 선택색을 그리는지 전부 만들어 본다(사용자 설정을 모를 때도 답이 나오게).
-  window.__run = async (style, mode) => {
+  const { TERM_STYLES } = await import('./js/theme.js?v=3');
+  window.__run = async ({ style = 'auto', mode = 'dark', webgl = true, minContrast = 3, renderer = '' } = {}) => {
     document.getElementById('t').innerHTML = '';
     const theme = TERM_STYLES[style][mode];
-    const term = new Terminal({ theme, fontSize: 14, rows: 12, cols: 80, allowProposedApi: true });
+    const term = new Terminal({
+      cursorBlink: true, fontSize: 14, rows: 10, cols: 74, scrollback: 1000, convertEol: false,
+      theme, minimumContrastRatio: minContrast, allowProposedApi: true,
+    });
     term.open(document.getElementById('t'));
-    try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (_) { term.loadAddon(new CanvasAddon.CanvasAddon()); }
-    term.write('Claude Code v2.1.232\r\n  Opus 5 (1M context)\r\n  ~/other/project/tokin\r\n');
-    await new Promise((r) => setTimeout(r, 250));
+    if (webgl) { try { term.loadAddon(new WebglAddon.WebglAddon()); } catch (_) { /* noop */ } }
+    else if (renderer === 'canvas') { try { term.loadAddon(new CanvasAddon.CanvasAddon()); } catch (_) { /* noop */ } }
+    // claude 배너와 비슷하게 — 초록 볼드 + 노랑 경고 + 빈 줄.
+    term.write('\x1b[1;32mClaude Code\x1b[0m \x1b[90mv2.1.232\x1b[0m\r\n');
+    term.write('  \x1b[36mOpus 5 (1M context)\x1b[0m · Claude Max\r\n');
+    term.write('  ~/other/project/tokin\r\n\r\n');
+    term.write('\x1b[33m⚠ 1 MCP server needs authentication\x1b[0m · run /mcp\r\n');
+    await new Promise((r) => setTimeout(r, 200));
     term.selectAll();
     term.focus();
+    document.getElementById('lab').textContent =
+      `${style}/${mode} · webgl=${webgl} · minContrast=${minContrast} · theme.selection=${theme.selectionBackground} · theme.cursor=${theme.cursor}`;
     await new Promise((r) => setTimeout(r, 250));
-    // 캔버스 픽셀을 직접 읽는다 — "무슨 색으로 보이나" 를 사람 눈이 아니라 숫자로 답한다.
-    const cvs = [...document.querySelectorAll('#t canvas')];
-    const out = [];
-    for (const c of cvs) {
-      try {
-        const g = c.getContext('webgl2') || c.getContext('webgl') || c.getContext('2d');
-        if (!g) continue;
-        if (g.readPixels) {
-          const px = new Uint8Array(4);
-          g.readPixels(400, Math.floor(c.height / 2), 1, 1, g.RGBA, g.UNSIGNED_BYTE, px);
-          out.push(`#${[...px].slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('')}`);
-        } else {
-          const d = g.getImageData(400, Math.floor(c.height / 2), 1, 1).data;
-          out.push(`#${[...d].slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('')}`);
-        }
-      } catch (_) { /* 컨텍스트 종류가 안 맞으면 건너뛴다 */ }
-    }
-    return { style, mode, themeSelection: theme.selectionBackground, themeCursor: theme.cursor, 픽셀: out };
+    return 'ok';
   };
+  await window.__run({});
 </script>
 </body>
 </html>

@@ -460,6 +460,11 @@ ok(pcPal.length === appPal.length && !palDiff.length,
 ok(!/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'))
   && !/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8')),
   '★ CodingPT 팔레트의 커서에 액센트색을 쓰지 않는다');
+// ★ 드래그 색은 앱이 정한다 — `::selection` 을 정의하지 않으면 웹뷰/시스템 강조색이 고른다.
+//  터미널도 이 규칙을 탄다(TUI 가 마우스 리포팅을 켜면 xterm 자체 선택이 안 만들어진다).
+ok(/::selection \{[^}]*background: #264F78/.test(pcCss)
+  && /\[data-theme="light"\] ::selection/.test(pcCss),
+  '★ 드래그 선택색을 다크·라이트 둘 다 앱이 명시한다(플랫폼 기본값에 맡기지 않는다)');
 // 선택색은 **비활성까지** 지정한다 — 안 주면 포커스가 빠지는 순간 xterm 이 30% 로 깔아 묻힌다.
 ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveBackground/g) || []).length >= 2,
   '선택색은 활성·비활성 둘 다 지정한다');

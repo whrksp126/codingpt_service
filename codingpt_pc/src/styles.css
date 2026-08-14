@@ -123,6 +123,16 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
 /* 개별 지정용 — 화면 어디든 "이건 복사할 만하다" 싶은 조각에 붙인다(버전·오류 메시지 등). */
 .sel-text, .sel-text * { user-select: text; -webkit-user-select: text; }
 
+/* ── 드래그로 잡힌 영역의 색 (2026-08-15 사용자 지적: "포인트 컬러로 하지 말고 일반적인 걸로") ──
+   ★ 지금까지 이 앱은 `::selection` 을 **한 번도 정의한 적이 없다**. 그래서 색을 웹뷰가 골랐고,
+    그 기본값은 플랫폼·시스템 강조색·다크모드에 따라 달라진다(우리가 통제하지 못한다).
+   ★ 터미널도 이 규칙을 탄다: 위 주석과 달리 xterm 자체 선택은 **앱이 마우스 리포팅을 켠 동안
+    (claude·vim 등 TUI) 아예 만들어지지 않는다** — 그때 드래그는 DOM 텍스트 선택으로 떨어지고,
+    색은 여기서 정해진다. 값은 터미널 팔레트의 선택색과 같게 둔다(두 선택이 다른 색이면 같은
+    드래그가 화면 위치에 따라 달라 보인다). */
+::selection { background: #264F78; color: #F8FAFC; }
+:root[data-theme="light"] ::selection { background: #BCD3F5; color: #0F172A; }
+
 .shell { height: 100%; display: grid; grid-template-columns: var(--sb-w) 1fr; }
 /* 접힘: 단일 컬럼 트랙 → 유일한 그리드 아이템(main)이 전체 폭 차지.
    (display:none 된 사이드바가 그리드 흐름에서 빠져도 main 이 0폭 컬럼에 배치되지 않도록.) */
