@@ -403,6 +403,20 @@ for (const sel of ['input, textarea', '\\.cm-editor', '\\.pane-chat', '\\.rv-lin
     `선택 가능한 표면 유지: ${sel.replace(/\\\\/g, "")}`);
 }
 
+// ── 16. 렌더는 프레임당 1회로 합친다 (2026-08-14 사용자 실사고: "반응이 왜 이리 느리지?") ──
+// 진단: WebContent 를 sample 하니 타이머 콜백 안에서 innerHTML 재작성이 쉬지 않고 돌았다. 렌더가
+//  무거운 게 아니라 **횟수**가 문제였다 — emit() 이 listeners 를 동기로 돌았고 emit 호출 지점이
+//  106곳이며 그중 agent_state push 는 초당 여러 번 온다(claude 가 도는 내내). 그 사이에 낀 클릭이
+//  밀린다. 이 검사는 emit 이 다시 동기 렌더로 돌아가는 것을 막는다.
+const pcStateSrc = strip(read(path.join(PC, 'state.js')));
+const emitBody = (/export function emit\(\) \{[\s\S]*?\n\}/.exec(pcStateSrc) || [""])[0];
+ok(/renderScheduled/.test(emitBody) && !/for \(const fn of listeners\)/.test(emitBody),
+  '★ emit() 은 렌더를 예약만 한다(동기로 listeners 를 돌지 않는다)');
+ok(/setTimeout\(runListeners/.test(pcStateSrc),
+  '★ rAF 만 믿지 않는다 — 창이 가려지면 rAF 는 안 돈다(타이머 폴백 필수)');
+ok(/export function flushRender/.test(pcStateSrc),
+  '동기 렌더가 필요한 경로를 위한 탈출구가 있다');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

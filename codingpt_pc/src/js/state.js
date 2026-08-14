@@ -240,7 +240,28 @@ export function subscribe(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
-export function emit() {
+// ── 렌더 합치기 (2026-08-14 사용자 실사고: "다 클릭했을 때 반응이 왜 이리 느리지?") ──────────
+// 진단(실측): WebContent 프로세스를 sample 해 보니 메인 스레드가 타이머 콜백 안에서 계속
+//  `innerHTML` 재작성을 돌고 있었다. 원인은 렌더가 무거워서가 아니라 **횟수**다 —
+//  `emit()` 이 호출 즉시 listeners 를 **동기로** 돌았고, listener 는 main.js `render()` 하나로
+//  사이드바 innerHTML 전면 재작성 + 설정 + 워크스페이스 + 승인 카드를 전부 다시 그린다.
+//  그런데 emit 호출 지점이 106곳이고, 그중엔 **에이전트 상태 push(agent_state)** 처럼 초당 여러 번
+//  오는 것이 있다. claude 가 도는 동안 앱은 쉬지 않고 전체 렌더를 반복했고, 그 사이에 낀 클릭은
+//  당연히 늦게 처리된다(사용자에겐 "설정 카테고리 전환마저 느리다"로 보인다).
+//
+// 그래서 emit 은 이제 **예약**만 한다 — 한 프레임에 렌더 1회. 상태 변경 N 번이 렌더 N 번이 아니다.
+//  · rAF 로 예약하되 setTimeout 을 함께 걸고 **먼저 오는 쪽이 이긴다**: 창이 가려져 있으면 rAF 는
+//    아예 안 돈다(이번 라운드의 하위 메뉴 위치 버그와 같은 함정) → 그때는 타이머가 받는다.
+//  · 동기 렌더에 기대는 호출부는 없다(emit 직후 DOM 을 읽는 코드 없음 — 전수 확인).
+//    그래도 필요하면 `flushRender()` 로 즉시 비울 수 있게 열어 둔다.
+let renderScheduled = false;
+let rafId = 0;
+let timerId = 0;
+function runListeners() {
+  renderScheduled = false;
+  if (rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+  rafId = 0;
+  if (timerId) { clearTimeout(timerId); timerId = 0; }
   for (const fn of listeners) {
     try {
       fn();
@@ -248,7 +269,19 @@ export function emit() {
       console.error(e);
     }
   }
+}
+export function emit() {
+  // 영속화는 그대로 매번 예약한다(자체 디바운스를 갖고 있고, 렌더와 수명이 다르다).
   schedulePersist();
+  if (renderScheduled) return;
+  renderScheduled = true;
+  //  node(테스트 하네스)에는 rAF 가 없다 — 타이머만으로도 합치기는 성립한다.
+  if (typeof requestAnimationFrame === "function") rafId = requestAnimationFrame(runListeners);
+  timerId = setTimeout(runListeners, 16);
+}
+/** 예약된 렌더를 지금 즉시 수행(테스트·하네스처럼 동기 단언이 필요한 경로용). */
+export function flushRender() {
+  if (renderScheduled) runListeners();
 }
 
 // ── 워크스페이스 조회 헬퍼 ──
