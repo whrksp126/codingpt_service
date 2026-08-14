@@ -385,6 +385,27 @@ ok(/LAB_FEATURES/.test(pcSet) && /sec === 'lab'/.test(appSet),
 ok(!/chatBetaChk/.test(pcSet) && !/chatBetaOn.*\n.*AgentsCard|AgentsCard[\s\S]{0,200}chatBetaOn/.test(appSet),
   '에이전트 화면에는 더 이상 베타 토글이 없다(실험실로 이사 완료)');
 
+// (6) PC 전환 = 그 PC 에서 **마지막에 보던 워크스페이스**로 (2026-08-14 사용자 확정).
+//  PC 만 바뀌고 본문이 옛 PC 의 워크스페이스로 남으면 지금 어느 PC 를 보는지 잃는다.
+ok(/cpt\.lastWsByDevice\.v1/.test(pcState) && /cpt\.lastWsByDevice\.v1/.test(appShell),
+  '★ PC 별 마지막 워크스페이스 저장 키가 두 플랫폼에서 같은 문자열이다');
+for (const [name, src] of [['PC', pcState], ['앱', appShell]]) {
+  ok(/rememberLastWs\(/.test(src), `${name}: 워크스페이스를 고를 때 그 PC 의 마지막 자리로 기록한다`);
+  // 기억한 것이 사라졌으면 첫 워크스페이스로 — 아무 데도 못 가는 상태를 만들지 않는다.
+  ok(/lastWs(Map\(\)|ByDeviceRef\.current)\[String\(id\)\]/.test(src) && /\|\| list\[0\]/.test(src),
+    `${name}: PC 를 고르면 기억한 워크스페이스(없으면 첫 번째)로 들어간다`);
+}
+
+// (7) 꺼진 PC 의 빈 화면은 사실대로 말한다 — "열린 터미널이 없습니다 / [새 터미널]" 은 거짓말이다
+//  (그 PC 는 꺼져 있어 새 터미널을 열 수 없다). 2026-08-14 사용자 지적.
+const OFFMSG = '이 PC가 꺼져 있어요';
+for (const [name, src] of [['PC', pcPane], ['앱', appPane]]) {
+  ok(src.includes(OFFMSG), `${name}: 꺼진 PC 의 빈 화면은 꺼져 있다고 말한다`);
+  ok(/hostOffline/.test(src), `${name}: 빈 화면 문구·버튼이 호스트 온오프를 본다`);
+}
+ok(/hostOnline === false/.test(pcWv) && /hostOnline === false/.test(appPane),
+  '★ 두 구현 모두 hostOnline === false 를 같은 판정으로 쓴다(undefined 는 켜짐 취급)');
+
 // ── 15. 텍스트 선택 정책 (2026-08-14 사용자 실사고) ──────────────────────────
 // 증상: 설정 창의 제목·소제목·라벨이 드래그로 잡혀 매우 불편했다.
 // 진범: 전역 `user-select: none` 은 처음부터 있었지만 **`-webkit-` 접두사가 없었다**. WKWebView 는
