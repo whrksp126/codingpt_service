@@ -373,8 +373,17 @@ ok(/input\.betaOn === false/.test(pcSignal) && /input\.betaOn === false/.test(ap
 ok(/cpt\.chatBeta\.v1/.test(strip(read(path.join(PC, 'chat-model.js'))))
   && /cpt\.chatBeta\.v1/.test(strip(read(path.join(APP, 'services/chatBeta.ts')))),
   '★ 채팅 모드 베타 저장 키가 두 플랫폼에서 같은 문자열이다');
-ok(/베타/.test(strip(read(path.join(PC, 'settings.js')))) && /BetaTag/.test(strip(read(path.join(APP, 'components/SettingsModal.tsx')))),
-  '설정 화면이 베타임을 표시한다(양 플랫폼)');
+const pcSet = strip(read(path.join(PC, 'settings.js')));
+const appSet = strip(read(path.join(APP, 'components/SettingsModal.tsx')));
+ok(/베타/.test(pcSet) && /BetaTag/.test(appSet), '설정 화면이 베타임을 표시한다(양 플랫폼)');
+// ★ 베타 기능은 `실험실` 한 곳에 모은다(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다").
+//  각 기능 화면에 흩어지면 화면마다 "이건 정식인가 실험인가"를 다시 판단해야 한다.
+ok(/key: "lab", label: "실험실"/.test(pcSet) && /key: 'lab', label: '실험실'/.test(appSet),
+  '양 플랫폼 설정에 `실험실` 섹션이 있다');
+ok(/LAB_FEATURES/.test(pcSet) && /sec === 'lab'/.test(appSet),
+  '채팅 모드 토글이 실험실에서 그려진다');
+ok(!/chatBetaChk/.test(pcSet) && !/chatBetaOn.*\n.*AgentsCard|AgentsCard[\s\S]{0,200}chatBetaOn/.test(appSet),
+  '에이전트 화면에는 더 이상 베타 토글이 없다(실험실로 이사 완료)');
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

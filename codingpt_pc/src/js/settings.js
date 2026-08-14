@@ -59,7 +59,29 @@ const NAV = [
   { key: "mobile", label: "연결", group: "계정 및 기기", icon: "smartphone", keywords: "휴대폰 태블릿 모바일 Android iOS QR 인증 코드" },
   { key: "supporter", label: "Supporter", group: "계정 및 기기", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
   { key: "system", label: "시스템", group: "앱", icon: "monitor", keywords: "자동 실행 시작 로그인 권한 다운로드 데스크탑 문서 폴더 접근" },
+  //  ★ 실험실(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다") — 다듬는 중인 기능의 on/off 를
+  //   한자리에 모은다. 처음엔 채팅 모드를 `에이전트` 화면에 얹었는데, 베타가 늘면 각 화면에 흩어져
+  //   "이건 정식인가 실험인가"를 화면마다 다시 판단해야 한다. 1항목짜리 **그룹**을 만들지 말라는
+  //   기존 규율은 지킨다 — 새 그룹이 아니라 `앱` 그룹의 항목이다.
+  { key: "lab", label: "실험실", group: "앱", icon: "flask", keywords: "베타 beta 실험 experimental 미리보기 채팅 chat 채팅 모드" },
   { key: "about", label: "앱 정보", group: "앱", icon: "info", keywords: "버전 업데이트" },
+];
+
+/**
+ * 실험실 항목 표 — **베타 기능을 늘릴 땐 여기에 한 줄만 더한다**(화면은 이 표를 그린다).
+ *  · get/set 은 그 기능의 정본 모듈이 갖는다(여기서 localStorage 를 직접 만지지 않는다).
+ *  · onChange = 켜고 끈 직후 화면에 즉시 반영할 일(없으면 생략).
+ */
+const LAB_FEATURES = [
+  {
+    id: "chatBeta",
+    label: "채팅 모드",
+    desc: "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.",
+    get: chatBetaEnabled,
+    set: setChatBetaEnabled,
+    // 열려 있는 pane 이 **즉시** 따라야 한다(설정을 닫고 다시 열 필요가 없게).
+    onChange: () => import("./pane.js").then((m) => m.refreshPaneSurfaces()).catch(() => {}),
+  },
 ];
 
 export function mountSettings(container) {
@@ -171,20 +193,11 @@ function renderSection(force) {
     // 이 PC 의 AI CLI 목록. 데몬 감지가 정본이라 화면은 그 결과를 그대로 비춘다(추측 표기 금지).
     if (force || !contentEl.querySelector("#agentsBody")) {
       // 하단 요약/설명 문단은 사용자 확정으로 제거(2026-07-27) — 목록만 둔다.
-      //  ★ 채팅 모드(베타)는 여기 산다(2026-08-14). 별도 `실험실` 섹션을 만들지 않는 이유는 이
-      //   파일의 기존 규율 그대로다: 항목 하나짜리 그룹은 분류가 아니라 장식이다. 그리고 이 설정은
-      //   "에이전트 대화를 어떻게 볼 것인가" 라 이 화면의 목록과 같은 주제다.
+      //  (채팅 모드(베타)는 `실험실` 로 옮겼다 — 2026-08-14 사용자 확정.)
       contentEl.innerHTML = `
-        <div class="sm-card2">
-          <label class="sett-row sett-row-action" for="chatBetaChk">
-            <span class="sett-copy"><span class="sett-label">${i18n.t('채팅 모드')}<span class="sett-beta">${i18n.t('베타')}</span></span><span class="sett-desc">${i18n.t('터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.')}</span></span>
-            <input id="chatBetaChk" type="checkbox" class="tgl" aria-label="${i18n.t('채팅 모드')}" />
-          </label>
-        </div>
         <div class="sm-card2">
           <div class="sett-col"><div id="agentsBody" class="ag-list"></div></div>
         </div>`;
-      bindChatBeta(contentEl);
       const body = contentEl.querySelector("#agentsBody");
       const paint = () => renderAgentList(body, { onChange: paint });
       paint();
@@ -193,6 +206,17 @@ function renderSection(force) {
         body.firstChild.textContent = String(e && e.message ? e.message : e);
       });
     }
+  } else if (section === "lab") {
+    contentEl.innerHTML = `
+      <div class="sm-card2">
+        ${LAB_FEATURES.map((f, i) => `
+          <label class="sett-row sett-row-action" for="lab_${f.id}">
+            <span class="sett-copy"><span class="sett-label">${i18n.t(f.label)}<span class="sett-beta">${i18n.t('베타')}</span></span><span class="sett-desc">${i18n.t(f.desc)}</span></span>
+            <input id="lab_${f.id}" type="checkbox" class="tgl" data-lab="${i}" aria-label="${i18n.t(f.label)}" />
+          </label>`).join("")}
+      </div>
+      <div class="sm-section-note">${i18n.t('실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.')}</div>`;
+    bindLab(contentEl);
   } else if (section === "system") {
     // 시스템 — macOS 와의 연동만 모은다(로그인 항목 + 보호 폴더 접근). 각각은 카드 하나를 채우지
     //  못하는 설정이라 예전엔 `일반`·`보안` 이라는 1항목짜리 그룹으로 흩어져 있었다(2026-08-05 통합).
@@ -703,16 +727,18 @@ function folderPermRow(id, label) {
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
 //  허용=버튼 '허용됨' 고정, 거부=버튼이 '설정 열기'(파일 및 폴더 설정)로 전환.
-// 채팅 모드(베타) 토글 — 켜고 끄면 **열려 있는 pane 이 즉시** 따라야 한다(설정을 닫고 다시 열
-//  필요가 없게). 워크스페이스 뷰의 재렌더가 pane 마다 _syncModeToggle + showActiveTab 을 돌린다.
-function bindChatBeta(rootEl) {
-  const chk = rootEl.querySelector("#chatBetaChk");
-  if (!chk) return;
-  chk.checked = chatBetaEnabled();
-  chk.addEventListener("change", () => {
-    setChatBetaEnabled(chk.checked);
-    import("./pane.js").then((m) => m.refreshPaneSurfaces()).catch(() => {});
-    S.emit();
+// 실험실 토글 — LAB_FEATURES 표의 get/set 을 그대로 쓴다(화면은 값을 갖지 않는다).
+//  켜고 끄면 그 기능이 **즉시** 반영돼야 한다(설정을 닫고 다시 열 필요가 없게).
+function bindLab(rootEl) {
+  rootEl.querySelectorAll("[data-lab]").forEach((chk) => {
+    const f = LAB_FEATURES[Number(chk.dataset.lab)];
+    if (!f) return;
+    chk.checked = !!f.get();
+    chk.addEventListener("change", () => {
+      f.set(chk.checked);
+      f.onChange?.();
+      S.emit();
+    });
   });
 }
 

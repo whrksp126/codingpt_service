@@ -674,5 +674,7 @@ export default {
   "채팅 모드": "Mode chat",
   "채팅 모드로 보기 (베타)": "Voir en mode chat (Bêta)",
   "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.": "Affiche la conversation IA du terminal sous forme de chat. Encore en cours d'ajustement, donc désactivé par défaut.",
-  "이 PC의 폴더를 추가하세요": "Ajoutez un dossier de ce PC"
+  "이 PC의 폴더를 추가하세요": "Ajoutez un dossier de ce PC",
+  "실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.": "Les fonctionnalités du labo sont encore en cours d'ajustement et peuvent changer ou disparaître sans préavis.",
+  "실험실": "Labo"
 };
