@@ -364,7 +364,7 @@ function adoptPolicy(e, p) {
 // 이 기기 열쇠가 해제된 경우 — 신원키를 새로 만들고 처음부터 다시 신청한다.
 //  ★ 상태 파일을 통째로 버린다(계정이 우리를 해제했다 = 우리가 들고 있던 MK 는 회수 대상이다).
 //   남겨 두면 "해제된 기기가 옛 세대 데이터를 계속 읽는" 상태가 된다.
-function handleRevoked(e) {
+function handleRevoked(e, { evicted = false } = {}) {
   try { e.removeState(); } catch (_) { /* noop */ }
   try { e.clearCache(); } catch (_) { /* noop */ }
   st.keyState = 'none';
@@ -373,8 +373,11 @@ function handleRevoked(e) {
   st.pendingSince = null;
   st.devices = [];
   st.cache = { pending: null, pendingAt: 0, keyring: null, keyringAt: 0 };
-  st.reason = '이 PC 의 열쇠가 계정에서 해제됐어요. 새 신원키로 다시 승인을 요청합니다.';
-  warn('이 기기의 열쇠가 해제됨 — 신원키 재생성 후 재신청');
+  st.reason = evicted
+    ? '다른 기기에서 계정 열쇠를 다시 만들어 이 PC 의 열쇠가 빠졌어요. 새 신원키로 다시 신청합니다 — 열쇠를 가진 기기에서 승인해 주세요.'
+    : '이 PC 의 열쇠가 계정에서 해제됐어요. 새 신원키로 다시 승인을 요청합니다.';
+  warn(evicted ? '이 기기가 계정 열쇠 목록에서 빠짐(다른 기기의 재생성) — 신원키 재생성 후 재신청'
+    : '이 기기의 열쇠가 해제됨 — 신원키 재생성 후 재신청');
   try { identityOf(e); } catch (_) { /* 다음 주기에 재시도 */ }
   // ★ 해제도 '열쇠 사실 변화' 다 — 나머지 세 전이(acceptGrant/revoke/rollbackEpoch)와 같은 규율.
   //  이게 없으면 열쇠가 0개가 된 순간에도 back 의 conn.e2eeEpoch 는 옛 세대로 고착하고(재팬아웃
@@ -464,11 +467,23 @@ async function runOnce() {
 async function stepTrusted(e) {
   const kr = await callKeyring(e, { force: true });
   if (kr.myState === 'revoked') { handleRevoked(e); schedule('resolved', { reset: true }); return { phase: st.phase }; }
+  // ★ 축출 감지(2026-08-15 실사고) — 우리 열쇠가 계정 링에 **아예 없다**. 다른 PC 가 완전 재설치
+  //  경로로 열쇠를 다시 만들면(bootstrap replace) 링이 통째로 갈리고 우리 항목은 사라진다.
+  //  겉모습은 아래 '회전 대기' 와 같지만(세대만 앞서 있다) 결말이 정반대다: 우리 봉인문은 **영원히
+  //  오지 않는다**. 예전엔 이 경우도 회전 대기로 접혀 화면이 영구히 "열쇠 세대가 갱신되는 중"이었고,
+  //  그 상태에서 연동 코드를 만들면 서버가 403(NOT_TRUSTED)로 막아 [다시 시도] 만 남았다.
+  //  판정은 링이 직접 말해 준다: 우리 ikX 가 키에도 신청서에도 없으면 myState='unknown' + myKeyId=null.
+  if (kr.myState === 'unknown' && kr.myKeyId == null) {
+    handleRevoked(e, { evicted: true });
+    schedule('resolved', { reset: true });
+    return { phase: st.phase };
+  }
   const mine = Number(kr.epoch) || 0;
   if (mine > (e.epoch() | 0) && kr.myGrant) {
     acceptGrant(e, kr.myGrant, kr.devices);       // 회전 후 새 봉인문 수령
   } else if (mine > (e.epoch() | 0)) {
     // 회전은 됐는데 우리 봉인문이 아직 없다(back INCOMPLETE_ROTATION 은 막지만 배포 중간 상태 가능).
+    //  위 축출 분기를 지난 뒤이므로 여기는 **링에 우리 항목이 있는** 진짜 과도 상태뿐이다.
     st.reason = '열쇠 세대가 갱신되는 중이에요.';
     st.keyState = 'enrolled';
     schedule('pending');

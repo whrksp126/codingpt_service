@@ -231,9 +231,13 @@ export const TERM_STYLE_OPTIONS = [
   { value: "solarized", label: "Solarized" },
 ];
 const TERM_AUTO_DARK = {
-  // CodingPT 다크 — 배경=앱 배경(--base), 액센트 민트, 16색 전부 가독 튜닝
-  background: "#0A0D14", foreground: "#E2E8F0", cursor: "#34D399", cursorAccent: "#0A0D14",
-  selectionBackground: "#264F78",
+  // CodingPT 다크 — 배경=앱 배경(--base), 16색 전부 가독 튜닝
+  //  ★ 커서는 **글자색**이다(2026-08-15 사용자 확정). 예전엔 액센트 민트였는데, 액센트는 상태 신호
+  //   전용이라는 규칙에 어긋난다 — 늘 깜빡이는 커서는 신호가 아니라 장식이다(cmux·Ghostty 도 글자색).
+  //  ★ selectionInactiveBackground 를 반드시 함께 준다. 안 주면 xterm 이 선택색을 30% 로 깔아
+  //   포커스를 옮기는 순간 드래그한 자리가 배경에 묻힌다("선택이 사라졌다"로 보인다).
+  background: "#0A0D14", foreground: "#E2E8F0", cursor: "#E2E8F0", cursorAccent: "#0A0D14",
+  selectionBackground: "#264F78", selectionInactiveBackground: "#264F78",
   black: "#1B2230", red: "#F87171", green: "#34D399", yellow: "#FBBF24",
   blue: "#60A5FA", magenta: "#C084FC", cyan: "#22D3EE", white: "#CBD5E1",
   brightBlack: "#475569", brightRed: "#FCA5A5", brightGreen: "#6EE7B7", brightYellow: "#FCD34D",
@@ -241,8 +245,8 @@ const TERM_AUTO_DARK = {
 };
 const TERM_AUTO_LIGHT = {
   // CodingPT 라이트 — 배경=앱 라이트 배경(--base), 밝은 배경 가독 팔레트
-  background: "#F2F4F8", foreground: "#1E293B", cursor: "#0B8F63", cursorAccent: "#FFFFFF",
-  selectionBackground: "#BCD3F5",
+  background: "#F2F4F8", foreground: "#1E293B", cursor: "#1E293B", cursorAccent: "#FFFFFF",
+  selectionBackground: "#BCD3F5", selectionInactiveBackground: "#BCD3F5",
   black: "#334155", red: "#DC2626", green: "#059669", yellow: "#B45309",
   blue: "#2563EB", magenta: "#9333EA", cyan: "#0891B2", white: "#CBD5E1",
   brightBlack: "#64748B", brightRed: "#EF4444", brightGreen: "#10B981", brightYellow: "#D97706",

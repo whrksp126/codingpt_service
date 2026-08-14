@@ -443,6 +443,27 @@ ok(!/requestAnimationFrame\(runListeners\)/.test(pcStateSrc) && !/setTimeout\(ru
 ok(/export function flushRender/.test(pcStateSrc),
   '동기 렌더가 필요한 경로를 위한 탈출구가 있다');
 
+// ── 17. 터미널 팔레트는 두 플랫폼이 **같은 값 한 벌**이다 (2026-08-15) ────────
+// PC theme.js 와 앱 terminalSchemes.ts 는 "값은 반드시 동일하게 유지" 라고 주석으로만 약속하고
+//  있었다. 색은 한쪽만 고치기 가장 쉬운 것이라(오늘 커서색 교정이 그랬다) 실제로 대조한다.
+const palTokens = (src) => (strip(src).match(/\b[a-zA-Z]+:\s*['"]#[0-9A-Fa-f]{3,8}['"]/g) || [])
+  .map((t) => t.replace(/['"\s]/g, '').toLowerCase());
+const pcPal = palTokens(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'));
+const appPal = palTokens(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8'));
+ok(pcPal.length > 100, `팔레트를 실제로 읽었다(PC ${pcPal.length}개)`);
+const palDiff = pcPal.filter((t, i) => appPal[i] !== t).slice(0, 4);
+ok(pcPal.length === appPal.length && !palDiff.length,
+  '★ 터미널 팔레트가 PC·앱에서 같은 값 같은 순서다',
+  palDiff.length ? `PC=${palDiff.join(',')} vs 앱=${palDiff.map((_, i) => appPal[pcPal.indexOf(palDiff[i])]).join(',')}` : `개수 PC=${pcPal.length} 앱=${appPal.length}`);
+// ★ 커서는 액센트가 아니다(사용자 확정) — 늘 깜빡이는 것은 상태 신호가 될 수 없다.
+//  `auto` 다크의 커서가 초록(액센트 #34D399)으로 되돌아가면 여기서 걸린다.
+ok(!/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'))
+  && !/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8')),
+  '★ CodingPT 팔레트의 커서에 액센트색을 쓰지 않는다');
+// 선택색은 **비활성까지** 지정한다 — 안 주면 포커스가 빠지는 순간 xterm 이 30% 로 깔아 묻힌다.
+ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveBackground/g) || []).length >= 2,
+  '선택색은 활성·비활성 둘 다 지정한다');
+
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);
 console.log('ALL CONFORMANT');

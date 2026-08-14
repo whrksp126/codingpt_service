@@ -557,6 +557,35 @@ test('5-C. 다른 기기가 회전시킨 세대도 정기 확인에서 수령하
   assert.strictEqual(e2ee.hasKey(to - 2), false, '해제된 옛 세대가 무한히 남으면 회전이 무효화가 아니다');
 });
 
+test('5-D. 다른 기기가 열쇠를 다시 만들어(replace) 링에서 빠지면 — 영원한 "갱신 중" 이 아니라 재신청으로 넘어간다', async () => {
+  // 실사고(2026-08-15): 윈도우 PC 가 완전 재설치 경로로 계정 열쇠를 다시 만들자 링이 통째로 갈리고
+  //  이 PC 항목이 사라졌다. 그런데 데몬은 "회전은 됐는데 우리 봉인문이 아직 없다"(= 곧 온다)로 읽어
+  //  영구히 `열쇠 세대가 갱신되는 중이에요` 를 말했고, 그 상태로 연동 코드를 만들면 서버가 403
+  //  (NOT_TRUSTED)로 막아 설정 > 연결 화면에 [다시 시도] 만 남았다 — 사용자에게는 원인 0줄.
+  // 두 상황은 링이 직접 구분해 준다: 우리 ikX 가 키에도 신청서에도 없으면 myState='unknown'.
+  assert.strictEqual(e2ee.hasKey(), true, '전제: 이 시점엔 열쇠를 갖고 있어야 한다');
+  acct.epoch += 1;
+  acct.keys = [{
+    keyId: 999, ikX: tablet.ikX, ikEd: tablet.ikEd, label: '다른 PC', platform: 'win32', kind: 'host',
+    deviceId: 999, state: 'trusted', enrolledAt: new Date().toISOString(), revokedAt: null,
+    lastGrantEpoch: acct.epoch,
+  }];
+  acct.grants = [];
+
+  const r = await account.runOnce();
+  assert.notStrictEqual(r.phase, 'rotating', '축출을 회전 대기로 읽으면 영원히 기다린다');
+  assert.strictEqual(e2ee.hasKey(), false, '계정이 우리를 버렸는데 옛 MK 를 계속 들고 있으면 안 된다');
+  const st = await account.state();
+  assert.notStrictEqual(st.state, 'trusted', '링에 없는데 trusted 라고 말하면 화면이 코드 발급을 시도한다');
+  assert.match(String(st.reason || ''), /다시 만들어|빠졌어요/, '이유가 사실대로 적혀야 사용자가 다음 행동을 안다');
+
+  // 그리고 실제로 **재신청**으로 넘어간다(멈추지 않는다) — 다음 확인에서 enroll 이 나간다.
+  const before = countOf('/api/daemon/e2ee/enroll');
+  await account.runOnce();
+  account.stop();
+  assert.ok(countOf('/api/daemon/e2ee/enroll') > before, '축출 뒤 재신청이 없으면 사용자는 손쓸 방법이 없다');
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 //  6. 폴링 백오프 · 정책 · 유출 금지
 // ══════════════════════════════════════════════════════════════════════════

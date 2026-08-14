@@ -42,6 +42,7 @@ export default {
   "JSON 형식이 아니에요. 원문 보기로 확인하세요.": "This isn't valid JSON. Switch to the raw view to check it.",
   "Mac에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT starts automatically when you log in to your Mac.",
   "Windows에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT starts automatically when you log in to Windows.",
+  "암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.": "Get a code from a device that has the key and enter it here.",
   "이전 크기로": "Restore down",
   "최대화": "Maximize",
   "최소화": "Minimize",

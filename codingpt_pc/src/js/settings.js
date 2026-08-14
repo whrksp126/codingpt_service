@@ -299,16 +299,30 @@ function renderSection(force) {
       `;
     bindNotificationSettings(contentEl);
   } else if (section === "mobile") {
+    // ★ 코드를 못 만들면 **이유를 말한다**(2026-08-15 실사고). 예전엔 실패해도 `다시 시도` 버튼만
+    //  남아, 눌러도 같은 403 이 조용히 반복됐다 — 화면에는 아무 설명이 없었다(진짜 원인: 다른 PC 가
+    //  계정 열쇠를 다시 만들어 이 PC 가 링에서 빠짐 → 서버가 NOT_TRUSTED 로 거절).
+    //  그리고 이 PC 에 열쇠가 없을 때는 기다리라고만 하지 않는다 — 열쇠를 가진 기기가 있으면
+    //  **그 기기의 코드를 여기서 입력**하는 길(=유일한 회복 경로)을 같은 자리에 둔다.
+    const otherKeyed = (e2ee.devices || []).some((d) => !d.isThisDevice && d.state === "trusted");
+    const claimBox = `<div class="link-entry">
+        <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="${i18n.t('8자 코드')}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
+        <button class="sett-btn" data-link-submit="self">${i18n.t('연결')}</button>
+      </div>`;
     const codeHtml = e2eeReady()
       ? `<div class="sett-col">
           <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="link-box">
             ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
             ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>` : ""}
-            ${!myLinkBusy && !validMyLink() ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
+            ${!myLinkBusy && !validMyLink() ? `${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
           </div>
         </div>`
-      : `<div class="sett-col"><span class="sett-label">${i18n.t('이 기기 인증 코드')}</span><div class="acct-msg">${i18n.t('암호화 연결을 준비하고 있어요…')}</div></div>`;
+      : `<div class="sett-col">
+          <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
+          <div class="acct-msg">${esc(e2ee.reason || i18n.t('암호화 연결을 준비하고 있어요…'))}</div>
+          ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}` : ""}
+        </div>`;
     contentEl.innerHTML = `
       <div class="sm-card2">
         ${codeHtml}
@@ -325,7 +339,9 @@ function renderSection(force) {
         </div>
       </div>`;
     bindE2ee(contentEl);
-    if (e2eeReady() && !validMyLink() && !myLinkBusy) queueMicrotask(() => { void ensureMyLink(); });
+    if (e2eeReady() && !validMyLink() && !myLinkBusy && Date.now() - myLinkFailedAt > MY_LINK_RETRY_MS) {
+      queueMicrotask(() => { void ensureMyLink(); });
+    }
   } else {
     // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
@@ -952,6 +968,11 @@ let aliasEditError = "";
 let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
+//  ★ 마지막 발급 실패 시각 — 자동 재요청의 브레이크. 발급이 실패하면 화면을 다시 그리는데,
+//   그 렌더가 다시 자동 발급을 부르므로(아래 renderSection 의 queueMicrotask) 서버가 403 을 주는
+//   동안 요청이 무한히 반복된다. 실패 후 잠깐은 사람이 [다시 시도] 를 누를 때만 나간다.
+let myLinkFailedAt = 0;
+const MY_LINK_RETRY_MS = 30000;
 
 function validMyLink() {
   return !!(myLink && myLink.until > Date.now()
@@ -983,6 +1004,7 @@ async function ensureMyLink({ force = false } = {}) {
     ref: e2ee.userRef || "",
     revision: e2ee.linkRevision,
   } : null;
+  myLinkFailedAt = r.ok ? 0 : Date.now();
   linkEntryMsg = r.ok ? "" : (r.error || i18n.t('인증 코드를 만들지 못했어요'));
   scheduleMyLinkRenewal();
   if (section === "mobile") renderSection(true);
@@ -1188,17 +1210,21 @@ function bindE2ee(box) {
     linkEntryFor = null;
     await ensureMyLink({ force: true });
   }));
+  //  ⚠ 코드 입력칸은 두 화면에 산다(`계정`의 기기 행 아래 · `연결` 화면). 그래서 입력칸도 다시
+  //   그릴 대상도 **부른 쪽 기준**으로 찾는다 — connBody/renderE2ee 로 고정하면 `연결` 화면에서
+  //   누른 [연결] 이 남의 DOM 을 읽고 자기 화면은 갱신하지 않는다(무반응으로 보인다).
+  const repaint = () => { if (section === "mobile") renderSection(true); else renderE2ee(); };
   box.querySelectorAll("[data-link-submit]").forEach((b) => b.addEventListener("click", async () => {
-    const inp = connBody?.querySelector("#linkCodeInput");
+    const inp = box.querySelector("#linkCodeInput") || connBody?.querySelector("#linkCodeInput");
     const code = String(inp?.value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (code.length !== 8) { linkEntryMsg = i18n.t('코드 8자를 입력해 주세요'); renderE2ee(); return; }
+    if (code.length !== 8) { linkEntryMsg = i18n.t('코드 8자를 입력해 주세요'); repaint(); return; }
     b.disabled = true;
     linkEntryMsg = i18n.t('연결 중…');
-    renderE2ee();
+    repaint();
     const r = await linkClaim(code);
     linkEntryMsg = r.ok ? "" : (r.error || i18n.t('연동에 실패했어요'));
     if (r.ok) linkEntryFor = null;
-    renderE2ee();
+    repaint();
   }));
   // 이 기기의 연동 코드는 자동 발급·자동 갱신한다. 실패했을 때만 명시적인 재시도 버튼을 둔다.
   box.querySelectorAll("[data-link-new]").forEach((b) => b.addEventListener("click", async () => {

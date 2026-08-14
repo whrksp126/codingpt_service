@@ -42,6 +42,7 @@ export default {
   "JSON 형식이 아니에요. 원문 보기로 확인하세요.": "Ce n'est pas du JSON valide. Consulte la vue brute.",
   "Mac에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT démarre automatiquement à la connexion sur ton Mac.",
   "Windows에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT démarre automatiquement à la connexion sur Windows.",
+  "암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.": "Générez un code sur un appareil qui possède la clé, puis saisissez-le ici.",
   "이전 크기로": "Restaurer",
   "최대화": "Agrandir",
   "최소화": "Réduire",
