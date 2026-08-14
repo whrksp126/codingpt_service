@@ -322,7 +322,7 @@ function renderSection(force) {
           <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="acct-msg">${esc(e2ee.reason || i18n.t('암호화 연결을 준비하고 있어요…'))}</div>
           ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}
-          <div class="sett-hint" style="margin-top:10px">${i18n.t('그 기기를 쓸 수 없다면 이 PC 를 새 기준으로 삼을 수 있어요 — 다른 기기는 모두 다시 연결해야 해요.')}</div>
+          <div class="sett-hint" style="margin-top:10px">${i18n.t('그 기기를 켤 수 없다면 이 PC 를 새 기준으로 삼으세요. 워크스페이스·기기 등록·로그인은 그대로예요 — 다른 기기는 다음에 켜질 때 자동으로 다시 신청하고, 여기서 승인만 하면 돼요.')}</div>
           <div><button class="sett-btn" data-e2ee-reboot="1">${i18n.t('이 PC 로 열쇠 다시 만들기')}</button></div>` : ""}
         </div>`;
     contentEl.innerHTML = `

@@ -43,6 +43,7 @@ export default {
   "Mac에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT startet automatisch, wenn du dich am Mac anmeldest.",
   "Windows에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT startet automatisch, wenn du dich an Windows anmeldest.",
   "그 기기를 쓸 수 없다면 이 PC 를 새 기준으로 삼을 수 있어요 — 다른 기기는 모두 다시 연결해야 해요.": "Wenn du dieses Gerät nicht nutzen kannst, kannst du diesen PC zum neuen Ausgangspunkt machen — alle anderen Geräte müssen sich neu verbinden.",
+  "그 기기를 켤 수 없다면 이 PC 를 새 기준으로 삼으세요. 워크스페이스·기기 등록·로그인은 그대로예요 — 다른 기기는 다음에 켜질 때 자동으로 다시 신청하고, 여기서 승인만 하면 돼요.": "Wenn du das Gerät nicht einschalten kannst, mach diesen PC zum neuen Ausgangspunkt. Workspaces, Geräteregistrierungen und Anmeldung bleiben erhalten — andere Geräte fragen beim nächsten Start automatisch erneut an, du bestätigst hier nur.",
   "암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.": "Erzeuge auf einem Gerät mit dem Schlüssel einen Code und gib ihn hier ein.",
   "열쇠를 다시 만드는 중…": "Schlüssel wird neu erstellt…",
   "이 PC 로 열쇠 다시 만들기": "Schlüssel auf diesem PC neu erstellen",
