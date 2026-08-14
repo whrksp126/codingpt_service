@@ -382,7 +382,9 @@ function sectionHead(title, items) {
   return head;
 }
 
-/** PC 행 — 클릭 = 그 PC 로 전환(오프라인도 고를 수 있다: 뭘 등록해 뒀는지 볼 수 있어야 한다). */
+/** PC 행 — 클릭 = 그 PC 로 전환(오프라인도 고를 수 있다: 뭘 등록해 뒀는지 볼 수 있어야 한다).
+ *  ★ 상태 점은 그리지 않는다(2026-08-14 사용자 확정). 오프라인은 **행 전체가 흐려지는 것**으로 이미
+ *   드러난다 — 같은 사실을 점으로 한 번 더 말하면 신호가 아니라 장식이다. */
 function deviceRow(d, activeId) {
   const on = d.online !== false;
   const sel = String(d.id) === String(activeId);
@@ -395,8 +397,7 @@ function deviceRow(d, activeId) {
     `<span class="pc-ic">${icons.monitor({ size: 14 })}</span>` +
     `<span class="pc-nm">${escapeHtml(d.name || i18n.t('내 PC'))}</span>` +
     (d.isCurrent ? `<span class="pc-here">${i18n.t('이 PC')}</span>` : "") +
-    (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
-    `<span class="wsr-dot ${on ? "on" : "off"}"></span>`;
+    (unread ? `<span class="wsr-badge">${unread}</span>` : "");
   row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
   return row;
 }
