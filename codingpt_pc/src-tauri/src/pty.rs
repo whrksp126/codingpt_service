@@ -111,6 +111,23 @@ pub fn pty_open(
     }
     let target = tmux::term_session(&ns, tid);
 
+    // xterm 스크롤백은 클라이언트 로컬 상태다. 그냥 tmux attach 만 하면 새 PC 뷰는 현재 화면만
+    // 받고, 오래 살아 있던 모바일 WebView 는 자기 옛 버퍼를 계속 보여 같은 터미널의 과거가
+    // 기기마다 달라진다. attach 전에 로컬 버퍼를 비우고 tmux 정본 history(현재 화면 제외)를
+    // 심는다. 뒤이어 attach 가 현재 화면을 그리므로 중복 없이 모든 기기가 같은 과거를 본다.
+    let history_bootstrap = {
+        let captured = tmux::run(
+            &ctx,
+            &["capture-pane", "-p", "-e", "-t", &format!("={target}:0"), "-S", "-10000", "-E", "-1"],
+        ).unwrap_or_default();
+        let history = captured.trim_end_matches('\n').replace('\n', "\r\n");
+        if history.is_empty() {
+            "\x1b[3J\x1b[H\x1b[2J".to_string()
+        } else {
+            format!("\x1b[3J\x1b[H\x1b[2J{history}\r\n")
+        }
+    };
+
     let pair = native_pty_system()
         .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("PTY 생성 실패: {e}"))?;
@@ -139,6 +156,11 @@ pub fn pty_open(
         pane_id.clone(),
         PtyHandle { master: pair.master, writer, child, epoch, target, last_cols: cols, last_rows: rows },
     );
+
+    // reader 스레드보다 먼저 emit: PTY 쪽 attach 리페인트는 이미 master 버퍼에 대기하므로
+    // bootstrap → 현재 화면 순서가 보장된다.
+    let bootstrap_b64 = base64::engine::general_purpose::STANDARD.encode(history_bootstrap.as_bytes());
+    let _ = app.emit("pty://data", DataEvent { pane_id: pane_id.clone(), b64: bootstrap_b64 });
 
     // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리(자기 세대만).
     let app2 = app.clone();

@@ -559,6 +559,28 @@ async function attachPty(params, io) {
   //  — 무조건 걸던 시절엔 화면이 뜨고 0.6초 뒤 SIGWINCH 2회로 멀쩡한 TUI 를 두 번 재도장했다.
   let nudgeTimer = null;
 
+  // xterm 의 스크롤백은 뷰어마다 따로 쌓인다. 새 PC attach 는 과거가 없고 오래 살아 있던 폰은
+  // 낡은 과거가 남는 불일치를 없애기 위해, 매 attach/swap 직전에 로컬 버퍼를 지우고 터미널
+  // 백엔드의 정본 history(현재 화면 제외)를 주입한다. attach 자체가 곧 현재 화면을 다시 그린다.
+  const sendHistoryBootstrap = async (name, visibleRows) => {
+    let history = '';
+    try {
+      if (!usingHost()) {
+        // tmux 의 -E -1 = 보이는 화면 바로 위까지만. 화면 높이/줄바꿈 추측 없이 history 만 정확히 얻는다.
+        history = String(await runTmux([
+          'capture-pane', '-p', '-e', '-t', `=${name}:0`, '-S', '-10000', '-E', '-1',
+        ]) || '').replace(/\n$/, '').replace(/\n/g, '\r\n');
+      } else {
+        // term-host capture API 는 end-line 이 없으므로 전체 버퍼에서 현재 물리 행만 제외한다.
+        const captured = String(await termBackend.capture(name, { escapes: true, lines: 10000 }) || '');
+        const lines = captured.replace(/\n$/, '').split('\n');
+        const keep = Math.max(0, lines.length - Math.max(0, visibleRows | 0));
+        history = lines.slice(0, keep).join('\r\n');
+      }
+    } catch (_) { /* attach 는 살리고 버퍼만 빈 상태로 시작 */ }
+    sendOut('\x1b[3J\x1b[H\x1b[2J' + (history ? history + '\r\n' : ''));
+  };
+
   // 백엔드 attach 핸들 + 세대 토큰 — swap(탭 전환)으로 교체된 구 핸들의 exit/close 는 무시한다
   //  (구 nodePty 시절의 `p !== pty` 가드 등가. 콜백이 핸들 확정 전에 발화해도 안전하게 gen 으로 판정).
   let term = null;
@@ -580,6 +602,7 @@ async function attachPty(params, io) {
     },
   });
   try {
+    await sendHistoryBootstrap(attachName, attachH);
     gen = 1;
     term = await termBackend.attach(attachName, {
       cols: attachW, rows: attachH, cwd: abs, setLatest: true, sharedCreate: shared && !usingHost(),
@@ -611,9 +634,11 @@ async function attachPty(params, io) {
   //  뷰어 연결은 유지한 채 백엔드 attach 만 갈아끼운다 — attach 가 전체 화면을 다시 그리므로
   //  (tmux 리페인트 / term-host serializeRepaint) 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
   if (pkey) {
-    const swap = (newTid) => {
+    const swap = async (newTid) => {
       const myGen = ++gen; // 이 시점부터 구 핸들의 exit/close 는 무시된다
-      termBackend.attach(termSession(session, newTid), {
+      const nextName = termSession(session, newTid);
+      await sendHistoryBootstrap(nextName, lastH || rows);
+      termBackend.attach(nextName, {
         cols: lastW || cols, rows: lastH || rows, cwd: abs,
         ...mkHandlers(myGen),
       }).then((np) => {

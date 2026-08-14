@@ -70,7 +70,9 @@ d=json.loads(s); old=d['version']
 io.open(p,'w',encoding='utf-8').write(s.replace(f'"version": "{old}"', f'"version": "{v}"',1))
 PY
     # Cargo.toml 은 릴리스에 쓰이지 않지만(정본은 tauri.conf) 방치하면 사람이 오독한다 — 같이 맞춘다.
-    sed -i '' "0,/^version = \"[^\"]*\"/s//version = \"$newver\"/" "$cargo"
+    # package version 만 줄 시작에 단독으로 있다. macOS BSD sed 는 GNU 의 `0,/pattern/` 주소를
+    # 조용히 적용하지 않아 과거엔 성공 메시지만 뜨고 Cargo.toml 이 안 바뀌었다.
+    sed -i '' "s/^version = \"[^\"]*\"/version = \"$newver\"/" "$cargo"
     echo "PC ${cur} → ${newver} (tauri.conf + Cargo.toml)"
     echo "  다음: 커밋 → bash codingpt_service/codingpt_pc/scripts/release-pc.sh"
     ;;

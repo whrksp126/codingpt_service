@@ -490,6 +490,22 @@ ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveB
     '★ 데몬: COLORTERM 주입 + tmux RGB 광고가 한 쌍으로 있다');
   ok(/ensureTruecolor/.test(daemonPty),
     '★ 데몬: 이미 떠 있는 tmux 서버에도 RGB 를 소급 적용한다(conf 는 첫 기동에만 읽힌다)');
+
+  // attach 클라이언트마다 xterm 로컬 스크롤백이 달라지면 PC 는 과거가 없고 오래 켜 둔 폰만
+  // 낡은 과거를 보게 된다. 두 경로 모두 로컬 버퍼를 지운 뒤 tmux 정본 history 를 넣어야 한다.
+  const pcPtyRust = fs.readFileSync(path.resolve('src-tauri/src/pty.rs'), 'utf8');
+  ok(/capture-pane[\s\S]*?-S[\s\S]*?-10000[\s\S]*?-E[\s\S]*?-1/.test(pcPtyRust)
+    && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(pcPtyRust),
+    '★ PC attach 는 tmux history 로 xterm 스크롤백을 초기화한다');
+  ok(/sendHistoryBootstrap/.test(daemonPty)
+    && /capture-pane[\s\S]*?'-E', '-1'/.test(daemonPty)
+    && /sendHistoryBootstrap\(attachName/.test(daemonPty),
+    '★ 모바일/원격 attach 도 같은 tmux history 로 스크롤백을 초기화한다');
+
+  // 단축키 검색바는 콘텐츠와 함께 스크롤해야 한다. sticky 면 설정 헤더 아래를 떠다니며 목록을 가린다.
+  const scBar = (/\.sc-bar\s*\{([^}]*)\}/.exec(pcCss) || ['', ''])[1];
+  ok(!/position:\s*sticky/.test(scBar),
+    '★ 단축키 검색바는 목록을 따라다니지 않는다');
 }
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);

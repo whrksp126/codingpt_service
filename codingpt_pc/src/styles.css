@@ -2228,8 +2228,9 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
    겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
 .sc-bar {
   display: flex; align-items: center; gap: 8px; margin: 2px 0 12px;
-  /* 스크롤해도 검색이 상단에 붙는다 — 목록이 길어도 검색/초기화가 항상 손에 있게. */
-  position: sticky; top: 0; z-index: 3; padding: 8px 0; background: var(--base);
+  /* 콘텐츠와 함께 스크롤한다. sticky 로 두면 설정 헤더 아래를 따라다니며 목록/구분선을
+     가리는 떠다니는 막대가 된다(특히 모달 자체가 화면보다 낮을 때 두드러짐). */
+  padding: 8px 0;
 }
 .sc-search {
   flex: 1 1 auto; min-width: 0; padding: 8px 12px; border-radius: 9px;
@@ -2416,4 +2417,3 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-note { color: var(--dim); font-size: 11px; padding: 6px 10px; line-height: 1.5; border-top: 1px solid var(--border); }
 .emu-again { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 0;
   background: none; border: 0; color: var(--text3); font-size: 12px; cursor: pointer; }
-
