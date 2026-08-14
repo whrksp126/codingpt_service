@@ -225,11 +225,13 @@ body.resizing-row { cursor: row-resize; }
    ⚠ 클래스 이름이 `.pc-row` 인 이유: `.dev-row` 는 설정 기기 표가 "행에 배경/테두리를 주지 않는다"로
    확정하며 규칙 자체를 지운 이름이다(contract.mjs 가 그 부재를 고정한다). 다른 화면의 결정을
    같은 이름으로 되살리지 않는다. */
+/* 높이·글자 크기를 워크스페이스 행(.ws-row/.wsr-name)에 맞춘다(2026-08-14 사용자 확정) —
+   두 목록이 같은 사이드바에 세로로 붙어 있는데 행 크기가 다르면 한쪽이 부속처럼 보인다. */
 .pc-row {
-  width: 100%; display: flex; align-items: center; gap: 6px;
-  padding: 7px 10px; margin-bottom: 2px;
+  width: 100%; display: flex; align-items: center; gap: 7px;
+  min-height: 44px; padding: 11px 10px; margin-bottom: 2px;
   background: transparent; border: none; border-radius: var(--r-md);
-  color: var(--text2); text-align: left; cursor: pointer; font-size: 13px; font-weight: 600;
+  color: var(--text2); text-align: left; cursor: pointer; font-size: 13.5px; font-weight: 600;
   user-select: none; -webkit-user-select: none;
 }
 .pc-row:hover { background: var(--elevated); }
@@ -237,7 +239,6 @@ body.resizing-row { cursor: row-resize; }
 .pc-row.pc-off { opacity: 0.55; }
 .pc-row .pc-ic { display: inline-flex; flex: none; opacity: 0.85; }
 .pc-row .pc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pc-row .pc-here { font-size: 9.5px; font-weight: 700; color: var(--dim); letter-spacing: -0.2px; flex: none; }
 .pc-row .wsr-badge { margin-left: auto; }
 .wsr-dot { width: 6px; height: 6px; border-radius: 3px; display: inline-block; flex: none; }
 .wsr-dot.on { background: var(--accent); }

@@ -394,9 +394,10 @@ function deviceRow(d, activeId) {
   // 미읽음은 그 PC 의 워크스페이스 것을 합산한다 — 다른 PC 를 보고 있어도 "저기서 뭔가 왔다"를 안다.
   const unread = S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0);
   row.innerHTML =
-    `<span class="pc-ic">${icons.monitor({ size: 14 })}</span>` +
+    // ★ `이 PC` 라벨은 그리지 않는다(2026-08-14 사용자 확정) — 지금 이 앱이 도는 PC 라는 사실은
+    //  목록에서 할 일이 없다(고르는 기준이 아니다). 이름만 남긴다.
+    `<span class="pc-ic">${icons.monitor({ size: 15 })}</span>` +
     `<span class="pc-nm">${escapeHtml(d.name || i18n.t('내 PC'))}</span>` +
-    (d.isCurrent ? `<span class="pc-here">${i18n.t('이 PC')}</span>` : "") +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
   row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
   return row;

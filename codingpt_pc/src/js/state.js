@@ -240,28 +240,28 @@ export function subscribe(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
-// ── 렌더 합치기 (2026-08-14 사용자 실사고: "다 클릭했을 때 반응이 왜 이리 느리지?") ──────────
-// 진단(실측): WebContent 프로세스를 sample 해 보니 메인 스레드가 타이머 콜백 안에서 계속
-//  `innerHTML` 재작성을 돌고 있었다. 원인은 렌더가 무거워서가 아니라 **횟수**다 —
-//  `emit()` 이 호출 즉시 listeners 를 **동기로** 돌았고, listener 는 main.js `render()` 하나로
-//  사이드바 innerHTML 전면 재작성 + 설정 + 워크스페이스 + 승인 카드를 전부 다시 그린다.
-//  그런데 emit 호출 지점이 106곳이고, 그중엔 **에이전트 상태 push(agent_state)** 처럼 초당 여러 번
-//  오는 것이 있다. claude 가 도는 동안 앱은 쉬지 않고 전체 렌더를 반복했고, 그 사이에 낀 클릭은
-//  당연히 늦게 처리된다(사용자에겐 "설정 카테고리 전환마저 느리다"로 보인다).
+// ── 렌더 합치기 (2026-08-14 사용자 실사고 2건) ────────────────────────────────
+// ① "클릭 반응이 느리다": WebContent 를 sample 해 보니 메인 스레드가 타이머 콜백 안에서 계속
+//    innerHTML 재작성을 돌고 있었다. 렌더가 무거운 게 아니라 **횟수**였다 — emit() 이 listeners 를
+//    동기로 돌았고, listener 는 main.js render() 하나로 사이드바 전면 재작성 + 설정 + 워크스페이스 +
+//    승인 카드를 전부 다시 그린다. emit 호출 지점이 106곳이고 그중 agent_state push 는 claude 가
+//    도는 내내 초당 여러 번 온다 → 앱이 쉬지 않고 전체 렌더를 반복했다.
+// ② 그래서 rAF 로 합쳤더니 이번엔 "PC 목록에서 다른 PC 로 바꿀 때 너무 느리다"가 나왔다.
+//    ★ 실측(하네스): 전환이 **1370~2000ms**. 원인은 스케줄러 선택이다 —
+//      · requestAnimationFrame 은 창이 화면에 안 보이면 **아예 안 돈다**
+//      · setTimeout 은 배경에서 **1초 이상으로 throttle** 된다
+//    둘 다 "화면이 보이는 동안"을 전제한 도구라, 렌더 예약의 유일한 수단으로 쓰면 안 된다.
 //
-// 그래서 emit 은 이제 **예약**만 한다 — 한 프레임에 렌더 1회. 상태 변경 N 번이 렌더 N 번이 아니다.
-//  · rAF 로 예약하되 setTimeout 을 함께 걸고 **먼저 오는 쪽이 이긴다**: 창이 가려져 있으면 rAF 는
-//    아예 안 돈다(이번 라운드의 하위 메뉴 위치 버그와 같은 함정) → 그때는 타이머가 받는다.
-//  · 동기 렌더에 기대는 호출부는 없다(emit 직후 DOM 을 읽는 코드 없음 — 전수 확인).
-//    그래도 필요하면 `flushRender()` 로 즉시 비울 수 있게 열어 둔다.
+// 그래서 지금은 **마이크로태스크 하나만** 쓴다: 지금 실행 중인 태스크가 끝나는 즉시 실행되고,
+//  가시성·throttle 의 영향을 전혀 받지 않는다. 사용자의 클릭은 그 클릭을 처리하는 태스크 안에서
+//  화면까지 끝나므로 체감상 즉시다.
+//  ⚠ "연속 렌더 최소 간격" 같은 걸 타이머로 얹지 않는다 — 그 타이머가 곧 위 ②의 재발이다.
+//   합쳐지는 것은 **한 태스크 안에서 난 emit 들**이고, 실제로 그게 폭주의 대부분이다(리컨실러 한
+//   바퀴·목록 로드 한 번이 emit 을 여러 번 낸다). 태스크마다 하나씩 오는 push 는 그대로 한 번씩
+//   그린다 — 그건 원래 화면이 바뀌어야 하는 순간이라 줄일 대상이 아니다.
 let renderScheduled = false;
-let rafId = 0;
-let timerId = 0;
 function runListeners() {
   renderScheduled = false;
-  if (rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
-  rafId = 0;
-  if (timerId) { clearTimeout(timerId); timerId = 0; }
   for (const fn of listeners) {
     try {
       fn();
@@ -275,9 +275,7 @@ export function emit() {
   schedulePersist();
   if (renderScheduled) return;
   renderScheduled = true;
-  //  node(테스트 하네스)에는 rAF 가 없다 — 타이머만으로도 합치기는 성립한다.
-  if (typeof requestAnimationFrame === "function") rafId = requestAnimationFrame(runListeners);
-  timerId = setTimeout(runListeners, 16);
+  queueMicrotask(runListeners);
 }
 /** 예약된 렌더를 지금 즉시 수행(테스트·하네스처럼 동기 단언이 필요한 경로용). */
 export function flushRender() {

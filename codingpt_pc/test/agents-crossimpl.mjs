@@ -412,8 +412,13 @@ const pcStateSrc = strip(read(path.join(PC, 'state.js')));
 const emitBody = (/export function emit\(\) \{[\s\S]*?\n\}/.exec(pcStateSrc) || [""])[0];
 ok(/renderScheduled/.test(emitBody) && !/for \(const fn of listeners\)/.test(emitBody),
   '★ emit() 은 렌더를 예약만 한다(동기로 listeners 를 돌지 않는다)');
-ok(/setTimeout\(runListeners/.test(pcStateSrc),
-  '★ rAF 만 믿지 않는다 — 창이 가려지면 rAF 는 안 돈다(타이머 폴백 필수)');
+// ★ 예약 수단은 **마이크로태스크뿐**이다(2026-08-14 두 번째 실사고).
+//  rAF 는 창이 안 보이면 아예 안 돌고, setTimeout 은 배경에서 1초 이상으로 throttle 된다.
+//  처음엔 그 둘로 예약했다가 PC 전환이 **1370~2000ms** 걸리는 것을 하네스에서 실측했다.
+ok(/queueMicrotask\(runListeners\)/.test(pcStateSrc),
+  '★ 렌더 예약은 마이크로태스크로 한다(가시성·throttle 에 걸리지 않는 유일한 수단)');
+ok(!/requestAnimationFrame\(runListeners\)/.test(pcStateSrc) && !/setTimeout\(runListeners/.test(pcStateSrc),
+  '★ 렌더 예약에 rAF·setTimeout 을 쓰지 않는다(둘 다 "화면이 보이는 동안"을 전제한다)');
 ok(/export function flushRender/.test(pcStateSrc),
   '동기 렌더가 필요한 경로를 위한 탈출구가 있다');
 
