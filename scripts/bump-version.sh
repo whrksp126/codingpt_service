@@ -60,6 +60,7 @@ case "$target" in
   pc)
     conf="$PC/src-tauri/tauri.conf.json"
     cargo="$PC/src-tauri/Cargo.toml"
+    lock="$PC/src-tauri/Cargo.lock"
     cur=$(python3 -c "import json;print(json.load(open('$conf'))['version'])")
     higher "$cur" "$newver" || { echo "❌ $cur → $newver 는 상향이 아닙니다(업데이터가 무시)"; exit 1; }
     python3 - "$conf" "$newver" <<'PY'
@@ -73,7 +74,19 @@ PY
     # package version 만 줄 시작에 단독으로 있다. macOS BSD sed 는 GNU 의 `0,/pattern/` 주소를
     # 조용히 적용하지 않아 과거엔 성공 메시지만 뜨고 Cargo.toml 이 안 바뀌었다.
     sed -i '' "s/^version = \"[^\"]*\"/version = \"$newver\"/" "$cargo"
-    echo "PC ${cur} → ${newver} (tauri.conf + Cargo.toml)"
+    # Cargo.lock 의 루트 패키지도 빌드 전에 맞춘다. cargo build 가 뒤늦게 이 줄을 바꾸면
+    # 릴리스 직후 작업 트리가 더러워지고 버전 커밋에서 lockfile 만 빠진다.
+    python3 - "$lock" "$cur" "$newver" <<'PY'
+import io, sys
+p, old, new = sys.argv[1:]
+s = io.open(p, encoding='utf-8').read()
+needle = f'name = "codingpt_pc"\nversion = "{old}"'
+replacement = f'name = "codingpt_pc"\nversion = "{new}"'
+if needle not in s:
+    raise SystemExit(f"❌ Cargo.lock 루트 패키지 버전을 찾지 못했습니다: {old}")
+io.open(p, 'w', encoding='utf-8').write(s.replace(needle, replacement, 1))
+PY
+    echo "PC ${cur} → ${newver} (tauri.conf + Cargo.toml + Cargo.lock)"
     echo "  다음: 커밋 → bash codingpt_service/codingpt_pc/scripts/release-pc.sh"
     ;;
   *) echo "대상은 app | app-build | pc"; exit 1 ;;
