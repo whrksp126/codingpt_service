@@ -709,6 +709,11 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 /* ★ 개정 12: 연동 코드(이 기기) · 코드 입력(다른 기기 행) — 승인 UI 를 대체한다. */
 .link-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
 .link-code { font-family: var(--mono, ui-monospace, monospace); font-size: 26px; font-weight: 800; letter-spacing: 6px; color: var(--text); }
+.link-expiry { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.link-renew { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--dim); cursor: pointer; }
+.link-renew:hover { background: var(--elevated2); color: var(--text2); }
+.link-renew:active { transform: scale(.96); }
+.link-renew:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--text3) 16%, transparent); }
 .link-entry { display: flex; align-items: center; gap: 8px; }
 .link-entry .acct-del-input { flex: 1; min-width: 0; font-family: var(--mono, ui-monospace, monospace); }
 /* (구) 승인 대기 행 = 미확인 알림(개정 9). 행 전체가 승인 표면으로 가는 문이라 커서/호버를 준다.

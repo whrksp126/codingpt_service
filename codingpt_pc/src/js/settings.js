@@ -326,7 +326,8 @@ function renderSection(force) {
       ? `<div class="sett-col">
           <div class="link-box">
             ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
-            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>` : ""}
+            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>
+              <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
             ${!myLinkBusy && !validMyLink() ? `${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
           </div>
         </div>`
@@ -1000,6 +1001,7 @@ let aliasEditError = "";
 let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
+let myLinkClockTimer = null;
 //  ★ 마지막 발급 실패 시각 — 자동 재요청의 브레이크. 발급이 실패하면 화면을 다시 그리는데,
 //   그 렌더가 다시 자동 발급을 부르므로(아래 renderSection 의 queueMicrotask) 서버가 403 을 주는
 //   동안 요청이 무한히 반복된다. 실패 후 잠깐은 사람이 [다시 시도] 를 누를 때만 나간다.
@@ -1012,13 +1014,29 @@ function validMyLink() {
     && (!myLink.ref || !e2ee.userRef || myLink.ref === e2ee.userRef));
 }
 
+function myLinkTimeText() {
+  const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} 남음`;
+}
+
+function paintMyLinkCountdown() {
+  const text = myLinkTimeText();
+  document.querySelectorAll("[data-link-countdown]").forEach((el) => { el.textContent = text; });
+}
+
 function scheduleMyLinkRenewal() {
   if (myLinkTimer) clearTimeout(myLinkTimer);
+  if (myLinkClockTimer) clearInterval(myLinkClockTimer);
   myLinkTimer = null;
+  myLinkClockTimer = null;
   if (!validMyLink()) return;
+  paintMyLinkCountdown();
+  myLinkClockTimer = setInterval(paintMyLinkCountdown, 1000);
   const wait = Math.max(1000, myLink.until - Date.now() - 1000);
   myLinkTimer = setTimeout(() => {
     myLinkTimer = null;
+    if (myLinkClockTimer) clearInterval(myLinkClockTimer);
+    myLinkClockTimer = null;
     myLink = null;
     if (state.view === "settings" && (section === "connection" || section === "mobile") && e2eeReady()) void ensureMyLink();
   }, wait);
@@ -1063,13 +1081,13 @@ function e2eeMyCodeRow() {
     scheduleMyLinkRenewal();
   }
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
-  const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
     <div class="appr-reveal">${i18n.t('이 기기 인증 코드')}</div>
     <div class="link-box">
       ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
-        <div class="acct-msg">다른 기기에서 이 코드를 입력하세요 · ${mm} 남음</div>` : ""}
+        <div class="acct-msg">다른 기기에서 이 코드를 입력하세요</div>
+        <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
       ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
     </div>
   </td></tr>`;
