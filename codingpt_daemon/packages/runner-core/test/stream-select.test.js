@@ -219,9 +219,14 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
     let clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
     assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `뷰어 PTY가 실제 크기를 반영하지 않았다: ${clients.trim()}`);
     const paneAfter = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(paneAfter.trim(), '100x30', 'shared pane did not follow the mobile viewport');
+    /* legacy ignore-size assertions removed in 0.1.284
     assert.strictEqual(paneAfter, paneBefore, 'ignore-size 뷰어가 공유 pane 정본 크기를 바꿨다');
     const flags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
     assert.match(flags, /ignore-size/, '모바일 뷰어에 ignore-size 플래그가 없다');
+    */
+    const activeFlags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
+    assert.doesNotMatch(activeFlags, /ignore-size/, 'mobile client is still excluded from pane sizing');
 
     // alternate-screen TUI에 진입하면 마지막 요청 크기를 실제 PTY에 적용한다.
     ws.send(vs.seal(Buffer.from('tput smcup\r')), { binary: true });

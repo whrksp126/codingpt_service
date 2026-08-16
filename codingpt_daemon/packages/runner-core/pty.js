@@ -579,8 +579,9 @@ async function attachPty(params, io) {
   let resizeSeq = 0;
   let syncSeq = 0;
 
-  // 모바일 tmux 클라이언트는 ignore-size 뷰어다. 자기 PTY 크기는 실제 WebView와 맞춰 tmux가
-  // 올바른 커서/클리핑을 렌더하게 하되, 공유 pane 정본 크기는 PC만 결정한다.
+  // 각 기기는 같은 tmux pane을 보되, 마지막으로 실제 viewport resize를 보낸 기기의 크기로
+  // 정본을 맞춘다. 그래야 tmux가 만든 커서 이동과 해당 기기의 xterm 열 수가 일치한다.
+  // keepalive/단순 focus는 이 함수를 호출하지 않으므로 예전의 주기적 크기 왕복은 재발하지 않는다.
   const applyViewerResize = (w, h) => {
     resizeSeq++;
     try { term.resize(w, h); } catch (_) { /* noop */ }
@@ -650,14 +651,9 @@ async function attachPty(params, io) {
   });
   try {
     await sendHistoryBootstrap(attachName, attachH);
-    // PC UI 클라이언트가 잠시 없어도 ignore-size 모바일만으로 pane 크기가 바뀌지 않게 현재 정본을
-    // manual로 고정한다. PC Rust 경로가 실제 창 리사이즈 때만 이 값을 갱신한다.
-    if (!usingHost()) {
-      await runTmux(['resize-window', '-t', `=${attachName}:0`, '-x', String(attachW), '-y', String(attachH)]).catch(() => {});
-    }
     gen = 1;
     term = await termBackend.attach(attachName, {
-      cols, rows, cwd: abs, ignoreSize: !usingHost(), sharedCreate: shared && !usingHost(),
+      cols, rows, cwd: abs, setLatest: !usingHost(), sharedCreate: shared && !usingHost(),
       ...mkHandlers(1),
     });
   } catch (e) {
@@ -690,15 +686,9 @@ async function attachPty(params, io) {
       const myGen = ++gen; // 이 시점부터 구 핸들의 exit/close 는 무시된다
       const nextName = termSession(session, newTid);
       await sendHistoryBootstrap(nextName, lastH || rows);
-      if (!usingHost()) {
-        const inf = await termBackend.info(nextName).catch(() => null);
-        if (inf && inf.cols > 1 && inf.rows > 1) {
-          await runTmux(['resize-window', '-t', `=${nextName}:0`, '-x', String(inf.cols), '-y', String(inf.rows)]).catch(() => {});
-        }
-      }
       termBackend.attach(nextName, {
         cols: lastW || cols, rows: lastH || rows, cwd: abs,
-        ignoreSize: !usingHost(),
+        setLatest: !usingHost(),
         ...mkHandlers(myGen),
       }).then((np) => {
         if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }
