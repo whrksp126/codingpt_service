@@ -265,10 +265,10 @@ pub fn pty_resize(
     Ok(())
 }
 
-// 크기 주장(claim) — 사용자가 이 pane 을 클릭/포커스/타이핑할 때, 표시 중인 터미널 창이 다른 기기
-//  크기로 잡혀 있으면 클라이언트 pty 를 1칸 줄였다 복원(nudge)한다. 리사이즈 신호가 이 클라이언트를
-//  window-size latest 의 "latest" 로 만들어 창이 이 pane 크기로 따라온다 — resize-window(manual 고정)
-//  없이 성립하므로 기기 간 크기 뺏기 전쟁이 없다. 창이 이미 내 크기면 완전 no-op.
+// 크기 주장(claim) — 사용자가 이 pane 을 클릭/포커스/타이핑할 때, 공유 창을 PC 에 마지막으로
+//  fit 된 크기로 되돌린다. 모바일과 동일하게 resize-window 를 명시해야 일반 셸에서도 확실히
+//  회수된다. 예전 nudge 방식은 alternate-screen 에서만 실행되어 일반 프롬프트가 모바일 크기에
+//  고정되는 결함이 있었다. 창이 이미 내 크기면 완전 no-op.
 #[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, sync: Option<bool>) {
@@ -286,7 +286,21 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     std::thread::spawn(move || {
         let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"]).unwrap_or_default();
         let mut it = cur.split_whitespace();
-        if it.next() != Some("1") {
+        let alternate = it.next() == Some("1");
+        let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if cw != cols || ch != rows {
+            let _ = tmux::run(
+                &ctx2,
+                &["resize-window", "-t", &format!("={target}:0"), "-x", &cols.to_string(), "-y", &rows.to_string()],
+            );
+            if let Some(m) = app.try_state::<PtyManager>() {
+                if let Some(h) = m.panes.lock().unwrap().get(&pane_id) {
+                    let _ = h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                }
+            }
+        }
+        if !alternate {
             if sync.unwrap_or(false) {
                 let captured = tmux::run(&ctx2, &["capture-pane", "-p", "-e", "-t", &format!("={target}:0"), "-S", "-10000"]).unwrap_or_default();
                 let snapshot = normalize_resize_prompt_history(&captured).replace('\n', "\r\n");
@@ -296,21 +310,6 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
             }
             return;
         }
-        let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-        let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-        if cw == cols && ch == rows {
-            return; // 이미 내 크기 — SIGWINCH 소음 없이 종료
-        }
-        let nudge = |c: u16| {
-            if let Some(m) = app.try_state::<PtyManager>() {
-                if let Some(h) = m.panes.lock().unwrap().get(&pane_id) {
-                    let _ = h.master.resize(PtySize { rows, cols: c, pixel_width: 0, pixel_height: 0 });
-                }
-            }
-        };
-        nudge(cols - 1);
-        std::thread::sleep(std::time::Duration::from_millis(60));
-        nudge(cols);
     });
 }
 
