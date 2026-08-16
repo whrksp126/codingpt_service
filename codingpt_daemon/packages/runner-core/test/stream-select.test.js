@@ -129,12 +129,12 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   const capA = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '-S', '-30']);
   assert.ok(/IN-A/.test(capA), 'WS 입력이 터미널 A 에 안 들어갔다');
 
-  // 같은 터미널을 다시 포커스(claim)하면 스트림/PTY를 분리하지 않고 이 뷰어에 정본 스냅샷을 보낸다.
+  // 같은 터미널을 다시 포커스(claim)해도 스트림/PTY를 분리하지 않는다. claim은 공유
+  // window 크기만 명시적으로 가져오며, 화면 스냅샷을 재주입해 프롬프트/scrollback을 복제하지 않는다.
   rx = '';
   await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
   await sleep(250);
-  assert.ok(rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim에 로컬 버퍼 초기화가 없다');
-  assert.ok(rx.includes('IN-A'), '포커스 claim 스냅샷이 tmux 정본 내용을 포함하지 않는다');
+  assert.ok(!rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim이 정본 스냅샷을 다시 주입했다');
 
   // 3) select → 같은 스트림이 터미널 B 로 스왑(WS 유지).
   const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: b.index, paneId: 'pS', client: 'cS' });
@@ -213,20 +213,16 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
     });
 
     const paneBefore = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
-    // ctrl 프레임(=옛 텍스트 JSON) — 뷰어 PTY는 실제 화면 크기로, 공유 pane은 PC 정본 그대로.
+    // ctrl 프레임(=옛 텍스트 JSON) — attach client는 크기 경쟁에서 제외되지만,
+    // 현재 입력 주체의 명시적 resize-window는 공유 pane을 실제 화면 크기로 맞춘다.
     ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
     await sleep(1000); // attach + 첫 resize nudge(600ms) 안정화
     let clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
     assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `뷰어 PTY가 실제 크기를 반영하지 않았다: ${clients.trim()}`);
     const paneAfter = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
     assert.strictEqual(paneAfter.trim(), '100x30', 'shared pane did not follow the mobile viewport');
-    /* legacy ignore-size assertions removed in 0.1.284
-    assert.strictEqual(paneAfter, paneBefore, 'ignore-size 뷰어가 공유 pane 정본 크기를 바꿨다');
-    const flags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
-    assert.match(flags, /ignore-size/, '모바일 뷰어에 ignore-size 플래그가 없다');
-    */
     const activeFlags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
-    assert.doesNotMatch(activeFlags, /ignore-size/, 'mobile client is still excluded from pane sizing');
+    assert.match(activeFlags, /ignore-size/, '모바일 attach client가 자동 pane 크기 경쟁에 참여한다');
 
     // alternate-screen TUI에 진입하면 마지막 요청 크기를 실제 PTY에 적용한다.
     ws.send(vs.seal(Buffer.from('tput smcup\r')), { binary: true });

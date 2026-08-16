@@ -663,6 +663,7 @@ async function attachPty(params, io) {
     gen = 1;
     term = await termBackend.attach(attachName, {
       cols, rows, cwd: abs, setLatest: !usingHost(), sharedCreate: shared && !usingHost(),
+      ignoreSize: !usingHost(),
       ...mkHandlers(1),
     });
   } catch (e) {
@@ -698,6 +699,7 @@ async function attachPty(params, io) {
       termBackend.attach(nextName, {
         cols: lastW || cols, rows: lastH || rows, cwd: abs,
         setLatest: !usingHost(),
+        ignoreSize: !usingHost(),
         ...mkHandlers(myGen),
       }).then((np) => {
         if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }
@@ -726,7 +728,6 @@ async function attachPty(params, io) {
       async claim() {
         applyViewerResize(lastW || cols, lastH || rows);
         await resizeBarrier;
-        await sendShellSnapshot();
       },
       // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
       displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },

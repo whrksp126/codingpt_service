@@ -855,6 +855,17 @@ export class PaneView {
       macOptionClickForcesSelection: true,
       allowProposedApi: true,
     });
+    // normal buffer 의 `clear`(CSI 2 J)는 화면만 지우고 xterm 로컬 scrollback 은 남긴다. 공유
+    // 터미널에서는 기기마다 로컬 과거가 달라져 PC만 지워지고 iPad에는 남는 것처럼 보이므로,
+    // 같은 clear 신호를 받은 모든 뷰어가 자기 scrollback도 정리한다. alternate TUI는 제외.
+    try {
+      this.term.parser.registerCsiHandler({ final: "J" }, (params) => {
+        if (params?.[0] === 2 && this.term?.buffer?.active?.type === "normal") {
+          queueMicrotask(() => { try { this.term?.clear(); this.term?.scrollToBottom(); } catch (_) {} });
+        }
+        return false; // xterm 기본 ED 처리도 계속 실행
+      });
+    } catch (_) { /* 구 xterm 폴백 */ }
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     if (SearchAddon) {

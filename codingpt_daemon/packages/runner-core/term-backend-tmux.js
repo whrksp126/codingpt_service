@@ -185,7 +185,11 @@ async function attach(name, o = {}) {
   if (!tmux) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
   const args = ['-L', p.TMUX_SOCKET, '-u'];
   if (o.sharedCreate) args.push(...(p.CONF_ARGS || []), 'new-session', '-A', '-s', String(name), '-c', o.cwd);
-  else args.push('attach-session', '-t', '=' + String(name));
+  else {
+    args.push('attach-session');
+    if (o.ignoreSize) args.push('-f', 'ignore-size');
+    args.push('-t', '=' + String(name));
+  }
   if (o.setLatest) args.push(';', 'set', '-g', 'window-size', 'latest');
   const child = nodePty.spawn(tmux, args, {
     name: 'xterm-256color',

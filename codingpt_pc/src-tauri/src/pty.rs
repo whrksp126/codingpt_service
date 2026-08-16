@@ -135,7 +135,10 @@ pub fn pty_open(
     // -d 금지 — 같은 세션에 폰/다른 PC 가 동시 attach 해 미러/이어받기 한다(죽은 앱의 스테일
     //  클라이언트는 프로세스 종료와 함께 tmux 가 자동 제거). window-size latest 는 conf 가 전역
     //  세팅하지만, conf 없이 뜬 구 서버 대비로 attach 시에도 한 번 보장한다.
-    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-t", &format!("={target}"), ";", "set", "-g", "window-size", "latest"]);
+    // attach 자체는 공유 창 크기를 건드리지 않는다. 실제 사용자 포커스/입력/viewport resize 만
+    // pty_resize·pty_claim 의 명시적 resize-window 로 크기를 정한다. 여러 기기가 동시에 붙을 때
+    // tmux 가 클라이언트 수만큼 SIGWINCH 재도장을 만들어 프롬프트/화면을 history 에 복제하는 것 방지.
+    cmd.args(["-L", tmux::TMUX_SOCKET, "attach", "-f", "ignore-size", "-t", &format!("={target}"), ";", "set", "-g", "window-size", "latest"]);
     cmd.cwd(abs.to_string_lossy().to_string());
     cmd.env_remove("TMUX");
     // GUI(open)로 뜬 앱은 TERM/LANG 이 없어 tmux attach 가 "terminal does not support clear" 로 죽는다.
