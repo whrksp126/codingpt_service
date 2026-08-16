@@ -247,15 +247,15 @@ ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem
   'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
 ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
   'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
-// 화면당 권한 하나 + 이전/확인/다음. 실제 승인 전에는 다음이 비활성이다.
+// 화면당 권한 하나 + 이전/확인/다음. OS 권한은 모두 선택 사항이라 미승인 상태에서도 진행한다.
 ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate)
-  && /id="lgPermBack"/.test(pcGate) && /id="lgPermNext"[^>]*disabled/.test(pcGate)
+  && /id="lgPermBack"/.test(pcGate) && /id="lgPermNext" class="btn primary">/.test(pcGate)
   && !/id="lgFolders"/.test(pcGate),
-  'PC: 권한 위저드는 화면당 하나이며 이전/확인/다음을 제공하고 미승인 시 다음이 비활성이다');
+  'PC: 권한 위저드는 화면당 하나이며 미승인 상태에서도 다음으로 진행할 수 있다');
 ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
   'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
-ok(!/lgSkipPerm/.test(pcGate) && /requiredPerms\(\)/.test(pcGate),
-  'PC: 모든 필수 권한을 실제 승인하기 전에는 건너뛰거나 완료할 수 없다');
+ok(/requiredPerms\(\)/.test(pcGate) && !/if \(!grantedNow\) return/.test(pcGate),
+  'PC: 모든 OS 권한은 선택 사항이며 미승인 상태도 완료할 수 있다');
 ok(/\{ id: "notification", label: "알림 설정" \}/.test(pcGate)
   && /p\.id === "notification"/.test(pcGate)
   && !/\{ id: "notif"/.test(pcGate),
@@ -266,9 +266,9 @@ ok(/id="lgOpenNotifSettings"/.test(pcGate)
 ok(/id="lgNotifControls" class="notif-onb-controls is-disabled"/.test(pcGate)
   && /soundSelect\.disabled = !granted/.test(pcGate)
   && /test\.disabled = !granted/.test(pcGate)
-  && /nextBtn\.disabled = !grantedNow/.test(pcGate)
+  && !/nextBtn\.disabled = !grantedNow/.test(pcGate)
   && !/lgOpenNotifSettingsReady/.test(pcGate),
-  'PC: 상태·설정 구조는 유지하고 OFF면 소리·테스트·계속만 비활성, ON이면 같은 자리에서 활성화한다');
+  'PC: 알림 OFF면 소리·테스트만 비활성이고 온보딩 진행은 막지 않는다');
 ok(/mac_usernotifications::Notification::new/.test(pcBridge)
   && /\.send_blocking\(\)/.test(pcBridge)
   && /\.default_sound\(\)/.test(pcBridge),
@@ -283,6 +283,10 @@ ok(/btn\.dataset\.denied = "1"/.test(pcGate)
   && /id="lgOpenFolderSettings"/.test(pcGate)
   && /btn\.textContent = "다시 확인"/.test(pcGate),
   'PC: 보호 폴더는 설정 화면을 직접 열고 승인 상태를 다시 확인할 수 있다');
+ok(/checkingPermission/.test(pcGate)
+  && /권한을 다시 확인하고 있어요/.test(pcGate)
+  && /권한 없이 다음으로 넘어갈 수 있어요/.test(pcGate),
+  'PC: 다시 확인은 즉시 진행 상태와 실패 결과를 표시한다');
 // ★ 2026-08-14 사용자 확정: 권한 판정은 **슬라이드 진입 시 자동**이다. 예전엔 이미 허용된 권한
 //  앞에서도 [권한 확인] 을 한 번 눌러야 [다음] 이 열렸다("굳이 사용자가 누르지 않아도 되게").
 //  알림도 상태만 읽지 않고 미결정이면 그 자리에서 요청한다(팝업). 버튼은 거부 뒤 재확인 전용.

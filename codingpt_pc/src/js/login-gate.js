@@ -53,7 +53,8 @@ const requiredPerms = () => (IS_WINDOWS ? [] : [
   ...FOLDER_PERMS.map((f) => ({ ...f, folder: true })),
 ]);
 
-// 권한은 화면당 하나만 요청한다. 실제 승인 확인 전에는 다음 단계가 없다.
+// 권한은 화면당 하나씩 안내하지만 모두 선택 사항이다. 거부/미결정이어도 다음 단계로 갈 수 있고,
+// 필요한 기능을 실제 사용할 때 설정에서 다시 허용할 수 있다.
 const PERM_COPY = {
   notification: { title: "알림 설정", benefit: "에이전트 작업이 끝나거나 도움이 필요할 때 알려드려요." },
   downloads: { title: "다운로드 폴더 접근을 허용해 주세요", benefit: "프로젝트 폴더를 열고 파일을 다루는 데 필요해요" },
@@ -194,9 +195,8 @@ function renderStep() {
   //  · 화면당 권한 하나 — 제목 + 이득 1줄. 장식 아이콘/브랜드 로고는 사용하지 않는다.
   //    행 목록 + 행별 작은 버튼은 "아무도 누르고 싶지 않은" 구성이었다(사용자 실사 피드백).
   //  · 자동 실행 토글은 게이트에서 제거 — 기본 켬(페어링 시 적용), 끄기는 설정 > 일반에서.
-  //  · [이전]은 언제나 가능, [다음]은 현재 권한이 실제 승인된 경우에만 가능하다.
-  //  · 거부됨 → 그때만 [시스템 설정 열기] + '나중에 설정에서 허용' 탈출로가 열린다. 처음부터
-  //    건너뛰기를 주지 않는 것은 "필수 승인" 확정 — 단 거부로 막힌 사용자를 영구히 가두지 않는다.
+  //  · 모든 권한은 선택 사항이다. [다음]/[완료]은 승인 여부와 무관하게 항상 가능하다.
+  //  · 거부됨 → [시스템 설정 열기]와 [다시 확인]을 제공하되 온보딩을 가두지 않는다.
   //
   // ★ 2026-08-14 3차 개정(사용자 확정): **판정은 우리가 한다.** 예전엔 [권한 확인]을 눌러야만
   //  프로브가 돌아서, 이미 허용된 권한 앞에서도 사용자가 버튼을 한 번 눌러야 [다음]이 열렸다.
@@ -230,7 +230,7 @@ function renderStep() {
         <div class="lg-wizard-actions">
           <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>${i18n.t('이전')}</button>
           <button id="lgAllow" class="btn secondary" data-perm="${p.id}" disabled>${i18n.t('확인 중…')}</button>
-          <button id="lgPermNext" class="btn primary" disabled>${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
+          <button id="lgPermNext" class="btn primary">${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
         </div>
       </footer>
     </div>`;
@@ -243,7 +243,6 @@ function renderStep() {
   let grantedNow = false;
   const paintGranted = (granted) => {
     grantedNow = !!granted;
-    nextBtn.disabled = !grantedNow;
     if (grantedNow) {
       btn.textContent = i18n.t('허용됨 ✓');
       btn.disabled = true;
@@ -263,7 +262,6 @@ function renderStep() {
     renderStep();
   });
   nextBtn?.addEventListener("click", () => {
-    if (!grantedNow) return;
     permIdx += 1;
     const progressKey = setupProgressKey();
     if (progressKey) { try { localStorage.setItem(progressKey, String(permIdx)); } catch (_) {} }
@@ -305,6 +303,9 @@ function renderStep() {
       statusBody.textContent = granted
         ? i18n.t('아래에서 알림음을 선택하고 테스트할 수 있어요.')
         : i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.');
+      alt.textContent = granted
+        ? i18n.t('이 권한은 허용되어 있어요.')
+        : i18n.t('아직 허용되지 않았어요. 권한 없이 다음으로 넘어갈 수 있어요.');
     };
     const bindOpenSettings = (open) => open?.addEventListener("click", async () => {
       open.disabled = true;
@@ -325,6 +326,7 @@ function renderStep() {
     permAutoCheck = async () => {
       btn.disabled = true;
       btn.textContent = i18n.t('확인 중…');
+      alt.textContent = i18n.t('권한을 다시 확인하고 있어요…');
       let value = await refreshNotificationPermission();
       if (!alive()) return;
       if (value === "prompt") {
@@ -374,10 +376,15 @@ function renderStep() {
   if (p.folder) {
     // 보호 경로 프로브 = 미결정이면 곧 OS 팝업이고(응답까지 블로킹), 결정돼 있으면 즉답이다.
     //  그래서 슬라이드 진입 시 그냥 돌린다 — 허용된 권한 앞에서는 아무 팝업도 뜨지 않는다.
+    let checkingPermission = false;
     permAutoCheck = async () => {
+      if (checkingPermission) return;
+      checkingPermission = true;
       btn.disabled = true;
       btn.textContent = i18n.t('확인 중…');
+      alt.textContent = i18n.t('권한을 다시 확인하고 있어요…');
       const ok = await api.probeFolder(p.id).catch(() => false);
+      checkingPermission = false;
       if (!alive()) return;
       if (ok) { completePermission(p.id); return; }
       // macOS 는 한 번 거부한 보호 경로 팝업을 다시 띄우지 않는다 → 재요청이 아니라 설정 유도 +
@@ -385,7 +392,7 @@ function renderStep() {
       btn.dataset.denied = "1";
       btn.textContent = i18n.t('다시 확인');
       btn.disabled = false;
-      alt.textContent = i18n.t('시스템 설정에서 권한을 켜면 자동으로 확인해요.');
+      alt.textContent = i18n.t('아직 허용되지 않았어요. 권한 없이 다음으로 넘어갈 수 있어요.');
       stopPermWatch();
       let checking = false;
       const timer = setInterval(async () => {
