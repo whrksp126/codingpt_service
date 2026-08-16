@@ -111,6 +111,13 @@ pub fn pty_open(
     }
     let target = tmux::term_session(&ns, tid);
 
+    // PC가 공유 pane의 정본 크기 소유자다. 모바일은 ignore-size 뷰어라 이 manual 크기를 바꾸지
+    // 못하고, PC 창의 실제 resize만 아래 pty_resize에서 갱신한다.
+    let _ = tmux::run(
+        &ctx,
+        &["resize-window", "-t", &format!("={target}:0"), "-x", &cols.to_string(), "-y", &rows.to_string()],
+    );
+
     // xterm 스크롤백은 클라이언트 로컬 상태다. 그냥 tmux attach 만 하면 새 PC 뷰는 현재 화면만
     // 받고, 오래 살아 있던 모바일 WebView 는 자기 옛 버퍼를 계속 보여 같은 터미널의 과거가
     // 기기마다 달라진다. attach 전에 로컬 버퍼를 비우고 tmux 정본 history(현재 화면 제외)를
@@ -128,20 +135,8 @@ pub fn pty_open(
         }
     };
 
-    // 셸 attach는 현재 정본 크기를 유지한다. 새 PC/폰이 붙을 때마다 자기 크기로 PTY를 흔들면
-    // tmux가 보이는 프롬프트를 history로 밀어 넣는다. alternate-screen TUI만 요청 크기로 attach.
-    let display = tmux::run(
-        &ctx,
-        &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"],
-    ).unwrap_or_default();
-    let mut display_parts = display.split_whitespace();
-    let alternate = display_parts.next() == Some("1");
-    let current_cols = display_parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(cols);
-    let current_rows = display_parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(rows);
-    let attach_cols = if alternate { cols } else { current_cols };
-    let attach_rows = if alternate { rows } else { current_rows };
     let pair = native_pty_system()
-        .openpty(PtySize { rows: attach_rows, cols: attach_cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("PTY 생성 실패: {e}"))?;
     let mut cmd = CommandBuilder::new(ctx.tmux.to_string_lossy().to_string());
     // -d 금지 — 같은 세션에 폰/다른 PC 가 동시 attach 해 미러/이어받기 한다(죽은 앱의 스테일
@@ -257,31 +252,23 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
 #[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_resize(
-    app: AppHandle,
     ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
     pane_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let target = {
-        let mut panes = mgr.panes.lock().unwrap();
-        if let Some(h) = panes.get_mut(&pane_id) {
-            h.last_cols = cols;
-            h.last_rows = rows;
-            h.target.clone()
-        } else { return Ok(()); }
-    };
-    let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
-    std::thread::spawn(move || {
-        let alt = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on}"]).unwrap_or_default();
-        if alt.trim() != "1" { return; }
-        if let Some(m) = app.try_state::<PtyManager>() {
-            if let Some(h) = m.panes.lock().unwrap().get(&pane_id) {
-                let _ = h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
-            }
-        }
-    });
+    let mut panes = mgr.panes.lock().unwrap();
+    if let Some(h) = panes.get_mut(&pane_id) {
+        let _ = tmux::run(
+            &ctx,
+            &["resize-window", "-t", &format!("={}:0", h.target), "-x", &cols.to_string(), "-y", &rows.to_string()],
+        );
+        h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+            .map_err(|e| format!("resize 실패: {e}"))?;
+        h.last_cols = cols;
+        h.last_rows = rows;
+    }
     Ok(())
 }
 

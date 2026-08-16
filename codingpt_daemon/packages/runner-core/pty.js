@@ -577,35 +577,16 @@ async function attachPty(params, io) {
   //  — 무조건 걸던 시절엔 화면이 뜨고 0.6초 뒤 SIGWINCH 2회로 멀쩡한 TUI 를 두 번 재도장했다.
   let nudgeTimer = null;
   let resizeSeq = 0;
-  let shellResizePending = false;
-  let shellProbeAt = 0;
   let syncSeq = 0;
 
-  // 일반 셸에서 기기 크기를 왕복시키면 tmux가 화면 행을 history로 밀어 같은 프롬프트가 계속
-  // 늘어난다. 실제 PTY resize는 alternate-screen TUI에만 허용한다. 셸은 각 xterm이 로컬 fit만
-  // 하고, TUI가 막 시작된 경우 다음 입력 뒤 한 번 재확인해 마지막 요청 크기를 적용한다.
+  // 모바일 tmux 클라이언트는 ignore-size 뷰어다. 자기 PTY 크기는 실제 WebView와 맞춰 tmux가
+  // 올바른 커서/클리핑을 렌더하게 하되, 공유 pane 정본 크기는 PC만 결정한다.
   const applyViewerResize = (w, h) => {
-    const seq = ++resizeSeq;
-    if (usingHost()) {
-      try { term.resize(w, h); } catch (_) { /* noop */ }
-      return;
-    }
-    runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}'])
-      .then((v) => {
-        if (seq !== resizeSeq || cleaned) return;
-        if (String(v).trim() !== '1') { shellResizePending = true; return; }
-        shellResizePending = false;
-        try { term.resize(w, h); } catch (_) { /* noop */ }
-      }).catch(() => { /* 세션 전환/종료 경쟁 */ });
+    resizeSeq++;
+    try { term.resize(w, h); } catch (_) { /* noop */ }
   };
 
-  const applyPendingResizeAfterInput = () => {
-    if (!shellResizePending || usingHost()) return;
-    const now = Date.now();
-    if (now - shellProbeAt < 1000) return;
-    shellProbeAt = now;
-    setTimeout(() => applyViewerResize(lastW, lastH), 120);
-  };
+  const applyPendingResizeAfterInput = () => {};
 
   // 이 클라이언트의 로컬 xterm을 PC tmux 정본으로 다시 맞춘다. TUI는 capture-pane 텍스트로
   // 복원하면 커서/모드가 깨지므로 라이브 미러를 유지하고, 일반 셸에서만 전체 정본을 보낸다.
@@ -669,9 +650,14 @@ async function attachPty(params, io) {
   });
   try {
     await sendHistoryBootstrap(attachName, attachH);
+    // PC UI 클라이언트가 잠시 없어도 ignore-size 모바일만으로 pane 크기가 바뀌지 않게 현재 정본을
+    // manual로 고정한다. PC Rust 경로가 실제 창 리사이즈 때만 이 값을 갱신한다.
+    if (!usingHost()) {
+      await runTmux(['resize-window', '-t', `=${attachName}:0`, '-x', String(attachW), '-y', String(attachH)]).catch(() => {});
+    }
     gen = 1;
     term = await termBackend.attach(attachName, {
-      cols: attachW, rows: attachH, cwd: abs, setLatest: true, sharedCreate: shared && !usingHost(),
+      cols, rows, cwd: abs, ignoreSize: !usingHost(), sharedCreate: shared && !usingHost(),
       ...mkHandlers(1),
     });
   } catch (e) {
@@ -704,8 +690,15 @@ async function attachPty(params, io) {
       const myGen = ++gen; // 이 시점부터 구 핸들의 exit/close 는 무시된다
       const nextName = termSession(session, newTid);
       await sendHistoryBootstrap(nextName, lastH || rows);
+      if (!usingHost()) {
+        const inf = await termBackend.info(nextName).catch(() => null);
+        if (inf && inf.cols > 1 && inf.rows > 1) {
+          await runTmux(['resize-window', '-t', `=${nextName}:0`, '-x', String(inf.cols), '-y', String(inf.rows)]).catch(() => {});
+        }
+      }
       termBackend.attach(nextName, {
         cols: lastW || cols, rows: lastH || rows, cwd: abs,
+        ignoreSize: !usingHost(),
         ...mkHandlers(myGen),
       }).then((np) => {
         if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }

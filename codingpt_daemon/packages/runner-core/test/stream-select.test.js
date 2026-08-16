@@ -170,8 +170,8 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
 // ── E2EE 봉인 모드(D단계) ────────────────────────────────────────────────
 // 검증하는 불변식:
 //  · 협상은 스트림 **밖**(제어채널 e2ee.begin)에서 끝나고, 스트림 첫 프레임부터 봉인된다.
-//  · kind=ctrl 프레임의 payload 는 기존 resize JSON **원문**. 일반 셸에선 history 오염 방지를 위해
-//    PTY 크기를 유지하고, alternate-screen TUI에서만 실제 클라이언트 크기에 반영한다.
+//  · kind=ctrl 프레임의 payload 는 기존 resize JSON **원문**. 모바일 tmux 클라이언트의 뷰 크기는
+//    반영하지만 ignore-size라 공유 pane 정본 크기는 흔들지 않는다.
 //  · kind=data 프레임 = stdin, 출력은 봉인된 바이너리로만 나간다(평문 카나리 0건).
 //  · 봉인 모드에 도착한 평문 프레임(텍스트/바이너리)은 전부 폐기 = 셸 오염 0(함정 #1 의 거울상).
 test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + 평문 인젝션 폐기 + 카나리 0건', { skip: !hasTmux }, async () => {
@@ -212,11 +212,16 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
       try { plain.push(vs.open(d).payload); } catch (e) { errs.push(e.message); }
     });
 
-    // ctrl 프레임(=옛 텍스트 JSON) — 일반 셸에서는 로컬 fit 정보만 기억하고 PTY는 유지.
+    const paneBefore = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
+    // ctrl 프레임(=옛 텍스트 JSON) — 뷰어 PTY는 실제 화면 크기로, 공유 pane은 PC 정본 그대로.
     ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
     await sleep(1000); // attach + 첫 resize nudge(600ms) 안정화
     let clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.ok(/(^|\s)80x24(\s|$)/.test(clients.trim()), `일반 셸 resize가 PTY history를 흔들었다: ${clients.trim()}`);
+    assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `뷰어 PTY가 실제 크기를 반영하지 않았다: ${clients.trim()}`);
+    const paneAfter = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(paneAfter, paneBefore, 'ignore-size 뷰어가 공유 pane 정본 크기를 바꿨다');
+    const flags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
+    assert.match(flags, /ignore-size/, '모바일 뷰어에 ignore-size 플래그가 없다');
 
     // alternate-screen TUI에 진입하면 마지막 요청 크기를 실제 PTY에 적용한다.
     ws.send(vs.seal(Buffer.from('tput smcup\r')), { binary: true });
