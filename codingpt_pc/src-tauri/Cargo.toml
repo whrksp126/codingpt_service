@@ -1,6 +1,6 @@
 [package]
 name = "codingpt_pc"
-version = "0.1.287"
+version = "0.1.288"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"

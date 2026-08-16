@@ -502,7 +502,7 @@ dependencies = [
 
 [[package]]
 name = "codingpt_pc"
-version = "0.1.287"
+version = "0.1.288"
 dependencies = [
  "base64 0.22.1",
  "block2",

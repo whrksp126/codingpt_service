@@ -268,10 +268,11 @@ pub fn pty_resize(
 // 크기 주장(claim) — 사용자가 이 pane 을 클릭/포커스/타이핑할 때, 공유 창을 PC 에 마지막으로
 //  fit 된 크기로 되돌린다. 모바일과 동일하게 resize-window 를 명시해야 일반 셸에서도 확실히
 //  회수된다. 예전 nudge 방식은 alternate-screen 에서만 실행되어 일반 프롬프트가 모바일 크기에
-//  고정되는 결함이 있었다. 창이 이미 내 크기면 완전 no-op.
+//  고정되는 결함이 있었다. 여기서는 capture-pane 스냅샷을 재주입하지 않는다 — resize 로 tmux 가
+//  보내는 실제 재도장과 겹치면 프롬프트 중복·화면 중간의 거대한 여백이 생긴다. 이미 같은 크기면 no-op.
 #[cfg(not(windows))]
 #[tauri::command]
-pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, sync: Option<bool>) {
+pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, _sync: Option<bool>) {
     let (target, cols, rows) = {
         let panes = mgr.panes.lock().unwrap();
         match panes.get(&pane_id) {
@@ -284,9 +285,8 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     }
     let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
     std::thread::spawn(move || {
-        let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"]).unwrap_or_default();
+        let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{window_width} #{window_height}"]).unwrap_or_default();
         let mut it = cur.split_whitespace();
-        let alternate = it.next() == Some("1");
         let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         if cw != cols || ch != rows {
@@ -299,16 +299,6 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
                     let _ = h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
                 }
             }
-        }
-        if !alternate {
-            if sync.unwrap_or(false) {
-                let captured = tmux::run(&ctx2, &["capture-pane", "-p", "-e", "-t", &format!("={target}:0"), "-S", "-10000"]).unwrap_or_default();
-                let snapshot = normalize_resize_prompt_history(&captured).replace('\n', "\r\n");
-                let payload = format!("\x1b[3J\x1b[H\x1b[2J{snapshot}");
-                let b64 = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
-                let _ = app.emit("pty://data", DataEvent { pane_id: pane_id.clone(), b64 });
-            }
-            return;
         }
     });
 }
