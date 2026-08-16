@@ -120,7 +120,7 @@ pub fn pty_open(
             &ctx,
             &["capture-pane", "-p", "-e", "-t", &format!("={target}:0"), "-S", "-10000", "-E", "-1"],
         ).unwrap_or_default();
-        let history = captured.trim_end_matches('\n').replace('\n', "\r\n");
+        let history = normalize_resize_prompt_history(&captured).replace('\n', "\r\n");
         if history.is_empty() {
             "\x1b[3J\x1b[H\x1b[2J".to_string()
         } else {
@@ -185,6 +185,46 @@ pub fn pty_open(
         }
     });
     Ok(tid)
+}
+
+fn normalize_resize_prompt_history(captured: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    let mut previous_prompt = String::new();
+    for line in captured.trim_end_matches('\n').split('\n') {
+        // capture-pane -e 의 SGR만 제거해 비교한다. 원본 ANSI 줄은 그대로 보존한다.
+        let mut plain = String::new();
+        let mut chars = line.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == '\x1b' && chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(c) = chars.next() {
+                    if ('@'..='~').contains(&c) { break; }
+                }
+            } else { plain.push(ch); }
+        }
+        let p = plain.trim();
+        let is_prompt = p.split_whitespace().any(|s| s.contains('@'))
+            && p.split_whitespace().any(|s| s.starts_with('/') || s.starts_with('~'));
+        if is_prompt && p == previous_prompt { continue; }
+        out.push(line);
+        if is_prompt { previous_prompt = p.to_string(); } else { previous_prompt.clear(); }
+    }
+    out.join("\n")
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::normalize_resize_prompt_history;
+
+    #[test]
+    fn collapses_only_consecutive_shell_prompt_repaints() {
+        let prompt = "user@host ~/work/project main";
+        let input = format!("same log\nsame log\n{prompt}\n{prompt}\n{prompt}\nresult\n{prompt}\n");
+        assert_eq!(
+            normalize_resize_prompt_history(&input),
+            format!("same log\nsame log\n{prompt}\nresult\n{prompt}")
+        );
+    }
 }
 
 // 키 입력(UTF-8 문자열) → PTY stdin.

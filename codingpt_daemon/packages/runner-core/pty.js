@@ -294,6 +294,24 @@ async function resolveTid(ns, want) {
 // pane 스트림 레지스트리 — terminal.select 가 "그 pane 의 살아있는 스트림"의 attach 대상을 즉석
 //  교체(swap)할 수 있게 한다(뷰 세션 select-window 의 대체). key = ns|paneId|client.
 const paneStreams = new Map(); // key -> { tid, swap(tid) }
+
+// 서로 다른 크기의 tmux 클라이언트가 번갈아 latest 가 되던 구버전은 SIGWINCH 때 zsh/p10k가
+// 같은 프롬프트를 history 에 여러 번 밀어 넣었다. 일반 명령 출력은 절대 접지 않고,
+// `user@host` + 경로가 있는 동일 프롬프트가 연속될 때만 한 줄로 정규화한다.
+function normalizeResizePromptHistory(text) {
+  const lines = String(text || '').replace(/\n$/, '').split('\n');
+  const plain = (s) => s.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '').trim();
+  const out = [];
+  let prevPrompt = null;
+  for (const line of lines) {
+    const p = plain(line);
+    const isShellPrompt = /\S+@\S+/.test(p) && /(?:^|\s)(?:~|\/)[^\s]*/.test(p);
+    if (isShellPrompt && p === prevPrompt) continue;
+    out.push(line);
+    prevPrompt = isShellPrompt ? p : null;
+  }
+  return out.join('\n');
+}
 // pane 이 마지막으로 본 터미널 — 재접속(스트림 재수립) 시 select 이후 상태를 이어받는다.
 const paneCurrent = new Map(); // key -> tid
 function paneKeyOf(ns, paneId, client) {
@@ -567,9 +585,9 @@ async function attachPty(params, io) {
     try {
       if (!usingHost()) {
         // tmux 의 -E -1 = 보이는 화면 바로 위까지만. 화면 높이/줄바꿈 추측 없이 history 만 정확히 얻는다.
-        history = String(await runTmux([
+        history = normalizeResizePromptHistory(String(await runTmux([
           'capture-pane', '-p', '-e', '-t', `=${name}:0`, '-S', '-10000', '-E', '-1',
-        ]) || '').replace(/\n$/, '').replace(/\n/g, '\r\n');
+        ]) || '')).replace(/\n/g, '\r\n');
       } else {
         // term-host capture API 는 end-line 이 없으므로 전체 버퍼에서 현재 물리 행만 제외한다.
         const captured = String(await termBackend.capture(name, { escapes: true, lines: 10000 }) || '');
@@ -970,4 +988,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, normalizeResizePromptHistory, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };
