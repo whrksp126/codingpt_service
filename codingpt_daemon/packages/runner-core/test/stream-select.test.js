@@ -163,8 +163,8 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
 // ── E2EE 봉인 모드(D단계) ────────────────────────────────────────────────
 // 검증하는 불변식:
 //  · 협상은 스트림 **밖**(제어채널 e2ee.begin)에서 끝나고, 스트림 첫 프레임부터 봉인된다.
-//  · kind=ctrl 프레임의 payload 는 기존 resize JSON **원문** → 같은 처리기를 타 tmux 클라이언트 크기에
-//    실제로 반영된다(80x24 고착 = 함정 #2 회귀 방지).
+//  · kind=ctrl 프레임의 payload 는 기존 resize JSON **원문**. 일반 셸에선 history 오염 방지를 위해
+//    PTY 크기를 유지하고, alternate-screen TUI에서만 실제 클라이언트 크기에 반영한다.
 //  · kind=data 프레임 = stdin, 출력은 봉인된 바이너리로만 나간다(평문 카나리 0건).
 //  · 봉인 모드에 도착한 평문 프레임(텍스트/바이너리)은 전부 폐기 = 셸 오염 0(함정 #1 의 거울상).
 test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + 평문 인젝션 폐기 + 카나리 0건', { skip: !hasTmux }, async () => {
@@ -205,9 +205,21 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
       try { plain.push(vs.open(d).payload); } catch (e) { errs.push(e.message); }
     });
 
-    // ctrl 프레임(=옛 텍스트 JSON) — 100x30 리사이즈.
+    // ctrl 프레임(=옛 텍스트 JSON) — 일반 셸에서는 로컬 fit 정보만 기억하고 PTY는 유지.
     ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
     await sleep(1000); // attach + 첫 resize nudge(600ms) 안정화
+    let clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
+    assert.ok(/(^|\s)80x24(\s|$)/.test(clients.trim()), `일반 셸 resize가 PTY history를 흔들었다: ${clients.trim()}`);
+
+    // alternate-screen TUI에 진입하면 마지막 요청 크기를 실제 PTY에 적용한다.
+    ws.send(vs.seal(Buffer.from('tput smcup\r')), { binary: true });
+    await sleep(250);
+    ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
+    await sleep(700);
+    clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
+    assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `TUI ctrl(resize)가 반영되지 않았다: ${clients.trim()}`);
+    ws.send(vs.seal(Buffer.from('tput rmcup\r')), { binary: true });
+    await sleep(250);
 
     // data 프레임(=옛 바이너리) — stdin.
     const CANARY = `CPT_CANARY_${Math.random().toString(36).slice(2, 8)}`;
@@ -216,8 +228,6 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
 
     const cap = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '-S', '-30']);
     assert.ok(cap.includes(CANARY), '봉인 data 프레임이 stdin 으로 들어가지 않았다');
-    const clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `ctrl(resize) 프레임이 tmux 클라이언트에 반영되지 않았다: ${clients.trim()}`);
 
     // 출력: 전부 바이너리 봉인 프레임 + 복호 성공 + 와이어에 평문 0건.
     assert.ok(rawFrames.length > 0, '봉인 모드에서 출력이 오지 않았다');

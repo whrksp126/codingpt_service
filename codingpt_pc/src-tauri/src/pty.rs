@@ -128,8 +128,20 @@ pub fn pty_open(
         }
     };
 
+    // 셸 attach는 현재 정본 크기를 유지한다. 새 PC/폰이 붙을 때마다 자기 크기로 PTY를 흔들면
+    // tmux가 보이는 프롬프트를 history로 밀어 넣는다. alternate-screen TUI만 요청 크기로 attach.
+    let display = tmux::run(
+        &ctx,
+        &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"],
+    ).unwrap_or_default();
+    let mut display_parts = display.split_whitespace();
+    let alternate = display_parts.next() == Some("1");
+    let current_cols = display_parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(cols);
+    let current_rows = display_parts.next().and_then(|s| s.parse::<u16>().ok()).unwrap_or(rows);
+    let attach_cols = if alternate { cols } else { current_cols };
+    let attach_rows = if alternate { rows } else { current_rows };
     let pair = native_pty_system()
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize { rows: attach_rows, cols: attach_cols, pixel_width: 0, pixel_height: 0 })
         .map_err(|e| format!("PTY 생성 실패: {e}"))?;
     let mut cmd = CommandBuilder::new(ctx.tmux.to_string_lossy().to_string());
     // -d 금지 — 같은 세션에 폰/다른 PC 가 동시 attach 해 미러/이어받기 한다(죽은 앱의 스테일
@@ -245,19 +257,31 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
 #[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_resize(
+    app: AppHandle,
+    ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
     pane_id: String,
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let mut panes = mgr.panes.lock().unwrap();
-    if let Some(h) = panes.get_mut(&pane_id) {
-        h.master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| format!("resize 실패: {e}"))?;
-        h.last_cols = cols;
-        h.last_rows = rows;
-    }
+    let target = {
+        let mut panes = mgr.panes.lock().unwrap();
+        if let Some(h) = panes.get_mut(&pane_id) {
+            h.last_cols = cols;
+            h.last_rows = rows;
+            h.target.clone()
+        } else { return Ok(()); }
+    };
+    let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
+    std::thread::spawn(move || {
+        let alt = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on}"]).unwrap_or_default();
+        if alt.trim() != "1" { return; }
+        if let Some(m) = app.try_state::<PtyManager>() {
+            if let Some(h) = m.panes.lock().unwrap().get(&pane_id) {
+                let _ = h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+            }
+        }
+    });
     Ok(())
 }
 
@@ -280,8 +304,9 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     }
     let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
     std::thread::spawn(move || {
-        let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{window_width} #{window_height}"]).unwrap_or_default();
+        let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"]).unwrap_or_default();
         let mut it = cur.split_whitespace();
+        if it.next() != Some("1") { return; }
         let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         if cw == cols && ch == rows {

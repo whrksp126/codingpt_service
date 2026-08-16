@@ -576,6 +576,35 @@ async function attachPty(params, io) {
   //  사고가 난다. ⚠ 첫 resize 가 attach 크기와 **같으면 고착이 곧 정답**이라 nudge 를 걸지 않는다
   //  — 무조건 걸던 시절엔 화면이 뜨고 0.6초 뒤 SIGWINCH 2회로 멀쩡한 TUI 를 두 번 재도장했다.
   let nudgeTimer = null;
+  let resizeSeq = 0;
+  let shellResizePending = false;
+  let shellProbeAt = 0;
+
+  // 일반 셸에서 기기 크기를 왕복시키면 tmux가 화면 행을 history로 밀어 같은 프롬프트가 계속
+  // 늘어난다. 실제 PTY resize는 alternate-screen TUI에만 허용한다. 셸은 각 xterm이 로컬 fit만
+  // 하고, TUI가 막 시작된 경우 다음 입력 뒤 한 번 재확인해 마지막 요청 크기를 적용한다.
+  const applyViewerResize = (w, h) => {
+    const seq = ++resizeSeq;
+    if (usingHost()) {
+      try { term.resize(w, h); } catch (_) { /* noop */ }
+      return;
+    }
+    runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}'])
+      .then((v) => {
+        if (seq !== resizeSeq || cleaned) return;
+        if (String(v).trim() !== '1') { shellResizePending = true; return; }
+        shellResizePending = false;
+        try { term.resize(w, h); } catch (_) { /* noop */ }
+      }).catch(() => { /* 세션 전환/종료 경쟁 */ });
+  };
+
+  const applyPendingResizeAfterInput = () => {
+    if (!shellResizePending || usingHost()) return;
+    const now = Date.now();
+    if (now - shellProbeAt < 1000) return;
+    shellProbeAt = now;
+    setTimeout(() => applyViewerResize(lastW, lastH), 120);
+  };
 
   // xterm 의 스크롤백은 뷰어마다 따로 쌓인다. 새 PC attach 는 과거가 없고 오래 살아 있던 폰은
   // 낡은 과거가 남는 불일치를 없애기 위해, 매 attach/swap 직전에 로컬 버퍼를 지우고 터미널
@@ -702,6 +731,7 @@ async function attachPty(params, io) {
   const handleStdin = (buf) => {
     notifyInput(buf);
     try { term.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
+    applyPendingResizeAfterInput();
   };
   // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
   //  payload 가 **그대로** 이 함수로 들어온다(원문 JSON 보존 = 리사이즈 의미 불변).
@@ -714,8 +744,8 @@ async function attachPty(params, io) {
       if (m && m.type === 'keepalive') return;
       if (m && m.type === 'resize' && m.cols && m.rows) {
         const w = m.cols | 0, h = m.rows | 0;
-        try { term.resize(w, h); } catch (_) { /* noop */ }
         lastW = w; lastH = h;
+        applyViewerResize(w, h);
         // 창 크기는 window-size latest(등가)가 클라이언트 리사이즈/입력을 따라 자동 반영 —
         //  구 모델의 resize-window 수동 클레임(기기 간 크기 뺏기 전쟁의 근원)은 전면 폐지.
         if (!firstResizeDone) {
@@ -724,7 +754,10 @@ async function attachPty(params, io) {
           if (w !== attachW || h !== attachH) {
             if (nudgeTimer) clearTimeout(nudgeTimer);
             nudgeTimer = setTimeout(() => {
-              try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ }
+              const nudge = () => { try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ } };
+              if (usingHost()) nudge();
+              else runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}'])
+                .then((v) => { if (String(v).trim() === '1') nudge(); }).catch(() => {});
             }, 600);
           }
         }
@@ -733,6 +766,7 @@ async function attachPty(params, io) {
     } catch (_) { /* JSON 아니면 일반 입력 */ }
     notifyInput(str);
     try { term.write(str); } catch (_) { /* noop */ }
+    applyPendingResizeAfterInput();
   };
 
   // 핸들러 등록 = 어댑터가 버퍼해 둔 셋업 중 메시지(첫 resize 등)의 순서 재생 시점.
