@@ -579,6 +579,7 @@ async function attachPty(params, io) {
   let resizeSeq = 0;
   let syncSeq = 0;
   let resizeBarrier = Promise.resolve();
+  let lastInputAt = 0;
 
   // 각 기기는 같은 tmux pane을 보되, 마지막으로 실제 viewport resize를 보낸 기기의 크기로
   // 정본을 맞춘다. 그래야 tmux가 만든 커서 이동과 해당 기기의 xterm 열 수가 일치한다.
@@ -722,6 +723,11 @@ async function attachPty(params, io) {
       tid,
       swap,
       sync: sendShellSnapshot,
+      async claim() {
+        applyViewerResize(lastW || cols, lastH || rows);
+        await resizeBarrier;
+        await sendShellSnapshot();
+      },
       // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
       displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },
     };
@@ -741,6 +747,9 @@ async function attachPty(params, io) {
     syncSeq++;
     notifyInput(buf);
     const input = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
+    const now = Date.now();
+    if (now - lastInputAt > 500) applyViewerResize(lastW || cols, lastH || rows);
+    lastInputAt = now;
     resizeBarrier.then(() => { try { term.write(input); } catch (_) { /* noop */ } });
     applyPendingResizeAfterInput();
   };
@@ -778,6 +787,9 @@ async function attachPty(params, io) {
     } catch (_) { /* JSON 아니면 일반 입력 */ }
     syncSeq++;
     notifyInput(str);
+    const now = Date.now();
+    if (now - lastInputAt > 500) applyViewerResize(lastW || cols, lastH || rows);
+    lastInputAt = now;
     resizeBarrier.then(() => { try { term.write(str); } catch (_) { /* noop */ } });
     applyPendingResizeAfterInput();
   };
@@ -928,8 +940,11 @@ async function handleTerminalRpc(method, params) {
       if (h && h.tid !== tid) {
         try { h.swap(tid); } catch (_) { /* 스트림 사망 직후 등 — 재접속 경로가 paneCurrent 로 잇는다 */ }
       }
-      if (h && params && params.claim && typeof h.sync === 'function') {
-        try { h.sync(); } catch (_) { /* 포커스 동기화는 세션 전환 경쟁 시 다음 터치가 복구 */ }
+      if (h && params && params.claim) {
+        try {
+          if (typeof h.claim === 'function') h.claim();
+          else if (typeof h.sync === 'function') h.sync();
+        } catch (_) { /* 포커스 동기화는 세션 전환 경쟁 시 다음 터치가 복구 */ }
       }
     }
     return { ok: true, index: tid };
