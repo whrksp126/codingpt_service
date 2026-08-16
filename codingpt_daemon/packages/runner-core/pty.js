@@ -587,6 +587,9 @@ async function attachPty(params, io) {
   let gen = 0;
   const mkHandlers = (myGen) => ({
     onData: (data) => {
+      // 탭 전환은 먼저 세대를 올리고 정본 history를 보낸다. 그 짧은 동안 이전 터미널이
+      // 출력하면 clear/history 사이에 섞여 기기별 로컬 스크롤백이 다시 달라지므로 폐기한다.
+      if (myGen !== gen) return;
       // 출력은 어댑터가 전송 형태를 결정한다(릴레이 평문=텍스트 프레임, 봉인/LAN=바이너리).
       //  멀티바이트 분할은 백엔드(node-pty/term-host) 단계에서 이미 결정되므로 어느 경로든 동일하다.
       sendOut(data);
