@@ -726,8 +726,24 @@ async function attachPty(params, io) {
       swap,
       sync: sendShellSnapshot,
       async claim() {
+        let changed = false;
+        if (!usingHost()) {
+          try {
+            const size = String(await runTmux([
+              'display-message', '-p', '-t', `=${attachName}:0`, '#{window_width}x#{window_height}',
+            ])).trim();
+            changed = size !== `${lastW || cols}x${lastH || rows}`;
+          } catch (_) { /* 종료 경합이면 기존 resize 경로가 처리 */ }
+        }
         applyViewerResize(lastW || cols, lastH || rows);
         await resizeBarrier;
+        // 다른 기기 크기에서 이 기기 크기로 실제 전환된 경우, tmux의 커서 좌표와 이 xterm의
+        // 로컬 행 배치가 달라진다. 이때만 정본으로 한 번 재동기화한다. 같은 크기 터치마다
+        // snapshot을 보내면 scrollback 복제·캡처 비용이 생기므로 changed=false에서는 금지.
+        if (changed) {
+          await new Promise((resolve) => setTimeout(resolve, 80)); // 셸 SIGWINCH redraw가 pane에 반영될 시간
+          await sendShellSnapshot();
+        }
       },
       // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
       displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },

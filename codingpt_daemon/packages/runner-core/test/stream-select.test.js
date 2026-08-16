@@ -129,12 +129,21 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   const capA = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '-S', '-30']);
   assert.ok(/IN-A/.test(capA), 'WS 입력이 터미널 A 에 안 들어갔다');
 
-  // 같은 터미널을 다시 포커스(claim)해도 스트림/PTY를 분리하지 않는다. claim은 공유
-  // window 크기만 명시적으로 가져오며, 화면 스냅샷을 재주입해 프롬프트/scrollback을 복제하지 않는다.
+  // 같은 크기로 다시 포커스(claim)하면 스트림/PTY를 분리하지 않고 snapshot도 재주입하지 않는다.
   rx = '';
   await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
   await sleep(250);
   assert.ok(!rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim이 정본 스냅샷을 다시 주입했다');
+
+  // 다른 기기 크기에서 돌아오면 tmux 정본 커서와 로컬 xterm 행 배치가 달라지므로 이때만
+  // clear+snapshot으로 한 번 맞춘다. Android에서 명령줄이 화면 중간에 남는 회귀 방지.
+  await tmux(['resize-window', '-t', `=${pty.termSession(NS, a.index)}:0`, '-x', '100', '-y', '30']);
+  rx = '';
+  await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
+  await sleep(250);
+  assert.ok(rx.includes('\x1b[3J\x1b[H\x1b[2J'), '크기 소유권 전환 뒤 로컬 화면 정본 동기화가 없다');
+  const reclaimed = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
+  assert.strictEqual(reclaimed.trim(), '80x24', 'claim이 이 뷰어 크기로 공유 pane을 되찾지 못했다');
 
   // 셸 clear가 내는 CSI 3 J는 각 xterm 화면뿐 아니라 공유 tmux 정본 history도 비운다.
   // 그렇지 않으면 지금은 지워져 보여도 모바일 재연결/bootstrap 뒤 과거 명령이 되살아난다.
