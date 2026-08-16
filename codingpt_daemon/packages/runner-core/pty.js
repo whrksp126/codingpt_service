@@ -578,6 +578,7 @@ async function attachPty(params, io) {
   let nudgeTimer = null;
   let resizeSeq = 0;
   let syncSeq = 0;
+  let resizeBarrier = Promise.resolve();
 
   // 각 기기는 같은 tmux pane을 보되, 마지막으로 실제 viewport resize를 보낸 기기의 크기로
   // 정본을 맞춘다. 그래야 tmux가 만든 커서 이동과 해당 기기의 xterm 열 수가 일치한다.
@@ -585,6 +586,13 @@ async function attachPty(params, io) {
   const applyViewerResize = (w, h) => {
     resizeSeq++;
     try { term.resize(w, h); } catch (_) { /* noop */ }
+    if (!usingHost()) {
+      // tmux window-size=latest는 "마지막 입력 클라이언트"가 아니라 마지막으로 선택된 크기를 계속
+      // 유지할 수 있다. pane을 실제 모바일 열 수로 먼저 확정해야 이후 커서 이동과 xterm 좌표가 같다.
+      resizeBarrier = resizeBarrier.then(() => runTmux([
+        'resize-window', '-t', `=${attachName}:0`, '-x', String(w), '-y', String(h),
+      ])).catch(() => {});
+    }
   };
 
   const applyPendingResizeAfterInput = () => {};
@@ -694,6 +702,7 @@ async function attachPty(params, io) {
         if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }
         const old = term;
         term = np;
+        attachName = nextName;
         tid = newTid;
         if (handle) handle.tid = newTid;
         paneCurrent.set(pkey, newTid);
@@ -731,7 +740,8 @@ async function attachPty(params, io) {
   const handleStdin = (buf) => {
     syncSeq++;
     notifyInput(buf);
-    try { term.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
+    const input = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
+    resizeBarrier.then(() => { try { term.write(input); } catch (_) { /* noop */ } });
     applyPendingResizeAfterInput();
   };
   // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
@@ -768,7 +778,7 @@ async function attachPty(params, io) {
     } catch (_) { /* JSON 아니면 일반 입력 */ }
     syncSeq++;
     notifyInput(str);
-    try { term.write(str); } catch (_) { /* noop */ }
+    resizeBarrier.then(() => { try { term.write(str); } catch (_) { /* noop */ } });
     applyPendingResizeAfterInput();
   };
 

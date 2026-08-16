@@ -245,7 +245,7 @@ pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Resul
 #[cfg(not(windows))]
 #[tauri::command]
 pub fn pty_resize(
-    _ctx: State<TmuxCtx>,
+    ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
     pane_id: String,
     cols: u16,
@@ -253,6 +253,10 @@ pub fn pty_resize(
 ) -> Result<(), String> {
     let mut panes = mgr.panes.lock().unwrap();
     if let Some(h) = panes.get_mut(&pane_id) {
+        let _ = tmux::run(
+            &ctx,
+            &["resize-window", "-t", &format!("={}:0", h.target), "-x", &cols.to_string(), "-y", &rows.to_string()],
+        );
         h.master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
             .map_err(|e| format!("resize 실패: {e}"))?;
         h.last_cols = cols;
