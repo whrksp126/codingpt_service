@@ -1649,6 +1649,14 @@ export class PaneView {
     }, delay);
   }
   _write(d) {
+    // macOS 입력은 IME/단축키 보존을 위해 xterm 의 기본 key handler 를 우회해 PTY 로 직행한다.
+    // 그래서 xterm 은 "사용자 입력"을 감지하지 못하고, 사용자가 위로 스크롤한 상태면 새 입력이
+    // tmux/iPad 에는 도착해도 PC 화면은 과거 위치에 고정된다. 터미널의 일반 규칙대로 입력 순간
+    // 현재 커서(버퍼 맨 아래)로 복귀시킨다. 이미 아래거나 alternate-screen 이면 사실상 no-op.
+    try {
+      const b = this.term?.buffer?.active;
+      if (b && b.viewportY < b.baseY) this.term.scrollToBottom();
+    } catch (_) { /* noop */ }
     // shift+tab(CSI Z) = 에이전트 모드 순환. **로컬 터미널은 tmux 직결**이라 데몬이 이 키를 못 본다
     //  → 데몬에 즉시 재확인을 알려 이 PC·폰의 모드 알약이 3초 폴링을 기다리지 않게 한다(2026-08-02).
     //  원격 터미널은 입력이 데몬 pty 를 지나가므로 데몬이 알아서 감지한다(중복 통지 불필요).
