@@ -198,7 +198,17 @@ async function attach(name, o = {}) {
     cwd: o.cwd,
     env: p.tmuxEnv(),
   });
+  // `clear`의 terminfo 시퀀스 끝(CSI 3 J = erase scrollback)을 tmux 서버 history에도 반영한다.
+  // xterm별 로컬 버퍼만 지우면 재연결/bootstrap 때 정본 history가 다시 나타난다. CSI 2 J는
+  // TUI 재도장에도 흔하므로 절대 트리거로 쓰지 않는다. escape가 onData 청크 경계에서 갈릴 수
+  // 있어 직전 3바이트를 이어 검사한다.
+  let eraseTail = '';
   child.onData((d) => {
+    const scan = eraseTail + String(d);
+    eraseTail = scan.slice(-3);
+    if (scan.includes('\x1b[3J')) {
+      pty().runTmux(['clear-history', '-t', t0(name)]).catch(() => { /* 세션 종료 경합 = 무시 */ });
+    }
     if (typeof o.onData === 'function') { try { o.onData(d); } catch (_) { /* noop */ } }
   });
   child.onExit(({ exitCode }) => {

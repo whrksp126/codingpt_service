@@ -157,7 +157,7 @@ pub fn pty_open(
     let epoch = PTY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, epoch, target, last_cols: cols, last_rows: rows },
+        PtyHandle { master: pair.master, writer, child, epoch, target: target.clone(), last_cols: cols, last_rows: rows },
     );
 
     // reader 스레드보다 먼저 emit: PTY 쪽 attach 리페인트는 이미 master 버퍼에 대기하므로
@@ -168,12 +168,23 @@ pub fn pty_open(
     // reader 스레드: 출력 바이트 → base64 → emit. EOF/오류 시 exit emit + 매니저 정리(자기 세대만).
     let app2 = app.clone();
     let pid = pane_id.clone();
+    let clear_ctx = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
+    let clear_target = target.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut erase_tail: Vec<u8> = Vec::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
+                    let mut scan = erase_tail;
+                    scan.extend_from_slice(&buf[..n]);
+                    if contains_erase_scrollback(&scan) {
+                        // CSI 3 J는 일반 셸 `clear`가 내는 erase-scrollback 신호다. 공유 정본도
+                        // 함께 비워야 다른 기기의 재접속/bootstrap에서 과거가 되살아나지 않는다.
+                        let _ = tmux::run(&clear_ctx, &["clear-history", "-t", &format!("={clear_target}:0")]);
+                    }
+                    erase_tail = scan[scan.len().saturating_sub(3)..].to_vec();
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
                     let _ = app2.emit("pty://data", DataEvent { pane_id: pid.clone(), b64 });
                 }
@@ -188,6 +199,11 @@ pub fn pty_open(
         }
     });
     Ok(tid)
+}
+
+#[cfg(not(windows))]
+fn contains_erase_scrollback(bytes: &[u8]) -> bool {
+    bytes.windows(4).any(|w| w == b"\x1b[3J")
 }
 
 fn normalize_resize_prompt_history(captured: &str) -> String {
@@ -217,7 +233,7 @@ fn normalize_resize_prompt_history(captured: &str) -> String {
 
 #[cfg(test)]
 mod history_tests {
-    use super::normalize_resize_prompt_history;
+    use super::{contains_erase_scrollback, normalize_resize_prompt_history};
 
     #[test]
     fn collapses_only_consecutive_shell_prompt_repaints() {
@@ -227,6 +243,13 @@ mod history_tests {
             normalize_resize_prompt_history(&input),
             format!("same log\nsame log\n{prompt}\nresult\n{prompt}")
         );
+    }
+
+    #[test]
+    fn recognizes_only_the_erase_scrollback_sequence() {
+        assert!(contains_erase_scrollback(b"before\x1b[3Jafter"));
+        assert!(!contains_erase_scrollback(b"\x1b[2J"));
+        assert!(!contains_erase_scrollback(b"\x1b[?1049h"));
     }
 }
 

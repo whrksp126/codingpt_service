@@ -136,6 +136,13 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   await sleep(250);
   assert.ok(!rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim이 정본 스냅샷을 다시 주입했다');
 
+  // 셸 clear가 내는 CSI 3 J는 각 xterm 화면뿐 아니라 공유 tmux 정본 history도 비운다.
+  // 그렇지 않으면 지금은 지워져 보여도 모바일 재연결/bootstrap 뒤 과거 명령이 되살아난다.
+  ws.send(Buffer.from("printf '\\033[3J'\r"));
+  await sleep(350);
+  const historyAfterClear = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{history_size}']);
+  assert.strictEqual(historyAfterClear.trim(), '0', 'CSI 3 J 뒤에도 공유 tmux history가 남았다');
+
   // 3) select → 같은 스트림이 터미널 B 로 스왑(WS 유지).
   const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: b.index, paneId: 'pS', client: 'cS' });
   assert.strictEqual(sel.index, b.index);
