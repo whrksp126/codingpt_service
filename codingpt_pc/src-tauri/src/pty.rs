@@ -291,7 +291,7 @@ pub fn pty_resize(
 //  없이 성립하므로 기기 간 크기 뺏기 전쟁이 없다. 창이 이미 내 크기면 완전 no-op.
 #[cfg(not(windows))]
 #[tauri::command]
-pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, sync: Option<bool>) {
     let (target, cols, rows) = {
         let panes = mgr.panes.lock().unwrap();
         match panes.get(&pane_id) {
@@ -306,7 +306,16 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     std::thread::spawn(move || {
         let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on} #{window_width} #{window_height}"]).unwrap_or_default();
         let mut it = cur.split_whitespace();
-        if it.next() != Some("1") { return; }
+        if it.next() != Some("1") {
+            if sync.unwrap_or(false) {
+                let captured = tmux::run(&ctx2, &["capture-pane", "-p", "-e", "-t", &format!("={target}:0"), "-S", "-10000"]).unwrap_or_default();
+                let snapshot = normalize_resize_prompt_history(&captured).replace('\n', "\r\n");
+                let payload = format!("\x1b[3J\x1b[H\x1b[2J{snapshot}");
+                let b64 = base64::engine::general_purpose::STANDARD.encode(payload.as_bytes());
+                let _ = app.emit("pty://data", DataEvent { pane_id: pane_id.clone(), b64 });
+            }
+            return;
+        }
         let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         let ch: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
         if cw == cols && ch == rows {
@@ -510,7 +519,7 @@ pub fn pty_resize(mgr: State<PtyManager>, pane_id: String, cols: u16, rows: u16)
 //  SIGWINCH 소음도 없다(비교 왕복 불필요 — mac 의 display-message 프리체크와 같은 효과).
 #[cfg(windows)]
 #[tauri::command]
-pub fn pty_claim(_app: AppHandle, _ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) {
+pub fn pty_claim(_app: AppHandle, _ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, _sync: Option<bool>) {
     let mut panes = mgr.panes.lock().unwrap();
     if let Some(h) = panes.get_mut(&pane_id) {
         if h.last_cols < 4 || h.last_rows < 2 {

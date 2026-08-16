@@ -1275,7 +1275,7 @@ export class PaneView {
   // 크기 주장(스로틀) — 사용자가 이 pane 을 실제로 만질 때(클릭/포커스/타이핑), 표시 창이 다른
   //  기기 크기로 잡혀 있으면 Rust 가 클라이언트 nudge 로 회수한다(이미 내 크기면 no-op).
   //  모바일은 키보드 노출 등 실 리사이즈가 자연 클레임을 만들지만 PC 는 이 훅이 유일한 계기다.
-  _claimSize() {
+  _claimSize(sync = false) {
     if (!this.ctx.isLocal || this.node.kind !== "terminal") return;
     // Chat 모드는 터미널을 "보고 있지 않다" = 크기 주장 자격이 없다. 여기서 주장하면 다른 기기가
     //  실제로 쓰고 있는 창 크기를 놀고 있는 화면이 뺏는다(PaneView.tsx:540 주석과 같은 사고).
@@ -1283,7 +1283,7 @@ export class PaneView {
     const n = Date.now();
     if (n - (this._lastClaim || 0) < 1200) return;
     this._lastClaim = n;
-    api.ptyClaim(this.id).catch(() => {});
+    api.ptyClaim(this.id, sync).catch(() => {});
   }
 
   // 이 pane 의 attach 를 지정 터미널(tid)로 재수립 — 전용 세션 모델의 탭 전환/드롭 이동 공용.
@@ -1811,13 +1811,13 @@ export class PaneView {
     //  복귀 후 첫 입력의 델타가 "옛 텍스트 길이만큼 백스페이스"를 쏘지 않는다.
     const onBlur = () => resetBuf();
     ta.addEventListener("blur", onBlur);
-    const onFocus = () => this._claimSize();
+    const onFocus = () => this._claimSize(true);
     ta.addEventListener("focus", onFocus);
     const onMouseDown = () => {
       // 사용자가 실제로 터미널을 클릭 = 이 터미널을 봄 → 활성 탭 win 알림 읽음(프로그램적 포커스 제외).
       const at = this.node.tabs?.[this.node.active];
       if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
-      this._claimSize(); // 클릭 = 크기 주장(모바일의 키보드 노출 리사이즈에 대응하는 PC 계기)
+      this._claimSize(true); // 클릭 = 크기 주장 + PC 정본 화면 동기화
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
@@ -1897,12 +1897,12 @@ export class PaneView {
       })();
     };
     document.addEventListener("paste", onPaste, true);
-    const onFocus = () => this._claimSize();
+    const onFocus = () => this._claimSize(true);
     ta.addEventListener("focus", onFocus);
     const onMouseDown = () => {
       const at = this.node.tabs?.[this.node.active];
       if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
-      this._claimSize();
+      this._claimSize(true);
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
     this._inputDispose = () => {

@@ -75,7 +75,7 @@ export const api = {
   ptyWrite: (paneId, data) => invoke("pty_write", { paneId, data }),
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).
-  ptyClaim: (paneId) => invoke("pty_claim", { paneId }),
+  ptyClaim: (paneId, sync = false) => invoke("pty_claim", { paneId, sync }),
   // 채널 실제 생존 여부 — 리컨실러 워치독이 스테일 낙관 상태를 바로잡는 진실 원천.
   ptyAlive: (paneId) => invoke("pty_alive", { paneId }),
   // 진단 로그(stderr) — 터미널 탭 소거/편입 등 상태 변화 사후 추적용.

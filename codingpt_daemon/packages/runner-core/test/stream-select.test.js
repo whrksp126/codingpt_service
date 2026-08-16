@@ -129,6 +129,13 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   const capA = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '-S', '-30']);
   assert.ok(/IN-A/.test(capA), 'WS 입력이 터미널 A 에 안 들어갔다');
 
+  // 같은 터미널을 다시 포커스(claim)하면 스트림/PTY를 분리하지 않고 이 뷰어에 정본 스냅샷을 보낸다.
+  rx = '';
+  await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
+  await sleep(250);
+  assert.ok(rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim에 로컬 버퍼 초기화가 없다');
+  assert.ok(rx.includes('IN-A'), '포커스 claim 스냅샷이 tmux 정본 내용을 포함하지 않는다');
+
   // 3) select → 같은 스트림이 터미널 B 로 스왑(WS 유지).
   const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: b.index, paneId: 'pS', client: 'cS' });
   assert.strictEqual(sel.index, b.index);

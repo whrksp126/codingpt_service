@@ -579,6 +579,7 @@ async function attachPty(params, io) {
   let resizeSeq = 0;
   let shellResizePending = false;
   let shellProbeAt = 0;
+  let syncSeq = 0;
 
   // 일반 셸에서 기기 크기를 왕복시키면 tmux가 화면 행을 history로 밀어 같은 프롬프트가 계속
   // 늘어난다. 실제 PTY resize는 alternate-screen TUI에만 허용한다. 셸은 각 xterm이 로컬 fit만
@@ -604,6 +605,21 @@ async function attachPty(params, io) {
     if (now - shellProbeAt < 1000) return;
     shellProbeAt = now;
     setTimeout(() => applyViewerResize(lastW, lastH), 120);
+  };
+
+  // 이 클라이언트의 로컬 xterm을 PC tmux 정본으로 다시 맞춘다. TUI는 capture-pane 텍스트로
+  // 복원하면 커서/모드가 깨지므로 라이브 미러를 유지하고, 일반 셸에서만 전체 정본을 보낸다.
+  const sendShellSnapshot = async () => {
+    if (usingHost()) return;
+    const mine = ++syncSeq;
+    try {
+      const alt = await runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}']);
+      if (mine !== syncSeq || String(alt).trim() === '1') return;
+      const captured = await runTmux(['capture-pane', '-p', '-e', '-t', `=${attachName}:0`, '-S', '-10000']);
+      if (mine !== syncSeq) return;
+      const snapshot = normalizeResizePromptHistory(String(captured || '')).replace(/\n/g, '\r\n');
+      sendOut('\x1b[3J\x1b[H\x1b[2J' + snapshot);
+    } catch (_) { /* 세션 전환/종료 경쟁 */ }
   };
 
   // xterm 의 스크롤백은 뷰어마다 따로 쌓인다. 새 PC attach 는 과거가 없고 오래 살아 있던 폰은
@@ -713,6 +729,7 @@ async function attachPty(params, io) {
     handle = {
       tid,
       swap,
+      sync: sendShellSnapshot,
       // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
       displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },
     };
@@ -729,6 +746,7 @@ async function attachPty(params, io) {
     try { require('./status-line').onTerminalInput(termSession(session, tid), payload); } catch (_) { /* noop */ }
   };
   const handleStdin = (buf) => {
+    syncSeq++;
     notifyInput(buf);
     try { term.write(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)); } catch (_) { /* noop */ }
     applyPendingResizeAfterInput();
@@ -742,6 +760,7 @@ async function attachPty(params, io) {
       // 재전송해 크기가 다른 세 기기가 25초마다 window-size latest 를 서로 빼앗았고, 그 SIGWINCH
       // 재도장이 tmux history 와 기기별 xterm scrollback 에 반복 적재됐다.
       if (m && m.type === 'keepalive') return;
+      if (m && m.type === 'sync') { sendShellSnapshot(); return; }
       if (m && m.type === 'resize' && m.cols && m.rows) {
         const w = m.cols | 0, h = m.rows | 0;
         lastW = w; lastH = h;
@@ -764,6 +783,7 @@ async function attachPty(params, io) {
         return;
       }
     } catch (_) { /* JSON 아니면 일반 입력 */ }
+    syncSeq++;
     notifyInput(str);
     try { term.write(str); } catch (_) { /* noop */ }
     applyPendingResizeAfterInput();
@@ -914,6 +934,9 @@ async function handleTerminalRpc(method, params) {
       const h = paneStreams.get(pkey);
       if (h && h.tid !== tid) {
         try { h.swap(tid); } catch (_) { /* 스트림 사망 직후 등 — 재접속 경로가 paneCurrent 로 잇는다 */ }
+      }
+      if (h && params && params.claim && typeof h.sync === 'function') {
+        try { h.sync(); } catch (_) { /* 포커스 동기화는 세션 전환 경쟁 시 다음 터치가 복구 */ }
       }
     }
     return { ok: true, index: tid };
