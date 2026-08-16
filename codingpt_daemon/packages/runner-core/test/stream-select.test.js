@@ -115,6 +115,14 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   await sleep(700); // attach + 셸 프롬프트
   assert.ok(rx.length > 0, 'attach 출력이 WS 로 흐르지 않는다');
 
+  // keepalive 는 resize 재주장이나 셸 입력으로 흘러가면 안 된다. 특히 여러 기기가 각자 크기를
+  // 주기적으로 재주장하면 window-size latest 가 왕복하며 가짜 scrollback 을 만든다.
+  const beforeKeepalive = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
+  ws.send(JSON.stringify({ type: 'keepalive' }));
+  await sleep(100);
+  const afterKeepalive = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
+  assert.strictEqual(afterKeepalive, beforeKeepalive, 'keepalive 가 터미널 크기를 변경했다');
+
   // 2) 입력 → 터미널 A 에서 실행.
   ws.send(Buffer.from('echo IN-A\r'));
   await sleep(600);

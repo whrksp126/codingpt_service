@@ -687,6 +687,10 @@ async function attachPty(params, io) {
   const handleTextFrame = (str) => {
     try {
       const m = JSON.parse(str);
+      // 연결 유지 프레임은 터미널 입력도, 크기 주장도 아니다. 예전 모바일은 keepalive 로 resize 를
+      // 재전송해 크기가 다른 세 기기가 25초마다 window-size latest 를 서로 빼앗았고, 그 SIGWINCH
+      // 재도장이 tmux history 와 기기별 xterm scrollback 에 반복 적재됐다.
+      if (m && m.type === 'keepalive') return;
       if (m && m.type === 'resize' && m.cols && m.rows) {
         const w = m.cols | 0, h = m.rows | 0;
         try { term.resize(w, h); } catch (_) { /* noop */ }
