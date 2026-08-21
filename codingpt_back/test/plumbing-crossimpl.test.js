@@ -566,7 +566,7 @@ function withRunner(userId, deviceId, fn) {
 test('스트림 sid — begin 프레임은 토큰에 저장된 좌표와 동일해야 한다(트랜스크립트 = confirm 검증)', async () => {
   const userId = 990010;
   await withRunner(userId, 12, async ({ sent, reply }) => {
-    const token = relay.issueTerminalToken(userId, 'proj/a', 'p1', 3, 'clientKeyA', 12);
+    const token = relay.issueTerminalToken(userId, 'proj/a', 'p1', 3, 'clientKeyA', 12, 2);
     const p = relay.negotiateStreamE2ee(userId, {
       token, purpose: 'pty', offer: VIEWER_OFFER,
       routing: { cwd: 'proj/a', paneId: 'p1', win: 3 }, client: 'clientKeyA',
@@ -596,7 +596,7 @@ test('스트림 sid — begin 프레임은 토큰에 저장된 좌표와 동일�
     const sess = relay._termTokens.get(token);
     assert.deepStrictEqual(sess.e2ee, { sid: HOST_ANSWER.sid });
     assert.deepStrictEqual(relay._ptyStreamParams(sess), {
-      cols: 80, rows: 24, cwd: 'proj/a', paneId: 'p1', win: 3, client: 'clientKeyA', sid: HOST_ANSWER.sid,
+      cols: 80, rows: 24, cwd: 'proj/a', paneId: 'p1', win: 3, client: 'clientKeyA', terminalProtocol: 2, sid: HOST_ANSWER.sid,
     });
     relay._termTokens.delete(token);
   });
