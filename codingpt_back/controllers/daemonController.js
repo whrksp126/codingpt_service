@@ -551,7 +551,7 @@ async function daemonTerminalStart(req, res) {
     const win = Number.isInteger(b.win) ? b.win : undefined;
     const client = typeof b.client === 'string' ? b.client : '';
     // hostDeviceId — 다른 PC(호스트)의 워크스페이스를 열 때 대상 러너 지정(활성 러너 무변경).
-    const token = daemonRelayService.issueTerminalToken(device.user_id, cwd, paneId, win, client, b.hostDeviceId);
+    const token = daemonRelayService.issueTerminalToken(device.user_id, cwd, paneId, win, client, b.hostDeviceId, b.terminalProtocol);
     // PC 앱(deviceToken) 경로도 같은 선협상을 탄다 — 오퍼가 없으면 { token } 그대로.
     const neg = await negotiateTerminalE2ee(req, device.user_id, token, { cwd, paneId, win, client });
     return successResponse(res, { token, ...(neg || {}) });
@@ -910,7 +910,7 @@ async function startTerminal(req, res) {
     // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
     const client = (req.body && typeof req.body.client === 'string') ? req.body.client : '';
     // hostDeviceId — 다른 PC(호스트) 지정(멀티 PC). 없으면 활성 러너(기존 동작).
-    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client, req.body && req.body.hostDeviceId);
+    const token = daemonRelayService.issueTerminalToken(userId, cwd, paneId, win, client, req.body && req.body.hostDeviceId, req.body && req.body.terminalProtocol);
     // body.e2ee 오퍼가 있으면 봉인 세션 선협상(기능2 D단계). 없으면 응답은 { token } 그대로.
     const neg = await negotiateTerminalE2ee(req, userId, token, { cwd, paneId, win, client });
     return successResponse(res, { token, ...(neg || {}) });

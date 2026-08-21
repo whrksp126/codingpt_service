@@ -1387,7 +1387,7 @@ function redeemUiTicket(ticket) {
 // ── 앱 터미널 ─────────────────────────────────────────────────────────
 
 // POST /api/daemon/terminal/start 에서 호출(인증 후). 데몬 오프라인이면 throw.
-function issueTerminalToken(userId, cwd, paneId, win, client, runnerId) {
+function issueTerminalToken(userId, cwd, paneId, win, client, runnerId, terminalProtocol) {
   // runnerId — 대상 호스트(DaemonDevice.id) 지정. 다른 PC 의 워크스페이스를 열 때 활성 러너를
   //  건드리지 않고 그 호스트로 직결한다(멀티 PC). 같은 userId 의 러너만 조회되므로 월경 불가.
   const rid = Number.isInteger(runnerId) ? runnerId
@@ -1410,7 +1410,8 @@ function issueTerminalToken(userId, cwd, paneId, win, client, runnerId) {
   // win — 이 pane 이 표시할 tmux window(정수). 앱이 미리 확보해 넘기면 데몬이 attach 와 동시에 select.
   // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
   const winNum = Number.isInteger(win) ? win : null;
-  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', paneId: typeof paneId === 'string' ? paneId : '', win: winNum, client: typeof client === 'string' ? client : '', runnerId: rid, expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
+  const protocol = Number(terminalProtocol) === 2 ? 2 : 1;
+  termTokens.set(token, { userId, cwd: typeof cwd === 'string' ? cwd : '', paneId: typeof paneId === 'string' ? paneId : '', win: winNum, client: typeof client === 'string' ? client : '', runnerId: rid, terminalProtocol: protocol, expiresAt: Date.now() + TERM_TOKEN_TTL_MS });
   return token;
 }
 
@@ -1432,6 +1433,7 @@ function ptyStreamParams(sess) {
     cwd: sess.cwd || '', paneId: sess.paneId || '',
     win: Number.isInteger(sess.win) ? sess.win : undefined,
     client: sess.client || '',
+    ...(sess.terminalProtocol === 2 ? { terminalProtocol: 2 } : {}),
     ...sidOf(sess),
   };
 }
