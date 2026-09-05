@@ -618,6 +618,39 @@ test('스트림 sid — hostDeviceId 미지정이면 서버가 고른 러너 id 
   });
 });
 
+test('터미널 protocol 3 — 강등되지 않고 deviceName 과 함께 데몬까지 간다', async () => {
+  const userId = 990014;
+  await withRunner(userId, 12, async () => {
+    // ★ 이 회귀가 있어야 하는 이유: 구 back 은 `Number(p)===2 ? 2 : 1` 이라 3 을 조용히 1 로 깎았다.
+    //   그러면 v3 뷰어(CPT3 바이너리 기대)가 v1 ANSI 스트림을 받아 화면이 통째로 깨진다.
+    const t3 = relay.issueTerminalToken(userId, 'a', 'p', 1, 'ck', 12, 3, 'MacBook Pro');
+    const s3 = relay._termTokens.get(t3);
+    assert.strictEqual(s3.terminalProtocol, 3);
+    assert.strictEqual(s3.deviceName, 'MacBook Pro');
+    assert.deepStrictEqual(relay._ptyStreamParams(s3), {
+      cols: 80, rows: 24, cwd: 'a', paneId: 'p', win: 1, client: 'ck', terminalProtocol: 3, deviceName: 'MacBook Pro',
+    });
+    relay._termTokens.delete(t3);
+
+    // 2 는 그대로, 미지정/이상값은 1 — 구 클라이언트 호환.
+    const t2 = relay.issueTerminalToken(userId, 'a', 'p', 1, 'ck', 12, 2);
+    assert.strictEqual(relay._termTokens.get(t2).terminalProtocol, 2);
+    assert.strictEqual(relay._ptyStreamParams(relay._termTokens.get(t2)).deviceName, undefined, 'deviceName 없는 세션에 빈 키가 실리면 안 된다');
+    relay._termTokens.delete(t2);
+    for (const bad of [undefined, null, 0, 4, 'x']) {
+      const t = relay.issueTerminalToken(userId, 'a', 'p', 1, 'ck', 12, bad);
+      assert.strictEqual(relay._termTokens.get(t).terminalProtocol, 1, `protocol=${bad} 은 1 이어야 한다`);
+      assert.strictEqual(relay._ptyStreamParams(relay._termTokens.get(t)).terminalProtocol, undefined);
+      relay._termTokens.delete(t);
+    }
+
+    // 이름은 64자로 자른다(사용자 입력이 그대로 데몬 로그/소유자 표시에 들어간다).
+    const tl = relay.issueTerminalToken(userId, 'a', 'p', 1, 'ck', 12, 3, 'x'.repeat(200));
+    assert.strictEqual(relay._termTokens.get(tl).deviceName.length, 64);
+    relay._termTokens.delete(tl);
+  });
+});
+
 test('스트림 sid — 협상 실패는 전부 평문 폴백(토큰은 살아 있고 sid 는 안 붙는다)', async () => {
   const userId = 990012;
   await withRunner(userId, 12, async ({ sent, reply }) => {
