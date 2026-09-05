@@ -271,6 +271,18 @@ const api = {
     if (!isHostBackend()) return tmuxBackend().capture(name, { escapes, lines, join });
     return (await request('capture', { name, escapes, lines, join })).text;
   },
+  async captureHistory(name, { escapes, lines } = {}) {
+    if (!isHostBackend()) return tmuxBackend().captureHistory(name, { escapes, lines });
+    return (await request('capture', { name, escapes, lines, historyOnly: true })).text;
+  },
+  /**
+   * 과거 한 페이지(offset 기반) — tmux 백엔드만 제공한다. 정본이 왜 tmux 인지는 term-backend-tmux 참조.
+   * term-host(윈도우 등)는 tmux history 라는 개념이 없어 null 을 주고, 호출자가 자기 VT 로 폴백한다.
+   */
+  async historyPage(name, o = {}) {
+    if (!isHostBackend()) return tmuxBackend().historyPage(name, o);
+    return null;
+  },
   /** 리사이즈 — latest wins(window-size latest 등가. tmux 는 attach 클라이언트가 담당 = no-op) */
   resize(name, cols, rows) {
     if (!isHostBackend()) return tmuxBackend().resize(name, cols, rows);

@@ -204,8 +204,12 @@ class Session {
     this.screen.resize(c, r);
   }
 
-  async capture({ escapes, lines, join } = {}) {
+  async capture({ escapes, lines, join, historyOnly } = {}) {
     await this.screen.flush(); // 방금 들어온 출력까지 반영 후 스크랩(51ms TUI 판정 등가)
+    if (historyOnly) {
+      const page = this.screen.historyPage({ limit: Math.max(1, lines | 0 || 10000) });
+      return page.rows.map((r) => r.text).join('\n');
+    }
     return escapes ? this.screen.captureEscapes({ lines }) : this.screen.captureText({ lines, join });
   }
 

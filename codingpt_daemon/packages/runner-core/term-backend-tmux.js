@@ -112,6 +112,61 @@ async function capture(name, { escapes, lines, join } = {}) {
   return pty().runTmux(args);
 }
 
+async function captureHistory(name, { escapes, lines } = {}) {
+  const args = ['capture-pane', '-p'];
+  if (escapes) args.push('-e');
+  args.push('-t', t0(name), '-S', `-${Math.max(1, lines | 0 || 10000)}`, '-E', '-1');
+  return pty().runTmux(args);
+}
+
+/** ANSI(SGR/CSI/OSC) 제거 — 페이지의 text 필드용. capture -e 출력만 상대하므로 최소 문법으로 충분. */
+function stripAnsi(s) {
+  return String(s)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')   // OSC
+    .replace(/\x1b[[][0-?]*[ -/]*[@-~]/g, '')                // CSI
+    .replace(/\x1b[@-Z\\-_]/g, '');                          // 단일 문자 이스케이프
+}
+
+/**
+ * 과거(스크롤백) 한 페이지 — **정본은 tmux history 다**.
+ *
+ * 왜 VT(headless xterm) 스크롤백이 아니라 tmux 인가(2026-09-04 실측):
+ *  tmux 는 리사이즈마다 pane 전체를 **커서 위치에 다시 그린다**(ED 없이 `\e[K`+`\r\n` 반복).
+ *  그 스트림을 먹는 쪽(PC 의 xterm, 데몬의 canonical Screen)은 재도장 잔재를 "과거"로 쌓는다.
+ *  기기 크기가 다른 멀티기기에서는 window-size latest 로 리사이즈가 상시 일어나 이 찌꺼기가
+ *  실제 과거를 밀어내고, 폭이 바뀌며 리플로우돼 프롬프트가 한 줄에 여러 개 붙는 형태로 뭉개진다
+ *  (사용자 신고 스크린샷의 정체). 실측: 리사이즈 7회에 Screen 이 tmux 보다 43줄 과다.
+ *  tmux 는 셀 격자를 자기가 소유하므로 이런 잔재가 없고, `clear`(E3)도 여기 반영된다.
+ *
+ * 좌표: offset 0 = 가장 오래된 과거 줄, total = #{history_size}(현재 화면 제외).
+ *  tmux 의 -S/-E 줄번호는 0 = 보이는 화면 첫 줄, 음수 = 과거이므로 offset i → (i - total).
+ * @param {object} o { before?: number(이 offset 미만을 준다. null=맨 끝), limit?: number }
+ * @returns {Promise<{start,end,total,hasMore,rows:{offset,text,ansi,wrapped}[]}>}
+ */
+async function historyPage(name, { before, limit } = {}) {
+  const raw = await pty().runTmux(['display-message', '-p', '-t', t0(name), '#{history_size}']);
+  const total = Math.max(0, parseInt(String(raw).trim(), 10) || 0);
+  const lim = Math.max(1, Math.min(500, limit | 0 || 200));
+  const end = before == null ? total : Math.max(0, Math.min(total, before | 0));
+  const start = Math.max(0, end - lim);
+  if (start >= end) return { start: end, end, total, hasMore: end > 0, rows: [] };
+  const out = await pty().runTmux(['capture-pane', '-p', '-e', '-t', t0(name),
+    '-S', String(start - total), '-E', String(end - 1 - total)]);
+  // capture-pane 은 요청 줄 수만큼 개행 구분으로 준다(마지막 개행 1개는 종결자).
+  const lines = String(out).replace(/\n$/, '').split('\n');
+  const rows = [];
+  for (let i = 0; i < end - start; i++) {
+    let ansi = (lines[i] == null ? '' : lines[i]).replace(/\r$/, '');
+    // ★ 줄마다 속성을 닫는다. tmux 는 배경이 줄 끝까지 이어지면 리셋을 안 붙이는데(실측: 파워라인
+    //   프롬프트가 `\e[44m` 을 켠 채 끝난다), 페이지를 `\r\n` 으로 이어 붙이는 뷰어에서는 그 배경이
+    //   **이후 모든 줄로 번져** 화면이 통째로 파래진다(2026-09-05 안드로이드 실기).
+    //   행은 offset 으로 임의 접근하는 단위이므로 애초에 자족적이어야 한다.
+    if (ansi.includes('\x1b')) ansi += '\x1b[0m';
+    rows.push({ offset: start + i, text: stripAnsi(ansi), ansi, wrapped: false });
+  }
+  return { start, end, total, hasMore: start > 0, rows };
+}
+
 /** darwin 은 no-op — 크기는 attach 클라이언트 + window-size latest 가 결정한다(수동 resize-window
  *  클레임은 기기 간 크기 뺏기 전쟁의 근원이라 전면 폐지된 상태 — 되살리지 말 것). */
 async function resize() {
@@ -225,6 +280,6 @@ async function attach(name, o = {}) {
 
 module.exports = {
   create, list, listSessionNames, has, kill, killServer,
-  sendKeys, capture, resize, setEnv, getEnv, rename, respawn, info, attach,
+  sendKeys, capture, captureHistory, historyPage, resize, setEnv, getEnv, rename, respawn, info, attach,
   LIST_FMT, INFO_FMT,
 };

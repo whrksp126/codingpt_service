@@ -210,7 +210,7 @@ class TermHostServer {
 
         case 'capture': {
           const s = this._need(msg.name);
-          const text = await s.capture({ escapes: !!msg.escapes, lines: msg.lines, join: !!msg.join });
+          const text = await s.capture({ escapes: !!msg.escapes, lines: msg.lines, join: !!msg.join, historyOnly: !!msg.historyOnly });
           return this._reply(sock, id, { text });
         }
 

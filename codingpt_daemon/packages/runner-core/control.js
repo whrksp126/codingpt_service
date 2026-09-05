@@ -741,6 +741,8 @@ function run(config) {
     } catch (_) { /* noop */ }
     // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
     try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
+    // PC 앱(같은 기기) v3 터미널 루프백 리스너 — 원격과 같은 와이어, 릴레이 왕복 없이.
+    try { require('./terminal-local').start(); } catch (e) { console.error('[control] 로컬 터미널 리스너 시작 실패:', e.message); }
     // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
     //  리스너를 여는 것은 그 불변식을 깨는 일이라 **서버가 그 기능을 쓴다고 선언했을 때만** 열어야 한다.
     //  부팅 시점에 열면 서버 스위치(LAN_DIRECT_ENABLED)를 켜지 않은 환경의 모든 사용자 PC 가 사설

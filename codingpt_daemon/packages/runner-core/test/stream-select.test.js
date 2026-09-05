@@ -141,7 +141,8 @@ test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴
   rx = '';
   await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
   await sleep(250);
-  assert.ok(rx.includes('\x1b[3J\x1b[H\x1b[2J'), '크기 소유권 전환 뒤 로컬 화면 정본 동기화가 없다');
+  const canonicalSnapshot = process.env.CPT_CANONICAL_TERMINAL === '1' && rx.includes('\x1bc');
+  assert.ok(canonicalSnapshot || rx.includes('\x1b[3J\x1b[H\x1b[2J'), '크기 소유권 전환 뒤 로컬 화면 정본 동기화가 없다');
   const reclaimed = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
   assert.strictEqual(reclaimed.trim(), '80x24', 'claim이 이 뷰어 크기로 공유 pane을 되찾지 못했다');
 

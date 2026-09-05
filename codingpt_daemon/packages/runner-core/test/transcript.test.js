@@ -455,6 +455,22 @@ test('codex 어댑터 — 롤아웃 → ChatMsg 정규화(중복 0 · 도구 짝
   assert.strictEqual(meta.sessionId, sid);
 });
 
+test('codex 0.147+ — item_completed UserMessage/AgentMessage를 대화로 읽는다', async () => {
+  const sid = '01a00bfd-61d0-75f1-933f-56cf5a705e63';
+  const file = writeCodexRollout(`rollout-2026-08-17T04-12-30-${sid}.jsonl`, WS, [
+    { timestamp: TS, type: 'session_meta', payload: { id: sid, cwd: WS, originator: 'codex-tui', cli_version: '0.147.0' } },
+    // response_item/message는 developer 메시지와 중복 원본이므로 계속 무시한다.
+    { timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: '내부 지시문' }] } },
+    { timestamp: TS, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '새 포맷 질문' }] } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', id: 'u1', content: [{ type: 'text', text: '새 포맷 질문', text_elements: [] }] } } },
+    { timestamp: TS, type: 'event_msg', payload: { type: 'item_completed', item: { type: 'AgentMessage', id: 'a1', phase: 'final_answer', content: [{ type: 'Text', text: '새 포맷 답변' }] } } },
+  ]);
+  const snap = await T.snapshot(file, { maxLines: 100, agent: 'codex' });
+  assert.deepStrictEqual(snap.messages.map((m) => [m.role, m.text]), [
+    ['user', '새 포맷 질문'], ['assistant', '새 포맷 답변'],
+  ]);
+});
+
 test('codex — agent 를 안 보내면 claude 로 열려 이 대화가 안 보인다(클라 계약 고정)', async () => {
   // claude 어댑터에는 이 워크스페이스의 후보가 없다 → noSession. 이게 "codex 터미널에 claude 대화" 사고의
   //  반대 증명이다: agent 를 실어야만 codex 대화가 열린다.
@@ -708,6 +724,16 @@ test('noteHook / lookupBind — 훅 좌표가 chat.open 의 P0 경로가 된다'
   await T.handle('chat.close', { chatId: open.chatId });
   // 바인딩 파일은 0600
   assert.strictEqual(fs.statSync(path.join(ROOT, '.codingpt', 'chat-bind.json')).mode & 0o777, 0o600);
+});
+
+test('chat.open — 절대 cwd 요청도 정규화된 기존 바인딩을 찾는다', async () => {
+  writeJsonl(sessFile(WS, 'bound-absolute'), [{ type: 'user', uuid: 'abs-a', timestamp: TS, cwd: WS, sessionId: 'bound-absolute', origin: { kind: 'human' }, promptSource: 'typed', message: { role: 'user', content: '절대경로에서도 보임' } }]);
+  T.noteHook({ sessionId: 'bound-absolute', transcriptPath: sessFile(WS, 'bound-absolute'), cwd: WS, cwdRel: 'ws', tid: 1000003, event: 'prompt' });
+  const open = await T.handle('chat.open', { cwd: WS, tid: 1000003 }, fakeWs());
+  assert.strictEqual(open.noSession, undefined, JSON.stringify(open));
+  assert.strictEqual(open.sessionId, 'bound-absolute');
+  assert.strictEqual(open.messages[0].text, '절대경로에서도 보임');
+  await T.handle('chat.close', { chatId: open.chatId });
 });
 
 // ★★ 2026-07-27 실사고 회귀 — "터미널마다 다른 claude 세션인데 채팅이 둘 다 엉뚱한 같은 대화"
