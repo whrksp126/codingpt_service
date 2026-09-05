@@ -6,9 +6,9 @@
 //  tmux 는 "화면 재도장"을 보낸다(줄 단위 EL, attach 시 CSR+INDN, 리사이즈 재도장). 그걸 xterm 에
 //  먹이면 스크롤백에 잔재가 쌓이고 alt-screen(1049)도 숨겨진다. control mode 는 pane 의 **원시 PTY
 //  바이트**를 `%output` 으로 준다 — 실측(3.7b, 2026-09-05): DECSET 1049/1000/1006 그대로 통과, UTF-8
-//  원시 바이트, 제어문자만 8진 이스케이프(`\033`, `\015\012`). 그리고 control 클라이언트가 유일할 때
-//  `refresh-client -C WxH` 가 window 크기를 그대로 정한다(80x24→120x40→48x21 실측) — window-size
-//  옵션·lease·nudge 가 전부 필요 없어지는 이유.
+//  원시 바이트, 제어문자만 8진 이스케이프(`\033`, `\015\012`). 크기는 이 클라이언트가 `resize-window`
+//  로 못 박는다(→ resize() 주석) — 다른 클라가 몇이 붙든 소유자 격자가 이긴다. lease·nudge 가 전부
+//  필요 없어지는 이유.
 //
 // 프레임: `%begin ts num flags` … `%end|%error ts num flags` 가 명령 응답을 감싼다(순차 처리).
 //  통지: `%output %<pane> <data>` · `%layout-change @win <layout> …` · `%exit` · `%sessions-changed` 등.
@@ -133,9 +133,24 @@ class TmuxControl extends EventEmitter {
     }
   }
 
-  /** 크기 — 이 클라이언트가 유일하면 window 크기가 정확히 이 값이 된다(실측). */
-  resize(cols, rows) {
-    return this.command(`refresh-client -C ${cols | 0}x${rows | 0}`);
+  /**
+   * 크기 — 소유자가 정한 격자를 window 에 **못 박는다**.
+   *
+   * ⚠ `refresh-client -C` 만으로는 부족하다(2026-09-06 실측). 그건 "이 클라이언트의 크기"를 바꿀 뿐이고
+   *  window 크기는 window-size 정책이 유도한다. 그래서 ① 다른 클라이언트(구 v2 tty attach)가 하나라도
+   *  붙어 있으면 latest 계산에 끼어들고, ② 그 클라가 `resize-window` 를 한 번이라도 부르면 window-size
+   *  가 **manual 로 영구 고정**돼 이후 refresh-client -C 는 통째로 무시된다.
+   *  실측(같은 세션): latest 에서 refresh -C 129x40 → 129x40 / v2 가 resize-window 90x24 → manual 90x24 /
+   *  manual 에서 refresh -C 129x40 → **90x24 그대로** / resize-window 129x40 → 129x40.
+   *
+   *  `resize-window -x -y` 는 정책과 무관하게 정확히 그 크기로 고정한다 — "크기는 소유자 1명이 정한다"
+   *  라는 v3 계약과 정확히 같은 의미다. refresh-client 도 같이 보내 컨트롤 클라이언트 자신의 크기를
+   *  맞춰 둔다(안 맞으면 tmux 가 이 클라 기준으로 잘라 보내는 경로가 남는다).
+   */
+  async resize(cols, rows) {
+    const w = cols | 0, h = rows | 0;
+    await this.command(`refresh-client -C ${w}x${h}`);
+    await this.command(`resize-window -t =${this.session}:0 -x ${w} -y ${h}`);
   }
 
   close() {

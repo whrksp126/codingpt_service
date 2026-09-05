@@ -63,6 +63,21 @@ test('소유자만 크기를 정한다 — 비소유자 resize 는 window 를 �
   host.close();
 });
 
+test('구 v2 클라가 window-size 를 manual 로 박아도 소유자 크기가 이긴다', { skip: !hasTmux }, async () => {
+  await newSession('v3-manual');
+  const host = await registry.get('v3-manual', { cols: 100, rows: 30 });
+  await host.ready;
+  await host.claim({ deviceId: 'pc', name: 'PC' });
+  // v2 경로(pty.js 의 resize-window)가 하는 짓 그대로 — 이 한 번으로 window-size 가 manual 로 굳는다.
+  //  이 상태에서 refresh-client -C 는 영구히 무시되므로, 소유자 resize 는 resize-window 로 주장해야 한다.
+  await runTmux(['resize-window', '-t', '=v3-manual:0', '-x', '90', '-y', '24']);
+  assert.strictEqual(String(await runTmux(['display-message', '-p', '-t', '=v3-manual:0', '#{window-size}'])).trim(), 'manual');
+  assert.strictEqual(await host.resize(129, 40, 'pc'), true);
+  assert.ok(await until(async () => (await winSize('v3-manual')) === '129x40'),
+    `manual 로 굳은 window 를 소유자가 되찾지 못했다: ${await winSize('v3-manual')}`);
+  host.close();
+});
+
 test('원시 바이트가 그대로 온다 — alt-screen·마우스 모드가 뷰어에 도달하고 VT 도 안다', { skip: !hasTmux }, async () => {
   await newSession('v3-raw');
   const host = await registry.get('v3-raw', { cols: 80, rows: 24 });
