@@ -863,10 +863,10 @@ export class PaneView {
     this.histTag.textContent = i18n.t("과거 — 아래로 스크롤하면 현재");
     this.histTag.style.display = "none";
     this.body.appendChild(this.histTag);
-    // 비소유자 표시 + "이 기기로 조작" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
+    // 비소유자 표시 + "내 크기로 맞추기" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
     this.ownerPill = document.createElement("div");
     this.ownerPill.className = "pane-owner-pill";
-    this.ownerPill.innerHTML = `<span class="op-text"></span><button type="button" class="op-btn">${i18n.t("이 기기로 조작")}</button>`;
+    this.ownerPill.innerHTML = `<span class="op-text"></span><button type="button" class="op-btn">${i18n.t("내 크기로 맞추기")}</button>`;
     this.ownerPill.style.display = "none";
     this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
     this.body.appendChild(this.ownerPill);
@@ -1833,7 +1833,7 @@ export class PaneView {
     this.ownerPill.style.display = "flex";
   }
 
-  // "이 기기로 조작" — 소유권을 가져온 뒤 내 컨테이너 크기를 주장한다. 자동 탈취는 없다(설계 §1).
+  // "내 크기로 맞추기" — 소유권을 가져온 뒤 내 컨테이너 크기를 주장한다. 자동 탈취는 없다(설계 §1).
   _claimOwnership() {
     if (!this.ws || this.ws.readyState !== 1) return;
     try { this.ws.send(JSON.stringify({ type: "claim" })); } catch (_) { /* noop */ }

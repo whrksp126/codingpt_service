@@ -51,7 +51,7 @@ export default {
   "암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.": "Générez un code sur un appareil qui possède la clé, puis saisissez-le ici.",
   "열쇠를 다시 만드는 중…": "Recréation de la clé…",
   "이 PC 로 열쇠 다시 만들기": "Recréer la clé sur ce PC",
-  "이 기기로 조작": "Contrôler depuis cet appareil",
+  "내 크기로 맞추기": "Adapter à mon écran",
   "이전 크기로": "Restaurer",
   "최대화": "Agrandir",
   "최소화": "Réduire",

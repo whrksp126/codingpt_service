@@ -51,7 +51,7 @@ export default {
   "암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.": "Obtén un código en un dispositivo que tenga la clave e introdúcelo aquí.",
   "열쇠를 다시 만드는 중…": "Recreando la clave…",
   "이 PC 로 열쇠 다시 만들기": "Volver a crear la clave en este PC",
-  "이 기기로 조작": "Controlar desde este dispositivo",
+  "내 크기로 맞추기": "Ajustar a mi pantalla",
   "이전 크기로": "Restaurar",
   "최대화": "Maximizar",
   "최소화": "Minimizar",
