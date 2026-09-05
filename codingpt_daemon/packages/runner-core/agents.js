@@ -183,6 +183,16 @@ function probeLoginPathWin() {
   });
 }
 
+/**
+ * 부팅/세션마다 사라지는 임시 디렉토리인가. 우리가 만드는 심은 **영구 파일**이라 여기 있는 경로를
+ *  박아 두면 다음 부팅에 깨진다(그리고 그런 자리에 있는 건 대개 남의 툴이 만든 임시 래퍼다).
+ */
+function isTransientDir(d) {
+  const abs = path.resolve(d);
+  const tmps = [os.tmpdir(), '/tmp', '/private/tmp', '/var/folders', '/private/var/folders'];
+  return tmps.some((t) => { const r = path.resolve(t); return abs === r || abs.startsWith(r + path.sep); });
+}
+
 // 테스트 전용 탐색 경로 고정 — 감지 결과가 **이 머신에 무엇이 깔려 있는지**에 좌우되면 테스트가
 //  기계마다 다른 답을 낸다("codex 없으면 래퍼 없음"을 codex 가 깔린 PC 에서 검증할 수 없다).
 let searchOverride = null;
@@ -194,6 +204,7 @@ function searchDirs(extra) {
   if (searchOverride) return searchOverride.filter((d) => d && d !== bin);
   const push = (d) => {
     if (!d || d === bin || seen.has(d)) return; // 우리 래퍼 디렉토리 제외(순환 판정 방지)
+    if (isTransientDir(d)) return;              // 부팅마다 사라지는 경로를 영구 심에 박지 않는다
     seen.add(d);
     out.push(d);
   };
@@ -215,19 +226,51 @@ function winPathext() {
  *  win32 는 X_OK 가 무의미하다(실행 비트 없음) → PATHEXT 확장자 매칭(.exe/.cmd/.bat …)으로 판정.
  * @param {{win?:boolean, pathext?:string[]}} [opts] 테스트 주입용(기본 = process.platform)
  */
+/**
+ * 이 후보가 "같은 이름을 다시 실행하는 남의 래퍼"인가.
+ *
+ * ★ 이걸 안 걸러서 2026-09-06 에 워크스페이스 claude 가 통째로 먹통이 됐다. cmux 는 PATH 맨 앞에
+ *  `<TMPDIR>/cmux-cli-shims/<UUID>/claude` 를 깔고, 그 래퍼는 "진짜 claude" 를 **PATH 로 다시**
+ *  찾는다. 우리가 그 래퍼를 REAL 로 박아 두면 우리 심 → cmux 래퍼 → (PATH 선두인) 우리 심 →
+ *  … 서로 무한 재실행이 되고, 화면엔 아무것도 안 나온 채 멈춘다.
+ *  그래서 판정은 이름·경로가 아니라 **내용**으로 한다 — 남의 툴이 또 생겨도 같은 규칙에 걸린다.
+ *  (진짜 CLI 는 node 스크립트라 `#!` 뒤가 node 이고 패키지 경로가 박혀 있어 여기서 걸러진다.)
+ */
+function looksLikeReexecWrapper(file, name) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(8192);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    const head = buf.subarray(0, n).toString('utf8');
+    if (!head.startsWith('#!')) return false;                 // 바이너리·비스크립트는 대상 아님
+    if (/@anthropic-ai\/claude-code|claude-code\/cli\.js|codex-cli\/|\bnode\b.*cli\.js/.test(head)) return false;
+    const n1 = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // exec/command/spawn 로 **같은 이름**을 다시 부르면 래퍼다.
+    return new RegExp(
+      `(?:exec|command)\\s+(?:-v\\s+)?(?:env\\s+)?["']?${n1}["']?(?:\\s|$)` +
+      `|command\\s+-v\\s+["']?${n1}["']?` +
+      `|(?:spawn|spawnSync|execFile|execFileSync)\\(\\s*["']${n1}["']`,
+      'm',
+    ).test(head);
+  } catch (_) { return false; }
+}
+
 function findBin(name, dirs, opts) {
   const win = opts && opts.win !== undefined ? !!opts.win : process.platform === 'win32';
   if (!win) {
+    let wrapper = null;   // 남의 래퍼밖에 없으면 "미설치"로 떨어뜨리지 않고 그거라도 쓴다
     for (const d of dirs) {
       const p = path.join(d, name);
       try {
         fs.accessSync(p, fs.constants.X_OK);
         const st = fs.statSync(p);            // 디렉토리가 X_OK 를 통과하므로 파일 확인 필수
         if (st.isDirectory()) continue;
+        if (looksLikeReexecWrapper(p, name)) { if (!wrapper) wrapper = p; continue; }
         return p;
       } catch (_) { /* 다음 후보 */ }
     }
-    return null;
+    return wrapper;
   }
   const exts = (opts && opts.pathext) || winPathext();
   for (const d of dirs) {
@@ -421,6 +464,8 @@ module.exports = {
   _internals: {
     findBin,
     searchDirs,
+    looksLikeReexecWrapper,
+    isTransientDir,
     fallbackDirs,
     winFallbackDirs,
     winPathext,

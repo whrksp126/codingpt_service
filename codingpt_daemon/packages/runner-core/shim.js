@@ -62,11 +62,35 @@ function writeIfChanged(file, content, mode) {
 }
 
 // 래퍼 공통 꼬리 — 생성 시점 절대경로가 사라졌으면 런타임 재탐색(shim 디렉토리 제외).
+//
+// ★ 재진입 가드가 왜 있나(2026-09-06 실사고). cmux 같은 다른 툴도 PATH 선두에 자기 `claude` 래퍼를
+//  깐다. 그 래퍼는 "진짜 claude" 를 **PATH 로 다시** 찾는데, 우리 ZDOTDIR 이 PATH 선두에 우리 bin 을
+//  두므로 우리 심을 다시 집는다 → 우리 심 → 남의 래퍼 → 우리 심 → … 무한 재실행. 화면엔 아무것도
+//  안 나온 채 멈춘다(실측: pane_current_command 가 bash 에 물림).
+//  생성기(agents.js findBin)가 남의 래퍼를 REAL 로 박지 않게 이미 걸러내지만 그건 **생성 시점** 방어다.
+//  이미 잘못 깔린 심·나중에 깔릴 다른 툴까지 감당하도록 런타임에서도 끊는다. 못 끊으면 **매달리지
+//  말고 보이게 실패**한다 — 조용한 멈춤이 이 사고를 두 시간 짜리 미스터리로 만들었다.
 function resolverSnippet(name) {
+  const G = `CPT_SHIM_ACTIVE_${name.toUpperCase()}`;
   return `
+_cpt_self_dir="$(cd "$(dirname "$0")" && pwd)"
+# PATH 에서 우리 bin · (인자로 준) 되돌아온 래퍼 디렉토리 · 남의 임시 심 디렉토리를 뺀 목록
+_cpt_clean_path() {
+  echo "$PATH" | tr ':' '\\n' | grep -vx "$_cpt_self_dir" \\
+    | { if [ -n "\${1:-}" ]; then grep -vx "$1"; else cat; fi; } \\
+    | grep -v '/cmux-cli-shims' | tr '\\n' ':'
+}
+if [ -n "\${${G}:-}" ]; then
+  _cpt_direct="$(PATH="$(_cpt_clean_path "$(dirname "$REAL" 2>/dev/null)")" command -v ${name} || true)"
+  if [ -n "$_cpt_direct" ] && [ -x "$_cpt_direct" ]; then exec "$_cpt_direct" "$@"; fi
+  echo "cpt-shim: ${name} 이 다른 래퍼와 서로를 되부르고 있습니다 — 진짜 실행 파일을 찾지 못했습니다" >&2
+  exit 127
+fi
+${G}=1; export ${G}
+
 # 실제 ${name} 해석 — 생성 시점 경로가 사라졌으면 PATH 재탐색(자기 자신 제외)
 if [ ! -x "$REAL" ]; then
-  REAL="$(PATH="$(echo "$PATH" | tr ':' '\\n' | grep -vx "$(cd "$(dirname "$0")" && pwd)" | tr '\\n' ':')" command -v ${name} || true)"
+  REAL="$(PATH="$(_cpt_clean_path)" command -v ${name} || true)"
 fi
 if [ -z "$REAL" ] || [ ! -x "$REAL" ]; then
   # 이 래퍼는 "생성 시점에 ${name} 이 있었다"는 뜻이므로, 여기 도달했으면 그 사이에 사라진 것이다.

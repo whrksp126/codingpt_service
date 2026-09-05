@@ -200,6 +200,69 @@ test('구 저장소(daemon.json)의 설정은 최초 1회 이관된다', () => {
   assert.strictEqual(agents.onboardedAt(), '2026-07-01T00:00:00.000Z');
 });
 
+test('남의 래퍼는 진짜 바이너리로 오인하지 않는다 — 상호 재실행 루프의 근본 차단', async () => {
+  // 2026-09-06 실사고: cmux 가 PATH 선두에 <TMPDIR>/cmux-cli-shims/<UUID>/claude 를 깐다. 그 래퍼는
+  //  "진짜 claude" 를 PATH 로 다시 찾는데, 우리 ZDOTDIR 이 PATH 선두에 우리 bin 을 두므로 우리 심을
+  //  다시 집는다 → 우리 심 → 남의 래퍼 → 우리 심 → … 무한 재실행. 화면은 아무것도 없이 멈춘다.
+  reset();
+  const FOREIGN = path.join(ROOT, 'foreignbin');
+  fs.mkdirSync(FOREIGN, { recursive: true });
+  fs.writeFileSync(path.join(FOREIGN, 'claude'),
+    '#!/bin/sh\n# 남의 래퍼 — 진짜를 PATH 로 다시 찾는다\nexec claude "$@"\n', { mode: 0o755 });
+  const real = plant('claude');
+  agents._internals.setSearchOverride([FOREIGN, FAKEBIN]);   // 남의 래퍼가 **먼저** 걸리는 순서
+  assert.strictEqual(await agents.resolveBin('claude'), real, '남의 래퍼를 진짜로 잡았다');
+  shim.ensureShims();
+  const body = fs.readFileSync(path.join(BIN(), 'claude'), 'utf8');
+  assert.ok(body.includes(`REAL="${real}"`), `REAL 이 진짜가 아니다:\n${body.split('\n')[1]}`);
+  unplant('claude');
+});
+
+test('래퍼밖에 없으면 그거라도 쓴다 — "미설치" 로 떨어뜨리지 않는다', async () => {
+  reset();
+  const FOREIGN = path.join(ROOT, 'foreignonly');
+  fs.mkdirSync(FOREIGN, { recursive: true });
+  const only = path.join(FOREIGN, 'claude');
+  fs.writeFileSync(only, '#!/bin/sh\nexec claude "$@"\n', { mode: 0o755 });
+  agents._internals.setSearchOverride([FOREIGN]);
+  assert.strictEqual(await agents.resolveBin('claude'), only, '래퍼뿐인데 미설치로 판정했다');
+});
+
+test('부팅마다 사라지는 임시 디렉토리는 탐색에서 뺀다 — 영구 심에 박으면 다음 부팅에 깨진다', () => {
+  const tmpBin = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-transient-'));
+  assert.strictEqual(agents._internals.isTransientDir(tmpBin), true, `임시 판정 실패: ${tmpBin}`);
+  assert.strictEqual(agents._internals.isTransientDir('/opt/homebrew/bin'), false);
+  agents._internals.setSearchOverride(null);   // 실제 PATH 스캔 경로로 확인
+  try {
+    assert.ok(!agents._internals.searchDirs([tmpBin]).includes(tmpBin), '임시 디렉토리가 탐색에 남았다');
+  } finally { agents._internals.setSearchOverride([FAKEBIN]); }
+});
+
+test('★ 구 심이 남의 래퍼를 REAL 로 물고 있어도 루프에 빠지지 않는다(런타임 가드)', () => {
+  // 사용자 머신에 이미 깔린 잘못된 심을 재현한다 — 재생성 전에도 멈추지 않아야 한다.
+  reset();
+  const real = plant('claude');
+  fs.writeFileSync(real, '#!/bin/sh\necho REAL-CLAUDE-RAN\n', { mode: 0o755 });
+  const FOREIGN = path.join(ROOT, 'loopbin');
+  fs.mkdirSync(FOREIGN, { recursive: true });
+  // 남의 래퍼: 자기 디렉토리만 PATH 에서 빼고 claude 를 다시 찾는다(= cmux 래퍼의 실제 동작).
+  fs.writeFileSync(path.join(FOREIGN, 'claude'),
+    `#!/bin/sh\nPATH="$(echo "$PATH" | tr ':' '\\n' | grep -vx "${FOREIGN}" | tr '\\n' ':')"\nexec claude "$@"\n`,
+    { mode: 0o755 });
+  agents._internals.setSearchOverride([FAKEBIN]);
+  shim.ensureShims();
+  // REAL 을 남의 래퍼로 되돌린다 = 수정 전 심과 동일한 상태.
+  const wrapper = path.join(BIN(), 'claude');
+  fs.writeFileSync(wrapper,
+    fs.readFileSync(wrapper, 'utf8').replace(/^REAL=.*$/m, `REAL="${path.join(FOREIGN, 'claude')}"`),
+    { mode: 0o755 });
+  const { execFileSync } = require('child_process');
+  const out = execFileSync('/bin/sh', ['-c', `CPT_HOOKS_DISABLED=1 PATH="${BIN()}:${FOREIGN}:${FAKEBIN}:/usr/bin:/bin" "${wrapper}"`],
+    { encoding: 'utf8', timeout: 15000 });
+  assert.match(out, /REAL-CLAUDE-RAN/, `루프를 못 빠져나왔다: ${JSON.stringify(out)}`);
+  unplant('claude');
+});
+
 test('cleanup', () => {
   agents._internals.setSearchOverride(null);
   fs.rmSync(ROOT, { recursive: true, force: true });
