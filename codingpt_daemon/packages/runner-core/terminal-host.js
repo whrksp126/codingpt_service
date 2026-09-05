@@ -31,7 +31,10 @@ class TerminalHost extends EventEmitter {
     this.rows = clampRows(o.rows || 24);
     this.owner = o.owner || null;          // {deviceId, name}
     this.screen = new Screen(this.cols, this.rows);
-    this.seq = 0;                          // OUTPUT 프레임 seq(단조)
+    this.seq = 0;                          // OUTPUT 프레임 seq(단조 — **이 세대 안에서만** 유효)
+    // 세대 식별자 — host 가 새로 만들어질 때마다(데몬 재시작·세션 재생성) 바뀐다. seq 는 세대 안에서만
+    //  의미가 있어서, 이게 없으면 재시작 뒤 옛 뷰어의 seq 를 최신으로 오판해 화면이 멈춘다(replaySince).
+    this.epoch = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     this.ring = [];                        // [{seq, buf}]
     this.ringBytes = 0;
     this.viewers = new Set();              // 구독 콜백 fn(frame)
@@ -112,9 +115,20 @@ class TerminalHost extends EventEmitter {
   }
 
   /** 재접속 이어받기: lastSeq 다음부터의 OUTPUT 들. 링버퍼 밖이면 null(스냅샷 필요). */
-  replaySince(lastSeq) {
+  /**
+   * 재접속 이어받기. 이어 붙일 수 있으면 프레임 배열, **못 하면 null**(호출자는 스냅샷을 보낸다).
+   *
+   * ★ epoch 가 필요한 이유(2026-09-06 실기 사고): 데몬이 재시작하면 host 가 새로 만들어져 seq 가
+   *  0 부터 다시 센다. 그때 옛 뷰어가 큰 lastSeq 로 hello 하면 예전 코드는 `n >= this.seq` 를
+   *  "너는 최신"으로 읽어 아무것도 안 보냈고, 그 화면은 **영원히 멈췄다**(PC 에서 작업해도 폰/패드에
+   *  아무 변화 없음). seq 는 세대 안에서만 의미가 있으므로 세대 식별자로 먼저 가른다.
+   *  epoch 를 안 보내는 구 뷰어를 위해 "정본보다 앞선 seq" 도 이어받기 불가로 본다.
+   */
+  replaySince(lastSeq, epoch) {
+    if (epoch != null && String(epoch) !== this.epoch) return null;
     const n = Number(lastSeq) || 0;
-    if (n >= this.seq) return [];
+    if (n > this.seq) return null;       // 정본보다 앞섬 = 다른 세대의 seq
+    if (n === this.seq) return [];       // 진짜로 최신
     if (!this.ring.length || this.ring[0].seq > n + 1) return null;
     return this.ring.filter((r) => r.seq > n);
   }
@@ -123,7 +137,7 @@ class TerminalHost extends EventEmitter {
     await this.ready;
     await this.screen.flush();
     return {
-      cols: this.cols, rows: this.rows, owner: this.owner, seq: this.seq,
+      cols: this.cols, rows: this.rows, owner: this.owner, seq: this.seq, epoch: this.epoch,
       modes: this.modes(),
       cursor: this.screen.cursor(),
       ansi: this.screen.serializeRepaint(),

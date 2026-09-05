@@ -136,6 +136,18 @@ test('CPT3 왕복 — 스냅샷·입력·소유자 크기·claim·history·이�
   pc.send({ type: 'hello', lastSeq: -1 });
   assert.ok(await pc.until(() => pc.json(v3.OPCODE.SNAPSHOT).length > snapsBefore), '링버퍼 밖인데 스냅샷을 안 보냈다');
 
+  // ★ 데몬 재시작 후 옛 뷰어가 큰 seq 로 hello — 정본보다 앞서면 반드시 스냅샷이어야 한다.
+  //   안 그러면 뷰어가 옛 화면에 멈춘 채 아무 갱신도 못 받는다(2026-09-06 실기 사고: PC 작업이
+  //   폰/패드에 안 보임). 세대(epoch)가 다른 경우도 마찬가지.
+  const s2 = pc.json(v3.OPCODE.SNAPSHOT).length;
+  pc.send({ type: 'hello', lastSeq: 999999 });
+  assert.ok(await pc.until(() => pc.json(v3.OPCODE.SNAPSHOT).length > s2), '앞선 seq 인데 스냅샷을 안 보냈다');
+  const s3 = pc.json(v3.OPCODE.SNAPSHOT).length;
+  const lastSnap = pc.json(v3.OPCODE.SNAPSHOT).slice(-1)[0];
+  assert.ok(lastSnap.epoch, '스냅샷에 세대 식별자가 없다');
+  pc.send({ type: 'hello', lastSeq: lastSnap.seq, epoch: 'stale-epoch' });
+  assert.ok(await pc.until(() => pc.json(v3.OPCODE.SNAPSHOT).length > s3), '다른 세대인데 스냅샷을 안 보냈다');
+
   pc.ws.close(); ph.ws.close();
   await sleep(200);
 });

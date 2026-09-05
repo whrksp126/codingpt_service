@@ -73,7 +73,7 @@ async function attachV3(ctx, io) {
     switch (m.type) {
       case 'hello': {
         // 이어받기: 링버퍼 안이면 OUTPUT 을 seq 순서로, 아니면 스냅샷. 항상 OWNER 도 알려준다.
-        const replay = host.replaySince(m.lastSeq);
+        const replay = host.replaySince(m.lastSeq, m.epoch);
         if (replay) {
           sendJson(terminalV3.OPCODE.RESIZED, { cols: host.cols, rows: host.rows });
           sendJson(terminalV3.OPCODE.OWNER, ownerFrame());

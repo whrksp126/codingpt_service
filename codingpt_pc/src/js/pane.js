@@ -870,7 +870,7 @@ export class PaneView {
     this.ownerPill.style.display = "none";
     this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
     this.body.appendChild(this.ownerPill);
-    this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0;
+    this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0; this._v3Epoch = null;
     this._histRows = new Map();
     this._histTotal = 0;
     this._histLoadedFrom = Infinity;   // 아직 받은 게 없다(0 은 "맨 앞까지 다 받았다"는 뜻이라 못 쓴다)
@@ -1709,7 +1709,7 @@ export class PaneView {
     ws.onopen = () => {
       this._remoteTries = 0;
       // 이어받기: 이미 받은 seq 가 있으면 hello 로 이어 달라 한다(링버퍼 밖이면 데몬이 스냅샷을 보낸다).
-      if (this._v3Seq > 0) { try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq })); } catch (_) { /* noop */ } }
+      if (this._v3Seq > 0) { try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq, epoch: this._v3Epoch })); } catch (_) { /* noop */ } }
       // 25초 keepalive — 데몬이 살아 있는 뷰어와 릴레이만 남은 유령을 구분하는 근거.
       this._remoteKa = setInterval(() => {
         if (ws.readyState !== 1) return;
@@ -1727,7 +1727,7 @@ export class PaneView {
         case TERMINAL_OPCODE_V3.OUTPUT: {
           // seq 구멍 = 릴레이가 프레임을 떨어뜨렸다 → 데몬에 이어 달라고 한다(스냅샷/리플레이는 데몬 판단).
           if (this._v3Seq && f.seq !== this._v3Seq + 1 && f.seq > this._v3Seq) {
-            try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq })); } catch (_) { /* noop */ }
+            try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq, epoch: this._v3Epoch })); } catch (_) { /* noop */ }
           }
           if (f.seq > this._v3Seq) { this._v3Seq = f.seq; this._termOut(f.payload); }
           return;
@@ -1763,6 +1763,8 @@ export class PaneView {
   // 스냅샷 = 소유자 격자 크기 + 입력 모드 + 화면 ANSI. 라이브 격자를 통째로 갈아끼운다.
   _applySnapshot(m) {
     this._v3Seq = Number(m.seq) || 0;
+    // 세대 — 데몬이 재시작하면 seq 가 0 부터 다시 세므로, 이걸 같이 보내야 이어받기 오판(=화면 정지)이 없다.
+    this._v3Epoch = m.epoch || null;
     this._setOwner(m);
     this._setGrid(m.cols, m.rows, true);
     try { this.term.reset(); } catch (_) { /* noop */ }

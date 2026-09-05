@@ -68,7 +68,12 @@ ok('PC 가 과거를 데몬 v3 계약으로 읽는다(로컬·원격 동일)',
   ok('PC: 크기는 소유자만 주장한다', /if \(!this\._isOwner && !this\._ownerFree\) return;\n\s+if \(this\.ws && this\.ws\.readyState === 1\) this\.ws\.send\(JSON\.stringify\(\{ type: "resize"/.test(pane));
   ok('PC: 비소유자는 격자를 바꾸지 않고 축소해 본다', /if \(this\._grid && !this\._isOwner && !this\._ownerFree\) \{[\s\S]{0,300}?this\._applyScale\(\);\s+return;/.test(pane) && /el\.style\.transform = k < 1 \? `scale/.test(pane));
   ok('PC: 스냅샷은 입력 모드(1049·마우스·bracketed paste)를 먼저 복원한다', /if \(md\.altScreen\) pre \+= "\\x1b\[\?1049h"/.test(pane) && /md\.mouseTracking\) pre \+= "\\x1b\[\?1000h\\x1b\[\?1006h"/.test(pane));
-  ok('PC: 재접속은 hello{lastSeq} 로 이어받는다', /JSON\.stringify\(\{ type: "hello", lastSeq: this\._v3Seq \}\)/.test(pane));
+  // ★ epoch 를 같이 보내야 한다(2026-09-06 실기 사고). 데몬이 재시작하면 host 의 seq 가 0 부터 다시
+  //   세는데, 세대 없이 큰 lastSeq 만 보내면 데몬이 "너는 최신"으로 오판해 아무것도 안 보내고 화면이
+  //   영원히 멈춘다. 스냅샷의 epoch 를 보관했다가 hello 에 동봉한다.
+  ok('PC: 재접속은 hello{lastSeq, epoch} 로 이어받는다',
+    /JSON\.stringify\(\{ type: "hello", lastSeq: this\._v3Seq, epoch: this\._v3Epoch \}\)/.test(pane)
+      && /this\._v3Epoch = m\.epoch/.test(pane));
   ok('PC: 소유권은 명시적 claim 만(자동 탈취 없음)', /JSON\.stringify\(\{ type: "claim" \}\)/.test(pane) && !/type: "claim"[\s\S]{0,40}setInterval/.test(pane));
   ok('PC: 스크롤 라우팅 판정이 로컬 xterm 상태다(서버 modes 조회 없음)', /buffer\?\.active\?\.type === "alternate"; return;/.test(pane));
 }

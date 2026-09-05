@@ -150,6 +150,13 @@ test('재접속 이어받기 — 링버퍼 안이면 seq 부터, 밖이면 스�
   assert.ok(Buffer.concat(replay.map((r) => r.buf)).toString().includes('two'));
   assert.deepStrictEqual(host.replaySince(host.seq), [], '최신이면 빈 배열');
   assert.strictEqual(host.replaySince(-5), null, '링버퍼 밖(seq 0 이전)은 스냅샷 요구');
+  // ★ 데몬이 재시작하면 새 host 의 seq 는 0 부터다. 그때 옛 뷰어가 큰 lastSeq 로 hello 하면
+  //   "너는 최신"으로 오판해 아무것도 안 보내고, 화면이 **영원히 멈춘다**(2026-09-06 실기 사고).
+  assert.strictEqual(host.replaySince(host.seq + 500), null, '정본보다 앞선 seq 는 스냅샷 요구');
+  // 세대(epoch)가 다르면 seq 가 우연히 맞아도 이어붙이면 안 된다 — 다른 화면의 조각이다.
+  assert.ok(host.epoch && typeof host.epoch === 'string', 'host 에 세대 식별자가 없다');
+  assert.strictEqual(host.replaySince(host.seq - 1, 'other-epoch'), null, '다른 세대는 스냅샷 요구');
+  assert.ok(Array.isArray(host.replaySince(host.seq - 1, host.epoch)), '같은 세대는 이어받기');
   const snap = await host.snapshot();
   assert.strictEqual(snap.cols, 80); assert.strictEqual(snap.rows, 24);
   assert.ok(snap.ansi.includes('two') || snap.ansi.includes('P>'), '스냅샷에 화면이 없다');
