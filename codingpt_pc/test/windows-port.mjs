@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 
 const C = await import("../src/js/commands.js");
 const P = await import("../src/js/path-utils.js");
+const fs = await import("node:fs");
 
 // ── ① win32 기본 바인딩 표 ───────────────────────────────────────────────────
 test("win32 기본값: Ctrl+글자 단독(제어문자 충돌) 조합이 하나도 없다", () => {
@@ -135,4 +136,21 @@ test("shellQuote: POSIX 는 종전 shq 와 동일, win32 는 PowerShell 인용('
   }
   assert.equal(P.shellQuote("C:\\a b\\c.txt", true), "'C:\\a b\\c.txt'");
   assert.equal(P.shellQuote("C:\\it's.txt", true), "'C:\\it''s.txt'");
+});
+
+test("win32 프리뷰 휠: DOM 슬롯 → IPC → CompositionController 계약이 모두 연결돼 있다", () => {
+  const pane = fs.readFileSync(new URL("../src/js/pane.js", import.meta.url), "utf8");
+  const api = fs.readFileSync(new URL("../src/js/api.js", import.meta.url), "utf8");
+  const preview = fs.readFileSync(new URL("../src-tauri/src/preview.rs", import.meta.url), "utf8");
+  const win = fs.readFileSync(new URL("../src-tauri/src/preview_win.rs", import.meta.url), "utf8");
+  const lib = fs.readFileSync(new URL("../src-tauri/src/lib.rs", import.meta.url), "utf8");
+  assert.match(pane, /dataset\.os !== "windows"/);
+  assert.match(pane, /addEventListener\("wheel", this\._onWheel, \{ passive: false \}\)/);
+  assert.match(pane, /api\.previewWheel\(this\.id, dx, dy\)/);
+  assert.match(api, /invoke\("preview_wheel", \{ pane: paneId, dx, dy \}\)/);
+  assert.match(preview, /pub fn preview_wheel\(pane: String, dx: i32, dy: i32\)/);
+  assert.match(lib, /preview::preview_wheel/);
+  assert.match(win, /pub fn wheel\(pane_id: &str, dx: i32, dy: i32\)/);
+  assert.match(win, /send\(WM_MOUSEHWHEEL, dx\)/);
+  assert.match(win, /send\(WM_MOUSEWHEEL, -dy\)/);
 });

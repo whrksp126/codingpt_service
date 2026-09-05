@@ -82,6 +82,19 @@ pub fn preview_shield(on: bool) {
     let _ = on;
 }
 
+// Windows 휠은 포커스 HWND(앱 WebView2)로 가서 클릭용 오버레이가 받을 수 없다. DOM 슬롯이
+// 받은 delta를 CompositionController로 되돌린다. macOS는 WKWebView가 직접 처리하므로 no-op.
+#[tauri::command]
+pub fn preview_wheel(pane: String, dx: i32, dy: i32) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    return preview_win::wheel(&pane, dx, dy);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (pane, dx, dy);
+        Ok(())
+    }
+}
+
 // 프리뷰 페이지 줌(WKWebView.pageZoom, macOS 11+) — 데브툴 디바이스 툴바(모바일 에뮬레이션)용.
 //  프레임을 화면 rect 에 두고 zoom=rect폭÷에뮬폭 을 걸면 레이아웃 뷰포트가 정확히 에뮬 크기가 된다
 //  (스크린캐스트 없는 진짜 렌더링·반응형 실동작). 1.0 = 복원.

@@ -96,21 +96,16 @@ cp -R "$DAEMON_SRC/packages/daemon"       "$OUT/app/node_modules/@codingpt/daemo
 cp -R "$DAEMON_SRC/packages/runner-core"  "$OUT/app/node_modules/@codingpt/runner-core"
 # cpt-cli — runner-core/shim.js 가 형제 디렉토리(../cpt-cli/bin/cpt.js)로 해석하므로 반드시 동봉
 cp -R "$DAEMON_SRC/packages/cpt-cli"      "$OUT/app/node_modules/@codingpt/cpt-cli"
+# term-host의 Screen은 macOS canonical VT 모델과 Windows 세션 호스트가 함께 사용한다.
+cp -R "$DAEMON_SRC/packages/term-host"    "$OUT/app/node_modules/@codingpt/term-host"
 # 각 패키지 내부의 중첩 node_modules(있으면) 제거 — 루트로 통일
-rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" 2>/dev/null || true
+rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" "$OUT/app/node_modules/@codingpt/term-host/node_modules" 2>/dev/null || true
 
 # ── win32 전용 구성 ──
 #  · term-host(계약 1 — tmux 등가 세션 호스트)는 데몬 워크스페이스 패키지라 별도 바이너리 없이 동봉.
 #    darwin 은 tmux 경로 그대로이므로 win32 에서만 넣는다(darwin 번들 불변 원칙).
 #  · serve-sim(iOS 시뮬레이터 라이브 화면)은 darwin+arm64 전용 — win32 번들에서 통째 제외.
 if [[ "$TARGET" == win32-* ]]; then
-  if [ -d "$DAEMON_SRC/packages/term-host" ]; then
-    cp -R "$DAEMON_SRC/packages/term-host" "$OUT/app/node_modules/@codingpt/term-host"
-    rm -rf "$OUT/app/node_modules/@codingpt/term-host/node_modules" 2>/dev/null || true
-    echo "▸ term-host 동봉 → @codingpt/term-host"
-  else
-    echo "⚠ packages/term-host 미존재 — win32 터미널 세션 호스트 없이 조립(WS A 완성 전 테스트 번들)" >&2
-  fi
   rm -rf "$OUT/app/node_modules/serve-sim" 2>/dev/null || true
 fi
 

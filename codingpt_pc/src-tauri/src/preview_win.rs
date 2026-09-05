@@ -1047,6 +1047,55 @@ pub fn shield(on: bool) {
     });
 }
 
+// 앱 WebView2의 DOM preview-host가 받은 휠을 해당 프리뷰 CompositionController로 전달한다.
+// SendMouseInput의 wheel delta는 signed 16-bit가 mouseData 상위 워드에 들어가는 Win32 형식이다.
+// DOM deltaY는 양수=아래, WM_MOUSEWHEEL은 양수=위라 수직만 부호를 뒤집는다.
+pub fn wheel(pane_id: &str, dx: i32, dy: i32) -> Result<(), String> {
+    if SHIELD.load(Ordering::Relaxed) || (dx == 0 && dy == 0) {
+        return Ok(());
+    }
+    let pane = pane_id.to_string();
+    on_main(move || {
+        let target = with_state(|st| {
+            let p = st.panes.get(&pane)?;
+            let comp = p.comp.clone()?;
+            let mut pt = POINT::default();
+            if unsafe { GetCursorPos(&mut pt) }.is_err() {
+                return None;
+            }
+            let _ = unsafe { ScreenToClient(HWND(st.host_hwnd as _), &mut pt) };
+            Some((
+                comp,
+                POINT {
+                    x: pt.x - p.px,
+                    y: pt.y - p.py,
+                },
+            ))
+        })
+        .flatten();
+        let Some((comp, rel)) = target else { return Ok(()) };
+
+        let send = |kind: u32, delta: i32| {
+            if delta == 0 {
+                return;
+            }
+            let signed = delta.clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+            let data = (signed as u16 as u32) << 16;
+            let _ = unsafe {
+                comp.SendMouseInput(
+                    COREWEBVIEW2_MOUSE_EVENT_KIND(kind as i32),
+                    COREWEBVIEW2_MOUSE_EVENT_VIRTUAL_KEYS(0),
+                    data,
+                    rel,
+                )
+            };
+        };
+        send(WM_MOUSEHWHEEL, dx);
+        send(WM_MOUSEWHEEL, -dy);
+        Ok(())
+    })?
+}
+
 pub fn navigate(pane_id: &str, url: &str) -> Result<(), String> {
     let pane = pane_id.to_string();
     let url = url.to_string();
