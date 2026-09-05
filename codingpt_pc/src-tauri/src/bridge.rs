@@ -601,6 +601,11 @@ pub fn cloud_terminal_start(
             "hostDeviceId": host_device_id,
             "paneId": pane_id.unwrap_or_default(),
             "client": client,
+            // v3(CPT3): 데몬 VT 정본 + 소유자 1명(codingpt_daemon/docs/terminal-v3-design.md).
+            "terminalProtocol": 3,
+            "deviceName": read_config()
+                .and_then(|c| c.get("deviceName").and_then(|v| v.as_str().map(String::from)))
+                .unwrap_or_default(),
         }))
         .map_err(|e| format!("터미널 시작 실패: {e}"))?;
     let v = resp
@@ -616,6 +621,22 @@ pub fn cloud_terminal_start(
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
     Ok(CloudTerminal { token: tok, ws_base })
+}
+
+/// PC 로컬 터미널(v3) 루프백 엔드포인트 — 사이드카 데몬이 daemon.json 에 적어 둔 {port, token}.
+///  로컬 터미널도 원격과 같은 와이어로 데몬(정본)에 붙는다. 없으면 데몬 미기동/구버전.
+#[derive(serde::Serialize)]
+pub struct TerminalLocalEndpoint { pub port: u16, pub token: String, pub client: String, pub device_name: String }
+
+#[tauri::command]
+pub fn terminal_local_endpoint() -> Result<TerminalLocalEndpoint, String> {
+    let cfg = read_config().ok_or("데몬 설정이 없습니다(페어링 필요)")?;
+    let tl = cfg.get("terminalLocal").ok_or("데몬이 로컬 터미널 리스너를 아직 열지 않았습니다")?;
+    let port = tl.get("port").and_then(|v| v.as_u64()).ok_or("포트 없음")? as u16;
+    let token = tl.get("token").and_then(|v| v.as_str()).ok_or("토큰 없음")?.to_string();
+    let client = cfg.get("deviceId").and_then(|v| v.as_i64()).map(|id| format!("pc-{id}")).unwrap_or_else(|| "pc".into());
+    let device_name = cfg.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    Ok(TerminalLocalEndpoint { port, token, client, device_name })
 }
 
 // 새 로컬 워크스페이스 생성 — 폴더 절대경로 → 홈-상대 localPath 로 변환 후 백엔드에 등록(deviceToken).

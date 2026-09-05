@@ -73,6 +73,13 @@ export const api = {
   ptyOpen: (paneId, localPath, winIndex, cols, rows, replace) =>
     invoke("pty_open", { paneId, localPath, winIndex, cols, rows, replace: !!replace }),
   ptyWrite: (paneId, data) => invoke("pty_write", { paneId, data }),
+  // 스크롤 라우팅 모드(tmux 정본) — {altScreen, mouseTracking}. win32/미지원이면 {}.
+  ptyModes: (paneId) => invoke("pty_modes", { paneId }),
+  // 과거(스크롤백) 한 페이지 — 정본은 tmux history 다(클라이언트 xterm 스크롤백이 아니라).
+  //  계약은 원격(데몬 v2 `{type:'history'}`)과 **같은 모양**: {start,end,total,hasMore,rows[]}.
+  ptyHistory: (paneId, before, limit) => invoke("pty_history", { paneId, before: before ?? null, limit: limit ?? null }),
+  // v3: PC 로컬 터미널도 데몬(정본)에 WS 로 붙는다 — 루프백 {port, token, client, device_name}.
+  terminalLocalEndpoint: () => invoke("terminal_local_endpoint"),
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).
   ptyClaim: (paneId, sync = false) => invoke("pty_claim", { paneId, sync }),
@@ -164,6 +171,9 @@ export const api = {
   previewSetCookies: (paneId, cookiesJson) => invoke("preview_set_cookies", { pane: paneId, cookiesJson }),
   onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
   previewClose: (paneId) => invoke("preview_close", { paneId }),
+  // win32: 휠은 커서 아래 오버레이가 아니라 포커스된 앱 WebView2로 배달된다.
+  // DOM preview-host가 받은 delta를 네이티브 CompositionController로 전달한다(mac은 호출 안 함).
+  previewWheel: (paneId, dx, dy) => invoke("preview_wheel", { pane: paneId, dx, dy }),
   // 데브툴 디바이스 툴바 — 페이지 줌(WKWebView pageZoom). 1=복원.
   previewZoom: (paneId, zoom) => invoke("preview_zoom", { pane: paneId, zoom }),
 

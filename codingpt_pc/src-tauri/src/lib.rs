@@ -355,7 +355,8 @@ fn install_state_path() -> Option<PathBuf> {
 
 // 앱 번들 삭제 후 DMG 재설치를 macOS가 알려주는 제거 훅은 없다. 대신 실행 파일 inode를 설치 지문으로
 // 기록한다. 같은 앱의 재실행에서는 유지되고 Finder가 DMG에서 앱을 다시 복사하면 바뀐다.
-// 자동 업데이트도 inode를 바꾸므로 update_install이 목표 버전을 먼저 승인해 두고 재시작한다.
+// 이 지문은 설치 상태 진단에만 쓴다. 앱 번들 교체만으로 ~/.codingpt 의 계정·E2EE 키를 지우면
+// 정상 업데이트/덮어쓰기도 새 기기로 변해 PC가 연동 코드를 발급하지 못하므로 자격 삭제 근거로 쓰지 않는다.
 #[cfg(unix)]
 fn current_install_fingerprint() -> Option<String> {
     use std::os::unix::fs::MetadataExt;
@@ -452,8 +453,9 @@ fn is_manual_reinstall(old_fingerprint: &str, fingerprint: &str, authorized_vers
     old_fingerprint != fingerprint && authorized_version != Some(version)
 }
 
-// 최초 도입 실행은 기존 사용자를 로그아웃시키지 않고 지문만 등록한다. 이후 앱 번들이 바뀌었는데
-// update_install이 그 버전을 승인하지 않았다면 수동 재설치이므로 계정 연결을 해제한다.
+// 앱 번들 교체와 "이 PC의 계정 연결 해제"는 서로 다른 사용자 의도다. Finder 덮어쓰기, DMG 재설치,
+// 자동 업데이트 모두 기존 daemon.json/e2ee.json 을 보존한다. 계정 연결 해제는 앱의 명시적 로그아웃
+// 흐름에서만 수행해야 한다. 그래야 PC가 업데이트 뒤에도 항상 기존 신뢰 키로 연동 코드를 발급한다.
 fn reconcile_app_install(_version: &str) {
     #[cfg(debug_assertions)]
     return;
@@ -465,23 +467,14 @@ fn reconcile_app_install(_version: &str) {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
         let Some(previous) = previous else {
-            // 설치 지문이 없는데 계정 자격은 남아 있다면 앱 번들만 삭제한 뒤 DMG로 다시 설치한 경우다.
-            // 기능 도입 전 버전에서 넘어온 사용자도 한 번 로그아웃되지만, "앱 삭제 = 계정 연결 해제"라는
-            // 명시적 제품 계약을 지키는 편이 이전 자격을 새 설치에 조용히 승계하는 것보다 안전하다.
-            if is_paired() {
-                clear_local_account_credentials();
-                applog("신규 설치에서 잔존 계정 자격 감지 — 로컬 계정 연결 해제");
-            }
-            clear_install_onboarding_state();
+            // 기능 도입 전 설치나 pc-install.json 만 유실된 경우도 로컬 계정/키를 그대로 승계한다.
             write_install_state(&fingerprint, _version, None);
             return;
         };
         let old_fingerprint = previous.get("fingerprint").and_then(|v| v.as_str()).unwrap_or("");
         let authorized_version = previous.get("authorizedVersion").and_then(|v| v.as_str());
         if is_manual_reinstall(old_fingerprint, &fingerprint, authorized_version, _version) {
-            clear_local_account_credentials();
-            clear_install_onboarding_state();
-            applog("수동 앱 재설치 감지 — 로컬 계정 연결 해제");
+            applog("앱 번들 교체 감지 — 로컬 계정 및 암호화 키 유지");
         }
         write_install_state(&fingerprint, _version, None);
     }
@@ -502,7 +495,7 @@ mod install_tests {
     }
 
     #[test]
-    fn dmg_reinstall_clears_account() {
+    fn detects_unapproved_dmg_replacement_without_implying_account_reset() {
         assert!(is_manual_reinstall("fp-a", "fp-b", None, "0.1.193"));
         assert!(is_manual_reinstall("fp-a", "fp-b", Some("0.1.192"), "0.1.193"));
     }
@@ -572,6 +565,10 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
     // 종속인데, 자기 package.json(영구 0.1.0)을 보고해 왔다 — 전 사용자가 같은 값이라 "누가 어떤
     // 조합을 쓰는지"를 서버가 알 수 없었다(버전 스큐 진단 불가).
     cmd.env("CPT_APP_VERSION", app.package_info().version.to_string());
+    // 원격 뷰어마다 tmux/xterm 상태를 따로 만들지 않고, 데몬의 terminal-id별 단일 VT 모델을
+    // 구독한다. 기존 tmux 세션/프로세스는 그대로 두고 attach 계층만 canonical registry로 전환.
+    #[cfg(not(windows))]
+    cmd.env("CPT_CANONICAL_TERMINAL", "1");
     // 번들 tmux(사이드카 base/tmux/bin/tmux)가 있으면 주입 → 데몬이 무설치 tmux 사용.
     //  win32 는 tmux 부재(세션 호스트 = term-host, 포팅 계약 1) — 주입하지 않는다.
     #[cfg(not(windows))]
@@ -945,6 +942,9 @@ pub fn run() {
             daemon_unpair,
             // 터미널 pane (로컬 tmux)
             pty::pty_open,
+            pty::pty_modes,
+            pty::pty_history,
+            bridge::terminal_local_endpoint,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_claim,
@@ -1039,6 +1039,7 @@ pub fn run() {
             preview::preview_set_cookies,
             preview::preview_close,
             preview::preview_shield,
+            preview::preview_wheel,
             preview::preview_zoom,
             preview::window_set_bg,
             // 내장 IDE 파일 접근

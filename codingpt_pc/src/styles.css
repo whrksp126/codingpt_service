@@ -487,7 +487,26 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
    열을 더 제안해 정확히 상쇄된다. 바깥 margin 은 유효하지만 **pane 자체가 창을 넘는 상황에서는
    잘림을 키운다**(2026-07-27 사용자 실측 "더 많이 짤리네") → 넣지 않는다. */
 .pane-term { flex: 1; min-height: 0; padding: 4px 2px 2px 8px; overflow: hidden; }
-.pane-term .xterm { height: 100%; }
+.pane-term .xterm { height: 100%; transform-origin: 0 0; }
+/* v3 비소유자 뷰 — 소유자 격자(예: 폰 48칸)를 축소/스크롤로 본다. 격자 자체는 절대 바꾸지 않는다. */
+.pane-term.scaled { overflow: auto; }
+.pane-term.scaled .xterm { height: auto; }
+.pane-owner-pill { position: absolute; left: 10px; bottom: 10px; z-index: 21; display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px 4px 10px; border-radius: 999px; font-size: 11.5px; background: var(--elevated2);
+  border: 1px solid var(--border-ctrl); color: var(--text2); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.pane-owner-pill .op-btn { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-ctrl); background: var(--elevated);
+  color: var(--text); font-size: 11.5px; cursor: pointer; }
+.pane-owner-pill .op-btn:hover { background: var(--hover); }
+
+/* 과거(스크롤백) 오버레이 — 라이브 격자를 덮고 서버/tmux 정본 과거를 같은 xterm 으로 그린다.
+   라이브 격자는 scrollback:0 이라(재도장 잔재가 과거로 쌓이는 걸 막기 위해) 여기가 유일한 과거다.
+   z-index 는 검색 바(40)·모드 토글(36) 아래 — 과거를 보는 중에도 그 둘은 조작 가능해야 한다. */
+.pane-term-hist { position: absolute; inset: 0; padding: 4px 2px 2px 8px; overflow: hidden; z-index: 20; }
+.pane-term-hist .xterm { height: 100%; }
+.pane-term-hist.plain { white-space: pre; overflow: auto; font-family: var(--mono-font); font-size: 12px; color: var(--text2); }
+.pane-hist-tag { position: absolute; left: 10px; top: 8px; z-index: 21; pointer-events: none;
+  padding: 2px 8px; border-radius: 999px; font-size: 11px; letter-spacing: 0.2px;
+  background: var(--elevated2); border: 1px solid var(--border-ctrl); color: var(--text2); opacity: 0.92; }
 
 /* preview */
 .preview-bar { flex: none; display: flex; gap: 6px; padding: 5px 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }

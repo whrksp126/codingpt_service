@@ -16,6 +16,8 @@ use std::io::{Read, Write};
 #[cfg(windows)]
 use std::io::{BufRead, BufReader, Write};
 use std::sync::Mutex;
+#[cfg(not(windows))]
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(not(windows))]
 use base64::Engine;
@@ -38,6 +40,11 @@ struct PtyHandle {
     target: String,
     last_cols: u16,
     last_rows: u16,
+    // 입력마다 tmux 를 스폰하지 않기 위한 절약 상태(실측 tmux 1회 = 5.5ms, 키당 2회면 ~11ms).
+    //  · last_claim_ms  — 컨트롤러 리스는 15초짜리라 1/3 이 지났을 때만 갱신한다.
+    //  · last_write_ms  — 크기 재주장은 입력이 끊겼다 재개될 때만(다른 기기가 뺏어갔을 수 있는 순간).
+    last_claim_ms: u128,
+    last_write_ms: u128,
 }
 
 // win32 pane 핸들 — tmux attach 자식 대신 term-host 파이프 attach 커넥션(포팅 계약 1).
@@ -59,6 +66,51 @@ static PTY_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::n
 #[derive(Default)]
 pub struct PtyManager {
     panes: Mutex<HashMap<String, PtyHandle>>,
+}
+
+#[cfg(not(windows))]
+fn controller_now_ms() -> u128 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+fn controller_lease_allows_value(raw: &str, owner: &str, now: u128) -> bool {
+    let Some((current, expiry)) = raw.trim().rsplit_once(':') else { return true };
+    let expires_at = expiry.parse::<u128>().unwrap_or(0);
+    current == owner || expires_at <= now
+}
+
+#[cfg(not(windows))]
+fn controller_allows(ctx: &TmuxCtx, target: &str, owner: &str) -> bool {
+    let raw = tmux::run(ctx, &["show-options", "-w", "-v", "-t", &format!("={target}:0"), "@codingpt_controller"])
+        .unwrap_or_default();
+    controller_lease_allows_value(&raw, owner, controller_now_ms())
+}
+
+#[cfg(not(windows))]
+const CONTROLLER_LEASE_MS: u128 = 15_000;
+// 리스 갱신 주기 — 유효기간의 1/3. 키마다 갱신하면 tmux 프로세스가 초당 수십 개 뜬다.
+#[cfg(not(windows))]
+const CONTROLLER_REFRESH_MS: u128 = CONTROLLER_LEASE_MS / 3;
+// 입력이 이만큼 끊겼다 재개되면 그 사이 다른 기기가 크기를 가져갔을 수 있으므로 한 번 되찾는다.
+#[cfg(not(windows))]
+const SIZE_RECLAIM_IDLE_MS: u128 = 500;
+
+#[cfg(not(windows))]
+fn claim_controller(ctx: &TmuxCtx, target: &str, owner: &str) {
+    let value = format!("{owner}:{}", controller_now_ms() + CONTROLLER_LEASE_MS);
+    let _ = tmux::run(ctx, &["set-option", "-w", "-t", &format!("={target}:0"), "@codingpt_controller", &value]);
+}
+
+// 입력 경로에서 "지금 tmux 를 불러야 하는가"를 순수 함수로 분리 — 테스트가 스폰 없이 검증한다.
+#[cfg(not(windows))]
+fn should_refresh_lease(last_claim_ms: u128, now: u128) -> bool {
+    now.saturating_sub(last_claim_ms) >= CONTROLLER_REFRESH_MS
+}
+
+#[cfg(not(windows))]
+fn should_reclaim_size(last_write_ms: u128, now: u128) -> bool {
+    last_write_ms == 0 || now.saturating_sub(last_write_ms) > SIZE_RECLAIM_IDLE_MS
 }
 
 #[derive(Clone, Serialize)]
@@ -157,7 +209,7 @@ pub fn pty_open(
     let epoch = PTY_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     mgr.panes.lock().unwrap().insert(
         pane_id.clone(),
-        PtyHandle { master: pair.master, writer, child, epoch, target: target.clone(), last_cols: cols, last_rows: rows },
+        PtyHandle { master: pair.master, writer, child, epoch, target: target.clone(), last_cols: cols, last_rows: rows, last_claim_ms: 0, last_write_ms: 0 },
     );
 
     // reader 스레드보다 먼저 emit: PTY 쪽 attach 리페인트는 이미 master 버퍼에 대기하므로
@@ -233,7 +285,7 @@ fn normalize_resize_prompt_history(captured: &str) -> String {
 
 #[cfg(test)]
 mod history_tests {
-    use super::{contains_erase_scrollback, normalize_resize_prompt_history};
+    use super::{contains_erase_scrollback, controller_lease_allows_value, normalize_resize_prompt_history};
 
     #[test]
     fn collapses_only_consecutive_shell_prompt_repaints() {
@@ -251,14 +303,217 @@ mod history_tests {
         assert!(!contains_erase_scrollback(b"\x1b[2J"));
         assert!(!contains_erase_scrollback(b"\x1b[?1049h"));
     }
+
+    #[test]
+    fn input_path_spawns_tmux_only_on_lease_refresh_and_after_idle() {
+        use super::{should_reclaim_size, should_refresh_lease, CONTROLLER_REFRESH_MS, SIZE_RECLAIM_IDLE_MS};
+        // 연속 타이핑: 리스도 크기도 다시 안 건드린다(키당 tmux 스폰 0).
+        assert!(!should_refresh_lease(1_000, 1_000 + CONTROLLER_REFRESH_MS - 1));
+        assert!(!should_reclaim_size(1_000, 1_000 + SIZE_RECLAIM_IDLE_MS));
+        // 리스 유효기간 1/3 경과 → 한 번 갱신.
+        assert!(should_refresh_lease(1_000, 1_000 + CONTROLLER_REFRESH_MS));
+        // 입력이 끊겼다 재개 → 크기 한 번 회수. 첫 입력(0)도 회수 대상.
+        assert!(should_reclaim_size(1_000, 1_000 + SIZE_RECLAIM_IDLE_MS + 1));
+        assert!(should_reclaim_size(0, 1));
+    }
+
+    #[test]
+    fn history_window_pages_backwards_from_the_newest_line() {
+        use super::history_window;
+        // before 생략 = 맨 끝(가장 최근) 페이지.
+        assert_eq!(history_window(500, None, 200), (300, 500));
+        // 이어서 그 앞 페이지 — 경계가 정확히 맞물린다.
+        assert_eq!(history_window(500, Some(300), 200), (100, 300));
+        // 맨 앞에서 멈춘다(음수 offset 금지).
+        assert_eq!(history_window(500, Some(100), 200), (0, 100));
+        assert_eq!(history_window(500, Some(0), 200), (0, 0));
+        // 과거가 limit 보다 짧아도 안전.
+        assert_eq!(history_window(30, None, 200), (0, 30));
+        assert_eq!(history_window(0, None, 200), (0, 0));
+        // limit 은 1..=500 으로 조인다(0 이나 거대값이 와도 tmux 호출이 깨지지 않게).
+        assert_eq!(history_window(500, None, 0), (499, 500));
+        assert_eq!(history_window(5000, None, 99_999), (4500, 5000));
+        // before 가 범위를 벗어나면 클램프.
+        assert_eq!(history_window(100, Some(999), 50), (50, 100));
+        assert_eq!(history_window(100, Some(-5), 50), (0, 0));
+    }
+
+    #[test]
+    fn strip_ansi_keeps_text_and_multibyte() {
+        use super::strip_ansi;
+        assert_eq!(strip_ansi("\x1b[31mRED\x1b[39m"), "RED");
+        assert_eq!(strip_ansi("\x1b[1;38;2;255;0;0m한글 ✳\x1b[0m"), "한글 ✳");
+        assert_eq!(strip_ansi("\x1b]0;title\x07shell"), "shell");
+        assert_eq!(strip_ansi("\x1b]8;;http://x\x1b\\link"), "link");
+        assert_eq!(strip_ansi("plain"), "plain");
+    }
+
+    #[test]
+    fn controller_lease_allows_only_owner_until_expiry() {
+        assert!(controller_lease_allows_value("ipad:200", "ipad", 100));
+        assert!(!controller_lease_allows_value("ipad:200", "pc", 100));
+        assert!(controller_lease_allows_value("ipad:200", "pc", 200));
+        assert!(controller_lease_allows_value("", "pc", 100));
+    }
+}
+
+// 스크롤 라우팅 모드 — 모바일과 **같은 정본**(tmux 가 pane 의 alternate/mouse 를 안다).
+//  terminal-overrides 의 smcup@ 때문에 1049 는 클라이언트 xterm 에 오지 않으므로, PC 로컬
+//  터미널도 "지금 풀스크린 앱인가"를 xterm 만 보고는 알 수 없다. 예전엔 이걸 codex 브랜드
+//  하드코딩으로 때웠는데, 브랜드가 아니라 모드로 판정해야 vim·less·그 밖의 TUI 가 다 맞는다.
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn pty_modes(ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) -> Result<serde_json::Value, String> {
+    let target = { mgr.panes.lock().unwrap().get(&pane_id).map(|h| h.target.clone()) };
+    let Some(target) = target else { return Ok(serde_json::json!({})) };
+    let raw = tmux::run(&ctx, &["display-message", "-p", "-t", &format!("={target}:0"), "#{alternate_on},#{mouse_any_flag}"])
+        .unwrap_or_default();
+    let mut it = raw.trim().split(',');
+    let alt = it.next().unwrap_or("0") == "1";
+    let mouse = it.next().unwrap_or("0") == "1";
+    Ok(serde_json::json!({ "altScreen": alt, "mouseTracking": mouse }))
+}
+
+// win32(term-host)는 tmux 가 없다 — 모드를 모른다고 답하고 클라이언트가 xterm 추론으로 폴백한다.
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_modes(_mgr: State<PtyManager>, _pane_id: String) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({}))
+}
+
+// ── 과거(스크롤백)는 tmux 격자에서 읽는다 ────────────────────────────────────────
+// 왜 클라이언트 xterm 의 스크롤백이 아닌가(2026-09-04 실측·사용자 신고):
+//  tmux 는 리사이즈마다 pane 을 **커서 위치에 다시 그린다**(ED 없이 `\e[K`+`\r\n` 반복).
+//  그래서 attach 한 xterm 은 재도장 잔재를 계속 스크롤백에 쌓는다. 기기마다 화면 크기가 다른
+//  멀티기기(window-size latest)에서는 이 리사이즈가 상시 일어나 잔재가 실제 과거를 밀어내고,
+//  폭이 바뀌며 리플로우돼 프롬프트가 한 줄에 여러 개 붙는 형태로 뭉개진다.
+//  → PC 도 모바일과 **같은 정본**(서버/tmux history)에서 과거를 읽는다. 계약은 데몬의
+//    `{type:'history', before, limit}` → `{start,end,total,hasMore,rows[]}` 와 동일하다.
+//
+/// offset 0 = 가장 오래된 과거 줄일 때, 요청 페이지의 [start,end) 를 구한다(순수).
+fn history_window(total: i64, before: Option<i64>, limit: i64) -> (i64, i64) {
+    let lim = limit.clamp(1, 500);
+    let end = before.map_or(total, |b| b.clamp(0, total));
+    let start = (end - lim).max(0);
+    (start, end)
+}
+
+/// ANSI(CSI/OSC/단일문자 이스케이프) 제거 — 페이지의 text 필드용(렌더는 ansi 를 쓴다).
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' {
+            out.push(c);
+            continue;
+        }
+        match it.peek().copied() {
+            Some('[') => {
+                it.next();
+                while let Some(c2) = it.next() {
+                    if ('\u{40}'..='\u{7e}').contains(&c2) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                it.next();
+                while let Some(c2) = it.next() {
+                    if c2 == '\u{7}' {
+                        break;
+                    }
+                    if c2 == '\u{1b}' {
+                        if it.peek() == Some(&'\\') {
+                            it.next();
+                        }
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                it.next();
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+fn empty_history_page() -> serde_json::Value {
+    serde_json::json!({ "start": 0, "end": 0, "total": 0, "hasMore": false, "rows": [] })
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn pty_history(
+    ctx: State<TmuxCtx>,
+    mgr: State<PtyManager>,
+    pane_id: String,
+    before: Option<i64>,
+    limit: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let target = { mgr.panes.lock().unwrap().get(&pane_id).map(|h| h.target.clone()) };
+    let Some(target) = target else { return Ok(empty_history_page()) };
+    let t = format!("={target}:0");
+    let raw = tmux::run(&ctx, &["display-message", "-p", "-t", &t, "#{history_size}"]).unwrap_or_default();
+    let total: i64 = raw.trim().parse().unwrap_or(0);
+    let (start, end) = history_window(total, before, limit.unwrap_or(200));
+    if start >= end {
+        return Ok(serde_json::json!({ "start": end, "end": end, "total": total, "hasMore": end > 0, "rows": [] }));
+    }
+    // tmux 줄번호: 0 = 보이는 화면 첫 줄, 음수 = 과거. offset i → (i - total).
+    let s0 = (start - total).to_string();
+    let e0 = (end - 1 - total).to_string();
+    let out = tmux::run(&ctx, &["capture-pane", "-p", "-e", "-t", &t, "-S", &s0, "-E", &e0]).unwrap_or_default();
+    let body = out.strip_suffix('\n').unwrap_or(&out);
+    let lines: Vec<&str> = if body.is_empty() { Vec::new() } else { body.split('\n').collect() };
+    let rows: Vec<serde_json::Value> = (0..(end - start))
+        .map(|i| {
+            let raw = lines.get(i as usize).copied().unwrap_or("").trim_end_matches('\r');
+            // ★ 줄마다 속성을 닫는다 — tmux 는 배경이 줄 끝까지 이어지면 리셋을 안 붙인다(실측:
+            //   파워라인 프롬프트가 `\e[44m` 을 켠 채 끝난다). 페이지를 이어 붙이는 뷰어에서 그
+            //   배경이 이후 모든 줄로 번져 화면이 통째로 물든다. 행은 offset 임의 접근 단위라
+            //   애초에 자족적이어야 한다.
+            let ansi = if raw.contains('\u{1b}') { format!("{raw}\u{1b}[0m") } else { raw.to_string() };
+            serde_json::json!({ "offset": start + i, "text": strip_ansi(&ansi), "ansi": ansi, "wrapped": false })
+        })
+        .collect();
+    Ok(serde_json::json!({ "start": start, "end": end, "total": total, "hasMore": start > 0, "rows": rows }))
+}
+
+// win32(term-host)는 tmux history 가 없다 — 빈 과거로 답하고 클라이언트는 오버레이를 안 연다.
+#[cfg(windows)]
+#[tauri::command]
+pub fn pty_history(
+    _mgr: State<PtyManager>,
+    _pane_id: String,
+    _before: Option<i64>,
+    _limit: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    Ok(empty_history_page())
 }
 
 // 키 입력(UTF-8 문자열) → PTY stdin.
 #[cfg(not(windows))]
 #[tauri::command]
-pub fn pty_write(mgr: State<PtyManager>, pane_id: String, data: String) -> Result<(), String> {
+pub fn pty_write(ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String, data: String) -> Result<(), String> {
     let mut panes = mgr.panes.lock().unwrap();
     if let Some(h) = panes.get_mut(&pane_id) {
+        // ⚠ 이 블록은 뮤텍스를 쥔 채 키 하나마다 돈다. tmux 호출을 무조건 걸면 타이핑 지연이
+        //   키당 ~11ms 쌓인다(실측 tmux 1회 5.5ms) — 리스 갱신과 크기 재주장 모두 조건부다.
+        let now = controller_now_ms();
+        if should_refresh_lease(h.last_claim_ms, now) {
+            claim_controller(&ctx, &h.target, "pc");
+            h.last_claim_ms = now;
+        }
+        if should_reclaim_size(h.last_write_ms, now) {
+            let _ = tmux::run(
+                &ctx,
+                &["resize-window", "-t", &format!("={}:0", h.target), "-x", &h.last_cols.to_string(), "-y", &h.last_rows.to_string()],
+            );
+            let _ = h.master.resize(PtySize { rows: h.last_rows, cols: h.last_cols, pixel_width: 0, pixel_height: 0 });
+        }
+        h.last_write_ms = now;
         h.writer.write_all(data.as_bytes()).map_err(|e| format!("write 실패: {e}"))?;
         let _ = h.writer.flush();
     }
@@ -279,6 +534,13 @@ pub fn pty_resize(
 ) -> Result<(), String> {
     let mut panes = mgr.panes.lock().unwrap();
     if let Some(h) = panes.get_mut(&pane_id) {
+        if !controller_allows(&ctx, &h.target, "pc") {
+            h.last_cols = cols;
+            h.last_rows = rows;
+            return Ok(());
+        }
+        claim_controller(&ctx, &h.target, "pc");
+        h.last_claim_ms = controller_now_ms();
         let _ = tmux::run(
             &ctx,
             &["resize-window", "-t", &format!("={}:0", h.target), "-x", &cols.to_string(), "-y", &rows.to_string()],
@@ -311,6 +573,7 @@ pub fn pty_claim(app: AppHandle, ctx: State<TmuxCtx>, mgr: State<PtyManager>, pa
     }
     let ctx2 = tmux::TmuxCtx { tmux: ctx.tmux.clone(), conf: ctx.conf.clone() };
     std::thread::spawn(move || {
+        claim_controller(&ctx2, &target, "pc");
         let cur = tmux::run(&ctx2, &["display-message", "-p", "-t", &format!("={target}:0"), "#{window_width} #{window_height}"]).unwrap_or_default();
         let mut it = cur.split_whitespace();
         let cw: u16 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);

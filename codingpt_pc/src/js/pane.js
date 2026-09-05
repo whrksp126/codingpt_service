@@ -21,12 +21,20 @@ import { shellQuote } from "./path-utils.js";
 import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
 import { commandForCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
+import { decodeTerminalFrameV3, TERMINAL_OPCODE_V3 } from './terminal-stream-v3.js';
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
 const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
 const SearchAddon = window.SearchAddon?.SearchAddon;
+
+// 과거 한 페이지 줄 수 — 서버(데몬/tmux)가 500 을 상한으로 자른다. 모바일과 같은 값.
+const HIST_PAGE = 500;
+// tmux 백엔드가 아닐 때만 쓰는 로컬 스크롤백(윈도우 term-host). tmux 면 0 이다 — 위 Terminal 주석.
+const LIVE_SCROLLBACK = 10000;
+// 이 PC 가 tmux 백엔드인가 = 로컬 터미널의 과거 정본이 tmux 인가. win32 는 term-host 라 아니다.
+const localTmuxBackend = () => document.documentElement.dataset.os !== "windows";
 
 // (구) 프리뷰 프리즈/모달 숨김은 punch-through 전환으로 폐지 — 웹뷰가 앱 UI 아래층이라
 //  DOM 모달·메뉴가 자연히 위에 그려지고, 오버레이 중 이벤트만 preview_shield 로 차단한다.
@@ -94,6 +102,10 @@ onAppearanceChange(() => {
           p.term.options.fontFamily = mono;
           p.term.options.minimumContrastRatio = termMinContrast();
           if (p.termEl) p.termEl.style.background = theme.background || "";
+          if (p.histEl) p.histEl.style.background = theme.background || "";
+          // 과거 오버레이는 다음에 열릴 때 새 테마/글꼴로 다시 만든다(열려 있으면 즉시 접는다).
+          try { p._hideHistory?.(); p._histTerm?.dispose(); } catch (_) {}
+          p._histTerm = null; p._histSearch = null; p._histWritten = -1;
           p._fitNow();
         }
         p.ide?.setTheme(cmName);
@@ -574,6 +586,20 @@ class PreviewSurface {
     this.host = document.createElement("div");
     this.host.className = "preview-host";
     fillPreviewEmpty(this.host);
+    // Win32에서 버튼은 커서 아래 입력 오버레이 HWND가 받지만, 휠은 포커스된 앱 WebView2가
+    // 받아 이 DOM 슬롯으로 온다. 네이티브 프리뷰로 되돌려 보내야 실제 페이지가 스크롤된다.
+    // macOS는 네이티브 WKWebView가 직접 받으므로 호출하면 이중 스크롤 — 반드시 win32만.
+    this._onWheel = (e) => {
+      if (document.documentElement.dataset.os !== "windows" || !this._visible) return;
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 120
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 360 : 1;
+      const dx = Math.round(e.deltaX * unit);
+      const dy = Math.round(e.deltaY * unit);
+      if (!dx && !dy) return;
+      e.preventDefault();
+      api.previewWheel(this.id, dx, dy).catch(() => {});
+    };
+    this.host.addEventListener("wheel", this._onWheel, { passive: false });
     parent.append(this.bar.el, this.host);
     dtAttachHost(this.id, this.host); // 승계된 데브툴 세션이 있으면 새 host 에 재부착
     this._visible = false;
@@ -633,6 +659,7 @@ class PreviewSurface {
   //  같은 표면 ID("pv-"+tid)로 재생성되면 기존 webview 에 재부착 → 페이지·테마·인스펙터 유지.
   dispose(keepWebview) {
     this._disposed = true;
+    this.host?.removeEventListener("wheel", this._onWheel);
     cancelAnimationFrame(this._raf);
     clearTimeout(this._slowTimer);
     clearInterval(this._infoTimer);
@@ -823,6 +850,37 @@ export class PaneView {
     // 터미널 스킴 배경을 pane 여백까지 — 프리셋 배경이 앱 배경과 다를 때 띠가 지지 않게.
     try { this.termEl.style.background = termTheme().background || ""; } catch (_) {}
     this.body.appendChild(this.termEl);
+    // 과거(스크롤백) 오버레이 — 위로 스크롤하면 라이브 격자를 가리고 서버/tmux 정본을 그린다.
+    //  모바일 TerminalWebView 의 #historyViewport 와 같은 설계(한 번 써 넣고 자체 스크롤).
+    this.histEl = document.createElement("div");
+    this.histEl.className = "pane-term-hist";
+    this.histEl.style.display = "none";
+    try { this.histEl.style.background = termTheme().background || ""; } catch (_) {}
+    this.body.appendChild(this.histEl);
+    // "지금 과거를 보고 있다"는 표시 — 없으면 터미널이 멈춘 것으로 오인한다.
+    this.histTag = document.createElement("div");
+    this.histTag.className = "pane-hist-tag";
+    this.histTag.textContent = i18n.t("과거 — 아래로 스크롤하면 현재");
+    this.histTag.style.display = "none";
+    this.body.appendChild(this.histTag);
+    // 비소유자 표시 + "이 기기로 조작" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
+    this.ownerPill = document.createElement("div");
+    this.ownerPill.className = "pane-owner-pill";
+    this.ownerPill.innerHTML = `<span class="op-text"></span><button type="button" class="op-btn">${i18n.t("이 기기로 조작")}</button>`;
+    this.ownerPill.style.display = "none";
+    this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
+    this.body.appendChild(this.ownerPill);
+    this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0;
+    this._histRows = new Map();
+    this._histTotal = 0;
+    this._histLoadedFrom = Infinity;   // 아직 받은 게 없다(0 은 "맨 앞까지 다 받았다"는 뜻이라 못 쓴다)
+    this._histWritten = -1;
+    this._histWantScroll = 0;
+    this._histOn = false;
+    this._histPending = false;
+    this._histFailed = false;
+    // 과거를 서버에 물어볼 수 있는가. 로컬은 OS 로 알고, 원격은 스냅샷 메타(serverHistory)로 안다.
+    this._srvHistory = this.ctx.isLocal ? localTmuxBackend() : true;
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
     this.emptyEl = document.createElement("div");
     this.emptyEl.className = "pane-term-empty";
@@ -842,7 +900,14 @@ export class PaneView {
       cursorBlink: true,
       fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
       fontFamily: monoFontStack(), // 코드·터미널 글꼴 설정(theme.js) — 변경은 onAppearanceChange 가 반영
-      scrollback: 10000,
+      // ★ tmux 백엔드면 스크롤백 0 — 과거는 여기 쌓지 않는다(2026-09-04).
+      //  tmux 는 리사이즈마다 pane 을 커서 위치에 다시 그린다(ED 없이 `\e[K`+`\r\n` 반복).
+      //  그래서 attach 한 xterm 의 스크롤백에는 "과거"가 아니라 **재도장 잔재**가 쌓인다.
+      //  기기마다 화면이 다른 멀티기기(window-size latest)에서는 리사이즈가 상시 일어나 잔재가
+      //  실제 과거를 밀어내고, 폭이 바뀌며 리플로우돼 프롬프트가 한 줄에 여러 개 붙는 형태로
+      //  뭉개졌다(사용자 신고 스크린샷). 과거는 _histFetch 가 서버/tmux 정본에서 읽어 온다.
+      //  ⚠ term-host(윈도우)는 tmux 재도장 자체가 없어 로컬 스크롤백이 정당하다 — 거기선 그대로 둔다.
+      scrollback: this._srvHistory ? 0 : LIVE_SCROLLBACK,
       convertEol: false,
       theme: termTheme(),
       // 최소 대비 자동 보정 — 프롬프트(p10k 등)가 팔레트 밖 256색 배경을 써도 글자가 항상 읽히게.
@@ -855,17 +920,10 @@ export class PaneView {
       macOptionClickForcesSelection: true,
       allowProposedApi: true,
     });
-    // normal buffer 의 `clear`(CSI 2 J)는 화면만 지우고 xterm 로컬 scrollback 은 남긴다. 공유
-    // 터미널에서는 기기마다 로컬 과거가 달라져 PC만 지워지고 iPad에는 남는 것처럼 보이므로,
-    // 같은 clear 신호를 받은 모든 뷰어가 자기 scrollback도 정리한다. alternate TUI는 제외.
-    try {
-      this.term.parser.registerCsiHandler({ final: "J" }, (params) => {
-        if (params?.[0] === 2 && this.term?.buffer?.active?.type === "normal") {
-          queueMicrotask(() => { try { this.term?.clear(); this.term?.scrollToBottom(); } catch (_) {} });
-        }
-        return false; // xterm 기본 ED 처리도 계속 실행
-      });
-    } catch (_) { /* 구 xterm 폴백 */ }
+    // (여기 있던 CSI 2J 훅은 제거했다 — **한 번도 발화한 적이 없다**. tmux 는 `clear` 를 클라이언트에
+    //  `\e[H\e[J`(ED 0)로 다시 그려 보내지 2J 를 보내지 않는다(pty 원시 바이트로 실측 2026-09-04).
+    //  `clear` 가 과거까지 지우는 건 이제 tmux.conf 의 `scroll-on-clear off` 가 보장한다 — 그쪽이
+    //  정본이라 세 기기(PC·안드로이드·iPad)가 같이 비워진다.)
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     if (SearchAddon) {
@@ -1287,7 +1345,7 @@ export class PaneView {
   //  기기 크기로 잡혀 있으면 Rust 가 클라이언트 nudge 로 회수한다(이미 내 크기면 no-op).
   //  모바일은 키보드 노출 등 실 리사이즈가 자연 클레임을 만들지만 PC 는 이 훅이 유일한 계기다.
   _claimSize(sync = false) {
-    if (!this.ctx.isLocal || this.node.kind !== "terminal") return;
+    if (!this.ctx.isLocal || this.node.kind !== "terminal" || localTmuxBackend()) return;
     // Chat 모드는 터미널을 "보고 있지 않다" = 크기 주장 자격이 없다. 여기서 주장하면 다른 기기가
     //  실제로 쓰고 있는 창 크기를 놀고 있는 화면이 뺏는다(PaneView.tsx:540 주석과 같은 사고).
     if (this._chatActive()) return;
@@ -1451,6 +1509,14 @@ export class PaneView {
   showActiveTab() {
     if (this.node.kind !== "terminal" || !this.termEl) return;
     const tab = this.node.tabs[this.node.active];
+    // 표시 대상이 **실제로 바뀌었을 때만** 과거 보기를 접는다(가려진 채 남으면 유령 화면이 된다).
+    //  ⚠ 이 함수는 리컨실러의 ensureAttached() 가 매 틱 호출하는 멱등 함수다 — 무조건 접으면
+    //    사용자가 과거를 보고 있어도 몇 초마다 라이브로 튕긴다(2026-09-04 실측으로 잡음).
+    const sig = `${this.node.active}|${tab ? tab.tid || tab.win : ""}|${tab ? tab.kind || "term" : ""}|${tab ? tab.mode || "tui" : ""}|${this.node.tabs.length}`;
+    if (this._surfaceSig !== sig) {
+      this._surfaceSig = sig;
+      this._hideHistory();
+    }
     const isT = isTermTab(tab);
     if (!isT && tab) this._ensureMixed(tab);
     const empty = !this.node.tabs.length;
@@ -1565,7 +1631,7 @@ export class PaneView {
     this.showActiveTab();
     if (!this.ctx.isLocal) return;
     if (typeof this._attachedWin === "number") {
-      const alive = await api.ptyAlive(this.id).catch(() => true);
+      const alive = localTmuxBackend() ? !!(this.ws && this.ws.readyState === 1) || !!this._remoteReopenTimer : await api.ptyAlive(this.id).catch(() => true);
       if (alive) return;
       this._attachedWin = null; // 죽었는데 낙관 상태만 남음(이벤트 유실 등) — 아래서 재attach
     }
@@ -1596,17 +1662,192 @@ export class PaneView {
     this._correctFit();
   }
 
-  // ── 채널(로컬 pty / 클라우드 WS) ──
+  // ── 채널 — v3(CPT3): 로컬·원격 모두 데몬(정본)에 WS 뷰어로 붙는다 ─────────────────────
+  //  docs: codingpt_daemon/docs/terminal-v3-design.md. 정본은 데몬 VT 하나, 크기는 소유자 1명.
+  //  이 pane 은 뷰어다: 소유자면 컨테이너에 fit 해 resize 를 보내고, 아니면 소유자 격자를 축소해 본다.
+  //  (win32/term-host 는 아직 v3 미지원 → _openChannelLegacyLocal.)
   async _openChannel(win, replace) {
-    this._fitLocalOnly();          // 스테일 치수로 창을 만들지 않는다(§_fitLocalOnly)
-    // 첫 측정은 폰트 로드·레이아웃 확정 전일 수 있다. ResizeObserver 는 **컨테이너 크기가 바뀔 때만**
-    //  울리므로 "크기는 그대로인데 측정이 나중에 정확해지는" 경우를 아무도 바로잡지 않는다
-    //  → 채널을 연 뒤 두 번 더 검산한다(같은 값이면 _resize 가 no-op 수준이라 비용 0).
+    // 붙는 터미널이 바뀌면 과거 offset 이 통째로 다른 의미가 된다 — 캐시를 버리고 다시 받는다.
+    this._histReset();
+    if (this.ctx.isLocal && !localTmuxBackend()) return this._openChannelLegacyLocal(win, replace);
+    this._fitLocalOnly();          // 첫 resize 를 스테일 치수로 보내지 않는다
     for (const delay of [250, 1200]) {
       setTimeout(() => { if (this.term && this._attachedWin === win) this._fitNow(); }, delay);
     }
+    // 이전 채널 정리(탭 전환·재연결) — 소켓은 하나만.
+    try { this.ws?.close(); } catch (_) { /* noop */ }
+    this.ws = null;
+    if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
+    this._attachedWin = typeof win === "number" ? win : this._attachedWin;
+    this._v3Seq = 0;
+    try {
+      let url;
+      if (this.ctx.isLocal) {
+        const ep = await api.terminalLocalEndpoint();
+        this._selfDevice = { deviceId: ep.client, name: ep.device_name || "" };
+        const q = new URLSearchParams({
+          token: ep.token, cwd: this.ctx.localPath || "", paneId: this.id, client: ep.client,
+          cols: String(this.term.cols || 80), rows: String(this.term.rows || 24), deviceName: ep.device_name || "",
+        });
+        if (typeof win === "number") q.set("win", String(win));
+        url = `ws://127.0.0.1:${ep.port}/v3/terminal?${q}`;
+      } else {
+        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
+        url = `${wsBase}/api/daemon/terminal/${token}`;
+      }
+      this._v3Connect(url);
+    } catch (e) {
+      this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
+      this._scheduleRemoteReopen();
+    }
+  }
+
+  _v3Connect(url) {
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    this.ws = ws;
+    ws.onopen = () => {
+      this._remoteTries = 0;
+      // 이어받기: 이미 받은 seq 가 있으면 hello 로 이어 달라 한다(링버퍼 밖이면 데몬이 스냅샷을 보낸다).
+      if (this._v3Seq > 0) { try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq })); } catch (_) { /* noop */ } }
+      // 25초 keepalive — 데몬이 살아 있는 뷰어와 릴레이만 남은 유령을 구분하는 근거.
+      this._remoteKa = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        try { ws.send(JSON.stringify({ type: "keepalive" })); } catch (_) { /* noop */ }
+      }, 25000);
+      // 소유자면(또는 아직 아무도 아니면) 컨테이너 크기를 주장한다.
+      this._fitNow(true);
+    };
+    ws.onmessage = (e) => {
+      if (typeof e.data === "string") { this._termOut(e.data); return; }
+      const f = decodeTerminalFrameV3(e.data);
+      if (!f) { this._termOut(new Uint8Array(e.data)); return; }   // 구 데몬(v1 raw) 폴백
+      const json = () => { try { return JSON.parse(new TextDecoder().decode(f.payload)); } catch (_) { return null; } };
+      switch (f.opcode) {
+        case TERMINAL_OPCODE_V3.OUTPUT: {
+          // seq 구멍 = 릴레이가 프레임을 떨어뜨렸다 → 데몬에 이어 달라고 한다(스냅샷/리플레이는 데몬 판단).
+          if (this._v3Seq && f.seq !== this._v3Seq + 1 && f.seq > this._v3Seq) {
+            try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq })); } catch (_) { /* noop */ }
+          }
+          if (f.seq > this._v3Seq) { this._v3Seq = f.seq; this._termOut(f.payload); }
+          return;
+        }
+        case TERMINAL_OPCODE_V3.SNAPSHOT: { const m = json(); if (m) this._applySnapshot(m); return; }
+        case TERMINAL_OPCODE_V3.RESIZED: { const m = json(); if (m) this._setGrid(m.cols, m.rows); return; }
+        case TERMINAL_OPCODE_V3.OWNER: { const m = json(); if (m) this._setOwner(m); return; }
+        case TERMINAL_OPCODE_V3.HISTORY_PAGE: {
+          clearTimeout(this._histTimer);
+          const done = this._histResolve; this._histResolve = null;
+          done?.(json());
+          return;
+        }
+        case TERMINAL_OPCODE_V3.EXIT: {
+          this._v3Seq = 0;
+          this._onExit();
+          return;
+        }
+        case TERMINAL_OPCODE_V3.ERROR: { const m = json(); this.term.write(`\r\n\x1b[31m${(m && m.message) || "error"}\x1b[0m\r\n`); return; }
+        default: return;
+      }
+    };
+    ws.onclose = () => {
+      if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
+      if (this.ws !== ws) return;                 // 의도된 교체(탭 전환)
+      this.ws = null;
+      if (this._reopenStop || !this.mounted) return;
+      this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
+      this._scheduleRemoteReopen();
+    };
+  }
+
+  // 스냅샷 = 소유자 격자 크기 + 입력 모드 + 화면 ANSI. 라이브 격자를 통째로 갈아끼운다.
+  _applySnapshot(m) {
+    this._v3Seq = Number(m.seq) || 0;
+    this._setOwner(m);
+    this._setGrid(m.cols, m.rows, true);
+    try { this.term.reset(); } catch (_) { /* noop */ }
+    // 입력 모드는 스냅샷 본문(화면)에 없다 — DECSET 으로 먼저 복원해야 alt-screen 앱·마우스 TUI 가
+    //  뷰어 xterm 에서도 같은 상태가 된다(shpool 의 "복원 시 입력 모드 재생" 교훈).
+    const md = m.modes || {};
+    let pre = "";
+    if (md.altScreen) pre += "\x1b[?1049h";
+    if (md.appCursor) pre += "\x1b[?1h";
+    if (md.bracketedPaste) pre += "\x1b[?2004h";
+    if (md.mouseTracking) pre += "\x1b[?1000h\x1b[?1006h";
+    this.term.write(pre + (m.ansi || ""));
+    this._applyScale();
+  }
+
+  // 격자 = 소유자 크기. 뷰어 xterm 은 항상 정확히 이 크기다(다른 크기로는 절대 만들지 않는다).
+  _setGrid(cols, rows, silent) {
+    const c = Math.max(2, cols | 0), r = Math.max(2, rows | 0);
+    this._grid = { cols: c, rows: r };
+    if (this.term && (this.term.cols !== c || this.term.rows !== r)) {
+      try { this.term.resize(c, r); } catch (_) { /* noop */ }
+    }
+    this._sentCols = c; this._sentRows = r;
+    if (!silent) this._applyScale();
+    // 과거 오버레이도 같은 격자로.
+    if (this._histOn && this._histTerm) { try { this._writeHistory(this._histFromBottom()); } catch (_) { /* noop */ } }
+    this._histGrid = `${c}x${r}`;
+  }
+
+  _setOwner(m) {
+    this._owner = m.owner || null;
+    this._isOwner = !!m.self || !!m.free;
+    this._ownerFree = !!m.free;
+    this._syncOwnerUi();
+    this._applyScale();
+    if (this._isOwner) this._fitNow(true);
+  }
+
+  // 비소유자 뷰: 소유자 격자를 컨테이너 폭에 맞춰 축소(세로는 스크롤). Orca desktop-fit 과 같은 방식.
+  _applyScale() {
+    const el = this.termEl?.querySelector(".xterm");
+    if (!el || !this.term) return;
+    if (this._isOwner || !this._grid) {
+      el.style.transform = ""; el.style.width = ""; el.style.height = "";
+      this.termEl.classList.remove("scaled");
+      return;
+    }
+    let cell = null;
+    try { const d = this.term._core?._renderService?.dimensions?.css?.cell; if (d && d.width > 0 && d.height > 0) cell = d; } catch (_) { cell = null; }
+    if (!cell) return;
+    const needW = this._grid.cols * cell.width, needH = this._grid.rows * cell.height;
+    const availW = Math.max(1, this.termEl.clientWidth - 10);
+    const k = Math.min(1, availW / needW);
+    el.style.transformOrigin = "0 0";
+    el.style.transform = k < 1 ? `scale(${k.toFixed(4)})` : "";
+    el.style.width = `${Math.ceil(needW)}px`;
+    el.style.height = `${Math.ceil(needH)}px`;
+    this.termEl.classList.toggle("scaled", k < 1);
+  }
+
+  _syncOwnerUi() {
+    if (!this.ownerPill) return;
+    const name = (this._owner && (this._owner.name || this._owner.deviceId)) || "";
+    if (this._isOwner || this.node.kind !== "terminal") { this.ownerPill.style.display = "none"; return; }
+    this.ownerPill.querySelector(".op-text").textContent = name
+      ? i18n.t("{name} 크기로 보는 중").replace("{name}", name)
+      : i18n.t("다른 기기 크기로 보는 중");
+    this.ownerPill.style.display = "flex";
+  }
+
+  // "이 기기로 조작" — 소유권을 가져온 뒤 내 컨테이너 크기를 주장한다. 자동 탈취는 없다(설계 §1).
+  _claimOwnership() {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    try { this.ws.send(JSON.stringify({ type: "claim" })); } catch (_) { /* noop */ }
+    this._isOwner = true;          // 낙관 — OWNER 프레임이 곧 확정한다
+    this._syncOwnerUi();
+    this._applyScale();
+    this._fitNow(true);
+  }
+
+  // win32(term-host) 전용 구 경로 — Rust 가 term-host 에 직접 붙는다. v3 term-host 백엔드가 생기면 제거.
+  _openChannelLegacyLocal(win, replace) {
+    this._fitLocalOnly();
     const { cols, rows } = this.term;
-    if (this.ctx.isLocal) {
+    {
       this._attachedWin = typeof win === "number" ? win : null;
       this._sentCols = cols || 80;   // ptyOpen 이 이미 이 크기를 전달했다 → 직후 no-op 을 걸러내게
       this._sentRows = rows || 24;
@@ -1624,30 +1865,10 @@ export class PaneView {
         this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
         this._scheduleReopen(2500); // 일시 오류(서버 재기동 중 등)에 고착되지 않게 자동 재시도
       });
-    } else {
-      try {
-        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
-        const ws = new WebSocket(`${wsBase}/api/daemon/terminal/${token}`);
-        ws.binaryType = "arraybuffer";
-        this.ws = ws;
-        ws.onopen = () => { this._remoteTries = 0; this._resize(this.term.cols, this.term.rows); };
-        ws.onmessage = (e) => {
-          this._termOut(typeof e.data === "string" ? e.data : new Uint8Array(e.data));
-        };
-        // 끊기면 자동 재연결 — 반드시 새 토큰 발급(만료 dterm 토큰 재시도 = 서버 502 스팸의 근원).
-        ws.onclose = () => {
-          if (this._reopenStop || !this.mounted) return;
-          this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
-          this._scheduleRemoteReopen();
-        };
-      } catch (e) {
-        this.term.write(i18n.t("\n\x1b[31m원격 터미널 실패: ") + e + "\x1b[0m\r\n");
-        this._scheduleRemoteReopen();
-      }
     }
   }
 
-  // 원격(릴레이) 터미널 재연결 — 지수 백오프, _openChannel 이 새 토큰을 발급한다.
+  // 재연결 — 지수 백오프, _openChannel 이 새 토큰/엔드포인트를 받는다.
   _scheduleRemoteReopen() {
     if (this._reopenStop || !this.mounted) return;
     clearTimeout(this._remoteReopenTimer);
@@ -1655,25 +1876,20 @@ export class PaneView {
     const delay = Math.min(2000 * this._remoteTries, 15000);
     this._remoteReopenTimer = setTimeout(() => {
       if (this._reopenStop || !this.mounted) return;
-      try { this.ws?.close(); } catch (_) { /* noop */ }
-      this._openChannel();
+      this._openChannel(this._attachedWin);
     }, delay);
   }
   _write(d) {
-    // macOS 입력은 IME/단축키 보존을 위해 xterm 의 기본 key handler 를 우회해 PTY 로 직행한다.
-    // 그래서 xterm 은 "사용자 입력"을 감지하지 못하고, 사용자가 위로 스크롤한 상태면 새 입력이
-    // tmux/iPad 에는 도착해도 PC 화면은 과거 위치에 고정된다. 터미널의 일반 규칙대로 입력 순간
-    // 현재 커서(버퍼 맨 아래)로 복귀시킨다. 이미 아래거나 alternate-screen 이면 사실상 no-op.
-    try {
-      const b = this.term?.buffer?.active;
-      if (b && b.viewportY < b.baseY) this.term.scrollToBottom();
-    } catch (_) { /* noop */ }
+    // 터미널의 일반 규칙 — 뭔가 입력하면 과거 보기를 접고 라이브 화면으로 돌아온다.
+    //  (macOS 입력은 IME/단축키 보존을 위해 xterm 키 핸들러를 우회해 PTY 로 직행하므로 xterm 은
+    //   "사용자 입력"을 감지하지 못한다. 그래서 여기서 명시적으로 접는다.)
+    this._hideHistory();
     // shift+tab(CSI Z) = 에이전트 모드 순환. **로컬 터미널은 tmux 직결**이라 데몬이 이 키를 못 본다
     //  → 데몬에 즉시 재확인을 알려 이 PC·폰의 모드 알약이 3초 폴링을 기다리지 않게 한다(2026-08-02).
     //  원격 터미널은 입력이 데몬 pty 를 지나가므로 데몬이 알아서 감지한다(중복 통지 불필요).
     if (this.ctx.isLocal && typeof d === "string" && d.includes("\x1b[Z")) this._pokeMode();
-    if (this.ctx.isLocal) api.ptyWrite(this.id, d).catch(() => {});
-    else if (this.ws && this.ws.readyState === 1) this.ws.send(new TextEncoder().encode(d));
+    if (this.ctx.isLocal && !localTmuxBackend()) { api.ptyWrite(this.id, d).catch(() => {}); return; }
+    if (this.ws && this.ws.readyState === 1) this.ws.send(new TextEncoder().encode(d));
   }
   _pokeMode() {
     const t = this.node.tabs?.[this.node.active];
@@ -1682,8 +1898,10 @@ export class PaneView {
     api.modePoke(this.ctx.localPath || "", win).catch(() => { /* 폴링이 안전망 */ });
   }
   _resize(cols, rows) {
-    if (this.ctx.isLocal) api.ptyResize(this.id, cols, rows).catch(() => {});
-    else if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    if (this.ctx.isLocal && !localTmuxBackend()) { api.ptyResize(this.id, cols, rows).catch(() => {}); return; }
+    // 크기는 소유자만 주장한다(설계 §1). 비소유자는 격자를 바꾸지 않고 축소해서 본다.
+    if (!this._isOwner && !this._ownerFree) return;
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
   }
   // ── 입력 인터셉트 — WKWebView(사파리 엔진) 한글 IME 깨짐의 근본 해법 ──
   //  xterm 기본 키 처리는 macOS IME 조합 키에도 개입(preventDefault/keyup 의 textarea.value 클리어)해
@@ -1706,21 +1924,6 @@ export class PaneView {
       Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
     };
     const resetBuf = () => { this._sentBuf = ""; try { ta.value = ""; } catch (_) {} };
-    // Codex는 재시작 뒤 복원된 alternate-screen에서 마우스 추적을 다시 켜지 않는 구간이 있다.
-    // 이때 xterm은 휠을 앱에도 스크롤백에도 전달하지 않아 화면이 고정된다. 마우스 추적이
-    // 실제로 켜져 있으면 xterm 정본 경로를 두고, 꺼진 Codex alternate 화면만 방향키로 보완한다.
-    const onWheel = (e) => {
-      if (this._activeAgentBrand() !== "codex") return;
-      if (this.term?.buffer?.active?.type !== "alternate") return;
-      if (this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none") return;
-      const dy = Number(e.deltaY) || 0;
-      if (!dy) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
-      this._write((dy < 0 ? "\x1b[A" : "\x1b[B").repeat(count));
-    };
-    this.termEl?.addEventListener("wheel", onWheel, { capture: true, passive: false });
     // ⌘/⌥ 편집 조합 — textarea 기본동작(delta 의존)이 아니라 셸 표준 시퀀스를 직접 보낸다.
     //  탭 자동완성·히스토리(↑) 등으로 셸 라인과 textarea 미러가 어긋나 있어도 항상 동작.
     const EDIT_COMBO = {
@@ -1845,11 +2048,12 @@ export class PaneView {
     document.addEventListener("compositionstart", onComp, true);
     document.addEventListener("compositionupdate", onComp, true);
     document.addEventListener("compositionend", onCompEnd, true);
+    const disposeTuiWheel = this._bindWheelRouting();
     this._inputDispose = () => {
+      disposeTuiWheel();
       ta.removeEventListener("blur", onBlur);
       ta.removeEventListener("focus", onFocus);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
-      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("paste", onPaste, true);
@@ -1880,19 +2084,6 @@ export class PaneView {
       if (combo && commandForCombo(bindings(), combo)) return false; // 앱 예약 → 전역 핸들러 몫
       return true; // 그 외 전부 xterm 표준 경로(제어문자·IME 포함)
     });
-    // Codex alternate-screen 휠 보완 — mac 경로와 동일(xterm 동작 보정이라 플랫폼 무관).
-    const onWheel = (e) => {
-      if (this._activeAgentBrand() !== "codex") return;
-      if (this.term?.buffer?.active?.type !== "alternate") return;
-      if (this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none") return;
-      const dy = Number(e.deltaY) || 0;
-      if (!dy) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
-      this._write((dy < 0 ? "\x1b[A" : "\x1b[B").repeat(count));
-    };
-    this.termEl?.addEventListener("wheel", onWheel, { capture: true, passive: false });
     // 붙여넣기 — mac 과 같은 우선순위(파일 참조 > 이미지 데이터 > plain text). 경로/이미지 확인이
     //  비동기라 기본 paste 를 막고 여기서 1회만 보낸다(중복 전송 방지 규칙 동일). 네이티브 클립보드
     //  조회가 이 플랫폼 빌드에 없으면 조용히 텍스트로 폴백한다.
@@ -1924,11 +2115,241 @@ export class PaneView {
       this._claimSize(true);
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
+    const disposeTuiWheel = this._bindWheelRouting();
     this._inputDispose = () => {
+      disposeTuiWheel();
       ta.removeEventListener("focus", onFocus);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
-      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
       document.removeEventListener("paste", onPaste, true);
+    };
+  }
+  // ── 과거(스크롤백)는 서버/tmux 정본에서 읽는다 ────────────────────────────────
+  // 라이브 격자(this.term)는 scrollback:0 이다. 이유는 Terminal({scrollback:0}) 주석 참조 —
+  //  tmux attach 스트림에 쌓이는 건 과거가 아니라 재도장 잔재라서, 그걸 과거로 보여 주면 안 된다.
+  // 계약은 로컬(pty_history)·원격(데몬 v2 `{type:'history'}`)·모바일이 **완전히 동일**하다:
+  //  요청 {before, limit} → {start, end, total, hasMore, rows:[{offset, text, ansi}]}
+  //  offset 0 = 가장 오래된 과거 줄. 렌더는 ansi(색 포함)를 쓰고 text 는 폴백/검색용이다.
+  //
+  // 설계(모바일 #historyViewport 와 동일): 받아 둔 구간을 오버레이 xterm 에 **한 번 써 넣고**,
+  //  그다음은 그 xterm 자신의 scrollLines 로 움직인다. 스텝마다 다시 그리면 잔상이 남는다.
+  _histReset() {
+    this._histRows = new Map();
+    this._histTotal = 0;
+    this._histLoadedFrom = Infinity;
+    this._histWritten = -1;
+    this._histWantScroll = 0;
+    this._histPending = false;
+    this._hideHistory();
+  }
+  // 원격 호스트가 tmux 가 아니면(term-host) 서버 과거가 없다 — 그땐 로컬 스크롤백이 정당하다.
+  _applyHistoryMode(serverHistory) {
+    const on = !!serverHistory;
+    if (this._srvHistory === on) return;
+    this._srvHistory = on;
+    if (!this.term) return;
+    try { this.term.options.scrollback = on ? 0 : LIVE_SCROLLBACK; } catch (_) { /* noop */ }
+    if (on) this._histReset();
+  }
+  _histFetch(before) {
+    if (this.ctx.isLocal && !localTmuxBackend()) return api.ptyHistory(this.id, before ?? null, HIST_PAGE).catch(() => null);
+    return new Promise((resolve) => {
+      if (!this.ws || this.ws.readyState !== 1) { resolve(null); return; }
+      this._histResolve = resolve;
+      clearTimeout(this._histTimer);
+      // 응답이 영영 안 와도 _histPending 이 물리지 않게(재연결 중 등) 반드시 시한을 둔다.
+      this._histTimer = setTimeout(() => {
+        const r = this._histResolve; this._histResolve = null; r?.(null);
+      }, 5000);
+      try { this.ws.send(JSON.stringify({ type: "history", before: before ?? null, limit: HIST_PAGE })); }
+      catch (_) { this._histResolve = null; resolve(null); }
+    });
+  }
+  _requestHistory(before) {
+    if (this._histPending) return;
+    this._histPending = true;
+    this._histFetch(before).then((page) => {
+      this._histPending = false;
+      this._ingestHistoryPage(page);
+    }).catch(() => { this._histPending = false; });
+  }
+  // ⚠ 반드시 **보이는 상태에서** open 한다. display:none 인 요소에 open 하면 xterm 이 글자 크기를
+  //   0 으로 재서 빈 화면이 된다(모바일 실기 실측 2026-09-04). WebGL 은 안 붙인다 — 여기는 통째
+  //   재작성이 섞여 캔버스 잔상에 취약하다.
+  _histView() {
+    if (this._histTerm || this._histFailed) return this._histTerm;
+    try {
+      this._histTerm = new Terminal({
+        cursorBlink: false,
+        disableStdin: true,
+        fontSize: termFontPx(),
+        fontFamily: monoFontStack(),
+        convertEol: false,
+        scrollback: 10000,
+        minimumContrastRatio: termMinContrast(),
+        theme: termTheme(),
+        cols: Math.max(2, this.term?.cols || 80),
+        rows: Math.max(2, this.term?.rows || 24),
+        allowProposedApi: true,
+      });
+      this._histTerm.open(this.histEl);
+      if (!this.histEl.querySelector(".xterm-rows")) throw new Error("history xterm did not mount");
+      if (SearchAddon) {
+        try { this._histSearch = new SearchAddon(); this._histTerm.loadAddon(this._histSearch); } catch (_) {}
+      }
+    } catch (_) {
+      // 어떤 이유로든 실패하면 빈 화면 대신 평문으로 떨어뜨린다 — 과거를 못 보는 것보단 낫다.
+      this._histFailed = true;
+      this._histTerm = null;
+    }
+    return this._histTerm;
+  }
+  // 지금 갖고 있는 구간([_histLoadedFrom, _histTotal))만 만든다. 아직 안 받은 더 오래된 구간을
+  //  빈 줄로 채우지 않는다 — 그러면 사용자가 수천 줄의 공백을 긁어 올려야 한다.
+  _histLines() {
+    const out = [];
+    const from = Number.isFinite(this._histLoadedFrom) ? this._histLoadedFrom : this._histTotal;
+    for (let i = from; i < this._histTotal; i++) {
+      const row = this._histRows.get(i);
+      if (!row) { out.push(""); continue; }
+      out.push(typeof row.ansi === "string" ? row.ansi : String(row.text || "").replace(/\s+$/, ""));
+    }
+    return out;
+  }
+  _showHistory() {
+    if (this._histOn) return;
+    this.histEl.style.display = "block";   // ★ open 전에 먼저 보이게(_histView 주석)
+    if (this.histTag) this.histTag.style.display = "block";
+    this.termEl.style.visibility = "hidden";
+    this._histOn = true;
+  }
+  _hideHistory() {
+    if (!this._histOn) return;
+    this._histOn = false;
+    if (this.histEl) this.histEl.style.display = "none";
+    if (this.histTag) this.histTag.style.display = "none";
+    if (this.termEl) this.termEl.style.visibility = "";
+    // 가려졌다 돌아온 라이브 격자는 한 번 다시 그려 줘야 빈 화면으로 남지 않는다.
+    try { this.term?.refresh(0, this.term.rows - 1); } catch (_) {}
+  }
+  _histFromBottom() {
+    try {
+      const b = this._histTerm.buffer.active;
+      return Math.max(0, Number(b.baseY) - Number(b.viewportY));
+    } catch (_) { return 0; }
+  }
+  // 오버레이에 현재 보유 구간을 새로 써 넣는다(진입 시 1회 + 더 오래된 페이지를 받았을 때).
+  _writeHistory(keepFromBottom) {
+    const lines = this._histLines();
+    const v = this._histView();
+    if (!v) {
+      this.histEl.classList.add("plain");
+      this.histEl.textContent = lines.map((l) => String(l).replace(/\x1b\[[0-9;]*m/g, "")).join("\n");
+      this._histWritten = this._histTotal;
+      return;
+    }
+    const cols = Math.max(2, this.term?.cols || v.cols), rows = Math.max(2, this.term?.rows || v.rows);
+    if (v.cols !== cols || v.rows !== rows) { try { v.resize(cols, rows); } catch (_) {} }
+    try { v.reset(); } catch (_) {}
+    v.write("\x1b[H" + lines.join("\r\n"), () => {
+      try {
+        v.scrollToBottom();
+        if (keepFromBottom > 0) v.scrollLines(-keepFromBottom);
+        v.refresh(0, v.rows - 1);
+      } catch (_) {}
+    });
+    this._histWritten = this._histTotal;
+  }
+  _ingestHistoryPage(page) {
+    if (!page) return;
+    const total = Math.max(0, Number(page.total) || 0);
+    // 과거가 줄었다 = `clear` 됐거나 스크롤백 상한을 넘겨 오래된 줄이 버려졌다.
+    //  절대 offset 이 통째로 밀리므로 캐시를 버린다(안 그러면 남의 줄을 내 offset 으로 그린다).
+    if (total < this._histTotal) { this._histRows.clear(); this._histLoadedFrom = Infinity; this._histWritten = -1; }
+    this._histTotal = total;
+    const rows = Array.isArray(page.rows) ? page.rows : [];
+    for (const r of rows) {
+      if (r && Number.isFinite(Number(r.offset))) this._histRows.set(Number(r.offset), r);
+    }
+    if (rows.length) this._histLoadedFrom = Math.min(this._histLoadedFrom, Number(page.start) || 0);
+
+    // 첫 페이지를 기다리며 쌓아 둔 스크롤을 이제 적용한다(맨 아래에서 그만큼 위로).
+    if (!this._histOn && this._histWantScroll < 0) {
+      const want = -this._histWantScroll;
+      this._histWantScroll = 0;
+      if (!this._histTotal) return;             // 과거가 아예 없다 — 열지 않는다
+      this._showHistory();
+      this._writeHistory(want);
+      return;
+    }
+    // 보고 있는 중에 더 오래된 페이지가 왔다 — 보던 위치를 유지한 채 다시 써 넣는다.
+    if (this._histOn && this._histTerm) this._writeHistory(this._histFromBottom());
+  }
+  // 휠 한 번(양수=아래로). 오버레이 진입·이탈·추가 로드를 전부 여기서 판단한다.
+  _histScroll(lines) {
+    const n = Number(lines) || 0;
+    if (!n) return;
+    // 서버 과거가 없는 백엔드(term-host) — 라이브 격자의 자체 스크롤백으로 움직인다.
+    if (!this._srvHistory) { try { this.term?.scrollLines(n); } catch (_) {} return; }
+    if (!this._histOn) {
+      if (n > 0) return;                        // 이미 라이브 화면 맨 아래
+      // 진입은 **항상 새로 물어본다**. 캐시된 total 로 바로 열면 그새 `clear` 로 비워졌거나 출력이
+      //  더 쌓인 과거를 낡은 상태로 보여 준다(2026-09-04 실측: clear 뒤에도 지운 과거가 열렸다).
+      this._histWantScroll += n;
+      this._requestHistory(null);
+      return;
+    }
+    const v = this._histTerm;
+    if (!v) return;                             // 평문 폴백은 전체를 한 번에 보여 준다
+    v.scrollLines(n);
+    const b = v.buffer.active;
+    if (n > 0 && Number(b.viewportY) >= Number(b.baseY)) { this._hideHistory(); return; }
+    // 맨 위에 닿았는데 더 오래된 과거가 남아 있으면 이어서 받아 온다.
+    if (n < 0 && Number(b.viewportY) <= 0 && this._histLoadedFrom > 0 && Number.isFinite(this._histLoadedFrom)) {
+      this._requestHistory(this._histLoadedFrom);
+    }
+  }
+
+  // 풀스크린 TUI 휠 보완 — 두 입력 경로(mac/win)가 공유한다.
+  //  smcup@ 때문에 tmux 는 1049 를 클라이언트 xterm 에 보내지 않는다. 그래서 vim·less 처럼
+  //  마우스 추적을 안 켜는 풀스크린 앱에서 휠을 돌리면 xterm 이 "일반 셸 스크롤백"으로 처리해
+  //  화면이 안 움직인다. 판정은 tmux 정본(pty_modes)으로 하고, 브랜드(codex 등)로 하지 않는다.
+  //  ⚠ 마우스 추적이 켜져 있으면 손대지 않는다 — 그건 xterm 이 이미 휠 리포트로 보낸다.
+  _bindWheelRouting() {
+    // v3: 원시 PTY 바이트가 그대로 오므로 alt-screen(1049)·마우스 모드를 **로컬 xterm 이 안다**.
+    //  서버에 물어보던 modes 조회(TTL 캐시·타이머)는 사라졌다. (win32 legacy 만 pty_modes 폴백.)
+    const modes = { altScreen: false, at: 0 };
+    const refresh = () => {
+      if (localTmuxBackend() || !this.ctx.isLocal) { modes.altScreen = this.term?.buffer?.active?.type === "alternate"; return; }
+      if (Date.now() - modes.at < 700) return;
+      modes.at = Date.now();
+      api.ptyModes(this.id).then((m) => { modes.altScreen = !!(m && m.altScreen); }).catch(() => {});
+    };
+    const onWheel = (e) => {
+      refresh();
+      // ① 마우스 추적 TUI(claude·codex 등) — xterm 이 이미 휠 리포트를 보낸다. 손대지 않는다.
+      const tracking = this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none";
+      if (tracking && !this._histOn) return;
+      const dy = Number(e.deltaY) || 0;
+      if (!dy) return;
+      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
+      e.preventDefault();
+      e.stopPropagation();
+      // ② 풀스크린 앱(vim·less) — 방향키로 바꿔 앱에 준다. tmux 가 smcup@ 라 xterm 은 1049 를
+      //    못 봐서 스스로는 알 수 없다. 판정은 tmux 정본(pty_modes)이지 브랜드가 아니다.
+      if (modes.altScreen && !this._histOn) {
+        const app = !!this.term?.modes?.applicationCursorKeysMode;
+        this._write((dy < 0 ? (app ? "\x1bOA" : "\x1b[A") : (app ? "\x1bOB" : "\x1b[B")).repeat(count));
+        return;
+      }
+      // ③ 일반 셸 — 과거는 서버/tmux 정본에서 읽어 오버레이로 본다(라이브 격자는 스크롤백 0).
+      this._histScroll(dy < 0 ? -count : count);
+    };
+    const opt = { capture: true, passive: false };
+    this.termEl?.addEventListener("wheel", onWheel, opt);
+    this.histEl?.addEventListener("wheel", onWheel, opt);   // 오버레이 위에서도 같은 판정을 탄다
+    return () => {
+      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
+      this.histEl?.removeEventListener("wheel", onWheel, { capture: true });
     };
   }
   // 프로그램적 텍스트 삽입(OS 파일 드롭 등) — 붙여넣기(onPaste)와 동일 규칙:
@@ -1951,7 +2372,7 @@ export class PaneView {
   //  의도된 교체. 전자는 남은/새 터미널로 갈아타고, 목록이 비어 있으면 생길 때까지 대기만 한다
   //  (여기서 창을 만들면 기기 간 생성 레이스로 유령 터미널이 생긴다).
   _onExit() {
-    if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
+    if (this.node.kind !== "terminal") return;
     if (this._expectExit) { this._expectExit = false; return; } // 탭 전환의 의도된 교체 — 무시
     this.term?.write(i18n.t("\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\n"));
     this._attachedWin = null;
@@ -1982,21 +2403,38 @@ export class PaneView {
         this.buildHead();
         this.ctx.persist?.();
       }
-      const { cols, rows } = this.term || {};
-      api.ptyOpen(this.id, this.ctx.localPath || "", tab.win ?? 0, cols || 80, rows || 24)
-        .then((resolved) => {
-          this._attachedWin = typeof resolved === "number" ? resolved : tab.win;
-          this.term?.write(i18n.t("\x1b[90m[재연결됨]\x1b[0m\n"));
-        })
-        .catch(() => this._scheduleReopen(3000));
+      this._attachedWin = tab.win;
+      this._openChannel(tab.win);
+      this.term?.write(i18n.t("\x1b[90m[재연결됨]\x1b[0m\n"));
     }, delay);
   }
-  _fitNow() {
+  _fitNow(force) {
     if (!this.term) return;
+    // v3 비소유자: 격자는 소유자 것이라 fit 하지 않는다 — 컨테이너에 맞춰 축소만 다시 계산.
+    if (this._grid && !this._isOwner && !this._ownerFree) {
+      if (this.term.cols !== this._grid.cols || this.term.rows !== this._grid.rows) { try { this.term.resize(this._grid.cols, this._grid.rows); } catch (_) {} }
+      this._applyScale();
+      return;
+    }
     try {
       this.fit.fit();
     } catch (_) {}
     this._correctFit();
+    this._applyScale();
+    if (force) { this._sentCols = -1; this._sentRows = -1; }
+    // ★ 퇴화 크기는 절대 보내지 않는다. 격자가 숨겨진 상태에서 fit 하면 FitAddon 이 자기 최소값
+    //   (2x1)을 돌려주는데, 그게 공유 tmux window 로 나가면 **모든 기기의 터미널이 2x1 로 접힌다**
+    //   (2026-09-05 안드로이드 실기 실측 — 앱의 과거 오버레이가 라이브 격자를 display:none 할 때 발생).
+    //   PC 는 오버레이가 visibility 만 감춰 레이아웃이 남지만, 창 최소화·탭 전환 등 0 크기 순간은
+    //   언제든 생기므로 같은 방어선을 둔다.
+    if (this.term.cols < 8 || this.term.rows < 3) return;
+    // 과거 오버레이도 라이브와 같은 격자여야 한다(줄바꿈 위치가 달라지면 다른 화면이 된다).
+    //  ⚠ 격자가 **바뀐 경우만** — _fitNow 는 자주 불리고, 매번 다시 쓰면 스크롤이 튄다.
+    const grid = `${this.term.cols}x${this.term.rows}`;
+    if (this._histOn && this._histTerm && this._histGrid !== grid) {
+      try { this._writeHistory(this._histFromBottom()); } catch (_) { /* noop */ }
+    }
+    this._histGrid = grid;
     const { cols, rows } = this.term;
     if (!cols || !rows) return;
     // ★ 값이 안 바뀌었으면 보내지 않는다. 라이브 로그로 드러난 것: `_fitNow` 가 **7초마다**(리컨실
@@ -2118,8 +2556,14 @@ export class PaneView {
     }
   }
 
+  // 검색 대상 = **지금 보고 있는 격자**. 과거 오버레이가 떠 있으면 그 안(서버 정본 과거)을 찾는다.
+  //  라이브 격자는 scrollback:0 이라 화면에 보이는 만큼이 전부다 — 과거를 찾으려면 위로 스크롤해
+  //  오버레이를 띄운 뒤 ⌘F 를 누르면 된다.
+  _activeSearchAddon() {
+    return (this._histOn && this._histSearch) || this.searchAddon || null;
+  }
   _openTermSearch() {
-    if (!this.searchAddon) return;
+    if (!this._activeSearchAddon()) return;
     if (this._searchBar) { this._searchInput.focus(); this._searchInput.select(); return; }
     const bar = document.createElement("div");
     bar.className = "pane-search";
@@ -2145,16 +2589,19 @@ export class PaneView {
       activeMatchColorOverviewRuler: "#c78b1e",
     };
     const opts = () => ({ decorations: deco, caseSensitive: false });
-    if (!this._searchResDisposer && this.searchAddon.onDidChangeResults) {
-      this._searchResDisposer = this.searchAddon.onDidChangeResults((r) => {
+    const addon = this._activeSearchAddon();
+    if (!this._searchResDisposer && addon.onDidChangeResults) {
+      this._searchResDisposer = addon.onDidChangeResults((r) => {
         if (!r || !r.resultCount) count.textContent = "0/0";
         else count.textContent = `${(r.resultIndex ?? -1) + 1}/${r.resultCount}`;
       });
     }
     const doFind = (back) => {
       const q = input.value;
-      if (!q) { try { this.searchAddon.clearDecorations?.(); } catch (_) {} count.textContent = "0/0"; return; }
-      try { back ? this.searchAddon.findPrevious(q, opts()) : this.searchAddon.findNext(q, opts()); } catch (_) {}
+      const a = this._activeSearchAddon();
+      if (!a) return;
+      if (!q) { try { a.clearDecorations?.(); } catch (_) {} count.textContent = "0/0"; return; }
+      try { back ? a.findPrevious(q, opts()) : a.findNext(q, opts()); } catch (_) {}
     };
     input.addEventListener("input", () => doFind(false));
     input.addEventListener("keydown", (e) => {
@@ -2169,6 +2616,7 @@ export class PaneView {
 
   _closeSearch() {
     try { this.searchAddon?.clearDecorations?.(); } catch (_) {}
+    try { this._histSearch?.clearDecorations?.(); } catch (_) {}
     this._searchBar?.remove();
     this._searchBar = null;
     this._searchInput = null;
@@ -2212,10 +2660,15 @@ export class PaneView {
       if (this._preservePreview) api.previewSync(this._pvId, this._pvEffUrl || this.previewUrl || "", 0, 0, 0, 0, false).catch(() => {});
       else api.previewClose(this._pvId).catch(() => {});
     }
-    if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});
+    if (this.ctx.isLocal && this.node.kind === "terminal" && !localTmuxBackend()) api.ptyClose(this.id).catch(() => {});
     try {
       this.ws?.close();
     } catch (_) {}
+    clearTimeout(this._histTimer);
+    try {
+      this._histTerm?.dispose();
+    } catch (_) {}
+    this._histTerm = null;
     try {
       this.term?.dispose();
     } catch (_) {}

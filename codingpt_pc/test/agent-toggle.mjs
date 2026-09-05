@@ -283,11 +283,13 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
     /\.pane-body \{[^}]*position:\s*relative/.test(css));
   ok("토글 노드는 pane 본문에 붙는다(this.body)",
     /_buildModeToggle\(\)\s*\{[\s\S]{0,900}?this\.body\.appendChild\(b\)/.test(paneJs2));
-  ok("Codex alternate-screen에서 mouse tracking이 없으면 휠을 내부 이동으로 보완",
-    /_activeAgentBrand\(\) !== "codex"/.test(paneJs2)
-      && /buffer\?\.active\?\.type !== "alternate"/.test(paneJs2)
-      && /mouseTrackingMode !== "none"/.test(paneJs2)
-      && /addEventListener\("wheel", onWheel/.test(paneJs2));
+  // 풀스크린 TUI 휠 보완은 "브랜드"가 아니라 "모드"로 판정한다. tmux 의 smcup@ 때문에 1049 가
+  //  클라이언트 xterm 에 오지 않으므로, alternate 여부는 tmux 정본(pty_modes)만 알 수 있다.
+  //  상세 계약은 test/terminal-scroll-crossimpl.mjs 가 앱과 함께 고정한다.
+  ok("PC 휠 보완은 tmux 정본 모드로만 갈린다(codex 브랜드 분기 금지)",
+    /api\.ptyModes\(this\.id\)/.test(paneJs2)
+      && /addEventListener\("wheel", onWheel/.test(paneJs2)
+      && !/_activeAgentBrand\(\) !== "codex"/.test(paneJs2));
   ok("유휴에도 테두리+불투명 배경이 있는 컨트롤 형태(추가 버튼과 구별 · 터미널 글자 위에서 읽힘)",
     /border:\s*1px solid var\(--border-ctrl\)/.test(tgRule) && /background:\s*var\(--elevated2\)/.test(tgRule));
   ok("⌘F 검색 중에는 토글을 숨긴다(좌표 충돌 — search-open 예외 복원)",

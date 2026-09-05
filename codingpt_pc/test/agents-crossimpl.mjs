@@ -501,9 +501,10 @@ ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveB
   ok(/capture-pane[\s\S]*?-S[\s\S]*?-10000[\s\S]*?-E[\s\S]*?-1/.test(pcPtyRust)
     && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(pcPtyRust),
     '★ PC attach 는 tmux history 로 xterm 스크롤백을 초기화한다');
-  ok(/sendHistoryBootstrap/.test(daemonPty)
+  ok(/buildTerminalSnapshotPayload/.test(daemonPty)
     && /capture-pane[\s\S]*?'-E', '-1'/.test(daemonPty)
-    && /sendHistoryBootstrap\(attachName/.test(daemonPty),
+    && /finishHistoryBootstrap/.test(daemonPty)
+    && /SNAPSHOT_START/.test(daemonPty),
     '★ 모바일/원격 attach 도 같은 tmux history 로 스크롤백을 초기화한다');
 
   // 단축키 검색바는 콘텐츠와 함께 스크롤해야 한다. sticky 면 설정 헤더 아래를 떠다니며 목록을 가린다.
