@@ -82,7 +82,11 @@ onScaleChange(() => {
   const px = termFontPx();
   for (const [, p] of registry) {
     try {
-      if (p.term) { p.term.options.fontSize = px; p._fitNow(); }
+      if (p.term) {
+        // 비소유자는 _applyScale 이 배율 기준(termFontPx)에서 다시 줄여 준다 — 여기서 직접 넣지 않는다.
+        if (p._grid && !p._isOwner) { p._applyScale(); }
+        else { p.term.options.fontSize = px; p._fitNow(); }
+      }
       p.ide?.refresh();
       p._mixed?.forEach((m) => m.ide?.refresh());
     } catch (_) {}
@@ -1804,25 +1808,40 @@ export class PaneView {
   }
 
   // 비소유자 뷰: 소유자 격자를 컨테이너 폭에 맞춰 축소(세로는 스크롤). Orca desktop-fit 과 같은 방식.
+  /** 소유자일 때의 글꼴 = 사용자 표시 배율 정본. 축소는 여기서 아래로만 간다. */
+  _baseFontPx() { return termFontPx(); }
+
+  /**
+   * 비소유자 뷰 — 소유자 격자를 폭에 맞춰 **글꼴 크기**로 줄인다. 격자(cols/rows)는 안 바꾼다.
+   *
+   * ⚠ CSS transform 으로 줄이지 말 것(2026-09-06 안드로이드 실기 회귀). Android WebView 는 WebGL
+   *  캔버스를 별도 하드웨어 레이어로 합성해 조상의 transform 배율을 먹지 않는다 — iPad 는 줄어드는데
+   *  안드로이드만 원래 크기로 그려져 오른쪽이 잘렸다. 글꼴을 줄이면 xterm 이 실제로 작은 셀로 다시
+   *  그리므로 렌더러와 무관하고, 늘린 비트맵이 아니라 또렷하다. 앱과 같은 계약이다.
+   */
   _applyScale() {
     const el = this.termEl?.querySelector(".xterm");
-    if (!el || !this.term) return;
-    if (this._isOwner || !this._grid) {
-      el.style.transform = ""; el.style.width = ""; el.style.height = "";
-      this.termEl.classList.remove("scaled");
-      return;
+    if (!this.term) return;
+    // 예전 transform 방식의 잔재 제거(구버전에서 올라온 화면).
+    if (el) { el.style.transform = ""; el.style.transformOrigin = ""; el.style.width = ""; el.style.height = ""; }
+    const viewer = !this._isOwner && !!this._grid;
+    this.termEl?.classList.toggle("scaled", viewer);   // 세로 넘침은 스크롤로 본다
+    const base = this._baseFontPx();
+    let want = base;
+    if (viewer) {
+      let cell = null;
+      try { const d = this.term._core?._renderService?.dimensions?.css?.cell; if (d && d.width > 0 && d.height > 0) cell = d; } catch (_) { cell = null; }
+      const availW = Math.max(1, (this.termEl?.clientWidth || 0) - 10);
+      const cur = this.term.options.fontSize || base;
+      const perPx = cell ? cell.width / cur : 0;       // 글꼴 1px 당 셀 폭 — 필요한 글꼴을 역산
+      if (perPx > 0) want = Math.max(4, Math.min(base, Math.floor(((availW / this._grid.cols) / perPx) * 2) / 2));
     }
-    let cell = null;
-    try { const d = this.term._core?._renderService?.dimensions?.css?.cell; if (d && d.width > 0 && d.height > 0) cell = d; } catch (_) { cell = null; }
-    if (!cell) return;
-    const needW = this._grid.cols * cell.width, needH = this._grid.rows * cell.height;
-    const availW = Math.max(1, this.termEl.clientWidth - 10);
-    const k = Math.min(1, availW / needW);
-    el.style.transformOrigin = "0 0";
-    el.style.transform = k < 1 ? `scale(${k.toFixed(4)})` : "";
-    el.style.width = `${Math.ceil(needW)}px`;
-    el.style.height = `${Math.ceil(needH)}px`;
-    this.termEl.classList.toggle("scaled", k < 1);
+    const now = this.term.options.fontSize || base;
+    if (Math.abs(want - now) < 0.25) return;           // 수렴 — 재적용 루프 방지
+    try {
+      this.term.options.fontSize = want;
+      if (viewer) this.term.resize(this._grid.cols, this._grid.rows);
+    } catch (_) { /* noop */ }
   }
 
   _syncOwnerUi() {

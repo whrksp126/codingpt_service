@@ -489,6 +489,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 .pane-term { flex: 1; min-height: 0; padding: 4px 2px 2px 8px; overflow: hidden; }
 .pane-term .xterm { height: 100%; transform-origin: 0 0; }
 /* v3 비소유자 뷰 — 소유자 격자(예: 폰 48칸)를 축소/스크롤로 본다. 격자 자체는 절대 바꾸지 않는다. */
+/* 비소유자 뷰 — 폭은 글꼴로 맞추고(_applyScale), 세로로 넘치는 만큼만 스크롤로 본다. */
 .pane-term.scaled { overflow: auto; }
 .pane-term.scaled .xterm { height: auto; }
 .pane-owner-pill { position: absolute; left: 10px; bottom: 10px; z-index: 21; display: flex; align-items: center; gap: 8px;

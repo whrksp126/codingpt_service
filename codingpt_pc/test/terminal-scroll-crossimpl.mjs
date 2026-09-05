@@ -66,7 +66,15 @@ ok('PC 가 과거를 데몬 v3 계약으로 읽는다(로컬·원격 동일)',
   ok('PC/데몬 v3 opcode 표 일치', JSON.stringify(codes(pcV3, 'TERMINAL_OPCODE_V3')) === JSON.stringify(codes(dmV3, 'OPCODE = Object.freeze', 'function encode')));
   ok('PC/데몬 v3 MAGIC·헤더 길이 일치', pcV3.includes('0x43, 0x50, 0x54, 0x33') && dmV3.includes("Buffer.from('CPT3')") && pcV3.includes('HEADER_BYTES = 14') && dmV3.includes('4 + 1 + 1 + 4 + 4'));
   ok('PC: 크기는 소유자만 주장한다', /if \(!this\._isOwner && !this\._ownerFree\) return;\n\s+if \(this\.ws && this\.ws\.readyState === 1\) this\.ws\.send\(JSON\.stringify\(\{ type: "resize"/.test(pane));
-  ok('PC: 비소유자는 격자를 바꾸지 않고 축소해 본다', /if \(this\._grid && !this\._isOwner && !this\._ownerFree\) \{[\s\S]{0,300}?this\._applyScale\(\);\s+return;/.test(pane) && /el\.style\.transform = k < 1 \? `scale/.test(pane));
+  // ★ 축소는 CSS transform 이 아니라 **글꼴 크기**로 한다(2026-09-06 안드로이드 실기 회귀 — Android
+  //   WebView 는 WebGL 캔버스를 별도 하드웨어 레이어로 합성해 조상 transform 배율을 안 먹는다).
+  //   앱(TerminalWebView)도 같은 계약이라 여기서 한 벌로 고정한다.
+  ok('PC: 비소유자는 격자를 바꾸지 않고 글꼴로 줄여 본다',
+    /if \(this\._grid && !this\._isOwner && !this\._ownerFree\) \{[\s\S]{0,300}?this\._applyScale\(\);\s+return;/.test(pane)
+      && /this\.term\.options\.fontSize = want/.test(pane)
+      && /this\.term\.resize\(this\._grid\.cols, this\._grid\.rows\)/.test(pane)
+      && !/style\.transform = `?scale/.test(pane));
+  ok('앱도 같은 축소 계약(글꼴)을 쓴다', /term\.options\.fontSize = want/.test(app) && !/style\.transform = 'scale/.test(app));
   ok('PC: 스냅샷은 입력 모드(1049·마우스·bracketed paste)를 먼저 복원한다', /if \(md\.altScreen\) pre \+= "\\x1b\[\?1049h"/.test(pane) && /md\.mouseTracking\) pre \+= "\\x1b\[\?1000h\\x1b\[\?1006h"/.test(pane));
   // ★ epoch 를 같이 보내야 한다(2026-09-06 실기 사고). 데몬이 재시작하면 host 의 seq 가 0 부터 다시
   //   세는데, 세대 없이 큰 lastSeq 만 보내면 데몬이 "너는 최신"으로 오판해 아무것도 안 보내고 화면이
