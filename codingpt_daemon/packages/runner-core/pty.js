@@ -513,7 +513,6 @@ async function attachPty(params, io) {
   //  resolveTid 가 확정한다. select 이후 재접속이면 데몬이 기억하는 현재 터미널을 우선한다.
   let tid = 0;
   let attachName;   // 백엔드 attach 대상 세션명
-  let shared = false; // 하위호환(paneId 없음) — 공유 세션 create-or-attach
   if (paneId) {
     await migrateLegacyPool(session, abs);
     const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
@@ -526,14 +525,12 @@ async function attachPty(params, io) {
       return;
     }
     paneCurrent.set(pkey, tid);
-    // 터미널 세션은 전 기기가 같은 세션에 동시 attach 해 미러/이어받기 한다(-d 금지 등가 —
-    //  term-host 는 다중 attach 브로드캐스트가 기본). 크기는 window-size latest 등가 —
-    //  마지막으로 조작(입력/리사이즈)한 기기 크기를 따른다(수동 클레임 전면 폐지).
+    // 전 기기가 같은 터미널을 함께 본다 — 다만 tmux 에 붙는 것은 데몬의 control 클라이언트 **하나**뿐이고
+    //  기기들은 그 정본(TerminalHost)의 뷰어다. 크기는 소유자 1명이 정한다(설계 §1-1).
     attachName = termSession(session, tid);
   } else {
     // 하위호환(paneId 없음): 기존 공유 세션에 직접 attach(tmux: new-session -A 등가).
     attachName = session;
-    shared = true;
     // term-host 백엔드엔 -A(create-or-attach)가 없다 — 없으면 만들어 항상 열리게 한다.
     if (usingHost() && !(await termBackend.has(session).catch(() => false))) {
       await termBackend.create({ name: session, cwd: abs, env: poolEnvMap(abs) }).catch(() => { /* 경쟁 생성 등 — attach 가 판정 */ });
@@ -556,6 +553,13 @@ async function attachPty(params, io) {
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }
+  // 같은 pane 아이덴티티로 새 스트림이 열리면(릴레이↔LAN 경로 전환·재접속 겹침) 옛 것을 **먼저** 축출한다.
+  //  v3 에선 크기 핑퐁 걱정은 없지만(정본 host 하나에 control 클라이언트 하나), 놔두면 죽은 뷰어가
+  //  리퍼(90초)까지 릴레이 소켓과 구독을 붙잡는다.
+  if (pkey) {
+    const prev = paneStreams.get(pkey);
+    if (prev && typeof prev.evict === 'function') { try { prev.evict(); } catch (_) { /* noop */ } }
+  }
   const { attachV3 } = require('./pty-v3');
   const deviceName = params && typeof params.deviceName === 'string' ? params.deviceName : '';
   const v3 = await attachV3({
@@ -566,11 +570,6 @@ async function attachPty(params, io) {
   // 탭 전환 등록 — 앱·PC 는 탭을 바꿔도 스트림을 새로 열지 않고 `terminal.select` 만 부른다.
   //  (v2 시절 attachPty 가 하던 일. v3 로 넘어오면서 빠져 있었다 — 2026-09-06 복구.)
   if (pkey) {
-    // 같은 pane 아이덴티티로 새 스트림이 열리면(릴레이↔LAN 경로 전환·재접속 겹침) 옛 것을 축출한다.
-    //  v3 에선 크기 핑퐁 걱정은 없지만(정본 host 하나에 control 클라이언트 하나), 놔두면 죽은 뷰어가
-    //  리퍼(90초)까지 릴레이 소켓과 구독을 붙잡는다.
-    const prev = paneStreams.get(pkey);
-    if (prev && typeof prev.evict === 'function') { try { prev.evict(); } catch (_) { /* noop */ } }
     const entry = {
       tid,
       swap(nextTid) {
