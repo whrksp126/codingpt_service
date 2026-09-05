@@ -16,6 +16,11 @@ const { Screen } = require('../term-host/lib/screen');
 const { TmuxControl } = require('./tmux-control');
 
 const RING_BYTES = 2 * 1024 * 1024;   // sshx 와 같은 2 MiB — 이 안이면 seq 이어받기, 밖이면 스냅샷
+// 마지막 뷰어가 떠난 뒤 control 클라이언트를 붙잡고 있는 유예. 0 이 되자마자 놓으면 탭 전환·재접속
+//  마다 attach 를 다시 세워 화면이 늦고, 영원히 붙잡으면 열어 본 터미널 수만큼 `tmux -C` 자식과 VT 가
+//  쌓인다(2026-09-04 에 v2 에서 겪은 누수의 v3 판). 놓아도 손실이 없는 이유: 다시 붙을 때 `capture-pane`
+//  으로 VT 를 시드하고 epoch 이 바뀌어 뷰어가 스냅샷을 받는다(이어받기 링버퍼만 버린다).
+const IDLE_CLOSE_MS = Math.max(1000, Number(process.env.CPT_HOST_IDLE_MS) || 30000);
 const MIN_COLS = 8, MIN_ROWS = 3;     // 격자가 숨겨진 뷰어의 fit 이 주는 퇴화값(2x1) 차단
 const MAX_COLS = 500, MAX_ROWS = 200;
 
@@ -38,6 +43,7 @@ class TerminalHost extends EventEmitter {
     this.ring = [];                        // [{seq, buf}]
     this.ringBytes = 0;
     this.viewers = new Set();              // 구독 콜백 fn(frame)
+    this.idleTimer = null;                 // 뷰어 0 유예(_armIdleClose)
     this.closed = false;
     this.exitCode = null;
     this.control = new TmuxControl({ tmux: o.tmux, socket: o.socket, session: this.name, env: o.env });
@@ -110,8 +116,25 @@ class TerminalHost extends EventEmitter {
   // ── 뷰어 API ─────────────────────────────────────────────────────────────
   subscribe(fn) {
     this.viewers.add(fn);
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     let off = false;
-    return () => { if (off) return; off = true; this.viewers.delete(fn); };
+    return () => {
+      if (off) return;
+      off = true;
+      this.viewers.delete(fn);
+      this._armIdleClose();
+    };
+  }
+
+  /** 뷰어 0 → 유예 뒤 control 클라이언트/VT 해제. 새 뷰어가 붙으면 subscribe 가 취소한다. */
+  _armIdleClose() {
+    if (this.closed || this.viewers.size || this.idleTimer) return;
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (this.closed || this.viewers.size) return;
+      this.close();
+    }, IDLE_CLOSE_MS);
+    if (typeof this.idleTimer.unref === 'function') this.idleTimer.unref();
   }
 
   /** 재접속 이어받기: lastSeq 다음부터의 OUTPUT 들. 링버퍼 밖이면 null(스냅샷 필요). */
@@ -194,6 +217,7 @@ class TerminalHost extends EventEmitter {
   close() {
     if (this.closed) return;
     this.closed = true;
+    if (this.idleTimer) { clearTimeout(this.idleTimer); this.idleTimer = null; }
     try { this.control.close(); } catch (_) { /* noop */ }
     try { this.screen.dispose(); } catch (_) { /* noop */ }
     this.viewers.clear();

@@ -39,20 +39,11 @@ const WebSocket = require('ws');
 const fsLib = require('./fs');
 const runtime = require('./runtime');
 const e2eeGate = require('./e2ee-gate');
-const terminalV2 = require('./terminal-stream-v2');
-const controllerLease = require('./terminal-controller-lease');
-const { CanonicalTerminalRegistry } = require('./canonical-terminal');
-const { openCanonicalStream } = require('./canonical-stream');
 // 터미널 세션 백엔드 유일 진입점(웨이브2) — darwin: tmux 구현(term-backend-tmux, 동작 불변),
 //  win32/CPT_TERMHOST_SOCK: term-host 파이프. tmux 전용 유지보수(레거시 풀 마이그레이션·리퍼·
 //  자가치유·automatic-rename 주입)만 runTmux 직행으로 남고 usingHost() 에서 건너뛴다.
 const termBackend = require('./term-backend');
 const usingHost = () => termBackend.isHostBackend();
-const canonicalRegistry = new CanonicalTerminalRegistry(termBackend);
-const canonicalEnabled = () => process.env.CPT_CANONICAL_TERMINAL === '1';
-// 뷰어가 주장할 수 있는 최소 격자. 이보다 작으면 "화면이 없는 상태에서 계산된 값"이라 본다.
-const MIN_VIEWER_COLS = 8;
-const MIN_VIEWER_ROWS = 3;
 
 // tmux -L codingpt (사용자 기본 tmux 서버와 격리). 기본은 'codingpt' — 프로덕션은 이 값을 절대
 //  바꾸지 않는다. 격리 소켓(재연결 레이스 재현 테스트 등)만 CODINGPT_TMUX_SOCKET 로 덮어써 실사용
@@ -305,23 +296,6 @@ async function resolveTid(ns, want) {
 //  교체(swap)할 수 있게 한다(뷰 세션 select-window 의 대체). key = ns|paneId|client.
 const paneStreams = new Map(); // key -> { tid, swap(tid) }
 
-// 서로 다른 크기의 tmux 클라이언트가 번갈아 latest 가 되던 구버전은 SIGWINCH 때 zsh/p10k가
-// 같은 프롬프트를 history 에 여러 번 밀어 넣었다. 일반 명령 출력은 절대 접지 않고,
-// `user@host` + 경로가 있는 동일 프롬프트가 연속될 때만 한 줄로 정규화한다.
-function normalizeResizePromptHistory(text) {
-  const lines = String(text || '').replace(/\n$/, '').split('\n');
-  const plain = (s) => s.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '').trim();
-  const out = [];
-  let prevPrompt = null;
-  for (const line of lines) {
-    const p = plain(line);
-    const isShellPrompt = /\S+@\S+/.test(p) && /(?:^|\s)(?:~|\/)[^\s]*/.test(p);
-    if (isShellPrompt && p === prevPrompt) continue;
-    out.push(line);
-    prevPrompt = isShellPrompt ? p : null;
-  }
-  return out.join('\n');
-}
 // pane 이 마지막으로 본 터미널 — 재접속(스트림 재수립) 시 select 이후 상태를 이어받는다.
 const paneCurrent = new Map(); // key -> tid
 function paneKeyOf(ns, paneId, client) {
@@ -362,11 +336,6 @@ function tmuxEnv() {
   if (!/UTF-?8/i.test(env.LC_CTYPE || '')) env.LC_CTYPE = 'en_US.UTF-8';
   return env;
 }
-
-// 스폰 실패 쿨다운 — node-pty 는 스폰 실패 경로에서 pty 마스터 fd 를 누수한다. 웹뷰 자동 재접속
-//  (1~10s)과 결합하면 실패가 실패를 낳는 나선(pty 고갈 고착, 실측 75분에 마스터 459개 누수)이 되므로,
-//  직전 스폰 실패 후 잠시는 스폰 시도 자체를 거부한다.
-let lastSpawnFailAt = 0;
 
 // ── 전송 어댑터(io) 계약 — attachPty 는 전송을 모른다 ─────────────────────
 // 릴레이(back dial-back WS)와 LAN 직결(lan.js 채널)이 **같은 attachPty 한 벌**을 타게 하는 이음쇠다.
@@ -529,33 +498,11 @@ async function attachPty(params, io) {
   await ensureTruecolor();
   const cols = (params && params.cols) || 80;
   const rows = (params && params.rows) || 24;
-  const protocolV2 = Number(params && params.terminalProtocol) === 2;
-  let streamSeq = 0;
-  let streamEpoch = crypto.randomBytes(8).toString('hex');
-  const sendFrame = (opcode, payload) => {
-    try { io.send(terminalV2.encode(opcode, ++streamSeq, payload)); } catch (_) { /* noop */ }
-  };
-  const sendOut = (chunk) => {
-    if (protocolV2) { sendFrame(terminalV2.OPCODE.OUTPUT, chunk); return; }
-    try { io.send(chunk); } catch (_) { /* noop */ }
-  };
-  const sendSnapshot = (chunks, meta = {}) => {
-    if (!protocolV2) {
-      for (const chunk of chunks) { try { io.send(chunk); } catch (_) { /* noop */ } }
-      return;
-    }
-    streamEpoch = crypto.randomBytes(8).toString('hex');
-    // serverHistory = "과거는 서버에 물어봐라"(`{type:'history'}`). 정본이 tmux 격자라 canonical VT
-    //  가 꺼져 있어도 답할 수 있다 — 클라이언트는 이 값만 보고 자기 스크롤백 대신 서버를 쓴다.
-    sendFrame(terminalV2.OPCODE.SNAPSHOT_START,
-      JSON.stringify({ epoch: streamEpoch, serverHistory: !usingHost(), ...meta }));
-    for (const chunk of chunks) sendFrame(terminalV2.OPCODE.SNAPSHOT_CHUNK, chunk);
-    sendFrame(terminalV2.OPCODE.SNAPSHOT_END, JSON.stringify({ epoch: streamEpoch }));
-  };
+  // 여기서 나가는 유일한 바이트 — attach 전 거절/안내뿐이다(그 뒤는 전부 attachV3 의 CPT3 프레임).
+  //  구버전 v1 클라이언트는 이걸 그대로 화면에 찍고, v2/v3 는 프레임이 아니라 무시한다 → 어느 쪽이든
+  //  이어지는 io.close() 로 끝난다.
+  const sendOut = (chunk) => { try { io.send(chunk); } catch (_) { /* noop */ } };
 
-  // tmux 세션 옵션은 tmux.conf 에 있고 -f 로 서버 시작 시점에 로드된다.
-  //  (alt-screen override 는 클라이언트 attach 전에 세팅돼야 스크롤백이 xterm 에 쌓임 —
-  //   new-session 뒤에 set 하면 이미 smcup 을 보낸 뒤라 소급 안 됨.)
   // 진입한 워크스페이스 경로에 맞는 네임스페이스/시작폴더 결정.
   const { session, abs } = sessionForCwd(params && params.cwd);
   const paneId = params && params.paneId ? String(params.paneId).replace(/[^A-Za-z0-9_-]+/g, '-') : '';
@@ -593,571 +540,49 @@ async function attachPty(params, io) {
     }
   }
 
-  // ── v3(CPT3): 데몬 VT 가 정본, 크기 주체는 소유자 1명 — 아래 lease/nudge/스냅샷 경로를 전혀 타지 않는다.
-  //  (docs/terminal-v3-design.md. v2 경로는 구 클라이언트 호환용으로만 남는다.)
-  if (Number(params && params.terminalProtocol) === 3) {
-    if (usingHost()) { sendOut('\r\n\x1b[31m[이 호스트는 아직 v3 터미널을 지원하지 않습니다]\x1b[0m\r\n'); try { io.close(); } catch (_) { /* noop */ } return; }
-    const { attachV3 } = require('./pty-v3');
-    const deviceName = params && typeof params.deviceName === 'string' ? params.deviceName : '';
-    return attachV3({
-      name: attachName, cols, rows,
-      device: client ? { deviceId: client, name: deviceName || client } : null,
-      deps: { tmux: findTmux(), socket: TMUX_SOCKET, env: tmuxEnv(), runTmux },
-    }, io);
-  }
-
-  // 하나의 PTY는 cols×rows 한 벌만 가진다. tmux window option을 PC 네이티브 클라이언트와 공유해
-  // 실제 입력/명시 claim을 한 기기만 15초 동안 resize 주체로 인정한다.
-  const leaseOwner = String(client || 'remote').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 80) || 'remote';
-  const leaseTarget = () => `=${attachName}:0`;
-  const readControllerLease = async () => {
-    if (usingHost()) return null;
-    const raw = String(await runTmux(['show-options', '-w', '-v', '-t', leaseTarget(), '@codingpt_controller']).catch(() => '')).trim();
-    return controllerLease.parse(raw);
-  };
-  let leaseClaimedAt = 0;
-  const claimControllerLease = async () => {
-    if (usingHost()) return;
-    leaseClaimedAt = Date.now();
-    await runTmux(['set-option', '-w', '-t', leaseTarget(), '@codingpt_controller', controllerLease.format(leaseOwner)]).catch(() => {});
-  };
-  // 입력 경로 전용 리스 갱신 — 리스는 15초짜리라 키마다 갱신할 이유가 없다. 유효기간의 1/3 이
-  //  지났을 때만 스폰하고, **절대 await 하지 않는다**. 입력 write 가 이 비동기 완료를 기다리면
-  //  키마다 독립 체인이 생겨 완료 순서가 뒤집힌다(§ terminal-input-order 회귀 참조).
-  const refreshControllerLease = () => {
-    if (usingHost()) return;
-    if (Date.now() - leaseClaimedAt < controllerLease.LEASE_MS / 3) return;
-    claimControllerLease().catch(() => {});
-  };
-  const mayResizeForLease = async () => {
-    const lease = await readControllerLease();
-    return !lease || lease.expiresAt <= Date.now() || lease.owner === leaseOwner;
-  };
-
-  // 쿨다운 중이면 스폰 시도 없이 거절 — 실패 스폰마다 pty 마스터가 새는 것을 차단.
-  if (Date.now() - lastSpawnFailAt < 3000) {
-    sendOut('\r\n\x1b[33m터미널 준비 중입니다. 잠시 후 다시 연결돼요.\x1b[0m\r\n');
+  // ── CPT3 = 유일한 터미널 경로(docs/terminal-v3-design.md). 데몬 VT 가 정본, 크기 주체는 소유자 1명.
+  //  v1(원시 바이트)·v2(프레임 + tmux capture 스냅샷 + 15초 컨트롤러 리스) 경로는 2026-09-06 삭제했다 —
+  //  앱·PC·로컬 모두 terminalProtocol:3 만 요청한다. 구버전 앱이 붙으면 옛 경로로 되돌려주지 않고
+  //  **거절**한다(설계 §1-7: 호환은 거부로 끝낸다). 되살릴 일이 있으면 git 이력의 이 커밋 직전을 보라.
+  if (Number(params && params.terminalProtocol) !== 3) {
+    sendOut('\r\n\x1b[31m[앱/PC 버전이 오래됐습니다 — 업데이트하면 터미널이 열립니다]\x1b[0m\r\n');
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }
-
-  // 첫 attach 크기 = tmux 가 기억하는 **현재 창 크기**(조회되면) — 릴레이 params 는 항상 80x24
-  //  (back ptyStreamParams 고정 기본값)라, 그 크기로 붙였다가 클라이언트의 실크기 resize 가 오면
-  //  전체 화면 재도장이 연달아 났다(TUI 는 레이아웃이 통째로 깨졌다 다시 그려짐 — 2026-08-15
-  //  "떴는데 새로 그린다" 진단). window-size latest 덕에 창 크기는 대개 "마지막으로 이 터미널을
-  //  보던 기기"의 크기 = 재접속하는 그 기기의 직전 크기다. 조회 실패/0 은 params 폴백.
-  let attachW = cols, attachH = rows;
-  if (paneId) {
-    try {
-      const inf = await termBackend.info(attachName);
-      if (inf && inf.cols > 1 && inf.rows > 1) { attachW = inf.cols; attachH = inf.rows; }
-    } catch (_) { /* 폴백: params 크기 */ }
-  }
-  // 마지막으로 반영한 클라이언트 크기 — 탭 전환(swap)으로 새 attach 를 만들 때 그대로 승계한다.
-  let lastW = attachW, lastH = attachH;
-  let firstResizeDone = !paneId;
-  // 첫 resize 를 attach 안정화 후 재적용(nudge) — 첫 resize 가 tmux 클라이언트 초기화와 겹치면
-  //  클라이언트 크기가 attach 크기로 고착된다(같은 크기 재-ioctl 은 SIGWINCH 가 안 나가므로 한 칸
-  //  줄였다 되돌려 강제로 다시 읽힌다). 고착되면 이 클라이언트에 옛 크기 화면만 그려지는(반쪽 화면)
-  //  사고가 난다. ⚠ 첫 resize 가 attach 크기와 **같으면 고착이 곧 정답**이라 nudge 를 걸지 않는다
-  //  — 무조건 걸던 시절엔 화면이 뜨고 0.6초 뒤 SIGWINCH 2회로 멀쩡한 TUI 를 두 번 재도장했다.
-  let nudgeTimer = null;
-  let resizeSeq = 0;
-  let syncSeq = 0;
-  let resizeBarrier = Promise.resolve();
-  let lastInputAt = 0;
-  let lastV1SnapshotSize = '';
-
-  // 각 기기는 같은 tmux pane을 보되, 마지막으로 실제 viewport resize를 보낸 기기의 크기로
-  // 정본을 맞춘다. 그래야 tmux가 만든 커서 이동과 해당 기기의 xterm 열 수가 일치한다.
-  // keepalive/단순 focus는 이 함수를 호출하지 않으므로 예전의 주기적 크기 왕복은 재발하지 않는다.
-  const applyViewerResize = (w, h) => {
-    resizeSeq++;
-    try { term.resize(w, h); } catch (_) { /* noop */ }
-    if (!usingHost()) {
-      // tmux window-size=latest는 "마지막 입력 클라이언트"가 아니라 마지막으로 선택된 크기를 계속
-      // 유지할 수 있다. pane을 실제 모바일 열 수로 먼저 확정해야 이후 커서 이동과 xterm 좌표가 같다.
-      resizeBarrier = resizeBarrier.then(() => runTmux([
-        'resize-window', '-t', `=${attachName}:0`, '-x', String(w), '-y', String(h),
-      ])).catch(() => {});
-    }
-  };
-
-
-  // 이 클라이언트의 로컬 xterm을 PC tmux 정본으로 다시 맞춘다. TUI는 capture-pane 텍스트로
-  // 복원하면 커서/모드가 깨지므로 라이브 미러를 유지하고, 일반 셸에서만 전체 정본을 보낸다.
-  const sendShellSnapshot = async () => {
-    if (usingHost()) return;
-    const mine = ++syncSeq;
-    try {
-      const alt = await runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}']);
-      if (mine !== syncSeq || String(alt).trim() === '1') return;
-      const target = `=${attachName}:0`;
-      const [histRaw, screenRaw, cursorRaw] = await Promise.all([
-        runTmux(['capture-pane', '-p', '-e', '-t', target, '-S', '-10000', '-E', '-1']),
-        runTmux(['capture-pane', '-p', '-e', '-t', target]),
-        runTmux(['display-message', '-p', '-t', target, '#{cursor_x},#{cursor_y}']),
-      ]);
-      if (mine !== syncSeq) return;
-      const history = normalizeResizePromptHistory(String(histRaw || '')).replace(/\n/g, '\r\n');
-      const screen = String(screenRaw || '').replace(/\n/g, '\r\n');
-      const cm = /^(\d+),(\d+)$/.exec(String(cursorRaw || '').trim());
-      const cursor = cm ? `\x1b[${Number(cm[2]) + 1};${Number(cm[1]) + 1}H` : '\x1b[H';
-      const bootstrap = '\x1b[3J\x1b[H\x1b[2J' + (history ? history + '\r\n' : '');
-      const repaint = '\x1b[H\x1b[2J' + screen + cursor;
-      sendSnapshot([bootstrap, repaint], { cols: lastW || cols, rows: lastH || rows, historyBootstrap: true });
-    } catch (_) { /* 세션 전환/종료 경쟁 */ }
-  };
-
-  const sendCanonicalSnapshot = async () => {
-    if (!canonicalEnabled() || !term || !term.model) return false;
-    try {
-      const snapshot = await term.model.snapshot();
-      sendSnapshot([snapshot.ansi], {
-        cols: snapshot.cols, rows: snapshot.rows, canonicalModel: true, serverHistory: true, modelSeq: snapshot.seq,
-      });
-      return true;
-    } catch (_) { return false; }
-  };
-
-  // 구 운영 릴레이(v1)는 SNAPSHOT_START 메타를 전달하지 않는다. 첫 실제 모바일 resize를 받은 뒤
-  // 그 뷰어의 정확한 rows로 history를 scrollback에 밀어 올리고 현재 pane을 다시 그린다.
-  // 서버/PC 높이로 패딩하면 큰 화면에서 N-rows만 남는 문제가 재발한다.
-  const sendV1ViewerSnapshot = async (viewerRows) => {
-    if (protocolV2 || usingHost()) return;
-    try {
-      const target = `=${attachName}:0`;
-      const [histRaw, screenRaw, cursorRaw] = await Promise.all([
-        runTmux(['capture-pane', '-p', '-e', '-t', target, '-S', '-10000', '-E', '-1']),
-        runTmux(['capture-pane', '-p', '-e', '-t', target]),
-        runTmux(['display-message', '-p', '-t', target, '#{cursor_x},#{cursor_y}']),
-      ]);
-      const history = normalizeResizePromptHistory(String(histRaw || '')).replace(/\n/g, '\r\n');
-      const screen = String(screenRaw || '').replace(/\n/g, '\r\n');
-      const cm = /^(\d+),(\d+)$/.exec(String(cursorRaw || '').trim());
-      const cursor = cm ? `\x1b[${Number(cm[2]) + 1};${Number(cm[1]) + 1}H` : '\x1b[H';
-      const pad = '\r\n'.repeat(Math.max(1, viewerRows | 0));
-      sendSnapshot(['\x1b[3J\x1b[H\x1b[2J' + (history ? history + '\r\n' : '') + pad + '\x1b[H\x1b[2J' + screen + cursor], {
-        cols: lastW || cols, rows: viewerRows | 0,
-      });
-    } catch (_) { /* 라이브 스트림은 유지 — 다음 재접속/출력이 안전망 */ }
-  };
-
-  // xterm 의 스크롤백은 뷰어마다 따로 쌓인다. 새 PC attach 는 과거가 없고 오래 살아 있던 폰은
-  // 낡은 과거가 남는 불일치를 없애기 위해, 매 attach/swap 직전에 로컬 버퍼를 지우고 터미널
-  // 백엔드의 정본 history(현재 화면 제외)를 주입한다. attach 자체가 곧 현재 화면을 다시 그린다.
-  const buildTerminalSnapshotPayload = async (name, visibleRows) => {
-    let history = '';
-    try {
-      if (!usingHost()) {
-        // tmux 의 -E -1 = 보이는 화면 바로 위까지만. 화면 높이/줄바꿈 추측 없이 history 만 정확히 얻는다.
-        history = normalizeResizePromptHistory(String(await runTmux([
-          'capture-pane', '-p', '-e', '-t', `=${name}:0`, '-S', '-10000', '-E', '-1',
-        ]) || '')).replace(/\n/g, '\r\n');
-      } else {
-        // term-host capture API 는 end-line 이 없으므로 전체 버퍼에서 현재 물리 행만 제외한다.
-        const captured = String(await termBackend.capture(name, { escapes: true, lines: 10000 }) || '');
-        const lines = captured.replace(/\n$/, '').split('\n');
-        const keep = Math.max(0, lines.length - Math.max(0, visibleRows | 0));
-        history = lines.slice(0, keep).join('\r\n');
-      }
-    } catch (_) { /* attach 는 살리고 버퍼만 빈 상태로 시작 */ }
-    return '\x1b[3J\x1b[H\x1b[2J' + (history ? history + '\r\n' : '');
-  };
-
-  // tmux attach의 최초 리페인트에는 ED3(스크롤백 삭제)가 들어올 수 있다. history를 attach 전에
-  // 보내면 이 리페인트가 곧바로 지워 새 모바일 xterm의 baseY가 0이 된다. 최초 출력만 잠깐
-  // 버퍼링한 뒤 history → ED3를 제거한 현재화면 리페인트 순으로 전달한다.
-  const stripScrollbackErase = (chunk) => {
-    // ED3뿐 아니라 RIS(ESC c)도 xterm의 로컬 scrollback을 전부 지운다. history를 먼저
-    // 주입한 뒤 오는 tmux 최초 repaint에서 둘 다 제거해야 기기별 viewport 패딩이 보존된다.
-    if (!Buffer.isBuffer(chunk)) return String(chunk).replace(/\x1b(?:\[3J|c)/g, '');
-    let out = chunk;
-    for (const needle of [Buffer.from('\x1b[3J'), Buffer.from('\x1bc')]) {
-      const parts = [];
-      let start = 0, at;
-      while ((at = out.indexOf(needle, start)) !== -1) {
-        if (at > start) parts.push(out.subarray(start, at));
-        start = at + needle.length;
-      }
-      if (start !== 0) {
-        if (start < out.length) parts.push(out.subarray(start));
-        out = Buffer.concat(parts);
-      }
-    }
-    return out;
-  };
-  const finishHistoryBootstrap = async (myGen, boot, bootstrap, snapshotName) => {
-    await new Promise((resolve) => setTimeout(resolve, 40));
-    if (myGen !== gen) return;
-    boot.active = false;
-    const chunks = boot.chunks.splice(0);
-    const snapshotChunks = [bootstrap];
-    // tmux attach의 raw 최초 repaint에는 환경/버전에 따라 scrollback을 재설정하는 제어가 섞인다.
-    // 최초 snapshot은 capture-pane 현재 화면+커서로 안전하게 재구성하고, raw 청크는 버린다.
-    if (!usingHost()) {
-      try {
-        const target = `=${snapshotName}:0`;
-        const [screenRaw, cursorRaw] = await Promise.all([
-          runTmux(['capture-pane', '-p', '-e', '-t', target]),
-          runTmux(['display-message', '-p', '-t', target, '#{cursor_x},#{cursor_y}']),
-        ]);
-        const screen = String(screenRaw || '').replace(/\n/g, '\r\n');
-        const cm = /^(\d+),(\d+)$/.exec(String(cursorRaw || '').trim());
-        const cursor = cm ? `\x1b[${Number(cm[2]) + 1};${Number(cm[1]) + 1}H` : '\x1b[H';
-        snapshotChunks.push('\x1b[H\x1b[2J' + screen + cursor);
-      } catch (_) { /* 아래 raw repaint 폴백 */ }
-      if (snapshotChunks.length > 1) {
-        sendSnapshot(snapshotChunks, { cols: lastW || cols, rows: lastH || rows, historyBootstrap: true });
-        return;
-      }
-    }
-    // tmux 최초 repaint의 ED3/RIS가 PTY 데이터 청크 경계에서 갈라질 수 있다. 청크별 필터는
-    // ESC[ / 3J를 놓쳐 history를 다시 지우므로 먼저 합친 뒤 한 번만 제거한다.
-    if (chunks.length) {
-      const merged = Buffer.concat(chunks.map((chunk) => Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8')));
-      const clean = stripScrollbackErase(merged);
-      if (clean.length) snapshotChunks.push(clean);
-    }
-    // 첫 청크는 history 전용이다. 서버의 rows(현재 PC/tmux 높이)로 viewport를 패딩하면 화면이 더
-    // 큰 모바일에서 history가 다시 현재화면으로 소비된다. 각 클라이언트가 자기 term.rows만큼
-    // 밀어 올릴 수 있도록 메타로 구분한다.
-    sendSnapshot(snapshotChunks, { cols: lastW || cols, rows: lastH || rows, historyBootstrap: true });
-  };
-
-  // 백엔드 attach 핸들 + 세대 토큰 — swap(탭 전환)으로 교체된 구 핸들의 exit/close 는 무시한다
-  //  (구 nodePty 시절의 `p !== pty` 가드 등가. 콜백이 핸들 확정 전에 발화해도 안전하게 gen 으로 판정).
-  let term = null;
-  let gen = 0;
-  const mkHandlers = (myGen, boot = null) => ({
-    onData: (data) => {
-      // 탭 전환은 먼저 세대를 올리고 정본 history를 보낸다. 그 짧은 동안 이전 터미널이
-      // 출력하면 clear/history 사이에 섞여 기기별 로컬 스크롤백이 다시 달라지므로 폐기한다.
-      if (myGen !== gen) return;
-      if (boot && boot.active) { boot.chunks.push(data); return; }
-      // 출력은 어댑터가 전송 형태를 결정한다(릴레이 평문=텍스트 프레임, 봉인/LAN=바이너리).
-      //  멀티바이트 분할은 백엔드(node-pty/term-host) 단계에서 이미 결정되므로 어느 경로든 동일하다.
-      sendOut(data);
-    },
-    onExit: (exitCode) => {
-      if (myGen !== gen) return; // swap 으로 교체된 이전 클라이언트의 종료 — 스트림은 계속 산다
-      console.log(`[pty] tmux 클라이언트 종료 exitCode=${exitCode}`);
-      try { io.close(); } catch (_) { /* noop */ }
-    },
-    onClose: () => {
-      if (myGen !== gen) return; // 교체된 구 attach 의 소켓 정리(win32) — 무시
-      try { io.close(); } catch (_) { /* noop */ }
-    },
-  });
-  try {
-    gen = 1;
-    if (canonicalEnabled()) {
-      term = await openCanonicalStream(canonicalRegistry, attachName, {
-        cols: attachW, rows: attachH, cwd: abs,
-        onSnapshot: (snapshot) => sendSnapshot([snapshot.ansi], {
-          cols: snapshot.cols, rows: snapshot.rows, canonicalModel: true, serverHistory: true, modelSeq: snapshot.seq,
-        }),
-        onOutput: (frame) => sendOut(frame.payload),
-        onExit: (code) => mkHandlers(1).onExit(code),
-      });
-    } else {
-      const bootstrap = await buildTerminalSnapshotPayload(attachName, attachH);
-      const boot = { active: true, chunks: [] };
-      term = await termBackend.attach(attachName, {
-        cols, rows, cwd: abs, setLatest: !usingHost(), sharedCreate: shared && !usingHost(),
-        ignoreSize: !usingHost(),
-        ...mkHandlers(1, boot),
-      });
-      await finishHistoryBootstrap(1, boot, bootstrap, attachName);
-    }
-  } catch (e) {
-    lastSpawnFailAt = Date.now();
-    console.error(`[pty] 스폰 실패(3초 쿨다운 진입): ${e.message}`);
-    sendOut(`\r\n\x1b[31m터미널 생성 실패: ${e.message}\x1b[0m\r\n`);
+  // term-host(win32) 백엔드는 tmux control mode 가 없어 아직 CPT3 를 못 만든다 — 웨이브3 과제는
+  //  TerminalHost 의 transport 를 tmux-control ↔ term-host attach 스트림으로 갈아끼우는 일이다.
+  if (usingHost()) {
+    sendOut('\r\n\x1b[31m[이 호스트는 아직 v3 터미널을 지원하지 않습니다]\x1b[0m\r\n');
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }
-  console.log(`[pty] 스트림 연결 (transport=${io.transport || 'relay'}, session=${session}${paneId ? ' term=' + attachName : ''}, cwd=${abs}, ${attachW}x${attachH}${io.label || ''})`);
-
-  // (선언 순서 주의: cleanup 이 handle 을 참조하므로 먼저 선언한다 — TDZ 사고 방지)
-  let handle = null;
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    // 터미널 클라이언트만 종료(detach) — 세션(터미널 실체)은 백엔드(tmux 서버/term-host)에 살아남는다.
-    if (typeof io.dispose === 'function') { try { io.dispose(); } catch (_) { /* noop */ } }
-    if (nudgeTimer) { clearTimeout(nudgeTimer); nudgeTimer = null; }
-    if (handle && paneStreams.get(pkey) === handle) paneStreams.delete(pkey);
-    if (idleReaper) { clearInterval(idleReaper); idleReaper = null; }
-    try { term.close(); } catch (_) { /* noop */ }
-  };
-
-  // ★ 릴레이 스트림은 뷰어가 죽어도 곧바로 닫히지 않는다 — 앱을 강제 종료하고 4분이 지나도
-  //   데몬 쪽 소켓이 살아 있었다(2026-09-04 실측). 그동안 canonical VT 와 backend attach 가
-  //   붙잡혀 있어 터미널마다 하나씩 샌다(8월에 13일 묵은 attach 가 남아 있던 원인).
-  //   keepalive 를 보내던 클라이언트가 갑자기 조용해지면 그 스트림은 죽은 것으로 본다.
-  //   ⚠ keepalive 를 한 번도 안 보낸 클라이언트(PC 원격 뷰어)는 대상이 아니다 — 조용한 게 정상이다.
-  //  (테스트는 CPT_STREAM_IDLE_MS 로 상한을 낮춰 실제 정리 동작을 관찰한다)
-  const STREAM_IDLE_MS = Math.max(500, Number(process.env.CPT_STREAM_IDLE_MS) || 90000);
-  const streamOpenedAt = Date.now();
-  let lastClientMsgAt = streamOpenedAt;
-  let clientMsgs = 0;
-  let sawKeepalive = false;
-  const noteClientAlive = () => { clientMsgs++; lastClientMsgAt = Date.now(); };
-  // 죽은 스트림 판정은 두 가지다. 둘 다 실측에서 나온 경우다:
-  //  (1) keepalive 를 보내던 뷰어가 조용해졌다 — 앱이 죽었는데 릴레이 소켓만 살아 있는 경우.
-  //  (2) 열리고 나서 **한 마디도 없다** — 폰이 죽은 뒤 백이 스트림만 다시 열어 주는 좀비.
-  //      살아 있는 뷰어는 PC 든 모바일이든 접속 직후 반드시 resize 를 보낸다(그게 없으면 유령).
-  //  ⚠ "조용함" 하나로만 끊으면 안 된다 — PC 원격 뷰어는 resize 뒤 계속 조용한 게 정상이다.
-  //  (3) keepalive 를 아직/전혀 안 보낸 뷰어라도 아주 오래 조용하면 죽은 것으로 본다.
-  //      접속 25초(=keepalive 주기) 안에 죽은 폰은 resize 만 남기고 사라져 (1)(2) 어디에도
-  //      안 걸린다 — 실측에서 이 스트림이 영구히 남았다. 구버전 뷰어를 잘못 끊지 않도록
-  //      상한을 넉넉히(기본 6분) 두고, 끊겨도 클라이언트가 알아서 재접속한다.
-  const NO_KA_IDLE_MS = STREAM_IDLE_MS * 4;
-  const deadStreamReason = (now) => {
-    const silent = now - lastClientMsgAt;
-    if (sawKeepalive) return silent >= STREAM_IDLE_MS ? `keepalive 끊김 ${Math.round(silent / 1000)}초` : null;
-    if (clientMsgs === 0 && now - streamOpenedAt >= STREAM_IDLE_MS) return '접속 후 무응답(유령 스트림)';
-    if (silent >= NO_KA_IDLE_MS) return `무응답 ${Math.round(silent / 1000)}초(keepalive 미사용 뷰어)`;
-    return null;
-  };
-  let idleReaper = setInterval(() => {
-    if (cleaned) return;
-    const why = deadStreamReason(Date.now());
-    if (!why) return;
-    console.warn(`[pty] 스트림 정리 — ${why}`);
-    try { io.close(); } catch (_) { /* noop */ }
-    cleanup();
-  }, Math.max(200, Math.min(15000, Math.floor(STREAM_IDLE_MS / 4))));
-  if (typeof idleReaper.unref === 'function') idleReaper.unref();
-
-  // terminal.select → 이 스트림의 attach 대상을 즉석 교체(구 모델의 select-window 대체).
-  //  뷰어 연결은 유지한 채 백엔드 attach 만 갈아끼운다 — attach 가 전체 화면을 다시 그리므로
-  //  (tmux 리페인트 / term-host serializeRepaint) 앱 쪽은 끊김 없이 새 터미널 내용으로 전환된다.
+  const { attachV3 } = require('./pty-v3');
+  const deviceName = params && typeof params.deviceName === 'string' ? params.deviceName : '';
+  const v3 = await attachV3({
+    name: attachName, cols, rows,
+    device: client ? { deviceId: client, name: deviceName || client } : null,
+    deps: { tmux: findTmux(), socket: TMUX_SOCKET, env: tmuxEnv(), runTmux },
+  }, io);
+  // 탭 전환 등록 — 앱·PC 는 탭을 바꿔도 스트림을 새로 열지 않고 `terminal.select` 만 부른다.
+  //  (v2 시절 attachPty 가 하던 일. v3 로 넘어오면서 빠져 있었다 — 2026-09-06 복구.)
   if (pkey) {
-    const swap = async (newTid) => {
-      const myGen = ++gen; // 이 시점부터 구 핸들의 exit/close 는 무시된다
-      const nextName = termSession(session, newTid);
-      if (canonicalEnabled()) {
-        try {
-          const np = await openCanonicalStream(canonicalRegistry, nextName, {
-            cols: lastW || cols, rows: lastH || rows, cwd: abs,
-            onSnapshot: (snapshot) => sendSnapshot([snapshot.ansi], {
-              cols: snapshot.cols, rows: snapshot.rows, canonicalModel: true, serverHistory: true, modelSeq: snapshot.seq,
-            }),
-            onOutput: (frame) => { if (myGen === gen) sendOut(frame.payload); },
-            onExit: (code) => mkHandlers(myGen).onExit(code),
-          });
-          if (myGen !== gen || cleaned) { np.close(); return; }
-          const old = term;
-          term = np; attachName = nextName; tid = newTid;
-          if (handle) handle.tid = newTid;
-          paneCurrent.set(pkey, newTid);
-          try { old.close(); } catch (_) { /* noop */ }
-        } catch (e) {
-          console.warn(`[pty] canonical 탭 전환 실패: ${(e && e.message) || e}`);
-        }
-        return;
-      }
-      const bootstrap = await buildTerminalSnapshotPayload(nextName, lastH || rows);
-      const boot = { active: true, chunks: [] };
-      termBackend.attach(nextName, {
-        cols: lastW || cols, rows: lastH || rows, cwd: abs,
-        setLatest: !usingHost(),
-        ignoreSize: !usingHost(),
-        ...mkHandlers(myGen, boot),
-      }).then((np) => {
-        if (myGen !== gen || cleaned) { try { np.close(); } catch (_) { /* noop */ } return; }
-        const old = term;
-        term = np;
-        attachName = nextName;
-        tid = newTid;
-        if (handle) handle.tid = newTid;
-        paneCurrent.set(pkey, newTid);
-        try { old.close(); } catch (_) { /* noop */ }
-        finishHistoryBootstrap(myGen, boot, bootstrap, nextName).catch(() => {});
-      }).catch((e) => {
-        // 스트림 사망/세션 소멸 직후 등 — 재접속 경로가 paneCurrent 로 잇는다.
-        console.warn(`[pty] 탭 전환 attach 실패: ${(e && e.message) || e}`);
-      });
-    };
-    // 같은 pane 아이덴티티의 기존 스트림 축출 — 경로 전환/재접속이 겹쳐도 tmux 클라이언트는 1개.
+    // 같은 pane 아이덴티티로 새 스트림이 열리면(릴레이↔LAN 경로 전환·재접속 겹침) 옛 것을 축출한다.
+    //  v3 에선 크기 핑퐁 걱정은 없지만(정본 host 하나에 control 클라이언트 하나), 놔두면 죽은 뷰어가
+    //  리퍼(90초)까지 릴레이 소켓과 구독을 붙잡는다.
     const prev = paneStreams.get(pkey);
-    if (prev && typeof prev.displace === 'function') {
-      console.log(`[pty] 같은 pane 의 기존 스트림 축출(경로 전환/재접속) pkey=${pkey}`);
-      try { prev.displace(); } catch (_) { /* noop */ }
-    }
-    handle = {
+    if (prev && typeof prev.evict === 'function') { try { prev.evict(); } catch (_) { /* noop */ } }
+    const entry = {
       tid,
-      swap,
-      sync: () => sendCanonicalSnapshot().then((sent) => sent || sendShellSnapshot()),
-      async claim() {
-        let changed = false;
-        if (!usingHost()) {
-          try {
-            const size = String(await runTmux([
-              'display-message', '-p', '-t', `=${attachName}:0`, '#{window_width}x#{window_height}',
-            ])).trim();
-            changed = size !== `${lastW || cols}x${lastH || rows}`;
-          } catch (_) { /* 종료 경합이면 기존 resize 경로가 처리 */ }
-        }
-        await claimControllerLease();
-        applyViewerResize(lastW || cols, lastH || rows);
-        await resizeBarrier;
-        // 다른 기기 크기에서 이 기기 크기로 실제 전환된 경우, tmux의 커서 좌표와 이 xterm의
-        // 로컬 행 배치가 달라진다. 이때만 정본으로 한 번 재동기화한다. 같은 크기 터치마다
-        // snapshot을 보내면 scrollback 복제·캡처 비용이 생기므로 changed=false에서는 금지.
-        if (changed) {
-          await new Promise((resolve) => setTimeout(resolve, 80)); // 셸 SIGWINCH redraw가 pane에 반영될 시간
-          if (!(await sendCanonicalSnapshot())) await sendShellSnapshot();
-        }
+      swap(nextTid) {
+        entry.tid = nextTid;
+        v3.swapTo(termSession(session, nextTid)).catch(() => { /* 스트림 사망 직후 등 */ });
       },
-      // 축출: 옛 전송을 닫고 tmux 클라이언트를 즉시 정리한다(cleanup 이 paneStreams 도 비운다).
-      displace() { try { io.close(); } catch (_) { /* noop */ } cleanup(); },
+      evict() { try { io.close(); } catch (_) { /* noop */ } v3.cleanup(); },
     };
-    paneStreams.set(pkey, handle);
+    paneStreams.set(pkey, entry);
+    io.onClose(() => { if (paneStreams.get(pkey) === entry) paneStreams.delete(pkey); });
   }
-
-  // ── 와이어 의미(stdin / text) 처리기 한 벌 — 모든 전송·암호 모드가 공유한다 ──
-  // 옛 "바이너리 프레임" 경로.
-  // 입력이 지나갈 때 **모드 감시자에게 알린다** — shift+tab(CSI Z)이면 그 터미널을 즉시 다시 읽어
-  //  채팅 알약이 3초 폴링을 기다리지 않고 곧바로 따라온다(사용자 요청 2026-08-02). 다른 키는 무시.
-  //  ⚠ 우리 입력 경로를 지나가는 키만 보인다 — 사용자가 Mac 터미널에서 직접 누른 건 폴링/캐치업이 잡는다.
-  const notifyInput = (payload) => {
-    if (!paneId) return;
-    try { require('./status-line').onTerminalInput(termSession(session, tid), payload); } catch (_) { /* noop */ }
-  };
-  const handleStdin = (buf) => {
-    syncSeq++;
-    noteClientAlive();
-    notifyInput(buf);
-    const input = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf);
-    const now = Date.now();
-    refreshControllerLease();
-    // 크기 재주장은 tmux 프로세스를 스폰한다(실측 5.5ms). 연속 타이핑마다 걸면 그 왕복이 입력에
-    //  쌓이므로, 입력이 한 번 끊겼다 재개될 때만 이 기기 크기를 되찾는다.
-    if (now - lastInputAt > 500) applyViewerResize(lastW || cols, lastH || rows);
-    lastInputAt = now;
-    // ⚠ 입력 write 는 반드시 **공유 resizeBarrier 한 줄**에만 매단다. 같은 프라미스에 등록된
-    //   콜백은 등록 순서대로 실행되므로 이것이 곧 키 순서 보장이다. 여기에 입력별 비동기 단계를
-    //   하나라도 끼우면 순서가 뒤집힌다(2026-09-04: 리스 클레임을 await 해 실제로 뒤집혔다 —
-    //   `echo 0123…` 가 `mlkjihgfedcba9876543210 ohcesqrpontuv` 로 도착).
-    resizeBarrier.then(() => { try { term.write(input); } catch (_) { /* noop */ } });
-  };
-  // 옛 "텍스트 프레임" 경로 — JSON 이면 resize, 아니면 일반 입력(폴스루). 봉인 모드/LAN TEXT 프레임의
-  //  payload 가 **그대로** 이 함수로 들어온다(원문 JSON 보존 = 리사이즈 의미 불변).
-  const handleTextFrame = (str) => {
-    noteClientAlive();
-    try {
-      const m = JSON.parse(str);
-      // 연결 유지 프레임은 터미널 입력도, 크기 주장도 아니다. 예전 모바일은 keepalive 로 resize 를
-      // 재전송해 크기가 다른 세 기기가 25초마다 window-size latest 를 서로 빼앗았고, 그 SIGWINCH
-      // 재도장이 tmux history 와 기기별 xterm scrollback 에 반복 적재됐다.
-      if (m && m.type === 'keepalive') { sawKeepalive = true; noteClientAlive(); return; }
-      if (m && m.type === 'sync') { sendCanonicalSnapshot().then((sent) => { if (!sent) sendShellSnapshot(); }); return; }
-      // 스크롤 라우팅 모드 정본 — 클라이언트가 DECSET 을 엿보며 추측하지 않게 서버가 알려준다.
-      //  tmux 는 alternate-screen off + smcup@ 로 1049 를 클라이언트에도 서버 VT 에도 보내지 않으므로
-      //  "지금 풀스크린 앱인가"는 tmux 의 #{alternate_on} 만 알 수 있다. 그 값을 override 로 얹는다.
-      if (m && m.type === 'modes' && protocolV2) {
-        (async () => {
-          // tmux 는 pane 의 alternate/mouse 상태를 자기가 들고 있고, smcup@ 때문에 그 전환을
-          //  클라이언트에도 서버 VT 에도 보내지 않는다. 그래서 tmux 값이 이 둘의 정본이다.
-          //  ⚠ alternate-screen 옵션이 off 이면 tmux 도 추적을 안 해 늘 0 이 된다(ensureTruecolor 가 on 강제).
-          let tmuxModes = null;
-          if (!usingHost()) {
-            try {
-              const raw = await runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on},#{mouse_any_flag}']);
-              const [alt, mouse] = String(raw).trim().split(',');
-              tmuxModes = { altScreen: alt === '1', mouseTracking: mouse === '1' };
-            } catch (_) { /* 세션 전환 경쟁 — 아래 폴백 */ }
-          }
-          let modes;
-          if (term && term.model && typeof term.model.modes === 'function') {
-            // canonical VT 가 있으면 appCursor/bracketedPaste 까지 정확하다. mouse/alt 만 tmux 로 덮는다.
-            modes = await term.model.modes(tmuxModes || {});
-          } else if (tmuxModes) {
-            modes = { appCursor: false, bracketedPaste: false, ...tmuxModes };
-          } else {
-            return; // 알 수 없으면 침묵 — 클라이언트가 로컬 추론으로 폴백한다.
-          }
-          sendFrame(terminalV2.OPCODE.METADATA, JSON.stringify({ kind: 'modes', ...modes }));
-        })().catch(() => {});
-        return;
-      }
-      if (m && m.type === 'history' && protocolV2) {
-        // 과거의 정본은 **tmux 격자**다(canonical VT 스크롤백이 아니라). tmux 는 리사이즈마다 pane 을
-        //  다시 그리는데, 그 스트림을 먹는 VT 는 재도장 잔재까지 과거로 쌓는다(실측: 리사이즈 7회에
-        //  43줄 과다). 그래서 canonical 플래그와 **무관하게** 백엔드에서 바로 읽는다 — 그래야
-        //  프로덕션 기본값(canonical off)에서도 PC 원격·모바일이 같은 과거를 본다.
-        (async () => {
-          let page = null;
-          if (typeof termBackend.historyPage === 'function') {
-            page = await termBackend.historyPage(attachName, { before: m.before, limit: m.limit }).catch(() => null);
-          }
-          if (!page && term && term.model && typeof term.model.historyPage === 'function') {
-            page = await term.model.historyPage({ before: m.before, limit: m.limit }).catch(() => null);
-          }
-          if (page) sendFrame(terminalV2.OPCODE.HISTORY_PAGE, JSON.stringify(page));
-        })().catch(() => {});
-        return;
-      }
-      if (m && m.type === 'resize' && m.cols && m.rows) {
-        const w = m.cols | 0, h = m.rows | 0;
-        // ★ 퇴화 크기는 받지 않는다(2026-09-05 안드로이드 실기 실측). 클라이언트의 격자가 숨겨진
-        //   상태에서 fit 하면 xterm FitAddon 이 자기 최소값(MINIMUM_COLS=2, MINIMUM_ROWS=1)을
-        //   돌려주는데, tmux 는 `window-size latest` 라 그 값이 **공유 window 를 2x1 로 접고**
-        //   그 창을 보는 모든 기기가 같이 무너진다(실측: win=2x1, history 가 2자짜리 줄로 폭발).
-        //   실제 기기 중 8x3 보다 작은 뷰어는 없다 — 이건 오직 버그 신호다. 클라 방어와 이중으로 둔다.
-        if (w < MIN_VIEWER_COLS || h < MIN_VIEWER_ROWS) {
-          console.warn(`[pty] 퇴화 resize 무시 — ${w}x${h} (뷰어 격자가 숨겨진 상태의 fit 으로 추정)`);
-          return;
-        }
-        lastW = w; lastH = h;
-        mayResizeForLease().then(async (allowed) => {
-          const wasFirstResize = !firstResizeDone;
-          const v1Size = `${w}x${h}`;
-          const needsV1Snapshot = !protocolV2 && v1Size !== lastV1SnapshotSize;
-          if (needsV1Snapshot) lastV1SnapshotSize = v1Size;
-          if (wasFirstResize) firstResizeDone = true;
-          // 컨트롤러 lease는 공유 PTY 크기만 보호한다. 로컬 xterm history 복원까지 막으면
-          // PC가 활성인 동안 새 Android/iOS는 baseY≈0으로 영구 고착된다.
-          if (!allowed) {
-            if (needsV1Snapshot) await sendV1ViewerSnapshot(h);
-            return;
-          }
-          await claimControllerLease();
-          applyViewerResize(w, h);
-          await resizeBarrier;
-          if (protocolV2) sendFrame(terminalV2.OPCODE.RESIZED, JSON.stringify({ epoch: streamEpoch, cols: w, rows: h, owner: leaseOwner }));
-          if (wasFirstResize) {
-            if (w !== attachW || h !== attachH) {
-              if (nudgeTimer) clearTimeout(nudgeTimer);
-              nudgeTimer = setTimeout(() => {
-                const nudge = () => { try { term.resize(Math.max(2, lastW - 1), lastH); term.resize(lastW, lastH); } catch (_) { /* noop */ } };
-                if (usingHost()) nudge();
-                else runTmux(['display-message', '-p', '-t', `=${attachName}:0`, '#{alternate_on}'])
-                  .then((v) => { if (String(v).trim() === '1') nudge(); }).catch(() => {});
-              }, 600);
-            }
-          }
-          if (needsV1Snapshot) {
-            await new Promise((resolve) => setTimeout(resolve, 80));
-            await sendV1ViewerSnapshot(h);
-          }
-        }).catch(() => {});
-        return;
-      }
-    } catch (_) { /* JSON 아니면 일반 입력 */ }
-    handleStdin(str);
-  };
-
-  // 핸들러 등록 = 어댑터가 버퍼해 둔 셋업 중 메시지(첫 resize 등)의 순서 재생 시점.
-  io.onMessage((kind, payload) => {
-    if (kind === 'text') handleTextFrame(typeof payload === 'string' ? payload : payload.toString('utf8'));
-    else handleStdin(payload);
-  });
-  io.onClose(cleanup);
+  return v3;
 }
 
 // ── 멀티 터미널 RPC ──
@@ -1298,12 +723,9 @@ async function handleTerminalRpc(method, params) {
       if (h && h.tid !== tid) {
         try { h.swap(tid); } catch (_) { /* 스트림 사망 직후 등 — 재접속 경로가 paneCurrent 로 잇는다 */ }
       }
-      if (h && params && params.claim) {
-        try {
-          if (typeof h.claim === 'function') h.claim();
-          else if (typeof h.sync === 'function') h.sync();
-        } catch (_) { /* 포커스 동기화는 세션 전환 경쟁 시 다음 터치가 복구 */ }
-      }
+      // params.claim 은 **무시한다**(v2 잔재). v3 는 "크기 소유자 1명 + 사용자가 명시적으로 가져간다"
+      //  가 정책이라(설계 §1-1) 포커스·터치 같은 암묵 신호로 소유권이 넘어가면 안 된다 — 그게 기기
+      //  사이 재배치 폭풍의 원인이었다. 가져오기는 뷰어의 `{type:'claim'}`(알약 버튼) 하나뿐이다.
     }
     return { ok: true, index: tid };
   }
@@ -1411,4 +833,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, normalizeResizePromptHistory, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };

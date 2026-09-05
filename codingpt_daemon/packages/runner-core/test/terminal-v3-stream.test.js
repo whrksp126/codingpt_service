@@ -116,12 +116,21 @@ test('CPT3 왕복 — 스냅샷·입력·소유자 크기·claim·history·이�
   assert.ok(pc.json(v3.OPCODE.OWNER).some((o) => o.owner && o.owner.deviceId === 'phone-1' && o.self === false));
 
   // 과거 페이지.
-  ph.send({ type: 'input', data: Buffer.from('seq 1 100\r').toString('base64') });
-  await ph.until(() => ph.out.includes('100'));
-  ph.send({ type: 'history', limit: 30 });
-  assert.ok(await ph.until(() => ph.json(v3.OPCODE.HISTORY_PAGE).length > 0), 'history 응답 없음');
-  const page = ph.json(v3.OPCODE.HISTORY_PAGE)[0];
-  assert.ok(page.total > 40 && page.rows.length === 30 && page.rows.every((r) => typeof r.ansi === 'string'));
+  //  ⚠ 완료 판정은 **전용 마커**로 한다 — 예전엔 `ph.out.includes('100')` 이었는데 그건 방금 친
+  //   명령줄 에코("seq 1 100")에도 걸려서, 부하가 걸린 병렬 실행에서 100줄이 다 흐르기 전에
+  //   history 를 물어 total<40 으로 죽었다(단독 실행에서만 통과하는 전형적 flake).
+  ph.send({ type: 'input', data: Buffer.from('seq 1 100; echo SEQ-DONE\r').toString('base64') });
+  assert.ok(await ph.until(() => /SEQ-DONE\r?\n/.test(ph.out), 15000), 'seq 출력이 안 끝났다');
+  let page = null;
+  assert.ok(await ph.until(() => {
+    const got = ph.json(v3.OPCODE.HISTORY_PAGE);
+    const last = got[got.length - 1];
+    if (last && last.total > 40) { page = last; return true; }
+    ph.send({ type: 'history', limit: 30 });   // 아직 tmux/VT 가 다 못 받았다 — 다시 묻는다
+    return false;
+  }, 15000), 'history 가 100줄을 못 담았다');
+  assert.strictEqual(page.rows.length, 30);
+  assert.ok(page.rows.every((r) => typeof r.ansi === 'string'));
 
   // 이어받기: PC 가 마지막 seq 로 hello → 스냅샷 없이 OUTPUT 이어서.
   const lastSeq = Math.max(...pc.frames.filter((f) => f.opcode === v3.OPCODE.OUTPUT).map((f) => f.seq));
@@ -150,4 +159,63 @@ test('CPT3 왕복 — 스냅샷·입력·소유자 크기·claim·history·이�
 
   pc.ws.close(); ph.ws.close();
   await sleep(200);
+});
+
+// ★ 2026-09-06: v3 에는 **탭 전환(swap)이 아예 없었다**. 앱·PC 는 탭을 바꿔도 스트림을 새로 열지
+//   않고 `terminal.select` 만 부르므로(PaneView effect 3 / pane.js), 탭을 눌러도 옛 터미널이 계속
+//   보였다. v2 attachPty 가 하던 swap 을 pty-v3 로 옮겼고 이 테스트가 그 계약을 고정한다.
+//   함께 고정하는 것: 스왑 뒤 SNAPSHOT 이 **새 정본의 OUTPUT 보다 먼저** 나간다(안 그러면 클라가
+//   옛 세대의 seq/epoch 로 판정해 새 화면을 통째로 버린다).
+test('terminal.select — 살아있는 스트림이 다른 터미널로 스왑된다(스냅샷 선행)', { skip: !hasTmux }, async () => {
+  const a = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const b = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const v = await openViewer('v3-swap', { client: 'sw-1', win: a.index, cols: 80, rows: 24, deviceName: 'Sw' });
+  assert.ok(await v.until(() => v.json(v3.OPCODE.SNAPSHOT).length > 0), '첫 스냅샷 없음');
+  v.send({ type: 'resize', cols: 80, rows: 24 });
+  await sleep(600);
+
+  v.send({ type: 'input', data: Buffer.from('echo IN-A\r').toString('base64') });
+  assert.ok(await v.until(() => v.out.includes('IN-A')), 'A 입력이 안 돌아왔다');
+
+  const snapsBefore = v.json(v3.OPCODE.SNAPSHOT).length;
+  const mark = v.frames.length;                    // 이 지점 이후 프레임만 본다
+  const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: b.index, paneId: 'p-sw-1', client: 'sw-1' });
+  assert.strictEqual(sel.index, b.index);
+  assert.ok(await v.until(() => v.json(v3.OPCODE.SNAPSHOT).length > snapsBefore), '스왑 뒤 스냅샷이 없다 — 탭을 바꿔도 옛 터미널이 보인다');
+  assert.strictEqual(v.ws.readyState, WebSocket.OPEN, '스왑이 WS 를 끊었다');
+
+  // 순서: 스왑 뒤 첫 프레임은 SNAPSHOT 이어야 한다(새 정본 OUTPUT 이 먼저 나가면 클라가 버린다).
+  const after = v.frames.slice(mark);
+  const iSnap = after.findIndex((f) => f.opcode === v3.OPCODE.SNAPSHOT);
+  const iOut = after.findIndex((f) => f.opcode === v3.OPCODE.OUTPUT);
+  assert.ok(iSnap >= 0 && (iOut === -1 || iSnap < iOut), `스왑 스냅샷보다 새 정본 OUTPUT 이 먼저 나갔다(snap=${iSnap}, out=${iOut})`);
+
+  v.send({ type: 'input', data: Buffer.from('echo IN-B\r').toString('base64') });
+  assert.ok(await v.until(() => v.out.includes('IN-B')), '스왑 후 입력이 새 터미널에 안 갔다');
+  const capA = String(await pty.runTmux(['capture-pane', '-p', '-t', `=${pty.termSession(pty.sessionForCwd(WS_REL).session, a.index)}:0`, '-S', '-30']));
+  assert.ok(!capA.includes('IN-B'), '스왑 후에도 입력이 옛 터미널로 샌다');
+  const capB = String(await pty.runTmux(['capture-pane', '-p', '-t', `=${pty.termSession(pty.sessionForCwd(WS_REL).session, b.index)}:0`, '-S', '-30']));
+  assert.ok(capB.includes('IN-B'), '새 터미널에 입력이 안 들어갔다');
+
+  v.ws.close();
+  await sleep(200);
+  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: a.index });
+  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: b.index });
+});
+
+// keepalive 는 크기 재주장이 아니다 — 여러 기기가 주기적으로 크기를 다시 주장하면 창이 왕복한다.
+test('keepalive 는 터미널 크기를 건드리지 않는다', { skip: !hasTmux }, async () => {
+  const t = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const session = pty.termSession(pty.sessionForCwd(WS_REL).session, t.index);
+  const size = async () => String(await pty.runTmux(['display-message', '-p', '-t', `=${session}:0`, '#{window_width}x#{window_height}'])).trim();
+  const v = await openViewer('v3-ka', { client: 'ka-1', win: t.index, cols: 100, rows: 30, deviceName: 'Ka' });
+  v.send({ type: 'resize', cols: 100, rows: 30 });
+  assert.ok(await v.until(async () => true) && (await size()) === '100x30', `소유자 크기 미반영: ${await size()}`);
+  const before = await size();
+  v.send({ type: 'keepalive' });
+  await sleep(300);
+  assert.strictEqual(await size(), before, 'keepalive 가 크기를 바꿨다');
+  v.ws.close();
+  await sleep(150);
+  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: t.index });
 });

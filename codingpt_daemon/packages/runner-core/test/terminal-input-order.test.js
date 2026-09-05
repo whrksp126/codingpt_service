@@ -1,10 +1,9 @@
-// 원격 입력 순서 회귀 — "키를 친 순서대로 PTY 에 들어간다"는 계약 고정.
+// 원격 입력 순서 + 유령 스트림 회수 회귀 — CPT3 경로(terminalProtocol:3)로 고정한다.
 //
-// ★ 2026-09-04 실사고: 컨트롤러 리스 도입이 입력 경로에 `claimControllerLease().then(write)` 를
-//   넣었다. 이 함수는 `execFile(tmux …)` 를 스폰하므로 입력마다 **독립 비동기 체인**이 생기고,
-//   그 완료 순서는 스폰 순서와 무관하다(동시 12건 실측 완료 순서 3,2,1,0,5,4,7,6,…).
-//   즉 빠른 타이핑·컴포저 버스트에서 키가 뒤집혀 들어갈 수 있었다.
-//   계약: 입력 write 는 **공유 resizeBarrier 한 줄**에만 매달고, 리스 갱신은 그 경로를 막지 않는다.
+// ★ 2026-09-04 실사고(v2): 컨트롤러 리스가 입력마다 `execFile(tmux …)` 를 스폰해 완료 순서가
+//   뒤집혔다(동시 12건 실측 3,2,1,0,5,4,7,6,…) → 빠른 타이핑에서 키가 뒤집혔다. 리스는 v3 에서
+//   통째로 사라졌고, 지금 순서를 보장하는 것은 tmux-control 의 `command()` 가 **동기 stdin write**
+//   라는 사실 하나다(tmux 가 그 줄들을 순차 처리한다). 그 계약이 깨지면 이 테스트가 먼저 죽는다.
 //
 // 안전: CODINGPT_TMUX_SOCKET 격리 소켓 강제 — 실사용 -L codingpt 무접촉.
 
@@ -21,8 +20,8 @@ const SOCK = `codingpt-order-test-${process.pid}-${Date.now()}`;
 process.env.CODINGPT_TMUX_SOCKET = SOCK;
 // 무응답 스트림 회수 상한을 테스트용으로 낮춘다(운영 기본 90초를 그대로 기다릴 수 없다).
 process.env.CPT_STREAM_IDLE_MS = '1200';
-// canonical 모델은 마지막 구독자가 떠난 뒤에도 잠깐(운영 30초) 살아 있다 — 그 유예도 낮춘다.
-process.env.CPT_CANONICAL_IDLE_MS = '800';
+// 마지막 뷰어가 떠난 뒤 TerminalHost 가 control 클라이언트를 놓는 유예(운영 30초)도 낮춘다.
+process.env.CPT_HOST_IDLE_MS = '800';
 
 const runtime = require('../runtime');
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-order-'));
@@ -89,7 +88,7 @@ test('키를 한 글자씩 연속으로 보내도 PTY 입력 순서가 보존된
   const cfgLike = { serverUrl: `http://127.0.0.1:${port}`, deviceToken: 'test' };
   const t = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
 
-  pty.openPtyStream(cfgLike, { streamToken: 'ord1', params: { cwd: WS_REL, paneId: 'pO', client: 'cO', win: t.index, cols: 80, rows: 24 } });
+  pty.openPtyStream(cfgLike, { streamToken: 'ord1', params: { cwd: WS_REL, paneId: 'pO', client: 'cO', win: t.index, cols: 80, rows: 24, terminalProtocol: 3 } });
   const ws = await waitStream('ord1');
   ws.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));
   await sleep(900); // attach + 셸 프롬프트
@@ -120,7 +119,7 @@ test('keepalive 를 보내던 스트림이 조용해지면 정리된다', { skip
   const attaches = async () => (await tmux(['list-clients', '-F', '#{client_session}']))
     .split('\n').filter((l) => l.trim() === NAME).length;
 
-  pty.openPtyStream(cfgLike, { streamToken: 'idle1', params: { cwd: WS_REL, paneId: 'pI', client: 'cI', win: t.index, cols: 80, rows: 24 } });
+  pty.openPtyStream(cfgLike, { streamToken: 'idle1', params: { cwd: WS_REL, paneId: 'pI', client: 'cI', win: t.index, cols: 80, rows: 24, terminalProtocol: 3 } });
   const ws = await waitStream('idle1');
   const closed = new Promise((resolve) => ws.on('close', () => resolve(true)));
   ws.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));
@@ -131,7 +130,7 @@ test('keepalive 를 보내던 스트림이 조용해지면 정리된다', { skip
   // 이제 조용해진다(뷰어가 죽었지만 릴레이 소켓은 살아 있는 실제 상황).
   const reaped = await Promise.race([closed, sleep(6000).then(() => false)]);
   assert.strictEqual(reaped, true, '무응답 스트림이 정리되지 않았다');
-  // canonical 모드는 유예가 지나야 VT 와 attach 를 놓는다 — 0 이 될 때까지 폴링한다.
+  // 마지막 뷰어가 떠나면 TerminalHost 가 control 클라이언트를 놓는다 — 0 이 될 때까지 폴링한다.
   let after = -1;
   for (let i = 0; i < 60; i++) {
     after = await attaches();
@@ -141,21 +140,8 @@ test('keepalive 를 보내던 스트림이 조용해지면 정리된다', { skip
   assert.strictEqual(after, 0, `backend attach 가 회수되지 않았다(남은 attach=${after})`);
 });
 
-// PC 원격 뷰어는 keepalive 를 보내지 않는다 — 조용한 게 정상이므로 끊으면 안 된다.
-test('keepalive 를 쓰지 않는 뷰어는 (짧은 침묵으로는) 끊기지 않는다', { skip: !hasTmux }, async () => {
-  await startRelay();
-  const cfgLike = { serverUrl: `http://127.0.0.1:${port}`, deviceToken: 'test' };
-  const t = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
-  pty.openPtyStream(cfgLike, { streamToken: 'idle2', params: { cwd: WS_REL, paneId: 'pQ', client: 'cQ', win: t.index, cols: 80, rows: 24 } });
-  const ws = await waitStream('idle2');
-  let gone = false; ws.on('close', () => { gone = true; });
-  ws.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));   // keepalive 는 안 보낸다
-  // keepalive 상한(1200ms)의 몇 배가 지나도, 구버전 뷰어용 넉넉한 상한(4배) 전에는 살아 있어야 한다.
-  await sleep(3000);
-  assert.strictEqual(gone, false, 'keepalive 를 안 쓰는 뷰어를 너무 빨리 끊었다');
-  ws.close();
-  await sleep(200);
-});
+// (삭제) "keepalive 를 안 쓰는 뷰어는 안 끊긴다" — v3 뷰어는 앱·PC 모두 25초 keepalive 를 보낸다
+//  (TerminalWebView `__keepalive` · pane.js). 구버전 뷰어용 4배 유예는 v2 경로와 함께 사라졌다.
 
 // ★ 2026-09-04 실측: 폰을 강제 종료해도 백이 데몬에 스트림을 **다시 열어 준다**. 그 스트림은
 //   접속 후 resize 조차 보내지 않는 유령이다. keepalive 기준만으로는 절대 안 걷히고,
@@ -168,7 +154,7 @@ test('접속 후 한 마디도 없는 유령 스트림은 정리된다', { skip:
   const attaches = async () => (await tmux(['list-clients', '-F', '#{client_session}']))
     .split('\n').filter((l) => l.trim() === NAME).length;
 
-  pty.openPtyStream(cfgLike, { streamToken: 'ghost1', params: { cwd: WS_REL, paneId: 'pG', client: 'cG', win: t.index, cols: 80, rows: 24 } });
+  pty.openPtyStream(cfgLike, { streamToken: 'ghost1', params: { cwd: WS_REL, paneId: 'pG', client: 'cG', win: t.index, cols: 80, rows: 24, terminalProtocol: 3 } });
   const ws = await waitStream('ghost1');
   const closed = new Promise((resolve) => ws.on('close', () => resolve(true)));
   await sleep(800);
@@ -190,7 +176,7 @@ test('keepalive 없이 조용해진 뷰어도 결국 정리된다', { skip: !has
   const attaches = async () => (await tmux(['list-clients', '-F', '#{client_session}']))
     .split('\n').filter((l) => l.trim() === NAME).length;
 
-  pty.openPtyStream(cfgLike, { streamToken: 'noka1', params: { cwd: WS_REL, paneId: 'pN', client: 'cN', win: t.index, cols: 80, rows: 24 } });
+  pty.openPtyStream(cfgLike, { streamToken: 'noka1', params: { cwd: WS_REL, paneId: 'pN', client: 'cN', win: t.index, cols: 80, rows: 24, terminalProtocol: 3 } });
   const ws = await waitStream('noka1');
   const closed = new Promise((resolve) => ws.on('close', () => resolve(true)));
   ws.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));   // 이 한 마디가 전부다

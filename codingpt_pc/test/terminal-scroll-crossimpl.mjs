@@ -21,27 +21,34 @@ const app = fs.readFileSync(
 let pass = 0;
 const ok = (label, cond) => { assert.ok(cond, `FAIL ${label}`); console.log(`PASS ${label}`); pass++; };
 
-// 1) 두 구현 모두 서버/tmux 정본에게 모드를 묻는다.
-ok('PC 가 tmux 정본(pty_modes)을 조회한다', pane.includes('api.ptyModes(this.id)'));
-ok('앱이 서버 VT 정본(type:modes)을 조회한다', app.includes("ws.send(JSON.stringify({type:'modes'}))"));
+// 1) v3 는 원시 PTY 바이트가 그대로 오므로 **모드는 로컬 xterm 이 안다** — 서버 조회는 없다.
+//    (2026-09-06 삭제. win32 legacy 만 pty_modes 폴백을 남긴다.)
+ok('PC 는 로컬 xterm 으로 alt-screen 을 판정한다', pane.includes("this.term?.buffer?.active?.type === \"alternate\""));
+ok('PC 의 pty_modes 는 win32 legacy 게이트 안에만 있다',
+  /if \(localTmuxBackend\(\) \|\| !this\.ctx\.isLocal\)[\s\S]{0,200}?api\.ptyModes\(this\.id\)/.test(pane));
+ok('앱은 서버 modes 를 조회하지 않는다', !app.includes("type:'modes'"));
+ok('앱은 로컬 xterm 상태로 스크롤을 라우팅한다',
+  app.includes('if (__mouseActive())') && app.includes('if (__alternateActive())'));
 
 // 2) 우선순위는 양쪽이 같다: mouse > alternate > 과거(서버 정본).
 ok('PC 는 mouse tracking 이면 xterm 경로 유지', /if \(tracking && !this\._histOn\) return;/.test(pane));
 ok('PC 는 mouse 다음에 alternate 를 본다', /if \(tracking[\s\S]{0,600}?if \(modes\.altScreen[\s\S]{0,400}?_histScroll/.test(pane));
-ok('앱은 mouse tracking 이 alternate 보다 우선', /if \(mouseOn\)[\s\S]{0,200}?if \(altOn\)/.test(app));
+ok('앱은 mouse tracking 이 alternate 보다 우선', /if \(__mouseActive\(\)\)[\s\S]{0,300}?if \(__alternateActive\(\)\)/.test(app));
 
 // 3) 브랜드 하드코딩 금지 — 판정은 모드로만 한다.
 ok('PC 휠 보완에 codex 브랜드 분기가 없다', !/_activeAgentBrand\(\) !== "codex"/.test(pane));
 
 // 4) alternate 화면에서는 방향키(alternate-scroll 등가), application cursor 도 따른다.
 ok('PC 가 application cursor 모드를 반영한다', pane.includes('applicationCursorKeysMode') && pane.includes('\\x1bOA'));
-ok('앱이 application cursor 모드를 반영한다', app.includes('__srvModes.appCursor'));
+ok('앱이 application cursor 모드를 반영한다', app.includes('term.modes&&term.modes.applicationCursorKeysMode'));
 
-// 5) tmux 옵션 전제 — alternate-screen 이 off 면 #{alternate_on} 이 늘 0 이라 위 계약이 통째로 무너진다.
+// 5) tmux 옵션 전제 — alternate-screen 이 off 면 tmux 가 alt 버퍼를 따로 두지 않아 TUI 화면이
+//    pane history 로 밀려들어간다(= 재시작 시드가 쓰레기가 된다). 기본이 on 이라 명시 설정은
+//    2026-09-06 제거했고, **off 로 되돌리는 것만** 금지한다.
 for (const conf of ['../../codingpt_daemon/tmux.conf', '../../codingpt_back/tmux.conf']) {
   const text = fs.readFileSync(path.join(here, conf), 'utf8');
   ok(`${path.basename(path.dirname(conf))}/tmux.conf 가 alternate-screen 을 끄지 않는다`,
-    /^\s*setw -g alternate-screen on\s*$/m.test(text) && !/alternate-screen\s+off\s*$/m.test(text));
+    !/alternate-screen\s+off/m.test(text));
 }
 
 // 6) 과거(스크롤백)의 정본 — 2026-09-04 사용자 신고("PC 는 clear 해도 위로 스크롤되고 뭉개진 게 보인다").
@@ -124,14 +131,18 @@ ok('PC 오버레이가 휠을 받는다', /this\.histEl\?\.addEventListener\("wh
   ok('PC(로컬)도 과거 행마다 속성을 닫는다', /raw\.contains\('\\u\{1b\}'\)[\s\S]{0,80}?\\u\{1b\}\[0m/.test(rust));
 }
 
-// 7) 프레임 opcode 표가 데몬과 어긋나면 과거 응답을 통째로 놓친다(조용한 실패).
+// 7) 프레임 opcode 표가 데몬과 어긋나면 과거 응답을 통째로 놓친다(조용한 실패). v2 표는 2026-09-06 삭제.
 {
-  const pcV2 = fs.readFileSync(path.join(here, '../src/js/terminal-stream-v2.js'), 'utf8');
-  const dmV2 = fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/terminal-stream-v2.js'), 'utf8');
+  const pcV3 = fs.readFileSync(path.join(here, '../src/js/terminal-stream-v3.js'), 'utf8');
+  const dmV3 = fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/terminal-stream-v3.js'), 'utf8');
   const codes = (t) => Object.fromEntries([...t.matchAll(/([A-Z_]+):\s*(\d+)/g)].map((m) => [m[1], m[2]]));
-  const a = codes(pcV2.slice(pcV2.indexOf('TERMINAL_OPCODE')));
-  const b = codes(dmV2.slice(dmV2.indexOf('OPCODE = Object.freeze'), dmV2.indexOf('function encode')));
-  ok('PC/데몬 opcode 표 일치', JSON.stringify(a) === JSON.stringify(b) && a.HISTORY_PAGE === '7');
+  const a = codes(pcV3.slice(pcV3.indexOf('TERMINAL_OPCODE_V3')));
+  const b = codes(dmV3.slice(dmV3.indexOf('OPCODE = Object.freeze'), dmV3.indexOf('function encode')));
+  ok('PC/데몬 CPT3 opcode 표 일치', JSON.stringify(a) === JSON.stringify(b) && a.HISTORY_PAGE === '5');
+  // 구 v2 디코더가 되살아나지 않게 부재를 못 박는다(두 리포 모두).
+  ok('v2 스트림 모듈이 남아 있지 않다',
+    !fs.existsSync(path.join(here, '../src/js/terminal-stream-v2.js'))
+    && !fs.existsSync(path.join(here, '../../codingpt_daemon/packages/runner-core/terminal-stream-v2.js')));
 }
 
 // 8) `clear` 가 과거까지 지우려면 tmux 가 지운 화면을 history 로 도로 밀지 않아야 한다.

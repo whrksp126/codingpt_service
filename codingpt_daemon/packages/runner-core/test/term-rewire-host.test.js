@@ -1,9 +1,14 @@
 // 웨이브2 재배선 e2e(호스트 백엔드) — CPT_TERMHOST_SOCK 폴백으로 mac 에서 **win32 와 같은 경로**
 //  (pty.js → term-backend → term-host 파이프)를 태운다. tmux 무접촉.
 //
-//  검증: createTerminal/listTerminals(호스트 meta 매핑) · resolveTid(has) · attachPty(백엔드 attach
-//  스트림 + 첫 resize + 입력) · terminal.select(비동기 swap) · terminal.close(멱등 kill) ·
+//  검증: createTerminal/listTerminals(호스트 meta 매핑) · resolveTid(has) · **term-backend.attach
+//  스트림 직접**(출력 + resize + 입력 + capture) · terminal.close(멱등 kill) ·
 //  injectPoolEnv(setEnv) → getEnv 회수(agent-watch/question-revive 의 CPT_WS 해석 경로).
+//
+// ⚠ 2026-09-06: attachPty 는 더 이상 이 백엔드로 스트림을 열지 않는다. v1/v2 경로가 삭제됐고
+//  CPT3 는 tmux control mode 를 쓰기 때문이다(웨이브3 과제: TerminalHost 의 transport 를 여기
+//  attach 핸들로 갈아끼우면 win32 도 CPT3 가 된다 — 그래서 이 파일은 그 **바탕이 되는 백엔드
+//  계약**을 계속 지킨다). attachPty 쪽은 "호스트 백엔드는 아직 v3 미지원" 거절만 고정한다.
 const { test, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
@@ -46,6 +51,7 @@ function fakeIo() {
   return {
     transport: 'test',
     out: '',
+    get closed() { return closed; },
     send(chunk) { this.out += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk); },
     onMessage(fn) { cb = fn; for (const [k, p] of q.splice(0)) fn(k, p); },
     onClose(fn) { if (closed) { fn(); return; } closeCbs.push(fn); },
@@ -82,36 +88,38 @@ test('injectPoolEnv(setEnv) → getEnv 회수 — agent-watch/question-revive �
   assert.strictEqual(await backend.getEnv(name, 'CPT_TSESSION'), name);
 });
 
-test('attachPty — 백엔드 attach 스트림(출력/입력/resize) + select 스왑 + close', async () => {
-  const io = fakeIo();
-  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH', client: 'cH', win: A.index, cols: 80, rows: 24 }, io);
-  io.push('text', JSON.stringify({ type: 'resize', cols: 100, rows: 28 }));
-  await until(() => io.out.length > 0 ? true : null, 10000, 'attach 출력(리페인트/프롬프트)');
-  // 리사이즈 latest 반영(win32 attach 경로의 {t:'r'} 프레임).
-  await until(async () => (await backend.info(ptyLib.termSession(NS, A.index))).cols === 100 ? true : null, 8000, 'resize 반영');
+test('term-backend.attach — 스트림(출력/입력/resize) + capture (웨이브3 CPT3 transport 의 바탕)', async () => {
+  let out = '';
+  const name = ptyLib.termSession(NS, A.index);
+  const h = await backend.attach(name, { cols: 80, rows: 24, onData: (d) => { out += String(d); } });
+  await until(() => out.length > 0 ? true : null, 10000, 'attach 출력(리페인트/프롬프트)');
 
-  // 입력 → A 터미널에서 실행.
+  h.resize(100, 28);
+  await until(async () => (await backend.info(name)).cols === 100 ? true : null, 8000, 'resize 반영');
+
   await sleep(500); // 셸 rc 소화(스폰 직후 입력 씹힘 방지 — 주의점 2)
-  io.push('stdin', Buffer.from('echo IN-A-host\r'));
-  await until(async () => (await backend.capture(ptyLib.termSession(NS, A.index))).includes('IN-A-host') ? true : null, 10000, 'A 입력 반영');
+  h.write('echo IN-A-host\r');
+  await until(async () => (await backend.capture(name)).includes('IN-A-host') ? true : null, 10000, 'A 입력 반영');
 
-  // select — 살아있는 스트림의 attach 대상 즉석 교체(비동기 swap).
-  const sel = await ptyLib.handleTerminalRpc('terminal.select', { cwd: WS_REL, paneId: 'pH', client: 'cH', index: B.index });
-  assert.strictEqual(sel.index, B.index);
-  await sleep(700); // swap(attach 재수립) 완료 대기
-  io.push('stdin', Buffer.from('echo IN-B-host\r'));
-  await until(async () => (await backend.capture(ptyLib.termSession(NS, B.index))).includes('IN-B-host') ? true : null, 10000, 'B 스왑 후 입력 반영');
-  const aScreen = await backend.capture(ptyLib.termSession(NS, A.index));
-  assert.ok(!aScreen.includes('IN-B-host'), '스왑 후 입력이 옛 터미널로 샜다');
+  // 다른 터미널은 오염되지 않는다(전용 세션 모델).
+  const bScreen = await backend.capture(ptyLib.termSession(NS, B.index));
+  assert.ok(!bScreen.includes('IN-A-host'), '입력이 다른 터미널로 샜다');
+  h.close();
+});
 
-  io.close();
+test('attachPty — 호스트 백엔드는 CPT3 미지원을 명시 거절한다(조용한 실패 금지)', async () => {
+  const io = fakeIo();
+  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH', client: 'cH', win: A.index, cols: 80, rows: 24, terminalProtocol: 3 }, io);
+  assert.match(io.out, /아직 v3 터미널을 지원하지 않습니다/);
+  assert.strictEqual(io.closed, true, '거절 후 스트림을 닫지 않았다');
 });
 
 test('스테일 win → 첫 터미널 폴백(resolveTid/has) · 터미널 0개 = 정식 상태', async () => {
+  // 스테일 win 은 resolveTid 가 첫 터미널로 접는다 — 그 뒤에야 백엔드 미지원 거절이 나온다
+  //  (터미널이 있는데도 "없습니다" 라고 답하면 앱 리컨실러가 pane 을 지운다).
   const io = fakeIo();
-  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH2', client: 'cH2', win: 424242, cols: 80, rows: 24 }, io);
-  await until(() => io.out.length > 0 ? true : null, 8000, '폴백 attach 출력');
-  io.close();
+  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH2', client: 'cH2', win: 424242, cols: 80, rows: 24, terminalProtocol: 3 }, io);
+  assert.match(io.out, /아직 v3 터미널을 지원하지 않습니다/);
 
   await ptyLib.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: A.index });
   await ptyLib.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: B.index });
@@ -120,7 +128,7 @@ test('스테일 win → 첫 터미널 폴백(resolveTid/has) · 터미널 0개 =
 
   // 터미널 0개에서 attach — 생성하지 않고 안내 후 종료(유령 부활 금지).
   const io2 = fakeIo();
-  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH3', client: 'cH3', win: 1, cols: 80, rows: 24 }, io2);
+  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH3', client: 'cH3', win: 1, cols: 80, rows: 24, terminalProtocol: 3 }, io2);
   assert.match(io2.out, /열린 터미널이 없습니다/);
   assert.strictEqual((await ptyLib.listTerminals(NS)).length, 0, 'attach 가 유령 터미널을 만들었다');
 });

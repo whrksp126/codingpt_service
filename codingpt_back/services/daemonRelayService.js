@@ -1410,7 +1410,10 @@ function issueTerminalToken(userId, cwd, paneId, win, client, runnerId, terminal
   // win — 이 pane 이 표시할 tmux window(정수). 앱이 미리 확보해 넘기면 데몬이 attach 와 동시에 select.
   // client — 요청 기기의 안정 키. pane 세션을 기기별로 분리(같은 세션 다중 attach 시 tmux 크기 공유 방지).
   const winNum = Number.isInteger(win) ? win : null;
-  // terminalProtocol — 1(구 ANSI) · 2(CPT2 프레임) · 3(CPT3: 데몬 정본 VT + 소유자 1명, docs/terminal-v3-design.md).
+  // terminalProtocol — 3(CPT3: 데몬 정본 VT + 소유자 1명, codingpt_daemon/docs/terminal-v3-design.md).
+  //  릴레이는 값을 **그대로 전달만** 하고 판정은 데몬이 한다. 1·2 는 2026-09-06 데몬에서 삭제됐고
+  //  ("앱/PC 버전이 오래됐습니다" 안내 후 종료), 여기서 강등하지 않는 것 자체가 계약이다 —
+  //  예전에 이 함수가 3 을 2 로 깎아 v3 가 조용히 안 켜진 사고가 있었다(crossimpl 테스트로 고정).
   const pn = Number(terminalProtocol);
   const protocol = pn === 3 ? 3 : pn === 2 ? 2 : 1;
   // deviceName — v3 소유권 표시용 사람 이름("폰이 크기를 잡고 있음"). 없으면 데몬이 client 키로 대체.

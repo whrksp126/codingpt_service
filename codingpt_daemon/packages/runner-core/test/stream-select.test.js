@@ -1,14 +1,15 @@
-// 모바일 스트림 경로 통합 테스트 — openPtyStream(dial-back WS + node-pty attach) + terminal.select(스왑).
+// E2EE 봉인 스트림 통합 테스트 — 봉투 **안**에서 CPT3 계약이 그대로 성립하는지.
 //   실행: node --test packages/runner-core/test/stream-select.test.js
 //
-// 검증하는 것(전용 세션 모델의 모바일 경로):
-//  1. stream_open(params.win=tid) → 데몬이 전용 세션에 직접 attach, 출력이 WS 로 흐른다.
-//  2. WS 입력(binary) → 셸 실행 → tmux 세션에 반영.
-//  3. terminal.select(다른 tid) → "살아있는 스트림"의 attach 대상이 즉석 교체(swap)되고,
-//     이후 입력은 새 터미널로 들어간다(WS 는 끊기지 않는다).
-//  4. 스테일 win 으로 stream_open → 첫 터미널 폴백(에러/무한루프 없음).
-//  5. E2EE 봉인 모드(CPT_E2EE_SCOPE=all): 같은 계약이 프레임 봉투 안에서 그대로 성립하고,
-//     평문 프레임 인젝션은 폐기되며, 와이어에 평문 카나리가 0건임(§8.2 카나리 시험의 축소판).
+// 검증하는 것(CPT_E2EE_SCOPE=all):
+//  1. 협상은 스트림 **밖**(제어채널)에서 끝나고, 스트림 첫 프레임부터 봉인된다.
+//  2. 봉인 data 프레임 = stdin, ctrl 프레임 = 텍스트 JSON(resize 등) — v3 도 같은 봉투를 쓴다.
+//  3. 출력은 전부 바이너리 봉인이고, 복호하면 CPT3 프레임이며, **와이어에 평문 카나리 0건**.
+//  4. 평문 인젝션·리플레이는 폐기되고 소켓은 살아 있다.
+//  5. sid 는 있는데 세션이 없으면 평문 폴백이 아니라 4090 종료(재협상 유도).
+//
+// ※ attach/입력/탭 스왑/스테일 win 같은 **평문 경로 계약**은 terminal-v3-stream.test.js 가 본다
+//   (2026-09-06 v1/v2 삭제 때 이 파일에서 그쪽으로 옮겼다 — 중복 유지 금지).
 //
 // 안전: CODINGPT_TMUX_SOCKET 격리 소켓 강제 — 실사용 -L codingpt 무접촉.
 
@@ -30,6 +31,7 @@ runtime.init({ root: ROOT, stateDir: path.join(ROOT, '.codingpt') });
 
 const pty = require('../pty');
 const e2eeGate = require('../e2ee-gate');
+const v3wire = require('../terminal-stream-v3');
 const e2ee = require('../e2ee'); // 암호 코어(격리 stateDir 에 e2ee.json 을 만든다 — 실사용 홈 무접촉)
 assert.strictEqual(pty.TMUX_SOCKET, SOCK, '격리 소켓 미적용 — 중단');
 
@@ -99,91 +101,6 @@ after(async () => {
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch (_) { /* noop */ }
 });
 
-test('스트림 attach → 입력/출력 → select 스왑 → 스테일 win 폴백', { skip: !hasTmux }, async () => {
-  await startRelay();
-  const cfgLike = { serverUrl: `http://127.0.0.1:${port}`, deviceToken: 'test' };
-
-  const a = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
-  const b = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
-
-  // 1) stream_open — 터미널 A 에 attach.
-  pty.openPtyStream(cfgLike, { streamToken: 'tok1', params: { cwd: WS_REL, paneId: 'pS', client: 'cS', win: a.index, cols: 80, rows: 24 } });
-  const ws = await waitStream('tok1');
-  let rx = '';
-  ws.on('message', (d) => { rx += d.toString(); });
-  ws.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));
-  await sleep(700); // attach + 셸 프롬프트
-  assert.ok(rx.length > 0, 'attach 출력이 WS 로 흐르지 않는다');
-
-  // keepalive 는 resize 재주장이나 셸 입력으로 흘러가면 안 된다. 특히 여러 기기가 각자 크기를
-  // 주기적으로 재주장하면 window-size latest 가 왕복하며 가짜 scrollback 을 만든다.
-  const beforeKeepalive = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
-  ws.send(JSON.stringify({ type: 'keepalive' }));
-  await sleep(100);
-  const afterKeepalive = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
-  assert.strictEqual(afterKeepalive, beforeKeepalive, 'keepalive 가 터미널 크기를 변경했다');
-
-  // 2) 입력 → 터미널 A 에서 실행.
-  ws.send(Buffer.from('echo IN-A\r'));
-  await sleep(600);
-  const capA = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '-S', '-30']);
-  assert.ok(/IN-A/.test(capA), 'WS 입력이 터미널 A 에 안 들어갔다');
-
-  // 같은 크기로 다시 포커스(claim)하면 스트림/PTY를 분리하지 않고 snapshot도 재주입하지 않는다.
-  rx = '';
-  await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
-  await sleep(250);
-  assert.ok(!rx.includes('\x1b[3J\x1b[H\x1b[2J'), '포커스 claim이 정본 스냅샷을 다시 주입했다');
-
-  // 다른 기기 크기에서 돌아오면 tmux 정본 커서와 로컬 xterm 행 배치가 달라지므로 이때만
-  // clear+snapshot으로 한 번 맞춘다. Android에서 명령줄이 화면 중간에 남는 회귀 방지.
-  await tmux(['resize-window', '-t', `=${pty.termSession(NS, a.index)}:0`, '-x', '100', '-y', '30']);
-  rx = '';
-  await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: a.index, paneId: 'pS', client: 'cS', claim: true });
-  await sleep(250);
-  const canonicalSnapshot = process.env.CPT_CANONICAL_TERMINAL === '1' && rx.includes('\x1bc');
-  assert.ok(canonicalSnapshot || rx.includes('\x1b[3J\x1b[H\x1b[2J'), '크기 소유권 전환 뒤 로컬 화면 정본 동기화가 없다');
-  const reclaimed = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
-  assert.strictEqual(reclaimed.trim(), '80x24', 'claim이 이 뷰어 크기로 공유 pane을 되찾지 못했다');
-
-  // 셸 clear가 내는 CSI 3 J는 각 xterm 화면뿐 아니라 공유 tmux 정본 history도 비운다.
-  // 그렇지 않으면 지금은 지워져 보여도 모바일 재연결/bootstrap 뒤 과거 명령이 되살아난다.
-  ws.send(Buffer.from("printf '\\033[3J'\r"));
-  await sleep(350);
-  const historyAfterClear = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{history_size}']);
-  assert.strictEqual(historyAfterClear.trim(), '0', 'CSI 3 J 뒤에도 공유 tmux history가 남았다');
-
-  // 3) select → 같은 스트림이 터미널 B 로 스왑(WS 유지).
-  const sel = await pty.handleTerminalRpc('terminal.select', { cwd: WS_REL, index: b.index, paneId: 'pS', client: 'cS' });
-  assert.strictEqual(sel.index, b.index);
-  await sleep(700); // 새 attach 리페인트
-  assert.strictEqual(ws.readyState, WebSocket.OPEN, 'select 스왑이 WS 를 끊었다');
-  ws.send(Buffer.from('echo IN-B\r'));
-  await sleep(600);
-  const capB = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, b.index)}:0`, '-S', '-30']);
-  assert.ok(/IN-B/.test(capB), 'select 스왑 후 입력이 터미널 B 로 가지 않는다');
-  const capA2 = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '-S', '-30']);
-  assert.ok(!/IN-B/.test(capA2), 'select 스왑 후에도 입력이 옛 터미널 A 로 샌다');
-
-  // 4) 재접속이 스테일 win(닫힌/구버전 인덱스)을 들고 와도 폴백 attach(무한루프 없음).
-  //    또한 select 를 기억(paneCurrent)해 그 pane 은 B 를 다시 본다.
-  ws.close();
-  await sleep(300);
-  pty.openPtyStream(cfgLike, { streamToken: 'tok2', params: { cwd: WS_REL, paneId: 'pS', client: 'cS', win: 3, cols: 80, rows: 24 } });
-  const ws2 = await waitStream('tok2');
-  ws2.send(JSON.stringify({ type: 'resize', cols: 80, rows: 24 }));
-  await sleep(700);
-  ws2.send(Buffer.from('echo IN-B2\r'));
-  await sleep(600);
-  const capB2 = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, b.index)}:0`, '-S', '-30']);
-  assert.ok(/IN-B2/.test(capB2), '재접속(스테일 win)이 select 기억(B)으로 이어지지 않는다');
-  ws2.close();
-  await sleep(200);
-
-  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: a.index });
-  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: b.index });
-});
-
 // ── E2EE 봉인 모드(D단계) ────────────────────────────────────────────────
 // 검증하는 불변식:
 //  · 협상은 스트림 **밖**(제어채널 e2ee.begin)에서 끝나고, 스트림 첫 프레임부터 봉인된다.
@@ -218,7 +135,7 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
     // ② 스트림 — params.sid 가 봉인 모드 스위치.
     pty.openPtyStream(cfgLike, {
       streamToken: 'tokE',
-      params: { cwd: WS_REL, paneId: 'pE', client: 'cE', win: t.index, cols: 80, rows: 24, sid: answer.sid },
+      params: { cwd: WS_REL, paneId: 'pE', client: 'cE', win: t.index, cols: 80, rows: 24, sid: answer.sid, terminalProtocol: 3 },
     });
     const ws = await waitStream('tokE');
     const rawFrames = [];
@@ -229,27 +146,11 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
       try { plain.push(vs.open(d).payload); } catch (e) { errs.push(e.message); }
     });
 
-    const paneBefore = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
-    // ctrl 프레임(=옛 텍스트 JSON) — attach client는 크기 경쟁에서 제외되지만,
-    // 현재 입력 주체의 명시적 resize-window는 공유 pane을 실제 화면 크기로 맞춘다.
+    // ctrl 프레임(=텍스트 JSON) — 첫 뷰어의 resize 는 소유권 확정 + window 크기 결정이다(v3 §2).
     ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
-    await sleep(1000); // attach + 첫 resize nudge(600ms) 안정화
-    let clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `뷰어 PTY가 실제 크기를 반영하지 않았다: ${clients.trim()}`);
+    await sleep(1000);
     const paneAfter = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '#{window_width}x#{window_height}']);
-    assert.strictEqual(paneAfter.trim(), '100x30', 'shared pane did not follow the mobile viewport');
-    const activeFlags = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_flags}']);
-    assert.match(activeFlags, /ignore-size/, '모바일 attach client가 자동 pane 크기 경쟁에 참여한다');
-
-    // alternate-screen TUI에 진입하면 마지막 요청 크기를 실제 PTY에 적용한다.
-    ws.send(vs.seal(Buffer.from('tput smcup\r')), { binary: true });
-    await sleep(250);
-    ws.send(vs.sealCtrl({ type: 'resize', cols: 100, rows: 30 }), { binary: true });
-    await sleep(700);
-    clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, t.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.ok(/(^|\s)100x30(\s|$)/.test(clients.trim()), `TUI ctrl(resize)가 반영되지 않았다: ${clients.trim()}`);
-    ws.send(vs.seal(Buffer.from('tput rmcup\r')), { binary: true });
-    await sleep(250);
+    assert.strictEqual(paneAfter.trim(), '100x30', '봉인 ctrl(resize)이 소유자 격자로 반영되지 않았다');
 
     // data 프레임(=옛 바이너리) — stdin.
     const CANARY = `CPT_CANARY_${Math.random().toString(36).slice(2, 8)}`;
@@ -265,7 +166,13 @@ test('E2EE 봉인 모드: 와이어 계약 보존(ctrl=resize / data=stdin) + �
     assert.deepStrictEqual(errs, [], `출력 프레임 복호 실패: ${errs.join(' / ')}`);
     const wire = Buffer.concat(rawFrames.map((f) => f.buf)).toString('latin1');
     assert.ok(!wire.includes(CANARY), '봉인 모드인데 와이어(서버가 보는 바이트)에 평문 카나리가 있다');
-    assert.ok(Buffer.concat(plain).toString('utf8').includes(CANARY), '복호된 출력에 셸 에코가 없다');
+    // 봉투를 벗기면 CPT3 프레임 — OUTPUT payload 를 이어 붙여야 셸 에코가 된다.
+    const decoded = plain.map((b) => v3wire.decode(Buffer.isBuffer(b) ? b : Buffer.from(b))).filter(Boolean);
+    assert.ok(decoded.length > 0, '복호된 프레임이 CPT3 가 아니다(봉투 안 계약이 깨졌다)');
+    const outText = Buffer.concat(decoded.filter((f) => f.opcode === v3wire.OPCODE.OUTPUT).map((f) => f.payload)).toString('utf8');
+    const snapText = decoded.filter((f) => f.opcode === v3wire.OPCODE.SNAPSHOT)
+      .map((f) => { try { return JSON.parse(f.payload.toString('utf8')).ansi || ''; } catch (_) { return ''; } }).join('');
+    assert.ok((outText + snapText).includes(CANARY), '복호된 CPT3 출력에 셸 에코가 없다');
 
     // ③ 평문 프레임 인젝션 — 텍스트/바이너리 모두 폐기돼야 한다(셸 오염 0, 크기 변조 0).
     ws.send(JSON.stringify({ type: 'resize', cols: 1, rows: 1 }));
@@ -305,7 +212,7 @@ test('E2EE: sid 는 있는데 세션이 없으면 평문 폴백이 아니라 스
     const t = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
     pty.openPtyStream(cfgLike, {
       streamToken: 'tokGhost',
-      params: { cwd: WS_REL, paneId: 'pG', client: 'cG', win: t.index, cols: 80, rows: 24, sid: 'nonexistent-sid' },
+      params: { cwd: WS_REL, paneId: 'pG', client: 'cG', win: t.index, cols: 80, rows: 24, sid: 'nonexistent-sid', terminalProtocol: 3 },
     });
     await waitStream('tokGhost');
     let code = null;

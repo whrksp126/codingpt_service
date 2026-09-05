@@ -449,17 +449,19 @@ test('E-2. pty 채널: resize(TEXT)/stdin(DATA) 계약 + select 스왑 + 같은 
   const s = await lan.connect({ host: '127.0.0.1', port: LAN_PORT, grantId: g.grantId, secret: g.secret, clientKey: g.clientKey, kind: 'pc' });
   try {
     // 릴레이(daemonRelayService → openPtyStream)가 넘기는 것과 **완전 동일한 키**.
-    const params = { cwd: WS_REL, paneId: 'pL', client: 'cL', win: a.index, cols: 80, rows: 24 };
+    const params = { cwd: WS_REL, paneId: 'pL', client: 'cL', win: a.index, cols: 80, rows: 24, terminalProtocol: 3 };
     const ch = await s.openPty(params);
     const rx = [];
     ch.onData = (buf) => rx.push(buf);
-    // 첫 resize 는 TEXT 프레임(= 옛 텍스트 JSON). 채널 오픈 직후 보내 early 버퍼 경로도 함께 태운다.
+    // 첫 resize 는 TEXT 프레임(텍스트 JSON). 채널 오픈 직후 보내 early 버퍼 경로도 함께 태운다.
     ch.sendText(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
-    await sleep(1300); // attach + nudge(600ms) 안정화
-    assert.ok(Buffer.concat(rx).length > 0, 'attach 출력이 LAN 채널로 흐르지 않는다');
+    await sleep(1300);
+    assert.ok(Buffer.concat(rx).length > 0, 'attach 출력(CPT3 프레임)이 LAN 채널로 흐르지 않는다');
 
-    const clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, a.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.match(clients.trim(), /(^|\s)100x30(\s|$)/, `TEXT resize 가 tmux 클라이언트에 반영되지 않았다(80x24 고착): ${clients.trim()}`);
+    // v3: 크기는 소유자 1명이 정하고 데몬이 `resize-window` 로 **window** 에 못 박는다
+    //  (뷰어마다 tmux 클라이언트가 붙던 v2 와 달리 control 클라이언트는 하나뿐이다).
+    const win1 = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(win1.trim(), '100x30', `TEXT resize 가 window 에 반영되지 않았다: ${win1.trim()}`);
 
     ch.write(Buffer.from('echo LAN-A\r'));
     await sleep(700);
@@ -481,11 +483,12 @@ test('E-2. pty 채널: resize(TEXT)/stdin(DATA) 계약 + select 스왑 + 같은 
     const ch2 = await s.openPty({ ...params, win: b.index, cols: 90, rows: 26 });
     ch2.sendText(JSON.stringify({ type: 'resize', cols: 90, rows: 26 }));
     await sleep(1300);
-    assert.strictEqual(closedOld, true, '옛 스트림이 닫히지 않았다(같은 세션에 tmux 클라이언트 2개 = 크기 핑퐁)');
+    assert.strictEqual(closedOld, true, '옛 스트림이 닫히지 않았다(죽은 뷰어가 릴레이 소켓·구독을 붙잡는다)');
     const cl2 = (await tmux(['list-clients', '-t', `=${pty.termSession(NS, b.index)}`, '-F', '#{client_width}x#{client_height}']))
       .split('\n').map((l) => l.trim()).filter(Boolean);
-    assert.strictEqual(cl2.length, 1, `경로 전환 후 tmux 클라이언트가 ${cl2.length}개 — 1개여야 한다(§5.1)`);
-    assert.strictEqual(cl2[0], '90x26', `승계된 클라이언트 크기가 틀리다: ${cl2[0]}`);
+    assert.strictEqual(cl2.length, 1, `control 클라이언트가 ${cl2.length}개 — v3 는 정본당 1개여야 한다`);
+    const win2 = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, b.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(win2.trim(), '90x26', `승계된 스트림의 크기가 window 에 안 걸렸다: ${win2.trim()}`);
     ch2.close();
     await sleep(200);
   } finally {

@@ -501,10 +501,12 @@ ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveB
   ok(/capture-pane[\s\S]*?-S[\s\S]*?-10000[\s\S]*?-E[\s\S]*?-1/.test(pcPtyRust)
     && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(pcPtyRust),
     '★ PC attach 는 tmux history 로 xterm 스크롤백을 초기화한다');
-  ok(/buildTerminalSnapshotPayload/.test(daemonPty)
-    && /capture-pane[\s\S]*?'-E', '-1'/.test(daemonPty)
-    && /finishHistoryBootstrap/.test(daemonPty)
-    && /SNAPSHOT_START/.test(daemonPty),
+  // v3(2026-09-06): 데몬 쪽 정본은 TerminalHost 의 VT 다 — 붙을 때 tmux history 로 **1회 시드**하고
+  //  그 VT 를 직렬화해 SNAPSHOT 으로 내려보낸다(v2 의 buildTerminalSnapshotPayload/SNAPSHOT_START 삭제).
+  const daemonHost = fs.readFileSync(path.resolve('../codingpt_daemon/packages/runner-core/terminal-host.js'), 'utf8');
+  ok(/capture-pane[\s\S]*?'-S', '-10000'[\s\S]*?'-E', '-1'/.test(daemonHost)
+    && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(daemonHost)
+    && /snapshot\(\)/.test(daemonHost),
     '★ 모바일/원격 attach 도 같은 tmux history 로 스크롤백을 초기화한다');
 
   // 단축키 검색바는 콘텐츠와 함께 스크롤해야 한다. sticky 면 설정 헤더 아래를 떠다니며 목록을 가린다.
