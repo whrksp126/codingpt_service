@@ -541,8 +541,16 @@ async function attachPty(params, io) {
   //  v1(원시 바이트)·v2(프레임 + tmux capture 스냅샷 + 15초 컨트롤러 리스) 경로는 2026-09-06 삭제했다 —
   //  앱·PC·로컬 모두 terminalProtocol:3 만 요청한다. 구버전 앱이 붙으면 옛 경로로 되돌려주지 않고
   //  **거절**한다(설계 §1-7: 호환은 거부로 끝낸다). 되살릴 일이 있으면 git 이력의 이 커밋 직전을 보라.
+  //  ★ 이 문구가 **구버전 앱 사용자가 보는 유일한 안내**다 — 앱 안 배너·오류화면은 새 앱에만 있으니,
+  //   이미 낡은 앱을 쓰는 사람에게 도달하는 통로는 이 스트림뿐이다(데몬은 늘 최신). 그래서
+  //   (a) 어느 쪽이 낮은지 (b) 뭘 하면 되는지 (c) 하던 작업이 날아가는지 를 전부 여기서 말한다.
+  //   판정은 확정적이다: 이 검사를 가진 데몬이 거절했다면 **낮은 쪽은 언제나 접속한 클라이언트**다.
   if (Number(params && params.terminalProtocol) !== 3) {
-    sendOut('\r\n\x1b[31m[앱/PC 버전이 오래됐습니다 — 업데이트하면 터미널이 열립니다]\x1b[0m\r\n');
+    const got = Number(params && params.terminalProtocol) || 0;
+    const mine = String(process.env.CPT_APP_VERSION || '').trim();
+    sendOut('\r\n\x1b[33m[이 PC 앱' + (mine ? '(' + mine + ')' : '') + ' 보다 접속한 기기의 앱 버전이 낮습니다]\x1b[0m\r\n');
+    sendOut('\x1b[33m[스토어에서 CodingPT 앱을 업데이트하면 이 터미널이 그대로 열립니다]\x1b[0m\r\n');
+    sendOut('\x1b[90m[하던 작업은 이 PC 가 들고 있어 그대로 유지됩니다 · 터미널 규약 v' + got + ' → v3 필요]\x1b[0m\r\n');
     try { io.close(); } catch (_) { /* noop */ }
     return;
   }

@@ -107,6 +107,23 @@ test('term-backend.attach — 스트림(출력/입력/resize) + capture (웨이�
   h.close();
 });
 
+// 구버전 클라이언트 거절 문구는 **그 사용자가 받는 유일한 안내**다.
+//  앱 안 배너·전용 오류화면은 새 앱에만 있으니, 이미 낡은 앱을 쓰는 사람에게 도달하는 통로는
+//  이 스트림뿐이다(데몬은 PC 앱 사이드카라 늘 최신). 그래서 문구가 갖춰야 할 세 가지를 고정한다.
+test('구버전 클라이언트 거절 — 어느 쪽이 낮은지·무엇을 할지·작업 보존을 모두 말한다', async () => {
+  const io = fakeIo();
+  process.env.CPT_APP_VERSION = '9.9.9';
+  try {
+    // terminalProtocol 생략 = 구버전 앱이 붙은 상황 그대로.
+    await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pOld', client: 'cOld', win: A.index, cols: 80, rows: 24 }, io);
+  } finally { delete process.env.CPT_APP_VERSION; }
+  assert.match(io.out, /접속한 기기의 앱 버전이 낮습니다/, '(a) 어느 쪽이 낮은지');
+  assert.match(io.out, /9\.9\.9/, 'PC 쪽 버전을 밝혀 비교가 되게 한다');
+  assert.match(io.out, /스토어에서 CodingPT 앱을 업데이트/, '(b) 무엇을 하면 되는지');
+  assert.match(io.out, /작업은 이 PC 가 들고 있어 그대로 유지/, '(c) 작업이 날아가지 않는다');
+  assert.strictEqual(io.closed, true, '거절 후 스트림을 닫지 않았다');
+});
+
 test('attachPty — 호스트 백엔드는 CPT3 미지원을 명시 거절한다(조용한 실패 금지)', async () => {
   const io = fakeIo();
   await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH', client: 'cH', win: A.index, cols: 80, rows: 24, terminalProtocol: 3 }, io);
