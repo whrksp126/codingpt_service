@@ -111,6 +111,12 @@ const refreshAccessToken = async (req, res) => {
     successResponse(res, user, '엑세스 토큰이 성공적으로 재발급되었습니다.');
   } catch (error) {
     console.error('엑세스 토큰 재발급 오류:', error);
+    // 영구 실패(REFRESH_INVALID)와 일시 실패(DB 장애 등)를 상태코드로 갈라준다.
+    //  클라는 401 을 받으면 토큰을 버리고 재로그인 화면으로 가야 하고, 400 이면 나중에 다시 시도한다.
+    //  errorResponse 는 최상위 code 를 버리고 publicDetail 만 detail 로 실어준다 — 관례대로 detail.code 로 내려간다.
+    if (error && error.code === 'REFRESH_INVALID') {
+      return errorResponse(res, { message: error.message, publicDetail: { code: 'REFRESH_INVALID' } }, 401);
+    }
     errorResponse(res, { message: error.message }, 400);
   }
 };

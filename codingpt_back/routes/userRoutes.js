@@ -25,6 +25,19 @@ const authLimiter = rateLimit({
   message: { success: false, message: '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
 });
 
+// 토큰 갱신은 **별도 버킷**. 로그인과 한 통을 쓰면 갱신 폭주가 로그인까지 잠근다.
+//  2026-09-07 실제로 그랬다 — 계정이 삭제된 폰이 죽은 refreshToken 으로 분당 40여 건을 두들겨
+//  버킷을 태웠고, 같은 IP 의 PC 가 "요청이 너무 많습니다"로 로그인 자체를 못 했다.
+//  갱신은 기기 수만큼 정상적으로 잦으니 한도를 넉넉히 주되, 폭주는 여기서만 막힌다.
+const refreshLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: realClientIp,
+  message: { success: false, message: '토큰 갱신 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' },
+});
+
 const {
   login,
   appleLogin,
@@ -57,7 +70,7 @@ router.post('/handoff/redeem', authLimiter, handoffRedeem);  // 앱→토큰 핸
 router.post('/password/forgot', authLimiter, passwordForgot); // 비밀번호 찾기(재설정 요청) — 무인증, 존재 노출 없음
 router.post('/logout', logout);                 // 로그아웃
 router.get('/verify', verifyAccessToken);       // 엑세스 토큰 검증
-router.post('/refresh', authLimiter, refreshAccessToken);    // 엑세스 토큰 재발급
+router.post('/refresh', refreshLimiter, refreshAccessToken); // 엑세스 토큰 재발급 — 로그인과 분리된 버킷
 
 router.get('/', authMiddleware, getAllUsers);   // 모든 사용자 조회 — 인증 필수(무인증 PII 덤프 차단)
 router.get('/heatmap', authMiddleware, getStudyHeatmap); // 사용자 잔디 조회(일자별 학습 횟수 조회)
