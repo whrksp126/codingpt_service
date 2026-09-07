@@ -68,10 +68,11 @@ services:
       #     둘이 어긋나면 배포 검증이 실패한다 — 사람이 기억할 필요가 없게 만든 장치다.
       #   ★ 규율: 스토어에 **게시된** 버전만 하한으로 걸 것. 게시 안 된 버전을 강제하면
       #     사용자는 끌 수 없는 안내를 받고도 받을 게 없다(안내가 없는 것보다 나쁘다).
-      #     그래서 iOS 는 0.4.1 이 심사 통과해 출시된 뒤에 채운다(2026-09-07 현재 App Store 최신 0.4.0).
+      #     (2026-09-08: iOS 0.4.1 게시 완료 → 하한을 채웠다. 그 전엔 비워 두고 있었다.)
       - APP_LATEST_IOS=0.4.1
-      - APP_LATEST_ANDROID=0.4.1
+      - APP_LATEST_ANDROID=0.4.2
       - APP_MIN_ANDROID=0.4.1
+      - APP_MIN_IOS=0.4.1
     env_file:
       - ./codingpt_back/.env
     depends_on:
