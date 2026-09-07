@@ -57,6 +57,11 @@ vw=$(curl -s --max-time 15 "$BACK/api/pc/update/windows/x86_64/0.0.1" 2>/dev/nul
 if [ -n "$vw" ]; then ok "PC Windows 업데이트 채널 응답 (발행 최신 $vw)"
 else printf "  INFO  PC Windows 채널 미발행(정상 — 실기 검증 전)\n"; fi
 
+# 6) 구성요소 호환 — PC 가 요구하는 앱 하한이 (a) 스토어에 게시돼 있고 (b) 강제 안내로 전파되는가.
+#    사람이 기억해야 하는 규율은 잊힌다 → 여기서 기계가 compat.json 과 실서버를 대조한다.
+echo
+if node "$(dirname "$0")/compat-check.mjs" "$ENV"; then :; else fails=$((fails+1)); fi
+
 echo
 if [ "$fails" != 0 ]; then echo "❌ $fails 건 실패 — 완료 보고 금지"; exit 1; fi
 echo "✅ 검증 통과"
