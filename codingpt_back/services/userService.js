@@ -50,6 +50,12 @@ function _handoffPrune() {
 
 // ── 기기별 refresh 세션(폐기 가능·해시 저장) ──────────────────────────────
 function _sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }
+
+// 재발급 영구 실패 표식 — 이 토큰으로는 무슨 짓을 해도 다시 살아나지 않는다(계정 삭제·세션 폐기·위조·만료).
+//  컨트롤러가 401 + code 로 내려주고, 클라는 이걸 보면 재시도를 멈추고 저장된 토큰을 버려야 한다.
+//  구분이 없던 시절 클라가 영구 실패를 계속 두들겨 분당 40여 건의 refresh 폭주를 냈다(2026-09-07).
+const REFRESH_DEAD = 'REFRESH_INVALID';
+function _refreshDead(message) { return Object.assign(new Error(message), { code: REFRESH_DEAD }); }
 // 발급된 refresh 토큰을 세션 테이블에 기록 — 원문 대신 sha256, exp 는 디코드로 채움. best-effort(실패해도 로그인 진행).
 async function _recordRefreshSession(userId, refreshToken) {
   try {
@@ -356,7 +362,7 @@ class UserService {
   // 기한 임박 시 리프레시 토큰 재발급
   async refreshAccessToken(refreshToken) {
     if(!refreshToken || refreshToken === '') {
-      throw new Error('refreshToken 없음');
+      throw _refreshDead('refreshToken 없음');
     }
     try {
       // 실제 리프레시 토큰의 exp 값 확인
@@ -369,14 +375,14 @@ class UserService {
       // 어드민 임명/박탈을 즉시 반영하기 위해 role 은 항상 DB 최신값으로 갱신.
       const dbUser = await User.findByPk(decoded.id, { attributes: ['id', 'email', 'role'] });
       // 탈퇴한 계정의 refreshToken 으로 새 토큰을 발급하면 유령 세션이 영속된다 — 재발급 거부.
-      if (!dbUser) throw new Error('존재하지 않는 계정입니다.');
+      if (!dbUser) throw _refreshDead('존재하지 않는 계정입니다.');
       const role = dbUser.role || 'user';
 
       // 세션 검증 — 폐기된 refresh 토큰(로그아웃/기기 해제/재사용 감지)은 거부.
       //  테이블 도입 전에 발급된 토큰은 세션이 없으므로 lazy 로 등록(기존 로그인 사용자 대량 로그아웃 방지).
       const session = await RefreshSession.findOne({ where: { token_hash: _sha256(refreshToken) } }).catch(() => null);
       if (session) {
-        if (session.revoked_at) throw new Error('로그아웃되었거나 폐기된 세션입니다. 다시 로그인해 주세요.');
+        if (session.revoked_at) throw _refreshDead('로그아웃되었거나 폐기된 세션입니다. 다시 로그인해 주세요.');
         await RefreshSession.update({ last_used_at: new Date() }, { where: { id: session.id } }).catch(() => {});
       } else {
         await _recordRefreshSession(decoded.id, refreshToken);
@@ -409,11 +415,15 @@ class UserService {
       return response;
     } catch (err) {
       console.error('Refresh Token 검증 실패:', err);
+      // 이미 사망 판정이 난 것(계정 없음·세션 폐기)은 그대로 올린다 — 예전엔 여기서 뭉개져
+      //  "알 수 없는 오류"로 둔갑했고, 클라가 영구 실패를 일시 실패로 오해해 무한 재시도했다.
+      if (err && err.code === REFRESH_DEAD) throw err;
       if (err.name === 'TokenExpiredError') {
-        throw new Error('만료된 refreshToken입니다. 재로그인이 필요합니다.');
-      } else if (err.name === 'JsonWebTokenError') {
-        throw new Error('위조되었거나 유효하지 않은 refreshToken입니다.');
+        throw _refreshDead('만료된 refreshToken입니다. 재로그인이 필요합니다.');
+      } else if (err.name === 'JsonWebTokenError' || err.name === 'NotBeforeError') {
+        throw _refreshDead('위조되었거나 유효하지 않은 refreshToken입니다.');
       } else {
+        // DB 장애 등 일시 실패 — 코드를 붙이지 않아 클라가 로그아웃하지 않고 나중에 다시 시도한다.
         throw new Error('refreshToken 검증 중 알 수 없는 오류가 발생했습니다.');
       }
     }
