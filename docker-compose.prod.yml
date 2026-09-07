@@ -63,9 +63,15 @@ services:
       #   → APP_LATEST_IOS 는 조회 실패 시의 폴백일 뿐이라 낡아도 안전하다.
       #  Android 도 공개 상세 페이지에서 자동 감지한다(보조 경로 — 깨지면 아래 env 로 폴백).
       #   → 이 값들은 이제 "조회가 막혔을 때의 폴백" 이라 낡아도 안전하다(게시 때 맞춰두면 더 좋음).
-      #  APP_MIN_IOS/APP_MIN_ANDROID 는 강제 업데이트 킬스위치(평소 비워 둠).
-      - APP_LATEST_IOS=0.2.9
-      - APP_LATEST_ANDROID=0.2.9
+      #  APP_MIN_IOS/APP_MIN_ANDROID = "이 버전 미만은 못 쓴다" 강제 안내(끌 수 없는 배너).
+      #   ★ 정본은 리포의 compat.json 이고, ./deploy.sh 가 scripts/compat-check.mjs 로 여기와 대조한다.
+      #     둘이 어긋나면 배포 검증이 실패한다 — 사람이 기억할 필요가 없게 만든 장치다.
+      #   ★ 규율: 스토어에 **게시된** 버전만 하한으로 걸 것. 게시 안 된 버전을 강제하면
+      #     사용자는 끌 수 없는 안내를 받고도 받을 게 없다(안내가 없는 것보다 나쁘다).
+      #     그래서 iOS 는 0.4.1 이 심사 통과해 출시된 뒤에 채운다(2026-09-07 현재 App Store 최신 0.4.0).
+      - APP_LATEST_IOS=0.4.1
+      - APP_LATEST_ANDROID=0.4.1
+      - APP_MIN_ANDROID=0.4.1
     env_file:
       - ./codingpt_back/.env
     depends_on:

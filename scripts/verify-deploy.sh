@@ -51,6 +51,11 @@ v=$(curl -s --max-time 15 "$BACK/api/pc/update/darwin/aarch64/0.0.1" 2>/dev/null
   | python3 -c "import sys,json;s=sys.stdin.read().strip();print(json.loads(s)['version'] if s else '')" 2>/dev/null || echo '')
 [ -n "$v" ] && ok "PC 업데이트 채널 응답 (발행 최신 $v)" || bad "PC 업데이트 채널이 버전을 안 줌(latest.json 확인)"
 
+# 5) 구성요소 호환 — PC 가 요구하는 앱 하한이 (a) 스토어에 게시돼 있고 (b) 강제 안내로 전파되는가.
+#    사람이 기억해야 하는 규율은 잊힌다 → 여기서 기계가 compat.json 과 실서버를 대조한다.
+echo
+if node "$(dirname "$0")/compat-check.mjs" "$ENV"; then :; else fails=$((fails+1)); fi
+
 echo
 if [ "$fails" != 0 ]; then echo "❌ $fails 건 실패 — 완료 보고 금지"; exit 1; fi
 echo "✅ 검증 통과"
