@@ -320,15 +320,30 @@ async function enrichHosts(userId, metas) {
   const daemonRelayService = require('./daemonRelayService');
   const rows = await DaemonDevice.findAll({
     where: { user_id: userId, revoked_at: null },
-    attributes: ['id', 'device_name', 'device_alias'],
+    attributes: ['id', 'device_name', 'device_alias', 'role', 'runner_kind'],
   });
   const nameById = new Map(rows.map((d) => [d.id, d.device_alias || d.device_name]));
   const online = new Set(daemonRelayService.listRunners(userId).map((r) => r.deviceId));
+  // 이 계정의 PC(호스트) — 컨트롤러(폰/태블릿)와 클라우드 러너는 제외.
+  const hosts = rows.filter((d) => d.role !== 'controller' && d.runner_kind !== 'cloud');
+  const soleHost = hosts.length === 1 ? hosts[0].id : null;
+
   return metas.map((w) => {
     if (w.compute === 'cloud') return { ...w, hostName: '클라우드', hostOnline: true };
-    const hid = w.hostDeviceId;
+    // 귀속이 빠진 로컬 워크스페이스 자동 복구 —
+    //  ★ 2026-09-07 실사고: JWT 경로(/api/workspaces)가 hostDeviceId 를 안 심어서, PC 에서 만든
+    //   워크스페이스가 **폰 사이드바에서 통째로 사라졌다**(PC 에서만 보였다 — 클라가 "귀속 없음"을
+    //   '내 기기 것'으로 해석하는데, 폰에서는 그 PC 가 '내 기기'가 아니기 때문).
+    //   PC 가 하나뿐이면 답이 하나뿐이므로 여기서 귀속시키고 저장까지 한다(다음 조회부턴 정상).
+    //   PC 가 여럿이면 추측하지 않는다 — 잘못 귀속시키면 다른 PC 목록에 유령이 생긴다.
+    const hid = w.hostDeviceId != null ? w.hostDeviceId : soleHost;
+    if (w.hostDeviceId == null && hid != null) {
+      // 읽기 경로의 쓰기 — 실패해도 목록은 그대로 나가야 하므로 붙잡지 않는다(다음 조회에 재시도).
+      setWorkspaceHost(userId, w.id, hid).catch(() => {});
+    }
     return {
       ...w,
+      ...(hid != null ? { hostDeviceId: hid } : {}),
       hostName: (hid != null && nameById.get(hid)) || null,
       hostOnline: hid != null ? online.has(hid) : false,
     };
