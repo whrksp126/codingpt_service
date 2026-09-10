@@ -18,6 +18,17 @@ code_of() { curl -s -o /dev/null -w '%{http_code}' --max-time 15 "$1" 2>/dev/nul
 
 echo "── $ENV 배포 검증 ──"
 
+# 0) back 이 뜰 때까지 기다린다 — `docker compose up` 은 컨테이너를 **띄우고** 돌아올 뿐이고,
+#    노드 부팅+마이그레이션에 수십 초가 걸린다. 안 기다리면 전 항목이 502 로 무더기 FAIL 나서
+#    "배포가 깨졌다" 로 오독된다(2026-09-10 실제로 그랬다 — 25초 뒤엔 전부 통과였다).
+printf "  ..    back 기동 대기"
+for i in $(seq 1 60); do
+  [ "$(code_of "$BACK/api/daemon/status")" = 401 ] && break
+  printf "."
+  sleep 2
+done
+printf "\n"
+
 # 1) back 기동 — 인증을 요구하면(401) 라우팅·부팅이 정상이라는 뜻이다.
 c=$(code_of "$BACK/api/daemon/status")
 [ "$c" = 401 ] && ok "back 기동 (401 = 인증 요구)" || bad "back 응답 $c (401 이어야 함)"
