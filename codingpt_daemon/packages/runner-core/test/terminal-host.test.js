@@ -135,6 +135,59 @@ test('clear 는 과거를 정말 비우고, 과거 페이지는 offset 연속이
   host.close();
 });
 
+test('갓 만든 터미널은 과거가 0 이다 — 시드가 가짜 과거를 만들지 않는다', { skip: !hasTmux }, async () => {
+  // 회귀(2026-09-10): tmux 는 history 가 비어 있어도 `capture-pane -S -10000 -E -1` 에 **현재 화면
+  //  0행**을 돌려준다. 그걸 과거로 믿고 시드하면 새 터미널이 "프롬프트 1줄 + 빈 줄"짜리 과거를
+  //  갖게 되고, 위로 스크롤하는 순간 뷰어가 라이브 화면을 가린 채 과거 화면으로 넘어간다.
+  await newSession('v3-fresh');
+  assert.strictEqual(String(await runTmux(['display-message', '-p', '-t', '=v3-fresh:0', '#{history_size}'])).trim(), '0');
+  const host = await registry.get('v3-fresh', { cols: 80, rows: 24 });
+  await host.ready;
+  await host.screen.flush();
+  assert.strictEqual((await host.historyPage({ limit: 500 })).total, 0, '새 터미널에 가짜 과거가 생겼다');
+  // 실제 과거가 생기면 정상적으로 쌓인다(시드 건너뛰기가 과거 기능을 죽이지 않았다).
+  await host.input('seq 1 60\r');
+  assert.ok(await until(async () => (await host.historyPage({ limit: 1 })).total > 30), '실제 과거가 안 쌓인다');
+  host.close();
+});
+
+test('스냅샷 하나로 뷰어가 과거 전부를 복원한다 — 클라의 유일한 과거 경로', { skip: !hasTmux }, async () => {
+  // ★ 계약(2026-09-10): PC·앱 뷰어는 과거를 따로 물어보지 않는다. `snapshot().ansi`(serializeRepaint)
+  //  가 데몬 VT 의 **스크롤백까지 통째로** 담고 있어서, 뷰어 xterm 에 그대로 쓰면 위로 스크롤이
+  //  일반 터미널처럼 동작한다. 이게 깨지면 세 기기 모두 과거가 사라진다 → 여기서 실제 xterm 에
+  //  써 넣어 확인한다(문자열 grep 이 아니라 버퍼 상태로).
+  const { Terminal } = require('@xterm/headless');
+  await newSession('v3-snaphist');
+  const host = await registry.get('v3-snaphist', { cols: 80, rows: 24 });
+  await host.ready;
+  await host.input('seq 1 200 | sed "s/^/L /"\r');
+  await until(async () => (await host.historyPage({ limit: 1 })).total > 150);
+  const snap = await host.snapshot();
+  const hist = await host.historyPage({ limit: 1 });
+
+  const viewer = new Terminal({ cols: snap.cols, rows: snap.rows, scrollback: 10000, allowProposedApi: true });
+  await new Promise((r) => viewer.write(snap.ansi, r));
+  const b = viewer.buffer.active;
+  assert.strictEqual(b.baseY, hist.total, `뷰어 과거 ${b.baseY}줄 ≠ 데몬 VT ${hist.total}줄`);
+  // 가장 오래된 줄까지 실제로 읽힌다(= 위로 끝까지 스크롤하면 보인다).
+  const all = [];
+  for (let y = 0; y < b.baseY + viewer.rows; y++) all.push(b.getLine(y).translateToString(true).trim());
+  assert.ok(all.includes('L 1'), '첫 줄(L 1)이 뷰어 스크롤백에 없다');
+  assert.ok(all.includes('L 200'), '마지막 줄(L 200)이 뷰어 화면에 없다');
+  // 사용자 동작 그대로 — 위로 스크롤하면 과거가 보이고, 내려오면 라이브 화면으로 돌아온다.
+  viewer.scrollLines(-60);
+  const seen = [];
+  for (let y = 0; y < viewer.rows; y++) seen.push(b.getLine(b.viewportY + y).translateToString(true).trim());
+  assert.ok(seen.some((l) => /^L \d+$/.test(l)), '위로 스크롤했는데 과거 줄이 안 보인다');
+  assert.ok(!seen.includes('L 200'), '60줄 올라갔는데 아직 마지막 줄이 보인다(스크롤이 안 먹었다)');
+  viewer.scrollToBottom();
+  const back = [];
+  for (let y = 0; y < viewer.rows; y++) back.push(b.getLine(b.viewportY + y).translateToString(true).trim());
+  assert.ok(back.includes('L 200'), '맨 아래로 돌아왔는데 라이브 화면이 아니다');
+  viewer.dispose();
+  host.close();
+});
+
 test('재접속 이어받기 — 링버퍼 안이면 seq 부터, 밖이면 스냅샷', { skip: !hasTmux }, async () => {
   await newSession('v3-seq');
   const host = await registry.get('v3-seq', { cols: 80, rows: 24 });

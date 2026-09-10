@@ -504,10 +504,15 @@ ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveB
   // v3(2026-09-06): 데몬 쪽 정본은 TerminalHost 의 VT 다 — 붙을 때 tmux history 로 **1회 시드**하고
   //  그 VT 를 직렬화해 SNAPSHOT 으로 내려보낸다(v2 의 buildTerminalSnapshotPayload/SNAPSHOT_START 삭제).
   const daemonHost = fs.readFileSync(path.resolve('../codingpt_daemon/packages/runner-core/terminal-host.js'), 'utf8');
-  ok(/capture-pane[\s\S]*?'-S', '-10000'[\s\S]*?'-E', '-1'/.test(daemonHost)
+  ok(/capture-pane[\s\S]*?'-S', `-\$\{Math\.min\(hs, 10000\)\}`[\s\S]*?'-E', '-1'/.test(daemonHost)
     && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(daemonHost)
     && /snapshot\(\)/.test(daemonHost),
     '★ 모바일/원격 attach 도 같은 tmux history 로 스크롤백을 초기화한다');
+  // ★ history_size 를 먼저 물어보고 0 이면 캡처도 패딩도 건너뛴다(2026-09-10 실측). tmux 는 history 가
+  //  비었을 때 `-S -10000 -E -1` 에 **현재 화면 0행**을 돌려주므로, 그대로 시드하면 갓 만든 터미널이
+  //  "프롬프트 1줄 + 빈 줄"짜리 가짜 과거를 갖는다 → 위로 스크롤하면 없던 과거가 열린다.
+  ok(/#\{history_size\}/.test(daemonHost) && /hs > 0 \? this\.runTmux/.test(daemonHost),
+    '★ 데몬 시드는 history_size=0 이면 가짜 과거를 만들지 않는다');
 
   // 단축키 검색바는 콘텐츠와 함께 스크롤해야 한다. sticky 면 설정 헤더 아래를 떠다니며 목록을 가린다.
   const scBar = (/\.sc-bar\s*\{([^}]*)\}/.exec(pcCss) || ['', ''])[1];

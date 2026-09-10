@@ -60,15 +60,25 @@ class TerminalHost extends EventEmitter {
     // 데몬 재시작 등으로 이미 내용이 있는 세션이면 VT 를 tmux 격자로 1회 시드한다(유일한 capture 사용처).
     //  history + 현재화면. 이후엔 %output 원시 바이트만으로 정본이 이어진다.
     try {
+      // ★ history 는 `history_size` 를 먼저 물어보고, 0 이면 **캡처하지 않는다**(2026-09-10 실측).
+      //  tmux 는 history 가 비었을 때 `-S -10000 -E -1` 을 빈 범위로 접지 않고 **현재 화면 0행**을
+      //  돌려준다(history_size=0 인 새 세션에서 프롬프트 줄이 그대로 나온다). 그걸 과거로 믿고
+      //  아래 시드가 스크롤백으로 밀어 넣으면, 방금 만든 터미널이 "프롬프트 1줄 + 빈 줄"짜리 가짜
+      //  과거를 갖게 된다 → 위로 스크롤하는 순간 뷰어가 과거 화면(PC 는 '과거' 배너까지)으로 넘어가
+      //  라이브 화면을 가린다. history_size>0 이면 `-E -1` 은 정확히 history 끝까지다(실측: 23줄
+      //  history 에 화면은 ROW22 부터 — 겹침 0).
+      const hs = Number(String(await this.runTmux(['display-message', '-p', '-t', `=${this.name}:0`, '#{history_size}']).catch(() => '0')).trim()) || 0;
       const [hist, scr] = await Promise.all([
-        this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`, '-S', '-10000', '-E', '-1']),
+        hs > 0 ? this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`, '-S', `-${Math.min(hs, 10000)}`, '-E', '-1']) : Promise.resolve(''),
         this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`]),
       ]);
       const h = String(hist || '').replace(/\n$/, '');
       const s = String(scr || '').replace(/\n$/, '');
+      //  과거가 없으면 밀어 넣기(개행 rows 개 + 화면 지우기)도 **하지 않는다** — 그 자체가 VT
+      //  스크롤백에 빈 줄 1개를 남겨(마지막 개행이 스크롤을 한 번 일으킨다) 똑같이 가짜 과거가 된다.
       const seed = '\x1b[3J\x1b[H\x1b[2J'
-        + (h ? h.replace(/\n/g, '\x1b[0m\r\n') + '\x1b[0m\r\n' : '')
-        + '\r\n'.repeat(this.rows) + '\x1b[H\x1b[2J' + s.replace(/\n/g, '\x1b[0m\r\n');
+        + (h ? h.replace(/\n/g, '\x1b[0m\r\n') + '\x1b[0m\r\n' + '\r\n'.repeat(this.rows) + '\x1b[H\x1b[2J' : '')
+        + s.replace(/\n/g, '\x1b[0m\r\n');
       this.screen.write(seed);
       await this.screen.flush();
     } catch (_) { /* 새 세션 등 — 빈 화면에서 시작 */ }

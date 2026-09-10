@@ -43,7 +43,6 @@ export default {
   "Mac에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT se inicia automáticamente al iniciar sesión en tu Mac.",
   "Windows에 로그인하면 CodingPT를 자동으로 시작해요.": "CodingPT se inicia automáticamente al iniciar sesión en Windows.",
   "{name} 크기로 보는 중": "Viendo con el tamaño de {name}",
-  "과거 — 아래로 스크롤하면 현재": "Historial: desplázate abajo para volver al presente",
   "그 기기를 쓸 수 없다면 이 PC 를 새 기준으로 삼을 수 있어요 — 다른 기기는 모두 다시 연결해야 해요.": "Si no puedes usar ese dispositivo, puedes hacer que este PC sea el nuevo punto de partida: todos los demás tendrán que vincularse otra vez.",
   "그 기기를 켤 수 없다면 이 PC 를 새 기준으로 삼으세요. 워크스페이스·기기 등록·로그인은 그대로예요 — 다른 기기는 다음에 켜질 때 자동으로 다시 신청하고, 여기서 승인만 하면 돼요.": "Si no puedes encender ese dispositivo, haz que este PC sea el nuevo punto de partida. Los espacios de trabajo, los dispositivos registrados y la sesión se mantienen: los demás volverán a solicitarlo al arrancar y solo tendrás que aprobarlo aquí.",
   "다른 기기 크기로 보는 중": "Viendo con el tamaño de otro dispositivo",

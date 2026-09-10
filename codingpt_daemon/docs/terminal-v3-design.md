@@ -28,8 +28,9 @@ tmux 서버(-L codingpt)                     데몬(runner-core)                
  cpt-<ws>--t-<tid>  ──%output 원시바이트──▶ TerminalHost(tid)                      ──OUTPUT(seq)──▶ xterm.js (owner 격자 크기)
                     ◀──send-keys/stdin──   ├ headless VT (정본)                    ◀──INPUT──
                     ◀─refresh-client -C──  ├ owner: deviceId, cols×rows            ──RESIZE(owner 만)──
-                                           ├ scrollback 10000 → HISTORY_PAGE       ──HISTORY req──
-                                           └ snapshot = serialize(VT)+modes+cursor ──SNAPSHOT/RESIZED/OWNER──
+                                           ├ scrollback 10000 (VT 안에 과거 전부)
+                                           └ snapshot = serialize(VT: 과거+화면)    ──SNAPSHOT/RESIZED/OWNER──
+                                             +modes+cursor                          → 뷰어 scrollback 이 곧 과거
 ```
 
 - **TerminalHost** 하나 = tmux control 클라이언트 프로세스 1 + VT 1 + 뷰어 N. 뷰어 0 이 되면 `CPT_HOST_IDLE_MS`(기본 30초) 뒤 해제한다 — 영원히 붙잡으면 열어 본 터미널 수만큼 `tmux -C` 자식과 VT 가 쌓인다. 놓아도 손실이 없는 이유는 시드 때문이다: 데몬 재시작이든 재attach 든 TerminalHost 는 `capture-pane -e -S -10000` 으로 VT 를 **1회 시드**하고(유일한 capture 사용처) epoch 를 새로 발급해 뷰어에게 스냅샷을 준다.
@@ -50,8 +51,14 @@ seq 는 OUTPUT 에만 단조 증가하며 **한 세대(epoch) 안에서만** 유
 
 - xterm 크기 = 서버가 준 `cols×rows` 외엔 절대 다른 값으로 만들지 않는다. `fit()` 은 owner 일 때만, 결과를 `resize` 로 보낸다.
 - 비소유자: `term.options.fontSize` 를 (컨테이너폭 / 격자열수 / 셀폭비) 로 줄인다(상한 = 기본 글꼴, 0.5px 단위). 격자(cols×rows)는 그대로 두고 세로 초과분만 컨테이너 스크롤. 축소 상태 알약 + "내 크기로 맞추기" 버튼(알약은 **터미널 DOM 밖**에서 그린다 — PC `styles.css .pane-owner-pill`, 앱 `PaneView`).
-- 스크롤 라우팅은 **로컬** xterm 상태로 판정한다(1049·mouse 모드가 원시 바이트로 오므로): mouse tracking → 휠 리포트 / alt-screen → 방향키 / 일반 → 과거 오버레이(HISTORY_PAGE). 서버 모드 조회(`modes`) 삭제.
-- 과거 오버레이는 지금 설계 유지(한 번 써 넣고 자체 스크롤, 진입 시 재조회, 총량 감소 시 캐시 폐기, 행마다 SGR 닫힘).
+- 스크롤 라우팅은 **로컬** xterm 상태로 판정한다(1049·mouse 모드가 원시 바이트로 오므로): mouse tracking → 휠 리포트 / alt-screen → 방향키 / 일반 → **자기 버퍼 `scrollLines`**. 서버 모드 조회(`modes`) 삭제.
+- **과거 = 라이브 버퍼 그 자체다(2026-09-10 재설계).** 뷰어 xterm 은 `scrollback: 10000`(= VT `CPT_TERM_SCROLLBACK` = tmux `history-limit`)으로 만들고, 위로 스크롤은 일반 터미널과 완전히 같다. 별도 과거 오버레이·`HISTORY_PAGE` 페이징·모드 전환 배너는 **전부 삭제**했다. 근거 2가지(실측):
+  1. v3 control mode 는 tty 를 그리지 않는다 → 리사이즈 3회에도 `%output` 에 재도장 바이트 **0**. v2(tty attach) 때 스크롤백을 0 으로 죽였던 이유("재도장 잔재")가 사라졌다.
+  2. `snapshot().ansi`(= `serializeRepaint`)가 VT 의 **스크롤백까지 통째로** 담는다(과거 301줄 + 화면 24줄 = 2.8KB). 그래서 attach·탭전환·재접속 어디서든 스냅샷 하나로 과거가 통째 복원되고, 세 기기가 같은 과거를 본다. 회귀: `test/terminal-host.test.js`("스냅샷 하나로 뷰어가 과거 전부를 복원한다").
+- `clear` 가 과거를 지우는 유일한 경로 = TERM 의 E3(`CSI 3J`) — xterm 네이티브(실측: 과거 31줄 → 3J 뒤 0줄, 2J 로는 안 지워짐). 클라이언트가 `CSI 2J` 에서 임의로 `term.clear()` 를 부르면 데몬 VT 에는 남은 과거가 그 기기에서만 사라진다 → 금지.
+- 입력하면 맨 아래(라이브)로 내려온다. 두 구현 다 IME 때문에 xterm 키 핸들러를 우회하므로 xterm 의 `scrollOnUserInput` 이 안 돌아 **명시적으로** `scrollToBottom()` 한다.
+- `HISTORY_PAGE`(opcode 5)·`history{before,limit}` 는 와이어에 남아 있다 — 구버전 클라이언트 호환용이며 새 뷰어는 쓰지 않는다. `historyPage()` 자체는 승인·상태감지 등 서버측 소비자가 계속 쓴다.
+- 시드 주의: tmux 는 history 가 비었을 때 `capture-pane -S -N -E -1` 에 **현재 화면 0행**을 돌려준다. 그래서 `_open()` 은 `#{history_size}` 를 먼저 읽고 0 이면 캡처도 패딩(`\r\n`×rows)도 건너뛴다 — 안 그러면 갓 만든 터미널이 "프롬프트 1줄 + 빈 줄"짜리 가짜 과거를 갖고, 위로 스크롤하는 순간 없던 과거가 열린다(2026-09-10 실측·수정).
 - 키보드로 높이만 바뀌는 리사이즈는 보내지 않는다(VibeTunnel·Orca 동일).
 
 ## 5. 삭제 목록 — **2026-09-06 실행 완료**

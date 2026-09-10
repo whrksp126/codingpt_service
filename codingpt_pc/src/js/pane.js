@@ -29,9 +29,10 @@ const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
 const SearchAddon = window.SearchAddon?.SearchAddon;
 
-// 과거 한 페이지 줄 수 — 서버(데몬/tmux)가 500 을 상한으로 자른다. 모바일과 같은 값.
-const HIST_PAGE = 500;
-// tmux 백엔드가 아닐 때만 쓰는 로컬 스크롤백(윈도우 term-host). tmux 면 0 이다 — 위 Terminal 주석.
+// 라이브 격자의 스크롤백 = 과거 전부(데몬 VT 의 CPT_TERM_SCROLLBACK·tmux history-limit 과 같은 값).
+//  ★ 2026-09-10: 뷰어는 과거를 따로 물어보지 않는다. 스냅샷의 `ansi`(serializeRepaint)가 이미
+//   **스크롤백 통째**를 담고 있어서(실측: 과거 301줄+화면 24줄 = 2.8KB) 여기에 그대로 쌓인다.
+//   그래서 위로 스크롤은 그냥 xterm 자체 스크롤 — 일반 터미널과 동치다.
 const LIVE_SCROLLBACK = 10000;
 // 이 PC 가 tmux 백엔드인가 = 로컬 터미널의 과거 정본이 tmux 인가. win32 는 term-host 라 아니다.
 const localTmuxBackend = () => document.documentElement.dataset.os !== "windows";
@@ -106,10 +107,6 @@ onAppearanceChange(() => {
           p.term.options.fontFamily = mono;
           p.term.options.minimumContrastRatio = termMinContrast();
           if (p.termEl) p.termEl.style.background = theme.background || "";
-          if (p.histEl) p.histEl.style.background = theme.background || "";
-          // 과거 오버레이는 다음에 열릴 때 새 테마/글꼴로 다시 만든다(열려 있으면 즉시 접는다).
-          try { p._hideHistory?.(); p._histTerm?.dispose(); } catch (_) {}
-          p._histTerm = null; p._histSearch = null; p._histWritten = -1;
           p._fitNow();
         }
         p.ide?.setTheme(cmName);
@@ -854,19 +851,6 @@ export class PaneView {
     // 터미널 스킴 배경을 pane 여백까지 — 프리셋 배경이 앱 배경과 다를 때 띠가 지지 않게.
     try { this.termEl.style.background = termTheme().background || ""; } catch (_) {}
     this.body.appendChild(this.termEl);
-    // 과거(스크롤백) 오버레이 — 위로 스크롤하면 라이브 격자를 가리고 서버/tmux 정본을 그린다.
-    //  모바일 TerminalWebView 의 #historyViewport 와 같은 설계(한 번 써 넣고 자체 스크롤).
-    this.histEl = document.createElement("div");
-    this.histEl.className = "pane-term-hist";
-    this.histEl.style.display = "none";
-    try { this.histEl.style.background = termTheme().background || ""; } catch (_) {}
-    this.body.appendChild(this.histEl);
-    // "지금 과거를 보고 있다"는 표시 — 없으면 터미널이 멈춘 것으로 오인한다.
-    this.histTag = document.createElement("div");
-    this.histTag.className = "pane-hist-tag";
-    this.histTag.textContent = i18n.t("과거 — 아래로 스크롤하면 현재");
-    this.histTag.style.display = "none";
-    this.body.appendChild(this.histTag);
     // 비소유자 표시 + "내 크기로 맞추기" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
     this.ownerPill = document.createElement("div");
     this.ownerPill.className = "pane-owner-pill";
@@ -875,16 +859,6 @@ export class PaneView {
     this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
     this.body.appendChild(this.ownerPill);
     this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0; this._v3Epoch = null;
-    this._histRows = new Map();
-    this._histTotal = 0;
-    this._histLoadedFrom = Infinity;   // 아직 받은 게 없다(0 은 "맨 앞까지 다 받았다"는 뜻이라 못 쓴다)
-    this._histWritten = -1;
-    this._histWantScroll = 0;
-    this._histOn = false;
-    this._histPending = false;
-    this._histFailed = false;
-    // 과거를 서버에 물어볼 수 있는가. 로컬은 OS 로 알고, 원격은 스냅샷 메타(serverHistory)로 안다.
-    this._srvHistory = this.ctx.isLocal ? localTmuxBackend() : true;
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
     this.emptyEl = document.createElement("div");
     this.emptyEl.className = "pane-term-empty";
@@ -904,14 +878,13 @@ export class PaneView {
       cursorBlink: true,
       fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
       fontFamily: monoFontStack(), // 코드·터미널 글꼴 설정(theme.js) — 변경은 onAppearanceChange 가 반영
-      // ★ tmux 백엔드면 스크롤백 0 — 과거는 여기 쌓지 않는다(2026-09-04).
-      //  tmux 는 리사이즈마다 pane 을 커서 위치에 다시 그린다(ED 없이 `\e[K`+`\r\n` 반복).
-      //  그래서 attach 한 xterm 의 스크롤백에는 "과거"가 아니라 **재도장 잔재**가 쌓인다.
-      //  기기마다 화면이 다른 멀티기기(window-size latest)에서는 리사이즈가 상시 일어나 잔재가
-      //  실제 과거를 밀어내고, 폭이 바뀌며 리플로우돼 프롬프트가 한 줄에 여러 개 붙는 형태로
-      //  뭉개졌다(사용자 신고 스크린샷). 과거는 _histFetch 가 서버/tmux 정본에서 읽어 온다.
-      //  ⚠ term-host(윈도우)는 tmux 재도장 자체가 없어 로컬 스크롤백이 정당하다 — 거기선 그대로 둔다.
-      scrollback: this._srvHistory ? 0 : LIVE_SCROLLBACK,
+      // ★ 과거는 여기 그대로 쌓인다 — 일반 터미널과 같다(2026-09-10).
+      //  v2(tty attach) 때는 tmux 가 리사이즈마다 pane 을 다시 그려서(`\e[K`+`\r\n` 반복) 스크롤백에
+      //  "재도장 잔재"가 쌓였고, 그래서 여기를 0 으로 죽이고 별도 과거 오버레이를 그렸다. v3
+      //  control mode 는 tty 를 안 그린다 — 리사이즈 3회 실측에서 %output 재도장 바이트 0(2026-09-10).
+      //  게다가 재접속·탭전환 스냅샷(serializeRepaint)이 스크롤백까지 통째로 실어 오므로, 이 버퍼는
+      //  어느 기기에서 언제 붙어도 데몬 VT 와 같은 과거를 갖는다.
+      scrollback: LIVE_SCROLLBACK,
       convertEol: false,
       theme: termTheme(),
       // 최소 대비 자동 보정 — 프롬프트(p10k 등)가 팔레트 밖 256색 배경을 써도 글자가 항상 읽히게.
@@ -1514,13 +1487,8 @@ export class PaneView {
     if (this.node.kind !== "terminal" || !this.termEl) return;
     const tab = this.node.tabs[this.node.active];
     // 표시 대상이 **실제로 바뀌었을 때만** 과거 보기를 접는다(가려진 채 남으면 유령 화면이 된다).
-    //  ⚠ 이 함수는 리컨실러의 ensureAttached() 가 매 틱 호출하는 멱등 함수다 — 무조건 접으면
-    //    사용자가 과거를 보고 있어도 몇 초마다 라이브로 튕긴다(2026-09-04 실측으로 잡음).
     const sig = `${this.node.active}|${tab ? tab.tid || tab.win : ""}|${tab ? tab.kind || "term" : ""}|${tab ? tab.mode || "tui" : ""}|${this.node.tabs.length}`;
-    if (this._surfaceSig !== sig) {
-      this._surfaceSig = sig;
-      this._hideHistory();
-    }
+    if (this._surfaceSig !== sig) this._surfaceSig = sig;
     const isT = isTermTab(tab);
     if (!isT && tab) this._ensureMixed(tab);
     const empty = !this.node.tabs.length;
@@ -1671,8 +1639,6 @@ export class PaneView {
   //  이 pane 은 뷰어다: 소유자면 컨테이너에 fit 해 resize 를 보내고, 아니면 소유자 격자를 축소해 본다.
   //  (win32/term-host 는 아직 v3 미지원 → _openChannelLegacyLocal.)
   async _openChannel(win, replace) {
-    // 붙는 터미널이 바뀌면 과거 offset 이 통째로 다른 의미가 된다 — 캐시를 버리고 다시 받는다.
-    this._histReset();
     if (this.ctx.isLocal && !localTmuxBackend()) return this._openChannelLegacyLocal(win, replace);
     this._fitLocalOnly();          // 첫 resize 를 스테일 치수로 보내지 않는다
     for (const delay of [250, 1200]) {
@@ -1739,12 +1705,8 @@ export class PaneView {
         case TERMINAL_OPCODE_V3.SNAPSHOT: { const m = json(); if (m) this._applySnapshot(m); return; }
         case TERMINAL_OPCODE_V3.RESIZED: { const m = json(); if (m) this._setGrid(m.cols, m.rows); return; }
         case TERMINAL_OPCODE_V3.OWNER: { const m = json(); if (m) this._setOwner(m); return; }
-        case TERMINAL_OPCODE_V3.HISTORY_PAGE: {
-          clearTimeout(this._histTimer);
-          const done = this._histResolve; this._histResolve = null;
-          done?.(json());
-          return;
-        }
+        // HISTORY_PAGE 는 더 쓰지 않는다 — 과거는 스냅샷 ansi 로 통째 오고 라이브 버퍼에 쌓인다.
+        //  (데몬은 구버전 클라를 위해 아직 응답한다.)
         case TERMINAL_OPCODE_V3.EXIT: {
           this._v3Seq = 0;
           this._onExit();
@@ -1793,9 +1755,6 @@ export class PaneView {
     }
     this._sentCols = c; this._sentRows = r;
     if (!silent) this._applyScale();
-    // 과거 오버레이도 같은 격자로.
-    if (this._histOn && this._histTerm) { try { this._writeHistory(this._histFromBottom()); } catch (_) { /* noop */ } }
-    this._histGrid = `${c}x${r}`;
   }
 
   _setOwner(m) {
@@ -1901,10 +1860,10 @@ export class PaneView {
     }, delay);
   }
   _write(d) {
-    // 터미널의 일반 규칙 — 뭔가 입력하면 과거 보기를 접고 라이브 화면으로 돌아온다.
-    //  (macOS 입력은 IME/단축키 보존을 위해 xterm 키 핸들러를 우회해 PTY 로 직행하므로 xterm 은
-    //   "사용자 입력"을 감지하지 못한다. 그래서 여기서 명시적으로 접는다.)
-    this._hideHistory();
+    // 일반 터미널 규칙 — 뭔가 입력하면 맨 아래(라이브)로 돌아온다. xterm 의 scrollOnUserInput 은
+    //  xterm 자신의 키 핸들러를 탈 때만 도는데, macOS 입력은 IME/단축키 보존을 위해 그걸 우회해
+    //  PTY 로 직행한다(입력을 xterm 이 모른다) → 여기서 명시적으로 내린다.
+    try { this.term?.scrollToBottom(); } catch (_) { /* noop */ }
     // shift+tab(CSI Z) = 에이전트 모드 순환. **로컬 터미널은 tmux 직결**이라 데몬이 이 키를 못 본다
     //  → 데몬에 즉시 재확인을 알려 이 PC·폰의 모드 알약이 3초 폴링을 기다리지 않게 한다(2026-08-02).
     //  원격 터미널은 입력이 데몬 pty 를 지나가므로 데몬이 알아서 감지한다(중복 통지 불필요).
@@ -2144,192 +2103,6 @@ export class PaneView {
       document.removeEventListener("paste", onPaste, true);
     };
   }
-  // ── 과거(스크롤백)는 서버/tmux 정본에서 읽는다 ────────────────────────────────
-  // 라이브 격자(this.term)는 scrollback:0 이다. 이유는 Terminal({scrollback:0}) 주석 참조 —
-  //  tmux attach 스트림에 쌓이는 건 과거가 아니라 재도장 잔재라서, 그걸 과거로 보여 주면 안 된다.
-  // 계약은 로컬(pty_history)·원격(데몬 v2 `{type:'history'}`)·모바일이 **완전히 동일**하다:
-  //  요청 {before, limit} → {start, end, total, hasMore, rows:[{offset, text, ansi}]}
-  //  offset 0 = 가장 오래된 과거 줄. 렌더는 ansi(색 포함)를 쓰고 text 는 폴백/검색용이다.
-  //
-  // 설계(모바일 #historyViewport 와 동일): 받아 둔 구간을 오버레이 xterm 에 **한 번 써 넣고**,
-  //  그다음은 그 xterm 자신의 scrollLines 로 움직인다. 스텝마다 다시 그리면 잔상이 남는다.
-  _histReset() {
-    this._histRows = new Map();
-    this._histTotal = 0;
-    this._histLoadedFrom = Infinity;
-    this._histWritten = -1;
-    this._histWantScroll = 0;
-    this._histPending = false;
-    this._hideHistory();
-  }
-  // 원격 호스트가 tmux 가 아니면(term-host) 서버 과거가 없다 — 그땐 로컬 스크롤백이 정당하다.
-  _applyHistoryMode(serverHistory) {
-    const on = !!serverHistory;
-    if (this._srvHistory === on) return;
-    this._srvHistory = on;
-    if (!this.term) return;
-    try { this.term.options.scrollback = on ? 0 : LIVE_SCROLLBACK; } catch (_) { /* noop */ }
-    if (on) this._histReset();
-  }
-  _histFetch(before) {
-    if (this.ctx.isLocal && !localTmuxBackend()) return api.ptyHistory(this.id, before ?? null, HIST_PAGE).catch(() => null);
-    return new Promise((resolve) => {
-      if (!this.ws || this.ws.readyState !== 1) { resolve(null); return; }
-      this._histResolve = resolve;
-      clearTimeout(this._histTimer);
-      // 응답이 영영 안 와도 _histPending 이 물리지 않게(재연결 중 등) 반드시 시한을 둔다.
-      this._histTimer = setTimeout(() => {
-        const r = this._histResolve; this._histResolve = null; r?.(null);
-      }, 5000);
-      try { this.ws.send(JSON.stringify({ type: "history", before: before ?? null, limit: HIST_PAGE })); }
-      catch (_) { this._histResolve = null; resolve(null); }
-    });
-  }
-  _requestHistory(before) {
-    if (this._histPending) return;
-    this._histPending = true;
-    this._histFetch(before).then((page) => {
-      this._histPending = false;
-      this._ingestHistoryPage(page);
-    }).catch(() => { this._histPending = false; });
-  }
-  // ⚠ 반드시 **보이는 상태에서** open 한다. display:none 인 요소에 open 하면 xterm 이 글자 크기를
-  //   0 으로 재서 빈 화면이 된다(모바일 실기 실측 2026-09-04). WebGL 은 안 붙인다 — 여기는 통째
-  //   재작성이 섞여 캔버스 잔상에 취약하다.
-  _histView() {
-    if (this._histTerm || this._histFailed) return this._histTerm;
-    try {
-      this._histTerm = new Terminal({
-        cursorBlink: false,
-        disableStdin: true,
-        fontSize: termFontPx(),
-        fontFamily: monoFontStack(),
-        convertEol: false,
-        scrollback: 10000,
-        minimumContrastRatio: termMinContrast(),
-        theme: termTheme(),
-        cols: Math.max(2, this.term?.cols || 80),
-        rows: Math.max(2, this.term?.rows || 24),
-        allowProposedApi: true,
-      });
-      this._histTerm.open(this.histEl);
-      if (!this.histEl.querySelector(".xterm-rows")) throw new Error("history xterm did not mount");
-      if (SearchAddon) {
-        try { this._histSearch = new SearchAddon(); this._histTerm.loadAddon(this._histSearch); } catch (_) {}
-      }
-    } catch (_) {
-      // 어떤 이유로든 실패하면 빈 화면 대신 평문으로 떨어뜨린다 — 과거를 못 보는 것보단 낫다.
-      this._histFailed = true;
-      this._histTerm = null;
-    }
-    return this._histTerm;
-  }
-  // 지금 갖고 있는 구간([_histLoadedFrom, _histTotal))만 만든다. 아직 안 받은 더 오래된 구간을
-  //  빈 줄로 채우지 않는다 — 그러면 사용자가 수천 줄의 공백을 긁어 올려야 한다.
-  _histLines() {
-    const out = [];
-    const from = Number.isFinite(this._histLoadedFrom) ? this._histLoadedFrom : this._histTotal;
-    for (let i = from; i < this._histTotal; i++) {
-      const row = this._histRows.get(i);
-      if (!row) { out.push(""); continue; }
-      out.push(typeof row.ansi === "string" ? row.ansi : String(row.text || "").replace(/\s+$/, ""));
-    }
-    return out;
-  }
-  _showHistory() {
-    if (this._histOn) return;
-    this.histEl.style.display = "block";   // ★ open 전에 먼저 보이게(_histView 주석)
-    if (this.histTag) this.histTag.style.display = "block";
-    this.termEl.style.visibility = "hidden";
-    this._histOn = true;
-  }
-  _hideHistory() {
-    if (!this._histOn) return;
-    this._histOn = false;
-    if (this.histEl) this.histEl.style.display = "none";
-    if (this.histTag) this.histTag.style.display = "none";
-    if (this.termEl) this.termEl.style.visibility = "";
-    // 가려졌다 돌아온 라이브 격자는 한 번 다시 그려 줘야 빈 화면으로 남지 않는다.
-    try { this.term?.refresh(0, this.term.rows - 1); } catch (_) {}
-  }
-  _histFromBottom() {
-    try {
-      const b = this._histTerm.buffer.active;
-      return Math.max(0, Number(b.baseY) - Number(b.viewportY));
-    } catch (_) { return 0; }
-  }
-  // 오버레이에 현재 보유 구간을 새로 써 넣는다(진입 시 1회 + 더 오래된 페이지를 받았을 때).
-  _writeHistory(keepFromBottom) {
-    const lines = this._histLines();
-    const v = this._histView();
-    if (!v) {
-      this.histEl.classList.add("plain");
-      this.histEl.textContent = lines.map((l) => String(l).replace(/\x1b\[[0-9;]*m/g, "")).join("\n");
-      this._histWritten = this._histTotal;
-      return;
-    }
-    const cols = Math.max(2, this.term?.cols || v.cols), rows = Math.max(2, this.term?.rows || v.rows);
-    if (v.cols !== cols || v.rows !== rows) { try { v.resize(cols, rows); } catch (_) {} }
-    try { v.reset(); } catch (_) {}
-    v.write("\x1b[H" + lines.join("\r\n"), () => {
-      try {
-        v.scrollToBottom();
-        if (keepFromBottom > 0) v.scrollLines(-keepFromBottom);
-        v.refresh(0, v.rows - 1);
-      } catch (_) {}
-    });
-    this._histWritten = this._histTotal;
-  }
-  _ingestHistoryPage(page) {
-    if (!page) return;
-    const total = Math.max(0, Number(page.total) || 0);
-    // 과거가 줄었다 = `clear` 됐거나 스크롤백 상한을 넘겨 오래된 줄이 버려졌다.
-    //  절대 offset 이 통째로 밀리므로 캐시를 버린다(안 그러면 남의 줄을 내 offset 으로 그린다).
-    if (total < this._histTotal) { this._histRows.clear(); this._histLoadedFrom = Infinity; this._histWritten = -1; }
-    this._histTotal = total;
-    const rows = Array.isArray(page.rows) ? page.rows : [];
-    for (const r of rows) {
-      if (r && Number.isFinite(Number(r.offset))) this._histRows.set(Number(r.offset), r);
-    }
-    if (rows.length) this._histLoadedFrom = Math.min(this._histLoadedFrom, Number(page.start) || 0);
-
-    // 첫 페이지를 기다리며 쌓아 둔 스크롤을 이제 적용한다(맨 아래에서 그만큼 위로).
-    if (!this._histOn && this._histWantScroll < 0) {
-      const want = -this._histWantScroll;
-      this._histWantScroll = 0;
-      if (!this._histTotal) return;             // 과거가 아예 없다 — 열지 않는다
-      this._showHistory();
-      this._writeHistory(want);
-      return;
-    }
-    // 보고 있는 중에 더 오래된 페이지가 왔다 — 보던 위치를 유지한 채 다시 써 넣는다.
-    if (this._histOn && this._histTerm) this._writeHistory(this._histFromBottom());
-  }
-  // 휠 한 번(양수=아래로). 오버레이 진입·이탈·추가 로드를 전부 여기서 판단한다.
-  _histScroll(lines) {
-    const n = Number(lines) || 0;
-    if (!n) return;
-    // 서버 과거가 없는 백엔드(term-host) — 라이브 격자의 자체 스크롤백으로 움직인다.
-    if (!this._srvHistory) { try { this.term?.scrollLines(n); } catch (_) {} return; }
-    if (!this._histOn) {
-      if (n > 0) return;                        // 이미 라이브 화면 맨 아래
-      // 진입은 **항상 새로 물어본다**. 캐시된 total 로 바로 열면 그새 `clear` 로 비워졌거나 출력이
-      //  더 쌓인 과거를 낡은 상태로 보여 준다(2026-09-04 실측: clear 뒤에도 지운 과거가 열렸다).
-      this._histWantScroll += n;
-      this._requestHistory(null);
-      return;
-    }
-    const v = this._histTerm;
-    if (!v) return;                             // 평문 폴백은 전체를 한 번에 보여 준다
-    v.scrollLines(n);
-    const b = v.buffer.active;
-    if (n > 0 && Number(b.viewportY) >= Number(b.baseY)) { this._hideHistory(); return; }
-    // 맨 위에 닿았는데 더 오래된 과거가 남아 있으면 이어서 받아 온다.
-    if (n < 0 && Number(b.viewportY) <= 0 && this._histLoadedFrom > 0 && Number.isFinite(this._histLoadedFrom)) {
-      this._requestHistory(this._histLoadedFrom);
-    }
-  }
-
   // 풀스크린 TUI 휠 보완 — 두 입력 경로(mac/win)가 공유한다.
   //  vim·less 처럼 마우스 추적을 안 켜는 풀스크린 앱은 휠을 돌려도 xterm 이 "일반 셸 스크롤백"으로
   //  처리해 화면이 안 움직인다 → 방향키로 바꿔 보낸다. 판정은 브랜드(codex 등)가 아니라 모드로 한다.
@@ -2350,7 +2123,7 @@ export class PaneView {
       refresh();
       // ① 마우스 추적 TUI(claude·codex 등) — xterm 이 이미 휠 리포트를 보낸다. 손대지 않는다.
       const tracking = this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none";
-      if (tracking && !this._histOn) return;
+      if (tracking) return;
       const dy = Number(e.deltaY) || 0;
       if (!dy) return;
       const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
@@ -2358,20 +2131,18 @@ export class PaneView {
       e.stopPropagation();
       // ② 풀스크린 앱(vim·less) — 방향키로 바꿔 앱에 준다. tmux 가 smcup@ 라 xterm 은 1049 를
       //    못 봐서 스스로는 알 수 없다. 판정은 tmux 정본(pty_modes)이지 브랜드가 아니다.
-      if (modes.altScreen && !this._histOn) {
+      if (modes.altScreen) {
         const app = !!this.term?.modes?.applicationCursorKeysMode;
         this._write((dy < 0 ? (app ? "\x1bOA" : "\x1b[A") : (app ? "\x1bOB" : "\x1b[B")).repeat(count));
         return;
       }
-      // ③ 일반 셸 — 과거는 서버/tmux 정본에서 읽어 오버레이로 본다(라이브 격자는 스크롤백 0).
-      this._histScroll(dy < 0 ? -count : count);
+      // ③ 일반 셸 — 이 버퍼가 곧 과거다(스냅샷이 스크롤백을 통째로 실어 온다). 일반 터미널처럼 스크롤.
+      try { this.term?.scrollLines(dy < 0 ? -count : count); } catch (_) { /* noop */ }
     };
     const opt = { capture: true, passive: false };
     this.termEl?.addEventListener("wheel", onWheel, opt);
-    this.histEl?.addEventListener("wheel", onWheel, opt);   // 오버레이 위에서도 같은 판정을 탄다
     return () => {
       this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
-      this.histEl?.removeEventListener("wheel", onWheel, { capture: true });
     };
   }
   // 프로그램적 텍스트 삽입(OS 파일 드롭 등) — 붙여넣기(onPaste)와 동일 규칙:
@@ -2450,13 +2221,6 @@ export class PaneView {
     //   PC 는 오버레이가 visibility 만 감춰 레이아웃이 남지만, 창 최소화·탭 전환 등 0 크기 순간은
     //   언제든 생기므로 같은 방어선을 둔다.
     if (this.term.cols < 8 || this.term.rows < 3) return;
-    // 과거 오버레이도 라이브와 같은 격자여야 한다(줄바꿈 위치가 달라지면 다른 화면이 된다).
-    //  ⚠ 격자가 **바뀐 경우만** — _fitNow 는 자주 불리고, 매번 다시 쓰면 스크롤이 튄다.
-    const grid = `${this.term.cols}x${this.term.rows}`;
-    if (this._histOn && this._histTerm && this._histGrid !== grid) {
-      try { this._writeHistory(this._histFromBottom()); } catch (_) { /* noop */ }
-    }
-    this._histGrid = grid;
     const { cols, rows } = this.term;
     if (!cols || !rows) return;
     // ★ 값이 안 바뀌었으면 보내지 않는다. 라이브 로그로 드러난 것: `_fitNow` 가 **7초마다**(리컨실
@@ -2578,11 +2342,9 @@ export class PaneView {
     }
   }
 
-  // 검색 대상 = **지금 보고 있는 격자**. 과거 오버레이가 떠 있으면 그 안(서버 정본 과거)을 찾는다.
-  //  라이브 격자는 scrollback:0 이라 화면에 보이는 만큼이 전부다 — 과거를 찾으려면 위로 스크롤해
-  //  오버레이를 띄운 뒤 ⌘F 를 누르면 된다.
+  // 검색 대상 = 라이브 격자 하나. 스크롤백(과거)까지 한 버퍼라 ⌘F 가 과거도 함께 찾는다.
   _activeSearchAddon() {
-    return (this._histOn && this._histSearch) || this.searchAddon || null;
+    return this.searchAddon || null;
   }
   _openTermSearch() {
     if (!this._activeSearchAddon()) return;
@@ -2638,7 +2400,6 @@ export class PaneView {
 
   _closeSearch() {
     try { this.searchAddon?.clearDecorations?.(); } catch (_) {}
-    try { this._histSearch?.clearDecorations?.(); } catch (_) {}
     this._searchBar?.remove();
     this._searchBar = null;
     this._searchInput = null;
@@ -2686,11 +2447,6 @@ export class PaneView {
     try {
       this.ws?.close();
     } catch (_) {}
-    clearTimeout(this._histTimer);
-    try {
-      this._histTerm?.dispose();
-    } catch (_) {}
-    this._histTerm = null;
     try {
       this.term?.dispose();
     } catch (_) {}

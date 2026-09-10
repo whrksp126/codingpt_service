@@ -30,9 +30,9 @@ ok('앱은 서버 modes 를 조회하지 않는다', !app.includes("type:'modes'
 ok('앱은 로컬 xterm 상태로 스크롤을 라우팅한다',
   app.includes('if (__mouseActive())') && app.includes('if (__alternateActive())'));
 
-// 2) 우선순위는 양쪽이 같다: mouse > alternate > 과거(서버 정본).
-ok('PC 는 mouse tracking 이면 xterm 경로 유지', /if \(tracking && !this\._histOn\) return;/.test(pane));
-ok('PC 는 mouse 다음에 alternate 를 본다', /if \(tracking[\s\S]{0,600}?if \(modes\.altScreen[\s\S]{0,400}?_histScroll/.test(pane));
+// 2) 우선순위는 양쪽이 같다: mouse > alternate > 일반 셸(자기 버퍼 스크롤 = 과거 포함).
+ok('PC 는 mouse tracking 이면 xterm 경로 유지', /if \(tracking\) return;/.test(pane));
+ok('PC 는 mouse 다음에 alternate 를 본다', /if \(tracking\) return;[\s\S]{0,700}?if \(modes\.altScreen\)[\s\S]{0,400}?this\.term\?\.scrollLines\(/.test(pane));
 ok('앱은 mouse tracking 이 alternate 보다 우선', /if \(__mouseActive\(\)\)[\s\S]{0,300}?if \(__alternateActive\(\)\)/.test(app));
 
 // 3) 브랜드 하드코딩 금지 — 판정은 모드로만 한다.
@@ -51,19 +51,31 @@ for (const conf of ['../../codingpt_daemon/tmux.conf', '../../codingpt_back/tmux
     !/alternate-screen\s+off/m.test(text));
 }
 
-// 6) 과거(스크롤백)의 정본 — 2026-09-04 사용자 신고("PC 는 clear 해도 위로 스크롤되고 뭉개진 게 보인다").
-//    tmux 는 리사이즈마다 pane 을 커서 위치에 다시 그린다(ED 없이 `\e[K`+`\r\n`). 그 스트림을 먹는
-//    xterm 의 스크롤백에 쌓이는 건 과거가 아니라 재도장 잔재다. 그래서 라이브 격자는 스크롤백을
-//    갖지 않고, 과거는 서버/tmux 정본에서 페이지로 받아 오버레이에 그린다 — PC·앱 같은 계약.
-ok('PC 라이브 격자는 tmux 백엔드에서 스크롤백을 쌓지 않는다',
-  /scrollback: this\._srvHistory \? 0 : LIVE_SCROLLBACK,/.test(pane)
-  && /this\.term\.options\.scrollback = on \? 0 : LIVE_SCROLLBACK/.test(pane));
-ok('PC 는 서버 과거가 없는 백엔드(term-host)에선 로컬 스크롤로 폴백한다',
-  /if \(!this\._srvHistory\) \{ try \{ this\.term\?\.scrollLines\(n\); \}/.test(pane));
-ok('PC 가 로컬 과거를 tmux 정본에서 읽는다', pane.includes('api.ptyHistory(this.id'));
-ok('PC 가 과거를 데몬 v3 계약으로 읽는다(로컬·원격 동일)',
-  /JSON\.stringify\(\{ type: "history", before: before \?\? null, limit: HIST_PAGE \}\)/.test(pane)
-  && pane.includes('TERMINAL_OPCODE_V3.HISTORY_PAGE'));
+// 6) 과거(스크롤백)의 정본 — 2026-09-10 재설계. **라이브 버퍼 하나가 곧 과거다.**
+//    근거(실측): ① v3 control mode 는 tty 를 안 그린다 → 리사이즈에도 %output 재도장 바이트 0
+//    (v2 tty attach 시절 "재도장 잔재" 때문에 스크롤백을 0 으로 죽였던 이유가 사라졌다).
+//    ② 스냅샷 `ansi`(serializeRepaint)가 데몬 VT 의 **스크롤백까지 통째로** 담는다(과거 301줄 +
+//    화면 24줄 = 2.8KB). 그래서 어느 기기에서 언제 붙어도 같은 과거가 그 버퍼에 들어오고, 위로
+//    스크롤은 일반 터미널과 완전히 같아진다 — 별도 과거 오버레이·페이지 요청은 전부 삭제했다.
+//    계약을 지키는 데몬측 회귀: runner-core/test/terminal-host.test.js('스냅샷 하나로 …').
+ok('PC 라이브 격자가 과거를 담는다', /scrollback: LIVE_SCROLLBACK,/.test(pane));
+ok('앱 라이브 격자가 같은 한도로 과거를 담는다', /scrollback: 10000,/.test(app));
+ok('PC 일반 셸 스크롤은 자기 버퍼로 간다', /this\.term\?\.scrollLines\(dy < 0 \? -count : count\)/.test(pane));
+ok('앱 일반 셸 스크롤도 자기 버퍼로 간다', /term\.scrollLines\(lines\)/.test(app));
+// 과거 오버레이(별도 xterm·페이지 요청·모드 전환 배너)가 되살아나지 않게 부재를 못 박는다.
+for (const [label, src, needles] of [
+  ['PC', pane, ['_histOn', '_histTerm', 'pane-term-hist', 'pane-hist-tag', 'type: "history"']],
+  ['앱', app, ['__histOn', '__histTerm', 'historyViewport', 'hist-on', "type:'history'"]],
+]) {
+  for (const n of needles) ok(`${label} 에 과거 오버레이 잔재가 없다 (${n})`, !src.includes(n));
+}
+// 입력하면 맨 아래(라이브)로 — 일반 터미널 규칙. 두 구현 다 xterm 키 핸들러를 우회하므로 명시적으로 한다.
+ok('PC: 입력하면 맨 아래로 내려온다', /_write\(d\) \{[\s\S]{0,400}?this\.term\?\.scrollToBottom\(\)/.test(pane));
+ok('앱: 입력하면 맨 아래로 내려온다', /var send = function\(s\)\{ try \{\s*term\.scrollToBottom\(\);/.test(app));
+// clear 가 과거를 지우는 유일한 경로 = TERM 의 E3(CSI 3J) — xterm 네이티브. 임의 2J 훅은 데몬 VT 와
+//  어긋나 그 기기에서만 과거가 사라진다(실측: 3J 로 과거 31→0, 2J 로는 안 지워짐).
+ok('앱에 임의 CSI 2J 스크롤백 삭제 훅이 없다', !app.includes("registerCsiHandler({ final:'J' }"));
+ok('PC 에도 없다', !pane.includes("registerCsiHandler"));
 
 // 6-6) v3 뷰어 계약(docs/terminal-v3-design.md §4) — 격자는 소유자 것, 크기 주장은 소유자만, 비소유자는 축소.
 {
@@ -92,38 +104,13 @@ ok('PC 가 과거를 데몬 v3 계약으로 읽는다(로컬·원격 동일)',
   ok('PC: 소유권은 명시적 claim 만(자동 탈취 없음)', /JSON\.stringify\(\{ type: "claim" \}\)/.test(pane) && !/type: "claim"[\s\S]{0,40}setInterval/.test(pane));
   ok('PC: 스크롤 라우팅 판정이 로컬 xterm 상태다(서버 modes 조회 없음)', /buffer\?\.active\?\.type === "alternate"; return;/.test(pane));
 }
-ok('앱도 같은 요청 계약을 쓴다', /type:'history',before:before,limit:500/.test(app));
-ok('PC 오버레이는 한 번 써 넣고 자체 스크롤한다(스텝마다 재작성 금지)',
-  pane.includes('v.scrollLines(n)') && /this\._histWritten = this\._histTotal;/.test(pane));
-ok('앱 오버레이도 같은 설계', app.includes('v.scrollLines(n)') && app.includes('__histWritten=__histTotal'));
-ok('PC 오버레이는 보이게 만든 뒤 open 한다(흰 화면 회귀)',
-  /_showHistory\(\)[\s\S]{0,400}?this\.histEl\.style\.display = "block"/.test(pane)
-  && pane.includes('this.histEl.querySelector(".xterm-rows")'));
-
-// 6-2) 실기에서 잡힌 결함 2종(2026-09-04) — 둘 다 "동작은 하는데 몇 초 뒤 사라진다" 류라 코드로 고정한다.
-ok('PC: 리컨실러의 멱등 showActiveTab 이 과거 보기를 닫지 않는다',
-  /this\._surfaceSig !== sig[\s\S]{0,120}?this\._hideHistory\(\)/.test(pane));
-ok('PC: 과거 진입은 캐시를 믿지 않고 항상 새로 물어본다(clear 뒤 유령 과거 방지)',
-  /if \(n > 0\) return;[\s\S]{0,400}?this\._requestHistory\(null\);\n\s+return;\n\s+\}/.test(pane)
-  && !/if \(!this\._histTotal\) \{\s+\/\/ 총량/.test(pane));
-ok('PC: 총량이 줄면(clear·상한초과) 캐시를 버린다',
-  /if \(total < this\._histTotal\) \{ this\._histRows\.clear\(\)/.test(pane));
-
-// 6-3) 퇴화 크기 전송 금지(2026-09-05 안드로이드 실기): 과거 보기 중 라이브 격자가 숨겨지면
-//   FitAddon 이 최소값(2x1)을 준다. 그게 공유 tmux window 로 나가면 전 기기 터미널이 접힌다.
-ok('앱: 과거 보기 중에는 fit 하지 않는다', /var __fitNow = function\(\)\{[\s\S]{0,700}?if \(__histOn\) return;/.test(app));
+// 6-3) 퇴화 크기 전송 금지(2026-09-05 안드로이드 실기): 격자가 숨겨진 순간 FitAddon 은 최소값
+//   (2x1)을 준다. 그게 공유 tmux window 로 나가면 전 기기 터미널이 접힌다.
 ok('앱: 퇴화 크기는 전송하지 않는다', /term\.cols >= 8 && term\.rows >= 3/.test(app) && /ws\.readyState === 1 && __sane\(\)/.test(app));
-ok('앱: 과거 보기를 접으면 미룬 fit 을 따라잡는다', /classList\.remove\('hist-on'\)[\s\S]{0,300}?__fitNow\(\)/.test(app));
 ok('PC: 퇴화 크기는 전송하지 않는다', /if \(this\.term\.cols < 8 \|\| this\.term\.rows < 3\) return;/.test(pane));
 
-// 6-4) 과거 오버레이 자신이 스크롤 입력을 받아야 한다(2026-09-05 안드로이드 실기): 과거를 보는
-//   동안 라이브 격자는 숨겨져 있으므로, 오버레이가 입력을 안 받으면 더 올라갈 수도 돌아올 수도 없다.
-ok('앱 오버레이가 터치를 받는다(pointer-events:none 회귀 금지)',
-  !/#historyViewport \{[^}]*pointer-events:none/.test(app)
-  && /__histEl\.addEventListener\('touchmove'/.test(app));
-ok('PC 오버레이가 휠을 받는다', /this\.histEl\?\.addEventListener\("wheel", onWheel, opt\)/.test(pane));
-
 // 6-5) tmux 는 배경이 줄 끝까지 이어지면 리셋을 안 붙인다 → 행은 자족적이어야 한다(색 번짐).
+//   (뷰어는 이제 안 쓰지만 historyPage 는 승인·상태감지 등 서버측 소비자가 계속 쓴다.)
 {
   const tmuxBackend = fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/term-backend-tmux.js'), 'utf8');
   const rust = fs.readFileSync(path.join(here, '../src-tauri/src/pty.rs'), 'utf8');

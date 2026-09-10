@@ -499,16 +499,6 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
   color: var(--text); font-size: 11.5px; cursor: pointer; }
 .pane-owner-pill .op-btn:hover { background: var(--hover); }
 
-/* 과거(스크롤백) 오버레이 — 라이브 격자를 덮고 서버/tmux 정본 과거를 같은 xterm 으로 그린다.
-   라이브 격자는 scrollback:0 이라(재도장 잔재가 과거로 쌓이는 걸 막기 위해) 여기가 유일한 과거다.
-   z-index 는 검색 바(40)·모드 토글(36) 아래 — 과거를 보는 중에도 그 둘은 조작 가능해야 한다. */
-.pane-term-hist { position: absolute; inset: 0; padding: 4px 2px 2px 8px; overflow: hidden; z-index: 20; }
-.pane-term-hist .xterm { height: 100%; }
-.pane-term-hist.plain { white-space: pre; overflow: auto; font-family: var(--mono-font); font-size: 12px; color: var(--text2); }
-.pane-hist-tag { position: absolute; left: 10px; top: 8px; z-index: 21; pointer-events: none;
-  padding: 2px 8px; border-radius: 999px; font-size: 11px; letter-spacing: 0.2px;
-  background: var(--elevated2); border: 1px solid var(--border-ctrl); color: var(--text2); opacity: 0.92; }
-
 /* preview */
 .preview-bar { flex: none; display: flex; gap: 6px; padding: 5px 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
 .preview-url { flex: 1; min-width: 0; background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 5px 9px; color: var(--text); font-size: 12px; outline: none; font-family: var(--mono-font); }
