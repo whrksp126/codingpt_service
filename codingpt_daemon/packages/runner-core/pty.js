@@ -235,6 +235,8 @@ async function createTerminal(ns, abs) {
     }
     await injectPoolEnv(name, abs).catch(() => {});
     await ensureAutoRename(name).catch(() => {});
+    // 재부팅 복원용 기록 — tmux 는 OS 재부팅을 못 넘기므로 데몬이 따로 적어 둔다(terminal-manifest.js).
+    try { require('./terminal-manifest').record({ session: name, cwd: abs }); } catch (_) { /* 기록 실패는 무해 */ }
     const inf = await termBackend.info(name).catch(() => null);
     return { index: id, name: (inf && inf.windowName) || '', session: name };
   }
@@ -520,7 +522,17 @@ async function attachPty(params, io) {
     if (tid == null) {
       // 터미널 0개(정식 상태) — 여기서 만들면 죽은 pane 재접속이 유령을 부활시킨다.
       //  앱 리컨실러가 곧 이 pane 을 정리한다(생성은 terminal.new 명시 경로만).
-      sendOut('\r\n\x1b[90m[이 워크스페이스에 열린 터미널이 없습니다]\x1b[0m\r\n');
+      //  ★ v3 클라에는 **EXIT 프레임**으로 말한다(2026-09-16). 평문으로 보내면 PC 는 그걸 화면에 찍고
+      //   "연결 끊김" 으로 오판해 재접속 루프(두 줄씩 무한 출력)에 빠지고, 앱은 "버전 불일치" 배너를
+      //   띄웠다 — 둘 다 "터미널이 없다" 는 결정적 상태를 전송 오류로 읽은 것. EXIT 는 양쪽 다 이미
+      //   "세션 종료 → 목록이 생길 때까지 조용히 대기" 로 처리한다. (재부팅 뒤엔 terminal-manifest 가
+      //   기동 시 터미널을 되살려 여기 오지 않는 것이 정상 경로다.)
+      if (Number(params && params.terminalProtocol) === 3) {
+        const v3 = require('./terminal-stream-v3');
+        try { io.send(v3.encode(v3.OPCODE.EXIT, 1, JSON.stringify({ code: 0, reason: 'no_terminal' }))); } catch (_) { /* noop */ }
+      } else {
+        sendOut('\r\n\x1b[90m[이 워크스페이스에 열린 터미널이 없습니다]\x1b[0m\r\n');
+      }
       try { io.close(); } catch (_) { /* noop */ }
       return;
     }
@@ -746,6 +758,8 @@ async function handleTerminalRpc(method, params) {
     // 완전 삭제(전 기기 공통) = kill 등가. 세션이 이미 없거나 서버가 죽었어도 멱등 성공(백엔드 규칙).
     const tid = Number(params && params.index);
     await termBackend.kill(termSession(session, tid));
+    // 명시적 닫힘 = 재부팅 뒤에도 부활 금지(매니페스트에서 즉시 제거).
+    try { require('./terminal-manifest').forget(termSession(session, tid)); } catch (_) { /* noop */ }
     return { ok: true };
   }
   throw new Error('unknown terminal method: ' + method);
@@ -840,4 +854,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };
+module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, injectPoolEnv, ensureAutoRename, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };

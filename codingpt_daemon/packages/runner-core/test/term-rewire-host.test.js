@@ -143,9 +143,17 @@ test('스테일 win → 첫 터미널 폴백(resolveTid/has) · 터미널 0개 =
   await ptyLib.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: B.index }); // 멱등
   assert.strictEqual((await ptyLib.listTerminals(NS)).length, 0);
 
-  // 터미널 0개에서 attach — 생성하지 않고 안내 후 종료(유령 부활 금지).
+  // 터미널 0개에서 attach — 생성하지 않고 **EXIT 프레임**(v3) 으로 종료(유령 부활 금지).
+  //  2026-09-16: 평문 안내는 v1 전용. v3 클라에 평문을 주면 PC 는 "연결 끊김" 재접속 루프, 앱은 "버전
+  //  불일치" 배너로 오판했다 — 결정적 상태는 프레임으로 말한다.
   const io2 = fakeIo();
   await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH3', client: 'cH3', win: 1, cols: 80, rows: 24, terminalProtocol: 3 }, io2);
-  assert.match(io2.out, /열린 터미널이 없습니다/);
+  assert.doesNotMatch(io2.out, /열린 터미널이 없습니다/, 'v3 클라에 평문 안내가 나갔다');
+  assert.match(io2.out, /^CPT3/, 'CPT3 프레임이 아니다');
+  assert.match(io2.out, /"reason":"no_terminal"/);
   assert.strictEqual((await ptyLib.listTerminals(NS)).length, 0, 'attach 가 유령 터미널을 만들었다');
+  // 구버전(v1) 클라에는 여전히 평문으로 안내한다(그쪽엔 프레임 해독기가 없다).
+  const io3 = fakeIo();
+  await ptyLib.attachPty({ cwd: WS_REL, paneId: 'pH4', client: 'cH4', win: 1, cols: 80, rows: 24 }, io3);
+  assert.match(io3.out, /열린 터미널이 없습니다/);
 });

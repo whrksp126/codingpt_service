@@ -1702,13 +1702,18 @@ export class PaneView {
           if (f.seq > this._v3Seq) { this._v3Seq = f.seq; this._termOut(f.payload); }
           return;
         }
-        case TERMINAL_OPCODE_V3.SNAPSHOT: { const m = json(); if (m) this._applySnapshot(m); return; }
+        case TERMINAL_OPCODE_V3.SNAPSHOT: { const m = json(); this._v3Live = true; if (m) this._applySnapshot(m); return; }
         case TERMINAL_OPCODE_V3.RESIZED: { const m = json(); if (m) this._setGrid(m.cols, m.rows); return; }
         case TERMINAL_OPCODE_V3.OWNER: { const m = json(); if (m) this._setOwner(m); return; }
         // HISTORY_PAGE 는 더 쓰지 않는다 — 과거는 스냅샷 ansi 로 통째 오고 라이브 버퍼에 쌓인다.
         //  (데몬은 구버전 클라를 위해 아직 응답한다.)
         case TERMINAL_OPCODE_V3.EXIT: {
+          // 결정적 종료(터미널 닫힘 / 이 워크스페이스에 터미널 0개) — 데몬은 이 프레임 직후 소켓을 닫는다.
+          //  그 close 는 "끊김"이 아니라 이 EXIT 의 마무리다 → onclose 가 "연결 끊김" 을 찍고 원격 재접속
+          //  루프를 돌리지 않게 표시해 둔다(2026-09-16 재부팅 뒤 두 줄씩 무한 출력되던 루프의 진범).
+          //  복구는 _onExit → _scheduleReopen(목록에 터미널이 생길 때까지 조용히 대기)이 맡는다.
           this._v3Seq = 0;
+          this._exitClose = true;
           this._onExit();
           return;
         }
@@ -1720,8 +1725,13 @@ export class PaneView {
       if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
       if (this.ws !== ws) return;                 // 의도된 교체(탭 전환)
       this.ws = null;
+      const wasLive = !!this._v3Live;
+      this._v3Live = false;
+      if (this._exitClose) { this._exitClose = false; return; }   // EXIT 의 마무리 close — 재접속 루프 금지
       if (this._reopenStop || !this.mounted) return;
-      this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
+      // "연결 끊김" 은 **붙어 있던** 채널이 끊겼을 때만 말한다. 한 프레임도 못 받고 닫힌 건(데몬 기동 중·
+      //  거절 등) 끊김이 아니라 아직 못 붙은 것 — 매 시도마다 화면에 찍지 않고 조용히 백오프한다.
+      if (wasLive) this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
       this._scheduleRemoteReopen();
     };
   }

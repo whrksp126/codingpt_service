@@ -741,6 +741,13 @@ function run(config) {
     } catch (_) { /* noop */ }
     // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
     try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
+    // ★ 재부팅 복원 — tmux 서버가 없고(재부팅/크래시) 매니페스트가 있으면 터미널을 그 tid 그대로
+    //  되살린다(terminal-manifest.js). 리스너를 열기 **전에** 끝내야 PC/폰의 저장된 레이아웃이 첫
+    //  attach 부터 실체를 만난다(cmux 처럼 "켜면 그대로"). 데몬만 재시작한 경우엔 서버가 살아 있어 no-op.
+    try {
+      const n = await require('./terminal-manifest').restoreIfNeeded();
+      if (n) console.log(`[control] 재부팅 복원 — 터미널 ${n}개 되살림(매니페스트)`);
+    } catch (e) { console.error('[control] 터미널 복원 실패:', e.message); }
     // PC 앱(같은 기기) v3 터미널 루프백 리스너 — 원격과 같은 와이어, 릴레이 왕복 없이.
     try { require('./terminal-local').start(); } catch (e) { console.error('[control] 로컬 터미널 리스너 시작 실패:', e.message); }
     // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
@@ -784,6 +791,8 @@ function run(config) {
       ptyLib.healStaleTerminals()
         .then((n) => { if (n) console.log(`[control] 낡은 터미널 ${n}개 자가치유(respawn)`); })
         .catch(() => { /* 다음 주기 */ });
+      // 터미널 매니페스트 동기화 — 살아 있는 tmux 를 정본으로 재부팅 복원 기록을 갱신(닫힌 건 빠진다).
+      try { require('./terminal-manifest').sync().catch(() => {}); } catch (_) { /* noop */ }
     };
     // 첫 reap 은 지연한다 — 앱/데몬이 함께 재기동되는 순간(특히 PC 앱 업데이트: 다운로드+설치가
     //  리퍼 grace(90s)를 넘겨 뷰 세션이 idle 로 판정됨)에, 클라이언트가 레이아웃을 복원해 자기 뷰
