@@ -77,6 +77,20 @@ ok('앱: 입력하면 맨 아래로 내려온다', /var send = function\(s\)\{ t
 ok('앱에 임의 CSI 2J 스크롤백 삭제 훅이 없다', !app.includes("registerCsiHandler({ final:'J' }"));
 ok('PC 에도 없다', !pane.includes("registerCsiHandler"));
 
+// 6-1) EXIT 는 끊김이 아니다(2026-09-16 재부팅 뒤 무한 루프의 진범). 데몬은 "터미널 0개" 를 EXIT 프레임으로
+//   말하고 곧 소켓을 닫는다 — 그 close 에 "연결 끊김" 을 찍고 원격 재접속을 돌리면 두 줄씩 영원히 반복된다.
+ok('PC: EXIT 프레임은 뒤따르는 close 를 재접속으로 보지 않는다',
+  /case TERMINAL_OPCODE_V3\.EXIT: \{[\s\S]{0,700}?this\._exitClose = true;[\s\S]{0,80}?this\._onExit\(\);/.test(pane)
+  && /if \(this\._exitClose\) \{ this\._exitClose = false; return; \}/.test(pane));
+ok('PC: "연결 끊김" 은 붙어 있던 채널이 끊겼을 때만 찍는다', /if \(wasLive\) this\.term\.write\(i18n\.t\("\\n\\x1b\[90m\[연결 끊김/.test(pane)
+  && /case TERMINAL_OPCODE_V3\.SNAPSHOT: \{[^\n]*this\._v3Live = true;/.test(pane));
+{
+  const dm = fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/pty.js'), 'utf8');
+  ok('데몬: v3 클라에는 "터미널 0개" 를 EXIT 프레임으로 말한다', /terminalProtocol\) === 3\) \{\s*const v3 = require\('\.\/terminal-stream-v3'\);[\s\S]{0,200}?OPCODE\.EXIT[\s\S]{0,120}?no_terminal/.test(dm));
+  ok('데몬: 재부팅 복원(매니페스트)이 로컬 리스너보다 먼저 돈다',
+    /restoreIfNeeded\(\)[\s\S]{0,400}?require\('\.\/terminal-local'\)\.start\(\)/.test(fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/control.js'), 'utf8')));
+}
+
 // 6-6) v3 뷰어 계약(docs/terminal-v3-design.md §4) — 격자는 소유자 것, 크기 주장은 소유자만, 비소유자는 축소.
 {
   const pcV3 = fs.readFileSync(path.join(here, '../src/js/terminal-stream-v3.js'), 'utf8');
