@@ -274,6 +274,7 @@ export default {
   "새 폴더": "Carpeta nueva",
   "새로고침": "Actualizar",
   "새로고침 중…": "Actualizando…",
+  "새로고침 실패": "Error al actualizar",
   "색상": "Color",
   "서버에서 대화 기록 기능이 꺼져 있습니다.": "El historial de conversaciones está desactivado en el servidor.",
   "선택 화면": "Pantalla de selección",

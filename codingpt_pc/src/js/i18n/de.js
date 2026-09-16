@@ -274,6 +274,7 @@ export default {
   "새 폴더": "Neuer Ordner",
   "새로고침": "Aktualisieren",
   "새로고침 중…": "Wird aktualisiert…",
+  "새로고침 실패": "Aktualisierung fehlgeschlagen",
   "색상": "Farbe",
   "서버에서 대화 기록 기능이 꺼져 있습니다.": "Der Gesprächsverlauf ist auf dem Server deaktiviert.",
   "선택 화면": "Auswahlbildschirm",

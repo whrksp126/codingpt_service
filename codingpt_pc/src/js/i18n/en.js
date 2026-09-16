@@ -274,6 +274,7 @@ export default {
   "새 폴더": "New folder",
   "새로고침": "Refresh",
   "새로고침 중…": "Refreshing…",
+  "새로고침 실패": "Refresh failed",
   "색상": "Color",
   "서버에서 대화 기록 기능이 꺼져 있습니다.": "Conversation history is turned off on the server.",
   "선택 화면": "Selection screen",

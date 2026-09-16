@@ -286,8 +286,19 @@ function attachPullToRefresh(list) {
       ind.style.height = "30px";
       ind.style.opacity = "1";
       ind.textContent = i18n.t('새로고침 중…');
+      // ★ 끝나면 **여기서** 인디케이터를 접는다(2026-09-16 사용자 신고 "새로고침 중… 이 계속 남는다").
+      //  예전엔 loadWorkspaces → emit → updateSidebar 의 재렌더가 DOM 을 통째로 갈아 끼우며 지워 주길 기대했는데,
+      //  updateSidebar 는 서명(sig)이 같으면 재렌더를 건너뛴다 — 새로고침 결과가 "그대로" 인 가장 흔한 경우에
+      //  정확히 아무도 안 지워서 문구가 영구히 남았다. 실패했으면 그 사실도 잠깐 보여 준다(조용히 사라지면
+      //  "됐나?" 를 알 수 없다).
+      const t0 = Date.now();
       Promise.resolve(S.loadWorkspaces()).finally(() => {
-        setTimeout(() => { __ptrBusy = false; }, 400);
+        const failed = !!state.wsError;
+        const hold = Math.max(0, 400 - (Date.now() - t0));   // 너무 빨리 끝나도 문구가 깜빡이지 않게 최소 400ms
+        setTimeout(() => {
+          if (failed) ind.textContent = i18n.t('새로고침 실패');
+          setTimeout(() => { __ptrBusy = false; reset(); }, failed ? 1200 : 0);
+        }, hold);
       });
     } else {
       reset();
