@@ -161,7 +161,10 @@ body.resizing-row { cursor: row-resize; }
 .sb-resizer:hover, .sb-resizer.dragging { background: var(--border-ctrl); }
 .sb-top {
   display: flex; align-items: center; gap: 6px;   /* cmux classic spacing 6 */
-  height: 40px; padding: 0 8px 0 var(--titlebar-inset-left); /* 좌: macOS 트래픽 라이트 여백(win32=0 근처) */
+  /* ★ 높이 28 = macOS 표준 타이틀바 = cmux `sharedChromeBarHeight`(2026-09-16). 트래픽 라이트는 OS 가 표준
+     타이틀바(28pt) 중앙(y=14)에 놓으므로, 바가 40 이면 신호등은 위에 뜨고 우리 버튼은 20 에 앉아 6px 어긋난다.
+     28 이어야 신호등·버튼·이름이 한 중심선에 선다. */
+  height: 28px; padding: 0 8px 0 var(--titlebar-inset-left); /* 좌: macOS 트래픽 라이트 여백(win32=0 근처) */
   flex: none; border-bottom: 1px solid var(--border); /* main-top 과 헤더 라인 연속 */
 }
 /* ── 타이틀바 컨트롤(좌: 사이드바·알림 / 우: 검색·추가) — cmux classic 지표 1:1(2026-09-16) ──
@@ -169,10 +172,10 @@ body.resizing-row { cursor: row-resize; }
    (불투명도 0.86 → 0.96 → 눌림 1.0) · 색 = secondary. 아이콘 크기는 sidebar.js TITLEBAR_ICON 이 짝이다.
    ⚠ 호버 배경을 다시 넣지 말 것 — 배경 사각형이 생기는 순간 macOS 타이틀바 도구 버튼과 달라 보인다. */
 .sb-top .ic-btn, .main-top .ic-btn, .mt-adds .pane-ctrl {
-  width: 20px; height: 20px; border-radius: 6px; color: var(--text3); opacity: 0.86;
+  width: 20px; height: 20px; border-radius: 6px; color: var(--text2); opacity: 0.86; /* cmux Color.secondary 밝기 */
   transition: opacity 0.12s;
 }
-.sb-top .ic-btn:hover, .main-top .ic-btn:hover, .mt-adds .pane-ctrl:hover { background: transparent; color: var(--text3); opacity: 0.96; }
+.sb-top .ic-btn:hover, .main-top .ic-btn:hover, .mt-adds .pane-ctrl:hover { background: transparent; color: var(--text2); opacity: 0.96; }
 .sb-top .ic-btn:active, .main-top .ic-btn:active, .mt-adds .pane-ctrl:active { opacity: 1; }
 .sb-top .bell { position: relative; }
 .bell-badge {
@@ -334,7 +337,7 @@ body.resizing-row { cursor: row-resize; }
 
 .main-top {
   flex: none; display: flex; align-items: center; gap: 8px;
-  height: 40px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+  height: 28px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border); /* = .sb-top(28, cmux) */
   user-select: none; -webkit-user-select: none;
 }
 .shell.sb-collapsed .main-top { padding-left: var(--titlebar-inset-left); } /* sb-top 과 동일 트래픽라이트 여백 */
@@ -346,11 +349,11 @@ html[data-os="windows"] {
 }
 html[data-os="windows"] .main-top { padding-right: calc(14px + var(--titlebar-inset-right)); }
 /* 게이트(로그인/부트스트랩, z-index 10000)가 떠 있어도 창 조작은 가능해야 한다 → 그 위. */
-.win-caption { position: fixed; top: 0; right: 0; height: 40px; display: flex; z-index: 12000; }
+.win-caption { position: fixed; top: 0; right: 0; height: 28px; display: flex; z-index: 12000; } /* 바 높이(28)와 한 벌 */
 /* Windows 관용: 칸 전체 사각 하이라이트(둥근 모서리 없음), 무채색 명암. 닫기 hover 만 --error
    (파괴적 동작 신호 = 상태색 허용 범위, OS 관용과도 일치). */
 .win-cap-btn {
-  width: 46px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  width: 46px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
   background: transparent; border: none; border-radius: 0; padding: 0;
   color: var(--text3); cursor: default; transition: background 0.12s, color 0.12s;
 }

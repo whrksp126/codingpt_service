@@ -335,9 +335,11 @@ function attachPullToRefresh(list) {
 
 // 타이틀바 컨트롤 — cmux classic 지표와 1:1(2026-09-16, 사용자 요청 "macOS 앱 상단 버튼들과 동일하게").
 //  버튼 20 · 아이콘 = SF Symbol 12pt regular 등가. 우리 24-뷰박스 아이콘은 글리프가 뷰박스의 ~73% 라
-//  size 16 이면 실제 글리프 ≈ 11.7px = SF 12pt 와 같은 눈높이, 선 굵기 1.3 ≈ regular weight.
+//  size 16 이면 실제 글리프 ≈ 11.7px = SF 12pt 와 같은 눈높이.
+//  ⚠ 선 굵기는 뷰박스 배율을 탄다 — 24-뷰박스를 16px 로 그리면 실제 선 = sw × 16/24. SF regular(≈1.1px)를
+//   노리면 sw 1.6 이다. 1.3 을 줬던 0.1.329 는 실제 0.87px 짜리 실선이 돼 신호등 옆에서 흐릿했다(사용자 비교 스크린샷).
 //  (styles.css `.sb-top .ic-btn` 이 상자·간격·호버를 같은 지표로 고정한다.)
-const TITLEBAR_ICON = { size: 16, sw: 1.3 };
+const TITLEBAR_ICON = { size: 16, sw: 1.6 };
 function ctlBtn(iconName, title, onClick) {
   const b = document.createElement("button");
   b.className = "ic-btn";
