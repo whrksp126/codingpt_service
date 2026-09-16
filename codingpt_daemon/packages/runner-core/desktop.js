@@ -214,13 +214,46 @@ async function connectRfb() {
   }
 }
 
+/**
+ * 끈다 — 게스트 안에서 정상 종료(`lume shutdown` = ssh `shutdown -h now`) 를 먼저, 30초 안에 안 내려가면 VM 프로세스에
+ *  SIGINT → SIGKILL. `lume stop` 은 쓰지 않는다: 우리가 자기 세션으로 떼어 띄운 VM 에 대해 아무 로그 없이 exit 130 으로
+ *  죽고 VM 은 그대로 남았다(2026-09-17 실측, 원인 미상). 정상 종료가 되면 어차피 그쪽이 더 안전하다(디스크 일관성).
+ */
 async function stop() {
   if (rfb) { try { rfb.close(); } catch (_) { /* noop */ } rfb = null; }
   if (!lumeBin()) return { ok: true };
-  try { await lume(['stop', VM_NAME], { timeoutMs: 30000 }); } catch (e) { if (!/not running|stopped/i.test(e.stderr || e.message)) throw e; }
+  const info = await vmInfo(true);
+  if (!info || !/running/i.test(String(info.status || ''))) { invalidateInfo(); return { ok: true, already: true }; }
+  try { await lume(['shutdown', VM_NAME, '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', '20'], { timeoutMs: 30000 }); } catch (_) { /* ssh 가 안 되면 아래 신호로 */ }
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30000) {
+    const i = await vmInfo(true);
+    if (!i || !/running/i.test(String(i.status || ''))) { invalidateInfo(); return { ok: true, graceful: true }; }
+    await sleep(1000);
+  }
+  const pid = vmPid();
+  if (pid) {
+    try { process.kill(pid, 'SIGINT'); } catch (_) { /* noop */ }
+    for (let i = 0; i < 10; i++) { await sleep(1000); if (!alive(pid)) { invalidateInfo(); return { ok: true, forced: 'SIGINT' }; } }
+    try { process.kill(pid, 'SIGKILL'); } catch (_) { /* noop */ }
+    await sleep(500);
+  }
   invalidateInfo();
-  return { ok: true };
+  return { ok: true, forced: 'SIGKILL' };
 }
+/** VM 프로세스 pid — Lume 이 VM 디렉터리에 남기는 owner 파일(실측 `.native-display-owner.json`), 없으면 pgrep. */
+function vmPid() {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.lume', VM_NAME, '.native-display-owner.json'), 'utf8'));
+    if (j && j.processIdentifier > 0 && alive(j.processIdentifier)) return j.processIdentifier;
+  } catch (_) { /* noop */ }
+  try {
+    const out = cp.execFileSync('/usr/bin/pgrep', ['-f', `lume run ${VM_NAME}\\b`], { encoding: 'utf8' });
+    const n = Number(String(out).trim().split('\n')[0]);
+    return n > 0 ? n : 0;
+  } catch (_) { return 0; }
+}
+function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { return false; } }
 
 /** 게스트 셸. 문자열 한 줄로 받는다(lume ssh 가 원격 셸에 그대로 넘긴다). */
 async function exec(cmd, o = {}) {
