@@ -2419,6 +2419,10 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-key:active { transform: scale(0.92); }
 .emu-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex;
   align-items: center; justify-content: center; overflow: hidden; }
+/* 에이전트 데스크톱 — 키보드를 받으려면 포커스가 필요하다. 포커스 링은 안쪽 1px 로 조용히. */
+.emu-stage.emu-desktop { outline: none; cursor: default; }
+.emu-stage.emu-desktop:focus-visible { box-shadow: inset 0 0 0 1px var(--border-ctrl); }
+.emu-key.on { background: var(--elevated2); color: var(--text); }
 /* 스테이지를 **꽉 채우고** 안에서 contain 한다. max-width/height 로만 두면 작은 프레임에서
    <img> 자체가 그림 크기로 쪼그라들어, 클릭 좌표 기준(요소 rect)이 화면과 어긋난다. */
 .emu-img { width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }

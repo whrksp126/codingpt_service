@@ -269,11 +269,14 @@ pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
 //  타임아웃이 긴 이유: `emulator.boot` 는 시뮬레이터가 뜰 때까지 기다린다.
 #[tauri::command]
 pub fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    if !cmd.starts_with("emulator.") {
+    // 에이전트 데스크톱(desktop.*)도 같은 pane 이 쓴다 — 상태·켜기·끄기·에이전트 멈춤/재개.
+    //  게스트 VM 콜드 부팅은 2분까지 간다(시뮬레이터 60초보다 길다).
+    let is_desktop = cmd.starts_with("desktop.");
+    if !cmd.starts_with("emulator.") && !is_desktop {
         return Err("허용되지 않은 명령입니다.".to_string());
     }
     // 시뮬레이터 부팅이 60초까지 걸린다(프레임 한 장은 1~2초).
-    cpt_request_timed(&cmd, args, true, 90)
+    cpt_request_timed(&cmd, args, true, if is_desktop { 180 } else { 90 })
 }
 
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이

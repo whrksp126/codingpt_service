@@ -350,6 +350,8 @@ export default {
   "에게 요청": "Anfragen an",
   "에뮬레이터 끄기": "",
   "에뮬레이터 켜기": "",
+  "에이전트 멈춤": "Agent pausieren",
+  "에이전트 재개": "Agent fortsetzen",
   "에이전트": "Agent",
   "에이전트 모드 (TUI 의 shift+tab)": "Agentenmodus (Shift+Tab in der TUI)",
   "에이전트 실행 실패": "Agent konnte nicht gestartet werden",

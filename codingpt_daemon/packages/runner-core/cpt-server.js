@@ -716,6 +716,12 @@ async function dispatch(req, conn) {
     if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
     return emuLib.handle(cmd, req.args || {});
   }
+  // 에이전트 데스크톱(게스트 macOS VM) — 수명주기·셸·개입. 화면/입력은 emulator.* 로 `desktop:main` 을 쓴다.
+  if (cmd.startsWith('desktop.')) {
+    const deskLib = lazyMod('./desktop');
+    if (!deskLib) throw new Error('이 데몬은 에이전트 데스크톱을 지원하지 않습니다(PC 앱 업데이트 필요)');
+    return deskLib.handle(cmd, req.args || {});
+  }
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
     if (!proxyLib) throw new Error('이 데몬은 포트 조회를 지원하지 않습니다(PC 앱 업데이트 필요)');
@@ -1879,6 +1885,10 @@ const CAPABILITIES = [
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl', 'emulator.ax',
   //  화면에 띄우기 — 프리뷰/IDE 와 같은 급으로 연다(사용자가 보고 있는 기기 1곳).
   'ui.emulatorOpen', 'ui.emulatorClose',
+  // 에이전트 데스크톱 — 전부 공개. 격리된 게스트라 에이전트가 마음껏 조작하는 것이 이 기능의 값이다.
+  //  handoff 는 "사용자에게 부탁" 이라 승인 성격이 아니다(자기 승인 경로가 아니다).
+  'desktop.status', 'desktop.start', 'desktop.stop', 'desktop.exec', 'desktop.openApp', 'desktop.openUrl', 'desktop.path',
+  'desktop.handoff', 'desktop.pause', 'desktop.resume', 'desktop.settings.get', 'desktop.settings.set', 'desktop.pull',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.

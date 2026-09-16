@@ -577,6 +577,11 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
         if bundled_tmux.exists() {
             cmd.env("CODINGPT_TMUX", bundled_tmux);
         }
+        // 번들 lume(사이드카 base/lume/lume) — 에이전트 데스크톱(게스트 macOS VM). 데몬 desktop.js 가 우선 사용.
+        let bundled_lume = base.join("lume").join("lume");
+        if bundled_lume.exists() {
+            cmd.env("CPT_LUME", bundled_lume);
+        }
     }
     #[cfg(windows)]
     {

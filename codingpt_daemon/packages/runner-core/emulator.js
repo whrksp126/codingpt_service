@@ -236,12 +236,23 @@ function sortDevices(rows) {
   return rows.sort((a, b) => rank(a) - rank(b) || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 }
 
+/** 에이전트 데스크톱 모듈 — darwin 이 아니거나 로드 실패면 없는 것으로 친다(목록·폴링은 돌아야 한다). */
+let _desktopMod = null;
+function desktop() {
+  if (!_desktopMod) {
+    try { _desktopMod = require('./desktop'); } catch (_) { _desktopMod = { deviceRow: async () => null, handle: async () => { throw new Error('데스크톱 모듈이 없어요'); } }; }
+  }
+  return _desktopMod;
+}
+async function desktopRow() { try { return await desktop().deviceRow(); } catch (_) { return null; } }
+
 async function list() {
   const t = tools();
   const android = await androidDevices();
-  const [avds, ios] = await Promise.all([androidAvds(android), iosSimulators()]);
+  const [avds, ios, desk] = await Promise.all([androidAvds(android), iosSimulators(), desktopRow()]);
   return {
-    devices: sortDevices([...android, ...avds, ...ios]),
+    //  에이전트 데스크톱(게스트 macOS)도 한 "기기" 다 — 같은 pane·같은 프레임/입력 계약으로 보인다.
+    devices: sortDevices([...android, ...avds, ...ios, ...(desk ? [desk] : [])]),
     //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
     tools: {
       adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, resize: !!t.sips,
@@ -262,13 +273,14 @@ function parseId(id) {
   if (!value) return null;
   // 셸을 거치지 않고 execFile 로만 부르지만, 인자 오염을 원천 차단한다.
   if (!/^[A-Za-z0-9._:@-]+$/.test(value)) return null;
-  if (scheme !== 'android' && scheme !== 'avd' && scheme !== 'ios') return null;
+  if (scheme !== 'android' && scheme !== 'avd' && scheme !== 'ios' && scheme !== 'desktop') return null;
   return { scheme, value };
 }
 
 async function boot(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme === 'desktop') { await desktop().handle('desktop.start', {}); return { ok: true, booting: false }; }
   const t = tools();
   if (p.scheme === 'avd') {
     if (!t.emulator) throw new Error('안드로이드 에뮬레이터를 찾을 수 없어요');
@@ -297,6 +309,7 @@ async function boot(id) {
 async function shutdown(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme === 'desktop') return desktop().handle('desktop.stop', {});
   const t = tools();
   if (p.scheme === 'ios') {
     await run(t.xcrun, ['simctl', 'shutdown', p.value], { timeoutMs: 30000 });
@@ -476,6 +489,11 @@ async function androidRaw(adb, serial) {
 async function frame(args) {
   const p = parseId(args && args.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme === 'desktop') {
+    const r = await desktop().handle('desktop.frame', { maxWidth: args && args.maxWidth, quality: args && args.quality });
+    lastSize.set(args.id, { w: r.width, h: r.height });
+    return r;
+  }
   const t = tools();
   let png = null;
   let bmp = null;
@@ -829,6 +847,7 @@ async function input(args) {
   const a = args || {};
   const p = parseId(a.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
+  if (p.scheme === 'desktop') return desktop().handle('desktop.input', a);
   const t = tools();
   const type = String(a.type || '');
 
@@ -1079,6 +1098,7 @@ async function openUrl(args) {
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
   const url = String((args && args.url) || '');
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) throw new Error('주소가 올바르지 않아요');
+  if (p.scheme === 'desktop') return desktop().handle('desktop.openUrl', { url });
   const t = tools();
   if (p.scheme === 'android') {
     await run(t.adb, ['-s', p.value, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url], { timeoutMs: 15000 });
@@ -1162,7 +1182,7 @@ module.exports = {
   // 테스트용
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
-  _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg,
+  _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg, toJpeg,
   _pointsFromIdbDescribe: pointsFromIdbDescribe, _sortDevices: sortDevices,
   _idbReady: idbReady, _idbEnv: idbEnv,
   _normalizeIosAx: normalizeIosAx, _parseAndroidAx: parseAndroidAx,

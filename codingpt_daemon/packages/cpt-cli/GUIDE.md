@@ -270,6 +270,34 @@ cpt emulator hide                       # 띄운 탭 닫기
 이면 요소가 비어 있을 수 있다 — 그때는 스크린샷 + 좌표로 가라. 어떤 키를 받는지는 기기마다 다르니
 `cpt emulator list` 의 `caps.keys` 를 보라(없는 키는 오류를 돌려준다).
 
+## 7-2. 에이전트 데스크톱 — 네이티브 앱·창을 다뤄야 할 때 (desktop)
+
+이 맥 안에 **에이전트 전용 macOS(게스트 VM)** 가 있다. 사용자는 자기 화면·마우스·키보드를 그대로 쓰고
+있으니, **네이티브 앱·창·시스템 설정을 조작해야 하면 사용자 화면이 아니라 여기서 하라.** 사용자 화면을
+움직이는 컴퓨터 유즈 도구는 CodingPT 워크스페이스에서 쓰지 않는다. (웹 페이지는 `cpt browser`, 모바일 앱은
+`cpt emulator` 가 더 정확하고 가볍다 — 그 둘로 안 되는 것만 데스크톱으로.)
+
+```
+cpt desktop status                      # 준비/정지/실행, 연결된 폴더, 개입 대기 여부
+cpt desktop show                        # 사용자에게 데스크톱 탭을 띄운다(꺼져 있으면 먼저 켠다 — 수십 초)
+cpt desktop open Safari                 # 앱 실행. URL 이면 게스트 브라우저로(호스트 localhost 는 자동 변환)
+cpt desktop screenshot                  # 화면을 파일로(경로를 돌려준다) — 좌표는 0~1 비율로 읽어라
+cpt desktop click 0.42 0.31             # 클릭 · double-click · right-click · move · drag x y x2 y2 · scroll x y [dy]
+cpt desktop key cmd+space               # 키 조합 · key enter · key cmd+shift+4
+cpt desktop type "hello"                # 글자(ASCII 는 키로, 한글 등은 클립보드+⌘V)
+cpt desktop run -- ls "/Volumes/My Shared Files"   # 게스트 셸
+cpt desktop path ./src/app.tsx          # 이 워크스페이스 파일의 게스트 경로(연결돼 있어야 한다)
+cpt desktop handoff "GitHub 로그인이 필요합니다"     # ★ 사용자가 대신 해야 할 때(로그인·2FA·결제)
+```
+
+- **`handoff` 는 기다린다.** 사용자에게 카드가 가고, 사용자가 데스크톱에서 처리한 뒤 [계속]을 누르면
+  명령이 끝난다. 비밀번호를 네가 묻거나 치려 하지 마라 — 사용자가 그 화면에서 직접 친다.
+- 사용자가 데스크톱을 만지는 동안 네 입력은 **멈춤** 상태로 거절된다(오류 메시지에 `resume` 안내). 기다렸다
+  다시 시도하라. 너 스스로 `resume` 하지 마라 — 그건 사용자의 버튼이다.
+- 워크스페이스 폴더는 게스트에 `/Volumes/My Shared Files/<폴더명>` 로 보인다(`cpt desktop path` 로 변환).
+  연결이 안 돼 있으면 `cpt desktop connect` 로 연결하고 사용자에게 재시작이 필요하다고 알려라.
+- 게스트는 앱스토어 앱·Docker·Android 에뮬레이터가 안 돈다(호스트에서 돌고 네트워크로 닿는다).
+
 ## 8. 알림·진행 상태
 
 장시간 작업이나 완료를 사용자에게 알리려면:

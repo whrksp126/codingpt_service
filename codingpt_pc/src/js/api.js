@@ -271,6 +271,9 @@ export const api = {
   //  라이브 화면(H.264) — 데몬이 로컬 WebSocket 주소를 돌려주고, 웹뷰가 거기에 직접 붙는다.
   //   프레임을 이 invoke 통로로 실어 나르지 않는 이유: 초당 20~30개의 바이너리를 요청/응답
   //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
+  //  에이전트 데스크톱(게스트 macOS) — 같은 소켓. 화면·입력은 emulator.* 에 id `desktop:main` 으로 간다.
+  desktopStatus: () => invoke("emulator_local", { cmd: "desktop.status", args: {} }),
+  desktopPause: (on) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: {} }),
   emulatorStreamStart: (id, opts) =>
     invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
   emulatorStreamStop: (streamId) =>

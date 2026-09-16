@@ -315,6 +315,22 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
                                         그 결과가 JSON 으로 돌아온다(파일 생략 = 변경된 파일 전부).
                                         결과: {status:"submitted"|"cancelled"|"timeout", files:[...]}
 
+  # 에이전트 데스크톱 (이 맥 안의 별도 macOS — 사용자 화면을 건드리지 않고 GUI 를 조작한다)
+  #  네이티브 앱·창을 다뤄야 하면 사용자 화면이 아니라 **여기서** 한다. 좌표는 0~1 비율.
+  desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
+  desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
+  desktop show                          사용자가 보고 있는 기기에 데스크톱 탭을 띄운다
+  desktop open <앱|URL>                 앱 실행(open -a) 또는 게스트 브라우저로 URL(호스트 localhost 자동 변환)
+  desktop run -- <명령>                 게스트 셸에서 실행
+  desktop screenshot [--out <파일>] [--width <px>=1280]
+  desktop click <x> <y> [--right] · double-click · right-click · move · drag <x> <y> <x2> <y2> · scroll <x> <y> [dy]
+  desktop key <조합>                    예: key cmd+space · key enter · key cmd+shift+4
+  desktop type <글자>                   ASCII 는 키로, 한글 등은 클립보드+⌘V 로
+  desktop handoff <사유>                사용자에게 개입 요청(로그인 등) — [계속] 을 누를 때까지 기다린다
+  desktop pause | resume                에이전트 입력 멈춤/재개
+  desktop path <경로>                   호스트 경로 → 게스트 공유 폴더 경로
+  desktop connect [폴더] | disconnect   이 워크스페이스 폴더를 데스크톱에 공유(다음 시작 때 반영)
+
   # 모바일 화면 (안드로이드 에뮬레이터/실기기 · iOS 시뮬레이터)
   #  좌표는 **0~1 비율**이다(0.5 0.5 = 화면 한가운데). 픽셀이 아니다 — 기기마다 해상도가 달라서.
   emulator list                         붙어 있는 기기 목록(켜짐/꺼짐, 조작 가능 여부 포함)
@@ -667,6 +683,85 @@ async function main() {
           return out({ saved: dest, width: r.width, height: r.height, bytes: r.bytes }, flags, `저장됨: ${dest}`);
         }
         break;
+      }
+      // 에이전트 데스크톱 — 이 맥 안의 별도 macOS(게스트 VM). 사용자 화면을 건드리지 않고 전면 GUI 조작을 한다.
+      //  화면·입력은 모바일 화면(emulator.*)과 같은 계약이고 기기 id 가 `desktop:main` 으로 고정된 것뿐이다.
+      case 'desktop': {
+        const D = 'desktop:main';
+        const num = (n, d) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : d);
+        const isUrl = (v) => /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(String(v || ''));
+        if (c2 === 'status' || c2 == null) {
+          const r = await request('desktop.status', {}, { timeoutMs: 20000 });
+          const line = r.phase === 'running'
+            ? `● 실행 중 · ${r.screen ? `${r.screen.width}x${r.screen.height}` : '화면 준비 중'} · ip ${r.ip || '-'}${r.paused ? ' · 에이전트 멈춤' : ''}${r.handoff ? ` · 개입 대기: ${r.handoff.reason}` : ''}`
+            : `○ ${r.phase}${r.reason ? ` — ${r.reason}` : ''}`;
+          return out(r, flags, `${line}\n연결된 폴더: ${(r.sharedDirs || []).join(', ') || '(없음)'}`);
+        }
+        if (c2 === 'start') return out(await request('desktop.start', {}, { timeoutMs: 150000 }), flags, '켜졌어요');
+        if (c2 === 'stop') return out(await request('desktop.stop', {}), flags, '꺼졌어요');
+        if (c2 === 'pull') return out(await request('desktop.pull', {}, { timeoutMs: 4 * 3600 * 1000 }), flags, '이미지 준비됨');
+        if (c2 === 'show') {
+          //  꺼져 있으면 먼저 켠다 — 빈 액자를 띄우고 "켜세요" 라고 하는 것보다 낫다(수십 초 걸리면 그만큼 기다린다).
+          const st = await request('desktop.status', {}, { timeoutMs: 20000 });
+          if (st.phase === 'stopped' || st.phase === 'starting') await request('desktop.start', {}, { timeoutMs: 150000 });
+          else if (st.phase !== 'running') throw new Error(st.reason || `데스크톱을 쓸 수 없어요 (${st.phase})`);
+          return out(await request('ui.emulatorOpen', { device: D, timeoutMs: 8000 }), flags, '띄웠어요');
+        }
+        if (c2 === 'hide') return out(await request('ui.emulatorClose', {}), flags, 'ok');
+        if (c2 === 'open') {
+          const target = rest[0] || flags.url || flags.app;
+          if (!target) throw new Error('무엇을 열지 알려 주세요 — cpt desktop open Safari | cpt desktop open http://localhost:5173');
+          if (isUrl(target)) return out(await request('desktop.openUrl', { url: target }, { timeoutMs: 30000 }), flags, 'ok');
+          return out(await request('desktop.openApp', { name: target }, { timeoutMs: 30000 }), flags, 'ok');
+        }
+        if (c2 === 'run') {
+          const cmd = rest.join(' ').trim();
+          if (!cmd) throw new Error('실행할 명령을 알려 주세요 — cpt desktop run -- ls -la');
+          const r = await request('desktop.exec', { cmd, timeoutMs: num('timeout', 60) * 1000 }, { timeoutMs: num('timeout', 60) * 1000 + 10000 });
+          if (flags.json) return printJson(r);
+          process.stdout.write(String(r.out || ''));
+          return 0;
+        }
+        if (c2 === 'path') {
+          const r = await request('desktop.path', { path: path.resolve(rest[0] || '.') });
+          return out(r, flags, r.guest || '(연결된 폴더 밖이에요 — cpt desktop connect 로 워크스페이스를 데스크톱에 연결하세요)');
+        }
+        //  사용자 개입 — 로그인·2FA 처럼 사람이 해야 하는 일. 카드가 뜨고 사용자가 [계속]을 누를 때까지 **기다린다**.
+        if (c2 === 'handoff') {
+          const reason = rest.join(' ').trim() || '사용자 조작이 필요해요';
+          const ms = num('timeout', 900) * 1000;
+          const r = await request('desktop.handoff', { reason, timeoutMs: ms }, { timeoutMs: ms + 10000 });
+          if (r && r.ok) return out(r, flags, '사용자가 처리했어요 — 계속하세요');
+          throw new Error(r && r.timeout ? '사용자 응답이 없어 개입 요청이 끝났어요' : '개입 요청이 취소됐어요');
+        }
+        if (c2 === 'pause') return out(await request('desktop.pause', {}), flags, '에이전트 입력 멈춤');
+        if (c2 === 'resume') return out(await request('desktop.resume', {}), flags, '에이전트 입력 재개');
+        if (c2 === 'screenshot') {
+          const r = await request('emulator.frame', { id: D, maxWidth: num('width', 1280), quality: num('quality', 80) }, { timeoutMs: 60000 });
+          let dest = flags.out ? String(flags.out) : null;
+          if (!dest) { const dir = path.join(os.homedir(), '.codingpt', 'tmp'); fs.mkdirSync(dir, { recursive: true }); dest = path.join(dir, `desktop-${Date.now()}.jpg`); }
+          fs.writeFileSync(dest, Buffer.from(r.base64, 'base64'));
+          return out({ saved: dest, width: r.width, height: r.height, bytes: r.bytes }, flags, `저장됨: ${dest} (${r.width}x${r.height})`);
+        }
+        const inp = (o) => request('emulator.input', { id: D, from: 'agent', ...o }, { timeoutMs: 30000 });
+        if (c2 === 'click' || c2 === 'double-click') return out(await inp({ type: 'tap', x: Number(rest[0]), y: Number(rest[1]), count: c2 === 'double-click' ? 2 : 1, button: flags.right ? 'right' : 'left' }), flags, 'ok');
+        if (c2 === 'right-click') return out(await inp({ type: 'tap', x: Number(rest[0]), y: Number(rest[1]), button: 'right' }), flags, 'ok');
+        if (c2 === 'move') return out(await inp({ type: 'move', x: Number(rest[0]), y: Number(rest[1]) }), flags, 'ok');
+        if (c2 === 'drag') return out(await inp({ type: 'swipe', x: Number(rest[0]), y: Number(rest[1]), x2: Number(rest[2]), y2: Number(rest[3]), durationMs: num('ms', 400) }), flags, 'ok');
+        if (c2 === 'scroll') return out(await inp({ type: 'scroll', x: Number(rest[0]), y: Number(rest[1]), dy: Number(rest[2] != null ? rest[2] : 3) }), flags, 'ok');
+        if (c2 === 'key') return out(await inp({ type: 'key', key: rest[0] }), flags, 'ok');
+        if (c2 === 'type') return out(await inp({ type: 'text', text: rest.join(' ') }), flags, 'ok');
+        if (c2 === 'connect' || c2 === 'disconnect') {
+          const cur = await request('desktop.settings.get', {});
+          const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
+          const set = new Set(cur.sharedDirs || []);
+          if (c2 === 'connect') set.add(dir); else set.delete(dir);
+          const r = await request('desktop.settings.set', { sharedDirs: [...set] });
+          return out(r, flags, `${c2 === 'connect' ? '연결' : '해제'}: ${dir}\n(다음 시작 때 반영됩니다 — 켜져 있으면 cpt desktop stop && cpt desktop start)`);
+        }
+        process.stderr.write('사용법: cpt desktop status|start|stop|show|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.exitCode = 2;
+        return;
       }
       case 'ide': {
         const sid = flags.sid || undefined;

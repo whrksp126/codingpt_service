@@ -216,6 +216,38 @@ if [[ "$TARGET" == darwin-* ]]; then
   fi
 fi
 
+# ── 4c) Lume 번들 (darwin) — 에이전트 데스크톱(게스트 macOS VM)의 하이퍼바이저 CLI ──
+#  데몬 desktop.js 가 lib.rs 주입 CPT_LUME(=<base>/lume/lume) 로 이 바이너리를 우선 쓴다. 사용자 무설치.
+#  릴리스 tar.gz 를 한 번 캐시에 받아 lume.app 을 통째로 넣는다. 재서명은 **가상화 entitlement 만** 남긴다 —
+#  원본의 com.apple.vm.networking(브리지 네트워킹) 은 Apple 승인 entitlement 라 우리 서명으론 실행이 거부된다
+#  (NAT 만 쓰므로 필요도 없다).
+LUME_VER="${LUME_VER:-0.5.3}"
+if [[ "$TARGET" == darwin-* ]]; then
+  LUME_TGZ="$CACHE/lume-$LUME_VER-darwin-arm64.tar.gz"
+  if [ ! -f "$LUME_TGZ" ]; then
+    echo "▸ lume $LUME_VER 내려받기"
+    mkdir -p "$CACHE"
+    curl -fsSL -o "$LUME_TGZ" "https://github.com/trycua/cua/releases/download/lume-v$LUME_VER/lume-$LUME_VER-darwin-arm64.tar.gz" \
+      || { echo "⚠ lume 내려받기 실패 — 에이전트 데스크톱 없이 번들(사용자 PC 에서 lume 별도 설치 필요)" >&2; rm -f "$LUME_TGZ"; }
+  fi
+  if [ -f "$LUME_TGZ" ]; then
+    LUME_OUT="$OUT/lume"
+    rm -rf "$LUME_OUT"; mkdir -p "$LUME_OUT"
+    tar -xzf "$LUME_TGZ" -C "$LUME_OUT" lume.app
+    cat > "$LUME_OUT/lume" <<'SH'
+#!/bin/sh
+exec "$(dirname "$0")/lume.app/Contents/MacOS/lume" "$@"
+SH
+    chmod +x "$LUME_OUT/lume"
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+      ENT_VZ="$PC_DIR/src-tauri/entitlements.lume.plist"
+      codesign --force --timestamp --options runtime --entitlements "$ENT_VZ" --sign "$CODESIGN_IDENTITY" "$LUME_OUT/lume.app"
+      codesign --verify --verbose=1 "$LUME_OUT/lume.app"
+    fi
+    echo "▸ lume 번들 완료 → $LUME_OUT ($("$LUME_OUT/lume" --version 2>/dev/null | tail -1))"
+  fi
+fi
+
 # ── 5) 사이드카 코드 서명(mac, CODESIGN_IDENTITY 설정 시) ───────────
 # 공증 통과를 위해 중첩된 실행/네이티브 코드(node 바이너리 + *.node)를 모두 하드닝 런타임으로 서명.
 #  Tauri 는 바깥 .app 만 서명하므로 Resources 안의 node/.node 는 여기서 미리 서명한다(복사돼도 서명 유지).

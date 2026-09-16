@@ -26,6 +26,11 @@ description: >-
   "run it on the simulator", "tap the settings button": `cpt emulator list` / `boot` /
   `ax` (read the screen as text) / `tap-label "설정"` / `screenshot`. Read the screen
   with `ax` before tapping — never guess coordinates from a screenshot.
+  When a task needs a **native macOS app, window or system dialog** (not a web page, not a
+  mobile app), do it in the **agent desktop** — a separate macOS running inside this Mac —
+  never on the user's own screen: `cpt desktop show` / `open <app|url>` / `screenshot` /
+  `click x y` / `key cmd+…` / `type` / `run -- <cmd>`. If a login, 2FA or payment step
+  needs the human, call `cpt desktop handoff "<why>"` and wait; do not ask for passwords.
 ---
 
 # CodingPT cpt CLI

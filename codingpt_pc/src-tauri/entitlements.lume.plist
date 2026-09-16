@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 에이전트 데스크톱(게스트 macOS VM) — Virtualization.framework 사용 권한. 브리지 네트워킹(com.apple.vm.networking)은
+       Apple 승인 entitlement 라 넣지 않는다(NAT 만 쓴다). -->
+  <key>com.apple.security.virtualization</key>
+  <true/>
+</dict>
+</plist>

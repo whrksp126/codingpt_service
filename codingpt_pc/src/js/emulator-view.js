@@ -158,6 +158,9 @@ export class EmulatorView {
       const r = await api.emulatorList();
       if (this.disposed) return;
       this.devices = (r && r.devices) || [];
+      //  에이전트 데스크톱의 멈춤 상태는 기기 행에 실려 온다 — 폰이 풀었으면 여기 버튼도 따라간다.
+      const desk = this.devices.find((d) => d.kind === "desktop");
+      if (desk && desk.desktop) this.deskPaused = !!desk.desktop.paused;
       this.tools = (r && r.tools) || {};
       this.err = null;
     } catch (e) {
@@ -666,7 +669,7 @@ export class EmulatorView {
           row.className = "emu-row" + (d.state === "booted" ? " on" : "");
           const sub = (booting ? i18n.t('켜는 중…') : d.state === "booted" ? i18n.t('켜짐') : i18n.t('꺼짐'))
             + (d.caps && d.caps.frame && !d.caps.input ? ` · ${i18n.t('보기 전용')}` : "");
-          row.innerHTML = `${icons.smartphone({ size: 15 })}<span class="emu-row-t"><b></b><i></i></span>`;
+          row.innerHTML = `${(d.kind === "desktop" ? icons.monitor : icons.smartphone)({ size: 15 })}<span class="emu-row-t"><b></b><i></i></span>`;
           row.querySelector("b").textContent = d.name;
           row.querySelector("i").textContent = sub;
           //  꺼진 기기는 목록에서 바로 켠다 — 예전엔 골라 들어가야 전원 버튼이 보였는데, 꺼진 기기를
@@ -741,6 +744,25 @@ export class EmulatorView {
         b.addEventListener("click", () => (k === "rotate" ? this.rotate() : this.send({ type: "key", key: k })));
         keys.appendChild(b);
       }
+    }
+    /**
+     * 에이전트 데스크톱 — **에이전트 멈춤/재개** 토글. 사용자가 이 화면을 만지는 동안 에이전트 입력이
+     *  큐에 대기하고(데몬이 자동으로 켠다), 개입을 끝내면 이 버튼으로 풀어 준다. 되감기·재시작 같은
+     *  파괴적 조작은 여기 두지 않는다(설정 시트로).
+     */
+    if (dev && dev.kind === "desktop" && booted) {
+      const pz = document.createElement("button");
+      pz.className = "emu-key" + (this.deskPaused ? " on" : "");
+      pz.title = this.deskPaused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤');
+      pz.innerHTML = icons[this.deskPaused ? "play" : "pause"]({ size: 22 });
+      pz.addEventListener("click", async () => {
+        try { await api.desktopPause(!this.deskPaused); this.deskPaused = !this.deskPaused; this.render(); }
+        catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
+      });
+      keys.appendChild(pz);
+      const s1 = document.createElement("span");
+      s1.className = "emu-keys-sep";
+      keys.appendChild(s1);
     }
     //  에뮬레이터 자체를 끄는 전원 — 기기 조작 키와 하는 일이 다르니 구분선으로 나눈다.
     //  ★ '기기 목록으로'(‹) 버튼은 뺐다(2026-08-06 사용자 지시). 끄면 목록으로 돌아간다.
@@ -827,6 +849,54 @@ export class EmulatorView {
       stage.addEventListener("mouseup", finish);
       //  화면 밖으로 나가도 **뗀 것으로** 마무리한다 — 안 그러면 기기가 계속 눌린 줄 안다.
       stage.addEventListener("mouseleave", finish);
+      /**
+       * 에이전트 데스크톱은 폰이 아니라 **맥 화면**이다 — 우클릭·휠·키보드가 있어야 쓸 수 있다.
+       *  키는 xterm 처럼 pane 이 포커스를 가진 채 받는다(stage 가 tabindex 를 갖는다). 글자는 text 로,
+       *  그 밖(Enter·화살표·⌘ 조합)은 key 조합 문자열로 보낸다 — 데몬 desktop.js 의 계약과 같다.
+       */
+      if (dev && dev.kind === "desktop") {
+        stage.tabIndex = 0;
+        stage.classList.add("emu-desktop");
+        stage.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          const r = this.ratioOf(ev); if (!r) return;
+          down = null;
+          this.send({ type: "tap", button: "right", x: r.x, y: r.y });
+        });
+        let wheelAcc = 0, wheelTimer = null, wheelAt = null;
+        stage.addEventListener("wheel", (ev) => {
+          ev.preventDefault();
+          const r = this.ratioOf(ev); if (!r) return;
+          wheelAcc += ev.deltaY; wheelAt = r;
+          if (wheelTimer) return;
+          wheelTimer = setTimeout(() => {
+            wheelTimer = null;
+            const dy = Math.max(-30, Math.min(30, Math.round(wheelAcc / 40))) || (wheelAcc > 0 ? 1 : -1);
+            wheelAcc = 0;
+            this.send({ type: "scroll", x: wheelAt.x, y: wheelAt.y, dy });
+          }, 60);
+        }, { passive: false });
+        stage.addEventListener("mousedown", () => stage.focus());
+        const MOD = { Meta: "cmd", Control: "ctrl", Alt: "alt", Shift: "shift" };
+        const NAMED = { Enter: "enter", Backspace: "backspace", Tab: "tab", Escape: "escape", Delete: "delete", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Home: "home", End: "end", PageUp: "pageup", PageDown: "pagedown", " ": "space" };
+        stage.addEventListener("keydown", (ev) => {
+          if (MOD[ev.key]) return;                                  // 수식키 단독은 조합에 실려 간다
+          const hasMod = ev.metaKey || ev.ctrlKey || ev.altKey;
+          const named = NAMED[ev.key] || (/^F\d{1,2}$/.test(ev.key) ? ev.key.toLowerCase() : null);
+          if (!named && !hasMod && ev.key.length === 1) {           // 그냥 글자(대문자 포함) — IME 조합은 compositionend 로
+            if (ev.isComposing) return;
+            ev.preventDefault();
+            this.send({ type: "text", text: ev.key });
+            return;
+          }
+          const main = named || (ev.key.length === 1 ? ev.key.toLowerCase() : null);
+          if (!main) return;
+          ev.preventDefault();
+          const mods = [ev.metaKey && "cmd", ev.ctrlKey && "ctrl", ev.altKey && "alt", ev.shiftKey && "shift"].filter(Boolean);
+          this.send({ type: "key", key: [...mods, main].join("+") });
+        });
+        stage.addEventListener("compositionend", (ev) => { if (ev.data) this.send({ type: "text", text: ev.data }); });
+      }
     } else if (!booted) {
       const b = document.createElement("button");
       b.className = "emu-boot";
