@@ -59,6 +59,7 @@ seq 는 OUTPUT 에만 단조 증가하며 **한 세대(epoch) 안에서만** 유
 - 입력하면 맨 아래(라이브)로 내려온다. 두 구현 다 IME 때문에 xterm 키 핸들러를 우회하므로 xterm 의 `scrollOnUserInput` 이 안 돌아 **명시적으로** `scrollToBottom()` 한다.
 - `HISTORY_PAGE`(opcode 5)·`history{before,limit}` 는 와이어에 남아 있다 — 구버전 클라이언트 호환용이며 새 뷰어는 쓰지 않는다. `historyPage()` 자체는 승인·상태감지 등 서버측 소비자가 계속 쓴다.
 - 시드 주의: tmux 는 history 가 비었을 때 `capture-pane -S -N -E -1` 에 **현재 화면 0행**을 돌려준다. 그래서 `_open()` 은 `#{history_size}` 를 먼저 읽고 0 이면 캡처도 패딩(`\r\n`×rows)도 건너뛴다 — 안 그러면 갓 만든 터미널이 "프롬프트 1줄 + 빈 줄"짜리 가짜 과거를 갖고, 위로 스크롤하는 순간 없던 과거가 열린다(2026-09-10 실측·수정).
+- 시드 주의 2: `capture-pane` 은 pane 높이만큼 **끝의 빈 행까지** 돌려주고, control mode 는 attach 때 커서를 그려 주지 않는다. 그래서 `_open()` 은 `#{pane_width} #{pane_height} #{cursor_x} #{cursor_y}` 를 함께 읽어 VT 를 pane 크기로 맞춘 채 1:1 로 심고 마지막에 CUP 으로 커서를 tmux 위치에 놓은 뒤 뷰어 크기로 되돌린다(xterm 리플로우). 안 그러면 커서가 맨 아래 행에 남아, 이어지는 resize 의 SIGWINCH 에 셸이 그 자리에 프롬프트를 다시 그려 앱 재시작 뒤 화면이 "옛 내용 몇 줄 · 공백 · 새 프롬프트 맨 아래" 로 갈라진다(2026-09-16 실측·수정, 회귀 `terminal-host.test.js`).
 - 키보드로 높이만 바뀌는 리사이즈는 보내지 않는다(VibeTunnel·Orca 동일).
 
 ## 5. 삭제 목록 — **2026-09-06 실행 완료**

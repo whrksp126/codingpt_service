@@ -151,6 +151,40 @@ test('갓 만든 터미널은 과거가 0 이다 — 시드가 가짜 과거를 
   host.close();
 });
 
+test('재시작 시드는 커서까지 옮긴다 — 새 프롬프트가 맨 아래로 떨어지지 않는다', { skip: !hasTmux }, async () => {
+  // 회귀(2026-09-16): `capture-pane` 은 pane 높이만큼 빈 행까지 돌려준다. 그대로 심으면 VT 커서가
+  //  맨 아래 행에 남고, 이어지는 resize 의 SIGWINCH 에 셸이 **그 자리**에 프롬프트를 다시 그려
+  //  "옛 내용 위 몇 줄 · 공백 · 새 프롬프트 맨 아래" 로 갈라졌다. pane 과 뷰어 크기가 달라도 같아야 한다.
+  const cursorOf = async (name) => String(await runTmux(['display-message', '-p', '-t', `=${name}:0`, '#{cursor_x} #{cursor_y}'])).trim();
+  for (const [name, cols, rows] of [['v3-seed-same', 80, 12], ['v3-seed-big', 120, 30]]) {
+    await newSession(name, 80, 12);
+    await runTmux(['send-keys', '-t', `=${name}:0`, 'echo hello', 'Enter']);
+    await sleep(300);
+    const [tx, ty] = (await cursorOf(name)).split(' ').map(Number);
+    assert.ok(ty < 11, `전제: tmux 커서가 맨 아래가 아니어야 한다(${ty})`);
+    const host = await registry.get(name, { cols, rows });
+    await host.ready;
+    await sleep(500); await host.screen.flush();
+    const snap = await host.snapshot();
+    assert.deepStrictEqual(snap.cursor, { x: tx, y: ty }, `${cols}x${rows}: VT 커서가 tmux 커서와 다르다`);
+    const lines = host.screen.captureText().split('\n');
+    const prompts = lines.map((l, i) => [l.trimEnd(), i]).filter(([l]) => l === 'P>').map(([, i]) => i);
+    assert.deepStrictEqual(prompts, [ty], `${cols}x${rows}: 프롬프트가 커서 행 밖에도 그려졌다(행 ${prompts})`);
+    assert.strictEqual((await host.historyPage({ limit: 5 })).total, 0, `${cols}x${rows}: 시드가 가짜 과거를 만들었다`);
+    host.close();
+  }
+  // 과거가 있는 세션도 같다 — 과거는 스크롤백에, 화면은 커서 행까지.
+  await newSession('v3-seed-hist', 80, 12);
+  await runTmux(['send-keys', '-t', '=v3-seed-hist:0', 'seq 1 30', 'Enter']);
+  await sleep(400);
+  const [hx, hy] = (await cursorOf('v3-seed-hist')).split(' ').map(Number);
+  const host = await registry.get('v3-seed-hist', { cols: 80, rows: 12 });
+  await host.ready; await sleep(300); await host.screen.flush();
+  assert.deepStrictEqual((await host.snapshot()).cursor, { x: hx, y: hy });
+  assert.ok((await host.historyPage({ limit: 5 })).total > 10, '과거가 시드되지 않았다');
+  host.close();
+});
+
 test('스냅샷 하나로 뷰어가 과거 전부를 복원한다 — 클라의 유일한 과거 경로', { skip: !hasTmux }, async () => {
   // ★ 계약(2026-09-10): PC·앱 뷰어는 과거를 따로 물어보지 않는다. `snapshot().ansi`(serializeRepaint)
   //  가 데몬 VT 의 **스크롤백까지 통째로** 담고 있어서, 뷰어 xterm 에 그대로 쓰면 위로 스크롤이

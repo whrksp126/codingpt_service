@@ -67,20 +67,37 @@ class TerminalHost extends EventEmitter {
       //  과거를 갖게 된다 → 위로 스크롤하는 순간 뷰어가 과거 화면(PC 는 '과거' 배너까지)으로 넘어가
       //  라이브 화면을 가린다. history_size>0 이면 `-E -1` 은 정확히 history 끝까지다(실측: 23줄
       //  history 에 화면은 ROW22 부터 — 겹침 0).
-      const hs = Number(String(await this.runTmux(['display-message', '-p', '-t', `=${this.name}:0`, '#{history_size}']).catch(() => '0')).trim()) || 0;
+      //
+      // ★ 시드는 **tmux pane 크기로, 커서까지** 옮긴다(2026-09-16 실측). `capture-pane` 은 pane 높이
+      //  만큼의 행을 **끝의 빈 행까지 전부** 돌려주므로(12행 pane 에 3줄만 있어도 12줄), 그대로 쓰면
+      //  VT 커서가 맨 아래 행에 남는다. 이어서 resize 가 셸에 SIGWINCH 를 주면 셸은 "현재 커서 행"에
+      //  프롬프트를 다시 그린다 → 앱 재시작 뒤 화면이 "옛 내용 위 몇 줄 · 큼직한 공백 · 새 프롬프트는
+      //  맨 아래" 로 갈라졌다(일반 터미널은 attach 시 tmux 가 커서까지 그려 주지만 control mode 는
+      //  그리지 않는다). pane 과 VT 크기가 다르면(폰이 마지막 소유자였다가 PC 로 여는 경우) 캡처 행이
+      //  VT 에서 잘리거나 스크롤백으로 밀리므로, VT 를 pane 크기로 맞춰 1:1 로 심은 뒤 xterm 리플로우로
+      //  뷰어 크기로 되돌린다 — 일반 터미널이 다른 크기로 attach 했을 때와 같은 결과.
+      const info = String(await this.runTmux(['display-message', '-p', '-t', `=${this.name}:0`,
+        '#{history_size} #{pane_width} #{pane_height} #{cursor_x} #{cursor_y}'])).trim().split(/\s+/).map(Number);
+      const hs = info[0] || 0;
+      const seedCols = clampCols(info[1] || this.cols), seedRows = clampRows(info[2] || this.rows);
+      const cx = Math.min(Math.max(0, info[3] | 0), seedCols - 1), cy = Math.min(Math.max(0, info[4] | 0), seedRows - 1);
       const [hist, scr] = await Promise.all([
         hs > 0 ? this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`, '-S', `-${Math.min(hs, 10000)}`, '-E', '-1']) : Promise.resolve(''),
         this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`]),
       ]);
       const h = String(hist || '').replace(/\n$/, '');
       const s = String(scr || '').replace(/\n$/, '');
+      const resized = seedCols !== this.cols || seedRows !== this.rows;
+      if (resized) this.screen.resize(seedCols, seedRows);
       //  과거가 없으면 밀어 넣기(개행 rows 개 + 화면 지우기)도 **하지 않는다** — 그 자체가 VT
       //  스크롤백에 빈 줄 1개를 남겨(마지막 개행이 스크롤을 한 번 일으킨다) 똑같이 가짜 과거가 된다.
       const seed = '\x1b[3J\x1b[H\x1b[2J'
-        + (h ? h.replace(/\n/g, '\x1b[0m\r\n') + '\x1b[0m\r\n' + '\r\n'.repeat(this.rows) + '\x1b[H\x1b[2J' : '')
-        + s.replace(/\n/g, '\x1b[0m\r\n');
+        + (h ? h.replace(/\n/g, '\x1b[0m\r\n') + '\x1b[0m\r\n' + '\r\n'.repeat(seedRows) + '\x1b[H\x1b[2J' : '')
+        + s.replace(/\n/g, '\x1b[0m\r\n')
+        + `\x1b[0m\x1b[${cy + 1};${cx + 1}H`;
       this.screen.write(seed);
       await this.screen.flush();
+      if (resized) { this.screen.resize(this.cols, this.rows); await this.screen.flush(); }
     } catch (_) { /* 새 세션 등 — 빈 화면에서 시작 */ }
     // 크기 확정: 이 컨트롤 클라이언트가 유일하므로 window 가 정확히 이 값이 된다.
     await this.control.resize(this.cols, this.rows).catch(() => {});
