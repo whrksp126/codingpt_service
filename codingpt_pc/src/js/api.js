@@ -274,6 +274,12 @@ export const api = {
   //  에이전트 데스크톱(게스트 macOS) — 같은 소켓. 화면·입력은 emulator.* 에 id `desktop:main` 으로 간다.
   desktopStatus: () => invoke("emulator_local", { cmd: "desktop.status", args: {} }),
   desktopPause: (on) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: {} }),
+  desktopSettings: () => invoke("emulator_local", { cmd: "desktop.settings.get", args: {} }),
+  desktopSettingsSet: (patch) => invoke("emulator_local", { cmd: "desktop.settings.set", args: patch || {} }),
+  desktopPull: () => invoke("emulator_local", { cmd: "desktop.pull", args: {} }),
+  desktopStart: () => invoke("emulator_local", { cmd: "desktop.start", args: {} }),
+  desktopStop: () => invoke("emulator_local", { cmd: "desktop.stop", args: {} }),
+  desktopDelete: () => invoke("emulator_local", { cmd: "desktop.delete", args: {} }),
   emulatorStreamStart: (id, opts) =>
     invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
   emulatorStreamStop: (streamId) =>

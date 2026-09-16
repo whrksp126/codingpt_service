@@ -115,7 +115,10 @@ async function status() {
   if (base.hostGB < MIN_HOST_GB) return { ...base, phase: 'unsupported', reason: `메모리 ${MIN_HOST_GB}GB 이상인 Mac 에서만 켤 수 있어요 (이 Mac: ${base.hostGB}GB)` };
   if (!lumeBin()) return { ...base, phase: 'no-tool', reason: 'VM 도구(lume)가 없어요' };
   const info = await vmInfo();
-  if (!info) return { ...base, phase: 'no-image', reason: `데스크톱 이미지가 없어요 (${IMAGE}, 약 21GB)`, image: IMAGE };
+  if (!info) {
+    if (pullState && pullState.running) return { ...base, phase: 'pulling', pull: pullState, image: IMAGE };
+    return { ...base, phase: 'no-image', reason: (pullState && pullState.error) || `데스크톱 이미지가 없어요 (${IMAGE}, 약 21GB)`, image: IMAGE };
+  }
   const running = /running/i.test(String(info.status || ''));
   return {
     ...base,
@@ -133,17 +136,38 @@ let rfb = null;         // RfbClient | null
 let vncPassword = '';
 let agentPaused = false; // 사용자가 화면을 만지는 동안 에이전트 입력을 막는다
 
-async function pull(onProgress) {
+/**
+ * 이미지 내려받기(21GB, 회선 6MB/s 면 한 시간). **백그라운드로** 돌리고 진행률은 status().pull 로 읽는다 — 화면이
+ *  한 시간짜리 RPC 를 붙들고 있을 수는 없다. 이미 도는 중이면 그 상태를 돌려준다.
+ *  진행 줄 실측: `N/200 done | 9.6 GB/19.6 GB | 26m 52s` (\r 로 덮어쓰는 한 줄).
+ */
+let pullState = null;   // { running, done, bytes, total, elapsed, error, at }
+function pull() {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
-  //  21GB — 진행률은 stderr 로 온다. 부르는 쪽이 로그 줄을 그대로 화면에 흘린다.
-  return new Promise((resolve, reject) => {
-    const child = cp.spawn(lumeBin(), ['pull', IMAGE, VM_NAME], { env: { ...process.env, LANG: 'en_US.UTF-8' } });
-    let tail = '';
-    const onChunk = (d) => { const s = String(d); tail = (tail + s).slice(-4000); if (onProgress) onProgress(s); };
-    child.stdout.on('data', onChunk); child.stderr.on('data', onChunk);
-    child.on('exit', (code) => (code === 0 ? resolve({ ok: true }) : reject(new Error(`이미지 내려받기 실패(${code}): ${tail.slice(-400)}`))));
-    child.on('error', reject);
-  });
+  if (pullState && pullState.running) return pullState;
+  pullState = { running: true, done: 0, total: 0, bytes: '', totalBytes: '', elapsed: '', error: null, at: Date.now() };
+  const child = cp.spawn(lumeBin(), ['pull', IMAGE, VM_NAME], { env: { ...process.env, LANG: 'en_US.UTF-8' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let tail = '';
+  const onChunk = (d) => {
+    const str = String(d); tail = (tail + str).slice(-4000);
+    const m = /(\d+)\/(\d+) done \| ([\d.]+ [KMG]B)\/([\d.]+ [KMG]B) \| ([^\r\n]+)/g;
+    let last = null, x; while ((x = m.exec(str))) last = x;
+    if (last) Object.assign(pullState, { done: +last[1], total: +last[2], bytes: last[3], totalBytes: last[4], elapsed: last[5].trim() });
+  };
+  child.stdout.on('data', onChunk); child.stderr.on('data', onChunk);
+  child.on('exit', (code) => { pullState.running = false; if (code !== 0) pullState.error = `이미지 내려받기 실패(${code}): ${tail.slice(-300)}`; invalidateInfo(); });
+  child.on('error', (e) => { pullState.running = false; pullState.error = e.message; });
+  child.unref();
+  return pullState;
+}
+
+/** 데스크톱 삭제 — 게스트 디스크·설정을 지운다(캐시 이미지는 남긴다). 켜져 있으면 먼저 끈다. */
+async function remove() {
+  if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
+  await stop();
+  await lume(['delete', VM_NAME, '--force'], { timeoutMs: 60000 });
+  invalidateInfo();
+  return { ok: true };
 }
 
 /** 켠다(이미 켜져 있으면 VNC 만 확인). 공유 폴더는 설정의 sharedDirs. */
@@ -156,7 +180,8 @@ async function start(o = {}) {
       const s = loadSettings();
       const res = defaultResources();
       try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
-      vncPassword = crypto.randomBytes(6).toString('base64url').slice(0, 8);
+      //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
+      vncPassword = crypto.randomBytes(8).toString('hex').slice(0, 12);
       const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
       for (const d of (o.sharedDirs || s.sharedDirs || [])) args.push('--shared-dir', `${d}:rw`);
       //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
@@ -399,6 +424,7 @@ async function handle(method, p = {}) {
   const m = String(method);
   if (m === 'desktop.status') return { ...(await status()), handoff: pendingHandoff() };
   if (m === 'desktop.pull') return pull();
+  if (m === 'desktop.delete') return remove();
   if (m === 'desktop.start') return start(p);
   if (m === 'desktop.stop') return stop();
   if (m === 'desktop.exec') return { out: await exec(String(p.cmd || ''), { timeoutMs: p.timeoutMs }) };
@@ -418,6 +444,6 @@ async function handle(method, p = {}) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
-  handle, status, start, stop, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
+  handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
   requestHandoff, resume, pause, pendingHandoff, loadSettings, saveSettings, _resetTools, lumeBin,
 };

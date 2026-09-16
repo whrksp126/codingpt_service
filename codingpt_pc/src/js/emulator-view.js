@@ -16,6 +16,8 @@ import { icons } from "./icons.js";
 import { insertAttachment, attachName, shq, toast } from "./attach-insert.js";
 import * as i18n from "./i18n/index.js";
 
+function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
 /** 아무도 안 만진 채 이만큼 지나면 쉰다 — 배경에서 계속 도는 화면이 제일 나쁘다. */
 const IDLE_AFTER_MS = 60_000;
 
@@ -128,6 +130,8 @@ export class EmulatorView {
 
   dispose() {
     this.disposed = true;
+    this._disposedDesk = true;
+    this.stopDeskPoll();
     this.stopVideo();
     clearTimeout(this._capTimer);
     try { this.el.remove(); } catch (_) { /* noop */ }
@@ -385,6 +389,11 @@ export class EmulatorView {
           if (f.width && f.height) {
             const wasLandscape = this.frameIsLandscape();
             this.frameAspect = f.width / f.height;
+            //  데스크톱 상태 바의 해상도 표기 — 바뀌었을 때만 다시 그린다(로그인 뒤 1280×720 → 1440×900 실측).
+            if (!this.lastFrameSize || this.lastFrameSize.w !== f.width || this.lastFrameSize.h !== f.height) {
+              this.lastFrameSize = { w: f.width, h: f.height };
+              if (this.deskBarEl) void this.pollDesk(true);
+            }
             if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();   // 영상과 같은 규율
           }
           this.err = null;
@@ -586,6 +595,90 @@ export class EmulatorView {
    *   줄여 놓은 해상도(wantWidth)로 굳고, 회전해 그린 경우엔 돌아간 그림이 나간다. 원본이 정답이다.
    *  · 저장 위치·삽입 규칙은 프리뷰 요소 캡처(design-pick)와 **같은 길**을 쓴다.
    */
+  /** 데스크톱 상태 바. 상태·해상도·에이전트 상태를 한 줄로, 오른쪽에 버튼. */
+  buildDeskBar(dev, booted) {
+    const bar = document.createElement("div");
+    bar.className = "emu-deskbar";
+    const st = this.deskStatus || (dev && dev.desktop) || {};
+    const handoff = st.handoff || null;
+    const paused = !!st.paused;
+    const size = this.lastFrameSize;
+    const left = document.createElement("div");
+    left.className = "emu-deskbar-l";
+    const dot = `<span class="emu-deskdot${booted ? " on" : ""}"></span>`;
+    const state = booted ? i18n.t('실행 중') : (st.phase === "starting" ? i18n.t('켜는 중…') : i18n.t('꺼짐'));
+    const res = size ? `<span class="emu-deskbar-sep">·</span><span class="mono">${size.w}×${size.h}</span>` : "";
+    let agent = "";
+    if (booted) {
+      agent = handoff ? `<span class="emu-deskbar-sep">·</span><b>${i18n.t('개입 대기')}</b>: ${escapeHtml(handoff.reason || "")}`
+        : paused ? `<span class="emu-deskbar-sep">·</span>${i18n.t('에이전트 멈춤')}`
+          : `<span class="emu-deskbar-sep">·</span>${i18n.t('에이전트 조작 가능')}`;
+    }
+    left.innerHTML = `${dot}<span>${state}</span>${res}${agent}`;
+    bar.appendChild(left);
+    const right = document.createElement("div");
+    right.className = "emu-deskbar-r";
+    const btn = (label, title, onClick, cls) => {
+      const b = document.createElement("button");
+      b.className = "emu-deskbtn" + (cls ? " " + cls : "");
+      b.textContent = label; if (title) b.title = title;
+      b.addEventListener("click", onClick);
+      right.appendChild(b);
+      return b;
+    };
+    if (booted) {
+      btn(paused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤'), i18n.t('사용자가 조작하는 동안 에이전트 입력을 막습니다'), async () => {
+        try { await api.desktopPause(!paused); this.deskPaused = !paused; await this.pollDesk(true); }
+        catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
+      }, paused ? "on" : "");
+      btn(i18n.t('첨부'), i18n.t('이 화면을 캡처해 에이전트에게 첨부'), (ev) => void this.capture(ev.currentTarget));
+      if (handoff) {
+        btn(i18n.t('계속'), i18n.t('개입을 끝내고 에이전트를 재개합니다'), async () => {
+          try { await api.desktopPause(false); await this.pollDesk(true); }
+          catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
+        }, "primary");
+      }
+    } else {
+      btn(i18n.t('켜기'), "", () => this.power("boot"), "primary");
+    }
+    btn("···", i18n.t('더 보기'), (ev) => {
+      const r = ev.currentTarget.getBoundingClientRect();
+      import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
+        ...(booted ? [{ icon: icons.power({ size: 14 }), label: i18n.t('데스크톱 끄기'), onClick: () => this.power("shutdown") }] : []),
+        { icon: icons.sliders({ size: 14 }), label: i18n.t('데스크톱 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet()).catch(() => {}) },
+      ])).catch(() => {});
+    });
+    bar.appendChild(right);
+    this.deskBarEl = bar;
+    return bar;
+  }
+
+  /** 데스크톱 상태(멈춤·개입 대기)는 폰이나 cpt 가 바꿀 수 있다 — 탭이 보이는 동안 3초마다 확인해 바를 다시 그린다. */
+  startDeskPoll() {
+    this.stopDeskPoll();
+    this._deskTimer = setInterval(() => void this.pollDesk(false), 3000);
+    void this.pollDesk(false);
+  }
+  stopDeskPoll() { if (this._deskTimer) { clearInterval(this._deskTimer); this._deskTimer = null; } }
+  async pollDesk(force) {
+    if (this._disposedDesk) return;
+    let st = null;
+    try { st = await api.desktopStatus(); } catch (_) { return; }
+    const prev = this.deskStatus;
+    this.deskStatus = st;
+    this.deskPaused = !!(st && st.paused);
+    const sig = (x) => x ? `${x.phase}|${x.paused}|${x.handoff ? x.handoff.reason : ""}` : "";
+    if (force || sig(prev) !== sig(st)) {
+      //  바만 갈아 끼운다 — 화면(<img>)을 다시 만들면 프레임 루프가 끊긴다.
+      const dev = this.device();
+      const booted = st && st.phase === "running";
+      const nb = this.buildDeskBar(dev, booted);
+      if (this.deskBarEl && this.deskBarEl.parentNode) this.deskBarEl.parentNode.replaceChild(nb, this.deskBarEl);
+      //  꺼졌다/켜졌다가 바뀌면 기기 목록도 새로 읽어 프레임 루프를 맞춘다.
+      if (prev && (prev.phase === "running") !== booted) this.loadDevices();
+    }
+  }
+
   async capture(btn) {
     if (!this.deviceId || this._capturing) return;
     this._capturing = true;
@@ -750,7 +843,7 @@ export class EmulatorView {
      *  큐에 대기하고(데몬이 자동으로 켠다), 개입을 끝내면 이 버튼으로 풀어 준다. 되감기·재시작 같은
      *  파괴적 조작은 여기 두지 않는다(설정 시트로).
      */
-    if (dev && dev.kind === "desktop" && booted) {
+    if (false && dev && dev.kind === "desktop" && booted) {
       const pz = document.createElement("button");
       pz.className = "emu-key" + (this.deskPaused ? " on" : "");
       pz.title = this.deskPaused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤');
@@ -908,10 +1001,21 @@ export class EmulatorView {
     //  화면 + 버튼 스트립. 어느 쪽에 붙일지는 **여백이 어디 생기는지**로 정한다(applyLayout).
     const wrap2 = document.createElement("div");
     wrap2.className = "emu-main";
-    wrap2.append(stage, keys);
+    const isDesktop = !!(dev && dev.kind === "desktop");
+    if (isDesktop) {
+      //  에이전트 데스크톱은 폰이 아니라 맥 화면 — 옆 스트립 대신 **얇은 상태 바**를 위에 둔다(목업 확정 2026-09-17):
+      //   [● 실행 중 · 1440×900 · 에이전트 조작 중]   [에이전트 멈춤↔재개] [첨부] [계속] [···]
+      this.el.append(this.buildDeskBar(dev, booted));
+      wrap2.append(stage);
+      this.keysEl = null;
+      this.startDeskPoll();
+    } else {
+      wrap2.append(stage, keys);
+      this.keysEl = keys;
+      this.stopDeskPoll();
+    }
     this.el.append(wrap2);
     this.mainEl = wrap2;
-    this.keysEl = keys;
     //  render 는 <canvas>/<img> 를 새로 만든다 — 배치·표시 회전을 그 위에 다시 얹는다.
     setTimeout(() => this.applyLayout(), 0);
     //  창 크기가 바뀌면 남는 자리도 바뀐다 — 그때마다 다시 판정한다.

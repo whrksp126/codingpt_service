@@ -445,6 +445,13 @@ async function handleUiCommand(msg, reply) {
   if (executor) reply({ uiId, ...res });
 }
 
+/** 로컬에서 ui 명령 하나를 그대로 실행(알림 카드 등 앱 내부 진입점용). back/cpt 경로와 같은 handlers 한 벌. */
+export async function runUiCommandLocal(cmd, params) {
+  const handler = handlers[cmd];
+  if (!handler) throw new Error(i18n.t('알 수 없는 명령: ') + cmd);
+  return handler(params || {}, true);
+}
+
 // cwd(홈-상대 localPath)로 로컬 워크스페이스 메타 찾기.
 function wsByCwd(cwd) {
   return state.workspaces.find((w) => w.localPath === cwd) || null;
