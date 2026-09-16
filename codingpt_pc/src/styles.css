@@ -160,16 +160,25 @@ body.resizing-row { cursor: row-resize; }
 /* 잡았을 때 = 중립 테두리색(액센트 아님)으로 표시 */
 .sb-resizer:hover, .sb-resizer.dragging { background: var(--border-ctrl); }
 .sb-top {
-  display: flex; align-items: center; gap: 2px;
+  display: flex; align-items: center; gap: 6px;   /* cmux classic spacing 6 */
   height: 40px; padding: 0 8px 0 var(--titlebar-inset-left); /* 좌: macOS 트래픽 라이트 여백(win32=0 근처) */
   flex: none; border-bottom: 1px solid var(--border); /* main-top 과 헤더 라인 연속 */
 }
-.sb-top .ic-btn, .main-top .ic-btn { width: 28px; height: 28px; }
+/* ── 타이틀바 컨트롤(좌: 사이드바·알림 / 우: 검색·추가) — cmux classic 지표 1:1(2026-09-16) ──
+   HeaderChromeControlMetrics: button 20 · icon 12(SF regular) · radius 6 · spacing 6 · hoverBackground false
+   (불투명도 0.86 → 0.96 → 눌림 1.0) · 색 = secondary. 아이콘 크기는 sidebar.js TITLEBAR_ICON 이 짝이다.
+   ⚠ 호버 배경을 다시 넣지 말 것 — 배경 사각형이 생기는 순간 macOS 타이틀바 도구 버튼과 달라 보인다. */
+.sb-top .ic-btn, .main-top .ic-btn, .mt-adds .pane-ctrl {
+  width: 20px; height: 20px; border-radius: 6px; color: var(--text3); opacity: 0.86;
+  transition: opacity 0.12s;
+}
+.sb-top .ic-btn:hover, .main-top .ic-btn:hover, .mt-adds .pane-ctrl:hover { background: transparent; color: var(--text3); opacity: 0.96; }
+.sb-top .ic-btn:active, .main-top .ic-btn:active, .mt-adds .pane-ctrl:active { opacity: 1; }
 .sb-top .bell { position: relative; }
 .bell-badge {
-  position: absolute; top: 2px; right: 2px;
-  background: var(--error); color: #fff; font-size: 9px; font-weight: 700;
-  min-width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 999px; padding: 0 3px;
+  position: absolute; top: -2px; right: -3px;
+  background: var(--error); color: #fff; font-size: 8px; font-weight: 700;
+  min-width: 12px; height: 12px; line-height: 12px; text-align: center; border-radius: 999px; padding: 0 2px;
 }
 
 .sb-list { flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 0; }
@@ -350,13 +359,13 @@ html[data-os="windows"] .main-top { padding-right: calc(14px + var(--titlebar-in
 .win-cap-btn.win-cap-close:hover { background: var(--error); color: #fff; }
 .win-cap-btn.win-cap-close:active { background: var(--error); opacity: 0.85; }
 .mt-ctl { display: inline-flex; align-items: center; gap: 2px; }
-.mt-div { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+.mt-div { width: 1px; height: 14px; background: var(--border); margin: 0 2px; flex: none; } /* 20px 버튼 줄에 맞춘 높이 */
 .mt-folder { display: inline-flex; color: var(--text2); }
 .mt-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .mt-path { font-size: 11.5px; color: var(--dim); font-family: var(--mono-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 통합 추가 버튼(터미널/IDE/웹뷰) — main-top 우측 고정, 활성 pane 기준 자동 배치 */
 .mt-spacer { flex: 1; }
-.mt-adds { display: inline-flex; align-items: center; gap: 2px; }
+.mt-adds { display: inline-flex; align-items: center; gap: 6px; } /* 좌측 컨트롤과 같은 spacing */
 
 .ws-grid { flex: 1; min-height: 0; background: transparent; } /* punch-through 경로(창 bg 가 base) */
 /* 워크스페이스 화면 LRU 캐시 컨테이너 — 활성 1개만 보이고 나머지는 display:none 으로 눕는다.

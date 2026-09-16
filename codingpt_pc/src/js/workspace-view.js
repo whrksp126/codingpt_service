@@ -602,7 +602,7 @@ function renderMainTop(ws) {
     //  있으면 그 툴팁은 거짓말이 된다.
     const palCombo = bindings()["palette.open"];
     palBtn.title = tx(PALETTE_TEXT).open + (palCombo ? "  " + formatCombo(palCombo, IS_APPLE) : "");
-    palBtn.innerHTML = icons.search({ size: 16 });
+    palBtn.innerHTML = icons.search({ size: 16, sw: 1.3 });   // 타이틀바 지표(sidebar.js TITLEBAR_ICON 과 한 벌)
     palBtn.addEventListener("click", (ev) => {
       ev.stopPropagation();
       import("./palette.js").then((m) => m.openPalette());
@@ -613,7 +613,7 @@ function renderMainTop(ws) {
     addBtn.className = "pane-ctrl";
     addBtn.title = i18n.t('추가');
     addBtn.dataset.cmd = "ws.add";
-    addBtn.innerHTML = icons.plus({ size: 16 });
+    addBtn.innerHTML = icons.plus({ size: 16, sw: 1.5 });     // cmux 의 plus 는 medium weight — 이웃보다 살짝 굵다
     addBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openAddMenu(addBtn); });
     adds.append(palBtn, palDiv, addBtn);
     mtDyn.append(spacer, adds);

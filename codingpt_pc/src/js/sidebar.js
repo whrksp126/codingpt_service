@@ -333,11 +333,16 @@ function attachPullToRefresh(list) {
   );
 }
 
+// 타이틀바 컨트롤 — cmux classic 지표와 1:1(2026-09-16, 사용자 요청 "macOS 앱 상단 버튼들과 동일하게").
+//  버튼 20 · 아이콘 = SF Symbol 12pt regular 등가. 우리 24-뷰박스 아이콘은 글리프가 뷰박스의 ~73% 라
+//  size 16 이면 실제 글리프 ≈ 11.7px = SF 12pt 와 같은 눈높이, 선 굵기 1.3 ≈ regular weight.
+//  (styles.css `.sb-top .ic-btn` 이 상자·간격·호버를 같은 지표로 고정한다.)
+const TITLEBAR_ICON = { size: 16, sw: 1.3 };
 function ctlBtn(iconName, title, onClick) {
   const b = document.createElement("button");
   b.className = "ic-btn";
   b.title = title;
-  b.innerHTML = icons[iconName]({ size: 17 });
+  b.innerHTML = icons[iconName](TITLEBAR_ICON);
   b.addEventListener("click", onClick);
   return b;
 }
@@ -351,8 +356,9 @@ function ctlBtn(iconName, title, onClick) {
 export function buildTopControls(_withAdd = true) {
   const frag = document.createDocumentFragment();
   const totalUnread = state.notifications.filter((n) => !n.read).length;
-  // 열림=채운 아이콘, 닫힘=빈 아이콘(색이 아니라 채움 유무로 상태 표현).
-  const toggle = ctlBtn(state.sidebarCollapsed ? "sidebar" : "sidebarFilled", state.sidebarCollapsed ? i18n.t('사이드바 펼치기') : i18n.t('사이드바 접기'), () => S.toggleSidebar());
+  // 글리프는 열림/닫힘 양쪽 같다(cmux 와 동일 — 사이드바가 보이느냐 자체가 상태다). 예전의 채움/빈 아이콘
+  //  구분은 2026-09-16 cmux 1:1 정렬로 뺐다: 채운 글리프가 이웃 아이콘보다 무거워 줄이 고르지 않았다.
+  const toggle = ctlBtn("sidebarTitlebar", state.sidebarCollapsed ? i18n.t('사이드바 펼치기') : i18n.t('사이드바 접기'), () => S.toggleSidebar());
   const bell = ctlBtn("bell", i18n.t('알림'), (e) => {
     e.stopPropagation();
     notifOpen ? closeNotif() : openNotif();

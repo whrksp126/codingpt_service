@@ -18,6 +18,10 @@ const svg = (inner, o = {}) =>
 
 export const icons = {
   sidebar: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>', o),
+  // 타이틀바 전용 사이드바 글리프 — cmux `TitlebarSidebarGlyphShape` 1:1(2026-09-16): 14×11 프레임에 0.5 인셋
+  //  둥근사각(r2) + 폭 36% 지점 세로선(상하 1.5 인셋), 선 굵기 1. 16-뷰박스에 px 그대로 그려 20px 버튼 안에서
+  //  SF Symbol 12pt 이웃(벨·+)과 같은 무게로 보인다. 크기 인자는 받지 않는다(지표가 고정값이라서).
+  sidebarTitlebar: () => '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="ic"><rect x="1.5" y="3" width="13" height="10" rx="2"/><line x1="6.18" y1="4.5" x2="6.18" y2="11.5"/></svg>',
   // 열림 상태 표시용 — 왼쪽 컬럼이 채워진 변형(색이 아니라 채움 유무로 토글 상태를 직관 표현).
   sidebarFilled: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M4 4h5v16H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" fill="currentColor" stroke="none"/>', o),
   bell: (o) => svg('<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5 2 5.5H4c.5-.5 2-1.5 2-5.5"/><path d="M10 18.5a2 2 0 0 0 4 0"/>', o),
