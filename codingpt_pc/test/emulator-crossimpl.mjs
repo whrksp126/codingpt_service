@@ -40,6 +40,24 @@ ok(missing.length === 0,
   '누락: ' + missing.join(', '));
 ok(/T\.leaf\("terminal"/.test(splitBody), 'splitPane 의 기본값은 여전히 터미널이다(위 검사가 의미를 갖는 이유)');
 
+// ── 2-a. ★ 복원 마이그레이션도 같은 함정(2026-09-17 실사고) ─────────────────────
+//  업데이트로 앱이 재시작하면 pc-ui.json 을 migrateTree 로 되살린다. 그 함수가 "preview 가 아니면 터미널"
+//  이라 에이전트 PC(emulator) pane 이 **win 0 터미널**(첫 터미널의 복사본)로 둔갑했다. 실제 함수를 떼어 돌린다.
+{
+  const src = /function migrateTree\(node\) \{[\s\S]*?\n\}\n/.exec(state)?.[0];
+  ok(!!src, 'migrateTree 를 찾았다');
+  const migrate = new Function('T', `${src}; return migrateTree;`)(T);
+  for (const k of KINDS) {
+    const leaf = T.leaf(k, { deviceId: 'desktop:main', url: 'http://x', openPath: '/a' });
+    const out = migrate(structuredClone(leaf));
+    ok(out.kind === k && !Array.isArray(out.tabs), `★ 복원 마이그레이션이 ${k} pane 을 터미널로 바꾸지 않는다`, JSON.stringify(out));
+  }
+  const old = migrate({ id: 'p1', win: 3 });
+  ok(old.kind === 'terminal' && old.tabs?.[0]?.win === 3, '옛 저장본(win 단일)은 여전히 터미널 탭으로 올린다');
+  const nested = migrate({ id: 's', dir: 'row', first: T.leaf('emulator', { deviceId: 'desktop:main' }), second: { id: 'p2', win: 1 } });
+  ok(nested.first.kind === 'emulator' && nested.second.kind === 'terminal', '분할 안쪽도 같은 규칙');
+}
+
 //  위는 소스 검사라 "그 줄이 있다"까지만 말한다. splitPane 이 실제로 부르는 식을 **그대로 떼어
 //  진짜 tiling 모듈에 태워** 결과 노드의 kind 를 확인한다(state.js 는 api.js→Tauri 를 물고 있어
 //  통째로 import 할 수 없다 — 그래서 결정식만 가져온다).

@@ -1026,10 +1026,14 @@ function scheduleSessionPush() { /* no-op — 세션 매니페스트 동기화 �
 export async function pullSession(_wsId) { /* no-op */ }
 
 // 구버전 레이아웃(leaf.win 단일)을 새 형식(leaf.tabs)으로 마이그레이션.
+//  ★ 터미널(또는 kind 없는 옛 저장본)만 건드린다. 예전엔 "preview 가 아니면" 이었고, 그 화이트리스트가
+//   emulator(에이전트 PC·모바일 화면)·ide leaf 를 **win 0 터미널로 둔갑**시켰다 — 업데이트 재시작 뒤
+//   에이전트 PC pane 자리에 첫 터미널의 복사본이 떠 있던 실사고(2026-09-17).
 function migrateTree(node) {
   if (!node) return node;
   if (T.isLeaf(node)) {
-    if (node.kind !== "preview" && !Array.isArray(node.tabs)) {
+    const terminalish = !node.kind || node.kind === "terminal";
+    if (terminalish && !Array.isArray(node.tabs)) {
       node.kind = "terminal";
       node.tabs = [{ win: typeof node.win === "number" ? node.win : 0, title: "" }];
       node.active = 0;
