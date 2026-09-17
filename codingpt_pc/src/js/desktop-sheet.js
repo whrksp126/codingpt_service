@@ -144,14 +144,3 @@ async function paint(quiet) {
   body.querySelector("#dsMem")?.addEventListener("change", onRes);
   body.querySelector("#dsCpu")?.addEventListener("change", onRes);
 }
-
-/** 사이드바 PC 카드 아래 한 줄용 — 상태 텍스트. 없으면(지원 안 함) null. */
-export async function desktopLine() {
-  try {
-    const st = await api.desktopStatus();
-    if (!st || st.phase === "unsupported" || st.phase === "no-tool") return null;
-    const t = { 'no-image': i18n.t('준비 안 됨'), pulling: i18n.t('내려받는 중'), stopped: i18n.t('정지'), starting: i18n.t('켜는 중…'), running: i18n.t('실행 중') }[st.phase] || st.phase;
-    return { phase: st.phase, text: `${i18n.t('에이전트 PC')} · ${t}${st.phase === "running" && st.memorySize ? ` · ${fmtGB(st.memorySize)}` : ""}`, running: st.phase === "running" };
-  } catch (_) { return null; }
-}
-

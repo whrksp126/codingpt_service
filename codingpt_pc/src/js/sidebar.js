@@ -227,8 +227,6 @@ export function updateSidebar() {
   }
   for (const d of devices) {
     list.appendChild(deviceRow(d, activeDev));
-    //  이 PC 카드 아래 한 줄: 에이전트 PC 상태(지원되는 맥에서만). 클릭 = 설정 시트.
-    if (d.isCurrent || String(d.id) === String(state.currentDeviceId)) list.appendChild(desktopLineRow());
   }
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
@@ -459,28 +457,6 @@ function deviceRow(d, activeId) {
     `<span class="pc-nm">${escapeHtml(d.name || i18n.t('내 PC'))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
   row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
-  return row;
-}
-
-/**
- * 에이전트 PC 한 줄(이 PC 카드 아래). 상태는 데몬에서 비동기로 오므로 자리를 먼저 만들고 채운다 —
- *  지원 안 되는 맥(인텔·램 부족)이면 줄을 빼 버린다. 30초에 한 번만 다시 묻는다(사이드바 재렌더마다 IPC 금지).
- */
-let deskLineCache = { at: 0, v: null };
-function desktopLineRow() {
-  const row = document.createElement("button");
-  row.className = "pc-desk hidden";
-  const paintLine = (v) => {
-    if (!v) { row.classList.add("hidden"); return; }
-    row.classList.remove("hidden");
-    row.innerHTML = `<span class="pc-desk-dot${v.running ? " on" : ""}"></span><span class="pc-desk-t">${escapeHtml(v.text)}</span>`;
-  };
-  paintLine(deskLineCache.v);
-  if (Date.now() - deskLineCache.at > 30000) {
-    deskLineCache.at = Date.now();
-    import("./desktop-sheet.js").then((m) => m.desktopLine()).then((v) => { deskLineCache.v = v; paintLine(v); }).catch(() => {});
-  }
-  row.addEventListener("click", () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet()).catch(() => {}));
   return row;
 }
 

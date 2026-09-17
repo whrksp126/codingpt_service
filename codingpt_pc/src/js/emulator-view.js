@@ -609,25 +609,24 @@ export class EmulatorView {
     const handoff = st.handoff || null;
     const paused = !!st.paused;
     const size = this.lastFrameSize;
+    //  왼쪽: 켜져 있을 때만 해상도·에이전트 상태(사용자 결정 2026-09-17: 상태 점·"꺼짐" 글자는 뺀다 — 화면이 곧 상태다).
     const left = document.createElement("div");
     left.className = "emu-deskbar-l";
-    const dot = `<span class="emu-deskdot${booted ? " on" : ""}"></span>`;
-    const state = booted ? i18n.t('실행 중') : (st.phase === "starting" ? i18n.t('켜는 중…') : i18n.t('꺼짐'));
-    const res = size ? `<span class="emu-deskbar-sep">·</span><span class="mono">${size.w}×${size.h}</span>` : "";
-    let agent = "";
+    const parts = [];
+    if (booted && size) parts.push(`<span class="mono">${size.w}×${size.h}</span>`);
     if (booted) {
-      agent = handoff ? `<span class="emu-deskbar-sep">·</span><b>${i18n.t('개입 대기')}</b>: ${escapeHtml(handoff.reason || "")}`
-        : paused ? `<span class="emu-deskbar-sep">·</span>${i18n.t('에이전트 멈춤')}`
-          : `<span class="emu-deskbar-sep">·</span>${i18n.t('에이전트 조작 가능')}`;
-    }
-    left.innerHTML = `${dot}<span>${state}</span>${res}${agent}`;
+      parts.push(handoff ? `<b>${i18n.t('개입 대기')}</b>: ${escapeHtml(handoff.reason || "")}`
+        : paused ? i18n.t('에이전트 멈춤') : i18n.t('에이전트 조작 가능'));
+    } else if (st.phase === "starting") parts.push(i18n.t('켜는 중…'));
+    left.innerHTML = parts.join(`<span class="emu-deskbar-sep">·</span>`);
     bar.appendChild(left);
     const right = document.createElement("div");
     right.className = "emu-deskbar-r";
-    const btn = (label, title, onClick, cls) => {
+    const btn = (label, title, onClick, cls, html) => {
       const b = document.createElement("button");
       b.className = "emu-deskbtn" + (cls ? " " + cls : "");
-      b.textContent = label; if (title) b.title = title;
+      if (html) b.innerHTML = html; else b.textContent = label;
+      if (title) b.title = title;
       b.addEventListener("click", onClick);
       right.appendChild(b);
       return b;
@@ -644,16 +643,21 @@ export class EmulatorView {
           catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
         }, "primary");
       }
-    } else {
-      btn(i18n.t('켜기'), "", () => this.power("boot"), "primary");
     }
+    //  전원 = 아이콘 하나(켜짐이면 눌린 모양). 켜는 중엔 잠근다 — 두 번 누르면 start 가 겹친다.
+    const starting = st.phase === "starting" || this._powering;
+    const pw = btn("", booted ? i18n.t('끄기') : i18n.t('켜기'), async () => {
+      if (this._powering) return;
+      this._powering = true;
+      try { await this.power(booted ? "shutdown" : "boot"); } finally { this._powering = false; }
+    }, "icon" + (booted ? " on" : ""), icons.power({ size: 14 }));
+    if (starting) pw.disabled = true;
     btn("···", i18n.t('더 보기'), (ev) => {
       const r = ev.currentTarget.getBoundingClientRect();
       import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
-        ...(booted ? [{ icon: icons.power({ size: 14 }), label: i18n.t('에이전트 PC 끄기'), onClick: () => this.power("shutdown") }] : []),
         { icon: icons.sliders({ size: 14 }), label: i18n.t('에이전트 PC 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet()).catch(() => {}) },
       ])).catch(() => {});
-    });
+    }, "icon");
     bar.appendChild(right);
     this.deskBarEl = bar;
     return bar;
@@ -724,7 +728,8 @@ export class EmulatorView {
     }
     //  ★ 끄면 기기 목록으로 돌아간다(2026-08-06). 예전엔 '‹ 목록으로' 버튼이 그 자리를 대신했는데
     //   버튼을 뺐다 — 꺼진 기기 화면에 남아 있어 봐야 볼 것도 조작할 것도 없다.
-    if (action === "shutdown" && !this.disposed) { this.select(null); return; }
+    const dv = (this.devices || []).find((d) => d.id === id);
+    if (action === "shutdown" && !this.disposed && !(dv && dv.kind === "desktop")) { this.select(null); return; }
     if (!this.disposed) void this.loadDevices();
   }
 
@@ -996,6 +1001,12 @@ export class EmulatorView {
         });
         stage.addEventListener("compositionend", (ev) => { if (ev.data) this.send({ type: "text", text: ev.data }); });
       }
+    } else if (dev && dev.kind === "desktop") {
+      //  꺼진 에이전트 PC — 버튼 대신 한 줄(켜기는 상태 바의 전원 아이콘 하나뿐, 사용자 결정 2026-09-17).
+      const off = document.createElement("div");
+      off.className = "emu-off";
+      off.textContent = (this.deskStatus && this.deskStatus.phase === "starting") ? i18n.t('켜는 중…') : i18n.t('에이전트 PC 가 꺼져 있어요');
+      stage.appendChild(off);
     } else if (!booted) {
       const b = document.createElement("button");
       b.className = "emu-boot";
@@ -1041,7 +1052,7 @@ export class EmulatorView {
     //  ★ 조작이 안 되면 **이유가 항상 있어야 한다**(2026-08-06): 예전엔 데몬이 준 inputHint 가 있을
     //   때만 적었는데, "아직 안 켜짐" 처럼 힌트가 빈 경우가 있어 버튼도 없고 터치도 안 먹는데 설명이
     //   한 줄도 없는 상태가 됐다 — 사용자에겐 그냥 고장으로 보인다.
-    if (!canInput && dev) {
+    if (!canInput && dev && dev.kind !== "desktop") {
       const hint = document.createElement("div");
       hint.className = "emu-hint";
       hint.textContent = dev.caps?.inputHint

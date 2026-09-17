@@ -327,8 +327,11 @@ for (const [name, src, hook] of [['PC', pcView, /setVisible[\s\S]{0,600}?this\.l
   ok(/CAP_RETRY_MAX/.test(src), `${name} 이 조작 준비를 상한 안에서 다시 물어본다(무한 폴링 금지)`);
 }
 //  왜 안 되는지는 **항상** 적는다 — 버튼도 없고 설명도 없으면 사용자에겐 그냥 고장이다.
-ok(/if \(!canInput && dev\) \{/.test(pcView) && !/!canInput && dev && dev\.caps && dev\.caps\.inputHint/.test(pcView),
+ok(/if \(!canInput && dev && dev\.kind !== "desktop"\) \{/.test(pcView) && !/!canInput && dev && dev\.caps && dev\.caps\.inputHint/.test(pcView),
   'PC 의 이유 표시가 데몬 힌트 유무에 묶여 있지 않다');
+//  에이전트 PC 는 아래 힌트 줄 대신 화면 안 한 줄(.emu-off) — 켜기는 상태 바 전원 아이콘 하나뿐(2026-09-17 사용자 결정).
+ok(/className = "emu-off"/.test(pcView) && !/btn\(i18n\.t\('켜기'\)/.test(pcView) && /icons\.power\(/.test(pcView),
+  '에이전트 PC: 꺼짐 안내는 화면 안에, 전원은 아이콘 버튼 하나');
 ok(/!canInput && dev \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
   '앱의 이유 표시도 힌트 유무에 묶여 있지 않다');
 ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
