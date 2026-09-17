@@ -389,6 +389,7 @@ export default {
   "반환": "freed",
   "데스크톱을 삭제할까요? 그 안에 설치한 것과 바꾼 설정이 사라집니다. 공유 폴더의 코드는 영향받지 않습니다.": "Delete the desktop? Anything installed or changed inside is lost. Code in shared folders is not affected.",
   "연결을 반영하려면 데스크톱을 다시 시작해야 해요. 지금 다시 시작할까요?": "The desktop must restart to apply connections. Restart now?",
+  "데스크톱": "Desktop",
   "에이전트": "Agent",
   "에이전트 모드 (TUI 의 shift+tab)": "Agent mode (shift+tab in the TUI)",
   "에이전트 실행 실패": "Couldn't start the agent",

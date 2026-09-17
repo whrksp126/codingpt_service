@@ -227,7 +227,7 @@ function beginTabDrag(srcId, index, e) {
   const label = tabIsTerm
     ? tab?.title || (typeof tab?.win === "number" ? i18n.t('터미널 ') + tab.win : i18n.t('터미널 '))
     : surfaceLabel(kind);
-  const ghostIcon = tabIsTerm ? icons.terminal : surfaceIcon(kind);
+  const ghostIcon = tabIsTerm ? icons.terminal : surfaceIcon(kind, wholePane ? src : tab);
   const pointerId = e.pointerId;
   const startX = e.clientX, startY = e.clientY;
   let dragging = false;
@@ -733,6 +733,9 @@ function openAddMenu(anchor) {
   });
   // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
   row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
+  // 에이전트 데스크톱 — 같은 pane(모바일 화면)에 기기를 `desktop:main` 으로 미리 골라 연다.
+  //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
+  row(icons.monitor, i18n.t('데스크톱'), { onClick: () => smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 데스크톱') }) });
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();

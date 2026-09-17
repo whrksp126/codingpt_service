@@ -147,9 +147,9 @@ export function surfaceLabel(kind, node) {
   if (kind === "emulator") return (node && node.metaName) || i18n.t('모바일 화면');
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
-export function surfaceIcon(kind) {
+export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
-  if (kind === "emulator") return icons.smartphone;
+  if (kind === "emulator") return (node && String(node.deviceId || "").startsWith("desktop:")) ? icons.monitor : icons.smartphone;
   return icons.globe;
 }
 
@@ -758,7 +758,7 @@ export class PaneView {
         //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
-          : t.kind === "emulator" ? icons.smartphone({ size: 13 })
+          : t.kind === "emulator" ? (String(t.deviceId || "").startsWith("desktop:") ? icons.monitor : icons.smartphone)({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
@@ -815,7 +815,7 @@ export class PaneView {
       lbl.className = "ptab active static";
       const icHtml = kind === "preview"
         ? previewTabIconHtml(this.node.metaFav)
-        : surfaceIcon(kind)({ size: 13 });
+        : surfaceIcon(kind, this.node)({ size: 13 });
       const lblText = surfaceLabel(kind, this.node);
       lbl.innerHTML = `<span class="ptab-ic">${icHtml}</span><span class="ptab-title">${escapeHtml(lblText)}</span>`;
       const x = document.createElement("span");
