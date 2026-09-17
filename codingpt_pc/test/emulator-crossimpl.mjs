@@ -133,9 +133,14 @@ ok(/tab\.kind === "emulator"/.test(pane) && /new mod\.EmulatorView\(host/.test(p
 ok(/m\.emu\?\.dispose\(\)/.test(pane), '탭을 닫으면 EmulatorView 도 정리한다(프레임 루프 누수 금지)');
 ok(/m\.emu\?\.setVisible\(!!on\)/.test(pane),
   '★ 가려진 탭은 프레임을 안 당긴다(한 장이 수십 KB — 안 보이는데 계속 받으면 그 자체가 결함)');
-ok(/t\.kind === "emulator" \? icons\.smartphone/.test(pane), '탭 아이콘이 모바일 화면 것이다');
+ok(/t\.kind === "emulator" \? \(String\(t\.deviceId[^)]*\)\.startsWith\("desktop:"\) \? icons\.monitor : icons\.smartphone\)/.test(pane),
+  '탭 아이콘 — 모바일 화면은 폰, 에이전트 PC(desktop:) 는 모니터');
 
 const emu = read(path.join(PC, 'emulator-view.js'));
+ok(/dv\.kind === "desktop" && dv\.state !== "booted"/.test(emu),
+  '★ 꺼진 에이전트 PC 에는 프레임을 묻지 않는다(30초 VNC 되풀이가 메인 스레드를 잡던 무지개 커서)');
+ok(/pub async fn emulator_local[\s\S]*?spawn_blocking/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'cptsock.rs'))),
+  '★ emulator_local 은 비동기 — 동기 커맨드는 메인 스레드에서 소켓 응답을 기다린다(프레임·부팅 동안 앱 전체가 멈춤)');
 ok(/setVisible\(on\)/.test(emu) && /!this\.visible/.test(emu),
   'EmulatorView.setVisible 이 루프 조건에 실제로 걸려 있다(메서드만 있고 안 쓰면 무의미)');
 

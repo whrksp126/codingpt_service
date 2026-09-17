@@ -268,15 +268,20 @@ pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
 //  올렸다 내리면 왕복 지연이 프레임 시간(실측 1.3s)에 그대로 얹힌다. 원격 PC 는 기존대로 back 릴레이.
 //  타임아웃이 긴 이유: `emulator.boot` 는 시뮬레이터가 뜰 때까지 기다린다.
 #[tauri::command]
-pub fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
-    // 에이전트 데스크톱(desktop.*)도 같은 pane 이 쓴다 — 상태·켜기·끄기·에이전트 멈춤/재개.
+pub async fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    // 에이전트 PC(desktop.*)도 같은 pane 이 쓴다 — 상태·켜기·끄기·에이전트 멈춤/재개.
     //  게스트 VM 콜드 부팅은 2분까지 간다(시뮬레이터 60초보다 길다).
     let is_desktop = cmd.starts_with("desktop.");
     if !cmd.starts_with("emulator.") && !is_desktop {
         return Err("허용되지 않은 명령입니다.".to_string());
     }
-    // 시뮬레이터 부팅이 60초까지 걸린다(프레임 한 장은 1~2초).
-    cpt_request_timed(&cmd, args, true, if is_desktop { 180 } else { 90 })
+    // ★ 동기 커맨드는 웹뷰 IPC 스레드(=메인 스레드)에서 그대로 돈다 — 소켓 응답을 기다리는 동안 앱 전체가 멈춘다.
+    //  프레임·부팅처럼 초 단위로 걸리는 요청은 spawn_blocking 으로 뺀다(2026-09-17 실사고: 꺼진 에이전트 PC 의
+    //  프레임 요청이 30초를 끌어 무지개 커서). 시뮬레이터 부팅이 60초까지 걸린다(프레임 한 장은 1~2초).
+    let secs = if is_desktop { 180 } else { 90 };
+    tauri::async_runtime::spawn_blocking(move || cpt_request_timed(&cmd, args, true, secs))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
 }
 
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이

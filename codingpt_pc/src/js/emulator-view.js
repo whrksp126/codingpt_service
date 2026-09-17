@@ -381,6 +381,12 @@ export class EmulatorView {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
+        //  꺼진 에이전트 PC 에는 프레임을 묻지 않는다 — 켜지면 pollDesk 가 기기 목록을 새로 읽어 state 가 바뀐다.
+        const dv = this.device();
+        if (dv && dv.kind === "desktop" && dv.state !== "booted") {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
         const t0 = Date.now();
         try {
           const f = await api.emulatorFrame(this.deviceId, { maxWidth: this.wantWidth(), quality: 72 });

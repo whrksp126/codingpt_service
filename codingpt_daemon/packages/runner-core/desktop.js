@@ -195,7 +195,7 @@ async function start(o = {}) {
       invalidateInfo();
     }
     await waitRunning();
-    await connectRfb();
+    await connectRfb({ waitMs: 30000 });
   })();
   try { await _starting; } finally { _starting = null; }
   return status();     // _starting 을 비운 뒤에 읽어야 phase 가 'running' 으로 나온다
@@ -218,14 +218,22 @@ function parseVncUrl(u) {
   return { password: decodeURIComponent(m[2] || ''), host: m[3], port: Number(m[4]) };
 }
 
-async function connectRfb() {
+/**
+ * VNC 에 붙는다(이미 붙어 있으면 그대로).
+ *  ★ 꺼진 VM 이면 **즉시** 실패한다 — 예전엔 프레임 요청 하나가 30초 동안 접속을 되풀이했고, PC 앱은 그 30초를
+ *   메인 스레드에서 기다렸다(무지개 커서, 2026-09-17 실사고). 부팅 직후의 되풀이(waitMs)는 start() 만 쓴다.
+ *  @param {{waitMs?:number}} o  접속 실패를 되풀이할 상한(기본 0 = 한 번만)
+ */
+async function connectRfb(o = {}) {
   if (rfb && rfb.ready && !rfb.closed) return rfb;
   const info = await vmInfo();
+  if (!info || !/running/i.test(String(info.status || ''))) throw new Error('에이전트 PC 가 꺼져 있어요 (cpt desktop start)');
   const v = parseVncUrl(info && info.vncUrl) || { host: '127.0.0.1', port: VNC_PORT, password: vncPassword };
+  const waitMs = Number(o.waitMs) || 0;
   const t0 = Date.now();
   for (;;) {
     try {
-      const c = new RfbClient({ host: v.host === '0.0.0.0' ? '127.0.0.1' : v.host, port: v.port, password: v.password || vncPassword });
+      const c = new RfbClient({ host: v.host === '0.0.0.0' ? '127.0.0.1' : v.host, port: v.port, password: v.password || vncPassword, connectTimeoutMs: waitMs ? 8000 : 3000 });
       await c.connect();
       c.on('close', () => { if (rfb === c) rfb = null; });
       c.on('error', () => { /* close 가 뒤따른다 */ });
@@ -233,7 +241,7 @@ async function connectRfb() {
       await c.requestUpdate(false, 4000);
       return c;
     } catch (e) {
-      if (Date.now() - t0 > 30000) throw new Error(`에이전트 PC 화면(VNC)에 붙을 수 없어요: ${e.message}`);
+      if (Date.now() - t0 >= waitMs) throw new Error(`에이전트 PC 화면(VNC)에 붙을 수 없어요: ${e.message}`);
       await sleep(600);
     }
   }

@@ -124,3 +124,25 @@ test('호스트 ↔ 게스트 변환 — localhost 는 NAT 게이트웨이로, �
   assert.strictEqual(desktop.guestUrl('http://localhost.example.com/'), 'http://localhost.example.com/');
   assert.strictEqual(desktop.guestUrl('https://github.com/'), 'https://github.com/');
 });
+
+// 꺼진 VM 의 프레임/입력은 **즉시** 실패해야 한다 — 예전엔 VNC 접속을 30초 되풀이했고 PC 앱이 그걸 메인 스레드에서
+//  기다려 무지개 커서가 돌았다(2026-09-17). 가짜 lume 이 stopped 를 답하게 하고 시간을 잰다.
+test('꺼진 에이전트 PC 의 frame/input 은 바로 실패한다', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-lume-'));
+  const fake = path.join(dir, 'lume');
+  fs.writeFileSync(fake, '#!/bin/sh\necho \'[{"name":"cpt-agent-desktop","status":"stopped"}]\'\n', { mode: 0o755 });
+  const prev = process.env.CPT_LUME;
+  process.env.CPT_LUME = fake;
+  desktop._resetTools();
+  try {
+    const t0 = Date.now();
+    await assert.rejects(desktop.frame({ maxWidth: 100 }), /꺼져 있어요/);
+    await assert.rejects(desktop.input({ type: 'tap', x: 0.5, y: 0.5 }), /꺼져 있어요/);
+    assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0}ms — 되풀이 접속이 살아났다`);
+  } finally {
+    if (prev === undefined) delete process.env.CPT_LUME; else process.env.CPT_LUME = prev;
+    desktop._resetTools();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
