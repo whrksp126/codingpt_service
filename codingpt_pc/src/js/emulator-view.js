@@ -162,7 +162,7 @@ export class EmulatorView {
       const r = await api.emulatorList();
       if (this.disposed) return;
       this.devices = (r && r.devices) || [];
-      //  에이전트 데스크톱의 멈춤 상태는 기기 행에 실려 온다 — 폰이 풀었으면 여기 버튼도 따라간다.
+      //  에이전트 PC의 멈춤 상태는 기기 행에 실려 온다 — 폰이 풀었으면 여기 버튼도 따라간다.
       const desk = this.devices.find((d) => d.kind === "desktop");
       if (desk && desk.desktop) this.deskPaused = !!desk.desktop.paused;
       this.tools = (r && r.tools) || {};
@@ -644,8 +644,8 @@ export class EmulatorView {
     btn("···", i18n.t('더 보기'), (ev) => {
       const r = ev.currentTarget.getBoundingClientRect();
       import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
-        ...(booted ? [{ icon: icons.power({ size: 14 }), label: i18n.t('데스크톱 끄기'), onClick: () => this.power("shutdown") }] : []),
-        { icon: icons.sliders({ size: 14 }), label: i18n.t('데스크톱 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet()).catch(() => {}) },
+        ...(booted ? [{ icon: icons.power({ size: 14 }), label: i18n.t('에이전트 PC 끄기'), onClick: () => this.power("shutdown") }] : []),
+        { icon: icons.sliders({ size: 14 }), label: i18n.t('에이전트 PC 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet()).catch(() => {}) },
       ])).catch(() => {});
     });
     bar.appendChild(right);
@@ -839,7 +839,7 @@ export class EmulatorView {
       }
     }
     /**
-     * 에이전트 데스크톱 — **에이전트 멈춤/재개** 토글. 사용자가 이 화면을 만지는 동안 에이전트 입력이
+     * 에이전트 PC — **에이전트 멈춤/재개** 토글. 사용자가 이 화면을 만지는 동안 에이전트 입력이
      *  큐에 대기하고(데몬이 자동으로 켠다), 개입을 끝내면 이 버튼으로 풀어 준다. 되감기·재시작 같은
      *  파괴적 조작은 여기 두지 않는다(설정 시트로).
      */
@@ -943,7 +943,7 @@ export class EmulatorView {
       //  화면 밖으로 나가도 **뗀 것으로** 마무리한다 — 안 그러면 기기가 계속 눌린 줄 안다.
       stage.addEventListener("mouseleave", finish);
       /**
-       * 에이전트 데스크톱은 폰이 아니라 **맥 화면**이다 — 우클릭·휠·키보드가 있어야 쓸 수 있다.
+       * 에이전트 PC은 폰이 아니라 **맥 화면**이다 — 우클릭·휠·키보드가 있어야 쓸 수 있다.
        *  키는 xterm 처럼 pane 이 포커스를 가진 채 받는다(stage 가 tabindex 를 갖는다). 글자는 text 로,
        *  그 밖(Enter·화살표·⌘ 조합)은 key 조합 문자열로 보낸다 — 데몬 desktop.js 의 계약과 같다.
        */
@@ -1003,7 +1003,7 @@ export class EmulatorView {
     wrap2.className = "emu-main";
     const isDesktop = !!(dev && dev.kind === "desktop");
     if (isDesktop) {
-      //  에이전트 데스크톱은 폰이 아니라 맥 화면 — 옆 스트립 대신 **얇은 상태 바**를 위에 둔다(목업 확정 2026-09-17):
+      //  에이전트 PC은 폰이 아니라 맥 화면 — 옆 스트립 대신 **얇은 상태 바**를 위에 둔다(목업 확정 2026-09-17):
       //   [● 실행 중 · 1440×900 · 에이전트 조작 중]   [에이전트 멈춤↔재개] [첨부] [계속] [···]
       this.el.append(this.buildDeskBar(dev, booted));
       wrap2.append(stage);

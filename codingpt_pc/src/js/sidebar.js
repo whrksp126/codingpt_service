@@ -96,7 +96,7 @@ export function jumpToNotification(n) {
     import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings"));
     return;
   }
-  //  에이전트 데스크톱 개입 요청 — 그 워크스페이스에 데스크톱 탭을 띄운다(처리 후 탭의 [계속]).
+  //  에이전트 PC 개입 요청 — 그 워크스페이스에 데스크톱 탭을 띄운다(처리 후 탭의 [계속]).
   if (n && n.kind === "desktop_handoff") {
     const ws = state.workspaces.find((w) => w.localPath === n.cwd) || state.workspaces.find((w) => w.id === state.activeWsId);
     if (ws) {
@@ -220,14 +220,14 @@ export function updateSidebar() {
   //   앱(SidebarContent) 쪽에는 남겨 둔다.
   list.appendChild(sectionHead(i18n.t('내 PC'), [
     { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
-    { icon: icons.monitor({ size: 15 }), label: i18n.t('에이전트 데스크톱…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet()).catch(() => {}) },
+    { icon: icons.monitor({ size: 15 }), label: i18n.t('에이전트 PC…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet()).catch(() => {}) },
   ]));
   if (!devices.length) {
     list.appendChild(note(state.paired ? i18n.t('불러오는 중…') : i18n.t('PC를 연결하세요')));
   }
   for (const d of devices) {
     list.appendChild(deviceRow(d, activeDev));
-    //  이 PC 카드 아래 한 줄: 에이전트 데스크톱 상태(지원되는 맥에서만). 클릭 = 설정 시트.
+    //  이 PC 카드 아래 한 줄: 에이전트 PC 상태(지원되는 맥에서만). 클릭 = 설정 시트.
     if (d.isCurrent || String(d.id) === String(state.currentDeviceId)) list.appendChild(desktopLineRow());
   }
 
@@ -463,7 +463,7 @@ function deviceRow(d, activeId) {
 }
 
 /**
- * 에이전트 데스크톱 한 줄(이 PC 카드 아래). 상태는 데몬에서 비동기로 오므로 자리를 먼저 만들고 채운다 —
+ * 에이전트 PC 한 줄(이 PC 카드 아래). 상태는 데몬에서 비동기로 오므로 자리를 먼저 만들고 채운다 —
  *  지원 안 되는 맥(인텔·램 부족)이면 줄을 빼 버린다. 30초에 한 번만 다시 묻는다(사이드바 재렌더마다 IPC 금지).
  */
 let deskLineCache = { at: 0, v: null };

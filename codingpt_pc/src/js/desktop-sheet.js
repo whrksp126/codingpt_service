@@ -1,4 +1,4 @@
-// desktop-sheet — 에이전트 데스크톱 설정 시트(PC 카드 ··· → 에이전트 데스크톱 / 데스크톱 탭 ··· → 설정).
+// desktop-sheet — 에이전트 PC 설정 시트(PC 카드 ··· → 에이전트 PC / 데스크톱 탭 ··· → 설정).
 //  준비(이미지 내려받기, 진행률)·상태·연결된 워크스페이스·자원·삭제·알아둘 것 — 한 장에.
 //  데이터는 전부 이 PC 데몬(유닉스 소켓 직결, api.desktop*)에서 온다. 원격 PC 의 데스크톱은 아직 안 본다.
 import { api } from "./api.js";
@@ -36,7 +36,7 @@ function localWorkspaces() {
 export async function openDesktopSheet() {
   const ov = ensureOverlay();
   ov.classList.remove("hidden");
-  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="fp-title">${i18n.t('에이전트 데스크톱')}</span><button class="fp-newfolder" id="dsClose">${i18n.t('닫기')}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
+  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="fp-title">${i18n.t('에이전트 PC')}</span><button class="fp-newfolder" id="dsClose">${i18n.t('닫기')}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
   ov.querySelector("#dsClose").addEventListener("click", close);
   await paint();
   //  준비(내려받기) 중이면 진행률을, 켜는 중이면 상태를 따라간다.
@@ -98,15 +98,15 @@ async function paint(quiet) {
     <div class="fp-sub">${i18n.t('이 맥 안에서 에이전트가 쓰는 별도의 macOS. 사용자 화면·마우스·키보드를 건드리지 않습니다.')}</div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('상태')}</div>${statusRows}</div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('연결된 워크스페이스')}</div>${wsRows}
-      <div class="ds-warn">${i18n.t('연결을 바꾸면 데스크톱을 다시 시작합니다(약 10초). 연결된 폴더는 데스크톱 안 /Volumes/My Shared Files/ 에 보입니다.')}</div></div>
+      <div class="ds-warn">${i18n.t('연결을 바꾸면 에이전트 PC 를 다시 시작합니다(약 10초). 연결된 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보입니다.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
       <div class="ds-kv"><span>${i18n.t('메모리')}</span><b><select id="dsMem">${memOpts.map((g) => `<option value="${g}" ${g === res.memGB ? "selected" : ""}>${g} GB</option>`).join("")}</select> / ${st.hostGB || "?"} GB</b></div>
       <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('알아둘 것')}</div>
-      <div class="ds-warn">${i18n.t('앱스토어 앱은 대부분 실행되지 않습니다. Docker·Android 에뮬레이터는 이 맥(호스트)에서 돌고 데스크톱에서 네트워크로 씁니다. iOS 시뮬레이터는 기존 시뮬레이터 탭을 그대로 쓰세요.')}</div>
+      <div class="ds-warn">${i18n.t('앱스토어 앱은 대부분 실행되지 않습니다. Docker·Android 에뮬레이터는 이 맥(호스트)에서 돌고 에이전트 PC 에서 네트워크로 씁니다. iOS 시뮬레이터는 기존 시뮬레이터 탭을 그대로 쓰세요.')}</div>
       <div class="ds-warn">${i18n.t('메모리')} ${st.minHostGB || 32} GB ${i18n.t('이상인 Mac 에서만 켤 수 있어요')} (${i18n.t('이 Mac')}: ${st.hostGB || "?"} GB)</div></div>
     ${st.phase !== "unsupported" && st.phase !== "no-tool" && st.phase !== "no-image" && st.phase !== "pulling"
-      ? `<div class="ds-grp ds-danger"><span>${i18n.t('데스크톱 삭제')} (${fmtGB(st.diskSize && st.diskSize.allocated)} ${i18n.t('반환')})</span><button class="fp-newfolder" id="dsDelete">${i18n.t('삭제')}</button></div>` : ""}
+      ? `<div class="ds-grp ds-danger"><span>${i18n.t('에이전트 PC 삭제')} (${fmtGB(st.diskSize && st.diskSize.allocated)} ${i18n.t('반환')})</span><button class="fp-newfolder" id="dsDelete">${i18n.t('삭제')}</button></div>` : ""}
     <div class="ds-err" id="dsErr"></div>`;
 
   const errEl = body.querySelector("#dsErr");
@@ -120,7 +120,7 @@ async function paint(quiet) {
   body.querySelector("#dsStop")?.addEventListener("click", guard(() => api.desktopStop()));
   body.querySelector("#dsRestart")?.addEventListener("click", guard(async () => { await api.desktopStop(); await api.desktopStart(); }));
   body.querySelector("#dsDelete")?.addEventListener("click", guard(async () => {
-    if (!window.confirm(i18n.t('데스크톱을 삭제할까요? 그 안에 설치한 것과 바꾼 설정이 사라집니다. 공유 폴더의 코드는 영향받지 않습니다.'))) throw new Error("");
+    if (!window.confirm(i18n.t('에이전트 PC 를 삭제할까요? 그 안에 설치한 것과 바꾼 설정이 사라집니다. 공유 폴더의 코드는 영향받지 않습니다.'))) throw new Error("");
     await api.desktopDelete();
   }));
   //  연결 체크 — 저장 즉시 반영은 "재시작" 이 필요하다. 켜져 있으면 물어보고 재시작.
@@ -129,7 +129,7 @@ async function paint(quiet) {
       const next = [...body.querySelectorAll(".ds-chk input")].filter((x) => x.checked).map((x) => x.dataset.path);
       try {
         await api.desktopSettingsSet({ sharedDirs: next });
-        if (st.phase === "running" && window.confirm(i18n.t('연결을 반영하려면 데스크톱을 다시 시작해야 해요. 지금 다시 시작할까요?'))) {
+        if (st.phase === "running" && window.confirm(i18n.t('연결을 반영하려면 에이전트 PC 를 다시 시작해야 해요. 지금 다시 시작할까요?'))) {
           await api.desktopStop(); await api.desktopStart();
         }
         body.dataset.sig = ""; await paint();
@@ -150,7 +150,7 @@ export async function desktopLine() {
     const st = await api.desktopStatus();
     if (!st || st.phase === "unsupported" || st.phase === "no-tool") return null;
     const t = { 'no-image': i18n.t('준비 안 됨'), pulling: i18n.t('내려받는 중'), stopped: i18n.t('정지'), starting: i18n.t('켜는 중…'), running: i18n.t('실행 중') }[st.phase] || st.phase;
-    return { phase: st.phase, text: `${i18n.t('에이전트 데스크톱')} · ${t}${st.phase === "running" && st.memorySize ? ` · ${fmtGB(st.memorySize)}` : ""}`, running: st.phase === "running" };
+    return { phase: st.phase, text: `${i18n.t('에이전트 PC')} · ${t}${st.phase === "running" && st.memorySize ? ` · ${fmtGB(st.memorySize)}` : ""}`, running: st.phase === "running" };
   } catch (_) { return null; }
 }
 

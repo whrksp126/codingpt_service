@@ -315,7 +315,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
                                         그 결과가 JSON 으로 돌아온다(파일 생략 = 변경된 파일 전부).
                                         결과: {status:"submitted"|"cancelled"|"timeout", files:[...]}
 
-  # 에이전트 데스크톱 (이 맥 안의 별도 macOS — 사용자 화면을 건드리지 않고 GUI 를 조작한다)
+  # 에이전트 PC (이 맥 안의 별도 macOS — 사용자 화면을 건드리지 않고 GUI 를 조작한다)
   #  네이티브 앱·창을 다뤄야 하면 사용자 화면이 아니라 **여기서** 한다. 좌표는 0~1 비율.
   desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
   desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
@@ -684,7 +684,7 @@ async function main() {
         }
         break;
       }
-      // 에이전트 데스크톱 — 이 맥 안의 별도 macOS(게스트 VM). 사용자 화면을 건드리지 않고 전면 GUI 조작을 한다.
+      // 에이전트 PC — 이 맥 안의 별도 macOS(게스트 VM). 사용자 화면을 건드리지 않고 전면 GUI 조작을 한다.
       //  화면·입력은 모바일 화면(emulator.*)과 같은 계약이고 기기 id 가 `desktop:main` 으로 고정된 것뿐이다.
       case 'desktop': {
         const D = 'desktop:main';
@@ -704,7 +704,7 @@ async function main() {
           //  꺼져 있으면 먼저 켠다 — 빈 액자를 띄우고 "켜세요" 라고 하는 것보다 낫다(수십 초 걸리면 그만큼 기다린다).
           const st = await request('desktop.status', {}, { timeoutMs: 20000 });
           if (st.phase === 'stopped' || st.phase === 'starting') await request('desktop.start', {}, { timeoutMs: 150000 });
-          else if (st.phase !== 'running') throw new Error(st.reason || `데스크톱을 쓸 수 없어요 (${st.phase})`);
+          else if (st.phase !== 'running') throw new Error(st.reason || `에이전트 PC 를 쓸 수 없어요 (${st.phase})`);
           return out(await request('ui.emulatorOpen', { device: D, timeoutMs: 8000 }), flags, '띄웠어요');
         }
         if (c2 === 'hide') return out(await request('ui.emulatorClose', {}), flags, 'ok');

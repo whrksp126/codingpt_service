@@ -733,9 +733,9 @@ function openAddMenu(anchor) {
   });
   // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
   row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
-  // 에이전트 데스크톱 — 같은 pane(모바일 화면)에 기기를 `desktop:main` 으로 미리 골라 연다.
+  // 에이전트 PC — 같은 pane(모바일 화면)에 기기를 `desktop:main` 으로 미리 골라 연다.
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
-  row(icons.monitor, i18n.t('데스크톱'), { onClick: () => smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 데스크톱') }) });
+  row(icons.monitor, i18n.t('에이전트 PC'), { onClick: () => smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') }) });
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -858,7 +858,10 @@ export function smartAdd(kind, extra) {
     ? { url: extra?.url || "" }
     : kind === "terminal"
       ? { fresh: true, ...(extra?.launchAgent ? { launchAgent: extra.launchAgent } : {}) }
-      : extra?.openPath ? { openPath: extra.openPath } : undefined;
+      : kind === "emulator"
+        //  미리 고른 기기(에이전트 PC 등) — 분할 경로에서 떨어뜨리면 기기 목록으로 열린다(2026-09-17 실사고).
+        ? (extra?.deviceId ? { deviceId: extra.deviceId, metaName: extra.metaName || "" } : undefined)
+        : extra?.openPath ? { openPath: extra.openPath } : undefined;
   S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
   return wsRuntime(state.activeWsId)?.focusId || null;
 }

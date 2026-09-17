@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * desktop — **에이전트 데스크톱**: 이 맥 안에서 에이전트가 쓰는 별도의 macOS(게스트 VM).
+ * desktop — **에이전트 PC**: 이 맥 안에서 에이전트가 쓰는 별도의 macOS(게스트 VM).
  *
  *  사용자는 자기 화면·마우스·키보드를 그대로 쓰고, 에이전트는 이 게스트에서 전면 컴퓨터 유즈를 한다.
  *  사용자는 PC·폰의 "모바일 화면" pane 과 같은 파이프로 이 화면을 보고 손댄다(기기 id `desktop:main`).
@@ -117,7 +117,7 @@ async function status() {
   const info = await vmInfo();
   if (!info) {
     if (pullState && pullState.running) return { ...base, phase: 'pulling', pull: pullState, image: IMAGE };
-    return { ...base, phase: 'no-image', reason: (pullState && pullState.error) || `데스크톱 이미지가 없어요 (${IMAGE}, 약 21GB)`, image: IMAGE };
+    return { ...base, phase: 'no-image', reason: (pullState && pullState.error) || `에이전트 PC 이미지가 없어요 (${IMAGE}, 약 21GB)`, image: IMAGE };
   }
   const running = /running/i.test(String(info.status || ''));
   return {
@@ -161,7 +161,7 @@ function pull() {
   return pullState;
 }
 
-/** 데스크톱 삭제 — 게스트 디스크·설정을 지운다(캐시 이미지는 남긴다). 켜져 있으면 먼저 끈다. */
+/** 에이전트 PC 삭제 — 게스트 디스크·설정을 지운다(캐시 이미지는 남긴다). 켜져 있으면 먼저 끈다. */
 async function remove() {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
   await stop();
@@ -206,7 +206,7 @@ async function waitRunning() {
   for (;;) {
     const info = await vmInfo(true);
     if (info && /running/i.test(String(info.status || '')) && info.vncUrl) return info;
-    if (Date.now() - t0 > BOOT_TIMEOUT_MS) throw new Error('데스크톱이 시간 안에 켜지지 않았어요');
+    if (Date.now() - t0 > BOOT_TIMEOUT_MS) throw new Error('에이전트 PC 가 시간 안에 켜지지 않았어요');
     await sleep(700);
   }
 }
@@ -233,7 +233,7 @@ async function connectRfb() {
       await c.requestUpdate(false, 4000);
       return c;
     } catch (e) {
-      if (Date.now() - t0 > 30000) throw new Error(`데스크톱 화면(VNC)에 붙을 수 없어요: ${e.message}`);
+      if (Date.now() - t0 > 30000) throw new Error(`에이전트 PC 화면(VNC)에 붙을 수 없어요: ${e.message}`);
       await sleep(600);
     }
   }
@@ -310,7 +310,7 @@ function px(n, max) { const v = Number(n); return Math.max(0, Math.min(max - 1, 
 async function input(a = {}) {
   const c = await connectRfb();
   const type = String(a.type || '');
-  if (a.from === 'agent' && agentPaused) throw new Error('사용자가 데스크톱을 조작하는 동안에는 에이전트 입력이 멈춰 있어요 (cpt desktop resume)');
+  if (a.from === 'agent' && agentPaused) throw new Error('사용자가 에이전트 PC 를 조작하는 동안에는 에이전트 입력이 멈춰 있어요 (cpt desktop resume)');
   const X = px(a.x, c.width), Y = px(a.y, c.height);
   if (type === 'touch') {
     const ph = String(a.phase || '');
@@ -413,9 +413,9 @@ async function deviceRow() {
   if (st.phase === 'unsupported' || st.phase === 'no-tool') return null;
   const running = st.phase === 'running';
   return {
-    id: DEVICE_ID, kind: 'desktop', name: '에이전트 데스크톱', state: running ? 'booted' : 'shutdown', physical: false,
+    id: DEVICE_ID, kind: 'desktop', name: '에이전트 PC', state: running ? 'booted' : 'shutdown', physical: false,
     desktop: { phase: st.phase, reason: st.reason || '', paused: st.paused, handoff: pendingHandoff() },
-    caps: { frame: running, input: running, keys: [], inputHint: running ? '' : (st.reason || '데스크톱이 꺼져 있어요') },
+    caps: { frame: running, input: running, keys: [], inputHint: running ? '' : (st.reason || '에이전트 PC 가 꺼져 있어요') },
   };
 }
 

@@ -483,7 +483,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 /* 탭 라벨 최대폭 = 화면 폭 비례(좁은 창=짧게, 넓은 창=길게) — 넘치면 탭바 가로 스크롤(휠 지원). */
 .ptab-title { max-width: clamp(72px, 16vw, 200px); overflow: hidden; text-overflow: ellipsis; }
 .ptab.drag-src { opacity: 0.35; } /* 드래그 중 원본 탭 — 이 자리는 비워질 것임을 표현 */
-.ptab-x { display: inline-flex; color: var(--dim); border-radius: 3px; padding: 1px; margin-left: 1px; }
+.ptab-x { display: inline-flex; color: var(--dim); border-radius: 3px; padding: 1px; margin-left: 1px; cursor: pointer; }   /* 탭은 잡기(grab)지만 닫기는 누르기다 */
 .ptab-x:hover { color: var(--error); background: rgba(248, 113, 113, 0.12); }
 .pane-ctrls { display: flex; align-items: center; gap: 1px; flex: none; padding: 0 5px; }
 .pane-ctrl { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--dim); cursor: pointer; border-radius: var(--r-sm); }

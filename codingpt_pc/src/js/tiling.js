@@ -25,7 +25,7 @@ export function leaf(kind, opts = {}) {
   if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null };
   if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null };
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — deviceId 만 기억한다.
-  if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null };
+  if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null, metaName: opts.metaName || "" };
   // empty: 터미널 0개 상태의 자리 pane — 자동 생성 금지(닫힘=전 기기 공통 의사), 사용자가 + 로 추가.
   if (opts.empty) return { id: newPaneId(), kind: "terminal", tabs: [], active: 0 };
   return {
