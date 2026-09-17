@@ -47,12 +47,30 @@ function _resetTools() { toolCache = null; }
 
 function settingsFile() { return path.join(runtime.stateDir(), 'desktop.json'); }
 function loadSettings() {
-  try { return { sharedDirs: [], ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; }
+  try { const s = { sharedDirs: [], ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; return { ...s, sharedDirs: normalizeDirs(s.sharedDirs) }; }
   catch (_) { return { sharedDirs: [] }; }
 }
+/**
+ * 공유 폴더 항목 → 절대 경로. PC 앱은 워크스페이스 id(홈-상대 `other/project/x`)를, cpt 는 절대 경로를 보낸다 —
+ *  둘 다 받아 한 모양으로 맞춘다(안 맞추면 lume 이 상대 경로를 자기 cwd 기준으로 읽고, 해제가 같은 폴더를 못 찾는다).
+ */
+function absDir(d) {
+  const str = String(d || '').trim();
+  if (!str) return '';
+  return path.isAbsolute(str) ? path.normalize(str) : path.join(os.homedir(), str);
+}
+function normalizeDirs(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map(absDir).filter(Boolean))];
+}
+/** 절대 경로 → 워크스페이스 id(홈-상대). 홈 밖이면 절대 경로 그대로 — PC 앱 체크박스가 이 값으로 자기 워크스페이스를 찾는다. */
+function dirId(d) {
+  const rel = path.relative(os.homedir(), absDir(d)).split(path.sep).join('/');
+  return rel && !rel.startsWith('..') ? rel : absDir(d);
+}
+function withIds(s) { return { ...s, sharedIds: (s.sharedDirs || []).map(dirId) }; }
 function saveSettings(s) {
   fs.mkdirSync(runtime.stateDir(), { recursive: true });
-  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2));
+  fs.writeFileSync(settingsFile(), JSON.stringify({ ...s, sharedDirs: normalizeDirs(s.sharedDirs) }, null, 2));
 }
 
 function run(bin, args, o = {}) {
@@ -183,7 +201,7 @@ async function start(o = {}) {
       //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
       vncPassword = crypto.randomBytes(8).toString('hex').slice(0, 12);
       const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
-      for (const d of (o.sharedDirs || s.sharedDirs || [])) args.push('--shared-dir', `${d}:rw`);
+      for (const d of normalizeDirs(o.sharedDirs || s.sharedDirs)) args.push('--shared-dir', `${d}:rw`);
       //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
       //   남은 VM 이 부모 셸 정리에 휩쓸려 5분 만에 소리 없이 죽었다. 데몬이 재시작해도 VM 은 tmux 처럼 살아 있어야 한다.
       fs.mkdirSync(runtime.stateDir(), { recursive: true });
@@ -391,8 +409,8 @@ function guestUrl(u) { return u.replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(
 /** 호스트 경로 → 게스트 공유 폴더 경로. 연결된 sharedDirs 중 하나 아래여야 한다. */
 function guestPath(p) {
   const abs = path.resolve(String(p || ''));
-  for (const d of loadSettings().sharedDirs) {
-    const root = path.resolve(d);
+  for (const d of normalizeDirs(loadSettings().sharedDirs)) {
+    const root = d;
     if (abs === root || abs.startsWith(root + path.sep)) return path.posix.join('/Volumes/My Shared Files', path.basename(root), path.relative(root, abs).split(path.sep).join('/'));
   }
   return null;
@@ -444,8 +462,8 @@ async function handle(method, p = {}) {
   if (m === 'desktop.handoff') return requestHandoff(p.reason, { timeoutMs: p.timeoutMs });
   if (m === 'desktop.resume') return resume();
   if (m === 'desktop.pause') return pause();
-  if (m === 'desktop.settings.get') return loadSettings();
-  if (m === 'desktop.settings.set') { const s = { ...loadSettings(), ...p }; saveSettings(s); return s; }
+  if (m === 'desktop.settings.get') return withIds(loadSettings());
+  if (m === 'desktop.settings.set') { const s = { ...loadSettings(), ...p }; saveSettings(s); return withIds(loadSettings()); }
   throw new Error(`알 수 없는 메서드: ${m}`);
 }
 
@@ -453,5 +471,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, loadSettings, saveSettings, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

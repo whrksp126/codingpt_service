@@ -146,3 +146,15 @@ test('꺼진 에이전트 PC 의 frame/input 은 바로 실패한다', async () 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 공유 폴더는 PC 앱(워크스페이스 id, 홈-상대)과 cpt(절대 경로)가 다른 모양으로 보낸다 — 저장은 절대 경로 한 모양,
+//  돌려줄 땐 id 도 같이(sharedIds). 안 맞추면 체크박스가 안 켜지고 disconnect 가 같은 폴더를 못 찾는다(2026-09-17).
+test('공유 폴더 경로는 절대 경로로 맞추고 id 도 돌려준다', () => {
+  const os = require('os'), path = require('path');
+  const home = os.homedir();
+  assert.strictEqual(desktop.absDir('other/project/x'), path.join(home, 'other/project/x'));
+  assert.strictEqual(desktop.absDir(path.join(home, 'other/project/x')), path.join(home, 'other/project/x'));
+  assert.deepStrictEqual(desktop.normalizeDirs(['other/project/x', path.join(home, 'other/project/x'), '']), [path.join(home, 'other/project/x')]);
+  assert.strictEqual(desktop.dirId(path.join(home, 'other/project/x')), 'other/project/x');
+  assert.strictEqual(desktop.dirId('/opt/elsewhere'), '/opt/elsewhere');
+});

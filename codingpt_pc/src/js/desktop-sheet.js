@@ -66,7 +66,8 @@ async function paint(quiet) {
   }[st.phase] || st.phase;
   const res = { memGB: cfg.memGB || st.memGB, cpu: cfg.cpu || st.cpu };
   const wss = localWorkspaces();
-  const shared = new Set((cfg.sharedDirs || []).map(String));
+  //  데몬은 절대 경로(sharedDirs)와 워크스페이스 id(sharedIds, 홈-상대)를 함께 준다 — 체크는 id 로 맞춘다.
+  const shared = new Set([...(cfg.sharedIds || []), ...(cfg.sharedDirs || [])].map(String));
 
   let statusRows = `<div class="ds-kv"><span>${i18n.t('상태')}</span><b><span class="emu-deskdot${st.phase === "running" ? " on" : ""}"></span> ${phaseText}${st.phase === "running" ? ` · ${fmtGB(st.memorySize)} · ${st.cpuCount || res.cpu}${i18n.t('코어')}${st.screen ? ` · ${st.screen.width}×${st.screen.height}` : ""}` : ""}</b></div>`;
   if (st.phase === "unsupported" || st.phase === "no-tool") {

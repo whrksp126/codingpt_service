@@ -754,7 +754,9 @@ async function main() {
         if (c2 === 'connect' || c2 === 'disconnect') {
           const cur = await request('desktop.settings.get', {});
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
-          const set = new Set(cur.sharedDirs || []);
+          //  데몬이 절대 경로로 맞춰 주지만 옛 설정엔 홈-상대(워크스페이스 id)가 남아 있을 수 있다 — 같은 폴더로 본다.
+          const abs = (d) => (path.isAbsolute(d) ? path.normalize(d) : path.join(os.homedir(), d));
+          const set = new Set((cur.sharedDirs || []).map(abs));
           if (c2 === 'connect') set.add(dir); else set.delete(dir);
           const r = await request('desktop.settings.set', { sharedDirs: [...set] });
           return out(r, flags, `${c2 === 'connect' ? '연결' : '해제'}: ${dir}\n(다음 시작 때 반영됩니다 — 켜져 있으면 cpt desktop stop && cpt desktop start)`);
