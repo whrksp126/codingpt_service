@@ -377,13 +377,17 @@ export class EmulatorView {
     this.running = true;
     (async () => {
       while (!this.disposed && this.deviceId && this.visible && !this.videoOn) {
-        if (Date.now() - this.lastTouch > IDLE_AFTER_MS) {
+        const dv = this.device();
+        const isDesk = !!(dv && dv.kind === "desktop");
+        //  ★ 에이전트 PC 는 쉬지 않는다 — 사용자는 손을 안 대고 **에이전트가 하는 걸 지켜본다**(그게 이 pane 의 용도).
+        //   60초 유휴 정지는 폰 화면(사용자가 만지는 물건) 규칙이다. 안 보이면 setVisible 이 이미 루프를 세운다.
+        //   (2026-09-19 실사고: 켜고 로그인까지 60초 넘게 걸려 첫 프레임 전에 잠들어 영영 빈 화면)
+        if (!isDesk && Date.now() - this.lastTouch > IDLE_AFTER_MS) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
         //  꺼진 에이전트 PC 에는 프레임을 묻지 않는다 — 켜지면 pollDesk 가 기기 목록을 새로 읽어 state 가 바뀐다.
-        const dv = this.device();
-        if (dv && dv.kind === "desktop" && dv.state !== "booted") {
+        if (isDesk && dv.state !== "booted") {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -395,11 +399,7 @@ export class EmulatorView {
           if (f.width && f.height) {
             const wasLandscape = this.frameIsLandscape();
             this.frameAspect = f.width / f.height;
-            //  데스크톱 상태 바의 해상도 표기 — 바뀌었을 때만 다시 그린다(로그인 뒤 1280×720 → 1440×900 실측).
-            if (!this.lastFrameSize || this.lastFrameSize.w !== f.width || this.lastFrameSize.h !== f.height) {
-              this.lastFrameSize = { w: f.width, h: f.height };
-              if (this.deskBarEl) void this.pollDesk(true);
-            }
+            this.lastFrameSize = { w: f.width, h: f.height };
             if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();   // 영상과 같은 규율
           }
           this.err = null;
@@ -608,17 +608,10 @@ export class EmulatorView {
     const st = this.deskStatus || (dev && dev.desktop) || {};
     const handoff = st.handoff || null;
     const paused = !!st.paused;
-    const size = this.lastFrameSize;
-    //  왼쪽: 켜져 있을 때만 해상도·에이전트 상태(사용자 결정 2026-09-17: 상태 점·"꺼짐" 글자는 뺀다 — 화면이 곧 상태다).
     const left = document.createElement("div");
     left.className = "emu-deskbar-l";
-    const parts = [];
-    if (booted && size) parts.push(`<span class="mono">${size.w}×${size.h}</span>`);
-    if (booted) {
-      parts.push(handoff ? `<b>${i18n.t('개입 대기')}</b>: ${escapeHtml(handoff.reason || "")}`
-        : paused ? i18n.t('에이전트 멈춤') : i18n.t('에이전트 조작 가능'));
-    } else if (st.phase === "starting") parts.push(i18n.t('켜는 중…'));
-    left.innerHTML = parts.join(`<span class="emu-deskbar-sep">·</span>`);
+    //  글자는 **에이전트가 남긴 개입 사유**뿐(다국어 UI — 상태 문구는 버튼 모양이 말한다, 사용자 결정 2026-09-19).
+    left.innerHTML = booted && handoff ? `${icons.handoffIn({ size: 14 })}<span>${escapeHtml(handoff.reason || "")}</span>` : "";
     bar.appendChild(left);
     const right = document.createElement("div");
     right.className = "emu-deskbar-r";
@@ -632,16 +625,18 @@ export class EmulatorView {
       return b;
     };
     if (booted) {
-      btn(paused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤'), i18n.t('사용자가 조작하는 동안 에이전트 입력을 막습니다'), async () => {
+      //  멈춤↔재개 = 일시정지/재생 아이콘 하나(멈춰 있으면 눌린 모양 + 재생 아이콘).
+      btn("", paused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤'), async () => {
         try { await api.desktopPause(!paused); this.deskPaused = !paused; await this.pollDesk(true); }
         catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
-      }, paused ? "on" : "");
-      btn(i18n.t('첨부'), i18n.t('이 화면을 캡처해 에이전트에게 첨부'), (ev) => void this.capture(ev.currentTarget));
+      }, "icon" + (paused ? " on" : ""), (paused ? icons.play : icons.pause)({ size: 14 }));
+      btn("", i18n.t('이 화면을 캡처해 에이전트에게 첨부'), (ev) => void this.capture(ev.currentTarget), "icon", icons.camera({ size: 14 }));
       if (handoff) {
-        btn(i18n.t('계속'), i18n.t('개입을 끝내고 에이전트를 재개합니다'), async () => {
+        //  개입 끝 = 에이전트에게 돌려준다(handoffOut). 주 동작이라 채운 모양.
+        btn("", i18n.t('개입을 끝내고 에이전트를 재개합니다'), async () => {
           try { await api.desktopPause(false); await this.pollDesk(true); }
           catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
-        }, "primary");
+        }, "icon primary", icons.handoffOut({ size: 14 }));
       }
     }
     //  전원 = 아이콘 하나(켜짐이면 눌린 모양). 켜는 중엔 잠근다 — 두 번 누르면 start 가 겹친다.

@@ -155,8 +155,10 @@ ok(/t\.kind === "emulator" \? \(String\(t\.deviceId[^)]*\)\.startsWith\("desktop
   '탭 아이콘 — 모바일 화면은 폰, 에이전트 PC(desktop:) 는 모니터');
 
 const emu = read(path.join(PC, 'emulator-view.js'));
-ok(/dv\.kind === "desktop" && dv\.state !== "booted"/.test(emu),
+ok(/isDesk && dv\.state !== "booted"/.test(emu),
   '★ 꺼진 에이전트 PC 에는 프레임을 묻지 않는다(30초 VNC 되풀이가 메인 스레드를 잡던 무지개 커서)');
+ok(/!isDesk && Date\.now\(\) - this\.lastTouch > IDLE_AFTER_MS/.test(emu),
+  '★ 에이전트 PC 는 유휴 정지가 없다(지켜보는 pane — 켜고 60초 지나면 첫 프레임 전에 잠들던 빈 화면)');
 ok(/pub async fn emulator_local[\s\S]*?spawn_blocking/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'cptsock.rs'))),
   '★ emulator_local 은 비동기 — 동기 커맨드는 메인 스레드에서 소켓 응답을 기다린다(프레임·부팅 동안 앱 전체가 멈춤)');
 ok(/setVisible\(on\)/.test(emu) && /!this\.visible/.test(emu),
