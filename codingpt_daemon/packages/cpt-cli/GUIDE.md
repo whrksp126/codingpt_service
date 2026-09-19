@@ -281,7 +281,9 @@ cpt emulator hide                       # 띄운 탭 닫기
 cpt desktop status                      # 준비/정지/실행, 연결된 폴더, 개입 대기 여부
 cpt desktop show                        # 사용자에게 데스크톱 탭을 띄운다(꺼져 있으면 먼저 켠다 — 수십 초, 맨 처음은 1~2분: 자동 로그인 설정+재시작)
 cpt desktop open Safari                 # 앱 실행. URL 이면 게스트 브라우저로(호스트 localhost 는 자동 변환)
-cpt desktop screenshot                  # 화면을 파일로(경로를 돌려준다) — 좌표는 0~1 비율로 읽어라
+cpt desktop ax [앱]                     # ★ 화면 읽기 = 접근성 트리(요소 role·글·0~1 좌표). 스크린샷보다 먼저 이걸
+cpt desktop tap "Save" [--app Safari]   # 글자로 요소를 찾아 클릭(버튼·링크·메뉴·입력칸). 좌표 추정 금지
+cpt desktop screenshot                  # 화면을 파일로(경로를 돌려준다) — 트리에 없는 것(그림·캔버스)만 이걸로
 cpt desktop click 0.42 0.31             # 클릭 · double-click · right-click · move · drag x y x2 y2 · scroll x y [dy]
 cpt desktop key cmd+space               # 키 조합 · key enter · key cmd+shift+4
 cpt desktop type "hello"                # 글자(ASCII 는 키로, 한글 등은 클립보드+⌘V)
@@ -291,6 +293,9 @@ cpt desktop path ./src/app.tsx          # 이 워크스페이스 파일의 게�
 cpt desktop handoff "GitHub 로그인이 필요합니다"     # ★ 사용자가 대신 해야 할 때(로그인·2FA·결제)
 ```
 
+- **화면은 `ax` 로 읽고 `tap` 으로 누른다.** 스크린샷에서 좌표를 눈대중하면 빗나간다. `ax` 가 준 x,y,w,h 는 0~1 비율이라
+  `click x y` 에 그대로 쓸 수 있다(가운데 = x+w/2, y+h/2). 트리가 비어 있으면 앱이 접근성을 안 내는 것(캔버스·게임) —
+  그때만 스크린샷. 접근성 권한은 첫 켜기 때 자동으로 켜진다; 실패했다는 오류가 오면 안내대로 `handoff` 로 사용자에게.
 - **`handoff` 는 기다린다.** 사용자에게 카드가 가고, 사용자가 데스크톱에서 처리한 뒤 [계속]을 누르면
   명령이 끝난다. 비밀번호를 네가 묻거나 치려 하지 마라 — 사용자가 그 화면에서 직접 친다.
 - 사용자가 데스크톱을 만지는 동안 네 입력은 **멈춤** 상태로 거절된다(오류 메시지에 `resume` 안내). 기다렸다

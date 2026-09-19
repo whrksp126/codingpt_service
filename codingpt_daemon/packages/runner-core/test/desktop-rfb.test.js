@@ -200,3 +200,24 @@ test('desktop.connect/disconnect 는 설정을 절대 경로로 바꾸고 게스
     desktop._resetTools(); fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// 접근성 트리(2026-09-19) — JXA 는 runner-core 에 파일로 동봉되고 해시 이름으로 게스트에 한 번 들어간다. axFind 는
+//  정확 일치 > 포함, 조작 가능한 role 우선, 같은 점수면 작은 요소(글자 하나를 감싼 큰 Group 보다 버튼 자체).
+test('AX 트리 스크립트 동봉 + axFind 우선순위', () => {
+  const fs = require('fs'), path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'desktop-ax.jxa.js'), 'utf8');
+  assert.ok(/bindFunction\('AXUIElementCopyAttributeValue', \['int', \['void\*', 'id', 'void\*\*'\]\]\)/.test(src), 'void*/void** 바인딩(기본 바인딩은 -25201·Ref 타입 충돌)');
+  assert.ok(/CFCopyDescription/.test(src), '좌표는 AXValue 설명 문자열에서');
+  const tree = { app: 'X', nodes: [
+    { i: 0, role: 'Group', title: 'Save', x: 0, y: 0, w: 1, h: 1 },
+    { i: 1, role: 'Button', title: 'Save', x: 0.1, y: 0.1, w: 0.1, h: 0.05 },
+    { i: 2, role: 'Button', title: 'Save As…', x: 0.3, y: 0.1, w: 0.1, h: 0.05 },
+    { i: 3, role: 'Button', title: 'Save', x: 0.5, y: 0.1, w: 0.1, h: 0.05, disabled: true },
+    { i: 4, role: 'StaticText', value: 'Autosave on', x: 0.7, y: 0.1, w: 0.1, h: 0.05 },
+  ] };
+  assert.strictEqual(desktop.axFind(tree, 'save').i, 1, '정확 일치 + 조작 가능 + 작은 요소');
+  assert.strictEqual(desktop.axFind(tree, 'save as').i, 2, '포함 일치');
+  assert.strictEqual(desktop.axFind(tree, 'autosave').i, 4, 'value 도 본다');
+  assert.strictEqual(desktop.axFind(tree, 'save', { role: 'Group' }).i, 0, 'role 지정');
+  assert.strictEqual(desktop.axFind(tree, 'nothing'), null);
+});

@@ -246,6 +246,10 @@ async function start(o = {}) {
       await launch(o);
       await waitRunning();
       await waitLoggedIn();
+      //  접근성 권한도 이때 미리 켠다(에이전트의 첫 `cpt desktop ax` 가 30초 기다리지 않게). 안 되면 그때 다시 시도.
+      _step = 'ax';
+      await sleep(4000);   // 로그인 직후 Dock/Finder 가 뜨는 동안
+      try { await ensureAx(); } catch (_) { /* 첫 ax 호출 때 다시 */ }
     }
     await connectRfb({ waitMs: 30000 });
   })();
@@ -255,6 +259,7 @@ async function start(o = {}) {
 
 /** VM 프로세스를 띄운다(설정의 자원·공유 폴더). 켜졌는지는 waitRunning 이 본다. */
 async function launch(o = {}) {
+  _axOk = false;   // 권한은 VM 안에 남지만 확인은 다시 한다(재시작 뒤 첫 ax 호출 1회)
   const s = loadSettings();
   const res = defaultResources();
   try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
@@ -499,6 +504,91 @@ async function typeText(text, c) {
   return { ok: true, via: 'clipboard' };
 }
 
+// ── 접근성 트리(AX) ───────────────────────────────────────────────────────────
+/**
+ * 에이전트가 화면을 **읽는** 길 — 스크린샷 좌표 추정 대신 요소(role·title·value·frame 0~1)를 JSON 으로.
+ *  게스트에서 JXA(desktop-ax.jxa.js)를 osascript 로 돌린다. 스크립트는 해시 이름으로 게스트 홈에 한 번 넣는다(ssh 1왕복).
+ *  ssh 로 띄운 프로세스는 TCC 에 `sshd-keygen-wrapper` 로 잡힌다 — 접근성 권한이 없으면 ensureAx() 가 스스로 켠다.
+ */
+const AX_SRC = fs.readFileSync(path.join(__dirname, 'desktop-ax.jxa.js'), 'utf8');
+const AX_HASH = crypto.createHash('sha1').update(AX_SRC).digest('hex').slice(0, 10);
+const AX_PATH = `~/.cpt/ax-${AX_HASH}.js`;
+async function axTrusted() {
+  const out = await exec(`osascript -l JavaScript -e 'ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()' 2>&1`, { timeoutMs: 15000 });
+  return /^true/m.test(out);
+}
+async function axTree(target) {
+  await ensureAx();
+  const arg = target ? shq(String(target)) : '';
+  const cmd = `[ -f ${AX_PATH} ] || { mkdir -p ~/.cpt && printf %s '${Buffer.from(AX_SRC, 'utf8').toString('base64')}' | base64 -d > ${AX_PATH}; }; osascript -l JavaScript ${AX_PATH} ${arg} 2>&1`;
+  const out = await exec(cmd, { timeoutMs: 60000 });
+  const i = out.indexOf('{');
+  if (i < 0) throw new Error(`접근성 트리를 읽지 못했어요: ${out.trim().slice(0, 200)}`);
+  const j = JSON.parse(out.slice(i));
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+/** 글자로 요소 찾기 — title/desc/value/placeholder/id 를 정확 → 포함 순으로, 조작 가능한 role 을 먼저. */
+const AX_CLICKABLE = /^(Button|CheckBox|RadioButton|MenuItem|MenuBarItem|PopUpButton|Link|TextField|TextArea|Tab|Cell|Row|ComboBox|Slider|Incrementor|DisclosureTriangle|Image|StaticText)$/;
+function axFind(tree, text, o = {}) {
+  const q = String(text || '').trim().toLowerCase();
+  if (!q) return null;
+  const nodes = tree.nodes.filter((n) => n.w > 0 && n.h > 0 && !n.disabled && (!o.role || n.role === o.role));
+  const label = (n) => [n.title, n.desc, n.value, n.ph, n.id, n.help].filter((v) => v != null).map((v) => String(v).toLowerCase());
+  const score = (n) => { const ls = label(n); if (ls.some((l) => l === q)) return 2; if (ls.some((l) => l.includes(q))) return 1; return 0; };
+  const hits = nodes.map((n) => ({ n, s: score(n) })).filter((x) => x.s > 0)
+    .sort((a, b) => (b.s - a.s) || (Number(AX_CLICKABLE.test(b.n.role)) - Number(AX_CLICKABLE.test(a.n.role))) || (a.n.w * a.n.h - b.n.w * b.n.h));
+  return hits.length ? hits[0].n : null;
+}
+async function axTap(text, o = {}) {
+  //  ★ 앱을 지정했으면 먼저 앞으로 가져온다 — 클릭은 좌표로 가니 다른 창이 덮고 있으면 그 창이 눌린다(실측: Safari 링크를
+  //   노렸는데 위에 있던 설정 앱의 Siri 가 눌렸다). 앞으로 온 뒤 트리를 읽어야 좌표도 맞다.
+  if (o.app && !/^\d+$/.test(String(o.app))) { await openApp(o.app); await sleep(700); }
+  const tree = await axTree(o.app);
+  const n = axFind(tree, text, o);
+  if (!n) throw new Error(`"${text}" 요소를 못 찾았어요 (${tree.app}, ${tree.nodes.length}개 중)`);
+  const x = n.x + n.w / 2, y = n.y + n.h / 2;
+  await input({ type: 'tap', x, y, button: o.button, from: o.from });
+  return { ok: true, app: tree.app, node: n, x: +x.toFixed(4), y: +y.toFixed(4) };
+}
+
+/**
+ * 접근성 권한을 스스로 켠다(없을 때만). 게스트 이미지가 고정(macos-tahoe-vanilla 26.4, 1440×900)이라 창 위치가 결정적이다:
+ *  ① System Events 자동화 프롬프트 [Allow] ② 접근성 안내 창은 Esc ③ 설정 앱을 접근성 패널로 열어 첫 줄(sshd-keygen-wrapper)
+ *  토글 → 비밀번호 → 확인. 어느 단계든 안 되면 에이전트에게 handoff 로 사용자에게 넘기라고 알린다(사용자는 pane 에서 켠다).
+ *  SIP 가 켜져 있어 TCC.db 를 직접 못 쓴다(실측) — 이 길이 유일하다.
+ */
+let _axOk = false;
+async function ensureAx() {
+  if (_axOk) return true;
+  if (await axTrusted()) { _axOk = true; return true; }
+  const c = await connectRfb();
+  const tap = async (x, y) => { c.pointer(px(x, c.width), px(y, c.height), B_LEFT); await sleep(80); c.pointer(px(x, c.width), px(y, c.height), 0); };
+  //  프롬프트가 떠 있는 동안 osascript 는 **답을 기다리며 멈춘다**(실측 25초 넘게) — 짧게 자르고 시간 초과 = 프롬프트로 본다.
+  const se = async (script, ms = 8000) => { try { return await exec(`osascript -e ${shq(script)} 2>&1; true`, { timeoutMs: ms }); } catch (_) { return 'TIMEOUT'; } };
+  //  ① 자동화(System Events) — 안 돼 있으면 프롬프트가 화면 가운데 뜬다 → [Allow]
+  for (let i = 0; i < 3; i++) {
+    const r = await se('tell application "System Events" to get name of first process');
+    if (!/TIMEOUT|-1743|not allowed|Not authorized/i.test(r)) break;
+    await sleep(800); await tap(0.582, 0.628); await sleep(1500);
+  }
+  //  ② 접근성 — 한 번 실패시켜 목록에 올린다(안내 창이 뜬다 → Esc)
+  await se('tell application "System Events" to tell (first process whose frontmost is true) to get name of every window');
+  await sleep(1200); await c.chord('escape'); await sleep(600);
+  //  ③ 설정 → 접근성 패널 → 첫 줄 토글 → 비밀번호
+  await exec('open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"', { timeoutMs: 15000 });
+  await sleep(3000);
+  await tap(0.9345, 0.314);
+  await sleep(1800);
+  await c.typeAscii(SSH_PASSWORD); await sleep(200); await c.chord('enter');
+  await sleep(2500);
+  const ok = await axTrusted();
+  await exec('pkill -x "System Settings"; true', { timeoutMs: 10000 });   // `quit application` 은 또 다른 자동화 프롬프트를 부른다
+  if (!ok) throw new Error('에이전트 PC 의 접근성 권한을 켤 수 없었어요 — `cpt desktop handoff "접근성 권한을 허용해 주세요"` 로 사용자에게 넘기세요 (설정 › 개인정보 보호 및 보안 › 손쉬운 사용 › sshd-keygen-wrapper)');
+  _axOk = true;
+  return true;
+}
+
 // ── 앱·주소 ───────────────────────────────────────────────────────────────────
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 async function openApp(name) {
@@ -568,6 +658,8 @@ async function handle(method, p = {}) {
   if (m === 'desktop.openApp') return openApp(p.name);
   if (m === 'desktop.openUrl') return openUrl(p.url);
   if (m === 'desktop.path') return { host: p.path, guest: guestPath(p.path) };
+  if (m === 'desktop.ax') return axTree(p.app || p.pid);
+  if (m === 'desktop.tap') return axTap(String(p.text || ''), { app: p.app, role: p.role, button: p.button, from: p.from });
   if (m === 'desktop.connect' || m === 'desktop.disconnect') return connectDir(String(p.dir || ''), m === 'desktop.connect');
   if (m === 'desktop.handoff') return requestHandoff(p.reason, { timeoutMs: p.timeoutMs });
   if (m === 'desktop.resume') return resume();
@@ -581,5 +673,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

@@ -324,6 +324,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   desktop open <앱|URL>                 앱 실행(open -a) 또는 게스트 브라우저로 URL(호스트 localhost 자동 변환)
   desktop run -- <명령>                 게스트 셸에서 실행
   desktop screenshot [--out <파일>] [--width <px>=1280]
+  desktop ax [앱] [--all|--json]         ★ 화면을 읽는다 — 접근성 트리(요소·글·0~1 좌표). 스크린샷 좌표 추정 대신 이걸 먼저
+  desktop tap "<글자>" [--app 앱]        글자로 요소를 찾아 클릭(버튼·링크·메뉴·입력칸 — title/설명/값/placeholder)
   desktop click <x> <y> [--right] · double-click · right-click · move · drag <x> <y> <x2> <y2> · scroll <x> <y> [dy]
   desktop key <조합>                    예: key cmd+space · key enter · key cmd+shift+4
   desktop type <글자>                   ASCII 는 키로, 한글 등은 클립보드+⌘V 로
@@ -752,6 +754,25 @@ async function main() {
         if (c2 === 'scroll') return out(await inp({ type: 'scroll', x: Number(rest[0]), y: Number(rest[1]), dy: Number(rest[2] != null ? rest[2] : 3) }), flags, 'ok');
         if (c2 === 'key') return out(await inp({ type: 'key', key: rest[0] }), flags, 'ok');
         if (c2 === 'type') return out(await inp({ type: 'text', text: rest.join(' ') }), flags, 'ok');
+        if (c2 === 'ax') {
+          //  접근성 트리 — 기본은 사람이 읽는 줄(i role "글" @x,y wxh), --json 은 원본. 조작 가능한 것만이 기본, --all 로 전부.
+          const t = await request('desktop.ax', { app: flags.app || rest[0] || undefined }, { timeoutMs: 120000 });
+          if (flags.json) return printJson(t);
+          const KEEP = /^(Button|CheckBox|RadioButton|MenuItem|MenuBarItem|PopUpButton|Link|TextField|TextArea|SearchField|Tab|Cell|Row|ComboBox|Slider|StaticText|Heading|Image|Window|Sheet|Dialog|Group)$/;
+          const rows = t.nodes.filter((n) => flags.all || (KEEP.test(n.role) && n.w > 0 && (n.title || n.desc || n.value || n.ph || n.role !== 'Group')));
+          const line = (n) => {
+            const label = [n.title, n.desc, n.value, n.ph].filter((v) => v != null && v !== '').map((v) => JSON.stringify(String(v))).join(' ');
+            const geo = n.w > 0 ? ` @${n.x.toFixed(3)},${n.y.toFixed(3)} ${n.w.toFixed(3)}x${n.h.toFixed(3)}` : '';
+            return `${n.i} ${n.role}${n.subrole ? '/' + n.subrole : ''} ${label}${geo}${n.disabled ? ' (disabled)' : ''}${n.focused ? ' (focused)' : ''}`;
+          };
+          process.stdout.write(`# ${t.app} (pid ${t.pid}) — ${rows.length}/${t.nodes.length}개${t.truncated ? ' · 잘림' : ''} · 좌표는 0~1 비율(cpt desktop click x y 에 그대로)\n${rows.map(line).join('\n')}\n`);
+          return;
+        }
+        if (c2 === 'tap') {
+          if (!rest[0]) { process.stderr.write('사용법: cpt desktop tap "<글자>" [--app 이름] [--role Button]\n'); process.exitCode = 2; return; }
+          const r = await request('desktop.tap', { text: rest[0], app: flags.app || undefined, role: flags.role || undefined, from: 'agent' }, { timeoutMs: 120000 });
+          return out(r, flags, `클릭: ${r.node.role} ${JSON.stringify(r.node.title || r.node.desc || r.node.value || '')} @${r.x},${r.y} (${r.app})`);
+        }
         if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
         if (c2 === 'connect' || c2 === 'disconnect') {
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
@@ -760,7 +781,7 @@ async function main() {
           const tail = r.restarted ? ' (에이전트 PC 를 다시 켰어요 — 바로 쓸 수 있어요)' : (r.changed ? '' : ' (이미 그 상태)');
           return out(r, flags, c2 === 'connect' ? `연결: ${r.host} → ${r.guest}${tail}` : `해제: ${r.host}${tail}`);
         }
-        process.stderr.write('사용법: cpt desktop status|start|stop|provision|show|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.stderr.write('사용법: cpt desktop status|start|stop|provision|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
         return;
       }

@@ -670,7 +670,7 @@ export class EmulatorView {
     const st = this.deskStatus || {};
     if (st.phase !== "starting") return i18n.t('에이전트 PC 가 꺼져 있어요');
     if (st.step === "provision") return i18n.t('처음 켜는 거라 설정하는 중이에요 (1~2분)');
-    if (st.step === "reboot") return i18n.t('설정을 적용하려고 다시 켜는 중…');
+    if (st.step === "reboot" || st.step === "ax") return i18n.t('설정을 적용하려고 다시 켜는 중…');
     return i18n.t('켜는 중…');
   }
   async pollDesk(force) {
