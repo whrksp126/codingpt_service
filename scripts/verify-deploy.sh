@@ -7,7 +7,7 @@ set -uo pipefail
 ENV="${1:-prod}"
 case "$ENV" in
   prod) BACK="https://codingpt-back.ghmate.com"; FRONT="https://codingpt.ghmate.com" ;;
-  dev)  BACK="https://dev-codingpt-back.ghmate.com"; FRONT="https://dev-codingpt.ghmate.com" ;;
+  dev)  BACK="https://dev-codingpt-back.ghmate.com"; FRONT="https://dev-codingpt-front.ghmate.com" ;;   # dev 는 짧은 도메인이 없다(nginx server_name 실측)
   *) echo "사용법: verify-deploy.sh [prod|dev]"; exit 1 ;;
 esac
 
