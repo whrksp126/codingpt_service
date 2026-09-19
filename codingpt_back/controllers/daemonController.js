@@ -1137,8 +1137,27 @@ async function emulatorPower(req, res) {
   try {
     const b = req.body || {};
     const method = b.action === 'shutdown' ? 'emulator.shutdown' : 'emulator.boot';
+    //  에이전트 PC(desktop:) 첫 켜기는 설정+재시작이 붙어 2~3분까지 간다(시뮬레이터 70초보다 길다).
+    const isDesktop = String(b.id || '').startsWith('desktop:');
     const result = await daemonRelayService.callRpc(req.user.id, method,
-      { id: String(b.id || '') }, 70000, connOptsOf(req));
+      { id: String(b.id || '') }, isDesktop ? 200000 : 70000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+/**
+ * 에이전트 PC(desktop.*) — 폰이 상태를 보고 멈춤/재개/개입 [계속]/켜기·끄기 를 누른다. 허용 목록만(임의 RPC 통로 금지).
+ *  화면·입력은 emulator.* 를 그대로 탄다(기기 id `desktop:main`).
+ */
+const DESKTOP_RPC_OK = new Map([
+  ['desktop.status', 20000], ['desktop.pause', 20000], ['desktop.resume', 20000],
+  ['desktop.start', 200000], ['desktop.stop', 60000],
+]);
+async function desktopRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!DESKTOP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const result = await daemonRelayService.callRpc(req.user.id, method, {}, DESKTOP_RPC_OK.get(method), connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -1827,6 +1846,7 @@ module.exports = {
   emulatorInput,
   emulatorPower,
   emulatorOpenUrl,
+  desktopRpc,
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

@@ -235,6 +235,25 @@ ok(/active=\{isActive(?: && !hidden)?\}/.test(appPane),
 //  PC 에서는 부드럽고 폰에서는 뚝뚝 끊기는, 설명할 수 없는 차이가 생긴다.
 const pcView = read(path.join(PC, 'emulator-view.js'));
 const appEmu = read(path.join(APP, 'workspace/EmulatorBody.tsx'));
+
+// ── 에이전트 PC(desktop:main) — 폰도 PC 와 같은 계약(2026-09-19) ─────────────────────
+//  · 유휴 정지 없음(지켜보는 화면) · 꺼져 있으면 프레임 안 묻음 · 상태는 desktop.status 3초 폴링
+//  · 조작 줄 = 멈춤↔재개 / 키보드 / 캡처 / 개입 [계속] / 전원(desktop.start/stop — 첫 켜기 2~3분이라 emulator.power 의 70초로는 짧다)
+ok(/isDeskLoop && Date\.now\(\) - lastTouch\.current > IDLE_AFTER_MS/.test(appEmu) && /!isDeskLoop && Date/.test(appEmu),
+  '앱: 에이전트 PC 는 유휴 정지가 없다');
+ok(/isDeskLoop && deskOffRef\.current/.test(appEmu), '앱: 꺼진 에이전트 PC 에는 프레임을 묻지 않는다');
+ok(/desktopRpc<DesktopStatus>\('desktop\.status'/.test(appEmu) && /setInterval\(\(\) => void tick\(\), 3000\)/.test(appEmu),
+  '앱: 에이전트 PC 상태를 3초마다 읽는다');
+ok(/desktopRpc\(action === 'boot' \? 'desktop\.start' : 'desktop\.stop'/.test(appEmu), '앱: 전원은 desktop.start/stop');
+ok(/'desktop\.pause' : 'desktop\.resume'/.test(appEmu) && /deskHandoff \?/.test(appEmu), '앱: 멈춤↔재개 + 개입 [계속]');
+ok(/type: 'key', key: 'backspace'/.test(appEmu) && /type: 'text', text: add/.test(appEmu), '앱: 키보드는 text 델타 + backspace/enter 키(데몬 계약)');
+const appSvc = read(path.join(APP, 'services/daemonService.ts'));
+ok(/sealedFs<T>\(method, \{\}, host, timeoutMs\)/.test(appSvc) && /\/api\/daemon\/desktop/.test(appSvc),
+  '앱: desktop.* 는 봉인 RPC 먼저, 평문 REST 폴백');
+const appNotif = read(path.join(APP, 'components/NotificationsPanel.tsx'));
+ok(/n\.kind === 'desktop_handoff'/.test(appNotif) && /cmd: 'emulatorOpen'/.test(appNotif) && /device: 'desktop:main'/.test(appNotif),
+  '앱: 개입 알림을 누르면 에이전트 PC 화면으로 간다(PC sidebar.js 와 같은 규칙)');
+ok(/kind === "desktop_handoff"/.test(read(path.join(PC, 'sidebar.js'))), 'PC: 같은 알림 라우팅이 있다');
 for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
   ok(/type:\s*['"]touch['"]/.test(src), `${name} 이 touch 스트리밍을 보낸다`);
   for (const phase of ['begin', 'move', 'end']) {
@@ -352,7 +371,7 @@ ok(/if \(!canInput && dev && dev\.kind !== "desktop"\) \{/.test(pcView) && !/!ca
 //  에이전트 PC 는 아래 힌트 줄 대신 화면 안 한 줄(.emu-off) — 켜기는 상태 바 전원 아이콘 하나뿐(2026-09-17 사용자 결정).
 ok(/className = "emu-off"/.test(pcView) && !/btn\(i18n\.t\('켜기'\)/.test(pcView) && /icons\.power\(/.test(pcView),
   '에이전트 PC: 꺼짐 안내는 화면 안에, 전원은 아이콘 버튼 하나');
-ok(/!canInput && dev \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
+ok(/!canInput && dev && !isDesk \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
   '앱의 이유 표시도 힌트 유무에 묶여 있지 않다');
 ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
 
