@@ -64,6 +64,7 @@ router.post('/emulator/input', accountAuth, daemonController.emulatorInput);
 router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
 router.post('/desktop', accountAuth, daemonController.desktopRpc);
+router.post('/surface', accountAuth, daemonController.surfaceRpc);
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);
 //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 시그널링만 여기를 지나고 영상은 안 지난다.

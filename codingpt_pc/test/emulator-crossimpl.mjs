@@ -437,5 +437,20 @@ ok(/kind === 'emulator' && url && url\.startsWith\('desktop:'\)/.test(appWs) && 
 ok(/if \(queued > 0 && nowMs - lastPaintAt < 250\) return;/.test(appVideo), '앱: 250ms 넘게 안 그렸으면 밀려 있어도 그린다');
 ok(/queued === 0 \|\| nowMs - this\._lastPaintAt > 250/.test(pcView), 'PC: 같은 250ms 상한');
 
+// ── 공유 표면(2026-09-20, 사용자 결정: 모든 pane 공유) — 터미널 풀과 같은 규율을 양쪽이 같이 지킨다 ──
+const appShell = read(path.join(APP, 'contexts/WorkspaceShellContext.tsx'));
+const pcTiling = read(path.join(PC, 'tiling.js'));
+const pcSurf = read(path.join(PC, 'surface-sync.js'));
+const pcState = read(path.join(PC, 'state.js'));
+ok(/sid = leaf\.sid \? \{ sid: leaf\.sid \} : \{\}/.test(pcTiling) && /const sid = tab\.sid \? \{ sid: tab\.sid \} : \{\}/.test(pcTiling), 'PC: pane↔탭 왕복에 sid 보존');
+ok(/leaf\.kind !== 'terminal' && leaf\.sid \? \{ sid: leaf\.sid \} : \{\}/.test(appTiling) && /const sid = tab\.sid \? \{ sid: tab\.sid \} : \{\}/.test(appTiling), '앱: 같은 왕복 보존');
+ok(/holder\.miss = 1/.test(pcSurf) && /pendingAdd\.has\(e\.sid\) \|\| !knownFor\(meta\.id\)\.has\(e\.sid\)/.test(pcSurf), 'PC: 2틱 유예 + 등록 전/중 보호');
+ok(/surfacePending\.has\(x\.sid\) \|\| !known\.has\(x\.sid\)/.test(appShell) && /return x\.miss \? 'drop' : 'mark'/.test(appShell), '앱: 같은 2틱 유예 + 보호');
+ok(/api\.surfaceList\(meta\.localPath/.test(pcState) && /_surfaceSync\.scheduleSync\(\)/.test(pcState), 'PC: 리컨실 틱에 표면 목록 + emit 마다 안→밖 동기화');
+ok(/daemonService\.listPool\(/.test(appShell) && /reconcileSurfaces\(wsId, next, surfaces\)/.test(appShell) && /surfaceRpc\('surface\.add'/.test(appShell), '앱: terminal.list 에 실린 surfaces 로 리컨실 + 안→밖 등록');
+ok(/got\.id !== e\.sid/.test(pcSurf) && /got\.id !== e\.sid/.test(appShell), '양쪽: 에이전트 PC 흡수(merged) 시 로컬 sid 갈아 끼움');
+const daemonSurf = read(path.join(PC, '..', '..', '..', 'codingpt_daemon', 'packages', 'runner-core', 'surfaces.js'));
+ok(/had && had\.id !== sid\) return \{ ok: true, item: strip\(had\), merged: true \}/.test(daemonSurf), '데몬: 에이전트 PC 는 워크스페이스에 하나');
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

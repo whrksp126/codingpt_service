@@ -381,13 +381,24 @@ function dispatchRpc(ws, method, params, ok, fail) {
   if (method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
   if (method === 'net.ports') { proxyLib.listPorts(params || {}).then(ok).catch(fail); return; }
   // 멀티 터미널(tmux window) — terminal.list/new/select/close.
-  if (method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(method, params).then(ok).catch(fail); return; }
+  if (method.startsWith('terminal.')) {
+    ptyLib.handleTerminalRpc(method, params).then((r) => {
+      //  terminal.list 에 공유 표면을 같이 싣는다(추가 전용, cpt-server 의 로컬 소켓 경로와 동일).
+      if (method === 'terminal.list' && r && typeof r === 'object') {
+        try { r.surfaces = require('./surfaces').list({ cwd: (params && params.cwd) || '' }).items; } catch (_) { /* noop */ }
+      }
+      return r;
+    }).then(ok).catch(fail);
+    return;
+  }
   // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
   if (method.startsWith('agent.')) { agentLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 에이전트 관리(agents.list/wire/rescan) — 모바일에서도 조작 가능(사용자 확정 2026-07-27).
   //  ⚠ `agents.` 와 `agent.` 는 다른 접두사다(위 분기가 먼저 걸리지 않는다) — 순서를 바꿔도 안전.
   //  LAN 직결 allowlist 에는 넣지 않는다(lan.js 불변식: 승인·에이전트류는 서버 릴레이로 남긴다).
   if (method.startsWith('agents.')) { cptServer.handleAgentsRpc(method, params || {}).then(ok).catch(fail); return; }
+  // 공유 표면(surface.list/add/update/remove) — 폰·다른 PC 가 연 프리뷰·IDE·모바일 화면을 전 기기에 반영(2026-09-20).
+  if (method.startsWith('surface.')) { cptServer.handleSurfaceRpc(method, params || {}).then(ok).catch(fail); return; }
   // 코드 리뷰(review.get/pending/submit/cancel) — 폰·다른 PC 화면이 결과를 돌려보내는 유일한 경로.
   //  세션은 이 PC 데몬 메모리에 있고, 유닉스 소켓(이 PC 화면)과 **같은 함수**를 탄다.
   //  ⚠ 이 줄이 없으면 폰의 [보내기]가 "알 수 없는 메서드"로 조용히 실패한다(실측으로 잡힌 결함).

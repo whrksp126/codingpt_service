@@ -263,6 +263,16 @@ pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
     cpt_request_coded(&cmd, args, true)
 }
 
+// 공유 표면(2026-09-20) — 프리뷰·IDE·모바일 화면의 존재를 전 기기가 나눈다(터미널 풀과 같은 모양).
+//  이 PC 워크스페이스는 데몬 소켓으로 바로 묻는다. 울타리는 위와 같은 모양: `surface.` 접두사만.
+#[tauri::command]
+pub fn surface_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if !cmd.starts_with("surface.") {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    cpt_request_coded(&cmd, args, true)
+}
+
 // 모바일 화면(에뮬레이터·시뮬레이터·실기기) — **이 PC 에 붙은 기기**를 볼 때 쓰는 직결 경로.
 //  왜 back 을 안 거치나: 프레임 한 장이 base64 로 수십~수백 KB 다. 같은 머신인데 그걸 서버까지
 //  올렸다 내리면 왕복 지연이 프레임 시간(실측 1.3s)에 그대로 얹힌다. 원격 PC 는 기존대로 back 릴레이.

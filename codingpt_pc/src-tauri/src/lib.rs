@@ -1027,6 +1027,7 @@ pub fn run() {
             cptsock::e2ee_local,
             cptsock::agents_local,
             cptsock::ports_local,
+            cptsock::surface_local,
             cptsock::review_local,
             cptsock::emulator_local,
             cptsock::mode_poke,

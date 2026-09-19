@@ -291,9 +291,13 @@ function runListeners() {
     }
   }
 }
+let _surfaceSync = null;   // 공유 표면 동기화(순환 import 회피 — 첫 emit 때 붙는다)
 export function emit() {
   // 영속화는 그대로 매번 예약한다(자체 디바운스를 갖고 있고, 렌더와 수명이 다르다).
   schedulePersist();
+  // 레이아웃 변화 = 표면이 생기거나 사라졌을 수 있다 → 데몬 기록과 맞춘다(전 기기 반영, 2026-09-20).
+  if (_surfaceSync) _surfaceSync.scheduleSync();
+  else import("./surface-sync.js").then((m) => { _surfaceSync = m; m.scheduleSync(); }).catch(() => {});
   if (renderScheduled) return;
   renderScheduled = true;
   queueMicrotask(runListeners);
@@ -1183,6 +1187,14 @@ export async function reconcilePool() {
         }
       }
     }
+    // 공유 표면(프리뷰·IDE·모바일 화면) — 터미널과 같은 틱에 맞춘다(다른 기기가 열면 들이고, 닫으면 닫는다).
+    try {
+      const sl = await api.surfaceList(meta.localPath || "");
+      if (!_surfaceSync) _surfaceSync = await import("./surface-sync.js");
+      for (const id of _surfaceSync.reconcile(meta, w, (sl && sl.items) || [])) { changed = true; if (id !== "*") touched.add(id); }
+      //  안→밖도 한 번 더 — 데몬이 늦게 떠서 첫 등록이 실패했던 표면을 여기서 다시 올린다(맞춰져 있으면 RPC 0건).
+      _surfaceSync.scheduleSync();
+    } catch (_) { /* 구 데몬(surface.* 없음) — 표면은 기기 로컬로 남는다 */ }
     if (changed) {
       for (const id of touched) getPane(id)?.buildHead();
       emit();

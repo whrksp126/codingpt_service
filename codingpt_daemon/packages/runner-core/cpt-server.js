@@ -709,6 +709,10 @@ async function dispatch(req, conn) {
   //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 **자기가 요청한 리뷰를 스스로 승인**할 경로가
   //   되면 리뷰라는 것 자체가 무의미해진다(approval.respond·agents.wire 를 닫은 것과 같은 이유).
   if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
+  // 공유 표면(프리뷰·IDE·모바일 화면) 목록 — 어느 기기에서 열면 전부에, 어디서 닫으면 전부에서(사용자 결정
+  //  2026-09-20, 터미널 풀과 같은 모양). 변경은 surfaces.js 가 pool.changed 로 알린다. CAPABILITIES 비공개
+  //  (화면 배관 — 터미널 안 AI 는 `cpt preview/ide/emulator` 로 여는 게 곧 등록이다).
+  if (cmd.startsWith('surface.')) return handleSurfaceRpc(cmd, req.args || {});
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 목록/켜기/프레임/입력.
   //  프레임은 수십~수백 KB 라 **부르는 쪽이 당겨 간다**(푸시하면 느린 회선에서 지연이 쌓인다).
   if (cmd.startsWith('emulator.')) {
@@ -809,6 +813,8 @@ async function dispatch(req, conn) {
       //  agent(3값: true / false=셸 확정만 / null=모름) · agentName · agentState · agentSource.
       //  내용성 정보(제목 원문·요약)는 싣지 않는다.
       const r = await ptyLib.handleTerminalRpc('terminal.list', { cwd: resolved.cwdRel });
+      //  공유 표면도 같은 응답에 싣는다(추가 전용) — 폰 리컨실러가 한 번의 폴링으로 터미널과 표면을 함께 맞춘다.
+      try { r.surfaces = require('./surfaces').list({ cwd: resolved.cwdRel }).items; } catch (_) { /* 구 상태 파일 — 없음 */ }
       return r;
     }
     case 'terminal.new': {
@@ -958,6 +964,7 @@ async function dispatch(req, conn) {
       // 서버 목록(메타)에서만 삭제 — 로컬 폴더/파일은 절대 건드리지 않는다.
       if (!args.id) throw new Error('워크스페이스 id 가 필요합니다 (cpt ws list 로 확인)');
       const r = await backFetch('DELETE', `/api/daemon/workspaces/${encodeURIComponent(String(args.id))}`);
+      if (args.cwd) { try { require('./surfaces').forgetWs(String(args.cwd)); } catch (_) { /* noop */ } }
       notifyPoolChanged();
       return r;
     }
@@ -1878,6 +1885,14 @@ function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
 }
 
+// 공유 표면(surface.list/add/update/remove) — 유닉스 소켓(이 PC 화면)과 릴레이(폰·다른 PC)가 같은 함수를 탄다.
+//  변경 알림은 surfaces.js 가 notify 훅으로 부른다(터미널과 같은 pool.changed).
+function handleSurfaceRpc(method, params) {
+  const lib = require('./surfaces');
+  lib.setNotify(notifyPoolChanged);
+  return lib.handle(method, params || {});
+}
+
 const CAPABILITIES = [
   'ping', 'capabilities', 'identify',
   'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
@@ -2159,6 +2174,7 @@ module.exports = {
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
+  handleSurfaceRpc, // 공유 표면(surface.*) — control.js 의 릴레이 경로도 이 구현을 쓴다
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
   _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },

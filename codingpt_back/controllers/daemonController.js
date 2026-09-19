@@ -1161,6 +1161,19 @@ async function desktopRpc(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+// POST /api/daemon/surface  body:{ method, params, hostDeviceId } — 공유 표면(프리뷰·IDE·모바일 화면) 목록/등록/해제.
+//  폰이 봉인 RPC(E2EE)를 못 쓸 때의 평문 폴백. 데몬 surfaces.js 가 검증한다(여기선 메서드만 가른다).
+const SURFACE_RPC_OK = new Set(['surface.list', 'surface.add', 'surface.update', 'surface.remove']);
+async function surfaceRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!SURFACE_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, 15000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
 async function emulatorOpenUrl(req, res) {
   try {
     const b = req.body || {};
@@ -1847,6 +1860,7 @@ module.exports = {
   emulatorPower,
   emulatorOpenUrl,
   desktopRpc,
+  surfaceRpc,
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

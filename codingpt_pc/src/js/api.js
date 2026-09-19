@@ -273,6 +273,11 @@ export const api = {
   //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
   //  에이전트 PC(게스트 macOS) — 같은 소켓. 화면·입력은 emulator.* 에 id `desktop:main` 으로 간다.
   desktopStatus: () => invoke("emulator_local", { cmd: "desktop.status", args: {} }),
+  // 공유 표면(프리뷰·IDE·모바일 화면) — 어느 기기에서 열면 전부에(2026-09-20). cwd = 워크스페이스 localPath.
+  surfaceList: (cwd) => invoke("surface_local", { cmd: "surface.list", args: { cwd } }),
+  surfaceAdd: (cwd, item) => invoke("surface_local", { cmd: "surface.add", args: { cwd, ...item } }),
+  surfaceUpdate: (cwd, item) => invoke("surface_local", { cmd: "surface.update", args: { cwd, ...item } }),
+  surfaceRemove: (cwd, id) => invoke("surface_local", { cmd: "surface.remove", args: { cwd, id } }),
   desktopPause: (on) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: {} }),
   desktopSettings: () => invoke("emulator_local", { cmd: "desktop.settings.get", args: {} }),
   desktopSettingsSet: (patch) => invoke("emulator_local", { cmd: "desktop.settings.set", args: patch || {} }),

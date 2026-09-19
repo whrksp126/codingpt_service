@@ -21,11 +21,13 @@ export function bumpSeq(fromIds) {
 }
 
 // leaf: 터미널 pane 은 탭 배열(각 탭=tmux 터미널). 프리뷰는 url, IDE 는 openPath.
+//  sid = 공유 표면 id(2026-09-20) — 기기 사이에 "같은 표면" 을 잇는 열쇠. pane↔탭 왕복·저장을 넘어 보존된다.
 export function leaf(kind, opts = {}) {
-  if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null };
-  if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null };
+  const sid = opts.sid ? { sid: opts.sid } : {};
+  if (kind === "ide") return { id: newPaneId(), kind, openPath: opts.openPath || null, ...sid };
+  if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null, ...sid };
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — deviceId 만 기억한다.
-  if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null, metaName: opts.metaName || "" };
+  if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null, metaName: opts.metaName || "", ...sid };
   // empty: 터미널 0개 상태의 자리 pane — 자동 생성 금지(닫힘=전 기기 공통 의사), 사용자가 + 로 추가.
   if (opts.empty) return { id: newPaneId(), kind: "terminal", tabs: [], active: 0 };
   return {
@@ -50,14 +52,15 @@ export const TAB_KINDS = ["ide", "preview", "emulator"];
 /** 독립 pane(leaf) → 혼합 탭 한 칸. 터미널은 이 경로로 오지 않는다(탭 배열을 이미 갖는다). */
 export function leafToTab(leaf) {
   if (!leaf) return null;
-  if (leaf.kind === "ide") return { kind: "ide", openPath: leaf.openPath || null, tid: newPaneId() };
+  const sid = leaf.sid ? { sid: leaf.sid } : {};
+  if (leaf.kind === "ide") return { kind: "ide", openPath: leaf.openPath || null, tid: newPaneId(), ...sid };
   if (leaf.kind === "preview") {
     //  표면 ID 승계: 기존 "pv-"+(tid||id) webview 를 그대로 넘긴다(dispose 가 보존한다).
-    return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav };
+    return { kind: "preview", url: leaf.url || null, tid: leaf.tid || leaf.id, dark: leaf.dark, metaTitle: leaf.metaTitle, metaFav: leaf.metaFav, ...sid };
   }
   //  metaName = 탭 제목에 쓰는 기기 이름. 안 넘기면 다른 pane 으로 옮기는 순간 제목이 "모바일 화면"
   //   으로 되돌아간다(프리뷰의 metaTitle 과 같은 이유로 왕복 보존한다).
-  if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, metaName: leaf.metaName || "", tid: newPaneId() };
+  if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, metaName: leaf.metaName || "", tid: newPaneId(), ...sid };
   return null;
 }
 
@@ -65,11 +68,12 @@ export function leafToTab(leaf) {
 export function tabToLeaf(tab, id) {
   if (!tab) return null;
   const paneId = id || newPaneId();
-  if (tab.kind === "ide") return { id: paneId, kind: "ide", openPath: tab.openPath || null };
+  const sid = tab.sid ? { sid: tab.sid } : {};
+  if (tab.kind === "ide") return { id: paneId, kind: "ide", openPath: tab.openPath || null, ...sid };
   if (tab.kind === "preview") {
-    return { id: paneId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav };
+    return { id: paneId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav, ...sid };
   }
-  if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null, metaName: tab.metaName || "" };
+  if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null, metaName: tab.metaName || "", ...sid };
   return null;
 }
 
