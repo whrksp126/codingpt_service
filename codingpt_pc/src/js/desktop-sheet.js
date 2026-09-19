@@ -58,7 +58,7 @@ async function paint(quiet) {
   //  진행률만 바뀌는 동안 포커스·스크롤이 튀지 않게, 서명이 같으면 다시 그리지 않는다.
   const hasVm = st.phase === "running" || st.phase === "stopped";
   if (hasVm) { try { snaps = await api.desktopSnapshots(); } catch (_) { /* 목록 없이 그린다 */ } }
-  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
+  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, cfg.idleOffMin, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
   if (body.dataset.sig === sig) return;
   body.dataset.sig = sig;
 
@@ -67,6 +67,7 @@ async function paint(quiet) {
     pulling: i18n.t('내려받는 중'), stopped: i18n.t('정지'), starting: i18n.t('켜는 중…'), running: i18n.t('실행 중'),
   }[st.phase] || st.phase;
   const res = { memGB: cfg.memGB || st.memGB, cpu: cfg.cpu || st.cpu };
+  const idle = Number(cfg.idleOffMin ?? 60) || 0;
   const wss = localWorkspaces();
   //  데몬은 절대 경로(sharedDirs)와 워크스페이스 id(sharedIds, 홈-상대)를 함께 준다 — 체크는 id 로 맞춘다.
   const shared = new Set([...(cfg.sharedIds || []), ...(cfg.sharedDirs || [])].map(String));
@@ -104,7 +105,9 @@ async function paint(quiet) {
       <div class="ds-warn">${i18n.t('연결을 바꾸면 에이전트 PC 를 다시 시작합니다(약 10초). 연결된 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보입니다.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
       <div class="ds-kv"><span>${i18n.t('메모리')}</span><b><select id="dsMem">${memOpts.map((g) => `<option value="${g}" ${g === res.memGB ? "selected" : ""}>${g} GB</option>`).join("")}</select> / ${st.hostGB || "?"} GB</b></div>
-      <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div></div>
+      <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div>
+      <div class="ds-kv"><span>${i18n.t('안 쓰면 끄기')}</span><b><select id="dsIdle">${[[0, i18n.t('끄지 않음')], [30, i18n.t('{n}분', { n: 30 })], [60, i18n.t('{n}시간', { n: 1 })], [180, i18n.t('{n}시간', { n: 3 })]].map(([v, l]) => `<option value="${v}" ${v === idle ? "selected" : ""}>${l}</option>`).join("")}</select></b></div>
+      <div class="ds-warn">${i18n.t('아무도 화면을 보지 않고 에이전트도 쓰지 않으면 자동으로 끕니다. 메모리 {n} GB 를 돌려받습니다.', { n: res.memGB })}</div></div>
     ${hasVm ? `<div class="ds-grp"><div class="ds-l">${i18n.t('스냅샷')}</div>
       ${(snaps.snapshots || []).map((x) => `<div class="ds-kv ds-snap"><span>${escapeHtml(new Date(x.at).toLocaleString())}${x.label ? ` · ${escapeHtml(x.label)}` : ""}</span>
         <b><button class="fp-newfolder" data-restore="${escapeHtml(x.name)}">${i18n.t('되돌리기')}</button> <button class="fp-newfolder ds-x" data-snapdel="${escapeHtml(x.name)}" title="${i18n.t('삭제')}">×</button></b></div>`).join("")
@@ -159,5 +162,9 @@ async function paint(quiet) {
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
   };
   body.querySelector("#dsMem")?.addEventListener("change", onRes);
+  body.querySelector("#dsIdle")?.addEventListener("change", async (ev) => {
+    try { await api.desktopSettingsSet({ idleOffMin: Number(ev.currentTarget.value) }); }
+    catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
+  });
   body.querySelector("#dsCpu")?.addEventListener("change", onRes);
 }

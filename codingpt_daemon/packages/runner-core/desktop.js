@@ -92,8 +92,8 @@ function _resetTools() { toolCache = null; }
 
 function settingsFile() { return path.join(runtime.stateDir(), 'desktop.json'); }
 function loadSettings() {
-  try { const s = { sharedDirs: [], ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; return { ...s, sharedDirs: normalizeDirs(s.sharedDirs) }; }
-  catch (_) { return { sharedDirs: [] }; }
+  try { const s = { sharedDirs: [], idleOffMin: IDLE_OFF_DEFAULT_MIN, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; return { ...s, sharedDirs: normalizeDirs(s.sharedDirs) }; }
+  catch (_) { return { sharedDirs: [], idleOffMin: IDLE_OFF_DEFAULT_MIN }; }
 }
 /**
  * 공유 폴더 항목 → 절대 경로. PC 앱은 워크스페이스 id(홈-상대 `other/project/x`)를, cpt 는 절대 경로를 보낸다 —
@@ -196,6 +196,33 @@ async function status() {
 
 // ── 수명주기 ───────────────────────────────────────────────────────────────
 let _starting = null;   // Promise | null
+/**
+ * 유휴 자동 끄기 — 켜진 VM 은 메모리 16GB 를 쥔다. 아무도 안 보고(프레임·영상) 에이전트도 안 쓰면(입력·exec·ax…) 이만큼 뒤 끈다.
+ *  설정 idleOffMin(0 = 안 끔). 개입 대기(handoff) 중엔 끄지 않는다 — 사용자가 와서 해야 할 일이 남아 있다.
+ */
+const IDLE_OFF_DEFAULT_MIN = 60;
+let lastUse = Date.now();
+function touchUse() { lastUse = Date.now(); }
+let _idleTimer = null;
+function armIdleWatch() {
+  if (_idleTimer) return;
+  _idleTimer = setInterval(() => idleTick(), 60000);
+  _idleTimer.unref?.();
+}
+async function idleTick() {
+    try {
+      const min = Number(loadSettings().idleOffMin) || 0;
+      if (min <= 0 || _starting || pendingHandoff()) return;
+      if (Date.now() - lastUse < min * 60000) return;
+      const info = await vmInfo();
+      if (!info || !/running/i.test(String(info.status || ''))) return;
+      console.log(`[desktop] ${min}분 동안 쓰지 않아 에이전트 PC 를 끕니다`);
+      touchUse();                 // 끄는 동안 되풀이 방지
+      await stop();
+      return true;
+    } catch (_) { /* 다음 틱에 */ }
+    return false;
+}
 let _step = '';         // 'boot' | 'provision' | 'reboot' — status().step (PC 가 "처음이라 설정 중" 을 보여 준다)
 let rfb = null;         // RfbClient | null
 let vncPassword = '';
@@ -302,6 +329,7 @@ async function remove() {
 
 /** 켠다(이미 켜져 있으면 VNC 만 확인). 공유 폴더는 설정의 sharedDirs. */
 async function start(o = {}) {
+  touchUse(); armIdleWatch();
   if (_starting) return _starting;
   _starting = (async () => {
     const st = await status();
@@ -518,6 +546,7 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
 /** 게스트 셸. 문자열 한 줄로 받는다(lume ssh 가 원격 셸에 그대로 넘긴다). */
 async function exec(cmd, o = {}) {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
+  touchUse();
   //  부팅 직후엔 VNC 는 떴는데 sshd 가 몇 초 늦는다(실측: 스냅샷 뒤 다시 켠 직후 "SSH is not available") — 그 오류만 20초까지 되풀이.
   const t0 = Date.now();
   for (;;) {
@@ -534,6 +563,7 @@ async function exec(cmd, o = {}) {
 
 // ── 화면 ─────────────────────────────────────────────────────────────────────
 async function frame(o = {}) {
+  touchUse();
   const c = await connectRfb();
   await c.requestUpdate(true, o.waitMs || 400);
   const bmp = c.toBmp(o.maxWidth);          // 여기서 이미 줄였다 — toJpeg 에는 원본 크기라고 말해 재축소를 막는다
@@ -628,6 +658,7 @@ class DesktopStreamSession {
       //  바뀐 프레임만 인코더에 넣되, 1초에 한 장은 그대로 넣는다 — 정지 화면에서도 키프레임 주기가 살아 있어
       //   늦게 붙는 화면이 GOP 되감기로 바로 그린다.
       const now = Date.now();
+      touchUse();
       if ((changed || this.rfb.dirty || now - lastSent > 1000) && this.enc && this.rfb.fb && this.rfb.fb.length === this._sizeAtSpawn) {
         this.rfb.dirty = false; lastSent = now;
         try { this.enc.stdin.write(this.rfb.fb); } catch (_) { /* exit 핸들러가 정리 */ }
@@ -660,6 +691,7 @@ function px(n, max) { const v = Number(n); return Math.max(0, Math.min(max - 1, 
  *  `from` 이 'agent' 인 입력은 사용자가 화면을 만지는 동안(agentPaused) 거절한다 — 손 아래에서 커서가 튀는 게 제일 나쁘다.
  */
 async function input(a = {}) {
+  touchUse();
   const c = await connectRfb();
   const type = String(a.type || '');
   if (a.from === 'agent' && agentPaused) throw new Error('사용자가 에이전트 PC 를 조작하는 동안에는 에이전트 입력이 멈춰 있어요 (cpt desktop resume)');
@@ -846,6 +878,7 @@ function pendingHandoff() { return handoff ? { reason: handoff.reason, at: hando
 const DEVICE_ID = 'desktop:main';
 async function deviceRow() {
   if (process.platform !== 'darwin') return null;
+  armIdleWatch();
   const st = await status();
   if (st.phase === 'unsupported' || st.phase === 'no-tool') return null;
   const running = st.phase === 'running';
@@ -857,9 +890,12 @@ async function deviceRow() {
 }
 
 /** RPC — `desktop.*` 와, emulator.js 가 `desktop:` id 로 넘겨 주는 frame/input/openUrl. */
+const POLL_METHODS = new Set(['desktop.status', 'desktop.snapshots', 'desktop.settings.get']);
 async function handle(method, p = {}) {
   const m = String(method);
-  if (m === 'desktop.status') return { ...(await status()), handoff: pendingHandoff() };
+  armIdleWatch();
+  if (!POLL_METHODS.has(m)) touchUse();
+  if (m === 'desktop.status') return { ...(await status()), handoff: pendingHandoff(), idleOffMin: Number(loadSettings().idleOffMin) || 0, idleMin: Math.floor((Date.now() - lastUse) / 60000) };
   if (m === 'desktop.pull') return pull();
   if (m === 'desktop.delete') return remove();
   if (m === 'desktop.start') return start(p);
@@ -890,5 +926,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, IDLE_OFF_DEFAULT_MIN, _idleState: () => ({ lastUse }), _idleTest: (ageMs) => { lastUse = Date.now() - ageMs; return idleTick(); }, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

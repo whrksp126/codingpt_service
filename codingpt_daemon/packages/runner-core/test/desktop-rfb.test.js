@@ -230,3 +230,26 @@ test('스냅샷 이름 규칙 + VNC 비밀번호는 영숫자 12자', () => {
   assert.match(desktop.snapName(''), new RegExp('^' + desktop.SNAP_PREFIX.replace(/[-]/g, '\\-') + '\\d{8}-\\d{6}$'));
   for (let i = 0; i < 50; i++) { const p = desktop.strongVncPassword(); assert.match(p, /^[A-Za-z][A-Za-z0-9]{11}$/, p); }
 });
+
+// 유휴 자동 끄기(2026-09-19) — 폴링(status/snapshots/settings.get)은 사용으로 치지 않고, 나머지 RPC·프레임·입력·exec·영상은 친다.
+test('유휴 판정: 폴링은 사용이 아니다, 조작은 사용이다', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-lume-'));
+  fs.writeFileSync(path.join(dir, 'lume'), '#!/bin/sh\necho \'[{"name":"cpt-agent-desktop","status":"stopped"}]\'\n', { mode: 0o755 });
+  const prev = process.env.CPT_LUME; process.env.CPT_LUME = path.join(dir, 'lume'); desktop._resetTools();
+  try {
+    const before = desktop._idleState().lastUse;
+    await new Promise((r) => setTimeout(r, 15));
+    await desktop.handle('desktop.status', {});
+    assert.strictEqual(desktop._idleState().lastUse, before, 'status 폴링은 lastUse 를 안 건드린다');
+    await desktop.handle('desktop.settings.get', {});
+    assert.strictEqual(desktop._idleState().lastUse, before);
+    await desktop.handle('desktop.pause', {});
+    assert.ok(desktop._idleState().lastUse > before, '조작 RPC 는 사용이다');
+    assert.strictEqual(desktop.loadSettings().idleOffMin === undefined, false, '기본 idleOffMin 이 있다');
+    assert.strictEqual(desktop.IDLE_OFF_DEFAULT_MIN, 60);
+  } finally {
+    await desktop.handle('desktop.resume', {}).catch(() => {});
+    if (prev === undefined) delete process.env.CPT_LUME; else process.env.CPT_LUME = prev; desktop._resetTools(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
