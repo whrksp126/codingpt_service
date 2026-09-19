@@ -1900,7 +1900,7 @@ const CAPABILITIES = [
   'ui.emulatorOpen', 'ui.emulatorClose',
   // 에이전트 PC — 전부 공개. 격리된 게스트라 에이전트가 마음껏 조작하는 것이 이 기능의 값이다.
   //  handoff 는 "사용자에게 부탁" 이라 승인 성격이 아니다(자기 승인 경로가 아니다).
-  'desktop.status', 'desktop.start', 'desktop.provision', 'desktop.stop', 'desktop.exec', 'desktop.openApp', 'desktop.openUrl', 'desktop.path',
+  'desktop.status', 'desktop.start', 'desktop.provision', 'desktop.connect', 'desktop.disconnect', 'desktop.stop', 'desktop.exec', 'desktop.openApp', 'desktop.openUrl', 'desktop.path',
   'desktop.handoff', 'desktop.pause', 'desktop.resume', 'desktop.settings.get', 'desktop.settings.set', 'desktop.pull', 'desktop.delete',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',

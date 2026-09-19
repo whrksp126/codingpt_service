@@ -286,7 +286,8 @@ cpt desktop click 0.42 0.31             # 클릭 · double-click · right-click 
 cpt desktop key cmd+space               # 키 조합 · key enter · key cmd+shift+4
 cpt desktop type "hello"                # 글자(ASCII 는 키로, 한글 등은 클립보드+⌘V)
 cpt desktop run -- ls "/Volumes/My Shared Files"   # 게스트 셸
-cpt desktop path ./src/app.tsx          # 이 워크스페이스 파일의 게스트 경로(연결돼 있어야 한다)
+cpt desktop connect [폴더]              # 폴더를 게스트에 붙인다(필요할 때만 — 켜져 있으면 다시 켜서 바로 쓴다)
+cpt desktop path ./src/app.tsx          # 이 워크스페이스 파일의 게스트 경로(connect 한 폴더 아래여야 한다)
 cpt desktop handoff "GitHub 로그인이 필요합니다"     # ★ 사용자가 대신 해야 할 때(로그인·2FA·결제)
 ```
 
@@ -294,8 +295,10 @@ cpt desktop handoff "GitHub 로그인이 필요합니다"     # ★ 사용자가
   명령이 끝난다. 비밀번호를 네가 묻거나 치려 하지 마라 — 사용자가 그 화면에서 직접 친다.
 - 사용자가 데스크톱을 만지는 동안 네 입력은 **멈춤** 상태로 거절된다(오류 메시지에 `resume` 안내). 기다렸다
   다시 시도하라. 너 스스로 `resume` 하지 마라 — 그건 사용자의 버튼이다.
-- 워크스페이스 폴더는 게스트에 `/Volumes/My Shared Files/<폴더명>` 로 보인다(`cpt desktop path` 로 변환).
-  연결이 안 돼 있으면 `cpt desktop connect` 로 연결하고 사용자에게 재시작이 필요하다고 알려라.
+- **폴더는 자동으로 붙지 않는다 — 게스트에서 파일이 필요하면 네가 붙여라.** `cpt desktop connect [폴더]`(기본 = 이
+  워크스페이스). 어떤 경로든 된다. 켜져 있으면 데몬이 끄고 다시 켜서(20~40초) 바로 쓸 수 있는 게스트 경로를 돌려준다
+  (`/Volumes/My Shared Files/<폴더명>`, `cpt desktop path` 로 변환). GUI 조작만 할 땐(브라우저·앱·설정) 붙일 필요 없다.
+  다 쓴 폴더는 `disconnect`. 붙인 폴더는 사용자 설정 시트에 그대로 보인다.
 - 게스트는 앱스토어 앱·Docker·Android 에뮬레이터가 안 돈다(호스트에서 돌고 네트워크로 닿는다).
 
 ## 8. 알림·진행 상태

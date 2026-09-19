@@ -313,6 +313,30 @@ async function provision() {
   return { ok: true, version: PROVISION_VER };
 }
 
+/**
+ * 폴더 연결/해제 — 에이전트가 **필요한 순간에** 붙인다(사용자 결정 2026-09-19: 자동 연결 없음, 어떤 경로든 에이전트 판단).
+ *  공유 폴더는 부팅 때 고정이라, 켜져 있으면 여기서 끄고 다시 켠다(~20~40초) — 에이전트가 사용자에게 재시작을
+ *  부탁하고 멈추는 일이 없게. 돌려주는 guest 경로로 바로 쓸 수 있다.
+ */
+async function connectDir(dir, on) {
+  const abs = absDir(dir);
+  if (!abs) throw new Error('폴더 경로가 필요해요');
+  if (on) { try { if (!fs.statSync(abs).isDirectory()) throw new Error(); } catch (_) { throw new Error(`폴더가 없어요: ${abs}`); } }
+  const s = loadSettings();
+  const set = new Set(normalizeDirs(s.sharedDirs));
+  const had = set.has(abs);
+  if (on) set.add(abs); else set.delete(abs);
+  const changed = on ? !had : had;
+  if (changed) saveSettings({ ...s, sharedDirs: [...set] });
+  let restarted = false;
+  if (changed && (await status()).phase === 'running') {
+    await stop();
+    await start();
+    restarted = true;
+  }
+  return { ok: true, host: abs, guest: on ? path.posix.join('/Volumes/My Shared Files', path.basename(abs)) : null, changed, restarted, sharedDirs: [...set] };
+}
+
 /** vncUrl = vnc://:password@host:port — 우리가 준 비밀번호가 아니면(이미 켜져 있던 VM) URL 의 것을 쓴다. */
 function parseVncUrl(u) {
   const m = /^vnc:\/\/(?:([^:@]*):)?([^@]*)@([^:]+):(\d+)/.exec(String(u || ''));
@@ -544,6 +568,7 @@ async function handle(method, p = {}) {
   if (m === 'desktop.openApp') return openApp(p.name);
   if (m === 'desktop.openUrl') return openUrl(p.url);
   if (m === 'desktop.path') return { host: p.path, guest: guestPath(p.path) };
+  if (m === 'desktop.connect' || m === 'desktop.disconnect') return connectDir(String(p.dir || ''), m === 'desktop.connect');
   if (m === 'desktop.handoff') return requestHandoff(p.reason, { timeoutMs: p.timeoutMs });
   if (m === 'desktop.resume') return resume();
   if (m === 'desktop.pause') return pause();
@@ -556,5 +581,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

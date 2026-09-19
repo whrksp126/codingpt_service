@@ -173,3 +173,30 @@ test('프로비저닝 스크립트 계약(kcpassword·sudo sh -c·성공 표식)
   assert.strictEqual(m[1], 'Efw/RtKz3b9f5RJ9');
   assert.strictEqual(Buffer.from(m[1], 'base64').length, 12);
 });
+
+// 폴더 연결은 에이전트가 필요할 때 스스로(사용자 결정 2026-09-19: 자동 연결 없음·경로 제한 없음). 꺼져 있을 때는
+//  설정만 바꾸고 재시작하지 않는다; 없는 폴더는 거절; 같은 상태면 changed:false.
+test('desktop.connect/disconnect 는 설정을 절대 경로로 바꾸고 게스트 경로를 돌려준다', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-lume-'));
+  const fake = path.join(dir, 'lume');
+  fs.writeFileSync(fake, '#!/bin/sh\necho \'[{"name":"cpt-agent-desktop","status":"stopped"}]\'\n', { mode: 0o755 });
+  const prevLume = process.env.CPT_LUME; process.env.CPT_LUME = fake; desktop._resetTools();
+  const prevHome = process.env.CPT_HOME;
+  const before = desktop.loadSettings();
+  try {
+    const r = await desktop.handle('desktop.connect', { dir });
+    assert.deepStrictEqual([r.changed, r.restarted, r.host, r.guest], [true, false, dir, `/Volumes/My Shared Files/${path.basename(dir)}`]);
+    assert.ok(desktop.loadSettings().sharedDirs.includes(dir));
+    const again = await desktop.handle('desktop.connect', { dir });
+    assert.strictEqual(again.changed, false);
+    await assert.rejects(desktop.handle('desktop.connect', { dir: path.join(dir, 'nope') }), /폴더가 없어요/);
+    const off = await desktop.handle('desktop.disconnect', { dir });
+    assert.deepStrictEqual([off.changed, off.guest], [true, null]);
+    assert.ok(!desktop.loadSettings().sharedDirs.includes(dir));
+  } finally {
+    desktop.saveSettings(before);
+    if (prevLume === undefined) delete process.env.CPT_LUME; else process.env.CPT_LUME = prevLume;
+    desktop._resetTools(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -330,7 +330,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   desktop handoff <사유>                사용자에게 개입 요청(로그인 등) — [계속] 을 누를 때까지 기다린다
   desktop pause | resume                에이전트 입력 멈춤/재개
   desktop path <경로>                   호스트 경로 → 게스트 공유 폴더 경로
-  desktop connect [폴더] | disconnect   이 워크스페이스 폴더를 데스크톱에 공유(다음 시작 때 반영)
+  desktop connect [폴더] | disconnect   폴더를 에이전트 PC 에 공유(기본=이 워크스페이스 · 어떤 경로든 · 켜져 있으면 다시 켜서 바로 반영)
 
   # 모바일 화면 (안드로이드 에뮬레이터/실기기 · iOS 시뮬레이터)
   #  좌표는 **0~1 비율**이다(0.5 0.5 = 화면 한가운데). 픽셀이 아니다 — 기기마다 해상도가 달라서.
@@ -725,7 +725,7 @@ async function main() {
         }
         if (c2 === 'path') {
           const r = await request('desktop.path', { path: path.resolve(rest[0] || '.') });
-          return out(r, flags, r.guest || '(연결된 폴더 밖이에요 — cpt desktop connect 로 워크스페이스를 데스크톱에 연결하세요)');
+          return out(r, flags, r.guest || '(연결된 폴더 밖이에요 — cpt desktop connect <폴더> 로 붙이세요)');
         }
         //  사용자 개입 — 로그인·2FA 처럼 사람이 해야 하는 일. 카드가 뜨고 사용자가 [계속]을 누를 때까지 **기다린다**.
         if (c2 === 'handoff') {
@@ -754,14 +754,11 @@ async function main() {
         if (c2 === 'type') return out(await inp({ type: 'text', text: rest.join(' ') }), flags, 'ok');
         if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
         if (c2 === 'connect' || c2 === 'disconnect') {
-          const cur = await request('desktop.settings.get', {});
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
-          //  데몬이 절대 경로로 맞춰 주지만 옛 설정엔 홈-상대(워크스페이스 id)가 남아 있을 수 있다 — 같은 폴더로 본다.
-          const abs = (d) => (path.isAbsolute(d) ? path.normalize(d) : path.join(os.homedir(), d));
-          const set = new Set((cur.sharedDirs || []).map(abs));
-          if (c2 === 'connect') set.add(dir); else set.delete(dir);
-          const r = await request('desktop.settings.set', { sharedDirs: [...set] });
-          return out(r, flags, `${c2 === 'connect' ? '연결' : '해제'}: ${dir}\n(다음 시작 때 반영됩니다 — 켜져 있으면 cpt desktop stop && cpt desktop start)`);
+          //  켜져 있으면 데몬이 끄고 다시 켜서 바로 쓸 수 있게 돌려준다(공유 폴더는 부팅 때 고정) — 최대 3분.
+          const r = await request(`desktop.${c2}`, { dir }, { timeoutMs: 180000 });
+          const tail = r.restarted ? ' (에이전트 PC 를 다시 켰어요 — 바로 쓸 수 있어요)' : (r.changed ? '' : ' (이미 그 상태)');
+          return out(r, flags, c2 === 'connect' ? `연결: ${r.host} → ${r.guest}${tail}` : `해제: ${r.host}${tail}`);
         }
         process.stderr.write('사용법: cpt desktop status|start|stop|provision|show|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
