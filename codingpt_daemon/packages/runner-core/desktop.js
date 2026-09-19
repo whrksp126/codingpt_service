@@ -76,6 +76,25 @@ pkill -x tipsd 2>/dev/null || true
 [ "$(sudo defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser)" = "${SSH_USER}" ] && sudo test -s /etc/kcpassword && echo CPT_PROVISION_OK
 `;
 
+//  ★ 켤 때마다 다시 거는 것 — ByHost(하드웨어 UUID) 에 묶인 설정은 VM 의 식별자가 바뀌면 조용히 사라진다.
+//   실측(2026-09-20): 복원된 VM 의 IOPlatformUUID 가 프로비저닝 때와 달라 화면보호기 idleTime=0 이 안 먹고
+//   20분 뒤 잠금 화면("Enter Password") 으로 떨어졌다 → 에이전트가 손을 못 대는 상태. 첫 설정 한 번으론 부족.
+const SETTLE_SCRIPT = `P="${SSH_PASSWORD}"
+defaults -currentHost write com.apple.screensaver idleTime -int 0
+sysadminctl -screenLock off -password "$P" >/dev/null 2>&1 || true
+launchctl disable gui/$(id -u)/com.apple.tipsd 2>/dev/null || true
+sysadminctl -screenLock status 2>&1 | grep -q 'screenLock is off' && [ "$(defaults -currentHost read com.apple.screensaver idleTime)" = 0 ] && echo CPT_SETTLE_OK
+`;
+
+/** 켠 뒤 한 번 — ByHost 설정을 다시 건다(위 SETTLE_SCRIPT). 실패해도 켜기는 막지 않는다(로그만). */
+async function settle() {
+  try {
+    const out = await exec(SETTLE_SCRIPT, { timeoutMs: 20000 });
+    if (!/CPT_SETTLE_OK/.test(out)) console.warn('[desktop] settle 미완료:', out.trim().slice(0, 200));
+    return true;
+  } catch (e) { console.warn('[desktop] settle 실패:', String(e && e.message || e).slice(0, 200)); return false; }
+}
+
 let toolCache = null;
 function lumeBin() {
   if (toolCache !== null) return toolCache;
@@ -289,12 +308,30 @@ async function withStopped(fn) {
   if (wasRunning) await start();
   return { ...r, restarted: wasRunning };
 }
+/**
+ * ★ `lume clone` 은 machineIdentifier·macAddress 를 새로 만든다 — 게스트 macOS 는 "다른 맥"으로 알고 로그인 때 Setup Assistant 를
+ *  다시 띄운다(실측 2026-09-19: 복원 뒤 검은 화면 → SA 가 창 없이 멈춤, 죽이면 로그아웃, 재로그인 세션에선 ssh 의 AX 가 창을 못 봄).
+ *  디스크 속 macOS 가 아는 정체를 config.json 에 되살린다. 스냅샷은 절대 동시에 켜지 않으므로 같은 정체를 들어도 된다.
+ */
+function vmConfigPath(name) { return path.join(os.homedir(), '.lume', name, 'config.json'); }
+function carryIdentity(fromName, toName) {
+  try {
+    const from = JSON.parse(fs.readFileSync(vmConfigPath(fromName), 'utf8'));
+    const toPath = vmConfigPath(toName);
+    const to = JSON.parse(fs.readFileSync(toPath, 'utf8'));
+    if (from.machineIdentifier) to.machineIdentifier = from.machineIdentifier;
+    if (from.macAddress) to.macAddress = from.macAddress;
+    fs.writeFileSync(toPath, JSON.stringify(to, null, 2));
+    return true;
+  } catch (_) { return false; }
+}
 async function snapshot(label) {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
   if (!(await vmInfo(true))) throw new Error('에이전트 PC 가 아직 없어요');
   const name = snapName(label);
   return withStopped(async () => {
     await lume(['clone', VM_NAME, name], { timeoutMs: 120000 });
+    carryIdentity(VM_NAME, name);
     //  오래된 것 정리 — 지금 만든 것은 목록 맨 앞이라 안 지워진다.
     const all = await snapshots();
     for (const s of all.slice(SNAP_MAX)) { try { await lume(['delete', s.name, '--force'], { timeoutMs: 60000 }); } catch (_) { /* 다음에 */ } }
@@ -308,6 +345,7 @@ async function restore(name) {
   return withStopped(async () => {
     await lume(['delete', VM_NAME, '--force'], { timeoutMs: 60000 });
     await lume(['clone', n, VM_NAME], { timeoutMs: 120000 });
+    carryIdentity(n, VM_NAME);
     return { ok: true, name: n };
   });
 }
@@ -352,6 +390,8 @@ async function start(o = {}) {
       try { await ensureAx(); } catch (_) { /* 첫 ax 호출 때 다시 */ }
     }
     await connectRfb({ waitMs: 30000 });
+    //  화면이 붙은 뒤 뒤에서 — 켜기를 기다리는 쪽을 ssh 왕복만큼 더 세우지 않는다.
+    void settle();
   })();
   try { await _starting; } finally { _starting = null; _step = ''; }
   return status();     // _starting 을 비운 뒤에 읽어야 phase 가 'running' 으로 나온다
@@ -690,7 +730,18 @@ function px(n, max) { const v = Number(n); return Math.max(0, Math.min(max - 1, 
  *  touch(phase begin/move/end) · tap · longPress(=우클릭) · swipe(드래그) · scroll(dy 눈금) · key("cmd+c") · text
  *  `from` 이 'agent' 인 입력은 사용자가 화면을 만지는 동안(agentPaused) 거절한다 — 손 아래에서 커서가 튀는 게 제일 나쁘다.
  */
-async function input(a = {}) {
+/**
+ * 입력은 **한 줄로 세운다**. 폰 키보드는 글자마다 RPC 를 따로 보내는데(await 없이) 두 typeAscii 가 같은 RFB 소켓에서 겹치면
+ *  키 down/down/up/up 이 되어 글자가 빠진다(실측 2026-09-20: "hello" → "Helo"). 순서도 보존된다.
+ */
+let _inputQ = Promise.resolve();
+function input(a = {}) {
+  const run = () => inputNow(a);
+  const p = _inputQ.then(run, run);
+  _inputQ = p.catch(() => {});
+  return p;
+}
+async function inputNow(a = {}) {
   touchUse();
   const c = await connectRfb();
   const type = String(a.type || '');
@@ -758,9 +809,16 @@ async function typeText(text, c) {
 const AX_SRC = fs.readFileSync(path.join(__dirname, 'desktop-ax.jxa.js'), 'utf8');
 const AX_HASH = crypto.createHash('sha1').update(AX_SRC).digest('hex').slice(0, 10);
 const AX_PATH = `~/.cpt/ax-${AX_HASH}.js`;
+/**
+ * 접근성이 **실제로** 되는가 — AXIsProcessTrusted() 만 믿지 않는다. 실측(2026-09-19): 스냅샷 복원(머신 식별자 변경) 뒤
+ *  AXIsProcessTrusted 는 true 인데 System Events UI 스크립팅은 -25211 로 거절됐다(트리에 메뉴만 나옴). 진짜 조회로 판정.
+ */
 async function axTrusted() {
-  const out = await exec(`osascript -l JavaScript -e 'ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()' 2>&1`, { timeoutMs: 15000 });
-  return /^true/m.test(out);
+  let out = '';
+  try {
+    out = await exec(`osascript -l JavaScript -e 'ObjC.import("ApplicationServices"); $.AXIsProcessTrusted()' 2>&1; osascript -e 'tell application "System Events" to get count of windows of process "Finder"' 2>&1; true`, { timeoutMs: 15000 });
+  } catch (_) { return false; }
+  return /^true\s*$/m.test(out) && /^\d+\s*$/m.test(out) && !/not allowed|-25211|-1728|-1743/.test(out);
 }
 async function axTree(target) {
   await ensureAx();
@@ -807,6 +865,8 @@ let _axOk = false;
 async function ensureAx() {
   if (_axOk) return true;
   if (await axTrusted()) { _axOk = true; return true; }
+  //  "켜져 있는데 안 되는" 반쪽 상태(복원 뒤)면 목록의 토글이 이미 ON 이라 한 번 누르면 꺼진다 — 먼저 지워서 OFF/부재로 맞춘다.
+  await exec('tccutil reset Accessibility >/dev/null 2>&1; true', { timeoutMs: 15000 });
   const c = await connectRfb();
   const tap = async (x, y) => { c.pointer(px(x, c.width), px(y, c.height), B_LEFT); await sleep(80); c.pointer(px(x, c.width), px(y, c.height), 0); };
   //  프롬프트가 떠 있는 동안 osascript 는 **답을 기다리며 멈춘다**(실측 25초 넘게) — 짧게 자르고 시간 초과 = 프롬프트로 본다.
@@ -925,6 +985,7 @@ async function handle(method, p = {}) {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
+  settle, SETTLE_SCRIPT,
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, IDLE_OFF_DEFAULT_MIN, _idleState: () => ({ lastUse }), _idleTest: (ageMs) => { lastUse = Date.now() - ageMs; return idleTick(); }, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, carryIdentity, IDLE_OFF_DEFAULT_MIN, _idleState: () => ({ lastUse }), _idleTest: (ageMs) => { lastUse = Date.now() - ageMs; return idleTick(); }, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

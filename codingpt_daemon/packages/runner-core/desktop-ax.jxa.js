@@ -11,7 +11,8 @@ function run(argv) {
   let pid = 0; const want = argv && argv[0] ? String(argv[0]) : '';
   if (/^\d+$/.test(want)) pid = Number(want);
   else if (want) { const apps = ObjC.unwrap($.NSWorkspace.sharedWorkspace.runningApplications); for (const a of apps) { if (ObjC.unwrap(a.localizedName).toLowerCase() === want.toLowerCase()) { pid = a.processIdentifier; break; } } if (!pid) return JSON.stringify({ error: 'app not running: ' + want }); }
-  if (!pid) pid = $.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier;
+  //  frontmostApplication 은 ssh 문맥에서 AccessibilityUIServer 같은 에이전트를 돌려주기도 한다(실측) — 메뉴 바를 쥔 앱이 "앞 앱"이다.
+  if (!pid) { const mb = $.NSWorkspace.sharedWorkspace.menuBarOwningApplication; pid = (!mb.isNil() ? mb : $.NSWorkspace.sharedWorkspace.frontmostApplication).processIdentifier; }
   const ra = $.NSRunningApplication.runningApplicationWithProcessIdentifier(pid);
   const appName = ra.isNil() ? '' : ObjC.unwrap(ra.localizedName);
   const scr = $.NSScreen.mainScreen.frame; const SW = scr.size.width, SH = scr.size.height;   // 포인트(레티나 2x 면 1440→720)
@@ -24,6 +25,9 @@ function run(argv) {
   function walk(el, depth, parent) {
     if (n >= maxNodes || depth > maxDepth) return;
     const role = plain(attr(el, 'AXRole')); if (!role) return;
+    //  Setup Assistant 처럼 자식 목록에 자기 앱 요소가 다시 들어오는 앱이 있다(실측: 2000개 전부 Application) — 앱은 뿌리에서만.
+    //   (macOS 26.4 실측: 앱의 AXChildren[0] 도 role=AXApplication 인 대리 요소다 — 그래서 뿌리는 AXWindows+AXMenuBar 로 직접 간다.)
+    if (depth > 0 && role === 'AXApplication') return;
     const node = { i: n++, p: parent, role: String(role).replace(/^AX/, '') };
     const sub = plain(attr(el, 'AXSubrole')); if (sub) node.subrole = String(sub).replace(/^AX/, '');
     for (const [k, a] of [['title', 'AXTitle'], ['desc', 'AXDescription'], ['id', 'AXIdentifier'], ['ph', 'AXPlaceholderValue'], ['help', 'AXHelp']]) { const v = plain(attr(el, a)); if (v !== null && v !== '') node[k] = String(v).slice(0, 200); }
@@ -38,6 +42,13 @@ function run(argv) {
     const cnt = ch.count;
     for (let i = 0; i < cnt && n < maxNodes; i++) walk(ObjC.castObjectToRef(ch.objectAtIndex(i)), depth + 1, node.i);
   }
-  walk($.AXUIElementCreateApplication(pid), 0, -1);
+  //  뿌리: 앱 노드 하나 + 창들(AXWindows) + 메뉴 바(AXMenuBar). AXChildren 을 그대로 타면 26.4 에선 창이 AXApplication 대리 뒤에 숨는다.
+  const appEl = $.AXUIElementCreateApplication(pid);
+  const rootNode = { i: n++, p: -1, role: 'Application', title: appName };
+  out.push(rootNode);
+  const wref = attr(appEl, 'AXWindows');
+  if (wref) { try { const ws = ObjC.castRefToObject(wref); for (let i = 0; i < ws.count && n < maxNodes; i++) walk(ObjC.castObjectToRef(ws.objectAtIndex(i)), 1, rootNode.i); } catch (_) { /* 창 없음 */ } }
+  const mref = attr(appEl, 'AXMenuBar');
+  if (mref) { try { walk(mref, 1, rootNode.i); } catch (_) { /* 메뉴 없음 */ } }
   return JSON.stringify({ app: appName, pid, screen: { w: SW, h: SH }, truncated: n >= maxNodes, nodes: out });
 }

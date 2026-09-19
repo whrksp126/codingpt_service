@@ -174,6 +174,19 @@ test('프로비저닝 스크립트 계약(kcpassword·sudo sh -c·성공 표식)
   assert.strictEqual(Buffer.from(m[1], 'base64').length, 12);
 });
 
+//  ByHost(하드웨어 UUID) 에 묶인 설정은 VM 식별자가 바뀌면 사라진다(복원된 VM 이 20분 뒤 잠금 화면으로 떨어진 실사고,
+//  2026-09-20) → 켤 때마다 다시 건다. 성공 표식은 **실제 상태를 읽어서** 낸다(썼다고 믿지 않는다).
+test('켤 때마다 다시 거는 설정(settle) — 화면보호기 0·잠금 해제, 상태 확인 뒤 표식', () => {
+  const fs = require('fs'), path = require('path');
+  const sc = desktop.SETTLE_SCRIPT;
+  assert.ok(/defaults -currentHost write com\.apple\.screensaver idleTime -int 0/.test(sc));
+  assert.ok(/sysadminctl -screenLock off -password/.test(sc));
+  assert.ok(/screenLock is off.*idleTime.*= 0.*CPT_SETTLE_OK/s.test(sc), '표식은 상태 확인 뒤에만');
+  assert.ok(!/\bsudo\b/.test(sc), '사용자 도메인 설정만 — sudo 불필요');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'desktop.js'), 'utf8');
+  assert.ok(/await connectRfb\(\{ waitMs: 30000 \}\);\s*\n[^\n]*\n\s*void settle\(\);/.test(src), 'start() 는 화면이 붙은 뒤 settle 을 뒤에서 돈다');
+});
+
 // 폴더 연결은 에이전트가 필요할 때 스스로(사용자 결정 2026-09-19: 자동 연결 없음·경로 제한 없음). 꺼져 있을 때는
 //  설정만 바꾸고 재시작하지 않는다; 없는 폴더는 거절; 같은 상태면 changed:false.
 test('desktop.connect/disconnect 는 설정을 절대 경로로 바꾸고 게스트 경로를 돌려준다', async () => {
@@ -252,4 +265,34 @@ test('유휴 판정: 폴링은 사용이 아니다, 조작은 사용이다', asy
     await desktop.handle('desktop.resume', {}).catch(() => {});
     if (prev === undefined) delete process.env.CPT_LUME; else process.env.CPT_LUME = prev; desktop._resetTools(); fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// 2026-09-20 폰 실기에서 잡은 셋: ① 입력은 한 줄로(글자마다 오는 RPC 가 겹치면 키가 빠짐) ② clone 뒤 머신 식별자 되살리기
+//  ③ AX 뿌리는 AXWindows+AXMenuBar(26.4 의 AXChildren[0] 은 AXApplication 대리) · 앞 앱은 menuBarOwningApplication.
+test('desktop.input 은 직렬(순서 보존) · carryIdentity · AX 뿌리 규칙', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-lume-'));
+  fs.writeFileSync(path.join(dir, 'lume'), '#!/bin/sh\necho \'[{"name":"cpt-agent-desktop","status":"stopped"}]\'\n', { mode: 0o755 });
+  const prev = process.env.CPT_LUME; process.env.CPT_LUME = path.join(dir, 'lume'); desktop._resetTools();
+  try {
+    //  꺼진 VM 이라 전부 거절되지만, 거절 순서가 보낸 순서와 같아야 한다(큐).
+    const order = [];
+    await Promise.all(['a', 'b', 'c'].map((t) => desktop.input({ type: 'text', text: t }).catch(() => order.push(t))));
+    assert.deepStrictEqual(order, ['a', 'b', 'c']);
+  } finally { if (prev === undefined) delete process.env.CPT_LUME; else process.env.CPT_LUME = prev; desktop._resetTools(); fs.rmSync(dir, { recursive: true, force: true }); }
+  //  carryIdentity — 가짜 ~/.lume 두 VM
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-home-'));
+  const realHome = os.homedir; os.homedir = () => home;
+  try {
+    fs.mkdirSync(path.join(home, '.lume', 'a'), { recursive: true }); fs.mkdirSync(path.join(home, '.lume', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.lume', 'a', 'config.json'), JSON.stringify({ machineIdentifier: 'ID-A', macAddress: 'aa:aa', cpuCount: 8 }));
+    fs.writeFileSync(path.join(home, '.lume', 'b', 'config.json'), JSON.stringify({ machineIdentifier: 'ID-B', macAddress: 'bb:bb', cpuCount: 4 }));
+    assert.strictEqual(desktop.carryIdentity('a', 'b'), true);
+    const b = JSON.parse(fs.readFileSync(path.join(home, '.lume', 'b', 'config.json'), 'utf8'));
+    assert.deepStrictEqual([b.machineIdentifier, b.macAddress, b.cpuCount], ['ID-A', 'aa:aa', 4], '식별자·MAC 만 옮기고 자원은 그대로');
+  } finally { os.homedir = realHome; fs.rmSync(home, { recursive: true, force: true }); }
+  const src = fs.readFileSync(path.join(__dirname, '..', 'desktop-ax.jxa.js'), 'utf8');
+  assert.ok(/attr\(appEl, 'AXWindows'\)/.test(src) && /attr\(appEl, 'AXMenuBar'\)/.test(src), 'AX 뿌리는 AXWindows+AXMenuBar');
+  assert.ok(/depth > 0 && role === 'AXApplication'\) return/.test(src), 'Application 대리 요소는 안 탄다(Setup Assistant 무한 재귀)');
+  assert.ok(/menuBarOwningApplication/.test(src), '앞 앱 = 메뉴 바를 쥔 앱');
 });
