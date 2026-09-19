@@ -280,6 +280,10 @@ export const api = {
   desktopStart: () => invoke("emulator_local", { cmd: "desktop.start", args: {} }),
   desktopStop: () => invoke("emulator_local", { cmd: "desktop.stop", args: {} }),
   desktopDelete: () => invoke("emulator_local", { cmd: "desktop.delete", args: {} }),
+  desktopSnapshots: () => invoke("emulator_local", { cmd: "desktop.snapshots", args: {} }),
+  desktopSnapshot: (label) => invoke("emulator_local", { cmd: "desktop.snapshot", args: { label: label || "" } }),
+  desktopRestore: (name) => invoke("emulator_local", { cmd: "desktop.restore", args: { name } }),
+  desktopSnapshotDelete: (name) => invoke("emulator_local", { cmd: "desktop.snapshot.delete", args: { name } }),
   emulatorStreamStart: (id, opts) =>
     invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
   emulatorStreamStop: (streamId) =>

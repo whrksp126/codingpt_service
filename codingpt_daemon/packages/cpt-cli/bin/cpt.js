@@ -320,6 +320,8 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
   desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
   desktop provision                     첫 설정 다시(자동 로그인·절전 끔 — 처음 켤 때는 자동으로 한다)
+  desktop snapshot [라벨] | snapshots    지금 상태를 저장(끄고 2초 복제·다시 켬 ~30초) / 목록 — 위험한 작업 전에
+  desktop restore <이름>                 스냅샷으로 되돌리기(지금 상태는 사라진다 — 먼저 사용자에게 알려라)
   desktop show                          사용자가 보고 있는 기기에 데스크톱 탭을 띄운다
   desktop open <앱|URL>                 앱 실행(open -a) 또는 게스트 브라우저로 URL(호스트 localhost 자동 변환)
   desktop run -- <명령>                 게스트 셸에서 실행
@@ -773,6 +775,23 @@ async function main() {
           const r = await request('desktop.tap', { text: rest[0], app: flags.app || undefined, role: flags.role || undefined, from: 'agent' }, { timeoutMs: 120000 });
           return out(r, flags, `클릭: ${r.node.role} ${JSON.stringify(r.node.title || r.node.desc || r.node.value || '')} @${r.x},${r.y} (${r.app})`);
         }
+        if (c2 === 'snapshots') {
+          const r = await request('desktop.snapshots', {});
+          if (flags.json) return printJson(r);
+          const fmt = (s) => `${s.name}  ${new Date(s.at).toLocaleString()}${s.label ? '  ' + s.label : ''}`;
+          process.stdout.write(r.snapshots.length ? r.snapshots.map(fmt).join('\n') + '\n' : '(스냅샷 없음)\n');
+          return;
+        }
+        if (c2 === 'snapshot') {
+          const r = await request('desktop.snapshot', { label: rest[0] || '' }, { timeoutMs: 240000 });
+          return out(r, flags, `스냅샷 저장: ${r.name}${r.restarted ? ' (끄고 저장한 뒤 다시 켰어요)' : ''}`);
+        }
+        if (c2 === 'restore') {
+          if (!rest[0]) { process.stderr.write('사용법: cpt desktop restore <스냅샷 이름>  (cpt desktop snapshots 로 목록)\n'); process.exitCode = 2; return; }
+          const r = await request('desktop.restore', { name: rest[0] }, { timeoutMs: 240000 });
+          return out(r, flags, `되돌렸어요: ${r.name}${r.restarted ? ' (다시 켰어요)' : ''}`);
+        }
+        if (c2 === 'snapshot-delete') return out(await request('desktop.snapshot.delete', { name: rest[0] }, { timeoutMs: 60000 }), flags, '삭제했어요');
         if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
         if (c2 === 'connect' || c2 === 'disconnect') {
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
@@ -781,7 +800,7 @@ async function main() {
           const tail = r.restarted ? ' (에이전트 PC 를 다시 켰어요 — 바로 쓸 수 있어요)' : (r.changed ? '' : ' (이미 그 상태)');
           return out(r, flags, c2 === 'connect' ? `연결: ${r.host} → ${r.guest}${tail}` : `해제: ${r.host}${tail}`);
         }
-        process.stderr.write('사용법: cpt desktop status|start|stop|provision|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.stderr.write('사용법: cpt desktop status|start|stop|provision|snapshot [라벨]|snapshots|restore <이름>|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
         return;
       }

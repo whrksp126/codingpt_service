@@ -46,7 +46,7 @@ export async function openDesktopSheet() {
 
 async function paint(quiet) {
   if (!el) return;
-  let st = null, cfg = null;
+  let st = null, cfg = null, snaps = { snapshots: [] };
   try { [st, cfg] = await Promise.all([api.desktopStatus(), api.desktopSettings()]); }
   catch (e) {
     if (quiet) return;
@@ -56,7 +56,9 @@ async function paint(quiet) {
   const body = el.querySelector(".ds-body");
   if (!body) return;
   //  진행률만 바뀌는 동안 포커스·스크롤이 튀지 않게, 서명이 같으면 다시 그리지 않는다.
-  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, st.screen]);
+  const hasVm = st.phase === "running" || st.phase === "stopped";
+  if (hasVm) { try { snaps = await api.desktopSnapshots(); } catch (_) { /* 목록 없이 그린다 */ } }
+  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
   if (body.dataset.sig === sig) return;
   body.dataset.sig = sig;
 
@@ -103,6 +105,12 @@ async function paint(quiet) {
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
       <div class="ds-kv"><span>${i18n.t('메모리')}</span><b><select id="dsMem">${memOpts.map((g) => `<option value="${g}" ${g === res.memGB ? "selected" : ""}>${g} GB</option>`).join("")}</select> / ${st.hostGB || "?"} GB</b></div>
       <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div></div>
+    ${hasVm ? `<div class="ds-grp"><div class="ds-l">${i18n.t('스냅샷')}</div>
+      ${(snaps.snapshots || []).map((x) => `<div class="ds-kv ds-snap"><span>${escapeHtml(new Date(x.at).toLocaleString())}${x.label ? ` · ${escapeHtml(x.label)}` : ""}</span>
+        <b><button class="fp-newfolder" data-restore="${escapeHtml(x.name)}">${i18n.t('되돌리기')}</button> <button class="fp-newfolder ds-x" data-snapdel="${escapeHtml(x.name)}" title="${i18n.t('삭제')}">×</button></b></div>`).join("")
+        || `<div class="ds-warn">${i18n.t('저장한 스냅샷이 없어요.')}</div>`}
+      <div class="ds-actions"><button class="fp-btn" id="dsSnap">${i18n.t('지금 상태 저장')}</button></div>
+      <div class="ds-warn">${i18n.t('저장·되돌리기는 에이전트 PC 를 잠깐 끄고 합니다(약 30초). 최대 {n}개, 오래된 것부터 지워집니다.', { n: snaps.max || 5 })}</div></div>` : ""}
     <div class="ds-grp"><div class="ds-l">${i18n.t('알아둘 것')}</div>
       <div class="ds-warn">${i18n.t('앱스토어 앱은 대부분 실행되지 않습니다. Docker·Android 에뮬레이터는 이 맥(호스트)에서 돌고 에이전트 PC 에서 네트워크로 씁니다. iOS 시뮬레이터는 기존 시뮬레이터 탭을 그대로 쓰세요.')}</div>
       <div class="ds-warn">${i18n.t('메모리')} ${st.minHostGB || 32} GB ${i18n.t('이상인 Mac 에서만 켤 수 있어요')} (${i18n.t('이 Mac')}: ${st.hostGB || "?"} GB)</div></div>
@@ -117,6 +125,15 @@ async function paint(quiet) {
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); b.disabled = false; }
   };
   body.querySelector("#dsPull")?.addEventListener("click", guard(() => api.desktopPull()));
+  body.querySelector("#dsSnap")?.addEventListener("click", guard(async () => {
+    const label = window.prompt(i18n.t('스냅샷 이름(선택)'), "") ; if (label === null) throw new Error("");
+    await api.desktopSnapshot(label);
+  }));
+  for (const b of body.querySelectorAll("[data-restore]")) b.addEventListener("click", guard(async (ev) => {
+    if (!window.confirm(i18n.t('이 스냅샷으로 되돌릴까요? 그 뒤에 에이전트 PC 안에서 바뀐 것은 사라집니다.'))) throw new Error("");
+    await api.desktopRestore(ev.currentTarget.dataset.restore);
+  }));
+  for (const b of body.querySelectorAll("[data-snapdel]")) b.addEventListener("click", guard(async (ev) => { await api.desktopSnapshotDelete(ev.currentTarget.dataset.snapdel); }));
   body.querySelector("#dsStart")?.addEventListener("click", guard(() => api.desktopStart()));
   body.querySelector("#dsStop")?.addEventListener("click", guard(() => api.desktopStop()));
   body.querySelector("#dsRestart")?.addEventListener("click", guard(async () => { await api.desktopStop(); await api.desktopStart(); }));

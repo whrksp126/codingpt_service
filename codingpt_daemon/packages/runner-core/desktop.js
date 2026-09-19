@@ -38,7 +38,7 @@ const SSH_PASSWORD = 'lume';                 // vanilla 이미지 기본 — 자
  *  TCC(접근성·화면 기록)는 SIP 가 켜져 있어 여기서 못 만진다(2026-09-19 실측: `csrutil status` enabled) — 필요한 순간
  *  게스트가 띄우는 허용 창을 pane 에서 한 번 눌러 준다. 번호를 올리면 이미 준비된 VM 에도 다시 돈다.
  */
-const PROVISION_VER = 1;
+const PROVISION_VER = 2;   // 2 = Safari 첫 실행 안내(검색 제안)·Tips 알림("macOS 새 기능") 끄기
 /**
  * /etc/kcpassword — 자동 로그인 비밀번호 파일. `sysadminctl -autologin set` 은 이 이미지에서 `SACSetAutoLoginPassword error:22`
  *  로 실패한다(2026-09-19 실측) — loginwindow 가 읽는 파일을 직접 쓴다. 형식: 11바이트 키로 XOR, 12의 배수로 0 패딩.
@@ -66,6 +66,13 @@ defaults write com.apple.SetupAssistant LastSeenCloudProductVersion "$(sw_vers -
 defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion "$(sw_vers -buildVersion)"
 sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
 defaults write com.apple.CrashReporter DialogType none
+# v2 — 게스트 Safari 의 "검색 제안" 첫 실행 안내(Safari 는 샌드박스라 컨테이너 안 plist 가 정본 — ssh 는 Full Disk Access 라 쓸 수 있다, 실측)
+mkdir -p ~/Library/Containers/com.apple.Safari/Data/Library/Preferences
+defaults write ~/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari UniversalSearchFeatureNotificationHasBeenDisplayed -bool true
+defaults write com.apple.Safari UniversalSearchFeatureNotificationHasBeenDisplayed -bool true
+# v2 — Tips("See what's new in macOS") 알림 에이전트 — SIP 때문에 bootout 은 못 하지만 disable 은 다음 로그인부터 먹는다(실측)
+launchctl disable gui/$(id -u)/com.apple.tipsd 2>/dev/null || true
+pkill -x tipsd 2>/dev/null || true
 [ "$(sudo defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser)" = "${SSH_USER}" ] && sudo test -s /etc/kcpassword && echo CPT_PROVISION_OK
 `;
 
@@ -219,6 +226,71 @@ function pull() {
   return pullState;
 }
 
+// ── 스냅샷(되돌리기) ─────────────────────────────────────────────────────────
+/**
+ * 에이전트가 VM 을 망쳤을 때를 위한 보험. `lume clone` = APFS 클론이라 2초·디스크 0 증가(실측 2026-09-17).
+ *  일관성을 위해 **끈 채로** 복제한다(켜져 있으면 끄고 → 복제 → 다시 켬, ~30초). 이름은 `<VM>--snap-<시각>[-라벨]`,
+ *  최대 SNAP_MAX 개(오래된 것부터 지움). 되돌리기 = 지금 VM 삭제 → 스냅샷을 VM 이름으로 복제 → 켬(스냅샷은 남는다).
+ */
+const SNAP_PREFIX = `${VM_NAME}--snap-`;
+const SNAP_MAX = 5;
+function snapName(label) {
+  const ts = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
+  const lab = String(label || '').trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  return SNAP_PREFIX + ts + (lab ? '-' + lab : '');
+}
+async function lumeLs() {
+  const out = String(await lume(['ls', '-f', 'json'], { timeoutMs: 15000 }));
+  const i = out.indexOf('['); if (i < 0) return [];
+  try { return JSON.parse(out.slice(i)); } catch (_) { return []; }
+}
+async function snapshots() {
+  const rows = (await lumeLs()).filter((v) => String(v.name || '').startsWith(SNAP_PREFIX));
+  return rows.map((v) => {
+    const rest = String(v.name).slice(SNAP_PREFIX.length);
+    const m = /^(\d{8})-(\d{6})(?:-(.*))?$/.exec(rest);
+    const at = m ? Date.UTC(+m[1].slice(0, 4), +m[1].slice(4, 6) - 1, +m[1].slice(6, 8), +m[2].slice(0, 2), +m[2].slice(2, 4), +m[2].slice(4, 6)) : 0;
+    return { name: v.name, label: m && m[3] ? m[3] : '', at, allocated: v.diskSize && v.diskSize.allocated };
+  }).sort((a, b) => b.at - a.at);
+}
+/** 켜져 있으면 끄고 fn 을 돌린 뒤 다시 켠다 — 스냅샷·되돌리기가 같은 모양을 쓴다. */
+async function withStopped(fn) {
+  const wasRunning = (await status()).phase === 'running';
+  if (wasRunning) await stop();
+  const r = await fn();
+  invalidateInfo();
+  if (wasRunning) await start();
+  return { ...r, restarted: wasRunning };
+}
+async function snapshot(label) {
+  if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
+  if (!(await vmInfo(true))) throw new Error('에이전트 PC 가 아직 없어요');
+  const name = snapName(label);
+  return withStopped(async () => {
+    await lume(['clone', VM_NAME, name], { timeoutMs: 120000 });
+    //  오래된 것 정리 — 지금 만든 것은 목록 맨 앞이라 안 지워진다.
+    const all = await snapshots();
+    for (const s of all.slice(SNAP_MAX)) { try { await lume(['delete', s.name, '--force'], { timeoutMs: 60000 }); } catch (_) { /* 다음에 */ } }
+    return { ok: true, name, snapshots: await snapshots() };
+  });
+}
+async function restore(name) {
+  const n = String(name || '');
+  if (!n.startsWith(SNAP_PREFIX)) throw new Error('스냅샷 이름이 아니에요');
+  if (!(await snapshots()).some((s) => s.name === n)) throw new Error(`스냅샷이 없어요: ${n}`);
+  return withStopped(async () => {
+    await lume(['delete', VM_NAME, '--force'], { timeoutMs: 60000 });
+    await lume(['clone', n, VM_NAME], { timeoutMs: 120000 });
+    return { ok: true, name: n };
+  });
+}
+async function snapshotDelete(name) {
+  const n = String(name || '');
+  if (!n.startsWith(SNAP_PREFIX)) throw new Error('스냅샷 이름이 아니에요');
+  await lume(['delete', n, '--force'], { timeoutMs: 60000 });
+  return { ok: true, snapshots: await snapshots() };
+}
+
 /** 에이전트 PC 삭제 — 게스트 디스크·설정을 지운다(캐시 이미지는 남긴다). 켜져 있으면 먼저 끈다. */
 async function remove() {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
@@ -260,11 +332,14 @@ async function start(o = {}) {
 /** VM 프로세스를 띄운다(설정의 자원·공유 폴더). 켜졌는지는 waitRunning 이 본다. */
 async function launch(o = {}) {
   _axOk = false;   // 권한은 VM 안에 남지만 확인은 다시 한다(재시작 뒤 첫 ax 호출 1회)
+  await reapVmProcess();   // 꺼진 채 남은 옛 프로세스가 포트를 쥐고 있으면 켜기가 실패한다
   const s = loadSettings();
   const res = defaultResources();
   try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
   //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
-  vncPassword = crypto.randomBytes(8).toString('hex').slice(0, 12);
+  //  ★ VNC 인증(DES)은 비밀번호 **앞 8바이트만** 쓴다 — 16진수 8자는 32비트에 그친다. 대소문자+숫자로 62^8≈47비트.
+  //   (VNC 서버는 lume 이 모든 인터페이스에 열고 바인드 옵션이 없다 — 비밀번호가 유일한 문이라 강도를 올린다.)
+  vncPassword = strongVncPassword();
   const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
   for (const d of normalizeDirs(o.sharedDirs || s.sharedDirs)) args.push('--shared-dir', `${d}:rw`);
   //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
@@ -342,6 +417,15 @@ async function connectDir(dir, on) {
   return { ok: true, host: abs, guest: on ? path.posix.join('/Volumes/My Shared Files', path.basename(abs)) : null, changed, restarted, sharedDirs: [...set] };
 }
 
+/** 대소문자+숫자 12자(앞 8자가 실효) — crypto.randomInt 로 편향 없이. */
+function strongVncPassword() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < 12; i++) out += A[crypto.randomInt(A.length)];
+  //  첫 글자가 숫자여도 lume 은 플래그로 안 읽는다('-' 만 문제) — 그래도 글자로 시작하게 해 둔다.
+  return /^[A-Za-z]/.test(out) ? out : 'k' + out.slice(1);
+}
+
 /** vncUrl = vnc://:password@host:port — 우리가 준 비밀번호가 아니면(이미 켜져 있던 VM) URL 의 것을 쓴다. */
 function parseVncUrl(u) {
   const m = /^vnc:\/\/(?:([^:@]*):)?([^@]*)@([^:]+):(\d+)/.exec(String(u || ''));
@@ -392,7 +476,7 @@ async function stop() {
   const t0 = Date.now();
   while (Date.now() - t0 < 30000) {
     const i = await vmInfo(true);
-    if (!i || !/running/i.test(String(i.status || ''))) { invalidateInfo(); return { ok: true, graceful: true }; }
+    if (!i || !/running/i.test(String(i.status || ''))) { await reapVmProcess(); invalidateInfo(); return { ok: true, graceful: true }; }
     await sleep(1000);
   }
   const pid = vmPid();
@@ -404,6 +488,18 @@ async function stop() {
   }
   invalidateInfo();
   return { ok: true, forced: 'SIGKILL' };
+}
+/**
+ * 게스트는 내려갔는데 `lume run` 프로세스가 남아 VNC 포트를 쥐고 있는 경우가 있다(2026-09-19 실측: 정상 종료 뒤
+ *  status=stopped 인데 프로세스 생존 → 다음 켜기가 "port 5951 already in use" 로 실패). 잠깐 기다렸다 신호로 거둔다.
+ */
+async function reapVmProcess() {
+  for (let i = 0; i < 8; i++) { const pid = vmPid(); if (!pid) return; await sleep(500); }
+  const pid = vmPid(); if (!pid) return;
+  try { process.kill(pid, 'SIGINT'); } catch (_) { /* noop */ }
+  for (let i = 0; i < 10; i++) { await sleep(500); if (!alive(pid)) return; }
+  try { process.kill(pid, 'SIGKILL'); } catch (_) { /* noop */ }
+  await sleep(500);
 }
 /** VM 프로세스 pid — Lume 이 VM 디렉터리에 남기는 owner 파일(실측 `.native-display-owner.json`), 없으면 pgrep. */
 function vmPid() {
@@ -422,9 +518,18 @@ function alive(pid) { try { process.kill(pid, 0); return true; } catch (_) { ret
 /** 게스트 셸. 문자열 한 줄로 받는다(lume ssh 가 원격 셸에 그대로 넘긴다). */
 async function exec(cmd, o = {}) {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
-  const out = await lume(['ssh', VM_NAME, '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', String(Math.ceil((o.timeoutMs || 30000) / 1000)), String(cmd)],
-    { timeoutMs: (o.timeoutMs || 30000) + 5000 });
-  return String(out);
+  //  부팅 직후엔 VNC 는 떴는데 sshd 가 몇 초 늦는다(실측: 스냅샷 뒤 다시 켠 직후 "SSH is not available") — 그 오류만 20초까지 되풀이.
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const out = await lume(['ssh', VM_NAME, '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', String(Math.ceil((o.timeoutMs || 30000) / 1000)), String(cmd)],
+        { timeoutMs: (o.timeoutMs || 30000) + 5000 });
+      return String(out);
+    } catch (e) {
+      if (!/SSH is not available|has no IP address/i.test(String(e && e.message)) || Date.now() - t0 > 30000) throw e;
+      await sleep(1500);
+    }
+  }
 }
 
 // ── 화면 ─────────────────────────────────────────────────────────────────────
@@ -766,6 +871,10 @@ async function handle(method, p = {}) {
   if (m === 'desktop.openApp') return openApp(p.name);
   if (m === 'desktop.openUrl') return openUrl(p.url);
   if (m === 'desktop.path') return { host: p.path, guest: guestPath(p.path) };
+  if (m === 'desktop.snapshots') return { snapshots: await snapshots(), max: SNAP_MAX };
+  if (m === 'desktop.snapshot') return snapshot(p.label);
+  if (m === 'desktop.restore') return restore(p.name);
+  if (m === 'desktop.snapshot.delete') return snapshotDelete(p.name);
   if (m === 'desktop.ax') return axTree(p.app || p.pid);
   if (m === 'desktop.tap') return axTap(String(p.text || ''), { app: p.app, role: p.role, button: p.button, from: p.from });
   if (m === 'desktop.connect' || m === 'desktop.disconnect') return connectDir(String(p.dir || ''), m === 'desktop.connect');
@@ -781,5 +890,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

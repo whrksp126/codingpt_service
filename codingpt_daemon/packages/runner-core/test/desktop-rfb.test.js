@@ -221,3 +221,12 @@ test('AX 트리 스크립트 동봉 + axFind 우선순위', () => {
   assert.strictEqual(desktop.axFind(tree, 'save', { role: 'Group' }).i, 0, 'role 지정');
   assert.strictEqual(desktop.axFind(tree, 'nothing'), null);
 });
+
+// 스냅샷(2026-09-19) — 이름 규칙(접두사·시각·라벨 정리)과 VNC 비밀번호 강도(DES 는 앞 8자만: 대소문자+숫자, '-' 로 시작 금지).
+test('스냅샷 이름 규칙 + VNC 비밀번호는 영숫자 12자', () => {
+  const n = desktop.snapName('Before Test!! 한글');
+  assert.ok(n.startsWith(desktop.SNAP_PREFIX), n);
+  assert.match(n.slice(desktop.SNAP_PREFIX.length), /^\d{8}-\d{6}-before-test-한글$/);
+  assert.match(desktop.snapName(''), new RegExp('^' + desktop.SNAP_PREFIX.replace(/[-]/g, '\\-') + '\\d{8}-\\d{6}$'));
+  for (let i = 0; i < 50; i++) { const p = desktop.strongVncPassword(); assert.match(p, /^[A-Za-z][A-Za-z0-9]{11}$/, p); }
+});
