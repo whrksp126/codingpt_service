@@ -665,6 +665,14 @@ export class EmulatorView {
     void this.pollDesk(false);
   }
   stopDeskPoll() { if (this._deskTimer) { clearInterval(this._deskTimer); this._deskTimer = null; } }
+  /** 꺼져 있을 때 화면 한가운데 한 줄 — 켜는 단계(step)를 데몬이 알려 준다(첫 켜기는 설정+재시작이 붙어 1~2분). */
+  deskOffText() {
+    const st = this.deskStatus || {};
+    if (st.phase !== "starting") return i18n.t('에이전트 PC 가 꺼져 있어요');
+    if (st.step === "provision") return i18n.t('처음 켜는 거라 설정하는 중이에요 (1~2분)');
+    if (st.step === "reboot") return i18n.t('설정을 적용하려고 다시 켜는 중…');
+    return i18n.t('켜는 중…');
+  }
   async pollDesk(force) {
     if (this._disposedDesk) return;
     let st = null;
@@ -672,8 +680,10 @@ export class EmulatorView {
     const prev = this.deskStatus;
     this.deskStatus = st;
     this.deskPaused = !!(st && st.paused);
-    const sig = (x) => x ? `${x.phase}|${x.paused}|${x.handoff ? x.handoff.reason : ""}` : "";
+    const sig = (x) => x ? `${x.phase}|${x.step || ""}|${x.paused}|${x.handoff ? x.handoff.reason : ""}` : "";
     if (force || sig(prev) !== sig(st)) {
+      const off = this.el.querySelector(".emu-off");
+      if (off) off.textContent = this.deskOffText();
       //  바만 갈아 끼운다 — 화면(<img>)을 다시 만들면 프레임 루프가 끊긴다.
       const dev = this.device();
       const booted = st && st.phase === "running";
@@ -1000,7 +1010,7 @@ export class EmulatorView {
       //  꺼진 에이전트 PC — 버튼 대신 한 줄(켜기는 상태 바의 전원 아이콘 하나뿐, 사용자 결정 2026-09-17).
       const off = document.createElement("div");
       off.className = "emu-off";
-      off.textContent = (this.deskStatus && this.deskStatus.phase === "starting") ? i18n.t('켜는 중…') : i18n.t('에이전트 PC 가 꺼져 있어요');
+      off.textContent = this.deskOffText();
       stage.appendChild(off);
     } else if (!booted) {
       const b = document.createElement("button");

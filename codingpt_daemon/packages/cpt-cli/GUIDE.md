@@ -279,7 +279,7 @@ cpt emulator hide                       # 띄운 탭 닫기
 
 ```
 cpt desktop status                      # 준비/정지/실행, 연결된 폴더, 개입 대기 여부
-cpt desktop show                        # 사용자에게 데스크톱 탭을 띄운다(꺼져 있으면 먼저 켠다 — 수십 초)
+cpt desktop show                        # 사용자에게 데스크톱 탭을 띄운다(꺼져 있으면 먼저 켠다 — 수십 초, 맨 처음은 1~2분: 자동 로그인 설정+재시작)
 cpt desktop open Safari                 # 앱 실행. URL 이면 게스트 브라우저로(호스트 localhost 는 자동 변환)
 cpt desktop screenshot                  # 화면을 파일로(경로를 돌려준다) — 좌표는 0~1 비율로 읽어라
 cpt desktop click 0.42 0.31             # 클릭 · double-click · right-click · move · drag x y x2 y2 · scroll x y [dy]

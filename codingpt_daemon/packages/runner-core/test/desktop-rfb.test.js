@@ -158,3 +158,18 @@ test('공유 폴더 경로는 절대 경로로 맞추고 id 도 돌려준다', (
   assert.strictEqual(desktop.dirId(path.join(home, 'other/project/x')), 'other/project/x');
   assert.strictEqual(desktop.dirId('/opt/elsewhere'), '/opt/elsewhere');
 });
+
+// 첫 부팅 프로비저닝(2026-09-19) — 실측으로 굳은 계약 셋: ① `sysadminctl -autologin set` 은 이 이미지에서 error:22 →
+//  /etc/kcpassword 를 직접 쓴다(11바이트 키 XOR·12 배수 0 패딩) ② ssh 에 tty 가 없어 sudo 가 stdin 으로 비밀번호를 받는다
+//  → sudo 뒤에 파이프로 파일을 먹이면 0바이트(실사고) — 파일 쓰기는 `sudo sh -c` 안에서 ③ 성공 표식이 있어야 provisioned.
+test('프로비저닝 스크립트 계약(kcpassword·sudo sh -c·성공 표식)', () => {
+  const sc = desktop.PROVISION_SCRIPT;
+  assert.ok(!/sysadminctl -autologin set/.test(sc), 'sysadminctl -autologin set 은 error:22 — 쓰지 않는다');
+  assert.ok(/sudo sh -c 'echo "[A-Za-z0-9+/=]+" \| base64 -d > \/etc\/kcpassword/.test(sc), 'kcpassword 는 sudo sh -c 안에서 쓴다');
+  assert.ok(!/\| sudo tee/.test(sc), 'sudo 뒤 파이프 금지(stdin 은 비밀번호가 차지)');
+  assert.ok(/autoLoginUser -string lume/.test(sc) && /CPT_PROVISION_OK/.test(sc));
+  //  kcpassword("lume") 실측 값 — 이 바이트로 자동 로그인이 실제로 됐다(2026-09-19, macOS 26.4 게스트).
+  const m = /echo "([A-Za-z0-9+/=]+)" \| base64 -d > \/etc\/kcpassword/.exec(sc);
+  assert.strictEqual(m[1], 'Efw/RtKz3b9f5RJ9');
+  assert.strictEqual(Buffer.from(m[1], 'base64').length, 12);
+});

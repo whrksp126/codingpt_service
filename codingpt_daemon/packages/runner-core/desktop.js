@@ -30,6 +30,44 @@ const MIN_HOST_GB = 32;                      // 이 아래 맥에서는 기능�
 const BOOT_TIMEOUT_MS = 120000;
 const SSH_USER = 'lume';
 const SSH_PASSWORD = 'lume';                 // vanilla 이미지 기본 — 자체 이미지에서 바꾼다
+/**
+ * 첫 부팅 프로비저닝 — 공용 vanilla 이미지에 "누구에게나 필요한 첫 세팅"을 **각 사용자 맥에서** 한 번 한다.
+ *  이미지를 새로 굽거나 우리가 나눠 주지 않는다(21GB 를 우리 회선으로 흘릴 이유가 없고, 사용자 VM 은 밖으로 안 나간다).
+ *  하는 일: 자동 로그인(켤 때마다 lume/lume 을 치던 것) · 절전/화면보호기/잠금 끔(에이전트가 일하는 중에 화면이 잠기면
+ *  끝) · 첫 로그인 설정 도우미(Apple ID·Siri·화면 시간 …) 건너뜀 · 소프트웨어 업데이트/충돌 보고 창 끔.
+ *  TCC(접근성·화면 기록)는 SIP 가 켜져 있어 여기서 못 만진다(2026-09-19 실측: `csrutil status` enabled) — 필요한 순간
+ *  게스트가 띄우는 허용 창을 pane 에서 한 번 눌러 준다. 번호를 올리면 이미 준비된 VM 에도 다시 돈다.
+ */
+const PROVISION_VER = 1;
+/**
+ * /etc/kcpassword — 자동 로그인 비밀번호 파일. `sysadminctl -autologin set` 은 이 이미지에서 `SACSetAutoLoginPassword error:22`
+ *  로 실패한다(2026-09-19 실측) — loginwindow 가 읽는 파일을 직접 쓴다. 형식: 11바이트 키로 XOR, 12의 배수로 0 패딩.
+ */
+function kcpassword(pw) {
+  const key = [0x7d, 0x89, 0x52, 0x23, 0xd2, 0xb3, 0xdd, 0xbf, 0x5f, 0xe5, 0x12];
+  const raw = Buffer.from(pw, 'utf8');
+  const out = Buffer.alloc(Math.ceil((raw.length + 1) / 12) * 12, 0);
+  raw.copy(out);
+  for (let i = 0; i < out.length; i++) out[i] ^= key[i % key.length];
+  return out.toString('base64');
+}
+//  ssh 에 tty 가 없어 sudo 타임스탬프가 안 남는다 — 매번 비밀번호를 stdin 으로 준다(sudo 함수). 그래서 sudo 뒤 명령에
+//  파이프로 뭘 먹일 수 없다(stdin 은 비밀번호가 차지) — 파일 쓰기는 `sudo sh -c` 안에서 한다.
+const PROVISION_SCRIPT = `set -e
+P="${SSH_PASSWORD}"
+sudo() { echo "$P" | command sudo -S -p "" "$@"; }
+sudo sh -c 'echo "${kcpassword(SSH_PASSWORD)}" | base64 -d > /etc/kcpassword && chmod 600 /etc/kcpassword'
+sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string ${SSH_USER}
+sudo pmset -a sleep 0 displaysleep 0 disksleep 0
+defaults -currentHost write com.apple.screensaver idleTime -int 0
+sysadminctl -screenLock off -password "$P" >/dev/null 2>&1 || true
+for k in DidSeeCloudSetup DidSeeSiriSetup DidSeeAppearanceSetup DidSeeTouchIDSetup DidSeeScreenTime DidSeePrivacy DidSeeActivationLock DidSeeiCloudLoginForStorageServices DidSeeAccessibility DidSeeTrueTonePrivacy DidSeeSyncSetup DidSeeSyncSetup2 DidSeeIntelligence SkipFirstLoginOptimization; do defaults write com.apple.SetupAssistant "$k" -bool true; done
+defaults write com.apple.SetupAssistant LastSeenCloudProductVersion "$(sw_vers -productVersion)"
+defaults write com.apple.SetupAssistant LastSeenBuddyBuildVersion "$(sw_vers -buildVersion)"
+sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false
+defaults write com.apple.CrashReporter DialogType none
+[ "$(sudo defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser)" = "${SSH_USER}" ] && sudo test -s /etc/kcpassword && echo CPT_PROVISION_OK
+`;
 
 let toolCache = null;
 function lumeBin() {
@@ -140,7 +178,8 @@ async function status() {
   const running = /running/i.test(String(info.status || ''));
   return {
     ...base,
-    phase: _starting ? 'starting' : (running ? 'running' : 'stopped'),
+    phase: _starting ? 'starting' : (running ? 'running' : 'stopped'), step: _starting ? _step : '',
+    provisioned: (loadSettings().provisioned || 0) >= PROVISION_VER,
     os: info.os, ip: info.ipAddress || null, cpuCount: info.cpuCount, memorySize: info.memorySize, diskSize: info.diskSize,
     display: info.display, vncUrl: running ? (info.vncUrl || null) : null,
     screen: rfb && rfb.ready ? { width: rfb.width, height: rfb.height } : null,
@@ -150,6 +189,7 @@ async function status() {
 
 // ── 수명주기 ───────────────────────────────────────────────────────────────
 let _starting = null;   // Promise | null
+let _step = '';         // 'boot' | 'provision' | 'reboot' — status().step (PC 가 "처음이라 설정 중" 을 보여 준다)
 let rfb = null;         // RfbClient | null
 let vncPassword = '';
 let agentPaused = false; // 사용자가 화면을 만지는 동안 에이전트 입력을 막는다
@@ -194,29 +234,53 @@ async function start(o = {}) {
   _starting = (async () => {
     const st = await status();
     if (st.phase === 'unsupported' || st.phase === 'no-tool' || st.phase === 'no-image') throw new Error(st.reason);
-    if (st.phase !== 'running') {
-      const s = loadSettings();
-      const res = defaultResources();
-      try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
-      //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
-      vncPassword = crypto.randomBytes(8).toString('hex').slice(0, 12);
-      const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
-      for (const d of normalizeDirs(o.sharedDirs || s.sharedDirs)) args.push('--shared-dir', `${d}:rw`);
-      //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
-      //   남은 VM 이 부모 셸 정리에 휩쓸려 5분 만에 소리 없이 죽었다. 데몬이 재시작해도 VM 은 tmux 처럼 살아 있어야 한다.
-      fs.mkdirSync(runtime.stateDir(), { recursive: true });
-      const logFd = fs.openSync(path.join(runtime.stateDir(), 'desktop-vm.log'), 'a');
-      const child = cp.spawn(lumeBin(), args, { detached: true, stdio: ['ignore', logFd, logFd], env: { ...process.env, LANG: 'en_US.UTF-8' } });
-      child.on('error', () => { /* waitRunning 이 시간 초과로 알린다 */ });
-      child.unref();
-      fs.closeSync(logFd);
-      invalidateInfo();
-    }
+    if (st.phase !== 'running') await launch(o);
+    _step = 'boot';
     await waitRunning();
+    if ((loadSettings().provisioned || 0) < PROVISION_VER) {
+      //  첫 설정 → 정상 종료 → 다시 켜기. 게스트 안 `reboot` 는 쓰지 않는다: Virtualization.framework 는 게스트 재시작을
+      //  "VM 정지"로 보고 lume run 프로세스가 끝난다(아무도 다시 안 띄움).
+      await provision();
+      _step = 'reboot';
+      await stop();
+      await launch(o);
+      await waitRunning();
+      await waitLoggedIn();
+    }
     await connectRfb({ waitMs: 30000 });
   })();
-  try { await _starting; } finally { _starting = null; }
+  try { await _starting; } finally { _starting = null; _step = ''; }
   return status();     // _starting 을 비운 뒤에 읽어야 phase 가 'running' 으로 나온다
+}
+
+/** VM 프로세스를 띄운다(설정의 자원·공유 폴더). 켜졌는지는 waitRunning 이 본다. */
+async function launch(o = {}) {
+  const s = loadSettings();
+  const res = defaultResources();
+  try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
+  //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
+  vncPassword = crypto.randomBytes(8).toString('hex').slice(0, 12);
+  const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
+  for (const d of normalizeDirs(o.sharedDirs || s.sharedDirs)) args.push('--shared-dir', `${d}:rw`);
+  //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
+  //   남은 VM 이 부모 셸 정리에 휩쓸려 5분 만에 소리 없이 죽었다. 데몬이 재시작해도 VM 은 tmux 처럼 살아 있어야 한다.
+  fs.mkdirSync(runtime.stateDir(), { recursive: true });
+  const logFd = fs.openSync(path.join(runtime.stateDir(), 'desktop-vm.log'), 'a');
+  const child = cp.spawn(lumeBin(), args, { detached: true, stdio: ['ignore', logFd, logFd], env: { ...process.env, LANG: 'en_US.UTF-8' } });
+  child.on('error', () => { /* waitRunning 이 시간 초과로 알린다 */ });
+  child.unref();
+  fs.closeSync(logFd);
+  invalidateInfo();
+}
+
+/** 자동 로그인 증거 — `who` 에 console 세션이 보일 때까지(부팅 직후 ssh 가 잠깐 안 될 수 있다). */
+async function waitLoggedIn(limitMs = 90000) {
+  const t0 = Date.now();
+  for (;;) {
+    try { if (/console/.test(await exec('who', { timeoutMs: 10000 }))) return true; } catch (_) { /* 부팅 중 */ }
+    if (Date.now() - t0 > limitMs) throw new Error('에이전트 PC 가 자동 로그인되지 않았어요');
+    await sleep(2000);
+  }
 }
 
 async function waitRunning() {
@@ -227,6 +291,26 @@ async function waitRunning() {
     if (Date.now() - t0 > BOOT_TIMEOUT_MS) throw new Error('에이전트 PC 가 시간 안에 켜지지 않았어요');
     await sleep(700);
   }
+}
+
+/**
+ * 프로비저닝 본체 — ssh 로 스크립트를 넣는다(로그인 화면에서도 sshd 는 떠 있다). 자동 로그인 확인은 start() 가
+ *  끄고 다시 켜서 한다(waitLoggedIn). ssh 가 아직 안 뜬 직후엔 60초까지 되풀이. 성공해야 settings.provisioned 를 올린다.
+ */
+async function provision() {
+  _step = 'provision';
+  const t0 = Date.now();
+  let out = '';
+  for (;;) {
+    try { out = await exec(PROVISION_SCRIPT, { timeoutMs: 90000 }); break; }
+    catch (e) {
+      if (Date.now() - t0 > 60000) throw new Error(`에이전트 PC 첫 설정에 실패했어요: ${String(e.message || e).slice(0, 200)}`);
+      await sleep(2000);
+    }
+  }
+  if (!/CPT_PROVISION_OK/.test(out)) throw new Error('에이전트 PC 첫 설정에 실패했어요 (자동 로그인이 켜지지 않음)');
+  saveSettings({ ...loadSettings(), provisioned: PROVISION_VER });
+  return { ok: true, version: PROVISION_VER };
 }
 
 /** vncUrl = vnc://:password@host:port — 우리가 준 비밀번호가 아니면(이미 켜져 있던 VM) URL 의 것을 쓴다. */
@@ -453,6 +537,7 @@ async function handle(method, p = {}) {
   if (m === 'desktop.delete') return remove();
   if (m === 'desktop.start') return start(p);
   if (m === 'desktop.stop') return stop();
+  if (m === 'desktop.provision') { saveSettings({ ...loadSettings(), provisioned: 0 }); if ((await status()).phase === 'running') await stop(); return start(p); }
   if (m === 'desktop.exec') return { out: await exec(String(p.cmd || ''), { timeoutMs: p.timeoutMs }) };
   if (m === 'desktop.frame') return frame(p);
   if (m === 'desktop.input') return input(p);
@@ -471,5 +556,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

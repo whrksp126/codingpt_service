@@ -319,6 +319,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   #  네이티브 앱·창을 다뤄야 하면 사용자 화면이 아니라 **여기서** 한다. 좌표는 0~1 비율.
   desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
   desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
+  desktop provision                     첫 설정 다시(자동 로그인·절전 끔 — 처음 켤 때는 자동으로 한다)
   desktop show                          사용자가 보고 있는 기기에 데스크톱 탭을 띄운다
   desktop open <앱|URL>                 앱 실행(open -a) 또는 게스트 브라우저로 URL(호스트 localhost 자동 변환)
   desktop run -- <명령>                 게스트 셸에서 실행
@@ -751,6 +752,7 @@ async function main() {
         if (c2 === 'scroll') return out(await inp({ type: 'scroll', x: Number(rest[0]), y: Number(rest[1]), dy: Number(rest[2] != null ? rest[2] : 3) }), flags, 'ok');
         if (c2 === 'key') return out(await inp({ type: 'key', key: rest[0] }), flags, 'ok');
         if (c2 === 'type') return out(await inp({ type: 'text', text: rest.join(' ') }), flags, 'ok');
+        if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
         if (c2 === 'connect' || c2 === 'disconnect') {
           const cur = await request('desktop.settings.get', {});
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
@@ -761,7 +763,7 @@ async function main() {
           const r = await request('desktop.settings.set', { sharedDirs: [...set] });
           return out(r, flags, `${c2 === 'connect' ? '연결' : '해제'}: ${dir}\n(다음 시작 때 반영됩니다 — 켜져 있으면 cpt desktop stop && cpt desktop start)`);
         }
-        process.stderr.write('사용법: cpt desktop status|start|stop|show|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.stderr.write('사용법: cpt desktop status|start|stop|provision|show|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
         return;
       }
