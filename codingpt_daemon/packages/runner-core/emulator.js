@@ -1119,7 +1119,13 @@ async function streamStart(args) {
   const a = args || {};
   const p = parseId(a.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme !== 'android' && p.scheme !== 'ios') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
+  if (p.scheme !== 'android' && p.scheme !== 'ios' && p.scheme !== 'desktop') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
+  if (p.scheme === 'desktop') {
+    const d = require('./desktop');
+    const st = await d.status();
+    if (st.phase !== 'running') throw new Error('에이전트 PC 가 꺼져 있어요');
+    return lazyStream().start({ serial: a.id, deviceId: a.id, kind: 'desktop' });
+  }
   const t = tools();
   if (p.scheme === 'android' && !t.adb) throw new Error('adb 를 찾을 수 없어요');
   if (p.scheme === 'ios' && !serveSim().available()) {

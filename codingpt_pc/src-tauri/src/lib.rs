@@ -582,6 +582,11 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
         if bundled_lume.exists() {
             cmd.env("CPT_LUME", bundled_lume);
         }
+        // 번들 vt-h264(사이드카 base/vt-h264) — 에이전트 PC 라이브 영상 인코더(VideoToolbox). 데몬 desktop.js 가 우선 사용.
+        let bundled_vt = base.join("vt-h264");
+        if bundled_vt.exists() {
+            cmd.env("CPT_VT_H264", bundled_vt);
+        }
     }
     #[cfg(windows)]
     {

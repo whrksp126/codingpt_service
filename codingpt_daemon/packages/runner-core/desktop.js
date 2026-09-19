@@ -437,6 +437,114 @@ async function frame(o = {}) {
   return { mime: img.mime, base64: img.buf.toString('base64'), width: c.width, height: c.height, bytes: img.buf.length };
 }
 
+// ── 라이브 영상(H.264) ─────────────────────────────────────────────────────────
+/**
+ * VNC 프레임버퍼(BGRX) → vt-h264(VideoToolbox, 하드웨어) → Annex-B 조각. `ScrcpySession`/`ServeSimSession` 과
+ *  **같은 인터페이스**(start/configPacket/closed/close/meta) 라 emulator-stream 의 뷰어·GOP·배압 배관을 그대로 탄다.
+ *  프레임 폴링(frame)과 같은 RFB 연결을 쓴다 — 갱신 요청은 pending 큐로 겹쳐도 안전하다.
+ *  해상도가 바뀌면(로그인 1280×720 → 1440×900) 인코더를 새로 띄운다(SPS 가 바뀐다 — configPacket 도 새로).
+ */
+const STREAM_FPS = 20;
+function vtH264Bin() {
+  const cands = [process.env.CPT_VT_H264, path.join(runtime.stateDir(), 'bin', 'vt-h264'),
+    process.env.CPT_SIDECAR_DIR ? path.join(process.env.CPT_SIDECAR_DIR, 'vt-h264') : null].filter(Boolean);
+  return cands.find((p) => { try { return fs.existsSync(p); } catch (_) { return false; } }) || '';
+}
+/** 개발 편의 — 번들이 없으면 swiftc 로 한 번 빌드해 ~/.codingpt/bin 에 둔다(사용자 맥에는 번들이 있다). */
+async function ensureVtH264() {
+  const have = vtH264Bin();
+  if (have) return have;
+  const src = path.join(__dirname, 'native', 'vt-h264.swift');
+  const out = path.join(runtime.stateDir(), 'bin', 'vt-h264');
+  if (!fs.existsSync(src) || !fs.existsSync('/usr/bin/swiftc')) throw new Error('이 PC 에서는 에이전트 PC 라이브 화면을 쓸 수 없어요 (vt-h264 없음)');
+  fs.mkdirSync(path.dirname(out), { recursive: true });
+  await run('/usr/bin/swiftc', ['-O', '-o', out, src], { timeoutMs: 180000 });
+  return out;
+}
+class DesktopStreamSession {
+  constructor(cb) {
+    this.cb = cb || {};
+    this.closed = false;
+    this.configPacket = null;
+    this.meta = null;
+    this.orientationKnown = false;
+    this.orientation = 'landscape';
+    this.enc = null;
+    this.pending = Buffer.alloc(0);
+  }
+  static async start(_opts, cb) {
+    const s = new DesktopStreamSession(cb);
+    s.bin = await ensureVtH264();
+    s.rfb = await connectRfb();
+    s.meta = { width: s.rfb.width, height: s.rfb.height, codec: 'h264' };
+    try { s.cb.onMeta?.(s.meta); } catch (_) { /* noop */ }
+    s._spawnEncoder();
+    s._onResize = ({ width, height }) => { s.meta = { width, height, codec: 'h264' }; try { s.cb.onMeta?.(s.meta); } catch (_) { /* noop */ } s._spawnEncoder(); };
+    s.rfb.on('resize', s._onResize);
+    s._onClose = () => s._fail('에이전트 PC 화면(VNC)이 끊겼어요');
+    s.rfb.on('close', s._onClose);
+    void s._loop();
+    return s;
+  }
+  _spawnEncoder() {
+    if (this.enc) { try { this.enc.kill('SIGKILL'); } catch (_) { /* noop */ } this.enc = null; }
+    this.configPacket = null; this.pending = Buffer.alloc(0);
+    const { width, height } = this.meta;
+    const enc = cp.spawn(this.bin, [], { stdio: ['pipe', 'pipe', 'ignore'] });
+    this.enc = enc;
+    enc.stdin.on('error', () => { /* 종료 경합 — 루프가 closed 를 본다 */ });
+    enc.stdout.on('data', (d) => this._onChunk(enc, d));
+    enc.on('exit', () => { if (this.enc === enc && !this.closed) this._fail('영상 인코더가 끝났어요'); });
+    enc.stdin.write(`${width} ${height} ${STREAM_FPS} 4000000\n`);
+    this._sizeAtSpawn = width * height * 4;
+  }
+  _onChunk(enc, d) {
+    if (this.enc !== enc) return;                 // 옛 인코더의 꼬리 — 버린다(해상도가 바뀐 뒤)
+    this.pending = Buffer.concat([this.pending, d]);
+    for (;;) {
+      if (this.pending.length < 5) return;
+      const n = this.pending.readUInt32BE(0);
+      if (this.pending.length < 5 + n) return;
+      const flags = this.pending[4]; const data = Buffer.from(this.pending.subarray(5, 5 + n));
+      this.pending = this.pending.subarray(5 + n);
+      if (flags & 1) { this.configPacket = data; this._emit({ config: true, keyFrame: false, data }); }
+      else this._emit({ config: false, keyFrame: !!(flags & 2), data });
+    }
+  }
+  _emit(f) { try { this.cb.onFrame?.(f); } catch (e) { console.warn(`[desktop] 프레임 처리 실패: ${(e && e.message) || e}`); } }
+  async _loop() {
+    const gap = Math.round(1000 / STREAM_FPS);
+    let lastSent = 0;
+    while (!this.closed) {
+      const t0 = Date.now();
+      let changed = false;
+      try { changed = await this.rfb.requestUpdate(true, gap); } catch (_) { if (!this.closed) this._fail('VNC 갱신 실패'); return; }
+      if (this.closed) return;
+      //  바뀐 프레임만 인코더에 넣되, 1초에 한 장은 그대로 넣는다 — 정지 화면에서도 키프레임 주기가 살아 있어
+      //   늦게 붙는 화면이 GOP 되감기로 바로 그린다.
+      const now = Date.now();
+      if ((changed || this.rfb.dirty || now - lastSent > 1000) && this.enc && this.rfb.fb && this.rfb.fb.length === this._sizeAtSpawn) {
+        this.rfb.dirty = false; lastSent = now;
+        try { this.enc.stdin.write(this.rfb.fb); } catch (_) { /* exit 핸들러가 정리 */ }
+      }
+      const spent = Date.now() - t0;
+      if (spent < gap) await sleep(gap - spent);
+    }
+  }
+  _fail(msg) {
+    if (this.closed) return;
+    try { this.cb.onError?.(new Error(msg)); } catch (_) { /* noop */ }
+    this.close();
+  }
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    try { this.rfb?.off('resize', this._onResize); this.rfb?.off('close', this._onClose); } catch (_) { /* noop */ }
+    if (this.enc) { try { this.enc.stdin.end(); this.enc.kill('SIGKILL'); } catch (_) { /* noop */ } this.enc = null; }
+    try { this.cb.onClose?.(); } catch (_) { /* noop */ }
+  }
+}
+
 // ── 입력 ─────────────────────────────────────────────────────────────────────
 const B_LEFT = 1, B_RIGHT = 4, B_WHEEL_UP = 8, B_WHEEL_DOWN = 16;
 function px(n, max) { const v = Number(n); return Math.max(0, Math.min(max - 1, Math.round((Number.isFinite(v) ? v : 0) * max))); }
@@ -673,5 +781,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 module.exports = {
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
 };

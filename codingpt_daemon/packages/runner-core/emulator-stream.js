@@ -182,6 +182,8 @@ async function start({ adb, serial, deviceId, kind, maxSize, maxFps, bitRate }) 
   //   안드로이드=scrcpy(adb), iOS=serve-sim(시뮬레이터 프레임버퍼). 둘 다 Annex-B H.264 를
   //   `{config,keyFrame,data}` 로 올려 주므로, 아래 뷰어·GOP·배압 배관은 한 벌로 끝난다.
   const makeSession = (cbs) => {
+    //  에이전트 PC = VNC 프레임버퍼 → VideoToolbox(desktop.js DesktopStreamSession). 같은 바이트 계약.
+    if (kind === 'desktop') return require('./desktop').DesktopStreamSession.start({}, cbs);
     if (kind === 'ios') {
       const { ServeSimSession } = require('./serve-sim-session');
       return ServeSimSession.start({ udid: serial }, cbs);

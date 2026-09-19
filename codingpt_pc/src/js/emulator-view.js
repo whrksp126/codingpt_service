@@ -126,6 +126,10 @@ export class EmulatorView {
     this.host.appendChild(this.el);
     this.render();
     this.loadDevices();
+    //  ★ 복원된 pane(기기 id 를 이미 아는 채로 생성)도 라이브 영상을 붙인다(2026-09-19 실사고: 재시작 뒤 복원된
+    //   모바일 화면·에이전트 PC 가 전부 폴링으로만 돌았다 — startVideo 는 select/setVisible 에서만 불렸고,
+    //   pane.js 의 setVisible(true) 는 기본값과 같아 아무것도 안 했다). 실패하면 loadDevices 의 폴링이 그대로 돈다.
+    if (this.deviceId) void this.startVideo().catch(() => false);
   }
 
   dispose() {
@@ -254,7 +258,10 @@ export class EmulatorView {
     if (this.videoOn || this.disposed || !this.deviceId) return false;
     //  안드로이드=scrcpy · iOS=serve-sim. 둘 다 같은 바이트를 주므로 여기서 갈라질 이유가 없다.
     //  (해당 PC 에 경로가 없으면 stream.start 가 실패하고 아래에서 조용히 폴링으로 돌아간다.)
-    if (!/^(android|ios):/.test(this.deviceId)) return false;
+    if (!/^(android|ios|desktop):/.test(this.deviceId)) return false;
+    //  꺼진 에이전트 PC 에 스트림을 열면 데몬이 거절한다 — 켜지면 loadDevices → select 경로가 다시 연다.
+    const dv0 = this.device();
+    if (dv0 && dv0.kind === "desktop" && dv0.state !== "booted") return false;
     if (!canDecodeVideo()) { this.videoNote = i18n.t('이 창은 영상 디코딩을 지원하지 않아 화면을 한 장씩 받아요.'); return false; }
     let info;
     try { info = await api.emulatorStreamStart(this.deviceId); }
@@ -690,7 +697,11 @@ export class EmulatorView {
       const nb = this.buildDeskBar(dev, booted);
       if (this.deskBarEl && this.deskBarEl.parentNode) this.deskBarEl.parentNode.replaceChild(nb, this.deskBarEl);
       //  꺼졌다/켜졌다가 바뀌면 기기 목록도 새로 읽어 프레임 루프를 맞춘다.
-      if (prev && (prev.phase === "running") !== booted) this.loadDevices();
+      if (prev && (prev.phase === "running") !== booted) {
+        //  켜졌으면 라이브 영상을 붙이고(폴링은 startVideo 가 실패할 때만), 꺼졌으면 영상을 접는다.
+        if (!booted) this.stopVideo();
+        this.loadDevices().then(() => { if (booted && !this.videoOn && !this.disposed) void this.startVideo().then((ok) => { if (!ok) this.ensureLoop(); }); });
+      }
     }
   }
 

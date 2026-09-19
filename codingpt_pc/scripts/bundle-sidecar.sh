@@ -246,6 +246,21 @@ SH
     fi
     echo "▸ lume 번들 완료 → $LUME_OUT ($("$LUME_OUT/lume" --version 2>/dev/null | tail -1))"
   fi
+  # 4d. vt-h264 — 에이전트 PC 라이브 영상 인코더(VideoToolbox, Swift 한 파일). swiftc 는 Xcode CLT 에 있다.
+  #  ★ rm -f 후 새로 쓴다(같은 inode 덮어쓰기 = 서명 캐시 불일치로 SIGKILL — 이 파일 머리의 절대 함정).
+  VT_SRC="$DAEMON_SRC/packages/runner-core/native/vt-h264.swift"
+  if [ -f "$VT_SRC" ] && command -v swiftc >/dev/null 2>&1; then
+    rm -f "$OUT/vt-h264"
+    swiftc -O -o "$OUT/vt-h264" "$VT_SRC"
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+      codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$OUT/vt-h264"
+    else
+      codesign -f -s - "$OUT/vt-h264" >/dev/null 2>&1 || true
+    fi
+    echo "▸ vt-h264 번들 완료 → $OUT/vt-h264"
+  else
+    echo "⚠ swiftc 없음 — 에이전트 PC 라이브 영상 없이 번들(프레임 폴링으로 동작)" >&2
+  fi
 fi
 
 # ── 5) 사이드카 코드 서명(mac, CODESIGN_IDENTITY 설정 시) ───────────

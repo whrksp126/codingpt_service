@@ -254,6 +254,20 @@ const appNotif = read(path.join(APP, 'components/NotificationsPanel.tsx'));
 ok(/n\.kind === 'desktop_handoff'/.test(appNotif) && /cmd: 'emulatorOpen'/.test(appNotif) && /device: 'desktop:main'/.test(appNotif),
   '앱: 개입 알림을 누르면 에이전트 PC 화면으로 간다(PC sidebar.js 와 같은 규칙)');
 ok(/kind === "desktop_handoff"/.test(read(path.join(PC, 'sidebar.js'))), 'PC: 같은 알림 라우팅이 있다');
+
+// ── 에이전트 PC 라이브 영상(H.264, 2026-09-19) — VNC 프레임버퍼 → vt-h264(VideoToolbox) → 같은 바이트 계약 ────
+const css = read(path.join(PC, '..', 'styles.css'));
+ok(/img\.emu-img:not\(\[src\]\) \{ visibility: hidden; \}/.test(css) && !/^\.emu-img:not\(\[src\]\)/m.test(css),
+  '★ 빈 <img> 숨김이 canvas(라이브 영상)까지 숨기지 않는다(0.1.341~346 캔버스가 통째로 안 보이던 진범)');
+ok(/\/\^\(android\|ios\|desktop\):\//.test(pcView), 'PC: 에이전트 PC 도 라이브 영상을 연다');
+ok(/if \(this\.deviceId\) void this\.startVideo\(\)/.test(pcView), '★ PC: 복원된 pane 도 라이브 영상을 붙인다(setVisible(true) 는 기본값과 같아 아무것도 안 했다)');
+ok(/\/\^\(android\|ios\|desktop\):\//.test(appEmu) && /deviceId\.startsWith\('desktop:'\) && !deskOn\) return;/.test(appEmu), '앱: 에이전트 PC 라이브 영상(켜져 있을 때만)');
+const daemonDir = path.join(PC, '..', '..', '..', 'codingpt_daemon', 'packages', 'runner-core');
+const emuStream = read(path.join(daemonDir, 'emulator-stream.js'));
+ok(/kind === 'desktop'\) return require\('\.\/desktop'\)\.DesktopStreamSession\.start/.test(emuStream), '데몬: 스트림 세션이 desktop 을 안다(같은 뷰어·GOP·배압 배관)');
+ok(fs.existsSync(path.join(daemonDir, 'native', 'vt-h264.swift')), '데몬: vt-h264.swift 동봉');
+ok(/swiftc -O -o "\$OUT\/vt-h264"/.test(read(path.join(PC, '..', '..', 'scripts', 'bundle-sidecar.sh'))), '번들: vt-h264 를 빌드·서명한다');
+ok(/CPT_VT_H264/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'lib.rs'))), 'PC: 번들 vt-h264 경로를 데몬에 넘긴다');
 for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
   ok(/type:\s*['"]touch['"]/.test(src), `${name} 이 touch 스트리밍을 보낸다`);
   for (const phase of ['begin', 'move', 'end']) {
