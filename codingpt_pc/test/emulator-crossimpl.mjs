@@ -425,5 +425,17 @@ for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
 }
 
 
+// ── 에이전트 PC 표면은 워크스페이스에 하나(2026-09-20) — 두 번 열면 새 pane 이 아니라 있는 탭을 앞으로 ──
+//  (폰 실기: + 메뉴를 두 번 눌러 에이전트 PC pane 이 2개 → 같은 화면을 두 번 받으며 사용자가 "이상하다")
+const pcWsView = read(path.join(PC, 'workspace-view.js'));
+ok(/export function focusDesktopSurface\(\)/.test(pcWsView) && /if \(focusDesktopSurface\(\)\) return;\s*\n\s*smartAdd\("emulator", \{ deviceId: "desktop:main"/.test(pcWsView),
+  'PC: + 메뉴의 에이전트 PC 는 이미 있으면 그 표면을 앞으로');
+ok(/kind === 'emulator' && url && url\.startsWith\('desktop:'\)/.test(appWs) && /\(t\.deviceId \|\| ''\)\.startsWith\('desktop:'\)/.test(appWs),
+  '앱: smartAdd 의 에이전트 PC 도 같은 규칙(leaf·혼합 탭 둘 다 찾는다)');
+
+// ── 디코더가 프레임을 쥐고 내놓아도 그린다(2026-09-20) — queued>0 규칙에 250ms 상한(양쪽 동일) ──
+ok(/if \(queued > 0 && nowMs - lastPaintAt < 250\) return;/.test(appVideo), '앱: 250ms 넘게 안 그렸으면 밀려 있어도 그린다');
+ok(/queued === 0 \|\| nowMs - this\._lastPaintAt > 250/.test(pcView), 'PC: 같은 250ms 상한');
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

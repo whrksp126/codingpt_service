@@ -682,7 +682,9 @@ class DesktopStreamSession {
       if (this.pending.length < 5 + n) return;
       const flags = this.pending[4]; const data = Buffer.from(this.pending.subarray(5, 5 + n));
       this.pending = this.pending.subarray(5 + n);
-      if (flags & 1) { this.configPacket = data; this._emit({ config: true, keyFrame: false, data }); }
+      //  ★ SPS 에 VUI bitstream_restriction(재정렬 0) 을 붙인다 — 없으면 폰 하드웨어 디코더가 프레임을 쥐고 있어
+      //   정지 화면(1fps) 에서 변화가 4~5초 뒤에 보였다(h264-sps.js 주석, 2026-09-20 실측).
+      if (flags & 1) { const cfg = require('./h264-sps').patchConfigPacket(data); this.configPacket = cfg; this._emit({ config: true, keyFrame: false, data: cfg }); }
       else this._emit({ config: false, keyFrame: !!(flags & 2), data });
     }
   }

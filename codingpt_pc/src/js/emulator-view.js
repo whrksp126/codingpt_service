@@ -288,6 +288,7 @@ export class EmulatorView {
      *  디코딩은 다 해야 한다(델타가 앞 프레임을 참조한다) — **그리기만** 건너뛴다.
      */
     let queued = 0;
+    this._lastPaintAt = 0;
     /** 디코더에 넣은 순서대로 "그릴 것인가" — 따라잡기용 조각은 false 다(위 FLAG_CATCHUP). */
     const skipQ = [];
     const decoder = new globalThis.VideoDecoder({
@@ -306,7 +307,10 @@ export class EmulatorView {
             //   회전 표시를 다시 계산한다 — 이게 없으면 기기가 돈 뒤에도 우리가 덧돌려 그린다.
             if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();
           }
-          if (!skip && queued === 0) cv.getContext('2d')?.drawImage(frame, 0, 0);   // 따라잡기·밀린 것은 안 그린다
+          //  따라잡기·밀린 것은 안 그린다 — 단 250ms 넘게 안 그렸으면 그린다(폰 EmulatorVideo 와 같은 규칙: 하드웨어
+          //   디코더가 프레임을 쥐고 내놓으면 queued 가 0 이 되는 순간이 없다, 2026-09-20).
+          const nowMs = Date.now();
+          if (!skip && (queued === 0 || nowMs - this._lastPaintAt > 250)) { this._lastPaintAt = nowMs; cv.getContext('2d')?.drawImage(frame, 0, 0); }
           if (this.errEl && this.err) { this.err = null; this.errEl.textContent = ''; }
         }
         frame.close();

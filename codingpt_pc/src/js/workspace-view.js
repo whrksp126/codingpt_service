@@ -735,7 +735,11 @@ function openAddMenu(anchor) {
   row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
   // 에이전트 PC — 같은 pane(모바일 화면)에 기기를 `desktop:main` 으로 미리 골라 연다.
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
-  row(icons.monitor, i18n.t('에이전트 PC'), { onClick: () => smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') }) });
+  //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
+  row(icons.monitor, i18n.t('에이전트 PC'), { onClick: () => {
+    if (focusDesktopSurface()) return;
+    smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') });
+  } });
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -806,6 +810,32 @@ function mixedTabFor(kind, extra) {
   //  ⚠ 모르는 종류에 기본값(프리뷰 등)을 주지 않는다 — 그런 "그럴듯한 기본값"이 바로
   //   [모바일 화면] 버튼이 터미널을 만들던 사고의 모양이다. 모르면 아무것도 안 한다.
   return T.leafToTab({ kind, ...(extra || {}) });
+}
+
+/** 이미 열린 에이전트 PC 표면(leaf 또는 혼합 탭)을 앞으로 끌어온다. 없으면 false. */
+export function focusDesktopSurface() {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout) return false;
+  const isDesk = (d) => typeof d === "string" && d.startsWith("desktop:");
+  let hit = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (hit) return;
+    if (l.kind === "emulator" && isDesk(l.deviceId)) hit = { leaf: l };
+    else if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "emulator" && isDesk(t.deviceId));
+      if (i >= 0) hit = { leaf: l, index: i };
+    }
+  });
+  if (!hit) return false;
+  if (hit.index != null) {
+    hit.leaf.active = hit.index;
+    const pane = panes.get(hit.leaf.id);
+    pane?.buildHead();
+    pane?.showActiveTab?.();
+  }
+  S.focusPane(hit.leaf.id);
+  S.emit();
+  return true;
 }
 
 export function smartAdd(kind, extra) {

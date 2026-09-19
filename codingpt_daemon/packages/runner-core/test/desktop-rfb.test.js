@@ -296,3 +296,21 @@ test('desktop.input 은 직렬(순서 보존) · carryIdentity · AX 뿌리 규�
   assert.ok(/depth > 0 && role === 'AXApplication'\) return/.test(src), 'Application 대리 요소는 안 탄다(Setup Assistant 무한 재귀)');
   assert.ok(/menuBarOwningApplication/.test(src), '앞 앱 = 메뉴 바를 쥔 앱');
 });
+
+//  VideoToolbox 는 SPS 에 VUI 를 안 쓴다 → 하드웨어 디코더가 프레임을 4~6장 쥐고 내놓아 정지 화면 변화가 폰에 4~5초
+//  뒤에 보였다(2026-09-20 실측). config 패킷의 SPS 에 bitstream_restriction(재정렬 0) 을 덧붙인다.
+test('H.264 SPS 에 VUI bitstream_restriction 을 붙인다(실측 SPS 바이트 · 멱등 · 모르는 건 안 만짐)', () => {
+  const fs = require('fs'), path = require('path');
+  const { patchConfigPacket, addBitstreamRestriction, unescapeRbsp, escapeRbsp } = require('../h264-sps');
+  const cfg = Buffer.from('0000000127420028ab402d039fce800000000128ce3c80', 'hex');      // vt-h264 실측(1440×900 Baseline 4.0)
+  const out = patchConfigPacket(cfg);
+  assert.strictEqual(out.toString('hex'), '0000000127420028ab402d039fcf00f08846a00000000128ce3c80');   // ffmpeg trace_headers 로 확인한 값
+  assert.ok(patchConfigPacket(out).equals(out), '이미 VUI 가 있으면 그대로');
+  assert.ok(addBitstreamRestriction(Buffer.from([0x28, 0xce, 0x3c, 0x80])).equals(Buffer.from([0x28, 0xce, 0x3c, 0x80])), 'PPS 는 안 만진다');
+  assert.ok(addBitstreamRestriction(Buffer.from([0x27, 0x42])).length === 2, '짧은/깨진 SPS 는 원본');
+  const e = escapeRbsp(Buffer.from([0, 0, 1, 0, 0, 0, 0, 0, 3]));
+  assert.deepStrictEqual([...e], [0, 0, 3, 1, 0, 0, 3, 0, 0, 3, 0, 3]);
+  assert.deepStrictEqual([...unescapeRbsp(e)], [0, 0, 1, 0, 0, 0, 0, 0, 3]);
+  const src = fs.readFileSync(path.join(__dirname, '..', 'desktop.js'), 'utf8');
+  assert.ok(/patchConfigPacket\(data\)/.test(src), 'DesktopStreamSession 이 config 패킷마다 적용');
+});

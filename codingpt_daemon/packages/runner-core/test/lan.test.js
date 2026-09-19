@@ -187,6 +187,14 @@ test('B. 주소 분류 + 피어 정책 — 공용/링크로컬 거부, loopback/
 });
 
 // ── G. 경로 상태(승격/강등/최소체류/쿨다운/부활) ─────────────────────────
+test('B2. 가상 머신 NAT 인터페이스는 LAN 주소로 세지 않는다(에이전트 PC 켜고 끌 때 lan_update 가 나가 폰 직결이 끊기던 것)', () => {
+  for (const n of ['bridge100', 'bridge101', 'vmnet8', 'utun3', 'awdl0', 'docker0', 'veth1a2b', 'tailscale0']) assert.ok(lan.isVirtIf(n), n);
+  for (const n of ['en0', 'en1', 'eth0', 'wlan0', 'bridge0', 'br0']) assert.ok(!lan.isVirtIf(n), n);
+  //  실제 인터페이스 목록으로 돌려도 bridge1xx 는 나오지 않는다.
+  for (const a of lan.localAddrs()) assert.ok(!/^bridge1\d\d$/.test(a.ifname), a.ifname);
+  assert.strictEqual(typeof lan.addrsKey(lan.localAddrs()), 'string');
+});
+
 test('G. 경로 상태 머신 — 2연속 승격 / 하드 즉시 강등+쿨다운 배가 / 최소체류 / 부활', () => {
   let now = 1_000_000;
   lan.__setNow(() => now);
