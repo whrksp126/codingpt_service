@@ -764,10 +764,12 @@ async function main() {
           const rows = t.nodes.filter((n) => flags.all || (KEEP.test(n.role) && n.w > 0 && (n.title || n.desc || n.value || n.ph || n.role !== 'Group')));
           const line = (n) => {
             const label = [n.title, n.desc, n.value, n.ph].filter((v) => v != null && v !== '').map((v) => JSON.stringify(String(v))).join(' ');
-            const geo = n.w > 0 ? ` @${n.x.toFixed(3)},${n.y.toFixed(3)} ${n.w.toFixed(3)}x${n.h.toFixed(3)}` : '';
+            //  @ 는 요소의 **중심** 좌표다 — `cpt desktop click <x> <y>` 에 그대로 넣으면 그 요소가 눌린다(0~1 비율).
+            //   size 는 크기(참고용). 예전엔 좌상단을 찍어, 헤더의 "click 에 그대로" 를 믿고 누르면 모서리를 눌렀다(2026-09-20).
+            const geo = n.w > 0 ? ` @${(n.x + n.w / 2).toFixed(3)},${(n.y + n.h / 2).toFixed(3)} (${n.w.toFixed(3)}x${n.h.toFixed(3)})` : '';
             return `${n.i} ${n.role}${n.subrole ? '/' + n.subrole : ''} ${label}${geo}${n.disabled ? ' (disabled)' : ''}${n.focused ? ' (focused)' : ''}`;
           };
-          process.stdout.write(`# ${t.app} (pid ${t.pid}) — ${rows.length}/${t.nodes.length}개${t.truncated ? ' · 잘림' : ''} · 좌표는 0~1 비율(cpt desktop click x y 에 그대로)\n${rows.map(line).join('\n')}\n`);
+          process.stdout.write(`# ${t.app} (pid ${t.pid}) — ${rows.length}/${t.nodes.length}개${t.truncated ? ' · 잘림' : ''} · @=중심 0~1 좌표(cpt desktop click x y 에 그대로), 괄호=크기\n${rows.map(line).join('\n')}\n`);
           return;
         }
         if (c2 === 'tap') {
