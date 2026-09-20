@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import { state } from "./state.js";
 import * as S from "./state.js";
+import { icons } from "./icons.js";
 import * as i18n from "./i18n/index.js";
 
 function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -36,7 +37,7 @@ function localWorkspaces() {
 export async function openDesktopSheet() {
   const ov = ensureOverlay();
   ov.classList.remove("hidden");
-  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="fp-title">${i18n.t('에이전트 PC')}</span><button class="fp-newfolder" id="dsClose">${i18n.t('닫기')}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
+  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="fp-title">${i18n.t('에이전트 PC')}</span><button class="fp-newfolder ds-close" id="dsClose" title="${i18n.t('닫기')}" aria-label="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
   ov.querySelector("#dsClose").addEventListener("click", close);
   await paint();
   //  준비(내려받기) 중이면 진행률을, 켜는 중이면 상태를 따라간다.
