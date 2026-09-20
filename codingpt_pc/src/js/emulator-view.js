@@ -121,6 +121,16 @@ export class EmulatorView {
      */
     this.visualRot = 0;
 
+    //  pane 안 알림함(2026-09-21) — 화면 아래 안내줄(영상/조작 사유·오류·개입 사유)이 화면을 깎던 걸 없애고
+    //   조작 줄/상태 바의 종 버튼으로 모은다. 새로 뜨거나 바뀌면 로그에 쌓고 잠깐 토스트로 띄운다.
+    this.notices = [];
+    this.noticeSeq = 0;
+    this.seenId = 0;
+    this.lastBySrc = {};
+    this.toast = null;
+    this._toastTimer = null;
+    this.noticeOpen = false;
+
     this.el = document.createElement("div");
     this.el.className = "emu";
     this.host.appendChild(this.el);
@@ -658,6 +668,8 @@ export class EmulatorView {
       try { await this.power(booted ? "shutdown" : "boot"); } finally { this._powering = false; }
     }, "icon" + (booted ? " on" : ""), icons.power({ size: 14 }));
     if (starting) pw.disabled = true;
+    //  알림 종 — 화면 아래 안내줄 대신. 상태 바 오른쪽(설정 ··· 옆).
+    right.appendChild(this.bellButton("emu-deskbtn icon", 14));
     btn("···", i18n.t('더 보기'), (ev) => {
       const r = ev.currentTarget.getBoundingClientRect();
       import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
@@ -760,8 +772,115 @@ export class EmulatorView {
     if (this.visualRot) this.applyVisualRot();
   }
 
+  //  오류는 화면 아래 줄이 아니라 알림함/토스트로 알린다(2026-09-21). 전체 render 없이 오버레이만 갱신해
+  //   스트리밍 중 깜빡임을 피한다 — 종 뱃지는 다음 폴링 render 에서 따라온다.
   paintError() {
-    if (this.errEl) this.errEl.textContent = this.err || "";
+    this.pushNotice("err", this.err || "", "error");
+    if (!this.el) return;
+    this.el.querySelectorAll(".emu-toast, .emu-notif-ov").forEach((n) => n.remove());
+    this.renderNoticeOverlays();
+  }
+
+  //  한 소스(영상/입력/오류/개입)의 사유가 새로 뜨거나 문구가 바뀔 때만 알림 1건. 사유가 사라지면 로그엔 안 남긴다.
+  //   render() 안에서 매번 불려도 dedup(lastBySrc) 이라 새 문구일 때만 쌓인다 — 여기서 render() 를 부르지 않는다(재귀 방지).
+  pushNotice(src, text, kind) {
+    const t = String(text || "");
+    if (this.lastBySrc[src] === t) return;
+    this.lastBySrc[src] = t;
+    if (!t) return;
+    const n = { id: (this.noticeSeq += 1), text: t, kind: kind || "info", at: Date.now() };
+    this.notices.unshift(n);
+    if (this.notices.length > 40) this.notices.length = 40;
+    this.toast = { id: n.id, text: n.text, kind: n.kind };
+    if (this._toastTimer) clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => { this.toast = null; this._toastTimer = null; this.render(); }, 3600);
+  }
+
+  //  화면 아래 줄에 있던 4종 사유를 알림함으로 흘린다. render() 초입에서 부른다.
+  feedNotices(dev, booted, canInput) {
+    this.pushNotice("video", this.videoNote || "", "info");
+    this.pushNotice("err", this.err || "", "error");
+    const stx = this.deskStatus || (dev && dev.desktop) || {};
+    const handoff = (dev && dev.kind === "desktop" && booted) ? (stx.handoff || null) : null;
+    this.pushNotice("handoff", handoff ? (handoff.reason || "") : "", "info");
+    let inputWhy = "";
+    if (!canInput && dev && dev.kind !== "desktop") {
+      inputWhy = (dev.caps && dev.caps.inputHint)
+        || (dev.state !== "booted"
+          ? i18n.t('기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요')
+          : (this.capRetry || 0) < CAP_RETRY_MAX
+            ? i18n.t('조작 준비를 기다리는 중이에요…')
+            : i18n.t('이 기기는 조작을 지원하지 않아요 (보기 전용)'));
+    }
+    this.pushNotice("input", inputWhy, "info");
+  }
+
+  //  종 버튼 — 안 본 알림이 있으면 점(오류면 강조). 눌러 목록을 연다. cls 로 스트립용/상태바용 구분.
+  bellButton(cls, size) {
+    const b = document.createElement("button");
+    b.className = cls + (this.noticeOpen ? " on" : "");
+    b.title = i18n.t('알림');
+    b.innerHTML = icons.bell({ size: size || 22 });
+    const unseen = this.notices.filter((n) => n.id > this.seenId);
+    if (unseen.length) {
+      const dot = document.createElement("span");
+      dot.className = "emu-bell-dot" + (unseen.some((n) => n.kind === "error") ? " err" : "");
+      b.appendChild(dot);
+    }
+    b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      this.toast = null; if (this._toastTimer) { clearTimeout(this._toastTimer); this._toastTimer = null; }
+      this.noticeOpen = !this.noticeOpen;
+      if (this.noticeOpen) this.seenId = this.noticeSeq;
+      this.render();
+    });
+    return b;
+  }
+
+  //  토스트 + 목록 오버레이 — pane 위에 겹친다(절대 배치라 화면 크기를 건드리지 않는다). render() 끝에서 부른다.
+  renderNoticeOverlays() {
+    if (this.toast) {
+      const tw = document.createElement("div");
+      tw.className = "emu-toast" + (this.toast.kind === "error" ? " err" : "");
+      tw.textContent = this.toast.text;
+      this.el.appendChild(tw);
+    }
+    if (!this.noticeOpen) return;
+    const ov = document.createElement("div");
+    ov.className = "emu-notif-ov";
+    ov.addEventListener("mousedown", (e) => { if (e.target === ov) { this.noticeOpen = false; this.render(); } });
+    const panel = document.createElement("div");
+    panel.className = "emu-notif";
+    const head = document.createElement("div");
+    head.className = "emu-notif-h";
+    head.innerHTML = `<b>${i18n.t('알림')}</b>`;
+    if (this.notices.length) {
+      const clr = document.createElement("button");
+      clr.className = "emu-notif-clear";
+      clr.textContent = i18n.t('모두 지우기');
+      clr.addEventListener("click", () => { this.notices = []; this.seenId = 0; this.lastBySrc = {}; this.render(); });
+      head.appendChild(clr);
+    }
+    panel.appendChild(head);
+    if (this.notices.length) {
+      const listEl = document.createElement("div");
+      listEl.className = "emu-notif-list";
+      for (const n of this.notices) {
+        const row = document.createElement("div");
+        row.className = "emu-notif-row";
+        row.innerHTML = `<span class="emu-notif-dot${n.kind === "error" ? " err" : ""}"></span>`
+          + `<div class="emu-notif-tx"><div>${escapeHtml(n.text)}</div><i>${escapeHtml(new Date(n.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}</i></div>`;
+        listEl.appendChild(row);
+      }
+      panel.appendChild(listEl);
+    } else {
+      const empty = document.createElement("div");
+      empty.className = "emu-notif-empty";
+      empty.textContent = i18n.t('알림이 없어요');
+      panel.appendChild(empty);
+    }
+    ov.appendChild(panel);
+    this.el.appendChild(ov);
   }
 
   render() {
@@ -828,6 +947,8 @@ export class EmulatorView {
     const dev = this.device();
     const booted = dev ? dev.state === "booted" : false;
     const canInput = !!(dev && dev.caps && dev.caps.input);
+    //  화면 아래 안내줄 대신 알림함으로 흘린다(사용자 지시 2026-09-21 — 화면이 깎이는 게 싫다).
+    this.feedNotices(dev, booted, canInput);
 
     /**
      * ★ 조작 버튼은 **화면 옆의 남는 자리**에 세운다(2026-08-06 사용자 확정).
@@ -840,6 +961,11 @@ export class EmulatorView {
      */
     const keys = document.createElement("div");
     keys.className = "emu-keys";
+    //  알림 종 — 화면 아래 안내줄 대신 여기로 모은다(안 본 게 있으면 점). 폰 스트립 맨 앞.
+    keys.appendChild(this.bellButton("emu-key", 22));
+    const bsep = document.createElement("span");
+    bsep.className = "emu-keys-sep";
+    keys.appendChild(bsep);
     /**
      * ★ 캡처 — 지금 이 화면을 **에이전트에게 건네는** 버튼(2026-08-06 사용자 요구).
      *  기기 조작 키가 아니라 **우리 기능**이라 `caps.keys` 와 무관하게 그린다. 조건은 하나:
@@ -1061,33 +1187,9 @@ export class EmulatorView {
       this._ro = new ResizeObserver(() => this.applyLayout());
       this._ro.observe(wrap2);
     }
-    //  폴링으로 돌아갔으면 **왜** 인지 한 줄로 적는다(느린 이유를 사용자가 짐작하게 두지 않는다).
-    if (this.videoNote) {
-      const note = document.createElement("div");
-      note.className = "emu-note";
-      note.textContent = this.videoNote;
-      this.el.appendChild(note);
-    }
-
-    //  ★ 조작이 안 되면 **이유가 항상 있어야 한다**(2026-08-06): 예전엔 데몬이 준 inputHint 가 있을
-    //   때만 적었는데, "아직 안 켜짐" 처럼 힌트가 빈 경우가 있어 버튼도 없고 터치도 안 먹는데 설명이
-    //   한 줄도 없는 상태가 됐다 — 사용자에겐 그냥 고장으로 보인다.
-    if (!canInput && dev && dev.kind !== "desktop") {
-      const hint = document.createElement("div");
-      hint.className = "emu-hint";
-      hint.textContent = dev.caps?.inputHint
-        || (dev.state !== "booted"
-          ? i18n.t('기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요')
-          : (this.capRetry || 0) < CAP_RETRY_MAX
-            ? i18n.t('조작 준비를 기다리는 중이에요…')
-            : i18n.t('이 기기는 조작을 지원하지 않아요 (보기 전용)'));
-      this.el.appendChild(hint);
-    }
-
-    const e = document.createElement("div");
-    e.className = "emu-err";
-    e.textContent = this.err || "";
-    this.errEl = e;
-    this.el.appendChild(e);
+    //  ★ 화면 아래 안내줄(영상 폴링 사유·조작 불가 사유·오류)은 없앴다(2026-09-21 사용자 지시 — 화면이 깎이는 게 싫다).
+    //   전부 feedNotices 로 알림함에 흘렸고, 아래 오버레이(종 버튼 목록 + 토스트)가 pane 위에 겹쳐 보여 준다.
+    this.errEl = null;
+    this.renderNoticeOverlays();
   }
 }

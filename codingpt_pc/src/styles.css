@@ -2400,7 +2400,7 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
    화면은 `object-fit: contain` 이라 여백이 생기고, 클릭 좌표는 그 여백을 빼고 환산한다. */
 /*  ⚠ width/flex 를 명시한다: 혼합 탭의 호스트(.pane-mixed)가 flex 컨테이너라, 이게 없으면
     .emu 가 내용 폭(=기기 화면 폭)으로 쪼그라들어 pane 오른쪽이 통째로 빈다. */
-.emu { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0; background: var(--base); }
+.emu { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0; background: var(--base); position: relative; }
 /*  화면 + 조작 스트립. 스트립은 **여백이 생기는 쪽**에 붙는다(세로 기기=오른쪽, 가로 기기=아래).
     예전엔 탭바 아래에 줄을 하나 더 뒀는데, 그 줄만큼 화면이 통째로 줄고 정작 옆의 빈 자리는
     비어 있었다(2026-08-06 사용자 확정). */
@@ -2415,7 +2415,7 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-main.keys-right .emu-keys-sep { width: 18px; height: 1px; margin: 5px 0; }
 .emu-main.keys-bottom .emu-keys-sep { width: 1px; height: 18px; margin: 0 5px; }
 /*  과녁은 크게 — 이 스트립은 화면 옆의 **원래 비어 있던 자리**를 쓰므로 키우는 데 드는 비용이 없다. */
-.emu-key { display: inline-flex; align-items: center; justify-content: center;
+.emu-key { position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 38px; height: 38px; border: 0; background: none; color: var(--text2);
   cursor: pointer; border-radius: 9px; padding: 0; }
 .emu-key:hover { color: var(--text); background: var(--hover); }
@@ -2441,6 +2441,42 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-deskbtn.icon { width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .emu-deskbtn.icon svg { display: block; }
 .emu-deskbtn:disabled { opacity: .45; cursor: default; }
+.emu-deskbtn.icon { position: relative; }
+
+/* ── pane 안 알림함(2026-09-21) — 화면 아래 안내줄 대신. 종 버튼 점 + 토스트 + 목록 오버레이 ── */
+/*  안 본 알림 점 — 무채색(오류만 의미색). 포인트 컬러 금지 준수. */
+.emu-bell-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text); box-shadow: 0 0 0 2px var(--base); }
+.emu-deskbtn .emu-bell-dot { top: 3px; right: 3px; width: 6px; height: 6px; }
+.emu-bell-dot.err { background: var(--error); }
+/*  토스트 — 위 가운데서 잠깐. 절대 배치라 화면을 안 깎는다. */
+.emu-toast { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  max-width: min(460px, 88%); z-index: 30; pointer-events: none;
+  background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: 10px;
+  padding: 9px 12px; color: var(--text); font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4); animation: emu-toast-in .2s ease-out; }
+.emu-toast.err { border-color: var(--error); }
+@keyframes emu-toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/*  목록 오버레이 — 오른쪽 위 드롭다운. 바깥 클릭으로 닫힘. */
+.emu-notif-ov { position: absolute; inset: 0; z-index: 40; }
+.emu-notif { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 92%; max-height: 72%;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.45); }
+.emu-notif-h { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.emu-notif-h b { color: var(--text); font-size: 13px; }
+.emu-notif-clear { border: 0; background: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 2px 4px; }
+.emu-notif-clear:hover { color: var(--text2); }
+.emu-notif-list { overflow-y: auto; min-height: 0; }
+.emu-notif-row { display: flex; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.emu-notif-row:last-child { border-bottom: 0; }
+.emu-notif-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: var(--text3); }
+.emu-notif-dot.err { background: var(--error); }
+.emu-notif-tx { flex: 1 1 auto; min-width: 0; }
+.emu-notif-tx div { color: var(--text2); font-size: 12.5px; line-height: 1.5; }
+.emu-notif-tx i { display: block; color: var(--dim); font-size: 10.5px; font-style: normal; margin-top: 2px; }
+.emu-notif-empty { color: var(--dim); font-size: 12.5px; text-align: center; padding: 16px 14px; }
 /* 에이전트 데스크톱 설정 시트 */
 .emu-deskdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
 .emu-deskdot.on { background: var(--accent); }
