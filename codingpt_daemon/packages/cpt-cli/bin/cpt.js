@@ -318,6 +318,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   # 에이전트 PC (이 맥 안의 별도 macOS — 사용자 화면을 건드리지 않고 GUI 를 조작한다)
   #  네이티브 앱·창을 다뤄야 하면 사용자 화면이 아니라 **여기서** 한다. 좌표는 0~1 비율.
   desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
+  desktop os [macos|linux]              게스트 OS 보기/바꾸기(Linux=경량 ~5GB, 꺼진 상태에서만)
   desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
   desktop provision                     첫 설정 다시(자동 로그인·절전 끔 — 처음 켤 때는 자동으로 한다)
   desktop snapshot [라벨] | snapshots    지금 상태를 저장(끄고 2초 복제·다시 켬 ~30초) / 목록 — 위험한 작업 전에
@@ -795,6 +796,15 @@ async function main() {
         }
         if (c2 === 'snapshot-delete') return out(await request('desktop.snapshot.delete', { name: rest[0] }, { timeoutMs: 60000 }), flags, '삭제했어요');
         if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
+        if (c2 === 'os') {
+          //  게스트 OS 선택 — 인자 없으면 현재값, 있으면 macos|linux 로 바꾼다(꺼져 있어야 한다; 다음 켤 때 그 OS 로).
+          if (!rest[0]) { const r = await request('desktop.settings.get', {}); return out(r, flags, `현재 게스트 OS: ${r.osKind || 'macos'}`); }
+          if (rest[0] !== 'macos' && rest[0] !== 'linux') { process.stderr.write('사용법: cpt desktop os macos|linux\n'); process.exitCode = 2; return; }
+          const st = await request('desktop.status', {}, { timeoutMs: 20000 });
+          if (st.phase === 'running' || st.phase === 'starting') { process.stderr.write('먼저 에이전트 PC 를 끄세요 (cpt desktop stop) — OS 는 꺼진 상태에서만 바꿔요\n'); process.exitCode = 2; return; }
+          const r = await request('desktop.settings.set', { osKind: rest[0] }, { timeoutMs: 20000 });
+          return out(r, flags, `게스트 OS = ${r.osKind} (다음 켤 때 적용${rest[0] === 'linux' ? ' — 첫 켜기 때 이미지 준비 몇 분' : ''})`);
+        }
         if (c2 === 'connect' || c2 === 'disconnect') {
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
           //  켜져 있으면 데몬이 끄고 다시 켜서 바로 쓸 수 있게 돌려준다(공유 폴더는 부팅 때 고정) — 최대 3분.
@@ -802,7 +812,7 @@ async function main() {
           const tail = r.restarted ? ' (에이전트 PC 를 다시 켰어요 — 바로 쓸 수 있어요)' : (r.changed ? '' : ' (이미 그 상태)');
           return out(r, flags, c2 === 'connect' ? `연결: ${r.host} → ${r.guest}${tail}` : `해제: ${r.host}${tail}`);
         }
-        process.stderr.write('사용법: cpt desktop status|start|stop|provision|snapshot [라벨]|snapshots|restore <이름>|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.stderr.write('사용법: cpt desktop status|start|stop|os <macos|linux>|provision|snapshot [라벨]|snapshots|restore <이름>|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
         return;
       }

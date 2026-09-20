@@ -58,7 +58,7 @@ async function paint(quiet) {
   //  진행률만 바뀌는 동안 포커스·스크롤이 튀지 않게, 서명이 같으면 다시 그리지 않는다.
   const hasVm = st.phase === "running" || st.phase === "stopped";
   if (hasVm) { try { snaps = await api.desktopSnapshots(); } catch (_) { /* 목록 없이 그린다 */ } }
-  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, cfg.idleOffMin, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
+  const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, cfg.idleOffMin, cfg.osKind, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
   if (body.dataset.sig === sig) return;
   body.dataset.sig = sig;
 
@@ -103,6 +103,12 @@ async function paint(quiet) {
     <div class="ds-grp"><div class="ds-l">${i18n.t('상태')}</div>${statusRows}</div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('연결된 워크스페이스')}</div>${wsRows}
       <div class="ds-warn">${i18n.t('연결을 바꾸면 에이전트 PC 를 다시 시작합니다(약 10초). 연결된 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보입니다.')}</div></div>
+    <div class="ds-grp"><div class="ds-l">${i18n.t('게스트 OS')}</div>
+      <div class="ds-kv"><span>${i18n.t('종류')}</span><b><select id="dsOs" ${st.phase === "running" || st.phase === "starting" || st.phase === "pulling" ? "disabled" : ""}>
+        <option value="macos" ${(cfg.osKind || "macos") === "macos" ? "selected" : ""}>${i18n.t('macOS (약 26GB)')}</option>
+        <option value="linux" ${cfg.osKind === "linux" ? "selected" : ""}>${i18n.t('Linux (가벼움 · 약 5GB)')}</option>
+      </select></b></div>
+      <div class="ds-warn">${i18n.t('OS 는 꺼진 상태에서만 바꿔요. Linux 는 첫 켜기 때 이미지 준비로 몇 분 걸려요. macOS 는 Mac 전용 앱·Safari 정확 재현, Linux 는 브라우저·GUI·개발이 가볍게 됩니다.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
       <div class="ds-kv"><span>${i18n.t('메모리')}</span><b><select id="dsMem">${memOpts.map((g) => `<option value="${g}" ${g === res.memGB ? "selected" : ""}>${g} GB</option>`).join("")}</select> / ${st.hostGB || "?"} GB</b></div>
       <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div>
@@ -166,5 +172,9 @@ async function paint(quiet) {
     try { await api.desktopSettingsSet({ idleOffMin: Number(ev.currentTarget.value) }); }
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
   });
+  body.querySelector("#dsOs")?.addEventListener("change", guard(async (ev) => {
+    //  OS 전환은 꺼진 상태에서만. 다음 켤 때 그 OS 로(다른 VM). 기존 OS 의 VM·데이터는 그대로 남는다.
+    await api.desktopSettingsSet({ osKind: ev.currentTarget.value });
+  }));
   body.querySelector("#dsCpu")?.addEventListener("change", onRes);
 }

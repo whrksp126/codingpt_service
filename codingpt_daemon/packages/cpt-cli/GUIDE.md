@@ -281,6 +281,7 @@ cpt emulator hide                       # 띄운 탭 닫기
 cpt desktop status                      # 준비/정지/실행, 연결된 폴더, 개입 대기 여부
 cpt desktop show                        # 사용자에게 데스크톱 탭을 띄운다(꺼져 있으면 먼저 켠다 — 수십 초, 맨 처음은 1~2분: 자동 로그인 설정+재시작)
 cpt desktop open Safari                 # 앱 실행. URL 이면 게스트 브라우저로(호스트 localhost 는 자동 변환)
+cpt desktop os [macos|linux]            # 게스트 OS 보기/바꾸기 — Linux 는 경량(~5GB)·브라우저/GUI/개발, macOS 는 Mac 전용 앱. 꺼진 상태에서만. ax/tap 은 두 OS 동일
 cpt desktop ax [앱]                     # ★ 화면 읽기 = 접근성 트리(요소 role·글·0~1 좌표). 스크린샷보다 먼저 이걸
 cpt desktop tap "Save" [--app Safari]   # 글자로 요소를 찾아 클릭(버튼·링크·메뉴·입력칸). 좌표 추정 금지
 cpt desktop screenshot                  # 화면을 파일로(경로를 돌려준다) — 트리에 없는 것(그림·캔버스)만 이걸로

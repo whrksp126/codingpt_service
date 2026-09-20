@@ -25,6 +25,18 @@ const { RfbClient } = require('./desktop-rfb');
 
 const VM_NAME = 'cpt-agent-desktop';
 const IMAGE = 'macos-tahoe-vanilla:latest';
+//  게스트 OS 선택(2026-09-21) — macOS(기본) 또는 Linux(경량 ~5GB). settings.osKind 로 정해지고, VM 이름·이미지가 갈린다.
+//  기존 사용자는 osKind 없음 → macos. VM_NAME 은 macOS 상수(SNAP_PREFIX·테스트·export 호환)로 남기고, 런타임 조작은 vmName().
+const VM_LINUX = 'cpt-agent-linux';
+function osKind() { try { return loadSettings().osKind === 'linux' ? 'linux' : 'macos'; } catch (_) { return 'macos'; } }
+function isLinux() { return osKind() === 'linux'; }
+function vmName() { return isLinux() ? VM_LINUX : VM_NAME; }
+function snapPrefix() { return vmName() + '--snap-'; }
+const LX = () => require('./desktop-linux');
+//  프로비저닝 완료 표식은 OS별(하나로 두면 macOS 설정 뒤 Linux 로 바꿔도 '이미 됨'으로 오판해 cloud-init 을 건너뛴다).
+const PROV_KEY = () => (isLinux() ? 'provisionedLinux' : 'provisioned');
+function provisionedVer() { return Number(loadSettings()[PROV_KEY()] || 0); }
+function markProvisioned(v) { saveSettings({ ...loadSettings(), [PROV_KEY()]: v }); }
 const VNC_PORT = 5951;                       // 고정 — 재시작해도 뷰어가 같은 곳을 본다
 const MIN_HOST_GB = 32;                      // 이 아래 맥에서는 기능을 켜지 않는다(호스트가 숨 막힌다)
 const BOOT_TIMEOUT_MS = 120000;
@@ -89,7 +101,7 @@ sysadminctl -screenLock status 2>&1 | grep -q 'screenLock is off' && [ "$(defaul
 /** 켠 뒤 한 번 — ByHost 설정을 다시 건다(위 SETTLE_SCRIPT). 실패해도 켜기는 막지 않는다(로그만). */
 async function settle() {
   try {
-    const out = await exec(SETTLE_SCRIPT, { timeoutMs: 20000 });
+    const out = await exec(isLinux() ? LX().SETTLE_CMD : SETTLE_SCRIPT, { timeoutMs: 20000 });
     if (!/CPT_SETTLE_OK/.test(out)) console.warn('[desktop] settle 미완료:', out.trim().slice(0, 200));
     return true;
   } catch (e) { console.warn('[desktop] settle 실패:', String(e && e.message || e).slice(0, 200)); return false; }
@@ -166,7 +178,7 @@ async function vmInfo(fresh) {
   if (!fresh && now - _infoCache.at < INFO_TTL_MS) return _infoCache.v;
   const p = (async () => {
     try {
-      const out = await lume(['get', VM_NAME, '-f', 'json'], { timeoutMs: 15000 });
+      const out = await lume(['get', vmName(), '-f', 'json'], { timeoutMs: 15000 });
       //  Lume 0.5.3 실측: 로그 줄 뒤에 **배열** `[ {…} ]` 로 온다(한 VM 이어도). 첫 '[' 또는 '{' 부터 파싱.
       const str = String(out);
       const i = Math.min(...['[', '{'].map((ch) => str.indexOf(ch)).filter((n) => n >= 0));
@@ -190,14 +202,18 @@ function invalidateInfo() { _infoCache = { at: 0, v: null, p: null }; }
 async function status() {
   const s = loadSettings();
   const base = {
-    vm: VM_NAME, hostGB: hostGB(), minHostGB: MIN_HOST_GB, sharedDirs: s.sharedDirs, ...defaultResources(),
-    vnc: { port: VNC_PORT }, lume: lumeBin() || null,
+    vm: vmName(), hostGB: hostGB(), minHostGB: MIN_HOST_GB, sharedDirs: s.sharedDirs, ...defaultResources(),
+    vnc: { port: VNC_PORT }, lume: lumeBin() || null, osKind: osKind(),
   };
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return { ...base, phase: 'unsupported', reason: 'Apple 실리콘 Mac 에서만 쓸 수 있어요' };
   if (base.hostGB < MIN_HOST_GB) return { ...base, phase: 'unsupported', reason: `메모리 ${MIN_HOST_GB}GB 이상인 Mac 에서만 켤 수 있어요 (이 Mac: ${base.hostGB}GB)` };
   if (!lumeBin()) return { ...base, phase: 'no-tool', reason: 'VM 도구(lume)가 없어요' };
   const info = await vmInfo();
   if (!info) {
+    if (isLinux()) {
+      if (_linuxBuild && _linuxBuild.running) return { ...base, phase: 'pulling', pull: _linuxBuild, image: 'ubuntu-24.04-arm64' };
+      return { ...base, phase: 'no-image', reason: (_linuxBuild && _linuxBuild.error) || '에이전트 PC(Linux) 이미지가 없어요 (첫 켜기 때 준비 — 다운로드 약 0.6GB)', image: 'ubuntu-24.04-arm64' };
+    }
     if (pullState && pullState.running) return { ...base, phase: 'pulling', pull: pullState, image: IMAGE };
     return { ...base, phase: 'no-image', reason: (pullState && pullState.error) || `에이전트 PC 이미지가 없어요 (${IMAGE}, 약 21GB)`, image: IMAGE };
   }
@@ -205,7 +221,7 @@ async function status() {
   return {
     ...base,
     phase: _starting ? 'starting' : (running ? 'running' : 'stopped'), step: _starting ? _step : '',
-    provisioned: (loadSettings().provisioned || 0) >= PROVISION_VER,
+    provisioned: provisionedVer() >= PROVISION_VER,
     os: info.os, ip: info.ipAddress || null, cpuCount: info.cpuCount, memorySize: info.memorySize, diskSize: info.diskSize,
     display: info.display, vncUrl: running ? (info.vncUrl || null) : null,
     screen: rfb && rfb.ready ? { width: rfb.width, height: rfb.height } : null,
@@ -215,6 +231,7 @@ async function status() {
 
 // ── 수명주기 ───────────────────────────────────────────────────────────────
 let _starting = null;   // Promise | null
+let _linuxBuild = null;   // Linux 이미지 준비 상태(status 가 phase 'pulling' 으로 보고) | null
 /**
  * 유휴 자동 끄기 — 켜진 VM 은 메모리 16GB 를 쥔다. 아무도 안 보고(프레임·영상) 에이전트도 안 쓰면(입력·exec·ax…) 이만큼 뒤 끈다.
  *  설정 idleOffMin(0 = 안 끔). 개입 대기(handoff) 중엔 끄지 않는다 — 사용자가 와서 해야 할 일이 남아 있다.
@@ -257,7 +274,7 @@ function pull() {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
   if (pullState && pullState.running) return pullState;
   pullState = { running: true, done: 0, total: 0, bytes: '', totalBytes: '', elapsed: '', error: null, at: Date.now() };
-  const child = cp.spawn(lumeBin(), ['pull', IMAGE, VM_NAME], { env: { ...process.env, LANG: 'en_US.UTF-8' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = cp.spawn(lumeBin(), ['pull', IMAGE, vmName()], { env: { ...process.env, LANG: 'en_US.UTF-8' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let tail = '';
   const onChunk = (d) => {
     const str = String(d); tail = (tail + str).slice(-4000);
@@ -283,7 +300,7 @@ const SNAP_MAX = 5;
 function snapName(label) {
   const ts = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*$/, '').replace('T', '-');
   const lab = String(label || '').trim().toLowerCase().replace(/[^a-z0-9가-힣]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
-  return SNAP_PREFIX + ts + (lab ? '-' + lab : '');
+  return snapPrefix() + ts + (lab ? '-' + lab : '');
 }
 async function lumeLs() {
   const out = String(await lume(['ls', '-f', 'json'], { timeoutMs: 15000 }));
@@ -291,9 +308,9 @@ async function lumeLs() {
   try { return JSON.parse(out.slice(i)); } catch (_) { return []; }
 }
 async function snapshots() {
-  const rows = (await lumeLs()).filter((v) => String(v.name || '').startsWith(SNAP_PREFIX));
+  const rows = (await lumeLs()).filter((v) => String(v.name || '').startsWith(snapPrefix()));
   return rows.map((v) => {
-    const rest = String(v.name).slice(SNAP_PREFIX.length);
+    const rest = String(v.name).slice(snapPrefix().length);
     const m = /^(\d{8})-(\d{6})(?:-(.*))?$/.exec(rest);
     const at = m ? Date.UTC(+m[1].slice(0, 4), +m[1].slice(4, 6) - 1, +m[1].slice(6, 8), +m[2].slice(0, 2), +m[2].slice(2, 4), +m[2].slice(4, 6)) : 0;
     return { name: v.name, label: m && m[3] ? m[3] : '', at, allocated: v.diskSize && v.diskSize.allocated };
@@ -330,8 +347,8 @@ async function snapshot(label) {
   if (!(await vmInfo(true))) throw new Error('에이전트 PC 가 아직 없어요');
   const name = snapName(label);
   return withStopped(async () => {
-    await lume(['clone', VM_NAME, name], { timeoutMs: 120000 });
-    carryIdentity(VM_NAME, name);
+    await lume(['clone', vmName(), name], { timeoutMs: 120000 });
+    carryIdentity(vmName(), name);
     //  오래된 것 정리 — 지금 만든 것은 목록 맨 앞이라 안 지워진다.
     const all = await snapshots();
     for (const s of all.slice(SNAP_MAX)) { try { await lume(['delete', s.name, '--force'], { timeoutMs: 60000 }); } catch (_) { /* 다음에 */ } }
@@ -340,18 +357,18 @@ async function snapshot(label) {
 }
 async function restore(name) {
   const n = String(name || '');
-  if (!n.startsWith(SNAP_PREFIX)) throw new Error('스냅샷 이름이 아니에요');
+  if (!n.startsWith(snapPrefix())) throw new Error('스냅샷 이름이 아니에요');
   if (!(await snapshots()).some((s) => s.name === n)) throw new Error(`스냅샷이 없어요: ${n}`);
   return withStopped(async () => {
-    await lume(['delete', VM_NAME, '--force'], { timeoutMs: 60000 });
-    await lume(['clone', n, VM_NAME], { timeoutMs: 120000 });
-    carryIdentity(n, VM_NAME);
+    await lume(['delete', vmName(), '--force'], { timeoutMs: 60000 });
+    await lume(['clone', n, vmName()], { timeoutMs: 120000 });
+    carryIdentity(n, vmName());
     return { ok: true, name: n };
   });
 }
 async function snapshotDelete(name) {
   const n = String(name || '');
-  if (!n.startsWith(SNAP_PREFIX)) throw new Error('스냅샷 이름이 아니에요');
+  if (!n.startsWith(snapPrefix())) throw new Error('스냅샷 이름이 아니에요');
   await lume(['delete', n, '--force'], { timeoutMs: 60000 });
   return { ok: true, snapshots: await snapshots() };
 }
@@ -360,7 +377,7 @@ async function snapshotDelete(name) {
 async function remove() {
   if (!lumeBin()) throw new Error('VM 도구(lume)가 없어요');
   await stop();
-  await lume(['delete', VM_NAME, '--force'], { timeoutMs: 60000 });
+  await lume(['delete', vmName(), '--force'], { timeoutMs: 60000 });
   invalidateInfo();
   return { ok: true };
 }
@@ -370,24 +387,45 @@ async function start(o = {}) {
   touchUse(); armIdleWatch();
   if (_starting) return _starting;
   _starting = (async () => {
-    const st = await status();
-    if (st.phase === 'unsupported' || st.phase === 'no-tool' || st.phase === 'no-image') throw new Error(st.reason);
+    let st = await status();
+    if (st.phase === 'unsupported' || st.phase === 'no-tool') throw new Error(st.reason);
+    if (st.phase === 'no-image') {
+      if (!isLinux()) throw new Error(st.reason);   // macOS 는 pull(desktop.pull)로 따로 받는다
+      //  Linux: 이미지 준비(클라우드 이미지 다운로드→raw 변환→lume create→seed). 진행은 status 가 'pulling' 으로 보고.
+      _step = 'provision';
+      const res = defaultResources(); const cfg = loadSettings();
+      try {
+        _linuxBuild = { running: true, phase: 'download', pct: 0 };
+        await LX().ensureImage({ lumeBin, vmName: vmName(), cpu: cfg.cpu || res.cpu, memGB: cfg.memGB || res.memGB,
+          onProgress: (x) => { _linuxBuild = { running: true, ...x }; } });
+      } catch (e) { _linuxBuild = { running: false, error: String((e && e.message) || e) }; throw e; }
+      _linuxBuild = { running: false };
+      st = await status();
+    }
     if (st.phase !== 'running') await launch(o);
     _step = 'boot';
     await waitRunning();
-    if ((loadSettings().provisioned || 0) < PROVISION_VER) {
-      //  첫 설정 → 정상 종료 → 다시 켜기. 게스트 안 `reboot` 는 쓰지 않는다: Virtualization.framework 는 게스트 재시작을
-      //  "VM 정지"로 보고 lume run 프로세스가 끝난다(아무도 다시 안 띄움).
-      await provision();
-      _step = 'reboot';
-      await stop();
-      await launch(o);
-      await waitRunning();
-      await waitLoggedIn();
-      //  접근성 권한도 이때 미리 켠다(에이전트의 첫 `cpt desktop ax` 가 30초 기다리지 않게). 안 되면 그때 다시 시도.
-      _step = 'ax';
-      await sleep(4000);   // 로그인 직후 Dock/Finder 가 뜨는 동안
-      try { await ensureAx(); } catch (_) { /* 첫 ax 호출 때 다시 */ }
+    if (provisionedVer() < PROVISION_VER) {
+      if (isLinux()) {
+        //  Linux: cloud-init 이 설치(apt xfce4·firefox·at-spi ~8분)+재부팅까지 스스로 한다. ★재부팅해도 lume run 이 안 죽는다
+        //   (macOS 와 반대 — VZ 가 Linux reboot 은 제자리 재시작으로 처리). 로그인될 때까지 넉넉히 기다린다.
+        _step = 'provision';
+        await waitLoggedIn(780000);
+        _step = 'ax';
+        await settle();
+        markProvisioned(PROVISION_VER);
+      } else {
+        //  첫 설정 → 정상 종료 → 다시 켜기. macOS 게스트 안 `reboot` 는 못 쓴다(VZ 가 "정지"로 봐 lume run 종료).
+        await provision();
+        _step = 'reboot';
+        await stop();
+        await launch(o);
+        await waitRunning();
+        await waitLoggedIn();
+        _step = 'ax';
+        await sleep(4000);   // 로그인 직후 Dock/Finder 가 뜨는 동안
+        try { await ensureAx(); } catch (_) { /* 첫 ax 호출 때 다시 */ }
+      }
     }
     await connectRfb({ waitMs: 30000 });
     //  화면이 붙은 뒤 뒤에서 — 켜기를 기다리는 쪽을 ssh 왕복만큼 더 세우지 않는다.
@@ -403,12 +441,14 @@ async function launch(o = {}) {
   await reapVmProcess();   // 꺼진 채 남은 옛 프로세스가 포트를 쥐고 있으면 켜기가 실패한다
   const s = loadSettings();
   const res = defaultResources();
-  try { await lume(['set', VM_NAME, '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
+  try { await lume(['set', vmName(), '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
   //  영숫자만 — base64url 은 '-' 로 시작할 수 있어 lume 이 `--vnc-password -xxx` 를 플래그로 읽고 죽는다(0.1.335 실사고).
   //  ★ VNC 인증(DES)은 비밀번호 **앞 8바이트만** 쓴다 — 16진수 8자는 32비트에 그친다. 대소문자+숫자로 62^8≈47비트.
   //   (VNC 서버는 lume 이 모든 인터페이스에 열고 바인드 옵션이 없다 — 비밀번호가 유일한 문이라 강도를 올린다.)
   vncPassword = strongVncPassword();
-  const args = ['run', VM_NAME, '--display', 'none', '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
+  const args = ['run', vmName(), ...(isLinux() ? ['--no-display'] : ['--display', 'none']), '--vnc-port', String(VNC_PORT), '--vnc-password', vncPassword];
+  //  Linux 첫 부팅엔 cloud-init seed 를 mount 한다(자동 로그인·데스크톱·접근성 설치). 프로비저닝 뒤엔 안 붙인다.
+  if (isLinux() && provisionedVer() < 1) args.push('--mount', LX().seedFile());
   for (const d of normalizeDirs(o.sharedDirs || s.sharedDirs)) args.push('--shared-dir', `${d}:rw`);
   //  ★ `--detach` 대신 우리가 **자기 세션으로** 떼어 띄운다(detached + unref). 실측(2026-09-17): 같은 프로세스 그룹에
   //   남은 VM 이 부모 셸 정리에 휩쓸려 5분 만에 소리 없이 죽었다. 데몬이 재시작해도 VM 은 tmux 처럼 살아 있어야 한다.
@@ -425,7 +465,7 @@ async function launch(o = {}) {
 async function waitLoggedIn(limitMs = 90000) {
   const t0 = Date.now();
   for (;;) {
-    try { if (/console/.test(await exec('who', { timeoutMs: 10000 }))) return true; } catch (_) { /* 부팅 중 */ }
+    try { const w = await exec(isLinux() ? LX().LOGIN_CHECK : 'who', { timeoutMs: 10000 }); if (isLinux() ? /LOGGED_IN/.test(w) : /console/.test(w)) return true; } catch (_) { /* 부팅 중 */ }
     if (Date.now() - t0 > limitMs) throw new Error('에이전트 PC 가 자동 로그인되지 않았어요');
     await sleep(2000);
   }
@@ -457,7 +497,7 @@ async function provision() {
     }
   }
   if (!/CPT_PROVISION_OK/.test(out)) throw new Error('에이전트 PC 첫 설정에 실패했어요 (자동 로그인이 켜지지 않음)');
-  saveSettings({ ...loadSettings(), provisioned: PROVISION_VER });
+  markProvisioned(PROVISION_VER);
   return { ok: true, version: PROVISION_VER };
 }
 
@@ -540,7 +580,7 @@ async function stop() {
   if (!lumeBin()) return { ok: true };
   const info = await vmInfo(true);
   if (!info || !/running/i.test(String(info.status || ''))) { invalidateInfo(); return { ok: true, already: true }; }
-  try { await lume(['shutdown', VM_NAME, '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', '20'], { timeoutMs: 30000 }); } catch (_) { /* ssh 가 안 되면 아래 신호로 */ }
+  try { await lume(['shutdown', vmName(), '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', '20'], { timeoutMs: 30000 }); } catch (_) { /* ssh 가 안 되면 아래 신호로 */ }
   const t0 = Date.now();
   while (Date.now() - t0 < 30000) {
     const i = await vmInfo(true);
@@ -572,11 +612,11 @@ async function reapVmProcess() {
 /** VM 프로세스 pid — Lume 이 VM 디렉터리에 남기는 owner 파일(실측 `.native-display-owner.json`), 없으면 pgrep. */
 function vmPid() {
   try {
-    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.lume', VM_NAME, '.native-display-owner.json'), 'utf8'));
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.lume', vmName(), '.native-display-owner.json'), 'utf8'));
     if (j && j.processIdentifier > 0 && alive(j.processIdentifier)) return j.processIdentifier;
   } catch (_) { /* noop */ }
   try {
-    const out = cp.execFileSync('/usr/bin/pgrep', ['-f', `lume run ${VM_NAME}\\b`], { encoding: 'utf8' });
+    const out = cp.execFileSync('/usr/bin/pgrep', ['-f', `lume run ${vmName()}\\b`], { encoding: 'utf8' });
     const n = Number(String(out).trim().split('\n')[0]);
     return n > 0 ? n : 0;
   } catch (_) { return 0; }
@@ -591,7 +631,7 @@ async function exec(cmd, o = {}) {
   const t0 = Date.now();
   for (;;) {
     try {
-      const out = await lume(['ssh', VM_NAME, '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', String(Math.ceil((o.timeoutMs || 30000) / 1000)), String(cmd)],
+      const out = await lume(['ssh', vmName(), '--user', SSH_USER, '--password', SSH_PASSWORD, '--timeout', String(Math.ceil((o.timeoutMs || 30000) / 1000)), String(cmd)],
         { timeoutMs: (o.timeoutMs || 30000) + 5000 });
       return String(out);
     } catch (e) {
@@ -823,6 +863,16 @@ async function axTrusted() {
   return /^true\s*$/m.test(out) && /^\d+\s*$/m.test(out) && !/not allowed|-25211|-1728|-1743/.test(out);
 }
 async function axTree(target) {
+  if (isLinux()) {
+    const info = await vmInfo(true);
+    const screen = (info && info.display) || '1440x900';
+    const out = await exec(LX().axCmd(target, screen), { timeoutMs: 60000 });
+    const i = out.indexOf('{');
+    if (i < 0) throw new Error(`접근성 트리를 읽지 못했어요: ${out.trim().slice(0, 200)}`);
+    const j = JSON.parse(out.slice(i));
+    if (j.error) throw new Error(j.error);
+    return j;
+  }
   await ensureAx();
   const arg = target ? shq(String(target)) : '';
   const cmd = `[ -f ${AX_PATH} ] || { mkdir -p ~/.cpt && printf %s '${Buffer.from(AX_SRC, 'utf8').toString('base64')}' | base64 -d > ${AX_PATH}; }; osascript -l JavaScript ${AX_PATH} ${arg} 2>&1`;
@@ -865,6 +915,7 @@ async function axTap(text, o = {}) {
  */
 let _axOk = false;
 async function ensureAx() {
+  if (isLinux()) { _axOk = true; return true; }   // Linux 는 TCC 없음(접근성은 settle 이 세션에서 켠다)
   if (_axOk) return true;
   if (await axTrusted()) { _axOk = true; return true; }
   //  "켜져 있는데 안 되는" 반쪽 상태(복원 뒤)면 목록의 토글이 이미 ON 이라 한 번 누르면 꺼진다 — 먼저 지워서 OFF/부재로 맞춘다.
@@ -900,7 +951,7 @@ async function ensureAx() {
 function shq(s) { return `'${String(s).replace(/'/g, `'\\''`)}'`; }
 async function openApp(name) {
   if (!/^[\w .+-]{1,64}$/.test(String(name || ''))) throw new Error('앱 이름이 올바르지 않아요');
-  await exec(`open -a ${shq(name)}`, { timeoutMs: 20000 });
+  await exec(isLinux() ? LX().openAppCmd(name) : `open -a ${shq(name)}`, { timeoutMs: 20000 });
   return { ok: true };
 }
 async function openUrl(url) {
@@ -962,7 +1013,7 @@ async function handle(method, p = {}) {
   if (m === 'desktop.delete') return remove();
   if (m === 'desktop.start') return start(p);
   if (m === 'desktop.stop') return stop();
-  if (m === 'desktop.provision') { saveSettings({ ...loadSettings(), provisioned: 0 }); if ((await status()).phase === 'running') await stop(); return start(p); }
+  if (m === 'desktop.provision') { markProvisioned(0); if ((await status()).phase === 'running') await stop(); return start(p); }
   if (m === 'desktop.exec') return { out: await exec(String(p.cmd || ''), { timeoutMs: p.timeoutMs }) };
   if (m === 'desktop.frame') return frame(p);
   if (m === 'desktop.input') return input(p);
@@ -980,7 +1031,7 @@ async function handle(method, p = {}) {
   if (m === 'desktop.resume') return resume();
   if (m === 'desktop.pause') return pause();
   if (m === 'desktop.settings.get') return withIds(loadSettings());
-  if (m === 'desktop.settings.set') { const s = { ...loadSettings(), ...p }; saveSettings(s); return withIds(loadSettings()); }
+  if (m === 'desktop.settings.set') { const np = { ...p }; if (np.osKind != null && np.osKind !== 'macos' && np.osKind !== 'linux') throw new Error('osKind 는 macos 또는 linux'); const s = { ...loadSettings(), ...np }; saveSettings(s); return withIds(loadSettings()); }
   throw new Error(`알 수 없는 메서드: ${m}`);
 }
 
@@ -989,5 +1040,5 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 module.exports = {
   settle, SETTLE_SCRIPT,
   handle, status, start, stop, pull, remove, exec, frame, input, openApp, openUrl, guestUrl, guestPath, deviceRow, DEVICE_ID, VM_NAME, IMAGE,
-  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, carryIdentity, IDLE_OFF_DEFAULT_MIN, _idleState: () => ({ lastUse }), _idleTest: (ageMs) => { lastUse = Date.now() - ageMs; return idleTick(); }, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin,
+  requestHandoff, resume, pause, pendingHandoff, provision, connectDir, axTree, axFind, axTap, ensureAx, DesktopStreamSession, vtH264Bin, strongVncPassword, snapshots, snapshot, restore, snapshotDelete, snapName, SNAP_PREFIX, carryIdentity, IDLE_OFF_DEFAULT_MIN, _idleState: () => ({ lastUse }), _idleTest: (ageMs) => { lastUse = Date.now() - ageMs; return idleTick(); }, PROVISION_VER, PROVISION_SCRIPT, loadSettings, saveSettings, absDir, normalizeDirs, dirId, _resetTools, lumeBin, osKind, isLinux, vmName, snapPrefix,
 };
