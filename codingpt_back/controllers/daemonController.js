@@ -1151,13 +1151,21 @@ async function emulatorPower(req, res) {
 const DESKTOP_RPC_OK = new Map([
   ['desktop.status', 20000], ['desktop.pause', 20000], ['desktop.resume', 20000],
   ['desktop.start', 200000], ['desktop.stop', 60000],
+  //  폰에서 에이전트 PC 설정(게스트 OS·자원·삭제). settings.set 만 params 를 쓴다(나머지는 params 무시).
+  ['desktop.settings.get', 20000], ['desktop.settings.set', 20000], ['desktop.delete', 60000],
 ]);
+//  settings.set 이외의 메서드는 임의 params 를 데몬에 흘리지 않는다(통로 오남용 방지) — 화이트리스트만.
+const DESKTOP_PARAM_OK = new Set(['osKind', 'memGB', 'cpu', 'idleOffMin', 'sharedDirs']);
 async function desktopRpc(req, res) {
   try {
     const b = req.body || {};
     const method = String(b.method || '');
     if (!DESKTOP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
-    const result = await daemonRelayService.callRpc(req.user.id, method, {}, DESKTOP_RPC_OK.get(method), connOptsOf(req));
+    let params = {};
+    if (method === 'desktop.settings.set' && b.params && typeof b.params === 'object') {
+      for (const k of Object.keys(b.params)) if (DESKTOP_PARAM_OK.has(k)) params[k] = b.params[k];
+    }
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, DESKTOP_RPC_OK.get(method), connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

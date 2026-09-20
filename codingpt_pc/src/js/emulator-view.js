@@ -14,6 +14,7 @@
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { insertAttachment, attachName, shq, toast } from "./attach-insert.js";
+import { setDesktopOs } from "./desktop-os.js";
 import * as i18n from "./i18n/index.js";
 
 function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -703,6 +704,8 @@ export class EmulatorView {
     const prev = this.deskStatus;
     this.deskStatus = st;
     this.deskPaused = !!(st && st.paused);
+    //  게스트 OS 를 알게 되면(또는 바뀌면) 탭 파비콘·이름을 그 OS 로 갱신한다(onDeviceChange → buildHead).
+    if (setDesktopOs(st && st.osKind) && this.deviceId) this.onDeviceChange(this.deviceId, this.deviceName());
     const sig = (x) => x ? `${x.phase}|${x.step || ""}|${x.paused}|${x.handoff ? x.handoff.reason : ""}` : "";
     if (force || sig(prev) !== sig(st)) {
       const off = this.el.querySelector(".emu-off");

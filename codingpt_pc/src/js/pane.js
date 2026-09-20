@@ -13,6 +13,7 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
+import { getDesktopOs, osVmLabel } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
@@ -140,16 +141,25 @@ function b64ToBytes(b64) {
  *  예전엔 `kind === "ide" ? … : 프리뷰` 식 삼항이 두 곳에 흩어져 있었고, 그래서 모바일 화면 pane 이
  *  "프리뷰" 라는 이름과 지구본 아이콘을 달고 다녔다(2026-08-05).
  */
+function isDesktopSurface(node) { return !!(node && String(node.deviceId || "").startsWith("desktop:")); }
 export function surfaceLabel(kind, node) {
   if (kind === "ide") return "IDE";
   //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
   //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
-  if (kind === "emulator") return (node && node.metaName) || i18n.t('모바일 화면');
+  //  에이전트 PC 는 게스트 OS 로 이름을 붙인다("macOS · VM"/"Linux · VM"). OS 를 아직 모르면 "에이전트 PC".
+  if (kind === "emulator") {
+    if (isDesktopSurface(node)) return getDesktopOs() ? osVmLabel() : i18n.t('에이전트 PC');
+    return (node && node.metaName) || i18n.t('모바일 화면');
+  }
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
 export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
-  if (kind === "emulator") return (node && String(node.deviceId || "").startsWith("desktop:")) ? icons.monitor : icons.smartphone;
+  if (kind === "emulator") {
+    //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). OS 를 아직 모르면 모니터로 폴백.
+    if (isDesktopSurface(node)) return getDesktopOs() === "linux" ? icons.linux : getDesktopOs() === "macos" ? icons.apple : icons.monitor;
+    return icons.smartphone;
+  }
   return icons.globe;
 }
 
@@ -758,12 +768,12 @@ export class PaneView {
         //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
-          : t.kind === "emulator" ? (String(t.deviceId || "").startsWith("desktop:") ? icons.monitor : icons.smartphone)({ size: 13 })
+          : t.kind === "emulator" ? surfaceIcon("emulator", t)({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
           : t.kind === "ide" ? "IDE"
-            : t.kind === "emulator" ? (t.metaName || i18n.t('모바일 화면'))
+            : t.kind === "emulator" ? surfaceLabel("emulator", t)
               : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).

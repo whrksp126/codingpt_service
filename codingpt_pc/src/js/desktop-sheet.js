@@ -180,7 +180,8 @@ async function paint(quiet) {
       if (busy) {
         const nm = osKind === "linux" ? "Linux" : "macOS";
         if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
-        await api.desktopSettingsSet({ osKind }); await api.desktopStop(); await api.desktopStart();
+        //  ★ 반드시 현재 OS 를 먼저 끈다 — osKind 를 바꾼 뒤 끄면 stop 이 새 OS(안 켜진 VM)를 겨눠 옛 VM 이 VNC 포트를 쥔 채 남는다(2026-09-21 실사고).
+        await api.desktopStop(); await api.desktopSettingsSet({ osKind }); await api.desktopStart();
       } else {
         await api.desktopSettingsSet({ osKind });
       }

@@ -9,6 +9,7 @@ import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
+import { setDesktopOs } from "./desktop-os.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
@@ -841,12 +842,14 @@ async function chooseDesktopOs(osKind) {
     try {
       if (running) {
         if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
-        await api.desktopSettingsSet({ osKind }); await api.desktopStop(); await api.desktopStart();
+        //  ★ 현재 OS 를 먼저 끈다(osKind 를 바꾼 뒤 끄면 옛 VM 이 VNC 포트를 쥔 채 남는다 — 2026-09-21 실사고).
+        await api.desktopStop(); await api.desktopSettingsSet({ osKind }); await api.desktopStart();
       } else {
         await api.desktopSettingsSet({ osKind });
       }
     } catch (e) { wvToast(e && e.message ? e.message : String(e)); return; }
   }
+  setDesktopOs(osKind);   // 탭 파비콘·이름을 곧바로 그 OS 로(폴링 전 깜빡임 방지)
   if (focusDesktopSurface()) return;
   smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') });
 }

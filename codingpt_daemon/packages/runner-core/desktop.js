@@ -438,7 +438,8 @@ async function start(o = {}) {
 /** VM 프로세스를 띄운다(설정의 자원·공유 폴더). 켜졌는지는 waitRunning 이 본다. */
 async function launch(o = {}) {
   _axOk = false;   // 권한은 VM 안에 남지만 확인은 다시 한다(재시작 뒤 첫 ax 호출 1회)
-  await reapVmProcess();   // 꺼진 채 남은 옛 프로세스가 포트를 쥐고 있으면 켜기가 실패한다
+  await reapForeignVm();   // OS 전환: 다른 OS 의 VM 이 VNC 포트(공유 5951)를 쥐고 있으면 이 OS 가 못 켜진다
+  await reapVmProcess();   // 꺼진 채 남은 옛 프로세스(같은 OS)가 포트를 쥐고 있으면 켜기가 실패한다
   const s = loadSettings();
   const res = defaultResources();
   try { await lume(['set', vmName(), '--cpu', String(s.cpu || res.cpu), '--memory', `${s.memGB || res.memGB}GB`], { timeoutMs: 20000 }); } catch (_) { /* 켜진 채면 실패 — 무시 */ }
@@ -601,22 +602,34 @@ async function stop() {
  * 게스트는 내려갔는데 `lume run` 프로세스가 남아 VNC 포트를 쥐고 있는 경우가 있다(2026-09-19 실측: 정상 종료 뒤
  *  status=stopped 인데 프로세스 생존 → 다음 켜기가 "port 5951 already in use" 로 실패). 잠깐 기다렸다 신호로 거둔다.
  */
-async function reapVmProcess() {
-  for (let i = 0; i < 8; i++) { const pid = vmPid(); if (!pid) return; await sleep(500); }
-  const pid = vmPid(); if (!pid) return;
+async function reapVmProcess(name) {
+  for (let i = 0; i < 8; i++) { const pid = vmPid(name); if (!pid) return; await sleep(500); }
+  const pid = vmPid(name); if (!pid) return;
   try { process.kill(pid, 'SIGINT'); } catch (_) { /* noop */ }
   for (let i = 0; i < 10; i++) { await sleep(500); if (!alive(pid)) return; }
   try { process.kill(pid, 'SIGKILL'); } catch (_) { /* noop */ }
   await sleep(500);
 }
-/** VM 프로세스 pid — Lume 이 VM 디렉터리에 남기는 owner 파일(실측 `.native-display-owner.json`), 없으면 pgrep. */
-function vmPid() {
+/**
+ * OS 전환의 함정 — macOS/Linux VM 은 **VNC 포트 5951 을 공유**한다. 전환 때 옛 OS 의 `lume run` 이 남아 있으면
+ *  새 OS 가 "port 5951 already in use" 로 못 켜진다(2026-09-21 실사고: macOS→Linux 전환 뒤 cpt-agent-desktop 이
+ *  포트를 쥐고 있어 Linux 가 영영 안 켜졌다). 켜기 전에 **다른 OS 의 VM** 을 정상 종료 시도 후 확실히 거둔다.
+ */
+async function reapForeignVm() {
+  const other = vmName() === VM_LINUX ? VM_NAME : VM_LINUX;
+  if (!vmPid(other)) return;
+  try { await lume(['stop', other], { timeoutMs: 15000 }); } catch (_) { /* 아래 신호로 */ }
+  await reapVmProcess(other);
+}
+/** VM 프로세스 pid — Lume 이 VM 디렉터리에 남기는 owner 파일(실측 `.native-display-owner.json`), 없으면 pgrep. name 생략 시 현재 OS. */
+function vmPid(name) {
+  const nm = name || vmName();
   try {
-    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.lume', vmName(), '.native-display-owner.json'), 'utf8'));
+    const j = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.lume', nm, '.native-display-owner.json'), 'utf8'));
     if (j && j.processIdentifier > 0 && alive(j.processIdentifier)) return j.processIdentifier;
   } catch (_) { /* noop */ }
   try {
-    const out = cp.execFileSync('/usr/bin/pgrep', ['-f', `lume run ${vmName()}\\b`], { encoding: 'utf8' });
+    const out = cp.execFileSync('/usr/bin/pgrep', ['-f', `lume run ${nm}\\b`], { encoding: 'utf8' });
     const n = Number(String(out).trim().split('\n')[0]);
     return n > 0 ? n : 0;
   } catch (_) { return 0; }
