@@ -98,31 +98,28 @@ async function paint(quiet) {
   const memOpts = [8, 12, 16, 24, 32].filter((g) => g <= Math.max(8, Math.floor((st.hostGB || 0) / 2)));
   const cpuOpts = [4, 6, 8, 12, 16].filter((c) => c <= Math.max(4, (navigator.hardwareConcurrency || 8)));
 
+  const os = cfg.osKind === "linux" ? "linux" : "macos";
+  const busy = st.phase === "running" || st.phase === "starting" || st.phase === "pulling";
   body.innerHTML = `
-    <div class="fp-sub">${i18n.t('이 맥 안에서 에이전트가 쓰는 별도의 macOS. 사용자 화면·마우스·키보드를 건드리지 않습니다.')}</div>
+    <div class="fp-sub">${i18n.t('이 맥 안에서 에이전트만 쓰는 별도의 컴퓨터예요. 사용자 화면·입력은 건드리지 않아요.')}</div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('상태')}</div>${statusRows}</div>
-    <div class="ds-grp"><div class="ds-l">${i18n.t('연결된 워크스페이스')}</div>${wsRows}
-      <div class="ds-warn">${i18n.t('연결을 바꾸면 에이전트 PC 를 다시 시작합니다(약 10초). 연결된 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보입니다.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('게스트 OS')}</div>
-      <div class="ds-kv"><span>${i18n.t('종류')}</span><b><select id="dsOs" ${st.phase === "running" || st.phase === "starting" || st.phase === "pulling" ? "disabled" : ""}>
-        <option value="macos" ${(cfg.osKind || "macos") === "macos" ? "selected" : ""}>${i18n.t('macOS (약 26GB)')}</option>
-        <option value="linux" ${cfg.osKind === "linux" ? "selected" : ""}>${i18n.t('Linux (가벼움 · 약 5GB)')}</option>
-      </select></b></div>
-      <div class="ds-warn">${i18n.t('OS 는 꺼진 상태에서만 바꿔요. Linux 는 첫 켜기 때 이미지 준비로 몇 분 걸려요. macOS 는 Mac 전용 앱·Safari 정확 재현, Linux 는 브라우저·GUI·개발이 가볍게 됩니다.')}</div></div>
+      <div class="ds-seg" id="dsOs">
+        <button class="ds-seg-btn${os === "macos" ? " on" : ""}" data-os="macos">${icons.apple({ size: 15 })} macOS <span class="ds-seg-sz">${i18n.t('약 26GB')}</span></button>
+        <button class="ds-seg-btn${os === "linux" ? " on" : ""}" data-os="linux">${icons.linux({ size: 15 })} Linux <span class="ds-seg-sz">${i18n.t('약 5GB')}</span></button>
+      </div>
+      <div class="ds-warn">${i18n.t('macOS 는 Mac 앱·Safari 를 그대로, Linux 는 가볍고 브라우저·개발에 좋아요. 켜져 있으면 바꿀 때 다시 시작합니다.')}</div></div>
+    <div class="ds-grp"><div class="ds-l">${i18n.t('연결된 워크스페이스')}</div>${wsRows}
+      <div class="ds-warn">${i18n.t('바꾸면 다시 시작(약 10초). 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보여요.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
       <div class="ds-kv"><span>${i18n.t('메모리')}</span><b><select id="dsMem">${memOpts.map((g) => `<option value="${g}" ${g === res.memGB ? "selected" : ""}>${g} GB</option>`).join("")}</select> / ${st.hostGB || "?"} GB</b></div>
       <div class="ds-kv"><span>CPU</span><b><select id="dsCpu">${cpuOpts.map((c) => `<option value="${c}" ${c === res.cpu ? "selected" : ""}>${c}${i18n.t('코어')}</option>`).join("")}</select></b></div>
-      <div class="ds-kv"><span>${i18n.t('안 쓰면 끄기')}</span><b><select id="dsIdle">${[[0, i18n.t('끄지 않음')], [30, i18n.t('{n}분', { n: 30 })], [60, i18n.t('{n}시간', { n: 1 })], [180, i18n.t('{n}시간', { n: 3 })]].map(([v, l]) => `<option value="${v}" ${v === idle ? "selected" : ""}>${l}</option>`).join("")}</select></b></div>
-      <div class="ds-warn">${i18n.t('아무도 화면을 보지 않고 에이전트도 쓰지 않으면 자동으로 끕니다. 메모리 {n} GB 를 돌려받습니다.', { n: res.memGB })}</div></div>
+      <div class="ds-kv"><span>${i18n.t('안 쓰면 끄기')}</span><b><select id="dsIdle">${[[0, i18n.t('끄지 않음')], [30, i18n.t('{n}분', { n: 30 })], [60, i18n.t('{n}시간', { n: 1 })], [180, i18n.t('{n}시간', { n: 3 })]].map(([v, l]) => `<option value="${v}" ${v === idle ? "selected" : ""}>${l}</option>`).join("")}</select></b></div></div>
     ${hasVm ? `<div class="ds-grp"><div class="ds-l">${i18n.t('스냅샷')}</div>
       ${(snaps.snapshots || []).map((x) => `<div class="ds-kv ds-snap"><span>${escapeHtml(new Date(x.at).toLocaleString())}${x.label ? ` · ${escapeHtml(x.label)}` : ""}</span>
         <b><button class="fp-newfolder" data-restore="${escapeHtml(x.name)}">${i18n.t('되돌리기')}</button> <button class="fp-newfolder ds-x" data-snapdel="${escapeHtml(x.name)}" title="${i18n.t('삭제')}">×</button></b></div>`).join("")
-        || `<div class="ds-warn">${i18n.t('저장한 스냅샷이 없어요.')}</div>`}
-      <div class="ds-actions"><button class="fp-btn" id="dsSnap">${i18n.t('지금 상태 저장')}</button></div>
-      <div class="ds-warn">${i18n.t('저장·되돌리기는 에이전트 PC 를 잠깐 끄고 합니다(약 30초). 최대 {n}개, 오래된 것부터 지워집니다.', { n: snaps.max || 5 })}</div></div>` : ""}
-    <div class="ds-grp"><div class="ds-l">${i18n.t('알아둘 것')}</div>
-      <div class="ds-warn">${i18n.t('앱스토어 앱은 대부분 실행되지 않습니다. Docker·Android 에뮬레이터는 이 맥(호스트)에서 돌고 에이전트 PC 에서 네트워크로 씁니다. iOS 시뮬레이터는 기존 시뮬레이터 탭을 그대로 쓰세요.')}</div>
-      <div class="ds-warn">${i18n.t('메모리')} ${st.minHostGB || 32} GB ${i18n.t('이상인 Mac 에서만 켤 수 있어요')} (${i18n.t('이 Mac')}: ${st.hostGB || "?"} GB)</div></div>
+        || `<div class="ds-note">${i18n.t('저장한 스냅샷이 없어요.')}</div>`}
+      <div class="ds-actions"><button class="fp-btn" id="dsSnap">${i18n.t('지금 상태 저장')}</button></div></div>` : ""}
     ${st.phase !== "unsupported" && st.phase !== "no-tool" && st.phase !== "no-image" && st.phase !== "pulling"
       ? `<div class="ds-grp ds-danger"><span>${i18n.t('에이전트 PC 삭제')} (${fmtGB(st.diskSize && st.diskSize.allocated)} ${i18n.t('반환')})</span><button class="fp-newfolder" id="dsDelete">${i18n.t('삭제')}</button></div>` : ""}
     <div class="ds-err" id="dsErr"></div>`;
@@ -172,9 +169,22 @@ async function paint(quiet) {
     try { await api.desktopSettingsSet({ idleOffMin: Number(ev.currentTarget.value) }); }
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
   });
-  body.querySelector("#dsOs")?.addEventListener("change", guard(async (ev) => {
-    //  OS 전환은 꺼진 상태에서만. 다음 켤 때 그 OS 로(다른 VM). 기존 OS 의 VM·데이터는 그대로 남는다.
-    await api.desktopSettingsSet({ osKind: ev.currentTarget.value });
-  }));
+  //  게스트 OS 세그먼트 — 꺼져 있으면 바로 바꾸고(다음 켤 때 그 OS 로), 켜져 있으면 다시 시작을 물어본다.
+  //   기존 OS 의 VM·데이터는 그대로 남는다(다른 VM). 실행 중에도 눌러 바꿀 수 있게 비활성화하지 않는다(옛 드롭다운의 무동작 지적 반영).
+  for (const b of body.querySelectorAll("#dsOs .ds-seg-btn")) b.addEventListener("click", async () => {
+    const osKind = b.dataset.os;
+    if (osKind === os) return;
+    errEl.textContent = "";
+    try {
+      if (busy) {
+        const nm = osKind === "linux" ? "Linux" : "macOS";
+        if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
+        await api.desktopSettingsSet({ osKind }); await api.desktopStop(); await api.desktopStart();
+      } else {
+        await api.desktopSettingsSet({ osKind });
+      }
+      body.dataset.sig = ""; await paint();
+    } catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
+  });
   body.querySelector("#dsCpu")?.addEventListener("change", onRes);
 }

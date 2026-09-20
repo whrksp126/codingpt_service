@@ -733,13 +733,10 @@ function openAddMenu(anchor) {
   });
   // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
   row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
-  // 에이전트 PC — 같은 pane(모바일 화면)에 기기를 `desktop:main` 으로 미리 골라 연다.
+  // 에이전트 PC — 게스트 OS(macOS/Linux)를 하위 메뉴에서 고른다(터미널·웹뷰처럼 `›`).
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
   //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
-  row(icons.monitor, i18n.t('에이전트 PC'), { onClick: () => {
-    if (focusDesktopSurface()) return;
-    smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') });
-  } });
+  row(icons.monitor, i18n.t('에이전트 PC'), { fill: (panel, done) => fillDesktopOsMenu(panel, done) });
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -810,6 +807,48 @@ function mixedTabFor(kind, extra) {
   //  ⚠ 모르는 종류에 기본값(프리뷰 등)을 주지 않는다 — 그런 "그럴듯한 기본값"이 바로
   //   [모바일 화면] 버튼이 터미널을 만들던 사고의 모양이다. 모르면 아무것도 안 한다.
   return T.leafToTab({ kind, ...(extra || {}) });
+}
+
+// "에이전트 PC ›" 하위 메뉴 — 게스트 OS 두 종(macOS/Linux)을 로고와 함께 고른다(Image #21).
+//  지금 설정된 OS 에는 체크. 목록은 즉시 그리고, 설정이 오면 체크만 채운다(메뉴가 늦게 뜨지 않게).
+function fillDesktopOsMenu(panel, done) {
+  const mk = (iconFn, label, sub, osKind) => {
+    const b = document.createElement("button");
+    b.className = "pv-menu-item";
+    b.dataset.os = osKind;
+    b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`
+      + `<span class="pvm-hint">${sub}</span><span class="pvm-chk">${icons.check({ size: 13 })}</span>`;
+    b.addEventListener("click", (e) => { e.stopPropagation(); done(); void chooseDesktopOs(osKind); });
+    panel.appendChild(b);
+  };
+  mk(icons.apple, "macOS", i18n.t('약 26GB'), "macos");
+  mk(icons.linux, "Linux", i18n.t('약 5GB'), "linux");
+  api.desktopSettings().then((cfg) => {
+    const cur = (cfg && cfg.osKind) === "linux" ? "linux" : "macos";
+    panel.querySelector(`[data-os="${cur}"]`)?.classList.add("active");
+  }).catch(() => {});
+}
+
+// 게스트 OS 를 고르고 에이전트 PC 표면을 연다. 다른 OS 로 바꾸는데 켜져 있으면 다시 시작을 물어본다
+//  (연결된 워크스페이스 변경과 같은 규율). 꺼져 있으면 설정만 바꾸고 — 다음 켤 때 그 OS 로 뜬다.
+async function chooseDesktopOs(osKind) {
+  let cfg = null, st = null;
+  try { [cfg, st] = await Promise.all([api.desktopSettings(), api.desktopStatus()]); } catch (_) { /* 아래서 기본값 */ }
+  const cur = (cfg && cfg.osKind) === "linux" ? "linux" : "macos";
+  const running = st && (st.phase === "running" || st.phase === "starting" || st.phase === "pulling");
+  if (cur !== osKind) {
+    const nm = osKind === "linux" ? "Linux" : "macOS";
+    try {
+      if (running) {
+        if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
+        await api.desktopSettingsSet({ osKind }); await api.desktopStop(); await api.desktopStart();
+      } else {
+        await api.desktopSettingsSet({ osKind });
+      }
+    } catch (e) { wvToast(e && e.message ? e.message : String(e)); return; }
+  }
+  if (focusDesktopSurface()) return;
+  smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') });
 }
 
 /** 이미 열린 에이전트 PC 표면(leaf 또는 혼합 탭)을 앞으로 끌어온다. 없으면 false. */
