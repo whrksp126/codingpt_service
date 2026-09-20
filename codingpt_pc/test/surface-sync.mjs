@@ -91,6 +91,15 @@ const meta = { id: 'ws1', localPath: 'proj' };
   ok(touched.has('*') && w.layout.dir && w.layout.second.kind === 'preview' && w.layout.second.sid === 'sP', '분할 편입 + sid');
 }
 
+// ── ④' 더블링 — 같은 sid 둘·에이전트 PC 둘은 둘째를 즉시 닫는다(2026-09-20 폰 실사고: 흡수 뒤 탭 2개) ──
+{
+  _reset(); pane.closed.length = 0;
+  const term = { id: 't1', kind: 'terminal', tabs: [{ win: 1 }, { kind: 'emulator', deviceId: 'desktop:main', sid: 'D' }, { kind: 'emulator', deviceId: 'desktop:main', sid: 'D' }, { kind: 'preview', url: 'u', sid: 'P' }, { kind: 'preview', url: 'u', sid: 'P' }], active: 0 };
+  const w = { layout: term, focusId: 't1' };
+  reconcile(meta, w, [{ id: 'D', kind: 'emulator', deviceId: 'desktop:main' }, { id: 'P', kind: 'preview', url: 'u' }]);
+  ok(pane.closed.length === 2 && pane.closed.some(([, i]) => i === 2) && pane.closed.some(([, i]) => i === 4), '둘째 에이전트 PC·둘째 같은 sid 프리뷰를 닫는다');
+}
+
 // ── ⑤ pane↔탭 왕복에 sid 가 보존된다 ──
 {
   const l = T.leaf('emulator', { deviceId: 'desktop:main', sid: 'S' });

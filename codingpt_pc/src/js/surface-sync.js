@@ -140,13 +140,21 @@ export function reconcile(meta, w, items) {
   const seen = new Set();
   // ① 기록에서 사라진 것 — 2틱 유예 뒤 닫는다(등록 중인 것은 보호).
   const closeLeaves = [];
+  let deskSeen = false;
+  const localSeen = new Set();
   for (const e of local) {
-    if (remote.has(e.sid)) { seen.add(e.sid); if (e.tab) delete e.tab.miss; else { const l = T.findLeaf(w.layout, e.leafId); if (l) delete l.miss; } continue; }
-    if (pendingAdd.has(e.sid) || !knownFor(meta.id).has(e.sid)) continue;   // 아직 등록 전(첫 sync 전) 인 것도 보호
+    //  더블링 방지 — 같은 sid(흡수로 겹침)·에이전트 PC 둘째는 유예 없이 닫는다(먼저 만난 것만 남긴다).
+    const desk = e.kind === "emulator" && typeof e.deviceId === "string" && e.deviceId.startsWith("desktop:");
+    const dup = localSeen.has(e.sid) || (desk && deskSeen);
+    if (!dup) { localSeen.add(e.sid); if (desk) deskSeen = true; }
+    if (!dup && remote.has(e.sid)) { seen.add(e.sid); if (e.tab) delete e.tab.miss; else { const l = T.findLeaf(w.layout, e.leafId); if (l) delete l.miss; } continue; }
     const holder = e.tab || T.findLeaf(w.layout, e.leafId);
     if (!holder) continue;
-    if (!holder.miss) { holder.miss = 1; api.debugLog?.(`surface: sid=${e.sid} 목록 부재 — 1틱 유예`); continue; }
-    forgetKnown(meta.id, e.sid);
+    if (!dup) {
+      if (pendingAdd.has(e.sid) || !knownFor(meta.id).has(e.sid)) continue;   // 아직 등록 전(첫 sync 전) 인 것도 보호
+      if (!holder.miss) { holder.miss = 1; api.debugLog?.(`surface: sid=${e.sid} 목록 부재 — 1틱 유예`); continue; }
+      forgetKnown(meta.id, e.sid);
+    }
     if (e.tab) {
       const pane = getPane(e.leafId);
       const leaf = T.findLeaf(w.layout, e.leafId);
