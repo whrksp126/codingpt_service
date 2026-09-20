@@ -221,6 +221,8 @@ async function status() {
   return {
     ...base,
     phase: _starting ? 'starting' : (running ? 'running' : 'stopped'), step: _starting ? _step : '',
+    //  비동기 켜기가 실패했으면(꺼진 채) 사유를 보여 준다 — RPC 는 이미 빨리 돌아갔으니 여기가 유일한 통로.
+    ...((!running && !_starting && _startErr) ? { reason: _startErr } : {}),
     provisioned: provisionedVer() >= PROVISION_VER,
     os: info.os, ip: info.ipAddress || null, cpuCount: info.cpuCount, memorySize: info.memorySize, diskSize: info.diskSize,
     display: info.display, vncUrl: running ? (info.vncUrl || null) : null,
@@ -231,6 +233,7 @@ async function status() {
 
 // ── 수명주기 ───────────────────────────────────────────────────────────────
 let _starting = null;   // Promise | null
+let _startErr = null;   // 백그라운드 start() 실패 사유(비동기 켜기라 RPC 로 못 던진다 → status.reason 으로 보여 준다)
 let _linuxBuild = null;   // Linux 이미지 준비 상태(status 가 phase 'pulling' 으로 보고) | null
 /**
  * 유휴 자동 끄기 — 켜진 VM 은 메모리 16GB 를 쥔다. 아무도 안 보고(프레임·영상) 에이전트도 안 쓰면(입력·exec·ax…) 이만큼 뒤 끈다.
@@ -385,6 +388,7 @@ async function remove() {
 /** 켠다(이미 켜져 있으면 VNC 만 확인). 공유 폴더는 설정의 sharedDirs. */
 async function start(o = {}) {
   touchUse(); armIdleWatch();
+  _startErr = null;
   if (_starting) return _starting;
   _starting = (async () => {
     let st = await status();
@@ -1024,7 +1028,14 @@ async function handle(method, p = {}) {
   if (m === 'desktop.status') return { ...(await status()), handoff: pendingHandoff(), idleOffMin: Number(loadSettings().idleOffMin) || 0, idleMin: Math.floor((Date.now() - lastUse) / 60000) };
   if (m === 'desktop.pull') return pull();
   if (m === 'desktop.delete') return remove();
-  if (m === 'desktop.start') return start(p);
+  if (m === 'desktop.start') {
+    //  ★ Linux 첫 부팅은 cloud-init 설치로 8~12분 — start() 를 RPC 로 끝까지 기다리면 클라 소켓이 타임아웃한다
+    //   ("응답 수신 실패: Resource temporarily unavailable (os error 35)", 2026-09-21 실사고). 켜기를 백그라운드로
+    //   돌리고 바로 status 를 돌려준다(폴링이 진행 phase 'pulling'/'starting'→'running' 을 본다). 실패는 status.reason.
+    const pr = start(p); pr.catch((e) => { _startErr = String((e && e.message) || e); });
+    await Promise.race([pr.catch(() => {}), sleep(2500)]);
+    return status();
+  }
   if (m === 'desktop.stop') return stop();
   if (m === 'desktop.provision') { markProvisioned(0); if ((await status()).phase === 'running') await stop(); return start(p); }
   if (m === 'desktop.exec') return { out: await exec(String(p.cmd || ''), { timeoutMs: p.timeoutMs }) };
