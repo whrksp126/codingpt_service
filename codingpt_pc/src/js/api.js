@@ -271,24 +271,24 @@ export const api = {
   //  라이브 화면(H.264) — 데몬이 로컬 WebSocket 주소를 돌려주고, 웹뷰가 거기에 직접 붙는다.
   //   프레임을 이 invoke 통로로 실어 나르지 않는 이유: 초당 20~30개의 바이너리를 요청/응답
   //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
-  //  에이전트 PC(게스트 macOS) — 같은 소켓. 화면·입력은 emulator.* 에 id `desktop:main` 으로 간다.
-  desktopStatus: () => invoke("emulator_local", { cmd: "desktop.status", args: {} }),
+  //  에이전트 PC(macOS·Linux 게스트) — 같은 소켓. os 로 어느 VM 인지 고른다(둘 다 동시 실행). 화면·입력은 emulator.* 에 id `desktop:<os>`.
+  desktopStatus: (os) => invoke("emulator_local", { cmd: "desktop.status", args: { os } }),
   // 공유 표면(프리뷰·IDE·모바일 화면) — 어느 기기에서 열면 전부에(2026-09-20). cwd = 워크스페이스 localPath.
   surfaceList: (cwd) => invoke("surface_local", { cmd: "surface.list", args: { cwd } }),
   surfaceAdd: (cwd, item) => invoke("surface_local", { cmd: "surface.add", args: { cwd, ...item } }),
   surfaceUpdate: (cwd, item) => invoke("surface_local", { cmd: "surface.update", args: { cwd, ...item } }),
   surfaceRemove: (cwd, id) => invoke("surface_local", { cmd: "surface.remove", args: { cwd, id } }),
-  desktopPause: (on) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: {} }),
-  desktopSettings: () => invoke("emulator_local", { cmd: "desktop.settings.get", args: {} }),
-  desktopSettingsSet: (patch) => invoke("emulator_local", { cmd: "desktop.settings.set", args: patch || {} }),
-  desktopPull: () => invoke("emulator_local", { cmd: "desktop.pull", args: {} }),
-  desktopStart: () => invoke("emulator_local", { cmd: "desktop.start", args: {} }),
-  desktopStop: () => invoke("emulator_local", { cmd: "desktop.stop", args: {} }),
-  desktopDelete: () => invoke("emulator_local", { cmd: "desktop.delete", args: {} }),
-  desktopSnapshots: () => invoke("emulator_local", { cmd: "desktop.snapshots", args: {} }),
-  desktopSnapshot: (label) => invoke("emulator_local", { cmd: "desktop.snapshot", args: { label: label || "" } }),
-  desktopRestore: (name) => invoke("emulator_local", { cmd: "desktop.restore", args: { name } }),
-  desktopSnapshotDelete: (name) => invoke("emulator_local", { cmd: "desktop.snapshot.delete", args: { name } }),
+  desktopPause: (on, os) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: { os } }),
+  desktopSettings: (os) => invoke("emulator_local", { cmd: "desktop.settings.get", args: { os } }),
+  desktopSettingsSet: (patch, os) => invoke("emulator_local", { cmd: "desktop.settings.set", args: { ...(patch || {}), os } }),
+  desktopPull: (os) => invoke("emulator_local", { cmd: "desktop.pull", args: { os } }),
+  desktopStart: (os) => invoke("emulator_local", { cmd: "desktop.start", args: { os } }),
+  desktopStop: (os) => invoke("emulator_local", { cmd: "desktop.stop", args: { os } }),
+  desktopDelete: (os) => invoke("emulator_local", { cmd: "desktop.delete", args: { os } }),
+  desktopSnapshots: (os) => invoke("emulator_local", { cmd: "desktop.snapshots", args: { os } }),
+  desktopSnapshot: (label, os) => invoke("emulator_local", { cmd: "desktop.snapshot", args: { label: label || "", os } }),
+  desktopRestore: (name, os) => invoke("emulator_local", { cmd: "desktop.restore", args: { name, os } }),
+  desktopSnapshotDelete: (name, os) => invoke("emulator_local", { cmd: "desktop.snapshot.delete", args: { name, os } }),
   emulatorStreamStart: (id, opts) =>
     invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
   emulatorStreamStop: (streamId) =>

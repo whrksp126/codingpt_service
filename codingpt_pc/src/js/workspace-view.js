@@ -9,7 +9,7 @@ import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
-import { setDesktopOs } from "./desktop-os.js";
+import { setDesktopOs, osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
@@ -812,53 +812,49 @@ function mixedTabFor(kind, extra) {
 
 // "에이전트 PC ›" 하위 메뉴 — 게스트 OS 두 종(macOS/Linux)을 로고와 함께 고른다(Image #21).
 //  지금 설정된 OS 에는 체크. 목록은 즉시 그리고, 설정이 오면 체크만 채운다(메뉴가 늦게 뜨지 않게).
+// "에이전트 PC ›" 하위 메뉴 — macOS·Linux 를 **각각 독립 pane** 으로 연다(둘 다 동시에 쓸 수 있다).
+//  이미 열려 있는 OS 는 체크로 표시하고, 누르면 그 pane 을 앞으로 끌어온다.
 function fillDesktopOsMenu(panel, done) {
   const mk = (iconFn, label, sub, osKind) => {
     const b = document.createElement("button");
-    b.className = "pv-menu-item";
+    b.className = "pv-menu-item" + (isDesktopOsOpen(osKind) ? " active" : "");
     b.dataset.os = osKind;
     b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`
       + `<span class="pvm-hint">${sub}</span><span class="pvm-chk">${icons.check({ size: 13 })}</span>`;
-    b.addEventListener("click", (e) => { e.stopPropagation(); done(); void chooseDesktopOs(osKind); });
+    b.addEventListener("click", (e) => { e.stopPropagation(); done(); openDesktopOsPane(osKind); });
     panel.appendChild(b);
   };
   mk(icons.apple, "macOS", i18n.t('약 26GB'), "macos");
   mk(icons.linux, "Linux", i18n.t('약 5GB'), "linux");
-  api.desktopSettings().then((cfg) => {
-    const cur = (cfg && cfg.osKind) === "linux" ? "linux" : "macos";
-    panel.querySelector(`[data-os="${cur}"]`)?.classList.add("active");
-  }).catch(() => {});
 }
 
-// 게스트 OS 를 고르고 에이전트 PC 표면을 연다. 다른 OS 로 바꾸는데 켜져 있으면 다시 시작을 물어본다
-//  (연결된 워크스페이스 변경과 같은 규율). 꺼져 있으면 설정만 바꾸고 — 다음 켤 때 그 OS 로 뜬다.
-async function chooseDesktopOs(osKind) {
-  let cfg = null, st = null;
-  try { [cfg, st] = await Promise.all([api.desktopSettings(), api.desktopStatus()]); } catch (_) { /* 아래서 기본값 */ }
-  const cur = (cfg && cfg.osKind) === "linux" ? "linux" : "macos";
-  const running = st && (st.phase === "running" || st.phase === "starting" || st.phase === "pulling");
-  if (cur !== osKind) {
-    const nm = osKind === "linux" ? "Linux" : "macOS";
-    try {
-      if (running) {
-        if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
-        //  ★ 현재 OS 를 먼저 끈다(osKind 를 바꾼 뒤 끄면 옛 VM 이 VNC 포트를 쥔 채 남는다 — 2026-09-21 실사고).
-        await api.desktopStop(); await api.desktopSettingsSet({ osKind }); await api.desktopStart();
-      } else {
-        await api.desktopSettingsSet({ osKind });
-      }
-    } catch (e) { wvToast(e && e.message ? e.message : String(e)); return; }
-  }
-  setDesktopOs(osKind);   // 탭 파비콘·이름을 곧바로 그 OS 로(폴링 전 깜빡임 방지)
-  if (focusDesktopSurface()) return;
-  smartAdd("emulator", { deviceId: "desktop:main", metaName: i18n.t('에이전트 PC') });
+// 그 OS 의 에이전트 PC pane 을 연다(이미 열려 있으면 앞으로). 두 OS 는 서로 독립 — 하나 열어도 다른 하나는 그대로.
+function openDesktopOsPane(osKind) {
+  setDesktopOs(osKind);   // 레거시 캐시(파비콘 폴백)
+  if (focusDesktopSurface(osKind)) return;
+  smartAdd("emulator", { deviceId: `desktop:${osKind}`, metaName: osVmLabel(osKind) });
+}
+
+// 지금 이 워크스페이스에 그 OS 의 에이전트 PC pane 이 이미 있나?
+function isDesktopOsOpen(osKind) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout) return false;
+  let found = false;
+  const match = (d) => osOfDeviceId(d) === osKind;
+  T.eachLeaf(rt.layout, (l) => {
+    if (found) return;
+    if (l.kind === "emulator" && match(l.deviceId)) found = true;
+    else if (l.kind === "terminal" && (l.tabs || []).some((t) => t.kind === "emulator" && match(t.deviceId))) found = true;
+  });
+  return found;
 }
 
 /** 이미 열린 에이전트 PC 표면(leaf 또는 혼합 탭)을 앞으로 끌어온다. 없으면 false. */
-export function focusDesktopSurface() {
+export function focusDesktopSurface(osKind) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt || !rt.layout) return false;
-  const isDesk = (d) => typeof d === "string" && d.startsWith("desktop:");
+  //  os 를 주면 그 OS 의 pane 만(desktop:macos/linux 는 id 로, 레거시 desktop:main 은 osOfDeviceId 로). 없으면 아무 데스크톱.
+  const isDesk = (d) => typeof d === "string" && d.startsWith("desktop:") && (!osKind || osOfDeviceId(d) === osKind);
   let hit = null;
   T.eachLeaf(rt.layout, (l) => {
     if (hit) return;

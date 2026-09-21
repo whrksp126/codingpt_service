@@ -1161,7 +1161,9 @@ async function desktopRpc(req, res) {
     const b = req.body || {};
     const method = String(b.method || '');
     if (!DESKTOP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
-    let params = {};
+    //  os 로 어느 게스트 VM(macOS·Linux, 동시 실행)인지 고른다 — 데몬 handle 이 params.os 로 라우팅.
+    const params = {};
+    if (b.os === 'macos' || b.os === 'linux') params.os = b.os;
     if (method === 'desktop.settings.set' && b.params && typeof b.params === 'object') {
       for (const k of Object.keys(b.params)) if (DESKTOP_PARAM_OK.has(k)) params[k] = b.params[k];
     }

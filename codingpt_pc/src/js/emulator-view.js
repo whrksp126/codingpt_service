@@ -14,7 +14,7 @@
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { insertAttachment, attachName, shq, toast } from "./attach-insert.js";
-import { setDesktopOs } from "./desktop-os.js";
+import { setDesktopOs, osOfDeviceId } from "./desktop-os.js";
 import * as i18n from "./i18n/index.js";
 
 function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -237,6 +237,8 @@ export class EmulatorView {
   }
 
   device() { return (this.devices || []).find((d) => d.id === this.deviceId) || null; }
+  //  이 pane 이 가리키는 에이전트 PC 의 OS(desktop:macos/linux). 데스크톱이 아니면 null → api 는 데몬 기본 OS.
+  deskOs() { return osOfDeviceId(this.deviceId) || undefined; }
 
   /** 사람이 읽는 기기 이름. 목록을 아직 못 받았으면 빈 문자열(추측한 이름을 탭에 박지 않는다). */
   deviceName() { const d = this.device(); return d ? d.name : ""; }
@@ -649,14 +651,14 @@ export class EmulatorView {
     if (booted) {
       //  멈춤↔재개 = 일시정지/재생 아이콘 하나(멈춰 있으면 눌린 모양 + 재생 아이콘).
       btn("", paused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤'), async () => {
-        try { await api.desktopPause(!paused); this.deskPaused = !paused; await this.pollDesk(true); }
+        try { await api.desktopPause(!paused, this.deskOs()); this.deskPaused = !paused; await this.pollDesk(true); }
         catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
       }, "icon" + (paused ? " on" : ""), (paused ? icons.play : icons.pause)({ size: 14 }));
       btn("", i18n.t('이 화면을 캡처해 에이전트에게 첨부'), (ev) => void this.capture(ev.currentTarget), "icon", icons.camera({ size: 14 }));
       if (handoff) {
         //  개입 끝 = 에이전트에게 돌려준다(handoffOut). 주 동작이라 채운 모양.
         btn("", i18n.t('개입을 끝내고 에이전트를 재개합니다'), async () => {
-          try { await api.desktopPause(false); await this.pollDesk(true); }
+          try { await api.desktopPause(false, this.deskOs()); await this.pollDesk(true); }
           catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
         }, "icon primary", icons.handoffOut({ size: 14 }));
       }
@@ -674,7 +676,7 @@ export class EmulatorView {
     btn("···", i18n.t('더 보기'), (ev) => {
       const r = ev.currentTarget.getBoundingClientRect();
       import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
-        { icon: icons.sliders({ size: 14 }), label: i18n.t('에이전트 PC 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet()).catch(() => {}) },
+        { icon: icons.sliders({ size: 14 }), label: i18n.t('에이전트 PC 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet(this.deskOs())).catch(() => {}) },
       ])).catch(() => {});
     }, "icon");
     bar.appendChild(right);
@@ -700,7 +702,7 @@ export class EmulatorView {
   async pollDesk(force) {
     if (this._disposedDesk) return;
     let st = null;
-    try { st = await api.desktopStatus(); } catch (_) { return; }
+    try { st = await api.desktopStatus(this.deskOs()); } catch (_) { return; }
     const prev = this.deskStatus;
     this.deskStatus = st;
     this.deskPaused = !!(st && st.paused);

@@ -13,7 +13,7 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
-import { getDesktopOs, osVmLabel } from "./desktop-os.js";
+import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
@@ -148,7 +148,7 @@ export function surfaceLabel(kind, node) {
   //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
   //  에이전트 PC 는 게스트 OS 로 이름을 붙인다("macOS · VM"/"Linux · VM"). OS 를 아직 모르면 "에이전트 PC".
   if (kind === "emulator") {
-    if (isDesktopSurface(node)) return getDesktopOs() ? osVmLabel() : i18n.t('에이전트 PC');
+    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o ? osVmLabel(o) : i18n.t('에이전트 PC'); }
     return (node && node.metaName) || i18n.t('모바일 화면');
   }
   return (node && node.metaTitle) || i18n.t('프리뷰');
@@ -156,8 +156,8 @@ export function surfaceLabel(kind, node) {
 export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
   if (kind === "emulator") {
-    //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). OS 를 아직 모르면 모니터로 폴백.
-    if (isDesktopSurface(node)) return getDesktopOs() === "linux" ? icons.linux : getDesktopOs() === "macos" ? icons.apple : icons.monitor;
+    //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). id 로 판정, 모르면 모니터.
+    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o === "linux" ? icons.linux : o === "macos" ? icons.apple : icons.monitor; }
     return icons.smartphone;
   }
   return icons.globe;

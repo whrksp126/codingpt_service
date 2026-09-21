@@ -96,19 +96,28 @@ test('AT-SPI/settle/openApp 명령 — 그래픽 세션 버스 env(★함정)·�
   assert.ok(/LOGGED_IN/.test(lx.LOGIN_CHECK) && /:0/.test(lx.LOGIN_CHECK), '로그인 확인=:0 세션');
 });
 
-test('desktop.js OS 분기 — osKind 로 VM 이름·경로가 갈린다', () => {
+test('desktop.js OS별 인스턴스 — macOS·Linux 를 독립 VM 으로 동시에(포트·이름·라우팅)', () => {
   const d = require('../desktop');
   const src = fs.readFileSync(path.join(__dirname, '..', 'desktop.js'), 'utf8');
-  assert.strictEqual(d.osKind(), 'macos');            // 기본
-  assert.strictEqual(d.vmName(), 'cpt-agent-desktop');
-  assert.ok(src.includes('return isLinux() ? VM_LINUX : VM_NAME;') && src.includes("VM_LINUX = 'cpt-agent-linux'"), 'vmName 이 osKind 로 갈린다');
-  //  런타임 조작은 vmName() 을 쓴다(하드코딩 VM_NAME 아님) — get/run/ssh/clone 등
-  assert.ok(!/lume\(\['(get|set|run|ssh|shutdown)', VM_NAME/.test(src), '런타임 lume 호출은 vmName()');
-  //  Linux 분기 존재
-  assert.ok(/if \(isLinux\(\)\) \{ _axOk = true; return true; \}/.test(src), 'ensureAx Linux no-op');
+  //  두 OS 인스턴스가 따로 있다(둘 다 동시에 살아 있을 수 있다).
+  assert.ok(d.VMS && d.VMS.macos && d.VMS.linux, 'VMS.macos / VMS.linux');
+  assert.strictEqual(d.VMS.macos.vmName, 'cpt-agent-desktop');
+  assert.strictEqual(d.VMS.linux.vmName, 'cpt-agent-linux');
+  //  ★ VNC 포트가 OS별로 다르다 — 예전엔 5951 공유라 둘째가 "port in use" 로 못 켜졌다.
+  assert.strictEqual(d.VMS.macos.VNC_PORT, 5951);
+  assert.strictEqual(d.VMS.linux.VNC_PORT, 5952);
+  //  기기 id 로 OS 를 가른다.
+  assert.strictEqual(d.osOf('desktop:macos'), 'macos');
+  assert.strictEqual(d.osOf('desktop:linux'), 'linux');
+  assert.strictEqual(d.VMS.linux.DEVICE_ID, 'desktop:linux');
+  //  Linux 분기(팩토리 안).
+  assert.ok(/if \(isLinux\) \{ _axOk = true; return true; \}/.test(src), 'ensureAx Linux no-op');
   assert.ok(/LX\(\)\.axCmd\(target, screen\)/.test(src), 'axTree Linux=AT-SPI');
   assert.ok(/LX\(\)\.ensureImage/.test(src), 'start 가 Linux 이미지 빌드');
   assert.ok(/await waitLoggedIn\(780000\)/.test(src), 'Linux 는 cloud-init 설치+재부팅 대기');
-  assert.ok(/isLinux\(\) \? LX\(\)\.SETTLE_CMD : SETTLE_SCRIPT/.test(src), 'settle OS별');
-  assert.ok(/PROV_KEY = \(\) => \(isLinux\(\) \? 'provisionedLinux' : 'provisioned'\)/.test(src), '프로비저닝 표식은 OS별(macOS 뒤 Linux 전환 시 재설치)');
+  assert.ok(/isLinux \? LX\(\)\.SETTLE_CMD : SETTLE_SCRIPT/.test(src), 'settle OS별');
+  //  ★ 다른 OS 의 VM 을 죽이지 않는다(동시 실행) — reapForeignVm 제거.
+  assert.ok(!/reapForeignVm/.test(src), '다른 OS VM 회수(reapForeignVm) 없음 — 동시 실행');
+  //  deviceRow 는 두 OS 를 모두 돌려준다(배열).
+  assert.ok(/VMS\.macos\.deviceRow\(\)[\s\S]*VMS\.linux\.deviceRow\(\)/.test(src), 'deviceRow 가 두 OS 모두');
 });

@@ -15,3 +15,12 @@ export function setDesktopOs(k) {
 
 /** 탭 이름 — "macOS · VM" / "Linux · VM". 인자 없으면 캐시 값 사용. */
 export function osVmLabel(k) { return (((k || _os) === "linux") ? "Linux" : "macOS") + " · VM"; }
+
+/** 기기 id 로 OS 판정 — desktop:macos/linux 는 곧바로, 레거시 desktop:main 은 캐시로. 데스크톱이 아니면 null. */
+export function osOfDeviceId(id) {
+  const s = String(id || "");
+  if (s === "desktop:linux") return "linux";
+  if (s === "desktop:macos") return "macos";
+  if (s.startsWith("desktop:")) return _os;   // 레거시 desktop:main
+  return null;
+}

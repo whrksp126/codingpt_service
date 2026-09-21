@@ -2481,6 +2481,8 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-deskdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
 .emu-deskdot.on { background: var(--accent); }
 .ds-card { max-width: 520px; }
+.ds-head-os { display: inline-flex; align-items: center; gap: 7px; }
+.ds-head-os .ic-brand, .ds-head-os .ic { color: var(--text); }
 /* 시트 닫기 = × 아이콘(글자 아님). fp-newfolder 의 텍스트 패딩을 아이콘용으로 좁힌다. */
 .ds-close { display: inline-flex; align-items: center; justify-content: center; padding: 4px; color: var(--dim); }
 .ds-close:hover { color: var(--text); }

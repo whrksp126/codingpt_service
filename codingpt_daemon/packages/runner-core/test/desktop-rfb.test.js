@@ -184,7 +184,7 @@ test('켤 때마다 다시 거는 설정(settle) — 화면보호기 0·잠금 �
   assert.ok(/screenLock is off.*idleTime.*= 0.*CPT_SETTLE_OK/s.test(sc), '표식은 상태 확인 뒤에만');
   assert.ok(!/\bsudo\b/.test(sc), '사용자 도메인 설정만 — sudo 불필요');
   const src = fs.readFileSync(path.join(__dirname, '..', 'desktop.js'), 'utf8');
-  assert.ok(/await connectRfb\(\{ waitMs: 30000 \}\);\s*\n[^\n]*\n\s*void settle\(\);/.test(src), 'start() 는 화면이 붙은 뒤 settle 을 뒤에서 돈다');
+  assert.ok(/await connectRfb\(\{ waitMs: 30000 \}\);[\s\S]{0,120}void settle\(\);/.test(src), 'start() 는 화면이 붙은 뒤 settle 을 뒤에서 돈다');
 });
 
 // 폴더 연결은 에이전트가 필요할 때 스스로(사용자 결정 2026-09-19: 자동 연결 없음·경로 제한 없음). 꺼져 있을 때는

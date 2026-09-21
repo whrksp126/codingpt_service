@@ -244,15 +244,16 @@ function desktop() {
   }
   return _desktopMod;
 }
-async function desktopRow() { try { return await desktop().deviceRow(); } catch (_) { return null; } }
+//  에이전트 PC 는 이제 macOS·Linux 두 행(각 독립 VM) — deviceRow 가 배열을 돌려준다.
+async function desktopRow() { try { const r = await desktop().deviceRow(); return Array.isArray(r) ? r : (r ? [r] : []); } catch (_) { return []; } }
 
 async function list() {
   const t = tools();
   const android = await androidDevices();
   const [avds, ios, desk] = await Promise.all([androidAvds(android), iosSimulators(), desktopRow()]);
   return {
-    //  에이전트 데스크톱(게스트 macOS)도 한 "기기" 다 — 같은 pane·같은 프레임/입력 계약으로 보인다.
-    devices: sortDevices([...android, ...avds, ...ios, ...(desk ? [desk] : [])]),
+    //  에이전트 PC(macOS·Linux 게스트)도 각각 한 "기기" 다 — 같은 pane·같은 프레임/입력 계약으로 보인다.
+    devices: sortDevices([...android, ...avds, ...ios, ...desk]),
     //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
     tools: {
       adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, resize: !!t.sips,
@@ -280,7 +281,7 @@ function parseId(id) {
 async function boot(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') { await desktop().handle('desktop.start', {}); return { ok: true, booting: false }; }
+  if (p.scheme === 'desktop') { await desktop().handle('desktop.start', { id }); return { ok: true, booting: false }; }
   const t = tools();
   if (p.scheme === 'avd') {
     if (!t.emulator) throw new Error('안드로이드 에뮬레이터를 찾을 수 없어요');
@@ -309,7 +310,7 @@ async function boot(id) {
 async function shutdown(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') return desktop().handle('desktop.stop', {});
+  if (p.scheme === 'desktop') return desktop().handle('desktop.stop', { id });
   const t = tools();
   if (p.scheme === 'ios') {
     await run(t.xcrun, ['simctl', 'shutdown', p.value], { timeoutMs: 30000 });
@@ -490,7 +491,7 @@ async function frame(args) {
   const p = parseId(args && args.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
   if (p.scheme === 'desktop') {
-    const r = await desktop().handle('desktop.frame', { maxWidth: args && args.maxWidth, quality: args && args.quality });
+    const r = await desktop().handle('desktop.frame', { id: args.id, maxWidth: args && args.maxWidth, quality: args && args.quality });
     lastSize.set(args.id, { w: r.width, h: r.height });
     return r;
   }
@@ -1098,7 +1099,7 @@ async function openUrl(args) {
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
   const url = String((args && args.url) || '');
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) throw new Error('주소가 올바르지 않아요');
-  if (p.scheme === 'desktop') return desktop().handle('desktop.openUrl', { url });
+  if (p.scheme === 'desktop') return desktop().handle('desktop.openUrl', { id: args.id, url });
   const t = tools();
   if (p.scheme === 'android') {
     await run(t.adb, ['-s', p.value, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url], { timeoutMs: 15000 });
@@ -1122,7 +1123,7 @@ async function streamStart(args) {
   if (p.scheme !== 'android' && p.scheme !== 'ios' && p.scheme !== 'desktop') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
   if (p.scheme === 'desktop') {
     const d = require('./desktop');
-    const st = await d.status();
+    const st = await d.handle('desktop.status', { id: a.id });
     if (st.phase !== 'running') throw new Error('에이전트 PC 가 꺼져 있어요');
     return lazyStream().start({ serial: a.id, deviceId: a.id, kind: 'desktop' });
   }

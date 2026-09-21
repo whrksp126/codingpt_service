@@ -140,13 +140,13 @@ export function reconcile(meta, w, items) {
   const seen = new Set();
   // ① 기록에서 사라진 것 — 2틱 유예 뒤 닫는다(등록 중인 것은 보호).
   const closeLeaves = [];
-  let deskSeen = false;
+  const deskSeen = new Set();   // OS별로 하나씩만(macOS·Linux 는 각각 독립 pane) — 같은 OS 둘째만 더블링으로 닫는다.
   const localSeen = new Set();
   for (const e of local) {
-    //  더블링 방지 — 같은 sid(흡수로 겹침)·에이전트 PC 둘째는 유예 없이 닫는다(먼저 만난 것만 남긴다).
+    //  더블링 방지 — 같은 sid(흡수로 겹침)·같은 OS 의 에이전트 PC 둘째는 유예 없이 닫는다(먼저 만난 것만 남긴다).
     const desk = e.kind === "emulator" && typeof e.deviceId === "string" && e.deviceId.startsWith("desktop:");
-    const dup = localSeen.has(e.sid) || (desk && deskSeen);
-    if (!dup) { localSeen.add(e.sid); if (desk) deskSeen = true; }
+    const dup = localSeen.has(e.sid) || (desk && deskSeen.has(e.deviceId));
+    if (!dup) { localSeen.add(e.sid); if (desk) deskSeen.add(e.deviceId); }
     if (!dup && remote.has(e.sid)) { seen.add(e.sid); if (e.tab) delete e.tab.miss; else { const l = T.findLeaf(w.layout, e.leafId); if (l) delete l.miss; } continue; }
     const holder = e.tab || T.findLeaf(w.layout, e.leafId);
     if (!holder) continue;

@@ -220,7 +220,8 @@ export function updateSidebar() {
   //   앱(SidebarContent) 쪽에는 남겨 둔다.
   list.appendChild(sectionHead(i18n.t('내 PC'), [
     { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
-    { icon: icons.monitor({ size: 15 }), label: i18n.t('에이전트 PC…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet()).catch(() => {}) },
+    { icon: icons.apple({ size: 15 }), label: i18n.t('에이전트 PC (macOS)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("macos")).catch(() => {}) },
+    { icon: icons.linux({ size: 15 }), label: i18n.t('에이전트 PC (Linux)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("linux")).catch(() => {}) },
   ]));
   if (!devices.length) {
     list.appendChild(note(state.paired ? i18n.t('불러오는 중…') : i18n.t('PC를 연결하세요')));

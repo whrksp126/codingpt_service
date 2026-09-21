@@ -34,10 +34,14 @@ function localWorkspaces() {
   return list.filter((w) => w && w.localPath);
 }
 
-export async function openDesktopSheet() {
+let curOs = "macos";   // 이 시트가 다루는 에이전트 PC 의 OS(둘은 독립)
+
+export async function openDesktopSheet(osKind) {
+  curOs = osKind === "linux" ? "linux" : "macos";
   const ov = ensureOverlay();
   ov.classList.remove("hidden");
-  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="fp-title">${i18n.t('에이전트 PC')}</span><button class="fp-newfolder ds-close" id="dsClose" title="${i18n.t('닫기')}" aria-label="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
+  const title = `${(curOs === "linux" ? icons.linux : icons.apple)({ size: 15 })} <span class="fp-title">${curOs === "linux" ? "Linux · VM" : "macOS · VM"}</span>`;
+  ov.innerHTML = `<div class="fp-card ds-card"><div class="fp-head"><span class="ds-head-os">${title}</span><button class="fp-newfolder ds-close" id="dsClose" title="${i18n.t('닫기')}" aria-label="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div><div class="ds-body"><div class="fp-empty">${i18n.t('불러오는 중…')}</div></div></div>`;
   ov.querySelector("#dsClose").addEventListener("click", close);
   await paint();
   //  준비(내려받기) 중이면 진행률을, 켜는 중이면 상태를 따라간다.
@@ -48,7 +52,7 @@ export async function openDesktopSheet() {
 async function paint(quiet) {
   if (!el) return;
   let st = null, cfg = null, snaps = { snapshots: [] };
-  try { [st, cfg] = await Promise.all([api.desktopStatus(), api.desktopSettings()]); }
+  try { [st, cfg] = await Promise.all([api.desktopStatus(curOs), api.desktopSettings(curOs)]); }
   catch (e) {
     if (quiet) return;
     el.querySelector(".ds-body").innerHTML = `<div class="fp-empty">${escapeHtml(e && e.message ? e.message : String(e))}</div>`;
@@ -58,7 +62,7 @@ async function paint(quiet) {
   if (!body) return;
   //  진행률만 바뀌는 동안 포커스·스크롤이 튀지 않게, 서명이 같으면 다시 그리지 않는다.
   const hasVm = st.phase === "running" || st.phase === "stopped";
-  if (hasVm) { try { snaps = await api.desktopSnapshots(); } catch (_) { /* 목록 없이 그린다 */ } }
+  if (hasVm) { try { snaps = await api.desktopSnapshots(curOs); } catch (_) { /* 목록 없이 그린다 */ } }
   const sig = JSON.stringify([st.phase, st.paused, st.pull && st.pull.bytes, st.ip, cfg.sharedDirs, cfg.memGB, cfg.cpu, cfg.idleOffMin, cfg.osKind, st.screen, (snaps.snapshots || []).map((x) => x.name)]);
   if (body.dataset.sig === sig) return;
   body.dataset.sig = sig;
@@ -77,9 +81,12 @@ async function paint(quiet) {
   if (st.phase === "unsupported" || st.phase === "no-tool") {
     statusRows += `<div class="ds-warn">${escapeHtml(st.reason || "")}</div>`;
   } else if (st.phase === "no-image") {
-    statusRows += `<div class="ds-kv"><span>${i18n.t('이미지')}</span><b>${escapeHtml(st.image || "")} · ${i18n.t('약 21 GB')}</b></div>
+    //  macOS 는 이미지를 따로 내려받고(21GB), Linux 는 첫 켜기 때 스스로 준비한다(다운로드 0.6GB→변환). 그래서 버튼이 다르다.
+    statusRows += `<div class="ds-kv"><span>${i18n.t('이미지')}</span><b>${escapeHtml(st.image || "")} · ${curOs === "linux" ? i18n.t('약 5GB') : i18n.t('약 21 GB')}</b></div>
       ${st.reason && !/이미지가 없어요/.test(st.reason) ? `<div class="ds-warn">${escapeHtml(st.reason)}</div>` : ""}
-      <div class="ds-actions"><button class="fp-btn fp-designate" id="dsPull">${i18n.t('준비 (내려받기)')}</button></div>`;
+      ${curOs === "linux"
+        ? `<div class="ds-warn">${i18n.t('첫 켜기 때 이미지를 준비해요(몇 분).')}</div><div class="ds-actions"><button class="fp-btn fp-designate" id="dsStart">${i18n.t('지금 켜기')}</button></div>`
+        : `<div class="ds-actions"><button class="fp-btn fp-designate" id="dsPull">${i18n.t('준비 (내려받기)')}</button></div>`}`;
   } else if (st.phase === "pulling") {
     const p = st.pull || {};
     const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
@@ -99,17 +106,11 @@ async function paint(quiet) {
   const memOpts = [8, 12, 16, 24, 32].filter((g) => g <= Math.max(8, Math.floor((st.hostGB || 0) / 2)));
   const cpuOpts = [4, 6, 8, 12, 16].filter((c) => c <= Math.max(4, (navigator.hardwareConcurrency || 8)));
 
-  const os = cfg.osKind === "linux" ? "linux" : "macos";
-  const busy = st.phase === "running" || st.phase === "starting" || st.phase === "pulling";
   body.innerHTML = `
-    <div class="fp-sub">${i18n.t('이 맥 안에서 에이전트만 쓰는 별도의 컴퓨터예요. 사용자 화면·입력은 건드리지 않아요.')}</div>
+    <div class="fp-sub">${curOs === "linux"
+      ? i18n.t('이 맥 안에서 에이전트가 쓰는 별도의 Linux 데스크톱이에요. macOS 와 따로 동시에 켤 수 있어요.')
+      : i18n.t('이 맥 안에서 에이전트가 쓰는 별도의 macOS 데스크톱이에요. Linux 와 따로 동시에 켤 수 있어요.')}</div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('상태')}</div>${statusRows}</div>
-    <div class="ds-grp"><div class="ds-l">${i18n.t('게스트 OS')}</div>
-      <div class="ds-seg" id="dsOs">
-        <button class="ds-seg-btn${os === "macos" ? " on" : ""}" data-os="macos">${icons.apple({ size: 15 })} macOS <span class="ds-seg-sz">${i18n.t('약 26GB')}</span></button>
-        <button class="ds-seg-btn${os === "linux" ? " on" : ""}" data-os="linux">${icons.linux({ size: 15 })} Linux <span class="ds-seg-sz">${i18n.t('약 5GB')}</span></button>
-      </div>
-      <div class="ds-warn">${i18n.t('macOS 는 Mac 앱·Safari 를 그대로, Linux 는 가볍고 브라우저·개발에 좋아요. 켜져 있으면 바꿀 때 다시 시작합니다.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('연결된 워크스페이스')}</div>${wsRows}
       <div class="ds-warn">${i18n.t('바꾸면 다시 시작(약 10초). 폴더는 에이전트 PC 안 /Volumes/My Shared Files/ 에 보여요.')}</div></div>
     <div class="ds-grp"><div class="ds-l">${i18n.t('자원')}</div>
@@ -131,62 +132,44 @@ async function paint(quiet) {
     try { await fn(); body.dataset.sig = ""; await paint(); }
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); b.disabled = false; }
   };
-  body.querySelector("#dsPull")?.addEventListener("click", guard(() => api.desktopPull()));
+  body.querySelector("#dsPull")?.addEventListener("click", guard(() => api.desktopPull(curOs)));
   body.querySelector("#dsSnap")?.addEventListener("click", guard(async () => {
     const label = window.prompt(i18n.t('스냅샷 이름(선택)'), "") ; if (label === null) throw new Error("");
-    await api.desktopSnapshot(label);
+    await api.desktopSnapshot(label, curOs);
   }));
   for (const b of body.querySelectorAll("[data-restore]")) b.addEventListener("click", guard(async (ev) => {
     if (!window.confirm(i18n.t('이 스냅샷으로 되돌릴까요? 그 뒤에 에이전트 PC 안에서 바뀐 것은 사라집니다.'))) throw new Error("");
-    await api.desktopRestore(ev.currentTarget.dataset.restore);
+    await api.desktopRestore(ev.currentTarget.dataset.restore, curOs);
   }));
-  for (const b of body.querySelectorAll("[data-snapdel]")) b.addEventListener("click", guard(async (ev) => { await api.desktopSnapshotDelete(ev.currentTarget.dataset.snapdel); }));
-  body.querySelector("#dsStart")?.addEventListener("click", guard(() => api.desktopStart()));
-  body.querySelector("#dsStop")?.addEventListener("click", guard(() => api.desktopStop()));
-  body.querySelector("#dsRestart")?.addEventListener("click", guard(async () => { await api.desktopStop(); await api.desktopStart(); }));
+  for (const b of body.querySelectorAll("[data-snapdel]")) b.addEventListener("click", guard(async (ev) => { await api.desktopSnapshotDelete(ev.currentTarget.dataset.snapdel, curOs); }));
+  body.querySelector("#dsStart")?.addEventListener("click", guard(() => api.desktopStart(curOs)));
+  body.querySelector("#dsStop")?.addEventListener("click", guard(() => api.desktopStop(curOs)));
+  body.querySelector("#dsRestart")?.addEventListener("click", guard(async () => { await api.desktopStop(curOs); await api.desktopStart(curOs); }));
   body.querySelector("#dsDelete")?.addEventListener("click", guard(async () => {
     if (!window.confirm(i18n.t('에이전트 PC 를 삭제할까요? 그 안에 설치한 것과 바꾼 설정이 사라집니다. 공유 폴더의 코드는 영향받지 않습니다.'))) throw new Error("");
-    await api.desktopDelete();
+    await api.desktopDelete(curOs);
   }));
   //  연결 체크 — 저장 즉시 반영은 "재시작" 이 필요하다. 켜져 있으면 물어보고 재시작.
   for (const cb of body.querySelectorAll(".ds-chk input")) {
     cb.addEventListener("change", async () => {
       const next = [...body.querySelectorAll(".ds-chk input")].filter((x) => x.checked).map((x) => x.dataset.path);
       try {
-        await api.desktopSettingsSet({ sharedDirs: next });
+        await api.desktopSettingsSet({ sharedDirs: next }, curOs);
         if (st.phase === "running" && window.confirm(i18n.t('연결을 반영하려면 에이전트 PC 를 다시 시작해야 해요. 지금 다시 시작할까요?'))) {
-          await api.desktopStop(); await api.desktopStart();
+          await api.desktopStop(curOs); await api.desktopStart(curOs);
         }
         body.dataset.sig = ""; await paint();
       } catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
     });
   }
   const onRes = async () => {
-    try { await api.desktopSettingsSet({ memGB: Number(body.querySelector("#dsMem").value), cpu: Number(body.querySelector("#dsCpu").value) }); }
+    try { await api.desktopSettingsSet({ memGB: Number(body.querySelector("#dsMem").value), cpu: Number(body.querySelector("#dsCpu").value) }, curOs); }
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
   };
   body.querySelector("#dsMem")?.addEventListener("change", onRes);
   body.querySelector("#dsIdle")?.addEventListener("change", async (ev) => {
-    try { await api.desktopSettingsSet({ idleOffMin: Number(ev.currentTarget.value) }); }
+    try { await api.desktopSettingsSet({ idleOffMin: Number(ev.currentTarget.value) }, curOs); }
     catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
-  });
-  //  게스트 OS 세그먼트 — 꺼져 있으면 바로 바꾸고(다음 켤 때 그 OS 로), 켜져 있으면 다시 시작을 물어본다.
-  //   기존 OS 의 VM·데이터는 그대로 남는다(다른 VM). 실행 중에도 눌러 바꿀 수 있게 비활성화하지 않는다(옛 드롭다운의 무동작 지적 반영).
-  for (const b of body.querySelectorAll("#dsOs .ds-seg-btn")) b.addEventListener("click", async () => {
-    const osKind = b.dataset.os;
-    if (osKind === os) return;
-    errEl.textContent = "";
-    try {
-      if (busy) {
-        const nm = osKind === "linux" ? "Linux" : "macOS";
-        if (!window.confirm(i18n.t('에이전트 PC 를 {os} 로 바꾸려면 다시 시작해야 해요. 지금 다시 시작할까요?', { os: nm }))) return;
-        //  ★ 반드시 현재 OS 를 먼저 끈다 — osKind 를 바꾼 뒤 끄면 stop 이 새 OS(안 켜진 VM)를 겨눠 옛 VM 이 VNC 포트를 쥔 채 남는다(2026-09-21 실사고).
-        await api.desktopStop(); await api.desktopSettingsSet({ osKind }); await api.desktopStart();
-      } else {
-        await api.desktopSettingsSet({ osKind });
-      }
-      body.dataset.sig = ""; await paint();
-    } catch (e) { errEl.textContent = e && e.message ? e.message : String(e); }
   });
   body.querySelector("#dsCpu")?.addEventListener("change", onRes);
 }
