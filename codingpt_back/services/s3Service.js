@@ -14,6 +14,16 @@ const TEXT_EXTENSIONS = new Set([
 class S3Service {
   constructor() {
     this.s3Client = this._buildClient();
+    // ── 서버-사이드 데이터 전송용 내부 클라이언트 ──
+    //  OBJECTSTORE_ENDPOINT 는 공개 호스트(objectstore.ghmate.com = Cloudflare)라, 데몬/앱에
+    //  넘길 presigned URL 은 이걸 써야 한다. 하지만 백엔드가 **자기 데이터를** GetObject/PutObject 로
+    //  실어 나를 때 이 공개 호스트로 나가면 Cloudflare 를 한 바퀴 돌아(edge→origin) 돌아온다 —
+    //  작은 오브젝트는 버티지만 70MB 급(PC 업데이터·스냅샷)은 CF 대용량 경로에서 스톨→500/524 로 죽는다
+    //  (2026-09-21 실측: 공개 경로 83B/s vs 내부 minio:9000 ≈1GB/s). OBJECTSTORE_INTERNAL_ENDPOINT
+    //  (예: http://minio:9000)가 있으면 데이터 전송은 그 내부 직결 클라이언트로 보낸다. 없으면 공개로 폴백.
+    this.s3InternalClient = process.env.OBJECTSTORE_INTERNAL_ENDPOINT
+      ? this._buildClient(process.env.OBJECTSTORE_INTERNAL_ENDPOINT)
+      : this.s3Client;
     this.bucketName = process.env.OBJECTSTORE_BUCKET;
 
     if (!this.bucketName) {
@@ -23,8 +33,9 @@ class S3Service {
 
   // S3Client 생성(재생성 가능). systemClockOffset 을 명시하지 않아 항상 0(=시스템 시계)으로 시작한다.
   //  → skew 자가회복(_sendWithRetry)에서 이 메서드로 새 클라이언트를 만들어 낡은 오프셋을 버린다.
-  _buildClient() {
-    const endpoint = process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
+  //  endpointOverride 를 주면 그 엔드포인트로(내부 직결 클라이언트용) 생성한다.
+  _buildClient(endpointOverride) {
+    const endpoint = endpointOverride || process.env.OBJECTSTORE_ENDPOINT; // objectstore(MinIO) 엔드포인트
     return new S3Client({
       region: process.env.OBJECTSTORE_REGION || 'us-east-1',
       credentials: {
