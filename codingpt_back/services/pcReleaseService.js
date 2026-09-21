@@ -19,7 +19,7 @@ const BUCKET = process.env.OBJECTSTORE_BUCKET || 'codingpt';
 //  (레슨 실행 전용 규칙) — pc-releases 처럼 밖에 있는 키는 반드시 raw client 로 접근할 것.
 async function readLatest() {
   try {
-    const data = await s3Service.s3Client.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${PREFIX}latest.json` }));
+    const data = await s3Service.s3InternalClient.send(new GetObjectCommand({ Bucket: BUCKET, Key: `${PREFIX}latest.json` }));
     const chunks = [];
     for await (const c of data.Body) chunks.push(c);
     return JSON.parse(Buffer.concat(chunks).toString('utf-8'));
@@ -59,7 +59,7 @@ async function updateManifest(target, arch, currentVersion) {
 /** 배포물 스트림 — rel 은 pc-releases/ 이하 경로(화이트리스트 검증은 컨트롤러). */
 async function streamFile(rel) {
   const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: PREFIX + rel });
-  const data = await s3Service.s3Client.send(cmd);
+  const data = await s3Service.s3InternalClient.send(cmd);
   return {
     body: data.Body, // Readable
     contentLength: data.ContentLength,
