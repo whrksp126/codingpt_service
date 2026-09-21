@@ -317,9 +317,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 
   # 에이전트 PC (이 맥 안의 별도 macOS — 사용자 화면을 건드리지 않고 GUI 를 조작한다)
   #  네이티브 앱·창을 다뤄야 하면 사용자 화면이 아니라 **여기서** 한다. 좌표는 0~1 비율.
-  desktop status                        준비/정지/실행, 연결된 폴더, 개입 대기
-  desktop os [macos|linux]              게스트 OS 보기/바꾸기(Linux=경량 ~5GB, 꺼진 상태에서만)
-  desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기
+  desktop status                        macOS·Linux 둘 다 요약(--os 로 하나만 상세)
+  ── macOS·Linux 는 동시에 따로 돕니다 — 아래 모든 명령에 --os macos|linux 를 붙여 고른다(기본 macOS) ──
+  desktop start | stop                  켜기(정지 상태면 수십 초) / 끄기   (예: cpt desktop --os linux start)
   desktop provision                     첫 설정 다시(자동 로그인·절전 끔 — 처음 켤 때는 자동으로 한다)
   desktop snapshot [라벨] | snapshots    지금 상태를 저장(끄고 2초 복제·다시 켬 ~30초) / 목록 — 위험한 작업 전에
   desktop restore <이름>                 스냅샷으로 되돌리기(지금 상태는 사라진다 — 먼저 사용자에게 알려라)
@@ -693,23 +693,33 @@ async function main() {
       // 에이전트 PC — 이 맥 안의 별도 macOS(게스트 VM). 사용자 화면을 건드리지 않고 전면 GUI 조작을 한다.
       //  화면·입력은 모바일 화면(emulator.*)과 같은 계약이고 기기 id 가 `desktop:main` 으로 고정된 것뿐이다.
       case 'desktop': {
-        const D = 'desktop:main';
+        //  ★ 에이전트 PC 는 macOS·Linux 두 대(동시). --os 로 어느 것을 조작할지 고른다(기본 macOS). 기기 id·설정·상태가 그 OS 로 간다.
+        const osk = (flags.os === 'linux' || flags.os === 'macos') ? flags.os : 'macos';
+        const osSpecified = flags.os === 'linux' || flags.os === 'macos';
+        const D = `desktop:${osk}`;
+        const dreq = (m, p, o) => request(m, { os: osk, ...(p || {}) }, o);   // desktop.* 에 os 를 실어 보낸다
         const num = (n, d) => (flags[n] != null && flags[n] !== true ? Number(flags[n]) : d);
         const isUrl = (v) => /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(String(v || ''));
         if (c2 === 'status' || c2 == null) {
-          const r = await request('desktop.status', {}, { timeoutMs: 20000 });
-          const line = r.phase === 'running'
+          const statusLine = (r) => (r.phase === 'running'
             ? `● 실행 중 · ${r.screen ? `${r.screen.width}x${r.screen.height}` : '화면 준비 중'} · ip ${r.ip || '-'}${r.paused ? ' · 에이전트 멈춤' : ''}${r.handoff ? ` · 개입 대기: ${r.handoff.reason}` : ''}`
-            : `○ ${r.phase}${r.reason ? ` — ${r.reason}` : ''}`;
-          return out(r, flags, `${line}\n연결된 폴더: ${(r.sharedDirs || []).join(', ') || '(없음)'}`);
+            : `○ ${r.phase}${r.reason ? ` — ${r.reason}` : ''}`);
+          //  --os 없으면 둘 다 요약(동시 실행 모델), 있으면 그 OS 상세.
+          if (!osSpecified) {
+            const [m, l] = await Promise.all([request('desktop.status', { os: 'macos' }, { timeoutMs: 20000 }), request('desktop.status', { os: 'linux' }, { timeoutMs: 20000 })]);
+            if (flags.json) return printJson({ macos: m, linux: l });
+            return out({ macos: m, linux: l }, flags, `macOS  ${statusLine(m)}\nLinux  ${statusLine(l)}`);
+          }
+          const r = await dreq('desktop.status', {}, { timeoutMs: 20000 });
+          return out(r, flags, `[${osk}] ${statusLine(r)}\n연결된 폴더: ${(r.sharedDirs || []).join(', ') || '(없음)'}`);
         }
-        if (c2 === 'start') return out(await request('desktop.start', {}, { timeoutMs: 150000 }), flags, '켜졌어요');
-        if (c2 === 'stop') return out(await request('desktop.stop', {}), flags, '꺼졌어요');
-        if (c2 === 'pull') return out(await request('desktop.pull', {}, { timeoutMs: 4 * 3600 * 1000 }), flags, '이미지 준비됨');
+        if (c2 === 'start') return out(await dreq('desktop.start', {}, { timeoutMs: 150000 }), flags, '켜졌어요');
+        if (c2 === 'stop') return out(await dreq('desktop.stop', {}), flags, '꺼졌어요');
+        if (c2 === 'pull') return out(await dreq('desktop.pull', {}, { timeoutMs: 4 * 3600 * 1000 }), flags, '이미지 준비됨');
         if (c2 === 'show') {
           //  꺼져 있으면 먼저 켠다 — 빈 액자를 띄우고 "켜세요" 라고 하는 것보다 낫다(수십 초 걸리면 그만큼 기다린다).
-          const st = await request('desktop.status', {}, { timeoutMs: 20000 });
-          if (st.phase === 'stopped' || st.phase === 'starting') await request('desktop.start', {}, { timeoutMs: 150000 });
+          const st = await dreq('desktop.status', {}, { timeoutMs: 20000 });
+          if (st.phase === 'stopped' || st.phase === 'starting') await dreq('desktop.start', {}, { timeoutMs: 150000 });
           else if (st.phase !== 'running') throw new Error(st.reason || `에이전트 PC 를 쓸 수 없어요 (${st.phase})`);
           return out(await request('ui.emulatorOpen', { device: D, timeoutMs: 8000 }), flags, '띄웠어요');
         }
@@ -717,31 +727,31 @@ async function main() {
         if (c2 === 'open') {
           const target = rest[0] || flags.url || flags.app;
           if (!target) throw new Error('무엇을 열지 알려 주세요 — cpt desktop open Safari | cpt desktop open http://localhost:5173');
-          if (isUrl(target)) return out(await request('desktop.openUrl', { url: target }, { timeoutMs: 30000 }), flags, 'ok');
-          return out(await request('desktop.openApp', { name: target }, { timeoutMs: 30000 }), flags, 'ok');
+          if (isUrl(target)) return out(await dreq('desktop.openUrl', { url: target }, { timeoutMs: 30000 }), flags, 'ok');
+          return out(await dreq('desktop.openApp', { name: target }, { timeoutMs: 30000 }), flags, 'ok');
         }
         if (c2 === 'run') {
           const cmd = rest.join(' ').trim();
           if (!cmd) throw new Error('실행할 명령을 알려 주세요 — cpt desktop run -- ls -la');
-          const r = await request('desktop.exec', { cmd, timeoutMs: num('timeout', 60) * 1000 }, { timeoutMs: num('timeout', 60) * 1000 + 10000 });
+          const r = await dreq('desktop.exec', { cmd, timeoutMs: num('timeout', 60) * 1000 }, { timeoutMs: num('timeout', 60) * 1000 + 10000 });
           if (flags.json) return printJson(r);
           process.stdout.write(String(r.out || ''));
           return 0;
         }
         if (c2 === 'path') {
-          const r = await request('desktop.path', { path: path.resolve(rest[0] || '.') });
+          const r = await dreq('desktop.path', { path: path.resolve(rest[0] || '.') });
           return out(r, flags, r.guest || '(연결된 폴더 밖이에요 — cpt desktop connect <폴더> 로 붙이세요)');
         }
         //  사용자 개입 — 로그인·2FA 처럼 사람이 해야 하는 일. 카드가 뜨고 사용자가 [계속]을 누를 때까지 **기다린다**.
         if (c2 === 'handoff') {
           const reason = rest.join(' ').trim() || '사용자 조작이 필요해요';
           const ms = num('timeout', 900) * 1000;
-          const r = await request('desktop.handoff', { reason, timeoutMs: ms }, { timeoutMs: ms + 10000 });
+          const r = await dreq('desktop.handoff', { reason, timeoutMs: ms }, { timeoutMs: ms + 10000 });
           if (r && r.ok) return out(r, flags, '사용자가 처리했어요 — 계속하세요');
           throw new Error(r && r.timeout ? '사용자 응답이 없어 개입 요청이 끝났어요' : '개입 요청이 취소됐어요');
         }
-        if (c2 === 'pause') return out(await request('desktop.pause', {}), flags, '에이전트 입력 멈춤');
-        if (c2 === 'resume') return out(await request('desktop.resume', {}), flags, '에이전트 입력 재개');
+        if (c2 === 'pause') return out(await dreq('desktop.pause', {}), flags, '에이전트 입력 멈춤');
+        if (c2 === 'resume') return out(await dreq('desktop.resume', {}), flags, '에이전트 입력 재개');
         if (c2 === 'screenshot') {
           const r = await request('emulator.frame', { id: D, maxWidth: num('width', 1280), quality: num('quality', 80) }, { timeoutMs: 60000 });
           let dest = flags.out ? String(flags.out) : null;
@@ -759,7 +769,7 @@ async function main() {
         if (c2 === 'type') return out(await inp({ type: 'text', text: rest.join(' ') }), flags, 'ok');
         if (c2 === 'ax') {
           //  접근성 트리 — 기본은 사람이 읽는 줄(i role "글" @x,y wxh), --json 은 원본. 조작 가능한 것만이 기본, --all 로 전부.
-          const t = await request('desktop.ax', { app: flags.app || rest[0] || undefined }, { timeoutMs: 120000 });
+          const t = await dreq('desktop.ax', { app: flags.app || rest[0] || undefined }, { timeoutMs: 120000 });
           if (flags.json) return printJson(t);
           const KEEP = /^(Button|CheckBox|RadioButton|MenuItem|MenuBarItem|PopUpButton|Link|TextField|TextArea|SearchField|Tab|Cell|Row|ComboBox|Slider|StaticText|Heading|Image|Window|Sheet|Dialog|Group)$/;
           const rows = t.nodes.filter((n) => flags.all || (KEEP.test(n.role) && n.w > 0 && (n.title || n.desc || n.value || n.ph || n.role !== 'Group')));
@@ -775,44 +785,40 @@ async function main() {
         }
         if (c2 === 'tap') {
           if (!rest[0]) { process.stderr.write('사용법: cpt desktop tap "<글자>" [--app 이름] [--role Button]\n'); process.exitCode = 2; return; }
-          const r = await request('desktop.tap', { text: rest[0], app: flags.app || undefined, role: flags.role || undefined, from: 'agent' }, { timeoutMs: 120000 });
+          const r = await dreq('desktop.tap', { text: rest[0], app: flags.app || undefined, role: flags.role || undefined, from: 'agent' }, { timeoutMs: 120000 });
           return out(r, flags, `클릭: ${r.node.role} ${JSON.stringify(r.node.title || r.node.desc || r.node.value || '')} @${r.x},${r.y} (${r.app})`);
         }
         if (c2 === 'snapshots') {
-          const r = await request('desktop.snapshots', {});
+          const r = await dreq('desktop.snapshots', {});
           if (flags.json) return printJson(r);
           const fmt = (s) => `${s.name}  ${new Date(s.at).toLocaleString()}${s.label ? '  ' + s.label : ''}`;
           process.stdout.write(r.snapshots.length ? r.snapshots.map(fmt).join('\n') + '\n' : '(스냅샷 없음)\n');
           return;
         }
         if (c2 === 'snapshot') {
-          const r = await request('desktop.snapshot', { label: rest[0] || '' }, { timeoutMs: 240000 });
+          const r = await dreq('desktop.snapshot', { label: rest[0] || '' }, { timeoutMs: 240000 });
           return out(r, flags, `스냅샷 저장: ${r.name}${r.restarted ? ' (끄고 저장한 뒤 다시 켰어요)' : ''}`);
         }
         if (c2 === 'restore') {
           if (!rest[0]) { process.stderr.write('사용법: cpt desktop restore <스냅샷 이름>  (cpt desktop snapshots 로 목록)\n'); process.exitCode = 2; return; }
-          const r = await request('desktop.restore', { name: rest[0] }, { timeoutMs: 240000 });
+          const r = await dreq('desktop.restore', { name: rest[0] }, { timeoutMs: 240000 });
           return out(r, flags, `되돌렸어요: ${r.name}${r.restarted ? ' (다시 켰어요)' : ''}`);
         }
-        if (c2 === 'snapshot-delete') return out(await request('desktop.snapshot.delete', { name: rest[0] }, { timeoutMs: 60000 }), flags, '삭제했어요');
-        if (c2 === 'provision') return out(await request('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
+        if (c2 === 'snapshot-delete') return out(await dreq('desktop.snapshot.delete', { name: rest[0] }, { timeoutMs: 60000 }), flags, '삭제했어요');
+        if (c2 === 'provision') return out(await dreq('desktop.provision', {}), flags, '첫 설정 완료 — 자동 로그인·절전 끔·설정 도우미 건너뜀');
         if (c2 === 'os') {
-          //  게스트 OS 선택 — 인자 없으면 현재값, 있으면 macos|linux 로 바꾼다(꺼져 있어야 한다; 다음 켤 때 그 OS 로).
-          if (!rest[0]) { const r = await request('desktop.settings.get', {}); return out(r, flags, `현재 게스트 OS: ${r.osKind || 'macos'}`); }
-          if (rest[0] !== 'macos' && rest[0] !== 'linux') { process.stderr.write('사용법: cpt desktop os macos|linux\n'); process.exitCode = 2; return; }
-          const st = await request('desktop.status', {}, { timeoutMs: 20000 });
-          if (st.phase === 'running' || st.phase === 'starting') { process.stderr.write('먼저 에이전트 PC 를 끄세요 (cpt desktop stop) — OS 는 꺼진 상태에서만 바꿔요\n'); process.exitCode = 2; return; }
-          const r = await request('desktop.settings.set', { osKind: rest[0] }, { timeoutMs: 20000 });
-          return out(r, flags, `게스트 OS = ${r.osKind} (다음 켤 때 적용${rest[0] === 'linux' ? ' — 첫 켜기 때 이미지 준비 몇 분' : ''})`);
+          //  ★ 더 이상 OS 를 "전환"하지 않는다 — macOS·Linux 는 동시에 따로 돈다. 조작은 각 명령에 `--os macos|linux` 로 고른다.
+          process.stderr.write('이제 macOS·Linux 를 동시에 씁니다 — 전환이 아니라 명령마다 골라요:\n  cpt desktop --os linux start | ax | tap | open …  (기본은 macOS)\n  cpt desktop status  → 둘 다 요약\n');
+          process.exitCode = 2; return;
         }
         if (c2 === 'connect' || c2 === 'disconnect') {
           const dir = path.resolve(rest[0] || process.env.CPT_WS_ROOT || process.cwd());
           //  켜져 있으면 데몬이 끄고 다시 켜서 바로 쓸 수 있게 돌려준다(공유 폴더는 부팅 때 고정) — 최대 3분.
-          const r = await request(`desktop.${c2}`, { dir }, { timeoutMs: 180000 });
+          const r = await dreq(`desktop.${c2}`, { dir }, { timeoutMs: 180000 });
           const tail = r.restarted ? ' (에이전트 PC 를 다시 켰어요 — 바로 쓸 수 있어요)' : (r.changed ? '' : ' (이미 그 상태)');
           return out(r, flags, c2 === 'connect' ? `연결: ${r.host} → ${r.guest}${tail}` : `해제: ${r.host}${tail}`);
         }
-        process.stderr.write('사용법: cpt desktop status|start|stop|os <macos|linux>|provision|snapshot [라벨]|snapshots|restore <이름>|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
+        process.stderr.write('사용법: cpt desktop [--os macos|linux] status|start|stop|provision|snapshot [라벨]|snapshots|restore <이름>|show|ax [앱]|tap <글자>|open <앱|URL>|run -- <명령>|screenshot|click x y|right-click x y|drag x y x2 y2|scroll x y [dy]|key <조합>|type <글>|handoff <사유>|pause|resume|path <경로>|connect [폴더]|disconnect [폴더]\n');
         process.exitCode = 2;
         return;
       }
