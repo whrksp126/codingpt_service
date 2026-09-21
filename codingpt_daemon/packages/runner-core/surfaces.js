@@ -10,7 +10,7 @@
 //
 // 정본은 이 파일(<stateDir>/surfaces.json) 이다. 터미널과 달리 살아 있는 실체(tmux)가 없으므로 기록이 곧 존재다.
 //  · id = 클라이언트가 만든 표면 id(sid). 같은 id 로 다시 add 하면 갱신(멱등) — 기기 두 대가 같은 걸 등록해도 하나.
-//  · 에이전트 PC(deviceId `desktop:`) 는 워크스페이스에 하나뿐 — 다른 id 로 add 하면 **있는 것을 돌려준다**
+//  · 에이전트 PC(deviceId `desktop:<os>`)는 OS별로 하나 — 같은 OS 를 다른 id 로 add 하면 있는 것을 돌려준다(macOS·Linux 는 공존)
 //    (클라이언트는 돌려받은 id 를 자기 탭에 붙인다). 맥 1대 = 에이전트 PC 1대.
 //  · 변경은 pool.changed 로 전 기기에 즉시 알린다(터미널과 같은 신호 — 리컨실러가 바로 다시 읽는다).
 const fs = require('fs');
@@ -84,9 +84,10 @@ function add({ cwd, id, kind, ...props } = {}) {
   if (!KINDS.has(kind)) throw new Error('kind 는 preview|ide|emulator 중 하나입니다.');
   const items = load();
   const p = pick(props);
-  // 에이전트 PC 는 워크스페이스에 하나 — 이미 있으면 그걸 돌려준다(다른 id 로 온 요청은 흡수).
+  // 에이전트 PC 는 **OS별로** 하나(macOS·Linux 독립). 같은 OS(deviceId)가 이미 있으면 그걸 돌려준다(다른 id 로 온 중복만 흡수).
+  //  ★ 예전엔 desktop 전체를 하나로 흡수해서 둘째 OS 표면이 첫째로 합쳐졌다(2026-09-21 실사고: Linux 뒤 macOS 열면 탭이 하나로).
   if (kind === 'emulator' && p.deviceId && p.deviceId.startsWith('desktop:')) {
-    const had = items.find((s) => s.ws === ws && isDesk(s));
+    const had = items.find((s) => s.ws === ws && isDesk(s) && s.deviceId === p.deviceId);
     if (had && had.id !== sid) return { ok: true, item: strip(had), merged: true };
   }
   const now = Date.now();

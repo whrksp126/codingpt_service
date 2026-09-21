@@ -46,16 +46,20 @@ test('add/list/update/remove — 멱등·워크스페이스별·와이어 필드
   assert.deepStrictEqual(S.list({ cwd }).items, []);
 });
 
-test('에이전트 PC(desktop:) 는 워크스페이스에 하나 — 다른 id 로 add 하면 있는 것을 돌려준다', () => {
+test('에이전트 PC 는 OS별로 하나 — 같은 OS 는 흡수, macOS·Linux 는 공존', () => {
   const cwd = 'proj';
-  const a = S.add({ cwd, id: 'emuA', kind: 'emulator', deviceId: 'desktop:main' });
+  const a = S.add({ cwd, id: 'emuA', kind: 'emulator', deviceId: 'desktop:macos' });
   assert.strictEqual(a.item.id, 'emuA');
-  const b = S.add({ cwd, id: 'emuB', kind: 'emulator', deviceId: 'desktop:main' });
+  //  같은 OS 를 다른 id 로 → 있는 것을 돌려준다(흡수)
+  const b = S.add({ cwd, id: 'emuB', kind: 'emulator', deviceId: 'desktop:macos' });
   assert.strictEqual(b.item.id, 'emuA'); assert.strictEqual(b.merged, true);
-  assert.strictEqual(S.list({ cwd }).items.filter((s) => (s.deviceId || '').startsWith('desktop:')).length, 1);
-  //  일반 모바일 화면은 여럿 가능
+  //  ★ 다른 OS(Linux)는 별개 표면으로 공존한다(예전엔 desktop 하나로 흡수됐다)
+  const l = S.add({ cwd, id: 'emuL', kind: 'emulator', deviceId: 'desktop:linux' });
+  assert.strictEqual(l.item.id, 'emuL'); assert.ok(!l.merged);
+  assert.strictEqual(S.list({ cwd }).items.filter((s) => (s.deviceId || '').startsWith('desktop:')).length, 2);
+  //  일반 모바일 화면은 여럿 가능 — macOS·Linux·android = 3
   S.add({ cwd, id: 'emuC', kind: 'emulator', deviceId: 'android:emulator-5554' });
-  assert.strictEqual(S.list({ cwd }).items.length, 2);
+  assert.strictEqual(S.list({ cwd }).items.length, 3);
   S.forgetWs(cwd);
 });
 
