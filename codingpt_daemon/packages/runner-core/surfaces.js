@@ -29,7 +29,9 @@ function load() {
   try {
     const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     const items = Array.isArray(j && j.items) ? j.items : [];
-    return items.filter((s) => s && typeof s.id === 'string' && typeof s.ws === 'string' && KINDS.has(s.kind));
+    //  ★ 레거시 `desktop:main` 표면은 버린다(OS별 분리 전 잔재) — 지금은 desktop:macos/linux 만 쓴다.
+    //   그대로 두면 macOS pane 이 둘로 보인다(desktop:main 이 macOS 로 렌더). 읽을 때 걸러 자가 치유한다.
+    return items.filter((s) => s && typeof s.id === 'string' && typeof s.ws === 'string' && KINDS.has(s.kind) && s.deviceId !== 'desktop:main');
   } catch (_) { return []; }
 }
 
@@ -84,6 +86,8 @@ function add({ cwd, id, kind, ...props } = {}) {
   if (!KINDS.has(kind)) throw new Error('kind 는 preview|ide|emulator 중 하나입니다.');
   const items = load();
   const p = pick(props);
+  //  레거시 desktop:main 은 등록하지 않는다(위 load 필터와 짝) — 클라가 옛 레이아웃으로 다시 올려도 무시 → 리컨실이 그 탭을 정리한다.
+  if (p.deviceId === 'desktop:main') return { ok: true, legacy: true };
   // 에이전트 PC 는 **OS별로** 하나(macOS·Linux 독립). 같은 OS(deviceId)가 이미 있으면 그걸 돌려준다(다른 id 로 온 중복만 흡수).
   //  ★ 예전엔 desktop 전체를 하나로 흡수해서 둘째 OS 표면이 첫째로 합쳐졌다(2026-09-21 실사고: Linux 뒤 macOS 열면 탭이 하나로).
   if (kind === 'emulator' && p.deviceId && p.deviceId.startsWith('desktop:')) {
