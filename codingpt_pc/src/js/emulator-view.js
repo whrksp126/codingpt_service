@@ -249,10 +249,6 @@ export class EmulatorView {
     this.frameUrl = null;
     this.frameAspect = null;
     this.videoNote = '';
-    //  에이전트 PC 화면 연결이 방금 끊겼다(영상 드롭·VNC 붙기실패). 종료/재연결의 일시적 신호 —
-    //   상태 폴링이 '꺼짐' 으로 정리하기 전 창에서 종료 알림 스팸이 새는 걸 막는다(폴링이 실제로
-    //   프레임을 받아 오면 해제하고 그때 폴백 알림을 낸다). [[agent_desktop_shutdown_notice]]
-    this._deskDown = false;
     this.visualRot = 0;             // 기기를 바꾸면 표시 회전도 처음으로
     this.wantLandscape = null;      //  (다음 기기의 첫 프레임을 보고 다시 정한다)
     this.capRetry = 0;              // 새 기기는 조작 준비 재시도도 처음부터
@@ -382,9 +378,6 @@ export class EmulatorView {
   fallbackToPolling(note) {
     if (!this.videoOn) return;
     this.stopVideo();
-    //  에이전트 PC 의 영상 드롭은 종료일 수 있다 — 폴링이 프레임을 받아 살아 있음이 확인될 때까지
-    //   폴백 알림을 보류한다(종료면 프레임이 안 와 영영 안 뜨고, 살아 있으면 프레임 루프가 그때 낸다).
-    { const dv = this.device(); if (dv && dv.kind === "desktop") this._deskDown = true; }
     this.videoNote = note || '';
     if (this.disposed) return;
     this.render();
@@ -434,15 +427,13 @@ export class EmulatorView {
             if (this.frameIsLandscape() !== wasLandscape) this.onFrameShapeChange();   // 영상과 같은 규율
           }
           this.err = null;
-          //  폴링이 프레임을 받아 왔다 = 아직 살아 있다. 영상 드롭으로 눌러 뒀던 폴백 알림을 이제 낸다(있으면).
-          if (isDesk && this._deskDown) { this._deskDown = false; if (this.videoNote) this.pushNotice("video", this.videoNote, "info"); }
           this.paintFrame();
         } catch (e) {
           if (this.disposed) break;
           //  에이전트 PC 의 VNC 끊김·붙기실패·연결닫힘은 종료/재연결 과정의 **일시적 이벤트**다 —
           //   정상적으로 껐는데도 빨간 에러 알림으로 튀던 걸 삼킨다(상태 폴링이 곧 '꺼짐' 으로 정리).
           const emsg = e && e.message ? e.message : String(e);
-          if (isDesk && /꺼져 있어요|ECONNREFUSED|붙을 수 없|연결이 닫|끊|VNC|영상 인코더/.test(emsg)) { this.err = null; this._deskDown = true; }
+          if (isDesk && /꺼져 있어요|ECONNREFUSED|붙을 수 없|연결이 닫|끊|VNC|영상 인코더/.test(emsg)) this.err = null;
           else this.err = emsg;
           this.paintError();
           await new Promise((r) => setTimeout(r, 2000));   // 실패했는데 계속 두드리지 않는다
@@ -816,11 +807,12 @@ export class EmulatorView {
 
   //  화면 아래 줄에 있던 4종 사유를 알림함으로 흘린다. render() 초입에서 부른다.
   feedNotices(dev, booted, canInput) {
-    //  에이전트 PC 가 꺼졌으면(막 종료) 남아 있던 오류·폴백 알림을 흘리지 않는다 — 무대 글이 "꺼져 있어요" 를 이미 말한다.
-    if (dev && dev.kind === "desktop" && !booted) { this.err = null; this.videoNote = ""; this._deskDown = false; }
-    //  화면 연결이 방금 끊긴 참(deskDown)이면 "영상 끊겨 폴백" 을 보류한다 — 살아 있으면 프레임 루프가 낸다.
-    const deskHoldVideo = !!(dev && dev.kind === "desktop" && (!booted || this._deskDown));
-    this.pushNotice("video", deskHoldVideo ? "" : (this.videoNote || ""), "info");
+    const isDeskDev = !!(dev && dev.kind === "desktop");
+    //  에이전트 PC 가 꺼졌으면(막 종료) 남아 있던 오류를 흘리지 않는다 — 무대 글이 "꺼져 있어요" 를 이미 말한다.
+    if (isDeskDev && !booted) { this.err = null; this.videoNote = ""; }
+    //  에이전트 PC(desktop)는 영상↔폴링 전환을 사용자에게 알리지 않는다 — 화면은 계속 나오고,
+    //   스트리밍 방식은 내부 사정이라 알아야 할 게 아니다(사용자 지시 2026-09-22: 실제로 필요한 안내만). 일반 에뮬은 그대로.
+    this.pushNotice("video", isDeskDev ? "" : (this.videoNote || ""), "info");
     this.pushNotice("err", this.err || "", "error");
     const stx = this.deskStatus || (dev && dev.desktop) || {};
     const handoff = (dev && dev.kind === "desktop" && booted) ? (stx.handoff || null) : null;
