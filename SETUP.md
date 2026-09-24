@@ -46,7 +46,7 @@ codingpt/
 | `codingpt_service/codingpt_admin/.env.local` | 프론트 환경변수 (`VITE_BACKEND_URL` 등) |
 | `codingpt_app/.env.local` | 앱 환경변수 (`BACK_URL`, `ANDROID_BACK_URL`, `IOS_BACK_URL`) |
 
-> ⚠️ `.env`에는 production 설정이 들어있어 호스트 nodemon이 잘못 로드하면 staging/prod DB에 연결 시도 → 인증 실패. `local-setup.sh`가 셸에 `.env.local`을 명시 export해서 우선순위를 보장하므로 문제없지만, **수동으로 `npm run dev`를 실행할 때는 반드시 `.env.local`을 먼저 source** 해야 합니다 (아래 "수동 실행" 참조).
+> ⚠️ `.env`에는 production 설정이 들어있어 호스트 nodemon이 잘못 로드하면 prod DB에 연결 시도 → 인증 실패. `local-setup.sh`가 셸에 `.env.local`을 명시 export해서 우선순위를 보장하므로 문제없지만, **수동으로 `npm run dev`를 실행할 때는 반드시 `.env.local`을 먼저 source** 해야 합니다 (아래 "수동 실행" 참조).
 
 ---
 

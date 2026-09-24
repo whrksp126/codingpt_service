@@ -2,7 +2,7 @@
 # codingpt-front.ghmate.com  → codingpt_front_prod:3400  (별칭, 유지)
 # codingpt-back.ghmate.com   → codingpt_back_prod:5100
 # (어드민은 독립 프로젝트로 분리됨 → ../codingpt_admin = codingpt-admin.ghmate.com)
-# dev/stg 구조 미러 — DB는 홈서버 Docker PostgreSQL (AWS 미사용)
+# dev 구조 미러 — DB는 홈서버 Docker PostgreSQL (AWS 미사용)
 
 services:
   postgres:

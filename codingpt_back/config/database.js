@@ -41,13 +41,6 @@ module.exports = {
     pool: { max: 5, min: 0, acquire: 30000, idle: 10000 },
   },
 
-  // 스테이징: prod과 거의 동일하지만 필요시 로깅/풀 크기 등 다르게
-  staging: {
-    ...base,
-    logging: false,
-    pool: { max: 10, min: 2, acquire: 30000, idle: 10000 },
-  },
-
   // 프로덕션
   production: {
     ...base,

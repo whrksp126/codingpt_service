@@ -15,7 +15,7 @@ codingpt_service/
 ├── codingpt_front/    — Next.js SSR 공개 사이트 (port 3400) → codingpt.ghmate.com
 ├── codingpt_daemon/   — 사용자 PC 데몬 (npm workspaces: runner-core/daemon/cpt-cli/cloud-runner)
 ├── codingpt_pc/       — PC 데스크톱 앱 (Tauri, 데몬을 사이드카로 번들 → .dmg)
-├── docker-compose.{local,dev,stg,prod}.yml
+├── docker-compose.{local,dev,prod}.yml
 └── deploy.sh          — back+front 배포 (사용법: .claude/skills/deploy.md)
 ```
 
@@ -30,7 +30,7 @@ codingpt_service/
 |------|----|-----|
 | local | Docker PostgreSQL (localhost:5432) | 없음 |
 | development | Docker PostgreSQL (container: postgres) | 없음 |
-| staging/production | 홈서버 Docker PostgreSQL | prod는 `codingpt_postgres_prod`, SSL 없음 |
+| production | 홈서버 Docker PostgreSQL | prod는 `codingpt_postgres_prod`, SSL 없음 |
 
 ## DB 마이그레이션
 

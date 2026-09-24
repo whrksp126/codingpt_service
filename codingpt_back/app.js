@@ -42,13 +42,10 @@ const allowedOrigins = [
   // 공개 웹(랜딩+결제+웹 바이브코딩) — 정식 도메인 codingpt.ghmate.com + 별칭 codingpt-front
   'https://codingpt.ghmate.com',
   'https://dev-codingpt.ghmate.com',
-  'https://stg-codingpt.ghmate.com',
   'https://dev-codingpt-front.ghmate.com',
-  'https://stg-codingpt-front.ghmate.com',
   'https://codingpt-front.ghmate.com',
   // 어드민(독립 프로젝트) 도메인
   'https://dev-codingpt-admin.ghmate.com',
-  'https://stg-codingpt-admin.ghmate.com',
   'https://codingpt-admin.ghmate.com'
 ];
 
