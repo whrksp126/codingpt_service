@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: codingpt_service를 dev/stg/prod 홈서버에 배포한다(git push + deploy.sh + 헬스체크). prod는 사용자가 명시적으로 요청했을 때만.
+description: codingpt_service를 dev/prod 홈서버에 배포한다(git push + deploy.sh + 헬스체크). prod는 사용자가 명시적으로 요청했을 때만.
 disable-model-invocation: true
 ---
 
@@ -15,7 +15,7 @@ disable-model-invocation: true
 
 ```bash
 cd codingpt_service        # 리포 루트
-./deploy.sh dev            # 또는 stg / prod
+./deploy.sh dev            # 또는 prod
 ```
 
 내부 동작: 홈서버 SSH → git pull → `docker compose -f docker-compose.<env>.yml up -d --build`
