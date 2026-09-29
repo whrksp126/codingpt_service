@@ -217,11 +217,12 @@ function toolsCached() {
 
 function resetCache() { baseCache = null; baseInflight = null; authCache = null; authInflight = null; }
 
-/** git(args, {cwd, timeout=15000, input}) — 공통 접두 포함. git 이 없으면 {ok:false, code:-1, err}. */
-async function git(args, { cwd, timeout = 15000, input, raw } = {}) {
+/** git(args, {cwd, timeout=15000, input, env}) — 공통 접두 포함. env 는 기본 env 위에 덧씌운다(예: GIT_INDEX_FILE).
+ *  git 이 없으면 {ok:false, code:-1, err}. */
+async function git(args, { cwd, timeout = 15000, input, raw, env } = {}) {
   const t = await baseTools(); // ★ gh 인증 조사(네트워크)를 기다리지 않는다
   if (!t.git.ok) return { ok: false, code: -1, out: '', err: t.git.error || 'GIT_MISSING', timedOut: false };
-  return exec(t.git.path, raw ? args : [...GIT_PREFIX, ...args], { cwd, timeout, input, env: t.env });
+  return exec(t.git.path, raw ? args : [...GIT_PREFIX, ...args], { cwd, timeout, input, env: env ? { ...t.env, ...env } : t.env });
 }
 
 /** gh(args, {cwd, timeout=30000, input}). gh 가 없으면 {ok:false, code:-1, err:'GH_MISSING'}. */

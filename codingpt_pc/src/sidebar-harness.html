@@ -23,8 +23,11 @@
     { id: 'cloud', name: '클라우드', platform: 'cloud', role: 'host', runnerKind: 'cloud', online: true },
   ];
   const WORKSPACES = [
-    { id: 1, name: 'codingpt', localPath: 'other/project/codingpt', compute: 'local', hostDeviceId: 11, hostOnline: true },
-    { id: 2, name: 'hub', localPath: 'other/project/hub', compute: 'local', hostDeviceId: 11, hostOnline: true },
+    { id: 1, name: 'codingpt', localPath: 'other/project/codingpt', compute: 'local', hostDeviceId: 11, hostOnline: true, git: { branch: 'main' } },
+    { id: 2, name: 'hub', localPath: 'other/project/hub', compute: 'local', hostDeviceId: 11, hostOnline: true, git: { branch: 'gh-pages' } },
+    { id: 5, name: 'blog', localPath: 'work/blog', compute: 'local', hostDeviceId: 11, hostOnline: true },
+    // 작업 run 의 worktree 워크스페이스 — 사이드바 행으로 나오면 안 된다(작업 행이 대신한다).
+    { id: 90, name: 'wt', localPath: '.codingpt/worktrees/codingpt-x2m1-1', compute: 'local', hostDeviceId: 11, hostOnline: true },
     { id: 3, name: 'tokin', localPath: 'work/tokin', compute: 'local', hostDeviceId: 12, hostOnline: true },
     { id: 4, name: '집에서 하던 것', localPath: 'dev/side', compute: 'local', hostDeviceId: 13, hostOnline: false },
   ];
@@ -49,10 +52,28 @@
   S.state.currentDeviceId = 11;
   S.state.workspaces = WORKSPACES;
   S.state.notifications = [{ id: 1, cwd: 'work/tokin', win: 3, read: false, title: 'a' }];
+  // 저장소 트리(agent-tasks-sidebar.md) 확인용 작업 버킷 — 입력 대기 1 · 팬아웃 ×3 · 리뷰 준비(diff) · 다른 저장소 1.
+  const run = (id, idx, state, o = {}) => ({ id, idx, agent: o.agent || 'claude', branch: `cpt/x2m1-${idx}`, workspaceId: o.ws ?? null,
+    tid: o.tid ?? null, cwd: `.codingpt/worktrees/${id}`, state, terminalAlive: true, trustPending: false, agentGone: false,
+    diff: o.diff || null, op: null, lastOp: null, error: null, lastActivityAt: o.at || 0, updatedAt: o.at || 0 });
+  const task = (id, title, repoPath, wsId, runs) => ({ id, title, repo: { path: repoPath, subdir: '' }, workspaceId: wsId, state: 'open', runs });
+  S.state.tasks.byHost['11'] = { items: [
+    task('t_login', '로그인 폼 유효성 검사', 'other/project/codingpt', 1, [run('r_l1', 1, 'running', { tid: 5, at: 3 })]),
+    task('t_pay', '결제 실패 재시도', 'other/project/codingpt', 1, [
+      run('r_p1', 1, 'launching', { at: 9 }), run('r_p2', 2, 'running', { agent: 'codex', at: 8 }), run('r_p3', 3, 'running', { agent: 'gemini', at: 7 })]),
+    task('t_readme', 'README 정리', 'other/project/codingpt', 1, [run('r_r1', 1, 'review_ready', { diff: { files: 2, additions: 41, deletions: 7 }, at: 5 })]),
+    task('t_hub', '빌드 캐시 정리', 'other/project/hub', 2, [run('r_h1', 1, 'review_ready', { at: 2 })]),
+  ], at: Date.now(), error: null };
+  S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 }];
+  S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [] };
+  if (location.hash.includes('collapse')) localStorage.setItem('cpt.sbGroupCollapsed.v1', JSON.stringify({ 2: 1 }));
+  else localStorage.removeItem('cpt.sbGroupCollapsed.v1');
   localStorage.removeItem('cpt.activeDeviceId.v1');
   sb.mountSidebar(document.getElementById('sbRoot'));
   sb.updateSidebar();
   S.subscribe(() => sb.updateSidebar());
+  if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);
+  if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
   // 검사용 손잡이 — 지금 보이는 PC 행/워크스페이스 행, 그리고 코드로 PC 전환.
   window.__rows = () => ({
     pcs: [...document.querySelectorAll('.pc-row')].map((r) => r.querySelector('.pc-nm').textContent + (r.classList.contains('active') ? ' ✓' : '')),

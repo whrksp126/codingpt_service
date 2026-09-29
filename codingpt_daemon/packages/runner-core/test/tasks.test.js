@@ -72,7 +72,7 @@ const I = tasks._internals;
 const sessions = new Map(); // tsession → { command, title }
 let tidSeq = 1000001;
 let wsSeq = 1;
-const calls = { launch: [], input: [], dialog: [], back: [], notify: [], pool: 0, close: [] };
+const calls = { launch: [], input: [], dialog: [], keys: [], back: [], notify: [], pool: 0, close: [] };
 let screenFor = () => '';
 let signalFor = () => ({ on: false });
 let launchReply = () => ({ ok: true, ready: true });
@@ -118,6 +118,7 @@ function wire() {
     },
     chatInput: async (a) => { calls.input.push(a); return { ok: true }; },
     chatDialog: async (a) => { calls.dialog.push(a); return { ok: true, dialog: null }; },
+    keys: async (a) => { calls.keys.push(a); },
     screen: async (a) => screenFor(a),
     backFetch: async (m, p, b) => {
       calls.back.push({ m, p, b });
@@ -322,42 +323,57 @@ test('서브디렉토리 워크스페이스 — repo.subdir, run.cwd = dir/subdi
   closeAll();
 });
 
+// 2026-09-29 실측 claude 2.1.284 신뢰 화면 — 번호 없음, No 가 먼저(커서), 수락은 두 번째.
 const TRUST_SCREEN = [
-  '',
-  ' Do you trust the files in this folder?',
-  '',
-  ' /Users/me/proj',
-  '',
-  ' ❯ 1. Yes, proceed',
-  '   2. No, exit',
-  '',
-  ' Enter to confirm · Esc to exit',
+  '────────────────────────────────────────',
+  ' Accessing workspace:',
+  ' /Users/me/.codingpt/worktrees/proj-abc-1',
+  ' Quick safety check: Is this a project you created or one you trust? (Like your',
+  ' own code, a well-known open source project, or work from your team).',
+  " Claude Code'll be able to read, edit, and execute files here.",
+  ' Security guide',
+  ' ❯ No, exit',
+  '   Yes, I trust this folder',
+  ' Enter to confirm · Esc to cancel',
 ].join('\n');
 
-test('폴더 신뢰 — 다이얼로그 감지 → trustPending → task.run.trust 가 chatDialog({pick:1, expect}) 로 답한다(자동 수락 없음)', async () => {
+test('폴더 신뢰 — 다이얼로그 감지 → trustPending → task.run.trust 가 수락 선택지로 커서를 옮겨 Enter(자동 수락 없음)', async () => {
   const { rel } = makeRepo();
   let trusted = false;
   screenFor = () => (trusted ? '' : TRUST_SCREEN);
-  calls.dialog.length = 0;
+  calls.keys.length = 0;
   try {
     const t0 = await createTask(rel, [{ id: 'claude', count: 1 }]);
     const t = await waitFor(async () => { const x = await getTask(t0.id); return x.runs[0].trustPending ? x : null; });
-    assert.strictEqual(calls.dialog.length, 0, '자동 수락하지 않는다');
+    assert.strictEqual(calls.keys.length, 0, '자동 수락하지 않는다');
+    const origPush = calls.keys.push.bind(calls.keys);
+    calls.keys.push = (a) => { trusted = true; return origPush(a); };   // 키를 받으면 실화면처럼 다이얼로그가 사라진다
     const res = await call('task.run.trust', { taskId: t.id, runId: t.runs[0].id });
+    calls.keys.push = origPush;
     assert.deepStrictEqual(res, { ok: true, dialog: null });
-    assert.strictEqual(calls.dialog.length, 1);
-    assert.strictEqual(calls.dialog[0].pick, 1);
-    assert.strictEqual(calls.dialog[0].tid, t.runs[0].tid);
-    assert.strictEqual(typeof calls.dialog[0].expect, 'string');
-    assert.ok(calls.dialog[0].expect.length > 0);
-    trusted = true;
+    assert.strictEqual(calls.keys.length, 1);
+    // ★ 첫 선택지는 "No, exit" — pick 1 이면 claude 가 종료된다. Down 1회 후 Enter.
+    assert.deepStrictEqual(calls.keys[0].keys, ['Down', 'Enter']);
+    assert.strictEqual(calls.keys[0].tid, t.runs[0].tid);
     assert.strictEqual((await getTask(t.id)).runs[0].trustPending, false);
-    // 다이얼로그가 이미 없으면 {ok:true, dialog:null} + 아무 키도 안 보낸다
     const again = await call('task.run.trust', { taskId: t.id, runId: t.runs[0].id });
     assert.deepStrictEqual(again, { ok: true, dialog: null });
-    assert.strictEqual(calls.dialog.length, 1);
+    assert.strictEqual(calls.keys.length, 1, '다이얼로그가 없으면 아무 키도 안 보낸다');
   } finally { screenFor = () => ''; }
   closeAll();
+});
+
+test('폴더 신뢰 판정 — claude(번호 없음)·codex(번호)·일반 입력창 오탐 없음', () => {
+  const f = tasks._internals.trustDialogOf;
+  const c = f(TRUST_SCREEN);
+  assert.strictEqual(c.cursor, 0); assert.strictEqual(c.yes, 1);
+  const x = f('\n  Do you trust the contents of this directory? Working with untrusted contents\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue\n');
+  assert.strictEqual(x.cursor, 0); assert.strictEqual(x.yes, 0);
+  // codex 실측: 맨 위 `> You are in …` 안내 줄의 '>' 를 커서로 잡으면 안 된다(가장 아래 표시 줄이 커서).
+  const cx = f(['> You are in /Users/me/.codingpt/worktrees/p-abc-2', '', '  Do you trust the contents of this directory? Working with untrusted contents', '  comes with higher risk of prompt injection.', '', '› 1. Yes, continue', '  2. No, quit', '', '  Press enter to continue'].join('\n'));
+  assert.ok(cx, 'codex 신뢰 화면 감지'); assert.strictEqual(cx.cursor, 0); assert.strictEqual(cx.yes, 0);
+  assert.strictEqual(f('╭──╮\n│ > I trust you, fix it │\n╰──╯'), null);
+  assert.strictEqual(f('> hello world\n  some prompt'), null);
 });
 
 test('paste 준비 판정 — pane 이 셸인 동안·rawState launching 인 동안 chatInput 을 호출하지 않는다', async () => {
@@ -541,6 +557,26 @@ test('discard — 미커밋 거부 → 미머지 커밋 거부 → force 폐기(
   // 종결 뒤에는 기록 삭제 가능
   assert.deepStrictEqual(await call('task.delete', { taskId: t.id }), { ok: true });
   await assert.rejects(() => getTask(t.id), (e) => e.code === 'TASK_NOT_FOUND');
+});
+
+test('merge.local — 미커밋 변경: commitMessage 없으면 UNCOMMITTED_CHANGES, 있으면 커밋 후 머지(폰 한 시트)', async () => {
+  const { rel, dir } = makeRepo();
+  const t = await createTask(rel, [{ id: 'claude', count: 1 }]);
+  const [w] = t.runs;
+  const wt = path.join(ROOT, w.dir);
+  fs.writeFileSync(path.join(wt, 'dirty.txt'), 'd\n');   // 에이전트가 커밋하지 않고 멈춘 상태
+  const o1 = uuid();
+  await call('git.merge.local', { opId: o1, taskId: t.id, runId: w.id, method: 'merge' });
+  const failed = await waitFor(async () => { await I._drain(); const x = await getTask(t.id); return x.runs[0].lastOp && x.runs[0].lastOp.opId === o1 ? x : null; });
+  assert.strictEqual(failed.runs[0].lastOp.code, 'UNCOMMITTED_CHANGES');
+  await assert.rejects(() => call('git.merge.local', { opId: uuid(), taskId: t.id, runId: w.id, method: 'merge', commitMessage: '   ' }), (e) => e.code === 'BAD_PARAMS');
+  const o2 = uuid();
+  await call('git.merge.local', { opId: o2, taskId: t.id, runId: w.id, method: 'merge', commitMessage: 'dirty 반영' });
+  const x = await waitFor(async () => { await I._drain(); const y = await getTask(t.id); return y.state === 'merged' ? y : null; });
+  assert.strictEqual(x.runs[0].lastOp.ok, true);
+  assert.ok(fs.existsSync(path.join(dir, 'dirty.txt')), '커밋된 변경이 base 로 머지됐다');
+  assert.ok(G(dir, 'log', '--format=%s', '-3').includes('dirty 반영'));
+  closeAll();
 });
 
 test('merge.local (b: base 체크아웃+clean) — cleanup pending 즉시 → 비동기 정리 → 나머지 폐기(merged/discarded 이벤트)', async () => {
@@ -1041,27 +1077,27 @@ test('승자 1명 원자성 — 같은 작업 두 run 을 동시에 merge.local 
   closeAll();
 });
 
-test('task.delete — 실패 run 의 worktree 가 남아 있으면 거부(고아 방지), 정리 뒤엔 삭제 + 복구 ref 도 지운다', async () => {
+test('머지 후 나머지 폐기 — 미커밋 진 실행도 폐기하되 복구 ref 스냅샷에 미커밋 변경을 담는다(복사 env 제외) · 작업 삭제 시 ref 정리', async () => {
   const { rel, dir } = makeRepo();
   const t = await createTask(rel, [{ id: 'claude', count: 1 }, { id: 'codex', count: 1 }]);
   const [w, f] = t.runs;
   const wt = path.join(ROOT, w.dir);
   fs.writeFileSync(path.join(wt, 'w.txt'), 'w\n');
   G(wt, 'add', '-A'); G(wt, 'commit', '-qm', 'w');
-  fs.writeFileSync(path.join(ROOT, f.dir, 'dirty.txt'), 'd\n'); // 미커밋 → 머지 후 폐기 건너뜀
-  I.mutate((s) => { const x = s.items.find((y) => y.id === t.id); x.runs[1].state = 'failed'; x.runs[1].error = { code: 'OP_INTERRUPTED', message: 'x' }; });
+  const fdir = path.join(ROOT, f.dir);
+  fs.writeFileSync(path.join(fdir, 'dirty.txt'), 'd\n');            // 미커밋(fan-out 의 진 실행은 보통 이렇다)
+  fs.writeFileSync(path.join(fdir, '.env.cptsnap'), 'SECRET=1\n');  // 우리가 복사해 둔 env 라고 치자
+  I.mutate((s) => { const x = s.items.find((y) => y.id === t.id); x.runs[1].copiedFiles = ['.env.cptsnap']; });
   const op = uuid();
   await call('git.merge.local', { opId: op, taskId: t.id, runId: w.id, method: 'merge' });
   const x = await waitFor(async () => { await I._drain(); const y = await getTask(t.id); return y.runs[0].lastOp && y.runs[0].lastOp.result && y.runs[0].lastOp.result.cleanup === 'done' ? y : null; });
-  assert.deepStrictEqual(x.runs[0].lastOp.result.discardSkipped, [{ runId: f.id, code: 'UNCOMMITTED_CHANGES' }]);
-  assert.strictEqual(x.runs[1].state, 'failed');
-  await assert.rejects(() => call('task.delete', { taskId: t.id }), (e) => e.code === 'BAD_PARAMS');
-  assert.ok(await getTask(t.id));
-  // 사용자가 강제 폐기 → 이제 삭제 가능, 복구 ref 도 사라진다
-  const od = uuid();
-  await call('task.discard', { opId: od, taskId: t.id, runIds: [f.id], force: true });
-  await opDone(t.id, f.id, od);
-  assert.ok(G(dir, 'for-each-ref', 'refs/codingpt/discarded/').length > 0);
+  assert.deepStrictEqual(x.runs[0].lastOp.result.discardSkipped, []);
+  assert.deepStrictEqual(x.runs[0].lastOp.result.discarded, [f.id]);
+  assert.strictEqual(x.runs[1].state, 'discarded');
+  assert.ok(!fs.existsSync(fdir), '진 실행 worktree 정리');
+  const ref = `refs/codingpt/discarded/${f.id}`;
+  assert.strictEqual(G(dir, 'show', `${ref}:dirty.txt`), 'd', '미커밋 변경이 복구 ref 에 남는다');
+  assert.throws(() => G(dir, 'show', `${ref}:.env.cptsnap`), '복사해 둔 env 는 스냅샷에서 뺀다');
   assert.deepStrictEqual(await call('task.delete', { taskId: t.id }), { ok: true });
   assert.strictEqual(G(dir, 'for-each-ref', 'refs/codingpt/discarded/'), '', '복구 ref 정리');
 });

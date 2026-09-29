@@ -240,7 +240,7 @@ else {
   ok(/serverOff \|\| isLocalHostId|!serverOff \|\| isLocalHostId/.test(tv) && /serverHasTasks\(\) !== false \|\| isLocalHostId/.test(nts),
     "서버 킬스위치면 다른 PC 는 조회·선택 대상에서 뺀다(이 PC 는 로컬 소켓)");
   ok(/ui\.onFail\?\.\("TIMEOUT"\)/.test(td) && /reconcileOps\(task\)/.test(td), "op 대기 시간 초과 → 시트 재활성 + 뒤늦은 마감 정리");
-  ok(/if \(!ghKnown\)/.test(td), "gh 상태 모름이면 'gh 없음' 안내를 단정하지 않는다");
+  ok(/if \(!ghKnown\b/.test(td), "gh 상태 모름이면 'gh 없음' 안내를 단정하지 않는다");
   ok(/opId: st\.opId/.test(nts) && /isUncertain\(code\)/.test(nts), "새 작업: 결과 불명 실패 뒤 재시도는 같은 opId");
   ok(/my !== branchSeq/.test(nts) && /my !== agentSeq/.test(nts), "새 작업: 늦게 온 브랜치/에이전트 응답은 버린다");
   ok(/S\.isTaskWorkspace\(ws\)[\s\S]{0,400}openRunTerminal\(ws\.id/.test(sb), "작업 run 터미널의 일반 알림 → openRunTerminal(task:true)");
@@ -248,6 +248,58 @@ else {
   ok(/backApiAsync\(o\.method/.test(ta) && !/api\.backApi\("GET"/.test(ta), "작업 평문 경로·caps 조회는 비동기 back_api(메인 스레드 금지)");
   ok(/pub async fn back_api_async/.test(bridge) && /spawn_blocking\(move \|\| back_api\(/.test(bridge) && /bridge::back_api_async/.test(lib), "Rust back_api_async = spawn_blocking + 등록");
   ok(/if \(state\.paired\) startTasksBackground\(\); \}\);/.test(mainJs), "로그인/페어링 뒤에도 작업 배경 폴링 시작");
+}
+
+// ── 7. 사이드바 저장소 트리(agent-tasks-sidebar.md §2·§7.3) — PC ↔ 앱 ↔ sidebar-01 픽스처 ─────────────
+//  무엇이 조용히 망가지나: 폰과 PC 가 같은 작업을 다른 워크스페이스 아래·다른 순서·다른 점으로 그린다
+//  ("작업 vs 워크스페이스" 혼동을 없애려던 개편이 혼동을 늘린다).
+{
+  const SBF = path.join(FIX, "sidebar-01.json");
+  const SB = await import(path.join(PC, "sidebar-tasks.js"));
+  if (!fs.existsSync(SBF)) {
+    ok(false, "sidebar-01.json 픽스처가 있다", SBF);
+  } else {
+    const fx = JSON.parse(read(SBF));
+    const got = SB.summarizeSidebar(SB.buildSidebarTasks(fx.input));
+    ok(JSON.stringify(got) === JSON.stringify(fx.expect), `PC sidebar-01 — ${fx.description.slice(0, 60)}…`,
+      `\n   got  ${JSON.stringify(got)}\n   want ${JSON.stringify(fx.expect)}`);
+    ok(JSON.stringify(SB.buildSidebarTasks({ ...fx.input, host: 0 })) === JSON.stringify({ groups: {} }), "host 0(모름) = 빈 결과(§2.1)");
+    // 필수 케이스가 픽스처에 실제로 있다(§7.1 목록) — 기대값 쪽에서 센다.
+    const exp = Object.values(fx.expect).flatMap((g) => g.tasks);
+    ok(exp.some((t) => t.fanout >= 3 && t.group === "needs_input") && exp.some((t) => t.sub.diff)
+      && exp.some((t) => t.sub.key === "stateCreating") && exp.some((t) => t.dot === "error")
+      && Object.values(fx.expect).some((g) => g.openCount === 0) && Object.values(fx.expect).some((g) => g.needsInput)
+      && fx.input.tasks.some((t) => t.state === "merged") && !Object.keys(fx.expect).some((k) => /task/.test(k)),
+      "sidebar-01 이 팬아웃·diff·creating·error·빈 그룹·needsInput·merged·작업 워크스페이스 케이스를 담는다");
+    const APP_SB = path.join(APP, "workspace/tasks/sidebarTasks.ts");
+    if (!fs.existsSync(APP_SB)) skip("앱 sidebarTasks 대조", "codingpt_app/src/workspace/tasks/sidebarTasks.ts 없음");
+    else {
+      let app = null;
+      try {
+        app = probe(APP_SB, `
+          const input = ${JSON.stringify(fx.input)};
+          const out = m.buildSidebarTasks(input);
+          const sum = m.summarizeSidebar ? m.summarizeSidebar(out) : null;
+          console.log(JSON.stringify(sum));`);
+      } catch (e) { skip("앱 sidebarTasks 대조", "실행 실패: " + String(e.stderr || e.message).split("\n").find((l) => /Error/.test(l))); }
+      if (app) ok(JSON.stringify(app) === JSON.stringify(fx.expect), "앱 sidebar-01 — PC 와 같은 트리",
+        `\n   app  ${JSON.stringify(app)}\n   want ${JSON.stringify(fx.expect)}`);
+    }
+  }
+  const sb = read(path.join(PC, "sidebar.js"));
+  const tv = read(path.join(PC, "tasks-view.js"));
+  ok(/class="pc-nm">\$\{escapeHtml\(tt\("overview"\)\)\}/.test(sb) && /function tasksRow\(\)/.test(sb), "사이드바 맨 위 행 라벨 = tt(\"overview\")(진행 현황)");
+  ok(/add\.className = "wsg-add"[\s\S]{0,700}openNewTaskSheet\(\{ host, wsId: w\.id \}\)/.test(sb) && /e\.stopPropagation\(\);\s*\/\/ 머리 토글 방지/.test(sb),
+    "`+ 작업` 은 그 워크스페이스를 저장소로 미리 골라 새 작업 시트를 연다(stopPropagation)");
+  ok(/groupCollapsed\(w\.id\), w\.git\?\.branch \|\| "", S\.wsTerminalCount\(w\.id\)/.test(sb) && /fanExpanded\.has\(t\.taskId\)/.test(sb),
+    "sbSig 에 접힘·브랜치·터미널 수·작업 행 값이 들어 있다(없으면 화면이 안 바뀐다)");
+  ok(/"cpt\.sbGroupCollapsed\.v1"/.test(sb), "그룹 접힘 영속 키 = cpt.sbGroupCollapsed.v1(§4 — 앱과 같은 키)");
+  ok(/if \(r\.workspaceId\) void openRunTerminal\(r\.workspaceId, r\.tid, \{ task: true \}\)/.test(sb), "에이전트 자식 행 → 그 run 터미널(task:true)");
+  ok(/t\.textContent = tt\("overview"\)/.test(tv) && (tv.match(/tt\("overview"\)/g) || []).length >= 3 && /task\.title \|\| tt\("title"\)/.test(tv),
+    "현황판 제목·뒤로 라벨 = 진행 현황, 카드 폴백 제목은 '작업' 유지(§5)");
+  ok(/export function dashboardRows\(/.test(tv), "tasks-view 가 현황판 행 평탄화(dashboardRows)를 내보낸다");
+  const ic = read(path.join(PC, "icons.js"));
+  ok(/gitBranch: \(o\) => svg\(/.test(ic), "icons.gitBranch(SVG) 가 있다 — 이모지 금지");
 }
 
 const sk = skipped.length;

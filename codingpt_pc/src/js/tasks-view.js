@@ -14,7 +14,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { getPane } from "./pane.js";
-import { icons, agentMarkHtml } from "./icons.js";
+import { icons, agentMarkHtml, iconBtn } from "./icons.js";
 import { buildDashboard, GROUPS, isTaskWorkspace } from "./tasks-model.js";
 import { taskRpc, refreshHostCaps, hostHasTasks, serverHasTasks, onCapsChanged, newOpId, isLocalHostId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
@@ -155,6 +155,13 @@ function modelInput() {
 }
 
 export function dashboard() { return buildDashboard(modelInput()); }
+
+/** 현황판 행을 GROUPS 순으로 평탄화 — 사이드바 저장소 트리(sidebar-tasks.js)의 `rows` 입력(sidebar §2.1).
+ *  dash 를 주면 그걸 쓴다(같은 렌더에서 모델을 두 번 계산하지 않게). */
+export function dashboardRows(dash) {
+  const d = dash || dashboard();
+  return GROUPS.flatMap((g) => d.groups[g] || []);
+}
 
 /** 사이드바 `작업 [n]` 배지 — 입력 대기 수. */
 export function needsInputCount() {
@@ -371,20 +378,22 @@ function renderFrame(wide) {
     }).catch(() => {});
   }
   if (!wide && sel) {
-    const back = btn("tv-back", tt("title"), () => { sel = null; updateTasksView(); });
-    back.innerHTML = icons.chevronLeft({ size: 14 }) + `<span>${esc(tt("title"))}</span>`;
+    const back = btn("tv-back", tt("overview"), () => { sel = null; updateTasksView(); });
+    back.innerHTML = icons.chevronLeft({ size: 14 }) + `<span>${esc(tt("overview"))}</span>`;
     top.append(back);
   } else {
     const t = document.createElement("span");
     t.className = "tv-title";
-    t.textContent = tt("title");
+    t.textContent = tt("overview");
     top.append(t);
   }
   const sp = document.createElement("span");
   sp.className = "mt-spacer";
   top.append(sp);
-  const newB = btn("tv-btn", tt("newTask"), () => openNewTask());
-  const refB = btn("tv-btn ghost", tt("refresh"), () => { void refreshHostCaps(); void refreshAll(); });
+  //  상단 동작은 아이콘(툴팁·aria 는 원문) — 텍스트 버튼은 한눈에 안 읽힌다(사용자 지시 2026-09-29).
+  const newB = iconBtn("plus", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("newTask"), onClick: () => openNewTask() });
+  const refB = iconBtn("refresh", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("refresh"), onClick: () => { void refreshHostCaps(); void refreshAll(); } });
+  for (const b of [newB, refB]) b.setAttribute("aria-label", b.title);
   top.append(newB, refB);
   el.append(top);
 

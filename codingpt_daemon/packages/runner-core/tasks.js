@@ -20,6 +20,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const runtime = require('./runtime');
 const taskGit = require('./task-git');
@@ -99,6 +100,7 @@ let inj = {
   chatInput: null,       // ({cwd, tid, text, submit})
   chatDialog: null,      // ({cwd, tid, pick, expect})
   screen: null,          // ({cwd, tid}) → 화면 문자열(capture) — extractDialog 입력
+  keys: null,            // ({cwd, tid, keys:['Down','Enter']}) → tmux 표기 키 전송(폴더 신뢰 응답)
   backFetch: null,       // (method, apiPath, body) → json
   now: () => Date.now(),
   log: (m) => console.log(m),
@@ -128,7 +130,7 @@ let timings = {
 };
 
 function configure(opts = {}) {
-  for (const k of ['notify', 'poolChanged', 'launch', 'chatInput', 'chatDialog', 'screen', 'backFetch', 'now', 'log', 'deviceId']) {
+  for (const k of ['notify', 'poolChanged', 'launch', 'chatInput', 'chatDialog', 'keys', 'screen', 'backFetch', 'now', 'log', 'deviceId']) {
     if (opts[k] !== undefined) inj[k] = typeof opts[k] === 'function' ? opts[k] : (k === 'now' ? () => Date.now() : noop);
   }
   if (opts.deps && typeof opts.deps === 'object') depOverride = { ...depOverride, ...opts.deps };
@@ -705,7 +707,8 @@ async function launchRun(t, r, { withPrompt }) {
   }
   let res;
   try {
-    res = await inj.launch({ cwd: r.cwd, index: r.tid, id: r.agent, ...(args && args.length ? { args } : {}), timeoutMs: timings.launchTimeoutMs });
+    //  fresh — 첫 실행(withPrompt)은 방금 만든 터미널이다: rc 초기화 중 일시 명령을 busy 로 보지 않게(cpt-server).
+    res = await inj.launch({ cwd: r.cwd, index: r.tid, id: r.agent, ...(args && args.length ? { args } : {}), ...(withPrompt ? { fresh: true } : {}), timeoutMs: timings.launchTimeoutMs });
   } catch (e) {
     failRun(t, r, 'AGENT_LAUNCH_FAILED', e && e.message);
     return;
@@ -768,7 +771,8 @@ async function waitAgentReady(r, { timeoutMs, since }) {
         try { sig = dep('agentWatch').agentSignalOf(key, cmd, info.title || ''); } catch (_) { sig = null; }
         if (sig && sig.on === true) {
           const scr = await readScreen(r);
-          if (scr != null && !dep('statusLine').extractDialog(scr)) good = true;
+          //  번호 없는 폴더 신뢰 화면은 extractDialog 가 못 본다 — 전용 판정도 함께(그 화면에 붙여넣지 않게).
+          if (scr != null && !dep('statusLine').extractDialog(scr) && !trustDialogOf(scr)) good = true;
         }
       }
       if (good) {
@@ -790,15 +794,34 @@ async function readScreen(r) {
   } catch (_) { return null; }
 }
 
+//  폴더 신뢰 화면 판정 — extractDialog 에 기대지 않는다(2026-09-29 실측: claude 2.1.284 의 신뢰 화면은
+//  **번호 없는** 선택지 `❯ No, exit` / `Yes, I trust this folder` 라 extractDialog 가 null 을 돌려주고,
+//  순서도 No 가 1번이라 "pick 1" 은 claude 를 종료시킨다). 커서 표시(❯/›)가 있는 선택지 블록을 직접 읽어
+//  { title(질문 줄), options[], cursor(현재 커서 위치), yes(수락 선택지 위치) } 를 돌려준다.
+//  수락 선택지: claude "Yes, I trust this folder" · codex "1. Yes, continue" · gemini "1. Trust folder".
+const TRUST_YES_RE = /^(yes\b|trust folder\b)|\bI trust\b/i;
+const OPTION_MARK_RE = /^\s*([❯›>●])\s+/;
 function trustDialogOf(screen) {
   if (screen == null) return null;
-  const d = dep('statusLine').extractDialog(screen);
-  if (!d) return null;
-  // extractDialog 의 title 은 "옵션 바로 위 블록" 이라 claude 의 신뢰 화면에서는 폴더 경로가 된다
-  //  (`Do you trust the files in this folder?` 는 그 위 블록). 그래서 선택 화면 아래쪽 30줄도 함께 본다.
-  const tail = String(screen).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').slice(-30).join('\n');
-  const hay = [d.title, d.desc, ...(d.options || []).map((o) => o.label), tail].join('\n');
-  return TRUST_DIALOG_RE.test(hay) ? d : null;
+  const lines = String(screen).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').slice(-40);
+  //  커서 줄 = 표시(❯/›/>/●)가 있는 **가장 아래** 줄 — codex 신뢰 화면은 맨 위에 `> You are in …` 안내 줄이 있다(실측).
+  let cur = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (OPTION_MARK_RE.test(lines[i]) && lines[i].replace(OPTION_MARK_RE, '').trim()) { cur = i; break; }
+  if (cur < 0) return null;
+  //  선택지 = 커서 줄의 **글자 시작 열**과 같은 열에서 시작하는 연속된 줄(설명 문단은 열이 다르거나 빈 줄로 끊긴다).
+  const colOf = (l) => { const m = l.match(OPTION_MARK_RE); return m ? m[0].length : l.search(/\S/); };
+  const col = colOf(lines[cur]);
+  const isOpt = (l) => l.trim() && !/enter to|esc to|to confirm|to cancel/i.test(l) && colOf(l) === col;
+  let a = cur; while (a > 0 && isOpt(lines[a - 1])) a--;
+  let b = cur; while (b + 1 < lines.length && isOpt(lines[b + 1])) b++;
+  const opts = [];
+  for (let i = a; i <= b; i++) opts.push({ i, label: lines[i].replace(OPTION_MARK_RE, '').trim().replace(/^\d+[.)]\s*/, '') });
+  const cursor = opts.findIndex((o) => o.i === cur);
+  const yes = opts.findIndex((o) => TRUST_YES_RE.test(o.label));
+  const hay = lines.join('\n');
+  if (cursor < 0 || yes < 0 || !TRUST_DIALOG_RE.test(hay)) return null;
+  const q = lines.slice(0, a).reverse().find((l) => TRUST_DIALOG_RE.test(l) && /\?/.test(l)) || lines.slice(0, a).reverse().find((l) => TRUST_DIALOG_RE.test(l)) || '';
+  return { title: q.trim(), options: opts.map((o) => ({ label: o.label })), cursor, yes };
 }
 
 // ── 폴더 신뢰 감시(§2.5 10b) ─────────────────────────────────────────────────
@@ -1105,6 +1128,31 @@ function killTerminal(r) {
  * cleanupRun — {force, skipUnmerged}. 성공 시 r.cleanup 기록. 거부는 throw(UNCOMMITTED_CHANGES|UNMERGED_COMMITS).
  *  ★ dirty 는 정리 시점에 다시 계산한다(캐시 금지).
  */
+/**
+ * worktree 의 미커밋 변경(추적 안 된 파일 포함, .gitignore 존중)을 **임시 인덱스**로 커밋 객체로 만든다 —
+ *  작업 트리·실 인덱스·브랜치는 건드리지 않는다. 변경이 없으면 null. 우리가 복사해 둔 env 파일(copiedFiles)은
+ *  비밀일 수 있어 스냅샷에서 뺀다. 결과 sha 는 refs/codingpt/discarded/<runId> 가 붙잡아 30일 보관된다.
+ */
+async function snapshotDirty(t, r, dirAbs) {
+  const st = await taskGit.statusItems(dirAbs);
+  if (!st.length) return null;
+  const idx = path.join(os.tmpdir(), `cpt-snap-${r.id}-${process.pid}.idx`);
+  const env = { GIT_INDEX_FILE: idx };
+  try {
+    const rd = await taskGit.git(['read-tree', 'HEAD'], { cwd: dirAbs, env });
+    if (!rd.ok) return null;
+    const excl = (r.copiedFiles || []).map((f) => `:(exclude)${f}`);
+    const add = await taskGit.git(['add', '-A', '--', '.', ...excl], { cwd: dirAbs, env, timeout: 60000 });
+    if (!add.ok) return null;
+    const tree = await taskGit.git(['write-tree'], { cwd: dirAbs, env });
+    if (!tree.ok) return null;
+    const c = await taskGit.git(['commit-tree', tree.out.trim(), '-p', 'HEAD', '-m', `codingpt: ${r.id} 폐기 시점 미커밋 스냅샷`], { cwd: dirAbs });
+    return c.ok ? c.out.trim() : null;
+  } finally {
+    try { fs.rmSync(idx, { force: true }); } catch (_) { /* noop */ }
+  }
+}
+
 async function cleanupRun(t, r, { force = false, skipUnmerged = false } = {}) {
   const top = repoTopAbs(t);
   const dirAbs = wtAbs(r);
@@ -1125,13 +1173,18 @@ async function cleanupRun(t, r, { force = false, skipUnmerged = false } = {}) {
   await killTerminal(r);
   poolChangedSoon();
   const cleanup = { worktreeRemoved: false, branchDeleted: false, workspaceDeleted: false, recoveryRef: null, at: null };
-  // 3. 복구 ref
+  // 3. 복구 ref — 브랜치 HEAD, 그리고 worktree 에 **미커밋 변경이 있으면 그것까지** 담은 스냅샷 커밋.
+  //  (종전엔 HEAD 만 가리켜 force 폐기·자동 폐기에서 미커밋 작업이 "30일 복구" 약속 밖으로 새어 나갔다 — 2026-09-29.)
   const head = await taskGit.refExists(top, `refs/heads/${r.branch}`);
-  if (head) {
+  let snap = null;
+  if (exists) snap = await snapshotDirty(t, r, dirAbs).catch(() => null);
+  const target = snap || head;
+  if (target) {
     const ref = `refs/codingpt/discarded/${r.id}`;
-    const u = await taskGit.git(['update-ref', ref, head], { cwd: top });
+    const u = await taskGit.git(['update-ref', ref, target], { cwd: top });
     if (u.ok) cleanup.recoveryRef = ref;
   }
+  if (snap) cleanup.snapshot = true;
   // 4. worktree 제거(저장소 락)
   await withRepoLock(t.repo.common, async () => {
     if (fs.existsSync(dirAbs)) {
@@ -1277,10 +1330,13 @@ async function postMerge(t, r, { opId, viaPr, discardOthers, web = false, headOi
     for (const o of t.runs) {
       if (o.id === r.id || !['running', 'review_ready', 'failed'].includes(o.state)) continue;
       if (o.op) { result.discardSkipped.push({ runId: o.id, code: 'RUN_BUSY' }); continue; }
+      //  에이전트가 아직 일하는 실행은 건드리지 않는다. 미커밋·미머지 커밋은 복구 ref(스냅샷)에 담기므로
+      //  force 로 폐기한다 — fan-out 의 진 실행은 보통 커밋 없이 끝나 force 없이는 영영 안 치워졌다(2026-09-29 실측).
+      if (liveWorking(o)) { result.discardSkipped.push({ runId: o.id, code: 'AGENT_BUSY' }); continue; }
       const oid = `${opId}:${o.id}`.slice(0, 80);
       beginOp(t, o, oid, 'discard');
       try {
-        await discardOne(t, o, { force: false });
+        await discardOne(t, o, { force: true });
         result.discarded.push(o.id);
         endOp(t, o, oid, 'discard', { ok: true, result: { discarded: [o.id], skipped: [] } });
       } catch (e) {
@@ -1363,10 +1419,18 @@ async function rpcRunTrust(p) {
     if (r.trustPending) { r.trustPending = false; r.trustTitle = null; touch(t, r); save(); emit([t.id], 'run'); }
     return { ok: true, dialog: null };
   }
-  if (!inj.chatDialog) throw codedError('BAD_PARAMS', '다이얼로그 경로가 없습니다');
-  // expect 대조 — 그 사이 다른 질문으로 바뀌었으면 driveDialog 가 DIALOG_MISMATCH 로 거부한다.
-  const res = await inj.chatDialog({ cwd: r.cwd, tid: r.tid, pick: 1, expect: r.trustTitle || d.title });
-  r.trustPending = false;
+  if (!inj.keys) throw codedError('BAD_PARAMS', '키 입력 경로가 없습니다');
+  // 수락 선택지로 커서를 옮겨 Enter — 번호가 없는 화면(claude)이 있고 수락이 1번이 아닐 수 있다(trustDialogOf).
+  const delta = d.yes - d.cursor;
+  const keys = [];
+  for (let i = 0; i < Math.abs(delta); i++) keys.push(delta > 0 ? 'Down' : 'Up');
+  keys.push('Enter');
+  await inj.keys({ cwd: r.cwd, tid: r.tid, keys });
+  await new Promise((res) => setTimeout(res, timings.trustPollMs));
+  const after = trustDialogOf(await readScreen(r));
+  const res = { dialog: after };
+  r.trustPending = !!after;
+  if (after) { touch(t, r); save(); emit([t.id], 'run'); return { ok: false, dialog: after }; }
   r.trustTitle = null;
   stopTrustWatch(r);
   touch(t, r); save(); emit([t.id], 'run');
@@ -1681,6 +1745,9 @@ async function rpcMergeLocal(p) {
   const method = p.method;
   if (!['merge', 'squash', 'ff'].includes(method)) throw codedError('BAD_PARAMS', 'method 가 올바르지 않습니다');
   const discardOthers = p.discardOthers !== false;
+  //  commitMessage — git.pr.create 와 같은 규칙: 미커밋 변경이 있으면 먼저 커밋하고 머지(폰에서 한 시트로).
+  //  없이 dirty 면 UNCOMMITTED_CHANGES(2026-09-29 실측: 로컬 머지 시트에 커밋 수단이 없어 막다른 길이었다).
+  if (p.commitMessage != null && (typeof p.commitMessage !== 'string' || !p.commitMessage.trim())) throw codedError('BAD_PARAMS', 'commitMessage 가 올바르지 않습니다');
   return startRunOp(p, 'merge.local', { states: ['running', 'review_ready'] }, async ({ t, r, deadline }) => {
     const release = claimMerge(t); // ★ 첫 await 전
     try { return await mergeLocalBody(t, r, { p, method, discardOthers, deadline }); } finally { release(); }
@@ -1690,7 +1757,11 @@ async function rpcMergeLocal(p) {
 async function mergeLocalBody(t, r, { p, method, discardOthers, deadline }) {
   {
     await freshStatus(t, r);
-    if (r.dirty) throw codedError('UNCOMMITTED_CHANGES', '먼저 커밋해야 합니다');
+    if (r.dirty) {
+      if (!p.commitMessage) throw codedError('UNCOMMITTED_CHANGES', '먼저 커밋해야 합니다');
+      await doCommit(t, r, { message: p.commitMessage, noVerify: false, deadline });
+      await freshStatus(t, r);
+    }
     r.state = 'merging';
     touch(t, r); save(); emit([t.id], 'run');
     const top = repoTopAbs(t);
@@ -1874,9 +1945,14 @@ async function reconcile() {
               continue;
             }
           }
-          if (r.trustPending) {
+          //  신뢰 화면은 trustPending 기록과 무관하게 **화면으로** 다시 본다 — 재시작 전에 감지를 놓친(또는 감지기가
+          //  바뀐) 실행이 신뢰 화면에 멈춰 있으면 카드에 버튼이 영영 안 뜬다(2026-09-29 실측).
+          if (r.state === 'running' || r.state === 'review_ready' || r.trustPending) {
             const d = trustDialogOf(await readScreen(r));
-            if (!d) { r.trustPending = false; r.trustTitle = null; changed.add(t.id); } else startTrustWatch(t, r);
+            if (d) {
+              if (!r.trustPending) { r.trustPending = true; r.trustTitle = d.title; changed.add(t.id); }
+              startTrustWatch(t, r);
+            } else if (r.trustPending) { r.trustPending = false; r.trustTitle = null; changed.add(t.id); }
           }
         }
         // 30일 지난 복구 ref 정리

@@ -911,9 +911,13 @@ async function input(args) {
       const s = String(a.text || '');
       if (!s) return { ok: true };
       // `input text` 는 공백을 %s 로 받고 일부 기호를 못 넣는다. 나눠 보내고 공백은 키로.
-      for (const part of s.split(' ')) {
-        if (part) await adb(['input', 'text', part]);
-        await adb(['input', 'keyevent', 'KEYCODE_SPACE']);
+      //  ★ adb shell 은 인자를 **셸 문자열로 합쳐** 기기 sh 가 해석한다 → `(`·`)`·`;`·`&` 등이 문법 오류/명령 주입이
+      //    된다(2026-09-29 실측: "greet()" → syntax error). 조각마다 작은따옴표로 감싼다. 마지막 조각 뒤엔 공백을 안 보낸다.
+      const parts = s.split(' ');
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (part) await adb(['input', 'text', `'${part.replace(/'/g, `'\\''`)}'`]);
+        if (i < parts.length - 1) await adb(['input', 'keyevent', 'KEYCODE_SPACE']);
       }
       return { ok: true };
     }

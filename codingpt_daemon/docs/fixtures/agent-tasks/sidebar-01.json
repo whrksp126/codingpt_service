@@ -1,0 +1,743 @@
+{
+  "name": "sidebar-01",
+  "description": "사이드바 저장소 트리 파생(agent-tasks-sidebar.md §2) — workspaceId 매치 · 사라진 workspaceId → repo.path 폴백 · subdir 매치(긴 경로 우선) · 미등록 저장소 제외 · merged/closed 작업 제외 · 잔존 run 0 제외 · 팬아웃 ×3 집계(needs_input 우선) · 전부 creating = stateCreating · review_ready diff · 실패/opFailed = error · 색인 없는 run = idle · 정렬(그룹→sortAt 내림→taskId 코드포인트: t_iB < t_ia) · 작업 워크스페이스는 그룹 없음 · 접힘 칩 needsInput",
+  "contract": "expect 모양 = PC sidebar-tasks.js summarizeSidebar() 가 정본. rows 는 현황판 모델 출력을 직접 박은 것(모델을 다시 돌리지 않는다). 집계 점: 집계가 needs_input 이면 needs_input 인 run 중 하나라도 reason ∈ {failed, opFailed} 이면 error, 아니면 warn. 작업 정렬의 '최근 활동' = 그 작업의 run 행 sortAt 최대(행 없으면 0).",
+  "input": {
+    "host": 1,
+    "workspaces": [
+      {
+        "id": "ws_app",
+        "localPath": "work/app"
+      },
+      {
+        "id": "ws_mono",
+        "localPath": "work/mono"
+      },
+      {
+        "id": "ws_mono_back",
+        "localPath": "work/mono/back"
+      },
+      {
+        "id": "ws_blog",
+        "localPath": "work/blog"
+      },
+      {
+        "id": "ws_task_leak",
+        "localPath": ".codingpt/worktrees/app-zz-1"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "t_fan",
+        "title": "결제 실패 재시도",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_gone",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_f1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_f1",
+            "workspaceId": "ws_r_f1",
+            "tid": 11,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_f1"
+          },
+          {
+            "id": "r_f2",
+            "idx": 2,
+            "agent": "codex",
+            "branch": "cpt/r_f2",
+            "workspaceId": "ws_r_f2",
+            "tid": 12,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_f2"
+          },
+          {
+            "id": "r_f3",
+            "idx": 3,
+            "agent": "gemini",
+            "branch": "cpt/r_f3",
+            "workspaceId": "ws_r_f3",
+            "tid": 13,
+            "state": "review_ready",
+            "diff": {
+              "files": 1,
+              "additions": 2,
+              "deletions": 1
+            },
+            "cwd": ".codingpt/worktrees/r_f3"
+          }
+        ]
+      },
+      {
+        "id": "t_rev",
+        "title": "README 정리",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_v1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_v1",
+            "workspaceId": "ws_r_v1",
+            "tid": 21,
+            "state": "review_ready",
+            "diff": {
+              "files": 3,
+              "additions": 41,
+              "deletions": 7
+            },
+            "cwd": ".codingpt/worktrees/r_v1"
+          }
+        ]
+      },
+      {
+        "id": "t_ia",
+        "title": "작업 t_ia",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_ia",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_ia",
+            "workspaceId": "ws_r_ia",
+            "tid": 31,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_ia"
+          }
+        ]
+      },
+      {
+        "id": "t_iB",
+        "title": "작업 t_iB",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_ib",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_ib",
+            "workspaceId": "ws_r_ib",
+            "tid": 32,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_ib"
+          }
+        ]
+      },
+      {
+        "id": "t_i2",
+        "title": "작업 t_i2",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_i2",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_i2",
+            "workspaceId": "ws_r_i2",
+            "tid": 33,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_i2"
+          },
+          {
+            "id": "r_i2x",
+            "idx": 2,
+            "agent": "claude",
+            "branch": "cpt/r_i2x",
+            "workspaceId": "ws_r_i2x",
+            "tid": 34,
+            "state": "discarded",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_i2x"
+          }
+        ]
+      },
+      {
+        "id": "t_merged",
+        "title": "작업 t_merged",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "merged",
+        "runs": [
+          {
+            "id": "r_m1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_m1",
+            "workspaceId": "ws_r_m1",
+            "tid": 41,
+            "state": "merged",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_m1"
+          }
+        ]
+      },
+      {
+        "id": "t_closed",
+        "title": "작업 t_closed",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "closed",
+        "runs": [
+          {
+            "id": "r_c1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_c1",
+            "workspaceId": "ws_r_c1",
+            "tid": 42,
+            "state": "review_ready",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_c1"
+          }
+        ]
+      },
+      {
+        "id": "t_remnant",
+        "title": "작업 t_remnant",
+        "repo": {
+          "path": "work/app",
+          "subdir": ""
+        },
+        "workspaceId": "ws_app",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_x1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_x1",
+            "workspaceId": "ws_r_x1",
+            "tid": 43,
+            "state": "discarded",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_x1"
+          },
+          {
+            "id": "r_x2",
+            "idx": 2,
+            "agent": "claude",
+            "branch": "cpt/r_x2",
+            "workspaceId": "ws_r_x2",
+            "tid": 44,
+            "state": "merged",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_x2"
+          }
+        ]
+      },
+      {
+        "id": "t_sub",
+        "title": "작업 t_sub",
+        "repo": {
+          "path": "work/mono",
+          "subdir": "back"
+        },
+        "workspaceId": null,
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_s1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_s1",
+            "workspaceId": null,
+            "tid": null,
+            "state": "creating",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_s1"
+          },
+          {
+            "id": "r_s2",
+            "idx": 2,
+            "agent": "claude",
+            "branch": "cpt/r_s2",
+            "workspaceId": null,
+            "tid": null,
+            "state": "creating",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_s2"
+          }
+        ]
+      },
+      {
+        "id": "t_root",
+        "title": "작업 t_root",
+        "repo": {
+          "path": "work/mono",
+          "subdir": ""
+        },
+        "workspaceId": null,
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_r1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_r1",
+            "workspaceId": "ws_r_r1",
+            "tid": 51,
+            "state": "failed",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_r1"
+          }
+        ]
+      },
+      {
+        "id": "t_op",
+        "title": "작업 t_op",
+        "repo": {
+          "path": "work/elsewhere",
+          "subdir": ""
+        },
+        "workspaceId": "ws_mono",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_o1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_o1",
+            "workspaceId": "ws_r_o1",
+            "tid": 52,
+            "state": "review_ready",
+            "diff": {
+              "files": 1,
+              "additions": 5,
+              "deletions": 0
+            },
+            "cwd": ".codingpt/worktrees/r_o1"
+          }
+        ]
+      },
+      {
+        "id": "t_norow",
+        "title": "작업 t_norow",
+        "repo": {
+          "path": "work/mono",
+          "subdir": ""
+        },
+        "workspaceId": "ws_mono",
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_n1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_n1",
+            "workspaceId": "ws_r_n1",
+            "tid": 53,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_n1"
+          }
+        ]
+      },
+      {
+        "id": "t_unreg",
+        "title": "작업 t_unreg",
+        "repo": {
+          "path": "work/other",
+          "subdir": ""
+        },
+        "workspaceId": null,
+        "state": "open",
+        "runs": [
+          {
+            "id": "r_u1",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r_u1",
+            "workspaceId": "ws_r_u1",
+            "tid": 61,
+            "state": "running",
+            "diff": null,
+            "cwd": ".codingpt/worktrees/r_u1"
+          }
+        ]
+      }
+    ],
+    "rows": [
+      {
+        "k": "1|.codingpt/worktrees/r_f2|-",
+        "kind": "run",
+        "group": "needs_input",
+        "reason": "needsInput",
+        "run": {
+          "id": "r_f2"
+        },
+        "task": {
+          "id": "t_fan"
+        },
+        "sortAt": 900
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_r1|-",
+        "kind": "run",
+        "group": "needs_input",
+        "reason": "failed",
+        "run": {
+          "id": "r_r1"
+        },
+        "task": {
+          "id": "t_root"
+        },
+        "sortAt": 500
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_o1|-",
+        "kind": "run",
+        "group": "needs_input",
+        "reason": "opFailed",
+        "run": {
+          "id": "r_o1"
+        },
+        "task": {
+          "id": "t_op"
+        },
+        "sortAt": 600
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_f1|-",
+        "kind": "run",
+        "group": "working",
+        "reason": null,
+        "run": {
+          "id": "r_f1"
+        },
+        "task": {
+          "id": "t_fan"
+        },
+        "sortAt": 950
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_s1|-",
+        "kind": "run",
+        "group": "working",
+        "reason": null,
+        "run": {
+          "id": "r_s1"
+        },
+        "task": {
+          "id": "t_sub"
+        },
+        "sortAt": 300
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_s2|-",
+        "kind": "run",
+        "group": "working",
+        "reason": null,
+        "run": {
+          "id": "r_s2"
+        },
+        "task": {
+          "id": "t_sub"
+        },
+        "sortAt": 310
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_u1|-",
+        "kind": "run",
+        "group": "working",
+        "reason": null,
+        "run": {
+          "id": "r_u1"
+        },
+        "task": {
+          "id": "t_unreg"
+        },
+        "sortAt": 999
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_f3|-",
+        "kind": "run",
+        "group": "review_ready",
+        "reason": null,
+        "run": {
+          "id": "r_f3"
+        },
+        "task": {
+          "id": "t_fan"
+        },
+        "sortAt": 800
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_v1|-",
+        "kind": "run",
+        "group": "review_ready",
+        "reason": null,
+        "run": {
+          "id": "r_v1"
+        },
+        "task": {
+          "id": "t_rev"
+        },
+        "sortAt": 700
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_c1|-",
+        "kind": "run",
+        "group": "review_ready",
+        "reason": null,
+        "run": {
+          "id": "r_c1"
+        },
+        "task": {
+          "id": "t_closed"
+        },
+        "sortAt": 650
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_i2|-",
+        "kind": "run",
+        "group": "idle",
+        "reason": null,
+        "run": {
+          "id": "r_i2"
+        },
+        "task": {
+          "id": "t_i2"
+        },
+        "sortAt": 200
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_ia|-",
+        "kind": "run",
+        "group": "idle",
+        "reason": null,
+        "run": {
+          "id": "r_ia"
+        },
+        "task": {
+          "id": "t_ia"
+        },
+        "sortAt": 100
+      },
+      {
+        "k": "1|.codingpt/worktrees/r_ib|-",
+        "kind": "run",
+        "group": "idle",
+        "reason": null,
+        "run": {
+          "id": "r_ib"
+        },
+        "task": {
+          "id": "t_iB"
+        },
+        "sortAt": 100
+      },
+      {
+        "k": "1|work/app|7",
+        "kind": "agent",
+        "group": "working",
+        "reason": null,
+        "run": null,
+        "task": null,
+        "sortAt": 1000
+      },
+      {
+        "k": "1|task:t_merged",
+        "kind": "task",
+        "group": "done",
+        "reason": null,
+        "run": null,
+        "task": {
+          "id": "t_merged"
+        },
+        "sortAt": 400
+      }
+    ]
+  },
+  "expect": {
+    "ws_app": {
+      "openCount": 5,
+      "needsInput": true,
+      "tasks": [
+        {
+          "taskId": "t_fan",
+          "group": "needs_input",
+          "dot": "warn",
+          "sub": {
+            "key": "groupNeedsInput",
+            "diff": null
+          },
+          "fanout": 3,
+          "runs": [
+            {
+              "runId": "r_f1",
+              "group": "working",
+              "dot": "spin"
+            },
+            {
+              "runId": "r_f2",
+              "group": "needs_input",
+              "dot": "warn"
+            },
+            {
+              "runId": "r_f3",
+              "group": "review_ready",
+              "dot": "none"
+            }
+          ]
+        },
+        {
+          "taskId": "t_rev",
+          "group": "review_ready",
+          "dot": "none",
+          "sub": {
+            "key": "groupReviewReady",
+            "diff": {
+              "a": 41,
+              "d": 7
+            }
+          },
+          "fanout": 1,
+          "runs": []
+        },
+        {
+          "taskId": "t_i2",
+          "group": "idle",
+          "dot": "none",
+          "sub": {
+            "key": "groupIdle",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        },
+        {
+          "taskId": "t_iB",
+          "group": "idle",
+          "dot": "none",
+          "sub": {
+            "key": "groupIdle",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        },
+        {
+          "taskId": "t_ia",
+          "group": "idle",
+          "dot": "none",
+          "sub": {
+            "key": "groupIdle",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        }
+      ]
+    },
+    "ws_mono": {
+      "openCount": 3,
+      "needsInput": true,
+      "tasks": [
+        {
+          "taskId": "t_op",
+          "group": "needs_input",
+          "dot": "error",
+          "sub": {
+            "key": "groupNeedsInput",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        },
+        {
+          "taskId": "t_root",
+          "group": "needs_input",
+          "dot": "error",
+          "sub": {
+            "key": "groupNeedsInput",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        },
+        {
+          "taskId": "t_norow",
+          "group": "idle",
+          "dot": "none",
+          "sub": {
+            "key": "groupIdle",
+            "diff": null
+          },
+          "fanout": 1,
+          "runs": []
+        }
+      ]
+    },
+    "ws_mono_back": {
+      "openCount": 1,
+      "needsInput": false,
+      "tasks": [
+        {
+          "taskId": "t_sub",
+          "group": "working",
+          "dot": "spin",
+          "sub": {
+            "key": "stateCreating",
+            "diff": null
+          },
+          "fanout": 2,
+          "runs": [
+            {
+              "runId": "r_s1",
+              "group": "working",
+              "dot": "spin"
+            },
+            {
+              "runId": "r_s2",
+              "group": "working",
+              "dot": "spin"
+            }
+          ]
+        }
+      ]
+    },
+    "ws_blog": {
+      "openCount": 0,
+      "needsInput": false,
+      "tasks": []
+    }
+  }
+}
