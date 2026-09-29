@@ -1133,7 +1133,7 @@ function maybeNotify(userId, sessionId, event) {
   notificationService.createNotification(Number(userId), {
     source: 'agent',
     kind: event.type,
-    title: 'Claude Code',
+    title: 'Claude',
     sessionId: sessionId || null,
     body,
     // ★ hint 가 실어 오는 평문 라우팅 메타(봉투 밖 필드) — 읽음 scope(cwd,win)·딥링크가 살아난다.

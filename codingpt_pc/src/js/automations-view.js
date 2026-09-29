@@ -204,6 +204,8 @@ export function triggerLabel(row) {
   const v = { ...(row.triggerVars || {}) };
   if (row.triggerKey === "trigOnce") v.t = whenText(v.at);
   if (row.triggerKey === "trigSchedule" && !v.tz) return String(v.cron || "");
+  // 라벨이 없으면 대상 저장소 이름 — 빈 채로 두면 "새 이슈 ·" 로 끝이 잘려 보인다(앱과 같은 규칙).
+  if (row.triggerKey === "trigIssues" && !v.labels && v.repo) v.labels = String(v.repo).split("/").filter(Boolean).pop() || "";
   return at(row.triggerKey, v);
 }
 function creatorLine(row) {

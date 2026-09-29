@@ -327,7 +327,7 @@ async function create(userId, hostDeviceId, hostName, payload) {
   };
 
   // 알림 행 — 기존 인박스/크로스기기 dismiss 배관을 그대로 타기 위해 반드시 만든다(kind='approval_request').
-  const title = a.agent === 'claude' ? '승인 필요 — Claude Code' : `승인 필요 — ${a.agent}`;
+  const title = a.agent === 'claude' ? '승인 필요 — Claude' : `승인 필요 — ${a.agent}`; // 벤더 제품명 미표시(2026-09-30)
   const push = buildPush(rec);
   rec.push = push;
   let notification = null;
