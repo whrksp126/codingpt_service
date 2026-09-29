@@ -99,6 +99,7 @@ let inj = {
   chatInput: null,       // ({cwd, tid, text, submit})
   chatDialog: null,      // ({cwd, tid, pick, expect})
   screen: null,          // ({cwd, tid}) → 화면 문자열(capture) — extractDialog 입력
+  keys: null,            // ({cwd, tid, keys:['Down','Enter']}) → tmux 표기 키 전송(폴더 신뢰 응답)
   backFetch: null,       // (method, apiPath, body) → json
   now: () => Date.now(),
   log: (m) => console.log(m),
@@ -128,7 +129,7 @@ let timings = {
 };
 
 function configure(opts = {}) {
-  for (const k of ['notify', 'poolChanged', 'launch', 'chatInput', 'chatDialog', 'screen', 'backFetch', 'now', 'log', 'deviceId']) {
+  for (const k of ['notify', 'poolChanged', 'launch', 'chatInput', 'chatDialog', 'keys', 'screen', 'backFetch', 'now', 'log', 'deviceId']) {
     if (opts[k] !== undefined) inj[k] = typeof opts[k] === 'function' ? opts[k] : (k === 'now' ? () => Date.now() : noop);
   }
   if (opts.deps && typeof opts.deps === 'object') depOverride = { ...depOverride, ...opts.deps };
@@ -705,7 +706,8 @@ async function launchRun(t, r, { withPrompt }) {
   }
   let res;
   try {
-    res = await inj.launch({ cwd: r.cwd, index: r.tid, id: r.agent, ...(args && args.length ? { args } : {}), timeoutMs: timings.launchTimeoutMs });
+    //  fresh — 첫 실행(withPrompt)은 방금 만든 터미널이다: rc 초기화 중 일시 명령을 busy 로 보지 않게(cpt-server).
+    res = await inj.launch({ cwd: r.cwd, index: r.tid, id: r.agent, ...(args && args.length ? { args } : {}), ...(withPrompt ? { fresh: true } : {}), timeoutMs: timings.launchTimeoutMs });
   } catch (e) {
     failRun(t, r, 'AGENT_LAUNCH_FAILED', e && e.message);
     return;
@@ -768,7 +770,8 @@ async function waitAgentReady(r, { timeoutMs, since }) {
         try { sig = dep('agentWatch').agentSignalOf(key, cmd, info.title || ''); } catch (_) { sig = null; }
         if (sig && sig.on === true) {
           const scr = await readScreen(r);
-          if (scr != null && !dep('statusLine').extractDialog(scr)) good = true;
+          //  번호 없는 폴더 신뢰 화면은 extractDialog 가 못 본다 — 전용 판정도 함께(그 화면에 붙여넣지 않게).
+          if (scr != null && !dep('statusLine').extractDialog(scr) && !trustDialogOf(scr)) good = true;
         }
       }
       if (good) {
@@ -790,15 +793,34 @@ async function readScreen(r) {
   } catch (_) { return null; }
 }
 
+//  폴더 신뢰 화면 판정 — extractDialog 에 기대지 않는다(2026-09-29 실측: claude 2.1.284 의 신뢰 화면은
+//  **번호 없는** 선택지 `❯ No, exit` / `Yes, I trust this folder` 라 extractDialog 가 null 을 돌려주고,
+//  순서도 No 가 1번이라 "pick 1" 은 claude 를 종료시킨다). 커서 표시(❯/›)가 있는 선택지 블록을 직접 읽어
+//  { title(질문 줄), options[], cursor(현재 커서 위치), yes(수락 선택지 위치) } 를 돌려준다.
+//  수락 선택지: claude "Yes, I trust this folder" · codex "1. Yes, continue" · gemini "1. Trust folder".
+const TRUST_YES_RE = /^(yes\b|trust folder\b)|\bI trust\b/i;
+const OPTION_MARK_RE = /^\s*([❯›>●])\s+/;
 function trustDialogOf(screen) {
   if (screen == null) return null;
-  const d = dep('statusLine').extractDialog(screen);
-  if (!d) return null;
-  // extractDialog 의 title 은 "옵션 바로 위 블록" 이라 claude 의 신뢰 화면에서는 폴더 경로가 된다
-  //  (`Do you trust the files in this folder?` 는 그 위 블록). 그래서 선택 화면 아래쪽 30줄도 함께 본다.
-  const tail = String(screen).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').slice(-30).join('\n');
-  const hay = [d.title, d.desc, ...(d.options || []).map((o) => o.label), tail].join('\n');
-  return TRUST_DIALOG_RE.test(hay) ? d : null;
+  const lines = String(screen).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').split('\n').slice(-40);
+  //  커서 줄 = 표시(❯/›/>/●)가 있는 **가장 아래** 줄 — codex 신뢰 화면은 맨 위에 `> You are in …` 안내 줄이 있다(실측).
+  let cur = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (OPTION_MARK_RE.test(lines[i]) && lines[i].replace(OPTION_MARK_RE, '').trim()) { cur = i; break; }
+  if (cur < 0) return null;
+  //  선택지 = 커서 줄의 **글자 시작 열**과 같은 열에서 시작하는 연속된 줄(설명 문단은 열이 다르거나 빈 줄로 끊긴다).
+  const colOf = (l) => { const m = l.match(OPTION_MARK_RE); return m ? m[0].length : l.search(/\S/); };
+  const col = colOf(lines[cur]);
+  const isOpt = (l) => l.trim() && !/enter to|esc to|to confirm|to cancel/i.test(l) && colOf(l) === col;
+  let a = cur; while (a > 0 && isOpt(lines[a - 1])) a--;
+  let b = cur; while (b + 1 < lines.length && isOpt(lines[b + 1])) b++;
+  const opts = [];
+  for (let i = a; i <= b; i++) opts.push({ i, label: lines[i].replace(OPTION_MARK_RE, '').trim().replace(/^\d+[.)]\s*/, '') });
+  const cursor = opts.findIndex((o) => o.i === cur);
+  const yes = opts.findIndex((o) => TRUST_YES_RE.test(o.label));
+  const hay = lines.join('\n');
+  if (cursor < 0 || yes < 0 || !TRUST_DIALOG_RE.test(hay)) return null;
+  const q = lines.slice(0, a).reverse().find((l) => TRUST_DIALOG_RE.test(l) && /\?/.test(l)) || lines.slice(0, a).reverse().find((l) => TRUST_DIALOG_RE.test(l)) || '';
+  return { title: q.trim(), options: opts.map((o) => ({ label: o.label })), cursor, yes };
 }
 
 // ── 폴더 신뢰 감시(§2.5 10b) ─────────────────────────────────────────────────
@@ -1363,10 +1385,18 @@ async function rpcRunTrust(p) {
     if (r.trustPending) { r.trustPending = false; r.trustTitle = null; touch(t, r); save(); emit([t.id], 'run'); }
     return { ok: true, dialog: null };
   }
-  if (!inj.chatDialog) throw codedError('BAD_PARAMS', '다이얼로그 경로가 없습니다');
-  // expect 대조 — 그 사이 다른 질문으로 바뀌었으면 driveDialog 가 DIALOG_MISMATCH 로 거부한다.
-  const res = await inj.chatDialog({ cwd: r.cwd, tid: r.tid, pick: 1, expect: r.trustTitle || d.title });
-  r.trustPending = false;
+  if (!inj.keys) throw codedError('BAD_PARAMS', '키 입력 경로가 없습니다');
+  // 수락 선택지로 커서를 옮겨 Enter — 번호가 없는 화면(claude)이 있고 수락이 1번이 아닐 수 있다(trustDialogOf).
+  const delta = d.yes - d.cursor;
+  const keys = [];
+  for (let i = 0; i < Math.abs(delta); i++) keys.push(delta > 0 ? 'Down' : 'Up');
+  keys.push('Enter');
+  await inj.keys({ cwd: r.cwd, tid: r.tid, keys });
+  await new Promise((res) => setTimeout(res, timings.trustPollMs));
+  const after = trustDialogOf(await readScreen(r));
+  const res = { dialog: after };
+  r.trustPending = !!after;
+  if (after) { touch(t, r); save(); emit([t.id], 'run'); return { ok: false, dialog: after }; }
   r.trustTitle = null;
   stopTrustWatch(r);
   touch(t, r); save(); emit([t.id], 'run');
@@ -1874,9 +1904,14 @@ async function reconcile() {
               continue;
             }
           }
-          if (r.trustPending) {
+          //  신뢰 화면은 trustPending 기록과 무관하게 **화면으로** 다시 본다 — 재시작 전에 감지를 놓친(또는 감지기가
+          //  바뀐) 실행이 신뢰 화면에 멈춰 있으면 카드에 버튼이 영영 안 뜬다(2026-09-29 실측).
+          if (r.state === 'running' || r.state === 'review_ready' || r.trustPending) {
             const d = trustDialogOf(await readScreen(r));
-            if (!d) { r.trustPending = false; r.trustTitle = null; changed.add(t.id); } else startTrustWatch(t, r);
+            if (d) {
+              if (!r.trustPending) { r.trustPending = true; r.trustTitle = d.title; changed.add(t.id); }
+              startTrustWatch(t, r);
+            } else if (r.trustPending) { r.trustPending = false; r.trustTitle = null; changed.add(t.id); }
           }
         }
         // 30일 지난 복구 ref 정리

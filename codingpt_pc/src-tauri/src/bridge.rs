@@ -827,6 +827,16 @@ pub fn open_files_privacy_settings() -> Result<(), String> {
     Ok(())
 }
 
+/// UNUserNotificationCenter 는 `.app` 번들 안에서만 쓸 수 있다 — `tauri dev` 의 `target/debug/CodingPT`
+/// (번들 아님)에서 부르면 NSInternalInconsistencyException("bundleProxyForCurrentProcess is nil")으로
+/// 앱이 즉사한다(2026-09-29 실측). 정식 앱엔 해당 없음 — 개발 실행에서만 조회를 건너뛴다.
+#[cfg(target_os = "macos")]
+fn running_in_app_bundle() -> bool {
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS/"))
+        .unwrap_or(false)
+}
+
 #[cfg(target_os = "macos")]
 fn macos_notification_permission_state() -> String {
     use block2::RcBlock;
@@ -835,6 +845,9 @@ fn macos_notification_permission_state() -> String {
     };
     use std::{ptr::NonNull, sync::mpsc, time::Duration};
 
+    if !running_in_app_bundle() {
+        return "unknown".into();
+    }
     let (tx, rx) = mpsc::sync_channel(1);
     let center = UNUserNotificationCenter::currentNotificationCenter();
     let block = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
@@ -863,6 +876,9 @@ fn request_macos_notification_permission() -> bool {
     use objc2_user_notifications::{UNAuthorizationOptions, UNUserNotificationCenter};
     use std::{sync::mpsc, time::Duration};
 
+    if !running_in_app_bundle() {
+        return false;
+    }
     let (tx, rx) = mpsc::sync_channel(1);
     let center = UNUserNotificationCenter::currentNotificationCenter();
     let block = RcBlock::new(move |granted: Bool, _error: *mut NSError| {

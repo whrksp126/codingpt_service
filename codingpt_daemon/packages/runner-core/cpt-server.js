@@ -335,7 +335,16 @@ async function launchAgentInTerminal(agentsLib, a) {
     }
     // win32 는 process 가 전체 경로/대문자 확장자일 수 있다 — basename 소문자까지 셸 판정에 포함.
     const curBase = cur.split(/[\\/]/).pop().toLowerCase();
-    if (cur && !SHELLS.has(cur) && !SHELLS.has(curBase)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
+    if (cur && !SHELLS.has(cur) && !SHELLS.has(curBase)) {
+      //  fresh = 방금 만든 터미널(Agent Tasks). 셸 rc 초기화가 잠깐 띄우는 명령(git·프롬프트 테마 등)을
+      //  "다른 명령 실행 중" 으로 오판하면 안 된다(2026-09-29 실측: 두 run 이 모두 LAUNCH_BUSY) → 셸로 돌아올
+      //  때까지 기다리고, 기한까지 셸이 아니면 그때 busy. 기존 호출(fresh 없음)은 종전대로 즉시 busy.
+      busy = true;
+      if (!a.fresh) break;
+      await new Promise((r) => setTimeout(r, 150));
+      continue;
+    }
+    busy = false;
     let screen = '';
     try {
       screen = await termBackend.capture(target, { lines: 5 });
@@ -386,6 +395,11 @@ function wireTasks() {
       launch: (a) => launchAgentInTerminal(agentsLib, a),
       chatInput: (a) => chatInput(a),
       chatDialog: (a) => chatDialog(a),
+      //  tmux 표기 키 전송(Down·Enter 등) — 폴더 신뢰 화면은 번호 없는 선택지라 chatDialog(pick) 로 못 고른다.
+      keys: async ({ cwd, tid, keys }) => {
+        const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+        return termBackend.sendKeys(ptyLib.termSession(session, tid), { keys });
+      },
       // extractDialog 용 화면 원문(대화 바인딩 무관) — 신뢰 다이얼로그·준비 판정.
       screen: async ({ cwd, tid }) => {
         const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');

@@ -72,7 +72,7 @@ const I = tasks._internals;
 const sessions = new Map(); // tsession → { command, title }
 let tidSeq = 1000001;
 let wsSeq = 1;
-const calls = { launch: [], input: [], dialog: [], back: [], notify: [], pool: 0, close: [] };
+const calls = { launch: [], input: [], dialog: [], keys: [], back: [], notify: [], pool: 0, close: [] };
 let screenFor = () => '';
 let signalFor = () => ({ on: false });
 let launchReply = () => ({ ok: true, ready: true });
@@ -118,6 +118,7 @@ function wire() {
     },
     chatInput: async (a) => { calls.input.push(a); return { ok: true }; },
     chatDialog: async (a) => { calls.dialog.push(a); return { ok: true, dialog: null }; },
+    keys: async (a) => { calls.keys.push(a); },
     screen: async (a) => screenFor(a),
     backFetch: async (m, p, b) => {
       calls.back.push({ m, p, b });
@@ -322,42 +323,57 @@ test('서브디렉토리 워크스페이스 — repo.subdir, run.cwd = dir/subdi
   closeAll();
 });
 
+// 2026-09-29 실측 claude 2.1.284 신뢰 화면 — 번호 없음, No 가 먼저(커서), 수락은 두 번째.
 const TRUST_SCREEN = [
-  '',
-  ' Do you trust the files in this folder?',
-  '',
-  ' /Users/me/proj',
-  '',
-  ' ❯ 1. Yes, proceed',
-  '   2. No, exit',
-  '',
-  ' Enter to confirm · Esc to exit',
+  '────────────────────────────────────────',
+  ' Accessing workspace:',
+  ' /Users/me/.codingpt/worktrees/proj-abc-1',
+  ' Quick safety check: Is this a project you created or one you trust? (Like your',
+  ' own code, a well-known open source project, or work from your team).',
+  " Claude Code'll be able to read, edit, and execute files here.",
+  ' Security guide',
+  ' ❯ No, exit',
+  '   Yes, I trust this folder',
+  ' Enter to confirm · Esc to cancel',
 ].join('\n');
 
-test('폴더 신뢰 — 다이얼로그 감지 → trustPending → task.run.trust 가 chatDialog({pick:1, expect}) 로 답한다(자동 수락 없음)', async () => {
+test('폴더 신뢰 — 다이얼로그 감지 → trustPending → task.run.trust 가 수락 선택지로 커서를 옮겨 Enter(자동 수락 없음)', async () => {
   const { rel } = makeRepo();
   let trusted = false;
   screenFor = () => (trusted ? '' : TRUST_SCREEN);
-  calls.dialog.length = 0;
+  calls.keys.length = 0;
   try {
     const t0 = await createTask(rel, [{ id: 'claude', count: 1 }]);
     const t = await waitFor(async () => { const x = await getTask(t0.id); return x.runs[0].trustPending ? x : null; });
-    assert.strictEqual(calls.dialog.length, 0, '자동 수락하지 않는다');
+    assert.strictEqual(calls.keys.length, 0, '자동 수락하지 않는다');
+    const origPush = calls.keys.push.bind(calls.keys);
+    calls.keys.push = (a) => { trusted = true; return origPush(a); };   // 키를 받으면 실화면처럼 다이얼로그가 사라진다
     const res = await call('task.run.trust', { taskId: t.id, runId: t.runs[0].id });
+    calls.keys.push = origPush;
     assert.deepStrictEqual(res, { ok: true, dialog: null });
-    assert.strictEqual(calls.dialog.length, 1);
-    assert.strictEqual(calls.dialog[0].pick, 1);
-    assert.strictEqual(calls.dialog[0].tid, t.runs[0].tid);
-    assert.strictEqual(typeof calls.dialog[0].expect, 'string');
-    assert.ok(calls.dialog[0].expect.length > 0);
-    trusted = true;
+    assert.strictEqual(calls.keys.length, 1);
+    // ★ 첫 선택지는 "No, exit" — pick 1 이면 claude 가 종료된다. Down 1회 후 Enter.
+    assert.deepStrictEqual(calls.keys[0].keys, ['Down', 'Enter']);
+    assert.strictEqual(calls.keys[0].tid, t.runs[0].tid);
     assert.strictEqual((await getTask(t.id)).runs[0].trustPending, false);
-    // 다이얼로그가 이미 없으면 {ok:true, dialog:null} + 아무 키도 안 보낸다
     const again = await call('task.run.trust', { taskId: t.id, runId: t.runs[0].id });
     assert.deepStrictEqual(again, { ok: true, dialog: null });
-    assert.strictEqual(calls.dialog.length, 1);
+    assert.strictEqual(calls.keys.length, 1, '다이얼로그가 없으면 아무 키도 안 보낸다');
   } finally { screenFor = () => ''; }
   closeAll();
+});
+
+test('폴더 신뢰 판정 — claude(번호 없음)·codex(번호)·일반 입력창 오탐 없음', () => {
+  const f = tasks._internals.trustDialogOf;
+  const c = f(TRUST_SCREEN);
+  assert.strictEqual(c.cursor, 0); assert.strictEqual(c.yes, 1);
+  const x = f('\n  Do you trust the contents of this directory? Working with untrusted contents\n\n› 1. Yes, continue\n  2. No, quit\n\n  Press enter to continue\n');
+  assert.strictEqual(x.cursor, 0); assert.strictEqual(x.yes, 0);
+  // codex 실측: 맨 위 `> You are in …` 안내 줄의 '>' 를 커서로 잡으면 안 된다(가장 아래 표시 줄이 커서).
+  const cx = f(['> You are in /Users/me/.codingpt/worktrees/p-abc-2', '', '  Do you trust the contents of this directory? Working with untrusted contents', '  comes with higher risk of prompt injection.', '', '› 1. Yes, continue', '  2. No, quit', '', '  Press enter to continue'].join('\n'));
+  assert.ok(cx, 'codex 신뢰 화면 감지'); assert.strictEqual(cx.cursor, 0); assert.strictEqual(cx.yes, 0);
+  assert.strictEqual(f('╭──╮\n│ > I trust you, fix it │\n╰──╯'), null);
+  assert.strictEqual(f('> hello world\n  some prompt'), null);
 });
 
 test('paste 준비 판정 — pane 이 셸인 동안·rawState launching 인 동안 chatInput 을 호출하지 않는다', async () => {
