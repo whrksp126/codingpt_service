@@ -1077,27 +1077,27 @@ test('승자 1명 원자성 — 같은 작업 두 run 을 동시에 merge.local 
   closeAll();
 });
 
-test('task.delete — 실패 run 의 worktree 가 남아 있으면 거부(고아 방지), 정리 뒤엔 삭제 + 복구 ref 도 지운다', async () => {
+test('머지 후 나머지 폐기 — 미커밋 진 실행도 폐기하되 복구 ref 스냅샷에 미커밋 변경을 담는다(복사 env 제외) · 작업 삭제 시 ref 정리', async () => {
   const { rel, dir } = makeRepo();
   const t = await createTask(rel, [{ id: 'claude', count: 1 }, { id: 'codex', count: 1 }]);
   const [w, f] = t.runs;
   const wt = path.join(ROOT, w.dir);
   fs.writeFileSync(path.join(wt, 'w.txt'), 'w\n');
   G(wt, 'add', '-A'); G(wt, 'commit', '-qm', 'w');
-  fs.writeFileSync(path.join(ROOT, f.dir, 'dirty.txt'), 'd\n'); // 미커밋 → 머지 후 폐기 건너뜀
-  I.mutate((s) => { const x = s.items.find((y) => y.id === t.id); x.runs[1].state = 'failed'; x.runs[1].error = { code: 'OP_INTERRUPTED', message: 'x' }; });
+  const fdir = path.join(ROOT, f.dir);
+  fs.writeFileSync(path.join(fdir, 'dirty.txt'), 'd\n');            // 미커밋(fan-out 의 진 실행은 보통 이렇다)
+  fs.writeFileSync(path.join(fdir, '.env.cptsnap'), 'SECRET=1\n');  // 우리가 복사해 둔 env 라고 치자
+  I.mutate((s) => { const x = s.items.find((y) => y.id === t.id); x.runs[1].copiedFiles = ['.env.cptsnap']; });
   const op = uuid();
   await call('git.merge.local', { opId: op, taskId: t.id, runId: w.id, method: 'merge' });
   const x = await waitFor(async () => { await I._drain(); const y = await getTask(t.id); return y.runs[0].lastOp && y.runs[0].lastOp.result && y.runs[0].lastOp.result.cleanup === 'done' ? y : null; });
-  assert.deepStrictEqual(x.runs[0].lastOp.result.discardSkipped, [{ runId: f.id, code: 'UNCOMMITTED_CHANGES' }]);
-  assert.strictEqual(x.runs[1].state, 'failed');
-  await assert.rejects(() => call('task.delete', { taskId: t.id }), (e) => e.code === 'BAD_PARAMS');
-  assert.ok(await getTask(t.id));
-  // 사용자가 강제 폐기 → 이제 삭제 가능, 복구 ref 도 사라진다
-  const od = uuid();
-  await call('task.discard', { opId: od, taskId: t.id, runIds: [f.id], force: true });
-  await opDone(t.id, f.id, od);
-  assert.ok(G(dir, 'for-each-ref', 'refs/codingpt/discarded/').length > 0);
+  assert.deepStrictEqual(x.runs[0].lastOp.result.discardSkipped, []);
+  assert.deepStrictEqual(x.runs[0].lastOp.result.discarded, [f.id]);
+  assert.strictEqual(x.runs[1].state, 'discarded');
+  assert.ok(!fs.existsSync(fdir), '진 실행 worktree 정리');
+  const ref = `refs/codingpt/discarded/${f.id}`;
+  assert.strictEqual(G(dir, 'show', `${ref}:dirty.txt`), 'd', '미커밋 변경이 복구 ref 에 남는다');
+  assert.throws(() => G(dir, 'show', `${ref}:.env.cptsnap`), '복사해 둔 env 는 스냅샷에서 뺀다');
   assert.deepStrictEqual(await call('task.delete', { taskId: t.id }), { ok: true });
   assert.strictEqual(G(dir, 'for-each-ref', 'refs/codingpt/discarded/'), '', '복구 ref 정리');
 });

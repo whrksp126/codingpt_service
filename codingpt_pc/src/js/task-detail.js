@@ -284,8 +284,8 @@ function renderSelectedRun(host, hostId, task, run) {
   // ── gh 안내 / PR 블록 ──
   const prBox = document.createElement("div");
   prBox.className = "td-pr";
-  if (!ghKnown) {
-    // 모름 — 안내 없음
+  if (!ghKnown || closed) {
+    // 모름 — 안내 없음 / 끝난 실행(머지·폐기)에는 "무엇을 할 수 있는지" 안내가 소음이다
   } else if (task.repo && task.repo.github && !gh.ghInstalled) {
     prBox.append(hint(tt("ghMissing"), tt("ghMissingHint")));
   } else if (task.repo && task.repo.github && !gh.ghAuthed) {

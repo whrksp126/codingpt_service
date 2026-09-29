@@ -20,6 +20,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const crypto = require('crypto');
 const runtime = require('./runtime');
 const taskGit = require('./task-git');
@@ -1127,6 +1128,31 @@ function killTerminal(r) {
  * cleanupRun — {force, skipUnmerged}. 성공 시 r.cleanup 기록. 거부는 throw(UNCOMMITTED_CHANGES|UNMERGED_COMMITS).
  *  ★ dirty 는 정리 시점에 다시 계산한다(캐시 금지).
  */
+/**
+ * worktree 의 미커밋 변경(추적 안 된 파일 포함, .gitignore 존중)을 **임시 인덱스**로 커밋 객체로 만든다 —
+ *  작업 트리·실 인덱스·브랜치는 건드리지 않는다. 변경이 없으면 null. 우리가 복사해 둔 env 파일(copiedFiles)은
+ *  비밀일 수 있어 스냅샷에서 뺀다. 결과 sha 는 refs/codingpt/discarded/<runId> 가 붙잡아 30일 보관된다.
+ */
+async function snapshotDirty(t, r, dirAbs) {
+  const st = await taskGit.statusItems(dirAbs);
+  if (!st.length) return null;
+  const idx = path.join(os.tmpdir(), `cpt-snap-${r.id}-${process.pid}.idx`);
+  const env = { GIT_INDEX_FILE: idx };
+  try {
+    const rd = await taskGit.git(['read-tree', 'HEAD'], { cwd: dirAbs, env });
+    if (!rd.ok) return null;
+    const excl = (r.copiedFiles || []).map((f) => `:(exclude)${f}`);
+    const add = await taskGit.git(['add', '-A', '--', '.', ...excl], { cwd: dirAbs, env, timeout: 60000 });
+    if (!add.ok) return null;
+    const tree = await taskGit.git(['write-tree'], { cwd: dirAbs, env });
+    if (!tree.ok) return null;
+    const c = await taskGit.git(['commit-tree', tree.out.trim(), '-p', 'HEAD', '-m', `codingpt: ${r.id} 폐기 시점 미커밋 스냅샷`], { cwd: dirAbs });
+    return c.ok ? c.out.trim() : null;
+  } finally {
+    try { fs.rmSync(idx, { force: true }); } catch (_) { /* noop */ }
+  }
+}
+
 async function cleanupRun(t, r, { force = false, skipUnmerged = false } = {}) {
   const top = repoTopAbs(t);
   const dirAbs = wtAbs(r);
@@ -1147,13 +1173,18 @@ async function cleanupRun(t, r, { force = false, skipUnmerged = false } = {}) {
   await killTerminal(r);
   poolChangedSoon();
   const cleanup = { worktreeRemoved: false, branchDeleted: false, workspaceDeleted: false, recoveryRef: null, at: null };
-  // 3. 복구 ref
+  // 3. 복구 ref — 브랜치 HEAD, 그리고 worktree 에 **미커밋 변경이 있으면 그것까지** 담은 스냅샷 커밋.
+  //  (종전엔 HEAD 만 가리켜 force 폐기·자동 폐기에서 미커밋 작업이 "30일 복구" 약속 밖으로 새어 나갔다 — 2026-09-29.)
   const head = await taskGit.refExists(top, `refs/heads/${r.branch}`);
-  if (head) {
+  let snap = null;
+  if (exists) snap = await snapshotDirty(t, r, dirAbs).catch(() => null);
+  const target = snap || head;
+  if (target) {
     const ref = `refs/codingpt/discarded/${r.id}`;
-    const u = await taskGit.git(['update-ref', ref, head], { cwd: top });
+    const u = await taskGit.git(['update-ref', ref, target], { cwd: top });
     if (u.ok) cleanup.recoveryRef = ref;
   }
+  if (snap) cleanup.snapshot = true;
   // 4. worktree 제거(저장소 락)
   await withRepoLock(t.repo.common, async () => {
     if (fs.existsSync(dirAbs)) {
@@ -1299,10 +1330,13 @@ async function postMerge(t, r, { opId, viaPr, discardOthers, web = false, headOi
     for (const o of t.runs) {
       if (o.id === r.id || !['running', 'review_ready', 'failed'].includes(o.state)) continue;
       if (o.op) { result.discardSkipped.push({ runId: o.id, code: 'RUN_BUSY' }); continue; }
+      //  에이전트가 아직 일하는 실행은 건드리지 않는다. 미커밋·미머지 커밋은 복구 ref(스냅샷)에 담기므로
+      //  force 로 폐기한다 — fan-out 의 진 실행은 보통 커밋 없이 끝나 force 없이는 영영 안 치워졌다(2026-09-29 실측).
+      if (liveWorking(o)) { result.discardSkipped.push({ runId: o.id, code: 'AGENT_BUSY' }); continue; }
       const oid = `${opId}:${o.id}`.slice(0, 80);
       beginOp(t, o, oid, 'discard');
       try {
-        await discardOne(t, o, { force: false });
+        await discardOne(t, o, { force: true });
         result.discarded.push(o.id);
         endOp(t, o, oid, 'discard', { ok: true, result: { discarded: [o.id], skipped: [] } });
       } catch (e) {
