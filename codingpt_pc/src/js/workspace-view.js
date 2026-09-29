@@ -19,6 +19,7 @@ import * as i18n from './i18n/index.js';
 import { openNewTask, openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
 import { tt } from "./text/tasks.js";
 import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
+import { pickConvTab } from "./conv-model.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -1027,10 +1028,50 @@ export function focusConvTab(threadId, except) {
   return true;
 }
 
-/** 그 대화를 채팅 탭으로 연다(알림 클릭·터미널에서 이어가기). 이미 열려 있으면 그 탭으로 간다. */
+/** 지금 워크스페이스의 채팅 탭들(화면 순서) — conv-model.pickConvTab 의 후보. */
+function convTabCands() {
+  const rt = wsRuntime(state.activeWsId);
+  const out = [];
+  if (!rt || !rt.layout) return out;
+  T.eachLeaf(rt.layout, (l) => {
+    if (l.kind === "chat") out.push({ leaf: l, index: -1, holder: l, threadId: l.threadId || null, focused: rt.focusId === l.id });
+    else if (l.kind === "terminal") {
+      (l.tabs || []).forEach((t, i) => {
+        if (t.kind === "chat") out.push({ leaf: l, index: i, holder: t, threadId: t.threadId || null, focused: rt.focusId === l.id && l.active === i });
+      });
+    }
+  });
+  return out;
+}
+
+/**
+ * 그 대화를 채팅 탭으로 연다(알림 클릭·터미널에서 이어가기).
+ *  ① 그 대화가 열린 탭이 있으면 그리로 ② 없으면 **아직 대화가 없는 빈 새 채팅 탭**을 쓴다
+ *  ③ 그것도 없으면 새 탭. 다른 대화가 열린 탭은 갈아치우지 않는다(앱 실기 규칙과 같다 — conv-model.pickConvTab).
+ */
 export function openConvTab(threadId, title) {
   if (!threadId) return null;
-  if (focusConvTab(threadId, null)) return wsRuntime(state.activeWsId)?.focusId || null;
+  const pick = pickConvTab(convTabCands(), threadId);
+  if (pick.kind === "focus" && focusConvTab(threadId, null)) return wsRuntime(state.activeWsId)?.focusId || null;
+  if (pick.kind === "reuse") {
+    const { leaf, index, holder } = pick.target;
+    const pane = panes.get(leaf.id);
+    if (index >= 0 && leaf.active !== index) {
+      if (pane) pane.switchTab(index);
+      else leaf.active = index;
+    }
+    const conv = pane ? (index >= 0 ? pane._mixed?.get(holder.tid)?.conv : pane.conv) : null;
+    if (conv) conv.openThread(threadId, title || "");
+    else {
+      // 뷰가 아직 없다(다른 워크스페이스에서 막 넘어옴) — 탭에 적어 두면 뷰가 생길 때 그 대화를 연다.
+      holder.threadId = threadId;
+      if (title) holder.title = title; else delete holder.title;
+      S.emit();
+    }
+    S.focusPane(leaf.id);
+    pane?.focus?.();
+    return leaf.id;
+  }
   return smartAdd("chat", { threadId, title: title || "" });
 }
 

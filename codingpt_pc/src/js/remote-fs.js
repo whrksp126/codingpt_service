@@ -85,6 +85,21 @@ export function makeRemoteFs(hostDeviceId) {
       return { base64: r.base64, size: r.size || 0 };
     },
     async fsWrite(rel, content) { if (!(await direct("fs.write", { path: rel, content })) && !(await sealed("fs.write", { path: rel, content }))) await post("write", { path: rel, content }); },
+    // 바이너리 쓰기(채팅 첨부 업로드) — fs.write 의 base64 모드(디코드 후 6MB 상한). 응답 absPath(그 PC 의
+    //  절대경로)를 돌려준다 — 데몬 conv.send 의 attachments 는 그 경로를 쓴다. 폴더가 없으면 한 번 만들고 다시.
+    async fsWriteBytes(rel, b64) {
+      const once = async () => {
+        const p = { path: rel, content: b64, base64: true };
+        return (await direct("fs.write", p)) || (await sealed("fs.write", p)) || await post("write", p);
+      };
+      let r;
+      try { r = await once(); } catch (_) {
+        const dir = String(rel).split("/").slice(0, -1).join("/");
+        try { if (dir) await this.fsMkdir(dir); } catch (_) { /* 이미 있음 등 */ }
+        r = await once();
+      }
+      return r && r.data && typeof r.data === "object" ? r.data : r;
+    },
     async fsMkdir(rel) { if (!(await sealed("fs.mkdir", { path: rel }))) await post("mkdir", { path: rel }); },
     async fsCreateFile(rel) { if (!(await sealed("fs.createFile", { path: rel }))) await post("create", { path: rel }); },
     async fsRename(rel, dest) { if (!(await sealed("fs.rename", { path: rel, dest }))) await post("rename", { path: rel, dest }); },

@@ -2469,12 +2469,14 @@ export class PaneView {
   // ── 활성 영역 검색(⌘F/Ctrl+F) — 터미널은 스크롤백, IDE 는 열린 파일 내부 ──
   openSearch() {
     if (this.node.kind === "ide") { this.ide?.openSearch(); return; }
+    // 채팅 v2 탭(독립 pane·혼합 탭 모두) — 대화 안 검색. 가려진 터미널을 검색하지 않는다.
+    const conv = this.activeConv();
+    if (conv) { conv.openSearch?.(); return; }
     if (this.node.kind === "terminal") {
       // 혼합 탭: 활성 탭이 IDE/프리뷰면 그쪽으로 — IDE 는 파일 내 찾기(VS Code 동작).
       const at = this.node.tabs?.[this.node.active];
       if (at && at.kind === "ide") { this._mixed.get(at.tid)?.ide?.openSearch(); return; }
       if (at && at.kind === "preview") return; // 프리뷰는 페이지 검색 미지원
-      if (at && at.kind === "chat") return;    // 채팅 내 검색은 1차 범위 밖 — 가려진 터미널을 검색하지 않는다
       // Chat 모드에서 터미널 검색을 열면 "보이지도 않는 스크롤백"을 검색하게 된다(혼란).
       //  채팅 내 검색은 v1 범위 제외(§6-8) → 아무 것도 하지 않는다.
       if (this._chatActive()) return;

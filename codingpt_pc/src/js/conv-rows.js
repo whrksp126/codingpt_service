@@ -9,8 +9,8 @@ import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import {
   CHAT, toolLabel, resultMark, resultClass, resultMeta, patchLines, clampLines, toolRunLabel,
 } from "./chat-model.js";
-import { splitStreamBlocks, patchStreamTail, turnSummaryText, convErrorText, noticeText, CONV } from "./conv-model.js";
-import { basename, isAbs } from "./path-utils.js";
+import { splitStreamBlocks, patchStreamTail, turnSummaryText, convErrorText, noticeText, fileMissingText, CONV } from "./conv-model.js";
+import { basename } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 const IMG_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "heic", "tiff"]);
@@ -57,9 +57,21 @@ function actsHtml(extra) {
     (extra || "") + `</div>`;
 }
 
+/** 첨부 칩 하나(말풍선 안). 이미지면 썸네일 자리 — 바이트는 뷰가 채운다(thumb 가 있으면 바로). */
+export function attachChipHtml(f, thumb) {
+  const ext = f.ext ? String(f.ext).toUpperCase().slice(0, 4) : "";
+  const lead = thumb ? `<img class="chat-chip-thumb" src="${escapeHtml(thumb)}" alt="">`
+    : f.image ? `<span class="chat-chip-thumb conv-thumb-wait"></span>`
+      : (ext ? `<span class="chat-chip-ext">${escapeHtml(ext)}</span>` : "");
+  return `<span class="chat-chip msg" data-kind="att" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}"`
+    + `${f.image ? ' data-image="1"' : ""} title="${escapeHtml(f.path)}">${lead}`
+    + `<span class="chat-chip-label">${escapeHtml(f.name)}</span></span>`;
+}
+
 /** 서버가 기록한 내 메시지 또는 낙관 버블. status: sending|queued|sent|failed|blocked
- *  blocked = 터미널 전용 명령이라 에이전트에 전달되지 않았다. 실패 표시도 다시 시도도 없다 — 바로 아래 안내 줄이 말한다. */
-export function buildUserRow({ key, text, status, code, slash, clientId }) {
+ *  blocked = 터미널 전용 명령이라 에이전트에 전달되지 않았다. 실패 표시도 다시 시도도 없다 — 바로 아래 안내 줄이 말한다.
+ *  files = 첨부 칩(본문의 `[첨부] <경로>` 줄을 뗀 것 — §4.5). 각 { path, name, ext, image, thumb? } */
+export function buildUserRow({ key, text, status, code, slash, clientId, files }) {
   const wrap = document.createElement("div");
   wrap.className = "conv-user" + (status === "failed" ? " failed" : "") + (status === "queued" ? " queued" : "")
     + (status === "sending" ? " sending" : "");
@@ -67,7 +79,16 @@ export function buildUserRow({ key, text, status, code, slash, clientId }) {
   if (clientId) wrap.dataset.clientId = clientId;
   const bubble = document.createElement("div");
   bubble.className = "chat-msg chat-msg-user" + (slash ? " slash" : "");
-  bubble.innerHTML = slash ? `<span class="chat-slash">${escapeHtml(text)}</span>` : userTextHtml(text);
+  const body = String(text || "");
+  bubble.innerHTML = slash ? `<span class="chat-slash">${escapeHtml(body)}</span>` : userTextHtml(body);
+  const list = Array.isArray(files) ? files : [];
+  if (list.length) {
+    const strip = document.createElement("div");
+    strip.className = "conv-att-row";
+    strip.innerHTML = list.map((f) => attachChipHtml(f, f.thumb || "")).join("");
+    if (!body.trim()) bubble.classList.add("att-only");
+    bubble.appendChild(strip);
+  }
   wrap.appendChild(bubble);
   const foot = document.createElement("div");
   foot.className = "conv-user-foot";
@@ -84,7 +105,7 @@ export function buildUserRow({ key, text, status, code, slash, clientId }) {
     foot.innerHTML = actsHtml();
   }
   wrap.appendChild(foot);
-  wrap._copyText = String(text || "");
+  wrap._copyText = body;
   return wrap;
 }
 
@@ -337,9 +358,9 @@ export function buildNoticeRow(r) {
 }
 
 // ── 미디어(`![라벨](경로)`) ──
-//  확정된 블록에만 채운다. 이 PC 의 대화면 로컬 파일을 바로 읽고, URL 이면 그대로 쓴다.
-//  다른 PC 의 파일 바이트를 가져오는 conv RPC 는 계약에 아직 없다 → 그때는 이름만 남긴다.
-export function hydrateMedia(root, { isLocal, observer }) {
+//  확정된 블록에만 채운다. URL 이면 그대로 쓰고, 경로면 뷰가 준 bytes(target) 로 받는다
+//  (이 PC 면 로컬 읽기, 다른 PC 면 conv.file — §4.5). 로드는 화면에 들어올 때(observer).
+export function hydrateMedia(root, { observer }) {
   const nodes = root.querySelectorAll?.(".chat-media");
   if (!nodes || !nodes.length) return;
   for (const el of nodes) {
@@ -351,17 +372,22 @@ export function hydrateMedia(root, { isLocal, observer }) {
     cap.innerHTML = (alt ? `<span class="chat-media-alt">${escapeHtml(alt)}</span>` : "")
       + `<span class="chat-media-path" title="${escapeHtml(el.dataset.target || "")}">${escapeHtml(el.dataset.name || "")}</span>`;
     el.appendChild(cap);
-    if (el.dataset.via !== "url" && !isLocal) { el.dataset.state = "remote"; continue; }
-    observer?.observe(el);
+    if (observer) observer.observe(el);
   }
 }
 
-export async function loadMedia(el) {
+/**
+ * @param {HTMLElement} el  .chat-media 자리
+ * @param {(target:string)=>Promise<{mediaType?:string, base64?:string, missing?:boolean, reason?:string}|null>} bytes
+ * @param {(src:string, a:{name:string,path:string})=>void} [onOpen]  이미지 클릭(라이트박스)
+ */
+export async function loadMedia(el, bytes, onOpen) {
   if (!el || el.dataset.state !== "idle") return;
   el.dataset.state = "loading";
   const target = el.dataset.target || "";
   const fail = (why) => {
     el.dataset.state = "done";
+    el.dataset.openable = "1";
     const n = document.createElement("span");
     n.className = "chat-media-fail";
     n.textContent = why;
@@ -370,10 +396,9 @@ export async function loadMedia(el) {
   try {
     let src = target;
     if (el.dataset.via !== "url") {
-      if (!(target.startsWith("~") || isAbs(target))) { fail(i18n.t('불러오지 못했어요')); return; }
-      const b64 = await api.filePreviewB64(target);
-      if (!b64) { fail(i18n.t('불러오지 못했어요')); return; }
-      src = `data:${mimeOf(target)};base64,${b64}`;
+      const r = bytes ? await bytes(target) : null;
+      if (!r || r.missing || !r.base64) { fail(fileMissingText(r)); return; }
+      src = `data:${r.mediaType || mimeOf(target)};base64,${r.base64}`;
     }
     let node;
     if (el.dataset.kind === "video") {
@@ -384,7 +409,8 @@ export async function loadMedia(el) {
       node = document.createElement("img");
       node.loading = "lazy";
       node.alt = el.dataset.alt || "";
-      node.addEventListener("click", () => showLightbox(src, { name: el.dataset.name || "", path: el.dataset.via === "url" ? "" : target }));
+      const a = { name: el.dataset.name || "", path: el.dataset.via === "url" ? "" : target };
+      node.addEventListener("click", () => (onOpen ? onOpen(src, a) : showLightbox(src, a)));
     }
     node.className = "chat-media-el";
     node.src = src;
@@ -399,7 +425,8 @@ export function showLightbox(src, a) {
   ov.className = "chat-lightbox";
   ov.innerHTML =
     `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path || a.name)}">${escapeHtml(a.name)}</span>` +
-    (a.path ? `<button class="chat-lb-open" type="button">${i18n.t('원본 열기')}</button>` : "") +
+    // 원본 열기 = 이 PC 의 파일만(다른 PC 의 경로를 이 PC 에서 열 수 없다).
+    (a.path && a.canOpen !== false ? `<button class="chat-lb-open" type="button">${i18n.t('원본 열기')}</button>` : "") +
     `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">${icons.x({ size: 11 })}</button></div>` +
     `<img class="chat-lb-img" alt="">`;
   ov.querySelector(".chat-lb-img").src = src;

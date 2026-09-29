@@ -1144,5 +1144,13 @@ export default {
   "이 명령은 터미널에서만 쓸 수 있어요.": "This command only works in the terminal.",
   "작업을 끝내지 못했어요.": "Couldn't finish the work.",
   "터미널의 에이전트를 끝내지 못해 가져오지 못했어요.": "Couldn't bring it over because the agent in the terminal didn't exit.",
-  "파일 수정은 자동 허용": "Auto-allow file edits"
+  "파일 수정은 자동 허용": "Auto-allow file edits",
+  "모델": "Model",
+  "기본 모델": "Default model",
+  "첨부는 한 번에 {n}개까지예요": "You can attach up to {n} files at a time",
+  "첨부하지 못했어요 · {name}": "Couldn't attach · {name}",
+  "모델을 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.": "Couldn't switch models — please try again in a moment.",
+  "대화에서 찾기": "Find in conversation",
+  "이전 내역 더 불러오기": "Load earlier messages",
+  "첨부를 준비하는 중…": "Preparing attachments…"
 };

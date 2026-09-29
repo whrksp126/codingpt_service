@@ -28,7 +28,7 @@ export const CONV = {
 };
 
 // 클라 HTTP 타임아웃 = back 값 + 5초(§4.0). 기동·가져오기·TUI 종료 대기가 끼는 메서드만 길다.
-const LONG_METHODS = new Set(['conv.create', 'conv.send', 'conv.open', 'conv.adopt', 'conv.toTerminal']);
+const LONG_METHODS = new Set(['conv.create', 'conv.send', 'conv.open', 'conv.adopt', 'conv.toTerminal', 'conv.file']);   // conv.file = 8MB 바이트(§4.5)
 export function convTimeoutSecs(method) {
   return LONG_METHODS.has(String(method || '')) ? 35 : 20;
 }
@@ -503,11 +503,13 @@ export function newClientId() {
 }
 
 /** 보낸 즉시 그리는 버블. 원문은 버블이 보관한다 — 실패해도 사용자가 쓴 글이 사라지지 않는다. */
-export function addPending(st, { clientId, text, now }) {
+export function addPending(st, { clientId, text, now, attachments }) {
   const id = String(clientId || newClientId());
   const had = st.pending.get(id);
   if (had) return had;   // 같은 clientId 재등록 = 멱등
   const p = { clientId: id, text: String(text || ''), status: 'sending', code: '', at: Number(now) || 0 };
+  // 첨부 칩 — 다시 시도도 같은 파일로 간다(보낸 뒤 입력칸의 칩은 이미 비었다).
+  if (Array.isArray(attachments) && attachments.length) p.attachments = attachments.slice(0, ATTACH_MAX);
   st.pending.set(id, p);
   return p;
 }
@@ -662,7 +664,7 @@ export function buildRows(st, opts) {
   }
   // ⑤ 낙관 버블 — 아직 서버 기록이 없는 내 메시지.
   for (const p of st.pending.values()) {
-    rows.push({ type: 'pending', key: 'p:' + p.clientId, sig: `${p.status}|${p.code}`, clientId: p.clientId, text: p.text, status: p.status, code: p.code });
+    rows.push({ type: 'pending', key: 'p:' + p.clientId, sig: `${p.status}|${p.code}`, clientId: p.clientId, text: p.text, status: p.status, code: p.code, attachments: p.attachments || null });
   }
   return rows;
 }
@@ -996,4 +998,281 @@ export function patchStreamTail(tail, info) {
   if (last.trim() && /^\s*\|?[\s:|-]*$/.test(last) && TABLE_ROW_RE.test(prev)) return drop();
   const fixed = closeInline(last);
   return nl >= 0 ? head + '\n' + fixed : fixed;
+}
+
+// ── 첨부(§4.1·§4.5) ───────────────────────────────────────────────────────────
+// 데몬 계약: conv.send/create 의 `attachments:[{path, name?, mediaType?}]`(최대 12). 데몬이 본문 끝에
+//  `[첨부] <절대경로>` 줄로 붙이고 msg.attachments 에 남긴다. 경로는 **그 PC 의 홈 jail 안**이어야 한다
+//  (밖이면 데몬이 조용히 버린다) → 보내기 전에 PC 의 경로로 만들어 둔다(attachPlan).
+export const ATTACH_MAX = 12;
+export const ATTACH_DIR = '.codingpt/attachments';   // 홈 기준 — 앱 attachmentUpload.ts 와 같은 자리
+const ATTACH_LINE_RE = /^\[첨부\] (.+)$/;
+const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'heic', 'tif', 'tiff'];
+const ATTACH_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+  svg: 'image/svg+xml', heic: 'image/heic', tif: 'image/tiff', tiff: 'image/tiff', pdf: 'application/pdf',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+};
+
+function baseName(p) {
+  const s = String(p || '').replace(/[\\/]+$/, '');
+  const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+function extOfName(name) {
+  const n = String(name || '');
+  return n.includes('.') ? n.split('.').pop().toLowerCase() : '';
+}
+
+/** 파일 하나 → 칩 표시 정보. */
+export function attachInfo(path, name, mediaType) {
+  const nm = String(name || baseName(path) || path || '');
+  const ext = extOfName(nm) || extOfName(baseName(path));
+  const mt = mediaType ? String(mediaType) : (ATTACH_MIME[ext] || '');
+  const image = mt ? mt.startsWith('image/') : IMAGE_EXTS.includes(ext);
+  return { path: String(path || ''), name: nm, ext, image, ...(mt ? { mediaType: mt } : {}) };
+}
+
+/**
+ * 보낸 메시지 본문 → { body, files }. 끝의 `[첨부] <경로>` 줄들을 떼어 칩으로 그린다(§4.5).
+ *  줄은 **끝에 모여 있을 때만** 뗀다(본문 중간에 사용자가 쓴 같은 모양의 글은 글이다).
+ *  msg.attachments 가 있으면 이름·형식은 그것을 쓴다(경로로 짝짓는다). 줄이 없는데 attachments 만 있으면 그것으로.
+ */
+export function splitAttachLines(text, attachments) {
+  const src = String(text == null ? '' : text);
+  const lines = src.split('\n');
+  const paths = [];
+  while (lines.length) {
+    const m = ATTACH_LINE_RE.exec(lines[lines.length - 1]);
+    if (!m) break;
+    paths.unshift(m[1].trim());
+    lines.pop();
+  }
+  const meta = new Map();
+  for (const a of Array.isArray(attachments) ? attachments : []) {
+    if (a && typeof a.path === 'string' && a.path) meta.set(a.path, a);
+  }
+  if (!paths.length && meta.size) {
+    return { body: src, files: [...meta.values()].map((a) => attachInfo(a.path, a.name, a.mediaType)) };
+  }
+  if (!paths.length) return { body: src, files: [] };
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  const files = paths.map((p) => { const a = meta.get(p); return attachInfo(p, a && a.name, a && a.mediaType); });
+  return { body: lines.join('\n'), files };
+}
+
+// 홈 안의 절대경로인가 — 데몬 jail 은 "그 PC 의 홈"이다. PC 앱에는 홈 경로를 묻는 길이 없어 모양으로 판정한다
+//  (틀려도 비용이 작다: 홈 안인데 복사하면 사본이 하나 생길 뿐, 홈 밖인데 그대로 보내면 데몬이 버린다 → 밖으로 오판하는 쪽이 안전).
+const HOME_RE = [/^\/Users\/[^/]+\//, /^\/home\/[^/]+\//, /^[A-Za-z]:[\\/]Users[\\/][^\\/]+[\\/]/i];
+function isAbsPath(p) { return /^\//.test(p) || /^[A-Za-z]:[\\/]/.test(p) || /^\\\\/.test(p); }
+export function looksInHome(p) {
+  const s = String(p || '');
+  if (!isAbsPath(s)) return false;
+  if (/^\/Users\/Shared\//.test(s)) return false;
+  return HOME_RE.some((re) => re.test(s));
+}
+
+/**
+ * 첨부를 그 PC 의 경로로 만드는 방법.
+ *  · 'keep'   — 그대로 보낸다(워크스페이스에서 고른 파일 = 이미 그 PC 의 홈 기준 경로 / 이 PC 의 홈 안 파일)
+ *  · 'copy'   — 이 PC 의 홈 밖(임시 폴더의 붙여넣은 스크린샷 등) → ~/.codingpt/attachments 로 복사
+ *  · 'upload' — 다른 PC 의 대화 → 바이트를 그 PC 의 ~/.codingpt/attachments 로 올린다
+ * @param {{path:string, origin:'local'|'workspace'}} a  origin = 어디서 온 경로인가(OS 드롭·붙여넣기 = local)
+ */
+export function attachPlan(a, isLocal) {
+  if (!a || !a.path) return 'keep';
+  if (a.origin === 'workspace') return 'keep';
+  if (!isLocal) return 'upload';
+  return looksInHome(a.path) ? 'keep' : 'copy';
+}
+
+/** 올릴 때의 파일명 — `<yyyymmdd-hhmmss>-<원래 이름>`(앱 uploadAttachmentNamed 와 같은 규칙). */
+export function attachUploadName(name, now) {
+  const d = new Date(Number(now) || Date.now());
+  const p2 = (n) => String(n).padStart(2, '0');
+  const ts = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`;
+  const safe = String(name || 'file').replace(/[/\\]/g, '_').replace(/[\x00-\x1f]/g, '').replace(/\s+/g, '_').slice(0, 120) || 'file';
+  return `${ATTACH_DIR}/${ts}-${safe}`;
+}
+
+/** 칩 목록 → 와이어 모양(최대 12, 경로 없는 것은 뺀다). 빈 배열이면 undefined(필드를 싣지 않는다). */
+export function attachmentsForWire(list) {
+  const out = [];
+  for (const a of Array.isArray(list) ? list : []) {
+    if (!a || typeof a.path !== 'string' || !a.path) continue;
+    if (out.some((x) => x.path === a.path)) continue;
+    out.push({ path: a.path, ...(a.name ? { name: String(a.name) } : {}), ...(a.mediaType ? { mediaType: String(a.mediaType) } : {}) });
+    if (out.length >= ATTACH_MAX) break;
+  }
+  return out.length ? out : undefined;
+}
+
+// ── 파일 바이트 캐시(conv.file) ───────────────────────────────────────────────
+/**
+ * 같은 파일을 행이 다시 그려질 때마다 받지 않게 — 진행 중 요청은 합치고, 받은 것은 바이트 상한 안에서 남긴다.
+ *  "없음"(missing)은 남기지 않는다(파일이 곧 생길 수 있다). 실패(throw)도 남기지 않는다.
+ */
+export function createByteCache(maxBytes) {
+  const cap = Number(maxBytes) || 48 * 1024 * 1024;
+  const done = new Map();      // key → { r, size } (삽입 순서 = 오래된 순)
+  const flying = new Map();    // key → Promise
+  let total = 0;
+  const sizeOf = (r) => (r && typeof r.base64 === 'string' ? r.base64.length : 0);
+  return {
+    get(key, loader) {
+      const k = String(key);
+      const hit = done.get(k);
+      if (hit) { done.delete(k); done.set(k, hit); return Promise.resolve(hit.r); }
+      if (flying.has(k)) return flying.get(k);
+      const p = Promise.resolve().then(loader).then((r) => {
+        flying.delete(k);
+        const size = sizeOf(r);
+        if (r && !r.missing && size && size <= cap) {
+          done.set(k, { r, size });
+          total += size;
+          for (const [ok, v] of done) { if (total <= cap) break; done.delete(ok); total -= v.size; }
+        }
+        return r;
+      }, (e) => { flying.delete(k); throw e; });
+      flying.set(k, p);
+      return p;
+    },
+    has(key) { return done.has(String(key)); },
+    get size() { return total; },
+    clear() { done.clear(); flying.clear(); total = 0; },
+  };
+}
+
+/** conv.file 의 없음 사유 → 한 줄. */
+export function fileMissingText(r) {
+  const why = r && r.reason;
+  if (why === 'too_large') return i18n.t('파일이 너무 커서 여기서는 못 보여줘요(눌러서 열기)');
+  if (why === 'not_found') return i18n.t('파일을 찾을 수 없어요');
+  return i18n.t('불러오지 못했어요');
+}
+
+// ── 사용량 줄(§4.5) ───────────────────────────────────────────────────────────
+/**
+ * thread → 상태 칩 재료(chat-model.statusChips/statusDetail 이 그린다 — 앱 ConvBody 와 같은 값).
+ *  "모델 · 컨텍스트 n%". 모르는 값은 싣지 않는다(빈 칩을 만들지 않는다). 둘 다 모르면 null.
+ */
+export function usageStatus(thread) {
+  if (!thread) return null;
+  const u = thread.usage && typeof thread.usage === 'object' ? thread.usage : null;
+  const st = {};
+  const model = (u && u.model) || thread.model;
+  if (model) st.model = String(model);
+  if (u && typeof u.contextTokens === 'number') st.contextUsed = u.contextTokens;
+  if (u && typeof u.contextMax === 'number' && u.contextMax > 0) st.contextMax = u.contextMax;
+  if (u && typeof u.contextPct === 'number' && Number.isFinite(u.contextPct)) st.contextPct = Math.max(0, Math.min(100, Math.round(u.contextPct)));
+  else if (st.contextUsed != null && st.contextMax) st.contextPct = Math.max(0, Math.min(100, Math.round((st.contextUsed / st.contextMax) * 100)));
+  if (u && typeof u.costUsd === 'number') st.costUsd = u.costUsd;
+  return st.model || st.contextPct != null ? st : null;
+}
+
+// ── 에이전트·모델 고르기(§4.5) ────────────────────────────────────────────────
+/** 새 대화에서 고를 수 있는 에이전트. **2개 이상일 때만** 고르는 줄을 보인다(1개면 빈 배열). */
+export function agentChoices(caps) {
+  const list = (caps && Array.isArray(caps.agents) ? caps.agents : [])
+    .filter((a) => a && a.id && a.available);
+  return list.length >= 2 ? list.map((a) => ({ id: String(a.id), label: String(a.label || a.id) })) : [];
+}
+
+/**
+ * 모델 목록 — **데몬이 알려 준 것만**(conv.caps.models 또는 그 에이전트의 agents[].models).
+ *  없으면 빈 배열 = 기능을 숨긴다(추측한 별칭을 내밀지 않는다). 항목은 문자열 또는 {id,label}.
+ *  지금 모델이 목록에 없으면 맨 앞에 남긴다(바뀌지 않았는데 다른 것이 켜진 것처럼 보이지 않게).
+ */
+export function modelChoices(caps, agent, current) {
+  const ag = caps && Array.isArray(caps.agents) ? caps.agents.find((a) => a && a.id === agent) : null;
+  const raw = (ag && Array.isArray(ag.models) && ag.models.length) ? ag.models
+    : (caps && Array.isArray(caps.models) ? caps.models : []);
+  const out = [];
+  for (const m of raw) {
+    const id = typeof m === 'string' ? m : m && (m.id || m.value);
+    if (!id || out.some((x) => x.id === String(id))) continue;
+    out.push({ id: String(id), label: String((m && typeof m === 'object' && m.label) || id) });
+  }
+  if (!out.length) return [];
+  const cur = current ? String(current) : '';
+  if (cur && !out.some((x) => x.id === cur)) out.unshift({ id: cur, label: cur });
+  return out.map((x) => ({ ...x, on: x.id === cur }));
+}
+
+// ── 대화 안 검색(§4.5 — 클라 전용) ───────────────────────────────────────────
+/** 대소문자 무시로 q 가 text 에 몇 번 나오나(겹치지 않게). */
+export function countMatches(text, q) {
+  const s = String(text || '').toLowerCase();
+  const n = String(q || '').toLowerCase();
+  if (!n) return 0;
+  let c = 0;
+  for (let i = s.indexOf(n); i >= 0; i = s.indexOf(n, i + n.length)) c += 1;
+  return c;
+}
+
+function toolText(r) {
+  const m = r.msg || {};
+  const t = m.tool || {};
+  const res = r.result && r.result.result ? r.result.result : null;
+  return [t.title, t.name, t.argsPreview, t.path, res && res.preview].filter(Boolean).join('\n');
+}
+
+/**
+ * 검색이 행 안의 글을 **보이게** 하려면 무엇을 펼쳐야 하나. 접힌 묶음·접힌 도구 결과 속 일치는
+ *  화면에 없어 찾을 수 없다 → 그 묶음/도구를 펼친다. 반환 { groups, tools }(key 집합).
+ */
+export function searchExpand(rows, q) {
+  const groups = new Set();
+  const tools = new Set();
+  if (!String(q || '').trim()) return { groups, tools };
+  const visit = (r, group) => {
+    if (r.type === 'tool' || r.type === 'orphan') {
+      const res = r.result && r.result.result ? r.result.result : (r.msg && r.msg.result) || null;
+      const inRes = !!(res && countMatches(res.preview, q));
+      if (countMatches(toolText(r), q)) {
+        if (group) groups.add(group);
+        if (inRes && r.type === 'tool') tools.add(r.key);
+      }
+      return;
+    }
+    if (r.type === 'thinking' && countMatches(r.msg && r.msg.text, q) && group) groups.add(group);
+  };
+  for (const r of rows || []) {
+    if (r.type === 'group') for (const it of r.items || []) visit(it, r.key);
+    else visit(r, null);
+  }
+  return { groups, tools };
+}
+
+// ── 채팅 탭 고르기(알림으로 대화 열기) ───────────────────────────────────────
+/**
+ * 대화 B 를 열 탭. cands = 지금 워크스페이스의 채팅 탭들 [{ threadId, focused? , ...}](화면 순서).
+ *  ① 그 대화가 열린 탭 → 'focus'  ② **threadId 가 없는 빈 새 채팅 탭** → 'reuse'(포커스 pane 의 것 우선)
+ *  ③ 없으면 'new'. 다른 대화가 열린 탭은 절대 갈아치우지 않는다(앱 실기 규칙과 같다).
+ */
+export function pickConvTab(cands, threadId) {
+  const list = Array.isArray(cands) ? cands : [];
+  const same = list.find((c) => c && threadId && c.threadId === threadId);
+  if (same) return { kind: 'focus', target: same };
+  const blank = list.filter((c) => c && !c.threadId);
+  const b = blank.find((c) => c.focused) || blank[0];
+  if (b) return { kind: 'reuse', target: b };
+  return { kind: 'new', target: null };
+}
+
+/**
+ * 탭에 반영할 것 — 대화가 바뀌었거나 제목이 새로 왔으면 탭 라벨·threadId 를 맞춘다. 바꿀 것이 없으면 null.
+ *  제목을 모르면(빈 문자열) 옛 제목을 남기지 않는다: 다른 대화의 제목이 붙어 있으면 지운다.
+ */
+export function tabPatchFor(tab, threadId, thread) {
+  const t = tab || {};
+  const out = {};
+  if ((threadId || undefined) !== (t.threadId || undefined)) {
+    out.threadId = threadId || undefined;
+    out.title = (thread && typeof thread.title === 'string' && thread.title.trim()) || undefined;
+    return out;
+  }
+  const title = thread && typeof thread.title === 'string' ? thread.title.trim() : '';
+  if (title && title !== (t.title || '')) out.title = title;
+  return Object.keys(out).length ? out : null;
 }

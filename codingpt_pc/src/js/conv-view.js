@@ -15,12 +15,14 @@
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { escapeHtml } from "./chat-md.js";
-import { CHAT, agentModeOf, agentDisplayName } from "./chat-model.js";
+import { CHAT, agentModeOf, agentDisplayName, statusChips, statusDetail } from "./chat-model.js";
 import {
   CONV, createConv, applyOpen, applySince, applyBefore, applyPush, applyDelta, applyThreadHint,
   shouldPoll, addPending, markPending, removePending, newClientId, buildRows, openReqs, reqToCard,
   respondParams, isBusy, workingInfo, fmtDuration, parseConvError, convErrorText, isOfflineCode,
   terminalLaunch, fmtAgo, threadDot, needsAdopt, threadTitle, convModeLabel, convModeChoices,
+  splitAttachLines, attachPlan, attachUploadName, attachmentsForWire, createByteCache, fileMissingText,
+  usageStatus, agentChoices, modelChoices, searchExpand, tabPatchFor,
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
@@ -28,13 +30,19 @@ import {
   hydrateMedia, loadMedia, showLightbox, mimeOf, isImagePath,
 } from "./conv-rows.js";
 import { ConvComposer } from "./conv-composer.js";
-import { basename } from "./path-utils.js";
+import { basename, isAbs } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 const MODE_KEY = "cpt.conv.mode.v1";   // 새 대화의 기본 모드(이 기기에서 마지막으로 고른 것)
+const AGENT_KEY = "cpt.conv.agent.v1"; // 새 대화의 에이전트(고를 수 있을 때만 — agentChoices)
+
+// conv.file 바이트 — 탭·행이 다시 그려져도 같은 파일을 다시 받지 않는다(모든 뷰가 공유, 48MB 상한).
+//  키 = 호스트|대화|경로(권한이 대화 단위라 같은 경로라도 다른 대화면 따로 묻는다).
+const _bytes = createByteCache(48 * 1024 * 1024);
 
 // ── 살아 있는 뷰 ──
 const _live = new Set();
+let _findOwner = null;       // CSS 강조 이름은 전역 하나 — 마지막으로 검색한 뷰가 주인이다
 let _cardRenderer = null;
 let _channelUp = true;       // ui-channel WS — 모르면 붙어 있다고 본다(끊겼다고 먼저 말하지 않는다)
 let _channelDownAt = 0;
@@ -96,6 +104,10 @@ export class ConvView {
     this._caps = null;
     this._mode = null;
     try { this._newMode = localStorage.getItem(MODE_KEY) || "default"; } catch (_) { this._newMode = "default"; }
+    try { this._newAgent = localStorage.getItem(AGENT_KEY) || ""; } catch (_) { this._newAgent = ""; }
+    this._newModel = "";             // 새 대화의 모델(모델 목록이 있을 때만 — 없으면 에이전트 기본값)
+    this._find = null;               // 대화 안 검색 상태 { q, hits:[Range], cur }
+    this._usageOpen = false;
     _live.add(this);
   }
 
@@ -132,6 +144,7 @@ export class ConvView {
       <div class="conv-head">
         <button class="conv-title" type="button"></button>
         <span class="conv-head-gap"></span>
+        <button class="conv-h-model hidden" type="button" title="${i18n.t('모델')}"><span class="conv-h-model-label"></span><span class="chat-mode-caret">${icons.chevronDown({ size: 11 })}</span></button>
         <button class="pane-ctrl conv-h-term" type="button" title="${i18n.t('터미널에서 이어가기')}">${icons.terminal({ size: 15 })}</button>
         <button class="pane-ctrl conv-h-list" type="button" title="${i18n.t('대화 목록')}">${icons.history({ size: 15 })}</button>
         <button class="pane-ctrl conv-h-new" type="button" title="${i18n.t('새 대화')}">${icons.edit({ size: 15 })}</button>
@@ -152,6 +165,8 @@ export class ConvView {
     this.dockMoreEl = el.querySelector(".conv-dock-more");
     this.termBtn = el.querySelector(".conv-h-term");
     this.listBtn = el.querySelector(".conv-h-list");
+    this.modelBtn = el.querySelector(".conv-h-model");
+    this.modelBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleModelMenu(); });
 
     // 모드 알약 — 모양은 v1 과 같다(.chat-mode). 여기서는 키 입력 대행이 아니라 conv.set 이다.
     this.modeEl = document.createElement("button");
@@ -160,13 +175,23 @@ export class ConvView {
     this.modeEl.title = i18n.t('에이전트 모드');
     this.modeEl.innerHTML = `<span class="chat-mode-label"></span><span class="chat-mode-caret">${icons.chevronDown({ size: 11 })}</span>`;
     this.modeEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleModeMenu(); });
+    // 에이전트 알약 — 새 대화에서, 고를 수 있는 에이전트가 2개 이상일 때만(§4.5).
+    this.agentEl = document.createElement("button");
+    this.agentEl.className = "chat-mode conv-agent hidden";
+    this.agentEl.type = "button";
+    this.agentEl.title = i18n.t('에이전트');
+    this.agentEl.innerHTML = `<span class="chat-mode-label"></span><span class="chat-mode-caret">${icons.chevronDown({ size: 11 })}</span>`;
+    this.agentEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleAgentMenu(); });
+    const ctlLeft = document.createElement("span");
+    ctlLeft.className = "conv-ctl-pills";
+    ctlLeft.append(this.agentEl, this.modeEl);
 
     this.composer = new ConvComposer({
-      onSend: (text) => this._send(text),
+      onSend: (text, atts) => this._send(text, atts),
       onStop: () => this._interrupt(),
       busy: () => isBusy(this.m),
       placeholder: () => {
-        const name = agentDisplayName((this.m.thread && this.m.thread.agent) || "claude");
+        const name = agentDisplayName(this._agentId());
         return name ? name + i18n.t('에게 요청') : i18n.t('메시지 보내기');
       },
       getDraft: () => this.ctx.tab?.()?.draft || "",
@@ -177,9 +202,19 @@ export class ConvView {
         const r = await this._rpc("conv.commands", this.m.threadId ? { threadId: this.m.threadId } : { cwd: this.ctx.cwd?.() || "" });
         return r.items || [];
       },
-      ctlLeft: this.modeEl,
+      ctlLeft,
+      stage: (a) => this._stageAttachment(a),
+      thumb: (a) => this._attachThumb(a),
+      preview: (a) => void this._previewAttachment(a),
+      attachError: (a, e) => this._setBanner(e === "LIMIT" ? i18n.t('첨부는 한 번에 {n}개까지예요', { n: 12 })
+        : i18n.t('첨부하지 못했어요 · {name}', { name: a.name || "" }), "warn", 5000),
     });
     this.composer.mount(el);
+    // 사용량 줄(§4.5) — 컴포저 아래 "모델 · 컨텍스트 n%". 누르면 상세(v1 상태 줄과 같은 모양·같은 문구).
+    this.usageEl = document.createElement("div");
+    this.usageEl.className = "chat-statusline conv-usage hidden";
+    this.usageEl.addEventListener("click", () => { this._usageOpen = !this._usageOpen; this._usageKey = ""; this._syncUsage(); });
+    this.composer.el.appendChild(this.usageEl);
 
     // 맨 아래로 — 컴포저의 자식이다(입력 줄 수가 바뀌어도 항상 바로 위에 뜬다. v1 과 같은 자리).
     this.jumpEl = document.createElement("button");
@@ -211,7 +246,7 @@ export class ConvView {
         for (const e of entries) {
           if (!e.isIntersecting) continue;
           this._mediaObs.unobserve(e.target);
-          void loadMedia(e.target);
+          void loadMedia(e.target, (t) => this._fileBytes(t), (src, a) => this._lightbox(src, a));
         }
       }, { root: this.scrollEl, rootMargin: "300px 0px" });
     }
@@ -230,7 +265,7 @@ export class ConvView {
     // Esc = 작업 중단. 입력칸은 자기 Esc 를 스스로 처리한다(팝오버 먼저) — 여기는 본문을 누른 뒤의 Esc.
     el.addEventListener("keydown", (e) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
-      if (e.target.closest?.(".conv-title-input, .approval-card, .conv-pop, .chat-pick")) return;
+      if (e.target.closest?.(".conv-title-input, .approval-card, .conv-pop, .chat-pick, .conv-find")) return;
       if (this._closePopovers()) { e.preventDefault(); return; }
       if (isBusy(this.m)) { e.preventDefault(); void this._interrupt(); }
     });
@@ -263,9 +298,9 @@ export class ConvView {
   /** 탭 점 — 답을 기다리는 요청이 있다. */
   needsAttention() { return openReqs(this.m).length > 0; }
 
-  /** OS 에서 끌어다 놓은 파일 — 인용 경로로 입력칸에. */
+  /** OS 에서 끌어다 놓은 파일 — 입력칸 아래 첨부 칩으로(§4.5). 이 PC 의 파일이다(origin local). */
   addPaths(paths) {
-    this.composer?.insertPaths(paths);
+    this.composer?.addFiles((paths || []).filter(Boolean).map((p) => ({ path: p, origin: "local" })));
     this.composer?.focus();
   }
 
@@ -307,6 +342,7 @@ export class ConvView {
     this._setBanner("");
     this.composer?.resetCommands();
     this._mode = null;
+    if (this._find) this._runFind();
   }
 
   // ── 열기·따라잡기 ──
@@ -474,9 +510,9 @@ export class ConvView {
   }
 
   // ── 보내기(§10.2) ──
-  _send(text) {
+  _send(text, atts) {
     const clientId = newClientId();
-    addPending(this.m, { clientId, text, now: Date.now() });
+    addPending(this.m, { clientId, text, now: Date.now(), attachments: atts });
     this._follow = true;
     this._renderNow();
     this._toBottom();
@@ -495,13 +531,20 @@ export class ConvView {
     const timer = setTimeout(() => {
       if (markPending(this.m, clientId, "timeout", "TIMEOUT")) this._render();
     }, CONV.SEND_FAIL_MS);
+    const atts = attachmentsForWire(p.attachments);
     try {
       // 첫 메시지가 대화를 만든다. 만드는 중에 또 보낸 글은 그 대화가 생길 때까지 기다린다(둘을 만들지 않게).
       if (!this.m.threadId && this._creating) await this._creating.catch(() => {});
       let r;
       if (!this.m.threadId) {
         const mode = this._newMode && this._newMode !== "default" ? this._newMode : undefined;
-        this._creating = this._rpc("conv.create", { cwd: this.ctx.cwd?.() || "", text: p.text, clientId, ...(mode ? { mode } : {}) });
+        // 에이전트·모델은 고를 수 있을 때만 싣는다(고르는 줄이 숨어 있으면 데몬 기본값).
+        const agent = agentChoices(this._caps).some((a) => a.id === this._newAgent) ? this._newAgent : undefined;
+        const model = this._newModel && this._modelChoices().length ? this._newModel : undefined;
+        this._creating = this._rpc("conv.create", {
+          cwd: this.ctx.cwd?.() || "", text: p.text, clientId, ...(atts ? { attachments: atts } : {}),
+          ...(mode ? { mode } : {}), ...(agent ? { agent } : {}), ...(model ? { model } : {}),
+        });
         try { r = await this._creating; } finally { this._creating = null; }
         const th = r.thread || {};
         if (th.id && !this.m.threadId) {
@@ -514,7 +557,7 @@ export class ConvView {
           void this._catchUp();              // 만드는 사이 지나간 이벤트
         }
       } else {
-        r = await this._rpc("conv.send", { threadId: this.m.threadId, clientId, text: p.text });
+        r = await this._rpc("conv.send", { threadId: this.m.threadId, clientId, text: p.text, ...(atts ? { attachments: atts } : {}) });
       }
       if (r && r.ok === false) {
         // 데몬이 받았지만 에이전트에 전달하지 않았다(정상 응답 — 예외가 아니다).
@@ -542,7 +585,9 @@ export class ConvView {
     if (fromMsg) {
       // 서버가 '실패'로 기록한 내 메시지 — 그 행은 접고 같은 id 의 버블로 다시 보낸다.
       this.m.hidden.add(fromMsg.key);
-      addPending(this.m, { clientId, text: fromMsg.text, now: Date.now() });
+      // 서버 본문에는 데몬이 붙인 `[첨부]` 줄이 있다 — 떼어서 첨부로 다시 보낸다(두 번 붙지 않게).
+      const sp = splitAttachLines(fromMsg.text, fromMsg.attachments);
+      addPending(this.m, { clientId, text: sp.body, now: Date.now(), attachments: sp.files });
     } else if (!markPending(this.m, clientId, "retry")) return;
     this._render();
     void this._dispatch(clientId);
@@ -604,9 +649,11 @@ export class ConvView {
     this._renderDock();
     this._syncHead();
     this._syncConn();
+    this._syncUsage();
     this.composer?.sync();
     if (this._follow) this._toBottom();
     this._syncJump();
+    if (this._find && this._find.q) this._queueFind();
     const att = this.needsAttention();
     if (att !== this._att) { this._att = att; this.ctx.refreshHead?.(); }
   }
@@ -617,15 +664,95 @@ export class ConvView {
   }
 
   _hydrate(root) {
-    hydrateMedia(root, { isLocal: !!this.ctx.isLocal?.(), observer: this._mediaObs });
+    hydrateMedia(root, { observer: this._mediaObs });
+    if (!this._mediaObs) for (const el of root.querySelectorAll?.(".chat-media") || []) void loadMedia(el, (t) => this._fileBytes(t), (src, a) => this._lightbox(src, a));
+  }
+
+  // ── 파일 바이트(§4.5) ──
+  //  이 PC 의 대화면 절대경로를 로컬에서 바로 읽는다(왕복 0). 그 밖(다른 PC·상대 경로·로컬 읽기 실패)은
+  //  conv.file — 권한은 데몬이 정한다(그 대화에 등장한 경로만).
+  async _fileBytes(path) {
+    const target = String(path || "");
+    if (!target) return { missing: true, reason: "not_found" };
+    const tid = this.m.threadId || "";
+    const key = `${this.ctx.hostDeviceId?.() ?? ""}|${tid}|${target}`;
+    return _bytes.get(key, async () => {
+      if (this.ctx.isLocal?.() && (target.startsWith("~") || isAbs(target))) {
+        try {
+          const b64 = await api.filePreviewB64(target);
+          if (b64) return { mediaType: mimeOf(target), base64: b64, name: basename(target) };
+        } catch (_) { /* 데몬 경로로 */ }
+      }
+      if (!tid) return { missing: true, reason: "not_found" };
+      return this._rpc("conv.file", { threadId: tid, path: target });
+    });
+  }
+
+  _lightbox(src, a) {
+    showLightbox(src, { ...a, canOpen: !!this.ctx.isLocal?.() && !!a.path && (a.path.startsWith("~") || isAbs(a.path)) });
+  }
+
+  /** 보낸 말풍선의 이미지 칩 — 썸네일을 채운다(없으면 그대로 라벨 칩). */
+  _hydrateChips(row) {
+    for (const chip of row.querySelectorAll?.('.chat-chip.msg[data-image="1"]') || []) {
+      if (chip.querySelector("img")) continue;
+      const path = chip.dataset.path || "";
+      void this._fileBytes(path).then((r) => {
+        const wait = chip.querySelector(".conv-thumb-wait");
+        if (!r || r.missing || !r.base64) { wait?.remove(); return; }
+        const img = document.createElement("img");
+        img.className = "chat-chip-thumb";
+        img.alt = "";
+        img.src = `data:${r.mediaType || mimeOf(path)};base64,${r.base64}`;
+        if (wait) wait.replaceWith(img); else chip.prepend(img);
+      }).catch(() => chip.querySelector(".conv-thumb-wait")?.remove());
+    }
+  }
+
+  // ── 첨부 준비(컴포저가 부른다) ──
+  /** 칩 → 그 PC 의 경로. keep=그대로 · copy=이 PC 홈 밖 → ~/.codingpt/attachments · upload=다른 PC 로 올림. */
+  async _stageAttachment(a) {
+    const plan = attachPlan({ path: a.src, origin: a.origin }, !!this.ctx.isLocal?.());
+    if (plan === "keep") return { path: a.src };
+    const b64 = await api.filePreviewB64(a.src);   // 8MB 상한(넘으면 throw — 칩을 빼고 알린다)
+    if (!b64) throw new Error("empty");
+    const rel = attachUploadName(a.name, Date.now());
+    if (plan === "copy") return { path: await api.fsWriteB64(rel, b64) };
+    const fs = this.ctx.fs?.();
+    if (!fs || typeof fs.fsWriteBytes !== "function") throw new Error("no remote fs");
+    const r = await fs.fsWriteBytes(rel, b64);
+    const abs = r && (r.absPath || (r.data && r.data.absPath));
+    if (!abs) throw new Error("no absPath");
+    return { path: abs };
+  }
+
+  async _attachThumb(a) {
+    if (a.origin === "workspace") {
+      const fs = this.ctx.fs?.();
+      const r = fs && typeof fs.fsReadBytes === "function" ? await fs.fsReadBytes(a.src) : null;
+      return (r && r.base64) || null;
+    }
+    return (await api.filePreviewB64(a.src)) || null;
+  }
+
+  async _previewAttachment(a) {
+    let b64 = a.b64;
+    if (!b64 && a.image) { try { b64 = await this._attachThumb(a); } catch (_) { b64 = null; } }
+    if (b64) { this._lightbox(`data:${a.mediaType || mimeOf(a.src)};base64,${b64}`, { name: a.name, path: a.origin === "local" ? a.src : "" }); return; }
+    if (a.origin === "local") api.openPath(a.src).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));
+    else this.ctx.openFile?.(a.src);
   }
 
   _buildRow(r) {
     switch (r.type) {
-      case "user":
-        return buildUserRow({ key: r.key, text: r.msg.text, status: r.status, slash: r.msg.kind === "slash", clientId: r.msg.clientId });
+      case "user": {
+        const sp = r.msg.kind === "slash" ? { body: r.msg.text, files: [] } : splitAttachLines(r.msg.text, r.msg.attachments);
+        const el = buildUserRow({ key: r.key, text: sp.body, status: r.status, slash: r.msg.kind === "slash", clientId: r.msg.clientId, files: sp.files });
+        this._hydrateChips(el);
+        return el;
+      }
       case "pending":
-        return buildUserRow({ key: r.key, text: r.text, status: r.status, code: r.code, clientId: r.clientId });
+        return buildUserRow({ key: r.key, text: r.text, status: r.status, code: r.code, clientId: r.clientId, files: r.attachments || [] });
       case "assistant": {
         const el = buildAssistantRow(r.key);
         if (r.sub) el.classList.add("conv-sub");
@@ -757,7 +884,7 @@ export class ConvView {
     const grp = t.closest?.(".chat-tool-group");
     if (grp) { this._openGroups.add(grp.dataset.key); this._render(); return; }
     const mchip = t.closest?.(".chat-chip.msg");
-    if (mchip) { void this._openPath(mchip.dataset.path || ""); return; }
+    if (mchip) { void this._openPath(mchip.dataset.path || "", mchip.dataset.name || ""); return; }
     const dmore = t.closest?.(".chat-diff-more");
     if (dmore) {
       const rest = dmore.parentElement?.querySelector(".chat-diff-rest");
@@ -777,7 +904,10 @@ export class ConvView {
       return;
     }
     const file = t.closest?.(".chat-file");
-    if (file) { void this._openPath(file.dataset.target || ""); return; }
+    if (file) { void this._openPath(file.dataset.target || "", file.dataset.name || ""); return; }
+    // 못 불러온 미디어 자리 — 누르면 원본을 연다(너무 큰 파일 등).
+    const media = t.closest?.('.chat-media[data-openable="1"]');
+    if (media) { void this._openPath(media.dataset.target || "", media.dataset.name || "", { noPreview: true }); return; }
     const more = t.closest?.(".chat-out-more");
     if (more) {
       const pre = more.previousElementSibling;
@@ -826,37 +956,50 @@ export class ConvView {
   async _loadFull(key) {
     const ent = this.m.msgs.get(key);
     if (!ent || !this.m.threadId) return;
+    const btn = this._rows.get(key)?.el.querySelector(':scope > .chat-trunc [data-act="full"]');
+    if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = i18n.t('불러오는 중…'); }
     try {
       const r = await this._rpc("conv.detail", { threadId: this.m.threadId, key });
-      if (!r.text || this._disposed) return;
+      if (!r.text || this._disposed) { if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = i18n.t('전체 보기'); } return; }
       ent.msg = { ...ent.msg, text: r.text, truncated: false };
       const row = this._rows.get(key);
       if (row) { row.el.querySelector(":scope > .chat-trunc")?.remove(); row.sig = ""; }
       this._render();
     } catch (e) {
+      if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = i18n.t('전체 보기'); }
       this._setBanner(convErrorText(e.code), "warn", 4000);
     }
   }
 
-  async _openPath(path) {
+  /**
+   * 대화 속 파일을 연다. 이미지는 앱 안에서(이 PC 든 다른 PC 든 — 바이트는 _fileBytes), 그 밖은
+   *  이 PC 의 절대경로면 시스템 기본 앱, 아니면 IDE(그 워크스페이스의 파일 트리)로.
+   */
+  async _openPath(path, name, o) {
     if (!path) return;
-    if (!this.ctx.isLocal?.()) { this.ctx.openFile?.(path); return; }
-    if (isImagePath(path)) {
+    const local = !!this.ctx.isLocal?.();
+    const abs = path.startsWith("~") || isAbs(path);
+    if (isImagePath(path) && !(o && o.noPreview)) {
       try {
-        const b64 = await api.filePreviewB64(path);
-        if (b64) { showLightbox(`data:${mimeOf(path)};base64,${b64}`, { name: basename(path) || path, path }); return; }
+        const r = await this._fileBytes(path);
+        if (r && !r.missing && r.base64) {
+          this._lightbox(`data:${r.mediaType || mimeOf(path)};base64,${r.base64}`, { name: name || basename(path) || path, path });
+          return;
+        }
+        if (!local) { this._setBanner(fileMissingText(r), "warn", 4000); return; }
       } catch (_) { /* 아래 폴백 */ }
     }
-    api.openPath(path).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));
+    if (local && abs) { api.openPath(path).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000)); return; }
+    this.ctx.openFile?.(path);
   }
 
   // ── 헤더 ──
   _syncThread() {
     const th = this.m.thread;
     if (!th) return;
-    const tab = this.ctx.tab?.() || {};
-    const title = typeof th.title === "string" ? th.title : "";
-    if (title && title !== tab.title) this.ctx.patchTab?.({ title });
+    // 탭 라벨 = 지금 대화의 제목. 대화가 바뀌었거나 제목이 새로 왔으면 맞춘다(옛 제목이 남지 않게 — conv-model.tabPatchFor).
+    const patch = tabPatchFor(this.ctx.tab?.() || {}, this.m.threadId, th);
+    if (patch) this.ctx.patchTab?.(patch);
     if (th.mode && !this._modeBusy) this._mode = th.mode;
   }
 
@@ -873,6 +1016,53 @@ export class ConvView {
     const lEl = this.modeEl.querySelector(".chat-mode-label");
     if (lEl.textContent !== label) lEl.textContent = label;
     this.modeEl.classList.toggle("busy", !!this._modeBusy);
+    // 에이전트 — 새 대화에서만, 고를 것이 있을 때만.
+    const agents = this.m.threadId ? [] : agentChoices(this._caps);
+    this.agentEl.classList.toggle("hidden", !agents.length);
+    if (agents.length) {
+      const cur = agents.find((a) => a.id === this._agentId()) || agents[0];
+      const aEl = this.agentEl.querySelector(".chat-mode-label");
+      const name = agentDisplayName(cur.id) || cur.label;
+      if (aEl.textContent !== name) aEl.textContent = name;
+    }
+    // 모델 — 데몬이 목록을 줄 때만(없으면 숨긴다 — 추측한 별칭을 내밀지 않는다).
+    const models = this._modelChoices();
+    this.modelBtn.classList.toggle("hidden", !models.length);
+    if (models.length) {
+      const on = models.find((m) => m.on);
+      const mEl = this.modelBtn.querySelector(".conv-h-model-label");
+      const txt = on ? on.label : i18n.t('기본 모델');
+      if (mEl.textContent !== txt) mEl.textContent = txt;
+      this.modelBtn.classList.toggle("busy", !!this._modelBusy);
+    }
+  }
+
+  /** 이 탭의 에이전트 — 대화가 있으면 그 대화의 것, 없으면 새 대화에 쓸 것. */
+  _agentId() {
+    if (this.m.thread && this.m.thread.agent) return this.m.thread.agent;
+    const agents = agentChoices(this._caps);
+    return (agents.find((a) => a.id === this._newAgent) || agents[0] || { id: "claude" }).id;
+  }
+
+  // ── 사용량 줄(§4.5) ──
+  _syncUsage() {
+    if (!this.usageEl) return;
+    const st = this.m.threadId ? usageStatus(this.m.thread) : null;
+    const chips = statusChips(st);
+    const key = JSON.stringify(st) + "|" + this._usageOpen;
+    if (key === this._usageKey) return;
+    this._usageKey = key;
+    if (!chips.length) { this.usageEl.classList.add("hidden"); this.usageEl.innerHTML = ""; return; }
+    const rows = this._usageOpen
+      ? statusDetail(st, Date.now()).map((r) =>
+        `<div class="chat-status-row"><span class="chat-status-k">${escapeHtml(r.label)}</span>`
+        + `<span class="chat-status-v">${escapeHtml(r.value)}</span>`
+        + (r.sub ? `<span class="chat-status-s">${escapeHtml(r.sub)}</span>` : "") + "</div>").join("")
+      : "";
+    this.usageEl.innerHTML = `<div class="chat-status-chips">${chips.map((c) => `<span class="chat-status-chip">${escapeHtml(c.text)}</span>`).join("")}</div>`
+      + (rows ? `<div class="chat-status-detail">${rows}</div>` : "");
+    this.usageEl.classList.toggle("open", this._usageOpen);
+    this.usageEl.classList.remove("hidden");
   }
 
   _editTitle() {
@@ -924,6 +1114,256 @@ export class ConvView {
     this._capsLoading = true;
     try { this._caps = await this._rpc("conv.caps", {}); } catch (_) { this._caps = null; }
     finally { this._capsLoading = false; }
+    if (!this._disposed && this._mounted) { this._syncHead(); this.composer?.sync(); }
+  }
+
+  // ── 에이전트·모델 고르기(§4.5) — 모드 목록과 같은 모양의 작은 메뉴 ──
+  _openPick(anchor, rows, onPick, align) {
+    this._closePick();
+    this.composer?.closePopovers();
+    this._closeModeMenu();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu conv-pick-menu" + (align === "head" ? " head" : "");
+    wrap.innerHTML = rows.map((r) =>
+      `<div class="chat-mode-row${r.on ? " on" : ""}" data-id="${escapeHtml(r.id)}">` +
+      `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(r.label)}</span>` +
+      (r.desc ? `<span class="chat-mode-row-desc">${escapeHtml(r.desc)}</span>` : "") + `</span>` +
+      `<span class="chat-mode-row-mark">${r.on ? icons.check({ size: 12 }) : ""}</span></div>`).join("");
+    wrap.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-mode-row");
+      if (!row) return;
+      this._closePick();
+      onPick(row.dataset.id);
+    });
+    (align === "head" ? this.el : this.composer.el).appendChild(wrap);
+    this._pickEl = wrap;
+    this._pickCloser = (e) => { if (!wrap.contains(e.target) && !anchor.contains(e.target)) this._closePick(); };
+    setTimeout(() => { if (this._pickEl === wrap) document.addEventListener("mousedown", this._pickCloser, true); }, 0);
+  }
+
+  _closePick() {
+    if (this._pickCloser) document.removeEventListener("mousedown", this._pickCloser, true);
+    this._pickCloser = null;
+    this._pickEl?.remove();
+    this._pickEl = null;
+  }
+
+  _toggleAgentMenu() {
+    if (this._pickEl && this._pickFor === "agent") { this._closePick(); return; }
+    const cur = this._agentId();
+    const rows = agentChoices(this._caps).map((a) => ({ id: a.id, label: agentDisplayName(a.id) || a.label, on: a.id === cur }));
+    if (!rows.length) return;
+    this._openPick(this.agentEl, rows, (id) => {
+      this._newAgent = id;
+      try { localStorage.setItem(AGENT_KEY, id); } catch (_) { /* noop */ }
+      this.composer?.resetCommands();
+      this._render();
+    });
+    this._pickFor = "agent";
+  }
+
+  _modelChoices() {
+    const cur = this.m.threadId ? ((this.m.thread && (this.m.thread.model || (this.m.thread.usage && this.m.thread.usage.model))) || "") : this._newModel;
+    return modelChoices(this._caps, this._agentId(), cur);
+  }
+
+  _toggleModelMenu() {
+    if (this._pickEl && this._pickFor === "model") { this._closePick(); return; }
+    const rows = this._modelChoices();
+    if (!rows.length) return;
+    this._openPick(this.modelBtn, rows, (id) => void this._pickModel(id), "head");
+    this._pickFor = "model";
+  }
+
+  async _pickModel(id) {
+    if (!id || this._modelBusy) return;
+    if (!this.m.threadId) { this._newModel = id; this._syncHead(); return; }
+    const prev = this.m.thread ? this.m.thread.model : null;
+    if (prev === id) return;
+    this._modelBusy = true;
+    this.m.thread = { ...(this.m.thread || {}), model: id };
+    this._syncHead();
+    try {
+      const r = await this._rpc("conv.set", { threadId: this.m.threadId, model: id });
+      if (r.thread) applyThreadHint(this.m, r.thread);
+      void this._catchUp();   // "다음 시작부터 적용" 안내(MODEL_NEXT_START)가 로그로 온다
+    } catch (e) {
+      this.m.thread = { ...(this.m.thread || {}), model: prev };
+      this._setBanner(e.code === "CONTROL_TIMEOUT" || e.code === "CONTROL_FAILED" ? convErrorText(e.code)
+        : i18n.t('모델을 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.'), "warn", 4000);
+    } finally {
+      this._modelBusy = false;
+      this._syncHead();
+    }
+  }
+
+  // ── 대화 안 검색(⌘F, §4.5 — 클라 전용) ──
+  //  불러온 행 안에서만 찾는다. 접힌 묶음·도구 결과 속 일치는 펼쳐서 보이게 한 뒤 화면 글자에서 찾는다
+  //  (보이지 않는 글을 "찾았다"고 세지 않는다). 강조는 CSS Custom Highlight — DOM 을 건드리지 않아
+  //  스트리밍 중에도 행 재사용·선택이 깨지지 않는다. 더 앞은 "이전 내역 더 불러오기"로 넓힌다.
+  openSearch() {
+    if (!this._mounted) return;
+    if (this.findEl) { this.findInput.focus(); this.findInput.select(); return; }
+    const bar = document.createElement("div");
+    bar.className = "pane-search conv-find";
+    bar.innerHTML = `
+      <span class="pane-search-ic">${icons.search({ size: 13 })}</span>
+      <input class="pane-search-input" type="text" placeholder="${i18n.t('대화에서 찾기')}" />
+      <span class="pane-search-count">0/0</span>
+      <button class="pane-search-btn" type="button" data-a="prev" title="${i18n.t('이전 (⇧Enter)')}">${icons.chevronUp({ size: 14 })}</button>
+      <button class="pane-search-btn" type="button" data-a="next" title="${i18n.t('다음 (Enter)')}">${icons.chevronDown({ size: 14 })}</button>
+      <button class="pane-search-btn" type="button" data-a="close" title="${i18n.t('닫기 (Esc)')}">${icons.x({ size: 14 })}</button>
+      <button class="conv-link conv-find-more hidden" type="button" data-a="more">${i18n.t('이전 내역 더 불러오기')}</button>`;
+    this.host.appendChild(bar);
+    this.findEl = bar;
+    this.findInput = bar.querySelector(".pane-search-input");
+    this.findCount = bar.querySelector(".pane-search-count");
+    this.findMore = bar.querySelector(".conv-find-more");
+    this._find = { q: "", hits: [], cur: -1 };
+    this.findInput.addEventListener("input", () => { this._find.cur = -1; this._runFind(); this._stepFind(0); });
+    this.findInput.addEventListener("keydown", (e) => {
+      e.stopPropagation();   // 전역 단축키·뷰의 Esc(중단)가 이 입력을 가로채지 않게
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter") { e.preventDefault(); this._stepFind(e.shiftKey ? -1 : 1); }
+      else if (e.key === "Escape") { e.preventDefault(); this.closeSearch(); }
+    });
+    bar.addEventListener("click", (e) => {
+      const a = e.target.closest?.("[data-a]")?.dataset.a;
+      if (a === "prev") { this._stepFind(-1); this.findInput.focus(); }
+      else if (a === "next") { this._stepFind(1); this.findInput.focus(); }
+      else if (a === "close") this.closeSearch();
+      else if (a === "more") void this._findMoreBefore();
+    });
+    this._syncFindMore();
+    setTimeout(() => { this.findInput?.focus(); this.findInput?.select(); }, 0);
+  }
+
+  closeSearch() {
+    if (!this.findEl) return;
+    clearTimeout(this._findTimer);
+    this.findEl.remove();
+    this.findEl = null; this.findInput = null; this.findCount = null; this.findMore = null;
+    this._find = null;
+    this._paintFind();
+    this.composer?.focus();
+  }
+
+  async _findMoreBefore() {
+    if (!this.findMore || this._loadingBefore) return;
+    this.findMore.disabled = true;
+    await this._loadBefore();
+    if (this.findMore) this.findMore.disabled = false;
+    this._runFind();
+    this._syncFindMore();
+  }
+
+  _syncFindMore() {
+    if (!this.findMore) return;
+    const more = this._opened && !this.m.noMoreBefore && this.m.floorSeq > 1;
+    this.findMore.classList.toggle("hidden", !more);
+  }
+
+  _queueFind() {
+    clearTimeout(this._findTimer);
+    this._findTimer = setTimeout(() => { if (this._find) { this._runFind(); this._syncFindMore(); } }, 150);
+  }
+
+  /** 지금 검색어로 일치 범위를 다시 모은다(현재 위치는 가능한 한 유지). */
+  _runFind() {
+    if (!this._find || !this.findInput) return;
+    const q = this.findInput.value;
+    this._find.q = q;
+    if (!q.trim()) { this._find.hits = []; this._find.cur = -1; this._paintFind(); return; }
+    // 접힌 묶음·도구 결과에 있는 일치는 펼친다 — 화면에 없는 글은 찾을 수 없다.
+    const ex = searchExpand(buildRows(this.m, { openGroups: this._openGroups, openTools: this._openTools }), q);
+    let grew = false;
+    for (const g of ex.groups) if (!this._openGroups.has(g)) { this._openGroups.add(g); grew = true; }
+    for (const k of ex.tools) if (!this._openTools.has(k)) { this._openTools.add(k); grew = true; this._rows.get(k)?.el.classList.add("open"); }
+    if (grew) { const f = this._find; this._find = null; this._renderNow(); this._find = f; }
+    // 접힌 '생각' 은 전문을 펼친다(일치가 잘린 뒤쪽에 있을 수 있다).
+    const needle = q.toLowerCase();
+    for (const th of this.rowsEl.querySelectorAll('.chat-thinking[data-collapsed="1"]')) {
+      if (String(th.dataset.full || "").toLowerCase().includes(needle)) {
+        th.dataset.collapsed = "0";
+        const b = th.querySelector(".chat-think-body");
+        if (b) b.textContent = th.dataset.full || "";
+      }
+    }
+    const prevKey = this._find.hits[this._find.cur] ? this._find.hits[this._find.cur].key : null;
+    const prevIdx = this._find.hits[this._find.cur] ? this._find.hits[this._find.cur].n : 0;
+    const hits = [];
+    const vis = new Map();
+    const shown = (el) => {
+      if (!el) return false;
+      if (vis.has(el)) return vis.get(el);
+      const v = el.getClientRects().length > 0;
+      vis.set(el, v);
+      return v;
+    };
+    const walker = document.createTreeWalker(this.rowsEl, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => {
+        const p = n.parentElement;
+        if (!p || p.closest("button, .conv-acts, .conv-caret, .chat-working")) return NodeFilter.FILTER_REJECT;
+        return shown(p) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      },
+    });
+    const perRow = new Map();
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const text = n.data.toLowerCase();
+      let i = text.indexOf(needle);
+      if (i < 0) continue;
+      const rowEl = n.parentElement.closest("[data-key]");
+      const key = rowEl ? rowEl.dataset.key : "";
+      while (i >= 0) {
+        const r = document.createRange();
+        r.setStart(n, i); r.setEnd(n, i + needle.length);
+        const c = perRow.get(key) || 0;
+        perRow.set(key, c + 1);
+        hits.push({ range: r, key, n: c });
+        i = text.indexOf(needle, i + needle.length);
+      }
+    }
+    this._find.hits = hits;
+    // 같은 행의 같은 번째 일치가 남아 있으면 그 자리를 유지한다(새 글이 와도 커서가 튀지 않게).
+    let cur = prevKey != null ? hits.findIndex((h) => h.key === prevKey && h.n === prevIdx) : -1;
+    if (cur < 0 && this._find.cur >= 0 && hits.length) cur = Math.min(this._find.cur, hits.length - 1);
+    this._find.cur = cur;
+    this._paintFind();
+  }
+
+  _stepFind(d) {
+    const f = this._find;
+    if (!f || !f.hits.length) { this._paintFind(); return; }
+    if (f.cur < 0) {
+      // 처음 이동 — 아래에서부터(가장 최근 대화가 아래다). 앞으로 가기면 맨 아래, 뒤로면 그 위.
+      f.cur = f.hits.length - 1;
+    } else if (d) f.cur = (f.cur + d + f.hits.length) % f.hits.length;
+    this._paintFind();
+    const r = f.hits[f.cur] && f.hits[f.cur].range;
+    if (!r) return;
+    const box = r.getBoundingClientRect();
+    const sb = this.scrollEl.getBoundingClientRect();
+    if (box.top < sb.top + 40 || box.bottom > sb.bottom - 40) {
+      this._follow = false;
+      this.scrollEl.scrollTop += (box.top - sb.top) - sb.height / 2;
+      this._lastTop = this.scrollEl.scrollTop;
+      this._syncJump();
+    }
+  }
+
+  _paintFind() {
+    const f = this._find;
+    if (this.findCount) this.findCount.textContent = f && f.hits.length ? `${f.cur >= 0 ? f.cur + 1 : 0}/${f.hits.length}` : "0/0";
+    const H = typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined" ? CSS.highlights : null;
+    if (!H) return;   // 강조를 못 그리는 웹뷰 — 이동·건수는 그대로 된다
+    if (!f || !f.hits.length) {
+      if (_findOwner === this || !_findOwner) { H.delete("conv-find"); H.delete("conv-find-cur"); _findOwner = null; }
+      return;
+    }
+    _findOwner = this;
+    H.set("conv-find", new Highlight(...f.hits.map((h) => h.range)));
+    const cur = f.hits[f.cur];
+    if (cur) H.set("conv-find-cur", new Highlight(cur.range)); else H.delete("conv-find-cur");
   }
 
   // 데몬이 알려 준 것만(모르면 카탈로그 그대로). 지금 모드는 목록에 없어도 남긴다(conv-model.convModeChoices).
@@ -935,6 +1375,7 @@ export class ConvView {
   _toggleModeMenu() {
     if (this.modeMenuEl) { this._closeModeMenu(); return; }
     this.composer?.closePopovers();
+    this._closePick();
     const wrap = document.createElement("div");
     wrap.className = "chat-mode-menu";
     this.composer.el.appendChild(wrap);
@@ -1188,9 +1629,10 @@ export class ConvView {
   }
 
   _closePopovers() {
-    const any = !!(this.listEl || this.modeMenuEl || this.composer?.hasPopover());
+    const any = !!(this.listEl || this.modeMenuEl || this._pickEl || this.composer?.hasPopover());
     this._closeList();
     this._closeModeMenu();
+    this._closePick();
     this.composer?.closePopovers();
     return any;
   }
@@ -1215,6 +1657,8 @@ export class ConvView {
     this._stopTick();
     clearTimeout(this._bannerTimer);
     clearTimeout(this._behindTimer);
+    clearTimeout(this._findTimer);
+    if (this.findEl) { this.findEl.remove(); this.findEl = null; this._find = null; this._paintFind(); }
     if (this._raf) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(this._raf); this._raf = 0; }
     this._closePopovers();
     try { this._ro?.disconnect(); } catch (_) { /* noop */ }

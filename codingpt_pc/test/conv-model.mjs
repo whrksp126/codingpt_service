@@ -365,6 +365,7 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   ok(M.isAmbiguousFailure('TIMEOUT') && !M.isAmbiguousFailure('START_FAILED'), '결과 불명 실패 구분');
   ok(M.convErrorText('NOPE') === M.convErrorText('') && M.convErrorText('THREAD_BUSY') !== M.convErrorText(''), '모르는 code 는 일반 문구');
   eq([M.convTimeoutSecs('conv.send'), M.convTimeoutSecs('conv.open'), M.convTimeoutSecs('conv.since'), M.convTimeoutSecs('conv.respond')], [35, 35, 20, 20], '클라 타임아웃 = back + 5초');
+  eq(M.convTimeoutSecs('conv.file'), 35, 'conv.file 은 8MB 바이트 — back 30초 + 5(§4.5)');
 }
 
 // ── 12. 터미널로 넘기기·목록 ──────────────────────────────────────────────────
@@ -450,6 +451,132 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   }
   ok(stable && monotone, `★ 한 글자씩 자라는 ${DOC.length}개 접두에서 확정 블록이 한 번도 바뀌지 않는다`);
   eq(sp('a\r\n\r\nb').blocks, ['a'], 'CRLF');
+}
+
+// ── 8. 첨부(§4.1·§4.5) ────────────────────────────────────────────────────────
+{
+  // 데몬 composeText 가 만드는 본문: 글 + 빈 줄 + `[첨부] <절대경로>` 줄들, msg.attachments 에 메타
+  const text = '이 화면 봐 줘\n\n[첨부] /Users/me/a/shot.png\n[첨부] /Users/me/docs/spec.pdf';
+  const atts = [{ idx: 0, name: '화면.png', path: '/Users/me/a/shot.png', mediaType: 'image/png' }, { idx: 1, name: 'spec.pdf', path: '/Users/me/docs/spec.pdf' }];
+  const sp = M.splitAttachLines(text, atts);
+  eq(sp.body, '이 화면 봐 줘', '★ 끝의 [첨부] 줄을 본문에서 뗀다(빈 줄까지)');
+  eq(sp.files.map((f) => [f.path, f.name, f.image]), [['/Users/me/a/shot.png', '화면.png', true], ['/Users/me/docs/spec.pdf', 'spec.pdf', false]], '칩 = 경로 순서 그대로, 이름·형식은 msg.attachments 에서');
+  eq(M.splitAttachLines('[첨부] /Users/me/x.jpg', null).body, '', '첨부만 보낸 메시지 = 본문 없음');
+  eq(M.splitAttachLines('[첨부] /Users/me/x.jpg', null).files[0].image, true, '메타가 없으면 확장자로 이미지 판정');
+  const mid = '예: [첨부] /a/b.png 이런 줄\n그리고 끝';
+  eq(M.splitAttachLines(mid, null), { body: mid, files: [] }, '★ 본문 중간·끝이 아닌 [첨부] 는 사용자가 쓴 글이다');
+  eq(M.splitAttachLines('앞\n[첨부] /a/x.png\n뒤', null).files.length, 0, '뒤에 글이 있으면 떼지 않는다');
+  eq(M.splitAttachLines('글', [{ path: '/Users/me/y.png', name: 'y.png' }]).files.map((f) => f.path), ['/Users/me/y.png'], '줄이 없고 attachments 만 있으면 그것으로');
+
+  // 어디서 온 경로인가 → 그 PC 의 경로로 만드는 방법
+  eq(M.attachPlan({ path: 'demo/src/a.js', origin: 'workspace' }, false), 'keep', '워크스페이스에서 고른 파일은 그 PC 의 것 — 다른 PC 여도 그대로');
+  eq(M.attachPlan({ path: '/Users/me/Desktop/a.png', origin: 'local' }, true), 'keep', '이 PC 의 홈 안 → 그대로');
+  eq(M.attachPlan({ path: '/var/folders/zz/T/clip.png', origin: 'local' }, true), 'copy', '★ 붙여넣은 스크린샷(임시 폴더 = 홈 밖) → 홈으로 복사(안 하면 데몬 jail 이 조용히 버린다)');
+  eq(M.attachPlan({ path: '/Users/Shared/x.png', origin: 'local' }, true), 'copy', '/Users/Shared 는 홈이 아니다');
+  eq(M.attachPlan({ path: 'C:\\Users\\me\\a.png', origin: 'local' }, true), 'keep', 'win32 홈');
+  eq(M.attachPlan({ path: '/Users/me/Desktop/a.png', origin: 'local' }, false), 'upload', '★ 다른 PC 의 대화 → 이 PC 파일은 올린다');
+  const nm = M.attachUploadName('내 파일 (1).png', new Date(2026, 8, 30, 7, 5, 9).getTime());
+  eq(nm, '.codingpt/attachments/20260930-070509-내_파일_(1).png', '올리는 이름 = 타임스탬프-원래이름(공백·구분자 정리)');
+  ok(!M.attachUploadName('../../etc/passwd', 0).includes('../'), '이름의 경로 구분자로 폴더를 벗어나지 못한다');
+  eq(M.attachmentsForWire([]), undefined, '없으면 필드를 싣지 않는다');
+  const many = Array.from({ length: 15 }, (_, i) => ({ path: '/Users/me/f' + i + '.txt', name: 'f' + i, thumb: 'data:x' }));
+  const wire = M.attachmentsForWire([...many, many[0]]);
+  eq([wire.length, Object.keys(wire[0]).sort()], [12, ['name', 'path']], '★ 와이어는 최대 12 · 썸네일 같은 화면 전용 필드는 안 싣는다');
+  eq(M.attachmentsForWire([{ path: '/a', name: 'a' }, { path: '/a', name: 'b' }, { path: '' }]).length, 1, '같은 경로·빈 경로는 뺀다');
+
+  // 낙관 버블도 칩을 들고 있다(다시 시도가 같은 파일로 간다)
+  const st = M.createConv(null);
+  M.addPending(st, { clientId: 'c1', text: '', now: T0, attachments: [{ path: '/Users/me/a.png', name: 'a.png', image: true }] });
+  const row = M.buildRows(st).find((r) => r.type === 'pending');
+  eq(row.attachments.map((a) => a.path), ['/Users/me/a.png'], '낙관 버블 행에 첨부가 있다');
+  M.addPending(st, { clientId: 'c2', text: '글만', now: T0 });
+  eq(M.buildRows(st).find((r) => r.key === 'p:c2').attachments, null, '첨부 없는 버블');
+}
+
+// ── 9. 파일 바이트 캐시(conv.file) ───────────────────────────────────────────
+{
+  const c = M.createByteCache(100);
+  let calls = 0;
+  const load = (b64) => () => { calls++; return new Promise((r) => setTimeout(() => r({ mediaType: 'image/png', base64: b64 }), 5)); };
+  const [a, b] = await Promise.all([c.get('k1', load('x'.repeat(40))), c.get('k1', load('y'))]);
+  ok(calls === 1 && a === b, '★ 같은 파일을 동시에 두 행이 물어도 한 번만 받는다');
+  await c.get('k1', load('z'));
+  ok(calls === 1, '받은 것은 다시 받지 않는다');
+  await c.get('m', () => { calls++; return { missing: true, reason: 'not_found' }; });
+  await c.get('m', () => { calls++; return { missing: true, reason: 'not_found' }; });
+  ok(calls === 3, '"없음"은 남기지 않는다(곧 생길 수 있다)');
+  await c.get('k2', load('x'.repeat(40)));
+  await c.get('k3', load('x'.repeat(40)));
+  ok(!c.has('k1') && c.has('k2') && c.has('k3') && c.size <= 100, '★ 상한을 넘으면 오래된 것부터 버린다', c.size);
+  let threw = false;
+  try { await c.get('e', () => { throw new Error('x'); }); } catch (_) { threw = true; }
+  ok(threw && !c.has('e'), '실패는 그대로 던지고 남기지 않는다');
+  eq(M.fileMissingText({ missing: true, reason: 'too_large' }), '파일이 너무 커서 여기서는 못 보여줘요(눌러서 열기)', '없음 사유 문구 — 너무 큼');
+  eq(M.fileMissingText({ missing: true, reason: 'not_referenced' }), '불러오지 못했어요', '없음 사유 문구 — 대화에 없는 경로');
+}
+
+// ── 10. 사용량 줄·에이전트·모델(§4.5) ─────────────────────────────────────────
+{
+  const { statusChips } = await import('../src/js/chat-model.js');
+  const th = { id: 't', model: 'claude-x', usage: { contextTokens: 84000, contextMax: 200000, contextPct: 42, costUsd: 0.3, model: 'claude-y' } };
+  eq(statusChips(M.usageStatus(th)).map((c) => c.text), ['claude-y', '컨텍스트 42%'], '★ "모델 · 컨텍스트 n%" — 앱 ConvBody 와 같은 칩');
+  eq(M.usageStatus({ usage: { contextTokens: 50000, contextMax: 200000 } }).contextPct, 25, 'contextPct 가 없으면 토큰으로 계산');
+  eq(M.usageStatus({ model: 'm', usage: { contextTokens: null, contextMax: null, contextPct: null, costUsd: null, model: null } }), { model: 'm' }, 'null 필드는 싣지 않는다(빈 칩 없음)');
+  eq(M.usageStatus({ usage: null }), null, '아무것도 모르면 줄이 없다');
+  eq(M.usageStatus({ usage: { contextPct: 140 } }).contextPct, 100, '0~100 으로 자른다');
+
+  const one = { agents: [{ id: 'claude', label: 'Claude', available: true }, { id: 'codex', label: 'Codex', available: false }] };
+  eq(M.agentChoices(one), [], '★ 쓸 수 있는 에이전트가 1개면 고르는 줄을 숨긴다');
+  const two = { agents: [{ id: 'claude', label: 'Claude', available: true }, { id: 'codex', label: 'Codex', available: true }] };
+  eq(M.agentChoices(two).map((a) => a.id), ['claude', 'codex'], '2개 이상이면 보인다');
+  eq(M.agentChoices(null), [], 'caps 를 모르면 숨긴다');
+
+  eq(M.modelChoices({ enabled: true, agents: two.agents, modes: [] }, 'claude', 'x'), [], '★ 데몬이 모델 목록을 안 주면 기능을 숨긴다(추측한 별칭 없음)');
+  eq(M.modelChoices({ models: ['a', { id: 'b', label: 'B 모델' }] }, 'claude', 'b').map((m) => [m.id, m.label, m.on]), [['a', 'a', false], ['b', 'B 모델', true]], 'caps.models — 문자열·객체 둘 다');
+  eq(M.modelChoices({ models: ['a'], agents: [{ id: 'codex', models: ['c1', 'c2'] }] }, 'codex', '').map((m) => m.id), ['c1', 'c2'], '에이전트별 목록이 있으면 그것');
+  eq(M.modelChoices({ models: ['a', 'b'] }, 'claude', 'zz').map((m) => [m.id, m.on]), [['zz', true], ['a', false], ['b', false]], '지금 모델이 목록에 없으면 맨 앞에 남긴다');
+}
+
+// ── 11. 대화 안 검색 ──────────────────────────────────────────────────────────
+{
+  eq(M.countMatches('Abc abc ABC', 'abc'), 3, '대소문자 무시');
+  eq(M.countMatches('aaaa', 'aa'), 2, '겹치지 않게 센다');
+  eq(M.countMatches('x', ''), 0, '빈 검색어');
+  const st = M.createConv('t');
+  M.applyOpen(st, { thread: { id: 't', state: 'idle' }, headSeq: 12, floorSeq: 1, live: [], pending: [], events: [
+    aMsg(1, 'a:0', '시작'),
+    tool(2, 't1', 'Read'), result(3, 't1', true, { preview: 'nothing' }),
+    tool(4, 't2', 'Read'), result(5, 't2', true, { preview: 'needle here' }),
+    tool(6, 't3', 'Bash'), result(7, 't3', true, { preview: 'x' }),
+    tool(8, 't4', 'Bash'), result(9, 't4', true),
+    aMsg(10, 'a:1', '끝'),
+  ] });
+  const rows = M.buildRows(st);
+  const g = rows.find((r) => r.type === 'group');
+  ok(!!g, '끝난 도구 4개는 한 줄로 접혀 있다');
+  const ex = M.searchExpand(rows, 'NEEDLE');
+  ok(ex.groups.has(g.key) && ex.tools.has('t2') && ex.tools.size === 1, '★ 접힌 묶음 속 도구 결과의 일치 → 그 묶음과 그 도구만 펼친다');
+  const ex2 = M.searchExpand(rows, 'Bash t3');
+  ok(ex2.groups.has(g.key) && ex2.tools.size === 0, '도구 제목의 일치는 묶음만 펼친다(결과까지 열지 않는다)');
+  eq(M.searchExpand(rows, '시작').groups.size, 0, '보이는 행의 일치는 아무것도 펼치지 않는다');
+  eq(M.searchExpand(rows, '  ').groups.size, 0, '공백 검색어');
+}
+
+// ── 12. 알림으로 대화 열기 · 탭 라벨 ─────────────────────────────────────────
+{
+  const A = { id: 'A', threadId: 'tA' }, blank1 = { id: 'b1', threadId: null }, blank2 = { id: 'b2', threadId: null, focused: true };
+  eq(M.pickConvTab([A, blank1], 'tA').kind, 'focus', '그 대화가 열린 탭이 있으면 그리로');
+  const r = M.pickConvTab([A, blank1, blank2], 'tB');
+  ok(r.kind === 'reuse' && r.target === blank2, '★ 없으면 빈 새 채팅 탭을 쓴다(포커스된 것 우선)');
+  eq(M.pickConvTab([A, blank1], 'tB').target, blank1, '빈 탭이 하나면 그것');
+  eq(M.pickConvTab([A], 'tB').kind, 'new', '★ 다른 대화가 열린 탭은 갈아치우지 않는다 → 새 탭');
+  eq(M.pickConvTab([], 'tB').kind, 'new', '채팅 탭이 없으면 새 탭');
+
+  eq(M.tabPatchFor({ threadId: 'tA', title: 'A 대화' }, 'tB', { id: 'tB', title: 'B 대화' }), { threadId: 'tB', title: 'B 대화' }, '대화가 바뀌면 라벨도 그 대화의 제목');
+  eq(M.tabPatchFor({ threadId: 'tA', title: 'A 대화' }, 'tB', { id: 'tB', title: '' }), { threadId: 'tB', title: undefined }, '★ 제목 없는 대화로 바뀌면 옛 제목을 지운다(옛 라벨이 남던 버그)');
+  eq(M.tabPatchFor({ threadId: 'tA', title: '옛 제목' }, 'tA', { id: 'tA', title: '새 제목' }), { title: '새 제목' }, '★ 제목이 갱신되면 라벨도');
+  eq(M.tabPatchFor({ threadId: 'tA', title: 'A' }, 'tA', { id: 'tA', title: 'A' }), null, '같으면 건드리지 않는다(영속·재렌더 없음)');
+  eq(M.tabPatchFor({ threadId: 'tA', title: 'A' }, 'tA', { id: 'tA', title: '' }), null, '제목을 아직 모르면 지금 라벨을 둔다');
 }
 
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);

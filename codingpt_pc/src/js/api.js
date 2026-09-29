@@ -14,7 +14,7 @@ function qs(obj) {
 }
 
 // 기동·가져오기·TUI 종료 대기가 끼는 conv 메서드 — back 30초 + 5초(conv-model.convTimeoutSecs 와 같은 표).
-const CONV_LONG = new Set(["conv.create", "conv.send", "conv.open", "conv.adopt", "conv.toTerminal"]);
+const CONV_LONG = new Set(["conv.create", "conv.send", "conv.open", "conv.adopt", "conv.toTerminal", "conv.file"]);
 
 export const api = {
   // ── 데몬 상태/페어링(기존 유지, 설정→연결에서 사용) ──

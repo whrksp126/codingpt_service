@@ -6,8 +6,10 @@
 //  filterFiles·relToRoot·composerHasText). 여기 있는 것은 DOM 과 WebKit 우회뿐이다.
 //
 // v1 과 다른 점
-//  · 첨부 칩이 없다(1차). 붙여넣은 파일·이미지는 인용 경로 텍스트로 들어간다 — 에이전트는 경로만
-//    받으면 그 파일을 읽는다. 칩(원자 삭제·썸네일)은 후속.
+//  · 첨부는 입력칸 **아래 칩 줄**이다(v1 의 인라인 원자 칩이 아니다). 본문에 경로를 섞지 않고
+//    conv.send 의 attachments 로 따로 보낸다(§4.1) — 데몬이 본문 끝에 `[첨부] <경로>` 로 붙인다.
+//    그래서 WebKit 원자 칩 우회(캐럿 점프·칩 삭제 단위)가 필요 없다.
+//    칩은 "그 PC 의 경로"가 준비돼야 보낼 수 있다(홈 밖 파일 복사·다른 PC 로 업로드 — 뷰의 stage).
 //  · 전송 버튼이 셋 중 하나다: 글자가 있으면 전송, 없고 작업 중이면 중단, 둘 다 아니면 비활성.
 //  · Esc 는 채팅을 "나가는" 키가 아니라(나갈 TUI 가 없다) 작업 중단이다.
 //  · 초안 저장은 모아서 한다 — 저장은 레이아웃 영속(화면 전체 재렌더)을 부르므로 글자마다 하지 않는다.
@@ -17,7 +19,8 @@ import { escapeHtml } from "./chat-md.js";
 import {
   CHAT, slashQuery, filterCommands, commandBadges, filterFiles, flattenFiles, relToRoot, composerHasText,
 } from "./chat-model.js";
-import { IS_WINDOWS, shellQuote } from "./path-utils.js";
+import { ATTACH_MAX, attachInfo } from "./conv-model.js";
+import { IS_WINDOWS, shellQuote, basename } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 // 조합 경로·방향키로 새어 드는 제어문자와 맥 기능키 전용 문자(PUA). 본문에 남으면 □ 로 보인다.
@@ -37,6 +40,10 @@ export class ConvComposer {
    *  fs()                파일 목록 제공자(IDE 트리와 같은 것)
    *  commands()          Promise<[{name,desc}]> — 슬래시 팔레트 목록
    *  ctlLeft             컨트롤 행 왼쪽에 끼울 요소(모드 알약)
+   *  stage(a)            Promise<{path}> — 첨부를 그 PC 의 경로로 만든다(복사·업로드). 실패는 throw
+   *  thumb(a)            Promise<base64|null> — 이미지 칩 썸네일
+   *  preview(a)          칩을 눌렀다(라이트박스·열기)
+   *  attachError(a, e)   첨부를 못 했다(칩은 이미 뺐다) — 뷰가 이유를 말한다
    */
   constructor(o) {
     this.o = o || {};
@@ -44,6 +51,8 @@ export class ConvComposer {
     this._btnMode = "";
     this._cmds = null;
     this._disposed = false;
+    this._atts = [];          // 첨부 칩 [{ id, src, origin, name, ext, image, mediaType, path, b64, state }]
+    this._attSeq = 0;
   }
 
   mount(parent) {
@@ -52,6 +61,7 @@ export class ConvComposer {
     el.innerHTML = `
       <div class="chat-box">
         <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph=""></div>
+        <div class="conv-att hidden"></div>
         <div class="chat-ctl">
           <button class="chat-plus" type="button" title="${i18n.t('파일 넣기')}">${icons.plus({ size: 18 })}</button>
           <span class="conv-ctl-left"></span>
@@ -64,6 +74,15 @@ export class ConvComposer {
     this.inputEl = el.querySelector(".chat-input");
     this.sendEl = el.querySelector(".chat-send");
     this.plusEl = el.querySelector(".chat-plus");
+    this.attEl = el.querySelector(".conv-att");
+    this.attEl.addEventListener("click", (e) => {
+      const chip = e.target.closest?.(".chat-chip");
+      if (!chip) return;
+      const a = this._atts.find((x) => x.id === chip.dataset.id);
+      if (!a) return;
+      if (e.target.closest?.(".chat-chip-x")) { this.removeAttachment(a.id); this.focus(); return; }
+      this.o.preview?.(a);
+    });
     if (this.o.ctlLeft) el.querySelector(".conv-ctl-left").appendChild(this.o.ctlLeft);
 
     this.inputEl.textContent = String(this.o.getDraft?.() || "");
@@ -139,6 +158,12 @@ export class ConvComposer {
       e.preventDefault();
       e.stopPropagation();
       this._send();
+      return;
+    }
+    // 빈 입력칸의 ⌫ = 마지막 칩 빼기(메신저 관례). 글자가 있으면 글자를 지운다.
+    if (e.key === "Backspace" && !composing && this._atts.length && !this.text()) {
+      e.preventDefault();
+      this.removeAttachment(this._atts[this._atts.length - 1].id);
       return;
     }
     if (e.key === "Escape" && !composing) {
@@ -220,10 +245,13 @@ export class ConvComposer {
   /** 전송 버튼·문구를 지금 상태에 맞춘다. 작업 상태가 바뀌면 뷰가 부른다. */
   sync() {
     if (!this.sendEl || !this.inputEl) return;
-    const has = composerHasText(this.text());
+    const staging = this._atts.some((a) => a.state !== "ready");
+    const has = !staging && (composerHasText(this.text()) || this._atts.length > 0);
     const busy = !!this.o.busy?.();
     const mode = has ? (busy ? "queue" : "send") : busy ? "stop" : "idle";
     this.sendEl.disabled = mode === "idle";
+    // 첨부를 그 PC 로 옮기는 중에는 보낼 수 없다 — 이유를 버튼이 말한다(눌러도 아무 일 없는 버튼은 만들지 않는다).
+    if (staging && mode === "idle") this.sendEl.title = i18n.t('첨부를 준비하는 중…');
     // ★ 글리프는 **바뀔 때만** 다시 쓴다. 누르는 도중(mousedown~mouseup)에 자식이 갈리면 WebKit 이
     //  click 을 아예 보내지 않는다(pane.js 모드 토글에서 겪은 사고).
     if (this._btnMode !== mode) {
@@ -240,10 +268,83 @@ export class ConvComposer {
 
   _send() {
     const raw = this.text();
-    if (!composerHasText(raw)) return;
+    if (this._atts.some((a) => a.state !== "ready")) return;
+    const atts = this._atts.map((a) => ({ path: a.path, name: a.name, ext: a.ext, image: a.image, ...(a.mediaType ? { mediaType: a.mediaType } : {}), ...(a.b64 ? { thumb: `data:${a.mediaType || "image/png"};base64,${a.b64}` } : {}) }));
+    if (!composerHasText(raw) && !atts.length) return;
+    this._atts = [];
+    this._renderAtts();
     this.clear();
     this._flushDraft();
-    this.o.onSend?.(raw.replace(/\s+$/, ""));
+    this.o.onSend?.(composerHasText(raw) ? raw.replace(/\s+$/, "") : "", atts);
+  }
+
+  // ── 첨부 칩(§4.1·§4.5) ──
+  /**
+   * 파일을 칩으로 더한다. items = [{ path, origin:'local'|'workspace' }]
+   *  local = 이 PC 의 파일(OS 드롭·붙여넣기), workspace = `+` 로 고른 그 워크스페이스(그 PC)의 파일.
+   */
+  addFiles(items) {
+    let added = 0;
+    for (const it of items || []) {
+      const src = it && String(it.path || "");
+      if (!src) continue;
+      if (this._atts.length >= ATTACH_MAX) { this.o.attachError?.({ name: basename(src) || src }, "LIMIT"); break; }
+      if (this._atts.some((a) => a.src === src)) continue;
+      const info = attachInfo(src);
+      const a = { id: "a" + (++this._attSeq), src, origin: it.origin === "workspace" ? "workspace" : "local",
+        name: info.name, ext: info.ext, image: info.image, mediaType: info.mediaType || "", path: "", b64: null, state: "staging" };
+      this._atts.push(a);
+      added += 1;
+      void this._stage(a);
+      if (a.image) void this._thumb(a);
+    }
+    if (added) { this._renderAtts(); this.sync(); }
+  }
+
+  removeAttachment(id) {
+    const n = this._atts.length;
+    this._atts = this._atts.filter((a) => a.id !== id);
+    if (this._atts.length !== n) { this._renderAtts(); this.sync(); }
+  }
+
+  attachments() { return this._atts.slice(); }
+
+  async _stage(a) {
+    try {
+      const r = this.o.stage ? await this.o.stage(a) : { path: a.src };
+      if (!this._atts.includes(a)) return;
+      a.path = (r && r.path) || a.src;
+      a.state = "ready";
+    } catch (e) {
+      if (!this._atts.includes(a)) return;
+      this._atts = this._atts.filter((x) => x !== a);
+      this.o.attachError?.(a, e);
+    }
+    if (this._disposed) return;
+    this._renderAtts();
+    this.sync();
+  }
+
+  async _thumb(a) {
+    let b64 = null;
+    try { b64 = this.o.thumb ? await this.o.thumb(a) : null; } catch (_) { b64 = null; }
+    if (!this._atts.includes(a) || this._disposed) return;
+    if (b64) a.b64 = b64; else a.image = false;   // 못 읽으면 라벨 칩으로(8MB 초과 등)
+    this._renderAtts();
+  }
+
+  _renderAtts() {
+    if (!this.attEl) return;
+    this.attEl.classList.toggle("hidden", !this._atts.length);
+    this.attEl.innerHTML = this._atts.map((a) => {
+      const ext = a.ext ? escapeHtml(String(a.ext).toUpperCase().slice(0, 4)) : "";
+      const lead = a.b64 ? `<img class="chat-chip-thumb" src="data:${escapeHtml(a.mediaType || "image/png")};base64,${a.b64}" alt="">`
+        : a.image ? `<span class="chat-chip-thumb conv-thumb-wait"></span>`
+          : (ext ? `<span class="chat-chip-ext">${ext}</span>` : "");
+      return `<span class="chat-chip${a.state !== "ready" ? " staging" : ""}" data-id="${a.id}" title="${escapeHtml(a.src)}">${lead}`
+        + `<span class="chat-chip-label">${escapeHtml(a.name)}</span>`
+        + `<button class="chat-chip-x" type="button" title="${i18n.t('빼기')}">${icons.x({ size: 10 })}</button></span>`;
+    }).join("");
   }
 
   // ── 초안 ──
@@ -265,10 +366,10 @@ export class ConvComposer {
   async _pasteRouted(txt) {
     let paths = [];
     try { paths = await api.clipboardPaths(); } catch (_) { /* 이 빌드에 없으면 글자로 */ }
-    if (Array.isArray(paths) && paths.length) { this.insertPaths(paths); return; }
+    if (Array.isArray(paths) && paths.length) { this.addFiles(paths.map((p) => ({ path: p, origin: "local" }))); return; }
     let img = null;
     try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
-    if (img) { this.insertPaths([img]); return; }
+    if (img) { this.addFiles([{ path: img, origin: "local" }]); return; }
     if (txt) this.insertText(txt);
   }
 
@@ -382,13 +483,12 @@ export class ConvComposer {
     }).join("");
   }
 
+  // 고른 파일은 칩이 된다 — 그 워크스페이스(그 PC)의 홈 기준 경로라 옮길 것이 없다(attachPlan 'keep').
   _pickFile(full) {
     if (!full) return;
-    const r = relToRoot(this.o.cwd?.() || "", full);
     this._closePicker();
-    // 앞 글자에 붙으면 다른 이름이 된다 — 앞이 공백이 아니면 한 칸 띄운다(chat-model.insertPathAt 과 같은 규칙).
-    const before = this.text();
-    this.insertText((before && !/\s$/.test(before) ? " " : "") + r + " ");
+    this.addFiles([{ path: full, origin: "workspace" }]);
+    this.focus();
   }
 
   // ── 슬래시 명령 팔레트 ──

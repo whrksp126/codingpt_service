@@ -1144,5 +1144,13 @@ export default {
   "이 명령은 터미널에서만 쓸 수 있어요.": "Cette commande ne fonctionne que dans le terminal.",
   "작업을 끝내지 못했어요.": "Impossible de terminer le travail.",
   "터미널의 에이전트를 끝내지 못해 가져오지 못했어요.": "Impossible de reprendre : l'agent du terminal ne s'est pas arrêté.",
-  "파일 수정은 자동 허용": "Autoriser automatiquement les modifications de fichiers"
+  "파일 수정은 자동 허용": "Autoriser automatiquement les modifications de fichiers",
+  "모델": "Modèle",
+  "기본 모델": "Modèle par défaut",
+  "첨부는 한 번에 {n}개까지예요": "Tu peux joindre jusqu'à {n} fichiers à la fois",
+  "첨부하지 못했어요 · {name}": "Impossible de joindre · {name}",
+  "모델을 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.": "Impossible de changer de modèle — réessaie dans un instant.",
+  "대화에서 찾기": "Rechercher dans la conversation",
+  "이전 내역 더 불러오기": "Charger les messages précédents",
+  "첨부를 준비하는 중…": "Préparation des pièces jointes…"
 };

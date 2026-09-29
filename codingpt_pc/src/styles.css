@@ -2991,3 +2991,40 @@ button.au-chip, .au-chip { border: none; cursor: pointer; font-family: inherit; 
 .conv-dot.working { animation: chatWorkPulse 1.1s ease-in-out infinite; }
 .conv-dot.attention { background: var(--warn); }
 .conv-dot.error { background: var(--error); }
+
+/* ── 채팅 v2 — 첨부 칩·사용량 줄·에이전트/모델 고르기·대화 안 검색(§4.5) ── */
+/* 입력칸 아래 첨부 줄 — 칩 모양은 v1 과 같다(.chat-chip). 준비 중(복사·업로드)은 흐리게. */
+.conv-att { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 2px 0; }
+.conv-att.hidden { display: none; }
+.conv-att .chat-chip { margin: 0; cursor: pointer; }
+.conv-att .chat-chip.staging { opacity: 0.5; }
+.conv-att .chat-chip-x { display: inline-flex; align-items: center; }
+.conv-thumb-wait { display: block; background: var(--hover); }
+/* 보낸 말풍선 안 첨부 — 본문 아래 한 줄. 본문이 없으면 칩만. */
+.conv-att-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.chat-msg-user.att-only > .conv-att-row { margin-top: 0; }
+.conv-att-row .chat-chip { margin: 0; cursor: pointer; }
+.chat-msg-user.att-only { padding: 6px; }
+/* 컨트롤 행 왼쪽 알약 묶음(에이전트 · 모드) */
+.conv-ctl-left, .conv-ctl-pills { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.conv-agent.hidden { display: none; }
+/* 모델 — 헤더 오른쪽. 데몬이 목록을 줄 때만 보인다(없으면 숨김). */
+.conv-h-model {
+  flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 180px; height: 24px;
+  padding: 0 7px; margin-right: 2px; border: 1px solid var(--border-ctrl); border-radius: 999px;
+  background: transparent; color: var(--text2); font-family: var(--ui-font); font-size: 11.5px; cursor: pointer;
+}
+.conv-h-model:hover { background: var(--hover); color: var(--text); }
+.conv-h-model.hidden { display: none; }
+.conv-h-model.busy { opacity: 0.55; pointer-events: none; }
+.conv-h-model-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-pick-menu.head { top: 38px; bottom: auto; left: auto; right: 8px; min-width: 200px; }
+/* 사용량 줄 — 컴포저 아래 한 줄(v1 상태 줄과 같은 모양) */
+.conv-usage { padding: 5px 12px 0; cursor: pointer; }
+.conv-usage.hidden { display: none; }
+/* 대화 안 검색 — 헤더 아래에 뜬다(헤더 버튼을 가리지 않게). */
+.pane-conv > .conv-find { top: 42px; flex-wrap: wrap; max-width: calc(100% - 28px); }
+.conv-find-more { flex-basis: 100%; text-align: left; padding: 3px 4px 1px; }
+.conv-find-more.hidden { display: none; }
+::highlight(conv-find) { background-color: rgba(199, 139, 30, 0.30); }
+::highlight(conv-find-cur) { background-color: rgba(199, 139, 30, 0.62); }
