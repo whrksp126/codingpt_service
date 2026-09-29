@@ -325,6 +325,17 @@ export function activeWs() {
 export function wsRuntime(id) {
   return state.ws[id] || null;
 }
+/** 워크스페이스에 열린 터미널 수(사이드바 로컬 행 메타, agent-tasks-sidebar.md §2.7).
+ *  terminal leaf 들의 탭 중 실제 tmux 창(win 숫자)만 센다. 런타임이 없으면(아직 안 연 워크스페이스) null — 0 을 그리지 않는다. */
+export function wsTerminalCount(id) {
+  const rt = state.ws[id];
+  if (!rt || !rt.layout) return null;
+  let n = 0;
+  T.eachLeaf(rt.layout, (l) => {
+    if (l.kind === "terminal") n += (l.tabs || []).filter((t) => typeof t.win === "number").length;
+  });
+  return n;
+}
 export function isLocal(w) {
   return w && (w.compute === "local" || (!w.compute && w.localPath));
 }

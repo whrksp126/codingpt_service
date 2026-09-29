@@ -271,6 +271,47 @@ body.resizing-row { cursor: row-resize; }
 .wsr-dot.on { background: var(--accent); }
 .wsr-dot.off { background: var(--text-dim, #8b93a7); }
 .ws-row.ws-off { opacity: 0.55; } /* 꺼진 호스트 사본은 흐리게 */
+/* ── 저장소 트리(agent-tasks-sidebar.md §3.1, 2026-09-29) — 워크스페이스 = 그룹(머리 + 로컬 행 + 작업 행).
+   머리는 기존 .ws-row 지표 그대로(활성 표시는 로컬 행이 갖는다). 선택/활성은 무채색 명암, 색은 상태 점(.tv-dot)만. */
+.ws-group.ws-off { opacity: 0.55; } /* 꺼진 호스트 — 그룹 전체를 흐리게(머리에 또 주면 이중으로 흐려진다) */
+.wsg-head:focus { outline: none; }
+.wsg-head:focus-visible { box-shadow: inset 0 0 0 1px var(--text3); }
+.wsg-caret { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; color: var(--dim); margin-left: -2px; }
+.wsg-head:hover .wsg-caret { color: var(--text2); }
+.wsg-cnt, .wsg-fan {
+  display: inline-flex; align-items: center; gap: 3px; flex: none;
+  font-size: 10.5px; font-weight: 700; color: var(--text3); background: var(--elevated2);
+  border-radius: 4px; padding: 0 5px; line-height: 16px;
+}
+.wsg-cnt { margin-left: auto; }
+.wsg-cnt.warn::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--warn); margin-right: 1px; }
+.wsg-add {
+  display: none; align-items: center; gap: 3px; flex: none; margin-left: auto;
+  background: transparent; border: none; color: var(--dim); cursor: pointer;
+  padding: 3px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; line-height: 1;
+}
+.wsg-cnt + .wsg-add { margin-left: 4px; }
+.wsg-add:hover { background: var(--elevated2); color: var(--text2); }
+.wsg-head:hover .wsg-add, .wsg-head:focus-visible .wsg-add, .wsg-add:focus-visible { display: inline-flex; }
+.wsg-children { margin-bottom: 2px; }
+.wsg-child {
+  display: flex; align-items: center; gap: 7px; width: 100%; min-height: 30px;
+  padding: 5px 10px 5px 26px; margin-bottom: 1px; border-radius: var(--r-md);
+  background: transparent; border: none; color: var(--text2); font-size: 12.5px; font-weight: 500;
+  text-align: left; cursor: pointer; user-select: none; -webkit-user-select: none; transition: background 0.12s;
+}
+.wsg-child:hover { background: var(--elevated); }
+.wsg-child.active { background: var(--hover); color: var(--text); }
+.wsg-ic { display: inline-flex; flex: none; opacity: 0.85; }
+.wsg-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.wsg-meta { margin-left: auto; font-size: 10.5px; color: var(--dim); white-space: nowrap; flex: none; }
+.wsg-task { flex-direction: column; align-items: stretch; gap: 2px; }
+.wsg-line { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wsg-caret2 { display: inline-flex; flex: none; color: var(--dim); }
+.wsg-fan:hover, .wsg-caret2:hover { color: var(--text2); }
+.wsg-sub { padding-left: 22px; font-size: 11px; color: var(--dim); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wsg-subtx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.wsg-agent { padding-left: 42px; min-height: 26px; font-size: 12px; }
 /* LAN 직결 배지 — 액센트색 금지(액티브색 남용 금지 규칙). 릴레이는 배지 자체가 없다 = 정상 */
 .wsr-lan { font-size: 9.5px; font-weight: 700; color: var(--text-dim, #8b93a7); letter-spacing: -0.2px; flex: none; }
 

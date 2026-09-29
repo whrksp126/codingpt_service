@@ -3,12 +3,14 @@ import { state, isLocal } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { api } from "./api.js";
-import { icons } from "./icons.js";
+import { icons, agentMarkHtml } from "./icons.js";
 import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
-import { tasksIcon, needsInputCount, openTasksDashboard, closeTasksDashboard, openRunTerminal } from "./tasks-view.js";
+import { tasksIcon, dashboard, dashboardRows, agentName, openTasksDashboard, closeTasksDashboard, openRunTerminal } from "./tasks-view.js";
+import { buildSidebarTasks } from "./sidebar-tasks.js";
+import { isLocalHostId, hostHasTasks, serverHasTasks } from "./tasks-api.js";
 import { taskNotifTarget } from "./notifications.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
@@ -184,6 +186,9 @@ function closeNotif() {
 //  (emit 은 agent_state·리컨실러 등으로 수시로 오는데, 사이드바는 매번 아바타 <img> 까지 새로
 //   만들고 있었다 — 2026-08-15 성능 라운드. 여기 없는 값을 행 렌더에 새로 쓰면 반드시 추가할 것.)
 let sbSig = "";
+// 이번 렌더의 저장소 트리 파생(§2) — 시그니처 계산과 행 렌더가 같은 값을 쓴다(모델 1회 계산).
+let sbTree = { groups: {} };
+let sbTasksN = 0;
 export function updateSidebar() {
   if (!el) return;
   const totalUnread = state.notifications.filter((n) => !n.read).length;
@@ -191,7 +196,8 @@ export function updateSidebar() {
     const devices0 = S.pcDevices();
     const activeDev0 = S.activeDeviceId();
     const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
-    const tasksN = needsInputCount();
+    computeTree(activeDev0, wss0);
+    const tasksN = sbTasksN;
     const sig = JSON.stringify([
       tasksN,
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
@@ -203,14 +209,24 @@ export function updateSidebar() {
       wss0.map((w) => {
         const rt = S.wsRuntime(w.id);
         const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
+        const g = sbTree.groups[w.id];
         return [w.id, S.wsDisplayName(w), S.unreadForWs(w), S.wsPinned(w.id), S.wsColor(w.id),
           w.hostOnline, wsMissing(w), w.localPath, st?.status?.[0]?.value, st?.progress,
-          (rt?.ports || []).slice(0, 3)];
+          (rt?.ports || []).slice(0, 3),
+          // 저장소 트리(agent-tasks-sidebar.md §3.1) — 여기 없는 값은 화면에 반영되지 않는다.
+          groupCollapsed(w.id), w.git?.branch || "", S.wsTerminalCount(w.id),
+          g ? g.openCount : 0, g ? g.needsInput : false,
+          (g ? g.tasks : []).map((t) => [t.taskId, t.title, t.group, t.dot, t.sub.key, t.sub.diff?.a, t.sub.diff?.d,
+            t.fanout, fanExpanded.has(t.taskId), t.runs.map((r) => [r.runId, r.group, r.dot, r.agent, r.branch, r.workspaceId || null, r.tid || null])])];
       }),
     ]);
     if (sig === sbSig) return;
     sbSig = sig;
   }
+  // 재구축은 목록(스크롤 컨테이너)을 새로 만든다 — 스크롤 위치와 키보드 포커스를 옮겨 심지 않으면
+  //  그룹 토글·작업 상태 변화마다 맨 위로 튀고(더블클릭 두 번째 클릭이 엉뚱한 행에 떨어진다) 포커스가 사라진다.
+  const prevScroll = el.querySelector(".sb-list")?.scrollTop || 0;
+  const focusSel = focusKey(el);
   el.innerHTML = "";
   if (sbGrip) el.appendChild(sbGrip); // 리사이즈 핸들 재부착(innerHTML 초기화로 떨어짐)
 
@@ -267,8 +283,10 @@ export function updateSidebar() {
     if (state.wsError && !state.workspaces.length) list.appendChild(note(i18n.t('목록을 불러오지 못했습니다')));
     else list.appendChild(note(i18n.t('+ 로 이 PC의 폴더를 추가하세요')));
   }
-  for (const w of wss) list.appendChild(wsRow(w));
+  for (const w of wss) list.appendChild(wsGroup(w, sbTree.groups[w.id] || null));
   el.appendChild(list);
+  if (prevScroll) list.scrollTop = prevScroll;
+  if (focusSel) { try { list.querySelector(focusSel)?.focus({ preventScroll: true }); } catch (_) {} }
 
   // 하단: 내 정보.
   const online = state.daemon?.running && state.daemon?.paired;
@@ -422,24 +440,21 @@ export function buildTopControls(_withAdd = true) {
     badge.textContent = totalUnread > 9 ? "9+" : String(totalUnread);
     bell.appendChild(badge);
   }
-  // 작업 현황판 — 벨 옆(§6.1 진입점). 켜짐 표시는 색이 아니라 기존 ic-btn 호버 명암 규칙 그대로.
-  const tasks = document.createElement("button");
-  tasks.className = "ic-btn" + (state.view === "tasks" ? " on" : "");
-  tasks.title = tt("dashboard");
-  tasks.innerHTML = tasksIcon(TITLEBAR_ICON);
-  tasks.addEventListener("click", () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()));
-  frag.append(toggle, bell, tasks);
+  //  작업 현황판 진입은 사이드바 행 하나로만(타이틀바 아이콘은 사용자 지시로 제거 2026-09-29 — 진입점 중복).
+  frag.append(toggle, bell);
   return frag;
 }
 
-/** 사이드바 `작업 [n]` 행 — 현황판 진입. 선택(현황판이 열림)은 PC 행과 같은 배경 명암(--hover)으로만. */
+/** 사이드바 `진행 현황 [n]` 행 — 현황판 진입(모든 PC·워크스페이스의 에이전트를 상태별로 보는 **뷰**).
+ *  작업을 "만드는 곳" 은 워크스페이스 그룹의 `+ 작업` 이다(agent-tasks-sidebar.md §0-1).
+ *  선택(현황판이 열림)은 PC 행과 같은 배경 명암(--hover)으로만. */
 function tasksRow() {
-  const n = needsInputCount();
+  const n = sbTasksN;
   const row = document.createElement("button");
   row.className = "pc-row tasks-row" + (state.view === "tasks" ? " active" : "");
   row.innerHTML =
     `<span class="pc-ic">${tasksIcon({ size: 15 })}</span>` +
-    `<span class="pc-nm">${escapeHtml(tt("title"))}</span>` +
+    `<span class="pc-nm">${escapeHtml(tt("overview"))}</span>` +
     (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()));
   return row;
@@ -521,35 +536,153 @@ function wsMissing(w) {
   return !!w?.git?.missing || localMissing.get(w.id) === true;
 }
 
+// ── 저장소 트리(agent-tasks-sidebar.md, 2026-09-29) ─────────────────────────────
+//  사용자가 "작업(worktree)" 과 "워크스페이스(폴더)" 를 구분하지 못했다 → 워크스페이스 = 그룹, 그 아래
+//  첫 자식 `로컬 · <branch>`(폴더에서 직접 작업 = 예전 행 클릭) + 열린 worktree 작업 행들.
+//  판정은 sidebar-tasks.js(앱과 픽스처로 교차 검증)가 하고, 여기는 입력을 모으고 그리기만 한다.
+const GROUP_COLLAPSED_KEY = "cpt.sbGroupCollapsed.v1";
+let collapsedGroups = null;             // { [wsId]: 1 } — 접힌 것만(기본 펼침). localStorage 영속.
+const fanExpanded = new Set();          // 팬아웃을 펼친 taskId — 세션 한정(영속 X, §4)
+function loadCollapsed() {
+  if (collapsedGroups) return collapsedGroups;
+  collapsedGroups = {};
+  try {
+    const v = JSON.parse(localStorage.getItem(GROUP_COLLAPSED_KEY) || "{}");
+    if (v && typeof v === "object" && !Array.isArray(v)) collapsedGroups = v;
+  } catch (_) {}
+  return collapsedGroups;
+}
+function groupCollapsed(wsId) { return !!loadCollapsed()[wsId]; }
+/** 재구축 전 포커스가 트리 행에 있었다면 새 DOM 에서 같은 행을 찾을 선택자(없으면 null). */
+function focusKey(root) {
+  const a = document.activeElement;
+  if (!a || !root.contains(a)) return null;
+  const q = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/["\\]/g, "\\$&"));
+  if (a.classList.contains("wsg-head") && a.dataset.wsId) return `.wsg-head[data-ws-id="${q(a.dataset.wsId)}"]`;
+  if (a.classList.contains("wsg-local") && a.dataset.wsLocal) return `.wsg-local[data-ws-local="${q(a.dataset.wsLocal)}"]`;
+  if (a.classList.contains("wsg-task") && a.dataset.taskId) return `.wsg-task[data-task-id="${q(a.dataset.taskId)}"]`;
+  if (a.classList.contains("wsg-agent") && a.dataset.runId) return `.wsg-agent[data-run-id="${q(a.dataset.runId)}"]`;
+  return null;
+}
+function toggleGroup(wsId) {
+  const m = loadCollapsed();
+  if (m[wsId]) delete m[wsId]; else m[wsId] = 1;
+  try { localStorage.setItem(GROUP_COLLAPSED_KEY, JSON.stringify(m)); } catch (_) {}
+  updateSidebar();
+}
+function toggleFan(taskId) {
+  if (fanExpanded.has(taskId)) fanExpanded.delete(taskId); else fanExpanded.add(taskId);
+  updateSidebar();
+}
+
+/** 이번 렌더의 트리 + `진행 현황` 배지 수를 계산한다(현황판 모델은 한 번만 돈다). */
+function computeTree(activeDev, wss) {
+  let dash = null;
+  try { dash = dashboard(); } catch (_) { dash = null; }
+  sbTasksN = dash ? dash.counts.needs_input : 0;
+  const host = Number(activeDev);
+  if (!dash || !Number.isFinite(host) || host <= 0) { sbTree = { groups: {} }; return; }
+  // 서버 미가용(캐시 목록) — 다른 PC 버킷은 조회할 수 없으니 이 PC 의 것만(§6).
+  const bucket = state.wsStale && !isLocalHostId(state, host) ? null : state.tasks.byHost[String(host)];
+  try {
+    sbTree = buildSidebarTasks({
+      host,
+      workspaces: wss.map((w) => ({ id: w.id, localPath: w.localPath || "" })),
+      tasks: (bucket && bucket.items) || [],
+      rows: dashboardRows(dash),
+    });
+  } catch (_) { sbTree = { groups: {} }; }
+}
+
+/** 워크스페이스 열기 — 예전 wsRow 클릭 본문 그대로(로컬 행 클릭·머리 더블클릭). */
+function openWs(w) {
+  // 유령(폴더 소실) — 열지 않고 안내 다이얼로그(목록에서 삭제 제안)만.
+  if (wsMissing(w)) { showMissingDialog(w); return; }
+  // 오프라인(캐시 목록): 이 PC 것만 진입. 캐시의 hostOnline 은 옛 판정이므로 "온라인 사본 제안"
+  //  흐름(=거짓 정보)을 태우지 않고, 내 PC 워크스페이스는 로컬 직결로 그냥 연다.
+  if (state.wsStale) {
+    if (!S.isThisHost(w)) { S.blockedOffline(i18n.t('다른 기기의 워크스페이스 열기')); return; }
+    S.setActive(w.id);
+    return;
+  }
+  // ★ 프로젝트 그룹핑 폐기(2026-08-14)로 "켜진 사본으로 갈아타기" 제안도 함께 없앴다 — 사본이라는
+  //  개념 자체가 화면에서 사라졌으므로, 꺼진 PC 의 워크스페이스를 누르면 그냥 그것을 연다.
+  //  (호스트가 꺼져 있다는 사실은 위 기기 행의 상태점과 이 행의 흐린 표시가 이미 말한다.)
+  S.setActive(w.id);
+}
+
+/** 그룹 = 머리(.ws-row.wsg-head — 예전 워크스페이스 행 DOM) + 펼침이면 자식들. */
+function wsGroup(w, g) {
+  const local = isLocal(w);
+  const online = local ? (w.hostOnline !== false) : true;
+  const wrap = document.createElement("div");
+  wrap.className = "ws-group" + (online ? "" : " ws-off");
+  wrap.dataset.wsGroup = w.id;
+  const folded = groupCollapsed(w.id);
+  wrap.appendChild(wsHead(w, g, folded));
+  if (!folded) {
+    const kids = document.createElement("div");
+    kids.className = "wsg-children";
+    kids.appendChild(localRow(w));
+    for (const t of (g && g.tasks) || []) {
+      kids.appendChild(taskRow(w, t));
+      if (t.runs.length && fanExpanded.has(t.taskId)) for (const r of t.runs) kids.appendChild(agentRow(w, t, r));
+    }
+    wrap.appendChild(kids);
+  }
+  return wrap;
+}
+
 // ★ 2026-08-14: `group`(프로젝트 묶음) 인자는 없어졌다. 이제 행은 **고른 PC 의 워크스페이스** 하나이고,
 //  호스트 이름·상태점·직결 배지는 위 기기 행이 이미 말한다 → 행에서 중복 제거(이름과 경로만 남는다).
-function wsRow(w) {
+// ★ 2026-09-29: 행은 그룹 머리가 됐다. 클릭 = 펼침/접힘, 더블클릭 = 열기(로컬 행과 동일). 활성 표시는 로컬 행이 갖는다.
+//  안에 `+ 작업` 버튼이 들어가야 해서 <button> 이 아니라 role=button 인 div 다(버튼 안 버튼은 무효 HTML).
+let lastHeadClick = null; // { w, at } — 머리 더블클릭 대상 고정(재구축 사이에도)
+function wsHead(w, g, folded) {
   const rt = S.wsRuntime(w.id);
   const unread = S.unreadForWs(w);
-  const local = isLocal(w);
   const color = S.wsColor(w.id);
   const pinned = S.wsPinned(w.id);
-  const online = local ? (w.hostOnline !== false) : true;
-  const row = document.createElement("button");
-  row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "") + (online ? "" : " ws-off");
+  const row = document.createElement("div");
+  row.className = "ws-row wsg-head";
+  row.setAttribute("role", "button");
+  row.tabIndex = 0;
+  row.setAttribute("aria-expanded", folded ? "false" : "true");
   row.draggable = true;
   row.dataset.wsId = w.id;
   if (color) row.style.boxShadow = `inset 3px 0 0 ${color}`;
 
+  const openN = g ? g.openCount : 0;
   const name = document.createElement("div");
   name.className = "wsr-name";
   name.innerHTML =
+    `<span class="wsg-caret">${folded ? icons.chevronRight({ size: 14 }) : icons.chevronDown({ size: 14 })}</span>` +
     (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
-    (unread ? `<span class="wsr-badge">${unread}</span>` : "");
+    (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
+    (folded && openN ? `<span class="wsg-cnt${g.needsInput ? " warn" : ""}" title="${escapeHtml(tt("openTasksN", { n: openN }))}">${icons.gitBranch({ size: 11 })}${openN}</span>` : "");
+  const add = document.createElement("button");
+  add.className = "wsg-add";
+  add.title = tt("addTask");
+  add.setAttribute("aria-label", tt("addTask"));
+  add.innerHTML = icons.plus({ size: 13 }) + `<span>${escapeHtml(tt("title"))}</span>`;
+  add.addEventListener("click", (e) => {
+    e.stopPropagation();   // 머리 토글 방지
+    if (S.blockedOffline(tt("newTask"))) return;
+    const host = Number(w.hostDeviceId ?? state.daemon?.deviceId);
+    // 시트는 받을 수 없는 host 면 조용히 이 PC·첫 저장소로 바꿔 연다(new-task-sheet.js hosts()) —
+    //  엉뚱한 저장소에 작업이 만들어지지 않게, 시트와 같은 조건으로 여기서 먼저 막고 이유를 말한다.
+    const why = addTaskBlocked(w, host);
+    if (why) { import("./workspace-view.js").then((m) => m.wvToast(tt(why))).catch(() => {}); return; }
+    import("./new-task-sheet.js").then((m) => m.openNewTaskSheet({ host, wsId: w.id })).catch(() => {});
+  });
+  add.addEventListener("dblclick", (e) => e.stopPropagation());
+  name.appendChild(add);
 
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
-  // 호스트 이름·온라인 점·직결 배지는 **기기 행**이 담당한다 — 여기 다시 쓰면 같은 말이 두 줄이다.
-  //  이 줄에 남는 것은 그 워크스페이스에서만 알 수 있는 것(원격 상태 스트림)뿐이다.
-  meta.innerHTML = "";
-
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
+  //  (상태 스트림·포트는 폴더의 것이라 머리에 남는다 — §3.1)
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
   const stText = st?.status?.[0]?.value;
   if (stText || typeof st?.progress === "number") {
@@ -561,9 +694,8 @@ function wsRow(w) {
   }
 
   row.append(name);
-  if (meta.innerHTML) row.append(meta); // 빈 meta 줄(그룹 멤버 + 상태 배지 없음)은 여백만 남으니 생략
-  const missing = wsMissing(w);
-  if (missing) {
+  if (meta.innerHTML) row.append(meta);
+  if (wsMissing(w)) {
     // 유령 — 경로 서브라벨 대신 소실 라벨(오프라인 라벨 톤, 위험 뉘앙스 과하지 않게).
     const miss = document.createElement("div");
     miss.className = "wsr-path wsr-missing";
@@ -584,23 +716,93 @@ function wsRow(w) {
   }
   row.addEventListener("click", (e) => {
     if (row.classList.contains("dragging")) return;
-    // 유령(폴더 소실) — 열지 않고 안내 다이얼로그(목록에서 삭제 제안)만.
-    if (wsMissing(w)) { showMissingDialog(w); return; }
-    // 오프라인(캐시 목록): 이 PC 것만 진입. 캐시의 hostOnline 은 옛 판정이므로 "온라인 사본 제안"
-    //  흐름(=거짓 정보)을 태우지 않고, 내 PC 워크스페이스는 로컬 직결로 그냥 연다.
-    if (state.wsStale) {
-      if (!S.isThisHost(w)) { S.blockedOffline(i18n.t('다른 기기의 워크스페이스 열기')); return; }
-      S.setActive(w.id);
-      return;
-    }
-    // ★ 프로젝트 그룹핑 폐기(2026-08-14)로 "켜진 사본으로 갈아타기" 제안도 함께 없앴다 — 사본이라는
-    //  개념 자체가 화면에서 사라졌으므로, 꺼진 PC 의 워크스페이스를 누르면 그냥 그것을 연다.
-    //  (호스트가 꺼져 있다는 사실은 위 기기 행의 상태점과 이 행의 흐린 표시가 이미 말한다.)
-    S.setActive(w.id);
+    if (e.target.closest?.(".wsr-rename")) return;
+    // 더블클릭의 두 번째 클릭이 (재구축으로) 다른 그룹 머리에 떨어졌다면 그 그룹은 건드리지 않는다.
+    if (e.detail >= 2 && lastHeadClick && lastHeadClick.w.id !== w.id) return;
+    lastHeadClick = { w, at: Date.now() };
+    toggleGroup(w.id);
+  });
+  row.addEventListener("dblclick", (e) => {
+    if (e.target.closest?.(".wsr-rename")) return;
+    // 열기 대상 = 첫 클릭을 받은 머리(두 번째 클릭 위치가 아니라).
+    const first = lastHeadClick && Date.now() - lastHeadClick.at < 800 ? lastHeadClick.w : w;
+    openWs(first);
+  });
+  row.addEventListener("keydown", (e) => {
+    if (e.target !== row) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(w.id); }
   });
   row.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   bindWsDrag(row, w);
   return row;
+}
+
+/** `+ 작업` 을 이 host 로 열 수 없는 이유(tasks 문구 키) — 새 작업 시트 hosts() 필터와 같은 조건. */
+function addTaskBlocked(w, host) {
+  if (!Number.isFinite(host) || host <= 0) return "noHost";
+  const dev = S.pcDevices().find((d) => typeof d.id === "number" && Number(d.id) === host);
+  if (w.hostOnline === false || !dev || dev.online === false) return "hostOffline";
+  if (hostHasTasks(host) === false) return "pcNeedsUpdate";
+  if (serverHasTasks() === false && !isLocalHostId(state, host)) return "serverNeedsUpdate";
+  return null;
+}
+
+/** 첫 자식 `로컬 · <branch>` — 폴더에서 직접 작업(= 예전 워크스페이스 행 클릭). 활성 표시는 여기. */
+function localRow(w) {
+  const b = document.createElement("button");
+  const active = w.id === state.activeWsId && state.view === "workspace";
+  b.className = "wsg-child wsg-local" + (active ? " active" : "");
+  b.dataset.wsLocal = w.id;
+  const branch = w.git?.branch || "";
+  const n = S.wsTerminalCount(w.id);
+  b.innerHTML =
+    `<span class="wsg-ic">${icons.folder({ size: 15 })}</span>` +
+    `<span class="wsg-title">${escapeHtml(tt("local") + (branch ? " · " + branch : ""))}</span>` +
+    (n ? `<span class="wsg-meta">${escapeHtml(tt("terminalsN", { n }))}</span>` : "");
+  b.addEventListener("click", () => openWs(w));
+  return b;
+}
+
+/** 작업 행 — 제목 + (팬아웃 ×N · 캐럿) / 부제(상태 점 + 상태 문구 · diff). 클릭 = 현황판 그 작업 상세. */
+function taskRow(w, t) {
+  const host = Number(S.activeDeviceId());
+  const b = document.createElement("button");
+  b.className = "wsg-child wsg-task";
+  b.dataset.taskId = t.taskId;
+  const fan = t.runs.length > 0;
+  const open = fan && fanExpanded.has(t.taskId);
+  const subText = tt(t.sub.key) + (t.sub.diff ? " · " + tt("diffStat", { a: t.sub.diff.a, d: t.sub.diff.d }) : "");
+  const dotCls = t.dot === "none" ? "" : " " + t.dot;
+  b.innerHTML =
+    `<span class="wsg-line"><span class="wsg-ic">${icons.gitBranch({ size: 15 })}</span>` +
+    `<span class="wsg-title">${escapeHtml(t.title || tt("title"))}</span>` +
+    (fan ? `<span class="wsg-fan">×${t.fanout}</span><span class="wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "") +
+    `</span>` +
+    `<span class="wsg-sub"><span class="tv-dot${dotCls}"></span><span class="wsg-subtx">${escapeHtml(subText)}</span></span>`;
+  b.addEventListener("click", (e) => {
+    if (fan && e.target.closest?.(".wsg-fan, .wsg-caret2")) { e.stopPropagation(); toggleFan(t.taskId); return; }
+    openTasksDashboard({ taskId: t.taskId, host });
+  });
+  return b;
+}
+
+/** 팬아웃 에이전트 자식 행 — 클릭 = 그 run 의 터미널(작업 워크스페이스 미등록이면 현황판 상세로). */
+function agentRow(w, t, r) {
+  const host = Number(S.activeDeviceId());
+  const b = document.createElement("button");
+  const active = !!r.workspaceId && r.workspaceId === state.activeWsId && state.view === "workspace";
+  b.className = "wsg-child wsg-agent" + (active ? " active" : "");
+  b.dataset.runId = r.runId;
+  const dotCls = r.dot === "none" ? "" : " " + r.dot;
+  b.innerHTML =
+    `<span class="wsg-ic">${agentMarkHtml(r.agent, { size: 14 }) || icons.terminal({ size: 14 })}</span>` +
+    `<span class="wsg-title">${escapeHtml(agentName(r.agent) + (r.branch ? " · " + r.branch : ""))}</span>` +
+    `<span class="tv-dot${dotCls}"></span>`;
+  b.addEventListener("click", () => {
+    if (r.workspaceId) void openRunTerminal(r.workspaceId, r.tid, { task: true });
+    else openTasksDashboard({ taskId: t.taskId, runId: r.runId, host });
+  });
+  return b;
 }
 
 // ── 워크스페이스 드래그앤드롭 순서 변경 ──
