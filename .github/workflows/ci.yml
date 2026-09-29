@@ -1,5 +1,5 @@
 # 최소 CI — push/PR 마다 핵심 안전장치를 검증한다.
-#  back: 순수 유닛 테스트(그룹핑 키·릴리스 semver) · daemon: fs 홈 jail·신선도 git 판정
+#  back: 순수 유닛 테스트(그룹핑 키·릴리스 semver) · daemon: runner-core 전체(tmux·node-pty 실구동 포함)
 #  pc: JS/셸 문법(cargo check 는 macOS 러너 비용 문제로 제외 — 로컬 훅/개발 흐름이 커버)
 #  front: next build(프로드 배포가 서버에서 빌드하므로 깨짐을 여기서 먼저 잡는다)
 name: ci
@@ -7,6 +7,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   back:
@@ -26,9 +27,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_daemon/package-lock.json }
-      # --ignore-scripts: node-pty 네이티브 빌드 생략(테스트는 pty 무접촉 — freshness 가 지연 require)
+      # 터미널 테스트는 실제 tmux(격리 소켓)와 node-pty 로 돈다 — 둘 다 없으면 pty.js 로드부터 실패한다.
+      #  (node-pty 1.x 는 linux 프리빌드가 없다 → --ignore-scripts 로 설치한 뒤 node-pty 만 소스 빌드.)
+      - name: tmux
+        run: command -v tmux >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq tmux; }; tmux -V
       - run: npm ci --ignore-scripts
-      - run: node --test packages/runner-core/test/*.test.js
+      - run: npm rebuild node-pty
+      # npm test = run-tests.js(CPT_SHIM_NO_GLOBAL_LINK=1 주입 — 러너 홈 전역 심링크/훅 병합 OFF)
+      - run: npm test
 
   pc-js:
     runs-on: ubuntu-latest
