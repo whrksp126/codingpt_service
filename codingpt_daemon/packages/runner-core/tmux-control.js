@@ -58,6 +58,10 @@ class TmuxControl extends EventEmitter {
     const args = ['-L', this.socket, '-u', '-C', 'attach-session', '-t', '=' + this.session];
     this.child = spawn(this.tmux, args, { env: this.env, stdio: ['pipe', 'pipe', 'pipe'] });
     this.child.stdout.on('data', (d) => this._feed(d));
+    // ★ tmux 가 먼저 죽은 뒤(kill-server·마지막 셸 exit) close() 의 'detach' 나 대기 중 command 가
+    //  stdin 에 쓰면 EPIPE 가 **비동기 'error'** 로 온다 — 리스너가 없으면 데몬이 uncaught 로 죽는다
+    //  (리눅스 CI 에서 재현). 종료 처리는 'exit' 핸들러가 이미 하므로 여기선 삼키기만 한다.
+    this.child.stdin.on('error', () => { /* 자식이 먼저 죽었다 — exit 가 정리한다 */ });
     this.child.stderr.on('data', (d) => this.emit('stderr', String(d)));
     this.child.on('exit', (code, sig) => {
       this.closed = true;

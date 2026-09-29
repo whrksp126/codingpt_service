@@ -124,7 +124,8 @@ function normalizeDirs(list) {
   for (const d of (Array.isArray(list) ? list : [])) { const a = absDir(d); if (a && !out.includes(a)) out.push(a); }
   return out;
 }
-function dirId(d) { const a = absDir(d); const home = os.homedir(); return a.startsWith(home + path.sep) ? path.relative(home, a) : a; }
+// 워크스페이스 id 는 OS 와 무관하게 `/` 구분자(fs.js relToRoot 와 같은 모양) — win32 에서 `\\` 로 돌려주면 PC 앱 id 와 안 맞는다.
+function dirId(d) { const a = absDir(d); const home = os.homedir(); return a.startsWith(home + path.sep) ? path.relative(home, a).split(path.sep).join('/') : a; }
 function legacyOsKind() { const r = loadRaw(); return r.osKind === 'linux' ? 'linux' : 'macos'; }
 /** OS별 설정을 흡수(마이그레이션)해 돌려준다. provisioned 는 OS별 키(macos=provisioned·linux=provisionedLinux) 도 흡수. */
 function osSettings(osk) {
