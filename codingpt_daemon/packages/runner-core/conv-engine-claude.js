@@ -635,6 +635,9 @@ function resumeCommand(sessionId) {
 module.exports = {
   id: 'claude',
   modes: MODES.slice(),
+  // 모델 별칭 — CLI 가 --model/set_model 로 받는 공식 별칭(최신 버전으로 풀린다). 2026-09-30 실측: 턴 사이 set_model haiku
+  //  → control success, 다음 init·assistant 가 claude-haiku-4-5 로 바뀜. 목록이 비면 클라는 모델 선택을 숨긴다.
+  models: [{ id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }],
   label, locate, loginState, sessionFile, sessions, importLine, resumeCommand, resumeArgs, start, buildEnv,
   createParser, argsFor, toMsgs, contextTokensOf, modelUsageOf, rateOf,
   TEXT_CAP, COALESCE_MS,

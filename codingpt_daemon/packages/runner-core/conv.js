@@ -1180,7 +1180,7 @@ const HANDLERS = {
       if (!a) continue;
       let found = null;
       try { found = await a.locate(); } catch (_) { found = null; }
-      agents.push({ id: a.id, label: a.label(), available: !!(found && found.bin), version: (found && found.version) || null });
+      agents.push({ id: a.id, label: a.label(), available: !!(found && found.bin), version: (found && found.version) || null, models: Array.isArray(a.models) ? a.models.slice() : [] });
     }
     const modes = (adapterOf('claude') || { modes: [] }).modes;
     return { enabled: true, agents, modes, maxLive: MAX_LIVE };

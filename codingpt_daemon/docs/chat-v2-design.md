@@ -216,7 +216,7 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
 
 | 메서드 | params | 결과 |
 |---|---|---|
-| `conv.caps` | `{}` | `{ enabled, agents:[{id,label,available,version}], modes:[…], maxLive }` |
+| `conv.caps` | `{}` | `{ enabled, agents:[{id,label,available,version,models:[{id,label}]}], modes:[…], maxLive }` |
 | `conv.list` | `{ cwd?, limit?, includeExternal? }` | `{ threads:[Thread] }` lastAt 내림차순 |
 | `conv.create` | `{ cwd, agent?, mode?, model?, text?, clientId?, attachments? }` | `{ thread, seq? }` |
 | `conv.open` | `{ threadId, limit?, cwd? }` | `{ thread, events, headSeq, floorSeq, live, pending }` |

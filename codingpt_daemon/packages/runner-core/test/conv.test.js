@@ -1063,3 +1063,10 @@ test('사용 한도 경고 — 안내 없이 thread.usage.rateLimit 에만, 실�
   t = (await rpc('conv.open', { threadId: id })).thread;
   assert.strictEqual(t.usage.rateLimit.blocked, true);
 });
+
+test('conv.caps 는 에이전트별 모델 별칭을 싣는다(클라 모델 선택의 근거)', () => {
+  const claude = require('../conv-engine-claude');
+  assert.deepStrictEqual(claude.models.map((m) => m.id), ['opus', 'sonnet', 'haiku']);
+  const src = fs.readFileSync(path.join(__dirname, '..', 'conv.js'), 'utf8');
+  assert.match(src, /models: Array\.isArray\(a\.models\) \? a\.models\.slice\(\) : \[\]/);
+});
