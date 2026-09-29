@@ -788,7 +788,7 @@ export default {
   "텍스트로 열기": "Open as text",
   "통과": "Passed",
   "파일": "Files",
-  "파일 {n}개": "{n} files",
+  "파일 {n}개": "Files: {n}",
   "파일 내 검색": "Search in the file",
   "파일 넣기": "Insert a file",
   "파일 목록을 읽는 중…": "Reading the file list…",

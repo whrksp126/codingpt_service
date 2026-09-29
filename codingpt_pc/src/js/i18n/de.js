@@ -788,7 +788,7 @@ export default {
   "텍스트로 열기": "Als Text öffnen",
   "통과": "Bestanden",
   "파일": "Dateien",
-  "파일 {n}개": "{n} Dateien",
+  "파일 {n}개": "Dateien: {n}",
   "파일 내 검색": "In der Datei suchen",
   "파일 넣기": "Datei einfügen",
   "파일 목록을 읽는 중…": "Dateiliste wird gelesen…",
