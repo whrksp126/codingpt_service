@@ -2555,3 +2555,145 @@ img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에�
 .emu-note { color: var(--dim); font-size: 11px; padding: 6px 10px; line-height: 1.5; border-top: 1px solid var(--border); }
 .emu-again { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 0;
   background: none; border: 0; color: var(--text3); font-size: 12px; cursor: pointer; }
+
+/* ── Agent Tasks(설계 §6) — 현황판(.tasks-view) · 상세(.td-*) · 시트(.tk-*) ──────────────────────
+   규율: 선택/활성 = 무채색 명암(--hover/--elevated2)만. 색은 상태 신호(점·배지·에러 문구)에만 쓴다:
+   warn = 입력 대기 · error = 실패/CI 실패 · cta = PR 머지 가능/성공 · text3 점멸 = 작업 중. */
+.tasks-view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--base); outline: none; }
+.tasks-view[hidden] { display: none; }
+/* 현황판이 메인 영역을 대신 쓰는 동안 워크스페이스 뷰는 hidden — `.ws-view{display:flex}` 가 UA [hidden] 을 이기므로 명시한다
+   (안 하면 두 뷰가 나란히 선다. display:none 이라 프리뷰 슬롯 rect 가 0 → 네이티브 웹뷰도 내려간다). */
+.ws-view[hidden] { display: none; }
+.tv-top {
+  flex: none; display: flex; align-items: center; gap: 8px;
+  height: var(--titlebar-h); padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+  user-select: none; -webkit-user-select: none;
+}
+.shell.sb-collapsed .tv-top { padding-left: var(--titlebar-inset-left); }
+.tv-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.tv-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); }
+.tv-back:hover { background: var(--elevated2); }
+.tv-body { flex: 1; min-height: 0; display: flex; }
+.tv-list { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 10px 24px; }
+.tasks-view.tv-wide .tv-list { flex: none; width: 360px; border-right: 1px solid var(--border); }
+.tv-detail { flex: 1; min-width: 0; overflow-y: auto; }
+.tv-detail-empty { padding: 40px 20px; text-align: center; color: var(--dim); font-size: 13px; }
+.tv-btn {
+  border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
+  border-radius: var(--r-sm); padding: 4px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.tv-btn:hover:not(:disabled) { background: var(--hover); }
+.tv-btn:disabled { opacity: 0.45; cursor: default; }
+.tv-btn.ghost { background: transparent; color: var(--text2); }
+.tv-btn.ghost:hover:not(:disabled) { background: var(--elevated2); }
+.tv-btn.danger { color: var(--error); }
+.tv-banner { margin: 4px 0 8px; padding: 8px 10px; border-radius: var(--r-md); border: 1px solid var(--border-ctrl); color: var(--text2); font-size: 12.5px; background: var(--elevated); }
+.tv-empty { padding: 48px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.tv-empty-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.tv-empty-hint { font-size: 12.5px; color: var(--text3); max-width: 320px; line-height: 1.5; }
+.tv-group {
+  width: 100%; display: flex; align-items: center; gap: 6px; margin-top: 8px; padding: 6px 4px;
+  background: transparent; border: none; color: var(--dim); cursor: pointer; text-align: left;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.tv-caret { display: inline-flex; }
+.tv-count { margin-left: 2px; color: var(--text3); font-weight: 600; }
+.tv-card {
+  border: 1px solid var(--border); background: var(--elevated); border-radius: var(--r-md);
+  padding: 9px 10px; margin: 4px 0; cursor: pointer; outline: none;
+}
+.tv-card:hover { background: var(--elevated2); }
+.tv-card.selected { background: var(--hover); border-color: var(--border-ctrl); }
+.tv-card.kbd { border-color: var(--text3); }
+.tvc-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.tvc-logo { display: inline-flex; flex: none; }
+.tvc-who { font-size: 13px; font-weight: 700; color: var(--text); flex: none; }
+.tvc-where { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.tvc-status { display: flex; align-items: center; gap: 7px; margin-top: 5px; font-size: 12.5px; color: var(--text2); min-width: 0; }
+.tvc-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tvc-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tvc-appr { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.tvc-appr-sum { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: var(--text2); white-space: pre-wrap; word-break: break-word; }
+.tvc-appr-sum .ic { flex: none; margin-top: 2px; }
+.tv-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; background: transparent; box-shadow: inset 0 0 0 1px var(--border-ctrl); }
+.tv-dot.warn { background: var(--warn); box-shadow: none; }
+.tv-dot.error { background: var(--error); box-shadow: none; }
+.tv-dot.cta { background: var(--cta); box-shadow: none; }
+.tv-dot.off { background: var(--dim); box-shadow: none; opacity: 0.6; }
+.tv-dot.spin { background: var(--text3); box-shadow: none; animation: tvPulse 1.2s ease-in-out infinite; }
+@keyframes tvPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .tv-dot.spin { animation: none; } }
+.tv-offline { display: flex; align-items: center; gap: 8px; padding: 8px 6px; font-size: 12.5px; color: var(--text2); }
+.tv-sub, .td-sub { color: var(--text3); font-size: 12px; }
+.tasks-row .wsr-badge { background: var(--warn); color: #1a1300; }
+.sb-top .ic-btn.on, .main-top .ic-btn.on { color: var(--text); opacity: 1; }
+
+/* 워크스페이스 헤더 — 작업 워크스페이스 배지 + [현황판] */
+.mt-task-badge { font-size: 12px; color: var(--text2); background: var(--elevated2); border-radius: var(--r-sm); padding: 2px 8px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-task-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: var(--text3); font-size: 12px; cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); }
+.mt-task-back:hover { background: var(--elevated2); color: var(--text2); }
+
+/* 상세 */
+.td { padding: 14px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
+.td-head { display: flex; flex-direction: column; gap: 5px; }
+.td-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.td-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--text3); align-items: center; }
+.td-chip { font-size: 11px; font-weight: 700; color: var(--text2); background: var(--elevated2); border-radius: 999px; padding: 1px 8px; }
+.td-err, .td-run-line.err { color: var(--error); font-size: 12.5px; }
+.td-prompt summary { cursor: pointer; font-size: 12.5px; color: var(--text2); }
+.td-prompt pre { white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 12px; color: var(--text2); background: var(--elevated); border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px; margin: 6px 0 0; max-height: 260px; overflow: auto; }
+.td-runs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.td-run { flex: 0 0 calc((100% - 20px) / 3); min-width: 220px; border: 1px solid var(--border); background: var(--elevated); border-radius: var(--r-md); padding: 10px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.td-run.selected { background: var(--hover); border-color: var(--border-ctrl); }
+.td-run.dim { opacity: 0.55; }
+.td-run-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: var(--text); }
+.td-run-line { font-size: 12px; color: var(--text2); }
+.td-run-branch { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.td-sel { display: flex; flex-direction: column; gap: 10px; }
+.td-pr { display: flex; flex-direction: column; gap: 8px; }
+.td-hint { border: 1px solid var(--border-ctrl); border-radius: var(--r-md); padding: 9px 10px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.td-hint-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.td-hint-sub { font-size: 12px; color: var(--text3); }
+.td-prblock { border: 1px solid var(--border); border-radius: var(--r-md); padding: 9px 10px; }
+.td-prhead { display: flex; align-items: center; gap: 10px; }
+.td-link { background: transparent; border: none; padding: 0; color: var(--text); font-weight: 700; font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.td-checks { margin-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.td-check { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text2); cursor: default; }
+.td-check-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.td-op { font-size: 12.5px; color: var(--text2); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.td-op.err > div:first-child { color: var(--error); }
+.td-op pre { max-height: 180px; overflow: auto; font-size: 11.5px; white-space: pre-wrap; }
+.td-files { font-size: 12px; color: var(--text2); }
+.td-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.td-note { font-size: 12px; color: var(--text3); }
+.td-review { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.td-review .ide-review { max-height: none; }
+.mono { font-family: var(--mono); }
+
+/* 시트(커밋·PR·머지·새 작업) — .wv-sheet 위에 폼만 얹는다 */
+.wv-sheet.tk-sheet { min-width: 420px; max-width: 560px; width: min(560px, calc(100vw - 48px)); padding: 10px 12px 12px; }
+.tk-form { display: flex; flex-direction: column; gap: 10px; padding: 0 2px; }
+.tk-field { display: flex; flex-direction: column; gap: 4px; }
+.tk-label { font-size: 11.5px; font-weight: 700; color: var(--text3); }
+.tk-input { width: 100%; box-sizing: border-box; background: var(--base); color: var(--text); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); padding: 7px 9px; font-size: 13px; font-family: inherit; }
+.tk-input:focus { outline: none; border-color: var(--text3); }
+textarea.tk-input { resize: vertical; line-height: 1.45; }
+.tk-prompt { min-height: 120px; }
+.tk-note { font-size: 11.5px; color: var(--text3); }
+.tk-note.err, .tk-status.err { color: var(--error); }
+.tk-check { font-size: 12.5px; color: var(--text2); display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.tk-adv summary { cursor: pointer; font-size: 12px; color: var(--text3); }
+.tk-adv .tk-check { margin-top: 6px; }
+.tk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tk-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-ctrl); border-radius: 999px; overflow: hidden; background: transparent; }
+.tk-chip.on { background: var(--hover); }
+.tk-chip.off { opacity: 0.45; }
+.tk-chip-lbl { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--text); font-size: 12.5px; font-weight: 600; padding: 5px 10px; cursor: pointer; }
+.tk-chip-lbl:disabled { cursor: default; }
+.tk-step { display: inline-flex; align-items: center; gap: 2px; padding-right: 6px; }
+.tk-step button { background: transparent; border: none; color: var(--text2); width: 20px; height: 20px; border-radius: 999px; cursor: pointer; font-size: 13px; }
+.tk-step button:hover:not(:disabled) { background: var(--elevated2); }
+.tk-step button:disabled { opacity: 0.35; cursor: default; }
+.tk-step-n { font-size: 12px; color: var(--text2); min-width: 20px; text-align: center; }
+.tk-status { min-height: 16px; font-size: 12.5px; color: var(--text2); padding: 8px 2px 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.tk-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; }

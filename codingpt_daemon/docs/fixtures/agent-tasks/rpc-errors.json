@@ -1,0 +1,88 @@
+{
+  "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
+  "method": "*",
+  "description": "에러 코드 정본(§2.13) + 3 경로에서 code 가 도착하는 자리. MERGE_CONFLICT 는 결과 코드(던지지 않음).",
+  "codes": [
+    "BAD_PARAMS",
+    "PROMPT_TOO_LARGE",
+    "TASK_NOT_FOUND",
+    "RUN_NOT_FOUND",
+    "TASK_CLOSED",
+    "TASKS_DISABLED",
+    "NOT_A_REPO",
+    "BASE_NOT_FOUND",
+    "BASE_MOVED",
+    "TASK_LIMIT",
+    "AGENT_NOT_INSTALLED",
+    "GIT_MISSING",
+    "GIT_CLT_MISSING",
+    "GH_MISSING",
+    "GH_NOT_AUTHED",
+    "GH_ERROR",
+    "NOT_GITHUB",
+    "NO_REMOTE",
+    "WORKTREE_ADD_FAILED",
+    "WORKTREE_MISSING",
+    "WORKTREE_REMOVE_FAILED",
+    "AGENT_LAUNCH_FAILED",
+    "LAUNCH_BUSY",
+    "PROMPT_NOT_DELIVERED",
+    "TERMINAL_GONE",
+    "UNCOMMITTED_CHANGES",
+    "UNMERGED_COMMITS",
+    "NOTHING_TO_COMMIT",
+    "NOTHING_TO_PR",
+    "GIT_IDENTITY_MISSING",
+    "GIT_LOCKED",
+    "COMMIT_HOOK_FAILED",
+    "GIT_SIGN_FAILED",
+    "PUSH_REJECTED",
+    "AUTH_FAILED",
+    "PR_NOT_FOUND",
+    "PR_NOT_MERGEABLE",
+    "CHECKS_FAILING",
+    "MAIN_DIRTY",
+    "AGENT_BUSY",
+    "MERGE_CONFLICT",
+    "RUN_BUSY",
+    "OP_INTERRUPTED",
+    "TIMEOUT"
+  ],
+  "resultOnlyCodes": [
+    "MERGE_CONFLICT"
+  ],
+  "wire": {
+    "sealed": {
+      "note": "봉인 응답을 연 결과(e2ee.openRpcResult)",
+      "example": {
+        "ok": false,
+        "e": "작업을 찾을 수 없습니다",
+        "code": "TASK_NOT_FOUND"
+      }
+    },
+    "relayPlain": {
+      "note": "back POST /api/daemon/task 실패 — HTTP 500 body(데몬 rpc_result {error, code} → e.publicDetail={code})",
+      "example": {
+        "success": false,
+        "message": "작업을 찾을 수 없습니다",
+        "detail": {
+          "code": "TASK_NOT_FOUND"
+        }
+      }
+    },
+    "relayTimeout": {
+      "note": "릴레이 타임아웃은 back 이 TIMEOUT 으로 매핑",
+      "example": {
+        "success": false,
+        "message": "데몬이 응답하지 않습니다(RPC 타임아웃).",
+        "detail": {
+          "code": "TIMEOUT"
+        }
+      }
+    },
+    "localSocket": {
+      "note": "PC 로컬 소켓(task_local) — 문자열 접두 ^([A-Z_]+): 를 파싱",
+      "example": "TASK_NOT_FOUND: 작업을 찾을 수 없습니다"
+    }
+  }
+}

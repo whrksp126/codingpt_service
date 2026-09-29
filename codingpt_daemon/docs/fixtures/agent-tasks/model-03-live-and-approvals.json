@@ -1,0 +1,231 @@
+{
+  "name": "model-03-live-and-approvals",
+  "description": "live permission(since) · 승인 대기(createdAt 이 기다린 시각) · agentGone(updatedAt) · 일반 에이전트 needsInput(since)",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 1,
+        "name": "MacBook",
+        "online": true,
+        "caps": [
+          "task.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 1,
+        "items": [
+          {
+            "id": "t_cccccccccc",
+            "v": 1,
+            "title": "작업 t_cccccccccc",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "open",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_c1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-cccccc-1",
+                "cwd": ".codingpt/worktrees/app-cccccc-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_c1",
+                "tid": 301,
+                "tsession": "cpt-x--t-301",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789998800000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789998800000
+              },
+              {
+                "id": "r_c2",
+                "idx": 2,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-2",
+                "dir": ".codingpt/worktrees/app-cccccc-2",
+                "cwd": ".codingpt/worktrees/app-cccccc-2",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_c2",
+                "tid": 302,
+                "tsession": "cpt-x--t-302",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789998800000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789998800000
+              },
+              {
+                "id": "r_c3",
+                "idx": 3,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-3",
+                "dir": ".codingpt/worktrees/app-cccccc-3",
+                "cwd": ".codingpt/worktrees/app-cccccc-3",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_c3",
+                "tid": 303,
+                "tsession": "cpt-x--t-303",
+                "terminalAlive": true,
+                "agentGone": true,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999900000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999900000
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [
+      {
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-cccccc-1",
+        "win": 301,
+        "agent": "claude",
+        "state": "permission",
+        "at": 1789999995000,
+        "since": 1789999800000
+      },
+      {
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-cccccc-2",
+        "win": 302,
+        "agent": "claude",
+        "state": "working",
+        "at": 1789999995000,
+        "since": 1789999600000
+      },
+      {
+        "host": 1,
+        "cwd": "work/x",
+        "win": 9,
+        "agent": "codex",
+        "state": "needsInput",
+        "at": 1789999994000,
+        "since": 1789999750000
+      }
+    ],
+    "approvals": [
+      {
+        "id": "ap_1",
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-cccccc-2",
+        "win": 302,
+        "createdAt": 1789999700000
+      }
+    ],
+    "unread": [],
+    "terminalsFallback": [],
+    "workspaces": [
+      {
+        "id": "ws_repo",
+        "host": 1,
+        "localPath": "work/app",
+        "name": "app"
+      },
+      {
+        "id": "ws_x",
+        "host": 1,
+        "localPath": "work/x",
+        "name": "x"
+      }
+    ]
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [
+        "1|.codingpt/worktrees/app-cccccc-2|302",
+        "1|work/x|9",
+        "1|.codingpt/worktrees/app-cccccc-1|301",
+        "1|.codingpt/worktrees/app-cccccc-3|303"
+      ],
+      "working": [],
+      "review_ready": [],
+      "idle": [],
+      "done": []
+    },
+    "reasons": {
+      "1|.codingpt/worktrees/app-cccccc-2|302": "approval",
+      "1|work/x|9": "needsInput",
+      "1|.codingpt/worktrees/app-cccccc-1|301": "permission",
+      "1|.codingpt/worktrees/app-cccccc-3|303": "agentGone"
+    },
+    "unread": {},
+    "offline": []
+  }
+}

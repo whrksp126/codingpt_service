@@ -1,0 +1,180 @@
+{
+  "name": "model-10-idle-unread",
+  "description": "idle 은 sortAt 내림차순 · host 0 미읽음이 host 1 run 에 합산 · 대상 없는 승인은 무시",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 1,
+        "name": "MacBook",
+        "online": true,
+        "caps": [
+          "task.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 1,
+        "items": [
+          {
+            "id": "t_jjjjjjjjjj",
+            "v": 1,
+            "title": "작업 t_jjjjjjjjjj",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "open",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_j1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-jjjjjj-1",
+                "cwd": ".codingpt/worktrees/app-jjjjjj-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_j1",
+                "tid": 1001,
+                "tsession": "cpt-x--t-1001",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999995000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999994000
+              },
+              {
+                "id": "r_j2",
+                "idx": 2,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-2",
+                "dir": ".codingpt/worktrees/app-jjjjjj-2",
+                "cwd": ".codingpt/worktrees/app-jjjjjj-2",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_j2",
+                "tid": 1002,
+                "tsession": "cpt-x--t-1002",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999999000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999994000
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [
+      {
+        "host": 1,
+        "cwd": "work/w",
+        "win": 2,
+        "agent": "claude",
+        "state": "idle",
+        "at": 1789999997000,
+        "since": 1789999997000
+      }
+    ],
+    "approvals": [
+      {
+        "id": "ap_x",
+        "host": 0,
+        "cwd": "work/nowhere",
+        "win": 1,
+        "createdAt": 1789999999000
+      }
+    ],
+    "unread": [
+      {
+        "host": 0,
+        "cwd": ".codingpt/worktrees/app-jjjjjj-1",
+        "win": 1001,
+        "count": 2
+      },
+      {
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-jjjjjj-1",
+        "win": 1001,
+        "count": 1
+      }
+    ],
+    "terminalsFallback": [],
+    "workspaces": [
+      {
+        "id": "ws_repo",
+        "host": 1,
+        "localPath": "work/app",
+        "name": "app"
+      }
+    ]
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [],
+      "working": [],
+      "review_ready": [],
+      "idle": [
+        "1|.codingpt/worktrees/app-jjjjjj-2|1002",
+        "1|work/w|2",
+        "1|.codingpt/worktrees/app-jjjjjj-1|1001"
+      ],
+      "done": []
+    },
+    "reasons": {},
+    "unread": {
+      "1|.codingpt/worktrees/app-jjjjjj-1|1001": 3
+    },
+    "offline": []
+  }
+}

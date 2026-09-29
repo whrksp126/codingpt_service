@@ -270,6 +270,10 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   hooks doctor                          훅 배선 진단(상태·알림이 안 올 때 원인 확인)
   agents [rescan]                       이 PC 의 AI CLI 목록(● 연동 ○ 연동꺼짐 · 미설치)
 
+  # 작업(Agent Tasks — 조회 전용. 만들기·커밋·머지·폐기는 앱/PC 화면에서 사람이 한다)
+  task list [--all]                     이 PC 의 작업 목록(* = 이 터미널이 그 작업의 실행)
+  task get [<taskId>]                   작업 상세(프롬프트 포함). 생략 시 이 터미널이 속한 작업
+
   # 터미널 (전 기기 공유 풀)
   terminal list                         터미널 목록(이름/실행 중 명령)
   terminal new [--name <이름>]          새 터미널 생성(전 기기에 나타남)
@@ -473,6 +477,46 @@ async function main() {
           return `${mark} ${a.name} (${a.bin}) — ${tail}`;
         });
         return out(r, flags, lines.join('\n') || '(카탈로그 비어 있음)');
+      }
+      // 작업(Agent Tasks) — 읽기 2개만. 자기 run 은 CPT_TSESSION 으로 찾는다(새 env 없음 — 설계 §2.1).
+      //  쓰기(task.create/git.commit/…)는 CLI 에 없다: 터미널 안의 AI 가 스스로 작업을 늘리거나
+      //  자기 브랜치를 머지하는 경로가 되기 때문(agents.wire·approval.respond 를 닫은 것과 같은 이유).
+      case 'task': {
+        const self = process.env.CPT_TSESSION || '';
+        const runLine = (r) => `${r.tsession && r.tsession === self ? '*' : ' '} [${r.idx}] ${r.agent} ${r.state}`
+          + `${r.trustPending ? ' (폴더 신뢰 확인 필요)' : ''}${r.agentGone ? ' (에이전트 없음)' : ''}`
+          + `${r.diff ? ` 파일 ${r.diff.files} +${r.diff.additions} -${r.diff.deletions}` : ''}`
+          + `${r.commits ? ` 커밋 ${r.commits.ahead}` : ''}${r.pr ? ` PR #${r.pr.number}(${r.pr.state})` : ''}`
+          + ` ${r.branch}${r.error ? ` — ${r.error.code}` : ''}`;
+        if (c2 === 'list') {
+          const r = await request('task.list', { includeClosed: !!flags.all });
+          const items = (r && r.items) || [];
+          return out(r, flags, items.map((t) =>
+            `${t.id} [${t.state}] ${t.title} — ${t.repo && t.repo.name} · base ${t.base}\n${t.runs.map(runLine).join('\n')}`,
+          ).join('\n\n') || '(작업 없음)');
+        }
+        if (c2 === 'get') {
+          let taskId = rest[0];
+          if (!taskId) {
+            if (!self) { process.stderr.write('taskId 를 주거나 작업 터미널 안에서 실행하세요(CPT_TSESSION 없음)\n'); process.exitCode = 2; return; }
+            const l = await request('task.list', { includeClosed: true });
+            const hit = ((l && l.items) || []).find((t) => t.runs.some((x) => x.tsession === self));
+            if (!hit) { process.stderr.write('이 터미널은 작업의 실행이 아닙니다\n'); process.exitCode = 1; return; }
+            taskId = hit.id;
+          }
+          const r = await request('task.get', { taskId });
+          const t = r && r.task;
+          if (!t) return printJson(r);
+          return out(r, flags, [
+            `${t.id} [${t.state}] ${t.title}`,
+            `저장소: ${t.repo.path}${t.repo.subdir ? '/' + t.repo.subdir : ''} · base ${t.base}`,
+            '실행:', ...t.runs.map(runLine),
+            '', '프롬프트:', t.prompt || '',
+          ].join('\n'));
+        }
+        process.stderr.write('사용법: cpt task list [--all] | cpt task get [<taskId>]\n');
+        process.exitCode = 2;
+        return;
       }
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).

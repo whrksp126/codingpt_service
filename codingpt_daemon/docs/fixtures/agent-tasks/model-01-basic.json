@@ -1,0 +1,177 @@
+{
+  "name": "model-01-basic",
+  "description": "run 행 + live 부착(working) · review_ready · 일반 워크스페이스 에이전트 행(idle)",
+  "contract": "행 키 k = `${host}|${cwd}|${win}`(tid 없음 = '-'), 종결 작업 행 = `${host}|task:${taskId}`. host 모름 = 0. 그룹 순서 needs_input→working→review_ready→idle→done. 입력 대기는 waitSince 오름차순(승인 createdAt → live.since → run.updatedAt → live.at), 나머지는 sortAt 내림차순(run: max(lastActivityAt ?? updatedAt, live.at) · 에이전트: live.at · 작업: closedAt ?? updatedAt). 동률은 k 코드포인트 오름차순. 기대값의 모양은 PC tasks-model.js summarize() 가 정본.",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 1,
+        "name": "MacBook",
+        "online": true,
+        "caps": [
+          "task.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 1,
+        "items": [
+          {
+            "id": "t_aaaaaaaaaa",
+            "v": 1,
+            "title": "작업 t_aaaaaaaaaa",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "open",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_a1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-aaaaaa-1",
+                "cwd": ".codingpt/worktrees/app-aaaaaa-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_a1",
+                "tid": 101,
+                "tsession": "cpt-x--t-101",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999940000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999940000
+              },
+              {
+                "id": "r_a2",
+                "idx": 2,
+                "agent": "codex",
+                "branch": "cpt/aaaaaa-2",
+                "dir": ".codingpt/worktrees/app-aaaaaa-2",
+                "cwd": ".codingpt/worktrees/app-aaaaaa-2",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_a2",
+                "tid": 102,
+                "tsession": "cpt-x--t-102",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999880000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999880000
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [
+      {
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-aaaaaa-1",
+        "win": 101,
+        "agent": "claude",
+        "state": "working",
+        "at": 1789999970000,
+        "since": 1789999950000
+      },
+      {
+        "host": 1,
+        "cwd": "work/app",
+        "win": 5,
+        "agent": "claude",
+        "state": "idle",
+        "at": 1789999700000,
+        "since": 1789999700000
+      }
+    ],
+    "approvals": [],
+    "unread": [],
+    "terminalsFallback": [],
+    "workspaces": [
+      {
+        "id": "ws_repo",
+        "host": 1,
+        "localPath": "work/app",
+        "name": "app"
+      }
+    ]
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [],
+      "working": [
+        "1|.codingpt/worktrees/app-aaaaaa-1|101"
+      ],
+      "review_ready": [
+        "1|.codingpt/worktrees/app-aaaaaa-2|102"
+      ],
+      "idle": [
+        "1|work/app|5"
+      ],
+      "done": []
+    },
+    "reasons": {},
+    "unread": {},
+    "offline": []
+  }
+}

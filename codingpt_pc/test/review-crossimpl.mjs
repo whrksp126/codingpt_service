@@ -221,5 +221,42 @@ for (const lang of ['ko']) {
     `함수 문구 결과도 일치(${lang})`, `${p.remaining(3)} vs ${a.remaining(3)}`);
 }
 
+// ── Agent Tasks: 리뷰 코멘트 직렬화(설계 §8.5) — PC ↔ 앱 ↔ 픽스처(review-comments-01.json) ─────────
+//  작업 상세의 [코멘트 에이전트에게 보내기] 가 에이전트 터미널에 넣는 텍스트다. 두 기기가 다른 글자를 만들면
+//  같은 리뷰가 기기마다 다른 지시가 된다 → 픽스처(손으로 적은 기대값)로 두 구현을 같이 고정한다.
+{
+  const FIX = path.join(process.env.CPT_FIXTURES || path.resolve('../codingpt_daemon/docs/fixtures/agent-tasks'), 'review-comments-01.json');
+  if (!fs.existsSync(FIX)) {
+    console.log('SKIP serializeReviewComments — 픽스처 없음');
+  } else {
+    const fx = JSON.parse(read(FIX));
+    ok(fx.cases.length >= 6, `리뷰 코멘트 픽스처 ${fx.cases.length}케이스(6+ — §8.5)`);
+    const RUN = `
+      const cases = ${JSON.stringify(fx.cases.map((c) => [c.input, c.opts]))};
+      console.log(JSON.stringify(cases.map(([i, o]) => m.serializeReviewComments(i, o))));`;
+    const pcS = probe(path.join(PC, 'diff-parse.js'), RUN);
+    const check = (who, outs) => fx.cases.forEach((c, i) => {
+      const got = outs[i];
+      if (c.expectMeta) {
+        const ls = got.split('\n');
+        const bytes = Buffer.byteLength(got, 'utf8');
+        ok(ls.length === c.expectMeta.lines && ls[ls.length - 1] === c.expectMeta.lastLine
+          && ls[ls.length - 2].startsWith(c.expectMeta.secondLastPrefix) && bytes === c.expectMeta.bytes && bytes <= 30000,
+          `${who} ${c.name}`, `lines=${ls.length} bytes=${bytes} last=${ls[ls.length - 1]}`);
+      } else {
+        ok(got === c.expect, `${who} ${c.name}`, JSON.stringify(got));
+      }
+    });
+    check('PC', pcS);
+    const appSrc = read(path.join(APP, 'workspace/ide/diffParse.ts'));
+    if (!/export function serializeReviewComments/.test(appSrc)) console.log('SKIP 앱 serializeReviewComments — 아직 없음');
+    else {
+      const appS = probe(path.join(APP, 'workspace/ide/diffParse.ts'), RUN);
+      check('앱', appS);
+      ok(JSON.stringify(appS) === JSON.stringify(pcS), '앱·PC 직렬화 결과가 바이트까지 같다');
+    }
+  }
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

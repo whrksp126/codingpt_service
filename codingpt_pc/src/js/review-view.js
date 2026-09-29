@@ -17,6 +17,7 @@ import { tx } from "./text/index.js";
 import { REVIEW_TEXT } from "./text/review.js";
 import * as D from "./diff-parse.js";
 import * as i18n from './i18n/index.js';
+import { tt } from "./text/tasks.js";
 
 const TX = () => tx(REVIEW_TEXT);
 
@@ -34,6 +35,9 @@ export function createReview(payload, ws) {
   });
   return {
     reviewId: payload.reviewId,
+    // 'agent' = 에이전트가 `cpt review` 로 요청한 리뷰(제출은 review.submit) ·
+    // 'task'  = 작업 상세의 run diff 리뷰(Agent Tasks §6.2 — 제출 대신 코멘트를 그 run 터미널에 보낸다).
+    source: payload.source === "task" ? "task" : "agent",
     title: payload.title || TX().title,
     ws: payload.ws || "",
     wsMeta: ws || null,
@@ -80,10 +84,13 @@ export function renderReviewFile(host, state, onChange) {
   host.className = "ide-review";
   if (!f) return;
 
-  const why = document.createElement("div");
-  why.className = "rv-why";
-  why.textContent = T.why;
-  host.appendChild(why);
+  // "AI 가 요청했어요" 줄은 에이전트 요청 리뷰에만 — 작업 리뷰는 사용자가 연 화면이다(§6.4 와 같은 규칙).
+  if (state.source !== "task") {
+    const why = document.createElement("div");
+    why.className = "rv-why";
+    why.textContent = T.why;
+    host.appendChild(why);
+  }
 
   if (!f.hunkList.length) {
     const e = document.createElement("div");
@@ -272,6 +279,22 @@ export function renderReviewBar(bar, state, cbs) {
 
   const right = document.createElement("div");
   right.className = "rvb-right";
+  if (state.source === "task") {
+    // 작업 리뷰(§6.2): [보내기] → [코멘트 에이전트에게 보내기]. 리뷰 세션이 없으므로 취소도 없다.
+    //  보낼 내용이 없으면(코멘트 0·거절 0·메모 빈 값) 비활성 — 판정은 호출부(cbs.commentText)가 직렬화 결과로 한다.
+    const st = document.createElement("span");
+    st.className = "rvb-status";
+    st.textContent = state.error ? `${T.sendFailed} — ${state.error}` : T.commentCount(state.comments.length);
+    if (state.error) st.classList.add("err");
+    const sendC = document.createElement("button");
+    sendC.className = "rvb-btn primary";
+    sendC.textContent = state.sending ? T.sending : tt("sendComments");
+    sendC.disabled = !!state.sending || !(cbs.commentText && cbs.commentText());
+    sendC.addEventListener("click", () => cbs.onSendComments?.());
+    right.append(st, sendC);
+    bar.append(nav, mid, right);
+    return;
+  }
   const status = document.createElement("span");
   status.className = "rvb-status";
   // 실패는 **감추지 않는다** — 못 보냈는데 화면이 조용하면 사용자는 보낸 줄 안다.

@@ -1020,6 +1020,7 @@ pub fn run() {
             bridge::ui_stream_url,
             // 원격 PC fs/프리뷰(back 릴레이)
             bridge::back_api,
+            bridge::back_api_async,
             bridge::back_base,
             // 원격 프리뷰 로컬 포트 포워더(사이드카 데몬 cpt.sock 지시)
             cptsock::forward_start,
@@ -1032,6 +1033,7 @@ pub fn run() {
             cptsock::emulator_local,
             cptsock::mode_poke,
             cptsock::chat_local,
+            cptsock::task_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)
             cptsock::lan_probe,
             cptsock::lan_status,

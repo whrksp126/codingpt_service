@@ -53,6 +53,7 @@
 - `services/daemonRelayService.js` — daemonRegistry, openStream(pty/tcp), callRpc, 터미널토큰(+cwd), proxyHttp/proxyWs(프리뷰)
 - `controllers/daemonController.js` — 페어링/상태/터미널/fs.*/ws.*/프리뷰 + previewCookieMiddleware
 - `routes/daemonRoutes.js` — `/api/daemon/*`
+  - `POST /api/daemon/task`(accountAuth) — Agent Tasks `task.*`/`git.*` 평문 폴백(허용 표 `TASK_RPC_OK`, 에러 code=`detail.code`, 릴레이 타임아웃→`TIMEOUT`, 킬스위치 `TASKS_ENABLED=0`). 정본 `codingpt_daemon/docs/agent-tasks-design.md` §3.3
 - `app.js` — 단일 WS upgrade 핸들러에 `/connect`·`/stream/:token`·`/terminal/:token`·프리뷰 분기
 - `services/workspaceService.js` + `controllers/workspaceController.js` — WorkspaceMeta(compute/localPath 포함) objectstore CRUD
 

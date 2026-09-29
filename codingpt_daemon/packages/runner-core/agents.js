@@ -51,6 +51,9 @@ const CATALOG = [
     bin: 'claude',
     tier: 'full',
     docs: 'https://code.claude.com/docs/en/setup',
+    // Agent Tasks(설계 §2.5 10·§2.6) — 작업 run 에 한해 프롬프트 파일을 런치 인자로 넘긴다(부록 Z B-2).
+    promptArg: { positional: true },
+    resumeArgs: ['--continue'],
     install: [
       { label: '공식 설치 스크립트 (권장)', cmd: 'curl -fsSL https://claude.ai/install.sh | bash' },
       { label: 'Homebrew', cmd: 'brew install --cask claude-code' },
@@ -63,6 +66,8 @@ const CATALOG = [
     bin: 'codex',
     tier: 'partial',
     docs: 'https://developers.openai.com/codex/cli',
+    promptArg: { positional: true },
+    resumeArgs: ['resume', '--last'],
     install: [
       { label: '공식 설치 스크립트 (권장)', cmd: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' },
       { label: 'npm', cmd: 'npm install -g @openai/codex' },
@@ -74,6 +79,8 @@ const CATALOG = [
     bin: 'gemini',
     tier: 'launch',
     docs: 'https://github.com/google-gemini/gemini-cli',
+    promptArg: { flag: '-i' },
+    resumeArgs: null,
     install: [
       { label: 'npm', cmd: 'npm install -g @google/gemini-cli' },
       { label: 'Homebrew', cmd: 'brew install gemini-cli' },
@@ -85,6 +92,8 @@ const CATALOG = [
     bin: 'cursor-agent',
     tier: 'launch',
     docs: 'https://cursor.com/docs/cli',
+    promptArg: null,
+    resumeArgs: null,
     install: [
       { label: '공식 설치 스크립트', cmd: 'curl https://cursor.com/install -fsS | bash' },
     ],
@@ -95,6 +104,8 @@ const CATALOG = [
     bin: 'opencode',
     tier: 'launch',
     docs: 'https://opencode.ai',
+    promptArg: null,
+    resumeArgs: null,
     install: [
       { label: 'npm', cmd: 'npm install -g opencode-ai' },
     ],
@@ -461,6 +472,11 @@ module.exports = {
   resolveBinSync,
   launchCommand,
   wirable,
+  // Agent Tasks(task-git.js)가 git/gh 를 같은 PATH 규칙으로 찾는다 — 사본을 두면 한쪽만 고쳐진다.
+  //  `_internals` 의 같은 함수는 그대로 둔다(기존 테스트·호출부 무변경).
+  probeLoginPath,
+  searchDirs,
+  findBin,
   _internals: {
     findBin,
     searchDirs,

@@ -1,0 +1,298 @@
+{
+  "name": "model-09-done-window",
+  "description": "done 은 7일 이내만(closedAt ?? updatedAt 내림차순) · failed 작업의 failed run 은 needs_input 에도 나온다",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 1,
+        "name": "MacBook",
+        "online": true,
+        "caps": [
+          "task.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 1,
+        "items": [
+          {
+            "id": "t_i000000001",
+            "v": 1,
+            "title": "작업 t_i000000001",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "closed",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789827200000,
+            "closedAt": 1789827200000,
+            "runs": [
+              {
+                "id": "r_i1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-000001-1",
+                "cwd": ".codingpt/worktrees/app-000001-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i1",
+                "tid": 911,
+                "tsession": "cpt-x--t-911",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "discarded",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789996400000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789996400000
+              }
+            ]
+          },
+          {
+            "id": "t_i000000002",
+            "v": 1,
+            "title": "작업 t_i000000002",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "failed",
+            "winnerRunId": null,
+            "error": {
+              "code": "BASE_NOT_FOUND",
+              "message": "x"
+            },
+            "createdAt": 1789989200000,
+            "updatedAt": 1789913600000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_i2",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-000002-1",
+                "cwd": ".codingpt/worktrees/app-000002-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i2",
+                "tid": 901,
+                "tsession": "cpt-x--t-901",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "failed",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789913600000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": {
+                  "code": "WORKTREE_ADD_FAILED",
+                  "message": "x"
+                },
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789913600000
+              }
+            ]
+          },
+          {
+            "id": "t_i000000003",
+            "v": 1,
+            "title": "작업 t_i000000003",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "merged",
+            "winnerRunId": "r_i3",
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789308800000,
+            "closedAt": 1789308800000,
+            "runs": [
+              {
+                "id": "r_i3",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-000003-1",
+                "cwd": ".codingpt/worktrees/app-000003-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i3",
+                "tid": 931,
+                "tsession": "cpt-x--t-931",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "merged",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789996400000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789996400000
+              }
+            ]
+          },
+          {
+            "id": "t_i000000004",
+            "v": 1,
+            "title": "작업 t_i000000004",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "closed",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": 1789996400000,
+            "runs": [
+              {
+                "id": "r_i4",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-000004-1",
+                "cwd": ".codingpt/worktrees/app-000004-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i4",
+                "tid": 941,
+                "tsession": "cpt-x--t-941",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "discarded",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789996400000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789996400000
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [],
+    "approvals": [],
+    "unread": [],
+    "terminalsFallback": [],
+    "workspaces": [
+      {
+        "id": "ws_repo",
+        "host": 1,
+        "localPath": "work/app",
+        "name": "app"
+      }
+    ]
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [
+        "1|.codingpt/worktrees/app-000002-1|901"
+      ],
+      "working": [],
+      "review_ready": [],
+      "idle": [],
+      "done": [
+        "1|task:t_i000000004",
+        "1|task:t_i000000002",
+        "1|task:t_i000000001"
+      ]
+    },
+    "reasons": {
+      "1|.codingpt/worktrees/app-000002-1|901": "failed"
+    },
+    "unread": {},
+    "offline": []
+  }
+}

@@ -1,0 +1,397 @@
+{
+  "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
+  "method": "task.list",
+  "description": "열린 작업(리뷰 준비+PR / 신뢰 대기 / worktree 실패) + 머지된 작업(폐기 건너뛴 잔존 run). TaskLite = prompt 없음.",
+  "params": {
+    "includeClosed": false
+  },
+  "result": {
+    "items": [
+      {
+        "id": "t_k3j9x2m1qa",
+        "v": 1,
+        "title": "로그인 폼 유효성 검사 추가",
+        "repo": {
+          "path": "work/codingpt",
+          "subdir": "codingpt_back",
+          "common": "work/codingpt/.git",
+          "name": "codingpt",
+          "remoteUrl": "https://github.com/whrksp126/codingpt.git",
+          "github": {
+            "owner": "whrksp126",
+            "repo": "codingpt"
+          }
+        },
+        "base": "main",
+        "workspaceId": "ws_abc",
+        "state": "open",
+        "winnerRunId": null,
+        "error": null,
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000060000,
+        "closedAt": null,
+        "runs": [
+          {
+            "id": "r_8fk2ma1q",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/x2m1qa-1",
+            "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+            "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+            "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "workspaceId": "ws_def",
+            "tid": 1234567,
+            "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+            "terminalAlive": true,
+            "agentGone": false,
+            "trustPending": false,
+            "state": "review_ready",
+            "promptMode": "arg",
+            "promptDelivered": true,
+            "promptDeliveredAt": 1790000012345,
+            "launchedAt": 1790000010000,
+            "copiedFiles": [
+              ".env",
+              "codingpt_back/.env.local"
+            ],
+            "diff": {
+              "files": 3,
+              "additions": 41,
+              "deletions": 7,
+              "at": 1790000050000
+            },
+            "commits": {
+              "ahead": 2,
+              "at": 1790000050000
+            },
+            "dirty": false,
+            "pushed": true,
+            "pr": {
+              "number": 12,
+              "url": "https://github.com/whrksp126/codingpt/pull/12",
+              "state": "open",
+              "isDraft": false,
+              "title": "로그인 폼 유효성 검사 추가",
+              "mergeable": "MERGEABLE",
+              "mergeStateStatus": "CLEAN",
+              "reviewDecision": null,
+              "checks": {
+                "status": "passing",
+                "total": 2,
+                "passed": 1,
+                "failed": 0,
+                "pending": 0,
+                "items": [
+                  {
+                    "name": "ci / test",
+                    "status": "passing",
+                    "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                  },
+                  {
+                    "name": "optional",
+                    "status": "skipped"
+                  }
+                ]
+              },
+              "at": 1790000060000
+            },
+            "op": null,
+            "lastOp": {
+              "opId": "0b0c3d0e-1111-4222-8333-444455556666",
+              "kind": "pr.create",
+              "ok": true,
+              "code": null,
+              "message": null,
+              "result": {
+                "pr": {
+                  "number": 12,
+                  "url": "https://github.com/whrksp126/codingpt/pull/12",
+                  "state": "open",
+                  "isDraft": false,
+                  "title": "로그인 폼 유효성 검사 추가",
+                  "mergeable": "MERGEABLE",
+                  "mergeStateStatus": "CLEAN",
+                  "reviewDecision": null,
+                  "checks": {
+                    "status": "passing",
+                    "total": 2,
+                    "passed": 1,
+                    "failed": 0,
+                    "pending": 0,
+                    "items": [
+                      {
+                        "name": "ci / test",
+                        "status": "passing",
+                        "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                      },
+                      {
+                        "name": "optional",
+                        "status": "skipped"
+                      }
+                    ]
+                  },
+                  "at": 1790000060000
+                },
+                "existed": false
+              },
+              "at": 1790000060000
+            },
+            "lastTurnEndedAt": 1790000049000,
+            "lastActivityAt": 1790000050000,
+            "reviewNotifiedAt": 1790000050500,
+            "lastTurnFailed": false,
+            "error": null,
+            "cleanup": null,
+            "createdAt": 1790000000000,
+            "updatedAt": 1790000050000
+          },
+          {
+            "id": "r_2bq7nd0x",
+            "idx": 2,
+            "agent": "codex",
+            "branch": "cpt/x2m1qa-2",
+            "dir": ".codingpt/worktrees/codingpt-x2m1qa-2",
+            "cwd": ".codingpt/worktrees/codingpt-x2m1qa-2/codingpt_back",
+            "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "workspaceId": "ws_ghi",
+            "tid": 2345678,
+            "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-2-codingpt_back--t-2345678",
+            "terminalAlive": true,
+            "agentGone": false,
+            "trustPending": true,
+            "state": "running",
+            "promptMode": "arg",
+            "promptDelivered": true,
+            "promptDeliveredAt": 1790000012345,
+            "launchedAt": 1790000010000,
+            "copiedFiles": [
+              ".env",
+              "codingpt_back/.env.local"
+            ],
+            "diff": {
+              "files": 0,
+              "additions": 0,
+              "deletions": 0,
+              "at": 1790000020000
+            },
+            "commits": {
+              "ahead": 0,
+              "at": 1790000020000
+            },
+            "dirty": false,
+            "pushed": false,
+            "pr": null,
+            "op": null,
+            "lastOp": null,
+            "lastTurnEndedAt": null,
+            "lastActivityAt": 1790000050000,
+            "reviewNotifiedAt": null,
+            "lastTurnFailed": false,
+            "error": null,
+            "cleanup": null,
+            "createdAt": 1790000000000,
+            "updatedAt": 1790000050000
+          },
+          {
+            "id": "r_3cz0pq9w",
+            "idx": 3,
+            "agent": "claude",
+            "branch": "cpt/x2m1qa-3",
+            "dir": ".codingpt/worktrees/codingpt-x2m1qa-3",
+            "cwd": ".codingpt/worktrees/codingpt-x2m1qa-3/codingpt_back",
+            "baseSha": null,
+            "workspaceId": null,
+            "tid": null,
+            "tsession": null,
+            "terminalAlive": false,
+            "agentGone": false,
+            "trustPending": false,
+            "state": "failed",
+            "promptMode": "arg",
+            "promptDelivered": false,
+            "promptDeliveredAt": null,
+            "launchedAt": null,
+            "copiedFiles": [],
+            "diff": null,
+            "commits": null,
+            "dirty": false,
+            "pushed": false,
+            "pr": null,
+            "op": null,
+            "lastOp": null,
+            "lastTurnEndedAt": null,
+            "lastActivityAt": 1790000050000,
+            "reviewNotifiedAt": null,
+            "lastTurnFailed": false,
+            "error": {
+              "code": "WORKTREE_ADD_FAILED",
+              "message": "fatal: a branch named 'cpt/x2m1qa-3' already exists"
+            },
+            "cleanup": null,
+            "createdAt": 1790000000000,
+            "updatedAt": 1790000050000
+          }
+        ]
+      },
+      {
+        "id": "t_p0q1r2s3t4",
+        "v": 1,
+        "title": "README 오타 수정",
+        "repo": {
+          "path": "work/notes",
+          "subdir": "",
+          "common": "work/notes/.git",
+          "name": "notes",
+          "remoteUrl": null,
+          "github": null
+        },
+        "base": "main",
+        "workspaceId": null,
+        "state": "merged",
+        "winnerRunId": "r_9aa0bb1c",
+        "error": null,
+        "createdAt": 1789913600000,
+        "updatedAt": 1789920000000,
+        "closedAt": 1789920000000,
+        "runs": [
+          {
+            "id": "r_9aa0bb1c",
+            "idx": 1,
+            "agent": "claude",
+            "branch": "cpt/r2s3t4-1",
+            "dir": ".codingpt/worktrees/notes-r2s3t4-1",
+            "cwd": ".codingpt/worktrees/notes-r2s3t4-1",
+            "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "workspaceId": "ws_n1",
+            "tid": 3456789,
+            "tsession": "cpt-codingpt-worktrees-notes-r2s3t4-1--t-3456789",
+            "terminalAlive": false,
+            "agentGone": false,
+            "trustPending": false,
+            "state": "merged",
+            "promptMode": "arg",
+            "promptDelivered": true,
+            "promptDeliveredAt": 1790000012345,
+            "launchedAt": 1790000010000,
+            "copiedFiles": [],
+            "diff": {
+              "files": 1,
+              "additions": 1,
+              "deletions": 1,
+              "at": 1789919900000
+            },
+            "commits": {
+              "ahead": 1,
+              "at": 1789919900000
+            },
+            "dirty": false,
+            "pushed": false,
+            "pr": null,
+            "op": null,
+            "lastOp": {
+              "opId": "5f5f5f5f-aaaa-4bbb-8ccc-dddddddddddd",
+              "kind": "merge.local",
+              "ok": true,
+              "code": null,
+              "message": null,
+              "result": {
+                "ok": true,
+                "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "cleanup": "done",
+                "discarded": [],
+                "discardSkipped": [
+                  {
+                    "runId": "r_9aa0bb2d",
+                    "code": "UNCOMMITTED_CHANGES"
+                  }
+                ]
+              },
+              "at": 1789920000000
+            },
+            "lastTurnEndedAt": null,
+            "lastActivityAt": 1790000050000,
+            "reviewNotifiedAt": null,
+            "lastTurnFailed": false,
+            "error": null,
+            "cleanup": {
+              "worktreeRemoved": true,
+              "branchDeleted": true,
+              "workspaceDeleted": true,
+              "recoveryRef": "refs/codingpt/discarded/r_9aa0bb1c",
+              "at": 1789920010000
+            },
+            "createdAt": 1790000000000,
+            "updatedAt": 1790000050000
+          },
+          {
+            "id": "r_9aa0bb2d",
+            "idx": 2,
+            "agent": "gemini",
+            "branch": "cpt/r2s3t4-2",
+            "dir": ".codingpt/worktrees/notes-r2s3t4-2",
+            "cwd": ".codingpt/worktrees/notes-r2s3t4-2",
+            "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "workspaceId": "ws_n2",
+            "tid": 4567890,
+            "tsession": "cpt-codingpt-worktrees-notes-r2s3t4-2--t-4567890",
+            "terminalAlive": true,
+            "agentGone": true,
+            "trustPending": false,
+            "state": "review_ready",
+            "promptMode": "arg",
+            "promptDelivered": true,
+            "promptDeliveredAt": 1790000012345,
+            "launchedAt": 1790000010000,
+            "copiedFiles": [],
+            "diff": {
+              "files": 2,
+              "additions": 5,
+              "deletions": 0,
+              "at": 1789919900000
+            },
+            "commits": {
+              "ahead": 0,
+              "at": 1789919900000
+            },
+            "dirty": true,
+            "pushed": false,
+            "pr": null,
+            "op": null,
+            "lastOp": {
+              "opId": "5f5f5f5f-aaaa-4bbb-8ccc-dddddddddddd:r_9aa0bb2d",
+              "kind": "discard",
+              "ok": true,
+              "code": null,
+              "message": null,
+              "result": {
+                "discarded": [],
+                "skipped": [
+                  {
+                    "runId": "r_9aa0bb2d",
+                    "code": "UNCOMMITTED_CHANGES"
+                  }
+                ]
+              },
+              "at": 1789920010000
+            },
+            "lastTurnEndedAt": null,
+            "lastActivityAt": 1790000050000,
+            "reviewNotifiedAt": null,
+            "lastTurnFailed": false,
+            "error": null,
+            "cleanup": null,
+            "createdAt": 1790000000000,
+            "updatedAt": 1790000050000
+          }
+        ]
+      }
+    ],
+    "caps": {
+      "gh": {
+        "gitOk": true,
+        "ghInstalled": true,
+        "ghAuthed": true
+      }
+    }
+  }
+}

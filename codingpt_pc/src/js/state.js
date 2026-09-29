@@ -3,6 +3,10 @@ import { api } from "./api.js";
 import * as T from "./tiling.js";
 import { getPane } from "./pane.js";
 import * as i18n from './i18n/index.js';
+import { isTaskWorkspace } from "./tasks-model.js";
+// Agent Tasks(§4) — 작업 run 의 worktree 워크스페이스 술어. 정본은 순수 모듈(tasks-model.js, 앱과 교차 테스트)이고
+//  여기서는 재노출만 한다(뷰 모듈이 state.js 하나만 보고 쓸 수 있게).
+export { isTaskWorkspace };
 
 export const state = {
   paired: false,
@@ -19,7 +23,11 @@ export const state = {
   // 원격 승인 인박스(기능1) — 대기 중 승인 카드. 정본은 데몬, back 은 인덱스, 우리는 미러다.
   //  push(approval_event)는 힌트고 pull(GET /api/daemon/approvals)이 정본 — 부팅/재접속마다 재조회.
   approvals: [], // [{id, tool, kind, summary, prompt, relPath, cwd, wsName, win, deadlineAt, …, _busy?, _err?}]
-  view: "workspace", // 'workspace' | 'settings'
+  view: "workspace", // 'workspace' | 'settings' | 'tasks'(작업 현황판 — 메인 영역을 통째로 쓴다)
+  // Agent Tasks — 호스트(PC)별 task.list 결과 미러. 정본은 각 PC 데몬의 tasks.json 이고 서버에는 없다(§1.2).
+  //  byHost[hostId] = { items:TaskLite[], gh:GhStatusLite|null, at, error:{code,message}|null }
+  //  ⚠ 오프라인 PC 의 목록은 지우지 않고 남긴다 — 현황판이 "PC 오프라인" 한 줄로 접어 그린다(§5.4).
+  tasks: { byHost: {} },
   sidebarCollapsed: false,
   creatingWs: false,
   me: null, // 로그인 계정 프로필 {id,email,nickname,profileImg,...} — 웹 로그인 후 표시
@@ -121,10 +129,13 @@ function ensureWsOrder() {
 }
 
 // 표시 순서: 고정 먼저 → order 순. (고정은 항상 상단으로 float)
+//  ★ 작업 run 의 worktree 워크스페이스(isTaskWorkspace)는 **여기서** 거른다(§4 — 개별 뷰가 아니라 기본 셀렉터).
+//   사이드바·팔레트 전환·workspacesForDevice·PC 전환 복귀가 전부 이 함수를 탄다. 그것들은 현황판 카드로만 연다
+//   (setActive(id, {allowTask:true})). 원본이 필요한 곳(알림 cwd 역참조·활성 메타 조회)은 state.workspaces 를 직접 본다.
 export function sortedWorkspaces() {
   ensureWsOrder();
   const idx = (id) => { const i = wsPrefs.order.indexOf(id); return i === -1 ? 1e9 : i; };
-  return state.workspaces.slice().sort((a, b) => {
+  return state.workspaces.filter((w) => !isTaskWorkspace(w)).sort((a, b) => {
     const pa = wsPinned(a.id) ? 0 : 1, pb = wsPinned(b.id) ? 0 : 1;
     if (pa !== pb) return pa - pb;
     return idx(a.id) - idx(b.id);
@@ -353,7 +364,13 @@ export function ensureRuntime(id) {
   return state.ws[id];
 }
 
-export function setActive(id) {
+export function setActive(id, opts) {
+  // 작업 워크스페이스는 현황판 카드에서만 연다(§4) — 알림·단축키·팔레트가 실수로 열면 사이드바에 없는
+  //  워크스페이스가 활성인 채 "어디 있는지 모르는" 화면이 된다. 명시 옵션(allowTask)만 통과.
+  if (id && !(opts && opts.allowTask)) {
+    const tm = state.workspaces.find((w) => w.id === id);
+    if (tm && isTaskWorkspace(tm)) return;
+  }
   // 오프라인(캐시 목록)에서는 이 PC 로컬 워크스페이스만 진입 허용 — 다른 PC/클라우드는 서버 릴레이가
   //  있어야 조작되므로 열면 빈 화면 + 실패 폭풍이 된다(캐시가 원격 조작 허가는 아니다).
   if (id && state.wsStale) {
@@ -371,7 +388,8 @@ export function setActive(id) {
       try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(meta.hostDeviceId)); } catch (_) {}
     }
     // 이 PC 에서 마지막으로 본 워크스페이스로 기억 — 나중에 이 PC 로 되돌아오면 여기로 온다.
-    rememberLastWs(meta?.hostDeviceId ?? state.activeDeviceId, id);
+    //  작업 워크스페이스는 기억하지 않는다(PC 전환 복귀 목록에 없는 곳이다).
+    if (!isTaskWorkspace(meta)) rememberLastWs(meta?.hostDeviceId ?? state.activeDeviceId, id);
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
   }
@@ -803,6 +821,9 @@ export function setAgentState(ev) {
     agent: ev.agent || "claude",
     state: st || "idle",
     sessionId: ev.sessionId || null,
+    // 작업 현황판(§5.1) — 키가 아니라 값에서 읽는다(cwd 에 '|' 가 있어도 안전). since = 데몬이 실은 상태 전이 시각.
+    cwd: ev.cwd, win: Number(ev.win),
+    since: ev.since == null || !Number.isFinite(Number(ev.since)) ? null : Number(ev.since),
     at: Number(ev.at) || Date.now(),
     version: Number.isFinite(version) ? version : null,
     hostDeviceId: host,
@@ -827,6 +848,31 @@ export function agentStateOf(cwd, win) {
   if (Date.now() - (st.recvAt || st.at) > AGENT_STATE_STALE_MS) { agentStates.delete(key); return null; }
   return st;
 }
+/**
+ * 작업 현황판 입력(§5.1 agentSnaps) — 지금 믿을 수 있는 에이전트 상태 전부. host 모름 = 0(앱 `host ?? 0` 과 같은 규칙).
+ *  stale(15분)은 agentStateOf 와 같은 기준으로 뺀다(여기서 지우지는 않는다 — 렌더 경로라 emit 금지).
+ */
+export function listAgentSnaps() {
+  const out = [];
+  const now = Date.now();
+  for (const [k, v] of agentStates) {
+    if (now - (v.recvAt || v.at) > AGENT_STATE_STALE_MS) continue;
+    const bar = k.lastIndexOf("|");
+    const cwd = typeof v.cwd === "string" ? v.cwd : k.slice(0, bar);
+    const win = Number.isFinite(v.win) ? v.win : Number(k.slice(bar + 1));
+    out.push({ host: v.hostDeviceId ?? 0, cwd, win, agent: v.agent, state: v.state, at: v.at, since: v.since ?? null });
+  }
+  return out;
+}
+
+/** 작업 목록(호스트 1대분) 반영 — 현황판·사이드바 카운트가 이 값을 읽는다. */
+export function setTasksForHost(host, patch) {
+  const k = String(host);
+  const prev = state.tasks.byHost[k] || { items: [], gh: null, at: 0, error: null };
+  state.tasks.byHost[k] = { ...prev, ...(patch || {}) };
+  emit();
+}
+
 /**
  * 호스트가 오프라인이 되면 그 PC 가 남긴 상태는 더 이상 진실이 아니다(§1.5-b) → 폐기해 폴백으로 되돌린다.
  *  back 이 hostDeviceId 를 스탬프하지 않는 구버전에서는 cwd(그 워크스페이스의 홈-상대 경로)로 지운다.
@@ -877,7 +923,13 @@ export function blockedOffline(what) {
 }
 
 // ── 백엔드 워크스페이스 로드 ──
+//  활성 워크스페이스가 작업 워크스페이스였는지 — 목록 교체 **전에** 기억해 둬야 사라진 뒤에도 판정된다.
+let _activeWasTask = false;
+let _taskWsRemovedHook = null;
+/** 보고 있던 작업 워크스페이스가 정리로 사라졌을 때(main.js 가 토스트를 띄운다). */
+export function onTaskWsRemoved(fn) { _taskWsRemovedHook = typeof fn === "function" ? fn : null; }
 export async function loadWorkspaces() {
+  { const cur = state.workspaces.find((w) => w.id === state.activeWsId); _activeWasTask = !!cur && isTaskWorkspace(cur); }
   try {
     const data = await api.fetchWorkspaces();
     const list = Array.isArray(data) ? data : data?.workspaces || data?.data || [];
@@ -892,8 +944,14 @@ export async function loadWorkspaces() {
       if (w && isLocal(w) && w.hostOnline === false) forgetAgentStatesForHost(w.hostDeviceId, w.localPath);
     }
     // 활성 워크스페이스가 사라졌으면 초기화.
+    //  작업 워크스페이스였다면(데몬이 머지·폐기 정리로 지웠다) 현황판으로 돌아간다 — 빈 화면에 남기지 않는다(§4).
     if (state.activeWsId && !state.workspaces.some((w) => w.id === state.activeWsId)) {
+      const wasTask = _activeWasTask;
       state.activeWsId = null;
+      if (wasTask) {
+        state.view = "tasks";
+        try { _taskWsRemovedHook?.(); } catch (_) { /* noop */ }
+      }
     }
     // 오프라인(캐시)에서는 이 PC 워크스페이스만 열 수 있다 — 활성 선택도 그 규칙을 따른다.
     if (stale && state.activeWsId) {
@@ -902,9 +960,10 @@ export async function loadWorkspaces() {
     }
     // 첫 로컬 워크스페이스를 기본 활성으로.
     if (!state.activeWsId) {
+      const pool = state.workspaces.filter((w) => !isTaskWorkspace(w)); // 작업 워크스페이스는 기본 활성 후보가 아니다
       const first = stale
-        ? state.workspaces.find((w) => isLocal(w) && isThisHost(w))
-        : state.workspaces.find(isLocal) || state.workspaces[0];
+        ? pool.find((w) => isLocal(w) && isThisHost(w))
+        : pool.find(isLocal) || pool[0];
       if (first) {
         state.activeWsId = first.id;
         ensureRuntime(first.id);

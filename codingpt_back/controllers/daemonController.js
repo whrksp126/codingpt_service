@@ -1184,6 +1184,46 @@ async function surfaceRpc(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
+// POST /api/daemon/task  body:{ method, params, hostDeviceId } — Agent Tasks(task.*/git.*) 평문 폴백.
+//  정본 계약 = codingpt_daemon/docs/agent-tasks-design.md §3.3. 클라(taskRpc)는 봉인 RPC 가 **구조적으로**
+//  불가할 때(구 데몬·열쇠 없음·501)만 여기로 온다 — 타임아웃·5xx 뒤 평문 재전송은 클라가 금지한다(이중 실행).
+//  서버는 통로다: 메서드만 가르고 params 는 그대로 넘긴다(검증은 데몬 tasks.js 가 전부 — surfaceRpc 선례).
+//  값 = back 릴레이 타임아웃(ms). 클라 HTTP 타임아웃은 이 값 +5s 라 back 의 TIMEOUT 이 먼저 도착한다.
+//  변이(op)는 데몬이 {accepted, opId} 를 즉시 회신하므로 전부 15s.
+const TASK_RPC_OK = new Map([
+  ['task.list', 15000], ['task.get', 15000], ['task.create', 15000], ['task.run.prompt', 20000], ['task.run.trust', 15000],
+  ['task.run.reopen', 15000], ['task.diff', 30000], ['task.discard', 15000], ['task.delete', 15000],
+  ['git.branches', 15000], ['git.status', 15000], ['git.commit', 15000], ['git.push', 15000],
+  ['git.pr.create', 15000], ['git.pr.status', 30000], ['git.pr.merge', 15000], ['git.merge.local', 15000], ['git.gh.status', 15000],
+]);
+//  daemonRelayService.callRpc 의 타임아웃 reject 문구(code 없음). 문구 비교는 이 한 곳뿐 — 릴레이는 무수정 원칙이라
+//  코드를 붙일 수 없어 여기서 TIMEOUT 으로 접는다. 문구가 바뀌면 task-route.test.js 가 깨진다(실제 릴레이로 검증).
+const RELAY_RPC_TIMEOUT_MSG = '데몬이 응답하지 않습니다(RPC 타임아웃).';
+//  킬스위치 — TASKS_ENABLED=0 이면 caps 에서 task.v1 이 빠지고 라우트도 처리하지 않는다(핸들러 게이트 관습:
+//  rpcSealed/TRANSCRIPT_ENABLED 와 같은 이유 — 선언만 회수하면 이미 켠 클라가 계속 호출한다).
+function tasksEnabled() { return SERVER_CAPS.includes('task.v1'); }
+async function taskRpc(req, res) {
+  try {
+    if (!tasksEnabled()) {
+      return errorResponse(res, Object.assign(new Error('이 서버에서 작업 기능이 꺼져 있습니다.'), { publicDetail: { code: 'TASKS_DISABLED' } }), 403);
+    }
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!TASK_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, TASK_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') return mapRpcError(res, e); // 409
+    //  에러 code 의 자리 = body.detail.code(§2.13 3경로 정본). response.js 는 publicDetail 만 detail 로 싣는다.
+    //  ★ 프롬프트·diff 등 본문은 에러 message 에 실리지 않는다(데몬 message 는 한국어 원문 고정 문구) — 로그 금지 유지.
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code || 'GH_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
 async function emulatorOpenUrl(req, res) {
   try {
     const b = req.body || {};
@@ -1297,8 +1337,10 @@ async function rpcSealed(req, res) {
     if (e && e.message === 'DAEMON_OFFLINE') {
       return sealedFail(res, 'DAEMON_OFFLINE', 'PC 데몬이 연결되어 있지 않습니다.');
     }
-    // 매핑은 config/e2eeCodes.js 정본. 코드가 없는 실패(구 데몬·타임아웃)는 구조적 미지원과 같은 처방.
-    const m = e2eeCodes.sealedStatusOf(e && e.code);
+    // 매핑은 config/e2eeCodes.js 정본. 코드가 없는 실패(구 데몬)는 구조적 미지원과 같은 처방.
+    //  ★ 릴레이 타임아웃은 예외 — 봉투가 이미 데몬에 닿았을 수 있어 "미지원" 으로 위장하면 클라가 평문으로
+    //    같은 변이를 재전송한다(Agent Tasks §3.2). TIMEOUT(504)으로 구분해 싣는다.
+    const m = e2eeCodes.sealedStatusOf(e && e.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : e && e.code);
     e.publicDetail = { code: m.code };
     return errorResponse(res, e, m.status);
   }
@@ -1871,6 +1913,7 @@ module.exports = {
   emulatorOpenUrl,
   desktopRpc,
   surfaceRpc,
+  taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

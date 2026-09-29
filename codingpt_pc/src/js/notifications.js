@@ -144,3 +144,33 @@ function fmtTime(ts) {
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+
+// ── Agent Tasks 알림 라우팅(설계 §3.4·§4) ─────────────────────────────────────────
+//  kind task_ready · task_merged · task_failed 는 cwd/win(작업 워크스페이스 터미널) 대신 현황판의 그 작업으로 간다.
+//  목적지 정본 = deeplink `codingpt://task/<taskId>?host=<hostDeviceId>&run=<runId>`(앱과 같은 파서 규칙).
+//  deeplink 가 없는 행(구 서버·로컬 폴백)은 kind 만 보고 현황판을 연다(작업 id 는 모름).
+
+/** `codingpt://task/<id>?host=<n>&run=<r>` → { taskId, host, runId } | null */
+export function parseTaskDeeplink(url) {
+  const m = /^codingpt:\/\/task\/([^?#/]+)(?:\?([^#]*))?/.exec(String(url || ""));
+  if (!m) return null;
+  let taskId;
+  try { taskId = decodeURIComponent(m[1]); } catch (_) { return null; }
+  const q = new URLSearchParams(m[2] || "");
+  const h = q.get("host");
+  const host = h != null && h !== "" && Number.isFinite(Number(h)) ? Number(h) : null;
+  const runId = q.get("run") || null;
+  return { taskId, host, runId };
+}
+
+export function isTaskNotif(n) {
+  return !!n && (/^task_/.test(String(n.kind || "")) || /^codingpt:\/\/task\//.test(String(n.deeplink || "")));
+}
+
+/** 알림 → 현황판 열기 인자({taskId?, host?, runId?}). 작업 알림이 아니면 null. */
+export function taskNotifTarget(n) {
+  if (!isTaskNotif(n)) return null;
+  const p = parseTaskDeeplink(n.deeplink);
+  if (p) return p;
+  return { host: n.hostDeviceId ?? null };
+}

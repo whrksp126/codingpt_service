@@ -1,0 +1,69 @@
+{
+  "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
+  "method": "git.pr.merge|git.merge.local",
+  "description": "MergeResult — run.lastOp.result 로 온다. 성공은 cleanup:\"pending\" 으로 즉시 기록되고 정리 뒤 \"done\" 으로 갱신. 충돌은 **결과**(lastOp.ok:false, code:MERGE_CONFLICT, result 에 파일 목록) — 에러로 던지지 않는다.",
+  "cases": [
+    {
+      "name": "ok-pending",
+      "lastOp": {
+        "opId": "c2d3e4f5-a6b7-4c8d-9e0f-a0b1c2d3e4f5",
+        "kind": "pr.merge",
+        "ok": true,
+        "code": null,
+        "message": null,
+        "result": {
+          "ok": true,
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "cleanup": "pending",
+          "discarded": [],
+          "discardSkipped": []
+        },
+        "at": 1790000080000
+      }
+    },
+    {
+      "name": "ok-done",
+      "lastOp": {
+        "opId": "c2d3e4f5-a6b7-4c8d-9e0f-a0b1c2d3e4f5",
+        "kind": "pr.merge",
+        "ok": true,
+        "code": null,
+        "message": null,
+        "result": {
+          "ok": true,
+          "sha": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "cleanup": "done",
+          "discarded": [
+            "r_2bq7nd0x"
+          ],
+          "discardSkipped": [
+            {
+              "runId": "r_3cz0pq9w",
+              "code": "UNMERGED_COMMITS"
+            }
+          ]
+        },
+        "at": 1790000080000
+      }
+    },
+    {
+      "name": "conflict",
+      "lastOp": {
+        "opId": "d3e4f5a6-b7c8-4d9e-8f0a-b1c2d3e4f5a6",
+        "kind": "merge.local",
+        "ok": false,
+        "code": "MERGE_CONFLICT",
+        "message": "충돌이 났습니다",
+        "result": {
+          "ok": false,
+          "code": "MERGE_CONFLICT",
+          "files": [
+            "codingpt_back/routes/auth.js",
+            "README.md"
+          ]
+        },
+        "at": 1790000081000
+      }
+    }
+  ]
+}

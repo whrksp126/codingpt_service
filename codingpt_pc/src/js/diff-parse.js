@@ -167,3 +167,108 @@ export function buildSubmission(files, decisions, comments, note) {
     note: typeof note === "string" && note.trim() ? note.trim() : undefined,
   };
 }
+
+// ── Agent Tasks: 리뷰 코멘트 → 에이전트에게 보낼 텍스트(설계 §8.5 문법 정본) ──────────────
+//  작업 상세의 [코멘트 에이전트에게 보내기] 가 이 결과를 `chat.input` 으로 그 run 터미널에 넣는다
+//  (review.submit 이 아니다 — 작업 리뷰는 에이전트가 요청한 리뷰 세션이 없다).
+//  ⚠ 앱(diffParse.ts)에 같은 함수가 있고 review-comments-01.json 픽스처로 **바이트 동치**를 대조한다.
+//   §8.5 문언을 **글자 그대로** 따른다(해석을 보태지 않는다 — 두 구현이 갈리는 곳이 거기다):
+//   · 머리 `리뷰 코멘트 ({title})` — title 이 비어도 괄호는 남는다.
+//   · 코멘트 줄 `- {path}:{line}`(old 쪽 `:{line}(old)`, line 없으면 `- {path} hunk {hunk}`) + 거절 헝크면 ` [reject]`
+//     + ` ` + 본문(개행 \r?\n → 공백 하나). 본문이 비어도 줄은 남는다.
+//   · 코멘트 없는 거절 헝크 줄 `- {path} hunk {hunk} [reject]` (경로 → 헝크 순) · 메모 `전체 메모: {note.trim()}` (비면 생략).
+//   · 순서 = 경로 오름차순(코드포인트) → 헝크 번호 → 입력 순. 코멘트 0 · 거절 0 · 메모 없음 = "".
+//   · UTF-8 30000 바이트 초과 → 줄 단위로 앞에서부터 담고 마지막 줄 `… (잘림)`(표식 포함 상한 이내).
+//  "리뷰 코멘트"·"전체 메모"·"잘림" 은 에이전트가 읽는 고정 문자열이라 i18n 하지 않는다.
+export const REVIEW_COMMENTS_MAX_BYTES = 30000;
+
+function utf8Len(s) {
+  let n = 0;
+  for (const ch of String(s)) {
+    const c = ch.codePointAt(0);
+    n += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+  }
+  return n;
+}
+const cmpStr = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+/** 결정 키 `${path}#${hunk}` → [path, hunk]. 경로에 '#' 가 있어도 되게 마지막 '#' 로 자른다. */
+function splitHunkKey(k) {
+  const i = k.lastIndexOf("#");
+  if (i <= 0) return null;
+  const n = Number(k.slice(i + 1));
+  if (!Number.isInteger(n)) return null;
+  return [k.slice(0, i), n];
+}
+
+/**
+ * @param {{comments?:{path:string,hunk:number,side:'old'|'new',line:number|null,text:string}[],
+ *          decisions?:Record<string,'approve'|'reject'>, note?:string, files?:object[]}} submission
+ *   리뷰 화면 상태의 원재료(comments · decisions(키 `${path}#${hunk}`) · note). comments 가 없고
+ *   buildSubmission() 결과(`{files:[{path,hunks:[{index,decision}],comments}], note}`)면 그것을 원재료로 되돌린다.
+ * @param {{title?:string}} [opts]
+ * @returns {string}
+ */
+export function serializeReviewComments(submission, opts) {
+  const sub = submission || {};
+  let comments = Array.isArray(sub.comments) ? sub.comments.slice() : [];
+  let decisions = sub.decisions && typeof sub.decisions === "object" ? { ...sub.decisions } : {};
+  if (!sub.comments && Array.isArray(sub.files)) {
+    comments = [];
+    decisions = {};
+    for (const f of sub.files) {
+      for (const h of f.hunks || []) if (h.decision === "approve" || h.decision === "reject") decisions[`${f.path}#${h.index}`] = h.decision;
+      for (const c of f.comments || []) comments.push({ path: f.path, hunk: c.hunk, side: c.side, line: c.line, text: c.text });
+    }
+  }
+  const note = typeof sub.note === "string" ? sub.note.trim() : "";
+  const rejected = [];
+  for (const [k, v] of Object.entries(decisions)) {
+    if (v !== "reject") continue;
+    const pk = splitHunkKey(k);
+    if (pk) rejected.push(pk);
+  }
+  if (!comments.length && !rejected.length && !note) return "";
+
+  const ordered = comments.map((c, i) => ({ c, i })).sort((x, y) =>
+    cmpStr(x.c.path, y.c.path) || (x.c.hunk - y.c.hunk) || (x.i - y.i));
+  const lines = [`리뷰 코멘트 (${(opts && opts.title) ?? ""})`];
+  const commented = new Set();
+  for (const { c } of ordered) {
+    const key = `${c.path}#${c.hunk}`;
+    commented.add(key);
+    const at = c.line === null || c.line === undefined
+      ? `- ${c.path} hunk ${c.hunk}`
+      : `- ${c.path}:${c.line}${c.side === "old" ? "(old)" : ""}`;
+    const rej = decisions[key] === "reject" ? " [reject]" : "";
+    lines.push(`${at}${rej} ${String(c.text ?? "").replace(/\r?\n/g, " ")}`);
+  }
+  rejected
+    .filter(([p, h]) => !commented.has(`${p}#${h}`))
+    .sort((a, b) => cmpStr(a[0], b[0]) || (a[1] - b[1]))
+    .forEach(([p, h]) => lines.push(`- ${p} hunk ${h} [reject]`));
+  if (note) lines.push(`전체 메모: ${note}`);
+
+  const out = lines.join("\n");
+  if (utf8Len(out) <= REVIEW_COMMENTS_MAX_BYTES) return out;
+  const MARK = "… (잘림)";
+  const budget = REVIEW_COMMENTS_MAX_BYTES - utf8Len("\n" + MARK);
+  const kept = [];
+  let used = 0;
+  for (const ln of lines) {
+    const add = utf8Len(ln) + (kept.length ? 1 : 0);
+    if (used + add > budget) {
+      // 첫 줄조차 안 들어가는 극단(거대한 한 줄) — 그 줄을 바이트 예산 안에서 자른다.
+      if (!kept.length) {
+        let cut = "";
+        let b = 0;
+        for (const ch of ln) { const l = utf8Len(ch); if (b + l > budget) break; cut += ch; b += l; }
+        kept.push(cut);
+      }
+      break;
+    }
+    kept.push(ln);
+    used += add;
+  }
+  kept.push(MARK);
+  return kept.join("\n");
+}

@@ -43,6 +43,11 @@ let nowFn = () => Date.now();
 let notifyFn = null;                                  // null = 기본(cpt-server.backFetch)
 let logFn = (msg) => { console.log(msg); };
 let emitFn = null;                                    // null = 기본(control.sendEvent + caps 게이팅)
+// Agent Tasks(설계 §2.7) — 알림 발사 직전 거부권. false(또는 false 로 풀리는 Promise)면 알림을 내지 않는다.
+//  작업 run 터미널의 "변경 있는 턴 종료" 는 tasks.js 가 task_ready 로 대체하므로 done 을 여기서 막는다.
+let shouldNotifyFn = null;
+// 상태 전이 구독자(tasks.js) — bump() 가 유일한 변경 지점이므로 통지도 여기 한 곳에서만 나간다.
+const listeners = new Set();
 
 // 실제 알림 전송 — cpt-server 는 lazy require(순환 회피, agent-watch 와 동일 패턴).
 async function defaultNotify(payload) {
@@ -60,6 +65,7 @@ function configure(opts = {}) {
   if (opts.notify !== undefined) notifyFn = typeof opts.notify === 'function' ? opts.notify : null;
   if (opts.log !== undefined) logFn = typeof opts.log === 'function' ? opts.log : () => {};
   if (opts.emit !== undefined) emitFn = typeof opts.emit === 'function' ? opts.emit : null;
+  if (opts.shouldNotify !== undefined) shouldNotifyFn = typeof opts.shouldNotify === 'function' ? opts.shouldNotify : null;
   return module.exports;
 }
 // control.js 기동 순서용 진입점 — 타이머를 만들지 않는다(순수 스토어). 주입도 겸한다.
@@ -130,7 +136,23 @@ function bump(rec, next, source, ctx = {}) {
   // §8 관측 계측: 훅 도착 지연(dt)까지 한 줄로 — 라이브에서 훅 배선 문제를 눈으로 잡을 수 있어야 한다.
   logFn(`[agent-state] ${rec.tid} ${prev}→${rec.state} v${rec.version} src=${source} ev=${ctx.ev || '-'}${ctx.dt != null ? ` dt=${ctx.dt}ms` : ''}`);
   emitState(rec);  // 와이어 state 가 바뀐 경우에만 실제로 나간다(내부 dedup)
+  // 구독자 통지(추가 전용) — 구독자 예외는 삼킨다(상태 소유자가 소비자 버그로 죽으면 안 된다).
+  for (const fn of listeners) { try { fn(rec, prev, ctx); } catch (_) { /* noop */ } }
   return rec;
+}
+
+/** 상태 전이 구독 — fn(rec, prev, ctx{ev,dt}). 반환 = 해제 함수. */
+function subscribe(fn) {
+  if (typeof fn !== 'function') return () => false;
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}
+
+// launching 을 접지 않는 원본 상태(레코드 없음 = null). statusOf 는 launching·무기록을 둘 다 idle 로
+//  접어 "에이전트가 준비됐나" 게이트가 될 수 없다(설계 §2.5 11-(a)).
+function rawStateOf(key) {
+  const rec = states.get(String(key || ''));
+  return rec ? rec.state : null;
 }
 
 // ── 상태 방출(기능3 2단계, 계약 §1.3) ─────────────────────────────────────────
@@ -254,6 +276,18 @@ function hookRecent(cwdRel, win) {
 // ── 알림 발사(단일 창구) ──
 //  REFIRE_MIN_MS 집행이 여기 한 곳에 있어야 "훅 + 폴백 동시 도착 = 정확히 1건" 이 구조로 보장된다.
 async function fire(rec, kind, opts = {}) {
+  if (shouldNotifyFn) {
+    // 거부권은 REFIRE 기록 **전**에 본다 — 억제된 done 이 다음 턴의 done 을 8초 창으로 또 막지 않게.
+    let allow = true;
+    try {
+      allow = shouldNotifyFn(rec, kind);
+      if (allow && typeof allow.then === 'function') allow = await allow;
+    } catch (_) { allow = true; }   // 판정 실패 = 기존 동작(알림)
+    if (allow === false) {
+      logFn(`[agent-state] ${rec.tid} 알림 억제(shouldNotify ${kind})`);
+      return { fired: false, reason: 'suppressed' };
+    }
+  }
   const now = nowFn();
   const last = rec.fires.get(kind) || 0;
   if (now - last < REFIRE_MIN_MS) {
@@ -606,6 +640,7 @@ function forget(key) {
 // 테스트용 전면 초기화(agent-watch.js:204 _states 노출 컨벤션 미러).
 function _reset() {
   states.clear(); wsHooks.clear(); tombs.clear(); lastEmitted.clear();
+  listeners.clear(); shouldNotifyFn = null;
 }
 
 module.exports = {
@@ -613,6 +648,7 @@ module.exports = {
   applyHook, applyWatch,
   statusOf, legacyStatusOf, snapshot, hookGoverned, noteHook, hookRecent, forget,
   attachmentOf,             // 목록(terminal.list) 판정의 상태 쪽 절반 — agent-watch.agentSignalOf 가 소비
+  subscribe, rawStateOf,    // Agent Tasks(tasks.js) — 전이 구독 + launching 비접힘 원본 상태
   wireStateOf, resyncAll,   // 상태 방출(기능3 2단계) — control.js 가 hello_ack 에서 리싱크를 부른다
   HOOK_GOVERN_MS, REFIRE_MIN_MS, PERMISSION_DEDUP_MS, HOOK_RECENT_MS, AGENT_STATE_CAP,
   _states: states, _tombs: tombs, _reset, _lastEmitted: lastEmitted,

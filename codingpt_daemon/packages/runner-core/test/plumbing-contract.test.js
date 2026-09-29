@@ -63,7 +63,7 @@ const EPOCH = 2;
 
 // ── 가짜 back ─────────────────────────────────────────────────────────────
 const hits = [];
-let rpcBehavior = 'echo';     // echo | notfound | remoteError | empty
+let rpcBehavior = 'echo';     // echo | notfound | noKey | offline | remoteError | empty
 let grantBehavior = 'ok';     // ok | unsupported | ratelimited
 let LAN_PORT = 0;
 let lanGrantIssued = null;
@@ -84,6 +84,8 @@ const back = http.createServer((req, res) => {
     // ── POST /api/daemon/rpc (봉투 프록시, 기능2 B단계) ──
     if (req.url === '/api/daemon/rpc') {
       if (rpcBehavior === 'notfound') return sendJson(res, 404, { success: false, message: 'Not Found' });
+      if (rpcBehavior === 'noKey') return sendJson(res, 501, { success: false, message: '상대 PC 에 열쇠가 없습니다', detail: { code: 'E2EE_NO_KEY' } });
+      if (rpcBehavior === 'offline') return sendJson(res, 409, { success: false, message: 'PC 오프라인', detail: { code: 'DAEMON_OFFLINE' } });
       // 상대 데몬 역할: **평문 형제 필드 hostDeviceId 로 AAD 를 재구성**해 봉투를 열고 응답을 봉인한다.
       //  (같은 프로세스라 MK 를 공유한다 — 여기서 검증하는 것은 AAD/필드 규약이다)
       const aadHost = json && json.hostDeviceId != null ? Number(json.hostDeviceId) : 0;
@@ -471,6 +473,17 @@ test('2-D. e2ee.rpc — host 명시/미지정 AAD 왕복 + 본문 형태(앱 e2e
   rpcBehavior = 'notfound';
   const r5 = await call('e2ee.rpc', { method: 'fs.read', params: { path: 'a.ts' }, hostDeviceId: SELF_DEV });
   assert.strictEqual(r5.ok, false, '미지원은 폴백 신호여야 한다(도메인 실패로 주면 IDE 에 붉은 오류가 뜬다)');
+  // ⑥ back 의 code/status 를 보존 — 코드 없는 404 = 구 back = E2EE_UNSUPPORTED, 501 E2EE_NO_KEY 그대로,
+  //    409 = DAEMON_OFFLINE. (전부 E2EE_RELAY_FAILED 로 뭉개면 PC 작업 API 가 평문 폴백을 못 한다)
+  assert.strictEqual(r5.code, 'E2EE_UNSUPPORTED', JSON.stringify(r5));
+  rpcBehavior = 'noKey';
+  const r6 = await call('e2ee.rpc', { method: 'task.list', params: {}, hostDeviceId: SELF_DEV });
+  assert.strictEqual(r6.ok, false);
+  assert.strictEqual(r6.code, 'E2EE_NO_KEY');
+  rpcBehavior = 'offline';
+  const r7 = await call('e2ee.rpc', { method: 'task.list', params: {}, hostDeviceId: SELF_DEV });
+  assert.strictEqual(r7.ok, false);
+  assert.strictEqual(r7.code, 'DAEMON_OFFLINE');
   rpcBehavior = 'echo';
 });
 

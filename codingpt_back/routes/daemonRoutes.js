@@ -14,7 +14,9 @@ router.post('/pair/session', daemonController.createPairSession); // 무인증 �
 router.post('/pair/approve', authMiddleware, daemonController.approvePairSession); // 로그인된 앱이 QR 코드 승인
 router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코드/secret 이 비밀
 router.post('/pair/grant', authMiddleware, daemonController.pairGrant); // 승인 직후 앱이 PC 공개키로 봉인한 MK 업로드(추가 탭 0)
-router.get('/status', authMiddleware, daemonController.getStatus);
+// accountAuth(JWT|deviceToken): PC 앱도 runners[].caps(task.v1 등)를 읽어야 한다(Agent Tasks §2.3 hostCaps).
+//  getStatus 는 req.user.id 만 쓴다 — accountAuth 가 두 인증 모두에서 채운다(JWT 경로는 종전과 동일).
+router.get('/status', accountAuth, daemonController.getStatus);
 // PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
 router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)
 router.patch('/me', daemonController.updateMe); // JWT|deviceToken — 닉네임 등 프로필 수정
@@ -65,6 +67,8 @@ router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
 router.post('/desktop', accountAuth, daemonController.desktopRpc);
 router.post('/surface', accountAuth, daemonController.surfaceRpc);
+// Agent Tasks(task.*/git.*) 평문 폴백 — 봉인 RPC 가 구조적으로 불가할 때만. 허용 표 = daemonController.TASK_RPC_OK.
+router.post('/task', accountAuth, daemonController.taskRpc);
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);
 //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 시그널링만 여기를 지나고 영상은 안 지난다.

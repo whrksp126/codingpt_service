@@ -294,6 +294,32 @@ pub async fn emulator_local(cmd: String, args: serde_json::Value) -> Result<serd
         .map_err(|e| format!("요청 실행 실패: {e}"))?
 }
 
+// Agent Tasks(2026-09-29) — 이 PC 데몬의 작업(worktree 실행)·git/gh 조작. 이 PC 호스트면 back 을 왕복하지 않는다
+//  (다른 PC 는 프런트 tasks-api.js 의 taskRpc 가 봉인 RPC 로 보낸다 — 데몬 구현은 한 벌, cpt-server.handleTaskRpc).
+//  울타리는 위와 같은 모양: `task.` / `git.` 접두사만. 데몬 쪽 분기는 hasCptContext 게이트 바깥이지만
+//  cpt CLI 의 CAPABILITIES 에는 task.list/get 만 있다(터미널 안 AI 가 머지·폐기를 스스로 못 하게).
+//  ★ async + spawn_blocking: git fetch·gh 호출이 초 단위라 동기 커맨드면 메인 스레드가 멈춘다(emulator_local 선례).
+//  타임아웃 35s = 계약 표 최대(task.diff/git.pr.status 30s) + 5s — 데몬의 에러가 먼저 도착하게.
+//  실패는 `<CODE>: <메시지>` (with_code=true) — tasks-api.js 가 `^([A-Z_]+): ` 로 파싱한다.
+//  ★ 다른 PC 로 가는 **봉인** 작업 RPC(`e2ee.rpc` + method 가 task./git.)도 이 통로를 탄다. e2ee_local 은
+//   동기 커맨드 + 읽기 10초라 task.diff(30s)·변이(15s) 가 데몬보다 먼저 코드 없는 실패로 끊기고, 그 실패를
+//   "봉투가 못 떠났다" 로 오판하면 평문 재전송 = 이중 실행이 된다(설계 §3.2). 울타리는 method 접두로 유지한다.
+#[tauri::command]
+pub async fn task_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let sealed_task = cmd == "e2ee.rpc"
+        && args
+            .get("method")
+            .and_then(|m| m.as_str())
+            .map(|m| m.starts_with("task.") || m.starts_with("git."))
+            .unwrap_or(false);
+    if !cmd.starts_with("task.") && !cmd.starts_with("git.") && !sealed_task {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || cpt_request_timed(&cmd, args, true, 35))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

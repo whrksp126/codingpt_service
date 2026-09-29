@@ -17,8 +17,9 @@
 //  501 = 구조적 미지원. "이 호스트에서는 지금 봉투를 쓸 수 없다"가 사실이고 **재시도로 낫지 않는다**
 //        (데몬에 모듈이 없다 / CPT_E2EE=0 / 스코프 미달 / 이 PC 에 계정 열쇠가 0개).
 //        → 앱이 조용히 평문으로 내려가고 10분 캐시해 왕복 자체를 줄이는 것이 옳은 처방이다.
-//        code 없는 실패(구 데몬이 method 'sealed' 를 몰라 throw · RPC 타임아웃)도 이 바구니다:
-//        구분 수단이 없고 어느 쪽이든 처방이 같다.
+//        code 없는 실패(구 데몬이 method 'sealed' 를 몰라 throw)도 이 바구니다.
+//        ※ 릴레이 타임아웃은 여기 넣지 않는다(504 TIMEOUT) — 봉투가 이미 데몬에 닿았을 수 있어서
+//          평문 재전송이 이중 실행이 된다(Agent Tasks 2026-09-29 개정).
 //  409 = 계약 위반(재시도로 낫지 않지만 **구조적 미지원도 아니다**). 아래 §계약위반 참조.
 //  502 = 데몬이 봉투를 다루려다 실패했다(열기/봉인/메서드). 코드를 보존해 진단 가능하게 한다.
 //
@@ -57,12 +58,17 @@ const SEALED_HANDLING = ['E2EE_OPEN_FAILED', 'E2EE_SEAL_FAILED', 'E2EE_BAD_METHO
 const SEALED_STATUS = Object.freeze({
   BAD_ENVELOPE: 400,      // 형식 게이트(서버가 볼 수 있는 유일한 검문) — 데몬 왕복 0회
   DAEMON_OFFLINE: 409,    // 대상 PC 가 연결돼 있지 않다(기존 통일 응답)
+  // 릴레이 타임아웃 — 봉투가 **데몬에 도착했을 수 있다**(이미 실행 중일 수 있다). 구조적 미지원(501)과
+  //  섞으면 클라가 평문으로 같은 변이를 다시 보낸다(Agent Tasks §3.2/A3 이중 실행). 그래서 코드를 따로 싣는다.
+  //  컨트롤러가 릴레이 reject 문구로 이 코드를 붙인다(릴레이 무수정). 504 도 앱의 ≥500 규칙을 타므로
+  //  기존 기능의 처방(폴백 허용)은 종전 501 과 같다 — 달라지는 것은 코드로 구분하는 호출부(taskRpc)뿐이다.
+  TIMEOUT: 504,
   ...Object.fromEntries(SEALED_STRUCTURAL.map((c) => [c, 501])),
   ...Object.fromEntries(SEALED_CONTRACT.map((c) => [c, 409])),
   ...Object.fromEntries(SEALED_HANDLING.map((c) => [c, 502])),
 });
 
-// code 가 아예 없는 실패(구 데몬 throw · RPC 타임아웃 · 전송 실패) = 구조적 미지원과 같은 처방.
+// code 가 아예 없는 실패(구 데몬 throw · 전송 실패) = 구조적 미지원과 같은 처방. 릴레이 타임아웃은 컨트롤러가 TIMEOUT 으로 먼저 붙인다.
 const SEALED_NO_CODE_STATUS = 501;
 const SEALED_NO_CODE = 'E2EE_UNSUPPORTED';
 // 표에 없는 코드 = 데몬이 뭔가 시도하다 실패한 것으로 보고 502(코드는 그대로 보존해 진단).

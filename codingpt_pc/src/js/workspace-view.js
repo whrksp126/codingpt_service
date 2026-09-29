@@ -16,6 +16,8 @@ import { PALETTE_TEXT } from "./text/palette.js";
 import { bindings, IS_APPLE } from "./shortcuts.js";
 import { formatCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
+import { openNewTask, openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
+import { tt } from "./text/tasks.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -580,6 +582,22 @@ function renderMainTop(ws) {
   name.className = "mt-name";
   name.textContent = ws?.name || i18n.t('워크스페이스');
   mtDyn.append(name);
+  // 작업 워크스페이스(Agent Tasks §4) — 이름은 의미 없는 식별자(<repoSlug>-<t6>-<k>)라 사람이 읽는 제목을
+  //  배지로 붙이고, 사이드바에 없는 곳이므로 돌아갈 길([현황판])을 바로 옆에 둔다. 제목은 봉인 task.list 로만 온다.
+  if (ws && S.isTaskWorkspace(ws)) {
+    const title = taskTitleForWs(ws.id);
+    if (title) {
+      const badge = document.createElement("span");
+      badge.className = "mt-task-badge";
+      badge.textContent = tt("taskBadge", { name: title });
+      mtDyn.append(badge);
+    }
+    const back = document.createElement("button");
+    back.className = "mt-task-back";
+    back.innerHTML = tasksIcon({ size: 13 }) + `<span>${tt("backToDashboard")}</span>`;
+    back.addEventListener("click", (ev) => { ev.stopPropagation(); openTasksDashboard(); });
+    mtDyn.append(back);
+  }
   // 헤더 우측 = [찾기] │ [+] (2026-08-14 사용자 확정).
   //  예전엔 터미널·IDE·웹뷰·모바일화면 4개가 나란히 있었다. 아이콘 4개는 "무엇을 여는 버튼인지"를
   //  모양만으로 구분해야 해서 매번 툴팁을 읽어야 했고, 종류가 늘 때마다 헤더가 길어졌다.
@@ -738,6 +756,9 @@ function openAddMenu(anchor) {
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
   //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
   row(icons.monitor, i18n.t('에이전트 PC'), { fill: (panel, done) => fillDesktopOsMenu(panel, done) });
+  // Agent Tasks(§1.3 "PC 에서 만들기") — 이 워크스페이스를 저장소 기본값으로 새 작업 시트를 연다.
+  //  작업 워크스페이스 안에서는 뺀다(worktree 를 다시 저장소로 삼으면 작업 안의 작업이 된다).
+  if (!S.isTaskWorkspace(activeWs())) row((o) => tasksIcon(o), tt("newTask"), { onClick: () => openNewTask() });
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();

@@ -8,6 +8,9 @@ import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
+import { tasksIcon, needsInputCount, openTasksDashboard, closeTasksDashboard, openRunTerminal } from "./tasks-view.js";
+import { taskNotifTarget } from "./notifications.js";
+import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
 
 let el = null;
@@ -91,6 +94,14 @@ function startLanBadgePoll() {
 }
 
 export function jumpToNotification(n) {
+  // Agent Tasks 알림(task_ready·task_merged·task_failed) — cwd/win 라우팅 대신 현황판의 그 작업 상세로(§4).
+  //  작업 워크스페이스는 사이드바에 없는 곳이라 cwd 로 열면 "어디 있는지 모르는" 화면이 된다.
+  const tgt = taskNotifTarget(n);
+  if (tgt) {
+    openTasksDashboard(tgt);
+    closeNotif();
+    return;
+  }
   // 기기 승인 알림(기능2)은 워크스페이스가 없다 — 설정>계정(종단간 암호화 카드)이 목적지다.
   if (n && n.kind === "device_approval") {
     import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings"));
@@ -109,6 +120,16 @@ export function jumpToNotification(n) {
   const ws =
     state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId)) ||
     (n.cwd ? state.workspaces.find((w) => w.localPath === n.cwd) : null);
+  // 작업 run 터미널의 일반 에이전트 알림(입력 대기·권한·유휴) — setActive 는 작업 워크스페이스를 거부하므로
+  //  (allowTask 없이) 그대로 두면 아무것도 안 열리거나 **지금 활성 워크스페이스의 같은 win** 을 잘못 짚는다.
+  //  현황판 카드와 같은 경로(openRunTerminal, task:true)로 그 터미널을 연다.
+  if (ws && S.isTaskWorkspace(ws)) {
+    closeNotif();
+    void openRunTerminal(ws.id, n.win != null ? Number(n.win) : null, { task: true }).then((ok) => {
+      if (ok && n.cwd && n.win != null) S.readScope(n.cwd, Number(n.win));
+    });
+    return;
+  }
   if (ws) S.setActive(ws.id);
   // 발생한 터미널(win)을 보여주는 leaf 로 점프 — 다른 pane 탭에 숨어 있으면 그 탭으로 전환.
   const rt = S.wsRuntime(state.activeWsId);
@@ -170,7 +191,9 @@ export function updateSidebar() {
     const devices0 = S.pcDevices();
     const activeDev0 = S.activeDeviceId();
     const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
+    const tasksN = needsInputCount();
     const sig = JSON.stringify([
+      tasksN,
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
       state.me?.nickname, state.me?.email, state.me?.profileImg,
@@ -207,6 +230,9 @@ export function updateSidebar() {
   // 서버 미가용 — 목록은 로컬 캐시(last-known)다. 이 PC 폴더 작업은 그대로 되지만 서버가 원천인
   //  조작(추가/삭제)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
   if (state.wsStale) list.appendChild(note(i18n.t('오프라인 — 마지막으로 본 목록')));
+
+  // ── ⓪ 작업(Agent Tasks §6.1) — "내 PC" 위 한 줄. n = 입력 대기 수(현황판의 첫 그룹). ──
+  list.appendChild(tasksRow());
 
   // ── ① 내 PC (2026-08-14 기기 우선 개편) ────────────────────────────────
   //  예전엔 프로젝트(projectId) 묶음이 위, 그 안에 기기별 사본이 있었다. 사용자 지적: "이해도 안
@@ -396,8 +422,27 @@ export function buildTopControls(_withAdd = true) {
     badge.textContent = totalUnread > 9 ? "9+" : String(totalUnread);
     bell.appendChild(badge);
   }
-  frag.append(toggle, bell);
+  // 작업 현황판 — 벨 옆(§6.1 진입점). 켜짐 표시는 색이 아니라 기존 ic-btn 호버 명암 규칙 그대로.
+  const tasks = document.createElement("button");
+  tasks.className = "ic-btn" + (state.view === "tasks" ? " on" : "");
+  tasks.title = tt("dashboard");
+  tasks.innerHTML = tasksIcon(TITLEBAR_ICON);
+  tasks.addEventListener("click", () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()));
+  frag.append(toggle, bell, tasks);
   return frag;
+}
+
+/** 사이드바 `작업 [n]` 행 — 현황판 진입. 선택(현황판이 열림)은 PC 행과 같은 배경 명암(--hover)으로만. */
+function tasksRow() {
+  const n = needsInputCount();
+  const row = document.createElement("button");
+  row.className = "pc-row tasks-row" + (state.view === "tasks" ? " active" : "");
+  row.innerHTML =
+    `<span class="pc-ic">${tasksIcon({ size: 15 })}</span>` +
+    `<span class="pc-nm">${escapeHtml(tt("title"))}</span>` +
+    (n ? `<span class="wsr-badge">${n}</span>` : "");
+  row.addEventListener("click", () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()));
+  return row;
 }
 function note(text) {
   const d = document.createElement("div");

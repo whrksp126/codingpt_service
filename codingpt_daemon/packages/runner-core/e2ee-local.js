@@ -296,8 +296,18 @@ async function rpc(a) {
       timeoutMs, env,
     });
   } catch (err) {
-    // 404/501(구 back) · 409(오프라인) · 502 전부 "지금은 봉투를 못 쓴다" → 평문 폴백 신호(throw).
-    throw Object.assign(new Error((err && err.message) || '봉투 RPC 중계 실패'), { code: 'E2EE_RELAY_FAILED' });
+    // 404/501(구 back) · 409(오프라인) · 502 전부 "지금은 봉투를 못 쓴다" → 소켓 실패(throw).
+    //  ★ back 이 실은 code(detail.code)·HTTP status 를 **보존**한다 — 전부 E2EE_RELAY_FAILED 로 뭉개면
+    //   호출측(PC tasks-api)이 구조적 미지원(501 E2EE_NO_KEY/DISABLED/UNSUPPORTED → 평문 폴백)과
+    //   결과 불명(타임아웃 → 폴백 금지)·호스트 오프라인(409 → DAEMON_OFFLINE)을 구분할 수 없다.
+    //   코드 없는 404/405/501 = 구 back(라우트 없음) = E2EE_UNSUPPORTED, 코드 없는 409 = DAEMON_OFFLINE.
+    const status = err && Number(err.status) > 0 ? Number(err.status) : 0;
+    let code = err && typeof err.code === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(err.code) ? err.code : '';
+    if (!code && (status === 404 || status === 405 || status === 501)) code = 'E2EE_UNSUPPORTED';
+    if (!code && status === 409) code = 'DAEMON_OFFLINE';
+    if (!code) code = 'E2EE_RELAY_FAILED';
+    const msg = (err && err.message) || '봉투 RPC 중계 실패';
+    throw Object.assign(new Error(status ? `${msg} (HTTP ${status})` : msg), { code, status });
   }
   const body = (res && (res.data || res)) || {};
   if (!body.env) throw Object.assign(new Error('서버가 봉투 응답을 주지 않았습니다'), { code: 'E2EE_NO_ENVELOPE' });

@@ -1249,6 +1249,22 @@ pub fn devtools_window(app: AppHandle, pv: String, open: bool) -> Result<(), Str
     Ok(())
 }
 
+// back_api 의 비동기판 — 동기 #[tauri::command] 는 **메인 스레드**에서 돈다(Tauri 2). Agent Tasks 는 원격 호스트
+//  task.list 60초 폴링·task.diff/git.pr.status(최대 35초)·runner_status 마다 caps 조회를 부르므로, 동기판을 쓰면
+//  왕복 내내 WebView/AppKit 메인 스레드가 막혀 무지개 커서가 뜬다(task_local 이 spawn_blocking 인 것과 같은 이유).
+//  경로 허용 규칙·에러 형식은 back_api 그대로(같은 함수를 블로킹 풀에서 부른다).
+#[tauri::command]
+pub async fn back_api_async(
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+    timeout_secs: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || back_api(method, path, body, timeout_secs))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
+}
+
 // ── 범용 back REST(deviceToken) — 원격 PC 워크스페이스의 fs/프리뷰 릴레이 호출용 ──
 //  기본은 /api/daemon/ 경로만 허용한다. 설정의 Supporter 화면에 필요한 읽기/체크아웃/포털
 //  세 경로만 별도로 허용한다. 임의 billing API 를 열지 않아 deviceToken 의 권한 표면을 최소화한다.

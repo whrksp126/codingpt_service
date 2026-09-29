@@ -97,6 +97,12 @@
 //                   버퍼링(rseq)은 **하지 않는다** — 상태 프레임을 agentBuf 에 넣으면 알림 리플레이
 //                   항목을 축출한다(chat_event 를 버퍼에 넣지 않는 것과 같은 이유).
 //                   AGENTSTATE_ENABLED=0 으로 회수 → 데몬 sendEvent 가 false = 기존 tab.cmd 폴백.
+//
+//  · task.v1      — Agent Tasks(worktree 작업·git/gh). 서버측 = POST /api/daemon/task 평문 폴백
+//                   (daemonController.taskRpc, 허용 표 TASK_RPC_OK) — 봉인 경로(/api/daemon/rpc)는 무수정으로 통한다.
+//                   정본 = codingpt_daemon/docs/agent-tasks-design.md §3.3. 교집합의 데몬 항은 데몬
+//                   OPTIONAL_CAPS 의 task.v1(runners[].caps). TASKS_ENABLED=0 으로 회수 — 선언과 함께
+//                   taskRpc 핸들러 게이트도 403(TASKS_DISABLED) 으로 닫힌다(한 소스: SERVER_CAPS).
 
 // env 값이 명시적으로 꺼져 있는가('0'|'false'|'off'). 미설정 = 켜짐(기본값).
 function envOff(v) {
@@ -109,6 +115,7 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.APPROVAL_ENABLED)) caps.push('approval.v1');
   if (!envOff(env.TRANSCRIPT_ENABLED)) caps.push('transcript.v1');
   if (!envOff(env.AGENTSTATE_ENABLED)) caps.push('agentstate.v1');
+  if (!envOff(env.TASKS_ENABLED)) caps.push('task.v1');
   if (!envOff(env.E2EE_ENABLED)) {
     caps.push('e2ee.keys.v1');
     caps.push('e2ee.rpc.v1');

@@ -107,7 +107,8 @@ test('SERVER_CAPS — 처리 코드가 들어간 능력만 선언 + 킬스위치
   assert.strictEqual(typeof relay.fanoutAgentState, 'function', '선언했으면 팬아웃 코드가 반드시 있어야 한다');
   // 킬스위치 — 서버에서 기능을 끄면 능력도 회수돼 신버전 데몬의 교집합이 깨진다(= 기존 동작 폴백).
   assert.deepStrictEqual(
-    computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', AGENTSTATE_ENABLED: '0', E2EE_ENABLED: 'off' }),
+    //  TASKS_ENABLED = Agent Tasks(task.v1) 킬스위치(상세 검증은 task-route.test.js).
+    computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', AGENTSTATE_ENABLED: '0', E2EE_ENABLED: 'off', TASKS_ENABLED: '0' }),
     ['caps.v1']);
   assert.ok(computeServerCaps({}).includes('approval.v1')); // 미설정 = 켜짐
   assert.ok(!computeServerCaps({ AGENTSTATE_ENABLED: 'no' }).includes('agentstate.v1'));

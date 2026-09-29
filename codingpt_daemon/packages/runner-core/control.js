@@ -39,6 +39,7 @@ const DAEMON_CAPS = ['caps.v1', 'hooks.v2', 'agentstate.v1'];
 const OPTIONAL_CAPS = [
   ['approval.v1', './approvals', 'request'],    // 기능1 원격 승인(훅 블로킹 왕복)
   ['transcript.v1', './transcript', 'handle'],  // 기능5 트랜스크립트 tail/파싱
+  ['task.v1', './tasks', 'handle'],             // Agent Tasks(worktree 작업) — jail 밖이면 handle 이 undefined
 ];
 
 function daemonCaps() {
@@ -472,6 +473,15 @@ function dispatchRpc(ws, method, params, ok, fail) {
     return;
   }
   if (method.startsWith('chat.')) { callLazy('./transcript', 'handle', [method, params, ws], ok, fail); return; }
+  // Agent Tasks(task.*/git.*) — worktree 작업·git/gh 조작. 로컬 소켓과 같은 함수(cpt-server.handleTaskRpc). 구 번들은 명확한 실패.
+  if (method.startsWith('task.') || method.startsWith('git.')) {
+    // 서버 킬스위치(TASKS_ENABLED=0) — 서버가 hello_ack 으로 능력을 선언했는데 task.v1 이 없으면 원격 작업 RPC 를
+    //  거부한다. 평문 라우트는 back 이 403 으로 닫지만 **봉인 RPC 는 서버가 메서드를 못 본다**(/api/daemon/rpc) —
+    //  데몬이 교집합의 다른 한쪽을 지켜야 봉인 클라에도 킬스위치가 먹는다. serverCaps 미수신(구 서버·연결 전)은 기존 동작.
+    //  (로컬 소켓 cpt-server 경로는 이 디스패처를 타지 않는다 — 이 PC 의 앱·cpt CLI 는 서버와 무관.)
+    if (serverCaps.length && !hasServerCap('task.v1')) { fail(codedError('TASKS_DISABLED', '이 서버에서 작업 기능이 꺼져 있습니다')); return; }
+    callLazy('./cpt-server', 'handleTaskRpc', [method, params || {}], ok, fail); return;
+  }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }
   fsRpc.handle(method, params).then(ok).catch(fail);
@@ -575,6 +585,13 @@ function run(config) {
               .then(() => approvals.resync())
               .then((r) => { if (r && r.total) console.log(`[control] 대기 중 승인 재광고 ${r.resynced}/${r.total}건${r.failed ? ` (실패 ${r.failed})` : ''}`); })
               .catch((e) => console.warn('[control] 승인 재광고 실패:', (e && e.message) || e));
+          }
+        }
+        // Agent Tasks — 등록 못 한 작업 워크스페이스 재등록(설계 §2.11). 기동 전·기능 꺼짐이면 무동작.
+        {
+          const tasksLib = tryRequire('./tasks');
+          if (tasksLib && typeof tasksLib.onReconnect === 'function') {
+            try { tasksLib.onReconnect(); } catch (e) { console.warn('[control] 작업 워크스페이스 재등록 실패:', (e && e.message) || e); }
           }
         }
         // 에이전트 상태 리싱크 — back 이 재시작하면 라스트-스테이트 인덱스가 비지만 데몬의 상태는
@@ -855,5 +872,6 @@ module.exports = {
   lanInfo,       // hello 에 싣는 LAN 좌표(리스너 없으면 undefined)
   handleE2eeBegin, // E2EE 선협상 핸들러(테스트 노출 — 스코프 게이팅/거절 계약 고정용)
   handleSealedRpc, // 봉투 RPC 핸들러(테스트 노출 — "실패도 봉인" 불변식 고정용)
+  _setServerCaps(c) { serverCaps = Array.isArray(c) ? c.slice() : []; }, // 테스트 전용
   applyLanScope,   // daemon.json lanScope → CPT_LAN_SCOPE(단계 개방 설정 지점 — 테스트가 고정한다)
 };

@@ -51,6 +51,12 @@ export const COMMANDS = [
   { id: "sidebar.toggle", key: "Mod+B", scope: "global", group: "view", pc: true, app: true, palette: true },
   { id: "notif.panel", key: null, scope: "global", group: "view", pc: true, app: true, palette: true },
   { id: "notif.latestUnread", key: "Mod+Shift+U", scope: "global", group: "view", pc: true, app: true, palette: true },
+  // Agent Tasks(설계 §6.1·§9) — 작업 현황판·새 작업. 표는 PC·앱 **한 벌**이라 세 줄이 양쪽에 다 있다:
+  //  PC 는 현황판이 메인 뷰라 `tasks.dashboard`(⌘⇧A)·`tasks.new`(⌘⇧N), 앱은 현황판을 여는 `tasks.open` 하나.
+  //  (충돌 시 대안은 Mod+Alt+A / Mod+Alt+N — 지금 표에는 겹치는 조합이 없다.)
+  { id: "tasks.dashboard", key: "Mod+Shift+A", scope: "global", group: "view", pc: true, app: false, palette: true },
+  { id: "tasks.new", key: "Mod+Shift+N", scope: "global", group: "add", pc: true, app: false, palette: true },
+  { id: "tasks.open", key: null, scope: "global", group: "view", pc: false, app: true, palette: true },
 
   // ── 설정 ──
   { id: "app.settings", key: "Mod+Comma", scope: "global", group: "settings", pc: true, app: true, palette: true },

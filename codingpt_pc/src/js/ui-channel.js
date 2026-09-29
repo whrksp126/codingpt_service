@@ -254,6 +254,12 @@ async function connect() {
         //  back 은 러너 접속/종료와 hello.e2eeEpoch 변화마다 이 프레임을 쏜다. **표시 전용**이다 —
         //  이 값으로 봉인 시도를 게이팅하면 구 back(필드 없음)에서 기능이 조용히 꺼진다.
         if (applyRunnerStatus(msg.event)) S.emit();
+        // Agent Tasks — runner_status 에는 caps 가 없다 → online 전이마다 GET /status 로 hostCaps 재조회(§2.3),
+        //  현황판이 보이는 중이면 그 PC 의 task.list 도 즉시 다시 받는다(§3.4 클라 폴링 보강).
+        import("./tasks-api.js").then((m) => m.noteRunnerStatus(msg.event)).catch(() => {});
+        if (msg.event && msg.event.online !== false && state.view === "tasks") {
+          import("./tasks-view.js").then((m) => m.onTasksChanged({ host: msg.event.deviceId, reason: "reconciled" })).catch(() => {});
+        }
         break;
       case "ui_command":
         handleUiCommand(msg, (frame) => send(ws, { type: "ui_result", ...frame }));
@@ -461,7 +467,9 @@ function wsByCwd(cwd) {
 function requireWs(params) {
   const meta = wsByCwd(params.ws);
   if (!meta) throw new Error(i18n.t('워크스페이스 없음'));
-  if (state.activeWsId !== meta.id || state.view !== "workspace") S.setActive(meta.id);
+  // allowTask — cwd 로 짚은 워크스페이스를 여는 건 의도다(작업 run 터미널의 에이전트가 `cpt preview/ide open` 을
+  //  부르면 그 작업 워크스페이스가 대상). 없으면 setActive 가 조용히 무시해 숨은 워크스페이스를 만지게 된다.
+  if (state.activeWsId !== meta.id || state.view !== "workspace") S.setActive(meta.id, { allowTask: true });
   return { meta, rt: S.ensureRuntime(meta.id) };
 }
 
@@ -776,11 +784,11 @@ async function handleBrowserCommand(op, p) {
 function requireWsOrActive(p) {
   if (p && p.ws) {
     const m = wsByCwd(p.ws);
-    if (m) { if (state.activeWsId !== m.id || state.view !== "workspace") S.setActive(m.id); return { meta: m, rt: S.ensureRuntime(m.id) }; }
+    if (m) { if (state.activeWsId !== m.id || state.view !== "workspace") S.setActive(m.id, { allowTask: true }); return { meta: m, rt: S.ensureRuntime(m.id) }; }
   }
   const meta = state.workspaces.find((w) => w.id === state.activeWsId);
   if (!meta) throw new Error(i18n.t('활성 워크스페이스 없음'));
-  if (state.view !== "workspace") S.setActive(meta.id);
+  if (state.view !== "workspace") S.setActive(meta.id, { allowTask: true });
   return { meta, rt: S.ensureRuntime(meta.id) };
 }
 
@@ -1040,6 +1048,15 @@ async function waitEmuView(getter, ms = 4000) {
 
 // 명령 → 핸들러. 반환 객체가 ui_result 프레임에 그대로 병합된다({ok, ...}).
 const handlers = {
+  // Agent Tasks 변경 통지(§2.8) — 데몬 broadcast `{host, taskIds, reason}`. 그 host 의 task.list 를 300ms 디바운스로
+  //  다시 받는다(현황판이 안 보여도 받는다 — 사이드바 `작업 [n]` 배지가 이 목록을 센다).
+  //  ★ 반드시 ok 로 회신한다: executor 가 응답하지 않으면 데몬이 UI_TIMEOUT 을 본다(back 이 수신자 1곳을 executor 로 고른다).
+  "tasks.changed": async (p) => {
+    const m = await import("./tasks-view.js");
+    m.onTasksChanged(p || {});
+    return { ok: true };
+  },
+
   // 풀 변경 통지 — 즉시 리컨실(공유 터미널 풀 ↔ 레이아웃 동기화).
   "pool.changed": async () => {
     await S.reconcilePool();
@@ -1057,7 +1074,7 @@ const handlers = {
   wsSelect: async (p) => {
     const meta = state.workspaces.find((w) => w.id === p.id);
     if (!meta) throw new Error(i18n.t('워크스페이스 없음'));
-    S.setActive(meta.id);
+    S.setActive(meta.id, { allowTask: true }); // id 로 명시 지정 = 의도된 열기
     return { ok: true };
   },
 

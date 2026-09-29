@@ -211,6 +211,9 @@ export const api = {
   // ── 원격 PC 릴레이(back REST, deviceToken 은 Rust 내부) — /api/daemon/* 전용 ──
   backApi: (method, path, body, timeoutSecs) =>
     invoke("back_api", { method, path, body: body ?? null, timeoutSecs: timeoutSecs ?? null }),
+  // 비동기판(블로킹 풀) — 오래 걸릴 수 있는 호출(작업 RPC·주기 폴링)은 이것만 쓴다. 동기판은 메인 스레드를 막는다.
+  backApiAsync: (method, path, body, timeoutSecs) =>
+    invoke("back_api_async", { method, path, body: body ?? null, timeoutSecs: timeoutSecs ?? null }),
   backBase: () => invoke("back_base"),
   // ── Supporter 웹 결제(deviceToken 인증, 브라우저에는 자격증명 미전달) ──
   subscriptionMe: () => invoke("back_api", {
@@ -251,6 +254,11 @@ export const api = {
   //  다른 PC 면 back 릴레이 — 데몬 구현은 한 벌이다.
   //  조회가 POST 인 이유도 같다(`ws:''` 를 쿼리스트링이 삼킨다).
   reviewLocal: (cmd, args) => invoke("review_local", { cmd, args: args || {} }),
+
+  // ── Agent Tasks(2026-09-29) — 이 PC 데몬 직결(`task.`/`git.` 접두만 Rust 가 통과) ──
+  //  다른 PC 로 가는 봉인 요청도 cmd='e2ee.rpc'(method 가 task./git. 일 때만)로 이 통로를 탄다(35초).
+  //  실패는 `<CODE>: <메시지>` — tasks-api.js parseCodedError 가 정본 파서다. 직접 부르지 말고 taskRpc 를 쓸 것.
+  taskLocal: (cmd, args) => invoke("task_local", { cmd, args: args || {} }),
   reviewGet: (body) =>
     invoke("back_api", { method: "POST", path: "/api/daemon/review/get", body: body || {}, timeoutSecs: 15 }),
   reviewPending: (body) =>

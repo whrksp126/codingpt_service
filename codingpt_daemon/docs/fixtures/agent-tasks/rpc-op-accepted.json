@@ -1,0 +1,451 @@
+{
+  "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
+  "method": "git.commit|git.push|git.pr.create|git.pr.merge|git.merge.local|task.discard|task.run.reopen",
+  "description": "OpAccepted — 즉시 회신. 결과는 run.lastOp + tasks.changed reason:\"op\". 같은 opId 재전송은 replay:true(끝났으면 lastOp 동봉).",
+  "params": {
+    "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+    "taskId": "t_k3j9x2m1qa",
+    "runId": "r_8fk2ma1q",
+    "message": "feat: 로그인 폼 검증"
+  },
+  "result": {
+    "accepted": true,
+    "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+    "run": {
+      "id": "r_8fk2ma1q",
+      "idx": 1,
+      "agent": "claude",
+      "branch": "cpt/x2m1qa-1",
+      "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+      "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+      "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "workspaceId": "ws_def",
+      "tid": 1234567,
+      "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+      "terminalAlive": true,
+      "agentGone": false,
+      "trustPending": false,
+      "state": "review_ready",
+      "promptMode": "arg",
+      "promptDelivered": true,
+      "promptDeliveredAt": 1790000012345,
+      "launchedAt": 1790000010000,
+      "copiedFiles": [
+        ".env",
+        "codingpt_back/.env.local"
+      ],
+      "diff": {
+        "files": 3,
+        "additions": 41,
+        "deletions": 7,
+        "at": 1790000050000
+      },
+      "commits": {
+        "ahead": 2,
+        "at": 1790000050000
+      },
+      "dirty": false,
+      "pushed": true,
+      "pr": {
+        "number": 12,
+        "url": "https://github.com/whrksp126/codingpt/pull/12",
+        "state": "open",
+        "isDraft": false,
+        "title": "로그인 폼 유효성 검사 추가",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": null,
+        "checks": {
+          "status": "passing",
+          "total": 2,
+          "passed": 1,
+          "failed": 0,
+          "pending": 0,
+          "items": [
+            {
+              "name": "ci / test",
+              "status": "passing",
+              "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+            },
+            {
+              "name": "optional",
+              "status": "skipped"
+            }
+          ]
+        },
+        "at": 1790000060000
+      },
+      "op": {
+        "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+        "kind": "commit",
+        "startedAt": 1790000070000
+      },
+      "lastOp": {
+        "opId": "0b0c3d0e-1111-4222-8333-444455556666",
+        "kind": "pr.create",
+        "ok": true,
+        "code": null,
+        "message": null,
+        "result": {
+          "pr": {
+            "number": 12,
+            "url": "https://github.com/whrksp126/codingpt/pull/12",
+            "state": "open",
+            "isDraft": false,
+            "title": "로그인 폼 유효성 검사 추가",
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "checks": {
+              "status": "passing",
+              "total": 2,
+              "passed": 1,
+              "failed": 0,
+              "pending": 0,
+              "items": [
+                {
+                  "name": "ci / test",
+                  "status": "passing",
+                  "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                },
+                {
+                  "name": "optional",
+                  "status": "skipped"
+                }
+              ]
+            },
+            "at": 1790000060000
+          },
+          "existed": false
+        },
+        "at": 1790000060000
+      },
+      "lastTurnEndedAt": 1790000049000,
+      "lastActivityAt": 1790000050000,
+      "reviewNotifiedAt": 1790000050500,
+      "lastTurnFailed": false,
+      "error": null,
+      "cleanup": null,
+      "createdAt": 1790000000000,
+      "updatedAt": 1790000050000
+    }
+  },
+  "examples": {
+    "replayRunning": {
+      "accepted": true,
+      "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+      "replay": true,
+      "run": {
+        "id": "r_8fk2ma1q",
+        "idx": 1,
+        "agent": "claude",
+        "branch": "cpt/x2m1qa-1",
+        "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+        "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+        "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "workspaceId": "ws_def",
+        "tid": 1234567,
+        "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+        "terminalAlive": true,
+        "agentGone": false,
+        "trustPending": false,
+        "state": "review_ready",
+        "promptMode": "arg",
+        "promptDelivered": true,
+        "promptDeliveredAt": 1790000012345,
+        "launchedAt": 1790000010000,
+        "copiedFiles": [
+          ".env",
+          "codingpt_back/.env.local"
+        ],
+        "diff": {
+          "files": 3,
+          "additions": 41,
+          "deletions": 7,
+          "at": 1790000050000
+        },
+        "commits": {
+          "ahead": 2,
+          "at": 1790000050000
+        },
+        "dirty": false,
+        "pushed": true,
+        "pr": {
+          "number": 12,
+          "url": "https://github.com/whrksp126/codingpt/pull/12",
+          "state": "open",
+          "isDraft": false,
+          "title": "로그인 폼 유효성 검사 추가",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "CLEAN",
+          "reviewDecision": null,
+          "checks": {
+            "status": "passing",
+            "total": 2,
+            "passed": 1,
+            "failed": 0,
+            "pending": 0,
+            "items": [
+              {
+                "name": "ci / test",
+                "status": "passing",
+                "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+              },
+              {
+                "name": "optional",
+                "status": "skipped"
+              }
+            ]
+          },
+          "at": 1790000060000
+        },
+        "op": {
+          "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+          "kind": "commit",
+          "startedAt": 1790000070000
+        },
+        "lastOp": {
+          "opId": "0b0c3d0e-1111-4222-8333-444455556666",
+          "kind": "pr.create",
+          "ok": true,
+          "code": null,
+          "message": null,
+          "result": {
+            "pr": {
+              "number": 12,
+              "url": "https://github.com/whrksp126/codingpt/pull/12",
+              "state": "open",
+              "isDraft": false,
+              "title": "로그인 폼 유효성 검사 추가",
+              "mergeable": "MERGEABLE",
+              "mergeStateStatus": "CLEAN",
+              "reviewDecision": null,
+              "checks": {
+                "status": "passing",
+                "total": 2,
+                "passed": 1,
+                "failed": 0,
+                "pending": 0,
+                "items": [
+                  {
+                    "name": "ci / test",
+                    "status": "passing",
+                    "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                  },
+                  {
+                    "name": "optional",
+                    "status": "skipped"
+                  }
+                ]
+              },
+              "at": 1790000060000
+            },
+            "existed": false
+          },
+          "at": 1790000060000
+        },
+        "lastTurnEndedAt": 1790000049000,
+        "lastActivityAt": 1790000050000,
+        "reviewNotifiedAt": 1790000050500,
+        "lastTurnFailed": false,
+        "error": null,
+        "cleanup": null,
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000050000
+      }
+    },
+    "replayDone": {
+      "accepted": true,
+      "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+      "replay": true,
+      "run": {
+        "id": "r_8fk2ma1q",
+        "idx": 1,
+        "agent": "claude",
+        "branch": "cpt/x2m1qa-1",
+        "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+        "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+        "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "workspaceId": "ws_def",
+        "tid": 1234567,
+        "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+        "terminalAlive": true,
+        "agentGone": false,
+        "trustPending": false,
+        "state": "review_ready",
+        "promptMode": "arg",
+        "promptDelivered": true,
+        "promptDeliveredAt": 1790000012345,
+        "launchedAt": 1790000010000,
+        "copiedFiles": [
+          ".env",
+          "codingpt_back/.env.local"
+        ],
+        "diff": {
+          "files": 3,
+          "additions": 41,
+          "deletions": 7,
+          "at": 1790000050000
+        },
+        "commits": {
+          "ahead": 2,
+          "at": 1790000050000
+        },
+        "dirty": false,
+        "pushed": true,
+        "pr": {
+          "number": 12,
+          "url": "https://github.com/whrksp126/codingpt/pull/12",
+          "state": "open",
+          "isDraft": false,
+          "title": "로그인 폼 유효성 검사 추가",
+          "mergeable": "MERGEABLE",
+          "mergeStateStatus": "CLEAN",
+          "reviewDecision": null,
+          "checks": {
+            "status": "passing",
+            "total": 2,
+            "passed": 1,
+            "failed": 0,
+            "pending": 0,
+            "items": [
+              {
+                "name": "ci / test",
+                "status": "passing",
+                "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+              },
+              {
+                "name": "optional",
+                "status": "skipped"
+              }
+            ]
+          },
+          "at": 1790000060000
+        },
+        "op": null,
+        "lastOp": {
+          "opId": "0b0c3d0e-1111-4222-8333-444455556666",
+          "kind": "pr.create",
+          "ok": true,
+          "code": null,
+          "message": null,
+          "result": {
+            "pr": {
+              "number": 12,
+              "url": "https://github.com/whrksp126/codingpt/pull/12",
+              "state": "open",
+              "isDraft": false,
+              "title": "로그인 폼 유효성 검사 추가",
+              "mergeable": "MERGEABLE",
+              "mergeStateStatus": "CLEAN",
+              "reviewDecision": null,
+              "checks": {
+                "status": "passing",
+                "total": 2,
+                "passed": 1,
+                "failed": 0,
+                "pending": 0,
+                "items": [
+                  {
+                    "name": "ci / test",
+                    "status": "passing",
+                    "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                  },
+                  {
+                    "name": "optional",
+                    "status": "skipped"
+                  }
+                ]
+              },
+              "at": 1790000060000
+            },
+            "existed": false
+          },
+          "at": 1790000060000
+        },
+        "lastTurnEndedAt": 1790000049000,
+        "lastActivityAt": 1790000050000,
+        "reviewNotifiedAt": 1790000050500,
+        "lastTurnFailed": false,
+        "error": null,
+        "cleanup": null,
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000050000
+      },
+      "lastOp": {
+        "opId": "7c1e9d2a-3b4c-4d5e-8f60-718293a4b5c6",
+        "kind": "commit",
+        "ok": true,
+        "code": null,
+        "message": null,
+        "result": {
+          "sha": "dddddddddddddddddddddddddddddddddddddddd",
+          "short": "ddddddd"
+        },
+        "at": 1790000071000
+      }
+    }
+  },
+  "lastOpExamples": {
+    "commitHookFailed": {
+      "opId": "8d2f0e3b-4c5d-4e6f-9a70-8293a4b5c6d7",
+      "kind": "commit",
+      "ok": false,
+      "code": "COMMIT_HOOK_FAILED",
+      "message": "커밋 훅이 실패했습니다",
+      "result": {
+        "stderrTail": "husky - pre-commit hook exited with code 1 (error)"
+      },
+      "at": 1790000072000
+    },
+    "discardRefused": {
+      "opId": "9e3a1f4c-5d6e-4f70-8b81-93a4b5c6d7e8",
+      "kind": "discard",
+      "ok": false,
+      "code": "UNCOMMITTED_CHANGES",
+      "message": "미커밋 변경 2개 파일이 있습니다",
+      "result": {
+        "discarded": [],
+        "skipped": [
+          {
+            "runId": "r_8fk2ma1q",
+            "code": "UNCOMMITTED_CHANGES"
+          }
+        ]
+      },
+      "at": 1790000073000
+    },
+    "push": {
+      "opId": "a0b1c2d3-e4f5-4a6b-8c7d-8e9fa0b1c2d3",
+      "kind": "push",
+      "ok": true,
+      "code": null,
+      "message": null,
+      "result": {
+        "remote": "origin",
+        "branch": "cpt/x2m1qa-1"
+      },
+      "at": 1790000074000
+    },
+    "reopen": {
+      "opId": "b1c2d3e4-f5a6-4b7c-8d9e-9fa0b1c2d3e4",
+      "kind": "reopen",
+      "ok": true,
+      "code": null,
+      "message": null,
+      "result": {
+        "tid": 1234567
+      },
+      "at": 1790000075000
+    },
+    "interrupted": {
+      "opId": "b1c2d3e4-f5a6-4b7c-8d9e-9fa0b1c2d3e5",
+      "kind": "push",
+      "ok": false,
+      "code": "OP_INTERRUPTED",
+      "message": "PC 가 재시작되어 작업이 중단됐어요",
+      "result": null,
+      "at": 1790000076000
+    }
+  }
+}

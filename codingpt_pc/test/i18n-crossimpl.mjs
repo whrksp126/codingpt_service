@@ -124,5 +124,29 @@ for (const f of textDicts) {
 }
 ok(leftovers.length === 0, 'text/* 사전에 en 반쪽이 남아 있지 않다', leftovers.join(','));
 
+// ── 5. Agent Tasks 문구(설계 §9) — emit 뒤 7개 카탈로그에 전부 있고 번역이 비지 않았다 ─────────
+//  원문은 text/tasks.js(§9 원문 그대로)가 정본이다. 카탈로그에 없으면 그 언어에서 한국어가 튀어나온다.
+{
+  const TX = await import(path.join(PC, 'text/tasks.js'));
+  // 한글이 없는 원문(`PR #{n}` · `merge` · `{branch} → {base}` 등)은 언어 중립이라 정본에 안 넣어도 된다 —
+  //  t() 가 사전에 없으면 원문을 그대로 돌려준다(위 1절 ★). 한글이 있는 원문만 번역이 필수다.
+  const src = Object.values(TX.TASKS_TEXT.ko).filter((v) => /[가-힣]/.test(v));
+  for (const lang of LANGS) {
+    const miss = src.filter((k) => !pcCat[lang][k]);
+    ok(miss.length === 0, `§9 작업 문구 ${src.length}개가 PC ${lang} 카탈로그에 있고 비어 있지 않다`, miss.slice(0, 4).join(' | '));
+  }
+  const badKey = Object.values(TX.ERROR_KEY).filter((f) => TX.TASKS_TEXT.ko[f] == null);
+  ok(badKey.length === 0, 'ERROR_KEY 의 모든 값이 §9 필드다', badKey.join(','));
+  // 작업 화면 모듈이 §9 밖에서 직접 부르는 i18n.t('…') 원문도 카탈로그에 있어야 한다(재사용 문구).
+  const files = ['tasks-view.js', 'task-detail.js', 'new-task-sheet.js'];
+  const lits = new Set();
+  for (const f of files) {
+    const code = fs.readFileSync(path.join(PC, f), 'utf8');
+    for (const m of code.matchAll(/i18n\.t\((["'])((?:(?!\1).)+)\1/g)) lits.add(m[2]);
+  }
+  const missLit = [...lits].filter((k) => LANGS.some((l) => !pcCat[l][k]));
+  ok(lits.size > 0 && missLit.length === 0, `작업 화면의 재사용 문구 ${lits.size}개가 7개 카탈로그에 있다`, missLit.join(' | '));
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

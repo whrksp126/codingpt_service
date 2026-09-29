@@ -1,0 +1,62 @@
+{
+  "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
+  "method": "task.diff",
+  "description": "merge-base 대비 워킹트리+인덱스+미추적. status ∈ A|M|D|?(rename 은 --no-renames 로 D+A). 64KB 초과 truncated, 전체 400KB 초과분 omitted. file 파라미터는 목록 정확 일치만.",
+  "params": {
+    "taskId": "t_k3j9x2m1qa",
+    "runId": "r_8fk2ma1q"
+  },
+  "result": {
+    "taskId": "t_k3j9x2m1qa",
+    "runId": "r_8fk2ma1q",
+    "base": "main",
+    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "head": "cccccccccccccccccccccccccccccccccccccccc",
+    "mergeBase": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "uncommitted": true,
+    "files": [
+      {
+        "path": "codingpt_back/routes/auth.js",
+        "status": "M",
+        "additions": 30,
+        "deletions": 7,
+        "diffText": "diff --git a/codingpt_back/routes/auth.js b/codingpt_back/routes/auth.js\nindex 1111111..2222222 100644\n--- a/codingpt_back/routes/auth.js\n+++ b/codingpt_back/routes/auth.js\n@@ -1,3 +1,4 @@\n const express = require('express');\n+const { validate } = require('../utils/validate');\n"
+      },
+      {
+        "path": "codingpt_back/utils/검증.js",
+        "status": "?",
+        "additions": 11,
+        "deletions": 0,
+        "diffText": "diff --git a/codingpt_back/utils/검증.js b/codingpt_back/utils/검증.js\nnew file mode 100644\n--- /dev/null\n+++ b/codingpt_back/utils/검증.js\n@@ -0,0 +1,11 @@\n+module.exports = {};\n"
+      },
+      {
+        "path": "docs/logo.png",
+        "status": "A",
+        "additions": 0,
+        "deletions": 0,
+        "binary": true
+      },
+      {
+        "path": "codingpt_back/big.sql",
+        "status": "M",
+        "additions": 9000,
+        "deletions": 0,
+        "diffText": "…(64KB 까지)",
+        "truncated": true
+      },
+      {
+        "path": "codingpt_back/huge.json",
+        "status": "M",
+        "additions": 20000,
+        "deletions": 3,
+        "omitted": true
+      }
+    ],
+    "totals": {
+      "files": 5,
+      "additions": 29041,
+      "deletions": 10
+    },
+    "truncatedTotal": true
+  }
+}

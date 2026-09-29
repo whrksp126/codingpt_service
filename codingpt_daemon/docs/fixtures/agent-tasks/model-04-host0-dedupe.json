@@ -1,0 +1,159 @@
+{
+  "name": "model-04-host0-dedupe",
+  "description": "host 0 스냅은 host 7 run 에 붙는다(k 재시도) · 에이전트 행끼리는 정확한 k 로만(host 7·host 0 스냅 = 두 행) · 폴백은 같은 k 가 없는 것만(상태 모름 = live 없음 → idle)",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 7,
+        "name": "iMac",
+        "online": true,
+        "caps": [
+          "task.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 7,
+        "items": [
+          {
+            "id": "t_dddddddddd",
+            "v": 1,
+            "title": "작업 t_dddddddddd",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": null,
+              "github": null
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "open",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_d1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/aaaaaa-1",
+                "dir": ".codingpt/worktrees/app-dddddd-1",
+                "cwd": ".codingpt/worktrees/app-dddddd-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_d1",
+                "tid": 401,
+                "tsession": "cpt-x--t-401",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": null,
+                "commits": null,
+                "dirty": false,
+                "pushed": false,
+                "pr": null,
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999999000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999998000
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [
+      {
+        "host": 0,
+        "cwd": ".codingpt/worktrees/app-dddddd-1",
+        "win": 401,
+        "agent": "claude",
+        "state": "working",
+        "at": 1789999999500,
+        "since": 1789999999500
+      },
+      {
+        "host": 7,
+        "cwd": "work/y",
+        "win": 3,
+        "agent": "claude",
+        "state": "idle",
+        "at": 1789999991000,
+        "since": 1789999991000
+      },
+      {
+        "host": 0,
+        "cwd": "work/y",
+        "win": 3,
+        "agent": "claude",
+        "state": "working",
+        "at": 1789999999900,
+        "since": 1789999999900
+      }
+    ],
+    "approvals": [],
+    "unread": [],
+    "terminalsFallback": [
+      {
+        "host": 7,
+        "cwd": "work/y",
+        "win": 3,
+        "agent": "claude",
+        "on": true,
+        "state": null
+      },
+      {
+        "host": 7,
+        "cwd": "work/z",
+        "win": 4,
+        "agent": "gemini",
+        "on": true,
+        "state": null
+      },
+      {
+        "host": 7,
+        "cwd": "work/off",
+        "win": 5,
+        "agent": null,
+        "on": false,
+        "state": null
+      }
+    ],
+    "workspaces": []
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [],
+      "working": [
+        "0|work/y|3",
+        "7|.codingpt/worktrees/app-dddddd-1|401"
+      ],
+      "review_ready": [],
+      "idle": [
+        "7|work/y|3",
+        "7|work/z|4"
+      ],
+      "done": []
+    },
+    "reasons": {},
+    "unread": {},
+    "offline": []
+  }
+}

@@ -359,9 +359,77 @@ async function launchAgentInTerminal(agentsLib, a) {
     await new Promise((r) => setTimeout(r, 220));
   }
   const command = agentsLib.launchCommand(id);
-  await termBackend.sendKeys(target, { keys: [command], literal: true });
+  // Agent Tasks(설계 §2.5 10, 부록 Z B-2) — 작업 run 에 한해 런치 인자를 붙인다(프롬프트 파일 cat 치환).
+  //  일반 `agents.launch` 는 args 가 없어 동작이 그대로다("런치 인자 없음" 원칙 유지).
+  const extra = Array.isArray(a.args) ? a.args.filter((x) => typeof x === 'string' && x) : [];
+  const line = extra.length ? command + ' ' + extra.join(' ') : command;
+  await termBackend.sendKeys(target, { keys: [line], literal: true });
   await termBackend.sendKeys(target, { keys: ['Enter'] });
   return { ok: true, ready, index: tid, command };
+}
+
+// ── Agent Tasks(task.*/git.*) — 설계 정본 docs/agent-tasks-design.md §2.3 ─────────
+//  tasks.js 는 순수 모듈 + 주입. 실제 터미널·채팅·back 구현을 여기서 넣는다.
+//  ★ configure/start 는 소켓 기동 시 1회(wireTasks) — handleTaskRpc 안에서 lazy 로 하면 클라이언트가
+//    한 번도 RPC 를 안 부른 데몬(재시작 직후)에서 stop 훅이 와도 review_ready 승격·알림이 조용히 사라진다.
+let tasksWired = false;
+function wireTasks() {
+  if (tasksWired) return;
+  tasksWired = true;
+  const lib = lazyMod('./tasks');
+  const agentsLib = lazyMod('./agents');
+  if (!lib || !agentsLib) return;
+  try {
+    lib.configure({
+      notify: notifyTasksChanged,
+      poolChanged: notifyPoolChanged,
+      launch: (a) => launchAgentInTerminal(agentsLib, a),
+      chatInput: (a) => chatInput(a),
+      chatDialog: (a) => chatDialog(a),
+      // extractDialog 용 화면 원문(대화 바인딩 무관) — 신뢰 다이얼로그·준비 판정.
+      screen: async ({ cwd, tid }) => {
+        const { session } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+        return termBackend.capture(ptyLib.termSession(session, tid));
+      },
+      backFetch,
+      deviceId: () => { const c = configLib.load(); return c && c.deviceId != null ? c.deviceId : null; },
+    });
+    lib.start();
+  } catch (e) {
+    console.error('[cpt] 작업 기능 기동 실패:', e && e.message);
+  }
+}
+
+// task.*/git.* 디스패치 — 로컬 소켓(PC 앱 task_local)·릴레이(control.dispatchRpc)·봉인 경로 공통.
+function handleTaskRpc(method, params) {
+  const lib = lazyMod('./tasks');
+  if (!lib || typeof lib.rpc !== 'function') {
+    return Promise.reject(Object.assign(new Error('이 데몬은 작업 기능을 지원하지 않습니다(PC 앱 업데이트 필요)'), { code: 'TASKS_DISABLED' }));
+  }
+  return lib.rpc(method, params || {});
+}
+
+// tasks.changed 브로드캐스트(§2.8) — 300ms 코얼레싱. host 를 싣는 이유: back 은 발신 데몬 id 를 붙이지 않는다.
+//  수신 클라는 ui_result ok 로 응답한다(없으면 UI_TIMEOUT — 무시).
+let tasksChangedPending = null; // { ids:Set, reason }
+let tasksChangedTimer = null;
+function notifyTasksChanged(payload) {
+  const p = payload || {};
+  if (!tasksChangedPending) tasksChangedPending = { ids: new Set(), reason: p.reason || 'run' };
+  for (const id of (Array.isArray(p.taskIds) ? p.taskIds : [])) tasksChangedPending.ids.add(id);
+  // 여러 사유가 겹치면 마지막 사유를 싣는다(클라는 사유와 무관하게 task.list 를 다시 부른다).
+  if (p.reason) tasksChangedPending.reason = p.reason;
+  if (tasksChangedTimer) return;
+  tasksChangedTimer = setTimeout(() => {
+    const cur = tasksChangedPending;
+    tasksChangedPending = null;
+    tasksChangedTimer = null;
+    if (!cur) return;
+    const c = configLib.load() || {};
+    sendUiCommand('tasks.changed', { host: c.deviceId != null ? c.deviceId : null, taskIds: [...cur.ids], reason: cur.reason },
+      { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 클라이언트 0대 등 — 무시 */ });
+  }, 300);
+  if (tasksChangedTimer.unref) tasksChangedTimer.unref();
 }
 
 async function localCheckpoint(a) {
@@ -699,6 +767,9 @@ async function dispatch(req, conn) {
   //   되기 때문이다(approval.respond 를 닫는 것과 같은 이유 — 승인 게이트의 자기해제 금지).
   //   `agents.list` 만 공개한다(어차피 AI 는 `which claude` 로 알 수 있는 정보).
   if (cmd.startsWith('agents.')) return handleAgentsRpc(cmd, req.args || {});
+  // Agent Tasks(설계 §2.3) — PC 앱 `task_local` 이 여기로 온다. hasCptContext 게이트 **바깥**(인자가 자족적).
+  //  cpt CLI 에 공개하는 것은 CAPABILITIES 의 task.list/task.get 뿐이다(쓰기는 사람 UI 만).
+  if (cmd.startsWith('task.') || cmd.startsWith('git.')) return handleTaskRpc(cmd, req.args || {});
   // 열린 포트 목록(2026-08-04) — PC 앱이 back 을 왕복하지 않고 바로 묻는 길.
   //  ★ 이걸 여는 이유: PC 에 **같은 로직의 Rust 사본**(tmux.rs listen_ports_in)이 따로 있었다.
   //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
@@ -1921,6 +1992,8 @@ const CAPABILITIES = [
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
   'agents.list',
+  // Agent Tasks — 읽기 2개만(`cpt task list|get`). 생성·커밋·머지·폐기는 사람 UI 만(AI 자기증식·자기머지 금지).
+  'task.list', 'task.get',
   // 조회 전용(사람/AI 노출 안전) — 승인 대기 목록 + 트랜스크립트 읽기.
   'approval.list',
   'chat.sessions', 'chat.open', 'chat.since', 'chat.close', 'chat.detail', 'chat.attachment',
@@ -2147,6 +2220,7 @@ function start() {
     //  파이프 SD(현재 사용자 SID 한정)를 네이티브로 지정하는 방안 검토(§보고).
     if (!isPipe) { try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ } }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);
+    wireTasks(); // Agent Tasks 주입 + agent-state 구독 + reconcile(1회)
   });
   return server;
 }
@@ -2175,6 +2249,9 @@ module.exports = {
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   handleSurfaceRpc, // 공유 표면(surface.*) — control.js 의 릴레이 경로도 이 구현을 쓴다
+  handleTaskRpc, // Agent Tasks(task.*/git.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다
+  notifyTasksChanged, // tasks.changed 브로드캐스트(300ms 코얼레싱)
+  _wireTasks: wireTasks, // 테스트 전용
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
   _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },
