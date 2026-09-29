@@ -1208,7 +1208,7 @@ export class ConvView {
     bar.className = "pane-search conv-find";
     bar.innerHTML = `
       <span class="pane-search-ic">${icons.search({ size: 13 })}</span>
-      <input class="pane-search-input" type="text" placeholder="${i18n.t('대화에서 찾기')}" />
+      <input class="pane-search-input" type="text" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" placeholder="${i18n.t('대화에서 찾기')}" />
       <span class="pane-search-count">0/0</span>
       <button class="pane-search-btn" type="button" data-a="prev" title="${i18n.t('이전 (⇧Enter)')}">${icons.chevronUp({ size: 14 })}</button>
       <button class="pane-search-btn" type="button" data-a="next" title="${i18n.t('다음 (Enter)')}">${icons.chevronDown({ size: 14 })}</button>
