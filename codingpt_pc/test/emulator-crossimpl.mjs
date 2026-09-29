@@ -151,8 +151,10 @@ ok(/tab\.kind === "emulator"/.test(pane) && /new mod\.EmulatorView\(host/.test(p
 ok(/m\.emu\?\.dispose\(\)/.test(pane), '탭을 닫으면 EmulatorView 도 정리한다(프레임 루프 누수 금지)');
 ok(/m\.emu\?\.setVisible\(!!on\)/.test(pane),
   '★ 가려진 탭은 프레임을 안 당긴다(한 장이 수십 KB — 안 보이는데 계속 받으면 그 자체가 결함)');
-ok(/t\.kind === "emulator" \? \(String\(t\.deviceId[^)]*\)\.startsWith\("desktop:"\) \? icons\.monitor : icons\.smartphone\)/.test(pane),
-  '탭 아이콘 — 모바일 화면은 폰, 에이전트 PC(desktop:) 는 모니터');
+//  (2026-09-21 Linux 게스트 이후 에이전트 PC 는 OS 아이콘 — linux/apple, 모르면 모니터. 2026-09-29 검사 갱신)
+ok(/function isDesktopSurface\(node\) \{ return !!\(node && String\(node\.deviceId \|\| ""\)\.startsWith\("desktop:"\)\); \}/.test(pane)
+  && /if \(isDesktopSurface\(node\)\) \{ const o = osOfDeviceId\(node\.deviceId\); return o === "linux" \? icons\.linux : o === "macos" \? icons\.apple : icons\.monitor; \}/.test(pane),
+  '탭 아이콘 — 모바일 화면은 폰, 에이전트 PC(desktop:) 는 그 OS 아이콘(모르면 모니터)');
 
 const emu = read(path.join(PC, 'emulator-view.js'));
 ok(/isDesk && dv\.state !== "booted"/.test(emu),
@@ -248,7 +250,7 @@ ok(/desktopRpc\(action === 'boot' \? 'desktop\.start' : 'desktop\.stop'/.test(ap
 ok(/'desktop\.pause' : 'desktop\.resume'/.test(appEmu) && /deskHandoff \?/.test(appEmu), '앱: 멈춤↔재개 + 개입 [계속]');
 ok(/type: 'key', key: 'backspace'/.test(appEmu) && /type: 'text', text: add/.test(appEmu), '앱: 키보드는 text 델타 + backspace/enter 키(데몬 계약)');
 const appSvc = read(path.join(APP, 'services/daemonService.ts'));
-ok(/sealedFs<T>\(method, \{\}, host, timeoutMs\)/.test(appSvc) && /\/api\/daemon\/desktop/.test(appSvc),
+ok(/sealedFs<T>\(method, \{ os \}, host, timeoutMs\)/.test(appSvc) && /\/api\/daemon\/desktop/.test(appSvc),
   '앱: desktop.* 는 봉인 RPC 먼저, 평문 REST 폴백');
 const appNotif = read(path.join(APP, 'components/NotificationsPanel.tsx'));
 ok(/n\.kind === 'desktop_handoff'/.test(appNotif) && /cmd: 'emulatorOpen'/.test(appNotif) && /device: 'desktop:main'/.test(appNotif),
@@ -264,7 +266,8 @@ ok(/if \(this\.deviceId\) void this\.startVideo\(\)/.test(pcView), '★ PC: 복�
 ok(/\/\^\(android\|ios\|desktop\):\//.test(appEmu) && /deviceId\.startsWith\('desktop:'\) && !deskOn\) return;/.test(appEmu), '앱: 에이전트 PC 라이브 영상(켜져 있을 때만)');
 const daemonDir = path.join(PC, '..', '..', '..', 'codingpt_daemon', 'packages', 'runner-core');
 const emuStream = read(path.join(daemonDir, 'emulator-stream.js'));
-ok(/kind === 'desktop'\) return require\('\.\/desktop'\)\.DesktopStreamSession\.start/.test(emuStream), '데몬: 스트림 세션이 desktop 을 안다(같은 뷰어·GOP·배압 배관)');
+ok(/kind === 'desktop'\) return require\('\.\/desktop'\)\.startStream\(serial, cbs\)/.test(emuStream)
+  && /return DesktopStreamSession\.start\(\{\}, cbs, connectRfb\)/.test(read(path.join(daemonDir, 'desktop.js'))), '데몬: 스트림 세션이 desktop 을 안다(같은 뷰어·GOP·배압 배관)');
 ok(fs.existsSync(path.join(daemonDir, 'native', 'vt-h264.swift')), '데몬: vt-h264.swift 동봉');
 ok(/swiftc -O -o "\$OUT\/vt-h264"/.test(read(path.join(PC, '..', '..', 'scripts', 'bundle-sidecar.sh'))), '번들: vt-h264 를 빌드·서명한다');
 ok(/CPT_VT_H264/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'lib.rs'))), 'PC: 번들 vt-h264 경로를 데몬에 넘긴다');
@@ -385,7 +388,7 @@ ok(/if \(!canInput && dev && dev\.kind !== "desktop"\) \{/.test(pcView) && !/!ca
 //  에이전트 PC 는 아래 힌트 줄 대신 화면 안 한 줄(.emu-off) — 켜기는 상태 바 전원 아이콘 하나뿐(2026-09-17 사용자 결정).
 ok(/className = "emu-off"/.test(pcView) && !/btn\(i18n\.t\('켜기'\)/.test(pcView) && /icons\.power\(/.test(pcView),
   '에이전트 PC: 꺼짐 안내는 화면 안에, 전원은 아이콘 버튼 하나');
-ok(/!canInput && dev && !isDesk \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
+ok(/pushNotice\('input', \(dev && !deskSurface\) \? inputWhy : ''/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
   '앱의 이유 표시도 힌트 유무에 묶여 있지 않다');
 ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
 
@@ -428,9 +431,11 @@ for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
 // ── 에이전트 PC 표면은 워크스페이스에 하나(2026-09-20) — 두 번 열면 새 pane 이 아니라 있는 탭을 앞으로 ──
 //  (폰 실기: + 메뉴를 두 번 눌러 에이전트 PC pane 이 2개 → 같은 화면을 두 번 받으며 사용자가 "이상하다")
 const pcWsView = read(path.join(PC, 'workspace-view.js'));
-ok(/export function focusDesktopSurface\(\)/.test(pcWsView) && /if \(focusDesktopSurface\(\)\) return;\s*\n\s*smartAdd\("emulator", \{ deviceId: "desktop:main"/.test(pcWsView),
+//  (OS 별 하나씩 — macOS·Linux 독립, 2026-09-21)
+ok(/export function focusDesktopSurface\(osKind\)/.test(pcWsView) && /if \(focusDesktopSurface\(osKind\)\) return;\s*\n\s*smartAdd\("emulator", \{ deviceId: `desktop:\$\{osKind\}`/.test(pcWsView),
   'PC: + 메뉴의 에이전트 PC 는 이미 있으면 그 표면을 앞으로');
-ok(/kind === 'emulator' && url && url\.startsWith\('desktop:'\)/.test(appWs) && /\(t\.deviceId \|\| ''\)\.startsWith\('desktop:'\)/.test(appWs),
+ok(/kind === 'emulator' && url && url\.startsWith\('desktop:'\)/.test(appWs) && /t\.kind === 'emulator' && sameDesk\(t\.deviceId\)/.test(appWs)
+  && /l\.kind === 'emulator' && sameDesk\(l\.deviceId\)/.test(appWs),
   '앱: smartAdd 의 에이전트 PC 도 같은 규칙(leaf·혼합 탭 둘 다 찾는다)');
 
 // ── 디코더가 프레임을 쥐고 내놓아도 그린다(2026-09-20) — queued>0 규칙에 250ms 상한(양쪽 동일) ──

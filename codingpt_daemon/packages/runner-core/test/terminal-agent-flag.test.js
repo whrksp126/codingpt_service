@@ -193,9 +193,13 @@ test('에이전트 → 셸 복귀(프로세스 종료)가 목록에서 OFF 로 �
   await tmux(['new-session', '-d', '-s', sess, '-c', ABS, '-e', 'NODE_OPTIONS=']);
   await waitRow(tid, (r) => SHELL_RE.test(r.command)); // 프롬프트 준비 대기(rc 실행 중 send-keys 유실 방지)
   await tmux(['send-keys', '-t', `=${sess}:0.0`, `${bin} ${AGENT_ARGS}`, 'Enter']);
+  // 제목은 에이전트가 전경이 된 **뒤에** 붙인다 — 사용자 zsh 의 preexec(oh-my-zsh 자동 제목 등)가 명령 시작
+  //  순간 pane_title 을 명령줄로 덮어써서, 먼저 붙이면 글리프가 사라진다(환경 따라 실패하던 원인, 2026-09-29).
+  //  실제 claude 도 스스로 뜬 뒤에 제목을 쓴다.
+  const fg = await waitRow(tid, (r) => r.command === LIVE_CMD);
+  assert.strictEqual(fg.command, LIVE_CMD, '에이전트가 전경이 되지 않았다(테스트 전제 실패)');
   await tmux(['select-pane', '-t', `=${sess}:0.0`, '-T', LIVE_TITLE_WORK]);
-  const on = await waitRow(tid, (r) => r.command === LIVE_CMD);
-  assert.strictEqual(on.command, LIVE_CMD, '에이전트가 전경이 되지 않았다(테스트 전제 실패)');
+  const on = await waitRow(tid, (r) => r.command === LIVE_CMD && r.agent === true);
   assert.strictEqual(on.agent, true);
 
   await tmux(['send-keys', '-t', `=${sess}:0.0`, 'C-c']); // 종료 — pane_title 은 스테일하게 남는다
