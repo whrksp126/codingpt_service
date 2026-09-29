@@ -632,7 +632,7 @@ export default {
   "진행 현황": "Progreso",
   "로컬": "Local",
   "작업 추가": "Añadir tarea",
-  "터미널 {n}개": "{n} terminales",
+  "터미널 {n}개": "Terminales: {n}",
   "열린 작업 {n}개": "{n} tareas abiertas",
   "작업 환경": "Entorno de trabajo",
   "작업: {name}": "Tarea: {name}",
