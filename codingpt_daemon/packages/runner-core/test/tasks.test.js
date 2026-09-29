@@ -1,4 +1,13 @@
 'use strict';
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: POSIX 픽스처 — `#!/bin/sh` 가짜 gh/에이전트 셔뱅 스크립트, 탐색 경로 오버라이드 [BIN,'/usr/bin','/bin']
+//  (win32 의 git.exe 는 여기 없다 → GIT_MISSING), 유닉스 도메인 소켓 listen. 작업(tasks) 기능의 win32
+//  재배선/픽스처 이식 후 이 가드를 제거해 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('tasks.test.js: win32 스킵 — POSIX 픽스처(셔뱅 가짜 gh·/usr/bin 탐색·유닉스 소켓)', { skip: true }, () => {});
+  return;
+}
+
 // Agent Tasks 오케스트레이션(tasks.js) — 설계 정본 docs/agent-tasks-design.md §2·§3·§7.1.
 //  실제 git(임시 저장소·bare origin) + 가짜 claude/codex/gh + 터미널/tmux 는 전부 스텁.
 //  ★ 실 tmux(-L codingpt)·실 데몬·back 에 닿는 경로는 없다(격리 소켓 이름까지 바꿔 둔다).
