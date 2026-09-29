@@ -1,0 +1,779 @@
+{
+  "name": "model-13-followup-reviews",
+  "description": "PR 후속 리뷰(automation §4.2·§8.1): pending 2 → needs_input(reviewComments) · ci 와 동시면 ciFailed 우선(waitSince=ci.detectedAt) · dismissedAt → review_ready · 라이브 working → working · reviewComments 가 opFailed 보다 먼저 · 머지된 작업의 남은 run 은 keptDirty 가 ciFailed/reviewComments 보다 먼저(waitSince 는 기존 체인 run.updatedAt)",
+  "contract": "행 키 k = `${host}|${cwd}|${win}`(tid 없음 = '-'), 종결 작업 행 = `${host}|task:${taskId}`. host 모름 = 0. 그룹 순서 needs_input→working→review_ready→idle→done. 입력 대기는 waitSince 오름차순(승인 createdAt → live.since → run.updatedAt → live.at), 나머지는 sortAt 내림차순(run: max(lastActivityAt ?? updatedAt, live.at) · 에이전트: live.at · 작업: closedAt ?? updatedAt). 동률은 k 코드포인트 오름차순. 기대값의 모양은 PC tasks-model.js summarize() 가 정본. 추가(automation-design §8.1): needsInputReason 은 …keptDirty → ciFailed → reviewComments → opFailed(두 사유 모두 live.state==='working' 이면 무시, dismissedAt 이 있으면 무시). 사유가 ciFailed/reviewComments 인 행의 waitSince 는 각각 ci.detectedAt/reviews.detectedAt.",
+  "input": {
+    "now": 1790000000000,
+    "hosts": [
+      {
+        "id": 1,
+        "name": "MacBook",
+        "online": true,
+        "caps": [
+          "task.v1",
+          "auto.v1"
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "host": 1,
+        "items": [
+          {
+            "id": "t_hhhhhhhhhh",
+            "v": 1,
+            "title": "작업 t_hhhhhhhhhh",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": "git@github.com:o/app.git",
+              "github": {
+                "owner": "o",
+                "repo": "app"
+              }
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "open",
+            "winnerRunId": null,
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789996400000,
+            "closedAt": null,
+            "runs": [
+              {
+                "id": "r_h1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/hhhhhh-1",
+                "dir": ".codingpt/worktrees/app-hhhhhh-1",
+                "cwd": ".codingpt/worktrees/app-hhhhhh-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_h1",
+                "tid": 1301,
+                "tsession": "cpt-x--t-1301",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1301,
+                  "url": "https://github.com/o/app/pull/1301",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999940000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999940000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": null,
+                    "headSha": "abc1234",
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [],
+                    "seen": []
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789999280000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      },
+                      {
+                        "id": 101,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 13,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r101",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              },
+              {
+                "id": "r_h2",
+                "idx": 2,
+                "agent": "claude",
+                "branch": "cpt/hhhhhh-2",
+                "dir": ".codingpt/worktrees/app-hhhhhh-2",
+                "cwd": ".codingpt/worktrees/app-hhhhhh-2",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_h2",
+                "tid": 1302,
+                "tsession": "cpt-x--t-1302",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1302,
+                  "url": "https://github.com/o/app/pull/1302",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999880000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999880000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": "failing",
+                    "headSha": "abc1234",
+                    "detectedAt": 1789998500000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [
+                      {
+                        "name": "ci / lint",
+                        "url": "https://github.com/o/app/actions/runs/2/job/9",
+                        "runId": "2"
+                      }
+                    ],
+                    "seen": [
+                      "ci / lint@abc1234"
+                    ]
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789999700000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              },
+              {
+                "id": "r_h3",
+                "idx": 3,
+                "agent": "claude",
+                "branch": "cpt/hhhhhh-3",
+                "dir": ".codingpt/worktrees/app-hhhhhh-3",
+                "cwd": ".codingpt/worktrees/app-hhhhhh-3",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_h3",
+                "tid": 1303,
+                "tsession": "cpt-x--t-1303",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1303,
+                  "url": "https://github.com/o/app/pull/1303",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999640000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999640000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": null,
+                    "headSha": "abc1234",
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [],
+                    "seen": []
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789998200000,
+                    "dismissedAt": 1789998800000,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              },
+              {
+                "id": "r_h4",
+                "idx": 4,
+                "agent": "claude",
+                "branch": "cpt/hhhhhh-4",
+                "dir": ".codingpt/worktrees/app-hhhhhh-4",
+                "cwd": ".codingpt/worktrees/app-hhhhhh-4",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_h4",
+                "tid": 1304,
+                "tsession": "cpt-x--t-1304",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "running",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1304,
+                  "url": "https://github.com/o/app/pull/1304",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999820000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999820000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": null,
+                    "headSha": "abc1234",
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [],
+                    "seen": []
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789999460000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      },
+                      {
+                        "id": 101,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 13,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r101",
+                        "at": "2026-09-29T00:00:00Z"
+                      },
+                      {
+                        "id": 102,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 14,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r102",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              },
+              {
+                "id": "r_h5",
+                "idx": 5,
+                "agent": "claude",
+                "branch": "cpt/hhhhhh-5",
+                "dir": ".codingpt/worktrees/app-hhhhhh-5",
+                "cwd": ".codingpt/worktrees/app-hhhhhh-5",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_h5",
+                "tid": 1305,
+                "tsession": "cpt-x--t-1305",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1305,
+                  "url": "https://github.com/o/app/pull/1305",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": {
+                  "opId": "op-5",
+                  "kind": "push",
+                  "ok": false,
+                  "code": "PUSH_REJECTED",
+                  "message": "x",
+                  "result": null,
+                  "at": 1789999760000
+                },
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789999760000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789999760000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": null,
+                    "headSha": "abc1234",
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [],
+                    "seen": []
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789999580000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "id": "t_iiiiiiiiii",
+            "v": 1,
+            "title": "작업 t_iiiiiiiiii",
+            "repo": {
+              "path": "work/app",
+              "subdir": "",
+              "common": "work/app/.git",
+              "name": "app",
+              "remoteUrl": "git@github.com:o/app.git",
+              "github": {
+                "owner": "o",
+                "repo": "app"
+              }
+            },
+            "base": "main",
+            "workspaceId": "ws_repo",
+            "state": "merged",
+            "winnerRunId": "r_i1",
+            "error": null,
+            "createdAt": 1789989200000,
+            "updatedAt": 1789997000000,
+            "closedAt": 1789997000000,
+            "runs": [
+              {
+                "id": "r_i1",
+                "idx": 1,
+                "agent": "claude",
+                "branch": "cpt/iiiiii-1",
+                "dir": ".codingpt/worktrees/app-iiiiii-1",
+                "cwd": ".codingpt/worktrees/app-iiiiii-1",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i1",
+                "tid": 1311,
+                "tsession": "cpt-x--t-1311",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "merged",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1311,
+                  "url": "https://github.com/o/app/pull/1311",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789997000000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789997000000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": null,
+                    "headSha": "abc1234",
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [],
+                    "seen": []
+                  },
+                  "reviews": {
+                    "cursor": null,
+                    "detectedAt": null,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              },
+              {
+                "id": "r_i2",
+                "idx": 2,
+                "agent": "claude",
+                "branch": "cpt/iiiiii-2",
+                "dir": ".codingpt/worktrees/app-iiiiii-2",
+                "cwd": ".codingpt/worktrees/app-iiiiii-2",
+                "baseSha": "0000000",
+                "workspaceId": "ws_r_i2",
+                "tid": 1312,
+                "tsession": "cpt-x--t-1312",
+                "terminalAlive": true,
+                "agentGone": false,
+                "trustPending": false,
+                "state": "review_ready",
+                "promptMode": "arg",
+                "promptDelivered": true,
+                "promptDeliveredAt": 1789996400000,
+                "launchedAt": 1789996400000,
+                "copiedFiles": [],
+                "diff": {
+                  "files": 3,
+                  "additions": 41,
+                  "deletions": 7,
+                  "at": 1789999880000
+                },
+                "commits": {
+                  "ahead": 2,
+                  "at": 1789999880000
+                },
+                "dirty": false,
+                "pushed": true,
+                "pr": {
+                  "number": 1312,
+                  "url": "https://github.com/o/app/pull/1312",
+                  "state": "open",
+                  "mergeable": "MERGEABLE",
+                  "checks": {
+                    "status": "failing"
+                  }
+                },
+                "op": null,
+                "lastOp": null,
+                "lastTurnEndedAt": null,
+                "lastActivityAt": 1789997300000,
+                "reviewNotifiedAt": null,
+                "lastTurnFailed": false,
+                "error": null,
+                "cleanup": null,
+                "createdAt": 1789992800000,
+                "updatedAt": 1789997300000,
+                "followup": {
+                  "polledAt": 1789999940000,
+                  "ci": {
+                    "status": "failing",
+                    "headSha": "abc1234",
+                    "detectedAt": 1789997360000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "failed": [
+                      {
+                        "name": "ci / lint",
+                        "url": "https://github.com/o/app/actions/runs/2/job/9",
+                        "runId": "2"
+                      }
+                    ],
+                    "seen": [
+                      "ci / lint@abc1234"
+                    ]
+                  },
+                  "reviews": {
+                    "cursor": "2026-09-29T00:00:00Z",
+                    "detectedAt": 1789997420000,
+                    "dismissedAt": null,
+                    "fixOpId": null,
+                    "pending": [
+                      {
+                        "id": 100,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 12,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r100",
+                        "at": "2026-09-29T00:00:00Z"
+                      },
+                      {
+                        "id": 101,
+                        "kind": "review_comment",
+                        "author": "alice",
+                        "bot": false,
+                        "path": "src/a.ts",
+                        "line": 13,
+                        "bodyHead": "여기서 null 체크가 빠졌어요",
+                        "url": "https://github.com/o/app/pull/1#discussion_r101",
+                        "at": "2026-09-29T00:00:00Z"
+                      }
+                    ],
+                    "overflow": 0,
+                    "seenIds": []
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "agentSnaps": [
+      {
+        "host": 1,
+        "cwd": ".codingpt/worktrees/app-hhhhhh-4",
+        "win": 1304,
+        "agent": "claude",
+        "state": "working",
+        "at": 1789999988000,
+        "since": 1789999820000
+      }
+    ],
+    "approvals": [],
+    "unread": [],
+    "terminalsFallback": [],
+    "workspaces": [
+      {
+        "id": "ws_repo",
+        "host": 1,
+        "localPath": "work/app",
+        "name": "app"
+      }
+    ]
+  },
+  "expect": {
+    "groups": {
+      "needs_input": [
+        "1|.codingpt/worktrees/app-iiiiii-2|1312",
+        "1|.codingpt/worktrees/app-hhhhhh-2|1302",
+        "1|.codingpt/worktrees/app-hhhhhh-1|1301",
+        "1|.codingpt/worktrees/app-hhhhhh-5|1305"
+      ],
+      "working": [
+        "1|.codingpt/worktrees/app-hhhhhh-4|1304"
+      ],
+      "review_ready": [
+        "1|.codingpt/worktrees/app-hhhhhh-3|1303"
+      ],
+      "idle": [],
+      "done": [
+        "1|task:t_iiiiiiiiii"
+      ]
+    },
+    "reasons": {
+      "1|.codingpt/worktrees/app-iiiiii-2|1312": "keptDirty",
+      "1|.codingpt/worktrees/app-hhhhhh-2|1302": "ciFailed",
+      "1|.codingpt/worktrees/app-hhhhhh-1|1301": "reviewComments",
+      "1|.codingpt/worktrees/app-hhhhhh-5|1305": "reviewComments"
+    },
+    "unread": {},
+    "offline": []
+  }
+}

@@ -40,6 +40,11 @@ const OPTIONAL_CAPS = [
   ['approval.v1', './approvals', 'request'],    // 기능1 원격 승인(훅 블로킹 왕복)
   ['transcript.v1', './transcript', 'handle'],  // 기능5 트랜스크립트 tail/파싱
   ['task.v1', './tasks', 'handle'],             // Agent Tasks(worktree 작업) — jail 밖이면 handle 이 undefined
+  // 자동화 번들(docs/automation-design.md §2.3) — 셋 다 env 킬스위치(CPT_AUTOMATIONS/CPT_DISPATCH/CPT_POWER=0)면
+  //  handle 이 undefined 라 광고하지 않는다. power 는 darwin 외에서도 undefined(F4 비목표).
+  ['auto.v1', './automations', 'handle'],
+  ['dispatch.v1', './dispatch', 'handle'],
+  ['power.v1', './power', 'handle'],
 ];
 
 function daemonCaps() {
@@ -117,8 +122,23 @@ function helloFrame(config) {
     // 이 기기가 들고 있는 계정 마스터키 epoch(0 = 열쇠 없음). 클라는 자기 grant epoch 과 같을 때만
     //  암호화를 켠다(§2.8) — 0 이면 어떤 클라와도 일치하지 않아 자동으로 평문이 된다.
     e2eeEpoch: e2eeGate.epoch(),
+    // 작업 활성·깨어 있음(자동화 번들 §6.3) — back 은 이 불리언 2개로 "작업 중 끊김" 푸시를 판정한다(내용 0).
+    //  재접속 직후 runner_busy 프레임을 기다리지 않게 hello 에도 싣는다(추가 전용 — 구 back 은 무시).
+    ...powerHello(),
   };
 }
+
+// power.js(S2) 의 현재 불리언 — 모듈이 없거나(구 번들·비 darwin) 실패하면 둘 다 false.
+function powerHello() {
+  const pw = tryRequire('./power');
+  if (pw && typeof pw.busyState === 'function') {
+    try { const b = pw.busyState() || {}; return { busy: !!b.busy, awake: !!b.awake }; } catch (_) { /* 아래 */ }
+  }
+  return { busy: false, awake: false };
+}
+
+// 데몬 → back 프레임(게이팅 없음) — power.js 의 runner_busy 송신로(구 back 은 모르는 type 을 무시한다).
+function send(frame) { return sendEvent(frame); }
 
 // 열쇠 상태가 바뀐 직후(승인 수령·회전) 같은 소켓으로 hello 를 다시 보낸다.
 //  이게 없으면 **승인 직후 몇 시간 동안** back 의 conn.caps 에 e2ee.* 가 없고 e2eeEpoch 가 0 으로
@@ -481,6 +501,16 @@ function dispatchRpc(ws, method, params, ok, fail) {
     //  (로컬 소켓 cpt-server 경로는 이 디스패처를 타지 않는다 — 이 PC 의 앱·cpt CLI 는 서버와 무관.)
     if (serverCaps.length && !hasServerCap('task.v1')) { fail(codedError('TASKS_DISABLED', '이 서버에서 작업 기능이 꺼져 있습니다')); return; }
     callLazy('./cpt-server', 'handleTaskRpc', [method, params || {}], ok, fail); return;
+  }
+  // 자동화 번들(auto.*/dispatch.*/power.* — docs/automation-design.md §2.3). 로컬 소켓과 같은 함수(cpt-server.handleAutoRpc).
+  //  킬스위치는 task.* 와 같은 규칙 — 봉인 RPC 는 서버가 메서드를 못 보므로 데몬이 교집합의 다른 한쪽을 지킨다.
+  //  power.event(잠자기 알림)는 **이 PC 의 앱만** 보낸다 — 원격 기기가 PC 의 잠자기를 주장할 이유가 없다(Z-13).
+  if (method.startsWith('auto.') || method.startsWith('dispatch.') || method.startsWith('power.')) {
+    const fam = method.split('.')[0];
+    const cap = { auto: 'auto.v1', dispatch: 'dispatch.v1', power: 'power.v1' }[fam];
+    if (serverCaps.length && !hasServerCap(cap)) { fail(codedError(`${fam.toUpperCase()}_DISABLED`, '이 서버에서 이 기능이 꺼져 있습니다')); return; }
+    if (method === 'power.event') { fail(codedError('BAD_PARAMS', 'power.event 는 이 PC 의 앱만 보낼 수 있습니다')); return; }
+    callLazy('./cpt-server', 'handleAutoRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;
   }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }
@@ -866,6 +896,8 @@ module.exports = {
   announceHello,   // 열쇠 변화 직후 재신고(재접속 없이 caps·e2eeEpoch 갱신)
   handleE2eeHint,  // back e2ee_hint 프레임 처리(테스트가 실제 WS 로 받은 프레임을 그대로 넣는다)
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
+  serverCaps: () => serverCaps.slice(), // hello_ack 서버 능력 사본(자동화 엔진의 auto.v1 가드 — 비어 있으면 구 서버/연결 전)
+  send,          // 게이팅 없는 데몬→back 프레임(power.js runner_busy). false 면 연결 없음
   sendEvent,     // 데몬→back 신규 프레임(caps 게이팅 포함). false 면 보내지 않았다는 뜻 — 폴백할 것
   dispatchRpc,   // 제어채널 RPC 한 벌(평문/봉투 공용) — 테스트가 봉투 경로를 직접 검증할 수 있게 노출
   lanRpc,        // LAN 채널 → 같은 디스패처(주입용). 테스트가 "한 벌 공유"를 직접 검증한다

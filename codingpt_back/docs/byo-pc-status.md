@@ -144,6 +144,7 @@ iOS **0.4.4** 게시 / 0.4.5 핫픽스 심사 대기 / 0.4.6(build 50) 제출 �
 | 진행 현황 | 상태별 현황판 = **PC 안의 장소**(`내 PC` 아래 PC 머리 밑 한 줄, 그 PC 범위). 다른 PC 입력대기는 PC 행 배지. 폰도 WorkspaceView 형제 층 |
 | 사이드바 트리 | 워크스페이스 그룹 ▸ "로컬 · 브랜치" + 열린 작업(fan-out 펼침) |
 | 전송 | 봉인 RPC 우선 + back `POST /api/daemon/task` 평문 폴백(`TASK_RPC_OK` 허용 표). 정본 `codingpt_daemon/docs/agent-tasks-design.md`, `agent-tasks-sidebar.md` |
+| 자동화 번들 전송 | 봉인 RPC 우선 + back `POST /api/daemon/auto` 평문 폴백(`AUTO_RPC_OK` — `auto.*`·`dispatch.*`·`power.*`, `power.event` 제외) · caps `auto.v1`/`dispatch.v1`/`power.v1`(킬스위치 `AUTOMATIONS_ENABLED`/`DISPATCH_ENABLED`/`POWER_ENABLED`) · 제어 WS `runner_busy` → `runner_status.busy/awake` + 작업 중 끊김 90s 뒤 `pc_disconnected` 푸시. 정본 `codingpt_daemon/docs/automation-design.md` §7 |
 
 ### 3.9 알림
 | 기능 | 내용 |

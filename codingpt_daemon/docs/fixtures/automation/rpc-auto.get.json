@@ -1,0 +1,122 @@
+{
+  "contract": "docs/automation-design.md §5.6 — 데몬 automations.js(S1) 소유. test/automations.test.js 가 pickAuto 화이트리스트(AUTO_FIELDS/STATE_FIELDS)와 대조한다.",
+  "method": "auto.get",
+  "description": "자동화 1개 + 감사 로그 꼬리(≤50, 오래된 → 최신). 로그에는 프롬프트 본문이 없다(stage·code·message(≤200)·taskId 뿐).",
+  "params": {
+    "id": "a_c0mm1t7e5t"
+  },
+  "result": {
+    "automation": {
+      "id": "a_c0mm1t7e5t",
+      "v": 1,
+      "name": "main 커밋마다 테스트",
+      "enabled": true,
+      "paused": false,
+      "pausedReason": null,
+      "createdBy": {
+        "kind": "agent",
+        "agent": "claude",
+        "tsession": "cpt-work-codingpt--t-1000123",
+        "taskId": null,
+        "planId": null,
+        "deviceId": 12,
+        "at": 1789740800000
+      },
+      "trigger": {
+        "type": "git.commits",
+        "repo": "work/codingpt",
+        "branch": "main",
+        "remote": "origin"
+      },
+      "actions": [
+        {
+          "type": "task.create",
+          "repo": "work/codingpt",
+          "subdir": "",
+          "base": "main",
+          "agents": [
+            {
+              "id": "claude",
+              "count": 1
+            }
+          ],
+          "title": "테스트: {commits.range}",
+          "prompt": "새 커밋 {commits.count}개({commits.range})에 대해 테스트를 돌리고 실패하면 고쳐라.\n\n{commits.subjects}",
+          "copyEnv": true
+        }
+      ],
+      "guards": {
+        "maxRunsPerDay": 10,
+        "maxConcurrent": 1,
+        "cooldownMs": 300000
+      },
+      "state": {
+        "nextRunAt": null,
+        "lastRunAt": 1789990000000,
+        "runsToday": 2,
+        "dayKey": "2026-09-29",
+        "inflight": 0,
+        "cursor": {
+          "sha": "4f9c2a1d8e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+          "polledAt": 1789999900000
+        },
+        "consecutiveFailures": 1,
+        "lastResult": {
+          "firingId": "f_q1w2e3r4t5",
+          "ok": false,
+          "code": "TASK_LIMIT",
+          "message": "동시에 실행할 수 있는 작업 수를 넘었습니다",
+          "at": 1789990005000,
+          "taskIds": [],
+          "steps": [
+            {
+              "type": "task.create",
+              "ok": false,
+              "code": "TASK_LIMIT"
+            }
+          ]
+        }
+      },
+      "createdAt": 1789740800000,
+      "updatedAt": 1789827200000
+    },
+    "log": [
+      {
+        "at": 1789989990000,
+        "autoId": "a_c0mm1t7e5t",
+        "firingId": null,
+        "stage": "skip",
+        "ok": false,
+        "code": "AUTO_RATE_LIMITED",
+        "message": "cooldown"
+      },
+      {
+        "at": 1789990000000,
+        "autoId": "a_c0mm1t7e5t",
+        "firingId": "f_q1w2e3r4t5",
+        "stage": "start",
+        "ok": true,
+        "message": "git.commits"
+      },
+      {
+        "at": 1789990005000,
+        "autoId": "a_c0mm1t7e5t",
+        "firingId": "f_q1w2e3r4t5",
+        "stage": "step",
+        "type": "task.create",
+        "ok": false,
+        "code": "TASK_LIMIT",
+        "message": "동시에 실행할 수 있는 작업 수를 넘었습니다"
+      },
+      {
+        "at": 1789990005000,
+        "autoId": "a_c0mm1t7e5t",
+        "firingId": "f_q1w2e3r4t5",
+        "stage": "end",
+        "ok": false,
+        "code": "TASK_LIMIT",
+        "message": "동시에 실행할 수 있는 작업 수를 넘었습니다"
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "contract": "docs/automation-design.md §3.6·§4.3·§5.6·§6.4 — 데몬 슬라이스(S1/S2) 소유. test/automations.test.js 가 auto 절을 automations.ERROR_CODES 와 대조한다(dispatch/power/followup 절은 S2 테스트).",
+  "method": "*",
+  "description": "자동화 번들의 에러 코드 정본. 3 경로(로컬 소켓 `CODE: 메시지`·평문 /api/daemon/auto {code}·봉인 openRpcResult {ok:false, code})에서 같은 code 가 도착한다. 클라 ERROR_KEY(§11)가 이 집합을 전부 덮어야 한다.",
+  "auto": [
+    "AUTO_DISABLED", "AUTO_NOT_FOUND", "AUTO_LIMIT", "AUTO_LOOP", "AUTO_DEPTH",
+    "AUTO_BAD_TRIGGER", "AUTO_BAD_ACTION", "AUTO_TEMPLATE_TOO_LARGE",
+    "AUTO_PAUSED", "AUTO_RATE_LIMITED", "AUTO_BUSY", "AUTO_OUT_OF_TERMINAL"
+  ],
+  "autoValidateAlso": ["BAD_PARAMS", "NOT_A_REPO", "AGENT_NOT_INSTALLED"],
+  "autoResultOnly": {
+    "description": "던지지 않고 state.lastResult.code / 감사 로그에만 실리는 코드(firing 결과). AGENT_BUSY 는 연속 실패로 세지 않는다. MISSED 는 감사 로그 skip 전용.",
+    "codes": ["OP_INTERRUPTED", "TASK_LIMIT", "AGENT_BUSY", "PROMPT_NOT_DELIVERED", "TERMINAL_GONE", "TASKS_DISABLED", "TIMEOUT", "MISSED"]
+  },
+  "dispatch": [
+    "DISPATCH_DISABLED", "DISPATCH_NOT_FOUND", "PLANNER_UNAVAILABLE", "PLANNER_TIMEOUT", "PLANNER_FAILED", "BAD_PLAN", "CATALOG_TOO_LARGE"
+  ],
+  "power": [
+    "POWER_DISABLED", "POWER_UNSUPPORTED", "POWER_SETUP_REQUIRED", "POWER_SUDO_MISSING", "POWER_NO_GUI", "POWER_SETUP_CANCELLED", "POWER_SETUP_FAILED"
+  ],
+  "followup": ["FOLLOWUP_NOTHING"],
+  "wire": {
+    "local": { "note": "PC 앱 auto_local/power_local — `<CODE>: <메시지>` (with_code=true)", "example": "AUTO_LOOP: 자동화가 만든 작업에서는 자동화를 만들 수 없습니다" },
+    "plain": { "note": "POST /api/daemon/auto — 서버 킬스위치는 403 {code:'<FAM>_DISABLED'}", "example": { "success": false, "detail": { "code": "AUTO_NOT_FOUND" } } },
+    "sealed": { "note": "봉인 응답을 연 결과(e2ee.openRpcResult) — 데몬이 serverCaps 에 auto.v1 이 없으면 AUTO_DISABLED", "example": { "ok": false, "e": "이 서버에서 이 기능이 꺼져 있습니다", "code": "AUTO_DISABLED" } }
+  }
+}

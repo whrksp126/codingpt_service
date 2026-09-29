@@ -1,0 +1,93 @@
+{
+  "contract": "docs/automation-design.md §6.3·§6.4 — 데몬(S2) 소유. test/task-contract.test.js 가 power.STATUS_FIELDS 와 대조한다.",
+  "method": "power.status",
+  "description": "power.status {} → Status. power.set {keepAwake?, lidClosed?} → {status}. power.setup {remove?} → {accepted:true}(결과는 status.setup/setupError). power.event 는 로컬 소켓 전용. darwin 외에는 power.v1 미광고.",
+  "params": {},
+  "result": {
+    "supported": true,
+    "keepAwake": true,
+    "lidClosed": true,
+    "setup": "done",
+    "setupError": null,
+    "active": true,
+    "reasons": [
+      "automation:a_k3j9x2m1qa",
+      "task:t_k3j9x2m1qa"
+    ],
+    "layers": {
+      "caffeinate": true,
+      "disableSleep": true
+    },
+    "power": "ac",
+    "lidBlocked": null,
+    "lastError": null,
+    "since": 1790000000000
+  },
+  "examples": {
+    "idle": {
+      "supported": true,
+      "keepAwake": true,
+      "lidClosed": false,
+      "setup": "none",
+      "setupError": null,
+      "active": false,
+      "reasons": [],
+      "layers": {
+        "caffeinate": false,
+        "disableSleep": false
+      },
+      "power": "unknown",
+      "lidBlocked": null,
+      "lastError": null,
+      "since": 1790000000000
+    },
+    "battery": {
+      "supported": true,
+      "keepAwake": false,
+      "lidClosed": true,
+      "setup": "done",
+      "setupError": null,
+      "active": true,
+      "reasons": [
+        "task:t_k3j9x2m1qa"
+      ],
+      "layers": {
+        "caffeinate": false,
+        "disableSleep": false
+      },
+      "power": "battery",
+      "lidBlocked": "battery",
+      "lastError": null,
+      "since": 1790000000000
+    },
+    "needsSetup": {
+      "supported": true,
+      "keepAwake": false,
+      "lidClosed": true,
+      "setup": "failed",
+      "setupError": "POWER_SETUP_CANCELLED",
+      "active": false,
+      "reasons": [],
+      "layers": {
+        "caffeinate": false,
+        "disableSleep": false
+      },
+      "power": "unknown",
+      "lidBlocked": "setup",
+      "lastError": null,
+      "since": 1790000000000
+    }
+  },
+  "lidBlockedValues": [
+    null,
+    "battery",
+    "setup",
+    "sudo"
+  ],
+  "setupValues": [
+    "none",
+    "pending",
+    "done",
+    "failed"
+  ]
+}

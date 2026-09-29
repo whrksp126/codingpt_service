@@ -293,6 +293,43 @@ function stopWatch() {
   if (watcher) { try { watcher.close(); } catch (_) { /* noop */ } watcher = null; watchedRel = null; }
 }
 
+/**
+ * readHead(rel, maxBytes) — 파일 머리(UTF-8, maxBytes 이하)를 **줄 경계에서** 잘라 돌려준다(automation-design §3.2
+ *  카탈로그 README 머리). 홈 jail(safeResolve)·일반 파일만(심링크 탈출은 realpath 검증이 막는다). 없음·디렉토리·
+ *  바이너리(NUL) → "". 추가 전용 — fs.* RPC 표면에는 노출하지 않는다(데몬 내부 호출 전용).
+ */
+function readHead(rel, maxBytes = 600) {
+  const max = Math.max(1, Math.min(64 * 1024, parseInt(maxBytes, 10) || 600));
+  let abs;
+  try { abs = safeResolve(rel); } catch (_) { return ''; }
+  let fd = null;
+  try {
+    const st = fs.statSync(abs);
+    if (!st.isFile()) return '';
+    fd = fs.openSync(abs, 'r');
+    const buf = Buffer.alloc(max + 1);
+    const n = fs.readSync(fd, buf, 0, max + 1, 0);
+    let b = buf.subarray(0, Math.min(n, max));
+    if (b.includes(0)) return '';
+    const more = n > max;
+    if (more) {
+      // 글자 중간을 끊지 않게 — 이어지는 바이트(10xxxxxx)면 그 글자 시작 전까지.
+      let i = b.length - 1;
+      while (i > 0 && b.length - i < 4 && (b[i] & 0xc0) === 0x80) i--;
+      const lead = b[i];
+      const need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+      if (i + need > b.length) b = b.subarray(0, i);
+      const nl = b.lastIndexOf(0x0a);
+      if (nl > 0) b = b.subarray(0, nl);
+    }
+    return b.toString('utf8').replace(/\r/g, '').replace(/\s+$/, '');
+  } catch (_) {
+    return '';
+  } finally {
+    if (fd != null) { try { fs.closeSync(fd); } catch (_) { /* noop */ } }
+  }
+}
+
 async function handle(method, params) {
   switch (method) {
     case 'fs.list': return list(params);
@@ -308,4 +345,4 @@ async function handle(method, params) {
   }
 }
 
-module.exports = { handle, startWatch, stopWatch, rootDir, safeResolve, relOf };
+module.exports = { handle, startWatch, stopWatch, rootDir, safeResolve, relOf, readHead };

@@ -54,6 +54,14 @@ const CATALOG = [
     // Agent Tasks(설계 §2.5 10·§2.6) — 작업 run 에 한해 프롬프트 파일을 런치 인자로 넘긴다(부록 Z B-2).
     promptArg: { positional: true },
     resumeArgs: ['--continue'],
+    // 헤드리스 플래너(automation-design §3.3·부록 Z-1) — 2026-09-29 claude 2.1.284 실측: 빈 폴더에서
+    //  `-p --output-format json --max-turns 1 --tools "" --no-session-persistence --append-system-prompt <SYS>`
+    //  + stdin 프롬프트 → exit 0, stdout 한 줄 JSON {type:'result', subtype:'success', is_error:false,
+    //  result:'<모델 출력 문자열>', num_turns:1, …}. 신뢰 다이얼로그 없음(-p). 도구 0 개·세션 파일 0 개.
+    headless: {
+      args: ['-p', '--output-format', 'json', '--max-turns', '1', '--tools', '', '--no-session-persistence'],
+      sysFlag: '--append-system-prompt', prompt: 'stdin', parse: 'claude-json',
+    },
     install: [
       { label: '공식 설치 스크립트 (권장)', cmd: 'curl -fsSL https://claude.ai/install.sh | bash' },
       { label: 'Homebrew', cmd: 'brew install --cask claude-code' },
@@ -68,6 +76,13 @@ const CATALOG = [
     docs: 'https://developers.openai.com/codex/cli',
     promptArg: { positional: true },
     resumeArgs: ['resume', '--last'],
+    // 헤드리스 플래너 — codex-cli 0.147.0 `exec --help` 실측: PROMPT 인자가 없으면 stdin 을 읽는다,
+    //  `-o/--output-last-message <FILE>`·`-s/--sandbox`·`--skip-git-repo-check` 존재. (실행 실측은 구독
+    //  비활성 계정이라 못 함 — 실패는 PLANNER_FAILED → 폴백으로 접힌다.) SYS 는 프롬프트 앞에 붙인다.
+    headless: {
+      args: ['exec', '--skip-git-repo-check', '--sandbox', 'read-only'],
+      outFileFlag: '--output-last-message', prompt: 'stdin', parse: 'last-message',
+    },
     install: [
       { label: '공식 설치 스크립트 (권장)', cmd: 'curl -fsSL https://chatgpt.com/codex/install.sh | sh' },
       { label: 'npm', cmd: 'npm install -g @openai/codex' },
@@ -81,6 +96,12 @@ const CATALOG = [
     docs: 'https://github.com/google-gemini/gemini-cli',
     promptArg: { flag: '-i' },
     resumeArgs: null,
+    // 헤드리스 플래너 — 이 PC 에 gemini 가 없어 **미실측**(부록 Z-1). 문서 기준 `-p <prompt> --output-format json`
+    //  → stdout JSON `.response`. 형식이 다르면 PLANNER_FAILED → 폴백.
+    headless: {
+      args: ['--output-format', 'json'],
+      promptFlag: '-p', prompt: 'arg', parse: 'gemini-json',
+    },
     install: [
       { label: 'npm', cmd: 'npm install -g @google/gemini-cli' },
       { label: 'Homebrew', cmd: 'brew install gemini-cli' },
@@ -454,6 +475,49 @@ function resolveBinSync(id) {
   return findBin(a.bin, searchDirs(loginPathCache || []));
 }
 
+// ── 로그인 상태(automation-design §3.3 플래너 선택) ─────────────────────────────
+//  CLI **자체의** 상태 명령만 부른다(자격증명 파일은 열지 않는다 — agent.js authStatus 와 같은 등급).
+//   · claude → `auth status --json` : exit 0 ∧ loggedIn===true → 'in'. 비로그인은 non-zero + stdout JSON.
+//   · codex  → `login status`       : exit 0 → 'in', 그 외 'out'.
+//   · gemini → null(판정 불가 — 실행해 보고 판단).
+//  결과 = 'in' | 'out' | null(판정 불가). 5분 캐시, 호출당 4s 상한. 원본 바이너리(resolveBin)만 — 우리 래퍼 제외.
+const LOGIN_CACHE_MS = 5 * 60 * 1000;
+const loginCache = new Map(); // id → { at, value }
+let loginExec = null; // 테스트 주입: (bin, args, opts) → Promise<{code, stdout}>
+
+function execQuiet(bin, args, { timeout = 4000 } = {}) {
+  if (loginExec) return loginExec(bin, args, { timeout });
+  return new Promise((resolve) => {
+    const env = { ...process.env, PATH: searchDirs(loginPathCache || []).join(path.delimiter) };
+    delete env.TMUX;
+    execFile(bin, args, { timeout, encoding: 'utf8', env, windowsHide: true, maxBuffer: 1024 * 1024 }, (err, stdout) => {
+      const code = err ? (typeof err.code === 'number' ? err.code : -1) : 0;
+      resolve({ code, stdout: String(stdout || '') });
+    });
+  });
+}
+
+async function loginStatus(id, { refresh = false } = {}) {
+  const hit = loginCache.get(id);
+  if (!refresh && hit && Date.now() - hit.at < LOGIN_CACHE_MS) return hit.value;
+  let value = null;
+  const bin = await resolveBin(id);
+  if (!bin) value = 'out';
+  else if (id === 'claude') {
+    const r = await execQuiet(bin, ['auth', 'status', '--json']);
+    let j = null;
+    try { j = JSON.parse(r.stdout); } catch (_) { j = null; }
+    if (r.code === 0 && j && j.loggedIn === true) value = 'in';
+    else if (j && j.loggedIn === false) value = 'out';
+    else value = r.code === 0 ? null : 'out';
+  } else if (id === 'codex') {
+    const r = await execQuiet(bin, ['login', 'status']);
+    value = r.code === 0 ? 'in' : 'out';
+  } else value = null;
+  loginCache.set(id, { at: Date.now(), value });
+  return value;
+}
+
 /** 터미널에서 실행할 명령 — 지금은 바이너리 이름 그대로다(런치 인자 미도입, 사용자 확정 2026-07-27). */
 function launchCommand(id) {
   const a = byId.get(id);
@@ -470,6 +534,7 @@ module.exports = {
   markOnboarded,
   resolveBin,
   resolveBinSync,
+  loginStatus,
   launchCommand,
   wirable,
   // Agent Tasks(task-git.js)가 git/gh 를 같은 PATH 규칙으로 찾는다 — 사본을 두면 한쪽만 고쳐진다.
@@ -486,7 +551,8 @@ module.exports = {
     winFallbackDirs,
     winPathext,
     probeVersion,
-    resetCache: () => { cache = { at: 0, items: null }; versionCache.clear(); loginPathCache = null; },
+    resetCache: () => { cache = { at: 0, items: null }; versionCache.clear(); loginPathCache = null; loginCache.clear(); },
+    setLoginExec: (fn) => { loginExec = fn || null; loginCache.clear(); },
     setLoginPath: (dirs) => { loginPathCache = dirs; },
     // 테스트에서만 쓴다: null 로 되돌리면 실제 PATH 탐색으로 복귀.
     setSearchOverride: (dirs) => {

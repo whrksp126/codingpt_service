@@ -103,6 +103,14 @@
 //                   정본 = codingpt_daemon/docs/agent-tasks-design.md §3.3. 교집합의 데몬 항은 데몬
 //                   OPTIONAL_CAPS 의 task.v1(runners[].caps). TASKS_ENABLED=0 으로 회수 — 선언과 함께
 //                   taskRpc 핸들러 게이트도 403(TASKS_DISABLED) 으로 닫힌다(한 소스: SERVER_CAPS).
+//
+//  · auto.v1 / dispatch.v1 / power.v1 — 자동화 번들(정본 = codingpt_daemon/docs/automation-design.md §7).
+//                   서버측 = POST /api/daemon/auto 평문 폴백(daemonController.autoRpc, 허용 표 AUTO_RPC_OK)
+//                   — 봉인 경로(/api/daemon/rpc)는 무수정. method 접두(auto./dispatch./power.)별로 cap 이 없으면
+//                   autoRpc 가 403 {code:'<FAM>_DISABLED'}(한 소스: SERVER_CAPS). power.v1 은 추가로 제어 WS
+//                   `runner_busy {busy, awake}` 수신 + 끊김 90초 유예 뒤 `pc_disconnected` 푸시(daemonRelayService).
+//                   auto.v1 은 F2 의 task.run.fix / task.run.followup.dismiss(TASK_RPC_OK 경유)도 광고한다.
+//                   킬스위치: AUTOMATIONS_ENABLED=0 → auto.v1, DISPATCH_ENABLED=0 → dispatch.v1, POWER_ENABLED=0 → power.v1.
 
 // env 값이 명시적으로 꺼져 있는가('0'|'false'|'off'). 미설정 = 켜짐(기본값).
 function envOff(v) {
@@ -116,6 +124,9 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.TRANSCRIPT_ENABLED)) caps.push('transcript.v1');
   if (!envOff(env.AGENTSTATE_ENABLED)) caps.push('agentstate.v1');
   if (!envOff(env.TASKS_ENABLED)) caps.push('task.v1');
+  if (!envOff(env.DISPATCH_ENABLED)) caps.push('dispatch.v1');
+  if (!envOff(env.AUTOMATIONS_ENABLED)) caps.push('auto.v1');
+  if (!envOff(env.POWER_ENABLED)) caps.push('power.v1');
   if (!envOff(env.E2EE_ENABLED)) {
     caps.push('e2ee.keys.v1');
     caps.push('e2ee.rpc.v1');

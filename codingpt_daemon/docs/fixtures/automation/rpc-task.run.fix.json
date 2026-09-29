@@ -1,0 +1,354 @@
+{
+  "contract": "docs/automation-design.md §4.3 — 데몬(S2) 소유. test/task-contract.test.js 가 RunLite 화이트리스트·lastOp(fix) 결과 키와 대조한다.",
+  "method": "task.run.fix",
+  "description": "task.run.fix {opId, taskId, runId, what:'ci'|'reviews'|'both'} → OpAccepted(op kind 'fix', 데드라인 3분). 전제: what 대상이 비면 FOLLOWUP_NOTHING · op/전이 중 RUN_BUSY · 에이전트 작업 중 AGENT_BUSY · pr 없음 PR_NOT_FOUND. 배달 실패는 lastOp {ok:false, code:'PROMPT_NOT_DELIVERED'}(카드 [다시 시도]). task.run.followup.dismiss {taskId, runId, what} → {ok:true}(동기). 클라는 hostCaps ∋ 'auto.v1' 일 때만 버튼을 그린다.",
+  "params": {
+    "opId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+    "taskId": "t_k3j9x2m1qa",
+    "runId": "r_8fk2ma1q",
+    "what": "both"
+  },
+  "result": {
+    "accepted": true,
+    "opId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+    "run": {
+      "id": "r_8fk2ma1q",
+      "idx": 1,
+      "agent": "claude",
+      "branch": "cpt/x2m1qa-1",
+      "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+      "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+      "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "workspaceId": "ws_def",
+      "tid": 1234567,
+      "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+      "terminalAlive": true,
+      "agentGone": false,
+      "trustPending": false,
+      "state": "review_ready",
+      "promptMode": "arg",
+      "promptDelivered": true,
+      "promptDeliveredAt": 1790000012345,
+      "launchedAt": 1790000010000,
+      "copiedFiles": [
+        ".env",
+        "codingpt_back/.env.local"
+      ],
+      "diff": {
+        "files": 3,
+        "additions": 41,
+        "deletions": 7,
+        "at": 1790000050000
+      },
+      "commits": {
+        "ahead": 2,
+        "at": 1790000050000
+      },
+      "dirty": false,
+      "pushed": true,
+      "pr": {
+        "number": 12,
+        "url": "https://github.com/whrksp126/codingpt/pull/12",
+        "state": "open",
+        "isDraft": false,
+        "title": "로그인 폼 유효성 검사 추가",
+        "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
+        "reviewDecision": null,
+        "checks": {
+          "status": "passing",
+          "total": 2,
+          "passed": 1,
+          "failed": 0,
+          "pending": 0,
+          "items": [
+            {
+              "name": "ci / test",
+              "status": "passing",
+              "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+            },
+            {
+              "name": "optional",
+              "status": "skipped"
+            }
+          ]
+        },
+        "at": 1790000060000
+      },
+      "op": {
+        "opId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+        "kind": "fix",
+        "startedAt": 1790000070000
+      },
+      "lastOp": {
+        "opId": "0b0c3d0e-1111-4222-8333-444455556666",
+        "kind": "pr.create",
+        "ok": true,
+        "code": null,
+        "message": null,
+        "result": {
+          "pr": {
+            "number": 12,
+            "url": "https://github.com/whrksp126/codingpt/pull/12",
+            "state": "open",
+            "isDraft": false,
+            "title": "로그인 폼 유효성 검사 추가",
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": null,
+            "checks": {
+              "status": "passing",
+              "total": 2,
+              "passed": 1,
+              "failed": 0,
+              "pending": 0,
+              "items": [
+                {
+                  "name": "ci / test",
+                  "status": "passing",
+                  "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+                },
+                {
+                  "name": "optional",
+                  "status": "skipped"
+                }
+              ]
+            },
+            "at": 1790000060000
+          },
+          "existed": false
+        },
+        "at": 1790000060000
+      },
+      "lastTurnEndedAt": 1790000049000,
+      "lastActivityAt": 1790000050000,
+      "reviewNotifiedAt": 1790000050500,
+      "lastTurnFailed": false,
+      "error": null,
+      "cleanup": null,
+      "createdAt": 1790000000000,
+      "updatedAt": 1790000050000,
+      "followup": {
+        "polledAt": 1790000060000,
+        "ci": {
+          "status": "failing",
+          "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "detectedAt": 1790000060000,
+          "dismissedAt": null,
+          "fixOpId": null,
+          "failed": [
+            {
+              "name": "ci / lint",
+              "url": "https://github.com/whrksp126/codingpt/actions/runs/2/job/9",
+              "runId": "2"
+            }
+          ],
+          "seen": [
+            "ci / lint@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ]
+        },
+        "reviews": {
+          "cursor": "2026-09-29T00:00:00.000Z",
+          "detectedAt": 1790000060000,
+          "dismissedAt": null,
+          "fixOpId": null,
+          "pending": [
+            {
+              "id": 123,
+              "kind": "review_comment",
+              "author": "alice",
+              "bot": false,
+              "bodyHead": "여기서 null 체크가 빠졌어요",
+              "url": "https://github.com/whrksp126/codingpt/pull/12#discussion_r123",
+              "at": "2026-09-29T00:05:00Z",
+              "path": "src/a.ts",
+              "line": 12
+            },
+            {
+              "id": 456,
+              "kind": "review",
+              "author": "coderabbit[bot]",
+              "bot": true,
+              "bodyHead": "에러 처리를 추가해 주세요",
+              "url": "https://github.com/whrksp126/codingpt/pull/12#pullrequestreview-456",
+              "at": "2026-09-29T00:06:00Z",
+              "state": "CHANGES_REQUESTED"
+            }
+          ],
+          "overflow": 0,
+          "seenIds": [
+            99
+          ]
+        }
+      }
+    }
+  },
+  "lastOpExamples": {
+    "delivered": {
+      "opId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+      "kind": "fix",
+      "ok": true,
+      "code": null,
+      "message": null,
+      "result": {
+        "delivered": true,
+        "what": "both",
+        "bytes": 5120,
+        "checks": 1,
+        "comments": 2
+      },
+      "at": 1790000075000
+    },
+    "notDelivered": {
+      "opId": "6e2d3c4b-8888-4999-aaaa-bbbbccccdddd",
+      "kind": "fix",
+      "ok": false,
+      "code": "PROMPT_NOT_DELIVERED",
+      "message": "프롬프트가 전달되지 않았어요",
+      "result": {
+        "delivered": false,
+        "what": "ci"
+      },
+      "at": 1790000076000
+    }
+  },
+  "runAfter": {
+    "id": "r_8fk2ma1q",
+    "idx": 1,
+    "agent": "claude",
+    "branch": "cpt/x2m1qa-1",
+    "dir": ".codingpt/worktrees/codingpt-x2m1qa-1",
+    "cwd": ".codingpt/worktrees/codingpt-x2m1qa-1/codingpt_back",
+    "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "workspaceId": "ws_def",
+    "tid": 1234567,
+    "tsession": "cpt-codingpt-worktrees-codingpt-x2m1qa-1-codingpt_back--t-1234567",
+    "terminalAlive": true,
+    "agentGone": false,
+    "trustPending": false,
+    "state": "running",
+    "promptMode": "arg",
+    "promptDelivered": true,
+    "promptDeliveredAt": 1790000012345,
+    "launchedAt": 1790000010000,
+    "copiedFiles": [
+      ".env",
+      "codingpt_back/.env.local"
+    ],
+    "diff": {
+      "files": 3,
+      "additions": 41,
+      "deletions": 7,
+      "at": 1790000050000
+    },
+    "commits": {
+      "ahead": 2,
+      "at": 1790000050000
+    },
+    "dirty": false,
+    "pushed": true,
+    "pr": {
+      "number": 12,
+      "url": "https://github.com/whrksp126/codingpt/pull/12",
+      "state": "open",
+      "isDraft": false,
+      "title": "로그인 폼 유효성 검사 추가",
+      "mergeable": "MERGEABLE",
+      "mergeStateStatus": "CLEAN",
+      "reviewDecision": null,
+      "checks": {
+        "status": "passing",
+        "total": 2,
+        "passed": 1,
+        "failed": 0,
+        "pending": 0,
+        "items": [
+          {
+            "name": "ci / test",
+            "status": "passing",
+            "url": "https://github.com/whrksp126/codingpt/actions/runs/1"
+          },
+          {
+            "name": "optional",
+            "status": "skipped"
+          }
+        ]
+      },
+      "at": 1790000060000
+    },
+    "op": null,
+    "lastOp": {
+      "opId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+      "kind": "fix",
+      "ok": true,
+      "code": null,
+      "message": null,
+      "result": {
+        "delivered": true,
+        "what": "both",
+        "bytes": 5120,
+        "checks": 1,
+        "comments": 2
+      },
+      "at": 1790000075000
+    },
+    "lastTurnEndedAt": 1790000049000,
+    "lastActivityAt": 1790000050000,
+    "reviewNotifiedAt": 1790000050500,
+    "lastTurnFailed": false,
+    "error": null,
+    "cleanup": null,
+    "createdAt": 1790000000000,
+    "updatedAt": 1790000050000,
+    "followup": {
+      "polledAt": 1790000060000,
+      "ci": {
+        "status": null,
+        "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "detectedAt": 1790000060000,
+        "dismissedAt": null,
+        "fixOpId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+        "failed": [
+          {
+            "name": "ci / lint",
+            "url": "https://github.com/whrksp126/codingpt/actions/runs/2/job/9",
+            "runId": "2"
+          }
+        ],
+        "seen": [
+          "ci / lint@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ]
+      },
+      "reviews": {
+        "cursor": "2026-09-29T00:00:00.000Z",
+        "detectedAt": 1790000060000,
+        "dismissedAt": null,
+        "fixOpId": "5d1c2b3a-7777-4888-9999-aaaabbbbcccc",
+        "pending": [],
+        "overflow": 0,
+        "seenIds": [
+          99,
+          123,
+          456
+        ]
+      }
+    }
+  },
+  "dismiss": {
+    "params": {
+      "taskId": "t_k3j9x2m1qa",
+      "runId": "r_8fk2ma1q",
+      "what": "reviews"
+    },
+    "result": {
+      "ok": true
+    }
+  },
+  "resultKeys": [
+    "delivered",
+    "what",
+    "bytes",
+    "checks",
+    "comments"
+  ]
+}

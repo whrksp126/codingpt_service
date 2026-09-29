@@ -31,6 +31,10 @@ description: >-
   never on the user's own screen: `cpt desktop show` / `open <app|url>` / `screenshot` /
   `click x y` / `key cmd+…` / `type` / `run -- <cmd>`. If a login, 2FA or payment step
   needs the human, call `cpt desktop handoff "<why>"` and wait; do not ask for passwords.
+  When the user asks for something **recurring or conditional** — "매일", "매주", "자동으로",
+  "반복해서", "…할 때마다", "…하면 알려줘", "알림 설정", "automate", "every day", "whenever",
+  "each time" — set it up as an automation on this PC with `cpt auto create` (run `cpt auto schema`
+  first, then tell the user the id in one line); if unsure, ask instead of creating one.
 ---
 
 # CodingPT cpt CLI
@@ -53,3 +57,4 @@ cpt skills get cpt-cli
 - `CPT_WS` / `TMUX_PANE` 가 있는 CodingPT 터미널이면 자기 워크스페이스·터미널을 자동 인지한다.
 - 데몬이 꺼져 있어도 `cpt skills get cpt-cli` 는 동작한다(순수 파일 읽기).
 - 에이전트 호출은 `--json` 을 붙이면 기계가독 출력을 얻는다.
+- 반복·조건 작업(자동화)은 `cpt auto schema` 로 스키마를 먼저 읽고 만든다 — 확신이 없으면 만들지 말고 물어라.

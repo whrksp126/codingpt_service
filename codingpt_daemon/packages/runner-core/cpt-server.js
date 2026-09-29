@@ -423,6 +423,165 @@ function handleTaskRpc(method, params) {
   return lib.rpc(method, params || {});
 }
 
+// ── 자동화 번들(auto.*/dispatch.*/power.*) — 설계 정본 docs/automation-design.md §2.3 ─────────
+//  automations(S1)·dispatch/power(S2) 는 tasks.js 와 같은 규약의 순수 모듈 + 주입이다: configure(opts) → start(),
+//  `handle` getter(비활성이면 undefined → cap 미광고). 여기서 실제 back/터미널/제어 WS 구현을 넣는다.
+//  ★ 모듈 하나가 없어도(구 번들·배선 선행) 나머지는 그대로 돈다 — lazyMod 실패는 그 기능만 꺼진다.
+let autoBundleWired = false;
+function wireAutomationBundle() {
+  if (autoBundleWired) return;
+  autoBundleWired = true;
+  const control = lazyMod('./control');
+  const tasksLib = lazyMod('./tasks');
+  const agentsLib = lazyMod('./agents');
+  const events = lazyMod('./events');
+  const log = (m) => console.log(m);
+  if (events) events.configure({ log });
+  const deviceId = () => { const c = configLib.load(); return c && c.deviceId != null ? c.deviceId : null; };
+  const common = { backFetch, deviceId, log };
+  const specs = [
+    ['./automations', () => ({
+      ...common, notify: notifyAutomationsChanged, tasks: tasksLib, chatInput: (a) => chatInput(a),
+      serverCaps: () => (control && typeof control.serverCaps === 'function' ? control.serverCaps() : []),
+    })],
+    ['./dispatch', () => ({
+      ...common, notify: notifyDispatchChanged, tasks: tasksLib, agents: agentsLib,
+      // fs.readHead(rel, max) — S2 가 fs.js 에 추가 전용으로 넣는다(없으면 README 없이 카탈로그).
+      fsRead: (...a) => { if (typeof fsLib.readHead !== 'function') throw new Error('readHead 없음'); return fsLib.readHead(...a); },
+    })],
+    ['./power', () => ({
+      ...common, notify: notifyPowerChanged, tasks: tasksLib,
+      sendControl: (frame) => (control && typeof control.send === 'function' ? control.send(frame) : false),
+    })],
+  ];
+  for (const [mod, opts] of specs) {
+    const lib = lazyMod(mod);
+    if (!lib || typeof lib.configure !== 'function') continue;
+    try {
+      lib.configure(opts());
+      if (lib.handle && typeof lib.start === 'function') lib.start();
+    } catch (e) {
+      console.error(`[cpt] ${mod} 기동 실패:`, e && e.message);
+    }
+  }
+}
+
+// auto.*/dispatch.*/power.* 디스패치 — 로컬 소켓(PC 앱 auto_local/power_local·cpt CLI)·릴레이(control.dispatchRpc)·
+//  봉인 경로 공통. meta.via = 'relay'|'local'|'cli', meta.createdBy = 소켓 에이전트 게이트가 채운 생성자(auto.create).
+const AUTO_FAMILY = { auto: './automations', dispatch: './dispatch', power: './power' };
+function handleAutoRpc(method, params, meta) {
+  const fam = String(method || '').split('.')[0];
+  const mod = AUTO_FAMILY[fam];
+  if (!mod) return Promise.reject(Object.assign(new Error('알 수 없는 명령입니다: ' + method), { code: 'BAD_PARAMS' }));
+  const lib = lazyMod(mod);
+  if (!lib || typeof lib.handle !== 'function') {
+    return Promise.reject(Object.assign(new Error('이 PC 에서는 이 기능을 쓸 수 없습니다(PC 앱 업데이트 필요)'), { code: `${fam.toUpperCase()}_DISABLED` }));
+  }
+  try { return Promise.resolve(lib.handle(method, params || {}, meta || { via: 'relay' })); } catch (e) { return Promise.reject(e); }
+}
+
+// tsession → {task(원본 — origin 포함), run}. tasks.findRunByTsession(S2) 우선, 없으면 스토어 직접.
+function taskRunByTsession(tsession) {
+  const lib = lazyMod('./tasks');
+  if (!lib || !tsession) return null;
+  const raw = (id) => {
+    try { return lib._internals.load().items.find((t) => t.id === id) || null; } catch (_) { return null; }
+  };
+  if (typeof lib.findRunByTsession === 'function') {
+    let hit = null;
+    try { hit = lib.findRunByTsession(tsession); } catch (_) { hit = null; }
+    if (hit) {
+      const task = hit.task || hit.t || null;
+      const run = hit.run || hit.r || null;
+      if (task && run) return { task: task.origin ? task : (raw(task.id) || task), run };
+    }
+    return null;
+  }
+  try {
+    for (const t of lib._internals.load().items) {
+      const r = t.runs.find((x) => x.tsession === tsession);
+      if (r) return { task: t, run: r };
+    }
+  } catch (_) { /* 작업 기능 없음 */ }
+  return null;
+}
+
+// 에이전트 게이트(§5.7) — 자동화를 늘리는 명령은 **CodingPT 터미널 안**(tmux cpt- 자기좌표 + CPT_WS)에서만,
+//  그리고 자동화가 만든 작업의 실행 터미널에서는 거부(AUTO_LOOP — 결정적 루프 방지, §5.5-3).
+//  CWD 폴백으로 컨텍스트 게이트를 통과한 호출(워크스페이스 폴더의 일반 셸)은 AUTO_OUT_OF_TERMINAL.
+const AUTO_GROW = new Set(['auto.create', 'auto.update', 'auto.resume', 'auto.runNow']);
+function autoAgentGate(ctx) {
+  const c = ctx || {};
+  const tsession = c.tmux && typeof c.tmux.session === 'string' ? c.tmux.session : '';
+  if (!tsession.startsWith('cpt-') || typeof c.ws !== 'string') {
+    throw Object.assign(new Error('자동화는 CodingPT 터미널 안에서만 만들 수 있습니다'), { code: 'AUTO_OUT_OF_TERMINAL' });
+  }
+  const hit = taskRunByTsession(tsession);
+  if (hit && hit.task.origin && hit.task.origin.automationId) {
+    throw Object.assign(new Error('자동화가 만든 작업에서는 자동화를 만들 수 없습니다'), { code: 'AUTO_LOOP' });
+  }
+  let agent = null;
+  try { agent = require('./agent-state').attachmentOf(tsession).agent || null; } catch (_) { agent = null; }
+  if (!agent && hit) agent = hit.run.agent || null;
+  const cfg = configLib.load() || {};
+  return {
+    createdBy: {
+      kind: 'agent', agent, tsession, taskId: hit ? hit.task.id : null, planId: null,
+      deviceId: cfg.deviceId != null ? cfg.deviceId : null,
+    },
+  };
+}
+
+// 소켓 경로. PC 앱(auto_local/power_local)은 ctx 없이 보낸다 — 사람 UI 라 task.* 처럼 게이트 밖.
+//  cpt CLI 는 항상 ctx 를 싣는다 → auto.* 는 컨텍스트 게이트(assertCptContext) + 에이전트 게이트를 먼저 통과한다.
+async function handleAutoSocket(cmd, req) {
+  const args = req.args || {};
+  //  via 는 ctx 유무로만 정한다 — cpt CLI(ctx 있음)가 power.event 같은 앱 전용 명령을 흉내 내지 못하게.
+  if (!cmd.startsWith('auto.')) return handleAutoRpc(cmd, args, { via: req.ctx ? 'cli' : 'local' });
+  if (!req.ctx) return handleAutoRpc(cmd, args, { via: 'local' });
+  const resolved = await resolveCtx(req.ctx);
+  await assertCptContext(cmd, req.ctx, resolved);
+  // 전체 일시정지(킬스위치)는 사람 UI 전용 — 터미널 안 AI 가 전체 재개로 스스로를 풀지 못하게(CAPABILITIES 비공개).
+  if (cmd === 'auto.pauseAll') throw Object.assign(new Error('전체 일시정지는 앱/PC 화면에서만 바꿀 수 있습니다'), { code: 'BAD_PARAMS' });
+  const meta = { via: 'cli' };
+  if (AUTO_GROW.has(cmd)) {
+    const gate = autoAgentGate(req.ctx);
+    if (cmd === 'auto.create') meta.createdBy = gate.createdBy;
+  }
+  return handleAutoRpc(cmd, args, meta);
+}
+
+// <fam>.changed 브로드캐스트(§2.3) — notifyTasksChanged 복제: 300ms 코얼레싱 + host 동봉. 수신 클라는 ui_result ok.
+function coalescedNotifier(cmd, shape) {
+  let pend = null; // { ids:Set, reason, extra }
+  let timer = null;
+  return function notifyChanged(payload) {
+    const p = payload || {};
+    if (!pend) pend = { ids: new Set(), reason: p.reason || 'updated', extra: {} };
+    for (const id of (Array.isArray(p.ids) ? p.ids : [])) pend.ids.add(id);
+    if (p.reason) pend.reason = p.reason;
+    for (const k of Object.keys(p)) if (k !== 'ids' && k !== 'reason') pend.extra[k] = p[k];
+    if (timer) return;
+    timer = setTimeout(() => {
+      const cur = pend;
+      pend = null;
+      timer = null;
+      if (!cur) return;
+      const c = configLib.load() || {};
+      sendUiCommand(cmd, shape(c.deviceId != null ? c.deviceId : null, cur), { mode: 'broadcast', timeoutMs: 5000 })
+        .catch(() => { /* 클라이언트 0대 등 — 무시 */ });
+    }, 300);
+    if (timer.unref) timer.unref();
+  };
+}
+// 자동화 이름·내용은 싣지 않는다 — id 와 사유뿐(수신 클라가 봉인 auto.list 로 다시 읽는다).
+const notifyAutomationsChanged = coalescedNotifier('automations.changed',
+  (host, cur) => ({ host, ids: [...cur.ids], reason: cur.reason }));
+// dispatch.changed {host, planId} — dispatch.js 는 notify({ids:[planId], reason}) 로 부른다(겹치면 마지막 planId + ids 합집합).
+const notifyDispatchChanged = coalescedNotifier('dispatch.changed',
+  (host, cur) => ({ host, planId: cur.extra.planId != null ? cur.extra.planId : ([...cur.ids].pop() || null), ids: [...cur.ids], reason: cur.reason }));
+const notifyPowerChanged = coalescedNotifier('power.changed', (host, cur) => ({ host, reason: cur.reason }));
+
 // tasks.changed 브로드캐스트(§2.8) — 300ms 코얼레싱. host 를 싣는 이유: back 은 발신 데몬 id 를 붙이지 않는다.
 //  수신 클라는 ui_result ok 로 응답한다(없으면 UI_TIMEOUT — 무시).
 let tasksChangedPending = null; // { ids:Set, reason }
@@ -784,6 +943,9 @@ async function dispatch(req, conn) {
   // Agent Tasks(설계 §2.3) — PC 앱 `task_local` 이 여기로 온다. hasCptContext 게이트 **바깥**(인자가 자족적).
   //  cpt CLI 에 공개하는 것은 CAPABILITIES 의 task.list/task.get 뿐이다(쓰기는 사람 UI 만).
   if (cmd.startsWith('task.') || cmd.startsWith('git.')) return handleTaskRpc(cmd, req.args || {});
+  // 자동화 번들(docs/automation-design.md §2.3) — dispatch.*·power.* 는 PC 앱 로컬 커맨드 전용(게이트 밖, task.* 와 동일).
+  //  auto.* 는 cpt CLI(터미널 안 AI)면 컨텍스트 게이트 + 에이전트 게이트(AUTO_OUT_OF_TERMINAL/AUTO_LOOP)를 먼저 탄다.
+  if (/^(auto|dispatch|power)\./.test(cmd)) return handleAutoSocket(cmd, req);
   // 열린 포트 목록(2026-08-04) — PC 앱이 back 을 왕복하지 않고 바로 묻는 길.
   //  ★ 이걸 여는 이유: PC 에 **같은 로직의 Rust 사본**(tmux.rs listen_ports_in)이 따로 있었다.
   //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
@@ -2008,6 +2170,11 @@ const CAPABILITIES = [
   'agents.list',
   // Agent Tasks — 읽기 2개만(`cpt task list|get`). 생성·커밋·머지·폐기는 사람 UI 만(AI 자기증식·자기머지 금지).
   'task.list', 'task.get',
+  // 자동화(docs/automation-design.md §2.3·§5.7) — **의도된 예외**: 위 "AI 자기증식 금지" 규칙과 달리 에이전트가
+  //  반복·조건 작업을 스스로 자동화로 만들 수 있게 공개한다(사용자 지시, 부록 Z-6). 방어는 엔진 쪽 —
+  //  하루 상한·깊이 2·자동화가 만든 작업의 에이전트는 생성 불가(AUTO_LOOP)·auto_created 알림·킬스위치·감사 로그.
+  //  auto.pauseAll(전체 킬스위치)은 비공개 — 터미널의 AI 가 전체 재개로 스스로를 풀 수 있으면 킬스위치가 아니다.
+  'auto.list', 'auto.get', 'auto.create', 'auto.update', 'auto.remove', 'auto.pause', 'auto.resume', 'auto.runNow', 'auto.log', 'auto.validate',
   // 조회 전용(사람/AI 노출 안전) — 승인 대기 목록 + 트랜스크립트 읽기.
   'approval.list',
   'chat.sessions', 'chat.open', 'chat.since', 'chat.close', 'chat.detail', 'chat.attachment',
@@ -2235,6 +2402,7 @@ function start() {
     if (!isPipe) { try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ } }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);
     wireTasks(); // Agent Tasks 주입 + agent-state 구독 + reconcile(1회)
+    wireAutomationBundle(); // 자동화·한 줄 지시·깨어 있기 주입 + 엔진 기동(각 모듈 handle 이 있을 때만)
   });
   return server;
 }
@@ -2265,6 +2433,10 @@ module.exports = {
   handleSurfaceRpc, // 공유 표면(surface.*) — control.js 의 릴레이 경로도 이 구현을 쓴다
   handleTaskRpc, // Agent Tasks(task.*/git.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다
   notifyTasksChanged, // tasks.changed 브로드캐스트(300ms 코얼레싱)
+  handleAutoRpc, // 자동화 번들(auto.*/dispatch.*/power.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다
+  notifyAutomationsChanged, notifyDispatchChanged, notifyPowerChanged, // <fam>.changed 브로드캐스트(300ms 코얼레싱)
+  _wireAutomationBundle: wireAutomationBundle, // 테스트 전용
+  _autoAgentGate: autoAgentGate, // 테스트 전용(에이전트 게이트 판정)
   _wireTasks: wireTasks, // 테스트 전용
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.

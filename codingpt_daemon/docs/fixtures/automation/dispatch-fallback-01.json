@@ -1,0 +1,57 @@
+{
+  "contract": "docs/automation-design.md §3.5 — planFallback(instruction, catalog, {now, recentAgentByHost}) 결정적 폴백. S2(데몬) 소유, test/dispatch.test.js 가 읽는다.",
+  "now": 1790000000000,
+  "catalog": {
+    "hosts": [
+      {
+        "host": 12, "hostName": "MacBook Pro", "generatedAt": 1790000000000, "truncated": false,
+        "agents": [ { "id": "claude", "installed": true, "loggedIn": true }, { "id": "codex", "installed": true, "loggedIn": null }, { "id": "gemini", "installed": false, "loggedIn": false } ],
+        "workspaces": [
+          { "id": "ws_abc", "name": "codingpt", "path": "work/codingpt", "subdir": "",
+            "remoteUrl": "https://github.com/whrksp126/codingpt.git", "github": { "owner": "whrksp126", "repo": "codingpt" },
+            "branch": "main", "dirtyCount": 0, "readmeHead": "# CodingPT\n원격 바이브코딩 플랫폼",
+            "recentCommits": ["fix: 결제 재시도"], "topDirs": ["codingpt_back", "codingpt_daemon", "codingpt_front"], "lastActivityAt": 1789913600000 },
+          { "id": "ws_hey", "name": "heyvoca", "path": "work/heyvoca", "subdir": "",
+            "remoteUrl": "git@github.com:whrksp126/heyvoca.git", "github": { "owner": "whrksp126", "repo": "heyvoca" },
+            "branch": "develop", "dirtyCount": 2, "readmeHead": "# 헤이보카\n영어 단어 학습 앱",
+            "recentCommits": [], "topDirs": ["app", "server"], "lastActivityAt": 1788272000000 }
+        ]
+      },
+      {
+        "host": 13, "hostName": "MacMini", "generatedAt": 1790000000000, "truncated": false,
+        "agents": [ { "id": "claude", "installed": false, "loggedIn": false }, { "id": "codex", "installed": true, "loggedIn": true }, { "id": "gemini", "installed": false, "loggedIn": false } ],
+        "workspaces": [
+          { "id": "ws_blog", "name": "notes", "path": "work/notes", "subdir": "",
+            "remoteUrl": null, "github": null, "branch": "main", "dirtyCount": 0, "readmeHead": "# 기술 블로그\n개발 일지",
+            "recentCommits": [], "topDirs": ["posts"], "lastActivityAt": 1789827200000 }
+        ]
+      }
+    ]
+  },
+  "cases": [
+    { "name": "name-exact+topDirs-subdir+recent-agent",
+      "instruction": "codingpt back 에 결제 실패 재시도 넣어줘",
+      "opts": { "recentAgentByHost": { "12": "codex" } },
+      "expect": { "host": 12, "workspaceId": "ws_abc", "repo": "work/codingpt", "subdir": "codingpt_back", "base": "main", "agent": "codex", "minConfidence": 0.9 } },
+    { "name": "name-exact+topDirs-app+first-installed",
+      "instruction": "heyvoca app 로그인 버그 고쳐줘",
+      "opts": {},
+      "expect": { "host": 12, "workspaceId": "ws_hey", "repo": "work/heyvoca", "subdir": "app", "base": "develop", "agent": "claude", "minConfidence": 0.9 } },
+    { "name": "readme-tokens+recent-activity",
+      "instruction": "기술 블로그 글 정리해줘",
+      "opts": {},
+      "expect": { "host": 13, "workspaceId": "ws_blog", "repo": "work/notes", "subdir": "", "base": "main", "agent": "codex", "minConfidence": 0.3 } },
+    { "name": "unmatched-null",
+      "instruction": "전혀 관계없는 문장입니다",
+      "opts": { "recentAgentByHost": { "12": "codex" } },
+      "expect": { "host": 12, "workspaceId": null, "repo": null, "subdir": "", "base": null, "agent": "codex", "minConfidence": 0 } },
+    { "name": "single-workspace-always",
+      "instruction": "전혀 관계없는 문장입니다",
+      "catalog": { "hosts": [ { "host": 13, "hostName": "MacMini", "generatedAt": 1790000000000, "truncated": false,
+        "agents": [ { "id": "codex", "installed": true, "loggedIn": true } ],
+        "workspaces": [ { "id": "ws_only", "name": "solo", "path": "work/solo", "subdir": "", "remoteUrl": null, "github": null,
+          "branch": "trunk", "dirtyCount": 0, "readmeHead": "", "recentCommits": [], "topDirs": [], "lastActivityAt": 0 } ] } ] },
+      "opts": {},
+      "expect": { "host": 13, "workspaceId": "ws_only", "repo": "work/solo", "subdir": "", "base": "trunk", "agent": "codex", "minConfidence": 0 } }
+  ]
+}

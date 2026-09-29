@@ -1,0 +1,230 @@
+{
+  "contract": "docs/automation-design.md §5.6 — 데몬 automations.js(S1) 소유. test/automations.test.js 가 pickAuto 화이트리스트(AUTO_FIELDS/STATE_FIELDS)와 대조한다.",
+  "method": "auto.list",
+  "description": "AutomationLite = 전체(프롬프트·템플릿 포함 — 봉인 경로 전용). state.cursor 는 sha/sinceIso/polledAt 만 와이어로(seen·lastVars 는 디스크 전용). counts.attention = pausedReason error|limit ∨ lastResult.ok===false ∨ consecutiveFailures>0.",
+  "params": {},
+  "result": {
+    "items": [
+      {
+        "id": "a_k3j9x2m1qa",
+        "v": 1,
+        "name": "매일 bug 이슈 정리",
+        "enabled": true,
+        "paused": false,
+        "pausedReason": null,
+        "createdBy": {
+          "kind": "dispatch",
+          "agent": null,
+          "tsession": null,
+          "taskId": null,
+          "planId": "p_7h2k9x1m3q",
+          "deviceId": 12,
+          "at": 1789740800000
+        },
+        "trigger": {
+          "type": "schedule",
+          "cron": "0 9 * * *",
+          "tz": "Asia/Seoul",
+          "missed": "once"
+        },
+        "actions": [
+          {
+            "type": "task.create",
+            "repo": "work/codingpt",
+            "subdir": "codingpt_back",
+            "base": null,
+            "agents": [
+              {
+                "id": "codex",
+                "count": 1
+              }
+            ],
+            "title": "bug 이슈 정리",
+            "prompt": "열린 bug 라벨 이슈를 정리하고 중복은 닫자고 제안해라.",
+            "copyEnv": true
+          },
+          {
+            "type": "notify",
+            "title": "{repo.name}: 작업 {prev.taskId} 시작",
+            "subtitle": ""
+          }
+        ],
+        "guards": {
+          "maxRunsPerDay": 10,
+          "maxConcurrent": 1,
+          "cooldownMs": 300000
+        },
+        "state": {
+          "nextRunAt": 1790038800000,
+          "lastRunAt": 1789952400000,
+          "runsToday": 1,
+          "dayKey": "2026-09-29",
+          "inflight": 0,
+          "cursor": {},
+          "consecutiveFailures": 0,
+          "lastResult": {
+            "firingId": "f_x9c2m1k3qa",
+            "ok": true,
+            "code": null,
+            "message": null,
+            "at": 1789952460000,
+            "taskIds": [
+              "t_k3j9x2m1qb"
+            ],
+            "steps": [
+              {
+                "type": "task.create",
+                "ok": true,
+                "taskId": "t_k3j9x2m1qb"
+              },
+              {
+                "type": "notify",
+                "ok": true
+              }
+            ]
+          }
+        },
+        "createdAt": 1789740800000,
+        "updatedAt": 1789827200000
+      },
+      {
+        "id": "a_c0mm1t7e5t",
+        "v": 1,
+        "name": "main 커밋마다 테스트",
+        "enabled": true,
+        "paused": false,
+        "pausedReason": null,
+        "createdBy": {
+          "kind": "agent",
+          "agent": "claude",
+          "tsession": "cpt-work-codingpt--t-1000123",
+          "taskId": null,
+          "planId": null,
+          "deviceId": 12,
+          "at": 1789740800000
+        },
+        "trigger": {
+          "type": "git.commits",
+          "repo": "work/codingpt",
+          "branch": "main",
+          "remote": "origin"
+        },
+        "actions": [
+          {
+            "type": "task.create",
+            "repo": "work/codingpt",
+            "subdir": "",
+            "base": "main",
+            "agents": [
+              {
+                "id": "claude",
+                "count": 1
+              }
+            ],
+            "title": "테스트: {commits.range}",
+            "prompt": "새 커밋 {commits.count}개({commits.range})에 대해 테스트를 돌리고 실패하면 고쳐라.\n\n{commits.subjects}",
+            "copyEnv": true
+          }
+        ],
+        "guards": {
+          "maxRunsPerDay": 10,
+          "maxConcurrent": 1,
+          "cooldownMs": 300000
+        },
+        "state": {
+          "nextRunAt": null,
+          "lastRunAt": 1789990000000,
+          "runsToday": 2,
+          "dayKey": "2026-09-29",
+          "inflight": 0,
+          "cursor": {
+            "sha": "4f9c2a1d8e7b6c5a4f3e2d1c0b9a8f7e6d5c4b3a",
+            "polledAt": 1789999900000
+          },
+          "consecutiveFailures": 1,
+          "lastResult": {
+            "firingId": "f_q1w2e3r4t5",
+            "ok": false,
+            "code": "TASK_LIMIT",
+            "message": "동시에 실행할 수 있는 작업 수를 넘었습니다",
+            "at": 1789990005000,
+            "taskIds": [],
+            "steps": [
+              {
+                "type": "task.create",
+                "ok": false,
+                "code": "TASK_LIMIT"
+              }
+            ]
+          }
+        },
+        "createdAt": 1789740800000,
+        "updatedAt": 1789827200000
+      },
+      {
+        "id": "a_ci0fa1l3d0",
+        "v": 1,
+        "name": "CI 실패 시 알림만",
+        "enabled": true,
+        "paused": true,
+        "pausedReason": "user",
+        "createdBy": {
+          "kind": "user",
+          "agent": null,
+          "tsession": null,
+          "taskId": null,
+          "planId": null,
+          "deviceId": 7,
+          "at": 1789740800000
+        },
+        "trigger": {
+          "type": "pr.ci_failed",
+          "repo": null
+        },
+        "actions": [
+          {
+            "type": "notify",
+            "title": "PR #{pr.number} 검사 실패",
+            "subtitle": "{ci.failedChecks}"
+          }
+        ],
+        "guards": {
+          "maxRunsPerDay": 20,
+          "maxConcurrent": 1,
+          "cooldownMs": 0
+        },
+        "state": {
+          "nextRunAt": null,
+          "lastRunAt": null,
+          "runsToday": 0,
+          "dayKey": null,
+          "inflight": 0,
+          "cursor": {},
+          "consecutiveFailures": 0,
+          "lastResult": null
+        },
+        "createdAt": 1789740800000,
+        "updatedAt": 1789827200000
+      }
+    ],
+    "paused": false,
+    "limits": {
+      "maxItems": 30,
+      "maxActions": 5,
+      "maxRunsPerDayDefault": 10,
+      "maxRunsPerDayCap": 50,
+      "maxConcurrentCap": 2,
+      "minScheduleMs": 900000,
+      "pollMs": 300000,
+      "tickMs": 30000,
+      "firingDeadlineMs": 300000,
+      "templateMaxBytes": 20000,
+      "nameMax": 80
+    },
+    "counts": {
+      "total": 3,
+      "paused": 1,
+      "attention": 1
+    }
+  }
+}

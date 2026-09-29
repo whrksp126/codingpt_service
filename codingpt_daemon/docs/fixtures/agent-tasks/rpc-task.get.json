@@ -1,7 +1,7 @@
 {
   "contract": "docs/agent-tasks-design.md §3.1 — 데몬 구현자 소유(§8.5). test/task-contract.test.js 가 pickTask/pickRun 화이트리스트와 대조한다.",
   "method": "task.get",
-  "description": "Task = TaskLite + prompt(봉인 경로에서만).",
+  "description": "Task = TaskLite + prompt(봉인 경로에서만). automation-design §4.2 추가 전용 필드: task.origin(자동화/한 줄 지시 출신, 없으면 null)·run.followup(PR 후속 감지, 없으면 null).",
   "params": {
     "taskId": "t_k3j9x2m1qa"
   },
@@ -29,6 +29,12 @@
       "createdAt": 1790000000000,
       "updatedAt": 1790000060000,
       "closedAt": null,
+      "origin": {
+        "kind": "automation",
+        "automationId": "a_k3j9x2m1qa",
+        "firingId": "f_m2n8q0w1ze",
+        "depth": 1
+      },
       "prompt": "로그인 폼에 이메일/비밀번호 유효성 검사를 추가해줘.\n에러 문구는 한국어로.",
       "runs": [
         {
@@ -143,7 +149,60 @@
           "error": null,
           "cleanup": null,
           "createdAt": 1790000000000,
-          "updatedAt": 1790000050000
+          "updatedAt": 1790000050000,
+          "followup": {
+            "polledAt": 1790000060000,
+            "ci": {
+              "status": "failing",
+              "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "detectedAt": 1790000060000,
+              "dismissedAt": null,
+              "fixOpId": null,
+              "failed": [
+                {
+                  "name": "ci / lint",
+                  "url": "https://github.com/whrksp126/codingpt/actions/runs/2/job/9",
+                  "runId": "2"
+                }
+              ],
+              "seen": [
+                "ci / lint@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              ]
+            },
+            "reviews": {
+              "cursor": "2026-09-29T00:00:00.000Z",
+              "detectedAt": 1790000060000,
+              "dismissedAt": null,
+              "fixOpId": null,
+              "pending": [
+                {
+                  "id": 123,
+                  "kind": "review_comment",
+                  "author": "alice",
+                  "bot": false,
+                  "bodyHead": "여기서 null 체크가 빠졌어요",
+                  "url": "https://github.com/whrksp126/codingpt/pull/12#discussion_r123",
+                  "at": "2026-09-29T00:05:00Z",
+                  "path": "src/a.ts",
+                  "line": 12
+                },
+                {
+                  "id": 456,
+                  "kind": "review",
+                  "author": "coderabbit[bot]",
+                  "bot": true,
+                  "bodyHead": "에러 처리를 추가해 주세요",
+                  "url": "https://github.com/whrksp126/codingpt/pull/12#pullrequestreview-456",
+                  "at": "2026-09-29T00:06:00Z",
+                  "state": "CHANGES_REQUESTED"
+                }
+              ],
+              "overflow": 0,
+              "seenIds": [
+                99
+              ]
+            }
+          }
         },
         {
           "id": "r_2bq7nd0x",
@@ -190,7 +249,8 @@
           "error": null,
           "cleanup": null,
           "createdAt": 1790000000000,
-          "updatedAt": 1790000050000
+          "updatedAt": 1790000050000,
+          "followup": null
         },
         {
           "id": "r_3cz0pq9w",
@@ -229,7 +289,8 @@
           },
           "cleanup": null,
           "createdAt": 1790000000000,
-          "updatedAt": 1790000050000
+          "updatedAt": 1790000050000,
+          "followup": null
         }
       ]
     }

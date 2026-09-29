@@ -1,0 +1,135 @@
+{
+  "contract": "docs/automation-design.md §3.3 — 데몬(S2) 소유. test/task-contract.test.js 가 dispatch.PLAN_FIELDS/PLANNER_FIELDS/PLAN_TASK_FIELDS 와 대조한다.",
+  "method": "dispatch.get",
+  "description": "dispatch.plan {opId, instruction, catalog:{hosts:[…]}, prefer?} → 즉시 {accepted, planId, planner:{agent}|null}. 결과는 dispatch.get 2s 폴링 또는 ui_command dispatch.changed {host, ids:[planId], reason}. PLANNER_* 는 에러가 아니라 plan.planner.fallbackReason. 24h 뒤 DISPATCH_NOT_FOUND.",
+  "planAccepted": {
+    "accepted": true,
+    "planId": "p_k3j9x2m1qa",
+    "planner": {
+      "agent": "claude"
+    }
+  },
+  "params": {
+    "planId": "p_k3j9x2m1qa"
+  },
+  "examples": {
+    "done": {
+      "planId": "p_k3j9x2m1qa",
+      "state": "done",
+      "startedAt": 1790000000000,
+      "finishedAt": 1790000008400,
+      "plan": {
+        "v": 1,
+        "planner": {
+          "agent": "claude",
+          "mode": "cli",
+          "durationMs": 8400,
+          "fallbackReason": null
+        },
+        "summary": "codingpt_back 에 결제 재시도 추가 + 매일 09:00 bug 이슈 정리",
+        "tasks": [
+          {
+            "host": 12,
+            "workspaceId": "ws_abc",
+            "repo": "work/codingpt",
+            "subdir": "codingpt_back",
+            "base": "main",
+            "title": "결제 실패 재시도",
+            "prompt": "결제 API 호출이 실패하면 지수 백오프로 3회 재시도하게 해 줘.",
+            "agents": [
+              {
+                "id": "claude",
+                "count": 1
+              }
+            ],
+            "confidence": 0.82,
+            "why": "README 에 codingpt_back 이 결제 API 라고 적혀 있음"
+          }
+        ],
+        "automations": [
+          {
+            "host": 12,
+            "draft": {
+              "name": "매일 bug 이슈 정리",
+              "trigger": {
+                "type": "schedule",
+                "cron": "0 9 * * *",
+                "tz": "Asia/Seoul",
+                "missed": "once"
+              },
+              "actions": [
+                {
+                  "type": "task.create",
+                  "repo": "work/codingpt",
+                  "subdir": "",
+                  "base": null,
+                  "agents": [
+                    {
+                      "id": "claude",
+                      "count": 1
+                    }
+                  ],
+                  "title": "{issue.title}",
+                  "prompt": "이슈 #{issue.number} '{issue.title}' 를 처리해라.\n\n{issue.body}",
+                  "copyEnv": true
+                }
+              ],
+              "guards": {
+                "maxRunsPerDay": 10,
+                "maxConcurrent": 1,
+                "cooldownMs": 300000
+              }
+            },
+            "why": "'매일 아침 9시' 반복 지시"
+          }
+        ],
+        "questions": [
+          "'정리' 가 이슈 닫기까지 포함하나요?"
+        ]
+      }
+    },
+    "fallback": {
+      "planId": "p_0fallback1",
+      "state": "done",
+      "startedAt": 1790000000000,
+      "finishedAt": 1790000090012,
+      "plan": {
+        "v": 1,
+        "planner": {
+          "agent": "claude",
+          "mode": "fallback",
+          "durationMs": 90012,
+          "fallbackReason": "PLANNER_TIMEOUT"
+        },
+        "summary": "codingpt back 에 결제 실패 재시도 넣어줘",
+        "tasks": [
+          {
+            "host": 12,
+            "workspaceId": "ws_abc",
+            "repo": "work/codingpt",
+            "subdir": "codingpt_back",
+            "base": "main",
+            "title": "codingpt back 에 결제 실패 재시도 넣어줘",
+            "prompt": "codingpt back 에 결제 실패 재시도 넣어줘",
+            "agents": [
+              {
+                "id": "codex",
+                "count": 1
+              }
+            ],
+            "confidence": 1,
+            "why": "이름으로 고름(점수 16)"
+          }
+        ],
+        "automations": [],
+        "questions": []
+      }
+    },
+    "planning": {
+      "planId": "p_0planning1",
+      "state": "planning",
+      "startedAt": 1790000000000,
+      "finishedAt": null
+    }
+  }
+}

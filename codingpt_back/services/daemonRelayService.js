@@ -91,6 +91,8 @@ function listRunners(userId) {
     //  판단하는 힌트다(값은 절대 주소를 노출하지 않는다 — 주소는 grant 응답에서만).
     lanCapable: !!(c.lan && (c.caps || []).includes('lan.v1') && lanCfg.lanEnabled()),
     lanEpoch: c.lanEpoch || 0,
+    // 자동화 번들 F4(power.v1) — 데몬 runner_busy/hello 신고. 서버가 아는 건 이 불리언 2개뿐(§12-1).
+    busy: !!c.busy, awake: !!c.awake,
   }));
 }
 // 연결된 클라우드 러너 목록(동면 스위퍼용) — 활동시각/바쁨 상태 포함.
@@ -221,6 +223,8 @@ async function handleControlUpgrade(req, socket, head) {
 
 function registerControl(ws, device) {
   const userId = String(device.user_id);
+  // 같은 PC 가 90초 유예 안에 돌아왔다 = 끊김 푸시 취소(automation-design.md §6.5/§7.2).
+  clearBusyDisconnect(userId, device.id);
   const entry = userEntry(userId, true);
   // 같은 기기(deviceId) 재접속만 교체 — 다른 종류 러너(로컬↔클라우드)는 공존시킨다.
   const prevSame = entry.runners.get(device.id);
@@ -250,6 +254,13 @@ function registerControl(ws, device) {
     liveTerminals: 0,           // 이 러너로 열린 앱 PTY 터미널 수(>0 이면 동면 금지).
     rpcSeq: 0,
     pendingRpc: new Map(), // id → { resolve, reject, timer }
+    // 자동화 번들 F4 — 데몬 runner_busy {busy, awake} / hello 동봉값. busy = 에이전트 작업 활성,
+    //  awake = 잠자기 방지 층이 켜져 있음. 끊김 푸시(pc_disconnected)의 유일한 근거(§6.5).
+    busy: false,
+    awake: false,
+    busyAt: 0,
+    busyFanAt: null,   // 마지막 runner_status(busy) 팬아웃 시각(null=아직 없음) — 10s 스로틀
+    busyFanTimer: null, // 스로틀 창 안에 들어온 값의 후행 팬아웃(마지막 값만)
   };
   entry.runners.set(device.id, conn);
   // 활성 러너가 없거나 죽었으면 이 러너를 활성으로(로컬-우선 기본 동작 보존). 핸드오프는 명시적으로만.
@@ -303,6 +314,8 @@ function registerControl(ws, device) {
       //  hello 는 재연결/버전업마다 오므로 그때마다 최신 신고로 덮는다(다운그레이드 후 유령 주소 방지).
       if ('lan' in msg) applyLanInfo(userId, conn, msg.lan);
       if (typeof msg.machineId === 'string') conn.machineId = msg.machineId.slice(0, 64);
+      // F4 — hello 동봉 busy/awake(옵셔널, 구 데몬은 없음 = false 유지). 값이 바뀌면 runner_status 로 알린다.
+      if ('busy' in msg || 'awake' in msg) applyRunnerBusy(userId, conn, msg);
       DaemonDevice.update(
         { device_name: conn.systemDeviceName || conn.deviceName, platform: conn.platform, daemon_version: conn.daemonVersion, updated_at: new Date() },
         { where: { id: conn.deviceId } }
@@ -318,6 +331,11 @@ function registerControl(ws, device) {
     if (msg.type === 'lan_update') {
       // 인터페이스 변경/리스너 재바인딩 — 데몬이 주소가 바뀔 때만 보낸다(30s 폴링 diff).
       applyLanInfo(userId, conn, msg.lan);
+      return;
+    }
+    if (msg.type === 'runner_busy') {
+      // F4(power.v1) — {type:'runner_busy', busy, awake, at}. 불리언 강제, 내용 0(§12-1).
+      applyRunnerBusy(userId, conn, msg, true);
       return;
     }
     if (msg.type === 'stream_fail' && msg.streamToken) {
@@ -398,6 +416,7 @@ function registerControl(ws, device) {
 
   const cleanup = () => {
     clearInterval(ka);
+    if (conn.busyFanTimer) { clearTimeout(conn.busyFanTimer); conn.busyFanTimer = null; }
     // 미해결 RPC 는 실패로 정리(무한 대기 방지).
     for (const [, p] of conn.pendingRpc) { clearTimeout(p.timer); try { p.reject(new Error('DAEMON_OFFLINE')); } catch (_) { /* noop */ } }
     conn.pendingRpc.clear();
@@ -421,6 +440,9 @@ function registerControl(ws, device) {
         deviceId: conn.deviceId, online: false, kind: conn.kind, deviceName: conn.deviceName,
         ...(upd ? { reason: 'updating', toVersion: upd.version } : {}),
       });
+      // 작업 중이던 PC 가 끊겼다 → 90초 유예 뒤 pc_disconnected 푸시(재접속하면 registerControl 이 취소).
+      //  업데이트 재시작(upd)은 예고된 끊김이라 제외. 교체(replaced)된 옛 conn 은 이 블록에 오지 않는다.
+      if (conn.busy && !upd) armBusyDisconnect(userId, conn.deviceId, conn.deviceName);
     }
     // 이 호스트의 에이전트 상태 라스트-스테이트는 폐기한다 — 오프라인 호스트의 'working' 을
     //  다음 ui_hello 에 리플레이하면 폰이 "아직 돌고 있음"으로 오판하고 폴백이 영구 비활성된다.
@@ -429,6 +451,74 @@ function registerControl(ws, device) {
   };
   ws.on('close', cleanup);
   ws.on('error', (e) => { console.log(`[daemonRelay] 제어 WS 오류 userId=${userId}: ${e && e.message}`); cleanup(); });
+}
+
+// ── F4 PC 깨어 있기: runner_busy 수신 + 끊김 푸시(automation-design.md §6.5·§7.2) ─────────────
+const BUSY_FANOUT_THROTTLE_MS = 10 * 1000;   // 10s 안 중복 팬아웃은 마지막 값만
+const BUSY_DISCONNECT_GRACE_MS = 90 * 1000;  // 작업 중 끊김 → 이만큼 기다렸다가 푸시(재접속 시 취소)
+const busyTimers = new Map();                // `${userId}|${deviceId}` → Timeout (approvalService hostSweepTimers 패턴)
+
+function busyStatusEvent(conn) {
+  return {
+    deviceId: conn.deviceId, online: true, kind: conn.kind, deviceName: conn.deviceName,
+    e2eeEpoch: conn.e2eeEpoch || 0, busy: !!conn.busy, awake: !!conn.awake,
+  };
+}
+// fromFrame=true(runner_busy) 는 항상 팬아웃 후보, hello 는 값이 바뀐 경우만.
+function applyRunnerBusy(userId, conn, msg, fromFrame) {
+  const busy = 'busy' in msg ? msg.busy === true : conn.busy;
+  const awake = 'awake' in msg ? msg.awake === true : conn.awake;
+  const changed = busy !== conn.busy || awake !== conn.awake;
+  conn.busy = busy;
+  conn.awake = awake;
+  conn.busyAt = Date.now();
+  if (!fromFrame && !changed) return;
+  const now = Date.now();
+  const wait = conn.busyFanAt == null ? 0 : conn.busyFanAt + BUSY_FANOUT_THROTTLE_MS - now;
+  if (wait <= 0) {
+    conn.busyFanAt = now;
+    fanoutRunnerStatus(userId, busyStatusEvent(conn));
+    return;
+  }
+  if (conn.busyFanTimer) return; // 후행 타이머가 발화 시점의 최신 값을 보낸다
+  conn.busyFanTimer = setTimeout(() => {
+    conn.busyFanTimer = null;
+    const e = connections.get(String(userId));
+    if (!e || e.runners.get(conn.deviceId) !== conn) return; // 이미 끊김/교체
+    conn.busyFanAt = Date.now();
+    fanoutRunnerStatus(userId, busyStatusEvent(conn));
+  }, wait);
+  if (conn.busyFanTimer.unref) conn.busyFanTimer.unref();
+}
+function clearBusyDisconnect(userId, deviceId) {
+  const key = `${userId}|${deviceId}`;
+  const t = busyTimers.get(key);
+  if (t) { clearTimeout(t); busyTimers.delete(key); }
+}
+function armBusyDisconnect(userId, deviceId, deviceName) {
+  const key = `${userId}|${deviceId}`;
+  const prev = busyTimers.get(key);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(() => {
+    busyTimers.delete(key);
+    const name = String(deviceName || 'PC').slice(0, 64);
+    console.log(`[daemonRelay] 작업 중 끊김 푸시 userId=${userId} device=#${deviceId}`);
+    let svc = null;
+    try { svc = require('./notificationService'); } catch (_) { return; } // lazy — 순환 require
+    Promise.resolve()
+      .then(() => svc.createNotification(Number(userId), {
+        source: 'system',
+        kind: 'pc_disconnected',
+        title: 'PC 연결이 끊겼어요',
+        subtitle: `${name} · 작업이 진행 중이었어요`,
+        deeplink: `codingpt://tasks?host=${deviceId}`,
+        pushGate: 'ignore-pc-active',
+        push: { data: { hostDeviceId: String(deviceId) } },
+      }))
+      .catch((e) => console.warn('[daemonRelay] pc_disconnected 알림 실패:', e && e.message));
+  }, BUSY_DISCONNECT_GRACE_MS);
+  if (t.unref) t.unref();
+  busyTimers.set(key, t);
 }
 
 function touchLastSeen(conn, force) {
@@ -895,6 +985,7 @@ function replayRunnerStatus(userId, ws) {
         e2eeEpoch: conn.e2eeEpoch || 0,
         lanCapable: !!(conn.lan && (conn.caps || []).includes('lan.v1') && lanCfg.lanEnabled()),
         lanEpoch: conn.lanEpoch || 0,
+        busy: !!conn.busy, awake: !!conn.awake, // F4 — 앱을 나중에 연 폰도 sun 글리프를 그릴 수 있게
         // 그 PC 가 적용만 남겨 둔 업데이트 — **리플레이에 반드시 실어야 한다.** 폰이 나중에 접속하면
         //  라이브 팬아웃은 이미 지나갔으므로, 여기서 안 주면 "원격 업데이트" 버튼이 영영 안 뜬다
         //  (e2eeEpoch 자물쇠가 '확인 중' 에 고착하던 것과 똑같은 함정).
@@ -1889,4 +1980,7 @@ module.exports = {
   _replayRunnerStatus: replayRunnerStatus, // 테스트 노출 — 자물쇠 배지 급여 경로(ui_hello 캐치업)
   _registerAgentWs: registerAgentWs,       // 테스트 노출 — ui_hello 분기를 실제로 태워 배선을 고정
   _forgetAgentStatesOf: forgetAgentStatesOf,
+  _registerControl: registerControl,       // 테스트 노출 — runner_busy/끊김 푸시(F4) 배선을 실제 분기로 고정
+  _busyTimers: busyTimers,
+  BUSY_DISCONNECT_GRACE_MS,
 };

@@ -68,7 +68,11 @@ const ERROR_CODES = [
   'MERGE_CONFLICT',
   'RUN_BUSY', 'OP_INTERRUPTED',
   'TIMEOUT',
+  // automation-design §4.3 — F2(PR 후속) 추가분. agent-tasks-design §2.13 표 밖(자동화 문서가 정본).
+  'FOLLOWUP_NOTHING',
 ];
+// 위 목록 중 automation-design 이 추가한 코드(task-contract.test.js 가 §2.13 표와 대조할 때 뺀다).
+const FOLLOWUP_ERROR_CODES = ['FOLLOWUP_NOTHING'];
 
 // 알림 subtitle(task_failed) — 에러 code 의 한국어 문구. stderr·경로를 싣지 않는다(서버 DB/로그에 남는다).
 const FAIL_TEXT = {
@@ -83,13 +87,16 @@ const FAIL_TEXT = {
 
 // 와이어 화이트리스트(§2.2) — 이 목록 밖의 필드는 저장돼 있어도 절대 내보내지 않는다.
 const TASK_FIELDS = ['id', 'v', 'title', 'repo', 'base', 'workspaceId', 'state', 'winnerRunId', 'error',
-  'createdAt', 'updatedAt', 'closedAt'];
+  'createdAt', 'updatedAt', 'closedAt', 'origin'];
 const REPO_FIELDS = ['path', 'subdir', 'common', 'name', 'remoteUrl', 'github'];
 const RUN_FIELDS = ['id', 'idx', 'agent', 'branch', 'dir', 'cwd', 'baseSha', 'workspaceId', 'tid', 'tsession',
   'terminalAlive', 'agentGone', 'trustPending', 'state', 'promptMode', 'promptDelivered', 'promptDeliveredAt',
   'launchedAt', 'copiedFiles', 'diff', 'commits', 'dirty', 'pushed', 'pr', 'op', 'lastOp',
   'lastTurnEndedAt', 'lastActivityAt', 'reviewNotifiedAt', 'lastTurnFailed', 'error', 'cleanup',
-  'createdAt', 'updatedAt'];
+  'createdAt', 'updatedAt', 'followup'];
+// automation-design §4.2 — task.v1 **추가 전용** 필드(구 픽스처·구 클라엔 없다). 와이어에는 항상 싣는다(없으면 null).
+const OPTIONAL_TASK_FIELDS = ['origin'];
+const OPTIONAL_RUN_FIELDS = ['followup'];
 
 // ── 주입 ─────────────────────────────────────────────────────────────────────
 const noop = () => {};
@@ -119,6 +126,8 @@ function dep(name) {
     case 'statusLine': return require('./status-line');
     case 'fsLib': return require('./fs');
     case 'manifest': return require('./terminal-manifest');
+    // 이벤트 버스(automation-design §2.2, S1 소유) — 아직 없거나 로드 실패면 null(발행 생략).
+    case 'events': try { return require('./events'); } catch (_) { return null; }
     default: throw new Error('unknown dep ' + name);
   }
 }
@@ -127,6 +136,7 @@ let timings = {
   readyTimeoutMs: 30000, readyPollMs: 250, readyStableMs: 2000,
   stopDebounceMs: 1500, poolCoalesceMs: 500, shouldNotifyMaxMs: 3000,
   launchTimeoutMs: 12000,
+  followupPollMs: 180000, followupPerTick: 10,
 };
 
 function configure(opts = {}) {
@@ -338,8 +348,25 @@ async function refreshLive(tasks) {
 }
 
 // ── 통지 ─────────────────────────────────────────────────────────────────────
+// 데몬 내부 변경 구독자(power.js 의 활동 재평가 등) — 추가 전용. 와이어 통지(inj.notify)와 같은 자리에서 부른다.
+const changeListeners = new Set();
+function addChangeListener(fn) {
+  if (typeof fn !== 'function') return () => false;
+  changeListeners.add(fn);
+  return () => changeListeners.delete(fn);
+}
 function emit(taskIds, reason) {
-  try { inj.notify({ taskIds: [...new Set(taskIds.filter(Boolean))], reason }); } catch (_) { /* noop */ }
+  const ids = [...new Set(taskIds.filter(Boolean))];
+  try { inj.notify({ taskIds: ids, reason }); } catch (_) { /* noop */ }
+  for (const fn of changeListeners) { try { fn({ taskIds: ids, reason }); } catch (_) { /* noop */ } }
+}
+
+/** 이벤트 버스 발행(automation-design §2.2) — 버스가 없으면 조용히 생략. 발행 실패가 작업 흐름을 막지 않는다. */
+function busEmit(type, payload) {
+  let ev = null;
+  try { ev = dep('events'); } catch (_) { ev = null; }
+  if (!ev || typeof ev.emit !== 'function') return;
+  try { ev.emit(type, payload); } catch (e) { log(`[tasks] 이벤트 발행 실패(${type}): ${e && e.message}`); }
 }
 let poolTimer = null;
 function poolChangedSoon() {
@@ -352,11 +379,11 @@ function poolChangedSoon() {
 }
 
 /** 알림(§3.4) — 제목은 일반 문구, 작업 제목·프롬프트·브랜치명은 싣지 않는다. */
-async function pushNotification(t, r, kind, subtitle) {
+async function pushNotification(t, r, kind, subtitle, titleOverride) {
   if (!inj.backFetch) return;
   const host = inj.deviceId();
   const label = AGENT_LABEL[r.agent] || r.agent;
-  const title = kind === 'task_ready' ? `리뷰 준비 · ${label}` : kind === 'task_merged' ? `머지 완료 · ${label}` : `작업 실패 · ${label}`;
+  const title = titleOverride || (kind === 'task_ready' ? `리뷰 준비 · ${label}` : kind === 'task_merged' ? `머지 완료 · ${label}` : `작업 실패 · ${label}`);
   const payload = {
     source: 'agent', kind, title, subtitle,
     cwd: r.cwd, win: r.tid != null ? r.tid : undefined, wsName: wsNameOf(t, r),
@@ -419,6 +446,7 @@ function failRun(t, r, code, message, { notifyPush = true } = {}) {
   touch(t, r);
   save();
   emit([t.id], 'failed');
+  busEmit('task.failed', { task: pickTask(t), run: pickRun(r), code });
   if (notifyPush) pushNotification(t, r, 'task_failed', FAIL_TEXT[code] || '실패했어요').catch(() => {});
 }
 
@@ -433,7 +461,76 @@ function maybeCloseTask(t) {
 // ── 작업 생성(§2.5) ──────────────────────────────────────────────────────────
 const createInflight = new Map(); // opId → Promise
 
+/**
+ * origin 정규화(automation-design §4.2) — 릴레이/봉인 경로(task.create)는 `dispatch` 만, 데몬 내부
+ *  (internalCreate — 자동화 엔진)는 `automation` 도 허용한다(클라가 자동화 출신을 사칭해 루프 가드를 흐리지 않게).
+ */
+const ORIGIN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
+function normOrigin(o, { internal = false } = {}) {
+  if (o == null) return null;
+  if (typeof o !== 'object' || Array.isArray(o)) throw codedError('BAD_PARAMS', 'origin 이 올바르지 않습니다');
+  const kinds = internal ? ['dispatch', 'automation'] : ['dispatch'];
+  if (!kinds.includes(o.kind)) throw codedError('BAD_PARAMS', 'origin.kind 가 올바르지 않습니다');
+  const out = { kind: o.kind };
+  for (const k of ['planId', 'automationId', 'firingId']) {
+    if (o[k] == null) continue;
+    if (typeof o[k] !== 'string' || !ORIGIN_ID_RE.test(o[k])) throw codedError('BAD_PARAMS', `origin.${k} 가 올바르지 않습니다`);
+    out[k] = o[k];
+  }
+  if (o.kind === 'automation' && !out.automationId) throw codedError('BAD_PARAMS', 'origin.automationId 가 필요합니다');
+  const depth = o.depth == null ? (o.kind === 'automation' ? 1 : 0) : o.depth;
+  if (!Number.isInteger(depth) || depth < 0 || depth > 2) throw codedError('BAD_PARAMS', 'origin.depth 는 0~2 입니다');
+  out.depth = o.kind === 'dispatch' ? 0 : depth;
+  return out;
+}
+
 async function rpcCreate(p) {
+  return createEntry(p, normOrigin(p.origin, { internal: false }));
+}
+
+/**
+ * 데몬 내부 작업 생성(automation-design §5.3) — 자동화 엔진·디스패치가 부른다. task.create 와 같은 검증·상한
+ *  (TASK_LIMIT 공유)·worktree 전용 경로를 탄다. 추가 편의: opId 생략 시 생성, `subdir` 결합, `base` 생략 시
+ *  저장소의 현재 브랜치(없으면 origin/HEAD → 'main').
+ *  → {task: TaskLite} (task.create 회신과 같은 모양)
+ */
+async function internalCreate(params = {}, origin = null) {
+  if (!enabled()) throw codedError('TASKS_DISABLED', '이 PC 에서는 작업 기능을 쓸 수 없습니다');
+  const o = normOrigin(origin, { internal: true });
+  const p = { ...(params && typeof params === 'object' ? params : {}) };
+  if (typeof p.opId !== 'string' || !p.opId) p.opId = `int-${rand36(20)}`;
+  if (typeof p.repo === 'string' && typeof p.subdir === 'string' && p.subdir.trim()) {
+    const sub = p.subdir.trim().replace(/^\/+|\/+$/g, '');
+    if (sub.split('/').some((seg) => seg === '..' || seg === '')) throw codedError('BAD_PARAMS', 'subdir 가 올바르지 않습니다');
+    p.repo = `${p.repo.replace(/\/+$/, '')}/${sub}`;
+  }
+  delete p.subdir;
+  delete p.origin;
+  if (p.base == null || p.base === '') p.base = await defaultBase(p.repo);
+  return createEntry(p, o);
+}
+
+async function defaultBase(repoRel) {
+  let abs;
+  try { abs = dep('fsLib').safeResolve(String(repoRel || '')); } catch (_) { return 'main'; }
+  if (!fs.existsSync(abs)) return 'main';
+  const h = await taskGit.git(['symbolic-ref', '--short', '-q', 'HEAD'], { cwd: abs });
+  if (h.ok && h.out.trim()) return h.out.trim();
+  const o = await taskGit.git(['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD'], { cwd: abs });
+  if (o.ok && o.out.trim()) return o.out.trim().replace(/^origin\//, '');
+  return 'main';
+}
+
+/** tsession → {task: TaskLite(+origin), run: RunLite} | null — S1 의 `cpt auto create` AUTO_LOOP 판정용. */
+function findRunByTsession(tsession) {
+  if (!enabled()) return null;
+  load();
+  const hit = runByKey(tsession);
+  if (!hit) return null;
+  return { task: pickTask(hit.t), run: pickRun(hit.r) };
+}
+
+async function createEntry(p, origin) {
   const opId = reqOpId(p);
   const s = load();
   const prev = s.createOps.find((o) => o.opId === opId);
@@ -445,12 +542,12 @@ async function rpcCreate(p) {
     const r = await createInflight.get(opId);
     return { ...r, replay: true };
   }
-  const pr = createSync(p, opId);
+  const pr = createSync(p, opId, origin);
   createInflight.set(opId, pr);
   try { return await pr; } finally { createInflight.delete(opId); }
 }
 
-async function createSync(p, opId) {
+async function createSync(p, opId, origin = null) {
   // 1. 파라미터 검증
   const repoParam = reqString(p, 'repo');
   const base = p.base;
@@ -523,7 +620,7 @@ async function createSync(p, opId) {
       remoteUrl: await taskGit.remoteUrl(info.top), github: null,
     },
     base, workspaceId: p.workspaceId || null, state: 'open', winnerRunId: null, error: null,
-    createdAt: now, updatedAt: now, closedAt: null,
+    createdAt: now, updatedAt: now, closedAt: null, origin: origin || null,
     opts: { copyEnv, fetch: doFetch },
     runs: agentList.map((agent, i) => {
       const idx = i + 1;
@@ -558,6 +655,7 @@ async function createSync(p, opId) {
     if (st2.createOps.length > CREATE_OPS_KEEP) st2.createOps.splice(0, st2.createOps.length - CREATE_OPS_KEEP);
   });
   emit([id], 'created');
+  busEmit('task.created', { task: pickTask(task), origin: task.origin });
   log(`[tasks] 작업 생성 ${id} runs=${task.runs.length}`);
   // 비동기 구간 — 회신을 붙잡지 않는다.
   track(runCreate(task).catch((e) => log(`[tasks] ${id} 생성 비동기 실패: ${e && e.message}`)));
@@ -909,7 +1007,10 @@ async function evaluateTurn(t, r, { notify }) {
   touch(t, r);
   save();
   emit([t.id], 'run');
-  if (fire) await pushNotification(t, r, 'task_ready', `${repoSlug(t.repo.name)} · 파일 ${r.diff ? r.diff.files : 0}개`);
+  if (fire) {
+    busEmit('task.review_ready', { task: pickTask(t), run: pickRun(r) });
+    await pushNotification(t, r, 'task_ready', `${repoSlug(t.repo.name)} · 파일 ${r.diff ? r.diff.files : 0}개`);
+  }
   return changed;
 }
 
@@ -998,6 +1099,7 @@ function shouldNotify(rec, kind) {
 
 // ── 비동기 op(§2.12) ─────────────────────────────────────────────────────────
 const OP_DEADLINE = {
+  fix: 3 * 60 * 1000,
   commit: 5 * 60 * 1000, push: 3 * 60 * 1000, 'pr.create': 5 * 60 * 1000, 'pr.merge': 3 * 60 * 1000,
   'merge.local': 3 * 60 * 1000, discard: 3 * 60 * 1000, reopen: 2 * 60 * 1000, cleanup: 5 * 60 * 1000,
 };
@@ -1262,6 +1364,7 @@ async function finishMerge(t, r, { opId, sha, viaPr, discardOthers = true, web =
   touch(t, r);
   save();
   emit([t.id], 'merged');
+  busEmit('task.merged', { task: pickTask(t), run: pickRun(r) });
   pushNotification(t, r, 'task_merged', `${repoSlug(t.repo.name)} · ${t.base}`).catch(() => {});
   track(postMerge(t, r, { opId, viaPr, discardOthers, web, headOid }).catch((e) => log(`[tasks] ${t.id} 머지 후 정리 실패: ${e && e.message}`)));
   return result;
@@ -1438,37 +1541,7 @@ async function rpcRunTrust(p) {
 }
 
 async function rpcReopen(p) {
-  return startRunOp(p, 'reopen', { states: ['failed', 'running', 'review_ready'], agentBusy: true }, async ({ t, r }) => {
-    // worktree 가 한 번도 안 만들어진 run(생성 실패) — 6 단계부터 다시.
-    if (!fs.existsSync(wtAbs(r))) {
-      if (r.baseSha) throw codedError('WORKTREE_MISSING', '작업 폴더가 사라졌습니다');
-      r.state = 'creating';
-      await addWorktrees(t, [r]);
-      if (r.state !== 'creating') throw codedError((r.error && r.error.code) || 'WORKTREE_ADD_FAILED', (r.error && r.error.message) || '작업 폴더를 만들지 못했습니다');
-      await prepareRun(t, r);
-      poolChangedSoon();
-      await launchRun(t, r, { withPrompt: true });
-      if (r.state === 'failed') throw codedError(r.error.code, r.error.message);
-      return { tid: r.tid };
-    }
-    let alive = false;
-    let paneCmd = '';
-    if (r.tsession) {
-      try { paneCmd = String((await dep('termBackend').info(r.tsession)).command || '').trim(); alive = true; } catch (_) { alive = false; }
-    }
-    // 터미널에서 뭔가(에이전트) 돌고 있으면 덮어 치지 않는다 — run 을 failed 로 떨어뜨리기 전에 거절.
-    if (alive && paneCmd && !SHELLS.has(paneCmd)) throw codedError('LAUNCH_BUSY', '터미널에서 다른 명령이 실행 중입니다');
-    if (!alive) {
-      await createRunTerminal(t, r);
-      if (!r.workspaceId) await registerWorkspace(t, r);
-      touch(t, r); save();
-      poolChangedSoon();
-    }
-    // 프롬프트가 한 번도 안 들어간 run 은 프롬프트로, 이미 들어간 run 은 대화 이어가기로.
-    await launchRun(t, r, { withPrompt: !r.promptDelivered });
-    if (r.state === 'failed') throw codedError(r.error.code, r.error.message);
-    return { tid: r.tid };
-  });
+  return startRunOp(p, 'reopen', { states: ['failed', 'running', 'review_ready'], agentBusy: true }, async ({ t, r }) => reopenBody(t, r));
 }
 
 const DIFF_FILE_MAX = 64 * 1024;
@@ -1676,16 +1749,9 @@ async function rpcPrStatus(p) {
   const github = await ensureGithub(t, { required: true });
   const dir = fs.existsSync(wtAbs(r)) ? wtAbs(r) : repoTopAbs(t);
   const v = await taskGit.prView(dir, github, r.pr ? r.pr.number : r.branch, nowFn());
-  // 변화가 있을 때만 touch/emit — 상세가 30초마다 부르므로 무변화 통지는 모든 기기의 재조회·재렌더만 부른다.
-  const sig = (x) => JSON.stringify(x, (k, y) => (k === 'at' ? undefined : y));
-  const changed = sig(r.pr) !== sig(v ? v.pr : null);
-  r.pr = v ? v.pr : null;
-  if (changed) { touch(t, r); save(); emit([t.id], 'pr'); } else save();
-  // GitHub 웹에서 머지된 것을 처음 봄 → pr.merge 성공과 같은 완료 경로.
-  if (v && v.pr.state === 'merged' && t.state === 'open' && !t.winnerRunId && !mergingTasks.has(t.id)
-    && r.state !== 'merged' && r.state !== 'discarded' && !r.op) {
-    await finishMerge(t, r, { opId: `web-${r.id}`.slice(0, 80), sha: v.mergeSha, viaPr: true, discardOthers: true, web: true, headOid: v.headOid });
-  }
+  // 변화가 있을 때만 touch/emit(applyPrView) — 상세가 30초마다 부르므로 무변화 통지는 모든 기기의 재조회·재렌더만 부른다.
+  //  GitHub 웹에서 머지된 것을 처음 봄 → pr.merge 성공과 같은 완료 경로. open 이면 후속 판정(automation §4.1 a).
+  await applyPrView(t, r, v, dir, github);
   return { pr: r.pr, run: pickRun(r) };
 }
 
@@ -1823,6 +1889,402 @@ async function rpcGhStatus(p) {
   return { git: g, gh: h };
 }
 
+// ── PR 후속(automation-design §4 F2) ─────────────────────────────────────────
+//  감지 = 순수 판정기 assessFollowup 하나를 두 호출자가 탄다: (a) git.pr.status(상세 열림 중 30s 폴링)
+//  (b) 백그라운드 followupTick(3분, gh 인증 시, open PR run 만). 자동 수정은 없다 — 알림 + 카드 [고치기].
+const CI_SEEN_KEEP = 50;
+const CI_FAILED_KEEP = 10;
+const REVIEW_SEEN_KEEP = 300;
+const REVIEW_PENDING_KEEP = 30;
+const BODY_HEAD_MAX = 300;
+const FIX_TEXT_MAX_BYTES = 28000;
+const FIX_LOGS_MAX = 3;
+
+function emptyFollowup() {
+  return {
+    polledAt: null,
+    ci: { status: null, headSha: null, detectedAt: null, dismissedAt: null, fixOpId: null, failed: [], seen: [] },
+    reviews: { cursor: null, detectedAt: null, dismissedAt: null, fixOpId: null, pending: [], overflow: 0, seenIds: [] },
+  };
+}
+function cloneFollowup(f) {
+  const base = emptyFollowup();
+  if (!f || typeof f !== 'object') return base;
+  const ci = { ...base.ci, ...(f.ci || {}) };
+  ci.failed = Array.isArray(ci.failed) ? ci.failed.map((x) => ({ ...x })) : [];
+  ci.seen = Array.isArray(ci.seen) ? ci.seen.slice() : [];
+  const rv = { ...base.reviews, ...(f.reviews || {}) };
+  rv.pending = Array.isArray(rv.pending) ? rv.pending.map((x) => ({ ...x })) : [];
+  rv.seenIds = Array.isArray(rv.seenIds) ? rv.seenIds.slice() : [];
+  rv.overflow = Number.isInteger(rv.overflow) ? rv.overflow : 0;
+  return { polledAt: f.polledAt == null ? null : f.polledAt, ci, reviews: rv };
+}
+function headStr(s, n) {
+  const t = String(s == null ? '' : s).replace(/\r/g, '').trim();
+  return t.length > n ? t.slice(0, n) : t;
+}
+function isoOf(ms) { return new Date(ms).toISOString(); }
+function atMs(x) { const v = Date.parse(x); return Number.isNaN(v) ? 0 : v; }
+
+/**
+ * 판정기(순수) — 현재 followup + 관찰값 → {followup(새 객체), ciDetected, reviewsDetected, changed}.
+ *  input = {pr: PrInfo|null, headOid, comments[], reviews[], issueComments[], now}
+ *   · CI: checks failing ∧ `name@headOid` 중 seen 에 없는 것 → 새 실패. status 가 이미 failing(해제 전)이면 목록만 갱신·재알림 없음.
+ *        failing 아님 ∧ (passing ∨ head 변경) → status:null, failed:[].
+ *   · 리뷰: 첫 관찰은 cursor=now 만(과거 코멘트 재생 금지). 이후 id ∉ seenIds ∧ ∉ pending ∧ at ≥ cursor → pending.
+ *        pending 이 비어 있다가 생길 때만 감지(알림 1회).
+ */
+function assessFollowup(t, r, input = {}) {
+  const now = input.now == null ? nowFn() : input.now;
+  const prev = cloneFollowup(r && r.followup);
+  const f = cloneFollowup(prev);
+  f.polledAt = now;
+  const pr = input.pr || null;
+  let ciDetected = false;
+  let reviewsDetected = false;
+  if (pr && pr.state === 'open') {
+    // ── CI
+    const head = input.headOid ? String(input.headOid) : (f.ci.headSha || '');
+    const checks = pr.checks || { status: 'none', items: [] };
+    if (checks.status === 'failing') {
+      const failing = (checks.items || []).filter((i) => i && i.status === 'failing');
+      const keys = failing.map((i) => `${i.name}@${head}`);
+      const fresh = keys.filter((k) => !f.ci.seen.includes(k));
+      if (fresh.length) {
+        f.ci.failed = failing.slice(0, CI_FAILED_KEEP).map((i) => {
+          const url = typeof i.url === 'string' ? i.url : null;
+          return { name: String(i.name), url, runId: taskGit.actionsRunIdOf(url) };
+        });
+        f.ci.seen = [...f.ci.seen, ...fresh].slice(-CI_SEEN_KEEP);
+        f.ci.headSha = head || null;
+        if (f.ci.status !== 'failing') {
+          f.ci.status = 'failing';
+          f.ci.detectedAt = now;
+          f.ci.dismissedAt = null;
+          f.ci.fixOpId = null;
+          ciDetected = true;
+        }
+      }
+    } else if (checks.status === 'passing' || (head && f.ci.headSha && head !== f.ci.headSha)) {
+      f.ci.status = null;
+      f.ci.failed = [];
+      if (head) f.ci.headSha = head;
+    }
+    // ── 리뷰
+    if (!f.reviews.cursor) {
+      f.reviews.cursor = isoOf(now);
+    } else {
+      const cursorMs = atMs(f.reviews.cursor);
+      const seen = new Set(f.reviews.seenIds.map(String));
+      for (const p of f.reviews.pending) seen.add(String(p.id));
+      const all = [...(input.comments || []), ...(input.reviews || []), ...(input.issueComments || [])]
+        .filter((c) => c && c.id != null && !seen.has(String(c.id)) && atMs(c.at) >= cursorMs)
+        .sort((a, b) => atMs(a.at) - atMs(b.at));
+      const wasEmpty = f.reviews.pending.length === 0;
+      for (const c of all) {
+        seen.add(String(c.id));
+        const item = {
+          id: c.id, kind: c.kind, author: c.author == null ? null : String(c.author), bot: !!c.bot,
+          bodyHead: headStr(c.body, BODY_HEAD_MAX), url: typeof c.url === 'string' ? c.url : null, at: c.at || null,
+        };
+        if (c.kind === 'review_comment') { item.path = c.path == null ? null : String(c.path); item.line = Number.isInteger(c.line) ? c.line : null; }
+        if (c.kind === 'review') item.state = c.state || null;
+        f.reviews.pending.push(item);
+      }
+      if (f.reviews.pending.length > REVIEW_PENDING_KEEP) {
+        const drop = f.reviews.pending.length - REVIEW_PENDING_KEEP;
+        const dropped = f.reviews.pending.splice(0, drop);
+        f.reviews.overflow += drop;
+        f.reviews.seenIds = [...f.reviews.seenIds, ...dropped.map((x) => x.id)].slice(-REVIEW_SEEN_KEEP);
+      }
+      if (all.length && wasEmpty) {
+        f.reviews.detectedAt = now;
+        f.reviews.dismissedAt = null;
+        f.reviews.fixOpId = null;
+        reviewsDetected = true;
+      }
+    }
+  }
+  const sig = (x) => JSON.stringify({ ...x, polledAt: 0 });
+  return { followup: f, ciDetected, reviewsDetected, changed: sig(f) !== sig(prev) };
+}
+
+/** 판정 결과 반영 — 저장·통지·알림·버스 이벤트. */
+function applyFollowup(t, r, res) {
+  r.followup = res.followup;
+  if (res.changed) { touch(t, r); save(); emit([t.id], 'followup'); } else save();
+  const label = AGENT_LABEL[r.agent] || r.agent;
+  const n = r.pr ? r.pr.number : '';
+  const sub = `${repoSlug(t.repo.name)} · PR #${n}`;
+  if (res.ciDetected) {
+    busEmit('pr.ci_failed', { task: pickTask(t), run: pickRun(r), ci: r.followup.ci });
+    pushNotification(t, r, 'task_ci_failed', sub, `검사 실패 · ${label}`).catch(() => {});
+  }
+  if (res.reviewsDetected) {
+    busEmit('pr.review_comments', { task: pickTask(t), run: pickRun(r), reviews: r.followup.reviews });
+    pushNotification(t, r, 'task_review_comments', sub, `리뷰 코멘트 ${r.followup.reviews.pending.length}개 · ${label}`).catch(() => {});
+  }
+}
+
+/** 코멘트 3종 조회 — 실패한 종류는 빈 목록(판정은 가진 것으로). */
+async function fetchComments(dir, github, n, since) {
+  const safe = (p) => p.catch((e) => { log(`[tasks] 후속 코멘트 조회 실패: ${e && e.code}`); return []; });
+  const [comments, reviews, issueComments] = await Promise.all([
+    safe(taskGit.prComments(dir, github, n, since)),
+    safe(taskGit.prReviews(dir, github, n)),
+    safe(taskGit.issueComments(dir, github, n, since)),
+  ]);
+  return { comments, reviews, issueComments };
+}
+
+/** prView 결과 반영(git.pr.status·백그라운드 틱 공통) — PR 변화·웹 머지 감지·후속 판정. */
+async function applyPrView(t, r, v, dir, github) {
+  const sig = (x) => JSON.stringify(x, (k, y) => (k === 'at' ? undefined : y));
+  const changed = sig(r.pr) !== sig(v ? v.pr : null);
+  r.pr = v ? v.pr : null;
+  if (changed) { touch(t, r); save(); emit([t.id], 'pr'); } else save();
+  if (v && v.pr.state === 'merged' && t.state === 'open' && !t.winnerRunId && !mergingTasks.has(t.id)
+    && r.state !== 'merged' && r.state !== 'discarded' && !r.op) {
+    await finishMerge(t, r, { opId: `web-${r.id}`.slice(0, 80), sha: v.mergeSha, viaPr: true, discardOthers: true, web: true, headOid: v.headOid });
+    return;
+  }
+  if (v && v.pr.state === 'open' && ACTIVE_RUN_STATES.has(r.state)) {
+    const cur = r.followup && r.followup.reviews && r.followup.reviews.cursor;
+    const cm = cur ? await fetchComments(dir, github, v.pr.number, cur) : { comments: [], reviews: [], issueComments: [] };
+    applyFollowup(t, r, assessFollowup(t, r, { pr: v.pr, headOid: v.headOid, ...cm, now: nowFn() }));
+  }
+}
+
+/** 백그라운드 틱(§4.1 b) — open PR run 만, 틱당 최대 10개(polledAt 오래된 순). 실패는 로그만. */
+let followupTimer = null;
+let followupRunning = false;
+async function followupTick() {
+  if (followupRunning || !enabled()) return { polled: 0 };
+  followupRunning = true;
+  try {
+    let tl = null;
+    try { tl = await taskGit.tools(); } catch (_) { tl = null; }
+    if (!tl || !tl.gh.authenticated) return { polled: 0 };
+    const targets = [];
+    for (const t of load().items) {
+      if (t.state !== 'open' || !t.repo.github) continue;
+      for (const r of t.runs) {
+        if (r.pr && r.pr.state === 'open' && (r.state === 'running' || r.state === 'review_ready') && !r.op) targets.push({ t, r });
+      }
+    }
+    targets.sort((a, b) => ((a.r.followup && a.r.followup.polledAt) || 0) - ((b.r.followup && b.r.followup.polledAt) || 0));
+    let polled = 0;
+    for (const { t, r } of targets.slice(0, timings.followupPerTick)) {
+      try {
+        const dir = fs.existsSync(wtAbs(r)) ? wtAbs(r) : repoTopAbs(t);
+        if (!fs.existsSync(dir)) continue;
+        const v = await taskGit.prView(dir, t.repo.github, r.pr.number, nowFn());
+        await applyPrView(t, r, v, dir, t.repo.github);
+        polled++;
+      } catch (e) { log(`[tasks] 후속 폴링 실패 ${r.id}: ${e && e.code}`); }
+    }
+    return { polled };
+  } finally { followupRunning = false; }
+}
+function startFollowupPoller() {
+  if (followupTimer || process.env.CPT_FOLLOWUP === '0') return;
+  followupTimer = setInterval(() => { followupTick().catch(() => {}); }, timings.followupPollMs);
+  if (followupTimer.unref) followupTimer.unref();
+}
+
+/** 바이트 상한으로 앞부분을 남기고 자른다(글자 중간 금지). */
+function capBytes(s, max) {
+  const b = Buffer.from(String(s), 'utf8');
+  if (b.length <= max) return String(s);
+  let end = max;
+  while (end > 0 && (b[end] & 0xc0) === 0x80) end--;
+  return b.subarray(0, end).toString('utf8');
+}
+
+/**
+ * [고치기] 본문(§4.3 2) — 한국어 고정 문자열(i18n 안 함). 총 ≤ 28000B, 넘치면 **로그부터** 줄이고 `… (잘림)`.
+ *  logs = [{name, url, text|null, truncated}] (ci 실패 앞 3개), comments = reviews.pending.
+ */
+function composeFixText({ prNumber, what, failed = [], logs = [], comments = [] }) {
+  const tail = '위 내용을 반영해 고치고, 커밋·푸시까지 해 주세요. 원인을 모르겠으면 이유를 적고 멈추세요.';
+  const ciHead = [];
+  if (what !== 'reviews' && failed.length) {
+    ciHead.push(`CI 실패 수정 요청 (PR #${prNumber})`);
+    for (const f of failed) ciHead.push(`실패한 검사: ${f.name}${f.url ? ` — ${f.url}` : ''}`);
+  }
+  const rv = [];
+  if (what !== 'ci' && comments.length) {
+    rv.push(`리뷰 코멘트 반영 요청 (PR #${prNumber})`);
+    for (const c of comments) {
+      const who = `@${c.author || '?'}`;
+      const body = String(c.bodyHead || '').replace(/\s*\n\s*/g, ' ');
+      if (c.kind === 'review_comment') rv.push(`- ${who} ${c.path || ''}${c.line != null ? `:${c.line}` : ''}: ${body}`);
+      else if (c.kind === 'review') rv.push(`- ${who} (review, ${c.state || 'COMMENTED'}): ${body}`);
+      else rv.push(`- ${who}: ${body}`);
+    }
+  }
+  const fixed = [...ciHead, ...rv, tail].join('\n');
+  const fixedBytes = Buffer.byteLength(fixed, 'utf8') + 64;
+  let budget = Math.max(0, FIX_TEXT_MAX_BYTES - fixedBytes);
+  const logBlocks = [];
+  if (what !== 'reviews') {
+    for (const l of logs) {
+      if (!l || !l.text) continue;
+      const head = `--- ${l.name} 로그(마지막 200줄) ---`;
+      const need = Buffer.byteLength(head, 'utf8') + 1 + Buffer.byteLength(l.text, 'utf8');
+      if (need <= budget) { logBlocks.push(`${head}\n${l.text}`); budget -= need + 1; continue; }
+      const room = budget - Buffer.byteLength(head, 'utf8') - 16;
+      if (room > 200) {
+        //  로그는 꼬리가 중요하다 — 앞을 자른다.
+        const b = Buffer.from(l.text, 'utf8');
+        let st = b.length - room;
+        while (st < b.length && (b[st] & 0xc0) === 0x80) st++;
+        logBlocks.push(`${head}\n… (잘림)\n${b.subarray(st).toString('utf8')}`);
+      } else logBlocks.push(`${head}\n… (잘림)`);
+      budget = 0;
+    }
+  }
+  const out = [...ciHead, ...logBlocks, ...rv, tail].join('\n');
+  if (Buffer.byteLength(out, 'utf8') <= FIX_TEXT_MAX_BYTES) return out;
+  // 리뷰 코멘트만으로도 넘친다(30개×300자 한국어) — 앞부분을 남기고 자른 뒤 꼬리 문장을 붙인다.
+  const cut = capBytes(out, FIX_TEXT_MAX_BYTES - Buffer.byteLength(tail, 'utf8') - 32);
+  return `${cut}\n… (잘림)\n${tail}`;
+}
+
+const FIX_WHAT = ['ci', 'reviews', 'both'];
+function followupTargets(r, what) {
+  const f = cloneFollowup(r.followup);
+  const ci = what !== 'reviews' && f.ci.status === 'failing' && f.ci.failed.length ? f.ci.failed : [];
+  const comments = what !== 'ci' ? f.reviews.pending : [];
+  return { f, ci, comments };
+}
+
+/** reopen 본문(§2.6) — task.run.reopen 과 task.run.fix(터미널/에이전트가 없을 때)가 같은 경로를 탄다. */
+async function reopenBody(t, r) {
+  // worktree 가 한 번도 안 만들어진 run(생성 실패) — 6 단계부터 다시.
+  if (!fs.existsSync(wtAbs(r))) {
+    if (r.baseSha) throw codedError('WORKTREE_MISSING', '작업 폴더가 사라졌습니다');
+    r.state = 'creating';
+    await addWorktrees(t, [r]);
+    if (r.state !== 'creating') throw codedError((r.error && r.error.code) || 'WORKTREE_ADD_FAILED', (r.error && r.error.message) || '작업 폴더를 만들지 못했습니다');
+    await prepareRun(t, r);
+    poolChangedSoon();
+    await launchRun(t, r, { withPrompt: true });
+    if (r.state === 'failed') throw codedError(r.error.code, r.error.message);
+    return { tid: r.tid };
+  }
+  let alive = false;
+  let paneCmd = '';
+  if (r.tsession) {
+    try { paneCmd = String((await dep('termBackend').info(r.tsession)).command || '').trim(); alive = true; } catch (_) { alive = false; }
+  }
+  // 터미널에서 뭔가(에이전트) 돌고 있으면 덮어 치지 않는다 — run 을 failed 로 떨어뜨리기 전에 거절.
+  if (alive && paneCmd && !SHELLS.has(paneCmd)) throw codedError('LAUNCH_BUSY', '터미널에서 다른 명령이 실행 중입니다');
+  if (!alive) {
+    await createRunTerminal(t, r);
+    if (!r.workspaceId) await registerWorkspace(t, r);
+    touch(t, r); save();
+    poolChangedSoon();
+  }
+  // 프롬프트가 한 번도 안 들어간 run 은 프롬프트로, 이미 들어간 run 은 대화 이어가기로.
+  await launchRun(t, r, { withPrompt: !r.promptDelivered });
+  if (r.state === 'failed') throw codedError(r.error.code, r.error.message);
+  return { tid: r.tid };
+}
+
+/** task.run.fix(§4.3) — 실패 로그·코멘트를 기존 프롬프트 배달 경로로 에이전트에게. op kind 'fix'. */
+async function rpcRunFix(p) {
+  const opId = reqOpId(p);
+  const what = p.what;
+  if (!FIX_WHAT.includes(what)) throw codedError('BAD_PARAMS', "what 은 'ci'|'reviews'|'both' 입니다");
+  const { t, r } = mustRun(p);
+  const rep = replayFor(r, opId);
+  if (rep) return rep;
+  opGuard(t, r, 'fix', { states: ['running', 'review_ready'], agentBusy: true });
+  if (!r.pr) throw codedError('PR_NOT_FOUND', 'PR 이 없습니다');
+  const tg = followupTargets(r, what);
+  if (!tg.ci.length && !tg.comments.length) throw codedError('FOLLOWUP_NOTHING', '보낼 내용이 없습니다');
+  return runOp(t, r, opId, 'fix', async ({ deadline }) => {
+    const github = t.repo.github || await ensureGithub(t, { required: false });
+    const dir = fs.existsSync(wtAbs(r)) ? wtAbs(r) : repoTopAbs(t);
+    // 1. 로그(앞 3개, runId 있는 것만)
+    const logs = [];
+    for (const f of tg.ci.slice(0, FIX_LOGS_MAX)) {
+      let text = null; let truncated = false;
+      if (f.runId && github && Date.now() < deadline) {
+        try { const lg = await taskGit.runLogFailed(dir, github, f.runId); text = lg.text; truncated = lg.truncated; } catch (e) {
+          log(`[tasks] ${r.id} 실패 로그 조회 실패: ${e && e.code}`);
+        }
+      }
+      logs.push({ name: f.name, url: f.url, text, truncated });
+    }
+    const text = composeFixText({ prNumber: r.pr.number, what, failed: tg.ci, logs, comments: tg.comments });
+    // 2. 배달 — 터미널이 없거나 에이전트가 떠났으면 먼저 reopen(같은 op 안).
+    await refreshLive([t]);
+    const live = liveCache.get(r.id) || { terminalAlive: false, agentGone: false };
+    if (!live.terminalAlive || live.agentGone) await reopenBody(t, r);
+    const ready = await waitAgentReady(r, { timeoutMs: Math.min(timings.readyTimeoutMs, 16000), since: r.launchedAt || 0 });
+    if (!ready) return { opFailed: true, code: 'PROMPT_NOT_DELIVERED', message: '프롬프트가 전달되지 않았어요', result: { delivered: false, what } };
+    await deliverPrompt(t, r, text);
+    // 3. 후속 상태 — 보낸 것은 해제(ci)·seen 으로 이동(리뷰).
+    const f = cloneFollowup(r.followup);
+    let checks = 0; let comments = 0;
+    if (tg.ci.length) { f.ci.fixOpId = opId; f.ci.status = null; checks = tg.ci.length; }
+    if (tg.comments.length) {
+      comments = tg.comments.length;
+      const sent = new Set(tg.comments.map((c) => String(c.id)));
+      f.reviews.seenIds = [...f.reviews.seenIds, ...tg.comments.map((c) => c.id)].slice(-REVIEW_SEEN_KEEP);
+      f.reviews.pending = f.reviews.pending.filter((c) => !sent.has(String(c.id)));
+      f.reviews.fixOpId = opId;
+      f.reviews.overflow = 0;
+    }
+    r.followup = f;
+    touch(t, r); save(); emit([t.id], 'followup');
+    return { delivered: true, what, bytes: Buffer.byteLength(text, 'utf8'), checks, comments };
+  });
+}
+
+/** task.run.followup.dismiss(§4.3) — 동기. 카드 [무시]. */
+async function rpcFollowupDismiss(p) {
+  const what = p.what;
+  if (!FIX_WHAT.includes(what)) throw codedError('BAD_PARAMS', "what 은 'ci'|'reviews'|'both' 입니다");
+  const { t, r } = mustRun(p);
+  const f = cloneFollowup(r.followup);
+  const now = nowFn();
+  if (what !== 'reviews') { f.ci.dismissedAt = now; f.ci.status = null; }
+  if (what !== 'ci') {
+    f.reviews.dismissedAt = now;
+    f.reviews.seenIds = [...f.reviews.seenIds, ...f.reviews.pending.map((c) => c.id)].slice(-REVIEW_SEEN_KEEP);
+    f.reviews.pending = [];
+    f.reviews.overflow = 0;
+  }
+  r.followup = f;
+  touch(t, r); save(); emit([t.id], 'followup');
+  return { ok: true };
+}
+
+/** 이 PC 에서 가장 최근 작업의 첫 에이전트(automation-design §3.5 폴백 4) — 없으면 null. */
+function recentAgent() {
+  if (!enabled()) return null;
+  const items = load().items.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const t = items.find((x) => x.runs && x.runs[0] && TASK_AGENTS.has(x.runs[0].agent));
+  return t ? t.runs[0].agent : null;
+}
+
+/** 활동 사유(automation-design §6.3 power.isWorkActive) — 살아 있는 run 중 작업 중·op·전이 상태. */
+function activeReasons() {
+  if (!enabled() || !mem) return [];
+  const out = new Set();
+  for (const t of mem.items) {
+    for (const r of t.runs) {
+      const busy = !!r.op || ['creating', 'launching', 'merging'].includes(r.state)
+        || ((r.state === 'running' || r.state === 'review_ready') && liveWorking(r));
+      if (busy) out.add(`task:${t.id}`);
+    }
+  }
+  return [...out];
+}
+
 const HANDLERS = {
   'task.list': rpcList,
   'task.get': rpcGet,
@@ -1842,6 +2304,8 @@ const HANDLERS = {
   'git.pr.merge': rpcPrMerge,
   'git.merge.local': rpcMergeLocal,
   'git.gh.status': rpcGhStatus,
+  'task.run.fix': rpcRunFix,
+  'task.run.followup.dismiss': rpcFollowupDismiss,
 };
 
 /** RPC 진입점(로컬 소켓·릴레이·봉인 경로 공통). jail 밖이면 전부 TASKS_DISABLED. */
@@ -1994,6 +2458,7 @@ function start() {
     as.configure({ shouldNotify });
   } catch (e) { log(`[tasks] agent-state 구독 실패: ${e && e.message}`); }
   reconcilePromise = reconcile().catch((e) => { log(`[tasks] reconcile 실패: ${e && e.message}`); return null; });
+  startFollowupPoller();
   return reconcilePromise;
 }
 
@@ -2006,6 +2471,8 @@ async function _reset({ drain = true } = {}) {
   for (const tm of turnTimers.values()) clearTimeout(tm);
   trustTimers.clear(); turnTimers.clear(); refreshing.clear(); liveCache.clear(); repoLocks.clear(); createInflight.clear(); mergingTasks.clear();
   if (poolTimer) { clearTimeout(poolTimer); poolTimer = null; }
+  if (followupTimer) { clearInterval(followupTimer); followupTimer = null; }
+  followupRunning = false;
   mem = null; tsIndex = new Map(); started = false; reconcilePromise = null; enabledCache = { key: null, val: false };
 }
 
@@ -2022,9 +2489,13 @@ module.exports = {
   configure, start, rpc, onReconnect,
   pickTask, pickRun, repoSlug,
   TASK_FIELDS, REPO_FIELDS, RUN_FIELDS, ERROR_CODES, TASK_AGENTS,
+  // automation-design(S2) — 자동화·디스패치·power 가 쓰는 추가 전용 표면(이름은 문서 §10 이 고정).
+  internalCreate, findRunByTsession, activeReasons, recentAgent, addChangeListener, assessFollowup, composeFixText,
+  OPTIONAL_TASK_FIELDS, OPTIONAL_RUN_FIELDS, FOLLOWUP_ERROR_CODES, AGENT_LABEL,
   _internals: {
     load, save, mutate, reconcile, onAgentState, shouldNotify, waitAgentReady, refreshRun, evaluateTurn,
     cleanupRun, enabled, relHome, trustDialogOf, _reset, _drain, storeFile, worktreesDir, promptsDir,
+    followupTick, applyFollowup, emptyFollowup, normOrigin,
     get timings() { return timings; },
   },
 };

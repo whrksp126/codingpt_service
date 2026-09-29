@@ -1,0 +1,54 @@
+{
+  "contract": "docs/automation-design.md §5.4 — 데몬 template.js(S1) 소유. test/template.test.js 가 읽는다.",
+  "description": "{a.b} 정확 치환만(표현식 없음). 미정의 → 빈 문자열 + missing. 식별자가 아닌 중괄호(JSON·코드)는 그대로. 렌더 30000B 초과는 자르고 '… (잘림)', 원본 20000B 초과는 AUTO_TEMPLATE_TOO_LARGE.",
+  "cases": [
+    {
+      "why": "이슈 변수 + 줄바꿈 유지",
+      "template": "이슈 #{issue.number} '{issue.title}' 를 처리해라.\n\n{issue.body}",
+      "vars": { "issue": { "number": 42, "title": "로그인 실패", "body": "재현: 비밀번호 틀림" } },
+      "expect": { "text": "이슈 #42 '로그인 실패' 를 처리해라.\n\n재현: 비밀번호 틀림", "missing": [], "truncated": false }
+    },
+    {
+      "why": "미정의 변수는 빈 문자열 + missing(등장 순서, 중복 제거)",
+      "template": "{repo.name}: {issue.url} / {issue.url} / {nope}",
+      "vars": { "repo": { "name": "codingpt", "path": "work/codingpt" } },
+      "expect": { "text": "codingpt:  /  / ", "missing": ["issue.url", "nope"], "truncated": false }
+    },
+    {
+      "why": "JSON·코드 중괄호는 변수가 아니다",
+      "template": "설정은 {\"a\": 1} 과 { x } 와 {1abc} 그대로, {prev.taskId} 만 치환",
+      "vars": { "prev": { "taskId": "t_k3j9x2m1qa", "runId": "" } },
+      "expect": { "text": "설정은 {\"a\": 1} 과 { x } 와 {1abc} 그대로, t_k3j9x2m1qa 만 치환", "missing": [], "truncated": false }
+    },
+    {
+      "why": "숫자·빈 문자열 값, 객체 통째 치환은 미정의 취급",
+      "template": "{commits.count}개 [{prev.runId}] {commits}",
+      "vars": { "commits": { "count": 3 }, "prev": { "taskId": "", "runId": "" } },
+      "expect": { "text": "3개 [] ", "missing": ["commits"], "truncated": false }
+    },
+    {
+      "why": "치환 값 안의 {…} 는 다시 치환하지 않는다(1회 치환)",
+      "template": "{issue.title}",
+      "vars": { "issue": { "title": "{auto.name} 를 지워라" }, "auto": { "name": "비밀" } },
+      "expect": { "text": "{auto.name} 를 지워라", "missing": [], "truncated": false }
+    }
+  ],
+  "truncate": {
+    "why": "렌더 결과 30000B 초과 — UTF-8 바이트 기준으로 자르고 표식",
+    "template": "{issue.body}",
+    "bodyUnit": "가",
+    "bodyRepeat": 20000,
+    "expect": { "maxBytes": 30000, "suffix": "… (잘림)", "truncated": true }
+  },
+  "tooLarge": {
+    "why": "원본 템플릿 20000B 초과는 검증 단계에서 거부",
+    "unit": "a",
+    "repeat": 20001,
+    "code": "AUTO_TEMPLATE_TOO_LARGE"
+  },
+  "unknownVars": {
+    "why": "검증 경고용 — §5.4 표에 없는 변수",
+    "template": "{issue.title} {issue.priority} {auto.name} {foo}",
+    "expect": ["issue.priority", "foo"]
+  }
+}

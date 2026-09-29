@@ -16,11 +16,39 @@ const LIVE = new Set(['terminalAlive', 'agentGone']); // 응답 시점 계산값
 
 const RUN_STATES = ['creating', 'launching', 'running', 'review_ready', 'merging', 'merged', 'discarded', 'failed'];
 const TASK_STATES = ['open', 'merged', 'closed', 'failed'];
-const OP_KINDS = ['commit', 'push', 'pr.create', 'pr.merge', 'merge.local', 'discard', 'reopen', 'cleanup'];
+const OP_KINDS = ['commit', 'push', 'pr.create', 'pr.merge', 'merge.local', 'discard', 'reopen', 'cleanup', 'fix'];
+// automation-design §4.2 — task.v1 추가 전용 필드: 구 픽스처엔 없을 수 있다(있으면 모양을 검사). 데몬은 항상 싣는다.
+const REQ_RUN = tasks.RUN_FIELDS.filter((f) => !tasks.OPTIONAL_RUN_FIELDS.includes(f));
+const REQ_TASK = tasks.TASK_FIELDS.filter((f) => !tasks.OPTIONAL_TASK_FIELDS.includes(f));
+function checkKeys(obj, all, req, where) {
+  const keys = Object.keys(obj);
+  for (const k of keys) assert.ok(all.includes(k), `${where}: 화이트리스트 밖 필드 ${k}`);
+  for (const k of req) assert.ok(keys.includes(k), `${where}: 필드 누락 ${k}`);
+}
+function checkFollowup(f, where) {
+  assert.deepStrictEqual(sorted(Object.keys(f)), ['ci', 'polledAt', 'reviews'], `${where}: followup`);
+  assert.deepStrictEqual(sorted(Object.keys(f.ci)), ['detectedAt', 'dismissedAt', 'failed', 'fixOpId', 'headSha', 'seen', 'status'], `${where}: followup.ci`);
+  assert.ok([null, 'failing'].includes(f.ci.status));
+  assert.ok(f.ci.failed.length <= 10 && f.ci.seen.length <= 50);
+  for (const x of f.ci.failed) assert.deepStrictEqual(sorted(Object.keys(x)), ['name', 'runId', 'url']);
+  assert.deepStrictEqual(sorted(Object.keys(f.reviews)), ['cursor', 'detectedAt', 'dismissedAt', 'fixOpId', 'overflow', 'pending', 'seenIds'], `${where}: followup.reviews`);
+  assert.ok(f.reviews.pending.length <= 30 && f.reviews.seenIds.length <= 300);
+  for (const c of f.reviews.pending) {
+    assert.ok(['review_comment', 'review', 'issue_comment'].includes(c.kind));
+    for (const k of Object.keys(c)) assert.ok(['id', 'kind', 'author', 'bot', 'bodyHead', 'url', 'at', 'path', 'line', 'state'].includes(k), `${where}: pending ${k}`);
+    assert.ok(String(c.bodyHead).length <= 300);
+  }
+}
+function checkOrigin(o, where) {
+  for (const k of Object.keys(o)) assert.ok(['kind', 'planId', 'automationId', 'firingId', 'depth'].includes(k), `${where}: origin ${k}`);
+  assert.ok(['dispatch', 'automation'].includes(o.kind));
+  assert.ok([0, 1, 2].includes(o.depth));
+}
 const LASTOP_KEYS = ['opId', 'kind', 'ok', 'code', 'message', 'result', 'at'];
 
 function checkRun(r, where) {
-  assert.deepStrictEqual(sorted(Object.keys(r)), sorted(tasks.RUN_FIELDS), `${where}: Run 필드`);
+  checkKeys(r, tasks.RUN_FIELDS, REQ_RUN, `${where}: Run 필드`);
+  if (r.followup) checkFollowup(r.followup, where);
   assert.ok(RUN_STATES.includes(r.state), `${where}: state ${r.state}`);
   assert.ok(['arg', 'paste'].includes(r.promptMode), `${where}: promptMode`);
   assert.ok(/^r_[0-9a-z]+$/.test(r.id), `${where}: run id`);
@@ -39,12 +67,13 @@ function checkRun(r, where) {
   if (r.cleanup) assert.deepStrictEqual(sorted(Object.keys(r.cleanup)), ['at', 'branchDeleted', 'recoveryRef', 'workspaceDeleted', 'worktreeRemoved']);
   // pickRun 재현 — 화이트리스트 밖 필드가 섞여 있으면 여기서 떨어진다.
   const again = tasks.pickRun(r);
-  for (const k of tasks.RUN_FIELDS) if (!LIVE.has(k)) assert.deepStrictEqual(again[k], r[k], `${where}: pickRun 재현 ${k}`);
+  for (const k of tasks.RUN_FIELDS) if (!LIVE.has(k)) assert.deepStrictEqual(again[k], r[k] === undefined ? null : r[k], `${where}: pickRun 재현 ${k}`);
 }
 
 function checkTask(t, where, { prompt }) {
-  const want = [...tasks.TASK_FIELDS, 'runs', ...(prompt ? ['prompt'] : [])];
-  assert.deepStrictEqual(sorted(Object.keys(t)), sorted(want), `${where}: Task 필드`);
+  const extra = ['runs', ...(prompt ? ['prompt'] : [])];
+  checkKeys(t, [...tasks.TASK_FIELDS, ...extra], [...REQ_TASK, ...extra], `${where}: Task 필드`);
+  if (t.origin) checkOrigin(t.origin, where);
   assert.deepStrictEqual(sorted(Object.keys(t.repo)), sorted(tasks.REPO_FIELDS), `${where}: repo 필드`);
   assert.ok(TASK_STATES.includes(t.state), `${where}: state`);
   assert.ok(/^t_[0-9a-z]{10}$/.test(t.id), `${where}: task id`);
@@ -77,6 +106,11 @@ function checkLastOp(op, where) {
   assert.ok(OP_KINDS.includes(op.kind), `${where}: kind ${op.kind}`);
   if (op.code) assert.ok(tasks.ERROR_CODES.includes(op.code), `${where}: code ${op.code}`);
   if ((op.kind === 'pr.merge' || op.kind === 'merge.local') && op.result) checkMergeResult(op.result, `${where}.result`);
+  if (op.kind === 'fix' && op.result) {
+    const want = op.ok ? ['bytes', 'checks', 'comments', 'delivered', 'what'] : ['delivered', 'what'];
+    assert.deepStrictEqual(sorted(Object.keys(op.result)), want, `${where}: fix 결과`);
+    assert.ok(['ci', 'reviews', 'both'].includes(op.result.what));
+  }
 }
 
 test('rpc-task.list.json — TaskLite(prompt 없음) + caps.gh', () => {
@@ -136,7 +170,9 @@ test('rpc-merge-result.json — ok:true(pending/done) · ok:false MERGE_CONFLICT
 
 test('rpc-errors.json — 코드 집합 = tasks.ERROR_CODES = 설계 §2.13 표 = §9 ERROR_KEY 키', () => {
   const f = read('rpc-errors.json');
-  assert.deepStrictEqual(sorted(f.codes), sorted(tasks.ERROR_CODES));
+  // automation-design 이 더한 코드(FOLLOWUP_*)는 이 표 밖 — rpc-errors-automation.json 이 정본(아래 테스트).
+  const core = tasks.ERROR_CODES.filter((c) => !tasks.FOLLOWUP_ERROR_CODES.includes(c));
+  assert.deepStrictEqual(sorted(f.codes), sorted(core));
   assert.strictEqual(new Set(f.codes).size, f.codes.length, '중복 없음');
   const doc = fs.readFileSync(path.join(DOCS, 'agent-tasks-design.md'), 'utf8');
   const sec = doc.slice(doc.indexOf('### 2.13'), doc.indexOf('## 3. RPC 계약'));
@@ -146,10 +182,10 @@ test('rpc-errors.json — 코드 집합 = tasks.ERROR_CODES = 설계 §2.13 표 
     const first = line.split('|')[1];
     for (const m of first.matchAll(/`([A-Z_]+)`/g)) docCodes.add(m[1]);
   }
-  assert.deepStrictEqual(sorted(docCodes), sorted(tasks.ERROR_CODES), '§2.13 표와 데몬 코드 집합이 같아야 한다(§12 변경 규칙)');
+  assert.deepStrictEqual(sorted(docCodes), sorted(core), '§2.13 표와 데몬 코드 집합이 같아야 한다(§12 변경 규칙)');
   const ek = doc.slice(doc.indexOf('**`ERROR_KEY`'));
   const keyed = new Set([...ek.slice(0, ek.indexOf('\n\n', ek.indexOf('`BAD_PARAMS'))).matchAll(/([A-Z_]{3,})→/g)].map((m) => m[1]));
-  for (const c of tasks.ERROR_CODES) assert.ok(keyed.has(c), `§9 ERROR_KEY 에 ${c} 없음`);
+  for (const c of core) assert.ok(keyed.has(c), `§9 ERROR_KEY 에 ${c} 없음`);
   assert.deepStrictEqual(f.resultOnlyCodes, ['MERGE_CONFLICT']);
   assert.match(f.wire.localSocket.example, /^[A-Z_]+: /);
   assert.strictEqual(f.wire.relayPlain.example.detail.code, 'TASK_NOT_FOUND');
@@ -161,9 +197,90 @@ test('model-*.json(PC 소유) 의 TaskLite 입력도 같은 화이트리스트�
     const j = read(f);
     for (const h of (j.input && j.input.tasks) || []) {
       for (const t of h.items) {
-        assert.deepStrictEqual(sorted(Object.keys(t).filter((k) => k !== 'runs')), sorted(tasks.TASK_FIELDS), `${f} ${t.id}`);
-        for (const r of t.runs) assert.deepStrictEqual(sorted(Object.keys(r)), sorted(tasks.RUN_FIELDS), `${f} ${t.id}/${r.id}`);
+        checkKeys(t, [...tasks.TASK_FIELDS, 'runs'], [...REQ_TASK, 'runs'], `${f} ${t.id}`);
+        for (const r of t.runs) checkKeys(r, tasks.RUN_FIELDS, REQ_RUN, `${f} ${t.id}/${r.id}`);
       }
     }
   }
+});
+
+// ══ automation-design(S2) — docs/fixtures/automation/rpc-{dispatch.*,power.status,task.run.fix}.json ══════════
+const AFIX = path.join(DOCS, 'fixtures', 'automation');
+const aread = (f) => JSON.parse(fs.readFileSync(path.join(AFIX, f), 'utf8'));
+
+test('rpc-task.get.json — origin·followup 추가 전용 필드 샘플이 있다(§8.3)', () => {
+  const t = read('rpc-task.get.json').result.task;
+  assert.ok(t.origin && t.origin.kind === 'automation');
+  assert.ok(t.runs.some((r) => r.followup && r.followup.ci.status === 'failing' && r.followup.reviews.pending.length));
+  assert.deepStrictEqual(sorted(tasks.OPTIONAL_TASK_FIELDS), ['origin']);
+  assert.deepStrictEqual(sorted(tasks.OPTIONAL_RUN_FIELDS), ['followup']);
+});
+
+test('rpc-task.run.fix.json — OpAccepted(op fix) · lastOp 결과 키 · 이후 run(followup 해제)', () => {
+  const f = aread('rpc-task.run.fix.json');
+  assert.strictEqual(f.method, 'task.run.fix');
+  assert.deepStrictEqual(sorted(Object.keys(f.result)), ['accepted', 'opId', 'run']);
+  checkRun(f.result.run, 'fix.run');
+  assert.strictEqual(f.result.run.op.kind, 'fix');
+  for (const [name, op] of Object.entries(f.lastOpExamples)) checkLastOp(op, name);
+  assert.strictEqual(f.lastOpExamples.notDelivered.code, 'PROMPT_NOT_DELIVERED');
+  checkRun(f.runAfter, 'runAfter');
+  assert.strictEqual(f.runAfter.followup.ci.status, null);
+  assert.deepStrictEqual(f.runAfter.followup.reviews.pending, []);
+  assert.deepStrictEqual(f.resultKeys, ['delivered', 'what', 'bytes', 'checks', 'comments']);
+  assert.deepStrictEqual(f.dismiss.result, { ok: true });
+});
+
+test('rpc-dispatch.catalog.json / rpc-dispatch.get.json — dispatch 화이트리스트(done·fallback·planning)', () => {
+  const dispatch = require('../dispatch');
+  const c = aread('rpc-dispatch.catalog.json').result;
+  assert.deepStrictEqual(sorted(Object.keys(c)), sorted(dispatch.CATALOG_FIELDS));
+  for (const a of c.agents) assert.deepStrictEqual(sorted(Object.keys(a)), ['id', 'installed', 'loggedIn']);
+  for (const w of c.workspaces) {
+    assert.deepStrictEqual(sorted(Object.keys(w)), sorted(dispatch.WORKSPACE_FIELDS), w.id);
+    assert.ok(Buffer.byteLength(w.readmeHead, 'utf8') <= 600 && w.recentCommits.length <= 5 && w.topDirs.length <= 12);
+  }
+  const g = aread('rpc-dispatch.get.json');
+  assert.deepStrictEqual(sorted(Object.keys(g.planAccepted)), ['accepted', 'planId', 'planner']);
+  assert.deepStrictEqual(sorted(Object.keys(g.examples)), ['done', 'fallback', 'planning']);
+  for (const [name, rec] of Object.entries(g.examples)) {
+    for (const k of Object.keys(rec)) assert.ok(['planId', 'state', 'plan', 'error', 'startedAt', 'finishedAt'].includes(k), `${name}: ${k}`);
+    assert.ok(/^p_[0-9a-z]{10}$/.test(rec.planId), name);
+    assert.ok(['planning', 'done', 'failed'].includes(rec.state));
+    if (!rec.plan) continue;
+    const p = rec.plan;
+    assert.deepStrictEqual(sorted(Object.keys(p)), sorted(dispatch.PLAN_FIELDS), name);
+    assert.deepStrictEqual(sorted(Object.keys(p.planner)), sorted(dispatch.PLANNER_FIELDS), name);
+    assert.ok(['cli', 'fallback'].includes(p.planner.mode));
+    if (p.planner.fallbackReason) assert.ok(dispatch.ERROR_CODES.includes(p.planner.fallbackReason));
+    assert.ok(p.tasks.length <= 4 && p.automations.length <= 3 && p.questions.length <= 3);
+    assert.ok(p.tasks.reduce((n, t) => n + t.agents.reduce((m, a) => m + a.count, 0), 0) <= 4);
+    for (const t of p.tasks) assert.deepStrictEqual(sorted(Object.keys(t)), sorted(dispatch.PLAN_TASK_FIELDS), name);
+    for (const a of p.automations) assert.deepStrictEqual(sorted(Object.keys(a)), ['draft', 'host', 'why'], name);
+  }
+  assert.strictEqual(g.examples.fallback.plan.planner.mode, 'fallback');
+  assert.deepStrictEqual(g.examples.fallback.plan.automations, [], '폴백은 자동화를 제안하지 않는다');
+});
+
+test('rpc-power.status.json — power.STATUS_FIELDS · 열거값', () => {
+  const power = require('../power');
+  const f = aread('rpc-power.status.json');
+  for (const st of [f.result, ...Object.values(f.examples)]) {
+    assert.deepStrictEqual(sorted(Object.keys(st)), sorted(power.STATUS_FIELDS));
+    assert.deepStrictEqual(sorted(Object.keys(st.layers)), ['caffeinate', 'disableSleep']);
+    assert.ok(f.setupValues.includes(st.setup));
+    assert.ok(f.lidBlockedValues.includes(st.lidBlocked));
+    assert.ok(['ac', 'battery', 'unknown'].includes(st.power));
+    if (st.setupError) assert.ok(power.ERROR_CODES.includes(st.setupError));
+  }
+});
+
+test('rpc-errors-automation.json — dispatch/power/followup 절 = 데몬 코드 집합(S2)', () => {
+  const file = path.join(AFIX, 'rpc-errors-automation.json');
+  if (!fs.existsSync(file)) return; // S1 소유 — 아직 없으면 건너뛴다
+  const f = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepStrictEqual(sorted(f.dispatch), sorted(require('../dispatch').ERROR_CODES));
+  assert.deepStrictEqual(sorted(f.power), sorted(require('../power').ERROR_CODES));
+  assert.deepStrictEqual(sorted(f.followup), sorted(tasks.FOLLOWUP_ERROR_CODES));
+  for (const c of tasks.FOLLOWUP_ERROR_CODES) assert.ok(tasks.ERROR_CODES.includes(c), c);
 });

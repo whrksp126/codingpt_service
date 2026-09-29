@@ -1,0 +1,20 @@
+{
+  "name": "auto-02-empty",
+  "description": "자동화 0개 — 전체 일시정지·호스트 오프라인이어도 행이 생기지 않고 counts 는 전부 0(빈 상태 문구 autoEmpty 를 그리는 입력)",
+  "contract": "automation-design §8.2. summarizeAuto(buildAutomations(input)) = {rows:[{id,group,dot,attention,triggerKey}], counts:{total,paused,attention}}. rows = groups.active 다음 groups.paused 순서 그대로. group: item.paused||!item.enabled → 'paused' (전체 일시정지 input.paused·hostOnline 은 행 group/dot 에 영향 없음 — 배너·헤더만). attention = pausedReason∈{error,limit} ‖ state.lastResult?.ok===false ‖ state.consecutiveFailures>0. dot: attention→'error', state.inflight>0→'spin', 그 외 'none'. triggerKey: schedule+cron→trigSchedule · schedule+at→trigOnce · git.commits→trigCommits · github.issues→trigIssues · pr.ci_failed→trigCi · pr.review_comments→trigReviews · task.event→trigTaskEvent. 정렬 active: attention 먼저 → state.nextRunAt 오름(null 은 뒤) → name 코드포인트 오름(localeCompare 금지). paused: updatedAt 내림(동률 name 코드포인트). counts.total=rows 수 · paused=groups.paused 수 · attention=attention 행 수(두 그룹 합).",
+  "input": {
+    "now": 1790000000000,
+    "tz": "Asia/Seoul",
+    "items": [],
+    "paused": true,
+    "hostOnline": false
+  },
+  "expect": {
+    "rows": [],
+    "counts": {
+      "total": 0,
+      "paused": 0,
+      "attention": 0
+    }
+  }
+}

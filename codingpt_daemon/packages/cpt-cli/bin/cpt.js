@@ -274,6 +274,15 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   task list [--all]                     이 PC 의 작업 목록(* = 이 터미널이 그 작업의 실행)
   task get [<taskId>]                   작업 상세(프롬프트 포함). 생략 시 이 터미널이 속한 작업
 
+  # 자동화 (반복·조건 작업 — 이 PC 에 산다. 만들기 전에 auto schema 를 읽어라)
+  auto list                             이 PC 의 자동화(이름·트리거·다음 실행·마지막 결과)
+  auto get <id>                         자동화 상세 + 실행 기록 꼬리
+  auto create --file <spec.json> | -    Draft JSON(- = stdin) 으로 만들기 → id 출력. --dry-run = 검증만
+  auto update <id> --file <patch.json>  patch = {name?, trigger?, actions?, guards?, enabled?}
+  auto pause|resume|run|remove <id>     일시정지 / 재개 / 지금 실행 / 삭제
+  auto log [<id>] [--limit <n>=100]     실행 기록(감사 로그)
+  auto schema                           Draft 스키마 + 템플릿 변수 + 예시 3개(가이드 7-3 절)
+
   # 터미널 (전 기기 공유 풀)
   terminal list                         터미널 목록(이름/실행 중 명령)
   terminal new [--name <이름>]          새 터미널 생성(전 기기에 나타남)
@@ -518,6 +527,10 @@ async function main() {
         process.exitCode = 2;
         return;
       }
+      // 자동화(docs/automation-design.md §5.7) — 에이전트가 반복·조건 작업을 스스로 등록하는 유일한 표면.
+      //  데몬이 게이트한다: CodingPT 터미널 밖(AUTO_OUT_OF_TERMINAL)·자동화가 만든 작업의 터미널(AUTO_LOOP) 거부.
+      //  전체 일시정지(auto.pauseAll)는 CLI 에 없다 — 사람 UI 전용 킬스위치.
+      case 'auto': return autoCommand(c2, rest, flags);
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
         const r = await request('ui.devices', {});
@@ -1066,6 +1079,167 @@ async function main() {
     //  사용자에게 훅 실패를 표시하고(2 는 모델을 깨우기까지 한다) 작업 흐름을 오염시킨다.
     if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook') return;
     process.stderr.write(`오류: ${e.message}\n`);
+    process.exitCode = 1;
+  }
+}
+
+// ── 자동화(cpt auto) ─────────────────────────────────────────────────────────
+const AUTO_USAGE = '사용법: cpt auto list | get <id> | create --file <spec.json>|- [--dry-run] | update <id> --file <patch.json>'
+  + ' | pause|resume|run|remove <id> | log [<id>] [--limit n] | schema\n';
+
+// 가이드의 자동화 절(`## 7-3. 자동화`) — `cpt auto schema` 는 이 절을 **그대로** 출력한다(단일 출처).
+function autoSchemaText() {
+  let md = '';
+  try { md = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8'); } catch (_) { return null; }
+  const i = md.indexOf('## 7-3. 자동화');
+  if (i < 0) return null;
+  const j = md.indexOf('\n## ', i + 1);
+  return md.slice(i, j < 0 ? md.length : j + 1);
+}
+
+// stdin 전체(파이프). TTY 면 null. 파이프가 안 닫히면 10초 뒤 포기(에이전트 셸이 매달리지 않게).
+function readAllStdin(timeoutMs = 10000) {
+  if (process.stdin.isTTY) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let buf = '';
+    const t = setTimeout(() => { try { process.stdin.destroy(); } catch (_) { /* noop */ } resolve(buf); }, timeoutMs);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (d) => { buf += d; });
+    process.stdin.on('end', () => { clearTimeout(t); resolve(buf); });
+    process.stdin.on('error', () => { clearTimeout(t); resolve(buf); });
+  });
+}
+
+async function readSpecJson(flags, rest) {
+  // `--dry-run -`·`--json -` 처럼 불리언 플래그 뒤의 `-` 는 파서가 그 플래그 값으로 먹는다 → stdin 으로 본다.
+  const dashAsValue = Object.keys(flags).some((k) => k !== 'file' && flags[k] === '-');
+  const file = typeof flags.file === 'string' ? flags.file : (rest[0] === '-' || dashAsValue ? '-' : null);
+  if (!file) return { error: '--file <spec.json> 또는 - (stdin) 가 필요합니다' };
+  let text;
+  if (file === '-') {
+    text = await readAllStdin();
+    if (text == null) return { error: 'stdin 이 터미널입니다 — 파이프로 JSON 을 넘기거나 --file 을 쓰세요' };
+  } else {
+    try { text = fs.readFileSync(path.resolve(file), 'utf8'); } catch (e) { return { error: `파일을 읽을 수 없습니다: ${file}` }; }
+  }
+  try { return { value: JSON.parse(text) }; } catch (e) { return { error: `JSON 이 올바르지 않습니다: ${e.message}` }; }
+}
+
+function autoTrigText(t) {
+  if (!t) return '?';
+  const at = t.repo ? ` @ ${t.repo}` : '';
+  switch (t.type) {
+    case 'schedule': return t.at != null ? `일회 ${new Date(t.at).toLocaleString()} (${t.tz})` : `${t.cron} (${t.tz})`;
+    case 'git.commits': return `새 커밋 · ${t.remote}/${t.branch}${at}`;
+    case 'github.issues': return `새 이슈${t.labels && t.labels.length ? ` [${t.labels.join(',')}]` : ''}${at}`;
+    case 'pr.ci_failed': return `검사 실패${at}`;
+    case 'pr.review_comments': return `리뷰 코멘트${at}`;
+    case 'task.event': return `작업 이벤트 ${t.event}${at}`;
+    default: return t.type;
+  }
+}
+function autoLastText(r) {
+  if (!r) return '없음';
+  const when = r.at ? new Date(r.at).toLocaleString() : '';
+  if (r.ok) return `성공${r.taskIds && r.taskIds.length ? ` · 작업 ${r.taskIds.join(',')}` : ''} ${when}`.trim();
+  return `실패 ${r.code || ''} ${when}`.trim();
+}
+function autoLine(a) {
+  const st = a.state || {};
+  const creator = a.createdBy ? (a.createdBy.kind === 'agent' ? `${a.createdBy.agent || '에이전트'} 가 만듦`
+    : a.createdBy.kind === 'dispatch' ? '한 줄 지시로 만듦' : '직접 만듦') : '';
+  return `${a.id} ${a.paused || !a.enabled ? '[일시정지] ' : ''}${a.name} — ${autoTrigText(a.trigger)}`
+    + `\n    다음 ${st.nextRunAt ? new Date(st.nextRunAt).toLocaleString() : '-'} · 마지막 ${autoLastText(st.lastResult)}`
+    + ` · 오늘 ${st.runsToday || 0}/${a.guards ? a.guards.maxRunsPerDay : '?'}${creator ? ` · ${creator}` : ''}`;
+}
+function autoLogLine(l) {
+  return `${new Date(l.at).toISOString()} ${l.autoId || '-'} ${l.stage}${l.type ? ` ${l.type}` : ''} ${l.ok ? 'ok' : 'fail'}`
+    + `${l.code ? ` ${l.code}` : ''}${l.taskId ? ` ${l.taskId}` : ''}${l.message ? ` — ${l.message}` : ''}`;
+}
+function autoActText(x, i) {
+  const n = `${i + 1}.`;
+  if (x.type === 'task.create') return `${n} 작업 만들기 ${x.repo}${x.subdir ? '/' + x.subdir : ''} · ${(x.agents || []).map((g) => `${g.id}×${g.count}`).join(',')}${x.title ? ` · "${x.title}"` : ''}`;
+  if (x.type === 'terminal.prompt') return `${n} 에이전트에게 지시 → ${JSON.stringify(x.target)}`;
+  if (x.type === 'notify') return `${n} 알림 "${x.title}"`;
+  return `${n} ${x.type}`;
+}
+
+async function autoCommand(sub, rest, flags) {
+  const need = (id) => {
+    if (id) return true;
+    process.stderr.write(AUTO_USAGE); process.exitCode = 2; return false;
+  };
+  try {
+    switch (sub) {
+      case 'list': {
+        const r = await request('auto.list', {});
+        const items = (r && r.items) || [];
+        return out(r, flags, (r && r.paused ? '(전체 일시정지 중)\n' : '') + (items.map(autoLine).join('\n') || '(자동화 없음)'));
+      }
+      case 'get': {
+        if (!need(rest[0])) return;
+        const r = await request('auto.get', { id: rest[0] });
+        const a = r && r.automation;
+        if (!a) return printJson(r);
+        return out(r, flags, [autoLine(a), '액션:', ...a.actions.map(autoActText), '', '실행 기록:',
+          ...((r.log || []).map(autoLogLine)), ...(r.log && r.log.length ? [] : ['(없음)'])].join('\n'));
+      }
+      case 'create': {
+        const spec = await readSpecJson(flags, rest);
+        if (spec.error) { process.stderr.write(`${spec.error}\n${AUTO_USAGE}`); process.exitCode = 2; return; }
+        if (flags['dry-run']) {
+          const v = await request('auto.validate', { draft: spec.value });
+          return out(v, flags, `검증 통과 — ${autoTrigText(v.normalized.trigger)} · 다음 실행 ${v.nextRunAt ? new Date(v.nextRunAt).toLocaleString() : '-'}`
+            + `${v.warnings && v.warnings.length ? `\n경고:\n  ${v.warnings.join('\n  ')}` : ''}`);
+        }
+        const opId = require('crypto').randomUUID();
+        const r = await request('auto.create', { opId, draft: spec.value });
+        const a = r && r.automation;
+        return out(r, flags, a ? `${a.id}  ${a.name} — ${autoTrigText(a.trigger)}` : JSON.stringify(r));
+      }
+      case 'update': {
+        if (!need(rest[0])) return;
+        const spec = await readSpecJson(flags, rest.slice(1));
+        if (spec.error) { process.stderr.write(`${spec.error}\n${AUTO_USAGE}`); process.exitCode = 2; return; }
+        const r = await request('auto.update', { id: rest[0], patch: spec.value });
+        return out(r, flags, r && r.automation ? autoLine(r.automation) : 'ok');
+      }
+      case 'pause':
+      case 'resume': {
+        if (!need(rest[0])) return;
+        const r = await request(`auto.${sub}`, { id: rest[0] });
+        return out(r, flags, r && r.automation ? autoLine(r.automation) : 'ok');
+      }
+      case 'run': {
+        if (!need(rest[0])) return;
+        const r = await request('auto.runNow', { opId: require('crypto').randomUUID(), id: rest[0], ...(flags['dry-run'] ? { dryRun: true } : {}) });
+        if (r && r.rendered) return printJson(r);
+        return out(r, flags, `실행 요청됨 ${r && r.firingId} — 결과는 cpt auto get ${rest[0]}`);
+      }
+      case 'remove': {
+        if (!need(rest[0])) return;
+        const r = await request('auto.remove', { id: rest[0] });
+        return out(r, flags, '삭제됨');
+      }
+      case 'log': {
+        const limit = flags.limit != null ? parseInt(flags.limit, 10) : undefined;
+        const r = await request('auto.log', { ...(rest[0] ? { id: rest[0] } : {}), ...(Number.isInteger(limit) ? { limit } : {}) });
+        return out(r, flags, ((r && r.lines) || []).map(autoLogLine).join('\n') || '(기록 없음)');
+      }
+      case 'schema': {
+        const txt = autoSchemaText();
+        if (txt == null) { process.stderr.write('가이드 파일(GUIDE.md)에서 자동화 절을 찾을 수 없습니다.\n'); process.exitCode = 1; return; }
+        process.stdout.write(txt);
+        return;
+      }
+      default:
+        process.stderr.write(AUTO_USAGE);
+        process.exitCode = 2;
+        return;
+    }
+  } catch (e) {
+    // 코드를 같이 보여 준다 — 에이전트가 AUTO_LOOP/AUTO_OUT_OF_TERMINAL 을 보고 스스로 물러날 근거.
+    process.stderr.write(`오류${e && e.code ? `(${e.code})` : ''}: ${(e && e.message) || e}\n`);
     process.exitCode = 1;
   }
 }

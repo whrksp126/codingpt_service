@@ -1195,6 +1195,8 @@ const TASK_RPC_OK = new Map([
   ['task.run.reopen', 15000], ['task.diff', 30000], ['task.discard', 15000], ['task.delete', 15000],
   ['git.branches', 15000], ['git.status', 15000], ['git.commit', 15000], ['git.push', 15000],
   ['git.pr.create', 15000], ['git.pr.status', 30000], ['git.pr.merge', 15000], ['git.merge.local', 15000], ['git.gh.status', 15000],
+  // F2 PR 후속(automation-design.md §4.3·§7.1) — task. 접두라 task.v1 게이트를 탄다(클라는 hostCaps 의 auto.v1 로 버튼 게이팅).
+  ['task.run.fix', 15000], ['task.run.followup.dismiss', 15000],
 ]);
 //  daemonRelayService.callRpc 의 타임아웃 reject 문구(code 없음). 문구 비교는 이 한 곳뿐 — 릴레이는 무수정 원칙이라
 //  코드를 붙일 수 없어 여기서 TIMEOUT 으로 접는다. 문구가 바뀌면 task-route.test.js 가 깨진다(실제 릴레이로 검증).
@@ -1219,6 +1221,40 @@ async function taskRpc(req, res) {
     //  ★ 프롬프트·diff 등 본문은 에러 message 에 실리지 않는다(데몬 message 는 한국어 원문 고정 문구) — 로그 금지 유지.
     const err = e instanceof Error ? e : new Error(String(e));
     const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code || 'GH_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
+// POST /api/daemon/auto  body:{ method, params, hostDeviceId } — 자동화 번들(auto.*/dispatch.*/power.*) 평문 폴백.
+//  정본 계약 = codingpt_daemon/docs/automation-design.md §7.1. taskRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로).
+//  · 봉인 RPC 가 구조적으로 불가할 때만 온다(타임아웃·5xx 뒤 평문 재전송 금지 = 클라 규칙, taskRpc 와 동일).
+//  · power.event 는 표에 **없다**(로컬 소켓 전용 — 원격 기기가 PC 의 잠자기를 주장할 이유 없음, 부록 Z-13).
+//  · 킬스위치는 method 접두별 cap: auto→auto.v1, dispatch→dispatch.v1, power→power.v1 — 없으면 403 {code:'<FAM>_DISABLED'}.
+const AUTO_RPC_OK = new Map([
+  ['auto.list', 15000], ['auto.get', 15000], ['auto.validate', 15000], ['auto.create', 15000], ['auto.update', 15000], ['auto.remove', 15000],
+  ['auto.pause', 15000], ['auto.resume', 15000], ['auto.pauseAll', 15000], ['auto.runNow', 15000], ['auto.log', 15000],
+  ['dispatch.catalog', 30000], ['dispatch.plan', 15000], ['dispatch.get', 15000],
+  ['power.status', 15000], ['power.set', 15000], ['power.setup', 15000],
+]);
+const AUTO_FAMILY_CAP = { auto: 'auto.v1', dispatch: 'dispatch.v1', power: 'power.v1' };
+async function autoRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!AUTO_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const fam = method.split('.')[0];
+    if (!SERVER_CAPS.includes(AUTO_FAMILY_CAP[fam])) {
+      const code = `${fam.toUpperCase()}_DISABLED`;
+      return errorResponse(res, Object.assign(new Error('이 서버에서 이 기능이 꺼져 있습니다.'), { publicDetail: { code } }), 403);
+    }
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, AUTO_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') return mapRpcError(res, e); // 409
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code || 'AUTO_ERROR');
     err.code = code;
     err.publicDetail = { code };
     return errorResponse(res, err, 500);
@@ -1914,6 +1950,7 @@ module.exports = {
   desktopRpc,
   surfaceRpc,
   taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
+  autoRpc, _AUTO_RPC_OK: AUTO_RPC_OK, // 자동화 번들 평문 폴백 + 테스트 노출(허용 표 = automation-design.md §7.1)
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

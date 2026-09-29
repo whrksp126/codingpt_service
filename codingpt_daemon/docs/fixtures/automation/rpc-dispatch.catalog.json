@@ -1,0 +1,76 @@
+{
+  "contract": "docs/automation-design.md §3.2 — 데몬(S2) 소유. test/task-contract.test.js 가 dispatch.CATALOG_FIELDS/WORKSPACE_FIELDS 와 대조한다.",
+  "method": "dispatch.catalog",
+  "description": "각 PC 에 봉인으로 요청(30s). 이 PC 의 로컬 워크스페이스만(작업 worktree 제외). 10분 캐시(refresh:true 무효화). 40개·48KB 초과분은 lastActivityAt 오래된 순으로 잘리고 truncated:true.",
+  "params": {
+    "refresh": false
+  },
+  "result": {
+    "host": 12,
+    "hostName": "MacBook Pro",
+    "generatedAt": 1790000000000,
+    "truncated": false,
+    "agents": [
+      {
+        "id": "claude",
+        "installed": true,
+        "loggedIn": true
+      },
+      {
+        "id": "codex",
+        "installed": true,
+        "loggedIn": null
+      },
+      {
+        "id": "gemini",
+        "installed": false,
+        "loggedIn": false
+      }
+    ],
+    "workspaces": [
+      {
+        "id": "ws_abc",
+        "name": "codingpt",
+        "path": "work/codingpt",
+        "subdir": "",
+        "remoteUrl": "https://github.com/whrksp126/codingpt.git",
+        "github": {
+          "owner": "whrksp126",
+          "repo": "codingpt"
+        },
+        "branch": "main",
+        "dirtyCount": 0,
+        "readmeHead": "# CodingPT\n원격 바이브코딩 플랫폼",
+        "recentCommits": [
+          "fix: 결제 재시도"
+        ],
+        "topDirs": [
+          "codingpt_back",
+          "codingpt_daemon",
+          "codingpt_front"
+        ],
+        "lastActivityAt": 1789913600000
+      },
+      {
+        "id": "ws_hey",
+        "name": "heyvoca",
+        "path": "work/heyvoca",
+        "subdir": "",
+        "remoteUrl": "git@github.com:whrksp126/heyvoca.git",
+        "github": {
+          "owner": "whrksp126",
+          "repo": "heyvoca"
+        },
+        "branch": "develop",
+        "dirtyCount": 2,
+        "readmeHead": "# 헤이보카\n영어 단어 학습 앱",
+        "recentCommits": [],
+        "topDirs": [
+          "app",
+          "server"
+        ],
+        "lastActivityAt": 1788272000000
+      }
+    ]
+  }
+}

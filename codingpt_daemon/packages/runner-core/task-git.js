@@ -709,6 +709,156 @@ async function prMerge(dir, github, number, method) {
   return true;
 }
 
+// ── PR 후속(automation-design §4.1) · 자동화 폴링 트리거(§5.2) ──────────────────
+//  전부 `gh api … -q` 로 **필드만** 받는다(본문 전체·사용자 객체를 데몬에 들이지 않는다 — §12.6).
+//  jq 는 배열 대신 `.[]|{…}` 로 한 줄에 객체 하나(NDJSON)를 뽑는다 — `--paginate` 가 페이지마다 배열을
+//  따로 찍어 `[…][…]` 로 이어 붙는 형식을 파싱하지 않아도 되게.
+const ANSI_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+const REF_NAME_RE = /^[A-Za-z0-9._\/-]{1,200}$/;
+
+function parseNdjson(out) {
+  const items = [];
+  for (const line of String(out || '').split('\n')) {
+    const s = line.trim();
+    if (!s) continue;
+    try { items.push(JSON.parse(s)); } catch (_) { throw codedError('GH_ERROR', 'gh api 응답을 해석할 수 없습니다'); }
+  }
+  return items;
+}
+
+function repoSlugOf(github) {
+  if (!github || typeof github.owner !== 'string' || typeof github.repo !== 'string') throw codedError('NOT_GITHUB', 'GitHub 저장소가 아닙니다');
+  if (!/^[A-Za-z0-9_.-]+$/.test(github.owner) || !/^[A-Za-z0-9_.-]+$/.test(github.repo)) throw codedError('NOT_GITHUB', 'GitHub 저장소 이름이 올바르지 않습니다');
+  return `${github.owner}/${github.repo}`;
+}
+
+async function ghApiLines(dir, apiPath, jq, { paginate = false, timeout = 30000 } = {}) {
+  const args = ['api', apiPath, ...(paginate ? ['--paginate'] : []), '-q', jq];
+  const r = await gh(args, { cwd: dir, timeout });
+  if (!r.ok) {
+    if (r.timedOut) throw codedError('TIMEOUT', 'gh api 시간 초과');
+    if (r.err === 'GH_MISSING') throw codedError('GH_MISSING', 'GitHub CLI(gh) 가 이 PC 에 없습니다');
+    throw codedError('GH_ERROR', `gh api 실패: ${String(r.err).trim().slice(0, 200)}`);
+  }
+  return parseNdjson(r.out);
+}
+
+function numOf(n) {
+  const v = Number(n);
+  if (!Number.isInteger(v) || v <= 0) throw codedError('BAD_PARAMS', 'PR 번호가 올바르지 않습니다');
+  return v;
+}
+function sinceQ(since) {
+  if (since == null) return '';
+  const d = new Date(since);
+  if (Number.isNaN(d.getTime())) return '';
+  return `&since=${encodeURIComponent(d.toISOString())}`;
+}
+
+/** PR 리뷰 코멘트(줄 단위) — [{id, kind:'review_comment', author, bot, path, line, body, url, at}] */
+async function prComments(dir, github, n, since) {
+  const slug = repoSlugOf(github);
+  return ghApiLines(dir, `repos/${slug}/pulls/${numOf(n)}/comments?per_page=100${sinceQ(since)}`,
+    '.[]|{id,kind:"review_comment",author:.user.login,bot:(.user.type=="Bot"),path,line:(.line//.original_line),body,url:.html_url,at:.created_at}',
+    { paginate: true });
+}
+
+/** PR 리뷰(요약) — 본문이 있거나 CHANGES_REQUESTED 인 것만. */
+async function prReviews(dir, github, n) {
+  const slug = repoSlugOf(github);
+  const all = await ghApiLines(dir, `repos/${slug}/pulls/${numOf(n)}/reviews?per_page=100`,
+    '.[]|{id,kind:"review",author:.user.login,bot:(.user.type=="Bot"),state,body,url:.html_url,at:.submitted_at}',
+    { paginate: true });
+  return all.filter((x) => ['CHANGES_REQUESTED', 'COMMENTED', 'APPROVED'].includes(x.state)
+    && ((typeof x.body === 'string' && x.body.trim()) || x.state === 'CHANGES_REQUESTED'));
+}
+
+/** PR 대화 코멘트(이슈 코멘트). */
+async function issueComments(dir, github, n, since) {
+  const slug = repoSlugOf(github);
+  return ghApiLines(dir, `repos/${slug}/issues/${numOf(n)}/comments?per_page=100${sinceQ(since)}`,
+    '.[]|{id,kind:"issue_comment",author:.user.login,bot:(.user.type=="Bot"),body,url:.html_url,at:.created_at}',
+    { paginate: true });
+}
+
+/** check 상세 URL → Actions run id(문자열) | null */
+function actionsRunIdOf(url) {
+  const m = /\/actions\/runs\/(\d+)(?:\/|$|\?|#)/.exec(String(url || ''));
+  return m ? m[1] : null;
+}
+
+const LOG_TAIL_LINES = 200;
+const LOG_TAIL_BYTES = 12 * 1024;
+/** 문자열 꼬리를 UTF-8 바이트 상한으로(앞을 자른다, 글자 중간을 끊지 않는다). */
+function tailBytes(s, max) {
+  const b = Buffer.from(String(s), 'utf8');
+  if (b.length <= max) return { text: String(s), cut: false };
+  let start = b.length - max;
+  while (start < b.length && (b[start] & 0xc0) === 0x80) start++;
+  return { text: b.subarray(start).toString('utf8'), cut: true };
+}
+
+/** 실패한 Actions 로그 꼬리 — ANSI 제거 → 마지막 200줄·12KB. {text, truncated} */
+async function runLogFailed(dir, github, runId) {
+  const slug = repoSlugOf(github);
+  if (!/^\d{1,20}$/.test(String(runId || ''))) throw codedError('BAD_PARAMS', 'runId 가 올바르지 않습니다');
+  const r = await gh(['run', 'view', String(runId), '--repo', slug, '--log-failed'], { cwd: dir, timeout: 60000 });
+  if (!r.ok) {
+    if (r.timedOut) throw codedError('TIMEOUT', 'gh run view 시간 초과');
+    throw codedError('GH_ERROR', `gh run view 실패: ${String(r.err).trim().slice(0, 200)}`);
+  }
+  const lines = String(r.out).replace(ANSI_RE, '').replace(/\r/g, '').split('\n');
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  let truncated = lines.length > LOG_TAIL_LINES;
+  const tail = lines.slice(-LOG_TAIL_LINES).join('\n');
+  const cut = tailBytes(tail, LOG_TAIL_BYTES);
+  if (cut.cut) truncated = true;
+  return { text: cut.text, truncated };
+}
+
+/**
+ * 열린 이슈(PR 제외) — 자동화 github.issues 트리거(§5.2). per_page 상한 안에서만(밀린 것은 다음 폴링).
+ *  → [{number, title, body, url, labels[], author, at}]
+ */
+async function issuesList(dir, github, { labels = [], state = 'open', since = null, perPage = 30 } = {}) {
+  const slug = repoSlugOf(github);
+  const st = ['open', 'closed', 'all'].includes(state) ? state : 'open';
+  const lb = (Array.isArray(labels) ? labels : []).filter((l) => typeof l === 'string' && l.trim()).map((l) => encodeURIComponent(l.trim()));
+  const pp = Math.max(1, Math.min(100, parseInt(perPage, 10) || 30));
+  const q = `state=${st}${lb.length ? `&labels=${lb.join(',')}` : ''}&per_page=${pp}${sinceQ(since)}`;
+  return ghApiLines(dir, `repos/${slug}/issues?${q}`,
+    '.[]|select(.pull_request==null)|{number,title,body,url:.html_url,labels:[.labels[].name],author:.user.login,at:.created_at}');
+}
+
+/**
+ * 원격 브랜치의 새 커밋 — 자동화 git.commits 트리거(§5.2). `git fetch <remote> <branch>`(60s) →
+ *  `refs/remotes/<remote>/<branch>` 가 since 와 다르면 `since..head` 커밋(≤50).
+ *  ★ 로컬 브랜치·체크아웃은 건드리지 않는다(fetch 는 원격 추적 ref 만 바꾼다). 저장소 락은 호출측 몫.
+ *  → {head, commits:[{sha, subject, author}], truncated, fetched}. since 가 없으면(첫 관찰) commits:[].
+ */
+async function commitsSince(dir, { remote = 'origin', branch, since = null, fetch = true, max = 50 } = {}) {
+  if (!REF_NAME_RE.test(String(remote)) || String(remote).startsWith('-')) throw codedError('BAD_PARAMS', 'remote 이름이 올바르지 않습니다');
+  if (!REF_NAME_RE.test(String(branch || '')) || String(branch).startsWith('-') || String(branch).includes('..')) throw codedError('BAD_PARAMS', 'branch 이름이 올바르지 않습니다');
+  let fetched = false;
+  if (fetch) {
+    const f = await git(['fetch', '--quiet', remote, branch], { cwd: dir, timeout: 60000 });
+    fetched = f.ok;
+    if (!f.ok && f.timedOut) throw codedError('TIMEOUT', 'git fetch 시간 초과');
+  }
+  const head = await refExists(dir, `refs/remotes/${remote}/${branch}`);
+  if (!head) throw codedError('BASE_NOT_FOUND', `${remote}/${branch} 를 찾을 수 없습니다`);
+  if (!since || since === head) return { head, commits: [], truncated: false, fetched };
+  const n = Math.max(1, Math.min(50, max));
+  const r = await git(['log', `--max-count=${n + 1}`, '--format=%H%x00%s%x00%an', `${since}..${head}`], { cwd: dir, timeout: 15000 });
+  // since 가 사라졌으면(강제 푸시·gc) 범위를 못 만든다 — 새 커밋 0 으로 보고 커서만 옮긴다.
+  if (!r.ok) return { head, commits: [], truncated: false, fetched, lost: true };
+  const commits = r.out.split('\n').filter(Boolean).map((l) => {
+    const [sha, subject, author] = l.split('\0');
+    return { sha, subject: subject || '', author: author || '' };
+  });
+  return { head, commits: commits.slice(0, n), truncated: commits.length > n, fetched };
+}
+
 // ── 로컬 머지(§2.9 git.merge.local) ─────────────────────────────────────────
 async function conflictFiles(cwd) {
   const r = await git(['diff', '--name-only', '--diff-filter=U', '-z'], { cwd });
@@ -765,6 +915,7 @@ module.exports = {
   mergeBaseOf, changedFiles, runStat, fileDiffText, untrackedStat,
   commit, push, githubRepo, prView, prCreate, prMerge, foldChecks, toPrInfo,
   mergeIn, conflictFiles,
+  prComments, prReviews, issueComments, actionsRunIdOf, runLogFailed, issuesList, commitsSince,
   codedError,
   _parse: { parseStatusZ, parseWorktreeList, parseNumstatZ, parseNameStatusZ },
   GIT_PREFIX,
