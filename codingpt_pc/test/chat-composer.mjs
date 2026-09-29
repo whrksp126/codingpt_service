@@ -366,7 +366,7 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
   //  문장 중간에 섞이면 무변환 → 경로 조각을 따로 paste 하면 제자리 변환된다)
   const ds = readFileSync(path.resolve(here, "../../codingpt_daemon/packages/runner-core/cpt-server.js"), "utf8");
   ok("데몬 chatInput 이 이미지 경로 조각을 분리 paste 한다", /splitImagePathSegments/.test(ds) && /IMG_PATH_SEG_RE/.test(ds));
-  ok("조각 전송 시 Enter 를 넉넉히 지연(변환은 비동기 파일 읽기)", /segs\.length > 1 \? 900 : 120/.test(ds));
+  ok("조각 전송 시 Enter 를 넉넉히 지연(변환은 비동기 파일 읽기)", /segs\.length > 1 \? 900 : multiline \? 400 : 120/.test(ds) && /\[Pasted text #/.test(ds));
 
   // 데몬 조각 분리 규칙 — 소스에서 오려내 실행(이미지만 분리·텍스트 파일은 인라인 유지)
   {
