@@ -14,7 +14,7 @@ import { state } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { getPane } from "./pane.js";
-import { icons, agentMarkHtml } from "./icons.js";
+import { icons, agentMarkHtml, iconBtn } from "./icons.js";
 import { buildDashboard, GROUPS, isTaskWorkspace } from "./tasks-model.js";
 import { taskRpc, refreshHostCaps, hostHasTasks, serverHasTasks, onCapsChanged, newOpId, isLocalHostId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
@@ -383,8 +383,10 @@ function renderFrame(wide) {
   const sp = document.createElement("span");
   sp.className = "mt-spacer";
   top.append(sp);
-  const newB = btn("tv-btn", tt("newTask"), () => openNewTask());
-  const refB = btn("tv-btn ghost", tt("refresh"), () => { void refreshHostCaps(); void refreshAll(); });
+  //  상단 동작은 아이콘(툴팁·aria 는 원문) — 텍스트 버튼은 한눈에 안 읽힌다(사용자 지시 2026-09-29).
+  const newB = iconBtn("plus", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("newTask"), onClick: () => openNewTask() });
+  const refB = iconBtn("refresh", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("refresh"), onClick: () => { void refreshHostCaps(); void refreshAll(); } });
+  for (const b of [newB, refB]) b.setAttribute("aria-label", b.title);
   top.append(newB, refB);
   el.append(top);
 

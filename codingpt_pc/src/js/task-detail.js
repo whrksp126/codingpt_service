@@ -674,6 +674,10 @@ function openMergeSheet(hostId, task, run, kind) {
     : [["merge", tt("methodMerge")], ["squash", tt("methodSquash")], ["ff", tt("methodFf")]];
   const m = select(methods, pr ? "squash" : "merge");
   const others = check(tt("discardOthers"), true);
+  //  로컬 머지 + 미커밋 변경 = 커밋 메시지를 같은 시트에(데몬이 커밋 후 머지 — git.pr.create 와 같은 규칙).
+  //  없으면 UNCOMMITTED_CHANGES 로 막다른 길이 된다(2026-09-29 실측).
+  const cm = !pr && run.dirty ? textInput(task.title || "") : null;
+  if (cm) sh.form.append(field(tt("commitMessage"), cm));
   sh.form.append(field(tt("mergeMethod"), m));
   if ((task.runs || []).filter((r) => r.id !== run.id && r.state !== "discarded").length) sh.form.append(others.el);
   if (pr && run.pr && run.pr.checks && run.pr.checks.status === "failing") {
@@ -683,8 +687,10 @@ function openMergeSheet(hostId, task, run, kind) {
     sh.form.append(w);
   }
   const ok = button("tv-btn", pr ? tt("mergePr") : tt("mergeLocal"), () => {
+    if (cm && !cm.value.trim()) return;
     submitOp(sh, ok, hostId, task, run, pr ? "git.pr.merge" : "git.merge.local", {
       method: m.value, discardOthers: others.input.checked,
+      ...(cm ? { commitMessage: cm.value.trim() } : {}),
     });
   });
   sh.foot.append(button("tv-btn ghost", tt("cancel"), sh.close), ok);

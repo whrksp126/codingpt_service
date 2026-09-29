@@ -2578,6 +2578,10 @@ img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에�
 .tasks-view.tv-wide .tv-list { flex: none; width: 360px; border-right: 1px solid var(--border); }
 .tv-detail { flex: 1; min-width: 0; overflow-y: auto; }
 .tv-detail-empty { padding: 40px 20px; text-align: center; color: var(--dim); font-size: 13px; }
+/* 상단 아이콘 동작(새 작업·새로고침) — 타이틀바 도구 버튼과 같은 지표(20px·secondary·호버 배경 없음, 위 .main-top 절). */
+.tv-top .ic-btn.tv-ic { width: 20px; height: 20px; border-radius: 6px; color: var(--text2); opacity: 0.86; transition: opacity 0.12s; }
+.tv-top .ic-btn.tv-ic:hover { background: transparent; color: var(--text2); opacity: 0.96; }
+.tv-top .ic-btn.tv-ic:active { opacity: 1; }
 .tv-btn {
   border: 1px solid var(--border-ctrl); background: var(--elevated2); color: var(--text);
   border-radius: var(--r-sm); padding: 4px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap;

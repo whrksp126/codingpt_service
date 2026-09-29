@@ -1711,6 +1711,9 @@ async function rpcMergeLocal(p) {
   const method = p.method;
   if (!['merge', 'squash', 'ff'].includes(method)) throw codedError('BAD_PARAMS', 'method 가 올바르지 않습니다');
   const discardOthers = p.discardOthers !== false;
+  //  commitMessage — git.pr.create 와 같은 규칙: 미커밋 변경이 있으면 먼저 커밋하고 머지(폰에서 한 시트로).
+  //  없이 dirty 면 UNCOMMITTED_CHANGES(2026-09-29 실측: 로컬 머지 시트에 커밋 수단이 없어 막다른 길이었다).
+  if (p.commitMessage != null && (typeof p.commitMessage !== 'string' || !p.commitMessage.trim())) throw codedError('BAD_PARAMS', 'commitMessage 가 올바르지 않습니다');
   return startRunOp(p, 'merge.local', { states: ['running', 'review_ready'] }, async ({ t, r, deadline }) => {
     const release = claimMerge(t); // ★ 첫 await 전
     try { return await mergeLocalBody(t, r, { p, method, discardOthers, deadline }); } finally { release(); }
@@ -1720,7 +1723,11 @@ async function rpcMergeLocal(p) {
 async function mergeLocalBody(t, r, { p, method, discardOthers, deadline }) {
   {
     await freshStatus(t, r);
-    if (r.dirty) throw codedError('UNCOMMITTED_CHANGES', '먼저 커밋해야 합니다');
+    if (r.dirty) {
+      if (!p.commitMessage) throw codedError('UNCOMMITTED_CHANGES', '먼저 커밋해야 합니다');
+      await doCommit(t, r, { message: p.commitMessage, noVerify: false, deadline });
+      await freshStatus(t, r);
+    }
     r.state = 'merging';
     touch(t, r); save(); emit([t.id], 'run');
     const top = repoTopAbs(t);

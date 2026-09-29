@@ -559,6 +559,26 @@ test('discard — 미커밋 거부 → 미머지 커밋 거부 → force 폐기(
   await assert.rejects(() => getTask(t.id), (e) => e.code === 'TASK_NOT_FOUND');
 });
 
+test('merge.local — 미커밋 변경: commitMessage 없으면 UNCOMMITTED_CHANGES, 있으면 커밋 후 머지(폰 한 시트)', async () => {
+  const { rel, dir } = makeRepo();
+  const t = await createTask(rel, [{ id: 'claude', count: 1 }]);
+  const [w] = t.runs;
+  const wt = path.join(ROOT, w.dir);
+  fs.writeFileSync(path.join(wt, 'dirty.txt'), 'd\n');   // 에이전트가 커밋하지 않고 멈춘 상태
+  const o1 = uuid();
+  await call('git.merge.local', { opId: o1, taskId: t.id, runId: w.id, method: 'merge' });
+  const failed = await waitFor(async () => { await I._drain(); const x = await getTask(t.id); return x.runs[0].lastOp && x.runs[0].lastOp.opId === o1 ? x : null; });
+  assert.strictEqual(failed.runs[0].lastOp.code, 'UNCOMMITTED_CHANGES');
+  await assert.rejects(() => call('git.merge.local', { opId: uuid(), taskId: t.id, runId: w.id, method: 'merge', commitMessage: '   ' }), (e) => e.code === 'BAD_PARAMS');
+  const o2 = uuid();
+  await call('git.merge.local', { opId: o2, taskId: t.id, runId: w.id, method: 'merge', commitMessage: 'dirty 반영' });
+  const x = await waitFor(async () => { await I._drain(); const y = await getTask(t.id); return y.state === 'merged' ? y : null; });
+  assert.strictEqual(x.runs[0].lastOp.ok, true);
+  assert.ok(fs.existsSync(path.join(dir, 'dirty.txt')), '커밋된 변경이 base 로 머지됐다');
+  assert.ok(G(dir, 'log', '--format=%s', '-3').includes('dirty 반영'));
+  closeAll();
+});
+
 test('merge.local (b: base 체크아웃+clean) — cleanup pending 즉시 → 비동기 정리 → 나머지 폐기(merged/discarded 이벤트)', async () => {
   const { rel, dir } = makeRepo();
   const t = await createTask(rel, [{ id: 'claude', count: 1 }, { id: 'codex', count: 1 }]);
