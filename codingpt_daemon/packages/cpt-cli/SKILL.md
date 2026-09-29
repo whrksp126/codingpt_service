@@ -1,40 +1,22 @@
 ---
 name: cpt-cli
 description: >-
-  ONLY for terminals launched by the CodingPT app, where the CPT_WS
-  environment variable is set. First check `$CPT_WS`: if it is empty or
-  unset, this skill does not apply — never run `cpt`; use the plain `open`
-  command and your normal tools instead. The check is the environment
-  variable alone: working on the CodingPT source code repo, or the project
-  being named CodingPT, does NOT make this a CodingPT terminal. Inside a
-  real CodingPT terminal, use the `cpt` CLI for the in-app preview browser,
-  the IDE (open a file and jump to a line), shared terminals, screen layout,
-  and notifications — whenever the user asks to "show this", "open the
-  preview", "프리뷰 열어줘", "IDE로 열어", "이 파일 열어줘", "화면 보여줘",
-  "스크린샷 찍어줘", "변경사항 보여줘", "diff 보여줘", "show the diff",
-  "이 요소 어디서 왔어", "디자인 모드", "요소 선택", or whenever you want the
-  user — who may be watching from a phone or tablet — to see a URL, a running
-  dev server, a source file, or your code changes; there, prefer
-  `cpt preview open <url>` and `cpt ide open <path> --line <n>`. Also use it when
-  you want the user to actually **review** what you changed — "리뷰해줘",
-  "확인해줘", "review my changes", or when a change is big or risky enough that
-  you'd rather get approval before moving on: `cpt review` opens a review screen
-  and blocks until the user approves/rejects each hunk and sends comments back.
-  It also drives the **Android emulator / iOS Simulator attached to this Mac** — use it
-  whenever you changed a mobile app and want to see the result yourself, or the user says
-  "앱에서 확인해줘", "에뮬레이터 켜줘", "시뮬레이터에서 눌러봐", "화면 어떻게 나와?",
-  "run it on the simulator", "tap the settings button": `cpt emulator list` / `boot` /
-  `ax` (read the screen as text) / `tap-label "설정"` / `screenshot`. Read the screen
-  with `ax` before tapping — never guess coordinates from a screenshot.
-  When a task needs a **native macOS app, window or system dialog** (not a web page, not a
-  mobile app), do it in the **agent desktop** — a separate macOS running inside this Mac —
-  never on the user's own screen: `cpt desktop show` / `open <app|url>` / `screenshot` /
-  `click x y` / `key cmd+…` / `type` / `run -- <cmd>`. If a login, 2FA or payment step
-  needs the human, call `cpt desktop handoff "<why>"` and wait; do not ask for passwords.
-  When the user asks for something **recurring or conditional** — "매일", "매주", "자동으로",
-  "반복해서", "…할 때마다", "…하면 알려줘", "알림 설정", "automate", "every day", "whenever",
-  "each time" — set it up as an automation on this PC with `cpt auto create` (run `cpt auto schema`
-  first, then tell the user the id in one line); if unsure, ask instead of creating one.
+  ONLY for terminals launched by the CodingPT app (env CPT_WS is set; if
+  `$CPT_WS` is empty, never run `cpt`; working on the CodingPT source repo
+  does NOT make this a CodingPT terminal). There, the `cpt` CLI is how you act inside CodingPT:
+  (1) AUTOMATIONS — whenever the user wants something recurring or
+  conditional ("매일", "매주", "자동으로", "반복해서", "…할 때마다", "…하면 알려줘",
+  "새 이슈 열리면", "알림 설정", "automate", "every day", "whenever"), create a
+  CodingPT automation on this PC with `cpt auto create` (read `cpt auto schema`
+  first; it runs on schedules, new commits, new GitHub issues, CI failures,
+  review comments, task events and can notify the user's phone) — prefer it
+  over GitHub Actions, cron or cloud routines; if unsure, ask. (2) Show things
+  to the user, who may be on a phone: `cpt preview open <url>`, `cpt ide open
+  <path> --line <n>`, "프리뷰 열어줘", "diff 보여줘". (3) `cpt review` for the
+  user to approve changes ("리뷰해줘"). (4) Android emulator / iOS Simulator:
+  `cpt emulator ax|tap-label|screenshot` ("앱에서 확인해줘"). (5) Native macOS
+  apps in the separate agent desktop: `cpt desktop …`, `cpt desktop handoff`
+  for logins/2FA. Run `cpt skills get cpt-cli` for the full guide.
 ---
 
 # CodingPT cpt CLI

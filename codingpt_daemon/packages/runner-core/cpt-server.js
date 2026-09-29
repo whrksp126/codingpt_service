@@ -1629,8 +1629,22 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
     // 붙여넣기 직후 즉시 Enter 를 보내면 TUI 가 버퍼를 정리하기 전이라 일부만 제출되는 경우가 있다.
     //  이미지 경로 조각이 있으면 변환(파일 읽기)이 비동기라 넉넉히 기다린다 — 미변환 제출이어도
     //  경로 텍스트는 여전히 유효하다(에이전트가 Read 로 읽는다). 즉 안전한 지연일 뿐이다.
-    await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : 120));
+    await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : multiline ? 400 : 120));
     await termBackend.sendKeys(target, { keys: ['Enter'] });
+    // ★ 긴 여러 줄 paste 는 Enter 가 묻힐 수 있다(2026-09-30 실측: 17줄·2.2KB 의 CI 실패 로그를 [고치기]로
+    //  보냈더니 claude 컴포저에 `[Pasted text #1 +17 lines]` 칩만 남고 제출되지 않았다 — 칩으로 접는 처리가
+    //  끝나기 전에 Enter 가 도착). 제출 뒤에도 컴포저에 paste 칩이 그대로면 Enter 를 다시 보낸다(최대 3회).
+    //  칩이 없으면(=제출됨 또는 다른 TUI) 아무것도 하지 않는다 — 추측 조작 금지.
+    if (multiline) {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 350));
+        let out = '';
+        try { out = String(await termBackend.capture(target) || ''); } catch (_) { break; }
+        const composer = out.split('\n').reverse().find((l) => /^\s*❯/.test(l) && !/^\s*❯\s*[1-9]\.\s/.test(l));
+        if (!composer || !/\[Pasted text #\d+/.test(composer)) break;
+        await termBackend.sendKeys(target, { keys: ['Enter'] });
+      }
+    }
   }
   // ★ 제출 직후 화면 확인을 앞당긴다(2026-08-03 사용자 신고: "/model 선택 UI 가 늦게 뜬다").
   //  격리 실측: Enter 후 51ms 면 TUI 에 선택 화면이 이미 있다 — 늦은 건 우리 3초 폴링뿐이었다.
