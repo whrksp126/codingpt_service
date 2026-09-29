@@ -51,6 +51,7 @@ export const TASKS_TEXT = {
     trustNeeded: "폴더 신뢰 확인이 필요해요",
     trustContinue: "신뢰하고 계속",
     discard: "폐기",
+    discardTask: "작업 폐기",
     deleteRecord: "기록 삭제",
     detail: "상세",
     prompt: "프롬프트",

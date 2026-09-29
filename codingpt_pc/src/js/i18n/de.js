@@ -161,6 +161,7 @@ export default {
   "기기 연결": "Geräteverbindung",
   "기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요": "Das Gerät startet noch — sobald es fertig ist, kannst du es steuern",
   "기록 삭제": "Eintrag löschen",
+  "작업 폐기": "Aufgabe verwerfen",
   "기본값으로": "Auf Standard zurücksetzen",
   "기타": "Sonstiges",
   "꺼짐": "Aus",

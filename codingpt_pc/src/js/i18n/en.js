@@ -161,6 +161,7 @@ export default {
   "기기 연결": "Devices",
   "기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요": "The device is still starting up — you can control it as soon as it finishes",
   "기록 삭제": "Delete record",
+  "작업 폐기": "Discard task",
   "기본값으로": "Reset to default",
   "기타": "Other",
   "꺼짐": "Off",

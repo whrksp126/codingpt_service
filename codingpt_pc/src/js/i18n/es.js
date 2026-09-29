@@ -161,6 +161,7 @@ export default {
   "기기 연결": "Dispositivos",
   "기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요": "El dispositivo aún se está iniciando: podrás controlarlo en cuanto termine",
   "기록 삭제": "Eliminar registro",
+  "작업 폐기": "Descartar tarea",
   "기본값으로": "Restablecer",
   "기타": "Otros",
   "꺼짐": "Apagado",
