@@ -46,7 +46,8 @@ function establish(overrides) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-test('상태 파일 — e2ee.json 은 0600 이고 daemon.json 과 분리된다', () => {
+// win32 스킵: 0600 퍼미션 단정(win32 는 0666 으로 보임) — (windows-port 게이트)
+test('상태 파일 — e2ee.json 은 0600 이고 daemon.json 과 분리된다', { skip: process.platform === 'win32' }, () => {
   bootAccount();
   const st = e2ee.loadState();
   assert.strictEqual(st.v, 1);

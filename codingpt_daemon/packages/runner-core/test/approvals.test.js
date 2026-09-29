@@ -354,15 +354,23 @@ test('shim: PermissionRequest 만 approval-hook 으로, 나머지 6종은 무변
 
     // fire-and-forget 6종도 **절대경로**다(2026-07-29, approval-hook 과 동일 규칙) — 맨 이름 `cpt` 는
     //  PATH 조회라 전역 심링크(이제 옵션)에 묶이고 워킹트리 동명 실행파일에 가로채일 수 있다.
+    //  win32 는 계약 4 문법(cmd.exe /d /s /c "…cpt.cmd …") — shim.winHookCommand 한 곳이 정본이다.
     const cptAbs = path.join(iso, '.codingpt', 'bin', 'cpt');
+    const cptCmd = path.join(iso, '.codingpt', 'bin', 'cpt.cmd');
+    const expectHook = (sub) => process.platform === 'win32'
+      ? `cmd.exe /d /s /c "${cptCmd} claude-hook ${sub}"`
+      : `"${cptAbs}" claude-hook ${sub}`;
     for (const [ev, sub] of [['SessionStart', 'session-start'], ['UserPromptSubmit', 'prompt'], ['Notification', 'notification'],
       ['Stop', 'stop'], ['StopFailure', 'stop-failure'], ['SessionEnd', 'session-end']]) {
-      assert.strictEqual(hooks[ev][0].hooks[0].command, `"${cptAbs}" claude-hook ${sub}`, `${ev} 는 절대경로 fire-and-forget 이어야 한다`);
+      assert.strictEqual(hooks[ev][0].hooks[0].command, expectHook(sub), `${ev} 는 절대경로 fire-and-forget 이어야 한다`);
       assert.strictEqual(hooks[ev][0].hooks[0].async, true, `${ev} 가 블로킹되면 claude 가 느려진다`);
     }
     // zdot(ZDOTDIR 체인)은 손대지 않는다 — mtime 이 바뀌면 healStaleTerminals 가 유휴 터미널을 전부 respawn 한다.
-    const zlogin = fs.readFileSync(path.join(iso, '.codingpt', 'shim', 'zdot', '.zlogin'), 'utf8');
-    assert.doesNotMatch(zlogin, /approval/i, 'zdot 에 승인 관련 배선을 넣지 말 것');
+    //  (win32 는 zdot 자체가 없다 — ps 프로필이 등가물. shim §계약 4)
+    if (process.platform !== 'win32') {
+      const zlogin = fs.readFileSync(path.join(iso, '.codingpt', 'shim', 'zdot', '.zlogin'), 'utf8');
+      assert.doesNotMatch(zlogin, /approval/i, 'zdot 에 승인 관련 배선을 넣지 말 것');
+    }
   } finally { runtime.init({ root: prev.root, stateDir: prev.stateDir }); }
 });
 

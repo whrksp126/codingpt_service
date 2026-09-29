@@ -1,0 +1,66 @@
+<!doctype html>
+<!-- 사이드바(기기 우선) 확인용 하네스(개발 전용) — Tauri 없이 브라우저에서 sidebar.js 를 그대로 띄운다.
+     실행: cd src && python3 -m http.server 8899  →  http://localhost:8899/sidebar-harness.html
+     `window.__pick(name)` 로 PC 전환을 코드로도 걸 수 있다(선택에 따라 목록이 갈리는지 확인용). -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>사이드바 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
+<style>body { margin: 0; height: 100vh; display: flex; } #sbRoot { height: 100vh; }</style></head>
+<body>
+<div id="sbRoot"></div>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  const DEVICES = [
+    { id: 11, name: '건호의 MacBook', platform: 'darwin', role: 'host', online: true, isCurrent: true },
+    { id: 12, name: '사무실 iMac', platform: 'darwin', role: 'host', online: true, isCurrent: false },
+    { id: 13, name: '집 PC', platform: 'win32', role: 'host', online: false, isCurrent: false },
+    // 모바일(controller)과 클라우드 러너는 이 목록에 **나오면 안 된다**(기기 = PC 뿐).
+    { id: 14, name: '갤럭시 S24', platform: 'android', role: 'controller', online: true, isCurrent: false },
+    { id: 'cloud', name: '클라우드', platform: 'cloud', role: 'host', runnerKind: 'cloud', online: true },
+  ];
+  const WORKSPACES = [
+    { id: 1, name: 'codingpt', localPath: 'other/project/codingpt', compute: 'local', hostDeviceId: 11, hostOnline: true },
+    { id: 2, name: 'hub', localPath: 'other/project/hub', compute: 'local', hostDeviceId: 11, hostOnline: true },
+    { id: 3, name: 'tokin', localPath: 'work/tokin', compute: 'local', hostDeviceId: 12, hostOnline: true },
+    { id: 4, name: '집에서 하던 것', localPath: 'dev/side', compute: 'local', hostDeviceId: 13, hostOnline: false },
+  ];
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === 'daemon_status') return { paired: true, running: true, deviceId: 11, device_name: '건호의 MacBook' };
+        if (cmd === 'front_base_url') return 'https://codingpt.ghmate.com';
+        return {};
+      },
+    },
+    event: { listen: async () => () => {} },
+  };
+  const S = await import('./js/state.js');
+  const { bootLang } = await import('./js/theme.js');
+  const sb = await import('./js/sidebar.js');
+  bootLang();
+  S.state.paired = true;
+  S.state.daemon = { paired: true, running: true, deviceId: 11 };
+  S.state.me = { id: 999, nickname: '테스트', email: 'test@codingpt.app' };
+  S.state.devices = DEVICES;
+  S.state.currentDeviceId = 11;
+  S.state.workspaces = WORKSPACES;
+  S.state.notifications = [{ id: 1, cwd: 'work/tokin', win: 3, read: false, title: 'a' }];
+  localStorage.removeItem('cpt.activeDeviceId.v1');
+  sb.mountSidebar(document.getElementById('sbRoot'));
+  sb.updateSidebar();
+  S.subscribe(() => sb.updateSidebar());
+  // 검사용 손잡이 — 지금 보이는 PC 행/워크스페이스 행, 그리고 코드로 PC 전환.
+  window.__rows = () => ({
+    pcs: [...document.querySelectorAll('.pc-row')].map((r) => r.querySelector('.pc-nm').textContent + (r.classList.contains('active') ? ' ✓' : '')),
+    wss: [...document.querySelectorAll('.ws-row .wsr-nm')].map((n) => n.textContent),
+    topPlus: !!document.querySelector('.sb-top .ctl-plus, .sb-top [title*="워크스페이스"]'),
+    secs: [...document.querySelectorAll('.sb-sec-nm')].map((n) => n.textContent),
+  });
+  window.__pick = (name) => [...document.querySelectorAll('.pc-row')].find((r) => r.querySelector('.pc-nm').textContent === name)?.click();
+</script>
+</body>
+</html>

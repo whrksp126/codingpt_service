@@ -9,7 +9,15 @@ mod cptsock;
 mod fsapi;
 mod preview;
 mod pty;
+// term-host 파이프 클라이언트(포팅 계약 1) — 프레이밍은 플랫폼 중립(유닛테스트), 커넥션만 win32.
+//  mac 빌드에선 테스트 전용이라 dead_code 를 허용한다(런타임 사용처는 win32 pty/tmux 분기).
+#[cfg_attr(not(windows), allow(dead_code))]
+mod termhost;
 mod tmux;
+// win32 named pipe 겹침 I/O 클라이언트(계약 2 하부) — 동기 핸들의 읽기/쓰기 직렬화로
+//  duplex 채널이 메인 스레드를 영구 블록시키던 문제의 해소. 파일 안 주석이 정본.
+#[cfg(windows)]
+mod winpipe;
 
 use std::path::PathBuf;
 use std::process::Child;
@@ -26,11 +34,106 @@ const DEFAULT_SERVER: &str = "https://codingpt-back.ghmate.com";
 #[cfg(debug_assertions)]
 const DEFAULT_SERVER: &str = "http://localhost:5300";
 
+// ── win32 Job Object — Child::kill() 은 직계 프로세스만 죽여 데몬의 자식(손자)이 고아로 남는다
+//  (유닉스 프로세스 그룹 등가물이 없다). 스폰 직후 데몬을 KILL_ON_JOB_CLOSE Job 에 넣으면 앱이
+//  어떤 경로로 죽어도(크래시 포함 — 핸들 소멸=Job 소멸) 트리가 함께 정리된다.
+//  BREAKAWAY_OK 를 함께 켜는 이유: term-host(윈도우 세션 호스트, 포팅 계약 1)는 데몬이 죽어도
+//  터미널이 살아야 하므로, 데몬이 CREATE_BREAKAWAY_FROM_JOB 으로 탈출시킬 길을 열어 둔다.
+#[cfg(windows)]
+mod winjob {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+
+    pub struct Job(HANDLE);
+    // Job 핸들 조작은 스레드 무관(커널 오브젝트) — raw pointer 필드 때문에 자동 유도만 막혀 있다.
+    unsafe impl Send for Job {}
+
+    impl Job {
+        pub fn new() -> Option<Job> {
+            unsafe {
+                let h = CreateJobObjectW(None, PCWSTR::null()).ok()?;
+                let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                info.BasicLimitInformation.LimitFlags =
+                    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+                if SetInformationJobObject(
+                    h,
+                    JobObjectExtendedLimitInformation,
+                    &info as *const _ as *const core::ffi::c_void,
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+                .is_err()
+                {
+                    let _ = CloseHandle(h);
+                    return None;
+                }
+                Some(Job(h))
+            }
+        }
+
+        pub fn assign(&self, child: &std::process::Child) {
+            use std::os::windows::io::AsRawHandle;
+            unsafe {
+                let _ = AssignProcessToJobObject(self.0, HANDLE(child.as_raw_handle() as _));
+            }
+        }
+
+        // 잔여 트리 즉시 종료. TerminateJobObject 이후에도 Job 오브젝트는 유효 — 재스폰 자식을
+        //  같은 Job 에 다시 assign 할 수 있다(재시작 감시 스레드가 이 성질에 의존).
+        pub fn terminate(&self) {
+            unsafe {
+                let _ = TerminateJobObject(self.0, 1);
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+}
+
 // ── 데몬 생명주기 상태(Tauri managed state) ──────────────────────────
 #[derive(Default)]
 struct Daemon {
     child: Mutex<Option<Child>>, // run 프로세스 핸들
     should_run: Mutex<bool>,     // 감시 스레드 재시작 여부
+    #[cfg(windows)]
+    job: Mutex<Option<winjob::Job>>, // win32 프로세스 트리 묶음(손자 고아 방지)
+}
+
+// 스폰 직후 데몬 자식을 Job 에 편입(win32). 비-win 은 no-op — 유닉스는 kill 이 충분하다
+//  (데몬의 실작업 자식인 tmux 서버는 애초에 독립 생존이 계약이라 트리 정리 대상이 아니다).
+fn attach_daemon_job(state: &Daemon, child: &Child) {
+    #[cfg(windows)]
+    {
+        let mut g = state.job.lock().unwrap();
+        if g.is_none() {
+            *g = winjob::Job::new();
+        }
+        if let Some(job) = g.as_ref() {
+            job.assign(child);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (state, child);
+}
+
+// 데몬 kill 지점 공통 후처리 — win32 는 Job 을 종료해 손자까지 정리한다. 비-win no-op.
+fn kill_daemon_tree(state: &Daemon) {
+    #[cfg(windows)]
+    if let Some(job) = state.job.lock().unwrap().as_ref() {
+        job.terminate();
+    }
+    #[cfg(not(windows))]
+    let _ = state;
 }
 
 // ── 앱 종료 가드 — IDE 미저장 변경 여부(JS 가 dirty 전이마다 set_ide_dirty 로 미러) ──
@@ -212,6 +315,7 @@ async fn update_install(app: AppHandle) -> Result<(), String> {
         if let Some(mut ch) = state.child.lock().unwrap().take() {
             let _ = ch.kill();
         }
+        kill_daemon_tree(&state);
     }
     app.restart();
 }
@@ -225,6 +329,7 @@ fn quit_app(app: AppHandle) {
         if let Some(mut ch) = state.child.lock().unwrap().take() {
             let _ = ch.kill();
         }
+        kill_daemon_tree(&state);
     }
     app.exit(0);
 }
@@ -250,7 +355,8 @@ fn install_state_path() -> Option<PathBuf> {
 
 // 앱 번들 삭제 후 DMG 재설치를 macOS가 알려주는 제거 훅은 없다. 대신 실행 파일 inode를 설치 지문으로
 // 기록한다. 같은 앱의 재실행에서는 유지되고 Finder가 DMG에서 앱을 다시 복사하면 바뀐다.
-// 자동 업데이트도 inode를 바꾸므로 update_install이 목표 버전을 먼저 승인해 두고 재시작한다.
+// 이 지문은 설치 상태 진단에만 쓴다. 앱 번들 교체만으로 ~/.codingpt 의 계정·E2EE 키를 지우면
+// 정상 업데이트/덮어쓰기도 새 기기로 변해 PC가 연동 코드를 발급하지 못하므로 자격 삭제 근거로 쓰지 않는다.
 #[cfg(unix)]
 fn current_install_fingerprint() -> Option<String> {
     use std::os::unix::fs::MetadataExt;
@@ -315,6 +421,8 @@ fn clear_local_account_credentials() {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
             }
+            // TODO(win32): %USERPROFILE%\.codingpt 하위라 기본 ACL 로 타 사용자 접근이 이미 막힌다.
+            //  0600 등가의 명시 DACL(icacls /inheritance:r 상당)은 후속 하드닝으로.
             let _ = std::fs::rename(tmp, path);
         }
     }
@@ -345,8 +453,9 @@ fn is_manual_reinstall(old_fingerprint: &str, fingerprint: &str, authorized_vers
     old_fingerprint != fingerprint && authorized_version != Some(version)
 }
 
-// 최초 도입 실행은 기존 사용자를 로그아웃시키지 않고 지문만 등록한다. 이후 앱 번들이 바뀌었는데
-// update_install이 그 버전을 승인하지 않았다면 수동 재설치이므로 계정 연결을 해제한다.
+// 앱 번들 교체와 "이 PC의 계정 연결 해제"는 서로 다른 사용자 의도다. Finder 덮어쓰기, DMG 재설치,
+// 자동 업데이트 모두 기존 daemon.json/e2ee.json 을 보존한다. 계정 연결 해제는 앱의 명시적 로그아웃
+// 흐름에서만 수행해야 한다. 그래야 PC가 업데이트 뒤에도 항상 기존 신뢰 키로 연동 코드를 발급한다.
 fn reconcile_app_install(_version: &str) {
     #[cfg(debug_assertions)]
     return;
@@ -358,23 +467,14 @@ fn reconcile_app_install(_version: &str) {
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
         let Some(previous) = previous else {
-            // 설치 지문이 없는데 계정 자격은 남아 있다면 앱 번들만 삭제한 뒤 DMG로 다시 설치한 경우다.
-            // 기능 도입 전 버전에서 넘어온 사용자도 한 번 로그아웃되지만, "앱 삭제 = 계정 연결 해제"라는
-            // 명시적 제품 계약을 지키는 편이 이전 자격을 새 설치에 조용히 승계하는 것보다 안전하다.
-            if is_paired() {
-                clear_local_account_credentials();
-                applog("신규 설치에서 잔존 계정 자격 감지 — 로컬 계정 연결 해제");
-            }
-            clear_install_onboarding_state();
+            // 기능 도입 전 설치나 pc-install.json 만 유실된 경우도 로컬 계정/키를 그대로 승계한다.
             write_install_state(&fingerprint, _version, None);
             return;
         };
         let old_fingerprint = previous.get("fingerprint").and_then(|v| v.as_str()).unwrap_or("");
         let authorized_version = previous.get("authorizedVersion").and_then(|v| v.as_str());
         if is_manual_reinstall(old_fingerprint, &fingerprint, authorized_version, _version) {
-            clear_local_account_credentials();
-            clear_install_onboarding_state();
-            applog("수동 앱 재설치 감지 — 로컬 계정 연결 해제");
+            applog("앱 번들 교체 감지 — 로컬 계정 및 암호화 키 유지");
         }
         write_install_state(&fingerprint, _version, None);
     }
@@ -395,7 +495,7 @@ mod install_tests {
     }
 
     #[test]
-    fn dmg_reinstall_clears_account() {
+    fn detects_unapproved_dmg_replacement_without_implying_account_reset() {
         assert!(is_manual_reinstall("fp-a", "fp-b", None, "0.1.193"));
         assert!(is_manual_reinstall("fp-a", "fp-b", Some("0.1.192"), "0.1.193"));
     }
@@ -465,11 +565,27 @@ fn build_command(app: &AppHandle) -> Result<std::process::Command, String> {
     // 종속인데, 자기 package.json(영구 0.1.0)을 보고해 왔다 — 전 사용자가 같은 값이라 "누가 어떤
     // 조합을 쓰는지"를 서버가 알 수 없었다(버전 스큐 진단 불가).
     cmd.env("CPT_APP_VERSION", app.package_info().version.to_string());
+    // 원격 뷰어마다 tmux/xterm 상태를 따로 만들지 않고, 데몬의 terminal-id별 단일 VT 모델을
+    // 구독한다. 기존 tmux 세션/프로세스는 그대로 두고 attach 계층만 canonical registry로 전환.
+    #[cfg(not(windows))]
+    cmd.env("CPT_CANONICAL_TERMINAL", "1");
     // 번들 tmux(사이드카 base/tmux/bin/tmux)가 있으면 주입 → 데몬이 무설치 tmux 사용.
+    //  win32 는 tmux 부재(세션 호스트 = term-host, 포팅 계약 1) — 주입하지 않는다.
+    #[cfg(not(windows))]
     if let Some(base) = node.parent() {
         let bundled_tmux = base.join("tmux").join("bin").join("tmux");
         if bundled_tmux.exists() {
             cmd.env("CODINGPT_TMUX", bundled_tmux);
+        }
+        // 번들 lume(사이드카 base/lume/lume) — 에이전트 데스크톱(게스트 macOS VM). 데몬 desktop.js 가 우선 사용.
+        let bundled_lume = base.join("lume").join("lume");
+        if bundled_lume.exists() {
+            cmd.env("CPT_LUME", bundled_lume);
+        }
+        // 번들 vt-h264(사이드카 base/vt-h264) — 에이전트 PC 라이브 영상 인코더(VideoToolbox). 데몬 desktop.js 가 우선 사용.
+        let bundled_vt = base.join("vt-h264");
+        if bundled_vt.exists() {
+            cmd.env("CPT_VT_H264", bundled_vt);
         }
     }
     #[cfg(windows)]
@@ -586,6 +702,7 @@ async fn daemon_pair_poll(
                 let _ = ch.wait();
             }
         }
+        kill_daemon_tree(&state);
         start_run(&app, &state)?;
     }
     Ok(v)
@@ -606,6 +723,7 @@ fn start_run(app: &AppHandle, state: &State<Daemon>) -> Result<(), String> {
         let mut cmd = build_command(app)?;
         cmd.arg("run");
         let child = cmd.spawn().map_err(|e| format!("데몬 run 실패: {e}"))?;
+        attach_daemon_job(state, &child);
         *guard = Some(child);
     }
     *state.should_run.lock().unwrap() = true;
@@ -627,6 +745,7 @@ fn daemon_stop(app: AppHandle, state: State<Daemon>) -> Status {
         let _ = ch.kill();
         let _ = ch.wait();
     }
+    kill_daemon_tree(&state);
     let _ = app.emit("daemon-changed", ());
     daemon_status(state)
 }
@@ -753,6 +872,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                     if let Some(mut ch) = state.child.lock().unwrap().take() {
                         let _ = ch.kill();
                     }
+                    kill_daemon_tree(&state);
                 }
                 app.exit(0);
             }
@@ -763,11 +883,21 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                 show_window(tray.app_handle());
             }
         });
-    // 메뉴바 트레이 아이콘: 흰 글리프(alpha=모양)를 템플릿 이미지로 지정 → macOS 라이트/다크
+    // 메뉴바 트레이 아이콘: macOS 는 흰 글리프(alpha=모양)를 템플릿 이미지로 지정 → 라이트/다크
     //  메뉴바에 맞춰 자동 틴트. 앱/독 아이콘(초록)과 분리한다.
-    match tauri::image::Image::from_bytes(include_bytes!("../icons/tray.png")) {
+    //  win32 는 템플릿 개념이 없어 흰 글리프가 라이트 작업표시줄에서 안 보인다 — 다크 원형 배지 위
+    //  글리프(무채색, tray.png 에서 생성한 tray-win.png)를 쓴다.
+    #[cfg(target_os = "macos")]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray.png");
+    #[cfg(not(target_os = "macos"))]
+    let tray_bytes: &[u8] = include_bytes!("../icons/tray-win.png");
+    match tauri::image::Image::from_bytes(tray_bytes) {
         Ok(icon) => {
-            builder = builder.icon(icon).icon_as_template(true);
+            builder = builder.icon(icon);
+            #[cfg(target_os = "macos")]
+            {
+                builder = builder.icon_as_template(true);
+            }
         }
         Err(_) => {
             if let Some(icon) = app.default_window_icon() {
@@ -822,6 +952,9 @@ pub fn run() {
             daemon_unpair,
             // 터미널 pane (로컬 tmux)
             pty::pty_open,
+            pty::pty_modes,
+            pty::pty_history,
+            bridge::terminal_local_endpoint,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_claim,
@@ -851,6 +984,7 @@ pub fn run() {
             bridge::devtools_window,
             bridge::project_attach,
             bridge::desktop_login_url,
+            bridge::front_base_url,
             bridge::fetch_ws_session,
             bridge::save_ws_session,
             bridge::cloud_terminal_start,
@@ -893,6 +1027,7 @@ pub fn run() {
             cptsock::e2ee_local,
             cptsock::agents_local,
             cptsock::ports_local,
+            cptsock::surface_local,
             cptsock::review_local,
             cptsock::emulator_local,
             cptsock::mode_poke,
@@ -915,6 +1050,7 @@ pub fn run() {
             preview::preview_set_cookies,
             preview::preview_close,
             preview::preview_shield,
+            preview::preview_wheel,
             preview::preview_zoom,
             preview::window_set_bg,
             // 내장 IDE 파일 접근
@@ -1023,6 +1159,7 @@ pub fn run() {
                         if let Ok(mut cmd) = build_command(&h) {
                             cmd.arg("run");
                             if let Ok(child) = cmd.spawn() {
+                                attach_daemon_job(&state, &child);
                                 *state.child.lock().unwrap() = Some(child);
                                 let _ = h.emit("daemon-changed", ());
                             }
@@ -1108,6 +1245,7 @@ pub fn run() {
                         let _ = ch.kill();
                         let _ = ch.wait();
                     }
+                    kill_daemon_tree(&state);
                 }
                 // grouped view 세션 정리(primary/window 는 폰과 공유하므로 보존).
                 if let Some(ctx) = app_handle.try_state::<tmux::TmuxCtx>() {

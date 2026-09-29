@@ -11,11 +11,13 @@ import {
   focusNeighbor,
   focusCurrentPane,
   smartAdd,
-  headerButton,
+  openWebviewMenu,
 } from "./workspace-view.js";
 import { registerCommands, runCommand } from "./command-run.js";
 import { commandForCombo } from "./commands.js";
-import { bindings, comboOf } from "./shortcuts.js";
+import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
+import { basename } from "./path-utils.js";
+import { initWinCaption } from "./win-caption.js";
 import { openPalette, isPaletteOpen } from "./palette.js";
 import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
 import {
@@ -44,7 +46,7 @@ function initQuitGuard() {
   api.onQuitGuard(() => {
     if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
     const files = ideDirtyPaths();
-    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${p.split("/").pop()}</div>`).join("")
+    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${basename(p) || p}</div>`).join("")
       + (files.length > 6 ? `<div class="qg-file">… 외 ${files.length - 6}개</div>` : "");
     const bd = document.createElement("div");
     bd.className = "quit-guard-backdrop";
@@ -63,6 +65,13 @@ function initQuitGuard() {
     bd.addEventListener("click", (e) => { if (e.target === bd) bd.remove(); });
     document.body.appendChild(bd);
   });
+}
+
+// win32 표식 + 창틀 — styles.css 의 트래픽라이트 여백 변수(--titlebar-inset-*)가 이 속성을 보고,
+//  decorations:false 창의 우측 상단 min/max/close 버튼(win-caption.js)을 단다. mac 은 아무 것도 안 한다.
+if (IS_WINDOWS) {
+  document.documentElement.dataset.os = "windows";
+  initWinCaption();
 }
 
 const shellEl = document.querySelector(".shell");
@@ -153,11 +162,13 @@ function focusedPane() {
 // (구) 앱 활성화 시 창 크기 회수(resize-window 클레임)는 폐지 — 전용 세션 모델에선 window-size
 //  latest 가 입력/리사이즈하는 클라이언트를 자동으로 따라간다(수동 클레임 = 크기 뺏기 전쟁의 근원).
 
-// ── Ctrl+F(터미널 아닌 곳에서만) ──
+// ── Ctrl+F(터미널 아닌 곳에서만) — macOS 전용 ──
 //  ⌘F 는 아래 단축키 표(find.open)가 처리한다. Ctrl+F 만 여기 남는 이유: 터미널에서는 셸의
 //  forward-char 를 살려야 해서 **pane 종류를 봐야** 하는데, 이건 조합이 아니라 상황 판정이라
 //  재바인딩 표에 담기지 않는다.
-window.addEventListener("keydown", (e) => {
+//  win32 에선 걸지 않는다 — Ctrl 이 곧 Mod 라 사용자가 find.open 을 Ctrl+F 로 재바인딩하면
+//  이 핸들러와 이중 처리가 되고, 기본값(Ctrl+Shift+F)은 표가 이미 처리한다(계약 5).
+if (!IS_WINDOWS) window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() !== "f") return;
   if (!e.ctrlKey || e.metaKey) return;
   if (state.view === "settings") return;
@@ -180,8 +191,8 @@ registerCommands({
   "ws.addIde": () => smartAdd("ide"),
   "ws.addPreview": () => smartAdd("preview"),
   "ws.addEmulator": () => smartAdd("emulator"),
-  // 이 둘은 고르는 것이 목적이라 메뉴를 연다(헤더 버튼과 같은 자리에서).
-  "ws.ports": () => headerButton("ws.ports")?.click(),
+  // 이것은 고르는 것이 목적이라 메뉴를 연다(헤더 [+] 와 같은 자리·같은 함수).
+  "ws.ports": () => openWebviewMenu(),
 
   "pane.splitRight": () => S.splitFocused("h", "terminal"),
   "pane.splitDown": () => S.splitFocused("v", "terminal"),
@@ -230,10 +241,20 @@ function startPreviewShieldWatch() {
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
   const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
-  setInterval(() => {
+  const check = () => {
     const on = !!document.querySelector(SEL);
-    if (on !== cur) { cur = on; api.previewShield(on); }
-  }, 80);
+    // win32 프리뷰(B2 preview_win)가 아직 없는 빌드에서도 검사가 콘솔 오류를 쏟지 않게 삼킨다.
+    if (on !== cur) { cur = on; Promise.resolve(api.previewShield(on)).catch(() => {}); }
+  };
+  // 80ms 폴링 → DOM 변화 때만 검사(2026-08-15 성능 라운드: 유휴에도 초당 12.5회 전체 셀렉터
+  //  매칭이 돌았다). 변화 폭주는 마이크로태스크로 합쳐 버스트당 1회만 검사한다. 오히려 폴링보다
+  //  빠르다(오버레이 등장 즉시 같은 프레임에 실드 on).
+  let queued = false;
+  const schedule = () => { if (queued) return; queued = true; queueMicrotask(() => { queued = false; check(); }); };
+  const mo = new MutationObserver(schedule);
+  mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  check();
+  setInterval(check, 1000); // 안전망(관찰 사각 대비) — 저빈도라 비용 무시 가능
 }
 
 // 설치본이 오래됐어도 로그인 여부와 관계없이 다른 초기 데이터보다 먼저 최신판으로 맞춘다.
@@ -245,7 +266,12 @@ async function maybeInstallSetupUpdate() {
   setBootstrap(i18n.t('최신 버전을 확인하는 중'), 18);
   let result;
   try {
-    result = await api.updateCheck();
+    // 확인 자체는 3초 상한 — 업데이트 서버가 느리면 첫 화면이 그만큼 늦게 뜬다(체감 기동 시간).
+    //  상한 초과 = 이번 기동은 현재 버전으로 진행(다음 기동/설정>정보 확인이 다시 잡는다).
+    result = await Promise.race([
+      api.updateCheck(),
+      new Promise((res) => setTimeout(() => res(null), 3000)),
+    ]);
   } catch (_) {
     return;
   }
@@ -284,10 +310,11 @@ async function maybeInstallSetupUpdate() {
 
   setBootstrap(i18n.t('계정과 작업 공간을 불러오는 중'), 38);
   await Promise.allSettled([S.loadWorkspaces(), S.loadMe()]);
-  setBootstrap(i18n.t('연결된 기기와 알림을 불러오는 중'), 64);
-  await Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]);
-  setBootstrap(i18n.t('권한과 보안 상태를 확인하는 중'), 82);
-  await api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
+  setBootstrap(i18n.t('연결된 기기와 알림을 불러오는 중'), 70);
+  // 기기/알림/승인·OS 알림권한은 첫 화면을 막을 이유가 없다(2026-08-15 성능 라운드) —
+  //  백그라운드로 돌리고 도착하면 emit 이 그린다. 워크스페이스/계정만 첫 페인트의 전제다.
+  void Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]).then(() => S.emit());
+  void api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
 
   const setupPending = restorePendingSetup();
   await S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필

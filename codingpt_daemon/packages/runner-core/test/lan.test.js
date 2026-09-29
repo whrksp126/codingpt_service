@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: lan.json 0600 퍼미션 단정 + 순차 의존(B-2 가 LAN_PORT 를 세움) — win32 정리 후
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('lan.test.js: win32 스킵 — lan.json 0600 퍼미션 단정 + 순차 의존(B-2 가 LAN_PORT 를 세움)', { skip: true }, () => {});
+  return;
+}
+
 // LAN 직결(임무 F) 회귀/계약 테스트 — node --test
 //   실행: node --test packages/runner-core/test/lan.test.js
 //
@@ -179,6 +187,14 @@ test('B. 주소 분류 + 피어 정책 — 공용/링크로컬 거부, loopback/
 });
 
 // ── G. 경로 상태(승격/강등/최소체류/쿨다운/부활) ─────────────────────────
+test('B2. 가상 머신 NAT 인터페이스는 LAN 주소로 세지 않는다(에이전트 PC 켜고 끌 때 lan_update 가 나가 폰 직결이 끊기던 것)', () => {
+  for (const n of ['bridge100', 'bridge101', 'vmnet8', 'utun3', 'awdl0', 'docker0', 'veth1a2b', 'tailscale0']) assert.ok(lan.isVirtIf(n), n);
+  for (const n of ['en0', 'en1', 'eth0', 'wlan0', 'bridge0', 'br0']) assert.ok(!lan.isVirtIf(n), n);
+  //  실제 인터페이스 목록으로 돌려도 bridge1xx 는 나오지 않는다.
+  for (const a of lan.localAddrs()) assert.ok(!/^bridge1\d\d$/.test(a.ifname), a.ifname);
+  assert.strictEqual(typeof lan.addrsKey(lan.localAddrs()), 'string');
+});
+
 test('G. 경로 상태 머신 — 2연속 승격 / 하드 즉시 강등+쿨다운 배가 / 최소체류 / 부활', () => {
   let now = 1_000_000;
   lan.__setNow(() => now);
@@ -441,17 +457,19 @@ test('E-2. pty 채널: resize(TEXT)/stdin(DATA) 계약 + select 스왑 + 같은 
   const s = await lan.connect({ host: '127.0.0.1', port: LAN_PORT, grantId: g.grantId, secret: g.secret, clientKey: g.clientKey, kind: 'pc' });
   try {
     // 릴레이(daemonRelayService → openPtyStream)가 넘기는 것과 **완전 동일한 키**.
-    const params = { cwd: WS_REL, paneId: 'pL', client: 'cL', win: a.index, cols: 80, rows: 24 };
+    const params = { cwd: WS_REL, paneId: 'pL', client: 'cL', win: a.index, cols: 80, rows: 24, terminalProtocol: 3 };
     const ch = await s.openPty(params);
     const rx = [];
     ch.onData = (buf) => rx.push(buf);
-    // 첫 resize 는 TEXT 프레임(= 옛 텍스트 JSON). 채널 오픈 직후 보내 early 버퍼 경로도 함께 태운다.
+    // 첫 resize 는 TEXT 프레임(텍스트 JSON). 채널 오픈 직후 보내 early 버퍼 경로도 함께 태운다.
     ch.sendText(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
-    await sleep(1300); // attach + nudge(600ms) 안정화
-    assert.ok(Buffer.concat(rx).length > 0, 'attach 출력이 LAN 채널로 흐르지 않는다');
+    await sleep(1300);
+    assert.ok(Buffer.concat(rx).length > 0, 'attach 출력(CPT3 프레임)이 LAN 채널로 흐르지 않는다');
 
-    const clients = await tmux(['list-clients', '-t', `=${pty.termSession(NS, a.index)}`, '-F', '#{client_width}x#{client_height}']);
-    assert.match(clients.trim(), /(^|\s)100x30(\s|$)/, `TEXT resize 가 tmux 클라이언트에 반영되지 않았다(80x24 고착): ${clients.trim()}`);
+    // v3: 크기는 소유자 1명이 정하고 데몬이 `resize-window` 로 **window** 에 못 박는다
+    //  (뷰어마다 tmux 클라이언트가 붙던 v2 와 달리 control 클라이언트는 하나뿐이다).
+    const win1 = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, a.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(win1.trim(), '100x30', `TEXT resize 가 window 에 반영되지 않았다: ${win1.trim()}`);
 
     ch.write(Buffer.from('echo LAN-A\r'));
     await sleep(700);
@@ -473,11 +491,12 @@ test('E-2. pty 채널: resize(TEXT)/stdin(DATA) 계약 + select 스왑 + 같은 
     const ch2 = await s.openPty({ ...params, win: b.index, cols: 90, rows: 26 });
     ch2.sendText(JSON.stringify({ type: 'resize', cols: 90, rows: 26 }));
     await sleep(1300);
-    assert.strictEqual(closedOld, true, '옛 스트림이 닫히지 않았다(같은 세션에 tmux 클라이언트 2개 = 크기 핑퐁)');
+    assert.strictEqual(closedOld, true, '옛 스트림이 닫히지 않았다(죽은 뷰어가 릴레이 소켓·구독을 붙잡는다)');
     const cl2 = (await tmux(['list-clients', '-t', `=${pty.termSession(NS, b.index)}`, '-F', '#{client_width}x#{client_height}']))
       .split('\n').map((l) => l.trim()).filter(Boolean);
-    assert.strictEqual(cl2.length, 1, `경로 전환 후 tmux 클라이언트가 ${cl2.length}개 — 1개여야 한다(§5.1)`);
-    assert.strictEqual(cl2[0], '90x26', `승계된 클라이언트 크기가 틀리다: ${cl2[0]}`);
+    assert.strictEqual(cl2.length, 1, `control 클라이언트가 ${cl2.length}개 — v3 는 정본당 1개여야 한다`);
+    const win2 = await tmux(['display-message', '-p', '-t', `=${pty.termSession(NS, b.index)}:0`, '#{window_width}x#{window_height}']);
+    assert.strictEqual(win2.trim(), '90x26', `승계된 스트림의 크기가 window 에 안 걸렸다: ${win2.trim()}`);
     ch2.close();
     await sleep(200);
   } finally {

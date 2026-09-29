@@ -1,0 +1,95 @@
+# Windows 포팅 CI — docs/windows-port/design.md 계약 6.
+#  main CI(ci.yml — macOS/리눅스 경로)와 분리해 win32 컴파일·테스트만 검증한다.
+#  · rust-check  : src-tauri 를 msvc 타깃으로 타입체크(링크 없음) — B1 스위프 진행도 게이트
+#  · daemon-test : runner-core 테스트를 실제 win32 에서 실행(유닉스 소켓/퍼미션/셔뱅 의존 파일은
+#                  테스트 파일 상단의 process.platform==='win32' 가드가 스킵 — 재배선 후 해제)
+#  · nsis-build  : 수동 트리거 시에만 NSIS 번들 조립. **미서명**(코드서명 인증서 확보 전 —
+#                  테스트 전용 아티팩트, 배포 금지). 업데이터 아티팩트도 서명키가 없어 생략
+#                  (tauri.windows.conf.json 의 createUpdaterArtifacts=false — 웨이브 3에서 서명과 함께 활성화).
+name: windows-port
+on:
+  push:
+    branches: [windows-port]
+  workflow_dispatch:
+    inputs:
+      nsis:
+        description: 'NSIS 번들까지 빌드(미서명 테스트 아티팩트)'
+        type: boolean
+        default: false
+
+jobs:
+  rust-check:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: codingpt_pc/src-tauri, shell: bash } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust msvc 툴체인
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc && rustup default stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codingpt_pc/src-tauri/target
+          key: winport-cargo-${{ hashFiles('codingpt_pc/src-tauri/Cargo.lock') }}
+          restore-keys: winport-cargo-
+      - name: cargo check (x86_64-pc-windows-msvc)
+        run: |
+          mkdir -p resources/daemon   # tauri build.rs 가 bundle.resources 경로 존재를 요구(사이드카는 번들 단계에서 조립)
+          cargo check --target x86_64-pc-windows-msvc --locked
+
+  daemon-test:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: codingpt_daemon, shell: bash } }
+    env:
+      CPT_SHIM_NO_GLOBAL_LINK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_daemon/package-lock.json }
+      # --ignore-scripts: 네이티브 빌드 생략 — 테스트는 pty 무접촉(ci.yml 의 daemon job 과 동일 규칙)
+      - run: npm ci --ignore-scripts
+      - run: node --test packages/runner-core/test/*.test.js
+
+  nsis-build:
+    # 수동 트리거 + nsis 체크 시에만 — 번들은 비싸고(네이티브 npm ci + NSIS) 매 push 에 필요 없다.
+    if: github.event_name == 'workflow_dispatch' && inputs.nsis
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: codingpt_pc/package-lock.json }
+      - name: Rust msvc 툴체인
+        shell: bash
+        run: rustup toolchain install stable --profile minimal --target x86_64-pc-windows-msvc && rustup default stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            codingpt_pc/src-tauri/target
+          key: winport-cargo-${{ hashFiles('codingpt_pc/src-tauri/Cargo.lock') }}
+          restore-keys: winport-cargo-
+      # 데몬 의존성은 **scripts 포함 npm ci** — node-datachannel 은 prebuild 가 아니라 이 머신의
+      # 컴파일 산물이 번들에 그대로 들어간다(win32 번들은 Windows 러너 npm ci 필수 — bundle-sidecar 가 강제).
+      - name: 데몬 의존성 (win32 네이티브 — 번들에 그대로 들어감)
+        working-directory: codingpt_daemon
+        shell: bash
+        run: npm ci
+      - name: PC 의존성 (tauri CLI)
+        working-directory: codingpt_pc
+        shell: bash
+        run: npm ci
+      # tauri 가 windows 오버레이(tauri.windows.conf.json)를 자동 병합: beforeBuildCommand 가
+      # bash scripts/bundle-sidecar.sh win32-x64 로 사이드카(Node 런타임+데몬+term-host)를 조립한다.
+      - name: tauri build (NSIS · 미서명)
+        working-directory: codingpt_pc
+        shell: bash
+        run: npm run tauri build -- --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codingpt-windows-nsis-unsigned
+          path: codingpt_pc/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -4,6 +4,7 @@
 import { api } from "./api.js";
 import { sealedRpc } from "./e2ee.js";
 import lan from "./lan.js";
+import { basename, splitSegs } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 const enc = encodeURIComponent;
@@ -13,7 +14,7 @@ const enc = encodeURIComponent;
 function nestTree(rootRel, items) {
   const root = { children: new Map() };
   for (const it of items || []) {
-    const parts = String(it.path || "").split("/").filter(Boolean);
+    const parts = splitSegs(it.path); // `/`·`\` 양쪽 인식(win32 호스트 대비)
     if (!parts.length) continue;
     let cur = root;
     let rel = rootRel;
@@ -61,7 +62,7 @@ export function makeRemoteFs(hostDeviceId) {
       const base = (rel || "").replace(/\/+$/, "");
       return (r?.matches || []).map((m) => ({
         path: base ? `${base}/${m.path}` : m.path,
-        name: String(m.path || "").split("/").pop(),
+        name: basename(m.path),
         line: m.line,
         text: m.text,
       }));

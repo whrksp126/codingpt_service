@@ -4,16 +4,25 @@
 //  · 여기서는 window 관리·git 브랜치·리스닝 포트 등 "제어" 명령만. 실제 스트림은 pty.rs.
 
 use std::path::PathBuf;
+#[cfg(not(windows))]
 use std::process::Command;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+#[cfg(not(windows))]
+use tauri::Manager;
 
+// win32 에는 tmux 가 없다(세션 호스트 = term-host, 포팅 계약 1) — 이 파일의 "제어" API 는 시그니처를
+//  유지한 채 win32 분기가 term-host 단발 op(list/has/create/kill)로 같은 의미론을 재현한다.
+//  세션명 규칙(session_for/term_session)은 문자열 그대로 공유(상위 계층 무수정 조건).
+#[cfg(not(windows))]
 pub const TMUX_SOCKET: &str = "codingpt";
 pub const TMUX_SESSION: &str = "codingpt"; // 홈 루트 공유 세션(폰 하위호환)
 
 // 번들 tmux / tmux.conf 경로를 앱 리소스에서 해석해 들고 다니는 컨텍스트(설정 시 1회 계산).
+//  win32 는 tmux 부재로 빈 값(필드 미사용) — managed state 시그니처 공유를 위해 형태만 유지.
 #[derive(Clone)]
+#[cfg_attr(windows, allow(dead_code))]
 pub struct TmuxCtx {
     pub tmux: PathBuf,
     pub conf: Option<PathBuf>,
@@ -21,6 +30,7 @@ pub struct TmuxCtx {
 
 // resource_dir 아래 사이드카(bundle-sidecar.sh 산출물)에서 tmux/tmux.conf 를 찾는다.
 //  bundle.resources 설정에 따라 daemon/ 또는 resources/daemon/ 하위 → 후보 탐색.
+#[cfg(not(windows))]
 fn bundled_tmux_paths(app: &AppHandle) -> Option<(PathBuf, Option<PathBuf>)> {
     let res = app.path().resource_dir().ok()?;
     for c in ["daemon", "resources/daemon", "_up_/daemon"] {
@@ -36,6 +46,7 @@ fn bundled_tmux_paths(app: &AppHandle) -> Option<(PathBuf, Option<PathBuf>)> {
 }
 
 // TmuxCtx 해석: 번들 tmux 우선 → CODINGPT_TMUX env → PATH/표준 경로. conf 는 번들 우선, 없으면 dev 모노레포 폴백.
+#[cfg(not(windows))]
 pub fn resolve_ctx(app: &AppHandle) -> TmuxCtx {
     if let Some((bin, conf)) = bundled_tmux_paths(app) {
         return TmuxCtx { tmux: bin, conf };
@@ -63,9 +74,24 @@ pub fn resolve_ctx(app: &AppHandle) -> TmuxCtx {
     TmuxCtx { tmux, conf }
 }
 
-// 홈 디렉토리 절대경로.
+// win32 TmuxCtx: tmux 좌표가 없다 — 터미널 백엔드 좌표(term-host 파이프 경로)는 TmuxCtx 가 아니라
+//  termhost::pipe_path() 가 그때그때 유도한다(env CPT_TERMHOST_SOCK 우선 → homedir 해시. 상태가
+//  아니라 규칙이라 들고 다닐 게 없다). 유닉스 경로 하드코딩 폴백은 win32 에 존재하지 않는다.
+#[cfg(windows)]
+pub fn resolve_ctx(_app: &AppHandle) -> TmuxCtx {
+    TmuxCtx { tmux: PathBuf::new(), conf: None }
+}
+
+// 홈 디렉토리 절대경로(폴백은 플랫폼 루트 — win32 에 "/" 는 무의미).
 pub fn home() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+    #[cfg(windows)]
+    {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from(r"C:\"))
+    }
+    #[cfg(not(windows))]
+    {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+    }
 }
 
 // 홈-상대 localPath → (세션명, 시작 절대경로). 데몬 sessionForCwd 규칙 1:1.
@@ -116,6 +142,7 @@ pub fn new_tid() -> i64 {
 //  되고, 그러면 tmux 가 출력의 제어문자(탭 구분자!)와 한글을 '_' 로 이스케이프해 list 파싱이
 //  전멸한다(살아있는 세션이 0개로 보여 탭 오소거 — 2일 추적 끝에 확정한 실사고 근원).
 //  pty.rs 스트림 spawn 엔 이미 있었고 이 제어 경로에만 빠져 있었다.
+#[cfg(not(windows))]
 pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new(&ctx.tmux);
     cmd.arg("-L").arg(TMUX_SOCKET);
@@ -140,6 +167,7 @@ pub fn run(ctx: &TmuxCtx, args: &[&str]) -> Result<String, String> {
 // 주의: tmux -t 는 접두사 매칭 — 세션 타겟은 반드시 '=' 정확 일치로 지정한다(이 파일 전체 규칙).
 // detached 세션 생성(+서버 첫 기동이면 -f 로 conf 로드). duplicate = Err(호출측이 tid 재시도/스킵) —
 //  성공으로 뭉개면 기존 터미널 세션을 오인 점유(마이그레이션 move-window -k 덮어쓰기)할 수 있다.
+#[cfg(not(windows))]
 fn new_detached_session(ctx: &TmuxCtx, name: &str, abs: &PathBuf) -> Result<(), String> {
     let abs_s = abs.to_string_lossy().to_string();
     let mut args: Vec<String> = Vec::new();
@@ -159,6 +187,7 @@ fn new_detached_session(ctx: &TmuxCtx, name: &str, abs: &PathBuf) -> Result<(), 
 
 // new-session -e 로 넣을 env(-e KEY=VAL) 목록 — 초기 셸부터 shim 활성화. inject_pool_env(세션 env 영속)와
 //  같은 값이되, 이건 spawn 시점 적용이라 초기 셸이 바로 받는다.
+#[cfg(not(windows))]
 fn pool_env_args(ctx: &TmuxCtx, abs: &PathBuf) -> Vec<String> {
     let h = home();
     let rel = abs
@@ -189,6 +218,7 @@ fn pool_env_args(ctx: &TmuxCtx, abs: &PathBuf) -> Vec<String> {
 }
 
 // ensure_auto_rename 의 프로세스당 세션 1회 래퍼 — ensure_session 이 pane 부팅마다 불리므로 절약.
+#[cfg(not(windows))]
 fn ensure_auto_rename_once(ctx: &TmuxCtx, session: &str) {
     use std::collections::HashSet;
     use std::sync::{Mutex, OnceLock};
@@ -208,8 +238,10 @@ fn ensure_auto_rename_once(ctx: &TmuxCtx, session: &str) {
 //  포맷은 데몬 tmux.conf·pty.js 와 3벌 동기 — 한쪽만 수정 금지.
 //  이미 떠 있는 서버(구 conf)에도 전역 옵션을 런타임 주입하고, 구 빌드가 -n 으로 만들어
 //  per-window automatic-rename 이 꺼진 "터미널 N" window 를 개별로 다시 켠다(수동 이름은 보존).
+#[cfg(not(windows))]
 const AUTO_RENAME_FMT: &str =
     "#{?#{||:#{==:#{pane_current_command},zsh},#{||:#{==:#{pane_current_command},bash},#{||:#{==:#{pane_current_command},sh},#{||:#{==:#{pane_current_command},fish},#{||:#{==:#{pane_current_command},-zsh},#{||:#{==:#{pane_current_command},-bash},#{==:#{pane_current_command},login}}}}}}},#{b:pane_current_path},#{?#{&&:#{!=:#{pane_title},},#{&&:#{!=:#{pane_title},#{host}},#{&&:#{!=:#{pane_title},#{host_short}},#{?#{m:*@#{host_short}*,#{pane_title}},0,1}}}},#{pane_title},#{pane_current_command}}}";
+#[cfg(not(windows))]
 pub fn ensure_auto_rename(ctx: &TmuxCtx, session: &str) {
     let _ = run(ctx, &["set-window-option", "-g", "automatic-rename-format", AUTO_RENAME_FMT]);
     let _ = run(ctx, &["set-window-option", "-g", "automatic-rename", "on"]);
@@ -227,6 +259,7 @@ pub fn ensure_auto_rename(ctx: &TmuxCtx, session: &str) {
 
 // 풀 세션 환경에 cpt CLI 좌표 주입 — 이후 생성되는 window 셸이 상속(데몬 injectPoolEnv 미러).
 //  PC 가 풀을 먼저 만들어도 터미널 안의 `cpt` 가 자기 워크스페이스/소켓을 알 수 있게 한다.
+#[cfg(not(windows))]
 fn inject_pool_env(ctx: &TmuxCtx, session: &str, abs: &PathBuf) {
     let h = home();
     let rel = abs
@@ -269,6 +302,7 @@ pub struct WindowInfo {
 }
 
 // 세션의 window 목록(이름 포함 — 공유 풀의 "내역" 원천).
+#[cfg(not(windows))]
 pub fn list_windows(ctx: &TmuxCtx, session: &str) -> Vec<WindowInfo> {
     let out = match run(
         ctx,
@@ -308,6 +342,7 @@ pub struct NewWindowInfo {
 //  window name(자동 개명)이 곧 전 기기 공유 탭 이름.
 //  "서버 없음" = 터미널 0개(정상) → Ok(빈 목록). 그 외 오류 = Err — 호출측(리컨실러)이 빈 목록을
 //  "전부 삭제됨" 으로 신뢰할 수 있게 오류와 진짜 0개를 구분한다.
+#[cfg(not(windows))]
 pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Result<Vec<WindowInfo>, String> {
     let out = match run(
         ctx,
@@ -349,6 +384,7 @@ pub fn list_terminals(ctx: &TmuxCtx, ns: &str) -> Result<Vec<WindowInfo>, String
 
 // 새 터미널 생성(전 기기에 나타남) — 전용 세션 detached 생성 + cpt env 주입.
 //  이름은 자동 개명(automatic-rename)이 부여 — -n 지정은 automatic-rename 을 꺼서 금지.
+#[cfg(not(windows))]
 pub fn create_terminal(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
     let mut last_err = String::new();
     for _ in 0..3 {
@@ -371,6 +407,7 @@ pub fn create_terminal(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) -> Result<NewWind
 // 레거시 공유 풀(ns 세션의 window들) → 전용 세션 마이그레이션(데몬 migrateLegacyPool 미러).
 //  move-window 라 실행 중인 셸이 무손실 보존된다. 데몬과 동시에 돌아도 안전 — window 이동은
 //  tmux 서버에서 원자적이라 진 쪽은 자기가 만든 빈 세션만 회수한다. 멱등(풀 소멸 후 no-op).
+#[cfg(not(windows))]
 pub fn migrate_legacy_pool(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) {
     if ns == TMUX_SESSION {
         return; // 홈 공유 세션은 풀이 아님(레거시 직결 attach) — 옮기지 않는다
@@ -412,6 +449,7 @@ pub fn migrate_legacy_pool(ctx: &TmuxCtx, ns: &str, abs: &PathBuf) {
 // 요청 tid 확정 — 살아있으면 그대로, 죽었으면(닫힘/구버전 인덱스) 첫 터미널 폴백.
 //  터미널 0개면 Err — 여기서 "생성"하면 죽은 pane 의 자동 재연결이 닫은 터미널을 유령으로
 //  부활시킨다(0개 = 정식 상태, 생성은 tmux_new_window/시드의 명시 경로만).
+#[cfg(not(windows))]
 pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, want: i64) -> Result<i64, String> {
     if want > 0 && run(ctx, &["has-session", "-t", &format!("={}", term_session(ns, want))]).is_ok() {
         return Ok(want);
@@ -424,6 +462,7 @@ pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, want: i64) -> Result<i64, String> {
 }
 
 // 터미널 완전 삭제(전 기기 공통) = kill-session. 이미 없거나 서버가 죽었어도 멱등 성공.
+#[cfg(not(windows))]
 pub fn kill_terminal(ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
     match run(ctx, &["kill-session", "-t", &format!("={}", term_session(ns, tid))]) {
         Ok(_) => Ok(()),
@@ -440,6 +479,7 @@ pub fn kill_terminal(ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
 
 // ── 프론트 노출 커맨드 ──
 
+#[cfg(not(windows))]
 #[tauri::command]
 pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
     let (ns, abs) = session_for(&local_path);
@@ -497,4 +537,169 @@ pub fn tmux_kill_window(
 ) -> Result<(), String> {
     let (ns, _abs) = session_for(&local_path);
     kill_terminal(&ctx, &ns, index)
+}
+
+// ═══ win32 — term-host 단발 op 로 같은 제어 API 재현(포팅 계약 1) ══════════════
+//  tmux 서버 대신 term-host(named pipe NDJSON)가 세션 원천이다. 의미론 대응:
+//   · list-windows -a → op list(세션명 prefix "<ns>--t-" 필터, createdAt 정렬)
+//   · has-session   → op has  · new-session -d -e → op create(env 는 JSON 맵)
+//   · kill-session  → op kill(멱등)  · "no server running" → 파이프 부재(NotRunning)
+//  자동 개명(automatic-rename)·window-size latest 는 호스트가 내장(session.js) — 별도 보장 불요.
+//  레거시 공유 풀 마이그레이션은 tmux 시절 산물이라 win32 에 존재하지 않는다(no-op).
+
+#[cfg(windows)]
+pub fn list_terminals(_ctx: &TmuxCtx, ns: &str) -> Result<Vec<WindowInfo>, String> {
+    use crate::termhost::{self, ThError};
+    let v = match termhost::oneshot("list", serde_json::json!({})) {
+        Ok(v) => v,
+        // 호스트 미기동 = tmux "no server running" 등가 — 터미널 0개(정상). 프론트 리컨실러가
+        //  기존 tmux 부재 UX 그대로 폴링을 계속한다(데몬이 term-host 를 띄우면 목록이 나타난다).
+        Err(ThError::NotRunning(_)) => return Ok(vec![]),
+        Err(e) => return Err(e.message()),
+    };
+    let prefix = format!("{ns}--t-");
+    let empty: Vec<serde_json::Value> = vec![];
+    let sessions = v.get("sessions").and_then(|x| x.as_array()).unwrap_or(&empty);
+    let mut rows: Vec<(i64, i64, WindowInfo)> = Vec::new();
+    for s in sessions {
+        let sname = s.get("name").and_then(|x| x.as_str()).unwrap_or("");
+        if !sname.starts_with(&prefix) {
+            continue;
+        }
+        let tid: i64 = match sname[prefix.len()..].parse() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let created = s.get("createdAt").and_then(|x| x.as_i64()).unwrap_or(0);
+        rows.push((created, tid, WindowInfo {
+            index: tid,
+            active: false,
+            id: sname.to_string(),
+            // windowName = 호스트의 automatic-rename 등가(셸=폴더명, 실행 중=타이틀→프로세스명).
+            name: s.get("windowName").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            command: s.get("command").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        }));
+    }
+    rows.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    Ok(rows.into_iter().map(|r| r.2).collect())
+}
+
+// 세션 초기 env(JSON 맵) — mac pool_env_args 의 win32 등가(create op 의 env 로 전달 = new-session -e).
+//  CPT_TMUX(tmux 좌표)·ZDOTDIR(zsh 전용)은 win32 무의미라 제외. CPT_SOCK 은 계약 2 파이프 이름.
+//  ⚠ 데몬이 만드는 세션의 env/셸 프로필 주입은 데몬(term-backend) 소관 — 여기는 "앱이 직접 만드는"
+//   경로(tmux_new_window)만 커버한다. PowerShell 프로필(shim, 계약 4) 주입은 셸 선택과 결합돼
+//   있어 호스트/데몬 쪽 규칙 확정 후 합류(웨이브2 데몬 재배선 전달 사항).
+#[cfg(windows)]
+fn win_session_env(abs: &PathBuf, tid: i64, session: &str) -> serde_json::Value {
+    let h = home();
+    let rel = abs
+        .strip_prefix(&h)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| abs.to_string_lossy().to_string());
+    let bin = h.join(".codingpt").join("bin");
+    let base_path = std::env::var("PATH").unwrap_or_default();
+    let path_v = if base_path.is_empty() {
+        bin.to_string_lossy().to_string()
+    } else {
+        format!("{};{}", bin.display(), base_path)
+    };
+    // CPT_TID/CPT_TSESSION: win32 는 tmux 자기조회가 없어 cpt CLI 좌표에 필수(데몬 poolEnvMap 정합).
+    let mut env = serde_json::json!({
+        "CPT_WS": rel,
+        "PATH": path_v,
+        "CPT_TID": tid.to_string(),
+        "CPT_TSESSION": session,
+    });
+    if let Some(sock) = crate::termhost::cpt_sock_name() {
+        env["CPT_SOCK"] = serde_json::Value::String(sock);
+    }
+    env
+}
+
+// 새 터미널 생성 — create op(detached 등가). DUPLICATE_SESSION 은 tid 재시도(mac 과 동일 규칙).
+//  mac 과 달리 호스트 미기동 시 자동 기동이 없다(세션 호스트 스폰은 데몬 소관 — 앱 단독 기동 없음).
+#[cfg(windows)]
+pub fn create_terminal(_ctx: &TmuxCtx, ns: &str, abs: &PathBuf) -> Result<NewWindowInfo, String> {
+    use crate::termhost::{self, ThError};
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        let tid = new_tid();
+        let name = term_session(ns, tid);
+        let env = win_session_env(abs, tid, &name);
+        match termhost::oneshot(
+            "create",
+            serde_json::json!({ "name": name, "cwd": abs.to_string_lossy(), "env": env }),
+        ) {
+            Ok(meta) => {
+                let wname = meta.get("windowName").and_then(|x| x.as_str()).unwrap_or("").to_string();
+                return Ok(NewWindowInfo { index: tid, name: wname });
+            }
+            Err(ThError::Op { code, msg }) if code == "DUPLICATE_SESSION" => {
+                last_err = msg;
+                continue; // tid 충돌 — 재시도
+            }
+            Err(e) => return Err(e.message()),
+        }
+    }
+    Err(if last_err.is_empty() { "터미널 생성 실패".to_string() } else { last_err })
+}
+
+// win32: 레거시 tmux 공유 풀이 존재한 적 없음 — no-op(호출측 시그니처 유지).
+#[cfg(windows)]
+pub fn migrate_legacy_pool(_ctx: &TmuxCtx, _ns: &str, _abs: &PathBuf) {}
+
+// 요청 tid 확정 — has op 로 생존 확인, 죽었으면 첫 터미널 폴백(mac 과 동일 의미론 — 0개 = Err).
+#[cfg(windows)]
+pub fn resolve_tid(ctx: &TmuxCtx, ns: &str, want: i64) -> Result<i64, String> {
+    if want > 0 {
+        if let Ok(v) = crate::termhost::oneshot("has", serde_json::json!({ "name": term_session(ns, want) })) {
+            if v.get("exists").and_then(|x| x.as_bool()).unwrap_or(false) {
+                return Ok(want);
+            }
+        }
+    }
+    let list = list_terminals(ctx, ns)?;
+    match list.first() {
+        Some(first) => Ok(first.index),
+        None => Err("열린 터미널이 없습니다".to_string()),
+    }
+}
+
+// 터미널 완전 삭제 — kill op(서버가 멱등 성공 응답). 호스트 미기동 = 이미 없음(멱등 성공).
+#[cfg(windows)]
+pub fn kill_terminal(_ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
+    use crate::termhost::{self, ThError};
+    match termhost::oneshot("kill", serde_json::json!({ "name": term_session(ns, tid) })) {
+        Ok(_) => Ok(()),
+        Err(ThError::NotRunning(_)) => Ok(()),
+        Err(e) => Err(e.message()),
+    }
+}
+
+// win32 목록 커맨드 — mac 버전의 tmux 원시 진단(list-windows raw 재조회)만 뺀 동일 구조.
+//  "N>0 → 0 급전이" 부검 로그는 유지한다(원인군이 달라도 탭 오소거 사고의 관측 지점은 같다).
+#[cfg(windows)]
+#[tauri::command]
+pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
+    let (ns, abs) = session_for(&local_path);
+    migrate_legacy_pool(&ctx, &ns, &abs); // no-op — mac 과 호출 순서 동형 유지
+    let r = list_terminals(&ctx, &ns);
+    match &r {
+        Ok(v) => {
+            eprintln!("[termhost] list ns={ns} -> {} terminals", v.len());
+            use std::collections::HashMap;
+            use std::sync::{Mutex, OnceLock};
+            static LAST: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+            let last = LAST.get_or_init(|| Mutex::new(HashMap::new()));
+            let prev = last.lock().unwrap().insert(ns.clone(), v.len());
+            if v.is_empty() && prev.unwrap_or(1) > 0 {
+                crate::applog(&format!("[termhost] list ns={ns} -> 0개 급전이!"));
+            }
+        }
+        Err(e) => {
+            eprintln!("[termhost] list ns={ns} -> ERR {e}");
+            crate::applog(&format!("[termhost] list ns={ns} -> ERR {e}"));
+        }
+    }
+    r
 }

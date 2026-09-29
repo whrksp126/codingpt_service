@@ -10,6 +10,7 @@
 import { state, ensureRuntime } from "./state.js";
 import * as T from "./tiling.js";
 import { getPane, isTermTab } from "./pane.js";
+import { shellQuote } from "./path-utils.js";
 
 /**
  * 삽입 대상 터미널 pane — 포커스 pane 이 터미널이면 그것, 아니면 레이아웃 첫 터미널 pane.
@@ -84,7 +85,8 @@ export async function toast(msg) {
   try { const wv = await import("./workspace-view.js"); wv.wvToast(msg); } catch (_) { /* noop */ }
 }
 
-/** 셸 안전 작은따옴표 감싸기 — TUI 한 줄에 경로를 넣을 때 쓴다(공백·한글 경로 안전). */
+/** 셸 안전 작은따옴표 감싸기 — TUI 한 줄에 경로를 넣을 때 쓴다(공백·한글 경로 안전).
+ *  대상 셸별 인용은 path-utils 위임(macOS=POSIX, win32=PowerShell — 계약 5). */
 export function shq(p) {
-  return "'" + String(p).replace(/'/g, "'\\''") + "'";
+  return shellQuote(p);
 }

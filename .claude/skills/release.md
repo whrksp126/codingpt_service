@@ -82,8 +82,16 @@ node codingpt_service/scripts/store/play.mjs status     # IN_REVIEW 확인
 bash codingpt_service/scripts/store/ios-signing.sh    # 인증서+프로파일(멱등)
 
 cd codingpt_app/ios
+# ★ archive 에도 수동 서명 값을 줘야 한다(2026-09-11 실측). pbxproj 는 Automatic + "Apple Development"
+#   인데 키체인엔 배포 인증서만 있어서, 안 주면 `No signing certificate "iOS Development" found` 로 죽는다.
+#   ⚠ `CODE_SIGN_IDENTITY[sdk=iphoneos*]=...` 형태는 xcodebuild 가 오파싱한다(값이 `iphoneos*]=...` 로
+#   들어가 "No certificate matching" 으로 죽음) — 괄호 없는 형태만 쓸 것.
 xcodebuild -workspace codingpt.xcworkspace -scheme codingpt -configuration Release \
-  -destination 'generic/platform=iOS' -archivePath build/codingpt.xcarchive archive
+  -destination 'generic/platform=iOS' -archivePath build/codingpt.xcarchive \
+  CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=BB8GGQPRRX \
+  CODE_SIGN_IDENTITY="iPhone Distribution: GeonHo Jo (BB8GGQPRRX)" \
+  PROVISIONING_PROFILE_SPECIFIER="CodingPT AppStore Auto" \
+  archive
 xcodebuild -exportArchive -archivePath build/codingpt.xcarchive -exportPath build/ipa \
   -exportOptionsPlist exportOptions-auto.plist      # 수동 서명(자동 서명은 아래 함정 참조)
 xcrun altool --upload-app -f build/ipa/codingpt.ipa -t ios \
@@ -104,6 +112,18 @@ node codingpt_service/scripts/store/asc.mjs submit --yes
 - **수출규정**은 `Info.plist` 의 `ITSAppUsesNonExemptEncryption` 으로 고정돼 있어 더는 묻지 않는다.
   이게 없으면 심사가 WAITING_FOR_EXPORT_COMPLIANCE 에 걸려 시작조차 안 한다. 값을 바꿔야 하면
   법적 신고이므로 사용자 확인을 받고 plist 를 고친다(`asc.mjs compliance` 는 이미 올라간 빌드용).
+
+**데모 계정**: 비번을 사용자에게 묻지 않는다 — ASC `GET /v1/appStoreVersions/{id}/appStoreReviewDetail`
+이 이전 버전의 `demoAccountPassword` 를 그대로 돌려준다. 게다가 Apple 이 새 버전에 심사상세를
+**승계**하므로 보통 `review-set` 도 불필요하다(`preflight` 가 비었다고 하면 그때만 돌린다).
+
+**바이너리 검증(빌드가 정말 새 코드인지)**: Hermes 번들은 **한글이 섞인 문자열 조각을 UTF-16LE 로**
+저장한다 → ASCII `grep` 만 쓰면 "새 코드가 없다" 고 오판한다. 반드시 양쪽 인코딩으로 센다:
+```bash
+python3 -c "b=open('base/assets/index.android.bundle','rb').read();t='새코드마커';print(b.count(t.encode()),b.count(t.encode('utf-16-le')))"
+```
+`Play 는 업로드 직후 NOT_SENT_FOR_REVIEW` 로 보인다 — 몇 분 뒤 IN_REVIEW 가 된다. 그 사이에 스크립트를
+고치려 들지 말 것(`status:'completed'` + `changesInReviewBehavior=ERROR_IF_IN_REVIEW` 가 이미 맞다).
 
 **심사 감시 → 승인되면 출시**(양 스토어 모두 무인):
 ```bash

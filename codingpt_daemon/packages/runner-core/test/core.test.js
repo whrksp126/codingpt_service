@@ -26,7 +26,8 @@ test('fs jail — ../ 상대경로 탈출 거부', () => {
   assert.throws(() => safeResolve('proj/../../etc'), /허용되지 않은 경로/);
 });
 
-test('fs jail — 심링크로 루트 밖 우회 거부', () => {
+// win32 스킵: symlinkSync 는 권한(SeCreateSymbolicLinkPrivilege) 의존 — CI 러너에서 비결정적 (windows-port 게이트)
+test('fs jail — 심링크로 루트 밖 우회 거부', { skip: process.platform === 'win32' }, () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-out-'));
   fs.writeFileSync(path.join(outside, 'secret.txt'), 'x');
   const link = path.join(ROOT, 'esc');

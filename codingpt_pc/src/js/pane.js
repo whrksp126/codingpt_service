@@ -13,11 +13,16 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
-import { CHAT } from "./chat-model.js";
+import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
+import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { state as appState } from "./state.js";
+import { shellQuote } from "./path-utils.js";
+import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
+import { commandForCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
+import { decodeTerminalFrameV3, TERMINAL_OPCODE_V3 } from './terminal-stream-v3.js';
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -25,12 +30,28 @@ const Terminal = window.Terminal;
 const FitAddon = window.FitAddon.FitAddon;
 const SearchAddon = window.SearchAddon?.SearchAddon;
 
+// 라이브 격자의 스크롤백 = 과거 전부(데몬 VT 의 CPT_TERM_SCROLLBACK·tmux history-limit 과 같은 값).
+//  ★ 2026-09-10: 뷰어는 과거를 따로 물어보지 않는다. 스냅샷의 `ansi`(serializeRepaint)가 이미
+//   **스크롤백 통째**를 담고 있어서(실측: 과거 301줄+화면 24줄 = 2.8KB) 여기에 그대로 쌓인다.
+//   그래서 위로 스크롤은 그냥 xterm 자체 스크롤 — 일반 터미널과 동치다.
+const LIVE_SCROLLBACK = 10000;
+// 이 PC 가 tmux 백엔드인가 = 로컬 터미널의 과거 정본이 tmux 인가. win32 는 term-host 라 아니다.
+const localTmuxBackend = () => document.documentElement.dataset.os !== "windows";
+
 // (구) 프리뷰 프리즈/모달 숨김은 punch-through 전환으로 폐지 — 웹뷰가 앱 UI 아래층이라
 //  DOM 모달·메뉴가 자연히 위에 그려지고, 오버레이 중 이벤트만 preview_shield 로 차단한다.
 
 const registry = new Map();
 export function getPane(paneId) {
   return registry.get(paneId) || null;
+}
+// 채팅 모드(베타) 토글처럼 **모든 pane 의 본문 표시를 즉시** 다시 정해야 하는 설정 변경용.
+//  emit() 만으로는 부족하다: 워크스페이스 렌더는 토글 글리프만 동기화하고, 본문 전환은
+//  showActiveTab 이 하는데 그건 리컨실러 틱에서야 돈다(설정을 껐다 켠 사용자에겐 "몇 초 뒤 반영").
+export function refreshPaneSurfaces() {
+  for (const [, p] of registry) {
+    try { p.showActiveTab?.(); p._syncModeToggle?.(); } catch (_) { /* 하나가 실패해도 나머지는 갱신 */ }
+  }
 }
 // 현재 살아있는 terminal-kind pane 목록 — OS 파일 드롭 좌표가 pane 을 못 짚을 때 폴백용.
 export function terminalPanes() {
@@ -63,7 +84,11 @@ onScaleChange(() => {
   const px = termFontPx();
   for (const [, p] of registry) {
     try {
-      if (p.term) { p.term.options.fontSize = px; p._fitNow(); }
+      if (p.term) {
+        // 비소유자는 _applyScale 이 배율 기준(termFontPx)에서 다시 줄여 준다 — 여기서 직접 넣지 않는다.
+        if (p._grid && !p._isOwner) { p._applyScale(); }
+        else { p.term.options.fontSize = px; p._fitNow(); }
+      }
       p.ide?.refresh();
       p._mixed?.forEach((m) => m.ide?.refresh());
     } catch (_) {}
@@ -116,16 +141,25 @@ function b64ToBytes(b64) {
  *  예전엔 `kind === "ide" ? … : 프리뷰` 식 삼항이 두 곳에 흩어져 있었고, 그래서 모바일 화면 pane 이
  *  "프리뷰" 라는 이름과 지구본 아이콘을 달고 다녔다(2026-08-05).
  */
+function isDesktopSurface(node) { return !!(node && String(node.deviceId || "").startsWith("desktop:")); }
 export function surfaceLabel(kind, node) {
   if (kind === "ide") return "IDE";
   //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
   //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
-  if (kind === "emulator") return (node && node.metaName) || i18n.t('모바일 화면');
+  //  에이전트 PC 는 게스트 OS 로 이름을 붙인다("macOS · VM"/"Linux · VM"). OS 를 아직 모르면 "에이전트 PC".
+  if (kind === "emulator") {
+    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o ? osVmLabel(o) : i18n.t('에이전트 PC'); }
+    return (node && node.metaName) || i18n.t('모바일 화면');
+  }
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
-export function surfaceIcon(kind) {
+export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
-  if (kind === "emulator") return icons.smartphone;
+  if (kind === "emulator") {
+    //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). id 로 판정, 모르면 모니터.
+    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o === "linux" ? icons.linux : o === "macos" ? icons.apple : icons.monitor; }
+    return icons.smartphone;
+  }
   return icons.globe;
 }
 
@@ -563,6 +597,20 @@ class PreviewSurface {
     this.host = document.createElement("div");
     this.host.className = "preview-host";
     fillPreviewEmpty(this.host);
+    // Win32에서 버튼은 커서 아래 입력 오버레이 HWND가 받지만, 휠은 포커스된 앱 WebView2가
+    // 받아 이 DOM 슬롯으로 온다. 네이티브 프리뷰로 되돌려 보내야 실제 페이지가 스크롤된다.
+    // macOS는 네이티브 WKWebView가 직접 받으므로 호출하면 이중 스크롤 — 반드시 win32만.
+    this._onWheel = (e) => {
+      if (document.documentElement.dataset.os !== "windows" || !this._visible) return;
+      const unit = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 120
+        : e.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 360 : 1;
+      const dx = Math.round(e.deltaX * unit);
+      const dy = Math.round(e.deltaY * unit);
+      if (!dx && !dy) return;
+      e.preventDefault();
+      api.previewWheel(this.id, dx, dy).catch(() => {});
+    };
+    this.host.addEventListener("wheel", this._onWheel, { passive: false });
     parent.append(this.bar.el, this.host);
     dtAttachHost(this.id, this.host); // 승계된 데브툴 세션이 있으면 새 host 에 재부착
     this._visible = false;
@@ -591,6 +639,14 @@ class PreviewSurface {
           this._key = key;
           if (this.effUrl) api.previewSync(this.id, this.effUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
         }
+        // 안 보이는 프리뷰(가려진 탭·숨은 워크스페이스)는 60fps 로 rect 를 잴 이유가 없다 —
+        //  300ms 저속으로 내려 강제 레이아웃/CPU 를 줄인다(2026-08-15 성능 라운드). 다시 보이는
+        //  전환 프레임은 다음 저속 틱(≤300ms)에서 잡혀 즉시 고속으로 복귀한다.
+        if (!visible) {
+          this._raf = null;
+          this._slowTimer = setTimeout(() => { this._slowTimer = null; this._raf = requestAnimationFrame(tick); }, 300);
+          return;
+        }
       }
       this._raf = requestAnimationFrame(tick);
     };
@@ -614,7 +670,9 @@ class PreviewSurface {
   //  같은 표면 ID("pv-"+tid)로 재생성되면 기존 webview 에 재부착 → 페이지·테마·인스펙터 유지.
   dispose(keepWebview) {
     this._disposed = true;
+    this.host?.removeEventListener("wheel", this._onWheel);
     cancelAnimationFrame(this._raf);
+    clearTimeout(this._slowTimer);
     clearInterval(this._infoTimer);
     this.bar.dispose();
     dtDispose(this.id, keepWebview, this.host);
@@ -656,7 +714,21 @@ export class PaneView {
     this.el = document.createElement("div");
     this.el.className = "pane";
     this.el.dataset.paneId = this.id;
-    this.el.addEventListener("mousedown", () => this.ctx.onFocus?.(this.id), true);
+    this.el.addEventListener("mousedown", (e) => {
+      this.ctx.onFocus?.(this.id);
+      // 사용자가 이 pane 을 실제로 클릭 = 이 터미널을 봤다 → 활성 터미널 탭의 미읽음 알림을 읽음
+      //  처리(= 강조 테두리 소멸).
+      //  ★ 예전엔 이 판정이 **터미널 본문(termEl)** 에만 걸려 있었다. 그래서 같은 탭이라도
+      //   **채팅 모드**로 보고 있으면(본문이 채팅 뷰) 아무리 읽고 답해도 테두리가 안 꺼졌다
+      //   (2026-08-14 실사고). 읽음의 근거는 "사용자가 봤다"이지 어느 레이어를 눌렀냐가 아니다 →
+      //   판정 자리는 pane 전체 하나다.
+      //  "프로그램적 포커스로는 읽음 처리하지 않는다"(state.focusPane 주석)는 그대로다 — 그 경로는
+      //   S.focusPane() 직접 호출이라 애초에 DOM 이벤트를 만들지 않는다. 이 앱에서 pane 에 합성
+      //   mousedown 을 쏘는 곳은 없다(page-agent 의 합성 클릭은 **프리뷰 안 페이지** 대상이다).
+      if (this.node.kind !== "terminal") return;
+      const at = this.node.tabs?.[this.node.active];
+      if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
+    }, true);
     registry.set(this.id, this);
 
     this.head = document.createElement("div");
@@ -696,12 +768,12 @@ export class PaneView {
         //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
-          : t.kind === "emulator" ? icons.smartphone({ size: 13 })
+          : t.kind === "emulator" ? surfaceIcon("emulator", t)({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
           : t.kind === "ide" ? "IDE"
-            : t.kind === "emulator" ? (t.metaName || i18n.t('모바일 화면'))
+            : t.kind === "emulator" ? surfaceLabel("emulator", t)
               : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
@@ -753,7 +825,7 @@ export class PaneView {
       lbl.className = "ptab active static";
       const icHtml = kind === "preview"
         ? previewTabIconHtml(this.node.metaFav)
-        : surfaceIcon(kind)({ size: 13 });
+        : surfaceIcon(kind, this.node)({ size: 13 });
       const lblText = surfaceLabel(kind, this.node);
       lbl.innerHTML = `<span class="ptab-ic">${icHtml}</span><span class="ptab-title">${escapeHtml(lblText)}</span>`;
       const x = document.createElement("span");
@@ -789,6 +861,14 @@ export class PaneView {
     // 터미널 스킴 배경을 pane 여백까지 — 프리셋 배경이 앱 배경과 다를 때 띠가 지지 않게.
     try { this.termEl.style.background = termTheme().background || ""; } catch (_) {}
     this.body.appendChild(this.termEl);
+    // 비소유자 표시 + "내 크기로 맞추기" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
+    this.ownerPill = document.createElement("div");
+    this.ownerPill.className = "pane-owner-pill";
+    this.ownerPill.innerHTML = `<span class="op-text"></span><button type="button" class="op-btn">${i18n.t("내 크기로 맞추기")}</button>`;
+    this.ownerPill.style.display = "none";
+    this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
+    this.body.appendChild(this.ownerPill);
+    this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0; this._v3Epoch = null;
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
     this.emptyEl = document.createElement("div");
     this.emptyEl.className = "pane-term-empty";
@@ -801,18 +881,36 @@ export class PaneView {
     btn.innerHTML = `${icons.terminal({ size: 14 })}<span>${i18n.t('새 터미널')}</span>`;
     btn.addEventListener("click", () => this.addTab());
     this.emptyEl.append(msg, btn);
+    this._emptyMsg = msg;
+    this._emptyBtn = btn;
     this.body.appendChild(this.emptyEl);
     this.term = new Terminal({
       cursorBlink: true,
       fontSize: termFontPx(), // 기본 13px × 표시 배율(이 기기 로컬 설정)
       fontFamily: monoFontStack(), // 코드·터미널 글꼴 설정(theme.js) — 변경은 onAppearanceChange 가 반영
-      scrollback: 10000,
+      // ★ 과거는 여기 그대로 쌓인다 — 일반 터미널과 같다(2026-09-10).
+      //  v2(tty attach) 때는 tmux 가 리사이즈마다 pane 을 다시 그려서(`\e[K`+`\r\n` 반복) 스크롤백에
+      //  "재도장 잔재"가 쌓였고, 그래서 여기를 0 으로 죽이고 별도 과거 오버레이를 그렸다. v3
+      //  control mode 는 tty 를 안 그린다 — 리사이즈 3회 실측에서 %output 재도장 바이트 0(2026-09-10).
+      //  게다가 재접속·탭전환 스냅샷(serializeRepaint)이 스크롤백까지 통째로 실어 오므로, 이 버퍼는
+      //  어느 기기에서 언제 붙어도 데몬 VT 와 같은 과거를 갖는다.
+      scrollback: LIVE_SCROLLBACK,
       convertEol: false,
       theme: termTheme(),
       // 최소 대비 자동 보정 — 프롬프트(p10k 등)가 팔레트 밖 256색 배경을 써도 글자가 항상 읽히게.
       minimumContrastRatio: termMinContrast(),
+      // ★ TUI 가 마우스를 잡고 있어도 ⌥(Option)+드래그면 **우리 선택**을 만든다(2026-08-15).
+      //  claude·vim 처럼 마우스 리포팅을 켠 앱이 떠 있으면 드래그가 전부 그 앱으로 가서, 화면에
+      //  보이는 하이라이트는 **그 앱이 칠한 색**이다. claude 가 쓰던 256색 66번(#5F8787 세이지)은
+      //  트루컬러 강등 산물이라 (a) 데몬의 COLORTERM/RGB 광고로 근본 차단하고 (b) theme.extendedAnsi
+      //  가 66번을 선택색으로 리맵해(기존 세션용) 화면에선 항상 일반 선택색으로 보인다.
+      macOptionClickForcesSelection: true,
       allowProposedApi: true,
     });
+    // (여기 있던 CSI 2J 훅은 제거했다 — **한 번도 발화한 적이 없다**. tmux 는 `clear` 를 클라이언트에
+    //  `\e[H\e[J`(ED 0)로 다시 그려 보내지 2J 를 보내지 않는다(pty 원시 바이트로 실측 2026-09-04).
+    //  `clear` 가 과거까지 지우는 건 이제 tmux.conf 의 `scroll-on-clear off` 가 보장한다 — 그쪽이
+    //  정본이라 세 기기(PC·안드로이드·iPad)가 같이 비워진다.)
     this.fit = new FitAddon();
     this.term.loadAddon(this.fit);
     if (SearchAddon) {
@@ -869,7 +967,8 @@ export class PaneView {
     if (!st.on) return;
     // ★ 채팅 모드를 **색으로** 표시하지 않는다(사용자 확정 2026-07-27). 액센트 배경은 "선택된 필터"처럼
     //  읽혀 상태와 행동이 헷갈렸다 → 상태 표현은 글리프 교체 하나로만 한다(같은 이유로 `.active` 도 제거).
-    b.title = st.chat ? i18n.t('터미널(TUI) 보기') : i18n.t('채팅으로 보기');
+    // 이름은 설정 항목과 **한 벌**이다 — 설정에서 켠 것이 화면의 무엇인지 이어지지 않으면 토글이다.
+    b.title = st.chat ? i18n.t('터미널(TUI) 보기') : i18n.t('채팅 모드로 보기 (베타)');
     // ★ 글리프는 **실제로 바뀔 때만** 다시 쓴다(매번 쓰면 클릭이 죽는다 — ② 항).
     //  크기 16 = 워크스페이스 헤더 추가 버튼과 같은 값(앱은 자기 헤더 기준 19).
     const want = st.chat ? "term" : "chat";
@@ -948,7 +1047,9 @@ export class PaneView {
   //  다른 기기가 쓰는 tmux 창 크기를 뺏는 과거 사고(12R·17R) 계열의 재발 경로다.
   _chatActive() {
     const tab = this.node.tabs?.[this.node.active];
-    return !!(tab && isTermTab(tab) && tab.mode === "chat");
+    // 베타가 꺼져 있으면 mode 가 'chat' 이어도 화면은 터미널이다 → 여기서도 chat 이 아니다.
+    //  (tab.mode 는 지우지 않는다 — 다시 켜면 보던 탭이 그대로 채팅으로 돌아온다.)
+    return !!(tab && isTermTab(tab) && tab.mode === "chat" && chatBetaEnabled());
   }
 
   // TUI ↔ Chat 토글의 **노출/모드 판정**(그리기는 `_syncModeToggle` — 같은 pane 안이지만 분리해 둔다:
@@ -968,6 +1069,7 @@ export class PaneView {
       chatMode: chat,
       agentOn: this._agentOn(tab),
       chatReady: this._chatReady(tab),
+      betaOn: chatBetaEnabled(), // 베타 꺼짐 = 토글 자체가 없다(설정 > 작업 환경 > 채팅 모드)
     });
     return { on, chat };
   }
@@ -1229,15 +1331,15 @@ export class PaneView {
   // 크기 주장(스로틀) — 사용자가 이 pane 을 실제로 만질 때(클릭/포커스/타이핑), 표시 창이 다른
   //  기기 크기로 잡혀 있으면 Rust 가 클라이언트 nudge 로 회수한다(이미 내 크기면 no-op).
   //  모바일은 키보드 노출 등 실 리사이즈가 자연 클레임을 만들지만 PC 는 이 훅이 유일한 계기다.
-  _claimSize() {
-    if (!this.ctx.isLocal || this.node.kind !== "terminal") return;
+  _claimSize(sync = false) {
+    if (!this.ctx.isLocal || this.node.kind !== "terminal" || localTmuxBackend()) return;
     // Chat 모드는 터미널을 "보고 있지 않다" = 크기 주장 자격이 없다. 여기서 주장하면 다른 기기가
     //  실제로 쓰고 있는 창 크기를 놀고 있는 화면이 뺏는다(PaneView.tsx:540 주석과 같은 사고).
     if (this._chatActive()) return;
     const n = Date.now();
     if (n - (this._lastClaim || 0) < 1200) return;
     this._lastClaim = n;
-    api.ptyClaim(this.id).catch(() => {});
+    api.ptyClaim(this.id, sync).catch(() => {});
   }
 
   // 이 pane 의 attach 를 지정 터미널(tid)로 재수립 — 전용 세션 모델의 탭 전환/드롭 이동 공용.
@@ -1251,8 +1353,9 @@ export class PaneView {
     this._expectExit = true;
     clearTimeout(this._expectExitTimer);
     this._expectExitTimer = setTimeout(() => { this._expectExit = false; }, 2000);
-    try { await api.ptyClose(this.id); } catch (_) {}
-    this._openChannel(win);
+    // pty_close 왕복을 기다리지 않는다(2026-08-15 성능 라운드) — pty_open(replace=true)이 Rust 안에서
+    //  구 attach 를 원자적으로 교체한다. IPC 1왕복 = 탭 전환 즉시성.
+    this._openChannel(win, true);
   }
 
   // ── 탭 조작 ──
@@ -1393,13 +1496,23 @@ export class PaneView {
   showActiveTab() {
     if (this.node.kind !== "terminal" || !this.termEl) return;
     const tab = this.node.tabs[this.node.active];
+    // 표시 대상이 **실제로 바뀌었을 때만** 과거 보기를 접는다(가려진 채 남으면 유령 화면이 된다).
+    const sig = `${this.node.active}|${tab ? tab.tid || tab.win : ""}|${tab ? tab.kind || "term" : ""}|${tab ? tab.mode || "tui" : ""}|${this.node.tabs.length}`;
+    if (this._surfaceSig !== sig) this._surfaceSig = sig;
     const isT = isTermTab(tab);
     if (!isT && tab) this._ensureMixed(tab);
     const empty = !this.node.tabs.length;
     // Chat 모드 = 터미널 탭이지만 본문은 채팅. 터미널 레이어는 살아 있는 채로 가려진다.
-    const chat = !empty && isT && !!tab && tab.mode === "chat";
+    // 베타 꺼짐 → 채팅 본문을 띄우지 않는다(토글도 없으므로 돌아올 길 없는 화면이 되면 안 된다).
+    const chat = !empty && isT && !!tab && tab.mode === "chat" && chatBetaEnabled();
     if (chat) this._ensureChat();
-    if (this.emptyEl) this.emptyEl.style.display = empty ? "flex" : "none";
+    if (this.emptyEl) {
+      this.emptyEl.style.display = empty ? "flex" : "none";
+      // ★ 호스트가 꺼져 있으면 "열린 터미널이 없습니다 + [새 터미널]" 을 보여 주지 않는다
+      //  (2026-08-14 사용자 지적: "안 켜진 PC 인데?"). 그건 **모른다는 사실을 아는 것처럼** 말하는
+      //  화면이다 — 데몬이 없으니 터미널이 있는지 없는지 알 수 없고, 버튼을 눌러도 만들 수 없다.
+      if (empty) this._paintEmptyState();
+    }
     this.termEl.style.display = !empty && isT && !chat ? "" : "none";
     if (this.chatHost) this.chatHost.style.display = chat ? "flex" : "none";
     this.chat?.setVisible(chat);
@@ -1418,6 +1531,19 @@ export class PaneView {
     //   그게 "프롬프트 무한누적"(17R) 계열 사고의 진범이었다. 복귀 시 setMode 가 1회만 맞춘다.
     if (isT && !chat) this._fitNow();
     this._syncModeToggle();
+  }
+
+  /** 빈 터미널 자리표시의 문구·버튼 — 호스트가 꺼져 있으면 "만들 수 있다"고 말하지 않는다. */
+  _paintEmptyState() {
+    const off = !!this.ctx.hostOffline;
+    if (this._emptyOff === off) return;   // 바뀔 때만 손댄다(매 렌더 DOM 수정 금지)
+    this._emptyOff = off;
+    if (this._emptyMsg) {
+      this._emptyMsg.textContent = off
+        ? i18n.t('이 PC가 꺼져 있어요 · 켜면 여기에 터미널이 나타나요')
+        : i18n.t('열린 터미널이 없습니다');
+    }
+    if (this._emptyBtn) this._emptyBtn.style.display = off ? "none" : "";
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나
@@ -1487,7 +1613,7 @@ export class PaneView {
     this.showActiveTab();
     if (!this.ctx.isLocal) return;
     if (typeof this._attachedWin === "number") {
-      const alive = await api.ptyAlive(this.id).catch(() => true);
+      const alive = localTmuxBackend() ? !!(this.ws && this.ws.readyState === 1) || !!this._remoteReopenTimer : await api.ptyAlive(this.id).catch(() => true);
       if (alive) return;
       this._attachedWin = null; // 죽었는데 낙관 상태만 남음(이벤트 유실 등) — 아래서 재attach
     }
@@ -1518,21 +1644,214 @@ export class PaneView {
     this._correctFit();
   }
 
-  // ── 채널(로컬 pty / 클라우드 WS) ──
-  async _openChannel(win) {
-    this._fitLocalOnly();          // 스테일 치수로 창을 만들지 않는다(§_fitLocalOnly)
-    // 첫 측정은 폰트 로드·레이아웃 확정 전일 수 있다. ResizeObserver 는 **컨테이너 크기가 바뀔 때만**
-    //  울리므로 "크기는 그대로인데 측정이 나중에 정확해지는" 경우를 아무도 바로잡지 않는다
-    //  → 채널을 연 뒤 두 번 더 검산한다(같은 값이면 _resize 가 no-op 수준이라 비용 0).
+  // ── 채널 — v3(CPT3): 로컬·원격 모두 데몬(정본)에 WS 뷰어로 붙는다 ─────────────────────
+  //  docs: codingpt_daemon/docs/terminal-v3-design.md. 정본은 데몬 VT 하나, 크기는 소유자 1명.
+  //  이 pane 은 뷰어다: 소유자면 컨테이너에 fit 해 resize 를 보내고, 아니면 소유자 격자를 축소해 본다.
+  //  (win32/term-host 는 아직 v3 미지원 → _openChannelLegacyLocal.)
+  async _openChannel(win, replace) {
+    if (this.ctx.isLocal && !localTmuxBackend()) return this._openChannelLegacyLocal(win, replace);
+    this._fitLocalOnly();          // 첫 resize 를 스테일 치수로 보내지 않는다
     for (const delay of [250, 1200]) {
       setTimeout(() => { if (this.term && this._attachedWin === win) this._fitNow(); }, delay);
     }
+    // 이전 채널 정리(탭 전환·재연결) — 소켓은 하나만.
+    try { this.ws?.close(); } catch (_) { /* noop */ }
+    this.ws = null;
+    if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
+    this._attachedWin = typeof win === "number" ? win : this._attachedWin;
+    this._v3Seq = 0;
+    try {
+      let url;
+      if (this.ctx.isLocal) {
+        const ep = await api.terminalLocalEndpoint();
+        this._selfDevice = { deviceId: ep.client, name: ep.device_name || "" };
+        const q = new URLSearchParams({
+          token: ep.token, cwd: this.ctx.localPath || "", paneId: this.id, client: ep.client,
+          cols: String(this.term.cols || 80), rows: String(this.term.rows || 24), deviceName: ep.device_name || "",
+        });
+        if (typeof win === "number") q.set("win", String(win));
+        url = `ws://127.0.0.1:${ep.port}/v3/terminal?${q}`;
+      } else {
+        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
+        url = `${wsBase}/api/daemon/terminal/${token}`;
+      }
+      this._v3Connect(url);
+    } catch (e) {
+      this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
+      this._scheduleRemoteReopen();
+    }
+  }
+
+  _v3Connect(url) {
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    this.ws = ws;
+    ws.onopen = () => {
+      this._remoteTries = 0;
+      // 이어받기: 이미 받은 seq 가 있으면 hello 로 이어 달라 한다(링버퍼 밖이면 데몬이 스냅샷을 보낸다).
+      if (this._v3Seq > 0) { try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq, epoch: this._v3Epoch })); } catch (_) { /* noop */ } }
+      // 25초 keepalive — 데몬이 살아 있는 뷰어와 릴레이만 남은 유령을 구분하는 근거.
+      this._remoteKa = setInterval(() => {
+        if (ws.readyState !== 1) return;
+        try { ws.send(JSON.stringify({ type: "keepalive" })); } catch (_) { /* noop */ }
+      }, 25000);
+      // 소유자면(또는 아직 아무도 아니면) 컨테이너 크기를 주장한다.
+      this._fitNow(true);
+    };
+    ws.onmessage = (e) => {
+      if (typeof e.data === "string") { this._termOut(e.data); return; }
+      const f = decodeTerminalFrameV3(e.data);
+      if (!f) { this._termOut(new Uint8Array(e.data)); return; }   // 구 데몬(v1 raw) 폴백
+      const json = () => { try { return JSON.parse(new TextDecoder().decode(f.payload)); } catch (_) { return null; } };
+      switch (f.opcode) {
+        case TERMINAL_OPCODE_V3.OUTPUT: {
+          // seq 구멍 = 릴레이가 프레임을 떨어뜨렸다 → 데몬에 이어 달라고 한다(스냅샷/리플레이는 데몬 판단).
+          if (this._v3Seq && f.seq !== this._v3Seq + 1 && f.seq > this._v3Seq) {
+            try { ws.send(JSON.stringify({ type: "hello", lastSeq: this._v3Seq, epoch: this._v3Epoch })); } catch (_) { /* noop */ }
+          }
+          if (f.seq > this._v3Seq) { this._v3Seq = f.seq; this._termOut(f.payload); }
+          return;
+        }
+        case TERMINAL_OPCODE_V3.SNAPSHOT: { const m = json(); this._v3Live = true; if (m) this._applySnapshot(m); return; }
+        case TERMINAL_OPCODE_V3.RESIZED: { const m = json(); if (m) this._setGrid(m.cols, m.rows); return; }
+        case TERMINAL_OPCODE_V3.OWNER: { const m = json(); if (m) this._setOwner(m); return; }
+        // HISTORY_PAGE 는 더 쓰지 않는다 — 과거는 스냅샷 ansi 로 통째 오고 라이브 버퍼에 쌓인다.
+        //  (데몬은 구버전 클라를 위해 아직 응답한다.)
+        case TERMINAL_OPCODE_V3.EXIT: {
+          // 결정적 종료(터미널 닫힘 / 이 워크스페이스에 터미널 0개) — 데몬은 이 프레임 직후 소켓을 닫는다.
+          //  그 close 는 "끊김"이 아니라 이 EXIT 의 마무리다 → onclose 가 "연결 끊김" 을 찍고 원격 재접속
+          //  루프를 돌리지 않게 표시해 둔다(2026-09-16 재부팅 뒤 두 줄씩 무한 출력되던 루프의 진범).
+          //  복구는 _onExit → _scheduleReopen(목록에 터미널이 생길 때까지 조용히 대기)이 맡는다.
+          this._v3Seq = 0;
+          this._exitClose = true;
+          this._onExit();
+          return;
+        }
+        case TERMINAL_OPCODE_V3.ERROR: { const m = json(); this.term.write(`\r\n\x1b[31m${(m && m.message) || "error"}\x1b[0m\r\n`); return; }
+        default: return;
+      }
+    };
+    ws.onclose = () => {
+      if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
+      if (this.ws !== ws) return;                 // 의도된 교체(탭 전환)
+      this.ws = null;
+      const wasLive = !!this._v3Live;
+      this._v3Live = false;
+      if (this._exitClose) { this._exitClose = false; return; }   // EXIT 의 마무리 close — 재접속 루프 금지
+      if (this._reopenStop || !this.mounted) return;
+      // "연결 끊김" 은 **붙어 있던** 채널이 끊겼을 때만 말한다. 한 프레임도 못 받고 닫힌 건(데몬 기동 중·
+      //  거절 등) 끊김이 아니라 아직 못 붙은 것 — 매 시도마다 화면에 찍지 않고 조용히 백오프한다.
+      if (wasLive) this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
+      this._scheduleRemoteReopen();
+    };
+  }
+
+  // 스냅샷 = 소유자 격자 크기 + 입력 모드 + 화면 ANSI. 라이브 격자를 통째로 갈아끼운다.
+  _applySnapshot(m) {
+    this._v3Seq = Number(m.seq) || 0;
+    // 세대 — 데몬이 재시작하면 seq 가 0 부터 다시 세므로, 이걸 같이 보내야 이어받기 오판(=화면 정지)이 없다.
+    this._v3Epoch = m.epoch || null;
+    this._setOwner(m);
+    this._setGrid(m.cols, m.rows, true);
+    try { this.term.reset(); } catch (_) { /* noop */ }
+    // 입력 모드는 스냅샷 본문(화면)에 없다 — DECSET 으로 먼저 복원해야 alt-screen 앱·마우스 TUI 가
+    //  뷰어 xterm 에서도 같은 상태가 된다(shpool 의 "복원 시 입력 모드 재생" 교훈).
+    const md = m.modes || {};
+    let pre = "";
+    if (md.altScreen) pre += "\x1b[?1049h";
+    if (md.appCursor) pre += "\x1b[?1h";
+    if (md.bracketedPaste) pre += "\x1b[?2004h";
+    if (md.mouseTracking) pre += "\x1b[?1000h\x1b[?1006h";
+    this.term.write(pre + (m.ansi || ""));
+    this._applyScale();
+  }
+
+  // 격자 = 소유자 크기. 뷰어 xterm 은 항상 정확히 이 크기다(다른 크기로는 절대 만들지 않는다).
+  _setGrid(cols, rows, silent) {
+    const c = Math.max(2, cols | 0), r = Math.max(2, rows | 0);
+    this._grid = { cols: c, rows: r };
+    if (this.term && (this.term.cols !== c || this.term.rows !== r)) {
+      try { this.term.resize(c, r); } catch (_) { /* noop */ }
+    }
+    this._sentCols = c; this._sentRows = r;
+    if (!silent) this._applyScale();
+  }
+
+  _setOwner(m) {
+    this._owner = m.owner || null;
+    this._isOwner = !!m.self || !!m.free;
+    this._ownerFree = !!m.free;
+    this._syncOwnerUi();
+    this._applyScale();
+    if (this._isOwner) this._fitNow(true);
+  }
+
+  // 비소유자 뷰: 소유자 격자를 컨테이너 폭에 맞춰 축소(세로는 스크롤). Orca desktop-fit 과 같은 방식.
+  /** 소유자일 때의 글꼴 = 사용자 표시 배율 정본. 축소는 여기서 아래로만 간다. */
+  _baseFontPx() { return termFontPx(); }
+
+  /**
+   * 비소유자 뷰 — 소유자 격자를 폭에 맞춰 **글꼴 크기**로 줄인다. 격자(cols/rows)는 안 바꾼다.
+   *
+   * ⚠ CSS transform 으로 줄이지 말 것(2026-09-06 안드로이드 실기 회귀). Android WebView 는 WebGL
+   *  캔버스를 별도 하드웨어 레이어로 합성해 조상의 transform 배율을 먹지 않는다 — iPad 는 줄어드는데
+   *  안드로이드만 원래 크기로 그려져 오른쪽이 잘렸다. 글꼴을 줄이면 xterm 이 실제로 작은 셀로 다시
+   *  그리므로 렌더러와 무관하고, 늘린 비트맵이 아니라 또렷하다. 앱과 같은 계약이다.
+   */
+  _applyScale() {
+    const el = this.termEl?.querySelector(".xterm");
+    if (!this.term) return;
+    // 예전 transform 방식의 잔재 제거(구버전에서 올라온 화면).
+    if (el) { el.style.transform = ""; el.style.transformOrigin = ""; el.style.width = ""; el.style.height = ""; }
+    const viewer = !this._isOwner && !!this._grid;
+    this.termEl?.classList.toggle("scaled", viewer);   // 세로 넘침은 스크롤로 본다
+    const base = this._baseFontPx();
+    let want = base;
+    if (viewer) {
+      let cell = null;
+      try { const d = this.term._core?._renderService?.dimensions?.css?.cell; if (d && d.width > 0 && d.height > 0) cell = d; } catch (_) { cell = null; }
+      const availW = Math.max(1, (this.termEl?.clientWidth || 0) - 10);
+      const cur = this.term.options.fontSize || base;
+      const perPx = cell ? cell.width / cur : 0;       // 글꼴 1px 당 셀 폭 — 필요한 글꼴을 역산
+      if (perPx > 0) want = Math.max(4, Math.min(base, Math.floor(((availW / this._grid.cols) / perPx) * 2) / 2));
+    }
+    const now = this.term.options.fontSize || base;
+    if (Math.abs(want - now) < 0.25) return;           // 수렴 — 재적용 루프 방지
+    try {
+      this.term.options.fontSize = want;
+      if (viewer) this.term.resize(this._grid.cols, this._grid.rows);
+    } catch (_) { /* noop */ }
+  }
+
+  _syncOwnerUi() {
+    if (!this.ownerPill) return;
+    const name = (this._owner && (this._owner.name || this._owner.deviceId)) || "";
+    if (this._isOwner || this.node.kind !== "terminal") { this.ownerPill.style.display = "none"; return; }
+    this.ownerPill.querySelector(".op-text").textContent = name
+      ? i18n.t("{name} 크기로 보는 중").replace("{name}", name)
+      : i18n.t("다른 기기 크기로 보는 중");
+    this.ownerPill.style.display = "flex";
+  }
+
+  // "내 크기로 맞추기" — 소유권을 가져온 뒤 내 컨테이너 크기를 주장한다. 자동 탈취는 없다(설계 §1).
+  _claimOwnership() {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    try { this.ws.send(JSON.stringify({ type: "claim" })); } catch (_) { /* noop */ }
+    this._isOwner = true;          // 낙관 — OWNER 프레임이 곧 확정한다
+    this._syncOwnerUi();
+    this._applyScale();
+    this._fitNow(true);
+  }
+
+  // win32(term-host) 전용 구 경로 — Rust 가 term-host 에 직접 붙는다. v3 term-host 백엔드가 생기면 제거.
+  _openChannelLegacyLocal(win, replace) {
+    this._fitLocalOnly();
     const { cols, rows } = this.term;
-    if (this.ctx.isLocal) {
+    {
       this._attachedWin = typeof win === "number" ? win : null;
       this._sentCols = cols || 80;   // ptyOpen 이 이미 이 크기를 전달했다 → 직후 no-op 을 걸러내게
       this._sentRows = rows || 24;
-      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24).then((resolved) => {
+      api.ptyOpen(this.id, this.ctx.localPath || "", win ?? 0, cols || 80, rows || 24, !!replace).then((resolved) => {
         // 요청 tid 가 스테일(닫힘/구버전 인덱스)이면 Rust 가 첫 터미널로 폴백해 실제 attach 한
         //  tid 를 돌려준다 — 탭을 실체에 맞게 보정(리컨실러가 목록은 따로 정리).
         if (typeof resolved !== "number") return;
@@ -1546,30 +1865,10 @@ export class PaneView {
         this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
         this._scheduleReopen(2500); // 일시 오류(서버 재기동 중 등)에 고착되지 않게 자동 재시도
       });
-    } else {
-      try {
-        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
-        const ws = new WebSocket(`${wsBase}/api/daemon/terminal/${token}`);
-        ws.binaryType = "arraybuffer";
-        this.ws = ws;
-        ws.onopen = () => { this._remoteTries = 0; this._resize(this.term.cols, this.term.rows); };
-        ws.onmessage = (e) => {
-          this._termOut(typeof e.data === "string" ? e.data : new Uint8Array(e.data));
-        };
-        // 끊기면 자동 재연결 — 반드시 새 토큰 발급(만료 dterm 토큰 재시도 = 서버 502 스팸의 근원).
-        ws.onclose = () => {
-          if (this._reopenStop || !this.mounted) return;
-          this.term.write(i18n.t("\n\x1b[90m[연결 끊김 — 재연결 중…]\x1b[0m\n"));
-          this._scheduleRemoteReopen();
-        };
-      } catch (e) {
-        this.term.write(i18n.t("\n\x1b[31m원격 터미널 실패: ") + e + "\x1b[0m\r\n");
-        this._scheduleRemoteReopen();
-      }
     }
   }
 
-  // 원격(릴레이) 터미널 재연결 — 지수 백오프, _openChannel 이 새 토큰을 발급한다.
+  // 재연결 — 지수 백오프, _openChannel 이 새 토큰/엔드포인트를 받는다.
   _scheduleRemoteReopen() {
     if (this._reopenStop || !this.mounted) return;
     clearTimeout(this._remoteReopenTimer);
@@ -1577,17 +1876,20 @@ export class PaneView {
     const delay = Math.min(2000 * this._remoteTries, 15000);
     this._remoteReopenTimer = setTimeout(() => {
       if (this._reopenStop || !this.mounted) return;
-      try { this.ws?.close(); } catch (_) { /* noop */ }
-      this._openChannel();
+      this._openChannel(this._attachedWin);
     }, delay);
   }
   _write(d) {
+    // 일반 터미널 규칙 — 뭔가 입력하면 맨 아래(라이브)로 돌아온다. xterm 의 scrollOnUserInput 은
+    //  xterm 자신의 키 핸들러를 탈 때만 도는데, macOS 입력은 IME/단축키 보존을 위해 그걸 우회해
+    //  PTY 로 직행한다(입력을 xterm 이 모른다) → 여기서 명시적으로 내린다.
+    try { this.term?.scrollToBottom(); } catch (_) { /* noop */ }
     // shift+tab(CSI Z) = 에이전트 모드 순환. **로컬 터미널은 tmux 직결**이라 데몬이 이 키를 못 본다
     //  → 데몬에 즉시 재확인을 알려 이 PC·폰의 모드 알약이 3초 폴링을 기다리지 않게 한다(2026-08-02).
     //  원격 터미널은 입력이 데몬 pty 를 지나가므로 데몬이 알아서 감지한다(중복 통지 불필요).
     if (this.ctx.isLocal && typeof d === "string" && d.includes("\x1b[Z")) this._pokeMode();
-    if (this.ctx.isLocal) api.ptyWrite(this.id, d).catch(() => {});
-    else if (this.ws && this.ws.readyState === 1) this.ws.send(new TextEncoder().encode(d));
+    if (this.ctx.isLocal && !localTmuxBackend()) { api.ptyWrite(this.id, d).catch(() => {}); return; }
+    if (this.ws && this.ws.readyState === 1) this.ws.send(new TextEncoder().encode(d));
   }
   _pokeMode() {
     const t = this.node.tabs?.[this.node.active];
@@ -1596,8 +1898,10 @@ export class PaneView {
     api.modePoke(this.ctx.localPath || "", win).catch(() => { /* 폴링이 안전망 */ });
   }
   _resize(cols, rows) {
-    if (this.ctx.isLocal) api.ptyResize(this.id, cols, rows).catch(() => {});
-    else if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    if (this.ctx.isLocal && !localTmuxBackend()) { api.ptyResize(this.id, cols, rows).catch(() => {}); return; }
+    // 크기는 소유자만 주장한다(설계 §1). 비소유자는 격자를 바꾸지 않고 축소해서 본다.
+    if (!this._isOwner && !this._ownerFree) return;
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: "resize", cols, rows }));
   }
   // ── 입력 인터셉트 — WKWebView(사파리 엔진) 한글 IME 깨짐의 근본 해법 ──
   //  xterm 기본 키 처리는 macOS IME 조합 키에도 개입(preventDefault/keyup 의 textarea.value 클리어)해
@@ -1609,6 +1913,9 @@ export class PaneView {
   _setupInput() {
     const ta = this.term?.textarea;
     if (!ta) return;
+    // win32(WebView2=Chromium): WKWebView 한글 IME 우회가 필요 없다 — xterm 표준 키 경로를
+    //  그대로 쓴다(계약 5). 아래 macOS 델타 경로는 한 줄도 건드리지 않는다(회귀 0 원칙).
+    if (IS_WINDOWS) { this._setupInputWin(ta); return; }
     this.term.attachCustomKeyEventHandler(() => false); // xterm 키 처리 비활성(전송은 아래가 전담)
     this._sentBuf = "";
     const SEQ = {
@@ -1617,21 +1924,6 @@ export class PaneView {
       Home: "\x1b[H", End: "\x1b[F", PageUp: "\x1b[5~", PageDown: "\x1b[6~",
     };
     const resetBuf = () => { this._sentBuf = ""; try { ta.value = ""; } catch (_) {} };
-    // Codex는 재시작 뒤 복원된 alternate-screen에서 마우스 추적을 다시 켜지 않는 구간이 있다.
-    // 이때 xterm은 휠을 앱에도 스크롤백에도 전달하지 않아 화면이 고정된다. 마우스 추적이
-    // 실제로 켜져 있으면 xterm 정본 경로를 두고, 꺼진 Codex alternate 화면만 방향키로 보완한다.
-    const onWheel = (e) => {
-      if (this._activeAgentBrand() !== "codex") return;
-      if (this.term?.buffer?.active?.type !== "alternate") return;
-      if (this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none") return;
-      const dy = Number(e.deltaY) || 0;
-      if (!dy) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
-      this._write((dy < 0 ? "\x1b[A" : "\x1b[B").repeat(count));
-    };
-    this.termEl?.addEventListener("wheel", onWheel, { capture: true, passive: false });
     // ⌘/⌥ 편집 조합 — textarea 기본동작(delta 의존)이 아니라 셸 표준 시퀀스를 직접 보낸다.
     //  탭 자동완성·히스토리(↑) 등으로 셸 라인과 textarea 미러가 어긋나 있어도 항상 동작.
     const EDIT_COMBO = {
@@ -1708,7 +2000,7 @@ export class PaneView {
     //  우선순위: 파일 참조(Finder ⌘C → '경로' 인용 삽입, OS 드롭과 동일 규칙) > 이미지 데이터
     //  (스크린샷 → 임시 PNG 경로) > plain text. Finder 복사는 text/plain 에 파일명이 실릴 수
     //  있어 경로 확인이 텍스트보다 항상 선행돼야 한다(네이티브 pasteboard 를 invoke 로 조회).
-    const shqp = (p) => "'" + String(p).replace(/'/g, "'\\''") + "'"; // os-drop.shq 사본(순환 import 회피)
+    const shqp = shellQuote; // 대상 셸별 인용(path-utils — macOS 에선 종전 POSIX 인용과 동일 문자열)
     const onPaste = (e) => {
       if (e.target !== ta) return;
       e.preventDefault(); e.stopImmediatePropagation();
@@ -1741,13 +2033,13 @@ export class PaneView {
     //  복귀 후 첫 입력의 델타가 "옛 텍스트 길이만큼 백스페이스"를 쏘지 않는다.
     const onBlur = () => resetBuf();
     ta.addEventListener("blur", onBlur);
-    const onFocus = () => this._claimSize();
+    const onFocus = () => this._claimSize(true);
     ta.addEventListener("focus", onFocus);
     const onMouseDown = () => {
       // 사용자가 실제로 터미널을 클릭 = 이 터미널을 봄 → 활성 탭 win 알림 읽음(프로그램적 포커스 제외).
       const at = this.node.tabs?.[this.node.active];
       if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
-      this._claimSize(); // 클릭 = 크기 주장(모바일의 키보드 노출 리사이즈에 대응하는 PC 계기)
+      this._claimSize(true); // 클릭 = 크기 주장 + PC 정본 화면 동기화
     };
     this.termEl?.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeydown, true);
@@ -1756,17 +2048,121 @@ export class PaneView {
     document.addEventListener("compositionstart", onComp, true);
     document.addEventListener("compositionupdate", onComp, true);
     document.addEventListener("compositionend", onCompEnd, true);
+    const disposeTuiWheel = this._bindWheelRouting();
     this._inputDispose = () => {
+      disposeTuiWheel();
       ta.removeEventListener("blur", onBlur);
       ta.removeEventListener("focus", onFocus);
       this.termEl?.removeEventListener("mousedown", onMouseDown);
-      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
       document.removeEventListener("keydown", onKeydown, true);
       document.removeEventListener("input", onInput, true);
       document.removeEventListener("paste", onPaste, true);
       document.removeEventListener("compositionstart", onComp, true);
       document.removeEventListener("compositionupdate", onComp, true);
       document.removeEventListener("compositionend", onCompEnd, true);
+    };
+  }
+  // ── win32 입력 배선(계약 5) — xterm 표준 키 경로 + 앱 예약 조합만 위로 흘린다 ──
+  //  · Chromium(WebView2) IME 는 표준 경로에서 한글이 정상이라 WKWebView 델타 우회가 필요 없다.
+  //  · attachCustomKeyEventHandler: 예약 조합(현재 바인딩 표에 걸린 것)이면 false → xterm 이
+  //    무시하고 이벤트가 버블 → main.js 전역 단축키 핸들러가 실행한다. 나머지(Ctrl+* 포함)는
+  //    true → xterm 이 제어문자로 변환해 셸로 보낸다. AltGr(ctrl+alt 동시)는 comboOf 가
+  //    null 을 돌려줘 항상 문자 입력으로 통과한다(유럽 자판 보호).
+  //  · 입력 전송은 xterm 정본(onData → _write, mount 에서 이미 배선됨). Shift+Tab(CSI Z)·
+  //    Shift+PageUp/Down 스크롤백도 xterm 기본 동작이다.
+  _setupInputWin(ta) {
+    this.term.attachCustomKeyEventHandler((ev) => {
+      if (ev.type !== "keydown") return true;
+      this._claimSize(); // 타이핑 = 이 pane 크기 주장(mac 경로와 동일 규칙)
+      if (ev.shiftKey && ev.key === "Enter" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        // 멀티라인 개행(Claude Code 등 REPL) — 3플랫폼 공통 UX(mac 경로와 동일 시퀀스).
+        ev.preventDefault();
+        this._write("\x1b\r");
+        return false;
+      }
+      const combo = comboOf(ev);
+      if (combo && commandForCombo(bindings(), combo)) return false; // 앱 예약 → 전역 핸들러 몫
+      return true; // 그 외 전부 xterm 표준 경로(제어문자·IME 포함)
+    });
+    // 붙여넣기 — mac 과 같은 우선순위(파일 참조 > 이미지 데이터 > plain text). 경로/이미지 확인이
+    //  비동기라 기본 paste 를 막고 여기서 1회만 보낸다(중복 전송 방지 규칙 동일). 네이티브 클립보드
+    //  조회가 이 플랫폼 빌드에 없으면 조용히 텍스트로 폴백한다.
+    const onPaste = (e) => {
+      if (e.target !== ta) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      const text = (e.clipboardData || window.clipboardData)?.getData("text") || "";
+      (async () => {
+        let paths = [];
+        try { paths = await api.clipboardPaths(); } catch (_) { /* noop */ }
+        if (!Array.isArray(paths) || !paths.length) {
+          let img = null;
+          try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
+          if (img) paths = [img];
+        }
+        if (paths.length) { this.insertText(paths.map((p) => shellQuote(p)).join(" ") + " "); return; }
+        if (!text) return;
+        let t = text.replace(/\r?\n/g, "\r");                       // xterm 규칙: 개행 → CR
+        if (this.term?.modes?.bracketedPasteMode) t = "\x1b[200~" + t + "\x1b[201~";
+        this._write(t);
+      })();
+    };
+    document.addEventListener("paste", onPaste, true);
+    const onFocus = () => this._claimSize(true);
+    ta.addEventListener("focus", onFocus);
+    const onMouseDown = () => {
+      const at = this.node.tabs?.[this.node.active];
+      if (at && isTermTab(at) && typeof at.win === "number") this.ctx.onTabActivated?.(at.win);
+      this._claimSize(true);
+    };
+    this.termEl?.addEventListener("mousedown", onMouseDown);
+    const disposeTuiWheel = this._bindWheelRouting();
+    this._inputDispose = () => {
+      disposeTuiWheel();
+      ta.removeEventListener("focus", onFocus);
+      this.termEl?.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("paste", onPaste, true);
+    };
+  }
+  // 풀스크린 TUI 휠 보완 — 두 입력 경로(mac/win)가 공유한다.
+  //  vim·less 처럼 마우스 추적을 안 켜는 풀스크린 앱은 휠을 돌려도 xterm 이 "일반 셸 스크롤백"으로
+  //  처리해 화면이 안 움직인다 → 방향키로 바꿔 보낸다. 판정은 브랜드(codex 등)가 아니라 모드로 한다.
+  //  ⚠ 마우스 추적이 켜져 있으면 손대지 않는다 — 그건 xterm 이 이미 휠 리포트로 보낸다.
+  //  (v2 시절엔 tmux.conf 의 smcup@ 때문에 1049 가 클라이언트에 안 와서 서버에 물어봐야 했다.
+  //   v3 는 %output 원시 바이트라 로컬 xterm 이 직접 안다 — smcup@ 도 2026-09-06 제거됐다.)
+  _bindWheelRouting() {
+    // v3: 원시 PTY 바이트가 그대로 오므로 alt-screen(1049)·마우스 모드를 **로컬 xterm 이 안다**.
+    //  서버에 물어보던 modes 조회(TTL 캐시·타이머)는 사라졌다. (win32 legacy 만 pty_modes 폴백.)
+    const modes = { altScreen: false, at: 0 };
+    const refresh = () => {
+      if (localTmuxBackend() || !this.ctx.isLocal) { modes.altScreen = this.term?.buffer?.active?.type === "alternate"; return; }
+      if (Date.now() - modes.at < 700) return;
+      modes.at = Date.now();
+      api.ptyModes(this.id).then((m) => { modes.altScreen = !!(m && m.altScreen); }).catch(() => {});
+    };
+    const onWheel = (e) => {
+      refresh();
+      // ① 마우스 추적 TUI(claude·codex 등) — xterm 이 이미 휠 리포트를 보낸다. 손대지 않는다.
+      const tracking = this.term?.modes?.mouseTrackingMode && this.term.modes.mouseTrackingMode !== "none";
+      if (tracking) return;
+      const dy = Number(e.deltaY) || 0;
+      if (!dy) return;
+      const count = Math.max(1, Math.min(6, Math.ceil(Math.abs(dy) / 36)));
+      e.preventDefault();
+      e.stopPropagation();
+      // ② 풀스크린 앱(vim·less) — 방향키로 바꿔 앱에 준다. tmux 가 smcup@ 라 xterm 은 1049 를
+      //    못 봐서 스스로는 알 수 없다. 판정은 tmux 정본(pty_modes)이지 브랜드가 아니다.
+      if (modes.altScreen) {
+        const app = !!this.term?.modes?.applicationCursorKeysMode;
+        this._write((dy < 0 ? (app ? "\x1bOA" : "\x1b[A") : (app ? "\x1bOB" : "\x1b[B")).repeat(count));
+        return;
+      }
+      // ③ 일반 셸 — 이 버퍼가 곧 과거다(스냅샷이 스크롤백을 통째로 실어 온다). 일반 터미널처럼 스크롤.
+      try { this.term?.scrollLines(dy < 0 ? -count : count); } catch (_) { /* noop */ }
+    };
+    const opt = { capture: true, passive: false };
+    this.termEl?.addEventListener("wheel", onWheel, opt);
+    return () => {
+      this.termEl?.removeEventListener("wheel", onWheel, { capture: true });
     };
   }
   // 프로그램적 텍스트 삽입(OS 파일 드롭 등) — 붙여넣기(onPaste)와 동일 규칙:
@@ -1789,7 +2185,7 @@ export class PaneView {
   //  의도된 교체. 전자는 남은/새 터미널로 갈아타고, 목록이 비어 있으면 생길 때까지 대기만 한다
   //  (여기서 창을 만들면 기기 간 생성 레이스로 유령 터미널이 생긴다).
   _onExit() {
-    if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
+    if (this.node.kind !== "terminal") return;
     if (this._expectExit) { this._expectExit = false; return; } // 탭 전환의 의도된 교체 — 무시
     this.term?.write(i18n.t("\n\x1b[90m[세션 종료 — 재연결 대기]\x1b[0m\n"));
     this._attachedWin = null;
@@ -1820,21 +2216,31 @@ export class PaneView {
         this.buildHead();
         this.ctx.persist?.();
       }
-      const { cols, rows } = this.term || {};
-      api.ptyOpen(this.id, this.ctx.localPath || "", tab.win ?? 0, cols || 80, rows || 24)
-        .then((resolved) => {
-          this._attachedWin = typeof resolved === "number" ? resolved : tab.win;
-          this.term?.write(i18n.t("\x1b[90m[재연결됨]\x1b[0m\n"));
-        })
-        .catch(() => this._scheduleReopen(3000));
+      this._attachedWin = tab.win;
+      this._openChannel(tab.win);
+      this.term?.write(i18n.t("\x1b[90m[재연결됨]\x1b[0m\n"));
     }, delay);
   }
-  _fitNow() {
+  _fitNow(force) {
     if (!this.term) return;
+    // v3 비소유자: 격자는 소유자 것이라 fit 하지 않는다 — 컨테이너에 맞춰 축소만 다시 계산.
+    if (this._grid && !this._isOwner && !this._ownerFree) {
+      if (this.term.cols !== this._grid.cols || this.term.rows !== this._grid.rows) { try { this.term.resize(this._grid.cols, this._grid.rows); } catch (_) {} }
+      this._applyScale();
+      return;
+    }
     try {
       this.fit.fit();
     } catch (_) {}
     this._correctFit();
+    this._applyScale();
+    if (force) { this._sentCols = -1; this._sentRows = -1; }
+    // ★ 퇴화 크기는 절대 보내지 않는다. 격자가 숨겨진 상태에서 fit 하면 FitAddon 이 자기 최소값
+    //   (2x1)을 돌려주는데, 그게 공유 tmux window 로 나가면 **모든 기기의 터미널이 2x1 로 접힌다**
+    //   (2026-09-05 안드로이드 실기 실측 — 앱의 과거 오버레이가 라이브 격자를 display:none 할 때 발생).
+    //   PC 는 오버레이가 visibility 만 감춰 레이아웃이 남지만, 창 최소화·탭 전환 등 0 크기 순간은
+    //   언제든 생기므로 같은 방어선을 둔다.
+    if (this.term.cols < 8 || this.term.rows < 3) return;
     const { cols, rows } = this.term;
     if (!cols || !rows) return;
     // ★ 값이 안 바뀌었으면 보내지 않는다. 라이브 로그로 드러난 것: `_fitNow` 가 **7초마다**(리컨실
@@ -1922,6 +2328,12 @@ export class PaneView {
             api.previewSync(this._pvId, this._pvEffUrl, r.left, r.top, r.width, r.height, visible).catch(() => {});
           }
         }
+        // 안 보일 땐 300ms 저속(위 PreviewSurface 와 동일 규칙 — 숨은 워크스페이스 CPU 절약).
+        if (!visible) {
+          this._previewRaf = null;
+          this._previewSlowTimer = setTimeout(() => { this._previewSlowTimer = null; this._previewRaf = requestAnimationFrame(tick); }, 300);
+          return;
+        }
       }
       this._previewRaf = requestAnimationFrame(tick);
     };
@@ -1950,8 +2362,12 @@ export class PaneView {
     }
   }
 
+  // 검색 대상 = 라이브 격자 하나. 스크롤백(과거)까지 한 버퍼라 ⌘F 가 과거도 함께 찾는다.
+  _activeSearchAddon() {
+    return this.searchAddon || null;
+  }
   _openTermSearch() {
-    if (!this.searchAddon) return;
+    if (!this._activeSearchAddon()) return;
     if (this._searchBar) { this._searchInput.focus(); this._searchInput.select(); return; }
     const bar = document.createElement("div");
     bar.className = "pane-search";
@@ -1977,16 +2393,19 @@ export class PaneView {
       activeMatchColorOverviewRuler: "#c78b1e",
     };
     const opts = () => ({ decorations: deco, caseSensitive: false });
-    if (!this._searchResDisposer && this.searchAddon.onDidChangeResults) {
-      this._searchResDisposer = this.searchAddon.onDidChangeResults((r) => {
+    const addon = this._activeSearchAddon();
+    if (!this._searchResDisposer && addon.onDidChangeResults) {
+      this._searchResDisposer = addon.onDidChangeResults((r) => {
         if (!r || !r.resultCount) count.textContent = "0/0";
         else count.textContent = `${(r.resultIndex ?? -1) + 1}/${r.resultCount}`;
       });
     }
     const doFind = (back) => {
       const q = input.value;
-      if (!q) { try { this.searchAddon.clearDecorations?.(); } catch (_) {} count.textContent = "0/0"; return; }
-      try { back ? this.searchAddon.findPrevious(q, opts()) : this.searchAddon.findNext(q, opts()); } catch (_) {}
+      const a = this._activeSearchAddon();
+      if (!a) return;
+      if (!q) { try { a.clearDecorations?.(); } catch (_) {} count.textContent = "0/0"; return; }
+      try { back ? a.findPrevious(q, opts()) : a.findNext(q, opts()); } catch (_) {}
     };
     input.addEventListener("input", () => doFind(false));
     input.addEventListener("keydown", (e) => {
@@ -2034,6 +2453,7 @@ export class PaneView {
     if (this.node.kind === "preview") {
       this._disposed = true;
       if (this._previewRaf) cancelAnimationFrame(this._previewRaf);
+      if (this._previewSlowTimer) clearTimeout(this._previewSlowTimer);
       if (this._previewInfoTimer) clearInterval(this._previewInfoTimer);
       this.previewBar?.dispose();
       // 탭 편입(joinPaneAsTab/mergeAsTabs) 등 표면 승계 경로에선 webview 를 닫지 않는다.
@@ -2043,7 +2463,7 @@ export class PaneView {
       if (this._preservePreview) api.previewSync(this._pvId, this._pvEffUrl || this.previewUrl || "", 0, 0, 0, 0, false).catch(() => {});
       else api.previewClose(this._pvId).catch(() => {});
     }
-    if (this.ctx.isLocal && this.node.kind === "terminal") api.ptyClose(this.id).catch(() => {});
+    if (this.ctx.isLocal && this.node.kind === "terminal" && !localTmuxBackend()) api.ptyClose(this.id).catch(() => {});
     try {
       this.ws?.close();
     } catch (_) {}

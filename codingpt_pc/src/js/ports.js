@@ -62,12 +62,19 @@ function esc(s) {
  * 포트 드롭다운. "웹뷰 추가" 버튼과 빈 프리뷰의 "dev 열기"가 **같은 메뉴**를 연다.
  *  opts.blank 를 주면 맨 위에 [빈 웹뷰] 행을 넣는다(웹뷰 추가 버튼용).
  */
-export function openPortsMenu(anchor, { ws, onPick, onBlank } = {}) {
-  document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
-  const menu = document.createElement("div");
-  menu.className = "pv-menu";
-  menu.style.minWidth = "244px";
-  const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+export function openPortsMenu(anchor, { ws, onPick, onBlank, into, onDone } = {}) {
+  // `into` = **이미 만들어진 패널에 그려 넣는다**(헤더 [+] 의 `웹뷰 ›` 하위 메뉴). 이때는 자기
+  //  위치를 잡지도, 바깥 클릭 감시를 걸지도 않는다 — 그건 부모 메뉴가 한다.
+  //  이 옵션이 있는 이유: 포트 목록은 여기가 정본이라 하위 메뉴에서 다시 구현하면 두 벌이 된다.
+  const nested = !!into;
+  if (!nested) document.querySelectorAll(".pv-menu").forEach((el) => el.remove());
+  const menu = into || document.createElement("div");
+  if (!nested) { menu.className = "pv-menu"; menu.style.minWidth = "244px"; }
+  const close = () => {
+    if (nested) { onDone?.(); return; }
+    menu.remove();
+    document.removeEventListener("mousedown", closer, true);
+  };
   const closer = (e) => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
 
   const row = (html, onClick) => {
@@ -130,13 +137,15 @@ export function openPortsMenu(anchor, { ws, onPick, onBlank } = {}) {
   };
 
   paint(null);
-  const r = anchor.getBoundingClientRect();
-  menu.style.top = (r.bottom + 4) + "px";
-  menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
-  menu.style.maxHeight = "min(60vh, 420px)";
-  menu.style.overflowY = "auto";
-  document.body.append(menu);
-  setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  if (!nested) {
+    const r = anchor.getBoundingClientRect();
+    menu.style.top = (r.bottom + 4) + "px";
+    menu.style.right = Math.max(6, window.innerWidth - r.right) + "px";
+    menu.style.maxHeight = "min(60vh, 420px)";
+    menu.style.overflowY = "auto";
+    document.body.append(menu);
+    setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  }
   loadPorts(ws)
     .then((d) => { if (menu.isConnected) paint(d); })
     .catch(() => { if (menu.isConnected) { menu.innerHTML = ""; note(TX.failed); } });

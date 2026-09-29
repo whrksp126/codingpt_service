@@ -117,7 +117,7 @@ const read = (p) => fs.readFileSync(path.resolve(here, p), "utf8");
   //  지나갈 때 ② TUI→채팅 토글. 둘 다 '그 순간의 화면'을 읽어야 알약이 바로 맞는다.
   ok("PC: 채팅으로 토글하면 즉시 캐치업한다", /if \(this\._chatId\) this\._catchUp\(\);/.test(cv));
   ok("데몬: shift\+tab(CSI Z)이 입력 경로를 지나가면 즉시 재확인", /onTerminalInput/.test(sl) && /CSI_Z/.test(sl));
-  ok("데몬: pty 입력이 감시자에게 통지한다", /onTerminalInput\(/.test(read("../../codingpt_daemon/packages/runner-core/pty.js")));
+  ok("데몬: pty 입력이 감시자에게 통지한다", /onTerminalInput\(/.test(read("../../codingpt_daemon/packages/runner-core/pty-v3.js")));
   ok("데몬: chat.open 스냅샷은 캐시가 아니라 새로 읽는다", /await pollOne\(chatId\)/.test(sl) && !/w\.last == null && w\.lastMode == null/.test(sl));
   ok("PC: 실패를 배너로 알린다(조용한 실패 금지)", /MODE_UNREACHABLE/.test(cv) && /MODE_BLOCKED/.test(cv));
   const api = read("../src/js/api.js");

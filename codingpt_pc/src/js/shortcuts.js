@@ -15,20 +15,20 @@
 //  · 판정(정규화·충돌·병합)은 전부 commands.js 다. 여기는 보관과 배선만 한다.
 import { api } from "./api.js";
 import { resolveBindings, normalizeCombo, comboFromEvent, defaultBindings } from "./commands.js";
+import { IS_APPLE as PU_IS_APPLE, IS_WINDOWS as PU_IS_WINDOWS } from "./path-utils.js";
 
 const KEY = "cpt.shortcuts";
 
-/** ⌘ 를 쓰는 플랫폼인가. 조합의 `Mod` 가 무엇으로 풀리는지를 정한다. */
-export const IS_APPLE = (() => {
-  try {
-    const s = `${navigator.platform || ""} ${navigator.userAgent || ""}`;
-    return /Mac|iPhone|iPad|iPod/i.test(s);
-  } catch (_) { return true; }   // Tauri(macOS) 가 이 앱의 유일한 배포 대상이다
-})();
+/** ⌘ 를 쓰는 플랫폼인가. 조합의 `Mod` 가 무엇으로 풀리는지를 정한다.
+ *  판정 구현은 path-utils.js 한 곳이다(의존성 0 — 테스트에서도 같은 판정을 쓴다).
+ *  구 폴백 "무조건 mac" 은 Windows 배포에서 결함이라 path-utils 쪽에서 수정됐다. */
+export const IS_APPLE = PU_IS_APPLE;
+/** Windows 인가 — win32 기본 바인딩 표(WIN_KEYS)·입력층 분기가 이 값 하나를 본다. */
+export const IS_WINDOWS = PU_IS_WINDOWS;
 
 /** 사용자가 바꾼 것만 담는다(안 바꾼 명령은 여기 없다 = 기본값). */
 let overrides = {};
-let resolved = resolveBindings("pc", null);
+let resolved = resolveBindings("pc", null, IS_WINDOWS);
 const listeners = new Set();
 
 function load() {
@@ -36,12 +36,12 @@ function load() {
     const raw = JSON.parse(localStorage.getItem(KEY) || "null");
     if (raw && typeof raw === "object" && !Array.isArray(raw)) overrides = raw;
   } catch (_) { /* 손상된 값은 무시 — 기본값으로 시작한다 */ }
-  resolved = resolveBindings("pc", overrides);
+  resolved = resolveBindings("pc", overrides, IS_WINDOWS);
 }
 load();
 
 function emit() {
-  resolved = resolveBindings("pc", overrides);
+  resolved = resolveBindings("pc", overrides, IS_WINDOWS);
   listeners.forEach((fn) => { try { fn(resolved); } catch (_) { /* noop */ } });
 }
 
@@ -77,7 +77,7 @@ function persist() {
  *  (설정 파일에 의미 없는 줄이 쌓이지 않게).
  */
 export function setBinding(id, combo) {
-  const def = defaultBindings("pc");
+  const def = defaultBindings("pc", IS_WINDOWS);
   if (!Object.prototype.hasOwnProperty.call(def, id)) return;
   const next = combo == null ? null : normalizeCombo(combo);
   if (combo != null && next == null) return;      // 못 읽는 조합은 조용히 버리지 않고 아무것도 안 한다

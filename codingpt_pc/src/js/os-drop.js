@@ -5,6 +5,7 @@
 //  터미널에 `'<path>'` 공백 join + 뒤 공백 1개를 경로(insertText)로 삽입. 그 외 드롭은 무시.
 import { api } from "./api.js";
 import { getPane, isTermTab, terminalPanes } from "./pane.js";
+import { shellQuote } from "./path-utils.js";
 
 let hlEl = null; // 하이라이트 중인 pane 요소
 
@@ -38,9 +39,10 @@ export function termTargetAt(px, py) {
   if (ti >= 0) return { pane, tabIndex: ti };
   return null;
 }
-// 셸 안전 작은따옴표 감싸기 — 경로 내 ' 는 '\'' 로 이스케이프.
+// 셸 안전 작은따옴표 감싸기 — 대상 셸별 인용(path-utils 위임).
+//  macOS(zsh/bash)=POSIX(내부 ' → '\''), win32(PowerShell)=' 두 배. 기존 호출부 호환용 재수출.
 export function shq(p) {
-  return "'" + String(p).replace(/'/g, "'\\''") + "'";
+  return shellQuote(p);
 }
 
 // 대상 터미널(pane, tabIndex)에 경로 텍스트를 삽입 — 필요하면 그 터미널 탭으로 먼저 전환. os-drop/ide 공용.

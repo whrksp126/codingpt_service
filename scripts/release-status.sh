@@ -52,6 +52,10 @@ front_code=$(code_of "$FRONT_PROD/")
 # 발행된 PC 최신 버전 — 아주 낮은 버전으로 물어보면 항상 최신을 알려준다(204 면 발행분 없음).
 pc_live=$(curl -s --max-time 12 "$BACK_PROD/api/pc/update/darwin/aarch64/0.0.1" 2>/dev/null \
   | python3 -c "import sys,json;d=sys.stdin.read().strip();print(json.loads(d)['version'] if d else '없음')" 2>/dev/null || echo '?')
+# Windows 채널 — 아직 미발행이 정상(실기 검증 전). 404/204 든 '없음' 으로 표시만 한다.
+pc_live_win=$(curl -s --max-time 12 "$BACK_PROD/api/pc/update/windows/x86_64/0.0.1" 2>/dev/null \
+  | python3 -c "import sys,json;d=sys.stdin.read().strip();print(json.loads(d)['version'] if d else '없음')" 2>/dev/null || echo '없음')
+pc_live_win="${pc_live_win:-없음}"
 # back 이 앱에 알려주는 최신 버전(= 인앱 업데이트 안내 기준)
 app_ver_json=$(curl -s --max-time 12 "$BACK_PROD/api/app/version" 2>/dev/null || echo '')
 back_ios=$(echo "$app_ver_json" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d['ios']['version'],d['ios'].get('source','?'))" 2>/dev/null || echo '? ?')
@@ -72,14 +76,14 @@ read -r adm_dirty adm_unpushed adm_branch <<<"$(repo_state "$ADMIN")"
 if [ "$JSON" = 1 ]; then
   python3 - "$svc_dirty" "$svc_unpushed" "$app_dirty" "$app_unpushed" "$adm_dirty" "$adm_unpushed" \
     "$pc_ver" "$pc_live" "$and_name" "$and_code" "$ios_ver" "$ios_build" \
-    "$cmp_ios" "$cmp_and" "$store_ios" "$back_code" "$front_code" "$back_ios" "$back_and" <<'PY'
+    "$cmp_ios" "$cmp_and" "$store_ios" "$back_code" "$front_code" "$back_ios" "$back_and" "$pc_live_win" <<'PY'
 import json,sys
 a=sys.argv[1:]
 print(json.dumps({
  "repos":{"service":{"dirty":int(a[0]),"unpushed":int(a[1])},
           "app":{"dirty":int(a[2]),"unpushed":int(a[3])},
           "admin":{"dirty":int(a[4]),"unpushed":int(a[5])}},
- "pc":{"repo":a[6],"published":a[7]},
+ "pc":{"repo":a[6],"published":a[7],"publishedWindows":a[19]},
  "android":{"versionName":a[8],"versionCode":a[9],"composeLatest":a[13]},
  "ios":{"marketing":a[10],"build":a[11],"composeLatest":a[12],"store":a[14]},
  "live":{"backCode":a[15],"frontCode":a[16],"backIos":a[17],"backAndroid":a[18]},
@@ -95,6 +99,7 @@ printf "  admin    %-6s 미커밋 %s · 미푸시 %s\n" "$adm_branch" "$adm_dirt
 
 hdr "버전 (리포 → 라이브)"
 printf "  PC        %s → 발행됨 %s\n" "$pc_ver" "$pc_live"
+printf "  PC(win)   %s → 발행됨 %s%s\n" "$pc_ver" "$pc_live_win" "$([ "$pc_live_win" = '없음' ] && echo ' (미발행=정상 — 실기 검증 전)')"
 printf "  Android   %s (code %s) → 스토어 %s\n" "$and_name" "$and_code" "$store_and"
 printf "  iOS       %s (build %s) → 스토어 %s\n" "$ios_ver" "$ios_build" "$store_ios"
 printf "  안내기준   back ios=%s · android=%s   (compose ios=%s android=%s)\n" "$back_ios" "$back_and" "$cmp_ios" "$cmp_and"

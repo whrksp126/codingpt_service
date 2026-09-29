@@ -67,6 +67,11 @@ h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; margin: 0 0 8px
 h2 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
 h3 { font-size: 16px; font-weight: 700; }
 
+/* 한글 줄바꿈 — 기본값(line-break: auto)은 한글을 **음절 단위로** 끊어서 단어 중간에서 줄이 바뀐다.
+   (실사고: 히어로가 "내 PC의 코딩 에이전 / 트를 폰에서 이어서" 로 잘림, 1600px 폭)
+   keep-all 로 어절(띄어쓰기) 단위 줄바꿈을 강제한다. 긴 URL·코드가 넘칠 수 있는 곳에는 걸지 않는다. */
+h1, h2, h3, .hero .sub, .hero .kick, .hero .avail { word-break: keep-all; overflow-wrap: break-word; }
+
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
 th { color: var(--dim); font-weight: 600; }

@@ -101,8 +101,11 @@ ok(/launchAgent: undefined/.test(appPane),
 ok(/agents\.launch/.test(pcPane), 'PC: 실행은 데몬 agents.launch 에 맡긴다');
 ok(/launchAgent\(/.test(appPane), '앱: 실행은 데몬 launchAgent RPC 에 맡긴다');
 const daemonSrv = strip(read(path.join(DAEMON, 'cpt-server.js')));
-ok(/pane_current_command/.test(daemonSrv) && /capture-pane/.test(daemonSrv),
-  '데몬: 셸 준비를 tmux 에 직접 물어 판정한다(프롬프트 전 전송 = 입력 씹힘)');
+// ★ 2026-08-14: 판정은 그대로지만 **묻는 통로**가 tmux 직결에서 termBackend(win32 포팅)로 바뀌었다.
+//  고정할 것은 "무엇을 근거로 판정하는가"(실행 중 명령 + 화면에 그려진 것)이지 tmux 명령 문자열이
+//  아니다 — 옛 정규식(pane_current_command/capture-pane)은 리팩터링 이후 계속 빨간 채였다.
+ok(/termBackend\.info\(target\)/.test(daemonSrv) && /termBackend\.capture\(target/.test(daemonSrv),
+  '데몬: 셸 준비를 터미널에 직접 물어 판정한다(프롬프트 전 전송 = 입력 씹힘)');
 
 // ── 6. 배선 대상은 claude/codex 뿐 — 남의 개인 설정 파일을 쓰지 않는다 ────────
 ok(!/\.gemini\/settings\.json|\.cursor\/|writeFileSync\([^)]*gemini/.test(strip(daemonAgents)),
@@ -155,9 +158,9 @@ ok(/wirables\.filter\(\(a\) => a\.installed\)/.test(pcView),
 
 // ── 9. 새 터미널은 스테일 치수로 열지 않는다(TUI 첫 화면이 영구히 어긋난다) ──
 ok(/_fitLocalOnly\(\);\s*\n?\s*const \{ cols, rows \} = this\.term;/.test(pcPane)
-   || /_fitLocalOnly\(\)/.test(pcPane) && /_openChannel\(win\) \{[\s\S]{0,200}_fitLocalOnly/.test(pcPane),
+   || /_fitLocalOnly\(\)/.test(pcPane) && /_openChannel\(win(?:, replace)?\) \{[\s\S]{0,200}_fitLocalOnly/.test(pcPane),
   'PC: _openChannel 이 크기를 읽기 전에 실측 재맞춤한다(라이브 실측 42x15 사고)');
-ok(/window_width/.test(daemonSrv),
+ok(/termBackend\.info\(target\)\)\.cols/.test(daemonSrv) && /lastW !== null && w === lastW/.test(daemonSrv),  // 폭이 두 번 연속 같을 때만 전송
   '데몬 launch: 창 폭이 안정된 뒤 명령을 보낸다(TUI 는 첫 화면을 그 순간 폭으로 그린다)');
 
 
@@ -244,15 +247,15 @@ ok(/cpt\.setupDone\.\$\{state\.me\.id\}/.test(pcGate) && !/localStorage\.setItem
   'PC: 셋업 완료 플래그는 계정별 키다(머신 1회 플래그로 되돌리면 재가입 계정이 온보딩을 못 본다)');
 ok(/cpt\.agentsOnboarded\.\$\{state\.me\.id\}/.test(strip(pcView)),
   'PC: 에이전트 온보딩 노출도 계정별 1회다(배선 설정의 머신 영속과 스코프가 다르다)');
-// 화면당 권한 하나 + 이전/확인/다음. 실제 승인 전에는 다음이 비활성이다.
+// 화면당 권한 하나 + 이전/확인/다음. OS 권한은 모두 선택 사항이라 미승인 상태에서도 진행한다.
 ok(/permQueue\[permIdx\]/.test(pcGate) && /id="lgAllow"/.test(pcGate)
-  && /id="lgPermBack"/.test(pcGate) && /id="lgPermNext"[^>]*disabled/.test(pcGate)
+  && /id="lgPermBack"/.test(pcGate) && /id="lgPermNext" class="btn primary">/.test(pcGate)
   && !/id="lgFolders"/.test(pcGate),
-  'PC: 권한 위저드는 화면당 하나이며 이전/확인/다음을 제공하고 미승인 시 다음이 비활성이다');
+  'PC: 권한 위저드는 화면당 하나이며 미승인 상태에서도 다음으로 진행할 수 있다');
 ok(!/id="lgAuto"/.test(pcGate) && !/lgDone/.test(pcGate),
   'PC: 게이트에 자동 실행 토글·시작하기 버튼이 없다(권한에만 집중 — 마지막 허용이 곧 완료)');
-ok(!/lgSkipPerm/.test(pcGate) && /requiredPerms\(\)/.test(pcGate),
-  'PC: 모든 필수 권한을 실제 승인하기 전에는 건너뛰거나 완료할 수 없다');
+ok(/requiredPerms\(\)/.test(pcGate) && !/if \(!grantedNow\) return/.test(pcGate),
+  'PC: 모든 OS 권한은 선택 사항이며 미승인 상태도 완료할 수 있다');
 ok(/\{ id: "notification", label: "알림 설정" \}/.test(pcGate)
   && /p\.id === "notification"/.test(pcGate)
   && !/\{ id: "notif"/.test(pcGate),
@@ -263,9 +266,9 @@ ok(/id="lgOpenNotifSettings"/.test(pcGate)
 ok(/id="lgNotifControls" class="notif-onb-controls is-disabled"/.test(pcGate)
   && /soundSelect\.disabled = !granted/.test(pcGate)
   && /test\.disabled = !granted/.test(pcGate)
-  && /btn\.disabled = !granted/.test(pcGate)
+  && !/nextBtn\.disabled = !grantedNow/.test(pcGate)
   && !/lgOpenNotifSettingsReady/.test(pcGate),
-  'PC: 상태·설정 구조는 유지하고 OFF면 소리·테스트·계속만 비활성, ON이면 같은 자리에서 활성화한다');
+  'PC: 알림 OFF면 소리·테스트만 비활성이고 온보딩 진행은 막지 않는다');
 ok(/mac_usernotifications::Notification::new/.test(pcBridge)
   && /\.send_blocking\(\)/.test(pcBridge)
   && /\.default_sound\(\)/.test(pcBridge),
@@ -274,13 +277,32 @@ ok(/test\.textContent = ok \? "다시 테스트"/.test(pcGate)
   && /soundSelect\?\.addEventListener\("change"[\s\S]*"테스트 알림 보내기"/.test(pcGate)
   && !/보냈어요 ✓/.test(pcGate),
   'PC: 테스트 알림은 성공 후에도 재전송할 수 있고 소리 변경 시 버튼 문구를 초기화한다');
-ok(/btn\.dataset\.denied === "1"/.test(pcGate)
+ok(/btn\.dataset\.denied = "1"/.test(pcGate)
   && /api\.openFilesPrivacy\(\)/.test(pcGate)
-  && /folderPermissionWatch = setInterval/.test(pcGate)
-  && /api\.probeFolder\(p\.id\)/.test(pcGate)
+  && /setInterval\(async \(\)[\s\S]{0,400}api\.probeFolder\(p\.id\)/.test(pcGate)
   && /id="lgOpenFolderSettings"/.test(pcGate)
   && /btn\.textContent = "다시 확인"/.test(pcGate),
   'PC: 보호 폴더는 설정 화면을 직접 열고 승인 상태를 다시 확인할 수 있다');
+ok(/checkingPermission/.test(pcGate)
+  && /권한을 다시 확인하고 있어요/.test(pcGate)
+  && /권한 없이 다음으로 넘어갈 수 있어요/.test(pcGate),
+  'PC: 다시 확인은 즉시 진행 상태와 실패 결과를 표시한다');
+// ★ 2026-08-14 사용자 확정: 권한 판정은 **슬라이드 진입 시 자동**이다. 예전엔 이미 허용된 권한
+//  앞에서도 [권한 확인] 을 한 번 눌러야 [다음] 이 열렸다("굳이 사용자가 누르지 않아도 되게").
+//  알림도 상태만 읽지 않고 미결정이면 그 자리에서 요청한다(팝업). 버튼은 거부 뒤 재확인 전용.
+ok(/permAutoCheck\?\.\(\)/.test(pcGate)
+  && /btn\.addEventListener\("click", \(\) => \{ permAutoCheck\?\.\(\); \}\)/.test(pcGate)
+  && /value === "prompt"/.test(pcGate) && /api\.notifPermission\(\)/.test(pcGate)
+  && !/알림 상태 확인 중…|"권한 확인"|'권한 확인'/.test(pcGate),
+  'PC: 권한은 슬라이드 진입 시 자동 판정한다(사용자가 [권한 확인] 을 누를 필요가 없다)');
+// ★ TCC 는 폴더 세 개가 아니다 — 홈 훑기가 iCloud Drive·음악 보관함에 닿으면 **작업 도중** 팝업이
+//  뜬다(2026-08-14 실사고). 온보딩에서 함께 받고, 없는 경로는 통과시켜 승인 수단 없는 화면에
+//  사용자를 가두지 않는다.
+ok(/\{ id: "icloud"/.test(pcGate) && /\{ id: "media"/.test(pcGate)
+  && /"icloud" => h\.join\("Library"\)\.join\("Mobile Documents"\)/.test(pcBridge)
+  && /Music Library\.musiclibrary/.test(pcBridge)
+  && /ErrorKind::NotFound/.test(pcBridge),
+  'PC: iCloud Drive·음악 보관함 TCC 도 온보딩에서 미리 받는다(없는 경로는 통과)');
 ok(/\.login-gate \.lg-wizard-body\s*\{[^}]*align-items:\s*flex-start[^}]*text-align:\s*left/.test(pcStyles)
   && /\.login-gate \.lg-dots\s*\{[^}]*justify-content:\s*flex-start/.test(pcStyles),
   'PC: 권한 온보딩 본문과 진행 표시는 Orca처럼 왼쪽 정렬한다');
@@ -294,6 +316,209 @@ ok(/S\.setView\("workspace"\)/.test(pcSettings2.slice(pcSettings2.indexOf('doDel
   'PC: 이 기기에서 탈퇴해도 설정 모달을 닫는다(재가입 첫 화면에 잔상 금지)');
 ok(/markPermGranted\(b\.dataset\.f\)/.test(pcSettings2),
   'PC: 설정의 폴더 허용 성공도 로컬 기록에 남긴다(온보딩의 "없는 권한만" 판정 근거)');
+
+// ── 13. 미읽음 강조 테두리는 "사용자가 봤다"로 꺼진다 (2026-08-14 실사고) ─────
+// 실사고: 알림이 온 터미널을 클릭해도 강조 테두리가 안 꺼졌다. 원인 둘 —
+//  ① 읽음 판정이 **터미널 본문(termEl)** 클릭에만 걸려 있어 같은 탭을 **채팅 모드**로 보고 있으면
+//     아무리 읽어도 안 꺼졌다 → 판정 자리를 pane 전체(el mousedown, isTrusted)로 올렸다.
+//  ② 알림 행을 눌러 점프해도 누른 그 한 건만 읽음이라(readOne) 같은 터미널의 나머지 미읽음이
+//     테두리를 계속 켜 뒀다 → 점프 시 그 (cwd,win) 을 통째로 읽음 처리한다.
+ok(/this\.el\.addEventListener\("mousedown"[\s\S]{0,600}onTabActivated\?\.\(at\.win\)/.test(pcPane),
+  'PC: pane 어디를 클릭해도(채팅 모드 포함) 그 터미널의 알림이 읽음 처리된다');
+const pcSidebar = strip(read(path.join(PC, 'sidebar.js')));
+ok(/S\.readScope\(n\.cwd, Number\(n\.win\)\)/.test(pcSidebar),
+  'PC: 알림에서 터미널로 점프하면 그 터미널의 미읽음을 통째로 읽음 처리한다(테두리 잔존 방지)');
+
+// ── 14. 기기 우선 사이드바 + 채팅 모드(베타) — 2026-08-14 사용자 확정 ─────────
+// 사용자 지적: "워크스페이스 안에 PC 가 보이는 구조는 이해도 안 가고 사용성도 안 좋다".
+//  실제 소유 관계는 반대다 — 워크스페이스는 **그 PC 의 로컬 폴더**다. 그래서 PC 를 먼저 고르고
+//  고른 PC 의 워크스페이스만 그린다. 이 절은 그 구조가 되돌아가지 않게 못박는다.
+const pcState = strip(read(path.join(PC, 'state.js')));
+const appSidebar = strip(read(path.join(APP, 'components/SidebarContent.tsx')));
+const appShell = strip(read(path.join(APP, 'contexts/WorkspaceShellContext.tsx')));
+
+// (1) 기기 선택 = 양 플랫폼 같은 규칙(PC 만 · 마지막 선택 기억 · 사라진 기기는 폴백).
+for (const [name, src] of [['PC', pcState], ['앱', appShell]]) {
+  ok(/role !== ["\']controller["\']/.test(src) && /runnerKind !== ["\']cloud["\']/.test(src),
+    `${name}: 기기 목록은 PC 뿐이다(모바일 controller·클라우드 러너 제외)`);
+  ok(/cpt\.activeDeviceId\.v1/.test(src), `${name}: 마지막으로 고른 PC 를 기억한다(같은 저장 키)`);
+  ok(/workspacesForDevice/.test(src), `${name}: 워크스페이스 목록은 고른 PC 로 거른다`);
+}
+// 저장 키 문자열이 실제로 **같은가** — 다르면 "폰에선 됐는데 PC 는" 이 조용히 생긴다.
+ok(/cpt\.activeDeviceId\.v1/.test(pcState) && /cpt\.activeDeviceId\.v1/.test(appShell),
+  '★ 선택한 PC 저장 키가 두 플랫폼에서 같은 문자열이다');
+
+// (2) 상단 + 제거 — 워크스페이스 추가는 사이드바 안 `워크스페이스` 섹션 머리로 내려갔다.
+ok(!/i18n\.t\('새 워크스페이스'\)|"새 워크스페이스"/.test(pcSidebar) && /sb-sec/.test(pcSidebar),
+  'PC: 사이드바 상단 + 를 없애고 섹션 머리에서 추가한다');
+ok(/SectionHead/.test(appSidebar) && !/onPress=\{onNewWorkspace\} disabled=\{creating\}><Plus/.test(appSidebar),
+  '앱: 상단 컨트롤의 + 를 없애고 섹션 머리에서 추가한다');
+
+// (3) 프로젝트 그룹핑 폐기 — 화면·CSS·메뉴 어디에도 남기지 않는다(죽은 코드는 조용히 부활한다).
+ok(!/projectId/.test(pcSidebar), 'PC: 사이드바가 projectId(프로젝트 묶음)를 더 이상 쓰지 않는다');
+ok(!/projectId/.test(appSidebar), '앱: 사이드바가 projectId 를 더 이상 쓰지 않는다');
+ok(!/ws-proj-head|ws-proj-members/.test(pcCss), 'PC: 프로젝트 그룹 CSS 가 남아 있지 않다');
+ok(!/프로젝트에서 분리|다른 프로젝트와 합치기/.test(pcSidebar + appSidebar),
+  '분리/합치기 메뉴가 두 플랫폼 모두에서 사라졌다');
+
+// (4) 헤더 추가 버튼 = [+] 하나. 옛 4버튼(터미널/IDE/웹뷰/모바일화면)이 남아 있으면 걸린다.
+const appWv = strip(read(path.join(APP, 'workspace/WorkspaceView.tsx')));
+ok(/addBtn\.dataset\.cmd = "ws\.add"/.test(pcWv) && !/mkBtn\(icons\.code/.test(pcWv),
+  'PC: 헤더 추가는 [+] 하나다(옛 4버튼 폐기)');
+ok(/setAddSheet\(true\)/.test(appWv) && !/smartAdd\('emulator'\)\}><DeviceMobile/.test(appWv),
+  '앱: 헤더 추가는 [+] 하나다(옛 4버튼 폐기)');
+
+// (5) 채팅 모드(베타) — 판정은 **공용 함수 인자**로 들어가야 한다. 한쪽에서만 바깥 가드로 막으면
+//  §agent-toggle 의 조합 동치 검증이 그 차이를 못 본다(그래서 여기서 인자 존재를 고정한다).
+const pcSignal = strip(read(path.join(PC, 'agent-signal.js')));
+const appPresence = strip(read(path.join(APP, 'workspace/agentPresence.ts')));
+ok(/input\.betaOn === false/.test(pcSignal) && /input\.betaOn === false/.test(appPresence),
+  '★ 채팅 모드 베타 게이트가 두 구현의 resolveToggleVisible 안에 같은 규칙으로 있다');
+ok(/cpt\.chatBeta\.v1/.test(strip(read(path.join(PC, 'chat-model.js'))))
+  && /cpt\.chatBeta\.v1/.test(strip(read(path.join(APP, 'services/chatBeta.ts')))),
+  '★ 채팅 모드 베타 저장 키가 두 플랫폼에서 같은 문자열이다');
+const pcSet = strip(read(path.join(PC, 'settings.js')));
+const appSet = strip(read(path.join(APP, 'components/SettingsModal.tsx')));
+ok(/베타/.test(pcSet) && /BetaTag/.test(appSet), '설정 화면이 베타임을 표시한다(양 플랫폼)');
+// ★ 베타 기능은 `실험실` 한 곳에 모은다(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다").
+//  각 기능 화면에 흩어지면 화면마다 "이건 정식인가 실험인가"를 다시 판단해야 한다.
+ok(/key: "lab", label: "실험실"/.test(pcSet) && /key: 'lab', label: '실험실'/.test(appSet),
+  '양 플랫폼 설정에 `실험실` 섹션이 있다');
+ok(/LAB_FEATURES/.test(pcSet) && /sec === 'lab'/.test(appSet),
+  '채팅 모드 토글이 실험실에서 그려진다');
+ok(!/chatBetaChk/.test(pcSet) && !/chatBetaOn.*\n.*AgentsCard|AgentsCard[\s\S]{0,200}chatBetaOn/.test(appSet),
+  '에이전트 화면에는 더 이상 베타 토글이 없다(실험실로 이사 완료)');
+
+// (6) PC 전환 = 그 PC 에서 **마지막에 보던 워크스페이스**로 (2026-08-14 사용자 확정).
+//  PC 만 바뀌고 본문이 옛 PC 의 워크스페이스로 남으면 지금 어느 PC 를 보는지 잃는다.
+ok(/cpt\.lastWsByDevice\.v1/.test(pcState) && /cpt\.lastWsByDevice\.v1/.test(appShell),
+  '★ PC 별 마지막 워크스페이스 저장 키가 두 플랫폼에서 같은 문자열이다');
+for (const [name, src] of [['PC', pcState], ['앱', appShell]]) {
+  ok(/rememberLastWs\(/.test(src), `${name}: 워크스페이스를 고를 때 그 PC 의 마지막 자리로 기록한다`);
+  // 기억한 것이 사라졌으면 첫 워크스페이스로 — 아무 데도 못 가는 상태를 만들지 않는다.
+  ok(/lastWs(Map\(\)|ByDeviceRef\.current)\[String\(id\)\]/.test(src) && /\|\| list\[0\]/.test(src),
+    `${name}: PC 를 고르면 기억한 워크스페이스(없으면 첫 번째)로 들어간다`);
+}
+
+// (7) 꺼진 PC 의 빈 화면은 사실대로 말한다 — "열린 터미널이 없습니다 / [새 터미널]" 은 거짓말이다
+//  (그 PC 는 꺼져 있어 새 터미널을 열 수 없다). 2026-08-14 사용자 지적.
+const OFFMSG = '이 PC가 꺼져 있어요';
+for (const [name, src] of [['PC', pcPane], ['앱', appPane]]) {
+  ok(src.includes(OFFMSG), `${name}: 꺼진 PC 의 빈 화면은 꺼져 있다고 말한다`);
+  ok(/hostOffline/.test(src), `${name}: 빈 화면 문구·버튼이 호스트 온오프를 본다`);
+}
+ok(/hostOnline === false/.test(pcWv) && /hostOnline === false/.test(appPane),
+  '★ 두 구현 모두 hostOnline === false 를 같은 판정으로 쓴다(undefined 는 켜짐 취급)');
+
+// ── 15. 텍스트 선택 정책 (2026-08-14 사용자 실사고) ──────────────────────────
+// 증상: 설정 창의 제목·소제목·라벨이 드래그로 잡혀 매우 불편했다.
+// 진범: 전역 `user-select: none` 은 처음부터 있었지만 **`-webkit-` 접두사가 없었다**. WKWebView 는
+//  접두사 선언을 봐야 해서 전역 규칙이 통째로 무시됐고, 개별적으로 접두사를 적어 둔 곳만 살아남아
+//  "어떤 건 잡히고 어떤 건 안 잡히는" 화면이 됐다. 이 검사는 그 누락이 되돌아오는 것을 막는다.
+const rootBlock = (/html, body \{[\s\S]*?\n\}/.exec(pcCss) || [""])[0];
+ok(/user-select: none;/.test(rootBlock) && /-webkit-user-select: none;/.test(rootBlock),
+  '★ 앱 셸의 기본은 선택 불가 — 접두사 있는 선언까지 함께 있다(WKWebView 는 이것만 본다)');
+// 되돌리는 곳도 마찬가지다: 접두사 없는 `user-select: text` 는 이 웹뷰에서 아무 일도 하지 않는다.
+const textOnly = pcCss.split("\n").filter((l) => /user-select: text/.test(l) && !/-webkit-user-select: text/.test(l)
+  && !/^\s*-webkit-/.test(l));
+ok(textOnly.length === 0, '★ 선택 허용 선언은 항상 접두사와 짝으로 쓴다', textOnly.slice(0, 3).join(" | "));
+// 복사·편집이 목적인 표면은 실제로 열려 있어야 한다(전역 none 이 이것들까지 덮으면 기능이 죽는다).
+for (const sel of ['input, textarea', '\\.cm-editor', '\\.pane-chat', '\\.rv-lines', '\\.link-code']) {
+  ok(new RegExp(sel + '[^{]*\\{[^}]*user-select: text').test(pcCss),
+    `선택 가능한 표면 유지: ${sel.replace(/\\\\/g, "")}`);
+}
+
+// ── 16. 렌더는 프레임당 1회로 합친다 (2026-08-14 사용자 실사고: "반응이 왜 이리 느리지?") ──
+// 진단: WebContent 를 sample 하니 타이머 콜백 안에서 innerHTML 재작성이 쉬지 않고 돌았다. 렌더가
+//  무거운 게 아니라 **횟수**가 문제였다 — emit() 이 listeners 를 동기로 돌았고 emit 호출 지점이
+//  106곳이며 그중 agent_state push 는 초당 여러 번 온다(claude 가 도는 내내). 그 사이에 낀 클릭이
+//  밀린다. 이 검사는 emit 이 다시 동기 렌더로 돌아가는 것을 막는다.
+const pcStateSrc = strip(read(path.join(PC, 'state.js')));
+const emitBody = (/export function emit\(\) \{[\s\S]*?\n\}/.exec(pcStateSrc) || [""])[0];
+ok(/renderScheduled/.test(emitBody) && !/for \(const fn of listeners\)/.test(emitBody),
+  '★ emit() 은 렌더를 예약만 한다(동기로 listeners 를 돌지 않는다)');
+// ★ 예약 수단은 **마이크로태스크뿐**이다(2026-08-14 두 번째 실사고).
+//  rAF 는 창이 안 보이면 아예 안 돌고, setTimeout 은 배경에서 1초 이상으로 throttle 된다.
+//  처음엔 그 둘로 예약했다가 PC 전환이 **1370~2000ms** 걸리는 것을 하네스에서 실측했다.
+ok(/queueMicrotask\(runListeners\)/.test(pcStateSrc),
+  '★ 렌더 예약은 마이크로태스크로 한다(가시성·throttle 에 걸리지 않는 유일한 수단)');
+ok(!/requestAnimationFrame\(runListeners\)/.test(pcStateSrc) && !/setTimeout\(runListeners/.test(pcStateSrc),
+  '★ 렌더 예약에 rAF·setTimeout 을 쓰지 않는다(둘 다 "화면이 보이는 동안"을 전제한다)');
+ok(/export function flushRender/.test(pcStateSrc),
+  '동기 렌더가 필요한 경로를 위한 탈출구가 있다');
+
+// ── 17. 터미널 팔레트는 두 플랫폼이 **같은 값 한 벌**이다 (2026-08-15) ────────
+// PC theme.js 와 앱 terminalSchemes.ts 는 "값은 반드시 동일하게 유지" 라고 주석으로만 약속하고
+//  있었다. 색은 한쪽만 고치기 가장 쉬운 것이라(오늘 커서색 교정이 그랬다) 실제로 대조한다.
+const palTokens = (src) => (strip(src).match(/\b[a-zA-Z]+:\s*['"]#[0-9A-Fa-f]{3,8}['"]/g) || [])
+  .map((t) => t.replace(/['"\s]/g, '').toLowerCase());
+const pcPal = palTokens(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'));
+const appPal = palTokens(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8'));
+ok(pcPal.length > 100, `팔레트를 실제로 읽었다(PC ${pcPal.length}개)`);
+const palDiff = pcPal.filter((t, i) => appPal[i] !== t).slice(0, 4);
+ok(pcPal.length === appPal.length && !palDiff.length,
+  '★ 터미널 팔레트가 PC·앱에서 같은 값 같은 순서다',
+  palDiff.length ? `PC=${palDiff.join(',')} vs 앱=${palDiff.map((_, i) => appPal[pcPal.indexOf(palDiff[i])]).join(',')}` : `개수 PC=${pcPal.length} 앱=${appPal.length}`);
+// ★ 커서는 액센트가 아니다(사용자 확정) — 늘 깜빡이는 것은 상태 신호가 될 수 없다.
+//  `auto` 다크의 커서가 초록(액센트 #34D399)으로 되돌아가면 여기서 걸린다.
+ok(!/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'))
+  && !/cursor:\s*['"]#34D399['"]/i.test(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8')),
+  '★ CodingPT 팔레트의 커서에 액센트색을 쓰지 않는다');
+// ★ 드래그 색은 앱이 정한다 — `::selection` 을 정의하지 않으면 웹뷰/시스템 강조색이 고른다.
+//  터미널도 이 규칙을 탄다(TUI 가 마우스 리포팅을 켜면 xterm 자체 선택이 안 만들어진다).
+ok(/::selection \{[^}]*background: #264F78/.test(pcCss)
+  && /\[data-theme="light"\] ::selection/.test(pcCss),
+  '★ 드래그 선택색을 다크·라이트 둘 다 앱이 명시한다(플랫폼 기본값에 맡기지 않는다)');
+// 선택색은 **비활성까지** 지정한다 — 안 주면 포커스가 빠지는 순간 xterm 이 30% 로 깔아 묻힌다.
+ok((fs.readFileSync(path.join(PC, 'theme.js'), 'utf8').match(/selectionInactiveBackground/g) || []).length >= 2,
+  '선택색은 활성·비활성 둘 다 지정한다');
+// ★ 스타일은 4종(CodingPT 디자인, 2026-08-15 사용자 확정) — 값 키는 동기화 계약이라 유지하되
+//  'solarized' 키의 **팔레트 블록**이 되살아나면 5종 회귀다. (이관 매핑의 문자열은 허용)
+{
+  const pcThemeSrc = strip(fs.readFileSync(path.join(PC, 'theme.js'), 'utf8'));
+  const appSchemeSrc = strip(fs.readFileSync(path.join(APP, 'theme/terminalSchemes.ts'), 'utf8'));
+  ok(!/solarized:\s*\{/.test(pcThemeSrc) && !/solarized:\s*\{/.test(appSchemeSrc),
+    '★ 터미널 스타일은 4종이다(solarized 팔레트 블록 부활 금지)');
+  // ★ 256색 66번 리맵 — claude 가 트루컬러 강등으로 칠하는 #5F8787(48;5;66)을 선택색으로 되돌린다.
+  //  기존 세션(COLORTERM 미주입) 대비책이라 한쪽만 지우면 그 플랫폼만 세이지가 재발한다.
+  ok(/TERM_REMAP_ANSI_IDX = 66/.test(pcThemeSrc) && /extendedAnsi/.test(pcThemeSrc),
+    '★ PC: 66번 리맵(extendedAnsi)이 있다');
+  ok(/TERM_REMAP_ANSI_IDX = 66/.test(appSchemeSrc)
+    && /a\[50\] = p\.selectionBackground/.test(strip(fs.readFileSync(path.join(APP, 'components/module/ide/TerminalWebView.tsx'), 'utf8'))),
+    '★ 앱: 66번 리맵이 웹뷰 안에서 조립된다(JSON 희소배열 함정 회피)');
+  // ★ 근본책: 데몬이 새 세션에 트루컬러를 광고한다(COLORTERM + tmux RGB). 둘 중 하나만 있으면
+  //  앱이 색을 못 그리거나(RGB 미관통) TUI 가 강등을 계속한다(COLORTERM 부재).
+  const daemonPty = strip(fs.readFileSync(path.join(DAEMON, 'pty.js'), 'utf8'));
+  const tmuxConf = fs.readFileSync(path.resolve('../codingpt_daemon/tmux.conf'), 'utf8');
+  ok(/COLORTERM = 'truecolor'/.test(daemonPty) && /xterm-256color:RGB/.test(tmuxConf),
+    '★ 데몬: COLORTERM 주입 + tmux RGB 광고가 한 쌍으로 있다');
+  ok(/ensureTruecolor/.test(daemonPty),
+    '★ 데몬: 이미 떠 있는 tmux 서버에도 RGB 를 소급 적용한다(conf 는 첫 기동에만 읽힌다)');
+
+  // attach 클라이언트마다 xterm 로컬 스크롤백이 달라지면 PC 는 과거가 없고 오래 켜 둔 폰만
+  // 낡은 과거를 보게 된다. 두 경로 모두 로컬 버퍼를 지운 뒤 tmux 정본 history 를 넣어야 한다.
+  const pcPtyRust = fs.readFileSync(path.resolve('src-tauri/src/pty.rs'), 'utf8');
+  ok(/capture-pane[\s\S]*?-S[\s\S]*?-10000[\s\S]*?-E[\s\S]*?-1/.test(pcPtyRust)
+    && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(pcPtyRust),
+    '★ PC attach 는 tmux history 로 xterm 스크롤백을 초기화한다');
+  // v3(2026-09-06): 데몬 쪽 정본은 TerminalHost 의 VT 다 — 붙을 때 tmux history 로 **1회 시드**하고
+  //  그 VT 를 직렬화해 SNAPSHOT 으로 내려보낸다(v2 의 buildTerminalSnapshotPayload/SNAPSHOT_START 삭제).
+  const daemonHost = fs.readFileSync(path.resolve('../codingpt_daemon/packages/runner-core/terminal-host.js'), 'utf8');
+  ok(/capture-pane[\s\S]*?'-S', `-\$\{Math\.min\(hs, 10000\)\}`[\s\S]*?'-E', '-1'/.test(daemonHost)
+    && /\\x1b\[3J\\x1b\[H\\x1b\[2J/.test(daemonHost)
+    && /snapshot\(\)/.test(daemonHost),
+    '★ 모바일/원격 attach 도 같은 tmux history 로 스크롤백을 초기화한다');
+  // ★ history_size 를 먼저 물어보고 0 이면 캡처도 패딩도 건너뛴다(2026-09-10 실측). tmux 는 history 가
+  //  비었을 때 `-S -10000 -E -1` 에 **현재 화면 0행**을 돌려주므로, 그대로 시드하면 갓 만든 터미널이
+  //  "프롬프트 1줄 + 빈 줄"짜리 가짜 과거를 갖는다 → 위로 스크롤하면 없던 과거가 열린다.
+  ok(/#\{history_size\}/.test(daemonHost) && /hs > 0 \? this\.runTmux/.test(daemonHost),
+    '★ 데몬 시드는 history_size=0 이면 가짜 과거를 만들지 않는다');
+
+  // 단축키 검색바는 콘텐츠와 함께 스크롤해야 한다. sticky 면 설정 헤더 아래를 떠다니며 목록을 가린다.
+  const scBar = (/\.sc-bar\s*\{([^}]*)\}/.exec(pcCss) || ['', ''])[1];
+  ok(!/position:\s*sticky/.test(scBar),
+    '★ 단축키 검색바는 목록을 따라다니지 않는다');
+}
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);
 if (fail) process.exit(1);

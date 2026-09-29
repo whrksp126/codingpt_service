@@ -1,3 +1,11 @@
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: 유닉스 도메인 소켓 실청취(CPT_SOCK 경로 listen) — 계약 2 named pipe 재배선 전
+//  해당 재배선/정리 후 이 가드를 제거해 win32 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('statusline-relay.test.js: win32 스킵 — 유닉스 도메인 소켓 실청취(CPT_SOCK 경로 listen)', { skip: true }, () => {});
+  return;
+}
+
 // statusline-relay — claude statusLine 슬롯을 차지하면서 **사용자 스크립트를 체인**하는 중계기.
 //
 // 이 파일이 지키는 계약(어기면 사용자 터미널 화면이 망가진다):

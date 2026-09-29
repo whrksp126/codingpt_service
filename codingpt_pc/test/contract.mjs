@@ -967,6 +967,11 @@ eq("폴백 표: 호스트가 이미 실행한 실패는 폴백 금지(이중 실
   eq("1회용 코드가 소비되면 즉시 다음 코드를 자동 발급한다",
     code.includes("myLink.revision === e2ee.linkRevision")
     && e2eeWhole.includes("e2ee.linkRevision += 1"), true);
+  eq("인증 코드에 초 단위 남은 시간과 새 코드 버튼을 함께 표시한다",
+    code.includes("data-link-countdown")
+    && code.includes("myLinkClockTimer = setInterval(paintMyLinkCountdown, 1000)")
+    && code.includes('class="link-renew" data-link-new="1"')
+    && code.includes("icons.refresh({ size: 14 })"), true);
 
   // ⑦ **표(table) 구조**(2026-07-27 개정 3 · 사용자 요구: "기기 목록에서 카드 안에 카드 구조인데 그렇게
   //  안햇으면 좋겠어! 차라리 테이블 구조는 어떨까") — 행마다 카드(`.dev-row`: 배경+테두리+라운드)를

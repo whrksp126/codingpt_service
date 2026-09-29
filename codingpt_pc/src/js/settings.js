@@ -9,7 +9,7 @@ import {
   // (개정 6: approveDevice/denyDevice 는 더 이상 이 화면의 일이 아니다 — device-approval.js·notifications.js)
   e2ee, e2eeReady, refreshE2ee,
   revokeTrust, e2eeStateLabel, e2eeNeedsBootstrap,
-  linkStart, linkClaim,
+  linkStart, linkClaim, bootstrapAccount,
 } from "./e2ee.js";
 // (개정 7: hostLockLabel/isHostRow 는 이 화면에서 쓰지 않는다 — 행별 암호화 배지와 '연결된 PC 없음'
 //  행이 사라졌다. 판정 함수와 그 계약은 host-lock.js 에 그대로 남아 있다: 다시 노출하는 날 규칙을
@@ -24,8 +24,10 @@ import {
   getThemeMode, setThemeMode, getUiFont, setUiFont, getMonoFont, setMonoFont,
   uiFontOptions, monoFontOptions, getTermStyle, setTermStyle,
   getLangSetting, setLangSetting, langOptions,
-  TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme,
+  TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme, onAppearanceChange,
 } from "./theme.js";
+import { IS_WINDOWS } from "./shortcuts.js";
+import { chatBetaEnabled, setChatBetaEnabled } from "./chat-model.js";
 import * as i18n from './i18n/index.js';
 
 let root = null;
@@ -57,7 +59,29 @@ const NAV = [
   { key: "mobile", label: "연결", group: "계정 및 기기", icon: "smartphone", keywords: "휴대폰 태블릿 모바일 Android iOS QR 인증 코드" },
   { key: "supporter", label: "Supporter", group: "계정 및 기기", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
   { key: "system", label: "시스템", group: "앱", icon: "monitor", keywords: "자동 실행 시작 로그인 권한 다운로드 데스크탑 문서 폴더 접근" },
+  //  ★ 실험실(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다") — 다듬는 중인 기능의 on/off 를
+  //   한자리에 모은다. 처음엔 채팅 모드를 `에이전트` 화면에 얹었는데, 베타가 늘면 각 화면에 흩어져
+  //   "이건 정식인가 실험인가"를 화면마다 다시 판단해야 한다. 1항목짜리 **그룹**을 만들지 말라는
+  //   기존 규율은 지킨다 — 새 그룹이 아니라 `앱` 그룹의 항목이다.
+  { key: "lab", label: "실험실", group: "앱", icon: "flask", keywords: "베타 beta 실험 experimental 미리보기 채팅 chat 채팅 모드" },
   { key: "about", label: "앱 정보", group: "앱", icon: "info", keywords: "버전 업데이트" },
+];
+
+/**
+ * 실험실 항목 표 — **베타 기능을 늘릴 땐 여기에 한 줄만 더한다**(화면은 이 표를 그린다).
+ *  · get/set 은 그 기능의 정본 모듈이 갖는다(여기서 localStorage 를 직접 만지지 않는다).
+ *  · onChange = 켜고 끈 직후 화면에 즉시 반영할 일(없으면 생략).
+ */
+const LAB_FEATURES = [
+  {
+    id: "chatBeta",
+    label: "채팅 모드",
+    desc: "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.",
+    get: chatBetaEnabled,
+    set: setChatBetaEnabled,
+    // 열려 있는 pane 이 **즉시** 따라야 한다(설정을 닫고 다시 열 필요가 없게).
+    onChange: () => import("./pane.js").then((m) => m.refreshPaneSurfaces()).catch(() => {}),
+  },
 ];
 
 export function mountSettings(container) {
@@ -147,6 +171,13 @@ function renderSection(force) {
   // 메인 영역 상단 헤더의 제목을 현재 섹션으로(사이드바 말고 메인에 명확히 구분된 헤더).
   const titleEl = root && root.querySelector("#smTitle");
   if (titleEl) titleEl.textContent = i18n.t((NAV.find((n) => n.key === section) || {}).label || "");
+  // ── 한 번 그린 섹션은 emit 마다 다시 그리지 않는다(2026-08-15 성능 라운드) ─────────────
+  //  예전엔 설정이 열려 있는 동안 모든 emit(에이전트 상태 push·리컨실러 등)이 섹션 innerHTML 을
+  //  통째로 재생성했다 — 열어 둔 드롭다운이 닫히고, 입력 중이던 코드가 지워지고, document 클릭
+  //  리스너가 누적됐다. 라이브 값이 필요한 섹션(connection/mobile/기본)은 각자 가드가 있다.
+  const BUILD_ONCE = ["lab", "system", "shortcuts", "appearance", "notifications", "supporter"];
+  if (!force && BUILD_ONCE.includes(section) && contentEl.dataset.sec === section) return;
+  contentEl.dataset.sec = section;
   if (section === "connection") {
     if (force || connMode === null || !contentEl.querySelector("#connBody")) {
       contentEl.innerHTML = `
@@ -169,6 +200,7 @@ function renderSection(force) {
     // 이 PC 의 AI CLI 목록. 데몬 감지가 정본이라 화면은 그 결과를 그대로 비춘다(추측 표기 금지).
     if (force || !contentEl.querySelector("#agentsBody")) {
       // 하단 요약/설명 문단은 사용자 확정으로 제거(2026-07-27) — 목록만 둔다.
+      //  (채팅 모드(베타)는 `실험실` 로 옮겼다 — 2026-08-14 사용자 확정.)
       contentEl.innerHTML = `
         <div class="sm-card2">
           <div class="sett-col"><div id="agentsBody" class="ag-list"></div></div>
@@ -181,24 +213,39 @@ function renderSection(force) {
         body.firstChild.textContent = String(e && e.message ? e.message : e);
       });
     }
+  } else if (section === "lab") {
+    contentEl.innerHTML = `
+      <div class="sm-card2">
+        ${LAB_FEATURES.map((f, i) => `
+          <label class="sett-row sett-row-action" for="lab_${f.id}">
+            <span class="sett-copy"><span class="sett-label">${i18n.t(f.label)}<span class="sett-beta">${i18n.t('베타')}</span></span><span class="sett-desc">${i18n.t(f.desc)}</span></span>
+            <input id="lab_${f.id}" type="checkbox" class="tgl" data-lab="${i}" aria-label="${i18n.t(f.label)}" />
+          </label>`).join("")}
+      </div>
+      <div class="sm-section-note">${i18n.t('실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.')}</div>`;
+    bindLab(contentEl);
   } else if (section === "system") {
     // 시스템 — macOS 와의 연동만 모은다(로그인 항목 + 보호 폴더 접근). 각각은 카드 하나를 채우지
     //  못하는 설정이라 예전엔 `일반`·`보안` 이라는 1항목짜리 그룹으로 흩어져 있었다(2026-08-05 통합).
+    //  win32: 보호 폴더(TCC)는 macOS 개념이라 카드 자체를 숨긴다. 자동 실행은 양 OS 공통(Tauri).
     contentEl.innerHTML = `
       <div class="sm-section-title">${i18n.t('시작')}</div>
       <div class="sm-card2">
         <label class="sett-row sett-row-action" for="autostartChk">
-          <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
+          <span class="sett-copy"><span class="sett-label">${i18n.t('로그인 시 자동 실행')}</span><span class="sett-desc">${IS_WINDOWS ? i18n.t('Windows에 로그인하면 CodingPT를 자동으로 시작해요.') : i18n.t('Mac에 로그인하면 CodingPT를 자동으로 시작해요.')}</span></span>
           <input id="autostartChk" type="checkbox" class="tgl" aria-label="${i18n.t('로그인 시 자동 실행')}" />
         </label>
       </div>
+      ${IS_WINDOWS ? "" : `
       <div class="sm-section-title">${i18n.t('폴더 접근 권한')}</div>
       <div class="sm-card2">
         ${folderPermRow("downloads", i18n.t('다운로드 폴더'))}
         ${folderPermRow("desktop", i18n.t('데스크탑 폴더'))}
         ${folderPermRow("documents", i18n.t('문서 폴더'))}
+        ${folderPermRow("icloud", "iCloud Drive")}
+        ${folderPermRow("media", i18n.t('음악 보관함'))}
         <div class="sett-hint">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</div>
-      </div>
+      </div>`}
       <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정’에서 관리할 수 있어요.')}</div>`;
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
@@ -259,20 +306,48 @@ function renderSection(force) {
       `;
     bindNotificationSettings(contentEl);
   } else if (section === "mobile") {
+    // ★ 코드를 못 만들면 **이유를 말한다**(2026-08-15 실사고). 예전엔 실패해도 `다시 시도` 버튼만
+    //  남아, 눌러도 같은 403 이 조용히 반복됐다 — 화면에는 아무 설명이 없었다(진짜 원인: 다른 PC 가
+    //  계정 열쇠를 다시 만들어 이 PC 가 링에서 빠짐 → 서버가 NOT_TRUSTED 로 거절).
+    //  그리고 이 PC 에 열쇠가 없을 때는 기다리라고만 하지 않는다 — 열쇠를 가진 기기가 있으면
+    //  **그 기기의 코드를 여기서 입력**하는 길(=유일한 회복 경로)을 같은 자리에 둔다.
+    const otherKeyed = (e2ee.devices || []).some((d) => !d.isThisDevice && d.state === "trusted");
+    // 라이브 값이 그대로면 재구축 생략 — emit 마다 innerHTML 재생성하면 **입력 중이던 8자 코드가
+    //  지워진다**(2026-08-15 성능 라운드에서 발견된 실버그). 화면에 나가는 값만 시그니처로 잡는다.
+    const mobileSig = JSON.stringify([e2eeReady(), myLinkBusy, validMyLink() ? myLink.code : null,
+      linkEntryMsg, otherKeyed, e2ee.reason]);
+    if (!force && contentEl.dataset.mobileSig === mobileSig) return;
+    contentEl.dataset.mobileSig = mobileSig;
+    const claimBox = `<div class="link-entry">
+        <input id="linkCodeInput" class="acct-del-input" maxlength="8" placeholder="${i18n.t('8자 코드')}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;letter-spacing:2px" />
+        <button class="sett-btn" data-link-submit="self">${i18n.t('연결')}</button>
+      </div>`;
     const codeHtml = e2eeReady()
       ? `<div class="sett-col">
-          <span class="sett-label">${i18n.t('이 기기 인증 코드')}</span>
           <div class="link-box">
             ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
-            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>` : ""}
-            ${!myLinkBusy && !validMyLink() ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
+            ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>
+              <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
+            ${!myLinkBusy && !validMyLink() ? `${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
           </div>
         </div>`
-      : `<div class="sett-col"><span class="sett-label">${i18n.t('이 기기 인증 코드')}</span><div class="acct-msg">${i18n.t('암호화 연결을 준비하고 있어요…')}</div></div>`;
+      : `<div class="sett-col">
+          <div class="acct-msg">${esc(e2ee.reason || i18n.t('암호화 연결을 준비하고 있어요…'))}</div>
+          ${otherKeyed ? `<div class="sett-hint">${i18n.t('암호화 열쇠가 있는 다른 기기에서 코드를 발급해 여기에 입력하세요.')}</div>${claimBox}${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}
+          <div class="sett-hint" style="margin-top:10px">${i18n.t('그 기기를 켤 수 없다면 이 PC 를 새 기준으로 삼으세요. 워크스페이스·기기 등록·로그인은 그대로예요 — 다른 기기는 다음에 켜질 때 자동으로 다시 신청하고, 여기서 승인만 하면 돼요.')}</div>
+          <div><button class="sett-btn" data-e2ee-reboot="1">${i18n.t('이 PC 로 열쇠 다시 만들기')}</button></div>` : ""}
+        </div>`;
+    // ★ 인증 코드와 스토어 QR 은 **딴 일**이다(2026-08-15 사용자 확정: 카드 분리) — 한 카드에 섞여
+    //  있으면 "코드 아래 QR 을 찍어야 하나?" 같은 오독이 난다. 제목 달린 카드 둘로 나눈다.
     contentEl.innerHTML = `
+      <div class="sm-section-title">${i18n.t('이 기기 인증 코드')}</div>
       <div class="sm-card2">
         ${codeHtml}
-        <div class="sett-hint">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요. 카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
+        <div class="sett-hint">${i18n.t('코드는 이 PC에서 실행하고, 화면은 모바일에서 이어받아요.')}</div>
+      </div>
+      <div class="sm-section-title">${i18n.t('모바일 앱 설치')}</div>
+      <div class="sm-card2">
+        <div class="sett-hint" style="margin-top:0">${i18n.t('카메라로 QR을 스캔해 앱을 설치하세요.')}</div>
         <div class="qr-row">
           <div class="qr-tile">
             <div class="qr-imgwrap"><img class="qr-img" src="${ANDROID_QR}" alt="${i18n.t('Android 앱 설치 QR')}" draggable="false"></div>
@@ -285,14 +360,16 @@ function renderSection(force) {
         </div>
       </div>`;
     bindE2ee(contentEl);
-    if (e2eeReady() && !validMyLink() && !myLinkBusy) queueMicrotask(() => { void ensureMyLink(); });
+    if (e2eeReady() && !validMyLink() && !myLinkBusy && Date.now() - myLinkFailedAt > MY_LINK_RETRY_MS) {
+      queueMicrotask(() => { void ensureMyLink(); });
+    }
   } else {
     // force 이거나 미구성일 때만 재구성 — emit(리컨실러 등)마다 통째 리렌더하면
     // 업데이트 진행 상태("새 버전 N"/"다운로드 %")가 몇 초마다 초기화되는 버그가 된다.
     if (!force && contentEl.querySelector("#updBtn")) return;
     contentEl.innerHTML = `
       <div class="sm-card2">
-        <div class="sett-row"><span>${i18n.t('버전')}</span><span class="dim" id="appVerLabel">CodingPT PC …</span></div>
+        <div class="sett-row"><span>${i18n.t('버전')}</span><span class="dim sel-text" id="appVerLabel">CodingPT PC …</span></div>
         <div class="sett-row"><span>${i18n.t('업데이트')}</span>
           <span style="display:inline-flex;align-items:center;gap:14px;">
             <span class="dim" id="updStatus" style="min-width:76px;text-align:right;">-</span>
@@ -497,6 +574,12 @@ function bindAppearance(rootEl) {
     paintSeg();
   }
 
+  // 바깥 클릭으로 드롭다운 닫기 — **모듈에 1회만** 건다. 예전엔 buildFontDd 마다 document 리스너를
+  //  추가하고 제거하지 않아, 설정을 오래 열수록 클릭 리스너가 선형으로 쌓였다(2026-08-15 누수 수정).
+  if (!window.__cptFdClose) {
+    window.__cptFdClose = true;
+    document.addEventListener("click", () => document.querySelectorAll(".fd-menu").forEach((m) => m.classList.add("hidden")));
+  }
   // 글꼴 미리보기 드롭다운 — 옵션을 실제 그 글꼴로 렌더 + 샘플 문구.
   const buildFontDd = (host, opts, getCur, onPick, sample) => {
     if (!host) return;
@@ -538,7 +621,6 @@ function bindAppearance(rootEl) {
       try { opts.forEach((o) => { if (o.stack) document.fonts?.load?.(`13px ${o.stack}`); }); } catch (_) {}
       menu.classList.toggle("hidden");
     });
-    document.addEventListener("click", () => menu.classList.add("hidden"));
     host.append(btn, menu);
     paintBtn();
     host._repaint = paintBtn;
@@ -575,7 +657,7 @@ function bindAppearance(rootEl) {
         <div class="ts-name">${esc(o.label)}</div>
         <div class="ts-prev" style="background:${p.background}">
           <div class="ts-pline">
-            <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@mac</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
+            <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@${IS_WINDOWS ? "pc" : "mac"}</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
           </div>
           <div class="ts-line" style="color:${p.foreground}">claude&nbsp;<span style="opacity:.75">${i18n.t('코드 설명해줘')}</span></div>
         </div>
@@ -588,6 +670,13 @@ function bindAppearance(rootEl) {
     }
   };
   paintStyleGrid();
+  // 다른 기기발 모양 변경(appearance_event) 라이브 반영 — 섹션이 emit 마다 재구축되지 않게 된 대신
+  //  (BUILD_ONCE), 원격 변경은 이 구독이 그린다. 화면이 교체되면 스스로 해제한다(누수 방지).
+  const off = onAppearanceChange(() => {
+    if (!rootEl.isConnected) { off(); return; }
+    paintStyleGrid();
+    ["#langDd", "#uiFontDd", "#monoFontDd"].forEach((s) => rootEl.querySelector(s)?._repaint?.());
+  });
 }
 
 async function syncAutostart() {
@@ -687,6 +776,21 @@ function folderPermRow(id, label) {
 
 // 보호 폴더(다운로드/데스크탑/문서) 접근 허용 — 클릭 시 프로브(최초엔 macOS 팝업).
 //  허용=버튼 '허용됨' 고정, 거부=버튼이 '설정 열기'(파일 및 폴더 설정)로 전환.
+// 실험실 토글 — LAB_FEATURES 표의 get/set 을 그대로 쓴다(화면은 값을 갖지 않는다).
+//  켜고 끄면 그 기능이 **즉시** 반영돼야 한다(설정을 닫고 다시 열 필요가 없게).
+function bindLab(rootEl) {
+  rootEl.querySelectorAll("[data-lab]").forEach((chk) => {
+    const f = LAB_FEATURES[Number(chk.dataset.lab)];
+    if (!f) return;
+    chk.checked = !!f.get();
+    chk.addEventListener("change", () => {
+      f.set(chk.checked);
+      f.onChange?.();
+      S.emit();
+    });
+  });
+}
+
 function bindFolderPerms(rootEl) {
   rootEl.querySelectorAll(".fpa-btn").forEach((b) => {
     b.addEventListener("click", async () => {
@@ -897,6 +1001,12 @@ let aliasEditError = "";
 let myLink = null;      // { code, until, ref, revision } — 표시 중인 코드
 let myLinkBusy = false;
 let myLinkTimer = null;
+let myLinkClockTimer = null;
+//  ★ 마지막 발급 실패 시각 — 자동 재요청의 브레이크. 발급이 실패하면 화면을 다시 그리는데,
+//   그 렌더가 다시 자동 발급을 부르므로(아래 renderSection 의 queueMicrotask) 서버가 403 을 주는
+//   동안 요청이 무한히 반복된다. 실패 후 잠깐은 사람이 [다시 시도] 를 누를 때만 나간다.
+let myLinkFailedAt = 0;
+const MY_LINK_RETRY_MS = 30000;
 
 function validMyLink() {
   return !!(myLink && myLink.until > Date.now()
@@ -904,13 +1014,29 @@ function validMyLink() {
     && (!myLink.ref || !e2ee.userRef || myLink.ref === e2ee.userRef));
 }
 
+function myLinkTimeText() {
+  const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} 남음`;
+}
+
+function paintMyLinkCountdown() {
+  const text = myLinkTimeText();
+  document.querySelectorAll("[data-link-countdown]").forEach((el) => { el.textContent = text; });
+}
+
 function scheduleMyLinkRenewal() {
   if (myLinkTimer) clearTimeout(myLinkTimer);
+  if (myLinkClockTimer) clearInterval(myLinkClockTimer);
   myLinkTimer = null;
+  myLinkClockTimer = null;
   if (!validMyLink()) return;
+  paintMyLinkCountdown();
+  myLinkClockTimer = setInterval(paintMyLinkCountdown, 1000);
   const wait = Math.max(1000, myLink.until - Date.now() - 1000);
   myLinkTimer = setTimeout(() => {
     myLinkTimer = null;
+    if (myLinkClockTimer) clearInterval(myLinkClockTimer);
+    myLinkClockTimer = null;
     myLink = null;
     if (state.view === "settings" && (section === "connection" || section === "mobile") && e2eeReady()) void ensureMyLink();
   }, wait);
@@ -928,6 +1054,7 @@ async function ensureMyLink({ force = false } = {}) {
     ref: e2ee.userRef || "",
     revision: e2ee.linkRevision,
   } : null;
+  myLinkFailedAt = r.ok ? 0 : Date.now();
   linkEntryMsg = r.ok ? "" : (r.error || i18n.t('인증 코드를 만들지 못했어요'));
   scheduleMyLinkRenewal();
   if (section === "mobile") renderSection(true);
@@ -954,13 +1081,13 @@ function e2eeMyCodeRow() {
     scheduleMyLinkRenewal();
   }
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
-  const mm = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
   return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
     <div class="appr-reveal">${i18n.t('이 기기 인증 코드')}</div>
     <div class="link-box">
       ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
-        <div class="acct-msg">다른 기기에서 이 코드를 입력하세요 · ${mm} 남음</div>` : ""}
+        <div class="acct-msg">다른 기기에서 이 코드를 입력하세요</div>
+        <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
       ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
     </div>
   </td></tr>`;
@@ -1133,17 +1260,37 @@ function bindE2ee(box) {
     linkEntryFor = null;
     await ensureMyLink({ force: true });
   }));
+  //  ⚠ 코드 입력칸은 두 화면에 산다(`계정`의 기기 행 아래 · `연결` 화면). 그래서 입력칸도 다시
+  //   그릴 대상도 **부른 쪽 기준**으로 찾는다 — connBody/renderE2ee 로 고정하면 `연결` 화면에서
+  //   누른 [연결] 이 남의 DOM 을 읽고 자기 화면은 갱신하지 않는다(무반응으로 보인다).
+  const repaint = () => { if (section === "mobile") renderSection(true); else renderE2ee(); };
   box.querySelectorAll("[data-link-submit]").forEach((b) => b.addEventListener("click", async () => {
-    const inp = connBody?.querySelector("#linkCodeInput");
+    const inp = box.querySelector("#linkCodeInput") || connBody?.querySelector("#linkCodeInput");
     const code = String(inp?.value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-    if (code.length !== 8) { linkEntryMsg = i18n.t('코드 8자를 입력해 주세요'); renderE2ee(); return; }
+    if (code.length !== 8) { linkEntryMsg = i18n.t('코드 8자를 입력해 주세요'); repaint(); return; }
     b.disabled = true;
     linkEntryMsg = i18n.t('연결 중…');
-    renderE2ee();
+    repaint();
     const r = await linkClaim(code);
     linkEntryMsg = r.ok ? "" : (r.error || i18n.t('연동에 실패했어요'));
     if (r.ok) linkEntryFor = null;
-    renderE2ee();
+    repaint();
+  }));
+  //  ★ 최후 수단 — 이 PC 를 새 신뢰 기점으로(계정 링 교체). 자동으로는 절대 돌지 않는다(핑퐁 방지,
+  //   e2ee.js maybeAutoBootstrap) → 사람이 경고를 읽고 **두 번** 눌러야 한다.
+  box.querySelectorAll("[data-e2ee-reboot]").forEach((b) => b.addEventListener("click", async () => {
+    if (!b.classList.contains("arm")) {
+      b.classList.add("arm");
+      b.textContent = i18n.t('한 번 더 누르면 다시 만듭니다 · 다른 기기는 모두 재연결');
+      setTimeout(() => { if (b.isConnected) { b.classList.remove("arm"); b.textContent = i18n.t('이 PC 로 열쇠 다시 만들기'); } }, 6000);
+      return;
+    }
+    b.disabled = true;
+    linkEntryMsg = i18n.t('열쇠를 다시 만드는 중…');
+    repaint();
+    const r = await bootstrapAccount();
+    linkEntryMsg = r && r.ok ? "" : ((r && r.error) || i18n.t('열쇠를 만들지 못했어요(잠시 후 다시 시도해 주세요).'));
+    repaint();
   }));
   // 이 기기의 연동 코드는 자동 발급·자동 갱신한다. 실패했을 때만 명시적인 재시도 버튼을 둔다.
   box.querySelectorAll("[data-link-new]").forEach((b) => b.addEventListener("click", async () => {

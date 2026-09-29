@@ -7,7 +7,7 @@ set -uo pipefail
 ENV="${1:-prod}"
 case "$ENV" in
   prod) BACK="https://codingpt-back.ghmate.com"; FRONT="https://codingpt.ghmate.com" ;;
-  dev)  BACK="https://dev-codingpt-back.ghmate.com"; FRONT="https://dev-codingpt.ghmate.com" ;;
+  dev)  BACK="https://dev-codingpt-back.ghmate.com"; FRONT="https://dev-codingpt-front.ghmate.com" ;;   # dev 는 짧은 도메인이 없다(nginx server_name 실측)
   *) echo "사용법: verify-deploy.sh [prod|dev]"; exit 1 ;;
 esac
 
@@ -62,7 +62,13 @@ v=$(curl -s --max-time 15 "$BACK/api/pc/update/darwin/aarch64/0.0.1" 2>/dev/null
   | python3 -c "import sys,json;s=sys.stdin.read().strip();print(json.loads(s)['version'] if s else '')" 2>/dev/null || echo '')
 [ -n "$v" ] && ok "PC 업데이트 채널 응답 (발행 최신 $v)" || bad "PC 업데이트 채널이 버전을 안 줌(latest.json 확인)"
 
-# 5) 구성요소 호환 — PC 가 요구하는 앱 하한이 (a) 스토어에 게시돼 있고 (b) 강제 안내로 전파되는가.
+# 5) PC Windows 채널 — 아직 미발행이 정상(실기 검증 전이라 FAIL 로 치지 않는다). 발행되면 버전 표시.
+vw=$(curl -s --max-time 15 "$BACK/api/pc/update/windows/x86_64/0.0.1" 2>/dev/null \
+  | python3 -c "import sys,json;s=sys.stdin.read().strip();print(json.loads(s)['version'] if s else '')" 2>/dev/null || echo '')
+if [ -n "$vw" ]; then ok "PC Windows 업데이트 채널 응답 (발행 최신 $vw)"
+else printf "  INFO  PC Windows 채널 미발행(정상 — 실기 검증 전)\n"; fi
+
+# 6) 구성요소 호환 — PC 가 요구하는 앱 하한이 (a) 스토어에 게시돼 있고 (b) 강제 안내로 전파되는가.
 #    사람이 기억해야 하는 규율은 잊힌다 → 여기서 기계가 compat.json 과 실서버를 대조한다.
 echo
 if node "$(dirname "$0")/compat-check.mjs" "$ENV"; then :; else fails=$((fails+1)); fi

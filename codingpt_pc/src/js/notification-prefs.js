@@ -1,10 +1,17 @@
 // notification-prefs.js — 온보딩과 설정이 공유하는 데스크톱 알림 소리 설정.
 // 기기 로컬 성격(OS 소리 선택)이므로 계정/서버가 아니라 localStorage 에 둔다.
 import { api } from "./api.js";
+import { IS_WINDOWS } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 const KEY = "cpt.notificationSound.v1";
-export const NOTIFICATION_SOUNDS = [
+// Glass/Ping/Pop 은 macOS 시스템 사운드 이름이다 — win32 에는 존재하지 않아 목록에서 뺀다
+//  (Windows 알림음은 OS 토스트 기본음 하나 = '시스템 기본값'/'소리 없음' 2택).
+//  mac 값이 저장된 채 win32 로 오면 getNotificationSound 의 목록 검증이 'default' 로 떨어뜨린다.
+export const NOTIFICATION_SOUNDS = IS_WINDOWS ? [
+  { value: "default", label: "시스템 기본값" },
+  { value: "none", label: "소리 없음" },
+] : [
   { value: "default", label: "시스템 기본값" },
   { value: "Glass", label: "Glass" },
   { value: "Ping", label: "Ping" },

@@ -145,9 +145,17 @@ export function resolveAgentPresence(input) {
  *  · 혼합 탭(IDE/프리뷰)에서는 숨김 — 요구사항 자체가 "터미널 탭에서만"(의도된 동작).
  *  · win 미확정('new')이면 숨김 — chat 스냅샷 키 (cwd,tid) 가 아직 없다.
  *  · mode==='chat' 이면 에이전트가 사라져도 유지 — TUI 로 돌아갈 길을 사용자 의사 없이 없애지 않는다.
+ *
+ * ★ betaOn(2026-08-14) — 채팅 모드는 베타라 설정으로 끌 수 있다. **꺼짐이 가장 강한 규칙**이라
+ *  맨 앞에 둔다(chat 모드로 열려 있던 탭도 예외가 아니다 — 본문 역시 함께 TUI 로 떨어지므로
+ *  "토글은 없는데 채팅 화면만 남는" 상태가 생기지 않는다).
+ *  ⚠ 이 판정은 앱 `agentPresence.resolveToggleVisible` 과 **같은 함수**여야 한다(test/agent-toggle.mjs
+ *   가 두 구현을 조합 전수로 동치 고정한다). 한쪽에만 플래그를 넣으면 그 즉시 터진다.
+ *  undefined(미지정)는 켜짐으로 본다 — 플래그를 모르는 호출부의 기존 동작을 바꾸지 않는다.
  */
 export function resolveToggleVisible(input) {
   if (!input || !input.isTerm) return false;
+  if (input.betaOn === false) return false;
   if (typeof input.win !== "number") return false;
   if (input.chatReady === false && !input.chatMode) return false;
   return !!(input.agentOn || input.chatMode);

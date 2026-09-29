@@ -155,9 +155,21 @@ test('shim 은 훅 7종을 등록한다 (격리 stateDir, zdot 무접촉)', () =
       'Stop', 'StopFailure', 'UserPromptSubmit',
     ], `훅 7종이어야 함 (실제: ${events.join(',')})`);
     // 래퍼가 --settings 로 이 파일을 주입해야 기존 셸에도 즉시 적용된다(zdot 수정 불필요).
-    const wrapper = fs.readFileSync(path.join(iso, '.codingpt', 'bin', 'claude'), 'utf8');
-    assert.match(wrapper, /--settings/);
-    assert.match(wrapper, /CPT_HOOKS_DISABLED/, '비활성 킬스위치를 유지해야 한다');
+    //  래퍼는 "claude 설치 + 배선 ON" 일 때만 생성된다(shim §3) — 미설치 환경(win CI 등)에선
+    //  래퍼 부재가 정상이라 훅 7종 검증까지만. win32 래퍼(.cmd)는 로직이 node(win-agent-wrapper)에
+    //  있어 배치 본문엔 --settings 가 없다 — 그 계약은 windows-port.test('win 래퍼')가 고정한다.
+    const wrapperPath = process.platform === 'win32'
+      ? path.join(iso, '.codingpt', 'bin', 'claude.cmd')
+      : path.join(iso, '.codingpt', 'bin', 'claude');
+    if (fs.existsSync(wrapperPath)) {
+      const wrapper = fs.readFileSync(wrapperPath, 'utf8');
+      if (process.platform === 'win32') {
+        assert.match(wrapper, /win-agent-wrapper\.js/, '래퍼 로직은 node 위임이어야 한다');
+      } else {
+        assert.match(wrapper, /--settings/);
+        assert.match(wrapper, /CPT_HOOKS_DISABLED/, '비활성 킬스위치를 유지해야 한다');
+      }
+    }
   } finally {
     runtime.init({ root: prev.root || ROOT, stateDir: prev.stateDir });
   }

@@ -381,13 +381,24 @@ function dispatchRpc(ws, method, params, ok, fail) {
   if (method === 'fs.unwatch') { fsRpc.stopWatch(); ok({ ok: true }); return; }
   if (method === 'net.ports') { proxyLib.listPorts(params || {}).then(ok).catch(fail); return; }
   // 멀티 터미널(tmux window) — terminal.list/new/select/close.
-  if (method.startsWith('terminal.')) { ptyLib.handleTerminalRpc(method, params).then(ok).catch(fail); return; }
+  if (method.startsWith('terminal.')) {
+    ptyLib.handleTerminalRpc(method, params).then((r) => {
+      //  terminal.list 에 공유 표면을 같이 싣는다(추가 전용, cpt-server 의 로컬 소켓 경로와 동일).
+      if (method === 'terminal.list' && r && typeof r === 'object') {
+        try { r.surfaces = require('./surfaces').list({ cwd: (params && params.cwd) || '' }).items; } catch (_) { /* noop */ }
+      }
+      return r;
+    }).then(ok).catch(fail);
+    return;
+  }
   // BYO 에이전트(agent.start/input/approve/…) — ws 를 넘겨 이벤트 push 대상 갱신.
   if (method.startsWith('agent.')) { agentLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 에이전트 관리(agents.list/wire/rescan) — 모바일에서도 조작 가능(사용자 확정 2026-07-27).
   //  ⚠ `agents.` 와 `agent.` 는 다른 접두사다(위 분기가 먼저 걸리지 않는다) — 순서를 바꿔도 안전.
   //  LAN 직결 allowlist 에는 넣지 않는다(lan.js 불변식: 승인·에이전트류는 서버 릴레이로 남긴다).
   if (method.startsWith('agents.')) { cptServer.handleAgentsRpc(method, params || {}).then(ok).catch(fail); return; }
+  // 공유 표면(surface.list/add/update/remove) — 폰·다른 PC 가 연 프리뷰·IDE·모바일 화면을 전 기기에 반영(2026-09-20).
+  if (method.startsWith('surface.')) { cptServer.handleSurfaceRpc(method, params || {}).then(ok).catch(fail); return; }
   // 코드 리뷰(review.get/pending/submit/cancel) — 폰·다른 PC 화면이 결과를 돌려보내는 유일한 경로.
   //  세션은 이 PC 데몬 메모리에 있고, 유닉스 소켓(이 PC 화면)과 **같은 함수**를 탄다.
   //  ⚠ 이 줄이 없으면 폰의 [보내기]가 "알 수 없는 메서드"로 조용히 실패한다(실측으로 잡힌 결함).
@@ -396,6 +407,8 @@ function dispatchRpc(ws, method, params, ok, fail) {
   // 모바일 화면(emulator.*) — 폰·태블릿 화면이 프레임을 당겨 가고 탭을 되돌려보내는 유일한 경로.
   //  ⚠ 이 줄이 없으면 폰에서 에뮬레이터 탭이 "알 수 없는 메서드"로 조용히 죽는다(리뷰에서 겪은 그 사고).
   if (method.startsWith('emulator.')) { require('./emulator').handle(method, params || {}).then(ok).catch(fail); return; }
+  // 에이전트 데스크톱(desktop.*) — 폰·다른 PC 에서 상태/개입 [계속]/켜기·끄기. 화면·입력은 emulator.* 를 탄다.
+  if (method.startsWith('desktop.')) { callLazy('./desktop', 'handle', [method, params || {}], ok, fail); return; }
   // 동기화(sync.checkpoint/materialize/status/resolve) — ws 를 넘겨 sync_event push.
   if (method.startsWith('sync.')) { syncLib.handle(method, params, ws).then(ok).catch(fail); return; }
   // 원격 승인(기능1) — 사용자 결정 배달(approval.resolve) / 정본 대조(approval.list) / 일괄 취소.
@@ -741,6 +754,15 @@ function run(config) {
     } catch (_) { /* noop */ }
     // cpt 컨트롤 소켓 — 터미널 안의 AI/사용자가 `cpt` CLI 로 서비스를 조작하는 로컬 진입점.
     try { cptServer.start(config); } catch (e) { console.error('[control] cpt 소켓 시작 실패:', e.message); }
+    // ★ 재부팅 복원 — tmux 서버가 없고(재부팅/크래시) 매니페스트가 있으면 터미널을 그 tid 그대로
+    //  되살린다(terminal-manifest.js). 리스너를 열기 **전에** 끝내야 PC/폰의 저장된 레이아웃이 첫
+    //  attach 부터 실체를 만난다(cmux 처럼 "켜면 그대로"). 데몬만 재시작한 경우엔 서버가 살아 있어 no-op.
+    try {
+      const n = await require('./terminal-manifest').restoreIfNeeded();
+      if (n) console.log(`[control] 재부팅 복원 — 터미널 ${n}개 되살림(매니페스트)`);
+    } catch (e) { console.error('[control] 터미널 복원 실패:', e.message); }
+    // PC 앱(같은 기기) v3 터미널 루프백 리스너 — 원격과 같은 와이어, 릴레이 왕복 없이.
+    try { require('./terminal-local').start(); } catch (e) { console.error('[control] 로컬 터미널 리스너 시작 실패:', e.message); }
     // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
     //  리스너를 여는 것은 그 불변식을 깨는 일이라 **서버가 그 기능을 쓴다고 선언했을 때만** 열어야 한다.
     //  부팅 시점에 열면 서버 스위치(LAN_DIRECT_ENABLED)를 켜지 않은 환경의 모든 사용자 PC 가 사설
@@ -782,6 +804,8 @@ function run(config) {
       ptyLib.healStaleTerminals()
         .then((n) => { if (n) console.log(`[control] 낡은 터미널 ${n}개 자가치유(respawn)`); })
         .catch(() => { /* 다음 주기 */ });
+      // 터미널 매니페스트 동기화 — 살아 있는 tmux 를 정본으로 재부팅 복원 기록을 갱신(닫힌 건 빠진다).
+      try { require('./terminal-manifest').sync().catch(() => {}); } catch (_) { /* noop */ }
     };
     // 첫 reap 은 지연한다 — 앱/데몬이 함께 재기동되는 순간(특히 PC 앱 업데이트: 다운로드+설치가
     //  리퍼 grace(90s)를 넘겨 뷰 세션이 idle 로 판정됨)에, 클라이언트가 레이아웃을 복원해 자기 뷰

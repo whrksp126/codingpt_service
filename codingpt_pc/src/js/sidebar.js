@@ -96,6 +96,15 @@ export function jumpToNotification(n) {
     import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings"));
     return;
   }
+  //  에이전트 PC 개입 요청 — 그 워크스페이스에 데스크톱 탭을 띄운다(처리 후 탭의 [계속]).
+  if (n && n.kind === "desktop_handoff") {
+    const ws = state.workspaces.find((w) => w.localPath === n.cwd) || state.workspaces.find((w) => w.id === state.activeWsId);
+    if (ws) {
+      import("./ui-channel.js").then((m) => m.runUiCommandLocal("emulatorOpen", { ws: ws.localPath, device: "desktop:main" })).catch(() => {});
+    }
+    closeNotif();
+    return;
+  }
   // 대상 워크스페이스 활성화 — 서버 행(workspaceId → cwd 매칭) 우선, 로컬 폴백(wsId)도 지원.
   const ws =
     state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId)) ||
@@ -112,6 +121,10 @@ export function jumpToNotification(n) {
       const idx = hit.tabs.findIndex((t) => typeof t.win === "number" && t.win === Number(n.win));
       if (idx >= 0 && idx !== hit.active) getPane(hit.id)?.switchTab(idx);
       S.focusPane(hit.id);
+      // 알림을 눌러 그 터미널로 왔다 = 사용자가 그 터미널을 봤다 → 그 터미널의 미읽음을 **전부**
+      //  읽음 처리한다. 누른 한 건만 읽음으로 두면(readOne) 같은 터미널의 나머지 미읽음이 남아
+      //  강조 테두리가 그대로다 — 사용자에겐 "눌렀는데 안 없어진다"로 보인다(2026-08-14).
+      if (n.cwd) S.readScope(n.cwd, Number(n.win));
     }
   } else if (n.paneId) {
     S.focusPane(n.paneId); // 로컬 폴백 알림(구 형식)
@@ -146,9 +159,35 @@ function closeNotif() {
   notifPanel.classList.add("hidden");
 }
 
+// 직전 렌더의 내용 시그니처 — 화면에 나가는 값이 그대로면 DOM 재구축을 통째로 건너뛴다.
+//  (emit 은 agent_state·리컨실러 등으로 수시로 오는데, 사이드바는 매번 아바타 <img> 까지 새로
+//   만들고 있었다 — 2026-08-15 성능 라운드. 여기 없는 값을 행 렌더에 새로 쓰면 반드시 추가할 것.)
+let sbSig = "";
 export function updateSidebar() {
   if (!el) return;
   const totalUnread = state.notifications.filter((n) => !n.read).length;
+  {
+    const devices0 = S.pcDevices();
+    const activeDev0 = S.activeDeviceId();
+    const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
+    const sig = JSON.stringify([
+      state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
+      !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
+      state.me?.nickname, state.me?.email, state.me?.profileImg,
+      notifOpen, state.notifications.length, state.notifications[0]?.id, state.notifications[0]?.read,
+      activeDev0,
+      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0)]),
+      wss0.map((w) => {
+        const rt = S.wsRuntime(w.id);
+        const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
+        return [w.id, S.wsDisplayName(w), S.unreadForWs(w), S.wsPinned(w.id), S.wsColor(w.id),
+          w.hostOnline, wsMissing(w), w.localPath, st?.status?.[0]?.value, st?.progress,
+          (rt?.ports || []).slice(0, 3)];
+      }),
+    ]);
+    if (sig === sbSig) return;
+    sbSig = sig;
+  }
   el.innerHTML = "";
   if (sbGrip) el.appendChild(sbGrip); // 리사이즈 핸들 재부착(innerHTML 초기화로 떨어짐)
 
@@ -166,36 +205,43 @@ export function updateSidebar() {
   attachPullToRefresh(list);
 
   // 서버 미가용 — 목록은 로컬 캐시(last-known)다. 이 PC 폴더 작업은 그대로 되지만 서버가 원천인
-  //  조작(추가/삭제/그룹핑)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
+  //  조작(추가/삭제)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
   if (state.wsStale) list.appendChild(note(i18n.t('오프라인 — 마지막으로 본 목록')));
-  if (state.wsError && !state.workspaces.length) {
-    list.appendChild(note(state.paired ? i18n.t('목록을 불러오지 못했습니다') : i18n.t('PC를 연결하세요')));
-  } else if (!state.workspaces.length) {
-    list.appendChild(note(i18n.t('+ 로 워크스페이스를 추가하세요')));
+
+  // ── ① 내 PC (2026-08-14 기기 우선 개편) ────────────────────────────────
+  //  예전엔 프로젝트(projectId) 묶음이 위, 그 안에 기기별 사본이 있었다. 사용자 지적: "이해도 안
+  //  가고 사용성도 안 좋다". 실제 소유 관계는 반대다 — 워크스페이스는 **그 PC 의 로컬 폴더**다.
+  //  그래서 PC 를 먼저 고르고, 고른 PC 의 워크스페이스만 아래에 그린다.
+  const devices = S.pcDevices();
+  const activeDev = S.activeDeviceId();
+  // 새 PC 는 이 화면에서 만들 수 없다(그 PC 에 앱을 깔고 로그인해야 나타난다) → + 버튼 없음.
+  //  ★ `PC 연결하기` 안내도 뺐다(2026-08-14 사용자 확정: "PC 에서는 필요 없을 것 같다") —
+  //   PC 앱을 쓰고 있다는 것 자체가 이미 그 방법을 아는 것이다. 폰에서는 그 안내가 여전히 필요해
+  //   앱(SidebarContent) 쪽에는 남겨 둔다.
+  list.appendChild(sectionHead(i18n.t('내 PC'), [
+    { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
+    { icon: icons.apple({ size: 15 }), label: i18n.t('에이전트 PC (macOS)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("macos")).catch(() => {}) },
+    { icon: icons.linux({ size: 15 }), label: i18n.t('에이전트 PC (Linux)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("linux")).catch(() => {}) },
+  ]));
+  if (!devices.length) {
+    list.appendChild(note(state.paired ? i18n.t('불러오는 중…') : i18n.t('PC를 연결하세요')));
   }
-  // 프로젝트 그룹 — projectId 가 같은 워크스페이스(다른 PC의 사본)를 인접 묶음으로.
-  //  정렬 순서 유지(그룹 위치=첫 멤버), 단독 그룹은 기존 행 그대로. 항상 전부 펼침.
-  const groups = [];
-  {
-    const byKey = new Map();
-    for (const w of S.sortedWorkspaces()) {
-      const key = w.projectId || w.id;
-      let g = byKey.get(key);
-      if (!g) { g = { key, members: [] }; byKey.set(key, g); groups.push(g); }
-      g.members.push(w);
-    }
+  for (const d of devices) {
+    list.appendChild(deviceRow(d, activeDev));
   }
-  for (const g of groups) {
-    // 단독(사본 1개)도 같은 구조로 렌더(표현 통일 — 프로젝트명 ⊃ 기기 워크스페이스, 모바일 미러).
-    const head = document.createElement("div");
-    head.className = "ws-proj-head";
-    head.innerHTML = `${icons.folder({ size: 13 })}<span class="wsp-nm">${escapeHtml(S.wsDisplayName(g.members[0]))}</span>`;
-    list.appendChild(head);
-    const wrap = document.createElement("div");
-    wrap.className = "ws-proj-members";
-    for (const m of g.members) wrap.appendChild(wsRow(m, g));
-    list.appendChild(wrap);
+
+  // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
+  const wss = devices.length ? S.workspacesForDevice(activeDev) : [];
+  //  ★ [+] 와 ⋯ 을 함께 두지 않는다(2026-08-14 사용자 확정) — 둘 다 "워크스페이스 추가" 하나를
+  //   가리켜서, 같은 일을 하는 버튼이 나란히 두 개 있는 꼴이었다. ⋯ 하나로 통일한다.
+  list.appendChild(sectionHead(i18n.t('워크스페이스'), [
+    { icon: icons.plus({ size: 14 }), label: i18n.t('워크스페이스 추가'), onClick: () => startNewWorkspace(activeDev) },
+  ]));
+  if (devices.length && !wss.length) {
+    if (state.wsError && !state.workspaces.length) list.appendChild(note(i18n.t('목록을 불러오지 못했습니다')));
+    else list.appendChild(note(i18n.t('+ 로 이 PC의 폴더를 추가하세요')));
   }
+  for (const w of wss) list.appendChild(wsRow(w));
   el.appendChild(list);
 
   // 하단: 내 정보.
@@ -253,8 +299,19 @@ function attachPullToRefresh(list) {
       ind.style.height = "30px";
       ind.style.opacity = "1";
       ind.textContent = i18n.t('새로고침 중…');
+      // ★ 끝나면 **여기서** 인디케이터를 접는다(2026-09-16 사용자 신고 "새로고침 중… 이 계속 남는다").
+      //  예전엔 loadWorkspaces → emit → updateSidebar 의 재렌더가 DOM 을 통째로 갈아 끼우며 지워 주길 기대했는데,
+      //  updateSidebar 는 서명(sig)이 같으면 재렌더를 건너뛴다 — 새로고침 결과가 "그대로" 인 가장 흔한 경우에
+      //  정확히 아무도 안 지워서 문구가 영구히 남았다. 실패했으면 그 사실도 잠깐 보여 준다(조용히 사라지면
+      //  "됐나?" 를 알 수 없다).
+      const t0 = Date.now();
       Promise.resolve(S.loadWorkspaces()).finally(() => {
-        setTimeout(() => { __ptrBusy = false; }, 400);
+        const failed = !!state.wsError;
+        const hold = Math.max(0, 400 - (Date.now() - t0));   // 너무 빨리 끝나도 문구가 깜빡이지 않게 최소 400ms
+        setTimeout(() => {
+          if (failed) ind.textContent = i18n.t('새로고침 실패');
+          setTimeout(() => { __ptrBusy = false; reset(); }, failed ? 1200 : 0);
+        }, hold);
       });
     } else {
       reset();
@@ -300,22 +357,34 @@ function attachPullToRefresh(list) {
   );
 }
 
+// 타이틀바 컨트롤 — cmux classic 지표와 1:1(2026-09-16, 사용자 요청 "macOS 앱 상단 버튼들과 동일하게").
+//  버튼 20 · 아이콘 = SF Symbol 12pt regular 등가. 우리 24-뷰박스 아이콘은 글리프가 뷰박스의 ~73% 라
+//  size 16 이면 실제 글리프 ≈ 11.7px = SF 12pt 와 같은 눈높이.
+//  ⚠ 선 굵기는 뷰박스 배율을 탄다 — 24-뷰박스를 16px 로 그리면 실제 선 = sw × 16/24. SF regular(≈1.1px)를
+//   노리면 sw 1.6 이다. 1.3 을 줬던 0.1.329 는 실제 0.87px 짜리 실선이 돼 신호등 옆에서 흐릿했다(사용자 비교 스크린샷).
+//  (styles.css `.sb-top .ic-btn` 이 상자·간격·호버를 같은 지표로 고정한다.)
+const TITLEBAR_ICON = { size: 16, sw: 1.6 };
 function ctlBtn(iconName, title, onClick) {
   const b = document.createElement("button");
   b.className = "ic-btn";
   b.title = title;
-  b.innerHTML = icons[iconName]({ size: 17 });
+  b.innerHTML = icons[iconName](TITLEBAR_ICON);
   b.addEventListener("click", onClick);
   return b;
 }
 
 // 상단 컨트롤(토글·알림·추가) — 사이드바 상단바 + 접힘 시 메인 상단바에서 공용 사용(정합성).
 //  withAdd=false: 접힘 시 이식되는 축약판 — 워크스페이스 추가(+)는 사이드바를 열어야 보인다.
-export function buildTopControls(withAdd = true) {
+// ★ 2026-08-14: `withAdd` 는 **더 이상 아무것도 하지 않는다**(사용자 확정으로 상단 + 제거).
+//  워크스페이스 추가는 사이드바 안의 `워크스페이스` 섹션 머리에 산다 — 무엇을 어디에 만드는지가
+//  그 자리에서 드러난다(옛 상단 + 는 "어느 PC 에?" 를 매번 다시 물어야 했다).
+//  인자를 남겨 둔 이유는 접힌 사이드바의 상단바(main-top)가 같은 함수를 부르기 때문이다.
+export function buildTopControls(_withAdd = true) {
   const frag = document.createDocumentFragment();
   const totalUnread = state.notifications.filter((n) => !n.read).length;
-  // 열림=채운 아이콘, 닫힘=빈 아이콘(색이 아니라 채움 유무로 상태 표현).
-  const toggle = ctlBtn(state.sidebarCollapsed ? "sidebar" : "sidebarFilled", state.sidebarCollapsed ? i18n.t('사이드바 펼치기') : i18n.t('사이드바 접기'), () => S.toggleSidebar());
+  // 글리프는 열림/닫힘 양쪽 같다(cmux 와 동일 — 사이드바가 보이느냐 자체가 상태다). 예전의 채움/빈 아이콘
+  //  구분은 2026-09-16 cmux 1:1 정렬로 뺐다: 채운 글리프가 이웃 아이콘보다 무거워 줄이 고르지 않았다.
+  const toggle = ctlBtn("sidebarTitlebar", state.sidebarCollapsed ? i18n.t('사이드바 펼치기') : i18n.t('사이드바 접기'), () => S.toggleSidebar());
   const bell = ctlBtn("bell", i18n.t('알림'), (e) => {
     e.stopPropagation();
     notifOpen ? closeNotif() : openNotif();
@@ -328,11 +397,6 @@ export function buildTopControls(withAdd = true) {
     bell.appendChild(badge);
   }
   frag.append(toggle, bell);
-  if (withAdd) {
-    const add = ctlBtn("plus", i18n.t('새 워크스페이스'), () => { if (S.blockedOffline(i18n.t('워크스페이스 추가'))) return; openNewWorkspace(); });
-    if (state.creatingWs) add.classList.add("busy");
-    frag.append(add);
-  }
   return frag;
 }
 function note(text) {
@@ -340,6 +404,67 @@ function note(text) {
   d.className = "sb-note";
   d.textContent = text;
   return d;
+}
+
+// ── 기기 우선 사이드바의 조각들 (2026-08-14) ────────────────────────────────
+/**
+ * 섹션 머리 — 제목 + ⋯ 메뉴.
+ *  ★ [+] 는 두지 않는다(2026-08-14 사용자 확정: "그냥 옆에 ... 으로만 하자"). 처음엔 워크스페이스
+ *   섹션에 [+] 와 ⋯ 을 나란히 뒀는데, ⋯ 안의 유일한 항목도 `워크스페이스 추가` 라서 **같은 일을
+ *   하는 버튼이 두 개** 있는 꼴이었다.
+ *  · 메뉴 항목은 워크스페이스 우클릭 메뉴(buildMenu)와 **같은 모양**을 쓴다 — 사이드바 안에서
+ *    메뉴가 두 종류로 보이면 그건 디자인이 아니라 누락이다.
+ */
+function sectionHead(title, items) {
+  const head = document.createElement("div");
+  head.className = "sb-sec";
+  const nm = document.createElement("span");
+  nm.className = "sb-sec-nm";
+  nm.textContent = title;
+  head.appendChild(nm);
+  const acts = document.createElement("span");
+  acts.className = "sb-sec-acts";
+  if (items && items.length) {
+    const m = document.createElement("button");
+    m.className = "sb-sec-btn" + (state.creatingWs && title === i18n.t('워크스페이스') ? " busy" : "");
+    m.title = i18n.t('더 보기');
+    m.innerHTML = icons.dots({ size: 15 });
+    m.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const r = m.getBoundingClientRect();
+      showPopupMenu(r.left, r.bottom + 4, items);
+    });
+    acts.appendChild(m);
+  }
+  head.appendChild(acts);
+  return head;
+}
+
+/** PC 행 — 클릭 = 그 PC 로 전환(오프라인도 고를 수 있다: 뭘 등록해 뒀는지 볼 수 있어야 한다).
+ *  ★ 상태 점은 그리지 않는다(2026-08-14 사용자 확정). 오프라인은 **행 전체가 흐려지는 것**으로 이미
+ *   드러난다 — 같은 사실을 점으로 한 번 더 말하면 신호가 아니라 장식이다. */
+function deviceRow(d, activeId) {
+  const on = d.online !== false;
+  const sel = String(d.id) === String(activeId);
+  const row = document.createElement("button");
+  row.className = "pc-row" + (sel ? " active" : "") + (on ? "" : " pc-off");
+  row.dataset.devId = String(d.id);
+  // 미읽음은 그 PC 의 워크스페이스 것을 합산한다 — 다른 PC 를 보고 있어도 "저기서 뭔가 왔다"를 안다.
+  const unread = S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0);
+  row.innerHTML =
+    // ★ `이 PC` 라벨은 그리지 않는다(2026-08-14 사용자 확정) — 지금 이 앱이 도는 PC 라는 사실은
+    //  목록에서 할 일이 없다(고르는 기준이 아니다). 이름만 남긴다.
+    `<span class="pc-ic">${icons.monitor({ size: 15 })}</span>` +
+    `<span class="pc-nm">${escapeHtml(d.name || i18n.t('내 PC'))}</span>` +
+    (unread ? `<span class="wsr-badge">${unread}</span>` : "");
+  row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
+  return row;
+}
+
+/** 새 워크스페이스 — 고른 PC 를 대상으로 연다(다른 PC 를 보는 중이면 그 PC 의 폴더를 고른다). */
+function startNewWorkspace(deviceId) {
+  if (S.blockedOffline(i18n.t('워크스페이스 추가'))) return;
+  openNewWorkspace({ hostDeviceId: deviceId });
 }
 
 // ── 유령(폴더 소실) 감지 ──
@@ -351,15 +476,15 @@ function wsMissing(w) {
   return !!w?.git?.missing || localMissing.get(w.id) === true;
 }
 
-function wsRow(w, group) {
+// ★ 2026-08-14: `group`(프로젝트 묶음) 인자는 없어졌다. 이제 행은 **고른 PC 의 워크스페이스** 하나이고,
+//  호스트 이름·상태점·직결 배지는 위 기기 행이 이미 말한다 → 행에서 중복 제거(이름과 경로만 남는다).
+function wsRow(w) {
   const rt = S.wsRuntime(w.id);
   const unread = S.unreadForWs(w);
   const local = isLocal(w);
   const color = S.wsColor(w.id);
   const pinned = S.wsPinned(w.id);
-  const grouped = !!group;
   const online = local ? (w.hostOnline !== false) : true;
-  const hostLabel = local ? (w.hostName || i18n.t('내 PC')) : i18n.t('클라우드');
   const row = document.createElement("button");
   row.className = "ws-row" + (w.id === state.activeWsId && state.view === "workspace" ? " active" : "") + (online ? "" : " ws-off");
   row.draggable = true;
@@ -368,21 +493,16 @@ function wsRow(w, group) {
 
   const name = document.createElement("div");
   name.className = "wsr-name";
-  // 그룹 멤버 행은 제목=호스트명(프로젝트 이름은 그룹 헤더에 1회) + 상태점.
   name.innerHTML =
     (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
-    (grouped ? `<span class="wsr-kind">${local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 })}</span>` : "") +
-    `<span class="wsr-nm">${escapeHtml(grouped ? hostLabel : S.wsDisplayName(w))}</span>` +
-    (grouped && online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="${i18n.t('같은 Wi-Fi 직접 연결')}">${i18n.t('직결')}</span>` : "") +
-    (grouped ? `<span class="wsr-dot ${online ? "on" : "off"}"></span>` : "") +
+    `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "");
 
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
-  const kindIc = local ? icons.monitor({ size: 12 }) : icons.cloud({ size: 12 });
-  meta.innerHTML = grouped
-    ? ""
-    : `<span class="wsr-kind">${kindIc}${escapeHtml(hostLabel)}${online && lan.isDirect(w.hostDeviceId) ? `<span class="wsr-lan" title="${i18n.t('같은 Wi-Fi 직접 연결')}">${i18n.t('직결')}</span>` : ""}<span class="wsr-dot ${online ? "on" : "off"}"></span></span>`;
+  // 호스트 이름·온라인 점·직결 배지는 **기기 행**이 담당한다 — 여기 다시 쓰면 같은 말이 두 줄이다.
+  //  이 줄에 남는 것은 그 워크스페이스에서만 알 수 있는 것(원격 상태 스트림)뿐이다.
+  meta.innerHTML = "";
 
   // 원격 상태 스트림(ui_command status.changed) 최소 표시 — status[0].value 텍스트 + 진행률 %.
   const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -428,13 +548,9 @@ function wsRow(w, group) {
       S.setActive(w.id);
       return;
     }
-    // 호스트가 꺼진 사본인데 같은 프로젝트의 켜진 사본이 있으면 원탭 폴백 제안.
-    if (local && w.hostOnline === false) {
-      const key = w.projectId || w.id;
-      const alt = state.workspaces.find((x) => x.id !== w.id && (x.projectId || x.id) === key
-        && (isLocal(x) ? x.hostOnline !== false : true));
-      if (alt) { showOfflineFallback(e, w, alt); return; }
-    }
+    // ★ 프로젝트 그룹핑 폐기(2026-08-14)로 "켜진 사본으로 갈아타기" 제안도 함께 없앴다 — 사본이라는
+    //  개념 자체가 화면에서 사라졌으므로, 꺼진 PC 의 워크스페이스를 누르면 그냥 그것을 연다.
+    //  (호스트가 꺼져 있다는 사실은 위 기기 행의 상태점과 이 행의 흐린 표시가 이미 말한다.)
     S.setActive(w.id);
   });
   row.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
@@ -532,8 +648,6 @@ function buildCtxEl(items, onAfter) {
 // 워크스페이스 우클릭 메뉴 항목 모델.
 function wsMenuItems(w) {
   const pinned = S.wsPinned(w.id);
-  const projKey = w.projectId || w.id;
-  const hasSibling = state.workspaces.some((x) => x.id !== w.id && (x.projectId || x.id) === projKey);
   const items = [
     { icon: icons.edit({ size: 15 }), label: i18n.t('이름 변경'), onClick: () => inlineRename(w) },
     { icon: icons.pin({ size: 15 }), label: pinned ? i18n.t('고정 해제') : i18n.t('고정'), onClick: () => S.togglePinWs(w.id) },
@@ -544,11 +658,10 @@ function wsMenuItems(w) {
     { icon: icons.arrowTop({ size: 15 }), label: i18n.t('맨 위로 이동'), onClick: () => S.moveWs(w.id, "top") },
     { type: "sep" },
   ];
-  // 서버가 원천인 조작 3종(분리/합치기/삭제)은 오프라인(캐시 목록)에서 막는다 — 캐시 기준으로
-  //  실행하면 서버 메타를 옛 상태로 되돌리거나(그룹핑) 실패만 남는다.
-  if (hasSibling) items.push({ icon: icons.folder({ size: 15 }), label: i18n.t('프로젝트에서 분리'), onClick: async () => { if (S.blockedOffline(i18n.t('프로젝트 분리'))) return; try { await api.projectDetach(w.id); await S.loadWorkspaces(); } catch (_) {} } });
-  else items.push({ icon: icons.folder({ size: 15 }), label: i18n.t('다른 프로젝트와 합치기'), onClick: () => { if (S.blockedOffline(i18n.t('프로젝트 합치기'))) return; showAttachMenu(w); } });
-  // 기기(호스트)/클라우드 행 공통 — 목록 메타만 삭제(폴더/파일 무영향). 그룹 헤더에는 메뉴 없음.
+  // ★ 프로젝트 분리/합치기 제거(2026-08-14 사용자 확정) — 기기 우선 구조에서는 한 화면에 한 PC 의
+  //  워크스페이스만 있어서 "무엇과 합칠지"가 화면에 없다. 서버의 projectId 필드는 그대로 두므로
+  //  되돌리려면 이 두 항목만 다시 붙이면 된다(api.projectDetach/projectAttach 도 살아 있다).
+  // 목록 메타만 삭제(폴더/파일 무영향). 서버가 원천이라 오프라인에서는 막는다.
   items.push({ type: "sep" });
   items.push({ icon: icons.trash({ size: 15 }), label: i18n.t('워크스페이스 삭제'), danger: true, onClick: () => { if (S.blockedOffline(i18n.t('워크스페이스 삭제'))) return; confirmDeleteWs(w); } });
   return items;
@@ -635,40 +748,13 @@ function showCtxDom(x, y, items) {
 }
 
 // 지정 좌표 팝업 메뉴 — items: [{icon,label,onClick}].
-function showPopupMenu(x, y, items) {
+export function showPopupMenu(x, y, items) {
   showCtxDom(x, y, items);
 }
 
-// 꺼진 호스트 사본 클릭 — 같은 프로젝트의 켜진 사본으로 원탭 폴백 제안.
-function showOfflineFallback(e, w, alt) {
-  const altHost = isLocal(alt) ? (alt.hostName || i18n.t('내 PC')) : i18n.t('클라우드');
-  showPopupMenu(e.clientX, e.clientY, [
-    { icon: isLocal(alt) ? icons.monitor({ size: 15 }) : icons.cloud({ size: 15 }), label: `${altHost}로 열기`, onClick: () => S.setActive(alt.id) },
-    { icon: icons.monitor({ size: 15 }), label: i18n.t('그냥 열기'), onClick: () => S.setActive(w.id) },
-  ]);
-}
-
-// 합칠 대상 프로젝트 선택(자기 그룹 제외, 그룹당 1항목).
-function showAttachMenu(w) {
-  const key = w.projectId || w.id;
-  const seen = new Set();
-  const items = [];
-  for (const x of S.sortedWorkspaces()) {
-    const k = x.projectId || x.id;
-    if (k === key || seen.has(k)) continue;
-    seen.add(k);
-    items.push({
-      icon: icons.folder({ size: 15 }),
-      label: S.wsDisplayName(x),
-      onClick: async () => {
-        try { await api.projectAttach(w.id, x.id); await S.loadWorkspaces(); } catch (_) {}
-      },
-    });
-  }
-  if (!items.length) return;
-  const r = el?.querySelector(`.ws-row[data-ws-id="${w.id}"]`)?.getBoundingClientRect();
-  showPopupMenu(r ? r.right - 40 : 200, r ? r.top + 8 : 200, items);
-}
+// ★ showOfflineFallback / showAttachMenu 삭제(2026-08-14) — 둘 다 **프로젝트 그룹핑 전용**이었다
+//  ("같은 프로젝트의 켜진 사본으로 열기" / "다른 프로젝트와 합치기"). 그룹핑을 없앤 이상 화면에
+//  근거가 없는 기능이라 죽은 코드로 남기지 않는다(살릴 땐 api.projectAttach/Detach 가 그대로 있다).
 
 // 인라인 이름 변경 — 해당 행의 이름을 입력창으로 교체.
 function inlineRename(w) {

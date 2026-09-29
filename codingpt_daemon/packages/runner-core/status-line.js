@@ -287,9 +287,12 @@ async function pollOne(chatId) {
   if (!w) return;
   const ptyLib = require('./pty');
   const { session } = ptyLib.sessionForCwd(w.cwdRel);
-  const target = `=${ptyLib.termSession(session, w.tid)}:0`;
+  const target = ptyLib.termSession(session, w.tid);
   let screen = null;
-  try { screen = await ptyLib.runTmux(['capture-pane', '-e', '-p', '-t', target]); }
+  // capture(escapes) — darwin: capture-pane -e -p(종전 그대로), win32: term-host serialize.
+  //  ⚠ serialize 산물은 tmux -e 와 바이트 동일이 아니다(웨이브1 주의점 1) — 이 파일의 추출/모드
+  //  파서가 양쪽 형식을 통과하는지 term-capture-format.test.js 가 고정한다.
+  try { screen = await require('./term-backend').capture(target, { escapes: true }); }
   catch (_) { return; } // 터미널 없음 — tail 수명은 transcript 가 관리, 여기선 침묵
   // 모드는 statusline 과 **독립**으로 갱신한다 — 커스텀 statusline 이 있으면 푸터(=모드 원천)는
   //  미러 대상에서 빠지므로, 여기서 뽑아 두지 않으면 채팅 알약이 영영 갱신되지 않는다.
@@ -330,9 +333,9 @@ async function screenFor({ cwdRel, tid, agent } = {}) {
   if (!Number.isInteger(tid)) return null;
   const ptyLib = require('./pty');
   const { session } = ptyLib.sessionForCwd(typeof cwdRel === 'string' ? cwdRel : '');
-  const target = `=${ptyLib.termSession(session, tid)}:0`;
+  const target = ptyLib.termSession(session, tid);
   let screen = null;
-  try { screen = await ptyLib.runTmux(['capture-pane', '-e', '-p', '-t', target]); }
+  try { screen = await require('./term-backend').capture(target, { escapes: true }); }
   catch (_) { return null; }                    // 터미널 없음 — 조용히(호출측이 이전 값 유지)
   const a = agent === 'claude' || agent === 'codex' ? agent : detectAgent(screen);
   const dialog = extractDialog(screen);

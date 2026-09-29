@@ -22,7 +22,7 @@ function defaults() {
     stateDir: path.join(home, '.codingpt'),     // 우리 상태(daemon.json·sessions·tmp)
     claudeHome: path.join(home, '.claude'),     // claude OAuth/대화로그(~/.claude)
     codexHome: path.join(home, '.codex'),       // codex 인증/대화로그(~/.codex) — sessions/ 만 읽는다
-    platform: process.platform,                 // 'darwin'|'linux' — 플랫폼별 가드(TCC/HIDDEN_DIRS 등)
+    platform: process.platform,                 // 'darwin'|'linux'|'win32' — 플랫폼별 가드(TCC/HIDDEN_DIRS/shim/term-host)
   };
 }
 
@@ -44,5 +44,6 @@ const claudeHome = () => get().claudeHome;
 const codexHome = () => get().codexHome || path.join(os.homedir(), '.codex');
 const platform = () => get().platform;
 const isDarwin = () => get().platform === 'darwin';
+const isWindows = () => get().platform === 'win32';
 
-module.exports = { init, get, root, stateDir, claudeHome, codexHome, platform, isDarwin };
+module.exports = { init, get, root, stateDir, claudeHome, codexHome, platform, isDarwin, isWindows };

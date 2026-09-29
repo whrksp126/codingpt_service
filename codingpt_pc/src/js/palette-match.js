@@ -75,7 +75,8 @@ export function fuzzyScore(text, term) {
 /** 경로 점수 — 파일명 일치를 경로 전체 일치보다 위로(사람은 파일명을 친다). */
 export function scorePath(path, term) {
   const p = String(path == null ? "" : path);
-  const base = p.split("/").pop() || p;
+  // 구분자 `/`·`\` 양쪽 인식(win32 경로) — `/` 코퍼스에선 종전 판정과 동일(앱 대조 테스트 유지).
+  const base = p.split(/[\\/]/).pop() || p;
   const b = fuzzyScore(base, term);
   const f = fuzzyScore(p, term);
   if (b == null && f == null) return null;

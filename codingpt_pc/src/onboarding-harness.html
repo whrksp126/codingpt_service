@@ -1,0 +1,64 @@
+<!doctype html>
+<!-- 온보딩(권한 위저드) 확인용 하네스(개발 전용) — Tauri 없이 브라우저에서 login-gate.js 를 그대로 띄운다.
+     실행: cd src && python3 -m http.server 8899  →  http://localhost:8899/onboarding-harness.html
+     시나리오는 쿼리로 고른다(OS 팝업을 흉내 낸다):
+       ?perm=granted  모든 권한이 이미 허용됨 — 팝업 없이 [다음] 이 바로 열려야 한다(자동 판정)
+       ?perm=prompt   미결정 — 프로브가 곧 팝업이고, 응답(기본 허용)까지 시간이 걸린다
+       ?perm=denied   거부 — [다시 확인] + 유도 문구가 뜨고, 설정에서 켜는 순간 자동으로 열려야 한다
+     `window.__grant()` 로 "사용자가 시스템 설정에서 켬"을 흉내 낼 수 있다(감시 폴링 검증). -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>온보딩 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css"></head>
+<body>
+<div id="gateRoot"></div>
+<!-- login-gate.js → state.js → pane.js 가 xterm 전역을 module 평가 시점에 읽는다(없으면 TypeError). -->
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  const mode = new URLSearchParams(location.search).get('perm') || 'granted';
+  // 상태는 권한 하나하나마다 따로 든다 — 실제 TCC 도 그렇다.
+  const st = { downloads: mode, desktop: mode, documents: mode, icloud: mode, media: mode, notification: mode };
+  const log = [];
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        log.push([cmd, args]);
+        if (cmd === 'probe_folder_access') {
+          const f = args.folder;
+          if (st[f] === 'prompt') { await sleep(1200); st[f] = 'granted'; } // 팝업 → 사용자가 [허용]
+          return st[f] === 'granted';
+        }
+        if (cmd === 'notification_permission_state') return st.notification === 'granted' ? 'granted' : st.notification;
+        if (cmd === 'notification_permission') {
+          if (st.notification === 'prompt') { await sleep(1200); st.notification = 'granted'; }
+          return st.notification === 'granted';
+        }
+        if (cmd === 'daemon_status') return { paired: true, running: true, device_name: '이 Mac' };
+        return {};
+      },
+    },
+    event: { listen: async () => () => {} },
+  };
+  const S = await import('./js/state.js');
+  const { bootLang } = await import('./js/theme.js');
+  const gate = await import('./js/login-gate.js');
+  bootLang();
+  S.state.me = { id: 999, nickname: '테스트', email: 'test@codingpt.app' };
+  S.state.daemon = { paired: true };
+  S.state.authChecked = true;
+  // 셋업은 계정별 1회 플래그를 본다 — 하네스는 매번 처음부터 본다.
+  for (const k of ['cpt.setupDone.999', 'cpt.setupProgress.999']) localStorage.removeItem(k);
+  for (const k of ['downloads', 'desktop', 'documents', 'icloud', 'media', 'notification']) localStorage.removeItem(`cpt.perm.${k}`);
+  gate.mountLoginGate(document.getElementById('gateRoot'));
+  gate.restorePendingSetup();
+  document.getElementById('gateRoot').classList.remove('hidden');
+  // 검사용 손잡이 — "사용자가 시스템 설정에서 켰다"(감시 폴링이 스스로 [다음] 을 여는지) / 호출 로그.
+  window.__grant = (k) => { if (k) st[k] = 'granted'; else for (const x of Object.keys(st)) st[x] = 'granted'; };
+  window.__log = () => log;
+</script>
+</body>
+</html>

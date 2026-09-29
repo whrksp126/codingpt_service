@@ -26,7 +26,77 @@ export const state = {
   authChecked: false, // loadMe 를 최소 1회 시도했는지(로그인 게이트 판정용 — 페어링돼도 계정 확인 실패 시 게이트)
   devices: [], // 계정의 모든 기기(멀티기기 "내 기기")
   currentDeviceId: null, // 이 기기의 DaemonDevice id
+  // 사이드바에서 지금 보고 있는 PC(2026-08-14 기기 우선 개편). null = 아직 안 정해짐 → 이 PC.
+  //  ⚠ 이것은 **표시 선택**이지 접속 상태가 아니다. 워크스페이스를 여는 것은 여전히 setActive 이고,
+  //   어느 PC 로 붙을지는 그 워크스페이스의 hostDeviceId 가 정한다(선택은 목록을 거를 뿐이다).
+  activeDeviceId: null,
 };
+
+// ── 기기 우선 사이드바 (2026-08-14 사용자 확정) ──────────────────────────────
+// 옛 구조: 프로젝트(projectId) 묶음 ⊃ 기기별 사본. "워크스페이스가 위, PC 가 아래" 였다.
+// 새 구조: **PC 를 먼저 고르고, 그 PC 에 등록된 워크스페이스만 본다.** 워크스페이스는 원래
+//  각 PC 의 로컬 폴더이므로 이쪽이 실제 소유 관계와 같다(사용자: "워크스페이스 단위가 각 PC
+//  로컬마다로 내려가는 거겠지").
+const ACTIVE_DEVICE_KEY = "cpt.activeDeviceId.v1";
+// PC 마다 **마지막으로 보던 워크스페이스** — PC 를 바꾸면 그 PC 에서 하던 자리로 돌아간다
+//  (2026-08-14 사용자 요구). 이게 없으면 목록만 갈리고 화면은 이전 PC 의 워크스페이스를 계속
+//  띄운 채라, 헤더 제목과 사이드바 선택이 서로 다른 PC 를 가리키는 상태가 된다(실사고 스크린샷).
+const LAST_WS_KEY = "cpt.lastWsByDevice.v1";
+function lastWsMap() {
+  try { return JSON.parse(localStorage.getItem(LAST_WS_KEY) || "{}") || {}; } catch (_) { return {}; }
+}
+function rememberLastWs(deviceId, wsId) {
+  if (deviceId == null || !wsId) return;
+  const m = lastWsMap();
+  m[String(deviceId)] = wsId;
+  try { localStorage.setItem(LAST_WS_KEY, JSON.stringify(m)); } catch (_) {}
+}
+
+/** 사이드바에 그릴 기기 = **PC 뿐**. 모바일(controller)과 클라우드 러너는 여기 대상이 아니다. */
+export function pcDevices() {
+  return (state.devices || []).filter((d) => d && d.role !== "controller" && d.runnerKind !== "cloud");
+}
+
+/** 지금 선택된 PC 의 id — 저장값이 사라진 기기를 가리키면 이 PC 로, 그것도 없으면 첫 기기로 떨어진다. */
+export function activeDeviceId() {
+  const list = pcDevices();
+  if (!list.length) return null;
+  const has = (id) => id != null && list.some((d) => String(d.id) === String(id));
+  if (has(state.activeDeviceId)) return state.activeDeviceId;
+  // 마지막 선택 기억(사용자 확정) → 없거나 사라졌으면 이 PC → 그것도 없으면 첫 기기.
+  let saved = null;
+  try { saved = localStorage.getItem(ACTIVE_DEVICE_KEY); } catch (_) {}
+  if (has(saved)) return list.find((d) => String(d.id) === String(saved)).id;
+  const mine = list.find((d) => d.isCurrent) || list.find((d) => String(d.id) === String(state.currentDeviceId));
+  return (mine || list[0]).id;
+}
+
+export function setActiveDevice(id) {
+  state.activeDeviceId = id;
+  try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(id)); } catch (_) {}
+  // 그 PC 에서 마지막으로 보던 워크스페이스로 이동한다. 기억이 없거나 사라졌으면 첫 번째,
+  //  그마저 없으면(워크스페이스 0개) 활성 워크스페이스를 비운다 — 다른 PC 의 것을 계속 띄우면
+  //  헤더 제목과 사이드바 선택이 서로 다른 PC 를 가리킨다.
+  const list = workspacesForDevice(id);
+  const wanted = lastWsMap()[String(id)];
+  const next = (wanted && list.find((w) => w.id === wanted)) || list[0] || null;
+  if (next) { setActive(next.id); return; }   // setActive 가 emit 까지 한다
+  state.activeWsId = null;
+  emit();
+}
+
+/** 그 PC 에 등록된 워크스페이스만(표시 순서는 기존 정렬 규칙 그대로). 클라우드 워크스페이스는 제외. */
+export function workspacesForDevice(id) {
+  const list = sortedWorkspaces().filter((w) => isLocal(w));
+  if (id == null) return list;
+  const isMine = pcDevices().some((d) => String(d.id) === String(id) && (d.isCurrent || String(d.id) === String(state.currentDeviceId)));
+  return list.filter((w) => {
+    // hostDeviceId 가 없는 레거시 항목(멀티 PC 이전에 만든 것)은 **이 PC** 것이다 → 이 PC 를
+    //  고른 경우에만 보인다. 다른 PC 목록에 섞여 보이면 "그 PC 에 없는 폴더"를 열게 된다.
+    if (w.hostDeviceId == null) return isMine;
+    return String(w.hostDeviceId) === String(id);
+  });
+}
 
 // 워크스페이스 로컬 표시 설정(순서/고정/색/이름/터미널 시드 여부) — 백엔드 목록과 별개로 pc-ui.json 영속.
 //  seeded: 이 기기에서 그 워크스페이스에 "최초 1회 터미널 자동 준비"를 이미 했는가 — 이후엔
@@ -191,7 +261,28 @@ export function subscribe(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
-export function emit() {
+// ── 렌더 합치기 (2026-08-14 사용자 실사고 2건) ────────────────────────────────
+// ① "클릭 반응이 느리다": WebContent 를 sample 해 보니 메인 스레드가 타이머 콜백 안에서 계속
+//    innerHTML 재작성을 돌고 있었다. 렌더가 무거운 게 아니라 **횟수**였다 — emit() 이 listeners 를
+//    동기로 돌았고, listener 는 main.js render() 하나로 사이드바 전면 재작성 + 설정 + 워크스페이스 +
+//    승인 카드를 전부 다시 그린다. emit 호출 지점이 106곳이고 그중 agent_state push 는 claude 가
+//    도는 내내 초당 여러 번 온다 → 앱이 쉬지 않고 전체 렌더를 반복했다.
+// ② 그래서 rAF 로 합쳤더니 이번엔 "PC 목록에서 다른 PC 로 바꿀 때 너무 느리다"가 나왔다.
+//    ★ 실측(하네스): 전환이 **1370~2000ms**. 원인은 스케줄러 선택이다 —
+//      · requestAnimationFrame 은 창이 화면에 안 보이면 **아예 안 돈다**
+//      · setTimeout 은 배경에서 **1초 이상으로 throttle** 된다
+//    둘 다 "화면이 보이는 동안"을 전제한 도구라, 렌더 예약의 유일한 수단으로 쓰면 안 된다.
+//
+// 그래서 지금은 **마이크로태스크 하나만** 쓴다: 지금 실행 중인 태스크가 끝나는 즉시 실행되고,
+//  가시성·throttle 의 영향을 전혀 받지 않는다. 사용자의 클릭은 그 클릭을 처리하는 태스크 안에서
+//  화면까지 끝나므로 체감상 즉시다.
+//  ⚠ "연속 렌더 최소 간격" 같은 걸 타이머로 얹지 않는다 — 그 타이머가 곧 위 ②의 재발이다.
+//   합쳐지는 것은 **한 태스크 안에서 난 emit 들**이고, 실제로 그게 폭주의 대부분이다(리컨실러 한
+//   바퀴·목록 로드 한 번이 emit 을 여러 번 낸다). 태스크마다 하나씩 오는 push 는 그대로 한 번씩
+//   그린다 — 그건 원래 화면이 바뀌어야 하는 순간이라 줄일 대상이 아니다.
+let renderScheduled = false;
+function runListeners() {
+  renderScheduled = false;
   for (const fn of listeners) {
     try {
       fn();
@@ -199,7 +290,21 @@ export function emit() {
       console.error(e);
     }
   }
+}
+let _surfaceSync = null;   // 공유 표면 동기화(순환 import 회피 — 첫 emit 때 붙는다)
+export function emit() {
+  // 영속화는 그대로 매번 예약한다(자체 디바운스를 갖고 있고, 렌더와 수명이 다르다).
   schedulePersist();
+  // 레이아웃 변화 = 표면이 생기거나 사라졌을 수 있다 → 데몬 기록과 맞춘다(전 기기 반영, 2026-09-20).
+  if (_surfaceSync) _surfaceSync.scheduleSync();
+  else import("./surface-sync.js").then((m) => { _surfaceSync = m; m.scheduleSync(); }).catch(() => {});
+  if (renderScheduled) return;
+  renderScheduled = true;
+  queueMicrotask(runListeners);
+}
+/** 예약된 렌더를 지금 즉시 수행(테스트·하네스처럼 동기 단언이 필요한 경로용). */
+export function flushRender() {
+  if (renderScheduled) runListeners();
 }
 
 // ── 워크스페이스 조회 헬퍼 ──
@@ -258,6 +363,15 @@ export function setActive(id) {
   state.activeWsId = id;
   state.view = "workspace";
   if (id) {
+    // 사이드바 선택 PC 를 이 워크스페이스의 호스트로 맞춘다 — 팔레트·알림 점프로 다른 PC 의
+    //  워크스페이스가 열렸는데 목록은 옛 PC 를 보여 주면, 사용자는 지금 어느 PC 를 보는지 잃는다.
+    const meta = state.workspaces.find((w) => w.id === id);
+    if (meta && meta.hostDeviceId != null && String(meta.hostDeviceId) !== String(state.activeDeviceId)) {
+      state.activeDeviceId = meta.hostDeviceId;
+      try { localStorage.setItem(ACTIVE_DEVICE_KEY, String(meta.hostDeviceId)); } catch (_) {}
+    }
+    // 이 PC 에서 마지막으로 본 워크스페이스로 기억 — 나중에 이 PC 로 되돌아오면 여기로 온다.
+    rememberLastWs(meta?.hostDeviceId ?? state.activeDeviceId, id);
     ensureRuntime(id);
     pullSession(id); // 첫 활성 시 원격 세션 이어받기(1회)
   }
@@ -685,7 +799,7 @@ export function setAgentState(ev) {
   if (prev && Number.isFinite(version) && Number.isFinite(prev.version)
       && prev.hostDeviceId === host && version <= prev.version
       && Number.isFinite(sentAt) && Number.isFinite(prev.at) && sentAt <= prev.at) return;
-  agentStates.set(key, {
+  const next = {
     agent: ev.agent || "claude",
     state: st || "idle",
     sessionId: ev.sessionId || null,
@@ -694,7 +808,13 @@ export function setAgentState(ev) {
     hostDeviceId: host,
     // stale 판정은 **수신 시각** 기준이다 — 호스트 시계가 어긋나도 판정이 뒤집히지 않게.
     recvAt: Date.now(),
-  });
+  };
+  agentStates.set(key, next);
+  // 화면에 보이는 값이 그대로면 렌더를 깨우지 않는다(2026-08-15 성능 라운드) — agent_state push 는
+  //  claude 가 도는 내내 초당 여러 번 오고, 그때마다 emit 하면 전 화면 재도장이 그 빈도로 돈다.
+  //  recvAt/at/version 은 표시에 안 쓰이므로 갱신만 하고 조용히 넘어간다.
+  if (prev && prev.agent === next.agent && prev.state === next.state && prev.sessionId === next.sessionId
+      && prev.hostDeviceId === next.hostDeviceId) return;
   emit();
 }
 export function agentStateOf(cwd, win) {
@@ -910,10 +1030,14 @@ function scheduleSessionPush() { /* no-op — 세션 매니페스트 동기화 �
 export async function pullSession(_wsId) { /* no-op */ }
 
 // 구버전 레이아웃(leaf.win 단일)을 새 형식(leaf.tabs)으로 마이그레이션.
+//  ★ 터미널(또는 kind 없는 옛 저장본)만 건드린다. 예전엔 "preview 가 아니면" 이었고, 그 화이트리스트가
+//   emulator(에이전트 PC·모바일 화면)·ide leaf 를 **win 0 터미널로 둔갑**시켰다 — 업데이트 재시작 뒤
+//   에이전트 PC pane 자리에 첫 터미널의 복사본이 떠 있던 실사고(2026-09-17).
 function migrateTree(node) {
   if (!node) return node;
   if (T.isLeaf(node)) {
-    if (node.kind !== "preview" && !Array.isArray(node.tabs)) {
+    const terminalish = !node.kind || node.kind === "terminal";
+    if (terminalish && !Array.isArray(node.tabs)) {
       node.kind = "terminal";
       node.tabs = [{ win: typeof node.win === "number" ? node.win : 0, title: "" }];
       node.active = 0;
@@ -1063,6 +1187,14 @@ export async function reconcilePool() {
         }
       }
     }
+    // 공유 표면(프리뷰·IDE·모바일 화면) — 터미널과 같은 틱에 맞춘다(다른 기기가 열면 들이고, 닫으면 닫는다).
+    try {
+      const sl = await api.surfaceList(meta.localPath || "");
+      if (!_surfaceSync) _surfaceSync = await import("./surface-sync.js");
+      for (const id of _surfaceSync.reconcile(meta, w, (sl && sl.items) || [])) { changed = true; if (id !== "*") touched.add(id); }
+      //  안→밖도 한 번 더 — 데몬이 늦게 떠서 첫 등록이 실패했던 표면을 여기서 다시 올린다(맞춰져 있으면 RPC 0건).
+      _surfaceSync.scheduleSync();
+    } catch (_) { /* 구 데몬(surface.* 없음) — 표면은 기기 로컬로 남는다 */ }
     if (changed) {
       for (const id of touched) getPane(id)?.buildHead();
       emit();

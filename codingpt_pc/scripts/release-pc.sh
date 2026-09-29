@@ -15,6 +15,15 @@
 #  latest.json                               ← /api/pc/update 가 읽는 매니페스트
 set -euo pipefail
 
+# ── darwin 전용 ──
+#  이 스크립트의 산출물 경로·codesign·notarytool·검증이 전부 macOS 전제다. Windows(NSIS) 릴리스
+#  스크립트는 실기 검증 완료 후 웨이브 3에서 별도 추가한다(그 전까지 win 발행 금지 —
+#  _release-upload.cjs 는 이미 --target windows-x86_64 를 지원하지만 호출부가 없다).
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "✗ release-pc.sh 는 macOS(darwin-aarch64) 릴리스 전용입니다 — Windows 릴리스 스크립트는 실기 검증 후 추가 예정." >&2
+  exit 1
+fi
+
 PC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACK_DIR="$PC_DIR/../codingpt_back"
 KEY="$HOME/.codingpt-release/pc-updater.key"

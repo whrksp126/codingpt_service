@@ -9,6 +9,7 @@
 //    파일은 저장 유지.
 import { api } from "./api.js";
 import { insertAttachment, attachName, shq } from "./attach-insert.js";
+import { basename, IS_WINDOWS } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
 // 페이지 주입 픽커 — 계약(round2 §2) 사양 그대로: 오버레이+hover 하이라이트+라벨 툴팁,
@@ -73,7 +74,7 @@ const PICKER_JS = String.raw`(function(){
     var cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 2);
     var s = el.tagName.toLowerCase() + (cls.length ? '.' + cls.join('.') : '');
     if (s.length > 60) s = s.slice(0, 60) + '…';
-    if (src && src.file) s += ' — ' + String(src.file).split('/').pop() + ':' + (src.line || 0);
+    if (src && src.file) s += ' — ' + (basename(src.file) || String(src.file)) + ':' + (src.line || 0);
     return s;
   }
   function mk(css){ var d = document.createElement('div'); d.style.cssText = css; return d; }
@@ -293,7 +294,9 @@ async function _finish(mode, payload) {
 // 소스 파일 경로 정규화 — 워크스페이스 루트(홈-상대 localPath) 세그먼트가 절대경로 안에 보이면
 //  ws 상대로 절단, 아니면 원문 유지(홈 절대경로를 JS 가 모르므로 세그먼트 매칭으로 판별).
 function normSrcFile(file, localPath) {
-  const f = String(file || "");
+  // win32 가드 — 번들러가 주는 소스 경로에 `\` 가 섞일 수 있어 내부 표기(`/`)로 먼저 접는다
+  //  (mac 은 무변환 — 파일명의 합법적 `\` 보존).
+  const f = IS_WINDOWS ? String(file || "").replace(/\\/g, "/") : String(file || "");
   const lp = String(localPath || "").replace(/^\/+|\/+$/g, "");
   if (lp) {
     const i = f.indexOf("/" + lp + "/");

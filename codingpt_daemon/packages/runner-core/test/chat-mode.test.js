@@ -6,6 +6,9 @@
 //  · 푸터 라벨은 폭이 좁아도 안 잘린다(힌트가 먼저 잘림) → 화면 파싱이 판정 정본
 // 이 테스트가 고정하는 것: 목표에 도달하면 **더 누르지 않는다**, 도달 못 하면 조용히 성공하지
 //  않는다(모드가 틀린 채 "바꿨습니다"가 최악), 다이얼로그 위에서는 **키를 한 개도 보내지 않는다**.
+// win32 CI: 이 파일은 ptyLib.runTmux 몽키패치/캐시 스텁으로 돈다 — 파이프 백엔드가 활성이면 스텁이
+//  안 걸리므로 tmux 구현을 강제한다(실행이 runTmux 지연 참조라 tmux 바이너리 불요 — term-backend 주석).
+process.env.CPT_TERM_BACKEND = "tmux";
 const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');

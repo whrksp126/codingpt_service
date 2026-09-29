@@ -20,6 +20,9 @@ const { execFile } = require('child_process');
 const runtime = require('./runtime');
 const configLib = require('./config');
 const ptyLib = require('./pty');
+// 터미널 세션 백엔드 유일 진입점(웨이브2) — 이 파일의 tmux 서브커맨드 직행은 전부 이걸 경유한다
+//  (darwin: term-backend-tmux 가 종전과 동일한 인자를 조립, win32: term-host 파이프).
+const termBackend = require('./term-backend');
 const wsRpc = require('./workspace');
 const fsLib = require('./fs');
 const forwardLib = require('./forward');
@@ -44,13 +47,12 @@ const pendingUi = new Map();   // uiId → { resolve, reject, timer }
 const wsMeta = new Map();
 const LOG_MAX = 200;
 
-// 유닉스 소켓 경로 — sun_path 한계(macOS 104B) 초과 시 /tmp 짧은 폴백(경로 해시로 인스턴스 구분).
-//  초과 경로는 커널이 조용히 잘라 바인딩해 유령 소켓(연결은 되는데 파일이 안 보임)이 된다.
+// 소켓/파이프 경로 — 단일 출처(sock-path.js, Windows 포팅 계약 2).
+//  darwin/linux: <stateDir>/cpt.sock + sun_path 한계(104B) 초과 시 /tmp 짧은 폴백(기존 규칙 그대로).
+//  win32: \\.\pipe\codingpt-cpt-<sha8> — 파일이 아니므로 unlink/chmod/existsSync 를 스킵한다.
+const sockPathLib = require('./sock-path');
 function sockPath() {
-  const p = path.join(runtime.stateDir(), 'cpt.sock');
-  if (Buffer.byteLength(p) <= 100) return p;
-  const h = crypto.createHash('sha1').update(runtime.stateDir()).digest('hex').slice(0, 8);
-  return path.join('/tmp', `cpt-${typeof process.getuid === 'function' ? process.getuid() : 0}-${h}.sock`);
+  return sockPathLib.serverSockPath(runtime.stateDir());
 }
 
 function setControlWs(ws) {
@@ -317,22 +319,26 @@ async function launchAgentInTerminal(agentsLib, a) {
   if (!Number.isFinite(tid)) throw new Error('터미널 index 가 필요합니다');
   const { session, abs } = ptyLib.sessionForCwd(a.cwd);
   await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-  const target = `=${ptyLib.termSession(session, tid)}:0`;
-  const SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login']);
+  const target = ptyLib.termSession(session, tid);
+  // win32 셸 프로세스명 포함(pwsh/cmd) — term-host 의 command 판정과 정합(계약 4).
+  const SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login',
+    'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']);
   const deadline = Date.now() + Math.max(1000, Math.min(20000, (a.timeoutMs | 0) || 6000));
   let ready = false;
   let busy = false;
   while (Date.now() < deadline) {
     let cur = '';
     try {
-      cur = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{pane_current_command}'])).trim();
+      cur = String((await termBackend.info(target)).command || '').trim();
     } catch (e) {
       throw new Error('터미널을 찾을 수 없습니다 (index=' + tid + ')');
     }
-    if (cur && !SHELLS.has(cur)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
+    // win32 는 process 가 전체 경로/대문자 확장자일 수 있다 — basename 소문자까지 셸 판정에 포함.
+    const curBase = cur.split(/[\\/]/).pop().toLowerCase();
+    if (cur && !SHELLS.has(cur) && !SHELLS.has(curBase)) { busy = true; break; }   // 이미 뭔가 돌고 있다 — 덮어 치지 않는다
     let screen = '';
     try {
-      screen = await ptyLib.runTmux(['capture-pane', '-p', '-t', target, '-S', '-5']);
+      screen = await termBackend.capture(target, { lines: 5 });
     } catch (_) { screen = ''; }
     if (screen.trim()) { ready = true; break; }            // 프롬프트가 그려졌다
     await new Promise((r) => setTimeout(r, 120));
@@ -347,14 +353,14 @@ async function launchAgentInTerminal(agentsLib, a) {
   const sizeDeadline = Date.now() + 1500;
   while (Date.now() < sizeDeadline) {
     let w = null;
-    try { w = (await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{window_width}'])).trim(); } catch (_) { break; }
+    try { w = (await termBackend.info(target)).cols; } catch (_) { break; }
     if (lastW !== null && w === lastW) break;   // 두 번 연속 동일 = 안정
     lastW = w;
     await new Promise((r) => setTimeout(r, 220));
   }
   const command = agentsLib.launchCommand(id);
-  await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', command]);
-  await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+  await termBackend.sendKeys(target, { keys: [command], literal: true });
+  await termBackend.sendKeys(target, { keys: ['Enter'] });
   return { ok: true, ready, index: tid, command };
 }
 
@@ -444,7 +450,8 @@ async function resolveCtx(ctx) {
   } else {
     if (sessionName.includes('--p-')) pool = sessionName.split('--p-')[0];
     // 레거시: windowId 로 풀 index 확정(가능하면) — 뷰 세션 index 는 폴백으로 어긋날 수 있다.
-    if (pool && windowId) {
+    //  (tmux 전용 잔재 — term-host 백엔드엔 레거시 풀/windowId 개념이 없다.)
+    if (pool && windowId && !termBackend.isHostBackend()) {
       try {
         const wins = await ptyLib.poolWindows(pool);
         const hit = wins.find((w) => w.id === windowId);
@@ -482,13 +489,12 @@ async function liveWorkspaceNs() {
   if (liveNsCache.set && Date.now() - liveNsCache.at < 5000) return liveNsCache.set;
   const set = new Set();
   try {
-    const out = await ptyLib.runTmux(['list-sessions', '-F', '#{session_name}']);
-    for (const raw of String(out).split('\n')) {
-      const name = raw.replace(/\r$/, '').trim();
+    for (const raw of await termBackend.listSessionNames()) {
+      const name = String(raw).trim();
       if (!name.startsWith('cpt-')) continue;
       set.add(name.split('--')[0]);
     }
-  } catch (_) { /* tmux 서버 없음 = 열린 워크스페이스 0 */ }
+  } catch (_) { /* 백엔드 서버 없음 = 열린 워크스페이스 0 */ }
   liveNsCache = { at: Date.now(), set };
   return set;
 }
@@ -626,7 +632,9 @@ async function dispatch(req, conn) {
       }
     } catch (_) { /* noop */ }
     setTimeout(() => {
-      try { fs.unlinkSync(sockPath()); } catch (_) { /* noop */ }
+      // named pipe(win32)는 파일이 아니다 — 프로세스 종료로 자동 소멸(unlink 스킵).
+      const sp = sockPath();
+      if (!sockPathLib.isPipePath(sp)) { try { fs.unlinkSync(sp); } catch (_) { /* noop */ } }
       process.exit(0);
     }, 200); // 응답 flush 여유
     return { shuttingDown: true, pid: process.pid };
@@ -701,12 +709,35 @@ async function dispatch(req, conn) {
   //  ⚠ CAPABILITIES 비공개다: 터미널 안의 AI 가 **자기가 요청한 리뷰를 스스로 승인**할 경로가
   //   되면 리뷰라는 것 자체가 무의미해진다(approval.respond·agents.wire 를 닫은 것과 같은 이유).
   if (cmd.startsWith('review.')) return handleReviewRpc(cmd, req.args || {});
+  // 공유 표면(프리뷰·IDE·모바일 화면) 목록 — 어느 기기에서 열면 전부에, 어디서 닫으면 전부에서(사용자 결정
+  //  2026-09-20, 터미널 풀과 같은 모양). 변경은 surfaces.js 가 pool.changed 로 알린다. CAPABILITIES 비공개
+  //  (화면 배관 — 터미널 안 AI 는 `cpt preview/ide/emulator` 로 여는 게 곧 등록이다).
+  if (cmd.startsWith('surface.')) return handleSurfaceRpc(cmd, req.args || {});
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 목록/켜기/프레임/입력.
   //  프레임은 수십~수백 KB 라 **부르는 쪽이 당겨 간다**(푸시하면 느린 회선에서 지연이 쌓인다).
   if (cmd.startsWith('emulator.')) {
     const emuLib = lazyMod('./emulator');
     if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
     return emuLib.handle(cmd, req.args || {});
+  }
+  // 에이전트 PC(게스트 macOS VM) — 수명주기·셸·개입. 화면/입력은 emulator.* 로 `desktop:main` 을 쓴다.
+  if (cmd.startsWith('desktop.')) {
+    const deskLib = lazyMod('./desktop');
+    if (!deskLib) throw new Error('이 데몬은 에이전트 PC을 지원하지 않습니다(PC 앱 업데이트 필요)');
+    if (cmd === 'desktop.handoff') {
+      //  개입 요청 = 사용자에게 부탁. 승인 알림과 같은 채널(back /api/notifications → 폰·PC)로 카드를 띄우고,
+      //  사용자가 데스크톱 화면에서 [계속]을 누를 때까지 이 RPC 는 기다린다(에이전트가 그 사이 멈춰 있게).
+      const reason = String((req.args || {}).reason || '사용자 조작이 필요해요');
+      const p = deskLib.handle(cmd, req.args || {});
+      //  워크스페이스 좌표는 여기(조기 분기)선 아직 안 풀려 있다 — 알림에만 쓰니 실패해도 무방.
+      const ctx = await resolveCtx(req.ctx).catch(() => ({}));
+      backFetch('POST', '/api/notifications', {
+        source: 'desktop', kind: 'desktop_handoff', title: '에이전트 PC — 개입 요청', body: reason,
+        cwd: ctx.cwdRel || undefined, wsName: ctx.cwdRel ? path.basename(ctx.cwdRel) : undefined,
+      }).catch(() => { /* 알림 실패는 카드가 안 뜰 뿐 — 데스크톱 탭의 개입 표시가 남는다 */ });
+      return p;
+    }
+    return deskLib.handle(cmd, req.args || {});
   }
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
@@ -754,8 +785,9 @@ async function dispatch(req, conn) {
   // CodingPT 컨텍스트 밖(무관 폴더의 CWD 폴백)이면 진단/훅 예외만 남기고 전부 거부 — §게이트 주석.
   await assertCptContext(cmd, req.ctx, resolved);
   const { session, abs } = ptyLib.sessionForCwd(resolved.cwdRel);
-  // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 직접 tmux 를 때리는 커맨드의 타겟.
-  const termTarget = (tid) => `=${ptyLib.termSession(session, tid)}:0`;
+  // 터미널 = 전용 세션 "<ns>--t-<tid>" (window 0 하나). 백엔드 op 의 타겟은 세션명 그대로
+  //  ('=' 정확 일치·':0' 장식은 백엔드 tmux 구현이 붙인다 — 웨이브2).
+  const termName = (tid) => ptyLib.termSession(session, tid);
 
   switch (cmd) {
     case 'ping': return { pong: true, at: Date.now() };
@@ -781,12 +813,14 @@ async function dispatch(req, conn) {
       //  agent(3값: true / false=셸 확정만 / null=모름) · agentName · agentState · agentSource.
       //  내용성 정보(제목 원문·요약)는 싣지 않는다.
       const r = await ptyLib.handleTerminalRpc('terminal.list', { cwd: resolved.cwdRel });
+      //  공유 표면도 같은 응답에 싣는다(추가 전용) — 폰 리컨실러가 한 번의 폴링으로 터미널과 표면을 함께 맞춘다.
+      try { r.surfaces = require('./surfaces').list({ cwd: resolved.cwdRel }).items; } catch (_) { /* 구 상태 파일 — 없음 */ }
       return r;
     }
     case 'terminal.new': {
       const r = await ptyLib.handleTerminalRpc('terminal.new', { cwd: resolved.cwdRel });
       if (args.name) {
-        await ptyLib.runTmux(['rename-window', '-t', termTarget(r.index), String(args.name)]).catch(() => {});
+        await termBackend.rename(termName(r.index), String(args.name)).catch(() => {});
         r.name = String(args.name);
       }
       notifyPoolChanged();
@@ -802,7 +836,7 @@ async function dispatch(req, conn) {
       const win = targetWin(args, resolved);
       if (!args.name) throw new Error('새 이름이 필요합니다');
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['rename-window', '-t', termTarget(win), String(args.name)]);
+      await termBackend.rename(termName(win), String(args.name));
       notifyPoolChanged();
       return { ok: true, index: win, name: String(args.name) };
     }
@@ -810,8 +844,8 @@ async function dispatch(req, conn) {
       const win = targetWin(args, resolved);
       const lines = Math.max(1, Math.min(5000, (args.lines | 0) || 200));
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      // -p: stdout, -S -N: 스크롤백 N줄 위부터, -E -: 화면 끝까지. -J: 랩 줄 병합.
-      const out = await ptyLib.runTmux(['capture-pane', '-p', '-J', '-t', termTarget(win), '-S', `-${lines}`]);
+      // capture 등가(-p stdout, lines=스크롤백 N줄 위부터, join=랩 줄 병합).
+      const out = await termBackend.capture(termName(win), { lines, join: true });
       return { text: out.replace(/\s+$/, ''), index: win };
     }
     case 'terminal.send': {
@@ -822,8 +856,8 @@ async function dispatch(req, conn) {
       }
       if (typeof args.text !== 'string' || !args.text.length) throw new Error('보낼 텍스트가 필요합니다');
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), '-l', '--', args.text]);
-      if (args.enter) await ptyLib.runTmux(['send-keys', '-t', termTarget(win), 'Enter']);
+      await termBackend.sendKeys(termName(win), { keys: [args.text], literal: true });
+      if (args.enter) await termBackend.sendKeys(termName(win), { keys: ['Enter'] });
       return { ok: true, index: win };
     }
     case 'terminal.sendKey': {
@@ -833,7 +867,7 @@ async function dispatch(req, conn) {
         throw new Error('자기 자신 터미널에 키를 보내려 합니다. 의도한 것이면 --force 를 붙이세요.');
       }
       await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
-      await ptyLib.runTmux(['send-keys', '-t', termTarget(win), String(args.key)]);
+      await termBackend.sendKeys(termName(win), { keys: [String(args.key)] });
       return { ok: true, index: win };
     }
     case 'terminal.wait': {
@@ -930,6 +964,7 @@ async function dispatch(req, conn) {
       // 서버 목록(메타)에서만 삭제 — 로컬 폴더/파일은 절대 건드리지 않는다.
       if (!args.id) throw new Error('워크스페이스 id 가 필요합니다 (cpt ws list 로 확인)');
       const r = await backFetch('DELETE', `/api/daemon/workspaces/${encodeURIComponent(String(args.id))}`);
+      if (args.cwd) { try { require('./surfaces').forgetWs(String(args.cwd)); } catch (_) { /* noop */ } }
       notifyPoolChanged();
       return r;
     }
@@ -1327,7 +1362,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(cwdRel);
   await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
-  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const target = ptyLib.termSession(session, win);
   const multiline = /\n/.test(body);
   // 컴포저 잔재 청소(2026-07-30 실사고): TUI 컴포저에 남아 있던 초안 위에 paste 하면
   //  "채팅에서 보낸 것"과 다른 메시지가 제출된다(경로 이중 전송 신고). 채팅 전송의 계약은
@@ -1339,7 +1374,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   //    paste 하면 문장 중간의 첨부도 제자리에서 변환된다(literal 타이핑은 아예 무변환 — 옛 진범).
   const segs = splitImagePathSegments(body);
   for (const seg of segs) {
-    await ptyLib.runTmux(['send-keys', '-t', target, '-l', '--', `[200~${seg}[201~`]);
+    await termBackend.sendKeys(target, { keys: [`[200~${seg}[201~`], literal: true });
     if (segs.length > 1) await new Promise((r) => setTimeout(r, 90)); // 조각 간 소화 시간
   }
   const doSubmit = submit !== false;
@@ -1348,7 +1383,7 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
     //  이미지 경로 조각이 있으면 변환(파일 읽기)이 비동기라 넉넉히 기다린다 — 미변환 제출이어도
     //  경로 텍스트는 여전히 유효하다(에이전트가 Read 로 읽는다). 즉 안전한 지연일 뿐이다.
     await new Promise((r) => setTimeout(r, segs.length > 1 ? 900 : 120));
-    await ptyLib.runTmux(['send-keys', '-t', target, 'Enter']);
+    await termBackend.sendKeys(target, { keys: ['Enter'] });
   }
   // ★ 제출 직후 화면 확인을 앞당긴다(2026-08-03 사용자 신고: "/model 선택 UI 가 늦게 뜬다").
   //  격리 실측: Enter 후 51ms 면 TUI 에 선택 화면이 이미 있다 — 늦은 건 우리 3초 폴링뿐이었다.
@@ -1373,7 +1408,7 @@ const RESIDUE_MAX_BS = 200;     // 폭주 방어(긴 초안이 남아 있어도 
 
 async function clearComposerResidue(target) {
   for (let i = 0; i < 6; i++) {
-    const out = await ptyLib.runTmux(['capture-pane', '-p', '-t', target]);
+    const out = await termBackend.capture(target);
     const lines = String(out || '').split('\n');
     let idx = -1;
     let codex = false;
@@ -1389,17 +1424,17 @@ async function clearComposerResidue(target) {
       let cx = -1;
       let cy = -1;
       try {
-        const pos = await ptyLib.runTmux(['display-message', '-p', '-t', target, '#{cursor_x} #{cursor_y}']);
-        const m = /(\d+)\s+(\d+)/.exec(String(pos || ''));
-        if (m) { cx = parseInt(m[1], 10); cy = parseInt(m[2], 10); }
+        const inf = await termBackend.info(target);
+        if (inf && inf.cursor) { cx = inf.cursor.x | 0; cy = inf.cursor.y | 0; }
+        else return;                                // 커서를 못 읽으면 건드리지 않는다(추측 조작 금지)
       } catch (_) { return; }                       // 커서를 못 읽으면 건드리지 않는다(추측 조작 금지)
       if (cy !== idx) return;                        // 커서가 컴포저 줄이 아니다 = 지금 입력 자리가 아니다
       const n = cx - RESIDUE_PROMPT_COLS;
       if (n <= 0) return;                            // 비어 있다(보이는 건 플레이스홀더)
-      await ptyLib.runTmux(['send-keys', '-t', target, '-N', String(Math.min(n, RESIDUE_MAX_BS)), 'BSpace']);
+      await termBackend.sendKeys(target, { keys: ['BSpace'], count: Math.min(n, RESIDUE_MAX_BS) });
     } else {
       if (!text || /^Try "/.test(text)) return;      // 비었다(힌트는 본문이 아니다)
-      await ptyLib.runTmux(['send-keys', '-t', target, 'C-u']);
+      await termBackend.sendKeys(target, { keys: ['C-u'] });
     }
     await new Promise((r) => setTimeout(r, 140));
   }
@@ -1505,12 +1540,12 @@ function dialogIoFor(cwd, tid, opts) {
   const win = Number.isInteger(tid) ? tid : (typeof tid === 'string' && /^\d+$/.test(tid) ? parseInt(tid, 10) : null);
   if (win == null) throw Object.assign(new Error('대상 터미널(tid)이 필요합니다'), { code: 'BAD_REQUEST' });
   const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
-  const target = `=${ptyLib.termSession(session, win)}:0`;
+  const target = ptyLib.termSession(session, win);
   const io = {
     ready: ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ }),
-    screen: () => ptyLib.runTmux(['capture-pane', '-p', '-t', target]),
+    screen: () => termBackend.capture(target),
     key: async (k, literal) => {
-      await ptyLib.runTmux(literal ? ['send-keys', '-t', target, '-l', '--', k] : ['send-keys', '-t', target, k]);
+      await termBackend.sendKeys(target, literal ? { keys: [k], literal: true } : { keys: [k] });
       // 다이얼로그 조작은 키 사이 간격이 필요하지만(그 값이 실측 정본), 모드 순환은 키 1개마다
       //  화면을 다시 읽어 검증하므로 고정 대기를 짧게 잡는다(체감 반응 — 사용자 신고 2026-08-02).
       await new Promise((r) => setTimeout(r, (opts && opts.keyGapMs != null) ? opts.keyGapMs : DRIVE_KEY_GAP_MS));
@@ -1850,6 +1885,14 @@ function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
 }
 
+// 공유 표면(surface.list/add/update/remove) — 유닉스 소켓(이 PC 화면)과 릴레이(폰·다른 PC)가 같은 함수를 탄다.
+//  변경 알림은 surfaces.js 가 notify 훅으로 부른다(터미널과 같은 pool.changed).
+function handleSurfaceRpc(method, params) {
+  const lib = require('./surfaces');
+  lib.setNotify(notifyPoolChanged);
+  return lib.handle(method, params || {});
+}
+
 const CAPABILITIES = [
   'ping', 'capabilities', 'identify',
   'terminal.list', 'terminal.new', 'terminal.close', 'terminal.rename', 'terminal.read', 'terminal.send', 'terminal.sendKey', 'terminal.wait',
@@ -1870,6 +1913,10 @@ const CAPABILITIES = [
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl', 'emulator.ax',
   //  화면에 띄우기 — 프리뷰/IDE 와 같은 급으로 연다(사용자가 보고 있는 기기 1곳).
   'ui.emulatorOpen', 'ui.emulatorClose',
+  // 에이전트 PC — 전부 공개. 격리된 게스트라 에이전트가 마음껏 조작하는 것이 이 기능의 값이다.
+  //  handoff 는 "사용자에게 부탁" 이라 승인 성격이 아니다(자기 승인 경로가 아니다).
+  'desktop.status', 'desktop.start', 'desktop.provision', 'desktop.connect', 'desktop.disconnect', 'desktop.ax', 'desktop.tap', 'desktop.snapshots', 'desktop.snapshot', 'desktop.restore', 'desktop.snapshot.delete', 'desktop.stop', 'desktop.exec', 'desktop.openApp', 'desktop.openUrl', 'desktop.path',
+  'desktop.handoff', 'desktop.pause', 'desktop.resume', 'desktop.settings.get', 'desktop.settings.set', 'desktop.pull', 'desktop.delete',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
@@ -1906,7 +1953,41 @@ const CAPABILITIES = [
 //  세션 churn·"can't find session" 을 유발한다(실측 데몬 3개 공존). ps 로 데몬 진입 프로세스를 직접 훑어
 //  자기 자신만 남기고 SIGTERM→(잔존 시)SIGKILL. 새 인스턴스 승리 = 앱 재시작 시맨틱과 일치.
 //  전용 소켓(-L codingpt)은 stateDir 무관 머신 전역이라, 머신당 데몬 1개가 올바른 불변식.
+// 데몬 진입 프로세스 판정 — <node 실행파일> <...>/daemon/index.js run 형태만.
+//  node 실행 토큰 + 스크립트 경로 + run 을 함께 요구 → 셸/에디터/grep 이 그 경로 문자열을 인자로
+//  담고 있어도(오탐) 안 잡힌다. 번들(@codingpt/daemon/index.js)·dev(packages/daemon/index.js) 공통.
+//  경로 구분자는 양방향([\\/]) — win32 CommandLine 은 `"C:\…\node.exe" "C:\…\daemon\index.js" run`
+//  처럼 역슬래시·따옴표가 섞인다(darwin ps 출력은 따옴표/역슬래시가 없어 판정 불변).
+function isDaemonEntryCmd(cmd) {
+  return /(^|[\\/"])node(\.exe)?"?\s+("[^"]*daemon[\\/]index\.js"|\S*daemon[\\/]index\.js)\s+run\b/.test(String(cmd || ''));
+}
+
+// win32 프로세스 목록 — Get-CimInstance(JSON). wmic 은 deprecated 라 PowerShell 을 정본으로 한다.
+function listProcessesWin() {
+  return new Promise((resolve) => {
+    const script = 'Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress';
+    const tryOne = (bins) => {
+      if (!bins.length) return resolve([]);
+      execFile(bins[0], ['-NoProfile', '-NonInteractive', '-Command', script],
+        { maxBuffer: 16 * 1024 * 1024, timeout: 15000, windowsHide: true, encoding: 'utf8' },
+        (err, stdout) => { if (err) return tryOne(bins.slice(1)); resolve(parseWinProcessJson(stdout)); });
+    };
+    tryOne(['pwsh.exe', 'powershell.exe']);
+  });
+}
+
+/** Get-CimInstance JSON 파서(순수 — 테스트용 분리). 1건이면 객체를 벗기는 ConvertTo-Json 관례 흡수. */
+function parseWinProcessJson(out) {
+  let v;
+  try { v = JSON.parse(String(out || '').trim() || '[]'); } catch (_) { return []; }
+  const arr = Array.isArray(v) ? v : (v && typeof v === 'object' ? [v] : []);
+  return arr
+    .map((r) => ({ pid: Number(r && r.ProcessId) || 0, cmd: String((r && r.CommandLine) || '') }))
+    .filter((r) => r.pid);
+}
+
 function killStrayDaemons() {
+  if (process.platform === 'win32') return killStrayDaemonsWin();
   return new Promise((resolve) => {
     let strays = [];
     execFile('/bin/ps', ['-A', '-o', 'pid=,command='], { maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
@@ -1918,10 +1999,7 @@ function killStrayDaemons() {
         const pid = parseInt(m[1], 10);
         const cmd = m[2] || '';
         if (!pid || pid === self) continue;
-        // 데몬 진입 프로세스만: <node 실행파일> <...>/daemon/index.js run 형태.
-        //  node 실행 토큰 + 공백없는 스크립트 경로 + run 을 함께 요구 → 셸/에디터/grep 이 그 경로
-        //  문자열을 인자로 담고 있어도(오탐) 안 잡힌다. 번들(@codingpt/daemon/index.js)·dev(packages/daemon/index.js) 공통.
-        if (!/(^|\/)node(\.exe)?\s+\S*daemon\/index\.js\s+run\b/.test(cmd)) continue;
+        if (!isDaemonEntryCmd(cmd)) continue;
         strays.push(pid);
       }
       if (!strays.length) return resolve(0);
@@ -1937,13 +2015,28 @@ function killStrayDaemons() {
   });
 }
 
+// win32 등가 — 시그널 graceful 이 없으므로 taskkill /T /F(트리 강제 종료)로 바로 정리한다.
+async function killStrayDaemonsWin() {
+  const procs = await listProcessesWin();
+  const self = process.pid;
+  const strays = procs.filter((r) => r.pid !== self && isDaemonEntryCmd(r.cmd)).map((r) => r.pid);
+  for (const pid of strays) {
+    try { execFile('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, timeout: 8000 }, () => {}); }
+    catch (_) { /* noop */ }
+  }
+  return strays.length;
+}
+
 // 같은 stateDir 의 기존 데몬 인스턴스 감지·인수 — 살아있으면 shutdown 을 지시하고 소켓이 빌 때까지 대기.
 //  (tauri dev 재시작·수동 재실행이 남긴 인스턴스와 단일 control WS 를 서로 뺏는 replaced 재접속
 //   폭주(~2s 간격)를 원천 차단. 새 인스턴스 승리 = PC 앱 재시작 시맨틱과 일치)
 function takeoverExisting(timeoutMs = 4000) {
   return new Promise((resolve) => {
     const sock = sockPath();
-    if (!fs.existsSync(sock)) return resolve(false);
+    const isPipe = sockPathLib.isPipePath(sock);
+    // named pipe 는 파일이 아니라 existsSync 로 못 본다(열어 보는 것 자체가 인스턴스를 소비한다)
+    //  → win32 는 바로 접속 시도로 존재를 판정한다(없으면 error 콜백 = 인수 불필요).
+    if (!isPipe && !fs.existsSync(sock)) return resolve(false);
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     const probe = net.createConnection(sock);
@@ -1954,6 +2047,18 @@ function takeoverExisting(timeoutMs = 4000) {
       probe.on('close', () => {
         clearTimeout(guard);
         const t0 = Date.now();
+        if (isPipe) {
+          // 파이프는 마지막 핸들이 닫히면 자동 소멸 — 재접속이 실패할 때까지 폴링한다.
+          const pollPipe = () => {
+            if (Date.now() - t0 > timeoutMs) return finish(true);
+            const p2 = net.createConnection(sock);
+            const g2 = setTimeout(() => { try { p2.destroy(); } catch (_) { /* noop */ } finish(true); }, 500);
+            p2.on('connect', () => { clearTimeout(g2); try { p2.destroy(); } catch (_) { /* noop */ } setTimeout(pollPipe, 150); });
+            p2.on('error', () => { clearTimeout(g2); finish(true); }); // 파이프 소멸 = 기존 인스턴스 종료
+          };
+          setTimeout(pollPipe, 150);
+          return;
+        }
         const poll = setInterval(() => {
           // 기존 인스턴스가 exit 하며 소켓을 unlink 한다 — 사라지면(또는 타임아웃) 진행.
           if (!fs.existsSync(sock) || Date.now() - t0 > timeoutMs) { clearInterval(poll); finish(true); }
@@ -1967,8 +2072,12 @@ function takeoverExisting(timeoutMs = 4000) {
 function start() {
   if (server) return server;
   const sock = sockPath();
-  try { fs.mkdirSync(path.dirname(sock), { recursive: true }); } catch (_) { /* noop */ }
-  try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
+  const isPipe = sockPathLib.isPipePath(sock);
+  if (!isPipe) {
+    // named pipe(win32)는 파일이 아니다 — mkdir/unlink/chmod 전부 스킵(계약 2).
+    try { fs.mkdirSync(path.dirname(sock), { recursive: true }); } catch (_) { /* noop */ }
+    try { fs.unlinkSync(sock); } catch (_) { /* 스테일 소켓 정리(살아있는 인스턴스는 takeoverExisting 이 먼저 종료시킴) */ }
+  }
   server = net.createServer((conn) => {
     let buf = '';
     let handled = false; // 한 커넥션 = 한 요청(one-shot). 블로킹 대기 중 도착한 추가 데이터는 무시한다.
@@ -2026,7 +2135,7 @@ function start() {
     //  실패 시 unlink 후 1회 재시도(EADDRINUSE 는 unlink 전 크래시/중복 기동 잔재가 대부분).
     if (e && e.code === 'EADDRINUSE') {
       const probe = net.createConnection(sock);
-      const retry = () => { try { fs.unlinkSync(sock); } catch (_) { /* noop */ } server.listen(sock); };
+      const retry = () => { if (!isPipe) { try { fs.unlinkSync(sock); } catch (_) { /* noop */ } } server.listen(sock); };
       probe.on('connect', () => { probe.end(); console.error('[cpt] 소켓을 다른 데몬이 사용 중 — 이 인스턴스는 cpt 비활성'); });
       probe.on('error', retry);
       return;
@@ -2034,7 +2143,9 @@ function start() {
     console.error('[cpt] 소켓 오류:', e.message);
   });
   server.listen(sock, () => {
-    try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ }
+    // 파이프는 chmod 대상이 아니다 — 기본 DACL(로컬 사용자)로 충분. TODO(win32): 보안 강화 시
+    //  파이프 SD(현재 사용자 SID 한정)를 네이티브로 지정하는 방안 검토(§보고).
+    if (!isPipe) { try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ } }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);
   });
   return server;
@@ -2057,10 +2168,13 @@ module.exports = {
   _drivePermissionDialog: drivePermissionDialog,
   _driveMode: driveMode,
   _driveCodexMode: driveCodexMode,          // 테스트/격리 검증용(io 주입)
+  _isDaemonEntryCmd: isDaemonEntryCmd,      // 테스트용(win32 CommandLine 판정 포함)
+  _parseWinProcessJson: parseWinProcessJson, // 테스트용(Get-CimInstance JSON 파서)
   _clearComposerResidue: clearComposerResidue, // 테스트/격리 검증용
   // 테스트 전용 — 소켓 프레임 없이 명령 디스패치만 태운다(앱 내부용 명령의 게이트 회귀 고정).
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
+  handleSurfaceRpc, // 공유 표면(surface.*) — control.js 의 릴레이 경로도 이 구현을 쓴다
   _sendUiCommand: sendUiCommand, // 테스트 전용(control-teardown.test.js) — 프로덕션 코드에서 직접 쓰지 말 것
   // 테스트 전용(local-ui-route.test.js) — 로컬 UI 채널 라우팅 배타성 고정. 프로덕션에서 직접 쓰지 말 것.
   _localUi: { clients: localUiClients, attach: attachLocalUi, detach: detachLocalUi, frame: handleLocalUiFrame, pick: pickLocalUi, forTarget: localUiFor },

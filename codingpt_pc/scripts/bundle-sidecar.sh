@@ -34,6 +34,24 @@ DAEMON_SRC="$(cd "$PC_DIR/../codingpt_daemon" && pwd)"
 OUT="$PC_DIR/src-tauri/resources/daemon"
 CACHE="$PC_DIR/.node-cache"
 
+# ── win32 번들은 Windows 빌드머신 전제 ──
+#  node-datachannel 은 prebuild 가 아니라 빌드머신 컴파일 산물을 node_modules 채로 복사한다.
+#  mac 에서 win32 를 조립하면 mac 용 .node 가 들어가 사용자 PC 에서 조용히 깨진다 →
+#  Windows(GH windows-latest 러너 등)에서 `npm ci` 한 node_modules 로만 조립을 허용한다.
+#  (교차 조립이 정말 필요하면 CPT_ALLOW_CROSS_BUNDLE=1 로 명시 우회 — 산출물은 실행 불가 테스트용.)
+if [[ "$TARGET" == win32-* ]]; then
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) : ;;
+    *)
+      if [ "${CPT_ALLOW_CROSS_BUNDLE:-}" != "1" ]; then
+        echo "✗ win32 번들은 Windows 빌드머신에서 npm ci 한 node_modules 가 필요합니다(node-datachannel 컴파일 산물)." >&2
+        echo "  GH Actions windows-latest 러너를 사용하세요. (강제 교차 조립: CPT_ALLOW_CROSS_BUNDLE=1)" >&2
+        exit 1
+      fi
+      echo "⚠ CPT_ALLOW_CROSS_BUNDLE=1 — 비-Windows 에서 win32 조립(네이티브 모듈은 실행 불가, 테스트 전용)" >&2 ;;
+  esac
+fi
+
 echo "▸ target=$TARGET  node=v$NODE_VERSION"
 echo "▸ daemon src: $DAEMON_SRC"
 echo "▸ out:        $OUT"
@@ -53,7 +71,12 @@ if [ ! -f "$CACHE/$NODE_ARC" ]; then
 fi
 rm -rf "$CACHE/$NODE_PKG"
 if [[ "$NODE_ARC" == *.zip ]]; then
-  ( cd "$CACHE" && unzip -q "$NODE_ARC" )
+  # unzip 우선(GH windows 러너 Git Bash 에 있음), 없으면 bsdtar(Windows 내장 tar.exe)가 zip 을 푼다.
+  if command -v unzip >/dev/null 2>&1; then
+    ( cd "$CACHE" && unzip -q "$NODE_ARC" )
+  else
+    ( cd "$CACHE" && tar -xf "$NODE_ARC" )
+  fi
 else
   ( cd "$CACHE" && tar xzf "$NODE_ARC" )
 fi
@@ -73,8 +96,18 @@ cp -R "$DAEMON_SRC/packages/daemon"       "$OUT/app/node_modules/@codingpt/daemo
 cp -R "$DAEMON_SRC/packages/runner-core"  "$OUT/app/node_modules/@codingpt/runner-core"
 # cpt-cli — runner-core/shim.js 가 형제 디렉토리(../cpt-cli/bin/cpt.js)로 해석하므로 반드시 동봉
 cp -R "$DAEMON_SRC/packages/cpt-cli"      "$OUT/app/node_modules/@codingpt/cpt-cli"
+# term-host의 Screen은 macOS canonical VT 모델과 Windows 세션 호스트가 함께 사용한다.
+cp -R "$DAEMON_SRC/packages/term-host"    "$OUT/app/node_modules/@codingpt/term-host"
 # 각 패키지 내부의 중첩 node_modules(있으면) 제거 — 루트로 통일
-rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" 2>/dev/null || true
+rm -rf "$OUT/app/node_modules/@codingpt/daemon/node_modules" "$OUT/app/node_modules/@codingpt/runner-core/node_modules" "$OUT/app/node_modules/@codingpt/cpt-cli/node_modules" "$OUT/app/node_modules/@codingpt/term-host/node_modules" 2>/dev/null || true
+
+# ── win32 전용 구성 ──
+#  · term-host(계약 1 — tmux 등가 세션 호스트)는 데몬 워크스페이스 패키지라 별도 바이너리 없이 동봉.
+#    darwin 은 tmux 경로 그대로이므로 win32 에서만 넣는다(darwin 번들 불변 원칙).
+#  · serve-sim(iOS 시뮬레이터 라이브 화면)은 darwin+arm64 전용 — win32 번들에서 통째 제외.
+if [[ "$TARGET" == win32-* ]]; then
+  rm -rf "$OUT/app/node_modules/serve-sim" 2>/dev/null || true
+fi
 
 # .bin 워크스페이스 심링크 제거 — cloud-runner 등 미번들 대상을 가리키는 깨진 심링크가
 #  Tauri 리소스 수집을 실패시킨다(런타임엔 node index.js 로 직접 실행하므로 불필요).
@@ -180,6 +213,53 @@ if [[ "$TARGET" == darwin-* ]]; then
       echo "▸ tmux.conf 동봉 → $TMUX_OUT/tmux.conf"
     fi
     echo "▸ tmux 번들 완료 → $TMUX_OUT ($("$TMUX_OUT/bin/tmux" -V), dylib: $(ls "$TMUX_OUT/lib" | tr '\n' ' '))"
+  fi
+fi
+
+# ── 4c) Lume 번들 (darwin) — 에이전트 데스크톱(게스트 macOS VM)의 하이퍼바이저 CLI ──
+#  데몬 desktop.js 가 lib.rs 주입 CPT_LUME(=<base>/lume/lume) 로 이 바이너리를 우선 쓴다. 사용자 무설치.
+#  릴리스 tar.gz 를 한 번 캐시에 받아 lume.app 을 통째로 넣는다. 재서명은 **가상화 entitlement 만** 남긴다 —
+#  원본의 com.apple.vm.networking(브리지 네트워킹) 은 Apple 승인 entitlement 라 우리 서명으론 실행이 거부된다
+#  (NAT 만 쓰므로 필요도 없다).
+LUME_VER="${LUME_VER:-0.5.3}"
+if [[ "$TARGET" == darwin-* ]]; then
+  LUME_TGZ="$CACHE/lume-$LUME_VER-darwin-arm64.tar.gz"
+  if [ ! -f "$LUME_TGZ" ]; then
+    echo "▸ lume $LUME_VER 내려받기"
+    mkdir -p "$CACHE"
+    curl -fsSL -o "$LUME_TGZ" "https://github.com/trycua/cua/releases/download/lume-v$LUME_VER/lume-$LUME_VER-darwin-arm64.tar.gz" \
+      || { echo "⚠ lume 내려받기 실패 — 에이전트 데스크톱 없이 번들(사용자 PC 에서 lume 별도 설치 필요)" >&2; rm -f "$LUME_TGZ"; }
+  fi
+  if [ -f "$LUME_TGZ" ]; then
+    LUME_OUT="$OUT/lume"
+    rm -rf "$LUME_OUT"; mkdir -p "$LUME_OUT"
+    tar -xzf "$LUME_TGZ" -C "$LUME_OUT" lume.app
+    cat > "$LUME_OUT/lume" <<'SH'
+#!/bin/sh
+exec "$(dirname "$0")/lume.app/Contents/MacOS/lume" "$@"
+SH
+    chmod +x "$LUME_OUT/lume"
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+      ENT_VZ="$PC_DIR/src-tauri/entitlements.lume.plist"
+      codesign --force --timestamp --options runtime --entitlements "$ENT_VZ" --sign "$CODESIGN_IDENTITY" "$LUME_OUT/lume.app"
+      codesign --verify --verbose=1 "$LUME_OUT/lume.app"
+    fi
+    echo "▸ lume 번들 완료 → $LUME_OUT ($("$LUME_OUT/lume" --version 2>/dev/null | tail -1))"
+  fi
+  # 4d. vt-h264 — 에이전트 PC 라이브 영상 인코더(VideoToolbox, Swift 한 파일). swiftc 는 Xcode CLT 에 있다.
+  #  ★ rm -f 후 새로 쓴다(같은 inode 덮어쓰기 = 서명 캐시 불일치로 SIGKILL — 이 파일 머리의 절대 함정).
+  VT_SRC="$DAEMON_SRC/packages/runner-core/native/vt-h264.swift"
+  if [ -f "$VT_SRC" ] && command -v swiftc >/dev/null 2>&1; then
+    rm -f "$OUT/vt-h264"
+    swiftc -O -o "$OUT/vt-h264" "$VT_SRC"
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+      codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$OUT/vt-h264"
+    else
+      codesign -f -s - "$OUT/vt-h264" >/dev/null 2>&1 || true
+    fi
+    echo "▸ vt-h264 번들 완료 → $OUT/vt-h264"
+  else
+    echo "⚠ swiftc 없음 — 에이전트 PC 라이브 영상 없이 번들(프레임 폴링으로 동작)" >&2
   fi
 fi
 

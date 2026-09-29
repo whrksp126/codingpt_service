@@ -40,6 +40,24 @@ ok(missing.length === 0,
   '누락: ' + missing.join(', '));
 ok(/T\.leaf\("terminal"/.test(splitBody), 'splitPane 의 기본값은 여전히 터미널이다(위 검사가 의미를 갖는 이유)');
 
+// ── 2-a. ★ 복원 마이그레이션도 같은 함정(2026-09-17 실사고) ─────────────────────
+//  업데이트로 앱이 재시작하면 pc-ui.json 을 migrateTree 로 되살린다. 그 함수가 "preview 가 아니면 터미널"
+//  이라 에이전트 PC(emulator) pane 이 **win 0 터미널**(첫 터미널의 복사본)로 둔갑했다. 실제 함수를 떼어 돌린다.
+{
+  const src = /function migrateTree\(node\) \{[\s\S]*?\n\}\n/.exec(state)?.[0];
+  ok(!!src, 'migrateTree 를 찾았다');
+  const migrate = new Function('T', `${src}; return migrateTree;`)(T);
+  for (const k of KINDS) {
+    const leaf = T.leaf(k, { deviceId: 'desktop:main', url: 'http://x', openPath: '/a' });
+    const out = migrate(structuredClone(leaf));
+    ok(out.kind === k && !Array.isArray(out.tabs), `★ 복원 마이그레이션이 ${k} pane 을 터미널로 바꾸지 않는다`, JSON.stringify(out));
+  }
+  const old = migrate({ id: 'p1', win: 3 });
+  ok(old.kind === 'terminal' && old.tabs?.[0]?.win === 3, '옛 저장본(win 단일)은 여전히 터미널 탭으로 올린다');
+  const nested = migrate({ id: 's', dir: 'row', first: T.leaf('emulator', { deviceId: 'desktop:main' }), second: { id: 'p2', win: 1 } });
+  ok(nested.first.kind === 'emulator' && nested.second.kind === 'terminal', '분할 안쪽도 같은 규칙');
+}
+
 //  위는 소스 검사라 "그 줄이 있다"까지만 말한다. splitPane 이 실제로 부르는 식을 **그대로 떼어
 //  진짜 tiling 모듈에 태워** 결과 노드의 kind 를 확인한다(state.js 는 api.js→Tauri 를 물고 있어
 //  통째로 import 할 수 없다 — 그래서 결정식만 가져온다).
@@ -86,6 +104,41 @@ for (const [fn, end] of [
 ok(/T\.TAB_KINDS\.includes\(src\.kind\)/.test(wsv),
   '★ 병합 가능 판정이 종류 목록을 쓴다(예전엔 ide/preview 만 손으로 적혀 있었다)');
 
+// ── 2-b. **탭 하나**를 옮기는 경로도 종류로 막지 않는다 (2026-08-14 재발) ─────────
+//  증상: 터미널 탭을 잡아 프리뷰/IDE/시뮬레이터 pane 에 놓으면 아무 일도 안 났다.
+//  원인: `mergeTabbar`(pane 통째)만 TAB_KINDS 로 고쳐지고, 단일 탭 판정 `termTabbar` 와
+//   실제 이동(moveTab/moveTabToIndex)은 **받는 쪽이 터미널일 때만** 성립하도록 남아 있었다.
+//  계약: 단일 표면 pane 은 거절이 아니라 **탭 host 로 승격**시켜 받는다.
+ok(/const termTabbar = !wholePane && canBeTab\(targetLeaf\)/.test(wsv),
+  '★ 단일 탭 탭바 드롭 판정이 canBeTab 을 쓴다(받는 쪽 종류를 손으로 적지 않는다)');
+ok(!/const termTabbar = !wholePane && targetLeaf && targetLeaf\.kind === "terminal"/.test(wsv),
+  '★ termTabbar 가 다시 === "terminal" 로 굳지 않았다');
+ok(/async function moveTabIntoSurfacePane/.test(wsv),
+  '단일 표면 pane 을 탭 host 로 승격해 받는 경로가 있다');
+for (const fn of ['async function moveTab(', 'async function moveTabToIndex(']) {
+  const a = wsv.indexOf(fn);
+  const body = a < 0 ? '' : wsv.slice(a, a + 900);
+  ok(a >= 0, `${fn} 이 있다`);
+  ok(!/dst\.kind !== "terminal"\) return;/.test(body),
+    `★ ${fn} 이 비터미널 대상을 그냥 거절하지 않는다`);
+  ok(/moveTabIntoSurfacePane\(srcId, index, dstId/.test(body),
+    `★ ${fn} 이 비터미널 대상을 승격 경로로 넘긴다`);
+}
+//  드롭 미리보기(존 하이라이트)도 같은 규칙이어야 한다 — 여기만 어긋나면 "동작은 되는데
+//  표시가 안 떠서" 사용자가 못 놓는다(더 헷갈리는 실패).
+ok(/zone === "center" && !\(dstLeaf\.kind === "terminal" \|\| T\.TAB_KINDS\.includes\(dstLeaf\.kind\)\)/.test(wsv),
+  '★ 미리보기의 no-op 판정도 TAB_KINDS 를 쓴다');
+//  승격은 mergeAsTabs 와 같은 방식(새 host leaf 로 교체)이어야 한다 — 두 경로가 갈라지면 또 어긋난다.
+{
+  const a = wsv.indexOf('async function moveTabIntoSurfacePane');
+  const body = a < 0 ? '' : wsv.slice(a, wsv.indexOf('// 탭을 다른 pane 으로 이동', a));
+  ok(/T\.leafToTab\(dst\)/.test(body), '승격 경로가 변환 함수를 쓴다(자기 표를 만들지 않는다)');
+  ok(/kind: "terminal", tabs/.test(body) && /T\.replaceLeaf\(rt\.layout, dstId, host\)/.test(body),
+    '★ 승격 = dst 자리를 새 host leaf 로 교체(mergeAsTabs 와 동형)');
+  ok(/_preservePreview = true/.test(body),
+    '★ 프리뷰를 받을 때 webview 를 닫지 않고 승계한다(표면 보존)');
+}
+
 //  헤더·드래그 고스트의 이름/아이콘도 한 표에서 온다.
 const pane = read(path.join(PC, 'pane.js'));
 ok(/export function surfaceLabel/.test(pane) && /kind === "emulator"/.test(pane),
@@ -98,9 +151,16 @@ ok(/tab\.kind === "emulator"/.test(pane) && /new mod\.EmulatorView\(host/.test(p
 ok(/m\.emu\?\.dispose\(\)/.test(pane), '탭을 닫으면 EmulatorView 도 정리한다(프레임 루프 누수 금지)');
 ok(/m\.emu\?\.setVisible\(!!on\)/.test(pane),
   '★ 가려진 탭은 프레임을 안 당긴다(한 장이 수십 KB — 안 보이는데 계속 받으면 그 자체가 결함)');
-ok(/t\.kind === "emulator" \? icons\.smartphone/.test(pane), '탭 아이콘이 모바일 화면 것이다');
+ok(/t\.kind === "emulator" \? \(String\(t\.deviceId[^)]*\)\.startsWith\("desktop:"\) \? icons\.monitor : icons\.smartphone\)/.test(pane),
+  '탭 아이콘 — 모바일 화면은 폰, 에이전트 PC(desktop:) 는 모니터');
 
 const emu = read(path.join(PC, 'emulator-view.js'));
+ok(/isDesk && dv\.state !== "booted"/.test(emu),
+  '★ 꺼진 에이전트 PC 에는 프레임을 묻지 않는다(30초 VNC 되풀이가 메인 스레드를 잡던 무지개 커서)');
+ok(/!isDesk && Date\.now\(\) - this\.lastTouch > IDLE_AFTER_MS/.test(emu),
+  '★ 에이전트 PC 는 유휴 정지가 없다(지켜보는 pane — 켜고 60초 지나면 첫 프레임 전에 잠들던 빈 화면)');
+ok(/pub async fn emulator_local[\s\S]*?spawn_blocking/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'cptsock.rs'))),
+  '★ emulator_local 은 비동기 — 동기 커맨드는 메인 스레드에서 소켓 응답을 기다린다(프레임·부팅 동안 앱 전체가 멈춤)');
 ok(/setVisible\(on\)/.test(emu) && /!this\.visible/.test(emu),
   'EmulatorView.setVisible 이 루프 조건에 실제로 걸려 있다(메서드만 있고 안 쓰면 무의미)');
 
@@ -163,7 +223,8 @@ for (const k of KINDS) {
   ok(appKinds.includes(`'${k}'`), `앱 PaneKind 에도 ${k} 가 있다`, appKinds.trim());
 }
 const appPane = read(path.join(APP, 'workspace/PaneView.tsx'));
-ok(/active=\{isActive\}/.test(appPane),
+// hidden(LRU 로 눕힌 워크스페이스)도 비활성이다 — `isActive && !hidden` 이 현행(2026-08-15).
+ok(/active=\{isActive(?: && !hidden)?\}/.test(appPane),
   '앱도 가려진 탭에 프레임을 안 당긴다(EmulatorBody active)');
 
 
@@ -174,6 +235,39 @@ ok(/active=\{isActive\}/.test(appPane),
 //  PC 에서는 부드럽고 폰에서는 뚝뚝 끊기는, 설명할 수 없는 차이가 생긴다.
 const pcView = read(path.join(PC, 'emulator-view.js'));
 const appEmu = read(path.join(APP, 'workspace/EmulatorBody.tsx'));
+
+// ── 에이전트 PC(desktop:main) — 폰도 PC 와 같은 계약(2026-09-19) ─────────────────────
+//  · 유휴 정지 없음(지켜보는 화면) · 꺼져 있으면 프레임 안 묻음 · 상태는 desktop.status 3초 폴링
+//  · 조작 줄 = 멈춤↔재개 / 키보드 / 캡처 / 개입 [계속] / 전원(desktop.start/stop — 첫 켜기 2~3분이라 emulator.power 의 70초로는 짧다)
+ok(/isDeskLoop && Date\.now\(\) - lastTouch\.current > IDLE_AFTER_MS/.test(appEmu) && /!isDeskLoop && Date/.test(appEmu),
+  '앱: 에이전트 PC 는 유휴 정지가 없다');
+ok(/isDeskLoop && deskOffRef\.current/.test(appEmu), '앱: 꺼진 에이전트 PC 에는 프레임을 묻지 않는다');
+ok(/desktopRpc<DesktopStatus>\('desktop\.status'/.test(appEmu) && /setInterval\(\(\) => void tick\(\), 3000\)/.test(appEmu),
+  '앱: 에이전트 PC 상태를 3초마다 읽는다');
+ok(/desktopRpc\(action === 'boot' \? 'desktop\.start' : 'desktop\.stop'/.test(appEmu), '앱: 전원은 desktop.start/stop');
+ok(/'desktop\.pause' : 'desktop\.resume'/.test(appEmu) && /deskHandoff \?/.test(appEmu), '앱: 멈춤↔재개 + 개입 [계속]');
+ok(/type: 'key', key: 'backspace'/.test(appEmu) && /type: 'text', text: add/.test(appEmu), '앱: 키보드는 text 델타 + backspace/enter 키(데몬 계약)');
+const appSvc = read(path.join(APP, 'services/daemonService.ts'));
+ok(/sealedFs<T>\(method, \{\}, host, timeoutMs\)/.test(appSvc) && /\/api\/daemon\/desktop/.test(appSvc),
+  '앱: desktop.* 는 봉인 RPC 먼저, 평문 REST 폴백');
+const appNotif = read(path.join(APP, 'components/NotificationsPanel.tsx'));
+ok(/n\.kind === 'desktop_handoff'/.test(appNotif) && /cmd: 'emulatorOpen'/.test(appNotif) && /device: 'desktop:main'/.test(appNotif),
+  '앱: 개입 알림을 누르면 에이전트 PC 화면으로 간다(PC sidebar.js 와 같은 규칙)');
+ok(/kind === "desktop_handoff"/.test(read(path.join(PC, 'sidebar.js'))), 'PC: 같은 알림 라우팅이 있다');
+
+// ── 에이전트 PC 라이브 영상(H.264, 2026-09-19) — VNC 프레임버퍼 → vt-h264(VideoToolbox) → 같은 바이트 계약 ────
+const css = read(path.join(PC, '..', 'styles.css'));
+ok(/img\.emu-img:not\(\[src\]\) \{ visibility: hidden; \}/.test(css) && !/^\.emu-img:not\(\[src\]\)/m.test(css),
+  '★ 빈 <img> 숨김이 canvas(라이브 영상)까지 숨기지 않는다(0.1.341~346 캔버스가 통째로 안 보이던 진범)');
+ok(/\/\^\(android\|ios\|desktop\):\//.test(pcView), 'PC: 에이전트 PC 도 라이브 영상을 연다');
+ok(/if \(this\.deviceId\) void this\.startVideo\(\)/.test(pcView), '★ PC: 복원된 pane 도 라이브 영상을 붙인다(setVisible(true) 는 기본값과 같아 아무것도 안 했다)');
+ok(/\/\^\(android\|ios\|desktop\):\//.test(appEmu) && /deviceId\.startsWith\('desktop:'\) && !deskOn\) return;/.test(appEmu), '앱: 에이전트 PC 라이브 영상(켜져 있을 때만)');
+const daemonDir = path.join(PC, '..', '..', '..', 'codingpt_daemon', 'packages', 'runner-core');
+const emuStream = read(path.join(daemonDir, 'emulator-stream.js'));
+ok(/kind === 'desktop'\) return require\('\.\/desktop'\)\.DesktopStreamSession\.start/.test(emuStream), '데몬: 스트림 세션이 desktop 을 안다(같은 뷰어·GOP·배압 배관)');
+ok(fs.existsSync(path.join(daemonDir, 'native', 'vt-h264.swift')), '데몬: vt-h264.swift 동봉');
+ok(/swiftc -O -o "\$OUT\/vt-h264"/.test(read(path.join(PC, '..', '..', 'scripts', 'bundle-sidecar.sh'))), '번들: vt-h264 를 빌드·서명한다');
+ok(/CPT_VT_H264/.test(read(path.join(PC, '..', '..', 'src-tauri', 'src', 'lib.rs'))), 'PC: 번들 vt-h264 경로를 데몬에 넘긴다');
 for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
   ok(/type:\s*['"]touch['"]/.test(src), `${name} 이 touch 스트리밍을 보낸다`);
   for (const phase of ['begin', 'move', 'end']) {
@@ -286,9 +380,12 @@ for (const [name, src, hook] of [['PC', pcView, /setVisible[\s\S]{0,600}?this\.l
   ok(/CAP_RETRY_MAX/.test(src), `${name} 이 조작 준비를 상한 안에서 다시 물어본다(무한 폴링 금지)`);
 }
 //  왜 안 되는지는 **항상** 적는다 — 버튼도 없고 설명도 없으면 사용자에겐 그냥 고장이다.
-ok(/if \(!canInput && dev\) \{/.test(pcView) && !/!canInput && dev && dev\.caps && dev\.caps\.inputHint/.test(pcView),
+ok(/if \(!canInput && dev && dev\.kind !== "desktop"\) \{/.test(pcView) && !/!canInput && dev && dev\.caps && dev\.caps\.inputHint/.test(pcView),
   'PC 의 이유 표시가 데몬 힌트 유무에 묶여 있지 않다');
-ok(/!canInput && dev \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
+//  에이전트 PC 는 아래 힌트 줄 대신 화면 안 한 줄(.emu-off) — 켜기는 상태 바 전원 아이콘 하나뿐(2026-09-17 사용자 결정).
+ok(/className = "emu-off"/.test(pcView) && !/btn\(i18n\.t\('켜기'\)/.test(pcView) && /icons\.power\(/.test(pcView),
+  '에이전트 PC: 꺼짐 안내는 화면 안에, 전원은 아이콘 버튼 하나');
+ok(/!canInput && dev && !isDesk \?/.test(appEmu) && !/dev\.caps\.inputHint \?/.test(appEmu),
   '앱의 이유 표시도 힌트 유무에 묶여 있지 않다');
 ok(/inputWhy/.test(appEmu), '앱이 힌트가 없을 때도 이유를 적는다');
 
@@ -327,6 +424,33 @@ for (const [name, src] of [['PC', pcView], ['앱', appEmu]]) {
   ok(/emulatorFrame\(/.test(src), `${name} 캡처가 데몬에게 원본을 다시 받는다`);
 }
 
+
+// ── 에이전트 PC 표면은 워크스페이스에 하나(2026-09-20) — 두 번 열면 새 pane 이 아니라 있는 탭을 앞으로 ──
+//  (폰 실기: + 메뉴를 두 번 눌러 에이전트 PC pane 이 2개 → 같은 화면을 두 번 받으며 사용자가 "이상하다")
+const pcWsView = read(path.join(PC, 'workspace-view.js'));
+ok(/export function focusDesktopSurface\(\)/.test(pcWsView) && /if \(focusDesktopSurface\(\)\) return;\s*\n\s*smartAdd\("emulator", \{ deviceId: "desktop:main"/.test(pcWsView),
+  'PC: + 메뉴의 에이전트 PC 는 이미 있으면 그 표면을 앞으로');
+ok(/kind === 'emulator' && url && url\.startsWith\('desktop:'\)/.test(appWs) && /\(t\.deviceId \|\| ''\)\.startsWith\('desktop:'\)/.test(appWs),
+  '앱: smartAdd 의 에이전트 PC 도 같은 규칙(leaf·혼합 탭 둘 다 찾는다)');
+
+// ── 디코더가 프레임을 쥐고 내놓아도 그린다(2026-09-20) — queued>0 규칙에 250ms 상한(양쪽 동일) ──
+ok(/if \(queued > 0 && nowMs - lastPaintAt < 250\) return;/.test(appVideo), '앱: 250ms 넘게 안 그렸으면 밀려 있어도 그린다');
+ok(/queued === 0 \|\| nowMs - this\._lastPaintAt > 250/.test(pcView), 'PC: 같은 250ms 상한');
+
+// ── 공유 표면(2026-09-20, 사용자 결정: 모든 pane 공유) — 터미널 풀과 같은 규율을 양쪽이 같이 지킨다 ──
+const appShell = read(path.join(APP, 'contexts/WorkspaceShellContext.tsx'));
+const pcTiling = read(path.join(PC, 'tiling.js'));
+const pcSurf = read(path.join(PC, 'surface-sync.js'));
+const pcState = read(path.join(PC, 'state.js'));
+ok(/sid = leaf\.sid \? \{ sid: leaf\.sid \} : \{\}/.test(pcTiling) && /const sid = tab\.sid \? \{ sid: tab\.sid \} : \{\}/.test(pcTiling), 'PC: pane↔탭 왕복에 sid 보존');
+ok(/leaf\.kind !== 'terminal' && leaf\.sid \? \{ sid: leaf\.sid \} : \{\}/.test(appTiling) && /const sid = tab\.sid \? \{ sid: tab\.sid \} : \{\}/.test(appTiling), '앱: 같은 왕복 보존');
+ok(/holder\.miss = 1/.test(pcSurf) && /pendingAdd\.has\(e\.sid\) \|\| !knownFor\(meta\.id\)\.has\(e\.sid\)/.test(pcSurf), 'PC: 2틱 유예 + 등록 전/중 보호');
+ok(/surfacePending\.has\(x\.sid\) \|\| !known\.has\(x\.sid\)/.test(appShell) && /return x\.miss \? 'drop' : 'mark'/.test(appShell), '앱: 같은 2틱 유예 + 보호');
+ok(/api\.surfaceList\(meta\.localPath/.test(pcState) && /_surfaceSync\.scheduleSync\(\)/.test(pcState), 'PC: 리컨실 틱에 표면 목록 + emit 마다 안→밖 동기화');
+ok(/daemonService\.listPool\(/.test(appShell) && /reconcileSurfaces\(wsId, next, surfaces\)/.test(appShell) && /surfaceRpc\('surface\.add'/.test(appShell), '앱: terminal.list 에 실린 surfaces 로 리컨실 + 안→밖 등록');
+ok(/got\.id !== e\.sid/.test(pcSurf) && /got\.id !== e\.sid/.test(appShell), '양쪽: 에이전트 PC 흡수(merged) 시 로컬 sid 갈아 끼움');
+const daemonSurf = read(path.join(PC, '..', '..', '..', 'codingpt_daemon', 'packages', 'runner-core', 'surfaces.js'));
+ok(/had && had\.id !== sid\) return \{ ok: true, item: strip\(had\), merged: true \}/.test(daemonSurf), '데몬: 에이전트 PC 는 워크스페이스에 하나');
 
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

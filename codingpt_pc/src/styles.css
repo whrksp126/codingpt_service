@@ -28,6 +28,16 @@
   --r-md: 10px;
   --r-lg: 12px;
   --sb-w: 264px;
+  /* 창틀 여백 — mac: 좌측 macOS 트래픽라이트 72px(종전 하드코딩의 변수화, 값 동일).
+     win32(html[data-os="windows"], main.js 가 세팅)는 좌측 0 대신 최소 여백 + 우측 캡션 버튼 폭. */
+  /* ★ 신호등은 OS 기본 위치 그대로 둔다(2026-09-16 AppKit 실측, Darwin 27): 닫기 x=9 · 위 여백 9 · 지름 14 ·
+     초록 우측 끝 69 · 타이틀바 컨테이너 32. 즉 OS 가 이미 32pt 바의 정중앙(위 9/아래 9)에 놓는다 → 바 높이 32.
+     ⚠ tauri `trafficLightPosition` 은 쓰지 말 것 — tao 는 컨테이너만 (14+y) 로 줄이고 버튼의 컨테이너 안 y(9)는
+       그대로 둬서 {y:10} 을 주면 위 여백이 **1** 이 된다(실측). 28 로 줄였던 0.1.330 은 아래 여백만 5 가 됐다.
+     좌측 인셋: cmux 는 표준 버튼 영역 뒤 leading 액세서리 + 4 = 초록 끝(69) 뒤 ≈ 11 → 버튼 시작 80. */
+  --titlebar-inset-left: 80px;
+  --titlebar-h: 32px;
+  --titlebar-inset-right: 0px;
   /* 별칭 — 본문 곳곳의 var(--x, #폴백) 가 참조하는 미정의 변수들을 정식 등록(테마 전환 시 폴백 고착 방지) */
   --text-2: var(--text2);
   --text-dim: var(--dim);
@@ -91,9 +101,43 @@ html, body {
   font-size: 14px;
   letter-spacing: -0.02em;
   -webkit-font-smoothing: antialiased;
-  user-select: none;
   overflow: hidden;
+
+  /* ── 텍스트 선택 정책 (2026-08-14 사용자 실사고) ─────────────────────────────
+     증상: 설정 창의 제목·소제목·라벨이 드래그로 파랗게 잡혀 매우 불편하다.
+     진범: 여기 `user-select: none` 은 **처음부터 있었는데 `-webkit-` 접두사가 없었다.**
+      WKWebView(=이 앱의 웹뷰)는 접두사 붙은 선언을 봐야 하므로 전역 규칙이 통째로 무시됐고,
+      개별적으로 `-webkit-user-select: none` 을 적어 둔 곳(pane 탭·사이드바 행 등)만 살아남았다.
+      그래서 "어떤 건 안 잡히고 어떤 건 잡히는" 들쭉날쭉한 화면이 됐다.
+     정책: **앱 셸의 기본은 선택 불가**(버튼·타이틀·라벨·설명은 읽는 것이지 고르는 것이 아니다).
+      복사·편집이 목적인 표면만 아래에서 되돌린다. 되돌릴 땐 반드시 두 선언을 함께 쓴다. */
+  user-select: none;
+  -webkit-user-select: none;
 }
+
+/* ── 선택 가능한 표면(위 기본을 되돌리는 유일한 목록) ────────────────────────
+   여기 없는 것은 선택되지 않는다. 새 표면을 추가할 땐 "사용자가 이 글자를 복사하거나 고칠
+   이유가 있는가"만 물으면 된다 — 없으면 추가하지 않는다.
+   ⚠ 터미널(xterm)은 여기 없다: xterm 은 자기 CSS 로 이미 user-select:none 을 걸고 선택·복사를
+    **자체 선택 모델**로 처리한다(캔버스/WebGL 렌더러라 DOM 텍스트가 아니다) → 전역 규칙 무관. */
+input, textarea, [contenteditable="true"], [contenteditable=""] {
+  user-select: text; -webkit-user-select: text;
+}
+.cm-editor, .cm-editor * { user-select: text; -webkit-user-select: text; }   /* IDE — 편집·복사 */
+.rv-lines, .rv-lines * { user-select: text; -webkit-user-select: text; }     /* 코드 리뷰 diff */
+.link-code { user-select: text; -webkit-user-select: text; }                 /* 기기 연동 8자 코드 */
+/* 개별 지정용 — 화면 어디든 "이건 복사할 만하다" 싶은 조각에 붙인다(버전·오류 메시지 등). */
+.sel-text, .sel-text * { user-select: text; -webkit-user-select: text; }
+
+/* ── 드래그로 잡힌 영역의 색 (2026-08-15 사용자 지적: "포인트 컬러로 하지 말고 일반적인 걸로") ──
+   ★ 지금까지 이 앱은 `::selection` 을 **한 번도 정의한 적이 없다**. 그래서 색을 웹뷰가 골랐고,
+    그 기본값은 플랫폼·시스템 강조색·다크모드에 따라 달라진다(우리가 통제하지 못한다).
+   ★ 터미널도 이 규칙을 탄다: 위 주석과 달리 xterm 자체 선택은 **앱이 마우스 리포팅을 켠 동안
+    (claude·vim 등 TUI) 아예 만들어지지 않는다** — 그때 드래그는 DOM 텍스트 선택으로 떨어지고,
+    색은 여기서 정해진다. 값은 터미널 팔레트의 선택색과 같게 둔다(두 선택이 다른 색이면 같은
+    드래그가 화면 위치에 따라 달라 보인다). */
+::selection { background: #264F78; color: #F8FAFC; }
+:root[data-theme="light"] ::selection { background: #BCD3F5; color: #0F172A; }
 
 .shell { height: 100%; display: grid; grid-template-columns: var(--sb-w) 1fr; }
 /* 접힘: 단일 컬럼 트랙 → 유일한 그리드 아이템(main)이 전체 폭 차지.
@@ -122,16 +166,27 @@ body.resizing-row { cursor: row-resize; }
 /* 잡았을 때 = 중립 테두리색(액센트 아님)으로 표시 */
 .sb-resizer:hover, .sb-resizer.dragging { background: var(--border-ctrl); }
 .sb-top {
-  display: flex; align-items: center; gap: 2px;
-  height: 40px; padding: 0 8px 0 72px; /* 좌: macOS 트래픽 라이트 여백 */
+  display: flex; align-items: center; gap: 6px;   /* cmux classic spacing 6 */
+  /* ★ 높이 32 = OS 신호등 컨테이너와 동일(--titlebar-h, :root 주석의 실측). 신호등 중심 = 9+7 = 16,
+     20px 버튼 중심 = 6+10 = 16 → 신호등·버튼·이름이 한 중심선(2026-09-16 사용자 지적: "위 여백만큼 아래도"). */
+  height: var(--titlebar-h); padding: 0 8px 0 var(--titlebar-inset-left); /* 좌: 신호등 여백(win32=0 근처) */
   flex: none; border-bottom: 1px solid var(--border); /* main-top 과 헤더 라인 연속 */
 }
-.sb-top .ic-btn, .main-top .ic-btn { width: 28px; height: 28px; }
+/* ── 타이틀바 컨트롤(좌: 사이드바·알림 / 우: 검색·추가) — cmux classic 지표 1:1(2026-09-16) ──
+   HeaderChromeControlMetrics: button 20 · icon 12(SF regular) · radius 6 · spacing 6 · hoverBackground false
+   (불투명도 0.86 → 0.96 → 눌림 1.0) · 색 = secondary. 아이콘 크기는 sidebar.js TITLEBAR_ICON 이 짝이다.
+   ⚠ 호버 배경을 다시 넣지 말 것 — 배경 사각형이 생기는 순간 macOS 타이틀바 도구 버튼과 달라 보인다. */
+.sb-top .ic-btn, .main-top .ic-btn, .mt-adds .pane-ctrl {
+  width: 20px; height: 20px; border-radius: 6px; color: var(--text2); opacity: 0.86; /* cmux Color.secondary 밝기 */
+  transition: opacity 0.12s;
+}
+.sb-top .ic-btn:hover, .main-top .ic-btn:hover, .mt-adds .pane-ctrl:hover { background: transparent; color: var(--text2); opacity: 0.96; }
+.sb-top .ic-btn:active, .main-top .ic-btn:active, .mt-adds .pane-ctrl:active { opacity: 1; }
 .sb-top .bell { position: relative; }
 .bell-badge {
-  position: absolute; top: 2px; right: 2px;
-  background: var(--error); color: #fff; font-size: 9px; font-weight: 700;
-  min-width: 14px; height: 14px; line-height: 14px; text-align: center; border-radius: 999px; padding: 0 3px;
+  position: absolute; top: -2px; right: -3px;
+  background: var(--error); color: #fff; font-size: 8px; font-weight: 700;
+  min-width: 12px; height: 12px; line-height: 12px; text-align: center; border-radius: 999px; padding: 0 2px;
 }
 
 .sb-list { flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 0; }
@@ -175,10 +230,43 @@ body.resizing-row { cursor: row-resize; }
 .wsr-badge { background: var(--error); color: #fff; font-size: 9px; font-weight: 700; min-width: 15px; height: 15px; line-height: 15px; text-align: center; border-radius: 999px; padding: 0 4px; }
 .wsr-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--dim); }
 .wsr-kind { display: inline-flex; align-items: center; gap: 4px; }
-/* 프로젝트 그룹(같은 프로젝트의 PC별 사본 묶음) — 헤더 1회 + 멤버 들여쓰기 + 상태점 */
-.ws-proj-head { display: flex; align-items: center; gap: 6px; padding: 7px 10px 3px; color: var(--text-2, #aab2c5); font-size: 12.5px; font-weight: 700; }
-.ws-proj-head .wsp-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-proj-members { margin-left: 14px; border-left: 1px solid var(--border); padding-left: 4px; }
+/* ── 기기 우선 사이드바(2026-08-14) — `내 PC` 섹션 + 고른 PC 의 워크스페이스 섹션 ──
+   옛 `.ws-proj-*`(프로젝트 그룹 헤더/멤버 들여쓰기)는 그룹핑 폐기와 함께 삭제했다.
+   죽은 CSS 를 남기면 다음 사람이 그 클래스를 다시 쓰면서 폐기된 구조가 조용히 부활한다. */
+.sb-sec {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 6px 4px 10px; color: var(--dim);
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.sb-sec + .sb-sec { margin-top: 6px; }
+.sb-sec-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-sec-acts { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+.sb-sec-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; color: var(--dim); cursor: pointer;
+  padding: 3px; border-radius: var(--r-sm);
+}
+.sb-sec-btn:hover { background: var(--elevated2); color: var(--text2); }
+.sb-sec-btn.busy { opacity: 0.5; pointer-events: none; }
+/* PC 행 — 선택 상태는 배경으로만(포인트 컬러 금지). 상태점은 워크스페이스 행과 같은 것을 쓴다.
+   ⚠ 클래스 이름이 `.pc-row` 인 이유: `.dev-row` 는 설정 기기 표가 "행에 배경/테두리를 주지 않는다"로
+   확정하며 규칙 자체를 지운 이름이다(contract.mjs 가 그 부재를 고정한다). 다른 화면의 결정을
+   같은 이름으로 되살리지 않는다. */
+/* 높이·글자 크기를 워크스페이스 행(.ws-row/.wsr-name)에 맞춘다(2026-08-14 사용자 확정) —
+   두 목록이 같은 사이드바에 세로로 붙어 있는데 행 크기가 다르면 한쪽이 부속처럼 보인다. */
+.pc-row {
+  width: 100%; display: flex; align-items: center; gap: 7px;
+  min-height: 44px; padding: 11px 10px; margin-bottom: 2px;
+  background: transparent; border: none; border-radius: var(--r-md);
+  color: var(--text2); text-align: left; cursor: pointer; font-size: 13.5px; font-weight: 600;
+  user-select: none; -webkit-user-select: none;
+}
+.pc-row:hover { background: var(--elevated); }
+.pc-row.active { background: var(--hover); color: var(--text); }
+.pc-row.pc-off { opacity: 0.55; }
+.pc-row .pc-ic { display: inline-flex; flex: none; opacity: 0.85; }
+.pc-row .pc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pc-row .wsr-badge { margin-left: auto; }
 .wsr-dot { width: 6px; height: 6px; border-radius: 3px; display: inline-block; flex: none; }
 .wsr-dot.on { background: var(--accent); }
 .wsr-dot.off { background: var(--text-dim, #8b93a7); }
@@ -254,20 +342,43 @@ body.resizing-row { cursor: row-resize; }
 
 .main-top {
   flex: none; display: flex; align-items: center; gap: 8px;
-  height: 40px; padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+  height: var(--titlebar-h); padding: 0 14px; background: var(--surface); border-bottom: 1px solid var(--border); /* = .sb-top */
   user-select: none; -webkit-user-select: none;
 }
-.shell.sb-collapsed .main-top { padding-left: 72px; } /* sb-top 과 동일 트래픽라이트 여백 */
+.shell.sb-collapsed .main-top { padding-left: var(--titlebar-inset-left); } /* sb-top 과 동일 트래픽라이트 여백 */
+
+/* ── win32 창틀(decorations:false) — 트래픽라이트 없음 + 우측 상단 캡션 버튼(win-caption.js) ── */
+html[data-os="windows"] {
+  --titlebar-inset-left: 10px;
+  --titlebar-inset-right: 138px; /* 46px 버튼 3개 */
+}
+html[data-os="windows"] .main-top { padding-right: calc(14px + var(--titlebar-inset-right)); }
+/* 게이트(로그인/부트스트랩, z-index 10000)가 떠 있어도 창 조작은 가능해야 한다 → 그 위. */
+.win-caption { position: fixed; top: 0; right: 0; height: var(--titlebar-h); display: flex; z-index: 12000; } /* 바 높이와 한 벌 */
+/* Windows 관용: 칸 전체 사각 하이라이트(둥근 모서리 없음), 무채색 명암. 닫기 hover 만 --error
+   (파괴적 동작 신호 = 상태색 허용 범위, OS 관용과도 일치). */
+.win-cap-btn {
+  width: 46px; height: var(--titlebar-h); display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: none; border-radius: 0; padding: 0;
+  color: var(--text3); cursor: default; transition: background 0.12s, color 0.12s;
+}
+.win-cap-btn:hover { background: var(--elevated2); color: var(--text); }
+.win-cap-btn:active { background: var(--hover); }
+.win-cap-btn.win-cap-close:hover { background: var(--error); color: #fff; }
+.win-cap-btn.win-cap-close:active { background: var(--error); opacity: 0.85; }
 .mt-ctl { display: inline-flex; align-items: center; gap: 2px; }
-.mt-div { width: 1px; height: 20px; background: var(--border); margin: 0 6px; flex: none; }
+.mt-div { width: 1px; height: 14px; background: var(--border); margin: 0 2px; flex: none; } /* 20px 버튼 줄에 맞춘 높이 */
 .mt-folder { display: inline-flex; color: var(--text2); }
 .mt-name { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .mt-path { font-size: 11.5px; color: var(--dim); font-family: var(--mono-font); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 통합 추가 버튼(터미널/IDE/웹뷰) — main-top 우측 고정, 활성 pane 기준 자동 배치 */
 .mt-spacer { flex: 1; }
-.mt-adds { display: inline-flex; align-items: center; gap: 2px; }
+.mt-adds { display: inline-flex; align-items: center; gap: 6px; } /* 좌측 컨트롤과 같은 spacing */
 
 .ws-grid { flex: 1; min-height: 0; background: transparent; } /* punch-through 경로(창 bg 가 base) */
+/* 워크스페이스 화면 LRU 캐시 컨테이너 — 활성 1개만 보이고 나머지는 display:none 으로 눕는다.
+   (전환 시 xterm 파괴/재생성 대신 표시 토글 — workspace-view.js WS_KEEP 참조) */
+.ws-stack { width: 100%; height: 100%; min-height: 0; }
 .ws-empty { height: 100%; display: flex; align-items: center; justify-content: center; color: var(--dim); }
 
 /* 분할 — 여백 없이 flush, 얇은 1px 구분선(넓은 히트영역). */
@@ -306,15 +417,15 @@ body.resizing-row { cursor: row-resize; }
 .pane.ring { box-shadow: inset 0 0 0 2px rgba(96, 165, 250, 0.5); }
 /* 미읽음 알림이 있는 터미널 pane — 읽기 전까지 강조 테두리(모바일 패리티).
    탭바(헤더)는 제외하고 "탭 아래 본문 영역"에만 그린다. 자식(터미널)에 가리지 않게 outline 사용. */
-.pane.notif-unread > .pane-body { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+.pane.notif-unread > .pane-body { outline: 2px solid var(--text3); outline-offset: -2px; border-radius: 4px; }
 /* 읽음(클릭) 순간 = 바로 사라지지 않고 두 번 깜빡이고 소멸(cmux 식). animationend 에서 클래스 제거. */
-.pane.notif-clearing > .pane-body { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; animation: notifBlink 0.58s ease-in-out forwards; }
+.pane.notif-clearing > .pane-body { outline: 2px solid var(--text3); outline-offset: -2px; border-radius: 4px; animation: notifBlink 0.58s ease-in-out forwards; }
 @keyframes notifBlink {
-  0% { outline-color: var(--accent); }
+  0% { outline-color: var(--text3); }
   20% { outline-color: transparent; }
-  40% { outline-color: var(--accent); }
+  40% { outline-color: var(--text3); }
   60% { outline-color: transparent; }
-  80% { outline-color: var(--accent); }
+  80% { outline-color: var(--text3); }
   100% { outline-color: transparent; }
 }
 
@@ -372,7 +483,7 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 /* 탭 라벨 최대폭 = 화면 폭 비례(좁은 창=짧게, 넓은 창=길게) — 넘치면 탭바 가로 스크롤(휠 지원). */
 .ptab-title { max-width: clamp(72px, 16vw, 200px); overflow: hidden; text-overflow: ellipsis; }
 .ptab.drag-src { opacity: 0.35; } /* 드래그 중 원본 탭 — 이 자리는 비워질 것임을 표현 */
-.ptab-x { display: inline-flex; color: var(--dim); border-radius: 3px; padding: 1px; margin-left: 1px; }
+.ptab-x { display: inline-flex; color: var(--dim); border-radius: 3px; padding: 1px; margin-left: 1px; cursor: pointer; }   /* 탭은 잡기(grab)지만 닫기는 누르기다 */
 .ptab-x:hover { color: var(--error); background: rgba(248, 113, 113, 0.12); }
 .pane-ctrls { display: flex; align-items: center; gap: 1px; flex: none; padding: 0 5px; }
 .pane-ctrl { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: none; background: transparent; color: var(--dim); cursor: pointer; border-radius: var(--r-sm); }
@@ -393,7 +504,17 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
    열을 더 제안해 정확히 상쇄된다. 바깥 margin 은 유효하지만 **pane 자체가 창을 넘는 상황에서는
    잘림을 키운다**(2026-07-27 사용자 실측 "더 많이 짤리네") → 넣지 않는다. */
 .pane-term { flex: 1; min-height: 0; padding: 4px 2px 2px 8px; overflow: hidden; }
-.pane-term .xterm { height: 100%; }
+.pane-term .xterm { height: 100%; transform-origin: 0 0; }
+/* v3 비소유자 뷰 — 소유자 격자(예: 폰 48칸)를 축소/스크롤로 본다. 격자 자체는 절대 바꾸지 않는다. */
+/* 비소유자 뷰 — 폭은 글꼴로 맞추고(_applyScale), 세로로 넘치는 만큼만 스크롤로 본다. */
+.pane-term.scaled { overflow: auto; }
+.pane-term.scaled .xterm { height: auto; }
+.pane-owner-pill { position: absolute; left: 10px; bottom: 10px; z-index: 21; display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px 4px 10px; border-radius: 999px; font-size: 11.5px; background: var(--elevated2);
+  border: 1px solid var(--border-ctrl); color: var(--text2); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.pane-owner-pill .op-btn { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-ctrl); background: var(--elevated);
+  color: var(--text); font-size: 11.5px; cursor: pointer; }
+.pane-owner-pill .op-btn:hover { background: var(--hover); }
 
 /* preview */
 .preview-bar { flex: none; display: flex; gap: 6px; padding: 5px 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
@@ -578,6 +699,11 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .sett-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .sett-label { color: var(--text); font-weight: 550; line-height: 1.35; }
 .sett-desc { color: var(--dim); font-size: 11.5px; line-height: 1.45; }
+/* 베타 배지 — accent 를 쓰지 않는다(포인트 컬러 = 상태 신호 전용). 무채색 테두리 알약. */
+.sett-beta {
+  margin-left: 6px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .04em; color: var(--dim); vertical-align: 1px;
+}
 .sett-row + .sett-row, .sett-row + .sett-hint { border-top: 1px solid var(--border); } /* 행 구분선(모바일 미러) */
 .sett-hint { font-size: 11.5px; color: var(--dim); padding: 2px 0 4px; }
 .sett-select {
@@ -610,6 +736,11 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 /* ★ 개정 12: 연동 코드(이 기기) · 코드 입력(다른 기기 행) — 승인 UI 를 대체한다. */
 .link-box { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 0 4px; }
 .link-code { font-family: var(--mono, ui-monospace, monospace); font-size: 26px; font-weight: 800; letter-spacing: 6px; color: var(--text); }
+.link-expiry { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.link-renew { display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--dim); cursor: pointer; }
+.link-renew:hover { background: var(--elevated2); color: var(--text2); }
+.link-renew:active { transform: scale(.96); }
+.link-renew:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--text3) 16%, transparent); }
 .link-entry { display: flex; align-items: center; gap: 8px; }
 .link-entry .acct-del-input { flex: 1; min-width: 0; font-family: var(--mono, ui-monospace, monospace); }
 /* (구) 승인 대기 행 = 미확인 알림(개정 9). 행 전체가 승인 표면으로 가는 문이라 커서/호버를 준다.
@@ -728,7 +859,7 @@ li.CodeMirror-hint-active { background: var(--hover); color: var(--text); }
 .acct-line { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 2px; border-bottom: 1px solid var(--border); }
 .acct-line-txt { font-size: 13px; color: var(--text2); }
 .acct-line .btn { flex: none; }
-.acct-msg { font-size: 12px; color: var(--dim); padding: 8px 2px 0; }
+.acct-msg { font-size: 12px; color: var(--dim); padding: 8px 2px 0; user-select: text; -webkit-user-select: text; }
 .acct-msg.warn { color: var(--error); }
 
 /* 프로필(일반 탭) */
@@ -1153,9 +1284,19 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .pv-menu-item.active { color: var(--text2); }
 .pvm-ic { display: inline-flex; color: var(--dim); flex: 0 0 auto; }
 .pvm-label { flex: 1 1 auto; }
+/* "여기서 끝나지 않는다"(하위 메뉴로 이어짐) 표시 — 헤더 [+] 의 터미널·웹뷰 행에만 붙는다. */
+.pvm-more { display: inline-flex; color: var(--text3); flex: 0 0 auto; margin-left: 6px; }
+/* 캐스케이드 하위 메뉴(Windows 식) — 부모 옆에 뜨고, 부모 목록은 그대로 남는다.
+   부모보다 위에 그려야 겹칠 때 가려지지 않는다. 목록이 길 수 있어 자체 스크롤을 준다. */
+.pv-submenu { z-index: 9003; min-width: 196px; max-height: min(60vh, 420px); overflow-y: auto; }
+/* 하위 메뉴가 열려 있는 행 — 포인터가 하위 패널로 넘어가 hover 가 풀려도 "여기서 왔다"를 유지한다. */
+.pv-menu-item.is-open { background: var(--hover); }
 .pv-menu-item .tgl { pointer-events: none; } /* 행 전체가 클릭 타겟 — 토글은 표시 전용 */
 
 .pvm-hint { flex: 0 0 auto; color: var(--dim); font-size: 11.5px; }
+/* 현재 선택된 게스트 OS 표시 — 행이 .active 일 때만 체크가 보인다(에이전트 PC › 하위 메뉴). */
+.pvm-chk { display: none; flex: 0 0 auto; color: var(--text2); margin-left: 4px; }
+.pv-menu-item.active .pvm-chk { display: inline-flex; }
 .pv-menu-note { padding: 8px 10px; color: var(--dim); font-size: 12px; line-height: 1.45; }
 .pv-menu-div { height: 1px; margin: 5px 6px; background: var(--border-ctrl); }
 /* 포트 드롭다운 섹션 제목 — 목록이 '이 워크스페이스 / 다른 곳'으로 나뉜다. */
@@ -1219,7 +1360,7 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .ide-pv-md .chat-list { margin: 0 0 12px 20px; }
 .ide-pv-md .chat-list li { margin: 4px 0; }
 /* JSON 트리 */
-.ide-json-node { font-size: 12.5px; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ide-json-node { font-size: 12.5px; line-height: 1.65; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .ide-json-head { cursor: pointer; user-select: none; display: flex; align-items: baseline; gap: 4px; }
 .ide-json-head:hover { background: var(--elevated2); border-radius: 5px; }
 .ide-json-caret { color: var(--dim); width: 11px; flex: none; }
@@ -1285,8 +1426,9 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
   flex: 1; min-height: 0; display: none; flex-direction: column;
   background: var(--base); position: relative; overflow: hidden;
 }
-/* body 전역 user-select:none 을 이 안에서만 되돌린다 — 대화는 선택·복사할 수 있어야 한다. */
-.pane-chat, .pane-chat * { user-select: text; }
+/* 전역 user-select:none 을 이 안에서만 되돌린다 — 대화는 선택·복사할 수 있어야 한다.
+   ⚠ `-webkit-` 을 함께 쓴다: WKWebView 는 접두사 없는 선언을 무시한다(2026-08-14 실사고). */
+.pane-chat, .pane-chat * { user-select: text; -webkit-user-select: text; }
 .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .chat-banner {
   flex: none; padding: 7px 12px; font-size: 12px; line-height: 17px;
@@ -1941,7 +2083,7 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .ag-name { font-size: 13.5px; color: var(--text); }
 .ag-meta { font-size: 11px; color: var(--text2); }
 .ag-right { display: flex; align-items: center; flex: none; }
-.ag-err { font-size: 11.5px; color: var(--danger, #EF4444); padding: 0 0 8px 31px; }
+.ag-err { font-size: 11.5px; color: var(--danger, #EF4444); padding: 0 0 8px 31px; user-select: text; -webkit-user-select: text; }
 
 /* 인라인 설치 패널 — 행 아래에서 펼친다(모달 위 모달 금지). */
 .ag-panel {
@@ -2116,45 +2258,61 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
   color: var(--dim); font-size: 11.5px;
 }
 
-/* ── 단축키 설정 ──
-   행을 눌러 새 조합을 받는다. 겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
-.sc-bar { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+/* ── 단축키 설정 (2026-08-15 개편) ──
+   행 전체가 클릭 대상(누르면 새 조합 대기), 조합은 낱개 키캡(⌘ ⇧ E), 보조 동작은 hover 에만.
+   겹침 표시는 배지(무채색) — accent 는 상태 신호 전용. */
+.sc-bar {
+  display: flex; align-items: center; gap: 8px; margin: 2px 0 12px;
+  /* 콘텐츠와 함께 스크롤한다. sticky 로 두면 설정 헤더 아래를 따라다니며 목록/구분선을
+     가리는 떠다니는 막대가 된다(특히 모달 자체가 화면보다 낮을 때 두드러짐). */
+  padding: 8px 0;
+}
 .sc-search {
-  flex: 1 1 auto; min-width: 0; padding: 7px 10px; border-radius: 8px;
+  flex: 1 1 auto; min-width: 0; padding: 8px 12px; border-radius: 9px;
   border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
   font-size: 13px; font-family: inherit; outline: none;
 }
+.sc-search:focus { border-color: var(--text3, var(--text2)); }
 .sc-reset-all {
-  flex: 0 0 auto; padding: 7px 11px; border-radius: 8px; cursor: pointer;
+  flex: 0 0 auto; padding: 8px 12px; border-radius: 9px; cursor: pointer;
   border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2); font-size: 12.5px;
 }
 .sc-reset-all:hover { background: var(--elevated2); }
 .sc-conflict-note { margin: 0 0 10px; color: var(--text2); font-size: 12px; line-height: 1.45; }
-.sc-list { padding: 4px 6px; }
+.sc-list { padding: 2px 4px 6px; }
 .sc-group {
-  padding: 10px 6px 5px; font-size: 11px; color: var(--dim); letter-spacing: 0.02em;
+  padding: 16px 10px 6px; font-size: 11px; font-weight: 700; color: var(--dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
 }
+.sc-list > .sc-group:first-child { padding-top: 10px; }
 .sc-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 6px;
-  border-top: 1px solid var(--border-ctrl);
+  display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 10px;
+  border-radius: 8px; cursor: pointer; outline: none;
 }
-.sc-group + .sc-row { border-top: none; }
+.sc-row:hover, .sc-row:focus-visible { background: var(--elevated); }
+.sc-row + .sc-row { margin-top: 1px; }
 .sc-name { flex: 1 1 auto; min-width: 0; color: var(--text); font-size: 13px; }
 .sc-badge {
   flex: 0 0 auto; padding: 2px 7px; border-radius: 999px; font-size: 10.5px;
   border: 1px solid var(--border-ctrl); color: var(--text2); background: var(--elevated2);
 }
-.sc-key {
-  flex: 0 0 auto; min-width: 82px; text-align: center; padding: 5px 10px; border-radius: 7px;
-  border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text);
-  font-size: 12.5px; font-family: inherit; cursor: pointer;
+/* 키캡 — 낱개 키(⌘/⇧/E)를 실제 키보드 캡처럼. 조합 전체가 한 덩어리 알약이던 예전보다 판독이 빠르다. */
+.sc-keys { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; }
+.sc-cap {
+  min-width: 20px; height: 22px; padding: 0 6px; box-sizing: border-box;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-ctrl); border-bottom-width: 2px; border-radius: 5px;
+  background: var(--elevated); color: var(--text); font-size: 12px; font-family: inherit;
 }
-.sc-key:hover { background: var(--elevated2); }
-.sc-key.empty { color: var(--dim); }
-/* 조합을 받는 중 — 점선으로 "지금 기다린다"를 표시(색이 아니라 테두리 모양으로). */
-.sc-key.rec { border-style: dashed; color: var(--text2); }
+.sc-none { color: var(--dim); font-size: 12.5px; padding-right: 2px; }
+/* 조합을 받는 중 — 점선 테두리로 "지금 기다린다"(색이 아니라 모양으로). */
+.sc-waiting { color: var(--text2); font-size: 12.5px; }
+.sc-row.rec { outline: 1.5px dashed var(--border-ctrl); outline-offset: -1.5px; background: var(--elevated); }
+/* 보조 동작(기본값으로/지우기) — 평소엔 숨김: 모든 행에 항상 떠 있으면 표가 아니라 소음이다. */
+.sc-acts { flex: 0 0 auto; display: inline-flex; gap: 4px; visibility: hidden; }
+.sc-row:hover .sc-acts, .sc-row:focus-visible .sc-acts { visibility: visible; }
 .sc-mini {
-  flex: 0 0 auto; padding: 4px 8px; border-radius: 6px; cursor: pointer;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
   border: 1px solid transparent; background: transparent; color: var(--dim); font-size: 11.5px;
 }
 .sc-mini:hover { color: var(--text2); border-color: var(--border-ctrl); }
@@ -2242,7 +2400,7 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
    화면은 `object-fit: contain` 이라 여백이 생기고, 클릭 좌표는 그 여백을 빼고 환산한다. */
 /*  ⚠ width/flex 를 명시한다: 혼합 탭의 호스트(.pane-mixed)가 flex 컨테이너라, 이게 없으면
     .emu 가 내용 폭(=기기 화면 폭)으로 쪼그라들어 pane 오른쪽이 통째로 빈다. */
-.emu { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0; background: var(--base); }
+.emu { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; height: 100%; min-height: 0; min-width: 0; background: var(--base); position: relative; }
 /*  화면 + 조작 스트립. 스트립은 **여백이 생기는 쪽**에 붙는다(세로 기기=오른쪽, 가로 기기=아래).
     예전엔 탭바 아래에 줄을 하나 더 뒀는데, 그 줄만큼 화면이 통째로 줄고 정작 옆의 빈 자리는
     비어 있었다(2026-08-06 사용자 확정). */
@@ -2257,16 +2415,119 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-main.keys-right .emu-keys-sep { width: 18px; height: 1px; margin: 5px 0; }
 .emu-main.keys-bottom .emu-keys-sep { width: 1px; height: 18px; margin: 0 5px; }
 /*  과녁은 크게 — 이 스트립은 화면 옆의 **원래 비어 있던 자리**를 쓰므로 키우는 데 드는 비용이 없다. */
-.emu-key { display: inline-flex; align-items: center; justify-content: center;
+.emu-key { position: relative; display: inline-flex; align-items: center; justify-content: center;
   width: 38px; height: 38px; border: 0; background: none; color: var(--text2);
   cursor: pointer; border-radius: 9px; padding: 0; }
 .emu-key:hover { color: var(--text); background: var(--hover); }
 .emu-key:active { transform: scale(0.92); }
 .emu-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex;
   align-items: center; justify-content: center; overflow: hidden; }
+/* 에이전트 데스크톱 — 키보드를 받으려면 포커스가 필요하다. 포커스 링은 안쪽 1px 로 조용히. */
+/* 에이전트 데스크톱 상태 바 — 화면 위 한 줄. 상태 점 하나만 색(--accent = 상태 신호 전용). */
+.emu-deskbar { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; height: 34px; padding: 0 10px;
+  border-bottom: 1px solid var(--border); background: var(--elevated); font-size: 12px; color: var(--text3); }
+.emu-deskbar-l { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text2); }
+.emu-deskbar-l svg { flex: 0 0 auto; }
+.emu-deskbtn.icon.primary svg { stroke: var(--base); }
+.emu-deskbar-l b { color: var(--text); font-weight: 600; }
+.emu-deskbar-l .mono { font-family: var(--mono); font-size: 11.5px; }
+.emu-deskbar-sep { color: var(--border-ctrl); margin: 0 2px; }
+.emu-deskbar-r { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+.emu-deskbtn { height: 24px; padding: 0 10px; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); background: transparent;
+  color: var(--text2); font-size: 12px; font-family: var(--ui-font); cursor: pointer; }
+.emu-deskbtn:hover { background: var(--hover); color: var(--text); }
+.emu-deskbtn.on { background: var(--elevated2); color: var(--text); border-color: var(--text3); }
+.emu-deskbtn.primary { background: var(--text); color: var(--base); border-color: var(--text); font-weight: 600; }
+.emu-deskbtn.icon { width: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.emu-deskbtn.icon svg { display: block; }
+.emu-deskbtn:disabled { opacity: .45; cursor: default; }
+.emu-deskbtn.icon { position: relative; }
+
+/* ── pane 안 알림함(2026-09-21) — 화면 아래 안내줄 대신. 종 버튼 점 + 토스트 + 목록 오버레이 ── */
+/*  안 본 알림 점 — 무채색(오류만 의미색). 포인트 컬러 금지 준수. */
+.emu-bell-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--text); box-shadow: 0 0 0 2px var(--base); }
+.emu-deskbtn .emu-bell-dot { top: 3px; right: 3px; width: 6px; height: 6px; }
+.emu-bell-dot.err { background: var(--error); }
+/*  토스트 — 위 가운데서 잠깐. 절대 배치라 화면을 안 깎는다. */
+.emu-toast { position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  max-width: min(460px, 88%); z-index: 30; pointer-events: none;
+  background: var(--elevated2); border: 1px solid var(--border-ctrl); border-radius: 10px;
+  padding: 9px 12px; color: var(--text); font-size: 12.5px; line-height: 1.5;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4); animation: emu-toast-in .2s ease-out; }
+.emu-toast.err { border-color: var(--error); }
+@keyframes emu-toast-in { from { opacity: 0; transform: translate(-50%, -6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+/*  목록 오버레이 — 오른쪽 위 드롭다운. 바깥 클릭으로 닫힘. */
+.emu-notif-ov { position: absolute; inset: 0; z-index: 40; }
+.emu-notif { position: absolute; top: 10px; right: 10px; width: 320px; max-width: 92%; max-height: 72%;
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.45); }
+.emu-notif-h { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.emu-notif-h b { color: var(--text); font-size: 13px; }
+.emu-notif-clear { border: 0; background: none; color: var(--dim); font-size: 12px; cursor: pointer; padding: 2px 4px; }
+.emu-notif-clear:hover { color: var(--text2); }
+.emu-notif-list { overflow-y: auto; min-height: 0; }
+.emu-notif-row { display: flex; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.emu-notif-row:last-child { border-bottom: 0; }
+.emu-notif-dot { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; margin-top: 6px; background: var(--text3); }
+.emu-notif-dot.err { background: var(--error); }
+.emu-notif-tx { flex: 1 1 auto; min-width: 0; }
+.emu-notif-tx div { color: var(--text2); font-size: 12.5px; line-height: 1.5; }
+.emu-notif-tx i { display: block; color: var(--dim); font-size: 10.5px; font-style: normal; margin-top: 2px; }
+.emu-notif-empty { color: var(--dim); font-size: 12.5px; text-align: center; padding: 16px 14px; }
+/* 에이전트 데스크톱 설정 시트 */
+.emu-deskdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); display: inline-block; }
+.emu-deskdot.on { background: var(--accent); }
+.ds-card { max-width: 520px; }
+.ds-head-os { display: inline-flex; align-items: center; gap: 7px; }
+.ds-head-os .ic-brand, .ds-head-os .ic { color: var(--text); }
+/* 시트 닫기 = × 아이콘(글자 아님). fp-newfolder 의 텍스트 패딩을 아이콘용으로 좁힌다. */
+.ds-close { display: inline-flex; align-items: center; justify-content: center; padding: 4px; color: var(--dim); }
+.ds-close:hover { color: var(--text); }
+.ds-body { overflow-y: auto; min-height: 0; }
+.ds-grp { border-top: 1px solid var(--border); padding: 12px 0; }
+.ds-l { font-size: 11px; color: var(--dim); letter-spacing: .04em; margin-bottom: 8px; }
+.ds-kv { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 5px 0; color: var(--text2); font-size: 13px; }
+.ds-kv b { color: var(--text); font-weight: 500; display: inline-flex; align-items: center; gap: 6px; }
+.ds-kv select { height: 26px; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); background: var(--base); color: var(--text); font-size: 12.5px; padding: 0 6px; }
+.ds-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ds-actions .fp-btn { height: 36px; font-size: 13px; }
+.ds-prog { height: 6px; background: var(--elevated2); border-radius: 3px; overflow: hidden; margin: 8px 0 4px; }
+.ds-prog i { display: block; height: 100%; background: var(--text3); transition: width .4s; }
+.ds-note { font-size: 12px; color: var(--text3); }
+.ds-warn { font-size: 12px; color: var(--text3); border-left: 2px solid var(--border-ctrl); padding-left: 10px; margin-top: 8px; line-height: 1.5; }
+/* 게스트 OS 세그먼트(macOS/Linux) — 선택은 무채색 명암으로만 표시(포인트 컬러 금지). */
+.ds-seg { display: flex; gap: 8px; }
+.ds-seg-btn {
+  flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 44px; padding: 0 10px; cursor: pointer; font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border-ctrl); border-radius: var(--r-sm);
+  background: var(--base); color: var(--text2);
+}
+.ds-seg-btn .ic, .ds-seg-btn .ic-brand { color: var(--dim); }
+.ds-seg-btn:hover { background: var(--elevated2); }
+.ds-seg-btn.on { border-color: var(--text3); background: var(--elevated2); color: var(--text); }
+.ds-seg-btn.on .ic, .ds-seg-btn.on .ic-brand { color: var(--text); }
+.ds-seg-sz { color: var(--dim); font-size: 11px; font-weight: 400; }
+.ds-chk { display: flex; align-items: center; gap: 10px; padding: 5px 0; color: var(--text2); font-size: 13px; cursor: pointer; }
+.ds-chk input { accent-color: var(--text); }
+.ds-chk-nm { color: var(--text); font-weight: 500; }
+.ds-chk-path { font-family: var(--mono); font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ds-danger { display: flex; justify-content: space-between; align-items: center; color: var(--error); font-size: 13px; }
+.ds-snap b { display: flex; gap: 6px; align-items: center; }
+.ds-x { width: 26px; padding: 0; }
+.ds-err { color: var(--error); font-size: 12px; min-height: 16px; margin-top: 6px; }
+.emu-stage.emu-desktop { outline: none; cursor: default; }
+.emu-stage.emu-desktop:focus-visible { box-shadow: inset 0 0 0 1px var(--border-ctrl); }
+.emu-key.on { background: var(--elevated2); color: var(--text); }
 /* 스테이지를 **꽉 채우고** 안에서 contain 한다. max-width/height 로만 두면 작은 프레임에서
    <img> 자체가 그림 크기로 쪼그라들어, 클릭 좌표 기준(요소 rect)이 화면과 어긋난다. */
 .emu-img { width: 100%; height: 100%; object-fit: contain; user-select: none; -webkit-user-drag: none; }
+/* src 없는 <img> 는 WebKit 이 깨진 그림 테두리를 그린다 — 아직 프레임이 없으면 자리만 잡고 숨긴다. */
+img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에는 src 가 없다 — img 에만(0.1.341~346 캔버스가 통째로 숨던 진범) */
+.emu-off { position: absolute; color: var(--dim); font-size: 12.5px; text-align: center; padding: 0 16px; }
 .emu-boot { position: absolute; padding: 7px 14px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12.5px; }
 .emu-hint, .emu-err { color: var(--dim); font-size: 11px; padding: 6px 10px; text-align: center; flex: 0 0 auto; }
@@ -2294,4 +2555,3 @@ html[data-theme="light"] .chat-jump { box-shadow: 0 4px 14px rgba(15, 23, 42, 0.
 .emu-note { color: var(--dim); font-size: 11px; padding: 6px 10px; line-height: 1.5; border-top: 1px solid var(--border); }
 .emu-again { display: flex; align-items: center; gap: 5px; margin-top: 10px; padding: 0;
   background: none; border: 0; color: var(--text3); font-size: 12px; cursor: pointer; }
-

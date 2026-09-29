@@ -41,6 +41,9 @@ jobs:
         run: |
           for f in src/js/*.js scripts/*.cjs; do node --check "$f"; done
           bash -n scripts/*.sh
+      # latest.json 멀티플랫폼 병합 계약(darwin 바이트 호환 포함) — aws-sdk 없이 도는 순수 로직 테스트
+      - name: 릴리스 업로드 머지 유닛테스트
+        run: node --test scripts/_release-upload.test.cjs
 
   front:
     runs-on: ubuntu-latest

@@ -93,6 +93,8 @@ fn ws_cache_save_at(p: &std::path::Path, token: &str, server: &str, data: &serde
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o600));
         }
+        // TODO(win32): %USERPROFILE%\.codingpt 하위라 기본 ACL(본인+SYSTEM+관리자)로 이미 타 사용자
+        //  접근이 막힌다. 0600 등가의 명시 DACL(icacls /inheritance:r 상당)은 후속 하드닝으로.
     }
 }
 
@@ -391,6 +393,13 @@ pub fn desktop_login_url(code: String) -> String {
     )
 }
 
+// 공개 사이트 주소 — "다른 PC 에 설치하세요" 안내에서 다운로드 페이지를 열 때 쓴다.
+//  desktop_login_url 에서 경로를 잘라내는 식으로 유추하지 않는다(그건 문자열 운이지 계약이 아니다).
+#[tauri::command]
+pub fn front_base_url() -> String {
+    front_base().trim_end_matches('/').to_string()
+}
+
 fn front_base() -> String {
     // 명시적 override 우선(daemon.json.frontUrl), 없으면 서버 주소에서 파생.
     if let Some(f) = read_config()
@@ -592,6 +601,11 @@ pub fn cloud_terminal_start(
             "hostDeviceId": host_device_id,
             "paneId": pane_id.unwrap_or_default(),
             "client": client,
+            // v3(CPT3): 데몬 VT 정본 + 소유자 1명(codingpt_daemon/docs/terminal-v3-design.md).
+            "terminalProtocol": 3,
+            "deviceName": read_config()
+                .and_then(|c| c.get("deviceName").and_then(|v| v.as_str().map(String::from)))
+                .unwrap_or_default(),
         }))
         .map_err(|e| format!("터미널 시작 실패: {e}"))?;
     let v = resp
@@ -607,6 +621,22 @@ pub fn cloud_terminal_start(
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
     Ok(CloudTerminal { token: tok, ws_base })
+}
+
+/// PC 로컬 터미널(v3) 루프백 엔드포인트 — 사이드카 데몬이 daemon.json 에 적어 둔 {port, token}.
+///  로컬 터미널도 원격과 같은 와이어로 데몬(정본)에 붙는다. 없으면 데몬 미기동/구버전.
+#[derive(serde::Serialize)]
+pub struct TerminalLocalEndpoint { pub port: u16, pub token: String, pub client: String, pub device_name: String }
+
+#[tauri::command]
+pub fn terminal_local_endpoint() -> Result<TerminalLocalEndpoint, String> {
+    let cfg = read_config().ok_or("데몬 설정이 없습니다(페어링 필요)")?;
+    let tl = cfg.get("terminalLocal").ok_or("데몬이 로컬 터미널 리스너를 아직 열지 않았습니다")?;
+    let port = tl.get("port").and_then(|v| v.as_u64()).ok_or("포트 없음")? as u16;
+    let token = tl.get("token").and_then(|v| v.as_str()).ok_or("토큰 없음")?.to_string();
+    let client = cfg.get("deviceId").and_then(|v| v.as_i64()).map(|id| format!("pc-{id}")).unwrap_or_else(|| "pc".into());
+    let device_name = cfg.get("deviceName").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    Ok(TerminalLocalEndpoint { port, token, client, device_name })
 }
 
 // 새 로컬 워크스페이스 생성 — 폴더 절대경로 → 홈-상대 localPath 로 변환 후 백엔드에 등록(deviceToken).
@@ -743,9 +773,14 @@ pub fn open_privacy_settings() -> Result<(), String> {
     Ok(())
 }
 
-// 보호 폴더(다운로드/데스크탑/문서) 접근 프로브 — 최초 호출 시 macOS 허용 팝업이 뜨고(릴리스 .app),
-//  이후엔 즉시 허용/거부가 판정된다. 한 번 허용되면 앱 단위 영구 → 모든 워크스페이스에서 유효.
+// 보호 경로 접근 프로브 — 최초 호출 시 macOS 허용 팝업이 뜨고(릴리스 .app), 이후엔 즉시 허용/거부가
+//  판정된다. 한 번 허용되면 앱 단위 영구 → 모든 워크스페이스에서 유효.
 //  read_dir 은 팝업 응답까지 블로킹되므로 spawn_blocking 으로 UI 를 막지 않는다.
+//
+// ★ TCC 는 폴더 세 개(다운로드/데스크탑/문서)만이 아니다. 에이전트가 홈 폴더를 훑는 순간
+//  **iCloud Drive(kTCCServiceUbiquity)** 와 **음악 보관함(kTCCServiceMediaLibrary)** 팝업이 작업
+//  도중에 튀어나온다(2026-08-14 실사고). 온보딩에서 같이 받아 두려고 여기에 경로를 더했다.
+//  경로 판정은 파일시스템 위치가 정본이다 — TCC 는 이 경로들의 **내용 열람**에만 걸린다.
 #[tauri::command]
 pub async fn probe_folder_access(folder: String) -> Result<bool, String> {
     let dir = {
@@ -754,12 +789,26 @@ pub async fn probe_folder_access(folder: String) -> Result<bool, String> {
             "downloads" => h.join("Downloads"),
             "desktop" => h.join("Desktop"),
             "documents" => h.join("Documents"),
+            // iCloud Drive 가 관리하는 파일 — Desktop/Documents 동기화도 이 아래로 온다.
+            "icloud" => h.join("Library").join("Mobile Documents"),
+            // Apple Music 보관함 — 홈 훑기가 여기에 닿는 순간 미디어 보관함 팝업이 뜬다.
+            "media" => h.join("Music").join("Music").join("Music Library.musiclibrary"),
             _ => return Err("지원하지 않는 폴더".into()),
         }
     };
-    let granted = tauri::async_runtime::spawn_blocking(move || std::fs::read_dir(&dir).is_ok())
-        .await
-        .map_err(|e| format!("프로브 실패: {e}"))?;
+    let granted = tauri::async_runtime::spawn_blocking(move || {
+        // 없는 경로는 물을 것이 없다 → 통과(iCloud 미사용·음악 보관함 없는 Mac). 여기서 false 를
+        //  돌려주면 승인할 수단이 없는 온보딩 화면에 사용자가 영구히 갇힌다.
+        //  stat 은 TCC 에 걸리지 않으므로(막히는 것은 내용 열람) 팝업 없이 존재만 판정된다.
+        if let Err(e) = std::fs::symlink_metadata(&dir) {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                return true;
+            }
+        }
+        std::fs::read_dir(&dir).is_ok()
+    })
+    .await
+    .map_err(|e| format!("프로브 실패: {e}"))?;
     Ok(granted)
 }
 
@@ -893,8 +942,26 @@ pub fn open_notification_settings() -> Result<(), String> {
             .map(|_| ())
             .map_err(|e| format!("시스템 설정 활성화 실패: {e}"))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 설정 앱의 알림 페이지(ms-settings: URI). 앱별 행 딥링크는 UWP 패키지 앱 전용이라
+        //  목록 페이지까지만 연다. cmd /C start 는 URI 스킴 핸들러를 그대로 태운다.
+        win_cmd_hidden(&["/C", "start", "", "ms-settings:notifications"])
+            .map(|_| ())
+            .map_err(|e| format!("알림 설정 열기 실패: {e}"))
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     Ok(())
+}
+
+// win32 cmd.exe 스폰 공통 헬퍼 — CREATE_NO_WINDOW 필수(없으면 콘솔 창이 깜빡인다).
+#[cfg(target_os = "windows")]
+fn win_cmd_hidden(args: &[&str]) -> std::io::Result<std::process::Child> {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("cmd")
+        .args(args)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
 }
 
 // 외부 브라우저로 URL 열기(프리뷰의 프레임 차단 사이트·웹검색용). http/https 만 허용.
@@ -909,7 +976,7 @@ pub fn open_external(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("/usr/bin/open").arg(u).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", "", u]).spawn();
+    let r = win_cmd_hidden(&["/C", "start", "", u]);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(u).spawn();
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
@@ -926,7 +993,7 @@ pub fn open_path(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("/usr/bin/open").arg(p).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd").args(["/C", "start", ""]).arg(p).spawn();
+    let r = win_cmd_hidden(&["/C", "start", "", &path]);
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(p).spawn();
     r.map(|_| ()).map_err(|e| format!("열기 실패: {e}"))
@@ -984,7 +1051,15 @@ pub fn clipboard_paths() -> Vec<String> {
         }
         out
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // 탐색기 파일 복사(Ctrl+C/X)는 CF_HDROP 로 실린다 — 절대경로 목록으로 변환(계약 동일:
+        //  파일 참조가 없으면 빈 배열). clipboard-win 이 open/close·재시도를 내부 처리한다.
+        let paths: Vec<String> =
+            clipboard_win::get_clipboard(clipboard_win::formats::FileList).unwrap_or_default();
+        paths.into_iter().take(64).collect()
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     Vec::new()
 }
 
@@ -1039,8 +1114,49 @@ pub fn clipboard_image_png() -> Option<String> {
         std::fs::write(&p, &bytes).ok()?;
         Some(p.to_string_lossy().into_owned())
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        // 파일 참조가 함께 있으면 파일 쪽이 정본(macOS 경로와 동일 규칙).
+        if !clipboard_paths().is_empty() {
+            return None;
+        }
+        let bytes = win_clipboard_png_bytes()?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return None; // 비정상 크기 방어(macOS 와 동일 캡)
+        }
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        let p = std::env::temp_dir().join(format!(
+            "cpt-paste-{}-{:06}.png",
+            ts.as_secs(),
+            ts.subsec_micros() % 1_000_000
+        ));
+        std::fs::write(&p, &bytes).ok()?;
+        Some(p.to_string_lossy().into_owned())
+    }
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
     None
+}
+
+// win32 클립보드 이미지 → PNG 바이트. ① 등록 포맷 "PNG"(브라우저 이미지 복사 등)를 우선 —
+//  재인코딩 없이 원본 그대로. ② 없으면 CF_DIB(V5) 계열(Win+Shift+S 스크린샷 등)을 BMP 로 받아
+//  PNG 재인코딩(임시파일 계약은 항상 .png — macOS 의 TIFF→PNG 재인코딩과 같은 자리).
+#[cfg(target_os = "windows")]
+fn win_clipboard_png_bytes() -> Option<Vec<u8>> {
+    use clipboard_win::{formats, get_clipboard, register_format};
+    if let Some(png) = register_format("PNG") {
+        if let Ok(data) = get_clipboard::<Vec<u8>, _>(formats::RawData(png.get())) {
+            if !data.is_empty() {
+                return Some(data);
+            }
+        }
+    }
+    let bmp: Vec<u8> = get_clipboard(formats::Bitmap).ok()?;
+    let img = image::load_from_memory_with_format(&bmp, image::ImageFormat::Bmp).ok()?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    Some(out.into_inner())
 }
 
 // 수동 실측용 스모크(클립보드 상태 의존이라 CI 부적합 — 항상 ignored).

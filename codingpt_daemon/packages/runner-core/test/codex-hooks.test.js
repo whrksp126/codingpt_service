@@ -40,7 +40,15 @@ test('병합: 기존(타 도구) 항목을 보존하고 우리 항목을 뒤에 
   const ours = JSON.stringify(j.hooks.PermissionRequest[1]);
   assert.ok(ours.includes(CODEX_HOOK_MARKER));
   assert.ok(ours.includes('CPT_SOCK'), '자기-스코핑 가드(CPT_SOCK)가 없으면 CodingPT 밖 codex 에서도 발화한다');
-  assert.ok(ours.includes('cat >/dev/null'), '가드형 폴백이 없으면 앱 제거 후 훅 에러가 남는다');
+  // 가드형 폴백 — 2026-08-10 Node 원라이너 치환(win32 에 sh 없음) 후에는 stdin 드레인 + exit 0 이 등가물.
+  assert.ok(ours.includes('stdin.resume'), '가드형 폴백(stdin 드레인)이 없으면 앱 제거/스코프 밖에서 훅이 매달린다');
+  assert.ok(ours.includes('existsSync'), 'cpt CLI 부재 가드가 없으면 앱 제거 후 훅 에러가 남는다');
+  // 셸 교집합 문법 계약 — -e 코드 안에 큰따옴표/$/% 가 들어가면 sh("…")/cmd("…") 인용이 깨진다.
+  const cmd = j.hooks.PermissionRequest[1].hooks[0].command;
+  const inner = cmd.split(' -e ')[1] || '';
+  const code = (inner.match(/^"([^"]*)"/) || [])[1] || '';
+  assert.ok(code.length > 0, '-e 코드가 큰따옴표 한 쌍으로 감싸여 있어야 한다');
+  assert.ok(!/[$%\\]/.test(code), '-e 코드에 $·%·역슬래시가 있으면 셸 교집합 문법이 깨진다');
   assert.deepStrictEqual(j.hooks.Stop, [ORCA_ENTRY], '다른 이벤트가 오염됐다');
 });
 

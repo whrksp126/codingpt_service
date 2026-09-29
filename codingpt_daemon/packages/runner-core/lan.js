@@ -170,11 +170,17 @@ function peerPolicy(remote, local, o = {}) {
 // 이 머신의 사설 주소 목록 — 리스너 바인드 대상 + back 에 알려줄 endpoint.
 //  loopback 은 **보고하지 않는다**(원격 뷰어가 127.0.0.1 로 시도하면 자기 자신에 연결해 반드시
 //  실패하고, 그 실패가 쿨다운을 태운다). 링크로컬도 기본 제외.
+//  가상 머신·컨테이너의 호스트 전용 NAT 인터페이스 — 밖의 뷰어는 절대 못 닿는 주소다(macOS Virtualization.framework
+//   는 VM 을 켤 때 bridge100(192.168.64.1) 을 만들고 끄면 지운다). 이걸 세면 **에이전트 PC 를 켜고 끌 때마다**
+//   "인터페이스 변경" 으로 lan_update 가 나가 폰이 붙어 있던 LAN 직결(영상 포함)을 끊었다(2026-09-20 실측).
+const VIRT_IF_RE = /^(bridge1\d\d|vmnet\d*|utun\d*|awdl\d*|llw\d*|docker\d*|veth|virbr|vboxnet|tailscale|zt)/i;
+function isVirtIf(name) { return VIRT_IF_RE.test(String(name || '')); }
 function localAddrs() {
   const out = [];
   let ifaces = {};
   try { ifaces = os.networkInterfaces() || {}; } catch (_) { return out; }
   for (const [ifname, list] of Object.entries(ifaces)) {
+    if (isVirtIf(ifname)) continue;
     for (const a of list || []) {
       if (!a || a.internal) continue;
       const c = classifyAddr(a.address);
@@ -1288,6 +1294,6 @@ module.exports = {
   // 내부(테스트/진단 노출)
   NO_TRAFFIC_TTL_MS,
   PROTO, T_CTRL, T_DATA, T_TEXT, T_CLOSE, T_PING, T_PONG, MAX_FRAME,
-  encodeFrame, encodeCtrl, createFramer, classifyAddr, peerPolicy, macFor, srvMacFor,
+  encodeFrame, encodeCtrl, createFramer, classifyAddr, peerPolicy, macFor, srvMacFor, isVirtIf, localAddrs, addrsKey,
   lanStateFile, __setNow, __resetLimits,
 };

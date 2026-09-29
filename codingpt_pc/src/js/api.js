@@ -51,6 +51,7 @@ export const api = {
   pathExists: (rel) => invoke("path_exists", { rel }),
   // 웹 로그인 URL(프론트 /desktop-login?code=) — Rust 가 서버에서 프론트 주소 파생.
   desktopLoginUrl: (code) => invoke("desktop_login_url", { code }),
+  frontBase: () => invoke("front_base_url"), // 공개 사이트(다운로드 안내에서 연다)
   // 워크스페이스 세션 상태(이어받기) — 열린 터미널/IDE/프리뷰 + 레이아웃.
   fetchWsSession: (wsId) => invoke("fetch_ws_session", { wsId }),
   saveWsSession: (wsId, session) => invoke("save_ws_session", { wsId, session }),
@@ -67,12 +68,21 @@ export const api = {
   remoteWsCreate: (path, hostDeviceId) => invoke("remote_ws_create", { path: path || "", hostDeviceId: hostDeviceId ?? null }),
 
   // ── 로컬 터미널 pane (tmux) ──
-  ptyOpen: (paneId, localPath, winIndex, cols, rows) =>
-    invoke("pty_open", { paneId, localPath, winIndex, cols, rows }),
+  // replace=true(탭 전환): 같은 pane 의 기존 attach 를 Rust 가 원자적으로 교체 — JS 가 pty_close
+  //  완료를 기다렸다 여는 직렬 2왕복(전환 지연)을 없앤다.
+  ptyOpen: (paneId, localPath, winIndex, cols, rows, replace) =>
+    invoke("pty_open", { paneId, localPath, winIndex, cols, rows, replace: !!replace }),
   ptyWrite: (paneId, data) => invoke("pty_write", { paneId, data }),
+  // 스크롤 라우팅 모드(tmux 정본) — {altScreen, mouseTracking}. win32/미지원이면 {}.
+  ptyModes: (paneId) => invoke("pty_modes", { paneId }),
+  // 과거(스크롤백) 한 페이지 — 정본은 tmux history 다(클라이언트 xterm 스크롤백이 아니라).
+  //  계약은 원격(데몬 v2 `{type:'history'}`)과 **같은 모양**: {start,end,total,hasMore,rows[]}.
+  ptyHistory: (paneId, before, limit) => invoke("pty_history", { paneId, before: before ?? null, limit: limit ?? null }),
+  // v3: PC 로컬 터미널도 데몬(정본)에 WS 로 붙는다 — 루프백 {port, token, client, device_name}.
+  terminalLocalEndpoint: () => invoke("terminal_local_endpoint"),
   ptyResize: (paneId, cols, rows) => invoke("pty_resize", { paneId, cols, rows }),
   // 크기 주장 — 창이 다른 기기 크기면 클라이언트 nudge 로 latest 획득(이미 내 크기면 no-op).
-  ptyClaim: (paneId) => invoke("pty_claim", { paneId }),
+  ptyClaim: (paneId, sync = false) => invoke("pty_claim", { paneId, sync }),
   // 채널 실제 생존 여부 — 리컨실러 워치독이 스테일 낙관 상태를 바로잡는 진실 원천.
   ptyAlive: (paneId) => invoke("pty_alive", { paneId }),
   // 진단 로그(stderr) — 터미널 탭 소거/편입 등 상태 변화 사후 추적용.
@@ -141,7 +151,7 @@ export const api = {
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
   notifPermissionState: () => invoke("notification_permission_state"), // 요청 없이 현재 OS 권한만 조회
   openNotificationSettings: () => invoke("open_notification_settings"), // macOS CodingPT 알림 설정
-  probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents → 허용 여부(최초엔 macOS 팝업)
+  probeFolder: (folder) => invoke("probe_folder_access", { folder }), // downloads|desktop|documents|icloud|media → 허용 여부(최초엔 macOS 팝업)
   openFilesPrivacy: () => invoke("open_files_privacy_settings"), // '파일 및 폴더' 설정(거부 복구용)
 
   // ── 프리뷰(네이티브 임베디드 webview) ──
@@ -161,6 +171,9 @@ export const api = {
   previewSetCookies: (paneId, cookiesJson) => invoke("preview_set_cookies", { pane: paneId, cookiesJson }),
   onPreviewLoaded: (cb) => listen("preview-loaded", (e) => cb(e.payload)),
   previewClose: (paneId) => invoke("preview_close", { paneId }),
+  // win32: 휠은 커서 아래 오버레이가 아니라 포커스된 앱 WebView2로 배달된다.
+  // DOM preview-host가 받은 delta를 네이티브 CompositionController로 전달한다(mac은 호출 안 함).
+  previewWheel: (paneId, dx, dy) => invoke("preview_wheel", { pane: paneId, dx, dy }),
   // 데브툴 디바이스 툴바 — 페이지 줌(WKWebView pageZoom). 1=복원.
   previewZoom: (paneId, zoom) => invoke("preview_zoom", { pane: paneId, zoom }),
 
@@ -258,6 +271,24 @@ export const api = {
   //  라이브 화면(H.264) — 데몬이 로컬 WebSocket 주소를 돌려주고, 웹뷰가 거기에 직접 붙는다.
   //   프레임을 이 invoke 통로로 실어 나르지 않는 이유: 초당 20~30개의 바이너리를 요청/응답
   //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
+  //  에이전트 PC(macOS·Linux 게스트) — 같은 소켓. os 로 어느 VM 인지 고른다(둘 다 동시 실행). 화면·입력은 emulator.* 에 id `desktop:<os>`.
+  desktopStatus: (os) => invoke("emulator_local", { cmd: "desktop.status", args: { os } }),
+  // 공유 표면(프리뷰·IDE·모바일 화면) — 어느 기기에서 열면 전부에(2026-09-20). cwd = 워크스페이스 localPath.
+  surfaceList: (cwd) => invoke("surface_local", { cmd: "surface.list", args: { cwd } }),
+  surfaceAdd: (cwd, item) => invoke("surface_local", { cmd: "surface.add", args: { cwd, ...item } }),
+  surfaceUpdate: (cwd, item) => invoke("surface_local", { cmd: "surface.update", args: { cwd, ...item } }),
+  surfaceRemove: (cwd, id) => invoke("surface_local", { cmd: "surface.remove", args: { cwd, id } }),
+  desktopPause: (on, os) => invoke("emulator_local", { cmd: on ? "desktop.pause" : "desktop.resume", args: { os } }),
+  desktopSettings: (os) => invoke("emulator_local", { cmd: "desktop.settings.get", args: { os } }),
+  desktopSettingsSet: (patch, os) => invoke("emulator_local", { cmd: "desktop.settings.set", args: { ...(patch || {}), os } }),
+  desktopPull: (os) => invoke("emulator_local", { cmd: "desktop.pull", args: { os } }),
+  desktopStart: (os) => invoke("emulator_local", { cmd: "desktop.start", args: { os } }),
+  desktopStop: (os) => invoke("emulator_local", { cmd: "desktop.stop", args: { os } }),
+  desktopDelete: (os) => invoke("emulator_local", { cmd: "desktop.delete", args: { os } }),
+  desktopSnapshots: (os) => invoke("emulator_local", { cmd: "desktop.snapshots", args: { os } }),
+  desktopSnapshot: (label, os) => invoke("emulator_local", { cmd: "desktop.snapshot", args: { label: label || "", os } }),
+  desktopRestore: (name, os) => invoke("emulator_local", { cmd: "desktop.restore", args: { name, os } }),
+  desktopSnapshotDelete: (name, os) => invoke("emulator_local", { cmd: "desktop.snapshot.delete", args: { name, os } }),
   emulatorStreamStart: (id, opts) =>
     invoke("emulator_local", { cmd: "emulator.stream.start", args: { id, ...(opts || {}) } }),
   emulatorStreamStop: (streamId) =>

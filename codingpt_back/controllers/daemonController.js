@@ -1137,8 +1137,50 @@ async function emulatorPower(req, res) {
   try {
     const b = req.body || {};
     const method = b.action === 'shutdown' ? 'emulator.shutdown' : 'emulator.boot';
+    //  에이전트 PC(desktop:) 첫 켜기는 설정+재시작이 붙어 2~3분까지 간다(시뮬레이터 70초보다 길다).
+    const isDesktop = String(b.id || '').startsWith('desktop:');
     const result = await daemonRelayService.callRpc(req.user.id, method,
-      { id: String(b.id || '') }, 70000, connOptsOf(req));
+      { id: String(b.id || '') }, isDesktop ? 200000 : 70000, connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+/**
+ * 에이전트 PC(desktop.*) — 폰이 상태를 보고 멈춤/재개/개입 [계속]/켜기·끄기 를 누른다. 허용 목록만(임의 RPC 통로 금지).
+ *  화면·입력은 emulator.* 를 그대로 탄다(기기 id `desktop:main`).
+ */
+const DESKTOP_RPC_OK = new Map([
+  ['desktop.status', 20000], ['desktop.pause', 20000], ['desktop.resume', 20000],
+  ['desktop.start', 200000], ['desktop.stop', 60000],
+  //  폰에서 에이전트 PC 설정(게스트 OS·자원·삭제). settings.set 만 params 를 쓴다(나머지는 params 무시).
+  ['desktop.settings.get', 20000], ['desktop.settings.set', 20000], ['desktop.delete', 60000],
+]);
+//  settings.set 이외의 메서드는 임의 params 를 데몬에 흘리지 않는다(통로 오남용 방지) — 화이트리스트만.
+const DESKTOP_PARAM_OK = new Set(['osKind', 'memGB', 'cpu', 'idleOffMin', 'sharedDirs']);
+async function desktopRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!DESKTOP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    //  os 로 어느 게스트 VM(macOS·Linux, 동시 실행)인지 고른다 — 데몬 handle 이 params.os 로 라우팅.
+    const params = {};
+    if (b.os === 'macos' || b.os === 'linux') params.os = b.os;
+    if (method === 'desktop.settings.set' && b.params && typeof b.params === 'object') {
+      for (const k of Object.keys(b.params)) if (DESKTOP_PARAM_OK.has(k)) params[k] = b.params[k];
+    }
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, DESKTOP_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) { return mapRpcError(res, e); }
+}
+// POST /api/daemon/surface  body:{ method, params, hostDeviceId } — 공유 표면(프리뷰·IDE·모바일 화면) 목록/등록/해제.
+//  폰이 봉인 RPC(E2EE)를 못 쓸 때의 평문 폴백. 데몬 surfaces.js 가 검증한다(여기선 메서드만 가른다).
+const SURFACE_RPC_OK = new Set(['surface.list', 'surface.add', 'surface.update', 'surface.remove']);
+async function surfaceRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!SURFACE_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, 15000, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
@@ -1827,6 +1869,8 @@ module.exports = {
   emulatorInput,
   emulatorPower,
   emulatorOpenUrl,
+  desktopRpc,
+  surfaceRpc,
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,
   createPairCode, createPairSession, approvePairSession, pairGrant, claimPairCode, registerController, getStatus, revokeDevice, renameOwnDevice, activateRunner, ensureCloudRunner, startTerminal, uiTicket, uiClients, pcUpdate,

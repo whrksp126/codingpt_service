@@ -18,6 +18,22 @@ import * as i18n from './i18n/index.js';
 //
 // seq = 라인오프셋*1000+블록인덱스 (단조 증가·멱등 워터마크). 이 값을 DOM key 로 쓴다.
 
+// ── 채팅 모드 = 베타 기능(2026-08-14 사용자 확정) ─────────────────────────────
+//  "chatui 를 베타로 빼는 게 안전할 것 같다" → 기본 **꺼짐**, 설정에서 켠다.
+//  · 저장은 기기 로컬(localStorage) — 알림음과 같은 성격(그 기기에서 어떻게 볼지)이라 계정/서버가
+//    아니다. 키 이름은 앱 AsyncStorage 키와 **같은 문자열**을 쓴다(두 플랫폼이 같은 이름을 쓰면
+//    "폰에선 켰는데 PC 는 왜?" 를 이야기할 때 서로 같은 것을 가리킨다).
+//  · 꺼져 있으면 pane 토글이 숨고 채팅 본문도 안 뜬다. 단 **탭의 mode 는 지우지 않는다** —
+//    다시 켜면 보던 탭이 그대로 채팅으로 돌아온다(사용자 상태를 설정 하나로 파괴하지 않는다).
+export const CHAT_BETA_KEY = "cpt.chatBeta.v1";
+export function chatBetaEnabled() {
+  try { return localStorage.getItem(CHAT_BETA_KEY) === "1"; } catch (_) { return false; }
+}
+export function setChatBetaEnabled(on) {
+  try { localStorage.setItem(CHAT_BETA_KEY, on ? "1" : "0"); } catch (_) {}
+  return !!on;
+}
+
 // ── 임계값(양 플랫폼 동일하게 유지) ──
 export const CHAT = {
   SNAPSHOT_LIMIT: 200,     // chat.open limit
@@ -152,7 +168,8 @@ export function mediaRefOf(target) {
   const url = /^(https?:)?\/\//i.test(raw) || raw.startsWith("data:");
   // 쿼리/해시를 뺀 뒤 확장자를 본다(URL 에 ?v=1 이 붙는 경우).
   const clean = raw.split(/[?#]/)[0];
-  const base = clean.replace(/\/+$/, "").split("/").pop() || clean;
+  // 구분자 `/`·`\` 양쪽 인식(win32 경로) — URL 엔 `\` 가 없어 종전 판정과 동일하다.
+  const base = clean.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || clean;
   const ext = (base.includes(".") ? base.split(".").pop() : "").toLowerCase();
   const kind = MEDIA_EXT.image.includes(ext) ? "image" : MEDIA_EXT.video.includes(ext) ? "video" : "file";
   return { via: url ? "url" : "path", kind, name: base || raw, ext, target: raw };

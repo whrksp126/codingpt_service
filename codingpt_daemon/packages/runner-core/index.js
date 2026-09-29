@@ -18,6 +18,7 @@ module.exports = {
   forward: require('./forward'), // 보는 기기 쪽 로컬 포트 포워더(원격 프리뷰 localhost 미러)
   freshness: require('./freshness'),
   workspace: require('./workspace'),
+  terminalLocal: require('./terminal-local'), // PC 앱용 v3 터미널 루프백 리스너(docs/terminal-v3-design.md)
   cptServer: require('./cpt-server'), // cpt CLI 컨트롤 소켓(터미널 안 AI 의 서비스 조작 진입점)
   skills: require('./skills'),        // cpt 스킬 스텁 설치(claude 가 cpt 를 인지하게)
 };

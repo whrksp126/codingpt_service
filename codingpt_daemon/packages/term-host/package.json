@@ -1,0 +1,22 @@
+{
+  "name": "@codingpt/term-host",
+  "version": "0.1.0",
+  "description": "CodingPT 세션 호스트 — tmux 서버의 Windows 등가물(상주 프로세스, ConPTY + 헤드리스 스크린 버퍼)",
+  "main": "index.js",
+  "bin": {
+    "cpt-term-host": "index.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@xterm/addon-serialize": "^0.13.0",
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.0.0"
+  }
+}

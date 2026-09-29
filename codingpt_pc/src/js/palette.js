@@ -21,6 +21,7 @@ import { commandsFor, formatCombo } from "./commands.js";
 import { bindings, IS_APPLE } from "./shortcuts.js";
 import { isAvailable, runCommand } from "./command-run.js";
 import * as M from "./palette-match.js";
+import { basename, dirname } from "./path-utils.js";
 import { openSurfaces, activateSurface, openFileSmart } from "./workspace-view.js";
 
 const TX = () => tx(PALETTE_TEXT);
@@ -118,8 +119,8 @@ function fileRows(files, term) {
     key: "file:" + p,
     section: T.secFiles,
     icon: icons.file ? icons.file({ size: 15 }) : icons.code({ size: 15 }),
-    label: p.split("/").pop(),
-    sub: p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "",
+    label: basename(p), // `/`·`\` 양쪽 인식(win32 경로) — `/` 경로는 종전과 동일
+    sub: dirname(p),
     path: p,
     run: () => openFileSmart(p),
   }));
