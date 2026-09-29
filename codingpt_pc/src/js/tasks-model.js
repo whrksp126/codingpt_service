@@ -65,6 +65,12 @@ export function needsInputReason(row) {
   else if (live && WAIT_LIVE.includes(live.state)) return live.state;
   if (row.approvals.length > 0) return "approval";
   if (run && row.task && row.task.state === "merged" && run.id !== row.task.winnerRunId) return "keptDirty";
+  // PR 후속(automation-design §4.2·§8.1) — 에이전트가 이미 고치는 중(라이브 working)이면 사유가 아니다.
+  const fu = run && run.followup;
+  if (fu && !(live && live.state === "working")) {
+    if (fu.ci && fu.ci.status === "failing" && !fu.ci.dismissedAt) return "ciFailed";
+    if (fu.reviews && Array.isArray(fu.reviews.pending) && fu.reviews.pending.length > 0 && !fu.reviews.dismissedAt) return "reviewComments";
+  }
   if (run && run.lastOp && run.lastOp.ok === false) return "opFailed";
   return null;
 }
@@ -225,7 +231,11 @@ export function buildDashboard(input) {
     }
     // 기다린 시각 — 승인 createdAt → live.since → run.updatedAt → live.at(스냅만 있는 행).
     const ap = approvalAt.get(r.k);
-    r.waitSince = ap != null && ap !== Infinity ? ap
+    //  PR 후속 사유는 "감지된 시각" 부터 기다린 것이다(§8.1) — live.since·run.updatedAt 이 아니다.
+    const fu = r.run && r.run.followup;
+    r.waitSince = r.reason === "ciFailed" ? num(fu.ci.detectedAt, num(r.run.updatedAt))
+      : r.reason === "reviewComments" ? num(fu.reviews.detectedAt, num(r.run.updatedAt))
+      : ap != null && ap !== Infinity ? ap
       : r.live && r.live.since != null ? r.live.since
       : r.run ? num(r.run.updatedAt)
       : r.live ? r.live.at : 0;

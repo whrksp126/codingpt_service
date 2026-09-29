@@ -234,5 +234,19 @@ ok(paletteRows.length >= 12, `팔레트에 실제로 보이는 명령이 ${palet
   }
 }
 
+// ── 6. 자동화 번들 명령(automation-design §5.9·부록 Z-16) — 두 표에 같은 줄, 기본 조합은 충돌 대안 Mod+Alt+U/I ─────
+{
+  const pcRow = (id) => pcCmd.all.find((r) => r[0] === id);
+  const d = pcText.PALETTE_TEXT.ko.cmd;
+  ok(JSON.stringify(pcRow('automations.open')) === JSON.stringify(['automations.open', 'Mod+Alt+U', 'global', 'view', true, true, true]),
+    'PC 표 automations.open(⌘⌥U, 전역, 양 플랫폼)', JSON.stringify(pcRow('automations.open')));
+  ok(JSON.stringify(pcRow('dispatch.open')) === JSON.stringify(['dispatch.open', 'Mod+Alt+I', 'global', 'add', true, true, true]),
+    'PC 표 dispatch.open(⌘⌥I, 전역, 양 플랫폼)', JSON.stringify(pcRow('dispatch.open')));
+  ok(d['automations.open'] === '자동화' && d['dispatch.open'] === '한 줄 지시', '팔레트 라벨 = §11(자동화 · 한 줄 지시)');
+  const combos = Object.values(pcCmd.defaults).filter(Boolean);
+  ok(combos.filter((c) => c === 'Mod+Alt+U').length === 1 && combos.filter((c) => c === 'Mod+Alt+I').length === 1
+    && combos.filter((c) => c === 'Mod+Shift+U').length === 1, '⌘⌥U · ⌘⌥I 가 겹치지 않고, ⌘⇧U 는 여전히 알림 한 곳');
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

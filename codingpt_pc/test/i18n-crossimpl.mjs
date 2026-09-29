@@ -148,5 +148,23 @@ ok(leftovers.length === 0, 'text/* 사전에 en 반쪽이 남아 있지 않다',
   ok(lits.size > 0 && missLit.length === 0, `작업 화면의 재사용 문구 ${lits.size}개가 7개 카탈로그에 있다`, missLit.join(' | '));
 }
 
+// ── 6. 자동화 번들 문구(automation-design §11) — AUTO_TEXT 원문과 새 화면의 재사용 문구가 7개 카탈로그에 있다 ─────
+{
+  const AX = await import(path.join(PC, 'text/automations.js'));
+  const src = Object.values(AX.AUTO_TEXT.ko).filter((v) => /[가-힣]/.test(v));
+  for (const lang of LANGS) {
+    const miss = src.filter((k) => !pcCat[lang][k]);
+    ok(miss.length === 0, `§11 자동화 문구 ${src.length}개가 PC ${lang} 카탈로그에 있고 비어 있지 않다`, miss.slice(0, 4).join(' | '));
+  }
+  const files = ['automations-view.js', 'dispatch-sheet.js', 'power-settings.js'];
+  const lits = new Set();
+  for (const f of files) {
+    const code = fs.readFileSync(path.join(PC, f), 'utf8');
+    for (const m of code.matchAll(/i18n\.t\((["'])((?:(?!\1).)+)\1/g)) lits.add(m[2]);
+  }
+  const missLit = [...lits].filter((k) => LANGS.some((l) => !pcCat[l][k]));
+  ok(missLit.length === 0, `자동화 화면이 직접 부르는 i18n.t 원문 ${lits.size}개가 7개 카탈로그에 있다`, missLit.join(' | '));
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

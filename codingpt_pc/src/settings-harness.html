@@ -20,7 +20,14 @@
     app_version: '0.1.236',
   };
   window.__TAURI__ = {
-    core: { invoke: async (cmd) => (cmd in ANSWERS ? ANSWERS[cmd] : {}) },
+    core: { invoke: async (cmd, args) => {
+      // 자동화 번들 — PC 깨어 있기 카드(power.status/set, automation-design §6.6). `#nosetup` = 1회 설정 전, `#battery` = 배터리.
+      if (cmd === 'auto_local' && args.cmd === 'power.status') return {
+        supported: true, keepAwake: true, lidClosed: !location.hash.includes('nosetup'), setup: location.hash.includes('nosetup') ? 'none' : 'done',
+        setupError: null, active: true, reasons: ['task:t_1', 'task:t_2'], layers: { caffeinate: true, disableSleep: !location.hash.includes('battery') },
+        power: location.hash.includes('battery') ? 'battery' : 'ac', lidBlocked: location.hash.includes('battery') ? 'battery' : null, lastError: null };
+      return cmd in ANSWERS ? ANSWERS[cmd] : {};
+    } },
     event: { listen: async () => () => {} },
   };
   const { mountSettings, updateSettings } = await import('./js/settings.js');

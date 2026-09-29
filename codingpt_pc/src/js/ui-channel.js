@@ -46,7 +46,27 @@ export function startUiChannel() {
   bindActivityReport();
   bindPreviewFocus(); // R4 — 프리뷰 native webview 내부 클릭 시 그 pane/탭 포커스
   startLocalUiChannel(); // 같은 기기(사이드카 데몬) 직결 — back 왕복 없는 ui_command 경로
+  wirePower();          // 잠자기/깨어남(NSWorkspace) → 데몬 power.event(automation-design §6.5)
   connect();
+}
+
+// ── 잠자기/깨어남(automation-design §6.5) ─────────────────────────────────────────
+//  power.rs 옵저버가 `cpt-power {kind}` 를 쏜다. willSleep → 데몬 power.event(작업 중이면 폰에 pc_sleeping 푸시,
+//  best effort). didWake → 같은 통지 + 전부 다시 받기(잠든 사이 바뀐 작업·자동화·caps).
+let _powerWired = false;
+export function wirePower() {
+  if (_powerWired) return;
+  _powerWired = true;
+  Promise.resolve(api.onPower((p) => {
+    const kind = p && p.kind;
+    if (kind !== "willSleep" && kind !== "didWake") return;
+    import("./automations-api.js").then((m) => m.powerEvent(kind)).catch(() => {});
+    if (kind === "didWake") {
+      import("./tasks-api.js").then((m) => m.refreshHostCaps()).catch(() => {});
+      import("./tasks-view.js").then((m) => m.refreshAll()).catch(() => {});
+      import("./automations-view.js").then((m) => m.refreshAutomations()).catch(() => {});
+    }
+  })).catch(() => { /* 이벤트 API 미가용 */ });
 }
 
 // ── 로컬 UI 채널 — 같은 기기 왕복 제거 ─────────────────────────────────────────
@@ -257,6 +277,11 @@ async function connect() {
         // Agent Tasks — runner_status 에는 caps 가 없다 → online 전이마다 GET /status 로 hostCaps 재조회(§2.3),
         //  현황판이 보이는 중이면 그 PC 의 task.list 도 즉시 다시 받는다(§3.4 클라 폴링 보강).
         import("./tasks-api.js").then((m) => m.noteRunnerStatus(msg.event)).catch(() => {});
+        // 깨어 있음(busy/awake 불리언, automation-design §6.6·§7.2) — PC 행·장소 헤더의 sun 글리프.
+        import("./automations-api.js").then((m) => { if (m.noteRunnerAwake(msg.event)) S.emit(); }).catch(() => {});
+        if (msg.event && msg.event.online !== false && state.view === "automations") {
+          import("./automations-view.js").then((m) => m.onAutomationsChanged({ host: msg.event.deviceId, reason: "reconciled" })).catch(() => {});
+        }
         if (msg.event && msg.event.online !== false && state.view === "tasks") {
           import("./tasks-view.js").then((m) => m.onTasksChanged({ host: msg.event.deviceId, reason: "reconciled" })).catch(() => {});
         }
@@ -1054,6 +1079,26 @@ const handlers = {
   "tasks.changed": async (p) => {
     const m = await import("./tasks-view.js");
     m.onTasksChanged(p || {});
+    return { ok: true };
+  },
+
+  // 자동화 번들 변경 통지(automation-design §2.3) — 데몬 broadcast. 전부 반드시 ok 로 회신(executor 무응답 = UI_TIMEOUT).
+  //  automations.changed {host, ids, reason} → 그 host 의 auto.list(300ms 디바운스, 상세가 보는 항목이면 auto.get 도).
+  "automations.changed": async (p) => {
+    const m = await import("./automations-view.js");
+    m.onAutomationsChanged(p || {});
+    return { ok: true };
+  },
+  //  dispatch.changed {host, planId} → 열린 한 줄 지시 시트가 그 계획을 즉시 다시 받는다(2초 폴링을 기다리지 않는다).
+  "dispatch.changed": async (p) => {
+    const m = await import("./dispatch-sheet.js");
+    m.onDispatchChanged(p || {});
+    return { ok: true };
+  },
+  //  power.changed {host} → 그 PC 의 깨어 있기 카드(설정·PC 설정 시트)를 다시 받는다.
+  "power.changed": async (p) => {
+    const m = await import("./power-settings.js");
+    m.onPowerChanged(p || {});
     return { ok: true };
   },
 

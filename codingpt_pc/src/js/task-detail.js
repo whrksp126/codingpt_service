@@ -302,6 +302,10 @@ function renderSelectedRun(host, hostId, task, run) {
   if (run.pr) prBox.append(prBlock(run.pr));
   if (prBox.childElementCount) wrap.append(prBox);
 
+  // ── PR 후속(automation-design §4) — CI 실패·새 리뷰 코멘트 + [고치기][무시][PR 열기] ──
+  //  에이전트가 이미 고치는 중(라이브 working)이면 보이지 않는다(카드 사유와 같은 규칙, §4.2).
+  if (!closed && V.followupWhat(run) && !(live && live.state === "working")) wrap.append(followupBlock(hostId, task, run));
+
   // ── op 상태 줄 ──
   const st = ops.get(run.id);
   if (st && st.busy) wrap.append(opLine(hostId, task, run, st.busy));
@@ -366,6 +370,53 @@ function renderSelectedRun(host, hostId, task, run) {
   // ── diff 리뷰 ──
   if (!closed) wrap.append(reviewArea(hostId, task, run));
   host.append(wrap);
+}
+
+function followupBlock(hostId, task, run) {
+  const fu = run.followup || {};
+  const b = document.createElement("div");
+  b.className = "td-prblock td-followup";
+  const ci = fu.ci && fu.ci.status === "failing" && !fu.ci.dismissedAt ? fu.ci : null;
+  const rv = fu.reviews && (fu.reviews.pending || []).length && !fu.reviews.dismissedAt ? fu.reviews : null;
+  if (ci) {
+    const h = document.createElement("div");
+    h.className = "td-fu-head";
+    h.innerHTML = `<span class="tv-dot error"></span><span>${esc(tt("ciFailedLine", { n: V.ciFailedCount(run) }))}</span>`;
+    b.append(h);
+    const ul = document.createElement("div");
+    ul.className = "td-checks";
+    for (const f of (ci.failed || []).slice(0, 10)) {
+      const row = document.createElement("div");
+      row.className = "td-check" + (f.url ? " td-link-row" : "");
+      row.innerHTML = `<span class="td-check-nm">${esc(f.name)}</span>`;
+      if (f.url) row.addEventListener("click", () => api.openExternal(f.url).catch(() => {}));
+      ul.append(row);
+    }
+    if (ul.childElementCount) b.append(ul);
+  }
+  if (rv) {
+    const h = document.createElement("div");
+    h.className = "td-fu-head";
+    h.innerHTML = `<span class="tv-dot warn"></span><span>${esc(tt("reviewCommentsLine", { n: V.reviewCount(run) }))}</span>`;
+    b.append(h);
+    const ul = document.createElement("div");
+    ul.className = "td-fu-comments";
+    for (const c of (rv.pending || []).slice(0, 30)) {
+      const row = document.createElement("div");
+      row.className = "td-fu-comment" + (c.url ? " td-link-row" : "");
+      const where = c.path ? `${c.path}${c.line ? ":" + c.line : ""}` : c.state || c.kind || "";
+      row.innerHTML = `<div class="td-fu-meta"><span class="td-fu-author">@${esc(c.author)}</span>${where ? `<span class="mono">${esc(where)}</span>` : ""}</div>`
+        + `<div class="td-fu-body">${esc(c.bodyHead || "")}</div>`;
+      if (c.url) row.addEventListener("click", () => api.openExternal(c.url).catch(() => {}));
+      ul.append(row);
+    }
+    b.append(ul);
+  }
+  const acts = document.createElement("div");
+  acts.className = "td-actions";
+  for (const x of V.followupActions(hostId, task, run)) acts.append(x);
+  if (acts.childElementCount) b.append(acts);
+  return b;
 }
 
 function hint(title, sub) {

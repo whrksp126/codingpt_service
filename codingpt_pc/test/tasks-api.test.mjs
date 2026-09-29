@@ -149,8 +149,10 @@ for (const [err, want, retries, label] of [
     "task.run.reopen": 15000, "task.diff": 30000, "task.discard": 15000, "task.delete": 15000,
     "git.branches": 15000, "git.status": 15000, "git.commit": 15000, "git.push": 15000,
     "git.pr.create": 15000, "git.pr.status": 30000, "git.pr.merge": 15000, "git.merge.local": 15000, "git.gh.status": 15000,
+    // automation-design §4.3·§7.1 — PR 후속 2줄(TASK_RPC_OK 추가 전용)
+    "task.run.fix": 15000, "task.run.followup.dismiss": 15000,
   };
-  ok(JSON.stringify(TASK_TIMEOUTS) === JSON.stringify(DOC), "PC 타임아웃 표 = 설계 §3.3 allow-list(18개)");
+  ok(JSON.stringify(TASK_TIMEOUTS) === JSON.stringify(DOC), "PC 타임아웃 표 = 설계 §3.3 allow-list(18개) + 자동화 §7.1 2개");
   ok([...TASK_READS].every((m) => DOC[m] != null) && !TASK_READS.has("git.pr.merge") && !TASK_READS.has("task.create"),
     "읽기 목록(재시도 허용)에 변이가 섞이지 않는다");
   ok(["E2EE_RELAY_FAILED", "E2EE_EPOCH_MISMATCH", "E2EE_DECRYPT_FAILED", "TIMEOUT", ""].every((c) => !SEALED_FALLBACK_CODES.has(c)),

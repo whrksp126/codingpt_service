@@ -18,6 +18,9 @@ import { icons, agentMarkHtml, iconBtn } from "./icons.js";
 import { buildDashboard, GROUPS, isTaskWorkspace, scopeToHost, needsInputByHost } from "./tasks-model.js";
 import { taskRpc, refreshHostCaps, hostHasTasks, serverHasTasks, onCapsChanged, newOpId, isLocalHostId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
+import { at } from "./text/automations.js";
+import { hostHasAuto, hostHasDispatch, hostAwake } from "./automations-api.js";
+import { api } from "./api.js";
 import * as i18n from "./i18n/index.js";
 
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
@@ -185,9 +188,12 @@ export function openTasksDashboard(opts) {
   const o = opts || {};
   if (o.taskId) sel = { host: o.host != null ? Number(o.host) : guessHost(o.taskId), taskId: o.taskId, runId: o.runId || null };
   // 알림·딥링크가 다른 PC 의 작업을 가리키면 그 PC 로 옮긴다(현황판은 PC 안의 장소). setActiveDevice 는
-  //  워크스페이스로 이동시키므로 그 뒤에 view 를 다시 세운다.
-  if (sel && sel.host && Number(sel.host) !== Number(S.activeDeviceId()) && S.pcDevices().some((d) => Number(d.id) === Number(sel.host))) {
-    S.setActiveDevice(sel.host);
+  //  워크스페이스로 이동시키므로 그 뒤에 view 를 다시 세운다. host 만 온 경우(pc_sleeping·pc_disconnected 딥링크
+  //  `codingpt://tasks?host=`)도 그 PC 로 옮긴다.
+  const want = sel && sel.host ? Number(sel.host) : !o.taskId && o.host != null && o.host !== "" ? Number(o.host) : null;
+  if (want && want !== Number(S.activeDeviceId()) && S.pcDevices().some((d) => Number(d.id) === want)) {
+    if (!o.taskId) sel = null;
+    S.setActiveDevice(want);
   }
   S.setView("tasks");
   void refreshHostCaps();
@@ -330,14 +336,16 @@ export function updateTasksView() {
   const dash = scopedDashboard();
   const wide = el.clientWidth >= 1100;
   const now = Date.now();
-  const frameSig = JSON.stringify([wide, !!sel, state.sidebarCollapsed, actH, activeDeviceName()]);
+  const frameSig = JSON.stringify([wide, !!sel, state.sidebarCollapsed, actH, activeDeviceName(), hostAwake(actH), canDispatch()]);
   const lSig = JSON.stringify([
-    wide, sel, focusK, [...collapsed], serverHasTasks(), queryHosts(),
+    wide, sel, focusK, [...collapsed], serverHasTasks(), queryHosts(), [...fixing],
+    queryHosts().map((h) => [h, hostHasAuto(h)]),
     GROUPS.map((g) => dash.groups[g].map((r) => [r.k, r.group, r.reason, r.live && r.live.state, r.approvals.length, r.unread,
       r.run && [r.run.state, r.run.op && r.run.op.opId, r.run.lastOp && r.run.lastOp.opId, r.run.trustPending, r.run.agentGone, r.run.terminalAlive,
         r.run.diff && [r.run.diff.files, r.run.diff.additions, r.run.diff.deletions], r.run.commits && r.run.commits.ahead,
-        r.run.pr && [r.run.pr.number, r.run.pr.state, r.run.pr.isDraft, r.run.pr.mergeable, r.run.pr.checks && r.run.pr.checks.status]],
-      r.task && [r.task.state, r.task.title, r.task.winnerRunId],
+        r.run.pr && [r.run.pr.number, r.run.pr.state, r.run.pr.isDraft, r.run.pr.mergeable, r.run.pr.checks && r.run.pr.checks.status],
+        followupSig(r.run)],
+      r.task && [r.task.state, r.task.title, r.task.winnerRunId, r.task.origin && r.task.origin.automationId],
       // "{t} 대기" 는 입력 대기 행에만 보인다 — 다른 행은 분 단위로 다시 그릴 이유가 없다.
       r.group === "needs_input" ? Math.floor((now - r.waitSince) / 60000) : 0])),
     dash.offline, Object.entries(state.tasks.byHost).map(([h, v]) => [h, v.error && v.error.code, v.gh]),
@@ -413,21 +421,19 @@ function renderFrame(wide) {
     top.append(t);
     // 어느 PC 의 현황인지 — 제목 옆 흐린 글씨(워크스페이스 헤더의 호스트 표기와 같은 무게).
     const dn = activeDeviceName();
-    if (dn) {
-      const sub = document.createElement("span");
-      sub.className = "tv-host";
-      sub.textContent = dn;
-      top.append(sub);
-    }
+    // PC 이름(+ 깨어 있으면 sun 글리프) — 누르면 그 PC 의 `PC 설정`(깨어 있기, §6.6 · 앱 헤더와 같은 동작).
+    if (dn) top.append(pcNameButton(Number(S.activeDeviceId()), dn));
   }
   const sp = document.createElement("span");
   sp.className = "mt-spacer";
   top.append(sp);
   //  상단 동작은 아이콘(툴팁·aria 는 원문) — 텍스트 버튼은 한눈에 안 읽힌다(사용자 지시 2026-09-29).
+  //  [한 줄 지시](automation-design §3) — dispatch.v1 을 가진(모름 포함) 온라인 PC 가 있을 때만.
+  const oneB = canDispatch() ? iconBtn("zap", { cls: "tv-ic", size: 15, sw: 1.6, title: tt("oneLine"), onClick: () => openDispatch() }) : null;
   const newB = iconBtn("plus", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("newTask"), onClick: () => openNewTask() });
   const refB = iconBtn("refresh", { cls: "tv-ic", size: 16, sw: 1.6, title: tt("refresh"), onClick: () => { void refreshHostCaps(); void refreshAll(); } });
-  for (const b of [newB, refB]) b.setAttribute("aria-label", b.title);
-  top.append(newB, refB);
+  for (const b of [oneB, newB, refB].filter(Boolean)) b.setAttribute("aria-label", b.title);
+  top.append(...[oneB, newB, refB].filter(Boolean));
   el.append(top);
 
   const body = document.createElement("div");
@@ -554,6 +560,8 @@ export function statusOf(r) {
       case "terminalGone": return { line: tt("terminalGone"), dot: "warn" };
       case "agentGone": return { line: tt("agentGone"), dot: "warn" };
       case "keptDirty": return { line: tt("keptDirty"), dot: "warn" };
+      case "ciFailed": return { line: [tt("ciFailedLine", { n: ciFailedCount(run) }), run.pr && tt("prNumber", { n: run.pr.number })].filter(Boolean).join(" · "), dot: "error" };
+      case "reviewComments": return { line: [tt("reviewCommentsLine", { n: reviewCount(run) }), run.pr && tt("prNumber", { n: run.pr.number })].filter(Boolean).join(" · "), dot: "warn" };
       case "opFailed": return { line: errText(run.lastOp && run.lastOp.code), dot: "error" };
       default: return { line: wait, dot: "warn" };
     }
@@ -607,8 +615,11 @@ function card(r) {
   const st = statusOf(r);
   const who = r.kind === "task" ? (task.title || tt("title")) : agentName(r.agent || (r.live && r.live.agent));
   const logo = r.kind === "task" ? tasksIcon({ size: 15 }) : (agentMarkHtml(r.agent || (r.live && r.live.agent), { size: 15 }) || icons.terminal({ size: 15 }));
+  const autoId = task && task.origin && task.origin.kind === "automation" ? task.origin.automationId || null : null;
   c.innerHTML =
-    `<div class="tvc-head"><span class="tvc-logo">${logo}</span><span class="tvc-who">${esc(who)}</span>`
+    `<div class="tvc-head"><span class="tvc-logo">${logo}</span>`
+    + (autoId ? `<button class="wsg-fan au-chip" title="${esc(at("automations"))}">${esc(at("autoBadge"))}</button>` : "")
+    + `<span class="tvc-who">${esc(who)}</span>`
     + `<span class="tvc-where">${esc([pc && pc.name, r.kind === "task" ? null : where].filter(Boolean).join(" · "))}</span>`
     + (r.unread ? `<span class="wsr-badge">${r.unread}</span>` : "")
     + `</div>`
@@ -618,7 +629,10 @@ function card(r) {
   for (const b of cardActions(r)) acts.append(b);
   if (acts.childElementCount) c.append(acts);
   if (openAppr.has(r.k)) { if (r.approvals.length) c.append(approvalBox(r)); else openAppr.delete(r.k); }
-  c.addEventListener("click", () => select(r));
+  c.addEventListener("click", (e) => {
+    if (autoId && e.target.closest?.(".au-chip")) { e.stopPropagation(); openAutomationsFor(autoId, r.host); return; }
+    select(r);
+  });
   c.addEventListener("dblclick", () => openRow(r));
   return c;
 }
@@ -666,6 +680,10 @@ function cardActions(r) {
       case "opFailed":
         out.push(btn("tv-btn ghost", tt("confirm"), () => { dismissedOps.add(`${run.id}:${run.lastOp.opId}`); S.emit(); }));
         break;
+      case "ciFailed":
+      case "reviewComments":
+        for (const b of followupActions(host, task, run)) out.push(b);
+        break;
       default: break;
     }
     if (r.reason !== "terminalGone") out.push(term());
@@ -678,6 +696,97 @@ function cardActions(r) {
   }
   out.push(term());
   return out;
+}
+
+// ── PR 후속(automation-design §4) — [고치기] [무시] [PR 열기] ─────────────────────────
+const fixing = new Set(); // runId — 배달 op 대기 중(버튼을 "보내는 중…" 으로 잠근다)
+
+export function ciFailedCount(run) {
+  const ci = run && run.followup && run.followup.ci;
+  return ci && Array.isArray(ci.failed) && ci.failed.length ? ci.failed.length : 1;
+}
+export function reviewCount(run) {
+  const rv = run && run.followup && run.followup.reviews;
+  return rv ? ((rv.pending || []).length + (Number(rv.overflow) || 0)) : 0;
+}
+/** 보낼 대상 — CI 실패와 리뷰가 둘 다 살아 있으면 둘 다(what:'both'). */
+export function followupWhat(run) {
+  const fu = (run && run.followup) || {};
+  const ci = !!(fu.ci && fu.ci.status === "failing" && !fu.ci.dismissedAt);
+  const rv = !!(fu.reviews && (fu.reviews.pending || []).length && !fu.reviews.dismissedAt);
+  return ci && rv ? "both" : ci ? "ci" : rv ? "reviews" : null;
+}
+function followupSig(run) {
+  const fu = run && run.followup;
+  if (!fu) return null;
+  return [fu.ci && [fu.ci.status, fu.ci.dismissedAt, fu.ci.fixOpId, (fu.ci.failed || []).length],
+    fu.reviews && [(fu.reviews.pending || []).length, fu.reviews.overflow, fu.reviews.dismissedAt, fu.reviews.fixOpId]];
+}
+
+/** [고치기] — task.run.fix(op) → 배달 마감을 기다려 결과를 토스트로(§4.3). 카드·상세가 같이 쓴다. */
+export async function fixFollowup(host, task, run) {
+  const what = followupWhat(run);
+  if (!what || fixing.has(run.id)) return null;
+  const opId = newOpId();
+  fixing.add(run.id);
+  S.emit();
+  try {
+    await taskRpc("task.run.fix", { opId, taskId: task.id, runId: run.id, what }, host);
+  } catch (e) {
+    fixing.delete(run.id);
+    toast(errText(e && e.code));
+    void refreshHost(host);
+    S.emit();
+    return null;
+  }
+  void refreshHost(host);
+  const done = await waitOp(host, task.id, run.id, opId, 3 * 60 * 1000 + 15000);
+  fixing.delete(run.id);
+  const lo = done && done.lastOp;
+  if (lo && lo.ok === false) toast(errText(lo.code));
+  else if (lo) toast(tt("fixSent"));
+  void refreshHost(host);
+  S.emit();
+  return lo || null;
+}
+/** [무시] — task.run.followup.dismiss(동기). */
+export async function dismissFollowup(host, task, run) {
+  const what = followupWhat(run);
+  if (!what) return null;
+  return act(host, "task.run.followup.dismiss", { taskId: task.id, runId: run.id, what });
+}
+/** 카드·상세 공용 버튼 묶음 — auto.v1 이 **있다고 확인된** PC 만 [고치기][무시](구 데몬은 BAD_PARAMS, §2.3). */
+export function followupActions(host, task, run) {
+  const out = [];
+  if (hostHasAuto(host) === true) {
+    const busy = fixing.has(run.id);
+    out.push(btn("tv-btn", busy ? tt("fixing") : tt("fix"), () => fixFollowup(host, task, run), { disabled: busy || runLocked(run) }));
+    out.push(btn("tv-btn ghost", tt("ignore"), () => dismissFollowup(host, task, run), { disabled: busy }));
+  }
+  if (run.pr && run.pr.url) out.push(btn("tv-btn ghost", tt("openPr"), () => api.openExternal(run.pr.url).catch(() => {})));
+  return out;
+}
+const runLocked = (run) => !!(run && run.op != null);
+
+/** 장소 헤더의 PC 이름 버튼 — 누르면 PC 설정 시트, 깨어 있으면 이름 뒤 sun 글리프(무채색). 자동화 장소도 쓴다. */
+export function pcNameButton(host, name) {
+  const b = document.createElement("button");
+  b.className = "tv-host tv-host-btn";
+  b.title = at("pcSettings");
+  b.innerHTML = `<span>${esc(name)}</span>` + (hostAwake(host)
+    ? `<span class="au-awake" title="${esc(at("awakeNow"))}" aria-label="${esc(at("awakeNow"))}">${icons.sun({ size: 12 })}</span>` : "");
+  b.addEventListener("click", () => import("./power-settings.js").then((m) => m.openPcSettingsSheet(host)).catch(() => {}));
+  return b;
+}
+
+function canDispatch() {
+  return S.pcDevices().some((d) => d.online !== false && typeof d.id === "number" && hostHasDispatch(d.id) !== false);
+}
+function openDispatch() {
+  import("./dispatch-sheet.js").then((m) => m.openDispatchSheet()).catch(() => {});
+}
+function openAutomationsFor(id, host) {
+  import("./automations-view.js").then((m) => m.openAutomations({ id, host })).catch(() => {});
 }
 
 /** 승인 인라인 응답 — 알림 패널 행과 같은 모양·같은 순서(허용 → 묻지 않기 → 거절). 선택형은 터미널로. */

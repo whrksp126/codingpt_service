@@ -39,6 +39,7 @@ import { mountApprovals, updateApprovals } from "./approvals.js";
 import { maybeShowOnboarding } from "./agents-view.js";
 import { startUpdateScheduler, applyNow, deferApply } from "./update-scheduler.js";
 import { mountTasksView, updateTasksView, openTasksDashboard, closeTasksDashboard, openNewTask, startTasksBackground, toast as tasksToast } from "./tasks-view.js";
+import { mountAutomationsView, updateAutomationsView, openAutomations, closeAutomations, startAutomationsBackground } from "./automations-view.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
 
@@ -81,6 +82,7 @@ const sidebarEl = document.getElementById("sidebar");
 const wsViewEl = document.getElementById("wsView");
 const settingsEl = document.getElementById("settingsView");
 const tasksViewEl = document.getElementById("tasksView"); // Agent Tasks 현황판(state.view === 'tasks')
+const automationsViewEl = document.getElementById("automationsView"); // 자동화 장소(state.view === 'automations', automation-design §5.9)
 const loginGateEl = document.getElementById("loginGate");
 const bootstrapGateEl = document.getElementById("bootstrapGate");
 const bootstrapLabelEl = document.getElementById("bootstrapLabel");
@@ -103,6 +105,7 @@ mountSidebar(sidebarEl, {});
 mountWorkspaceView(wsViewEl);
 mountSettings(settingsEl);
 if (tasksViewEl) mountTasksView(tasksViewEl);
+if (automationsViewEl) mountAutomationsView(automationsViewEl);
 // 보고 있던 작업 워크스페이스가 데몬 정리(머지·폐기)로 사라졌다 — state.js 가 현황판으로 돌려놓고 여기서 알린다(§4).
 S.onTaskWsRemoved(() => tasksToast(tt("wsRemoved")));
 mountLoginGate(loginGateEl);
@@ -118,14 +121,17 @@ function render() {
   // 설정은 모달 오버레이 → 워크스페이스는 항상 렌더(뒤에 보임).
   //  작업 현황판은 메인 영역을 **대신** 쓴다 — #wsView 를 hidden 으로(display:none → 프리뷰 슬롯 rect 0 →
   //  previewSync 가 visible=false 로 네이티브 웹뷰를 내린다). pane 트리는 그대로 캐시돼 복귀가 즉시다.
-  if (wsViewEl) wsViewEl.hidden = state.view === "tasks";
+  //  자동화 장소도 같은 규칙(메인 영역을 대신 쓰는 장소 — 진행 현황과 배타, setView 가 덮는다).
+  const mainPlace = state.view === "tasks" || state.view === "automations";
+  if (wsViewEl) wsViewEl.hidden = mainPlace;
   updateSettings();
   updateWorkspaceView();
   updateTasksView();
+  updateAutomationsView();
   updateApprovals(); // 승인 카드는 Chat 뷰 슬롯 판정을 위해 workspace 렌더 뒤에 갱신
-  if (state.activeWsId !== lastActive || (lastView === "tasks" && state.view === "workspace")) {
+  if (state.activeWsId !== lastActive || ((lastView === "tasks" || lastView === "automations") && state.view === "workspace")) {
     lastActive = state.activeWsId;
-    if (state.activeWsId && !settingsShown && state.view !== "tasks") setTimeout(focusCurrentPane, 40);
+    if (state.activeWsId && !settingsShown && !mainPlace) setTimeout(focusCurrentPane, 40);
   }
   lastView = state.view;
 }
@@ -158,7 +164,8 @@ api.onDaemonChanged(async () => {
   restorePendingSetup();
   // 부팅 뒤 로그인/페어링한 경우에도 Agent Tasks 배경(caps·첫 목록·60초 폴링)을 건다 — 부팅 시점엔 paired 가 아니라
   //  못 걸었다(startTasksBackground 는 멱등: 폴링 타이머는 1개, caps/목록은 새로 받는다). 기기 목록이 있어야 대상 PC 를 안다.
-  void Promise.resolve(S.loadDevices()).catch(() => {}).then(() => { if (state.paired) startTasksBackground(); });
+  //  자동화 배지(주의 수)도 같은 시점에 한 번 — 폴링은 장소가 열려 있을 때만(automation-design §5.9).
+  void Promise.resolve(S.loadDevices()).catch(() => {}).then(() => { if (state.paired) startAutomationsBackground(); if (state.paired) startTasksBackground(); });
   // 재페어링은 새 device 행을 만들 수 있다 → 옛 기기에 묶인 이 PC 워크스페이스를 즉시 재클레임
   //  (안 하면 터미널이 죽은 기기로 시작 요청 → 409 DAEMON_OFFLINE 영구화).
   S.reconcileWorkspaceHosts();
@@ -224,6 +231,9 @@ registerCommands({
   // Agent Tasks — 현황판은 토글(한 번 더 누르면 워크스페이스로 돌아간다), 새 작업은 현재 워크스페이스가 저장소 기본값.
   "tasks.dashboard": () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()),
   "tasks.new": () => openNewTask(),
+  // 자동화 번들(automation-design §5.9) — 자동화 장소는 진행 현황처럼 토글, 한 줄 지시는 시트.
+  "automations.open": () => (state.view === "automations" ? closeAutomations() : openAutomations()),
+  "dispatch.open": () => import("./dispatch-sheet.js").then((m) => m.openDispatchSheet()).catch(() => {}),
   "settings.shortcuts": () => openSettingsSection("shortcuts"),
 
   ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [
@@ -244,7 +254,8 @@ window.addEventListener("keydown", (e) => {
   const id = commandForCombo(bindings(), combo);
   if (!id) return;
   // 현황판이 떠 있는 동안 워크스페이스/pane 명령은 **보이지 않는** 워크스페이스를 조작하게 된다 → 전역 명령만 받는다.
-  if (state.view === "tasks" && commandById(id)?.scope !== "global") return;
+  //  자동화 장소도 같다(state.view === 'automations' — 메인 영역을 대신 쓰는 장소).
+  if ((state.view === "tasks" || state.view === "automations") && commandById(id)?.scope !== "global") return;
   // 처리할 수 있을 때만 기본 동작을 막는다. 못 쓰는 상황에서 preventDefault 만 하면
   //  "브라우저 기본 동작도 안 되고 우리 동작도 안 되는" 죽은 키가 된다.
   if (runCommand(id)) e.preventDefault();
@@ -259,7 +270,7 @@ function startPreviewShieldWatch() {
   //  클릭이 뒤의 프리뷰로 내려가 "허용 버튼이 안 눌리는" 사고가 난다(punch-through 규율).
   // .ag-sheet — 에이전트 설치 시트(설정 밖, 온보딩에서도 뜬다). 안에 실제 터미널이 있어 클릭·키
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
-  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .tasks-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
+  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .tasks-view:not([hidden]), .automations-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   const check = () => {
     const on = !!document.querySelector(SEL);
@@ -335,6 +346,7 @@ async function maybeInstallSetupUpdate() {
   //  백그라운드로 돌리고 도착하면 emit 이 그린다. 워크스페이스/계정만 첫 페인트의 전제다.
   void Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]).then(() => {
     S.emit();
+    if (state.paired) startAutomationsBackground(); // 자동화 — 사이드바 `자동화` 배지용 목록(보고 있는 PC 1대)
     if (state.paired) startTasksBackground(); // Agent Tasks — 사이드바 배지용 목록(기기 목록이 있어야 대상 PC 를 안다)
   });
   void api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.

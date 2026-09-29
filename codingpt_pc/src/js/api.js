@@ -259,6 +259,12 @@ export const api = {
   //  다른 PC 로 가는 봉인 요청도 cmd='e2ee.rpc'(method 가 task./git. 일 때만)로 이 통로를 탄다(35초).
   //  실패는 `<CODE>: <메시지>` — tasks-api.js parseCodedError 가 정본 파서다. 직접 부르지 말고 taskRpc 를 쓸 것.
   taskLocal: (cmd, args) => invoke("task_local", { cmd, args: args || {} }),
+  // ── 자동화 번들(automation-design §2.3) — auto./dispatch./power. 이 PC 데몬 직결 + 봉인(e2ee.rpc) 통로(35초).
+  //  직접 부르지 말고 automations-api.js autoRpc 를 쓸 것. power.event 는 여기로 못 간다(Rust 울타리) → powerLocal.
+  autoLocal: (cmd, args) => invoke("auto_local", { cmd, args: args || {} }),
+  powerLocal: (cmd, args) => invoke("power_local", { cmd, args: args || {} }),
+  // power.rs 옵저버(NSWorkspace willSleep/didWake) → { kind }.
+  onPower: (cb) => listen("cpt-power", (e) => cb(e.payload)),
   reviewGet: (body) =>
     invoke("back_api", { method: "POST", path: "/api/daemon/review/get", body: body || {}, timeoutSecs: 15 }),
   reviewPending: (body) =>

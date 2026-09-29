@@ -23,11 +23,14 @@ export const state = {
   // 원격 승인 인박스(기능1) — 대기 중 승인 카드. 정본은 데몬, back 은 인덱스, 우리는 미러다.
   //  push(approval_event)는 힌트고 pull(GET /api/daemon/approvals)이 정본 — 부팅/재접속마다 재조회.
   approvals: [], // [{id, tool, kind, summary, prompt, relPath, cwd, wsName, win, deadlineAt, …, _busy?, _err?}]
-  view: "workspace", // 'workspace' | 'settings' | 'tasks'(작업 현황판 — 메인 영역을 통째로 쓴다)
+  view: "workspace", // 'workspace' | 'settings' | 'tasks'(작업 현황판) | 'automations'(자동화 — automation-design §5.9). 뒤 둘은 메인 영역을 통째로 쓴다
   // Agent Tasks — 호스트(PC)별 task.list 결과 미러. 정본은 각 PC 데몬의 tasks.json 이고 서버에는 없다(§1.2).
   //  byHost[hostId] = { items:TaskLite[], gh:GhStatusLite|null, at, error:{code,message}|null }
   //  ⚠ 오프라인 PC 의 목록은 지우지 않고 남긴다 — 현황판이 "PC 오프라인" 한 줄로 접어 그린다(§5.4).
   tasks: { byHost: {} },
+  // 자동화(automation-design §5.9) — 호스트(PC)별 auto.list 결과 미러. 정본은 각 PC 데몬의 automations.json(서버엔 없다).
+  //  byHost[hostId] = { items:AutomationLite[], paused:boolean, limits, counts, at, error:{code,message}|null }
+  automations: { byHost: {} },
   sidebarCollapsed: false,
   creatingWs: false,
   me: null, // 로그인 계정 프로필 {id,email,nickname,profileImg,...} — 웹 로그인 후 표시
@@ -881,6 +884,14 @@ export function setTasksForHost(host, patch) {
   const k = String(host);
   const prev = state.tasks.byHost[k] || { items: [], gh: null, at: 0, error: null };
   state.tasks.byHost[k] = { ...prev, ...(patch || {}) };
+  emit();
+}
+
+/** 자동화 목록(호스트 1대분) 반영 — 자동화 장소·사이드바 `자동화` 배지가 이 값을 읽는다. */
+export function setAutomationsForHost(host, patch) {
+  const k = String(host);
+  const prev = state.automations.byHost[k] || { items: [], paused: false, limits: null, counts: null, at: 0, error: null };
+  state.automations.byHost[k] = { ...prev, ...(patch || {}) };
   emit();
 }
 

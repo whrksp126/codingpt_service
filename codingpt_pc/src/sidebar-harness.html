@@ -5,9 +5,12 @@
 <html lang="ko" data-theme="dark">
 <head><meta charset="utf-8"><title>사이드바 하네스</title>
 <link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
-<style>body { margin: 0; height: 100vh; display: flex; } #sbRoot { height: 100vh; }</style></head>
+<style>body { margin: 0; height: 100vh; display: flex; } #sbRoot { height: 100vh; }
+  /* #main 해시 — 사이드바 + 메인(진행 현황·자동화 장소)을 앱과 같은 격자로 */
+  body.with-main .shell { width: 100vw; }
+  body:not(.with-main) .main { display: none; }</style></head>
 <body>
-<div id="sbRoot"></div>
+<div class="shell"><aside id="sbRoot"></aside><main class="main"><section id="tasksView" class="tasks-view" hidden></section><section id="automationsView" class="automations-view" hidden></section></main></div>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="vendor/xterm/xterm-addon-search.js"></script>
@@ -31,17 +34,98 @@
     { id: 3, name: 'tokin', localPath: 'work/tokin', compute: 'local', hostDeviceId: 12, hostOnline: true },
     { id: 4, name: '집에서 하던 것', localPath: 'dev/side', compute: 'local', hostDeviceId: 13, hostOnline: false },
   ];
+  // ── 자동화 번들 목(automation-design) — auto./dispatch./power. RPC 를 이 PC(로컬 소켓)·다른 PC(평문 /api/daemon/auto) 둘 다 받는다.
+  const NOW = Date.now();
+  const H = 3600e3;
+  const auto = (id, name, trigger, o = {}) => ({ id, v: 1, name, enabled: o.enabled ?? true, paused: !!o.paused, pausedReason: o.pausedReason || null,
+    createdBy: { kind: o.by || 'agent', agent: o.agent ?? (o.by && o.by !== 'agent' ? null : 'claude'), deviceId: 11, at: NOW - 48 * H }, trigger,
+    actions: o.actions || [{ type: 'task.create', repo: 'other/project/codingpt', subdir: '', base: null, agents: [{ id: 'claude', count: 1 }], title: '{issue.title}', prompt: "이슈 #{issue.number} '{issue.title}' 를 처리해라.\n\n{issue.body}", copyEnv: true }],
+    guards: { maxRunsPerDay: 10, maxConcurrent: 1, cooldownMs: 300000 },
+    state: { nextRunAt: o.next ?? null, lastRunAt: o.lastAt ?? null, runsToday: o.runsToday || 0, inflight: o.inflight || 0, consecutiveFailures: o.fails || 0,
+      lastResult: o.last === undefined ? null : o.last },
+    createdAt: NOW - 48 * H, updatedAt: o.updatedAt || NOW - 24 * H });
+  const AUTOS = location.hash.includes('autoempty') ? [] : [
+    auto('a_issues', '매일 bug 이슈 정리', { type: 'github.issues', repo: 'other/project/codingpt', labels: ['bug'], state: 'open' },
+      { next: NOW + 14 * H, last: { firingId: 'f1', ok: false, code: 'TASK_LIMIT', at: NOW - 2 * H, taskIds: [] }, fails: 1, lastAt: NOW - 2 * H }),
+    auto('a_sched', '평일 아침 테스트 작업', { type: 'schedule', cron: '0 9 * * 1-5', tz: 'Asia/Seoul', missed: 'once' },
+      { next: NOW + 10 * H, last: { firingId: 'f2', ok: true, at: NOW - 14 * H, taskIds: ['t_login', 't_pay', 't_readme'] }, runsToday: 1 }),
+    auto('a_commits', 'main 커밋마다 테스트', { type: 'git.commits', repo: 'other/project/codingpt', branch: 'main', remote: 'origin' },
+      { by: 'dispatch', inflight: 1, last: { firingId: 'f3', ok: true, at: NOW - 5 * 60e3, taskIds: [] } }),
+    auto('a_review', 'PR 리뷰 오면 알림', { type: 'pr.review_comments', repo: null },
+      { by: 'user', actions: [{ type: 'notify', title: '{repo.name}: 리뷰 {pr.number}', subtitle: '' }] }),
+    auto('a_ci', 'CI 실패 시 에이전트에게', { type: 'pr.ci_failed', repo: 'other/project/codingpt' },
+      { paused: true, pausedReason: 'error', fails: 5, agent: 'codex', actions: [{ type: 'terminal.prompt', target: { event: true }, text: '{ci.failedLogs}' }], updatedAt: NOW - H }),
+    auto('a_evt', '리뷰 준비되면 다음 단계', { type: 'task.event', event: 'review_ready', repo: null }, { paused: true, pausedReason: 'user', by: 'user' }),
+  ];
+  const AUTO_PAUSED_ALL = location.hash.includes('pausedall');
+  const LOG = [
+    { at: NOW - 14 * H, autoId: 'a_sched', firingId: 'f2', stage: 'start', ok: true },
+    { at: NOW - 14 * H + 3000, autoId: 'a_sched', firingId: 'f2', stage: 'step', type: 'task.create', ok: true, taskId: 't_login' },
+    { at: NOW - 14 * H + 5000, autoId: 'a_sched', firingId: 'f2', stage: 'end', ok: true },
+    { at: NOW - 2 * H, autoId: 'a_issues', firingId: 'f1', stage: 'end', ok: false, code: 'TASK_LIMIT' },
+  ];
+  const CATALOG = (host) => host === 11 ? {
+    host: 11, hostName: '건호의 MacBook', generatedAt: NOW,
+    agents: [{ id: 'claude', installed: true, loggedIn: true }, { id: 'codex', installed: true, loggedIn: null }, { id: 'gemini', installed: false, loggedIn: null }],
+    workspaces: [
+      { id: 1, name: 'codingpt', path: 'other/project/codingpt', subdir: '', branch: 'main', topDirs: ['codingpt_back', 'codingpt_front'] },
+      { id: 2, name: 'hub', path: 'other/project/hub', subdir: '', branch: 'gh-pages', topDirs: [] },
+    ] } : { host: 12, hostName: '사무실 iMac', agents: [{ id: 'claude', installed: true }], workspaces: [{ id: 3, name: 'tokin', path: 'work/tokin', branch: 'main' }] };
+  const PLAN = {
+    v: 1, planner: location.hash.includes('fallback')
+      ? { agent: null, mode: 'fallback', durationMs: 20, fallbackReason: 'PLANNER_UNAVAILABLE' }
+      : { agent: 'claude', mode: 'cli', durationMs: 8400, fallbackReason: null },
+    summary: 'codingpt_back 에 결제 실패 재시도 추가 + 매일 09:00 bug 이슈 정리',
+    tasks: [
+      { host: 11, workspaceId: 1, repo: 'other/project/codingpt', subdir: 'codingpt_back', base: 'main', title: '결제 실패 재시도',
+        prompt: '결제 API 가 실패하면 지수 백오프로 3회까지 재시도하고, 실패 로그를 남겨라.', agents: [{ id: 'claude', count: 1 }], confidence: 0.82,
+        why: 'README 에 codingpt_back 이 결제 API 라고 적혀 있음' },
+      ...(location.hash.includes('fallback') ? [{ host: 11, workspaceId: null, repo: '', subdir: '', base: 'main', title: '블로그 글 정리', prompt: '블로그 글 정리', agents: [{ id: 'claude', count: 1 }], why: '' }] : []),
+    ],
+    automations: location.hash.includes('fallback') ? [] : [{ host: 11, draft: { name: '매일 bug 이슈 정리', trigger: { type: 'schedule', cron: '0 9 * * *', tz: 'Asia/Seoul' },
+      actions: [{ type: 'task.create', repo: 'other/project/codingpt' }] }, why: "'매일 아침 9시' 반복 지시" }],
+    questions: location.hash.includes('fallback') ? [] : ["'정리' 가 이슈 닫기까지 포함하나요?"],
+  };
+  const POWER = { supported: true, keepAwake: true, lidClosed: true, setup: location.hash.includes('nosetup') ? 'none' : 'done', setupError: null, active: true,
+    reasons: ['task:t_login', 'task:t_pay'], layers: { caffeinate: true, disableSleep: true }, power: 'ac', lidBlocked: null, lastError: null, since: NOW - 600e3 };
+  window.__calls = [];
+  async function autoRpc(method, params, host) {
+    window.__calls.push([method, params, host]);
+    if (method === 'auto.list') return { items: host === 12 ? [] : AUTOS, paused: AUTO_PAUSED_ALL, limits: {}, counts: {} };
+    if (method === 'auto.get') return { automation: AUTOS.find((a) => a.id === params.id) || null, log: LOG.filter((l) => l.autoId === params.id) };
+    if (method === 'dispatch.catalog') { if (host === 12 && location.hash.includes('catfail')) throw new Error('TIMEOUT: x'); return CATALOG(host ?? 11); }
+    if (method === 'dispatch.plan') return { accepted: true, planId: 'p_1', planner: { agent: 'claude' } };
+    if (method === 'dispatch.get') return { planId: 'p_1', state: 'done', plan: PLAN };
+    if (method === 'power.status') return POWER;
+    if (method === 'power.set') { Object.assign(POWER, params); return { status: POWER }; }
+    return { ok: true };
+  }
+  const CAPS = ['task.v1', 'auto.v1', 'dispatch.v1', 'power.v1'];
   window.__TAURI__ = {
     core: {
-      invoke: async (cmd) => {
+      invoke: async (cmd, args) => {
         if (cmd === 'daemon_status') return { paired: true, running: true, deviceId: 11, device_name: '건호의 MacBook' };
         if (cmd === 'front_base_url') return 'https://codingpt.ghmate.com';
+        if (cmd === 'auto_local') return autoRpc(args.cmd, args.args, 11);
+        // 작업 상세 — task.get 은 목 목록에서 찾아 준다(빈 {} 를 주면 상세가 끝없이 다시 조회한다).
+        if (cmd === 'task_local' && args.cmd === 'task.get') {
+          for (const v of Object.values(window.__S.state.tasks.byHost)) { const t = (v.items || []).find((x) => x.id === args.args.taskId); if (t) return { task: { ...t, prompt: '로그인 후 리다이렉트가 /home 으로 고정돼요. 원래 페이지로 돌려보내 주세요.' } }; }
+          throw new Error('TASK_NOT_FOUND: x');
+        }
+        if (cmd === 'task_local' && args.cmd === 'task.diff') return { files: [] };
+        if (cmd === 'back_api_async' && args.path === '/api/daemon/status')
+          return { data: { runners: [{ deviceId: 11, caps: CAPS }, { deviceId: 12, caps: CAPS }], serverCaps: CAPS } };
+        if (cmd === 'back_api_async' && args.path === '/api/daemon/auto') {
+          try { return { success: true, data: await autoRpc(args.body.method, args.body.params, args.body.hostDeviceId) }; }
+          catch (e) { throw new Error('HTTP 500 ' + e.message); }
+        }
         return {};
       },
     },
     event: { listen: async () => () => {} },
   };
   const S = await import('./js/state.js');
+  window.__S = S;
   const { bootLang } = await import('./js/theme.js');
   const sb = await import('./js/sidebar.js');
   bootLang();
@@ -63,6 +147,18 @@
       run('r_p1', 1, 'launching', { at: 9 }), run('r_p2', 2, 'running', { agent: 'codex', at: 8 }), run('r_p3', 3, 'running', { agent: 'gemini', at: 7 })]),
     task('t_readme', 'README 정리', 'other/project/codingpt', 1, [run('r_r1', 1, 'review_ready', { diff: { files: 2, additions: 41, deletions: 7 }, at: 5 })]),
     task('t_hub', '빌드 캐시 정리', 'other/project/hub', 2, [run('r_h1', 1, 'review_ready', { at: 2 })]),
+    // PR 후속(automation-design §4) — CI 실패 1 · 새 리뷰 코멘트 1. 앞의 것은 자동화가 만든 작업(`자동` 칩).
+    { ...task('t_ci', '이슈 #41 로그인 리다이렉트', 'other/project/codingpt', 1, [{ ...run('r_c1', 1, 'review_ready', { tid: 7, at: 6 }),
+      pr: { number: 12, state: 'open', url: 'https://github.com/x/y/pull/12', isDraft: false, mergeable: 'MERGEABLE', checks: { status: 'failing', items: [
+        { name: 'ci / lint', status: 'failing', url: 'https://github.com/x/y/actions/runs/2/job/9' }, { name: 'ci / test', status: 'passing' }] } },
+      followup: { ci: { status: 'failing', headSha: 'abc', detectedAt: Date.now() - 8 * 60e3, dismissedAt: null, fixOpId: null,
+        failed: [{ name: 'ci / lint', url: 'https://github.com/x/y/actions/runs/2/job/9', runId: '2' }], seen: [] } } }]),
+      origin: { kind: 'automation', automationId: 'a_issues', firingId: 'f1', depth: 1 } },
+    task('t_rv', '다크 모드 토글', 'other/project/hub', 2, [{ ...run('r_v1', 1, 'review_ready', { tid: 8, at: 1 }),
+      pr: { number: 7, state: 'open', url: 'https://github.com/x/hub/pull/7', isDraft: false, mergeable: 'MERGEABLE', checks: { status: 'passing', items: [] } },
+      followup: { reviews: { cursor: '', detectedAt: Date.now() - 3 * 60e3, dismissedAt: null, fixOpId: null, overflow: 0, seenIds: [], pending: [
+        { id: 1, kind: 'review_comment', author: 'alice', bot: false, path: 'src/theme.ts', line: 12, bodyHead: '여기서 prefers-color-scheme 변화를 구독하지 않아요', url: 'https://github.com/x/hub/pull/7#c1', at: '' },
+        { id: 2, kind: 'review', author: 'coderabbit', bot: true, state: 'CHANGES_REQUESTED', bodyHead: '토글 상태가 localStorage 에만 있어요', url: '', at: '' }] } } }]),
   ], at: Date.now(), error: null };
   // 다른 PC(사무실 iMac)에서 입력을 기다리는 작업 — PC 행 배지(진행 현황 = PC 안의 장소, 2026-09-29).
   S.state.tasks.byHost['12'] = { items: [
@@ -70,14 +166,36 @@
   ], at: Date.now(), error: null };
   S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 },
     { id: 'ap2', hostDeviceId: 12, cwd: '.codingpt/worktrees/r_i1', win: 2, createdAt: 2 }];
+  if (location.hash.includes('main')) document.body.classList.add('with-main');
+  const TA = await import('./js/tasks-api.js');
+  await TA.refreshHostCaps();
+  const AA = await import('./js/automations-api.js');
+  AA.noteRunnerAwake({ deviceId: 11, online: true, awake: true, busy: true });
+  const AV = await import('./js/automations-view.js');
+  const TV = await import('./js/tasks-view.js');
+  TV.mountTasksView(document.getElementById('tasksView'));
+  AV.mountAutomationsView(document.getElementById('automationsView'));
+  await AV.refreshAutoHost(11);
   if (location.hash.includes('tasks')) S.setView('tasks');
+  if (location.hash.includes('autos')) AV.openAutomations(location.hash.includes('detail') ? { id: 'a_sched', host: 11 } : {});
   S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [] };
   if (location.hash.includes('collapse')) localStorage.setItem('cpt.sbGroupCollapsed.v1', JSON.stringify({ 2: 1 }));
   else localStorage.removeItem('cpt.sbGroupCollapsed.v1');
   localStorage.removeItem('cpt.activeDeviceId.v1');
   sb.mountSidebar(document.getElementById('sbRoot'));
   sb.updateSidebar();
-  S.subscribe(() => sb.updateSidebar());
+  S.subscribe(() => { sb.updateSidebar(); TV.updateTasksView(); AV.updateAutomationsView(); });
+  TV.updateTasksView(); AV.updateAutomationsView();
+  // 한 줄 지시 시트 — `#dispatch` 해시면 문장을 넣고 [계획] 까지 누른다(목 카탈로그 → 목 플랜).
+  window.__dispatch = async (text) => {
+    const m = await import('./js/dispatch-sheet.js');
+    m.openDispatchSheet({ text: text || '코딩피티 백엔드에 결제 실패 재시도 넣고, 매일 아침 9시에 열린 bug 이슈 정리해줘' });
+    await new Promise((r) => setTimeout(r, 50));
+    [...document.querySelectorAll('.dp-sheet .tk-foot button')].find((b) => b.textContent.trim() === '계획')?.click();
+  };
+  window.__pcSettings = async (h) => (await import('./js/power-settings.js')).openPcSettingsSheet(h ?? 11);
+  if (location.hash.includes('dispatch')) setTimeout(() => window.__dispatch(), 100);
+  if (location.hash.includes('pcset')) setTimeout(() => window.__pcSettings(11), 100);
   if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);
   if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
   // 검사용 손잡이 — 지금 보이는 PC 행/워크스페이스 행, 그리고 코드로 PC 전환.

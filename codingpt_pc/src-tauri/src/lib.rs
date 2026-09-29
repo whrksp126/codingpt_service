@@ -7,6 +7,7 @@
 mod bridge;
 mod cptsock;
 mod fsapi;
+mod power;
 mod preview;
 mod pty;
 // term-host 파이프 클라이언트(포팅 계약 1) — 프레이밍은 플랫폼 중립(유닛테스트), 커넥션만 win32.
@@ -1034,6 +1035,8 @@ pub fn run() {
             cptsock::mode_poke,
             cptsock::chat_local,
             cptsock::task_local,
+            cptsock::auto_local,
+            cptsock::power_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)
             cptsock::lan_probe,
             cptsock::lan_status,
@@ -1118,6 +1121,9 @@ pub fn run() {
             // punch-through 설치 — 프리뷰(네이티브 웹뷰)를 앱 UI 아래에 깔고, 앱 웹뷰 투명 슬롯으로
             //  비추며 hitTest 로 이벤트를 라우팅(DOM 모달/메뉴가 자연히 프리뷰 위에 그려진다).
             preview::install_punch_through(&handle);
+
+            // 잠자기/깨어남 통지(automation-design §6.5) — NSWorkspace 옵저버 → `cpt-power` 이벤트 → JS 가 데몬 power.event 로.
+            power::install(&handle);
 
             // 런타임 딥링크(mac: 앱 실행 중 URL 오픈) 구독.
             {

@@ -174,3 +174,44 @@ export function taskNotifTarget(n) {
   if (p) return p;
   return { host: n.hostDeviceId ?? null };
 }
+
+// ── 자동화 번들 알림 라우팅(automation-design §4.4·§5.8·§6.5) ─────────────────────────────
+//  task_ci_failed · task_review_comments 는 위 task_* 규칙(codingpt://task/…)을 그대로 탄다.
+//  auto_*  → `codingpt://auto/<id>?host=<n>`  → 그 PC 의 자동화 장소, 그 항목.
+//  pc_*    → `codingpt://tasks?host=<n>`      → 그 PC 의 진행 현황.
+
+/** `codingpt://auto/<id>?host=<n>` → { id, host } | null */
+export function parseAutoDeeplink(url) {
+  const m = /^codingpt:\/\/auto\/([^?#/]+)(?:\?([^#]*))?/.exec(String(url || ""));
+  if (!m) return null;
+  let id;
+  try { id = decodeURIComponent(m[1]); } catch (_) { return null; }
+  const h = new URLSearchParams(m[2] || "").get("host");
+  return { id, host: h != null && h !== "" && Number.isFinite(Number(h)) ? Number(h) : null };
+}
+
+/** `codingpt://tasks?host=<n>` → { host } | null */
+export function parseTasksHostDeeplink(url) {
+  const m = /^codingpt:\/\/tasks\/?(?:\?([^#]*))?$/.exec(String(url || ""));
+  if (!m) return null;
+  const h = new URLSearchParams(m[1] || "").get("host");
+  return { host: h != null && h !== "" && Number.isFinite(Number(h)) ? Number(h) : null };
+}
+
+/** 알림 → 자동화 장소 열기 인자({id?, host?}). 자동화 알림이 아니면 null. */
+export function autoNotifTarget(n) {
+  if (!n) return null;
+  const p = parseAutoDeeplink(n.deeplink);
+  if (p) return p;
+  if (/^auto_/.test(String(n.kind || ""))) return { host: n.hostDeviceId ?? null };
+  return null;
+}
+
+/** 알림 → 진행 현황 열기 인자({host}). PC 잠자기·끊김 알림이 아니면 null. */
+export function pcNotifTarget(n) {
+  if (!n) return null;
+  const p = parseTasksHostDeeplink(n.deeplink);
+  if (p) return p;
+  if (n.kind === "pc_sleeping" || n.kind === "pc_disconnected") return { host: n.hostDeviceId ?? null };
+  return null;
+}

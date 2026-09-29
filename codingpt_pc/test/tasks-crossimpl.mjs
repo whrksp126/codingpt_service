@@ -42,7 +42,7 @@ for (const fx of fixtures) {
 // §8.5 필수 케이스가 픽스처 안에 실제로 있는가(규칙마다 1개 이상) — 기대값 쪽에서 센다.
 {
   const reasons = new Set(fixtures.flatMap((f) => Object.values(f.expect.reasons || {})));
-  for (const r of ["failed", "promptNotDelivered", "interrupted", "trust", "terminalGone", "agentGone", "permission", "needsInput", "approval", "keptDirty", "opFailed"]) {
+  for (const r of ["failed", "promptNotDelivered", "interrupted", "trust", "terminalGone", "agentGone", "permission", "needsInput", "approval", "keptDirty", "ciFailed", "reviewComments", "opFailed"]) {
     ok(reasons.has(r), `§5.3 규칙 1 의 항목 '${r}' 을 다루는 픽스처가 있다`);
   }
   const groupsCovered = new Set(fixtures.flatMap((f) => Object.entries(f.expect.groups).filter(([, v]) => v.length).map(([g]) => g)));
@@ -184,12 +184,30 @@ const CODES_213 = ["BAD_PARAMS", "PROMPT_TOO_LARGE", "TASK_NOT_FOUND", "RUN_NOT_
   "UNCOMMITTED_CHANGES", "UNMERGED_COMMITS", "NOTHING_TO_COMMIT", "NOTHING_TO_PR", "GIT_IDENTITY_MISSING", "GIT_LOCKED",
   "COMMIT_HOOK_FAILED", "GIT_SIGN_FAILED", "PUSH_REJECTED", "AUTH_FAILED", "PR_NOT_FOUND", "PR_NOT_MERGEABLE",
   "CHECKS_FAILING", "MAIN_DIRTY", "AGENT_BUSY", "MERGE_CONFLICT", "RUN_BUSY", "OP_INTERRUPTED", "TIMEOUT"];
+// automation-design §11 "ERROR_KEY 추가" — 별도 표 AUTO_ERROR_KEY(값 일부가 AUTO_TEXT 필드라 ERROR_KEY 와 섞지 않는다, 앱과 같은 구조).
+const AUTO_CODES = {
+  AUTO_DISABLED: "errAutoDisabled", AUTO_NOT_FOUND: "errAutoNotFound", AUTO_LIMIT: "errAutoLimit", AUTO_LOOP: "errAutoLoop",
+  AUTO_DEPTH: "errAutoDepth", AUTO_BAD_TRIGGER: "errAutoBad", AUTO_BAD_ACTION: "errAutoBad", AUTO_TEMPLATE_TOO_LARGE: "errAutoBad",
+  AUTO_BUSY: "errAutoBusy", AUTO_PAUSED: "pausedByError", AUTO_RATE_LIMITED: "pausedByLimit",
+  DISPATCH_DISABLED: "errTasksDisabled", POWER_DISABLED: "errTasksDisabled", POWER_UNSUPPORTED: "powerUnsupported",
+  POWER_SETUP_REQUIRED: "lidClosedDesc", POWER_SUDO_MISSING: "setupFailed", POWER_NO_GUI: "setupRemoteHint",
+  POWER_SETUP_CANCELLED: "setupCancelled", POWER_SETUP_FAILED: "setupFailed", FOLLOWUP_NOTHING: "errFollowupNothing",
+  AUTO_OUT_OF_TERMINAL: "errAutoLoop",
+};
+const AX = await import(path.join(PC, "text/automations.js"));
 {
   const keys = Object.keys(TX.ERROR_KEY).sort();
   ok(JSON.stringify(keys) === JSON.stringify([...CODES_213].sort()), `ERROR_KEY 의 code 집합 = §2.13 (${CODES_213.length}개)`,
     `빠짐=${CODES_213.filter((c) => !keys.includes(c))} 남음=${keys.filter((c) => !CODES_213.includes(c))}`);
   const bad = Object.entries(TX.ERROR_KEY).filter(([, f]) => TX.TASKS_TEXT.ko[f] == null);
   ok(bad.length === 0, "ERROR_KEY 의 모든 값이 문구 사전의 필드다", bad.map(([c, f]) => `${c}→${f}`).join(","));
+  ok(JSON.stringify(Object.entries(TX.AUTO_ERROR_KEY).sort()) === JSON.stringify(Object.entries(AUTO_CODES).sort()), `AUTO_ERROR_KEY = automation-design §11 (${Object.keys(AUTO_CODES).length}개)`);
+  //  값은 작업 사전(§9) 또는 자동화 사전(§11 AUTO_TEXT) 필드 — tt() 가 둘 다 본다.
+  const badA = Object.entries(TX.AUTO_ERROR_KEY).filter(([, f]) => TX.TASKS_TEXT.ko[f] == null && AX.AUTO_TEXT.ko[f] == null);
+  ok(badA.length === 0, "AUTO_ERROR_KEY 의 모든 값이 문구 사전(작업 또는 자동화)의 필드다", badA.map(([c, f]) => `${c}→${f}`).join(","));
+  ok(TX.errText("AUTO_LOOP") === AX.AUTO_TEXT.ko.errAutoLoop && TX.errText("FOLLOWUP_NOTHING") === TX.TASKS_TEXT.ko.errFollowupNothing
+    && TX.errText("NOPE_CODE") === TX.TASKS_TEXT.ko.errGeneric, "errText: 자동화 사전으로 떨어지고, 모르는 code 는 errGeneric");
+  ok(Object.keys(TX.TASKS_TEXT.ko).every((k) => !(k in AX.AUTO_TEXT.ko)), "작업·자동화 사전의 필드명이 겹치지 않는다(tt 폴백이 모호하지 않게)");
   const rpcErr = path.join(FIX, "rpc-errors.json");
   if (fs.existsSync(rpcErr)) {
     const j = JSON.parse(read(rpcErr));
@@ -205,11 +223,14 @@ if (!fs.existsSync(APP_TEXT)) skip("앱 text/tasks.ts 대조", "없음");
 else {
   let app = null;
   try {
-    app = probe(APP_TEXT, "console.log(JSON.stringify({ ko: (m.TASKS_TEXT && m.TASKS_TEXT.ko) || null, err: m.ERROR_KEY || null }));");
+    app = probe(APP_TEXT, "console.log(JSON.stringify({ ko: (m.TASKS_TEXT && m.TASKS_TEXT.ko) || null, err: m.ERROR_KEY || null, autoErr: m.AUTO_ERROR_KEY || null }));");
   } catch (e) { skip("앱 text/tasks.ts 대조", "실행 실패"); }
   if (app) {
     ok(JSON.stringify(app.err) === JSON.stringify(Object.fromEntries(Object.keys(app.err || {}).map((k) => [k, TX.ERROR_KEY[k]])))
       && Object.keys(app.err || {}).length === Object.keys(TX.ERROR_KEY).length, "앱 ERROR_KEY == PC ERROR_KEY(code → 필드명)");
+    if (!app.autoErr) skip("앱 AUTO_ERROR_KEY 대조", "앱 text/tasks.ts 에 아직 없음(S5)");
+    else ok(JSON.stringify(Object.entries(app.autoErr).sort()) === JSON.stringify(Object.entries(TX.AUTO_ERROR_KEY).sort()),
+      "앱 AUTO_ERROR_KEY == PC AUTO_ERROR_KEY(code → 필드명)");
     // 앱은 자리표시자 문구를 `(n) => i18n.t('파일 {n}개', { n })` 함수로 둔다 → 소스에서 원문을 오려 문자열 필드와 합친다.
     const appSrc = read(APP_TEXT);
     const fnSrc = {};

@@ -320,6 +320,42 @@ pub async fn task_local(cmd: String, args: serde_json::Value) -> Result<serde_js
         .map_err(|e| format!("요청 실행 실패: {e}"))?
 }
 
+// 자동화 번들(automation-design §2.3·§9.3) — auto./dispatch./power. RPC 를 이 PC 데몬으로(봉인 요청도 여기로).
+//  task_local 과 같은 모양·같은 이유: async + spawn_blocking(메인 스레드 금지), 읽기 35초, 코드 보존.
+//  울타리 = method 접두 3종. `power.event` 는 여기서 받지 않는다 — 잠자기/깨어남 통지는 이 PC 의 앱만 보낼 수
+//  있는 로컬 전용 명령이라(§6.4) 봉인·릴레이 경로에 실리면 안 되고, 전용 커맨드 power_local 로만 간다.
+fn auto_family(m: &str) -> bool {
+    (m.starts_with("auto.") || m.starts_with("dispatch.") || m.starts_with("power.")) && m != "power.event"
+}
+
+#[tauri::command]
+pub async fn auto_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let sealed_auto = cmd == "e2ee.rpc"
+        && args
+            .get("method")
+            .and_then(|m| m.as_str())
+            .map(auto_family)
+            .unwrap_or(false);
+    if !auto_family(&cmd) && !sealed_auto {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || cpt_request_timed(&cmd, args, true, 35))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
+}
+
+// power.event {kind:'willSleep'|'didWake'} — PC 앱(power.rs 옵저버 → JS)만 부르는 로컬 전용 통지(§6.5).
+//  macOS 가 잠들기 전에 주는 시간이 수 초라 짧게(5초) 끊는다 — best effort.
+#[tauri::command]
+pub async fn power_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    if cmd != "power.event" {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || cpt_request_timed(&cmd, args, true, 5))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
+}
+
 // 에이전트 모드 즉시 확인(2026-08-02) — 이 PC 의 터미널은 **로컬 tmux 직결**이라 shift+tab 이
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**

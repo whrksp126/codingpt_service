@@ -29,6 +29,8 @@ import {
 import { IS_WINDOWS } from "./shortcuts.js";
 import { chatBetaEnabled, setChatBetaEnabled } from "./chat-model.js";
 import * as i18n from './i18n/index.js';
+import { renderPowerCard } from "./power-settings.js";
+import { at } from "./text/automations.js";
 
 let root = null;
 let navEl = null;
@@ -246,7 +248,12 @@ function renderSection(force) {
         ${folderPermRow("media", i18n.t('음악 보관함'))}
         <div class="sett-hint">${i18n.t('워크스페이스 파일을 열고 수정하는 데 필요해요.')}</div>
       </div>`}
+      ${IS_WINDOWS ? "" : `
+      <div class="sm-section-title">${at("keepAwake")}</div>
+      <div id="powerCardHost"></div>`}
       <div class="sm-section-note">${i18n.t('종단 간 암호화와 신뢰 기기는 ‘계정’에서 관리할 수 있어요.')}</div>`;
+    // PC 깨어 있기(automation-design §6.6) — 이 PC 카드. 카드가 30초 폴링 + power.changed 로 스스로 갱신한다.
+    { const ph = contentEl.querySelector("#powerCardHost"); if (ph) renderPowerCard(ph, state.daemon?.deviceId ?? null, { remote: false }); }
     autostartChk = contentEl.querySelector("#autostartChk");
     autostartChk.addEventListener("change", async () => {
       try {

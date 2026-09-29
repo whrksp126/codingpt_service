@@ -8,10 +8,13 @@ import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
-import { tasksIcon, dashboard, dashboardRows, scopedDashboard, needsInputPerHost, agentName, openTasksDashboard, openRunTerminal } from "./tasks-view.js";
+import { tasksIcon, dashboard, dashboardRows, scopedDashboard, needsInputPerHost, agentName, openTasksDashboard, openRunTerminal, findTask } from "./tasks-view.js";
 import { buildSidebarTasks } from "./sidebar-tasks.js";
 import { isLocalHostId, hostHasTasks, serverHasTasks } from "./tasks-api.js";
-import { taskNotifTarget } from "./notifications.js";
+import { taskNotifTarget, autoNotifTarget, pcNotifTarget } from "./notifications.js";
+import { autoAttentionCount, openAutomations } from "./automations-view.js";
+import { hostHasAuto, hostAwake } from "./automations-api.js";
+import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
 
@@ -101,6 +104,20 @@ export function jumpToNotification(n) {
   const tgt = taskNotifTarget(n);
   if (tgt) {
     openTasksDashboard(tgt);
+    closeNotif();
+    return;
+  }
+  // 자동화 알림(auto_created·auto_failed·auto_paused·auto_notify) → 그 PC 의 자동화 장소, 그 항목(§5.8).
+  const atgt = autoNotifTarget(n);
+  if (atgt) {
+    openAutomations(atgt);
+    closeNotif();
+    return;
+  }
+  // PC 잠자기·끊김(pc_sleeping·pc_disconnected) → 그 PC 의 진행 현황(§6.5 deeplink codingpt://tasks?host=).
+  const ptgt = pcNotifTarget(n);
+  if (ptgt) {
+    openTasksDashboard(ptgt);
     closeNotif();
     return;
   }
@@ -199,14 +216,15 @@ export function updateSidebar() {
     const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
     computeTree(activeDev0, wss0);
     const tasksN = sbTasksN;
+    const autoN = autoAttentionCount();
     const sig = JSON.stringify([
-      tasksN,
+      tasksN, autoN,
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
       state.me?.nickname, state.me?.email, state.me?.profileImg,
       notifOpen, state.notifications.length, state.notifications[0]?.id, state.notifications[0]?.read,
       activeDev0,
-      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0), sbNeedsByHost[d.id] || 0]),
+      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0), sbNeedsByHost[d.id] || 0, hostAwake(d.id)]),
       wss0.map((w) => {
         const rt = S.wsRuntime(w.id);
         const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -262,6 +280,8 @@ export function updateSidebar() {
     { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
     { icon: icons.apple({ size: 15 }), label: i18n.t('에이전트 PC (macOS)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("macos")).catch(() => {}) },
     { icon: icons.linux({ size: 15 }), label: i18n.t('에이전트 PC (Linux)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("linux")).catch(() => {}) },
+    // 고른 PC 의 깨어 있기 설정(automation-design §6.6) — PC 행 우클릭 메뉴와 같은 시트.
+    ...(activeDev != null ? [{ icon: icons.gear({ size: 15 }), label: at("pcSettings"), onClick: () => openPcSettings(activeDev) }] : []),
   ]));
   if (!devices.length) {
     list.appendChild(note(state.paired ? i18n.t('불러오는 중…') : i18n.t('PC를 연결하세요')));
@@ -279,6 +299,7 @@ export function updateSidebar() {
     devHead.classList.add("sb-sec-dev"); // PC 이름은 고유명사 — 대문자 변환 없이, 위 PC 목록과는 선으로 가른다
     list.appendChild(devHead);
     list.appendChild(tasksRow());
+    list.appendChild(autoRow());
   }
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
@@ -469,6 +490,30 @@ function tasksRow() {
   row.addEventListener("click", () => { if (state.view !== "tasks") openTasksDashboard(); });
   return row;
 }
+/** 사이드바 `자동화 [n]` 행 — 고른 PC 의 자동화 장소(automation-design §5.9). `진행 현황` 바로 아래, 같은 장소 규칙:
+ *  선택 배경은 들어가 있을 때만, 토글이 아니다(다시 눌러도 닫히지 않음). 배지 = 주의(실패·오류 일시정지) 수(error).
+ *  auto.v1 이 없는 PC 는 행을 그리되 누르면 업데이트 안내(§5.9). */
+function autoRow() {
+  const n = autoAttentionCount();
+  const row = document.createElement("button");
+  row.className = "pc-row auto-row" + (state.view === "automations" ? " active" : "");
+  row.innerHTML =
+    `<span class="pc-ic">${icons.repeat({ size: 15 })}</span>` +
+    `<span class="pc-nm">${escapeHtml(tt("automations"))}</span>` +
+    (n ? `<span class="wsr-badge">${n}</span>` : "");
+  row.addEventListener("click", () => {
+    if (state.view === "automations") return;
+    if (hostHasAuto(S.activeDeviceId()) === false) {
+      import("./tasks-view.js").then((m) => m.toast(tt("pcNeedsUpdate"))).catch(() => {});
+      return;
+    }
+    openAutomations();
+  });
+  return row;
+}
+function openPcSettings(hid) {
+  import("./power-settings.js").then((m) => m.openPcSettingsSheet(hid)).catch(() => {});
+}
 function note(text) {
   const d = document.createElement("div");
   d.className = "sb-note";
@@ -531,8 +576,15 @@ function deviceRow(d, activeId) {
     // 다른 PC 에서 입력을 기다리는 에이전트 수(warn) — 고른 PC 의 수는 바로 아래 `진행 현황` 배지가 말한다.
     (!sel && sbNeedsByHost[d.id] ? `<span class="wsr-badge pc-needs">${sbNeedsByHost[d.id]}</span>` : "") +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
+    // 깨어 있기(잠자기 방지 층)가 지금 잡혀 있음 — 무채색 글리프(§6.6, 상태 신호지만 경고가 아니다).
+    (hostAwake(d.id) ? `<span class="pc-awake" title="${escapeHtml(at("awakeNow"))}" aria-label="${escapeHtml(at("awakeNow"))}">${icons.sun({ size: 12 })}</span>` : "") +
     (sel ? `<span class="pc-check">${icons.check({ size: 15 })}</span>` : "");
   row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
+  // PC 메뉴 — `PC 설정`(깨어 있기). 우클릭(워크스페이스 행과 같은 방식).
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    showPopupMenu(e.clientX, e.clientY, [{ icon: icons.gear({ size: 15 }), label: at("pcSettings"), onClick: () => openPcSettings(d.id) }]);
+  });
   return row;
 }
 
@@ -789,13 +841,18 @@ function taskRow(w, t) {
   const open = fan && fanExpanded.has(t.taskId);
   const subText = tt(t.sub.key) + (t.sub.diff ? " · " + tt("diffStat", { a: t.sub.diff.a, d: t.sub.diff.d }) : "");
   const dotCls = t.dot === "none" ? "" : " " + t.dot;
+  // 자동화가 만든 작업 — 제목 앞 `자동` 칩(automation-design §5.9). 누르면 그 자동화로.
+  const origin = (findTask(host, t.taskId) || {}).origin || null;
+  const autoId = origin && origin.kind === "automation" ? origin.automationId || null : null;
   b.innerHTML =
     `<span class="wsg-line"><span class="wsg-ic">${icons.gitBranch({ size: 15 })}</span>` +
+    (autoId ? `<span class="wsg-fan au-chip" title="${escapeHtml(at("automations"))}">${escapeHtml(at("autoBadge"))}</span>` : "") +
     `<span class="wsg-title">${escapeHtml(t.title || tt("title"))}</span>` +
     (fan ? `<span class="wsg-fan">×${t.fanout}</span><span class="wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "") +
     `</span>` +
     `<span class="wsg-sub"><span class="tv-dot${dotCls}"></span><span class="wsg-subtx">${escapeHtml(subText)}</span></span>`;
   b.addEventListener("click", (e) => {
+    if (autoId && e.target.closest?.(".au-chip")) { e.stopPropagation(); openAutomations({ id: autoId, host }); return; }
     if (fan && e.target.closest?.(".wsg-fan, .wsg-caret2")) { e.stopPropagation(); toggleFan(t.taskId); return; }
     openTasksDashboard({ taskId: t.taskId, host });
   });

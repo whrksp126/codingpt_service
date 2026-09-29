@@ -1,4 +1,5 @@
 import * as i18n from '../i18n/index.js';
+import { AUTO_TEXT } from './automations.js';
 // Agent Tasks(작업 현황판·새 작업·작업 상세)의 화면 문구. text/index.js 의 규율을 따른다.
 //  ⚠ 원문 정본 = 설계 문서 §9(codingpt_daemon/docs/agent-tasks-design.md). 앱(codingpt_app/src/text/tasks.ts)에
 //   **같은 필드명·같은 원문**의 사전이 있다 — 번역은 i18n 카탈로그(master.json → emit) 한 벌이 갖는다.
@@ -169,6 +170,15 @@ export const TASKS_TEXT = {
     mergedInto: "{branch} → {base}",
     promptPlaceholder: "무엇을 만들까요?",
     dictate: "받아쓰기",
+    // 자동화 번들 추가분(automation-design §11 — text/tasks 추가분).
+    ciFailedLine: "검사 실패 {n}개",
+    reviewCommentsLine: "리뷰 코멘트 {n}개",
+    fix: "고치기",
+    fixing: "에이전트에게 보내는 중…",
+    ignore: "무시",
+    fixSent: "에이전트에게 보냈어요",
+    errFollowupNothing: "보낼 내용이 없어요",
+    oneLine: "한 줄 지시",
   },
 };
 
@@ -223,13 +233,44 @@ export const ERROR_KEY = {
   TIMEOUT: "errTimeout",
 };
 
+/**
+ * 자동화 번들 에러 code → 필드명(automation-design §11 "ERROR_KEY 추가"). 앱 text/tasks.ts 의 AUTO_ERROR_KEY 와 **같은 객체**.
+ *  ★ ERROR_KEY 와 따로 둔다: ERROR_KEY 는 데몬 agent-tasks rpc-errors.json 과 집합이 같아야 하고 값이 TASKS_TEXT 필드다.
+ *   이쪽은 값 일부가 AUTO_TEXT 필드다 — tt() 가 그 사전으로 떨어진다. errText 는 두 표를 차례로 본다.
+ */
+export const AUTO_ERROR_KEY = {
+  AUTO_DISABLED: "errAutoDisabled",
+  AUTO_NOT_FOUND: "errAutoNotFound",
+  AUTO_LIMIT: "errAutoLimit",
+  AUTO_LOOP: "errAutoLoop",
+  AUTO_DEPTH: "errAutoDepth",
+  AUTO_BAD_TRIGGER: "errAutoBad",
+  AUTO_BAD_ACTION: "errAutoBad",
+  AUTO_TEMPLATE_TOO_LARGE: "errAutoBad",
+  AUTO_BUSY: "errAutoBusy",
+  AUTO_PAUSED: "pausedByError",
+  AUTO_RATE_LIMITED: "pausedByLimit",
+  AUTO_OUT_OF_TERMINAL: "errAutoLoop",
+  DISPATCH_DISABLED: "errTasksDisabled",
+  POWER_DISABLED: "errTasksDisabled",
+  POWER_UNSUPPORTED: "powerUnsupported",
+  POWER_SETUP_REQUIRED: "lidClosedDesc",
+  POWER_SUDO_MISSING: "setupFailed",
+  POWER_NO_GUI: "setupRemoteHint",
+  POWER_SETUP_CANCELLED: "setupCancelled",
+  POWER_SETUP_FAILED: "setupFailed",
+  FOLLOWUP_NOTHING: "errFollowupNothing",
+};
+
 /** 필드명 → 지금 언어의 문구(자리표시자 치환 포함). 모르는 필드는 원문 대신 errGeneric. */
 export function tt(key, vars) {
-  const src = TASKS_TEXT.ko[key];
+  //  작업 사전에 없으면 자동화 사전(§11 AUTO_TEXT)으로 — ERROR_KEY 값 일부와 사이드바 `자동화` 행이 그쪽 필드다.
+  const src = TASKS_TEXT.ko[key] ?? AUTO_TEXT.ko[key];
   return i18n.t(src == null ? TASKS_TEXT.ko.errGeneric : src, vars);
 }
 
 /** 에러 code → 문구. `errBaseMoved` 처럼 자리표시자가 있으면 vars 로 채운다. */
 export function errText(code, vars) {
-  return tt(ERROR_KEY[String(code || "")] || "errGeneric", vars);
+  const c = String(code || "");
+  return tt(ERROR_KEY[c] || AUTO_ERROR_KEY[c] || "errGeneric", vars);
 }

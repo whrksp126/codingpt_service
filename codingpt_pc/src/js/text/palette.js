@@ -52,6 +52,8 @@ export const PALETTE_TEXT = {
       "tasks.dashboard": "작업 현황판",
       "tasks.new": "새 작업",
       "tasks.open": "작업 현황판",
+      "automations.open": "자동화",
+      "dispatch.open": "한 줄 지시",
       "app.settings": "설정 열기",
       "settings.shortcuts": "단축키 설정",
       "ws.select1": "1번 워크스페이스로",

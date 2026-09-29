@@ -32,6 +32,10 @@ export const icons = {
   pause: (o) => svg('<circle cx="12" cy="12" r="9"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/>', o),
   // git 브랜치(Feather git-branch) — 사이드바 작업 행·접힘 칩(agent-tasks-sidebar.md §3.1).
   gitBranch: (o) => svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', o),
+  // 자동화(Feather repeat) — 사이드바 `자동화` 행·트리거 카드(automation-design §5.9).
+  repeat: (o) => svg('<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>', o),
+  // 한 줄 지시(Feather zap — 앱 헤더와 같은 번개 글리프) — 진행 현황 헤더 아이콘 동작(§3).
+  zap: (o) => svg('<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>', o),
   folder: (o) => svg('<path d="M3 7a2 2 0 0 1 2-2h3.5l2 2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>', o),
   terminal: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3"/><line x1="12.5" y1="15" x2="17" y2="15"/>', o),
   x: (o) => svg('<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>', o),
