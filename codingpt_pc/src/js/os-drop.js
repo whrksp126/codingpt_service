@@ -30,6 +30,8 @@ export function termTargetAt(px, py) {
   const paneEl = el && el.closest ? el.closest(".pane") : null;
   if (!paneEl) return null;
   const pane = getPane(paneEl.dataset.paneId);
+  // 채팅 v2 탭이 보이고 있으면 그 입력칸이 받는다(가려진 터미널에 꽂으면 사라진 것처럼 보인다).
+  if (pane && pane.activeConv?.()) return { pane, tabIndex: -1, conv: pane.activeConv() };
   if (!pane || pane.node.kind !== "terminal") return null;
   const tabs = pane.node.tabs || [];
   const active = tabs[pane.node.active];
@@ -48,6 +50,7 @@ export function shq(p) {
 // 대상 터미널(pane, tabIndex)에 경로 텍스트를 삽입 — 필요하면 그 터미널 탭으로 먼저 전환. os-drop/ide 공용.
 export function insertIntoTerminal(tgt, text) {
   if (!tgt || !text) return;
+  if (tgt.conv) { tgt.conv.composer?.insertText(text); tgt.conv.focus(); return; }
   const { pane, tabIndex } = tgt;
   const doInsert = () => { pane.insertText(text); pane.ctx?.onFocus?.(pane.id); pane.focus(); };
   if (tabIndex !== pane.node.active) Promise.resolve(pane.switchTab(tabIndex)).then(doInsert, doInsert);
@@ -82,6 +85,7 @@ export function initOsDrop() {
       setDragging(false);
       const paths = Array.isArray(ev.paths) ? ev.paths.filter(Boolean) : [];
       if (!tgt || !paths.length) return; // 터미널 대상 밖 드롭 = 무시
+      if (tgt.conv) { tgt.conv.addPaths(paths); tgt.pane.ctx?.onFocus?.(tgt.pane.id); return; }
       const { pane, tabIndex } = tgt;
       // 채팅 모드 pane 에 떨어진 드롭은 채팅 입력칸의 **원자 칩**(contenteditable=false)이 된다
       //  (2026-07-30 사용자 확정 3차: 입력은 로컬 네이티브). TUI 반영은 전송 시 한 번 —

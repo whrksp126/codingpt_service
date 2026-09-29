@@ -104,7 +104,8 @@ function tabRows(term) {
       section: T.secOpenTabs,
       score,
       sortKey: s.label,
-      icon: s.kind === "ide" ? icons.code({ size: 15 }) : s.kind === "preview" ? icons.globe({ size: 15 }) : icons.terminal({ size: 15 }),
+      icon: s.kind === "ide" ? icons.code({ size: 15 }) : s.kind === "preview" ? icons.globe({ size: 15 })
+        : s.kind === "chat" ? icons.chat({ size: 15 }) : icons.terminal({ size: 15 }),
       label: s.label,
       hint: s.active ? "●" : "",
       run: () => activateSurface(s.paneId, s.index),

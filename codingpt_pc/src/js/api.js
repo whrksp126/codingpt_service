@@ -13,6 +13,9 @@ function qs(obj) {
   return p.toString();
 }
 
+// 기동·가져오기·TUI 종료 대기가 끼는 conv 메서드 — back 30초 + 5초(conv-model.convTimeoutSecs 와 같은 표).
+const CONV_LONG = new Set(["conv.create", "conv.send", "conv.open", "conv.adopt", "conv.toTerminal"]);
+
 export const api = {
   // ── 데몬 상태/페어링(기존 유지, 설정→연결에서 사용) ──
   daemonStatus: () => invoke("daemon_status"),
@@ -364,6 +367,38 @@ export const api = {
   chatScreen: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/screen", body: body || {}, timeoutSecs: 20 }),
   chatDialog: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/dialog", body: body || {}, timeoutSecs: 25 }),
   chatCommands: (body) => invoke("back_api", { method: "POST", path: "/api/daemon/chat/commands", body: body || {}, timeoutSecs: 20 }),
+
+  // ── 채팅 v2(conv.*) — 구조화 대화 엔진 RPC(계약 정본 = codingpt_daemon/docs/chat-v2-design.md §4) ──
+  //  · 통로는 `POST /api/daemon/conv {method, params, hostDeviceId}` 하나다. 성공은 데몬 결과가 최상위.
+  //  · **비동기판**(back_api_async)만 쓴다 — 기동·가져오기가 끼면 30초까지 걸리는데, 동기판은 그동안
+  //    메인 스레드(창 전체)를 세운다.
+  //  · 타임아웃 = back 값 + 5초(긴 것 35초, 나머지 20초). 시간 초과 뒤에도 데몬은 성공했을 수 있다 →
+  //    보내기 재시도는 반드시 같은 clientId 로 한다(conv-view 가 지킨다).
+  //  · 실패는 `HTTP <상태> <CODE>: <메시지>` 문자열이다. 분기는 상태가 아니라 CODE 로(conv-model.parseConvError).
+  //  라이브는 여기가 아니라 ui-channel WS 의 conv_event 로 온다.
+  conv: (method, params, hostDeviceId, timeoutSecs) =>
+    invoke("back_api_async", {
+      method: "POST",
+      path: "/api/daemon/conv",
+      body: { method, params: params || {}, ...(hostDeviceId != null ? { hostDeviceId } : {}) },
+      timeoutSecs: timeoutSecs ?? (CONV_LONG.has(method) ? 35 : 20),
+    }),
+  convCaps: (host) => api.conv("conv.caps", {}, host),
+  convList: (params, host) => api.conv("conv.list", params, host),
+  convCreate: (params, host) => api.conv("conv.create", params, host),
+  convOpen: (params, host) => api.conv("conv.open", params, host),
+  convSince: (params, host) => api.conv("conv.since", params, host),
+  convBefore: (params, host) => api.conv("conv.before", params, host),
+  convSend: (params, host) => api.conv("conv.send", params, host),
+  convRespond: (params, host) => api.conv("conv.respond", params, host),
+  convInterrupt: (params, host) => api.conv("conv.interrupt", params, host),
+  convSet: (params, host) => api.conv("conv.set", params, host),
+  convStop: (params, host) => api.conv("conv.stop", params, host),
+  convRemove: (params, host) => api.conv("conv.remove", params, host),
+  convDetail: (params, host) => api.conv("conv.detail", params, host),
+  convCommands: (params, host) => api.conv("conv.commands", params, host),
+  convToTerminal: (params, host) => api.conv("conv.toTerminal", params, host),
+  convAdopt: (params, host) => api.conv("conv.adopt", params, host),
 
   // ── 작업 스냅샷(자동 체크포인트) ──
   //  1순위 = 사이드카 데몬 직결(cpt.sock). 같은 머신에서 나는 트리거인데 back → 제어 WS → 이 머신의

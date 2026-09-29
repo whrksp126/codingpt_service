@@ -14,6 +14,7 @@ import { smartAdd } from "./workspace-view.js";
 import { PAGE_AGENT_JS } from "./page-agent.js";
 import { startDesignPick, cancelDesignPick, isPicking } from "./design-pick.js";
 import { applyChatEvent } from "./chat-view.js";
+import { applyConvEvent, setConvChannel } from "./conv-view.js";
 import { applyDeviceApprovalEvent, e2eeCaps, refreshE2ee } from "./e2ee.js";
 import { applyRunnerStatus, resetHostLocks } from "./host-lock.js";
 import { basename, IS_WINDOWS } from "./path-utils.js";
@@ -144,6 +145,8 @@ function addSurfaceGated(rt, kind, opts) {
     if (host) {
       const tab = kind === "ide"
         ? { kind: "ide", openPath: opts.openPath || null, tid: newTid() }
+        : kind === "chat"
+          ? { kind: "chat", ...(opts.threadId ? { threadId: opts.threadId } : {}), tid: newTid() }
         : kind === "emulator"
           ? { kind: "emulator", deviceId: opts.deviceId || null, metaName: "", tid: newTid() }
           : { kind: "preview", url: opts.url || "", tid: newTid() };
@@ -159,6 +162,7 @@ function addSurfaceGated(rt, kind, opts) {
     }
   }
   const sopts = kind === "ide" ? { openPath: opts.openPath }
+    : kind === "chat" ? { threadId: opts.threadId || null }
     : kind === "emulator" ? { deviceId: opts.deviceId || null }
       : { url: opts.url || "" };
   S.splitPane(focusId, "h", kind, sopts);
@@ -216,7 +220,8 @@ async function connect() {
       //  agentstate.v1 = 에이전트 상태 push(기능3) 수신기가 실제로 있다(아래 'agent_state' 케이스 →
       //   state.setAgentState). 팬아웃은 caps 로 게이팅하지 않으므로(모르는 type 은 무시) 이 신고는
       //   진단·통계용이지만, "구현한 것만 신고" 규약을 지켜 수신기와 같은 커밋에서만 실린다.
-      caps: ["caps.v1", "approval.v1", "transcript.v1", "agentstate.v1", ...e2eeCaps()],
+      //  conv.v1 = 채팅 v2 탭(conv-view.js)이 실제로 있다 — 아래 'conv_event' 수신기와 같은 커밋에서만 실린다.
+      caps: ["caps.v1", "approval.v1", "transcript.v1", "agentstate.v1", "conv.v1", ...e2eeCaps()],
       // 진단 전용(분기 금지 — 분기는 항상 caps). 서버가 "누가 어떤 조합인지" 를 알 유일한 단서.
       appVersion: appVer || undefined,
       // 이 화면이 **실제로 실행할 수 있는** ui_command 이름. 서버는 이 목록으로 명령을 보낼 화면을
@@ -228,6 +233,8 @@ async function connect() {
     S.loadNotifications(); // 끊긴 사이 놓친 알림 보충(재접속 시에도)
     S.loadApprovals();     // 승인은 push 가 힌트, pull 이 정본 — 재접속마다 재조회(유령/누락 방지)
     void refreshE2ee();    // 열쇠 상태/대기 목록도 같은 규율(재접속마다 pull)
+    // 채팅 v2 — conv_event 는 버퍼가 없는 라이브 중계다. 끊긴 사이는 열려 있는 채팅 탭이 conv.since 로 메운다.
+    setConvChannel(true);
   };
   ws.onmessage = (e) => {
     let msg = null;
@@ -261,6 +268,10 @@ async function connect() {
       case "chat_event":
         // 트랜스크립트(기능5) 라이브 델타 — 해당 chatId 를 구독 중인 Chat 뷰에만 배달.
         applyChatEvent(msg);
+        break;
+      case "conv_event":
+        // 채팅 v2 — 영속 이벤트·델타·목록 힌트·control. 그 대화를 연 채팅 탭에만 배달한다(호스트 대조 포함).
+        applyConvEvent(msg);
         break;
       case "agent_state":
         // 기능3(에이전트 상태머신) push — 토글 노출 판정의 **1순위**(폴백은 pane.js 의 tab.cmd).
@@ -308,6 +319,7 @@ async function connect() {
   ws.onclose = () => {
     if (sock === ws) {
       sock = null;
+      setConvChannel(false);   // 채팅 탭의 연결 상태 줄("재연결 중…")
       scheduleRetry();
     }
   };
@@ -531,6 +543,7 @@ function serializeNode(node) {
         if (t.url) tab.url = t.url;
         if (t.openPath) tab.openPath = t.openPath;
         if (t.deviceId) tab.deviceId = t.deviceId;   // 모바일 화면 탭이 보고 있는 기기
+        if (t.threadId) tab.threadId = t.threadId;   // 채팅 탭이 보여 주는 대화
         return tab;
       });
       out.active = node.active || 0;
@@ -540,6 +553,7 @@ function serializeNode(node) {
     //  ★ 모바일 화면은 **어느 기기를 보고 있는지**가 그 pane 의 내용이다 — url/openPath 와 같은 자리.
     //   빠뜨리면 `cpt layout tree` 로는 "emulator" 라는 것만 알고 무엇이 떠 있는지 알 수 없다.
     if (node.deviceId) out.deviceId = node.deviceId;
+    if (node.kind === "chat") { if (node.threadId) out.threadId = node.threadId; if (node.title) out.title = node.title; }
     return out;
   }
   return { dir: node.dir, ratio: node.ratio, first: serializeNode(node.first), second: serializeNode(node.second) };
@@ -1037,7 +1051,8 @@ export async function applySnapshotPC(id) {
   return err ? { ok: false, error: err } : { ok: true };
 }
 
-const PANE_TYPES = ["terminal", "ide", "preview", "emulator"];
+//  chat = 채팅 v2 대화 탭. (앞의 네 종류 줄은 test/emulator-crossimpl.mjs 가 글자 그대로 잡고 있어 뒤에 잇는다.)
+const PANE_TYPES = ["terminal", "ide", "preview", "emulator"].concat(["chat"]);
 
 // 모바일 화면 표면 찾기 — 독립 pane 우선, 없으면 혼합 탭. (findPreviewTarget/findIdeTarget 미러)
 function findEmulatorTarget(rt) {
@@ -1141,6 +1156,7 @@ const handlers = {
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
       : p.type === "ide" ? { openPath: normPath(meta, p.path) }
       : p.type === "emulator" ? { deviceId: p.device || null }
+      : p.type === "chat" ? { threadId: p.threadId || null }
       : { fresh: true };
     S.splitPane(targetId, dir, p.type, opts);
     return { ok: true, paneId: rt.focusId };
@@ -1154,6 +1170,7 @@ const handlers = {
       p.type === "preview" ? { url: p.url ? resolveUrl(p.url) : "" }
       : p.type === "ide" ? { openPath: normPath(meta, p.path) }
       : p.type === "emulator" ? { deviceId: p.device || null }
+      : p.type === "chat" ? { threadId: p.threadId || null }
       : undefined;
     const paneId = smartAdd(p.type, extra);
     if (!paneId) throw new Error(i18n.t('pane 생성 실패'));

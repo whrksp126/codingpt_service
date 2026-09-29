@@ -18,7 +18,12 @@ import * as S from "./state.js";
 import { getPane } from "./pane.js";
 import * as i18n from './i18n/index.js';
 
-export const SURFACE_KINDS = new Set(["preview", "ide", "emulator"]);
+//  chat = 채팅 v2 대화 탭(chat-v2-design §10.7). 속성은 threadId·title. 대화 본문은 conv 저장소가 정본이다.
+export const SURFACE_KINDS = new Set(["preview", "ide", "emulator", "chat"]);
+
+// 채팅 표면의 공유 id 는 **대화에서 나온다**(`c-<threadId>`). 임의 id 를 쓰면 두 기기가 같은 대화를 각자 열었을 때
+//  기록이 둘이 되고 모든 기기에 같은 대화 탭이 둘씩 뜬다. 대화가 같으면 id 도 같으니 그럴 수가 없다.
+export const chatSid = (threadId) => "c-" + String(threadId);
 
 /** wsId → Map<sid, 등록된 속성 키>. 없으면 아직 한 번도 안 맞춘 것(첫 sync 가 전부 등록한다). */
 const known = new Map();
@@ -29,7 +34,8 @@ let syncing = false;
 let dirty = false;
 
 const knownFor = (wsId) => { let m = known.get(wsId); if (!m) { m = new Map(); known.set(wsId, m); } return m; };
-const propsOf = (e) => ({ url: e.url ?? undefined, openPath: e.openPath ?? null, deviceId: e.deviceId ?? null, title: e.title || undefined });
+//  threadId 는 채팅에만 있다 — 없으면 undefined 라 JSON 에서 빠지고, 다른 종류의 키 문자열은 예전과 같다.
+const propsOf = (e) => ({ url: e.url ?? undefined, openPath: e.openPath ?? null, deviceId: e.deviceId ?? null, title: e.title || undefined, threadId: e.threadId || undefined });
 const keyOf = (e) => JSON.stringify(propsOf(e));
 
 /**
@@ -39,15 +45,25 @@ const keyOf = (e) => JSON.stringify(propsOf(e));
 let assignedSid = false;   // surfacesOf 가 sid 를 새로 붙였다 — 저장본에 남게 한 번 더 emit 한다
 export function surfacesOf(layout) {
   const out = [];
+  //  채팅: 아직 첫 메시지를 안 보낸 새 대화(threadId 없음)는 **표면이 아니다** — 이 기기에만 있다(§10.7).
+  //   conv.create 가 끝나 threadId 가 생기는 순간부터 공유된다. sid 는 대화에서 나온다(chatSid).
+  const chatSkip = (h) => h.kind === "chat" && !h.threadId;
+  const chatFix = (h) => {
+    if (h.kind !== "chat") return false;
+    const want = chatSid(h.threadId);
+    if (h.sid !== want) { h.sid = want; assignedSid = true; }
+    return true;
+  };
   T.eachLeaf(layout, (l) => {
     if (SURFACE_KINDS.has(l.kind)) {
-      if (!l.sid) { l.sid = l.tid || l.id; assignedSid = true; }
-      out.push({ sid: l.sid, kind: l.kind, url: l.url, openPath: l.openPath, deviceId: l.deviceId, title: l.metaName || l.metaTitle || "", leafId: l.id, tab: null, index: -1 });
+      if (chatSkip(l)) return;
+      if (!chatFix(l) && !l.sid) { l.sid = l.tid || l.id; assignedSid = true; }
+      out.push({ sid: l.sid, kind: l.kind, url: l.url, openPath: l.openPath, deviceId: l.deviceId, threadId: l.threadId, title: l.kind === "chat" ? (l.title || "") : (l.metaName || l.metaTitle || ""), leafId: l.id, tab: null, index: -1 });
     } else if (l.kind === "terminal") {
       (l.tabs || []).forEach((t, i) => {
-        if (!SURFACE_KINDS.has(t.kind)) return;
-        if (!t.sid) { t.sid = t.tid || T.newPaneId(); assignedSid = true; }
-        out.push({ sid: t.sid, kind: t.kind, url: t.url, openPath: t.openPath, deviceId: t.deviceId, title: t.metaName || t.metaTitle || "", leafId: l.id, tab: t, index: i });
+        if (!SURFACE_KINDS.has(t.kind) || chatSkip(t)) return;
+        if (!chatFix(t) && !t.sid) { t.sid = t.tid || T.newPaneId(); assignedSid = true; }
+        out.push({ sid: t.sid, kind: t.kind, url: t.url, openPath: t.openPath, deviceId: t.deviceId, threadId: t.threadId, title: t.kind === "chat" ? (t.title || "") : (t.metaName || t.metaTitle || ""), leafId: l.id, tab: t, index: i });
       });
     }
   });
@@ -94,7 +110,7 @@ async function sync() {
           if (got && got.id !== e.sid) {
             //  에이전트 PC 흡수 — 데몬이 이미 있는 표면을 돌려줬다. 로컬 sid 를 갈아 끼운다(다음 목록에 그 id 로 온다).
             if (e.tab) e.tab.sid = got.id; else { const l = T.findLeaf(rt.layout, e.leafId); if (l) l.sid = got.id; }
-            prev.set(got.id, JSON.stringify({ url: got.url ?? undefined, openPath: got.openPath ?? null, deviceId: got.deviceId ?? null, title: got.title || undefined }));
+            prev.set(got.id, keyOf(got));
             curIds.add(got.id); curIds.delete(e.sid);
             S.emit();
           } else prev.set(e.sid, k);
@@ -117,13 +133,14 @@ async function sync() {
 }
 
 /** 리컨실러가 방금 들인/닫은 표면 — 다음 sync 가 되돌려 보내지 않게 기록만 맞춘다. */
-function noteKnown(wsId, sid, item) { knownFor(wsId).set(sid, JSON.stringify({ url: item.url ?? undefined, openPath: item.openPath ?? null, deviceId: item.deviceId ?? null, title: item.title || undefined })); }
+function noteKnown(wsId, sid, item) { knownFor(wsId).set(sid, keyOf(item)); }
 function forgetKnown(wsId, sid) { knownFor(wsId).delete(sid); }
 
 function tabFor(item) {
   const base = { kind: item.kind, tid: T.newPaneId(), sid: item.id };
   if (item.kind === "preview") return { ...base, url: item.url || null };
   if (item.kind === "ide") return { ...base, openPath: item.openPath || null };
+  if (item.kind === "chat") return { ...base, threadId: item.threadId, ...(item.title ? { title: item.title } : {}) };
   const desk = typeof item.deviceId === "string" && item.deviceId.startsWith("desktop:");
   return { ...base, deviceId: item.deviceId || null, metaName: item.title || (desk ? i18n.t('에이전트 PC') : "") };
 }
@@ -138,6 +155,13 @@ export function reconcile(meta, w, items) {
   const remote = new Map(items.map((s) => [s.id, s]));
   const local = surfacesOf(w.layout);
   const seen = new Set();
+  // 채팅은 **대화가 같으면 같은 표면**이다 — 다른 클라가 다른 id 로 올린 기록도 이미 연 것으로 친다(탭 둘 방지).
+  const localThreads = new Set(local.filter((e) => e.kind === "chat").map((e) => e.threadId));
+  for (const s of items) {
+    if (s.kind !== "chat") continue;
+    if (!s.threadId) { seen.add(s.id); continue; }          // 대화 없는 채팅 기록은 들일 것이 없다
+    if (localThreads.has(s.threadId)) { seen.add(s.id); remote.set(chatSid(s.threadId), s); }
+  }
   // ① 기록에서 사라진 것 — 2틱 유예 뒤 닫는다(등록 중인 것은 보호).
   const closeLeaves = [];
   const deskSeen = new Set();   // OS별로 하나씩만(macOS·Linux 는 각각 독립 pane) — 같은 OS 둘째만 더블링으로 닫는다.
@@ -186,7 +210,7 @@ export function reconcile(meta, w, items) {
     } else {
       const anchor = T.firstLeafId(w.layout);
       for (const s of missing) {
-        const node = T.leaf(s.kind, { url: s.url, openPath: s.openPath, deviceId: s.deviceId, sid: s.id, metaName: s.title });
+        const node = T.leaf(s.kind, { url: s.url, openPath: s.openPath, deviceId: s.deviceId, sid: s.id, metaName: s.title, threadId: s.threadId, title: s.title });
         if (!anchor) { w.layout = node; } else { w.layout = T.split(w.layout, anchor, "h", node).tree; }
         noteKnown(meta.id, s.id, s);
       }

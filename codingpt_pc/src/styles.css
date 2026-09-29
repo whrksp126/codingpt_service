@@ -2850,3 +2850,143 @@ button.au-chip, .au-chip { border: none; cursor: pointer; font-family: inherit; 
 .dp-include input[type="checkbox"], .tk-check input[type="checkbox"] { accent-color: var(--text2); width: 14px; height: 14px; margin: 0; flex: none; }
 .tv-host-btn { display: inline-flex; align-items: center; gap: 0; background: transparent; border: none; padding: 2px 6px; margin-left: 2px; border-radius: var(--r-sm); cursor: pointer; font-family: inherit; }
 .tv-host-btn:hover { background: var(--elevated2); color: var(--text2); }
+
+/* ── 채팅 v2 탭(탭 종류 `chat`, conv-view.js) ─────────────────────────────────────────
+   행 모양은 채팅 v1 의 `.chat-*` 를 그대로 쓴다(같은 대화가 두 화면에서 다르게 보이지 않게).
+   여기에는 v2 에만 있는 것만 둔다: 루트·헤더·연결 상태 줄·스트리밍 꼬리·낙관 버블·턴 요약·대화 목록.
+   색 규율: 켜짐·선택은 명암으로만. 색은 상태 신호(조치 필요 점)와 오류에만 쓴다. */
+.pane-conv {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: var(--base); position: relative; overflow: hidden;
+}
+.pane-mixed.pane-conv { display: none; }   /* 혼합 탭 — 표시는 pane.js 가 켠다(.pane-mixed 와 같은 규칙) */
+/* 전역 user-select:none 을 이 안에서만 되돌린다. `-webkit-` 필수(WKWebView 는 접두사 없는 선언을 무시한다). */
+.pane-conv, .pane-conv * { user-select: text; -webkit-user-select: text; }
+.pane-conv button, .pane-conv .conv-head, .pane-conv .conv-pop-head { user-select: none; -webkit-user-select: none; }
+/* v1 의 위쪽 44px 는 TUI 토글 버튼 자리다 — 여기에는 그 버튼이 없다. */
+.pane-conv .chat-scroll { padding-top: 14px; }
+.conv-scroll:focus { outline: none; }
+.conv-rows { flex: 1 0 auto; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+.conv-head {
+  flex: none; display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.conv-head-gap { flex: 1 1 auto; }
+.conv-title {
+  min-width: 0; max-width: 60%; padding: 3px 6px; margin-left: -6px; border: none; border-radius: var(--r-sm);
+  background: transparent; color: var(--text2); font-family: var(--ui-font); font-size: 12.5px; font-weight: 600;
+  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+}
+.conv-title:hover:not(:disabled) { background: var(--elevated2); color: var(--text); }
+.conv-title:disabled { cursor: default; color: var(--text3); }
+.conv-title-input {
+  flex: 1 1 auto; min-width: 0; max-width: 60%; height: 24px; padding: 0 6px; margin-left: -6px;
+  background: var(--base); border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); outline: none;
+  color: var(--text); font-family: var(--ui-font); font-size: 12.5px; font-weight: 600;
+}
+.conv-title-input:focus { border-color: var(--text3); }
+
+/* 연결 상태 줄 — 재연결 중 / PC 오프라인 / 터미널에서 사용 중 */
+.conv-conn {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  font-size: 12px; line-height: 17px; color: var(--text3);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.conv-conn.warn { color: var(--warn); }
+.conv-conn.hidden { display: none; }
+
+.conv-link {
+  border: none; background: transparent; padding: 0; cursor: pointer;
+  color: var(--text2); font-family: var(--ui-font); font-size: 12px; text-decoration: underline; text-underline-offset: 2px;
+}
+.conv-link:hover { color: var(--text); }
+.conv-link:disabled { opacity: 0.5; cursor: default; }
+.conv-link.danger:hover { color: var(--error); }
+.conv-note { font-size: 11.5px; color: var(--dim); }
+
+/* 어시스턴트 본문 — 블록마다 자기 요소. v1 은 블록이 행의 직계 자식이라 간격 규칙(:last-child)이 달리 걸린다. */
+.conv-blk + .conv-blk { margin-top: 8px; }
+.conv-blk > .chat-p:last-child, .conv-blk > .chat-list:last-child,
+.conv-blk > .chat-code:last-child, .conv-blk > .chat-quote:last-child { margin-bottom: 0; }
+.conv-blk > .chat-tablewrap { margin: 0; }
+/* 스트리밍 커서 — 무채색. 글 끝에 붙는 작은 막대 */
+.conv-caret {
+  display: inline-block; width: 7px; height: 14px; margin-top: 4px; border-radius: 1.5px;
+  background: var(--text3); animation: convCaret 1s steps(2, start) infinite;
+  user-select: none; -webkit-user-select: none;
+}
+@keyframes convCaret { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.15; } }
+.conv-sub { margin-left: 16px; }
+.conv-think-live { display: flex; gap: 8px; align-items: baseline; cursor: default; }
+.conv-think-label { flex: none; color: var(--text3); }
+
+/* 내 메시지 — 말풍선 + 아래 한 줄(상태·동작) */
+.conv-user { align-self: flex-end; max-width: 88%; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; }
+.conv-user > .chat-msg-user { max-width: 100%; align-self: auto; }
+.conv-user.sending > .chat-msg-user, .conv-user.queued > .chat-msg-user { opacity: 0.62; }
+.conv-user-foot { display: flex; align-items: center; gap: 10px; min-height: 16px; }
+.conv-user-foot:empty { display: none; }
+.conv-fail { font-size: 11.5px; color: var(--error); }
+
+/* 행 동작(복사) — 마우스를 올렸을 때만. 자리는 항상 차지한다(나타날 때 글이 밀리지 않게). */
+.conv-acts { display: flex; gap: 2px; opacity: 0; transition: opacity 100ms ease; }
+.conv-assistant > .conv-acts { margin-top: 4px; margin-left: -4px; }
+.conv-assistant:hover > .conv-acts, .conv-user:hover .conv-acts, .conv-acts:focus-within { opacity: 1; }
+.conv-act {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 20px;
+  border: none; border-radius: 4px; background: transparent; color: var(--dim); cursor: pointer;
+}
+.conv-act:hover { background: var(--hover); color: var(--text); }
+.conv-act.done { color: var(--text2); }
+
+/* 턴 끝 요약 · 안내 */
+.conv-turn { align-self: flex-start; font-size: 11.5px; color: var(--dim); }
+.conv-turn:empty { display: none; }
+.conv-notice { font-size: 12px; line-height: 17px; color: var(--text3); }
+.conv-notice.warn { color: var(--warn); }
+.conv-notice.error { color: var(--error); }
+.conv-working-time { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* 요청 도크 */
+.conv-dock-more { flex: none; padding: 4px 14px 0; font-size: 11.5px; color: var(--dim); }
+.conv-dock-more.link { cursor: pointer; }
+.conv-dock-more.link:hover { color: var(--text2); }
+.conv-dock-more.hidden { display: none; }
+
+/* 전송 버튼의 중단 모양 — 같은 자리, 같은 색. 글리프만 다르다 */
+.chat-send.stop { background: var(--text2); }
+
+/* 대화 목록 — 헤더 아래로 펼친다. 이 pane 밖으로 나가지 않는다(옆 pane 의 프리뷰 위에 걸치지 않게) */
+.conv-pop {
+  position: absolute; top: 38px; right: 8px; z-index: 60;
+  width: min(360px, calc(100% - 16px)); max-height: min(70%, 480px);
+  display: flex; flex-direction: column;
+  background: var(--elevated); border: 1px solid var(--border-ctrl); border-radius: var(--r-md);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.42);
+}
+.conv-pop, .conv-pop * { user-select: none; -webkit-user-select: none; }
+.conv-pop-head { flex: none; padding: 9px 12px 6px; font-size: 11.5px; color: var(--dim); }
+.conv-pop-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 5px 5px; display: flex; flex-direction: column; gap: 1px; }
+.conv-li { position: relative; padding: 7px 8px; border-radius: var(--r-sm); cursor: pointer; min-width: 0; }
+.conv-li:hover { background: var(--hover); }
+.conv-li.on { background: var(--elevated2); }
+.conv-li.busy { opacity: 0.5; pointer-events: none; }
+.conv-li-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.conv-li-title { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-li-time { flex: none; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.conv-li-badge { flex: none; font-size: 10.5px; color: var(--text3); border: 1px solid var(--border-ctrl); border-radius: 4px; padding: 0 5px; line-height: 15px; }
+.conv-li-prev { margin-top: 2px; font-size: 11.5px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-li-acts { display: flex; align-items: center; gap: 10px; margin-top: 3px; }
+.conv-li-acts:empty { display: none; }
+.conv-li-del {
+  position: absolute; right: 6px; bottom: 5px; display: none; align-items: center; justify-content: center;
+  width: 22px; height: 20px; border: none; border-radius: 4px; background: var(--elevated); color: var(--dim); cursor: pointer;
+}
+.conv-li:hover .conv-li-del { display: inline-flex; }
+.conv-li-del:hover { color: var(--error); }
+/* 상태 점 — 색을 쓰는 유일한 자리(상태 신호). 작업 중은 무채색 맥동, 조치 필요는 탭 점과 같은 색 */
+.conv-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text3); }
+.conv-dot.working { animation: chatWorkPulse 1.1s ease-in-out infinite; }
+.conv-dot.attention { background: var(--warn); }
+.conv-dot.error { background: var(--error); }

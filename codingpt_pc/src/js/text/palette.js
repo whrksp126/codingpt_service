@@ -38,6 +38,7 @@ export const PALETTE_TEXT = {
       "ws.addIde": "IDE 추가",
       "ws.addPreview": "웹뷰 추가",
       "ws.addEmulator": "모바일 화면 추가",
+      "ws.addChat": "채팅 추가",
       "ws.ports": "열린 포트 보기",
       "pane.splitRight": "오른쪽으로 나누기",
       "pane.splitDown": "아래로 나누기",

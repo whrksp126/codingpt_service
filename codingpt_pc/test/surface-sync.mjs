@@ -108,5 +108,60 @@ const meta = { id: 'ws1', localPath: 'proj' };
   ok(T.leafToTab(T.leaf('ide', { openPath: 'a', sid: 'I' })).sid === 'I' && T.leafToTab(T.leaf('preview', { url: 'u', sid: 'P' })).sid === 'P', 'ide/preview 도');
 }
 
+// ── ⑥ 채팅(채팅 v2 대화 탭, chat-v2-design §10.7) ──
+{
+  const { chatSid, SURFACE_KINDS } = await import('../src/js/surface-sync.js');
+  ok(SURFACE_KINDS.has('chat'), 'chat 은 공유 표면 종류다');
+  // 탭 종류 왕복 — threadId·title·draft·sid 를 잃지 않는다
+  const leaf = T.leaf('chat', { threadId: 'th-1', title: '리팩터링', draft: '쓰다 만 글', sid: 'c-th-1' });
+  ok(leaf.kind === 'chat' && leaf.threadId === 'th-1' && !('tabs' in leaf), "T.leaf('chat') 이 터미널 leaf 를 만들지 않는다");
+  const tab = T.leafToTab(leaf);
+  ok(tab.kind === 'chat' && tab.threadId === 'th-1' && tab.title === '리팩터링' && tab.draft === '쓰다 만 글' && tab.sid === 'c-th-1' && !!tab.tid, 'leaf → 탭(threadId·title·draft·sid)');
+  const back = T.tabToLeaf(tab, 'pX');
+  ok(back.id === 'pX' && back.kind === 'chat' && back.threadId === 'th-1' && back.title === '리팩터링' && back.draft === '쓰다 만 글' && back.sid === 'c-th-1' && back.tid === tab.tid, '탭 → leaf 왕복(잃는 것 없음)');
+  ok(T.leafToTab(back).tid === tab.tid, '다시 탭으로 — tid 유지(본문 DOM 의 열쇠)');
+  const blank = T.leaf('chat');
+  ok(blank.kind === 'chat' && !('threadId' in blank) && !('title' in blank) && !('draft' in blank), '새 대화는 빈 필드를 만들지 않는다');
+  ok(T.leaf('chat', { draft: 'x'.repeat(9000) }).draft.length === 4096, '초안은 4KB 까지');
+  ok(T.TAB_KINDS.includes('chat'), '혼합 탭으로 편입할 수 있는 종류다');
+
+  // 등록: threadId 가 없는 새 채팅 탭은 표면이 아니다
+  const term = { id: 't1', kind: 'terminal', tabs: [{ win: 1 }, { kind: 'chat', tid: 'a' }, { kind: 'chat', tid: 'b', threadId: 'th-9', title: '제목', sid: 'random-old' }], active: 0 };
+  const list = surfacesOf(term);
+  ok(list.length === 1 && list[0].kind === 'chat' && list[0].threadId === 'th-9' && list[0].title === '제목', '★ threadId 없는 새 채팅 탭은 등록하지 않는다(기기 로컬)');
+  ok(list[0].sid === chatSid('th-9') && term.tabs[2].sid === 'c-th-9' && !term.tabs[1].sid, '★ 채팅의 공유 id 는 대화에서 나온다(c-<threadId>)');
+  ok(/^[A-Za-z0-9_-]{1,64}$/.test(chatSid('21b28dc2-aaaa-4bbb-8ccc-1234567890ab')), '데몬 surfaces.js 가 받는 id 모양이다');
+  ok(surfacesOf(T.leaf('chat')).length === 0 && surfacesOf(T.leaf('chat', { threadId: 'x' }))[0].sid === 'c-x', '독립 pane 도 같은 규칙');
+
+  // 밖→안: 목록의 채팅을 탭으로 들인다
+  _reset(); pane.closed.length = 0;
+  const t2 = { id: 't1', kind: 'terminal', tabs: [{ win: 1 }], active: 0 };
+  const w = { layout: t2, focusId: 't1' };
+  reconcile(meta, w, [{ id: 'c-th-2', kind: 'chat', threadId: 'th-2', title: '다른 기기가 연 대화' }]);
+  ok(t2.tabs.length === 2 && t2.tabs[1].kind === 'chat' && t2.tabs[1].threadId === 'th-2' && t2.tabs[1].title === '다른 기기가 연 대화' && t2.tabs[1].sid === 'c-th-2', '채팅 탭 편입(threadId·title·sid)');
+  // 같은 대화를 다른 id 로 올린 기록 — 탭을 또 만들지 않는다
+  reconcile(meta, w, [{ id: 'c-th-2', kind: 'chat', threadId: 'th-2' }, { id: 'chat-xyz', kind: 'chat', threadId: 'th-2' }]);
+  ok(t2.tabs.length === 2, '★ 같은 대화를 다른 id 로 올린 기록이 있어도 탭은 하나다');
+  // 다른 클라가 다른 id 로만 올렸고 내 것(c-…)은 아직 목록에 없다 — 내 탭을 닫지 않는다
+  reconcile(meta, w, [{ id: 'chat-xyz', kind: 'chat', threadId: 'th-2' }]);
+  reconcile(meta, w, [{ id: 'chat-xyz', kind: 'chat', threadId: 'th-2' }]);
+  ok(pane.closed.length === 0 && t2.tabs.length === 2, '대화가 목록에 있는 한(어떤 id 로든) 내 탭을 닫지 않는다');
+  // 목록에서 사라지면 2틱 뒤 닫는다(다른 기기가 닫음)
+  reconcile(meta, w, []);
+  reconcile(meta, w, []);
+  ok(pane.closed.length === 1 && pane.closed[0][1] === 1, '다른 기기가 닫으면 여기서도 닫는다(2틱 유예)');
+  // 새 채팅 탭(threadId 없음)은 목록이 비어도 닫히지 않는다
+  _reset(); pane.closed.length = 0;
+  const t3 = { id: 't1', kind: 'terminal', tabs: [{ win: 1 }, { kind: 'chat', tid: 'n' }], active: 0 };
+  const w3 = { layout: t3, focusId: 't1' };
+  reconcile(meta, w3, []); reconcile(meta, w3, []); reconcile(meta, w3, []);
+  ok(pane.closed.length === 0 && t3.tabs.length === 2, '첫 메시지 전의 새 채팅 탭은 리컨실이 건드리지 않는다');
+  // 터미널 pane 이 없으면 분할로
+  _reset();
+  const w4 = { layout: T.leaf('ide', { openPath: 'x' }), focusId: null };
+  reconcile(meta, w4, [{ id: 'c-th-5', kind: 'chat', threadId: 'th-5', title: 'T' }]);
+  ok(w4.layout.dir && w4.layout.second.kind === 'chat' && w4.layout.second.threadId === 'th-5' && w4.layout.second.title === 'T', '분할 편입(chat leaf)');
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

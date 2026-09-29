@@ -461,11 +461,13 @@ export function splitPane(paneId, dir, kind, opts) {
   //  opts.fresh: 사용자가 명시적으로 "터미널 추가"한 경우 — 입양(claim) 없이 반드시 새로 생성.
   //  ⚠ 여기에 새 pane 종류를 더할 때는 **반드시 이 목록에 넣어라**. 빠지면 조용히 터미널이 하나
   //   생긴다(오류도 로그도 없다) — 2026-08-05 실사고: 헤더 [모바일 화면] 버튼이 터미널을 만들었다.
-  const node = kind === "preview" || kind === "ide" || kind === "emulator"
+  const node = kind === "preview" || kind === "ide" || kind === "emulator" || kind === "chat"
     ? T.leaf(kind, opts) : T.leaf("terminal", { win: "new" });
   if (node.kind === "terminal" && opts && opts.fresh) node.tabs[0].fresh = true;
   // opts.launchAgent: 터미널이 준비되면 그 에이전트를 실행(pane.js _ensureWin 이 tid 를 알 때 수행).
   if (node.kind === "terminal" && opts && opts.launchAgent) node.tabs[0].launchAgent = opts.launchAgent;
+  // opts.launchArgs: 그 실행에 붙일 인자(채팅 v2 → 터미널 이어가기의 `--resume <id>`).
+  if (node.kind === "terminal" && opts && opts.launchAgent && Array.isArray(opts.launchArgs)) node.tabs[0].launchArgs = opts.launchArgs;
   const r = T.split(w.layout, paneId, dir, node);
   w.layout = r.tree;
   w.focusId = r.added.id;

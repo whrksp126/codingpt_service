@@ -13,6 +13,7 @@ import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContr
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
+import { ConvView, adoptErrorText } from "./conv-view.js";
 import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
@@ -144,6 +145,8 @@ function b64ToBytes(b64) {
 function isDesktopSurface(node) { return !!(node && String(node.deviceId || "").startsWith("desktop:")); }
 export function surfaceLabel(kind, node) {
   if (kind === "ide") return "IDE";
+  //  채팅(채팅 v2) — 대화 제목이 탭 제목이다. 아직 첫 메시지를 안 보냈으면 종류 이름.
+  if (kind === "chat") return (node && node.title) || i18n.t('채팅');
   //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
   //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
   //  에이전트 PC 는 게스트 OS 로 이름을 붙인다("macOS · VM"/"Linux · VM"). OS 를 아직 모르면 "에이전트 PC".
@@ -155,6 +158,7 @@ export function surfaceLabel(kind, node) {
 }
 export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
+  if (kind === "chat") return icons.chat;
   if (kind === "emulator") {
     //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). id 로 판정, 모르면 모니터.
     if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o === "linux" ? icons.linux : o === "macos" ? icons.apple : icons.monitor; }
@@ -741,6 +745,7 @@ export class PaneView {
     if (node.kind === "terminal") this._buildTerminal();
     else if (node.kind === "ide") this._buildIde();
     else if (node.kind === "emulator") this._buildEmulator();
+    else if (node.kind === "chat") this._buildConv();
     else this._buildFrame(node.kind);
     this.buildHead();
   }
@@ -769,11 +774,13 @@ export class PaneView {
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
           : t.kind === "emulator" ? surfaceIcon("emulator", t)({ size: 13 })
+          : t.kind === "chat" ? icons.chat({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
           : t.kind === "ide" ? "IDE"
             : t.kind === "emulator" ? surfaceLabel("emulator", t)
+              : t.kind === "chat" ? surfaceLabel("chat", t)
               : (t.metaTitle || i18n.t('프리뷰'));
         // chat 모드 탭은 라벨 뒤에 작은 말풍선 글리프만 덧붙인다 — 탭 자체가 "다른 종류"로 보이면
         //  드래그/닫기 의미(터미널 탭=완전 삭제)를 오해하게 된다(부록 B).
@@ -786,10 +793,12 @@ export class PaneView {
         //  활성 탭에는 안 찍는다 — 지금 보이고 있어서 본문이 이미 말하고 있다.
         const twin = isT && typeof t.win === "number" ? t.win : null;
         const tcwd = this.ctx.localPath || "";
-        const waiting = twin != null && i !== this.node.active && (
+        const waiting = (twin != null && i !== this.node.active && (
           paneApprovalCount(tcwd, twin) > 0
           || (!!tcwd && (appState.notifications || []).some((n) => !n.read && n.cwd === tcwd && n.win === twin))
-        );
+        ))
+          // 채팅 탭 — 답을 기다리는 요청이 있다(본문을 한 번이라도 띄운 탭만 안다. 그 전에는 알림이 알린다).
+          || (t.kind === "chat" && i !== this.node.active && !!this._mixed.get(t.tid)?.conv?.needsAttention());
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`
           + (waiting ? `<span class="ptab-wait" title="${i18n.t('응답을 기다리는 중')}"></span>` : "");
         const x = document.createElement("span");
@@ -800,6 +809,8 @@ export class PaneView {
           this.closeTab(i);
         });
         tab.appendChild(x);
+        // 에이전트가 붙은 터미널 탭 — 우클릭 메뉴로 그 대화를 채팅 탭에서 이어 간다(chat-v2-design §6.2).
+        if (isT) tab.addEventListener("contextmenu", (e) => this._openTermTabMenu(e, t));
         tab.addEventListener("click", () => {
           this.switchTab(i);
           // 사용자가 탭을 직접 클릭 = 그 터미널을 봄 → 알림 읽음(프로그램적 전환은 안 읽음).
@@ -1147,6 +1158,94 @@ export class PaneView {
     }).catch(() => { /* 모듈 로드 실패 = 화면이 비어 있을 뿐 — pane 전체를 죽이지 않는다 */ });
   }
 
+  // ── 채팅 v2(탭 종류 `chat`) ──
+  //  holder = 그 대화를 들고 있는 것(혼합 탭 객체 또는 독립 pane 의 node). 필드는 threadId·title·draft 뿐이고
+  //  대화 본문은 레이아웃에 넣지 않는다(데몬이 정본). ctx 는 전부 라이브 getter — ChatView 와 같은 이유다.
+  _convCtx(holder) {
+    return {
+      cwd: () => this.ctx.localPath || "",
+      hostDeviceId: () => this.ctx.hostDeviceId ?? null,
+      isLocal: () => !!this.ctx.isLocal,
+      hostOffline: () => !!this.ctx.hostOffline,
+      deviceName: () => appState.daemon?.device_name || "",
+      tab: () => holder,
+      // 값이 undefined 면 그 필드를 지운다(저장본에 빈 필드를 남기지 않는다).
+      //  quiet = 초안처럼 화면에 안 보이는 값 — 헤더를 다시 그리지 않는다(입력 중 포커스를 건드리지 않게).
+      patchTab: (p, o) => {
+        let changed = false;
+        for (const [k, v] of Object.entries(p || {})) {
+          if (v === undefined || v === "") { if (k in holder) { delete holder[k]; changed = true; } }
+          else if (holder[k] !== v) { holder[k] = v; changed = true; }
+        }
+        if (!changed) return;
+        if (!(o && o.quiet)) this.buildHead();
+        this.ctx.persist?.();
+      },
+      refreshHead: () => this.buildHead(),
+      openFile: (rel) => this.ctx.onOpenIde?.(rel),
+      fs: () => this._ideFs() || api,
+      openTerminal: (o) => this.ctx.onOpenAgentTerminal?.(o),
+      focusThread: (id) => !!this.ctx.onFocusThread?.(id, holder),
+    };
+  }
+
+  _buildConv() {
+    const host = document.createElement("div");
+    host.className = "pane-conv";
+    this.body.appendChild(host);
+    this.conv = new ConvView(host, this._convCtx(this.node));
+  }
+
+  /** 지금 보이는 채팅 v2 뷰(없으면 null) — OS 드롭·포커스가 묻는다. */
+  activeConv() {
+    if (this.node.kind === "chat") return this.conv || null;
+    if (this.node.kind !== "terminal") return null;
+    const t = this.node.tabs?.[this.node.active];
+    return t && t.kind === "chat" ? this._mixed.get(t.tid)?.conv || null : null;
+  }
+
+  // 터미널 탭 우클릭 메뉴 — 지금은 한 줄("채팅으로 이어가기"). 조건이 안 되면 메뉴를 띄우지 않는다
+  //  (눌러도 안 되는 메뉴를 만들지 않는다): 에이전트가 붙어 있고, 이 PC 와 서버가 conv.v1 을 광고할 때만.
+  _openTermTabMenu(e, tab) {
+    if (!isTermTab(tab) || typeof tab.win !== "number") return;
+    if (!this._agentOn(tab) || this.ctx.convGate?.() !== true) return;
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelectorAll(".ctx-menu").forEach((el) => el.remove());
+    const menu = document.createElement("div");
+    menu.className = "ctx-menu";
+    const item = document.createElement("div");
+    item.className = "ctx-item";
+    item.textContent = i18n.t('채팅으로 이어가기');
+    menu.appendChild(item);
+    const close = () => { menu.remove(); document.removeEventListener("mousedown", closer, true); };
+    const closer = (ev) => { if (!menu.contains(ev.target)) close(); };
+    item.addEventListener("click", () => { close(); void this._adoptToChat(tab); });
+    document.body.appendChild(menu);
+    menu.style.left = Math.max(6, Math.min(e.clientX, window.innerWidth - menu.offsetWidth - 6)) + "px";
+    menu.style.top = Math.max(6, Math.min(e.clientY, window.innerHeight - menu.offsetHeight - 6)) + "px";
+    setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
+  }
+
+  // 터미널 → 채팅(§6.2). 데몬이 TUI 를 끝내고(소유자는 항상 1명) 그 대화를 채팅의 것으로 만든다.
+  //  실패하면 아무것도 바뀌지 않는다 — 이유만 말한다(문구가 아니라 오류 code 로 고른다).
+  async _adoptToChat(tab) {
+    if (this._adopting) return;
+    this._adopting = true;
+    const toast = async (msg) => { try { (await import("./workspace-view.js")).wvToast(msg); } catch (_) { /* noop */ } };
+    try {
+      const r = await api.convAdopt({ cwd: this.ctx.localPath || "", tid: tab.win }, this.ctx.hostDeviceId ?? null);
+      const th = (r && r.thread) || (r && r.data && r.data.thread) || null;
+      if (!th || !th.id) { await toast(i18n.t('이 터미널에서 이어갈 대화를 찾지 못했어요')); return; }
+      this.ctx.onOpenThread?.(th.id, th.title || "");
+    } catch (err) {
+      const m = /^HTTP \d{3}(?: ([A-Z][A-Z0-9_]+))?/.exec(String((err && err.message) || err || ""));
+      await toast(adoptErrorText(m && m[1] ? m[1] : /^HTTP 409/.test(String(err)) ? "DAEMON_OFFLINE" : ""));
+    } finally {
+      this._adopting = false;
+    }
+  }
+
   _buildIde() {
     this.ide = new IdeView(this.ctx.localPath || "", this.body, {
       openPath: this.node.openPath || null,
@@ -1226,6 +1325,11 @@ export class PaneView {
     }
     if (this.node.kind === "preview") {
       this._startPreviewSync();
+      return;
+    }
+    if (this.node.kind === "chat") {
+      this.conv?.mount();
+      this.conv?.setVisible(true);
       return;
     }
     if (this.node.kind !== "terminal") return;
@@ -1319,9 +1423,11 @@ export class PaneView {
     //  ⚠ 반드시 지운다 — 영속(pc-ui.json)에 남으면 앱을 켤 때마다 에이전트가 저절로 실행된다.
     if (tab && tab.launchAgent) {
       const agentId = tab.launchAgent;
+      const args = Array.isArray(tab.launchArgs) ? tab.launchArgs.filter((x) => typeof x === "string" && x) : [];
       delete tab.launchAgent;
+      delete tab.launchArgs;
       if (tab.win != null && tab.win !== "new") {
-        api.agentsLocal("agents.launch", { cwd: this.ctx.localPath || "", index: tab.win, id: agentId })
+        api.agentsLocal("agents.launch", { cwd: this.ctx.localPath || "", index: tab.win, id: agentId, ...(args.length ? { args, fresh: true } : {}) })
           .catch((e) => api.debugLog(`agents.launch 실패 pane=${this.id} agent=${agentId} — ${e}`));
       }
     }
@@ -1360,9 +1466,13 @@ export class PaneView {
 
   // ── 탭 조작 ──
   // launchAgent: 'claude' | 'codex' | … — 새 터미널이 준비되면 그 명령을 타이핑해 실행한다(§_ensureWin).
-  async addTab(launchAgent) {
+  // launchArgs: 그 실행에 붙일 인자(채팅 v2 → 터미널 이어가기의 `--resume <id>`). launchAgent 없이는 뜻이 없다.
+  async addTab(launchAgent, launchArgs) {
     if (this.node.kind !== "terminal" || !this.ctx.isLocal) return;
-    const tab = { win: "new", title: "", fresh: true, ...(launchAgent ? { launchAgent } : {}) };
+    const tab = {
+      win: "new", title: "", fresh: true,
+      ...(launchAgent ? { launchAgent, ...(Array.isArray(launchArgs) && launchArgs.length ? { launchArgs } : {}) } : {}),
+    };
     this.node.tabs.push(tab);
     this.node.active = this.node.tabs.length - 1;
     this.buildHead();
@@ -1461,6 +1571,10 @@ export class PaneView {
         fs: this._ideFs(),
       });
       m.ide.mount();
+    } else if (tab.kind === "chat") {
+      host.classList.add("pane-conv");
+      m.conv = new ConvView(host, this._convCtx(tab));
+      m.conv.mount();
     } else if (tab.kind === "emulator") {
       // 동적 import 라 탭 객체에 먼저 자리를 잡아 둔다 — 로드 전에 showActiveTab 이 돌아도
       //  `m.emu?.setVisible` 이 조용히 넘어가고, 로드되면 그때의 가시성으로 시작한다.
@@ -1488,6 +1602,7 @@ export class PaneView {
     if (!m) return;
     m.ide?.dispose();
     m.emu?.dispose();
+    m.conv?.dispose();
     m.preview?.dispose(keepWebview);
     m.host.remove();
     this._mixed.delete(tab.tid);
@@ -1525,6 +1640,7 @@ export class PaneView {
       m.host.style.display = on ? "flex" : "none";
       if (on && m.ide) m.ide.refresh();
       m.emu?.setVisible(!!on);
+      m.conv?.setVisible(!!on);
       m.preview?.setVisible(!!on);
     }
     // ★ Chat 모드에서는 fit 을 부르지 않는다 — fit → ptyResize → tmux window 리사이즈가 되고,
@@ -2343,6 +2459,9 @@ export class PaneView {
   }
 
   focus() {
+    // 채팅 탭이 보이고 있으면 입력칸으로 — 가려진 터미널에 포커스를 주면 타이핑이 안 보이는 셸로 들어간다.
+    const conv = this.activeConv();
+    if (conv) { conv.focus(); return; }
     this.term?.focus();
   }
 
@@ -2354,6 +2473,7 @@ export class PaneView {
       const at = this.node.tabs?.[this.node.active];
       if (at && at.kind === "ide") { this._mixed.get(at.tid)?.ide?.openSearch(); return; }
       if (at && at.kind === "preview") return; // 프리뷰는 페이지 검색 미지원
+      if (at && at.kind === "chat") return;    // 채팅 내 검색은 1차 범위 밖 — 가려진 터미널을 검색하지 않는다
       // Chat 모드에서 터미널 검색을 열면 "보이지도 않는 스크롤백"을 검색하게 된다(혼란).
       //  채팅 내 검색은 v1 범위 제외(§6-8) → 아무 것도 하지 않는다.
       if (this._chatActive()) return;
@@ -2436,7 +2556,11 @@ export class PaneView {
     clearTimeout(this._reopenTimer);
     clearTimeout(this._remoteReopenTimer);
     for (const [, m] of this._mixed) {
-      try { m.ide?.dispose(); m.preview?.dispose(); } catch (_) {}
+      //  하나가 던져도 나머지를 놓치지 않게 따로 감싼다. emu 는 프레임 루프, conv 는 폴링·전역 리스너를 들고 있다
+      //   (예전엔 ide/preview 만 해제해서 혼합 탭의 모바일 화면이 pane 을 닫은 뒤에도 프레임을 계속 받았다).
+      for (const k of ["ide", "preview", "emu", "conv"]) {
+        try { m[k]?.dispose(); } catch (_) { /* noop */ }
+      }
     }
     this._mixed.clear();
     try { this.chat?.dispose(); } catch (_) {}
@@ -2444,6 +2568,8 @@ export class PaneView {
     // 모바일 화면 — 프레임 루프가 계속 돌면 pane 을 닫아도 데이터를 계속 먹는다.
     try { this.emu?.dispose(); } catch (_) {}
     this.emu = null;
+    try { this.conv?.dispose(); } catch (_) {}
+    this.conv = null;
     try { this._inputDispose?.(); } catch (_) {}
     try { this._searchResDisposer?.dispose?.(); } catch (_) {}
     try {

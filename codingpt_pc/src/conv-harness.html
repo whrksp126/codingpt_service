@@ -1,0 +1,496 @@
+<!doctype html>
+<!-- 채팅 v2 탭 확인용 하네스(개발 전용) — Tauri·데몬·서버 없이 브라우저에서 conv-view.js 를 그대로 띄운다.
+     실행: cd src && python3 -m http.server 8899  →  http://localhost:8899/conv-harness.html
+     가짜 데몬이 **실제 데몬(runner-core/conv.js · conv-store.js)과 같은 모양**으로 이벤트 로그·델타·요청을 만든다:
+     upsert 줄의 `first`, 접은 스냅샷(seq 가 띄엄띄엄), working/waiting 은 state 이벤트가 아니라 thread 힌트,
+     pending 은 요청 배열, floorSeq 는 더 앞이 없으면 1, since 의 more/reset, toTerminal 의 args.
+     RPC 는 실제와 같은 길(api.conv → invoke("back_api_async", POST /api/daemon/conv))을 타고, 실패도
+     실제와 같은 문자열(`HTTP 500 CODE: 메시지`)로 던진다 — 뷰의 오류 분기까지 같이 확인된다.
+     쿼리: ?theme=light  ?thread=<id>(그 대화를 연 채로 시작: demo | long | terminal)
+     오른쪽 패널의 버튼이 시나리오다. 콘솔에서는 window.__h 로 같은 것을 부를 수 있다. -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>채팅 v2 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; background: var(--base); color: var(--text); font-family: var(--ui-font); }
+  #stage { flex: 1 1 auto; min-width: 0; display: flex; padding: 12px; }
+  #pane { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  #side { flex: none; width: 250px; padding: 12px; border-left: 1px solid var(--border); overflow-y: auto; font-size: 12px; }
+  #side h4 { margin: 12px 0 6px; font-size: 11px; color: var(--dim); font-weight: 600; }
+  #side button { display: block; width: 100%; margin: 3px 0; padding: 6px 8px; text-align: left; font-size: 12px;
+    background: var(--elevated2); color: var(--text2); border: 1px solid var(--border-ctrl); border-radius: 6px; cursor: pointer; }
+  #side button:hover { color: var(--text); background: var(--hover); }
+  #log { margin-top: 8px; font-family: var(--mono-font); font-size: 10.5px; color: var(--dim); white-space: pre-wrap; word-break: break-all; }
+</style></head>
+<body>
+<div id="stage"><div id="pane"><div class="pane-conv" id="host"></div></div></div>
+<div id="side">
+  <h4>응답</h4>
+  <button data-s="stream">긴 답 스트리밍(표·코드·목록)</button>
+  <button data-s="tools">도구 여러 개 + 묶음</button>
+  <button data-s="approve">권한 요청(승인 카드)</button>
+  <button data-s="question">질문 2개</button>
+  <button data-s="plan">계획 승인</button>
+  <button data-s="other">다른 기기가 먼저 답함</button>
+  <h4>보내기</h4>
+  <button data-s="failNext">다음 전송 실패(START_FAILED)</button>
+  <button data-s="slowNext">다음 전송 25초 지연(20초 실패 → 늦은 성공)</button>
+  <h4>연결</h4>
+  <button data-s="offline">PC 오프라인 켜기/끄기</button>
+  <button data-s="wsdown">WS 끊기(6초 뒤 재접속, 그 사이 이벤트 유실)</button>
+  <button data-s="gap">push 한 프레임 유실(seq 틈)</button>
+  <button data-s="badoff">델타 off 어긋남</button>
+  <button data-s="imported">터미널에서 이어 간 내역(push 없이 head 만 앞섬)</button>
+  <button data-s="recreate">로그가 바뀜(since → reset)</button>
+  <h4>기타</h4>
+  <button data-s="terminal">대화를 터미널 소유로</button>
+  <button data-s="theme">라이트/다크</button>
+  <div id="log"></div>
+</div>
+<!-- approvals.js → state.js → pane.js 가 xterm 전역을 모듈 평가 시점에 읽는다(없으면 TypeError). -->
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  const Q = new URLSearchParams(location.search);
+  if (Q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const logEl = document.getElementById('log');
+  const calls = [];
+  const log = (s) => { logEl.textContent = (String(s) + '\n' + logEl.textContent).slice(0, 3000); };
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id' + Math.random().toString(36).slice(2));
+
+  // ── 가짜 데몬 ──────────────────────────────────────────────────────────────
+  const F = { threads: new Map(), offline: false, wsUp: true, failNext: false, slowNext: false, dropNext: false, badOff: false };
+  let push = () => {};   // conv-view.applyConvEvent 가 꽂힌다
+  const fail = (code, msg, status = 500) => { throw `HTTP ${status} ${code}: ${msg || code}`; };
+
+  function mkThread(id, over) {
+    const t = {
+      meta: { id, agent: 'claude', cwd: 'demo/project', title: '', titleSet: false, createdAt: Date.now(), lastAt: Date.now(),
+        state: 'idle', owner: 'chat', ownerTid: null, mode: 'default', model: 'demo-model', headSeq: 0, pending: 0, preview: '', ...over },
+      log: [], first: new Map(), latest: new Map(), live: new Map(), turn: 0, sent: new Map(), open: false,
+    };
+    F.threads.set(id, t);
+    return t;
+  }
+  const keyOf = (e) => (e.op === 'msg' ? 'm:' + e.msg.key : e.op === 'req' ? 'q:' + e.req.id : null);   // msg 와 req 는 이름공간이 다르다
+  const pub = (t) => ({ ...t.meta, headSeq: t.log.length });
+  const reqsOf = (t) => { const m = new Map(); for (const e of t.log) if (e.op === 'req') m.set(e.req.id, e.req); return [...m.values()]; };
+  const pendingOf = (t) => reqsOf(t).filter((q) => q.status === 'pending');
+  /** 로그에 덧붙인다(push 없음). upsert 줄에는 first 를 싣는다 — conv-store.appendMany 와 같은 규칙. */
+  function append(t, ev, ts) {
+    const e = { seq: t.log.length + 1, ts: ts || Date.now(), ...ev };
+    const k = keyOf(e);
+    if (k) { if (t.first.has(k)) e.first = t.first.get(k); else t.first.set(k, e.seq); t.latest.set(k, e.seq); }
+    if (e.op === 'msg') e.msg = { ts: new Date(e.ts).toISOString(), truncated: false, hidden: false, ...e.msg };
+    t.log.push(e);
+    t.meta.lastAt = e.ts;
+    if (e.op === 'state') for (const f of ['state', 'mode', 'title', 'titleSet', 'owner', 'ownerTid']) if (e[f] !== undefined) t.meta[f] = e[f];
+    if (e.op === 'msg' && e.msg.role === 'assistant' && e.msg.kind === 'text') t.meta.preview = String(e.msg.text).slice(0, 120);
+    return e;
+  }
+  /** 영속 이벤트 기록 + push. dropNext 면 프레임 하나를 잃는다(틈). */
+  function emit(t, ev) {
+    const e = append(t, ev);
+    if (F.dropNext) { F.dropNext = false; log('유실: seq ' + e.seq); return e; }
+    if (F.wsUp) push({ type: 'conv_event', threadId: t.meta.id, headSeq: e.seq, events: [e], hostDeviceId: 7 });
+    return e;
+  }
+  /** thread 힌트 — working/waiting/idle 전이는 로그에 적지 않고 이것으로만 알린다(conv.js patch → hintThread). */
+  function hint(t) {
+    clearTimeout(t.hintTimer);
+    t.hintTimer = setTimeout(() => { if (F.wsUp) push({ type: 'conv_event', threadId: t.meta.id, thread: pub(t), hostDeviceId: 7 }); }, 120);
+  }
+  function patch(t, fields, event) {
+    Object.assign(t.meta, fields);
+    if (event) emit(t, { op: 'state', ...fields });
+    hint(t);
+  }
+  const superseded = (t, e) => { const k = keyOf(e); return !!k && t.latest.get(k) !== e.seq; };
+  /** 뒤에서부터 접은 페이지 — floorSeq 는 더 앞이 없으면 1. */
+  function pageBack(t, fromIdx, limit) {
+    const picked = [];
+    let i = fromIdx;
+    for (; i >= 0; i--) { const e = t.log[i]; if (superseded(t, e)) continue; if (picked.length >= limit) break; picked.push(e); }
+    let more = false;
+    for (; i >= 0; i--) if (!superseded(t, t.log[i])) { more = true; break; }
+    picked.reverse();
+    return { events: picked, floorSeq: more && picked.length ? picked[0].seq : 1 };
+  }
+  const snapshot = (t, limit) => ({ ...pageBack(t, t.log.length - 1, Math.min(limit || 200, 500)), headSeq: t.log.length });
+
+  function delta(t, key, kind, piece) {
+    const cur = t.live.get(key) || { key, kind, text: '' };
+    let off = cur.text.length;                 // UTF-16 코드 유닛
+    cur.text += piece;
+    t.live.set(key, cur);
+    if (F.badOff) { F.badOff = false; off += 3; log('델타 off 를 3 어긋나게 보냄'); }
+    if (F.wsUp) push({ type: 'conv_event', threadId: t.meta.id, delta: { key, kind, off, text: piece }, hostDeviceId: 7 });
+  }
+  const stopped = (t, n) => t.turn !== n || !t.open;
+  async function think(t, ms = 700) {
+    const n = t.turn;
+    const key = 'th' + uuid().slice(0, 6) + ':0';
+    delta(t, key, 'thinking', '');             // 생각 블록은 빈 조각으로 시작한다(§2.5)
+    await sleep(ms);
+    t.live.delete(key);
+    if (stopped(t, n)) return;
+    emit(t, { op: 'msg', msg: { key, role: 'assistant', kind: 'thinking', text: '', hidden: true, turn: n } });
+  }
+  async function streamText(t, key, text, per = 9, gap = 35) {
+    const n = t.turn;
+    for (let i = 0; i < text.length; i += per) {
+      if (stopped(t, n)) { t.live.delete(key); return; }   // 완성되지 못한 초안은 메시지가 되지 않는다
+      delta(t, key, 'text', text.slice(i, i + per));
+      await sleep(gap);
+    }
+    t.live.delete(key);
+    if (stopped(t, n)) return;
+    emit(t, { op: 'msg', msg: { key, role: 'assistant', kind: 'text', text, turn: n } });
+  }
+  async function runTool(t, name, title, args, res, ms = 500) {
+    const n = t.turn;
+    if (stopped(t, n)) return;
+    const id = 'tu_' + uuid().slice(0, 8);
+    emit(t, { op: 'msg', msg: { key: id, role: 'assistant', kind: 'tool_use', text: '', turn: n, tool: { id, name, title, argsPreview: args, ...(res && res.path ? { path: res.path } : {}) } } });
+    await sleep(ms);
+    if (stopped(t, n)) return;
+    emit(t, { op: 'msg', msg: { key: 'r:' + id, role: 'user', kind: 'tool_result', text: '', turn: n, result: { toolUseId: id, ok: true, preview: 'ok', lines: 1, bytes: 2, ...(res || {}) } } });
+  }
+  function startTurn(t) {
+    if (t.open) return;
+    t.turn += 1; t.turnAt = Date.now(); t.open = true;
+    emit(t, { op: 'turn', phase: 'start', turn: t.turn });
+    patch(t, { state: 'working' });
+  }
+  function endTurn(t, over) {
+    if (!t.open) return;
+    t.open = false;
+    t.live.clear();
+    const left = pendingOf(t);
+    for (const q of left) emit(t, { op: 'req', req: { ...q, status: 'canceled', reason: 'turn_end', resolvedAt: Date.now() } });
+    emit(t, { op: 'turn', phase: 'end', turn: t.turn, ok: true, durationMs: Date.now() - t.turnAt, usage: { input: 1200, output: 340, cacheRead: 45000, cacheCreate: 750 }, ...over });
+    patch(t, { state: 'idle', pending: 0 }, true);   // 턴 종료의 idle 은 로그에도 남는다
+  }
+  /** 요청을 열고 답을 기다린다. */
+  function ask(t, req) {
+    const id = 'req_' + uuid().slice(0, 8);
+    const full = { id, status: 'pending', requestedAt: Date.now(), turn: t.turn, ...req };
+    emit(t, { op: 'req', req: full });
+    patch(t, { state: 'waiting', pending: pendingOf(t).length });
+    return new Promise((resolve) => { t.waiters = t.waiters || new Map(); t.waiters.set(id, resolve); });
+  }
+  function closeReq(t, id, status, extra) {
+    const cur = reqsOf(t).find((q) => q.id === id);
+    if (!cur || cur.status !== 'pending') return false;
+    const { answers, message, ...keep } = extra || {};
+    emit(t, { op: 'req', req: { ...cur, status, resolvedAt: Date.now(), ...keep } });
+    if (t.open) patch(t, { state: pendingOf(t).length ? 'waiting' : 'working', pending: pendingOf(t).length });
+    const w = t.waiters && t.waiters.get(id);
+    if (w) { t.waiters.delete(id); w({ status, answers, message, ...keep }); }
+    return true;
+  }
+
+  const LONG = [
+    '## 요약', '', '요청하신 대로 **세 군데**를 고쳤어요. 핵심은 `applyPush` 의 *연속성 검사*입니다.', '',
+    '1. 틈이 있으면 프레임을 버립니다', '2. 같은 구간의 재수신은 무시합니다', '3. 앞이 겹치면 뒤쪽만 적용합니다', '',
+    '```js', 'export function classifyFrame(headSeq, events) {', '  const fresh = events.filter((e) => e.seq > headSeq);',
+    '  if (!fresh.length) return { kind: "dup" };', '', '  let want = headSeq + 1;',
+    '  for (const e of fresh) { if (e.seq !== want) return { kind: "gap" }; want += 1; }', '  return { kind: "apply", events: fresh };', '}', '```', '',
+    '| 경우 | 결과 | 다음 |', '|---|:--:|---|', '| 이어짐 | 적용 | - |', '| 틈 | 버림 | `conv.since` |', '| 중복 | 버림 | - |', '',
+    '> 참고: push 는 힌트이고 pull 이 정본입니다.', '',
+    '자세한 내용은 [설계 문서](https://example.com/design)를 보세요. 다음으로 ~~폴링 제거~~ 폴링 간격 조정을 제안합니다.', '',
+    '- 유휴 15초', '- 작업 중 5초', '  - push 가 3초 안에 왔으면 건너뜀', '',
+  ].join('\n');
+
+  const scripts = {
+    async stream(t) { startTurn(t); await think(t, 500); await streamText(t, 'm' + uuid().slice(0, 6) + ':0', LONG); endTurn(t); },
+    async tools(t) {
+      startTurn(t);
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', '파일을 살펴볼게요.\n');
+      for (const f of ['pane.js', 'state.js', 'tiling.js', 'api.js', 'main.js']) await runTool(t, 'Read', 'Read src/js/' + f, 'src/js/' + f, { preview: '…', lines: 120, bytes: 4200, path: 'src/js/' + f }, 350);
+      await runTool(t, 'Bash', 'Bash npm test', 'npm test', { preview: 'ALL PASS — pass 154 / fail 0\n> done', lines: 2, bytes: 40 }, 900);
+      await runTool(t, 'Edit', 'Edit src/js/tiling.js', 'src/js/tiling.js', { preview: '', path: 'src/js/tiling.js', patch: { hunks: [{ oldStart: 58, newStart: 58, lines: [' export const TAB_KINDS =', '-  ["ide", "preview", "emulator"];', '+  ["ide", "preview", "emulator", "chat"];'] }] } }, 500);
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', '탭 종류에 `chat` 을 더했고 테스트가 통과했어요.');
+      endTurn(t);
+    },
+    async approve(t) {
+      startTurn(t);
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', '빌드 산출물을 지우고 다시 만들게요.');
+      const id = 'tu_' + uuid().slice(0, 8);
+      emit(t, { op: 'msg', msg: { key: id, role: 'assistant', kind: 'tool_use', text: '', turn: t.turn, tool: { id, name: 'Bash', title: 'Bash rm -rf dist && npm run build', argsPreview: 'rm -rf dist && npm run build' } } });
+      const r = await ask(t, { kind: 'permission', tool: 'Bash', toolUseId: id, summary: 'rm -rf dist && npm run build', detail: '빌드 산출물을 지우고 다시 만든다', alwaysLabel: 'Bash(npm run build:*)', inputPreview: { command: 'rm -rf dist && npm run build' } });
+      if (!t.open) return;
+      emit(t, { op: 'msg', msg: { key: 'r:' + id, role: 'user', kind: 'tool_result', text: '', turn: t.turn, result: { toolUseId: id, ok: r.status === 'allowed', preview: r.status === 'allowed' ? 'build ok' : '사용자가 거부했습니다' + (r.message ? ': ' + r.message : ''), lines: 1, bytes: 8 } } });
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', r.status === 'allowed' ? '빌드가 끝났어요.' : '알겠어요, 지우지 않을게요.');
+      endTurn(t);
+    },
+    async question(t) {
+      startTurn(t);
+      const id = 'tu_' + uuid().slice(0, 8);
+      const questions = [
+        { header: '범위', question: '어디까지 고칠까요?', multiSelect: false, options: [{ label: '이 파일만', description: '가장 안전해요' }, { label: '모듈 전체', description: '호출부까지 함께' }] },
+        { header: '테스트', question: '어떤 테스트를 더할까요?', multiSelect: true, options: [{ label: '단위 테스트' }, { label: '대조 테스트' }, { label: '하네스' }] },
+      ];
+      emit(t, { op: 'msg', msg: { key: id, role: 'assistant', kind: 'question', text: '', turn: t.turn, tool: { id, name: 'AskUserQuestion', title: '질문' }, question: questions[0], questions } });
+      const r = await ask(t, { kind: 'question', tool: 'AskUserQuestion', toolUseId: id, questions });
+      if (!t.open) return;
+      emit(t, { op: 'msg', msg: { key: 'r:' + id, role: 'user', kind: 'tool_result', text: '', turn: t.turn, result: { toolUseId: id, ok: r.status === 'answered', preview: r.status === 'answered' ? JSON.stringify(r.answers) : '건너뜀' } } });
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', '고르신 대로 진행할게요.');
+      endTurn(t);
+    },
+    async plan(t) {
+      startTurn(t);
+      const id = 'tu_' + uuid().slice(0, 8);
+      const r = await ask(t, { kind: 'plan', tool: 'ExitPlanMode', toolUseId: id, plan: '## 계획\n\n1. `tiling.js` 에 종류 추가\n2. `pane.js` 본문 분기\n3. 테스트\n\n```sh\nnpm test\n```' });
+      if (!t.open) return;
+      await streamText(t, 'm' + uuid().slice(0, 6) + ':0', r.status === 'allowed' ? '계획대로 시작할게요.' + (r.message ? ' (의견: ' + r.message + ')' : '') : '계획을 다시 세울게요.');
+      endTurn(t);
+    },
+  };
+  function respondTo(t, text) {
+    const s = /승인|권한|rm/.test(text) ? 'approve' : /질문/.test(text) ? 'question' : /계획/.test(text) ? 'plan' : /도구|파일/.test(text) ? 'tools'
+      : /짧/.test(text) ? null : 'stream';
+    if (!s) { (async () => { startTurn(t); await streamText(t, 'm' + uuid().slice(0, 6) + ':0', '네, 알겠어요.'); endTurn(t); })(); return; }
+    void scripts[s](t);
+  }
+  const TERMINAL_ONLY = ['vim', 'terminal-setup', 'ide', 'exit'];
+  /** conv.js sendOnce 와 같은 순서: 멱등 → 터미널 전용 가드 → queued 기록 → (쉬고 있었으면) 도달 확인을 기다려 sent. */
+  async function accept(t, clientId, text) {
+    const key = 'u:' + clientId;
+    const prior = t.sent.get(clientId);
+    if (prior && prior.status !== 'failed') return { ok: true, status: prior.status, seq: prior.seq };
+    const base = { key, role: 'user', kind: 'text', text, clientId };
+    const m = /^\s*\/([A-Za-z0-9:_-]+)/.exec(text);
+    if (m && TERMINAL_ONLY.includes(m[1])) {
+      const e = emit(t, { op: 'msg', msg: { ...base, status: 'failed' } });
+      emit(t, { op: 'notice', level: 'info', code: 'TERMINAL_ONLY_COMMAND', text: `/${m[1]} 는 터미널에서만 쓸 수 있는 명령입니다` });
+      t.sent.set(clientId, { status: 'failed', seq: e.seq });
+      return { ok: false, status: 'failed', seq: e.seq, code: 'TERMINAL_ONLY_COMMAND' };
+    }
+    const wasIdle = !t.open;
+    if (wasIdle) startTurn(t);
+    if (!t.meta.titleSet && !t.meta.title) patch(t, { title: text.replace(/\s+/g, ' ').trim().slice(0, 60) }, true);
+    const ev = emit(t, { op: 'msg', msg: { ...base, status: 'queued', turn: t.turn } });
+    const rec = { status: 'queued', seq: ev.seq };
+    t.sent.set(clientId, rec);
+    const ack = () => { rec.status = 'sent'; emit(t, { op: 'msg', msg: { ...base, status: 'sent', turn: t.turn } }); };
+    if (!wasIdle) { setTimeout(() => { if (t.open) ack(); }, 1500); return { ok: true, status: 'queued', seq: ev.seq }; }
+    await sleep(200);
+    ack();
+    void respondTo(t, text);
+    return { ok: true, status: 'sent', seq: ev.seq };
+  }
+  // accept 가 턴을 이미 열었다 — 대본은 startTurn 을 다시 불러도 아무 일도 하지 않는다.
+
+  const rpc = {
+    'conv.caps': () => ({ enabled: true, agents: [{ id: 'claude', label: 'Claude', available: true, version: null }], modes: ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions', 'dontAsk'], maxLive: 4 }),
+    'conv.list': () => ({ threads: [...F.threads.values()].map(pub).sort((a, b) => b.lastAt - a.lastAt) }),
+    'conv.create': async (p) => {
+      if (F.failNext) { F.failNext = false; fail('START_FAILED', '에이전트를 시작하지 못했습니다'); }
+      if (F.slowNext) { F.slowNext = false; await sleep(25000); }
+      const had = [...F.threads.values()].find((t) => t.sent.has(p.clientId));   // clientId 로 멱등
+      const t = had || mkThread(uuid(), { mode: p.mode || 'default', cwd: p.cwd || 'demo/project' });
+      if (!p.text) return { thread: pub(t) };
+      const r = await accept(t, p.clientId, p.text);
+      return { thread: pub(t), seq: r.seq };
+    },
+    'conv.open': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      if (t.meta.external && !p.cwd) fail('THREAD_NOT_FOUND', '이 대화가 어느 폴더의 것인지 알 수 없습니다');
+      if (t.meta.external && t.meta.owner !== 'terminal') t.meta.external = false;   // 처음 열 때 가져온다
+      return { thread: pub(t), ...snapshot(t, p.limit), live: [...t.live.values()], pending: pendingOf(t) };
+    },
+    'conv.since': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      const s = Number(p.sinceSeq) | 0;
+      if (s > t.log.length) return { thread: pub(t), ...snapshot(t), more: false, reset: true, live: [...t.live.values()], pending: pendingOf(t) };
+      const range = t.log.filter((e) => e.seq > s).slice(0, 120);        // 응답 예산 흉내
+      const last = new Map();
+      for (const e of range) { const k = keyOf(e); if (k) last.set(k, e.seq); }
+      const events = range.filter((e) => { const k = keyOf(e); return !k || last.get(k) === e.seq; });   // 구간 안에서만 접는다
+      const cut = range.length ? range[range.length - 1].seq : s;
+      return { thread: pub(t), events, headSeq: t.log.length, more: cut < t.log.length, live: [...t.live.values()], pending: pendingOf(t) };
+    },
+    'conv.before': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      let i = t.log.length - 1;
+      while (i >= 0 && t.log[i].seq >= p.beforeSeq) i--;
+      return pageBack(t, i, Math.min(p.limit || 200, 500));
+    },
+    'conv.send': async (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      if (!p.clientId) fail('BAD_REQUEST', 'clientId 가 필요합니다');
+      if (t.meta.owner === 'terminal') fail('THREAD_BUSY_IN_TERMINAL', '터미널에서 사용 중');
+      if (F.failNext) {
+        F.failNext = false;
+        const e = emit(t, { op: 'msg', msg: { key: 'u:' + p.clientId, role: 'user', kind: 'text', text: p.text, clientId: p.clientId, status: 'failed' } });
+        t.sent.set(p.clientId, { status: 'failed', seq: e.seq });      // 기동 실패는 대화에 남는다(§4.1)
+        fail('START_FAILED', '에이전트를 시작하지 못했습니다');
+      }
+      if (F.slowNext) { F.slowNext = false; const r = await accept(t, p.clientId, p.text); await sleep(25000); return r; }
+      return accept(t, p.clientId, p.text);
+    },
+    'conv.respond': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      const cur = reqsOf(t).find((q) => q.id === p.reqId);
+      if (cur && cur.kind === 'question' && p.decision !== 'deny' && !(p.answers && Object.keys(p.answers).length)) fail('BAD_REQUEST', '답이 비어 있습니다');
+      const status = p.decision === 'deny' ? 'denied' : p.decision === 'answer' && cur && cur.kind === 'question' ? 'answered' : 'allowed';
+      if (!closeReq(t, p.reqId, status, { by: p.by || '이 PC', message: p.message, answers: p.answers, ...(p.always ? { always: true } : {}) })) fail('REQ_NOT_PENDING', '이미 닫힌 요청');
+      return { ok: true };
+    },
+    'conv.interrupt': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      if (!t.open) return { ok: true, interrupted: false };
+      for (const q of pendingOf(t)) {                                   // 요청은 즉시 닫힌다(턴 종료를 기다리지 않는다)
+        emit(t, { op: 'req', req: { ...q, status: 'canceled', reason: 'interrupted', resolvedAt: Date.now() } });
+        t.waiters && t.waiters.delete(q.id);
+      }
+      patch(t, { pending: 0, state: 'working' });
+      setTimeout(() => {
+        emit(t, { op: 'msg', msg: { key: 'u:int' + t.turn, role: 'user', kind: 'interrupt', text: '[Request interrupted by user]', hidden: true, turn: t.turn } });
+        endTurn(t, { ok: true, interrupted: true });
+      }, 250);
+      return { ok: true, interrupted: true };
+    },
+    'conv.set': async (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      if (p.title != null) { if (!String(p.title).trim()) fail('BAD_REQUEST', '제목이 비어 있습니다'); patch(t, { title: String(p.title).trim().slice(0, 60), titleSet: true }, true); }
+      if (p.mode != null) {
+        if (F.modeTimeout) { F.modeTimeout = false; await sleep(800); fail('CONTROL_TIMEOUT', '에이전트가 응답하지 않습니다'); }
+        patch(t, { mode: String(p.mode) }, true);
+      }
+      return { thread: pub(t) };
+    },
+    'conv.stop': () => ({ ok: true }),
+    'conv.remove': (p) => { F.threads.delete(p.threadId); if (F.wsUp) push({ type: 'conv_event', control: { kind: 'deleted', threadId: p.threadId }, hostDeviceId: 7 }); return { ok: true }; },
+    'conv.detail': (p) => { const t = F.threads.get(p.threadId); const e = t && [...t.log].reverse().find((x) => x.op === 'msg' && x.msg.key === p.key); return { text: e ? e.msg.text + '\n\n(전문 끝)' : '' }; },
+    'conv.commands': () => ({ items: [{ name: '/compact', desc: '대화를 요약해 줄인다' }, { name: '/review', desc: '변경 검토' }, { name: '/init', desc: '프로젝트 안내 파일 만들기' }] }),
+    'conv.toTerminal': (p) => {
+      const t = F.threads.get(p.threadId) || fail('THREAD_NOT_FOUND', '없는 대화');
+      if (t.open) fail('THREAD_BUSY', '작업이 끝난 뒤 넘길 수 있습니다');
+      patch(t, { owner: 'none', ownerTid: null }, true);
+      // command 는 표시용(실행 파일은 절대경로가 아니라 이름) — 클라는 args 를 쓴다.
+      return { ok: true, cwd: t.meta.cwd, agent: 'claude', command: `claude --resume ${t.meta.id}`, args: ['--resume', t.meta.id] };
+    },
+    'conv.adopt': (p) => {
+      const t = [...F.threads.values()].find((x) => x.meta.ownerTid === p.tid) || fail('THREAD_NOT_FOUND', '이 터미널에서 진행한 대화를 찾을 수 없습니다');
+      if (t.meta.termBusy) fail('THREAD_BUSY_IN_TERMINAL', '터미널에서 작업 중입니다');
+      if (F.adoptFail) { F.adoptFail = false; fail('ADOPT_FAILED', '터미널의 에이전트를 끝내지 못했습니다'); }
+      t.meta.external = false;
+      patch(t, { owner: 'chat', ownerTid: null }, true);
+      return { thread: pub(t) };
+    },
+  };
+
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push([cmd, args]);
+        if (cmd === 'back_api_async' && args.path === '/api/daemon/conv') {
+          const { method, params } = args.body;
+          log('→ ' + method + ' ' + JSON.stringify(params).slice(0, 90));
+          await sleep(60 + Math.random() * 80);
+          if (F.offline) throw 'HTTP 409 DAEMON_OFFLINE: PC 데몬이 연결되어 있지 않습니다.';
+          if (!rpc[method]) throw 'HTTP 400: 허용되지 않은 명령입니다.';
+          return rpc[method](params || {});
+        }
+        if (cmd === 'fs_tree') return [{ path: 'demo/project/src/js/pane.js' }, { path: 'demo/project/src/js/conv-view.js' }, { dir: true, path: 'demo/project/test', children: [{ path: 'demo/project/test/conv-model.mjs' }] }];
+        if (cmd === 'clipboard_paths') return [];
+        if (cmd === 'clipboard_image_png') return null;
+        if (cmd === 'daemon_status') return { paired: true, running: true, device_name: '이 Mac', deviceId: 7 };
+        return {};
+      },
+    },
+    event: { listen: async () => () => {} },
+  };
+
+  // ── 미리 있는 대화 ──
+  {
+    const t = mkThread('demo', { title: '채팅 탭 추가', titleSet: true });
+    t.turn = 1;
+    let at = Date.now() - 100000;
+    const e = (ev) => append(t, ev, (at += 900));
+    e({ op: 'turn', phase: 'start', turn: 1 });
+    e({ op: 'msg', msg: { key: 'u:seed1', role: 'user', kind: 'text', text: "탭 종류에 채팅을 더해 줘. 참고: '/Users/me/demo/spec.png'", clientId: 'seed1', status: 'queued', turn: 1 } });
+    e({ op: 'msg', msg: { key: 'th:0', role: 'assistant', kind: 'thinking', text: '먼저 탭 종류를 나열하는 자리를 전부 찾아야 한다. tiling.js 의 leaf, TAB_KINDS, leafToTab, tabToLeaf 그리고 state.js 의 splitPane 화이트리스트가 있다. 빠지면 조용히 터미널이 생긴다.', turn: 1 } });
+    e({ op: 'msg', msg: { key: 'm1:0', role: 'assistant', kind: 'text', text: '고칠 자리를 먼저 모았어요.\n\n- `tiling.js`\n- `state.js`\n- `pane.js`', turn: 1 } });
+    // 턴 중에 끼어든 말 — 나중에 sent 로 바뀌어도(upsert) 제자리에 있어야 한다
+    e({ op: 'msg', msg: { key: 'u:seed2', role: 'user', kind: 'text', text: '테스트도 같이 고쳐 줘', clientId: 'seed2', status: 'queued', turn: 1 } });
+    e({ op: 'msg', msg: { key: 'm1:1', role: 'assistant', kind: 'text', text: '네, 테스트도 함께 볼게요.', turn: 1 } });
+    e({ op: 'msg', msg: { key: 'u:seed1', role: 'user', kind: 'text', text: "탭 종류에 채팅을 더해 줘. 참고: '/Users/me/demo/spec.png'", clientId: 'seed1', status: 'sent', turn: 1 } });
+    e({ op: 'msg', msg: { key: 'u:seed2', role: 'user', kind: 'text', text: '테스트도 같이 고쳐 줘', clientId: 'seed2', status: 'sent', turn: 1 } });
+    e({ op: 'turn', phase: 'end', turn: 1, ok: true, durationMs: 95000 });
+    e({ op: 'state', state: 'idle' });
+    e({ op: 'notice', level: 'info', code: 'MODEL_NEXT_START', text: '모델 변경은 다음 시작부터 적용됩니다' });
+    const big = mkThread('long', { title: '긴 대화(이전 내역 받기)', titleSet: true, preview: '…120번째 답' });
+    for (let i = 1; i <= 360; i++) {
+      append(big, { op: 'msg', msg: i % 2
+        ? { key: 'u:l' + i, role: 'user', kind: 'text', text: `${(i + 1) / 2}번째 질문`, clientId: 'l' + i, status: 'sent' }
+        : { key: 'a:l' + i, role: 'assistant', kind: 'text', text: `${i / 2}번째 답.\n\n본문 두 번째 문단.` } }, Date.now() - 4000000 + i * 1000);
+    }
+    big.meta.lastAt = Date.now() - 3 * 3600000;
+    const ext = mkThread('terminal', { title: '터미널에서 만든 대화', external: true, owner: 'terminal', ownerTid: 1000123, preview: '빌드 스크립트를 고쳤어요' });
+    append(ext, { op: 'msg', msg: { key: 'a:x', role: 'assistant', kind: 'text', text: '빌드 스크립트를 고쳤어요.' } }, Date.now() - 86400000 * 2);
+    ext.meta.lastAt = Date.now() - 86400000 * 2;
+  }
+
+  const i18n = await import('./js/i18n/index.js');
+  if (Q.get('lang')) i18n.setLangRuntime(Q.get('lang'));
+  const A = await import('./js/approvals.js');
+  const V = await import('./js/conv-view.js');
+  A.mountApprovals();                      // 카드 렌더러를 conv-view 에 꽂는다(실제 앱과 같은 길)
+  push = (frame) => setTimeout(() => V.applyConvEvent(frame), 15 + Math.random() * 30);
+
+  const tab = { kind: 'chat', tid: 'h1', ...(Q.get('thread') ? { threadId: Q.get('thread') } : {}) };
+  const view = new V.ConvView(document.getElementById('host'), {
+    cwd: () => 'demo/project',
+    hostDeviceId: () => 7,
+    isLocal: () => true,
+    hostOffline: () => F.offline,
+    deviceName: () => '이 Mac',
+    tab: () => tab,
+    patchTab: (p) => { for (const [k, v] of Object.entries(p)) { if (v === undefined || v === '') delete tab[k]; else tab[k] = v; } document.title = (tab.title || '채팅') + ' — 하네스'; },
+    refreshHead: () => {},
+    openFile: (rel) => log('IDE 로 열기: ' + rel),
+    fs: () => ({ fsTree: (rel, depth) => window.__TAURI__.core.invoke('fs_tree', { rel, depth }) }),
+    openTerminal: (o) => log('새 터미널: ' + o.agent + ' ' + JSON.stringify(o.args)),
+    focusThread: () => false,
+  });
+  view.mount();
+  view.setVisible(true);
+
+  const cur = () => F.threads.get(view.m.threadId) || null;
+  const H = {
+    F, view, calls, tab,
+    stream: () => cur() && scripts.stream(cur()), tools: () => cur() && scripts.tools(cur()),
+    approve: () => cur() && scripts.approve(cur()), question: () => cur() && scripts.question(cur()), plan: () => cur() && scripts.plan(cur()),
+    other: () => { const t = cur(); const q = t && pendingOf(t)[0]; if (q) closeReq(t, q.id, q.kind === 'question' ? 'answered' : 'allowed', { by: '내 폰' }); else log('열린 요청이 없어요'); },
+    failNext: () => { F.failNext = true; log('다음 전송은 START_FAILED'); },
+    slowNext: () => { F.slowNext = true; log('다음 전송은 25초 걸린다'); },
+    offline: () => { F.offline = !F.offline; log('PC 오프라인 = ' + F.offline); view._syncConn(); },
+    wsdown: () => { F.wsUp = false; V.setConvChannel(false); log('WS 끊김'); setTimeout(() => { F.wsUp = true; V.setConvChannel(true); log('WS 재접속'); }, 6000); },
+    gap: () => { F.dropNext = true; log('다음 영속 프레임 하나를 잃는다'); },
+    badoff: () => { F.badOff = true; log('다음 델타의 off 를 어긋나게'); },
+    terminal: () => { const t = cur(); if (t) patch(t, { owner: 'terminal', ownerTid: 1000999 }, true); },
+    // 터미널에서 이어 간 부분을 가져왔다 — push 는 없고 thread 힌트의 headSeq 만 앞선다(§4.3)
+    imported: () => { const t = cur(); if (!t) return; append(t, { op: 'msg', msg: { key: 'u:imp' + t.log.length, role: 'user', kind: 'text', text: '터미널에서 한 질문', status: 'sent' } }); append(t, { op: 'msg', msg: { key: 'a:imp' + t.log.length, role: 'assistant', kind: 'text', text: '터미널에서 받은 답(가져온 내역).' } }); hint(t); log('가져온 이벤트 2개(push 없음)'); },
+    // 로그가 통째로 바뀌었다(삭제 후 재생성) — 클라의 sinceSeq 가 head 보다 크다 → reset
+    recreate: () => { const t = cur(); if (!t) return; t.log = []; t.first.clear(); t.latest.clear(); t.live.clear(); t.sent.clear(); t.open = false; t.turn = 0; t.meta.state = 'idle'; t.meta.title = '다시 만든 대화'; append(t, { op: 'msg', msg: { key: 'a:new', role: 'assistant', kind: 'text', text: '새 로그의 첫 줄.' } }); log('로그 재생성 — 다음 since 가 reset 을 받는다'); view.resync(); },
+    theme: () => { const d = document.documentElement; d.dataset.theme = d.dataset.theme === 'light' ? 'dark' : 'light'; },
+  };
+  window.__h = H;
+  document.getElementById('side').addEventListener('click', (e) => {
+    const s = e.target.closest('button')?.dataset.s;
+    if (!s) return;
+    if (!cur() && !['failNext', 'slowNext', 'offline', 'wsdown', 'theme'].includes(s)) { log('먼저 메시지를 보내 대화를 만들거나 목록에서 고르세요'); return; }
+    void H[s]();
+  });
+  log('준비됨');
+</script>
+</body>
+</html>

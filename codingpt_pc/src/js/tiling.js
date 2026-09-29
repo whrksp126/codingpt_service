@@ -2,7 +2,8 @@ import * as i18n from './i18n/index.js';
 // tiling.js — pane 분할 트리(순수 로직). 렌더/영속화가 이 트리를 소비한다.
 //
 //  노드:
-//   · leaf   = { id, kind:'terminal'|'preview', win?, url? }
+//   · leaf   = { id, kind:'terminal'|'preview'|'ide'|'emulator'|'chat', win?, url?, openPath?, deviceId?, threadId? }
+//     - 'chat' = 채팅 v2 대화 탭(conv-view.js). 터미널 탭의 `mode:'chat'`(채팅 v1 토글)과는 다른 것이다.
 //   · branch = { dir:'h'|'v', ratio:0..1, first:node, second:node }
 //     - dir 'h' = 좌우 분할(가로로 나란히), 'v' = 상하 분할(세로로 쌓기)
 //
@@ -28,6 +29,8 @@ export function leaf(kind, opts = {}) {
   if (kind === "preview") return { id: newPaneId(), kind, url: opts.url || null, ...sid };
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — deviceId 만 기억한다.
   if (kind === "emulator") return { id: newPaneId(), kind, deviceId: opts.deviceId || null, metaName: opts.metaName || "", ...sid };
+  // 채팅 v2 — 대화 본문은 넣지 않는다(데몬이 정본). threadId 가 없으면 아직 첫 메시지를 안 보낸 새 대화다.
+  if (kind === "chat") return { id: newPaneId(), kind, ...chatFields(opts), ...sid };
   // empty: 터미널 0개 상태의 자리 pane — 자동 생성 금지(닫힘=전 기기 공통 의사), 사용자가 + 로 추가.
   if (opts.empty) return { id: newPaneId(), kind: "terminal", tabs: [], active: 0 };
   return {
@@ -47,7 +50,16 @@ export function leaf(kind, opts = {}) {
  *  다른 pane 안으로 들어가지지가 않았다(조용히 스왑/분할로 처리됐다).
  *  종류를 늘릴 때 고쳐야 할 자리를 하나로 만든다 — 빠뜨릴 자리가 없으면 빠뜨릴 수 없다.
  */
-export const TAB_KINDS = ["ide", "preview", "emulator"];
+export const TAB_KINDS = ["ide", "preview", "emulator", "chat"];
+
+/** 채팅 탭이 들고 다니는 것 — threadId·제목·초안(4KB)뿐이다. 없는 값은 필드를 만들지 않는다. */
+function chatFields(o) {
+  const out = {};
+  if (o && o.threadId) out.threadId = String(o.threadId);
+  if (o && o.title) out.title = String(o.title);
+  if (o && o.draft) out.draft = String(o.draft).slice(0, 4096);
+  return out;
+}
 
 /** 독립 pane(leaf) → 혼합 탭 한 칸. 터미널은 이 경로로 오지 않는다(탭 배열을 이미 갖는다). */
 export function leafToTab(leaf) {
@@ -61,6 +73,7 @@ export function leafToTab(leaf) {
   //  metaName = 탭 제목에 쓰는 기기 이름. 안 넘기면 다른 pane 으로 옮기는 순간 제목이 "모바일 화면"
   //   으로 되돌아간다(프리뷰의 metaTitle 과 같은 이유로 왕복 보존한다).
   if (leaf.kind === "emulator") return { kind: "emulator", deviceId: leaf.deviceId || null, metaName: leaf.metaName || "", tid: newPaneId(), ...sid };
+  if (leaf.kind === "chat") return { kind: "chat", ...chatFields(leaf), tid: leaf.tid || newPaneId(), ...sid };
   return null;
 }
 
@@ -74,6 +87,7 @@ export function tabToLeaf(tab, id) {
     return { id: paneId, kind: "preview", url: tab.url || null, tid: tab.tid, dark: tab.dark, metaTitle: tab.metaTitle, metaFav: tab.metaFav, ...sid };
   }
   if (tab.kind === "emulator") return { id: paneId, kind: "emulator", deviceId: tab.deviceId || null, metaName: tab.metaName || "", ...sid };
+  if (tab.kind === "chat") return { id: paneId, kind: "chat", ...chatFields(tab), ...(tab.tid ? { tid: tab.tid } : {}), ...sid };
   return null;
 }
 

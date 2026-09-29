@@ -18,6 +18,7 @@ import { formatCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
 import { openNewTask, openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
 import { tt } from "./text/tasks.js";
+import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -187,6 +188,12 @@ function paneCtx(ws) {
     agentStateOf: (cwd, win) => S.agentStateOf(cwd, win),
     // Chat 의 tool 카드 "열기" → IDE 탭/분할(활성 pane 기준 자동 배치).
     onOpenIde: (relPath) => { if (relPath) smartAdd("ide", { openPath: relPath }); },
+    // 채팅 v2 — 터미널로 넘기기(새 터미널에서 그 에이전트를 인자와 함께 실행) / 같은 대화가 열린 탭으로 가기 /
+    //  터미널 탭의 대화를 채팅 탭으로 열기. 배치는 헤더 [+] 와 같은 규칙(smartAdd)이다.
+    onOpenAgentTerminal: ({ agent, args }) => smartAdd("terminal", { launchAgent: agent, launchArgs: args || [] }),
+    onFocusThread: (threadId, except) => focusConvTab(threadId, except),
+    onOpenThread: (threadId, title) => openConvTab(threadId, title),
+    convGate: () => convGate(live()),
     // (모드 토글은 pane 이 자기 본문 안에 소유한다 — ctx 주입 없음. workspace 는 리컨실 후 일괄 sync 만.)
     persist: () => S.emit(),
   };
@@ -752,6 +759,10 @@ function openAddMenu(anchor) {
   });
   // 모바일 화면 — 이 PC 에 붙어 있는 에뮬레이터·시뮬레이터·실기기를 여기서 본다.
   row(icons.smartphone, i18n.t('모바일 화면'), { onClick: () => smartAdd("emulator") });
+  // 채팅(채팅 v2) — 그 PC 의 데몬과 서버가 **둘 다** conv.v1 을 광고할 때만 있다(chat-v2-design §9).
+  //  모르는 동안에는 그리지 않는다: 눌러도 안 되는 메뉴보다 없는 메뉴가 낫다. 조회가 끝나면 다음에 열 때 나타난다.
+  if (convGate(activeWs()) === true) row(icons.chat, i18n.t('채팅'), { onClick: () => smartAdd("chat") });
+  else if (convGate(activeWs()) == null) void refreshHostCaps();
   // 에이전트 PC — 게스트 OS(macOS/Linux)를 하위 메뉴에서 고른다(터미널·웹뷰처럼 `›`).
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
   //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
@@ -906,7 +917,7 @@ export function smartAdd(kind, extra) {
   // 빈 자리 pane(터미널 0개 상태)이 활성이면 분할 대신 그 자리를 채운다.
   if (focusLeaf?.kind === "terminal" && !focusLeaf.tabs.length) {
     if (kind === "terminal") {
-      panes.get(focusId)?.addTab(extra?.launchAgent);
+      panes.get(focusId)?.addTab(extra?.launchAgent, extra?.launchArgs);
     } else {
       const tab = mixedTabFor(kind, extra);
       if (!tab) return null;
@@ -929,7 +940,7 @@ export function smartAdd(kind, extra) {
   else if (canV) dir = "v";
   if (!dir && focusLeaf?.kind === "terminal") {
     if (kind === "terminal") {
-      panes.get(focusId)?.addTab(extra?.launchAgent);
+      panes.get(focusId)?.addTab(extra?.launchAgent, extra?.launchArgs);
       S.focusPane(focusId);
       return focusId;
     }
@@ -946,13 +957,81 @@ export function smartAdd(kind, extra) {
   const opts = kind === "preview"
     ? { url: extra?.url || "" }
     : kind === "terminal"
-      ? { fresh: true, ...(extra?.launchAgent ? { launchAgent: extra.launchAgent } : {}) }
+      ? { fresh: true, ...(extra?.launchAgent ? { launchAgent: extra.launchAgent, launchArgs: extra.launchArgs || [] } : {}) }
+      : kind === "chat"
+        //  열 대화를 미리 정한 경우(알림·터미널에서 이어가기) — 떨어뜨리면 빈 새 대화가 열린다.
+        ? (extra?.threadId ? { threadId: extra.threadId, title: extra.title || "" } : undefined)
       : kind === "emulator"
         //  미리 고른 기기(에이전트 PC 등) — 분할 경로에서 떨어뜨리면 기기 목록으로 열린다(2026-09-17 실사고).
         ? (extra?.deviceId ? { deviceId: extra.deviceId, metaName: extra.metaName || "" } : undefined)
         : extra?.openPath ? { openPath: extra.openPath } : undefined;
   S.splitPane(focusId, dir || (r && r.height > r.width ? "v" : "h"), kind, opts);
   return wsRuntime(state.activeWsId)?.focusId || null;
+}
+
+// ── 채팅 v2(탭 종류 `chat`) ─────────────────────────────────────────────────────
+/**
+ * 그 워크스페이스에서 채팅을 쓸 수 있는가 — 데몬 caps ∩ 서버 caps 에 conv.v1(chat-v2-design §9).
+ *  true/false, 아직 모르면 null. 출처는 자동화(auto.v1)와 같은 캐시다(GET /api/daemon/status).
+ */
+export function convGate(ws) {
+  if (!ws || ws.hostDeviceId == null) return null;
+  const h = hostCaps(ws.hostDeviceId);
+  const s = serverHasCap("conv.v1");
+  if (h == null || s == null) return null;
+  return s && h.includes("conv.v1");
+}
+
+/** 명령(팔레트·단축키)으로 채팅 추가 — 못 쓰는 이유를 말한다(메뉴와 달리 명령은 숨길 수 없다). */
+export function addChatGated() {
+  const ws = activeWs();
+  const g = convGate(ws);
+  if (g === true) return smartAdd("chat");
+  if (g == null) {
+    void refreshHostCaps().then(() => {
+      if (convGate(activeWs()) === true) smartAdd("chat");
+      else wvToast(i18n.t('지금은 채팅을 쓸 수 없어요.'));
+    });
+    return null;
+  }
+  wvToast(serverHasCap("conv.v1") ? i18n.t('이 PC 앱을 업데이트해야 채팅을 쓸 수 있어요') : i18n.t('지금은 채팅을 쓸 수 없어요.'));
+  return null;
+}
+
+function findConvTab(threadId, except) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!threadId || !rt || !rt.layout) return null;
+  let hit = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (hit) return;
+    if (l.kind === "chat" && l.threadId === threadId && l !== except) hit = { leaf: l, index: -1 };
+    else if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "chat" && t.threadId === threadId && t !== except);
+      if (i >= 0) hit = { leaf: l, index: i };
+    }
+  });
+  return hit;
+}
+
+/** 그 대화가 이미 열려 있으면 그 탭을 앞으로. 없으면 false. except = 부르는 탭 자신(자기를 찾지 않게). */
+export function focusConvTab(threadId, except) {
+  const hit = findConvTab(threadId, except);
+  if (!hit) return false;
+  const pane = panes.get(hit.leaf.id);
+  if (hit.index >= 0 && hit.leaf.active !== hit.index) {
+    if (pane) pane.switchTab(hit.index);
+    else hit.leaf.active = hit.index;
+  }
+  S.focusPane(hit.leaf.id);
+  pane?.focus?.();
+  return true;
+}
+
+/** 그 대화를 채팅 탭으로 연다(알림 클릭·터미널에서 이어가기). 이미 열려 있으면 그 탭으로 간다. */
+export function openConvTab(threadId, title) {
+  if (!threadId) return null;
+  if (focusConvTab(threadId, null)) return wsRuntime(state.activeWsId)?.focusId || null;
+  return smartAdd("chat", { threadId, title: title || "" });
 }
 
 // ── 명령 팔레트가 쓰는 열기 동작 ──────────────────────────────────────────────
@@ -969,9 +1048,12 @@ export function openSurfaces() {
     if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
     if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || i18n.t('프리뷰') }); return; }
     if (leaf.kind === "emulator") { out.push({ paneId: leaf.id, index: -1, kind: "emulator", label: leaf.metaName || i18n.t('모바일 화면') }); return; }
+    if (leaf.kind === "chat") { out.push({ paneId: leaf.id, index: -1, kind: "chat", label: leaf.title || i18n.t('채팅') }); return; }
     (leaf.tabs || []).forEach((t, i) => {
-      const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : t.kind === "emulator" ? "emulator" : "terminal";
+      const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : t.kind === "emulator" ? "emulator"
+        : t.kind === "chat" ? "chat" : "terminal";
       const label = kind === "terminal" ? termTabLabel(t)
+        : kind === "chat" ? (t.title || i18n.t('채팅'))
         : kind === "ide" ? "IDE"
           : kind === "emulator" ? (t.metaName || i18n.t('모바일 화면')) : (t.url || i18n.t('프리뷰'));
       out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });

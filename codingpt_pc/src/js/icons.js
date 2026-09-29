@@ -29,6 +29,10 @@ export const icons = {
   file: (o) => svg('<path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M13 3v5h5"/>', o),
   image: (o) => svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M4 17l5-5 4 4 2.5-2.5L20 17"/>', o),
   play: (o) => svg('<circle cx="12" cy="12" r="9"/><path d="M10 8.5l6 3.5-6 3.5z"/>', o),
+  // 중단(채워진 네모) — 채팅 v2 전송 버튼이 작업 중에 바뀌는 모양. 선이 아니라 면이다(작아도 읽히게).
+  stop: (o) => svg('<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>', o),
+  // 대화 목록(시계 + 되감는 화살) — 채팅 v2 헤더.
+  history: (o) => svg('<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4h4"/><path d="M12 7.5V12l3 2"/>', o),
   pause: (o) => svg('<circle cx="12" cy="12" r="9"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/>', o),
   // git 브랜치(Feather git-branch) — 사이드바 작업 행·접힘 칩(agent-tasks-sidebar.md §3.1).
   gitBranch: (o) => svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', o),

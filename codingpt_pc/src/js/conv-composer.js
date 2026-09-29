@@ -1,0 +1,488 @@
+// conv-composer.js — 채팅 v2 탭의 입력칸(컴포저).
+//
+// 채팅 v1 의 컴포저(chat-view.js ChatView 의 메서드들)와 **같은 동작**을 따로 옮겨 온 것이다.
+//  v1 파일은 테스트 7개가 소스 문자열을 핀으로 잡고 있어 메서드를 빼내 공유할 수 없다 → 복제한다.
+//  규칙이 갈리지 않게 **판정은 전부 chat-model.js 의 순수 함수**를 쓴다(slashQuery·filterCommands·
+//  filterFiles·relToRoot·composerHasText). 여기 있는 것은 DOM 과 WebKit 우회뿐이다.
+//
+// v1 과 다른 점
+//  · 첨부 칩이 없다(1차). 붙여넣은 파일·이미지는 인용 경로 텍스트로 들어간다 — 에이전트는 경로만
+//    받으면 그 파일을 읽는다. 칩(원자 삭제·썸네일)은 후속.
+//  · 전송 버튼이 셋 중 하나다: 글자가 있으면 전송, 없고 작업 중이면 중단, 둘 다 아니면 비활성.
+//  · Esc 는 채팅을 "나가는" 키가 아니라(나갈 TUI 가 없다) 작업 중단이다.
+//  · 초안 저장은 모아서 한다 — 저장은 레이아웃 영속(화면 전체 재렌더)을 부르므로 글자마다 하지 않는다.
+import { api } from "./api.js";
+import { icons } from "./icons.js";
+import { escapeHtml } from "./chat-md.js";
+import {
+  CHAT, slashQuery, filterCommands, commandBadges, filterFiles, flattenFiles, relToRoot, composerHasText,
+} from "./chat-model.js";
+import { IS_WINDOWS, shellQuote } from "./path-utils.js";
+import * as i18n from './i18n/index.js';
+
+// 조합 경로·방향키로 새어 드는 제어문자와 맥 기능키 전용 문자(PUA). 본문에 남으면 □ 로 보인다.
+const GHOST_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F-]/;
+const GHOST_RE_G = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F-]/g;
+const DRAFT_SAVE_MS = 500;
+
+export class ConvComposer {
+  /**
+   * @param {object} o
+   *  onSend(text)        전송(글자가 있을 때만 온다)
+   *  onStop()            중단
+   *  busy()              지금 작업 중인가(전송 버튼 모양의 근거)
+   *  placeholder()       빈 입력칸 문구
+   *  getDraft()/setDraft(s)
+   *  cwd()               워크스페이스 루트(파일 피커 기준)
+   *  fs()                파일 목록 제공자(IDE 트리와 같은 것)
+   *  commands()          Promise<[{name,desc}]> — 슬래시 팔레트 목록
+   *  ctlLeft             컨트롤 행 왼쪽에 끼울 요소(모드 알약)
+   */
+  constructor(o) {
+    this.o = o || {};
+    this._composing = false;
+    this._btnMode = "";
+    this._cmds = null;
+    this._disposed = false;
+  }
+
+  mount(parent) {
+    const el = document.createElement("div");
+    el.className = "chat-composer";
+    el.innerHTML = `
+      <div class="chat-box">
+        <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph=""></div>
+        <div class="chat-ctl">
+          <button class="chat-plus" type="button" title="${i18n.t('파일 넣기')}">${icons.plus({ size: 18 })}</button>
+          <span class="conv-ctl-left"></span>
+          <span class="chat-ctl-gap"></span>
+          <button class="chat-send" type="button" disabled></button>
+        </div>
+      </div>`;
+    parent.appendChild(el);
+    this.el = el;
+    this.inputEl = el.querySelector(".chat-input");
+    this.sendEl = el.querySelector(".chat-send");
+    this.plusEl = el.querySelector(".chat-plus");
+    if (this.o.ctlLeft) el.querySelector(".conv-ctl-left").appendChild(this.o.ctlLeft);
+
+    this.inputEl.textContent = String(this.o.getDraft?.() || "");
+
+    this.sendEl.addEventListener("click", () => {
+      if (this._btnMode === "stop") this.o.onStop?.();
+      else this._send();
+    });
+    this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
+
+    // ── IME 조합 ──
+    //  한글은 조합 중 Enter 가 "확정"이다. 그 Enter 로 전송하면 마지막 글자가 빠진 채 나가거나
+    //  확정된 글자가 다음 메시지로 넘어간다. 판정을 셋 다 본다:
+    //   · isComposing  — 표준
+    //   · keyCode 229  — WebKit 은 조합을 끝내는 Enter 를 compositionend **뒤에** isComposing=false 로
+    //                    보내는데, 그 keydown 의 keyCode 가 229 다
+    //   · 우리 플래그  — 위 둘이 모두 빠지는 웹뷰 버전에 대한 안전망
+    this.inputEl.addEventListener("compositionstart", () => { this._composing = true; });
+    this.inputEl.addEventListener("compositionend", () => { this._composing = false; });
+
+    this.inputEl.addEventListener("keydown", (e) => this._onKeydown(e));
+    // macOS 한글 IME + WKWebView 에서 방향키가 기능키 전용 문자를 글자로 흘린다(v1 에서 2회 신고) —
+    //  넣기 전에 막고(beforeinput), 그래도 샌 것은 넣은 뒤에 걷는다(input). win32(Chromium)에는 없는 버그.
+    if (!IS_WINDOWS) {
+      this.inputEl.addEventListener("beforeinput", (e) => {
+        if (e.inputType === "insertText" && e.data && GHOST_RE.test(e.data)) e.preventDefault();
+      });
+    }
+    this.inputEl.addEventListener("input", () => {
+      if (!IS_WINDOWS) this._sanitize();
+      // 다 지워도 contenteditable 은 <br> 하나를 남긴다 → `:empty` 가 아니라서 빈 입력칸 문구가 안 돌아온다.
+      if (this.inputEl.firstChild && !this.inputEl.textContent && !this.text().trim()
+        && !this.inputEl.querySelector("img")) this.inputEl.innerHTML = "";
+      this._syncSlash();
+      this.sync();
+      this._queueDraft();
+    });
+    this.inputEl.addEventListener("blur", () => this._flushDraft());
+    // 붙여넣기 — 파일 참조(Finder ⌘C) > 이미지 데이터(스크린샷) > 글자. 파일 복사는 text/plain 에
+    //  파일명이 실려 올 수 있어 경로 확인이 항상 먼저다(경로는 네이티브 pasteboard 에서만 나온다).
+    //  서식 HTML 은 받지 않는다 — 직렬화가 오염된다.
+    this.inputEl.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const txt = e.clipboardData?.getData("text/plain") || "";
+      void this._pasteRouted(txt);
+    });
+    this.sync();
+    return el;
+  }
+
+  _onKeydown(e) {
+    const composing = e.isComposing || e.keyCode === 229 || this._composing;
+    // 슬래시 팔레트가 떠 있으면 ↑↓/Enter/Tab 은 목록 조작이다. Enter 는 **채워넣기**지 전송이 아니다.
+    if (this.cmdsEl && !composing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault(); e.stopPropagation();
+        this._moveCmd(e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        const row = (this._cmdRows || [])[this._cmdIdx];
+        if (row) {
+          e.preventDefault(); e.stopPropagation();
+          this._pickCmd(row.name);
+          return;
+        }
+      }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this._closeCmds(); return; }
+    }
+    if (e.key === "Enter") {
+      if (composing) return;                 // 조합 확정 — IME 의 것
+      if (e.shiftKey || e.altKey) return;    // 줄바꿈(기본 동작)
+      e.preventDefault();
+      e.stopPropagation();
+      this._send();
+      return;
+    }
+    if (e.key === "Escape" && !composing) {
+      if (this.pickEl) { e.preventDefault(); e.stopPropagation(); this._closePicker(); return; }
+      if (this.o.busy?.()) { e.preventDefault(); e.stopPropagation(); this.o.onStop?.(); }
+      return;
+    }
+    // 방향키는 우리가 직접 캐럿을 옮긴다(Selection.modify — ⇧ 선택·⌥ 단어·⌘ 줄 끝 보존).
+    //  기본 경로를 아예 타지 않으므로 유령 문자가 생길 자리가 없다. 조합 중에는 IME 의 것.
+    if (!IS_WINDOWS && typeof e.key === "string" && e.key.startsWith("Arrow") && !composing && !e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sel = window.getSelection();
+      if (!sel) return;
+      const dir = e.key === "ArrowLeft" || e.key === "ArrowUp" ? "backward" : "forward";
+      const gran = e.key === "ArrowUp" || e.key === "ArrowDown" ? "line"
+        : e.metaKey ? "lineboundary" : e.altKey ? "word" : "character";
+      try { sel.modify(e.shiftKey ? "extend" : "move", dir, gran); } catch (_) { /* noop */ }
+    }
+  }
+
+  // ── 직렬화 ──
+  //  글자 노드는 그대로, BR·블록 경계는 개행. NBSP 는 공백으로(contenteditable 이 줄 끝 공백을 NBSP 로 바꾼다).
+  text() {
+    const out = [];
+    const walk = (n) => {
+      for (const c of n.childNodes) {
+        if (c.nodeType === Node.TEXT_NODE) { out.push(c.data); continue; }
+        if (c.nodeType !== Node.ELEMENT_NODE) continue;
+        if (c.tagName === "BR") { out.push("\n"); continue; }
+        if ((c.tagName === "DIV" || c.tagName === "P") && out.length && !String(out[out.length - 1]).endsWith("\n")) out.push("\n");
+        walk(c);
+      }
+    };
+    if (this.inputEl) walk(this.inputEl);
+    return out.join("").replace(/ /g, " ");
+  }
+
+  clear() {
+    if (this.inputEl) this.inputEl.innerHTML = "";
+    this._closeCmds();
+    this.sync();
+  }
+
+  setText(t) {
+    if (!this.inputEl) return;
+    this.inputEl.textContent = String(t || "");
+    this._caretToEnd();
+    this.sync();
+    this._queueDraft();
+  }
+
+  /** 커서 자리에 글자를 넣는다. execCommand 는 WebKit 에서 **실행취소 스택을 지키는 유일한 삽입**이다. */
+  insertText(t) {
+    if (!this.inputEl || !t) return;
+    try { this.inputEl.focus(); document.execCommand("insertText", false, String(t)); } catch (_) { /* noop */ }
+    this.sync();
+    this._queueDraft();
+  }
+
+  /** 파일 경로들을 인용해 넣는다(OS 드롭·붙여넣기 공용). */
+  insertPaths(paths) {
+    const list = (paths || []).filter(Boolean);
+    if (!list.length) return;
+    this.insertText(list.map((p) => shellQuote(p)).join(" ") + " ");
+  }
+
+  focus() {
+    try { this.inputEl?.focus(); } catch (_) { /* noop */ }
+  }
+
+  hasPopover() { return !!(this.cmdsEl || this.pickEl); }
+
+  closePopovers() {
+    this._closeCmds();
+    this._closePicker();
+  }
+
+  /** 전송 버튼·문구를 지금 상태에 맞춘다. 작업 상태가 바뀌면 뷰가 부른다. */
+  sync() {
+    if (!this.sendEl || !this.inputEl) return;
+    const has = composerHasText(this.text());
+    const busy = !!this.o.busy?.();
+    const mode = has ? (busy ? "queue" : "send") : busy ? "stop" : "idle";
+    this.sendEl.disabled = mode === "idle";
+    // ★ 글리프는 **바뀔 때만** 다시 쓴다. 누르는 도중(mousedown~mouseup)에 자식이 갈리면 WebKit 이
+    //  click 을 아예 보내지 않는다(pane.js 모드 토글에서 겪은 사고).
+    if (this._btnMode !== mode) {
+      this._btnMode = mode;
+      const stop = mode === "stop";
+      this.sendEl.classList.toggle("stop", stop);
+      this.sendEl.innerHTML = stop ? icons.stop({ size: 13 }) : icons.arrowUp({ size: 17 });
+      this.sendEl.title = stop ? i18n.t('중단 (Esc)')
+        : mode === "queue" ? i18n.t('대기열에 넣기 (Enter)') : i18n.t('보내기 (Enter)');
+    }
+    const ph = String(this.o.placeholder?.() || i18n.t('메시지 보내기'));
+    if (this.inputEl.dataset.ph !== ph) this.inputEl.dataset.ph = ph;   // :empty::before 가 그린다
+  }
+
+  _send() {
+    const raw = this.text();
+    if (!composerHasText(raw)) return;
+    this.clear();
+    this._flushDraft();
+    this.o.onSend?.(raw.replace(/\s+$/, ""));
+  }
+
+  // ── 초안 ──
+  _queueDraft() {
+    clearTimeout(this._draftTimer);
+    this._draftTimer = setTimeout(() => this._flushDraft(), DRAFT_SAVE_MS);
+  }
+
+  _flushDraft() {
+    clearTimeout(this._draftTimer);
+    this._draftTimer = null;
+    if (this._disposed) return;
+    const v = this.text().slice(0, CHAT.DRAFT_MAX);
+    if (v === this._savedDraft) return;
+    this._savedDraft = v;
+    this.o.setDraft?.(v);
+  }
+
+  async _pasteRouted(txt) {
+    let paths = [];
+    try { paths = await api.clipboardPaths(); } catch (_) { /* 이 빌드에 없으면 글자로 */ }
+    if (Array.isArray(paths) && paths.length) { this.insertPaths(paths); return; }
+    let img = null;
+    try { img = await api.clipboardImagePng(); } catch (_) { /* noop */ }
+    if (img) { this.insertPaths([img]); return; }
+    if (txt) this.insertText(txt);
+  }
+
+  _sanitize() {
+    const sel = window.getSelection();
+    const walker = document.createTreeWalker(this.inputEl, NodeFilter.SHOW_TEXT);
+    let t;
+    while ((t = walker.nextNode())) {
+      if (!GHOST_RE.test(t.data)) continue;
+      const inNode = sel && sel.rangeCount && sel.getRangeAt(0).startContainer === t;
+      const off = inNode ? sel.getRangeAt(0).startOffset : 0;
+      const before = t.data.slice(0, off);
+      t.data = t.data.replace(GHOST_RE_G, "");
+      if (inNode) {
+        try {
+          const r = document.createRange();
+          r.setStart(t, Math.min(before.replace(GHOST_RE_G, "").length, t.length));
+          r.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(r);
+        } catch (_) { /* noop */ }
+      }
+    }
+  }
+
+  _caretToEnd() {
+    const sel = window.getSelection();
+    if (!sel || !this.inputEl) return;
+    const r = document.createRange();
+    r.selectNodeContents(this.inputEl);
+    r.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
+  // ── `+` 파일 넣기 ──
+  //  워크스페이스 파일을 골라 **상대 경로를 입력에 넣는다**(올리는 것이 아니다). 목록 출처는 IDE 트리와
+  //  같은 제공자라 다른 PC 의 워크스페이스도 같은 화면으로 고른다.
+  _togglePicker() {
+    if (this.pickEl) { this._closePicker(); return; }
+    this._closeCmds();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-pick";
+    wrap.innerHTML =
+      `<input class="chat-pick-q" type="text" placeholder="${i18n.t('파일 이름')}" />` +
+      `<div class="chat-pick-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    this.el.appendChild(wrap);
+    this.pickEl = wrap;
+    this._pickFiles = null;
+    const q = wrap.querySelector(".chat-pick-q");
+    q.addEventListener("input", () => this._renderPicker(q.value));
+    q.addEventListener("keydown", (e) => {
+      e.stopPropagation();                       // 전역 단축키가 이 입력을 가로채지 않게
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Escape") { e.preventDefault(); this._closePicker(); this.focus(); return; }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const first = wrap.querySelector(".chat-pick-row");
+        if (first) this._pickFile(first.dataset.path);
+      }
+    });
+    wrap.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-pick-row");
+      if (row) this._pickFile(row.dataset.path);
+    });
+    this._pickCloser = (e) => { if (!wrap.contains(e.target) && !this.plusEl.contains(e.target)) this._closePicker(); };
+    setTimeout(() => { if (this.pickEl === wrap) document.addEventListener("mousedown", this._pickCloser, true); }, 0);
+    q.focus();
+    void this._loadPickFiles();
+  }
+
+  _closePicker() {
+    if (this._pickCloser) document.removeEventListener("mousedown", this._pickCloser, true);
+    this._pickCloser = null;
+    this.pickEl?.remove();
+    this.pickEl = null;
+  }
+
+  async _loadPickFiles() {
+    const fs = this.o.fs?.();
+    const root = this.o.cwd?.() || "";
+    const wrap = this.pickEl;
+    if (!fs) { this._pickFiles = []; this._renderPicker(""); return; }
+    try {
+      const tree = await fs.fsTree(root, 4);   // 깊이 4 = IDE 트리와 같은 값
+      if (this.pickEl !== wrap) return;
+      this._pickFiles = flattenFiles(tree);
+      this._renderPicker(wrap.querySelector(".chat-pick-q")?.value || "");
+    } catch (_) {
+      if (this.pickEl !== wrap) return;
+      this._pickFiles = [];
+      // 실패를 조용히 빈 목록으로 만들지 않는다(원격 오프라인·권한 문제를 알아야 한다).
+      wrap.querySelector(".chat-pick-list").innerHTML = `<div class="chat-pick-empty">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
+    }
+  }
+
+  _renderPicker(query) {
+    if (!this.pickEl) return;
+    const list = this.pickEl.querySelector(".chat-pick-list");
+    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    const root = this.o.cwd?.() || "";
+    const hit = filterFiles(this._pickFiles, root, query, CHAT.PICK_LIMIT);
+    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('일치하는 파일 없음')}</div>`; return; }
+    list.innerHTML = hit.map((p) => {
+      const r = relToRoot(root, p);
+      const i = Math.max(r.lastIndexOf("/"), r.lastIndexOf("\\"));
+      return `<div class="chat-pick-row" data-path="${escapeHtml(p)}">` +
+        `<span class="chat-pick-name">${escapeHtml(i < 0 ? r : r.slice(i + 1))}</span>` +
+        (i < 0 ? "" : `<span class="chat-pick-dir">${escapeHtml(r.slice(0, i))}</span>`) +
+        `</div>`;
+    }).join("");
+  }
+
+  _pickFile(full) {
+    if (!full) return;
+    const r = relToRoot(this.o.cwd?.() || "", full);
+    this._closePicker();
+    // 앞 글자에 붙으면 다른 이름이 된다 — 앞이 공백이 아니면 한 칸 띄운다(chat-model.insertPathAt 과 같은 규칙).
+    const before = this.text();
+    this.insertText((before && !/\s$/.test(before) ? " " : "") + r + " ");
+  }
+
+  // ── 슬래시 명령 팔레트 ──
+  //  여는 조건 = 초안 전체가 `/토큰` 한 개(공백을 치면 인자 모드 → 닫힌다). 고르면 채워 넣기만 한다 —
+  //  실행은 언제나 사용자가 전송을 눌러야 일어난다.
+  _syncSlash() {
+    const q = slashQuery(this.text());
+    if (q == null) { this._closeCmds(); return; }
+    if (!this.cmdsEl) this._openCmds();
+    this._renderCmds(q);
+    void this._loadCmds();
+  }
+
+  _openCmds() {
+    this._closePicker();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-cmds";
+    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    this.el.appendChild(wrap);
+    this.cmdsEl = wrap;
+    this._cmdIdx = 0;
+    // mousedown 으로 처리한다 — click 은 입력칸 blur 뒤라 캐럿이 날아간다.
+    wrap.addEventListener("mousedown", (e) => {
+      const row = e.target.closest?.(".chat-cmds-row");
+      if (!row) return;
+      e.preventDefault();
+      this._pickCmd(row.dataset.name);
+    });
+  }
+
+  _closeCmds() {
+    this.cmdsEl?.remove();
+    this.cmdsEl = null;
+  }
+
+  /** 대화가 바뀌면 목록도 다를 수 있다(프로젝트 명령) — 뷰가 부른다. */
+  resetCommands() { this._cmds = null; }
+
+  async _loadCmds() {
+    if (this._cmds || this._cmdsLoading) return;
+    this._cmdsLoading = true;
+    try {
+      const items = await this.o.commands?.();
+      this._cmds = (Array.isArray(items) ? items : [])
+        .filter((c) => c && c.name)
+        .map((c) => ({ ...c, name: String(c.name).startsWith("/") ? String(c.name) : "/" + c.name }));
+    } catch (_) {
+      this._cmds = [];   // 실패해도 팔레트만 비는 것이고 직접 타이핑은 그대로 나간다
+    } finally {
+      this._cmdsLoading = false;
+      if (this.cmdsEl) this._renderCmds(slashQuery(this.text()) || "");
+    }
+  }
+
+  _renderCmds(q) {
+    if (!this.cmdsEl) return;
+    const list = this.cmdsEl.querySelector(".chat-cmds-list");
+    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    const rows = filterCommands(this._cmds, q, CHAT.CMD_MAX);
+    this._cmdRows = rows;
+    if (this._cmdIdx >= rows.length) this._cmdIdx = 0;
+    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
+    list.innerHTML = rows.map((c, i) =>
+      `<div class="chat-cmds-row${i === this._cmdIdx ? " on" : ""}" data-name="${escapeHtml(c.name)}">` +
+      `<span class="chat-cmds-name">${escapeHtml(c.name)}</span>` +
+      `<span class="chat-cmds-desc">${escapeHtml(c.desc || "")}</span>` +
+      commandBadges(c).map((b) => `<span class="chat-cmds-badge">${escapeHtml(b)}</span>`).join("") +
+      `</div>`).join("");
+    list.querySelector(".chat-cmds-row.on")?.scrollIntoView({ block: "nearest" });
+  }
+
+  _moveCmd(d) {
+    const rows = this._cmdRows || [];
+    if (!rows.length) return;
+    this._cmdIdx = (this._cmdIdx + d + rows.length) % rows.length;
+    this._renderCmds(slashQuery(this.text()) || "");
+  }
+
+  _pickCmd(name) {
+    const n = String(name || "").trim();
+    if (!n) return;
+    this._closeCmds();
+    this.inputEl.textContent = n + " ";   // 이름 + 공백 한 칸 — 인자를 이어 치거나 그대로 전송
+    this._caretToEnd();
+    this.sync();
+    this._queueDraft();
+    this.focus();
+  }
+
+  dispose() {
+    this._flushDraft();
+    this._disposed = true;
+    clearTimeout(this._draftTimer);
+    this.closePopovers();   // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 산다
+    this.el?.remove();
+  }
+}

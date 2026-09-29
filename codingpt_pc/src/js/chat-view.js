@@ -29,6 +29,7 @@ import {
   TOOL_GROUP_MIN, toolRunLabel,
 } from "./chat-model.js";
 import { basename, isAbs, IS_WINDOWS } from "./path-utils.js";
+import { parseCodedError } from "./tasks-api.js";
 import * as i18n from './i18n/index.js';
 
 // 살아있는 뷰 레지스트리 — WS push 를 chatId 로 배달하고, 승인 카드가 "이 화면이 이미 그 터미널을
@@ -391,17 +392,18 @@ export class ChatView {
         this._setBanner("");
       } catch (e) {
         if (this._disposed) return;
-        const msg = String(e || "");
         this._openFailed = Date.now();
-        // CHAT_NOT_FOUND = 그 터미널에서 claude 가 아직 대화를 만들지 않았다(정상 상태).
-        //  ★ 사용자가 고른 대화(sessionId)를 명시했는데 이게 나오면 그 **파일이 사라진** 것이다
-        //   (데몬 축출/삭제). 선택을 놓아주지 않으면 그 탭은 영구히 없는 대화를 요청하며 오류 배너에
-        //   갇힌다(조용히 죽는 경로) → 선택 해제 + 빈 상태로 되돌린다. 다음 열기는 정상 판정을 탄다.
-        if (/CHAT_NOT_FOUND|찾을 수 없습니다/.test(msg)) {
+        // ★ 분기는 **오류 code·HTTP 상태**로만 한다. 예전엔 한국어 문구 정규식(`찾을 수 없습니다`·`데몬`)이라
+        //  back/데몬의 문구가 바뀌거나 번역되면 조용히 엉뚱한 배너가 떴다.
+        //  형식 = `HTTP <상태> <CODE>: …`(back 경유) / `<CODE>: …`(이 PC 데몬 직결) — parseCodedError 가 둘 다 읽는다.
+        //  PC 미연결은 code 없이 409 로만 오는 경로가 있다(back mapRpcError) → 상태도 본다.
+        const er = parseCodedError(e);
+        // CHAT_NOT_FOUND = 그 터미널에서 에이전트가 아직 대화를 만들지 않았다(정상 상태).
+        if (er.code === "CHAT_NOT_FOUND") {
           this._setBanner(i18n.t('아직 이 터미널의 대화 기록이 없습니다. 첫 메시지를 보내면 생깁니다.'), "info");
         }
-        else if (/HTTP 409|데몬/.test(msg)) this._setBanner(i18n.t('PC 가 연결돼 있지 않습니다.'), "warn");
-        else if (/TRANSCRIPT_DISABLED/.test(msg)) this._setBanner(i18n.t('서버에서 대화 기록 기능이 꺼져 있습니다.'), "warn");
+        else if (er.code === "DAEMON_OFFLINE" || er.status === 409) this._setBanner(i18n.t('PC 가 연결돼 있지 않습니다.'), "warn");
+        else if (er.code === "TRANSCRIPT_DISABLED") this._setBanner(i18n.t('서버에서 대화 기록 기능이 꺼져 있습니다.'), "warn");
         else this._setBanner(i18n.t('대화를 불러오지 못했습니다 — 잠시 후 자동으로 다시 시도합니다.'), "warn");
       } finally {
         this._opening = null;
@@ -422,6 +424,17 @@ export class ChatView {
     if (this._noSession) {
       this._noSession = null;
       this._probeUntil = 0;
+      if (this._visible) this._open();
+      return;
+    }
+    // `/clear`·resume — 그 터미널의 대화 **파일이 바뀐다**. 지금 chatId 는 옛 파일의 것이라 더 자라지 않는다
+    //  → 버퍼를 비우고 스냅샷부터 다시 연다(앱 useChatStream 과 같은 처리. 이 분기가 없어서 PC 만
+    //  /clear 뒤에도 옛 대화를 보여 주고 새 메시지가 안 떴다).
+    if (ctl === "session_switch") {
+      this._chatId = null;
+      this._noSession = null;
+      this._probeUntil = 0;
+      this._resetBuffer();
       if (this._visible) this._open();
       return;
     }
@@ -2082,11 +2095,17 @@ export class ChatView {
     this.bannerEl.classList.toggle("hidden", !on);
     this.bannerEl.className = "chat-banner" + (on ? " " + (tone || "info") : " hidden");
     this.bannerEl.textContent = msg || "";
+    this._bannerIsGone = false;   // 어떤 배너든 새로 쓰면 '종료 배너'가 아니다(setAgentGone 이 다시 세운다)
   }
   // 에이전트가 종료됐을 때 pane 이 부른다 — 모드는 유지하고 배너만(사용자 의사 없이 화면 전환 금지).
   setAgentGone(gone) {
-    if (gone) this._setBanner(i18n.t('에이전트가 종료됐어요 · 토글로 터미널(TUI)로 돌아갈 수 있습니다'), "warn");
-    else if (/에이전트가 종료/.test(this.bannerEl?.textContent || "")) this._setBanner("");
+    // 지금 떠 있는 배너가 '종료 배너'인지는 **플래그**로 안다. 예전엔 배너 글자를 한국어 정규식으로 읽어서
+    //  영어·일본어 화면에서는 에이전트가 다시 떠도 배너가 영영 안 지워졌다.
+    if (gone) {
+      if (this._bannerIsGone) return;
+      this._setBanner(i18n.t('에이전트가 종료됐어요 · 토글로 터미널(TUI)로 돌아갈 수 있습니다'), "warn");
+      this._bannerIsGone = true;
+    } else if (this._bannerIsGone) this._setBanner("");
   }
 
   dispose() {

@@ -11,6 +11,7 @@ import {
   focusNeighbor,
   focusCurrentPane,
   smartAdd,
+  addChatGated,
   openWebviewMenu,
 } from "./workspace-view.js";
 import { registerCommands, runCommand } from "./command-run.js";
@@ -212,6 +213,7 @@ registerCommands({
   "ws.addIde": () => smartAdd("ide"),
   "ws.addPreview": () => smartAdd("preview"),
   "ws.addEmulator": () => smartAdd("emulator"),
+  "ws.addChat": () => addChatGated(),
   // 이것은 고르는 것이 목적이라 메뉴를 연다(헤더 [+] 와 같은 자리·같은 함수).
   "ws.ports": () => openWebviewMenu(),
 
@@ -270,7 +272,7 @@ function startPreviewShieldWatch() {
   //  클릭이 뒤의 프리뷰로 내려가 "허용 버튼이 안 눌리는" 사고가 난다(punch-through 규율).
   // .ag-sheet — 에이전트 설치 시트(설정 밖, 온보딩에서도 뜬다). 안에 실제 터미널이 있어 클릭·키
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
-  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .tasks-view:not([hidden]), .automations-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
+  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .chat-lightbox, .conv-pop, .tasks-view:not([hidden]), .automations-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   const check = () => {
     const on = !!document.querySelector(SEL);

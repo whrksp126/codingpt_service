@@ -26,6 +26,7 @@ import { icons } from "./icons.js";
 import { renderMarkdown, escapeHtml } from "./chat-md.js";
 import { fmtRemain, remainMs } from "./chat-model.js";
 import { setChatApprovalRenderer, refreshChatApprovals } from "./chat-view.js";
+import { setConvCardRenderer } from "./conv-view.js";
 import { api } from "./api.js";
 import * as i18n from './i18n/index.js';
 
@@ -44,6 +45,9 @@ export function mountApprovals() {
   mounted = true;
   // Chat 뷰가 자기 슬롯을 그릴 때 이 렌더러를 쓴다(순환 import 회피 — chat-view 는 우리를 모른다).
   setChatApprovalRenderer(renderScoped);
+  // 채팅 v2 탭(conv-view)은 **자기 행 목록**을 넘겨 같은 카드를 그린다 — 승인 인박스(state.approvals)에는
+  //  올리지 않는다(한 사실에 통로 하나, chat-v2-design §7·§10.8). 응답은 행의 `_respond` 로 간다.
+  setConvCardRenderer(renderList);
   // 카운트다운 — 카드가 있을 때만 1s 틱(없으면 타이머도 없다).
   tickTimer = setInterval(() => {
     if (!state.approvals.length) return;
@@ -136,6 +140,31 @@ function renderList(host, rows) {
   }
 }
 
+// ── 응답 통로 ──
+// 기본은 승인 인박스(S.respondApproval — busy/err 는 state 의 행에 실리고 syncCard 가 그린다).
+//  행에 `_respond` 가 있으면 그것이 통로다(채팅 v2: conv.respond). 그 행은 state 에 없어서 매 렌더마다
+//  새 객체로 오므로, busy/err 를 **카드 DOM 에 직접** 관리한다(`_tui` 합성 행과 같은 예외).
+//  `_respond` 는 실패 시 사용자에게 보일 문구를 message 로 가진 Error 를 던진다.
+async function respond(el, a, body) {
+  if (typeof a._respond !== "function") { await S.respondApproval(a.id, body); return; }
+  if (a._busy) return;
+  a._busy = true;
+  el.classList.add("busy");
+  try {
+    await a._respond(body);
+  } catch (e) {
+    flashErr(el, String((e && e.message) || "") || i18n.t('답변을 전달하지 못했어요 — 다시 시도해 주세요'));
+  } finally {
+    a._busy = false;
+    el.classList.remove("busy");
+  }
+}
+// 카드 접기(✕) — 승인 인박스 행은 state 에서 걷고, `_dismiss` 가 있는 행은 주인이 정한다.
+function dismiss(a) {
+  if (typeof a._dismiss === "function") { a._dismiss(); return; }
+  S.dismissApproval(a.id);
+}
+
 function cssEsc(s) {
   try { return CSS.escape(String(s)); } catch (_) { return String(s).replace(/["\\]/g, "\\$&"); }
 }
@@ -186,7 +215,7 @@ function buildCard(a) {
         (q.options || []).map((o, i) => optRowInputHtml(`mirror:${i}`, o.label || i18n.t("선택 {n}", { n: i + 1 }), "", i + 1, !!o.input)).join("") +
       `</div></div>`;
     const send = async (label, text) => {
-      await S.respondApproval(a.id, {
+      await respond(el, a, {
         decision: "answer",
         answers: [{ questionIndex: 0, labels: [label], ...(text ? { text } : {}) }],
       });
@@ -204,7 +233,7 @@ function buildCard(a) {
       const btn = e.target.closest?.("[data-act]");
       if (!btn) return;
       e.stopPropagation();
-      if (btn.dataset.act === "dismiss") { S.dismissApproval(a.id); return; }
+      if (btn.dataset.act === "dismiss") { dismiss(a); return; }
       await rowSend(btn);
     });
     el.addEventListener("keydown", (e) => {
@@ -454,8 +483,8 @@ async function submitQuestionCard(el, a) {
     }
     return;
   }
-  if (!answers.length) { await S.respondApproval(a.id, { decision: "deny", message: i18n.t('원격 기기에서 건너뛰었습니다') }); return; }
-  await S.respondApproval(a.id, { decision: "answer", answers });
+  if (!answers.length) { await respond(el, a, { decision: "deny", message: i18n.t('원격 기기에서 건너뛰었습니다') }); return; }
+  await respond(el, a, { decision: "answer", answers });
 }
 
 // 선택지 행 1개 — 질문 카드(.apc-qopt)와 같은 시각 언어(번호 붙은 세로 행). 앱 도크와 동일 형태.
@@ -535,6 +564,7 @@ function buildActions(el, a) {
 
 function syncCard(el, a) {
   if (a._tui) return;   // 합성 행 — busy/err 는 submit 경로가 el 에 직접 관리한다(매 emit 재생성 값에 덮이면 안 됨)
+  if (typeof a._respond === "function") return;   // 자기 통로를 가진 행 — 같은 이유(respond() 가 el 에 직접 관리)
   if (a.deadlineAt) el.dataset.deadline = String(a.deadlineAt);
   el.classList.toggle("busy", !!a._busy);
   const err = el.querySelector(".apc-err");
@@ -552,7 +582,7 @@ async function onCardClick(e, el, a) {
   const act = btn.dataset.act;
   if (act === "dismiss") {
     if (a._tui) { dismissedTui.add(a.id); el.remove(); return; }   // 합성 행 — 로컬로만 접는다
-    S.dismissApproval(a.id);
+    dismiss(a);
     return;
   }
   if (a._busy) return;
@@ -562,25 +592,25 @@ async function onCardClick(e, el, a) {
     // 허용 + 코멘트 — 보강 카드는 데몬이 TUI 다이얼로그에 인라인으로 타이핑, 폴백은 허용 직후
     //  컴포저 주입("Yes, and tell Claude what to do next" 동치). 입력칸 존재 자체가 가능 여부다.
     const text = rowText();
-    await S.respondApproval(a.id, { decision: "allow", ...(text ? { message: text } : {}) });
+    await respond(el, a, { decision: "allow", ...(text ? { message: text } : {}) });
     return;
   }
   // 규칙 기록: 보강 카드는 TUI 다이얼로그가 직접(2번 키 — codex 포함 완전 동작), 폴백은 claude
   //  제안(updatedPermissions) 그대로 — 우리는 "그걸 원한다"는 플래그만 보낸다. 코멘트 불가 옵션.
-  if (act === "allowAlways") { await S.respondApproval(a.id, { decision: "allow", always: true }); return; }
+  if (act === "allowAlways") { await respond(el, a, { decision: "allow", always: true }); return; }
   if (act === "deny") {
     // 계획 승인 카드의 의견 입력은 거절 사유로, 권한 카드의 행내 코멘트는 deny 메시지로 실려 간다.
     const text = isChoice(a)
       ? String(el.querySelector(".apc-free-input")?.value || "").trim()
       : rowText();
-    await S.respondApproval(a.id, { decision: "deny", ...(text ? { message: text } : {}) });
+    await respond(el, a, { decision: "deny", ...(text ? { message: text } : {}) });
     return;
   }
   // 계획 승인(1번 행) — 의견이 있으면 answer.text 로(계획을 조금 고쳐 진행), 없으면 순수 allow.
   if (act === "planAllow") {
     const text = String(el.querySelector(".apc-free-input")?.value || "").trim();
-    if (text) await S.respondApproval(a.id, { decision: "answer", answers: [{ questionIndex: 0, labels: [], text }] });
-    else await S.respondApproval(a.id, { decision: "allow" });
+    if (text) await respond(el, a, { decision: "answer", answers: [{ questionIndex: 0, labels: [], text }] });
+    else await respond(el, a, { decision: "allow" });
     return;
   }
   // ── 질문 카드(한 번에 하나) ──
@@ -646,3 +676,6 @@ export function approvalForNotif(n) {
   );
 }
 export { isChoice as isChoiceApproval };
+// 자기 행 목록으로 같은 카드를 그리려는 뷰용(채팅 v2). 행 모양은 state.approvals 의 행과 같고,
+//  `_respond(body)` / `_dismiss()` 를 실으면 응답·접기가 그쪽으로 간다(conv-model.reqToCard).
+export { renderList as renderApprovalCards };

@@ -37,6 +37,8 @@ export const COMMANDS = [
   { id: "ws.addPreview", key: "Mod+Shift+E", scope: "workspace", group: "add", pc: true, app: true, palette: true },
   // 모바일 화면(에뮬레이터·시뮬레이터·붙어 있는 실기기) — 단축키는 안 준다(앱 commands.ts 주석 참조).
   { id: "ws.addEmulator", key: null, scope: "workspace", group: "add", pc: true, app: true, palette: true },
+  // 채팅(채팅 v2 대화 탭) — 단축키는 안 준다. 그 PC 와 서버가 conv.v1 을 광고할 때만 동작한다.
+  { id: "ws.addChat", key: null, scope: "workspace", group: "add", pc: true, app: true, palette: true },
 
   // ── pane 조작 ──
   { id: "pane.splitRight", key: "Mod+D", scope: "pane", group: "pane", pc: true, app: false, palette: true },

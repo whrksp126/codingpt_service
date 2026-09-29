@@ -215,6 +215,10 @@ export function hostHasTasks(host) {
 export function serverHasTasks() {
   return serverCaps == null ? null : serverCaps.includes("task.v1");
 }
+/** 서버가 그 능력을 광고하는가. null = 모름(아직 조회 전). 채팅 v2(conv.v1) 게이팅이 쓴다. */
+export function serverHasCap(cap) {
+  return serverCaps == null ? null : serverCaps.includes(String(cap));
+}
 export function onCapsChanged(fn) { capsListeners.add(fn); return () => capsListeners.delete(fn); }
 
 export async function refreshHostCaps() {

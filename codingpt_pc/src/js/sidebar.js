@@ -121,6 +121,21 @@ export function jumpToNotification(n) {
     closeNotif();
     return;
   }
+  // 채팅 v2 알림(conv_request·conv_done·conv_error) — threadId 가 있으면 터미널이 아니라 **그 대화의 채팅 탭**이다
+  //  (chat-v2-design §7). 이미 열려 있으면 그 탭으로 가고, 없으면 연다.
+  if (n && n.threadId) {
+    const ws =
+      state.workspaces.find((w) => w.id === (n.workspaceId ?? n.wsId)) ||
+      (n.cwd ? state.workspaces.find((w) => w.localPath === n.cwd
+        && (n.hostDeviceId == null || w.hostDeviceId == null || Number(w.hostDeviceId) === Number(n.hostDeviceId))) : null);
+    if (ws) S.setActive(ws.id, { allowTask: true });
+    closeNotif();
+    // 워크스페이스를 방금 바꿨으면 pane 이 아직 없다 — 한 프레임 뒤에 연다.
+    requestAnimationFrame(() => {
+      import("./workspace-view.js").then((m) => m.openConvTab(String(n.threadId), "")).catch(() => {});
+    });
+    return;
+  }
   // 기기 승인 알림(기능2)은 워크스페이스가 없다 — 설정>계정(종단간 암호화 카드)이 목적지다.
   if (n && n.kind === "device_approval") {
     import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings"));

@@ -1,0 +1,1237 @@
+// conv-view.js — 채팅 v2 탭의 본문(탭 종류 `chat`). 계약 정본 = codingpt_daemon/docs/chat-v2-design.md.
+//
+// 채팅 v1(chat-view.js = 터미널 TUI 의 읽기 뷰)과 **다른 것**이다. 여기에는 터미널이 없다:
+//  데몬이 에이전트를 구조화 프로토콜로 직접 구동하고, 우리는 그 이벤트 로그를 그린다.
+//  그래서 코드에서는 conv 라고 부른다(터미널 탭의 `mode:'chat'` 과 헷갈리지 않게).
+//
+// 규율
+//  · **push 는 힌트, pull 이 정본**(§3). seq 가 이어지지 않으면 프레임을 버리고 conv.since 를 부른다.
+//  · 상태는 conv-model 의 순수 함수가 바꾸고, 이 파일은 그 결과를 그리기만 한다.
+//  · 그리기는 프레임당 한 번(rAF). 행은 key 로 재사용하고 바뀐 행만 다시 만든다 —
+//    끝난 행을 다시 그리지 않아야 글자가 오는 동안에도 선택이 풀리지 않는다(§10.5).
+//  · 요청 카드는 승인 인박스(state.approvals)에 올리지 않는다(§7 "한 사실에 통로 하나").
+//    카드 컴포넌트만 빌려 쓰고 응답은 conv.respond 로 보낸다.
+//  · 이 모듈은 state.js 를 import 하지 않는다. 화면 밖의 일(탭 제목·터미널 열기)은 ctx 로 받는다.
+import { api } from "./api.js";
+import { icons, agentMarkHtml } from "./icons.js";
+import { escapeHtml } from "./chat-md.js";
+import { CHAT, agentModeOf, agentDisplayName } from "./chat-model.js";
+import {
+  CONV, createConv, applyOpen, applySince, applyBefore, applyPush, applyDelta, applyThreadHint,
+  shouldPoll, addPending, markPending, removePending, newClientId, buildRows, openReqs, reqToCard,
+  respondParams, isBusy, workingInfo, fmtDuration, parseConvError, convErrorText, isOfflineCode,
+  terminalLaunch, fmtAgo, threadDot, needsAdopt, threadTitle, convModeLabel, convModeChoices,
+} from "./conv-model.js";
+import {
+  buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
+  buildToolRow, buildOrphanRow, buildGroupRow, buildDividerRow, buildTurnRow, buildNoticeRow,
+  hydrateMedia, loadMedia, showLightbox, mimeOf, isImagePath,
+} from "./conv-rows.js";
+import { ConvComposer } from "./conv-composer.js";
+import { basename } from "./path-utils.js";
+import * as i18n from './i18n/index.js';
+
+const MODE_KEY = "cpt.conv.mode.v1";   // 새 대화의 기본 모드(이 기기에서 마지막으로 고른 것)
+
+// ── 살아 있는 뷰 ──
+const _live = new Set();
+let _cardRenderer = null;
+let _channelUp = true;       // ui-channel WS — 모르면 붙어 있다고 본다(끊겼다고 먼저 말하지 않는다)
+let _channelDownAt = 0;
+
+/** approvals.js 가 카드 렌더러를 꽂는다(순환 import 회피 — chat-view 와 같은 방식). */
+export function setConvCardRenderer(fn) { _cardRenderer = typeof fn === "function" ? fn : null; }
+
+/** ui-channel 이 부른다: {type:'conv_event', threadId?, headSeq?, events?, delta?, thread?, control?, hostDeviceId?} */
+export function applyConvEvent(frame) {
+  if (!frame || typeof frame !== "object") return;
+  for (const v of _live) { try { v._onPush(frame); } catch (_) { /* 한 뷰의 실패가 나머지를 막지 않게 */ } }
+}
+
+/** ui-channel 접속 상태. 다시 붙으면 끊긴 사이를 메운다(§10.1 "재접속: 즉시 conv.since"). */
+export function setConvChannel(up) {
+  const was = _channelUp;
+  _channelUp = !!up;
+  if (!_channelUp && was) _channelDownAt = Date.now();
+  for (const v of _live) {
+    try { v._syncConn(); if (_channelUp && !was) v.resync(); } catch (_) { /* noop */ }
+  }
+}
+
+/** 이 스레드를 보여 주는 뷰(있으면). 알림·목록이 "이미 열려 있나"를 물을 때 쓴다. */
+export function convViewFor(threadId) {
+  for (const v of _live) if (threadId && v.m.threadId === threadId) return v;
+  return null;
+}
+
+export class ConvView {
+  /**
+   * @param {HTMLElement} host `.pane-conv` 컨테이너(pane.js 가 소유·표시 전환)
+   * @param {object} ctx
+   *   cwd() · hostDeviceId() · isLocal() · hostOffline() · deviceName()
+   *   tab()              이 뷰의 탭(또는 독립 pane 노드) — { threadId, title, draft }
+   *   patchTab(p)        탭 필드 갱신 + 헤더 다시 그리기 + 영속
+   *   refreshHead()      탭 헤더만 다시(조치 필요 점)
+   *   openFile(rel) · fs()
+   *   openTerminal({agent,args,cwd})  새 터미널 탭을 열어 그 에이전트를 실행(§6.1)
+   *   focusThread(id)    같은 대화가 다른 탭에 이미 열려 있으면 그리로 가고 true
+   *   rpc(method,params) (선택) 전송 계층 교체 — 하네스·테스트용
+   */
+  constructor(host, ctx) {
+    this.host = host;
+    this.ctx = ctx || {};
+    this.m = createConv(this.ctx.tab?.()?.threadId || null);
+    this._rows = new Map();          // key → { el, sig, type }
+    this._openGroups = new Set();
+    this._openTools = new Set();
+    this._dismissed = new Set();     // 접어 둔 요청 id
+    this._visible = false;
+    this._disposed = false;
+    this._opened = false;            // 이 스레드를 conv.open 했는가
+    this._follow = true;
+    this._lastTop = 0;
+    this._lastPushAt = 0;
+    this._lastPullAt = 0;
+    this._offline = false;           // 마지막 RPC 가 "PC 미연결"이었다
+    this._caps = null;
+    this._mode = null;
+    try { this._newMode = localStorage.getItem(MODE_KEY) || "default"; } catch (_) { this._newMode = "default"; }
+    _live.add(this);
+  }
+
+  // ── 전송 계층 ──
+  async _rpc(method, params) {
+    const host = this.ctx.hostDeviceId?.() ?? null;
+    let r;
+    try {
+      r = this.ctx.rpc ? await this.ctx.rpc(method, params || {}, host) : await api.conv(method, params || {}, host);
+    } catch (e) {
+      const p = parseConvError(e);
+      if (isOfflineCode(p.code)) this._setOffline(true);
+      const err = new Error(p.message || p.code || "conv");
+      err.code = p.code; err.status = p.status;
+      throw err;
+    }
+    this._setOffline(false);
+    // 성공은 데몬 결과가 최상위다(§4.0). 구 관례의 {success,data} 껍데기로 와도 받는다.
+    if (r && r.success === false) {
+      const err = new Error(r.message || "conv");
+      err.code = (r.detail && r.detail.code) || "";
+      throw err;
+    }
+    return r && r.success === true && r.data && typeof r.data === "object" ? r.data : (r || {});
+  }
+
+  // ── DOM ──
+  mount() {
+    if (this._mounted) return;
+    this._mounted = true;
+    const el = document.createElement("div");
+    el.className = "chat conv";
+    el.innerHTML = `
+      <div class="conv-head">
+        <button class="conv-title" type="button"></button>
+        <span class="conv-head-gap"></span>
+        <button class="pane-ctrl conv-h-term" type="button" title="${i18n.t('터미널에서 이어가기')}">${icons.terminal({ size: 15 })}</button>
+        <button class="pane-ctrl conv-h-list" type="button" title="${i18n.t('대화 목록')}">${icons.history({ size: 15 })}</button>
+        <button class="pane-ctrl conv-h-new" type="button" title="${i18n.t('새 대화')}">${icons.edit({ size: 15 })}</button>
+      </div>
+      <div class="conv-conn hidden"></div>
+      <div class="chat-banner hidden"></div>
+      <div class="chat-scroll conv-scroll"><div class="conv-rows"></div></div>
+      <div class="chat-approvals conv-dock"></div>
+      <div class="conv-dock-more hidden"></div>`;
+    this.host.appendChild(el);
+    this.el = el;
+    this.titleEl = el.querySelector(".conv-title");
+    this.connEl = el.querySelector(".conv-conn");
+    this.bannerEl = el.querySelector(".chat-banner");
+    this.scrollEl = el.querySelector(".conv-scroll");
+    this.rowsEl = el.querySelector(".conv-rows");
+    this.dockEl = el.querySelector(".conv-dock");
+    this.dockMoreEl = el.querySelector(".conv-dock-more");
+    this.termBtn = el.querySelector(".conv-h-term");
+    this.listBtn = el.querySelector(".conv-h-list");
+
+    // 모드 알약 — 모양은 v1 과 같다(.chat-mode). 여기서는 키 입력 대행이 아니라 conv.set 이다.
+    this.modeEl = document.createElement("button");
+    this.modeEl.className = "chat-mode";
+    this.modeEl.type = "button";
+    this.modeEl.title = i18n.t('에이전트 모드');
+    this.modeEl.innerHTML = `<span class="chat-mode-label"></span><span class="chat-mode-caret">${icons.chevronDown({ size: 11 })}</span>`;
+    this.modeEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleModeMenu(); });
+
+    this.composer = new ConvComposer({
+      onSend: (text) => this._send(text),
+      onStop: () => this._interrupt(),
+      busy: () => isBusy(this.m),
+      placeholder: () => {
+        const name = agentDisplayName((this.m.thread && this.m.thread.agent) || "claude");
+        return name ? name + i18n.t('에게 요청') : i18n.t('메시지 보내기');
+      },
+      getDraft: () => this.ctx.tab?.()?.draft || "",
+      setDraft: (s) => this.ctx.patchTab?.({ draft: s ? String(s).slice(0, CONV.DRAFT_MAX) : undefined }, { quiet: true }),
+      cwd: () => this.ctx.cwd?.() || "",
+      fs: () => this.ctx.fs?.(),
+      commands: async () => {
+        const r = await this._rpc("conv.commands", this.m.threadId ? { threadId: this.m.threadId } : { cwd: this.ctx.cwd?.() || "" });
+        return r.items || [];
+      },
+      ctlLeft: this.modeEl,
+    });
+    this.composer.mount(el);
+
+    // 맨 아래로 — 컴포저의 자식이다(입력 줄 수가 바뀌어도 항상 바로 위에 뜬다. v1 과 같은 자리).
+    this.jumpEl = document.createElement("button");
+    this.jumpEl.className = "chat-jump hidden";
+    this.jumpEl.type = "button";
+    this.jumpEl.title = i18n.t('맨 아래로');
+    this.jumpEl.innerHTML = icons.arrowDown({ size: 15 });
+    this.jumpEl.addEventListener("click", () => { this._follow = true; this._toBottom(); this._syncJump(); });
+    this.composer.el.appendChild(this.jumpEl);
+
+    // ── 따라가기(§10.4) ──
+    //  내용이 늘어서 생긴 변화는 scrollTop 을 줄이지 않는다. **위로 움직였을 때만** 사용자가 떠난 것이다.
+    //  바닥에 닿으면 다시 따라간다.
+    this.scrollEl.addEventListener("scroll", () => {
+      const top = this.scrollEl.scrollTop;
+      if (this._atBottom()) this._follow = true;
+      else if (top < this._lastTop - 1) this._follow = false;
+      this._lastTop = top;
+      this._syncJump();
+      if (top < CONV.HISTORY_EDGE_PX) void this._loadBefore();
+    }, { passive: true });
+    // 이미지가 늦게 실리거나 코드 블록이 자라면 높이만 변한다(스크롤 이벤트 없음) → 따라가는 중이면 붙인다.
+    if (typeof ResizeObserver !== "undefined") {
+      this._ro = new ResizeObserver(() => { if (this._follow) this._toBottom(); else this._syncJump(); });
+      this._ro.observe(this.rowsEl);
+    }
+    if (typeof IntersectionObserver !== "undefined") {
+      this._mediaObs = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          if (!e.isIntersecting) continue;
+          this._mediaObs.unobserve(e.target);
+          void loadMedia(e.target);
+        }
+      }, { root: this.scrollEl, rootMargin: "300px 0px" });
+    }
+
+    // 본문을 누른 뒤의 Esc(중단)가 이 뷰에 닿게 한다 — 스크롤 영역은 원래 포커스를 못 받아서 키가 body 로 간다.
+    this.scrollEl.tabIndex = -1;
+    this.rowsEl.addEventListener("click", (e) => this._onBodyClick(e));
+    this.titleEl.addEventListener("click", () => this._editTitle());
+    this.termBtn.addEventListener("click", () => void this._toTerminal());
+    this.listBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleList(); });
+    el.querySelector(".conv-h-new").addEventListener("click", () => this.newThread());
+    this.connEl.addEventListener("click", (e) => {
+      if (e.target.closest?.("[data-act='adopt']")) void this._adoptCurrent();
+    });
+    this.dockMoreEl.addEventListener("click", () => { this._dismissed.clear(); this._renderDock(); });
+    // Esc = 작업 중단. 입력칸은 자기 Esc 를 스스로 처리한다(팝오버 먼저) — 여기는 본문을 누른 뒤의 Esc.
+    el.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (e.target.closest?.(".conv-title-input, .approval-card, .conv-pop, .chat-pick")) return;
+      if (this._closePopovers()) { e.preventDefault(); return; }
+      if (isBusy(this.m)) { e.preventDefault(); void this._interrupt(); }
+    });
+    this._onWinFocus = () => { if (this._visible) this.resync(); };
+    this._onVis = () => { if (this._visible && document.visibilityState === "visible") this.resync(); };
+    window.addEventListener("focus", this._onWinFocus);
+    document.addEventListener("visibilitychange", this._onVis);
+    this._render();
+  }
+
+  setVisible(on) {
+    const was = this._visible;
+    this._visible = !!on;
+    if (this._visible === was) return;
+    if (!this._visible) { this._stopTick(); this._closePopovers(); return; }
+    this._startTick();
+    if (this.m.threadId && !this._opened) void this._open();
+    else if (this.m.threadId) this.resync();
+    void this._loadCaps();
+    this._render();
+    requestAnimationFrame(() => {
+      if (!this._visible || this._disposed) return;
+      if (this._follow) this._toBottom();
+      this.composer?.sync();
+    });
+  }
+
+  focus() { this.composer?.focus(); }
+
+  /** 탭 점 — 답을 기다리는 요청이 있다. */
+  needsAttention() { return openReqs(this.m).length > 0; }
+
+  /** OS 에서 끌어다 놓은 파일 — 인용 경로로 입력칸에. */
+  addPaths(paths) {
+    this.composer?.insertPaths(paths);
+    this.composer?.focus();
+  }
+
+  /** 이 탭을 다른 대화로 바꾼다(목록에서 고름·알림에서 옴). */
+  openThread(threadId, title) {
+    if (!threadId) return;
+    if (threadId === this.m.threadId) { if (!this._opened && this._visible) void this._open(); return; }
+    this._resetTo(threadId);
+    this.ctx.patchTab?.({ threadId, title: title || "" });
+    if (this._visible) void this._open();
+  }
+
+  /** 빈 대화로 — 지금 대화는 목록에 남는다. */
+  newThread() {
+    this._closePopovers();
+    if (!this.m.threadId && !this.m.pending.size) { this.composer?.focus(); return; }
+    this._resetTo(null);
+    this.ctx.patchTab?.({ threadId: undefined, title: undefined });
+    this._render();
+    this.composer?.focus();
+  }
+
+  _dropRows() {
+    for (const ent of this._rows.values()) ent.el.remove();
+    this._rows.clear();
+  }
+
+  _resetTo(threadId) {
+    this.m = createConv(threadId);
+    this._opened = false;
+    this._opening = null;
+    this._creating = null;
+    this._catching = false;
+    this._loadingBefore = false;
+    this._openGroups.clear(); this._openTools.clear(); this._dismissed.clear();
+    for (const ent of this._rows.values()) ent.el.remove();
+    this._rows.clear();
+    this._follow = true;
+    this._setBanner("");
+    this.composer?.resetCommands();
+    this._mode = null;
+  }
+
+  // ── 열기·따라잡기 ──
+  async _open() {
+    if (this._opening) return this._opening;
+    const id = this.m.threadId;
+    if (!id) return null;
+    this._setBanner(i18n.t('대화를 불러오는 중…'), "info");
+    this._opening = (async () => {
+      try {
+        // cwd — 우리 색인에 없는 대화(터미널에서 만든 것)를 처음 열 때 데몬이 세션 파일을 찾는 근거다(§4).
+        const r = await this._rpc("conv.open", { threadId: id, limit: CONV.OPEN_LIMIT, cwd: this.ctx.cwd?.() || "" });
+        if (this._disposed || this.m.threadId !== id) return;
+        const { more } = applyOpen(this.m, r);
+        this._opened = true;
+        this._lastPullAt = Date.now();
+        this._setBanner("");
+        this._follow = true;
+        this._syncThread();
+        this._render();
+        if (more) void this._catchUp();
+      } catch (e) {
+        if (this._disposed || this.m.threadId !== id) return;
+        this._openFailedAt = Date.now();
+        if (e.code === "THREAD_NOT_FOUND") this._setBanner(i18n.t('대화를 찾을 수 없어요.'), "warn");
+        else if (isOfflineCode(e.code)) this._setBanner("");   // 연결 상태 줄이 말한다
+        else this._setBanner(convErrorText(e.code), "warn");
+      } finally {
+        this._opening = null;
+      }
+    })();
+    return this._opening;
+  }
+
+  /** 끊긴 사이를 메운다 — 재접속·창 복귀·틈 발견·폴백 폴링이 모두 이것을 부른다. */
+  resync() {
+    if (!this.m.threadId) return;
+    if (!this._opened) { if (this._visible) void this._open(); return; }
+    void this._catchUp();
+  }
+
+  async _catchUp() {
+    if (this._catching || !this.m.threadId || !this._opened) { this._again = this._catching; return; }
+    this._catching = true;
+    const id = this.m.threadId;
+    try {
+      // 응답은 512KB 예산으로 잘릴 수 있다(more) → 다 받을 때까지 잇는다. 상한은 폭주 방지.
+      for (let i = 0; i < 40; i++) {
+        const r = await this._rpc("conv.since", { threadId: id, sinceSeq: this.m.headSeq });
+        if (this._disposed || this.m.threadId !== id) return;
+        const { more, reopen, reset } = applySince(this.m, r);
+        if (reopen) { this._opened = false; if (this._visible) void this._open(); return; }
+        if (reset) this._dropRows();   // 로그가 통째로 바뀌었다 — 옛 행(같은 key 의 다른 내용)을 재사용하지 않는다
+        this._lastPullAt = Date.now();
+        this._syncThread();
+        this._render();
+        if (!more) break;
+      }
+    } catch (e) {
+      if (this._disposed || this.m.threadId !== id) return;
+      // 구독이 사라졌으면 다시 여는 것이 항상 옳은 복구다(conv.open 은 멱등).
+      if (e.code === "THREAD_NOT_FOUND") { this._opened = false; if (this._visible) void this._open(); }
+    } finally {
+      this._catching = false;
+      if (this._again) { this._again = false; void this._catchUp(); }
+    }
+  }
+
+  async _loadBefore() {
+    if (this._loadingBefore || !this._opened || this.m.noMoreBefore || !this.m.floorSeq || this.m.floorSeq <= 1) return;
+    this._loadingBefore = true;
+    const id = this.m.threadId;
+    this._syncTopHint();
+    try {
+      const r = await this._rpc("conv.before", { threadId: id, beforeSeq: this.m.floorSeq, limit: CONV.BEFORE_LIMIT });
+      if (this._disposed || this.m.threadId !== id) return;
+      // 위에 끼워 넣어도 보던 자리가 움직이지 않게 — 늘어난 높이만큼 내린다.
+      const h0 = this.scrollEl.scrollHeight;
+      const t0 = this.scrollEl.scrollTop;
+      applyBefore(this.m, r);
+      this._renderNow();
+      this.scrollEl.scrollTop = t0 + (this.scrollEl.scrollHeight - h0);
+      this._lastTop = this.scrollEl.scrollTop;
+    } catch (_) {
+      /* 다음 스크롤에 다시 시도한다 */
+    } finally {
+      this._loadingBefore = false;
+      this._syncTopHint();
+    }
+  }
+
+  // ── push ──
+  _onPush(frame) {
+    if (this._disposed) return;
+    // 멀티 PC — back 이 프레임이 온 PC 를 붙인다. 내 탭의 호스트가 아니면 남의 것이다.
+    const mine = this.ctx.hostDeviceId?.();
+    if (frame.hostDeviceId != null && mine != null && Number(frame.hostDeviceId) !== Number(mine)) return;
+    const ctl = frame.control;
+    const tid = frame.threadId || (ctl && ctl.threadId) || (frame.thread && frame.thread.id) || null;
+    if (this.listEl && frame.thread) this._noteListThread(frame.thread);
+    if (!tid || tid !== this.m.threadId) return;
+    this._lastPushAt = Date.now();
+    if (ctl) {
+      if (ctl.kind === "deleted") {
+        // 다른 기기에서 대화를 지웠다 — 없는 대화를 붙들고 있지 않는다.
+        this._resetTo(null);
+        this.ctx.patchTab?.({ threadId: undefined, title: undefined });
+        this._setBanner(i18n.t('이 대화는 삭제됐어요.'), "info");
+        this._render();
+      } else if (ctl.kind === "gone") {
+        this._opened = false;
+        if (this._visible) void this._open();
+      }
+      return;
+    }
+    if (!this._opened) return;   // 아직 스냅샷이 없다 — 열면 그 안에 다 들어 있다
+    if (frame.thread) {
+      const h = applyThreadHint(this.m, frame.thread);
+      this._syncThread();
+      // 가져온 과거(터미널에서 이어 간 부분)는 push 되지 않는다(§4.3) — 힌트의 headSeq 가 앞서 있으면 당겨 온다.
+      //  힌트는 이벤트 프레임과 앞뒤로 섞여 온다 → 잠깐 기다렸다가 그래도 뒤처져 있을 때만 부른다.
+      if (h.behind) {
+        clearTimeout(this._behindTimer);
+        this._behindTimer = setTimeout(() => {
+          if (this._disposed || !this._opened) return;
+          if (((this.m.thread && this.m.thread.headSeq) || 0) > this.m.headSeq) void this._catchUp();
+        }, 600);
+      }
+    }
+    if (Array.isArray(frame.events) && frame.events.length) {
+      const r = applyPush(this.m, frame);
+      if (r.resync) { void this._catchUp(); return; }
+      if (r.applied) this._syncThread();
+    }
+    if (frame.delta) {
+      const r = applyDelta(this.m, frame.delta);
+      if (r.resync) { void this._catchUp(); return; }
+    }
+    this._render();
+  }
+
+  // ── 폴백 폴링 + 경과 시간 ──
+  _startTick() {
+    this._stopTick();
+    this._tick = setInterval(() => this._onTick(), 1000);
+  }
+  _stopTick() { clearInterval(this._tick); this._tick = null; }
+  _onTick() {
+    if (!this._visible || this._disposed) return;
+    this._syncWorking();
+    this._syncConn();
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (!this.m.threadId) return;
+    if (!this._opened) {
+      // 열기 실패 — 8초 간격으로만 다시(오프라인에서 폭주 금지).
+      if (!this._opening && Date.now() - (this._openFailedAt || 0) > CHAT.OPEN_FAIL_RETRY_MS) void this._open();
+      return;
+    }
+    if (shouldPoll({
+      now: Date.now(), lastPushAt: this._lastPushAt, lastPullAt: this._lastPullAt,
+      working: isBusy(this.m), visible: true,
+    })) void this._catchUp();
+  }
+
+  // ── 보내기(§10.2) ──
+  _send(text) {
+    const clientId = newClientId();
+    addPending(this.m, { clientId, text, now: Date.now() });
+    this._follow = true;
+    this._renderNow();
+    this._toBottom();
+    void this._dispatch(clientId);
+  }
+
+  async _dispatch(clientId) {
+    const p = this.m.pending.get(clientId);
+    if (!p) return;
+    // 호스트가 꺼져 있으면 보내지 않는다 — 버블은 실패로 두고 연결 상태 줄이 이유를 말한다.
+    if (this.ctx.hostOffline?.()) {
+      markPending(this.m, clientId, "offline", "DAEMON_OFFLINE");
+      this._render();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (markPending(this.m, clientId, "timeout", "TIMEOUT")) this._render();
+    }, CONV.SEND_FAIL_MS);
+    try {
+      // 첫 메시지가 대화를 만든다. 만드는 중에 또 보낸 글은 그 대화가 생길 때까지 기다린다(둘을 만들지 않게).
+      if (!this.m.threadId && this._creating) await this._creating.catch(() => {});
+      let r;
+      if (!this.m.threadId) {
+        const mode = this._newMode && this._newMode !== "default" ? this._newMode : undefined;
+        this._creating = this._rpc("conv.create", { cwd: this.ctx.cwd?.() || "", text: p.text, clientId, ...(mode ? { mode } : {}) });
+        try { r = await this._creating; } finally { this._creating = null; }
+        const th = r.thread || {};
+        if (th.id && !this.m.threadId) {
+          this.m.threadId = th.id;
+          this.m.thread = { ...th };
+          this._opened = true;               // 새 대화다 — 받아 올 과거가 없다(seq 1 부터 push 로 온다)
+          this.m.noMoreBefore = true;
+          this.ctx.patchTab?.({ threadId: th.id, title: th.title || "" });
+          this._syncThread();
+          void this._catchUp();              // 만드는 사이 지나간 이벤트
+        }
+      } else {
+        r = await this._rpc("conv.send", { threadId: this.m.threadId, clientId, text: p.text });
+      }
+      if (r && r.ok === false) {
+        // 데몬이 받았지만 에이전트에 전달하지 않았다(정상 응답 — 예외가 아니다).
+        if (r.code === "TERMINAL_ONLY_COMMAND") {
+          // 보내기 실패가 아니라 여기서는 못 쓰는 명령이다 — 버블을 실패로 두지 않는다.
+          //  데몬이 남긴 메시지와 안내 줄이 곧 도착해 이 버블을 대신한다.
+          markPending(this.m, clientId, "ack_sent");
+          void this._catchUp();
+        } else markPending(this.m, clientId, "error", r.code || "");
+      } else markPending(this.m, clientId, r && r.status === "queued" ? "ack_queued" : "ack_sent");
+    } catch (e) {
+      markPending(this.m, clientId, isOfflineCode(e.code) ? "offline" : "error", e.code || "");
+      if (e.code === "THREAD_BUSY_IN_TERMINAL") {
+        this.m.thread = { ...(this.m.thread || {}), owner: "terminal" };
+        void this._catchUp();
+      }
+    } finally {
+      clearTimeout(timer);
+      if (!this._disposed) this._render();
+    }
+  }
+
+  /** 다시 시도 — **같은 clientId**. 데몬이 이미 받았다면 같은 결과를 돌려준다(중복 전송이 되지 않는다). */
+  _retry(clientId, fromMsg) {
+    if (fromMsg) {
+      // 서버가 '실패'로 기록한 내 메시지 — 그 행은 접고 같은 id 의 버블로 다시 보낸다.
+      this.m.hidden.add(fromMsg.key);
+      addPending(this.m, { clientId, text: fromMsg.text, now: Date.now() });
+    } else if (!markPending(this.m, clientId, "retry")) return;
+    this._render();
+    void this._dispatch(clientId);
+  }
+
+  async _interrupt() {
+    if (!this.m.threadId || this._stopping) return;
+    this._stopping = true;
+    try {
+      const r = await this._rpc("conv.interrupt", { threadId: this.m.threadId });
+      // 에이전트가 중단 요청에 답하지 않았다/거절했다 — 오류가 아니라 응답으로 온다({ok:false, code}).
+      if (r && r.ok === false) this._setBanner(convErrorText(r.code || "CONTROL_FAILED"), "warn", 4000);
+      void this._catchUp();
+    } catch (e) {
+      if (!isOfflineCode(e.code)) this._setBanner(i18n.t('중단하지 못했어요 · 잠시 후 다시 시도해 주세요'), "warn", 4000);
+    } finally {
+      this._stopping = false;
+    }
+  }
+
+  // ── 그리기 ──
+  _render() {
+    if (this._raf || this._disposed || !this._mounted) return;
+    const run = () => { this._raf = 0; this._renderNow(); };
+    this._raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : setTimeout(run, 16);
+  }
+
+  _renderNow() {
+    if (this._disposed || !this._mounted) return;
+    if (this._raf) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(this._raf); this._raf = 0; }
+    const rows = buildRows(this.m, { openGroups: this._openGroups, openTools: this._openTools });
+    const want = new Set(rows.map((r) => r.key));
+    for (const [key, ent] of this._rows) {
+      if (!want.has(key)) { ent.el.remove(); this._rows.delete(key); }
+    }
+    let prev = this._topHint && this._topHint.isConnected ? this._topHint : null;
+    for (const r of rows) {
+      let ent = this._rows.get(r.key);
+      const stream = r.type === "live" || r.type === "assistant";
+      if (ent && r.type === "live" && r.kind === "thinking" && ent.type === "live" && !ent.stream) {
+        paintThinkingLive(ent.el, r.text);
+      } else if (ent && stream && ent.stream) {
+        // 글자가 자라는 행(그리고 그것이 완성본이 되는 순간) — 같은 요소에서 이어 그린다.
+        if (r.type === "live" || ent.sig !== r.sig) this._paintStreamRow(ent.el, r);
+      } else if (!ent || ent.sig !== r.sig || ent.type !== r.type) {
+        const el = this._buildRow(r);
+        if (!el) { if (ent) { ent.el.remove(); this._rows.delete(r.key); } continue; }
+        if (ent) ent.el.replaceWith(el);
+        ent = { el, stream: stream && r.kind !== "thinking" };
+        this._rows.set(r.key, ent);
+      }
+      ent.sig = r.sig; ent.type = r.type;
+      const ref = prev ? prev.nextSibling : this.rowsEl.firstChild;
+      if (ent.el !== ref) this.rowsEl.insertBefore(ent.el, ref);
+      prev = ent.el;
+    }
+    this._syncBlank(rows.length === 0);
+    this._syncWorking();
+    this._renderDock();
+    this._syncHead();
+    this._syncConn();
+    this.composer?.sync();
+    if (this._follow) this._toBottom();
+    this._syncJump();
+    const att = this.needsAttention();
+    if (att !== this._att) { this._att = att; this.ctx.refreshHead?.(); }
+  }
+
+  _paintStreamRow(el, r) {
+    if (r.type === "live") paintStream(el, r.text, { final: false });
+    else paintStream(el, r.msg.text, { final: true, truncated: !!r.msg.truncated, hydrate: (b) => this._hydrate(b) });
+  }
+
+  _hydrate(root) {
+    hydrateMedia(root, { isLocal: !!this.ctx.isLocal?.(), observer: this._mediaObs });
+  }
+
+  _buildRow(r) {
+    switch (r.type) {
+      case "user":
+        return buildUserRow({ key: r.key, text: r.msg.text, status: r.status, slash: r.msg.kind === "slash", clientId: r.msg.clientId });
+      case "pending":
+        return buildUserRow({ key: r.key, text: r.text, status: r.status, code: r.code, clientId: r.clientId });
+      case "assistant": {
+        const el = buildAssistantRow(r.key);
+        if (r.sub) el.classList.add("conv-sub");
+        this._paintStreamRow(el, r);
+        return el;
+      }
+      case "live": {
+        if (r.kind === "thinking") { const el = buildThinkingLive(r.key); paintThinkingLive(el, r.text); return el; }
+        const el = buildAssistantRow(r.key);
+        this._paintStreamRow(el, r);
+        return el;
+      }
+      case "thinking": return buildThinkingRow(r.msg);
+      case "tool": return buildToolRow(r, this._openTools.has(r.key));
+      case "orphan": return buildOrphanRow(r);
+      case "group": return buildGroupRow(r);
+      case "turn": return buildTurnRow(r);
+      case "notice": return buildNoticeRow(r);
+      default: return buildDividerRow(r.msg);
+    }
+  }
+
+  _syncBlank(empty) {
+    const show = empty && !this._opening && !(this.m.threadId && !this._opened);
+    let el = this.rowsEl.querySelector(":scope > .chat-blank");
+    if (!show) { el?.remove(); return; }
+    if (el) return;
+    el = document.createElement("div");
+    el.className = "chat-blank";
+    const agent = (this.m.thread && this.m.thread.agent) || "claude";
+    el.innerHTML = `<span class="chat-blank-ic">${agentMarkHtml(agent, { size: 30 }) || icons.chat({ size: 30 })}</span>`
+      + `<div class="chat-blank-title">${i18n.t('무엇이든 요청하세요')}</div>`;
+    this.rowsEl.appendChild(el);
+  }
+
+  _syncTopHint() {
+    if (this._loadingBefore) {
+      if (!this._topHint) {
+        this._topHint = document.createElement("div");
+        this._topHint.className = "chat-headhint";
+        this._topHint.textContent = i18n.t('불러오는 중…');
+      }
+      this.rowsEl.insertBefore(this._topHint, this.rowsEl.firstChild);
+    } else this._topHint?.remove();
+  }
+
+  // 작업 중 한 줄 — 지금 도는 도구 + 경과 시간. 요청 카드가 떠 있으면 그 카드가 이미 말하고 있다.
+  _syncWorking() {
+    if (!this.rowsEl) return;
+    const w = workingInfo(this.m);
+    const on = w.on && !w.waiting && !openReqs(this.m).length;
+    let el = this.rowsEl.querySelector(":scope > .chat-working");
+    if (!on) { el?.remove(); return; }
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "chat-working";
+      el.innerHTML = `<span class="chat-working-dot"></span><span class="conv-working-title"></span><span class="conv-working-time"></span>`;
+    }
+    if (el !== this.rowsEl.lastElementChild) this.rowsEl.appendChild(el);   // 항상 맨 아래
+    const title = w.title || i18n.t('작업 중…');
+    const tEl = el.querySelector(".conv-working-title");
+    if (tEl.textContent !== title) tEl.textContent = title;
+    const ms = w.since != null ? Date.now() - w.since : -1;
+    const time = ms >= 1000 ? fmtDuration(ms) : "";
+    const cEl = el.querySelector(".conv-working-time");
+    if (cEl.textContent !== time) cEl.textContent = time;
+  }
+
+  // ── 요청 도크(§10.8) — 가장 오래된 것 하나 + "n개 더" ──
+  _renderDock() {
+    if (!this.dockEl) return;
+    const all = openReqs(this.m);
+    const shown = all.filter((q) => !this._dismissed.has(q.id));
+    const first = this._visible && _cardRenderer ? shown[0] : null;
+    const rows = [];
+    if (first) {
+      const card = reqToCard(first);
+      const req = first;
+      card._respond = (body) => this._respond(req, body);
+      card._dismiss = () => { this._dismissed.add(req.id); this._renderDock(); };
+      rows.push(card);
+    }
+    if (_cardRenderer) _cardRenderer(this.dockEl, rows);
+    const more = shown.length - (first ? 1 : 0);
+    const folded = all.length - shown.length;
+    const parts = [];
+    if (more > 0) parts.push(i18n.t('{n}개 더 기다리는 중', { n: more }));
+    if (folded > 0) parts.push(i18n.t('답을 기다리는 요청 {n}개', { n: folded }) + ' · ' + i18n.t('기다리는 요청 보기'));
+    this.dockMoreEl.textContent = parts.join(" · ");
+    this.dockMoreEl.classList.toggle("hidden", !parts.length);
+    this.dockMoreEl.classList.toggle("link", folded > 0);
+  }
+
+  async _respond(req, body) {
+    try {
+      await this._rpc("conv.respond", { threadId: this.m.threadId, ...respondParams(req, body, this.ctx.deviceName?.()) });
+    } catch (e) {
+      // 다른 기기가 먼저 답했다 — 실패가 아니라 끝난 일이다.
+      if (e.code !== "REQ_NOT_PENDING") throw new Error(convErrorText(e.code));
+    }
+    // 서버의 req 이벤트가 오기 전에 카드를 걷는다(다시 누를 수 없게). 곧 같은 id 의 이벤트가 덮는다.
+    const q = this.m.reqs.get(req.id);
+    if (q && q.status === "pending") {
+      q.status = body.decision === "deny" ? "denied" : body.decision === "answer" ? "answered" : "allowed";
+      q._local = true;
+    }
+    this._render();
+    void this._catchUp();
+  }
+
+  // ── 본문 클릭(위임) ──
+  _onBodyClick(e) {
+    const t = e.target;
+    const act = t.closest?.("[data-act]");
+    if (act) {
+      const row = act.closest("[data-key]");
+      const key = row ? row.dataset.key : "";
+      const a = act.dataset.act;
+      if (a === "copy") { this._copy(row, act); return; }
+      if (a === "retry" || a === "discard") {
+        const cid = row.dataset.clientId || "";
+        const ent = this.m.msgs.get(key);
+        if (a === "retry") this._retry(cid, ent ? ent.msg : null);
+        else { if (ent) this.m.hidden.add(key); else removePending(this.m, cid); this._render(); }
+        return;
+      }
+      if (a === "full") { void this._loadFull(key); return; }
+    }
+    const grp = t.closest?.(".chat-tool-group");
+    if (grp) { this._openGroups.add(grp.dataset.key); this._render(); return; }
+    const mchip = t.closest?.(".chat-chip.msg");
+    if (mchip) { void this._openPath(mchip.dataset.path || ""); return; }
+    const dmore = t.closest?.(".chat-diff-more");
+    if (dmore) {
+      const rest = dmore.parentElement?.querySelector(".chat-diff-rest");
+      if (rest) { rest.classList.remove("hidden"); dmore.remove(); }
+      return;
+    }
+    const copy = t.closest?.(".chat-code-copy");
+    if (copy) {
+      const txt = copy.closest(".chat-code")?.querySelector(".chat-code-pre")?.textContent || "";
+      if (txt) this._flashCopied(copy, txt);
+      return;
+    }
+    const link = t.closest?.(".chat-a");
+    if (link) {
+      e.preventDefault();
+      if (link.dataset.href) api.openExternal(link.dataset.href).catch(() => {});
+      return;
+    }
+    const file = t.closest?.(".chat-file");
+    if (file) { void this._openPath(file.dataset.target || ""); return; }
+    const more = t.closest?.(".chat-out-more");
+    if (more) {
+      const pre = more.previousElementSibling;
+      if (pre && pre.dataset.full != null) { pre.textContent = pre.dataset.full; more.remove(); }
+      return;
+    }
+    const open = t.closest?.(".chat-tool-open");
+    if (open) { if (open.dataset.path) this.ctx.openFile?.(open.dataset.path); return; }
+    const thead = t.closest?.(".chat-tool-head");
+    if (thead) {
+      const trow = thead.closest(".chat-tool");
+      if (trow && trow.dataset.fold === "1") {
+        const k = trow.dataset.key;
+        if (trow.classList.toggle("open")) this._openTools.add(k); else this._openTools.delete(k);
+      }
+      return;
+    }
+    const think = t.closest?.(".chat-thinking");
+    if (think && think.dataset.full != null) {
+      const full = think.dataset.full || "";
+      const collapsed = think.dataset.collapsed === "1";
+      think.dataset.collapsed = collapsed ? "0" : "1";
+      const body = think.querySelector(".chat-think-body");
+      if (body) body.textContent = collapsed ? full : full.slice(0, CHAT.THINKING_CHARS) + (full.length > CHAT.THINKING_CHARS ? "…" : "");
+    }
+  }
+
+  _flashCopied(btn, text) {
+    try { navigator.clipboard?.writeText(text).catch(() => {}); } catch (_) { /* noop */ }
+    btn.classList.add("done");
+    btn.innerHTML = icons.check({ size: 13 });
+    setTimeout(() => { btn.classList.remove("done"); btn.innerHTML = icons.copy({ size: 13 }); }, 1200);
+  }
+
+  async _copy(row, btn) {
+    if (!row) return;
+    let text = row._copyText || "";
+    const ent = this.m.msgs.get(row.dataset.key);
+    // 잘린 본문은 전문을 받아 복사한다 — 화면에 보이는 앞부분만 복사되면 조용히 틀린 것이 된다.
+    if (ent && ent.msg.truncated && this.m.threadId) {
+      try { const r = await this._rpc("conv.detail", { threadId: this.m.threadId, key: ent.msg.key }); if (r.text) text = r.text; } catch (_) { /* 보이는 만큼이라도 */ }
+    }
+    if (text) this._flashCopied(btn, text);
+  }
+
+  async _loadFull(key) {
+    const ent = this.m.msgs.get(key);
+    if (!ent || !this.m.threadId) return;
+    try {
+      const r = await this._rpc("conv.detail", { threadId: this.m.threadId, key });
+      if (!r.text || this._disposed) return;
+      ent.msg = { ...ent.msg, text: r.text, truncated: false };
+      const row = this._rows.get(key);
+      if (row) { row.el.querySelector(":scope > .chat-trunc")?.remove(); row.sig = ""; }
+      this._render();
+    } catch (e) {
+      this._setBanner(convErrorText(e.code), "warn", 4000);
+    }
+  }
+
+  async _openPath(path) {
+    if (!path) return;
+    if (!this.ctx.isLocal?.()) { this.ctx.openFile?.(path); return; }
+    if (isImagePath(path)) {
+      try {
+        const b64 = await api.filePreviewB64(path);
+        if (b64) { showLightbox(`data:${mimeOf(path)};base64,${b64}`, { name: basename(path) || path, path }); return; }
+      } catch (_) { /* 아래 폴백 */ }
+    }
+    api.openPath(path).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));
+  }
+
+  // ── 헤더 ──
+  _syncThread() {
+    const th = this.m.thread;
+    if (!th) return;
+    const tab = this.ctx.tab?.() || {};
+    const title = typeof th.title === "string" ? th.title : "";
+    if (title && title !== tab.title) this.ctx.patchTab?.({ title });
+    if (th.mode && !this._modeBusy) this._mode = th.mode;
+  }
+
+  _syncHead() {
+    if (!this.titleEl || this._editing) return;
+    const th = this.m.thread;
+    const title = this.m.threadId ? threadTitle(th || { title: this.ctx.tab?.()?.title }) : i18n.t('새 대화');
+    if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
+    this.titleEl.disabled = !this.m.threadId;
+    this.titleEl.title = this.m.threadId ? i18n.t('대화 제목 바꾸기') : "";
+    // 터미널로 넘기기는 이 PC 의 대화만 — 다른 PC 에 터미널을 만드는 길이 PC 앱에는 없다.
+    this.termBtn.classList.toggle("hidden", !this.m.threadId || !this.ctx.isLocal?.() || !this.ctx.openTerminal);
+    const label = convModeLabel(this.m.threadId ? (this._mode || "default") : this._newMode);
+    const lEl = this.modeEl.querySelector(".chat-mode-label");
+    if (lEl.textContent !== label) lEl.textContent = label;
+    this.modeEl.classList.toggle("busy", !!this._modeBusy);
+  }
+
+  _editTitle() {
+    if (!this.m.threadId || this._editing) return;
+    this._editing = true;
+    const cur = threadTitle(this.m.thread || {});
+    const input = document.createElement("input");
+    input.className = "conv-title-input";
+    input.type = "text";
+    input.value = cur;
+    input.maxLength = 120;
+    this.titleEl.replaceWith(input);
+    let done = false;
+    const finish = async (save) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      input.replaceWith(this.titleEl);
+      this._editing = false;
+      if (save && v && v !== cur) {
+        const prev = this.m.thread ? this.m.thread.title : "";
+        this.m.thread = { ...(this.m.thread || {}), title: v, titleSet: true };
+        this.ctx.patchTab?.({ title: v });
+        try {
+          const r = await this._rpc("conv.set", { threadId: this.m.threadId, title: v });
+          if (r.thread) applyThreadHint(this.m, r.thread);
+        } catch (e) {
+          this.m.thread = { ...(this.m.thread || {}), title: prev };
+          this.ctx.patchTab?.({ title: prev || "" });
+          this._setBanner(convErrorText(e.code), "warn", 4000);
+        }
+      }
+      this._syncHead();
+    };
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === "Enter") { e.preventDefault(); void finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); void finish(false); }
+    });
+    input.addEventListener("blur", () => void finish(true));
+    input.focus();
+    input.select();
+  }
+
+  // ── 모드 ──
+  async _loadCaps() {
+    if (this._caps || this._capsLoading) return;
+    this._capsLoading = true;
+    try { this._caps = await this._rpc("conv.caps", {}); } catch (_) { this._caps = null; }
+    finally { this._capsLoading = false; }
+  }
+
+  // 데몬이 알려 준 것만(모르면 카탈로그 그대로). 지금 모드는 목록에 없어도 남긴다(conv-model.convModeChoices).
+  _modeChoices() {
+    const cur = this.m.threadId ? (this._mode || "default") : this._newMode;
+    return convModeChoices(cur, this._caps && this._caps.modes);
+  }
+
+  _toggleModeMenu() {
+    if (this.modeMenuEl) { this._closeModeMenu(); return; }
+    this.composer?.closePopovers();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu";
+    this.composer.el.appendChild(wrap);
+    this.modeMenuEl = wrap;
+    wrap.innerHTML = this._modeChoices().map((m) => {
+      // 설명 한 줄은 v1 카탈로그의 것을 빌린다(같은 모드의 같은 설명 — 이름만 채팅에 맞게 다르다).
+      const cat = agentModeOf(m.id);
+      const desc = cat && cat.desc ? i18n.t(cat.desc) : "";
+      return `<div class="chat-mode-row${m.on ? " on" : ""}" data-mode="${escapeHtml(m.id)}">` +
+        `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
+        (desc ? `<span class="chat-mode-row-desc">${escapeHtml(desc)}</span>` : "") + `</span>` +
+        `<span class="chat-mode-row-mark">${m.on ? icons.check({ size: 12 }) : ""}</span></div>`;
+    }).join("");
+    wrap.addEventListener("click", (e) => {
+      const row = e.target.closest?.(".chat-mode-row");
+      if (row) void this._pickMode(row.dataset.mode);
+    });
+    this._modeCloser = (e) => { if (!wrap.contains(e.target) && !this.modeEl.contains(e.target)) this._closeModeMenu(); };
+    setTimeout(() => { if (this.modeMenuEl === wrap) document.addEventListener("mousedown", this._modeCloser, true); }, 0);
+  }
+
+  _closeModeMenu() {
+    if (this._modeCloser) document.removeEventListener("mousedown", this._modeCloser, true);
+    this._modeCloser = null;
+    this.modeMenuEl?.remove();
+    this.modeMenuEl = null;
+  }
+
+  async _pickMode(id) {
+    this._closeModeMenu();
+    if (!id || this._modeBusy) return;
+    if (!this.m.threadId) {
+      // 아직 대화가 없다 — 첫 메시지(conv.create)에 실려 간다.
+      this._newMode = id;
+      try { localStorage.setItem(MODE_KEY, id); } catch (_) { /* noop */ }
+      this._syncHead();
+      return;
+    }
+    if (this._mode === id) return;
+    const prev = this._mode;
+    // 누른 즉시 알약을 바꾼다. 실패하면 되돌리고 이유를 말한다(바뀌지 않았는데 바뀐 것처럼 보이면 안 된다).
+    this._modeBusy = true;
+    this._mode = id;
+    this._syncHead();
+    try {
+      const r = await this._rpc("conv.set", { threadId: this.m.threadId, mode: id });
+      if (r.thread) applyThreadHint(this.m, r.thread);
+      this._mode = (r.thread && r.thread.mode) || id;
+      try { localStorage.setItem(MODE_KEY, this._mode); } catch (_) { /* noop */ }
+    } catch (e) {
+      this._mode = prev;
+      // 에이전트가 답하지 않았는지(CONTROL_TIMEOUT) 거절했는지(CONTROL_FAILED)는 다른 일이다 — code 로 말한다.
+      this._setBanner(e.code === "CONTROL_TIMEOUT" || e.code === "CONTROL_FAILED" ? convErrorText(e.code)
+        : i18n.t('모드를 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.'), "warn", 4000);
+    } finally {
+      this._modeBusy = false;
+      this._syncHead();
+    }
+  }
+
+  // ── 터미널과 주고받기(§6) ──
+  async _toTerminal() {
+    if (!this.m.threadId || this._handing) return;
+    if (isBusy(this.m)) { this._setBanner(i18n.t('작업이 끝난 뒤에 할 수 있어요.'), "info", 4000); return; }
+    this._handing = true;
+    try {
+      const r = await this._rpc("conv.toTerminal", { threadId: this.m.threadId });
+      // owner 는 데몬이 정한다('none' → 터미널에 훅이 걸리면 'terminal'). 여기서 짐작해 적지 않는다.
+      this.ctx.openTerminal?.(terminalLaunch(r, this.m.thread && this.m.thread.agent));
+      void this._catchUp();
+      this._render();
+    } catch (e) {
+      this._setBanner(e.code === "THREAD_BUSY" ? i18n.t('작업이 끝난 뒤에 할 수 있어요.') : convErrorText(e.code), "warn", 4000);
+    } finally {
+      this._handing = false;
+    }
+  }
+
+  async _adoptCurrent() {
+    const th = this.m.thread;
+    if (!th || this._adopting) return;
+    this._adopting = true;
+    this._syncConn();
+    try {
+      const r = await this._rpc("conv.adopt", { cwd: th.cwd || this.ctx.cwd?.() || "", tid: th.ownerTid });
+      if (r.thread) applyThreadHint(this.m, r.thread);
+      this._opened = false;
+      await this._open();
+    } catch (e) {
+      this._setBanner(adoptErrorText(e.code), "warn", 5000);
+    } finally {
+      this._adopting = false;
+      this._syncConn();
+    }
+  }
+
+  // ── 연결 상태 줄 ──
+  _setOffline(on) {
+    if (this._offline === !!on) return;
+    this._offline = !!on;
+    this._syncConn();
+  }
+
+  _syncConn() {
+    if (!this.connEl) return;
+    let html = "";
+    let tone = "";
+    if (this.ctx.hostOffline?.() || this._offline) {
+      html = escapeHtml(i18n.t('PC가 꺼져 있거나 연결이 끊겼어요. 켜지면 이어서 받아 와요.')); tone = "warn";
+    } else if (!_channelUp && Date.now() - _channelDownAt > 2000) {
+      html = escapeHtml(i18n.t('다시 연결하는 중…')); tone = "info";
+    } else if (this.m.thread && needsAdopt(this.m.thread)) {
+      html = `<span>${escapeHtml(i18n.t('터미널에서 사용 중'))}</span>`
+        + `<button class="conv-link" type="button" data-act="adopt"${this._adopting ? " disabled" : ""}>${i18n.t('채팅으로 가져오기')}</button>`;
+      tone = "info";
+    }
+    const key = tone + "|" + html;
+    if (key === this._connKey) return;
+    this._connKey = key;
+    this.connEl.innerHTML = html;
+    this.connEl.className = "conv-conn" + (html ? " " + tone : " hidden");
+  }
+
+  _setBanner(msg, tone, ttl) {
+    if (!this.bannerEl) return;
+    clearTimeout(this._bannerTimer);
+    this.bannerEl.className = "chat-banner" + (msg ? " " + (tone || "info") : " hidden");
+    this.bannerEl.textContent = msg || "";
+    if (msg && ttl) this._bannerTimer = setTimeout(() => this._setBanner(""), ttl);
+  }
+
+  // ── 대화 목록(§10.6) ──
+  _toggleList() {
+    if (this.listEl) { this._closeList(); return; }
+    this._closePopovers();
+    const pop = document.createElement("div");
+    pop.className = "conv-pop";
+    pop.innerHTML = `<div class="conv-pop-head">${i18n.t('대화 목록')}</div><div class="conv-pop-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    this.el.appendChild(pop);
+    this.listEl = pop;
+    this._threads = null;
+    pop.addEventListener("click", (e) => void this._onListClick(e));
+    this._listCloser = (e) => { if (!pop.contains(e.target) && !this.listBtn.contains(e.target)) this._closeList(); };
+    setTimeout(() => { if (this.listEl === pop) document.addEventListener("mousedown", this._listCloser, true); }, 0);
+    void this._loadList();
+  }
+
+  _closeList() {
+    if (this._listCloser) document.removeEventListener("mousedown", this._listCloser, true);
+    this._listCloser = null;
+    this.listEl?.remove();
+    this.listEl = null;
+  }
+
+  async _loadList() {
+    const pop = this.listEl;
+    try {
+      const r = await this._rpc("conv.list", { cwd: this.ctx.cwd?.() || "", limit: 100, includeExternal: true });
+      if (this.listEl !== pop) return;
+      this._threads = Array.isArray(r.threads) ? r.threads.slice() : [];
+      this._renderList();
+    } catch (e) {
+      if (this.listEl !== pop) return;
+      pop.querySelector(".conv-pop-list").innerHTML = `<div class="chat-pick-empty">${escapeHtml(isOfflineCode(e.code) ? i18n.t('PC 가 연결돼 있지 않습니다.') : i18n.t('목록을 불러오지 못했습니다'))}</div>`;
+    }
+  }
+
+  _noteListThread(t) {
+    if (!this._threads || !t || !t.id) return;
+    const i = this._threads.findIndex((x) => x.id === t.id);
+    if (i >= 0) this._threads[i] = { ...this._threads[i], ...t };
+    else this._threads.unshift(t);
+    this._threads.sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+    this._renderList();
+  }
+
+  _renderList() {
+    if (!this.listEl || !this._threads) return;
+    const list = this.listEl.querySelector(".conv-pop-list");
+    if (!this._threads.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('아직 대화가 없어요')}</div>`; return; }
+    const now = Date.now();
+    list.innerHTML = this._threads.map((t) => {
+      const dot = threadDot(t);
+      const cur = t.id === this.m.threadId;
+      const confirm = this._confirmDel === t.id;
+      const dotTitle = dot === "attention" ? i18n.t('조치 필요') : dot === "working" ? i18n.t('작업 중') : dot === "error" ? i18n.t('오류') : "";
+      return `<div class="conv-li${cur ? " on" : ""}" data-id="${escapeHtml(t.id)}">` +
+        `<div class="conv-li-top">` +
+          (dot ? `<span class="conv-dot ${dot}" title="${escapeHtml(dotTitle)}"></span>` : "") +
+          `<span class="conv-li-title">${escapeHtml(threadTitle(t))}</span>` +
+          (t.external || needsAdopt(t) ? `<span class="conv-li-badge">${i18n.t('터미널')}</span>` : "") +
+          `<span class="conv-li-time">${escapeHtml(fmtAgo(t.lastAt, now))}</span>` +
+        `</div>` +
+        (t.preview ? `<div class="conv-li-prev">${escapeHtml(String(t.preview))}</div>` : "") +
+        (confirm
+          ? `<div class="conv-li-acts"><span class="conv-note">${i18n.t('이 대화를 지울까요? 되돌릴 수 없어요.')}</span>` +
+            `<button class="conv-link danger" type="button" data-act="del-yes">${i18n.t('삭제')}</button>` +
+            `<button class="conv-link" type="button" data-act="del-no">${i18n.t('취소')}</button></div>`
+          : `<div class="conv-li-acts">` +
+            (needsAdopt(t) ? `<button class="conv-link" type="button" data-act="adopt">${i18n.t('채팅으로 가져오기')}</button>` : "") +
+            (t.external ? "" : `<button class="conv-li-del" type="button" data-act="del" title="${i18n.t('삭제')}">${icons.trash({ size: 13 })}</button>`) +
+            `</div>`) +
+        `</div>`;
+    }).join("");
+  }
+
+  async _onListClick(e) {
+    const li = e.target.closest?.(".conv-li");
+    if (!li) return;
+    const id = li.dataset.id;
+    const t = (this._threads || []).find((x) => x.id === id);
+    if (!t) return;
+    const act = e.target.closest?.("[data-act]")?.dataset.act;
+    if (act === "del") { this._confirmDel = id; this._renderList(); return; }
+    if (act === "del-no") { this._confirmDel = null; this._renderList(); return; }
+    if (act === "del-yes") {
+      this._confirmDel = null;
+      try {
+        await this._rpc("conv.remove", { threadId: id });
+        this._threads = (this._threads || []).filter((x) => x.id !== id);
+        this._renderList();
+        if (id === this.m.threadId) this.newThread();
+      } catch (err) {
+        this._renderList();
+        this._setBanner(convErrorText(err.code), "warn", 4000);
+      }
+      return;
+    }
+    if (act === "adopt") {
+      li.classList.add("busy");
+      try {
+        const r = await this._rpc("conv.adopt", { cwd: t.cwd || this.ctx.cwd?.() || "", tid: t.ownerTid });
+        this._pickThread((r.thread && r.thread.id) || id, (r.thread && r.thread.title) || t.title);
+      } catch (err) {
+        li.classList.remove("busy");
+        this._setBanner(adoptErrorText(err.code), "warn", 5000);
+      }
+      return;
+    }
+    // 터미널이 쓰고 있는 대화는 그냥 열 수 없다(소유자는 항상 1명) — 먼저 가져와야 한다.
+    if (needsAdopt(t)) return;
+    this._pickThread(id, t.title);
+  }
+
+  _pickThread(id, title) {
+    this._closeList();
+    if (id === this.m.threadId) return;
+    // 같은 대화가 다른 탭에 이미 열려 있으면 그 탭으로 간다(한 화면에 같은 대화 둘을 만들지 않는다).
+    if (this.ctx.focusThread?.(id)) return;
+    this.openThread(id, title || "");
+  }
+
+  _closePopovers() {
+    const any = !!(this.listEl || this.modeMenuEl || this.composer?.hasPopover());
+    this._closeList();
+    this._closeModeMenu();
+    this.composer?.closePopovers();
+    return any;
+  }
+
+  // ── 스크롤 ──
+  _atBottom() {
+    const s = this.scrollEl;
+    return !s || s.scrollHeight - s.scrollTop - s.clientHeight < CONV.AT_BOTTOM_PX;
+  }
+  _toBottom() {
+    // 애니메이션 없음 — 글자가 오는 동안 부드러운 스크롤은 매번 튄다.
+    if (!this.scrollEl) return;
+    this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
+    this._lastTop = this.scrollEl.scrollTop;
+  }
+  _syncJump() {
+    if (this.jumpEl) this.jumpEl.classList.toggle("hidden", this._follow || this._atBottom());
+  }
+
+  dispose() {
+    this._disposed = true;
+    this._stopTick();
+    clearTimeout(this._bannerTimer);
+    clearTimeout(this._behindTimer);
+    if (this._raf) { (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout)(this._raf); this._raf = 0; }
+    this._closePopovers();
+    try { this._ro?.disconnect(); } catch (_) { /* noop */ }
+    try { this._mediaObs?.disconnect(); } catch (_) { /* noop */ }
+    if (this._onWinFocus) window.removeEventListener("focus", this._onWinFocus);
+    if (this._onVis) document.removeEventListener("visibilitychange", this._onVis);
+    this.composer?.dispose();
+    _live.delete(this);
+    // ⚠ conv.stop 을 부르지 않는다. 탭을 닫아도 대화는 남고(§10.7), 같은 대화를 다른 기기가 보고 있을 수 있다.
+    //  프로세스는 데몬이 10분 유휴로 스스로 내린다(§5).
+    this.el?.remove();
+  }
+}
+
+/** conv.adopt 실패 안내 — 터미널 탭의 "채팅으로 이어가기"와 목록의 "가져오기"가 같은 말을 한다. */
+export function adoptErrorText(code) {
+  switch (String(code || "")) {
+    case "THREAD_BUSY_IN_TERMINAL": return i18n.t('에이전트가 아직 작업 중이에요');
+    case "THREAD_NOT_FOUND": return i18n.t('이 터미널에서 이어갈 대화를 찾지 못했어요');
+    default: return convErrorText(code);
+  }
+}
