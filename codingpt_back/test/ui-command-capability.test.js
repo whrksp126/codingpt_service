@@ -56,10 +56,16 @@ test('선정 로직이 능력을 실제로 적용한다(소스 계약)', () => {
   assert.match(src, /msg\.mode === 'broadcast' \? capable : \[executor\]/);
 });
 
-test('클라이언트 양쪽이 실제로 목록을 신고한다', () => {
+test('PC 클라이언트가 실제로 목록을 신고한다', () => {
   const pc = fs.readFileSync(path.join(__dirname, '../../codingpt_pc/src/js/ui-channel.js'), 'utf8');
   // PC 는 핸들러 테이블에서 직접 뽑는다 — 손으로 적으면 반드시 어긋난다.
   assert.match(pc, /uiCmds: \[\.\.\.Object\.keys\(handlers\), "browser\.\*"\]/);
+});
+
+// codingpt_app 은 별도 리포 — CI(이 리포 단독 체크아웃)엔 없다. 있을 때만 검증(로컬 멀티 리포 배치).
+const APP_ROOT = path.join(__dirname, '../../../codingpt_app');
+test('앱 클라이언트가 실제로 목록을 신고한다', (t) => {
+  if (!fs.existsSync(path.join(APP_ROOT, 'src'))) return t.skip('앱 리포 없음(단일 리포 CI)');
   const app = fs.readFileSync(path.join(__dirname, '../../../codingpt_app/src/services/notificationService.ts'), 'utf8');
   assert.match(app, /uiCmds: UI_COMMAND_NAMES/);
   const names = fs.readFileSync(path.join(__dirname, '../../../codingpt_app/src/workspace/uiCommandNames.ts'), 'utf8');

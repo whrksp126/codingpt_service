@@ -162,7 +162,11 @@ test('env -i PATH=/usr/bin:/bin 재현 — searchDirs(표준 위치 ~/.local/bin
   } else {
     assert.strictEqual(out.gh, path.join(lb, 'gh'));
   }
-  assert.ok(!out.gh || !['/usr/bin', '/bin'].includes(path.dirname(out.gh)));
+  // 전제: 이 머신 /usr/bin·/bin 에 gh 가 없다(macOS 기본). 리눅스 CI 러너처럼 apt 로 /usr/bin/gh 가
+  //  깔린 머신에선 PATH 에서 찾는 것이 정답이므로 이 단언은 전제가 성립할 때만 건다.
+  if (!['/usr/bin/gh', '/bin/gh'].some((f) => fs.existsSync(f))) {
+    assert.ok(!out.gh || !['/usr/bin', '/bin'].includes(path.dirname(out.gh)));
+  }
 });
 
 test('repoInfo — top/common/subdir 정규화', async () => {
