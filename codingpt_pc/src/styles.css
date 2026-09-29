@@ -239,6 +239,7 @@ body.resizing-row { cursor: row-resize; }
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
 }
 .sb-sec + .sb-sec { margin-top: 6px; }
+.sb-sec.sb-sec-dev { text-transform: none; letter-spacing: 0; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--border); }
 .sb-sec-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-sec-acts { margin-left: auto; display: flex; align-items: center; gap: 2px; }
 .sb-sec-btn {
@@ -263,10 +264,14 @@ body.resizing-row { cursor: row-resize; }
 }
 .pc-row:hover { background: var(--elevated); }
 .pc-row.active { background: var(--hover); color: var(--text); }
+.pc-row.picked { color: var(--text); }
+.pc-row .pc-nm { flex: 1; }
+.pc-row .wsr-badge { margin-left: 0; }
+.pc-row .wsr-badge.pc-needs { background: var(--warn); color: #1a1300; }
+.pc-row .pc-check { display: inline-flex; flex: none; color: var(--text2); }
 .pc-row.pc-off { opacity: 0.55; }
 .pc-row .pc-ic { display: inline-flex; flex: none; opacity: 0.85; }
 .pc-row .pc-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.pc-row .wsr-badge { margin-left: auto; }
 .wsr-dot { width: 6px; height: 6px; border-radius: 3px; display: inline-block; flex: none; }
 .wsr-dot.on { background: var(--accent); }
 .wsr-dot.off { background: var(--text-dim, #8b93a7); }
@@ -2612,6 +2617,7 @@ img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에�
 }
 .shell.sb-collapsed .tv-top { padding-left: var(--titlebar-inset-left); }
 .tv-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
+.tv-host { font-size: 12px; color: var(--dim); margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tv-back { display: inline-flex; align-items: center; gap: 4px; background: transparent; border: none; color: var(--text2); font-size: 13px; font-weight: 600; cursor: pointer; padding: 2px 6px; border-radius: var(--r-sm); }
 .tv-back:hover { background: var(--elevated2); }
 .tv-body { flex: 1; min-height: 0; display: flex; }

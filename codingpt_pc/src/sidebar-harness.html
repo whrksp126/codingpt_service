@@ -64,7 +64,13 @@
     task('t_readme', 'README 정리', 'other/project/codingpt', 1, [run('r_r1', 1, 'review_ready', { diff: { files: 2, additions: 41, deletions: 7 }, at: 5 })]),
     task('t_hub', '빌드 캐시 정리', 'other/project/hub', 2, [run('r_h1', 1, 'review_ready', { at: 2 })]),
   ], at: Date.now(), error: null };
-  S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 }];
+  // 다른 PC(사무실 iMac)에서 입력을 기다리는 작업 — PC 행 배지(진행 현황 = PC 안의 장소, 2026-09-29).
+  S.state.tasks.byHost['12'] = { items: [
+    task('t_img', '이미지 업로드 개선', 'work/tokin', 3, [{ ...run('r_i1', 1, 'running', { tid: 2, at: 4 }), cwd: '.codingpt/worktrees/r_i1' }]),
+  ], at: Date.now(), error: null };
+  S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 },
+    { id: 'ap2', hostDeviceId: 12, cwd: '.codingpt/worktrees/r_i1', win: 2, createdAt: 2 }];
+  if (location.hash.includes('tasks')) S.setView('tasks');
   S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [] };
   if (location.hash.includes('collapse')) localStorage.setItem('cpt.sbGroupCollapsed.v1', JSON.stringify({ 2: 1 }));
   else localStorage.removeItem('cpt.sbGroupCollapsed.v1');
@@ -76,7 +82,7 @@
   if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
   // 검사용 손잡이 — 지금 보이는 PC 행/워크스페이스 행, 그리고 코드로 PC 전환.
   window.__rows = () => ({
-    pcs: [...document.querySelectorAll('.pc-row')].map((r) => r.querySelector('.pc-nm').textContent + (r.classList.contains('active') ? ' ✓' : '')),
+    pcs: [...document.querySelectorAll('.pc-row')].map((r) => r.querySelector('.pc-nm').textContent + (r.classList.contains('picked') || r.classList.contains('active') ? ' ✓' : '')),
     wss: [...document.querySelectorAll('.ws-row .wsr-nm')].map((n) => n.textContent),
     topPlus: !!document.querySelector('.sb-top .ctl-plus, .sb-top [title*="워크스페이스"]'),
     secs: [...document.querySelectorAll('.sb-sec-nm')].map((n) => n.textContent),

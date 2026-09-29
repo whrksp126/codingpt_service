@@ -93,6 +93,44 @@ if (!fs.existsSync(APP_MODEL)) {
   }
 }
 
+// ── 2-1. PC 범위(진행 현황 = PC 안의 장소, 2026-09-29) — scopeToHost·needsInputByHost 두 구현 대조 ──
+{
+  const cases = [];
+  fixtures.forEach((fx, i) => {
+    const hs = new Set([...(fx.input.hosts || []).map((h) => Number(h.id)), ...(fx.input.tasks || []).map((t) => Number(t.host))].filter((h) => h > 0));
+    for (const h of hs) cases.push({ i, h });
+  });
+  ok(cases.length > 0, `PC 범위 대조 케이스 ${cases.length}개`);
+  const pcOut = cases.map(({ i, h }) => {
+    const full = M.buildDashboard(fixtures[i].input);
+    const sc = M.scopeToHost(full, h);
+    return { groups: Object.fromEntries(M.GROUPS.map((g) => [g, sc.groups[g].map((r) => r.k)])), counts: sc.counts, offline: sc.offline, byHost: M.needsInputByHost(full) };
+  });
+  // 규칙 자체: 범위 밖 host 의 행이 없다(host 0 = 모름은 남긴다).
+  ok(cases.every(({ h }, j) => M.GROUPS.every((g) => pcOut[j].groups[g].every((k) => { const hh = Number(k.split("|")[0]); return hh === h || hh === 0; }))),
+    "PC scopeToHost: 고른 PC(+host 0) 의 행만 남는다");
+  if (fs.existsSync(APP_MODEL)) {
+    let appOut = null;
+    try {
+      appOut = probe(APP_MODEL, `
+        const fx = ${JSON.stringify(fixtures.map((f) => f.input))};
+        const cases = ${JSON.stringify(cases)};
+        const G = ${JSON.stringify(M.GROUPS)};
+        console.log(JSON.stringify(cases.map(({ i, h }) => {
+          const full = m.buildTasksModel(fx[i]);
+          const sc = m.scopeToHost(full, h);
+          return { groups: Object.fromEntries(G.map((g) => [g, sc.groups[g].map((r) => r.k)])), counts: sc.counts, offline: sc.offline, byHost: m.needsInputByHost(full) };
+        })));`);
+    } catch (e) {
+      skip("앱 scopeToHost 대조", "앱 모델을 실행하지 못함: " + String(e.stderr || e.message).split("\n").find((l) => /Error/.test(l)));
+    }
+    if (appOut) {
+      ok(JSON.stringify(appOut) === JSON.stringify(pcOut), "앱 scopeToHost·needsInputByHost 가 PC 와 같다",
+        `\n   app ${JSON.stringify(appOut).slice(0, 400)}\n   pc  ${JSON.stringify(pcOut).slice(0, 400)}`);
+    }
+  }
+}
+
 // ── 3. 작업 워크스페이스 술어(§4) ────────────────────────────────────────────────
 ok(M.isTaskWorkspace({ localPath: ".codingpt/worktrees/app-x2m1qa-1" }), "술어: .codingpt/worktrees/ 아래 = 작업 워크스페이스");
 ok(M.isTaskWorkspace({ localPath: ".codingpt/worktrees/app-x2m1qa-1/codingpt_back" }), "술어: 모노레포 subdir run.cwd 도 작업 워크스페이스");

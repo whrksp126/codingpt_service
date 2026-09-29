@@ -15,7 +15,7 @@ import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { getPane } from "./pane.js";
 import { icons, agentMarkHtml, iconBtn } from "./icons.js";
-import { buildDashboard, GROUPS, isTaskWorkspace } from "./tasks-model.js";
+import { buildDashboard, GROUPS, isTaskWorkspace, scopeToHost, needsInputByHost } from "./tasks-model.js";
 import { taskRpc, refreshHostCaps, hostHasTasks, serverHasTasks, onCapsChanged, newOpId, isLocalHostId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
 import * as i18n from "./i18n/index.js";
@@ -156,6 +156,17 @@ function modelInput() {
 
 export function dashboard() { return buildDashboard(modelInput()); }
 
+/** 보고 있는 PC 로 좁힌 현황판 — 화면(목록·키 이동)과 사이드바 `진행 현황` 배지가 쓴다. 상세 찾기는 전체(dashboard). */
+export function scopedDashboard(dash) {
+  const d = dash || dashboard();
+  const h = Number(S.activeDeviceId());
+  return Number.isFinite(h) && h > 0 ? scopeToHost(d, h) : d;
+}
+/** PC 행 배지 — PC 별 입력 대기 수. */
+export function needsInputPerHost(dash) {
+  try { return needsInputByHost(dash || dashboard()); } catch (_) { return {}; }
+}
+
 /** 현황판 행을 GROUPS 순으로 평탄화 — 사이드바 저장소 트리(sidebar-tasks.js)의 `rows` 입력(sidebar §2.1).
  *  dash 를 주면 그걸 쓴다(같은 렌더에서 모델을 두 번 계산하지 않게). */
 export function dashboardRows(dash) {
@@ -165,7 +176,7 @@ export function dashboardRows(dash) {
 
 /** 사이드바 `작업 [n]` 배지 — 입력 대기 수. */
 export function needsInputCount() {
-  try { return dashboard().counts.needs_input; } catch (_) { return 0; }
+  try { return scopedDashboard().counts.needs_input; } catch (_) { return 0; }
 }
 
 // ── 열기/닫기 ──────────────────────────────────────────────────────────────────
@@ -173,6 +184,11 @@ export function needsInputCount() {
 export function openTasksDashboard(opts) {
   const o = opts || {};
   if (o.taskId) sel = { host: o.host != null ? Number(o.host) : guessHost(o.taskId), taskId: o.taskId, runId: o.runId || null };
+  // 알림·딥링크가 다른 PC 의 작업을 가리키면 그 PC 로 옮긴다(현황판은 PC 안의 장소). setActiveDevice 는
+  //  워크스페이스로 이동시키므로 그 뒤에 view 를 다시 세운다.
+  if (sel && sel.host && Number(sel.host) !== Number(S.activeDeviceId()) && S.pcDevices().some((d) => Number(d.id) === Number(sel.host))) {
+    S.setActiveDevice(sel.host);
+  }
   S.setView("tasks");
   void refreshHostCaps();
   void refreshAll();
@@ -180,6 +196,12 @@ export function openTasksDashboard(opts) {
   setTimeout(() => el?.focus?.(), 30);
 }
 export function closeTasksDashboard() { S.setView("workspace"); }
+
+function activeDeviceName() {
+  const id = S.activeDeviceId();
+  const d = S.pcDevices().find((x) => String(x.id) === String(id));
+  return d ? d.name || "" : "";
+}
 
 function guessHost(taskId) {
   for (const [h, v] of Object.entries(state.tasks.byHost)) if ((v.items || []).some((t) => t.id === taskId)) return Number(h);
@@ -302,10 +324,13 @@ export function updateTasksView() {
   el.hidden = !on;
   if (!on) return;
   startPolling();
-  const dash = dashboard();
+  // 다른 PC 로 옮겼으면 이전 PC 의 상세는 닫는다 — 현황판은 보고 있는 PC 의 것이다.
+  const actH = Number(S.activeDeviceId());
+  if (sel && sel.host && actH > 0 && Number(sel.host) !== actH) sel = null;
+  const dash = scopedDashboard();
   const wide = el.clientWidth >= 1100;
   const now = Date.now();
-  const frameSig = JSON.stringify([wide, !!sel, state.sidebarCollapsed]);
+  const frameSig = JSON.stringify([wide, !!sel, state.sidebarCollapsed, actH, activeDeviceName()]);
   const lSig = JSON.stringify([
     wide, sel, focusK, [...collapsed], serverHasTasks(), queryHosts(),
     GROUPS.map((g) => dash.groups[g].map((r) => [r.k, r.group, r.reason, r.live && r.live.state, r.approvals.length, r.unread,
@@ -386,6 +411,14 @@ function renderFrame(wide) {
     t.className = "tv-title";
     t.textContent = tt("overview");
     top.append(t);
+    // 어느 PC 의 현황인지 — 제목 옆 흐린 글씨(워크스페이스 헤더의 호스트 표기와 같은 무게).
+    const dn = activeDeviceName();
+    if (dn) {
+      const sub = document.createElement("span");
+      sub.className = "tv-host";
+      sub.textContent = dn;
+      top.append(sub);
+    }
   }
   const sp = document.createElement("span");
   sp.className = "mt-spacer";
@@ -753,7 +786,7 @@ function onKey(e) {
   // 버튼·링크·접이 요약에서 Enter/Space 는 그 요소 자신의 동작이다 — 가로채서 커서 행을 열지 않는다.
   if ((tag === "BUTTON" || tag === "SUMMARY" || tag === "A") && (e.key === "Enter" || e.key === " ")) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const dash = dashboard();
+  const dash = scopedDashboard();
   const flat = GROUPS.filter((g) => !collapsed.has(g)).flatMap((g) => dash.groups[g]);
   const i = flat.findIndex((r) => r.k === focusK);
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {

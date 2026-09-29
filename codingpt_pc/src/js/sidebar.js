@@ -8,7 +8,7 @@ import { getPane } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
-import { tasksIcon, dashboard, dashboardRows, agentName, openTasksDashboard, closeTasksDashboard, openRunTerminal } from "./tasks-view.js";
+import { tasksIcon, dashboard, dashboardRows, scopedDashboard, needsInputPerHost, agentName, openTasksDashboard, openRunTerminal } from "./tasks-view.js";
 import { buildSidebarTasks } from "./sidebar-tasks.js";
 import { isLocalHostId, hostHasTasks, serverHasTasks } from "./tasks-api.js";
 import { taskNotifTarget } from "./notifications.js";
@@ -189,6 +189,7 @@ let sbSig = "";
 // 이번 렌더의 저장소 트리 파생(§2) — 시그니처 계산과 행 렌더가 같은 값을 쓴다(모델 1회 계산).
 let sbTree = { groups: {} };
 let sbTasksN = 0;
+let sbNeedsByHost = {}; // host → 입력 대기 수(PC 행 배지)
 export function updateSidebar() {
   if (!el) return;
   const totalUnread = state.notifications.filter((n) => !n.read).length;
@@ -205,7 +206,7 @@ export function updateSidebar() {
       state.me?.nickname, state.me?.email, state.me?.profileImg,
       notifOpen, state.notifications.length, state.notifications[0]?.id, state.notifications[0]?.read,
       activeDev0,
-      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0)]),
+      devices0.map((d) => [d.id, d.name, d.online, S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0), sbNeedsByHost[d.id] || 0]),
       wss0.map((w) => {
         const rt = S.wsRuntime(w.id);
         const st = w.localPath ? S.wsStatus.get(w.localPath) : null;
@@ -247,9 +248,6 @@ export function updateSidebar() {
   //  조작(추가/삭제)과 다른 기기 진입은 막혀 있다는 것을 한 줄로 알린다(오프라인 톤, 위험색 금지).
   if (state.wsStale) list.appendChild(note(i18n.t('오프라인 — 마지막으로 본 목록')));
 
-  // ── ⓪ 작업(Agent Tasks §6.1) — "내 PC" 위 한 줄. n = 입력 대기 수(현황판의 첫 그룹). ──
-  list.appendChild(tasksRow());
-
   // ── ① 내 PC (2026-08-14 기기 우선 개편) ────────────────────────────────
   //  예전엔 프로젝트(projectId) 묶음이 위, 그 안에 기기별 사본이 있었다. 사용자 지적: "이해도 안
   //  가고 사용성도 안 좋다". 실제 소유 관계는 반대다 — 워크스페이스는 **그 PC 의 로컬 폴더**다.
@@ -270,6 +268,17 @@ export function updateSidebar() {
   }
   for (const d of devices) {
     list.appendChild(deviceRow(d, activeDev));
+  }
+
+  // ── ①-1 고른 PC 의 `진행 현황` — 진행 현황은 **PC 안의 장소**다(2026-09-29 사용자 확정: 에이전트는
+  //  그 PC 에서 돈다). 예전엔 "내 PC" 위에서 모든 PC 를 합쳐 셌고, 누르면 켜고/끄는 버튼이었다.
+  //  이제 워크스페이스 행처럼 "들어가는 곳" — 선택 배경은 들어가 있는 곳 하나에만.
+  if (devices.length) {
+    const dn = devices.find((d) => String(d.id) === String(activeDev));
+    const devHead = sectionHead((dn && dn.name) || i18n.t('내 PC'), null);
+    devHead.classList.add("sb-sec-dev"); // PC 이름은 고유명사 — 대문자 변환 없이, 위 PC 목록과는 선으로 가른다
+    list.appendChild(devHead);
+    list.appendChild(tasksRow());
   }
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
@@ -445,7 +454,7 @@ export function buildTopControls(_withAdd = true) {
   return frag;
 }
 
-/** 사이드바 `진행 현황 [n]` 행 — 현황판 진입(모든 PC·워크스페이스의 에이전트를 상태별로 보는 **뷰**).
+/** 사이드바 `진행 현황 [n]` 행 — 고른 PC 의 에이전트를 상태별로 보는 **장소**(워크스페이스와 같은 급).
  *  작업을 "만드는 곳" 은 워크스페이스 그룹의 `+ 작업` 이다(agent-tasks-sidebar.md §0-1).
  *  선택(현황판이 열림)은 PC 행과 같은 배경 명암(--hover)으로만. */
 function tasksRow() {
@@ -456,7 +465,8 @@ function tasksRow() {
     `<span class="pc-ic">${tasksIcon({ size: 15 })}</span>` +
     `<span class="pc-nm">${escapeHtml(tt("overview"))}</span>` +
     (n ? `<span class="wsr-badge">${n}</span>` : "");
-  row.addEventListener("click", () => (state.view === "tasks" ? closeTasksDashboard() : openTasksDashboard()));
+  // 토글이 아니다 — 나가는 길은 다른 장소(워크스페이스 로컬 행 등)를 누르는 것(시안 확정 2026-09-29).
+  row.addEventListener("click", () => { if (state.view !== "tasks") openTasksDashboard(); });
   return row;
 }
 function note(text) {
@@ -507,7 +517,9 @@ function deviceRow(d, activeId) {
   const on = d.online !== false;
   const sel = String(d.id) === String(activeId);
   const row = document.createElement("button");
-  row.className = "pc-row" + (sel ? " active" : "") + (on ? "" : " pc-off");
+  // ★ 고른 PC 는 배경이 아니라 체크로(2026-09-29) — 배경 명암은 "지금 들어가 있는 곳"(진행 현황·로컬 행)
+  //  하나에만 쓴다. PC 는 장소가 아니라 그 아래 목록의 필터다.
+  row.className = "pc-row" + (sel ? " picked" : "") + (on ? "" : " pc-off");
   row.dataset.devId = String(d.id);
   // 미읽음은 그 PC 의 워크스페이스 것을 합산한다 — 다른 PC 를 보고 있어도 "저기서 뭔가 왔다"를 안다.
   const unread = S.workspacesForDevice(d.id).reduce((n, w) => n + S.unreadForWs(w), 0);
@@ -516,7 +528,10 @@ function deviceRow(d, activeId) {
     //  목록에서 할 일이 없다(고르는 기준이 아니다). 이름만 남긴다.
     `<span class="pc-ic">${icons.monitor({ size: 15 })}</span>` +
     `<span class="pc-nm">${escapeHtml(d.name || i18n.t('내 PC'))}</span>` +
-    (unread ? `<span class="wsr-badge">${unread}</span>` : "");
+    // 다른 PC 에서 입력을 기다리는 에이전트 수(warn) — 고른 PC 의 수는 바로 아래 `진행 현황` 배지가 말한다.
+    (!sel && sbNeedsByHost[d.id] ? `<span class="wsr-badge pc-needs">${sbNeedsByHost[d.id]}</span>` : "") +
+    (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
+    (sel ? `<span class="pc-check">${icons.check({ size: 15 })}</span>` : "");
   row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
   return row;
 }
@@ -579,7 +594,8 @@ function toggleFan(taskId) {
 function computeTree(activeDev, wss) {
   let dash = null;
   try { dash = dashboard(); } catch (_) { dash = null; }
-  sbTasksN = dash ? dash.counts.needs_input : 0;
+  sbTasksN = dash ? scopedDashboard(dash).counts.needs_input : 0;
+  sbNeedsByHost = dash ? needsInputPerHost(dash) : {};
   const host = Number(activeDev);
   if (!dash || !Number.isFinite(host) || host <= 0) { sbTree = { groups: {} }; return; }
   // 서버 미가용(캐시 목록) — 다른 PC 버킷은 조회할 수 없으니 이 PC 의 것만(§6).

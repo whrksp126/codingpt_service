@@ -241,6 +241,25 @@ export function buildDashboard(input) {
 }
 
 /**
+ * 현황판을 한 PC 로 좁힌다 — 진행 현황은 PC 안의 장소다(사이드바 "내 PC ▸ 진행 현황", 2026-09-29 사용자 확정).
+ *  host 0(모름 — 구 back 전환기의 스냅)은 어느 PC 인지 모르니 버리지 않고 보고 있는 PC 쪽에 둔다.
+ */
+export function scopeToHost(result, host) {
+  const h = normHost(host);
+  const groups = {};
+  for (const g of GROUPS) groups[g] = result.groups[g].filter((r) => r.host === h || r.host === 0);
+  const counts = Object.fromEntries(GROUPS.map((g) => [g, groups[g].length]));
+  return { groups, offline: result.offline.filter((x) => x === h), counts };
+}
+
+/** PC 별 입력 대기 수(host → n) — 사이드바 PC 행 배지. 다른 PC 에서 기다리는 것을 놓치지 않게. host 0 은 셀 수 없다. */
+export function needsInputByHost(result) {
+  const m = {};
+  for (const r of result.groups.needs_input) if (r.host) m[r.host] = (m[r.host] || 0) + 1;
+  return m;
+}
+
+/**
  * 픽스처 대조용 요약(model-*.json 의 expect 모양) — 앱도 같은 모양을 만든다.
  *  groups: 그룹별 k 순서 · reasons: 입력 대기 행의 사유 · unread: 미읽음이 붙은 행(k → 수) · offline: 오프라인 host.
  */
