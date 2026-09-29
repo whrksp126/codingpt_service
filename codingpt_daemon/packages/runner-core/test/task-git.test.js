@@ -1,4 +1,13 @@
 'use strict';
+// ── win32 CI 스킵 가드 (windows-port · design.md 계약 6) — 게이트만, 테스트 로직 무수정 ──
+//  사유: POSIX 픽스처 — `#!/bin/sh` 가짜 gh/에이전트 셔뱅 스크립트, 탐색 경로 오버라이드 [BIN,'/usr/bin','/bin']
+//  (win32 의 git.exe 는 여기 없다 → GIT_MISSING), 유닉스 도메인 소켓 listen. 작업(tasks) 기능의 win32
+//  재배선/픽스처 이식 후 이 가드를 제거해 커버리지를 복구한다. (darwin/linux 는 무영향)
+if (process.platform === 'win32') {
+  require('node:test')('task-git.test.js: win32 스킵 — POSIX 픽스처(셔뱅 가짜 gh·/usr/bin 탐색·유닉스 소켓)', { skip: true }, () => {});
+  return;
+}
+
 // Agent Tasks git/gh 실행기(task-git.js) — 설계 정본 docs/agent-tasks-design.md §2.4·§2.9·§7.1.
 //  실제 git + 임시 저장소 + **가짜 gh**(임시 bin 의 셸 스크립트). 사용자 전역 git 설정(서명·색·훅)이
 //  결과를 바꾸지 않게 GIT_CONFIG_GLOBAL 을 빈 파일로 격리한다.
@@ -162,7 +171,11 @@ test('env -i PATH=/usr/bin:/bin 재현 — searchDirs(표준 위치 ~/.local/bin
   } else {
     assert.strictEqual(out.gh, path.join(lb, 'gh'));
   }
-  assert.ok(!out.gh || !['/usr/bin', '/bin'].includes(path.dirname(out.gh)));
+  // 전제: 이 머신 /usr/bin·/bin 에 gh 가 없다(macOS 기본). 리눅스 CI 러너처럼 apt 로 /usr/bin/gh 가
+  //  깔린 머신에선 PATH 에서 찾는 것이 정답이므로 이 단언은 전제가 성립할 때만 건다.
+  if (!['/usr/bin/gh', '/bin/gh'].some((f) => fs.existsSync(f))) {
+    assert.ok(!out.gh || !['/usr/bin', '/bin'].includes(path.dirname(out.gh)));
+  }
 });
 
 test('repoInfo — top/common/subdir 정규화', async () => {

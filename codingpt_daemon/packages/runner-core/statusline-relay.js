@@ -89,6 +89,10 @@ function chain(cmd, raw, done) {
   });
   ch.on('error', () => done(''));
   ch.on('close', () => done(buf.slice(0, RENDER_CAP)));
+  // ★ 자식이 stdin 을 안 읽고 먼저 끝나면(`printf …` 같은 한 줄) 쓰기가 EPIPE 로 **비동기** 'error' 를
+  //  낸다 — 리스너가 없으면 릴레이가 uncaught 로 죽어 사용자 줄도 보고도 사라진다(리눅스에서 재현).
+  //  try/catch 로는 못 잡는다. 무해하므로 삼킨다.
+  ch.stdin.on('error', () => { /* 자식이 stdin 을 안 읽었다 — 무해 */ });
   try { ch.stdin.end(raw); } catch (_) { /* 자식이 stdin 을 안 읽었다 — 무해 */ }
 }
 

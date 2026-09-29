@@ -156,7 +156,8 @@ test('공유 폴더 경로는 절대 경로로 맞추고 id 도 돌려준다', (
   assert.strictEqual(desktop.absDir(path.join(home, 'other/project/x')), path.join(home, 'other/project/x'));
   assert.deepStrictEqual(desktop.normalizeDirs(['other/project/x', path.join(home, 'other/project/x'), '']), [path.join(home, 'other/project/x')]);
   assert.strictEqual(desktop.dirId(path.join(home, 'other/project/x')), 'other/project/x');
-  assert.strictEqual(desktop.dirId('/opt/elsewhere'), '/opt/elsewhere');
+  // 홈 밖은 절대 경로 그대로(win32 에선 `/opt/…` 가 현재 드라이브 기준 절대 경로로 풀린다 — path.resolve 가 정본).
+  assert.strictEqual(desktop.dirId('/opt/elsewhere'), path.resolve('/opt/elsewhere'));
 });
 
 // 첫 부팅 프로비저닝(2026-09-19) — 실측으로 굳은 계약 셋: ① `sysadminctl -autologin set` 은 이 이미지에서 error:22 →

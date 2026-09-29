@@ -96,11 +96,17 @@ test('키를 한 글자씩 연속으로 보내도 PTY 입력 순서가 보존된
   const MARK = '0123456789abcdefghijklmnopqrstuv';
   for (const ch of `echo ${MARK}`) ws.send(Buffer.from(ch));
   ws.send(Buffer.from('\r'));
-  await sleep(900);
 
-  const cap = await tmux(['capture-pane', '-p', '-t', `=${pty.termSession(NS, t.index)}:0`, '-S', '-30']);
   // 명령줄 에코와 실행 결과 두 줄 모두에 원문 그대로 나와야 한다. 한 글자라도 뒤집히면 불일치.
-  const hits = cap.split('\n').filter((line) => line.includes(MARK)).length;
+  //  -J: 긴 프롬프트(리눅스 CI 의 user@host:/tmp/…)로 줄이 접혀도 한 줄로 본다.
+  //  고정 대기 대신 폴링 — 전체 스위트 병렬 부하에서 셸 실행이 900ms 를 넘겨 거짓 실패하던 것.
+  //  순서가 뒤집히면 몇 초를 기다려도 온전한 줄은 1개 이하라 회귀 검출력은 그대로다.
+  let cap = '', hits = 0;
+  for (let i = 0; i < 40 && hits < 2; i++) {
+    await sleep(200);
+    cap = await tmux(['capture-pane', '-p', '-J', '-t', `=${pty.termSession(NS, t.index)}:0`, '-S', '-30']);
+    hits = cap.split('\n').filter((line) => line.includes(MARK)).length;
+  }
   assert.ok(hits >= 2, `입력 순서가 깨졌다 — MARK 온전한 줄 ${hits}개\n${cap}`);
 
   ws.close();
