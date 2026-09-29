@@ -500,3 +500,25 @@ test('back 이 만드는 알림 문구에 벤더 제품명이 없다', () => {
     assert.ok(!/Claude Code/i.test(src), f);
   }
 });
+
+// ── 런치 인자 전달(launchargs.v1) ──────────────────────────────────────────
+test('agents/launch: 검증된 args 만 데몬에 넘기고, 셸 문자가 섞이면 400', async () => {
+  const ctrl = require('../controllers/daemonController');
+  const relay = require('../services/daemonRelayService');
+  const { SERVER_CAPS } = require('../config/caps');
+  assert.ok(SERVER_CAPS.includes('launchargs.v1'));
+  const orig = relay.callRpc; const calls = [];
+  relay.callRpc = async (uid, m, p) => { calls.push(p); return { ok: true }; };
+  const mk = () => { const r = { code: 200, body: null }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; return r; }; return r; };
+  try {
+    let res = mk();
+    await ctrl.agentsLaunch({ user: { id: 1 }, body: { cwd: 'p', index: 2, id: 'claude', args: ['--resume', '11f810c8-3f6c-4d09-85a7-c4f1636852b3'] }, query: {} }, res);
+    assert.equal(res.code, 200); assert.deepEqual(calls[0].args, ['--resume', '11f810c8-3f6c-4d09-85a7-c4f1636852b3']);
+    res = mk();
+    await ctrl.agentsLaunch({ user: { id: 1 }, body: { cwd: 'p', index: 2, id: 'claude', args: ['--resume', 'x; rm -rf ~'] }, query: {} }, res);
+    assert.equal(res.code, 400); assert.equal(calls.length, 1);
+    res = mk();
+    await ctrl.agentsLaunch({ user: { id: 1 }, body: { cwd: 'p', index: 2, id: 'claude' }, query: {} }, res);
+    assert.equal(res.code, 200); assert.equal('args' in calls[1], false);
+  } finally { relay.callRpc = orig; }
+});

@@ -994,8 +994,19 @@ async function agentsRescan(req, res) {
 async function agentsLaunch(req, res) {
   try {
     const b = req.body || {};
+    // 런치 인자(채팅 v2 "터미널에서 이어가기" = ['--resume','<id>']) — 데몬이 셸에 **그대로 타이핑**하므로
+    //  글자 집합을 좁게 막는다(공백·따옴표·세미콜론·$ 없음). 어긋나면 인자 없이 띄우지 말고 거절한다
+    //  (인자가 떨어지면 --resume 이 빠져 **새 대화**가 조용히 시작된다).
+    let args;
+    if (b.args != null) {
+      if (!SERVER_CAPS.includes('launchargs.v1')) return errorResponse(res, new Error('실행 인자를 지원하지 않습니다.'), 400);
+      const ok = Array.isArray(b.args) && b.args.length <= 8
+        && b.args.every((x) => typeof x === 'string' && /^[A-Za-z0-9_.=:@/+-]{1,200}$/.test(x));
+      if (!ok) return errorResponse(res, new Error('허용되지 않은 실행 인자입니다.'), 400);
+      args = b.args;
+    }
     const result = await daemonRelayService.callRpc(req.user.id, 'agents.launch',
-      { cwd: b.cwd || '', index: b.index | 0, id: String(b.id || '') }, undefined, connOptsOf(req));
+      { cwd: b.cwd || '', index: b.index | 0, id: String(b.id || ''), ...(args ? { args } : {}) }, undefined, connOptsOf(req));
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }

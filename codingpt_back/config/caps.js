@@ -136,6 +136,9 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.AUTOMATIONS_ENABLED)) caps.push('auto.v1');
   if (!envOff(env.POWER_ENABLED)) caps.push('power.v1');
   if (!envOff(env.CONV_ENABLED)) caps.push('conv.v1');
+  // launchargs.v1 — POST /api/daemon/agents/launch 가 args 를 데몬에 전달한다(채팅 v2 터미널에서 이어가기).
+  //  킬스위치 LAUNCHARGS_ENABLED=0 → 미선언 + 라우트가 args 를 400 으로 거절(버리고 띄우면 새 대화가 조용히 시작된다).
+  if (!envOff(env.LAUNCHARGS_ENABLED)) caps.push('launchargs.v1');
   if (!envOff(env.E2EE_ENABLED)) {
     caps.push('e2ee.keys.v1');
     caps.push('e2ee.rpc.v1');

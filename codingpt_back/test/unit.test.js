@@ -111,7 +111,7 @@ test('SERVER_CAPS — 처리 코드가 들어간 능력만 선언 + 킬스위치
     //  DISPATCH/AUTOMATIONS/POWER_ENABLED = 자동화 번들 3 능력(상세 검증은 auto-route.test.js).
     computeServerCaps({ APPROVAL_ENABLED: '0', TRANSCRIPT_ENABLED: 'false', AGENTSTATE_ENABLED: '0', E2EE_ENABLED: 'off', TASKS_ENABLED: '0',
       DISPATCH_ENABLED: '0', AUTOMATIONS_ENABLED: '0', POWER_ENABLED: '0',
-      CONV_ENABLED: '0' }), // 채팅 v2(conv.v1) — 상세 검증은 conv-route.test.js
+      CONV_ENABLED: '0', LAUNCHARGS_ENABLED: '0' }), // 채팅 v2(conv.v1) — 상세 검증은 conv-route.test.js
     ['caps.v1']);
   assert.ok(computeServerCaps({}).includes('approval.v1')); // 미설정 = 켜짐
   assert.ok(!computeServerCaps({ AGENTSTATE_ENABLED: 'no' }).includes('agentstate.v1'));

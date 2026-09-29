@@ -327,6 +327,22 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
   `args` 로 넘긴다(실행 파일은 카탈로그가 정한다). 그래서 응답에 `args:['--resume','<id>']` 도 함께 싣는다.
 - `control.kind:'deleted'` 를 받으면 그 탭은 빈 새 대화로 되돌린다. `'gone'` 은 재오픈.
 
+### 4.5 파일 바이트·사용량 (2026-09-30 2차)
+
+- `conv.file {threadId, path}` → `{mediaType, base64, bytes, name}` | `{missing:true, reason}`.
+  - 허용 경로 = **그 대화의 이벤트에 등장한 경로만**: 사용자 첨부(`[첨부] <경로>` 줄·attachments), 도구 입력의
+    파일 경로(tool.path·argsPreview), 어시스턴트 본문의 마크다운 이미지·링크 대상. 상대 경로는 thread.cwd 기준.
+    `fs.safeResolve` jail 을 통과해야 하고 심링크 탈출 거부. 그 외는 `{missing:true, reason:'not_referenced'}`.
+  - 상한 8MB(넘으면 `{missing:true, reason:'too_large', bytes}`). mediaType 은 확장자로.
+  - back 허용 표에 추가(타임아웃 30초, 클라 35초).
+- `thread.usage` = `{ contextTokens, contextMax, contextPct, costUsd, model }` — 턴 끝(result)과 assistant 메시지의
+  usage 로 갱신. contextPct 는 0~100 정수. 클라는 컴포저 아래 한 줄로 "모델 · 컨텍스트 n%" 를 보인다(PC·앱 동일).
+- 사용자 첨부는 보낸 버블에 **칩**(이미지면 썸네일)으로 보인다. 썸네일 바이트는 `conv.file`.
+  클라는 본문의 `[첨부] <경로>` 줄을 본문에서 떼어 칩으로 그린다.
+- 에이전트 선택: `conv.caps.agents` 중 `available` 이 2개 이상일 때만 새 대화 화면에 선택 줄을 보인다(지금은 claude 1개 → 숨김).
+  `conv.create` 에 `agent` 로 넘긴다.
+- 대화 안 검색: 클라 전용. 불러온 이벤트 범위 안에서 찾고, 더 앞은 "이전 내역 더 불러오기"로 넓힌다.
+
 ## 5. 프로세스 수명
 
 - thread 당 프로세스 0 또는 1. 첫 `send`/`create` 에 뜬다.
