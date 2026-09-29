@@ -240,7 +240,7 @@ else {
   ok(/serverOff \|\| isLocalHostId|!serverOff \|\| isLocalHostId/.test(tv) && /serverHasTasks\(\) !== false \|\| isLocalHostId/.test(nts),
     "서버 킬스위치면 다른 PC 는 조회·선택 대상에서 뺀다(이 PC 는 로컬 소켓)");
   ok(/ui\.onFail\?\.\("TIMEOUT"\)/.test(td) && /reconcileOps\(task\)/.test(td), "op 대기 시간 초과 → 시트 재활성 + 뒤늦은 마감 정리");
-  ok(/if \(!ghKnown\)/.test(td), "gh 상태 모름이면 'gh 없음' 안내를 단정하지 않는다");
+  ok(/if \(!ghKnown\b/.test(td), "gh 상태 모름이면 'gh 없음' 안내를 단정하지 않는다");
   ok(/opId: st\.opId/.test(nts) && /isUncertain\(code\)/.test(nts), "새 작업: 결과 불명 실패 뒤 재시도는 같은 opId");
   ok(/my !== branchSeq/.test(nts) && /my !== agentSeq/.test(nts), "새 작업: 늦게 온 브랜치/에이전트 응답은 버린다");
   ok(/S\.isTaskWorkspace\(ws\)[\s\S]{0,400}openRunTerminal\(ws\.id/.test(sb), "작업 run 터미널의 일반 알림 → openRunTerminal(task:true)");
