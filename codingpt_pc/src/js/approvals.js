@@ -151,7 +151,7 @@ const TOOL_TITLES = {
 };
 function toolTitle(tool) {
   const t = String(tool || "Tool");
-  return TOOL_TITLES[t] || t;
+  return TOOL_TITLES[t] ? i18n.t(TOOL_TITLES[t]) : t;
 }
 function questionsOf(a) {
   const qs = a.prompt && Array.isArray(a.prompt.questions) ? a.prompt.questions : null;
@@ -183,7 +183,7 @@ function buildCard(a) {
       `</div>` +
       `<div class="apc-err hidden"></div>` +
       `<div class="apc-actions"><div class="apc-qopts">` +
-        (q.options || []).map((o, i) => optRowInputHtml(`mirror:${i}`, o.label || `선택 ${i + 1}`, "", i + 1, !!o.input)).join("") +
+        (q.options || []).map((o, i) => optRowInputHtml(`mirror:${i}`, o.label || i18n.t("선택 {n}", { n: i + 1 }), "", i + 1, !!o.input)).join("") +
       `</div></div>`;
     const send = async (label, text) => {
       await S.respondApproval(a.id, {
@@ -312,7 +312,7 @@ function buildCard(a) {
     const old = a.diff.oldContent ? `<pre class="apc-pre apc-diff-old">${cap(a.diff.oldContent)}</pre>` : "";
     const neu = a.diff.newContent ? `<pre class="apc-pre apc-diff-new">${cap(a.diff.newContent)}</pre>` : "";
     const note = a.diff.truncated ? `<div class="apc-diff-note">${i18n.t('내용이 길어 일부만 표시됩니다')}</div>` : "";
-    d.innerHTML = `<summary>${a.diff.kind === "write" ? "파일 내용" : "변경 내용"}</summary>${old}${neu}${note}`;
+    d.innerHTML = `<summary>${a.diff.kind === "write" ? i18n.t("파일 내용") : i18n.t("변경 내용")}</summary>${old}${neu}${note}`;
     body.appendChild(d);
   }
 
@@ -347,7 +347,7 @@ function renderQuestionStep(el, a) {
   const opts = (q.options || []).map((o, k) => {
     const on = picks.includes(o.label);
     return `<button class="apc-qopt${on ? " on" : ""}" type="button" data-act="qpick" data-label="${escapeHtml(o.label || "")}">` +
-      `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(o.label || `선택 ${k + 1}`)}</span>` +
+      `<span class="apc-qtext"><span class="apc-qlabel">${escapeHtml(o.label || i18n.t("선택 {n}", { n: k + 1 }))}</span>` +
       (o.description ? `<span class="apc-qdesc">${escapeHtml(o.description)}</span>` : "") + `</span>` +
       `<span class="apc-qnum">${k + 1}</span>` +
     `</button>`;
@@ -383,7 +383,7 @@ function renderQuestionStep(el, a) {
         `<button class="apc-btn ghost" type="button" data-act="qprev" ${i === 0 ? "disabled" : ""}>${i18n.t('뒤로')}</button>` +
         `<span class="apc-qspacer"></span>` +
         (tui ? "" : `<button class="apc-btn ghost" type="button" data-act="qskip">${i18n.t('건너뛰기')}</button>`) +
-        `<button class="apc-btn primary" type="button" data-act="qadvance" ${canGo ? "" : "disabled"}>${lastOne ? "보내기" : "다음"} ↵</button>` +
+        `<button class="apc-btn primary" type="button" data-act="qadvance" ${canGo ? "" : "disabled"}>${lastOne ? i18n.t("보내기") : i18n.t("다음")} ↵</button>` +
       `</div>`) +
     (multi ? `<div class="apc-qhint">${i18n.t('여러 개 고를 수 있어요')}</div>` : "");
   if (etcOn) wrap.querySelector(".etc .apc-free-input")?.focus();

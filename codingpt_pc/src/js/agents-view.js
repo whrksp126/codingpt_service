@@ -76,8 +76,8 @@ export function renderAgentList(container, opt) {
       <span class="ag-main">
         <span class="ag-name">${esc(a.name)}</span>
         <span class="ag-meta">${a.installed
-          ? `${a.version ? esc(a.version) + " · " : ""}${esc(tier.label)}`
-          : `미설치 · ${esc(tier.label)}`}</span>
+          ? `${a.version ? esc(a.version) + " · " : ""}${esc(i18n.t(tier.label))}`
+          : `${i18n.t("미설치")} · ${esc(i18n.t(tier.label))}`}</span>
       </span>
       <span class="ag-right"></span>`;
     const right = row.querySelector(".ag-right");
@@ -252,7 +252,7 @@ function buildInstallPanel(a, onDone) {
         onDone?.();          // 패널 접고 목록 갱신 — 행이 토글/버전으로 바뀐 것이 결과 표시다
       } else {
         // 여기서 "설치됐다" 고 말하지 않는다 — 실제로 못 찾았다.
-        resultEl.textContent = `아직 못 찾았어요. 설치가 끝났는데도 이러면 새 터미널에서 ${a.bin} --version 을 확인해 주세요.`;
+        resultEl.textContent = i18n.t("아직 못 찾았어요. 설치가 끝났는데도 이러면 새 터미널에서 {cmd} 을 확인해 주세요.", { cmd: `${a.bin} --version` });
         resultEl.className = "ag-result warn";
         btn.disabled = false;
       }
@@ -319,7 +319,7 @@ export async function maybeShowOnboarding(force = false) {
             <span class="ag-onb-option-mark">${agentMarkHtml(a.id, { size: 22 }) || icons.terminal({ size: 22 })}</span>
             <span class="ag-onb-option-copy">
               <span class="ag-onb-option-name">${esc(a.name)}</span>
-              <span class="ag-onb-option-meta">${a.version ? esc(a.version) + " · " : ""}${esc(tier.label || "")}</span>
+              <span class="ag-onb-option-meta">${a.version ? esc(a.version) + " · " : ""}${esc(i18n.t(tier.label || ""))}</span>
             </span>
             <span class="ag-onb-check">${checked ? "✓" : ""}</span>
           </button>`;
@@ -334,7 +334,7 @@ export async function maybeShowOnboarding(force = false) {
             <div class="ag-onb-error" aria-live="polite"></div>
           </main>
           <footer class="ag-onb-foot">
-            <span class="ag-onb-count">${selected.size}개 선택</span>
+            <span class="ag-onb-count">${i18n.t("{n}개 선택", { n: selected.size })}</span>
             <button class="btn primary lg ag-onb-go"${selected.size ? "" : " disabled"}>${i18n.t('선택한 에이전트 연동')}</button>
           </footer>
         </div>`;

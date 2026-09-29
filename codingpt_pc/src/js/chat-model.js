@@ -375,9 +375,9 @@ export function resultClass(res) {
 export function resultMeta(res) {
   if (!res) return "";
   const parts = [];
-  if (res.lines) parts.push(`${res.lines}줄`);
+  if (res.lines) parts.push(i18n.t("{n}줄", { n: res.lines }));
   if (res.bytes) parts.push(fmtBytes(res.bytes));
-  if (res.images) parts.push(`이미지 ${res.images}`);
+  if (res.images) parts.push(i18n.t("이미지 {n}", { n: res.images }));
   return parts.join(" · ");
 }
 export function fmtBytes(n) {
@@ -494,12 +494,12 @@ export function fmtReset(resetsAt, now) {
   const ms = at * 1000 - (Number(now) || 0);
   if (ms <= 0) return "";
   const min = Math.floor(ms / 60000);
-  if (min < 60) return `${Math.max(1, min)}분 후 리셋`;
+  if (min < 60) return i18n.t("{n}분 후 리셋", { n: Math.max(1, min) });
   const h = Math.floor(min / 60);
-  if (h < 24) { const m = min % 60; return m ? `${h}시간 ${m}분 후 리셋` : `${h}시간 후 리셋`; }
+  if (h < 24) { const m = min % 60; return m ? i18n.t("{h}시간 {m}분 후 리셋", { h, m }) : i18n.t("{h}시간 후 리셋", { h }); }
   // 일 단위는 **반올림**한다 — floor 면 95시간(≈4일)이 "3일 후"로 읽혀 하루를 손해 본다
   //  (경계에서 몇 초 차이로 눈금이 통째로 떨어지는 것도 같은 이유).
-  return `${Math.max(1, Math.round(h / 24))}일 후 리셋`;
+  return i18n.t("{n}일 후 리셋", { n: Math.max(1, Math.round(h / 24)) });
 }
 
 /**
@@ -510,7 +510,7 @@ export function statusChips(st) {
   if (!st) return [];
   const out = [];
   if (st.model) out.push({ key: "model", text: String(st.model) });
-  if (st.contextPct != null) out.push({ key: "ctx", text: `컨텍스트 ${st.contextPct}%` });
+  if (st.contextPct != null) out.push({ key: "ctx", text: i18n.t("컨텍스트 {n}%", { n: st.contextPct }) });
   for (const l of Array.isArray(st.limits) ? st.limits : []) {
     if (l && l.pct != null) out.push({ key: "lim:" + l.id, text: `${l.label} ${l.pct}%` });
   }
@@ -530,11 +530,11 @@ export function statusDetail(st, now) {
   }
   for (const l of Array.isArray(st.limits) ? st.limits : []) {
     if (!l || l.pct == null) continue;
-    rows.push({ key: "lim:" + l.id, label: `${l.label} 한도`, value: `${l.pct}%`, sub: fmtReset(l.resetsAt, now) });
+    rows.push({ key: "lim:" + l.id, label: i18n.t("{label} 한도", { label: l.label }), value: `${l.pct}%`, sub: fmtReset(l.resetsAt, now) });
   }
   const bits = [];
   if (st.costUsd != null) bits.push("$" + Number(st.costUsd).toFixed(2));
-  if (st.linesAdded != null || st.linesRemoved != null) bits.push(`+${st.linesAdded || 0} / -${st.linesRemoved || 0} 줄`);
+  if (st.linesAdded != null || st.linesRemoved != null) bits.push(i18n.t("+{added} / -{removed} 줄", { added: st.linesAdded || 0, removed: st.linesRemoved || 0 }));
   if (bits.length) rows.push({ key: "cost", label: i18n.t('이번 세션'), value: bits.join(" · "), sub: "" });
   const meta = [];
   if (st.effort) meta.push(i18n.t('추론 ') + st.effort);

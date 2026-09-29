@@ -74,7 +74,7 @@ function renderPcSelect(self, externals) {
   el.innerHTML = `<div class="fp-card fp-card-sm"><div class="fp-head"><div class="fp-title">${i18n.t('어느 PC에 만들까요?')}</div></div><div class="fp-sub">${i18n.t('워크스페이스를 만들 PC를 선택하세요.')}</div><div class="fp-pc-list"></div><div class="fp-actions"><button class="fp-btn fp-cancel">${i18n.t('취소')}</button></div></div>`;
   const list = el.querySelector(".fp-pc-list");
   // 이 PC(로컬) — 네이티브 피커.
-  list.appendChild(row(self ? `${self.name} (이 PC)` : i18n.t('이 PC'), self && self.platform, () => { close(); createLocalWorkspace(); }, true));
+  list.appendChild(row(self ? `${self.name} (${i18n.t("이 PC")})` : i18n.t('이 PC'), self && self.platform, () => { close(); createLocalWorkspace(); }, true));
   // 외부 PC — 컬럼 브라우저.
   externals.forEach((d) => list.appendChild(row(d.name || "PC", d.platform, () => renderColumnBrowser(d.id, d.name || "PC"), true)));
   el.querySelector(".fp-cancel").addEventListener("click", close);

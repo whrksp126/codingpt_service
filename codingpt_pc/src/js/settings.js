@@ -327,7 +327,7 @@ function renderSection(force) {
           <div class="link-box">
             ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
             ${validMyLink() ? `<div class="link-code">${esc(myLink.code)}</div><div class="acct-msg">${i18n.t('모바일 앱에서 이 코드를 입력하세요.')}</div>
-              <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
+              <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="${i18n.t('새 인증 코드 만들기')}" title="${i18n.t('새 인증 코드 만들기')}">${icons.refresh({ size: 14 })}</button></div>` : ""}
             ${!myLinkBusy && !validMyLink() ? `${linkEntryMsg ? `<div class="acct-msg">${esc(linkEntryMsg)}</div>` : ""}<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
           </div>
         </div>`
@@ -413,8 +413,8 @@ async function renderSupporter() {
       <div class="sm-card2 supporter-card">
         <div class="supporter-copy">
           <span class="supporter-plan">CodingPT Supporter</span>
-          <b>${pastDue ? "결제 확인이 필요해요" : "함께해 주셔서 고마워요."}</b>
-          <span>${pastDue ? "구독 관리에서 결제 수단을 확인해 주세요." : (end ? `${end}까지 이용 중이에요.` : "월 ₩4,900 구독을 이용 중이에요.")}</span>
+          <b>${pastDue ? i18n.t("결제 확인이 필요해요") : i18n.t("함께해 주셔서 고마워요.")}</b>
+          <span>${pastDue ? i18n.t("구독 관리에서 결제 수단을 확인해 주세요.") : (end ? i18n.t("{date}까지 이용 중이에요.", { date: end }) : i18n.t("월 ₩4,900 구독을 이용 중이에요."))}</span>
         </div>
         <button id="supporterAction" class="sett-btn">${i18n.t('구독 관리')}</button>
       </div>` : `
@@ -466,7 +466,7 @@ function bindNotificationSettings(host) {
     const granted = value === "granted";
     if (granted) markPermGranted("notification");
     status.className = granted ? "sett-done" : "sett-attn";
-    status.innerHTML = granted ? `${icons.check({ size: 14 })}허용됨` : i18n.t('확인 필요');
+    status.innerHTML = granted ? `${icons.check({ size: 14 })}${i18n.t("허용됨")}` : i18n.t('확인 필요');
     warning.innerHTML = granted ? "" : `
       <div class="notif-warning">
         <span class="notif-warning-copy"><b>${i18n.t('macOS가 CodingPT 알림을 전달하지 않고 있어요.')}</b><small>${i18n.t('시스템 설정에서 CodingPT 알림을 허용해 주세요.')}</small></span>
@@ -596,7 +596,7 @@ function bindAppearance(rootEl) {
       const cur = opts.find((o) => o.value === getCur()) || opts[0];
       if (!cur) return;
       const font = cur.stack ? ` style="font-family:${String(cur.stack).replace(/"/g, "&quot;")}"` : "";
-      btn.innerHTML = `<span${font}>${esc(cur.label)}</span><span class="fd-caret">${icons.chevronDown({ size: 13 })}</span>`;
+      btn.innerHTML = `<span${font}>${esc(i18n.t(cur.label))}</span><span class="fd-caret">${icons.chevronDown({ size: 13 })}</span>`;
       menu.querySelectorAll(".fd-opt").forEach((el) => el.classList.toggle("sel", el.dataset.v === getCur()));
     };
     for (const o of opts) {
@@ -604,7 +604,7 @@ function bindAppearance(rootEl) {
       it.className = "fd-opt";
       it.dataset.v = o.value;
       if (o.stack) it.style.fontFamily = o.stack;
-      it.innerHTML = `<span class="fd-name">${esc(o.label)}</span>${sample ? `<span class="fd-sample">${esc(sample)}</span>` : ""}`;
+      it.innerHTML = `<span class="fd-name">${esc(i18n.t(o.label))}</span>${sample ? `<span class="fd-sample">${esc(sample)}</span>` : ""}`;
       it.addEventListener("click", (e) => {
         e.stopPropagation();
         onPick(o.value);
@@ -654,7 +654,7 @@ function bindAppearance(rootEl) {
       card.className = "ts-card" + (o.value === getTermStyle() ? " sel" : "");
       card.dataset.v = o.value;
       card.innerHTML = `
-        <div class="ts-name">${esc(o.label)}</div>
+        <div class="ts-name">${esc(i18n.t(o.label))}</div>
         <div class="ts-prev" style="background:${p.background}">
           <div class="ts-pline">
             <span class="ts-seg" style="background:${seg1};color:${onColor(seg1)}">user@${IS_WINDOWS ? "pc" : "mac"}</span><span class="ts-tri" style="border-left-color:${seg1};background:${seg2}"></span><span class="ts-seg" style="background:${seg2};color:${onColor(seg2)}">~/project</span><span class="ts-tri" style="border-left-color:${seg2}"></span>
@@ -769,7 +769,7 @@ function buildPaired() {
 function folderPermRow(id, label) {
   const copy = `<span class="sett-copy"><span class="sett-label">${label}</span></span>`;
   if (permGranted(id)) {
-    return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}허용됨</span></div>`;
+    return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}${i18n.t("허용됨")}</span></div>`;
   }
   return `<div class="sett-row">${copy}<button class="sett-btn fpa-btn" data-f="${id}">${i18n.t('허용')}</button></div>`;
 }
@@ -804,7 +804,7 @@ function bindFolderPerms(rootEl) {
         if (ok) {
           markPermGranted(b.dataset.f);
           // 버튼을 남겨 두면 '허용됨' 이 여전히 눌러야 하는 것처럼 보인다 → 표기로 교체(folderPermRow 와 같은 모양).
-          b.outerHTML = `<span class="sett-done">${icons.check({ size: 14 })}허용됨</span>`;
+          b.outerHTML = `<span class="sett-done">${icons.check({ size: 14 })}${i18n.t("허용됨")}</span>`;
           return;
         }
         b.dataset.denied = "1";
@@ -835,7 +835,8 @@ function bindNickname() {
 
 // 회원 탈퇴 — "회원탈퇴" 문구 입력 확인(파괴적 작업 가드, 모바일과 동일 스펙).
 //  1탭: 확인 영역(문구 입력 + 영구 삭제) 펼침 → "회원탈퇴" 를 정확히 입력할 때만 실행.
-const DELETE_CONFIRM_WORD = "회원탈퇴";
+// 확인 단어는 **지금 언어로** 받는다 — 한국어 IME 가 없는 사용자에게 한글 입력을 요구하면 탈퇴를 못 한다.
+const deleteConfirmWord = () => i18n.t("회원탈퇴");
 let acctDeleting = false;
 async function onDeleteAccount() {
   const btn = connBody?.querySelector("#deleteAcctBtn");
@@ -848,8 +849,8 @@ async function onDeleteAccount() {
     //  ★ 개정 10(사용자 확정): 경고색은 **버튼 하나만**(과한 색은 AI 스러움). 문구·테두리·입력창은 일반색.
     msg.innerHTML = `
       <div class="acct-del-confirm">
-        <div>${i18n.t('계속하려면')} <b>${DELETE_CONFIRM_WORD}</b> ${i18n.t('를 입력하세요.')}</div>
-        <input id="acctDelEmail" class="acct-del-input" placeholder="${DELETE_CONFIRM_WORD}" autocomplete="off" spellcheck="false" />
+        <div>${i18n.t("계속하려면 {word}를 입력하세요.", { word: `<b>${esc(deleteConfirmWord())}</b>` })}</div>
+        <input id="acctDelEmail" class="acct-del-input" placeholder="${esc(deleteConfirmWord())}" autocomplete="off" spellcheck="false" />
         <button id="acctDelGo" class="acct-del-go">
           <span class="acct-del-spin"></span><span class="acct-del-go-txt">${i18n.t('영구 삭제')}</span>
         </button>
@@ -859,7 +860,7 @@ async function onDeleteAccount() {
     const go = msg.querySelector("#acctDelGo");
     // 시각적 활성(빨간 버튼)만 토글 — 클릭 차단은 disabled 로 하지 않는다(한글 IME 확정이 첫 클릭과
     //  겹쳐 첫 클릭이 무시되던 문제 회피). 실제 실행 여부는 doDeleteAccount 가 클릭 시점 최신 값으로 판정.
-    const syncMatch = () => go.classList.toggle("match", input.value.trim() === DELETE_CONFIRM_WORD);
+    const syncMatch = () => go.classList.toggle("match", input.value.trim() === deleteConfirmWord());
     input.addEventListener("input", syncMatch);
     input.addEventListener("compositionend", syncMatch); // 한글 IME 확정 시 반영
     go.addEventListener("click", () => doDeleteAccount(btn, go, msg));
@@ -878,8 +879,8 @@ async function doDeleteAccount(btn, go, msg) {
   if (acctDeleting) return;
   // 클릭 시점에 최신 입력값으로 판정(IME 확정 후) — 문구 불일치면 조용히 무시. 첫 클릭에 바로 반응.
   const inputEl = msg?.querySelector("#acctDelEmail");
-  if (!inputEl || inputEl.value.trim() !== DELETE_CONFIRM_WORD) {
-    if (go) go.classList.toggle("match", (inputEl?.value.trim() || "") === DELETE_CONFIRM_WORD);
+  if (!inputEl || inputEl.value.trim() !== deleteConfirmWord()) {
+    if (go) go.classList.toggle("match", (inputEl?.value.trim() || "") === deleteConfirmWord());
     return;
   }
   acctDeleting = true;
@@ -921,7 +922,7 @@ function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d)) return "—";
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+  return i18n.t("{y}년 {m}월 {d}일", { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() });
 }
 
 // 기기 행의 부제용 라벨(운영체제) — `기기` 섹션(e2eeDeviceRowsHtml)이 쓴다.
@@ -981,7 +982,7 @@ function e2eeActionRow() {
   //   부트스트랩 진행만 남긴다(수 초짜리 과도 상태 — 빈 화면으로 두지 않는다).
   if (e2eeNeedsBootstrap()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
-      <div class="acct-msg" style="padding:2px 0">${e2ee.autoBootError ? "암호화를 켜지 못했어요 · 잠시 후 다시 시도합니다" : "암호화를 준비하고 있어요…"}</div>
+      <div class="acct-msg" style="padding:2px 0">${e2ee.autoBootError ? i18n.t("암호화를 켜지 못했어요 · 잠시 후 다시 시도합니다") : i18n.t("암호화를 준비하고 있어요…")}</div>
     </td></tr>`;
   }
   return "";
@@ -1016,7 +1017,7 @@ function validMyLink() {
 
 function myLinkTimeText() {
   const left = myLink ? Math.max(0, Math.floor((myLink.until - Date.now()) / 1000)) : 0;
-  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")} 남음`;
+  return i18n.t(`{time} 남음`, { time: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` });
 }
 
 function paintMyLinkCountdown() {
@@ -1067,7 +1068,7 @@ function e2eeMyCodeRow() {
   if (!e2eeReady()) {
     return `<tr class="dev-tr"><td class="dev-c-full" colspan="4">
       <div class="appr-reveal" aria-label="${i18n.t('이 기기 인증 코드 준비 중')}">${i18n.t('이 기기 인증 코드')}</div>
-      <div class="acct-msg">${e2ee.autoBootError ? "암호화 연결을 준비하지 못했어요 · 잠시 후 다시 시도합니다" : "암호화 연결을 준비하고 있어요…"}</div>
+      <div class="acct-msg">${e2ee.autoBootError ? i18n.t("암호화 연결을 준비하지 못했어요 · 잠시 후 다시 시도합니다") : i18n.t("암호화 연결을 준비하고 있어요…")}</div>
     </td></tr>`;
   }
   //  ★ 계정이 바뀌면(재가입·계정 전환) 옛 코드는 **다른 계정의 코드**라 입력해도 404 다(실사고).
@@ -1086,8 +1087,8 @@ function e2eeMyCodeRow() {
     <div class="link-box">
       ${myLinkBusy ? `<div class="acct-msg">${i18n.t('코드를 만드는 중…')}</div>` : ""}
       ${myLink && left > 0 ? `<div class="link-code">${esc(myLink.code)}</div>
-        <div class="acct-msg">다른 기기에서 이 코드를 입력하세요</div>
-        <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="새 인증 코드 만들기" title="새 인증 코드 만들기">${icons.refresh({ size: 14 })}</button></div>` : ""}
+        <div class="acct-msg">${i18n.t('다른 기기에서 이 코드를 입력하세요')}</div>
+        <div class="link-expiry"><span data-link-countdown>${myLinkTimeText()}</span><button class="link-renew" data-link-new="1" aria-label="${i18n.t('새 인증 코드 만들기')}" title="${i18n.t('새 인증 코드 만들기')}">${icons.refresh({ size: 14 })}</button></div>` : ""}
       ${!myLinkBusy && (!myLink || left <= 0) ? `<button class="sett-btn" data-link-new="1">${i18n.t('다시 시도')}</button>` : ""}
     </div>
   </td></tr>`;
@@ -1169,7 +1170,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     const editing = d.isCurrent && aliasEditFor === String(d.id);
     const nameCell = editing
       ? `<span class="dev-alias-edit"><input class="dev-alias-input" maxlength="40" value="${esc(aliasEditValue)}" aria-label="${i18n.t('기기 별칭')}" /><button class="dev-alias-save" data-alias-save="${d.id}">${icons.check({ size: 14 })}</button><button class="dev-alias-cancel" data-alias-cancel="1">${icons.x({ size: 14 })}</button></span>`
-      : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || "기기")}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="${i18n.t('별칭 변경')}">${icons.edit({ size: 13 })}</button>` : ""}`;
+      : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || i18n.t("기기"))}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="${i18n.t('별칭 변경')}">${icons.edit({ size: 13 })}</button>` : ""}`;
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
       <td class="dev-c-name"><span class="dev-name">${linkedMark}${nameCell}</span>${editing && aliasEditError ? `<div class="acct-msg" style="color:var(--error,#ef6b73)">${esc(aliasEditError)}</div>` : ""}</td>
@@ -1201,7 +1202,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
     const isPc = k.platform === "darwin" || k.platform === "win32" || k.platform === "linux";
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${isPc ? icons.monitor({ size: 15 }) : icons.smartphone({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || "기기")}</span></span></td>
+      <td class="dev-c-name"><span class="dev-name"><span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(k.label || i18n.t("기기"))}</span></span></td>
       <td class="dev-c-meta"><span style="color:var(--text3)">${i18n.t('이전에 연동된 기기')}</span></td>
       <td class="dev-c-del"><button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="${i18n.t('연동 해제')}">${icons.trash({ size: 15 })}</button></td>
     </tr>

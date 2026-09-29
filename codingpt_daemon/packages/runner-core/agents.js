@@ -88,7 +88,7 @@ const CATALOG = [
   },
   {
     id: 'cursor-agent',
-    name: 'Cursor CLI',
+    name: 'Cursor',
     bin: 'cursor-agent',
     tier: 'launch',
     docs: 'https://cursor.com/docs/cli',
@@ -100,7 +100,7 @@ const CATALOG = [
   },
   {
     id: 'opencode',
-    name: 'opencode',
+    name: 'OpenCode',
     bin: 'opencode',
     tier: 'launch',
     docs: 'https://opencode.ai',

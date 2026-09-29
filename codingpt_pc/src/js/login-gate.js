@@ -211,8 +211,8 @@ function renderStep() {
     <div class="lg-wizard">
       <main class="lg-wizard-body">
         ${permQueue.length > 1 ? `<div class="lg-dots">${dots}</div>` : ""}
-        <div class="lg-head">${c.title}</div>
-        <div class="lg-perm-benefit">${c.benefit}</div>
+        <div class="lg-head">${i18n.t(c.title)}</div>
+        <div class="lg-perm-benefit">${i18n.t(c.benefit)}</div>
         ${p.id === "notification" ? `
           <div id="lgNotifWarning" class="notif-warning notif-onb-status">
             <span class="notif-warning-copy"><b id="lgNotifStatusTitle">${i18n.t('macOS에서 CodingPT 알림을 켜주세요.')}</b><small id="lgNotifStatusBody">${i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.')}</small></span>
@@ -230,7 +230,7 @@ function renderStep() {
         <div class="lg-wizard-actions">
           <button id="lgPermBack" class="btn secondary"${permIdx === 0 ? " disabled" : ""}>${i18n.t('이전')}</button>
           <button id="lgAllow" class="btn secondary" data-perm="${p.id}" disabled>${i18n.t('확인 중…')}</button>
-          <button id="lgPermNext" class="btn primary">${permIdx === permQueue.length - 1 ? "완료" : "다음"}</button>
+          <button id="lgPermNext" class="btn primary">${permIdx === permQueue.length - 1 ? i18n.t("완료") : i18n.t("다음")}</button>
         </div>
       </footer>
     </div>`;

@@ -455,7 +455,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
         row.innerHTML =
           `<span class="pvs-ic">${icons.globe({ size: 13 })}</span>`
           + `<span class="pvs-title">localhost:${it.port}</span>`
-          + `<span class="pvs-url">${escapeHtml(it.command || "")}${it.other ? " · 다른 곳" : ""}</span>`;
+          + `<span class="pvs-url">${escapeHtml(it.command || "")}${it.other ? i18n.t(" · 다른 곳") : ""}</span>`;
       } else {
         row.innerHTML = `<span class="pvs-ic">${icons.search({ size: 13 })}</span><span class="pvs-title">${escapeHtml(it.q)}</span><span class="pvs-url">${i18n.t('Google 검색')}</span>`;
       }

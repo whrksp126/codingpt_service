@@ -114,7 +114,7 @@ export class ChatView {
       <div class="chat-composer">
         <button class="chat-jump hidden" type="button" title="${i18n.t('맨 아래로')}">${icons.arrowDown({ size: 15 })}<span class="chat-jump-n"></span></button>
         <div class="chat-box">
-          <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph="메시지 보내기"></div>
+          <div class="chat-input chat-ce" contenteditable="true" role="textbox" aria-multiline="true" data-ph="${i18n.t('메시지 보내기')}"></div>
           <div class="chat-ctl">
             <button class="chat-plus" type="button" title="${i18n.t('파일 넣기')}">${icons.plus({ size: 18 })}</button>
             <button class="chat-mode hidden" type="button" title="${i18n.t('에이전트 모드 (TUI 의 shift+tab)')}">
@@ -692,7 +692,7 @@ export class ChatView {
     }
     if (m.kind === "compact" || m.kind === "divider" || m.kind === "interrupt") {
       row.className = "chat-divider";
-      row.innerHTML = `<span>${escapeHtml(m.kind === "interrupt" ? "사용자가 중단했습니다" : text)}</span>`;
+      row.innerHTML = `<span>${escapeHtml(m.kind === "interrupt" ? i18n.t("사용자가 중단했습니다") : text)}</span>`;
       return row;
     }
     // 그 외(예상 밖 kind) — 조용히 삼키지 않고 dim 한 줄로 남긴다(진단 가능).
@@ -720,7 +720,7 @@ export class ChatView {
         const sum = document.createElement("div");
         sum.className = "chat-tool-group";
         sum.innerHTML = `<span class="chat-tool-mark ${bad ? "err" : "ok"}">${bad ? "✕" : "✓"}</span>`
-          + `<span class="chat-tool-group-label">도구 ${tools.length}개 실행 · ${escapeHtml(toolRunLabel(names))}${bad ? ` · 실패 ${bad}` : ""}</span>`
+          + `<span class="chat-tool-group-label">${escapeHtml(i18n.t("도구 {n}개 실행 · {names}", { n: tools.length, names: toolRunLabel(names) }))}${bad ? escapeHtml(i18n.t(" · 실패 {n}", { n: bad })) : ""}</span>`
           + `<span class="chat-tool-group-caret">›</span>`;
         run[0].before(sum);
         for (const el of run) el.classList.add("grouped");
@@ -754,7 +754,7 @@ export class ChatView {
     const rest = lines.slice(CHAT.PATCH_CLAMP_LINES);
     return `<div class="chat-diff">${head}`
       + (rest.length ? `<div class="chat-diff-rest hidden">${rest.map(rowHtml).join("")}</div>`
-        + `<button class="chat-diff-more" type="button">${rest.length}줄 더 보기</button>` : "")
+        + `<button class="chat-diff-more" type="button">${i18n.t("{n}줄 더 보기", { n: rest.length })}</button>` : "")
       + (more ? `<div class="chat-diff-cut">${i18n.t('…이후 생략(원문은 터미널)')}</div>` : "")
       + `</div>`;
   }
@@ -1277,7 +1277,7 @@ export class ChatView {
       // 질문 행의 결과는 박스/바이트 메타 없이 담백한 한 줄(TUI 의 "User declined …" 자리) —
       //  "사용자가 답하지 않고 넘어갔습니다" 를 박스+바이트 수로 감싸던 게 못생김의 진범(사용자 지적).
       card.res.innerHTML = card.q
-        ? `<div class="chat-q-res">${escapeHtml(String(res.preview || "").trim() || "응답됨")}</div>`
+        ? `<div class="chat-q-res">${escapeHtml(String(res.preview || "").trim() || i18n.t("응답됨"))}</div>`
         : body;
       // 결과 도착 = TUI 가 그 도구를 한 줄로 접는 순간(.done) — 사용자가 펼쳐 둔 행(.open)은 유지.
       // 편집 diff 는 접지 않는다 — TUI 도 Update 는 diff 를 펼쳐 둔다(이 대화의 핵심 정보).
@@ -1295,7 +1295,7 @@ export class ChatView {
       `<div class="chat-tool-head"><span class="chat-tool-mark ${resultClass(res)}">${resultMark(res)}</span>` +
       // 라벨은 데몬이 준 title 을 신뢰한다(toolLabel) — 로컬 명령 출력(`/model` 결과 · `!` 셸 결과)은
       //  '명령 결과'/'셸 결과' 로 온다. 여기서 '도구 결과'로 굳히면 앱(toolLabel 사용)과 갈라진다.
-      `<span class="chat-tool-label">${escapeHtml(m.tool ? toolLabel(m) : "도구 결과")}</span></div>` +
+      `<span class="chat-tool-label">${escapeHtml(m.tool ? toolLabel(m) : i18n.t("도구 결과"))}</span></div>` +
       `<div class="chat-tool-result">${body}</div>`;
     this._els.set(m.seq, row);
     this.scrollEl.appendChild(row);
@@ -1310,7 +1310,7 @@ export class ChatView {
     const { head, rest } = clampLines(preview, CHAT.OUTPUT_CLAMP_LINES);
     return (
       `<pre class="chat-out${wrap ? " wrap" : ""}" data-full="${escapeHtml(preview)}">${escapeHtml(head)}</pre>` +
-      (rest ? `<button class="chat-out-more" type="button">${rest}줄 더 보기</button>` : "") +
+      (rest ? `<button class="chat-out-more" type="button">${i18n.t("{n}줄 더 보기", { n: rest })}</button>` : "") +
       (meta ? `<div class="chat-tool-meta">${escapeHtml(meta)}</div>` : "")
     );
   }
@@ -2036,7 +2036,7 @@ export class ChatView {
       // 모드 심볼(⏸/⏵⏵)은 그리지 않는다(사용자 확정 2026-08-02: 왼쪽 아이콘 제거) — 라벨이 정본.
       return `<div class="chat-mode-row${on ? " on" : ""}${busy ? " busy" : ""}" data-mode="${m.id}">` +
         `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
-        `<span class="chat-mode-row-desc">${escapeHtml(m.desc)}</span></span>` +
+        `<span class="chat-mode-row-desc">${escapeHtml(i18n.t(m.desc))}</span></span>` +
         `<span class="chat-mode-row-mark">${on ? "✓" : ""}</span></div>`;
     }).join("") + `<div class="chat-mode-hint">${escapeHtml(hint)}</div>`;
   }

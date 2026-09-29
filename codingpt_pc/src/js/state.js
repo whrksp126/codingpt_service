@@ -742,7 +742,7 @@ export function applyApprovalEvent(ev) {
     //  단 알림 행 생성이 실패한 경우(notifId 없음)만 폴백으로 직접 울린다.
     if (a.notifId == null) {
       maybeOsNotify(
-        { title: `승인 필요 — ${a.agent === "claude" ? "Claude" : a.agent || i18n.t('에이전트')}`,
+        { title: `${i18n.t("승인 필요")} — ${a.agent === "claude" ? "Claude" : a.agent || i18n.t('에이전트')}`,
           body: `${a.tool || "Tool"}${a.relPath || a.summary ? " · " + String(a.relPath || a.summary).slice(0, 80) : ""}`,
           read: false },
         ev.alertClientKey == null ? true : ev.alertClientKey === deviceKey()
@@ -928,7 +928,7 @@ export function setWsStatus(cwd, payload) {
 export function blockedOffline(what) {
   if (!state.wsStale) return false;
   import("./workspace-view.js")
-    .then((m) => m.wvToast(`오프라인 — ${what}은(는) 서버에 연결된 뒤에 가능합니다`))
+    .then((m) => m.wvToast(i18n.t("오프라인 — {what}은(는) 서버에 연결된 뒤에 가능합니다", { what })))
     .catch(() => {});
   return true;
 }

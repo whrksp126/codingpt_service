@@ -37,7 +37,7 @@ export function setNotificationSound(value) {
 export function soundOptionsHtml() {
   const current = getNotificationSound();
   return NOTIFICATION_SOUNDS.map((o) =>
-    `<option value="${o.value}"${o.value === current ? " selected" : ""}>${o.label}</option>`
+    `<option value="${o.value}"${o.value === current ? " selected" : ""}>${i18n.t(o.label)}</option>`
   ).join("");
 }
 

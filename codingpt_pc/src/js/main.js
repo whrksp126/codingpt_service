@@ -49,13 +49,13 @@ function initQuitGuard() {
     if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
     const files = ideDirtyPaths();
     const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${basename(p) || p}</div>`).join("")
-      + (files.length > 6 ? `<div class="qg-file">… 외 ${files.length - 6}개</div>` : "");
+      + (files.length > 6 ? `<div class="qg-file">${i18n.t("… 외 {n}개", { n: files.length - 6 })}</div>` : "");
     const bd = document.createElement("div");
     bd.className = "quit-guard-backdrop";
     bd.innerHTML = `
       <div class="quit-guard">
         <div class="qg-title">${i18n.t('저장되지 않은 변경이 있습니다')}</div>
-        <div class="qg-desc">${files.length}개 파일이 아직 저장되지 않았습니다. 지금 종료하면 변경 내용이 사라집니다.</div>
+        <div class="qg-desc">${i18n.t("파일 {n}개가 아직 저장되지 않았습니다. 지금 종료하면 변경 내용이 사라집니다.", { n: files.length })}</div>
         <div class="qg-files">${list}</div>
         <div class="qg-actions">
           <button class="qg-btn qg-cancel">${i18n.t('취소')}</button>
@@ -296,7 +296,7 @@ async function maybeInstallSetupUpdate() {
     return;
   }
   if (!result?.available) return;
-  setBootstrap(`CodingPT ${result.version} 다운로드 중`, 22);
+  setBootstrap(i18n.t("CodingPT {version} 다운로드 중", { version: result.version }), 22);
   showSetupUpdate(result.version);
   let unlisten = null;
   try {
@@ -304,7 +304,7 @@ async function maybeInstallSetupUpdate() {
       updateSetupProgress(payload);
       const pct = payload?.total ? Math.min(100, Math.round((payload.chunk / payload.total) * 100)) : null;
       setBootstrap(
-        pct == null ? `CodingPT ${result.version} 다운로드 중` : `CodingPT ${result.version} 다운로드 중 · ${pct}%`,
+        pct == null ? i18n.t("CodingPT {version} 다운로드 중", { version: result.version }) : i18n.t("CodingPT {version} 다운로드 중 · {pct}%", { version: result.version, pct }),
         pct == null ? 22 : 22 + (pct * 0.62),
       );
     });
@@ -377,7 +377,7 @@ function renderUpdateBanner(info) {
   if (!el) return;
   if (!info) { el.classList.add("hidden"); el.innerHTML = ""; return; }
   el.innerHTML = `
-    <div class="ub-title">업데이트 준비됨 · ${info.version}</div>
+    <div class="ub-title">${i18n.t("업데이트 준비됨")} · ${info.version}</div>
     <div class="ub-body">${i18n.t('지금 적용하면 약 20초 연결이 끊겨요.')} <b>${i18n.t('하던 터미널 작업은 그대로 유지')}</b>${i18n.t('됩니다.')}</div>
     <div class="ub-row">
       <button id="ubLater">${i18n.t('나중에')}</button>

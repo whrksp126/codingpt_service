@@ -891,7 +891,7 @@ function buildCtxEl(items, onAfter) {
         const sw = document.createElement("button");
         sw.className = "ctx-sw" + (c.c ? "" : " none") + (c.sel ? " sel" : "");
         if (c.c) sw.style.background = c.c;
-        sw.title = c.title;
+        sw.title = i18n.t(c.title);
         tag(sw, c.onClick);
         wrap.appendChild(sw);
       }
@@ -954,7 +954,7 @@ function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
 function confirmDeleteWs(w) {
   confirmDialog({
     title: i18n.t('워크스페이스 삭제'),
-    lines: [`‘${S.wsDisplayName(w)}’을(를) 목록에서 삭제할까요? PC의 폴더와 파일은 그대로 유지됩니다.`],
+    lines: [i18n.t("‘{name}’을(를) 목록에서 삭제할까요? PC의 폴더와 파일은 그대로 유지됩니다.", { name: S.wsDisplayName(w) })],
     confirmLabel: i18n.t('삭제'),
     onConfirm: () => deleteWs(w),
   });
