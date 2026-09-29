@@ -69,7 +69,7 @@ test('title 전이 working→idle = done 폴백 알림', async () => {
   assert.strictEqual(fired[0].win, 1000002);
   assert.strictEqual(fired[0].cwd, 'proj/demo');
   assert.strictEqual(fired[0].wsName, 'demo');
-  assert.strictEqual(fired[0].title, 'Claude Code');
+  assert.strictEqual(fired[0].title, 'Claude');
 });
 
 test('훅이 최근에 왔으면 폴백은 침묵(dedup)', async () => {
@@ -223,7 +223,7 @@ test('실측 회귀 — 버전 문자열 cmd 에서도 working→idle 완료 알
   assert.strictEqual(fired.length, 1);
   assert.strictEqual(fired[0].kind, 'done');
   assert.strictEqual(fired[0].win, tid);
-  assert.strictEqual(fired[0].title, 'Claude Code');
+  assert.strictEqual(fired[0].title, 'Claude');
   assert.deepStrictEqual(frames.map((f) => f.state), ['working', 'idle']);
 });
 

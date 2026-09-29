@@ -31,7 +31,8 @@ const AGENT_STATE_CAP = 'agentstate.v1';   // 서버가 수신·검증·팬아�
 // 훅 event 도메인. pre_tool/post_tool 은 1단계 미구독이지만 값이 와도 조용히 무시한다.
 const HOOK_EVENTS = new Set(['session_start', 'prompt', 'permission', 'notification', 'stop', 'stop_failure', 'session_end']);
 // 알림 타이틀(기존 cpt-server/agent-watch 문구 유지 — 클라이언트가 보는 문자열이라 바꾸지 않는다).
-const AGENT_TITLES = new Map([['claude', 'Claude Code'], ['codex', 'Codex'], ['gemini', 'Gemini CLI']]);
+// 표시 이름은 짧은 이름만 — 벤더 제품명("Claude Code" 등)을 우리 UI 에 쓰지 않는다(약관, 2026-09-29).
+const AGENT_TITLES = new Map([['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini']]);
 // subtitle 은 서버도 조합할 수 있지만(SUBTITLE_SUFFIX), 기존 발사 문구와 1바이트도 달라지지 않게 여기서 유지.
 const SUBTITLE = {
   done: (ws) => `「${ws}」에서 완료`,

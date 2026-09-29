@@ -47,7 +47,7 @@ function binDir() { return path.join(runtime.stateDir(), 'bin'); }
 const CATALOG = [
   {
     id: 'claude',
-    name: 'Claude Code',
+    name: 'Claude',
     bin: 'claude',
     tier: 'full',
     docs: 'https://code.claude.com/docs/en/setup',
@@ -62,7 +62,7 @@ const CATALOG = [
   },
   {
     id: 'codex',
-    name: 'Codex CLI',
+    name: 'Codex',
     bin: 'codex',
     tier: 'partial',
     docs: 'https://developers.openai.com/codex/cli',
@@ -75,7 +75,7 @@ const CATALOG = [
   },
   {
     id: 'gemini',
-    name: 'Gemini CLI',
+    name: 'Gemini',
     bin: 'gemini',
     tier: 'launch',
     docs: 'https://github.com/google-gemini/gemini-cli',

@@ -742,7 +742,7 @@ export function applyApprovalEvent(ev) {
     //  단 알림 행 생성이 실패한 경우(notifId 없음)만 폴백으로 직접 울린다.
     if (a.notifId == null) {
       maybeOsNotify(
-        { title: `승인 필요 — ${a.agent === "claude" ? "Claude Code" : a.agent || i18n.t('에이전트')}`,
+        { title: `승인 필요 — ${a.agent === "claude" ? "Claude" : a.agent || i18n.t('에이전트')}`,
           body: `${a.tool || "Tool"}${a.relPath || a.summary ? " · " + String(a.relPath || a.summary).slice(0, 80) : ""}`,
           read: false },
         ev.alertClientKey == null ? true : ev.alertClientKey === deviceKey()

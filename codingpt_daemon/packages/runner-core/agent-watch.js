@@ -38,9 +38,9 @@ function agentState() { return require('./agent-state'); }  // 상태/알림 단
 
 // 이름으로 확실히 아는 에이전트 → 알림 타이틀. **이 목록은 판정의 필요조건이 아니다**(아래 참조).
 const AGENT_CMDS = new Map([
-  ['claude', 'Claude Code'],
+  ['claude', 'Claude'],
   ['codex', 'Codex'],
-  ['gemini', 'Gemini CLI'],
+  ['gemini', 'Gemini'],
 ]);
 // win32(term-host 백엔드) 셸 이름 포함 — term-host session.SHELL_NAMES 와 정합(웨이브2).
 const SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh',

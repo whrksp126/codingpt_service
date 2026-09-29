@@ -40,7 +40,7 @@ test('전이표 — session_start→idle / prompt→working / stop(bg=0)→idle+
   // 알림 payload 계약(기존 필드) 그대로여야 한다 — 서버 무수정 전제.
   assert.strictEqual(fired[0].kind, 'done');
   assert.strictEqual(fired[0].source, 'hook');
-  assert.strictEqual(fired[0].title, 'Claude Code');
+  assert.strictEqual(fired[0].title, 'Claude');
   assert.strictEqual(fired[0].body, '완료했습니다');
   assert.strictEqual(fired[0].cwd, 'proj/demo');
   assert.strictEqual(fired[0].wsName, 'demo');
