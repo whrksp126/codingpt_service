@@ -460,6 +460,8 @@ export class ConvView {
     this._syncConn();
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     if (!this.m.threadId) return;
+    // 보고 있는 대화의 알림은 읽은 것이다 — 창에 포커스가 있을 때만(다른 앱을 보는 중이면 남긴다).
+    if (typeof document !== "undefined" && document.hasFocus && document.hasFocus()) this.ctx.markRead?.(this.m.threadId);
     if (!this._opened) {
       // 열기 실패 — 8초 간격으로만 다시(오프라인에서 폭주 금지).
       if (!this._opening && Date.now() - (this._openFailedAt || 0) > CHAT.OPEN_FAIL_RETRY_MS) void this._open();

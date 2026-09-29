@@ -1185,6 +1185,7 @@ export class PaneView {
       openFile: (rel) => this.ctx.onOpenIde?.(rel),
       fs: () => this._ideFs() || api,
       openTerminal: (o) => this.ctx.onOpenAgentTerminal?.(o),
+      markRead: (threadId) => { import("./state.js").then((S) => S.readThread(threadId)).catch(() => {}); },
       focusThread: (id) => !!this.ctx.onFocusThread?.(id, holder),
     };
   }

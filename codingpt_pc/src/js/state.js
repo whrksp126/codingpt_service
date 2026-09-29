@@ -698,6 +698,18 @@ export function readScope(cwd, win) {
   api.notifRead({ scope: { cwd, win: w } }).catch(() => {});
 }
 
+// 채팅 v2 대화 읽음 처리 — 그 대화의 채팅 탭이 **화면에 떠 있는 동안** 온 알림(조치 필요·완료)은 이미 본 것이다.
+//  터미널 알림과 달리 (cwd,win) 이 없어 scope 로는 못 지운다 → id 로 지운다.
+export function readThread(threadId) {
+  if (!threadId) return;
+  const hit = state.notifications.filter((n) => !n.read && n.threadId && String(n.threadId) === String(threadId));
+  if (!hit.length) return;
+  hit.forEach((n) => (n.read = true));
+  emit();
+  const ids = hit.map((n) => n.id).filter((id) => typeof id === "number");
+  if (ids.length) api.notifRead({ ids }).catch(() => {});
+}
+
 // 워크스페이스별 미읽음 수 — 서버 행(workspaceId/cwd)과 로컬 폴백(wsId) 모두 매칭.
 export function unreadForWs(w) {
   if (!w) return 0;

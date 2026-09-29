@@ -55,6 +55,7 @@ const DEFAULT_TIMINGS = {
   adoptWaitMs: 5000,        // /exit 뒤 셸 복귀 대기
   adoptPollMs: 250,
   adoptKeyGapMs: 150,
+  foreignWriteMs: 90 * 1000, // 세션 파일이 이 안에 바뀌었는데 우리가 쓴 게 아니면 다른 곳(우리 터미널이 아닌 터미널 앱)에서 사용 중으로 본다
 };
 let timings = { ...DEFAULT_TIMINGS };
 
@@ -88,6 +89,7 @@ const leaving = new Map();     // threadId → 내려가는 중인 프로세스�
 const sending = new Map();     // `${threadId}\n${clientId}` → 진행 중인 보내기(같은 clientId 재시도가 겹칠 때)
 const creating = new Map();    // clientId → 진행 중인 만들기
 const viewers = new Map();     // threadId → 마지막 open/since 시각
+const released = new Map();    // threadId → 우리 프로세스가 마지막으로 끝난 시각(실시각 — 세션 파일 mtime 과 비교한다)
 const healed = new Set();      // 이번 데몬 수명에 미결 정리를 끝낸 thread
 const hintTimers = new Map();  // threadId → 힌트 코얼레싱 타이머
 const catalog = new Map();     // agent → { commands, terminalCommands }  마지막 init 이 알려준 명령 목록
@@ -305,6 +307,18 @@ async function ensureProc(thread) {
   const abs = absOf(thread);
   if (!abs || !fs.existsSync(abs)) throw coded('START_FAILED', '작업 폴더를 찾을 수 없습니다');
 
+  // 우리 터미널 밖(다른 터미널 앱)에서 같은 세션을 쓰는 중이면 띄우지 않는다 — 두 프로세스가 한 세션을 열면 기록이 섞인다.
+  //  훅 바인딩이 없어 누가 쓰는지는 모른다. 세션 파일이 방금 바뀌었고 그게 우리 프로세스가 끝난 뒤라면 남이 쓴 것이다.
+  if (timings.foreignWriteMs > 0) {
+    let mtime = 0;
+    try { const sf = adapter.sessionFile(abs, thread.id); if (sf) mtime = fs.statSync(sf).mtimeMs; } catch (_) { mtime = 0; }
+    // 데몬이 재시작하면 released 는 비지만 색인의 lastAt(우리가 마지막으로 기록한 시각)은 남는다.
+    const ours = Math.max(released.get(thread.id) || 0, Number(thread.lastAt) || 0);
+    if (mtime && Date.now() - mtime < timings.foreignWriteMs && mtime > ours + 2000) {
+      throw coded('THREAD_BUSY_IN_TERMINAL', '이 대화는 다른 곳에서 사용 중입니다. 잠시 후 다시 시도하세요');
+    }
+  }
+
   makeRoom();
   heal(thread.id);
 
@@ -384,6 +398,7 @@ function stopProc(proc, reason) {
 function onExit(proc, ev) {
   if (proc.exited) return;
   proc.exited = true;
+  released.set(proc.id, Date.now());
   if (live.get(proc.id) === proc) live.delete(proc.id);
   const thread = store.getThread(proc.id);
   if (!thread) return; // 그 사이 삭제된 대화

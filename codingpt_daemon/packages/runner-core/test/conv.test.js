@@ -951,3 +951,14 @@ test('종료 훅 — process exit 경로에서도 장부를 닫고 프로세스�
   await waitFor(() => conv._internals.live.size === 0, 2000, '정리');
   assert.strictEqual(store.open(id).events.filter((e) => e.op === 'turn' && e.phase === 'end').length, 1, '턴 종료는 한 번만 적힌다');
 });
+
+// ── 우리 터미널 밖에서 쓰는 중인 세션(다른 터미널 앱) ──────────────────────────
+test('다른 곳에서 방금 쓰인 세션에는 프로세스를 띄우지 않는다(foreignWriteMs)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'conv.js'), 'utf8');
+  // 가드는 터미널 바인딩 확인 뒤·프로세스 기동 전에 있어야 하고, 우리 기록 시각(released·lastAt)보다 뒤의 변경만 남의 것으로 본다.
+  const at = src.indexOf('timings.foreignWriteMs > 0');
+  assert.ok(at > src.indexOf('const term = terminalOf(thread.id);'), '터미널 확인 뒤');
+  assert.ok(at < src.indexOf('makeRoom();\n  heal(thread.id);'), '기동 전');
+  assert.match(src.slice(at, at + 900), /Math\.max\(released\.get\(thread\.id\) \|\| 0, Number\(thread\.lastAt\) \|\| 0\)/);
+  assert.match(src.slice(at, at + 900), /THREAD_BUSY_IN_TERMINAL/);
+});

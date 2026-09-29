@@ -1592,7 +1592,8 @@ html[data-theme="light"] .qr-card { box-shadow: 0 8px 28px rgba(15, 23, 42, 0.16
 .chat-table { border-collapse: separate; border-spacing: 0; font-size: 12.5px; border: 1px solid var(--border-ctrl); border-radius: 8px; overflow: hidden; }
 .chat-table th, .chat-table td { padding: 7px 12px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
 .chat-table th { background: var(--elevated2); color: var(--text); font-weight: 600; font-size: 12px; white-space: nowrap; }
-.chat-table td { color: var(--text2); }
+/* keep-all — 좁은 pane 에서 한글 낱말이 글자 단위로 꺾이지 않게(열 최소폭 = 가장 긴 낱말, 넘치면 wrap 이 가로 스크롤) */
+.chat-table td { color: var(--text2); word-break: keep-all; }
 .chat-table td + td, .chat-table th + th { border-left: 1px solid var(--border); }
 .chat-table tbody tr:last-child td { border-bottom: none; }
 .chat-table tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--elevated2) 40%, transparent); }
@@ -2910,9 +2911,9 @@ button.au-chip, .au-chip { border: none; cursor: pointer; font-family: inherit; 
 .conv-blk > .chat-p:last-child, .conv-blk > .chat-list:last-child,
 .conv-blk > .chat-code:last-child, .conv-blk > .chat-quote:last-child { margin-bottom: 0; }
 .conv-blk > .chat-tablewrap { margin: 0; }
-/* 스트리밍 커서 — 무채색. 글 끝에 붙는 작은 막대 */
+/* 스트리밍 커서 — 그리지 않는다. 본문이 블록 요소라 커서가 늘 빈 줄에 혼자 놓였고(실기 확인), 진행은 아래 '작업 중' 줄이 알린다 */
 .conv-caret {
-  display: inline-block; width: 7px; height: 14px; margin-top: 4px; border-radius: 1.5px;
+  display: none; width: 7px; height: 14px; margin-top: 4px; border-radius: 1.5px;
   background: var(--text3); animation: convCaret 1s steps(2, start) infinite;
   user-select: none; -webkit-user-select: none;
 }
