@@ -73,6 +73,18 @@ function composeSubtitle(kind, wsName) {
   return `「${wsName}」${suffix}`;
 }
 
+// FCM 표시 본문 — 기본은 subtitle(없으면 body 앞 120자). 채팅 v2 완료 알림(conv_done)만 subtitle 뒤에 답변 미리보기를
+//  붙인다: 폰 알림에 "「ws」에서 완료" 만 보이면 무엇이 끝났는지 알 수 없다(실기 검증 2026-09-30). 다른 kind 는 불변.
+const PUSH_PREVIEW_MAX = 80;
+function pushBodyOf(kind, subtitle, body) {
+  const preview = body != null ? String(body).replace(/\s+/g, ' ').trim() : '';
+  if (kind === 'conv_done' && subtitle && preview) {
+    const cut = Array.from(preview);
+    return `${subtitle} · ${cut.length > PUSH_PREVIEW_MAX ? cut.slice(0, PUSH_PREVIEW_MAX).join('') + '…' : preview}`;
+  }
+  return subtitle || (body ? String(body).slice(0, 120) : '');
+}
+
 // FCM 딥링크 — 앱이 알림 탭 시 해당 워크스페이스/터미널 탭으로 이동.
 function buildDeeplink(n) {
   const params = new URLSearchParams();
@@ -174,7 +186,7 @@ async function createNotification(userId, payload) {
       workspaceId: notification.workspaceId || undefined,
       notifId: notification.id, // Android 태그/iOS userInfo 매칭 — 크로스기기 dismiss 의 열쇠
       title,
-      body: subtitle || (notification.body ? String(notification.body).slice(0, 120) : ''),
+      body: pushBodyOf(kind, subtitle, notification.body),
       deeplink: p.deeplink ? String(p.deeplink).slice(0, 300) : buildDeeplink(notification),
       // 승인 등 특수 알림만 채워진다(부재 시 provider 가 기존 기본값을 그대로 쓴다 — 회귀 0).
       // FCM data 에 threadId 를 싣는다(폰이 탭했을 때 그 대화를 연다). 서버가 검증한 값이 마지막에 와서
@@ -287,4 +299,5 @@ module.exports = {
   _toJson: toJson,                 // 채팅 v2 — threadId 왕복(저장 접두 ↔ API JSON) 계약 고정
   _buildDeeplink: buildDeeplink,
   _normThreadId: normThreadId,
+  _pushBodyOf: pushBodyOf,
 };

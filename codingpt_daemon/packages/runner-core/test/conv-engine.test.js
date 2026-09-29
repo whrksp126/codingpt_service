@@ -146,6 +146,67 @@ test('result — 비용·사용량·컨텍스트 크기를 싣는다', () => {
   assert.ok(r.durationMs > 0);
 });
 
+test('사용량 — 컨텍스트는 마지막 API 호출 하나(합계인 result.usage 가 아님), 창 크기는 modelUsage.contextWindow', () => {
+  const ev = replay('p-mode');
+  const results = of(ev, 'result');
+  // 실측: 턴마다 마지막 호출 = input 2 + cache_creation + cache_read + 최종 output(message_delta)
+  assert.strictEqual(results[0].contextTokens, 2 + 285 + 26658 + 5);
+  assert.strictEqual(results[1].contextTokens, 2 + 284 + 27300 + 5);
+  for (const r of results) {
+    assert.strictEqual(r.contextMax, 1000000);
+    assert.strictEqual(r.model, 'claude-fable-5-1');
+    assert.ok(r.contextTokens < 81243, 'result.usage(턴 합계)를 컨텍스트로 쓰지 않는다');
+  }
+  assert.strictEqual(results[1].costUsd, 0.38621399999999995, '비용은 세션 누적 그대로');
+  // 턴 중간에도 컨텍스트가 바뀔 때마다 usage 이벤트가 나간다(같은 값은 다시 안 낸다)
+  const us = of(ev, 'usage');
+  assert.ok(us.length >= 4);
+  us.forEach((u, i) => { if (i) assert.notStrictEqual(u.contextTokens, us[i - 1].contextTokens); });
+  assert.strictEqual(us[0].model, 'claude-fable-5-1');
+  assert.strictEqual(us[us.length - 1].contextTokens, results[1].contextTokens);
+});
+
+test('사용량 — modelUsage 에서 메인 모델 항목을 고르고, 창 크기가 없으면 null(모델 id 로 추정하지 않는다)', () => {
+  const mu = {
+    'claude-haiku-x': { inputTokens: 900000, contextWindow: 200000 },
+    'claude-main-y': { inputTokens: 10, contextWindow: 1000000 },
+  };
+  assert.strictEqual(engine.modelUsageOf(mu, 'claude-main-y').entry.contextWindow, 1000000);
+  assert.strictEqual(engine.modelUsageOf({ 'a[1m]': { canonicalModel: 'a', contextWindow: 5 } }, 'a').entry.contextWindow, 5);
+  assert.strictEqual(engine.modelUsageOf({ only: { contextWindow: 7 } }, null).model, 'only');
+  assert.strictEqual(engine.modelUsageOf(mu, null).model, 'claude-haiku-x', '모르면 가장 많이 쓴 항목');
+  assert.strictEqual(engine.modelUsageOf(null, 'x'), null);
+
+  const events = [];
+  const parser = engine.createParser((e) => events.push(e), { coalesceMs: 0 });
+  parser.feed({ type: 'system', subtype: 'init', model: 'm-1', permissionMode: 'default' });
+  parser.feed({ type: 'assistant', message: { id: 'msg_1', model: 'm-1', role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 5, output_tokens: 1 } }, uuid: 'u1' });
+  // 서브에이전트 응답은 메인 컨텍스트가 아니다
+  parser.feed({ type: 'assistant', parent_tool_use_id: 'toolu_1', message: { id: 'msg_2', model: 'm-2', role: 'assistant', content: [{ type: 'text', text: 'sub' }], usage: { input_tokens: 99999 } }, uuid: 'u2' });
+  parser.feed({ type: 'result', subtype: 'success', is_error: false, result: 'hi', total_cost_usd: 0.5, modelUsage: { 'm-1': { inputTokens: 5 } } });
+  const r = of(events, 'result')[0];
+  assert.strictEqual(r.contextTokens, 6);
+  assert.strictEqual(r.contextMax, null);
+  assert.strictEqual(r.model, 'm-1');
+  assert.deepStrictEqual(of(events, 'usage').map((u) => u.contextTokens), [6]);
+});
+
+test('사용 한도 — 실측 allowed 는 차단이 아니고, 경고(allowed_*)도 차단이 아니다. rejected·그 밖의 값만 차단', () => {
+  const rs = of(replay('p-allow'), 'rate');
+  assert.ok(rs.length >= 1);
+  for (const r of rs) {
+    assert.strictEqual(r.blocked, false);
+    assert.strictEqual(r.status, 'allowed');
+    assert.strictEqual(r.kind, 'five_hour');
+    assert.ok(r.utilization > 0 && r.utilization < 1, 'unifiedWindows[rateLimitType].utilization');
+    assert.strictEqual(r.resetsAt, 1790702400);
+  }
+  assert.strictEqual(engine.rateOf({ status: 'allowed_warning', rateLimitType: 'seven_day', utilization: 0.8 }).blocked, false);
+  assert.strictEqual(engine.rateOf({ status: 'allowed_warning', utilization: 0.8 }).utilization, 0.8);
+  assert.strictEqual(engine.rateOf({ status: 'rejected' }).blocked, true);
+  assert.strictEqual(engine.rateOf({ status: 'blocked_somehow' }).blocked, true);
+});
+
 test('코얼레싱 — 50ms 창 안의 조각은 한 프레임으로 합쳐진다', async () => {
   const events = [];
   const parser = engine.createParser((ev) => events.push(ev), { coalesceMs: 50 });

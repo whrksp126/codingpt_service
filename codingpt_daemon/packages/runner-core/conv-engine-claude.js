@@ -30,8 +30,9 @@
  *       request   { rid, tool, toolUseId, input, description, suggestions, interactive }
  *       request_gone { rid }
  *       mode      { mode }
- *       rate      { status, resetsAt, kind }
- *       result    { ok, subtype, interrupted, durationMs, usage, costUsd, contextTokens, contextMax, text, authFailed }
+ *       rate      { status, kind, resetsAt, utilization, blocked }                rate_limit_event 마다. blocked = 실제 차단
+ *       usage     { contextTokens, model }                                        메인 세션 응답마다(값이 바뀔 때만) — 컨텍스트 점유
+ *       result    { ok, subtype, interrupted, durationMs, usage, costUsd, contextTokens, contextMax, model, text, authFailed }
  *       exit      { code, signal, stderr, spawnError? }
  */
 'use strict';
@@ -134,6 +135,47 @@ function toMsgs(o, { blockIdx = 0, textCap = TEXT_CAP, closeDraft = false } = {}
 // 세션 파일에만 있는 곁가지(첨부 메타·큐 조작·훅 요약…)는 대화가 아니다 — 가져오기에서 버린다.
 const IMPORT_DROP_KINDS = new Set(['meta', 'unknown', 'system']);
 
+// ── 사용량(§4.5) ─────────────────────────────────────────────────────────────
+// API usage 하나 → 그 호출이 차지한 컨텍스트(입력 + 캐시 읽기/생성 + 출력 — 출력도 다음 호출의 입력이 된다).
+function contextTokensOf(u) {
+  if (!u || typeof u !== 'object') return 0;
+  const n = (k) => (Number.isFinite(u[k]) ? u[k] : 0);
+  return n('input_tokens') + n('cache_read_input_tokens') + n('cache_creation_input_tokens') + n('output_tokens');
+}
+
+/**
+ * result.modelUsage({ "<모델 id>": { contextWindow, … } }) 에서 메인 모델의 항목을 고른다 → { model, entry } | null.
+ *  서브에이전트가 다른 모델을 쓰면 항목이 여럿이다 — 메인 모델 id(키 또는 canonicalModel)가 맞는 것,
+ *  모르면 하나뿐일 때만 그것, 아니면 토큰을 가장 많이 쓴 항목. contextWindow 를 모델 id 로 추정하지 않는다.
+ */
+function modelUsageOf(modelUsage, model) {
+  if (!modelUsage || typeof modelUsage !== 'object') return null;
+  const rows = Object.entries(modelUsage).filter(([, v]) => v && typeof v === 'object');
+  if (!rows.length) return null;
+  let hit = model ? rows.find(([k, v]) => k === model || v.canonicalModel === model) : null;
+  if (!hit && rows.length === 1) hit = rows[0];
+  if (!hit) {
+    const size = (v) => (v.inputTokens || 0) + (v.cacheReadInputTokens || 0) + (v.cacheCreationInputTokens || 0);
+    hit = rows.slice().sort((a, b) => size(b[1]) - size(a[1]))[0];
+  }
+  return { model: hit[0], entry: hit[1] };
+}
+
+/**
+ * rate_limit_info → { status, kind, resetsAt, utilization, blocked }.
+ *  실측 status 는 턴마다 'allowed' 로 온다. 한도 근접 경고('allowed_warning' 등)는 **차단이 아니다** — 응답은 정상 완료된다.
+ *  그래서 blocked = 'rejected' 또는 'allowed' 로 시작하지 않는 값일 때만(실기 검증 2026-09-30: 경고를 한도 도달로 안내했던 오류).
+ *  utilization 은 이벤트에 있으면 그 값, 없으면 unifiedWindows[rateLimitType].utilization(실측 0~1).
+ */
+function rateOf(r) {
+  const status = String(r.status);
+  const kind = r.rateLimitType ? String(r.rateLimitType) : null;
+  const win = kind && r.unifiedWindows && typeof r.unifiedWindows === 'object' ? r.unifiedWindows[kind] : null;
+  const util = Number.isFinite(r.utilization) ? r.utilization : (win && Number.isFinite(win.utilization) ? win.utilization : null);
+  const resetsAt = Number.isFinite(r.resetsAt) ? r.resetsAt : (win && Number.isFinite(win.resetsAt) ? win.resetsAt : null);
+  return { status, kind, resetsAt, utilization: util, blocked: status === 'rejected' || !status.startsWith('allowed') };
+}
+
 // ── stdout 파서 ──────────────────────────────────────────────────────────────
 /**
  * createParser(emit, opts) → { feed(obj), flush(), noteInterrupt(), dispose() }
@@ -151,6 +193,8 @@ function createParser(emit, opts = {}) {
     timer: null,
     interrupting: false,
     usage: null,            // 마지막 메인 세션 응답의 usage(컨텍스트 점유 추정)
+    model: null,            // 메인 세션 모델(init·assistant 의 message.model) — result.modelUsage 에서 제 항목을 고르는 키
+    ctxSent: null,          // 마지막으로 내보낸 usage 이벤트의 contextTokens(같은 값은 다시 안 낸다)
     authFailed: false,
   };
 
@@ -209,12 +253,23 @@ function createParser(emit, opts = {}) {
         st.blocks.delete(idx);
         return;
       }
+      case 'message_delta':
+        // 완성 assistant 줄의 usage.output_tokens 는 중간값이다(실측) — 최종값은 message_delta 가 준다.
+        if (ev.usage && typeof ev.usage === 'object') { st.usage = { ...(st.usage || {}), ...ev.usage }; noteUsage(); }
+        return;
       case 'message_stop':
         flush();
         st.blocks.clear();
         return;
       default:
     }
+  }
+
+  function noteUsage() {
+    const ctx = contextTokensOf(st.usage);
+    if (!ctx || ctx === st.ctxSent) return;
+    st.ctxSent = ctx;
+    emit({ type: 'usage', contextTokens: ctx, model: st.model || null });
   }
 
   // 완성 메시지는 블록 1개당 1줄, 같은 message.id 로 온다(실측) — 인덱스는 줄에 없으므로 스트림에서 얻는다.
@@ -238,7 +293,10 @@ function createParser(emit, opts = {}) {
     flushBlock(b);                       // 초안의 남은 조각이 완성본보다 먼저 나가야 한다
     const drafted = !!(b && (b.sent > 0 || b.kind === 'thinking'));
     if (b) st.blocks.delete(idx);
-    if (!o.parent_tool_use_id && o.message && o.message.usage) st.usage = o.message.usage;
+    if (!o.parent_tool_use_id && o.message) {
+      if (o.message.model) st.model = String(o.message.model);
+      if (o.message.usage) { st.usage = o.message.usage; noteUsage(); }
+    }
     if (o.error && AUTH_RE.test(String(o.error))) st.authFailed = true;
     const msgs = toMsgs(o, { blockIdx: idx, textCap, closeDraft: drafted });
     if (msgs.length) emit({ type: 'msgs', msgs, uuid: o.uuid || null });
@@ -255,6 +313,7 @@ function createParser(emit, opts = {}) {
 
   function onSystem(o) {
     if (o.subtype === 'init') {
+      if (o.model) st.model = String(o.model);
       emit({
         type: 'init',
         mode: o.permissionMode || null, model: o.model || null,
@@ -275,9 +334,11 @@ function createParser(emit, opts = {}) {
   function onResult(o) {
     flush();
     st.blocks.clear();
-    const mu = o.modelUsage && typeof o.modelUsage === 'object' ? Object.values(o.modelUsage)[0] : null;
-    const u = st.usage || {};
-    const ctx = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.output_tokens || 0);
+    const mu = modelUsageOf(o.modelUsage, st.model);
+    // 컨텍스트 = 마지막 API 호출 하나의 크기. result.usage 는 턴 전체의 **합계**라 쓰면 안 된다(실측: 호출 3번이면 3배).
+    //  스트림을 못 본 경우(방어)에만 result.usage.iterations 의 마지막 호출로 대신한다.
+    const its = o.usage && Array.isArray(o.usage.iterations) ? o.usage.iterations : [];
+    const ctx = contextTokensOf(st.usage) || contextTokensOf(its[its.length - 1]);
     const aborted = typeof o.terminal_reason === 'string' && /^aborted/.test(o.terminal_reason);
     const text = typeof o.result === 'string' ? o.result : ''; // 중단된 턴의 result 에는 result 필드가 없다(실측)
     emit({
@@ -292,7 +353,8 @@ function createParser(emit, opts = {}) {
       } : null,
       costUsd: Number.isFinite(o.total_cost_usd) ? o.total_cost_usd : null,
       contextTokens: ctx || null,
-      contextMax: (mu && mu.contextWindow) || null,
+      contextMax: mu && Number.isFinite(mu.entry.contextWindow) && mu.entry.contextWindow > 0 ? mu.entry.contextWindow : null,
+      model: st.model || (mu && mu.model) || null,
       text,
       authFailed: st.authFailed || (!!o.is_error && AUTH_RE.test(text)),
     });
@@ -310,7 +372,8 @@ function createParser(emit, opts = {}) {
       case 'result': return onResult(o);
       case 'rate_limit_event': {
         const r = o.rate_limit_info || {};
-        if (r.status && r.status !== 'allowed') emit({ type: 'rate', status: String(r.status), resetsAt: r.resetsAt || null, kind: r.rateLimitType || null });
+        if (!r.status) return;
+        emit({ type: 'rate', ...rateOf(r) });
         return;
       }
       default: // control_* 는 프로세스 쪽(start)이 먼저 가로챈다
@@ -573,6 +636,6 @@ module.exports = {
   id: 'claude',
   modes: MODES.slice(),
   label, locate, loginState, sessionFile, sessions, importLine, resumeCommand, resumeArgs, start, buildEnv,
-  createParser, argsFor, toMsgs,
+  createParser, argsFor, toMsgs, contextTokensOf, modelUsageOf, rateOf,
   TEXT_CAP, COALESCE_MS,
 };

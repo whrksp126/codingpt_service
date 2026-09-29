@@ -20,6 +20,7 @@
 'use strict';
 const fs = require('fs');
 const fsp = require('fs/promises');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const runtime = require('./runtime');
@@ -38,6 +39,9 @@ const LIST_DEFAULT = 50;
 const LIST_MAX = 200;
 const NOTIFY_BODY_MAX = 200;
 const STDERR_NOTE_MAX = 300;
+const FILE_MAX = 8 * 1024 * 1024;       // conv.file 상한(§4.5)
+const FILE_PATH_MAX = 4096;
+const FILE_REFS_MAX = 20000;            // thread 당 기억할 참조 경로 수(오래된 것부터 버림)
 const FILE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Read']);
 const SHELL_CMDS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh',
   'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']); // agent-watch.js 와 같은 집합
@@ -93,6 +97,7 @@ const released = new Map();    // threadId → 우리 프로세스가 마지막�
 const healed = new Set();      // 이번 데몬 수명에 미결 정리를 끝낸 thread
 const hintTimers = new Map();  // threadId → 힌트 코얼레싱 타이머
 const catalog = new Map();     // agent → { commands, terminalCommands }  마지막 init 이 알려준 명령 목록
+const fileRefs = new Map();    // threadId → { upto, abs:Set }  conv.file 권한 색인(이벤트에 등장한 경로의 절대경로)
 let pushWs = null;             // 제어 WS 가 아닌 직접 호출자(종단 스크립트)의 sink
 let sweeper = null;
 let hooks = null;
@@ -478,9 +483,20 @@ function onEngine(proc, ev) {
     case 'mode':
       if (ev.mode && ev.mode !== thread.mode) patch(id, { mode: ev.mode }, { event: true });
       return;
-    case 'rate':
-      notice(id, 'warn', 'RATE_LIMITED', '사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시도하세요');
+    case 'usage':
+      // 턴 중간의 컨텍스트 갱신은 로그에 적지 않는다(응답마다 온다) — 힌트로만 알리고, 턴 끝(result)에 한 번 기록한다.
+      patch(id, { usage: usageOf(thread.usage, ev) });
       return;
+    case 'rate': {
+      // 경고(한도 근접)는 안내하지 않는다 — thread.usage.rateLimit 에만 싣고(클라가 원하면 표시) 힌트로 알린다.
+      //  실제 차단일 때만 notice. 같은 차단(같은 창·같은 해제 시각)이 이어서 와도 한 번만 남긴다.
+      const prev = thread.usage && thread.usage.rateLimit;
+      const rateLimit = { status: ev.status, kind: ev.kind || null, resetsAt: ev.resetsAt != null ? ev.resetsAt : null, utilization: ev.utilization != null ? ev.utilization : null };
+      const again = prev && prev.blocked && prev.kind === rateLimit.kind && prev.resetsAt === rateLimit.resetsAt;
+      patch(id, { usage: usageOf(thread.usage, { rateLimit: { ...rateLimit, blocked: !!ev.blocked } }) });
+      if (ev.blocked && !again) notice(id, 'warn', 'RATE_LIMITED', '사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시도하세요');
+      return;
+    }
     case 'result': return onResult(proc, thread, ev);
     case 'exit': return onExit(proc, ev);
     default:
@@ -577,15 +593,32 @@ function onResult(proc, thread, ev) {
       : { op: 'notice', level: 'error', code: 'TURN_FAILED', text: oneLine(approvals().redactValues(ev.text || ''), 300) || '작업이 실패로 끝났습니다' });
   }
   record(id, evs);
-  const usage = (ev.contextTokens || ev.contextMax || ev.costUsd != null)
-    ? { contextTokens: ev.contextTokens || null, contextMax: ev.contextMax || null, costUsd: ev.costUsd != null ? ev.costUsd : null }
-    : undefined;
-  patch(id, { state: failed ? 'error' : 'idle', pending: 0, ...(usage ? { usage } : {}) }, { event: failed || !!usage });
+  const usage = (ev.contextTokens || ev.contextMax || ev.costUsd != null || ev.model) ? usageOf(thread.usage, ev) : undefined;
+  const usageChanged = !!usage && JSON.stringify(usage) !== JSON.stringify(thread.usage || null);
+  patch(id, { state: failed ? 'error' : 'idle', pending: 0, ...(usage ? { usage } : {}) }, { event: failed || usageChanged });
   if (failed) notify(thread, 'conv_error', { subtitle: `${where(thread)}에서 오류`, body: ev.authFailed ? '로그인이 필요합니다' : '작업이 실패로 끝났습니다' });
   else if (!ev.interrupted && !hasViewer(id)) {
     const cur = store.getThread(id);
     notify(thread, 'conv_done', { subtitle: `${where(thread)}에서 완료`, body: (cur && cur.preview) || undefined });
   }
+}
+
+/**
+ * thread.usage(§4.5) = { contextTokens, contextMax, contextPct, costUsd, model }. 어댑터가 준 값만 덮고 나머지는 앞 값을 잇는다.
+ *  contextMax 는 에이전트가 알려 준 값만 쓴다(result.modelUsage.contextWindow) — 모델 id 로 추정하지 않는다.
+ *  모델이 바뀌면 앞 모델의 창 크기는 버린다(다음 result 가 새 값을 줄 때까지 null → contextPct 도 null).
+ */
+function usageOf(prev, u) {
+  const p = prev && typeof prev === 'object' ? prev : {};
+  const num = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
+  const model = (u && u.model) || p.model || null;
+  const sameModel = !(u && u.model) || !p.model || u.model === p.model;
+  const contextTokens = num(u && u.contextTokens) != null ? u.contextTokens : num(p.contextTokens);
+  const contextMax = num(u && u.contextMax) || (sameModel ? num(p.contextMax) : null) || null;
+  const costUsd = num(u && u.costUsd) != null ? u.costUsd : num(p.costUsd);
+  const contextPct = contextTokens != null && contextMax ? Math.max(0, Math.min(100, Math.round((contextTokens * 100) / contextMax))) : null;
+  const rateLimit = u && u.rateLimit !== undefined ? u.rateLimit : (p.rateLimit || null);
+  return { contextTokens, contextMax, contextPct, costUsd, model, ...(rateLimit ? { rateLimit } : {}) };
 }
 
 // ── 가져오기(§4.3) — 프로세스가 떠 있지 않을 때만 ─────────────────────────────
@@ -967,6 +1000,124 @@ async function detail(p) {
   }
 }
 
+// ── 파일 바이트(conv.file, §4.5) ─────────────────────────────────────────────
+// 권한 = "그 대화의 이벤트에 등장한 경로만"(v1 chat.file 의 "트랜스크립트가 곧 능력" 규칙). 임의 경로 열람 통로가 아니다.
+//  v1 과 다른 점: 홈 jail(fs.safeResolve — realpath 로 심링크 탈출까지)도 통과해야 한다(§4.5). 그래서 홈 밖
+//  (/var/folders 의 스크린샷 등)은 참조돼 있어도 거절(outside)이다.
+const FILE_MIME = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  bmp: 'image/bmp', heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff', svg: 'image/svg+xml',
+  ico: 'image/x-icon', avif: 'image/avif',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+  mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4',
+  pdf: 'application/pdf', zip: 'application/zip', json: 'application/json',
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', log: 'text/plain', html: 'text/html', htm: 'text/html',
+  css: 'text/css', xml: 'application/xml', yaml: 'text/yaml', yml: 'text/yaml',
+  js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript', ts: 'text/plain', tsx: 'text/plain', jsx: 'text/plain',
+  py: 'text/plain', sh: 'text/plain', go: 'text/plain', rs: 'text/plain', java: 'text/plain', kt: 'text/plain', swift: 'text/plain',
+};
+function fileMimeOf(abs) {
+  const ext = String(path.extname(abs) || '').slice(1).toLowerCase();
+  return FILE_MIME[ext] || 'application/octet-stream';
+}
+
+const ATTACH_LINE_RE = /^\[첨부\] (.+)$/gm;                      // composeText 가 붙이는 줄
+const LINK_RE = /!?\[[^\]\n]*\]\((?:<([^>\n]+)>|([^()\s]+))(?:\s+"[^"\n]*")?\)/g; // ![alt](t) · [text](t) · (<공백 있는 경로>) · (t "제목")
+const PATH_TOKEN_RE = /(?:^|[\s'"`(=])((?:~\/|\/)[^\s'"`()<>]+)/g;           // argsPreview 안의 절대·~ 경로
+
+/** 참조 원문 → 절대경로(존재·jail 검사는 호출측). base: 'cwd' | 'root'(fs.relOf 가 만든 홈 상대 = tool.path). */
+function refAbs(raw, base, cwdAbs) {
+  let t = String(raw || '').trim();
+  if (!t || t.length > FILE_PATH_MAX) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t) && !/^file:/i.test(t)) return null; // URL 은 클라가 직접 연다
+  if (/^file:\/\//i.test(t)) { try { t = decodeURIComponent(t.slice(7)); } catch (_) { t = t.slice(7); } }
+  t = t.replace(/#.*$/, '');
+  if (!t) return null;
+  if (t === '~' || t.startsWith('~/')) t = path.join(os.homedir(), t.slice(2));
+  if (path.isAbsolute(t)) return path.resolve(t);
+  if (base === 'root') { try { return path.resolve(fsLib().rootDir(), t); } catch (_) { return null; } }
+  return cwdAbs ? path.resolve(cwdAbs, t) : null;
+}
+
+/** 이 이벤트가 말한 경로들 → [[원문, base]]. */
+function refsOfEvent(ev) {
+  const out = [];
+  const m = ev && ev.op === 'msg' ? ev.msg : null;
+  if (!m) return out;
+  if (Array.isArray(m.attachments)) for (const a of m.attachments) if (a && typeof a.path === 'string') out.push([a.path, 'cwd']);
+  const text = typeof m.text === 'string' ? m.text : '';
+  if (m.role === 'user' && text.indexOf('[첨부] ') >= 0) {
+    ATTACH_LINE_RE.lastIndex = 0;
+    let hit;
+    while ((hit = ATTACH_LINE_RE.exec(text))) out.push([hit[1].trim(), 'cwd']);
+  }
+  if (m.role === 'assistant' && text.indexOf('](') >= 0) {
+    LINK_RE.lastIndex = 0;
+    let hit;
+    while ((hit = LINK_RE.exec(text))) out.push([hit[1] || hit[2], 'cwd']);
+  }
+  if (m.tool && typeof m.tool === 'object') {
+    if (typeof m.tool.path === 'string') out.push([m.tool.path, 'root']);
+    if (typeof m.tool.argsPreview === 'string') {
+      PATH_TOKEN_RE.lastIndex = 0;
+      let hit;
+      while ((hit = PATH_TOKEN_RE.exec(m.tool.argsPreview))) out.push([hit[1].replace(/[.,;:]+$/, ''), 'cwd']);
+    }
+  }
+  return out;
+}
+
+/** 참조 색인을 로그 끝까지 잇는다(증분 — 이미 훑은 seq 는 다시 보지 않는다). */
+function refsOf(thread) {
+  const head = store.headSeq(thread.id);
+  let r = fileRefs.get(thread.id);
+  if (!r || r.upto > head) { r = { upto: 0, abs: new Set() }; fileRefs.set(thread.id, r); } // 삭제 후 재생성 등
+  if (r.upto === head) return r;
+  const cwdAbs = absOf(thread);
+  for (const ev of store.eventsAfter(thread.id, r.upto)) {
+    for (const [raw, base] of refsOfEvent(ev)) {
+      const abs = refAbs(raw, base, cwdAbs);
+      if (!abs) continue;
+      r.abs.delete(abs); // 최근 참조를 뒤로(상한에서 오래된 것부터 버린다)
+      r.abs.add(abs);
+      if (r.abs.size > FILE_REFS_MAX) r.abs.delete(r.abs.values().next().value);
+    }
+  }
+  r.upto = head;
+  return r;
+}
+
+async function fileOf(p) {
+  const thread = need(p.threadId);
+  const raw = typeof p.path === 'string' ? p.path.trim() : '';
+  if (!raw || raw.length > FILE_PATH_MAX || raw.includes('\0')) throw coded('BAD_REQUEST', '파일 경로(path)가 필요합니다');
+  const refs = refsOf(thread);
+  // 클라는 화면에 보인 원문을 그대로 보낸다 — 원문이 어느 기준의 상대 경로인지 모르므로 두 기준을 다 대 본다.
+  const cwdAbs = absOf(thread);
+  const abs = [refAbs(raw, 'cwd', cwdAbs), refAbs(raw, 'root', cwdAbs)].find((a) => a && refs.abs.has(a));
+  if (!abs) return { missing: true, reason: 'not_referenced' };
+  try { fsLib().safeResolve(abs); } catch (_) { return { missing: true, reason: 'outside' } } // jail 밖·심링크 탈출
+  let fh = null;
+  try {
+    fh = await fsp.open(abs, 'r');
+    const st = await fh.stat(); // 연 핸들로 잰다 — 검사와 읽기 사이에 파일이 바뀌어도 읽는 것은 잰 그 파일이다
+    if (!st.isFile()) return { missing: true, reason: 'not_found' };
+    if (st.size > FILE_MAX) return { missing: true, reason: 'too_large', bytes: st.size };
+    const buf = Buffer.alloc(st.size);
+    let off = 0;
+    while (off < st.size) {
+      const { bytesRead } = await fh.read(buf, off, st.size - off, off);
+      if (!bytesRead) break;
+      off += bytesRead;
+    }
+    return { mediaType: fileMimeOf(abs), base64: buf.subarray(0, off).toString('base64'), bytes: off, name: path.basename(abs) };
+  } catch (_) {
+    return { missing: true, reason: 'not_found' };
+  } finally {
+    if (fh) { try { await fh.close(); } catch (_) { /* noop */ } }
+  }
+}
+
 // ── 목록 ─────────────────────────────────────────────────────────────────────
 async function externalThreads(rel, abs, limit) {
   const out = [];
@@ -1148,12 +1299,13 @@ const HANDLERS = {
     if (proc) await stopProc(proc, 'removed');
     else if (leaving.has(id)) await leaving.get(id);
     const had = store.removeThread(id); // 에이전트의 세션 파일은 건드리지 않는다
-    viewers.delete(id); healed.delete(id);
+    viewers.delete(id); healed.delete(id); fileRefs.delete(id);
     if (had) push({ control: { kind: 'deleted', threadId: id } });
     return { ok: true };
   },
 
   'conv.detail': detail,
+  'conv.file': fileOf,
 
   async 'conv.commands'(p) {
     let thread = null;
@@ -1285,7 +1437,7 @@ async function _reset() {
   const procs = [...live.values()];
   for (const p of procs) p.stopReason = p.stopReason || 'reset';
   await Promise.all(procs.map((p) => (p.exited ? null : p.engine.stop({ graceMs: 200 }).catch(() => {}))));
-  live.clear(); leaving.clear(); sending.clear(); creating.clear(); viewers.clear(); healed.clear(); catalog.clear();
+  live.clear(); leaving.clear(); sending.clear(); creating.clear(); viewers.clear(); healed.clear(); catalog.clear(); fileRefs.clear();
   pushWs = null;
   deps = { ...defaults };
   timings = { ...DEFAULT_TIMINGS };
@@ -1297,7 +1449,7 @@ module.exports = {
   CAP, MAX_LIVE, ERROR_CODES,
   configure, start, stop, shutdown, shutdownSync, detachAll, rpc,
   _internals: {
-    live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, publicThread, terminalOf,
+    live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, publicThread, terminalOf, usageOf, refsOfEvent,
     _reset,
     get timings() { return timings; },
   },

@@ -18,6 +18,7 @@
  *   fail            실패로 끝나는 턴(is_error)
  *   die             턴 도중 비정상 종료(exit 3 + stderr)
  *   diereq          승인 요청을 낸 채 비정상 종료
+ *   rate <status>   rate_limit_event(status, 5시간 창 utilization 0.91) 를 낸 뒤 평범한 응답
  *
  * 환경변수:
  *   FAKE_ARGS_LOG        기동 인자·환경 일부를 한 줄 JSON 으로 덧붙일 파일
@@ -278,6 +279,13 @@ async function turn(u) {
       await sleep(80);
       process.stderr.write('fatal: crashed while waiting\n');
       process.exit(4);
+      return;
+    }
+    case 'rate': {
+      out({ type: 'rate_limit_event', rate_limit_info: { status: arg || 'allowed', resetsAt: 1790702400, rateLimitType: 'five_hour',
+        unifiedWindows: { five_hour: { utilization: 0.91, resetsAt: 1790702400 } } }, uuid: uid(), session_id: sessionId });
+      await message([{ type: 'text', text: '응답' }]);
+      result('응답');
       return;
     }
     default: {

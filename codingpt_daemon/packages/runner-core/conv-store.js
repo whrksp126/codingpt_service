@@ -334,6 +334,13 @@ function since(id, sinceSeq, { limit } = {}) {
   return { events, headSeq: c.headSeq, more: cut < c.headSeq };
 }
 
+/** seq 초과 이벤트(접지 않은 원본 순서) — conv.file 의 참조 경로 색인이 이어서 훑을 때 쓴다. 고치지 말 것(공유 배열의 원소). */
+function eventsAfter(id, seq) {
+  const c = load(id);
+  const s = Number.isInteger(seq) && seq > 0 ? seq : 0;
+  return c.events.slice(lastIndexBelow(c, s + 1) + 1);
+}
+
 /** 열린 턴·대기 요청 — 데몬이 비정상 종료한 뒤 남은 미결을 conv.js 가 닫을 때 쓴다. */
 function dangling(id) {
   const c = load(id);
@@ -392,7 +399,7 @@ module.exports = {
   configure, dir, logFile,
   getThread, listThreads, putThread, patchThread, removeThread, flushSync,
   append, appendMany, headSeq, latestOf, hasUuid, countKeys,
-  open, before, since, dangling, prune, keyOf,
+  open, before, since, eventsAfter, dangling, prune, keyOf,
   RETAIN_MS, FRAME_BUDGET, PAGE_DEFAULT, PAGE_MAX,
   _reset, _cache: cache,
 };

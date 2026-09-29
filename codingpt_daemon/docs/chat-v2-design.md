@@ -95,7 +95,7 @@ claude -p --input-format stream-json --output-format stream-json --verbose
   headSeq,       // 마지막 영속 이벤트 seq
   pending,       // 대기 중 요청 수
   preview,       // 마지막 assistant 텍스트 앞 120자
-  usage,         // { contextTokens, contextMax, costUsd } (있으면)
+  usage,         // { contextTokens, contextMax, contextPct, costUsd, model, rateLimit? } (있으면, §4.5)
   external,      // true = 우리 로그가 아직 없는 에이전트 세션(터미널에서 만든 대화)
 }
 ```
@@ -229,6 +229,7 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
 | `conv.stop` | `{ threadId }` | `{ ok }` (프로세스만 내림. 대화는 남는다) |
 | `conv.remove` | `{ threadId }` | `{ ok }` (우리 로그·목록에서 제거. 에이전트의 세션 파일은 건드리지 않는다) |
 | `conv.detail` | `{ threadId, key }` | `{ text, raw? }` |
+| `conv.file` | `{ threadId, path }` | `{ mediaType, base64, bytes, name }` \| `{ missing:true, reason, bytes? }` (§4.5) |
 | `conv.commands` | `{ threadId?, cwd? }` | `{ items:[{name,desc}] }` |
 | `conv.toTerminal` | `{ threadId }` | `{ ok, cwd, agent, command, args }` (§6) |
 | `conv.adopt` | `{ cwd, tid }` | `{ thread }` (§6) |
@@ -255,7 +256,7 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
   PC 미연결 409, 그 외 데몬 오류 전부 500. **클라는 상태가 아니라 `detail.code` 로 분기한다**
   (기존 클라가 409 를 "PC 끊김"으로 읽으므로 데몬 오류에 409 를 쓰지 않는다).
 - 데몬은 오류 시 `rpc_result` 에 `code` 를 실어야 한다.
-- 클라 HTTP 타임아웃 = back 값 + 5초(create/send/open/adopt/toTerminal 35초, 나머지 20초).
+- 클라 HTTP 타임아웃 = back 값 + 5초(create/send/open/adopt/toTerminal/file 35초, 나머지 20초).
   타임아웃 뒤에도 데몬이 성공했을 수 있다 → 재시도는 반드시 같은 `clientId`.
 - 응답 크기: 데몬은 `conv.open`/`since`/`before` 응답을 **512KB 예산**으로 자른다(넘으면 개수를 줄이고
   `more:true`/`floorSeq` 로 이어받기). 앞단 Cloudflare 의 413/524 이력 때문.
@@ -329,14 +330,34 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
 
 ### 4.5 파일 바이트·사용량 (2026-09-30 2차)
 
-- `conv.file {threadId, path}` → `{mediaType, base64, bytes, name}` | `{missing:true, reason}`.
-  - 허용 경로 = **그 대화의 이벤트에 등장한 경로만**: 사용자 첨부(`[첨부] <경로>` 줄·attachments), 도구 입력의
-    파일 경로(tool.path·argsPreview), 어시스턴트 본문의 마크다운 이미지·링크 대상. 상대 경로는 thread.cwd 기준.
-    `fs.safeResolve` jail 을 통과해야 하고 심링크 탈출 거부. 그 외는 `{missing:true, reason:'not_referenced'}`.
-  - 상한 8MB(넘으면 `{missing:true, reason:'too_large', bytes}`). mediaType 은 확장자로.
+- `conv.file {threadId, path}` → `{mediaType, base64, bytes, name}` | `{missing:true, reason, bytes?}`.
+  - 허용 경로 = **그 대화의 이벤트에 등장한 경로만**: 사용자 첨부(`msg.attachments[].path` · 사용자 본문의 `[첨부] <경로>` 줄),
+    도구 입력의 파일 경로(`tool.path` · `tool.argsPreview` 안의 `/…`·`~/…` 토큰), 어시스턴트 본문의 마크다운 이미지·링크 대상
+    (`![a](t)` `[a](t)` `[a](<공백 있는 경로>)`, `http(s):` 등 URL 제외, `file://`·`#조각` 허용).
+  - 기준: 본문·첨부의 상대 경로는 thread.cwd 기준, `tool.path` 는 홈(jail 루트) 기준(`fs.relOf` 가 만든 값이라서).
+    클라는 **화면에 보인 원문 그대로** 보낸다 — 데몬이 두 기준으로 풀어 보고 참조된 절대경로와 맞으면 허용한다
+    (`../ws/a.png` 처럼 표기가 달라도 같은 파일이면 허용).
+  - 그 뒤 `fs.safeResolve` jail(realpath 로 심링크 탈출 거부)을 통과해야 한다. **v1 `chat.file` 과 달리 홈 밖
+    (`/var/folders` 의 스크린샷 등)은 참조돼 있어도 거절**한다.
+  - `reason`: `not_referenced`(참조 안 됨·URL) · `outside`(jail 밖·심링크 탈출) · `not_found`(없음·디렉터리) ·
+    `too_large`(8MB 초과, `bytes` 동봉). 예외(`code`)는 `BAD_REQUEST`(path 없음) · `THREAD_NOT_FOUND` 뿐 —
+    나머지는 클라가 "왜 안 보이는지" 표시할 수 있게 값으로 준다.
+  - 상한 8MB. mediaType 은 확장자로(모르면 `application/octet-stream`). 참조 색인은 데몬 메모리에 thread 별로 증분 유지.
   - back 허용 표에 추가(타임아웃 30초, 클라 35초).
 - `thread.usage` = `{ contextTokens, contextMax, contextPct, costUsd, model }` — 턴 끝(result)과 assistant 메시지의
   usage 로 갱신. contextPct 는 0~100 정수. 클라는 컴포저 아래 한 줄로 "모델 · 컨텍스트 n%" 를 보인다(PC·앱 동일).
+  - `contextTokens` = **마지막 API 호출 하나**의 input + cache_read + cache_creation + output(메인 세션만, 서브에이전트 제외).
+    `result.usage` 는 턴 안 호출들의 **합계**라 쓰지 않는다(실측: 호출 3번이면 3배). output 최종값은 `message_delta.usage`.
+  - `contextMax` = `result.modelUsage[<메인 모델>].contextWindow`(실측 존재, 예 1000000). 없으면 null — 모델 id 로 추정하지
+    않는다. 모델이 바뀌면 다음 result 전까지 null(→ contextPct 도 null). `costUsd` = `result.total_cost_usd`(세션 누적).
+  - 턴 중간의 갱신은 `thread` 힌트로만 알리고(로그에 안 남긴다), 턴 끝에 값이 바뀌었으면 `state` 이벤트에 `usage` 를 남긴다.
+  - `rateLimit?` = `{ status, kind, resetsAt, utilization, blocked }` — 마지막 `rate_limit_event`(실측: 턴마다 `status:'allowed'`,
+    `kind` 예 `five_hour`, `utilization` 0~1 = `unifiedWindows[kind].utilization`, `resetsAt` epoch 초). 이벤트가 온 적 없으면 키 없음.
+    **`blocked` 는 `status` 가 `'rejected'` 이거나 `'allowed'` 로 시작하지 않을 때만 true.** 경고(`allowed_warning` 등)는
+    차단이 아니다(응답은 정상 완료) — 안내 없이 여기에만 싣는다(클라가 원하면 표시). `notice(RATE_LIMITED)` 는 실제 차단일 때만,
+    같은 차단(같은 kind·resetsAt)이 이어지면 한 번만(실기 검증 2026-09-30: 경고를 한도 도달로 안내했던 오류 수정).
+- 완료 알림(`conv_done`)의 폰 표시 본문 = `「<워크스페이스>」에서 완료 · <답변 앞 80자>`(back `notificationService` 가 조합 —
+  subtitle 뒤에 body 를 붙인다. 다른 kind 는 예전처럼 subtitle 만). 저장·인앱 목록의 body 는 자르지 않는다.
 - 사용자 첨부는 보낸 버블에 **칩**(이미지면 썸네일)으로 보인다. 썸네일 바이트는 `conv.file`.
   클라는 본문의 `[첨부] <경로>` 줄을 본문에서 떼어 칩으로 그린다.
 - 에이전트 선택: `conv.caps.agents` 중 `available` 이 2개 이상일 때만 새 대화 화면에 선택 줄을 보인다(지금은 claude 1개 → 숨김).
@@ -416,7 +437,7 @@ back 은 모든 프레임에 `hostDeviceId`(프레임이 온 PC)를 붙인다 �
 
 - `config/caps.js`: `conv.v1` (킬스위치 `CONV_ENABLED`).
 - `POST /api/daemon/conv` (`accountAuth`, `connOptsOf(req)` 로 멀티 PC 지정). 허용 표 = §4 의 메서드.
-  타임아웃: create/send/open/adopt/toTerminal 30초, 나머지 15초.
+  타임아웃: create/send/open/adopt/toTerminal/file 30초, 나머지 15초.
 - `daemonRelayService`: `conv_event` → `fanoutConvEvent`(화이트리스트: threadId, headSeq, events, delta, thread, control).
   버퍼·알림 없음. SSE 폴백 포함.
 - 알림 생성 시 `threadId` 통과.

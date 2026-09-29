@@ -1274,7 +1274,7 @@ async function autoRpc(req, res) {
 // POST /api/daemon/conv  body:{ method, params, hostDeviceId } — 채팅 v2(conv.*) 평문 REST.
 //  정본 계약 = codingpt_daemon/docs/chat-v2-design.md §4·§8. autoRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로,
 //  검증은 데몬 conv.js 가 전부). 본문(text/attachments/answers)은 로그에 남기지 않는다.
-//  · 타임아웃: create/send/open/adopt/toTerminal 30초(프로세스 기동·가져오기·TUI 종료 대기), 나머지 15초.
+//  · 타임아웃: create/send/open/adopt/toTerminal 30초(프로세스 기동·가져오기·TUI 종료 대기), file 30초(최대 8MB 바이트, §4.5), 나머지 15초.
 //  · 킬스위치 CONV_ENABLED=0 → caps 에서 conv.v1 이 빠지고 여기도 403 {code:'CONV_DISABLED'}(한 소스: SERVER_CAPS).
 //  · 오류 code 는 body.detail.code 로 그대로 전달한다(클라는 문구가 아니라 code 로 분기 — 설계 §4).
 //    데몬이 code 를 안 실은 실패는 CONV_ERROR, 릴레이 타임아웃은 TIMEOUT, 데몬 미연결은 DAEMON_OFFLINE.
@@ -1284,7 +1284,7 @@ const CONV_RPC_OK = new Map([
   ['conv.caps', 15000], ['conv.list', 15000], ['conv.create', 30000], ['conv.open', 30000], ['conv.since', 15000],
   ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.set', 15000],
   ['conv.stop', 15000], ['conv.remove', 15000], ['conv.detail', 15000], ['conv.commands', 15000],
-  ['conv.toTerminal', 30000], ['conv.adopt', 30000],
+  ['conv.toTerminal', 30000], ['conv.adopt', 30000], ['conv.file', 30000],
 ]);
 function convEnabled() { return SERVER_CAPS.includes('conv.v1'); }
 async function convRpc(req, res) {

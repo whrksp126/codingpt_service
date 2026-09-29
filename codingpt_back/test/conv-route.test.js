@@ -29,7 +29,7 @@ const DESIGN_TABLE = [
   ['conv.caps', 15000], ['conv.list', 15000], ['conv.create', 30000], ['conv.open', 30000], ['conv.since', 15000],
   ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.set', 15000],
   ['conv.stop', 15000], ['conv.remove', 15000], ['conv.detail', 15000], ['conv.commands', 15000],
-  ['conv.toTerminal', 30000], ['conv.adopt', 30000],
+  ['conv.toTerminal', 30000], ['conv.adopt', 30000], ['conv.file', 30000],
 ];
 // 설계 §4 오류 코드(§6.1 의 THREAD_BUSY 포함).
 const DESIGN_CODES = ['CONV_DISABLED', 'AGENT_UNAVAILABLE', 'AGENT_NOT_LOGGED_IN', 'THREAD_NOT_FOUND',
@@ -113,7 +113,7 @@ async function withControl(fn, deviceId = 41) {
 test('허용 표 = 설계 §4 표 + §8 타임아웃(메서드 집합·순서·값 전부)', () => {
   assert.deepStrictEqual([...daemonController._CONV_RPC_OK.entries()], DESIGN_TABLE);
   const slow = DESIGN_TABLE.filter(([, ms]) => ms === 30000).map(([m]) => m).sort();
-  assert.deepStrictEqual(slow, ['conv.adopt', 'conv.create', 'conv.open', 'conv.send', 'conv.toTerminal']);
+  assert.deepStrictEqual(slow, ['conv.adopt', 'conv.create', 'conv.file', 'conv.open', 'conv.send', 'conv.toTerminal']);
   assert.ok(DESIGN_TABLE.every(([, ms]) => ms === 15000 || ms === 30000));
 });
 
@@ -444,6 +444,23 @@ test('알림 threadId: 데몬이 준 deeplink·push.data 는 보존하고 thread
   assert.strictEqual(p.deeplink, 'codingpt://conv/' + THREAD + '?host=12');
   assert.deepStrictEqual(p.data, { hostDeviceId: '12', threadId: THREAD });
   assert.strictEqual(p.channelId, 'codingpt_default');
+});
+
+test('완료 알림(conv_done) FCM 본문 = "「ws」에서 완료 · <답변 앞 80자>", 다른 kind 는 그대로', async () => {
+  const long = '가'.repeat(100);
+  const r = await createWith({ source: 'agent', kind: 'conv_done', title: 'AI', subtitle: '「codingpt」에서 완료', body: long, threadId: THREAD });
+  assert.strictEqual(r.pushes[0].p.body, `「codingpt」에서 완료 · ${'가'.repeat(80)}…`);
+  assert.strictEqual(r.rows[0].body, long, '저장·인앱 본문은 자르지 않는다');
+  const short = await createWith({ source: 'agent', kind: 'conv_done', title: 'AI', subtitle: '「p」에서 완료', body: '끝났습니다.\n다음은', threadId: THREAD });
+  assert.strictEqual(short.pushes[0].p.body, '「p」에서 완료 · 끝났습니다. 다음은');
+  // 미리보기 없음 = subtitle 만
+  const bare = await createWith({ source: 'agent', kind: 'conv_done', title: 'AI', subtitle: '「p」에서 완료', threadId: THREAD });
+  assert.strictEqual(bare.pushes[0].p.body, '「p」에서 완료');
+  // 다른 kind 는 예전 규칙(subtitle 우선, 없으면 body 앞 120자) 그대로
+  const req = await createWith({ source: 'agent', kind: 'conv_request', title: 'AI', subtitle: '「p」에서 승인 대기', body: 'src/a.ts', threadId: THREAD });
+  assert.strictEqual(req.pushes[0].p.body, '「p」에서 승인 대기');
+  assert.strictEqual(notificationService._pushBodyOf('done', null, 'x'.repeat(200)), 'x'.repeat(120));
+  assert.strictEqual(notificationService._pushBodyOf('conv_done', null, 'body'), 'body');
 });
 
 test('알림 threadId 없음 = 기존과 완전히 동일(회귀 0)', async () => {

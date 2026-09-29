@@ -962,3 +962,104 @@ test('다른 곳에서 방금 쓰인 세션에는 프로세스를 띄우지 않�
   assert.match(src.slice(at, at + 900), /Math\.max\(released\.get\(thread\.id\) \|\| 0, Number\(thread\.lastAt\) \|\| 0\)/);
   assert.match(src.slice(at, at + 900), /THREAD_BUSY_IN_TERMINAL/);
 });
+
+// ── 사용량(§4.5) ─────────────────────────────────────────────────────────────
+test('thread.usage — 컨텍스트·창 크기·퍼센트·비용·모델, 바뀌면 thread 힌트로 알린다', async () => {
+  const { id } = await start('say 사용량');
+  await waitTurnEnd(id);
+  const t = (await rpc('conv.open', { threadId: id })).thread;
+  // 가짜 CLI: 호출마다 input 10 + cache_read 1000 + cache_creation 100 + output 20, 창 200000, 누적 비용 0.01
+  assert.deepStrictEqual(t.usage, { contextTokens: 1130, contextMax: 200000, contextPct: 1, costUsd: 0.01, model: 'fake-model-1' });
+  await waitFor(() => frames.some((f) => f.threadId === id && f.thread && f.thread.usage && f.thread.usage.contextPct === 1), 2000, 'usage 힌트');
+  const st = eventsOf(id).filter((e) => e.op === 'state' && e.usage);
+  assert.strictEqual(st.length, 1, '턴 끝에 한 번만 로그에 남긴다');
+});
+
+test('usageOf — 앞 값을 잇고, 모델이 바뀌면 앞 모델의 창 크기를 버린다', () => {
+  const U = conv._internals.usageOf;
+  const a = U(null, { contextTokens: 50000, contextMax: 200000, costUsd: 0.1, model: 'm1' });
+  assert.deepStrictEqual(a, { contextTokens: 50000, contextMax: 200000, contextPct: 25, costUsd: 0.1, model: 'm1' });
+  const b = U(a, { contextTokens: 60000, model: 'm1' }); // 턴 중간(창 크기·비용 없음)
+  assert.deepStrictEqual(b, { contextTokens: 60000, contextMax: 200000, contextPct: 30, costUsd: 0.1, model: 'm1' });
+  const c = U(b, { contextTokens: 1000, model: 'm2' });
+  assert.strictEqual(c.contextMax, null);
+  assert.strictEqual(c.contextPct, null);
+  assert.strictEqual(U(a, { contextTokens: 999999, contextMax: 200000 }).contextPct, 100, '0~100 으로 자른다');
+});
+
+// ── 파일 바이트(conv.file, §4.5) ─────────────────────────────────────────────
+test('conv.file — 대화에 등장한 경로만, jail 안에서만, 8MB 까지', async () => {
+  const OUT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-conv-out-')));
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  fs.writeFileSync(path.join(WS, 'shot.png'), png);
+  fs.writeFileSync(path.join(WS, 'other.png'), png);
+  fs.mkdirSync(path.join(WS, 'sub'), { recursive: true });
+  fs.writeFileSync(path.join(WS, 'sub', 'doc.txt'), 'doc');
+  fs.writeFileSync(path.join(ROOT, 'secret.txt'), 'secret');
+  fs.writeFileSync(path.join(OUT, 'x.png'), png);
+  try { fs.unlinkSync(path.join(WS, 'link.png')); } catch (_) { /* noop */ }
+  fs.symlinkSync(path.join(OUT, 'x.png'), path.join(WS, 'link.png'));
+  const big = path.join(WS, 'big.bin');
+  fs.writeFileSync(big, Buffer.alloc(8 * 1024 * 1024 + 1));
+  const att = path.join(WS, 'att.jpg');
+  fs.writeFileSync(att, Buffer.from('jpegbytes'));
+
+  const { id } = await start(`say ![s](shot.png) [d](<sub/doc.txt>) ![o](${OUT}/x.png) ![l](link.png) [b](big.bin) [w](https://example.com/a.png) ![g](gone.png)`,
+    { attachments: [{ path: att, name: 'att.jpg' }] });
+  await waitTurnEnd(id);
+  const file = (p) => rpc('conv.file', { threadId: id, path: p });
+
+  // 성공 — 어시스턴트 본문의 링크(상대 = thread.cwd 기준), 같은 파일의 절대경로·홈 상대 표기도 같은 파일이다
+  const ok = await file('shot.png');
+  assert.deepStrictEqual(ok, { mediaType: 'image/png', base64: png.toString('base64'), bytes: png.length, name: 'shot.png' });
+  assert.strictEqual((await file(path.join(WS, 'shot.png'))).name, 'shot.png');
+  assert.strictEqual((await file('ws/shot.png')).name, 'shot.png');
+  assert.strictEqual((await file('../ws/shot.png')).name, 'shot.png', '정규화해 같은 파일이면 허용');
+  assert.strictEqual((await file('sub/doc.txt')).mediaType, 'text/plain');
+  // 사용자 첨부([첨부] 줄·attachments)
+  const a = await file(att);
+  assert.strictEqual(a.mediaType, 'image/jpeg');
+  assert.strictEqual(Buffer.from(a.base64, 'base64').toString(), 'jpegbytes');
+
+  // 거절
+  assert.deepStrictEqual(await file('other.png'), { missing: true, reason: 'not_referenced' }, '있는 파일이어도 참조 안 됐으면 거절');
+  assert.deepStrictEqual(await file('../secret.txt'), { missing: true, reason: 'not_referenced' }, '상대 경로로 위로 올라가도 참조 안 됐으면 거절');
+  assert.deepStrictEqual(await file(path.join(ROOT, 'secret.txt')), { missing: true, reason: 'not_referenced' });
+  assert.deepStrictEqual(await file(`${OUT}/x.png`), { missing: true, reason: 'outside' }, '참조됐어도 jail 밖은 거절');
+  assert.deepStrictEqual(await file('link.png'), { missing: true, reason: 'outside' }, '심링크로 jail 탈출 거절');
+  assert.deepStrictEqual(await file('big.bin'), { missing: true, reason: 'too_large', bytes: 8 * 1024 * 1024 + 1 });
+  assert.deepStrictEqual(await file('gone.png'), { missing: true, reason: 'not_found' });
+  assert.deepStrictEqual(await file('https://example.com/a.png'), { missing: true, reason: 'not_referenced' }, 'URL 은 데몬이 읽지 않는다');
+  await assert.rejects(() => file(''), (e) => e.code === 'BAD_REQUEST');
+  await assert.rejects(() => rpc('conv.file', { threadId: 'nope', path: 'shot.png' }), (e) => e.code === 'THREAD_NOT_FOUND');
+
+  // 나중에 등장한 경로도 색인이 따라간다(증분) — 도구 입력의 파일 경로(tool.path)
+  assert.deepStrictEqual(await file('ws/made.png'), { missing: true, reason: 'not_referenced' });
+  await rpc('conv.send', { threadId: id, clientId: cid(), text: 'write made.png' });
+  const ev = await waitReq(id);
+  await rpc('conv.respond', { threadId: id, reqId: ev.req.id, decision: 'allow' });
+  await waitTurnEnd(id, 2);
+  const made = await file('ws/made.png');
+  assert.strictEqual(made.name, 'made.png');
+  assert.strictEqual(Buffer.from(made.base64, 'base64').toString(), 'hello\n');
+  fs.rmSync(OUT, { recursive: true, force: true });
+});
+
+test('사용 한도 경고 — 안내 없이 thread.usage.rateLimit 에만, 실제 차단은 안내 1회', async () => {
+  const { id } = await start('rate allowed_warning');
+  await waitTurnEnd(id);
+  const notices = () => eventsOf(id).filter((e) => e.op === 'notice' && e.code === 'RATE_LIMITED');
+  assert.strictEqual(notices().length, 0, '경고는 한도 도달 안내가 아니다');
+  let t = (await rpc('conv.open', { threadId: id })).thread;
+  assert.deepStrictEqual(t.usage.rateLimit, { status: 'allowed_warning', kind: 'five_hour', resetsAt: 1790702400, utilization: 0.91, blocked: false });
+  assert.strictEqual(t.usage.contextTokens, 1130, '다른 사용량 필드는 그대로');
+  assert.ok(frames.some((f) => f.threadId === id && f.thread && f.thread.usage && f.thread.usage.rateLimit), '힌트로 알린다');
+
+  await rpc('conv.send', { threadId: id, clientId: cid(), text: 'rate rejected' });
+  await waitTurnEnd(id, 2);
+  await rpc('conv.send', { threadId: id, clientId: cid(), text: 'rate rejected' });
+  await waitTurnEnd(id, 3);
+  assert.strictEqual(notices().length, 1, '같은 차단이 이어져도 안내는 한 번');
+  t = (await rpc('conv.open', { threadId: id })).thread;
+  assert.strictEqual(t.usage.rateLimit.blocked, true);
+});
