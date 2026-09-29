@@ -111,6 +111,14 @@
 //                   `runner_busy {busy, awake}` 수신 + 끊김 90초 유예 뒤 `pc_disconnected` 푸시(daemonRelayService).
 //                   auto.v1 은 F2 의 task.run.fix / task.run.followup.dismiss(TASK_RPC_OK 경유)도 광고한다.
 //                   킬스위치: AUTOMATIONS_ENABLED=0 → auto.v1, DISPATCH_ENABLED=0 → dispatch.v1, POWER_ENABLED=0 → power.v1.
+//
+//  · conv.v1      — 채팅 v2(구조화 대화 엔진, 정본 = codingpt_daemon/docs/chat-v2-design.md §8).
+//                   서버측 = POST /api/daemon/conv 평문 REST(daemonController.convRpc, 허용 표 CONV_RPC_OK)
+//                   + 제어 WS `conv_event` 라이브 팬아웃(daemonRelayService.fanoutConvEvent — 버퍼·알림 없음,
+//                   chat_event 와 같은 규율) + 알림 생성 입력의 threadId 통과(notificationService).
+//                   transcript.v1(채팅 v1 = 터미널 TUI 읽기 뷰)과 **별개 능력**이다 — 한쪽을 꺼도 다른 쪽은 그대로.
+//                   CONV_ENABLED=0 으로 회수 — 선언과 함께 convRpc 가 403(CONV_DISABLED) 으로 닫히고
+//                   conv_event 프레임도 중계하지 않는다(한 소스: SERVER_CAPS).
 
 // env 값이 명시적으로 꺼져 있는가('0'|'false'|'off'). 미설정 = 켜짐(기본값).
 function envOff(v) {
@@ -127,6 +135,7 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.DISPATCH_ENABLED)) caps.push('dispatch.v1');
   if (!envOff(env.AUTOMATIONS_ENABLED)) caps.push('auto.v1');
   if (!envOff(env.POWER_ENABLED)) caps.push('power.v1');
+  if (!envOff(env.CONV_ENABLED)) caps.push('conv.v1');
   if (!envOff(env.E2EE_ENABLED)) {
     caps.push('e2ee.keys.v1');
     caps.push('e2ee.rpc.v1');

@@ -3,7 +3,7 @@
 > 이 문서는 **"지금 실제로 만들어져 동작하는 것"**을 정리한 핸드오프 문서다(로드맵 아님).
 > 원래 설계 정본은 [`byo-pc-design.md`](./byo-pc-design.md)(2026-07 초기 설계 — 와이어 기초·ToS 경계).
 > 영역별 상세 정본은 §4 "핵심 파일" 옆에 적은 설계 문서를 본다.
-> 최종 갱신: 2026-09-29.
+> 최종 갱신: 2026-09-30.
 
 **현재 버전(2026-09-29)**: PC 앱 **0.1.369**(데몬 사이드카 포함) · Android **0.4.17** 게시 / 0.4.18(87) 심사 중 ·
 iOS **0.4.4** 게시 / 0.4.5 핫픽스 심사 대기 / 0.4.6(build 50) 제출 대기 · back/front 는 버전 없음(항상 main HEAD 배포).
@@ -43,8 +43,8 @@ iOS **0.4.4** 게시 / 0.4.5 핫픽스 심사 대기 / 0.4.6(build 50) 제출 �
   `/api/daemon/connect`, dial-back 스트림 `/api/daemon/stream/:token`(kind `pty`|`tcp`|…), UI 클라이언트 WSS 팬아웃
   (알림·승인·채팅·`ui_command`·`runner_status`). WS 업그레이드는 `app.js` 단일 핸들러.
 - **capability 협상**: 게이팅 = 데몬 caps ∩ `SERVER_CAPS`(`config/caps.js`) ∩ 기기 caps. 버전 문자열은 표시용.
-  현재 서버 능력: `caps.v1 approval.v1 transcript.v1 agentstate.v1 e2ee.keys.v1 e2ee.rpc.v1 e2ee.hint.v1 e2ee.snap.v1 e2ee.stream.v1 task.v1 lan.v1`
-  (각각 env 킬스위치로 회수 가능 — `APPROVAL_ENABLED`·`TRANSCRIPT_ENABLED`·`E2EE_ENABLED`·`TASKS_ENABLED`·`LAN_DIRECT_ENABLED`).
+  현재 서버 능력: `caps.v1 approval.v1 transcript.v1 agentstate.v1 e2ee.keys.v1 e2ee.rpc.v1 e2ee.hint.v1 e2ee.snap.v1 e2ee.stream.v1 task.v1 lan.v1 conv.v1`
+  (각각 env 킬스위치로 회수 가능 — `APPROVAL_ENABLED`·`TRANSCRIPT_ENABLED`·`E2EE_ENABLED`·`TASKS_ENABLED`·`LAN_DIRECT_ENABLED`·`CONV_ENABLED`).
   클라이언트는 `ui_hello.uiCmds` 로 실행 가능한 명령을 신고하고 서버는 그 기기에만 `ui_command` 를 보낸다(미신고=모름=가능).
 - **E2EE**: 계정 마스터키를 기기 승인(안전코드 대조)으로 배포, RPC·스트림·스냅샷을 봉투로 봉인. 경로는
   `POST /api/daemon/rpc`(봉인 RPC, **서버는 봉투를 열지 않음**) 우선 + REST 평문 폴백. 열쇠 없는 PC 는
@@ -131,6 +131,7 @@ iOS **0.4.4** 게시 / 0.4.5 핫픽스 심사 대기 / 0.4.6(build 50) 제출 �
 | 원격 승인 | claude/codex `PermissionRequest` 훅 → `approval.v1` 인박스 → PC·폰 카드 + 푸시. 선택지는 TUI 와 같은 번호·순서, "항상 허용" 은 `updatedPermissions` 로 실제 기록, 코멘트 입력은 화면에 어포던스가 있을 때만 |
 | TUI 폴백 화해 | 훅이 끊긴 뒤 TUI 에만 남은 질문/권한 다이얼로그를 화면 파싱으로 카드 복원(`question-revive.js`) |
 | 채팅 | 채팅 = TUI 의 미러. claude jsonl / codex rollout 트랜스크립트 어댑터(`transcript.js`), GFM 표·도구행 접기, 컴포저=로컬 contenteditable+원자 칩, 이미지·파일 첨부(TUI `[Image #N]` 동기화), 슬래시 팔레트, 모드 알약(shift+tab 대행) |
+| 채팅 v2 (**구현 중**, 2026-09-30) | 에이전트 CLI 를 공식 구조화 프로토콜(stream-json)로 직접 구동하는 새 "채팅" 탭 — 토큰 스트리밍·도달 확인·승인/질문이 데이터로 온다. 기존 채팅(TUI 미러, `transcript.v1`)은 터미널 탭의 토글로 유지. **back 쪽만 완료**: `POST /api/daemon/conv`(`CONV_RPC_OK` 허용 표 16종, create/send/open/adopt/toTerminal 30초·나머지 15초, 오류는 `detail.code`) · 제어 WS `conv_event` → `fanoutConvEvent`(라이브 중계만, 버퍼·알림 없음, 필드 화이트리스트 + `hostDeviceId`) · 알림 `threadId` 통과(컬럼 무추가 — `session_id` 에 `conv:` 접두, FCM data·딥링크 `thread=`) · caps `conv.v1`(킬스위치 `CONV_ENABLED`). 데몬(`conv.js`)·PC·앱은 미완. 봉인 RPC 는 서버 무수정으로 통한다. 정본 `codingpt_daemon/docs/chat-v2-design.md` |
 | 상태줄 | claude statusLine stdin JSON / codex rollout `token_count` 공식 채널로 컨텍스트%·모델·레이트리밋 표시(`status-line.js`, 사용자 statusline 스크립트 체인) |
 | cpt 스킬 | `~/.claude/skills`·`.agents/skills` 에 스텁 설치 → 에이전트가 `cpt` 를 스스로 사용. 워크스페이스 밖(OUT_OF_CONTEXT)에서는 무동작 |
 
@@ -250,6 +251,7 @@ iOS **0.4.4** 게시 / 0.4.5 핫픽스 심사 대기 / 0.4.6(build 50) 제출 �
 - **스냅샷/동기화 UI**: 엔진(`sync.js`)은 있으나 UI 잠정 숨김(MVP = 단일 PC + 모바일 안정화).
 - **LAN 직결**: 서버 스위치 기본 꺼짐, scope 단계 개방. 같은 사설망에서만 동작, 외부는 릴레이(영상은 WebRTC).
 - **surface REST**(`/api/daemon/surface`)는 dev 우선 배포 이력 — 폰은 봉인 RPC 우선이라 동작하지만 평문 폴백 경로는 환경별 확인 필요.
+- **채팅 v2**: back 배관만 있다(`conv.v1`). 데몬 엔진·PC/앱 채팅 탭이 들어오기 전까지 교집합이 비어 화면에는 아무 변화가 없다. `conv_event` 는 평문 중계(봉인은 후속).
 - **모바일 버전 스큐**: 스토어 심사로 모바일이 늘 뒤처진다(현재 iOS 가 Android 보다 뒤). 신기능은 caps 로 숨겨진다.
 - **알려진 CI 실패**: 데몬 Windows 경로 테스트 일부, PC emulator-crossimpl 일부(기존 실패). PC i18n 번역 누락 일부.
 - 레슨·TTS 는 레거시(어드민 전용), BYO 제품과 무관.

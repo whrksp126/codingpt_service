@@ -45,6 +45,8 @@ const OPTIONAL_CAPS = [
   ['auto.v1', './automations', 'handle'],
   ['dispatch.v1', './dispatch', 'handle'],
   ['power.v1', './power', 'handle'],
+  // 채팅 v2(docs/chat-v2-design.md) — 킬스위치(CPT_CONV=0 · daemon.json conv.enabled=false)면 handle 이 undefined.
+  ['conv.v1', './conv', 'handle'],
 ];
 
 function daemonCaps() {
@@ -512,6 +514,18 @@ function dispatchRpc(ws, method, params, ok, fail) {
     if (method === 'power.event') { fail(codedError('BAD_PARAMS', 'power.event 는 이 PC 의 앱만 보낼 수 있습니다')); return; }
     callLazy('./cpt-server', 'handleAutoRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;
   }
+  // 채팅 v2(conv.* — docs/chat-v2-design.md §4). ws 를 넘긴다(직접 호출자의 push 대상 — 제어 WS 는 sendEvent 로만 나간다).
+  //  킬스위치는 task.* 와 같은 규칙 — 봉인 RPC 는 서버가 메서드를 못 보므로 데몬이 교집합의 다른 한쪽을 지킨다.
+  //  오류는 전부 code 를 단다(안 달면 back 이 CONV_ERROR 로 바꾼다) — 꺼짐·구 번들도 CONV_DISABLED 한 가지로 답한다.
+  if (method.startsWith('conv.')) {
+    const conv = tryRequire('./conv');
+    if (!conv || typeof conv.handle !== 'function' || (serverCaps.length && !hasServerCap('conv.v1'))) {
+      fail(codedError('CONV_DISABLED', '이 기능은 꺼져 있습니다'));
+      return;
+    }
+    try { Promise.resolve(conv.handle(method, params || {}, ws)).then(ok).catch(fail); } catch (e) { fail(e); }
+    return;
+  }
   // 워크스페이스 스캐폴드/루트 지정(ws.getRoot/setRoot/create).
   if (method.startsWith('ws.')) { wsRpc.handle(method, params).then(ok).catch(fail); return; }
   fsRpc.handle(method, params).then(ok).catch(fail);
@@ -758,6 +772,8 @@ function run(config) {
       // 트랜스크립트: push 대상만 해제하고 tail/offset 은 유지한다(재접속 후 클라가 chat.since 로 따라잡음).
       //  ⚠ fsRpc.stopWatch() 처럼 watcher 를 닫지 말 것 — 재접속마다 tail 이 끊겨 스냅샷 재전송이 폭주한다.
       try { const t = tryRequire('./transcript'); if (t && typeof t.detachAll === 'function') t.detachAll(); } catch (_) { /* noop */ }
+      // 채팅 v2: push 대상만 놓는다. 에이전트 프로세스는 계속 돈다(재접속한 클라가 conv.since 로 따라잡는다).
+      try { const c = tryRequire('./conv'); if (c && typeof c.detachAll === 'function') c.detachAll(); } catch (_) { /* noop */ }
       // 승인은 여기서 건드리지 않는다 — 훅은 여전히 블록돼 있고 pending 의 정본은 데몬이다.
       //  재접속하면 hello_ack 에서 resync() 가 다시 광고한다(마감 타이머는 approvals 가 자체 보유).
       // 전송로 무효화 — 이걸 빼면 controlWs 가 CLOSED 인 스테일 소켓으로 남아, 대기 중이던 ui 왕복이
@@ -839,6 +855,9 @@ function run(config) {
     try { require('./agent-watch').start(); } catch (e) { console.error('[control] agent-watch 시작 실패:', e.message); }
     // TUI 폴백 질문 재광고 — 데몬 재시작이 회수한 승인 배너를 미응답 질문에 한해 되살린다.
     try { require('./question-revive').start(); } catch (e) { console.error('[control] question-revive 시작 실패:', e.message); }
+    // 채팅 v2 — 30일 정리 + idle 회수 타이머 + **종료 훅**(데몬이 어떤 경로로 끝나든 에이전트 프로세스를 내리고
+    //  진행 중이던 턴을 중단으로 기록한다: 신호는 정상 종료를 기다리고, process.exit 경로는 exit 훅이 닫는다).
+    try { const c = tryRequire('./conv'); if (c && typeof c.start === 'function') c.start(); } catch (e) { console.error('[control] conv 시작 실패:', e.message); }
     // 스테일 뷰 세션 리퍼 — 시작 시 1회 + 주기(120s). 버려진 pane 뷰 세션(--p-/--v-/--c-)이 영구
     //  tmux 소켓에 무한 누적되는 것을 막는다(attach 없는 뷰만·primary 셸은 보존). idleSec grace 로
     //  방금 만든 뷰는 안 건드림. 데몬 수명 내내 소켓을 스스로 청소한다.
@@ -895,6 +914,7 @@ module.exports = {
   helloFrame,      // 연결 시 신고 프레임(테스트가 caps/e2eeEpoch 동승을 고정한다)
   announceHello,   // 열쇠 변화 직후 재신고(재접속 없이 caps·e2eeEpoch 갱신)
   handleE2eeHint,  // back e2ee_hint 프레임 처리(테스트가 실제 WS 로 받은 프레임을 그대로 넣는다)
+  isActiveWs: (ws) => !!ws && ws === activeWs, // 이 소켓이 제어 WS 인가(conv.js — 제어 WS 로는 cap 게이팅된 sendEvent 만 쓴다)
   hasServerCap,  // 기능별 게이팅용(기능1 승인 왕복 등에서 사용) — 연결 전/구 서버면 항상 false
   serverCaps: () => serverCaps.slice(), // hello_ack 서버 능력 사본(자동화 엔진의 auto.v1 가드 — 비어 있으면 구 서버/연결 전)
   send,          // 게이팅 없는 데몬→back 프레임(power.js runner_busy). false 면 연결 없음

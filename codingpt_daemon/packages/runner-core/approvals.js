@@ -918,6 +918,9 @@ module.exports = {
   hookChoiceSlots, cancelHookChoice, // 훅 선택형 슬롯의 화면 화해(question-revive)
   cancelBySession, cancelAll, hasPending, pendingCount,
   buildHookOutput, budget, timeoutSec, configure, diffOf,
+  // 요약·리댁션 한 벌 — 채팅 v2(conv.js)의 요청 카드가 같은 함수를 쓴다(사본을 두면 리댁션이 한쪽만 고쳐진다).
+  //  ⚠ conv 는 이 함수들만 쓰고 request() 에는 등록하지 않는다(chat-v2-design §7: 한 사실에 통로 하나).
+  summaryOf, detailOf, questionsOf, alwaysRuleOf, relPathOf, inputPreviewOf, redactValues,
   gateReason, // 기능 게이팅의 단일 출처 — cpt-server/PC 설정이 "왜 꺼졌는지" 물을 때 쓴다(null=켜짐)
   CAP, ANSWER_PREFIX, MAX_PENDING_PER_PANE,
   _reset, _settle: settle,

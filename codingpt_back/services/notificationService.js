@@ -18,9 +18,30 @@ let createCounter = 0;
 
 function relay() { return require('./daemonRelayService'); } // lazy — 순환 require 회피
 
+// 채팅 v2(chat-v2-design.md §7) — 알림이 가리키는 대화(threadId)를 **스키마 변경 없이** 싣는다.
+//  notification 테이블에는 자유 JSON 컬럼이 없다. 대신 thread id 는 설계상 에이전트 세션 id 와 같은 값
+//  (§2.1 `id = 에이전트 세션 id`)이므로 session_id 컬럼에 'conv:' 접두로 저장하고, 읽을 때 접두를 벗겨
+//  threadId 와 sessionId 양쪽에 같은 값을 돌려준다(구 클라는 sessionId 만 본다 = 기존 모양 그대로).
+//  접두가 곧 "이 알림은 터미널이 아니라 채팅 탭을 연다"는 표식이다.
+const THREAD_PREFIX = 'conv:';
+const THREAD_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
+function normThreadId(v) {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return THREAD_ID_RE.test(t) ? t : null; // 형식이 아니면 조용히 무시(알림 자체는 만든다)
+}
+function splitSessionId(raw) {
+  if (typeof raw === 'string' && raw.startsWith(THREAD_PREFIX)) {
+    const t = raw.slice(THREAD_PREFIX.length);
+    return { sessionId: t, threadId: t };
+  }
+  return { sessionId: raw, threadId: null };
+}
+
 // DB 행(snake_case) → API JSON(camelCase). BIGINT id 는 pg 가 문자열로 주므로 숫자화.
 function toJson(row) {
   const r = row.get ? row.get({ plain: true }) : row;
+  const sid = splitSessionId(r.session_id);
   return {
     id: Number(r.id),
     source: r.source,
@@ -32,7 +53,8 @@ function toJson(row) {
     wsName: r.ws_name,
     cwd: r.cwd,
     win: r.win,
-    sessionId: r.session_id,
+    sessionId: sid.sessionId,
+    ...(sid.threadId ? { threadId: sid.threadId } : {}), // 채팅 v2 알림만(부재 = 기존 JSON 과 동일)
     readAt: r.read_at,
     createdAt: r.created_at,
   };
@@ -57,6 +79,7 @@ function buildDeeplink(n) {
   if (n.workspaceId) params.set('ws', n.workspaceId);
   if (n.cwd) params.set('cwd', n.cwd);
   if (n.win != null) params.set('win', String(n.win));
+  if (n.threadId) params.set('thread', n.threadId); // 채팅 v2 — 탭하면 그 대화(채팅 탭)를 연다
   const qs = params.toString();
   return `codingpt://notif/${n.id}${qs ? '?' + qs : ''}`;
 }
@@ -76,7 +99,8 @@ function computeRoute(present) {
   return { suppressAll, pcActive };
 }
 
-// 알림 생성 — payload: { source, kind?, title, subtitle?, body?, workspaceId?, wsName?, cwd?, win?, sessionId? }
+// 알림 생성 — payload: { source, kind?, title, subtitle?, body?, workspaceId?, wsName?, cwd?, win?, sessionId?, threadId? }
+//  threadId(채팅 v2) — 있으면 session_id 자리에 'conv:<threadId>' 로 저장한다(sessionId 보다 우선. 위 THREAD_PREFIX 주석).
 //  비영속 오버라이드(DB 컬럼 무추가 — 승인 인박스용):
 //   · deeplink — buildDeeplink 기본값 대체(예: codingpt://approval/<id>)
 //   · push     — { channelId?, category?, data? } 푸시 표시/액션 힌트를 provider 까지 그대로 전달
@@ -95,6 +119,8 @@ async function createNotification(userId, payload) {
   const win = Number.isInteger(winRaw) ? winRaw
     : (typeof winRaw === 'string' && /^\d+$/.test(winRaw) ? parseInt(winRaw, 10) : null);
 
+  const threadId = normThreadId(p.threadId);
+
   const row = await Notification.create({
     user_id: userId,
     source,
@@ -106,7 +132,7 @@ async function createNotification(userId, payload) {
     ws_name: wsName,
     cwd: p.cwd != null ? String(p.cwd) : null,
     win,
-    session_id: p.sessionId ? String(p.sessionId).slice(0, 120) : null,
+    session_id: threadId ? THREAD_PREFIX + threadId : (p.sessionId ? String(p.sessionId).slice(0, 120) : null),
   });
   const notification = toJson(row);
 
@@ -151,7 +177,15 @@ async function createNotification(userId, payload) {
       body: subtitle || (notification.body ? String(notification.body).slice(0, 120) : ''),
       deeplink: p.deeplink ? String(p.deeplink).slice(0, 300) : buildDeeplink(notification),
       // 승인 등 특수 알림만 채워진다(부재 시 provider 가 기존 기본값을 그대로 쓴다 — 회귀 0).
-      ...(push ? { channelId: push.channelId, category: push.category, data: push.data } : {}),
+      // FCM data 에 threadId 를 싣는다(폰이 탭했을 때 그 대화를 연다). 서버가 검증한 값이 마지막에 와서
+      //  push.data 가 같은 키를 실어도 덮는다. 채팅 v2 알림이 아니면 data 는 예전 그대로다(회귀 0).
+      ...(push ? { channelId: push.channelId, category: push.category } : {}),
+      ...((push && push.data) || notification.threadId ? {
+        data: {
+          ...(push && push.data && typeof push.data === 'object' ? push.data : {}),
+          ...(notification.threadId ? { threadId: notification.threadId } : {}),
+        },
+      } : {}),
     }, { pcActive }).catch(() => { /* fire-and-forget */ });
   }
 
@@ -250,4 +284,7 @@ module.exports = {
   _composeSubtitle: composeSubtitle,
   _computeRoute: computeRoute,   // approvalService 가 에스컬레이션 판정에 같은 규칙을 재사용(드리프트 방지)
   _pruneWhere: pruneWhere,
+  _toJson: toJson,                 // 채팅 v2 — threadId 왕복(저장 접두 ↔ API JSON) 계약 고정
+  _buildDeeplink: buildDeeplink,
+  _normThreadId: normThreadId,
 };

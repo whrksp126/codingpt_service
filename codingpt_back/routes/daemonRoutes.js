@@ -71,6 +71,9 @@ router.post('/surface', accountAuth, daemonController.surfaceRpc);
 router.post('/task', accountAuth, daemonController.taskRpc);
 // 자동화 번들(auto.*/dispatch.*/power.*) 평문 폴백 — 허용 표 = daemonController.AUTO_RPC_OK(power.event 는 로컬 전용이라 없음).
 router.post('/auto', accountAuth, daemonController.autoRpc);
+// 채팅 v2(conv.*) — 구조화 대화 엔진 RPC. 허용 표 = daemonController.CONV_RPC_OK(chat-v2-design.md §4·§8).
+//  accountAuth(JWT|deviceToken) — PC 앱은 deviceToken 으로 호출한다. 라이브는 데몬 conv_event → fanoutConvEvent.
+router.post('/conv', accountAuth, daemonController.convRpc);
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);
 //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 시그널링만 여기를 지나고 영상은 안 지난다.

@@ -18,7 +18,9 @@ const path = require('path');
 const runtime = require('./runtime');
 
 const FILE = () => path.join(runtime.stateDir(), 'surfaces.json');
-const KINDS = new Set(['preview', 'ide', 'emulator']);
+// chat = 채팅 v2 대화 탭(docs/chat-v2-design.md). 속성은 threadId 하나 — 대화 자체는 conv 저장소가 정본이다.
+//  구 클라이언트는 모르는 kind 를 걸러 내므로(SURFACE_KINDS) additive.
+const KINDS = new Set(['preview', 'ide', 'emulator', 'chat']);
 const MAX_PER_WS = 64;
 
 let notify = () => {};
@@ -66,6 +68,7 @@ function pick(o = {}) {
   if (typeof o.openPath === 'string' || o.openPath === null) out.openPath = o.openPath ? String(o.openPath).slice(0, 1024) : null;
   if (typeof o.deviceId === 'string' || o.deviceId === null) out.deviceId = o.deviceId ? String(o.deviceId).slice(0, 128) : null;
   if (typeof o.title === 'string') out.title = o.title.slice(0, 256);
+  if (typeof o.threadId === 'string' || o.threadId === null) out.threadId = o.threadId && /^[A-Za-z0-9_-]{1,64}$/.test(o.threadId) ? o.threadId : null;
   return out;
 }
 
@@ -83,7 +86,7 @@ function add({ cwd, id, kind, ...props } = {}) {
   const ws = wsKey(cwd); const sid = cleanId(id);
   if (!ws) throw new Error('cwd 가 필요합니다.');
   if (!sid) throw new Error('id 가 필요합니다.');
-  if (!KINDS.has(kind)) throw new Error('kind 는 preview|ide|emulator 중 하나입니다.');
+  if (!KINDS.has(kind)) throw new Error('kind 는 preview|ide|emulator|chat 중 하나입니다.');
   const items = load();
   const p = pick(props);
   //  레거시 desktop:main 은 등록하지 않는다(위 load 필터와 짝) — 클라가 옛 레이아웃으로 다시 올려도 무시 → 리컨실이 그 탭을 정리한다.

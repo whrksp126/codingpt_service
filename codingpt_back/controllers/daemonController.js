@@ -1260,6 +1260,45 @@ async function autoRpc(req, res) {
     return errorResponse(res, err, 500);
   }
 }
+// POST /api/daemon/conv  body:{ method, params, hostDeviceId } — 채팅 v2(conv.*) 평문 REST.
+//  정본 계약 = codingpt_daemon/docs/chat-v2-design.md §4·§8. autoRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로,
+//  검증은 데몬 conv.js 가 전부). 본문(text/attachments/answers)은 로그에 남기지 않는다.
+//  · 타임아웃: create/send/open/adopt/toTerminal 30초(프로세스 기동·가져오기·TUI 종료 대기), 나머지 15초.
+//  · 킬스위치 CONV_ENABLED=0 → caps 에서 conv.v1 이 빠지고 여기도 403 {code:'CONV_DISABLED'}(한 소스: SERVER_CAPS).
+//  · 오류 code 는 body.detail.code 로 그대로 전달한다(클라는 문구가 아니라 code 로 분기 — 설계 §4).
+//    데몬이 code 를 안 실은 실패는 CONV_ERROR, 릴레이 타임아웃은 TIMEOUT, 데몬 미연결은 DAEMON_OFFLINE.
+//    HTTP 상태는 autoRpc/taskRpc 와 같다: 데몬 오류 = 500, 미연결 = 409(기존 클라가 409 를 "PC 끊김"으로
+//    읽으므로 THREAD_BUSY 류를 409 로 가르지 않는다 — 분기 근거는 상태 코드가 아니라 detail.code).
+const CONV_RPC_OK = new Map([
+  ['conv.caps', 15000], ['conv.list', 15000], ['conv.create', 30000], ['conv.open', 30000], ['conv.since', 15000],
+  ['conv.before', 15000], ['conv.send', 30000], ['conv.respond', 15000], ['conv.interrupt', 15000], ['conv.set', 15000],
+  ['conv.stop', 15000], ['conv.remove', 15000], ['conv.detail', 15000], ['conv.commands', 15000],
+  ['conv.toTerminal', 30000], ['conv.adopt', 30000],
+]);
+function convEnabled() { return SERVER_CAPS.includes('conv.v1'); }
+async function convRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!CONV_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    if (!convEnabled()) {
+      return errorResponse(res, Object.assign(new Error('이 서버에서 채팅 기능이 꺼져 있습니다.'), { publicDetail: { code: 'CONV_DISABLED' } }), 403);
+    }
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, CONV_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') {
+      //  mapRpcError 와 같은 409·같은 문구 + code 보강(mapRpcError 는 code 를 싣지 않는다).
+      return errorResponse(res, Object.assign(new Error('PC 데몬이 연결되어 있지 않습니다.'), { publicDetail: { code: 'DAEMON_OFFLINE' } }), 409);
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code ? String(err.code) : 'CONV_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
 async function emulatorOpenUrl(req, res) {
   try {
     const b = req.body || {};
@@ -1950,6 +1989,7 @@ module.exports = {
   desktopRpc,
   surfaceRpc,
   taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
+  convRpc, _CONV_RPC_OK: CONV_RPC_OK, // 채팅 v2 평문 REST + 테스트 노출(허용 표 = chat-v2-design.md §4·§8)
   autoRpc, _AUTO_RPC_OK: AUTO_RPC_OK, // 자동화 번들 평문 폴백 + 테스트 노출(허용 표 = automation-design.md §7.1)
   reviewGet, reviewPending, reviewSubmit, reviewCancel,
   daemonGetSession, daemonPutSession, daemonClaimWorkspaceHost, daemonProjectDetach, daemonProjectAttach, daemonReportGit, daemonDeleteWorkspace,

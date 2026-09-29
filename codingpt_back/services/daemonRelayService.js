@@ -390,6 +390,16 @@ function registerControl(ws, device) {
       fanoutChatEvent(userId, msg);
       return;
     }
+    if (msg.type === 'conv_event') {
+      // 채팅 v2(구조화 대화) 라이브 프레임 — 토큰 델타가 50ms 간격으로 온다. chat_event 와 같은 규율:
+      //  **버퍼링·알림 금지**(agentBuf 축출 방지 / 알림은 데몬이 POST /api/notifications 로 따로 만든다 —
+      //  한 사실에 통로 하나, chat-v2-design.md §3·§7). push 는 힌트, 정본은 conv.since pull.
+      //  게이트는 서버 킬스위치뿐이다(CONV_ENABLED=0 이면 중계하지 않는다). 데몬 hello.caps 에 conv.v1 이
+      //  없어도 막지 않는다 — caps 는 연결 시 1회 신고라 커넥션별 하드 게이트는 조용한 영구 유실을 만든다
+      //  (config/caps.js ★②). 다른 프레임(chat_event/agent_state/runner_busy)도 conn.caps 로 막지 않는다.
+      if (SERVER_CAPS.includes('conv.v1')) fanoutConvEvent(userId, conn, msg);
+      return;
+    }
     if (msg.type === 'agent_state') {
       // 에이전트 상태(기능3 2단계) — 훅/워치가 만든 (cwd,win) 단위 순수 메타데이터.
       //  **버퍼링·알림 금지**: chat_event 와 같은 이유로 agentBuf 에 넣지 않는다(초당 수 건의 상태
@@ -868,6 +878,26 @@ function fanoutChatEvent(userId, msg) {
   broadcastEvent(userId, payload); // SSE 폴백
   const set = agentWsClients.get(String(userId));
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
+// 채팅 v2 팬아웃(chat-v2-design.md §3·§8) — 데몬 conv_event 를 라이브 중계만 한다(버퍼·알림 없음).
+//  필드 화이트리스트: threadId, headSeq, events, delta, thread, control — 그 밖의 필드는 버린다
+//  (데몬 내부 필드가 새어 나가지 않게 + 구 클라가 모르는 필드로 흔들리지 않게). 내용은 해석하지 않는다.
+//  hostDeviceId 는 서버가 붙인다(데몬이 주장한 값이 아니라 이 프레임이 실제로 온 커넥션) — 멀티 PC 에서
+//  클라가 "어느 PC 의 대화인가"를 가르는 유일한 근거(agent_state 와 같은 규약).
+const CONV_EVENT_FIELDS = ['threadId', 'headSeq', 'events', 'delta', 'thread', 'control'];
+function convEventPayload(conn, msg) {
+  const payload = { type: 'conv_event' };
+  for (const k of CONV_EVENT_FIELDS) if (msg[k] !== undefined && msg[k] !== null) payload[k] = msg[k];
+  if (conn && conn.deviceId != null) payload.hostDeviceId = conn.deviceId;
+  return payload;
+}
+function fanoutConvEvent(userId, conn, msg) {
+  const payload = convEventPayload(conn, msg || {});
+  broadcastEvent(userId, payload); // SSE 폴백
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+  return payload;
 }
 
 // 회원 탈퇴 통지 — 접속 중인 모든 UI 클라이언트(폰/태블릿/PC)에 {type:'account_deleted'} 를 보내고
@@ -1946,6 +1976,7 @@ module.exports = {
   fanoutDeviceApproval,
   notifyRunnersE2ee,
   fanoutChatEvent,
+  fanoutConvEvent,
   fanoutAgentState,
   negotiateStreamE2ee,
   hostE2eeEpoch,
@@ -1967,6 +1998,8 @@ module.exports = {
   _clientCanRun: clientCanRun,
   _maybeNotify: maybeNotify, // 테스트 노출 — hint/event 폴백 계약 고정(기능2)
   _e2eeHintKinds: E2EE_HINT_KINDS, // 테스트 노출 — 어떤 kind 가 데몬 힌트를 유발하는지 계약 고정
+  _convEventPayload: convEventPayload, // 테스트 노출 — conv_event 화이트리스트 계약 고정(채팅 v2)
+  _agentBuf: agentBuf, // 테스트 노출 — conv_event 가 리플레이 버퍼에 들어가지 않음을 고정
   _normAgentState: normAgentState, // 테스트 노출 — 데몬이 실제로 보내는 프레임으로 계약 고정(기능3)
   _normE2eeOffer: normE2eeOffer,   // 테스트 노출 — 오퍼 형식 게이트(기능2 D단계)
   _ptyStreamParams: ptyStreamParams, // 테스트 노출 — sid 주입이 실제로 params 에 실리는지 고정
