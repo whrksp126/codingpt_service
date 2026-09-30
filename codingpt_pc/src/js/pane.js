@@ -158,7 +158,8 @@ export function surfaceLabel(kind, node) {
 }
 export function surfaceIcon(kind, node) {
   if (kind === "ide") return icons.code;
-  if (kind === "chat") return icons.chat;
+  //  채팅 = 그 대화를 돌리는 에이전트의 로고(Claude·Codex…). 대화 전(새 채팅)은 기본 에이전트(claude) — 지금 채팅 엔진이 claude 만 띄운다.
+  if (kind === "chat") return (o) => agentMarkHtml((node && node.agent) || "claude", o) || icons.chat(o);
   if (kind === "emulator") {
     //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). id 로 판정, 모르면 모니터.
     if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o === "linux" ? icons.linux : o === "macos" ? icons.apple : icons.monitor; }
@@ -774,7 +775,7 @@ export class PaneView {
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
           : t.kind === "ide" ? icons.code({ size: 13 })
           : t.kind === "emulator" ? surfaceIcon("emulator", t)({ size: 13 })
-          : t.kind === "chat" ? icons.chat({ size: 13 })
+          : t.kind === "chat" ? surfaceIcon("chat", t)({ size: 13 })
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)

@@ -14,7 +14,7 @@
 import { state, activeWs, wsRuntime, isThisHost } from "./state.js";
 import { api } from "./api.js";
 import { makeRemoteFs } from "./remote-fs.js";
-import { icons } from "./icons.js";
+import { icons, agentMarkHtml } from "./icons.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
 import { commandsFor, formatCombo } from "./commands.js";
@@ -105,7 +105,7 @@ function tabRows(term) {
       score,
       sortKey: s.label,
       icon: s.kind === "ide" ? icons.code({ size: 15 }) : s.kind === "preview" ? icons.globe({ size: 15 })
-        : s.kind === "chat" ? icons.chat({ size: 15 }) : icons.terminal({ size: 15 }),
+        : s.kind === "chat" ? (agentMarkHtml(s.agent || "claude", { size: 15 }) || icons.chat({ size: 15 })) : icons.terminal({ size: 15 }),
       label: s.label,
       hint: s.active ? "●" : "",
       run: () => activateSurface(s.paneId, s.index),

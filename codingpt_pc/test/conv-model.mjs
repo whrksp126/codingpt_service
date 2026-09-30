@@ -575,6 +575,8 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   eq(M.tabPatchFor({ threadId: 'tA', title: 'A 대화' }, 'tB', { id: 'tB', title: 'B 대화' }), { threadId: 'tB', title: 'B 대화' }, '대화가 바뀌면 라벨도 그 대화의 제목');
   eq(M.tabPatchFor({ threadId: 'tA', title: 'A 대화' }, 'tB', { id: 'tB', title: '' }), { threadId: 'tB', title: undefined }, '★ 제목 없는 대화로 바뀌면 옛 제목을 지운다(옛 라벨이 남던 버그)');
   eq(M.tabPatchFor({ threadId: 'tA', title: '옛 제목' }, 'tA', { id: 'tA', title: '새 제목' }), { title: '새 제목' }, '★ 제목이 갱신되면 라벨도');
+  eq(M.tabPatchFor({ threadId: 'tA', title: 'A', agent: 'claude' }, 'tA', { id: 'tA', title: 'A', agent: 'codex' }), { agent: 'codex' }, '탭 아이콘 = 대화의 에이전트 로고(에이전트가 바뀌면 탭에 적는다)');
+  eq(M.tabPatchFor({}, 'tB', { id: 'tB', title: 'B', agent: 'claude' }), { threadId: 'tB', title: 'B', agent: 'claude' }, '대화를 열면 에이전트도 탭에');
   eq(M.tabPatchFor({ threadId: 'tA', title: 'A' }, 'tA', { id: 'tA', title: 'A' }), null, '같으면 건드리지 않는다(영속·재렌더 없음)');
   eq(M.tabPatchFor({ threadId: 'tA', title: 'A' }, 'tA', { id: 'tA', title: '' }), null, '제목을 아직 모르면 지금 라벨을 둔다');
 }

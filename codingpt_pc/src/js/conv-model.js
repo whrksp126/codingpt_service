@@ -1270,8 +1270,11 @@ export function tabPatchFor(tab, threadId, thread) {
   if ((threadId || undefined) !== (t.threadId || undefined)) {
     out.threadId = threadId || undefined;
     out.title = (thread && typeof thread.title === 'string' && thread.title.trim()) || undefined;
+    if (thread && thread.agent) out.agent = thread.agent;
     return out;
   }
+  // 탭 아이콘 = 에이전트 로고 — 대화의 에이전트를 탭에 적어 둔다(목록·다른 기기에서도 같은 로고).
+  if (thread && thread.agent && thread.agent !== t.agent) out.agent = thread.agent;
   const title = thread && typeof thread.title === 'string' ? thread.title.trim() : '';
   if (title && title !== (t.title || '')) out.title = title;
   return Object.keys(out).length ? out : null;

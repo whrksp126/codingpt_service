@@ -1089,7 +1089,7 @@ export function openSurfaces() {
     if (leaf.kind === "ide") { out.push({ paneId: leaf.id, index: -1, kind: "ide", label: "IDE" }); return; }
     if (leaf.kind === "preview") { out.push({ paneId: leaf.id, index: -1, kind: "preview", label: leaf.url || i18n.t('프리뷰') }); return; }
     if (leaf.kind === "emulator") { out.push({ paneId: leaf.id, index: -1, kind: "emulator", label: leaf.metaName || i18n.t('모바일 화면') }); return; }
-    if (leaf.kind === "chat") { out.push({ paneId: leaf.id, index: -1, kind: "chat", label: leaf.title || i18n.t('채팅') }); return; }
+    if (leaf.kind === "chat") { out.push({ paneId: leaf.id, index: -1, kind: "chat", agent: leaf.agent || "claude", label: leaf.title || i18n.t('채팅') }); return; }
     (leaf.tabs || []).forEach((t, i) => {
       const kind = t.kind === "ide" ? "ide" : t.kind === "preview" ? "preview" : t.kind === "emulator" ? "emulator"
         : t.kind === "chat" ? "chat" : "terminal";
@@ -1097,7 +1097,7 @@ export function openSurfaces() {
         : kind === "chat" ? (t.title || i18n.t('채팅'))
         : kind === "ide" ? "IDE"
           : kind === "emulator" ? (t.metaName || i18n.t('모바일 화면')) : (t.url || i18n.t('프리뷰'));
-      out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i });
+      out.push({ paneId: leaf.id, index: i, kind, label, active: leaf.active === i, ...(kind === "chat" ? { agent: t.agent || "claude" } : {}) });
     });
   });
   return out;
