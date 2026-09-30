@@ -16,19 +16,25 @@ const KEY_MONO_FONT = "cpt.monoFont";
 const KEY_TERM_STYLE = "cpt.termStyle";
 
 const SANS_TAIL = '-apple-system, system-ui, "Segoe UI", sans-serif';
-const UI_FONT_DEFAULT = `"PretendardVariable", "Pretendard", ${SANS_TAIL}`;
+const PRETENDARD_STACK = `"PretendardVariable", "Pretendard", ${SANS_TAIL}`;
+// 기본 인터페이스 글꼴 = 시스템(2026-09-30 디자인 리프레시 §0.3) — mac SF · 한글 Apple SD Gothic Neo ·
+//  win Segoe UI/맑은 고딕. 자간은 0(시스템 글꼴은 자체 트래킹을 가진다).
+const UI_FONT_DEFAULT = '-apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Segoe UI", "Malgun Gothic", sans-serif';
 // 기본 코드 글꼴 — mac=Menlo(종전 그대로), win32=Consolas + 한글 폴백(번들 D2Coding → Malgun Gothic).
 //  설정값 키('default')는 플랫폼 공통이라 계정 동기화 값이 그대로 유효하다(계약 5).
 const MONO_FONT_DEFAULT = IS_WINDOWS
   ? 'Consolas, "Cascadia Mono", "D2Coding", "Malgun Gothic", monospace'
   : 'Menlo, Monaco, "SF Mono", Consolas, monospace';
 
-// 인터페이스 글꼴 — 결이 확연히 다른 4종(전부 내장). 기본 = Pretendard.
+// 인터페이스 글꼴 — 시스템(기본) + 결이 확연히 다른 내장 4종. 값 키는 계정 동기화 계약
+//  (백엔드 APPEARANCE_KEYS.uiFont · 앱 uiFontSetting.ts 와 같은 문자열). 라벨 "시스템" 은 공용 사전 키.
+//  `tracking` = 그 글꼴에 맞는 자간(--ui-letter-spacing): 시스템 0 · Pretendard 만 -0.01em(§0.3).
 export const UI_FONT_OPTIONS = [
-  { value: "pretendard", label: "Pretendard", stack: UI_FONT_DEFAULT },
-  { value: "notoserif", label: "Noto Serif KR", stack: `"Noto Serif KR", "Apple Myungjo", Georgia, serif` },
-  { value: "gowun", label: "Gowun Dodum", stack: `"Gowun Dodum", ${UI_FONT_DEFAULT}` },
-  { value: "gmarket", label: "Gmarket Sans", stack: `"Gmarket Sans", ${UI_FONT_DEFAULT}` },
+  { value: "system", label: "시스템", stack: UI_FONT_DEFAULT, tracking: "0" },
+  { value: "pretendard", label: "Pretendard", stack: PRETENDARD_STACK, tracking: "-0.01em" },
+  { value: "notoserif", label: "Noto Serif KR", stack: `"Noto Serif KR", "Apple Myungjo", Georgia, serif`, tracking: "0" },
+  { value: "gowun", label: "Gowun Dodum", stack: `"Gowun Dodum", ${PRETENDARD_STACK}`, tracking: "0" },
+  { value: "gmarket", label: "Gmarket Sans", stack: `"Gmarket Sans", ${PRETENDARD_STACK}`, tracking: "0" },
 ];
 
 // 코드·터미널 글꼴 — 통일 목록(내장). "Symbols Nerd Font Mono"는 파워라인 글리프 폴백.
@@ -55,7 +61,7 @@ const MONO_VALUES = MONO_FONT_OPTIONS.map((o) => o.value);
 const STYLE_VALUES = ["auto", "ghostty", "one", "dracula"];
 
 let themeMode = "system"; // 기기 로컬
-let uiFont = "pretendard";
+let uiFont = "system";
 let monoFont = "default";
 let termStyle = "auto";
 function loadFromStorage() {
@@ -63,7 +69,7 @@ function loadFromStorage() {
     const t = localStorage.getItem(KEY_THEME);
     themeMode = (t === "light" || t === "dark" || t === "system") ? t : "system";
     const u = localStorage.getItem(KEY_UI_FONT);
-    uiFont = UI_VALUES.includes(u) ? u : "pretendard";
+    uiFont = UI_VALUES.includes(u) ? u : "system";
     const m0 = localStorage.getItem(KEY_MONO_FONT);
     const m = LEGACY_MONO[m0] || m0;
     monoFont = MONO_VALUES.includes(m) ? m : "default";
@@ -105,6 +111,11 @@ function stackFor(opts, value, fallback) {
   return hit ? hit.stack : fallback;
 }
 export function uiFontStack() { return stackFor(UI_FONT_OPTIONS, uiFont, UI_FONT_DEFAULT); }
+/** 현재 인터페이스 글꼴의 자간(styles.css `--ui-letter-spacing`). */
+export function uiFontTracking() {
+  const hit = UI_FONT_OPTIONS.find((o) => o.value === uiFont);
+  return (hit && hit.tracking) || "0";
+}
 /** 코드·터미널 폰트 스택(현재 설정) — xterm fontFamily 에 그대로 사용. */
 export function monoFontStack() { return stackFor(MONO_FONT_OPTIONS, monoFont, MONO_FONT_DEFAULT); }
 
@@ -112,6 +123,7 @@ function apply() {
   const el = document.documentElement;
   el.dataset.theme = resolvedTheme();
   el.style.setProperty("--ui-font", uiFontStack());
+  el.style.setProperty("--ui-letter-spacing", uiFontTracking());
   el.style.setProperty("--mono-font", monoFontStack());
   // punch-through: 앱 웹뷰가 투명이라 배경은 NSWindow 가 담당 — 테마 base 색으로 동기화.
   try {
@@ -241,7 +253,7 @@ const TERM_AUTO_DARK = {
   //   전용이라는 규칙에 어긋난다 — 늘 깜빡이는 커서는 신호가 아니라 장식이다(cmux·Ghostty 도 글자색).
   //  ★ selectionInactiveBackground 를 반드시 함께 준다. 안 주면 xterm 이 선택색을 30% 로 깔아
   //   포커스를 옮기는 순간 드래그한 자리가 배경에 묻힌다("선택이 사라졌다"로 보인다).
-  background: "#0A0D14", foreground: "#E2E8F0", cursor: "#E2E8F0", cursorAccent: "#0A0D14",
+  background: "#1E1E1E", foreground: "#E2E8F0", cursor: "#E2E8F0", cursorAccent: "#0A0D14",
   selectionBackground: "#264F78", selectionInactiveBackground: "#264F78",
   black: "#1B2230", red: "#F87171", green: "#34D399", yellow: "#FBBF24",
   blue: "#60A5FA", magenta: "#C084FC", cyan: "#22D3EE", white: "#CBD5E1",
@@ -250,7 +262,7 @@ const TERM_AUTO_DARK = {
 };
 const TERM_AUTO_LIGHT = {
   // CodingPT 라이트 — 배경=앱 라이트 배경(--base), 밝은 배경 가독 팔레트
-  background: "#F2F4F8", foreground: "#1E293B", cursor: "#1E293B", cursorAccent: "#FFFFFF",
+  background: "#FFFFFF", foreground: "#1E293B", cursor: "#1E293B", cursorAccent: "#FFFFFF",
   selectionBackground: "#BCD3F5", selectionInactiveBackground: "#BCD3F5",
   black: "#334155", red: "#DC2626", green: "#059669", yellow: "#B45309",
   blue: "#2563EB", magenta: "#9333EA", cyan: "#0891B2", white: "#CBD5E1",

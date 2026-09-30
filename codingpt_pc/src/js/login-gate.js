@@ -215,7 +215,7 @@ function renderStep() {
         <div class="lg-perm-benefit">${i18n.t(c.benefit)}</div>
         ${p.id === "notification" ? `
           <div id="lgNotifWarning" class="notif-warning notif-onb-status">
-            <span class="notif-warning-copy"><b id="lgNotifStatusTitle">${i18n.t('macOS에서 CodingPT 알림을 켜주세요.')}</b><small id="lgNotifStatusBody">${i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.')}</small></span>
+            <span class="notif-warning-lead"><span class="notif-warning-dot"></span><span class="notif-warning-copy"><b id="lgNotifStatusTitle">${i18n.t('macOS에서 CodingPT 알림을 켜주세요.')}</b><small id="lgNotifStatusBody">${i18n.t('시스템 설정에서 알림을 켜면 아래 설정을 사용할 수 있어요.')}</small></span></span>
             <button id="lgOpenNotifSettings" class="sett-btn">${i18n.t('시스템 설정 열기')}</button>
           </div>
           <div id="lgNotifControls" class="notif-onb-controls is-disabled">

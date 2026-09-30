@@ -168,7 +168,9 @@ async function registerController(req, res) {
 
 // 모양 설정 화이트리스트 — 알 수 없는 키/값은 버린다(전 기기 동기화 페이로드라 오염 방지).
 const APPEARANCE_KEYS = {
-  uiFont: ['pretendard', 'notoserif', 'gowun', 'gmarket'],
+  // 'system' = 기기의 시스템 글꼴(SF/Roboto) — 2026-09-30 디자인 개편의 기본값. 없으면 서버가 버려서
+  //  한 기기에서 고른 "시스템"이 다른 기기로 안 넘어간다.
+  uiFont: ['system', 'pretendard', 'notoserif', 'gowun', 'gmarket'],
   codeFont: ['default', 'jetbrains', 'fira', 'd2coding'],
   termStyle: ['auto', 'ghostty', 'one', 'dracula', 'solarized'],
   // 화면 언어(2026-08-05) — 'system' 은 "기기 언어를 따른다"는 유효한 의사다(기본값).

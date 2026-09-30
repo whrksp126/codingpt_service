@@ -558,11 +558,22 @@ eq("Claude SessionStart 후 → Chat 진입 토글 표시",
     const pcBrandBlock = /const BRAND = \{([^}]*)\}/.exec(pcIcons)?.[1] || "";
     const appBrandBlock = /const BRAND_COLOR: Record<string, string> = \{([\s\S]*?)\n\};/.exec(logoTsx)?.[1] || "";
     const hexOf = (block, brand) =>
-      (new RegExp(`["']?${brand}["']?:\\s*["'](#[0-9A-Fa-f]{6})["']`).exec(block)?.[1] || "").toUpperCase();
+      (new RegExp(`["']?${brand}["']?:\\s*["'](#[0-9A-Fa-f]{6}|currentColor)["']`).exec(block)?.[1] || "").toUpperCase();
+    // ★ 단색(흑/백) 마크 — OpenAI(codex)·Cursor·opencode — 는 **currentColor** 다(2026-09-30 디자인 리프레시):
+    //  고정 흰색(#FFFFFF)은 라이트 테마에서 흰 바탕에 묻혀 로고가 사라진다. 브랜드 가이드도 단색 마크는
+    //  배경에 따라 흑/백을 바꿔 쓴다 → 주변 글자색을 따른다. 앱(AgentLogo.tsx)도 같은 키워드를 쓰고
+    //  렌더 시점에 테마 글자색으로 푼다(RN SVG 엔 currentColor 가 없다).
+    //  색이 식별 정보인 컬러 마크(claude·gemini)는 그대로 양 플랫폼 같은 hex 여야 한다.
+    const MONO_MARKS = new Set(["codex", "cursor-agent", "opencode"]);
     for (const [brand] of BRANDS) {
       const pcH = hexOf(pcBrandBlock, brand);
       const appH = hexOf(appBrandBlock, brand);
-      ok(`브랜드 색 앱==PC (${brand} ${pcH})`, !!pcH && pcH === appH, `pc=${pcH} app=${appH}`);
+      if (MONO_MARKS.has(brand)) {
+        ok(`단색 마크는 양쪽 다 currentColor (${brand})`, pcH === "CURRENTCOLOR" && appH === "CURRENTCOLOR",
+          `pc=${pcH} app=${appH}`);
+      } else {
+        ok(`브랜드 색 앱==PC (${brand} ${pcH})`, !!pcH && pcH.startsWith("#") && pcH === appH, `pc=${pcH} app=${appH}`);
+      }
     }
     // ⚠ 주석을 먼저 걷어낸다 — 이 함정을 **설명하는 주석 자체**가 정규식에 걸려 거짓 실패가 났다
     //   (테스트가 자기 문서를 결함으로 신고하는 형태). 코드만 본다.

@@ -371,7 +371,7 @@ function attachPullToRefresh(list) {
   ind.className = "ptr-indicator";
   ind.style.cssText =
     "height:0px;overflow:hidden;display:flex;align-items:center;justify-content:center;" +
-    "font-size:11px;color:var(--text-dim,#8b93a7);opacity:0;transition:height .12s,opacity .12s;user-select:none;";
+    "font-size:11px;color:var(--dim);opacity:0;transition:height var(--dur-1) var(--ease-out),opacity var(--dur-1) var(--ease-out);user-select:none;";
   list.prepend(ind);
 
   const render = () => {
@@ -733,13 +733,14 @@ function wsHead(w, g, folded) {
   row.setAttribute("aria-expanded", folded ? "false" : "true");
   row.draggable = true;
   row.dataset.wsId = w.id;
-  if (color) row.style.boxShadow = `inset 3px 0 0 ${color}`;
+  // 색 = 이름 앞 6px 점(.wsr-color). 옛 3px 안쪽 띠(box-shadow)는 선택 테두리와 겹쳐 폐기(디자인 리프레시 2026-09-30).
 
   const openN = g ? g.openCount : 0;
   const name = document.createElement("div");
   name.className = "wsr-name";
   name.innerHTML =
     `<span class="wsg-caret">${folded ? icons.chevronRight({ size: 14 }) : icons.chevronDown({ size: 14 })}</span>` +
+    (color ? `<span class="wsr-color" style="background:${escapeHtml(color)}"></span>` : "") +
     (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
@@ -794,7 +795,8 @@ function wsHead(w, g, folded) {
   if (ports.length) {
     const p = document.createElement("div");
     p.className = "wsr-ports";
-    p.innerHTML = ports.map((x) => `<span class="port">:${x}</span>`).join("");
+    // 칩이 아니라 한 줄 보조 텍스트(`:3000 · :5173`) — 각 포트는 `.port` 스팬으로 남긴다.
+    p.innerHTML = ports.map((x) => `<span class="port">:${escapeHtml(String(x))}</span>`).join(" · ");
     row.appendChild(p);
   }
   row.addEventListener("click", (e) => {
@@ -931,7 +933,7 @@ function bindWsDrag(row, w) {
 
 // ── 워크스페이스 우클릭 컨텍스트 메뉴 ──
 const WS_COLORS = [
-  ["없음", ""], ["빨강", "#f87171"], ["주황", "#fb923c"], ["초록", "#34d399"],
+  ["없음", ""], ["빨강", "#f87171"], ["주황", "#fb923c"], ["초록", "#30D158"],
   ["파랑", "#60a5fa"], ["보라", "#a78bfa"], ["분홍", "#f472b6"],
 ];
 let wsMenuEl = null;
@@ -952,7 +954,11 @@ function buildCtxEl(items, onAfter) {
   menu.className = "ctx-menu";
   for (const it of items) {
     if (!it) continue;
-    if (it.type === "sep") { const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); continue; }
+    if (it.type === "sep") {
+      // 연속·맨앞 구분선은 한 줄로 접는다(항목 모델이 조건부 묶음 경계마다 sep 을 넣어 두 줄이 겹쳐 그려지던 것).
+      if (!menu.lastElementChild || menu.lastElementChild.classList.contains("ctx-sep")) continue;
+      const d = document.createElement("div"); d.className = "ctx-sep"; menu.appendChild(d); continue;
+    }
     if (it.type === "colors") {
       const row = document.createElement("div");
       row.className = "ctx-item ctx-static";
@@ -977,6 +983,7 @@ function buildCtxEl(items, onAfter) {
     tag(b, it.onClick);
     menu.appendChild(b);
   }
+  if (menu.lastElementChild?.classList.contains("ctx-sep")) menu.lastElementChild.remove(); // 끝 구분선도 접는다
   return menu;
 }
 

@@ -605,8 +605,11 @@ export class ChatView {
     //  (전부 hidden 인 진단 메시지만 온 경우가 흔하다).
     if (!this._els.size) {
       const empty = document.createElement("div");
-      empty.className = "chat-empty";
-      empty.textContent = i18n.t('아직 표시할 대화가 없습니다');
+      empty.className = "chat-empty empty";
+      const title = document.createElement("div");
+      title.className = "empty-title";
+      title.textContent = i18n.t('아직 표시할 대화가 없습니다');
+      empty.appendChild(title);
       this.scrollEl.appendChild(empty);
     }
   }
@@ -902,7 +905,7 @@ export class ChatView {
       ? `<img class="chat-chip-thumb" src="data:${this._attachMime(a)};base64,${a.b64}" alt="">`
       : (a.ext ? `<span class="chat-chip-ext">${escapeHtml(String(a.ext).toUpperCase().slice(0, 4))}</span>` : "");
     return lead + `<span class="chat-chip-label">${escapeHtml(a.name)}</span>` +
-      `<button class="chat-chip-x" type="button" title="${i18n.t('빼기')}">✕</button>`;
+      `<button class="chat-chip-x" type="button" title="${i18n.t('빼기')}">${icons.x({ size: 10 })}</button>`;
   }
 
   _refreshChip(a) {
@@ -1150,7 +1153,7 @@ export class ChatView {
     ov.innerHTML =
       `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path || a.name)}">${escapeHtml(a.name)}</span>` +
       (a.path ? `<button class="chat-lb-open" type="button">${i18n.t('원본 열기')}</button>` : "") +
-      `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">✕</button></div>` +
+      `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div>` +
       `<img class="chat-lb-img" src="${src}" alt="">`;
     let close;
     const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } };
@@ -1506,12 +1509,12 @@ export class ChatView {
     if (!this.scrollEl) return;
     this._clearBlank();
     const wrap = document.createElement("div");
-    wrap.className = "chat-blank";
+    wrap.className = "chat-blank empty";
     // 글리프는 붙어 있는 에이전트를 알면 그 로고(참고 앱들도 자기 로고를 쓴다), 모르면 말풍선.
     const mark = agentMarkHtml(this._agent, { size: 30 }) || icons.chat({ size: 30 });
     wrap.innerHTML =
       `<span class="chat-blank-ic">${mark}</span>` +
-      `<div class="chat-blank-title">${i18n.t('무엇이든 요청하세요')}</div>`;
+      `<div class="chat-blank-title empty-title">${i18n.t('무엇이든 요청하세요')}</div>`;
     this.scrollEl.appendChild(wrap);
   }
   _clearBlank() { this.scrollEl?.querySelector(".chat-blank")?.remove(); }
@@ -1528,7 +1531,7 @@ export class ChatView {
     wrap.className = "chat-pick";
     wrap.innerHTML =
       `<input class="chat-pick-q" type="text" placeholder="${i18n.t('파일 이름')}" />` +
-      `<div class="chat-pick-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
+      `<div class="chat-pick-list"><div class="chat-pick-empty empty-desc">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.querySelector(".chat-composer").appendChild(wrap);
     this.pickEl = wrap;
     this._pickFiles = null;
@@ -1576,17 +1579,17 @@ export class ChatView {
       this._pickFiles = [];
       // 실패를 조용히 빈 목록으로 만들지 않는다(원격 오프라인·권한 문제를 사용자가 알아야 한다).
       const list = this.pickEl.querySelector(".chat-pick-list");
-      list.innerHTML = `<div class="chat-pick-empty">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
+      list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
     }
   }
 
   _renderPicker(query) {
     if (!this.pickEl) return;
     const list = this.pickEl.querySelector(".chat-pick-list");
-    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('불러오는 중…')}</div>`; return; }
     const root = this._cwd() || "";
     const hit = filterFiles(this._pickFiles, root, query, CHAT.PICK_LIMIT);
-    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('일치하는 파일 없음')}</div>`; return; }
+    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('일치하는 파일 없음')}</div>`; return; }
     list.innerHTML = hit.map((p) => {
       const r = relToRoot(root, p);
       const i = Math.max(r.lastIndexOf("/"), r.lastIndexOf("\\")); // `/`·`\` 양쪽 인식(win32 대비)
@@ -1727,7 +1730,7 @@ export class ChatView {
   _openCmds() {
     const wrap = document.createElement("div");
     wrap.className = "chat-cmds";
-    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty empty-desc">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.querySelector(".chat-composer").appendChild(wrap);
     this.cmdsEl = wrap;
     this._cmdIdx = 0;
@@ -1770,11 +1773,11 @@ export class ChatView {
   _renderCmds(q) {
     if (!this.cmdsEl) return;
     const list = this.cmdsEl.querySelector(".chat-cmds-list");
-    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty empty-desc">${i18n.t('불러오는 중…')}</div>`; return; }
     const rows = this._cmdMatches(q);
     this._cmdRows = rows;
     if (this._cmdIdx >= rows.length) this._cmdIdx = 0;
-    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
+    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty empty-desc">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
     list.innerHTML = rows.map((c, i) => {
       const off = c.chat === "tui";
       return `<div class="chat-cmds-row${i === this._cmdIdx ? " on" : ""}${off ? " off" : ""}" data-name="${escapeHtml(c.name)}">` +
@@ -1923,7 +1926,7 @@ export class ChatView {
     this.dlgEl.innerHTML =
       `<div class="chat-tuidlg-head">` +
         `<span class="chat-tuidlg-title">${escapeHtml(d.title || "")}</span>` +
-        `<button class="chat-tuidlg-x" type="button" title="${i18n.t('닫기(Esc)')}">✕</button>` +
+        `<button class="chat-tuidlg-x" type="button" title="${i18n.t('닫기(Esc)')}">${icons.x({ size: 14 })}</button>` +
       `</div>` +
       (d.desc ? `<div class="chat-tuidlg-desc">${escapeHtml(d.desc)}</div>` : "") +
       `<div class="chat-tuidlg-opts">` +
@@ -2050,7 +2053,7 @@ export class ChatView {
       return `<div class="chat-mode-row${on ? " on" : ""}${busy ? " busy" : ""}" data-mode="${m.id}">` +
         `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
         `<span class="chat-mode-row-desc">${escapeHtml(i18n.t(m.desc))}</span></span>` +
-        `<span class="chat-mode-row-mark">${on ? "✓" : ""}</span></div>`;
+        `<span class="chat-mode-row-mark">${on ? icons.check({ size: 12 }) : ""}</span></div>`;
     }).join("") + `<div class="chat-mode-hint">${escapeHtml(hint)}</div>`;
   }
 

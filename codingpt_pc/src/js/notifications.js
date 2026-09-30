@@ -82,13 +82,18 @@ export function renderNotifPanel(el, onJump) {
     const row = document.createElement("button");
     row.className = "notif-row" + (n.read ? "" : " unread") + (n.kind === "approval_request" ? " approval" : "") + (n.kind === "approval_request" && !appr ? " resolved" : "");
     row.innerHTML =
+      `<span class="notif-dot"></span><div class="notif-main">` +
       `<div class="notif-title">${n.kind === "approval_request" || n.kind === "device_approval" ? `<span class="notif-ic">${icons.shield({ size: 12 })}</span>` : ""}${escapeHtml(n.title)}</div>` +
       (n.subtitle ? `<div class="notif-sub">${escapeHtml(n.subtitle)}</div>` : "") +
       // body 가 봉인문("cptenc:1:…")이면 데몬에 복호를 요청한다(비동기 → 도착 시 emit 으로 재렌더).
       //  잠금화면/배너는 subtitle(평문)로 도달하므로 알림 자체가 무내용이 되지는 않는다.
-      ((n.body ? `<div class="notif-body">${escapeHtml(notifBodyText(n.body))}</div>` : "")) +
+      //  마크다운 기호(#·*·백틱·링크 문법)는 미리보기에서 걷어낸다 — 서버가 원본을 한 줄로
+      //  뭉개 보내 `## 제목` 이 줄 중간에도 나타날 수 있다(stripMarkdownPreview 가 처리).
+      ((n.body ? `<div class="notif-body">${escapeHtml(stripMarkdownPreview(notifBodyText(n.body)))}</div>` : "")) +
       `<div class="notif-meta">${wsName ? escapeHtml(wsName) + " · " : ""}${fmtTime(n.createdAt || n.ts)}` +
-      (n.kind === "approval_request" && !appr ? i18n.t(' · 종료됨') : "") + `</div>`;
+      (n.kind === "approval_request" && !appr ? i18n.t(' · 종료됨') : "") + `</div>` +
+      `</div>`;
+    const mainEl = row.querySelector(".notif-main");
     if (appr) {
       const acts = document.createElement("div");
       acts.className = "notif-acts";
@@ -114,7 +119,7 @@ export function renderNotifPanel(el, onJump) {
             : { decision: "allow", ...(act === "always" ? { always: true } : {}) });
         });
       }
-      row.appendChild(acts);
+      mainEl.appendChild(acts);
     }
     // (★ 개정 12: 알림 행 인라인 승인 삭제 — 승인 절차 자체가 없어졌다. 연동은 설정에서 코드로.)
     row.addEventListener("click", () => {
@@ -135,14 +140,36 @@ export function jumpLatestUnread(onJump) {
   }
 }
 
+// 오늘이면 시각(HH:MM), 아니면 날짜(M/D — 로캘 무관 숫자 표기).
 function fmtTime(ts) {
   const d = new Date(ts);
   if (isNaN(d.getTime())) return "";
   const p = (x) => String(x).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// 알림 본문 미리보기 — 마크다운 기호를 걷어내 평문으로(서버가 원본을 한 줄로 뭉개 보내므로
+//  줄바꿈뿐 아니라 인용·목록 기호도 줄 중간에 섞여 나올 수 있다 — 공백 뒤 `##` 도 잡는다).
+export function stripMarkdownPreview(s) {
+  let t = String(s || "");
+  t = t.replace(/```[\s\S]*?```/g, " ");          // 코드 펜스
+  t = t.replace(/`([^`]*)`/g, "$1");               // 인라인 백틱
+  t = t.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");  // 이미지
+  t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");   // 링크
+  t = t.replace(/(^|\s)#{1,6}\s+/g, "$1");         // 헤딩(줄 중간의 `## ` 도)
+  t = t.replace(/(^|\s)>+\s?/g, "$1");             // 인용 기호
+  t = t.replace(/(^|\s)[-*+]\s+/g, "$1");          // 목록 기호
+  t = t.replace(/\*\*([^*]+)\*\*/g, "$1");         // 볼드
+  t = t.replace(/~~([^~]+)~~/g, "$1");             // 취소선
+  t = t.replace(/\*([^*]+)\*/g, "$1");             // 이탤릭
+  t = t.replace(/\s{2,}/g, " ").trim();
+  return t;
 }
 
 // ── Agent Tasks 알림 라우팅(설계 §3.4·§4) ─────────────────────────────────────────

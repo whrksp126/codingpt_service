@@ -17,7 +17,7 @@ import * as i18n from './i18n/index.js';
 const PICKER_JS = String.raw`(function(){
   if (window.__cptPick) return;
   var st = { on:false, result:null, crop:undefined, ov:null, hl:null, tip:null, el:null };
-  var ACC = '#3b82f6';
+  var ACC = '#9A9A9A';   /* 하이라이트 = 무채색(포인트 컬러 금지 — 어떤 페이지 위에서도 중립으로 읽힌다) */
   function esc(s){ try { return (window.CSS && CSS.escape) ? CSS.escape(s) : String(s); } catch (e) { return String(s); } }
   // CSS 선택자 — id > 문서 내 고유 클래스 > nth-child 경로(4단계 캡).
   function cssPath(el){

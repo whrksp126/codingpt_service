@@ -62,6 +62,7 @@ export function mountApprovals() {
         //  무기한 대기). 이 분기는 데몬의 좀비 청소 안전장치(24h)가 발동해 요청이 TUI 로 넘어간
         //  **극단 상황**에서만 도달한다. 여기서 답하면 410 이므로 응답 UI 를 걷고 안내만 남긴다.
         el.classList.toggle("expired", expired);
+        el.classList.toggle("blocking", !expired);
         const acts = el.querySelector(".apc-actions");
         if (acts && expired) {
           acts.innerHTML = `<div class="apc-expired-msg">${i18n.t('이 요청은 종료됐어요 — PC 터미널에서 답해주세요')}</div>` +
@@ -137,6 +138,9 @@ function renderList(host, rows) {
     if (el && el.dataset.scr !== scrRev) { el.remove(); el = null; }
     if (!el) { el = buildCard(a); el.dataset.scr = scrRev; host.appendChild(el); }
     syncCard(el, a);
+    // 막는 중 = 아직 답할 수 있는 요청(좌측 2px --warn, §0.7). 여기 오는 행은 전부 미응답이다 —
+    //  답한 요청은 목록에서 빠진다. 좀비 청소로 넘어간 것(expired)만 더는 막지 않는다(틱이 갱신).
+    el.classList.toggle("blocking", el.dataset.expired !== "1");
   }
 }
 
@@ -205,7 +209,7 @@ function buildCard(a) {
     el.innerHTML =
       `<div class="apc-head"><span class="apc-title">${escapeHtml(q.header || toolTitle(a.tool))}</span>` +
         `<span class="apc-qspacer"></span>` +
-        `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">✕</button></div>` +
+        `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div>` +
       `<div class="apc-body">` +
         // TUI 와 같은 위계 — 본문(모노) ↔ 질문 줄(굵게) 을 화면 배치 순서 그대로.
         screenBodyHtml(q.question, q.ask, !!q.askFirst) +
@@ -403,8 +407,8 @@ function renderQuestionStep(el, a) {
     `<div class="apc-qtop">` +
       (qs.length > 1 ? `<span class="apc-qbadge">${i + 1}/${qs.length}</span>` : "") +
       `<span class="apc-qtitle">${escapeHtml(q.question || q.header || "")}</span>` +
-      `<button class="apc-nav" type="button" data-act="qfold" title="${i18n.t('접기')}">${el._folded ? "⌃" : "⌄"}</button>` +
-      `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">✕</button>` +
+      `<button class="apc-nav" type="button" data-act="qfold" title="${i18n.t('접기')}">${el._folded ? icons.chevronUp({ size: 16 }) : icons.chevronDown({ size: 16 })}</button>` +
+      `<button class="apc-nav" type="button" data-act="dismiss" title="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button>` +
     `</div>` +
     (el._folded ? "" :
       `<div class="apc-qopts">${opts}${etc}</div>` +

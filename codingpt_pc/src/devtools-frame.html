@@ -5,7 +5,9 @@
      브리지/폴리필을 삽입해 document.write 로 자기 자신을 교체한다(URL·쿼리·오리진 유지).
      브리지 프로토콜(부모 postMessage {__cptDt}) 과 릴레이는 devtools.js 참고. -->
 <meta charset="utf-8">
-<style>html,body{margin:0;height:100%;background:#292a2d;color:#9aa0a6;font:12px -apple-system,sans-serif}</style>
+<!-- 이 프레임 바(로딩 문구)는 chii 가 아직 안 실려 우리 CSS 도 없는 독립 문서라 다크 토큰 값(--base/--text2)을
+     하드코드한다. chii 자체가 그린 뒤의 크롬(#292a2d/#9aa0a6, `.cpt-dt-frame` 배경)은 chii 고유 테마라 그대로 둔다. -->
+<style>html,body{margin:0;height:100%;background:#1E1E1E;color:#B0B0B0;font:12px -apple-system,sans-serif}</style>
 <body>DevTools 로딩 중…
 <script>
 (function () {

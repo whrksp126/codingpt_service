@@ -178,7 +178,10 @@
   await AV.refreshAutoHost(11);
   if (location.hash.includes('tasks')) S.setView('tasks');
   if (location.hash.includes('autos')) AV.openAutomations(location.hash.includes('detail') ? { id: 'a_sched', host: 11 } : {});
-  S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [] };
+  S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [3000, 5173] };
+  // 행 규격 확인용 — 색 점·고정 핀·포트 텍스트·활성 로컬 행(디자인 리프레시 2026-09-30).
+  S.wsPrefs.color[1] = '#60a5fa'; S.wsPrefs.color[2] = '#fb923c'; S.wsPrefs.pinned = [1];
+  S.state.activeWsId = 1;
   if (location.hash.includes('collapse')) localStorage.setItem('cpt.sbGroupCollapsed.v1', JSON.stringify({ 2: 1 }));
   else localStorage.removeItem('cpt.sbGroupCollapsed.v1');
   localStorage.removeItem('cpt.activeDeviceId.v1');
@@ -198,6 +201,11 @@
   if (location.hash.includes('pcset')) setTimeout(() => window.__pcSettings(11), 100);
   if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);
   if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
+  // `#ctx` = 첫 워크스페이스 머리에서 우클릭 메뉴를 연다(메뉴 규격 확인용).
+  //  헤드리스 캡처는 등장 모션 중간 프레임을 찍으므로 이 해시에서만 모션을 끈다.
+  if (location.hash.includes('ctx')) document.head.insertAdjacentHTML('beforeend', '<style>.ctx-menu { animation: none !important; }</style>');
+  if (location.hash.includes('ctx')) setTimeout(() => { const h = document.querySelector('.wsg-head'); const r = h.getBoundingClientRect();
+    h.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: r.left + 60, clientY: r.top + 20 })); }, 80);
   // 검사용 손잡이 — 지금 보이는 PC 행/워크스페이스 행, 그리고 코드로 PC 전환.
   window.__rows = () => ({
     pcs: [...document.querySelectorAll('.pc-row')].map((r) => r.querySelector('.pc-nm').textContent + (r.classList.contains('picked') || r.classList.contains('active') ? ' ✓' : '')),

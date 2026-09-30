@@ -883,13 +883,13 @@ export class PaneView {
     this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0; this._v3Epoch = null;
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
     this.emptyEl = document.createElement("div");
-    this.emptyEl.className = "pane-term-empty";
+    this.emptyEl.className = "pane-term-empty empty"; // 빈 상태 단일 패턴(.empty) — 모양은 styles.css 프리미티브 절
     this.emptyEl.style.display = "none";
     const msg = document.createElement("div");
-    msg.className = "pane-term-empty-msg";
+    msg.className = "pane-term-empty-msg empty-title";
     msg.textContent = i18n.t('열린 터미널이 없습니다');
     const btn = document.createElement("button");
-    btn.className = "pane-term-empty-btn";
+    btn.className = "pane-term-empty-btn btn";
     btn.innerHTML = `${icons.terminal({ size: 14 })}<span>${i18n.t('새 터미널')}</span>`;
     btn.addEventListener("click", () => this.addTab());
     this.emptyEl.append(msg, btn);

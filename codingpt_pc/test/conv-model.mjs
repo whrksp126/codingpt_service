@@ -535,6 +535,16 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   eq(M.modelChoices({ models: ['a', { id: 'b', label: 'B 모델' }] }, 'claude', 'b').map((m) => [m.id, m.label, m.on]), [['a', 'a', false], ['b', 'B 모델', true]], 'caps.models — 문자열·객체 둘 다');
   eq(M.modelChoices({ models: ['a'], agents: [{ id: 'codex', models: ['c1', 'c2'] }] }, 'codex', '').map((m) => m.id), ['c1', 'c2'], '에이전트별 목록이 있으면 그것');
   eq(M.modelChoices({ models: ['a', 'b'] }, 'claude', 'zz').map((m) => [m.id, m.on]), [['zz', true], ['a', false], ['b', false]], '지금 모델이 목록에 없으면 맨 앞에 남긴다');
+  // 모델 라벨(PLAN §0.7 채팅) — 헤더·사용량 줄에 원시 ID 대신 caps 라벨(데몬 claude 엔진 = 별칭 id + Haiku/Sonnet/Opus 라벨)
+  const cl = { agents: [{ id: 'claude', label: 'Claude', available: true, models: [{ id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }] }] };
+  eq(M.modelLabel('haiku', cl, 'claude'), 'Haiku', '별칭 id → 라벨');
+  eq(M.modelLabel('claude-haiku-4-5-20251001', cl, 'claude'), 'Haiku', '★ 전체 ID → 같은 계열 별칭의 라벨(원시 ID 노출 금지)');
+  eq(M.modelLabel('claude-sonnet-4-5-20250929', null, 'claude'), 'Sonnet 4.5', 'caps 모름 → 다듬은 이름(claude- · 날짜 꼬리 제거)');
+  eq(M.prettyModelId('claude-opus-4-1[1m]'), 'Opus 4.1', '대괄호 꼬리도 뗀다');
+  eq(M.prettyModelId('gpt-5-codex'), 'gpt-5-codex', 'claude 가 아니면 이름을 건드리지 않는다');
+  eq(M.modelChoices(cl, 'claude', 'claude-opus-4-1-20250805').map((m) => [m.id, m.label, m.on]),
+    [['opus', 'Opus', true], ['sonnet', 'Sonnet', false], ['haiku', 'Haiku', false]], '★ 전체 ID 가 켜져 있으면 같은 계열 별칭을 켠다(원시 ID 행을 덧세우지 않는다)');
+  eq(M.modelChoices({ models: ['a', 'b'] }, 'claude', 'claude-x-9-20250101')[0], { id: 'claude-x-9-20250101', label: 'X 9', on: true }, '목록에 없는 전체 ID 는 다듬은 이름으로 맨 앞');
 }
 
 // ── 11. 대화 안 검색 ──────────────────────────────────────────────────────────

@@ -1152,7 +1152,7 @@ export function updateWorkspaceView() {
   if (!ws || !rt) {
     renderMainTop(null);
     disposeAll(); // 워크스페이스가 정말 없다 — 캐시까지 전부 정리
-    if (gridEl) gridEl.innerHTML = `<div class="ws-empty">${i18n.t('워크스페이스를 선택하거나 추가하세요')}</div>`;
+    if (gridEl) gridEl.innerHTML = `<div class="ws-empty empty"><div class="empty-title">${i18n.t('워크스페이스를 선택하거나 추가하세요')}</div></div>`; // 빈 상태 단일 패턴(.empty)
     return;
   }
   renderMainTop(ws);

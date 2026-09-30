@@ -1,4 +1,7 @@
 // 알림음 로컬 설정 + 테스트 알림 IPC 계약.
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 const calls = [];
 const store = new Map();
 const windowListeners = new Map();
@@ -51,6 +54,21 @@ ok("복귀 후 새 권한 상태를 화면에 전달", returnedState === null);
 notificationState = "granted";
 await new Promise((resolve) => setTimeout(resolve, 800));
 ok("시스템 설정에서 ON 되면 앱 복귀 전에도 감지", returnedState === "granted");
+
+// ── 알림 패널 본문 미리보기 스트립(notifications.js — api.js 를 import 해 node 에서 못 연다 → 함수만 오려 실행) ──
+{
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const ns = readFileSync(path.join(here, "../src/js/notifications.js"), "utf8");
+  const cut = (a, b) => ns.slice(ns.indexOf(a), b ? ns.indexOf(b) : undefined);
+  const src = cut("export function stripMarkdownPreview").replace(/export function/g, "function");
+  const { stripMarkdownPreview } = new Function(`${src}; return { stripMarkdownPreview };`)();
+  ok("코드펜스·백틱·링크 문법을 걷어낸다",
+    stripMarkdownPreview("앞 `code` [링크](https://x.com) ```\nfence\n``` 뒤") === "앞 code 링크 뒤");
+  ok("줄 중간의 `## ` 헤딩·인용·목록 기호도 걷어낸다(서버가 한 줄로 뭉갠다)",
+    stripMarkdownPreview("완료 ## 제목 > 인용 - 항목 * 항목2") === "완료 제목 인용 항목 항목2");
+  ok("볼드/이탤릭/취소선 기호를 걷어낸다",
+    stripMarkdownPreview("**굵게** *기울임* ~~취소~~") === "굵게 기울임 취소");
+}
 
 if (fail) process.exit(1);
 console.log("\nALL PASS");

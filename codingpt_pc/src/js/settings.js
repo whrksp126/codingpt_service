@@ -473,10 +473,10 @@ function bindNotificationSettings(host) {
     const granted = value === "granted";
     if (granted) markPermGranted("notification");
     status.className = granted ? "sett-done" : "sett-attn";
-    status.innerHTML = granted ? `${icons.check({ size: 14 })}${i18n.t("허용됨")}` : i18n.t('확인 필요');
+    status.innerHTML = granted ? `<span class="sett-done-dot"></span>${i18n.t("허용됨")}` : i18n.t('확인 필요');
     warning.innerHTML = granted ? "" : `
       <div class="notif-warning">
-        <span class="notif-warning-copy"><b>${i18n.t('macOS가 CodingPT 알림을 전달하지 않고 있어요.')}</b><small>${i18n.t('시스템 설정에서 CodingPT 알림을 허용해 주세요.')}</small></span>
+        <span class="notif-warning-lead"><span class="notif-warning-dot"></span><span class="notif-warning-copy"><b>${i18n.t('macOS가 CodingPT 알림을 전달하지 않고 있어요.')}</b><small>${i18n.t('시스템 설정에서 CodingPT 알림을 허용해 주세요.')}</small></span></span>
         <button id="notifOpenSettings" class="sett-btn">${i18n.t('시스템 설정 열기')}</button>
       </div>`;
     warning.querySelector("#notifOpenSettings")?.addEventListener("click", async (e) => {
@@ -776,7 +776,7 @@ function buildPaired() {
 function folderPermRow(id, label) {
   const copy = `<span class="sett-copy"><span class="sett-label">${label}</span></span>`;
   if (permGranted(id)) {
-    return `<div class="sett-row">${copy}<span class="sett-done">${icons.check({ size: 14 })}${i18n.t("허용됨")}</span></div>`;
+    return `<div class="sett-row">${copy}<span class="sett-done"><span class="sett-done-dot"></span>${i18n.t("허용됨")}</span></div>`;
   }
   return `<div class="sett-row">${copy}<button class="sett-btn fpa-btn" data-f="${id}">${i18n.t('허용')}</button></div>`;
 }
@@ -811,7 +811,7 @@ function bindFolderPerms(rootEl) {
         if (ok) {
           markPermGranted(b.dataset.f);
           // 버튼을 남겨 두면 '허용됨' 이 여전히 눌러야 하는 것처럼 보인다 → 표기로 교체(folderPermRow 와 같은 모양).
-          b.outerHTML = `<span class="sett-done">${icons.check({ size: 14 })}${i18n.t("허용됨")}</span>`;
+          b.outerHTML = `<span class="sett-done"><span class="sett-done-dot"></span>${i18n.t("허용됨")}</span>`;
           return;
         }
         b.dataset.denied = "1";
@@ -969,8 +969,6 @@ let e2eeMsg = "";
 // 개정 5: 코드는 요청별로 접혀 있다(enrollmentId 집합 · 'self' = 이 PC 의 대기 화면).
 //  '승인됐는지 확인' 버튼은 삭제됐다 — 승인은 WS(resolved) 로 즉시 반영되고 폴링이 보증한다.
 // (개정 12: 구 '코드 확인' 접기 상태 삭제 — 안전 코드 대조 화면 자체가 사라졌다)
-
-const TONE_C = { on: "var(--accent)", wait: "var(--warn, #FBBF24)", off: "var(--dim)" };
 
 /**
  * self 배지 — 카드/섹션 제목 행 **우측**에 그린다(앱 카드 헤더와 같은 계층).
@@ -1180,7 +1178,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
       : `<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name || i18n.t("기기"))}</span>${d.isCurrent ? `<button class="dev-alias-btn" data-alias-edit="${d.id}" title="${i18n.t('별칭 변경')}">${icons.edit({ size: 13 })}</button>` : ""}`;
     return `<tr class="dev-tr">
       <td class="dev-c-ic"><span class="dev-ic">${d.role === "controller" ? icons.smartphone({ size: 15 }) : icons.monitor({ size: 15 })}</span></td>
-      <td class="dev-c-name"><span class="dev-name">${linkedMark}${nameCell}</span>${editing && aliasEditError ? `<div class="acct-msg" style="color:var(--error,#ef6b73)">${esc(aliasEditError)}</div>` : ""}</td>
+      <td class="dev-c-name"><span class="dev-name">${linkedMark}${nameCell}</span>${editing && aliasEditError ? `<div class="acct-msg" style="color:var(--error)">${esc(aliasEditError)}</div>` : ""}</td>
       <td class="dev-c-meta"></td>
       <td class="dev-c-del" style="white-space:nowrap">${link}${canRevoke ? `<button class="dev-del-btn" data-dev="${d.id}"${k ? ` data-dev-key="${k.deviceKeyId}"` : ""} title="${i18n.t('기기 삭제')}">${icons.trash({ size: 15 })}</button>` : ""}</td>
     </tr>
@@ -1213,7 +1211,7 @@ function e2eeDeviceRowsHtml(devs, selfReady, { mine } = {}) {
       <td class="dev-c-meta"><span style="color:var(--text3)">${i18n.t('이전에 연동된 기기')}</span></td>
       <td class="dev-c-del"><button class="dev-del-btn" data-e2ee-revoke="${k.deviceKeyId}" title="${i18n.t('연동 해제')}">${icons.trash({ size: 15 })}</button></td>
     </tr>
-    <tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn,#FBBF24)">${i18n.t('다시 눌러 해제 · 되돌릴 수 없음')}</td></tr>`;
+    <tr class="dev-tr-note" data-e2ee-armnote="${k.deviceKeyId}" style="display:none"><td colspan="4" class="acct-msg" style="padding:0 0 8px;color:var(--warn)">${i18n.t('다시 눌러 해제 · 되돌릴 수 없음')}</td></tr>`;
   }).join("");
 
   const others = otherRows + orphanRows;

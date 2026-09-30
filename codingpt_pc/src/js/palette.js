@@ -46,7 +46,7 @@ function cacheKey(ws) {
 function flattenTree(nodes, out) {
   for (const n of nodes || []) {
     if (n.dir) flattenTree(n.children, out);
-    else out.push(n.path);
+    else if (basename(n.path) !== ".DS_Store") out.push(n.path); // macOS 잡동사니는 결과에서 뺀다
   }
   return out;
 }
@@ -240,11 +240,15 @@ export function openPalette(initial) {
       }
       const el = document.createElement("button");
       el.className = "cp-row" + (i === sel ? " sel" : "") + (r.disabled ? " off" : "");
+      // 열린 탭의 "지금 이 탭" 표시는 단축키 힌트가 아니다 — 키캡이 아니라 점 하나로(§0.7).
+      const isOpenTabDot = !r.disabled && r.hint === "●";
       el.innerHTML =
         `<span class="cp-row-ic">${r.icon || ""}</span>`
         + `<span class="cp-row-label">${highlight(r.label, term)}</span>`
         + (r.sub ? `<span class="cp-row-sub">${highlight(r.sub, "")}</span>` : "")
-        + `<span class="cp-row-hint">${esc(r.disabled ? T.unavailable : (r.hint || ""))}</span>`;
+        + (isOpenTabDot
+          ? `<span class="cp-row-tabdot"></span>`
+          : `<span class="cp-row-hint">${esc(r.disabled ? T.unavailable : (r.hint || ""))}</span>`);
       el.addEventListener("mousemove", () => { if (sel !== i) { sel = i; paintSel(); } });
       el.addEventListener("click", () => choose(i));
       listEl.appendChild(el);

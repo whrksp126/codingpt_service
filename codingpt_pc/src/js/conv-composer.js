@@ -415,7 +415,7 @@ export class ConvComposer {
     wrap.className = "chat-pick";
     wrap.innerHTML =
       `<input class="chat-pick-q" type="text" placeholder="${i18n.t('파일 이름')}" />` +
-      `<div class="chat-pick-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
+      `<div class="chat-pick-list"><div class="chat-pick-empty empty-desc">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.appendChild(wrap);
     this.pickEl = wrap;
     this._pickFiles = null;
@@ -462,17 +462,17 @@ export class ConvComposer {
       if (this.pickEl !== wrap) return;
       this._pickFiles = [];
       // 실패를 조용히 빈 목록으로 만들지 않는다(원격 오프라인·권한 문제를 알아야 한다).
-      wrap.querySelector(".chat-pick-list").innerHTML = `<div class="chat-pick-empty">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
+      wrap.querySelector(".chat-pick-list").innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('목록을 불러오지 못했습니다')}</div>`;
     }
   }
 
   _renderPicker(query) {
     if (!this.pickEl) return;
     const list = this.pickEl.querySelector(".chat-pick-list");
-    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    if (this._pickFiles == null) { list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('불러오는 중…')}</div>`; return; }
     const root = this.o.cwd?.() || "";
     const hit = filterFiles(this._pickFiles, root, query, CHAT.PICK_LIMIT);
-    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('일치하는 파일 없음')}</div>`; return; }
+    if (!hit.length) { list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('일치하는 파일 없음')}</div>`; return; }
     list.innerHTML = hit.map((p) => {
       const r = relToRoot(root, p);
       const i = Math.max(r.lastIndexOf("/"), r.lastIndexOf("\\"));
@@ -506,7 +506,7 @@ export class ConvComposer {
     this._closePicker();
     const wrap = document.createElement("div");
     wrap.className = "chat-cmds";
-    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    wrap.innerHTML = `<div class="chat-cmds-list"><div class="chat-cmds-empty empty-desc">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.appendChild(wrap);
     this.cmdsEl = wrap;
     this._cmdIdx = 0;
@@ -546,11 +546,11 @@ export class ConvComposer {
   _renderCmds(q) {
     if (!this.cmdsEl) return;
     const list = this.cmdsEl.querySelector(".chat-cmds-list");
-    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('불러오는 중…')}</div>`; return; }
+    if (!this._cmds) { list.innerHTML = `<div class="chat-cmds-empty empty-desc">${i18n.t('불러오는 중…')}</div>`; return; }
     const rows = filterCommands(this._cmds, q, CHAT.CMD_MAX);
     this._cmdRows = rows;
     if (this._cmdIdx >= rows.length) this._cmdIdx = 0;
-    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
+    if (!rows.length) { list.innerHTML = `<div class="chat-cmds-empty empty-desc">${i18n.t('맞는 명령이 없습니다')}</div>`; return; }
     list.innerHTML = rows.map((c, i) =>
       `<div class="chat-cmds-row${i === this._cmdIdx ? " on" : ""}" data-name="${escapeHtml(c.name)}">` +
       `<span class="chat-cmds-name">${escapeHtml(c.name)}</span>` +

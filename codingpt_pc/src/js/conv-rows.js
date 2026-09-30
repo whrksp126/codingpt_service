@@ -95,8 +95,8 @@ export function buildUserRow({ key, text, status, code, slash, clientId, files }
   if (status === "failed") {
     foot.innerHTML =
       `<span class="conv-fail">${escapeHtml(i18n.t('전송 실패'))}${code ? " · " + escapeHtml(convErrorText(code)) : ""}</span>` +
-      `<button class="conv-link" type="button" data-act="retry">${i18n.t('다시 시도')}</button>` +
-      `<button class="conv-link" type="button" data-act="discard">${i18n.t('삭제')}</button>`;
+      `<button class="btn small" type="button" data-act="retry">${i18n.t('다시 시도')}</button>` +
+      `<button class="btn small ghost" type="button" data-act="discard">${i18n.t('삭제')}</button>`;
   } else if (status === "queued") {
     foot.innerHTML = `<span class="conv-note">${i18n.t('대기 중')}</span>` + actsHtml();
   } else if (status === "sending") {
@@ -427,7 +427,7 @@ export function showLightbox(src, a) {
     `<div class="chat-lb-bar"><span class="chat-lb-name" title="${escapeHtml(a.path || a.name)}">${escapeHtml(a.name)}</span>` +
     // 원본 열기 = 이 PC 의 파일만(다른 PC 의 경로를 이 PC 에서 열 수 없다).
     (a.path && a.canOpen !== false ? `<button class="chat-lb-open" type="button">${i18n.t('원본 열기')}</button>` : "") +
-    `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">${icons.x({ size: 11 })}</button></div>` +
+    `<button class="chat-lb-close" type="button" title="${i18n.t('닫기')}">${icons.x({ size: 16 })}</button></div>` +
     `<img class="chat-lb-img" alt="">`;
   ov.querySelector(".chat-lb-img").src = src;
   const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } };

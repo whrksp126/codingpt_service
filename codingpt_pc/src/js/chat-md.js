@@ -207,7 +207,8 @@ export function renderMarkdown(src) {
     const head = HEAD_RE.exec(line);
     if (head) {
       flushAll();
-      const lv = head[1].length <= 2 ? 1 : 2;
+      // # → h1 · ## → h2 · ### 이하 → h3 (크기 17/15/13 — styles.css 채팅 마크다운 절)
+      const lv = Math.min(3, head[1].length);
       out.push(`<div class="chat-h${lv}">${renderInline(head[2])}</div>`);
       continue;
     }

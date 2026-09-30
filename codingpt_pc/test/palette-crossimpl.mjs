@@ -248,5 +248,21 @@ ok(paletteRows.length >= 12, `팔레트에 실제로 보이는 명령이 ${palet
     && combos.filter((c) => c === 'Mod+Shift+U').length === 1, '⌘⌥U · ⌘⌥I 가 겹치지 않고, ⌘⇧U 는 여전히 알림 한 곳');
 }
 
+// ── 7. 파일 결과에서 .DS_Store 를 뺀다(palette.js 는 state/api 를 import 해 node 에서 못 연다 → 함수만 오려 실행) ──
+{
+  const { basename } = await import(path.join(PC, 'path-utils.js'));
+  const ps = fs.readFileSync(path.join(PC, 'palette.js'), 'utf8');
+  const cut = (a, b) => ps.slice(ps.indexOf(a), ps.indexOf(b));
+  const src = cut('function flattenTree', '/** 워크스페이스 루트 기준');
+  const { flattenTree } = new Function('basename', `${src}; return { flattenTree };`)(basename);
+  const tree = [
+    { dir: false, path: '/ws/a.txt' },
+    { dir: false, path: '/ws/.DS_Store' },
+    { dir: true, children: [{ dir: false, path: '/ws/sub/.DS_Store' }, { dir: false, path: '/ws/sub/b.txt' }] },
+  ];
+  ok(JSON.stringify(flattenTree(tree, [])) === JSON.stringify(['/ws/a.txt', '/ws/sub/b.txt']),
+    '팔레트 파일 결과는 .DS_Store 를 뺀다(최상위·하위 폴더 둘 다)');
+}
+
 console.log(`\n${fail === 0 ? 'ALL CONFORMANT' : 'NOT CONFORMANT'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

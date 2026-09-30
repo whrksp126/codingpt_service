@@ -50,8 +50,8 @@ function initQuitGuard() {
   api.onQuitGuard(() => {
     if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
     const files = ideDirtyPaths();
-    const list = files.slice(0, 6).map((p) => `<div class="qg-file">● ${basename(p) || p}</div>`).join("")
-      + (files.length > 6 ? `<div class="qg-file">${i18n.t("… 외 {n}개", { n: files.length - 6 })}</div>` : "");
+    const list = files.slice(0, 6).map((p) => `<div class="qg-file"><span class="qg-file-dot"></span>${basename(p) || p}</div>`).join("")
+      + (files.length > 6 ? `<div class="qg-file qg-file-more">${i18n.t("… 외 {n}개", { n: files.length - 6 })}</div>` : "");
     const bd = document.createElement("div");
     bd.className = "quit-guard-backdrop";
     bd.innerHTML = `

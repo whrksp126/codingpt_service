@@ -7,6 +7,7 @@
      RPC 는 실제와 같은 길(api.conv → invoke("back_api_async", POST /api/daemon/conv))을 타고, 실패도
      실제와 같은 문자열(`HTTP 500 CODE: 메시지`)로 던진다 — 뷰의 오류 분기까지 같이 확인된다.
      쿼리: ?theme=light  ?thread=<id>(그 대화를 연 채로 시작: demo | long | terminal)
+           ?s=models,stream,approve(시작하자마자 시나리오를 차례로 — 스크린샷용, 간격 ?gap=ms 기본 900)
      오른쪽 패널의 버튼이 시나리오다. 콘솔에서는 window.__h 로 같은 것을 부를 수 있다. -->
 <html lang="ko" data-theme="dark">
 <head><meta charset="utf-8"><title>채팅 v2 하네스</title>
@@ -95,7 +96,7 @@
   function mkThread(id, over) {
     const t = {
       meta: { id, agent: 'claude', cwd: 'demo/project', title: '', titleSet: false, createdAt: Date.now(), lastAt: Date.now(),
-        state: 'idle', owner: 'chat', ownerTid: null, mode: 'default', model: 'demo-model', headSeq: 0, pending: 0, preview: '', ...over },
+        state: 'idle', owner: 'chat', ownerTid: null, mode: 'default', model: 'claude-haiku-4-5-20251001', headSeq: 0, pending: 0, preview: '', ...over },
       log: [], first: new Map(), latest: new Map(), live: new Map(), turn: 0, sent: new Map(), open: false,
     };
     F.threads.set(id, t);
@@ -320,7 +321,9 @@
 
   const rpc = {
     'conv.caps': () => ({ enabled: true,
-      agents: [{ id: 'claude', label: 'Claude', available: true, version: null }, { id: 'codex', label: 'Codex', available: F.twoAgents, version: null }],
+      // 모델 목록 = 실제 데몬(conv-engine-claude.js)과 같은 모양 — 별칭 id + 라벨. 대화의 model 은 전체 ID 라 라벨 매핑이 드러난다.
+      agents: [{ id: 'claude', label: 'Claude', available: true, version: null, ...(F.models ? { models: [{ id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }] } : {}) },
+        { id: 'codex', label: 'Codex', available: F.twoAgents, version: null }],
       modes: ['default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions', 'dontAsk'], maxLive: 4,
       ...(F.models ? { models: [{ id: 'model-a', label: '모델 A' }, { id: 'model-b', label: '모델 B' }, 'model-c'] } : {}) }),
     // §4.5 — 그 대화의 이벤트에 등장한 경로만 준다(첨부 줄·도구 경로·본문의 마크다운 이미지/링크).
@@ -339,7 +342,7 @@
       if (F.failNext) { F.failNext = false; fail('START_FAILED', '에이전트를 시작하지 못했습니다'); }
       if (F.slowNext) { F.slowNext = false; await sleep(25000); }
       const had = [...F.threads.values()].find((t) => t.sent.has(p.clientId));   // clientId 로 멱등
-      const t = had || mkThread(uuid(), { mode: p.mode || 'default', cwd: p.cwd || 'demo/project', agent: p.agent || 'claude', model: p.model || 'demo-model' });
+      const t = had || mkThread(uuid(), { mode: p.mode || 'default', cwd: p.cwd || 'demo/project', agent: p.agent || 'claude', model: p.model || 'claude-haiku-4-5-20251001' });
       if (!p.text && !(p.attachments && p.attachments.length)) return { thread: pub(t) };
       const r = await accept(t, p.clientId, p.text, p.attachments);
       return { thread: pub(t), seq: r.seq };
@@ -566,8 +569,17 @@
     agents: () => { F.twoAgents = !F.twoAgents; view._caps = null; void view._loadCaps(); log('에이전트 2개 = ' + F.twoAgents); },
     models: () => { F.models = !F.models; view._caps = null; void view._loadCaps(); log('모델 목록 = ' + F.models); },
     find: () => view.openSearch(),
+    // 스크린샷용 — 팝오버·입력 상태를 코드로 연다(?s= 로 부를 수 있다)
+    list: () => view._toggleList(), modelMenu: () => view._toggleModelMenu(), modeMenu: () => view._toggleModeMenu(),
+    type: () => { view.composer.setText('테스트도 같이 고쳐 줘'); view.composer.focus(); },
+    send: () => { view.composer.setText('다시 보내 볼게요'); view.composer._send(); },
   };
   window.__h = H;
+  // ?s=a,b,c — 시나리오 자동 실행(헤드리스 스크린샷용). 시나리오는 끝을 기다리지 않는다(승인 카드는 답을 기다린다).
+  for (const s of String(Q.get('s') || '').split(',').filter(Boolean)) {
+    if (H[s]) { void H[s](); log('자동: ' + s); }
+    await sleep(Number(Q.get('gap')) || 900);
+  }
   document.getElementById('side').addEventListener('click', (e) => {
     const s = e.target.closest('button')?.dataset.s;
     if (!s) return;

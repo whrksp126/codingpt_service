@@ -22,7 +22,7 @@ import {
   respondParams, isBusy, workingInfo, fmtDuration, parseConvError, convErrorText, isOfflineCode,
   terminalLaunch, fmtAgo, threadDot, needsAdopt, threadTitle, convModeLabel, convModeChoices,
   splitAttachLines, attachPlan, attachUploadName, attachmentsForWire, createByteCache, fileMissingText,
-  usageStatus, agentChoices, modelChoices, searchExpand, tabPatchFor,
+  usageStatus, agentChoices, modelChoices, modelLabel, searchExpand, tabPatchFor,
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
@@ -781,10 +781,10 @@ export class ConvView {
     if (!show) { el?.remove(); return; }
     if (el) return;
     el = document.createElement("div");
-    el.className = "chat-blank";
+    el.className = "chat-blank empty";
     const agent = (this.m.thread && this.m.thread.agent) || "claude";
     el.innerHTML = `<span class="chat-blank-ic">${agentMarkHtml(agent, { size: 30 }) || icons.chat({ size: 30 })}</span>`
-      + `<div class="chat-blank-title">${i18n.t('무엇이든 요청하세요')}</div>`;
+      + `<div class="chat-blank-title empty-title">${i18n.t('무엇이든 요청하세요')}</div>`;
     this.rowsEl.appendChild(el);
   }
 
@@ -1047,7 +1047,9 @@ export class ConvView {
   // ── 사용량 줄(§4.5) ──
   _syncUsage() {
     if (!this.usageEl) return;
-    const st = this.m.threadId ? usageStatus(this.m.thread) : null;
+    const raw = this.m.threadId ? usageStatus(this.m.thread) : null;
+    // 원시 모델 ID(`claude-haiku-4-5-…`) 대신 caps 라벨(Haiku) — 헤더 알약과 같은 이름(conv-model.modelLabel).
+    const st = raw && raw.model ? { ...raw, model: modelLabel(raw.model, this._caps, this._agentId()) } : raw;
     const chips = statusChips(st);
     const key = JSON.stringify(st) + "|" + this._usageOpen;
     if (key === this._usageKey) return;
@@ -1114,7 +1116,7 @@ export class ConvView {
     this._capsLoading = true;
     try { this._caps = await this._rpc("conv.caps", {}); } catch (_) { this._caps = null; }
     finally { this._capsLoading = false; }
-    if (!this._disposed && this._mounted) { this._syncHead(); this.composer?.sync(); }
+    if (!this._disposed && this._mounted) { this._syncHead(); this._syncUsage(); this.composer?.sync(); }   // 사용량 줄의 모델 이름도 caps 라벨로
   }
 
   // ── 에이전트·모델 고르기(§4.5) — 모드 목록과 같은 모양의 작은 메뉴 ──
@@ -1513,7 +1515,7 @@ export class ConvView {
     this._closePopovers();
     const pop = document.createElement("div");
     pop.className = "conv-pop";
-    pop.innerHTML = `<div class="conv-pop-head">${i18n.t('대화 목록')}</div><div class="conv-pop-list"><div class="chat-pick-empty">${i18n.t('불러오는 중…')}</div></div>`;
+    pop.innerHTML = `<div class="conv-pop-head">${i18n.t('대화 목록')}</div><div class="conv-pop-list"><div class="chat-pick-empty empty-desc">${i18n.t('불러오는 중…')}</div></div>`;
     this.el.appendChild(pop);
     this.listEl = pop;
     this._threads = null;
@@ -1539,7 +1541,7 @@ export class ConvView {
       this._renderList();
     } catch (e) {
       if (this.listEl !== pop) return;
-      pop.querySelector(".conv-pop-list").innerHTML = `<div class="chat-pick-empty">${escapeHtml(isOfflineCode(e.code) ? i18n.t('PC 가 연결돼 있지 않습니다.') : i18n.t('목록을 불러오지 못했습니다'))}</div>`;
+      pop.querySelector(".conv-pop-list").innerHTML = `<div class="chat-pick-empty empty-desc">${escapeHtml(isOfflineCode(e.code) ? i18n.t('PC 가 연결돼 있지 않습니다.') : i18n.t('목록을 불러오지 못했습니다'))}</div>`;
     }
   }
 
@@ -1555,7 +1557,7 @@ export class ConvView {
   _renderList() {
     if (!this.listEl || !this._threads) return;
     const list = this.listEl.querySelector(".conv-pop-list");
-    if (!this._threads.length) { list.innerHTML = `<div class="chat-pick-empty">${i18n.t('아직 대화가 없어요')}</div>`; return; }
+    if (!this._threads.length) { list.innerHTML = `<div class="chat-pick-empty empty-desc">${i18n.t('아직 대화가 없어요')}</div>`; return; }
     const now = Date.now();
     list.innerHTML = this._threads.map((t) => {
       const dot = threadDot(t);

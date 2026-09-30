@@ -3,9 +3,10 @@
 //  (fill 로고에 stroke 를 얹으면 획이 뭉개져 "대충 만든 것" 처럼 보인다).
 // 브랜드 색 — simple-icons 공식 hex. **currentColor 를 쓰지 않는다**: 로고는 그 브랜드의 색까지가
 //  식별 정보이고, 텍스트 색(text2/dim)으로 칠하면 사용자가 "로고 컬러가 왜 안 나오냐"고 묻게 된다(실제 지적).
-//  ⚠ OpenAI 공식 hex(412991)는 어두운 배경에서 거의 안 보인다 → 다크 UI 에서는 흰색으로 그린다
-//   (브랜드 가이드도 어두운 배경에는 흰 마크를 쓴다). 밝은 테마는 CSS 가 `--brand-openai` 로 덮는다.
-const BRAND = { claude: "#D97757", codex: "#FFFFFF", gemini: "#8E75B2", "cursor-agent": "#FFFFFF", opencode: "#FFFFFF" };
+//  ⚠ 단색(흑백) 마크 — OpenAI(codex)·Cursor·opencode — 는 고정 흰색이면 라이트 테마에서 사라진다
+//   → `currentColor`(주변 글자색)로 그린다: 다크에선 밝게, 라이트에선 어둡게(브랜드 가이드의 흑/백 마크 규칙과 같다).
+//   색이 식별 정보인 컬러 마크(claude·gemini)만 고정 hex 를 쓴다.
+const BRAND = { claude: "#D97757", codex: "currentColor", gemini: "#8E75B2", "cursor-agent": "currentColor", opencode: "currentColor" };
 const brandSvg2 = (brand, d, o = {}) => brandSvg(d, { ...(o || {}), color: (o && o.color) || BRAND[brand] });
 const brandSvg = (d, o = {}) => {
   const size = (o && o.size) || 16;

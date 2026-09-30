@@ -4,15 +4,20 @@
 <html lang="ko" data-theme="dark">
 <head><meta charset="utf-8"><title>헤더 하네스</title>
 <link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
-<style>body { margin: 0; } .main-top { border-bottom: 1px solid var(--border); }</style></head>
+<style>html, body { margin: 0; height: 100%; background: var(--base); } .main { height: 100vh; }</style></head>
 <body>
-<div class="main" id="wsRoot"></div>
+<!-- 앱(index.html)과 같은 뼈대: .main > section.ws-view. `#light` = 라이트 테마. -->
+<div class="main"><section class="ws-view" id="wsRoot"></section></div>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="vendor/xterm/xterm-addon-search.js"></script>
 <script src="vendor/xterm/xterm-addon-webgl.js"></script>
 <script src="vendor/xterm/xterm-addon-canvas.js"></script>
 <script type="module">
+  // 터미널 스킴은 theme.js 가 로드 시 cpt.theme 를 읽어 고른다 → import 전에 맞춘다(하네스 전용).
+  const LIGHT = location.hash.includes('light');
+  try { localStorage.setItem('cpt.theme', LIGHT ? 'light' : 'dark'); } catch (_) {}
+  if (LIGHT) document.documentElement.dataset.theme = 'light';
   window.__TAURI__ = {
     core: {
       invoke: async (cmd) => {
@@ -31,7 +36,15 @@
   S.state.daemon = { paired: true, running: true, deviceId: 11 };
   S.state.workspaces = [{ id: 1, name: 'codingpt', localPath: 'other/project/codingpt', compute: 'local', hostDeviceId: 11, hostOnline: true }];
   S.state.activeWsId = 1;
-  S.ensureRuntime(1);
+  // pane 크롬 확인용 분할 — 좌: 포커스 pane(탭 3, 1번 대기 점) · 우상: 비포커스 pane(탭 2) · 우하: 터미널 0개 pane.
+  S.state.ws[1] = {
+    layout: { dir: 'h', ratio: 0.55,
+      first: { id: 'pa', kind: 'terminal', tabs: [{ win: 1, title: '터미널 1' }, { win: 2, title: '터미널 2' }, { win: 3, title: 'npm run dev' }], active: 0 },
+      second: { dir: 'v', ratio: 0.5,
+        first: { id: 'pb', kind: 'terminal', tabs: [{ win: 4, title: '터미널 4' }, { win: 5, title: '서버 로그' }], active: 1 },
+        second: { id: 'pc', kind: 'terminal', tabs: [], active: 0 } } },
+    focusId: 'pa', surfaces: [], ports: [],
+  };
   wv.mountWorkspaceView(document.getElementById('wsRoot'));
   wv.updateWorkspaceView();
   window.__header = () => ({
@@ -40,6 +53,11 @@
     menu: [...document.querySelectorAll('.pv-menu .pvm-label')].map((n) => n.textContent),
     more: [...document.querySelectorAll('.pv-menu .pv-menu-item')].map((b) => !!b.querySelector('.pvm-more')),
   });
+  // `#ring` = 우상 pane 에 주의 링(flashPane) · 좌 pane 에 OS 드롭 하이라이트(크롬 상태 확인용).
+  if (location.hash.includes('ring')) setTimeout(() => {
+    document.querySelector('.pane[data-pane-id="pb"]')?.classList.add('ring');
+    document.querySelector('.pane[data-pane-id="pa"]')?.classList.add('os-drop');
+  }, 50);
   window.__openAdd = () => document.querySelector('.mt-adds [data-cmd="ws.add"]').click();
 </script>
 </body>

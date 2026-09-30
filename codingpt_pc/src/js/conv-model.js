@@ -1184,6 +1184,18 @@ export function agentChoices(caps) {
  *  지금 모델이 목록에 없으면 맨 앞에 남긴다(바뀌지 않았는데 다른 것이 켜진 것처럼 보이지 않게).
  */
 export function modelChoices(caps, agent, current) {
+  const out = modelList(caps, agent);
+  if (!out.length) return [];
+  const cur = current ? String(current) : '';
+  // 지금 모델이 전체 ID(`claude-haiku-4-5-20251001`)이고 목록이 별칭(`haiku`)이면 같은 것이다 —
+  //  그 별칭을 켠다(원시 ID 를 한 줄 더 세우지 않는다). 별칭도 못 찾으면 맨 앞에 다듬은 이름으로 남긴다.
+  const onId = cur ? (out.some((x) => x.id === cur) ? cur : (familyOf(out, cur) || {}).id || cur) : '';
+  if (onId && !out.some((x) => x.id === onId)) out.unshift({ id: cur, label: prettyModelId(cur) });
+  return out.map((x) => ({ ...x, on: x.id === onId }));
+}
+
+/** 데몬이 알려 준 모델 목록(에이전트별 → 공용 순). 항목 = { id, label }. */
+function modelList(caps, agent) {
   const ag = caps && Array.isArray(caps.agents) ? caps.agents.find((a) => a && a.id === agent) : null;
   const raw = (ag && Array.isArray(ag.models) && ag.models.length) ? ag.models
     : (caps && Array.isArray(caps.models) ? caps.models : []);
@@ -1193,10 +1205,46 @@ export function modelChoices(caps, agent, current) {
     if (!id || out.some((x) => x.id === String(id))) continue;
     out.push({ id: String(id), label: String((m && typeof m === 'object' && m.label) || id) });
   }
-  if (!out.length) return [];
-  const cur = current ? String(current) : '';
-  if (cur && !out.some((x) => x.id === cur)) out.unshift({ id: cur, label: cur });
-  return out.map((x) => ({ ...x, on: x.id === cur }));
+  return out;
+}
+
+/** 전체 ID 의 토막(`-`·`.`·`[`·`]` 로 가른 것) 중 하나가 목록 항목의 id/라벨과 같으면 그 항목(3자 이상만 — 우연 일치 방지). */
+function familyOf(list, id) {
+  const toks = String(id).toLowerCase().split(/[-_.\[\]\s]+/).filter(Boolean);
+  return list.find((x) => {
+    const a = x.id.toLowerCase(), l = x.label.toLowerCase();
+    return (a.length >= 3 && toks.includes(a)) || (l.length >= 3 && toks.includes(l));
+  }) || null;
+}
+
+/**
+ * 원시 모델 ID → 사람이 읽는 이름(목록에서 못 찾았을 때의 폴백).
+ *  `claude-haiku-4-5-20251001` → `Haiku 4.5` · `claude-opus-4-1[1m]` → `Opus 4.1` · 그 밖(`gpt-5-codex`)은 날짜 꼬리만 뗀다.
+ */
+export function prettyModelId(id) {
+  let s = String(id || '').trim();
+  if (!s) return '';
+  s = s.replace(/\[[^\]]*\]$/, '').replace(/[-@](20\d{6}|\d{8})$/, '');
+  if (!/^claude-/i.test(s)) return s;
+  const toks = s.replace(/^claude-/i, '').split('-').filter(Boolean);
+  const words = [];
+  const nums = [];
+  for (const t of toks) (/^\d+$/.test(t) ? nums : words).push(t);
+  if (!words.length) return s;
+  const head = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  return nums.length ? `${head} ${nums.join('.')}` : head;
+}
+
+/**
+ * 표시용 모델 이름 — caps 목록의 라벨(Haiku/Sonnet/Opus)이 정본. 전체 ID 는 같은 계열의 별칭 라벨로,
+ *  그것도 없으면 prettyModelId. 헤더 알약과 하단 사용량 줄이 같은 규칙을 쓴다(PLAN §0.7 채팅).
+ */
+export function modelLabel(id, caps, agent) {
+  const cur = id ? String(id) : '';
+  if (!cur) return '';
+  const list = modelList(caps, agent);
+  const hit = list.find((x) => x.id === cur) || familyOf(list, cur);
+  return hit ? hit.label : prettyModelId(cur);
 }
 
 // ── 대화 안 검색(§4.5 — 클라 전용) ───────────────────────────────────────────
