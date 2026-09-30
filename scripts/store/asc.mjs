@@ -176,6 +176,20 @@ async function cmdPrepare(argv) {
   const build = wantBuild ? builds.find((b) => String(b.attributes?.version) === wantBuild) : builds[0];
   if (!build) die(wantBuild ? `처리 완료된 build ${wantBuild} 를 찾을 수 없습니다.` : '처리 완료(VALID)된 빌드가 없습니다 — 업로드/처리를 기다리세요.');
 
+  // ★ 편집 가능한 버전(철회·거절·제출 준비)이 이미 있으면 Apple 이 새 버전 생성을 409 로 막는다
+  //  ("cannot create a new version in the current state", 2026-09-30 실측: 0.4.6 철회 → 0.4.7 생성 불가).
+  //  그 레코드의 versionString 을 새 번호로 고쳐 **재사용**한다 — 심사 상세·로케일이 그대로 승계된다.
+  if (!target) {
+    const editable = vs.find((v) => SUBMITTABLE.has(v.state));
+    if (editable) {
+      await api(`/v1/appStoreVersions/${editable.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ data: { type: 'appStoreVersions', id: editable.id, attributes: { versionString: version } } }),
+      });
+      console.log(`편집 가능한 버전 ${editable.version}(${ko(editable.state)}) 을 ${version} 으로 이름 변경(재사용)`);
+      target = { ...editable, version };
+    }
+  }
   if (!target) {
     const created = await api('/v1/appStoreVersions', {
       method: 'POST',
