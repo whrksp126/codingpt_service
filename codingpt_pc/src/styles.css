@@ -3070,29 +3070,11 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .pane-mixed.pane-conv { display: none; }   /* 혼합 탭 — 표시는 pane.js 가 켠다(.pane-mixed 와 같은 규칙) */
 /* 전역 user-select:none 을 이 안에서만 되돌린다. `-webkit-` 필수(WKWebView 는 접두사 없는 선언을 무시한다). */
 .pane-conv, .pane-conv * { user-select: text; -webkit-user-select: text; }
-.pane-conv button, .pane-conv .conv-head, .pane-conv .conv-pop-head { user-select: none; -webkit-user-select: none; }
+.pane-conv button, .pane-conv .conv-pop-head { user-select: none; -webkit-user-select: none; }
 /* v1 의 위쪽 44px 는 TUI 토글 버튼 자리다 — 여기에는 그 버튼이 없다. */
 .pane-conv .chat-scroll { padding-top: 14px; }
 .conv-scroll:focus { outline: none; }
 .conv-rows { flex: 1 0 auto; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-
-.conv-head {
-  flex: none; display: flex; align-items: center; gap: 2px; height: 32px; padding: 0 6px 0 10px;
-  background: var(--surface); border-bottom: 1px solid var(--border);
-}
-.conv-head-gap { flex: 1 1 auto; }
-.conv-title {
-  min-width: 0; max-width: 60%; padding: 3px 6px; margin-left: -6px; border: none; border-radius: var(--r-sm);
-  background: transparent; color: var(--text); font-family: var(--ui-font); font-size: 13px; font-weight: 500;
-  text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.conv-title:hover:not(:disabled) { color: var(--text); } /* 헤더 글자 버튼 = 호버 채움 없음(타이틀바 모델) */
-.conv-title:disabled { cursor: default; color: var(--text3); }
-.conv-title-input {
-  flex: 1 1 auto; min-width: 0; max-width: 60%; height: 24px; padding: 0 6px; margin-left: -6px;
-  border-radius: var(--r-sm);
-  font-family: var(--ui-font); font-size: 13px; font-weight: 500;
-}
 
 /* 연결 상태 줄 — 재연결 중 / PC 오프라인 / 터미널에서 사용 중 */
 .conv-conn {
@@ -3166,9 +3148,9 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 /* 전송 버튼의 중단 모양 — 같은 자리, 같은 색. 글리프만 다르다 */
 .chat-send.stop { background: var(--text2); }
 
-/* 대화 목록 — 헤더 아래로 펼친다. 이 pane 밖으로 나가지 않는다(옆 pane 의 프리뷰 위에 걸치지 않게) */
+/* 대화 목록 — 컴포저 위로 펼친다(헤더가 없어졌다). 이 pane 밖으로 나가지 않는다(옆 pane 의 프리뷰 위에 걸치지 않게) */
 .conv-pop {
-  position: absolute; top: 36px; right: 8px; z-index: var(--z-popover);
+  position: absolute; bottom: 70px; left: 8px; z-index: var(--z-popover);
   width: min(360px, calc(100% - 16px)); max-height: min(70%, 480px);
   display: flex; flex-direction: column;
 }
@@ -3217,23 +3199,44 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 /* 컨트롤 행 왼쪽 알약 묶음(에이전트 · 모드) */
 .conv-ctl-left, .conv-ctl-pills { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .conv-agent.hidden { display: none; }
-/* 모델 — 헤더 오른쪽. 데몬이 목록을 줄 때만 보인다(없으면 숨김). */
-.conv-h-model {
-  flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 180px; height: 22px;
-  padding: 0 6px 0 8px; margin-right: 4px; border: none; border-radius: var(--r-sm);
-  background: transparent; color: var(--text2); font-family: var(--ui-font); font-size: 12px; font-weight: 500;
+/* 도구줄(컴포저 아래, 2026-10-02) — Claude 앱 배치: 왼쪽 [+][더보기][모드] · 오른쪽 [모델][추론 강도][사용량 링][전송] */
+.conv-ctl-right { display: inline-flex; align-items: center; gap: 2px; margin-right: 6px; }
+.conv-tool {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 26px; min-width: 26px;
+  padding: 0 8px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text2);
+  font-family: var(--ui-font); font-size: 13px; font-weight: 400; white-space: nowrap;
 }
-.conv-h-model:hover { background: var(--hover); color: var(--text); }
-.conv-h-model:active { background: var(--pressed); }
-.conv-h-model.hidden { display: none; }
-.conv-h-model.busy { opacity: 0.55; pointer-events: none; }
-.conv-h-model-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conv-pick-menu.head { top: 36px; bottom: auto; left: auto; right: 8px; min-width: 200px; }
-/* 사용량 줄 — 컴포저 아래 한 줄(v1 상태 줄과 같은 모양) */
-.conv-usage { padding: 5px 14px 0; background: transparent; border-top: none; }   /* 컴포저 아래 사용량 한 줄 — 띠 없이 11 dim */
-.conv-usage.hidden { display: none; }
+.conv-tool:hover { background: var(--hover); color: var(--text); }
+.conv-tool:active { background: var(--pressed); }
+.conv-tool.hidden { display: none; }
+.conv-tool.busy { opacity: 0.55; pointer-events: none; }
+.conv-t-more { padding: 0 6px; }
+.conv-t-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.conv-t-ring { padding: 0 4px; }
+.conv-t-ring svg circle { fill: none; stroke-width: 2.4; }
+.conv-ring-bg { stroke: var(--border-ctrl); }
+.conv-ring-fg { stroke: var(--text2); stroke-linecap: round; transition: stroke-dashoffset var(--dur-2) var(--ease-out); }
+.conv-t-ring.warn .conv-ring-fg { stroke: var(--warn); }
+/* 메뉴 변형 — 오른쪽 정렬(모델·추론 강도·사용량), 아이콘·단축 번호·배지·구분선 */
+.conv-pick-menu.right { left: auto; right: 8px; min-width: 240px; }
+.chat-mode-row-icon { display: inline-flex; flex: none; color: var(--text3); width: 16px; justify-content: center; }
+.chat-mode-row-kbd { display: inline-flex; flex: none; margin-left: auto; padding-left: 14px; color: var(--dim); font-size: 12px; }
+.chat-mode-badge { margin-left: 8px; padding: 1px 6px; border-radius: var(--r-xs); background: var(--elevated2); color: var(--text3); font-size: 11px; font-weight: 400; }
+.chat-mode-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+.conv-plus-menu { min-width: 250px; }
+.conv-usage-pop { min-width: 300px; padding-bottom: 8px; }
+.conv-usage-pop .chat-status-row { padding: 4px 10px; }
+/* 추론 강도 슬라이더 */
+.conv-eff-pop { min-width: 280px; padding: 12px 14px 10px; gap: 8px; }
+.conv-eff-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.conv-eff-k { color: var(--text3); }
+.conv-eff-v { color: var(--text); font-weight: 600; }
+.conv-eff-ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--dim); }
+.conv-eff-range { width: 100%; margin: 2px 0; accent-color: var(--text2); }
+.conv-eff-reset { align-self: center; border: none; background: transparent; color: var(--text3); font-size: 12px; padding: 2px 8px; border-radius: var(--r-sm); }
+.conv-eff-reset:hover { background: var(--hover); color: var(--text); }
 /* 대화 안 검색 — 헤더 아래에 뜬다(헤더 버튼을 가리지 않게). */
-.pane-conv > .conv-find { top: 40px; flex-wrap: wrap; max-width: calc(100% - 28px); }
+.pane-conv > .conv-find { top: 8px; flex-wrap: wrap; max-width: calc(100% - 28px); }
 .conv-find-more { flex-basis: 100%; text-align: left; padding: 3px 4px 1px; }
 .conv-find-more.hidden { display: none; }
 ::highlight(conv-find) { background-color: rgba(199, 139, 30, 0.30); }

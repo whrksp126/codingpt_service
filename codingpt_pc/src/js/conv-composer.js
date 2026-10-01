@@ -66,6 +66,7 @@ export class ConvComposer {
           <button class="chat-plus" type="button" title="${i18n.t('파일 넣기')}">${icons.plus({ size: 18 })}</button>
           <span class="conv-ctl-left"></span>
           <span class="chat-ctl-gap"></span>
+          <span class="conv-ctl-right"></span>
           <button class="chat-send" type="button" disabled></button>
         </div>
       </div>`;
@@ -84,6 +85,7 @@ export class ConvComposer {
       this.o.preview?.(a);
     });
     if (this.o.ctlLeft) el.querySelector(".conv-ctl-left").appendChild(this.o.ctlLeft);
+    if (this.o.ctlRight) el.querySelector(".conv-ctl-right").appendChild(this.o.ctlRight);
 
     this.inputEl.textContent = String(this.o.getDraft?.() || "");
 
@@ -91,7 +93,7 @@ export class ConvComposer {
       if (this._btnMode === "stop") this.o.onStop?.();
       else this._send();
     });
-    this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePicker(); });
+    this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePlusMenu(); });
 
     // ── IME 조합 ──
     //  한글은 조합 중 Enter 가 "확정"이다. 그 Enter 로 전송하면 마지막 글자가 빠진 채 나가거나
@@ -135,6 +137,12 @@ export class ConvComposer {
 
   _onKeydown(e) {
     const composing = e.isComposing || e.keyCode === 229 || this._composing;
+    // ⌘U / Ctrl+U = 파일 또는 사진 추가(Claude 앱과 같은 조합)
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === "u" || e.key === "U") && !composing) {
+      e.preventDefault(); e.stopPropagation();
+      void this._addFromDialog();
+      return;
+    }
     // 슬래시 팔레트가 떠 있으면 ↑↓/Enter/Tab 은 목록 조작이다. Enter 는 **채워넣기**지 전송이 아니다.
     if (this.cmdsEl && !composing) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -235,11 +243,12 @@ export class ConvComposer {
     try { this.inputEl?.focus(); } catch (_) { /* noop */ }
   }
 
-  hasPopover() { return !!(this.cmdsEl || this.pickEl); }
+  hasPopover() { return !!(this.cmdsEl || this.pickEl || this.plusMenuEl); }
 
   closePopovers() {
     this._closeCmds();
     this._closePicker();
+    this._closePlusMenu();
   }
 
   /** 전송 버튼·문구를 지금 상태에 맞춘다. 작업 상태가 바뀌면 뷰가 부른다. */
@@ -403,6 +412,46 @@ export class ConvComposer {
     r.collapse(false);
     sel.removeAllRanges();
     sel.addRange(r);
+  }
+
+  // ── `+` 메뉴 — 파일 또는 사진 추가(2026-10-02: Claude 앱 도구줄과 같은 모양, 항목은 일단 이것 하나) ──
+  _togglePlusMenu() {
+    if (this.plusMenuEl) { this._closePlusMenu(); return; }
+    this._closePicker();
+    this._closeCmds();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu conv-plus-menu";
+    wrap.innerHTML = `<div class="chat-mode-row" data-a="file"><span class="chat-mode-row-icon">${icons.paperclip ? icons.paperclip({ size: 15 }) : icons.plus({ size: 15 })}</span>`
+      + `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${i18n.t('파일 또는 사진 추가')}</span></span>`
+      + `<span class="chat-mode-row-kbd">${IS_WINDOWS ? "Ctrl U" : "⌘ U"}</span></div>`;
+    wrap.addEventListener("click", (e) => {
+      if (!e.target.closest?.("[data-a='file']")) return;
+      this._closePlusMenu();
+      void this._addFromDialog();
+    });
+    this.el.appendChild(wrap);
+    this.plusMenuEl = wrap;
+    this._plusCloser = (e) => { if (!wrap.contains(e.target) && !this.plusEl.contains(e.target)) this._closePlusMenu(); };
+    setTimeout(() => { if (this.plusMenuEl === wrap) document.addEventListener("mousedown", this._plusCloser, true); }, 0);
+  }
+
+  _closePlusMenu() {
+    if (this._plusCloser) document.removeEventListener("mousedown", this._plusCloser, true);
+    this._plusCloser = null;
+    this.plusMenuEl?.remove();
+    this.plusMenuEl = null;
+  }
+
+  /** OS 파일 선택창 — 고른 파일은 첨부 칩이 된다(드롭·붙여넣기와 같은 길, origin local). */
+  async _addFromDialog() {
+    const d = window.__TAURI__ && window.__TAURI__.dialog;
+    if (!d || !d.open) return;
+    let r = null;
+    try { r = await d.open({ multiple: true, directory: false }); } catch (_) { r = null; }
+    const paths = Array.isArray(r) ? r : (r ? [r] : []);
+    const list = paths.map((x) => (typeof x === "string" ? x : x && x.path)).filter(Boolean);
+    if (list.length) this.addFiles(list.map((path) => ({ path, origin: "local" })));
+    this.focus();
   }
 
   // ── `+` 파일 넣기 ──

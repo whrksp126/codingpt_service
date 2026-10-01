@@ -591,5 +591,20 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   eq(M.tabPatchFor({ threadId: 'tA', title: 'A' }, 'tA', { id: 'tA', title: '' }), null, '제목을 아직 모르면 지금 라벨을 둔다');
 }
 
+// ── 도구줄(2026-10-02): 모델 분할·플랜 한도·추론 강도 이름 ──
+{
+  const caps = { agents: [{ id: 'claude', defaultModel: 'sonnet', models: [] }] };
+  const ch = (on) => ['opus', 'sonnet', 'haiku', 'fable', 'claude-fable-5-1', 'claude-opus-5-5', 'claude-opus-4-8', 'claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-haiku-4-5-20251001']
+    .map((id) => ({ id, label: id, on: id === on }));
+  const sp = M.modelSplit(ch('sonnet'), caps, 'claude');
+  eq(sp.top.map((x) => x.id), ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-haiku-4-5'], '계열별 최신 버전만 위에(Opus·Sonnet·Fable·Haiku)');
+  ok(sp.top.find((x) => x.id === 'claude-sonnet-5-5').on && sp.top.find((x) => x.id === 'claude-sonnet-5-5').badge, '별칭이 켜져 있으면 그 계열 최신 줄이 켜짐 + 기본값 배지');
+  eq(sp.more.map((x) => x.id), ['claude-opus-4-8', 'claude-sonnet-4-6'], '나머지는 더 많은 모델(날짜 접미 변형은 합친다)');
+  eq(M.modelSplit([{ id: 'x', label: 'X', on: true }], caps, 'codex').top.length, 1, '버전 ID 를 모르는 에이전트는 전부 위에');
+  const st = M.usageStatus({ model: 'm', usage: { contextTokens: 50, contextMax: 100, rateLimit: { kind: 'five_hour', utilization: 0.73, resetsAt: 1 } } });
+  eq(st.limits && st.limits[0].pct, 73, '플랜 한도 = utilization×100');
+  eq(M.effortLabel('xhigh') !== 'xhigh' && M.effortLabel('zzz'), 'zzz', '추론 강도: 아는 단계는 사람 말, 모르면 그대로');
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

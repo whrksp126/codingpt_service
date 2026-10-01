@@ -22,7 +22,7 @@ import {
   respondParams, isBusy, workingInfo, fmtDuration, parseConvError, convErrorText, isOfflineCode,
   terminalLaunch, fmtAgo, threadDot, needsAdopt, threadTitle, convModeLabel, convModeChoices,
   splitAttachLines, attachPlan, attachUploadName, attachmentsForWire, createByteCache, fileMissingText,
-  usageStatus, agentChoices, modelChoices, modelLabel, searchExpand, tabPatchFor,
+  usageStatus, agentChoices, modelChoices, modelLabel, searchExpand, tabPatchFor, modelSplit, effortLabel,
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
@@ -142,14 +142,6 @@ export class ConvView {
     const el = document.createElement("div");
     el.className = "chat conv";
     el.innerHTML = `
-      <div class="conv-head">
-        <button class="conv-title" type="button"></button>
-        <span class="conv-head-gap"></span>
-        <button class="conv-h-model hidden" type="button" title="${i18n.t('모델')}"><span class="conv-h-model-label"></span><span class="chat-mode-caret">${icons.chevronDown({ size: 11 })}</span></button>
-        <button class="pane-ctrl conv-h-term" type="button" title="${i18n.t('터미널에서 이어가기')}">${icons.terminal({ size: 15 })}</button>
-        <button class="pane-ctrl conv-h-list" type="button" title="${i18n.t('대화 목록')}">${icons.history({ size: 15 })}</button>
-        <button class="pane-ctrl conv-h-new" type="button" title="${i18n.t('새 대화')}">${icons.edit({ size: 15 })}</button>
-      </div>
       <div class="conv-conn hidden"></div>
       <div class="chat-banner hidden"></div>
       <div class="chat-scroll conv-scroll"><div class="conv-rows"></div></div>
@@ -157,17 +149,36 @@ export class ConvView {
       <div class="conv-dock-more hidden"></div>`;
     this.host.appendChild(el);
     this.el = el;
-    this.titleEl = el.querySelector(".conv-title");
     this.connEl = el.querySelector(".conv-conn");
     this.bannerEl = el.querySelector(".chat-banner");
     this.scrollEl = el.querySelector(".conv-scroll");
     this.rowsEl = el.querySelector(".conv-rows");
     this.dockEl = el.querySelector(".conv-dock");
     this.dockMoreEl = el.querySelector(".conv-dock-more");
-    this.termBtn = el.querySelector(".conv-h-term");
-    this.listBtn = el.querySelector(".conv-h-list");
-    this.modelBtn = el.querySelector(".conv-h-model");
+    // 도구줄(컴포저 아래) — Claude 앱과 같은 배치(2026-10-02): 왼쪽 [+] [더보기] [모드] · 오른쪽 [모델] [추론 강도] [사용량 링] [전송].
+    //  헤더 줄(제목·모델·터미널·목록·새 대화)은 없앴다 — 그 기능은 [더보기] 메뉴로 갔다.
+    const mkTool = (cls, html, title) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "conv-tool " + cls;
+      b.innerHTML = html;
+      if (title) b.title = title;
+      return b;
+    };
+    this.moreBtn = mkTool("conv-t-more", icons.dots({ size: 16 }), i18n.t('더 보기'));
+    this.moreBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleMoreMenu(); });
+    this.listBtn = this.moreBtn;   // 대화 목록 팝오버의 바깥 클릭 판정이 쓰는 앵커
+    this.modelBtn = mkTool("conv-t-model hidden", `<span class="conv-t-label"></span>`, i18n.t('모델'));
     this.modelBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleModelMenu(); });
+    this.effortBtn = mkTool("conv-t-effort hidden", `<span class="conv-t-label"></span>`, i18n.t('추론 강도'));
+    this.effortBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleEffortPop(); });
+    this.ringBtn = mkTool("conv-t-ring hidden",
+      `<svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle class="conv-ring-bg" cx="10" cy="10" r="7.5"/><circle class="conv-ring-fg" cx="10" cy="10" r="7.5" transform="rotate(-90 10 10)"/></svg>`,
+      i18n.t('사용량'));
+    this.ringBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleUsagePop(); });
+    const ctlRight = document.createElement("span");
+    ctlRight.className = "conv-ctl-pills";
+    ctlRight.append(this.modelBtn, this.effortBtn, this.ringBtn);
 
     // 모드 알약 — 모양은 v1 과 같다(.chat-mode). 여기서는 키 입력 대행이 아니라 conv.set 이다.
     this.modeEl = document.createElement("button");
@@ -185,7 +196,7 @@ export class ConvView {
     this.agentEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleAgentMenu(); });
     const ctlLeft = document.createElement("span");
     ctlLeft.className = "conv-ctl-pills";
-    ctlLeft.append(this.agentEl, this.modeEl);
+    ctlLeft.append(this.moreBtn, this.agentEl, this.modeEl);
 
     this.composer = new ConvComposer({
       onSend: (text, atts) => this._send(text, atts),
@@ -204,6 +215,7 @@ export class ConvView {
         return r.items || [];
       },
       ctlLeft,
+      ctlRight,
       stage: (a) => this._stageAttachment(a),
       thumb: (a) => this._attachThumb(a),
       preview: (a) => void this._previewAttachment(a),
@@ -211,12 +223,6 @@ export class ConvView {
         : i18n.t('첨부하지 못했어요 · {name}', { name: a.name || "" }), "warn", 5000),
     });
     this.composer.mount(el);
-    // 사용량 줄(§4.5) — 컴포저 아래 "모델 · 컨텍스트 n%". 누르면 상세(v1 상태 줄과 같은 모양·같은 문구).
-    this.usageEl = document.createElement("div");
-    this.usageEl.className = "chat-statusline conv-usage hidden";
-    this.usageEl.addEventListener("click", () => { this._usageOpen = !this._usageOpen; this._usageKey = ""; this._syncUsage(); });
-    this.composer.el.appendChild(this.usageEl);
-
     // 맨 아래로 — 컴포저의 자식이다(입력 줄 수가 바뀌어도 항상 바로 위에 뜬다. v1 과 같은 자리).
     this.jumpEl = document.createElement("button");
     this.jumpEl.className = "chat-jump hidden";
@@ -255,10 +261,6 @@ export class ConvView {
     // 본문을 누른 뒤의 Esc(중단)가 이 뷰에 닿게 한다 — 스크롤 영역은 원래 포커스를 못 받아서 키가 body 로 간다.
     this.scrollEl.tabIndex = -1;
     this.rowsEl.addEventListener("click", (e) => this._onBodyClick(e));
-    this.titleEl.addEventListener("click", () => this._editTitle());
-    this.termBtn.addEventListener("click", () => void this._toTerminal());
-    this.listBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleList(); });
-    el.querySelector(".conv-h-new").addEventListener("click", () => this.newThread());
     this.connEl.addEventListener("click", (e) => {
       if (e.target.closest?.("[data-act='adopt']")) void this._adoptCurrent();
     });
@@ -1013,14 +1015,6 @@ export class ConvView {
   }
 
   _syncHead() {
-    if (!this.titleEl || this._editing) return;
-    const th = this.m.thread;
-    const title = this.m.threadId ? threadTitle(th || { title: this.ctx.tab?.()?.title }) : i18n.t('새 대화');
-    if (this.titleEl.textContent !== title) this.titleEl.textContent = title;
-    this.titleEl.disabled = !this.m.threadId;
-    this.titleEl.title = this.m.threadId ? i18n.t('대화 제목 바꾸기') : "";
-    // 터미널로 넘기기는 이 PC 의 대화만 — 다른 PC 에 터미널을 만드는 길이 PC 앱에는 없다.
-    this.termBtn.classList.toggle("hidden", !this.m.threadId || !this.ctx.isLocal?.() || !this.ctx.openTerminal);
     const label = convModeLabel(this.m.threadId ? (this._mode || "default") : this._newMode);
     const lEl = this.modeEl.querySelector(".chat-mode-label");
     if (lEl.textContent !== label) lEl.textContent = label;
@@ -1039,11 +1033,20 @@ export class ConvView {
     this.modelBtn.classList.toggle("hidden", !models.length);
     if (models.length) {
       const on = models.find((m) => m.on);
-      const mEl = this.modelBtn.querySelector(".conv-h-model-label");
-      const eff = this._effortNow();
-      const txt = (on ? on.label : i18n.t('기본 모델')) + (eff ? " · " + eff : "");
+      const mEl = this.modelBtn.querySelector(".conv-t-label");
+      const txt = on ? on.label : i18n.t('기본 모델');
       if (mEl.textContent !== txt) mEl.textContent = txt;
       this.modelBtn.classList.toggle("busy", !!this._modelBusy);
+    }
+    // 추론 강도 — 그 에이전트의 CLI 가 단계를 알려 줄 때만.
+    const efforts = this._effortList();
+    this.effortBtn.classList.toggle("hidden", !efforts.length);
+    if (efforts.length) {
+      const cur = this._effortNow();
+      const txt = cur ? effortLabel(cur) : i18n.t('기본값');
+      const eEl = this.effortBtn.querySelector(".conv-t-label");
+      if (eEl.textContent !== txt) eEl.textContent = txt;
+      this.effortBtn.classList.toggle("busy", !!this._modelBusy);
     }
   }
 
@@ -1054,70 +1057,57 @@ export class ConvView {
     return (agents.find((a) => a.id === this._newAgent) || agents[0] || { id: "claude" }).id;
   }
 
-  // ── 사용량 줄(§4.5) ──
-  _syncUsage() {
-    if (!this.usageEl) return;
+  // ── 사용량 링(도구줄 오른쪽) — 컨텍스트 점유율을 링으로, 눌러서 상세(플랜 한도 포함) ──
+  _usageState() {
     const raw = this.m.threadId ? usageStatus(this.m.thread) : null;
-    // 원시 모델 ID(`claude-haiku-4-5-…`) 대신 caps 라벨(Haiku) — 헤더 알약과 같은 이름(conv-model.modelLabel).
-    const st = raw && raw.model ? { ...raw, model: modelLabel(raw.model, this._caps, this._agentId()) } : raw;
-    const chips = statusChips(st);
-    const key = JSON.stringify(st) + "|" + this._usageOpen;
+    // 원시 모델 ID(`claude-haiku-4-5-…`) 대신 caps 라벨(Haiku) — 모델 버튼과 같은 이름(conv-model.modelLabel).
+    return raw && raw.model ? { ...raw, model: modelLabel(raw.model, this._caps, this._agentId()) } : raw;
+  }
+
+  _syncUsage() {
+    if (!this.ringBtn) return;
+    const st = this._usageState();
+    const pct = st && st.contextPct != null ? st.contextPct : null;
+    const key = JSON.stringify(st);
     if (key === this._usageKey) return;
     this._usageKey = key;
-    if (!chips.length) { this.usageEl.classList.add("hidden"); this.usageEl.innerHTML = ""; return; }
-    const rows = this._usageOpen
-      ? statusDetail(st, Date.now()).map((r) =>
+    this.ringBtn.classList.toggle("hidden", !st || (pct == null && !st.limits));
+    const fg = this.ringBtn.querySelector(".conv-ring-fg");
+    const C = 2 * Math.PI * 7.5;
+    if (fg) { fg.style.strokeDasharray = String(C); fg.style.strokeDashoffset = String(C * (1 - (pct || 0) / 100)); }
+    this.ringBtn.classList.toggle("warn", pct != null && pct >= 90);
+    this.ringBtn.title = pct != null ? i18n.t('컨텍스트 {n}%', { n: pct }) : i18n.t('사용량');
+    if (this.usagePopEl) this._paintUsagePop();
+  }
+
+  _paintUsagePop() {
+    const st = this._usageState();
+    const rows = statusDetail(st, Date.now());
+    this.usagePopEl.innerHTML = `<div class="chat-mode-head">${i18n.t('사용량')}</div>`
+      + (rows.length ? rows.map((r) =>
         `<div class="chat-status-row"><span class="chat-status-k">${escapeHtml(r.label)}</span>`
         + `<span class="chat-status-v">${escapeHtml(r.value)}</span>`
         + (r.sub ? `<span class="chat-status-s">${escapeHtml(r.sub)}</span>` : "") + "</div>").join("")
-      : "";
-    this.usageEl.innerHTML = `<div class="chat-status-chips">${chips.map((c) => `<span class="chat-status-chip">${escapeHtml(c.text)}</span>`).join("")}</div>`
-      + (rows ? `<div class="chat-status-detail">${rows}</div>` : "");
-    this.usageEl.classList.toggle("open", this._usageOpen);
-    this.usageEl.classList.remove("hidden");
+        : `<div class="chat-pick-empty empty-desc">${i18n.t('아직 표시할 사용량이 없어요')}</div>`);
   }
 
-  _editTitle() {
-    if (!this.m.threadId || this._editing) return;
-    this._editing = true;
-    const cur = threadTitle(this.m.thread || {});
-    const input = document.createElement("input");
-    input.className = "conv-title-input";
-    input.type = "text";
-    input.value = cur;
-    input.maxLength = 120;
-    this.titleEl.replaceWith(input);
-    let done = false;
-    const finish = async (save) => {
-      if (done) return;
-      done = true;
-      const v = input.value.trim();
-      input.replaceWith(this.titleEl);
-      this._editing = false;
-      if (save && v && v !== cur) {
-        const prev = this.m.thread ? this.m.thread.title : "";
-        this.m.thread = { ...(this.m.thread || {}), title: v, titleSet: true };
-        this.ctx.patchTab?.({ title: v });
-        try {
-          const r = await this._rpc("conv.set", { threadId: this.m.threadId, title: v });
-          if (r.thread) applyThreadHint(this.m, r.thread);
-        } catch (e) {
-          this.m.thread = { ...(this.m.thread || {}), title: prev };
-          this.ctx.patchTab?.({ title: prev || "" });
-          this._setBanner(convErrorText(e.code), "warn", 4000);
-        }
-      }
-      this._syncHead();
-    };
-    input.addEventListener("keydown", (e) => {
-      e.stopPropagation();
-      if (e.isComposing || e.keyCode === 229) return;
-      if (e.key === "Enter") { e.preventDefault(); void finish(true); }
-      else if (e.key === "Escape") { e.preventDefault(); void finish(false); }
-    });
-    input.addEventListener("blur", () => void finish(true));
-    input.focus();
-    input.select();
+  _toggleUsagePop() {
+    if (this.usagePopEl) { this._closeUsagePop(); return; }
+    this._closePopovers();
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu conv-pick-menu right conv-usage-pop";
+    this.composer.el.appendChild(wrap);
+    this.usagePopEl = wrap;
+    this._paintUsagePop();
+    this._usageCloser = (e) => { if (!wrap.contains(e.target) && !this.ringBtn.contains(e.target)) this._closeUsagePop(); };
+    setTimeout(() => { if (this.usagePopEl === wrap) document.addEventListener("mousedown", this._usageCloser, true); }, 0);
+  }
+
+  _closeUsagePop() {
+    if (this._usageCloser) document.removeEventListener("mousedown", this._usageCloser, true);
+    this._usageCloser = null;
+    this.usagePopEl?.remove();
+    this.usagePopEl = null;
   }
 
   // ── 모드 ──
@@ -1132,30 +1122,59 @@ export class ConvView {
   // ── 에이전트·모델 고르기(§4.5) — 모드 목록과 같은 모양의 작은 메뉴 ──
   _openPick(anchor, rows, onPick, align) {
     this._closePick();
+    this._closeUsagePop();
+    this._closeEffortPop();
     this.composer?.closePopovers();
     this._closeModeMenu();
     const wrap = document.createElement("div");
-    wrap.className = "chat-mode-menu conv-pick-menu" + (align === "head" ? " head" : "");
-    wrap.innerHTML = rows.map((r) => r.head ? `<div class="chat-mode-head">${escapeHtml(r.head)}</div>` :
-      `<div class="chat-mode-row${r.on ? " on" : ""}" data-id="${escapeHtml(r.id)}">` +
-      `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(r.label)}</span>` +
-      (r.desc ? `<span class="chat-mode-row-desc">${escapeHtml(r.desc)}</span>` : "") + `</span>` +
-      `<span class="chat-mode-row-mark">${r.on ? icons.check({ size: 12 }) : ""}</span></div>`).join("");
+    wrap.className = "chat-mode-menu conv-pick-menu" + (align === "right" ? " right" : "");
+    let n = 0;
+    const keyed = [];
+    wrap.innerHTML = rows.map((r) => {
+      if (r.head) return `<div class="chat-mode-head">${escapeHtml(r.head)}</div>`;
+      if (r.sep) return `<div class="chat-mode-sep"></div>`;
+      const k = r.kbd === false ? "" : String(++n);
+      if (k) keyed.push(r);
+      return `<div class="chat-mode-row${r.on ? " on" : ""}" data-id="${escapeHtml(r.id)}">`
+        + (r.icon ? `<span class="chat-mode-row-icon">${r.icon}</span>` : "")
+        + `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(r.label)}`
+        + (r.badge ? `<span class="chat-mode-badge">${escapeHtml(r.badge)}</span>` : "") + `</span>`
+        + (r.desc ? `<span class="chat-mode-row-desc">${escapeHtml(r.desc)}</span>` : "") + `</span>`
+        + (r.chev ? `<span class="chat-mode-row-kbd">${icons.chevronRight({ size: 13 })}</span>`
+          : (r.on ? `<span class="chat-mode-row-mark">${icons.check({ size: 13 })}</span>` : (k ? `<span class="chat-mode-row-kbd">${k}</span>` : ""))) + `</div>`;
+    }).join("");
     wrap.addEventListener("click", (e) => {
       const row = e.target.closest?.(".chat-mode-row");
       if (!row) return;
       this._closePick();
       onPick(row.dataset.id);
     });
-    (align === "head" ? this.el : this.composer.el).appendChild(wrap);
+    this.composer.el.appendChild(wrap);
     this._pickEl = wrap;
     this._pickCloser = (e) => { if (!wrap.contains(e.target) && !anchor.contains(e.target)) this._closePick(); };
-    setTimeout(() => { if (this._pickEl === wrap) document.addEventListener("mousedown", this._pickCloser, true); }, 0);
+    // 숫자 키 = 그 번호의 항목(Claude 앱 메뉴와 같다). 입력칸에 글자가 들어가지 않게 캡처에서 먹는다.
+    this._pickKeys = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); this._closePick(); this.focus(); return; }
+      const i = /^[1-9]$/.test(e.key) ? Number(e.key) - 1 : -1;
+      if (i < 0 || !keyed[i]) return;
+      e.preventDefault(); e.stopPropagation();
+      const r = keyed[i];
+      this._closePick();
+      onPick(r.id);
+    };
+    setTimeout(() => {
+      if (this._pickEl !== wrap) return;
+      document.addEventListener("mousedown", this._pickCloser, true);
+      document.addEventListener("keydown", this._pickKeys, true);
+    }, 0);
   }
 
   _closePick() {
     if (this._pickCloser) document.removeEventListener("mousedown", this._pickCloser, true);
+    if (this._pickKeys) document.removeEventListener("keydown", this._pickKeys, true);
     this._pickCloser = null;
+    this._pickKeys = null;
     this._pickEl?.remove();
     this._pickEl = null;
   }
@@ -1181,20 +1200,83 @@ export class ConvView {
 
   _toggleModelMenu() {
     if (this._pickEl && this._pickFor === "model") { this._closePick(); return; }
-    const models = this._modelChoices();
-    if (!models.length) return;
-    const rows = models.map((m) => ({ ...m, desc: m.hint || "" }));
-    // 추론 강도 — 이 PC 의 CLI 가 아는 단계(conv.caps 의 efforts). 없으면 줄이 없다.
-    const ag = (this._caps && this._caps.agents || []).find((a) => a.id === this._agentId());
-    const efforts = ag && Array.isArray(ag.efforts) ? ag.efforts : [];
-    if (efforts.length) {
-      const cur = this._effortNow();
-      rows.push({ head: i18n.t('추론 강도') });
-      rows.push({ id: "e:", label: ag.defaultEffort ? i18n.t('기본값 ({name})', { name: ag.defaultEffort }) : i18n.t('기본값'), on: !cur });
-      for (const e of efforts) rows.push({ id: "e:" + e, label: e, on: cur === e });
-    }
-    this._openPick(this.modelBtn, rows, (id) => { if (id.startsWith("e:")) void this._pickEffort(id.slice(2)); else void this._pickModel(id); }, "head");
+    const choices = this._modelChoices();
+    if (!choices.length) return;
+    const { top, more } = modelSplit(choices, this._caps, this._agentId());
+    const rows = top.map((m) => ({ id: m.id, label: m.label, on: m.on, badge: m.badge }));
+    // 이전 버전은 "더 많은 모델" 로(Claude 앱과 같다) — 눌러 목록을 바꿔 그린다.
+    if (more.length) { rows.push({ sep: true }); rows.push({ id: "more", label: i18n.t('더 많은 모델'), chev: true, kbd: false }); }
+    const pick = (id) => {
+      if (id === "more") {
+        const rows2 = [{ id: "back", label: i18n.t('뒤로'), icon: icons.chevronLeft({ size: 14 }), kbd: false }, { sep: true },
+          ...more.map((m) => ({ id: m.id, label: m.label, on: m.on, kbd: false }))];
+        this._openPick(this.modelBtn, rows2, (id2) => { if (id2 === "back") this._toggleModelMenu(); else void this._pickModel(id2); }, "right");
+        this._pickFor = "model";
+        return;
+      }
+      void this._pickModel(id);
+    };
+    this._openPick(this.modelBtn, rows, pick, "right");
     this._pickFor = "model";
+  }
+
+  // ── 추론 강도 — 슬라이더 팝업(노력: 더 빠르게 ↔ 더 스마트하게) ──
+  _effortList() {
+    const ag = (this._caps && this._caps.agents || []).find((a) => a.id === this._agentId());
+    return ag && Array.isArray(ag.efforts) ? ag.efforts : [];
+  }
+
+  _toggleEffortPop() {
+    if (this.effortPopEl) { this._closeEffortPop(); return; }
+    const list = this._effortList();
+    if (!list.length) return;
+    this._closePopovers();
+    const ag = (this._caps && this._caps.agents || []).find((a) => a.id === this._agentId()) || {};
+    const cur = this._effortNow() || ag.defaultEffort || "";
+    const idx = Math.max(0, list.indexOf(cur));
+    const wrap = document.createElement("div");
+    wrap.className = "chat-mode-menu conv-pick-menu right conv-eff-pop";
+    wrap.innerHTML = `<div class="conv-eff-head"><span class="conv-eff-k">${i18n.t('노력')}</span><span class="conv-eff-v"></span></div>`
+      + `<div class="conv-eff-ends"><span>${i18n.t('더 빠르게')}</span><span>${i18n.t('더 스마트하게')}</span></div>`
+      + `<input class="conv-eff-range" type="range" min="0" max="${list.length - 1}" step="1" value="${idx}" />`
+      + `<button class="conv-eff-reset" type="button">${ag.defaultEffort ? i18n.t('기본값 ({name})', { name: effortLabel(ag.defaultEffort) }) : i18n.t('기본값')}</button>`;
+    this.composer.el.appendChild(wrap);
+    this.effortPopEl = wrap;
+    const range = wrap.querySelector(".conv-eff-range");
+    const val = wrap.querySelector(".conv-eff-v");
+    const paint = () => { val.textContent = effortLabel(list[Number(range.value)]); };
+    paint();
+    range.addEventListener("input", paint);
+    range.addEventListener("change", () => void this._pickEffort(list[Number(range.value)]));
+    wrap.querySelector(".conv-eff-reset").addEventListener("click", () => { this._closeEffortPop(); void this._pickEffort(""); });
+    this._effortCloser = (e) => { if (!wrap.contains(e.target) && !this.effortBtn.contains(e.target)) this._closeEffortPop(); };
+    setTimeout(() => { if (this.effortPopEl === wrap) document.addEventListener("mousedown", this._effortCloser, true); }, 0);
+  }
+
+  _closeEffortPop() {
+    if (this._effortCloser) document.removeEventListener("mousedown", this._effortCloser, true);
+    this._effortCloser = null;
+    this.effortPopEl?.remove();
+    this.effortPopEl = null;
+  }
+
+  // ── 더 보기 — 헤더에 있던 기능(새 대화·대화 목록·터미널에서 이어가기)의 새 집 ──
+  _toggleMoreMenu() {
+    if (this._pickEl && this._pickFor === "more") { this._closePick(); return; }
+    const rows = [
+      { id: "new", label: i18n.t('새 대화'), icon: icons.edit({ size: 15 }), kbd: false },
+      { id: "list", label: i18n.t('대화 목록'), icon: icons.history({ size: 15 }), kbd: false },
+    ];
+    // 터미널로 넘기기는 이 PC 의 대화만 — 다른 PC 에 터미널을 만드는 길이 PC 앱에는 없다.
+    if (this.m.threadId && this.ctx.isLocal?.() && this.ctx.openTerminal) {
+      rows.push({ id: "term", label: i18n.t('터미널에서 이어가기'), icon: icons.terminal({ size: 15 }), kbd: false });
+    }
+    this._openPick(this.moreBtn, rows, (id) => {
+      if (id === "new") this.newThread();
+      else if (id === "list") this._toggleList();
+      else if (id === "term") void this._toTerminal();
+    });
+    this._pickFor = "more";
   }
 
   _effortNow() { return this.m.threadId ? ((this.m.thread && this.m.thread.effort) || "") : this._newEffort; }
@@ -1419,28 +1501,14 @@ export class ConvView {
   }
 
   _toggleModeMenu() {
-    if (this.modeMenuEl) { this._closeModeMenu(); return; }
-    this.composer?.closePopovers();
-    this._closePick();
-    const wrap = document.createElement("div");
-    wrap.className = "chat-mode-menu";
-    this.composer.el.appendChild(wrap);
-    this.modeMenuEl = wrap;
-    wrap.innerHTML = this._modeChoices().map((m) => {
-      // 설명 한 줄은 v1 카탈로그의 것을 빌린다(같은 모드의 같은 설명 — 이름만 채팅에 맞게 다르다).
+    if (this._pickEl && this._pickFor === "mode") { this._closePick(); return; }
+    // 설명 한 줄은 v1 카탈로그의 것을 빌린다(같은 모드의 같은 설명 — 이름만 채팅에 맞게 다르다).
+    const rows = [{ head: i18n.t('모드') }, ...this._modeChoices().map((m) => {
       const cat = agentModeOf(m.id);
-      const desc = cat && cat.desc ? i18n.t(cat.desc) : "";
-      return `<div class="chat-mode-row${m.on ? " on" : ""}" data-mode="${escapeHtml(m.id)}">` +
-        `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(m.label)}</span>` +
-        (desc ? `<span class="chat-mode-row-desc">${escapeHtml(desc)}</span>` : "") + `</span>` +
-        `<span class="chat-mode-row-mark">${m.on ? icons.check({ size: 12 }) : ""}</span></div>`;
-    }).join("");
-    wrap.addEventListener("click", (e) => {
-      const row = e.target.closest?.(".chat-mode-row");
-      if (row) void this._pickMode(row.dataset.mode);
-    });
-    this._modeCloser = (e) => { if (!wrap.contains(e.target) && !this.modeEl.contains(e.target)) this._closeModeMenu(); };
-    setTimeout(() => { if (this.modeMenuEl === wrap) document.addEventListener("mousedown", this._modeCloser, true); }, 0);
+      return { id: m.id, label: m.label, on: m.on, desc: cat && cat.desc ? i18n.t(cat.desc) : "" };
+    })];
+    this._openPick(this.modeEl, rows, (id) => void this._pickMode(id));
+    this._pickFor = "mode";
   }
 
   _closeModeMenu() {
@@ -1675,10 +1743,12 @@ export class ConvView {
   }
 
   _closePopovers() {
-    const any = !!(this.listEl || this.modeMenuEl || this._pickEl || this.composer?.hasPopover());
+    const any = !!(this.listEl || this.modeMenuEl || this._pickEl || this.usagePopEl || this.effortPopEl || this.composer?.hasPopover());
     this._closeList();
     this._closeModeMenu();
     this._closePick();
+    this._closeUsagePop();
+    this._closeEffortPop();
     this.composer?.closePopovers();
     return any;
   }

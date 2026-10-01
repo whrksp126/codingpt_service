@@ -1167,7 +1167,69 @@ export function usageStatus(thread) {
   if (u && typeof u.contextPct === 'number' && Number.isFinite(u.contextPct)) st.contextPct = Math.max(0, Math.min(100, Math.round(u.contextPct)));
   else if (st.contextUsed != null && st.contextMax) st.contextPct = Math.max(0, Math.min(100, Math.round((st.contextUsed / st.contextMax) * 100)));
   if (u && typeof u.costUsd === 'number') st.costUsd = u.costUsd;
-  return st.model || st.contextPct != null ? st : null;
+  // 플랜 한도(5시간·주간) — claude 의 rate_limit_event 가 알려 준 창 하나(utilization 0~1, resetsAt 초). 사용량 링 팝업이 그린다.
+  const rl = u && u.rateLimit && typeof u.rateLimit === 'object' ? u.rateLimit : null;
+  if (rl && typeof rl.utilization === 'number' && Number.isFinite(rl.utilization)) {
+    st.limits = [{ id: String(rl.kind || 'rate'), label: rateKindLabel(rl.kind), pct: Math.max(0, Math.min(100, Math.round(rl.utilization * 100))), resetsAt: rl.resetsAt != null ? rl.resetsAt : null }];
+  }
+  return st.model || st.contextPct != null || st.limits ? st : null;
+}
+
+function rateKindLabel(kind) {
+  const k = String(kind || '').toLowerCase();
+  if (/five|5h|hour/.test(k)) return i18n.t('5시간');
+  if (/seven|week|7d/.test(k)) return i18n.t('주간');
+  return k || i18n.t('사용량');
+}
+
+/** 추론 강도 표시 이름(데몬이 준 단계 id → 사람 말). 모르는 단계는 그대로. */
+export function effortLabel(e) {
+  switch (e) {
+    case 'low': return i18n.t('낮음');
+    case 'medium': return i18n.t('중간');
+    case 'high': return i18n.t('높음');
+    case 'xhigh': return i18n.t('매우 높음');
+    case 'max': return i18n.t('최대');
+    case 'ultra': return i18n.t('울트라');
+    default: return e ? String(e) : '';
+  }
+}
+
+/**
+ * 모델 메뉴용 분할 — 계열별 최신 버전만 위에(Opus·Sonnet·Fable·Haiku 순), 나머지는 "더 많은 모델" 아래로.
+ *  별칭(opus·sonnet…)은 그 계열 최신 버전과 같은 것이라 따로 세우지 않는다(켜짐·기본값 표시는 그 줄로 옮긴다).
+ *  버전 ID 를 모르는 에이전트(또는 목록이 별칭뿐)면 전부 위에 둔다. 항목 = { id, label, on, badge }.
+ */
+export function modelSplit(choices, caps, agent) {
+  const list = Array.isArray(choices) ? choices : [];
+  const ag = caps && Array.isArray(caps.agents) ? caps.agents.find((a) => a && a.id === agent) : null;
+  const defAlias = ag && ag.defaultModel ? String(ag.defaultModel) : '';
+  const famOf = (id) => {
+    const m = /^claude-(opus|sonnet|fable|haiku)-(\d+)-(\d{1,2})(?:-\d{8})?$/.exec(String(id));
+    return m ? { f: m[1], v: [Number(m[2]), Number(m[3])] } : null;
+  };
+  const versioned = list.filter((c) => famOf(c.id));
+  if (!versioned.length) return { top: list.map((c) => ({ ...c, badge: c.id === defAlias ? i18n.t('기본값') : '' })), more: [] };
+  // 같은 계열·같은 버전(날짜 접미 변형)은 한 줄로 합친다 — 켜짐은 어느 쪽이든 유지.
+  const byKey = new Map();
+  for (const c of versioned) {
+    const fm = famOf(c.id);
+    const key = fm.f + ':' + fm.v.join('.');
+    const hit = byKey.get(key);
+    if (hit) { hit.on = hit.on || !!c.on; continue; }
+    byKey.set(key, { ...c, _f: fm.f, _v: fm.v });
+  }
+  const top = [];
+  const more = [];
+  for (const f of ['opus', 'sonnet', 'fable', 'haiku']) {
+    const fam = [...byKey.values()].filter((x) => x._f === f).sort((a, b) => b._v[0] - a._v[0] || b._v[1] - a._v[1]);
+    if (fam[0]) top.push(fam[0]);
+    more.push(...fam.slice(1));
+  }
+  const onAlias = list.find((c) => c.on && !famOf(c.id));
+  if (onAlias) { const t = top.find((x) => x._f === onAlias.id); if (t) t.on = true; }
+  const clean = (x) => { const { _f, _v, ...rest } = x; return { ...rest, badge: _f === defAlias ? i18n.t('기본값') : '' }; };
+  return { top: top.map(clean), more: more.map((x) => { const { _f, _v, ...rest } = x; return { ...rest, badge: '' }; }) };
 }
 
 // ── 에이전트·모델 고르기(§4.5) ────────────────────────────────────────────────
