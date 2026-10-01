@@ -38,7 +38,7 @@ export function agentModelRow(a, sel, onChange, opt = {}) {
   w.className = "tk-model-row";
   const name = document.createElement("span");
   name.className = "tk-model-ag";
-  name.textContent = a.name || agentName(a.id);
+  name.innerHTML = `${agentMarkHtml(a.id, { size: 14 }) || ""}<span>${esc(a.name || agentName(a.id))}</span>`;
   const mk = (label, opts, value, set) => {
     const f = document.createElement("label");
     f.className = "tk-model-f";

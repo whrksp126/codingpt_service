@@ -1068,5 +1068,21 @@ test('conv.caps 는 에이전트별 모델 별칭을 싣는다(클라 모델 선
   const claude = require('../conv-engine-claude');
   assert.deepStrictEqual(claude.models.map((m) => m.id), ['opus', 'sonnet', 'haiku']);
   const src = fs.readFileSync(path.join(__dirname, '..', 'conv.js'), 'utf8');
-  assert.match(src, /models: Array\.isArray\(a\.models\) \? a\.models\.slice\(\) : \[\]/);
+  assert.match(src, /Array\.isArray\(a\.models\) \? a\.models\.slice\(\) : \[\]/);
+});
+
+test('AI 제목 마커 — 걷어 내고, 열린 꼬리는 보류한다', () => {
+  const c = require('../conv')._internals;
+  assert.deepStrictEqual(c.stripTitleMark('<!--cpt-title: 로그인 버그 수정-->\n안녕하세요'), { text: '안녕하세요', title: '로그인 버그 수정' });
+  assert.strictEqual(c.stripTitleMark('<!--cpt-ti').text, '', '마커 접두는 보류');
+  assert.strictEqual(c.stripTitleMark('<!--cpt-title: 반쪽').text, '', '닫히지 않은 마커는 보류');
+  assert.strictEqual(c.stripTitleMark('a < b').text, 'a < b', '일반 < 는 그대로');
+  assert.strictEqual(c.stripTitleMark('<!-- 그냥 주석 -->').text, '<!-- 그냥 주석 -->');
+  assert.strictEqual(c.stripTitleMark('앞말 <!--cpt-title: x--> 뒷말').text, '앞말  뒷말');
+});
+
+test('/remote-control(/rc) 는 터미널 전용 안내', async () => {
+  const id = (await rpc('conv.create', { cwd: '', agent: 'claude' })).thread.id;
+  const r = await rpc('conv.send', { threadId: id, clientId: cid(), text: '/rc' });
+  assert.strictEqual(r.code, 'TERMINAL_ONLY_COMMAND');
 });

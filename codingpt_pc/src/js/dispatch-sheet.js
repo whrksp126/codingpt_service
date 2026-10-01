@@ -236,10 +236,21 @@ export function openDispatchSheet(prefill) {
     if (st.prefAgents && st.prefAgents.length) {
       const wrap = document.createElement("div");
       wrap.className = "dp-pref";
-      const ag = select([["", tt("plannerAuto")]].concat(st.prefAgents.map((a) => [a.id, a.name || agentName(a.id)])), st.pref.agent);
-      ag.disabled = ta.disabled;
-      ag.addEventListener("change", () => { st.pref = { agent: ag.value, model: "", effort: "" }; draw(); });
-      wrap.append(field(tt("plannerAgent"), ag));
+      // 아이콘 타일 — 자동 + 설치된 에이전트(새 작업 시트의 에이전트 칩과 같은 모양).
+      const tiles = document.createElement("div");
+      tiles.className = "tk-chips";
+      const mkTile = (id, label, mark) => {
+        const t = document.createElement("button");
+        t.type = "button";
+        t.className = "tk-chip tk-tile" + (st.pref.agent === id ? " on" : "");
+        t.disabled = ta.disabled;
+        t.innerHTML = `<span class="tk-chip-lbl">${mark || ""}<span>${esc(label)}</span></span>`;
+        t.addEventListener("click", () => { if (st.pref.agent !== id) { st.pref = { agent: id, model: "", effort: "" }; draw(); } });
+        return t;
+      };
+      tiles.append(mkTile("", tt("plannerAuto"), icons.zap({ size: 14 })));
+      for (const a of st.prefAgents) tiles.append(mkTile(a.id, a.name || agentName(a.id), agentMarkHtml(a.id, { size: 14 }) || icons.terminal({ size: 14 })));
+      wrap.append(field(tt("plannerAgent"), tiles));
       const cur = st.prefAgents.find((a) => a.id === st.pref.agent);
       const mr = cur && !ta.disabled ? agentModelRow(cur, st.pref, () => draw(), { noName: true }) : null;
       if (mr) wrap.append(mr);

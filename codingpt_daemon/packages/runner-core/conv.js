@@ -29,6 +29,24 @@ const store = require('./conv-store');
 const CAP = 'conv.v1';
 const MAX_LIVE = 4;
 const TITLE_MAX = 60;
+
+// ── AI 제목(2026-10-02) — 첫 응답 첫 줄에 `<!--cpt-title: 제목-->` 를 쓰게 시스템 프롬프트로 시킨다(별도 호출 0).
+//  마커는 저장·전송 전에 걷어 낸다. 스트리밍 중 조각이 마커 중간에서 끊겨도 새지 않게 닫히지 않은 꼬리는 보류한다.
+const TITLE_MARK_RE = /<!--cpt-title:([\s\S]*?)-->\n?/g;
+const TITLE_MARK_OPEN = '<!--cpt-title:';
+/** raw → { text(마커 제거·열린 꼬리 보류), title(첫 마커의 제목 | null) } */
+function stripTitleMark(raw) {
+  let title = null;
+  let text = String(raw || '').replace(TITLE_MARK_RE, (_, t) => { if (title == null) title = String(t).trim(); return ''; });
+  // 닫히지 않은 마커(또는 마커 접두)가 꼬리에 있으면 보류
+  const i = text.lastIndexOf('<');
+  if (i >= 0) {
+    const tail = text.slice(i);
+    if (TITLE_MARK_OPEN.startsWith(tail) || (tail.startsWith(TITLE_MARK_OPEN) && !tail.includes('-->'))) text = text.slice(0, i);
+  }
+  return { text, title };
+}
+const EXTRA_TERMINAL_COMMANDS = new Set(['remote-control', 'rc']); // 구조화 모드에서 CLI 가 "사용할 수 없다"고만 답하는 TUI 전용 명령
 const PREVIEW_MAX = 120;
 const MESSAGE_MAX = 64 * 1024;          // 사용자 입력 상한(ConvMsg 본문 상한과 같다)
 const DETAIL_MAX = 1024 * 1024;         // conv.detail 전문 상한
@@ -342,7 +360,9 @@ async function ensureProc(thread) {
   };
   proc.engine = adapter.start({
     bin: found.bin, cwd: abs, sessionId: thread.id, resume,
-    mode: thread.mode || 'default', model: thread.model || null, env,
+    mode: thread.mode || 'default', model: thread.model || null, effort: thread.effort || null, env,
+    // 새 대화의 첫 응답에서만 제목을 쓰게 한다(이미 제목이 있거나 이어가는 대화면 시키지 않는다).
+    askTitle: !resume && !thread.titleSet && !thread.aiTitled,
   }, (ev) => onEngine(proc, ev));
   live.set(thread.id, proc);
   try { await proc.engine.ready; } catch (e) {
@@ -450,19 +470,36 @@ function onEngine(proc, ev) {
     case 'delta': {
       beginTurn(proc); // 에이전트가 스스로 시작한 턴(백그라운드 작업 완료 등)
       let d = proc.drafts.get(ev.key);
-      if (!d) { d = { kind: ev.kind, text: '' }; proc.drafts.set(ev.key, d); }
+      if (!d) { d = { kind: ev.kind, text: '', sent: 0 }; proc.drafts.set(ev.key, d); }
       // 어댑터의 off 는 자기 누적 길이다. 우리 장부와 어긋나면(없어야 한다) 우리 것을 정본으로 다시 매긴다.
-      const off = d.text.length;
+      const prevLen = d.text.length;
       d.text += ev.text;
-      push({ threadId: id, delta: { key: ev.key, kind: ev.kind, off, text: ev.text } });
+      if (d.kind !== 'text') {
+        push({ threadId: id, delta: { key: ev.key, kind: ev.kind, off: prevLen, text: ev.text } });
+      } else {
+        // 클라가 보는 글 = 제목 마커를 걷어 낸 것. 보이는 앞부분은 늘기만 하므로 off 는 "이미 보낸 길이"다.
+        const vis = stripTitleMark(d.text).text;
+        if (vis.length > d.sent || !prevLen) {
+          push({ threadId: id, delta: { key: ev.key, kind: ev.kind, off: d.sent, text: vis.slice(d.sent) } });
+          d.sent = vis.length;
+        }
+      }
       return;
     }
     case 'msgs': {
       if (ev.msgs.some((m) => m.role === 'assistant')) beginTurn(proc);
       const evs = [];
       let preview = null;
-      for (const m of ev.msgs) {
+      for (let m of ev.msgs) {
         proc.drafts.delete(m.key);
+        if (m.role === 'assistant' && m.kind === 'text' && typeof m.text === 'string' && m.text.includes(TITLE_MARK_OPEN)) {
+          const r = stripTitleMark(m.text);
+          const cur = store.getThread(id);
+          if (r.title && cur && !cur.titleSet && !cur.aiTitled) {
+            patch(id, { title: oneLine(r.title, TITLE_MAX), aiTitled: true }, { event: true });
+          }
+          m = { ...m, text: r.text.replace(/^\s+/, '') };
+        }
         evs.push({ op: 'msg', ...(ev.uuid ? { uuid: ev.uuid } : {}), msg: { ...m, turn: proc.turn } });
         if (m.role === 'assistant' && m.kind === 'text' && !m.hidden && !m.parent && m.text) preview = oneLine(m.text, PREVIEW_MAX);
       }
@@ -740,7 +777,7 @@ function need(threadId) {
 function liveView(id) {
   const proc = live.get(id);
   if (!proc) return [];
-  return [...proc.drafts.entries()].map(([key, d]) => ({ key, kind: d.kind, text: d.text }));
+  return [...proc.drafts.entries()].map(([key, d]) => ({ key, kind: d.kind, text: d.kind === 'text' ? stripTitleMark(d.text).text : d.text }));
 }
 function pendingView(id) {
   const proc = live.get(id);
@@ -767,6 +804,7 @@ function terminalOnly(thread, text) {
   const m = /^\/([A-Za-z0-9_:-]+)/.exec(String(text || '').trim());
   if (!m) return null;
   const c = catalog.get(thread.agent);
+  if (EXTRA_TERMINAL_COMMANDS.has(m[1])) return m[1];
   return c && c.terminalCommands.includes(m[1]) ? m[1] : null;
 }
 
@@ -1160,6 +1198,7 @@ async function createThread(p) {
   if (!found || !found.bin) throw coded('AGENT_UNAVAILABLE', '이 PC 에서 에이전트 실행 파일을 찾지 못했습니다');
   if (await adapter.loginState() === 'out') throw coded('AGENT_NOT_LOGGED_IN', '에이전트에 로그인돼 있지 않습니다. PC 터미널에서 로그인한 뒤 다시 시도하세요');
   const thread = newThread({ id: crypto.randomUUID(), agent: adapter.id, cwd: rel, mode, model: p.model ? String(p.model).slice(0, 120) : null, owner: 'chat' });
+  if (p.effort && require('./agent-models').valid(String(p.effort))) thread.effort = String(p.effort);
   if (clientId) thread.x.cid = clientId;
   store.putThread(thread);
   healed.add(thread.id);
@@ -1180,7 +1219,15 @@ const HANDLERS = {
       if (!a) continue;
       let found = null;
       try { found = await a.locate(); } catch (_) { found = null; }
-      agents.push({ id: a.id, label: a.label(), available: !!(found && found.bin), version: (found && found.version) || null, models: Array.isArray(a.models) ? a.models.slice() : [] });
+      // 모델·추론 강도 — 이 PC 의 CLI 가 아는 목록(agent-models.js). 못 읽으면 어댑터의 별칭 목록으로 폴백.
+      let rich = null;
+      try { rich = found && found.bin ? await require('./agent-models').describe(a.id, found.bin) : null; } catch (_) { rich = null; }
+      const models = rich && rich.models && rich.models.length ? rich.models.map((m) => ({ id: m.id, label: m.label, ...(m.hint ? { hint: m.hint } : {}) }))
+        : (Array.isArray(a.models) ? a.models.slice() : []);
+      agents.push({
+        id: a.id, label: a.label(), available: !!(found && found.bin), version: (found && found.version) || null, models,
+        ...(rich && rich.efforts && rich.efforts.length ? { efforts: rich.efforts, defaultEffort: rich.defaultEffort || null, defaultModel: rich.defaultModel || null } : {}),
+      });
     }
     const modes = (adapterOf('claude') || { modes: [] }).modes;
     return { enabled: true, agents, modes, maxLive: MAX_LIVE };
@@ -1282,6 +1329,20 @@ const HANDLERS = {
         }
       }
       patch(thread.id, { model }, { event: true });
+    }
+    if (p.effort != null) {
+      const am = require('./agent-models');
+      const effort = String(p.effort);
+      // '' = CLI 기본값으로 되돌림(다음 시작부터 — 실행 중에는 설정 층을 못 지운다)
+      if (effort && !am.valid(effort)) throw coded('BAD_REQUEST', '알 수 없는 추론 강도입니다');
+      if (effort && proc && !proc.exited) {
+        try { await proc.engine.setEffort(effort); } catch (_) {
+          notice(thread.id, 'info', 'EFFORT_NEXT_START', '추론 강도 변경은 다음 시작부터 적용됩니다');
+        }
+      } else if (!effort && proc && !proc.exited) {
+        notice(thread.id, 'info', 'EFFORT_NEXT_START', '추론 강도 변경은 다음 시작부터 적용됩니다');
+      }
+      patch(thread.id, { effort: effort || null }, { event: true });
     }
     return { thread: publicThread(store.getThread(thread.id)) };
   },
@@ -1449,7 +1510,7 @@ module.exports = {
   CAP, MAX_LIVE, ERROR_CODES,
   configure, start, stop, shutdown, shutdownSync, detachAll, rpc,
   _internals: {
-    live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, publicThread, terminalOf, usageOf, refsOfEvent,
+    live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, stripTitleMark, publicThread, terminalOf, usageOf, refsOfEvent,
     _reset,
     get timings() { return timings; },
   },

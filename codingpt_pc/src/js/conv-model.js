@@ -1203,7 +1203,7 @@ function modelList(caps, agent) {
   for (const m of raw) {
     const id = typeof m === 'string' ? m : m && (m.id || m.value);
     if (!id || out.some((x) => x.id === String(id))) continue;
-    out.push({ id: String(id), label: String((m && typeof m === 'object' && m.label) || id) });
+    out.push({ id: String(id), label: String((m && typeof m === 'object' && m.label) || id), ...(m && typeof m === 'object' && m.hint ? { hint: String(m.hint) } : {}) });
   }
   return out;
 }

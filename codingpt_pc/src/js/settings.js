@@ -27,7 +27,6 @@ import {
   TERM_STYLE_OPTIONS, termStylePalette, resolvedTheme, onAppearanceChange,
 } from "./theme.js";
 import { IS_WINDOWS } from "./shortcuts.js";
-import { chatBetaEnabled, setChatBetaEnabled } from "./chat-model.js";
 import * as i18n from './i18n/index.js';
 import { renderPowerCard } from "./power-settings.js";
 import { at } from "./text/automations.js";
@@ -65,7 +64,7 @@ const NAV = [
   //   한자리에 모은다. 처음엔 채팅 모드를 `에이전트` 화면에 얹었는데, 베타가 늘면 각 화면에 흩어져
   //   "이건 정식인가 실험인가"를 화면마다 다시 판단해야 한다. 1항목짜리 **그룹**을 만들지 말라는
   //   기존 규율은 지킨다 — 새 그룹이 아니라 `앱` 그룹의 항목이다.
-  { key: "lab", label: "실험실", group: "앱", icon: "flask", keywords: "베타 beta 실험 experimental 미리보기 채팅 chat 채팅 모드" },
+  { key: "lab", label: "실험실", group: "앱", icon: "flask", keywords: "베타 beta 실험 experimental 미리보기 신기능" },
   { key: "about", label: "앱 정보", group: "앱", icon: "info", keywords: "버전 업데이트" },
 ];
 
@@ -74,17 +73,7 @@ const NAV = [
  *  · get/set 은 그 기능의 정본 모듈이 갖는다(여기서 localStorage 를 직접 만지지 않는다).
  *  · onChange = 켜고 끈 직후 화면에 즉시 반영할 일(없으면 생략).
  */
-const LAB_FEATURES = [
-  {
-    id: "chatBeta",
-    label: "채팅 모드",
-    desc: "터미널의 AI 대화를 채팅 화면으로 바꿔서 봐요. 아직 다듬는 중이라 기본은 꺼져 있어요.",
-    get: chatBetaEnabled,
-    set: setChatBetaEnabled,
-    // 열려 있는 pane 이 **즉시** 따라야 한다(설정을 닫고 다시 열 필요가 없게).
-    onChange: () => import("./pane.js").then((m) => m.refreshPaneSurfaces()).catch(() => {}),
-  },
-];
+const LAB_FEATURES = []; // 지금은 실험이 없다(채팅 모드는 정식 — 2026-10-02 토글 제거). 생기면 위 형식의 객체를 한 줄 더한다.
 
 export function mountSettings(container) {
   root = container;
@@ -216,7 +205,7 @@ function renderSection(force) {
       });
     }
   } else if (section === "lab") {
-    contentEl.innerHTML = `
+    contentEl.innerHTML = LAB_FEATURES.length ? `
       <div class="sm-card2">
         ${LAB_FEATURES.map((f, i) => `
           <label class="sett-row sett-row-action" for="lab_${f.id}">
@@ -224,7 +213,11 @@ function renderSection(force) {
             <input id="lab_${f.id}" type="checkbox" class="tgl" data-lab="${i}" aria-label="${i18n.t(f.label)}" />
           </label>`).join("")}
       </div>
-      <div class="sm-section-note">${i18n.t('실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.')}</div>`;
+      <div class="sm-section-note">${i18n.t('실험실 기능은 아직 다듬는 중이라 예고 없이 바뀌거나 사라질 수 있어요.')}</div>` : `
+      <div class="sm-card2 sm-lab-empty">
+        <div class="sm-lab-empty-title">${i18n.t('실험적 기능을 준비 중이에요')}</div>
+        <div class="sm-lab-empty-desc">${i18n.t('새로운 기능을 가장 먼저 써 보고 다양한 실험에 도전할 수 있는 곳이에요. 지금은 준비된 실험이 없어요.')}</div>
+      </div>`;
     bindLab(contentEl);
   } else if (section === "system") {
     // 시스템 — macOS 와의 연동만 모은다(로그인 항목 + 보호 폴더 접근). 각각은 카드 하나를 채우지

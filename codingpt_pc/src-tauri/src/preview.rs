@@ -796,6 +796,8 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
     #[cfg(target_os = "windows")]
     {
         let _ = &mgr;
+        // Windows 는 아직 웹뷰 외형(prefers-color-scheme) API 를 안 쓴다 — 다크만 기존 필터로, 나머지는 해제.
+        let action = match action.as_str() { "theme_dark" => "theme_on".to_string(), "theme_light" | "theme_system" => "theme_off".to_string(), _ => action };
         return preview_win::control(&pane_id, &action, DARK_ON_JS, DARK_OFF_JS);
     }
     #[cfg(not(target_os = "windows"))]
@@ -840,6 +842,25 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
                             let _: () = msg_send![insp, evaluateJavaScript: &*ns, completionHandler: nil];
                         }
                     }
+                    // 웹뷰 외형(NSAppearance) — 사이트가 prefers-color-scheme 으로 자기 다크/라이트를 고른다(실제 브라우저와 같다).
+                    //  system = 외형을 비워 창(=OS)을 따른다. 예전의 색 반전 필터는 쓰지 않는다(옛 값이 남았으면 지운다).
+                    "theme_system" | "theme_dark" | "theme_light" => {
+                        let appearance: *mut AnyObject = match act.as_str() {
+                            "theme_dark" => {
+                                let n = objc2_foundation::NSString::from_str("NSAppearanceNameDarkAqua");
+                                msg_send![objc2::class!(NSAppearance), appearanceNamed: &*n]
+                            }
+                            "theme_light" => {
+                                let n = objc2_foundation::NSString::from_str("NSAppearanceNameAqua");
+                                msg_send![objc2::class!(NSAppearance), appearanceNamed: &*n]
+                            }
+                            _ => std::ptr::null_mut(),
+                        };
+                        let _: () = msg_send![wk, setAppearance: appearance];
+                        let ns = objc2_foundation::NSString::from_str(DARK_OFF_JS);
+                        let nil: *mut AnyObject = std::ptr::null_mut();
+                        let _: () = msg_send![wk, evaluateJavaScript: &*ns, completionHandler: nil];
+                    }
                     other => {
                         let js = if other == "theme_on" { DARK_ON_JS } else { DARK_OFF_JS };
                         let ns = objc2_foundation::NSString::from_str(js);
@@ -856,8 +877,8 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
         match action.as_str() {
             "devtools" => { entry.webview.open_devtools(); Ok(()) }
             "devtools_fit" => Ok(()),
-            "theme_on" => entry.webview.eval(DARK_ON_JS).map_err(|e| e.to_string()),
-            "theme_off" => entry.webview.eval(DARK_OFF_JS).map_err(|e| e.to_string()),
+            "theme_on" | "theme_dark" => entry.webview.eval(DARK_ON_JS).map_err(|e| e.to_string()),
+            "theme_off" | "theme_light" | "theme_system" => entry.webview.eval(DARK_OFF_JS).map_err(|e| e.to_string()),
             "back" | "forward" | "reload" => {
                 let js = match action.as_str() {
                     "back" => "history.back()",

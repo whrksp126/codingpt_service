@@ -388,7 +388,12 @@ function createParser(emit, opts = {}) {
 }
 
 // ── 프로세스 ─────────────────────────────────────────────────────────────────
-function argsFor({ sessionId, resume, mode, model }) {
+// AI 제목 — 별도 호출 없이 첫 응답에 한 줄만 얹게 한다(conv.js stripTitleMark 가 걷어 낸다).
+const TITLE_PROMPT = 'In your FIRST text reply of this conversation only, start that reply with exactly one line: '
+  + '<!--cpt-title: SHORT TITLE--> where SHORT TITLE is a concise 3-8 word title for the user\'s request, written in the '
+  + 'language the user used. Put nothing before it. Never write this line again in later replies, never explain or mention it.';
+
+function argsFor({ sessionId, resume, mode, model, effort, askTitle }) {
   const args = [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
     '--include-partial-messages', '--replay-user-messages',
@@ -397,6 +402,8 @@ function argsFor({ sessionId, resume, mode, model }) {
   ];
   if (sessionId) args.push(resume ? '--resume' : '--session-id', String(sessionId));
   if (model) args.push('--model', String(model));
+  if (effort && require('./agent-models').valid(String(effort))) args.push('--effort', String(effort));
+  if (askTitle) args.push('--append-system-prompt', TITLE_PROMPT);
   return args;
 }
 
@@ -544,6 +551,8 @@ function start(opts, onEvent) {
     interrupt() { parser.noteInterrupt(); return control({ subtype: 'interrupt' }); },
     setMode(mode) { return control({ subtype: 'set_permission_mode', mode }); },
     setModel(model) { return control({ subtype: 'set_model', model }); },
+    // 2026-10-02 실측: apply_flag_settings{effortLevel} → success. 이후 턴부터 적용.
+    setEffort(effort) { return control({ subtype: 'apply_flag_settings', settings: { effortLevel: String(effort) } }); },
     /** stdin 을 닫아 스스로 끝나게 하고, graceMs 뒤에도 살아 있으면 SIGTERM, 그래도 남으면 SIGKILL. */
     stop({ graceMs = 3000 } = {}) {
       if (exited) return Promise.resolve();

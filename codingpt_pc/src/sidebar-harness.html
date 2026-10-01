@@ -202,7 +202,7 @@
     [...document.querySelectorAll('.dp-sheet .tk-foot button')].find((b) => b.textContent.trim() === '계획')?.click();
   };
   window.__pcSettings = async (h) => (await import('./js/power-settings.js')).openPcSettingsSheet(h ?? 11);
-  if (location.hash.includes('dispopen')) setTimeout(async () => { (await import('./js/dispatch-sheet.js')).openDispatchSheet({ text: '결제 실패 재시도 넣어줘' }); setTimeout(() => { const s = document.querySelector('.dp-sheet select'); if (s) { s.value = 'claude'; s.dispatchEvent(new Event('change')); } }, 400); }, 100);
+  if (location.hash.includes('dispopen')) setTimeout(async () => { (await import('./js/dispatch-sheet.js')).openDispatchSheet({ text: '결제 실패 재시도 넣어줘' }); setTimeout(() => { const s = document.querySelector('.dp-sheet select'); const t = [...document.querySelectorAll('.dp-sheet .tk-tile')].find((b) => b.textContent.includes('Claude')); t?.click(); }, 400); }, 100);
   if (location.hash.includes('dispatch') && !location.hash.includes('dispopen')) setTimeout(() => window.__dispatch(), 100);
   if (location.hash.includes('pcset')) setTimeout(() => window.__pcSettings(11), 100);
   if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);

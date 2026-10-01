@@ -588,8 +588,19 @@ function renderMainTop(ws) {
   }
   const name = document.createElement("span");
   name.className = "mt-name";
-  name.textContent = ws?.name || i18n.t('워크스페이스');
+  name.textContent = (ws && S.wsDisplayName(ws)) || i18n.t('워크스페이스');
   mtDyn.append(name);
+  // `워크스페이스 - 작업` — 사이드바 트리의 "어느 자식을 보고 있는가"를 제목이 말한다(2026-10-02 QA).
+  //  폴더에서 직접 작업하는 화면은 `로컬`. 작업(worktree) 워크스페이스는 아래 배지가 제목을 말한다.
+  if (ws && !S.isTaskWorkspace(ws)) {
+    const sep = document.createElement("span");
+    sep.className = "mt-name-sep";
+    sep.textContent = "-";
+    const sub = document.createElement("span");
+    sub.className = "mt-name-sub";
+    sub.textContent = tt("local");
+    mtDyn.append(sep, sub);
+  }
   // 작업 워크스페이스(Agent Tasks §4) — 이름은 의미 없는 식별자(<repoSlug>-<t6>-<k>)라 사람이 읽는 제목을
   //  배지로 붙이고, 사이드바에 없는 곳이므로 돌아갈 길([현황판])을 바로 옆에 둔다. 제목은 봉인 task.list 로만 온다.
   if (ws && S.isTaskWorkspace(ws)) {

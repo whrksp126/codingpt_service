@@ -12,6 +12,17 @@ import * as T from "./tiling.js";
 import { getPane, isTermTab } from "./pane.js";
 import { shellQuote } from "./path-utils.js";
 
+/** 채팅 v2 탭이 지금 보이는 pane — 포커스 pane 이 그렇다면 그것, 아니면 레이아웃에서 첫 번째. */
+export function findConvPane() {
+  const rt = state.activeWsId ? ensureRuntime(state.activeWsId) : null;
+  if (!rt) return null;
+  const has = (leaf) => { const p = leaf && getPane(leaf.id); return p && p.activeConv && p.activeConv() ? p : null; };
+  const focusLeaf = rt.focusId ? T.findLeaf(rt.layout, rt.focusId) : null;
+  let hit = has(focusLeaf);
+  if (!hit) T.eachLeaf(rt.layout, (l) => { if (!hit) hit = has(l); });
+  return hit;
+}
+
 /**
  * 삽입 대상 터미널 pane — 포커스 pane 이 터미널이면 그것, 아니면 레이아웃 첫 터미널 pane.
  *  (터미널 탭을 하나도 안 가진 pane 은 후보가 아니다 — 넣어 봐야 받을 PTY 가 없다.)
@@ -36,6 +47,14 @@ export function findTermPane() {
  * @returns {'chat'|'tui'|null}  넣은 곳(대상이 없으면 null — 부르는 쪽이 안내한다)
  */
 export function insertAttachment({ text, path, line }) {
+  // 채팅 v2(conv) 탭이 떠 있으면 그쪽이 먼저다 — 터미널 TUI 에 넣은 줄은 채팅 화면에 안 보인다(2026-10-02 QA).
+  const cp = findConvPane();
+  if (cp) {
+    const conv = cp.activeConv();
+    conv.attachWithText(text, [path]);
+    cp.ctx?.onFocus?.(cp.id);
+    return "chat";
+  }
   const pane = findTermPane();
   if (!pane) return null;
   //  ★ 활성 탭이 터미널이 아니면(모바일 화면·IDE·프리뷰 탭) 터미널 탭을 앞으로 끌어온다 —

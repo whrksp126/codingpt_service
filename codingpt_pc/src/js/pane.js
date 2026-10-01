@@ -9,7 +9,7 @@ import { IdeView } from "./ide.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import lan from "./lan.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
-import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast } from "./theme.js";
+import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast, getThemeMode } from "./theme.js";
 import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dtAttachHost } from "./devtools.js";
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
@@ -282,7 +282,7 @@ export function smartUrl(raw) {
 // 새 프리뷰의 초기 화면 — 빈 안내 대신 구글 메인(2026-10-02 QA). dev 열기·내려받기는 ⋯ 메뉴로 옮겼다.
 const DEFAULT_PREVIEW_URL = "https://www.google.com/";
 
-function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
+function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialTheme, onNavigate, onMeta, onThemeChange }) {
   const bar = document.createElement("div");
   bar.className = "preview-bar";
   const mk = (iconFn, title) => {
@@ -308,7 +308,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
   const more = mk(icons.dots, i18n.t('더보기'));
   bar.append(back, fwd, reload, input, more);
 
-  const st = { url: initialUrl || "", dark: !!initialDark, disposed: false, meta: { title: "", favicon: "" } };
+  const st = { url: initialUrl || "", theme: initialTheme || "", disposed: false, meta: { title: "", favicon: "" } };
   const setNavState = (b, f) => { back.disabled = !b; fwd.disabled = !f; };
   setNavState(false, false);
   back.addEventListener("click", () => api.previewControl(getId(), "back").catch(() => {}));
@@ -316,11 +316,15 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
   reload.addEventListener("click", () => { if (st.url) api.previewControl(getId(), "reload").catch(() => {}); });
 
   // 메뉴 액션들 —
-  const doTheme = () => {
-    if (!st.url) return;
-    st.dark = !st.dark;
-    api.previewControl(getId(), st.dark ? "theme_on" : "theme_off").catch(() => {});
-    onDarkChange?.(st.dark);
+  // 웹뷰 테마 — 실제 브라우저처럼 웹뷰 외형(prefers-color-scheme)을 바꾼다(색 반전 필터 폐기, 2026-10-02).
+  //  st.theme 이 비어 있으면(사용자가 ⋯ 에서 안 골랐으면) 앱의 테마 설정(시스템/다크/라이트)을 그대로 따른다.
+  const effTheme = () => st.theme || getThemeMode();
+  const applyTheme = () => { api.previewControl(getId(), "theme_" + effTheme()).catch(() => {}); };
+  const stopAppearance = onAppearanceChange(() => { if (!st.theme && !st.disposed) applyTheme(); });
+  const doTheme = (v) => {
+    st.theme = v;
+    applyTheme();
+    onThemeChange?.(v);
   };
   const doTools = (alt) => {
     if (!st.url) return;
@@ -346,6 +350,12 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
       b.className = "pv-menu-item";
       b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`;
       let tgl = null;
+      if (opt.check) {
+        const mk = document.createElement("span");
+        mk.className = "pvm-check";
+        mk.innerHTML = opt.check() ? icons.check({ size: 14 }) : "";
+        b.appendChild(mk);
+      }
       if (opt.toggle) {
         tgl = document.createElement("input");
         tgl.type = "checkbox";
@@ -381,7 +391,9 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
         try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
       },
     });
-    row(icons.moon, i18n.t('다크모드'), { toggle: { get: () => st.dark, set: doTheme } });
+    for (const [v, label] of [["system", i18n.t('시스템 테마')], ["dark", i18n.t('다크')], ["light", i18n.t('라이트')]]) {
+      row(v === "dark" ? icons.moon : (v === "light" ? icons.sun : icons.monitor), label, { check: () => effTheme() === v, onClick: () => doTheme(v) });
+    }
     row(icons.tools, i18n.t('개발자 도구'), { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
     // Design Mode — 1회성 요소 선택(토글 아님): 선택 → 소스 위치+크롭샷을 터미널에 [디자인] 줄로 첨부.
     row(icons.crosshair, i18n.t('요소 선택'), {
@@ -550,12 +562,12 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
         st.url = disp;
         if (document.activeElement !== input) input.value = disp;
       }
-      if (st.dark) api.previewControl(getId(), "theme_on").catch(() => {}); // 내비게이션마다 재주입
+      applyTheme();
       dtOnPageLoaded(getId()); // 크롬 데브툴 열려 있으면 chobitsu 재주입 + enable 리플레이
       setTimeout(refreshInfo, 250);
     },
     refreshInfo,
-    dispose() { st.disposed = true; previewBars.delete(getId()); },
+    dispose() { st.disposed = true; stopAppearance(); previewBars.delete(getId()); },
   };
   previewBars.set(getId(), ctl);
   return ctl;
@@ -568,7 +580,10 @@ class PreviewSurface {
     this.id = "pv-" + tid;
     this.tab = tab;
     this.ctx = ctx || null;
-    this.url = tab.url || DEFAULT_PREVIEW_URL;
+    // 빈 탭도 구글 주소를 **탭 모델에 실제로 적어 둔다** — 직접 입력해 연 탭과 같은 상태가 되게(2026-10-02:
+    //  "구글 초기 화면에서 클릭·스크롤이 안 됨" — 빈 url 로 열린 탭만의 차이를 없앤다).
+    if (!tab.url) { tab.url = DEFAULT_PREVIEW_URL; persist?.(); }
+    this.url = tab.url;
     // webview 에 실제로 로드할 URL — 원격 워크스페이스의 localhost 는 back 프록시로 치환(비동기).
     this.effUrl = this.url;
     this._applyEff(this.url);
@@ -589,8 +604,8 @@ class PreviewSurface {
         onMeta?.(m);
         persist?.(); // 탭 메타는 레이아웃과 함께 영속(복원 시 라벨 유지)
       },
-      initialDark: !!tab.dark,
-      onDarkChange: (v) => { this.tab.dark = v; persist?.(); },
+      initialTheme: tab.theme || (tab.dark ? "dark" : ""),
+      onThemeChange: (v) => { this.tab.theme = v; delete this.tab.dark; persist?.(); },
     });
     this.host = document.createElement("div");
     this.host.className = "preview-host";
@@ -1256,8 +1271,8 @@ export class PaneView {
       getHost: () => this.previewHost,
       getCtx: () => this.ctx,
       initialUrl: this.node.url || DEFAULT_PREVIEW_URL,
-      initialDark: !!this.node.dark,
-      onDarkChange: (v) => { this.node.dark = v; this.ctx.persist?.(); },
+      initialTheme: this.node.theme || (this.node.dark ? "dark" : ""),
+      onThemeChange: (v) => { this.node.theme = v; delete this.node.dark; this.ctx.persist?.(); },
       onNavigate: (u) => {
         this.node.url = u;
         this.previewUrl = u;
@@ -1274,7 +1289,8 @@ export class PaneView {
     const host = document.createElement("div");
     host.className = "preview-host";
     this.previewHost = host;
-    this.previewUrl = this.node.url || DEFAULT_PREVIEW_URL;
+    if (!this.node.url) { this.node.url = DEFAULT_PREVIEW_URL; this.ctx.persist?.(); }
+    this.previewUrl = this.node.url;
     // webview 로드용 실효 URL(원격이면 프록시로 치환) — 복원된 URL 도 즉시 매핑.
     this._pvEffUrl = this.previewUrl;
     if (this.previewUrl) this._applyPvEff(this.previewUrl, false);

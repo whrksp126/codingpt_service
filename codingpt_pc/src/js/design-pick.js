@@ -203,6 +203,15 @@ export function isPicking() {
   return !!_mode || _busy;
 }
 
+// 앱 쪽 키 처리(main.js)가 "선택 중인가"를 동기로 알 수 있게 표식을 단다 — 키보드 포커스는 보통 앱 웹뷰에 있어
+//  페이지 안 ESC 핸들러(PICKER_JS onKey)가 키를 못 받는다(2026-10-02 QA: "ESC 가 안 먹힘").
+function syncPickFlag() {
+  try {
+    if (_mode) document.documentElement.dataset.designPick = "1";
+    else delete document.documentElement.dataset.designPick;
+  } catch (_) { /* noop */ }
+}
+
 // 선택 모드 시작(1회성) — 픽커 주입(멱등)+start 후 폴링. 이미 켜져 있으면 재시작.
 export async function startDesignPick({ pvId, localPath }) {
   if (_busy) { toast(i18n.t('이전 선택을 처리하는 중이에요')); return false; }
@@ -211,6 +220,7 @@ export async function startDesignPick({ pvId, localPath }) {
   await api.previewEval(pvId, "JSON.stringify((function(){try{return !!window.__cptPick.start();}catch(e){return false;}})())");
   const mode = { pvId, localPath: localPath || "", stopped: false, startedAt: Date.now() };
   _mode = mode;
+  syncPickFlag();
   _poll(mode); // 백그라운드 폴링(대기하지 않음 — 선택은 비동기)
   return true;
 }
@@ -221,6 +231,7 @@ export async function cancelDesignPick() {
   if (!m) return false;
   m.stopped = true;
   _mode = null;
+  syncPickFlag();
   try {
     await api.previewEval(m.pvId, "JSON.stringify((function(){try{window.__cptPick&&window.__cptPick.stop();}catch(e){}return true;})())");
   } catch (_) { /* 픽커 소실(내비게이션/프리뷰 닫힘) — 무시 */ }
@@ -242,7 +253,7 @@ async function _poll(mode) {
     if (mode.stopped) return;
     if (r && r.pending) continue;
     mode.stopped = true;
-    if (_mode === mode) _mode = null;
+    if (_mode === mode) { _mode = null; syncPickFlag(); }
     if (r && r.picked) {
       _busy = true;
       try { await _finish(mode, r.picked); }

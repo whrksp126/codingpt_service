@@ -256,6 +256,12 @@ registerCommands({
 //  조합 → 명령 id → 동작. 표는 commands.js, 사용자가 바꾼 값은 shortcuts.js 가 들고 있다.
 //  ★ 팔레트가 떠 있으면 아무것도 가로채지 않는다 — 팔레트 입력창에서 ⌘W 를 치면 pane 이 닫히는
 //    식의 사고를 막는다(팔레트는 자기 키를 스스로 처리한다).
+// 요소 선택(Design Mode) 중 ESC = 취소. 키보드 포커스가 앱 웹뷰에 있으면 페이지 안 핸들러가 ESC 를 못 받는다.
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !document.documentElement.dataset.designPick) return;
+  e.preventDefault(); e.stopPropagation();
+  import("./design-pick.js").then((m) => m.cancelDesignPick()).then(() => import("./workspace-view.js")).then((wv) => wv.wvToast(i18n.t('요소 선택을 취소했어요'))).catch(() => {});
+}, true);
 window.addEventListener("keydown", (e) => {
   if (isPaletteOpen()) return;
   const combo = comboOf(e);
@@ -282,7 +288,12 @@ function startPreviewShieldWatch() {
   const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .chat-lightbox, .conv-pop, .tasks-view:not([hidden]), .automations-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   const check = () => {
-    const on = !!document.querySelector(SEL);
+    const hit = document.querySelector(SEL);
+    const on = !!hit;
+    // 진단(2026-10-02): "프리뷰가 클릭·스크롤을 못 받는다" 류가 재발하면 무엇이 실드를 켰는지 pc-ui.log 로 남는다.
+    if (on !== cur) {
+      try { api.debugLog("[shield] " + (on ? "ON by " + (hit.tagName.toLowerCase() + (hit.className && typeof hit.className === "string" ? "." + hit.className.trim().split(/\s+/).join(".") : "")) : "OFF")); } catch (_) { /* noop */ }
+    }
     // win32 프리뷰(B2 preview_win)가 아직 없는 빌드에서도 검사가 콘솔 오류를 쏟지 않게 삼킨다.
     if (on !== cur) { cur = on; Promise.resolve(api.previewShield(on)).catch(() => {}); }
   };

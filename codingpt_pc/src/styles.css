@@ -385,8 +385,10 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .sb-top .bell { position: relative; }
 /* 미읽음 수 — 무채색 카운트(§0.6, 색·굵기·반경은 프리미티브 절). 여기는 자리·크기만. */
 .bell-badge {
-  position: absolute; top: -2px; right: -3px;
-  min-width: 12px; height: 12px; line-height: 12px; padding: 0 2px;
+  position: absolute; top: -3px; right: -5px;
+  min-width: 14px; height: 14px; line-height: 14px; padding: 0 3px; border-radius: 7px;
+  /* 알림 수만 예외로 빨강(2026-10-02 사용자 지시 — 한눈에 들어와야 한다). 다른 카운트 배지는 무채색 그대로. */
+  background: var(--error); color: #fff;
 }
 
 .sb-list { flex: 1; overflow-y: auto; padding: 2px 6px 6px; min-height: 0; border-bottom: 1px solid var(--border); } /* 바깥 여백 6(cmux outer inset) · 하단 헤어라인 = 계정 행과의 경계 */
@@ -2011,6 +2013,9 @@ select.sett-select { min-width: 150px; max-width: 220px; height: 28px; padding-l
 .chat-mode-row.busy { opacity: 0.5; cursor: default; }
 .chat-mode-row-body { display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-width: 0; }
 .chat-mode-row-label { font-size: 13px; color: var(--text); white-space: nowrap; }
+.chat-mode-menu.conv-pick-menu { max-height: min(60vh, 420px); overflow-y: auto; }
+.pvm-check { margin-left: auto; display: inline-flex; width: 14px; justify-content: center; color: var(--text2); }
+.chat-mode-head { padding: 10px 10px 4px; font-size: 11px; font-weight: 600; color: var(--text3); }
 .chat-mode-row-desc { font-size: 11px; color: var(--dim); white-space: nowrap; }
 .chat-mode-row-mark { display: inline-flex; justify-content: flex-end; color: var(--text2); font-size: 12px; width: 12px; }
 .chat-mode-hint { font-size: 11px; color: var(--dim); padding: 5px 8px 3px; }
@@ -2927,11 +2932,12 @@ img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에�
 .tk-input { width: 100%; box-sizing: border-box; border-radius: var(--r-md); padding: 8px 12px; min-height: 34px; font-size: 13px; font-family: inherit; }
 textarea.tk-input { resize: vertical; line-height: 1.5; padding: 10px 12px; }
 .tk-prompt { min-height: 140px; }
-/* 에이전트별 모델·추론 강도 — 칩 아래 한 줄(좁으면 줄바꿈) */
-.tk-model-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); }
-.tk-model-ag { flex: 0 0 100%; font-size: 12px; font-weight: 600; color: var(--text2); }
+/* 에이전트별 모델·추론 강도 — 카드 속 카드가 아니라 칩 바로 아래에 평평하게(2026-10-02 QA) */
+.tk-model-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; }
+.tk-model-ag { flex: 0 0 100%; display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text2); }
 .tk-model-f { flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .tk-model-f > span { font-size: 11px; color: var(--text3); }
+.tk-tile { cursor: default; }
 .dp-pref { display: flex; flex-direction: column; gap: 12px; }
 .tk-note { font-size: 11px; color: var(--text3); line-height: 1.5; }
 .tk-note.err, .tk-status.err { color: var(--error); }
@@ -3232,3 +3238,10 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .conv-find-more.hidden { display: none; }
 ::highlight(conv-find) { background-color: rgba(199, 139, 30, 0.30); }
 ::highlight(conv-find-cur) { background-color: rgba(199, 139, 30, 0.62); }
+
+/* 실험실 — 준비 중인 실험이 없을 때의 안내(2026-10-02) */
+.sm-lab-empty { padding: 28px 24px; display: flex; flex-direction: column; gap: 8px; text-align: center; align-items: center; }
+.sm-lab-empty-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.sm-lab-empty-desc { font-size: 12px; color: var(--text3); line-height: 1.6; max-width: 360px; }
+.mt-name-sep { margin: 0 6px; color: var(--dim); }
+.mt-name-sub { color: var(--text2); font-weight: 400; white-space: nowrap; }

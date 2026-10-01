@@ -27,7 +27,9 @@ import * as i18n from './i18n/index.js';
 //    다시 켜면 보던 탭이 그대로 채팅으로 돌아온다(사용자 상태를 설정 하나로 파괴하지 않는다).
 export const CHAT_BETA_KEY = "cpt.chatBeta.v1";
 export function chatBetaEnabled() {
-  try { return localStorage.getItem(CHAT_BETA_KEY) === "1"; } catch (_) { return false; }
+  // 2026-10-02: 채팅 v2(chat 탭)가 정식이라 이 옛 "터미널 채팅 보기" 베타는 접었다 — 설정 토글도 없앴으므로
+  //  예전에 켜 둔 사람도 꺼진다(되돌릴 길이 없는 켜짐을 남기지 않는다). 저장 키 이름만 앱과의 대조 테스트용으로 남긴다.
+  return false;
 }
 export function setChatBetaEnabled(on) {
   try { localStorage.setItem(CHAT_BETA_KEY, on ? "1" : "0"); } catch (_) {}

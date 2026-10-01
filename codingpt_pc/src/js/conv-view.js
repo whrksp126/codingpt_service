@@ -105,6 +105,7 @@ export class ConvView {
     this._mode = null;
     try { this._newMode = localStorage.getItem(MODE_KEY) || "default"; } catch (_) { this._newMode = "default"; }
     try { this._newAgent = localStorage.getItem(AGENT_KEY) || ""; } catch (_) { this._newAgent = ""; }
+    this._newEffort = "";            // 새 대화의 추론 강도("" = CLI 기본값)
     this._newModel = "";             // 새 대화의 모델(모델 목록이 있을 때만 — 없으면 에이전트 기본값)
     this._find = null;               // 대화 안 검색 상태 { q, hits:[Range], cur }
     this._usageOpen = false;
@@ -301,6 +302,13 @@ export class ConvView {
   /** OS 에서 끌어다 놓은 파일 — 입력칸 아래 첨부 칩으로(§4.5). 이 PC 의 파일이다(origin local). */
   addPaths(paths) {
     this.composer?.addFiles((paths || []).filter(Boolean).map((p) => ({ path: p, origin: "local" })));
+    this.composer?.focus();
+  }
+
+  /** 화면에서 집어 온 것(디자인 모드 요소·화면 캡처) — 설명 글을 입력칸에 넣고 파일은 첨부 칩으로. */
+  attachWithText(text, paths) {
+    this.composer?.addFiles((paths || []).filter(Boolean).map((p) => ({ path: p, origin: "local" })));
+    if (text) this.composer?.insertText(text);
     this.composer?.focus();
   }
 
@@ -541,9 +549,10 @@ export class ConvView {
         // 에이전트·모델은 고를 수 있을 때만 싣는다(고르는 줄이 숨어 있으면 데몬 기본값).
         const agent = agentChoices(this._caps).some((a) => a.id === this._newAgent) ? this._newAgent : undefined;
         const model = this._newModel && this._modelChoices().length ? this._newModel : undefined;
+        const effort = this._newEffort || undefined;
         this._creating = this._rpc("conv.create", {
           cwd: this.ctx.cwd?.() || "", text: p.text, clientId, ...(atts ? { attachments: atts } : {}),
-          ...(mode ? { mode } : {}), ...(agent ? { agent } : {}), ...(model ? { model } : {}),
+          ...(mode ? { mode } : {}), ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}),
         });
         try { r = await this._creating; } finally { this._creating = null; }
         const th = r.thread || {};
@@ -1031,7 +1040,8 @@ export class ConvView {
     if (models.length) {
       const on = models.find((m) => m.on);
       const mEl = this.modelBtn.querySelector(".conv-h-model-label");
-      const txt = on ? on.label : i18n.t('기본 모델');
+      const eff = this._effortNow();
+      const txt = (on ? on.label : i18n.t('기본 모델')) + (eff ? " · " + eff : "");
       if (mEl.textContent !== txt) mEl.textContent = txt;
       this.modelBtn.classList.toggle("busy", !!this._modelBusy);
     }
@@ -1126,7 +1136,7 @@ export class ConvView {
     this._closeModeMenu();
     const wrap = document.createElement("div");
     wrap.className = "chat-mode-menu conv-pick-menu" + (align === "head" ? " head" : "");
-    wrap.innerHTML = rows.map((r) =>
+    wrap.innerHTML = rows.map((r) => r.head ? `<div class="chat-mode-head">${escapeHtml(r.head)}</div>` :
       `<div class="chat-mode-row${r.on ? " on" : ""}" data-id="${escapeHtml(r.id)}">` +
       `<span class="chat-mode-row-body"><span class="chat-mode-row-label">${escapeHtml(r.label)}</span>` +
       (r.desc ? `<span class="chat-mode-row-desc">${escapeHtml(r.desc)}</span>` : "") + `</span>` +
@@ -1171,10 +1181,44 @@ export class ConvView {
 
   _toggleModelMenu() {
     if (this._pickEl && this._pickFor === "model") { this._closePick(); return; }
-    const rows = this._modelChoices();
-    if (!rows.length) return;
-    this._openPick(this.modelBtn, rows, (id) => void this._pickModel(id), "head");
+    const models = this._modelChoices();
+    if (!models.length) return;
+    const rows = models.map((m) => ({ ...m, desc: m.hint || "" }));
+    // 추론 강도 — 이 PC 의 CLI 가 아는 단계(conv.caps 의 efforts). 없으면 줄이 없다.
+    const ag = (this._caps && this._caps.agents || []).find((a) => a.id === this._agentId());
+    const efforts = ag && Array.isArray(ag.efforts) ? ag.efforts : [];
+    if (efforts.length) {
+      const cur = this._effortNow();
+      rows.push({ head: i18n.t('추론 강도') });
+      rows.push({ id: "e:", label: ag.defaultEffort ? i18n.t('기본값 ({name})', { name: ag.defaultEffort }) : i18n.t('기본값'), on: !cur });
+      for (const e of efforts) rows.push({ id: "e:" + e, label: e, on: cur === e });
+    }
+    this._openPick(this.modelBtn, rows, (id) => { if (id.startsWith("e:")) void this._pickEffort(id.slice(2)); else void this._pickModel(id); }, "head");
     this._pickFor = "model";
+  }
+
+  _effortNow() { return this.m.threadId ? ((this.m.thread && this.m.thread.effort) || "") : this._newEffort; }
+
+  async _pickEffort(level) {
+    if (this._modelBusy) return;
+    if (!this.m.threadId) { this._newEffort = level; this._syncHead(); return; }
+    const prev = (this.m.thread && this.m.thread.effort) || "";
+    if (prev === level) return;
+    this._modelBusy = true;
+    this.m.thread = { ...(this.m.thread || {}), effort: level };
+    this._syncHead();
+    try {
+      const r = await this._rpc("conv.set", { threadId: this.m.threadId, effort: level });
+      if (r.thread) applyThreadHint(this.m, r.thread);
+      void this._catchUp();
+    } catch (e) {
+      this.m.thread = { ...(this.m.thread || {}), effort: prev };
+      this._setBanner(e.code === "CONTROL_TIMEOUT" || e.code === "CONTROL_FAILED" ? convErrorText(e.code)
+        : i18n.t('추론 강도를 바꾸지 못했어요 — 잠시 후 다시 시도해 주세요.'), "warn", 4000);
+    } finally {
+      this._modelBusy = false;
+      this._syncHead();
+    }
   }
 
   async _pickModel(id) {
