@@ -994,7 +994,7 @@ li.CodeMirror-hint-active { background: var(--selected); color: var(--text); }
 .sm-sub { font-size: 13px; color: var(--text3); line-height: 1.55; margin-bottom: 22px; }
 /* 그룹 박스 — 모달 자체가 이미 헤어라인을 두르고 있어(sm-card), 안쪽 카드가 또 "떠 있는 카드"처럼
    보이면 테두리가 겹쳐 이중 테두리로 읽힌다(2026-09-30). --base 로 눌러 앉힌 인셋 박스로 바꾼다. */
-.sm-card2 { background: var(--base); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 4px 14px; }
+.sm-card2 { background: transparent; border: none; border-radius: 0; padding: 0; } /* 2026-10-02: 안쪽 카드 제거 — 내용이 바로 보인다 */
 .sm-card2 + .sm-card2 { margin-top: 16px; } /* 카드(부류) 사이 갭 */
 .sett-row { display: flex; justify-content: space-between; align-items: center; gap: 24px; min-height: 40px; padding: 0; font-size: 13px; }
 .sett-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
@@ -3245,3 +3245,5 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .sm-lab-empty-desc { font-size: 12px; color: var(--text3); line-height: 1.6; max-width: 360px; }
 .mt-name-sep { margin: 0 6px; color: var(--dim); }
 .mt-name-sub { color: var(--text2); font-weight: 400; white-space: nowrap; }
+.pv-menu-seg { cursor: default; }
+.pv-menu-seg .scale-seg { margin-left: auto; }

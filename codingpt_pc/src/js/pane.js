@@ -391,8 +391,25 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialTheme, onNa
         try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
       },
     });
-    for (const [v, label] of [["system", i18n.t('시스템 테마')], ["dark", i18n.t('다크')], ["light", i18n.t('라이트')]]) {
-      row(v === "dark" ? icons.moon : (v === "light" ? icons.sun : icons.monitor), label, { check: () => effTheme() === v, onClick: () => doTheme(v) });
+    // 테마 — 한 줄에 라벨 + 설정 모달(모양 > 테마)과 같은 아이콘 탭 3개(시스템/라이트/다크). 눌러도 메뉴는 닫지 않는다.
+    {
+      const r = document.createElement("div");
+      r.className = "pv-menu-item pv-menu-seg";
+      r.innerHTML = `<span class="pvm-ic">${icons.palette({ size: 15 })}</span><span class="pvm-label">${i18n.t('테마')}</span>`
+        + `<span class="scale-seg seg-ic">`
+        + `<button class="scale-opt" data-v="system" title="${i18n.t('시스템')}" aria-label="${i18n.t('시스템')}">${icons.monitor({ size: 15 })}</button>`
+        + `<button class="scale-opt" data-v="light" title="${i18n.t('라이트')}" aria-label="${i18n.t('라이트')}">${icons.sun({ size: 15 })}</button>`
+        + `<button class="scale-opt" data-v="dark" title="${i18n.t('다크')}" aria-label="${i18n.t('다크')}">${icons.moon({ size: 15 })}</button>`
+        + `</span>`;
+      const paint = () => r.querySelectorAll(".scale-opt").forEach((o) => o.classList.toggle("active", o.dataset.v === effTheme()));
+      r.addEventListener("click", (e) => {
+        const o = e.target.closest(".scale-opt");
+        if (!o) return;
+        doTheme(o.dataset.v);
+        paint();
+      });
+      paint();
+      menu.appendChild(r);
     }
     row(icons.tools, i18n.t('개발자 도구'), { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
     // Design Mode — 1회성 요소 선택(토글 아님): 선택 → 소스 위치+크롭샷을 터미널에 [디자인] 줄로 첨부.
