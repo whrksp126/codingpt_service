@@ -701,6 +701,9 @@ function wsGroup(w, g) {
   const wrap = document.createElement("div");
   wrap.className = "ws-group" + (online ? "" : " ws-off");
   wrap.dataset.wsGroup = w.id;
+  // 워크스페이스 색 = 그룹 전체의 아주 연한 배경 틴트(2026-10-02 QA — 왼쪽 점/띠는 어색하다는 지적).
+  const tint = S.wsColor(w.id);
+  if (tint) { wrap.classList.add("tinted"); wrap.style.setProperty("--wsg-tint", tint); }
   const folded = groupCollapsed(w.id);
   wrap.appendChild(wsHead(w, g, folded));
   if (!folded) {
@@ -740,7 +743,6 @@ function wsHead(w, g, folded) {
   name.className = "wsr-name";
   name.innerHTML =
     `<span class="wsg-caret">${folded ? icons.chevronRight({ size: 14 }) : icons.chevronDown({ size: 14 })}</span>` +
-    (color ? `<span class="wsr-color" style="background:${escapeHtml(color)}"></span>` : "") +
     (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
@@ -845,6 +847,8 @@ function localRow(w) {
     `<span class="wsg-title">${escapeHtml(tt("local") + (branch ? " · " + branch : ""))}</span>` +
     (n ? `<span class="wsg-meta">${escapeHtml(tt("terminalsN", { n }))}</span>` : "");
   b.addEventListener("click", () => openWs(w));
+  // 우클릭 = 워크스페이스 메뉴(머리와 같은 것) — 웹뷰 기본 메뉴(다시 로드·요소 검사)가 뜨던 것 대체.
+  b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   return b;
 }
 

@@ -279,40 +279,8 @@ export function smartUrl(raw) {
   return "https://www.google.com/search?q=" + encodeURIComponent(u);
 }
 
-// 빈 프리뷰(검색 전) 상태 — dev 열기 + 내려받기(이어하기). 웹뷰 생성 전에만 보인다.
-function fillPreviewEmpty(host) {
-  host.innerHTML = "";
-  const box = document.createElement("div");
-  box.className = "preview-empty";
-  const msg = document.createElement("div");
-  msg.className = "preview-empty-msg";
-  msg.textContent = i18n.t('URL 또는 데브서버 포트를 입력하세요');
-  const row = document.createElement("div");
-  row.className = "preview-empty-row";
-  const mkb = (label, handler) => {
-    const b = document.createElement("button");
-    b.className = "preview-empty-btn";
-    b.textContent = label;
-    b.addEventListener("click", handler);
-    return b;
-  };
-  row.append(
-    // 종전엔 "첫 번째 dev 포트"를 알아서 열었다(못 찾으면 "dev 포트 없음" 토스트가 전부).
-    //  포트가 여러 개인 게 보통이라, 무엇이 열릴지 모른 채 누르는 버튼이었다 → 목록에서 고르게 한다.
-    mkb(i18n.t('dev 열기'), async (ev) => {
-      try {
-        const m = await import("./ports.js");
-        const uic = await import("./ui-channel.js");
-        m.openPortsMenu(ev.currentTarget, { onPick: (port) => uic.openPortPC(port) });
-      } catch (_) { /* noop */ }
-    }),
-    mkb(i18n.t('내려받기 (이어하기)'), async () => {
-      try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
-    }),
-  );
-  box.append(msg, row);
-  host.append(box);
-}
+// 새 프리뷰의 초기 화면 — 빈 안내 대신 구글 메인(2026-10-02 QA). dev 열기·내려받기는 ⋯ 메뉴로 옮겼다.
+const DEFAULT_PREVIEW_URL = "https://www.google.com/";
 
 function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNavigate, onMeta, onDarkChange }) {
   const bar = document.createElement("div");
@@ -398,6 +366,21 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
       });
       menu.appendChild(b);
     };
+    // 예전 빈 화면 중앙의 두 버튼 — 항상 여기서 연다.
+    row(icons.globe, i18n.t('dev 열기'), {
+      onClick: async () => {
+        try {
+          const m = await import("./ports.js");
+          const uic = await import("./ui-channel.js");
+          m.openPortsMenu(more, { onPick: (port) => uic.openPortPC(port) });
+        } catch (_) { /* noop */ }
+      },
+    });
+    row(icons.handoffIn || icons.handoffOut, i18n.t('내려받기 (이어하기)'), {
+      onClick: async () => {
+        try { const wv = await import("./workspace-view.js"); await wv.pickSnapshotAndApply(); } catch (_) { /* noop */ }
+      },
+    });
     row(icons.moon, i18n.t('다크모드'), { toggle: { get: () => st.dark, set: doTheme } });
     row(icons.tools, i18n.t('개발자 도구'), { toggle: { get: () => dtActive(getId()), set: () => doTools(false) } });
     // Design Mode — 1회성 요소 선택(토글 아님): 선택 → 소스 위치+크롭샷을 터미널에 [디자인] 줄로 첨부.
@@ -419,10 +402,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     setTimeout(() => document.addEventListener("mousedown", closer, true), 0);
   };
 
-  more.addEventListener("click", () => {
-    if (!st.url) return;
-    openMoreMenu();
-  });
+  more.addEventListener("click", () => openMoreMenu());
   // ── 방문 기록 + 검색어 추천 드롭다운(크롬식) — DOM 이라 punch-through 로 프리뷰 위에 뜬다.
   //  포커스=최근 방문, 타이핑=기록 매칭 + Google Suggest. ↑↓/Enter/Esc/클릭.
   let sugEl = null, sugItems = [], sugSel = -1, sugSeq = 0, sugTimer = 0;
@@ -492,6 +472,19 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialDark, onNav
     renderSug();
   };
   const queueSug = () => { clearTimeout(sugTimer); sugTimer = setTimeout(refreshSug, 180); };
+  // 브라우저식 입력칸: 클릭·더블클릭·Tab 진입 = 전체 선택, ⌘Z/⇧⌘Z = 실행취소/다시실행.
+  //  (앱 메뉴에서 Undo/Redo 를 뺐기 때문에 웹뷰가 ⌘Z 를 처리해 주지 않는다 → 직접 execCommand.)
+  let mouseFocus = false;
+  input.addEventListener("mousedown", () => { mouseFocus = document.activeElement !== input; });
+  input.addEventListener("mouseup", (e) => { if (mouseFocus) { e.preventDefault(); input.select(); } mouseFocus = false; });
+  input.addEventListener("dblclick", () => input.select());
+  input.addEventListener("focus", () => { if (!mouseFocus) input.select(); });
+  input.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      document.execCommand(e.shiftKey ? "redo" : "undo");
+    }
+  });
   input.addEventListener("focus", queueSug);
   input.addEventListener("input", queueSug);
   input.addEventListener("blur", () => setTimeout(closeSug, 120));
@@ -575,7 +568,7 @@ class PreviewSurface {
     this.id = "pv-" + tid;
     this.tab = tab;
     this.ctx = ctx || null;
-    this.url = tab.url || "";
+    this.url = tab.url || DEFAULT_PREVIEW_URL;
     // webview 에 실제로 로드할 URL — 원격 워크스페이스의 localhost 는 back 프록시로 치환(비동기).
     this.effUrl = this.url;
     this._applyEff(this.url);
@@ -601,7 +594,6 @@ class PreviewSurface {
     });
     this.host = document.createElement("div");
     this.host.className = "preview-host";
-    fillPreviewEmpty(this.host);
     // Win32에서 버튼은 커서 아래 입력 오버레이 HWND가 받지만, 휠은 포커스된 앱 WebView2가
     // 받아 이 DOM 슬롯으로 온다. 네이티브 프리뷰로 되돌려 보내야 실제 페이지가 스크롤된다.
     // macOS는 네이티브 WKWebView가 직접 받으므로 호출하면 이중 스크롤 — 반드시 win32만.
@@ -888,13 +880,9 @@ export class PaneView {
     const msg = document.createElement("div");
     msg.className = "pane-term-empty-msg empty-title";
     msg.textContent = i18n.t('열린 터미널이 없습니다');
-    const btn = document.createElement("button");
-    btn.className = "pane-term-empty-btn btn";
-    btn.innerHTML = `${icons.terminal({ size: 14 })}<span>${i18n.t('새 터미널')}</span>`;
-    btn.addEventListener("click", () => this.addTab());
-    this.emptyEl.append(msg, btn);
+    // 안내 문구만 — 터미널 추가는 우측 상단 [+] 로(2026-10-02 QA: "필요한 건 사용자가 알아서").
+    this.emptyEl.append(msg);
     this._emptyMsg = msg;
-    this._emptyBtn = btn;
     this.body.appendChild(this.emptyEl);
     this.term = new Terminal({
       cursorBlink: true,
@@ -1267,7 +1255,7 @@ export class PaneView {
       getId: () => this._pvId,
       getHost: () => this.previewHost,
       getCtx: () => this.ctx,
-      initialUrl: this.node.url || "",
+      initialUrl: this.node.url || DEFAULT_PREVIEW_URL,
       initialDark: !!this.node.dark,
       onDarkChange: (v) => { this.node.dark = v; this.ctx.persist?.(); },
       onNavigate: (u) => {
@@ -1285,9 +1273,8 @@ export class PaneView {
     });
     const host = document.createElement("div");
     host.className = "preview-host";
-    fillPreviewEmpty(host);
     this.previewHost = host;
-    this.previewUrl = this.node.url || "";
+    this.previewUrl = this.node.url || DEFAULT_PREVIEW_URL;
     // webview 로드용 실효 URL(원격이면 프록시로 치환) — 복원된 URL 도 즉시 매핑.
     this._pvEffUrl = this.previewUrl;
     if (this.previewUrl) this._applyPvEff(this.previewUrl, false);
@@ -1661,7 +1648,6 @@ export class PaneView {
         ? i18n.t('이 PC가 꺼져 있어요 · 켜면 여기에 터미널이 나타나요')
         : i18n.t('열린 터미널이 없습니다');
     }
-    if (this._emptyBtn) this._emptyBtn.style.display = off ? "none" : "";
   }
 
   // 첫 chat 진입 시에만 ChatView 생성(lazy). ctx 는 전부 라이브 getter — 재클레임으로 host 가 바뀌거나

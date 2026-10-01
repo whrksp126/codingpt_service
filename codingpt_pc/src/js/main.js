@@ -190,6 +190,13 @@ function focusedPane() {
 //  재바인딩 표에 담기지 않는다.
 //  win32 에선 걸지 않는다 — Ctrl 이 곧 Mod 라 사용자가 find.open 을 Ctrl+F 로 재바인딩하면
 //  이 핸들러와 이중 처리가 되고, 기본값(Ctrl+Shift+F)은 표가 이미 처리한다(계약 5).
+// 웹뷰 기본 우클릭 메뉴(다시 로드·요소 검사·자동 완성)는 앱 UI 어디서도 의미가 없다 — 각 표면이 자기 메뉴를
+//  띄우지 않은(defaultPrevented 아님) 우클릭은 막는다. 편집 가능한 곳(입력·IDE·선택 가능 텍스트)만 기본 메뉴(복사/붙여넣기) 유지.
+window.addEventListener("contextmenu", (e) => {
+  if (e.defaultPrevented) return;
+  if (e.target?.closest?.('input, textarea, [contenteditable=""], [contenteditable="true"], .cm-editor, .sel-text, .xterm')) return;
+  e.preventDefault();
+});
 if (!IS_WINDOWS) window.addEventListener("keydown", (e) => {
   if (e.key.toLowerCase() !== "f") return;
   if (!e.ctrlKey || e.metaKey) return;

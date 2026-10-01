@@ -546,6 +546,7 @@ async function runHeadless(planner, instruction, catalog, planId) {
   const env = await plannerEnv();
   const user = userPrompt(catalog, instruction);
   let args = spec.args.slice();
+  args.push(...require('./agent-models').headlessArgs(planner.id, planner));
   let input = null;
   let outFile = null;
   if (spec.parse === 'claude-json') { args.push(spec.sysFlag, SYS_PROMPT); input = user; } else if (spec.parse === 'last-message') {
@@ -669,7 +670,11 @@ async function rpcPlan(p) {
   try { catBytes = bytesOf(JSON.stringify(catalog)); } catch (_) { throw codedError('BAD_PARAMS', 'catalog 가 올바르지 않습니다'); }
   if (catBytes > CATALOG_IN_MAX_BYTES) throw codedError('CATALOG_TOO_LARGE', '카탈로그가 너무 큽니다(256KB 까지)');
   const prefer = p.prefer && typeof p.prefer === 'object' ? p.prefer.agent : null;
-  const planner = await pickPlanner(typeof prefer === 'string' ? prefer : null);
+  const picked = await pickPlanner(typeof prefer === 'string' ? prefer : null);
+  // 플래너 모델·추론 강도(2026-10-02) — 사용자가 고른 값. 형식이 틀리면 무시(CLI 기본값).
+  const pm = p.prefer && typeof p.prefer === 'object' ? p.prefer : {};
+  const am = require('./agent-models');
+  const planner = picked ? { ...picked, model: am.valid(pm.model) ? pm.model || null : null, effort: am.valid(pm.effort) ? pm.effort || null : null } : null;
   let planId;
   do { planId = 'p_' + rand36(10); } while (plans.has(planId));
   const rec = { planId, opId, state: 'planning', startedAt: nowFn(), finishedAt: null, plan: null, error: null, planner: planner ? planner.id : null };

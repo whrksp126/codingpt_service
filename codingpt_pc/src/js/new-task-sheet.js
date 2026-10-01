@@ -26,13 +26,58 @@ export const utf8Bytes = (s) => new TextEncoder().encode(String(s || "")).length
 
 let open = null; // 열려 있는 시트(중복 방지)
 
+/**
+ * 에이전트별 모델·추론 강도 선택(2026-10-02 QA) — 목록은 **이 PC 의 CLI 가 아는 값**(agents.list 의 models/efforts).
+ *  구 데몬(필드 없음)이거나 모르는 에이전트(gemini)면 null — 선택지를 그리지 않고 CLI 기본값을 쓴다.
+ *  sel = { model, effort }(빈 문자열 = 기본값). 모델을 바꾸면 그 모델이 지원하지 않는 강도는 기본값으로 되돌린다(codex).
+ */
+export function agentModelRow(a, sel, onChange, opt = {}) {
+  const models = Array.isArray(a.models) ? a.models : [];
+  if (!models.length) return null;
+  const w = document.createElement("div");
+  w.className = "tk-model-row";
+  const name = document.createElement("span");
+  name.className = "tk-model-ag";
+  name.textContent = a.name || agentName(a.id);
+  const mk = (label, opts, value, set) => {
+    const f = document.createElement("label");
+    f.className = "tk-model-f";
+    const l = document.createElement("span");
+    l.textContent = label;
+    const sl = document.createElement("select");
+    sl.className = "tk-input";
+    for (const [v, t] of opts) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t;
+      if (v === value) o.selected = true;
+      sl.append(o);
+    }
+    sl.addEventListener("change", () => set(sl.value));
+    f.append(l, sl);
+    return f;
+  };
+  const cur = models.find((m) => m.id === sel.model);
+  const defName = a.defaultModel || "";
+  const modelOpts = [["", defName ? tt("modelDefaultN", { name: defName }) : tt("modelDefault")]]
+    .concat(models.map((m) => [m.id, m.hint ? `${m.label} · ${m.hint}` : m.label]));
+  // 강도 선택지 — 선택한 모델이 자기 목록(codex)을 가지면 그것, 아니면 에이전트 공통(claude).
+  const effList = (cur && Array.isArray(cur.efforts) && cur.efforts.length ? cur.efforts : a.efforts) || [];
+  const defEff = (cur && cur.defaultEffort) || a.defaultEffort || "";
+  const effOpts = [["", defEff ? tt("modelDefaultN", { name: defEff }) : tt("modelDefault")]].concat(effList.map((e) => [e, e]));
+  if (sel.effort && !effList.includes(sel.effort)) sel.effort = "";
+  w.append(...(opt.noName ? [] : [name]),
+    mk(tt("model"), modelOpts, sel.model || "", (v) => { sel.model = v; onChange(true); }),
+    ...(effList.length ? [mk(tt("effort"), effOpts, sel.effort || "", (v) => { sel.effort = v; onChange(false); })] : []));
+  return w;
+}
+
 /** prefill = { host?, wsId? } */
 export function openNewTaskSheet(prefill) {
   if (open) { open.focus(); return; }
   const pf = prefill || {};
   const st = {
     host: null, wsId: null, base: "", branches: null, branchErr: null,
-    prompt: "", agents: {}, agentList: null, agentErr: null,
+    prompt: "", agents: {}, sels: {}, agentList: null, agentErr: null,
     copyEnv: true, fetch: false, busy: false, err: null,
     // ★ 멱등 키(§2.12) — 결과가 불명한 실패(TIMEOUT·전송 실패)는 호스트가 이미 만들었을 수 있다. 다시 [시작] 해도
     //   같은 opId 를 보내야 데몬 createOps 재생이 중복 작업(worktree·에이전트 N개 더)을 막는다.
@@ -167,7 +212,10 @@ export function openNewTaskSheet(prefill) {
     bs.disabled = !names.length;
     bs.addEventListener("change", () => { st.base = bs.value; });
     const baseRow = row(tt("base"), bs);
-    if (st.branchErr != null) baseRow.append(note(errText(st.branchErr), "err"));
+    if (st.branchErr === "NOT_A_REPO") {
+      // 비-git 폴더 — 이유만 알리고 아무것도 하지 않는다(2026-10-02 결정: 하위 repo 탐색·다중 repo 작업은 하지 않음).
+      baseRow.append(note(tt("notRepoHint"), "err"));
+    } else if (st.branchErr != null) baseRow.append(note(errText(st.branchErr), "err"));
     else if (!st.branches && st.wsId) baseRow.append(note(tt("checking")));
     else if (st.branches && st.branches.dirtyCount > 0) {
       baseRow.append(note(tt("baseDirtyHint", { name: st.branches.current || st.base, n: st.branches.dirtyCount })));
@@ -238,6 +286,12 @@ export function openNewTaskSheet(prefill) {
       }
     }
     form.append(row(tt("agents"), chips));
+    // 고른 에이전트마다 모델·추론 강도(이 PC 의 CLI 가 아는 목록)
+    for (const a of st.agentList || []) {
+      if (!st.agents[a.id]) continue;
+      const mr = agentModelRow(a, (st.sels[a.id] = st.sels[a.id] || { model: "", effort: "" }), () => draw());
+      if (mr) form.append(mr);
+    }
 
     // 고급
     const adv = document.createElement("details");
@@ -286,7 +340,10 @@ export function openNewTaskSheet(prefill) {
         repo: ws.localPath,
         base: st.base,
         prompt: st.prompt,
-        agents: Object.entries(st.agents).map(([id, count]) => ({ id, count })),
+        agents: Object.entries(st.agents).map(([id, count]) => {
+          const m = st.sels[id] || {};
+          return { id, count, ...(m.model ? { model: m.model } : {}), ...(m.effort ? { effort: m.effort } : {}) };
+        }),
         copyEnv: st.copyEnv,
         fetch: st.fetch,
         workspaceId: ws.id,

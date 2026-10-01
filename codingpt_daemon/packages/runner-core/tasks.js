@@ -121,6 +121,7 @@ function dep(name) {
     case 'pty': return require('./pty');
     case 'termBackend': return require('./term-backend');
     case 'agents': return require('./agents');
+    case 'agentModels': return require('./agent-models');
     case 'agentState': return require('./agent-state');
     case 'agentWatch': return require('./agent-watch');
     case 'statusLine': return require('./status-line');
@@ -562,7 +563,11 @@ async function createSync(p, opId, origin = null) {
     const count = a && a.count == null ? 1 : a && a.count;
     if (!TASK_AGENTS.has(id)) throw codedError('BAD_PARAMS', `작업에 쓸 수 없는 에이전트입니다: ${id}`);
     if (!Number.isInteger(count) || count < 1 || count > RUNS_PER_TASK_MAX) throw codedError('BAD_PARAMS', 'count 는 1~4 입니다');
-    for (let i = 0; i < count; i++) agentList.push(id);
+    // 모델·추론 강도(2026-10-02) — 사용자 PC 의 CLI 가 아는 값만(agent-models.describe). 셸 한 줄에 붙으므로 형식 검증 필수.
+    const model = a.model == null || a.model === '' ? null : a.model;
+    const effort = a.effort == null || a.effort === '' ? null : a.effort;
+    if (!dep('agentModels').valid(model) || !dep('agentModels').valid(effort)) throw codedError('BAD_PARAMS', '모델 또는 추론 강도가 올바르지 않습니다');
+    for (let i = 0; i < count; i++) agentList.push({ id, model, effort });
   }
   if (agentList.length > RUNS_PER_TASK_MAX) throw codedError('TASK_LIMIT', '한 작업에 실행은 최대 4개입니다');
   if (p.workspaceId != null && typeof p.workspaceId !== 'string') throw codedError('BAD_PARAMS', 'workspaceId 가 올바르지 않습니다');
@@ -597,7 +602,7 @@ async function createSync(p, opId, origin = null) {
   const activeRuns = s.items.reduce((n, t) => n + t.runs.filter((r) => ACTIVE_RUN_STATES.has(r.state)).length, 0);
   if (activeRuns + agentList.length > OPEN_RUNS_MAX) throw codedError('TASK_LIMIT', '동시에 실행할 수 있는 작업 수를 넘었습니다');
   const installed = await dep('agents').list({ version: false });
-  for (const id of new Set(agentList)) {
+  for (const id of new Set(agentList.map((x) => x.id))) {
     const hit = installed.find((a) => a.id === id);
     if (!hit || !hit.installed) throw codedError('AGENT_NOT_INSTALLED', `${AGENT_LABEL[id] || id} 이 이 PC 에 없습니다`);
   }
@@ -622,13 +627,13 @@ async function createSync(p, opId, origin = null) {
     base, workspaceId: p.workspaceId || null, state: 'open', winnerRunId: null, error: null,
     createdAt: now, updatedAt: now, closedAt: null, origin: origin || null,
     opts: { copyEnv, fetch: doFetch },
-    runs: agentList.map((agent, i) => {
+    runs: agentList.map(({ id: agent, model, effort }, i) => {
       const idx = i + 1;
       const dirAbs = path.join(worktreesDir(), `${slug}-${t6}-${idx}`);
       const dir = relHome(dirAbs);
       const spec = catalog.find((c) => c.id === agent);
       return {
-        id: 'r_' + rand36(8), idx, agent,
+        id: 'r_' + rand36(8), idx, agent, model, effort,
         branch: `cpt/${t6}-${idx}`, dir, cwd: info.subdir ? `${dir}/${info.subdir}` : dir,
         baseSha: null, workspaceId: null, tid: null, tsession: null,
         trustPending: false, state: 'creating',
@@ -795,6 +800,7 @@ async function launchRun(t, r, { withPrompt }) {
   emit([t.id], 'run');
   let args;
   let mode = 'resume';
+  const modelArgs = dep('agentModels').launchArgs(r.agent, r);   // --model/--effort(없으면 CLI 기본값)
   if (withPrompt) {
     args = r.promptMode === 'arg' ? await promptArgsFor(t, r) : null;
     if (r.promptMode === 'arg' && !args) r.promptMode = 'paste';
@@ -803,6 +809,8 @@ async function launchRun(t, r, { withPrompt }) {
     const spec = (dep('agents').CATALOG || []).find((c) => c.id === r.agent);
     args = spec && Array.isArray(spec.resumeArgs) ? spec.resumeArgs.slice() : undefined;
   }
+  // 옵션은 프롬프트(위치 인자)·서브커맨드(resume) 앞에 와야 한다 — codex 의 `resume --last` 는 -m 을 서브커맨드 뒤에서도 받지만 앞이 항상 안전하다.
+  if (modelArgs.length) args = [...modelArgs, ...(args || [])];
   let res;
   try {
     //  fresh — 첫 실행(withPrompt)은 방금 만든 터미널이다: rc 초기화 중 일시 명령을 busy 로 보지 않게(cpt-server).

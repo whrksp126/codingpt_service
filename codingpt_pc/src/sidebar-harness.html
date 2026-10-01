@@ -105,6 +105,11 @@
     core: {
       invoke: async (cmd, args) => {
         if (cmd === 'daemon_status') return { paired: true, running: true, deviceId: 11, device_name: '건호의 MacBook' };
+        if (cmd === 'agents_local') return { agents: [
+          { id: 'claude', name: 'Claude', installed: true, defaultModel: 'sonnet', efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+            models: [{ id: 'opus', label: 'Opus', hint: '최신' }, { id: 'sonnet', label: 'Sonnet', hint: '최신' }, { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', hint: '' }, { id: 'claude-opus-4-8', label: 'Opus 4.8', hint: '' }] },
+          { id: 'codex', name: 'Codex', installed: true, efforts: ['low', 'medium', 'high'], models: [{ id: 'gpt-5.5', label: 'GPT-5.5', hint: '', efforts: ['low', 'medium', 'high', 'xhigh'], defaultEffort: 'medium' }] },
+        ] };
         if (cmd === 'front_base_url') return 'https://codingpt.ghmate.com';
         if (cmd === 'auto_local') return autoRpc(args.cmd, args.args, 11);
         // 작업 상세 — task.get 은 목 목록에서 찾아 준다(빈 {} 를 주면 상세가 끝없이 다시 조회한다).
@@ -197,7 +202,8 @@
     [...document.querySelectorAll('.dp-sheet .tk-foot button')].find((b) => b.textContent.trim() === '계획')?.click();
   };
   window.__pcSettings = async (h) => (await import('./js/power-settings.js')).openPcSettingsSheet(h ?? 11);
-  if (location.hash.includes('dispatch')) setTimeout(() => window.__dispatch(), 100);
+  if (location.hash.includes('dispopen')) setTimeout(async () => { (await import('./js/dispatch-sheet.js')).openDispatchSheet({ text: '결제 실패 재시도 넣어줘' }); setTimeout(() => { const s = document.querySelector('.dp-sheet select'); if (s) { s.value = 'claude'; s.dispatchEvent(new Event('change')); } }, 400); }, 100);
+  if (location.hash.includes('dispatch') && !location.hash.includes('dispopen')) setTimeout(() => window.__dispatch(), 100);
   if (location.hash.includes('pcset')) setTimeout(() => window.__pcSettings(11), 100);
   if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);
   if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';

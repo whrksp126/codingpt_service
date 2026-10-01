@@ -276,7 +276,16 @@ async function handleAgentsRpc(cmd, a) {
   const shimLib = lazyMod('./shim');
   if (cmd === 'agents.list') {
     const items = await agentsLib.list({ refresh: !!a.refresh });
-    return { agents: items, onboardedAt: agentsLib.onboardedAt() };
+    // 설치된 CLI 가 아는 모델·추론 강도(agent-models.js) — 새 작업/한 줄 지시의 모델 선택 근거. 모르면 필드 생략.
+    const modelsLib = lazyMod('./agent-models');
+    const withModels = modelsLib ? await Promise.all(items.map(async (i) => {
+      if (!i.installed) return i;
+      try {
+        const d = await modelsLib.describe(i.id, i.path);
+        return d ? { ...i, models: d.models, efforts: d.efforts, defaultModel: d.defaultModel, defaultEffort: d.defaultEffort } : i;
+      } catch (_) { return i; }
+    })) : items;
+    return { agents: withModels, onboardedAt: agentsLib.onboardedAt() };
   }
   if (cmd === 'agents.wire') {
     const id = String(a.id || '').trim();

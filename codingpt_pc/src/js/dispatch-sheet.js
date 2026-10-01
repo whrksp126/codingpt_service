@@ -19,7 +19,9 @@ import { at } from "./text/automations.js";
 import { triggerOf, normalizePlan, planRunTotal, planStartable, fallbackKey, pickPlannerHost } from "./automations-model.js";
 import { whenText } from "./automations-view.js";
 import { agentName, openTasksDashboard, toast } from "./tasks-view.js";
-import { isUncertain, TASK_AGENTS, MAX_RUNS, utf8Bytes } from "./new-task-sheet.js";
+import { isUncertain, TASK_AGENTS, MAX_RUNS, utf8Bytes, agentModelRow } from "./new-task-sheet.js";
+import { loadAgents } from "./agents-view.js";
+import { agentsRemote, isLocalHostId } from "./tasks-api.js";
 
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -53,6 +55,9 @@ export function openDispatchSheet(prefill) {
     err: null,               // 코드
     startOps: {},            // 항목 키 → opId(결과 불명 재시도는 같은 opId)
     done: {},                // 항목 키 → true(이미 만든 것 — 재시도 때 건너뛴다)
+    // 계획·실행에 쓸 AI(2026-10-02 QA) — agent "" = 자동(데몬이 쓸 수 있는 첫 에이전트). model/effort "" = CLI 기본값.
+    pref: { agent: "", model: "", effort: "" },
+    prefAgents: null,        // 이 PC(계획 PC)의 설치된 에이전트 + 모델 목록
   };
   let gen = 0;               // [다시 계획]·닫기가 진행 중인 흐름을 끊는다
   let pollKick = null;
@@ -76,6 +81,19 @@ export function openDispatchSheet(prefill) {
   const hosts = () => S.pcDevices().filter((d) => d.online !== false && typeof d.id === "number" && hostHasDispatch(d.id) !== false);
   const nameOf = (h) => (S.pcDevices().find((d) => Number(d.id) === Number(h)) || {}).name || tt("pc");
   const catOf = (h) => st.catalogs.find((c) => Number(c.host) === Number(h)) || null;
+
+  // 계획 PC 의 에이전트·모델 목록(agents.list) — 계획 PC 는 plan() 과 같은 규칙으로 고른다.
+  async function loadPrefAgents() {
+    const hs = hosts();
+    const ph = pickPlannerHost(hs.map((d) => d.id), S.activeDeviceId());
+    if (ph == null) return;
+    try {
+      const r = isLocalHostId(state, ph) ? await loadAgents(false) : await agentsRemote(ph);
+      if (!open) return;
+      st.prefAgents = (r.agents || []).filter((a) => TASK_AGENTS.includes(a.id) && a.installed);
+    } catch (_) { st.prefAgents = []; }
+    if (st.phase === "input") draw();
+  }
 
   // ── 흐름 ──
   async function plan() {
@@ -111,7 +129,7 @@ export function openDispatchSheet(prefill) {
       acc = await autoRpc("dispatch.plan", {
         opId: st.planOpId, instruction: text,
         catalog: { hosts: st.catalogs },
-        prefer: {},
+        prefer: st.pref.agent ? { agent: st.pref.agent, ...(st.pref.model ? { model: st.pref.model } : {}), ...(st.pref.effort ? { effort: st.pref.effort } : {}) } : {},
       }, plannerHost);
     } catch (e) {
       if (my !== gen) return;
@@ -155,7 +173,7 @@ export function openDispatchSheet(prefill) {
       try {
         const r = await taskRpc("task.create", {
           opId, repo: ws.path || t.repo, ...(t.subdir ? { subdir: t.subdir } : {}), base: t.base || ws.branch || "",
-          prompt: t.prompt, title: t.title, agents: Object.entries(t.agents).map(([id, count]) => ({ id, count })),
+          prompt: t.prompt, title: t.title, agents: Object.entries(t.agents).map(([id, count]) => ({ id, count, ...(id === st.pref.agent && st.pref.model ? { model: st.pref.model } : {}), ...(id === st.pref.agent && st.pref.effort ? { effort: st.pref.effort } : {}) })),
           copyEnv: true, fetch: false, workspaceId: t.workspaceId, origin: { kind: "dispatch", planId },
         }, t.host);
         st.done[t.key] = { taskId: r && r.task && r.task.id, host: t.host };
@@ -213,6 +231,20 @@ export function openDispatchSheet(prefill) {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); if (st.phase === "plan" && canStart()) void start(); else void plan(); }
     });
     form.append(ta);
+
+    // 쓸 AI — 자동 또는 설치된 에이전트 + 그 CLI 가 아는 모델·추론 강도.
+    if (st.prefAgents && st.prefAgents.length) {
+      const wrap = document.createElement("div");
+      wrap.className = "dp-pref";
+      const ag = select([["", tt("plannerAuto")]].concat(st.prefAgents.map((a) => [a.id, a.name || agentName(a.id)])), st.pref.agent);
+      ag.disabled = ta.disabled;
+      ag.addEventListener("change", () => { st.pref = { agent: ag.value, model: "", effort: "" }; draw(); });
+      wrap.append(field(tt("plannerAgent"), ag));
+      const cur = st.prefAgents.find((a) => a.id === st.pref.agent);
+      const mr = cur && !ta.disabled ? agentModelRow(cur, st.pref, () => draw(), { noName: true }) : null;
+      if (mr) wrap.append(mr);
+      form.append(wrap);
+    }
 
     if (st.phase === "collecting") form.append(progress(at("collecting", { n: st.collected, d: st.total })));
     if (st.phase === "planning") form.append(progress(at("planning", { agent: st.planner && st.planner.agent ? agentName(st.planner.agent) : "" }).replace(/ · $/, "")));
@@ -417,6 +449,7 @@ export function openDispatchSheet(prefill) {
     syncFoot: null,
   };
   draw();
+  void loadPrefAgents();
   setTimeout(() => ta?.focus(), 30);
 }
 

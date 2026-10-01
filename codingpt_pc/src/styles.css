@@ -170,6 +170,9 @@ input, textarea, [contenteditable="true"], [contenteditable=""] {
     드래그가 화면 위치에 따라 달라 보인다). */
 ::selection { background: #264F78; color: #F8FAFC; }
 :root[data-theme="light"] ::selection { background: #BCD3F5; color: #0F172A; }
+/* 입력칸 안은 배경(--elevated)이 어두워 #264F78 이 묻힌다(2026-10-02 QA) — 더 밝은 청색으로. */
+input::selection, textarea::selection { background: #3D7BD9; color: #FFFFFF; }
+:root[data-theme="light"] input::selection, :root[data-theme="light"] textarea::selection { background: #9CC1F5; color: #0F172A; }
 
 /* ── 전역 상호작용 정책(디자인 리프레시 2026-09-30, PLAN §0.5) ─────────────────────────────
    · 커서: macOS 앱은 화살표가 기본이다. 손가락(pointer)은 링크(<a>)에만 — 버튼·행·탭·메뉴에는 쓰지 않는다.
@@ -502,15 +505,20 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .wsg-add:hover { background: var(--hover); color: var(--text); }
 .wsg-add:active { background: var(--pressed); }
 .wsg-head:hover .wsg-add, .wsg-head:focus-visible .wsg-add, .wsg-add:focus-visible { display: inline-flex; }
-.wsg-children { margin-bottom: 4px; }
+.wsg-children { margin-top: 3px; margin-bottom: 4px; padding-bottom: 2px; }
+/* 워크스페이스 색 = 그룹 배경 틴트(연하게). 선택 행은 틴트 위에서도 또렷하게 한 단계 밝은 면으로 올린다. */
+.ws-group { border-radius: var(--r-md); }
+.ws-group.tinted { background: color-mix(in srgb, var(--wsg-tint) 9%, transparent); }
+:root[data-theme="light"] .ws-group.tinted { background: color-mix(in srgb, var(--wsg-tint) 14%, transparent); }
+.ws-group.tinted .wsg-head:hover, .ws-group.tinted .wsg-child:hover { background: color-mix(in srgb, var(--wsg-tint) 14%, transparent); }
 .wsg-child {
   display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px;
-  padding: 0 10px 0 26px; margin-bottom: 1px; border-radius: var(--r-sm);
+  padding: 0 10px 0 28px; margin: 0 4px 2px; width: calc(100% - 8px); border-radius: var(--r-sm);
   background: transparent; border: none; color: var(--text2); font-size: 13px; font-weight: 400;
   text-align: left; user-select: none; -webkit-user-select: none;
 }
 .wsg-child:hover { background: var(--hover); }
-.wsg-child.active { background: var(--selected); box-shadow: inset 0 0 0 1px var(--border-ctrl); color: var(--text); font-weight: 500; }
+.wsg-child.active { background: var(--pressed); box-shadow: inset 0 0 0 1px var(--border-ctrl); color: var(--text); font-weight: 500; }
 .wsg-ic { display: inline-flex; flex: none; color: var(--text3); }
 .wsg-child.active .wsg-ic { color: var(--text2); }
 .wsg-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
@@ -1236,10 +1244,10 @@ li.CodeMirror-hint-active { background: var(--selected); color: var(--text); }
 .error { font-size: 12px; color: var(--error); line-height: 1.4; }
 
 /* 알림 패널 — 미읽음은 채움이 아니라 좌측 6px 점(§0.7). */
-.notif-panel { position: fixed; z-index: var(--z-popover); width: 320px; max-height: 60vh; overflow-y: auto; padding: 4px; }
-.notif-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; font-weight: 600; font-size: 13px; }
+.notif-panel { position: fixed; z-index: var(--z-popover); width: 340px; max-height: 60vh; overflow-y: auto; padding: 6px; }
+.notif-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px 10px; font-weight: 600; font-size: 13px; }
 .notif-empty { padding: 20px; text-align: center; color: var(--dim); font-size: 13px; }
-.notif-row { width: 100%; text-align: left; display: flex; align-items: flex-start; gap: 0; padding: 8px 10px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text2); }
+.notif-row { width: 100%; text-align: left; display: flex; align-items: flex-start; gap: 0; padding: 11px 12px; margin-bottom: 4px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text2); }
 .notif-row:hover { background: var(--hover); }
 .notif-dot { flex: none; width: 14px; padding-top: 5px; display: flex; justify-content: center; }
 .notif-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: transparent; }
@@ -1247,12 +1255,12 @@ li.CodeMirror-hint-active { background: var(--selected); color: var(--text); }
 .notif-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .notif-title { font-size: 13px; font-weight: 500; color: var(--text2); }
 .notif-row.unread .notif-title { color: var(--text); }
-.notif-sub { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.notif-sub { font-size: 12px; color: var(--text2); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .notif-body {
-  font-size: 12px; color: var(--text3); margin-top: 2px; line-height: 1.4;
+  font-size: 12px; color: var(--text3); margin-top: 4px; line-height: 1.45;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.notif-meta { font-size: 11px; color: var(--dim); margin-top: 3px; }
+.notif-meta { font-size: 11px; color: var(--dim); margin-top: 6px; }
 
 /* (spin 키프레임은 전역 모션 절로 옮겼다. 액센트 맥동 `pulse` 는 폐기 — 상태 점은 정지해 있다.
    전역 커스텀 스크롤바도 폐기 — macOS 오버레이 스크롤바를 따른다.) */
@@ -2273,10 +2281,10 @@ video.chat-media-el { cursor: default; }
 .apc-expired-msg { flex: 1 1 auto; font-size: 12px; color: var(--warn); }
 
 /* 알림 패널의 승인 행 — 인박스에서 바로 응답 */
-.notif-row.approval { border: 1px solid var(--border-ctrl); margin-bottom: 4px; }
+.notif-row.approval { border: 1px solid var(--border-ctrl); margin-bottom: 6px; }
 .notif-row.approval.resolved { opacity: 0.55; }
 .notif-ic { display: inline-flex; color: var(--warn); margin-right: 5px; vertical-align: -1px; }
-.notif-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 7px; }
+.notif-acts { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 10px; }
 .notif-act { height: 24px; font-size: 12px; font-weight: 500; border-radius: var(--r-sm); padding: 0 10px; border: 1px solid var(--border-ctrl); background: var(--hover); color: var(--text); }
 .notif-act:hover { background: var(--selected); }
 .notif-act:active { background: var(--pressed); }
@@ -2911,23 +2919,30 @@ img.emu-img:not([src]) { visibility: hidden; }   /* canvas(라이브 영상)에�
 .mono { font-family: var(--mono); }
 
 /* 시트(커밋·PR·머지·새 작업) — .wv-sheet 위에 폼만 얹는다 */
-.wv-sheet.tk-sheet { min-width: 420px; max-width: 560px; width: min(560px, calc(100vw - 48px)); padding: 10px 12px 12px; }
-.tk-form { display: flex; flex-direction: column; gap: 10px; padding: 0 2px; }
-.tk-field { display: flex; flex-direction: column; gap: 4px; }
+.wv-sheet.tk-sheet { min-width: 420px; max-width: 560px; width: min(560px, calc(100vw - 48px)); padding: 20px 22px 18px; }
+.tk-sheet .wv-sheet-title { padding: 0 0 16px; font-size: 15px; }
+.tk-form { display: flex; flex-direction: column; gap: 16px; padding: 0; }
+.tk-field { display: flex; flex-direction: column; gap: 7px; }
 .tk-label { font-size: 12px; font-weight: 600; color: var(--text3); }
-.tk-input { width: 100%; box-sizing: border-box; border-radius: var(--r-md); padding: 5px 9px; font-size: 13px; font-family: inherit; }
-textarea.tk-input { resize: vertical; line-height: 1.45; }
-.tk-prompt { min-height: 120px; }
-.tk-note { font-size: 11px; color: var(--text3); }
+.tk-input { width: 100%; box-sizing: border-box; border-radius: var(--r-md); padding: 8px 12px; min-height: 34px; font-size: 13px; font-family: inherit; }
+textarea.tk-input { resize: vertical; line-height: 1.5; padding: 10px 12px; }
+.tk-prompt { min-height: 140px; }
+/* 에이전트별 모델·추론 강도 — 칩 아래 한 줄(좁으면 줄바꿈) */
+.tk-model-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--r-md); }
+.tk-model-ag { flex: 0 0 100%; font-size: 12px; font-weight: 600; color: var(--text2); }
+.tk-model-f { flex: 1 1 180px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tk-model-f > span { font-size: 11px; color: var(--text3); }
+.dp-pref { display: flex; flex-direction: column; gap: 12px; }
+.tk-note { font-size: 11px; color: var(--text3); line-height: 1.5; }
 .tk-note.err, .tk-status.err { color: var(--error); }
 .tk-check { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
 .tk-adv summary { font-size: 12px; color: var(--text3); }
-.tk-adv .tk-check { margin-top: 6px; }
+.tk-adv .tk-check { margin-top: 10px; }
 .tk-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tk-chip { display: inline-flex; align-items: center; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); overflow: hidden; background: transparent; }
 .tk-chip.on { background: var(--selected); }
 .tk-chip.off { opacity: 0.34; }
-.tk-chip-lbl { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: none; color: var(--text); font-size: 12px; font-weight: 500; padding: 4px 10px; }
+.tk-chip-lbl { display: inline-flex; align-items: center; gap: 7px; background: transparent; border: none; color: var(--text); font-size: 12px; font-weight: 500; padding: 7px 12px; }
 .tk-chip-lbl:disabled { cursor: default; }
 .tk-step { display: inline-flex; align-items: center; gap: 2px; padding-right: 6px; }
 .tk-step button { background: transparent; border: none; color: var(--text2); width: 20px; height: 20px; border-radius: 999px; font-size: 13px; }
@@ -2935,8 +2950,8 @@ textarea.tk-input { resize: vertical; line-height: 1.45; }
 .tk-step button:active:not(:disabled) { background: var(--pressed); }
 .tk-step button:disabled { opacity: 0.34; cursor: default; }
 .tk-step-n { font-size: 12px; color: var(--text2); min-width: 20px; text-align: center; }
-.tk-status { min-height: 16px; font-size: 12px; color: var(--text2); padding: 8px 2px 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
-.tk-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; }
+.tk-status { min-height: 16px; font-size: 12px; color: var(--text2); padding: 12px 0 0; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.tk-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 16px; }
 
 /* ── 자동화 번들(automation-design §3·§4·§5.9·§6.6) — 자동화 장소(.au-*) · 한 줄 지시(.dp-*) · PR 후속(.td-fu-*) · 깨어 있기(.pw-*)
    규율은 Agent Tasks 절과 같다: 선택/활성 = 무채색 명암만. 색은 상태 신호에만(error = 실패·주의 배지, warn = 입력 필요, 점멸 = 실행 중).
@@ -2994,7 +3009,7 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .dp-title .ic { color: var(--text3); }
 .dp-input { min-height: 0; }
 .dp-progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text2); padding: 2px; }
-.dp-card { display: flex; flex-direction: column; gap: 8px; }
+.dp-card { display: flex; flex-direction: column; gap: 12px; }
 .dp-warnline { font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
 .dp-warnline::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--warn); flex: none; }
 .dp-fallback { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text3); }
@@ -3003,13 +3018,13 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .dp-q { font-size: 12px; color: var(--text); }
 .dp-summary { font-size: 12px; color: var(--text2); line-height: 1.45; }
 .dp-sec { font-size: 12px; font-weight: 600; color: var(--text3); letter-spacing: 0; margin-top: 4px; }
-.dp-item { border: 1px solid var(--border); background: var(--base); border-radius: var(--r-md); padding: 9px 10px; display: flex; flex-direction: column; gap: 8px; }
+.dp-item { border: 1px solid var(--border); background: var(--base); border-radius: var(--r-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; }
 .dp-item:hover { background-image: linear-gradient(var(--hover), var(--hover)); }
 .dp-item.selected { background: var(--selected); }
 .dp-item.off { opacity: 0.55; }
 .dp-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .dp-item-title { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.dp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+.dp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
 .tk-input.dp-need { border-color: var(--warn); }
 .dp-prompt textarea { margin-top: 6px; }
 .dp-why { font-size: 11px; color: var(--dim); }
