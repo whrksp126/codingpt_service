@@ -65,6 +65,9 @@ static PUNCH_SHIELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 static PUNCH_ORIG_HITTEST: AtomicUsize = AtomicUsize::new(0); // 스위즐 전 원본 hitTest IMP
 #[cfg(target_os = "macos")]
 static CONTAINERS: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new()); // 살아있는 프리뷰 컨테이너 NSView (포인터, pvId)
+// 컨테이너 슬롯 표식 — 감싸기(wrap_in_container, 메인 스레드 비동기) 전에 프리뷰가 닫혔음.
+#[cfg(target_os = "macos")]
+const CONT_CLOSED: usize = usize::MAX;
 #[cfg(target_os = "macos")]
 static MOUSE_MONITOR: AtomicUsize = AtomicUsize::new(0); // NSEvent 좌클릭 로컬 모니터(설치 1회, 0=미설치)
 // OS 파일 드롭을 가로챈 뷰에서 "cpt-drag" 로 쏘기 위한 앱 핸들(클래스 메서드는 캡처 불가).
@@ -185,7 +188,9 @@ unsafe extern "C-unwind" fn punch_hit_test(
                 && p_self.y >= fr.origin.y && p_self.y <= fr.origin.y + fr.size.h
             {
                 let hit: *mut AnyObject = msg_send![&*cont, hitTest: p_self];
-                if !hit.is_null() {
+                // 컨테이너 자신이 맞으면 = 안에 웹뷰가 없는 빈 껍데기(닫힌 프리뷰의 잔재) → 프리뷰가 아니다.
+                //  여기서 돌려주면 그 자리의 클릭·스크롤을 빈 NSView 가 삼킨다(2026-10-02 "구글 화면 클릭 불가").
+                if !hit.is_null() && hit != cont {
                     return hit;
                 }
             }
@@ -478,7 +483,7 @@ pub fn install_punch_through(app: &AppHandle) {
 #[cfg(target_os = "macos")]
 fn container_set_frame(webview: &Webview, container: &Arc<AtomicUsize>, x: f64, y: f64, w: f64, h: f64) -> bool {
     let cont = container.load(Ordering::Acquire);
-    if cont == 0 {
+    if cont == 0 || cont == CONT_CLOSED {
         return false;
     }
     let _ = webview.with_webview(move |_pw| unsafe {
@@ -545,6 +550,12 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String)
     let _ = webview.with_webview(move |pw| unsafe {
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
+        // 감싸기 전에 이미 닫혔다(생성 직후 같은 프레임에 close — 기본 구글 페이지로 즉시 생성되는 프리뷰가
+        //  레이아웃 재구성에 닫히는 경우). 여기서 감싸면 주인 없는 컨테이너가 프리뷰 자리에 남아 hitTest 로
+        //  클릭·스크롤을 삼킨다 → 아무것도 하지 않는다.
+        if slot.load(Ordering::Acquire) == CONT_CLOSED {
+            return;
+        }
         let wk: *mut AnyObject = pw.inner().cast();
         // 프리뷰 웹뷰도 동일 — 가림 복귀 시 프리뷰 슬롯만 비어 보이는 변형 증상을 막는다.
         disable_occlusion_detection(wk);
@@ -569,7 +580,12 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String)
         let mask: usize = 2 | 16; // NSViewWidthSizable | NSViewHeightSizable
         let _: () = msg_send![wk, setAutoresizingMask: mask];
         let _: () = msg_send![wk, release];
-        slot.store(cont as usize, Ordering::Release);
+        if slot.compare_exchange(0, cont as usize, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            // 그 사이 닫힘 — 만든 컨테이너를 걷는다(웹뷰는 close 가 정리).
+            let _: () = msg_send![cont, removeFromSuperview];
+            let _: () = msg_send![cont, release];
+            return;
+        }
         if let Ok(mut v) = CONTAINERS.lock() { v.push((cont as usize, pane_id.clone())); } // hitTest 라우팅 + 클릭 포커스 역매핑 등록
     });
 }
@@ -577,9 +593,9 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String)
 // 컨테이너 정리(웹뷰 close 후) — 메인 스레드에서 remove + release.
 #[cfg(target_os = "macos")]
 fn drop_container(app: &AppHandle, container: &Arc<AtomicUsize>) {
-    let cont = container.swap(0, Ordering::AcqRel);
-    if cont == 0 {
-        return;
+    let cont = container.swap(CONT_CLOSED, Ordering::AcqRel);
+    if cont == 0 || cont == CONT_CLOSED {
+        return; // 아직 안 감쌌으면 표식만 — wrap_in_container 가 보고 건너뛴다.
     }
     if let Ok(mut v) = CONTAINERS.lock() { v.retain(|(c, _)| *c != cont); } // hitTest 라우팅 대상 해제
     let _ = app.run_on_main_thread(move || unsafe {
@@ -809,7 +825,7 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
     #[cfg(target_os = "macos")]
     {
         let act = action.clone();
-        let cont_ptr = entry.container.load(std::sync::atomic::Ordering::Acquire);
+        let cont_ptr = match entry.container.load(std::sync::atomic::Ordering::Acquire) { CONT_CLOSED => 0, c => c };
         entry
             .webview
             .with_webview(move |pw| unsafe {
