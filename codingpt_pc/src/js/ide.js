@@ -453,7 +453,8 @@ export class IdeView {
     acts.append(
       mini(icons.plus, i18n.t('새 파일'), () => this._startCreate(this.root, false)),
       mini(icons.folder, i18n.t('새 폴더'), () => this._startCreate(this.root, true)),
-      mini(icons.refresh, i18n.t('새로고침'), () => { this.tree = null; this.searchTree = null; this._reload(); })
+      mini(icons.refresh, i18n.t('새로고침'), () => { this.tree = null; this.searchTree = null; this._reload(); }),
+      mini(icons.collapseAll || icons.chevronUp, i18n.t('모두 접기'), () => this.collapseAll())
     );
     hdr.append(title, acts);
     const search = document.createElement("div");
@@ -606,6 +607,17 @@ export class IdeView {
   // 트리 행 키보드 — Return=이름변경(Finder), ↑/↓=행 이동, →/←=폴더 펼침/접기.
   _treeKeydown(e, n, row) {
     if (e.target.closest(".ide-rename-input")) return; // 편집 인풋 내부 키는 그쪽이 처리
+    const mod = e.metaKey || e.ctrlKey;
+    if (n.path !== this.root) {
+      if (mod && !e.altKey && e.key.toLowerCase() === "c") { e.preventDefault(); this._clip(n, "copy"); return; }
+      if (mod && e.key.toLowerCase() === "x") { e.preventDefault(); this._clip(n, "cut"); return; }
+      if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); this._duplicate(n); return; }
+      if ((mod && e.key === "Backspace") || e.key === "Delete") { e.preventDefault(); this._delete(n); return; }
+      if (e.key === "F2") { e.preventDefault(); this._startRename(n); return; }
+    }
+    if (mod && e.key.toLowerCase() === "v") { e.preventDefault(); this._paste(n.dir ? n.path : parentOf(n.path)); return; }
+    if (mod && e.altKey && e.code === "KeyC") { e.preventDefault(); this._copyPath(n, e.shiftKey); return; }
+    if (e.key === "Enter" && !n.dir && this.opts.onOpenFile && mod) { e.preventDefault(); this.opts.onOpenFile(n.path); return; }
     if (e.key === "Enter") {
       if (n.path === this.root) return;
       e.preventDefault();
@@ -1311,19 +1323,41 @@ export class IdeView {
   _menu(e, n) {
     closeMenu();
     const dirTarget = n.dir ? n.path : parentOf(n.path);
+    const isRoot = n.path === this.root;
     const items = [];
+    // VS Code 탐색기와 같은 묶음·순서(2026-10 사용자: "vscode 수준으로"). null = 구분선.
+    if (!n.dir && this.opts.onOpenFile) {
+      items.push([i18n.t('열기'), () => this.opts.onOpenFile(n.path)]);
+      items.push([i18n.t('옆으로 열기'), () => this.opts.onOpenFile(n.path, { split: true })]);
+      items.push(null);
+    }
     items.push([i18n.t('새 파일'), () => this._startCreate(dirTarget, false)]);
     items.push([i18n.t('새 폴더'), () => this._startCreate(dirTarget, true)]);
-    if (n.path !== this.root) {
-      items.push([i18n.t('이름 변경'), () => this._startRename(n)]);
-      items.push([i18n.t('삭제'), () => this._delete(n), "danger"]);
+    if (!this.fs.remote) items.push([i18n.t('Finder에서 보기'), () => this._reveal(n)]);
+    items.push(null);
+    if (!isRoot) {
+      items.push([i18n.t('잘라내기'), () => this._clip(n, "cut"), "⌘X"]);
+      items.push([i18n.t('복사'), () => this._clip(n, "copy"), "⌘C"]);
+    }
+    if (_clipboard && _clipboard.fs === this.fs) items.push([i18n.t('붙여넣기'), () => this._paste(dirTarget), "⌘V"]);
+    if (!isRoot) items.push([i18n.t('복제'), () => this._duplicate(n), "⌘D"]);
+    items.push(null);
+    items.push([i18n.t('경로 복사'), () => this._copyPath(n, false), "⌥⌘C"]);
+    items.push([i18n.t('상대 경로 복사'), () => this._copyPath(n, true), "⇧⌥⌘C"]);
+    if (!isRoot) {
+      items.push(null);
+      items.push([i18n.t('이름 변경'), () => this._startRename(n), "↩"]);
+      items.push([i18n.t('삭제'), () => this._delete(n), "⌘⌫", "danger"]);
     }
     const menu = document.createElement("div");
     menu.className = "ctx-menu";
-    for (const [label, fn, cls] of items) {
+    for (const row of items) {
+      if (!row) { const sep = document.createElement("div"); sep.className = "ctx-sep"; menu.appendChild(sep); continue; }
+      const [label, fn, kbd, cls] = row.length === 3 && row[2] === "danger" ? [row[0], row[1], "", "danger"] : row;
       const it = document.createElement("div");
       it.className = "ctx-item" + (cls ? " " + cls : "");
       it.textContent = label;
+      if (kbd) { const k = document.createElement("span"); k.className = "ctx-kbd"; k.textContent = kbd; it.appendChild(k); }
       it.addEventListener("click", () => { closeMenu(); fn(); });
       menu.appendChild(it);
     }
@@ -1334,6 +1368,64 @@ export class IdeView {
     activeMenu = menu;
     setTimeout(() => document.addEventListener("mousedown", closeMenuOnce, true), 0);
   }
+
+  // ── 탐색기 조작(VS Code 미러) ──
+  _clip(n, op) { _clipboard = { op, path: n.path, dir: !!n.dir, fs: this.fs }; this._toast(op === "cut" ? i18n.t('잘라냈어요') : i18n.t('복사했어요')); }
+  _uniqueName(dir, name) {
+    const p = this._findNode(dir);
+    const taken = new Set(((p && p.children) || []).map((c) => baseName(c.path)));
+    if (!taken.has(name)) return name;
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name, ext = dot > 0 ? name.slice(dot) : "";
+    for (let i = 1; i < 100; i++) { const c = `${stem} copy${i > 1 ? " " + i : ""}${ext}`; if (!taken.has(c)) return c; }
+    return `${stem} copy ${Date.now()}${ext}`;
+  }
+  async _copyTree(src, dst, isDir) {
+    if (!isDir) {
+      const r = await this.fs.fsReadBytes(src);
+      const w = this.fs.fsWriteB64 || this.fs.fsWriteBytes;
+      await w.call(this.fs, dst, r.base64 || "");
+      return;
+    }
+    await this.fs.fsMkdir(dst);
+    const t = await this.fs.fsTree(src, 1);
+    const kids = (t && (t.children || (Array.isArray(t) ? t : []))) || [];
+    for (const k of kids) await this._copyTree(k.path, dst + "/" + baseName(k.path), !!k.dir);
+  }
+  async _paste(dirTarget) {
+    const c = _clipboard;
+    if (!c) return;
+    try {
+      if (c.op === "cut") {
+        if (dirTarget === c.path || dirTarget.startsWith(c.path + "/")) return;
+        await this.fs.fsRename(c.path, dirTarget + "/" + baseName(c.path));
+        _clipboard = null;
+      } else {
+        await this._copyTree(c.path, dirTarget + "/" + this._uniqueName(dirTarget, baseName(c.path)), c.dir);
+      }
+      this.expanded.add(dirTarget);
+      const pn = this._findNode(dirTarget); if (pn) pn.children = null;
+      await this._reload();
+    } catch (e) { this._toast(String(e)); }
+  }
+  async _duplicate(n) {
+    const dir = parentOf(n.path);
+    try {
+      await this._copyTree(n.path, dir + "/" + this._uniqueName(dir, baseName(n.path)), !!n.dir);
+      const pn = this._findNode(dir); if (pn) pn.children = null;
+      await this._reload();
+    } catch (e) { this._toast(String(e)); }
+  }
+  async _copyPath(n, relative) {
+    let t = n.path;
+    if (relative) t = n.path === this.root ? "." : n.path.slice(this.root.length).replace(/^\/+/, "");
+    else if (this.fs.fsAbs) { try { t = await this.fs.fsAbs(n.path); } catch (_) { /* 상대 경로 그대로 */ } }
+    try { await navigator.clipboard.writeText(t); this._toast(i18n.t('복사했어요')); } catch (_) { /* noop */ }
+  }
+  async _reveal(n) {
+    try { const abs = await api.fsAbs(n.dir ? n.path : parentOf(n.path)); await api.openPath(abs); } catch (e) { this._toast(String(e)); }
+  }
+  collapseAll() { this.expanded = new Set([this.root]); this._renderBody(); }
 
   _startCreate(dirPath, isDir) {
     this.expanded.add(dirPath);
@@ -1526,9 +1618,14 @@ export class IdeView {
         } catch (e) { this._toast(String(e)); }
       } else if (dragging && dropFolder) {
         try {
-          const dest = joinPath(dropFolder, n.name);
-          await this.fs.fsRename(n.path, dest);
-          for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
+          // ⌥ 누른 채 놓기 = 복사(VS Code 와 같다). 아니면 이동.
+          if (_dragAlt) {
+            await this._copyTree(n.path, joinPath(dropFolder, this._uniqueName(dropFolder, n.name)), !!n.dir);
+          } else {
+            const dest = joinPath(dropFolder, n.name);
+            await this.fs.fsRename(n.path, dest);
+            for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
+          }
           this.tree = null;
           this.searchTree = null;
           this.expanded.add(dropFolder);
@@ -1634,6 +1731,11 @@ export class IdeView {
 
 // ── 컨텍스트 메뉴 전역 ──
 let activeMenu = null;
+let _dragAlt = false; // 트리 드래그 중 ⌥ 상태(놓는 순간 복사/이동 판정)
+window.addEventListener("keydown", (e) => { if (e.key === "Alt") _dragAlt = true; }, true);
+window.addEventListener("keyup", (e) => { if (e.key === "Alt") _dragAlt = false; }, true);
+window.addEventListener("pointermove", (e) => { _dragAlt = e.altKey; }, true);
+let _clipboard = null; // 탐색기 잘라내기/복사 버퍼 { op, path, dir, fs } — 같은 전송 계층(fs) 안에서만 붙여넣는다
 function closeMenu() { activeMenu?.remove(); activeMenu = null; }
 function closeMenuOnce(e) {
   if (activeMenu && !activeMenu.contains(e.target)) { closeMenu(); document.removeEventListener("mousedown", closeMenuOnce, true); }

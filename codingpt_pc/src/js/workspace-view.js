@@ -145,7 +145,7 @@ function syncTreePanel(ws) {
   treeView = new IdeView(ws.localPath || "", treePanelEl, {
     treeOnly: true,
     fs: fs || undefined,
-    onOpenFile: (path) => openFileAsPane(path),
+    onOpenFile: (path, o) => (o && o.split ? smartAdd("ide", { openPath: path }) : openFileAsPane(path)),
   });
   treeView.mount();
 }

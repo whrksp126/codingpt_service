@@ -6,6 +6,7 @@
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { IdeView } from "./ide.js";
+import { fileIcon } from "./fileicons.js";
 import { makeRemoteFs } from "./remote-fs.js";
 import lan from "./lan.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
@@ -158,7 +159,8 @@ export function surfaceLabel(kind, node) {
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
 export function surfaceIcon(kind, node) {
-  if (kind === "ide") return icons.code;
+  //  파일 pane — 파일 트리와 같은 Material 아이콘(2026-10).
+  if (kind === "ide") return (o) => fileIcon((node && node.openPath) || "", (o && o.size) || 14);
   //  채팅 = 그 대화를 돌리는 에이전트의 로고(Claude·Codex…). 대화 전(새 채팅)은 기본 에이전트(claude) — 지금 채팅 엔진이 claude 만 띄운다.
   if (kind === "chat") return (o) => agentMarkHtml((node && node.agent) || "claude", o) || icons.chat(o);
   if (kind === "emulator") {
@@ -801,7 +803,7 @@ export class PaneView {
         //  터미널 탭은 **에이전트를 특정할 수 있을 때만** 그 로고로 바꾼다(모르면 터미널 글리프 유지 —
         //  모양은 사실 주장이므로 추측 금지. 판정 = agent-signal.resolveAgentBrand, 앱과 동치).
         const iconHtml = isT ? (this._tabAgentMark(t) || icons.terminal({ size: 13 }))
-          : t.kind === "ide" ? icons.code({ size: 13 })
+          : t.kind === "ide" ? fileIcon(t.openPath || "", 14)
           : t.kind === "emulator" ? surfaceIcon("emulator", t)({ size: 13 })
           : t.kind === "chat" ? surfaceIcon("chat", t)({ size: 13 })
           : previewTabIconHtml(t.metaFav);

@@ -1183,5 +1183,16 @@ export default {
   "휴대폰·태블릿에서 이어서 작업하기": "Reprendre le travail sur ton téléphone ou ta tablette",
   "🔒 복호화 중…": "🔒 Déchiffrement…",
   "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Contenu chiffré (aucune clé sur cet appareil)",
-  "파일 트리": "Arborescence"
+  "파일 트리": "Arborescence",
+  "옆으로 열기": "Ouvrir sur le côté",
+  "Finder에서 보기": "Afficher dans le Finder",
+  "잘라내기": "Couper",
+  "붙여넣기": "Coller",
+  "복제": "Dupliquer",
+  "경로 복사": "Copier le chemin",
+  "상대 경로 복사": "Copier le chemin relatif",
+  "모두 접기": "Tout réduire",
+  "잘라냈어요": "Coupé",
+  "복사했어요": "Copié",
+  "미리보기": "Aperçu"
 };

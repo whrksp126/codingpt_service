@@ -78,6 +78,7 @@ export const icons = {
   code: (o) => svg('<path d="M8.5 8l-4 4 4 4"/><path d="M15.5 8l4 4-4 4"/><path d="M13.5 6l-3 12"/>', o),
   user: (o) => svg('<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/>', o),
   caretRight: (o) => svg('<path d="M9 5l7 7-7 7"/>', o),
+  collapseAll: (o) => svg('<rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/>', o),
   chevronUp: (o) => svg('<path d="M6 15l6-6 6 6"/>', o),
   chevronDown: (o) => svg('<path d="M6 9l6 6 6-6"/>', o),
   external: (o) => svg('<path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"/>', o),

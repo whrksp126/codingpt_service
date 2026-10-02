@@ -1183,5 +1183,16 @@ export default {
   "휴대폰·태블릿에서 이어서 작업하기": "Pick up where you left off on your phone or tablet",
   "🔒 복호화 중…": "🔒 Decrypting…",
   "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Encrypted content (no key on this device)",
-  "파일 트리": "File tree"
+  "파일 트리": "File tree",
+  "옆으로 열기": "Open to the Side",
+  "Finder에서 보기": "Reveal in Finder",
+  "잘라내기": "Cut",
+  "붙여넣기": "Paste",
+  "복제": "Duplicate",
+  "경로 복사": "Copy Path",
+  "상대 경로 복사": "Copy Relative Path",
+  "모두 접기": "Collapse All",
+  "잘라냈어요": "Cut",
+  "복사했어요": "Copied",
+  "미리보기": "Preview"
 };
