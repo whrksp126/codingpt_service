@@ -322,8 +322,11 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialTheme, onNa
   const applyTheme = () => { api.previewControl(getId(), "theme_" + effTheme()).catch(() => {}); };
   const stopAppearance = onAppearanceChange(() => { if (!st.theme && !st.disposed) applyTheme(); });
   const doTheme = (v) => {
+    const before = effTheme();
     st.theme = v;
     applyTheme();
+    // 유튜브처럼 색 구성을 로드 때 한 번만 읽는 사이트가 있다 — 실제로 바뀌었으면 다시 불러 반영한다.
+    if (st.url && effTheme() !== before) setTimeout(() => api.previewControl(getId(), "reload").catch(() => {}), 60);
     onThemeChange?.(v);
   };
   const doTools = (alt) => {

@@ -78,7 +78,12 @@ static DRAG_APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 #[tauri::command]
 pub fn preview_shield(on: bool) {
     #[cfg(target_os = "macos")]
-    PUNCH_SHIELD.store(on, std::sync::atomic::Ordering::Relaxed);
+    {
+        PUNCH_SHIELD.store(on, std::sync::atomic::Ordering::Relaxed);
+        if let Some(app) = DRAG_APP.get() {
+            let _ = app.run_on_main_thread(move || unsafe { restack_containers(on) });
+        }
+    }
     #[cfg(target_os = "windows")]
     preview_win::shield(on);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -157,6 +162,41 @@ pub fn window_set_bg(app: AppHandle, hex: String) -> Result<(), String> {
     { let (_, _) = (app, hex); }
     #[cfg(not(target_os = "windows"))]
     Ok(())
+}
+
+// 프리뷰 컨테이너 z 순서 — DOM 오버레이가 없으면(shield off) 앱 웹뷰 **위**, 있으면 **아래**.
+//  ★ 2026-10-02 실측: 프리뷰 페이지에 click/mousedown/wheel/mousemove 가 **0건**(cpt browser eval 카운터).
+//   앱 웹뷰 아래에 두고 contentView hitTest 스위즐로 이벤트를 넘기던 방식이 더는 이벤트를 넘기지 못한다
+//   (macOS 27 — 스위즐 코드는 그대로인데 끊겼다). 위에 두면 AppKit 이 웹뷰에 직접 준다(라우팅 불필요).
+//   앱 웹뷰는 프리뷰 슬롯이 투명이라 어느 쪽이든 그림은 같다 — 메뉴·모달이 뜰 때만 아래로 내려 DOM 이 위에 그려진다.
+#[cfg(target_os = "macos")]
+unsafe fn restack_containers(shield: bool) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+    let conts: Vec<(usize, String)> = CONTAINERS.lock().map(|v| v.clone()).unwrap_or_default();
+    for (c, _) in conts {
+        let cont = c as *mut AnyObject;
+        let sv: *mut AnyObject = msg_send![cont, superview];
+        if sv.is_null() { continue; }
+        let pos: isize = if shield { -1 } else { 1 }; // NSWindowBelow / NSWindowAbove
+        let nil_view: *mut AnyObject = std::ptr::null_mut();
+        let _: () = msg_send![cont, retain];
+        let _: () = msg_send![sv, addSubview: cont, positioned: pos, relativeTo: nil_view];
+        let _: () = msg_send![cont, release];
+    }
+}
+
+// 웹뷰 외형(마지막으로 고른 테마) — 새 프리뷰는 **페이지가 뜨기 전에** 이 외형으로 시작한다.
+//  유튜브처럼 prefers-color-scheme 을 로드 때 한 번만 읽는 사이트는 로드 뒤 바꾸면 반영되지 않는다.
+#[cfg(target_os = "macos")]
+static LAST_APPEARANCE: AtomicUsize = AtomicUsize::new(0); // 0=system 1=dark 2=light
+
+#[cfg(target_os = "macos")]
+unsafe fn appearance_obj(code: usize) -> *mut objc2::runtime::AnyObject {
+    use objc2::msg_send;
+    let name = match code { 1 => "NSAppearanceNameDarkAqua", 2 => "NSAppearanceNameAqua", _ => return std::ptr::null_mut() };
+    let n = objc2_foundation::NSString::from_str(name);
+    msg_send![objc2::class!(NSAppearance), appearanceNamed: &*n]
 }
 
 // contentView hitTest 오버라이드 본체 — 프리뷰 컨테이너 rect 안이면 프리뷰(아래층)로 라우팅.
@@ -568,7 +608,9 @@ fn wrap_in_container(webview: &Webview, slot: Arc<AtomicUsize>, pane_id: String)
         let alloc: *mut AnyObject = msg_send![cls, alloc];
         let cont: *mut AnyObject = msg_send![alloc, initWithFrame: frame];
         // punch-through: 컨테이너를 형제 최하단(앱 웹뷰 아래)에 삽입 — 앱 UI 의 투명 슬롯으로 비친다.
-        let below: isize = -1; // NSWindowBelow
+        // 지금 오버레이가 없으면 위(입력 직통), 있으면 아래 — restack_containers 와 같은 규칙.
+        let below: isize = if PUNCH_SHIELD.load(Ordering::Relaxed) { -1 } else { 1 };
+        let _: () = msg_send![wk, setAppearance: appearance_obj(LAST_APPEARANCE.load(Ordering::Relaxed))];
         let nil_view: *mut AnyObject = std::ptr::null_mut();
         let _: () = msg_send![superview, addSubview: cont, positioned: below, relativeTo: nil_view];
         // 재부모화 — 컨테이너 로컬 (0,0) 에 가득 채우고 autoresize 로 추종.
@@ -873,6 +915,7 @@ pub fn preview_control(mgr: State<PreviewManager>, pane_id: String, action: Stri
                             _ => std::ptr::null_mut(),
                         };
                         let _: () = msg_send![wk, setAppearance: appearance];
+                        LAST_APPEARANCE.store(match act.as_str() { "theme_dark" => 1, "theme_light" => 2, _ => 0 }, Ordering::Relaxed);
                         let ns = objc2_foundation::NSString::from_str(DARK_OFF_JS);
                         let nil: *mut AnyObject = std::ptr::null_mut();
                         let _: () = msg_send![wk, evaluateJavaScript: &*ns, completionHandler: nil];
