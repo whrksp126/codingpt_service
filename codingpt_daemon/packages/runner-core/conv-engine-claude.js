@@ -121,6 +121,9 @@ function toMsgs(o, { blockIdx = 0, textCap = TEXT_CAP, closeDraft = false } = {}
       if (msg.kind === 'tool_result' && msg.result && msg.result.toolUseId) { push('r:' + msg.result.toolUseId, msg); continue; }
       const m = { ...msg };
       if (m.kind === 'text' && INTERRUPT_MARK.test(String(m.text || '').trim())) { m.kind = 'interrupt'; m.hidden = true; }
+      // /compact 뒤 CLI 가 남기는 "This session is being continued…" 요약은 사람이 한 말이 아니다 — 경계선(compact_boundary)이
+      //  이미 "대화 압축" 을 알리므로 요약 본문을 말풍선·구분선으로 또 그리지 않는다(2026-10 QA).
+      if (m.kind === 'compact') m.hidden = true;
       push(idx ? `u:${uuid}:${idx}` : `u:${uuid}`, m);
     }
     return out;

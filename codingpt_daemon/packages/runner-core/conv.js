@@ -1273,7 +1273,8 @@ const HANDLERS = {
     heal(thread.id);
     try { await importSession(thread); } catch (e) { log(`가져오기 실패 thread=${thread.id}: ${e && e.message}`); }
     thread = reconcileOwner(store.getThread(thread.id));
-    viewed(thread.id);
+    // viewed() 를 여기서 부르지 않는다(2026-10 QA) — since 는 push 힌트마다 당겨 가는 호출이라, 창을 열어 둔 기기가 있으면
+    //  턴이 끝나는 순간에도 "방금 봤다" 가 항상 참이 되어 완료 알림이 영영 안 나갔다. '보는 중' 은 열기·보내기(사용자 행동)만 센다.
     const r = store.since(thread.id, Number(p.sinceSeq) | 0);
     return { thread: publicThread(thread), ...r, live: liveView(thread.id), pending: pendingView(thread.id) };
   },

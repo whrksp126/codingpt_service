@@ -283,3 +283,13 @@ test('환경 — 터미널 좌표·중첩 세션 표식을 넘기지 않고 훅�
     Object.assign(process.env, keep);
   }
 });
+
+test('/compact 요약("This session is being continued…")은 사람이 한 말이 아니다 — 접는다(2026-10 QA)', () => {
+  const sum = engine.toMsgs({ type: 'user', uuid: 'u-sum', isCompactSummary: true, message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context. The summary below covers…' } }, { blockIdx: 0 });
+  assert.strictEqual(sum.length, 1);
+  assert.strictEqual(sum[0].kind, 'compact');
+  assert.strictEqual(sum[0].hidden, true);
+  // 같은 줄이 아닌 일반 사용자 말은 그대로 보인다.
+  const [plain] = engine.toMsgs({ type: 'user', uuid: 'u-1', message: { role: 'user', content: '안녕' } }, { blockIdx: 0 });
+  assert.notStrictEqual(plain.hidden, true);
+});

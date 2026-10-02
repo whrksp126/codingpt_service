@@ -599,6 +599,7 @@ export function buildRows(st, opts) {
       continue;
     }
     if (!isVisible(m)) continue;
+    if (m.role === 'user' && m.kind === 'compact') continue;   // /compact 요약 본문 — 이미 저장된 옛 대화에도 적용
     if (m.kind === 'tool_use' || m.kind === 'question') {
       const id = m.tool && m.tool.id;
       // 아직 답하지 않은 질문은 도크의 카드가 그린다 — 내역에 또 그리면 같은 질문이 둘이 된다.

@@ -841,11 +841,10 @@ function localRow(w) {
   b.className = "wsg-child wsg-local" + (active ? " active" : "");
   b.dataset.wsLocal = w.id;
   const branch = w.git?.branch || "";
-  const n = S.wsTerminalCount(w.id);
+  // 터미널 개수는 일부러 안 그린다(2026-10 QA) — 알림 신호가 아닌 숫자라 정보 가치가 없었다.
   b.innerHTML =
     `<span class="wsg-ic">${icons.folder({ size: 15 })}</span>` +
-    `<span class="wsg-title">${escapeHtml(tt("local") + (branch ? " · " + branch : ""))}</span>` +
-    (n ? `<span class="wsg-meta">${escapeHtml(tt("terminalsN", { n }))}</span>` : "");
+    `<span class="wsg-title">${escapeHtml(tt("local") + (branch ? " · " + branch : ""))}</span>`;
   b.addEventListener("click", () => openWs(w));
   // 우클릭 = 워크스페이스 메뉴(머리와 같은 것) — 웹뷰 기본 메뉴(다시 로드·요소 검사)가 뜨던 것 대체.
   b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });

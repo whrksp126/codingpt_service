@@ -1,7 +1,7 @@
 // state.js — 앱 중앙 상태 + 구독 + 영속화. 뷰 모듈이 이 상태를 읽어 렌더한다.
 import { api } from "./api.js";
 import * as T from "./tiling.js";
-import { getPane } from "./pane.js";
+import { getPane, isTermTab } from "./pane.js";
 import * as i18n from './i18n/index.js';
 import { isTaskWorkspace } from "./tasks-model.js";
 // Agent Tasks(§4) — 작업 run 의 worktree 워크스페이스 술어. 정본은 순수 모듈(tasks-model.js, 앱과 교차 테스트)이고
@@ -496,8 +496,15 @@ export function closePane(wsId, paneId) {
     fireSurfaceClose("preview", wsId);
   }
   if (leaf && leaf.kind === "terminal" && isThisHost(ws)) {
+    // 다른 pane 이 같은 터미널(win)을 아직 보여 주고 있으면 지우지 않는다(앱의 closePane 과 같은 규칙 —
+    //  한 터미널이 두 pane 으로 나타났을 때 하나를 닫으면 둘 다 사라지던 사고).
+    const stillShown = new Set();
+    T.eachLeaf(w.layout, (l) => {
+      if (l.id === paneId || l.kind !== "terminal") return;
+      for (const t of l.tabs || []) if (isTermTab(t) && typeof t.win === "number") stillShown.add(t.win);
+    });
     for (const t of leaf.tabs || []) {
-      if (typeof t.win === "number") api.killWindow(ws.localPath || "", t.win).catch(() => {});
+      if (typeof t.win === "number" && !stillShown.has(t.win)) api.killWindow(ws.localPath || "", t.win).catch(() => {});
     }
   }
   const r = T.closeLeaf(w.layout, paneId);

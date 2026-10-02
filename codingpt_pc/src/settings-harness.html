@@ -44,6 +44,7 @@
   window.__section = (key) => {
     [...document.querySelectorAll('.sm-navitem')].find((b) => b.textContent.trim() === key)?.click();
   };
+  { const h = decodeURIComponent(location.hash.slice(1)); if (h && !['nosetup', 'battery'].includes(h)) setTimeout(() => window.__section(h), 150); }
   // ── E2EE 상태를 손으로 세워 `연결` 화면의 분기를 확인한다(2026-08-15) ──
   //  ① 열쇠 있음 = 인증 코드 · ② 이 PC 만 열쇠 없음(다른 기기는 있음) = 이유 + 코드 입력 + 최후 수단
   const e2eeMod = await import('./js/e2ee.js');

@@ -269,20 +269,27 @@ function renderSection(force) {
       .catch(() => { host.textContent = i18n.t('단축키 목록을 불러오지 못했어요.'); });
   } else if (section === "appearance") {
     contentEl.innerHTML = `
+      <div class="sm-section-title">${i18n.t('화면')}</div>
       <div class="sm-card2">
         <!-- 언어 — 계정 동기화. 목록 이름은 그 언어 자신의 표기라 번역하지 않는다
              (영어로 "Japanese" 라고 쓰면 일본어 쓰는 사람이 못 찾는다). -->
-        <div class="sett-row"><span>${i18n.t('언어')}</span><div class="fd" id="langDd"></div></div>
-        <div class="sett-row"><span>${i18n.t('테마')}</span>
+        <div class="sett-row"><span class="sett-copy"><span class="sett-label">${i18n.t('언어')}</span><span class="sett-desc">${i18n.t('앱에 표시되는 언어예요.')}</span></span><div class="fd" id="langDd"></div></div>
+        <div class="sett-row"><span class="sett-copy"><span class="sett-label">${i18n.t('테마')}</span><span class="sett-desc">${i18n.t('시스템 설정을 따르거나 라이트·다크를 직접 고를 수 있어요.')}</span></span>
           <span class="scale-seg seg-ic" id="themeSeg">
             <button class="scale-opt" data-v="system" title="${i18n.t('시스템')}" aria-label="${i18n.t('시스템')}">${icons.monitor({ size: 15 })}</button>
             <button class="scale-opt" data-v="light" title="${i18n.t('라이트')}" aria-label="${i18n.t('라이트')}">${icons.sun({ size: 15 })}</button>
             <button class="scale-opt" data-v="dark" title="${i18n.t('다크')}" aria-label="${i18n.t('다크')}">${icons.moon({ size: 15 })}</button>
           </span>
         </div>
-        <div class="sett-row"><span>${i18n.t('인터페이스 글꼴')}</span><div class="fd" id="uiFontDd"></div></div>
-        <div class="sett-row"><span>${i18n.t('코드·터미널 글꼴')}</span><div class="fd" id="monoFontDd"></div></div>
-        <div class="sett-col"><span>${i18n.t('터미널 스타일')}</span><div class="ts-grid" id="termStyleGrid"></div></div>
+      </div>
+      <div class="sm-section-title">${i18n.t('글꼴')}</div>
+      <div class="sm-card2">
+        <div class="sett-row"><span class="sett-copy"><span class="sett-label">${i18n.t('인터페이스 글꼴')}</span></span><div class="fd" id="uiFontDd"></div></div>
+        <div class="sett-row"><span class="sett-copy"><span class="sett-label">${i18n.t('코드·터미널 글꼴')}</span></span><div class="fd" id="monoFontDd"></div></div>
+      </div>
+      <div class="sm-section-title">${i18n.t('터미널 스타일')}</div>
+      <div class="sm-card2">
+        <div class="sett-col"><div class="ts-grid" id="termStyleGrid"></div></div>
         <div class="sett-hint">${i18n.t('글꼴·터미널 스타일은 계정의 모든 기기(PC·모바일)에 함께 적용돼요. 터미널 스타일은 앱 테마(다크/라이트)에 맞는 변형이 자동 선택돼요.')}</div>
       </div>
       `;

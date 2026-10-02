@@ -379,7 +379,8 @@ ok(/cpt\.chatBeta\.v1/.test(strip(read(path.join(PC, 'chat-model.js'))))
   '★ 채팅 모드 베타 저장 키가 두 플랫폼에서 같은 문자열이다');
 const pcSet = strip(read(path.join(PC, 'settings.js')));
 const appSet = strip(read(path.join(APP, 'components/SettingsModal.tsx')));
-ok(/베타/.test(pcSet) && /BetaTag/.test(appSet), '설정 화면이 베타임을 표시한다(양 플랫폼)');
+// 실험 기능이 생기면 PC 는 `베타` 표시를 달고, 앱은 BetaTag 를 되살린다. 지금(2026-10-02)은 둘 다 "준비 중" 안내만 둔다.
+ok(/베타/.test(pcSet) && /실험적 기능을 준비 중이에요/.test(appSet), '설정 화면이 베타임을 표시한다(양 플랫폼)');
 // ★ 베타 기능은 `실험실` 한 곳에 모은다(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다").
 //  각 기능 화면에 흩어지면 화면마다 "이건 정식인가 실험인가"를 다시 판단해야 한다.
 ok(/key: "lab", label: "실험실"/.test(pcSet) && /key: 'lab', label: '실험실'/.test(appSet),

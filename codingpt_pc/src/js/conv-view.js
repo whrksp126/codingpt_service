@@ -165,7 +165,8 @@ export class ConvView {
       if (title) b.title = title;
       return b;
     };
-    this.moreBtn = mkTool("conv-t-more", icons.dots({ size: 16 }), i18n.t('더 보기'));
+    //  ⋯ 는 입력창 안이 아니라 채팅 pane 우측 상단에 떠 있다(2026-10-02 사용자 확정) — 도구줄에는 자주 쓰는 것만 남긴다.
+    this.moreBtn = mkTool("conv-t-more conv-more-fab", icons.dots({ size: 16 }), i18n.t('더 보기'));
     this.moreBtn.addEventListener("click", (e) => { e.stopPropagation(); this._toggleMoreMenu(); });
     this.listBtn = this.moreBtn;   // 대화 목록 팝오버의 바깥 클릭 판정이 쓰는 앵커
     this.modelBtn = mkTool("conv-t-model hidden", `<span class="conv-t-label"></span>`, i18n.t('모델'));
@@ -196,7 +197,7 @@ export class ConvView {
     this.agentEl.addEventListener("click", (e) => { e.stopPropagation(); this._toggleAgentMenu(); });
     const ctlLeft = document.createElement("span");
     ctlLeft.className = "conv-ctl-pills";
-    ctlLeft.append(this.moreBtn, this.agentEl, this.modeEl);
+    ctlLeft.append(this.agentEl, this.modeEl);
 
     this.composer = new ConvComposer({
       onSend: (text, atts) => this._send(text, atts),
@@ -223,6 +224,7 @@ export class ConvView {
         : i18n.t('첨부하지 못했어요 · {name}', { name: a.name || "" }), "warn", 5000),
     });
     this.composer.mount(el);
+    el.appendChild(this.moreBtn);
     // 맨 아래로 — 컴포저의 자식이다(입력 줄 수가 바뀌어도 항상 바로 위에 뜬다. v1 과 같은 자리).
     this.jumpEl = document.createElement("button");
     this.jumpEl.className = "chat-jump hidden";
@@ -839,6 +841,9 @@ export class ConvView {
     const shown = all.filter((q) => !this._dismissed.has(q.id));
     const first = this._visible && _cardRenderer ? shown[0] : null;
     const rows = [];
+    // 에이전트가 질문(AskUserQuestion)을 물어 답을 기다리는 동안엔 입력창을 숨긴다 — 답은 카드(선택지·'기타' 직접 입력)로 받는다.
+    //  카드를 접으면(first 없음) 입력창이 돌아온다.
+    this.el.classList.toggle("conv-asking", !!(first && first.kind === "question"));
     if (first) {
       const card = reqToCard(first);
       const req = first;
@@ -1127,7 +1132,7 @@ export class ConvView {
     this.composer?.closePopovers();
     this._closeModeMenu();
     const wrap = document.createElement("div");
-    wrap.className = "chat-mode-menu conv-pick-menu" + (align === "right" ? " right" : "");
+    wrap.className = "chat-mode-menu conv-pick-menu" + (align === "right" ? " right" : align === "top" ? " top" : "");
     let n = 0;
     const keyed = [];
     wrap.innerHTML = rows.map((r) => {
@@ -1149,7 +1154,8 @@ export class ConvView {
       this._closePick();
       onPick(row.dataset.id);
     });
-    this.composer.el.appendChild(wrap);
+    // top = 우측 상단 ⋯ 에서 아래로 펼친다 → pane 루트 기준. 그 밖(도구줄 메뉴)은 컴포저 기준(위로 펼침).
+    (align === "top" ? this.el : this.composer.el).appendChild(wrap);
     this._pickEl = wrap;
     this._pickCloser = (e) => { if (!wrap.contains(e.target) && !anchor.contains(e.target)) this._closePick(); };
     // 숫자 키 = 그 번호의 항목(Claude 앱 메뉴와 같다). 입력칸에 글자가 들어가지 않게 캡처에서 먹는다.
@@ -1275,7 +1281,7 @@ export class ConvView {
       if (id === "new") this.newThread();
       else if (id === "list") this._toggleList();
       else if (id === "term") void this._toTerminal();
-    });
+    }, "top");
     this._pickFor = "more";
   }
 

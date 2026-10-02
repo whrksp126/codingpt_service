@@ -1112,7 +1112,8 @@ pub fn run() {
                 ])?;
                 let win_m = Submenu::with_items(&handle, "윈도우", true, &[
                     &P::minimize(&handle, None)?,
-                    &P::close_window(&handle, None)?,
+                    // '윈도우 닫기'(⌘W) 항목은 일부러 뺐다 — 네이티브 단축키가 웹뷰보다 먼저 ⌘W 를 가로채
+                    //  앱이 통째로 숨겨졌다. ⌘W 는 활성 pane 닫기(pane.close)로 웹뷰가 받는다.
                 ])?;
                 let menu = Menu::with_items(&handle, &[&app_m, &edit_m, &win_m])?;
                 app.set_menu(menu)?;
