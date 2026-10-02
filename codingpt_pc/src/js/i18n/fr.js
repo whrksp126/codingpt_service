@@ -1182,5 +1182,6 @@ export default {
   "훅 건너뛰기(--no-verify)": "Ignorer les hooks (--no-verify)",
   "휴대폰·태블릿에서 이어서 작업하기": "Reprendre le travail sur ton téléphone ou ta tablette",
   "🔒 복호화 중…": "🔒 Déchiffrement…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Contenu chiffré (aucune clé sur cet appareil)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Contenu chiffré (aucune clé sur cet appareil)",
+  "파일 트리": "Arborescence"
 };

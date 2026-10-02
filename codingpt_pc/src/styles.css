@@ -3258,3 +3258,13 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 
 /* 질문 대기 중엔 입력창을 숨긴다(답은 질문 카드로) */
 .conv.conv-asking .chat-composer { display: none; }
+
+/* ── IDE 해체(2026-10): 메인 영역 = 파일 트리 패널 + pane 그리드 ── */
+.ws-body { flex: 1; min-height: 0; display: flex; }
+.ws-body > .ws-grid { flex: 1; min-width: 0; }
+.ws-tree-panel { flex: none; width: 240px; min-width: 160px; max-width: 50%; resize: horizontal; overflow: hidden; display: flex; border-right: 1px solid var(--border); background: var(--surface); }
+.ws-tree-panel > .ide { flex: 1; min-width: 0; }
+.ide-tree-only > .ide-tree { flex: 1; width: auto !important; border-right: none; }
+.mt-tree-btn.on { color: var(--text); background: var(--selected); }
+/* 질문 카드 제목 — 말줄임 대신 줄바꿈해 끝까지 보인다(2026-10 사용자 요청) */
+.apc-qtitle { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4; }

@@ -20,6 +20,8 @@ import { openNewTask, openTasksDashboard, taskTitleForWs, tasksIcon } from "./ta
 import { tt } from "./text/tasks.js";
 import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
 import { pickConvTab } from "./conv-model.js";
+import { IdeView } from "./ide.js";
+import { makeRemoteFs } from "./remote-fs.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -118,6 +120,62 @@ function evictLru() {
   }
 }
 
+// ── 파일 트리 패널(메인 영역 왼쪽) ──
+//  워크스페이스마다 IdeView(treeOnly) 하나. 파일을 누르면 다른 pane 과 같은 등급의 파일 pane 으로 연다 —
+//  이미 열려 있으면 그 pane/탭으로 포커스만 옮긴다.
+let treePanelEl = null;
+let treeView = null, treeWsId = null;
+const TREE_KEY = "cpt.fileTreeOpen";
+function treeOpen() { try { return localStorage.getItem(TREE_KEY) === "1"; } catch (_) { return false; } }
+export function toggleFileTree() {
+  try { localStorage.setItem(TREE_KEY, treeOpen() ? "0" : "1"); } catch (_) { /* noop */ }
+  syncTreePanel(activeWs());
+  renderMainTop(activeWs());
+}
+function syncTreePanel(ws) {
+  if (!treePanelEl) return;
+  const show = !!ws && treeOpen();
+  treePanelEl.style.display = show ? "" : "none";
+  if (!show) return;
+  if (treeView && treeWsId === ws.id) return;
+  try { treeView?.dispose(); } catch (_) { /* noop */ }
+  treePanelEl.innerHTML = "";
+  treeWsId = ws.id;
+  const fs = isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId);
+  treeView = new IdeView(ws.localPath || "", treePanelEl, {
+    treeOnly: true,
+    fs: fs || undefined,
+    onOpenFile: (path) => openFileAsPane(path),
+  });
+  treeView.mount();
+}
+/** 파일을 파일 pane 으로 — 이미 열려 있으면 그 pane(탭)으로 포커스, 없으면 새 pane. */
+export function openFileAsPane(path) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!rt || !rt.layout || !path) return null;
+  let hit = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (hit) return;
+    if (l.kind === "ide" && l.openPath === path) hit = { id: l.id, tab: -1 };
+    else if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "ide" && t.openPath === path);
+      if (i >= 0) hit = { id: l.id, tab: i };
+    }
+  });
+  if (hit) {
+    if (hit.tab >= 0) {
+      const leaf = T.findLeaf(rt.layout, hit.id);
+      leaf.active = hit.tab;
+      panes.get(hit.id)?.buildHead?.();
+      panes.get(hit.id)?.showActiveTab?.();
+      S.emit();
+    }
+    S.focusPane(hit.id);
+    return hit.id;
+  }
+  return smartAdd("ide", { openPath: path });
+}
+
 export function mountWorkspaceView(container) {
   hostEl = container;
   hostEl.innerHTML = "";
@@ -133,7 +191,14 @@ export function mountWorkspaceView(container) {
   mainTop.append(mtDyn);
   gridEl = document.createElement("div");
   gridEl.className = "ws-grid";
-  hostEl.append(mainTop, gridEl);
+  // 메인 영역 = [파일 트리 패널] + [pane 그리드]. 트리는 헤더 [목록] 버튼이 연다(IDE 해체, 2026-10).
+  treePanelEl = document.createElement("div");
+  treePanelEl.className = "ws-tree-panel";
+  treePanelEl.style.display = "none";
+  const bodyRow = document.createElement("div");
+  bodyRow.className = "ws-body";
+  bodyRow.append(treePanelEl, gridEl);
+  hostEl.append(mainTop, bodyRow);
 }
 
 // ── TUI ↔ Chat 토글 동기화 ──────────────────────────────────────────────────
@@ -246,6 +311,7 @@ function beginTabDrag(srcId, index, e) {
   let overlay = null;
   let srcTabEl = null; // 드래그 중 흐리게 표시할 원본 탭
   // 탭바 끝단 자동 스크롤 — 일반 DnD 처럼 끝에 대면 가려진 탭이 나타나 원하는 위치에 놓을 수 있다.
+  let altHeld = false;     // ⌥ 누른 채 놓기 = 파일 pane 복제(VS Code 식)
   let lastEv = null;       // 마지막 포인터 좌표(정지 상태에서 스크롤 후 재판정용)
   let scrollEl = null;     // 스크롤 대상 .pane-tabs
   let scrollDir = 0;       // -1/0/1
@@ -287,6 +353,7 @@ function beginTabDrag(srcId, index, e) {
     scrollRaf = requestAnimationFrame(tick);
   };
   const update = (ev) => {
+    altHeld = !!ev.altKey;
     lastEv = { clientX: ev.clientX, clientY: ev.clientY };
     ghostEl.style.left = ev.clientX + 14 + "px";
     ghostEl.style.top = ev.clientY + 14 + "px";
@@ -396,7 +463,12 @@ function beginTabDrag(srcId, index, e) {
       const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
       window.addEventListener("click", sc, true);
     }
-    if (dragging && drop) {
+    // ⌥(Alt) 누른 채 놓기 — 파일 pane/탭은 옮기지 않고 **복제**해 그 자리에 하나 더 연다(VS Code 와 같다).
+    const dupPath = !dragging || !drop || !altHeld ? null
+      : wholePane ? (src.kind === "ide" ? src.openPath : null) : (tab && tab.kind === "ide" ? tab.openPath : null);
+    if (dupPath) {
+      openFileInPane(dupPath, null, drop.paneId, drop.zone === "tabbar" ? "center" : drop.zone);
+    } else if (dragging && drop) {
       if (wholePane) {
         // IDE/프리뷰 pane 을 다른 pane 탭바/가운데에 드롭 = 그 pane 의 탭으로 편입(혼합 탭).
         //  대상이 터미널 = joinPaneAsTab, 대상이 IDE/프리뷰 = mergeAsTabs(탭 host 로 승격).
@@ -586,13 +658,25 @@ function renderMainTop(ws) {
     div.className = "mt-div";
     mtDyn.appendChild(div);
   }
+  // [목록] │ 이름 — 파일 트리 패널 토글(돋보기·+ 와 같은 pane-ctrl 모양).
+  if (ws) {
+    const treeBtn = document.createElement("button");
+    treeBtn.className = "pane-ctrl mt-tree-btn" + (treeOpen() ? " on" : "");
+    treeBtn.title = i18n.t('파일 트리');
+    treeBtn.dataset.cmd = "ws.fileTree";
+    treeBtn.innerHTML = icons.list({ size: 16, sw: 1.6 });
+    treeBtn.addEventListener("click", (ev) => { ev.stopPropagation(); toggleFileTree(); });
+    const tdiv = document.createElement("span");
+    tdiv.className = "mt-div";
+    mtDyn.append(treeBtn, tdiv);
+  }
   const name = document.createElement("span");
   name.className = "mt-name";
   name.textContent = (ws && S.wsDisplayName(ws)) || i18n.t('워크스페이스');
   mtDyn.append(name);
   // `워크스페이스 - 작업` — 사이드바 트리의 "어느 자식을 보고 있는가"를 제목이 말한다(2026-10-02 QA).
   //  폴더에서 직접 작업하는 화면은 `로컬`. 작업(worktree) 워크스페이스는 아래 배지가 제목을 말한다.
-  if (ws && !S.isTaskWorkspace(ws)) {
+  if (false) { // ` - 로컬` 꼬리는 뺐다(2026-10 사용자 확정: "[목록] | codingpt" 만)
     const sep = document.createElement("span");
     sep.className = "mt-name-sep";
     sep.textContent = "-";
@@ -759,7 +843,6 @@ function openAddMenu(anchor) {
   row(icons.terminal, i18n.t('터미널'), {
     fill: (panel, done) => openAddTermMenu(anchor, { into: panel, onDone: done }),
   });
-  row(icons.code, i18n.t('IDE'), { onClick: () => smartAdd("ide") });
   row(icons.globe, i18n.t('웹뷰'), {
     fill: (panel, done) => import("./ports.js").then((m) => m.openPortsMenu(anchor, {
       ws: activeWs(),
@@ -1167,6 +1250,7 @@ export function updateWorkspaceView() {
     return;
   }
   renderMainTop(ws);
+  syncTreePanel(ws);
   const ctx = paneCtx(ws);
 
   if (lastWsId !== ws.id) {
@@ -1484,10 +1568,7 @@ function openFileInPane(filePath, srcPaneId, targetPaneId, zone) {
   const rt = wsRuntime(state.activeWsId);
   if (!rt) return false;
   const targetLeaf = T.findLeaf(rt.layout, targetPaneId);
-  if (zone === "center" && targetPaneId !== srcPaneId && targetLeaf && targetLeaf.kind === "ide") {
-    const tp = panes.get(targetPaneId);
-    if (tp?.ide) { tp.ide.openFile(filePath); S.focusPane(targetPaneId); return true; }
-  }
+  void targetLeaf; // 파일은 한 pane 에 하나 — 가운데에 놓아도 옆에 새 파일 pane 으로 연다(IDE 해체, 2026-10)
   const side = zone === "center" ? "right" : zone;
   const leaf = { id: T.newPaneId(), kind: "ide", openPath: filePath };
   const dir = side === "left" || side === "right" ? "h" : "v";

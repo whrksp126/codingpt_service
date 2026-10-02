@@ -114,6 +114,18 @@ export class IdeView {
     this.mainEl.append(this.editorAreaEl);
     wrap.append(this.treeEl, this.resizer, this.mainEl);
     this.body.appendChild(wrap);
+    // 2026-10 IDE 해체: 파일 트리는 메인 영역 왼쪽 패널(treeOnly), 파일은 다른 pane 과 같은 등급의 파일 pane(single).
+    if (this.opts.treeOnly) {
+      wrap.classList.add("ide-tree-only");
+      this.resizer.style.display = "none";
+      this.mainEl.style.display = "none";
+      this.treeEl.style.width = "";
+    } else if (this.opts.single) {
+      wrap.classList.add("ide-single");
+      this.treeVisible = false;
+      this.treeEl.style.display = "none";
+      this.resizer.style.display = "none";
+    }
 
     const g0 = this._makeGroup();
     this.egRoot = g0;
@@ -145,6 +157,7 @@ export class IdeView {
     // 열림=채운 아이콘, 닫힘=빈 아이콘.
     g.treeToggle.innerHTML = icons[this.treeVisible ? "sidebarFilled" : "sidebar"]({ size: 15 });
     g.treeToggle.addEventListener("click", (e) => { e.stopPropagation(); this.toggleTree(); });
+    if (this.opts.single) g.treeToggle.style.display = "none"; // 트리는 메인 영역 헤더의 [목록] 버튼이 연다
     g.tabsBar.append(g.tablist, g.treeToggle);
     g.editorHost = document.createElement("div");
     g.editorHost.className = "ide-editor";
@@ -565,6 +578,7 @@ export class IdeView {
       //  포커스를 준다(클릭 시점 행은 파괴됨). 포커스가 트리에 있어야 Return=rename·화살표가 동작.
       const focusAfter = () => this._focusSelected();
       if (n.dir) Promise.resolve(this._toggleDir(n, row)).then(focusAfter);
+      else if (this.opts.onOpenFile) { this.opts.onOpenFile(p, e); focusAfter(); } // 트리 패널 — 파일 pane 으로 연다
       else Promise.resolve(this.openFile(p, undefined, this.activeGroup, false)).then(focusAfter); // 열되 편집 포커스는 트리 유지
     });
     row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); this._select(n.path); this._menu(e, n); });

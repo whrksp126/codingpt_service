@@ -18,6 +18,7 @@ const svg = (inner, o = {}) =>
   `<svg viewBox="0 0 24 24" width="${o.size || 16}" height="${o.size || 16}" fill="none" stroke="currentColor" stroke-width="${o.sw || 1.8}" stroke-linecap="round" stroke-linejoin="round" class="ic">${inner}</svg>`;
 
 export const icons = {
+  list: (o) => svg('<line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>', o),
   sidebar: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="9" y1="4" x2="9" y2="20"/>', o),
   // 타이틀바 전용 사이드바 글리프 — cmux `TitlebarSidebarGlyphShape` 1:1(2026-09-16): 14×11 프레임에 0.5 인셋
   //  둥근사각(r2) + 폭 36% 지점 세로선(상하 1.5 인셋), 선 굵기 1. 16-뷰박스에 px 그대로 그려 20px 버튼 안에서

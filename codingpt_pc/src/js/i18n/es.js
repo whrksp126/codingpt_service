@@ -1182,5 +1182,6 @@ export default {
   "훅 건너뛰기(--no-verify)": "Omitir hooks (--no-verify)",
   "휴대폰·태블릿에서 이어서 작업하기": "Continúa donde lo dejaste en el móvil o la tablet",
   "🔒 복호화 중…": "🔒 Descifrando…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Contenido cifrado (sin clave en este dispositivo)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Contenido cifrado (sin clave en este dispositivo)",
+  "파일 트리": "Árbol de archivos"
 };

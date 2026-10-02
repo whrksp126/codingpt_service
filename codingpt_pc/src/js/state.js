@@ -1359,6 +1359,20 @@ export async function restorePersisted() {
     }
     // 구 저장본(seeded 없음) 마이그레이션 — 복원된 레이아웃이 있는 워크스페이스는 이미 시드된 것.
     for (const id of Object.keys(state.ws)) if (!wsPrefs.seeded.includes(id)) wsPrefs.seeded.push(id);
+    // IDE 해체(2026-10) 1회 정리 — 예전 IDE pane(트리+에디터 묶음)은 닫는다(사용자 확정 "그냥 닫기").
+    //  일반 닫기 경로로 닫아야 공유 표면도 함께 걷힌다(복원 직후엔 리컨실러가 아직이라 잠깐 뒤에).
+    try {
+      if (localStorage.getItem("cpt.ideDissolved") !== "1") {
+        localStorage.setItem("cpt.ideDissolved", "1");
+        setTimeout(() => {
+          for (const [wsId, rt] of Object.entries(state.ws)) {
+            const ids = [];
+            T.eachLeaf(rt && rt.layout, (l) => { if (l.kind === "ide") ids.push(l.id); });
+            for (const pid of ids) { try { closePane(wsId, pid); } catch (_) { /* noop */ } }
+          }
+        }, 4000);
+      }
+    } catch (_) { /* noop */ }
   } catch (_) {
     /* 복원 실패는 무시(빈 상태로 시작) */
   }

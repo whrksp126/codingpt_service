@@ -1182,5 +1182,6 @@ export default {
   "훅 건너뛰기(--no-verify)": "Hooks überspringen (--no-verify)",
   "휴대폰·태블릿에서 이어서 작업하기": "Auf Handy oder Tablet weiterarbeiten",
   "🔒 복호화 중…": "🔒 Wird entschlüsselt…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Verschlüsselter Inhalt (kein Schlüssel auf diesem Gerät)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Verschlüsselter Inhalt (kein Schlüssel auf diesem Gerät)",
+  "파일 트리": "Dateibaum"
 };

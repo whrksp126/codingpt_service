@@ -144,7 +144,8 @@ function b64ToBytes(b64) {
  */
 function isDesktopSurface(node) { return !!(node && String(node.deviceId || "").startsWith("desktop:")); }
 export function surfaceLabel(kind, node) {
-  if (kind === "ide") return "IDE";
+  //  파일 pane — 그 파일 이름이 제목이다(IDE 해체, 2026-10).
+  if (kind === "ide") return (node && node.openPath ? String(node.openPath).split("/").pop() : "") || i18n.t('파일');
   //  채팅(채팅 v2) — 대화 제목이 탭 제목이다. 아직 첫 메시지를 안 보냈으면 종류 이름.
   if (kind === "chat") return (node && node.title) || i18n.t('채팅');
   //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
@@ -806,7 +807,7 @@ export class PaneView {
           : previewTabIconHtml(t.metaFav);
         const label = isT
           ? termTabLabel(t)
-          : t.kind === "ide" ? "IDE"
+          : t.kind === "ide" ? surfaceLabel("ide", t)
             : t.kind === "emulator" ? surfaceLabel("emulator", t)
               : t.kind === "chat" ? surfaceLabel("chat", t)
               : (t.metaTitle || i18n.t('프리뷰'));
@@ -1278,6 +1279,7 @@ export class PaneView {
       paneDropZone: this.ctx.paneDropZone,
       onFileSplit: this.ctx.onFileSplit,
       fs: this._ideFs(),
+      single: true, // 파일 pane — 트리는 메인 영역 왼쪽 패널
     });
   }
 
@@ -1594,6 +1596,7 @@ export class PaneView {
         paneDropZone: this.ctx.paneDropZone,
         onFileSplit: this.ctx.onFileSplit,
         fs: this._ideFs(),
+        single: true,
       });
       m.ide.mount();
     } else if (tab.kind === "chat") {

@@ -217,7 +217,7 @@ registerCommands({
   // 추가 3종은 **바로 추가한다**(헤더 버튼의 드롭다운이 아니라). 단축키를 눌렀는데 메뉴가 뜨면
   //  손이 한 번 더 간다 — 에이전트 고르기·포트 고르기는 버튼에 그대로 남아 있다.
   "ws.addTerminal": () => smartAdd("terminal"),
-  "ws.addIde": () => smartAdd("ide"),
+  "ws.addIde": () => import("./workspace-view.js").then((m) => m.toggleFileTree()), // IDE 해체 — 파일 트리 토글
   "ws.addPreview": () => smartAdd("preview"),
   "ws.addEmulator": () => smartAdd("emulator"),
   "ws.addChat": () => addChatGated(),

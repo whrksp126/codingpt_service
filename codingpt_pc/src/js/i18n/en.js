@@ -1182,5 +1182,6 @@ export default {
   "훅 건너뛰기(--no-verify)": "Skip hooks (--no-verify)",
   "휴대폰·태블릿에서 이어서 작업하기": "Pick up where you left off on your phone or tablet",
   "🔒 복호화 중…": "🔒 Decrypting…",
-  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Encrypted content (no key on this device)"
+  "🔒 암호화된 내용(이 기기에 열쇠 없음)": "🔒 Encrypted content (no key on this device)",
+  "파일 트리": "File tree"
 };
