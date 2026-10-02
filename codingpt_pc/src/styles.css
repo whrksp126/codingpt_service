@@ -3268,3 +3268,5 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .mt-tree-btn.on { color: var(--text); background: var(--selected); }
 /* 질문 카드 제목 — 말줄임 대신 줄바꿈해 끝까지 보인다(2026-10 사용자 요청) */
 .apc-qtitle { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4; }
+/* 파일 pane(single) — 트리·리사이저·파일 탭 줄 없음(pane 헤더가 탭). 인라인 스타일이 빠져도 확실히. */
+.ide-single > .ide-tree, .ide-single > .ide-resizer, .ide-single .ide-tabs { display: none !important; }

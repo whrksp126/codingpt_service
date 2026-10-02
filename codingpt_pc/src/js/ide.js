@@ -83,6 +83,7 @@ export class IdeView {
     this._searchToken = 0;
     this._searchTimer = null;
     this._build();
+    api.debugLog(`[ide] mode=${opts.treeOnly ? "tree" : opts.single ? "file" : "legacy"} path=${opts.openPath || ""}`);
     // 외부 변경 리컨실러 — 다른 기기(모바일 IDE)/터미널/에이전트가 바꾼 파일을 열린 버퍼에 반영.
     //  로컬 디스크 직결이라 워처 없이 저비용 폴링: dirty 아닌 열린 파일만 다시 읽어 달라지면 교체.
     this._syncTick = 0;
@@ -157,7 +158,8 @@ export class IdeView {
     // 열림=채운 아이콘, 닫힘=빈 아이콘.
     g.treeToggle.innerHTML = icons[this.treeVisible ? "sidebarFilled" : "sidebar"]({ size: 15 });
     g.treeToggle.addEventListener("click", (e) => { e.stopPropagation(); this.toggleTree(); });
-    if (this.opts.single) g.treeToggle.style.display = "none"; // 트리는 메인 영역 헤더의 [목록] 버튼이 연다
+    // 파일 pane(single) = pane 헤더가 곧 파일 탭이다 — 안쪽 파일 탭 줄·탐색기 토글은 없다(pane 안 pane 금지).
+    if (this.opts.single) { g.treeToggle.style.display = "none"; g.tabsBar.style.display = "none"; }
     g.tabsBar.append(g.tablist, g.treeToggle);
     g.editorHost = document.createElement("div");
     g.editorHost.className = "ide-editor";
