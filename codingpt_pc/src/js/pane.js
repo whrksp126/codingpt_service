@@ -7,7 +7,7 @@ import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { fileIcon } from "./fileicons.js";
-import { makeRemoteFs } from "./remote-fs.js";
+import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 import lan from "./lan.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast, getThemeMode } from "./theme.js";
@@ -1166,6 +1166,7 @@ export class PaneView {
   // 내장 IDE(파일트리 + CodeMirror).
   // 파일 전송 계층 — 이 호스트면 로컬 fsapi(기본), 다른 PC 워크스페이스면 back fs 릴레이(원격 IDE).
   _ideFs() {
+    if (this.ctx.isLocal && isVmPath(this.ctx.localPath)) return makeVmFs(); // VM 워크스페이스 = VM 안의 파일
     return this.ctx.isLocal ? null : makeRemoteFs(this.ctx.hostDeviceId);
   }
 
@@ -1193,6 +1194,7 @@ export class PaneView {
       cwd: () => this.ctx.localPath || "",
       hostDeviceId: () => this.ctx.hostDeviceId ?? null,
       isLocal: () => !!this.ctx.isLocal,
+      vmRoot: () => (this.ctx.isLocal && isVmPath(this.ctx.localPath) ? this.ctx.localPath : null), // VM 워크스페이스면 그 자리 경로
       hostOffline: () => !!this.ctx.hostOffline,
       deviceName: () => appState.daemon?.device_name || "",
       tab: () => holder,
@@ -1704,6 +1706,7 @@ export class PaneView {
       // 이 PC 의 터미널인가 — 맞으면 채팅 조회/모드를 **사이드카 데몬 직결**로 보낸다(back 왕복 제거).
       //  라이브 getter 인 이유는 hostDeviceId 와 같다(재클레임으로 로컬/원격이 바뀔 수 있다).
       isLocal: () => !!this.ctx.isLocal,
+      vmRoot: () => (this.ctx.isLocal && isVmPath(this.ctx.localPath) ? this.ctx.localPath : null), // VM 워크스페이스면 그 자리 경로
       tid: () => {
         const t = this.node.tabs?.[this.node.active];
         return t && isTermTab(t) && typeof t.win === "number" ? t.win : null;

@@ -331,6 +331,13 @@ function readHead(rel, maxBytes = 600) {
 }
 
 async function handle(method, params) {
+  // VM 워크스페이스 자리(vm-agent.js) 안의 경로면 그 VM 의 파일을 본다 — 자리 폴더 자체는 비어 있다.
+  if (method !== 'fs.watch' && params && typeof params.path === 'string') {
+    let abs = null; try { abs = safeResolve(params.path); } catch (_) { abs = null; }
+    const va = abs && abs.includes(path.sep + 'vm' + path.sep) ? require('./vm-agent') : null;
+    const mark = va ? va.markerOf(abs) : null;
+    if (mark) return va.fsHandle(method, params, mark, abs, relOf);
+  }
   switch (method) {
     case 'fs.list': return list(params);
     case 'fs.tree': return tree(params);

@@ -506,7 +506,11 @@ function createVm(osk) {
         _linuxBuild = { running: false };
         st = await status();
       }
-      if (st.phase !== 'running') await launch(o);
+      // ★ 이미 켜져 있는지는 VM 정보로 직접 본다(2026-10-04 실사고): status() 는 `_starting` 이 서 있으면 'starting' 을
+      //  돌려주는데, 이 블록이 곧 `_starting` 이다 → 켜진 VM 에 start 를 보내면 늘 'starting' 으로 보여 launch 가
+      //  돌았고, launch 의 reapVmProcess 가 **멀쩡히 돌던 VM 을 죽이고 다시 켰다**(안 내려쓴 파일이 0바이트로 깨짐).
+      const up = await vmInfo(true).then((i) => !!i && /running/i.test(String(i.status || ''))).catch(() => false);
+      if (!up) await launch(o);
       _step = 'boot';
       await waitRunning();
       if (provisionedVer() < PROVISION_VER) {
@@ -953,6 +957,7 @@ function startStream(id, cbs) { return vmForOs(osOf(id) || legacyOsKind()).start
 //  레거시/테스트 호환 — 기본 OS(옛 osKind)의 VM 으로 위임한다.
 const dflt = () => vmForOs(legacyOsKind());
 module.exports = {
+  GUEST_PASSWORD: SSH_PASSWORD, // 게스트 VM 로컬 계정(우리가 만든 것)의 암호 — vm-agent.js 가 게스트 sudo 에 쓴다
   handle, deviceRow, startStream, DesktopStreamSession, VMS, osOf,
   // 라우터 위임(기본 OS)
   status: (...a) => dflt().status(...a), start: (...a) => dflt().start(...a), stop: (...a) => dflt().stop(...a),

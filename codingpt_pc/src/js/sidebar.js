@@ -1125,6 +1125,9 @@ function showMissingDialog(w) {
 async function deleteWs(w) {
   if (S.blockedOffline(i18n.t('워크스페이스 삭제'))) return;
   try {
+    // VM 워크스페이스면 호스트 쪽 자리(표식 폴더)도 치운다 — 남겨 두면 VM 화면이 다시 등록한다. VM 안의 사본은 그대로 둔다.
+    const vmOsDel = vmOsOfPath(w.localPath);
+    if (vmOsDel) await api.desktopAgent("ws.remove", { os: vmOsDel, name: String(w.localPath).split("/").pop() }).catch(() => {});
     await api.wsDelete(w.id);
     localMissing.delete(w.id);
     // 목록 리프레시 — 삭제된 ws 가 활성이었으면 loadWorkspaces 가 다른 ws 로 전환(없으면 빈 상태).

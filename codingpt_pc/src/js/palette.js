@@ -13,7 +13,7 @@
 //  palette-match.js 를, 명령 표는 commands.js 를, 문구는 text/palette.js 를 **양쪽이 공유**한다.
 import { state, activeWs, wsRuntime, isThisHost } from "./state.js";
 import { api } from "./api.js";
-import { makeRemoteFs } from "./remote-fs.js";
+import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
@@ -56,7 +56,7 @@ async function loadFiles(ws) {
   const key = cacheKey(ws);
   const hit = fileCache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
-  const fs = isThisHost(ws) ? api : makeRemoteFs(ws.hostDeviceId);
+  const fs = isVmPath(ws && ws.localPath) && isThisHost(ws) ? makeVmFs() : (isThisHost(ws) ? api : makeRemoteFs(ws.hostDeviceId));
   const root = (ws && ws.localPath) || "";
   const tree = await fs.fsTree(root, 8);
   const abs = flattenTree(tree, []);

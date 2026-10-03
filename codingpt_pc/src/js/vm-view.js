@@ -24,11 +24,23 @@ export function leaveVmScope() { if (!state.vmScope && state.view !== "vm") retu
 function refresh(os, force) {
   if (!force && infoOs === os && Date.now() - askedAt < 5000) return;
   askedAt = Date.now();
-  rpc("status", { os }).then((st) => { info = st; infoOs = os; err = ""; if (state.view === "vm") paintHead(os); }).catch(() => {});
+  rpc("status", { os }).then((st) => { info = st; infoOs = os; err = ""; adopt(st); if (state.view === "vm") paintHead(os); }).catch(() => {});
+}
+
+// VM 에 이미 있는 워크스페이스 자리(다른 경로로 가져온 것 포함)가 목록에 없으면 등록한다 — 한 자리당 한 번만 시도.
+const adopted = new Set();
+function adopt(st) {
+  for (const w of (st && st.workspaces) || []) {
+    const tail = String(w.dir).split("/.codingpt/")[1] || "";
+    if (!tail || adopted.has(w.dir)) continue;
+    if (state.workspaces.some((x) => String(x.localPath || "").endsWith(".codingpt/" + tail))) continue;
+    adopted.add(w.dir);
+    api.createWorkspace(w.dir).then(() => S.loadWorkspaces()).then(() => S.emit()).catch(() => {});
+  }
 }
 
 function stepText(job) {
-  const t = { boot: i18n.t('VM 을 켜는 중…'), key: i18n.t('연결을 준비하는 중…'), cli: i18n.t('에이전트를 설치하는 중… (1~2분)'), git: i18n.t('도구를 확인하는 중…') };
+  const t = { boot: i18n.t('VM 을 켜는 중…'), key: i18n.t('연결을 준비하는 중…'), cli: i18n.t('에이전트를 설치하는 중… (1~2분)'), git: i18n.t('도구를 확인하는 중…'), tools: i18n.t('화면 도구를 넣는 중…') };
   return t[job.step] || i18n.t('준비하는 중…');
 }
 
@@ -53,10 +65,9 @@ function paintHead(os) {
   head.innerHTML =
     `<span class="vmv-title">${(os === "linux" ? icons.linux : icons.apple)({ size: 15 })}<b>${escapeHtml(vmLabel(os))}</b></span>` +
     `<span class="vmv-msg">${escapeHtml(msg)}</span>` +
-    (act === "setup" ? `<button class="vmv-btn" data-act="setup">${i18n.t('에이전트 설치')}</button>` : "") +
-    `<button class="vmv-btn" data-act="import">${icons.plus({ size: 13 })}<span>${i18n.t('워크스페이스 가져오기')}</span></button>`;
+    //  워크스페이스 가져오기는 사이드바 `워크스페이스 ⋯` 한 곳에만 둔다(2026-10-04 사용자 확정 — 여기 버튼은 뺐다).
+    (act === "setup" ? `<button class="vmv-btn" data-act="setup">${i18n.t('에이전트 설치')}</button>` : "");
   head.querySelector('[data-act="setup"]')?.addEventListener("click", () => { rpc("setup", { os }).then((s) => { info = s; infoOs = os; headSig = ""; paintHead(os); }).catch((e) => { err = String(e); headSig = ""; paintHead(os); }); });
-  head.querySelector('[data-act="import"]')?.addEventListener("click", (e) => { const r = e.currentTarget.getBoundingClientRect(); openImportMenu(r.left, r.bottom + 4, os); });
 }
 
 /** 이 PC 의 워크스페이스 중 하나를 골라 VM 안에 git 사본을 만들고, 그 자리를 워크스페이스로 등록한다. */

@@ -727,6 +727,15 @@ export class ConvView {
   // ── 첨부 준비(컴포저가 부른다) ──
   /** 칩 → 그 PC 의 경로. keep=그대로 · copy=이 PC 홈 밖 → ~/.codingpt/attachments · upload=다른 PC 로 올림. */
   async _stageAttachment(a) {
+    // VM 워크스페이스 — 에이전트가 VM 안에서 돌아 이 PC 의 경로를 못 읽는다 → 파일을 VM 안으로 올리고 그쪽 경로를 넘긴다.
+    const vmRoot = this.ctx.vmRoot?.();
+    if (vmRoot && a.origin !== "workspace") {
+      const b = await api.filePreviewB64(a.src);
+      if (!b) throw new Error("empty");
+      const up = await this.ctx.fs().fsWriteBytes(`${vmRoot}/.cpt-attachments/${attachUploadName(a.name, Date.now()).split("/").pop()}`, b);
+      if (!up || !up.absPath) throw new Error("no absPath");
+      return { path: up.absPath };
+    }
     const plan = attachPlan({ path: a.src, origin: a.origin }, !!this.ctx.isLocal?.());
     if (plan === "keep") return { path: a.src };
     const b64 = await api.filePreviewB64(a.src);   // 8MB 상한(넘으면 throw — 칩을 빼고 알린다)

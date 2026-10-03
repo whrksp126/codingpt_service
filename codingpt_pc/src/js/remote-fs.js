@@ -106,3 +106,35 @@ export function makeRemoteFs(hostDeviceId) {
     async fsDelete(rel) { if (!(await sealed("fs.delete", { path: rel }))) await post("delete", { path: rel }); },
   };
 }
+
+/** VM 워크스페이스(에이전트 PC 안의 사본)의 파일 — 이 PC 데몬이 VM 안으로 넘긴다(`desktop.agent.fs`). 모양은 위 어댑터와 같다. */
+export function isVmPath(p) { return /(?:^|\/)\.codingpt\/vm\/(macos|linux)\/ws\//.test(String(p || "") + "/"); }
+export function makeVmFs() {
+  const call = (method, params) => api.desktopAgent("fs", { method, params });
+  return {
+    remote: true, vm: true,
+    async fsTree(rel) { const r = await call("fs.tree", { path: rel || "" }); return nestTree(rel || "", r?.items); },
+    async fsSearch(rel, query) {
+      const r = await call("fs.grep", { path: rel || "", query: query || "" });
+      const base = (rel || "").replace(/\/+$/, "");
+      return (r?.matches || []).map((m) => ({ path: base ? `${base}/${m.path}` : m.path, name: basename(m.path), line: m.line, text: m.text }));
+    },
+    async fsRead(rel) {
+      const r = await call("fs.read", { path: rel || "" });
+      if (r?.binary) throw i18n.t('바이너리 파일은 열 수 없습니다.');
+      if (r?.tooLarge) throw i18n.t('파일이 너무 큽니다(2MB 초과).');
+      return r?.content ?? "";
+    },
+    async fsReadBytes(rel) {
+      const r = await call("fs.read", { path: rel || "", base64: true });
+      if (!r?.base64) throw i18n.t('파일을 읽을 수 없습니다.');
+      return { base64: r.base64, size: r.size || 0 };
+    },
+    async fsWrite(rel, content) { await call("fs.write", { path: rel, content }); },
+    async fsWriteBytes(rel, b64) { return call("fs.write", { path: rel, content: b64, base64: true }); },
+    async fsMkdir(rel) { await call("fs.mkdir", { path: rel }); },
+    async fsCreateFile(rel) { await call("fs.createFile", { path: rel }); },
+    async fsRename(rel, dest) { await call("fs.rename", { path: rel, dest }); },
+    async fsDelete(rel) { await call("fs.delete", { path: rel }); },
+  };
+}

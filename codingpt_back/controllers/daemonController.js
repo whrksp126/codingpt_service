@@ -1166,7 +1166,12 @@ const DESKTOP_RPC_OK = new Map([
   ['desktop.start', 200000], ['desktop.stop', 60000],
   //  폰에서 에이전트 PC 설정(게스트 OS·자원·삭제). settings.set 만 params 를 쓴다(나머지는 params 무시).
   ['desktop.settings.get', 20000], ['desktop.settings.set', 20000], ['desktop.delete', 60000],
+  //  VM 안의 에이전트(데몬 vm-agent.js) — 준비 상태·설치·워크스페이스 사본 만들기/주고받기/치우기.
+  ['desktop.agent.status', 30000], ['desktop.agent.setup', 30000],
+  ['desktop.agent.ws.add', 600000], ['desktop.agent.ws.sync', 600000], ['desktop.agent.ws.remove', 20000],
 ]);
+//  desktop.agent.* 가 받는 문자열 인자(그 밖의 params 는 버린다).
+const DESKTOP_AGENT_PARAM_OK = new Set(['path', 'name', 'dir']);
 //  settings.set 이외의 메서드는 임의 params 를 데몬에 흘리지 않는다(통로 오남용 방지) — 화이트리스트만.
 const DESKTOP_PARAM_OK = new Set(['osKind', 'memGB', 'cpu', 'idleOffMin', 'sharedDirs']);
 async function desktopRpc(req, res) {
@@ -1179,6 +1184,9 @@ async function desktopRpc(req, res) {
     if (b.os === 'macos' || b.os === 'linux') params.os = b.os;
     if (method === 'desktop.settings.set' && b.params && typeof b.params === 'object') {
       for (const k of Object.keys(b.params)) if (DESKTOP_PARAM_OK.has(k)) params[k] = b.params[k];
+    }
+    if (method.startsWith('desktop.agent.') && b.params && typeof b.params === 'object') {
+      for (const k of Object.keys(b.params)) if (DESKTOP_AGENT_PARAM_OK.has(k) && typeof b.params[k] === 'string') params[k] = b.params[k].slice(0, 1024);
     }
     const result = await daemonRelayService.callRpc(req.user.id, method, params, DESKTOP_RPC_OK.get(method), connOptsOf(req));
     return successResponse(res, result);

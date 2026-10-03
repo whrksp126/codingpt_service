@@ -21,7 +21,7 @@ import { tt } from "./text/tasks.js";
 import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
 import { pickConvTab } from "./conv-model.js";
 import { IdeView } from "./ide.js";
-import { makeRemoteFs } from "./remote-fs.js";
+import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -143,7 +143,7 @@ function syncTreePanel(ws) {
   try { treeView?.dispose(); } catch (_) { /* noop */ }
   for (const c of [...treePanelEl.children]) if (!c.classList.contains("ws-tree-resizer")) c.remove(); // 그립은 남긴다
   treeWsId = ws.id;
-  const fs = isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId);
+  const fs = isVmPath(ws.localPath) && isThisHost(ws) ? makeVmFs() : (isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId)); // VM 워크스페이스 = VM 안의 파일
   treeView = new IdeView(ws.localPath || "", treePanelEl, {
     treeOnly: true,
     fs: fs || undefined,
