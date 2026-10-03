@@ -890,7 +890,7 @@ function openAddMenu(anchor) {
   // 에이전트 PC — 게스트 OS(macOS/Linux)를 하위 메뉴에서 고른다(터미널·웹뷰처럼 `›`).
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
   //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
-  row(icons.monitor, i18n.t('에이전트 PC'), { fill: (panel, done) => fillDesktopOsMenu(panel, done) });
+  //  에이전트 PC 는 뺐다(2026-10-04 QA) — 사이드바의 PC 아래 `macOS (VM)`/`Linux (VM)` 행에서 연다.
   // Agent Tasks(§1.3 "PC 에서 만들기") — 이 워크스페이스를 저장소 기본값으로 새 작업 시트를 연다.
   //  작업 워크스페이스 안에서는 뺀다(worktree 를 다시 저장소로 삼으면 작업 안의 작업이 된다).
   if (!S.isTaskWorkspace(activeWs())) row((o) => tasksIcon(o), tt("newTask"), { onClick: () => openNewTask() });
@@ -970,22 +970,8 @@ function mixedTabFor(kind, extra) {
 //  지금 설정된 OS 에는 체크. 목록은 즉시 그리고, 설정이 오면 체크만 채운다(메뉴가 늦게 뜨지 않게).
 // "에이전트 PC ›" 하위 메뉴 — macOS·Linux 를 **각각 독립 pane** 으로 연다(둘 다 동시에 쓸 수 있다).
 //  이미 열려 있는 OS 는 체크로 표시하고, 누르면 그 pane 을 앞으로 끌어온다.
-function fillDesktopOsMenu(panel, done) {
-  const mk = (iconFn, label, sub, osKind) => {
-    const b = document.createElement("button");
-    b.className = "pv-menu-item" + (isDesktopOsOpen(osKind) ? " active" : "");
-    b.dataset.os = osKind;
-    b.innerHTML = `<span class="pvm-ic">${iconFn({ size: 15 })}</span><span class="pvm-label">${label}</span>`
-      + `<span class="pvm-hint">${sub}</span><span class="pvm-chk">${icons.check({ size: 13 })}</span>`;
-    b.addEventListener("click", (e) => { e.stopPropagation(); done(); openDesktopOsPane(osKind); });
-    panel.appendChild(b);
-  };
-  mk(icons.apple, "macOS", i18n.t('약 26GB'), "macos");
-  mk(icons.linux, "Linux", i18n.t('약 5GB'), "linux");
-}
-
 // 그 OS 의 에이전트 PC pane 을 연다(이미 열려 있으면 앞으로). 두 OS 는 서로 독립 — 하나 열어도 다른 하나는 그대로.
-function openDesktopOsPane(osKind) {
+export function openDesktopOsPane(osKind) {
   setDesktopOs(osKind);   // 레거시 캐시(파비콘 폴백)
   if (focusDesktopSurface(osKind)) return;
   smartAdd("emulator", { deviceId: `desktop:${osKind}`, metaName: osVmLabel(osKind) });

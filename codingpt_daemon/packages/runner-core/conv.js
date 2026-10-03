@@ -545,6 +545,15 @@ function onAck(proc, ev) {
   let i = ev.uuid ? proc.unacked.findIndex((u) => u.uuid === ev.uuid) : -1;
   if (process.env.CPT_CONV_DEBUG) log(`도달 확인 thread=${proc.id} uuid 짝=${i >= 0}`);
   if (i < 0) i = proc.unacked.findIndex((u) => u.text === ev.text);
+  // CLI 가 스스로 만든 줄(슬래시 명령 래퍼·명령 출력·/compact 요약) — 사람이 친 말이 아니다. 보낸 메시지의 도달 확인으로
+  //  삼지 않고, 말풍선으로도 남기지 않는다(2026-10-04 신고: `<command-name>…` 원문이 내 말풍선으로 떴다).
+  const made = Array.isArray(ev.msgs) && ev.msgs.length > 0 && ev.msgs.every((m) => m.hidden || m.kind !== 'text');
+  if (i < 0 && made) {
+    if (ev.uuid && store.hasUuid(proc.id, ev.uuid)) return;
+    // 명령 이름 줄은 사용자가 친 `/명령` 말풍선이 이미 있다 → 접는다. 명령 출력은 결과 줄로 남는다.
+    record(proc.id, ev.msgs.map((m) => ({ op: 'msg', uuid: ev.uuid || undefined, msg: { ...m, hidden: m.hidden || m.kind === 'slash', turn: proc.turn } })));
+    return;
+  }
   if (i < 0 && proc.unacked.length) i = 0;
   if (i < 0) {
     // 우리가 보낸 적 없는 메시지(다른 경로로 들어온 입력) — 있는 그대로 남긴다.

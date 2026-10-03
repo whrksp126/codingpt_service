@@ -520,6 +520,9 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
   text-align: left; user-select: none; -webkit-user-select: none;
 }
 .wsg-child:hover { background: var(--hover); }
+/* PC 아래 에이전트 PC(VM) 행 — 이름이 남는 폭을 먹고 상태 점은 오른쪽 끝. */
+.pc-vm .pc-nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-vm .pc-ic { display: inline-flex; color: var(--text3); }
 .wsg-child.active { background: var(--pressed); box-shadow: inset 0 0 0 1px var(--border-ctrl); color: var(--text); font-weight: 500; }
 .wsg-ic { display: inline-flex; flex: none; color: var(--text3); }
 .wsg-child.active .wsg-ic { color: var(--text2); }

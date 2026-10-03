@@ -293,8 +293,8 @@ export function updateSidebar() {
   //   앱(SidebarContent) 쪽에는 남겨 둔다.
   list.appendChild(sectionHead(i18n.t('내 PC'), [
     { icon: icons.sliders({ size: 15 }), label: i18n.t('기기 관리'), onClick: () => import("./settings.js").then((m) => m.openAccountSection()).catch(() => S.setView("settings")) },
-    { icon: icons.apple({ size: 15 }), label: i18n.t('에이전트 PC (macOS)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("macos")).catch(() => {}) },
-    { icon: icons.linux({ size: 15 }), label: i18n.t('에이전트 PC (Linux)…'), onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("linux")).catch(() => {}) },
+    { icon: icons.apple({ size: 15 }), label: "macOS - VM…", onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("macos")).catch(() => {}) },
+    { icon: icons.linux({ size: 15 }), label: "Linux - VM…", onClick: () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet("linux")).catch(() => {}) },
     // 고른 PC 의 깨어 있기 설정(automation-design §6.6) — PC 행 우클릭 메뉴와 같은 시트.
     ...(activeDev != null ? [{ icon: icons.gear({ size: 15 }), label: at("pcSettings"), onClick: () => openPcSettings(activeDev) }] : []),
   ]));
@@ -303,6 +303,8 @@ export function updateSidebar() {
   }
   for (const d of devices) {
     list.appendChild(deviceRow(d, activeDev));
+    // 이 PC 에 만들어 둔 에이전트 PC(VM) — PC 의 하위 항목(2026-10-04 QA: 워크스페이스 아래 작업처럼). 누르면 그 화면을 연다.
+    if (isLocalHostId(state, d.id)) { for (const os of VM_KINDS) if (vmPhase[os]) list.appendChild(vmRow(os)); refreshVms(); }
   }
 
   // ── ①-1 고른 PC 의 `진행 현황` — 진행 현황은 **PC 안의 장소**다(2026-09-29 사용자 확정: 에이전트는
@@ -573,6 +575,42 @@ function sectionHead(title, items) {
 /** PC 행 — 클릭 = 그 PC 로 전환(오프라인도 고를 수 있다: 뭘 등록해 뒀는지 볼 수 있어야 한다).
  *  ★ 상태 점은 그리지 않는다(2026-08-14 사용자 확정). 오프라인은 **행 전체가 흐려지는 것**으로 이미
  *   드러난다 — 같은 사실을 점으로 한 번 더 말하면 신호가 아니라 장식이다. */
+// ── 에이전트 PC(VM) 하위 행 ──
+//  만들어 둔 VM 만 그린다(이미지 없음·미지원은 행 없음 — 만들기는 `내 PC ⋯` 메뉴의 설정 시트). 상태는 15초에 한 번만 묻는다.
+const VM_KINDS = ["macos", "linux"];
+const VM_SHOWN = new Set(["running", "stopped", "starting", "stopping", "paused"]);
+const vmPhase = { macos: null, linux: null };
+let vmAskedAt = 0;
+function refreshVms() {
+  if (Date.now() - vmAskedAt < 15000) return;
+  vmAskedAt = Date.now();
+  Promise.all(VM_KINDS.map((os) => api.desktopStatus(os).then((st) => (st && VM_SHOWN.has(st.phase) ? st.phase : null)).catch(() => null)))
+    .then((ph) => {
+      let changed = false;
+      VM_KINDS.forEach((os, i) => { if (vmPhase[os] !== ph[i]) { vmPhase[os] = ph[i]; changed = true; } });
+      if (changed) updateSidebar();
+    });
+}
+function vmRow(os) {
+  const row = document.createElement("button");
+  row.className = "wsg-child pc-vm";
+  row.dataset.os = os;
+  row.innerHTML = `<span class="pc-ic">${(os === "linux" ? icons.linux : icons.apple)({ size: 14 })}</span>` +
+    `<span class="pc-nm">${os === "linux" ? "Linux" : "macOS"} (VM)</span>` +
+    `<span class="emu-deskdot${vmPhase[os] === "running" ? " on" : ""}"></span>`;
+  const sheet = () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet(os)).catch(() => {});
+  // 화면은 워크스페이스의 pane 이다 — 열어 둔 워크스페이스가 없으면 설정 시트를 연다.
+  row.addEventListener("click", () => {
+    if (!state.activeWsId || state.view !== "workspace") { sheet(); return; }
+    import("./workspace-view.js").then((m) => m.openDesktopOsPane(os)).catch(() => {});
+  });
+  row.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    showPopupMenu(e.clientX, e.clientY, [{ icon: icons.sliders({ size: 15 }), label: i18n.t('에이전트 PC 설정…'), onClick: sheet }]);
+  });
+  return row;
+}
+
 function deviceRow(d, activeId) {
   const on = d.online !== false;
   const sel = String(d.id) === String(activeId);
