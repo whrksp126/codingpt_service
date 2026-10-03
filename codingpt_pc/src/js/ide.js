@@ -1686,15 +1686,22 @@ export class IdeView {
           this._applyExternal(f, content);
         }
       }
-      // 트리는 6틱(7.2초)마다 — 다른 기기의 새 파일/삭제 반영. 검색 표시 중엔 건너뜀.
-      this._syncTick = (this._syncTick + 1) % 6;
-      if (this._syncTick === 0 && !this.searchTree) {
-        try {
-          const t = await this.fs.fsTree(this.root, 4);
-          if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
-        } catch (_) { /* noop */ }
+      // 트리 새로고침 — **트리 패널만**(파일 pane 은 트리가 없다), 30초마다, 창이 보일 때만, 방금 타이핑했으면 미룬다.
+      //  ★ 2026-10-03 "채팅 타이핑이 10초에 한 번씩 멈췄다 몰아서 들어간다"의 진범: 예전엔 모든 IdeView 가 7.2초마다
+      //   fsTree(깊이 4) 전체를 받아 JSON.stringify 로 비교했다 — 큰 저장소에선 메인 스레드를 수백 ms 붙든다.
+      //   파일 트리가 상시 패널이 되면서 매번 돌게 됐다. 다른 기기의 변경은 창 포커스 복귀·새로고침 버튼에서도 반영된다.
+      if (this.opts.treeOnly) {
+        this._syncTick = (this._syncTick + 1) % 25;
+        const idle = Date.now() - _lastKeyAt > 4000;
+        if (this._syncTick === 0 && idle && document.visibilityState === "visible" && !this.searchTree) await this.refreshTreeQuiet();
       }
     } finally { this._reconciling = false; }
+  }
+  async refreshTreeQuiet() {
+    try {
+      const t = await this.fs.fsTree(this.root, 4);
+      if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
+    } catch (_) { /* noop */ }
   }
   _applyExternal(f, content) {
     this._reloadingExternal = true;
@@ -1731,6 +1738,8 @@ export class IdeView {
 
 // ── 컨텍스트 메뉴 전역 ──
 let activeMenu = null;
+let _lastKeyAt = 0; // 마지막 키 입력 시각 — 타이핑 중엔 무거운 백그라운드 갱신을 미룬다
+window.addEventListener("keydown", () => { _lastKeyAt = Date.now(); }, true);
 let _dragAlt = false; // 트리 드래그 중 ⌥ 상태(놓는 순간 복사/이동 판정)
 window.addEventListener("keydown", (e) => { if (e.key === "Alt") _dragAlt = true; }, true);
 window.addEventListener("keyup", (e) => { if (e.key === "Alt") _dragAlt = false; }, true);

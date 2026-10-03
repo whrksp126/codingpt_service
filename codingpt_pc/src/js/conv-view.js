@@ -208,6 +208,8 @@ export class ConvView {
         return name ? name + i18n.t('에게 요청') : i18n.t('메시지 보내기');
       },
       getDraft: () => this.ctx.tab?.()?.draft || "",
+      getAtts: () => this.ctx.tab?.()?.draftAtts || [],
+      setAtts: (list) => this.ctx.patchTab?.({ draftAtts: list && list.length ? list : undefined }, { quiet: true }),
       setDraft: (s) => this.ctx.patchTab?.({ draft: s ? String(s).slice(0, CONV.DRAFT_MAX) : undefined }, { quiet: true }),
       cwd: () => this.ctx.cwd?.() || "",
       fs: () => this.ctx.fs?.(),

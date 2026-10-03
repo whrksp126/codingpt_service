@@ -55,6 +55,9 @@ const NESTED_ENV = [
   'CLAUDE_CODE_BRIDGE_SESSION_ID', 'CLAUDE_CODE_MESSAGING_SOCKET', 'CLAUDE_CODE_MESSAGING_TOKEN',
 ];
 const INTERRUPT_MARK = /^\[Request interrupted by user/;
+// 하네스가 사용자 줄로 끼워 넣는 기계 메시지(백그라운드 작업 완료 알림·시스템 리마인더) — 사람이 한 말이 아니다(2026-10-03 신고:
+//  `<task-notification>` 이 내가 쓴 말풍선으로 보였다). CLI 가 모델에게 주는 입력이라 대화 화면에는 그리지 않는다.
+const HARNESS_MARK = /^\s*(<task-notification>|<system-reminder>|\[SYSTEM NOTIFICATION)/;
 const AUTH_RE = /authentication_failed|invalid api key|please run \/login|not logged in/i;
 
 const transcript = () => require('./transcript'); // 지연 — 파서만 쓰는 테스트가 tail 기계를 끌어오지 않게
@@ -124,6 +127,7 @@ function toMsgs(o, { blockIdx = 0, textCap = TEXT_CAP, closeDraft = false } = {}
       // /compact 뒤 CLI 가 남기는 "This session is being continued…" 요약은 사람이 한 말이 아니다 — 경계선(compact_boundary)이
       //  이미 "대화 압축" 을 알리므로 요약 본문을 말풍선·구분선으로 또 그리지 않는다(2026-10 QA).
       if (m.kind === 'compact') m.hidden = true;
+      if (m.kind === 'text' && HARNESS_MARK.test(String(m.text || ''))) m.hidden = true;
       push(idx ? `u:${uuid}:${idx}` : `u:${uuid}`, m);
     }
     return out;

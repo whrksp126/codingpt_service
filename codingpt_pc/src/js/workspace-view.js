@@ -127,6 +127,8 @@ let treePanelEl = null;
 let treeView = null, treeWsId = null;
 const TREE_KEY = "cpt.fileTreeOpen";
 function treeOpen() { try { return localStorage.getItem(TREE_KEY) === "1"; } catch (_) { return false; } }
+// 창이 다시 포커스되면 트리를 한 번 새로 고친다(다른 기기·터미널이 바꾼 파일 반영 — 주기 폴링은 뺐다).
+window.addEventListener("focus", () => { try { treeView?.refreshTreeQuiet?.(); } catch (_) { /* noop */ } });
 export function toggleFileTree() {
   try { localStorage.setItem(TREE_KEY, treeOpen() ? "0" : "1"); } catch (_) { /* noop */ }
   syncTreePanel(activeWs());

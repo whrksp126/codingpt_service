@@ -58,6 +58,7 @@ function chatFields(o) {
   if (o && o.threadId) out.threadId = String(o.threadId);
   if (o && o.title) out.title = String(o.title);
   if (o && o.draft) out.draft = String(o.draft).slice(0, 4096);
+  if (o && Array.isArray(o.draftAtts) && o.draftAtts.length) out.draftAtts = o.draftAtts.slice(0, 10); // 올려 둔 첨부 칩(pane 을 옮겨도 남게)
   return out;
 }
 

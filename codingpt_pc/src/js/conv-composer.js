@@ -88,6 +88,18 @@ export class ConvComposer {
     if (this.o.ctlRight) el.querySelector(".conv-ctl-right").appendChild(this.o.ctlRight);
 
     this.inputEl.textContent = String(this.o.getDraft?.() || "");
+    // 첨부 칩 복원 — pane 을 옮기면 이 뷰가 새로 만들어진다. 글 초안은 탭에 저장돼 살아남았지만 칩은 메모리뿐이라
+    //  사라졌다(2026-10-03 신고). 올려 둔 것(path 있음)만 탭에 저장했다가 되살린다. 썸네일은 다시 읽는다.
+    try {
+      for (const s of (this.o.getAtts?.() || [])) {
+        if (!s || !s.path) continue;
+        const a = { id: "a" + (++this._attSeq), src: s.src || s.path, origin: s.origin || "local", name: s.name || "", ext: s.ext || "",
+          image: !!s.image, mediaType: s.mediaType || "", path: s.path, b64: null, state: "ready" };
+        this._atts.push(a);
+        if (a.image) void this._thumb(a);
+      }
+      if (this._atts.length) this._renderAtts();
+    } catch (_) { /* 복원 실패는 칩만 비는 것 */ }
 
     this.sendEl.addEventListener("click", () => {
       if (this._btnMode === "stop") this.o.onStop?.();
@@ -345,6 +357,9 @@ export class ConvComposer {
   _renderAtts() {
     if (!this.attEl) return;
     this.attEl.classList.toggle("hidden", !this._atts.length);
+    if (!this._restoring) {
+      try { this.o.setAtts?.(this._atts.filter((a) => a.state === "ready" && a.path).map((a) => ({ src: a.src, origin: a.origin, name: a.name, ext: a.ext, image: !!a.image, mediaType: a.mediaType, path: a.path }))); } catch (_) { /* noop */ }
+    }
     this.attEl.innerHTML = this._atts.map((a) => {
       const ext = a.ext ? escapeHtml(String(a.ext).toUpperCase().slice(0, 4)) : "";
       const lead = a.b64 ? `<img class="chat-chip-thumb" src="data:${escapeHtml(a.mediaType || "image/png")};base64,${a.b64}" alt="">`
