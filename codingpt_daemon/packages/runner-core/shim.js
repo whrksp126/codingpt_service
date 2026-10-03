@@ -351,10 +351,14 @@ ZDOTDIR="${zdot}"
 [ -f "$_cpt_orig/.zprofile" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zprofile"
 ZDOTDIR="${zdot}"
 `);
+  // VM 워크스페이스 자리에서 연 터미널은 그 VM 으로 들어간다(vm-agent.js). 대화형 셸(.zshrc)에서만.
+  let vmTail = '';
+  try { const va = require('./vm-agent'); va.ensureEnterScript(); vmTail = va.zshTail(); } catch (_) { vmTail = ''; }
   writeIfChanged(path.join(zdot, '.zshrc'), `_cpt_orig=${orig}
 [ -f "$_cpt_orig/.zshrc" ] && ZDOTDIR="$_cpt_orig" source "$_cpt_orig/.zshrc"
 ZDOTDIR="${zdot}"
 ${cptTail}
+${vmTail}
 `);
   // 로그인 셸은 .zshrc 다음 .zlogin 이 "마지막"이라 여기서 한 번 더 확정(cmux 통합이 .zlogin/precmd 로
   //  뒤에 끼어드는 환경 대비). tmux 는 기본 로그인 셸(-l)로 pane 을 띄운다.

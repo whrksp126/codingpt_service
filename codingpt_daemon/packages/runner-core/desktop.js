@@ -936,7 +936,11 @@ function pickVm(p) {
 }
 function guestUrl(u) { return String(u).replace(/^(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/i, '$1192.168.64.1'); }
 
-async function handle(method, p = {}) { return pickVm(p).handle(String(method), p || {}); }
+async function handle(method, p = {}) {
+  // VM 안의 에이전트(준비·워크스페이스 사본) — vm-agent.js 가 맡는다.
+  if (String(method).startsWith('desktop.agent.')) return require('./vm-agent').handle(String(method), p || {});
+  return pickVm(p).handle(String(method), p || {});
+}
 /** 두 OS 의 기기 행을 모두 돌려준다(각각 독립 pane). 지원 안 되는 환경은 null 을 걸러낸다. */
 async function deviceRow() {
   if (process.platform !== 'darwin') return [];

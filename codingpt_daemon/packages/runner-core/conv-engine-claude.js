@@ -438,8 +438,10 @@ function start(opts, onEvent) {
   let exited = false;
   let stopping = null;
 
-  const proc = spawnCli(opts.bin, argsFor(opts), {
-    cwd: opts.cwd, env: opts.env || process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+  // wrap = 다른 곳(VM)에서 같은 인자로 띄우는 좌표(conv.js). 없으면 이 PC 의 CLI 를 그대로.
+  const at = opts.wrap ? opts.wrap(argsFor(opts)) : { bin: opts.bin, args: argsFor(opts), cwd: opts.cwd };
+  const proc = spawnCli(at.bin, at.args, {
+    cwd: at.cwd, env: opts.env || process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
   });
 
   // ENOENT 같은 기동 실패는 'error' 로만 온다('close' 가 뒤따르지 않을 수 있다).

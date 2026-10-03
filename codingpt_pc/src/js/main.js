@@ -40,6 +40,7 @@ import { mountApprovals, updateApprovals } from "./approvals.js";
 import { maybeShowOnboarding } from "./agents-view.js";
 import { startUpdateScheduler, applyNow, deferApply } from "./update-scheduler.js";
 import { mountTasksView, updateTasksView, openTasksDashboard, closeTasksDashboard, openNewTask, startTasksBackground, toast as tasksToast } from "./tasks-view.js";
+import { mountVmView, updateVmView } from "./vm-view.js";
 import { mountAutomationsView, updateAutomationsView, openAutomations, closeAutomations, startAutomationsBackground } from "./automations-view.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
@@ -107,6 +108,7 @@ mountWorkspaceView(wsViewEl);
 mountSettings(settingsEl);
 if (tasksViewEl) mountTasksView(tasksViewEl);
 if (automationsViewEl) mountAutomationsView(automationsViewEl);
+{ const v = document.getElementById("vmView"); if (v) mountVmView(v); } // 에이전트 PC(VM) 장소
 // 보고 있던 작업 워크스페이스가 데몬 정리(머지·폐기)로 사라졌다 — state.js 가 현황판으로 돌려놓고 여기서 알린다(§4).
 S.onTaskWsRemoved(() => tasksToast(tt("wsRemoved")));
 mountLoginGate(loginGateEl);
@@ -123,14 +125,15 @@ function render() {
   //  작업 현황판은 메인 영역을 **대신** 쓴다 — #wsView 를 hidden 으로(display:none → 프리뷰 슬롯 rect 0 →
   //  previewSync 가 visible=false 로 네이티브 웹뷰를 내린다). pane 트리는 그대로 캐시돼 복귀가 즉시다.
   //  자동화 장소도 같은 규칙(메인 영역을 대신 쓰는 장소 — 진행 현황과 배타, setView 가 덮는다).
-  const mainPlace = state.view === "tasks" || state.view === "automations";
+  const mainPlace = state.view === "tasks" || state.view === "automations" || state.view === "vm";
   if (wsViewEl) wsViewEl.hidden = mainPlace;
   updateSettings();
   updateWorkspaceView();
   updateTasksView();
   updateAutomationsView();
+  updateVmView();
   updateApprovals(); // 승인 카드는 Chat 뷰 슬롯 판정을 위해 workspace 렌더 뒤에 갱신
-  if (state.activeWsId !== lastActive || ((lastView === "tasks" || lastView === "automations") && state.view === "workspace")) {
+  if (state.activeWsId !== lastActive || ((lastView === "tasks" || lastView === "automations" || lastView === "vm") && state.view === "workspace")) {
     lastActive = state.activeWsId;
     if (state.activeWsId && !settingsShown && !mainPlace) setTimeout(focusCurrentPane, 40);
   }

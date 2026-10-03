@@ -17,6 +17,7 @@ import { hostHasAuto, hostAwake } from "./automations-api.js";
 import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
+import { openVm, leaveVmScope, vmOsOfPath, vmLabel, openImportMenu } from "./vm-view.js";
 
 let el = null;
 let notifPanel = null;
@@ -234,6 +235,7 @@ export function updateSidebar() {
     const autoN = autoAttentionCount();
     const sig = JSON.stringify([
       tasksN, autoN,
+      state.vmScope || "", JSON.stringify(vmPhase),
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
       state.me?.nickname, state.me?.email, state.me?.profileImg,
@@ -312,21 +314,31 @@ export function updateSidebar() {
   //  이제 워크스페이스 행처럼 "들어가는 곳" — 선택 배경은 들어가 있는 곳 하나에만.
   if (devices.length) {
     const dn = devices.find((d) => String(d.id) === String(activeDev));
-    const devHead = sectionHead((dn && dn.name) || i18n.t('내 PC'), null);
+    const devHead = sectionHead(state.vmScope ? vmLabel(state.vmScope) : ((dn && dn.name) || i18n.t('내 PC')), null);
     devHead.classList.add("sb-sec-dev"); // PC 이름은 고유명사 — 대문자 변환 없이, 위 PC 목록과는 선으로 가른다
+    if (state.vmScope) {
+      // VM 을 고른 상태 — 이 아래는 그 VM 의 것(화면·VM 워크스페이스). 진행 현황·자동화는 호스트의 것이라 여기서는 뺀다.
+      list.appendChild(devHead);
+      list.appendChild(vmScreenRow(state.vmScope));
+    } else {
     list.appendChild(devHead);
     list.appendChild(tasksRow());
     list.appendChild(autoRow());
+    }
   }
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
-  const wss = devices.length ? S.workspacesForDevice(activeDev) : [];
+  //  VM 워크스페이스(~/.codingpt/vm/<os>/ws/…)는 그 VM 을 골랐을 때만, 호스트 워크스페이스는 호스트일 때만.
+  const wss = (devices.length ? S.workspacesForDevice(activeDev) : []).filter((w) => (vmOsOfPath(w.localPath) || "") === (state.vmScope || ""));
   //  ★ [+] 와 ⋯ 을 함께 두지 않는다(2026-08-14 사용자 확정) — 둘 다 "워크스페이스 추가" 하나를
   //   가리켜서, 같은 일을 하는 버튼이 나란히 두 개 있는 꼴이었다. ⋯ 하나로 통일한다.
   list.appendChild(sectionHead(i18n.t('워크스페이스'), [
-    { icon: icons.plus({ size: 14 }), label: i18n.t('워크스페이스 추가'), onClick: () => startNewWorkspace(activeDev) },
+    state.vmScope
+      ? { icon: icons.plus({ size: 14 }), label: i18n.t('워크스페이스 가져오기'), onClick: () => { const r = el.querySelector(".sb-list")?.getBoundingClientRect(); openImportMenu((r ? r.left : 0) + 24, (r ? r.top : 0) + 160, state.vmScope); } }
+      : { icon: icons.plus({ size: 14 }), label: i18n.t('워크스페이스 추가'), onClick: () => startNewWorkspace(activeDev) },
   ]));
-  if (devices.length && !wss.length) {
+  if (state.vmScope && !wss.length) list.appendChild(note(i18n.t('+ 로 이 PC 의 워크스페이스를 VM 으로 가져오세요')));
+  else if (devices.length && !wss.length) {
     if (state.wsError && !state.workspaces.length) list.appendChild(note(i18n.t('목록을 불러오지 못했습니다')));
     else list.appendChild(note(i18n.t('+ 로 이 PC의 폴더를 추가하세요')));
   }
@@ -591,19 +603,23 @@ function refreshVms() {
       if (changed) updateSidebar();
     });
 }
+function vmScreenRow(os) {
+  const row = document.createElement("button");
+  row.className = "pc-row" + (state.view === "vm" ? " active" : "");
+  row.innerHTML = `<span class="pc-ic">${icons.monitor({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t('화면'))}</span>`;
+  row.addEventListener("click", () => { if (state.view !== "vm") openVm(os); });
+  return row;
+}
 function vmRow(os) {
   const row = document.createElement("button");
-  row.className = "wsg-child pc-vm";
+  row.className = "wsg-child pc-vm" + (state.vmScope === os ? " active" : "");
   row.dataset.os = os;
   row.innerHTML = `<span class="pc-ic">${(os === "linux" ? icons.linux : icons.apple)({ size: 14 })}</span>` +
-    `<span class="pc-nm">${os === "linux" ? "Linux" : "macOS"} (VM)</span>` +
+    `<span class="pc-nm">${vmLabel(os)}</span>` +
     `<span class="emu-deskdot${vmPhase[os] === "running" ? " on" : ""}"></span>`;
   const sheet = () => import("./desktop-sheet.js").then((m) => m.openDesktopSheet(os)).catch(() => {});
-  // 화면은 워크스페이스의 pane 이다 — 열어 둔 워크스페이스가 없으면 설정 시트를 연다.
-  row.addEventListener("click", () => {
-    if (!state.activeWsId || state.view !== "workspace") { sheet(); return; }
-    import("./workspace-view.js").then((m) => m.openDesktopOsPane(os)).catch(() => {});
-  });
+  // VM 을 고르면 사이드바가 그 VM 기준으로 바뀌고 메인에 그 화면이 뜬다(vm-view.js).
+  row.addEventListener("click", () => openVm(os));
   row.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     showPopupMenu(e.clientX, e.clientY, [{ icon: icons.sliders({ size: 15 }), label: i18n.t('에이전트 PC 설정…'), onClick: sheet }]);
@@ -632,7 +648,8 @@ function deviceRow(d, activeId) {
     // 깨어 있기(잠자기 방지 층)가 지금 잡혀 있음 — 무채색 글리프(§6.6, 상태 신호지만 경고가 아니다).
     (hostAwake(d.id) ? `<span class="pc-awake" title="${escapeHtml(at("awakeNow"))}" aria-label="${escapeHtml(at("awakeNow"))}">${icons.sun({ size: 12 })}</span>` : "") +
     (sel ? `<span class="pc-check">${icons.check({ size: 15 })}</span>` : "");
-  row.addEventListener("click", () => { if (!sel) S.setActiveDevice(d.id); });
+  // PC 행 = 호스트 기준으로 돌아가기(VM 을 보고 있었다면 벗어난다).
+  row.addEventListener("click", () => { if (state.vmScope) leaveVmScope(); if (!sel) S.setActiveDevice(d.id); });
   // PC 메뉴 — `PC 설정`(깨어 있기). 우클릭(워크스페이스 행과 같은 방식).
   row.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -1046,6 +1063,18 @@ function wsMenuItems(w) {
   //  되돌리려면 이 두 항목만 다시 붙이면 된다(api.projectDetach/projectAttach 도 살아 있다).
   // 목록 메타만 삭제(폴더/파일 무영향). 서버가 원천이라 오프라인에서는 막는다.
   items.push({ type: "sep" });
+  // VM 워크스페이스 — 에이전트가 VM 에서 한 작업을 호스트 저장소의 브랜치로 가져오거나, 호스트의 최신 커밋을 VM 으로 보낸다.
+  const vmOs = vmOsOfPath(w.localPath);
+  if (vmOs) {
+    const nm = String(w.localPath).split("/").pop();
+    const sync = (dir) => api.desktopAgent("ws.sync", { os: vmOs, name: nm, dir })
+      .then((r) => window.alert(dir === "pull"
+        ? i18n.t('호스트 저장소에 브랜치 「{b}」 로 가져왔어요 (새 커밋 {n}개)', { b: r.branch, n: r.ahead || 0 })
+        : i18n.t('호스트의 지금 커밋을 VM 의 「{b}」 로 보냈어요', { b: r.branch })))
+      .catch((e) => window.alert(String((e && e.message) || e).replace(/^[A-Z_]+:\s*/, "")));
+    items.push({ icon: icons.arrowDown ? icons.arrowDown({ size: 15 }) : "", label: i18n.t('VM 작업 가져오기'), onClick: () => sync("pull") });
+    items.push({ icon: icons.arrowUp ? icons.arrowUp({ size: 15 }) : "", label: i18n.t('호스트 최신 보내기'), onClick: () => sync("push") });
+  }
   items.push({ icon: icons.trash({ size: 15 }), label: i18n.t('워크스페이스 삭제'), danger: true, onClick: () => { if (S.blockedOffline(i18n.t('워크스페이스 삭제'))) return; confirmDeleteWs(w); } });
   return items;
 }

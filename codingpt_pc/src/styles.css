@@ -2967,6 +2967,17 @@ textarea.tk-input { resize: vertical; line-height: 1.5; padding: 10px 12px; }
 /* ── 자동화 번들(automation-design §3·§4·§5.9·§6.6) — 자동화 장소(.au-*) · 한 줄 지시(.dp-*) · PR 후속(.td-fu-*) · 깨어 있기(.pw-*)
    규율은 Agent Tasks 절과 같다: 선택/활성 = 무채색 명암만. 색은 상태 신호에만(error = 실패·주의 배지, warn = 입력 필요, 점멸 = 실행 중).
    `깨어 있음` sun 글리프는 상태지만 경고가 아니라 dim. 전체 일시정지는 무채색 토글. */
+/* 에이전트 PC(VM) 장소 — 머리줄(이름·준비 상태·가져오기) + 화면. */
+.vm-view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--base); }
+.vm-view[hidden] { display: none; }
+.vmv-head { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border-bottom: 1px solid var(--border); font-size: 13px; color: var(--text2); flex: none; }
+.vmv-title { display: inline-flex; align-items: center; gap: 6px; color: var(--text); }
+.vmv-title b { font-weight: 500; }
+.vmv-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text3); font-size: 12px; }
+.vmv-btn { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: var(--r-sm); border: 1px solid var(--border-ctrl); background: transparent; color: var(--text2); font-size: 12px; }
+.vmv-btn:hover { background: var(--hover); color: var(--text); }
+.vmv-body { flex: 1; min-height: 0; display: flex; position: relative; }
+.wsg-child.pc-vm.active { background: var(--selected); color: var(--text); }
 .automations-view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--base); outline: none; }
 .automations-view[hidden] { display: none; }
 .automations-view.tv-wide .tv-list { flex: none; width: 360px; border-right: 1px solid var(--border); }

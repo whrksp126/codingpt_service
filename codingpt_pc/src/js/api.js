@@ -290,6 +290,8 @@ export const api = {
   //   한 판짜리 통로로 흘릴 수는 없다(자세한 근거는 데몬 emulator-stream.js 머리주석).
   //  에이전트 PC(macOS·Linux 게스트) — 같은 소켓. os 로 어느 VM 인지 고른다(둘 다 동시 실행). 화면·입력은 emulator.* 에 id `desktop:<os>`.
   desktopStatus: (os) => invoke("emulator_local", { cmd: "desktop.status", args: { os } }),
+  // VM 안의 에이전트(준비·워크스페이스 사본) — 데몬 vm-agent.js.
+  desktopAgent: (cmd, args) => invoke("emulator_local", { cmd: "desktop.agent." + cmd, args: args || {} }),
   // 공유 표면(프리뷰·IDE·모바일 화면) — 어느 기기에서 열면 전부에(2026-09-20). cwd = 워크스페이스 localPath.
   surfaceList: (cwd) => invoke("surface_local", { cmd: "surface.list", args: { cwd } }),
   surfaceAdd: (cwd, item) => invoke("surface_local", { cmd: "surface.add", args: { cwd, ...item } }),

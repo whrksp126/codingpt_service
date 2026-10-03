@@ -358,7 +358,16 @@ async function ensureProc(thread) {
     unacked: [],           // [{ clientId, uuid, text, waiters[] }]  도달 확인을 기다리는 메시지
     exited: false, stopping: null, stopReason: null, resume,
   };
+  // VM 워크스페이스(vm-agent.js) — 같은 CLI 를 VM 안에서 띄운다(ssh 로 표준입출력을 잇는다). 꺼져 있으면 켠다.
+  const vmMark = require('./vm-agent').markerOf(abs);
+  let wrap = null;
+  if (vmMark) {
+    const va = require('./vm-agent');
+    wrap = await va.spawnSpec(vmMark, []).then((sp) => (args) => ({ bin: sp.bin, args: [...sp.args.slice(0, -1), sp.args[sp.args.length - 1] + ' ' + args.map((x) => `'${String(x).replace(/'/g, `'\\''`)}'`).join(' ')], cwd: sp.cwd }))
+      .catch((e) => { throw coded('START_FAILED', `에이전트 PC 에 연결하지 못했습니다: ${(e && e.message) || e}`); });
+  }
   proc.engine = adapter.start({
+    wrap,
     bin: found.bin, cwd: abs, sessionId: thread.id, resume,
     mode: thread.mode || 'default', model: thread.model || null, effort: thread.effort || null, env,
     // 새 대화의 첫 응답에서만 제목을 쓰게 한다(이미 제목이 있거나 이어가는 대화면 시키지 않는다).
