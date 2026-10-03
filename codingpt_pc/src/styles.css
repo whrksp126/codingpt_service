@@ -3262,8 +3262,8 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 /* ── IDE 해체(2026-10): 메인 영역 = 파일 트리 패널 + pane 그리드 ── */
 .ws-body { flex: 1; min-height: 0; display: flex; }
 .ws-body > .ws-grid { flex: 1; min-width: 0; }
-.ws-tree-panel { flex: none; width: 240px; min-width: 160px; max-width: 50%; resize: horizontal; overflow: hidden; display: flex; border-right: 1px solid var(--border); background: var(--surface); }
-.ws-tree-panel > .ide { flex: 1; min-width: 0; }
+.ws-tree-panel { position: relative; flex: none; width: 240px; min-width: 160px; max-width: 50%; overflow: visible; display: flex; border-right: 1px solid var(--border); background: var(--surface); }
+.ws-tree-panel > .ide { flex: 1; min-width: 0; overflow: hidden; }
 .ide-tree-only > .ide-tree { flex: 1; width: auto !important; border-right: none; }
 .mt-tree-btn.on { color: var(--text); background: var(--selected); }
 /* 질문 카드 제목 — 말줄임 대신 줄바꿈해 끝까지 보인다(2026-10 사용자 요청) */
@@ -3285,3 +3285,6 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .ctx-kbd { margin-left: auto; color: var(--text3); font-size: 11px; }
 /* Material 아이콘 — 원본 viewBox 그대로, 줄 높이에 맞춰 세로 가운데 */
 svg.mi { flex: none; display: block; }
+
+.ws-tree-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: var(--z-pane); }
+.ws-tree-resizer:hover, .ws-tree-resizer.dragging { background: var(--border-ctrl); }

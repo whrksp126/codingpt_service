@@ -139,7 +139,7 @@ function syncTreePanel(ws) {
   if (!show) return;
   if (treeView && treeWsId === ws.id) return;
   try { treeView?.dispose(); } catch (_) { /* noop */ }
-  treePanelEl.innerHTML = "";
+  for (const c of [...treePanelEl.children]) if (!c.classList.contains("ws-tree-resizer")) c.remove(); // 그립은 남긴다
   treeWsId = ws.id;
   const fs = isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId);
   treeView = new IdeView(ws.localPath || "", treePanelEl, {
@@ -195,6 +195,33 @@ export function mountWorkspaceView(container) {
   treePanelEl = document.createElement("div");
   treePanelEl.className = "ws-tree-panel";
   treePanelEl.style.display = "none";
+  // 우측 테두리를 잡고 폭 조절 — 사이드바(.sb-resizer)와 같은 방식·같은 굵기·같은 클램프(2026-10 사용자 요청).
+  const TW_KEY = "cpt:treeW";
+  const clampTw = (w) => Math.max(160, Math.min(Math.round(window.innerWidth * 0.5), Math.round(w)));
+  const savedTw = parseInt(localStorage.getItem(TW_KEY) || "", 10);
+  treePanelEl.style.width = (savedTw ? clampTw(savedTw) : 240) + "px";
+  const treeGrip = document.createElement("div");
+  treeGrip.className = "ws-tree-resizer";
+  treeGrip.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    treeGrip.setPointerCapture(e.pointerId);
+    treeGrip.classList.add("dragging");
+    document.body.classList.add("resizing-col"); // 프리뷰 위로 지나가도 이벤트를 앱이 받는다(shield)
+    const startX = e.clientX, startW = treePanelEl.getBoundingClientRect().width;
+    let cur = startW;
+    const move = (ev) => { cur = clampTw(startW + (ev.clientX - startX)); treePanelEl.style.width = cur + "px"; };
+    const up = () => {
+      treeGrip.classList.remove("dragging");
+      document.body.classList.remove("resizing-col");
+      treeGrip.removeEventListener("pointermove", move);
+      treeGrip.removeEventListener("pointerup", up);
+      try { localStorage.setItem(TW_KEY, String(Math.round(cur))); } catch (_) { /* noop */ }
+    };
+    treeGrip.addEventListener("pointermove", move);
+    treeGrip.addEventListener("pointerup", up);
+  });
+  treePanelEl.appendChild(treeGrip);
   const bodyRow = document.createElement("div");
   bodyRow.className = "ws-body";
   bodyRow.append(treePanelEl, gridEl);
