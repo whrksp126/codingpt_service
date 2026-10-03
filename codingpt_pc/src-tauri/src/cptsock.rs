@@ -134,7 +134,7 @@ fn cpt_request_timed(
 //   kind, hostDeviceId, remotePort }. 주면 데몬이 **연결마다** 직결을 먼저 시도하고, 첫 바이트 전에
 //   실패하면 버퍼를 승계해 그 연결만 릴레이(token)로 넘긴다 → 사용자 무자각 폴백.
 //   token 은 upstream 이 있어도 **항상 함께 넘긴다**(릴레이가 폴백의 전제). 구 데몬은 이 필드를 무시한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn forward_start(
     port: u16,
     token: String,
@@ -149,7 +149,7 @@ pub fn forward_start(
     cpt_request("forward.start", args)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn forward_stop(port: u16) -> Result<serde_json::Value, String> {
     cpt_request("forward.stop", serde_json::json!({ "port": port }))
 }
@@ -163,7 +163,7 @@ pub fn forward_stop(port: u16) -> Result<serde_json::Value, String> {
 //  구 데몬(사이드카 스테일)에는 이 커맨드가 없어 Err 가 온다 → JS 가 조용히 릴레이로 폴백한다.
 
 /// 대상 PC 로 직결이 되는지 왕복 측정. result: { ok:true, rttMs, endpoint } | { ok:false, code }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lan_probe(host_device_id: i64) -> Result<serde_json::Value, String> {
     cpt_request("lan.probe", serde_json::json!({ "hostDeviceId": host_device_id }))
 }
@@ -171,7 +171,7 @@ pub fn lan_probe(host_device_id: i64) -> Result<serde_json::Value, String> {
 /// 이 PC ↔ 대상 PC 경로 상태 스냅샷(배지 표시용). result: { mode:'lan'|'relay'|…, … }
 ///  ※ 데몬이 이 커맨드를 아직 갖고 있지 않으면 Err — JS 는 **배지를 안 띄우는 것**으로 처리한다
 ///    (거짓 표시 금지). 기능 자체는 forward.start 의 upstream 으로 이미 동작한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lan_status(host_device_id: i64) -> Result<serde_json::Value, String> {
     cpt_request("lan.status", serde_json::json!({ "hostDeviceId": host_device_id }))
 }
@@ -179,7 +179,7 @@ pub fn lan_status(host_device_id: i64) -> Result<serde_json::Value, String> {
 /// 원격 fs 등 제어 RPC 1건을 LAN 으로 왕복. result: { ok:true, result } | { ok:false, code }
 ///  울타리: `fs.` / `net.` / `terminal.list` 처럼 읽기·편집에 필요한 메서드만 데몬이 scope 로 게이팅한다
 ///  (여기서 임의 메서드를 막지 않는 대신 **데몬이 grant scope 밖 메서드를 거부**한다 — 정책의 정본은 서버).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn lan_rpc(
     host_device_id: i64,
     method: String,
@@ -195,7 +195,7 @@ pub fn lan_rpc(
 //  끊고 데몬에 직접 지시한다. 데몬이 back REST(begin/commit)를 직접 호출하고 번들·업로드는 백그라운드로
 //  진행하므로 이 호출은 좌표 발급까지만 기다린다(반환 { accepted:true, checkpointId }).
 //  구버전 사이드카/구 back 이면 Err → JS 가 기존 back_api 경로로 폴백한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sync_checkpoint(
     ws_id: String,
     reason: Option<String>,
@@ -230,7 +230,7 @@ pub fn e2ee_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Va
 //  통로를 프런트에 열면 웹뷰에서 도는 어떤 스크립트든 데몬 제어권을 갖는다.
 //  ⚠ 설치 명령 자체를 여기서 실행하지 않는다 — 설치는 **사용자가 보는 터미널에서** 돈다(그래서
 //   무엇이 실행되는지 숨겨지지 않고, Ctrl+C 로 멈출 수 있다). 이 커맨드는 감지/배선/타이핑만 한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if !cmd.starts_with("agents.") {
         return Err("허용되지 않은 명령입니다.".to_string());
@@ -241,7 +241,7 @@ pub fn agents_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
 // 열린 포트 목록(2026-08-04) — 종전엔 tmux.rs 에 **같은 로직의 Rust 사본**이 있었다.
 //  포트 판정 규칙(무시 포트·dev 포트대·워크스페이스 귀속·프로세스 이름)이 데몬과 두 벌이면
 //  한쪽만 고쳐진다 → 데몬 한 벌로 모으고 그 사본은 제거했다. 울타리는 위와 같은 모양.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ports_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if cmd != "net.ports" {
         return Err("허용되지 않은 명령입니다.".to_string());
@@ -255,7 +255,7 @@ pub fn ports_local(cmd: String, args: serde_json::Value) -> Result<serde_json::V
 //  ⚠ 여기가 열려 있어도 **터미널 안의 AI 는 이 길을 못 쓴다** — cpt 컨트롤 소켓의 CAPABILITIES 에
 //   review.* 가 없기 때문이다(자기가 요청한 리뷰를 스스로 승인하는 경로 차단). 이 커맨드는 앱
 //   웹뷰 전용 배관이다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if !cmd.starts_with("review.") {
         return Err("허용되지 않은 명령입니다.".to_string());
@@ -265,7 +265,7 @@ pub fn review_local(cmd: String, args: serde_json::Value) -> Result<serde_json::
 
 // 공유 표면(2026-09-20) — 프리뷰·IDE·모바일 화면의 존재를 전 기기가 나눈다(터미널 풀과 같은 모양).
 //  이 PC 워크스페이스는 데몬 소켓으로 바로 묻는다. 울타리는 위와 같은 모양: `surface.` 접두사만.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn surface_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if !cmd.starts_with("surface.") {
         return Err("허용되지 않은 명령입니다.".to_string());
@@ -360,7 +360,7 @@ pub async fn power_local(cmd: String, args: serde_json::Value) -> Result<serde_j
 //  데몬 입력 경로를 지나가지 않는다(원격 기기 입력만 지나간다). 그래서 그 키를 보낼 때 이 커맨드로
 //  데몬에 "지금 다시 봐"를 알린다 → 데몬이 그 터미널을 즉시 다시 읽어 **이 PC 와 폰의 알약이 함께**
 //  갱신된다(3초 폴링 대기 없음). 조작이 아니라 재확인 신호라 인자도 (cwd, tid) 뿐이다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mode_poke(cwd: String, tid: i64) -> Result<serde_json::Value, String> {
     cpt_request("status.poke", serde_json::json!({ "cwd": cwd, "tid": tid }))
 }
@@ -373,7 +373,7 @@ pub fn mode_poke(cwd: String, tid: i64) -> Result<serde_json::Value, String> {
 //  **읽기/상태 왕복 제거**이고, 입력은 지금도 체감 문제가 없다(추가 표면을 만들 이유가 없다).
 const CHAT_LOCAL_OK: [&str; 6] = ["chat.open", "chat.since", "chat.mode", "chat.commands", "chat.dialog", "chat.screen"];
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn chat_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
     if !CHAT_LOCAL_OK.contains(&cmd.as_str()) {
         return Err("허용되지 않은 명령입니다.".to_string());

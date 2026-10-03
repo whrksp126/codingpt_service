@@ -121,7 +121,7 @@ fn ws_cache_load_at(p: &std::path::Path, token: &str, server: &str) -> Option<se
 
 // 백엔드 워크스페이스(클라우드+로컬) 목록 — deviceToken 인증. 응답은 data 직접 반환(성공 규약).
 //  실패 시 last-known 캐시를 `stale:true` 로 반환(오프라인 부팅). 캐시도 없으면 기존대로 Err.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_workspaces() -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let server = server_url();
@@ -151,7 +151,7 @@ pub fn fetch_workspaces() -> Result<serde_json::Value, String> {
 }
 
 // 로그인된 계정 프로필(deviceToken 인증) — 설정 모달 "계정" 표시용. 미페어링이면 Ok(null).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_me() -> Result<Option<serde_json::Value>, String> {
     let token = match device_token() {
         Some(t) => t,
@@ -174,7 +174,7 @@ pub fn fetch_me() -> Result<Option<serde_json::Value>, String> {
 
 // 프리뷰 주소창 검색어 추천 — Google Suggest 공개 엔드포인트(무키·무인증).
 //  브라우저가 아닌 네이티브 호출이라 CORS 무관. 반환 = 추천 검색어 문자열 배열.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn preview_suggest(q: String) -> Result<Vec<String>, String> {
     let s = q.trim();
     if s.is_empty() {
@@ -202,7 +202,7 @@ pub fn preview_suggest(q: String) -> Result<Vec<String>, String> {
 }
 
 // 계정의 모든 기기 목록(deviceToken) — 멀티기기 "내 기기". 미페어링이면 Ok(null).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_devices() -> Result<Option<serde_json::Value>, String> {
     let token = match device_token() {
         Some(t) => t,
@@ -225,7 +225,7 @@ pub fn fetch_devices() -> Result<Option<serde_json::Value>, String> {
 
 // 지금 접속해 있는 UI 화면(기기) 목록 — 업데이트 재시작이 **원격에서 보고 있는 사람을 끊는지**
 //  판정하는 근거(update-scheduler.js). 미페어링/오프라인이면 Ok(null) → 판정은 보수적으로 처리.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_ui_clients() -> Result<Option<serde_json::Value>, String> {
     let token = match device_token() {
         Some(t) => t,
@@ -247,7 +247,7 @@ pub fn fetch_ui_clients() -> Result<Option<serde_json::Value>, String> {
 }
 
 // 로컬 워크스페이스를 이 기기(호스트)에 귀속(백필/클레임).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn claim_workspace(ws_id: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!(
@@ -266,7 +266,7 @@ pub fn claim_workspace(ws_id: String) -> Result<serde_json::Value, String> {
 
 // ── 외부 PC(다른 기기) 폴더 브라우징/워크스페이스 생성 — back 릴레이 fs API 를 hostDeviceId 로 라우팅 ──
 //  (이 PC 로컬은 네이티브 폴더 다이얼로그를 쓰고, 원격 PC 만 이 경로로 컬럼 브라우저를 띄운다)
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remote_fs_list(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let host_qs = match host_device_id {
@@ -288,7 +288,7 @@ pub fn remote_fs_list(path: String, host_device_id: Option<i64>) -> Result<serde
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remote_fs_mkdir(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!("{}/api/daemon/fs/mkdir", server_url().trim_end_matches('/'));
@@ -301,7 +301,7 @@ pub fn remote_fs_mkdir(path: String, host_device_id: Option<i64>) -> Result<serd
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remote_ws_create(path: String, host_device_id: Option<i64>) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     // 폴더명 = 워크스페이스명(홈-기준 상대경로의 마지막 구간). 빈 경로(홈)는 지정 불가.
@@ -322,7 +322,7 @@ pub fn remote_ws_create(path: String, host_device_id: Option<i64>) -> Result<ser
 }
 
 // 프로필(닉네임) 수정 — deviceToken.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_nickname(nickname: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!("{}/api/daemon/me", server_url().trim_end_matches('/'));
@@ -336,7 +336,7 @@ pub fn update_nickname(nickname: String) -> Result<serde_json::Value, String> {
 }
 
 // 모양 설정(계정 전체 동기화) 저장 — deviceToken. 서버가 appearance_event 로 전 기기 팬아웃.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_appearance(appearance: serde_json::Value) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!("{}/api/daemon/me", server_url().trim_end_matches('/'));
@@ -350,7 +350,7 @@ pub fn update_appearance(appearance: serde_json::Value) -> Result<serde_json::Va
 }
 
 // 회원 탈퇴(본인 계정 삭제) — deviceToken.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_account() -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!("{}/api/daemon/account", server_url().trim_end_matches('/'));
@@ -364,7 +364,7 @@ pub fn delete_account() -> Result<serde_json::Value, String> {
 }
 
 // 기기 삭제(revoke) — deviceToken.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn revoke_device(device_id: i64) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!(
@@ -425,7 +425,7 @@ fn urlencoding_min(s: &str) -> String {
 }
 
 // 워크스페이스 세션 상태 조회(deviceToken) — 이어받기. 없으면 { session: null }.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_ws_session(ws_id: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let url = format!(
@@ -443,7 +443,7 @@ pub fn fetch_ws_session(ws_id: String) -> Result<serde_json::Value, String> {
 }
 
 // 워크스페이스 세션 상태 저장(deviceToken) — 디바운스 푸시. updatedBy='pc'.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_ws_session(ws_id: String, session: serde_json::Value) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let url = format!(
@@ -463,7 +463,7 @@ pub fn save_ws_session(ws_id: String, session: serde_json::Value) -> Result<serd
 // ── 서버 동기화 알림(deviceToken 인증 — HTTP 는 여기 Rust 에서, 토큰 JS 노출 금지) ──
 
 // 알림 목록 조회 — data = { notifications:[...], unreadCount }.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn notif_list(limit: Option<u32>, before_id: Option<i64>) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let mut url = format!(
@@ -484,7 +484,7 @@ pub fn notif_list(limit: Option<u32>, before_id: Option<i64>) -> Result<serde_js
 }
 
 // 알림 생성(OSC/벨 → 서버 기록) — data = 생성된 행.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn notif_create(payload: serde_json::Value) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let url = format!("{}/api/notifications", server_url().trim_end_matches('/'));
@@ -498,7 +498,7 @@ pub fn notif_create(payload: serde_json::Value) -> Result<serde_json::Value, Str
 }
 
 // 알림 읽음 처리 — payload = {ids} | {scope:{cwd,win}} | {scope:{cwd,win:null}}.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn notif_read(payload: serde_json::Value) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let url = format!("{}/api/notifications/read", server_url().trim_end_matches('/'));
@@ -512,7 +512,7 @@ pub fn notif_read(payload: serde_json::Value) -> Result<serde_json::Value, Strin
 }
 
 // 전체 읽음 처리 — data = {ids}.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn notif_read_all() -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let url = format!("{}/api/notifications/read-all", server_url().trim_end_matches('/'));
@@ -527,7 +527,7 @@ pub fn notif_read_all() -> Result<serde_json::Value, String> {
 
 // UI 실시간 채널 접속 URL 발급 — 티켓(POST /api/daemon/ui/ticket)을 받아 완성된 ws URL 반환.
 //  wsUrl 이 없으면 serverUrl 에서 조립: ws(s)://…/api/daemon/agent/stream?ticket=<t>&client=pc.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ui_stream_url() -> Result<String, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let server = server_url();
@@ -579,7 +579,7 @@ pub struct CloudTerminal {
 // 원격 터미널 토큰 발급(deviceToken 인증) — 프론트는 이 토큰으로 back 릴레이 WS 연결.
 //  이 PC 의 로컬 워크스페이스는 이 경로를 안 탄다(로컬 tmux 직결). 사용처: 클라우드 +
 //  **다른 PC(host_device_id 지정)의 워크스페이스**(멀티 PC — 활성 러너 무변경 직결).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn cloud_terminal_start(
     cwd: String,
     host_device_id: Option<i64>,
@@ -628,7 +628,7 @@ pub fn cloud_terminal_start(
 #[derive(serde::Serialize)]
 pub struct TerminalLocalEndpoint { pub port: u16, pub token: String, pub client: String, pub device_name: String }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn terminal_local_endpoint() -> Result<TerminalLocalEndpoint, String> {
     let cfg = read_config().ok_or("데몬 설정이 없습니다(페어링 필요)")?;
     let tl = cfg.get("terminalLocal").ok_or("데몬이 로컬 터미널 리스너를 아직 열지 않았습니다")?;
@@ -641,7 +641,7 @@ pub fn terminal_local_endpoint() -> Result<TerminalLocalEndpoint, String> {
 
 // 새 로컬 워크스페이스 생성 — 폴더 절대경로 → 홈-상대 localPath 로 변환 후 백엔드에 등록(deviceToken).
 //  홈 밖 경로는 거부(데몬 홈 jail 규율). 반환=생성된 워크스페이스 meta.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_workspace(abs_path: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let home = dirs::home_dir().ok_or("홈 디렉토리 해석 실패")?;
@@ -676,7 +676,7 @@ pub fn create_workspace(abs_path: String) -> Result<serde_json::Value, String> {
 }
 
 // 워크스페이스 삭제 — 서버 목록 메타만 삭제(로컬 폴더/파일은 절대 건드리지 않음). deviceToken.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn ws_delete(ws_id: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!(
@@ -694,7 +694,7 @@ pub fn ws_delete(ws_id: String) -> Result<serde_json::Value, String> {
 }
 
 // 프로젝트 그룹 수동 교정 — 분리(단독 프로젝트로) / 합치기(대상 워크스페이스의 프로젝트로).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn project_detach(ws_id: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!(
@@ -711,7 +711,7 @@ pub fn project_detach(ws_id: String) -> Result<serde_json::Value, String> {
         .map_err(|e| format!("응답 파싱 실패: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn project_attach(ws_id: String, target_ws_id: String) -> Result<serde_json::Value, String> {
     let token = device_token().ok_or("로그인이 필요합니다.")?;
     let url = format!(
@@ -1285,7 +1285,7 @@ pub async fn back_api_async(
 //  기본은 /api/daemon/ 경로만 허용한다. 설정의 Supporter 화면에 필요한 읽기/체크아웃/포털
 //  세 경로만 별도로 허용한다. 임의 billing API 를 열지 않아 deviceToken 의 권한 표면을 최소화한다.
 //  에러는 back 의 { message } 를 살려 "HTTP <code>: <message>" 로 전달(409=대상 데몬 오프라인 등).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn back_api(
     method: String,
     path: String,

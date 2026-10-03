@@ -362,7 +362,7 @@ mod history_tests {
 //  터미널도 "지금 풀스크린 앱인가"를 xterm 만 보고는 알 수 없다. 예전엔 이걸 codex 브랜드
 //  하드코딩으로 때웠는데, 브랜드가 아니라 모드로 판정해야 vim·less·그 밖의 TUI 가 다 맞는다.
 #[cfg(not(windows))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_modes(ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) -> Result<serde_json::Value, String> {
     let target = { mgr.panes.lock().unwrap().get(&pane_id).map(|h| h.target.clone()) };
     let Some(target) = target else { return Ok(serde_json::json!({})) };
@@ -376,7 +376,7 @@ pub fn pty_modes(ctx: State<TmuxCtx>, mgr: State<PtyManager>, pane_id: String) -
 
 // win32(term-host)는 tmux 가 없다 — 모드를 모른다고 답하고 클라이언트가 xterm 추론으로 폴백한다.
 #[cfg(windows)]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_modes(_mgr: State<PtyManager>, _pane_id: String) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({}))
 }
@@ -444,7 +444,7 @@ fn empty_history_page() -> serde_json::Value {
 }
 
 #[cfg(not(windows))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_history(
     ctx: State<TmuxCtx>,
     mgr: State<PtyManager>,
@@ -483,7 +483,7 @@ pub fn pty_history(
 
 // win32(term-host)는 tmux history 가 없다 — 빈 과거로 답하고 클라이언트는 오버레이를 안 연다.
 #[cfg(windows)]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn pty_history(
     _mgr: State<PtyManager>,
     _pane_id: String,

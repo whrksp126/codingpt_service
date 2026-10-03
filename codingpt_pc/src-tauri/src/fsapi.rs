@@ -60,7 +60,7 @@ fn rel_of(abs: &Path) -> String {
 }
 
 // 홈-상대 경로 → 절대경로 문자열(홈 jail 검증). 파일트리 노드를 터미널에 절대경로로 삽입할 때 사용.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_abs(rel: String) -> Result<String, String> {
     Ok(safe_abs(rel.trim_start_matches('/'))?.to_string_lossy().to_string())
 }
@@ -112,7 +112,7 @@ fn read_dir_nodes(abs: &Path, depth: i32) -> Vec<Node> {
 
 // 워크스페이스 파일 트리(홈-상대 root). depth 로 재귀 제한.
 // 홈-상대 경로가 이 기기에 실재하는 디렉토리인지(멀티기기: 로컬 워크스페이스 호스트 클레임 판단용).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn path_exists(rel: String) -> bool {
     match safe_abs(&rel) {
         Ok(abs) => abs.is_dir(),
@@ -120,7 +120,7 @@ pub fn path_exists(rel: String) -> bool {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_tree(rel: String, depth: Option<i32>) -> Result<Vec<Node>, String> {
     let abs = safe_abs(&rel)?;
     if !abs.is_dir() {
@@ -195,7 +195,7 @@ fn walk_search(dir: &Path, ql: &str, hits: &mut Vec<SearchHit>, max: usize) {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_search(rel: String, query: String, max: Option<usize>) -> Result<Vec<SearchHit>, String> {
     let ql = query.trim().to_lowercase();
     if ql.is_empty() {
@@ -211,7 +211,7 @@ pub fn fs_search(rel: String, query: String, max: Option<usize>) -> Result<Vec<S
 }
 
 // 파일 읽기(텍스트). 큰 파일/바이너리는 거부.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read(rel: String) -> Result<String, String> {
     let abs = safe_abs(&rel)?;
     let meta = std::fs::metadata(&abs).map_err(|e| format!("{e}"))?;
@@ -227,7 +227,7 @@ pub fn fs_read(rel: String) -> Result<String, String> {
 }
 
 // 파일 쓰기(저장).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write(rel: String, content: String) -> Result<(), String> {
     let abs = safe_abs(&rel)?;
     std::fs::write(&abs, content).map_err(|e| format!("저장 실패: {e}"))
@@ -238,7 +238,7 @@ pub fn fs_write(rel: String, content: String) -> Result<(), String> {
 //   파일이 아니라 워크스페이스 상대 경로를 받는 경로라, 임의 절대경로를 열 수 있으면 안 된다.
 //  8MB 캡은 데몬(fs.js MAX_IMAGE_BYTES)과 같은 값이다 — 같은 파일이 로컬/원격에서 다르게
 //  동작하면 안 된다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_read_b64(rel: String) -> Result<serde_json::Value, String> {
     use base64::Engine;
     let abs = safe_abs(&rel)?;
@@ -259,7 +259,7 @@ pub fn fs_read_b64(rel: String) -> Result<serde_json::Value, String> {
 // 드롭 파일 미리보기(채팅 첨부 썸네일 — 2026-07-30) — 사용자가 방금 드래그한 파일을 그대로 읽어
 //  base64 로 준다. 홈 jail 을 걸지 않는다: 드롭 자체가 사용자의 명시적 선택이고 표시 외 어디로도
 //  나가지 않는다. 미리보기 용도라 8MB 캡(초과 시 썸네일만 생략 — 전송은 경로라 무관).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_preview_b64(path: String) -> Result<String, String> {
     use base64::Engine;
     let meta = std::fs::metadata(&path).map_err(|e| format!("파일 확인 실패: {e}"))?;
@@ -277,7 +277,7 @@ pub fn file_preview_b64(path: String) -> Result<String, String> {
 //  **절대경로를 반환**한다(클라가 터미널에 절대경로를 삽입해야 함 — 데몬 fs.write absPath 규약 미러).
 //  부모(~/.codingpt/attachments 등)가 아직 없으면 safe_abs(canonicalize)가 실패하므로
 //  `..` 세그먼트 사전 거부 → 부모 mkdir → safe_abs 재검증(홈 jail) 순서로 처리한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_write_b64(rel: String, b64: String) -> Result<String, String> {
     use base64::Engine;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -304,7 +304,7 @@ pub fn fs_write_b64(rel: String, b64: String) -> Result<String, String> {
 }
 
 // 새 폴더.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_mkdir(rel: String) -> Result<(), String> {
     let abs = safe_abs(&rel)?;
     if abs.exists() {
@@ -314,7 +314,7 @@ pub fn fs_mkdir(rel: String) -> Result<(), String> {
 }
 
 // 새 빈 파일.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_create_file(rel: String) -> Result<(), String> {
     let abs = safe_abs(&rel)?;
     if abs.exists() {
@@ -324,7 +324,7 @@ pub fn fs_create_file(rel: String) -> Result<(), String> {
 }
 
 // 이름 변경/이동.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_rename(rel: String, dest: String) -> Result<(), String> {
     let from = safe_abs(&rel)?;
     let to = safe_abs(&dest)?;
@@ -335,7 +335,7 @@ pub fn fs_rename(rel: String, dest: String) -> Result<(), String> {
 }
 
 // 삭제(파일/폴더 재귀).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fs_delete(rel: String) -> Result<(), String> {
     let abs = safe_abs(&rel)?;
     if abs.is_dir() {

@@ -480,7 +480,7 @@ pub fn kill_terminal(ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
 // ── 프론트 노출 커맨드 ──
 
 #[cfg(not(windows))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
     let (ns, abs) = session_for(&local_path);
     migrate_legacy_pool(&ctx, &ns, &abs); // 구 풀 잔재가 있으면 무손실 승격(멱등)
@@ -516,7 +516,7 @@ pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Resu
     r
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tmux_new_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
@@ -529,7 +529,7 @@ pub fn tmux_new_window(
 }
 
 // 터미널 완전 삭제(전 기기 공통) — 전용 세션 kill(멱등).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tmux_kill_window(
     ctx: tauri::State<TmuxCtx>,
     local_path: String,
@@ -679,7 +679,7 @@ pub fn kill_terminal(_ctx: &TmuxCtx, ns: &str, tid: i64) -> Result<(), String> {
 // win32 목록 커맨드 — mac 버전의 tmux 원시 진단(list-windows raw 재조회)만 뺀 동일 구조.
 //  "N>0 → 0 급전이" 부검 로그는 유지한다(원인군이 달라도 탭 오소거 사고의 관측 지점은 같다).
 #[cfg(windows)]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn tmux_list_windows(ctx: tauri::State<TmuxCtx>, local_path: String) -> Result<Vec<WindowInfo>, String> {
     let (ns, abs) = session_for(&local_path);
     migrate_legacy_pool(&ctx, &ns, &abs); // no-op — mac 과 호출 순서 동형 유지
