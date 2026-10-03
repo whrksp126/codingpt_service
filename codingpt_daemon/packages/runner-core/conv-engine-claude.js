@@ -57,7 +57,7 @@ const NESTED_ENV = [
 const INTERRUPT_MARK = /^\[Request interrupted by user/;
 // 하네스가 사용자 줄로 끼워 넣는 기계 메시지(백그라운드 작업 완료 알림·시스템 리마인더) — 사람이 한 말이 아니다(2026-10-03 신고:
 //  `<task-notification>` 이 내가 쓴 말풍선으로 보였다). CLI 가 모델에게 주는 입력이라 대화 화면에는 그리지 않는다.
-const HARNESS_MARK = /^\s*(<task-notification>|<system-reminder>|\[SYSTEM NOTIFICATION)/;
+const HARNESS_MARK = /^\s*(<task-notification>|<system-reminder>|\[SYSTEM NOTIFICATION|\[Image: (?:original|source))/;
 const AUTH_RE = /authentication_failed|invalid api key|please run \/login|not logged in/i;
 
 const transcript = () => require('./transcript'); // 지연 — 파서만 쓰는 테스트가 tail 기계를 끌어오지 않게
