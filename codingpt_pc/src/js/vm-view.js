@@ -64,7 +64,8 @@ function paintHead(os) {
   headSig = sig;
   head.innerHTML =
     `<span class="vmv-title">${(os === "linux" ? icons.linux : icons.apple)({ size: 15 })}<b>${escapeHtml(vmLabel(os))}</b></span>` +
-    `<span class="vmv-msg">${escapeHtml(msg)}</span>` +
+    //  상태 문구는 머리줄에 쓰지 않는다(2026-10-04 사용자 확정 — 긴 안내가 제목 옆을 차지했다). 필요한 행동은 버튼으로만.
+    `<span class="vmv-msg"></span>` +
     //  워크스페이스 가져오기는 사이드바 `워크스페이스 ⋯` 한 곳에만 둔다(2026-10-04 사용자 확정 — 여기 버튼은 뺐다).
     (act === "setup" ? `<button class="vmv-btn" data-act="setup">${i18n.t('에이전트 설치')}</button>` : "");
   head.querySelector('[data-act="setup"]')?.addEventListener("click", () => { rpc("setup", { os }).then((s) => { info = s; infoOs = os; headSig = ""; paintHead(os); }).catch((e) => { err = String(e); headSig = ""; paintHead(os); }); });
