@@ -36,7 +36,7 @@ export const PALETTE_TEXT = {
       "find.open": "현재 영역에서 찾기",
       "ws.addTerminal": "터미널 추가",
       "ws.addIde": "파일 트리 열기/닫기",
-      "ws.addPreview": "웹뷰 추가",
+      "ws.addPreview": "브라우저 추가",
       "ws.addEmulator": "모바일 화면 추가",
       "ws.addChat": "채팅 추가",
       "ws.ports": "열린 포트 보기",

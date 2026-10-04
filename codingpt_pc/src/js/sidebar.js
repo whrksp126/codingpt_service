@@ -505,7 +505,7 @@ export function buildTopControls(_withAdd = true) {
 }
 
 /** 사이드바 `진행 현황 [n]` 행 — 고른 PC 의 에이전트를 상태별로 보는 **장소**(워크스페이스와 같은 급).
- *  작업을 "만드는 곳" 은 워크스페이스 그룹의 `+ 작업` 이다(agent-tasks-sidebar.md §0-1).
+ *  작업을 "만드는 곳" 은 워크스페이스 그룹의 `⋯` 메뉴 > 새 작업이다(agent-tasks-sidebar.md §0-1).
  *  선택(현황판이 열림)은 PC 행과 같은 배경 명암(--hover)으로만. */
 function tasksRow() {
   const n = sbTasksN;
@@ -777,7 +777,7 @@ function wsGroup(w, g) {
 // ★ 2026-08-14: `group`(프로젝트 묶음) 인자는 없어졌다. 이제 행은 **고른 PC 의 워크스페이스** 하나이고,
 //  호스트 이름·상태점·직결 배지는 위 기기 행이 이미 말한다 → 행에서 중복 제거(이름과 경로만 남는다).
 // ★ 2026-09-29: 행은 그룹 머리가 됐다. 클릭 = 펼침/접힘, 더블클릭 = 열기(로컬 행과 동일). 활성 표시는 로컬 행이 갖는다.
-//  안에 `+ 작업` 버튼이 들어가야 해서 <button> 이 아니라 role=button 인 div 다(버튼 안 버튼은 무효 HTML).
+//  안에 `⋯` 버튼이 들어가야 해서 <button> 이 아니라 role=button 인 div 다(버튼 안 버튼은 무효 HTML).
 let lastHeadClick = null; // { w, at } — 머리 더블클릭 대상 고정(재구축 사이에도)
 function wsHead(w, g, folded) {
   const rt = S.wsRuntime(w.id);
@@ -802,23 +802,20 @@ function wsHead(w, g, folded) {
     `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
     (folded && openN ? `<span class="wsg-cnt${g.needsInput ? " warn" : ""}" title="${escapeHtml(tt("openTasksN", { n: openN }))}">${icons.gitBranch({ size: 11 })}${openN}</span>` : "");
-  const add = document.createElement("button");
-  add.className = "wsg-add";
-  add.title = tt("addTask");
-  add.setAttribute("aria-label", tt("addTask"));
-  add.innerHTML = icons.plus({ size: 13 }) + `<span>${escapeHtml(tt("title"))}</span>`;
-  add.addEventListener("click", (e) => {
+  // `⋯` — 워크스페이스 메뉴(우클릭과 같은 것). 옛 `+ 작업` 버튼을 대신한다(2026-10-05 사용자 확정):
+  //  새 작업은 그 메뉴의 첫 항목이다. 호버 때만 보이되 **행 높이를 바꾸지 않는다**(styles.css .wsg-more).
+  const more = document.createElement("button");
+  more.className = "wsg-more";
+  more.title = i18n.t('더보기');
+  more.setAttribute("aria-label", i18n.t('더보기'));
+  more.innerHTML = icons.dots({ size: 14 });
+  more.addEventListener("click", (e) => {
     e.stopPropagation();   // 머리 토글 방지
-    if (S.blockedOffline(tt("newTask"))) return;
-    const host = Number(w.hostDeviceId ?? state.daemon?.deviceId);
-    // 시트는 받을 수 없는 host 면 조용히 이 PC·첫 저장소로 바꿔 연다(new-task-sheet.js hosts()) —
-    //  엉뚱한 저장소에 작업이 만들어지지 않게, 시트와 같은 조건으로 여기서 먼저 막고 이유를 말한다.
-    const why = addTaskBlocked(w, host);
-    if (why) { import("./workspace-view.js").then((m) => m.wvToast(tt(why))).catch(() => {}); return; }
-    import("./new-task-sheet.js").then((m) => m.openNewTaskSheet({ host, wsId: w.id })).catch(() => {});
+    const r = more.getBoundingClientRect();
+    showCtxDom(r.left, r.bottom + 4, wsMenuItems(w));
   });
-  add.addEventListener("dblclick", (e) => e.stopPropagation());
-  name.appendChild(add);
+  more.addEventListener("dblclick", (e) => e.stopPropagation());
+  name.appendChild(more);
 
   const meta = document.createElement("div");
   meta.className = "wsr-meta";
@@ -879,7 +876,18 @@ function wsHead(w, g, folded) {
   return row;
 }
 
-/** `+ 작업` 을 이 host 로 열 수 없는 이유(tasks 문구 키) — 새 작업 시트 hosts() 필터와 같은 조건. */
+/** 워크스페이스 메뉴의 `새 작업` — 그 워크스페이스를 저장소로 미리 골라 새 작업 시트를 연다. */
+function newTaskFor(w) {
+  if (S.blockedOffline(tt("newTask"))) return;
+  const host = Number(w.hostDeviceId ?? state.daemon?.deviceId);
+  // 시트는 받을 수 없는 host 면 조용히 이 PC·첫 저장소로 바꿔 연다(new-task-sheet.js hosts()) —
+  //  엉뚱한 저장소에 작업이 만들어지지 않게, 시트와 같은 조건으로 여기서 먼저 막고 이유를 말한다.
+  const why = addTaskBlocked(w, host);
+  if (why) { import("./workspace-view.js").then((m) => m.wvToast(tt(why))).catch(() => {}); return; }
+  import("./new-task-sheet.js").then((m) => m.openNewTaskSheet({ host, wsId: w.id })).catch(() => {});
+}
+
+/** `새 작업` 을 이 host 로 열 수 없는 이유(tasks 문구 키) — 새 작업 시트 hosts() 필터와 같은 조건. */
 function addTaskBlocked(w, host) {
   if (!Number.isFinite(host) || host <= 0) return "noHost";
   const dev = S.pcDevices().find((d) => typeof d.id === "number" && Number(d.id) === host);
@@ -1049,6 +1057,11 @@ function buildCtxEl(items, onAfter) {
 function wsMenuItems(w) {
   const pinned = S.wsPinned(w.id);
   const items = [
+    // 새 작업 — 작업 워크스페이스에서는 뺀다(worktree 를 다시 저장소로 삼으면 작업 안의 작업이 된다).
+    ...(S.isTaskWorkspace(w) ? [] : [
+      { icon: icons.gitBranch({ size: 15 }), label: tt("newTask"), onClick: () => newTaskFor(w) },
+      { type: "sep" },
+    ]),
     { icon: icons.edit({ size: 15 }), label: i18n.t('이름 변경'), onClick: () => inlineRename(w) },
     { icon: icons.pin({ size: 15 }), label: pinned ? i18n.t('고정 해제') : i18n.t('고정'), onClick: () => S.togglePinWs(w.id) },
     { type: "colors", icon: icons.palette({ size: 15 }), label: i18n.t('색상'), colors: WS_COLORS.map(([title, c]) => ({ title, c, sel: (S.wsColor(w.id) || "") === c, onClick: () => S.setWsColor(w.id, c) })) },

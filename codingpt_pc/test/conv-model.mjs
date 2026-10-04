@@ -606,5 +606,28 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   eq(M.effortLabel('xhigh') !== 'xhigh' && M.effortLabel('zzz'), 'zzz', '추론 강도: 아는 단계는 사람 말, 모르면 그대로');
 }
 
+// ── 대화 속 링크·파일을 앱 안에서 연다(2026-10-05) ──
+{
+  const o = { home: '/Users/me', cwd: 'other/project/app' };
+  eq(M.homeRelOf('/Users/me/other/project/app/src/a.js', o), 'other/project/app/src/a.js', '이 PC 절대경로 → 홈-상대(IDE 가 받는 꼴)');
+  eq(M.homeRelOf('~/.codingpt/attachments/a.pdf', o), '.codingpt/attachments/a.pdf', '~/ 는 벗긴다');
+  eq(M.homeRelOf('src/a.js', o), 'other/project/app/src/a.js', '★ 상대경로는 워크스페이스 기준');
+  eq(M.homeRelOf('./src/a.js', o), 'other/project/app/src/a.js', './ 도 같다');
+  eq(M.homeRelOf('other/project/app/src/a.js', o), 'other/project/app/src/a.js', '이미 홈-상대(도구 카드)면 두 번 붙이지 않는다');
+  eq(M.homeRelOf('/etc/hosts', o), null, '★ 홈 밖은 IDE 로 못 연다 → null(호출부가 시스템으로 폴백)');
+  eq(M.homeRelOf('/Users/meow/x', o), null, '홈 접두사가 글자만 겹치는 경로는 홈 안이 아니다');
+  eq(M.homeRelOf('/home/u/x.js', { cwd: 'p' }), '/home/u/x.js', '다른 PC(홈을 모름)는 원문 그대로 — 그 PC 의 fs 가 판단');
+  eq(M.homeRelOf('', o), null, '빈 경로');
+  ok(M.opensInBrowserPane('https://order.ghmate.com') && M.opensInBrowserPane('http://localhost:3000/x'), 'http(s) 는 브라우저 pane');
+  ok(!M.opensInBrowserPane('mailto:a@b.c') && !M.opensInBrowserPane('javascript:1'), 'http 가 아닌 것은 pane 으로 열지 않는다');
+  eq(M.urlKey('https://A.com/x/#top'), M.urlKey('https://a.com/x'), '같은 페이지 판정 — 끝 슬래시·해시·대소문자 무시');
+  const read = (await import('node:fs')).readFileSync;
+  const cv = read('src/js/conv-view.js', 'utf8'), wv = read('src/js/workspace-view.js', 'utf8'), pn = read('src/js/pane.js', 'utf8');
+  ok(/_openLink\(link\.dataset\.href/.test(cv) && /this\.ctx\.openUrl\(href\)/.test(cv), '★ 대화 링크 클릭 = 브라우저 pane(외부 브라우저 직행 금지)');
+  ok(!/if \(local && abs\) \{ api\.openPath/.test(cv), '★ 이 PC 절대경로 파일을 시스템 기본 앱으로 바로 내보내지 않는다(IDE 로)');
+  ok(/onOpenUrl: \(url\) => !!openUrlSmart\(url\)/.test(wv) && /onOpenIde: \(relPath\) => \{ if \(relPath\) openFileSmart\(relPath\); \}/.test(wv), '워크스페이스가 두 열기를 smart 배치로 받는다');
+  ok((pn.match(/openUrl: \(url\) => !!this\.ctx\.onOpenUrl\?\.\(url\)/g) || []).length === 2, 'pane 이 채팅 v1·v2 양쪽 ctx 에 openUrl 을 준다');
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

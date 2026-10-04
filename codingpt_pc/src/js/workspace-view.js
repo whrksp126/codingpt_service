@@ -16,10 +16,10 @@ import { PALETTE_TEXT } from "./text/palette.js";
 import { bindings, IS_APPLE } from "./shortcuts.js";
 import { formatCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
-import { openNewTask, openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
+import { openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
 import { tt } from "./text/tasks.js";
 import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
-import { pickConvTab } from "./conv-model.js";
+import { pickConvTab, urlKey } from "./conv-model.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 
@@ -282,7 +282,10 @@ function paneCtx(ws) {
     //  여기서 주입한다. 아직 데몬이 agent_state 를 안 보내면 항상 null → tab.cmd 폴백이 판정한다.
     agentStateOf: (cwd, win) => S.agentStateOf(cwd, win),
     // Chat 의 tool 카드 "열기" → IDE 탭/분할(활성 pane 기준 자동 배치).
-    onOpenIde: (relPath) => { if (relPath) smartAdd("ide", { openPath: relPath }); },
+    //  이미 있는 IDE 를 먼저 쓴다(openFileSmart) — 파일을 누를 때마다 IDE 가 하나씩 늘지 않게.
+    onOpenIde: (relPath) => { if (relPath) openFileSmart(relPath); },
+    // 대화 속 링크 → 브라우저 pane(같은 주소가 이미 열려 있으면 그 탭을 앞으로).
+    onOpenUrl: (url) => !!openUrlSmart(url),
     // 채팅 v2 — 터미널로 넘기기(새 터미널에서 그 에이전트를 인자와 함께 실행) / 같은 대화가 열린 탭으로 가기 /
     //  터미널 탭의 대화를 채팅 탭으로 열기. 배치는 헤더 [+] 와 같은 규칙(smartAdd)이다.
     onOpenAgentTerminal: ({ agent, args }) => smartAdd("terminal", { launchAgent: agent, launchArgs: args || [] }),
@@ -872,7 +875,7 @@ function openAddMenu(anchor) {
   row(icons.terminal, i18n.t('터미널'), {
     fill: (panel, done) => openAddTermMenu(anchor, { into: panel, onDone: done }),
   });
-  row(icons.globe, i18n.t('웹뷰'), {
+  row(icons.globe, i18n.t('브라우저'), {
     fill: (panel, done) => import("./ports.js").then((m) => m.openPortsMenu(anchor, {
       ws: activeWs(),
       onBlank: () => smartAdd("preview"),
@@ -891,9 +894,8 @@ function openAddMenu(anchor) {
   //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
   //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
   //  에이전트 PC 는 뺐다(2026-10-04 QA) — 사이드바의 PC 아래 `macOS (VM)`/`Linux (VM)` 행에서 연다.
-  // Agent Tasks(§1.3 "PC 에서 만들기") — 이 워크스페이스를 저장소 기본값으로 새 작업 시트를 연다.
-  //  작업 워크스페이스 안에서는 뺀다(worktree 를 다시 저장소로 삼으면 작업 안의 작업이 된다).
-  if (!S.isTaskWorkspace(activeWs())) row((o) => tasksIcon(o), tt("newTask"), { onClick: () => openNewTask() });
+  // 새 작업은 뺐다(2026-10-05 사용자 확정) — 이 메뉴는 "지금 화면에 표면을 더하는 곳"이고, 작업은
+  //  진행 현황·자동화·사이드바 워크스페이스 `⋯` 메뉴에서 만든다.
 
   document.body.appendChild(menu);
   const r = anchor.getBoundingClientRect();
@@ -1232,6 +1234,24 @@ export function openFileSmart(rel) {
     if (panes.get(id)?.openFileHere?.(rel)) { S.focusPane(id); return id; }
   }
   return smartAdd("ide", { openPath: rel });
+}
+
+/** 주소 열기 — 같은 주소의 브라우저가 이미 있으면 그리로 가고, 없으면 새 브라우저 pane 을 더한다. */
+export function openUrlSmart(url) {
+  const rt = wsRuntime(state.activeWsId);
+  if (!url || !rt || !rt.layout) return null;
+  const want = urlKey(url);
+  let hit = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (hit) return;
+    if (l.kind === "preview" && urlKey(l.url) === want) hit = { id: l.id, index: -1 };
+    else if (l.kind === "terminal") {
+      const i = (l.tabs || []).findIndex((t) => t.kind === "preview" && urlKey(t.url) === want);
+      if (i >= 0) hit = { id: l.id, index: i };
+    }
+  });
+  if (hit) { activateSurface(hit.id, hit.index); return hit.id; }
+  return smartAdd("preview", { url });
 }
 
 /** 헤더 버튼 찾기 — 팔레트·단축키가 같은 자리에서 같은 메뉴를 열 수 있게. */

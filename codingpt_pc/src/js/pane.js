@@ -1212,6 +1212,7 @@ export class PaneView {
       },
       refreshHead: () => this.buildHead(),
       openFile: (rel) => this.ctx.onOpenIde?.(rel),
+      openUrl: (url) => !!this.ctx.onOpenUrl?.(url),   // 대화 속 링크 → 이 워크스페이스의 브라우저 pane
       fs: () => this._ideFs() || api,
       openTerminal: (o) => this.ctx.onOpenAgentTerminal?.(o),
       markRead: (threadId) => { import("./state.js").then((S) => S.readThread(threadId)).catch(() => {}); },
@@ -1746,6 +1747,7 @@ export class PaneView {
         return true;
       },
       openFile: (rel) => this.ctx.onOpenIde?.(rel),
+      openUrl: (url) => !!this.ctx.onOpenUrl?.(url),
       // 컴포저 `+` 파일 목록의 출처 — IDE 트리와 **같은 제공자**(로컬 api / 원격 makeRemoteFs).
       //  라이브 getter 인 이유는 `_ideFs()` 와 동일: 재클레임으로 host 가 바뀌면 그때의 값이어야 한다.
       fs: () => this._ideFs() || api,

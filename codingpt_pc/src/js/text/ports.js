@@ -10,7 +10,7 @@ export const PORTS_TEXT = {
     elsewhereHint: 'Docker 처럼 다른 폴더에서 띄운 서버는 여기 있어요.',
     empty: '열려 있는 포트가 없어요',
     emptyHint: '개발 서버를 먼저 실행해 주세요.',
-    blank: '빈 웹뷰',
+    blank: '빈 브라우저',
     refresh: '새로고침',
     loading: '확인 중…',
     failed: '포트를 확인하지 못했어요',

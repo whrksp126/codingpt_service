@@ -23,6 +23,7 @@ import {
   terminalLaunch, fmtAgo, threadDot, needsAdopt, threadTitle, convModeLabel, convModeChoices,
   splitAttachLines, attachPlan, attachUploadName, attachmentsForWire, createByteCache, fileMissingText,
   usageStatus, agentChoices, modelChoices, modelLabel, searchExpand, tabPatchFor, modelSplit, effortLabel,
+  opensInBrowserPane, homeRelOf,
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
@@ -32,6 +33,13 @@ import {
 import { ConvComposer } from "./conv-composer.js";
 import { basename, isAbs } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
+
+// 이 PC 의 홈 절대경로(대화 속 절대경로 → IDE 의 홈-상대 경로 변환용). 한 번만 묻는다.
+let _homeAbs = null;
+function homeAbs() {
+  if (!_homeAbs) _homeAbs = api.fsAbs("").then((h) => String(h || "")).catch(() => { _homeAbs = null; return ""; });
+  return _homeAbs;
+}
 
 const MODE_KEY = "cpt.conv.mode.v1";   // 새 대화의 기본 모드(이 기기에서 마지막으로 고른 것)
 const AGENT_KEY = "cpt.conv.agent.v1"; // 새 대화의 에이전트(고를 수 있을 때만 — agentChoices)
@@ -763,7 +771,8 @@ export class ConvView {
     let b64 = a.b64;
     if (!b64 && a.image) { try { b64 = await this._attachThumb(a); } catch (_) { b64 = null; } }
     if (b64) { this._lightbox(`data:${a.mediaType || mimeOf(a.src)};base64,${b64}`, { name: a.name, path: a.origin === "local" ? a.src : "" }); return; }
-    if (a.origin === "local") api.openPath(a.src).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));
+    if (a.origin === "local" && this.ctx.isLocal?.()) void this._openInIde(a.src);
+    else if (a.origin === "local") api.openPath(a.src).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));   // 이 PC 의 파일인데 대화는 다른 PC — 그 PC 의 IDE 로는 못 연다
     else this.ctx.openFile?.(a.src);
   }
 
@@ -927,7 +936,7 @@ export class ConvView {
     const link = t.closest?.(".chat-a");
     if (link) {
       e.preventDefault();
-      if (link.dataset.href) api.openExternal(link.dataset.href).catch(() => {});
+      this._openLink(link.dataset.href || "", e);
       return;
     }
     const file = t.closest?.(".chat-file");
@@ -999,8 +1008,30 @@ export class ConvView {
   }
 
   /**
-   * 대화 속 파일을 연다. 이미지는 앱 안에서(이 PC 든 다른 PC 든 — 바이트는 _fileBytes), 그 밖은
-   *  이 PC 의 절대경로면 시스템 기본 앱, 아니면 IDE(그 워크스페이스의 파일 트리)로.
+   * 대화 속 링크를 연다 — http(s) 는 **이 워크스페이스의 브라우저 pane** 으로(외부 브라우저로 내보내지 않는다,
+   *  2026-10-05 사용자 확정). ⌘/Ctrl+클릭과 http 가 아닌 것(mailto 등)만 시스템에 맡긴다.
+   */
+  _openLink(href, e) {
+    if (!href) return;
+    const ext = () => api.openExternal(href).catch(() => {});
+    if ((e && (e.metaKey || e.ctrlKey)) || !opensInBrowserPane(href) || !this.ctx.openUrl) { ext(); return; }
+    try { if (!this.ctx.openUrl(href)) ext(); } catch (_) { ext(); }
+  }
+
+  /** 대화 속 경로를 IDE(파일 뷰어 포함)로 연다. 앱 안에서 못 여는 것(홈 밖)만 시스템 기본 앱으로. */
+  async _openInIde(path) {
+    const local = !!this.ctx.isLocal?.();
+    let home = "";
+    if (local && !this.ctx.vmRoot?.()) { try { home = await homeAbs(); } catch (_) { home = ""; } }
+    const rel = this.ctx.vmRoot?.() ? path : homeRelOf(path, { home, cwd: this.ctx.cwd?.() || "" });
+    if (rel) { this.ctx.openFile?.(rel); return; }
+    if (local) api.openPath(path).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000));
+    else this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000);
+  }
+
+  /**
+   * 대화 속 파일을 연다. 이미지는 앱 안 라이트박스로(이 PC 든 다른 PC 든 — 바이트는 _fileBytes), 그 밖은
+   *  IDE 로(코드는 에디터, PDF·마크다운 등은 파일 뷰어) — 시스템 기본 앱으로 내보내지 않는다.
    */
   async _openPath(path, name, o) {
     if (!path) return;
@@ -1016,8 +1047,7 @@ export class ConvView {
         if (!local) { this._setBanner(fileMissingText(r), "warn", 4000); return; }
       } catch (_) { /* 아래 폴백 */ }
     }
-    if (local && abs) { api.openPath(path).catch(() => this._setBanner(i18n.t('파일을 열 수 없어요.'), "warn", 4000)); return; }
-    this.ctx.openFile?.(path);
+    await this._openInIde(path);
   }
 
   // ── 헤더 ──

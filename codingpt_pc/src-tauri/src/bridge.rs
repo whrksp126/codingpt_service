@@ -1079,6 +1079,32 @@ pub fn clipboard_paths() -> Vec<String> {
     Vec::new()
 }
 
+// macOS 시스템 받아쓰기(🎤/F5 키, 편집 > 받아쓰기 시작 과 같은 것)를 **지금 포커스된 입력칸**에서 시작한다.
+//  채팅 컴포저의 마이크 버튼이 부른다. 인식·마이크 권한·언어·듣는 중 표시는 전부 시스템 몫이라
+//  앱에는 마이크/음성 인식 TCC 항목이 필요 없다(글자는 IME 처럼 입력칸에 그대로 들어온다).
+//  받아쓰기가 꺼져 있으면 macOS 가 켤지 묻는다. 동기 커맨드 = 메인 스레드(AppKit 호출 조건).
+#[tauri::command]
+pub fn start_dictation() -> bool {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+        let app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        if app.is_null() {
+            return false;
+        }
+        let can: bool = msg_send![app, respondsToSelector: objc2::sel!(startDictation:)];
+        if !can {
+            return false;
+        }
+        let sender: *mut AnyObject = std::ptr::null_mut();
+        let _: () = msg_send![app, startDictation: sender];
+        true
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
 // 클립보드의 이미지 데이터(스크린샷 ⌘⇧^4, 브라우저 이미지 복사 등) → 임시 PNG 파일로 저장 후
 //  경로 반환. 이미지가 없으면 null. 파일 참조가 함께 있으면(=복사한 파일 — Finder 가 아이콘
 //  이미지를 얹는 경우가 있다) 파일 쪽이 정본이므로 여기서는 무시한다.

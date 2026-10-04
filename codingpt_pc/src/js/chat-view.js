@@ -1391,7 +1391,12 @@ export class ChatView {
     if (link) {
       e.preventDefault();
       const href = link.dataset.href;
-      if (href) { api.openExternal(href).catch(() => {}); return; }
+      if (href) {
+        // http(s) 는 이 워크스페이스의 브라우저 pane 으로(⌘/Ctrl+클릭·mailto 만 시스템으로 — conv-view 와 같은 규칙).
+        const inApp = /^https?:\/\//i.test(href) && !(e.metaKey || e.ctrlKey) && this.ctx.openUrl;
+        if (!inApp || !this.ctx.openUrl(href)) api.openExternal(href).catch(() => {});
+        return;
+      }
       // 파일 칩(`[라벨](경로)`) — 자동 로드는 안 하지만 누르면 연다: 이미지/영상은 앱 안에서 보고,
       //  그 외는 시스템 기본 앱(로컬)·IDE 로. 원격 PC 는 앱 안 미리보기만 가능하다.
       const chip = e.target.closest?.(".chat-file");

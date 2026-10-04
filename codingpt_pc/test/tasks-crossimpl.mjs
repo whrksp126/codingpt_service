@@ -348,8 +348,12 @@ else {
   const sb = read(path.join(PC, "sidebar.js"));
   const tv = read(path.join(PC, "tasks-view.js"));
   ok(/class="pc-nm">\$\{escapeHtml\(tt\("overview"\)\)\}/.test(sb) && /function tasksRow\(\)/.test(sb), "사이드바 맨 위 행 라벨 = tt(\"overview\")(진행 현황)");
-  ok(/add\.className = "wsg-add"[\s\S]{0,700}openNewTaskSheet\(\{ host, wsId: w\.id \}\)/.test(sb) && /e\.stopPropagation\(\);\s*\/\/ 머리 토글 방지/.test(sb),
-    "`+ 작업` 은 그 워크스페이스를 저장소로 미리 골라 새 작업 시트를 연다(stopPropagation)");
+  ok(/more\.className = "wsg-more"[\s\S]{0,500}e\.stopPropagation\(\);\s*\/\/ 머리 토글 방지[\s\S]{0,200}showCtxDom\([^)]*wsMenuItems\(w\)\)/.test(sb)
+    && /label: tt\("newTask"\), onClick: \(\) => newTaskFor\(w\)/.test(sb)
+    && /function newTaskFor\(w\)[\s\S]{0,700}openNewTaskSheet\(\{ host, wsId: w\.id \}\)/.test(sb),
+    "머리 `⋯` = 워크스페이스 메뉴(stopPropagation), 그 안의 새 작업은 그 워크스페이스를 저장소로 미리 골라 시트를 연다");
+  ok(/\.wsg-more\s*\{[^}]*margin:\s*-1px -4px -1px auto/.test(read(path.join(PC, "..", "styles.css"))),
+    "★ `⋯` 는 줄 높이에 기여하지 않는다(호버 때 행이 출렁이지 않게 — 위아래 음수 마진)");
   ok(/groupCollapsed\(w\.id\), w\.git\?\.branch \|\| "", S\.wsTerminalCount\(w\.id\)/.test(sb) && /fanExpanded\.has\(t\.taskId\)/.test(sb),
     "sbSig 에 접힘·브랜치·터미널 수·작업 행 값이 들어 있다(없으면 화면이 안 바뀐다)");
   ok(/"cpt\.sbGroupCollapsed\.v1"/.test(sb), "그룹 접힘 영속 키 = cpt.sbGroupCollapsed.v1(§4 — 앱과 같은 키)");

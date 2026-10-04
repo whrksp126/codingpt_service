@@ -1403,3 +1403,35 @@ export function tabPatchFor(tab, threadId, thread) {
   if (title && title !== (t.title || '')) out.title = title;
   return Object.keys(out).length ? out : null;
 }
+
+// ── 대화 속 링크·파일을 앱 안에서 연다(2026-10-05) ────────────────────────────────
+/** 워크스페이스 안 브라우저 pane 으로 열 주소인가 — http(s) 만. mailto 등은 시스템에 맡긴다. */
+export function opensInBrowserPane(url) { return /^https?:\/\//i.test(String(url || "").trim()); }
+
+/**
+ * 대화 속 경로 → IDE 가 받는 **홈-상대** 경로. 못 바꾸면 null(홈 밖 절대경로 — IDE 는 홈 밖을 못 읽는다).
+ *  · `~/a/b`            → `a/b`
+ *  · `<home>/a/b`       → `a/b`
+ *  · 그 밖의 절대경로    → home 을 알면 null, 모르면(다른 PC) 원문 그대로(그 PC 의 fs 가 판단한다)
+ *  · 상대경로 `src/a.js` → `<cwd>/src/a.js`(에이전트의 상대경로는 워크스페이스 기준이다).
+ *    이미 `<cwd>/…` 로 시작하면(도구 카드의 홈-상대 경로) 그대로.
+ */
+export function homeRelOf(path, { home, cwd } = {}) {
+  let p = String(path || "").trim();
+  if (!p) return null;
+  if (p === "~") return null;
+  if (p.startsWith("~/")) return p.slice(2).replace(/^\/+/, "") || null;
+  if (isAbsPath(p)) {
+    const h = String(home || "").replace(/[\\/]+$/, "");
+    if (!h) return p;
+    const norm = p.replace(/\\/g, "/"), hn = h.replace(/\\/g, "/");
+    return norm.startsWith(hn + "/") ? norm.slice(hn.length + 1) : null;
+  }
+  p = p.replace(/^\.\//, "");
+  const c = String(cwd || "").replace(/^\/+|\/+$/g, "");
+  if (!c || p === c || p.startsWith(c + "/")) return p;
+  return c + "/" + p;
+}
+
+/** 주소 비교용 — 끝 슬래시·해시 없는 꼴(같은 페이지를 두 번 열지 않기 위한 것). */
+export function urlKey(u) { return String(u || "").trim().replace(/#.*$/, "").replace(/\/+$/, "").toLowerCase(); }

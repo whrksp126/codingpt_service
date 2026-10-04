@@ -67,6 +67,7 @@ export class ConvComposer {
           <span class="conv-ctl-left"></span>
           <span class="chat-ctl-gap"></span>
           <span class="conv-ctl-right"></span>
+          ${IS_WINDOWS ? "" : `<button class="conv-mic" type="button" title="${i18n.t('음성으로 입력')}" aria-label="${i18n.t('음성으로 입력')}">${icons.mic({ size: 17 })}</button>`}
           <button class="chat-send" type="button" disabled></button>
         </div>
       </div>`;
@@ -106,6 +107,19 @@ export class ConvComposer {
       else this._send();
     });
     this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePlusMenu(); });
+    // 마이크 = macOS 시스템 받아쓰기(🎤/F5 키와 같은 것)를 이 입력칸에서 시작한다. 듣는 중 표시·언어·
+    //  권한은 시스템이 맡고, 글자는 IME 처럼 캐럿 자리에 들어온다. 받아쓰기는 **포커스된 입력칸**에
+    //  붙으므로 버튼이 포커스를 가져가지 않게 하고(mousedown), 부르기 전에 입력칸을 잡는다.
+    const micEl = el.querySelector(".conv-mic");
+    if (micEl) {
+      micEl.addEventListener("mousedown", (e) => e.preventDefault());
+      micEl.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closePopovers();
+        this.focus();
+        void api.startDictation().catch(() => {});
+      });
+    }
 
     // ── IME 조합 ──
     //  한글은 조합 중 Enter 가 "확정"이다. 그 Enter 로 전송하면 마지막 글자가 빠진 채 나가거나

@@ -995,6 +995,7 @@ pub fn run() {
             bridge::open_external,
             bridge::open_path,
             bridge::clipboard_paths,
+            bridge::start_dictation,
             bridge::clipboard_image_png,
             bridge::open_privacy_settings,
             bridge::notification_permission,
