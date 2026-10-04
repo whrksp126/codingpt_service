@@ -626,6 +626,14 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   ok(/_openLink\(link\.dataset\.href/.test(cv) && /this\.ctx\.openUrl\(href\)/.test(cv), '★ 대화 링크 클릭 = 브라우저 pane(외부 브라우저 직행 금지)');
   ok(!/if \(local && abs\) \{ api\.openPath/.test(cv), '★ 이 PC 절대경로 파일을 시스템 기본 앱으로 바로 내보내지 않는다(IDE 로)');
   ok(/onOpenUrl: \(url\) => !!openUrlSmart\(url\)/.test(wv) && /onOpenIde: \(relPath\) => \{ if \(relPath\) openFileSmart\(relPath\); \}/.test(wv), '워크스페이스가 두 열기를 smart 배치로 받는다');
+  const cc = read('src/js/conv-composer.js', 'utf8'), css = read('src/styles.css', 'utf8');
+  ok(/export function anchorMenu\(menu, anchor, host\)/.test(cc) && /anchorMenu\(wrap, this\.plusEl, this\.el\)/.test(cc)
+    && /if \(align !== "top"\) anchorMenu\(wrap, anchor, this\.composer\.el\)/.test(cv)
+    && /anchorMenu\(wrap, this\.ringBtn, this\.composer\.el\)/.test(cv) && /anchorMenu\(wrap, this\.effortBtn, this\.composer\.el\)/.test(cv),
+    '★ 도구줄 메뉴(+·모드·모델·노력·사용량)는 누른 버튼 바로 위에 뜬다(컴포저 상자 위가 아니다)');
+  ok(/if \(this\._stt\) \{ this\._sttStop\(\); return; \}/.test(cc) && /classList\.toggle\("on", !!st\)/.test(cc) && /\.conv-mic\.on\.ready\s*\{[^}]*box-shadow/.test(css),
+    '★ 마이크는 토글이다 — 듣는 중 표시(.on/.ready + 소리 크기 고리), 다시 누르면 멈춘다');
+  ok(/if \(this\._stt\) \{ const st = this\._stt; api\.sttCancel\(\)[^}]*this\._sttEnd\(st\); \}\s*\n\s*const raw = this\.text\(\)/.test(cc), '듣는 중에 보내면 지금까지 들은 글로 보낸다');
   ok((pn.match(/openUrl: \(url\) => !!this\.ctx\.onOpenUrl\?\.\(url\)/g) || []).length === 2, 'pane 이 채팅 v1·v2 양쪽 ctx 에 openUrl 을 준다');
 }
 

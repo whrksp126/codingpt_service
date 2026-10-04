@@ -27,6 +27,29 @@ import * as i18n from './i18n/index.js';
 const GHOST_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F-]/;
 const GHOST_RE_G = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F-]/g;
 const DRAFT_SAVE_MS = 500;
+// 음성 입력이 듣는 언어 = 앱 언어(앱의 i18n.speechLocale 과 같은 표).
+const SPEECH_LOCALES = { ko: "ko-KR", en: "en-US", ja: "ja-JP", "zh-CN": "zh-CN", es: "es-ES", de: "de-DE", fr: "fr-FR" };
+const STT_STOP_WAIT_MS = 3500;   // 멈춘 뒤 마지막 결과를 기다리는 상한(엔진이 답이 없어도 버튼은 풀린다)
+
+/**
+ * 컴포저 도구줄 버튼에서 연 메뉴를 **그 버튼 바로 위**에 놓는다(2026-10-05 사용자 확정: Claude 앱처럼 누른 자리 근처).
+ *  예전에는 컴포저 상자 전체의 위에 떴다 — 입력이 여러 줄이면 버튼에서 한참 떨어진 곳에 나타났다.
+ *  host = 메뉴의 offsetParent(.chat-composer). 아래 끝을 버튼 위에 고정하므로 내용이 늦게 차도 버튼에서 멀어지지 않는다.
+ */
+export function anchorMenu(menu, anchor, host) {
+  if (!menu || !anchor || !host || !anchor.isConnected) return;
+  const h = host.getBoundingClientRect(), a = anchor.getBoundingClientRect();
+  if (!a.width && !a.height) return;
+  menu.style.bottom = Math.round(h.bottom - a.top + 6) + "px";
+  menu.style.right = "auto";
+  const w = menu.offsetWidth;
+  // 버튼의 왼쪽 끝에 맞추고, 그러면 오른쪽으로 넘칠 때는 버튼의 오른쪽 끝에 맞춘다.
+  let left = a.left - h.left;
+  if (left + w > h.width - 8) left = a.right - h.left - w;
+  menu.style.left = Math.round(Math.max(8, Math.min(left, h.width - 8 - w))) + "px";
+  // 창 위로 넘치지 않게(스크롤되는 메뉴만 — 나머지는 내용이 짧다).
+  if (menu.classList.contains("conv-pick-menu")) menu.style.maxHeight = `min(60vh, 420px, ${Math.max(120, Math.round(a.top - 14))}px)`;
+}
 
 export class ConvComposer {
   /**
@@ -51,6 +74,7 @@ export class ConvComposer {
     this._btnMode = "";
     this._cmds = null;
     this._disposed = false;
+    this._stt = null;         // 듣는 중인 음성 입력 { id, range, span, ready, stopping, unlisten, queue }
     this._atts = [];          // 첨부 칩 [{ id, src, origin, name, ext, image, mediaType, path, b64, state }]
     this._attSeq = 0;
   }
@@ -107,18 +131,12 @@ export class ConvComposer {
       else this._send();
     });
     this.plusEl.addEventListener("click", (e) => { e.stopPropagation(); this._togglePlusMenu(); });
-    // 마이크 = macOS 시스템 받아쓰기(🎤/F5 키와 같은 것)를 이 입력칸에서 시작한다. 듣는 중 표시·언어·
-    //  권한은 시스템이 맡고, 글자는 IME 처럼 캐럿 자리에 들어온다. 받아쓰기는 **포커스된 입력칸**에
-    //  붙으므로 버튼이 포커스를 가져가지 않게 하고(mousedown), 부르기 전에 입력칸을 잡는다.
-    const micEl = el.querySelector(".conv-mic");
-    if (micEl) {
-      micEl.addEventListener("mousedown", (e) => e.preventDefault());
-      micEl.addEventListener("click", (e) => {
-        e.stopPropagation();
-        this.closePopovers();
-        this.focus();
-        void api.startDictation().catch(() => {});
-      });
+    // 마이크 = 음성 입력 토글. 누르면 듣기 시작(버튼이 켜지고 소리 크기만큼 테두리가 움직인다), 다시 누르면 멈춘다.
+    //  버튼이 포커스를 가져가지 않게 한다(mousedown) — 글자는 캐럿 자리에 들어가야 한다.
+    this.micEl = el.querySelector(".conv-mic");
+    if (this.micEl) {
+      this.micEl.addEventListener("mousedown", (e) => e.preventDefault());
+      this.micEl.addEventListener("click", (e) => { e.stopPropagation(); void this._toggleMic(); });
     }
 
     // ── IME 조합 ──
@@ -201,6 +219,7 @@ export class ConvComposer {
       return;
     }
     if (e.key === "Escape" && !composing) {
+      if (this._stt) { e.preventDefault(); e.stopPropagation(); this._sttStop(); return; }   // 듣는 중의 Esc = 그만 듣기(작업 중단이 아니다)
       if (this.pickEl) { e.preventDefault(); e.stopPropagation(); this._closePicker(); return; }
       if (this.o.busy?.()) { e.preventDefault(); e.stopPropagation(); this.o.onStop?.(); }
       return;
@@ -297,11 +316,139 @@ export class ConvComposer {
       this.sendEl.title = stop ? i18n.t('중단 (Esc)')
         : mode === "queue" ? i18n.t('대기열에 넣기 (Enter)') : i18n.t('보내기 (Enter)');
     }
-    const ph = String(this.o.placeholder?.() || i18n.t('메시지 보내기'));
+    const ph = this._stt ? i18n.t('듣는 중…') : String(this.o.placeholder?.() || i18n.t('메시지 보내기'));
     if (this.inputEl.dataset.ph !== ph) this.inputEl.dataset.ph = ph;   // :empty::before 가 그린다
   }
 
+  // ── 음성 입력(마이크) ──
+  //  엔진 = 번들 cpt-stt(이 PC 의 음성 인식). 듣는 동안의 글은 **지금까지 들은 전체 문장**이 매번 통째로 온다 →
+  //  캐럿 자리에 둔 한 칸(span)을 갈아 끼운다. 끝나면 그 칸을 보통 글자로 푼다(직렬화·초안은 원래도 글자만 본다).
+  async _toggleMic() {
+    if (this._stt) { this._sttStop(); return; }
+    this.closePopovers();
+    // 입력칸에 캐럿이 있었으면 그 자리에, 아니면(다른 곳을 보다가 눌렀다) 글 끝에 넣는다.
+    const had = document.activeElement === this.inputEl;
+    if (!had) this._caretToEnd();
+    this.focus();
+    const sel = window.getSelection();
+    let range = had && sel && sel.rangeCount && this.inputEl.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+    if (!range) { range = document.createRange(); range.selectNodeContents(this.inputEl); range.collapse(false); }
+    const st = { id: 0, range, span: null, ready: false, stopping: false, unlisten: null, queue: [] };
+    this._stt = st;
+    this._sttPaint();
+    try {
+      st.unlisten = await api.onStt((p) => { if (!st.id) st.queue.push(p); else this._onStt(st, p); });
+      const id = await api.sttStart(SPEECH_LOCALES[i18n.getLang()] || "en-US");
+      if (this._stt !== st) { api.sttCancel().catch(() => {}); return; }   // 그 사이 껐다(전송·닫힘)
+      st.id = id;
+      for (const p of st.queue.splice(0)) this._onStt(st, p);
+    } catch (_) {
+      // 음성 엔진이 없는 빌드 — macOS 시스템 받아쓰기(🎤 키와 같은 것)로 떨어진다. 그쪽은 듣는 중 표시를 시스템이 한다.
+      this._sttEnd(st);
+      this.focus();
+      api.startDictation().catch(() => {});
+    }
+  }
+
+  _onStt(st, p) {
+    if (this._stt !== st || !p || p.id !== st.id) return;
+    if (p.t === "ready") { st.ready = true; this._sttPaint(); return; }
+    if (p.t === "level") { this.micEl?.style.setProperty("--lv", String(Math.max(0, Math.min(1, Number(p.v) || 0)))); return; }
+    if (p.t === "text") { this._sttText(st, String(p.text || "")); return; }
+    if (p.t === "error") {
+      this._sttEnd(st);
+      this.o.notice?.(p.code === "mic_denied" ? i18n.t('마이크 권한이 필요합니다.')
+        : p.code === "speech_denied" ? i18n.t('음성 인식 권한이 필요합니다.') : i18n.t('음성 인식을 시작할 수 없습니다.'));
+      return;
+    }
+    if (p.t === "end" || p.t === "exit") {
+      // 듣기 시작도 못 하고 끝났다(엔진이 죽었다 등) — 버튼이 말없이 꺼지면 "눌러도 아무 일 없는 버튼"이 된다.
+      const silent = p.t === "exit" && !st.ready && !st.stopping;
+      this._sttEnd(st);
+      if (silent) this.o.notice?.(i18n.t('음성 인식을 시작할 수 없습니다.'));
+    }
+  }
+
+  _sttText(st, text) {
+    if (!this.inputEl) return;
+    if (!st.span || !st.span.isConnected) {
+      if (!text) return;
+      const span = document.createElement("span");
+      span.className = "conv-stt";
+      let r = st.range;
+      if (!r || !this.inputEl.contains(r.startContainer)) { r = document.createRange(); r.selectNodeContents(this.inputEl); r.collapse(false); }
+      // 앞 글자에 붙어 한 단어가 되지 않게 — 바로 앞이 공백·줄머리가 아니면 한 칸 띄운다.
+      const before = document.createRange();
+      before.selectNodeContents(this.inputEl);
+      before.setEnd(r.startContainer, r.startOffset);
+      st.lead = /[^\s]$/.test(before.toString()) ? " " : "";
+      r.collapse(true);
+      r.insertNode(span);
+      st.span = span;
+    }
+    st.span.textContent = (st.lead || "") + text;
+    this._caretAfter(st.span);
+    this.sync();
+    this._queueDraft();
+  }
+
+  _caretAfter(node) {
+    try {
+      const r = document.createRange();
+      r.setStartAfter(node);
+      r.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) { /* noop */ }
+  }
+
+  /** 그만 듣는다 — 엔진이 남은 소리를 마저 인식해 최종 문장을 보낸 뒤 끝난다. 답이 없으면 지금 글로 끝낸다. */
+  _sttStop() {
+    const st = this._stt;
+    if (!st || st.stopping) return;
+    st.stopping = true;
+    this._sttPaint();
+    api.sttStop().catch(() => {});
+    st.timer = setTimeout(() => { if (this._stt === st) { api.sttCancel().catch(() => {}); this._sttEnd(st); } }, STT_STOP_WAIT_MS);
+  }
+
+  /** 듣기를 정리한다 — 듣던 칸을 보통 글자로 풀고 버튼을 되돌린다. */
+  _sttEnd(st) {
+    if (!st) return;
+    clearTimeout(st.timer);
+    try { st.unlisten?.(); } catch (_) { /* noop */ }
+    if (st.span && st.span.isConnected) {
+      const tn = document.createTextNode(st.span.textContent || "");
+      st.span.replaceWith(tn);
+      if (document.activeElement === this.inputEl) this._caretAfter(tn);
+    }
+    if (this._stt !== st) return;
+    this._stt = null;
+    this._sttPaint();
+    this.sync();
+    this._queueDraft();
+  }
+
+  _sttPaint() {
+    const st = this._stt;
+    if (this.micEl) {
+      this.micEl.classList.toggle("on", !!st);
+      this.micEl.classList.toggle("ready", !!(st && st.ready && !st.stopping));
+      this.micEl.classList.toggle("stopping", !!(st && st.stopping));
+      if (!st) this.micEl.style.removeProperty("--lv");
+      const title = st ? i18n.t('음성 입력 종료') : i18n.t('음성으로 입력');
+      this.micEl.title = title;
+      this.micEl.setAttribute("aria-label", title);
+      this.micEl.setAttribute("aria-pressed", st ? "true" : "false");
+    }
+    this.el?.classList.toggle("listening", !!st);
+    this.sync();
+  }
+
   _send() {
+    // 듣는 중에 보내면 지금까지 들은 글로 보낸다(마지막 결과를 기다리지 않는다 — 기다리면 Enter 가 먹통처럼 보인다).
+    if (this._stt) { const st = this._stt; api.sttCancel().catch(() => {}); this._sttEnd(st); }
     const raw = this.text();
     if (this._atts.some((a) => a.state !== "ready")) return;
     const atts = this._atts.map((a) => ({ path: a.path, name: a.name, ext: a.ext, image: a.image, ...(a.mediaType ? { mediaType: a.mediaType } : {}), ...(a.b64 ? { thumb: `data:${a.mediaType || "image/png"};base64,${a.b64}` } : {}) }));
@@ -459,6 +606,7 @@ export class ConvComposer {
       void this._addFromDialog();
     });
     this.el.appendChild(wrap);
+    anchorMenu(wrap, this.plusEl, this.el);
     this.plusMenuEl = wrap;
     this._plusCloser = (e) => { if (!wrap.contains(e.target) && !this.plusEl.contains(e.target)) this._closePlusMenu(); };
     setTimeout(() => { if (this.plusMenuEl === wrap) document.addEventListener("mousedown", this._plusCloser, true); }, 0);
@@ -660,6 +808,7 @@ export class ConvComposer {
     this._flushDraft();
     this._disposed = true;
     clearTimeout(this._draftTimer);
+    if (this._stt) { const st = this._stt; api.sttCancel().catch(() => {}); this._sttEnd(st); }   // 마이크를 연 채 사라지지 않는다
     this.closePopovers();   // document 캡처 리스너를 남기면 pane 이 사라진 뒤에도 산다
     this.el?.remove();
   }

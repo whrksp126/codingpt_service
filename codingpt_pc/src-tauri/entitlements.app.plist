@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 채팅 음성 입력(cpt-stt)이 마이크를 쓴다. 하드닝 런타임에서는 마이크를 여는 프로세스뿐 아니라
+       그 권한의 주인으로 묶이는 앱 본체에도 이 항목이 있어야 한다(없으면 조용히 무음이 들어온다). -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+</dict>
+</plist>

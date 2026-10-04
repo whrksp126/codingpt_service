@@ -150,7 +150,12 @@ export const api = {
   openPath: (path) => invoke("open_path", { path }),
   clipboardPaths: () => invoke("clipboard_paths"),
   clipboardImagePng: () => invoke("clipboard_image_png"),
-  startDictation: () => invoke("start_dictation"), // macOS 시스템 받아쓰기를 포커스된 입력칸에서 시작
+  startDictation: () => invoke("start_dictation"), // macOS 시스템 받아쓰기를 포커스된 입력칸에서 시작(음성 엔진이 없는 빌드의 폴백)
+  // 채팅 음성 입력(번들 cpt-stt) — 시작하면 그 실행의 id, 진행은 `cpt-stt` 이벤트({id,t:ready|text|level|error|end|exit}).
+  sttStart: (locale) => invoke("stt_start", { locale: locale || "" }),
+  sttStop: () => invoke("stt_stop"),
+  sttCancel: () => invoke("stt_cancel"),
+  onStt: (cb) => listen("cpt-stt", (e) => cb(e.payload)),
   openPrivacySettings: () => invoke("open_privacy_settings"), // macOS 전체 디스크 접근 설정(온보딩)
   notifPermission: () => invoke("notification_permission"), // 알림 권한 요청(온보딩) → granted 여부
   notifPermissionState: () => invoke("notification_permission_state"), // 요청 없이 현재 OS 권한만 조회

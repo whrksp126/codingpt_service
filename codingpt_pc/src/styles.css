@@ -2040,6 +2040,22 @@ select.sett-select { min-width: 160px; max-width: 240px; height: 32px; padding-l
 }
 .conv-mic:hover { background: var(--hover); color: var(--text); }
 .conv-mic:active { background: var(--pressed); }
+/* 듣는 중 — 버튼이 **채워진다**(전송 버튼과 같은 무채색 반전: 색으로 말하지 않는다) + 소리 크기만큼 테두리 고리가 커진다.
+   마이크가 실제로 열리기 전(.on 만)과 멈추는 중(.stopping)은 흐리게 — "눌렸지만 아직/이제 안 듣는다". */
+.conv-mic { --lv: 0; transition: box-shadow 90ms linear, background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.conv-mic.on { background: var(--text); color: var(--base); opacity: 0.55; }
+.conv-mic.on:hover { background: var(--text); color: var(--base); }
+.conv-mic.on.ready {
+  opacity: 1;
+  box-shadow: 0 0 0 calc(2px + var(--lv) * 7px) color-mix(in srgb, var(--text) 22%, transparent);
+  animation: conv-mic-breathe 1.6s var(--ease-out) infinite;
+}
+.conv-mic.on.stopping { opacity: 0.55; box-shadow: none; animation: none; }
+@keyframes conv-mic-breathe { 0%, 100% { outline: 1px solid color-mix(in srgb, var(--text) 30%, transparent); outline-offset: 1px; } 50% { outline: 1px solid transparent; outline-offset: 4px; } }
+@media (prefers-reduced-motion: reduce) { .conv-mic.on.ready { animation: none; } }
+/* 듣는 동안 들어오는 글 — 아직 바뀔 수 있는 글이라 한 톤 흐리게(끝나면 보통 글자가 된다). */
+.conv-stt { color: var(--text2); }
+.chat-composer.listening .chat-box { border-color: var(--border-strong); }
 /* `+` 파일 넣기 팝오버 — 컴포저 기준 위로 펼침(입력을 가리지 않게 bottom 기준). */
 .chat-pick {
   position: absolute; left: 8px; right: 8px; bottom: calc(100% - 4px); z-index: var(--z-popover);

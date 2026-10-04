@@ -30,7 +30,7 @@ import {
   buildToolRow, buildOrphanRow, buildGroupRow, buildDividerRow, buildTurnRow, buildNoticeRow,
   hydrateMedia, loadMedia, showLightbox, mimeOf, isImagePath,
 } from "./conv-rows.js";
-import { ConvComposer } from "./conv-composer.js";
+import { ConvComposer, anchorMenu } from "./conv-composer.js";
 import { basename, isAbs } from "./path-utils.js";
 import * as i18n from './i18n/index.js';
 
@@ -230,6 +230,7 @@ export class ConvView {
       stage: (a) => this._stageAttachment(a),
       thumb: (a) => this._attachThumb(a),
       preview: (a) => void this._previewAttachment(a),
+      notice: (msg) => this._setBanner(msg, "warn", 5000),
       attachError: (a, e) => this._setBanner(e === "LIMIT" ? i18n.t('첨부는 한 번에 {n}개까지예요', { n: 12 })
         : i18n.t('첨부하지 못했어요 · {name}', { name: a.name || "" }), "warn", 5000),
     });
@@ -1145,6 +1146,7 @@ export class ConvView {
     this.composer.el.appendChild(wrap);
     this.usagePopEl = wrap;
     this._paintUsagePop();
+    anchorMenu(wrap, this.ringBtn, this.composer.el);
     this._usageCloser = (e) => { if (!wrap.contains(e.target) && !this.ringBtn.contains(e.target)) this._closeUsagePop(); };
     setTimeout(() => { if (this.usagePopEl === wrap) document.addEventListener("mousedown", this._usageCloser, true); }, 0);
   }
@@ -1197,6 +1199,7 @@ export class ConvView {
     });
     // top = 우측 상단 ⋯ 에서 아래로 펼친다 → pane 루트 기준. 그 밖(도구줄 메뉴)은 컴포저 기준(위로 펼침).
     (align === "top" ? this.el : this.composer.el).appendChild(wrap);
+    if (align !== "top") anchorMenu(wrap, anchor, this.composer.el);
     this._pickEl = wrap;
     this._pickCloser = (e) => { if (!wrap.contains(e.target) && !anchor.contains(e.target)) this._closePick(); };
     // 숫자 키 = 그 번호의 항목(Claude 앱 메뉴와 같다). 입력칸에 글자가 들어가지 않게 캡처에서 먹는다.
@@ -1288,6 +1291,7 @@ export class ConvView {
       + `<input class="conv-eff-range" type="range" min="0" max="${list.length - 1}" step="1" value="${idx}" />`
       + `<button class="conv-eff-reset" type="button">${ag.defaultEffort ? i18n.t('기본값 ({name})', { name: effortLabel(ag.defaultEffort) }) : i18n.t('기본값')}</button>`;
     this.composer.el.appendChild(wrap);
+    anchorMenu(wrap, this.effortBtn, this.composer.el);
     this.effortPopEl = wrap;
     const range = wrap.querySelector(".conv-eff-range");
     const val = wrap.querySelector(".conv-eff-v");

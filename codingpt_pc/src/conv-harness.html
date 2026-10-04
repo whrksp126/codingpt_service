@@ -12,14 +12,15 @@
         {id:'claude-fable-5-1',label:'Fable 5.1'},{id:'claude-opus-5-5',label:'Opus 5.5'},{id:'claude-opus-4-8',label:'Opus 4.8'},{id:'claude-opus-4-7',label:'Opus 4.7'},
         {id:'claude-sonnet-5-5',label:'Sonnet 5.5'},{id:'claude-sonnet-4-6',label:'Sonnet 4.6'},{id:'claude-haiku-4-5',label:'Haiku 4.5'}] }] };
   window.__TAURI__ = { core: { invoke: async (cmd, args) => {
+    if (cmd === 'stt_start') return 7;   // 음성 입력 — __L['cpt-stt']({payload:{id:7,t:'ready'|'text'|'level'|'end'}}) 로 흉내 낸다
     if (cmd === 'back_api_async' && args.path === '/api/daemon/conv') { if (args.body.method === 'conv.caps') return { success: true, data: CAPS }; return { success: true, data: {} }; }
     return {};
-  } }, event: { listen: async () => () => {} }, dialog: { open: async () => null } };
+  } }, event: { listen: async (name, cb) => { (window.__L ||= {})[name] = cb; return () => { delete window.__L[name]; }; } }, dialog: { open: async () => null } };
   const { ConvView } = await import('./js/conv-view.js');
   const host = document.getElementById('host');
   const v = new ConvView(host, { tab: () => ({}), patchTab() {}, cwd: () => 'x', isLocal: () => true, openTerminal() {}, fs: () => null,
     rpc: async (method) => (method === 'conv.caps' ? CAPS : {}) });
-  v.mount(); v.setVisible(true);
+  v.mount(); v.setVisible(true); window.__v = v;
   await new Promise((r) => setTimeout(r, 300));
   v._caps = CAPS; v.m.threadId = 't1'; v._opened = true; v._stopTick?.();
   v.m.thread = { id: 't1', agent: 'claude', model: 'claude-sonnet-4-6', mode: 'acceptEdits', effort: 'medium', usage: { model: 'claude-sonnet-4-6', contextTokens: 58000, contextMax: 200000,

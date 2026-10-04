@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- cpt-stt 바이너리에 __TEXT,__info_plist 로 박아 넣는다(번들이 아닌 실행 파일의 Info.plist).
+       사용 사유 문구가 없으면 마이크·음성 인식을 건드리는 순간 macOS 가 프로세스를 죽인다. -->
+  <key>CFBundleIdentifier</key>
+  <string>com.ghmate.codingpt.pc.stt</string>
+  <key>CFBundleName</key>
+  <string>CodingPT</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>채팅에 음성으로 입력하기 위해 필요해요.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>말한 내용을 채팅 입력칸에 글자로 옮기기 위해 필요해요.</string>
+</dict>
+</plist>

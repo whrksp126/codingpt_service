@@ -261,6 +261,23 @@ SH
   else
     echo "⚠ swiftc 없음 — 에이전트 PC 라이브 영상 없이 번들(프레임 폴링으로 동작)" >&2
   fi
+  # 4e. cpt-stt — 채팅 음성 입력 엔진(Speech + AVAudioEngine, Swift 한 파일). 없으면 마이크 버튼은 시스템 받아쓰기로 떨어진다.
+  #  · Info.plist 를 바이너리에 박는다(__TEXT,__info_plist) — 사용 사유 문구가 없으면 권한을 묻는 순간 macOS 가 죽인다.
+  #  · 마이크를 열어야 하므로 서명에 audio-input 항목을 준다(아래 5단계의 일괄 서명이 덮어쓰지 않게 거기서 제외한다).
+  STT_SRC="$PC_DIR/src-tauri/native/cpt-stt.swift"
+  if [ -f "$STT_SRC" ] && command -v swiftc >/dev/null 2>&1; then
+    rm -f "$OUT/cpt-stt"
+    swiftc -O -target "$(uname -m)-apple-macos11.0" -o "$OUT/cpt-stt" "$STT_SRC" \
+      -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker "$PC_DIR/src-tauri/native/cpt-stt.Info.plist"
+    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+      codesign --force --timestamp --options runtime --entitlements "$PC_DIR/src-tauri/entitlements.stt.plist" --sign "$CODESIGN_IDENTITY" "$OUT/cpt-stt"
+    else
+      codesign -f -s - --entitlements "$PC_DIR/src-tauri/entitlements.stt.plist" "$OUT/cpt-stt" >/dev/null 2>&1 || true
+    fi
+    echo "▸ cpt-stt 번들 완료 → $OUT/cpt-stt"
+  else
+    echo "⚠ swiftc 없음 — 채팅 음성 입력은 시스템 받아쓰기로 동작" >&2
+  fi
 fi
 
 # ── 5) 사이드카 코드 서명(mac, CODESIGN_IDENTITY 설정 시) ───────────
