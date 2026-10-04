@@ -633,7 +633,7 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
     '★ 도구줄 메뉴(+·모드·모델·노력·사용량)는 누른 버튼 바로 위에 뜬다(컴포저 상자 위가 아니다)');
   ok(/if \(this\._stt\) \{ this\._sttStop\(\); return; \}/.test(cc) && /classList\.toggle\("on", !!st\)/.test(cc) && /\.conv-mic\.on\.ready\s*\{[^}]*box-shadow/.test(css),
     '★ 마이크는 토글이다 — 듣는 중 표시(.on/.ready + 소리 크기 고리), 다시 누르면 멈춘다');
-  ok(/if \(this\._stt\) \{ const st = this\._stt; api\.sttCancel\(\)[^}]*this\._sttEnd\(st\); \}\s*\n\s*const raw = this\.text\(\)/.test(cc), '듣는 중에 보내면 지금까지 들은 글로 보낸다');
+  ok(/if \(this\._stt\) \{ const st = this\._stt; api\.sttCancel\(\)[^\n]*this\._sttEnd\(st\); \}\s*\n\s*const raw = this\.text\(\)/.test(cc), '듣는 중에 보내면 지금까지 들은 글로 보낸다');
   ok((pn.match(/openUrl: \(url\) => !!this\.ctx\.onOpenUrl\?\.\(url\)/g) || []).length === 2, 'pane 이 채팅 v1·v2 양쪽 ctx 에 openUrl 을 준다');
 }
 
