@@ -7,7 +7,7 @@
  * 구조(실측 2026-10-04, Linux 게스트):
  *  · 통로 = 진짜 ssh + 전용 키(`~/.codingpt/vm/id_ed25519`). `lume ssh` 는 한 번 실행·타임아웃 방식이라
  *    stream-json 을 계속 주고받는 채팅 엔진을 못 태운다. 키는 `desktop.exec`(lume ssh)로 한 번 심는다.
- *  · 로그인 = 사용자가 VM 안에서 **직접 한 번**(`claude auth login` — VM 디스크에 남아 다음부터는 묻지 않는다).
+ *  · 로그인 = VM 안 CLI 의 **공식 로그인 흐름**을 호스트 브라우저로 이어 준다(승인 한 번 — login() 참고). VM 디스크에 남아 다음부터는 묻지 않는다.
  *    ★ 호스트의 자격증명·토큰을 읽거나 VM 으로 옮기지 않는다(데몬 CLAUDE.md 절대 규칙). 우리는 로그인 **여부**만 묻는다.
  *  · 워크스페이스 = git 사본. 호스트 저장소 → 게스트 `~/work/<이름>` 으로 push(`host/<브랜치>`),
  *    에이전트는 `vm/<브랜치>` 에서 일하고, 호스트가 그 브랜치를 fetch 해 검토·머지한다. 공유 폴더가 아니라
@@ -208,6 +208,60 @@ async function pushGuestTools(o) {
 // ── 로그인 여부(자격증명은 만지지 않는다 — CLI 에게 묻기만) ────────────────────
 async function loggedIn(o) {
   try { const out = await sh(o, 'claude auth status 2>/dev/null || true', { timeoutMs: 20000 }); return /"loggedIn"\s*:\s*true/.test(out); } catch (_) { return false; }
+}
+
+// ── VM 안 로그인(공식 흐름 그대로 — 우리는 자격증명을 만지지 않는다) ─────────────
+// 실측(2026-10-04): `claude auth login` 은 게스트 127.0.0.1:<임의 포트> 에 콜백 서버를 띄우고, 브라우저에
+//  `redirect_uri=http://localhost:<포트>/callback` 인 승인 URL 을 연다. 게스트 브라우저는 claude.ai 에 로그인돼 있지 않다 →
+//  ① 게스트에서 "브라우저 열기"를 가로채 URL 만 받아 적고 ② 그 포트를 호스트 localhost 로 잇고(ssh -L)
+//  ③ URL 을 **호스트 브라우저**에서 연다(사용자는 이미 로그인돼 있다 → [승인] 한 번). 승인 뒤 리다이렉트가
+//  터널을 타고 게스트 CLI 에 닿아 CLI 가 자기 자격증명을 스스로 저장한다. 코드 붙여넣기도, 토큰 복사도 없다.
+const loginJobs = { macos: null, linux: null }; // { running, step, error }
+const LOGIN_SCRIPT = `#!/bin/sh
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+pkill -f "claude auth login" 2>/dev/null
+d=/tmp/cpt-login; rm -rf $d; mkdir -p $d
+# "브라우저 열기"를 가로챈다 — BROWSER(리눅스)·open/xdg-open(PATH 앞) 어느 길로 오든 URL 만 적는다.
+printf '#!/bin/sh\\nfor a in "$@"; do case "$a" in http*) printf "%%s\\\\n" "$a" > /tmp/cpt-login/url;; esac; done\\n' > $d/open
+chmod +x $d/open; cp $d/open $d/xdg-open
+if [ "$(uname)" = Darwin ]; then
+  (BROWSER=$d/open PATH="$d:$PATH" nohup script -q /dev/null claude auth login >$d/out 2>&1 </dev/null &)
+else
+  (BROWSER=$d/open PATH="$d:$PATH" nohup script -qfc "claude auth login" /dev/null >$d/out 2>&1 </dev/null &)
+fi
+i=0; while [ $i -lt 30 ] && [ ! -s $d/url ]; do sleep 0.5; i=$((i+1)); done
+cat $d/url 2>/dev/null
+`;
+function login(o) {
+  const k = osk(o);
+  if (loginJobs[k] && loginJobs[k].running) return loginJobs[k];
+  const job = loginJobs[k] = { running: true, step: 'start', error: null };
+  let tunnel = null;
+  (async () => {
+    const ip = await ipOf(k, { start: true });
+    await ensureKeyLogin(k, ip);
+    if (await loggedIn(k)) { job.step = 'done'; return; }
+    const url = (await sh(k, 'cat > /tmp/cpt-login.sh && sh /tmp/cpt-login.sh', { input: LOGIN_SCRIPT, timeoutMs: 40000 })).trim().split('\n').pop();
+    const m = /redirect_uri=http%3A%2F%2Flocalhost%3A(\d+)%2F/.exec(url || '');
+    if (!m) throw coded('LOGIN_FAILED', 'VM 안의 로그인 창을 열지 못했어요');
+    const port = m[1];
+    tunnel = cp.spawn('/usr/bin/ssh', [...sshOpts(), '-N', '-L', `${port}:127.0.0.1:${port}`, `${SSH_USER}@${ip}`], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 1200));
+    job.step = 'browser';
+    if (!process.env.CPT_VM_NO_OPEN) cp.spawn('/usr/bin/open', [url], { stdio: 'ignore', detached: true }).unref();
+    job._port = port; // 테스트용
+    for (let i = 0; i < 100; i++) { // 최대 5분 — 사용자가 브라우저에서 [승인]을 누를 때까지
+      await new Promise((r) => setTimeout(r, 3000));
+      if (await loggedIn(k)) { job.step = 'done'; return; }
+    }
+    throw coded('LOGIN_TIMEOUT', '브라우저에서 승인이 되지 않았어요 — 다시 시도해 주세요');
+  })().catch((e) => { job.error = String((e && e.message) || e); })
+    .finally(() => {
+      job.running = false;
+      try { if (tunnel) tunnel.kill(); } catch (_) { /* noop */ }
+      sh(k, 'pkill -f "claude auth login" 2>/dev/null; rm -rf /tmp/cpt-login /tmp/cpt-login.sh; true', { timeoutMs: 15000 }).catch(() => {});
+    });
+  return job;
 }
 
 // ── 준비(키·CLI·git) — 분 단위라 뒤에서 돌리고 status 로 본다 ─────────────────
@@ -504,6 +558,7 @@ async function status(o) {
   return {
     os: k, phase: st.phase, cli: running ? await cliVersion(k) : null, loggedIn: running ? await loggedIn(k) : null,
     job: jobs[k] ? { ...jobs[k] } : null,
+    login: loginJobs[k] ? { running: loginJobs[k].running, step: loginJobs[k].step, error: loginJobs[k].error } : null,
     workspaces: listWs(k).map((m) => ({ name: m.name, dir: m.dir, guest: m.guest, source: m.source, branch: 'vm/' + m.branch })),
   };
 }
@@ -512,6 +567,7 @@ async function handle(method, p = {}) {
   const m = String(method);
   if (m === 'desktop.agent.status') return status(p.os);
   if (m === 'desktop.agent.setup') { setup(p.os); return status(p.os); }
+  if (m === 'desktop.agent.login') { login(p.os); return { ok: true }; }
   if (m === 'desktop.agent.fs') return require('./fs').handle(String(p.method || ''), p.params || {}); // PC 가 VM 워크스페이스 파일을 볼 때(자리 경로 → fs.js 가 여기로 되돌린다)
   if (m === 'desktop.agent.ws.add') return addWs(p.os, p.path);
   if (m === 'desktop.agent.ws.sync') return syncWs(p.os, p.name, p.dir === 'push' ? 'push' : 'pull');
@@ -519,4 +575,4 @@ async function handle(method, p = {}) {
   throw coded('BAD_REQUEST', `알 수 없는 명령: ${m}`);
 }
 
-module.exports = { ensureScreenServer, screenReq, prepareMac, fsHandle, pushGuestTools, handle, status, setup, markerOf, spawnSpec, sh, addWs, syncWs, listWs, loggedIn, zshTail, ensureEnterScript, vmRoot, MARK };
+module.exports = { login, loginJobs, ensureScreenServer, screenReq, prepareMac, fsHandle, pushGuestTools, handle, status, setup, markerOf, spawnSpec, sh, addWs, syncWs, listWs, loggedIn, zshTail, ensureEnterScript, vmRoot, MARK };

@@ -24,7 +24,7 @@ export function leaveVmScope() { if (!state.vmScope && state.view !== "vm") retu
 function refresh(os, force) {
   if (!force && infoOs === os && Date.now() - askedAt < 5000) return;
   askedAt = Date.now();
-  rpc("status", { os }).then((st) => { info = st; infoOs = os; err = ""; adopt(st); if (state.view === "vm") paintHead(os); }).catch(() => {});
+  rpc("status", { os }).then((st) => { info = st; infoOs = os; err = ""; adopt(st); autoLogin(os, st); if (state.view === "vm") paintHead(os); }).catch(() => {});
 }
 
 // VM 에 이미 있는 워크스페이스 자리(다른 경로로 가져온 것 포함)가 목록에 없으면 등록한다 — 한 자리당 한 번만 시도.
@@ -37,6 +37,16 @@ function adopt(st) {
     adopted.add(w.dir);
     api.createWorkspace(w.dir).then(() => S.loadWorkspaces()).then(() => S.emit()).catch(() => {});
   }
+}
+
+// VM 안 에이전트가 아직 로그인 전이면 로그인 흐름을 한 번 자동으로 연다 — 이 PC 의 브라우저에 승인 창이 뜨고, [승인] 한 번이면 끝난다
+//  (데몬 vm-agent.js login: VM 안 공식 로그인의 콜백을 이 PC 로 이어 준다. 로그인 정보는 CodingPT 를 거치지 않는다).
+const autoLogged = new Set();
+function autoLogin(os, st) {
+  if (!st || st.phase !== "running" || !st.cli || st.loggedIn !== false) return;
+  if ((st.login && st.login.running) || (st.job && st.job.running) || autoLogged.has(os)) return;
+  autoLogged.add(os);
+  rpc("login", { os }).catch(() => {});
 }
 
 function stepText(job) {
@@ -57,7 +67,7 @@ function paintHead(os) {
   else if (!st) msg = "";
   else if (st.phase !== "running") msg = i18n.t('꺼져 있어요');
   else if (!st.cli) { msg = i18n.t('이 VM 에 에이전트가 아직 없어요'); act = "setup"; }
-  else if (st.loggedIn === false) msg = i18n.t('VM 안에서 한 번 로그인해 주세요 — VM 워크스페이스의 터미널에서 `claude auth login`');
+  else if (st.loggedIn === false) { msg = ""; act = st.login && st.login.running ? "" : "login"; }
   else msg = i18n.t('에이전트 준비됨');
   const sig = JSON.stringify([os, msg, act, !!busy]);
   if (sig === headSig) return;
@@ -67,7 +77,9 @@ function paintHead(os) {
     //  상태 문구는 머리줄에 쓰지 않는다(2026-10-04 사용자 확정 — 긴 안내가 제목 옆을 차지했다). 필요한 행동은 버튼으로만.
     `<span class="vmv-msg"></span>` +
     //  워크스페이스 가져오기는 사이드바 `워크스페이스 ⋯` 한 곳에만 둔다(2026-10-04 사용자 확정 — 여기 버튼은 뺐다).
-    (act === "setup" ? `<button class="vmv-btn" data-act="setup">${i18n.t('에이전트 설치')}</button>` : "");
+    (act === "setup" ? `<button class="vmv-btn" data-act="setup">${i18n.t('에이전트 설치')}</button>` : "") +
+    (act === "login" ? `<button class="vmv-btn" data-act="login">${i18n.t('로그인')}</button>` : "");
+  head.querySelector('[data-act="login"]')?.addEventListener("click", () => { rpc("login", { os }).then(() => refresh(os, true)).catch(() => {}); });
   head.querySelector('[data-act="setup"]')?.addEventListener("click", () => { rpc("setup", { os }).then((s) => { info = s; infoOs = os; headSig = ""; paintHead(os); }).catch((e) => { err = String(e); headSig = ""; paintHead(os); }); });
 }
 
