@@ -152,18 +152,19 @@ function draw() {
   const sig = JSON.stringify([pref.view, pref.source, pref.cwd, pref.state, srcs, wss.map((w) => [w.localPath, w.name]), i18n.getLang(), state.sidebarCollapsed]);
   if (sig !== topSig || !el.querySelector(".tv-top")) {
     topSig = sig;
-    const seg = (cls, items) => `<span class="scale-seg ${cls}">${items.join("")}</span>`;
+    //  고르는 것은 전부 드롭다운이다(2026-10-07 사용자 확정) — 누르면 목록이 나온다. 셀렉트는 작업 시트와 같은 것(.tk-input).
+    const sel = (key, items, cur) => `<select class="tk-input is-sel" data-pref="${key}">${items.map(([v, n]) => `<option value="${esc(v)}"${cur === v ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>`;
     el.innerHTML =
       `<div class="tv-top"><span class="tv-title">Tasks</span><span class="is-grow"></span>` +
       `<button class="ic-btn tv-ic" data-act="refresh" title="${esc(t("새로고침"))}">${icons.refresh({ size: 14 })}</button>` +
       `<button class="ic-btn tv-ic" data-act="new" title="${esc(t("새 이슈"))}">${icons.plus({ size: 15 })}</button></div>` +
       `<div class="is-bar">` +
-      (srcs.length > 2 ? seg("seg-ic is-srcseg", srcs.map((sv) => `<button class="scale-opt${pref.source === sv ? " active" : ""}" data-source="${sv}" title="${esc(sv === "all" ? t("전체 출처") : (SRC_TEXT[sv] || sv))}">${(SRC_ICON[sv] || SRC_ICON.codingpt)()}</button>`)) : "") +
-      seg("is-stseg", STATE_CHIPS.map(([k, n]) => `<button class="scale-opt${pref.state === k ? " active" : ""}" data-state="${k}">${esc(t(n))}</button>`)) +
+      sel("source", srcs.map((sv) => [sv, sv === "all" ? t("전체 출처") : (SRC_TEXT[sv] || sv)]), pref.source) +
+      sel("state", STATE_CHIPS.map(([k, n]) => [k, t(n)]), pref.state) +
+      sel("cwd", [["", t("전체 워크스페이스")], ...wss.map((w) => [w.localPath, w.name])], pref.cwd) +
       `<span class="is-count"></span><span class="is-grow"></span>` +
       `<span class="is-qwrap">${icons.search({ size: 13 })}<input class="tk-input is-q" placeholder="${esc(t("이슈 검색"))}" value="${esc(query)}"></span>` +
-      `<select class="tk-input is-sel" data-pref="cwd"><option value="">${esc(t("전체 워크스페이스"))}</option>${wss.map((w) => `<option value="${esc(w.localPath)}"${pref.cwd === w.localPath ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select>` +
-      seg("seg-ic is-viewseg", VIEWS.map((v) => `<button class="scale-opt${pref.view === v ? " active" : ""}" data-view="${v}" title="${esc(t(VIEW_TEXT[v]))}">${VIEW_ICON[v]()}</button>`)) +
+      sel("view", VIEWS.map((v) => [v, t(VIEW_TEXT[v])]), pref.view) +
       `</div><div class="is-warn" hidden></div><div class="is-body"></div>`;
   }
   drawBody();
@@ -247,26 +248,29 @@ function openSheet(issue) {
   const startAgent = (pref.start && pref.start.agent) || "claude";
   const startMode = (pref.start && pref.start.mode) || "task";
   const field = (label, html) => `<label class="is-prop"><span class="is-prop-l">${esc(t(label))}</span>${html}</label>`;
-  //  창 = 왼쪽 글(제목 + 편집기) / 오른쪽 속성·시작. 글을 길게 쓰는 자리라 넓고 높다(작은 팝업이 아니다).
+  //  창 = 머리줄(번호 + 제목 — 여기서 바로 고친다) / 왼쪽 편집기(가득) / 오른쪽 속성 · 시작 · 저장.
+  //  아래 띠는 없다 — 저장·취소·삭제는 오른쪽 칸 맨 아래에 둔다(2026-10-07 사용자 확정).
   box.innerHTML =
-    `<div class="is-sh-head"><span class="is-key">${esc(isNew ? t("새 이슈") : x.key)}</span>${isNew ? "" : srcChip(x)}<span class="is-grow"></span>` +
+    `<div class="is-sh-head"><span class="is-key">${esc(isNew ? t("새 이슈") : x.key)}</span>` +
+    `<input class="is-f-title" placeholder="${esc(t("제목"))}" value="${esc(x.title)}">${isNew ? "" : srcChip(x)}` +
     (ext && x.source.url ? `<button class="tv-btn ghost" data-s="ext">${esc(t("원본 열기"))}</button>` : "") +
     `<button class="ic-btn" data-s="close" title="${esc(t("닫기"))}">${icons.x({ size: 14 })}</button></div>` +
-    `<div class="is-sh-main"><div class="is-sh-doc"><input class="is-f-title" placeholder="${esc(t("제목"))}" value="${esc(x.title)}"><div class="is-f-ed"></div><div class="is-atts"></div></div>` +
+    `<div class="is-sh-main"><div class="is-sh-doc"><div class="is-f-ed"></div><div class="is-atts"></div></div>` +
     `<aside class="is-sh-side">` +
     field("상태", `<select class="tk-input is-f-status">${opt(STATUSES, x.status, (v) => t(ST_TEXT[v]))}</select>`) +
     field("우선순위", `<select class="tk-input is-f-pri">${opt(["none", "low", "medium", "high", "urgent"], x.priority || "none", (v) => t(PRI_TEXT[v]))}</select>`) +
     field("워크스페이스", `<select class="tk-input is-f-cwd"${ext ? " disabled" : ""}><option value="">${esc(t("정하지 않음"))}</option>${wss.map((w) => `<option value="${esc(w.localPath)}"${w.localPath === x.cwd ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select>`) +
     (ext ? "" : field("라벨(쉼표로 구분)", `<input class="tk-input is-f-labels" value="${esc((x.labels || []).join(", "))}">`)) +
     (isNew ? `<label class="is-f-gh"><input type="checkbox" class="is-f-github">${esc(t("GitHub 이슈로 만들기"))}</label>` : "") +
+    `<span class="is-grow"></span>` +
     (isNew ? "" : `<div class="is-start"><span class="is-start-h">${esc(t("이 이슈로 시작"))}</span>` +
       `<select class="tk-input is-s-mode">${opt(["task", "terminal", "orch"], startMode, (v) => t(MODE_TEXT[v]))}</select>` +
       `<select class="tk-input is-s-agent">${opt(["claude", "codex", "gemini"], startAgent, (v) => agentName(v) || v)}</select>` +
       `<button class="tv-btn is-go" data-s="start">${esc(t("시작"))}</button>` +
       (x.link ? `<button class="tv-btn ghost" data-s="goto">${esc(t("진행 중인 일 보기"))}</button>` : "") + `</div>`) +
-    `</aside></div>` +
-    `<div class="is-sh-foot">${!isNew && !ext ? `<button class="tv-btn ghost is-del" data-s="del">${esc(t("삭제"))}</button>` : ""}<span class="is-att-hint">${esc(t("이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다"))}</span><span class="is-grow"></span>` +
-    `<button class="tv-btn ghost" data-s="close">${esc(t("취소"))}</button><button class="tv-btn" data-s="save">${esc(isNew ? t("만들기") : t("저장"))}</button></div>`;
+    `<div class="is-acts">${!isNew && !ext ? `<button class="tv-btn ghost is-del" data-s="del">${esc(t("삭제"))}</button>` : ""}<span class="is-grow"></span>` +
+    `<button class="tv-btn ghost" data-s="close">${esc(t("취소"))}</button><button class="tv-btn" data-s="save">${esc(isNew ? t("만들기") : t("저장"))}</button></div>` +
+    `</aside></div>`;
   overlay.appendChild(box);
   document.body.appendChild(overlay);
   const q = (s) => box.querySelector(s);

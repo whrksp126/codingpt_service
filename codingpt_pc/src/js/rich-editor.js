@@ -131,7 +131,8 @@ export function createRichEditor(o) {
     `<div class="re-doc" contenteditable="true" spellcheck="false" data-ph="${esc(o.placeholder || "")}"></div>`;
   const doc = el.querySelector(".re-doc");
   const linkRow = el.querySelector(".re-link");
-  doc.innerHTML = mdToHtml(o.value || "");
+  //  빈 글도 첫 줄을 갖고 시작한다 — 줄이 없으면 커서 자리·첫 입력의 블록 모양이 웹뷰 마음대로가 된다.
+  doc.innerHTML = mdToHtml(o.value || "") || "<div><br></div>";
   const loadImgs = () => doc.querySelectorAll("img[data-att]").forEach((img) => {
     if (img.dataset.loaded || !o.resolveImage) return;
     img.dataset.loaded = "1";

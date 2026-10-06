@@ -224,7 +224,8 @@
   if (location.hash.includes('issues')) {
     document.head.insertAdjacentHTML('beforeend', '<style>.wv-sheet-overlay, .wv-sheet { animation: none !important; }</style>');
     const want = location.hash.includes('board') ? 'board' : location.hash.includes('table') ? 'table' : null;
-    if (want) setTimeout(() => document.querySelector(`.is-segb[data-view="${want}"]`)?.click(), 700);
+    if (want) setTimeout(() => { const v = document.querySelector('.is-sel[data-pref="view"]'); if (v) { v.value = want; v.dispatchEvent(new Event('change', { bubbles: true })); } }, 700);
+    if (location.hash.includes('newissue')) setTimeout(() => document.querySelector('[data-act="new"]')?.click(), 900);
     setTimeout(() => { IV.openIssues(); }, 60);
     if (location.hash.includes('sheet')) setTimeout(() => document.querySelector('.is-row[data-id="iss_12"], .is-card[data-id="iss_12"]')?.click(), 900);
     if (location.hash.includes('rich')) window.__ISSUES.issues.find((y) => y.id === 'iss_12').body = '# 결제 실패 재시도\n\n결제 API 가 **5xx** 를 주면 `retry()` 로 세 번까지 다시 시도한다.\n\n- [x] 재현 영상\n- [ ] 원인 찾기\n\n1. 결제 버튼\n2. 서버 오류\n\n> 기대: 자동 재시도\n\n```\nPOST /pay 502\n```\n\n참고 [문서](https://a.io)';
