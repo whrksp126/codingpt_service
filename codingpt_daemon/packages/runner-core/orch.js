@@ -719,6 +719,39 @@ async function rpcWorkerStart(p, caller) {
   emit(run.id, 'worker');
   return { run: pickRun(run), task: pickTask(task, { brief: true }), worker: await projectWorker(d, { brief: true }) };
 }
+// 이슈에서 시작(issues.js) — 그 폴더에 새 터미널을 만들고 에이전트를 프롬프트와 함께 띄운다. 사람이 누른 것이라
+//  권한 확인 생략은 붙이지 않는다(워커가 아니다 — 사용자가 직접 보는 보통 에이전트다).
+async function launchPrompted({ cwd, agent, model, prompt, name }) {
+  if (!inj.createTerminal || !inj.launch) throw codedError('START_FAILED', '터미널 실행 경로가 없습니다');
+  const term = await inj.createTerminal({ cwd, name: name || agent });
+  fs.mkdirSync(orchDir(), { recursive: true, mode: 0o700 });
+  const file = path.join(orchDir(), `issue-${term.tid}-${nowFn()}.prompt`);
+  fs.writeFileSync(file, prompt, { mode: 0o600 });
+  let shell = '';
+  try { shell = inj.shellOf ? await inj.shellOf({ tsession: term.tsession }) : ''; } catch (_) { shell = ''; }
+  const pArgs = promptArgs(agent, file, shell, /^\s*-/.test(prompt));
+  const mArgs = inj.agentModels && model ? inj.agentModels.launchArgs(agent, { model }) : [];
+  const args = [...mArgs, ...(pArgs || [])];
+  const res = await inj.launch({ cwd, index: term.tid, id: agent, ...(args.length ? { args } : {}), fresh: true, timeoutMs: timings.launchTimeoutMs });
+  if (res && res.busy) throw codedError('START_FAILED', '터미널에서 다른 명령이 실행 중입니다');
+  if (!pArgs) {
+    const ok = await waitAgentLive(term.tsession, timings.readyTimeoutMs);
+    if (!ok || !inj.chatInput) throw codedError('START_FAILED', '에이전트가 준비되지 않아 이슈를 전달하지 못했습니다');
+    await inj.chatInput({ cwd, tid: term.tid, text: prompt, submit: true });
+  }
+  return { tid: term.tid, tsession: term.tsession };
+}
+function issuesLib() {
+  const lib = require('./issues');
+  lib.configure({
+    tasks: inj.tasks, taskGit: require('./task-git'), launchPrompted, now: nowFn,
+    absOf: (rel) => require('./fs').safeResolve(rel || ''),
+    notify: () => emit([], 'issues'),
+  });
+  return lib;
+}
+const issueRpc = (name) => async (p) => issuesLib().METHODS[name](p);
+
 async function startInNewTerminal(run, d, prompt) {
   if (!inj.createTerminal || !inj.launch) throw codedError('WORKER_START_FAILED', '터미널 실행 경로가 없습니다');
   const w = d.worker;
@@ -1401,10 +1434,14 @@ const METHODS = {
   'orch.send': rpcSend, 'orch.check': rpcCheck, 'orch.ask': rpcAsk, 'orch.reply': rpcReply,
   'orch.gateCreate': rpcGateCreate, 'orch.gateResolve': rpcGateResolve, 'orch.gateList': rpcGateList,
   'orch.noteSet': rpcNoteSet, 'orch.list': rpcList,
+  // 이슈(issues.js) — 자체 이슈 + 외부 서비스 이슈. 사람 화면과 에이전트(`cpt issue`)가 같은 것을 부른다.
+  'orch.issueList': issueRpc('issueList'), 'orch.issueGet': issueRpc('issueGet'), 'orch.issueCreate': issueRpc('issueCreate'),
+  'orch.issueUpdate': issueRpc('issueUpdate'), 'orch.issueDelete': issueRpc('issueDelete'), 'orch.issueStart': issueRpc('issueStart'),
 };
 // 사람 화면(PC·폰)에서 부를 수 있는 것 — 보기와 "답하기·멈추기·닫기·정리".
 const USER_METHODS = new Set(['orch.list', 'orch.runList', 'orch.runShow', 'orch.runClose', 'orch.workerList', 'orch.workerShow', 'orch.workerRead',
-  'orch.workerStop', 'orch.workerRelease', 'orch.workerRetain', 'orch.reply', 'orch.gateResolve', 'orch.gateList', 'orch.noteSet', 'orch.status']);
+  'orch.workerStop', 'orch.workerRelease', 'orch.workerRetain', 'orch.reply', 'orch.gateResolve', 'orch.gateList', 'orch.noteSet', 'orch.status',
+  'orch.issueList', 'orch.issueGet', 'orch.issueCreate', 'orch.issueUpdate', 'orch.issueDelete', 'orch.issueStart']);
 
 async function rpc(method, params, meta) {
   if (!enabled()) throw codedError('ORCH_DISABLED', '이 PC 에서는 오케스트레이션이 꺼져 있습니다');

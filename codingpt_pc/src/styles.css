@@ -3396,3 +3396,70 @@ svg.mi { flex: none; display: block; }
 
 .ws-tree-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: var(--z-pane); }
 .ws-tree-resizer:hover, .ws-tree-resizer.dragging { background: var(--border-ctrl); }
+
+/* ── 이슈 장소(issues-view.js) — 목록 · 보드 · 표. 무채색 면 + 상태 표식만 색. ───────────────────────── */
+.issues-view[hidden] { display: none; }
+.issues-view .tv-top { gap: 10px; }
+.is-grow { flex: 1; }
+.is-seg { display: inline-flex; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); overflow: hidden; margin-left: 6px; }
+.is-segb { background: transparent; border: none; color: var(--text3); font-size: 12px; height: 22px; padding: 0 10px; }
+.is-segb + .is-segb { border-left: 1px solid var(--border-ctrl); }
+.is-segb.on { background: var(--selected); color: var(--text); }
+.is-sel { width: auto; min-height: 24px; height: 24px; padding: 0 22px 0 8px; font-size: 12px; border-radius: var(--r-sm); }
+.is-q { width: 160px; min-height: 24px; height: 24px; padding: 0 8px; font-size: 12px; border-radius: var(--r-sm); }
+.is-done { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text3); white-space: nowrap; }
+.is-warn { flex: none; padding: 6px 14px; font-size: 12px; color: var(--text2); background: color-mix(in srgb, var(--warn) 12%, transparent); border-bottom: 1px solid var(--border); }
+.is-body { flex: 1; min-height: 0; overflow: auto; }
+.is-empty-sub { margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--text3); }
+.is-n { margin-left: 6px; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.is-key { flex: none; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; color: var(--dim); }
+.is-chip, .is-label, .is-pri { flex: none; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 4px; background: var(--hover); color: var(--text2); white-space: nowrap; }
+.is-label { background: transparent; box-shadow: inset 0 0 0 1px var(--border-ctrl); color: var(--text3); }
+.is-pri.urgent, .is-pri.high { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 55%, transparent); background: transparent; color: var(--text); }
+.is-link { display: inline-flex; flex: none; }
+/* 상태 표식 — 할 일 = 빈 원, 진행 중 = 반, 리뷰 중 = 3/4, 완료 = 체크(agent-glyph). */
+.is-st { display: inline-block; flex: none; width: 10px; height: 10px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--text3); }
+.is-st.in_progress { background: conic-gradient(#eab308 0 50%, transparent 0); box-shadow: inset 0 0 0 1.5px #eab308; }
+.is-st.in_review { background: conic-gradient(#10b981 0 75%, transparent 0); box-shadow: inset 0 0 0 1.5px #10b981; }
+/* 목록 */
+.is-body.list { padding: 8px 14px 24px; }
+.is-group { margin-bottom: 14px; }
+.is-group-h { font-size: 11.5px; font-weight: 600; color: var(--text3); padding: 8px 6px 6px; }
+.is-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 8px; background: transparent; border: none; border-radius: var(--r-sm); color: var(--text); font-size: 13px; text-align: left; }
+.is-row:hover { background: var(--hover); }
+.is-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-ws { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--dim); }
+/* 보드 */
+.is-body.board { display: flex; gap: 10px; padding: 12px 14px; overflow-x: auto; align-items: stretch; }
+.is-col { flex: 1 1 0; min-width: 220px; display: flex; flex-direction: column; min-height: 0; border-radius: var(--r-md); background: color-mix(in srgb, var(--text) 3%, transparent); }
+.is-col.over { box-shadow: inset 0 0 0 1px var(--border-ctrl); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.is-col-h { flex: none; display: flex; align-items: center; gap: 7px; padding: 10px 10px 8px; font-size: 12px; font-weight: 600; color: var(--text2); }
+.is-col-b { flex: 1; min-height: 40px; overflow-y: auto; padding: 0 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.is-card { padding: 9px 10px; border-radius: var(--r-sm); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); cursor: default; }
+.is-card:hover { box-shadow: inset 0 0 0 1px var(--border-ctrl); }
+.is-card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+.is-card-title { font-size: 12.5px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.is-card-ws { margin-top: 5px; font-size: 11px; color: var(--dim); }
+/* 표 */
+.is-body.table { padding: 0 14px 24px; }
+.is-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.is-table th { position: sticky; top: 0; background: var(--base); text-align: left; font-weight: 600; font-size: 11.5px; color: var(--text3); padding: 9px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; -webkit-user-select: none; }
+.is-table th:hover { color: var(--text); }
+.is-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); color: var(--text2); white-space: nowrap; }
+.is-table .is-td-title { color: var(--text); white-space: normal; min-width: 240px; }
+.is-tr:hover td { background: var(--hover); }
+.is-cellst { display: inline-flex; align-items: center; gap: 6px; }
+.is-when { color: var(--dim); font-variant-numeric: tabular-nums; }
+/* 시트 */
+.is-sheet { width: min(640px, calc(100vw - 48px)); display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+.is-sh-head, .is-sh-foot, .is-start { display: flex; align-items: center; gap: 8px; }
+.is-f-title { font-size: 15px; font-weight: 600; }
+.is-f-body { min-height: 150px; }
+.is-f-row { display: flex; gap: 10px; }
+.is-f-row label, .is-f-lab { flex: 1; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--text3); }
+.is-f-gh { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.is-f-gh.off { opacity: 0.4; }
+.is-start { padding: 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--text) 4%, transparent); }
+.is-start-h { font-size: 12px; font-weight: 600; color: var(--text2); margin-right: 4px; white-space: nowrap; }
+.is-start .tk-input { width: auto; flex: 1; min-height: 28px; padding: 2px 24px 2px 8px; font-size: 12px; }
+.is-del[data-armed] { color: var(--error); }

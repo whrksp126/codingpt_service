@@ -43,6 +43,7 @@ import { startOrchBackground } from "./orch-view.js";
 import { mountTasksView, updateTasksView, openTasksDashboard, closeTasksDashboard, openNewTask, startTasksBackground, toast as tasksToast } from "./tasks-view.js";
 import { mountVmView, updateVmView } from "./vm-view.js";
 import { mountAutomationsView, updateAutomationsView, openAutomations, closeAutomations, startAutomationsBackground } from "./automations-view.js";
+import { mountIssuesView, updateIssuesView } from "./issues-view.js";
 import { tt } from "./text/tasks.js";
 import * as i18n from './i18n/index.js';
 
@@ -109,6 +110,8 @@ mountWorkspaceView(wsViewEl);
 mountSettings(settingsEl);
 if (tasksViewEl) mountTasksView(tasksViewEl);
 if (automationsViewEl) mountAutomationsView(automationsViewEl);
+const issuesViewEl = document.getElementById("issuesView"); // 이슈 장소(state.view === 'issues')
+if (issuesViewEl) mountIssuesView(issuesViewEl);
 { const v = document.getElementById("vmView"); if (v) mountVmView(v); } // 에이전트 PC(VM) 장소
 // 보고 있던 작업 워크스페이스가 데몬 정리(머지·폐기)로 사라졌다 — state.js 가 현황판으로 돌려놓고 여기서 알린다(§4).
 S.onTaskWsRemoved(() => tasksToast(tt("wsRemoved")));
@@ -126,15 +129,16 @@ function render() {
   //  작업 현황판은 메인 영역을 **대신** 쓴다 — #wsView 를 hidden 으로(display:none → 프리뷰 슬롯 rect 0 →
   //  previewSync 가 visible=false 로 네이티브 웹뷰를 내린다). pane 트리는 그대로 캐시돼 복귀가 즉시다.
   //  자동화 장소도 같은 규칙(메인 영역을 대신 쓰는 장소 — 진행 현황과 배타, setView 가 덮는다).
-  const mainPlace = state.view === "tasks" || state.view === "automations" || state.view === "vm";
+  const mainPlace = state.view === "tasks" || state.view === "automations" || state.view === "vm" || state.view === "issues";
   if (wsViewEl) wsViewEl.hidden = mainPlace;
   updateSettings();
   updateWorkspaceView();
   updateTasksView();
   updateAutomationsView();
+  updateIssuesView();
   updateVmView();
   updateApprovals(); // 승인 카드는 Chat 뷰 슬롯 판정을 위해 workspace 렌더 뒤에 갱신
-  if (state.activeWsId !== lastActive || ((lastView === "tasks" || lastView === "automations" || lastView === "vm") && state.view === "workspace")) {
+  if (state.activeWsId !== lastActive || ((lastView === "tasks" || lastView === "automations" || lastView === "vm" || lastView === "issues") && state.view === "workspace")) {
     lastActive = state.activeWsId;
     if (state.activeWsId && !settingsShown && !mainPlace) setTimeout(focusCurrentPane, 40);
   }
@@ -274,7 +278,7 @@ window.addEventListener("keydown", (e) => {
   if (!id) return;
   // 현황판이 떠 있는 동안 워크스페이스/pane 명령은 **보이지 않는** 워크스페이스를 조작하게 된다 → 전역 명령만 받는다.
   //  자동화 장소도 같다(state.view === 'automations' — 메인 영역을 대신 쓰는 장소).
-  if ((state.view === "tasks" || state.view === "automations") && commandById(id)?.scope !== "global") return;
+  if ((state.view === "tasks" || state.view === "automations" || state.view === "issues") && commandById(id)?.scope !== "global") return;
   // 처리할 수 있을 때만 기본 동작을 막는다. 못 쓰는 상황에서 preventDefault 만 하면
   //  "브라우저 기본 동작도 안 되고 우리 동작도 안 되는" 죽은 키가 된다.
   if (runCommand(id)) e.preventDefault();
@@ -289,7 +293,7 @@ function startPreviewShieldWatch() {
   //  클릭이 뒤의 프리뷰로 내려가 "허용 버튼이 안 눌리는" 사고가 난다(punch-through 규율).
   // .ag-sheet — 에이전트 설치 시트(설정 밖, 온보딩에서도 뜬다). 안에 실제 터미널이 있어 클릭·키
   //  입력이 뒤의 프리뷰로 새면 명령이 엉뚱한 곳에 들어간다.
-  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .chat-lightbox, .conv-pop, .tasks-view:not([hidden]), .automations-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
+  const SEL = ".bootstrap-gate, .settings-modal:not(.hidden), .ag-sheet, .pv-menu, .pv-suggest, .wv-sheet-overlay, .notif-panel:not(.hidden), .ctx-menu, .fd-menu:not(.hidden), .login-gate:not(.hidden), .quit-guard-backdrop, .drag-overlay, .approval-card, .chat-lightbox, .conv-pop, .tasks-view:not([hidden]), .automations-view:not([hidden]), .issues-view:not([hidden]), body.tab-dragging, body.resizing-col, body.resizing-row, body.os-dragging";
   let cur = null;
   const check = () => {
     const hit = document.querySelector(SEL);

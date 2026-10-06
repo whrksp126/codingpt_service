@@ -294,6 +294,14 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   send [<idx>] <text> [--enter]         터미널에 텍스트 입력(자기 자신은 --force)
   send-key [<idx>] <key>                특수키 입력 (C-c, Enter, Up ...)
 
+  # 이슈 — CodingPT 자체 이슈 + 이 폴더의 GitHub 이슈(한 목록). 사용자가 PC·폰의 이슈 화면에서 같은 것을 본다
+  issue list [--all] [--status <s>] [--source codingpt|github] [--done]   이 워크스페이스의 열린 이슈
+  issue show <id|#번호>                  본문까지
+  issue create --title "<제목>" [--body "<본문>"] [--priority low|medium|high|urgent] [--labels a,b] [--github]
+  issue update <id|#번호> [--status todo|in_progress|in_review|done] [--title …] [--body …] [--priority …]
+  issue close <id|#번호> · issue delete <id|#번호>(자체 이슈만)
+  issue start <id|#번호> [--mode task|terminal|orch] [--agent …]   그 이슈로 에이전트를 시작(task = 전용 브랜치)
+
   # 오케스트레이션 — 다른 에이전트에게 일을 나눠 맡기고 결과를 받는다 (전체: cpt skills get cpt-orch)
   orch status                           내 역할(코디네이터/워커)·상한
   orch run-create --objective "<목표>"  묶음 만들기(내 터미널이 코디네이터가 된다)
@@ -612,6 +620,7 @@ async function main() {
       case 'auto': return autoCommand(c2, rest, flags);
       // 오케스트레이션(docs/orchestration-design.md) — 에이전트가 다른 에이전트를 부린다. 호출자는 터미널 좌표로 식별된다.
       case 'orch': return orchCommand(c2, rest, flags);
+      case 'issue': return issueCommand(c2, rest, flags);
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
         const r = await request('ui.devices', {});
@@ -1565,6 +1574,62 @@ async function orchCommand(sub, rest, flags) {
       }
       default:
         process.stderr.write('사용법: cpt orch <status|run-create|worker-start|check|reply|send|worker-list|worker-show|worker-read|worker-release|worker-retain|worker-stop|worker-abandon|task-create|task-list|task-update|gate-create|gate-resolve|gate-list|run-show|run-list|run-close>\n전체 가이드: cpt skills get cpt-orch\n');
+        process.exitCode = 2;
+    }
+  } catch (e) {
+    if (e && e.usage) { process.stderr.write(e.message + '\n'); process.exitCode = 2; return; }
+    throw e;
+  }
+}
+
+// 이슈 — CodingPT 자체 이슈 + 연결된 외부 서비스(GitHub) 이슈를 한 목록으로. 화면(PC·폰)과 같은 것을 다룬다.
+async function issueCommand(sub, rest, flags) {
+  const f = (k) => (typeof flags[k] === 'string' ? flags[k] : undefined);
+  const need = (v, usage) => { if (v == null || v === '') { const e = new Error('사용법: cpt issue ' + usage); e.usage = true; throw e; } return v; };
+  const MARK = { todo: '○', in_progress: '◐', in_review: '◑', done: '●' };
+  const line = (x) => `${MARK[x.status] || '?'} ${x.key} [${x.status}] ${x.title}${x.priority && x.priority !== 'none' ? ` (${x.priority})` : ''}${x.source.provider !== 'codingpt' ? ` · ${x.source.provider}` : ''}${x.cwd ? ` · ${x.cwd}` : ''}   id=${x.id}`;
+  const ws = process.env.CPT_WS || '';
+  try {
+    switch (sub) {
+      case 'list': case undefined: {
+        const r = await request('orch.issueList', { cwds: flags.all ? [] : [f('cwd') || ws].filter(Boolean), fresh: !!flags.fresh }, { timeoutMs: 45000 });
+        let items = r.issues || [];
+        if (f('status')) items = items.filter((x) => x.status === f('status'));
+        if (f('source')) items = items.filter((x) => x.source.provider === f('source'));
+        if (!flags.done && !f('status')) items = items.filter((x) => x.status !== 'done');
+        return out({ ...r, issues: items }, flags, items.map(line).join('\n') || '(이슈 없음)');
+      }
+      case 'show': {
+        const r = await request('orch.issueGet', { id: need(rest[0], 'show <id|#번호>') });
+        const x = r.issue;
+        return out(r, flags, `${line(x)}\n${x.source.url || ''}\n\n${x.body || '(본문 없음)'}`);
+      }
+      case 'create': {
+        const title = need(f('title') || rest.join(' '), 'create --title "<제목>" [--body "<본문>"] [--priority low|medium|high|urgent] [--labels a,b] [--github]');
+        const r = await request('orch.issueCreate', { title, body: f('body'), status: f('status'), priority: f('priority'), labels: f('labels'),
+          cwd: f('cwd') || ws, provider: flags.github ? 'github' : 'codingpt' }, { timeoutMs: 45000 });
+        return out(r, flags, `만들었습니다: ${line(r.issue)}`);
+      }
+      case 'update': {
+        const id = need(rest[0], 'update <id|#번호> [--status todo|in_progress|in_review|done] [--title …] [--body …] [--priority …] [--labels a,b]');
+        const r = await request('orch.issueUpdate', { id, status: f('status'), title: f('title'), body: f('body'), priority: f('priority'), labels: f('labels') }, { timeoutMs: 45000 });
+        return out(r, flags, line(r.issue));
+      }
+      case 'close': {
+        const r = await request('orch.issueUpdate', { id: need(rest[0], 'close <id|#번호>'), status: 'done' }, { timeoutMs: 45000 });
+        return out(r, flags, line(r.issue));
+      }
+      case 'delete': {
+        const r = await request('orch.issueDelete', { id: need(rest[0], 'delete <id|#번호>') });
+        return out(r, flags, '지웠습니다');
+      }
+      case 'start': {
+        const id = need(rest[0], 'start <id|#번호> [--mode task|terminal|orch] [--agent claude|codex|gemini] [--model <id>] [--cwd <폴더>]');
+        const r = await request('orch.issueStart', { id, mode: f('mode'), agent: f('agent'), model: f('model'), cwd: f('cwd') || ws }, { timeoutMs: 90000 });
+        return out(r, flags, `시작했습니다(${r.started.mode}${r.started.taskId ? ` · 작업 ${r.started.taskId}` : ''}${r.started.tid != null ? ` · 터미널 ${r.started.tid}` : ''}): ${line(r.issue)}`);
+      }
+      default:
+        process.stderr.write('사용법: cpt issue <list|show|create|update|close|delete|start>\n');
         process.exitCode = 2;
     }
   } catch (e) {

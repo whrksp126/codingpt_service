@@ -1100,6 +1100,8 @@ const handlers = {
   // 오케스트레이션 변경 통지(orchestration-design.md) — 데몬 broadcast {host, runIds, reason}. 식별자뿐이라
   //  내용은 그 host 의 orch.list 로 다시 읽는다(300ms 디바운스). 반드시 ok 로 회신(무응답 = UI_TIMEOUT).
   "orch.changed": async (p) => {
+    // 이슈가 바뀐 신호는 이슈 화면만 다시 읽는다(묶음·에이전트 행은 그대로다).
+    if (p && p.reason === "issues") { (await import("./issues-view.js")).onIssuesChanged(); return { ok: true }; }
     const m = await import("./orch-view.js");
     m.onOrchChanged(p || {});
     return { ok: true };

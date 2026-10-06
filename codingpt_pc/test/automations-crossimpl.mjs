@@ -175,7 +175,7 @@ else {
   ok(/autoNotifTarget\(n\)/.test(sb) && /pcNotifTarget\(n\)/.test(sb), "알림 점프: auto_* → 자동화 장소, pc_* → 진행 현황");
   const main = read(path.join(PC, "main.js"));
   ok(/updateAutomationsView\(\);/.test(main) && /wsViewEl\.hidden = mainPlace/.test(main), "main: 자동화 장소가 메인 영역을 대신 쓴다");
-  ok(/\(state\.view === "tasks" \|\| state\.view === "automations"\) && commandById\(id\)\?\.scope !== "global"/.test(main), "main: 자동화 장소에서도 전역 명령만");
+  ok(/\(state\.view === "tasks" \|\| state\.view === "automations" \|\| state\.view === "issues"\) && commandById\(id\)\?\.scope !== "global"/.test(main), "main: 자동화 장소에서도 전역 명령만");
   ok(/\.automations-view:not\(\[hidden\]\)/.test(main), "main: 프리뷰 실드 셀렉터에 .automations-view");
   ok(/"automations\.open":/.test(main) && /"dispatch\.open":/.test(main), "main: 명령 2개 등록");
   const html = read(path.resolve("src/index.html"));

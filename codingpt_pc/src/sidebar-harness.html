@@ -10,7 +10,7 @@
   body.with-main .shell { width: 100vw; }
   body:not(.with-main) .main { display: none; }</style></head>
 <body>
-<div class="shell"><aside id="sbRoot"></aside><main class="main"><section id="tasksView" class="tasks-view" hidden></section><section id="automationsView" class="automations-view" hidden></section></main></div>
+<div class="shell"><aside id="sbRoot"></aside><main class="main"><section id="tasksView" class="tasks-view" hidden></section><section id="automationsView" class="automations-view" hidden></section><section id="issuesView" class="issues-view" hidden></section></main></div>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="vendor/xterm/xterm-addon-search.js"></script>
@@ -112,7 +112,7 @@
         ] };
         if (cmd === 'front_base_url') return 'https://codingpt.ghmate.com';
         if (cmd === 'auto_local') return autoRpc(args.cmd, args.args, 11);
-        if (cmd === 'orch_local') { window.__calls.push([args.cmd, args.args, 11]); return args.cmd === 'orch.list' ? window.__ORCH : { ok: true }; }
+        if (cmd === 'orch_local') { window.__calls.push([args.cmd, args.args, 11]); return args.cmd === 'orch.list' ? window.__ORCH : args.cmd === 'orch.issueList' ? window.__ISSUES : { ok: true }; }
         // 작업 상세 — task.get 은 목 목록에서 찾아 준다(빈 {} 를 주면 상세가 끝없이 다시 조회한다).
         if (cmd === 'task_local' && args.cmd === 'task.get') {
           for (const v of Object.values(window.__S.state.tasks.byHost)) { const t = (v.items || []).find((x) => x.id === args.args.taskId); if (t) return { task: { ...t, prompt: '로그인 후 리다이렉트가 /home 으로 고정돼요. 원래 페이지로 돌려보내 주세요.' } }; }
@@ -206,6 +206,28 @@
   AA.noteRunnerAwake({ deviceId: 11, online: true, awake: true, busy: true });
   const AV = await import('./js/automations-view.js');
   const TV = await import('./js/tasks-view.js');
+  // 이슈 장소(issues-view.js) 확인용 — `#main-issues`(목록) · `#main-issues-board` · `#main-issues-table` · `-sheet`(상세 시트).
+  const iss = (n, title, status, o = {}) => ({ id: o.gh ? `gh:me/codingpt#${n}` : 'iss_' + n, number: n, key: o.gh ? `codingpt#${n}` : '#' + n, title, body: o.body || '', status,
+    priority: o.pri || 'none', labels: o.labels || [], cwd: o.cwd === undefined ? 'other/project/codingpt' : o.cwd,
+    source: { provider: o.gh ? 'github' : 'codingpt', url: o.gh ? `https://github.com/me/codingpt/issues/${n}` : null, repo: o.gh ? 'me/codingpt' : null },
+    link: o.link || null, createdAt: Date.now() - n * 3600e3, updatedAt: Date.now() - n * 1800e3 });
+  window.__ISSUES = { at: Date.now(), sources: [{ provider: 'codingpt', cwd: null, ok: true }, { provider: 'github', cwd: 'other/project/codingpt', ok: true }], issues: [
+    iss(14, '음성 입력 언어 선택', 'todo', { pri: 'medium', labels: ['voice'] }), iss(13, 'README 정리', 'todo', { cwd: 'other/project/hub' }),
+    iss(41, '로그인 후 리다이렉트가 /home 으로 고정됨', 'todo', { gh: true, pri: 'high', labels: ['bug'] }),
+    iss(12, '결제 실패 재시도', 'in_progress', { pri: 'urgent', link: { mode: 'task', agent: 'claude', taskId: 't_pay' }, body: '결제 API 가 5xx 를 주면 세 번까지 다시 시도한다.\n\n끝났다는 기준: 재시도 테스트 3건 통과.' }),
+    iss(38, '다크 모드에서 표 테두리가 안 보임', 'in_progress', { gh: true, link: { mode: 'terminal', agent: 'codex', tid: 7 } }),
+    iss(10, '알림 문구 다듬기', 'in_review', { labels: ['copy'] }), iss(9, '이미지 업로드 개선', 'done', { cwd: 'other/project/hub' }), iss(30, 'CI 캐시 키 수정', 'done', { gh: true }),
+    iss(15, '어느 프로젝트인지 아직 모르는 아이디어', 'todo', { cwd: '' }) ] };
+  const IV = await import('./js/issues-view.js');
+  IV.mountIssuesView(document.getElementById('issuesView'));
+  S.subscribe(() => IV.updateIssuesView());
+  if (location.hash.includes('issues')) {
+    document.head.insertAdjacentHTML('beforeend', '<style>.wv-sheet-overlay, .wv-sheet { animation: none !important; }</style>');
+    const want = location.hash.includes('board') ? 'board' : location.hash.includes('table') ? 'table' : null;
+    if (want) setTimeout(() => document.querySelector(`.is-segb[data-view="${want}"]`)?.click(), 700);
+    setTimeout(() => { IV.openIssues(); }, 60);
+    if (location.hash.includes('sheet')) setTimeout(() => document.querySelector('.is-row[data-id="iss_12"], .is-card[data-id="iss_12"]')?.click(), 900);
+  }
   TV.mountTasksView(document.getElementById('tasksView'));
   AV.mountAutomationsView(document.getElementById('automationsView'));
   await AV.refreshAutoHost(11);

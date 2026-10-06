@@ -95,3 +95,21 @@ Run(묶음)        조율 한 건 + 코디네이터 수신함. 일정을 잡지 
 - **워커 탭** — 같은 폴더 워커의 터미널은 풀 리컨실러가 탭으로 들인다(생성 즉시 `pool.changed`). PC 는 그 탭을
   **코디네이터가 있는 pane** 에 넣는다(`orch-model.coordinatorTidOf`). 정리(`worker-release`)하면 탭이 사라진다 —
   Orca 와 같이 정리는 코디네이터의 의무다(턴을 끝내기 전에 넘기거나·남기거나·정리).
+
+## 11. 이슈 (2026-10-06 4차)
+
+사용자 결정: 사이드바의 `진행 현황`·`자동화` 행을 빼고 `이슈` 를 둔다 · 연동 없이도 쓰는 자체 이슈 · **이 PC 에 저장**(구조는 서버로 옮겨도 그대로) ·
+외부 서비스는 언제든 붙는 구조 · 자체/외부를 따로 보이지 않게 한 목록 + 걸러 보기 · 보기는 목록·보드·표 · 시작은 누를 때 방식을 고른다.
+(Orca 에는 자체 이슈가 없다 — 서비스별 화면이 따로다. 이 부분은 따라 한 것이 아니라 새로 설계했다.)
+
+- **데몬 `issues.js`** — 스토어 `<stateDir>/issues.json` `{seq, items, overlays}`. 공통 모양
+  `{id, number, key, title, body, status(todo|in_progress|in_review|done), priority, labels, cwd, source:{provider,url,repo}, link}`.
+  외부 이슈는 복사하지 않는다 — 정본은 그 서비스, 우리가 얹는 작업 상태·link 는 `overlays[id]`.
+- **제공자** — `PROVIDERS[name] = {list, create, update}`. 첫 제공자 = GitHub(이 PC 의 `gh` 로그인을 쓴다, 토큰 무보관, 폴더별 1분 캐시).
+  GitHub 저장소가 아니거나 gh 가 없으면 "해당 없음" 으로 조용히 빠진다. Jira·Linear·Notion 은 같은 표에 구현 하나를 더하면 된다.
+- **RPC** — `orch.issueList|Get|Create|Update|Delete|Start`(orch 배관을 그대로 탄다: 로컬 소켓·봉인·릴레이 허용 표·`orch.v1`). 사람 화면과 에이전트(`cpt issue …`)가 같은 것을 부른다.
+  바뀜 신호 = `orch.changed {reason:"issues"}`.
+- **시작** — `task`(전용 브랜치 작업, `tasks.internalCreate` origin `issue`) · `terminal`(그 폴더의 새 터미널에 에이전트 + 프롬프트) · `orch`(`/orch` 를 앞에 붙인 프롬프트).
+  사람이 누른 것이라 권한 확인 생략은 붙이지 않는다. 작업으로 시작한 이슈는 목록을 줄 때 작업 상태를 따라간다(리뷰 준비 → 리뷰 중, 머지 → 완료, 폐기 → 할 일). 사람이 옮긴 상태는 덮지 않는다.
+- **PC** — `issues-view.js`(장소 `state.view === "issues"`) + `issues-model.js`(걸러 보기·묶기·정렬, 폰이 같은 규칙을 옮겨 쓴다). 보드는 카드를 끌어 상태를 바꾼다.
+- 남은 것: 폰 화면 · 서버 허용 표 배포(폰·다른 PC 에서 볼 때 필요) · Jira 등 다른 제공자 · PC 간 동기화.

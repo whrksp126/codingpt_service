@@ -18,6 +18,7 @@ import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
 import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo } from "./orch-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
+import { openIssues, issuesOpenCount } from "./issues-view.js";
 import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
 import { ot, wsStatusText } from "./text/orch.js";
 import * as i18n from './i18n/index.js';
@@ -238,7 +239,7 @@ export function updateSidebar() {
     const tasksN = sbTasksN;
     const autoN = autoAttentionCount();
     const sig = JSON.stringify([
-      tasksN, autoN,
+      tasksN, autoN, issuesOpenCount(activeDev0),
       state.vmScope || "", JSON.stringify(vmPhase),
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
@@ -326,6 +327,8 @@ export function updateSidebar() {
       // VM 을 고른 상태 — 이 아래는 그 VM 의 것(화면·VM 워크스페이스). 진행 현황·자동화는 호스트의 것이라 여기서는 뺀다.
       list.appendChild(devHead);
       list.appendChild(vmScreenRow(state.vmScope));
+    } else {
+      list.appendChild(issuesRow());   // 이슈 장소 — 이 PC 의 할 일(자체 이슈 + 연결된 외부 서비스)
     }
     // `진행 현황`·`자동화` 행은 사이드바에서 뺐다(2026-10-06 사용자 결정) — 워크스페이스 아래 에이전트·작업 행이 같은 것을 말한다.
     //  장소 자체는 남아 있다: 작업 행을 누르면 그 상세가 열리고, 단축키·팔레트(tasks.dashboard · automations.open)와 알림도 그리로 간다.
@@ -522,6 +525,15 @@ function tasksRow() {
     (n ? `<span class="wsr-badge">${n}</span>` : "");
   // 토글이 아니다 — 나가는 길은 다른 장소(워크스페이스 로컬 행 등)를 누르는 것(시안 확정 2026-09-29).
   row.addEventListener("click", () => { if (state.view !== "tasks") openTasksDashboard(); });
+  return row;
+}
+/** 사이드바 `이슈 [n]` 행 — 고른 PC 의 이슈 장소. 배지 = 열린 이슈 수(목록을 한 번이라도 읽은 뒤부터). 토글이 아니다. */
+function issuesRow() {
+  const n = issuesOpenCount(S.activeDeviceId());
+  const row = document.createElement("button");
+  row.className = "pc-row issues-row" + (state.view === "issues" ? " active" : "");
+  row.innerHTML = `<span class="pc-ic">${icons.issue({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("이슈"))}</span>` + (n ? `<span class="wsr-badge">${n}</span>` : "");
+  row.addEventListener("click", () => { if (state.view !== "issues") openIssues(); });
   return row;
 }
 /** 사이드바 `자동화 [n]` 행 — 고른 PC 의 자동화 장소(automation-design §5.9). `진행 현황` 바로 아래, 같은 장소 규칙:

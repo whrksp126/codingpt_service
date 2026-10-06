@@ -1292,6 +1292,8 @@ const ORCH_RPC_OK = new Map([
   ['orch.workerList', 20000], ['orch.workerShow', 15000], ['orch.workerRead', 15000],
   ['orch.workerStop', 15000], ['orch.workerRelease', 60000], ['orch.workerRetain', 15000],
   ['orch.reply', 15000], ['orch.gateResolve', 15000], ['orch.gateList', 15000], ['orch.noteSet', 15000],
+  // 이슈(데몬 issues.js) — 자체 이슈 + 외부 서비스 이슈. 외부 서비스 왕복이 있어 넉넉히.
+  ['orch.issueList', 45000], ['orch.issueGet', 20000], ['orch.issueCreate', 45000], ['orch.issueUpdate', 45000], ['orch.issueDelete', 15000], ['orch.issueStart', 90000],
 ]);
 function orchEnabled() { return SERVER_CAPS.includes('orch.v1'); }
 async function orchRpc(req, res) {

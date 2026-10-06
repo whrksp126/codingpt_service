@@ -474,7 +474,8 @@ function normOrigin(o, { internal = false } = {}) {
   if (o == null) return null;
   if (typeof o !== 'object' || Array.isArray(o)) throw codedError('BAD_PARAMS', 'origin 이 올바르지 않습니다');
   //  'orch' = 오케스트레이션 워커(orch.js) — 코디네이터 에이전트가 띄운 작업. planId 에 시도(Dispatch) ID 가 온다.
-  const kinds = internal ? ['dispatch', 'automation', 'orch'] : ['dispatch'];
+  //  'issue' = 이슈에서 시작한 작업(issues.js). planId 에 연결 토큰이 온다.
+  const kinds = internal ? ['dispatch', 'automation', 'orch', 'issue'] : ['dispatch'];
   if (!kinds.includes(o.kind)) throw codedError('BAD_PARAMS', 'origin.kind 가 올바르지 않습니다');
   const out = { kind: o.kind };
   for (const k of ['planId', 'automationId', 'firingId']) {

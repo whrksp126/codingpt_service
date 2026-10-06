@@ -87,6 +87,20 @@ for (const k of Object.keys(pc)) ok(JSON.stringify(pc[k]) === JSON.stringify(app
   ok(JSON.stringify(L.splitPathLine('src/a.js:12:3')) === '{"path":"src/a.js","line":12}' && L.splitPathLine('file:///U/a%20b.js').path === '/U/a b.js', '경로:줄 분리 · file:// 해석');
 }
 
+// PC 전용 — 이슈 화면의 걸러 보기·묶기·정렬(issues-model.js).
+{
+  const I = await import('file://' + path.join(PC, 'issues-model.js'));
+  const mk = (id, status, o = {}) => ({ id, number: o.n || 1, key: '#' + (o.n || 1), title: o.title || id, status, priority: o.pri || 'none', labels: o.labels || [], cwd: o.cwd || 'a', source: { provider: o.src || 'codingpt' }, updatedAt: o.at || 0 });
+  const L = [mk('a', 'todo', { pri: 'low', at: 5 }), mk('b', 'todo', { pri: 'urgent', at: 1 }), mk('c', 'in_progress', { src: 'github', cwd: 'b', labels: ['bug'] }), mk('d', 'done', { at: 9 }), mk('e', 'in_review', { title: '로그인 리다이렉트' })];
+  ok(I.filterIssues(L, {}).map((x) => x.id).join('') === 'abce', '기본은 완료를 숨긴다');
+  ok(I.filterIssues(L, { done: true, source: 'github' }).map((x) => x.id).join('') === 'c' && I.filterIssues(L, { cwd: 'b' }).length === 1, '출처·워크스페이스로 거른다');
+  ok(I.filterIssues(L, { q: '리다이' }).map((x) => x.id).join('') === 'e' && I.filterIssues(L, { q: 'BUG' }).map((x) => x.id).join('') === 'c', '검색은 제목·번호·라벨(대소문자 무시)');
+  ok(JSON.stringify(I.groupByStatus(I.filterIssues(L, { done: true })).map((g) => [g.status, g.items.map((x) => x.id).join('')])) === '[["in_progress","c"],["in_review","e"],["todo","ba"],["done","d"]]', '묶음 순서 = 진행 중 → 리뷰 중 → 할 일 → 완료, 묶음 안은 우선순위 → 최근');
+  ok(I.groupByStatus([], { order: I.STATUSES, keepEmpty: true }).length === 4, '보드는 빈 열도 그린다');
+  ok(I.sortTable(L, 'priority', 1)[0].id === 'b' && I.sortTable(L, 'updatedAt', -1)[0].id === 'd' && I.sortTable(L, 'status', 1)[0].status === 'todo', '표 정렬');
+  ok(JSON.stringify(I.sourceOptions(L, [{ provider: 'codingpt' }])) === '["all","codingpt","github"]' && I.openCount(L) === 4, '출처 선택지 · 열린 이슈 수');
+}
+
 // 규칙 자체(둘이 같이 틀리는 것 방지)
 const r1 = pc.runs.find((x) => x[0] === 'r1');
 ok(JSON.stringify(pc.runs.map((x) => x[0])) === '["r0","r1","r4"]', '그 폴더의 진행 중 묶음만, 오래된 것부터(닫힌 묶음·다른 폴더 제외)');
