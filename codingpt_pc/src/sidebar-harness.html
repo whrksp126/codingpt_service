@@ -181,6 +181,8 @@
       { id: 'task_d3', title: '기존 테스트 정리', status: 'completed', deps: [] }, { id: 'task_d5', title: '통합 테스트 추가', status: 'pending', deps: ['task_d1', 'task_d2'] }],
     workers: [
       ow('d1', 'working', '결제 API 재시도 로직', { tid: 2, phase: '구현 중', at: 1, model: 'sonnet', min: 4 }),
+      { ...ow('d8', 'working', '곱셈 계산기 (Haiku)', { tid: 31, place: 'worktree', model: 'haiku', taskRef: { taskId: 'tk_w1' } }), branch: 'cpt/d3y9bk-1', cwd: 'x/wt1' },
+      { ...ow('d9', 'asking', '덧셈 계산기 (Haiku)', { tid: 32, place: 'worktree', model: 'haiku' }), branch: 'cpt/t3odk2-1', cwd: 'x/wt2' },
       ow('d2', 'asking', '웹훅 서명 검증', { tid: 3, agent: 'codex', at: 2, q: { id: 'm_q1', text: '서명 검증 실패 시 401 과 400 중 무엇으로 응답할까요?\n기존 클라이언트는 400 을 기대합니다.', options: ['401', '400'] } }),
       ow('d3', 'succeeded', '기존 테스트 정리', { tid: 4, at: 3, model: 'haiku', min: 12, res: { outcome: 'succeeded', summary: '중복 테스트 12개를 정리했다. 느린 테스트 3개의 원인은 실제 네트워크 호출이었다. 남은 것은 없다.' } }),
       ow('d4', 'failed', 'DB 마이그레이션 초안', { agent: 'gemini', at: 4, terminal: 'released', res: { outcome: 'failed', summary: '스키마 권한이 없어 적용하지 못했다.' } }),

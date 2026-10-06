@@ -153,8 +153,30 @@ function workerRow(run, w) {
     kind: "worker", key: "d:" + w.dispatchId, runId: run.id, dispatchId: w.dispatchId, glyph: workerGlyph(w.uiState), textKey: workerTextKey(w.uiState),
     agent: w.agent || null, lead: w.title || "", trail: said, model: w.model || "", at: (settled ? w.updatedAt : w.createdAt) || null,
     tid: w.tid == null ? null : w.tid, cwd: w.cwd || "", placement: w.placement || "current", terminal: w.terminal,
+    branch: w.branch || "", taskId: (w.taskRef && w.taskRef.taskId) || null,
     needsReply: !!w.question, worker: w,
   };
+}
+
+/** 전용 작업 폴더(worktree)에서 도는 워커인가 — 그 워커는 시킨 에이전트의 폴더가 아니라 제 브랜치에 있다. */
+export const inWorktree = (c) => !!c && c.placement === "worktree";
+/**
+ * 에이전트 행 트리 → 작업 폴더(worktree) 단위 묶음. [{ key, branch, taskId, workers:[워커 행…] }]
+ *  사이드바는 워크스페이스 아래를 **작업 폴더 단위**로 그린다(Orca 와 같다): `로컬 · main` 과 그 안의 에이전트,
+ *  그 옆에 브랜치마다 한 줄 + 그 안의 에이전트. 다른 브랜치의 워커를 main 아래에 그리면 main 에서 도는 것으로 읽힌다(2026-10-07 사용자 지적).
+ *  브랜치가 아직 없으면(막 띄우는 중) 워커마다 한 묶음이다.
+ */
+export function worktreeGroups(rows) {
+  const out = [];
+  const by = new Map();
+  for (const r of rows || []) for (const c of r.children || []) {
+    if (!inWorktree(c)) continue;
+    const key = c.branch ? "b:" + c.branch : "d:" + c.dispatchId;
+    let g = by.get(key);
+    if (!g) { g = { key, branch: c.branch || "", taskId: c.taskId || null, workers: [] }; by.set(key, g); out.push(g); }
+    g.workers.push(c);
+  }
+  return out;
 }
 
 /**

@@ -170,12 +170,27 @@ export function createRichEditor(o) {
     } catch (_) { /* 자리를 못 찾으면 커서는 웹뷰가 둔 곳 */ }
   };
   const history = createHistory(snap());
+  let lastHtml = doc.innerHTML;
+  //  같은 글이면 적지 않는다(조합 확정처럼 글은 그대로인데 이벤트만 오는 경우 — 빈 단계가 생기면 ⌘Z 가 한 번 헛돈다).
+  const record = (o) => { const st = snap(); if (st.html === lastHtml) return; lastHtml = st.html; history.record(st, o); };
+  // ── 한글(조합 입력) ── 조합 중에는 적지 않고, 음절이 확정될 때 "글자 입력" 한 번으로 적는다.
+  //  웹뷰는 음절마다 `조합 글자 지우기 → 확정 글자 넣기` 를 따로 알린다 — 그대로 적으면 음절마다 지우기 단계가 끼어
+  //  ⌘Z 가 글자가 사라진 중간 모습으로 돌아간다. 낱말 경계(띄어쓰기·줄바꿈)는 영문과 똑같이 그다음 입력이 끊는다.
   let composing = false;
   doc.addEventListener("compositionstart", () => { composing = true; });
-  doc.addEventListener("compositionend", () => { composing = false; });
-  doc.addEventListener("input", (e) => { history.record(snap(), classifyInput(e)); });
+  doc.addEventListener("compositionend", () => { composing = false; setTimeout(() => { if (!composing) record({ kind: "type", boundary: false }); }, 0); });
+  doc.addEventListener("input", (e) => {
+    const c = classifyInput(e);
+    if (composing || c.composition) return;
+    record(c);
+  });
   doc.addEventListener("mousedown", () => history.seal());
-  const stepHistory = (dir) => { if (composing) return; const st = dir === "redo" ? history.redo() : history.undo(); if (st) restore(st); };
+  const stepHistory = (dir) => {
+    //  한글은 마지막 음절이 늘 조합 중이다 — 그대로 두면 첫 ⌘Z 가 먹지 않는다. 조합을 확정시키고(포커스를 뗐다 붙인다) 그 글까지 적은 뒤 되돌린다.
+    if (composing) { doc.blur(); composing = false; record({ kind: "type", boundary: false }); }
+    const st = dir === "redo" ? history.redo() : history.undo();
+    if (st) { restore(st); lastHtml = doc.innerHTML; } else doc.focus();
+  };
   const exec = (cmd, val) => { doc.focus(); history.seal(); try { document.execCommand(cmd, false, val); } catch (_) { /* 이 웹뷰가 모르는 명령 */ } syncEmpty(); };
   const blockOf = () => { let n = window.getSelection()?.anchorNode || null; while (n && n !== doc) { if (n.nodeType === 1 && /^(H[1-3]|BLOCKQUOTE|PRE|LI)$/.test(n.tagName)) return n; n = n.parentNode; } return null; };
   let savedRange = null;
@@ -252,7 +267,7 @@ export function createRichEditor(o) {
       exec("insertHTML", `<div><img data-att="${esc(att.id)}" data-loaded="1" alt="${esc(att.name || "")}"${url ? ` src="${esc(url)}"` : ""}></div><div><br></div>`);
       if (!url) { const img = doc.querySelector(`img[data-att="${att.id}"]`); if (img) { delete img.dataset.loaded; loadImgs(); } }
     },
-    removeImage(id) { const imgs = doc.querySelectorAll(`img[data-att="${id}"]`); if (!imgs.length) return; imgs.forEach((n) => n.remove()); history.record(snap()); },
+    removeImage(id) { const imgs = doc.querySelectorAll(`img[data-att="${id}"]`); if (!imgs.length) return; imgs.forEach((n) => n.remove()); record({}); },
     imageIds: () => Array.from(doc.querySelectorAll("img[data-att]")).map((n) => n.getAttribute("data-att")),
     focus: () => doc.focus(),
   };

@@ -43,7 +43,18 @@ const type = (h, text, t0) => { let s = h._s || ""; let t = t0; for (const ch of
   assert.strictEqual(h.undo(), "1");
 }
 assert.deepStrictEqual(classifyInput({ inputType: "insertParagraph" }), { kind: "type", boundary: true });
-assert.deepStrictEqual(classifyInput({ inputType: "insertCompositionText", data: "한" }), { kind: "type", boundary: false });
+// 조합 입력은 composition 표시 — 받는 쪽이 건너뛰고 조합이 끝날 때 한 번 적는다(음절마다 "지우기" 단계가 끼지 않게)
+for (const ty of ["insertCompositionText", "insertFromComposition", "deleteCompositionText"]) assert.strictEqual(classifyInput({ inputType: ty, data: "한" }).composition, true, ty);
+assert.strictEqual(classifyInput({ inputType: "insertText", data: " " }).composition, undefined);
+{ // 한글: 음절 확정마다 type 한 번, 띄어쓰기는 경계 → 낱말 단위
+  const h = createHistory("");
+  let t = 0;
+  for (const s of ["안", "안녕"]) h.record(s, { kind: "type", boundary: false, now: (t += 80) });
+  h.record("안녕 ", { kind: "type", boundary: true, now: (t += 80) });
+  for (const s of ["안녕 하", "안녕 하세", "안녕 하세요"]) h.record(s, { kind: "type", boundary: false, now: (t += 80) });
+  assert.strictEqual(h.undo(), "안녕 ");
+  assert.strictEqual(h.undo(), "");
+}
 assert.deepStrictEqual(classifyInput({ inputType: "deleteContentBackward" }), { kind: "del", boundary: false });
 assert.deepStrictEqual(classifyInput({ inputType: "insertFromPaste" }), { kind: "", boundary: true });
 assert.strictEqual(undoKeyOf({ metaKey: true, key: "z" }), "undo");

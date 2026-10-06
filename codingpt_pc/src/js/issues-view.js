@@ -354,7 +354,7 @@ function openSheet(issue) {
     titleIn.value = titleVal; titleBtn.textContent = titleVal;
     titleIn.hidden = true; titleBtn.hidden = false;
   };
-  titleIn.addEventListener("blur", () => endTitle(true));
+  titleIn.addEventListener("blur", () => { if (!inputUndo.holding(titleIn)) endTitle(true); });
   const inputUndo = attachInputUndo(box);   // 제목·라벨·링크 칸의 ⌘Z (본문은 편집기가 제 기록으로 한다)
   const onKey = (e) => {
     if (e.target === titleIn && !e.isComposing) {

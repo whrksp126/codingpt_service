@@ -16,7 +16,7 @@ import { autoAttentionCount, openAutomations } from "./automations-view.js";
 import { hostHasAuto, hostAwake } from "./automations-api.js";
 import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
-import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo } from "./orch-model.js";
+import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo, inWorktree, worktreeGroups } from "./orch-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { openIssues, issuesOpenCount, issuesProviders } from "./issues-view.js";
 import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
@@ -795,7 +795,7 @@ function orchSig(host, w) {
   const rows = sessionTree(snap, w.localPath || "");
   return [n ? [n.comment, n.status] : null, rows.length ? [focusedTid(w.id), focusedThread(w.id), Math.floor(Date.now() / 60000)] : null,
     rows.map((r) => [r.key, r.glyph, r.agent, r.lead, r.trail, r.at, orchFolded.has(r.key), r.rollup ? [r.rollup.total, r.rollup.attention, r.rollup.gates] : null,
-      r.children.map((c) => [c.key, c.glyph, c.agent, c.lead, c.trail, c.model, c.at, c.tid, c.terminal, c.needsReply])])];
+      r.children.map((c) => [c.key, c.glyph, c.agent, c.lead, c.trail, c.model, c.at, c.tid, c.terminal, c.needsReply, c.placement, c.branch])])];
 }
 /** 그 워크스페이스에서 사람이 답해야 하는 것의 수(질문·결정·입력 대기). */
 function orchAttention(host, w) {
@@ -822,6 +822,7 @@ function agentSessionRow(w, r) {
   const host = Number(S.activeDeviceId());
   const b = document.createElement("button");
   const parent = r.children.length > 0 || r.runIds.length > 0;
+  const kidsHere = r.children.filter((c) => !inWorktree(c));   // 다른 브랜치의 워커는 제 작업 폴더 줄 아래에 있다
   const open = !orchFolded.has(r.key);
   const shown = w.id === state.activeWsId && state.view === "workspace";
   const here = shown && (r.chat ? focusedThread(w.id) === r.threadId : (r.tid != null && focusedTid(w.id) === r.tid));
@@ -833,9 +834,9 @@ function agentSessionRow(w, r) {
       !ro.live && !ro.attention && !ro.gates && ro.ok ? ot("okN", { n: ro.ok }) : ""].filter(Boolean).join(" · ")
     : r.trail;
   const extra = parent
-    ? (!open && r.children.length ? `<span class="ag-more">+${r.children.length}</span>` : "") +
+    ? (!open && kidsHere.length ? `<span class="ag-more">+${kidsHere.length}</span>` : "") +
       `<span class="ag-btn ag-run" title="${escapeHtml(ot("orchestration"))}">${icons.orch({ size: 12 })}</span>` +
-      (r.children.length ? `<span class="ag-btn wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "")
+      (kidsHere.length ? `<span class="ag-btn wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "")
     : "";
   b.innerHTML = agRowHtml({ glyph: r.glyph, glyphTitle: GLYPH_TEXT[r.glyph] ? ot(GLYPH_TEXT[r.glyph]) : "", agent: r.agent,
     lead: r.lead || agentName(r.agent || "") || ot("coordinator"), trail, model: r.model || "", at: r.at, extra });
@@ -872,13 +873,31 @@ function agentWorkerRow(w, c) {
   const host = Number(S.activeDeviceId());
   const b = document.createElement("button");
   const here = c.tid != null && c.terminal !== "released" && c.placement !== "worktree" && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === c.tid;
-  b.className = "wsg-child wsg-ag child" + (here ? " active" : "");
+  //  작업 폴더(브랜치) 줄 아래의 워커는 그 폴더의 에이전트다 — 시킨 에이전트의 자식 표시(가지 선)를 달지 않는다.
+  b.className = "wsg-child wsg-ag" + (inWorktree(c) ? " in-wt" : " child") + (here ? " active" : "");
   b.dataset.dispatchId = c.dispatchId;
   b.innerHTML = agRowHtml({ glyph: c.glyph, glyphTitle: ot(c.textKey), agent: c.agent, lead: c.lead || ot("worker"), trail: c.trail, model: c.model, at: c.at });
   b.addEventListener("click", () => {
     if (c.needsReply || c.tid == null || c.terminal === "released") { openOrchSheet({ host, runId: c.runId }); return; }
     void openWorkerTerminal(host, c.worker, c.placement === "worktree" ? null : w.id);
   });
+  return b;
+}
+/** 작업 폴더(worktree) 줄 — 브랜치 이름. `로컬 · main` 과 같은 층이다. 클릭 = 그 작업 상세(없으면 그 워커의 터미널). */
+function worktreeRow(w, g) {
+  const host = Number(S.activeDeviceId());
+  const b = document.createElement("button");
+  b.className = "wsg-child wsg-wt";
+  b.dataset.wtKey = g.key;
+  const first = g.workers[0];
+  b.innerHTML = `<span class="wsg-ic">${icons.gitBranch({ size: 15 })}</span><span class="wsg-title">${escapeHtml(g.branch || first.lead || ot("worker"))}</span>`;
+  b.title = g.branch || "";
+  b.addEventListener("click", () => {
+    if (g.taskId) { openTasksDashboard({ taskId: g.taskId, host }); return; }
+    if (first.tid != null && first.terminal !== "released") void openWorkerTerminal(host, first.worker, null);
+    else openOrchSheet({ host, runId: first.runId });
+  });
+  b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   return b;
 }
 /** 그 워크스페이스에서 지금 포커스된 터미널 번호(없으면 null) — 워커 행의 "여기 있음" 표시. */
@@ -911,9 +930,15 @@ function wsGroup(w, g) {
     kids.className = "wsg-children";
     kids.appendChild(localRow(w));
     const ohost = Number(S.activeDeviceId());
-    for (const r of agentTree(ohost, w)) {
+    //  작업 폴더 단위(Orca 와 같다): `로컬 · <브랜치>` 아래에는 그 폴더에서 도는 에이전트만, 다른 브랜치의 워커는 제 브랜치 줄 아래에.
+    const tree = agentTree(ohost, w);
+    for (const r of tree) {
       kids.appendChild(agentSessionRow(w, r));
-      if (!orchFolded.has(r.key)) for (const c of r.children) kids.appendChild(agentWorkerRow(w, c));
+      if (!orchFolded.has(r.key)) for (const c of r.children) if (!inWorktree(c)) kids.appendChild(agentWorkerRow(w, c));
+    }
+    for (const g of worktreeGroups(tree)) {
+      kids.appendChild(worktreeRow(w, g));
+      for (const c of g.workers) kids.appendChild(agentWorkerRow(w, c));
     }
     const owned = orchTaskIds(ohost, w);
     for (const t of (g && g.tasks) || []) {

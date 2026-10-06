@@ -79,6 +79,13 @@ for (const k of Object.keys(pc)) ok(JSON.stringify(pc[k]) === JSON.stringify(app
   ok(JSON.stringify(rows.slice(1, 5).map((r) => r.glyph)) === '["done","waiting","done","working"]', '표식: 끝난 글이 있으면 체크 · 승인 대기는 물음표 · 일하는 중은 고리');
   ok(rows[3].chat && rows[3].threadId === 'th_a' && rows[3].lead === '채팅 A' && rows[3].tid === null, '채팅 행은 대화 제목과 threadId 를 갖는다');
   ok(JSON.stringify(co.children.map((c) => c.glyph)) === '["done","waiting","working","failed","working","done","unverifiable","interrupted"]', '워커 표식', JSON.stringify(co.children.map((c) => c.glyph)));
+  {
+    const wt = (id, branch) => ({ kind: 'worker', dispatchId: id, placement: 'worktree', branch, taskId: branch ? 'tk_' + id : null });
+    const g = M.worktreeGroups([{ children: [{ dispatchId: 'a', placement: 'current' }, wt('b', 'cpt/x-1'), wt('c', '')] }, { children: [wt('d', 'cpt/x-1'), wt('e', 'cpt/y-1')] }]);
+    ok(JSON.stringify(g.map((x) => [x.key, x.branch, x.workers.map((c) => c.dispatchId).join('')])) === '[["b:cpt/x-1","cpt/x-1","bd"],["d:c","","c"],["b:cpt/y-1","cpt/y-1","e"]]',
+      '작업 폴더 묶음: 다른 브랜치의 워커만 브랜치별로(같은 폴더 워커는 빼고, 브랜치를 아직 모르면 워커마다)', JSON.stringify(g));
+    ok(M.inWorktree({ placement: 'worktree' }) && !M.inWorktree({ placement: 'current' }) && !M.inWorktree(null), '전용 작업 폴더 워커 판정');
+  }
   ok(M.shortAgo(0, 5) === '' && M.shortAgo(1, 30001) === '<1m' && M.shortAgo(1, 5 * 60000 + 1) === '5m' && M.shortAgo(1, 3 * 3600000 + 1) === '3h' && M.shortAgo(1, 50 * 3600000) === '2d', '짧은 경과 시간');
   const L = await import('file://' + path.join(PC, 'term-links.js'));
   ok(L.findLinks('보기: https://a.io/x). (http://localhost:3000/a(b)) 끝').map((x) => x.text).join('|') === 'https://a.io/x|http://localhost:3000/a(b)', '주소: 끝 문장부호·문장의 괄호는 떼고 짝 맞는 괄호는 둔다');

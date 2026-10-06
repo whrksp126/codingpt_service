@@ -50,7 +50,9 @@ export function createHistory(initial) {
 export function classifyInput(e) {
   const type = (e && e.inputType) || "";
   const data = (e && e.data) || "";
-  if (type === "insertText" || type === "insertCompositionText" || type === "insertFromComposition") return { kind: "type", boundary: /\s$/.test(data) };
+  //  조합 입력(한글·일본어…) — 조합이 끝날 때 한 번만 적는다(받는 쪽이 composition 을 보고 건너뛴다).
+  if (type === "insertCompositionText" || type === "insertFromComposition" || type === "deleteCompositionText") return { kind: "type", boundary: false, composition: true };
+  if (type === "insertText") return { kind: "type", boundary: /\s$/.test(data) };
   if (type === "insertParagraph" || type === "insertLineBreak") return { kind: "type", boundary: true };
   if (type.startsWith("delete") && type !== "deleteByCut" && type !== "deleteByDrag") return { kind: "del", boundary: false };
   return { kind: "", boundary: true };
@@ -80,11 +82,20 @@ export function attachInputUndo(root) {
   const snap = (n) => ({ v: n.value, s: n.selectionStart, e: n.selectionEnd });
   const histOf = (n) => { let h = hist.get(n); if (!h) { h = createHistory(snap(n)); hist.set(n, h); } return h; };
   let replaying = false;
-  root.addEventListener("focusin", (e) => { if (isField(e.target)) histOf(e.target); });
+  let composing = false;
+  let keepFocus = null;
+  const last = new WeakMap();   // 칸 → 마지막으로 적은 값(같은 값이면 적지 않는다)
+  const record = (n, o) => { const st = snap(n); if (last.get(n) === st.v) return; last.set(n, st.v); histOf(n).record(st, o); };
+  root.addEventListener("focusin", (e) => { if (isField(e.target)) { histOf(e.target); if (!last.has(e.target)) last.set(e.target, e.target.value); } });
+  //  한글(조합 입력) — 조합 중에는 적지 않고 음절이 확정될 때 한 번 적는다(편집기와 같은 규칙).
+  root.addEventListener("compositionstart", (e) => { if (isField(e.target)) composing = true; });
+  root.addEventListener("compositionend", (e) => { const n = e.target; if (!isField(n)) return; composing = false; setTimeout(() => { if (!composing) record(n, { kind: "type", boundary: false }); }, 0); });
   root.addEventListener("input", (e) => {
     const n = e.target;
     if (replaying || !isField(n)) return;
-    histOf(n).record(snap(n), classifyInput(e));
+    const c = classifyInput(e);
+    if (composing || c.composition) return;
+    record(n, c);
   });
   root.addEventListener("mousedown", (e) => { if (isField(e.target)) histOf(e.target).seal(); });
   root.addEventListener("keydown", (e) => {
@@ -93,14 +104,16 @@ export function attachInputUndo(root) {
     const k = undoKeyOf(e);
     if (!k) { if (isMoveKey(e)) histOf(n).seal(); return; }
     e.preventDefault(); e.stopPropagation();
-    if (e.isComposing) return;
+    //  마지막 음절이 조합 중이면 확정시키고(포커스를 뗐다 붙인다) 그 글까지 적은 뒤 되돌린다 — 안 그러면 첫 ⌘Z 가 먹지 않는다.
+    if (composing || e.isComposing) { keepFocus = n; n.blur(); composing = false; n.focus(); keepFocus = null; record(n, { kind: "type", boundary: false }); }
     const st = k === "undo" ? histOf(n).undo() : histOf(n).redo();
     if (!st) return;
-    n.value = st.v;
+    n.value = st.v; last.set(n, st.v);
     try { n.setSelectionRange(st.s, st.e); } catch (_) { /* 선택을 못 잡는 칸 */ }
     replaying = true;
     try { n.dispatchEvent(new Event("input", { bubbles: true })); } finally { replaying = false; }
   });
   //  값을 코드로 바꾼 뒤(초기화·되돌리기) 그 칸의 기록을 새로 시작하게 한다.
-  return { reset(n) { if (n) hist.delete(n); } };
+  //  holding(n) — 조합을 확정시키려고 잠깐 포커스를 뗀 칸인가(그 blur 로 편집을 끝내면 안 되는 쪽이 묻는다).
+  return { reset(n) { if (n) { hist.delete(n); last.delete(n); } }, holding: (n) => keepFocus === n };
 }
