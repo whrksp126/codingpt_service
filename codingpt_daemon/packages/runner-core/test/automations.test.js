@@ -772,12 +772,14 @@ test('SKILL.md — 자동화 트리거 구문 + 자기-스코핑 문장 유지',
   const desc = /^---\n([\s\S]*?)\n---/.exec(md)[1];
   //  설명은 **할 일 → 기능 표**다(2026-10-07): 스킬 목록에는 앞 ~1000자만 보이므로 기능마다 한 줄씩만 둔다.
   //  자세한 트리거 구문은 세션 시작 때 들어가는 인덱스(guides/index.md)와 주제별 안내서가 맡는다.
-  for (const w of ['"매일"', 'cpt auto', 'cpt browser', 'Claude in Chrome', 'cpt orch', 'cpt preview', 'cpt skills get index']) {
+  for (const w of ['"매일"', 'cpt auto', 'cpt browser', 'cpt orch', 'cpt preview', 'cpt skills get index']) {
     assert.ok(desc.includes(w), `description 에 ${w}`);
   }
   assert.ok(desc.length <= 1024, 'description 은 스킬 목록에 다 보여야 한다(~1000자): ' + desc.length);
   const idx = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'index.md'), 'utf8');
-  for (const w of ['every day', 'whenever', '`auto`', '`browser`', 'Claude in Chrome', '`orch`']) assert.ok(idx.includes(w), `인덱스에 ${w}`);
+  for (const w of ['every day', 'whenever', '`auto`', '`browser`', '`orch`']) assert.ok(idx.includes(w), `인덱스에 ${w}`);
+  //  특정 외부 도구를 이름으로 금지하지 않는다 — 무엇이 있는지 알려 주는 것으로 충분했다(2026-10-07 비교 실험: 명시 6/6 · 중립 6/6).
+  assert.ok(!/Claude in Chrome/.test(desc) && !/Claude in Chrome/.test(idx), '외부 도구 이름을 박지 않는다');
   assert.match(desc, /does NOT make this a CodingPT terminal/);
   assert.match(desc, /ONLY for terminals launched by the CodingPT app/);
 });

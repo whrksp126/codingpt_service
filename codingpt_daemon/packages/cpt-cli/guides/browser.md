@@ -4,10 +4,7 @@
 
 ## 프리뷰 내부 확인·조작·검사 (browser)
 
-**웹 페이지를 확인하거나 조작해야 하면 이것을 먼저 쓴다.** 외부 브라우저 도구(Claude in Chrome 같은 확장, 컴퓨터 유즈, 시스템 브라우저)보다 우선이다 —
-사용자가 폰·다른 PC 에서도 같은 화면을 보고, 창을 띄우는 승인 창에 멈추지 않는다(워커는 승인해 줄 사람이 없다).
-순서는 `cpt preview open <url>` 로 열고 → `cpt browser snapshot` 으로 읽고 → `click`/`fill`/`press` 로 조작 → `screenshot`·`console`·`network` 로 확인.
-외부 브라우저는 **사용자의 로그인된 브라우저 세션이 꼭 필요한 일**에만 쓰고, 그럴 때는 한 줄로 이유를 말한다.
+웹 페이지를 확인하거나 조작할 때 쓴다. 순서는 `cpt preview open <url>` 로 열고 → `cpt browser snapshot` 으로 읽고 → `click`/`fill`/`press` 로 조작 → `screenshot`·`console`·`network` 로 확인.
 
 프리뷰로 띄운 **로컬 개발 페이지**는 자동화·검사할 수 있다(외부 사이트 조작은 보안상 제한).
 

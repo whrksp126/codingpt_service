@@ -140,7 +140,7 @@ test('H. 안내서 — 주제마다 파일, 인덱스가 전부 가리킨다, �
   assert.equal(run(['skills', 'get', 'cpt-cli']), index, '옛 이름 cpt-cli = 인덱스');
   assert.equal(run(['skills', 'get', 'cpt-orch']), fs.readFileSync(path.join(GD, 'orch.md'), 'utf8'), '옛 이름 cpt-orch = orch');
   assert.ok(run(['skills', 'get', 'all']).length > index.length * 5);
-  assert.match(fs.readFileSync(path.join(GD, 'browser.md'), 'utf8'), /Claude in Chrome/, '브라우저 안내서가 외부 브라우저 도구보다 먼저 쓰라고 말한다');
+  assert.match(fs.readFileSync(path.join(GD, 'browser.md'), 'utf8'), /cpt preview open/, '브라우저 안내서가 여는 법부터 말한다');
 });
 
 test('I. 세션 컨텍스트 — CodingPT 터미널에서만 인덱스를 낸다 · 훅에 걸려 있다', () => {
