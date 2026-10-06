@@ -91,6 +91,21 @@ export function terminalRoles(snapshot) {
   return out;
 }
 
+/**
+ * 이 터미널이 같은 폴더 워커이면 그 묶음 코디네이터의 터미널 번호 — 아니면 null.
+ *  새로 생긴 워커 탭을 "보고 있던 pane" 이 아니라 **시킨 에이전트가 있는 pane** 에 들이는 데 쓴다.
+ */
+export function coordinatorTidOf(snapshot, cwd, tid) {
+  if (typeof tid !== "number") return null;
+  for (const run of (snapshot && snapshot.runs) || []) {
+    if (run.state !== "active") continue;
+    const co = run.coordinator;
+    if (!co || co.tid == null || (co.cwd || "") !== (cwd || "")) continue;
+    if ((run.workers || []).some((w) => w.tid === tid && (w.cwd || "") === (cwd || "") && w.terminal !== "released")) return co.tid;
+  }
+  return null;
+}
+
 /** 사람이 답해야 하는 것의 수(질문 + 결정 + 사용자 입력 대기) — 사이드바 배지·접힌 머리 표시. */
 export function attentionCount(snapshot, cwd) {
   let n = 0;

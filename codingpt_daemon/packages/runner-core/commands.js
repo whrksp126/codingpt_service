@@ -241,8 +241,27 @@ function discoverClaude(cwdAbs) {
   return out;
 }
 
-/** codex: 현재(0.146.0) 슬래시로 노출되는 사용자 정의가 없다 — 실측 결론(파일 상단 주석). */
-function discoverCodex() { return []; }
+/**
+ * codex: 현재(0.146.0) 슬래시로 노출되는 사용자 정의가 없다 — 실측 결론(파일 상단 주석).
+ *  예외 = 우리 전용 명령 `/orch`: codex 는 스킬을 `$이름` 으로 부르므로, **채팅 입력창에서 보낼 때** 데몬이
+ *  `/orch …` 를 `$orch …` 로 바꿔 넣는다(rewriteForAgent). 그래서 목록에도 보여 준다 — 스텁이 깔려 있을 때만.
+ */
+function discoverCodex() {
+  try {
+    if (!require('./skills').hasExtraStub('codex', 'orch')) return [];
+  } catch (_) { return []; }
+  return [{ name: '/orch', desc: 'CodingPT 오케스트레이션 — 일을 워커 에이전트에게 나눠 맡기고 결과를 모은다', chat: 'ok', source: 'user' }];
+}
+
+/**
+ * 채팅에서 보낸 글을 그 에이전트가 알아듣는 꼴로 — 지금은 codex 의 `/orch` 하나.
+ *  claude 는 스킬 이름이 곧 슬래시 명령이라 손대지 않는다. 다른 글은 한 글자도 바꾸지 않는다.
+ */
+function rewriteForAgent(agent, text) {
+  if (agent !== 'codex' || typeof text !== 'string') return text;
+  const m = /^\/orch(?=\s|$)/.exec(text);
+  return m ? '$orch' + text.slice(m[0].length) : text;
+}
 
 /**
  * 이 터미널에서 쓸 수 있는 슬래시 명령 목록.
@@ -278,4 +297,4 @@ function findCommand({ agent, cwdAbs, name }) {
 
 function _clearCache() { cache.clear(); }
 
-module.exports = { listCommands, findCommand, _clearCache, _frontMatter: frontMatter };
+module.exports = { listCommands, findCommand, rewriteForAgent, _clearCache, _frontMatter: frontMatter };

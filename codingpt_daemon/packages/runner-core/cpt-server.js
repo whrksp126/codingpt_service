@@ -1701,7 +1701,7 @@ function hooksDoctor(resolved) {
 //  back rpc(control.js) 두 경로가 같은 구현을 쓰도록 독립 함수로 둔다.
 //  ⚠ 멀티라인은 bracketed paste 로 감싼다 — 생 개행을 그대로 보내면 TUI 가 첫 줄에서 즉시 제출한다.
 async function chatInput({ cwd, tid, text, submit } = {}) {
-  const body = typeof text === 'string' ? text : '';
+  let body = typeof text === 'string' ? text : '';
   if (!body) throw Object.assign(new Error('보낼 텍스트가 필요합니다'), { code: 'BAD_REQUEST' });
   if (Buffer.byteLength(body, 'utf8') > 32 * 1024) {
     throw Object.assign(new Error('텍스트가 너무 깁니다(32KB 상한)'), { code: 'TOO_LARGE' });
@@ -1712,6 +1712,14 @@ async function chatInput({ cwd, tid, text, submit } = {}) {
   const { session, abs } = ptyLib.sessionForCwd(cwdRel);
   await ptyLib.migrateLegacyPool(session, abs).catch(() => { /* 레거시 풀 없음 — 무해 */ });
   const target = ptyLib.termSession(session, win);
+  // 전용 명령 `/orch` — codex 는 스킬을 슬래시가 아니라 `$이름` 으로 부른다(0.147.0 실측). 사용자는 어느
+  //  에이전트에서든 `/orch <할 일>` 한 가지로 쓰게 하고, 여기서 그 터미널의 에이전트에 맞춰 바꾼다.
+  if (/^\/orch(?=\s|$)/.test(body)) {
+    try {
+      const agent = require('./status-line').detectAgent(String(await termBackend.capture(target) || ''));
+      body = require('./commands').rewriteForAgent(agent, body);
+    } catch (_) { /* 화면을 못 읽음 — 원문 그대로 */ }
+  }
   const multiline = /\n/.test(body);
   // 컴포저 잔재 청소(2026-07-30 실사고): TUI 컴포저에 남아 있던 초안 위에 paste 하면
   //  "채팅에서 보낸 것"과 다른 메시지가 제출된다(경로 이중 전송 신고). 채팅 전송의 계약은

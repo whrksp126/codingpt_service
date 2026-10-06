@@ -4,6 +4,7 @@ import * as T from "./tiling.js";
 import { getPane, isTermTab } from "./pane.js";
 import * as i18n from './i18n/index.js';
 import { isTaskWorkspace } from "./tasks-model.js";
+import { coordinatorTidOf } from "./orch-model.js";
 // Agent Tasks(§4) — 작업 run 의 worktree 워크스페이스 술어. 정본은 순수 모듈(tasks-model.js, 앱과 교차 테스트)이고
 //  여기서는 재노출만 한다(뷰 모듈이 state.js 하나만 보고 쓸 수 있게).
 export { isTaskWorkspace };
@@ -1273,12 +1274,23 @@ export async function reconcilePool() {
       if (!targetId) T.eachLeaf(w.layout, (l) => { if (!targetId && l.kind === "terminal") targetId = l.id; });
       if (targetId) {
         const leafT = T.findLeaf(w.layout, targetId);
+        // 오케스트레이션 워커는 시킨 에이전트(코디네이터)가 있는 pane 에 들인다 — 다른 pane 을 보고 있었다고
+        //  워커 탭이 거기 흩어지면 "누가 시킨 누구" 인지 화면에서 끊긴다. 묶음 사본이 아직 없으면 종전 자리.
+        const orchSnap = state.orch.byHost[String(Number(meta.hostDeviceId != null ? meta.hostDeviceId : (state.daemon ? state.daemon.deviceId : NaN)))] || null;
+        const leafFor = (m) => {
+          const coTid = orchSnap ? coordinatorTidOf(orchSnap, meta.localPath || "", m.index) : null;
+          let hit = null;
+          if (coTid != null) T.eachLeaf(w.layout, (l) => { if (!hit && l.kind === "terminal" && l.tabs.some((t) => t.win === coTid)) hit = l; });
+          return hit || leafT;
+        };
         for (const m of missing) {
           // 편입 시점에도 판정 재료를 같이 싣는다 — 다음 틱(7s)까지 토글이 비어 보이지 않게.
           const nt = { win: m.index, title: m.name || "", cmd: m.command || "" };
           if (m.agent !== undefined) nt.agent = m.agent;
           if (m.agentState !== undefined) nt.agentState = m.agentState;
-          leafT.tabs.push(nt);
+          const into = leafFor(m);
+          into.tabs.push(nt);
+          touched.add(into.id);
         }
         api.debugLog(`reconcile: 탭 편입 ${missing.map((m) => m.index).join(",")} → pane=${targetId}`);
         // 트리 전멸 폴백으로 방금 만든 'new' placeholder 는 실제 풀 window 가 편입됐으면 제거 —

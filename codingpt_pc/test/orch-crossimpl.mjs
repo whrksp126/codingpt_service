@@ -52,6 +52,17 @@ const app = run(`import * as M from ${JSON.stringify('file://' + path.join(APP, 
 
 for (const k of Object.keys(pc)) ok(JSON.stringify(pc[k]) === JSON.stringify(app[k]), `PC ↔ 앱 같은 결과: ${k}`, `pc=${JSON.stringify(pc[k]).slice(0, 200)} app=${JSON.stringify(app[k]).slice(0, 200)}`);
 
+// PC 전용 — 새 워커 탭을 어느 pane 에 들일지(코디네이터가 있는 pane) 정하는 조회.
+{
+  const M = await import('file://' + path.join(PC, 'orch-model.js'));
+  ok(M.coordinatorTidOf(FIXTURE, 'proj', 13) === 1, '같은 폴더 워커 → 그 묶음 코디네이터의 터미널');
+  ok(M.coordinatorTidOf(FIXTURE, 'proj', 30) === 2, '다른 묶음의 워커는 그 묶음의 코디네이터로');
+  ok(M.coordinatorTidOf(FIXTURE, 'proj', 17) === null, '정리된(released) 워커 번호는 워커가 아니다');
+  ok(M.coordinatorTidOf(FIXTURE, 'proj', 50) === null, '닫힌 묶음의 워커는 따지지 않는다');
+  ok(M.coordinatorTidOf(FIXTURE, 'proj', 99) === null && M.coordinatorTidOf(null, 'proj', 13) === null && M.coordinatorTidOf(FIXTURE, 'proj', 'new') === null, '모르는 터미널·사본 없음·번호 아님 → null');
+  ok(M.coordinatorTidOf(FIXTURE, 'other', 40) === 1 && M.coordinatorTidOf(FIXTURE, 'proj', 40) === null, '폴더가 다르면 섞지 않는다');
+}
+
 // 규칙 자체(둘이 같이 틀리는 것 방지)
 const r1 = pc.runs.find((x) => x[0] === 'r1');
 ok(JSON.stringify(pc.runs.map((x) => x[0])) === '["r0","r1","r4"]', '그 폴더의 진행 중 묶음만, 오래된 것부터(닫힌 묶음·다른 폴더 제외)');

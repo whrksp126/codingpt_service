@@ -4,10 +4,12 @@ description: >-
   ONLY for terminals launched by the CodingPT app (env CPT_WS is set; if
   `$CPT_WS` is empty, never run `cpt`; working on the CodingPT source repo
   does NOT make this a CodingPT terminal). There, the `cpt` CLI is how you act inside CodingPT:
-  (0) ORCHESTRATION — when the user wants work split across agents ("나눠서 시켜",
-  "병렬로", "여러 에이전트로", "워커", "다른 에이전트한테 넘겨", "orchestrate",
-  "delegate", "hand off", "in parallel"), or your prompt starts with a CodingPT
-  worker notice, use `cpt orch` (read `cpt skills get cpt-orch` first) instead of
+  (0) ORCHESTRATION — when the user types `/orch`, wants work split across agents
+  ("나눠서 시켜", "병렬로", "여러 에이전트로", "오케스트레이션", "워커", "다른 에이전트한테
+  넘겨", "orchestrate", "delegate", "hand off", "in parallel"), when a task is
+  large and splits into independent parts that finish faster in parallel (your
+  call — say so in one line, then do it), or your prompt starts with a CodingPT
+  worker notice: use `cpt orch` (read `cpt skills get cpt-orch` first) instead of
   built-in subagents — the user watches and steers the workers from phone/PC.
   (1) AUTOMATIONS — whenever the user wants something recurring or
   conditional ("매일", "매주", "자동으로", "반복해서", "…할 때마다", "…하면 알려줘",

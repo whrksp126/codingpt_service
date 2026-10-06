@@ -55,6 +55,59 @@ function writeIfChanged(file, content) {
   return true;
 }
 
+// 전용 명령 스텁 — `/orch <할 일>`(claude 는 스킬 이름이 곧 슬래시 명령이다). Orca 가 orchestration 스킬을
+//  따로 두는 것과 같은 이유: "조율로 해라" 를 사용자가 **명시**할 입구가 있어야 한다(2026-10-06).
+//  이름이 흔해서(orch) 남의 동명 스킬과 겹칠 수 있다 → **우리 표식이 있을 때만** 덮어쓰고 지운다.
+const EXTRA_STUBS = [{ name: 'orch', src: 'ORCH_SKILL.md', mark: /CodingPT 오케스트레이션/ }];
+function extraSrc(x) { return path.join(__dirname, '..', 'cpt-cli', x.src); }
+function agentHomes() {
+  const home = path.dirname(runtime.claudeHome());
+  return [
+    { home: runtime.claudeHome(), always: true },
+    { home: path.join(home, '.codex') },
+    { home: path.join(home, '.gemini') },
+  ];
+}
+function isOurs(dir, mark) {
+  try { return mark.test(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8')); } catch (_) { return false; }
+}
+function ensureExtraStubs() {
+  for (const x of EXTRA_STUBS) {
+    let content;
+    try { content = fs.readFileSync(extraSrc(x), 'utf8'); } catch (_) { continue; }
+    for (const a of agentHomes()) {
+      try {
+        if (!a.always && !fs.existsSync(a.home)) continue; // 그 에이전트 미사용 — 폴더를 새로 만들지 않는다
+        const dir = path.join(a.home, 'skills', x.name);
+        if (fs.existsSync(dir) && !isOurs(dir, x.mark)) continue; // 남의 동명 스킬 — 불가침
+        fs.mkdirSync(dir, { recursive: true });
+        writeIfChanged(path.join(dir, 'SKILL.md'), content);
+      } catch (_) { /* 베스트에포트 */ }
+    }
+  }
+}
+function removeExtraStubs() {
+  let removed = false;
+  for (const x of EXTRA_STUBS) {
+    for (const a of agentHomes()) {
+      try {
+        const dir = path.join(a.home, 'skills', x.name);
+        if (!isOurs(dir, x.mark)) continue;
+        fs.rmSync(dir, { recursive: true, force: true });
+        removed = true;
+      } catch (_) { /* noop */ }
+    }
+  }
+  return removed;
+}
+/** 그 에이전트 홈에 우리 전용 명령 스텁이 깔려 있는가(채팅 팔레트가 codex 에 /orch 를 보일지 판단). */
+function hasExtraStub(agent, name) {
+  const x = EXTRA_STUBS.find((y) => y.name === name);
+  if (!x) return false;
+  const home = agent === 'claude' ? runtime.claudeHome() : path.join(path.dirname(runtime.claudeHome()), '.' + agent);
+  return isOurs(path.join(home, 'skills', x.name), x.mark);
+}
+
 // ~/.claude/skills/cpt-cli/SKILL.md 설치(멱등). opt-out: env CPT_SKILL_INSTALL=0.
 //  codex/gemini 는 해당 홈 디렉토리(~/.codex, ~/.gemini)가 **이미 존재할 때만** 같은 스텁을 설치한다
 //  (그 에이전트를 실제로 쓰는 사용자에게만 add — 폴더를 새로 만들지 않는다).
@@ -82,6 +135,7 @@ function ensureSkillStub() {
       writeIfChanged(path.join(a.dir, 'SKILL.md'), content);
     } catch (_) { /* noop */ }
   }
+  try { ensureExtraStubs(); } catch (_) { /* noop */ }
   return { installed: true, changed, dir };
 }
 
@@ -92,8 +146,9 @@ function removeSkillStub() {
   for (const a of agentSkillDirs()) {
     try { if (fs.existsSync(a.dir)) { fs.rmSync(a.dir, { recursive: true, force: true }); removed = true; } } catch (_) { /* noop */ }
   }
+  try { if (removeExtraStubs()) removed = true; } catch (_) { /* noop */ }
   try { if (sweepLegacyStubs()) removed = true; } catch (_) { /* noop */ }
   return removed;
 }
 
-module.exports = { ensureSkillStub, removeSkillStub, skillDir, agentSkillDirs, legacySkillDirs, sweepLegacyStubs };
+module.exports = { ensureSkillStub, removeSkillStub, skillDir, agentSkillDirs, legacySkillDirs, sweepLegacyStubs, hasExtraStub, EXTRA_STUBS };

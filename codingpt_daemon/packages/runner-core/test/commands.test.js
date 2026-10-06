@@ -79,7 +79,8 @@ test('codex 는 디스크 발견이 없다(0.146.0 실측: 스킬·프롬프트�
   cmds._clearCache();
   const items = cmds.listCommands({ agent: 'codex', cwdAbs: ws }).items;
   assert.ok(!items.some((c) => c.name === '/nope'));
-  assert.ok(items.every((c) => c.source === 'builtin'));
+  // 유일한 예외 = 우리 전용 명령 /orch(스텁이 깔린 PC 에서만 — 데몬이 보낼 때 `$orch` 로 바꾼다. skills.test.js G)
+  assert.ok(items.every((c) => c.source === 'builtin' || c.name === '/orch'));
 });
 
 test('찾기 — 인자가 붙어 있어도 이름으로 판정한다', () => {
