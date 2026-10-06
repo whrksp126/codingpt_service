@@ -11,6 +11,7 @@ import { orchRpc } from "./orch-api.js";
 import { toast, openTasksDashboard, openRunTerminal, agentName } from "./tasks-view.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { createRichEditor } from "./rich-editor.js";
+import { attachInputUndo } from "./undo-history.js";
 import { STATUSES, VIEWS, filterIssues, groupByStatus, sortIssues, sortTable, sourceOptions, openCount } from "./issues-model.js";
 
 const t = (s, v) => i18n.t(s, v);
@@ -37,17 +38,6 @@ if (!VIEWS.includes(pref.view)) pref.view = "list";
 let query = "";
 const savePref = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(pref)); } catch (_) { /* 저장 못 해도 화면은 돈다 */ } };
 
-/** 입력칸의 ⌘Z / ⇧⌘Z / ⌘Y — 앱 메뉴에 Undo/Redo 가 없어 웹뷰가 대신 해 주지 않는다(주소창·편집기와 같은 처리). 처리했으면 true. */
-function undoKey(e) {
-  if (!(e.metaKey || e.ctrlKey) || e.altKey) return false;
-  const k = e.key.toLowerCase();
-  if (k !== "z" && !(k === "y" && !e.shiftKey)) return false;
-  const tg = e.target;
-  if (!tg || !(tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.isContentEditable)) return false;
-  e.preventDefault(); e.stopPropagation();
-  document.execCommand(k === "y" || e.shiftKey ? "redo" : "undo");
-  return true;
-}
 const curHost = () => Number(S.activeDeviceId());
 const wsList = (h) => S.workspacesForDevice(h).filter((w) => w.localPath);
 const wsName = (h, cwd) => { const w = wsList(h).find((x) => x.localPath === cwd); return w ? w.name : (cwd ? cwd.split("/").pop() : ""); };
@@ -110,7 +100,8 @@ export function mountIssuesView(container) {
   el = container;
   el.className = "issues-view tasks-view";
   el.tabIndex = 0;
-  el.addEventListener("keydown", (e) => { if (undoKey(e)) return; if (e.key === "Escape" && !sheet) closeIssues(); });
+  attachInputUndo(el);   // 검색칸의 ⌘Z
+  el.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet) closeIssues(); });
   el.addEventListener("click", onClick);
   el.addEventListener("input", (e) => { if (e.target.classList?.contains("is-q")) { query = e.target.value; drawBody(); } });
   el.addEventListener("change", (e) => {
@@ -259,11 +250,15 @@ function openSheet(issue) {
   const startAgent = (pref.start && pref.start.agent) || "claude";
   const startMode = (pref.start && pref.start.mode) || "task";
   const field = (label, html) => `<label class="is-prop"><span class="is-prop-l">${esc(t(label))}</span>${html}</label>`;
+  //  제목은 평소엔 글자로만 보이고, 누르면 그 자리에서 입력칸이 된다(밖을 누르거나 Enter 면 다시 글자).
+  //  새 이슈는 "새 이슈" 라는 제목을 갖고 시작한다 — 머리줄에 따로 이름표를 두지 않는다(2026-10-07 사용자 확정).
+  const title0 = x.title || t("새 이슈");
   //  창 = 머리줄(번호 + 제목 — 여기서 바로 고친다) / 왼쪽 편집기(가득) / 오른쪽 속성 · 시작 · 저장.
   //  아래 띠는 없다 — 저장·취소·삭제는 오른쪽 칸 맨 아래에 둔다(2026-10-07 사용자 확정).
   box.innerHTML =
-    `<div class="is-sh-head"><span class="is-key">${esc(isNew ? t("새 이슈") : x.key)}</span>` +
-    `<input class="is-f-title" placeholder="${esc(t("제목"))}" value="${esc(x.title)}">${isNew ? "" : srcChip(x)}` +
+    `<div class="is-sh-head">${isNew ? "" : `<span class="is-key">${esc(x.key)}</span>`}` +
+    `<div class="is-title"><button type="button" class="is-title-t" data-s="title" title="${esc(t("제목 고치기"))}">${esc(title0)}</button>` +
+    `<input class="is-f-title" value="${esc(title0)}" hidden></div>${isNew ? "" : srcChip(x)}` +
     (ext && x.source.url ? `<button class="tv-btn ghost" data-s="ext">${esc(t("원본 열기"))}</button>` : "") +
     `<button class="ic-btn" data-s="close" title="${esc(t("닫기"))}">${icons.x({ size: 14 })}</button></div>` +
     `<div class="is-sh-main"><div class="is-sh-doc"><div class="is-f-ed"></div><div class="is-atts"></div></div>` +
@@ -348,20 +343,35 @@ function openSheet(issue) {
   dropHook = (paths) => { void addFiles(paths); };   // OS 에서 끌어다 놓은 파일(os-drop.js 가 넘긴다)
   drawAtts();
   const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey, true); sheet = null; dropHook = null; for (const u of thumbs.values()) { if (u) URL.revokeObjectURL(u); } };
+  // ── 제목 ── 글자 ↔ 입력칸. 비워 두고 나가면 고치기 전 제목으로 돌아간다(제목 없는 이슈는 없다).
+  const titleIn = q(".is-f-title"); const titleBtn = q(".is-title-t");
+  let titleVal = title0;
+  const editTitle = () => { titleBtn.hidden = true; titleIn.hidden = false; titleIn.value = titleVal; inputUndo.reset(titleIn); titleIn.focus(); titleIn.select(); };
+  const endTitle = (keep) => {
+    if (titleIn.hidden) return;
+    const v = titleIn.value.trim();
+    if (keep && v) titleVal = v;
+    titleIn.value = titleVal; titleBtn.textContent = titleVal;
+    titleIn.hidden = true; titleBtn.hidden = false;
+  };
+  titleIn.addEventListener("blur", () => endTitle(true));
+  const inputUndo = attachInputUndo(box);   // 제목·라벨·링크 칸의 ⌘Z (본문은 편집기가 제 기록으로 한다)
   const onKey = (e) => {
+    if (e.target === titleIn && !e.isComposing) {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endTitle(false); editor.focus(); return; }
+      if (e.key === "Enter" && !(e.metaKey || e.ctrlKey)) { e.preventDefault(); e.stopPropagation(); endTitle(true); editor.focus(); return; }
+    }
     if (e.key === "Escape") { e.stopPropagation(); close(); return; }
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); return; }
-    undoKey(e);
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); endTitle(true); void save(); }
   };
   document.addEventListener("keydown", onKey, true);
   overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
-  const fields = () => ({ title: q(".is-f-title").value.trim(), body: editor.getMarkdown(), status: q(".is-f-status").value, priority: q(".is-f-pri").value,
+  const fields = () => ({ title: (titleIn.hidden ? titleVal : titleIn.value.trim() || titleVal), body: editor.getMarkdown(), status: q(".is-f-status").value, priority: q(".is-f-pri").value,
     cwd: q(".is-f-cwd").value, ...(q(".is-f-labels") ? { labels: q(".is-f-labels").value } : {}) });
   let busy = false;
   async function save({ keepOpen = false } = {}) {
     if (busy) return null;
     const f = fields();
-    if (!f.title) { q(".is-f-title").focus(); return null; }
     busy = true;
     const r = isNew
       ? await act("orch.issueCreate", { ...f, provider: ghBox && ghBox.checked ? "github" : "codingpt" }, t("이슈를 만들었어요"))
@@ -378,6 +388,7 @@ function openSheet(issue) {
     const b = e.target.closest?.("[data-s]");
     if (!b) return;
     const k = b.dataset.s;
+    if (k === "title") { editTitle(); return; }
     if (k === "close") { close(); return; }
     if (k === "save") { void save(); return; }
     if (k === "ext") { api.openExternal(x.source.url).catch(() => {}); return; }
@@ -411,7 +422,7 @@ function openSheet(issue) {
     }
   });
   sheet = { close };
-  setTimeout(() => (isNew ? q(".is-f-title").focus() : editor.focus()), 30);
+  setTimeout(() => editor.focus(), 30);
 }
 /** 시작한 일로 간다 — 작업이면 그 작업 상세, 터미널이면 그 워크스페이스의 그 터미널. */
 function goTo(h, link) {

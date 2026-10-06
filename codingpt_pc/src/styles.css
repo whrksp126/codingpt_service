@@ -3457,10 +3457,11 @@ svg.mi { flex: none; display: block; }
 .is-sh-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--border); }
 .is-sh-main { flex: 1; min-height: 0; display: flex; }
 .is-sh-doc { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.is-f-title { flex: 1; min-width: 0; box-sizing: border-box; background: transparent; border: none; outline: none; color: var(--text); font-size: 16px; font-weight: 600; font-family: inherit; padding: 4px 6px; border-radius: var(--r-sm); }
-.is-f-title:hover { background: var(--hover); }
-.is-f-title:focus { background: color-mix(in srgb, var(--text) 5%, transparent); }
-.is-f-title::placeholder { color: var(--dim); }
+.is-title { flex: 1; min-width: 0; display: flex; align-items: center; }
+.is-title-t { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: none; color: var(--text); font-size: 16px; font-weight: 600; font-family: inherit; text-align: left; padding: 4px 6px; margin: 0; border-radius: var(--r-sm); cursor: text; }
+.is-title-t:hover { background: var(--hover); }
+.is-f-title { flex: 1; min-width: 0; box-sizing: border-box; background: color-mix(in srgb, var(--text) 5%, transparent); border: none; outline: none; color: var(--text); font-size: 16px; font-weight: 600; font-family: inherit; padding: 4px 6px; border-radius: var(--r-sm); }
+.is-f-title[hidden], .is-title-t[hidden] { display: none; }
 .is-f-ed { flex: 1; min-height: 0; display: flex; }
 .is-sh-doc .is-atts { padding: 8px 16px; border-top: 1px solid var(--border); }
 .is-sh-side { flex: none; width: 264px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-left: 1px solid var(--border); background: color-mix(in srgb, var(--text) 2.5%, transparent); overflow-y: auto; }

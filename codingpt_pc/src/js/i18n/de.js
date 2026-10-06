@@ -1256,6 +1256,7 @@ export default {
   "전체 워크스페이스": "Alle Workspaces",
   "완료 포함": "Erledigte anzeigen",
   "새 이슈": "Neues Issue",
+  "제목 고치기": "Titel bearbeiten",
   "이슈가 없어요": "Keine Issues",
   "할 일을 적어 두고, 준비되면 에이전트에게 시작시키세요.": "Notiere, was zu tun ist, und starte einen Agenten, sobald du bereit bist.",
   "제목": "Titel",

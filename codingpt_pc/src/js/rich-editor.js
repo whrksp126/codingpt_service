@@ -3,6 +3,7 @@
 //  GitHub 이슈 본문과도 같은 형식이라 외부 서비스와 오갈 때 변환이 없다.
 //  이미지는 본문 안에 그대로 그린다: 마크다운 `![이름](att:ID)` ↔ <img data-att="ID">.
 //  md → html(mdToHtml) 과 html → md(domToMd) 는 순수 함수라 node 테스트가 직접 돌린다(DOM 은 최소 인터페이스만 쓴다).
+import { createHistory, classifyInput, undoKeyOf, isMoveKey } from "./undo-history.js";
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** 한 줄 안의 마크다운 → html. 이미지 · 링크 · 코드 · 굵게 · 취소선 · 기울임. */
@@ -142,7 +143,40 @@ export function createRichEditor(o) {
   //  빈 글 안내문은 두지 않는다(2026-10-07 사용자 확정 — 빈 화면도 글이 있을 때와 같은 배치로 둔다).
   //  ⚠ 편집기 뿌리에 `empty` 같은 흔한 이름을 붙이지 말 것 — 공용 빈 상태 규칙(.empty: 가운데 정렬·큰 여백)이 걸려 배치가 무너졌다.
   const syncEmpty = () => {};
-  const exec = (cmd, val) => { doc.focus(); try { document.execCommand(cmd, false, val); } catch (_) { /* 이 웹뷰가 모르는 명령 */ } syncEmpty(); };
+  // ── 실행 취소 ── 웹뷰 기본은 쉬지 않고 친 글 전체를 한 번에 되돌린다 → 기록을 직접 쥔다(undo-history.js).
+  //  상태 = 본문 HTML + 커서 자리(뿌리에서 내려가는 자식 번호 길). 같은 HTML 을 되살리므로 길이 그대로 맞는다.
+  const pathOf = (node) => { const p = []; let n = node; while (n && n !== doc) { const par = n.parentNode; if (!par) return null; p.unshift(Array.prototype.indexOf.call(par.childNodes, n)); n = par; } return n === doc ? p : null; };
+  const nodeAt = (p) => { let n = doc; for (const i of p) { n = n.childNodes[i]; if (!n) return null; } return n; };
+  const snap = () => {
+    doc.querySelectorAll('input[type="checkbox"]').forEach((c) => c.toggleAttribute("checked", c.checked));   // 체크 여부는 속성이 아니라 HTML 에 안 실린다
+    const sel = window.getSelection();
+    let caret = null;
+    if (sel && sel.rangeCount && doc.contains(sel.anchorNode) && doc.contains(sel.focusNode)) {
+      const a = pathOf(sel.anchorNode); const f = pathOf(sel.focusNode);
+      if (a && f) caret = { a, ao: sel.anchorOffset, f, fo: sel.focusOffset };
+    }
+    return { html: doc.innerHTML, caret };
+  };
+  const restore = (st) => {
+    doc.innerHTML = st.html;
+    doc.focus();
+    const sel = window.getSelection();
+    if (!sel) return;
+    const a = st.caret && nodeAt(st.caret.a); const f = st.caret && nodeAt(st.caret.f);
+    const len = (n) => (n.nodeType === 3 ? n.nodeValue.length : n.childNodes.length);
+    try {
+      if (a && f) sel.setBaseAndExtent(a, Math.min(st.caret.ao, len(a)), f, Math.min(st.caret.fo, len(f)));
+      else { const r = document.createRange(); r.selectNodeContents(doc); r.collapse(false); sel.removeAllRanges(); sel.addRange(r); }
+    } catch (_) { /* 자리를 못 찾으면 커서는 웹뷰가 둔 곳 */ }
+  };
+  const history = createHistory(snap());
+  let composing = false;
+  doc.addEventListener("compositionstart", () => { composing = true; });
+  doc.addEventListener("compositionend", () => { composing = false; });
+  doc.addEventListener("input", (e) => { history.record(snap(), classifyInput(e)); });
+  doc.addEventListener("mousedown", () => history.seal());
+  const stepHistory = (dir) => { if (composing) return; const st = dir === "redo" ? history.redo() : history.undo(); if (st) restore(st); };
+  const exec = (cmd, val) => { doc.focus(); history.seal(); try { document.execCommand(cmd, false, val); } catch (_) { /* 이 웹뷰가 모르는 명령 */ } syncEmpty(); };
   const blockOf = () => { let n = window.getSelection()?.anchorNode || null; while (n && n !== doc) { if (n.nodeType === 1 && /^(H[1-3]|BLOCKQUOTE|PRE|LI)$/.test(n.tagName)) return n; n = n.parentNode; } return null; };
   let savedRange = null;
   function run(cmd) {
@@ -191,8 +225,9 @@ export function createRichEditor(o) {
   doc.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
     //  실행 취소/다시 실행 — 앱 메뉴에 Undo/Redo 가 없어(터미널·IDE 가 ⌘Z 를 직접 받게 하려고 뺐다) 웹뷰가 대신 해 주지 않는다.
-    if (mod && !e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); e.stopPropagation(); document.execCommand(e.shiftKey ? "redo" : "undo"); return; }
-    if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "y") { e.preventDefault(); e.stopPropagation(); document.execCommand("redo"); return; }
+    const hk = undoKeyOf(e);
+    if (hk) { e.preventDefault(); e.stopPropagation(); stepHistory(hk); return; }
+    if (isMoveKey(e)) history.seal();
     if (mod && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); run("bold"); }
     else if (mod && !e.shiftKey && e.key.toLowerCase() === "i") { e.preventDefault(); run("italic"); }
     else if (mod && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); run("link"); }
@@ -217,7 +252,7 @@ export function createRichEditor(o) {
       exec("insertHTML", `<div><img data-att="${esc(att.id)}" data-loaded="1" alt="${esc(att.name || "")}"${url ? ` src="${esc(url)}"` : ""}></div><div><br></div>`);
       if (!url) { const img = doc.querySelector(`img[data-att="${att.id}"]`); if (img) { delete img.dataset.loaded; loadImgs(); } }
     },
-    removeImage(id) { doc.querySelectorAll(`img[data-att="${id}"]`).forEach((n) => n.remove()); syncEmpty(); },
+    removeImage(id) { const imgs = doc.querySelectorAll(`img[data-att="${id}"]`); if (!imgs.length) return; imgs.forEach((n) => n.remove()); history.record(snap()); },
     imageIds: () => Array.from(doc.querySelectorAll("img[data-att]")).map((n) => n.getAttribute("data-att")),
     focus: () => doc.focus(),
   };

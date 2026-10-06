@@ -1256,6 +1256,7 @@ export default {
   "전체 워크스페이스": "Tous les espaces",
   "완료 포함": "Inclure les terminés",
   "새 이슈": "Nouveau ticket",
+  "제목 고치기": "Modifier le titre",
   "이슈가 없어요": "Aucun ticket",
   "할 일을 적어 두고, 준비되면 에이전트에게 시작시키세요.": "Notez ce qu’il y a à faire, puis lancez un agent quand vous êtes prêt.",
   "제목": "Titre",
