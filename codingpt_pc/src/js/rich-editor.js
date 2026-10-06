@@ -128,7 +128,7 @@ export function createRichEditor(o) {
   el.className = "re";
   el.innerHTML = `<div class="re-bar">${TOOLS.map((x) => (x ? `<button type="button" class="re-b" data-cmd="${x[0]}" title="${esc(t(x[1]))}">${x[2]}</button>` : `<span class="re-sep"></span>`)).join("")}</div>` +
     `<div class="re-link" hidden><input class="tk-input re-link-in" placeholder="https://"><button type="button" class="tv-btn re-link-ok">${esc(t("링크 넣기"))}</button></div>` +
-    `<div class="re-doc" contenteditable="true" spellcheck="false" data-ph="${esc(o.placeholder || "")}"></div>`;
+    `<div class="re-doc" contenteditable="true" spellcheck="false"></div>`;
   const doc = el.querySelector(".re-doc");
   const linkRow = el.querySelector(".re-link");
   //  빈 글도 첫 줄을 갖고 시작한다 — 줄이 없으면 커서 자리·첫 입력의 블록 모양이 웹뷰 마음대로가 된다.
@@ -139,9 +139,9 @@ export function createRichEditor(o) {
     void o.resolveImage(img.getAttribute("data-att")).then((u) => { if (u) img.src = u; }).catch(() => {});
   });
   loadImgs();
-  const syncEmpty = () => el.classList.toggle("empty", !doc.textContent.trim() && !doc.querySelector("img, hr, li, pre"));
-  syncEmpty();
-  doc.addEventListener("input", syncEmpty);
+  //  빈 글 안내문은 두지 않는다(2026-10-07 사용자 확정 — 빈 화면도 글이 있을 때와 같은 배치로 둔다).
+  //  ⚠ 편집기 뿌리에 `empty` 같은 흔한 이름을 붙이지 말 것 — 공용 빈 상태 규칙(.empty: 가운데 정렬·큰 여백)이 걸려 배치가 무너졌다.
+  const syncEmpty = () => {};
   const exec = (cmd, val) => { doc.focus(); try { document.execCommand(cmd, false, val); } catch (_) { /* 이 웹뷰가 모르는 명령 */ } syncEmpty(); };
   const blockOf = () => { let n = window.getSelection()?.anchorNode || null; while (n && n !== doc) { if (n.nodeType === 1 && /^(H[1-3]|BLOCKQUOTE|PRE|LI)$/.test(n.tagName)) return n; n = n.parentNode; } return null; };
   let savedRange = null;
@@ -190,6 +190,9 @@ export function createRichEditor(o) {
   linkRow.querySelector("input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); applyLink(); } else if (e.key === "Escape") { e.stopPropagation(); linkRow.hidden = true; doc.focus(); } });
   doc.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
+    //  실행 취소/다시 실행 — 앱 메뉴에 Undo/Redo 가 없어(터미널·IDE 가 ⌘Z 를 직접 받게 하려고 뺐다) 웹뷰가 대신 해 주지 않는다.
+    if (mod && !e.altKey && e.key.toLowerCase() === "z") { e.preventDefault(); e.stopPropagation(); document.execCommand(e.shiftKey ? "redo" : "undo"); return; }
+    if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "y") { e.preventDefault(); e.stopPropagation(); document.execCommand("redo"); return; }
     if (mod && !e.shiftKey && e.key.toLowerCase() === "b") { e.preventDefault(); run("bold"); }
     else if (mod && !e.shiftKey && e.key.toLowerCase() === "i") { e.preventDefault(); run("italic"); }
     else if (mod && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); run("link"); }

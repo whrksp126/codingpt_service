@@ -37,6 +37,17 @@ if (!VIEWS.includes(pref.view)) pref.view = "list";
 let query = "";
 const savePref = () => { try { localStorage.setItem(PREF_KEY, JSON.stringify(pref)); } catch (_) { /* 저장 못 해도 화면은 돈다 */ } };
 
+/** 입력칸의 ⌘Z / ⇧⌘Z / ⌘Y — 앱 메뉴에 Undo/Redo 가 없어 웹뷰가 대신 해 주지 않는다(주소창·편집기와 같은 처리). 처리했으면 true. */
+function undoKey(e) {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return false;
+  const k = e.key.toLowerCase();
+  if (k !== "z" && !(k === "y" && !e.shiftKey)) return false;
+  const tg = e.target;
+  if (!tg || !(tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.isContentEditable)) return false;
+  e.preventDefault(); e.stopPropagation();
+  document.execCommand(k === "y" || e.shiftKey ? "redo" : "undo");
+  return true;
+}
 const curHost = () => Number(S.activeDeviceId());
 const wsList = (h) => S.workspacesForDevice(h).filter((w) => w.localPath);
 const wsName = (h, cwd) => { const w = wsList(h).find((x) => x.localPath === cwd); return w ? w.name : (cwd ? cwd.split("/").pop() : ""); };
@@ -99,7 +110,7 @@ export function mountIssuesView(container) {
   el = container;
   el.className = "issues-view tasks-view";
   el.tabIndex = 0;
-  el.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet) closeIssues(); });
+  el.addEventListener("keydown", (e) => { if (undoKey(e)) return; if (e.key === "Escape" && !sheet) closeIssues(); });
   el.addEventListener("click", onClick);
   el.addEventListener("input", (e) => { if (e.target.classList?.contains("is-q")) { query = e.target.value; drawBody(); } });
   el.addEventListener("change", (e) => {
@@ -308,7 +319,6 @@ function openSheet(issue) {
   }
   const editor = createRichEditor({
     value: x.body || "", t,
-    placeholder: t("무엇을, 왜, 끝났다는 기준은 — 에이전트가 이 글만 보고 시작합니다"),
     resolveImage: (id) => { const pth = pathOfAtt(id); return pth ? urlOf(pth) : Promise.resolve(""); },
     onPaste: async () => { const paths = await clipFiles(); if (!paths.length) return false; await addFiles(paths); return true; },
     //  도구 줄의 첨부 버튼 — 클립보드에 있는 것을 붙인다(없으면 방법을 알려 준다. 파일 고르기 창은 웹뷰가 경로를 주지 않는다).
@@ -338,7 +348,11 @@ function openSheet(issue) {
   dropHook = (paths) => { void addFiles(paths); };   // OS 에서 끌어다 놓은 파일(os-drop.js 가 넘긴다)
   drawAtts();
   const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey, true); sheet = null; dropHook = null; for (const u of thumbs.values()) { if (u) URL.revokeObjectURL(u); } };
-  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); } };
+  const onKey = (e) => {
+    if (e.key === "Escape") { e.stopPropagation(); close(); return; }
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); return; }
+    undoKey(e);
+  };
   document.addEventListener("keydown", onKey, true);
   overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
   const fields = () => ({ title: q(".is-f-title").value.trim(), body: editor.getMarkdown(), status: q(".is-f-status").value, priority: q(".is-f-pri").value,
