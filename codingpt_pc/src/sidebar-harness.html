@@ -173,19 +173,27 @@
   // 오케스트레이션(orchestration-design.md) 확인용 — 묶음 1(진행·질문·완료·실패 워커) + 결정 1 + 한 줄 메모. `#orch` = 묶음 시트를 연다.
   const ow = (id, ui, title, o = {}) => ({ dispatchId: id, taskId: 'task_' + id, runId: 'run_a', title, uiState: ui,
     state: ['succeeded', 'failed', 'stopped', 'abandoned'].includes(ui) ? ui : 'ready', agent: o.agent || 'claude', placement: o.place || 'current',
-    cwd: 'other/project/codingpt', tid: o.tid ?? null, terminal: o.terminal || 'owned', phase: o.phase || null, createdAt: o.at || 0,
+    cwd: 'other/project/codingpt', tid: o.tid ?? null, terminal: o.terminal || 'owned', phase: o.phase || null, createdAt: Date.now() - (o.min || 1) * 60000, updatedAt: Date.now() - (o.min || 1) * 30000, model: o.model || null,
     taskRef: o.taskRef || null, question: o.q || null, result: o.res || null, liveness: 'live', attention: { categories: [] } });
   window.__ORCH = { runs: [{ id: 'run_a', objective: '결제 흐름 리팩터 + 테스트 보강', state: 'active', cwd: 'other/project/codingpt', depth: 0, createdAt: 1,
     coordinator: { cwd: 'other/project/codingpt', tid: 1, agent: 'claude' },
     tasks: [{ id: 'task_d1', title: '결제 API 재시도 로직', status: 'dispatched', deps: [] }, { id: 'task_d2', title: '웹훅 서명 검증', status: 'dispatched', deps: [] },
       { id: 'task_d3', title: '기존 테스트 정리', status: 'completed', deps: [] }, { id: 'task_d5', title: '통합 테스트 추가', status: 'pending', deps: ['task_d1', 'task_d2'] }],
     workers: [
-      ow('d1', 'working', '결제 API 재시도 로직', { tid: 2, phase: '구현 중', at: 1 }),
+      ow('d1', 'working', '결제 API 재시도 로직', { tid: 2, phase: '구현 중', at: 1, model: 'sonnet', min: 4 }),
       ow('d2', 'asking', '웹훅 서명 검증', { tid: 3, agent: 'codex', at: 2, q: { id: 'm_q1', text: '서명 검증 실패 시 401 과 400 중 무엇으로 응답할까요?\n기존 클라이언트는 400 을 기대합니다.', options: ['401', '400'] } }),
-      ow('d3', 'succeeded', '기존 테스트 정리', { tid: 4, at: 3, res: { outcome: 'succeeded', summary: '중복 테스트 12개를 정리했다. 느린 테스트 3개의 원인은 실제 네트워크 호출이었다. 남은 것은 없다.' } }),
+      ow('d3', 'succeeded', '기존 테스트 정리', { tid: 4, at: 3, model: 'haiku', min: 12, res: { outcome: 'succeeded', summary: '중복 테스트 12개를 정리했다. 느린 테스트 3개의 원인은 실제 네트워크 호출이었다. 남은 것은 없다.' } }),
       ow('d4', 'failed', 'DB 마이그레이션 초안', { agent: 'gemini', at: 4, terminal: 'released', res: { outcome: 'failed', summary: '스키마 권한이 없어 적용하지 못했다.' } }),
     ],
     gates: location.hash.includes('nogate') ? [] : [{ id: 'gate_1', runId: 'run_a', taskId: 'task_d5', question: '통합 테스트를 실제 PG 샌드박스로 돌릴까요?', options: ['샌드박스로', '목(mock)으로'], status: 'pending' }] }],
+    sessions: [
+      { cwd: 'other/project/codingpt', tid: 1, agent: 'claude', state: 'working', since: Date.now() - 9 * 60000, detail: '' },
+      { cwd: 'other/project/codingpt', tid: 2, agent: 'claude', state: 'working', since: Date.now() - 4 * 60000, detail: '' },
+      { cwd: 'other/project/codingpt', tid: 7, agent: 'codex', state: 'idle', since: Date.now() - 95 * 60000, detail: '로그인 폼 검증을 고쳤고 테스트 14개가 통과합니다.' },
+      { cwd: 'other/project/codingpt', tid: 8, agent: 'claude', state: 'permission', since: Date.now() - 30000, detail: '' },
+      { cwd: 'other/project/codingpt', tid: 9, agent: 'gemini', state: 'idle', since: Date.now() - 3 * 3600000, detail: '' },
+      { cwd: 'other/project/hub', tid: 3, agent: 'claude', state: 'working', since: Date.now() - 60000, detail: '' },
+    ],
     notes: [{ cwd: 'other/project/codingpt', comment: '워커 결과 모으는 중 — 결제 재시도만 남음', status: 'in-progress' }, { cwd: 'other/project/hub', comment: null, status: 'in-review' }] };
   S.state.orch.byHost['11'] = { ...window.__ORCH, at: Date.now() };
   S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 },

@@ -75,7 +75,8 @@ test('worker-start: 묶음을 알아서 만들고, 새 터미널에서 명세 �
   assert.strictEqual(l.index, w.tid);
   assert.strictEqual(l.fresh, true);
   const file = orch._internals.promptFile(w.dispatchId);
-  assert.ok(l.args[0].includes(file), '프롬프트는 파일 치환으로 넘긴다');
+  assert.equal(l.args[0], '--dangerously-skip-permissions', '워커는 권한 확인 생략 옵션으로 뜬다(Orca 기본값)');
+  assert.ok(l.args[l.args.length - 1].includes(file), '프롬프트는 파일 치환으로 넘긴다');
   const prompt = fs.readFileSync(file, 'utf8');
   assert.ok(prompt.includes(`cpt orch done --dispatch ${w.dispatchId}`));
   assert.ok(prompt.includes('대상: a.js'));
@@ -362,4 +363,18 @@ test('워크스페이스 메모 · 묶음 닫기 · 재기동 뒤 복원 · 조�
   assert.deepStrictEqual(closed.released, [w.dispatchId]);
   assert.strictEqual((await call('orch.list', {}, USER)).runs.length, 0);
   await rejects(call('orch.check'), 'NO_RUN');
+});
+
+test('워커 권한 — 기본은 확인 생략 인자(Orca 기본값), orch.workerPermissions="ask" 면 붙이지 않는다', () => {
+  const orch = require('../orch');
+  orch.configure({ config: () => ({}) });
+  assert.deepEqual(orch.permissionArgs('claude'), ['--dangerously-skip-permissions']);
+  assert.deepEqual(orch.permissionArgs('codex'), ['--dangerously-bypass-approvals-and-sandbox']);
+  assert.deepEqual(orch.permissionArgs('gemini'), ['--yolo']);
+  assert.deepEqual(orch.permissionArgs('unknown-agent'), []);
+  orch.configure({ config: () => ({ workerPermissions: 'ask' }) });
+  assert.deepEqual(orch.permissionArgs('claude'), []);
+  orch.configure({ config: () => ({}) });
+  const pre = orch.buildPreamble({ task: { id: 't', spec: 's' }, dispatch: { id: 'd' }, run: null, placement: 'current', canDispatch: false });
+  assert.match(pre, /되돌리기 어려운 일은 \*\*하기 전에\*\*/);
 });

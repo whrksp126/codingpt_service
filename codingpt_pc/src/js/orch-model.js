@@ -121,3 +121,92 @@ export function runTitle(run) {
   const line = String((run && run.objective) || "").split("\n").map((s) => s.trim()).find(Boolean) || "";
   return line.length > 60 ? line.slice(0, 59) + "…" : line;
 }
+
+// ── 에이전트 행(Orca 방식, 2026-10-06) ─────────────────────────────────────────────────────────
+//  워크스페이스 아래에 "그 폴더에서 돌아가는 에이전트" 를 한 줄씩 그린다. 일을 시킨 에이전트(코디네이터)가 부모 행이고
+//  맡은 워커가 그 아래 자식 행이다 — 따로 "묶음" 이라는 행을 두지 않는다(무엇을 뜻하는지 읽히지 않았다).
+
+/** 에이전트 세션 상태 → 표식. 끝난 턴의 글이 있으면 "끝"(체크), 없으면 한가함(회색 점). */
+export function sessionGlyph(state, hasDetail) {
+  if (state === "working") return "working";
+  if (state === "permission" || state === "needsInput") return "waiting";
+  if (state === "idle") return hasDetail ? "done" : "idle";
+  return "idle";
+}
+
+/** 워커 상태 → 표식. 보고 없이 멈춘 것은 "끝" 도 "실패" 도 아니다 — 근거 없음(점선 고리). */
+export function workerGlyph(ui) {
+  return {
+    starting: "working", working: "working", asking: "waiting", needs_input: "waiting", blocked: "blocked",
+    idle_no_report: "unverifiable", exited: "unverifiable", succeeded: "done", failed: "failed",
+    stopped: "interrupted", abandoned: "interrupted",
+  }[ui] || "unverifiable";
+}
+
+const firstLine = (s) => String(s || "").split("\n").map((x) => x.trim()).find(Boolean) || "";
+const SETTLED_UI = ["succeeded", "failed", "stopped", "abandoned"];
+
+function workerRow(run, w) {
+  const settled = SETTLED_UI.includes(w.uiState);
+  const said = w.question ? firstLine(w.question.text) : settled ? firstLine(w.result && w.result.summary) : (w.phase || "");
+  return {
+    kind: "worker", key: "d:" + w.dispatchId, runId: run.id, dispatchId: w.dispatchId, glyph: workerGlyph(w.uiState), textKey: workerTextKey(w.uiState),
+    agent: w.agent || null, lead: w.title || "", trail: said, model: w.model || "", at: (settled ? w.updatedAt : w.createdAt) || null,
+    tid: w.tid == null ? null : w.tid, cwd: w.cwd || "", placement: w.placement || "current", terminal: w.terminal,
+    needsReply: !!w.question, worker: w,
+  };
+}
+
+/**
+ * 그 폴더의 에이전트 행 트리. → [{ kind:"session", key, tid, agent, glyph, lead, trail, at, runIds, rollup, children:[worker…] }]
+ *  · 워커로 돌고 있는 터미널은 최상위에 다시 그리지 않는다(시킨 에이전트 아래에 있다).
+ *  · 코디네이터 터미널을 못 찾은 묶음(에이전트가 꺼졌다)도 부모 행을 만들어 워커를 잃지 않는다.
+ */
+export function sessionTree(snapshot, cwd) {
+  const here = cwd || "";
+  const runs = runsForCwd(snapshot, here);
+  const workerTerms = new Set();
+  for (const run of (snapshot && snapshot.runs) || []) {
+    if (run.state !== "active") continue;
+    for (const w of visibleWorkers(run)) if (w.tid != null && w.terminal !== "released") workerTerms.add(`${w.cwd || ""}\n${w.tid}`);
+  }
+  const rows = [];
+  const byTid = new Map();
+  const sessions = ((snapshot && snapshot.sessions) || []).filter((x) => (x.cwd || "") === here && !workerTerms.has(`${here}\n${x.tid}`))
+    .slice().sort((a, b) => a.tid - b.tid);   // 상태가 바뀌어도 자리가 안 바뀌게(since 는 상태 시작 시각이라 정렬 키가 못 된다)
+  for (const x of sessions) {
+    const row = { kind: "session", key: "s:" + x.tid, tid: x.tid, agent: x.agent || null, glyph: sessionGlyph(x.state, !!x.detail),
+      lead: "", trail: x.detail || "", at: x.since || null, runIds: [], rollup: null, children: [] };
+    rows.push(row);
+    byTid.set(x.tid, row);
+  }
+  for (const run of runs) {
+    const co = run.coordinator || {};
+    let row = co.tid != null && (co.cwd || "") === here ? byTid.get(co.tid) : null;
+    if (!row) {
+      row = { kind: "session", key: "r:" + run.id, tid: co.tid == null || (co.cwd || "") !== here ? null : co.tid, agent: co.agent || null, glyph: "idle",
+        lead: "", trail: "", at: run.createdAt || null, runIds: [], rollup: null, children: [], gone: true };
+      rows.push(row);
+    }
+    row.runIds.push(run.id);
+    if (!row.lead) row.lead = runTitle(run);
+    const roll = runRollup(run);
+    if (!row.rollup) row.rollup = { total: 0, live: 0, attention: 0, ok: 0, failed: 0, gates: 0 };
+    for (const k of ["total", "live", "attention", "ok", "failed"]) row.rollup[k] += roll.counts[k];
+    row.rollup.gates += roll.gates;
+    for (const w of visibleWorkers(run)) row.children.push(workerRow(run, w));
+    // 시킨 에이전트가 꺼졌거나 한가한데 사람이 답할 것이 남아 있으면 부모도 그것을 말한다(접혀 있어도 보이게).
+    if ((row.gone || row.glyph === "idle" || row.glyph === "done") && row.rollup.attention + row.rollup.gates > 0) row.glyph = "waiting";
+  }
+  return rows;
+}
+
+/** 짧은 경과 시간 — "3m" "2h" "5d"(1분 안쪽은 "<1m"). 숫자와 단위뿐이라 번역이 필요 없다. */
+export function shortAgo(at, now) {
+  if (!at || !now || now < at) return "";
+  const m = Math.floor((now - at) / 60000);
+  if (m < 1) return "<1m";
+  if (m < 60) return m + "m";
+  const h = Math.floor(m / 60);
+  return h < 24 ? h + "h" : Math.floor(h / 24) + "d";
+}

@@ -440,6 +440,10 @@ function buildPreamble({ task, dispatch, run, placement, canDispatch }) {
     '# 코디네이터가 보낸 추가 지시를 확인합니다 — 새 파일을 시작하기 전, 테스트를 돌린 뒤, 그리고 done 직전에.',
     'cpt orch check --json',
     '',
+    '# 되돌리기 어려운 일은 **하기 전에** 위 ask 로 코디네이터에게 묻습니다 — 원격 push·배포·맡은 범위 밖의 삭제·',
+    '# 강제 리셋·DB/외부 서비스 변경·돈이 드는 호출. 이 터미널은 승인 창 없이 실행되므로 네가 마지막 확인입니다.',
+    '# 맡은 범위 안의 파일 생성·수정·테스트·빌드는 묻지 말고 진행합니다.',
+    '',
     '# 혼자 풀 수 없게 막혔을 때만(끝내기 전에).',
     `cpt orch escalate --dispatch ${D} --subject "막힘: <이유>" --body "<자세히>"`,
     '```',
@@ -455,6 +459,25 @@ function buildPreamble({ task, dispatch, run, placement, canDispatch }) {
   if (run && run.objective) lines.push('', `전체 목표(참고): ${String(run.objective).slice(0, 400)}`);
   lines.push('', '=== 맡은 일 ===', '', task.spec);
   return lines.join('\n');
+}
+
+// 워커 권한 — Orca 와 같다(2026-10-06 사용자 결정): 워커는 **권한 확인을 생략하는 옵션**으로 띄운다.
+//  Orca 는 띄우는 모든 에이전트의 기본 인자가 이것이고(tui-agent-permissions.ts), 그래서 워커가 "style.css 를
+//  만들어도 될까요" 같은 창에서 멈추지 않는다(실사고: haiku 워커가 자기 worktree 의 파일 생성에서 멈춰
+//  사용자를 불렀다). 끄려면 daemon.json `orch.workerPermissions: "ask"`.
+//  되돌리기 어려운 일은 머리말이 "하기 전에 코디네이터에게 물어라" 로 막는다(프롬프트 층).
+const BYPASS_ARGS = {
+  claude: ['--dangerously-skip-permissions'],
+  codex: ['--dangerously-bypass-approvals-and-sandbox'],
+  gemini: ['--yolo'],
+};
+function workerPermissions() {
+  let c = {};
+  try { c = inj.config() || {}; } catch (_) { c = {}; }
+  return c.workerPermissions === 'ask' ? 'ask' : 'auto';
+}
+function permissionArgs(agentId) {
+  return workerPermissions() === 'auto' ? (BYPASS_ARGS[agentId] || []).slice() : [];
 }
 
 function promptArgs(agentId, file, shellCmd, dash) {
@@ -709,7 +732,7 @@ async function startInNewTerminal(run, d, prompt) {
   try { shell = inj.shellOf ? await inj.shellOf({ tsession: w.tsession }) : ''; } catch (_) { shell = ''; }
   const pArgs = promptArgs(w.agent, file, shell, /^\s*-/.test(prompt));
   const mArgs = inj.agentModels ? inj.agentModels.launchArgs(w.agent, w) : [];
-  const args = [...mArgs, ...(pArgs || [])];
+  const args = [...permissionArgs(w.agent), ...mArgs, ...(pArgs || [])];
   const res = await inj.launch({ cwd: w.cwd, index: w.tid, id: w.agent, ...(args.length ? { args } : {}), fresh: true, timeoutMs: timings.launchTimeoutMs });
   if (res && res.busy) throw Object.assign(codedError('WORKER_START_FAILED', '터미널에서 다른 명령이 실행 중입니다'), { stage: 'launch' });
   w.launchedAt = nowFn();
@@ -1225,6 +1248,33 @@ function rpcNoteSet(p, caller) {
 }
 
 // ── 화면용 한 벌(orch.list) ──────────────────────────────────────────────────
+// 이 PC 에서 에이전트가 붙어 있는 터미널 전부(오케스트레이션과 무관하게) — 사이드바가 워크스페이스 아래에
+//  "지금 돌아가는 에이전트" 를 행으로 그린다(Orca 의 워크트리 카드 에이전트 행과 같은 자리, 2026-10-06).
+//  상태는 agent-state(훅 자기보고 + 폴백)의 것 그대로다. detail = 마지막 턴의 한 줄(일하는 중에는 비운다 — 지난 턴 글이다).
+function agentSessions() {
+  const as = inj.agentState;
+  if (!as || typeof as.snapshot !== 'function') return [];
+  const out = [];
+  let list = [];
+  try { list = as.snapshot() || []; } catch (_) { return []; }
+  for (const v of list) {
+    if (!v || !v.attached || v.cwdRel == null || v.tid == null) continue;
+    const state = v.state === 'launching' ? 'idle' : v.state;
+    const line = state !== 'working' && v.summary ? String(v.summary).split('\n').map((x) => x.trim()).find(Boolean) || '' : '';
+    out.push({ cwd: v.cwdRel, tid: v.tid, tsession: v.key, agent: v.agent || null, state, since: v.since || null, detail: line.slice(0, 160) });
+  }
+  return out;
+}
+let sessionsTimer = null;
+function sessionsChangedSoon() {
+  if (sessionsTimer) return;
+  sessionsTimer = setTimeout(() => {
+    sessionsTimer = null;
+    try { inj.notify({ runIds: [], reason: 'sessions' }); } catch (_) { /* noop */ }
+  }, 400);
+  if (sessionsTimer.unref) sessionsTimer.unref();
+}
+
 async function rpcList(p) {
   resolveWorktreeSessions();
   const s = load();
@@ -1246,7 +1296,7 @@ async function rpcList(p) {
     });
   }
   const notes = Object.keys(s.notes).map((cwd) => ({ cwd, ...s.notes[cwd] }));
-  return { runs, notes, limits: limits(), at: nowFn() };
+  return { runs, notes, sessions: agentSessions(), limits: limits(), at: nowFn() };
 }
 
 // ── 사용자 알림 ──────────────────────────────────────────────────────────────
@@ -1373,6 +1423,7 @@ function start() {
     unsubscribe = inj.agentState.subscribe((rec) => {
       const d = rec && rec.key ? workerDispatchOf(rec.key, { activeOnly: true }) : null;
       if (d) emit(d.runId, 'liveness');
+      else sessionsChangedSoon();   // 워커가 아닌 에이전트도 사이드바에 행이 있다
     });
   }
   if (load().runs.some((r) => r.state === 'active')) ensureTick();
@@ -1401,7 +1452,7 @@ function roleOfSession(tsession) {
 }
 
 module.exports = {
-  configure, start, rpc, roleOfSession, quietSession, buildPreamble,
+  configure, start, rpc, roleOfSession, quietSession, buildPreamble, permissionArgs,
   ERROR_CODES, MESSAGE_TYPES, WS_STATUSES, DEFAULT_LIMITS, USER_METHODS, METHODS: Object.keys(METHODS),
   _internals: {
     load, save, tick, prune, advanceDag, livenessOf, storeFile, promptFile, orchDir, _reset, titleOf,

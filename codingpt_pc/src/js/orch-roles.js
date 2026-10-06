@@ -28,5 +28,5 @@ export function orchTabRole(host, cwd, win) {
 export function orchRolesSig(host) {
   const roles = rolesOf(host);
   if (!roles) return "";
-  return [...roles.entries()].map(([k, v]) => `${k}|${v.role}|${v.dot}|${v.title}`).sort().join("\n");
+  return [...roles.entries()].map(([k, v]) => `${k}|${v.role}|${v.dot}|${v.uiState || ""}|${v.title}`).sort().join("\n");
 }

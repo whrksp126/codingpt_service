@@ -538,9 +538,38 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .wsg-sub { padding-left: 23px; font-size: 11px; line-height: 15px; color: var(--dim); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wsg-subtx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .wsg-agent { padding-left: 42px; }
-/* 오케스트레이션 — 묶음 행(로컬 아래) + 워커 행(2줄: 맡은 일 / 상태). 색은 상태 점(.tv-dot)만. */
-.wsg-worker { min-height: 40px; }
-.wsg-worker .wsg-sub { padding-left: 22px; }
+/* 에이전트 행(Orca 방식) — 한 줄: [상태 표식][로고] 이름 - 지금 하는 말 · 모델 · 경과 시간.
+   일을 시킨 에이전트 = 부모(왼쪽 2px 띠 + 옅은 면), 워커 = 자식(들여쓰기 + 가지 표시). 색은 상태 표식에만. */
+.wsg-ag { min-height: 24px; gap: 5px; padding: 0 8px 0 28px; font-size: 11.5px; line-height: 1; color: var(--text3); }
+.wsg-ag .wsg-ic { color: var(--text3); }
+.wsg-ag.parent {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text) 38%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent);
+}
+.wsg-ag.parent:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.wsg-ag.child { position: relative; padding-left: 42px; }
+.wsg-ag.child::before { content: ""; position: absolute; left: 33px; top: 50%; width: 6px; border-top: 1px solid color-mix(in srgb, var(--text) 22%, transparent); }
+.wsg-ag.active { background: var(--pressed); box-shadow: inset 0 0 0 1px var(--border-ctrl); font-weight: 400; }
+.ag-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
+.ag-lead { color: var(--text2); }
+.wsg-ag.active .ag-lead { color: var(--text); }
+.ag-trail { color: var(--dim); }
+.ag-model { flex: none; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; color: var(--dim); }
+.ag-time, .ag-more { flex: none; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--dim); }
+.ag-btn { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; color: var(--dim); }
+.ag-btn:hover { background: var(--hover); color: var(--text); }
+/* 상태 표식 — Orca AgentStateDot 과 같은 어휘·같은 색(상태 신호). */
+.ag-glyph { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 12px; height: 12px; }
+.ag-glyph svg { width: 12px; height: 12px; display: block; }
+.ag-glyph .ag-pt { display: block; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--text3) 45%, transparent); }
+.ag-glyph .ag-spin { display: block; width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #eab308; border-top-color: transparent; animation: agSpin 1s steps(12, end) infinite; }
+.ag-glyph.done { color: #10b981; }
+.ag-glyph.waiting { color: #ea580c; }
+.ag-glyph.unverifiable { color: #f59e0b; }
+.ag-glyph.blocked .ag-pt, .ag-glyph.failed .ag-pt { background: #ef4444; }
+.ag-glyph.interrupted .ag-pt { background: var(--text3); }
+@keyframes agSpin { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .ag-glyph .ag-spin { animation: none; border-top-color: #eab308; } }
 .wsr-note { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; font-size: 11px; line-height: 15px; color: var(--text3); }
 .wsr-note-st { flex: none; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--text2); font-size: 10px; line-height: 15px; font-weight: 500; }
 .wsr-note-tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -1651,13 +1680,8 @@ select.sett-select { min-width: 160px; max-width: 240px; height: 32px; padding-l
 /* 탭 대기 점 — 승인/질문 카드는 그 탭을 열었을 때만 뜨므로, 어느 터미널이 기다리는지 알리는 유일한 신호.
    상태 신호라 유일하게 색을 쓴다(포인트 컬러 제거 라운드의 예외). */
 /* 탭의 오케스트레이션 표식 — 워커 = 점, 코디네이터 = 마름모. 기본은 무채색 테두리, 색은 상태 신호(warn·error)에만. */
-.ptab-orch { flex: none; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--text3); background: transparent; }
-.ptab-orch.coordinator { border-radius: 1px; transform: rotate(45deg); }
-.ptab-orch.spin { background: var(--text3); box-shadow: none; animation: tvPulse 1.2s ease-in-out infinite; }
-.ptab-orch.warn { background: var(--warn); box-shadow: none; }
-.ptab-orch.error { background: var(--error); box-shadow: none; }
-.ptab-orch.off { background: var(--dim); box-shadow: none; opacity: 0.6; }
-@media (prefers-reduced-motion: reduce) { .ptab-orch.spin { animation: none; } }
+.ptab-orch { display: inline-flex; flex: none; align-items: center; margin-left: 5px; }
+.ptab-orch.coordinator { width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); box-shadow: inset 0 0 0 1px var(--text3); }
 .ptab-wait { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 4px; }
 
 /* ── Chat 본문 ── */

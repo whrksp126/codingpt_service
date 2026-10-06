@@ -805,6 +805,10 @@ async function launchRun(t, r, { withPrompt }) {
   let args;
   let mode = 'resume';
   const modelArgs = dep('agentModels').launchArgs(r.agent, r);   // --model/--effort(없으면 CLI 기본값)
+  // 오케스트레이션 워커는 권한 확인 생략 옵션으로 띄운다(orch.permissionArgs — Orca 와 같은 기본값). 일반 작업은 종전대로.
+  if (t.origin && t.origin.kind === 'orch') {
+    try { modelArgs.unshift(...require('./orch').permissionArgs(r.agent)); } catch (_) { /* 구 번들 */ }
+  }
   if (withPrompt) {
     args = r.promptMode === 'arg' ? await promptArgsFor(t, r) : null;
     if (r.promptMode === 'arg' && !args) r.promptMode = 'paste';

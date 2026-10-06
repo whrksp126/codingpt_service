@@ -41,7 +41,7 @@ export function refreshOrchHost(host) {
     try {
       const r = await orchRpc("orch.list", {}, h);
       const before = orchRolesSig(h);
-      S.setOrchForHost(h, { runs: (r && r.runs) || [], notes: (r && r.notes) || [], at: Date.now() });
+      S.setOrchForHost(h, { runs: (r && r.runs) || [], notes: (r && r.notes) || [], sessions: (r && r.sessions) || [], at: Date.now() });
       if (orchRolesSig(h) !== before) refreshTabHeads();
     } catch (_) {
       // 구 데몬·오프라인 — 마지막으로 본 것을 지우지 않는다(잠깐의 끊김에 행이 깜빡이지 않게). 구 데몬이면 처음부터 비어 있다.
@@ -80,8 +80,8 @@ export function startOrchBackground() {
   if (pollTimer) return;
   pollTimer = setInterval(() => {
     if (document.hidden || !state.paired) return;
-    const any = Object.values(state.orch.byHost).some((b) => (b.runs || []).some((r) => r.state === "active"));
-    if (any) void refreshOrchAll();
+    // 에이전트 행은 묶음이 없어도 있다(워크스페이스에서 도는 에이전트 전부) — 항상 맞춘다. push 를 놓쳐도 30초 안에 돌아온다.
+    void refreshOrchAll();
   }, POLL_MS);
 }
 

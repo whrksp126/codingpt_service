@@ -16,7 +16,8 @@ import { autoAttentionCount, openAutomations } from "./automations-view.js";
 import { hostHasAuto, hostAwake } from "./automations-api.js";
 import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
-import { runsForCwd, noteFor, runRollup, runTitle, visibleWorkers, workerDot, workerTextKey, attentionCount } from "./orch-model.js";
+import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo } from "./orch-model.js";
+import { agentGlyphHtml } from "./agent-glyph.js";
 import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
 import { ot, wsStatusText } from "./text/orch.js";
 import * as i18n from './i18n/index.js';
@@ -756,26 +757,31 @@ function openWs(w) {
   S.setActive(w.id);
 }
 
-// ── 오케스트레이션(orchestration-design.md) — 로컬 행 아래 "묶음 → 워커" ─────────────────────────
-//  묶음 행 = 코디네이터가 그 폴더에서 돌리는 조율 한 건(목표 + 합산 상태). 워커 행 = 맡은 일 + 지금 상태.
+// ── 에이전트 행(orchestration-design.md §10, Orca 방식) — 로컬 행 아래 "에이전트 → 맡긴 워커" ─────────────
+//  한 줄 = [상태 표식][에이전트 로고] 이름 - 지금 하는 말 · 모델 · 경과 시간. 일을 시킨 에이전트가 부모, 워커가 자식이다.
 //  기본은 펼침이다(지금 돌아가는 것을 숨기지 않는다) — 접은 것만 기억한다.
 const orchFolded = new Set();
-function toggleOrch(runId) {
-  if (orchFolded.has(runId)) orchFolded.delete(runId); else orchFolded.add(runId);
+function toggleOrch(key) {
+  if (orchFolded.has(key)) orchFolded.delete(key); else orchFolded.add(key);
   updateSidebar();
 }
 function orchRuns(host, w) {
   const snap = orchSnapshot(host);
   return snap && w.localPath != null ? runsForCwd(snap, w.localPath || "") : [];
 }
-/** 렌더 서명 — 묶음·워커의 보이는 값 전부 + 한 줄 메모. */
+function agentTree(host, w) {
+  const snap = orchSnapshot(host);
+  return snap && w.localPath != null ? sessionTree(snap, w.localPath || "") : [];
+}
+/** 렌더 서명 — 에이전트·워커 행의 보이는 값 전부 + 한 줄 메모 + 분 단위 시각(경과 시간 표시). */
 function orchSig(host, w) {
   const snap = orchSnapshot(host);
   if (!snap) return null;
   const n = noteFor(snap, w.localPath || "");
-  const runs = runsForCwd(snap, w.localPath || "");
-  return [n ? [n.comment, n.status] : null, runs.length ? focusedTid(w.id) : null, runs.map((r) => [r.id, runTitle(r), orchFolded.has(r.id), (r.gates || []).length,
-    visibleWorkers(r).map((x) => [x.dispatchId, x.uiState, x.title, x.phase || "", x.agent, x.tid, x.terminal, x.question ? x.question.id : null])])];
+  const rows = sessionTree(snap, w.localPath || "");
+  return [n ? [n.comment, n.status] : null, rows.length ? [focusedTid(w.id), Math.floor(Date.now() / 60000)] : null,
+    rows.map((r) => [r.key, r.glyph, r.agent, r.lead, r.trail, r.at, orchFolded.has(r.key), r.rollup ? [r.rollup.total, r.rollup.attention, r.rollup.gates] : null,
+      r.children.map((c) => [c.key, c.glyph, c.agent, c.lead, c.trail, c.model, c.at, c.tid, c.terminal, c.needsReply])])];
 }
 /** 그 워크스페이스에서 사람이 답해야 하는 것의 수(질문·결정·입력 대기). */
 function orchAttention(host, w) {
@@ -788,49 +794,55 @@ function orchTaskIds(host, w) {
   for (const r of orchRuns(host, w)) for (const x of r.workers || []) if (x.taskRef && x.taskRef.taskId) ids.add(x.taskRef.taskId);
   return ids;
 }
-function orchRunRow(w, run) {
+const GLYPH_TEXT = { working: "wWorking", waiting: "wNeedsInput", blocked: "wBlocked", failed: "wFailed", interrupted: "wStopped", done: "wSucceeded", unverifiable: "wIdleNoReport" };
+function agRowHtml({ glyph, glyphTitle, agent, lead, trail, model, at, extra }) {
+  const ago = shortAgo(at, Date.now());
+  return agentGlyphHtml(glyph, glyphTitle) +
+    `<span class="wsg-ic">${agentMarkHtml(agent, { size: 13 }) || icons.terminal({ size: 13 })}</span>` +
+    `<span class="ag-text"><span class="ag-lead">${escapeHtml(lead)}</span>${trail ? `<span class="ag-trail"> - ${escapeHtml(trail)}</span>` : ""}</span>` +
+    (model ? `<span class="ag-model">${escapeHtml(model)}</span>` : "") + (extra || "") +
+    (ago ? `<span class="ag-time">${ago}</span>` : "");
+}
+/** 에이전트 행(최상위) — 워커를 거느리면 부모 행(접기 + 묶음 시트 버튼). 클릭 = 그 터미널. */
+function agentSessionRow(w, r) {
   const host = Number(S.activeDeviceId());
-  const roll = runRollup(run);
-  const open = !orchFolded.has(run.id);
   const b = document.createElement("button");
-  b.className = "wsg-child wsg-task wsg-orch";
-  b.dataset.orchRun = run.id;
-  const c = roll.counts;
-  const sub = [ot("workersN", { n: c.total }),
-    c.live ? ot("liveN", { n: c.live }) : "",
-    c.attention + roll.gates ? ot("attentionN", { n: c.attention + roll.gates }) : "",
-    c.failed ? ot("failedN", { n: c.failed }) : "",
-    !c.live && !c.attention && !roll.gates && c.ok ? ot("okN", { n: c.ok }) : ""].filter(Boolean).join(" · ");
-  b.innerHTML =
-    `<span class="wsg-line"><span class="wsg-ic">${icons.orch({ size: 15 })}</span>` +
-    `<span class="wsg-title">${escapeHtml(runTitle(run) || ot("orchestration"))}</span>` +
-    (c.total ? `<span class="wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "") +
-    `</span>` +
-    `<span class="wsg-sub"><span class="tv-dot${roll.dot === "none" ? "" : " " + roll.dot}"></span><span class="wsg-subtx">${escapeHtml(sub)}</span></span>`;
+  const parent = r.children.length > 0 || r.runIds.length > 0;
+  const open = !orchFolded.has(r.key);
+  const here = r.tid != null && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === r.tid;
+  b.className = "wsg-child wsg-ag" + (parent ? " parent" : "") + (here ? " active" : "");
+  b.dataset.agSession = r.key;
+  const ro = r.rollup;
+  const trail = parent && ro
+    ? [ro.attention + ro.gates ? ot("attentionN", { n: ro.attention + ro.gates }) : "", ro.live ? ot("liveN", { n: ro.live }) : "", ro.failed ? ot("failedN", { n: ro.failed }) : "",
+      !ro.live && !ro.attention && !ro.gates && ro.ok ? ot("okN", { n: ro.ok }) : ""].filter(Boolean).join(" · ")
+    : r.trail;
+  const extra = parent
+    ? (!open && r.children.length ? `<span class="ag-more">+${r.children.length}</span>` : "") +
+      `<span class="ag-btn ag-run" title="${escapeHtml(ot("orchestration"))}">${icons.orch({ size: 12 })}</span>` +
+      (r.children.length ? `<span class="ag-btn wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "")
+    : "";
+  b.innerHTML = agRowHtml({ glyph: r.glyph, glyphTitle: GLYPH_TEXT[r.glyph] ? ot(GLYPH_TEXT[r.glyph]) : "", agent: r.agent,
+    lead: r.lead || agentName(r.agent || "") || ot("coordinator"), trail, model: "", at: r.at, extra });
   b.addEventListener("click", (e) => {
-    if (e.target.closest?.(".wsg-caret2")) { e.stopPropagation(); toggleOrch(run.id); return; }
-    openOrchSheet({ host, runId: run.id });
+    if (e.target.closest?.(".wsg-caret2")) { e.stopPropagation(); toggleOrch(r.key); return; }
+    if (r.runIds.length && (e.target.closest?.(".ag-run") || r.tid == null)) { e.stopPropagation(); openOrchSheet({ host, runId: r.runIds[0] }); return; }
+    if (r.tid != null) void openRunTerminal(w.id, r.tid);
   });
+  b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   return b;
 }
-function orchWorkerRow(w, run, x) {
+/** 워커 행(자식) — 클릭 = 그 터미널. 답이 필요하거나 터미널이 없으면 묶음 시트(답하는 자리). */
+function agentWorkerRow(w, c) {
   const host = Number(S.activeDeviceId());
   const b = document.createElement("button");
-  const here = x.tid != null && x.terminal !== "released" && x.placement !== "worktree" && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === x.tid;
-  b.className = "wsg-child wsg-task wsg-agent wsg-worker" + (here ? " active" : "");
-  b.dataset.dispatchId = x.dispatchId;
-  const dot = workerDot(x.uiState);
-  const settled = x.uiState === "succeeded" || x.uiState === "failed" || x.uiState === "stopped" || x.uiState === "abandoned";
-  //  부제 = 상태 + (질문이면 질문 첫 줄 / 일하는 중이면 워커가 보고한 단계)
-  const tail = x.question ? String(x.question.text || "").split("\n")[0] : (!settled && x.phase ? x.phase : "");
-  b.innerHTML =
-    `<span class="wsg-line"><span class="wsg-ic">${agentMarkHtml(x.agent, { size: 14 }) || icons.terminal({ size: 14 })}</span>` +
-    `<span class="wsg-title">${escapeHtml(x.title || ot("worker"))}</span></span>` +
-    `<span class="wsg-sub"><span class="tv-dot${dot === "none" ? "" : " " + dot}"></span><span class="wsg-subtx">${escapeHtml(ot(workerTextKey(x.uiState)) + (tail ? " · " + tail : ""))}</span></span>`;
+  const here = c.tid != null && c.terminal !== "released" && c.placement !== "worktree" && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === c.tid;
+  b.className = "wsg-child wsg-ag child" + (here ? " active" : "");
+  b.dataset.dispatchId = c.dispatchId;
+  b.innerHTML = agRowHtml({ glyph: c.glyph, glyphTitle: ot(c.textKey), agent: c.agent, lead: c.lead || ot("worker"), trail: c.trail, model: c.model, at: c.at });
   b.addEventListener("click", () => {
-    // 답이 필요한 워커는 시트(답하는 자리)로, 나머지는 그 터미널로.
-    if (x.question || x.tid == null || x.terminal === "released") { openOrchSheet({ host, runId: run.id }); return; }
-    void openWorkerTerminal(host, x, x.placement === "worktree" ? null : w.id);
+    if (c.needsReply || c.tid == null || c.terminal === "released") { openOrchSheet({ host, runId: c.runId }); return; }
+    void openWorkerTerminal(host, c.worker, c.placement === "worktree" ? null : w.id);
   });
   return b;
 }
@@ -864,9 +876,9 @@ function wsGroup(w, g) {
     kids.className = "wsg-children";
     kids.appendChild(localRow(w));
     const ohost = Number(S.activeDeviceId());
-    for (const run of orchRuns(ohost, w)) {
-      kids.appendChild(orchRunRow(w, run));
-      if (!orchFolded.has(run.id)) for (const x of visibleWorkers(run)) kids.appendChild(orchWorkerRow(w, run, x));
+    for (const r of agentTree(ohost, w)) {
+      kids.appendChild(agentSessionRow(w, r));
+      if (!orchFolded.has(r.key)) for (const c of r.children) kids.appendChild(agentWorkerRow(w, c));
     }
     const owned = orchTaskIds(ohost, w);
     for (const t of (g && g.tasks) || []) {

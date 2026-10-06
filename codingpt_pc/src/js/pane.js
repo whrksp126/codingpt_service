@@ -20,6 +20,8 @@ import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { orchTabRole } from "./orch-roles.js";
+import { agentGlyphHtml } from "./agent-glyph.js";
+import { workerGlyph } from "./orch-model.js";
 import { ot } from "./text/orch.js";
 import { state as appState } from "./state.js";
 import { shellQuote } from "./path-utils.js";
@@ -836,7 +838,9 @@ export class PaneView {
         //  워커 = 점(상태에 따라 명암·warn·error), 코디네이터 = 마름모. 무슨 일을 맡았는지는 툴팁이 말한다.
         const orole = twin != null ? orchTabRole(this.ctx.hostDeviceId, tcwd, twin) : null;
         const oroleHtml = orole
-          ? `<span class="ptab-orch ${orole.role}${orole.dot && orole.dot !== "none" ? " " + orole.dot : ""}" title="${escapeHtml(ot(orole.role === "worker" ? "roleWorkerTip" : "roleCoordinatorTip", { name: orole.title || "" }))}"></span>`
+          ? (orole.role === "worker"
+            ? `<span class="ptab-orch worker">${agentGlyphHtml(workerGlyph(orole.uiState), ot("roleWorkerTip", { name: orole.title || "" }))}</span>`
+            : `<span class="ptab-orch coordinator" title="${escapeHtml(ot("roleCoordinatorTip", { name: orole.title || "" }))}"></span>`)
           : "";
         tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}${oroleHtml}`
           + (waiting ? `<span class="ptab-wait" title="${i18n.t('응답을 기다리는 중')}"></span>` : "");
