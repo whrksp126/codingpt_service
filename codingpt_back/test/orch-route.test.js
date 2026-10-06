@@ -29,7 +29,7 @@ async function callOrch(body, impl) {
 test('허용 표: 보기 + 답하기·결정·멈추기·정리·닫기·메모만', async () => {
   const ok = [...daemonController._ORCH_RPC_OK.keys()].sort();
   // 이슈(orch.issue*)는 사람이 화면에서 만들고·고치고·시작한다(2026-10-06) — 허용 표에 있다.
-  assert.deepStrictEqual(ok, ['orch.gateList', 'orch.gateResolve', 'orch.issueCreate', 'orch.issueDelete', 'orch.issueGet', 'orch.issueList', 'orch.issueStart', 'orch.issueUpdate', 'orch.list', 'orch.noteSet', 'orch.reply', 'orch.runClose', 'orch.runList',
+  assert.deepStrictEqual(ok, ['orch.gateList', 'orch.gateResolve', 'orch.issueAttach', 'orch.issueCreate', 'orch.issueDelete', 'orch.issueDetach', 'orch.issueGet', 'orch.issueList', 'orch.issueStart', 'orch.issueUpdate', 'orch.list', 'orch.noteSet', 'orch.reply', 'orch.runClose', 'orch.runList',
     'orch.runShow', 'orch.status', 'orch.workerList', 'orch.workerRead', 'orch.workerRelease', 'orch.workerRetain', 'orch.workerShow', 'orch.workerStop']);
   const { res, calls } = await callOrch({ method: 'orch.reply', params: { id: 'm_1', body: '그렇게 해' }, hostDeviceId: 3 });
   assert.strictEqual(res.statusCode, 200);

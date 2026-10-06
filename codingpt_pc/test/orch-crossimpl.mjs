@@ -27,6 +27,16 @@ const FIXTURE = {
   notes: [{ cwd: 'proj', comment: '테스트 돌리는 중', status: 'in-progress' }, { cwd: 'empty', comment: null, status: null }],
 };
 
+const SESSIONS = [
+  { cwd: 'proj', tid: 1, agent: 'claude', state: 'working', since: 5 }, { cwd: 'proj', tid: 13, agent: 'claude', state: 'working', since: 1 },
+  { cwd: 'proj', tid: 70, agent: 'codex', state: 'idle', since: 2, detail: '끝' }, { cwd: 'proj', tid: 71, agent: 'claude', state: 'permission', since: 3 },
+  { cwd: 'proj', tid: null, threadId: 'th_b', chat: true, agent: 'claude', state: 'working', title: '채팅 B', model: 'opus' },
+  { cwd: 'proj', tid: null, threadId: 'th_a', chat: true, agent: 'claude', state: 'idle', title: '채팅 A', detail: '답' },
+  { cwd: 'other', tid: 5, agent: 'claude', state: 'idle' }];
+const WT_RUN = [{ id: 'r9', state: 'active', cwd: 'proj', objective: '다른 브랜치로', createdAt: 9, coordinator: { cwd: 'proj', tid: 70 }, gates: [], workers: [
+  W('d91', 'working', { placement: 'worktree', branch: 'cpt/a-1', cwd: 'wt/a', taskRef: { taskId: 'tk1', runId: 'x' }, phase: '구현 중', model: 'haiku' }),
+  W('d92', 'asking', { placement: 'worktree', branch: '', cwd: 'wt/b', question: { text: '무엇으로?\n둘째 줄' } }),
+  W('d93', 'succeeded', { result: { summary: '끝냈다\n자세히' }, updatedAt: 77 })] }];
 const probe = `
   const snap = FIXTURE;
   const out = {
@@ -39,12 +49,19 @@ const probe = `
     roles: [...M.terminalRoles(snap).entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)),
     long: M.runTitle({ objective: '가'.repeat(80) }).length,
     nulls: [M.runRollup(null), M.visibleWorkers(null), M.runsForCwd(null, ''), M.terminalRoles(null).size],
+    // 에이전트 행 트리·작업 폴더 묶음·표식(2026-10-07 — 앱도 같은 규칙)
+    tree: (() => { const s2 = { ...snap, sessions: SESSIONS, runs: snap.runs.concat(WT_RUN) }; const rows = M.sessionTree(s2, 'proj');
+      return [rows.map((r) => [r.key, r.glyph, r.lead, r.trail, r.tid, r.threadId || null, r.runIds, r.rollup, r.children.map((c) => [c.key, c.glyph, c.lead, c.trail, c.placement, c.branch, c.taskId, c.needsReply])]),
+        M.worktreeGroups(rows).map((g) => [g.key, g.branch, g.taskId, g.workers.map((c) => c.dispatchId)])]; })(),
+    glyphs: [['working', false], ['permission', false], ['needsInput', true], ['idle', true], ['idle', false], ['??', true]].map(([a, b]) => M.sessionGlyph(a, b))
+      .concat(['starting','working','asking','needs_input','blocked','idle_no_report','exited','succeeded','failed','stopped','abandoned','??'].map((u) => M.workerGlyph(u))),
+    ago: [M.shortAgo(0, 5), M.shortAgo(1, 30001), M.shortAgo(1, 5 * 60000 + 1), M.shortAgo(1, 3 * 3600000 + 1), M.shortAgo(1, 50 * 3600000)],
   };
   console.log(JSON.stringify(out));
 `;
 function run(importLine, flags) {
   const tmp = path.join(process.env.TMPDIR || '/tmp', `orchprobe-${process.pid}-${Math.random().toString(36).slice(2)}.mjs`);
-  fs.writeFileSync(tmp, `${importLine}\nconst FIXTURE = ${JSON.stringify(FIXTURE)};\n${probe}`);
+  fs.writeFileSync(tmp, `${importLine}\nconst FIXTURE = ${JSON.stringify(FIXTURE)};\nconst SESSIONS = ${JSON.stringify(SESSIONS)};\nconst WT_RUN = ${JSON.stringify(WT_RUN)};\n${probe}`);
   try { return JSON.parse(execFileSync(process.execPath, [...flags, tmp], { encoding: 'utf8' })); } finally { try { fs.unlinkSync(tmp); } catch (_) { /* noop */ } }
 }
 const pc = run(`import * as M from ${JSON.stringify('file://' + path.join(PC, 'orch-model.js'))};`, []);
