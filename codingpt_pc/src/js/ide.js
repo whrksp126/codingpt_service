@@ -10,6 +10,7 @@ import { termTargetAt, shq, insertIntoTerminal } from "./os-drop.js";
 import { basename, dirname, joinPath, splitSegs } from "./path-utils.js";
 import * as PV from "./preview-kind.js";
 import * as RV from "./review-view.js";
+import { buildTreeStatus, statusOf, statusSig, clickSelect, topLevel } from "./tree-status.js";
 import { tx as pvTx } from "./text/index.js";
 import { FILE_PREVIEW_TEXT } from "./text/file-preview.js";
 import { REVIEW_TEXT } from "./text/review.js";
@@ -76,6 +77,13 @@ export class IdeView {
     this._gseq = 0;
     this.expanded = new Set([this.root]);
     this.selectedPath = null; // 트리에서 키보드로 선택된 행(Return=이름변경·화살표 이동 대상)
+    //  여러 개 선택(⌘ 클릭 · ⇧ 클릭 · ⇧ 화살표) — selectedPath 는 그중 "마지막으로 누른 것"(키보드 포커스·기준점).
+    this.selected = new Set();
+    this.selAnchor = null;
+    //  git 표시(변경 글자·무시 흐림) — opts.gitFiles() 가 주는 데몬 git.files 결과. 없거나 저장소가 아니면 표시 없음.
+    this._git = buildTreeStatus(null);
+    this._gitSig = "";
+    this.searchScope = null; // "폴더에서 찾기" — 검색을 그 폴더 안으로 좁힌다
     this.treeVisible = true;
     this.tree = null;
     this.searchTree = null;
@@ -429,9 +437,41 @@ export class IdeView {
       this.tree = await this.fs.fsTree(this.root, 4);
       this.searchTree = null;
       this._renderTree();
+      void this._refreshGit();
     } catch (e) {
       this.treeEl.innerHTML = `<div class="ide-err">${esc(String(e))}</div>`;
     }
+  }
+
+  /** git 표시를 다시 받는다 — 바뀐 때만 트리 본문을 다시 그린다(이름 고치는 중이면 건드리지 않는다). */
+  async _refreshGit() {
+    if (!this.opts.gitFiles || this._gitBusy) return;
+    this._gitBusy = true;
+    try {
+      const res = await this.opts.gitFiles(this.root);
+      const sig = statusSig(res);
+      if (sig === this._gitSig && !!(res && res.repo) === this._git.repo) return;
+      this._gitSig = sig;
+      this._git = buildTreeStatus(res);
+      if (this.bodyEl && !this.bodyEl.querySelector(".ide-rename-input") && !(this.query || "").trim()) {
+        const top = this.bodyEl.scrollTop;
+        const hadFocus = this.bodyEl.contains(document.activeElement);
+        this._renderBody();
+        this.bodyEl.scrollTop = top;
+        if (hadFocus) this._focusSelected();
+      }
+    } catch (_) { /* 구 데몬·오프라인 — 표시 없이 둔다 */ } finally { this._gitBusy = false; }
+  }
+  _rel(path) { return this.root ? (path.startsWith(this.root + "/") ? path.slice(this.root.length + 1) : "") : path; }
+  /** 이 행에 한 동작이 닿는 대상 — 그 행이 여러 개 선택 안에 있으면 선택 전부(안쪽 것은 뺀다), 아니면 그 행 하나. */
+  _targets(n) {
+    if (!this.selected.has(n.path) || this.selected.size < 2) return [n];
+    return topLevel(this.selected).filter((p) => p !== this.root).map((p) => this._findNode(p) || { path: p, name: baseName(p), dir: false });
+  }
+  _paintSelection() {
+    if (!this.bodyEl) return;
+    this.bodyEl.querySelectorAll(".ide-node.selected").forEach((r) => r.classList.remove("selected"));
+    for (const p of this.selected) this.bodyEl.querySelector(`.ide-node[data-path="${cssEsc(p)}"]`)?.classList.add("selected");
   }
 
   // ── 트리 ──
@@ -462,7 +502,7 @@ export class IdeView {
     search.innerHTML = `<span class="ide-search-ic">${icons.search({ size: 13 })}</span>`;
     const input = document.createElement("input");
     input.className = "ide-search-input";
-    input.placeholder = i18n.t('프로젝트 전체 검색 (파일 내용)');
+    input.placeholder = this.searchScope ? i18n.t('{name} 안에서 검색', { name: baseName(this.searchScope) }) : i18n.t('프로젝트 전체 검색 (파일 내용)');
     input.value = this.query || "";
     input.addEventListener("input", () => {
       this.query = input.value;
@@ -470,7 +510,12 @@ export class IdeView {
       if (!this.query.trim()) { this._renderBody(); return; }
       this._searchTimer = setTimeout(() => this._renderBody(), 220);
     });
-    input.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { input.value = ""; this.query = ""; clearTimeout(this._searchTimer); this._renderBody(); } });
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      const hadScope = !!this.searchScope;
+      input.value = ""; this.query = ""; this.searchScope = null; clearTimeout(this._searchTimer);
+      if (hadScope) this._renderTree(); else this._renderBody();
+    });
     search.appendChild(input);
     this.treeEl.append(hdr, search);
     this.bodyEl = document.createElement("div");
@@ -495,7 +540,7 @@ export class IdeView {
     const token = ++this._searchToken;
     this.bodyEl.innerHTML = `<div class="ide-empty">${i18n.t('검색 중…')}</div>`;
     let hits = [];
-    try { hits = await this.fs.fsSearch(this.root, q, 500); } catch (_) { hits = []; }
+    try { hits = await this.fs.fsSearch(this.searchScope || this.root, q, 500); } catch (_) { hits = []; }
     if (token !== this._searchToken) return; // 그 사이 쿼리 변경 → 취소
     this.bodyEl.innerHTML = "";
     if (!hits.length) { this.bodyEl.innerHTML = `<div class="ide-empty">${i18n.t('일치하는 결과가 없어요')}</div>`; return; }
@@ -543,18 +588,23 @@ export class IdeView {
       row.dataset.path = n.path;
       row.dataset.dir = n.dir ? "1" : "0";
       row.tabIndex = 0; // 포커스 가능 — 키보드 네비게이션 + Return=이름변경(Finder 시맨틱)
-      if (n.path === this.selectedPath) row.classList.add("selected");
+      if (n.path === this.selectedPath || this.selected.has(n.path)) row.classList.add("selected");
       const isOpen = this.expanded.has(n.path);
+      //  git 표시 — 이름에 상태 색, 오른쪽 끝에 글자(M·A·D·R·U…). 무시된 것(.gitignore)은 흐리게 기울여 쓴다.
+      const gs = statusOf(this._git, this._rel(n.path), !!n.dir);
+      if (gs.letter) row.classList.add("git", "git-" + (gs.letter === "!" ? "X" : gs.letter));
+      else if (gs.ignored) row.classList.add("git-ignored");
+      const gitHtml = gs.letter ? `<span class="ide-git" title="${esc(GIT_TEXT[gs.letter] ? i18n.t(GIT_TEXT[gs.letter]) : "")}">${gs.letter}</span>` : "";
       if (n.dir) {
         row.innerHTML =
           `<span class="ide-caret${isOpen ? " open" : ""}">${icons.caretRight({ size: 11 })}</span>` +
           `<span class="ide-icon">${folderIcon(isOpen, 16, n.name)}</span>` +
-          `<span class="ide-nname">${esc(n.name)}</span>`;
+          `<span class="ide-nname">${esc(n.name)}</span>` + gitHtml;
       } else {
         row.innerHTML =
           `<span class="ide-caret ghost"></span>` +
           `<span class="ide-icon">${fileIcon(n.name, 15)}</span>` +
-          `<span class="ide-nname">${esc(n.name)}</span>`;
+          `<span class="ide-nname">${esc(n.name)}</span>` + gitHtml;
         if (n.path === activePath) row.classList.add("active");
         else if (openPaths.has(n.path)) row.classList.add("opened");
       }
@@ -576,6 +626,15 @@ export class IdeView {
     row.addEventListener("click", (e) => {
       if (e.target.closest(".ide-rename-input")) return;
       const p = n.path;
+      //  ⌘ 클릭 = 선택에 넣다 뺐다, ⇧ 클릭 = 기준부터 여기까지(열지 않는다 — Finder·VS Code 와 같다).
+      if (e.metaKey || e.ctrlKey || e.shiftKey) {
+        const rows = [...this.bodyEl.querySelectorAll(".ide-node")].map((r) => r.dataset.path).filter(Boolean);
+        const r = clickSelect(rows, { paths: this.selected, anchor: this.selAnchor }, p, { meta: e.metaKey || e.ctrlKey, shift: e.shiftKey });
+        this.selected = r.paths; this.selAnchor = r.anchor; this.selectedPath = p;
+        this._paintSelection();
+        row.focus({ preventScroll: true });
+        return;
+      }
       this._select(p);
       // openFile/_toggleDir 는 트리를 재렌더(innerHTML 교체)하므로, 재렌더 완료 후 "선택된 새 행" 에
       //  포커스를 준다(클릭 시점 행은 파괴됨). 포커스가 트리에 있어야 Return=rename·화살표가 동작.
@@ -584,18 +643,19 @@ export class IdeView {
       else if (this.opts.onOpenFile) { this.opts.onOpenFile(p, e); focusAfter(); } // 트리 패널 — 파일 pane 으로 연다
       else Promise.resolve(this.openFile(p, undefined, this.activeGroup, false)).then(focusAfter); // 열되 편집 포커스는 트리 유지
     });
-    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); this._select(n.path); this._menu(e, n); });
+    //  우클릭 — 선택 안의 행이면 선택을 그대로 두고(여러 개에 한 번에), 밖의 행이면 그 하나로 바꾼다.
+    row.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); if (!this.selected.has(n.path)) this._select(n.path); this._menu(e, n); });
     row.addEventListener("pointerdown", (e) => { if (e.button === 0 && e.pointerType !== "touch") this._beginNodeDrag(n, e); });
     row.addEventListener("keydown", (e) => this._treeKeydown(e, n, row));
   }
 
   // 현재 선택 행 표시(선택 모델). rerender 없이 클래스만 토글해 가볍게.
   _select(path) {
-    if (this.selectedPath === path) return;
-    this.bodyEl?.querySelector(".ide-node.selected")?.classList.remove("selected");
+    if (this.selectedPath === path && this.selected.size === 1 && this.selected.has(path)) return;
     this.selectedPath = path;
-    const row = this.bodyEl?.querySelector(`.ide-node[data-path="${cssEsc(path)}"]`);
-    row?.classList.add("selected");
+    this.selected = new Set([path]);
+    this.selAnchor = path;
+    this._paintSelection();
   }
   // 선택된 행에 키보드 포커스 부여(트리 재렌더 후 호출 — Return/화살표가 트리로 오게).
   _focusSelected() {
@@ -608,6 +668,13 @@ export class IdeView {
   _treeKeydown(e, n, row) {
     if (e.target.closest(".ide-rename-input")) return; // 편집 인풋 내부 키는 그쪽이 처리
     const mod = e.metaKey || e.ctrlKey;
+    if (mod && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "a") {   // ⌘A = 보이는 것 전부
+      e.preventDefault();
+      this.selected = new Set([...this.bodyEl.querySelectorAll(".ide-node")].map((r) => r.dataset.path).filter(Boolean));
+      this._paintSelection();
+      return;
+    }
+    if (e.key === "Escape" && this.selected.size > 1) { e.preventDefault(); e.stopPropagation(); this._select(n.path); return; }
     if (n.path !== this.root) {
       if (mod && !e.altKey && e.key.toLowerCase() === "c") { e.preventDefault(); this._clip(n, "copy"); return; }
       if (mod && e.key.toLowerCase() === "x") { e.preventDefault(); this._clip(n, "cut"); return; }
@@ -631,7 +698,11 @@ export class IdeView {
       const rows = [...this.bodyEl.querySelectorAll(".ide-node")];
       const i = rows.indexOf(row);
       const next = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
-      if (next) { this._select(next.dataset.path); next.focus({ preventScroll: false }); }
+      if (next && e.shiftKey) {   // ⇧ 화살표 = 선택을 늘린다
+        const r = clickSelect(rows.map((x) => x.dataset.path), { paths: this.selected, anchor: this.selAnchor || n.path }, next.dataset.path, { shift: true });
+        this.selected = r.paths; this.selAnchor = r.anchor; this.selectedPath = next.dataset.path;
+        this._paintSelection(); next.focus({ preventScroll: false });
+      } else if (next) { this._select(next.dataset.path); next.focus({ preventScroll: false }); }
     }
   }
 
@@ -1324,9 +1395,10 @@ export class IdeView {
     closeMenu();
     const dirTarget = n.dir ? n.path : parentOf(n.path);
     const isRoot = n.path === this.root;
+    const many = this._targets(n).length;   // 여러 개 선택에 대고 연 메뉴면 그 수
     const items = [];
     // VS Code 탐색기와 같은 묶음·순서(2026-10 사용자: "vscode 수준으로"). null = 구분선.
-    if (!n.dir && this.opts.onOpenFile) {
+    if (!n.dir && this.opts.onOpenFile && many < 2) {
       items.push([i18n.t('열기'), () => this.opts.onOpenFile(n.path)]);
       items.push([i18n.t('옆으로 열기'), () => this.opts.onOpenFile(n.path, { split: true })]);
       items.push(null);
@@ -1334,20 +1406,24 @@ export class IdeView {
     items.push([i18n.t('새 파일'), () => this._startCreate(dirTarget, false)]);
     items.push([i18n.t('새 폴더'), () => this._startCreate(dirTarget, true)]);
     if (!this.fs.remote) items.push([i18n.t('Finder에서 보기'), () => this._reveal(n)]);
+    if (n.dir && many < 2) {
+      items.push([i18n.t('폴더에서 찾기'), () => this._findIn(n.path)]);
+      if (!isRoot && this.expanded.has(n.path)) items.push([i18n.t('하위 폴더 모두 접기'), () => this._collapseUnder(n.path)]);
+    }
     items.push(null);
     if (!isRoot) {
       items.push([i18n.t('잘라내기'), () => this._clip(n, "cut"), "⌘X"]);
       items.push([i18n.t('복사'), () => this._clip(n, "copy"), "⌘C"]);
     }
     if (_clipboard && _clipboard.fs === this.fs) items.push([i18n.t('붙여넣기'), () => this._paste(dirTarget), "⌘V"]);
-    if (!isRoot) items.push([i18n.t('복제'), () => this._duplicate(n), "⌘D"]);
+    if (!isRoot && many < 2) items.push([i18n.t('복제'), () => this._duplicate(n), "⌘D"]);
     items.push(null);
     items.push([i18n.t('경로 복사'), () => this._copyPath(n, false), "⌥⌘C"]);
     items.push([i18n.t('상대 경로 복사'), () => this._copyPath(n, true), "⇧⌥⌘C"]);
     if (!isRoot) {
       items.push(null);
-      items.push([i18n.t('이름 변경'), () => this._startRename(n), "↩"]);
-      items.push([i18n.t('삭제'), () => this._delete(n), "⌘⌫", "danger"]);
+      if (many < 2) items.push([i18n.t('이름 변경'), () => this._startRename(n), "↩"]);
+      items.push([many > 1 ? i18n.t('{n}개 삭제', { n: many }) : i18n.t('삭제'), () => this._delete(n), "⌘⌫", "danger"]);
     }
     const menu = document.createElement("div");
     menu.className = "ctx-menu";
@@ -1370,7 +1446,22 @@ export class IdeView {
   }
 
   // ── 탐색기 조작(VS Code 미러) ──
-  _clip(n, op) { _clipboard = { op, path: n.path, dir: !!n.dir, fs: this.fs }; this._toast(op === "cut" ? i18n.t('잘라냈어요') : i18n.t('복사했어요')); }
+  _clip(n, op) {
+    const items = this._targets(n).map((x) => ({ path: x.path, dir: !!x.dir }));
+    _clipboard = { op, items, fs: this.fs };
+    this._toast(op === "cut" ? i18n.t('잘라냈어요') : i18n.t('복사했어요'));
+  }
+  /** 폴더에서 찾기 — 검색을 그 폴더 안으로 좁히고 검색칸으로 간다(Esc 로 풀린다). */
+  _findIn(dir) {
+    this.searchScope = dir === this.root ? null : dir;
+    this.query = "";
+    this._renderTree();
+    this.treeEl.querySelector(".ide-search-input")?.focus();
+  }
+  _collapseUnder(dir) {
+    for (const p of [...this.expanded]) if (p.startsWith(dir + "/")) this.expanded.delete(p);
+    this._renderBody();
+  }
   _uniqueName(dir, name) {
     const p = this._findNode(dir);
     const taken = new Set(((p && p.children) || []).map((c) => baseName(c.path)));
@@ -1396,13 +1487,18 @@ export class IdeView {
     const c = _clipboard;
     if (!c) return;
     try {
-      if (c.op === "cut") {
-        if (dirTarget === c.path || dirTarget.startsWith(c.path + "/")) return;
-        await this.fs.fsRename(c.path, dirTarget + "/" + baseName(c.path));
-        _clipboard = null;
-      } else {
-        await this._copyTree(c.path, dirTarget + "/" + this._uniqueName(dirTarget, baseName(c.path)), c.dir);
+      for (const it of c.items || []) {
+        if (c.op === "cut") {
+          if (dirTarget === it.path || dirTarget.startsWith(it.path + "/") || parentOf(it.path) === dirTarget) continue;
+          const dest = dirTarget + "/" + baseName(it.path);
+          await this.fs.fsRename(it.path, dest);
+          for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === it.path) fo.path = dest;
+        } else {
+          await this._copyTree(it.path, dirTarget + "/" + this._uniqueName(dirTarget, baseName(it.path)), it.dir);
+          const pn0 = this._findNode(dirTarget); if (pn0 && pn0.children) pn0.children.push({ path: dirTarget + "/" + baseName(it.path), name: baseName(it.path), dir: it.dir });   // 다음 것의 이름 겹침 판정용
+        }
       }
+      if (c.op === "cut") { _clipboard = null; this.tree = null; }
       this.expanded.add(dirTarget);
       const pn = this._findNode(dirTarget); if (pn) pn.children = null;
       await this._reload();
@@ -1417,9 +1513,14 @@ export class IdeView {
     } catch (e) { this._toast(String(e)); }
   }
   async _copyPath(n, relative) {
-    let t = n.path;
-    if (relative) t = n.path === this.root ? "." : n.path.slice(this.root.length).replace(/^\/+/, "");
-    else if (this.fs.fsAbs) { try { t = await this.fs.fsAbs(n.path); } catch (_) { /* 상대 경로 그대로 */ } }
+    const out = [];
+    for (const x of this._targets(n)) {
+      let t = x.path;
+      if (relative) t = x.path === this.root ? "." : x.path.slice(this.root.length).replace(/^\/+/, "");
+      else if (this.fs.fsAbs) { try { t = await this.fs.fsAbs(x.path); } catch (_) { /* 상대 경로 그대로 */ } }
+      out.push(t);
+    }
+    const t = out.join("\n");
     try { await navigator.clipboard.writeText(t); this._toast(i18n.t('복사했어요')); } catch (_) { /* noop */ }
   }
   async _reveal(n) {
@@ -1490,16 +1591,42 @@ export class IdeView {
     input.addEventListener("blur", () => done(true));
   }
 
+  /**
+   * 삭제 — 이 PC 의 파일은 **휴지통으로**(되돌릴 수 있다). 휴지통을 못 쓰는 곳(다른 PC·VM)은 영구 삭제라
+   *  같은 대상에 한 번 더 눌러야 지운다(브라우저 confirm 은 웹뷰를 멈춰서 쓰지 않는다).
+   */
   async _delete(n) {
+    const targets = this._targets(n);
+    if (!targets.length) return;
+    const canTrash = this.fs === api && typeof api.fsTrash === "function";
+    const key = targets.map((x) => x.path).join("\n");
+    if (!canTrash && !(this._delArmed && this._delArmed.key === key && Date.now() - this._delArmed.at < 4000)) {
+      this._delArmed = { key, at: Date.now() };
+      this._toast(targets.length > 1 ? i18n.t('{n}개를 영구 삭제해요. 한 번 더 누르면 지워요', { n: targets.length }) : i18n.t('영구 삭제해요. 한 번 더 누르면 지워요'));
+      return;
+    }
+    this._delArmed = null;
     try {
-      await this.fs.fsDelete(n.path);
-      for (const g of this.groups.values()) {
-        g.open = g.open.filter((f) => f.path !== n.path && !f.path.startsWith(n.path + "/"));
+      let trashed = 0;
+      for (const x of targets) {
+        if (canTrash) {
+          try { await api.fsTrash(x.path); trashed += 1; continue; } catch (e) {
+            if (!/TRASH_UNSUPPORTED/.test(String(e))) throw e;
+            //  휴지통을 못 쓰는 자리(다른 볼륨 등) — 확인을 받은 뒤에만 영구 삭제한다.
+            if (!(this._delArmed2 && this._delArmed2 === key)) { this._delArmed2 = key; this._toast(i18n.t('휴지통으로 옮길 수 없는 위치예요. 한 번 더 누르면 영구 삭제해요')); return; }
+          }
+        }
+        await this.fs.fsDelete(x.path);
+      }
+      this._delArmed2 = null;
+      for (const x of targets) for (const g of this.groups.values()) {
+        g.open = g.open.filter((f) => f.path !== x.path && !f.path.startsWith(x.path + "/"));
         if (g.active >= g.open.length) g.active = g.open.length - 1;
         if (g.active < 0) { g.editorHost.style.display = "none"; g.empty.style.display = ""; }
       }
-      const pnode = this._findNode(parentOf(n.path));
-      if (pnode) pnode.children = null;
+      this.selected = new Set(); this.selectedPath = null; this.selAnchor = null;
+      this.tree = null;
+      if (trashed) this._toast(trashed > 1 ? i18n.t('{n}개를 휴지통으로 옮겼어요', { n: trashed }) : i18n.t('휴지통으로 옮겼어요'));
       await this._reload();
       this._renderTabs();
     } catch (e) { this._toast(String(e)); }
@@ -1532,7 +1659,8 @@ export class IdeView {
       document.body.classList.add("tab-dragging");
       try { window.getSelection()?.removeAllRanges(); } catch (_) {}
       ghost = document.createElement("div"); ghost.className = "tab-ghost";
-      ghost.innerHTML = `<span class="tg-ic">${fileIcon(n.name, 13)}</span>${esc(n.name)}`;
+      const cnt = this._targets(n).length;
+      ghost.innerHTML = `<span class="tg-ic">${fileIcon(n.name, 13)}</span>${esc(n.name)}` + (cnt > 1 ? `<span class="tg-n">+${cnt - 1}</span>` : "");
       document.body.appendChild(ghost);
       zoneEl = document.createElement("div"); zoneEl.className = "drop-zone hidden"; document.body.appendChild(zoneEl);
       insEl = document.createElement("div"); insEl.className = "tab-insert hidden"; document.body.appendChild(insEl);
@@ -1605,6 +1733,8 @@ export class IdeView {
       if (dragging) {
         const sc = (ce) => { ce.stopPropagation(); ce.preventDefault(); window.removeEventListener("click", sc, true); };
         window.addEventListener("click", sc, true);
+        //  놓는 순간의 클릭만 삼킨다 — 클릭이 안 생긴 드롭(다른 행 위에서 놓음) 뒤에 남아 **다음 진짜 클릭**을 먹지 않게.
+        setTimeout(() => window.removeEventListener("click", sc, true), 80);
       }
       if (dragging && dropEd) {
         // 에디터 그룹 위 드롭 = 그 위치에 파일 열기(터미널/폴더보다 우선).
@@ -1612,20 +1742,32 @@ export class IdeView {
       } else if (dragging && dropTerm) {
         // 파일을 터미널 pane 에 드롭 → 절대경로(원격은 폴백=워크스페이스 상대) 를 터미널에 삽입.
         try {
-          let p = this.fs.fsAbs ? await this.fs.fsAbs(n.path).catch(() => null) : null;
-          if (!p) p = n.path.startsWith(this.root + "/") ? n.path.slice(this.root.length + 1) : n.path;
-          insertIntoTerminal(dropTerm, shq(p) + " ");
+          const parts = [];
+          for (const x of this._targets(n)) {
+            let p = this.fs.fsAbs ? await this.fs.fsAbs(x.path).catch(() => null) : null;
+            if (!p) p = x.path.startsWith(this.root + "/") ? x.path.slice(this.root.length + 1) : x.path;
+            parts.push(shq(p));
+          }
+          insertIntoTerminal(dropTerm, parts.join(" ") + " ");
         } catch (e) { this._toast(String(e)); }
       } else if (dragging && dropFolder) {
         try {
           // ⌥ 누른 채 놓기 = 복사(VS Code 와 같다). 아니면 이동.
-          if (_dragAlt) {
-            await this._copyTree(n.path, joinPath(dropFolder, this._uniqueName(dropFolder, n.name)), !!n.dir);
-          } else {
-            const dest = joinPath(dropFolder, n.name);
-            await this.fs.fsRename(n.path, dest);
-            for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === n.path) fo.path = dest;
+          const moved = [];
+          for (const x of this._targets(n)) {
+            const nm = x.name || baseName(x.path);
+            if (!_dragAlt && !(parentOf(x.path) === dropFolder || dropFolder === x.path || dropFolder.startsWith(x.path + "/"))) moved.push(joinPath(dropFolder, nm));
+            if (_dragAlt) {
+              await this._copyTree(x.path, joinPath(dropFolder, this._uniqueName(dropFolder, nm)), !!x.dir);
+            } else {
+              if (parentOf(x.path) === dropFolder || dropFolder === x.path || dropFolder.startsWith(x.path + "/")) continue;   // 제자리·제 안으로는 안 옮긴다
+              const dest = joinPath(dropFolder, nm);
+              await this.fs.fsRename(x.path, dest);
+              for (const g of this.groups.values()) for (const fo of g.open) if (fo.path === x.path) fo.path = dest;
+            }
           }
+          //  옮긴 것들이 새 자리에서 그대로 선택돼 있게(옛 경로가 선택에 남으면 다음 동작이 엉뚱한 것을 잡는다).
+          if (moved.length) { this.selected = new Set(moved); this.selectedPath = moved[moved.length - 1]; this.selAnchor = this.selectedPath; }
           this.tree = null;
           this.searchTree = null;
           this.expanded.add(dropFolder);
@@ -1692,6 +1834,8 @@ export class IdeView {
       //   파일 트리가 상시 패널이 되면서 매번 돌게 됐다. 다른 기기의 변경은 창 포커스 복귀·새로고침 버튼에서도 반영된다.
       if (this.opts.treeOnly) {
         this._syncTick = (this._syncTick + 1) % 25;
+        //  git 표시는 더 자주(6초 안팎) — 에이전트가 고친 파일이 곧 표시되게. 데몬이 git status 한 번 도는 값이라 화면은 안 멈춘다.
+        if (this._syncTick % 5 === 1 && document.visibilityState === "visible") void this._refreshGit();
         const idle = Date.now() - _lastKeyAt > 4000;
         if (this._syncTick === 0 && idle && document.visibilityState === "visible" && !this.searchTree) await this.refreshTreeQuiet();
       }
@@ -1702,6 +1846,7 @@ export class IdeView {
       const t = await this.fs.fsTree(this.root, 4);
       if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
     } catch (_) { /* noop */ }
+    void this._refreshGit();
   }
   _applyExternal(f, content) {
     this._reloadingExternal = true;
@@ -1744,6 +1889,8 @@ let _dragAlt = false; // 트리 드래그 중 ⌥ 상태(놓는 순간 복사/�
 window.addEventListener("keydown", (e) => { if (e.key === "Alt") _dragAlt = true; }, true);
 window.addEventListener("keyup", (e) => { if (e.key === "Alt") _dragAlt = false; }, true);
 window.addEventListener("pointermove", (e) => { _dragAlt = e.altKey; }, true);
+/** git 상태 글자 → 툴팁 문구. */
+const GIT_TEXT = { M: '수정됨', A: '추가됨', D: '삭제됨', R: '이름 변경됨', C: '복사됨', U: '추적 안 함', "!": '충돌' };
 let _clipboard = null; // 탐색기 잘라내기/복사 버퍼 { op, path, dir, fs } — 같은 전송 계층(fs) 안에서만 붙여넣는다
 function closeMenu() { activeMenu?.remove(); activeMenu = null; }
 function closeMenuOnce(e) {

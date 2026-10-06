@@ -140,6 +140,7 @@ export const api = {
   fsCreateFile: (rel) => invoke("fs_create_file", { rel }),
   fsRename: (rel, dest) => invoke("fs_rename", { rel, dest }),
   fsDelete: (rel) => invoke("fs_delete", { rel }),
+  fsTrash: (rel) => invoke("fs_trash", { rel }),   // 휴지통으로(macOS). 못 하면 TRASH_UNSUPPORTED
 
   // ── UI 레이아웃 영속화 ──
   uiLoad: () => invoke("ui_state_load"),

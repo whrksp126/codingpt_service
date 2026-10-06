@@ -1078,6 +1078,7 @@ pub fn run() {
             fsapi::fs_create_file,
             fsapi::fs_rename,
             fsapi::fs_delete,
+            fsapi::fs_trash,
         ])
         .setup(|app| {
             let handle = app.handle().clone();

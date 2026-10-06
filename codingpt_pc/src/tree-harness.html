@@ -1,0 +1,46 @@
+<!doctype html>
+<!-- 파일 트리 확인용 하네스(개발 전용) — Tauri 없이 브라우저에서 ide.js 의 트리 패널을 그대로 띄운다(가짜 파일 계층 + 가짜 git 표시).
+     실행: cd src && python3 -m http.server 8899  →  http://localhost:8899/tree-harness.html   · window.__ops = 파일 계층에 한 일의 기록 -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>파일 트리 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
+<style>body { margin: 0; height: 100vh; display: flex; background: var(--base); } #tree { height: 100vh; width: 300px; }</style></head>
+<body><div id="tree" class="ws-tree-panel"></div>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script src="vendor/codemirror/codemirror.js"></script>
+<script type="module">
+  window.__ops = [];
+  window.__TAURI__ = { core: { invoke: async (cmd, args) => { window.__ops.push(["invoke", cmd, args]); return null; } }, event: { listen: async () => () => {} } };
+  const F = (path) => ({ path, name: path.split("/").pop(), dir: false });
+  const D = (path, children) => ({ path, name: path.split("/").pop(), dir: true, children });
+  let TREE = [
+    D("proj/docs", [F("proj/docs/guide.md"), F("proj/docs/new.md")]),
+    D("proj/node_modules", [D("proj/node_modules/x", [F("proj/node_modules/x/index.js")])]),
+    D("proj/src", [D("proj/src/sub", [F("proj/src/sub/new.js")]), F("proj/src/a.js"), F("proj/src/b.js"), F("proj/src/debug.log"), F("proj/src/staged.js")]),
+    F("proj/.gitignore"), F("proj/README.md"), F("proj/index.html"), F("proj/style.css"),
+  ];
+  const find = (p, nodes = TREE, parent = null) => { for (let i = 0; i < nodes.length; i++) { const n = nodes[i]; if (n.path === p) return { n, list: nodes, i }; if (n.dir && n.children) { const r = find(p, n.children, n); if (r) return r; } } return null; };
+  const repath = (n, from, to) => { n.path = to + n.path.slice(from.length); n.name = n.path.split("/").pop(); (n.children || []).forEach((c) => repath(c, from, to)); };
+  const fs = {
+    remote: true,
+    fsTree: async (root) => { window.__ops.push(["tree", root]); if (root === "proj") return JSON.parse(JSON.stringify(TREE)); const r = find(root); return r && r.n.children ? JSON.parse(JSON.stringify(r.n.children)) : []; },
+    fsSearch: async (root, q) => { window.__ops.push(["search", root, q]); return [{ path: "proj/src/a.js", name: "a.js", line: 3, text: "const " + q + " = 1" }]; },
+    fsRead: async () => "", fsReadBytes: async () => ({ base64: "" }), fsWriteB64: async (p) => { window.__ops.push(["write", p]); },
+    fsMkdir: async (p) => { window.__ops.push(["mkdir", p]); }, fsCreateFile: async (p) => { window.__ops.push(["create", p]); },
+    fsRename: async (a, b) => { window.__ops.push(["rename", a, b]); const r = find(a); if (!r) return; r.list.splice(r.i, 1); const d = find(b.split("/").slice(0, -1).join("/")); repath(r.n, a, b); (d ? d.n.children : TREE).push(r.n); },
+    fsDelete: async (p) => { window.__ops.push(["delete", p]); const r = find(p); if (r) r.list.splice(r.i, 1); },
+  };
+  const GIT = { repo: true, branch: "main", entries: [{ path: "src/a.js", status: "M" }, { path: "src/sub/", status: "U" }, { path: "src/staged.js", status: "A" }, { path: "docs/new.md", status: "U" }, { path: "README.md", status: "M" }, { path: "src/gone.js", status: "D" }], ignored: ["node_modules/", "src/debug.log"] };
+  const { IdeView } = await import("./js/ide.js");
+  window.__opened = [];
+  const view = new IdeView("proj", document.getElementById("tree"), { treeOnly: true, fs, onOpenFile: (p, o) => window.__opened.push([p, !!(o && o.split)]), gitFiles: async () => (location.hash.includes("nogit") ? { repo: false } : GIT) });
+  window.__view = view;
+  await view.mount();
+  view.expanded.add("proj/src"); view.expanded.add("proj/docs");
+  view._renderBody();
+  window.__ready = true;
+</script></body></html>

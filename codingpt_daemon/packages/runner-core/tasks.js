@@ -1701,6 +1701,17 @@ async function rpcBranches(p) {
   return { ...b, github: cached ? cached.repo.github : null };
 }
 
+/** 파일 트리 표시용 — 그 폴더의 변경·무시 목록(읽기 전용). 저장소가 아니면 { repo:false }(오류가 아니다). */
+async function rpcFiles(p) {
+  const cwdParam = reqString(p, 'cwd');
+  let abs;
+  try { abs = dep('fsLib').safeResolve(cwdParam); } catch (_) { return { repo: false }; }
+  if (!fs.existsSync(abs)) return { repo: false };
+  const tl = await taskGit.baseTools();
+  if (!tl.git.ok) return { repo: false };
+  return taskGit.fileStatuses(abs, { timeout: 10000 });
+}
+
 async function rpcStatus(p) {
   const { t, r } = mustRun(p);
   await freshStatus(t, r);
@@ -2316,6 +2327,7 @@ const HANDLERS = {
   'task.delete': rpcDelete,
   'git.branches': rpcBranches,
   'git.status': rpcStatus,
+  'git.files': rpcFiles,
   'git.commit': rpcCommit,
   'git.push': rpcPush,
   'git.pr.create': rpcPrCreate,

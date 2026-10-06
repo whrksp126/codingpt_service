@@ -1214,7 +1214,7 @@ async function surfaceRpc(req, res) {
 const TASK_RPC_OK = new Map([
   ['task.list', 15000], ['task.get', 15000], ['task.create', 15000], ['task.run.prompt', 20000], ['task.run.trust', 15000],
   ['task.run.reopen', 15000], ['task.diff', 30000], ['task.discard', 15000], ['task.delete', 15000],
-  ['git.branches', 15000], ['git.status', 15000], ['git.commit', 15000], ['git.push', 15000],
+  ['git.branches', 15000], ['git.status', 15000], ['git.files', 15000], ['git.commit', 15000], ['git.push', 15000],
   ['git.pr.create', 15000], ['git.pr.status', 30000], ['git.pr.merge', 15000], ['git.merge.local', 15000], ['git.gh.status', 15000],
   // F2 PR 후속(automation-design.md §4.3·§7.1) — task. 접두라 task.v1 게이트를 탄다(클라는 hostCaps 의 auto.v1 로 버튼 게이팅).
   ['task.run.fix', 15000], ['task.run.followup.dismiss', 15000],

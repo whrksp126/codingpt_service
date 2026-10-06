@@ -891,6 +891,16 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 /* 열린 파일(active)·고른 항목(selected) = 같은 선택 워시(파란 기 제거). 키보드 커서는 전역 :focus-visible 링이 대신한다. */
 .ide-node.active { background: var(--selected); color: var(--text); }
 .ide-node.selected { background: var(--selected); color: var(--text); }
+/* git 표시(Orca·VS Code 와 같다) — 이름에 상태 색, 오른쪽 끝에 글자. 색은 상태 신호에만 쓴다. 무시된 것은 흐리게 기울인다. */
+.ide-node .ide-nname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ide-git { flex: none; margin-left: 6px; width: 12px; text-align: center; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+.ide-node.git-M .ide-nname, .ide-node.git-M .ide-git, .ide-node.git-R .ide-nname, .ide-node.git-R .ide-git, .ide-node.git-C .ide-nname, .ide-node.git-C .ide-git { color: var(--warn); }
+.ide-node.git-A .ide-nname, .ide-node.git-A .ide-git, .ide-node.git-U .ide-nname, .ide-node.git-U .ide-git { color: var(--success); }
+.ide-node.git-D .ide-nname, .ide-node.git-D .ide-git, .ide-node.git-X .ide-nname, .ide-node.git-X .ide-git { color: var(--error); }
+.ide-node.git-D.file .ide-nname { text-decoration: line-through; }
+.ide-node.git-ignored .ide-nname { color: var(--dim); font-style: italic; padding-right: 2px; }
+.ide-node.git-ignored .ide-icon { opacity: 0.55; }
+.tab-ghost .tg-n { margin-left: 2px; padding: 0 5px; border-radius: 8px; background: var(--pressed); color: var(--text2); font-size: 10.5px; }
 .ide-node.drop { background: var(--selected); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .ide-tree.drop-root { box-shadow: inset 0 0 0 2px var(--border-strong); }
 .ide-caret { display: inline-flex; align-items: center; justify-content: center; width: 14px; flex: none; color: var(--dim); transition: transform var(--dur-1) var(--ease-out); }

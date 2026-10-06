@@ -413,3 +413,34 @@ test('git() 는 gh 인증 조사(네트워크)를 기다리지 않는다 · 네�
     await tg.tools({ refresh: true });
   }
 });
+
+// ── git.files — 파일 트리 표시용 변경·무시 목록 ──
+test('fileStatuses: 그 폴더 기준 상대 경로 · 폴더째 추적 안 함/무시는 dir/ · 저장소 밖은 repo:false', async () => {
+  const os = require('os'); const fsx = require('fs'); const pathx = require('path');
+  const { execFileSync } = require('child_process');
+  const tg = require('../task-git');
+  const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'cpt-files-'));
+  const g = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+  g('init', '-q', '-b', 'main');
+  fsx.mkdirSync(pathx.join(dir, 'src/sub'), { recursive: true });
+  fsx.writeFileSync(pathx.join(dir, 'src/a.js'), '1\n'); fsx.writeFileSync(pathx.join(dir, 'src/gone.js'), '1\n'); fsx.writeFileSync(pathx.join(dir, 'top.md'), '1\n');
+  fsx.writeFileSync(pathx.join(dir, '.gitignore'), 'node_modules/\n*.log\n');
+  g('add', '-A'); g('commit', '-q', '-m', 'init');
+  fsx.writeFileSync(pathx.join(dir, 'src/a.js'), '2\n');                       // M
+  fsx.unlinkSync(pathx.join(dir, 'src/gone.js'));                              // D
+  fsx.writeFileSync(pathx.join(dir, 'src/sub/new.js'), 'x\n');                 // U(폴더째)
+  fsx.writeFileSync(pathx.join(dir, 'src/staged.js'), 'x\n'); g('add', 'src/staged.js');   // A
+  fsx.mkdirSync(pathx.join(dir, 'node_modules/x'), { recursive: true }); fsx.writeFileSync(pathx.join(dir, 'node_modules/x/i.js'), 'x');
+  fsx.writeFileSync(pathx.join(dir, 'src/debug.log'), 'x');
+  const root = await tg.fileStatuses(dir);
+  assert.strictEqual(root.repo, true); assert.strictEqual(root.branch, 'main');
+  const m = Object.fromEntries(root.entries.map((e) => [e.path, e.status]));
+  assert.deepStrictEqual(m, { 'src/a.js': 'M', 'src/gone.js': 'D', 'src/sub/': 'U', 'src/staged.js': 'A' });
+  assert.deepStrictEqual(root.ignored.slice().sort(), ['node_modules/', 'src/debug.log']);
+  const sub = await tg.fileStatuses(pathx.join(dir, 'src'));
+  assert.deepStrictEqual(Object.fromEntries(sub.entries.map((e) => [e.path, e.status])), { 'a.js': 'M', 'gone.js': 'D', 'sub/': 'U', 'staged.js': 'A' });
+  assert.deepStrictEqual(sub.ignored, ['debug.log']);
+  const out = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'cpt-norepo-'));
+  assert.deepStrictEqual(await tg.fileStatuses(out), { repo: false });
+  assert.strictEqual(tg.statusLetter('UU'), '!'); assert.strictEqual(tg.statusLetter('R '), 'R'); assert.strictEqual(tg.statusLetter(' M'), 'M');
+});

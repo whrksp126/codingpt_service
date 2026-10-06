@@ -346,6 +346,40 @@ async function statusItems(cwd, { timeout } = {}) {
   return parseStatusZ(r.out);
 }
 
+/** porcelain XY → 파일 트리 표시 한 글자. M 수정 · A 추가 · D 삭제 · R 이름 변경 · C 복사 · U 추적 안 함 · ! 충돌. */
+function statusLetter(xy) {
+  const x = xy[0]; const y = xy[1];
+  if (xy === '??') return 'U';
+  if (x === 'U' || y === 'U' || xy === 'AA' || xy === 'DD') return '!';
+  if (x === 'D' || y === 'D') return 'D';
+  if (x === 'R' || y === 'R') return 'R';
+  if (x === 'C' || y === 'C') return 'C';
+  if (x === 'A') return 'A';
+  return 'M';
+}
+/**
+ * 그 폴더(저장소 안 어디든)의 변경·무시 목록 — 파일 트리 표시용(git.files).
+ *  → { repo:false } | { repo:true, branch, entries:[{ path, status }], ignored:[path] }
+ *  경로는 **그 폴더 기준 상대 경로**(`/` 구분). 폴더째 추적 안 함/무시면 `dir/` 로 끝난다(안을 일일이 세지 않는다 — node_modules 가 수만 줄이 된다).
+ */
+async function fileStatuses(cwd, { timeout } = {}) {
+  const top = await git(['rev-parse', '--show-prefix', '--abbrev-ref', 'HEAD'], { cwd, timeout });
+  if (!top.ok) return { repo: false };
+  const lines = top.out.split('\n');
+  const prefix = (lines[0] || '').trim();
+  const branch = (lines[1] || '').trim() || null;
+  const r = await git(['status', '--porcelain=v1', '-z', '--untracked-files=normal', '--ignored=matching'], { cwd, timeout });
+  if (!r.ok) return { repo: false };
+  const entries = []; const ignored = [];
+  for (const it of parseStatusZ(r.out)) {
+    if (prefix && !it.path.startsWith(prefix)) continue;   // 이 폴더 밖의 변경
+    const rel = it.path.slice(prefix.length);
+    if (!rel) continue;
+    if (it.xy === '!!') ignored.push(rel); else entries.push({ path: rel, status: statusLetter(it.xy) });
+  }
+  return { repo: true, branch, entries, ignored };
+}
+
 /** 브랜치 목록(git.branches) — {current, detached, dirtyCount, branches:[{name}], remoteUrl} */
 async function branches(cwd) {
   const r = await git(['for-each-ref', '--count=200', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], { cwd });
@@ -910,7 +944,7 @@ async function mergeIn(cwd, { branch, method, message, timeout }) {
 
 module.exports = {
   tools, baseTools, toolsCached, resetCache, git, gh, exec, requireGh,
-  repoInfo, refExists, remoteUrl, worktreeList, statusItems, branches,
+  repoInfo, refExists, remoteUrl, worktreeList, statusItems, branches, fileStatuses, statusLetter,
   worktreeAdd, worktreeRevert, copyEnvFiles,
   mergeBaseOf, changedFiles, runStat, fileDiffText, untrackedStat,
   commit, push, githubRepo, prView, prCreate, prMerge, foldChecks, toPrInfo,

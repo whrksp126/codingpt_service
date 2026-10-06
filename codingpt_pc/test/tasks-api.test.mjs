@@ -147,7 +147,7 @@ for (const [err, want, retries, label] of [
   const DOC = {
     "task.list": 15000, "task.get": 15000, "task.create": 15000, "task.run.prompt": 20000, "task.run.trust": 15000,
     "task.run.reopen": 15000, "task.diff": 30000, "task.discard": 15000, "task.delete": 15000,
-    "git.branches": 15000, "git.status": 15000, "git.commit": 15000, "git.push": 15000,
+    "git.branches": 15000, "git.status": 15000, "git.files": 15000, "git.commit": 15000, "git.push": 15000,
     "git.pr.create": 15000, "git.pr.status": 30000, "git.pr.merge": 15000, "git.merge.local": 15000, "git.gh.status": 15000,
     // automation-design §4.3·§7.1 — PR 후속 2줄(TASK_RPC_OK 추가 전용)
     "task.run.fix": 15000, "task.run.followup.dismiss": 15000,

@@ -334,6 +334,27 @@ pub fn fs_rename(rel: String, dest: String) -> Result<(), String> {
     std::fs::rename(&from, &to).map_err(|e| format!("이동 실패: {e}"))
 }
 
+// 휴지통으로 — 파일 트리의 삭제는 되돌릴 수 있어야 한다(실수로 지운 폴더를 잃지 않게).
+//  macOS: 같은 볼륨의 ~/.Trash 로 옮긴다(이름이 겹치면 시각을 붙인다). 그 밖의 OS·다른 볼륨이면 Err — 부르는 쪽이 확인을 받고 지운다.
+#[tauri::command(async)]
+pub fn fs_trash(rel: String) -> Result<(), String> {
+    let abs = safe_abs(&rel)?;
+    if !cfg!(target_os = "macos") {
+        return Err("TRASH_UNSUPPORTED".into());
+    }
+    let trash = home().join(".Trash");
+    if !trash.is_dir() {
+        return Err("TRASH_UNSUPPORTED".into());
+    }
+    let name = abs.file_name().ok_or("파일명 없음")?.to_string_lossy().to_string();
+    let mut dest = trash.join(&name);
+    if dest.exists() {
+        let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+        dest = trash.join(format!("{name} {ts}"));
+    }
+    std::fs::rename(&abs, &dest).map_err(|_| "TRASH_UNSUPPORTED".to_string())
+}
+
 // 삭제(파일/폴더 재귀).
 #[tauri::command(async)]
 pub fn fs_delete(rel: String) -> Result<(), String> {

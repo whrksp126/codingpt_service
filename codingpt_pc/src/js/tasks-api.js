@@ -21,14 +21,14 @@ import { rpcFailCode } from "./e2ee-fallback.js";
 export const TASK_TIMEOUTS = Object.freeze({
   "task.list": 15000, "task.get": 15000, "task.create": 15000, "task.run.prompt": 20000, "task.run.trust": 15000,
   "task.run.reopen": 15000, "task.diff": 30000, "task.discard": 15000, "task.delete": 15000,
-  "git.branches": 15000, "git.status": 15000, "git.commit": 15000, "git.push": 15000,
+  "git.branches": 15000, "git.status": 15000, "git.files": 15000, "git.commit": 15000, "git.push": 15000,
   "git.pr.create": 15000, "git.pr.status": 30000, "git.pr.merge": 15000, "git.merge.local": 15000, "git.gh.status": 15000,
   // PR 후속(automation-design §4.3·§7.1) — back TASK_RPC_OK 추가 2줄과 같다.
   "task.run.fix": 15000, "task.run.followup.dismiss": 15000,
 });
 
 /** 읽기 — 실패 시 1회 재시도 가능(§3.2). 나머지는 전부 변이이며 재시도하지 않는다(opId 재전송은 호출부 몫). */
-export const TASK_READS = new Set(["task.list", "task.get", "task.diff", "git.status", "git.pr.status", "git.branches", "git.gh.status"]);
+export const TASK_READS = new Set(["task.list", "task.get", "task.diff", "git.status", "git.files", "git.pr.status", "git.branches", "git.gh.status"]);
 
 /** 평문 폴백이 허용되는 봉인 실패 코드 = back SEALED_STRUCTURAL ∪ {E2EE_NO_ENVELOPE, E2EE_BAD_METHOD} ∪ 구 데몬 코드. */
 export const SEALED_FALLBACK_CODES = new Set([

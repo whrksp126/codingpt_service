@@ -148,6 +148,8 @@ function syncTreePanel(ws) {
     treeOnly: true,
     fs: fs || undefined,
     onOpenFile: (path, o) => (o && o.split ? smartAdd("ide", { openPath: path }) : openFileAsPane(path)),
+    //  git 표시(변경 글자·무시 흐림) — 그 PC 데몬에 묻는다. VM 안의 파일은 표시하지 않는다(VM 의 git 은 데몬이 못 본다).
+    gitFiles: fs && fs.vm ? null : (root) => import("./tasks-api.js").then((m) => m.taskRpc("git.files", { cwd: root }, ws.hostDeviceId)),
   });
   treeView.mount();
 }
