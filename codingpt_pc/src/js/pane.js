@@ -20,6 +20,8 @@ import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
 import { orchTabRole } from "./orch-roles.js";
+import { attachTermLinks, splitPathLine } from "./term-links.js";
+import { opensInBrowserPane, homeRelOf } from "./conv-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { workerGlyph } from "./orch-model.js";
 import { ot } from "./text/orch.js";
@@ -956,7 +958,11 @@ export class PaneView {
       //  가 66번을 선택색으로 리맵해(기존 세션용) 화면에선 항상 일반 선택색으로 보인다.
       macOptionClickForcesSelection: true,
       allowProposedApi: true,
+      // OSC 8 하이퍼링크(에이전트 CLI 가 밑줄로 그리는 주소·파일) — 기본 동작은 웹뷰에서 아무 일도 안 한다.
+      linkHandler: { allowNonHttpProtocols: true, activate: (e, uri) => this._openTermLink(uri, e) },
     });
+    // 맨 글자 주소·경로도 누를 수 있게(term-links.js). 여는 곳은 채팅과 같다: 주소 → 브라우저 pane, 파일 → IDE.
+    try { attachTermLinks(this.term, { url: (href, e) => this._openTermLink(href, e), path: (pth, line, e) => void this._openTermPath(pth, line, e) }); } catch (_) { /* 링크 없이도 터미널은 돈다 */ }
     // (여기 있던 CSI 2J 훅은 제거했다 — **한 번도 발화한 적이 없다**. tmux 는 `clear` 를 클라이언트에
     //  `\e[H\e[J`(ED 0)로 다시 그려 보내지 2J 를 보내지 않는다(pty 원시 바이트로 실측 2026-09-04).
     //  `clear` 가 과거까지 지우는 건 이제 tmux.conf 의 `scroll-on-clear off` 가 보장한다 — 그쪽이
@@ -1230,6 +1236,26 @@ export class PaneView {
       markRead: (threadId) => { import("./state.js").then((S) => S.readThread(threadId)).catch(() => {}); },
       focusThread: (id) => !!this.ctx.onFocusThread?.(id, holder),
     };
+  }
+
+  /** 터미널에서 누른 주소 — http(s) 는 이 워크스페이스의 브라우저 pane, file:// 은 IDE, 그 밖(mailto 등)과 ⌘/Ctrl+클릭은 시스템. */
+  _openTermLink(href, e) {
+    const u = String(href || "").trim();
+    if (!u) return;
+    if (/^file:\/\//i.test(u)) { const pl = splitPathLine(u); void this._openTermPath(pl.path, pl.line, e); return; }
+    const ext = () => api.openExternal(u).catch(() => {});
+    if ((e && (e.metaKey || e.ctrlKey)) || !opensInBrowserPane(u) || !this.ctx || !this.ctx.onOpenUrl) { ext(); return; }
+    try { if (!this.ctx.onOpenUrl(u)) ext(); } catch (_) { ext(); }
+  }
+  /** 터미널에서 누른 경로 — IDE 로(홈 안의 파일). 홈 밖이고 이 PC 의 파일이면 시스템 기본 앱. 없는 파일이면 조용히 무시. */
+  async _openTermPath(pth, _line, _e) {
+    if (!pth || !this.ctx) return;
+    const local = this.ctx.hostDeviceId == null || (appState.daemon && appState.daemon.deviceId === this.ctx.hostDeviceId);
+    let home = "";
+    if (local) { try { home = String(await api.fsAbs("") || ""); } catch (_) { home = ""; } }
+    const rel = homeRelOf(pth, { home, cwd: this.ctx.localPath || "" });
+    if (rel) { this.ctx.onOpenIde?.(rel); return; }
+    if (local) api.openPath(pth).catch(() => {});
   }
 
   _buildConv() {

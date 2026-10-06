@@ -549,7 +549,11 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .wsg-ag.parent:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
 .wsg-ag.child { position: relative; padding-left: 42px; }
 .wsg-ag.child::before { content: ""; position: absolute; left: 33px; top: 50%; width: 6px; border-top: 1px solid color-mix(in srgb, var(--text) 22%, transparent); }
-.wsg-ag.active { background: var(--pressed); box-shadow: inset 0 0 0 1px var(--border-ctrl); font-weight: 400; }
+/* 선택 = 면 하나만(Orca: 보고 있는 에이전트 행에만 채움, 테두리 없음). 에이전트 행이 선택되면 위 로컬 행은 선택 표시를 내려놓는다 —
+   둘이 같이 테두리를 두르면 어느 것을 보고 있는지 읽히지 않는다(2026-10-06 사용자 지적). */
+.wsg-ag.active { background: var(--pressed); box-shadow: none; font-weight: 400; }
+.wsg-ag.parent.active { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text) 55%, transparent); }
+.wsg-children:has(.wsg-ag.active) > .wsg-local.active { background: transparent; box-shadow: none; color: var(--text2); font-weight: 400; }
 .ag-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
 .ag-lead { color: var(--text2); }
 .wsg-ag.active .ag-lead { color: var(--text); }

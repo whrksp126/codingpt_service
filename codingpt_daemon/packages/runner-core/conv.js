@@ -204,7 +204,39 @@ function patch(id, fields, { event = false } = {}) {
   // working/waiting/idle 전이는 turn·req 이벤트가 이미 말해 준다 — 로그에 또 적지 않고 힌트만 보낸다.
   if (event) record(id, [{ op: 'state', ...fields }]);
   hintThread(id);
+  if (fields && (fields.state !== undefined || fields.title !== undefined)) { for (const fn of sessionListeners) { try { fn(id); } catch (_) { /* noop */ } } }
   return true;
+}
+
+// ── 사이드바 에이전트 행(orchestration-design §10) ───────────────────────────
+//  채팅으로 하는 대화도 "그 폴더에서 돌아가는 에이전트" 다 — 터미널 에이전트와 같은 목록에 올린다.
+//  올리는 것은 **지금 열려 있는 것**뿐이다: 엔진이 살아 있거나, 어느 기기든 탭으로 열어 둔 대화(공유 표면).
+//  지난 대화 전부를 올리면 목록이 기록 보관함이 된다.
+const sessionListeners = new Set();
+function onSessionsChanged(fn) { sessionListeners.add(fn); return () => sessionListeners.delete(fn); }
+function sessionsBrief() {
+  const out = [];
+  const openByCwd = new Map();
+  const openIn = (cwd) => {
+    if (openByCwd.has(cwd)) return openByCwd.get(cwd);
+    const set = new Set();
+    try {
+      const sl = lazy('./surfaces');
+      for (const it of (sl && sl.list({ cwd }).items) || []) if (it.kind === 'chat' && it.threadId) set.add(String(it.threadId));
+    } catch (_) { /* 표면 목록 없음 */ }
+    openByCwd.set(cwd, set);
+    return set;
+  };
+  let threads = [];
+  try { threads = store.listThreads(); } catch (_) { return out; }
+  for (const t of threads) {
+    if (!t || !t.id || typeof t.cwd !== 'string') continue;
+    if (!live.has(t.id) && !openIn(t.cwd).has(String(t.id))) continue;
+    const state = t.state === 'working' ? 'working' : t.state === 'waiting' ? 'permission' : 'idle';
+    out.push({ cwd: t.cwd, threadId: t.id, agent: t.agent || 'claude', state, since: t.lastAt || t.createdAt || null,
+      title: String(t.title || '').slice(0, 120), detail: state === 'working' ? '' : String(t.preview || '').slice(0, 160), model: t.model || null });
+  }
+  return out;
 }
 
 function notice(id, level, code, text) {
@@ -1527,7 +1559,7 @@ async function _reset() {
 
 module.exports = {
   CAP, MAX_LIVE, ERROR_CODES,
-  configure, start, stop, shutdown, shutdownSync, detachAll, rpc,
+  configure, start, stop, shutdown, shutdownSync, detachAll, rpc, sessionsBrief, onSessionsChanged,
   _internals: {
     live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, stripTitleMark, publicThread, terminalOf, usageOf, refsOfEvent,
     _reset,

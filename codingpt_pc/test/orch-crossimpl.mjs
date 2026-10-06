@@ -63,6 +63,30 @@ for (const k of Object.keys(pc)) ok(JSON.stringify(pc[k]) === JSON.stringify(app
   ok(M.coordinatorTidOf(FIXTURE, 'other', 40) === 1 && M.coordinatorTidOf(FIXTURE, 'proj', 40) === null, '폴더가 다르면 섞지 않는다');
 }
 
+// PC 전용 — 에이전트 행 트리(채팅 대화 포함)와 터미널 링크 찾기.
+{
+  const M = await import('file://' + path.join(PC, 'orch-model.js'));
+  const snap = { ...FIXTURE, sessions: [
+    { cwd: 'proj', tid: 1, agent: 'claude', state: 'working', since: 5 }, { cwd: 'proj', tid: 13, agent: 'claude', state: 'working', since: 1 },
+    { cwd: 'proj', tid: 70, agent: 'codex', state: 'idle', since: 2, detail: '끝' }, { cwd: 'proj', tid: 71, agent: 'claude', state: 'permission', since: 3 },
+    { cwd: 'proj', tid: null, threadId: 'th_b', chat: true, agent: 'claude', state: 'working', title: '채팅 B' },
+    { cwd: 'proj', tid: null, threadId: 'th_a', chat: true, agent: 'claude', state: 'idle', title: '채팅 A', detail: '답' },
+    { cwd: 'other', tid: 5, agent: 'claude', state: 'idle' }] };
+  const rows = M.sessionTree(snap, 'proj');
+  ok(JSON.stringify(rows.map((r) => r.key)) === '["s:1","s:70","s:71","c:th_a","c:th_b","r:r0","r:r4"]', '터미널(번호 순) → 채팅(ID 순) → 코디네이터를 못 찾은 묶음. 워커 터미널(13)은 최상위에 없다', JSON.stringify(rows.map((r) => r.key)));
+  const co = rows[0];
+  ok(co.runIds[0] === 'r1' && co.lead === '로그인 흐름 손보기' && co.children.length === 8 && co.glyph === 'working', '코디네이터 행 = 부모(제목은 목표 첫 줄, 워커가 자식)');
+  ok(JSON.stringify(rows.slice(1, 5).map((r) => r.glyph)) === '["done","waiting","done","working"]', '표식: 끝난 글이 있으면 체크 · 승인 대기는 물음표 · 일하는 중은 고리');
+  ok(rows[3].chat && rows[3].threadId === 'th_a' && rows[3].lead === '채팅 A' && rows[3].tid === null, '채팅 행은 대화 제목과 threadId 를 갖는다');
+  ok(JSON.stringify(co.children.map((c) => c.glyph)) === '["done","waiting","working","failed","working","done","unverifiable","interrupted"]', '워커 표식', JSON.stringify(co.children.map((c) => c.glyph)));
+  ok(M.shortAgo(0, 5) === '' && M.shortAgo(1, 30001) === '<1m' && M.shortAgo(1, 5 * 60000 + 1) === '5m' && M.shortAgo(1, 3 * 3600000 + 1) === '3h' && M.shortAgo(1, 50 * 3600000) === '2d', '짧은 경과 시간');
+  const L = await import('file://' + path.join(PC, 'term-links.js'));
+  ok(L.findLinks('보기: https://a.io/x). (http://localhost:3000/a(b)) 끝').map((x) => x.text).join('|') === 'https://a.io/x|http://localhost:3000/a(b)', '주소: 끝 문장부호·문장의 괄호는 떼고 짝 맞는 괄호는 둔다');
+  ok(L.findLinks('● Update(src/js/pane.js:120) ~/.codingpt/orch.json v1.2.3 a/b').map((x) => x.text).join('|') === 'src/js/pane.js:120|~/.codingpt/orch.json', '경로: 폴더+확장자가 있는 것만(버전·낱말 오탐 없음)');
+  ok(L.findLinks('한글 https://a.io/path 뒤')[0].start === 3, '위치는 문자열 인덱스(셀 열 변환은 붙이는 쪽이 한다)');
+  ok(JSON.stringify(L.splitPathLine('src/a.js:12:3')) === '{"path":"src/a.js","line":12}' && L.splitPathLine('file:///U/a%20b.js').path === '/U/a b.js', '경로:줄 분리 · file:// 해석');
+}
+
 // 규칙 자체(둘이 같이 틀리는 것 방지)
 const r1 = pc.runs.find((x) => x[0] === 'r1');
 ok(JSON.stringify(pc.runs.map((x) => x[0])) === '["r0","r1","r4"]', '그 폴더의 진행 중 묶음만, 오래된 것부터(닫힌 묶음·다른 폴더 제외)');

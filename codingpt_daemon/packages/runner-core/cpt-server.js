@@ -546,6 +546,7 @@ function wireOrch() {
       agents: agentsLib,
       agentModels: lazyMod('./agent-models'),
       agentState: lazyMod('./agent-state'),
+      conv: lazyMod('./conv'),
       tasks: lazyMod('./tasks'),
       backFetch,
       config: () => { const c = configLib.load() || {}; return c.orch && typeof c.orch === 'object' ? c.orch : {}; },

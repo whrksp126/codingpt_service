@@ -1127,6 +1127,8 @@ const handlers = {
 
   // 풀 변경 통지 — 즉시 리컨실(공유 터미널 풀 ↔ 레이아웃 동기화).
   "pool.changed": async () => {
+    // 채팅 탭을 열고 닫는 것도 이 신호다(공유 표면) — 사이드바 에이전트 행(열려 있는 대화)도 같이 맞춘다.
+    import("./orch-view.js").then((m) => m.onOrchChanged({ host: null, reason: "pool" })).catch(() => {});
     await S.reconcilePool();
     return { ok: true };
   },

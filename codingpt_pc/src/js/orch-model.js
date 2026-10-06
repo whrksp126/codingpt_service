@@ -172,13 +172,19 @@ export function sessionTree(snapshot, cwd) {
   }
   const rows = [];
   const byTid = new Map();
-  const sessions = ((snapshot && snapshot.sessions) || []).filter((x) => (x.cwd || "") === here && !workerTerms.has(`${here}\n${x.tid}`))
-    .slice().sort((a, b) => a.tid - b.tid);   // 상태가 바뀌어도 자리가 안 바뀌게(since 는 상태 시작 시각이라 정렬 키가 못 된다)
-  for (const x of sessions) {
+  // 터미널 에이전트 먼저(번호 순), 그다음 채팅 대화(만든 순 = ID 순). 상태가 바뀌어도 자리가 안 바뀌게 — since 는 정렬 키가 못 된다.
+  const mine = ((snapshot && snapshot.sessions) || []).filter((x) => (x.cwd || "") === here);
+  const terms = mine.filter((x) => !x.chat && x.tid != null && !workerTerms.has(`${here}\n${x.tid}`)).sort((a, b) => a.tid - b.tid);
+  const chats = mine.filter((x) => x.chat && x.threadId).sort((a, b) => (String(a.threadId) < String(b.threadId) ? -1 : 1));
+  for (const x of terms) {
     const row = { kind: "session", key: "s:" + x.tid, tid: x.tid, agent: x.agent || null, glyph: sessionGlyph(x.state, !!x.detail),
       lead: "", trail: x.detail || "", at: x.since || null, runIds: [], rollup: null, children: [] };
     rows.push(row);
     byTid.set(x.tid, row);
+  }
+  for (const x of chats) {
+    rows.push({ kind: "session", key: "c:" + x.threadId, tid: null, threadId: x.threadId, chat: true, agent: x.agent || null, glyph: sessionGlyph(x.state, !!x.detail),
+      lead: x.title || "", trail: x.detail || "", model: x.model || "", at: x.since || null, runIds: [], rollup: null, children: [] });
   }
   for (const run of runs) {
     const co = run.coordinator || {};

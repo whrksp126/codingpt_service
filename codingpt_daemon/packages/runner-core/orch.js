@@ -74,6 +74,7 @@ let inj = {
   agents: null,           // agents.js (CATALOG·list)
   agentModels: null,      // agent-models.js (launchArgs·valid)
   agentState: null,       // agent-state.js (subscribe)
+  conv: null,             // conv.js (sessionsBrief·onSessionsChanged) — 채팅 대화도 에이전트 행이다
   tasks: null,            // tasks.js (internalCreate·rpc·findRunByTsession)
   backFetch: null,        // (method, apiPath, body)
   config: () => ({}),     // daemon.json 의 orch 블록
@@ -1263,6 +1264,11 @@ function agentSessions() {
     const line = state !== 'working' && v.summary ? String(v.summary).split('\n').map((x) => x.trim()).find(Boolean) || '' : '';
     out.push({ cwd: v.cwdRel, tid: v.tid, tsession: v.key, agent: v.agent || null, state, since: v.since || null, detail: line.slice(0, 160) });
   }
+  // 채팅으로 하는 대화(터미널이 아니다 — tid 없음, threadId 로 가리킨다)
+  try {
+    const chats = inj.conv && typeof inj.conv.sessionsBrief === 'function' ? inj.conv.sessionsBrief() : [];
+    for (const c of chats) out.push({ cwd: c.cwd, tid: null, threadId: c.threadId, chat: true, agent: c.agent, state: c.state, since: c.since, title: c.title, detail: c.detail, model: c.model });
+  } catch (_) { /* 구 번들 */ }
   return out;
 }
 let sessionsTimer = null;
@@ -1426,6 +1432,7 @@ function start() {
       else sessionsChangedSoon();   // 워커가 아닌 에이전트도 사이드바에 행이 있다
     });
   }
+  if (inj.conv && typeof inj.conv.onSessionsChanged === 'function') { try { inj.conv.onSessionsChanged(() => sessionsChangedSoon()); } catch (_) { /* noop */ } }
   if (load().runs.some((r) => r.state === 'active')) ensureTick();
 }
 function _reset() {

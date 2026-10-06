@@ -779,7 +779,7 @@ function orchSig(host, w) {
   if (!snap) return null;
   const n = noteFor(snap, w.localPath || "");
   const rows = sessionTree(snap, w.localPath || "");
-  return [n ? [n.comment, n.status] : null, rows.length ? [focusedTid(w.id), Math.floor(Date.now() / 60000)] : null,
+  return [n ? [n.comment, n.status] : null, rows.length ? [focusedTid(w.id), focusedThread(w.id), Math.floor(Date.now() / 60000)] : null,
     rows.map((r) => [r.key, r.glyph, r.agent, r.lead, r.trail, r.at, orchFolded.has(r.key), r.rollup ? [r.rollup.total, r.rollup.attention, r.rollup.gates] : null,
       r.children.map((c) => [c.key, c.glyph, c.agent, c.lead, c.trail, c.model, c.at, c.tid, c.terminal, c.needsReply])])];
 }
@@ -809,7 +809,8 @@ function agentSessionRow(w, r) {
   const b = document.createElement("button");
   const parent = r.children.length > 0 || r.runIds.length > 0;
   const open = !orchFolded.has(r.key);
-  const here = r.tid != null && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === r.tid;
+  const shown = w.id === state.activeWsId && state.view === "workspace";
+  const here = shown && (r.chat ? focusedThread(w.id) === r.threadId : (r.tid != null && focusedTid(w.id) === r.tid));
   b.className = "wsg-child wsg-ag" + (parent ? " parent" : "") + (here ? " active" : "");
   b.dataset.agSession = r.key;
   const ro = r.rollup;
@@ -823,14 +824,34 @@ function agentSessionRow(w, r) {
       (r.children.length ? `<span class="ag-btn wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "")
     : "";
   b.innerHTML = agRowHtml({ glyph: r.glyph, glyphTitle: GLYPH_TEXT[r.glyph] ? ot(GLYPH_TEXT[r.glyph]) : "", agent: r.agent,
-    lead: r.lead || agentName(r.agent || "") || ot("coordinator"), trail, model: "", at: r.at, extra });
+    lead: r.lead || agentName(r.agent || "") || ot("coordinator"), trail, model: r.model || "", at: r.at, extra });
   b.addEventListener("click", (e) => {
     if (e.target.closest?.(".wsg-caret2")) { e.stopPropagation(); toggleOrch(r.key); return; }
     if (r.runIds.length && (e.target.closest?.(".ag-run") || r.tid == null)) { e.stopPropagation(); openOrchSheet({ host, runId: r.runIds[0] }); return; }
+    if (r.chat) { openChatRow(w, r); return; }
     if (r.tid != null) void openRunTerminal(w.id, r.tid);
   });
   b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   return b;
+}
+/** 채팅 대화 행 — 그 워크스페이스로 간 뒤 그 대화의 탭을 앞으로(없으면 연다). */
+function openChatRow(w, r) {
+  const go = () => import("./workspace-view.js").then((m) => m.openConvTab(r.threadId, r.lead || "")).catch(() => {});
+  if (w.id === state.activeWsId && state.view === "workspace") { void go(); return; }
+  openWs(w);
+  setTimeout(go, 120);   // 레이아웃이 선 뒤에 — 그 전에는 탭 후보가 없다
+}
+/** 그 워크스페이스에서 지금 보고 있는 채팅 대화(없으면 null) — 채팅 행의 "여기 있음" 표시. */
+function focusedThread(wsId) {
+  const rt = S.wsRuntime(wsId);
+  if (!rt || !rt.layout || !rt.focusId) return null;
+  let id = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (l.id !== rt.focusId) return;
+    if (l.kind === "chat") id = l.threadId || null;
+    else if (l.kind === "terminal") { const t = (l.tabs || [])[l.active]; if (t && t.kind === "chat") id = t.threadId || null; }
+  });
+  return id;
 }
 /** 워커 행(자식) — 클릭 = 그 터미널. 답이 필요하거나 터미널이 없으면 묶음 시트(답하는 자리). */
 function agentWorkerRow(w, c) {

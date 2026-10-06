@@ -192,6 +192,7 @@
       { cwd: 'other/project/codingpt', tid: 7, agent: 'codex', state: 'idle', since: Date.now() - 95 * 60000, detail: '로그인 폼 검증을 고쳤고 테스트 14개가 통과합니다.' },
       { cwd: 'other/project/codingpt', tid: 8, agent: 'claude', state: 'permission', since: Date.now() - 30000, detail: '' },
       { cwd: 'other/project/codingpt', tid: 9, agent: 'gemini', state: 'idle', since: Date.now() - 3 * 3600000, detail: '' },
+      { cwd: 'other/project/codingpt', tid: null, threadId: 'th_1', chat: true, agent: 'claude', state: 'working', since: Date.now() - 2 * 60000, title: '워크스페이스 메뉴 정리와 음성 입력 추가', detail: '', model: 'opus' },
       { cwd: 'other/project/hub', tid: 3, agent: 'claude', state: 'working', since: Date.now() - 60000, detail: '' },
     ],
     notes: [{ cwd: 'other/project/codingpt', comment: '워커 결과 모으는 중 — 결제 재시도만 남음', status: 'in-progress' }, { cwd: 'other/project/hub', comment: null, status: 'in-review' }] };
@@ -210,7 +211,7 @@
   await AV.refreshAutoHost(11);
   if (location.hash.includes('tasks')) S.setView('tasks');
   if (location.hash.includes('autos')) AV.openAutomations(location.hash.includes('detail') ? { id: 'a_sched', host: 11 } : {});
-  S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: 0 }, focusId: null, surfaces: [], ports: [3000, 5173] };
+  S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: location.hash.includes('focus2') ? 1 : 0 }, focusId: location.hash.includes('focus') ? 'p1' : null, surfaces: [], ports: [3000, 5173] };
   // 행 규격 확인용 — 색 점·고정 핀·포트 텍스트·활성 로컬 행(디자인 리프레시 2026-09-30).
   S.wsPrefs.color[1] = '#60a5fa'; S.wsPrefs.color[2] = '#fb923c'; S.wsPrefs.pinned = [1];
   S.state.activeWsId = 1;
