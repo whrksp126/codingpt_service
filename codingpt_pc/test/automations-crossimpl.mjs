@@ -170,7 +170,7 @@ else {
   ok(/tt\("automations"\)/.test(autoRowSrc) && /icons\.repeat/.test(autoRowSrc), "sidebar autoRow(): tt(\"automations\") + repeat 아이콘");
   ok(/state\.view === "automations" \? " active" : ""/.test(autoRowSrc) && /if \(state\.view === "automations"\) return;/.test(autoRowSrc), "자동화 행: 들어가 있을 때만 배경, 토글 아님");
   ok(/hostHasAuto\(S\.activeDeviceId\(\)\) === false[\s\S]{0,120}pcNeedsUpdate/.test(autoRowSrc), "auto.v1 없는 PC: 행은 그리되 누르면 업데이트 안내");
-  ok(/list\.appendChild\(tasksRow\(\)\);\s*\n\s*list\.appendChild\(autoRow\(\)\);/.test(sb), "`진행 현황` 바로 다음 줄에 `자동화`");
+  ok(!/list\.appendChild\(autoRow\(\)\)/.test(sb) && /"automations\.open"/.test(read(path.join(PC, "main.js"))), "`자동화` 행은 사이드바에 없다(2026-10-06 사용자 결정) — 단축키·팔레트로는 열린다");
   ok(/tasksN, autoN,/.test(sb) && /hostAwake\(d\.id\)\]\)/.test(sb), "sbSig 에 autoN·awake");
   ok(/autoNotifTarget\(n\)/.test(sb) && /pcNotifTarget\(n\)/.test(sb), "알림 점프: auto_* → 자동화 장소, pc_* → 진행 현황");
   const main = read(path.join(PC, "main.js"));

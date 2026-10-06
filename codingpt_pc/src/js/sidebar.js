@@ -329,7 +329,7 @@ export function updateSidebar() {
     } else {
     list.appendChild(devHead);
     list.appendChild(tasksRow());
-    list.appendChild(autoRow());
+    // `자동화` 행은 사이드바에서 뺐다(2026-10-06 사용자 결정) — 장소 자체는 남아 있다: 단축키·팔레트(automations.open)와 알림이 그리로 간다.
     }
   }
 
