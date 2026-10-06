@@ -347,7 +347,7 @@ else {
   }
   const sb = read(path.join(PC, "sidebar.js"));
   const tv = read(path.join(PC, "tasks-view.js"));
-  ok(/class="pc-nm">\$\{escapeHtml\(tt\("overview"\)\)\}/.test(sb) && /function tasksRow\(\)/.test(sb), "사이드바 맨 위 행 라벨 = tt(\"overview\")(진행 현황)");
+  ok(!/list\.appendChild\(tasksRow\(\)\)/.test(sb) && /"tasks\.dashboard"/.test(read(path.join(PC, "main.js"))), "`진행 현황` 행은 사이드바에 없다(2026-10-06 사용자 결정) — 작업 행·단축키·팔레트로는 열린다");
   ok(/more\.className = "wsg-more"[\s\S]{0,500}e\.stopPropagation\(\);\s*\/\/ 머리 토글 방지[\s\S]{0,200}showCtxDom\([^)]*wsMenuItems\(w\)\)/.test(sb)
     && /label: tt\("newTask"\), onClick: \(\) => newTaskFor\(w\)/.test(sb)
     && /function newTaskFor\(w\)[\s\S]{0,700}openNewTaskSheet\(\{ host, wsId: w\.id \}\)/.test(sb),

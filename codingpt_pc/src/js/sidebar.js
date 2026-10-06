@@ -326,11 +326,10 @@ export function updateSidebar() {
       // VM 을 고른 상태 — 이 아래는 그 VM 의 것(화면·VM 워크스페이스). 진행 현황·자동화는 호스트의 것이라 여기서는 뺀다.
       list.appendChild(devHead);
       list.appendChild(vmScreenRow(state.vmScope));
-    } else {
-    list.appendChild(devHead);
-    list.appendChild(tasksRow());
-    // `자동화` 행은 사이드바에서 뺐다(2026-10-06 사용자 결정) — 장소 자체는 남아 있다: 단축키·팔레트(automations.open)와 알림이 그리로 간다.
     }
+    // `진행 현황`·`자동화` 행은 사이드바에서 뺐다(2026-10-06 사용자 결정) — 워크스페이스 아래 에이전트·작업 행이 같은 것을 말한다.
+    //  장소 자체는 남아 있다: 작업 행을 누르면 그 상세가 열리고, 단축키·팔레트(tasks.dashboard · automations.open)와 알림도 그리로 간다.
+    //  그 아래 둘 것이 없으니 PC 이름 머리도 그리지 않는다(위 PC 목록이 이미 말한다).
   }
 
   // ── ② 선택한 PC 의 워크스페이스 ───────────────────────────────────────
