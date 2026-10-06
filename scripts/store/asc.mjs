@@ -430,6 +430,10 @@ async function cmdSubmit(argv) {
         reviewSubmission: { data: { type: 'reviewSubmissions', id: sub.id } },
         appStoreVersion: { data: { type: 'appStoreVersions', id: target.id } },
       } } }),
+    }).catch((e) => {
+      // 앞선 시도가 항목 추가까지만 성공하고 마지막 PATCH 에서 죽었을 수 있다(Apple 500 실측 2026-10-06) —
+      //  items 목록은 관계를 안 실어 줘서 위 has 판정이 놓친다. "이미 들어 있음" 은 통과시킨다.
+      if (!/already added/i.test(String(e && e.message))) throw e;
     });
   }
   await api(`/v1/reviewSubmissions/${sub.id}`, {
