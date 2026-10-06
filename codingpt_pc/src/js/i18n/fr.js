@@ -1292,5 +1292,21 @@ export default {
   "이슈 검색": "Rechercher des tickets",
   "이슈 {n}개": "{n} tickets",
   "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Collez (⌘V) ou déposez ici des images et fichiers pour les joindre",
-  "첨부 빼기": "Retirer la pièce jointe"
+  "첨부 빼기": "Retirer la pièce jointe",
+  "제목 1": "Titre 1",
+  "제목 2": "Titre 2",
+  "제목 3": "Titre 3",
+  "굵게": "Gras",
+  "기울임": "Italique",
+  "취소선": "Barré",
+  "코드": "Code",
+  "글머리 목록": "Liste à puces",
+  "번호 목록": "Liste numérotée",
+  "체크 목록": "Liste de tâches",
+  "인용": "Citation",
+  "코드 블록": "Bloc de code",
+  "구분선": "Séparateur",
+  "링크": "Lien",
+  "이미지·파일 첨부": "Joindre une image ou un fichier",
+  "링크 넣기": "Insérer le lien"
 };

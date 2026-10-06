@@ -1292,5 +1292,21 @@ export default {
   "이슈 검색": "Search issues",
   "이슈 {n}개": "{n} issues",
   "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Paste (⌘V) or drop images and files here to attach them",
-  "첨부 빼기": "Remove attachment"
+  "첨부 빼기": "Remove attachment",
+  "제목 1": "Heading 1",
+  "제목 2": "Heading 2",
+  "제목 3": "Heading 3",
+  "굵게": "Bold",
+  "기울임": "Italic",
+  "취소선": "Strikethrough",
+  "코드": "Code",
+  "글머리 목록": "Bulleted list",
+  "번호 목록": "Numbered list",
+  "체크 목록": "Checklist",
+  "인용": "Quote",
+  "코드 블록": "Code block",
+  "구분선": "Divider",
+  "링크": "Link",
+  "이미지·파일 첨부": "Attach image or file",
+  "링크 넣기": "Insert link"
 };

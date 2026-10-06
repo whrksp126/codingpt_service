@@ -534,7 +534,7 @@ function issuesRow() {
   row.className = "pc-row issues-row" + (state.view === "issues" ? " active" : "");
   //  오른쪽 = 연결된 외부 서비스 표식(Orca 의 Tasks 행과 같다 — 무엇이 붙어 있는지 한눈에).
   const provs = issuesProviders(S.activeDeviceId());
-  row.innerHTML = `<span class="pc-ic">${icons.issue({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("이슈"))}</span>` +
+  row.innerHTML = `<span class="pc-ic">${icons.tasksList({ size: 15 })}</span><span class="pc-nm">Tasks</span>` +
     provs.map((p) => (icons[p] ? `<span class="is-prov" title="${escapeHtml(p)}">${icons[p]({ size: 13 })}</span>` : "")).join("") + (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => { if (state.view !== "issues") openIssues(); });
   return row;

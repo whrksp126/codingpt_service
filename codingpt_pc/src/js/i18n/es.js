@@ -1292,5 +1292,21 @@ export default {
   "이슈 검색": "Buscar incidencias",
   "이슈 {n}개": "{n} incidencias",
   "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Pega (⌘V) o suelta aquí imágenes y archivos para adjuntarlos",
-  "첨부 빼기": "Quitar el adjunto"
+  "첨부 빼기": "Quitar el adjunto",
+  "제목 1": "Título 1",
+  "제목 2": "Título 2",
+  "제목 3": "Título 3",
+  "굵게": "Negrita",
+  "기울임": "Cursiva",
+  "취소선": "Tachado",
+  "코드": "Código",
+  "글머리 목록": "Lista con viñetas",
+  "번호 목록": "Lista numerada",
+  "체크 목록": "Lista de tareas",
+  "인용": "Cita",
+  "코드 블록": "Bloque de código",
+  "구분선": "Separador",
+  "링크": "Enlace",
+  "이미지·파일 첨부": "Adjuntar imagen o archivo",
+  "링크 넣기": "Insertar enlace"
 };
