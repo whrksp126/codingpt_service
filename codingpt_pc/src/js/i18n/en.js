@@ -1287,5 +1287,10 @@ export default {
   "표": "Table",
   "번호": "No.",
   "출처": "Source",
-  "바뀐 때": "Updated"
+  "바뀐 때": "Updated",
+  "열린 이슈": "Open",
+  "이슈 검색": "Search issues",
+  "이슈 {n}개": "{n} issues",
+  "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Paste (⌘V) or drop images and files here to attach them",
+  "첨부 빼기": "Remove attachment"
 };

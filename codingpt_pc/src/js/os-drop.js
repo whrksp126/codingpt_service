@@ -6,6 +6,7 @@
 import { api } from "./api.js";
 import { getPane, isTermTab, terminalPanes } from "./pane.js";
 import { shellQuote } from "./path-utils.js";
+import { issueSheetDrop } from "./issues-view.js";
 
 let hlEl = null; // 하이라이트 중인 pane 요소
 
@@ -71,6 +72,8 @@ export function initOsDrop() {
       return;
     }
     if (ev.kind === "drop") {
+      // 이슈 상세 창이 열려 있으면 그 창이 받는다(첨부) — 뒤에 가려진 터미널에 경로가 꽂히지 않게.
+      if (Array.isArray(ev.paths) && ev.paths.length && issueSheetDrop(ev.paths)) { clearHl(); setDragging(false); return; }
       let tgt = termTargetAt(ev.x, ev.y);
       // 폴백 — 좌표가 pane 을 못 짚었는데 터미널 pane 이 딱 하나면 거기로(단일 터미널 케이스 확실).
       if (!tgt) {

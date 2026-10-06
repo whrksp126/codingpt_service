@@ -114,3 +114,31 @@ test('시작 — 새 터미널/오케스트레이션: 프롬프트로 에이전�
   const c = (await M.issueCreate({ title: '폴더 없음' })).issue;
   await assert.rejects(M.issueStart({ id: c.id, mode: 'terminal' }), { code: 'BAD_PARAMS' });
 });
+
+test('첨부 — 파일을 이 PC 에 복사하고, 시작할 때 본문의 자리를 실제 경로로 바꾼다', async () => {
+  const img = path.join(HOME, 'shot.png'); fs.writeFileSync(img, Buffer.from('89504e47', 'hex'));
+  const log = path.join(HOME, 'err.log'); fs.writeFileSync(log, 'boom');
+  const x = (await M.issueCreate({ title: '화면이 깨짐', body: '여기 보세요 ![캡처](att:aaaaaa1) 끝', cwd: 'work/app' })).issue;
+  const r1 = await M.issueAttach({ id: x.id, path: img, attId: 'aaaaaa1' });
+  assert.equal(r1.attachment.image, true); assert.equal(r1.attachment.mime, 'image/png'); assert.ok(fs.existsSync(r1.attachment.path));
+  assert.equal(fs.statSync(r1.attachment.path).mode & 0o777, 0o600);
+  assert.ok(r1.attachment.path.startsWith(issues._internals.filesRoot()));
+  const again = await M.issueAttach({ id: x.id, path: img, attId: 'aaaaaa1' });
+  assert.equal(again.issue.attachments.length, 1, '같은 attId 를 다시 보내도 하나다(재시도 안전)');
+  const r2 = await M.issueAttach({ id: x.id, path: log });
+  assert.equal(r2.issue.attachments.length, 2); assert.equal(r2.attachment.image, false);
+  await assert.rejects(M.issueAttach({ id: x.id, path: 'relative.png' }), { code: 'BAD_PARAMS' });
+  await assert.rejects(M.issueAttach({ id: x.id, path: path.join(HOME, 'nope.png') }), { code: 'BAD_PARAMS' });
+  await M.issueStart({ id: x.id, mode: 'terminal', agent: 'claude' });
+  const prompt = launched[launched.length - 1].prompt;
+  assert.ok(prompt.includes(`[첨부 이미지 "캡처": ${r1.attachment.path}]`), prompt);
+  assert.ok(prompt.includes(`- err.log: ${r2.attachment.path}`));
+  assert.ok(!prompt.includes('att:aaaaaa1'));
+  const d = await M.issueDetach({ id: x.id, attId: r2.attachment.id });
+  assert.equal(d.issue.attachments.length, 1); assert.equal(fs.existsSync(r2.attachment.path), false);
+  // 외부 이슈에도 붙일 수 있다(그 서비스에 올리지 않고 여기에만)
+  const e = await M.issueAttach({ id: 'gh:me/app#7', path: img });
+  assert.equal(e.issue.attachments.length, 1); assert.ok(!ghCalls.some((c) => /upload|attach/.test(c)));
+  await M.issueDelete({ id: x.id });
+  assert.equal(fs.existsSync(r1.attachment.path), false, '이슈를 지우면 첨부도 지운다');
+});

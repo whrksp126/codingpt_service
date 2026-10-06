@@ -1287,5 +1287,10 @@ export default {
   "표": "Table",
   "번호": "N°",
   "출처": "Source",
-  "바뀐 때": "Modifié"
+  "바뀐 때": "Modifié",
+  "열린 이슈": "Ouverts",
+  "이슈 검색": "Rechercher des tickets",
+  "이슈 {n}개": "{n} tickets",
+  "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Collez (⌘V) ou déposez ici des images et fichiers pour les joindre",
+  "첨부 빼기": "Retirer la pièce jointe"
 };

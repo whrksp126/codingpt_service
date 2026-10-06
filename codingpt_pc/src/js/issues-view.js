@@ -25,9 +25,12 @@ const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</
 let el = null;
 let pollTimer = null;
 let sheet = null;                         // 열린 상세/새 이슈 시트 { close }
+let dropHook = null;                      // 시트가 열려 있을 때 OS 파일 드롭을 받는 곳
+/** os-drop.js — 이슈 시트가 열려 있으면 끌어다 놓은 파일을 첨부로 받는다. 받았으면 true. */
+export function issueSheetDrop(paths) { if (!dropHook) return false; dropHook(paths); return true; }
 const data = new Map();                   // host → { issues, sources, at, error, loading }
 const PREF_KEY = "cpt.issues.pref";
-let pref = { view: "list", source: "all", cwd: "", done: false, sort: "updatedAt", dir: -1, start: { mode: "task", agent: "claude" } };
+let pref = { view: "list", source: "all", cwd: "", state: "open", sort: "updatedAt", dir: -1, start: { mode: "task", agent: "claude" } };
 try { pref = { ...pref, ...(JSON.parse(localStorage.getItem(PREF_KEY) || "{}") || {}) }; } catch (_) { /* 기본값 */ }
 if (!VIEWS.includes(pref.view)) pref.view = "list";
 let query = "";
@@ -38,6 +41,8 @@ const wsList = (h) => S.workspacesForDevice(h).filter((w) => w.localPath);
 const wsName = (h, cwd) => { const w = wsList(h).find((x) => x.localPath === cwd); return w ? w.name : (cwd ? cwd.split("/").pop() : ""); };
 
 export function issuesSnapshot(host) { return data.get(Number(host)) || null; }
+/** 연결된 외부 서비스(이슈를 읽어 온 것) — 사이드바 이슈 행의 표식. */
+export function issuesProviders(host) { const d = data.get(Number(host)); return d ? [...new Set((d.sources || []).filter((x) => x.ok && x.provider !== "codingpt").map((x) => x.provider))] : []; }
 export function issuesOpenCount(host) { const d = data.get(Number(host)); return d ? openCount(d.issues) : 0; }
 
 export async function refreshIssues({ fresh = false } = {}) {
@@ -126,29 +131,49 @@ export function updateIssuesView() {
   if (!d || (!d.loading && Date.now() - d.at > 60000)) void refreshIssues();
   draw();
 }
+// 배치는 Orca 의 Tasks 화면을 따른다(task-page/Frame·SourceBar·github/Filters·linear/IssueToolbar, 2026-10-07):
+//   타이틀바 = 제목만(창을 끄는 자리다 — 도구를 여기 늘어놓지 않는다)
+//   본문    = [닫기 | 출처 아이콘 …            워크스페이스]      ← 출처 줄
+//             ┌ 상태 칩 …  /  [검색 ……………………] [+] [새로고침] ┐  ← 필터 머리(카드 윗부분)
+//             │ 이슈 N개                      [목록|보드|표]     │  ← 보기 줄
+//             └ 목록 · 보드 · 표                                 ┘
+const SRC_ICON = { all: () => icons.layers ? icons.layers({ size: 14 }) : icons.issue({ size: 14 }), codingpt: () => icons.issue({ size: 14 }), github: () => icons.github({ size: 14 }) };
+const STATE_CHIPS = [["open", "열린 이슈"], ["todo", "할 일"], ["in_progress", "진행 중"], ["in_review", "리뷰 중"], ["done", "완료"], ["all", "전체"]];
+const VIEW_ICON = { list: () => icons.viewList({ size: 13 }), board: () => icons.viewBoard({ size: 13 }), table: () => icons.viewTable({ size: 13 }) };
 function draw() {
   const h = curHost();
   const d = data.get(h) || { issues: [], sources: [] };
   const srcs = sourceOptions(d.issues, d.sources);
   if (!srcs.includes(pref.source)) pref.source = "all";
+  if (!STATE_CHIPS.some(([k]) => k === pref.state)) pref.state = "open";
   const wss = wsList(h);
   if (pref.cwd && !wss.some((w) => w.localPath === pref.cwd)) pref.cwd = "";
-  const sig = JSON.stringify([pref.view, pref.source, pref.cwd, pref.done, srcs, wss.map((w) => [w.localPath, w.name]), i18n.getLang(), state.sidebarCollapsed]);
+  const sig = JSON.stringify([pref.view, pref.source, pref.cwd, pref.state, srcs, wss.map((w) => [w.localPath, w.name]), i18n.getLang(), state.sidebarCollapsed]);
   if (sig !== topSig || !el.querySelector(".tv-top")) {
     topSig = sig;
     el.innerHTML =
-      `<div class="tv-top"><span class="tv-title">${esc(t("이슈"))}</span>` +
-      `<span class="is-seg">${VIEWS.map((v) => `<button class="is-segb${pref.view === v ? " on" : ""}" data-view="${v}">${esc(t({ list: "목록", board: "보드", table: "표" }[v]))}</button>`).join("")}</span>` +
-      `<select class="tk-input is-sel" data-pref="source">${srcs.map((s) => `<option value="${s}"${pref.source === s ? " selected" : ""}>${esc(s === "all" ? t("전체 출처") : (SRC_TEXT[s] || s))}</option>`).join("")}</select>` +
-      `<select class="tk-input is-sel" data-pref="cwd"><option value="">${esc(t("전체 워크스페이스"))}</option>${wss.map((w) => `<option value="${esc(w.localPath)}"${pref.cwd === w.localPath ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select>` +
-      `<input class="tk-input is-q" placeholder="${esc(t("검색"))}" value="${esc(query)}">` +
-      `<label class="is-done"><input type="checkbox" data-pref="done"${pref.done ? " checked" : ""}>${esc(t("완료 포함"))}</label>` +
-      `<span class="is-grow"></span>` +
-      `<button class="ic-btn tv-ic" data-act="refresh" title="${esc(t("새로고침"))}">${icons.refresh ? icons.refresh({ size: 14 }) : "↻"}</button>` +
-      `<button class="tv-btn" data-act="new">${esc(t("새 이슈"))}</button></div>` +
-      `<div class="is-warn" hidden></div><div class="is-body"></div>`;
+      `<div class="tv-top"><span class="tv-title">${esc(t("이슈"))}</span></div>` +
+      `<div class="is-page">` +
+      `<div class="is-srcbar"><button class="is-round" data-act="close" title="${esc(t("닫기"))} · Esc">${icons.x({ size: 15 })}</button><span class="is-vsep"></span>` +
+      srcs.map((sv) => `<button class="is-src${pref.source === sv ? " on" : ""}" data-source="${sv}" title="${esc(sv === "all" ? t("전체 출처") : (SRC_TEXT[sv] || sv))}">${(SRC_ICON[sv] || SRC_ICON.codingpt)()}</button>`).join("") +
+      `<span class="is-ctx">${esc(pref.source === "all" ? t("전체 출처") : (SRC_TEXT[pref.source] || pref.source))}</span><span class="is-grow"></span>` +
+      `<select class="tk-input is-sel" data-pref="cwd"><option value="">${esc(t("전체 워크스페이스"))}</option>${wss.map((w) => `<option value="${esc(w.localPath)}"${pref.cwd === w.localPath ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select></div>` +
+      `<div class="is-warn" hidden></div>` +
+      `<div class="is-card-shell"><div class="is-filters"><div class="is-chips">${STATE_CHIPS.map(([k, n]) => `<button class="is-fchip${pref.state === k ? " on" : ""}" data-state="${k}">${esc(t(n))}</button>`).join("")}</div>` +
+      `<div class="is-frow"><span class="is-qwrap">${icons.search ? icons.search({ size: 14 }) : ""}<input class="tk-input is-q" placeholder="${esc(t("이슈 검색"))}" value="${esc(query)}"></span>` +
+      `<button class="is-sq" data-act="new" title="${esc(t("새 이슈"))}">${icons.plus({ size: 15 })}</button>` +
+      `<button class="is-sq" data-act="refresh" title="${esc(t("새로고침"))}">${icons.refresh({ size: 14 })}</button></div></div>` +
+      `<div class="is-toolbar"><span class="is-count"></span><span class="is-grow"></span>` +
+      `<span class="is-seg">${VIEWS.map((v) => `<button class="is-segb${pref.view === v ? " on" : ""}" data-view="${v}" title="${esc(t({ list: "목록", board: "보드", table: "표" }[v]))}">${VIEW_ICON[v]()}<span>${esc(t({ list: "목록", board: "보드", table: "표" }[v]))}</span></button>`).join("")}</span></div>` +
+      `<div class="is-body"></div></div></div>`;
   }
   drawBody();
+}
+/** 상태 칩 → 걸러 보기. "열린 이슈" = 완료가 아닌 것(기본). */
+function stateFilter(list) {
+  if (pref.state === "all") return list;
+  if (pref.state === "open") return list.filter((x) => x.status !== "done");
+  return list.filter((x) => x.status === pref.state);
 }
 function drawBody() {
   const body = el.querySelector(".is-body");
@@ -159,15 +184,19 @@ function drawBody() {
   const bad = (d.sources || []).filter((s) => !s.ok);
   warn.hidden = !d.error && !bad.length;
   warn.textContent = d.error ? errText(d.error) : bad.map((s) => `${SRC_TEXT[s.provider] || s.provider} · ${wsName(h, s.cwd)}: ${errText(s.error)}`).join("  /  ");
-  const list = filterIssues(d.issues, { ...pref, q: query });
-  if (!list.length) {
+  const base = filterIssues(d.issues, { source: pref.source, cwd: pref.cwd, q: query, done: true });
+  const list = stateFilter(base);
+  const cnt = el.querySelector(".is-count");
+  if (cnt) cnt.textContent = t("이슈 {n}개", { n: pref.view === "board" ? base.length : list.length });
+  if (!list.length && pref.view !== "board") {
     body.className = "is-body";
     body.innerHTML = `<div class="tv-detail-empty">${esc(d.loading && !d.at ? t("불러오는 중…") : t("이슈가 없어요"))}<div class="is-empty-sub">${esc(t("할 일을 적어 두고, 준비되면 에이전트에게 시작시키세요."))}</div></div>`;
     return;
   }
   if (pref.view === "board") {
     body.className = "is-body board";
-    body.innerHTML = groupByStatus(filterIssues(d.issues, { ...pref, q: query, done: true }), { order: STATUSES, keepEmpty: true })
+    //  보드는 열 자체가 상태다 — 상태 칩은 적용하지 않는다(네 열을 항상 다 보인다).
+    body.innerHTML = groupByStatus(base, { order: STATUSES, keepEmpty: true })
       .map((g) => `<div class="is-col" data-status="${g.status}"><div class="is-col-h">${stGlyph(g.status)}<span>${esc(t(ST_TEXT[g.status]))}</span><span class="is-n">${g.items.length}</span></div>` +
         `<div class="is-col-b">${(g.status === "done" ? g.items.slice(0, 30) : g.items).map((x) => cardHtml(h, x)).join("")}</div></div>`).join("");
     return;
@@ -189,8 +218,12 @@ function drawBody() {
 function onClick(e) {
   const seg = e.target.closest?.("[data-view]");
   if (seg) { pref.view = seg.dataset.view; savePref(); draw(); return; }
+  const src = e.target.closest?.("[data-source]");
+  if (src) { pref.source = src.dataset.source; savePref(); draw(); return; }
+  const chip = e.target.closest?.("[data-state]");
+  if (chip) { pref.state = chip.dataset.state; savePref(); draw(); return; }
   const a = e.target.closest?.("[data-act]");
-  if (a) { if (a.dataset.act === "refresh") void refreshIssues({ fresh: true }); else openSheet(null); return; }
+  if (a) { const k = a.dataset.act; if (k === "refresh") void refreshIssues({ fresh: true }); else if (k === "close") closeIssues(); else openSheet(null); return; }
   const th = e.target.closest?.("th[data-sort]");
   if (th) { if (pref.sort === th.dataset.sort) pref.dir = -pref.dir; else { pref.sort = th.dataset.sort; pref.dir = 1; } savePref(); drawBody(); return; }
   const row = e.target.closest?.("[data-id]");
@@ -223,6 +256,7 @@ function openSheet(issue) {
     `<div class="is-f-row"><label>${esc(t("상태"))}<select class="tk-input is-f-status">${opt(STATUSES, x.status, (v) => t(ST_TEXT[v]))}</select></label>` +
     `<label>${esc(t("우선순위"))}<select class="tk-input is-f-pri">${opt(["none", "low", "medium", "high", "urgent"], x.priority || "none", (v) => t(PRI_TEXT[v]))}</select></label>` +
     `<label>${esc(t("워크스페이스"))}<select class="tk-input is-f-cwd"${ext ? " disabled" : ""}><option value="">${esc(t("정하지 않음"))}</option>${wss.map((w) => `<option value="${esc(w.localPath)}"${w.localPath === x.cwd ? " selected" : ""}>${esc(w.name)}</option>`).join("")}</select></label></div>` +
+    `<div class="is-atts"></div><div class="is-att-hint">${esc(t("이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다"))}</div>` +
     (ext ? "" : `<label class="is-f-lab">${esc(t("라벨(쉼표로 구분)"))}<input class="tk-input is-f-labels" value="${esc((x.labels || []).join(", "))}"></label>`) +
     (isNew ? `<label class="is-f-gh"><input type="checkbox" class="is-f-github">${esc(t("GitHub 이슈로 만들기"))}</label>` : "") +
     (isNew ? "" : `<div class="is-start"><span class="is-start-h">${esc(t("이 이슈로 시작"))}</span>` +
@@ -239,7 +273,67 @@ function openSheet(issue) {
   const syncGh = () => { if (!ghBox) return; const ok = ghCwds.has(q(".is-f-cwd").value); ghBox.disabled = !ok; if (!ok) ghBox.checked = false; ghBox.parentElement.classList.toggle("off", !ok); };
   syncGh();
   q(".is-f-cwd").addEventListener("change", syncGh);
-  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey, true); sheet = null; };
+  // ── 첨부 ── 이미 올라간 것(atts) + 아직 이슈가 없어 기다리는 것(pending — 만들기 직후에 올린다).
+  //  본문에는 `![이름](att:ID)` 로 자리를 적는다. ID 는 여기서 정해 두므로 새 이슈에서도 자리를 바로 적을 수 있다.
+  let atts = (x.attachments || []).slice();
+  const pending = [];   // { id, path, name, image }
+  const IMG_RE = /\.(png|jpe?g|gif|webp|heic|svg)$/i;
+  const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(5)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const thumbs = new Map();   // 경로 → blob URL
+  async function thumbOf(absPath) {
+    if (thumbs.has(absPath)) return thumbs.get(absPath);
+    let url = "";
+    try {
+      const home = String(await api.fsAbs("") || "").replace(/\/+$/, "");
+      const b64 = home && absPath.startsWith(home + "/") ? await api.fsReadBytes(absPath.slice(home.length + 1)) : null;
+      const raw = b64 && (typeof b64 === "string" ? b64 : b64.b64 || b64.base64 || b64.data || b64.content || "");
+      if (raw) { const bin = atob(raw); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); url = URL.createObjectURL(new Blob([u8])); }
+    } catch (_) { url = ""; }
+    thumbs.set(absPath, url);
+    return url;
+  }
+  function drawAtts() {
+    const all = [...atts.map((a) => ({ ...a, up: true })), ...pending.map((a) => ({ ...a, up: false }))];
+    const host = q(".is-atts");
+    host.innerHTML = all.map((a) => `<div class="is-att${a.image ? " img" : ""}" data-att="${esc(a.id)}" title="${esc(a.name)}">` +
+      (a.image ? `<span class="is-att-th" data-th="${esc(a.path)}"></span>` : `<span class="is-att-ic">${icons.file ? icons.file({ size: 14 }) : ""}</span>`) +
+      `<span class="is-att-nm">${esc(a.name)}</span><button class="is-att-x" data-s="unatt" data-att="${esc(a.id)}" title="${esc(t("첨부 빼기"))}">${icons.x({ size: 11 })}</button></div>`).join("");
+    host.querySelectorAll("[data-th]").forEach((n) => { void thumbOf(n.dataset.th).then((u) => { if (u) n.style.backgroundImage = `url("${u}")`; }); });
+  }
+  function insertMark(a) {
+    const ta = q(".is-f-body");
+    const mark = `![${a.name.replace(/[\[\]]/g, "")}](att:${a.id})`;
+    const at = ta.selectionStart ?? ta.value.length;
+    const pre = ta.value.slice(0, at); const post = ta.value.slice(ta.selectionEnd ?? at);
+    const text = (pre && !pre.endsWith("\n") ? "\n" : "") + mark + "\n";
+    ta.value = pre + text + post;
+    ta.selectionStart = ta.selectionEnd = pre.length + text.length;
+  }
+  async function addFiles(paths) {
+    for (const pth of (paths || []).filter(Boolean)) {
+      const a = { id: newId(), path: pth, name: pth.split("/").pop() || "file", image: IMG_RE.test(pth) };
+      if (isNew) { pending.push(a); if (a.image) insertMark(a); drawAtts(); continue; }
+      const r = await act("orch.issueAttach", { id: x.id, path: pth, attId: a.id });
+      if (r && r.issue) { atts = r.issue.attachments || []; if (a.image) insertMark(a); drawAtts(); }
+    }
+  }
+  //  붙여넣기 — 캡처한 이미지(클립보드 PNG)·Finder 에서 복사한 파일이면 첨부로, 아니면 글자 그대로(컴포저와 같은 순서).
+  box.addEventListener("paste", (e) => {
+    if (!e.target.classList?.contains("is-f-body") && !e.target.classList?.contains("is-f-title")) return;
+    const txt = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+    e.preventDefault();
+    const tgt = e.target;
+    void (async () => {
+      let paths = [];
+      try { paths = await api.clipboardPaths(); } catch (_) { paths = []; }
+      if (!Array.isArray(paths) || !paths.length) { let img = null; try { img = await api.clipboardImagePng(); } catch (_) { img = null; } paths = img ? [img] : []; }
+      if (paths.length) { await addFiles(paths); return; }
+      if (txt) { tgt.setRangeText(txt, tgt.selectionStart, tgt.selectionEnd, "end"); }
+    })();
+  });
+  dropHook = (paths) => { void addFiles(paths); };   // OS 에서 끌어다 놓은 파일(os-drop.js 가 넘긴다)
+  drawAtts();
+  const close = () => { overlay.remove(); document.removeEventListener("keydown", onKey, true); sheet = null; dropHook = null; for (const u of thumbs.values()) { if (u) URL.revokeObjectURL(u); } };
   const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); close(); } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); } };
   document.addEventListener("keydown", onKey, true);
   overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) close(); });
@@ -254,6 +348,8 @@ function openSheet(issue) {
     const r = isNew
       ? await act("orch.issueCreate", { ...f, provider: ghBox && ghBox.checked ? "github" : "codingpt" }, t("이슈를 만들었어요"))
       : await act("orch.issueUpdate", { id: x.id, ...f, ...(ext ? { cwd: undefined } : {}) }, t("저장했어요"));
+    //  새 이슈 — 만든 뒤에 기다리던 첨부를 올린다(자리 표시의 ID 는 그대로다).
+    if (r && isNew && r.issue) for (const a of pending) await act("orch.issueAttach", { id: r.issue.id, path: a.path, attId: a.id, name: a.name });
     busy = false;
     if (r) close();
     return r;
@@ -265,6 +361,16 @@ function openSheet(issue) {
     if (k === "close") { close(); return; }
     if (k === "save") { void save(); return; }
     if (k === "ext") { api.openExternal(x.source.url).catch(() => {}); return; }
+    if (k === "unatt") {
+      const id = b.dataset.att;
+      const pi = pending.findIndex((a) => a.id === id);
+      if (pi >= 0) pending.splice(pi, 1);
+      else { const r = await act("orch.issueDetach", { id: x.id, attId: id }); if (r && r.issue) atts = r.issue.attachments || []; }
+      const ta = q(".is-f-body");
+      ta.value = ta.value.replace(new RegExp(`\\n?!\\[[^\\]]*\\]\\(att:${id}\\)`, "g"), "");
+      drawAtts();
+      return;
+    }
     if (k === "del") {
       if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = t("한 번 더 누르면 삭제"); return; }   // 브라우저 confirm 을 띄우지 않는다(웹뷰를 멈춘다)
       if (await act("orch.issueDelete", { id: x.id }, t("삭제했어요"))) close();

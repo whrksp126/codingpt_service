@@ -1287,5 +1287,10 @@ export default {
   "표": "Tabla",
   "번호": "N.º",
   "출처": "Fuente",
-  "바뀐 때": "Actualizado"
+  "바뀐 때": "Actualizado",
+  "열린 이슈": "Abiertas",
+  "이슈 검색": "Buscar incidencias",
+  "이슈 {n}개": "{n} incidencias",
+  "이미지·파일을 붙여넣거나(⌘V) 이 창에 끌어다 놓으면 첨부됩니다": "Pega (⌘V) o suelta aquí imágenes y archivos para adjuntarlos",
+  "첨부 빼기": "Quitar el adjunto"
 };

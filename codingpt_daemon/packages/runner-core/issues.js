@@ -158,11 +158,90 @@ async function extList(provider, cwd, { fresh = false } = {}) {
   return rec;
 }
 
+// ── 첨부(이미지·파일) ────────────────────────────────────────────────────────
+//  QA 처럼 "화면을 보여 주며" 적는 이슈를 위해(2026-10-07 사용자 요청). 파일은 이 PC 에 복사해 둔다:
+//   <stateDir>/issue-files/<이슈 폴더>/<attId><확장자>
+//  본문에는 `![이름](att:<attId>)` 로 자리를 적고, 시작할 때 그 자리를 **실제 경로**로 바꿔 에이전트가 읽게 한다.
+//  외부 이슈에 붙인 첨부도 여기에만 둔다(그 서비스에 올리지 않는다 — overlays 가 든다).
+const ATT_MAX_BYTES = 25 * 1024 * 1024;
+const ATT_MAX_COUNT = 30;
+const ATT_ID_RE = /^[a-z0-9]{6,32}$/;
+const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.heic': 'image/heic',
+  '.svg': 'image/svg+xml', '.pdf': 'application/pdf', '.txt': 'text/plain', '.log': 'text/plain', '.md': 'text/markdown', '.json': 'application/json', '.mp4': 'video/mp4', '.mov': 'video/quicktime' };
+function filesRoot() { return path.join(runtime.stateDir(), 'issue-files'); }
+const dirKey = (issueId) => crypto.createHash('sha1').update(String(issueId)).digest('hex').slice(0, 16);
+function attPath(issueId, a) { return path.join(filesRoot(), dirKey(issueId), a.id + (a.ext || '')); }
+function wireAtts(issueId, list) {
+  return (Array.isArray(list) ? list : []).map((a) => ({ id: a.id, name: a.name, mime: a.mime, size: a.size, image: /^image\//.test(a.mime || ''), path: attPath(issueId, a) }));
+}
+/** 그 이슈가 첨부·상태를 적어 둘 곳 — 자체 이슈면 그 항목, 외부 이슈면 overlay. */
+function holderOf(r) {
+  if (r.local) return { id: r.local.id, holder: r.local };
+  const id = extId(r.ext.provider, r.ext.repo, r.ext.number);
+  const s = load();
+  return { id, holder: s.overlays[id] || (s.overlays[id] = {}) };
+}
+/** { id, path, attId?, name? } → { issue, attachment } — path = 이 PC 의 절대 경로(붙여넣기·끌어다 놓기가 준다). */
+async function attach(p = {}) {
+  const r = await resolve(p.id);
+  const src = str(p.path, 2000, 'path', { required: true });
+  if (!path.isAbsolute(src)) throw coded('BAD_PARAMS', 'path 는 절대 경로여야 합니다');
+  let st;
+  try { st = fs.statSync(src); } catch (_) { throw coded('BAD_PARAMS', '파일을 찾을 수 없습니다'); }
+  if (!st.isFile()) throw coded('BAD_PARAMS', '파일만 첨부할 수 있습니다');
+  if (st.size > ATT_MAX_BYTES) throw coded('TOO_LARGE', '25MB 보다 큰 파일은 첨부할 수 없습니다');
+  const { id, holder } = holderOf(r);
+  if (!Array.isArray(holder.attachments)) holder.attachments = [];
+  if (holder.attachments.length >= ATT_MAX_COUNT) throw coded('TOO_LARGE', `첨부는 ${ATT_MAX_COUNT}개까지입니다`);
+  const attId = p.attId == null ? crypto.randomBytes(5).toString('hex') : String(p.attId);
+  if (!ATT_ID_RE.test(attId)) throw coded('BAD_PARAMS', 'attId 가 올바르지 않습니다');
+  if (holder.attachments.some((a) => a.id === attId)) return { issue: (await get({ id: p.id })).issue, attachment: wireAtts(id, holder.attachments).find((a) => a.id === attId) };
+  const ext = path.extname(src).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 8);
+  const a = { id: attId, name: (str(p.name, 120, 'name') || path.basename(src)).slice(0, 120), ext, mime: MIME[ext] || 'application/octet-stream', size: st.size, addedAt: inj.now() };
+  const dest = attPath(id, a);
+  fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+  fs.copyFileSync(src, dest);
+  try { fs.chmodSync(dest, 0o600); } catch (_) { /* noop */ }
+  holder.attachments.push(a);
+  holder.updatedAt = inj.now();
+  save();
+  changed([id]);
+  return { issue: (await get({ id: p.id })).issue, attachment: wireAtts(id, [a])[0] };
+}
+async function detach(p = {}) {
+  const r = await resolve(p.id);
+  const { id, holder } = holderOf(r);
+  const a = (holder.attachments || []).find((x) => x.id === String(p.attId || ''));
+  if (!a) throw coded('BAD_PARAMS', '첨부를 찾을 수 없습니다');
+  try { fs.rmSync(attPath(id, a), { force: true }); } catch (_) { /* noop */ }
+  holder.attachments = holder.attachments.filter((x) => x.id !== a.id);
+  holder.updatedAt = inj.now();
+  save();
+  changed([id]);
+  return { issue: (await get({ id: p.id })).issue };
+}
+/** 본문의 `![이름](att:ID)` 를 실제 경로로 바꾸고, 첨부 목록을 덧붙인다(에이전트가 읽을 수 있게). */
+function withAttachments(body, atts) {
+  const list = atts || [];
+  if (!list.length) return body || '';
+  const by = new Map(list.map((a) => [a.id, a]));
+  const used = new Set();
+  let out = String(body || '').replace(/!\[([^\]]*)\]\(att:([a-z0-9]+)\)/g, (m, name, id) => {
+    const a = by.get(id);
+    if (!a) return m;
+    used.add(id);
+    return `[첨부 ${a.image ? '이미지' : '파일'} "${name || a.name}": ${a.path}]`;
+  });
+  const rest = list.filter((a) => !used.has(a.id));
+  if (rest.length) out += `\n\n첨부(${rest.length}):\n` + rest.map((a) => `- ${a.name}: ${a.path}`).join('\n');
+  return out + '\n\n(첨부 경로의 이미지는 직접 열어서 확인하세요 — 화면 캡처에 재현 상황이 담겨 있습니다.)';
+}
+
 // ── 모양 맞추기 ──────────────────────────────────────────────────────────────
 function wireLocal(x) {
   return { id: x.id, number: x.number, key: '#' + x.number, title: x.title, body: x.body || '', status: x.status, priority: x.priority || 'none',
     labels: x.labels || [], cwd: x.cwd || '', source: { provider: 'codingpt', url: null, repo: null }, link: x.link || null,
-    createdAt: x.createdAt, updatedAt: x.updatedAt };
+    attachments: wireAtts(x.id, x.attachments), createdAt: x.createdAt, updatedAt: x.updatedAt };
 }
 function wireExt(provider, cwd, raw) {
   const id = extId(provider, raw.repo, raw.number);
@@ -171,6 +250,7 @@ function wireExt(provider, cwd, raw) {
   const status = !raw.open ? 'done' : (ov.status === 'in_progress' || ov.status === 'in_review' ? ov.status : 'todo');
   return { id, number: raw.number, key: `${raw.repo.split('/').pop()}#${raw.number}`, title: raw.title, body: raw.body, status,
     priority: ov.priority || 'none', labels: raw.labels, cwd, source: { provider, url: raw.url, repo: raw.repo }, link: ov.link || null,
+    attachments: wireAtts(id, ov.attachments),
     createdAt: raw.createdAt, updatedAt: Math.max(raw.updatedAt || 0, ov.updatedAt || 0) || null };
 }
 
@@ -333,15 +413,17 @@ async function remove(p = {}) {
   if (!x) throw coded('BAD_PARAMS', '자체 이슈만 지울 수 있습니다(외부 이슈는 그 서비스에서 닫으세요)');
   const s = load();
   s.items = s.items.filter((y) => y.id !== x.id);
+  try { fs.rmSync(path.join(filesRoot(), dirKey(x.id)), { recursive: true, force: true }); } catch (_) { /* noop */ }
   save();
   changed([x.id]);
   return { ok: true };
 }
 
 function promptOf(w, mode, agent) {
+  const body = withAttachments(w.source.provider === 'codingpt' ? w.body : String(w.body || '').slice(0, 6000), w.attachments);
   const head = w.source.provider === 'codingpt'
-    ? `이슈 ${w.key}: ${w.title}${w.body ? `\n\n${w.body}` : ''}`
-    : `이 이슈를 해결해 주세요: ${w.source.url}\n\n제목: ${w.title}${w.body ? `\n\n${w.body.slice(0, 6000)}` : ''}`;
+    ? `이슈 ${w.key}: ${w.title}${body ? `\n\n${body}` : ''}`
+    : `이 이슈를 해결해 주세요: ${w.source.url}\n\n제목: ${w.title}${body ? `\n\n${body}` : ''}`;
   const tail = `\n\n(CodingPT 이슈에서 시작한 일입니다. 끝나면 무엇을 했는지 요약해 주세요. 이슈 상태는 \`cpt issue update "${w.id}" --status in_review\` 로 바꿀 수 있습니다.)`;
   if (mode !== 'orch') return head + tail;
   return `${agent === 'codex' ? '$orch' : '/orch'} ${head}${tail}`;
@@ -381,7 +463,7 @@ async function start(p = {}) {
   return { issue: r.local ? wireLocal(r.local) : wireExt(r.ext.provider, r.cwd, r.raw), started: { mode, taskId: link.taskId || null, tid: link.tid == null ? null : link.tid, cwd } };
 }
 
-const METHODS = { issueList: list, issueGet: get, issueCreate: create, issueUpdate: update, issueDelete: remove, issueStart: start };
+const METHODS = { issueList: list, issueGet: get, issueCreate: create, issueUpdate: update, issueDelete: remove, issueStart: start, issueAttach: attach, issueDetach: detach };
 function _reset() { mem = null; extCache.clear(); repoCwd.clear(); }
 
-module.exports = { configure, METHODS, STATUSES, PRIORITIES, MODES, PROVIDERS, _internals: { load, _reset, extCache, repoCwd, promptOf, wireLocal, parseExtId, followLinks, file } };
+module.exports = { configure, METHODS, STATUSES, PRIORITIES, MODES, PROVIDERS, _internals: { load, _reset, extCache, repoCwd, promptOf, wireLocal, parseExtId, followLinks, file, withAttachments, filesRoot } };

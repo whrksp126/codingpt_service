@@ -3399,15 +3399,37 @@ svg.mi { flex: none; display: block; }
 
 /* ── 이슈 장소(issues-view.js) — 목록 · 보드 · 표. 무채색 면 + 상태 표식만 색. ───────────────────────── */
 .issues-view[hidden] { display: none; }
-.issues-view .tv-top { gap: 10px; }
+/* 배치 = Orca Tasks 화면: 타이틀바는 제목만, 도구는 본문(출처 줄 → 필터 머리 → 보기 줄 → 목록 카드). */
+.is-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 28px 18px; }
 .is-grow { flex: 1; }
-.is-seg { display: inline-flex; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm); overflow: hidden; margin-left: 6px; }
-.is-segb { background: transparent; border: none; color: var(--text3); font-size: 12px; height: 22px; padding: 0 10px; }
-.is-segb + .is-segb { border-left: 1px solid var(--border-ctrl); }
+.is-srcbar { flex: none; display: flex; align-items: center; gap: 8px; }
+.is-round { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: transparent; border: none; color: var(--text2); }
+.is-round:hover { background: var(--hover); color: var(--text); }
+.is-vsep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+.is-src { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-md); background: transparent; border: 1px solid var(--border); color: var(--text3); }
+.is-src:hover { background: var(--hover); color: var(--text); }
+.is-src.on { background: var(--selected); border-color: var(--border-ctrl); color: var(--text); }
+.is-ctx { font-size: 12px; color: var(--text3); padding: 4px 9px; border-radius: var(--r-md); border: 1px solid var(--border); background: color-mix(in srgb, var(--text) 4%, transparent); white-space: nowrap; }
+.is-sel { width: auto; min-height: 30px; height: 30px; padding: 0 26px 0 10px; font-size: 12px; border-radius: var(--r-md); }
+.is-card-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+.is-filters { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: color-mix(in srgb, var(--text) 4%, transparent); border-bottom: 1px solid var(--border); }
+.is-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.is-fchip { height: 24px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text3); font-size: 12px; }
+.is-fchip:hover { color: var(--text); background: var(--hover); }
+.is-fchip.on { background: var(--selected); border-color: var(--border-ctrl); color: var(--text); }
+.is-frow { display: flex; align-items: center; gap: 8px; }
+.is-qwrap { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; color: var(--text3); }
+.is-qwrap > svg { position: absolute; left: 10px; pointer-events: none; }
+.is-q { width: 100%; min-height: 32px; height: 32px; padding: 0 10px 0 32px; font-size: 12.5px; border-radius: var(--r-md); background: var(--base); }
+.is-sq { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: var(--r-md); border: 1px solid var(--border-ctrl); background: var(--base); color: var(--text); }
+.is-sq:hover { background: var(--hover); }
+.is-toolbar { flex: none; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; background: color-mix(in srgb, var(--text) 4%, transparent); border-bottom: 1px solid var(--border); }
+.is-count { font-size: 11px; font-weight: 500; letter-spacing: 0.08em; color: var(--text3); }
+.is-seg { display: inline-flex; padding: 2px; gap: 2px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--base); }
+.is-segb { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; color: var(--text3); font-size: 11.5px; height: 24px; padding: 0 8px; border-radius: var(--r-sm); }
+.is-segb:hover { color: var(--text); }
 .is-segb.on { background: var(--selected); color: var(--text); }
-.is-sel { width: auto; min-height: 24px; height: 24px; padding: 0 22px 0 8px; font-size: 12px; border-radius: var(--r-sm); }
-.is-q { width: 160px; min-height: 24px; height: 24px; padding: 0 8px; font-size: 12px; border-radius: var(--r-sm); }
-.is-done { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text3); white-space: nowrap; }
+.pc-row .is-prov { display: inline-flex; flex: none; color: var(--text3); margin-left: 2px; }
 .is-warn { flex: none; padding: 6px 14px; font-size: 12px; color: var(--text2); background: color-mix(in srgb, var(--warn) 12%, transparent); border-bottom: 1px solid var(--border); }
 .is-body { flex: 1; min-height: 0; overflow: auto; }
 .is-empty-sub { margin-top: 6px; font-size: 12px; font-weight: 400; color: var(--text3); }
@@ -3422,7 +3444,7 @@ svg.mi { flex: none; display: block; }
 .is-st.in_progress { background: conic-gradient(#eab308 0 50%, transparent 0); box-shadow: inset 0 0 0 1.5px #eab308; }
 .is-st.in_review { background: conic-gradient(#10b981 0 75%, transparent 0); box-shadow: inset 0 0 0 1.5px #10b981; }
 /* 목록 */
-.is-body.list { padding: 8px 14px 24px; }
+.is-body.list { padding: 4px 8px 16px; }
 .is-group { margin-bottom: 14px; }
 .is-group-h { font-size: 11.5px; font-weight: 600; color: var(--text3); padding: 8px 6px 6px; }
 .is-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 8px; background: transparent; border: none; border-radius: var(--r-sm); color: var(--text); font-size: 13px; text-align: left; }
@@ -3430,7 +3452,7 @@ svg.mi { flex: none; display: block; }
 .is-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .is-ws { flex: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--dim); }
 /* 보드 */
-.is-body.board { display: flex; gap: 10px; padding: 12px 14px; overflow-x: auto; align-items: stretch; }
+.is-body.board { display: flex; gap: 10px; padding: 12px; overflow-x: auto; align-items: stretch; }
 .is-col { flex: 1 1 0; min-width: 220px; display: flex; flex-direction: column; min-height: 0; border-radius: var(--r-md); background: color-mix(in srgb, var(--text) 3%, transparent); }
 .is-col.over { box-shadow: inset 0 0 0 1px var(--border-ctrl); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .is-col-h { flex: none; display: flex; align-items: center; gap: 7px; padding: 10px 10px 8px; font-size: 12px; font-weight: 600; color: var(--text2); }
@@ -3441,7 +3463,7 @@ svg.mi { flex: none; display: block; }
 .is-card-title { font-size: 12.5px; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
 .is-card-ws { margin-top: 5px; font-size: 11px; color: var(--dim); }
 /* 표 */
-.is-body.table { padding: 0 14px 24px; }
+.is-body.table { padding: 0 4px 16px; }
 .is-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .is-table th { position: sticky; top: 0; background: var(--base); text-align: left; font-weight: 600; font-size: 11.5px; color: var(--text3); padding: 9px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; -webkit-user-select: none; }
 .is-table th:hover { color: var(--text); }
@@ -3463,3 +3485,14 @@ svg.mi { flex: none; display: block; }
 .is-start-h { font-size: 12px; font-weight: 600; color: var(--text2); margin-right: 4px; white-space: nowrap; }
 .is-start .tk-input { width: auto; flex: 1; min-height: 28px; padding: 2px 24px 2px 8px; font-size: 12px; }
 .is-del[data-armed] { color: var(--error); }
+/* 첨부 — 본문 아래 띠(이미지는 미리보기, 그 밖은 이름표). */
+.is-atts { display: flex; flex-wrap: wrap; gap: 8px; }
+.is-atts:empty { display: none; }
+.is-att { position: relative; display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 28px; padding: 0 22px 0 8px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--border-ctrl); font-size: 11.5px; color: var(--text2); }
+.is-att.img { flex-direction: column; align-items: stretch; width: 112px; height: auto; padding: 4px 4px 5px; gap: 4px; }
+.is-att-th { display: block; height: 70px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent) center / cover no-repeat; }
+.is-att-nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-att-ic { display: inline-flex; color: var(--text3); }
+.is-att-x { position: absolute; top: 3px; right: 3px; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: none; border-radius: 50%; background: var(--surface); color: var(--text2); box-shadow: inset 0 0 0 1px var(--border-ctrl); }
+.is-att-x:hover { color: var(--text); }
+.is-att-hint { font-size: 11px; color: var(--dim); margin-top: -4px; }

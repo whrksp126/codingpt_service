@@ -18,7 +18,7 @@ import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
 import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo } from "./orch-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
-import { openIssues, issuesOpenCount } from "./issues-view.js";
+import { openIssues, issuesOpenCount, issuesProviders } from "./issues-view.js";
 import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
 import { ot, wsStatusText } from "./text/orch.js";
 import * as i18n from './i18n/index.js';
@@ -239,7 +239,7 @@ export function updateSidebar() {
     const tasksN = sbTasksN;
     const autoN = autoAttentionCount();
     const sig = JSON.stringify([
-      tasksN, autoN, issuesOpenCount(activeDev0),
+      tasksN, autoN, issuesOpenCount(activeDev0), issuesProviders(activeDev0).join(),
       state.vmScope || "", JSON.stringify(vmPhase),
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
@@ -532,7 +532,10 @@ function issuesRow() {
   const n = issuesOpenCount(S.activeDeviceId());
   const row = document.createElement("button");
   row.className = "pc-row issues-row" + (state.view === "issues" ? " active" : "");
-  row.innerHTML = `<span class="pc-ic">${icons.issue({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("이슈"))}</span>` + (n ? `<span class="wsr-badge">${n}</span>` : "");
+  //  오른쪽 = 연결된 외부 서비스 표식(Orca 의 Tasks 행과 같다 — 무엇이 붙어 있는지 한눈에).
+  const provs = issuesProviders(S.activeDeviceId());
+  row.innerHTML = `<span class="pc-ic">${icons.issue({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("이슈"))}</span>` +
+    provs.map((p) => (icons[p] ? `<span class="is-prov" title="${escapeHtml(p)}">${icons[p]({ size: 13 })}</span>` : "")).join("") + (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => { if (state.view !== "issues") openIssues(); });
   return row;
 }

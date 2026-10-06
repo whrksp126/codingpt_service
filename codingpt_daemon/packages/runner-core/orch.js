@@ -1437,11 +1437,12 @@ const METHODS = {
   // 이슈(issues.js) — 자체 이슈 + 외부 서비스 이슈. 사람 화면과 에이전트(`cpt issue`)가 같은 것을 부른다.
   'orch.issueList': issueRpc('issueList'), 'orch.issueGet': issueRpc('issueGet'), 'orch.issueCreate': issueRpc('issueCreate'),
   'orch.issueUpdate': issueRpc('issueUpdate'), 'orch.issueDelete': issueRpc('issueDelete'), 'orch.issueStart': issueRpc('issueStart'),
+  'orch.issueAttach': issueRpc('issueAttach'), 'orch.issueDetach': issueRpc('issueDetach'),
 };
 // 사람 화면(PC·폰)에서 부를 수 있는 것 — 보기와 "답하기·멈추기·닫기·정리".
 const USER_METHODS = new Set(['orch.list', 'orch.runList', 'orch.runShow', 'orch.runClose', 'orch.workerList', 'orch.workerShow', 'orch.workerRead',
   'orch.workerStop', 'orch.workerRelease', 'orch.workerRetain', 'orch.reply', 'orch.gateResolve', 'orch.gateList', 'orch.noteSet', 'orch.status',
-  'orch.issueList', 'orch.issueGet', 'orch.issueCreate', 'orch.issueUpdate', 'orch.issueDelete', 'orch.issueStart']);
+  'orch.issueList', 'orch.issueGet', 'orch.issueCreate', 'orch.issueUpdate', 'orch.issueDelete', 'orch.issueStart', 'orch.issueAttach', 'orch.issueDetach']);
 
 async function rpc(method, params, meta) {
   if (!enabled()) throw codedError('ORCH_DISABLED', '이 PC 에서는 오케스트레이션이 꺼져 있습니다');
