@@ -47,6 +47,8 @@ const OPTIONAL_CAPS = [
   ['power.v1', './power', 'handle'],
   // 채팅 v2(docs/chat-v2-design.md) — 킬스위치(CPT_CONV=0 · daemon.json conv.enabled=false)면 handle 이 undefined.
   ['conv.v1', './conv', 'handle'],
+  // 오케스트레이션(docs/orchestration-design.md) — 킬스위치(CPT_ORCH=0)면 handle 이 undefined.
+  ['orch.v1', './orch', 'handle'],
 ];
 
 function daemonCaps() {
@@ -513,6 +515,12 @@ function dispatchRpc(ws, method, params, ok, fail) {
     if (serverCaps.length && !hasServerCap(cap)) { fail(codedError(`${fam.toUpperCase()}_DISABLED`, '이 서버에서 이 기능이 꺼져 있습니다')); return; }
     if (method === 'power.event') { fail(codedError('BAD_PARAMS', 'power.event 는 이 PC 의 앱만 보낼 수 있습니다')); return; }
     callLazy('./cpt-server', 'handleAutoRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;
+  }
+  // 오케스트레이션(orch.*) — 원격 화면(폰·다른 PC)은 사람 권한이다: 보기 + 답하기·멈추기·닫기(orch.USER_METHODS).
+  //  워커를 띄우는 쪽은 이 PC 터미널 안의 에이전트뿐이라 릴레이로는 열리지 않는다. 킬스위치 규칙은 task.* 와 같다.
+  if (method.startsWith('orch.')) {
+    if (serverCaps.length && !hasServerCap('orch.v1')) { fail(codedError('ORCH_DISABLED', '이 서버에서 오케스트레이션이 꺼져 있습니다')); return; }
+    callLazy('./cpt-server', 'handleOrchRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;
   }
   // 채팅 v2(conv.* — docs/chat-v2-design.md §4). ws 를 넘긴다(직접 호출자의 push 대상 — 제어 WS 는 sendEvent 로만 나간다).
   //  킬스위치는 task.* 와 같은 규칙 — 봉인 RPC 는 서버가 메서드를 못 보므로 데몬이 교집합의 다른 한쪽을 지킨다.

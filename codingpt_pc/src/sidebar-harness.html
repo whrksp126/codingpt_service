@@ -100,7 +100,7 @@
     if (method === 'power.set') { Object.assign(POWER, params); return { status: POWER }; }
     return { ok: true };
   }
-  const CAPS = ['task.v1', 'auto.v1', 'dispatch.v1', 'power.v1'];
+  const CAPS = ['task.v1', 'auto.v1', 'dispatch.v1', 'power.v1', 'orch.v1'];
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
@@ -112,6 +112,7 @@
         ] };
         if (cmd === 'front_base_url') return 'https://codingpt.ghmate.com';
         if (cmd === 'auto_local') return autoRpc(args.cmd, args.args, 11);
+        if (cmd === 'orch_local') { window.__calls.push([args.cmd, args.args, 11]); return args.cmd === 'orch.list' ? window.__ORCH : { ok: true }; }
         // 작업 상세 — task.get 은 목 목록에서 찾아 준다(빈 {} 를 주면 상세가 끝없이 다시 조회한다).
         if (cmd === 'task_local' && args.cmd === 'task.get') {
           for (const v of Object.values(window.__S.state.tasks.byHost)) { const t = (v.items || []).find((x) => x.id === args.args.taskId); if (t) return { task: { ...t, prompt: '로그인 후 리다이렉트가 /home 으로 고정돼요. 원래 페이지로 돌려보내 주세요.' } }; }
@@ -169,6 +170,24 @@
   S.state.tasks.byHost['12'] = { items: [
     task('t_img', '이미지 업로드 개선', 'work/tokin', 3, [{ ...run('r_i1', 1, 'running', { tid: 2, at: 4 }), cwd: '.codingpt/worktrees/r_i1' }]),
   ], at: Date.now(), error: null };
+  // 오케스트레이션(orchestration-design.md) 확인용 — 묶음 1(진행·질문·완료·실패 워커) + 결정 1 + 한 줄 메모. `#orch` = 묶음 시트를 연다.
+  const ow = (id, ui, title, o = {}) => ({ dispatchId: id, taskId: 'task_' + id, runId: 'run_a', title, uiState: ui,
+    state: ['succeeded', 'failed', 'stopped', 'abandoned'].includes(ui) ? ui : 'ready', agent: o.agent || 'claude', placement: o.place || 'current',
+    cwd: 'other/project/codingpt', tid: o.tid ?? null, terminal: o.terminal || 'owned', phase: o.phase || null, createdAt: o.at || 0,
+    taskRef: o.taskRef || null, question: o.q || null, result: o.res || null, liveness: 'live', attention: { categories: [] } });
+  window.__ORCH = { runs: [{ id: 'run_a', objective: '결제 흐름 리팩터 + 테스트 보강', state: 'active', cwd: 'other/project/codingpt', depth: 0, createdAt: 1,
+    coordinator: { cwd: 'other/project/codingpt', tid: 1, agent: 'claude' },
+    tasks: [{ id: 'task_d1', title: '결제 API 재시도 로직', status: 'dispatched', deps: [] }, { id: 'task_d2', title: '웹훅 서명 검증', status: 'dispatched', deps: [] },
+      { id: 'task_d3', title: '기존 테스트 정리', status: 'completed', deps: [] }, { id: 'task_d5', title: '통합 테스트 추가', status: 'pending', deps: ['task_d1', 'task_d2'] }],
+    workers: [
+      ow('d1', 'working', '결제 API 재시도 로직', { tid: 2, phase: '구현 중', at: 1 }),
+      ow('d2', 'asking', '웹훅 서명 검증', { tid: 3, agent: 'codex', at: 2, q: { id: 'm_q1', text: '서명 검증 실패 시 401 과 400 중 무엇으로 응답할까요?\n기존 클라이언트는 400 을 기대합니다.', options: ['401', '400'] } }),
+      ow('d3', 'succeeded', '기존 테스트 정리', { tid: 4, at: 3, res: { outcome: 'succeeded', summary: '중복 테스트 12개를 정리했다. 느린 테스트 3개의 원인은 실제 네트워크 호출이었다. 남은 것은 없다.' } }),
+      ow('d4', 'failed', 'DB 마이그레이션 초안', { agent: 'gemini', at: 4, terminal: 'released', res: { outcome: 'failed', summary: '스키마 권한이 없어 적용하지 못했다.' } }),
+    ],
+    gates: location.hash.includes('nogate') ? [] : [{ id: 'gate_1', runId: 'run_a', taskId: 'task_d5', question: '통합 테스트를 실제 PG 샌드박스로 돌릴까요?', options: ['샌드박스로', '목(mock)으로'], status: 'pending' }] }],
+    notes: [{ cwd: 'other/project/codingpt', comment: '워커 결과 모으는 중 — 결제 재시도만 남음', status: 'in-progress' }, { cwd: 'other/project/hub', comment: null, status: 'in-review' }] };
+  S.state.orch.byHost['11'] = { ...window.__ORCH, at: Date.now() };
   S.state.approvals = [{ id: 'ap1', hostDeviceId: 11, cwd: '.codingpt/worktrees/r_l1', win: 5, createdAt: 1 },
     { id: 'ap2', hostDeviceId: 12, cwd: '.codingpt/worktrees/r_i1', win: 2, createdAt: 2 }];
   if (location.hash.includes('main')) document.body.classList.add('with-main');
@@ -205,6 +224,8 @@
   if (location.hash.includes('dispopen')) setTimeout(async () => { (await import('./js/dispatch-sheet.js')).openDispatchSheet({ text: '결제 실패 재시도 넣어줘' }); setTimeout(() => { const s = document.querySelector('.dp-sheet select'); const t = [...document.querySelectorAll('.dp-sheet .tk-tile')].find((b) => b.textContent.includes('Claude')); t?.click(); }, 400); }, 100);
   if (location.hash.includes('dispatch') && !location.hash.includes('dispopen')) setTimeout(() => window.__dispatch(), 100);
   if (location.hash.includes('pcset')) setTimeout(() => window.__pcSettings(11), 100);
+  if (location.hash.includes('orch')) document.head.insertAdjacentHTML('beforeend', '<style>.wv-sheet-overlay, .wv-sheet { animation: none !important; }</style>');
+  if (location.hash.includes('orch')) setTimeout(async () => { (await import('./js/orch-view.js')).openOrchSheet({ host: 11, runId: 'run_a' }); }, 120);
   if (location.hash.includes('fan')) setTimeout(() => document.querySelector('.wsg-fan')?.click(), 50);
   if (location.hash.includes('light')) document.documentElement.dataset.theme = 'light';
   // `#ctx` = 첫 워크스페이스 머리에서 우클릭 메뉴를 연다(메뉴 규격 확인용).

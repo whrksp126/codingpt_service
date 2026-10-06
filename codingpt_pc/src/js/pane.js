@@ -19,6 +19,8 @@ import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
+import { orchTabRole } from "./orch-roles.js";
+import { ot } from "./text/orch.js";
 import { state as appState } from "./state.js";
 import { shellQuote } from "./path-utils.js";
 import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
@@ -830,7 +832,13 @@ export class PaneView {
         ))
           // 채팅 탭 — 답을 기다리는 요청이 있다(본문을 한 번이라도 띄운 탭만 안다. 그 전에는 알림이 알린다).
           || (t.kind === "chat" && i !== this.node.active && !!this._mixed.get(t.tid)?.conv?.needsAttention());
-        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}`
+        // 오케스트레이션 역할 — 이 터미널이 묶음의 워커/코디네이터이면 탭에 작은 표식을 단다(색은 상태 신호에만).
+        //  워커 = 점(상태에 따라 명암·warn·error), 코디네이터 = 마름모. 무슨 일을 맡았는지는 툴팁이 말한다.
+        const orole = twin != null ? orchTabRole(this.ctx.hostDeviceId, tcwd, twin) : null;
+        const oroleHtml = orole
+          ? `<span class="ptab-orch ${orole.role}${orole.dot && orole.dot !== "none" ? " " + orole.dot : ""}" title="${escapeHtml(ot(orole.role === "worker" ? "roleWorkerTip" : "roleCoordinatorTip", { name: orole.title || "" }))}"></span>`
+          : "";
+        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}${oroleHtml}`
           + (waiting ? `<span class="ptab-wait" title="${i18n.t('응답을 기다리는 중')}"></span>` : "");
         const x = document.createElement("span");
         x.className = "ptab-x";

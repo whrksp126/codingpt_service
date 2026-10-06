@@ -872,13 +872,15 @@ test('control.dispatchRpc — git.gh.status / task.* 위임(cpt-server.handleTas
   } finally { control._setServerCaps([]); }
 });
 
-test('cpt-server 로컬 소켓 디스패치 — task.* 는 컨텍스트 게이트 밖, CAPABILITIES 는 task.list/get 만', async () => {
+// 2026-10-06 사용자 결정: 에이전트에게 인계·커밋·머지·폐기를 연다(이전 규칙 = 읽기 2개만). PR·푸시·삭제는 여전히 비공개.
+test('cpt-server 로컬 소켓 디스패치 — task.* 는 컨텍스트 게이트 밖, CAPABILITIES 는 인계·커밋·머지·폐기까지', async () => {
   const cptServer = require('../cpt-server');
   const r = await cptServer._dispatch({ cmd: 'task.list', args: {}, ctx: {} });
   assert.ok(Array.isArray(r.items));
   const caps = await cptServer._dispatch({ cmd: 'capabilities', args: {}, ctx: { ws: '' } });
   const tc = caps.commands.filter((c) => c.startsWith('task.') || c.startsWith('git.'));
-  assert.deepStrictEqual(tc, ['task.list', 'task.get']);
+  assert.deepStrictEqual(tc, ['task.list', 'task.get', 'task.create', 'task.discard', 'git.branches', 'git.commit', 'git.merge.local']);
+  assert.ok(caps.commands.includes('orch.workerStart') && caps.commands.includes('orch.check'));
 });
 
 test('봉인 경로 — control.handleSealedRpc 로 task.list 왕복(서버는 메서드명도 못 본다)', async () => {

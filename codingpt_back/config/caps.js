@@ -120,6 +120,14 @@
 //                   CONV_ENABLED=0 으로 회수 — 선언과 함께 convRpc 가 403(CONV_DISABLED) 으로 닫히고
 //                   conv_event 프레임도 중계하지 않는다(한 소스: SERVER_CAPS).
 
+//  · orch.v1      — 오케스트레이션(에이전트가 다른 에이전트를 부리는 조율 계층, 정본 =
+//                   codingpt_daemon/docs/orchestration-design.md). 서버측 = POST /api/daemon/orch 평문 REST
+//                   (daemonController.orchRpc, 허용 표 ORCH_RPC_OK) — 원격 화면(폰·다른 PC)은 **사람 권한**만 쓴다:
+//                   보기(orch.list 등) + 답하기·결정·멈추기·정리·닫기. 워커를 띄우는 명령은 표에 없다
+//                   (그 PC 터미널 안의 에이전트만 — 로컬 소켓). 화면 갱신 신호 `orch.changed` 는 기존
+//                   ui_command 팬아웃을 그대로 탄다(식별자만, 내용 없음).
+//                   ORCH_ENABLED=0 으로 회수 — 선언과 함께 orchRpc 가 403(ORCH_DISABLED) 으로 닫힌다.
+
 // env 값이 명시적으로 꺼져 있는가('0'|'false'|'off'). 미설정 = 켜짐(기본값).
 function envOff(v) {
   return /^(0|false|off|no)$/i.test(String(v == null ? '' : v).trim());
@@ -136,6 +144,7 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.AUTOMATIONS_ENABLED)) caps.push('auto.v1');
   if (!envOff(env.POWER_ENABLED)) caps.push('power.v1');
   if (!envOff(env.CONV_ENABLED)) caps.push('conv.v1');
+  if (!envOff(env.ORCH_ENABLED)) caps.push('orch.v1');
   // launchargs.v1 — POST /api/daemon/agents/launch 가 args 를 데몬에 전달한다(채팅 v2 터미널에서 이어가기).
   //  킬스위치 LAUNCHARGS_ENABLED=0 → 미선언 + 라우트가 args 를 400 으로 거절(버리고 띄우면 새 대화가 조용히 시작된다).
   if (!envOff(env.LAUNCHARGS_ENABLED)) caps.push('launchargs.v1');

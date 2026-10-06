@@ -1097,6 +1097,14 @@ const handlers = {
     return { ok: true };
   },
 
+  // 오케스트레이션 변경 통지(orchestration-design.md) — 데몬 broadcast {host, runIds, reason}. 식별자뿐이라
+  //  내용은 그 host 의 orch.list 로 다시 읽는다(300ms 디바운스). 반드시 ok 로 회신(무응답 = UI_TIMEOUT).
+  "orch.changed": async (p) => {
+    const m = await import("./orch-view.js");
+    m.onOrchChanged(p || {});
+    return { ok: true };
+  },
+
   // 자동화 번들 변경 통지(automation-design §2.3) — 데몬 broadcast. 전부 반드시 ok 로 회신(executor 무응답 = UI_TIMEOUT).
   //  automations.changed {host, ids, reason} → 그 host 의 auto.list(300ms 디바운스, 상세가 보는 항목이면 auto.get 도).
   "automations.changed": async (p) => {

@@ -1281,6 +1281,41 @@ async function autoRpc(req, res) {
     return errorResponse(res, err, 500);
   }
 }
+// POST /api/daemon/orch  body:{ method, params, hostDeviceId } — 오케스트레이션(orch.*) 평문 REST.
+//  정본 계약 = codingpt_daemon/docs/orchestration-design.md. autoRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로).
+//  · 원격 화면은 사람 권한이다: 보기 + 답하기(reply)·결정(gateResolve)·멈추기·정리·닫기·메모. 워커를 띄우거나
+//    수신함을 소비하는 명령(workerStart·check·ask·send …)은 표에 **없다** — 데몬도 via='relay' 호출을 거부한다(이중 방어).
+//  · 정리·닫기는 머지/터미널 종료를 기다릴 수 있어 60초. 본문(명세·질문·답)은 로그에 남기지 않는다.
+//  · 킬스위치 ORCH_ENABLED=0 → caps 에서 orch.v1 이 빠지고 여기도 403 {code:'ORCH_DISABLED'}.
+const ORCH_RPC_OK = new Map([
+  ['orch.list', 20000], ['orch.status', 15000], ['orch.runList', 15000], ['orch.runShow', 20000], ['orch.runClose', 60000],
+  ['orch.workerList', 20000], ['orch.workerShow', 15000], ['orch.workerRead', 15000],
+  ['orch.workerStop', 15000], ['orch.workerRelease', 60000], ['orch.workerRetain', 15000],
+  ['orch.reply', 15000], ['orch.gateResolve', 15000], ['orch.gateList', 15000], ['orch.noteSet', 15000],
+]);
+function orchEnabled() { return SERVER_CAPS.includes('orch.v1'); }
+async function orchRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!ORCH_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    if (!orchEnabled()) {
+      return errorResponse(res, Object.assign(new Error('이 서버에서 오케스트레이션이 꺼져 있습니다.'), { publicDetail: { code: 'ORCH_DISABLED' } }), 403);
+    }
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, ORCH_RPC_OK.get(method), connOptsOf(req));
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') {
+      return errorResponse(res, Object.assign(new Error('PC 데몬이 연결되어 있지 않습니다.'), { publicDetail: { code: 'DAEMON_OFFLINE' } }), 409);
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code ? String(err.code) : 'ORCH_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
 // POST /api/daemon/conv  body:{ method, params, hostDeviceId } — 채팅 v2(conv.*) 평문 REST.
 //  정본 계약 = codingpt_daemon/docs/chat-v2-design.md §4·§8. autoRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로,
 //  검증은 데몬 conv.js 가 전부). 본문(text/attachments/answers)은 로그에 남기지 않는다.
@@ -2010,6 +2045,7 @@ module.exports = {
   desktopRpc,
   surfaceRpc,
   taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
+  orchRpc, _ORCH_RPC_OK: ORCH_RPC_OK, // 오케스트레이션 평문 REST(사람 권한 메서드만 — orchestration-design.md)
   convRpc, _CONV_RPC_OK: CONV_RPC_OK, // 채팅 v2 평문 REST + 테스트 노출(허용 표 = chat-v2-design.md §4·§8)
   autoRpc, _AUTO_RPC_OK: AUTO_RPC_OK, // 자동화 번들 평문 폴백 + 테스트 노출(허용 표 = automation-design.md §7.1)
   reviewGet, reviewPending, reviewSubmit, reviewCancel,

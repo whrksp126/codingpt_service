@@ -271,6 +271,8 @@ export const api = {
   // ── 자동화 번들(automation-design §2.3) — auto./dispatch./power. 이 PC 데몬 직결 + 봉인(e2ee.rpc) 통로(35초).
   //  직접 부르지 말고 automations-api.js autoRpc 를 쓸 것. power.event 는 여기로 못 간다(Rust 울타리) → powerLocal.
   autoLocal: (cmd, args) => invoke("auto_local", { cmd, args: args || {} }),
+  // 오케스트레이션(orch.*) — 이 PC 데몬 직결(사람 권한). 다른 PC 는 orch-api.js 가 봉인/평문 릴레이로 보낸다.
+  orchLocal: (cmd, args) => invoke("orch_local", { cmd, args: args || {} }),
   powerLocal: (cmd, args) => invoke("power_local", { cmd, args: args || {} }),
   // power.rs 옵저버(NSWorkspace willSleep/didWake) → { kind }.
   onPower: (cb) => listen("cpt-power", (e) => cb(e.payload)),

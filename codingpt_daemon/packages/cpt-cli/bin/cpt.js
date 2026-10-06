@@ -294,7 +294,26 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   send [<idx>] <text> [--enter]         터미널에 텍스트 입력(자기 자신은 --force)
   send-key [<idx>] <key>                특수키 입력 (C-c, Enter, Up ...)
 
+  # 오케스트레이션 — 다른 에이전트에게 일을 나눠 맡기고 결과를 받는다 (전체: cpt skills get cpt-orch)
+  orch status                           내 역할(코디네이터/워커)·상한
+  orch run-create --objective "<목표>"  묶음 만들기(내 터미널이 코디네이터가 된다)
+  orch worker-start --spec "<일>" [--title "<짧은 제목>"] [--agent claude|codex|gemini] [--worktree current|new] [--model <id>] [--effort <e>]
+                                        워커 띄우기(일 + 시도를 한 번에). --task <id> 로 이미 만든 일에, --terminal <n> 로 끝난 워커 재사용
+  orch check [--wait] [--types worker_done,escalation,question] [--timeout-ms <ms>] [--ack <deliveryId>] [--peek]
+                                        수신함 확인(--wait 는 올 때까지 기다림, 기본 100초 — 시간 초과는 실패가 아니다)
+  orch reply --id <messageId> --body "<답>"            워커의 질문에 답하기
+  orch send --to dispatch:<id>|@all|@idle|@<agent> --subject "…" --body "…"   워커에게 추가 지시
+  orch worker-list | worker-show --dispatch <id> | worker-read --dispatch <id> [--limit <줄>]
+  orch worker-release --dispatch <id> [--merge [merge|squash|ff]] [--message "…"]   끝난 워커 정리(작업 폴더면 머지 또는 폐기)
+  orch worker-retain|worker-stop|worker-abandon --dispatch <id>
+  orch task-create --spec "<일>" [--deps <id,id>] | task-list [--ready] [--brief] | task-update --task <id> --status <s>
+  orch gate-create --question "<결정>" --options "a,b" [--task <id>] | gate-resolve --id <id> --resolution "<선택>" | gate-list
+  orch run-show | run-list [--all] | run-close [--force]
+  # (워커 전용) orch done|ask|heartbeat|escalate — 띄워질 때 받은 안내문에 정확한 명령이 들어 있다
+
   # 워크스페이스
+  ws set [--comment "<한 줄>"] [--status todo|in-progress|in-review|completed] [--clear]
+                                        사이드바 카드에 보이는 한 줄 메모·단계(체크포인트마다 갱신)
   ws list                               워크스페이스 목록
   ws new <이름> [--parent <경로>]       새 워크스페이스 생성(git init)
   ws clone <git-url> [--name <이름>]    GitHub 레포 클론
@@ -405,8 +424,14 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
                                         이 터미널 에이전트의 대화 로그 읽기(--since = 그 seq 이후만)
   transcript sessions                   이 워크스페이스의 대화 세션 목록(● = 진행 중)
 
+  # 작업(전용 작업 폴더 = git worktree 에서 다른 에이전트가 맡는 일)
+  task list [--all] | task get [<taskId>]
+  task create --prompt "<맡길 일>" [--agent <id>] [--model <id>] [--base <branch>]   인계(결과를 기다리지 않는다)
+  task commit <taskId> --message "…" | task merge <taskId> [--message "…"] | task discard <taskId> [--force]
+
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
   skills get cpt-cli                    버전 일치 전체 가이드 출력(태스크 중심)
+  skills get cpt-orch                   오케스트레이션 가이드(워커 띄우기·수신함·질문/답·정리)
 
 옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
       --sid <표면id> (특정 프리뷰/IDE 대상 지정)
@@ -523,7 +548,61 @@ async function main() {
             '', '프롬프트:', t.prompt || '',
           ].join('\n'));
         }
-        process.stderr.write('사용법: cpt task list [--all] | cpt task get [<taskId>]\n');
+        // 쓰기(2026-10-06 — 사용자 결정으로 개방): 인계(새 작업 폴더에서 다른 에이전트가 이어받는다)와 머지·폐기.
+        //  이전에는 "AI 자기증식·자기머지 금지" 로 닫혀 있었다. 폭주 방지는 tasks.js 의 상한(TASK_LIMIT)이 맡는다.
+        const opId = () => `cli-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        const runRef = async () => {
+          let taskId = flags.task || rest[0];
+          let runId = flags.run || null;
+          if (!taskId) throw new Error('taskId 가 필요합니다 (cpt task list 로 확인)');
+          if (!runId) {
+            const g = await request('task.get', { taskId });
+            const runs = (g && g.task && g.task.runs) || [];
+            const open = runs.filter((x) => x.state !== 'discarded' && x.state !== 'merged');
+            if (open.length !== 1) throw new Error(`실행이 ${open.length}개입니다 — --run <runId> 로 고르세요`);
+            runId = open[0].id;
+          }
+          return { taskId, runId };
+        };
+        const waitOp = async (taskId, runId, id, first) => {
+          let lo = first && first.lastOp && first.lastOp.opId === id ? first.lastOp : null;
+          const until = Date.now() + 240000;
+          while (!lo && Date.now() < until) {
+            await new Promise((r) => setTimeout(r, 500));
+            const g = await request('task.get', { taskId });
+            const r = g && g.task && g.task.runs.find((x) => x.id === runId);
+            if (!r) return { ok: true };
+            if (r.lastOp && r.lastOp.opId === id) lo = r.lastOp;
+            else if (!r.op && (r.state === 'merged' || r.state === 'discarded')) return { ok: true, state: r.state };
+          }
+          return lo || { ok: false, code: 'TIMEOUT', message: '시간 안에 끝나지 않았습니다' };
+        };
+        if (c2 === 'create') {
+          const prompt = typeof flags.prompt === 'string' ? flags.prompt : rest.join(' ');
+          if (!prompt) { process.stderr.write('사용법: cpt task create --prompt "<맡길 일>" [--agent claude|codex|gemini] [--model <id>] [--effort <e>] [--base <branch>] [--title <t>]\n'); process.exitCode = 2; return; }
+          const id = await request('identify', {});
+          const r = await request('task.create', {
+            opId: opId(), repo: typeof flags.repo === 'string' ? flags.repo : (id.ws || ''),
+            base: typeof flags.base === 'string' ? flags.base : (await request('git.branches', { repo: typeof flags.repo === 'string' ? flags.repo : (id.ws || '') }).then((b) => b.current || b.default || 'main').catch(() => 'main')),
+            prompt, title: typeof flags.title === 'string' ? flags.title : undefined,
+            agents: [{ id: typeof flags.agent === 'string' ? flags.agent : 'claude', model: typeof flags.model === 'string' ? flags.model : null, effort: typeof flags.effort === 'string' ? flags.effort : null }],
+          });
+          const t = r && r.task;
+          return out(r, flags, t ? `${t.id} 생성 — ${t.runs.map((x) => `${x.agent} ${x.branch}`).join(', ')}` : 'ok');
+        }
+        if (c2 === 'commit' || c2 === 'merge' || c2 === 'discard') {
+          const ref = await runRef();
+          const id = opId();
+          const method = c2 === 'commit' ? 'git.commit' : c2 === 'merge' ? 'git.merge.local' : 'task.discard';
+          const args = c2 === 'commit' ? { message: String(flags.message || rest.slice(1).join(' ') || '') }
+            : c2 === 'merge' ? { method: typeof flags.method === 'string' ? flags.method : 'merge', ...(typeof flags.message === 'string' ? { commitMessage: flags.message } : {}) }
+              : { force: !!flags.force };
+          const first = await request(method, { ...ref, opId: id, ...args });
+          const lo = await waitOp(ref.taskId, ref.runId, id, first);
+          if (lo && lo.ok === false) { process.exitCode = 1; return out(lo, flags, `실패: ${lo.code || ''} ${lo.message || ''}`.trim()); }
+          return out(lo || first, flags, c2 === 'commit' ? '커밋됨' : c2 === 'merge' ? '머지됨' : '폐기됨');
+        }
+        process.stderr.write('사용법: cpt task list [--all] | get [<taskId>] | create --prompt "…" | commit <taskId> --message "…" | merge <taskId> [--message "…"] | discard <taskId> [--force]\n');
         process.exitCode = 2;
         return;
       }
@@ -531,6 +610,8 @@ async function main() {
       //  데몬이 게이트한다: CodingPT 터미널 밖(AUTO_OUT_OF_TERMINAL)·자동화가 만든 작업의 터미널(AUTO_LOOP) 거부.
       //  전체 일시정지(auto.pauseAll)는 CLI 에 없다 — 사람 UI 전용 킬스위치.
       case 'auto': return autoCommand(c2, rest, flags);
+      // 오케스트레이션(docs/orchestration-design.md) — 에이전트가 다른 에이전트를 부린다. 호출자는 터미널 좌표로 식별된다.
+      case 'orch': return orchCommand(c2, rest, flags);
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
         const r = await request('ui.devices', {});
@@ -597,6 +678,15 @@ async function main() {
       }
 
       case 'ws': {
+        // 워크스페이스 카드의 한 줄 메모·단계 — 사이드바에 보인다(사람이 "지금 뭐 하는 중인지" 한눈에 보게).
+        if (c2 === 'set') {
+          const p = {};
+          if (flags.comment !== undefined) p.comment = flags.comment === true ? null : String(flags.comment);
+          if (flags.status !== undefined) p.status = flags.status === true ? null : String(flags.status);
+          if (flags['clear']) { p.comment = null; p.status = null; }
+          if (!Object.keys(p).length) { process.stderr.write('사용법: cpt ws set [--comment "<한 줄>"] [--status todo|in-progress|in-review|completed] [--clear]\n'); process.exitCode = 2; return; }
+          return out(await request('orch.noteSet', p), flags, 'ok');
+        }
         if (c2 === 'list') {
           const r = await request('ws.list', {});
           const arr = Array.isArray(r) ? r : (r && r.workspaces) || [];
@@ -901,7 +991,7 @@ async function main() {
       }
       case 'skills': {
         if (c2 === 'get') return printSkillGuide(rest[0]);
-        if (c2 === 'list' || c2 == null) { process.stdout.write('cpt-cli\n'); return; }
+        if (c2 === 'list' || c2 == null) { process.stdout.write('cpt-cli\ncpt-orch\n'); return; }
         break;
       }
 
@@ -1343,14 +1433,156 @@ function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; }
 
 // 스킬 전체 가이드 — cpt-cli 패키지에 동봉된 GUIDE.md 를 그대로 출력(바이너리 버전과 항상 일치).
 //  소켓 불필요(순수 파일 읽기) — 데몬이 죽어 있어도 동작해 에이전트가 명령을 학습할 수 있다.
+// ── 오케스트레이션(cpt orch …) ───────────────────────────────────────────────
+//  명령 → RPC 는 얇은 변환이다. 판정(누가 워커이고 누가 코디네이터인가·상한·생존)은 전부 데몬(orch.js)이 한다.
+//  기다리는 명령(check --wait · ask)은 데몬이 응답을 쥐고 있으므로 소켓 타임아웃을 대기 시간보다 길게 잡는다.
+async function orchCommand(sub, rest, flags) {
+  const f = (k) => (typeof flags[k] === 'string' ? flags[k] : undefined);
+  const num = (k) => (flags[k] != null && flags[k] !== true && Number.isFinite(Number(flags[k])) ? Number(flags[k]) : undefined);
+  const call = (method, args, opt) => request(method, args, opt);
+  const need = (v, usage) => { if (v == null || v === '') { const e = new Error('사용법: cpt orch ' + usage); e.usage = true; throw e; } return v; };
+  const GLYPH = { starting: '·', working: '●', asking: '?', blocked: '!', needs_input: '✋', idle_no_report: '…', exited: '×', succeeded: '✓', failed: '✗', stopped: '■', abandoned: '×' };
+  const workerLine = (w) => `${GLYPH[w.uiState] || '?'} ${w.dispatchId} [${w.uiState}] ${w.agent || ''} ${w.title || ''}`
+    + `${w.phase ? ` — ${w.phase}` : ''}${w.tid != null ? ` (터미널 ${w.tid})` : ''}`
+    + `${w.liveness && w.liveness !== 'live' && !w.result ? ` · ${w.liveness}` : ''}`
+    + `${w.attention && w.attention.categories && w.attention.categories.length ? ` ⚠ ${w.attention.categories.join(',')}` : ''}`;
+  const waitOpt = () => {
+    const ms = num('timeout-ms');
+    return { timeoutMs: (ms || 100000) + 20000 };
+  };
+  try {
+    switch (sub) {
+      case 'status': {
+        const r = await call('orch.status', {});
+        const c = r.caller || {};
+        return out(r, flags, `역할: ${c.role}${c.dispatch ? ` (시도 ${c.dispatch.dispatchId})` : ''}${c.runs && c.runs.length ? ` · 묶음 ${c.runs.join(',')}` : ''} · 깊이 ${c.depth || 0}/${r.limits.maxDepth} · 동시 워커 ${r.limits.maxWorkersPerRun}/묶음`);
+      }
+      case 'run-create': {
+        const r = await call('orch.runCreate', { objective: need(f('objective') || rest.join(' '), 'run-create --objective "<목표>"') });
+        return out(r, flags, `${r.run.id} 생성 — 이 터미널이 코디네이터입니다`);
+      }
+      case 'run-list': {
+        const r = await call('orch.runList', { all: !!flags.all });
+        return out(r, flags, (r.runs || []).map((x) => `${x.id} [${x.state}] ${String(x.objective).split('\n')[0].slice(0, 60)} — 진행 ${x.counts.active} · 성공 ${x.counts.succeeded} · 실패 ${x.counts.failed}`).join('\n') || '(묶음 없음)');
+      }
+      case 'run-show': {
+        const r = await call('orch.runShow', { run: f('run') || rest[0] });
+        return out(r, flags, [`${r.run.id} [${r.run.state}] ${String(r.run.objective).split('\n')[0]}`,
+          '일:', ...(r.tasks || []).map((t) => `  ${t.id} [${t.status}] ${t.title}${t.deps.length ? ` ← ${t.deps.join(',')}` : ''}`),
+          '워커:', ...(r.workers || []).map((w) => '  ' + workerLine(w))].join('\n'));
+      }
+      case 'run-close': {
+        const r = await call('orch.runClose', { run: f('run') || rest[0], force: !!flags.force }, { timeoutMs: 260000 });
+        return out(r, flags, `${r.run.id} 닫음${r.released && r.released.length ? ` — 워커 ${r.released.length}개 정리` : ''}`);
+      }
+      case 'task-create': {
+        const r = await call('orch.taskCreate', { run: f('run'), spec: need(f('spec') || rest.join(' '), 'task-create --spec "<일>" [--deps <id,id>]'), deps: f('deps'), title: f('title') });
+        return out(r, flags, `${r.task.id} [${r.task.status}] ${r.task.title}`);
+      }
+      case 'task-list': {
+        const r = await call('orch.taskList', { run: f('run'), ready: !!flags.ready, brief: !!flags.brief });
+        return out(r, flags, (r.tasks || []).map((t) => `${t.id} [${t.status}] ${t.title}${t.deps.length ? ` ← ${t.deps.join(',')}` : ''}`).join('\n') || '(일 없음)');
+      }
+      case 'task-update': {
+        const r = await call('orch.taskUpdate', { task: need(f('task') || rest[0], 'task-update --task <id> [--status pending|completed|failed|blocked] [--spec "…"]'), status: f('status'), spec: f('spec'), title: f('title') });
+        return out(r, flags, `${r.task.id} [${r.task.status}]`);
+      }
+      case 'worker-start': {
+        const spec = f('spec');
+        const task = f('task');
+        if (!spec && !task) need(null, 'worker-start (--spec "<일>" | --task <id>) [--agent <id>] [--worktree current|new] [--model <id>] [--effort <e>] [--terminal <n>]');
+        const r = await call('orch.workerStart', { run: f('run'), spec, task, title: f('title'), deps: f('deps'), agent: f('agent'), model: f('model'), effort: f('effort'),
+          worktree: f('worktree'), terminal: f('terminal'), retryOf: f('retry-of'), force: !!flags.force }, { timeoutMs: 120000 });
+        return out(r, flags, `${r.worker.dispatchId} 시작 — ${r.worker.agent} · ${r.worker.placement === 'worktree' ? '전용 작업 폴더' : '같은 폴더'}${r.worker.tid != null ? ` · 터미널 ${r.worker.tid}` : ''}\n일 ${r.task.id} · 묶음 ${r.run.id}`);
+      }
+      case 'worker-list': {
+        const r = await call('orch.workerList', { run: f('run'), all: !!flags.all, terminalState: f('terminal-state') });
+        return out(r, flags, (r.workers || []).map(workerLine).join('\n') || '(워커 없음)');
+      }
+      case 'worker-show': {
+        const r = await call('orch.workerShow', { dispatch: need(f('dispatch') || rest[0], 'worker-show --dispatch <id>') });
+        return out(r, flags, workerLine(r.worker) + (r.worker.result ? `\n결과(${r.worker.result.outcome}): ${r.worker.result.summary}` : '') + (r.worker.question ? `\n질문: ${r.worker.question.text}` : ''));
+      }
+      case 'worker-read': {
+        const r = await call('orch.workerRead', { dispatch: need(f('dispatch') || rest[0], 'worker-read --dispatch <id> [--limit <줄>]'), limit: num('limit') });
+        return out(r, flags, r.text || `(화면 없음: ${r.reason || ''})`);
+      }
+      case 'worker-release': {
+        const r = await call('orch.workerRelease', { dispatch: need(f('dispatch') || rest[0], 'worker-release --dispatch <id> [--merge [merge|squash|ff]] [--message "…"]'), merge: flags.merge === undefined ? undefined : flags.merge, message: f('message') }, { timeoutMs: 260000 });
+        return out(r, flags, r.already ? `이미 정리됨(${r.terminal})` : (r.merged ? '머지하고 정리했습니다' : '정리했습니다'));
+      }
+      case 'worker-retain': case 'worker-stop': case 'worker-abandon': {
+        const m = { 'worker-retain': 'orch.workerRetain', 'worker-stop': 'orch.workerStop', 'worker-abandon': 'orch.workerAbandon' }[sub];
+        const r = await call(m, { dispatch: need(f('dispatch') || rest[0], `${sub} --dispatch <id>`), reason: f('reason'), force: !!flags.force });
+        return out(r, flags, r.worker ? workerLine(r.worker) : `터미널 ${r.terminal}`);
+      }
+      case 'send': {
+        const r = await call('orch.send', { run: f('run'), to: f('to'), type: f('type'), subject: f('subject'), body: f('body'), dispatch: f('dispatch') || f('dispatch-id'), outcome: f('outcome'), phase: f('phase'), files: f('files') || f('files-modified'), report: f('report') || f('report-path') });
+        return out(r, flags, r.accepted === false ? `거부: ${(r.settlement && r.settlement.reason) || r.reason || ''}` : `보냄${r.to ? ` → ${r.to.join(', ')}` : ''}`);
+      }
+      // 워커 전용 줄임 명령 — 안내문(머리말)에 이 형태로 들어간다.
+      case 'done': {
+        const r = await call('orch.send', { type: 'worker_done', dispatch: f('dispatch'), outcome: need(f('outcome'), 'done --dispatch <id> --outcome succeeded|failed --summary "<세 문장>"'), body: f('summary') || f('body'), subject: f('subject'), files: f('files'), report: f('report') });
+        if (r.accepted === false) { process.exitCode = 1; return out(r, flags, `거부: ${r.settlement.reason}`); }
+        return out(r, flags, `보고 완료(${r.settlement.outcome}${r.settlement.duplicate ? ', 이미 보고됨' : ''}) — 이 턴을 끝내고 기다리세요.`);
+      }
+      case 'heartbeat': {
+        const r = await call('orch.send', { type: 'heartbeat', dispatch: f('dispatch'), phase: f('phase') });
+        return out(r, flags, r.accepted ? `ok${r.pendingMail ? ` — 읽지 않은 지시 ${r.pendingMail}건(cpt orch check)` : ''}` : '끝난 시도입니다');
+      }
+      case 'escalate': {
+        const r = await call('orch.send', { type: 'escalation', dispatch: f('dispatch'), subject: f('subject'), body: f('body') });
+        return out(r, flags, '코디네이터에게 알렸습니다');
+      }
+      case 'check': {
+        const r = await call('orch.check', { run: f('run'), as: f('as'), wait: !!flags.wait, types: f('types'), timeoutMs: num('timeout-ms'), ack: f('ack'), peek: !!flags.peek, all: !!flags.all }, flags.wait ? waitOpt() : undefined);
+        const msgs = (r.messages || []).map((m) => `[${m.type}] ${m.id}${m.dispatchId ? ` (${m.dispatchId})` : ''} ${m.subject}${m.payload && m.payload.outcome ? ` — ${m.payload.outcome}` : ''}\n    ${String(m.body || '').replace(/\n/g, '\n    ')}`);
+        const head = r.timeout ? '시간 초과(실패 아님) — 계속 기다리세요' : r.empty ? '새 메시지 없음' : r.peek ? `읽지 않은 메시지 ${msgs.length}건(미리보기)` : `메시지 ${msgs.length}건${r.replay ? '(다시 받음 — 아직 확인 처리 안 됨)' : ''}`;
+        const tail = (r.workers || []).length ? ['워커:', ...r.workers.map((w) => `  ${GLYPH[w.uiState] || '?'} ${w.dispatchId} [${w.uiState}] ${w.title}${w.phase ? ` — ${w.phase}` : ''}${w.attention.length ? ` ⚠ ${w.attention.join(',')}` : ''}`)] : [];
+        return out(r, flags, [head, ...msgs, ...(r.ack ? [`다 처리한 뒤: ${r.ack}`] : []), ...tail].join('\n'));
+      }
+      case 'ask': {
+        const args = flags.resume ? { resume: f('resume'), timeoutMs: num('timeout-ms') }
+          : { dispatch: f('dispatch'), question: need(f('question') || rest.join(' '), 'ask --dispatch <id> --question "<질문>" [--options "a,b"]'), options: f('options'), timeoutMs: num('timeout-ms') };
+        const r = await call('orch.ask', args, waitOpt());
+        return out(r, flags, r.answered ? `답: ${r.answer}` : r.closed ? '질문이 닫혔습니다' : `아직 답이 없습니다 — 이어서 기다리기: ${r.resume}`);
+      }
+      case 'reply': {
+        const r = await call('orch.reply', { id: need(f('id') || rest[0], 'reply --id <messageId> --body "<답>"'), body: need(f('body') || rest.slice(1).join(' '), 'reply --id <messageId> --body "<답>"') });
+        return out(r, flags, r.duplicate ? '이미 답한 질문입니다' : '답을 보냈습니다');
+      }
+      case 'gate-create': {
+        const r = await call('orch.gateCreate', { run: f('run'), task: f('task'), question: need(f('question'), 'gate-create --question "<결정>" --options "a,b" [--task <id>]'), options: need(f('options'), 'gate-create --question "<결정>" --options "a,b"') });
+        return out(r, flags, `${r.gate.id} — 사용자(또는 gate-resolve)가 고를 때까지 기다립니다`);
+      }
+      case 'gate-resolve': {
+        const r = await call('orch.gateResolve', { id: need(f('id') || rest[0], 'gate-resolve --id <gateId> --resolution "<선택>"'), resolution: need(f('resolution'), 'gate-resolve --id <gateId> --resolution "<선택>"') });
+        return out(r, flags, `결정: ${r.gate.resolution}`);
+      }
+      case 'gate-list': {
+        const r = await call('orch.gateList', { run: f('run'), task: f('task'), pending: !!flags.pending });
+        return out(r, flags, (r.gates || []).map((g) => `${g.id} [${g.status}] ${g.question}${g.resolution ? ` → ${g.resolution}` : ` (${g.options.join(' / ')})`}`).join('\n') || '(결정 없음)');
+      }
+      default:
+        process.stderr.write('사용법: cpt orch <status|run-create|worker-start|check|reply|send|worker-list|worker-show|worker-read|worker-release|worker-retain|worker-stop|worker-abandon|task-create|task-list|task-update|gate-create|gate-resolve|gate-list|run-show|run-list|run-close>\n전체 가이드: cpt skills get cpt-orch\n');
+        process.exitCode = 2;
+    }
+  } catch (e) {
+    if (e && e.usage) { process.stderr.write(e.message + '\n'); process.exitCode = 2; return; }
+    throw e;
+  }
+}
+
 function printSkillGuide(name) {
-  if (name && name !== 'cpt-cli') {
-    process.stderr.write(`알 수 없는 스킬: ${name} (사용 가능: cpt-cli)\n`);
+  const FILES = { 'cpt-cli': 'GUIDE.md', 'cpt-orch': 'ORCH.md' };
+  const file = FILES[name || 'cpt-cli'];
+  if (!file) {
+    process.stderr.write(`알 수 없는 스킬: ${name} (사용 가능: ${Object.keys(FILES).join(', ')})\n`);
     process.exitCode = 2;
     return;
   }
   try {
-    process.stdout.write(fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8'));
+    process.stdout.write(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
   } catch (_) {
     process.stderr.write('가이드 파일(GUIDE.md)을 찾을 수 없습니다.\n');
     process.exitCode = 1;

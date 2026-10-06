@@ -538,6 +538,12 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .wsg-sub { padding-left: 23px; font-size: 11px; line-height: 15px; color: var(--dim); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wsg-subtx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .wsg-agent { padding-left: 42px; }
+/* 오케스트레이션 — 묶음 행(로컬 아래) + 워커 행(2줄: 맡은 일 / 상태). 색은 상태 점(.tv-dot)만. */
+.wsg-worker { min-height: 40px; }
+.wsg-worker .wsg-sub { padding-left: 22px; }
+.wsr-note { display: flex; align-items: center; gap: 6px; min-width: 0; margin-top: 2px; font-size: 11px; line-height: 15px; color: var(--text3); }
+.wsr-note-st { flex: none; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--text2); font-size: 10px; line-height: 15px; font-weight: 500; }
+.wsr-note-tx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* LAN 직결 배지 — 액센트색 금지(액티브색 남용 금지 규칙). 릴레이는 배지 자체가 없다 = 정상 */
 .wsr-lan { font-size: 11px; font-weight: 400; color: var(--dim); flex: none; }
 
@@ -1644,6 +1650,14 @@ select.sett-select { min-width: 160px; max-width: 240px; height: 32px; padding-l
 .pane-body.search-open .pane-mode-toggle { display: none; }
 /* 탭 대기 점 — 승인/질문 카드는 그 탭을 열었을 때만 뜨므로, 어느 터미널이 기다리는지 알리는 유일한 신호.
    상태 신호라 유일하게 색을 쓴다(포인트 컬러 제거 라운드의 예외). */
+/* 탭의 오케스트레이션 표식 — 워커 = 점, 코디네이터 = 마름모. 기본은 무채색 테두리, 색은 상태 신호(warn·error)에만. */
+.ptab-orch { flex: none; width: 6px; height: 6px; margin-left: 5px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--text3); background: transparent; }
+.ptab-orch.coordinator { border-radius: 1px; transform: rotate(45deg); }
+.ptab-orch.spin { background: var(--text3); box-shadow: none; animation: tvPulse 1.2s ease-in-out infinite; }
+.ptab-orch.warn { background: var(--warn); box-shadow: none; }
+.ptab-orch.error { background: var(--error); box-shadow: none; }
+.ptab-orch.off { background: var(--dim); box-shadow: none; opacity: 0.6; }
+@media (prefers-reduced-motion: reduce) { .ptab-orch.spin { animation: none; } }
 .ptab-wait { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 4px; }
 
 /* ── Chat 본문 ── */
@@ -3092,6 +3106,33 @@ button.au-chip, .au-chip { border: none; font-family: inherit; flex: none; }
 .pw-status { display: flex; flex-direction: column; gap: 2px; padding-top: 10px; color: var(--text2); }
 .pw-err { color: var(--error); }
 .pw-caveat { padding-bottom: 12px; }
+/* 오케스트레이션 묶음 시트 — 워커 목록이 길어지면 본문만 스크롤한다(머리·닫기 버튼은 고정). */
+.wv-sheet.tk-sheet.oc-sheet { max-width: 600px; width: min(600px, calc(100vw - 48px)); max-height: calc(100vh - 80px); display: flex; flex-direction: column; }
+.oc-title { display: flex; align-items: center; gap: 10px; padding-bottom: 8px !important; }
+.oc-title-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-x { flex: none; padding: 0 6px; }
+.oc-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--text3); padding-bottom: 12px; }
+.oc-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 -6px; padding: 0 6px 2px; }
+.oc-w, .oc-card { border: 1px solid var(--border); border-radius: var(--r-md); padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.oc-attn { border-color: var(--warn); }
+.oc-w-h { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.oc-w-ic { display: inline-flex; flex: none; color: var(--text3); }
+.oc-w-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; color: var(--text); }
+.oc-w-sub { font-size: 11px; color: var(--text3); padding-left: 23px; }
+.oc-card-h { font-size: 11px; font-weight: 600; color: var(--text3); }
+.oc-q { font-size: 13px; color: var(--text); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.oc-qbox { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 0 23px; }
+.oc-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.oc-reply { display: flex; align-items: flex-end; gap: 8px; }
+.oc-reply textarea { flex: 1; min-height: 34px; }
+.oc-res { font-size: 12px; color: var(--text2); line-height: 1.5; padding-left: 23px; white-space: pre-wrap; word-break: break-word; }
+.oc-w-acts { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 15px; }
+.oc-sec { font-size: 12px; font-weight: 600; color: var(--text3); padding: 8px 0 0; }
+.oc-tasks { display: flex; flex-direction: column; }
+.oc-task { display: flex; align-items: center; gap: 10px; font-size: 12px; min-height: 26px; }
+.oc-task-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+.oc-task-s { flex: none; color: var(--text3); }
+.oc-foot { display: flex; justify-content: flex-end; padding-top: 14px; }
 .wv-sheet.tk-sheet.pw-sheet { max-width: 520px; width: min(520px, calc(100vw - 48px)); }
 .pw-sheet .pw-sec { margin: 4px 10px 8px; }
 /* 체크박스 — 브라우저 기본 파랑(accent) 금지: 무채색 */

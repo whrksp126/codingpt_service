@@ -382,6 +382,9 @@ function poolChangedSoon() {
 /** 알림(§3.4) — 제목은 일반 문구, 작업 제목·프롬프트·브랜치명은 싣지 않는다. */
 async function pushNotification(t, r, kind, subtitle, titleOverride) {
   if (!inj.backFetch) return;
+  //  오케스트레이션 워커의 "리뷰 준비" 는 사용자에게 알리지 않는다 — 결과를 받는 쪽은 코디네이터 에이전트다
+  //  (묶음이 다 끝나면 orch.js 가 한 번 알린다). 실패·머지는 사람이 알아야 하므로 그대로 보낸다.
+  if (kind === 'task_ready' && t.origin && t.origin.kind === 'orch') return;
   const host = inj.deviceId();
   const label = AGENT_LABEL[r.agent] || r.agent;
   const title = titleOverride || (kind === 'task_ready' ? `리뷰 준비 · ${label}` : kind === 'task_merged' ? `머지 완료 · ${label}` : `작업 실패 · ${label}`);
@@ -470,7 +473,8 @@ const ORIGIN_ID_RE = /^[A-Za-z0-9_-]{1,80}$/;
 function normOrigin(o, { internal = false } = {}) {
   if (o == null) return null;
   if (typeof o !== 'object' || Array.isArray(o)) throw codedError('BAD_PARAMS', 'origin 이 올바르지 않습니다');
-  const kinds = internal ? ['dispatch', 'automation'] : ['dispatch'];
+  //  'orch' = 오케스트레이션 워커(orch.js) — 코디네이터 에이전트가 띄운 작업. planId 에 시도(Dispatch) ID 가 온다.
+  const kinds = internal ? ['dispatch', 'automation', 'orch'] : ['dispatch'];
   if (!kinds.includes(o.kind)) throw codedError('BAD_PARAMS', 'origin.kind 가 올바르지 않습니다');
   const out = { kind: o.kind };
   for (const k of ['planId', 'automationId', 'firingId']) {
@@ -481,7 +485,7 @@ function normOrigin(o, { internal = false } = {}) {
   if (o.kind === 'automation' && !out.automationId) throw codedError('BAD_PARAMS', 'origin.automationId 가 필요합니다');
   const depth = o.depth == null ? (o.kind === 'automation' ? 1 : 0) : o.depth;
   if (!Number.isInteger(depth) || depth < 0 || depth > 2) throw codedError('BAD_PARAMS', 'origin.depth 는 0~2 입니다');
-  out.depth = o.kind === 'dispatch' ? 0 : depth;
+  out.depth = o.kind === 'automation' ? depth : 0;
   return out;
 }
 
@@ -1089,6 +1093,8 @@ function onAgentState(rec, prev, ctx) {
  */
 function shouldNotify(rec, kind) {
   if (kind !== 'done') return true;
+  //  오케스트레이션 워커 터미널의 "턴 끝" 은 사용자 알림이 아니다(코디네이터가 받는다) — 워커 N개가 N번 울리지 않게.
+  try { if (require('./orch').quietSession(rec && rec.key)) return false; } catch (_) { /* 모듈 없음 = 종전대로 */ }
   const hit = runByKey(rec && rec.key);
   if (!hit) return true;
   const { t, r } = hit;

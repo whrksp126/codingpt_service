@@ -39,6 +39,7 @@ import { mountApprovals, updateApprovals } from "./approvals.js";
 // (★ 개정 12: 기기 승인 표면 삭제 — 승인 절차 자체가 없어졌다. 연동은 설정 > 계정 > 기기에서 코드로.)
 import { maybeShowOnboarding } from "./agents-view.js";
 import { startUpdateScheduler, applyNow, deferApply } from "./update-scheduler.js";
+import { startOrchBackground } from "./orch-view.js";
 import { mountTasksView, updateTasksView, openTasksDashboard, closeTasksDashboard, openNewTask, startTasksBackground, toast as tasksToast } from "./tasks-view.js";
 import { mountVmView, updateVmView } from "./vm-view.js";
 import { mountAutomationsView, updateAutomationsView, openAutomations, closeAutomations, startAutomationsBackground } from "./automations-view.js";
@@ -169,7 +170,7 @@ api.onDaemonChanged(async () => {
   // 부팅 뒤 로그인/페어링한 경우에도 Agent Tasks 배경(caps·첫 목록·60초 폴링)을 건다 — 부팅 시점엔 paired 가 아니라
   //  못 걸었다(startTasksBackground 는 멱등: 폴링 타이머는 1개, caps/목록은 새로 받는다). 기기 목록이 있어야 대상 PC 를 안다.
   //  자동화 배지(주의 수)도 같은 시점에 한 번 — 폴링은 장소가 열려 있을 때만(automation-design §5.9).
-  void Promise.resolve(S.loadDevices()).catch(() => {}).then(() => { if (state.paired) startAutomationsBackground(); if (state.paired) startTasksBackground(); });
+  void Promise.resolve(S.loadDevices()).catch(() => {}).then(() => { if (state.paired) startAutomationsBackground(); if (state.paired) startOrchBackground(); if (state.paired) startTasksBackground(); });
   // 재페어링은 새 device 행을 만들 수 있다 → 옛 기기에 묶인 이 PC 워크스페이스를 즉시 재클레임
   //  (안 하면 터미널이 죽은 기기로 시작 요청 → 409 DAEMON_OFFLINE 영구화).
   S.reconcileWorkspaceHosts();
@@ -370,7 +371,7 @@ async function maybeInstallSetupUpdate() {
   void Promise.allSettled([S.loadDevices(), S.loadNotifications(), S.loadApprovals()]).then(() => {
     S.emit();
     if (state.paired) startAutomationsBackground(); // 자동화 — 사이드바 `자동화` 배지용 목록(보고 있는 PC 1대)
-    if (state.paired) startTasksBackground(); // Agent Tasks — 사이드바 배지용 목록(기기 목록이 있어야 대상 PC 를 안다)
+    if (state.paired) startTasksBackground(); if (state.paired) startOrchBackground(); // Agent Tasks — 사이드바 배지용 목록(기기 목록이 있어야 대상 PC 를 안다)
   });
   void api.notifPermissionState().catch(() => null); // 권한 요청 없이 현재 OS 상태만 읽는다.
 

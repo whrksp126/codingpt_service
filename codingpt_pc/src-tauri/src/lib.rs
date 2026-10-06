@@ -1041,6 +1041,7 @@ pub fn run() {
             cptsock::chat_local,
             cptsock::task_local,
             cptsock::auto_local,
+            cptsock::orch_local,
             cptsock::power_local,
             // LAN 직결(기능4) — 데몬 위임(grant 는 데몬이 back 에서 직접 받는다)
             cptsock::lan_probe,

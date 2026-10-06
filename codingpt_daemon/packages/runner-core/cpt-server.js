@@ -489,6 +489,97 @@ function handleAutoRpc(method, params, meta) {
   try { return Promise.resolve(lib.handle(method, params || {}, meta || { via: 'relay' })); } catch (e) { return Promise.reject(e); }
 }
 
+// ── 오케스트레이션(orch.*) — 설계 정본 docs/orchestration-design.md ─────────────────
+//  orch.js 는 순수 모듈 + 주입(tasks.js 와 같은 규약). 터미널·실행·입력·관찰·알림의 실제 구현을 여기서 넣는다.
+const notifyOrchChanged = coalescedNotifier('orch.changed',
+  (host, cur) => ({ host, runIds: [...cur.ids], reason: cur.reason }));
+const ORCH_SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh',
+  'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']);
+let orchNames = { at: 0, set: null };
+async function orchProbe({ tsession }) {
+  const key = String(tsession || '');
+  if (!key) return null;
+  if (!orchNames.set || Date.now() - orchNames.at > 1500) {
+    try { orchNames = { at: Date.now(), set: new Set((await termBackend.listSessionNames()).map((n) => String(n).trim())) }; } catch (_) { return null; }
+  }
+  if (!orchNames.set.has(key)) return { exists: false, shell: null, agentState: null, attached: false };
+  let cmd = '';
+  try { cmd = String((await termBackend.info(key)).command || '').trim(); } catch (_) { return null; }
+  const base = cmd.split(/[\\/]/).pop().toLowerCase();
+  const shell = !cmd ? null : (ORCH_SHELLS.has(cmd) || ORCH_SHELLS.has(base));
+  let att = { attached: false, state: null };
+  try { att = require('./agent-state').attachmentOf(key) || att; } catch (_) { /* 구 번들 */ }
+  return { exists: true, shell, agentState: att.attached ? att.state : null, attached: !!att.attached };
+}
+let orchWired = false;
+function wireOrch() {
+  if (orchWired) return;
+  orchWired = true;
+  const lib = lazyMod('./orch');
+  const agentsLib = lazyMod('./agents');
+  if (!lib || !agentsLib || typeof lib.configure !== 'function') return;
+  const target = (cwd, tid) => ptyLib.termSession(ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '').session, tid);
+  try {
+    lib.configure({
+      notify: (p) => notifyOrchChanged({ ids: (p && p.runIds) || [], reason: p && p.reason }),
+      createTerminal: async ({ cwd, name }) => {
+        const { session, abs } = ptyLib.sessionForCwd(typeof cwd === 'string' ? cwd : '');
+        await ptyLib.migrateLegacyPool(session, abs).catch(() => {});
+        const t = await ptyLib.createTerminal(session, abs);
+        const tsession = t.session || ptyLib.termSession(session, t.index);
+        if (name) await termBackend.rename(tsession, String(name)).catch(() => {});
+        orchNames.set = null;
+        notifyPoolChanged();
+        return { tid: t.index, tsession };
+      },
+      closeTerminal: async ({ cwd, tid }) => {
+        await ptyLib.handleTerminalRpc('terminal.close', { cwd: typeof cwd === 'string' ? cwd : '', index: tid });
+        orchNames.set = null;
+        notifyPoolChanged();
+      },
+      launch: (a) => launchAgentInTerminal(agentsLib, a),
+      chatInput: (a) => chatInput(a),
+      keys: async ({ cwd, tid, keys }) => termBackend.sendKeys(target(cwd, tid), { keys }),
+      read: async ({ cwd, tid, lines }) => String(await termBackend.capture(target(cwd, tid), { lines, join: true })).replace(/\s+$/, ''),
+      probe: orchProbe,
+      shellOf: async ({ tsession }) => String((await termBackend.info(tsession)).command || '').trim(),
+      agents: agentsLib,
+      agentModels: lazyMod('./agent-models'),
+      agentState: lazyMod('./agent-state'),
+      tasks: lazyMod('./tasks'),
+      backFetch,
+      config: () => { const c = configLib.load() || {}; return c.orch && typeof c.orch === 'object' ? c.orch : {}; },
+    });
+    lib.start();
+  } catch (e) {
+    console.error('[cpt] 오케스트레이션 기동 실패:', e && e.message);
+  }
+}
+// orch.* 디스패치 — 릴레이(control.dispatchRpc, via='relay')·PC 앱 로컬 소켓(via='local')·cpt CLI(via='cli') 공통.
+function handleOrchRpc(method, params, meta) {
+  const lib = lazyMod('./orch');
+  if (!lib || typeof lib.handle !== 'function') {
+    return Promise.reject(Object.assign(new Error('이 PC 에서는 오케스트레이션을 쓸 수 없습니다(PC 앱 업데이트 필요)'), { code: 'ORCH_DISABLED' }));
+  }
+  try { return Promise.resolve(lib.handle(method, params || {}, meta || { via: 'relay' })); } catch (e) { return Promise.reject(e); }
+}
+// 소켓 경로. PC 앱은 ctx 없이 보낸다(사람 UI). cpt CLI 는 ctx 를 싣는다 → 컨텍스트 게이트를 지나 터미널 좌표로 호출자를 정한다.
+//  ★ 좌표는 tmux 자기조회로 얻은 세션(cpt-…--t-N)만 인정한다 — env 만으로는 "어느 터미널인가" 를 증명하지 못한다.
+async function handleOrchSocket(cmd, req, conn) {
+  const args = req.args || {};
+  if (!req.ctx) return handleOrchRpc(cmd, args, { via: 'local' });
+  const resolved = await resolveCtx(req.ctx);
+  await assertCptContext(cmd, req.ctx, resolved);
+  const c = req.ctx;
+  const tsession = c.tmux && typeof c.tmux.session === 'string' && /^cpt-.*--t-\d+$/.test(c.tmux.session) ? c.tmux.session : null;
+  let agent = null;
+  if (tsession) { try { agent = require('./agent-state').attachmentOf(tsession).agent || null; } catch (_) { agent = null; } }
+  return handleOrchRpc(cmd, args, {
+    via: 'cli', tsession, cwd: resolved.cwdRel, tid: resolved.windowIndex, agent,
+    onClose: (fn) => { if (conn && typeof conn.once === 'function') conn.once('close', fn); },
+  });
+}
+
 // tsession → {task(원본 — origin 포함), run}. tasks.findRunByTsession(S2) 우선, 없으면 스토어 직접.
 function taskRunByTsession(tsession) {
   const lib = lazyMod('./tasks');
@@ -955,6 +1046,8 @@ async function dispatch(req, conn) {
   // 자동화 번들(docs/automation-design.md §2.3) — dispatch.*·power.* 는 PC 앱 로컬 커맨드 전용(게이트 밖, task.* 와 동일).
   //  auto.* 는 cpt CLI(터미널 안 AI)면 컨텍스트 게이트 + 에이전트 게이트(AUTO_OUT_OF_TERMINAL/AUTO_LOOP)를 먼저 탄다.
   if (/^(auto|dispatch|power)\./.test(cmd)) return handleAutoSocket(cmd, req);
+  // 오케스트레이션(docs/orchestration-design.md) — 에이전트(cpt CLI)는 터미널 좌표로, PC 앱은 사람 권한으로.
+  if (cmd.startsWith('orch.')) return handleOrchSocket(cmd, req, conn);
   // 열린 포트 목록(2026-08-04) — PC 앱이 back 을 왕복하지 않고 바로 묻는 길.
   //  ★ 이걸 여는 이유: PC 에 **같은 로직의 Rust 사본**(tmux.rs listen_ports_in)이 따로 있었다.
   //   포트 판정 규칙(무시 포트·dev 포트대·cwd 귀속)이 두 곳에 있으면 한쪽만 고쳐진다 — 실제로
@@ -2191,8 +2284,15 @@ const CAPABILITIES = [
   'hook.event', 'agent.status', 'hooks.doctor',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
   'agents.list',
-  // Agent Tasks — 읽기 2개만(`cpt task list|get`). 생성·커밋·머지·폐기는 사람 UI 만(AI 자기증식·자기머지 금지).
-  'task.list', 'task.get',
+  // Agent Tasks — 2026-10-06 사용자 결정으로 쓰기도 공개한다(에이전트가 인계·머지까지 스스로).
+  //  이전 규칙은 "읽기 2개만(AI 자기증식·자기머지 금지)" 였다. 폭주 방지는 금지가 아니라 상한(TASK_LIMIT)이다.
+  'task.list', 'task.get', 'task.create', 'task.discard', 'git.branches', 'git.commit', 'git.merge.local',
+  // 오케스트레이션(docs/orchestration-design.md) — 에이전트가 워커를 띄우고·지시하고·결과를 받고·정리한다.
+  //  상한: 중첩 깊이·동시 워커 수(daemon.json orch). 호출자는 터미널 좌표로 식별한다(워커/코디네이터).
+  'orch.status', 'orch.list', 'orch.runCreate', 'orch.runList', 'orch.runShow', 'orch.runClose',
+  'orch.taskCreate', 'orch.taskList', 'orch.taskUpdate',
+  'orch.workerStart', 'orch.workerList', 'orch.workerShow', 'orch.workerRead', 'orch.workerStop', 'orch.workerAbandon', 'orch.workerRelease', 'orch.workerRetain',
+  'orch.send', 'orch.check', 'orch.ask', 'orch.reply', 'orch.gateCreate', 'orch.gateResolve', 'orch.gateList', 'orch.noteSet',
   // 자동화(docs/automation-design.md §2.3·§5.7) — **의도된 예외**: 위 "AI 자기증식 금지" 규칙과 달리 에이전트가
   //  반복·조건 작업을 스스로 자동화로 만들 수 있게 공개한다(사용자 지시, 부록 Z-6). 방어는 엔진 쪽 —
   //  하루 상한·깊이 2·자동화가 만든 작업의 에이전트는 생성 불가(AUTO_LOOP)·auto_created 알림·킬스위치·감사 로그.
@@ -2425,6 +2525,7 @@ function start() {
     if (!isPipe) { try { fs.chmodSync(sock, 0o600); } catch (_) { /* noop */ } }
     console.log(`[cpt] 컨트롤 소켓 대기: ${sock}`);
     wireTasks(); // Agent Tasks 주입 + agent-state 구독 + reconcile(1회)
+    wireOrch(); // 오케스트레이션 주입 + 진행 중 묶음 점검 재개
     wireAutomationBundle(); // 자동화·한 줄 지시·깨어 있기 주입 + 엔진 기동(각 모듈 handle 이 있을 때만)
   });
   return server;
@@ -2454,6 +2555,7 @@ module.exports = {
   _dispatch: dispatch,
   handleAgentsRpc, // 에이전트 관리(agents.*) — control.js 의 back rpc 경로도 이 구현을 쓴다(단일 출처)
   handleSurfaceRpc, // 공유 표면(surface.*) — control.js 의 릴레이 경로도 이 구현을 쓴다
+  handleOrchRpc, // 오케스트레이션(orch.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다
   handleTaskRpc, // Agent Tasks(task.*/git.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다
   notifyTasksChanged, // tasks.changed 브로드캐스트(300ms 코얼레싱)
   handleAutoRpc, // 자동화 번들(auto.*/dispatch.*/power.*) — control.js 의 릴레이·봉인 경로도 이 구현을 쓴다

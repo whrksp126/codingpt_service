@@ -320,6 +320,26 @@ pub async fn task_local(cmd: String, args: serde_json::Value) -> Result<serde_js
         .map_err(|e| format!("요청 실행 실패: {e}"))?
 }
 
+// 오케스트레이션(orchestration-design.md) — orch. RPC 를 이 PC 데몬으로(다른 PC 로 가는 봉인 요청도 여기로).
+//  task_local 과 같은 모양·같은 이유: async + spawn_blocking(메인 스레드 금지), 코드 보존.
+//  읽기 65초 = 정리·닫기(머지/터미널 종료 대기, 릴레이 표 60초) + 5초. ctx 를 싣지 않으므로 데몬은 사람 권한으로 처리한다
+//  (보기 + 답하기·결정·멈추기·정리·닫기 — 워커를 띄우는 쪽은 터미널 안의 에이전트뿐이다).
+#[tauri::command]
+pub async fn orch_local(cmd: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let sealed_orch = cmd == "e2ee.rpc"
+        && args
+            .get("method")
+            .and_then(|m| m.as_str())
+            .map(|m| m.starts_with("orch."))
+            .unwrap_or(false);
+    if !cmd.starts_with("orch.") && !sealed_orch {
+        return Err("허용되지 않은 명령입니다.".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || cpt_request_timed(&cmd, args, true, 65))
+        .await
+        .map_err(|e| format!("요청 실행 실패: {e}"))?
+}
+
 // 자동화 번들(automation-design §2.3·§9.3) — auto./dispatch./power. RPC 를 이 PC 데몬으로(봉인 요청도 여기로).
 //  task_local 과 같은 모양·같은 이유: async + spawn_blocking(메인 스레드 금지), 읽기 35초, 코드 보존.
 //  울타리 = method 접두 3종. `power.event` 는 여기서 받지 않는다 — 잠자기/깨어남 통지는 이 PC 의 앱만 보낼 수

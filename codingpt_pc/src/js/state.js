@@ -31,6 +31,9 @@ export const state = {
   // 자동화(automation-design §5.9) — 호스트(PC)별 auto.list 결과 미러. 정본은 각 PC 데몬의 automations.json(서버엔 없다).
   //  byHost[hostId] = { items:AutomationLite[], paused:boolean, limits, counts, at, error:{code,message}|null }
   automations: { byHost: {} },
+  // 오케스트레이션(orchestration-design.md) — 호스트별 데몬 `orch.list` 사본.
+  //  byHost[hostId] = { runs:Run[], notes:[{cwd, comment, status}], at }
+  orch: { byHost: {} },
   sidebarCollapsed: false,
   creatingWs: false,
   me: null, // 로그인 계정 프로필 {id,email,nickname,profileImg,...} — 웹 로그인 후 표시
@@ -905,6 +908,14 @@ export function setTasksForHost(host, patch) {
   const k = String(host);
   const prev = state.tasks.byHost[k] || { items: [], gh: null, at: 0, error: null };
   state.tasks.byHost[k] = { ...prev, ...(patch || {}) };
+  emit();
+}
+
+/** 오케스트레이션 사본(호스트 1대분) 반영 — 사이드바 묶음·워커 행과 pane 탭 표시가 이 값을 읽는다. */
+export function setOrchForHost(host, patch) {
+  const k = String(host);
+  const prev = state.orch.byHost[k] || { runs: [], notes: [], at: 0 };
+  state.orch.byHost[k] = { ...prev, ...(patch || {}) };
   emit();
 }
 

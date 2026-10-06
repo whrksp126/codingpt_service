@@ -310,19 +310,47 @@ cpt desktop handoff "GitHub 로그인이 필요합니다"     # ★ 사용자가
   다 쓴 폴더는 `disconnect`. 붙인 폴더는 사용자 설정 시트에 그대로 보인다.
 - 게스트는 앱스토어 앱·Docker·Android 에뮬레이터가 안 돈다(호스트에서 돌고 네트워크로 닿는다).
 
-## 6-2. 작업(Agent Tasks) 조회
+## 6-2. 작업(Agent Tasks) — 전용 작업 폴더에서 다른 에이전트가 맡는 일
 
-사용자가 폰/PC 에서 만든 **작업**은 저장소의 git worktree(`~/.codingpt/worktrees/…`)마다 에이전트 1개를
-돌린다. 네가 그 작업 터미널 안에서 돌고 있다면 자기 작업의 원래 프롬프트·브랜치·base 를 이렇게 본다:
+**작업**은 저장소의 git worktree(`~/.codingpt/worktrees/…`)마다 에이전트 1개를 돌린다. 사용자가 폰/PC 에서
+만들 수도 있고, 네가 **인계**로 만들 수도 있다("다른 에이전트한테 넘겨", "따로 해 줘").
 
 ```
 cpt task get                 # 이 터미널이 속한 작업(프롬프트 전문 포함)
 cpt task list [--all]        # 이 PC 의 작업 목록(* = 이 터미널의 실행)
+cpt task create --prompt "<맡길 일>" [--agent claude|codex|gemini] [--model <id>] [--base <branch>]
+cpt task commit <taskId> --message "…"      # 작업 폴더의 변경을 커밋
+cpt task merge <taskId> [--message "…"]     # base 브랜치로 머지하고 작업 폴더 정리(미커밋 변경은 --message 로 커밋 후)
+cpt task discard <taskId> [--force]         # 머지하지 않고 폐기(30일 복구 가능)
 ```
 
-정직성 계약: 조회 전용이다. 커밋·푸시·PR·머지·폐기는 사용자가 앱/PC 화면에서 결정한다 — 작업 브랜치
-(`cpt/…`)에서 평소처럼 파일을 고치고, 끝나면 멈춰라(턴이 끝나면 "리뷰 준비" 로 사용자에게 알려진다).
-base 브랜치로 직접 머지하거나 worktree 를 지우지 마라.
+규율: 인계는 **결과를 기다리지 않는다** — 작업 ID 를 사용자에게 알리고 끝낸다. 결과를 받아서 이어 가야 하면
+인계가 아니라 오케스트레이션이다(아래 6-3). 네가 작업 터미널 안의 에이전트라면 작업 브랜치(`cpt/…`)에서
+평소처럼 고치고 커밋한 뒤 멈춘다 — 자기 작업을 스스로 머지하거나 worktree 를 지우지 마라(맡긴 쪽이 한다).
+
+## 6-3. 오케스트레이션 (cpt orch) — 여러 에이전트에게 나눠 맡기고 결과 받기
+
+사용자가 "나눠서 시켜 / 병렬로 / 여러 에이전트로 / 지켜보다가 모아 줘" 라고 하면 네가 **코디네이터**가 되어
+워커를 띄우고, 수신함으로 결과·질문을 받고, 끝난 워커를 정리한다. 프롬프트 맨 위에 워커 안내문이 있으면
+너는 **워커**다 — 그 안내문의 명령을 그대로 따른다.
+
+```
+cpt skills get cpt-orch      # 전체 가이드(먼저 읽어라)
+cpt orch status              # 내 역할·상한
+cpt orch worker-start --spec "<일>" --agent claude
+cpt orch check --wait --types worker_done,escalation,question
+```
+
+내장 서브에이전트로 대신하지 마라 — 사용자가 사이드바에서 보고 조종할 수 없다.
+
+## 6-4. 사이드바에 진행 상황 남기기
+
+```
+cpt ws set --comment "수정 완료, 통합 테스트 돌리는 중" --status in-progress
+cpt ws set --status in-review       # todo · in-progress · in-review · completed
+```
+
+워크스페이스 카드에 한 줄로 보인다. 재현·수정·검증·막힘 같은 의미 있는 지점마다 짧게 갱신하라.
 
 ## 7-3. 자동화 (cpt auto)
 

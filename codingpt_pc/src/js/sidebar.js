@@ -16,6 +16,9 @@ import { autoAttentionCount, openAutomations } from "./automations-view.js";
 import { hostHasAuto, hostAwake } from "./automations-api.js";
 import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
+import { runsForCwd, noteFor, runRollup, runTitle, visibleWorkers, workerDot, workerTextKey, attentionCount } from "./orch-model.js";
+import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
+import { ot, wsStatusText } from "./text/orch.js";
 import * as i18n from './i18n/index.js';
 import { openVm, leaveVmScope, vmOsOfPath, vmLabel, openImportMenu } from "./vm-view.js";
 
@@ -252,6 +255,8 @@ export function updateSidebar() {
           // 저장소 트리(agent-tasks-sidebar.md §3.1) — 여기 없는 값은 화면에 반영되지 않는다.
           groupCollapsed(w.id), w.git?.branch || "", S.wsTerminalCount(w.id),
           g ? g.openCount : 0, g ? g.needsInput : false,
+          // 오케스트레이션(묶음·워커·한 줄 메모) — 여기 없는 값은 화면에 반영되지 않는다.
+          orchSig(activeDev0, w),
           (g ? g.tasks : []).map((t) => [t.taskId, t.title, t.group, t.dot, t.sub.key, t.sub.diff?.a, t.sub.diff?.d,
             t.fanout, fanExpanded.has(t.taskId), t.runs.map((r) => [r.runId, r.group, r.dot, r.agent, r.branch, r.workspaceId || null, r.tid || null])])];
       }),
@@ -697,6 +702,8 @@ function focusKey(root) {
   const q = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/["\\]/g, "\\$&"));
   if (a.classList.contains("wsg-head") && a.dataset.wsId) return `.wsg-head[data-ws-id="${q(a.dataset.wsId)}"]`;
   if (a.classList.contains("wsg-local") && a.dataset.wsLocal) return `.wsg-local[data-ws-local="${q(a.dataset.wsLocal)}"]`;
+  if (a.dataset.orchRun) return `.wsg-orch[data-orch-run="${q(a.dataset.orchRun)}"]`;
+  if (a.dataset.dispatchId) return `.wsg-worker[data-dispatch-id="${q(a.dataset.dispatchId)}"]`;
   if (a.classList.contains("wsg-task") && a.dataset.taskId) return `.wsg-task[data-task-id="${q(a.dataset.taskId)}"]`;
   if (a.classList.contains("wsg-agent") && a.dataset.runId) return `.wsg-agent[data-run-id="${q(a.dataset.runId)}"]`;
   return null;
@@ -749,6 +756,97 @@ function openWs(w) {
   S.setActive(w.id);
 }
 
+// ── 오케스트레이션(orchestration-design.md) — 로컬 행 아래 "묶음 → 워커" ─────────────────────────
+//  묶음 행 = 코디네이터가 그 폴더에서 돌리는 조율 한 건(목표 + 합산 상태). 워커 행 = 맡은 일 + 지금 상태.
+//  기본은 펼침이다(지금 돌아가는 것을 숨기지 않는다) — 접은 것만 기억한다.
+const orchFolded = new Set();
+function toggleOrch(runId) {
+  if (orchFolded.has(runId)) orchFolded.delete(runId); else orchFolded.add(runId);
+  updateSidebar();
+}
+function orchRuns(host, w) {
+  const snap = orchSnapshot(host);
+  return snap && w.localPath != null ? runsForCwd(snap, w.localPath || "") : [];
+}
+/** 렌더 서명 — 묶음·워커의 보이는 값 전부 + 한 줄 메모. */
+function orchSig(host, w) {
+  const snap = orchSnapshot(host);
+  if (!snap) return null;
+  const n = noteFor(snap, w.localPath || "");
+  const runs = runsForCwd(snap, w.localPath || "");
+  return [n ? [n.comment, n.status] : null, runs.length ? focusedTid(w.id) : null, runs.map((r) => [r.id, runTitle(r), orchFolded.has(r.id), (r.gates || []).length,
+    visibleWorkers(r).map((x) => [x.dispatchId, x.uiState, x.title, x.phase || "", x.agent, x.tid, x.terminal, x.question ? x.question.id : null])])];
+}
+/** 그 워크스페이스에서 사람이 답해야 하는 것의 수(질문·결정·입력 대기). */
+function orchAttention(host, w) {
+  const snap = orchSnapshot(host);
+  return snap ? attentionCount(snap, w.localPath || "") : 0;
+}
+/** 진행 중 묶음이 워커로 쓰는 작업(전용 작업 폴더) ID — 작업 행으로 한 번 더 그리지 않는다. */
+function orchTaskIds(host, w) {
+  const ids = new Set();
+  for (const r of orchRuns(host, w)) for (const x of r.workers || []) if (x.taskRef && x.taskRef.taskId) ids.add(x.taskRef.taskId);
+  return ids;
+}
+function orchRunRow(w, run) {
+  const host = Number(S.activeDeviceId());
+  const roll = runRollup(run);
+  const open = !orchFolded.has(run.id);
+  const b = document.createElement("button");
+  b.className = "wsg-child wsg-task wsg-orch";
+  b.dataset.orchRun = run.id;
+  const c = roll.counts;
+  const sub = [ot("workersN", { n: c.total }),
+    c.live ? ot("liveN", { n: c.live }) : "",
+    c.attention + roll.gates ? ot("attentionN", { n: c.attention + roll.gates }) : "",
+    c.failed ? ot("failedN", { n: c.failed }) : "",
+    !c.live && !c.attention && !roll.gates && c.ok ? ot("okN", { n: c.ok }) : ""].filter(Boolean).join(" · ");
+  b.innerHTML =
+    `<span class="wsg-line"><span class="wsg-ic">${icons.orch({ size: 15 })}</span>` +
+    `<span class="wsg-title">${escapeHtml(runTitle(run) || ot("orchestration"))}</span>` +
+    (c.total ? `<span class="wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "") +
+    `</span>` +
+    `<span class="wsg-sub"><span class="tv-dot${roll.dot === "none" ? "" : " " + roll.dot}"></span><span class="wsg-subtx">${escapeHtml(sub)}</span></span>`;
+  b.addEventListener("click", (e) => {
+    if (e.target.closest?.(".wsg-caret2")) { e.stopPropagation(); toggleOrch(run.id); return; }
+    openOrchSheet({ host, runId: run.id });
+  });
+  return b;
+}
+function orchWorkerRow(w, run, x) {
+  const host = Number(S.activeDeviceId());
+  const b = document.createElement("button");
+  const here = x.tid != null && x.terminal !== "released" && x.placement !== "worktree" && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === x.tid;
+  b.className = "wsg-child wsg-task wsg-agent wsg-worker" + (here ? " active" : "");
+  b.dataset.dispatchId = x.dispatchId;
+  const dot = workerDot(x.uiState);
+  const settled = x.uiState === "succeeded" || x.uiState === "failed" || x.uiState === "stopped" || x.uiState === "abandoned";
+  //  부제 = 상태 + (질문이면 질문 첫 줄 / 일하는 중이면 워커가 보고한 단계)
+  const tail = x.question ? String(x.question.text || "").split("\n")[0] : (!settled && x.phase ? x.phase : "");
+  b.innerHTML =
+    `<span class="wsg-line"><span class="wsg-ic">${agentMarkHtml(x.agent, { size: 14 }) || icons.terminal({ size: 14 })}</span>` +
+    `<span class="wsg-title">${escapeHtml(x.title || ot("worker"))}</span></span>` +
+    `<span class="wsg-sub"><span class="tv-dot${dot === "none" ? "" : " " + dot}"></span><span class="wsg-subtx">${escapeHtml(ot(workerTextKey(x.uiState)) + (tail ? " · " + tail : ""))}</span></span>`;
+  b.addEventListener("click", () => {
+    // 답이 필요한 워커는 시트(답하는 자리)로, 나머지는 그 터미널로.
+    if (x.question || x.tid == null || x.terminal === "released") { openOrchSheet({ host, runId: run.id }); return; }
+    void openWorkerTerminal(host, x, x.placement === "worktree" ? null : w.id);
+  });
+  return b;
+}
+/** 그 워크스페이스에서 지금 포커스된 터미널 번호(없으면 null) — 워커 행의 "여기 있음" 표시. */
+function focusedTid(wsId) {
+  const rt = S.wsRuntime(wsId);
+  if (!rt || !rt.layout || !rt.focusId) return null;
+  let tid = null;
+  T.eachLeaf(rt.layout, (l) => {
+    if (l.id !== rt.focusId || l.kind !== "terminal") return;
+    const t = (l.tabs || [])[l.active];
+    if (t && typeof t.win === "number") tid = t.win;
+  });
+  return tid;
+}
+
 /** 그룹 = 머리(.ws-row.wsg-head — 예전 워크스페이스 행 DOM) + 펼침이면 자식들. */
 function wsGroup(w, g) {
   const local = isLocal(w);
@@ -765,7 +863,14 @@ function wsGroup(w, g) {
     const kids = document.createElement("div");
     kids.className = "wsg-children";
     kids.appendChild(localRow(w));
+    const ohost = Number(S.activeDeviceId());
+    for (const run of orchRuns(ohost, w)) {
+      kids.appendChild(orchRunRow(w, run));
+      if (!orchFolded.has(run.id)) for (const x of visibleWorkers(run)) kids.appendChild(orchWorkerRow(w, run, x));
+    }
+    const owned = orchTaskIds(ohost, w);
     for (const t of (g && g.tasks) || []) {
+      if (owned.has(t.taskId)) continue;   // 묶음의 워커로 이미 위에 있다
       kids.appendChild(taskRow(w, t));
       if (t.runs.length && fanExpanded.has(t.taskId)) for (const r of t.runs) kids.appendChild(agentRow(w, t, r));
     }
@@ -794,6 +899,9 @@ function wsHead(w, g, folded) {
   // 색 = 이름 앞 6px 점(.wsr-color). 옛 3px 안쪽 띠(box-shadow)는 선택 테두리와 겹쳐 폐기(디자인 리프레시 2026-09-30).
 
   const openN = g ? g.openCount : 0;
+  const ohost = Number(S.activeDeviceId());
+  const oWorkers = orchRuns(ohost, w).reduce((n, r) => n + visibleWorkers(r).filter((x) => x.terminal !== "released").length, 0);
+  const oAttn = orchAttention(ohost, w);
   const name = document.createElement("div");
   name.className = "wsr-name";
   name.innerHTML =
@@ -801,7 +909,8 @@ function wsHead(w, g, folded) {
     (pinned ? `<span class="wsr-pin" title="${i18n.t('고정됨')}">${icons.pin({ size: 12 })}</span>` : "") +
     `<span class="wsr-nm">${escapeHtml(S.wsDisplayName(w))}</span>` +
     (unread ? `<span class="wsr-badge">${unread}</span>` : "") +
-    (folded && openN ? `<span class="wsg-cnt${g.needsInput ? " warn" : ""}" title="${escapeHtml(tt("openTasksN", { n: openN }))}">${icons.gitBranch({ size: 11 })}${openN}</span>` : "");
+    (folded && openN ? `<span class="wsg-cnt${g.needsInput ? " warn" : ""}" title="${escapeHtml(tt("openTasksN", { n: openN }))}">${icons.gitBranch({ size: 11 })}${openN}</span>` : "") +
+    (folded && oWorkers ? `<span class="wsg-cnt${oAttn ? " warn" : ""}" title="${escapeHtml(ot("workersN", { n: oWorkers }))}">${icons.orch({ size: 11 })}${oWorkers}</span>` : "");
   // `⋯` — 워크스페이스 메뉴(우클릭과 같은 것). 옛 `+ 작업` 버튼을 대신한다(2026-10-05 사용자 확정):
   //  새 작업은 그 메뉴의 첫 항목이다. 호버 때만 보이되 **행 높이를 바꾸지 않는다**(styles.css .wsg-more).
   const more = document.createElement("button");
@@ -844,6 +953,17 @@ function wsHead(w, g, folded) {
     path.className = "wsr-path";
     path.textContent = "~/" + w.localPath;
     row.appendChild(path);
+  }
+  // 한 줄 메모(`cpt ws set --comment … --status …`) — 에이전트가 "지금 어디까지 왔는지" 남긴 것. 단계는 앞에 작은 꼬리표로.
+  const note = (() => { const snap = orchSnapshot(ohost); return snap ? noteFor(snap, w.localPath || "") : null; })();
+  if (note && !wsMissing(w)) {
+    const n = document.createElement("div");
+    n.className = "wsr-note";
+    const stx = wsStatusText(note.status);
+    n.innerHTML = (stx ? `<span class="wsr-note-st" data-st="${escapeHtml(note.status)}">${escapeHtml(stx)}</span>` : "") +
+      (note.comment ? `<span class="wsr-note-tx">${escapeHtml(note.comment)}</span>` : "");
+    n.title = note.comment || stx;
+    row.appendChild(n);
   }
   const ports = (rt?.ports || []).slice(0, 3);
   if (ports.length) {

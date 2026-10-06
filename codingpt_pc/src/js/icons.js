@@ -38,6 +38,8 @@ export const icons = {
   pause: (o) => svg('<circle cx="12" cy="12" r="9"/><line x1="10" y1="9" x2="10" y2="15"/><line x1="14" y1="9" x2="14" y2="15"/>', o),
   // git 브랜치(Feather git-branch) — 사이드바 작업 행·접힘 칩(agent-tasks-sidebar.md §3.1).
   gitBranch: (o) => svg('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>', o),
+  // 오케스트레이션 — 한 점(코디네이터)에서 세 점(워커)으로 갈라지는 모양. 사이드바 묶음 행·접힌 머리 칩.
+  orch: (o) => svg('<circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="5" r="2.2"/><circle cx="19" cy="12" r="2.2"/><circle cx="19" cy="19" r="2.2"/><path d="M7.2 12h9.6"/><path d="M7 11c3-1 5-5 9.9-5.6"/><path d="M7 13c3 1 5 5 9.9 5.6"/>', o),
   // 자동화(Feather repeat) — 사이드바 `자동화` 행·트리거 카드(automation-design §5.9).
   repeat: (o) => svg('<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>', o),
   // 한 줄 지시(Feather zap — 앱 헤더와 같은 번개 글리프) — 진행 현황 헤더 아이콘 동작(§3).
