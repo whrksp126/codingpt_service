@@ -679,7 +679,7 @@ test('control.dispatchRpc — auto.* 위임(via relay)·서버 킬스위치 AUTO
 });
 
 // ── cpt CLI ──────────────────────────────────────────────────────────────────
-test('cpt auto create - (stdin) 왕복·--dry-run·schema = GUIDE 7-3 절·에러 코드 표시(가짜 소켓)', async () => {
+test('cpt auto create - (stdin) 왕복·--dry-run·schema = 안내서(auto) 7-3 절·에러 코드 표시(가짜 소켓)', async () => {
   const net = require('net');
   const seen = [];
   let reply = null;
@@ -746,15 +746,14 @@ test('cpt auto create - (stdin) 왕복·--dry-run·schema = GUIDE 7-3 절·에�
     const c5 = await run(['auto', 'log', 'a_k3j9x2m1qa', '--limit', '5']);
     assert.match(c5.stdout, /a_k3j9x2m1qa end fail TASK_LIMIT/);
     assert.deepStrictEqual(seen[seen.length - 1].args, { id: 'a_k3j9x2m1qa', limit: 5 });
-    // schema = GUIDE.md 7-3 절 그대로(소켓 불필요)
+    // schema = guides/auto.md 의 7-3 절 그대로(소켓 불필요)
     const n1 = seen.length;
     const sc = await run(['auto', 'schema']);
     assert.strictEqual(sc.code, 0);
-    const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'GUIDE.md'), 'utf8');
+    const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'auto.md'), 'utf8');
     const i = guide.indexOf('## 7-3. 자동화');
-    const j = guide.indexOf('\n## ', i + 1);
-    assert.ok(i > 0 && j > i);
-    assert.strictEqual(sc.stdout, guide.slice(i, j + 1));
+    assert.ok(i > 0);
+    assert.strictEqual(sc.stdout, guide.slice(i));   // 그 주제 파일의 본문 전부(머리말 빼고)
     assert.match(sc.stdout, /예시 1[\s\S]*예시 2[\s\S]*예시 3/);
     assert.match(sc.stdout, /AUTO_LOOP/);
     assert.strictEqual(seen.length, n1);
@@ -771,9 +770,14 @@ test('cpt auto create - (stdin) 왕복·--dry-run·schema = GUIDE 7-3 절·에�
 test('SKILL.md — 자동화 트리거 구문 + 자기-스코핑 문장 유지', () => {
   const md = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'SKILL.md'), 'utf8');
   const desc = /^---\n([\s\S]*?)\n---/.exec(md)[1];
-  for (const w of ['"매일"', '"자동으로"', '"반복해서"', '"…할 때마다"', '"알림 설정"', '"automate"', '"every day"', '"whenever"', 'cpt auto create']) {
+  //  설명은 **할 일 → 기능 표**다(2026-10-07): 스킬 목록에는 앞 ~1000자만 보이므로 기능마다 한 줄씩만 둔다.
+  //  자세한 트리거 구문은 세션 시작 때 들어가는 인덱스(guides/index.md)와 주제별 안내서가 맡는다.
+  for (const w of ['"매일"', 'cpt auto', 'cpt browser', 'Claude in Chrome', 'cpt orch', 'cpt preview', 'cpt skills get index']) {
     assert.ok(desc.includes(w), `description 에 ${w}`);
   }
+  assert.ok(desc.length <= 1024, 'description 은 스킬 목록에 다 보여야 한다(~1000자): ' + desc.length);
+  const idx = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'index.md'), 'utf8');
+  for (const w of ['every day', 'whenever', '`auto`', '`browser`', 'Claude in Chrome', '`orch`']) assert.ok(idx.includes(w), `인덱스에 ${w}`);
   assert.match(desc, /does NOT make this a CodingPT terminal/);
   assert.match(desc, /ONLY for terminals launched by the CodingPT app/);
 });

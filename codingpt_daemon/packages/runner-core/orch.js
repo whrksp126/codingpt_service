@@ -456,7 +456,9 @@ function buildPreamble({ task, dispatch, run, placement, canDispatch }) {
   } else {
     lines.push('', '작업 폴더는 코디네이터·다른 워커와 **같은 폴더**입니다. 맡은 범위의 파일만 고치세요. git 커밋·스태시·체크아웃·리셋은 하지 마세요(코디네이터가 합니다).');
   }
-  if (canDispatch) lines.push('', '이 일을 더 쪼개야 하면 직접 하위 워커를 띄울 수 있습니다: `cpt skills get cpt-orch` 참고.');
+  //  워커도 CodingPT 기능을 먼저 쓴다 — 특히 웹 확인. 외부 브라우저 확장은 창을 띄우는 승인에서 멈추는데 워커에게는 승인해 줄 사람이 없다(실사고 2026-10-07).
+  lines.push('', '웹 페이지를 열거나 확인·조작해야 하면 CodingPT 브라우저를 쓰세요(`cpt preview open <url>` → `cpt browser snapshot|click|screenshot`, 안내: `cpt skills get browser`). Claude in Chrome 같은 외부 브라우저 도구는 쓰지 마세요 — 승인 창에서 멈춥니다. 그 밖의 CodingPT 기능은 `cpt skills get index`.');
+  if (canDispatch) lines.push('', '이 일을 더 쪼개야 하면 직접 하위 워커를 띄울 수 있습니다: `cpt skills get orch` 참고.');
   if (run && run.objective) lines.push('', `전체 목표(참고): ${String(run.objective).slice(0, 400)}`);
   lines.push('', '=== 맡은 일 ===', '', task.spec);
   return lines.join('\n');

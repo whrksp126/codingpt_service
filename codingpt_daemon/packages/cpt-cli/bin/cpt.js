@@ -302,7 +302,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   issue close <id|#번호> · issue delete <id|#번호>(자체 이슈만)
   issue start <id|#번호> [--mode task|terminal|orch] [--agent …]   그 이슈로 에이전트를 시작(task = 전용 브랜치)
 
-  # 오케스트레이션 — 다른 에이전트에게 일을 나눠 맡기고 결과를 받는다 (전체: cpt skills get cpt-orch)
+  # 오케스트레이션 — 다른 에이전트에게 일을 나눠 맡기고 결과를 받는다 (전체: cpt skills get orch)
   orch status                           내 역할(코디네이터/워커)·상한
   orch run-create --objective "<목표>"  묶음 만들기(내 터미널이 코디네이터가 된다)
   orch worker-start --spec "<일>" [--title "<짧은 제목>"] [--agent claude|codex|gemini] [--worktree current|new] [--model <id>] [--effort <e>]
@@ -438,8 +438,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   task commit <taskId> --message "…" | task merge <taskId> [--message "…"] | task discard <taskId> [--force]
 
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
-  skills get cpt-cli                    버전 일치 전체 가이드 출력(태스크 중심)
-  skills get cpt-orch                   오케스트레이션 가이드(워커 띄우기·수신함·질문/답·정리)
+  skills get index                      무엇을 할 수 있는가 — 할 일 → 주제 표(먼저 읽는다)
+  skills list                           주제 목록(preview·browser·ide·emulator·desktop·orch·tasks·issue·auto·workspace·terminal·layout·basics)
+  skills get <주제>                      그 기능의 안내서(버전 일치) · skills get all = 전부
 
 옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
       --sid <표면id> (특정 프리뷰/IDE 대상 지정)
@@ -1000,7 +1001,7 @@ async function main() {
       }
       case 'skills': {
         if (c2 === 'get') return printSkillGuide(rest[0]);
-        if (c2 === 'list' || c2 == null) { process.stdout.write('cpt-cli\ncpt-orch\n'); return; }
+        if (c2 === 'list' || c2 == null) { printSkillList(); return; }
         break;
       }
 
@@ -1123,6 +1124,12 @@ async function main() {
       }
 
       // ── 훅(claude/codex 래퍼가 호출 — 사람이 직접 쓸 일 없음) ──
+      // ── 세션 시작 컨텍스트 — SessionStart 훅(동기)이 부른다. stdout = 에이전트 컨텍스트에 들어갈 글(인덱스). ──
+      //  불변식: 실패해도 조용히 성공(exit 0) · CodingPT 터미널이 아니면 무출력 · 데몬을 부르지 않는다.
+      case 'session-context': {
+        try { process.stdout.write(sessionContextText(process.env)); } catch (_) { /* 훅은 조용히 성공 */ }
+        return;
+      }
       case 'claude-hook': {
         // 이벤트 7종(session-start|prompt|permission|notification|stop|stop-failure|session-end)을
         //  hook.event v2 스키마로 매핑해 데몬에 자기보고한다. 데몬이 상태의 단일 소유자다.
@@ -1176,7 +1183,7 @@ async function main() {
   } catch (e) {
     // 훅 경로는 어떤 오류에도 exit 0 + 무출력 — 훅이 0 아닌 코드로 끝나거나 stderr 를 뱉으면 claude 가
     //  사용자에게 훅 실패를 표시하고(2 는 모델을 깨우기까지 한다) 작업 흐름을 오염시킨다.
-    if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook') return;
+    if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook' || c1 === 'session-context') return;
     process.stderr.write(`오류: ${e.message}\n`);
     process.exitCode = 1;
   }
@@ -1189,7 +1196,7 @@ const AUTO_USAGE = '사용법: cpt auto list | get <id> | create --file <spec.js
 // 가이드의 자동화 절(`## 7-3. 자동화`) — `cpt auto schema` 는 이 절을 **그대로** 출력한다(단일 출처).
 function autoSchemaText() {
   let md = '';
-  try { md = fs.readFileSync(path.join(__dirname, '..', 'GUIDE.md'), 'utf8'); } catch (_) { return null; }
+  try { md = fs.readFileSync(path.join(__dirname, '..', 'guides', 'auto.md'), 'utf8'); } catch (_) { return null; }
   const i = md.indexOf('## 7-3. 자동화');
   if (i < 0) return null;
   const j = md.indexOf('\n## ', i + 1);
@@ -1327,7 +1334,7 @@ async function autoCommand(sub, rest, flags) {
       }
       case 'schema': {
         const txt = autoSchemaText();
-        if (txt == null) { process.stderr.write('가이드 파일(GUIDE.md)에서 자동화 절을 찾을 수 없습니다.\n'); process.exitCode = 1; return; }
+        if (txt == null) { process.stderr.write('안내서(guides/auto.md)에서 자동화 절을 찾을 수 없습니다.\n'); process.exitCode = 1; return; }
         process.stdout.write(txt);
         return;
       }
@@ -1440,7 +1447,7 @@ function readStdinJson({ waitMs = 300 } = {}) {
 }
 function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; } }
 
-// 스킬 전체 가이드 — cpt-cli 패키지에 동봉된 GUIDE.md 를 그대로 출력(바이너리 버전과 항상 일치).
+// 안내서 — cpt-cli 패키지에 동봉된 guides/<주제>.md 를 그대로 출력(바이너리 버전과 항상 일치).
 //  소켓 불필요(순수 파일 읽기) — 데몬이 죽어 있어도 동작해 에이전트가 명령을 학습할 수 있다.
 // ── 오케스트레이션(cpt orch …) ───────────────────────────────────────────────
 //  명령 → RPC 는 얇은 변환이다. 판정(누가 워커이고 누가 코디네이터인가·상한·생존)은 전부 데몬(orch.js)이 한다.
@@ -1638,20 +1645,55 @@ async function issueCommand(sub, rest, flags) {
   }
 }
 
+// ── 안내서(기능별 파일) ─────────────────────────────────────────────────────────
+//  한 파일에 다 넣지 않는다(2026-10-07): 인덱스(`index` — 할 일 → 주제 표)만 늘 보이게 하고, 에이전트는 쓸 기능의
+//  안내서만 골라 읽는다. 파일 = `cpt-cli/guides/<주제>.md`. 인덱스는 CodingPT 터미널의 세션 시작 때 자동으로도 들어간다(session-context).
+const GUIDE_TOPICS = [
+  ['index', '무엇을 할 수 있는가 — 할 일 → 주제 표(먼저 읽는다)'],
+  ['basics', '기본 규칙 · 내 좌표 · 사용자가 보고 있는 기기'],
+  ['preview', '웹 페이지·개발 서버를 사용자에게 보여주기'],
+  ['browser', '웹 페이지 확인·클릭·입력·콘솔·네트워크·스크린샷(외부 브라우저 도구 대신)'],
+  ['ide', '파일·줄·diff 보여주기, 변경 리뷰 받기'],
+  ['emulator', '모바일 앱 확인·조작(Android 에뮬레이터 · iOS 시뮬레이터)'],
+  ['desktop', '네이티브 앱·창·시스템 설정(에이전트 PC), 로그인/2FA 넘기기'],
+  ['orch', '여러 에이전트에게 나눠 맡기고 결과 받기(오케스트레이션)'],
+  ['tasks', '일 하나를 다른 에이전트에게 전용 브랜치로 넘기기'],
+  ['issue', '할 일 적어 두기 · 이슈로 시작하기'],
+  ['auto', '반복·조건 작업(자동화)'],
+  ['workspace', '워크스페이스 관리 · 진행 상황 한 줄 · 알림'],
+  ['terminal', '다른 터미널 실행·읽기'],
+  ['layout', '화면 배치(pane 나누기·옮기기)'],
+];
+//  옛 이름(스텁·기억에 남아 있다) → 새 주제. `all` = 전부 이어 붙인 것.
+const GUIDE_ALIAS = { 'cpt-cli': 'index', 'cpt-orch': 'orch', guide: 'index' };
+const guidePath = (topic) => path.join(__dirname, '..', 'guides', topic + '.md');
+function readGuide(topic) { try { return fs.readFileSync(guidePath(topic), 'utf8'); } catch (_) { return null; } }
+function printSkillList() {
+  process.stdout.write(GUIDE_TOPICS.map(([n, d]) => `${n.padEnd(10)} ${d}`).join('\n') + '\n\n읽기: cpt skills get <주제>   (전부: cpt skills get all)\n');
+}
 function printSkillGuide(name) {
-  const FILES = { 'cpt-cli': 'GUIDE.md', 'cpt-orch': 'ORCH.md' };
-  const file = FILES[name || 'cpt-cli'];
-  if (!file) {
-    process.stderr.write(`알 수 없는 스킬: ${name} (사용 가능: ${Object.keys(FILES).join(', ')})\n`);
+  const raw = String(name || 'index');
+  const topic = GUIDE_ALIAS[raw] || raw;
+  if (topic === 'all') {
+    process.stdout.write(GUIDE_TOPICS.map(([n]) => readGuide(n) || '').filter(Boolean).join('\n\n---\n\n'));
+    return;
+  }
+  const text = GUIDE_TOPICS.some(([n]) => n === topic) ? readGuide(topic) : null;
+  if (text == null) {
+    process.stderr.write(`알 수 없는 주제: ${raw} (사용 가능: ${GUIDE_TOPICS.map(([n]) => n).join(', ')})\n`);
     process.exitCode = 2;
     return;
   }
-  try {
-    process.stdout.write(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'));
-  } catch (_) {
-    process.stderr.write('가이드 파일(GUIDE.md)을 찾을 수 없습니다.\n');
-    process.exitCode = 1;
-  }
+  process.stdout.write(text);
+}
+/**
+ * 세션 시작 때 에이전트에게 넣어 줄 글 — 인덱스 그대로. CodingPT 터미널(`CPT_WS`)이 아니면 아무것도 내지 않는다.
+ *  claude 의 SessionStart 훅 stdout 은 그 세션의 컨텍스트로 들어간다(실측) → "CodingPT 에 무엇이 있는지" 를 에이전트가 늘 안다.
+ *  순수 파일 읽기다(데몬·네트워크 없음) — 훅이 세션 시작을 붙들지 않는다.
+ */
+function sessionContextText(env) {
+  if (!env || !env.CPT_WS) return '';
+  return readGuide('index') || '';
 }
 
 // ── claude 훅 페이로드 → hook.event v2 매핑 ─────────────────────────────────

@@ -492,6 +492,6 @@ test('★ emulator show 가 CLI·라우팅·공개목록에 모두 있다', () =
   const cli = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js'), 'utf8');
   assert.ok(/c2 === 'show'/.test(cli) && /ui\.emulatorOpen/.test(cli), 'cpt emulator show');
   assert.ok(/c2 === 'hide'/.test(cli) && /ui\.emulatorClose/.test(cli), 'cpt emulator hide');
-  const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'GUIDE.md'), 'utf8');
+  const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'emulator.md'), 'utf8');
   assert.ok(/cpt emulator show/.test(guide), '에이전트 안내서에 적혀 있다(안 적으면 아무도 안 쓴다)');
 });

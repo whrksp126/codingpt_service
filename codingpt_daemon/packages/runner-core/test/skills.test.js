@@ -85,7 +85,7 @@ test('E. /orch 스텁 설치 — 자기-스코핑 + 인자 자리 + 내장 서�
   assert.match(md, /^---\nname: orch\n/);
   assert.match(md, /CPT_WS/);
   assert.match(md, /\$ARGUMENTS/);
-  assert.match(md, /cpt skills get cpt-orch/);
+  assert.match(md, /cpt skills get orch/);
   assert.match(md, /내장 서브에이전트/);
   assert.equal(fs.existsSync(path.join(ORCH_X, 'SKILL.md')), true, 'codex 사용자에게도 깐다');
   assert.equal(skills.hasExtraStub('codex', 'orch'), true);
@@ -119,4 +119,37 @@ test('G. 채팅 팔레트·입력 — codex 는 /orch 를 $orch 로 바꿔 보�
   assert.equal(commands.rewriteForAgent('codex', '/orchestra 연습'), '/orchestra 연습');
   assert.equal(commands.rewriteForAgent('codex', '설명: /orch 는'), '설명: /orch 는');
   assert.equal(commands.rewriteForAgent('claude', '/orch 로그인 점검'), '/orch 로그인 점검');
+});
+
+// ── 안내서 = 기능별 파일 + 인덱스(2026-10-07) ─────────────────────────────────────────
+//  한 파일에 다 넣으면 에이전트가 통째로 읽거나(낭비) 아예 안 읽는다. 인덱스만 늘 보이게 하고 쓸 기능만 골라 읽게 한다.
+test('H. 안내서 — 주제마다 파일, 인덱스가 전부 가리킨다, 옛 이름도 통한다', () => {
+  const { execFileSync } = require('child_process');
+  const CLI = path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js');
+  const GD = path.join(__dirname, '..', '..', 'cpt-cli', 'guides');
+  const run = (args, env = {}) => execFileSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, CPT_WS: '', ...env } });
+  const topics = run(['skills', 'list']).split('\n').map((l) => l.split(/\s+/)[0]).filter((x) => /^[a-z]+$/.test(x));
+  assert.deepEqual(topics.slice().sort(), fs.readdirSync(GD).map((f) => f.replace(/\.md$/, '')).sort(), '목록 = guides/ 의 파일들');
+  const index = fs.readFileSync(path.join(GD, 'index.md'), 'utf8');
+  for (const t of topics.filter((x) => x !== 'index')) {
+    assert.ok(index.includes('`' + t + '`'), `인덱스가 ${t} 를 가리킨다`);
+    const g = run(['skills', 'get', t]);
+    assert.ok(g.length > 200 && g.length < 30000, `${t} 안내서 크기: ${g.length}`);
+  }
+  assert.ok(index.length < 3000, '인덱스는 작아야 한다(세션마다 들어간다): ' + index.length);
+  assert.equal(run(['skills', 'get', 'cpt-cli']), index, '옛 이름 cpt-cli = 인덱스');
+  assert.equal(run(['skills', 'get', 'cpt-orch']), fs.readFileSync(path.join(GD, 'orch.md'), 'utf8'), '옛 이름 cpt-orch = orch');
+  assert.ok(run(['skills', 'get', 'all']).length > index.length * 5);
+  assert.match(fs.readFileSync(path.join(GD, 'browser.md'), 'utf8'), /Claude in Chrome/, '브라우저 안내서가 외부 브라우저 도구보다 먼저 쓰라고 말한다');
+});
+
+test('I. 세션 컨텍스트 — CodingPT 터미널에서만 인덱스를 낸다 · 훅에 걸려 있다', () => {
+  const { execFileSync } = require('child_process');
+  const CLI = path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js');
+  const run = (env) => execFileSync(process.execPath, [CLI, 'session-context'], { encoding: 'utf8', env: { ...process.env, ...env } });
+  const index = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'index.md'), 'utf8');
+  assert.equal(run({ CPT_WS: 'work/app' }), index);
+  assert.equal(run({ CPT_WS: '' }), '', 'CodingPT 터미널이 아니면 아무것도 내지 않는다(다른 도구의 claude 를 오염시키지 않는다)');
+  const shim = fs.readFileSync(path.join(__dirname, '..', 'shim.js'), 'utf8');
+  assert.match(shim, /SessionStart: \[\.\.\.hook\('session-start', 5\), \{ hooks: \[\{ type: 'command', command: `"\$\{cptAbs\}" session-context`, timeout: 5 \}\] \}\]/, 'SessionStart 에 동기 훅(무 async)으로 걸려 있다');
 });

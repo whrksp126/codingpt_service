@@ -156,7 +156,10 @@ exec "${process.execPath}" "${relayJs}"
   const hooks = {
     statusLine: { type: 'command', command: `"${statusRelay}"`, padding: 1 },
     hooks: {
-      SessionStart: hook('session-start', 5),
+      // 두 번째(동기) 훅 = 세션 컨텍스트 — stdout(안내서 인덱스)이 그 세션의 컨텍스트로 들어간다(실측 2026-10-07).
+      //  "CodingPT 에 무엇이 있는지" 를 에이전트가 늘 알게 하는 유일한 상시 통로다(스킬 설명은 앞 ~1000자만 보이고 그나마 골라 읽는다).
+      //  순수 파일 읽기라 빠르다. /clear·압축 뒤에도 다시 발화한다. 이 파일은 CodingPT 터미널의 claude 만 읽는다(--settings).
+      SessionStart: [...hook('session-start', 5), { hooks: [{ type: 'command', command: `"${cptAbs}" session-context`, timeout: 5 }] }],
       UserPromptSubmit: hook('prompt', 5),
       PermissionRequest: [{
         hooks: [{
@@ -529,7 +532,7 @@ function ensureShimsWin32() {
     //  구조 동일하게 심어 두고, 수정 릴리스에서 자동으로 살아난다(우리 쪽 무해).
     statusLine: { type: 'command', command: winHookCommand(`${statuslineCmd}`), padding: 1 },
     hooks: {
-      SessionStart: hook('session-start', 5),
+      SessionStart: [...hook('session-start', 5), { hooks: [{ type: 'command', command: winHookCommand(`${cptCmd} session-context`), timeout: 5 }] }],
       UserPromptSubmit: hook('prompt', 5),
       PermissionRequest: [{
         hooks: [{
