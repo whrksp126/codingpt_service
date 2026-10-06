@@ -4,7 +4,7 @@ import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
-import { getPane } from "./pane.js";
+import { getPane, stripAgentGlyph } from "./pane.js";
 import { renderNotifPanel, jumpLatestUnread } from "./notifications.js";
 import { openNewWorkspace } from "./folder-picker.js";
 import lan from "./lan.js";
@@ -717,6 +717,7 @@ function focusKey(root) {
   const q = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/["\\]/g, "\\$&"));
   if (a.classList.contains("wsg-head") && a.dataset.wsId) return `.wsg-head[data-ws-id="${q(a.dataset.wsId)}"]`;
   if (a.classList.contains("wsg-local") && a.dataset.wsLocal) return `.wsg-local[data-ws-local="${q(a.dataset.wsLocal)}"]`;
+  if (a.classList.contains("wsg-wt") && a.dataset.wtKey) return `.wsg-wt[data-wt-key="${q(a.dataset.wtKey)}"]`;
   if (a.dataset.orchRun) return `.wsg-orch[data-orch-run="${q(a.dataset.orchRun)}"]`;
   if (a.dataset.dispatchId) return `.wsg-worker[data-dispatch-id="${q(a.dataset.dispatchId)}"]`;
   if (a.classList.contains("wsg-task") && a.dataset.taskId) return `.wsg-task[data-task-id="${q(a.dataset.taskId)}"]`;
@@ -793,8 +794,8 @@ function orchSig(host, w) {
   if (!snap) return null;
   const n = noteFor(snap, w.localPath || "");
   const rows = sessionTree(snap, w.localPath || "");
-  return [n ? [n.comment, n.status] : null, rows.length ? [focusedTid(w.id), focusedThread(w.id), Math.floor(Date.now() / 60000)] : null,
-    rows.map((r) => [r.key, r.glyph, r.agent, r.lead, r.trail, r.at, orchFolded.has(r.key), r.rollup ? [r.rollup.total, r.rollup.attention, r.rollup.gates] : null,
+  return [n ? [n.comment, n.status] : null, rows.length ? [state.activeWsId, Math.floor(Date.now() / 60000)] : null,
+    rows.map((r) => [r.key, r.glyph, r.agent, r.lead || tabTitleOf(w.id, r.tid), r.trail, r.at, orchFolded.has(r.key), r.rollup ? [r.rollup.total, r.rollup.attention, r.rollup.gates] : null,
       r.children.map((c) => [c.key, c.glyph, c.agent, c.lead, c.trail, c.model, c.at, c.tid, c.terminal, c.needsReply, c.placement, c.branch])])];
 }
 /** 그 워크스페이스에서 사람이 답해야 하는 것의 수(질문·결정·입력 대기). */
@@ -809,6 +810,25 @@ function orchTaskIds(host, w) {
   return ids;
 }
 const GLYPH_TEXT = { working: "wWorking", waiting: "wNeedsInput", blocked: "wBlocked", failed: "wFailed", interrupted: "wStopped", done: "wSucceeded", unverifiable: "wIdleNoReport" };
+/** 그 터미널 탭에 적힌 이름(열어 본 워크스페이스만 안다) — 에이전트 행과 탭이 같은 이름을 쓰게. */
+function tabTitleOf(wsId, tid) {
+  const rt = S.wsRuntime(wsId);
+  if (!rt || !rt.layout || tid == null) return "";
+  let name = "";
+  T.eachLeaf(rt.layout, (l) => { if (l.kind !== "terminal") return; for (const t of l.tabs || []) if (t && t.win === tid && !name) name = stripAgentGlyph(t.title) || ""; });
+  return name;
+}
+/** 그 작업 폴더(worktree)를 연 워크스페이스 ID(등록돼 있을 때) — 작업 폴더 줄의 "여기 있음" 표시와 클릭에 쓴다. */
+function wtWorkspaceId(host, g) {
+  const bucket = state.tasks.byHost[String(Number(host))];
+  for (const c of g.workers) {
+    const ref = c.worker && c.worker.taskRef;
+    const t = ref && ((bucket && bucket.items) || []).find((x) => x.id === ref.taskId);
+    const r = t && (t.runs || []).find((x) => x.id === ref.runId);
+    if (r && r.workspaceId) return r.workspaceId;
+  }
+  return null;
+}
 function agRowHtml({ glyph, glyphTitle, agent, lead, trail, model, at, extra }) {
   const ago = shortAgo(at, Date.now());
   return agentGlyphHtml(glyph, glyphTitle) +
@@ -824,9 +844,8 @@ function agentSessionRow(w, r) {
   const parent = r.children.length > 0 || r.runIds.length > 0;
   const kidsHere = r.children.filter((c) => !inWorktree(c));   // 다른 브랜치의 워커는 제 작업 폴더 줄 아래에 있다
   const open = !orchFolded.has(r.key);
-  const shown = w.id === state.activeWsId && state.view === "workspace";
-  const here = shown && (r.chat ? focusedThread(w.id) === r.threadId : (r.tid != null && focusedTid(w.id) === r.tid));
-  b.className = "wsg-child wsg-ag" + (parent ? " parent" : "") + (here ? " active" : "");
+  //  "여기 있음" 표시는 작업 폴더 줄(로컬 · 브랜치)에만 둔다 — 에이전트 행마다 따로 칠하면 어느 폴더를 보고 있는지 읽히지 않는다(2026-10-07 사용자 확정).
+  b.className = "wsg-child wsg-ag" + (parent ? " parent" : "");
   b.dataset.agSession = r.key;
   const ro = r.rollup;
   const trail = parent && ro
@@ -839,7 +858,7 @@ function agentSessionRow(w, r) {
       (kidsHere.length ? `<span class="ag-btn wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "")
     : "";
   b.innerHTML = agRowHtml({ glyph: r.glyph, glyphTitle: GLYPH_TEXT[r.glyph] ? ot(GLYPH_TEXT[r.glyph]) : "", agent: r.agent,
-    lead: r.lead || agentName(r.agent || "") || ot("coordinator"), trail, model: r.model || "", at: r.at, extra });
+    lead: r.lead || tabTitleOf(w.id, r.tid) || agentName(r.agent || "") || ot("coordinator"), trail, model: r.model || "", at: r.at, extra });
   b.addEventListener("click", (e) => {
     if (e.target.closest?.(".wsg-caret2")) { e.stopPropagation(); toggleOrch(r.key); return; }
     if (r.runIds.length && (e.target.closest?.(".ag-run") || r.tid == null)) { e.stopPropagation(); openOrchSheet({ host, runId: r.runIds[0] }); return; }
@@ -856,25 +875,12 @@ function openChatRow(w, r) {
   openWs(w);
   setTimeout(go, 120);   // 레이아웃이 선 뒤에 — 그 전에는 탭 후보가 없다
 }
-/** 그 워크스페이스에서 지금 보고 있는 채팅 대화(없으면 null) — 채팅 행의 "여기 있음" 표시. */
-function focusedThread(wsId) {
-  const rt = S.wsRuntime(wsId);
-  if (!rt || !rt.layout || !rt.focusId) return null;
-  let id = null;
-  T.eachLeaf(rt.layout, (l) => {
-    if (l.id !== rt.focusId) return;
-    if (l.kind === "chat") id = l.threadId || null;
-    else if (l.kind === "terminal") { const t = (l.tabs || [])[l.active]; if (t && t.kind === "chat") id = t.threadId || null; }
-  });
-  return id;
-}
 /** 워커 행(자식) — 클릭 = 그 터미널. 답이 필요하거나 터미널이 없으면 묶음 시트(답하는 자리). */
 function agentWorkerRow(w, c) {
   const host = Number(S.activeDeviceId());
   const b = document.createElement("button");
-  const here = c.tid != null && c.terminal !== "released" && c.placement !== "worktree" && w.id === state.activeWsId && state.view === "workspace" && focusedTid(w.id) === c.tid;
   //  작업 폴더(브랜치) 줄 아래의 워커는 그 폴더의 에이전트다 — 시킨 에이전트의 자식 표시(가지 선)를 달지 않는다.
-  b.className = "wsg-child wsg-ag" + (inWorktree(c) ? " in-wt" : " child") + (here ? " active" : "");
+  b.className = "wsg-child wsg-ag" + (inWorktree(c) ? " in-wt" : " child");
   b.dataset.dispatchId = c.dispatchId;
   b.innerHTML = agRowHtml({ glyph: c.glyph, glyphTitle: ot(c.textKey), agent: c.agent, lead: c.lead || ot("worker"), trail: c.trail, model: c.model, at: c.at });
   b.addEventListener("click", () => {
@@ -887,32 +893,22 @@ function agentWorkerRow(w, c) {
 function worktreeRow(w, g) {
   const host = Number(S.activeDeviceId());
   const b = document.createElement("button");
-  b.className = "wsg-child wsg-wt";
+  const wsId = wtWorkspaceId(host, g);
+  const active = wsId != null && wsId === state.activeWsId && state.view === "workspace";
+  b.className = "wsg-child wsg-wt" + (active ? " active" : "");
   b.dataset.wtKey = g.key;
   const first = g.workers[0];
   b.innerHTML = `<span class="wsg-ic">${icons.gitBranch({ size: 15 })}</span><span class="wsg-title">${escapeHtml(g.branch || first.lead || ot("worker"))}</span>`;
   b.title = g.branch || "";
   b.addEventListener("click", () => {
+    //  그 작업 폴더를 연다(오른쪽이 그 폴더의 터미널·파일로 바뀐다). 아직 워크스페이스로 안 잡혔으면 작업 상세로.
+    if (first.worker && first.worker.taskRef) { void openWorkerTerminal(host, first.worker, null); return; }
     if (g.taskId) { openTasksDashboard({ taskId: g.taskId, host }); return; }
-    if (first.tid != null && first.terminal !== "released") void openWorkerTerminal(host, first.worker, null);
-    else openOrchSheet({ host, runId: first.runId });
+    openOrchSheet({ host, runId: first.runId });
   });
   b.addEventListener("contextmenu", (e) => { e.preventDefault(); showWsMenu(e, w); });
   return b;
 }
-/** 그 워크스페이스에서 지금 포커스된 터미널 번호(없으면 null) — 워커 행의 "여기 있음" 표시. */
-function focusedTid(wsId) {
-  const rt = S.wsRuntime(wsId);
-  if (!rt || !rt.layout || !rt.focusId) return null;
-  let tid = null;
-  T.eachLeaf(rt.layout, (l) => {
-    if (l.id !== rt.focusId || l.kind !== "terminal") return;
-    const t = (l.tabs || [])[l.active];
-    if (t && typeof t.win === "number") tid = t.win;
-  });
-  return tid;
-}
-
 /** 그룹 = 머리(.ws-row.wsg-head — 예전 워크스페이스 행 DOM) + 펼침이면 자식들. */
 function wsGroup(w, g) {
   const local = isLocal(w);

@@ -19,7 +19,7 @@ import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
-import { orchTabRole } from "./orch-roles.js";
+import { orchTabRole, tabSession, GLYPH_TEXT } from "./orch-roles.js";
 import { attachTermLinks, splitPathLine } from "./term-links.js";
 import { opensInBrowserPane, homeRelOf } from "./conv-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
@@ -836,15 +836,15 @@ export class PaneView {
         ))
           // 채팅 탭 — 답을 기다리는 요청이 있다(본문을 한 번이라도 띄운 탭만 안다. 그 전에는 알림이 알린다).
           || (t.kind === "chat" && i !== this.node.active && !!this._mixed.get(t.tid)?.conv?.needsAttention());
-        // 오케스트레이션 역할 — 이 터미널이 묶음의 워커/코디네이터이면 탭에 작은 표식을 단다(색은 상태 신호에만).
-        //  워커 = 점(상태에 따라 명암·warn·error), 코디네이터 = 마름모. 무슨 일을 맡았는지는 툴팁이 말한다.
-        const orole = twin != null ? orchTabRole(this.ctx.hostDeviceId, tcwd, twin) : null;
-        const oroleHtml = orole
-          ? (orole.role === "worker"
-            ? `<span class="ptab-orch worker">${agentGlyphHtml(workerGlyph(orole.uiState), ot("roleWorkerTip", { name: orole.title || "" }))}</span>`
-            : `<span class="ptab-orch coordinator" title="${escapeHtml(ot("roleCoordinatorTip", { name: orole.title || "" }))}"></span>`)
+        // 에이전트 상태 표식 + 제목 — 사이드바 에이전트 행과 **같은 표식·같은 제목**을 쓴다(2026-10-07 사용자 요청).
+        //  워커·코디네이터는 맡은 일의 제목, 채팅은 대화 제목. 에이전트가 없는 터미널에는 아무것도 안 단다.
+        const sess = twin != null ? tabSession(this.ctx.hostDeviceId, tcwd, { win: twin })
+          : t.kind === "chat" && t.threadId ? tabSession(this.ctx.hostDeviceId, tcwd, { threadId: t.threadId }) : null;
+        const shown = (sess && sess.title) || label;
+        const oroleHtml = sess
+          ? `<span class="ptab-orch">${agentGlyphHtml(sess.glyph, sess.worker ? ot("roleWorkerTip", { name: sess.title || "" }) : (GLYPH_TEXT[sess.glyph] ? ot(GLYPH_TEXT[sess.glyph]) : ""))}</span>`
           : "";
-        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(label)}</span>${modeGlyph}${oroleHtml}`
+        tab.innerHTML = `<span class="ptab-ic">${iconHtml}</span><span class="ptab-title">${escapeHtml(shown)}</span>${modeGlyph}${oroleHtml}`
           + (waiting ? `<span class="ptab-wait" title="${i18n.t('응답을 기다리는 중')}"></span>` : "");
         const x = document.createElement("span");
         x.className = "ptab-x";

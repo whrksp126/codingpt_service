@@ -58,7 +58,7 @@ function refreshTabHeads() {
   const rt = state.activeWsId ? S.wsRuntime(state.activeWsId) : null;
   if (!rt || !rt.layout) return;
   import("./pane.js").then((m) => {
-    T.eachLeaf(rt.layout, (l) => { if (l.kind === "terminal") m.getPane(l.id)?.buildHead(); });
+    T.eachLeaf(rt.layout, (l) => { if (l.kind === "terminal" || l.kind === "chat") m.getPane(l.id)?.buildHead?.(); });
   }).catch(() => {});
 }
 export async function refreshOrchAll() {

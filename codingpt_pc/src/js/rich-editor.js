@@ -143,7 +143,7 @@ export function createRichEditor(o) {
   //  빈 글 안내문은 두지 않는다(2026-10-07 사용자 확정 — 빈 화면도 글이 있을 때와 같은 배치로 둔다).
   //  ⚠ 편집기 뿌리에 `empty` 같은 흔한 이름을 붙이지 말 것 — 공용 빈 상태 규칙(.empty: 가운데 정렬·큰 여백)이 걸려 배치가 무너졌다.
   const syncEmpty = () => {};
-  // ── 실행 취소 ── 웹뷰 기본은 쉬지 않고 친 글 전체를 한 번에 되돌린다 → 기록을 직접 쥔다(undo-history.js).
+  // ── 실행 취소 ── 앱 메뉴에 Undo 가 없어 기록을 직접 쥔다. 묶는 기준은 macOS 기본과 같다(undo-history.js).
   //  상태 = 본문 HTML + 커서 자리(뿌리에서 내려가는 자식 번호 길). 같은 HTML 을 되살리므로 길이 그대로 맞는다.
   const pathOf = (node) => { const p = []; let n = node; while (n && n !== doc) { const par = n.parentNode; if (!par) return null; p.unshift(Array.prototype.indexOf.call(par.childNodes, n)); n = par; } return n === doc ? p : null; };
   const nodeAt = (p) => { let n = doc; for (const i of p) { n = n.childNodes[i]; if (!n) return null; } return n; };
@@ -175,7 +175,7 @@ export function createRichEditor(o) {
   const record = (o) => { const st = snap(); if (st.html === lastHtml) return; lastHtml = st.html; history.record(st, o); };
   // ── 한글(조합 입력) ── 조합 중에는 적지 않고, 음절이 확정될 때 "글자 입력" 한 번으로 적는다.
   //  웹뷰는 음절마다 `조합 글자 지우기 → 확정 글자 넣기` 를 따로 알린다 — 그대로 적으면 음절마다 지우기 단계가 끼어
-  //  ⌘Z 가 글자가 사라진 중간 모습으로 돌아간다. 낱말 경계(띄어쓰기·줄바꿈)는 영문과 똑같이 그다음 입력이 끊는다.
+  //  ⌘Z 가 글자가 사라진 중간 모습으로 돌아간다.
   let composing = false;
   doc.addEventListener("compositionstart", () => { composing = true; });
   doc.addEventListener("compositionend", () => { composing = false; setTimeout(() => { if (!composing) record({ kind: "type", boundary: false }); }, 0); });

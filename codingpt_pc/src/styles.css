@@ -537,28 +537,23 @@ input[type="checkbox"].tgl:disabled { opacity: 0.34; cursor: default; }
 .wsg-fan:hover, .wsg-caret2:hover { color: var(--text2); }
 .wsg-sub { padding-left: 23px; font-size: 11px; line-height: 15px; color: var(--dim); display: flex; align-items: center; gap: 6px; min-width: 0; }
 .wsg-subtx { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.wsg-agent { padding-left: 42px; }
+.wsg-agent { padding-left: 34px; }
+/* 작업 폴더 줄(로컬 · 브랜치 · 작업) — 워크스페이스 머리 바로 아래 층이다. 접었다 펴는 묶음이라 깊이 들일 이유가 없다(2026-10-07 사용자 확정). */
+.wsg-local, .wsg-wt, .wsg-task { padding-left: 12px; }
 /* 에이전트 행(Orca 방식) — 한 줄: [상태 표식][로고] 이름 - 지금 하는 말 · 모델 · 경과 시간.
    일을 시킨 에이전트 = 부모(왼쪽 2px 띠 + 옅은 면), 워커 = 자식(들여쓰기 + 가지 표시). 색은 상태 표식에만. */
-.wsg-ag { min-height: 24px; gap: 5px; padding: 0 8px 0 28px; font-size: 11.5px; line-height: 1; color: var(--text3); }
+.wsg-ag { position: relative; min-height: 24px; gap: 5px; padding: 0 8px 0 34px; font-size: 11.5px; line-height: 1; color: var(--text3); }
 .wsg-ag .wsg-ic { color: var(--text3); }
-.wsg-ag.parent {
-  background: color-mix(in srgb, var(--text) 4%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text) 38%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--text) 9%, transparent);
-}
-.wsg-ag.parent:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
-/* 작업 폴더(브랜치) 줄 — `로컬 · main` 과 같은 층·같은 모양(아이콘만 가지). 그 아래 에이전트 행은 로컬 아래와 같은 들여쓰기다. */
+/* 에이전트 행은 제 작업 폴더 줄의 **아래**다 — 들여쓰기 + 폴더 아이콘에서 내려오는 가는 세로선으로 묶는다. */
+.wsg-ag::after { content: ""; position: absolute; left: 19px; top: -2px; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--text) 13%, transparent); pointer-events: none; }
+/* 작업 폴더(브랜치) 줄 — `로컬 · main` 과 같은 층·같은 모양(아이콘만 가지). */
 .wsg-wt .wsg-title { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
-.wsg-ag.child { position: relative; padding-left: 42px; }
-.wsg-ag.child::before { content: ""; position: absolute; left: 33px; top: 50%; width: 6px; border-top: 1px solid color-mix(in srgb, var(--text) 22%, transparent); }
-/* 선택 = 면 하나만(Orca: 보고 있는 에이전트 행에만 채움, 테두리 없음). 에이전트 행이 선택되면 위 로컬 행은 선택 표시를 내려놓는다 —
-   둘이 같이 테두리를 두르면 어느 것을 보고 있는지 읽히지 않는다(2026-10-06 사용자 지적). */
-.wsg-ag.active { background: var(--pressed); box-shadow: none; font-weight: 400; }
-.wsg-ag.parent.active { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text) 55%, transparent); }
-.wsg-children:has(.wsg-ag.active) > .wsg-local.active { background: transparent; box-shadow: none; color: var(--text2); font-weight: 400; }
+.wsg-ag.child { padding-left: 48px; }
+.wsg-ag.child::before { content: ""; position: absolute; left: 39px; top: 50%; width: 6px; border-top: 1px solid color-mix(in srgb, var(--text) 22%, transparent); }
+/* 선택 표시는 작업 폴더 줄에만 둔다(.wsg-child.active). 에이전트 행은 칠하지 않는다 — 일을 시킨 에이전트 행에 두르던 띠·면도
+   "선택됨" 으로 읽혀서 뺐다(2026-10-07 사용자 지적). */
 .ag-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
 .ag-lead { color: var(--text2); }
-.wsg-ag.active .ag-lead { color: var(--text); }
 .ag-trail { color: var(--dim); }
 .ag-model { flex: none; max-width: 84px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; color: var(--dim); }
 .ag-time, .ag-more { flex: none; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--dim); }
@@ -1687,7 +1682,7 @@ select.sett-select { min-width: 160px; max-width: 240px; height: 32px; padding-l
    상태 신호라 유일하게 색을 쓴다(포인트 컬러 제거 라운드의 예외). */
 /* 탭의 오케스트레이션 표식 — 워커 = 점, 코디네이터 = 마름모. 기본은 무채색 테두리, 색은 상태 신호(warn·error)에만. */
 .ptab-orch { display: inline-flex; flex: none; align-items: center; margin-left: 5px; }
-.ptab-orch.coordinator { width: 6px; height: 6px; border-radius: 1px; transform: rotate(45deg); box-shadow: inset 0 0 0 1px var(--text3); }
+
 .ptab-wait { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); margin-left: 4px; }
 
 /* ── Chat 본문 ── */

@@ -1,11 +1,12 @@
 // 실행 취소 기록 — 입력칸·편집기가 함께 쓰는 한 벌.
-//  웹뷰의 기본 실행 취소(execCommand("undo"))는 **쉬지 않고 친 글 전체를 한 덩어리**로 되돌린다 — 방금 친 낱말만
-//  지우려다 본문이 통째로 사라졌다(2026-10-07 실사용). 그래서 기록을 직접 쥔다: 낱말(띄어쓰기·줄바꿈)·잠깐 쉼·
-//  커서 이동·다른 종류의 편집마다 한 단계를 끊는다.
+//  앱 메뉴에 Undo/Redo 가 없어 웹뷰가 ⌘Z 를 대신 해 주지 않는다 → 기록을 직접 쥔다.
+//  ★ 묶는 기준 = **macOS 기본(NSTextView) 그대로**(2026-10-07 실측 + 사용자 확정 "네이티브와 동일하게"):
+//    이어서 친 글·지운 글은 전부 한 단계다(낱말·줄바꿈·쉼으로 끊지 않는다. 한글도 같다).
+//    단계가 끊기는 때는 커서를 옮겼을 때 · 붙여넣기/잘라내기 · 서식 같은 다른 편집뿐이다.
 //  순수 로직(createHistory)은 DOM 을 모른다 — 상태는 부르는 쪽이 정한 값 그대로 보관만 한다.
 
-/** 같은 종류 입력이 이 시간 안에 이어지면 한 단계로 묶는다. */
-export const GROUP_MS = 1000;
+/** 같은 종류 입력이 이 시간 안에 이어지면 한 단계로 묶는다 — macOS 기본은 시간으로 끊지 않는다. */
+export const GROUP_MS = Infinity;
 const MAX_STEPS = 300;
 
 /**
@@ -46,15 +47,13 @@ export function createHistory(initial) {
   };
 }
 
-/** input 이벤트 → { kind, boundary }. 글자 입력끼리·지우기끼리만 묶이고, 나머지(붙여넣기·서식)는 늘 제 단계다. */
+/** input 이벤트 → { kind, boundary }. 치기와 지우기는 한 덩어리("type")로 이어지고, 나머지(붙여넣기·잘라내기·서식)는 늘 제 단계다. */
 export function classifyInput(e) {
   const type = (e && e.inputType) || "";
-  const data = (e && e.data) || "";
   //  조합 입력(한글·일본어…) — 조합이 끝날 때 한 번만 적는다(받는 쪽이 composition 을 보고 건너뛴다).
   if (type === "insertCompositionText" || type === "insertFromComposition" || type === "deleteCompositionText") return { kind: "type", boundary: false, composition: true };
-  if (type === "insertText") return { kind: "type", boundary: /\s$/.test(data) };
-  if (type === "insertParagraph" || type === "insertLineBreak") return { kind: "type", boundary: true };
-  if (type.startsWith("delete") && type !== "deleteByCut" && type !== "deleteByDrag") return { kind: "del", boundary: false };
+  if (type === "insertText" || type === "insertParagraph" || type === "insertLineBreak") return { kind: "type", boundary: false };
+  if (type.startsWith("delete") && type !== "deleteByCut" && type !== "deleteByDrag") return { kind: "type", boundary: false };
   return { kind: "", boundary: true };
 }
 
