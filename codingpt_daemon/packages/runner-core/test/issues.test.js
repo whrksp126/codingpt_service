@@ -142,3 +142,55 @@ test('첨부 — 파일을 이 PC 에 복사하고, 시작할 때 본문의 자�
   await M.issueDelete({ id: x.id });
   assert.equal(fs.existsSync(r1.attachment.path), false, '이슈를 지우면 첨부도 지운다');
 });
+
+test('자동 저장 초안 — draft 일 때만 제목 없이 만들고, 자체 이슈는 제목을 비울 수 있다', async () => {
+  const d = (await M.issueCreate({ draft: true, title: '', body: '본문부터 적는다' })).issue;
+  assert.equal(d.title, ''); assert.equal(d.body, '본문부터 적는다');
+  const e = (await M.issueCreate({ draft: true })).issue;   // 첨부를 먼저 붙이는 빈 초안
+  assert.equal(e.title, '');
+  await assert.rejects(M.issueCreate({ draft: true, title: '', provider: 'github', cwd: 'work/app' }), { code: 'BAD_PARAMS' });
+  const u = (await M.issueUpdate({ id: d.id, title: '이제 제목' })).issue;
+  assert.equal(u.title, '이제 제목');
+  assert.equal((await M.issueUpdate({ id: d.id, title: '' })).issue.title, '');
+  await M.issueDelete({ id: d.id }); await M.issueDelete({ id: e.id });
+});
+
+test('완료로 바뀐 순간을 한 번 알린다(onDone) — 손으로 완료 · 작업 머지 · 외부 이슈 닫기. 이미 완료면 다시 알리지 않는다', async () => {
+  const done = [];
+  issues.configure({ onDone: (e) => done.push(e) });
+  try {
+    const a = (await M.issueCreate({ title: '터미널로 시작', cwd: 'work/app' })).issue;
+    await M.issueStart({ id: a.id, mode: 'terminal' });
+    assert.equal(launched[launched.length - 1].issueId, a.id, '터미널 이름을 붙이는 쪽에 어느 이슈인지 넘긴다');
+    assert.equal(issues._internals.linkedTo('work/app', 55), a.id);
+    assert.equal(issues._internals.linkedTo('other', 55), null);
+    await M.issueUpdate({ id: a.id, status: 'in_review' });
+    assert.equal(done.length, 0);
+    await M.issueUpdate({ id: a.id, status: 'done' });
+    assert.equal(done.length, 1);
+    assert.equal(done[0].id, a.id); assert.equal(done[0].key, a.key); assert.equal(done[0].cwd, 'work/app'); assert.equal(done[0].link.tid, 55);
+    await M.issueUpdate({ id: a.id, status: 'done', title: '제목만 고침' });
+    assert.equal(done.length, 1, '이미 완료인 것을 고쳐도 다시 알리지 않는다');
+    assert.equal(issues._internals.statusOf(a.id), 'done');
+    assert.ok((await M.issueGet({ id: a.id })).issue.link, '시작한 일의 기록은 남는다');
+    // 작업(worktree)이 머지돼 따라서 완료
+    const b = (await M.issueCreate({ title: '작업으로 시작', cwd: 'work/app' })).issue;
+    const st = await M.issueStart({ id: b.id, mode: 'task' });
+    taskItems.find((t) => t.id === st.started.taskId).state = 'merged';
+    await M.issueList({});
+    await M.issueList({});
+    assert.deepEqual(done.map((d) => d.id), [a.id, b.id]);
+    // 외부 이슈를 닫는다
+    GH[0].state = 'OPEN';
+    await M.issueList({ cwds: ['work/app'], fresh: true });
+    const id = 'gh:me/app#7';
+    assert.notEqual(issues._internals.statusOf(id), 'done');
+    await M.issueUpdate({ id, status: 'done' });
+    assert.equal(done[done.length - 1].id, id);
+    assert.equal(issues._internals.statusOf(id), 'done');
+    const n = done.length;
+    await M.issueUpdate({ id, status: 'done' });
+    assert.equal(done.length, n);
+    assert.equal(issues._internals.statusOf('gh:me/nope#1'), null, '모르는 이슈는 완료가 아니다');
+  } finally { issues.configure({ onDone: null }); }
+});

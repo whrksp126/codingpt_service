@@ -517,7 +517,14 @@ async function attachPty(params, io) {
   let attachName;   // 백엔드 attach 대상 세션명
   if (paneId) {
     await migrateLegacyPool(session, abs);
-    const want = paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
+    // ★ 예외 — 뷰어가 `pin` 을 실으면 요청 win 이 기억을 이긴다(2026-10-08 이슈 #10). PC 앱은 탭을 바꿀 때
+    //   `terminal.select` 를 부르지 않고 스트림을 닫고 `win=<새 tid>` 로 **다시 연다** — 매번 그 순간의 활성
+    //   탭으로 URL 을 새로 만들므로 win 이 곧 정답이다. 그걸 기억이 덮어써서, 한 pane 은 처음 붙은 터미널로만
+    //   되돌아갔다(탭 표시는 바뀌는데 본문은 그대로 — 워커 탭을 아무리 눌러도 코디네이터 화면).
+    //   pin 없는 경로(앱·릴레이)는 종전대로다: 릴레이 토큰은 재연결마다 **발급 시점의 win** 을 다시 싣기
+    //   때문에(back ptyStreamParams) 거기서는 기억이 이겨야 select 이후 상태가 이어진다.
+    const pinned = !!(params && params.pin) && Number.isFinite(Number(params.win)) && Number(params.win) > 0;
+    const want = !pinned && paneCurrent.has(pkey) ? paneCurrent.get(pkey) : (params ? params.win : undefined);
     tid = await resolveTid(session, want);
     if (tid == null) {
       // 터미널 0개(정식 상태) — 여기서 만들면 죽은 pane 재접속이 유령을 부활시킨다.

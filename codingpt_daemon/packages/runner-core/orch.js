@@ -65,6 +65,9 @@ let inj = {
   notify: noop,           // ({runIds, reason}) → 화면 갱신 신호(식별자만)
   createTerminal: null,   // ({cwd, name}) → {tid, tsession}
   closeTerminal: null,    // ({cwd, tid}) → void
+  renameTerminal: null,   // ({tsession, name}) → void — name '' = 보통 터미널 이름 규칙(자동 개명)으로 되돌린다
+  termName: null,         // ({tsession}) → 지금 탭 이름(터미널이 없으면 throw)
+  sessionOf: null,        // ({cwd, tid}) → tsession
   launch: null,           // ({cwd, index, id, args?, fresh?, timeoutMs}) → {ok, busy?}
   chatInput: null,        // ({cwd, tid, text, submit})
   keys: null,             // ({cwd, tid, keys})
@@ -115,7 +118,7 @@ function orchDir() { return path.join(runtime.stateDir(), 'orch'); }
 function storeFile() { return path.join(runtime.stateDir(), 'orch.json'); }
 function promptFile(dispatchId) { return path.join(orchDir(), `${dispatchId}.prompt`); }
 function emptyStore() {
-  return { v: STORE_V, seq: 0, runs: [], tasks: [], dispatches: [], messages: [], deliveries: [], gates: [], notes: {} };
+  return { v: STORE_V, seq: 0, runs: [], tasks: [], dispatches: [], messages: [], deliveries: [], gates: [], notes: {}, labels: {} };
 }
 let mem = null;
 function load() {
@@ -127,6 +130,7 @@ function load() {
   });
   for (const k of ['tasks', 'messages', 'deliveries', 'gates']) if (!Array.isArray(mem[k])) mem[k] = [];
   if (!mem.notes || typeof mem.notes !== 'object') mem.notes = {};
+  if (!mem.labels || typeof mem.labels !== 'object') mem.labels = {};
   return mem;
 }
 function save() {
@@ -723,9 +727,10 @@ async function rpcWorkerStart(p, caller) {
 }
 // 이슈에서 시작(issues.js) — 그 폴더에 새 터미널을 만들고 에이전트를 프롬프트와 함께 띄운다. 사람이 누른 것이라
 //  권한 확인 생략은 붙이지 않는다(워커가 아니다 — 사용자가 직접 보는 보통 에이전트다).
-async function launchPrompted({ cwd, agent, model, prompt, name }) {
+async function launchPrompted({ cwd, agent, model, prompt, name, issueId }) {
   if (!inj.createTerminal || !inj.launch) throw codedError('START_FAILED', '터미널 실행 경로가 없습니다');
   const term = await inj.createTerminal({ cwd, name: name || agent });
+  setLabel(term.tsession, { name: name || agent, cwd, tid: term.tid, kind: 'issue', issueId: issueId || null });
   fs.mkdirSync(orchDir(), { recursive: true, mode: 0o700 });
   const file = path.join(orchDir(), `issue-${term.tid}-${nowFn()}.prompt`);
   fs.writeFileSync(file, prompt, { mode: 0o600 });
@@ -746,7 +751,7 @@ async function launchPrompted({ cwd, agent, model, prompt, name }) {
 function issuesLib() {
   const lib = require('./issues');
   lib.configure({
-    tasks: inj.tasks, taskGit: require('./task-git'), launchPrompted, now: nowFn,
+    tasks: inj.tasks, taskGit: require('./task-git'), launchPrompted, now: nowFn, onDone: onIssueDone,
     absOf: (rel) => require('./fs').safeResolve(rel || ''),
     notify: () => emit([], 'issues'),
   });
@@ -760,6 +765,7 @@ async function startInNewTerminal(run, d, prompt) {
   let term;
   try { term = await inj.createTerminal({ cwd: w.cwd, name: `${w.agent} · 워커` }); } catch (e) { throw Object.assign(e, { stage: 'terminal' }); }
   w.tid = term.tid; w.tsession = term.tsession; d.terminal = 'owned';
+  setLabel(term.tsession, { name: `${w.agent} · 워커`, cwd: w.cwd, tid: term.tid, kind: 'worker', issueId: null });
   save();
   fs.mkdirSync(orchDir(), { recursive: true, mode: 0o700 });
   const file = promptFile(d.id);
@@ -1277,10 +1283,155 @@ function rpcNoteSet(p, caller) {
   }
   cur.at = nowFn();
   cur.by = caller.kind === 'agent' ? (caller.meta.agent || 'agent') : 'user';
+  // 누가(어느 터미널이) 무슨 이슈 때문에 적었는지 — 그 세션이 끝나거나 그 이슈가 완료되면 치우는 근거다(아래 "흔적 정리").
+  if (caller.kind === 'agent') {
+    cur.tsession = caller.meta.tsession || null;
+    cur.tid = caller.meta.tid == null ? null : caller.meta.tid;
+    cur.issueId = issueOfTerminal(cur.tsession, cwd, cur.tid);
+  } else { delete cur.tsession; delete cur.tid; delete cur.issueId; }
   if (!cur.comment && !cur.status) delete s.notes[cwd]; else s.notes[cwd] = cur;
   save();
   emit(null, 'note');
   return { cwd, note: s.notes[cwd] || null };
+}
+
+// ── 흔적 정리(터미널 이름 · 한 줄 메모의 수명, 2026-10-08) ──────────────────────
+//  문제: 이슈에서 시작한 터미널은 `rename-window` 로 "#7 제목" 이 박히고(= 자동 개명이 꺼진다) 그것을 푸는 경로가
+//  없었다 → 에이전트를 끝내고 셸로 나가도, 새 에이전트를 띄워도 탭·사이드바가 영원히 그 이슈 이름이었다.
+//  에이전트가 `cpt ws set` 으로 적은 "완료 · 이슈 #7 완료" 도 지우는 사람이 없으면 영구히 남았다.
+//
+//  규칙(정본은 여기 — PC·폰은 탭 이름과 notes 를 그대로 그릴 뿐이다):
+//   이름  우리가 붙인 이름(labels 대장에 적힌 것)은 ① 그 터미널의 에이전트 세션이 끝나면(종료·/clear) ② 그 이슈가
+//         완료되면 풀린다(자동 개명 복귀 → 셸이면 폴더 이름, 새 에이전트면 그 세션의 제목). 사람이 다시 지은 이름은
+//         건드리지 않는다(지금 이름이 우리가 붙인 것과 다르면 대장에서만 뺀다).
+//   메모  에이전트가 적은 메모만 다룬다(사람이 화면에서 적은 것은 손대지 않는다).
+//         ① 이슈가 완료되면: 그 이슈에 묶인 메모(그 이슈 터미널에서 적은 것)를 지운다.
+//         ② 적은 에이전트의 세션이 끝나면: 단계가 completed 이거나 묶인 이슈가 완료된 메모를 지운다.
+//            진행 중·리뷰 중 같은 메모는 남긴다(다시 이어서 할 일일 수 있다).
+//         ③ 어느 터미널이 적었는지 모르는 옛 메모: 그 폴더의 에이전트 세션이 끝날 때 ② 와 같게, 또는 글에 적힌
+//            `#번호` 가 그 폴더의 완료된 자체 이슈일 때 지운다.
+//  사건을 놓쳤을 때(데몬이 꺼져 있었다)는 reconcileTraces 가 같은 규칙으로 따라잡는다.
+const LABEL_GRACE_MS = 60 * 1000;      // 막 만든 터미널은 에이전트가 뜨기 전까지 셸이다 — 그 사이를 "끝났다" 로 읽지 않는다
+const RECONCILE_MIN_MS = 15 * 1000;
+function setLabel(tsession, lab) {
+  if (!tsession || !lab || !lab.name) return;
+  load().labels[tsession] = { ...lab, at: nowFn() };
+  save();
+}
+function issueStatus(id) {
+  if (!id) return null;
+  try { return issuesLib()._internals.statusOf(id); } catch (_) { return null; }
+}
+function issueOfTerminal(tsession, cwd, tid) {
+  const lab = tsession ? load().labels[tsession] : null;
+  if (lab && lab.issueId) return lab.issueId;
+  try { return issuesLib()._internals.linkedTo(cwd || '', tid); } catch (_) { return null; }
+}
+/** 우리가 붙인 이름을 푼다. → 풀 것이 있었는가 */
+async function releaseLabel(tsession) {
+  const s = load();
+  const lab = s.labels[tsession];
+  if (!lab) return false;
+  delete s.labels[tsession];
+  save();
+  let cur = null;
+  if (inj.termName) { try { cur = await inj.termName({ tsession }); } catch (_) { return true; } }   // 터미널이 이미 없다
+  if (cur != null && cur !== '' && cur !== lab.name) return true;   // 사람이 다시 지은 이름
+  if (inj.renameTerminal) { try { await inj.renameTerminal({ tsession, name: '' }); } catch (_) { /* 이름은 장식 */ } }
+  return true;
+}
+function dropNotes(pred) {
+  const s = load();
+  let n = 0;
+  for (const cwd of Object.keys(s.notes)) {
+    const note = s.notes[cwd];
+    if (!note || note.by === 'user' || !pred(note, cwd)) continue;
+    delete s.notes[cwd];
+    n += 1;
+  }
+  if (n) { save(); emit(null, 'note'); }
+  return n;
+}
+const noteExpired = (note) => note.status === 'completed' || (note.issueId && issueStatus(note.issueId) === 'done');
+/** 에이전트 세션이 끝났다(종료·/clear) — agent-state 의 ended 전이. */
+function onAgentEnded(tsession, cwd) {
+  if (!tsession) return;
+  if (load().labels[tsession]) releaseLabel(tsession).catch(() => {});
+  dropNotes((note, at) => (note.tsession ? note.tsession === tsession : cwd != null && at === cwd) && noteExpired(note));
+}
+/** 이슈가 완료로 바뀌었다(issues.js onDone). */
+function onIssueDone({ id, link, cwd }) {
+  const s = load();
+  for (const ts of Object.keys(s.labels)) if (s.labels[ts].issueId === id) releaseLabel(ts).catch(() => {});
+  const at = (link && link.cwd) || cwd || '';
+  dropNotes((note, ncwd) => note.issueId === id || (link && link.tid != null && note.tid === link.tid && ncwd === at));
+}
+let reconcileAt = 0;
+let reconciling = false;
+let adopted = false;
+/** 대장이 생기기 전에 이슈로 시작한 터미널 — 탭 이름이 아직 우리가 붙인 그대로면 대장에 올린다(데몬 수명에 한 번). */
+async function adoptLegacyLabels() {
+  if (adopted || !inj.sessionOf || !inj.termName) return;
+  adopted = true;
+  let st;
+  try { st = issuesLib()._internals.load(); } catch (_) { return; }
+  for (const x of st.items) {
+    const link = x.link;
+    if (!link || link.tid == null || link.mode === 'task') continue;
+    let ts = null;
+    try { ts = await inj.sessionOf({ cwd: link.cwd || '', tid: link.tid }); } catch (_) { ts = null; }
+    if (!ts || load().labels[ts]) continue;
+    const name = `#${x.number} ${x.title}`.slice(0, 40);
+    let cur = null;
+    try { cur = await inj.termName({ tsession: ts }); } catch (_) { continue; }
+    if (cur !== name) continue;
+    load().labels[ts] = { name, cwd: link.cwd || '', tid: link.tid, kind: 'issue', issueId: x.id, at: link.startedAt || 0 };
+    save();
+  }
+}
+/** 놓친 사건 따라잡기 — 대장에 적힌 것이 없으면 아무것도 하지 않는다(터미널을 훑지 않는다). */
+async function reconcileTraces({ force = false } = {}) {
+  await adoptLegacyLabels();
+  const s = load();
+  const labels = Object.keys(s.labels);
+  const notes = Object.keys(s.notes).filter((c) => s.notes[c] && s.notes[c].by !== 'user');
+  if (!labels.length && !notes.length) return;
+  if (reconciling || (!force && nowFn() - reconcileAt < RECONCILE_MIN_MS)) return;
+  reconciling = true;
+  reconcileAt = nowFn();
+  try {
+    // 에이전트가 없다고 **확인된** 터미널만 끝난 것으로 본다(모름·조회 실패는 증거가 아니다).
+    const ended = async (tsession) => {
+      let pr = null;
+      try { pr = inj.probe ? await inj.probe({ tsession }) : null; } catch (_) { pr = null; }
+      if (!pr) return null;
+      if (pr.exists === false) return 'gone';
+      return pr.shell === true && !pr.attached ? 'shell' : null;
+    };
+    for (const ts of labels) {
+      const lab = load().labels[ts];
+      if (!lab) continue;
+      if (lab.issueId && issueStatus(lab.issueId) === 'done') { await releaseLabel(ts); continue; }
+      if (nowFn() - (lab.at || 0) < LABEL_GRACE_MS) continue;
+      const e = await ended(ts);
+      if (e === 'gone') { delete load().labels[ts]; save(); } else if (e === 'shell') await releaseLabel(ts);
+    }
+    // 옛 메모(적은 터미널을 모른다) — 글에 적힌 #번호가 이 폴더의 완료된 자체 이슈면 그 이슈의 흔적이다.
+    const doneIssueInText = (note, cwd) => {
+      const m = /#(\d+)/.exec(String(note.comment || ''));
+      let x = null;
+      try { x = m ? issuesLib()._internals.localByNumber(m[1]) : null; } catch (_) { x = null; }
+      return !!x && x.status === 'done' && ((x.link && x.link.cwd) || x.cwd || '') === cwd;
+    };
+    const dead = new Set();
+    for (const cwd of notes) {
+      const note = load().notes[cwd];
+      if (!note) continue;
+      if (!note.tsession) { if (note.status === 'completed' && doneIssueInText(note, cwd)) dead.add(cwd); continue; }
+      if (noteExpired(note) && await ended(note.tsession)) dead.add(cwd);
+    }
+    if (dead.size) dropNotes((note, cwd) => dead.has(cwd));
+  } finally { reconciling = false; }
 }
 
 // ── 화면용 한 벌(orch.list) ──────────────────────────────────────────────────
@@ -1318,6 +1469,7 @@ function sessionsChangedSoon() {
 
 async function rpcList(p) {
   resolveWorktreeSessions();
+  reconcileTraces().catch(() => {});   // 기다리지 않는다 — 바뀌면 'note'·탭 목록 신호로 다시 그려진다
   const s = load();
   const cutoff = nowFn() - 24 * 3600 * 1000;
   const runs = [];
@@ -1466,7 +1618,9 @@ function start() {
   try { fs.mkdirSync(orchDir(), { recursive: true, mode: 0o700 }); } catch (_) { /* noop */ }
   if (inj.agentState && typeof inj.agentState.subscribe === 'function') {
     // 워커 에이전트의 상태가 바뀌면 화면을 바로 다시 그리게 한다(점검 주기를 기다리지 않는다).
-    unsubscribe = inj.agentState.subscribe((rec) => {
+    unsubscribe = inj.agentState.subscribe((rec, prev) => {
+      // 세션이 끝났다(셸 복귀·session_end — /clear 도 여기로 온다) → 그 세션이 남긴 이름·메모를 치운다.
+      if (rec && rec.key && rec.state === 'ended' && prev !== 'ended') { try { onAgentEnded(rec.key, rec.cwdRel); } catch (_) { /* noop */ } }
       const d = rec && rec.key ? workerDispatchOf(rec.key, { activeOnly: true }) : null;
       if (d) emit(d.runId, 'liveness');
       else sessionsChangedSoon();   // 워커가 아닌 에이전트도 사이드바에 행이 있다
@@ -1480,7 +1634,7 @@ function _reset() {
   if (unsubscribe) { try { unsubscribe(); } catch (_) { /* noop */ } unsubscribe = null; }
   for (const set of waiters.values()) for (const w of set) { try { w.resolve('closed'); } catch (_) { /* noop */ } }
   waiters.clear(); questionWaiters.clear(); lastNudge.clear(); probeCache.clear();
-  mem = null; started = false; ticking = false;
+  mem = null; started = false; ticking = false; reconcileAt = 0; reconciling = false; adopted = false;
 }
 
 /** 이 터미널이 워커(진행 중이거나 방금 끝남)인가 — 워커의 "턴 끝" 알림을 사용자에게 보내지 않기 위한 판정. */
@@ -1503,6 +1657,7 @@ module.exports = {
   ERROR_CODES, MESSAGE_TYPES, WS_STATUSES, DEFAULT_LIMITS, USER_METHODS, METHODS: Object.keys(METHODS),
   _internals: {
     load, save, tick, prune, advanceDag, livenessOf, storeFile, promptFile, orchDir, _reset, titleOf,
+    reconcileTraces, onAgentEnded, onIssueDone, releaseLabel, setLabel,
     get timings() { return timings; },
   },
 };

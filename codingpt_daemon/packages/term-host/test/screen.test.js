@@ -99,3 +99,31 @@ test('resize — 스크린 버퍼 크기 추종', async () => {
   assert.strictEqual(s.rows, 40);
   s.dispose();
 });
+
+test('serializeRepaint — 마우스 인코딩(1006/1016)·커서 숨김을 RIS 뒤에 싣는다', async () => {
+  // SerializeAddon 은 마우스 "추적"(1000/1002/1003)만 싣고 "인코딩"은 빠뜨린다. 빠지면 스냅샷으로 붙은
+  //  뷰어 xterm 이 X10 으로 리포트를 보내, SGR 을 기다리는 TUI(claude)가 휠·클릭을 전부 버린다.
+  const { Terminal } = require('@xterm/headless');
+  const replay = async (ansi) => { const t = new Terminal({ cols: 40, rows: 5, allowProposedApi: true }); await new Promise((r) => t.write(ansi, r)); return t; };
+  const s = new Screen(40, 5);
+  await write(s, '\x1b[?1049h\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?25lTUI');
+  assert.strictEqual(s.mouseEncoding, 1006);
+  assert.strictEqual(s.cursorHidden, true);
+  let r = s.serializeRepaint();
+  const ris = r.lastIndexOf('\x1bc');
+  assert.ok(r.indexOf('\x1b[?1006h') > ris && r.indexOf('\x1b[?25l') > ris, JSON.stringify(r));
+  assert.ok(/\x1b\[1;4H$/.test(r), '커서 복원이 맨 끝');
+  // 받은 쪽에서 다시 직렬화해도 같은 모드가 나온다(뷰어가 실제로 그 상태가 됐다는 뜻).
+  const t = await replay(r);
+  assert.strictEqual(t.modes.mouseTrackingMode, 'drag');
+  assert.strictEqual(t.buffer.active.type, 'alternate');
+  await write(s, '\x1b[?1016h');
+  assert.strictEqual(s.mouseEncoding, 1016);
+  await write(s, '\x1b[?1016l\x1b[?25h');
+  r = s.serializeRepaint();
+  assert.ok(!/\x1b\[\?(1006|1016)h/.test(r) && !r.includes('\x1b[?25l'), '꺼진 모드가 실렸다: ' + JSON.stringify(r));
+  await write(s, '\x1b[?1006h\x1b[?25l\x1bc');
+  assert.strictEqual(s.mouseEncoding, 0, 'RIS 뒤에도 인코딩이 남았다');
+  assert.strictEqual(s.cursorHidden, false);
+  s.dispose();
+});

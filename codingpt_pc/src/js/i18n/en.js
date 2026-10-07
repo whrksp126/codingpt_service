@@ -1323,5 +1323,10 @@ export default {
   "구분선": "Divider",
   "링크": "Link",
   "이미지·파일 첨부": "Attach image or file",
-  "링크 넣기": "Insert link"
+  "링크 넣기": "Insert link",
+  "이 기기에 맞추기": "Fit to this device",
+  "그대로 보기": "View as is",
+  "제목 없음": "Untitled",
+  "저장됨": "Saved",
+  "저장하지 못했어요 · 다시 시도 중": "Couldn't save · retrying"
 };

@@ -262,6 +262,8 @@ export function createRichEditor(o) {
   return {
     el,
     getMarkdown: () => domToMd(doc),
+    /** 본문을 통째로 바꾼다(다른 기기가 고친 글을 따라갈 때 — 커서가 이 칸에 없을 때만 부른다). */
+    setMarkdown(md) { doc.innerHTML = mdToHtml(md || "") || "<div><br></div>"; loadImgs(); record({}); },
     insertImage(att, url) {
       doc.focus();
       exec("insertHTML", `<div><img data-att="${esc(att.id)}" data-loaded="1" alt="${esc(att.name || "")}"${url ? ` src="${esc(url)}"` : ""}></div><div><br></div>`);

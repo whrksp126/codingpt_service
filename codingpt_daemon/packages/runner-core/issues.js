@@ -32,7 +32,8 @@ const EXT_CACHE_MS = 60 * 1000;
 const inj = {
   tasks: null,            // tasks.js (internalCreate · _internals.load)
   taskGit: null,          // task-git.js (gh)
-  launchPrompted: null,   // ({cwd, agent, model, prompt, name}) → {tid, tsession}
+  launchPrompted: null,   // ({cwd, agent, model, prompt, name, issueId}) → {tid, tsession}
+  onDone: null,           // ({id, key, link, cwd}) — 이슈가 완료로 **바뀐 순간** 한 번. 그 이슈가 남긴 흔적(터미널 이름·한 줄 메모)을 치운다(orch.js)
   absOf: null,            // (cwdRel) → 절대경로
   notify: () => {},       // 바뀜 신호(식별자만)
   now: () => Date.now(),
@@ -62,6 +63,12 @@ function save() {
   fs.renameSync(tmp, f);
 }
 function changed(ids) { try { inj.notify({ ids: [].concat(ids || []) }); } catch (_) { /* noop */ } }
+// 완료로 넘어간 순간을 알린다 — 완료된 이슈의 이름이 터미널 탭·워크스페이스 메모에 영구히 남지 않게(2026-10-08).
+//  link 는 지우지 않는다("이 이슈로 무엇을 했는가" 의 기록이다). 치우는 쪽 예외는 이슈 저장을 막지 않는다.
+function settled(id, key, link, cwd) {
+  if (typeof inj.onDone !== 'function') return;
+  try { inj.onDone({ id, key: key || null, link: link || null, cwd: (link && link.cwd) || cwd || '' }); } catch (_) { /* noop */ }
+}
 
 // ── 입력 검증 ────────────────────────────────────────────────────────────────
 function str(v, max, name, { required = false } = {}) {
@@ -271,19 +278,22 @@ function taskStateOf(taskId) {
 function followLinks() {
   const s = load();
   let dirty = false;
-  const step = (holder, link) => {
+  const done = [];
+  const step = (holder, link, id, key) => {
     if (!link || link.mode !== 'task' || !link.taskId) return;
     if (holder.status !== 'in_progress' && holder.status !== 'in_review') return;
     const st = taskStateOf(link.taskId);
     const next = st === 'merged' ? 'done' : st === 'review' ? 'in_review' : st === 'gone' ? 'todo' : st === 'running' ? 'in_progress' : null;
     if (!next || next === holder.status) return;
     holder.status = next; holder.updatedAt = inj.now();
+    if (next === 'done') done.push([id, key, link, holder.cwd]);
     if (st === 'gone') holder.link = null;
     dirty = true;
   };
-  for (const x of s.items) step(x, x.link);
-  for (const id of Object.keys(s.overlays)) step(s.overlays[id], s.overlays[id].link);
+  for (const x of s.items) step(x, x.link, x.id, '#' + x.number);
+  for (const id of Object.keys(s.overlays)) step(s.overlays[id], s.overlays[id].link, id, null);
   if (dirty) save();
+  for (const d of done) settled(...d);
 }
 
 // ── RPC ──────────────────────────────────────────────────────────────────────
@@ -337,11 +347,13 @@ async function get(p = {}) {
 }
 
 async function create(p = {}) {
-  const title = str(p.title, TITLE_MAX, 'title', { required: true }).trim();
-  if (!title) throw coded('BAD_PARAMS', 'title 이 필요합니다');
+  const title = str(p.title, TITLE_MAX, 'title').trim();
   const body = str(p.body, BODY_MAX, 'body');
   const cwd = cwdOf(p.cwd);
   const provider = oneOf(p.provider, ['codingpt', ...Object.keys(PROVIDERS)], 'provider', 'codingpt');
+  //  화면의 자동 저장(draft)만 제목 없이 자체 이슈를 만든다 — 본문부터 적는 초안이고, 화면이 본문 첫 줄을 제목 자리에 보인다.
+  //  그 밖(cpt issue create·외부 서비스)은 그대로 제목이 있어야 한다.
+  if (!title && !(p.draft === true && provider === 'codingpt')) throw coded('BAD_PARAMS', 'title 이 필요합니다');
   const labels = labelsOf(p.labels) || [];
   if (provider !== 'codingpt') {
     if (!cwd) throw coded('BAD_PARAMS', '외부 서비스에 만들려면 워크스페이스(cwd)가 필요합니다');
@@ -368,12 +380,13 @@ async function update(p = {}) {
   const status = p.status == null ? null : oneOf(p.status, STATUSES, 'status');
   const priority = p.priority == null ? null : oneOf(p.priority, PRIORITIES, 'priority');
   const title = p.title == null ? null : str(p.title, TITLE_MAX, 'title').trim();
-  if (title === '') throw coded('BAD_PARAMS', 'title 을 비울 수 없습니다');
+  if (title === '' && !r.local) throw coded('BAD_PARAMS', 'title 을 비울 수 없습니다');
   const body = p.body == null ? null : str(p.body, BODY_MAX, 'body');
   const labels = labelsOf(p.labels);
   const now = inj.now();
   if (r.local) {
     const x = r.local;
+    const wasDone = x.status === 'done';
     if (title != null) x.title = title;
     if (body != null) x.body = body;
     if (status) x.status = status;
@@ -383,6 +396,7 @@ async function update(p = {}) {
     x.updatedAt = now;
     save();
     changed([x.id]);
+    if (!wasDone && x.status === 'done') settled(x.id, '#' + x.number, x.link, x.cwd);
     return { issue: wireLocal(x) };
   }
   const { ext, cwd, raw } = r;
@@ -403,6 +417,7 @@ async function update(p = {}) {
   ov.updatedAt = now;
   save();
   changed([id]);
+  if (status === 'done' && raw.open) settled(id, null, ov.link, cwd);
   const rec = await extList(ext.provider, cwd, { fresh: Object.keys(patch).length > 0 });
   const fresh = rec.items.find((x) => x.number === ext.number && x.repo === ext.repo) || raw;
   return { issue: wireExt(ext.provider, cwd, fresh) };
@@ -449,7 +464,7 @@ async function start(p = {}) {
     link.taskId = t.id;
   } else {
     if (!inj.launchPrompted) throw coded('START_FAILED', '터미널 실행 경로가 없습니다');
-    const term = await inj.launchPrompted({ cwd, agent, model, prompt, name: `${w.key} ${w.title}`.slice(0, 40) });
+    const term = await inj.launchPrompted({ cwd, agent, model, prompt, name: `${w.key} ${w.title}`.slice(0, 40), issueId: w.id });
     link.tid = term.tid;
   }
   const s = load();
@@ -463,7 +478,36 @@ async function start(p = {}) {
   return { issue: r.local ? wireLocal(r.local) : wireExt(r.ext.provider, r.cwd, r.raw), started: { mode, taskId: link.taskId || null, tid: link.tid == null ? null : link.tid, cwd } };
 }
 
+// ── 흔적 정리용 조회(동기 — orch.js 가 메모·터미널 이름의 근거를 물을 때) ──────
+/** 지금 아는 상태. 자체 이슈는 정본, 외부 이슈는 마지막으로 불러온 목록 기준(모르면 null — 모름은 완료가 아니다). */
+function statusOf(id) {
+  const loc = findLocal(id);
+  if (loc) return loc.status;
+  const ext = parseExtId(id);
+  if (!ext) return null;
+  for (const rec of extCache.values()) {
+    const raw = (rec.items || []).find((x) => x.number === ext.number && x.repo === ext.repo);
+    if (raw) return raw.open ? ((load().overlays[String(id)] || {}).status || 'todo') : 'done';
+  }
+  return null;
+}
+/** 그 터미널(cwd, tid)에서 시작한 이슈 ID — 여럿이면 가장 최근에 시작한 것. 없으면 null. */
+function linkedTo(cwd, tid) {
+  if (tid == null) return null;
+  const s = load();
+  let best = null;
+  const see = (id, link) => {
+    if (!link || link.tid !== tid || (link.cwd || '') !== (cwd || '')) return;
+    if (!best || (link.startedAt || 0) > best.at) best = { id, at: link.startedAt || 0 };
+  };
+  for (const x of s.items) see(x.id, x.link);
+  for (const id of Object.keys(s.overlays)) see(id, s.overlays[id].link);
+  return best ? best.id : null;
+}
+/** 자체 이슈 번호 → 이슈(없으면 null) — 연결 정보 없이 적힌 옛 메모("이슈 #7 완료")의 근거 찾기. */
+function localByNumber(n) { return load().items.find((x) => x.number === Number(n)) || null; }
+
 const METHODS = { issueList: list, issueGet: get, issueCreate: create, issueUpdate: update, issueDelete: remove, issueStart: start, issueAttach: attach, issueDetach: detach };
 function _reset() { mem = null; extCache.clear(); repoCwd.clear(); }
 
-module.exports = { configure, METHODS, STATUSES, PRIORITIES, MODES, PROVIDERS, _internals: { load, _reset, extCache, repoCwd, promptOf, wireLocal, parseExtId, followLinks, file, withAttachments, filesRoot } };
+module.exports = { configure, METHODS, STATUSES, PRIORITIES, MODES, PROVIDERS, _internals: { load, _reset, extCache, repoCwd, promptOf, wireLocal, parseExtId, followLinks, file, withAttachments, filesRoot, statusOf, linkedTo, localByNumber } };

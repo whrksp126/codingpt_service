@@ -92,6 +92,31 @@ class Screen {
     this.onData = null; // DA/DSR/CPR 등 VT가 생성한 응답 → 소유 PTY 입력으로 반환
     this.term.onBell(() => { if (this.onBell) { try { this.onBell(); } catch (_) { /* noop */ } } });
     this.term.onData((data) => { if (this.onData) { try { this.onData(data); } catch (_) { /* noop */ } } });
+    // 마우스 리포트 인코딩(1006 SGR·1016 SGR-pixels)과 커서 숨김(25) — xterm 공개 `modes` 에도,
+    //  SerializeAddon 출력에도 **없다**. 직접 따라가지 않으면 스냅샷으로 붙은 뷰어는 "마우스 추적은
+    //  켜졌는데 인코딩은 기본(X10)" 이 되어, 휠·클릭 리포트를 SGR 로 기다리는 TUI(claude 등)가 전부
+    //  버린다(2026-10-08 실측: 1002h+1006h 뒤 스냅샷 재생 → activeProtocol=DRAG, activeEncoding=DEFAULT).
+    //  핸들러는 false 를 돌려 xterm 기본 처리를 그대로 태운다(모드 적용은 xterm 이 한다).
+    this._mouseEncoding = 0;    // 0 | 1006 | 1016
+    this._cursorHidden = false;
+    const p = this.term.parser;
+    p.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      for (const v of params) {
+        if (v === 1006 || v === 1016) this._mouseEncoding = v;
+        else if (v === 25) this._cursorHidden = false;
+      }
+      return false;
+    });
+    p.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+      for (const v of params) {
+        // xterm 은 인코딩 계열(1005/1006/1015/1016) 중 무엇을 끄든 기본 인코딩으로 돌아간다.
+        if (v === 1005 || v === 1006 || v === 1015 || v === 1016) this._mouseEncoding = 0;
+        else if (v === 25) this._cursorHidden = true;
+      }
+      return false;
+    });
+    p.registerEscHandler({ final: 'c' }, () => { this._mouseEncoding = 0; this._cursorHidden = false; return false; });           // RIS
+    p.registerCsiHandler({ intermediates: '!', final: 'p' }, () => { this._cursorHidden = false; return false; });               // DECSTR
   }
 
   write(data) {
@@ -113,6 +138,8 @@ class Screen {
 
   reset() {
     this.term.reset();
+    this._mouseEncoding = 0;
+    this._cursorHidden = false;
   }
 
   get cols() { return this.term.cols; }
@@ -133,6 +160,9 @@ class Screen {
   get altScreen() {
     try { return this.term.buffer.active.type === 'alternate'; } catch (_) { return false; }
   }
+  // 0(기본 X10) | 1006(SGR) | 1016(SGR-pixels). 마우스 추적이 꺼져 있어도 값은 유지된다(xterm 과 동일).
+  get mouseEncoding() { return this._mouseEncoding; }
+  get cursorHidden() { return this._cursorHidden; }
 
   cursor() {
     const b = this.term.buffer.active;
@@ -210,7 +240,10 @@ class Screen {
     let body = '';
     try { body = this.serializer.serialize(); } catch (_) { body = ''; }
     const c = this.cursor();
-    return '\x1bc' + body + `\x1b[${c.y + 1};${c.x + 1}H`;
+    // SerializeAddon 이 빠뜨리는 모드 — 본문(RIS 뒤)에 실어야 뷰어 xterm 에 남는다. 뷰어가 스냅샷
+    //  앞에 따로 써 넣는 DECSET 은 본문 첫머리의 RIS 가 지워 버린다.
+    const extra = (this._mouseEncoding ? `\x1b[?${this._mouseEncoding}h` : '') + (this._cursorHidden ? '\x1b[?25l' : '');
+    return '\x1bc' + body + extra + `\x1b[${c.y + 1};${c.x + 1}H`;
   }
 
   dispose() {

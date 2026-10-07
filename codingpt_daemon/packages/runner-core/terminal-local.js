@@ -22,6 +22,8 @@ function parseParams(url) {
     token: q.get('token') || '',
     cwd: q.get('cwd') || '', paneId: q.get('paneId') || '', client: q.get('client') || 'pc',
     win: q.get('win') != null && q.get('win') !== '' ? Number(q.get('win')) : undefined,
+    // pin=1 — 이 win 은 뷰어가 지금 보려는 탭이다(데몬의 pane 기억보다 우선, pty.js attachPty).
+    pin: q.get('pin') === '1',
     cols: Number(q.get('cols')) || 80, rows: Number(q.get('rows')) || 24,
     deviceName: q.get('deviceName') || '',
   };

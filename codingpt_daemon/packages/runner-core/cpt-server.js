@@ -537,6 +537,16 @@ function wireOrch() {
         orchNames.set = null;
         notifyPoolChanged();
       },
+      // 우리가 붙인 이름(이슈·워커)을 푼다 — 빈 이름 = 자동 개명 복귀(셸이면 폴더 이름, 에이전트면 그 세션 제목).
+      renameTerminal: async ({ tsession, name }) => {
+        await termBackend.rename(tsession, name == null ? '' : String(name));
+        notifyPoolChanged();
+        //  자동 개명은 tmux 가 다음 루프(최대 0.5초 간격)에 이름을 다시 짓는다 — 그 뒤에 한 번 더 알린다.
+        const tm = setTimeout(notifyPoolChanged, 700);
+        if (tm.unref) tm.unref();
+      },
+      termName: async ({ tsession }) => String((await termBackend.info(tsession)).windowName || ''),
+      sessionOf: async ({ cwd, tid }) => target(cwd, tid),
       launch: (a) => launchAgentInTerminal(agentsLib, a),
       chatInput: (a) => chatInput(a),
       keys: async ({ cwd, tid, keys }) => termBackend.sendKeys(target(cwd, tid), { keys }),

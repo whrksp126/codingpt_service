@@ -1323,5 +1323,10 @@ export default {
   "구분선": "Separador",
   "링크": "Enlace",
   "이미지·파일 첨부": "Adjuntar imagen o archivo",
-  "링크 넣기": "Insertar enlace"
+  "링크 넣기": "Insertar enlace",
+  "이 기기에 맞추기": "Ajustar a este dispositivo",
+  "그대로 보기": "Ver tal cual",
+  "제목 없음": "Sin título",
+  "저장됨": "Guardado",
+  "저장하지 못했어요 · 다시 시도 중": "No se pudo guardar · reintentando"
 };

@@ -76,25 +76,39 @@ class TerminalHost extends EventEmitter {
       //  그리지 않는다). pane 과 VT 크기가 다르면(폰이 마지막 소유자였다가 PC 로 여는 경우) 캡처 행이
       //  VT 에서 잘리거나 스크롤백으로 밀리므로, VT 를 pane 크기로 맞춰 1:1 로 심은 뒤 xterm 리플로우로
       //  뷰어 크기로 되돌린다 — 일반 터미널이 다른 크기로 attach 했을 때와 같은 결과.
-      const info = String(await this.runTmux(['display-message', '-p', '-t', `=${this.name}:0`,
-        '#{history_size} #{pane_width} #{pane_height} #{cursor_x} #{cursor_y}'])).trim().split(/\s+/).map(Number);
+      //
+      // ★ 시드는 **입력 모드까지** 옮긴다(2026-10-08 실측). `capture-pane` 은 글자만 준다 — 아무도 안
+      //  보는 사이에 떠서 마우스 추적·alt-screen 을 켠 TUI(백그라운드로 시작된 워커 claude, 뷰어 0 유예로
+      //  host 가 닫힌 터미널, 데몬 재시작)에 나중에 붙으면 VT 는 그 DECSET 을 한 번도 못 봤다. 그 VT 가
+      //  만든 스냅샷을 받은 뷰어 xterm 은 "일반 셸" 로 알고 휠을 자기 스크롤백에, 클릭을 선택에 써 버려
+      //  앱에는 아무것도 안 간다(앱이 다시 그리며 모드를 재선언할 때까지). 모드의 정본은 tmux pane 이다.
+      const raw = String(await this.runTmux(['display-message', '-p', '-t', `=${this.name}:0`,
+        `#{history_size} #{pane_width} #{pane_height} #{cursor_x} #{cursor_y} ${SEED_FLAGS_FMT}`])).trim().split(/\s+/);
+      const info = raw.slice(0, 5).map(Number);
+      const fl = parseSeedFlags(raw[5]);
       const hs = info[0] || 0;
       const seedCols = clampCols(info[1] || this.cols), seedRows = clampRows(info[2] || this.rows);
       const cx = Math.min(Math.max(0, info[3] | 0), seedCols - 1), cy = Math.min(Math.max(0, info[4] | 0), seedRows - 1);
-      const [hist, scr] = await Promise.all([
+      // alt-screen 중이면 기본 캡처는 alt 화면이고, 가려진 일반 화면은 `-a` 로 따로 받는다(history 는
+      //  일반 화면의 것). 일반 화면을 먼저 심고 1049h 로 넘어가 alt 화면을 그려야, TUI 가 끝나며 1049l 을
+      //  보낼 때 VT 가 tmux 와 같은 화면(TUI 시작 전 셸)으로 돌아간다.
+      const [hist, scr, saved] = await Promise.all([
         hs > 0 ? this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`, '-S', `-${Math.min(hs, 10000)}`, '-E', '-1']) : Promise.resolve(''),
         this.runTmux(['capture-pane', '-e', '-p', '-t', `=${this.name}:0`]),
+        fl.alt ? this.runTmux(['capture-pane', '-a', '-q', '-e', '-p', '-t', `=${this.name}:0`]).catch(() => '') : Promise.resolve(null),
       ]);
       const h = String(hist || '').replace(/\n$/, '');
       const s = String(scr || '').replace(/\n$/, '');
+      const paint = (t) => t.replace(/\n/g, '\x1b[0m\r\n');
       const resized = seedCols !== this.cols || seedRows !== this.rows;
       if (resized) this.screen.resize(seedCols, seedRows);
       //  과거가 없으면 밀어 넣기(개행 rows 개 + 화면 지우기)도 **하지 않는다** — 그 자체가 VT
       //  스크롤백에 빈 줄 1개를 남겨(마지막 개행이 스크롤을 한 번 일으킨다) 똑같이 가짜 과거가 된다.
       const seed = '\x1b[3J\x1b[H\x1b[2J'
         + (h ? h.replace(/\n/g, '\x1b[0m\r\n') + '\x1b[0m\r\n' + '\r\n'.repeat(seedRows) + '\x1b[H\x1b[2J' : '')
-        + s.replace(/\n/g, '\x1b[0m\r\n')
-        + `\x1b[0m\x1b[${cy + 1};${cx + 1}H`;
+        + (fl.alt ? paint(String(saved || '').replace(/\n$/, '')) + '\x1b[0m\x1b[?1049h\x1b[H\x1b[2J' : '')
+        + paint(s)
+        + '\x1b[0m' + seedModes(fl) + `\x1b[${cy + 1};${cx + 1}H`;
       this.screen.write(seed);
       await this.screen.flush();
       if (resized) { this.screen.resize(this.cols, this.rows); await this.screen.flush(); }
@@ -198,6 +212,7 @@ class TerminalHost extends EventEmitter {
     return {
       appCursor: this.screen.appCursor, bracketedPaste: this.screen.bracketedPaste,
       mouseTracking: this.screen.mouseTracking, altScreen: this.screen.altScreen,
+      mouseEncoding: this.screen.mouseEncoding,
     };
   }
 
@@ -252,6 +267,40 @@ class TerminalHost extends EventEmitter {
   }
 }
 
+// 시드에 실을 pane 모드 — tmux format 플래그(없는 버전은 빈 문자열 → 0). 한 토큰(':' 구분)으로 받아
+//  빈 값이 섞여도 앞의 숫자 필드가 밀리지 않게 한다.
+const SEED_FLAG_KEYS = ['alt', 'mouseStd', 'mouseBtn', 'mouseAll', 'mouseSgr', 'mouseUtf8', 'bracket', 'appCursor', 'keypad', 'cursor', 'insert', 'wrap'];
+const SEED_FLAGS_FMT = ['alternate_on', 'mouse_standard_flag', 'mouse_button_flag', 'mouse_all_flag', 'mouse_sgr_flag',
+  'mouse_utf8_flag', 'bracket_paste_flag', 'keypad_cursor_flag', 'keypad_flag', 'cursor_flag', 'insert_flag', 'wrap_flag']
+  .map((k) => `#{${k}}`).join(':');
+
+function parseSeedFlags(token) {
+  const parts = String(token == null ? '' : token).split(':');
+  const out = {};
+  SEED_FLAG_KEYS.forEach((k, i) => { out[k] = parts[i] === '1'; });
+  // cursor/wrap 은 기본이 켜짐 — 값을 못 받았으면(구버전·빈 토큰) 끄지 않는다.
+  out.cursorOff = parts[SEED_FLAG_KEYS.indexOf('cursor')] === '0';
+  out.wrapOff = parts[SEED_FLAG_KEYS.indexOf('wrap')] === '0';
+  return out;
+}
+
+/** pane 모드 → 그 모드를 켜는 DECSET 열(alt-screen 은 화면을 그리는 쪽에서 따로 넘어간다). */
+function seedModes(fl) {
+  let m = '';
+  if (fl.appCursor) m += '\x1b[?1h';
+  if (fl.keypad) m += '\x1b=';
+  if (fl.insert) m += '\x1b[4h';
+  if (fl.wrapOff) m += '\x1b[?7l';
+  if (fl.bracket) m += '\x1b[?2004h';
+  if (fl.mouseStd) m += '\x1b[?1000h';
+  if (fl.mouseBtn) m += '\x1b[?1002h';
+  if (fl.mouseAll) m += '\x1b[?1003h';
+  if (fl.mouseUtf8) m += '\x1b[?1005h';
+  if (fl.mouseSgr) m += '\x1b[?1006h';
+  if (fl.cursorOff) m += '\x1b[?25l';
+  return m;
+}
+
 function clampCols(c) { return Math.max(MIN_COLS, Math.min(MAX_COLS, c | 0)); }
 function clampRows(r) { return Math.max(MIN_ROWS, Math.min(MAX_ROWS, r | 0)); }
 
@@ -278,4 +327,4 @@ class TerminalHostRegistry {
   closeAll() { for (const h of this.hosts.values()) h.close(); this.hosts.clear(); }
 }
 
-module.exports = { TerminalHost, TerminalHostRegistry, RING_BYTES, MIN_COLS, MIN_ROWS };
+module.exports = { TerminalHost, TerminalHostRegistry, RING_BYTES, MIN_COLS, MIN_ROWS, parseSeedFlags, seedModes };

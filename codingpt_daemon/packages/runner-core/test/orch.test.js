@@ -378,3 +378,197 @@ test('워커 권한 — 기본은 확인 생략 인자(Orca 기본값), orch.wor
   const pre = orch.buildPreamble({ task: { id: 't', spec: 's' }, dispatch: { id: 'd' }, run: null, placement: 'current', canDispatch: false });
   assert.match(pre, /되돌리기 어려운 일은 \*\*하기 전에\*\*/);
 });
+
+// ── 흔적 정리(2026-10-08) — 이슈에서 시작한 터미널의 이름 · 에이전트가 적은 한 줄 메모의 수명 ──
+//  실제 사고: 이슈 #7 을 "이슈로 시작" → 완료 처리 → /clear → exit → 다시 claude. 탭·사이드바는 계속 "#7 제목",
+//  워크스페이스 메모는 계속 "완료 · 이슈 #7 완료" 였다(이름을 푸는 경로도, 메모를 지우는 경로도 없었다).
+function traceSetup() {
+  const t = { names: new Map(), renames: [], subs: new Set() };
+  setup({
+    createTerminal: async ({ cwd, name }) => {
+      const tid = env.nextTid++;
+      const tsession = `cpt-${cwd}--t-${tid}`;
+      env.terms.set(tsession, { exists: true, shell: false, agentState: 'idle', attached: true });
+      t.names.set(tsession, name || 'zsh');
+      return { tid, tsession };
+    },
+    renameTerminal: async ({ tsession, name }) => { t.renames.push([tsession, name]); t.names.set(tsession, name || 'proj'); },
+    termName: async ({ tsession }) => { if (!t.names.has(tsession)) throw new Error('no session'); return t.names.get(tsession); },
+    agentState: { subscribe: (fn) => { t.subs.add(fn); return () => t.subs.delete(fn); }, snapshot: () => [] },
+  });
+  // agent-state 의 bump 통지 그대로: fn(rec, prev)
+  t.agent = (tsession, state, prev) => { for (const fn of t.subs) fn({ key: tsession, state, cwdRel: 'proj' }, prev); };
+  t.flush = () => new Promise((r) => { setImmediate(r); });
+  t.startIssue = async (title) => {
+    const x = (await call('orch.issueCreate', { title, cwd: 'proj' }, USER)).issue;
+    const st = await call('orch.issueStart', { id: x.id, mode: 'terminal', agent: 'claude' }, USER);
+    const tsession = `cpt-proj--t-${st.started.tid}`;
+    return { issue: x, tid: st.started.tid, tsession, meta: { via: 'cli', tsession, cwd: 'proj', tid: st.started.tid, agent: 'claude' } };
+  };
+  return t;
+}
+const noteOf = async (cwd = 'proj') => (await call('orch.list', {}, USER)).notes.find((n) => n.cwd === cwd) || null;
+
+test('흔적: 에이전트 종료 → 이슈로 붙인 터미널 이름이 풀린다(자동 개명 복귀). 일하는 동안에는 그대로', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('헤이보카 신규 qa');
+  assert.strictEqual(t.names.get(a.tsession), `${a.issue.key} 헤이보카 신규 qa`);
+  assert.strictEqual(orch._internals.load().labels[a.tsession].issueId, a.issue.id);
+  t.agent(a.tsession, 'idle', 'launching'); t.agent(a.tsession, 'working', 'idle'); t.agent(a.tsession, 'idle', 'working');
+  await t.flush();
+  assert.deepStrictEqual(t.renames, [], '세션이 살아 있는 동안에는 이름을 건드리지 않는다');
+  t.agent(a.tsession, 'ended', 'idle');   // exit(셸 복귀) 또는 /clear 의 session_end
+  await t.flush();
+  assert.deepStrictEqual(t.renames, [[a.tsession, '']], '빈 이름 = 보통 터미널 이름 규칙으로');
+  assert.strictEqual(orch._internals.load().labels[a.tsession], undefined);
+  // 그 뒤 새로 띄운 에이전트가 또 끝나도 다시 건드리지 않는다(대장에서 빠졌다)
+  t.agent(a.tsession, 'idle', 'ended'); t.agent(a.tsession, 'ended', 'idle');
+  await t.flush();
+  assert.strictEqual(t.renames.length, 1);
+});
+
+test('흔적: 사람이 다시 지은 탭 이름은 풀지 않는다', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('이름 바꿀 것');
+  t.names.set(a.tsession, '내가 지은 이름');
+  t.agent(a.tsession, 'ended', 'idle');
+  await t.flush();
+  assert.deepStrictEqual(t.renames, []);
+  assert.strictEqual(orch._internals.load().labels[a.tsession], undefined, '대장에서는 뺀다(더 따라다니지 않는다)');
+});
+
+test('흔적: 이슈 완료 → 그 이슈의 터미널 이름과, 그 이슈 터미널이 적은 메모가 정리된다', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('완료될 이슈');
+  await call('orch.noteSet', { comment: 'qa 진행 중', status: 'in-progress' }, a.meta);
+  assert.strictEqual((await noteOf()).issueId, a.issue.id, '이슈 터미널이 적은 메모는 그 이슈에 묶인다');
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'in_review' }, a.meta);
+  await t.flush();
+  assert.ok(await noteOf(), '완료가 아니면 남는다');
+  assert.deepStrictEqual(t.renames, []);
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'done' }, a.meta);
+  await t.flush();
+  assert.strictEqual(await noteOf(), null);
+  assert.deepStrictEqual(t.renames, [[a.tsession, '']]);
+  assert.ok((await call('orch.issueGet', { id: a.issue.id }, USER)).issue.link, '이슈의 "시작한 일" 기록은 남긴다');
+  assert.ok(env.notes.some((n) => n.reason === 'note'), '화면에 메모가 바뀌었다고 알린다');
+});
+
+test('흔적: 완료 뒤에 적은 "완료" 메모는 그 에이전트 세션이 끝나면 사라진다 — 실제 사고 순서', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('헤이보카 신규 qa');
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'done' }, a.meta);
+  await call('orch.noteSet', { comment: `이슈 ${a.issue.key} 완료 — prod 배포됨`, status: 'completed' }, a.meta);
+  await t.flush();
+  assert.ok(await noteOf(), '세션이 살아 있는 동안에는 보인다(방금 한 보고다)');
+  t.agent(a.tsession, 'ended', 'idle');   // /clear 또는 exit
+  await t.flush();
+  assert.strictEqual(await noteOf(), null);
+});
+
+test('흔적: 지우지 않는 것 — 사람이 적은 메모, 다른 터미널이 적은 메모, 끝나지 않은 단계의 메모', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('남의 메모');
+  // ① 사람이 화면에서 적은 메모
+  await call('orch.noteSet', { cwd: 'proj', comment: '내 메모', status: 'completed' }, USER);
+  t.agent(a.tsession, 'ended', 'idle');
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'done' }, USER);
+  await t.flush();
+  assert.strictEqual((await noteOf()).comment, '내 메모');
+  // ② 다른 터미널(코디네이터)이 적은 완료 메모 — 이 터미널이 끝나도 남는다
+  await call('orch.noteSet', { comment: '배포 끝', status: 'completed' }, COORD);
+  t.agent(a.tsession, 'ended', 'idle');
+  await t.flush();
+  assert.strictEqual((await noteOf()).comment, '배포 끝');
+  // ③ 적은 터미널이 끝나도 진행 중 메모는 남는다(이어서 할 일일 수 있다). completed 로 바꾸면 끝날 때 치운다
+  await call('orch.noteSet', { comment: '리팩터링 중', status: 'in-progress' }, COORD);
+  t.agent(COORD.tsession, 'ended', 'idle');
+  await t.flush();
+  assert.strictEqual((await noteOf()).comment, '리팩터링 중');
+  await call('orch.noteSet', { status: 'completed' }, COORD);
+  t.agent(COORD.tsession, 'ended', 'idle');
+  await t.flush();
+  assert.strictEqual(await noteOf(), null);
+});
+
+test('흔적: 놓친 사건 따라잡기 — 데몬이 꺼진 사이 끝난 세션·옛 메모(적은 터미널 모름)', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('재기동 사이에 끝남');
+  await call('orch.noteSet', { comment: '끝', status: 'completed' }, a.meta);
+  // 막 만든 터미널은 에이전트가 뜨기 전까지 셸이다 — 그 사이를 끝난 것으로 읽지 않는다
+  env.terms.set(a.tsession, { exists: true, shell: true, agentState: null, attached: false });
+  orch._internals.load().notes.proj.tsession = null;   // 메모는 따로 본다
+  await orch._internals.reconcileTraces({ force: true });
+  assert.deepStrictEqual(t.renames, []);
+  // 시간이 지났고 셸이다(에이전트 없음이 확인됐다) → 이름을 푼다
+  orch._internals.load().labels[a.tsession].at = Date.now() - 5 * 60 * 1000;
+  orch._internals.load().notes.proj.tsession = a.tsession;
+  await orch._internals.reconcileTraces({ force: true });
+  assert.deepStrictEqual(t.renames, [[a.tsession, '']]);
+  assert.strictEqual(await noteOf(), null, '적은 터미널에 에이전트가 없으면 완료 메모도 치운다');
+  // 모름(조회 실패)은 증거가 아니다
+  const b = await t.startIssue('조회 실패');
+  orch._internals.load().labels[b.tsession].at = Date.now() - 5 * 60 * 1000;
+  orch.configure({ probe: async () => null });
+  await orch._internals.reconcileTraces({ force: true });
+  assert.ok(orch._internals.load().labels[b.tsession]);
+  // 옛 메모: 누가 적었는지 모르지만 글의 #번호가 이 폴더의 완료된 자체 이슈다 → 그 이슈의 흔적
+  const s = orch._internals.load();
+  s.notes.proj = { comment: `이슈 ${a.issue.key} 완료 — prod 배포됨`, status: 'completed', by: 'claude', at: 1 };
+  await orch._internals.reconcileTraces({ force: true });
+  assert.ok(await noteOf(), '그 이슈가 아직 완료가 아니면 남는다');
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'done' }, USER);
+  s.notes.proj = { comment: `이슈 ${a.issue.key} 완료 — prod 배포됨`, status: 'completed', by: 'claude', at: 1 };
+  s.notes.other = { comment: `이슈 ${a.issue.key} 완료`, status: 'completed', by: 'claude', at: 1 };
+  await orch._internals.reconcileTraces({ force: true });
+  assert.strictEqual(await noteOf(), null);
+  assert.ok(await noteOf('other'), '다른 폴더의 같은 번호는 근거가 아니다');
+});
+
+test('흔적: 진짜 agent-state 와 맞물린다 — session_end(/clear·exit) 와 셸 복귀 관찰이 이름을 푼다', async () => {
+  const as = require('../agent-state');
+  as._reset();
+  as.configure({ notify: async () => {}, emit: () => true, log: () => {} });
+  const t = traceSetup();
+  orch._internals._reset();
+  orch.configure({ agentState: as });
+  orch.start();
+  try {
+    // /clear: session_end → session_start. 지운 대화의 이름(이슈)이 새 대화에 따라붙지 않는다.
+    const a = await t.startIssue('clear 로 지울 대화');
+    const id = { tid: a.tid, cwdRel: 'proj', agent: 'claude', sessionId: 's1' };
+    await as.applyHook(a.tsession, { ...id, event: 'session_start' });
+    await as.applyHook(a.tsession, { ...id, event: 'prompt' });
+    await as.applyHook(a.tsession, { ...id, event: 'stop' });
+    await t.flush();
+    assert.deepStrictEqual(t.renames, []);
+    await as.applyHook(a.tsession, { ...id, event: 'session_end' });
+    await as.applyHook(a.tsession, { ...id, sessionId: 's2', event: 'session_start' });
+    await t.flush();
+    assert.deepStrictEqual(t.renames, [[a.tsession, '']]);
+    // 훅 없이 죽은 에이전트(폴백 관찰: 셸 복귀)
+    const b = await t.startIssue('훅 없이 종료');
+    await as.applyWatch(b.tsession, { tid: b.tid, cwdRel: 'proj', agent: 'codex', observedState: 'working' });
+    await as.applyWatch(b.tsession, { tid: b.tid, cwdRel: 'proj', shell: true });
+    await t.flush();
+    assert.deepStrictEqual(t.renames.map((r) => r[0]), [a.tsession, b.tsession]);
+  } finally { as._reset(); }
+});
+
+test('흔적: 대장이 생기기 전에 이슈로 시작한 터미널도 따라잡는다(탭 이름이 우리가 붙인 그대로일 때만)', async () => {
+  const t = traceSetup();
+  const a = await t.startIssue('옛 이슈 터미널');
+  const b = await t.startIssue('옛 이슈 · 사람이 이름을 바꿈');
+  await call('orch.issueUpdate', { id: a.issue.id, status: 'done' }, USER);   // 대장이 있으면 여기서 풀린다 — 옛 상태를 다시 만든다
+  await t.flush();
+  t.renames.length = 0;
+  t.names.set(a.tsession, `${a.issue.key} 옛 이슈 터미널`);
+  t.names.set(b.tsession, '내 이름');
+  orch._internals.load().labels = {};
+  orch._internals._reset();
+  orch.configure({ sessionOf: async ({ cwd, tid }) => `cpt-${cwd}--t-${tid}` });
+  orch.start();
+  await orch._internals.reconcileTraces({ force: true });
+  assert.deepStrictEqual(t.renames, [[a.tsession, '']], '완료된 이슈의 이름만 풀린다');
+  assert.strictEqual(t.names.get(b.tsession), '내 이름');
+});

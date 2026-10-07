@@ -836,15 +836,37 @@ body.tab-dragging, body.tab-dragging * { cursor: grabbing !important; user-selec
 /* 비소유자 뷰 — 폭은 글꼴로 맞추고(_applyScale), 세로로 넘치는 만큼만 스크롤로 본다. */
 .pane-term.scaled { overflow: auto; }
 .pane-term.scaled .xterm { height: auto; }
-/* 비소유자 표시 — 알약이 아니라 올라온 면 r-sm 헤어라인(§0.6: 알약은 세그먼트·컴포저·전송·모드만). */
-.pane-owner-pill { position: absolute; left: 10px; bottom: 10px; z-index: calc(var(--z-pane) + 1); display: flex; align-items: center; gap: 8px;
-  height: 28px; padding: 0 4px 0 10px; border-radius: var(--r-sm); font-size: 11px; background: var(--elevated);
-  border: 1px solid var(--border); color: var(--text2); box-shadow: var(--shadow-toast); }
-/* 터미널 위에 떠 있다 → 불투명 면 유지, 호버는 그 위에 워시를 겹친다 */
-.pane-owner-pill .op-btn { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--r-xs); border: none; background: var(--elevated);
-  color: var(--text); font-size: 11px; font-weight: 500; }
-.pane-owner-pill .op-btn:hover { background-image: linear-gradient(var(--hover), var(--hover)); }
-.pane-owner-pill .op-btn:active { background-image: linear-gradient(var(--pressed), var(--pressed)); }
+/* 비소유자 표시(owner-cover.js) — 다른 기기 크기로 보이는 터미널은 본문을 흐리게 덮고, 정중앙에
+   아이콘 버튼 하나 + 한 줄 설명만 둔다. 가림막 아무 곳이나 누르면 이 기기 크기로 맞춘다.
+   "그대로 보기" 뒤(.peek)에는 가림막이 걷히고 모서리에 작은 아이콘 버튼만 남는다. 색은 전부 무채색 토큰. */
+.pane-owner-pill { position: absolute; inset: 0; z-index: calc(var(--z-pane) + 1); display: flex; align-items: center; justify-content: center; overflow: hidden;
+  opacity: 0; transition: opacity var(--dur-2) var(--ease-out); }
+.pane-owner-pill[hidden] { display: none; }
+.pane-owner-pill.on { opacity: 1; }
+.pane-owner-pill.cover { cursor: pointer; background: color-mix(in srgb, var(--base) 66%, transparent);
+  -webkit-backdrop-filter: blur(5px) saturate(0.7); backdrop-filter: blur(5px) saturate(0.7); }
+.pane-owner-pill.peek { pointer-events: none; }
+.pane-owner-pill .op-center { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0 16px; text-align: center;
+  transform: scale(0.97); transition: transform var(--dur-2) var(--ease-enter); }
+.pane-owner-pill.on .op-center { transform: none; }
+.pane-owner-pill.peek .op-center { display: none; }
+.pane-owner-pill .op-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-bottom: 6px;
+  border-radius: var(--r-lg); border: 1px solid var(--border-ctrl); background: var(--elevated); color: var(--text); box-shadow: var(--shadow-toast); }
+/* 가림막 전체가 누르는 자리다 → 어디에 올려도 버튼이 반응한다(불투명 면 위에 워시를 겹친다) */
+.pane-owner-pill.cover:hover .op-btn { background-image: linear-gradient(var(--hover), var(--hover)); }
+.pane-owner-pill.cover:active .op-btn { background-image: linear-gradient(var(--pressed), var(--pressed)); }
+.pane-owner-pill .op-label { font-size: 13px; font-weight: 500; color: var(--text); }
+.pane-owner-pill .op-text { font-size: 12px; color: var(--text2); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pane-owner-pill .op-peek { margin-top: 8px; height: 24px; padding: 0 10px; border: none; border-radius: var(--r-sm); background: transparent;
+  color: var(--text3); font-size: 12px; cursor: pointer; transition: background var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+.pane-owner-pill .op-peek:hover { background: var(--hover); color: var(--text); }
+.pane-owner-pill .op-peek:active { background: var(--pressed); }
+.pane-owner-pill .op-mini { display: none; position: absolute; right: 10px; bottom: 10px; width: 24px; height: 24px; align-items: center; justify-content: center;
+  pointer-events: auto; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--elevated); color: var(--text2); box-shadow: var(--shadow-toast);
+  cursor: pointer; transition: color var(--dur-1) var(--ease-out); }
+.pane-owner-pill.peek .op-mini { display: inline-flex; }
+.pane-owner-pill .op-mini:hover { color: var(--text); background-image: linear-gradient(var(--hover), var(--hover)); }
+.pane-owner-pill .op-mini:active { background-image: linear-gradient(var(--pressed), var(--pressed)); }
 
 /* preview */
 .preview-bar { flex: none; display: flex; gap: 6px; height: 32px; padding: 0 6px; background: var(--surface); border-bottom: 1px solid var(--border); align-items: center; }
@@ -3469,6 +3491,12 @@ svg.mi { flex: none; display: block; }
 .is-title-t:hover { background: var(--hover); }
 .is-f-title { flex: 1; min-width: 0; box-sizing: border-box; background: color-mix(in srgb, var(--text) 5%, transparent); border: none; outline: none; color: var(--text); font-size: 16px; font-weight: 600; font-family: inherit; padding: 4px 6px; border-radius: var(--r-sm); }
 .is-f-title[hidden], .is-title-t[hidden] { display: none; }
+/* 제목 없는 초안 — 본문 첫 줄(또는 "제목 없음")을 흐리게. 저장 표시 = 머리줄의 작은 글자(무채색, 실패만 한 단계 진하게). */
+.is-title-t.blank, .is-title.blank, .is-card-title.blank, .is-table .is-td-title.blank { color: var(--text3); font-weight: 400; }
+.is-f-title::placeholder { color: var(--dim); font-weight: 400; }
+.is-save { flex: none; font-size: 11.5px; color: var(--dim); white-space: nowrap; }
+.is-save.error { color: var(--text2); }
+.is-start[hidden], .is-acts[hidden], .is-to-gh[hidden], .is-sh-head .is-key[hidden] { display: none; }
 .is-f-ed { flex: 1; min-height: 0; display: flex; }
 .is-sh-doc .is-atts { padding: 8px 16px; border-top: 1px solid var(--border); }
 .is-sh-side { flex: none; width: 264px; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 16px; border-left: 1px solid var(--border); background: color-mix(in srgb, var(--text) 2.5%, transparent); overflow-y: auto; }

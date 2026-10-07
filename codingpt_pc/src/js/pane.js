@@ -31,6 +31,7 @@ import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
 import { commandForCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
 import { decodeTerminalFrameV3, TERMINAL_OPCODE_V3 } from './terminal-stream-v3.js';
+import { createOwnerCover } from './owner-cover.js';
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -917,12 +918,14 @@ export class PaneView {
     // 터미널 스킴 배경을 pane 여백까지 — 프리셋 배경이 앱 배경과 다를 때 띠가 지지 않게.
     try { this.termEl.style.background = termTheme().background || ""; } catch (_) {}
     this.body.appendChild(this.termEl);
-    // 비소유자 표시 + "내 크기로 맞추기" — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
-    this.ownerPill = document.createElement("div");
-    this.ownerPill.className = "pane-owner-pill";
-    this.ownerPill.innerHTML = `<span class="op-text"></span><button type="button" class="op-btn">${i18n.t("내 크기로 맞추기")}</button>`;
-    this.ownerPill.style.display = "none";
-    this.ownerPill.querySelector(".op-btn").addEventListener("click", (e) => { e.stopPropagation(); this._claimOwnership(); });
+    // 비소유자 표시(가림막 + "이 기기에 맞추기") — 크기 소유권은 사용자가 명시적으로 가져온다(설계 §1).
+    //  모양·깜빡임 방지 판정은 owner-cover.js. 맞춘 뒤에는 바로 타이핑할 수 있게 터미널로 포커스를 준다.
+    this.ownerCover = createOwnerCover({
+      guardEl: this.termEl,
+      onClaim: () => { this._claimOwnership(); try { this.term?.focus(); } catch (_) { /* noop */ } },
+      onPeek: () => { try { this.term?.focus(); } catch (_) { /* noop */ } },
+    });
+    this.ownerPill = this.ownerCover.el;
     this.body.appendChild(this.ownerPill);
     this._grid = null; this._owner = null; this._isOwner = true; this._ownerFree = true; this._v3Seq = 0; this._v3Epoch = null;
     // 터미널 0개 상태의 자리 표시(자동 생성 금지 — 사용자가 명시적으로 추가).
@@ -1700,6 +1703,7 @@ export class PaneView {
       if (empty) this._paintEmptyState();
     }
     this.termEl.style.display = !empty && isT && !chat ? "" : "none";
+    this._syncOwnerCtx();
     if (this.chatHost) this.chatHost.style.display = chat ? "flex" : "none";
     this.chat?.setVisible(chat);
     if (chat) {
@@ -1848,23 +1852,34 @@ export class PaneView {
     if (this._remoteKa) { clearInterval(this._remoteKa); this._remoteKa = null; }
     this._attachedWin = typeof win === "number" ? win : this._attachedWin;
     this._v3Seq = 0;
+    // 열기 세대 — 아래 await(엔드포인트/토큰 조회) 사이에 탭을 또 바꾸면 열기가 겹친다. 세대가 없으면
+    //  먼저 시작한 쪽이 **나중에** 소켓을 만들어 this.ws 를 덮거나(마지막에 누른 탭이 아닌 화면),
+    //  덮인 소켓이 안 닫힌 채 같은 xterm 에 계속 써서 두 터미널 출력이 섞인다. 마지막 요청만 연결한다.
+    const gen = (this._chanGen = (this._chanGen || 0) + 1);
     try {
       let url;
       if (this.ctx.isLocal) {
         const ep = await api.terminalLocalEndpoint();
+        if (gen !== this._chanGen) return;
         this._selfDevice = { deviceId: ep.client, name: ep.device_name || "" };
         const q = new URLSearchParams({
           token: ep.token, cwd: this.ctx.localPath || "", paneId: this.id, client: ep.client,
           cols: String(this.term.cols || 80), rows: String(this.term.rows || 24), deviceName: ep.device_name || "",
         });
-        if (typeof win === "number") q.set("win", String(win));
+        // pin=1 — "이 win 이 지금 보려는 탭" 이라는 명시(2026-10-08 이슈 #10). 이게 없으면 데몬은 이 pane 이
+        //  **처음 붙었던 터미널**(paneCurrent)을 요청 win 보다 우선해, 탭을 바꿔 다시 열어도 같은 화면만
+        //  돌려준다(탭 표시는 바뀌는데 본문은 그대로). PC 는 열 때마다 그 순간의 활성 탭으로 URL 을 새로
+        //  만들므로 win 이 항상 정답이다. 데몬 쪽 계약: runner-core/pty.js attachPty · terminal-local.js.
+        if (typeof win === "number") { q.set("win", String(win)); q.set("pin", "1"); }
         url = `ws://127.0.0.1:${ep.port}/v3/terminal?${q}`;
       } else {
         const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
+        if (gen !== this._chanGen) return;
         url = `${wsBase}/api/daemon/terminal/${token}`;
       }
       this._v3Connect(url);
     } catch (e) {
+      if (gen !== this._chanGen) return;     // 이미 다른 열기가 진행 중 — 옛 실패를 화면에 찍지 않는다
       this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
       this._scheduleRemoteReopen();
     }
@@ -1887,6 +1902,7 @@ export class PaneView {
       this._fitNow(true);
     };
     ws.onmessage = (e) => {
+      if (this.ws !== ws) return;                 // 교체된 소켓의 잔여 프레임 — 새 탭 화면에 섞지 않는다
       if (typeof e.data === "string") { this._termOut(e.data); return; }
       const f = decodeTerminalFrameV3(e.data);
       if (!f) { this._termOut(new Uint8Array(e.data)); return; }   // 구 데몬(v1 raw) 폴백
@@ -2012,13 +2028,17 @@ export class PaneView {
   }
 
   _syncOwnerUi() {
-    if (!this.ownerPill) return;
+    if (!this.ownerCover) return;
+    this._syncOwnerCtx();
     const name = (this._owner && (this._owner.name || this._owner.deviceId)) || "";
-    if (this._isOwner || this.node.kind !== "terminal") { this.ownerPill.style.display = "none"; return; }
-    this.ownerPill.querySelector(".op-text").textContent = name
-      ? i18n.t("{name} 크기로 보는 중").replace("{name}", name)
-      : i18n.t("다른 기기 크기로 보는 중");
-    this.ownerPill.style.display = "flex";
+    this.ownerCover.setOwner({ viewer: !this._isOwner && this.node.kind === "terminal", name });
+  }
+  // 가림막이 볼 맥락 — 지금 보는 터미널(탭)과 본문 표시 여부. 탭이 바뀌면 새 판정이 올 때까지 가림막은 숨는다.
+  _syncOwnerCtx() {
+    if (!this.ownerCover) return;
+    const t = this.node.tabs?.[this.node.active];
+    const key = t && isTermTab(t) && typeof t.win === "number" ? t.win : null;
+    this.ownerCover.setContext({ key, visible: !!this.termEl && this.termEl.style.display !== "none" });
   }
 
   // "내 크기로 맞추기" — 소유권을 가져온 뒤 내 컨테이너 크기를 주장한다. 자동 탈취는 없다(설계 §1).
@@ -2627,6 +2647,7 @@ export class PaneView {
   dispose() {
     registry.delete(this.id);
     this._reopenStop = true;
+    this._chanGen = (this._chanGen || 0) + 1;   // 진행 중이던 열기(_openChannel 의 await)가 닫힌 pane 에 소켓을 만들지 않게
     clearTimeout(this._reopenTimer);
     clearTimeout(this._remoteReopenTimer);
     for (const [, m] of this._mixed) {

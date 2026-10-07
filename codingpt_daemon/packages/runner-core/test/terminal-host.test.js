@@ -259,3 +259,80 @@ test('세션이 죽으면 exit 프레임이 오고 레지스트리에서 빠진�
   assert.ok(await until(() => frames.some((f) => f.type === 'exit'), 6000), 'exit 프레임이 안 왔다');
   assert.strictEqual(registry.has('v3-exit'), false);
 });
+
+// 뷰어(PC pane.js·모바일 TerminalWebView 의 _applySnapshot)가 하는 그대로 스냅샷을 xterm 에 먹인다.
+async function viewerOf(snap) {
+  const { Terminal } = require('@xterm/headless');
+  const t = new Terminal({ cols: snap.cols, rows: snap.rows, allowProposedApi: true });
+  const md = snap.modes || {};
+  let pre = '';
+  if (md.altScreen) pre += '\x1b[?1049h';
+  if (md.appCursor) pre += '\x1b[?1h';
+  if (md.bracketedPaste) pre += '\x1b[?2004h';
+  if (md.mouseTracking) pre += '\x1b[?1000h\x1b[?1006h';
+  t.reset();
+  await new Promise((r) => t.write(pre + (snap.ansi || ''), r));
+  return t;
+}
+const viewerScreen = (t) => { const b = t.buffer.active; const out = []; for (let y = 0; y < t.rows; y++) out.push(b.getLine(b.baseY + y).translateToString(true)); return out.join('\n'); };
+
+test('마우스 TUI 가 도는 터미널에 나중에 붙어도 뷰어가 그 모드를 안다(시드가 pane 모드를 옮긴다)', { skip: !hasTmux }, async () => {
+  // ★ 2026-10-08 실기 증상: 아무도 안 보는 사이에 시작된 워커 claude 터미널을 나중에 열면 휠·클릭이
+  //  안 먹다가, 키를 눌러 앱이 다시 그린 뒤에야 먹었다. host 가 없을 때 켜진 DECSET 은 capture-pane
+  //  시드에 없어서, 스냅샷을 받은 뷰어 xterm 이 "일반 셸" 로 알았던 것.
+  await newSession('v3-late');
+  await runTmux(['send-keys', '-t', '=v3-late:0', 'echo SHELL-LINE', 'Enter']);
+  await sleep(200);
+  // host 가 붙기 **전에** 풀스크린 마우스 TUI 가 뜬다(claude 가 켜는 조합: 1049·1000·1002·1006·2004·25l).
+  await runTmux(['send-keys', '-t', '=v3-late:0',
+    "printf '\\033[?1049h\\033[?1000h\\033[?1002h\\033[?1006h\\033[?2004h\\033[?1h\\033[?25l\\033[2J\\033[HTUI-BODY'; read -r x; printf '\\033[?1049l'", 'Enter']);
+  assert.ok(await until(async () => String(await runTmux(['display-message', '-p', '-t', '=v3-late:0', '#{alternate_on}#{mouse_sgr_flag}'])).trim() === '11'),
+    '전제 실패: tmux pane 이 alt-screen·SGR 마우스 상태가 아니다');
+  assert.strictEqual(registry.has('v3-late'), false, '전제 실패: host 가 이미 있다');
+
+  const host = await registry.get('v3-late', { cols: 80, rows: 24 });
+  await host.ready;
+  const snap = await host.snapshot();
+  assert.deepStrictEqual(
+    { alt: snap.modes.altScreen, mouse: snap.modes.mouseTracking, enc: snap.modes.mouseEncoding, bp: snap.modes.bracketedPaste, app: snap.modes.appCursor },
+    { alt: true, mouse: true, enc: 1006, bp: true, app: true }, '시드가 pane 모드를 VT 에 세우지 않았다');
+
+  const v = await viewerOf(snap);
+  assert.strictEqual(v.modes.mouseTrackingMode, 'drag', '뷰어 xterm 이 마우스 추적을 모른다 — 휠이 앱에 안 간다');
+  assert.strictEqual(v.buffer.active.type, 'alternate', '뷰어 xterm 이 alt-screen 을 모른다');
+  assert.strictEqual(v.modes.bracketedPasteMode, true);
+  assert.strictEqual(v.modes.applicationCursorKeysMode, true);
+  // 인코딩·커서 숨김은 xterm 공개 modes 에 없다 — 본문의 RIS **뒤에** 실려야 뷰어에 남는다.
+  const ris = snap.ansi.lastIndexOf('\x1bc');
+  assert.ok(snap.ansi.indexOf('\x1b[?1006h') > ris, '스냅샷이 SGR 마우스 인코딩(1006)을 싣지 않았다 — 리포트가 X10 으로 나가 앱이 버린다');
+  assert.ok(snap.ansi.indexOf('\x1b[?25l') > ris, '스냅샷이 커서 숨김을 싣지 않았다');
+  assert.match(viewerScreen(v), /TUI-BODY/, 'alt 화면 내용이 없다');
+  assert.doesNotMatch(viewerScreen(v), /SHELL-LINE/, 'alt 화면에 일반 화면이 섞였다');
+
+  // TUI 가 끝나면(1049l) VT 는 tmux 와 같은 일반 화면으로 돌아간다 — 시드가 가려진 일반 화면도 심었다.
+  await host.input('\r');
+  assert.ok(await until(async () => { await host.screen.flush(); return !host.screen.altScreen; }), 'TUI 종료 뒤에도 VT 가 alt-screen 이다');
+  await sleep(200);
+  const back = viewerScreen(await viewerOf(await host.snapshot()));
+  assert.match(back, /SHELL-LINE/, 'alt-screen 을 벗어난 뒤 TUI 시작 전 셸 화면이 없다');
+  assert.doesNotMatch(back, /^TUI-BODY/m);
+  host.close();
+});
+
+test('일반 셸 시드는 모드를 지어내지 않는다', { skip: !hasTmux }, async () => {
+  await newSession('v3-plain');
+  const host = await registry.get('v3-plain', { cols: 80, rows: 24 });
+  await host.ready;
+  const snap = await host.snapshot();
+  assert.deepStrictEqual(
+    { alt: snap.modes.altScreen, mouse: snap.modes.mouseTracking, enc: snap.modes.mouseEncoding, app: snap.modes.appCursor },
+    { alt: false, mouse: false, enc: 0, app: false });
+  assert.ok(!/\x1b\[\?(1000|1002|1003|1006|1049|25)[hl]/.test(snap.ansi), `일반 셸 스냅샷에 모드 시퀀스가 있다: ${JSON.stringify(snap.ansi.slice(-80))}`);
+  const { parseSeedFlags, seedModes } = require('../terminal-host');
+  // 플래그를 못 받은 tmux(빈 토큰)에서는 아무것도 켜거나 끄지 않는다 — 커서·줄바꿈을 끄면 안 된다.
+  assert.strictEqual(seedModes(parseSeedFlags(undefined)), '');
+  assert.strictEqual(seedModes(parseSeedFlags(':::::::::::')), '');
+  assert.strictEqual(seedModes(parseSeedFlags('0:0:0:0:0:0:0:0:0:1:0:1')), '');
+  assert.strictEqual(seedModes(parseSeedFlags('1:0:1:0:1:0:1:0:0:0:0:1')), '\x1b[?2004h\x1b[?1002h\x1b[?1006h\x1b[?25l');
+  host.close();
+});

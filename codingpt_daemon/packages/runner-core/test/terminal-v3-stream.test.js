@@ -61,11 +61,11 @@ after(async () => {
 });
 
 /** 뷰어 하나 열기 — 프레임을 종류별로 모아 주는 헬퍼. */
-async function openViewer(token, { client, win, cols = 80, rows = 24, deviceName }) {
+async function openViewer(token, { client, win, cols = 80, rows = 24, deviceName, pin }) {
   await startRelay();
   pty.openPtyStream({ serverUrl: `http://127.0.0.1:${port}`, deviceToken: 'test' }, {
     streamToken: token,
-    params: { cwd: WS_REL, paneId: 'p-' + client, client, win, cols, rows, terminalProtocol: 3, deviceName },
+    params: { cwd: WS_REL, paneId: 'p-' + client, client, win, cols, rows, terminalProtocol: 3, deviceName, ...(pin ? { pin: true } : {}) },
   });
   const t0 = Date.now();
   let v;
@@ -218,4 +218,54 @@ test('keepalive 는 터미널 크기를 건드리지 않는다', { skip: !hasTmu
   v.ws.close();
   await sleep(150);
   await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: t.index });
+});
+
+// ★ 회귀(2026-10-08 이슈 #10): PC 앱은 탭을 바꿀 때 `terminal.select` 를 부르지 않고 **스트림을 닫고
+//   `win=<새 tid>` 로 다시 연다**(pane.js `_reattach` → `_openChannel`). 그런데 attach 가 "이 pane 이
+//   마지막으로 본 터미널"(paneCurrent)을 요청 win 보다 **항상 우선**해서, 한 pane 에서 처음 붙은
+//   터미널로만 되돌아갔다 — 탭 표시는 바뀌는데 본문은 그대로(워커 탭 5개를 아무리 눌러도 코디네이터 화면).
+//   계약: 뷰어가 `pin` 을 실으면 요청 win 이 이긴다. pin 없는 재접속(앱·릴레이 — 토큰이 발급 시점의 win 을
+//   다시 싣는다)은 종전대로 기억이 이긴다.
+test('pin 재접속의 win 은 pane 기억(paneCurrent)보다 우선한다 — 탭 전환이 본문에 반영된다', { skip: !hasTmux }, async () => {
+  const a = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const b = await pty.handleTerminalRpc('terminal.new', { cwd: WS_REL });
+  const ns = pty.sessionForCwd(WS_REL).session;
+  const cap = async (t) => String(await pty.runTmux(['capture-pane', '-p', '-t', `=${pty.termSession(ns, t.index)}:0`, '-S', '-30']));
+
+  const v1 = await openViewer('v3-rw-1', { client: 'rw-1', win: a.index, deviceName: 'Rw' });
+  assert.ok(await v1.until(() => v1.json(v3.OPCODE.SNAPSHOT).length > 0), '첫 스냅샷 없음');
+  v1.ws.close();
+  await sleep(200);
+
+  // 같은 pane·같은 기기가 다른 탭(win=b)으로 다시 붙는다 = PC 의 탭 클릭.
+  const v2 = await openViewer('v3-rw-2', { client: 'rw-1', win: b.index, deviceName: 'Rw', pin: true });
+  assert.ok(await v2.until(() => v2.json(v3.OPCODE.SNAPSHOT).length > 0), '재접속 스냅샷 없음');
+  v2.send({ type: 'resize', cols: 80, rows: 24 });
+  await sleep(500);
+  v2.send({ type: 'input', data: Buffer.from('echo RW-B\r').toString('base64') });
+  assert.ok(await v2.until(() => v2.out.includes('RW-B')), '입력이 안 돌아왔다');
+  assert.ok(!(await cap(a)).includes('RW-B'), '탭을 바꿔 다시 붙었는데 옛 터미널(a)에 붙었다');
+  assert.ok((await cap(b)).includes('RW-B'), '요청한 터미널(b)에 붙지 않았다');
+  v2.ws.close();
+  await sleep(200);
+
+  // pin 없는 재접속은 **스테일 win(a)** 을 실어도 종전대로 기억(b)을 잇는다 — 앱·릴레이 토큰 재연결 경로.
+  const v3b = await openViewer('v3-rw-3', { client: 'rw-1', win: a.index, deviceName: 'Rw' });
+  assert.ok(await v3b.until(() => v3b.json(v3.OPCODE.SNAPSHOT).length > 0), 'pin 없는 재접속 스냅샷 없음');
+  v3b.send({ type: 'input', data: Buffer.from('echo RW-KEEP\r').toString('base64') });
+  assert.ok(await v3b.until(() => v3b.out.includes('RW-KEEP')), '입력이 안 돌아왔다');
+  assert.ok((await cap(b)).includes('RW-KEEP'), 'pin 없는 재접속이 마지막 터미널(b)을 잇지 않았다');
+  assert.ok(!(await cap(a)).includes('RW-KEEP'), 'pin 없는 재접속이 스테일 win(a)으로 되돌아갔다');
+  v3b.ws.close();
+  await sleep(200);
+  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: a.index });
+  await pty.handleTerminalRpc('terminal.close', { cwd: WS_REL, index: b.index });
+});
+
+test('루프백 리스너 파라미터 — pin=1 만 pin 이다', () => {
+  const { parseParams } = require('../terminal-local');
+  const p = parseParams('/v3/terminal?token=t&cwd=x&paneId=p1&client=c&win=7&pin=1');
+  assert.strictEqual(p.win, 7);
+  assert.strictEqual(p.pin, true);
+  assert.strictEqual(parseParams('/v3/terminal?token=t&win=7').pin, false);
 });

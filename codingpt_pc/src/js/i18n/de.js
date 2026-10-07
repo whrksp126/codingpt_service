@@ -1323,5 +1323,10 @@ export default {
   "구분선": "Trennlinie",
   "링크": "Link",
   "이미지·파일 첨부": "Bild oder Datei anhängen",
-  "링크 넣기": "Link einfügen"
+  "링크 넣기": "Link einfügen",
+  "이 기기에 맞추기": "An dieses Gerät anpassen",
+  "그대로 보기": "So ansehen",
+  "제목 없음": "Ohne Titel",
+  "저장됨": "Gespeichert",
+  "저장하지 못했어요 · 다시 시도 중": "Speichern fehlgeschlagen · neuer Versuch"
 };
