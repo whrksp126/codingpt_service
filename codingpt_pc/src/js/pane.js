@@ -22,7 +22,7 @@ import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAg
 import { paneApprovalCount } from "./approvals.js";
 import { orchTabRole, tabSession, GLYPH_TEXT } from "./orch-roles.js";
 import { attachTermLinks, splitPathLine } from "./term-links.js";
-import { opensInBrowserPane, homeRelOf } from "./conv-model.js";
+import { opensInBrowserPane, termPathCandidates } from "./conv-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { workerGlyph } from "./orch-model.js";
 import { ot } from "./text/orch.js";
@@ -1266,7 +1266,16 @@ export class PaneView {
     const local = this.ctx.hostDeviceId == null || (appState.daemon && appState.daemon.deviceId === this.ctx.hostDeviceId);
     let home = "";
     if (local) { try { home = String(await api.fsAbs("") || ""); } catch (_) { home = ""; } }
-    const rel = homeRelOf(pth, { home, cwd: this.ctx.localPath || "" });
+    const cands = termPathCandidates(pth, { home, cwd: this.ctx.localPath || "" });
+    //  후보마다 실제로 있는지 본다(그 폴더 목록 한 번) — 없는 곳을 열면 빈 파일 pane 만 남는다.
+    const fs = this._ideFs() || api;
+    const exists = async (rel) => {
+      const parent = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+      try { const list = await fs.fsTree(parent, 1); return (Array.isArray(list) ? list : []).some((n) => n && n.path === rel); } catch (_) { return false; }
+    };
+    let rel = null;
+    for (const c of cands) { if (await exists(c)) { rel = c; break; } }
+    if (!rel) rel = cands[0] || null;   // 못 찾아도 연다 — 파일 pane 이 "열 수 없어요" 와 파일 트리로 안내한다
     if (rel) { this.ctx.onOpenIde?.(rel); return; }
     if (local) api.openPath(pth).catch(() => {});
   }
@@ -1336,6 +1345,7 @@ export class PaneView {
       onFileSplit: this.ctx.onFileSplit,
       fs: this._ideFs(),
       single: true, // 파일 pane — 트리는 메인 영역 왼쪽 패널
+      onOpenFailed: (rel) => this.ctx.onOpenFileFailed?.(rel),   // 못 열었으면 파일 트리를 연다
     });
   }
 

@@ -157,6 +157,11 @@ export function toggleFileTree() {
   syncTreePanel(activeWs());
   renderMainTop(activeWs());
 }
+/** 파일 트리를 연다(이미 열려 있으면 그대로) — 파일 pane 이 파일을 못 열었을 때 찾아 고르게. */
+export function showFileTree() {
+  if (treeOpen()) return;
+  toggleFileTree();
+}
 function syncTreePanel(ws) {
   if (!treePanelEl) return;
   const show = !!ws && treeOpen();
@@ -310,6 +315,7 @@ function paneCtx(ws) {
     // Chat 의 tool 카드 "열기" → IDE 탭/분할(활성 pane 기준 자동 배치).
     //  이미 있는 IDE 를 먼저 쓴다(openFileSmart) — 파일을 누를 때마다 IDE 가 하나씩 늘지 않게.
     onOpenIde: (relPath) => { if (relPath) openFileSmart(relPath); },
+    onOpenFileFailed: () => showFileTree(),
     // 대화 속 링크 → 브라우저 pane(같은 주소가 이미 열려 있으면 그 탭을 앞으로).
     onOpenUrl: (url) => !!openUrlSmart(url),
     // 채팅 v2 — 터미널로 넘기기(새 터미널에서 그 에이전트를 인자와 함께 실행) / 같은 대화가 열린 탭으로 가기 /

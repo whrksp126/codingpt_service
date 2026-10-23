@@ -38,5 +38,11 @@ ok(M.inlineToHtml('`a*b*c` **d**') === '<code>a*b*c</code> <b>d</b>', '코드 �
 // 웹뷰가 실제로 만드는 모양(편집 중) → 마크다운
 ok(M.domToMd(parse('<div>가<b> 굵게 </b>나</div><div><br></div><ul><li>하나</li><li><div>둘</div></li></ul><div>끝</div>')) === '가 **굵게** 나\n\n- 하나\n- 둘\n\n끝', '편집 중 DOM: 공백을 낀 굵게 · 빈 줄 · 목록 안의 div', JSON.stringify(M.domToMd(parse('<div>가<b> 굵게 </b>나</div><div><br></div><ul><li>하나</li><li><div>둘</div></li></ul><div>끝</div>'))));
 ok(M.domToMd(parse('맨 글자<br>둘째<h2>제목</h2><div><img data-att="bbbbbb2" alt="[캡처]"></div>')) === '맨 글자\n둘째\n\n## 제목\n\n![캡처](att:bbbbbb2)', '감싸지 않은 글자 · 제목 · 이미지(이름의 대괄호는 뺀다)', JSON.stringify(M.domToMd(parse('맨 글자<br>둘째<h2>제목</h2><div><img data-att="bbbbbb2" alt="[캡처]"></div>'))));
+// 노션식 단축 입력(2026-10-23) — 줄 머리 판정 · 닫힌 인라인 서식 판정 · 디딤돌(폭 없는 공백)은 저장에 안 남는다
+const BS = { '- ': 'ul', '* ': 'ul', '1. ': 'ol', '3) ': 'ol', '[] ': 'todo', '[ ] ': 'todo', '[x] ': 'todo-checked', '# ': 'h1', '### ': 'h3', '> ': 'quote', '```': 'pre', '---': 'hr', '-\u00a0': 'ul', '#### ': '', 'a- ': '', '-- ': '' };
+ok(Object.entries(BS).every(([k, v]) => M.blockShortcut(k) === v), '줄 머리 단축 입력 판정', JSON.stringify(Object.keys(BS).map((k) => [k, M.blockShortcut(k)])));
+const IS = { '**굵게**': 'b', 'a `x`': 'code', '~~s~~': 's', '말 *기울*': 'i', '**굵*': null, '** a**': null, '*a *': null };
+ok(Object.entries(IS).every(([k, v]) => (M.inlineShortcut(k)?.tag ?? null) === v), '인라인 단축 입력 판정', JSON.stringify(Object.keys(IS).map((k) => [k, M.inlineShortcut(k)])));
+ok(M.domToMd(parse('<div>이건 <b>굵게</b>\u200b 끝</div>')) === '이건 **굵게** 끝', '디딤돌 공백은 저장에 남지 않는다', JSON.stringify(M.domToMd(parse('<div>이건 <b>굵게</b>\u200b 끝</div>'))));
 console.log(fail ? `\n${pass} PASS / ${fail} FAIL` : `\nALL PASS — pass ${pass} / fail 0`);
 process.exit(fail ? 1 : 0);

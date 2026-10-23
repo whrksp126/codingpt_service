@@ -637,5 +637,14 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   ok((pn.match(/openUrl: \(url\) => !!this\.ctx\.onOpenUrl\?\.\(url\)/g) || []).length === 2, 'pane 이 채팅 v1·v2 양쪽 ctx 에 openUrl 을 준다');
 }
 
+// 터미널 경로 후보(2026-10-23) — 에이전트가 하위 폴더 기준으로 찍은 `../x` 를 워크스페이스 기준으로도 찾는다 · `..` 는 풀어서 넘긴다(홈 jail 이 `..` 를 거절)
+{
+  const c = M.termPathCandidates('../codingpt_service/codingpt_pc/src/js/ide.js', { home: '/Users/me', cwd: 'other/project/codingpt' });
+  const want = ['other/project/codingpt_service/codingpt_pc/src/js/ide.js', 'other/project/codingpt/codingpt_service/codingpt_pc/src/js/ide.js'];
+  if (JSON.stringify(c) === JSON.stringify(want)) pass++; else { fail++; console.log('FAIL termPathCandidates ../', JSON.stringify(c)); }
+  const n = [M.normRel('a/./b/../c'), M.normRel('../x'), M.homeRelOf('/Users/me/a/../b.js', { home: '/Users/me' })];
+  if (JSON.stringify(n) === JSON.stringify(['a/c', null, 'b.js'])) pass++; else { fail++; console.log('FAIL normRel', JSON.stringify(n)); }
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

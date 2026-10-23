@@ -1130,6 +1130,24 @@ async function main() {
         try { process.stdout.write(sessionContextText(process.env)); } catch (_) { /* 훅은 조용히 성공 */ }
         return;
       }
+      // ── 도구 직전 안내 — PreToolUse 훅(동기)이 부른다. 숨은 서브에이전트·백그라운드 셸을 쓰려는 순간,
+      //  사용자가 보고 조종할 수 있는 CodingPT 기능을 한 줄로 알려 준다(2026-10-23 사용자 요청).
+      //  막지 않는다(결정 JSON 없음 — additionalContext 만). 불변식은 session-context 와 같다: 실패해도 조용히 성공.
+      case 'tool-hint': {
+        try {
+          const payload = await readStdinJson();
+          let h = toolHint(process.env, payload);
+          //  막는 것은 코디네이터(보통 에이전트)일 때만 — 워커가 다시 워커를 띄우는 길은 깊이 상한이 정한다. 데몬이 안 닿으면 막지 않는다.
+          if (h && h.deny) {
+            let role = null;
+            try { role = (await request('orch.status', {}, { timeoutMs: 1500 }))?.caller?.role || null; } catch (_) { role = null; }
+            if (role !== 'none' && role !== 'coordinator') h = { text: h.hint };   // worker·worker+coordinator·터미널 밖(user)·응답 없음
+          }
+          if (h && h.deny) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: h.text } }));
+          else if (h && h.text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: h.text } }));
+        } catch (_) { /* 훅은 조용히 성공 */ }
+        return;
+      }
       case 'claude-hook': {
         // 이벤트 7종(session-start|prompt|permission|notification|stop|stop-failure|session-end)을
         //  hook.event v2 스키마로 매핑해 데몬에 자기보고한다. 데몬이 상태의 단일 소유자다.
@@ -1183,7 +1201,7 @@ async function main() {
   } catch (e) {
     // 훅 경로는 어떤 오류에도 exit 0 + 무출력 — 훅이 0 아닌 코드로 끝나거나 stderr 를 뱉으면 claude 가
     //  사용자에게 훅 실패를 표시하고(2 는 모델을 깨우기까지 한다) 작업 흐름을 오염시킨다.
-    if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook' || c1 === 'session-context') return;
+    if (c1 === 'claude-hook' || c1 === 'codex-notify' || c1 === 'approval-hook' || c1 === 'session-context' || c1 === 'tool-hint') return;
     process.stderr.write(`오류: ${e.message}\n`);
     process.exitCode = 1;
   }
@@ -1691,6 +1709,38 @@ function printSkillGuide(name) {
  *  claude 의 SessionStart 훅 stdout 은 그 세션의 컨텍스트로 들어간다(실측) → "CodingPT 에 무엇이 있는지" 를 에이전트가 늘 안다.
  *  순수 파일 읽기다(데몬·네트워크 없음) — 훅이 세션 시작을 붙들지 않는다.
  */
+// 읽기만 하고 금방 끝나는 내장 서브에이전트 — 사용자에게 보일 일이 아니라 그대로 둔다.
+const QUICK_SUBAGENTS = new Set(['explore', 'plan', 'claude-code-guide', 'statusline-setup']);
+/**
+ * PreToolUse 페이로드 → { text, deny?, hint? } 또는 null. CodingPT 터미널(CPT_WS)에서만.
+ *  · 일을 맡기는 서브에이전트(Agent/Task — 읽기 전용 종류 제외) = 막고 CodingPT 워커로 돌린다.
+ *    안내만으로는 안 바뀌었다(실측 2026-10-23: sonnet 2/2 가 그대로 서브에이전트 — 안내는 도구가 이미 돈 뒤에 닿는다).
+ *  · 백그라운드 셸 = 안내만(세션 시작 안내서만으로 4/4 가 터미널 탭을 골랐다 — 막을 필요가 없다).
+ */
+function toolHint(env, payload) {
+  if (!env || !env.CPT_WS || !payload) return null;
+  const tool = String(payload.tool_name || '');
+  const input = payload.tool_input || {};
+  if (tool === 'Agent' || tool === 'Task') {
+    const kind = String(input.subagent_type || '').toLowerCase();
+    if (QUICK_SUBAGENTS.has(kind)) return null;
+    const hint = 'CodingPT: subagents run hidden — the user (possibly on a phone) cannot see or steer them. ' +
+      'For a real sub-job, start a CodingPT worker: `cpt orch worker-start --spec "<job>" --title "<short title>"` (guide: `cpt skills get orch`).';
+    return {
+      deny: true, hint,
+      text: 'In CodingPT, hand this sub-job to a CodingPT worker instead of a hidden subagent, so the user can watch and steer it from any device: ' +
+        '`cpt orch worker-start --spec "<the same task description>" --title "<short title>" --json`, then collect the result with `cpt orch check --wait` ' +
+        '(guide: `cpt skills get orch`). Quick read-only lookups can use an Explore subagent. If `cpt orch` fails, do the job yourself directly.',
+    };
+  }
+  if (tool === 'Bash' && input.run_in_background === true) {
+    return { text: 'CodingPT: background shells are hidden from the user. For a dev server, watcher, build or long run, ' +
+      'use a CodingPT terminal tab instead: `cpt terminal new --name <name>` → `cpt send <id> "<command>" --enter` → `cpt read-screen <id>` ' +
+      '(guide: `cpt skills get terminal`). The user can then see, stop and reuse it from any device.' };
+  }
+  return null;
+}
+
 function sessionContextText(env) {
   if (!env || !env.CPT_WS) return '';
   return readGuide('index') || '';

@@ -19,7 +19,13 @@ const t = (s, v) => i18n.t(s, v);
 const ST_TEXT = { todo: "할 일", in_progress: "진행 중", in_review: "리뷰 중", done: "완료" };
 const PRI_TEXT = { none: "없음", low: "낮음", medium: "보통", high: "높음", urgent: "긴급" };
 const SRC_TEXT = { all: "전체", codingpt: "CodingPT", github: "GitHub", gitlab: "GitLab", linear: "Linear", jira: "Jira", notion: "Notion" };
-const MODE_TEXT = { task: "새 작업(전용 브랜치)", terminal: "새 터미널(이 폴더)", orch: "오케스트레이션" };
+//  시작 방식 — "작업"은 Tasks 의 항목 이름이라(2026-10-23) 방식 이름은 "어디서·어떻게" 로 말한다. 고른 방식의 설명을 한 줄 붙인다.
+const MODE_TEXT = { task: "새 브랜치에서", terminal: "지금 폴더에서", orch: "여러 에이전트로 나눠서" };
+const MODE_HINT = {
+  task: "작업 폴더와 브랜치를 따로 만들어 에이전트를 띄워요. 지금 폴더는 그대로이고, 끝나면 확인한 뒤 합쳐요.",
+  terminal: "이 워크스페이스 폴더에 새 터미널 탭을 열고 에이전트를 띄워요. 지금 폴더의 파일을 바로 고쳐요.",
+  orch: "에이전트 하나가 일을 나눠 여러 에이전트에게 맡기고 결과를 모아요. 크고 나눌 수 있는 일에 맞아요.",
+};
 const ERR_TEXT = { GH_AUTH: "GitHub 로그인이 필요해요(gh auth login)", GH_MISSING: "gh 가 설치되어 있지 않아요", ISSUES_DISABLED: "이 저장소는 이슈를 쓰지 않아요",
   NOT_GITHUB: "GitHub 저장소가 아니에요", DAEMON_OFFLINE: "PC 가 연결되어 있지 않아요", START_FAILED: "시작하지 못했어요" };
 const errText = (code) => t(ERR_TEXT[String(code || "")] || "문제가 생겼어요. 다시 시도해 주세요");
@@ -152,7 +158,7 @@ export function updateIssuesView() {
 //   본문     = 목록 · 보드 · 표(테두리 두른 카드로 감싸지 않는다 — 면은 장소 바탕 그대로)
 //  세그는 설정의 세그먼트(.scale-seg/.scale-opt)를 그대로 쓴다: 선택 = 한 칸 올라온 무채색 면.
 const SRC_ICON = { all: () => icons.layers({ size: 13 }), codingpt: () => icons.tasksList({ size: 13 }), github: () => icons.github({ size: 13 }) };
-const STATE_CHIPS = [["open", "열린 이슈"], ["todo", "할 일"], ["in_progress", "진행 중"], ["in_review", "리뷰 중"], ["done", "완료"], ["all", "전체"]];
+const STATE_CHIPS = [["open", "열린 작업"], ["todo", "할 일"], ["in_progress", "진행 중"], ["in_review", "리뷰 중"], ["done", "완료"], ["all", "전체"]];
 const VIEW_ICON = { list: () => icons.viewList({ size: 13 }), board: () => icons.viewBoard({ size: 13 }), table: () => icons.viewTable({ size: 13 }) };
 const VIEW_TEXT = { list: "목록", board: "보드", table: "표" };
 function draw() {
@@ -171,13 +177,13 @@ function draw() {
     el.innerHTML =
       `<div class="tv-top"><span class="tv-title">Tasks</span><span class="is-grow"></span>` +
       `<button class="ic-btn tv-ic" data-act="refresh" title="${esc(t("새로고침"))}">${icons.refresh({ size: 14 })}</button>` +
-      `<button class="ic-btn tv-ic" data-act="new" title="${esc(t("새 이슈"))}">${icons.plus({ size: 15 })}</button></div>` +
+      `<button class="ic-btn tv-ic" data-act="new" title="${esc(t("새 작업"))}">${icons.plus({ size: 15 })}</button></div>` +
       `<div class="is-bar">` +
       sel("source", srcs.map((sv) => [sv, sv === "all" ? t("전체 출처") : (SRC_TEXT[sv] || sv)]), pref.source) +
       sel("state", STATE_CHIPS.map(([k, n]) => [k, t(n)]), pref.state) +
       sel("cwd", [["", t("전체 워크스페이스")], ...wss.map((w) => [w.cwd, w.label])], pref.cwd) +
       `<span class="is-count"></span><span class="is-grow"></span>` +
-      `<span class="is-qwrap">${icons.search({ size: 13 })}<input class="tk-input is-q" placeholder="${esc(t("이슈 검색"))}" value="${esc(query)}"></span>` +
+      `<span class="is-qwrap">${icons.search({ size: 13 })}<input class="tk-input is-q" placeholder="${esc(t("작업 검색"))}" value="${esc(query)}"></span>` +
       sel("view", VIEWS.map((v) => [v, t(VIEW_TEXT[v])]), pref.view) +
       `</div><div class="is-warn" hidden></div><div class="is-body"></div>`;
   }
@@ -204,7 +210,7 @@ function drawBody() {
   if (cnt) cnt.textContent = String(pref.view === "board" ? base.length : list.length);
   if (!list.length && pref.view !== "board") {
     body.className = "is-body";
-    body.innerHTML = `<div class="tv-detail-empty">${esc(d.loading && !d.at ? t("불러오는 중…") : t("이슈가 없어요"))}<div class="is-empty-sub">${esc(t("할 일을 적어 두고, 준비되면 에이전트에게 시작시키세요."))}</div></div>`;
+    body.innerHTML = `<div class="tv-detail-empty">${esc(d.loading && !d.at ? t("불러오는 중…") : t("작업이 없어요"))}<div class="is-empty-sub">${esc(t("할 일을 적어 두고, 준비되면 에이전트에게 시작시키세요."))}</div></div>`;
     return;
   }
   if (pref.view === "board") {
@@ -331,10 +337,11 @@ function openSheet(issue) {
     field("워크스페이스", `<select class="tk-input is-f-cwd" data-f="cwd"${ext ? " disabled" : ""}></select>`) +
     (ext ? "" : field("라벨(쉼표로 구분)", `<input class="tk-input is-f-labels" value="${esc(init.labels)}">`)) +
     `<span class="is-grow"></span>` +
-    `<div class="is-start"${cur ? "" : " hidden"}><span class="is-start-h">${esc(t("이 이슈로 시작"))}</span>` +
+    `<div class="is-start"${cur ? "" : " hidden"}><span class="is-start-h">${esc(t("이 작업으로 시작"))}</span>` +
     `<select class="tk-input is-s-mode">${opt(["task", "terminal", "orch"], startMode, (v) => t(MODE_TEXT[v]))}</select>` +
     `<select class="tk-input is-s-agent">${opt(["claude", "codex", "gemini"], startAgent, (v) => agentName(v) || v)}</select>` +
     `<button class="tv-btn is-go" data-s="start">${esc(t("시작"))}</button>` +
+    `<div class="is-start-hint">${esc(t(MODE_HINT[startMode] || ""))}</div>` +
     (cur && cur.link ? `<button class="tv-btn ghost" data-s="goto">${esc(t("진행 중인 일 보기"))}</button>` : "") + `</div>` +
     (ext ? "" : `<div class="is-acts"${cur ? "" : " hidden"}><button class="tv-btn ghost is-del" data-s="del">${esc(t("삭제"))}</button><span class="is-grow"></span>` +
       `<button class="tv-btn ghost is-to-gh" data-s="togh" hidden>${esc(t("GitHub 이슈로 만들기"))}</button></div>`) +
@@ -342,6 +349,7 @@ function openSheet(issue) {
   overlay.appendChild(box);
   document.body.appendChild(overlay);
   const q = (s) => box.querySelector(s);
+  q(".is-s-mode").addEventListener("change", (e) => { q(".is-start-hint").textContent = t(MODE_HINT[e.target.value] || ""); });
   const cwdSel = q(".is-f-cwd");
   const fillCwd = (c) => { cwdSel.innerHTML = `<option value="">${esc(t("정하지 않음"))}</option>` + wsOpts(h, c).map((w) => `<option value="${esc(w.cwd)}"${w.cwd === c ? " selected" : ""}>${esc(w.label)}</option>`).join(""); };
   fillCwd(init.cwd);

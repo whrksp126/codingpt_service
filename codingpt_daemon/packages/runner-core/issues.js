@@ -437,9 +437,9 @@ async function remove(p = {}) {
 function promptOf(w, mode, agent) {
   const body = withAttachments(w.source.provider === 'codingpt' ? w.body : String(w.body || '').slice(0, 6000), w.attachments);
   const head = w.source.provider === 'codingpt'
-    ? `이슈 ${w.key}: ${w.title}${body ? `\n\n${body}` : ''}`
+    ? `작업 ${w.key}: ${w.title}${body ? `\n\n${body}` : ''}`
     : `이 이슈를 해결해 주세요: ${w.source.url}\n\n제목: ${w.title}${body ? `\n\n${body}` : ''}`;
-  const tail = `\n\n(CodingPT 이슈에서 시작한 일입니다. 끝나면 무엇을 했는지 요약해 주세요. 이슈 상태는 \`cpt issue update "${w.id}" --status in_review\` 로 바꿀 수 있습니다.)`;
+  const tail = `\n\n(CodingPT Tasks 의 작업에서 시작한 일입니다. 끝나면 무엇을 했는지 요약해 주세요. 작업 상태는 \`cpt issue update "${w.id}" --status in_review\` 로 바꿀 수 있습니다.)`;
   if (mode !== 'orch') return head + tail;
   return `${agent === 'codex' ? '$orch' : '/orch'} ${head}${tail}`;
 }

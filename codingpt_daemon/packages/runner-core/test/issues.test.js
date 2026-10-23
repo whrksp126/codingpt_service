@@ -86,7 +86,7 @@ test('시작 — 작업으로: 진행 중이 되고 작업 상태를 따라간�
   const r = await M.issueStart({ id: '#1', mode: 'task', agent: 'claude', model: 'sonnet' });
   assert.equal(r.issue.status, 'in_progress'); assert.equal(r.started.taskId, 'task_1');
   const t = taskItems[0];
-  assert.equal(t.origin.kind, 'issue'); assert.equal(t.p.repo, 'work/app'); assert.match(t.p.prompt, /^이슈 #1: 결제 재시도 v2\n\n세 번까지/);
+  assert.equal(t.origin.kind, 'issue'); assert.equal(t.p.repo, 'work/app'); assert.match(t.p.prompt, /^작업 #1: 결제 재시도 v2\n\n세 번까지/);
   assert.match(t.p.prompt, /cpt issue update/); assert.deepEqual(t.p.agents, [{ id: 'claude', model: 'sonnet' }]);
   t.runs[0].state = 'review_ready';
   assert.equal((await M.issueList({})).issues.find((x) => x.number === 1 && x.source.provider === 'codingpt').status, 'in_review');
@@ -108,9 +108,9 @@ test('시작 — 새 터미널/오케스트레이션: 프롬프트로 에이전�
   assert.equal(a.started.tid, 55); assert.equal(a.issue.status, 'in_progress'); assert.equal(a.issue.link.mode, 'terminal');
   assert.match(launched[0].prompt, /^이 이슈를 해결해 주세요: https:\/\/github\.com\/me\/app\/issues\/7/); assert.equal(launched[0].cwd, 'work/app');
   await M.issueStart({ id: '#3', cwd: 'work/app', mode: 'orch', agent: 'claude' });
-  assert.match(launched[1].prompt, /^\/orch 이슈 #3: 셋째/);
+  assert.match(launched[1].prompt, /^\/orch 작업 #3: 셋째/);
   await M.issueStart({ id: '#3', cwd: 'work/app', mode: 'orch', agent: 'codex' });
-  assert.match(launched[2].prompt, /^\$orch 이슈 #3/);
+  assert.match(launched[2].prompt, /^\$orch 작업 #3/);
   const c = (await M.issueCreate({ title: '폴더 없음' })).issue;
   await assert.rejects(M.issueStart({ id: c.id, mode: 'terminal' }), { code: 'BAD_PARAMS' });
 });

@@ -153,3 +153,21 @@ test('I. 세션 컨텍스트 — CodingPT 터미널에서만 인덱스를 낸다
   const shim = fs.readFileSync(path.join(__dirname, '..', 'shim.js'), 'utf8');
   assert.match(shim, /SessionStart: \[\.\.\.hook\('session-start', 5\), \{ hooks: \[\{ type: 'command', command: `"\$\{cptAbs\}" session-context`, timeout: 5 \}\] \}\]/, 'SessionStart 에 동기 훅(무 async)으로 걸려 있다');
 });
+
+test('J. 도구 직전 안내 — 숨은 서브에이전트는 CodingPT 워커로, 백그라운드 셸은 터미널 탭으로 안내 · 데몬이 안 닿으면 막지 않는다', () => {
+  const { execFileSync } = require('child_process');
+  const CLI = path.join(__dirname, '..', '..', 'cpt-cli', 'bin', 'cpt.js');
+  const run = (payload, env) => execFileSync(process.execPath, [CLI, 'tool-hint'], { input: JSON.stringify(payload), encoding: 'utf8',
+    env: { ...process.env, CPT_SOCK: path.join(require('os').tmpdir(), `cpt-none-${process.pid}.sock`), CPT_TID: '1', CPT_TSESSION: 'x', ...env } });
+  const ws = { CPT_WS: 'work/app' };
+  const agent = run({ tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose' } }, ws);
+  const a = JSON.parse(agent).hookSpecificOutput;
+  assert.equal(a.permissionDecision, undefined, '역할을 모르면(데몬 무응답) 막지 않는다');
+  assert.match(a.additionalContext, /cpt orch worker-start/);
+  assert.equal(run({ tool_name: 'Agent', tool_input: { subagent_type: 'Explore' } }, ws), '', '읽기 전용 서브에이전트는 그대로 둔다');
+  assert.match(JSON.parse(run({ tool_name: 'Bash', tool_input: { command: 'npm run dev', run_in_background: true } }, ws)).hookSpecificOutput.additionalContext, /cpt terminal new/);
+  assert.equal(run({ tool_name: 'Bash', tool_input: { command: 'ls' } }, ws), '', '보통 셸 명령에는 아무것도 붙이지 않는다');
+  assert.equal(run({ tool_name: 'Agent', tool_input: {} }, { CPT_WS: '' }), '', 'CodingPT 터미널이 아니면 무출력');
+  const shim = fs.readFileSync(path.join(__dirname, '..', 'shim.js'), 'utf8');
+  assert.match(shim, /PreToolUse: \[\{ matcher: 'Agent\|Task\|Bash', hooks: \[\{ type: 'command', command: `"\$\{cptAbs\}" tool-hint`, timeout: 5 \}\] \}\]/);
+});

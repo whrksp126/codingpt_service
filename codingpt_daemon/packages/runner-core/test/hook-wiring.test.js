@@ -151,9 +151,9 @@ test('shim 은 훅 7종을 등록한다 (격리 stateDir, zdot 무접촉)', () =
     const hooks = JSON.parse(fs.readFileSync(path.join(iso, '.codingpt', 'shim', 'claude-hooks.json'), 'utf8'));
     const events = Object.keys(hooks.hooks).sort();
     assert.deepStrictEqual(events, [
-      'Notification', 'PermissionRequest', 'SessionEnd', 'SessionStart',
+      'Notification', 'PermissionRequest', 'PreToolUse', 'SessionEnd', 'SessionStart',
       'Stop', 'StopFailure', 'UserPromptSubmit',
-    ], `훅 7종이어야 함 (실제: ${events.join(',')})`);
+    ], `훅 8종이어야 함(PreToolUse = 도구 직전 안내) (실제: ${events.join(',')})`);
     // 래퍼가 --settings 로 이 파일을 주입해야 기존 셸에도 즉시 적용된다(zdot 수정 불필요).
     //  래퍼는 "claude 설치 + 배선 ON" 일 때만 생성된다(shim §3) — 미설치 환경(win CI 등)에선
     //  래퍼 부재가 정상이라 훅 7종 검증까지만. win32 래퍼(.cmd)는 로직이 node(win-agent-wrapper)에

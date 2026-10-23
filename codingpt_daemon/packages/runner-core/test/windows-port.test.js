@@ -153,8 +153,8 @@ test('ensureShimsWin32: 파일 세트·훅 7종·미설치 래퍼 미생성', ()
     assert.deepStrictEqual(r.skipped.sort(), ['claude', 'codex']);
     const hooks = JSON.parse(fs.readFileSync(r.hooksFile, 'utf8'));
     assert.deepStrictEqual(Object.keys(hooks.hooks).sort(),
-      ['Notification', 'PermissionRequest', 'SessionEnd', 'SessionStart', 'Stop', 'StopFailure', 'UserPromptSubmit'],
-      'darwin 과 같은 훅 7종이어야 한다(축소 모델 금지)');
+      ['Notification', 'PermissionRequest', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'StopFailure', 'UserPromptSubmit'],
+      'darwin 과 같은 훅 8종이어야 한다(축소 모델 금지)');
     for (const [ev, arr] of Object.entries(hooks.hooks)) {
       const cmd = arr[0].hooks[0].command;
       assert.match(cmd, /^cmd\.exe \/d \/s \/c "/, `${ev} 훅 명령이 win32 문법이 아니다: ${cmd}`);

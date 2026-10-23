@@ -760,7 +760,16 @@ export class IdeView {
       this._activate(group, group.open.length - 1, focusEditor);
       if (line) this._jumpTo(group, line);
     } catch (e) {
-      this._toast(String(e));
+      //  열 파일이 하나뿐인 파일 pane 에서 못 열면 빈 화면에 "왼쪽에서 파일을 선택하세요" 만 남았다(트리가 닫혀 있어도) —
+      //  무엇을 못 열었고 왜인지 말하고, 찾아 고를 수 있게 파일 트리를 연다(2026-10-23 사용자 요청).
+      if (this.opts.single && !group.open.length) {
+        const reason = String(e && e.message || e || "").replace(/^Error:\s*/, "");
+        group.empty.innerHTML = `<div class="ide-fail"><div class="ide-fail-h">${esc(i18n.t('파일을 열 수 없어요'))}</div>` +
+          `<div class="ide-fail-path">${esc(path)}</div>${reason ? `<div class="ide-fail-why">${esc(reason)}</div>` : ""}` +
+          `<div class="ide-fail-hint">${esc(i18n.t('왼쪽 파일 트리에서 찾아 열어 보세요'))}</div></div>`;
+        group.empty.style.display = "";
+        try { this.opts.onOpenFailed?.(path, e); } catch (_) { /* noop */ }
+      } else this._toast(String(e));
     }
   }
   /**

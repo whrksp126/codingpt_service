@@ -13,12 +13,12 @@ Everything goes through the `cpt` CLI. Before using a feature, read its guide: `
 | Show a file, a line or a diff; ask the user to review changes | `ide` |
 | Check or drive a mobile app (Android emulator / iOS Simulator) | `emulator` |
 | Operate native desktop apps, windows, system settings; hand a login/2FA to the user | `desktop` |
-| Split work across agents, run parts in parallel, delegate and collect results | `orch` |
+| Split work across agents, run parts in parallel, delegate and collect results — **also when you would start a subagent** for a real sub-job (research, review, one part of the change): a CodingPT worker shows up as a tab the user can watch and steer | `orch` |
 | Hand one job to another agent on its own branch and stop watching it | `tasks` |
 | Write down work to do later, or start work from an issue | `issue` |
 | Anything recurring or conditional ("every day", "whenever…", "notify me when…") | `auto` |
 | Tell the user something finished, show progress, leave a one-line status | `workspace` |
-| Run or read another terminal in this workspace | `terminal` |
+| Run or read another terminal in this workspace — **also for anything long-running** (dev server, watcher, build, long test run, a command you would put in the background): open a CodingPT terminal tab and run it there so the user can see it | `terminal` |
 | Arrange panes (split, move, focus) | `layout` |
 | Which device the user is on, where output appears, ground rules | `basics` |
 

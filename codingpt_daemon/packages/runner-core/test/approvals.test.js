@@ -341,8 +341,8 @@ test('shim: PermissionRequest 만 approval-hook 으로, 나머지 6종은 무변
     require('../shim').ensureShims();
     const hooks = JSON.parse(fs.readFileSync(path.join(iso, '.codingpt', 'shim', 'claude-hooks.json'), 'utf8')).hooks;
     assert.deepStrictEqual(Object.keys(hooks).sort(), [
-      'Notification', 'PermissionRequest', 'SessionEnd', 'SessionStart', 'Stop', 'StopFailure', 'UserPromptSubmit',
-    ], '훅 7종 유지');
+      'Notification', 'PermissionRequest', 'PreToolUse', 'SessionEnd', 'SessionStart', 'Stop', 'StopFailure', 'UserPromptSubmit',
+    ], '훅 8종 유지(PreToolUse = 도구 직전 안내)');
 
     const h = hooks.PermissionRequest[0].hooks[0];
     assert.match(h.command, /approval-hook/, 'PermissionRequest 는 승인 훅으로 라우팅돼야 한다');

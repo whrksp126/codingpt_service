@@ -1425,12 +1425,45 @@ export function homeRelOf(path, { home, cwd } = {}) {
     const h = String(home || "").replace(/[\\/]+$/, "");
     if (!h) return p;
     const norm = p.replace(/\\/g, "/"), hn = h.replace(/\\/g, "/");
-    return norm.startsWith(hn + "/") ? norm.slice(hn.length + 1) : null;
+    return norm.startsWith(hn + "/") ? normRel(norm.slice(hn.length + 1)) : null;
   }
   p = p.replace(/^\.\//, "");
   const c = String(cwd || "").replace(/^\/+|\/+$/g, "");
-  if (!c || p === c || p.startsWith(c + "/")) return p;
-  return c + "/" + p;
+  if (!c || p === c || p.startsWith(c + "/")) return normRel(p);
+  return normRel(c + "/" + p);
+}
+
+/** 홈-상대 경로의 `.`·`..` 를 푼다. 홈 위로 올라가면 null(파일 접근이 홈 안에 갇혀 있어 `..` 가 든 경로는 통째로 거절된다). */
+export function normRel(rel) {
+  const out = [];
+  for (const seg of String(rel || "").split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") { if (!out.length) return null; out.pop(); } else out.push(seg);
+  }
+  return out.join("/") || null;
+}
+
+/**
+ * 터미널에서 누른 상대 경로 → 찾아볼 홈-상대 후보들(앞이 우선).
+ *  에이전트는 **자기 작업 폴더 기준**으로 경로를 찍는데(예: 하위 폴더로 옮겨 간 claude 가 `../codingpt_service/x.js`),
+ *  우리가 아는 건 워크스페이스 폴더뿐이다 — 그 기준으로만 풀면 없는 곳을 연다(2026-10-23 사용자 신고: 파일 pane 이 비어 있음).
+ *  그래서 ① 워크스페이스 기준 ② 앞의 `../`·`./` 를 떼고 워크스페이스 기준 ③ 워크스페이스의 위 폴더 기준 순으로 둔다.
+ */
+export function termPathCandidates(path, { home, cwd } = {}) {
+  const out = [];
+  const add = (r) => { if (r && !out.includes(r)) out.push(r); };
+  add(homeRelOf(path, { home, cwd }));
+  const p = String(path || "").trim();
+  if (p && !p.startsWith("~") && !isAbsPath(p)) {
+    const tail = p.replace(/^(\.\.?\/)+/, "");
+    const c = String(cwd || "").replace(/^\/+|\/+$/g, "");
+    if (tail && tail !== p) {
+      add(normRel(c ? c + "/" + tail : tail));
+      const up = c.split("/").slice(0, -1).join("/");
+      if (up) add(normRel(up + "/" + tail));
+    }
+  }
+  return out;
 }
 
 /** 주소 비교용 — 끝 슬래시·해시 없는 꼴(같은 페이지를 두 번 열지 않기 위한 것). */

@@ -161,6 +161,8 @@ exec "${process.execPath}" "${relayJs}"
       //  순수 파일 읽기라 빠르다. /clear·압축 뒤에도 다시 발화한다. 이 파일은 CodingPT 터미널의 claude 만 읽는다(--settings).
       SessionStart: [...hook('session-start', 5), { hooks: [{ type: 'command', command: `"${cptAbs}" session-context`, timeout: 5 }] }],
       UserPromptSubmit: hook('prompt', 5),
+      // 도구 직전 안내(동기) — 숨은 서브에이전트·백그라운드 셸 대신 CodingPT 워커·터미널 탭을 알려 준다. 막지 않는다(additionalContext 만, 실측 2026-10-23).
+      PreToolUse: [{ matcher: 'Agent|Task|Bash', hooks: [{ type: 'command', command: `"${cptAbs}" tool-hint`, timeout: 5 }] }],
       PermissionRequest: [{
         hooks: [{
           type: 'command',
@@ -534,6 +536,7 @@ function ensureShimsWin32() {
     hooks: {
       SessionStart: [...hook('session-start', 5), { hooks: [{ type: 'command', command: winHookCommand(`${cptCmd} session-context`), timeout: 5 }] }],
       UserPromptSubmit: hook('prompt', 5),
+      PreToolUse: [{ matcher: 'Agent|Task|Bash', hooks: [{ type: 'command', command: winHookCommand(`${cptCmd} tool-hint`), timeout: 5 }] }],
       PermissionRequest: [{
         hooks: [{
           type: 'command',
