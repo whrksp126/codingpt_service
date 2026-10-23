@@ -153,6 +153,25 @@ fn set_ide_dirty(state: State<IdeDirty>, dirty: bool) {
     state.0.store(dirty, std::sync::atomic::Ordering::Relaxed);
 }
 
+static MAIN_FOCUSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn start_main_stall_watch(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let t0 = std::time::Instant::now();
+        if app.run_on_main_thread(move || { let _ = tx.send(()); }).is_err() {
+            return; // 이벤트 루프 종료 — 앱이 끝나는 중
+        }
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+        let ms = t0.elapsed().as_millis();
+        if ms >= 200 {
+            let focus = MAIN_FOCUSED.load(std::sync::atomic::Ordering::Relaxed) as u8;
+            applog(&format!("[stall] main {ms}ms focus={focus}"));
+        }
+    });
+}
+
 // 프론트 진단 로그 → stderr + 파일. 터미널 탭 소거/편입 같은 상태 변화를 사후 추적할 수 있게 남긴다.
 #[tauri::command]
 fn debug_log(msg: String) {
@@ -1151,6 +1170,11 @@ pub fn run() {
                 }
             }
 
+            // 메인(AppKit) 스레드 멈춤 감시 — 0.5초마다 메인 스레드에 빈 작업을 보내 도착까지 걸린 시간을 잰다.
+            //  200ms 이상이면 pc-ui.log 에 `[stall] main` 으로 남긴다(2026-10-23 주기 버벅임 추적 — 웹 쪽은
+            //  stall-monitor.js). focus=0(창이 뒤에 있음)일 땐 App Nap 지연이 섞일 수 있어 같이 적는다.
+            start_main_stall_watch(handle.clone());
+
             // 자식 감시 스레드: should_run 인데 죽었으면 백오프 후 재시작.
             {
                 let h = handle.clone();
@@ -1191,6 +1215,7 @@ pub fn run() {
             //  앱 전환(예: cmux)에 안 바뀌어 알림 present 판정이 틀어지므로, 신뢰 가능한 이 신호를 진실源으로 쓴다.
             if let tauri::WindowEvent::Focused(focused) = event {
                 if window.label() == "main" {
+                    MAIN_FOCUSED.store(*focused, std::sync::atomic::Ordering::Relaxed);
                     let _ = window.app_handle().emit("cpt-focus", *focused);
                 }
             }
@@ -1244,14 +1269,25 @@ pub fn run() {
             //  (quit_app/트레이 확정 종료는 app.exit(0)=code Some 이라 여기 걸리지 않는다)
             if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
                 if code.is_none() && ide_dirty(app_handle) {
+                    applog("[quit] 종료 요청 보류 — 미저장 IDE 변경(확인 창)");
                     api.prevent_exit();
                     show_window(app_handle);
                     let _ = app_handle.emit("cpt-quit-guard", "exit-request");
                     return;
                 }
+                applog(&format!("[quit] 종료 요청 code={code:?}"));
             }
             // 앱이 어떤 경로(Cmd+Q · 트레이 종료 · 시스템 종료)로 끝나도 데몬 자식을 정리(고아 방지).
             if let tauri::RunEvent::Exit = event {
+                // ⌘Q 뒤에 프로세스가 남지 않게 — 아래 정리(프리뷰·데몬·tmux 뷰 세션)가 어디서 멈춰도
+                //  3초 뒤엔 무조건 끝낸다(2026-10-23 "종료했는데 백그라운드에서 실행 중" 신고).
+                //  터미널(tmux 서버)·에이전트는 일부러 남긴다(사용자 확정: 앱만 확실히 꺼지게).
+                applog("[quit] 정리 시작");
+                std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    applog("[quit] 정리가 3초를 넘김 — 강제 종료");
+                    std::process::exit(0);
+                });
                 if let Some(pm) = app_handle.try_state::<preview::PreviewManager>() {
                     preview::close_all(&pm);
                 }
@@ -1267,6 +1303,7 @@ pub fn run() {
                 if let Some(ctx) = app_handle.try_state::<tmux::TmuxCtx>() {
                     pty::sweep_views(&ctx);
                 }
+                applog("[quit] 정리 끝");
             }
         });
 }

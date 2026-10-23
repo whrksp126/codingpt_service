@@ -851,6 +851,8 @@ function run(config) {
     cleanupAttachments();
     // 신선도 보고 루프(사이드바 미커밋/미푸시 배지) — 60s 주기, 변화시에만 서버 기록.
     try { require('./freshness').start(); } catch (e) { console.error('[control] freshness 시작 실패:', e.message); }
+    // 이벤트 루프 멈춤 상시 기록(pc-ui.log [daemon] [stall]) — 주기 버벅임 재발 추적.
+    try { require('./loop-lag').start(); } catch (e) { console.error('[control] loop-lag 시작 실패:', e.message); }
     // 에이전트 상태의 단일 소유자 — 훅(1차)과 agent-watch(폴백)의 보고를 받아 전이·알림을 판정한다.
     //  agent-watch 보다 먼저 띄운다(agent-watch 가 lazy require 하므로 순서 의존은 없지만 의도를 드러냄).
     //  emit 주입 = 상태 방출로(기능3 2단계). cap 게이팅은 sendEvent 안에 있어 구 back 에서는 무발화다.

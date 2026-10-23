@@ -1328,5 +1328,9 @@ export default {
   "그대로 보기": "So ansehen",
   "제목 없음": "Ohne Titel",
   "저장됨": "Gespeichert",
-  "저장하지 못했어요 · 다시 시도 중": "Speichern fehlgeschlagen · neuer Versuch"
+  "저장하지 못했어요 · 다시 시도 중": "Speichern fehlgeschlagen · neuer Versuch",
+  "기기를 끌까요?": "Gerät ausschalten?",
+  "{name}이(가) 아직 켜져 있어요. 화면을 닫아도 기기는 꺼지지 않고 계속 돌아갑니다.": "{name} läuft noch. Das Schließen der Ansicht schaltet das Gerät nicht aus.",
+  "켜 둔 채 닫기": "Schließen, weiterlaufen lassen",
+  "끄고 닫기": "Ausschalten und schließen"
 };

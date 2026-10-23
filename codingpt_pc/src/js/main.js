@@ -4,6 +4,7 @@ bootLang(); // ★ 어떤 화면 코드보다 먼저. 이 뒤에 그려지는 �
 import { state } from "./state.js";
 import * as S from "./state.js";
 import { api } from "./api.js";
+import { startStallMonitor, jobMark } from "./stall-monitor.js";
 import { mountSidebar, updateSidebar, refreshWsMeta, toggleLatestUnread, toggleNotifPanel } from "./sidebar.js";
 import {
   mountWorkspaceView,
@@ -13,6 +14,7 @@ import {
   smartAdd,
   addChatGated,
   openWebviewMenu,
+  closePaneAsked,
 } from "./workspace-view.js";
 import { registerCommands, runCommand } from "./command-run.js";
 import { commandForCombo, commandById } from "./commands.js";
@@ -234,7 +236,7 @@ registerCommands({
 
   "pane.splitRight": () => S.splitFocused("h", "terminal"),
   "pane.splitDown": () => S.splitFocused("v", "terminal"),
-  "pane.close": () => S.closeFocused(),
+  "pane.close": () => { void closePaneAsked(S.wsRuntime(state.activeWsId)?.focusId); },
   "pane.focusLeft": () => focusNeighbor("left"),
   "pane.focusRight": () => focusNeighbor("right"),
   "pane.focusUp": () => focusNeighbor("up"),
@@ -381,6 +383,7 @@ async function maybeInstallSetupUpdate() {
 
   const setupPending = restorePendingSetup();
   await S.reconcileWorkspaceHosts(); // 무귀속 로컬 워크스페이스를 이 호스트로 백필
+  startStallMonitor(); // 화면 멈춤 상시 기록(pc-ui.log [stall]) — 주기 버벅임 재발 추적
   startUiChannel(); // UI 실시간 채널(WS) — 알림/승인/채팅 이벤트 수신
   startE2ee(); // 종단간 암호화 상태(데몬 위임) — 실패해도 부팅/기능에 영향 없음(평문 폴백)
   startPreviewShieldWatch(); // punch-through: DOM 오버레이 열림 동안 프리뷰 이벤트 포워딩 차단
@@ -396,13 +399,14 @@ async function maybeInstallSetupUpdate() {
 
   // 백그라운드 폴링: 데몬 상태 / 워크스페이스 메타(브랜치·포트).
   setInterval(async () => {
+    jobMark("daemonStatus");
     const prev = JSON.stringify(state.daemon);
     state.daemon = await api.daemonStatus().catch(() => state.daemon);
     if (JSON.stringify(state.daemon) !== prev) S.emit();
   }, 4000);
-  setInterval(() => refreshWsMeta(), 15000);
+  setInterval(() => { jobMark("wsMeta"); refreshWsMeta(); }, 15000);
   // 신선도(미커밋/미푸시)·타 호스트 브랜치는 서버 메타에 실림 — 목록을 주기 재로드해 배지 갱신.
-  setInterval(() => { S.loadWorkspaces().catch(() => {}); }, 60000);
+  setInterval(() => { jobMark("loadWorkspaces"); S.loadWorkspaces().catch(() => {}); }, 60000);
 
   // 켜져 있는 동안의 자동 업데이트. 부팅 확인(maybeInstallSetupUpdate)은 위에서 이미 했고,
   //  여기서부터는 "며칠씩 안 끄는 PC" 를 맡는다 — 주기 확인 → 사전 다운로드 → 조용한 순간에 적용.

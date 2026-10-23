@@ -20,6 +20,7 @@ import { openTasksDashboard, taskTitleForWs, tasksIcon } from "./tasks-view.js";
 import { tt } from "./text/tasks.js";
 import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
 import { pickConvTab, urlKey } from "./conv-model.js";
+import { confirmEmulatorClose } from "./emulator-close.js";
 import { IdeView } from "./ide.js";
 import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 
@@ -120,6 +121,19 @@ function evictLru() {
   }
 }
 
+/** 사용자가 pane 을 닫을 때 — 모바일 화면 기기가 켜져 있으면 끌지 먼저 묻는다(emulator-close.js).
+ *  탭 이동·합치기처럼 "닫기가 아닌" 경로는 S.closePane 을 직접 부른다(묻지 않는다). */
+export async function closePaneAsked(paneId, wsId = state.activeWsId) {
+  const w = S.wsRuntime(wsId);
+  const leaf = w && paneId ? T.findLeaf(w.layout, paneId) : null;
+  if (leaf) {
+    const ok = await confirmEmulatorClose(leaf, w.layout).catch(() => true);
+    if (!ok) return false;
+  }
+  S.closePane(wsId, paneId);
+  return true;
+}
+
 // ── 파일 트리 패널(메인 영역 왼쪽) ──
 //  워크스페이스마다 IdeView(treeOnly) 하나. 파일을 누르면 다른 pane 과 같은 등급의 파일 pane 으로 연다 —
 //  이미 열려 있으면 그 pane/탭으로 포커스만 옮긴다.
@@ -129,6 +143,15 @@ const TREE_KEY = "cpt.fileTreeOpen";
 function treeOpen() { try { return localStorage.getItem(TREE_KEY) === "1"; } catch (_) { return false; } }
 // 창이 다시 포커스되면 트리를 한 번 새로 고친다(다른 기기·터미널이 바꾼 파일 반영 — 주기 폴링은 뺐다).
 window.addEventListener("focus", () => { try { treeView?.refreshTreeQuiet?.(); } catch (_) { /* noop */ } });
+// 이 워크스페이스에서 에이전트가 한 턴을 마치면 한 번 — 에이전트가 고친 파일·git 표시가 곧 보이게(주기 폴링 대체).
+S.onAgentTurnEnd((ev) => {
+  const ws = activeWs();
+  if (!treeView || !ws || treeWsId !== ws.id || document.visibilityState !== "visible") return;
+  const lp = ws.localPath || "";
+  if (ev.hostDeviceId != null && ws.hostDeviceId != null && Number(ev.hostDeviceId) !== Number(ws.hostDeviceId)) return;
+  if (lp && ev.cwd !== lp && !ev.cwd.startsWith(lp + "/")) return;
+  try { treeView.refreshTreeQuiet(); } catch (_) { /* noop */ }
+});
 export function toggleFileTree() {
   try { localStorage.setItem(TREE_KEY, treeOpen() ? "0" : "1"); } catch (_) { /* noop */ }
   syncTreePanel(activeWs());
@@ -274,7 +297,8 @@ function paneCtx(ws) {
     },
     onSurfacesChanged: () => {},
     onSurfaceClosed: (kind) => S.fireSurfaceClose(kind, ws.id),
-    onClosePane: (paneId) => S.closePane(state.activeWsId, paneId),
+    onClosePane: (paneId) => { void closePaneAsked(paneId); },
+    layout: () => S.wsRuntime(state.activeWsId)?.layout || null,
     onMoveTab: (srcId, index, dstId) => moveTab(srcId, index, dstId),
     onTabDragStart: (paneId, index, e) => beginTabDrag(paneId, index, e),
     paneDropZone: (x, y) => paneDropZone(x, y),

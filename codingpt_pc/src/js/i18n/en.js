@@ -1328,5 +1328,9 @@ export default {
   "그대로 보기": "View as is",
   "제목 없음": "Untitled",
   "저장됨": "Saved",
-  "저장하지 못했어요 · 다시 시도 중": "Couldn't save · retrying"
+  "저장하지 못했어요 · 다시 시도 중": "Couldn't save · retrying",
+  "기기를 끌까요?": "Turn off the device?",
+  "{name}이(가) 아직 켜져 있어요. 화면을 닫아도 기기는 꺼지지 않고 계속 돌아갑니다.": "{name} is still running. Closing this view does not turn the device off.",
+  "켜 둔 채 닫기": "Close, keep running",
+  "끄고 닫기": "Turn off and close"
 };

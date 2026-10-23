@@ -1328,5 +1328,9 @@ export default {
   "그대로 보기": "Ver tal cual",
   "제목 없음": "Sin título",
   "저장됨": "Guardado",
-  "저장하지 못했어요 · 다시 시도 중": "No se pudo guardar · reintentando"
+  "저장하지 못했어요 · 다시 시도 중": "No se pudo guardar · reintentando",
+  "기기를 끌까요?": "¿Apagar el dispositivo?",
+  "{name}이(가) 아직 켜져 있어요. 화면을 닫아도 기기는 꺼지지 않고 계속 돌아갑니다.": "{name} sigue encendido. Cerrar la vista no apaga el dispositivo.",
+  "켜 둔 채 닫기": "Cerrar y dejarlo encendido",
+  "끄고 닫기": "Apagar y cerrar"
 };

@@ -5,6 +5,7 @@ import { getPane, isTermTab } from "./pane.js";
 import * as i18n from './i18n/index.js';
 import { isTaskWorkspace } from "./tasks-model.js";
 import { coordinatorTidOf } from "./orch-model.js";
+import { noteSlow, jobMark } from "./stall-monitor.js";
 // Agent Tasks(§4) — 작업 run 의 worktree 워크스페이스 술어. 정본은 순수 모듈(tasks-model.js, 앱과 교차 테스트)이고
 //  여기서는 재노출만 한다(뷰 모듈이 state.js 하나만 보고 쓸 수 있게).
 export { isTaskWorkspace };
@@ -301,6 +302,7 @@ export function subscribe(fn) {
 let renderScheduled = false;
 function runListeners() {
   renderScheduled = false;
+  const t0 = performance.now();
   for (const fn of listeners) {
     try {
       fn();
@@ -308,6 +310,7 @@ function runListeners() {
       console.error(e);
     }
   }
+  noteSlow("render", performance.now() - t0);
 }
 let _surfaceSync = null;   // 공유 표면 동기화(순환 import 회피 — 첫 emit 때 붙는다)
 export function emit() {
@@ -834,6 +837,9 @@ export function dismissApproval(id) {
 //  ★ 폴백을 지우지 않는다: push 가 0건이거나 stale 이면 pane.js 의 tab.cmd 규칙이 그대로 판정한다(§1.5).
 const AGENT_STATE_STALE_MS = 15 * 60 * 1000; // 이보다 오래된 push 는 믿지 않는다(§1.5-c)
 export const agentStates = new Map();
+const _turnEndListeners = new Set();
+/** 에이전트 한 턴 종료 구독 — fn({cwd, win, agent, state, hostDeviceId}). 해제 함수를 돌려준다. */
+export function onAgentTurnEnd(fn) { _turnEndListeners.add(fn); return () => _turnEndListeners.delete(fn); }
 export function setAgentState(ev) {
   if (!ev || typeof ev.cwd !== "string" || ev.win == null) return; // cwd 는 "" (홈) 도 유효한 값이다
   const key = `${ev.cwd}|${ev.win}`;
@@ -870,6 +876,11 @@ export function setAgentState(ev) {
     recvAt: Date.now(),
   };
   agentStates.set(key, next);
+  // 한 턴이 끝났다(working → 그 밖) — 파일 트리처럼 "에이전트가 고친 결과"를 보여 주는 곳이 이때 한 번 갱신한다
+  //  (주기 폴링 대신 사건으로 — 2026-10-23 버벅임 라운드).
+  if (prev && prev.state === "working" && next.state !== "working") {
+    for (const fn of _turnEndListeners) { try { fn(next); } catch (_) { /* noop */ } }
+  }
   // 화면에 보이는 값이 그대로면 렌더를 깨우지 않는다(2026-08-15 성능 라운드) — agent_state push 는
   //  claude 가 도는 내내 초당 여러 번 오고, 그때마다 emit 하면 전 화면 재도장이 그 빈도로 돈다.
   //  recvAt/at/version 은 표시에 안 쓰이므로 갱신만 하고 조용히 넘어간다.
@@ -1330,7 +1341,7 @@ export async function reconcilePool() {
     T.eachLeaf(w.layout, (l) => { if (l.kind === "terminal") getPane(l.id)?.ensureAttached?.(); });
   } catch (_) { /* 오프라인 */ } finally { _reconciling = false; }
 }
-setInterval(() => { reconcilePool(); }, 7000);
+setInterval(() => { jobMark("reconcilePool"); reconcilePool(); }, 7000);
 
 export async function restorePersisted() {
   try {

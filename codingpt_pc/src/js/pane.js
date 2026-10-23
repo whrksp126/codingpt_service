@@ -4,6 +4,7 @@
 //  · 프리뷰 pane: URL 바 + iframe.
 //  로컬=Rust pty, 클라우드=백엔드 relay WS. OSC 9/777/99+벨 → 알림 콜백.
 import { api } from "./api.js";
+import { confirmEmulatorClose } from "./emulator-close.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { fileIcon } from "./fileicons.js";
@@ -850,8 +851,17 @@ export class PaneView {
         const x = document.createElement("span");
         x.className = "ptab-x";
         x.innerHTML = icons.x({ size: 11 });
-        x.addEventListener("click", (e) => {
+        x.addEventListener("click", async (e) => {
           e.stopPropagation();
+          // 모바일 화면 탭이면 켜진 기기를 끌지 먼저 묻는다(emulator-close.js). 취소면 그대로 둔다.
+          const tt = this.node.tabs[i];
+          if (tt && tt.kind === "emulator") {
+            const ok = await confirmEmulatorClose(tt, this.ctx.layout?.() || null).catch(() => true);
+            if (!ok) return;
+            const at = this.node.tabs.indexOf(tt); // 묻는 사이 탭 순서가 바뀌었을 수 있다
+            if (at >= 0) this.closeTab(at);
+            return;
+          }
           this.closeTab(i);
         });
         tab.appendChild(x);

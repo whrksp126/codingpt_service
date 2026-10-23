@@ -15,6 +15,7 @@ import { tx as pvTx } from "./text/index.js";
 import { FILE_PREVIEW_TEXT } from "./text/file-preview.js";
 import { REVIEW_TEXT } from "./text/review.js";
 import * as i18n from './i18n/index.js';
+import { jobMark, noteSlow } from "./stall-monitor.js";
 const FPT = pvTx(FILE_PREVIEW_TEXT);
 // 마크다운은 **채팅과 같은 렌더러**를 쓴다 — 같은 문서가 두 곳에서 다르게 보이면 안 되고,
 //  이미 안전 이스케이프가 검증된 코드다(새 렌더러를 들이면 XSS 표면이 하나 더 생긴다).
@@ -94,7 +95,6 @@ export class IdeView {
     api.debugLog(`[ide] mode=${opts.treeOnly ? "tree" : opts.single ? "file" : "legacy"} path=${opts.openPath || ""}`);
     // 외부 변경 리컨실러 — 다른 기기(모바일 IDE)/터미널/에이전트가 바꾼 파일을 열린 버퍼에 반영.
     //  로컬 디스크 직결이라 워처 없이 저비용 폴링: dirty 아닌 열린 파일만 다시 읽어 달라지면 교체.
-    this._syncTick = 0;
     this._reloadingExternal = false;
     //  원격(릴레이)은 호출당 서버 왕복이라 주기를 완화(열린 버퍼 1.2s → 4s).
     this._syncTimer = setInterval(() => { this._reconcileDisk().catch(() => {}); }, this.fs.remote ? 4000 : 1200);
@@ -447,11 +447,13 @@ export class IdeView {
   async _refreshGit() {
     if (!this.opts.gitFiles || this._gitBusy) return;
     this._gitBusy = true;
+    jobMark("treeGit");
     try {
       const res = await this.opts.gitFiles(this.root);
       const sig = statusSig(res);
       if (sig === this._gitSig && !!(res && res.repo) === this._git.repo) return;
       this._gitSig = sig;
+      const t0 = performance.now();
       this._git = buildTreeStatus(res);
       if (this.bodyEl && !this.bodyEl.querySelector(".ide-rename-input") && !(this.query || "").trim()) {
         const top = this.bodyEl.scrollTop;
@@ -460,6 +462,7 @@ export class IdeView {
         this.bodyEl.scrollTop = top;
         if (hadFocus) this._focusSelected();
       }
+      noteSlow("treeGit", performance.now() - t0);
     } catch (_) { /* 구 데몬·오프라인 — 표시 없이 둔다 */ } finally { this._gitBusy = false; }
   }
   _rel(path) { return this.root ? (path.startsWith(this.root + "/") ? path.slice(this.root.length + 1) : "") : path; }
@@ -1828,24 +1831,23 @@ export class IdeView {
           this._applyExternal(f, content);
         }
       }
-      // 트리 새로고침 — **트리 패널만**(파일 pane 은 트리가 없다), 30초마다, 창이 보일 때만, 방금 타이핑했으면 미룬다.
-      //  ★ 2026-10-03 "채팅 타이핑이 10초에 한 번씩 멈췄다 몰아서 들어간다"의 진범: 예전엔 모든 IdeView 가 7.2초마다
-      //   fsTree(깊이 4) 전체를 받아 JSON.stringify 로 비교했다 — 큰 저장소에선 메인 스레드를 수백 ms 붙든다.
-      //   파일 트리가 상시 패널이 되면서 매번 돌게 됐다. 다른 기기의 변경은 창 포커스 복귀·새로고침 버튼에서도 반영된다.
-      if (this.opts.treeOnly) {
-        this._syncTick = (this._syncTick + 1) % 25;
-        //  git 표시는 더 자주(6초 안팎) — 에이전트가 고친 파일이 곧 표시되게. 데몬이 git status 한 번 도는 값이라 화면은 안 멈춘다.
-        if (this._syncTick % 5 === 1 && document.visibilityState === "visible") void this._refreshGit();
-        const idle = Date.now() - _lastKeyAt > 4000;
-        if (this._syncTick === 0 && idle && document.visibilityState === "visible" && !this.searchTree) await this.refreshTreeQuiet();
-      }
+      // 트리·git 표시는 여기서 **주기로 돌리지 않는다**(2026-10-23).
+      //  ★ 0.1.385 는 7.2초 전체 재조회를 "없앴다"고 했지만 실제로는 30초로 늘린 것뿐이었고(키 입력만 보고 미뤄서
+      //   스크롤 중엔 그대로 돌았다), 뒤에 6초 git 갱신까지 붙었다 — 사용자 "1~5분마다 끊긴다" 재발의 용의자.
+      //  갱신은 사건으로만 한다: 창 포커스 복귀·패널 열기·내 파일 조작(기존) + 에이전트 한 턴이 끝났을 때
+      //  (workspace-view 가 state.onAgentTurnEnd 로 부른다 — 에이전트가 고친 파일이 곧 표시된다).
     } finally { this._reconciling = false; }
   }
   async refreshTreeQuiet() {
+    if (this._treeBusy) return;
+    this._treeBusy = true;
+    jobMark("tree");
     try {
       const t = await this.fs.fsTree(this.root, 4);
+      const t0 = performance.now();
       if (JSON.stringify(t) !== JSON.stringify(this.tree)) { this.tree = t; this._renderTree(); }
-    } catch (_) { /* noop */ }
+      noteSlow("tree", performance.now() - t0);
+    } catch (_) { /* noop */ } finally { this._treeBusy = false; }
     void this._refreshGit();
   }
   _applyExternal(f, content) {
@@ -1883,8 +1885,6 @@ export class IdeView {
 
 // ── 컨텍스트 메뉴 전역 ──
 let activeMenu = null;
-let _lastKeyAt = 0; // 마지막 키 입력 시각 — 타이핑 중엔 무거운 백그라운드 갱신을 미룬다
-window.addEventListener("keydown", () => { _lastKeyAt = Date.now(); }, true);
 let _dragAlt = false; // 트리 드래그 중 ⌥ 상태(놓는 순간 복사/이동 판정)
 window.addEventListener("keydown", (e) => { if (e.key === "Alt") _dragAlt = true; }, true);
 window.addEventListener("keyup", (e) => { if (e.key === "Alt") _dragAlt = false; }, true);
