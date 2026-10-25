@@ -318,6 +318,29 @@ async function handleAgentsRpc(cmd, a) {
  *  타임아웃(기본 6초)이면 그래도 보내고 `ready:false` 로 정직하게 알린다 — 아무것도 안 하는 것보다,
  *  "명령이 안 들어갔을 수 있다"를 UI 가 말할 수 있게 하는 편이 낫다.
  */
+const YN_PROMPT_RE = /\[(?:Y\/n|y\/N|y\/n|Y\/N|yes\/no)\]\s*\??\s*$/;
+async function settleShellPrompt(target, budgetMs = 4000) {
+  const deadline = Date.now() + budgetMs;
+  let prev = null;
+  let answered = 0;
+  while (Date.now() < deadline) {
+    let screen = '';
+    try { screen = String(await termBackend.capture(target, { lines: 8 }) || ''); } catch (_) { return; }
+    const last = screen.split('\n').map((l) => l.trimEnd()).filter(Boolean).pop() || '';
+    if (YN_PROMPT_RE.test(last) && answered < 3) {
+      answered++;
+      await termBackend.sendKeys(target, { keys: ['n'], literal: true });
+      await termBackend.sendKeys(target, { keys: ['Enter'] });
+      prev = null;
+      await new Promise((r) => setTimeout(r, 300));
+      continue;
+    }
+    if (prev !== null && screen === prev) return; // 두 번 연속 같은 화면 = rc 출력이 끝났다
+    prev = screen;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 async function launchAgentInTerminal(agentsLib, a) {
   const id = String(a.id || a.agent || '').trim();
   const items = await agentsLib.list({ version: false });
@@ -376,6 +399,10 @@ async function launchAgentInTerminal(agentsLib, a) {
     lastW = w;
     await new Promise((r) => setTimeout(r, 220));
   }
+  // ★ 셸 rc 가 띄운 질문(oh-my-zsh "Would you like to update? [Y/n]" 등)에 실행 줄이 먹히지 않게 —
+  //  화면이 잠깐 멈출 때까지 보고, 마지막 줄이 예/아니오 질문이면 n 으로 넘긴 뒤 프롬프트를 다시 기다린다
+  //  (2026-10-24 실측: 질문이 첫 글자 c 를 답으로 먹어 `laude: command not found`).
+  await settleShellPrompt(target);
   const command = agentsLib.launchCommand(id);
   // Agent Tasks(설계 §2.5 10, 부록 Z B-2) — 작업 run 에 한해 런치 인자를 붙인다(프롬프트 파일 cat 치환).
   //  일반 `agents.launch` 는 args 가 없어 동작이 그대로다("런치 인자 없음" 원칙 유지).
@@ -492,7 +519,7 @@ function handleAutoRpc(method, params, meta) {
 // ── 오케스트레이션(orch.*) — 설계 정본 docs/orchestration-design.md ─────────────────
 //  orch.js 는 순수 모듈 + 주입(tasks.js 와 같은 규약). 터미널·실행·입력·관찰·알림의 실제 구현을 여기서 넣는다.
 const notifyOrchChanged = coalescedNotifier('orch.changed',
-  (host, cur) => ({ host, runIds: [...cur.ids], reason: cur.reason }));
+  (host, cur) => ({ host, runIds: [...cur.ids], reason: cur.reason, reasons: [...cur.reasons] }));
 const ORCH_SHELLS = new Set(['zsh', '-zsh', 'bash', '-bash', 'sh', '-sh', 'fish', '-fish', 'login', 'tcsh', '-tcsh',
   'pwsh', 'pwsh.exe', 'powershell', 'powershell.exe', 'cmd', 'cmd.exe']);
 let orchNames = { at: 0, set: null };
@@ -668,9 +695,11 @@ function coalescedNotifier(cmd, shape) {
   let timer = null;
   return function notifyChanged(payload) {
     const p = payload || {};
-    if (!pend) pend = { ids: new Set(), reason: p.reason || 'updated', extra: {} };
+    if (!pend) pend = { ids: new Set(), reason: p.reason || 'updated', reasons: new Set(), extra: {} };
     for (const id of (Array.isArray(p.ids) ? p.ids : [])) pend.ids.add(id);
-    if (p.reason) pend.reason = p.reason;
+    // 사유는 합집합으로 들고 간다 — 마지막 것만 남기면 300ms 안에 겹친 다른 신호(예: 에이전트 상태)가
+    //  'issues' 를 덮어 PC 가 이슈 목록을 다시 안 읽었다(2026-10-25: 완료 처리가 사이드바에 안 따라옴).
+    if (p.reason) { pend.reason = p.reason; pend.reasons.add(p.reason); }
     for (const k of Object.keys(p)) if (k !== 'ids' && k !== 'reason') pend.extra[k] = p[k];
     if (timer) return;
     timer = setTimeout(() => {

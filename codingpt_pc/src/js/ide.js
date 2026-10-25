@@ -743,7 +743,17 @@ export class IdeView {
             const r = await this.fs.fsReadBytes(path);
             preview = { kind, base64: r.base64, size: r.size };
           } catch (e) {
-            preview = { kind: "unsupported", size: 0, error: String(e && e.message || e) };
+            // 홈-상대 읽기가 실패해도(절대경로로 넘어온 파일·홈 밖 경로) 이 PC 파일이면 절대경로로 한 번 더.
+            //  png 같은 기본 형식이 "지원하지 않는 형식"으로 떨어지던 원인 — 형식이 아니라 읽기 실패였다.
+            let r = null;
+            if (!this.fs.remote) {
+              try {
+                const abs = path.startsWith("/") ? path : String(await api.fsAbs(path) || "");
+                if (abs) r = { base64: await api.filePreviewB64(abs), size: 0 };
+              } catch (_) { r = null; }
+            }
+            preview = r && r.base64 ? { kind, base64: r.base64, size: r.size }
+              : { kind: "unsupported", size: 0, error: String(e && e.message || e) };
           }
           doc = CM.Doc("", "text/plain"); // 자리만 — 미리보기 탭은 에디터를 안 쓴다
         } else {
@@ -847,7 +857,10 @@ export class IdeView {
       // unsupported — 무엇인지·얼마나 큰지 말해 주고, 그래도 열고 싶으면 열 수 있게 둔다.
       const n = document.createElement("div");
       n.className = "ide-pv-note";
-      n.textContent = FPT.unsupported + (K.size ? ` · ${fmtBytes(K.size)}` : "");
+      // 형식은 미리보기 대상인데 읽기에 실패한 경우엔 "형식" 탓을 하지 않고 실제 이유를 말한다.
+      n.textContent = K.error && PV.previewKind(f.path) !== "unsupported"
+        ? `${i18n.t("파일을 읽을 수 없습니다.")} · ${K.error}`
+        : FPT.unsupported + (K.size ? ` · ${fmtBytes(K.size)}` : "");
       const b = document.createElement("button");
       b.className = "ide-pv-btn";
       b.textContent = FPT.openAsText;

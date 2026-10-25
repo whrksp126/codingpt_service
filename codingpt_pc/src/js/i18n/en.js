@@ -1337,5 +1337,9 @@ export default {
   "기기를 끌까요?": "Turn off the device?",
   "{name}이(가) 아직 켜져 있어요. 화면을 닫아도 기기는 꺼지지 않고 계속 돌아갑니다.": "{name} is still running. Closing this view does not turn the device off.",
   "켜 둔 채 닫기": "Close, keep running",
-  "끄고 닫기": "Turn off and close"
+  "끄고 닫기": "Turn off and close",
+  "이 작업을 시작할까요?": "Start this task?",
+  "상태만 바꾸기": "Change status only",
+  "끌어서 옮기기": "Drag to move",
+  "텍스트": "Text"
 };

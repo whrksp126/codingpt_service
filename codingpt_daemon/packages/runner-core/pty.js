@@ -184,6 +184,10 @@ function poolEnvMap(abs, tid, tsession) {
     //  256색으로 판정해 hex 색을 근사 인덱스로 강등한다(#264F78 → 48;5;66 세이지 실측). tmux 쪽
     //  RGB 관통은 tmux.conf terminal-features 가 담당 — 이 한 쌍이어야 색이 끝까지 산다.
     out.COLORTERM = 'truecolor';
+    // oh-my-zsh 업데이트 묻기([Y/n]) 끄기 — 새 터미널에 자동으로 치는 에이전트 실행 줄을 그 질문이 삼켜
+    //  `laude: command not found` 가 나던 원인(2026-10-24 신고). zstyle ':omz:update' mode 를 직접 정한
+    //  사용자는 그 설정이 이긴다(omz 가 이 변수는 zstyle 미설정일 때만 본다). 업데이트는 `omz update` 로.
+    out.DISABLE_AUTO_UPDATE = 'true';
     if (Number.isFinite(Number(tid)) && Number(tid) > 0 && tsession) {
       out.CPT_TID = String(Number(tid));
       out.CPT_TSESSION = String(tsession);
@@ -614,7 +618,16 @@ async function attachPty(params, io) {
 // ── 멀티 터미널 RPC ──
 // 터미널 = 전용 세션(termSession) 모델. list/new/close = 전 기기 공통 durable 목록(tmux 세션들),
 // select = 이 pane 스트림의 attach 대상 교체. 전용 소켓 -L codingpt 규율 유지.
-function runTmux(args) {
+// macOS: 서버를 만들 수 있는 명령 앞에서 launchd 서버를 먼저 세운다(tmux-launchd.js — ⌘Q 뒤 Dock 의
+//  "백그라운드에서 실행 중" 방지). 이미 떠 있으면 확인 1회로 끝난다.
+function ensureTmuxServer() {
+  const tmux = findTmux();
+  if (!tmux) return Promise.resolve(false);
+  return require('./tmux-launchd').ensureServer({ tmux, socket: TMUX_SOCKET, confArgs: CONF_ARGS, env: tmuxEnv() });
+}
+
+async function runTmux(args) {
+  if (args.includes('new-session')) await ensureTmuxServer();
   return new Promise((resolve, reject) => {
     const tmux = findTmux();
     if (!tmux) return reject(new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)'));
@@ -861,4 +874,4 @@ async function healStaleTerminals(idleSec = 45) {
   return healed;
 }
 
-module.exports = { openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, injectPoolEnv, ensureAutoRename, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };
+module.exports = { ensureTmuxServer, openPtyStream, attachPty, wsPtyIo, findTmux, tmuxEnv, handleTerminalRpc, runTmux, poolWindows, sessionForCwd, paneSession, termSession, newTid, listTerminals, createTerminal, migrateLegacyPool, resolveTid, reapStaleViews, healStaleTerminals, poolEnvMap, injectPoolEnv, ensureAutoRename, TMUX_SOCKET, TMUX_SESSION, CONF_ARGS };

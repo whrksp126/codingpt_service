@@ -69,9 +69,11 @@ function forget(session) {
 
 /** tmux 서버 생존 여부 — true/false, 판정 불가(다른 오류)면 null. */
 async function serverAlive() {
-  try { await pty().runTmux(['list-sessions', '-F', '#{session_name}']); return true; } catch (e) {
+  //  세션 0개인 서버 = 서버 없음과 같다. macOS 는 서버를 launchd 로 띄워(tmux-launchd.js, -D = exit-empty 꺼짐)
+  //  세션이 다 닫혀도 서버가 남는다 — 예전엔 마지막 세션과 함께 서버가 꺼졌고 이 함수의 뜻은 그 시절 그대로다.
+  try { const out = await pty().runTmux(['list-sessions', '-F', '#{session_name}']); return !!String(out).trim(); } catch (e) {
     const m = String((e && e.message) || e);
-    if (/no server running|error connecting|No such file/i.test(m)) return false;
+    if (/no server running|error connecting|No such file|no sessions/i.test(m)) return false;
     return null;
   }
 }

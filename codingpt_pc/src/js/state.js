@@ -724,6 +724,59 @@ export function readThread(threadId) {
   if (ids.length) api.notifRead({ ids }).catch(() => {});
 }
 
+// 이미 본 알림·확인할 길이 없는 알림 자동 정리(2026-10-25 신고: 끝난 작업의 알림이 9+ 로 남아 지울 길이 없었다).
+//  ① 지금 화면에 떠 있는 터미널 탭의 알림 — 창이 앞에 있고 그 탭이 pane 의 활성 탭이면 이미 본 것이다
+//     (종전엔 탭을 **다시 클릭**해야만 읽음이 됐다 — 이미 보고 있던 탭은 영영 안 지워졌다).
+//  ② 그 워크스페이스에 더는 없는 터미널(win)의 알림 — 탭이 닫혔으니 눌러도 갈 곳이 없다.
+//     레이아웃이 아직 안 그려진 부팅 직후 오판을 막으려 터미널 탭이 1개 이상 있는 워크스페이스만,
+//     막 생긴 알림(30초 이내)은 탭이 늦게 붙는 경주가 있어 건너뛴다. 승인 요청은 자기 수명이 있어 제외.
+let _sweepQueued = false;
+export function sweepSeenNotifs() {
+  if (_sweepQueued) return;
+  _sweepQueued = true;
+  queueMicrotask(() => { _sweepQueued = false; doSweepSeenNotifs(); });
+}
+function doSweepSeenNotifs() {
+  const unread = state.notifications.filter((n) => !n.read && n.cwd && n.win != null && n.kind !== "approval_request");
+  if (!unread.length) return;
+  const hits = [];
+  const now = Date.now();
+  const front = typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus?.();
+  for (const w of state.workspaces) {
+    if (!w.localPath || !isThisHost(w)) continue;
+    const rt = state.ws[w.id];
+    if (!rt || !rt.layout) continue;
+    const mine = unread.filter((n) => n.cwd === w.localPath);
+    if (!mine.length) continue;
+    const all = new Set();
+    const shown = new Set();
+    T.eachLeaf(rt.layout, (l) => {
+      if (l.kind !== "terminal") return;
+      (l.tabs || []).forEach((t, i) => {
+        if (!t || typeof t.win !== "number") return;
+        all.add(t.win);
+        if (i === (l.active || 0)) shown.add(t.win);
+      });
+    });
+    if (!all.size) continue;
+    const viewing = front && state.view === "workspace" && state.activeWsId === w.id;
+    for (const n of mine) {
+      const win = Number(n.win);
+      const ts = Number(new Date(n.createdAt || n.ts || 0)) || 0;
+      if ((viewing && shown.has(win)) || (!all.has(win) && ts && now - ts > 30000)) hits.push(n);
+    }
+  }
+  if (!hits.length) return;
+  hits.forEach((n) => (n.read = true));
+  const ids = hits.map((n) => n.id).filter((id) => typeof id === "number");
+  if (ids.length) api.notifRead({ ids }).catch(() => {});
+  emit();
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("focus", () => sweepSeenNotifs());
+  listeners.add(() => sweepSeenNotifs());
+}
+
 // 워크스페이스별 미읽음 수 — 서버 행(workspaceId/cwd)과 로컬 폴백(wsId) 모두 매칭.
 export function unreadForWs(w) {
   if (!w) return 0;

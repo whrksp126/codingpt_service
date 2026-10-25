@@ -78,8 +78,13 @@ export async function refreshIssues({ fresh = false } = {}) {
   if (sheet && sheet.onRemote && h === curHost()) sheet.onRemote();   // 열린 이슈 — 고치는 중이 아닌 칸만 따라간다
   if (cur.again) { cur.again = false; void refreshIssues(); }
 }
-/** ui_command orch.changed(reason=issues) — 열려 있을 때만 다시 읽는다(닫혀 있으면 열 때 읽는다). */
-export function onIssuesChanged() { if (state.view === "issues") void refreshIssues(); else { const d = data.get(curHost()); if (d) d.at = 0; } }
+/** ui_command orch.changed(reason=issues) — 화면이 닫혀 있어도 다시 읽는다. 사이드바 Tasks 배지가 이 목록을 세고,
+ *  닫혀 있을 때 옛 목록을 들고 있으면 들어가는 순간 옛 카드가 보였다가 사라졌다(2026-10-25 신고). 신호 폭주는 250ms 로 합친다. */
+let changedTimer = null;
+export function onIssuesChanged() {
+  clearTimeout(changedTimer);
+  changedTimer = setTimeout(() => { changedTimer = null; void refreshIssues(); }, 250);
+}
 
 export function openIssues() {
   S.setView("issues");
@@ -110,7 +115,7 @@ function rowHtml(h, x) {
     `<span class="is-ws">${esc(wsName(h, x.cwd))}</span></button>`;
 }
 function cardHtml(h, x) {
-  return `<div class="is-card" draggable="true" data-id="${esc(x.id)}"><div class="is-card-top"><span class="is-key">${esc(x.key)}</span>${linkMark(x)}${priChip(x)}${srcChip(x)}</div>` +
+  return `<div class="is-card" data-id="${esc(x.id)}"><div class="is-card-top"><span class="is-key">${esc(x.key)}</span>${linkMark(x)}${priChip(x)}${srcChip(x)}</div>` +
     `<div class="is-card-title${x.title ? "" : " blank"}">${esc(titleOf(x))}</div><div class="is-card-ws">${esc(wsName(h, x.cwd))}</div></div>`;
 }
 
@@ -128,18 +133,93 @@ export function mountIssuesView(container) {
     pref[k] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
     savePref(); draw();
   });
-  // 보드 — 카드를 끌어 다른 열에 놓으면 상태가 바뀐다.
-  el.addEventListener("dragstart", (e) => { const c = e.target.closest?.(".is-card"); if (c) { e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move"; } });
-  el.addEventListener("dragover", (e) => { const col = e.target.closest?.(".is-col"); if (col) { e.preventDefault(); col.classList.add("over"); } });
-  el.addEventListener("dragleave", (e) => { e.target.closest?.(".is-col")?.classList.remove("over"); });
-  el.addEventListener("drop", (e) => {
-    const col = e.target.closest?.(".is-col");
-    if (!col) return;
-    e.preventDefault(); col.classList.remove("over");
-    const id = e.dataTransfer.getData("text/plain");
-    const x = (data.get(curHost())?.issues || []).find((y) => y.id === id);
-    if (x && x.status !== col.dataset.status) { x.status = col.dataset.status; drawBody(); void act("orch.issueUpdate", { id, status: col.dataset.status }); }
+  // 보드 — 카드를 끌어 다른 열에 놓으면 상태가 바뀐다. HTML5 drag 는 이 웹뷰에서 OS 드롭 처리와 겹쳐
+  //  놓기가 오지 않는다(2026-10-25 신고: 끌어도 안 옮겨짐) → 탭 끌기와 같은 포인터 방식으로 직접 끈다.
+  el.addEventListener("pointerdown", onCardPointerDown);
+}
+
+let drag = null;            // { id, card, x0, y0, ghost, dx, dy, col }
+let suppressClick = false;  // 끌기 끝의 click 이 카드 상세를 열지 않게
+function onCardPointerDown(e) {
+  if (e.button !== 0) return;
+  const card = e.target.closest?.(".is-card");
+  if (!card) return;
+  const r = card.getBoundingClientRect();
+  drag = { id: card.dataset.id, card, x0: e.clientX, y0: e.clientY, ghost: null, dx: e.clientX - r.left, dy: e.clientY - r.top, col: null };
+  window.addEventListener("pointermove", onCardPointerMove);
+  window.addEventListener("pointerup", onCardPointerUp);
+  window.addEventListener("pointercancel", endCardDrag);
+}
+function colAt(x, y) { return document.elementFromPoint(x, y)?.closest?.(".is-col") || null; }
+function onCardPointerMove(e) {
+  if (!drag) return;
+  if (!drag.ghost) {
+    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;   // 클릭과 구분
+    const r = drag.card.getBoundingClientRect();
+    const g = drag.card.cloneNode(true);
+    g.classList.add("is-drag-ghost");
+    g.style.width = `${r.width}px`;
+    document.body.appendChild(g);
+    drag.ghost = g;
+    drag.card.classList.add("drag-src");
+    document.body.classList.add("is-card-dragging");
+  }
+  drag.ghost.style.left = `${e.clientX - drag.dx}px`;
+  drag.ghost.style.top = `${e.clientY - drag.dy}px`;
+  const col = colAt(e.clientX, e.clientY);
+  if (col !== drag.col) { drag.col?.classList.remove("over"); col?.classList.add("over"); drag.col = col; }
+}
+function onCardPointerUp(e) {
+  const d = drag;
+  const moved = !!(d && d.ghost);
+  const col = moved ? colAt(e.clientX, e.clientY) : null;
+  endCardDrag();
+  if (!moved) return;
+  suppressClick = true; setTimeout(() => { suppressClick = false; }, 0);
+  if (!col) return;
+  const x = (data.get(curHost())?.issues || []).find((y) => y.id === d.id);
+  if (x && x.status !== col.dataset.status) moveIssue(x, col.dataset.status);
+}
+function endCardDrag() {
+  window.removeEventListener("pointermove", onCardPointerMove);
+  window.removeEventListener("pointerup", onCardPointerUp);
+  window.removeEventListener("pointercancel", endCardDrag);
+  if (drag) { drag.ghost?.remove(); drag.card.classList.remove("drag-src"); drag.col?.classList.remove("over"); }
+  document.body.classList.remove("is-card-dragging");
+  drag = null;
+}
+/** 보드에서 상태를 옮긴다. 할 일 → 진행 중 은 "시작하라" 는 뜻일 가능성이 크다 — 물어보고 바로 시작한다. */
+function moveIssue(x, status) {
+  const setOnly = () => { x.status = status; drawBody(); void act("orch.issueUpdate", { id: x.id, status }); };
+  if (!(x.status === "todo" && status === "in_progress") || x.source?.provider && x.source.provider !== "codingpt") { setOnly(); return; }
+  const h = curHost();
+  const mode = (pref.start && pref.start.mode) || "task";
+  const agent = (pref.start && pref.start.agent) || "claude";
+  const bd = document.createElement("div");
+  bd.className = "quit-guard-backdrop";
+  bd.innerHTML = `<div class="quit-guard"><div class="qg-title">${esc(t("이 작업을 시작할까요?"))}</div>` +
+    `<div class="qg-desc">${esc(`${x.key} ${titleOf(x)}`)}<br/>${esc(`${agentName(agent) || agent} · ${t(MODE_TEXT[mode] || "")}${x.cwd ? " · " + wsName(h, x.cwd) : ""}`)}</div>` +
+    `<div class="qg-actions"><button class="qg-btn qg-cancel" data-k="cancel">${esc(t("취소"))}</button>` +
+    `<button class="qg-btn" data-k="set">${esc(t("상태만 바꾸기"))}</button>` +
+    `<button class="qg-btn qg-quit qg-confirm" data-k="start">${esc(t("시작"))}</button></div></div>`;
+  const done = () => { bd.remove(); document.removeEventListener("keydown", onKey, true); };
+  const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); done(); } else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(); void start(); } };
+  const start = async () => {
+    if (!x.cwd) { openSheet(x); return; }   // 어디서 시작할지 모르면 상세에서 고르게 한다
+    x.status = status; drawBody();
+    const r = await act("orch.issueStart", { id: x.id, mode, agent, cwd: x.cwd }, t("시작했어요"));
+    if (r && r.started) goTo(h, { ...r.started, cwd: x.cwd });
+  };
+  bd.addEventListener("click", (e) => {
+    if (e.target === bd) { done(); return; }
+    const k = e.target.closest?.("[data-k]")?.dataset.k;
+    if (!k) return;
+    done();
+    if (k === "set") setOnly(); else if (k === "start") void start();
   });
+  document.addEventListener("keydown", onKey, true);
+  document.body.appendChild(bd);
+  setTimeout(() => bd.querySelector(".qg-confirm")?.focus(), 0);
 }
 
 let topSig = "";
@@ -236,6 +316,7 @@ function drawBody() {
 }
 
 function onClick(e) {
+  if (suppressClick) return;
   const seg = e.target.closest?.("[data-view]");
   if (seg) { pref.view = seg.dataset.view; savePref(); draw(); return; }
   const src = e.target.closest?.("[data-source]");

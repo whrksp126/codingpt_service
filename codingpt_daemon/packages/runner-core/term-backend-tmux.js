@@ -77,7 +77,7 @@ async function kill(name) {
   try { await pty().runTmux(['kill-session', '-t', '=' + String(name)]); }
   catch (e) {
     const msg = String((e && e.message) || '');
-    if (!/no server running|can't find session|session not found/i.test(msg)) throw e;
+    if (!/no server running|can't find session|session not found|no current target/i.test(msg)) throw e;   // 세션 0개 서버(launchd -D)는 no current target
   }
   return {};
 }
@@ -239,6 +239,7 @@ async function attach(name, o = {}) {
   const tmux = p.findTmux();
   if (!tmux) throw new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)');
   const args = ['-L', p.TMUX_SOCKET, '-u'];
+  if (o.sharedCreate && p.ensureTmuxServer) await p.ensureTmuxServer();
   if (o.sharedCreate) args.push(...(p.CONF_ARGS || []), 'new-session', '-A', '-s', String(name), '-c', o.cwd);
   else {
     args.push('attach-session');

@@ -1101,7 +1101,9 @@ const handlers = {
   //  내용은 그 host 의 orch.list 로 다시 읽는다(300ms 디바운스). 반드시 ok 로 회신(무응답 = UI_TIMEOUT).
   "orch.changed": async (p) => {
     // 이슈가 바뀐 신호는 이슈 화면만 다시 읽는다(묶음·에이전트 행은 그대로다).
-    if (p && p.reason === "issues") { (await import("./issues-view.js")).onIssuesChanged(); return { ok: true }; }
+    //  에이전트가 `cpt issue update` 로 상태를 바꾼 경우에도 사이드바(Tasks 배지·세션 행)가 바로 따라가야 한다
+    //  (2026-10-25 신고) → 이슈 목록과 함께 에이전트 트리도 다시 읽는다.
+    if (p && (p.reason === "issues" || (Array.isArray(p.reasons) && p.reasons.includes("issues")))) (await import("./issues-view.js")).onIssuesChanged();
     const m = await import("./orch-view.js");
     m.onOrchChanged(p || {});
     return { ok: true };

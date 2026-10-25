@@ -1337,5 +1337,9 @@ export default {
   "기기를 끌까요?": "¿Apagar el dispositivo?",
   "{name}이(가) 아직 켜져 있어요. 화면을 닫아도 기기는 꺼지지 않고 계속 돌아갑니다.": "{name} sigue encendido. Cerrar la vista no apaga el dispositivo.",
   "켜 둔 채 닫기": "Cerrar y dejarlo encendido",
-  "끄고 닫기": "Apagar y cerrar"
+  "끄고 닫기": "Apagar y cerrar",
+  "이 작업을 시작할까요?": "¿Iniciar esta tarea?",
+  "상태만 바꾸기": "Solo cambiar estado",
+  "끌어서 옮기기": "Arrastra para mover",
+  "텍스트": "Texto"
 };

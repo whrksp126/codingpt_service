@@ -435,6 +435,195 @@ export function createRichEditor(o) {
     })();
   });
   doc.addEventListener("click", (e) => { const a = e.target.closest?.("a"); if (a && (e.metaKey || e.ctrlKey) && o.onOpenLink) { e.preventDefault(); o.onOpenLink(a.getAttribute("href")); } });
+
+  // ── 블록 옮기기(노션식, 2026-10-25 사용자 요청: "이미지 같은거 잡고 이동배치") ──
+  //  줄·제목·인용·코드·구분선·목록 항목·이미지가 각각 한 블록이다. 줄에 올리면 왼쪽에 손잡이(⋮⋮)가 뜨고, 잡아 끌면
+  //  놓일 자리에 가로선이 보인다. 이미지는 그림을 바로 잡아 끌어도 된다. HTML5 drag 는 이 웹뷰에서 OS 드롭과 겹쳐
+  //  쓰지 않는다 — 포인터로 직접 옮긴다. 옮긴 뒤 한 단계로 기록(⌘Z 한 번이면 되돌아간다)하고 input 을 알린다(저장 경로).
+  el.style.position = "relative";
+  const handle = document.createElement("div");
+  handle.className = "re-handle";
+  handle.title = t("끌어서 옮기기");
+  handle.innerHTML = `<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg>`;
+  handle.hidden = true;
+  const dropLine = document.createElement("div");
+  dropLine.className = "re-dropline";
+  dropLine.hidden = true;
+  el.append(handle, dropLine);
+  let hoverBlock = null;
+  /** 노드가 속한 블록 — 목록이면 항목(LI), 아니면 본문의 직계 자식. */
+  const blockFor = (n) => {
+    while (n && n !== doc) {
+      if (n.nodeType === 1 && n.tagName === "LI" && n.parentNode && n.parentNode.parentNode === doc) return n;
+      if (n.parentNode === doc) return n.nodeType === 1 ? n : null;
+      n = n.parentNode;
+    }
+    return null;
+  };
+  const allBlocks = () => { const out = []; for (const c of Array.from(doc.children)) { if (/^(UL|OL)$/.test(c.tagName)) out.push(...Array.from(c.children).filter((x) => x.tagName === "LI")); else out.push(c); } return out; };
+  const placeHandle = (b) => {
+    hoverBlock = b;
+    if (!b) { handle.hidden = true; return; }
+    const er = el.getBoundingClientRect(); const br = b.getBoundingClientRect(); const dr = doc.getBoundingClientRect();
+    if (br.bottom < dr.top || br.top > dr.bottom) { handle.hidden = true; return; }
+    const lh = Math.min(br.height, 24);
+    handle.style.top = `${br.top - er.top + (lh - 16) / 2}px`;
+    handle.style.left = `${Math.max(2, br.left - er.left - (b.tagName === "LI" ? 34 : 18))}px`;
+    handle.hidden = false;
+  };
+  //  손잡이는 본문 왼쪽 여백에 뜬다 — 여백 위에서는 elementFromPoint 가 본문 자체를 주므로 높이로 블록을 찾는다.
+  const blockAtY = (y) => allBlocks().find((b) => { const r = b.getBoundingClientRect(); return y >= r.top - 2 && y <= r.bottom + 2; }) || null;
+  doc.addEventListener("mousemove", (e) => { if (!bdrag) placeHandle(blockFor(document.elementFromPoint(e.clientX, e.clientY)) || blockAtY(e.clientY)); });
+  el.addEventListener("mouseleave", () => { if (!bdrag) placeHandle(null); });
+  doc.addEventListener("scroll", () => { if (!bdrag) placeHandle(null); });
+  let bdrag = null;   // { src, ghost, x0, y0, started, target:{ref, before} }
+  const startDrag = (src, e) => {
+    bdrag = { src, ghost: null, x0: e.clientX, y0: e.clientY, started: false, target: null };
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragUp);
+    window.addEventListener("pointercancel", endDrag);
+  };
+  handle.addEventListener("pointerdown", (e) => { if (e.button !== 0 || !hoverBlock) return; e.preventDefault(); startDrag(hoverBlock, e); });
+  doc.addEventListener("pointerdown", (e) => { if (e.button !== 0 || composing) return; const img = e.target.closest?.("img"); if (!img || !doc.contains(img)) return; e.preventDefault(); startDrag(img, e); });
+  function dropTarget(x, y) {
+    const blocks = allBlocks().filter((b) => b !== bdrag.src && !(bdrag.src.contains && bdrag.src.contains(b)));
+    let best = null;
+    for (const b of blocks) {
+      const r = b.getBoundingClientRect();
+      for (const [before, yy] of [[true, r.top], [false, r.bottom]]) {
+        const d = Math.abs(y - yy);
+        if (!best || d < best.d) best = { ref: b, before, d, y: yy, left: r.left, right: r.right };
+      }
+    }
+    return best;
+  }
+  function onDragMove(e) {
+    if (!bdrag) return;
+    if (!bdrag.started) {
+      if (Math.hypot(e.clientX - bdrag.x0, e.clientY - bdrag.y0) < 4) return;
+      bdrag.started = true;
+      handle.hidden = true;
+      const g = (bdrag.src.tagName === "IMG" ? bdrag.src : bdrag.src).cloneNode(true);
+      const wrap = document.createElement("div");
+      wrap.className = "re-drag-ghost";
+      wrap.appendChild(g);
+      wrap.style.width = `${Math.min(bdrag.src.getBoundingClientRect().width, 420)}px`;
+      document.body.appendChild(wrap);
+      bdrag.ghost = wrap;
+      bdrag.src.classList.add("re-drag-src");
+      document.body.classList.add("re-dragging");
+    }
+    bdrag.ghost.style.left = `${e.clientX + 8}px`;
+    bdrag.ghost.style.top = `${e.clientY + 6}px`;
+    const dr = doc.getBoundingClientRect();
+    if (e.clientY < dr.top + 24) doc.scrollTop -= 12; else if (e.clientY > dr.bottom - 24) doc.scrollTop += 12;   // 가장자리에서 끌면 따라 굴린다
+    const tg = dropTarget(e.clientX, e.clientY);
+    bdrag.target = tg;
+    if (!tg) { dropLine.hidden = true; return; }
+    const er = el.getBoundingClientRect();
+    dropLine.style.top = `${tg.y - er.top - 1}px`;
+    dropLine.style.left = `${tg.left - er.left}px`;
+    dropLine.style.width = `${Math.max(40, Math.min(tg.right, dr.right - 22) - tg.left)}px`;
+    dropLine.hidden = false;
+  }
+  function onDragUp() {
+    const d = bdrag;
+    endDrag();
+    if (!d || !d.started || !d.target) return;
+    moveBlock(d.src, d.target.ref, d.target.before);
+  }
+  function endDrag() {
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragUp);
+    window.removeEventListener("pointercancel", endDrag);
+    if (bdrag) { bdrag.ghost?.remove(); bdrag.src.classList.remove("re-drag-src"); }
+    document.body.classList.remove("re-dragging");
+    dropLine.hidden = true;
+    bdrag = null;
+  }
+  const isBlank = (n) => !!n && !n.textContent.replace(/[\u200b\u00a0\s]/g, "") && !n.querySelector?.("img, hr, input");
+  /** src 를 ref 앞/뒤로. 목록 항목은 목록 안에서는 항목으로, 목록 밖으로 나가면 같은 종류의 새 목록으로 감싼다. */
+  function moveBlock(src, ref, before) {
+    history.seal();
+    const oldParent = src.parentNode;
+    let node = src;
+    if (src.tagName === "IMG") {
+      //  그림만 떼어 자기 줄로 옮긴다. 남은 줄이 비면 그 줄도 걷는다.
+      node = document.createElement("div"); node.appendChild(src);
+    } else if (src.tagName === "LI" && ref.tagName !== "LI") {
+      const list = oldParent.cloneNode(false); list.appendChild(src); node = list;
+    }
+    if (src.tagName !== "LI" && ref.tagName === "LI") {
+      //  목록 항목 사이에 보통 블록을 놓으면 목록을 둘로 나눈다.
+      const list = ref.parentNode;
+      const tail = list.cloneNode(false);
+      let n = before ? ref : ref.nextSibling;
+      while (n) { const nx = n.nextSibling; tail.appendChild(n); n = nx; }
+      list.after(node);
+      if (tail.children.length) node.after(tail);
+      if (!list.children.length) list.remove();
+    } else if (before) ref.before(node); else ref.after(node);
+    //  빈 목록·빈 줄(그림을 떼고 남은 줄) 정리 — 단, 글이 하나도 없게 되면 첫 줄은 남긴다.
+    if (oldParent && oldParent !== doc && oldParent.isConnected && (/^(UL|OL)$/.test(oldParent.tagName) ? !oldParent.children.length : isBlank(oldParent))) oldParent.remove();
+    if (!doc.firstChild) doc.innerHTML = "<div><br></div>";
+    record({});
+    doc.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  // ── "/" 블록 메뉴(노션식) ── 빈 줄 맨 앞에서 / 를 치면 바꿀 블록을 고른다. 이어 치면 거른다. ↑↓ Enter · Esc.
+  const SLASH = [["text", "텍스트", ""], ["h1", "제목 1", "# "], ["h2", "제목 2", "## "], ["h3", "제목 3", "### "], ["ul", "글머리 목록", "- "],
+    ["ol", "번호 목록", "1. "], ["todo", "체크 목록", "[] "], ["quote", "인용", "> "], ["pre", "코드 블록", "```"], ["hr", "구분선", "---"], ["image", "이미지·파일 첨부", null]];
+  const menu = document.createElement("div");
+  menu.className = "re-slash";
+  menu.hidden = true;
+  el.appendChild(menu);
+  let slash = null;   // { line, items, idx }
+  const closeSlash = () => { slash = null; menu.hidden = true; };
+  const slashQuery = () => { if (!slash || !slash.line.isConnected) return null; const s = slash.line.textContent.replace(/\u200b/g, ""); return s.startsWith("/") ? s.slice(1) : null; };
+  function paintSlash() {
+    const qy = slashQuery();
+    if (qy == null || qy.length > 12) { closeSlash(); return; }
+    const k = qy.trim().toLowerCase();
+    slash.items = SLASH.filter(([id, label]) => !k || id.startsWith(k) || t(label).toLowerCase().includes(k) || label.includes(k));
+    if (!slash.items.length) { closeSlash(); return; }
+    slash.idx = Math.min(slash.idx, slash.items.length - 1);
+    menu.innerHTML = slash.items.map(([id, label], i) => `<button type="button" class="re-slash-i${i === slash.idx ? " on" : ""}" data-i="${i}">${esc(t(label))}</button>`).join("");
+    const er = el.getBoundingClientRect(); const lr = slash.line.getBoundingClientRect();
+    menu.style.left = `${lr.left - er.left}px`;
+    menu.style.top = `${lr.bottom - er.top + 4}px`;
+    menu.hidden = false;
+  }
+  function pickSlash(i) {
+    const it = slash && slash.items[i]; const line = slash && slash.line;
+    closeSlash();
+    if (!it || !line || !line.isConnected) return;
+    history.seal();
+    line.innerHTML = "";
+    if (it[0] === "image") { line.innerHTML = "<br>"; putCaret(line, 0); record({}); if (o.onAttach) o.onAttach(); return; }
+    if (it[0] === "text") { line.innerHTML = "<br>"; putCaret(line, 0); record({}); return; }
+    const tx = document.createTextNode(it[2]); line.appendChild(tx); putCaret(tx, tx.length);
+    autoBlock();
+    record({});
+    doc.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  menu.addEventListener("mousedown", (e) => e.preventDefault());
+  menu.addEventListener("click", (e) => { const b = e.target.closest?.("[data-i]"); if (b) pickSlash(Number(b.dataset.i)); });
+  doc.addEventListener("input", (e) => {
+    if (slash) { paintSlash(); return; }
+    if (e.inputType !== "insertText" || e.data !== "/") return;
+    const sel = caretAt(); if (!sel) return;
+    const line = lineOf(sel.anchorNode); if (!line) return;
+    if (line.textContent.replace(/\u200b/g, "") !== "/") return;
+    slash = { line, items: [], idx: 0 };
+    paintSlash();
+  });
+  doc.addEventListener("keydown", (e) => {
+    if (!slash || e.isComposing) return;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); e.stopImmediatePropagation(); const n = slash.items.length; slash.idx = (slash.idx + (e.key === "ArrowDown" ? 1 : n - 1)) % n; paintSlash(); }
+    else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); pickSlash(slash.idx); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeSlash(); }
+  }, true);
+  doc.addEventListener("blur", () => setTimeout(closeSlash, 120));
   return {
     el,
     getMarkdown: () => domToMd(doc),
