@@ -832,6 +832,10 @@ function run(config) {
       const n = await require('./terminal-manifest').restoreIfNeeded();
       if (n) console.log(`[control] 재부팅 복원 — 터미널 ${n}개 되살림(매니페스트)`);
     } catch (e) { console.error('[control] 터미널 복원 실패:', e.message); }
+    // macOS: 터미널이 하나도 없어도 tmux 서버를 launchd 로 미리 세운다(tmux-launchd.js). PC 앱은 터미널을
+    //  Rust(tmux.rs)로 직접 만들기도 해서, 서버가 없을 때 그쪽이 먼저 만들면 서버가 앱 코얼리션에 들어가
+    //  ⌘Q 뒤에도 Dock 에 "백그라운드에서 실행 중" 이 남는다.
+    try { if (!require('./term-backend').isHostBackend()) await require('./pty').ensureTmuxServer(); } catch (_) { /* 종전 경로로 */ }
     // PC 앱(같은 기기) v3 터미널 루프백 리스너 — 원격과 같은 와이어, 릴레이 왕복 없이.
     try { require('./terminal-local').start(); } catch (e) { console.error('[control] 로컬 터미널 리스너 시작 실패:', e.message); }
     // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
