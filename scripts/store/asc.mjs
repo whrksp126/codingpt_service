@@ -80,7 +80,9 @@ async function api(pathname, init = {}) {
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch (_) { /* noop */ }
   if (!res.ok) {
-    const detail = json?.errors?.map((e) => `${e.title}: ${e.detail}`).join(' / ') || text.slice(0, 300);
+    //  409 "not in valid state" 의 진짜 이유는 meta.associatedErrors 에만 있다(예: 빠진 필수 항목) — 같이 보여 준다.
+    const assoc = (e) => { const a = e?.meta?.associatedErrors; return a ? ' ' + JSON.stringify(Object.values(a).flat().map((x) => `${x.code}: ${x.detail}`)) : ''; };
+    const detail = json?.errors?.map((e) => `${e.title}: ${e.detail}${assoc(e)}`).join(' / ') || text.slice(0, 300);
     throw new Error(`ASC ${res.status} ${pathname}\n  ${detail}`);
   }
   return json;
