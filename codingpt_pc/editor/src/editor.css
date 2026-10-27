@@ -1,0 +1,75 @@
+/* issue-editor — PC·폰 공용. 색은 쓰는 쪽의 토큰(--text 등)을 따른다(폰 WebView 는 같은 이름으로 채워 넣는다). 무채색만. */
+.re { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--base); color: var(--text); }
+.re-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 3%, transparent); }
+.re-b { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 4px; border: none; border-radius: var(--r-sm, 6px); background: transparent; color: var(--text2); cursor: default; }
+.re-b:hover { background: var(--hover); color: var(--text); }
+.re-b:active { background: var(--pressed); }
+.re-b.on { background: var(--selected, var(--hover)); color: var(--text); }
+.re-tx { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+.re-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--border); }
+.re-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; cursor: text; }
+.re-host { position: relative; min-height: 100%; }
+.re-link { position: absolute; z-index: 6; left: 12px; right: 12px; bottom: 12px; display: flex; gap: 6px; padding: 6px; border-radius: var(--r-md, 8px); background: var(--surface); box-shadow: 0 0 0 1px var(--border-ctrl), 0 10px 28px rgba(0,0,0,.28); }
+.re-link[hidden] { display: none; }
+.re-link-in { flex: 1; min-width: 0; min-height: 30px; padding: 2px 10px; border: 1px solid var(--border-ctrl); border-radius: var(--r-sm, 6px); background: var(--base); color: var(--text); font: inherit; font-size: 13px; outline: none; }
+.re-link-ok { flex: none; padding: 0 12px; border: none; border-radius: var(--r-sm, 6px); background: var(--text); color: var(--base); font: inherit; font-size: 12.5px; font-weight: 600; }
+
+.re-doc { min-height: 100%; box-sizing: border-box; padding: 18px 22px 32px 30px; outline: none; font-size: 13.5px; line-height: 1.65; color: var(--text); user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; caret-color: var(--text); }
+.re-doc > * + * { margin-top: 2px; }
+.re-doc p { margin: 0; min-height: 1.65em; }
+.re-doc h1 { font-size: 20px; font-weight: 650; margin: 14px 0 6px; line-height: 1.35; }
+.re-doc h2 { font-size: 16.5px; font-weight: 650; margin: 12px 0 5px; line-height: 1.4; }
+.re-doc h3 { font-size: 14.5px; font-weight: 650; margin: 10px 0 4px; }
+.re-doc > :first-child { margin-top: 0; }
+.re-doc ul, .re-doc ol { margin: 4px 0; padding-left: 22px; }
+.re-doc li > p { margin: 0; }
+.re-doc ul[data-type="taskList"] { list-style: none; padding-left: 2px; }
+.re-doc ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; }
+.re-doc ul[data-type="taskList"] li > label { flex: none; display: flex; align-items: center; height: 1.65em; user-select: none; -webkit-user-select: none; }
+.re-doc ul[data-type="taskList"] li > label input { margin: 0; width: 14px; height: 14px; accent-color: var(--text2); }
+.re-doc ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
+.re-doc ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--text3); text-decoration: line-through; }
+.re-doc blockquote { margin: 6px 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--border-strong, var(--border-ctrl)); color: var(--text2); }
+.re-doc pre { margin: 6px 0; padding: 10px 12px; border-radius: var(--r-sm, 6px); background: color-mix(in srgb, var(--text) 6%, transparent); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
+.re-doc pre code { padding: 0; background: none; font-size: inherit; }
+.re-doc code { padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+.re-doc a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.re-doc hr { border: none; border-top: 1px solid var(--border-ctrl); margin: 12px 0; }
+.re-doc hr.ProseMirror-selectednode { border-top-color: var(--text2); }
+.re-imgw { display: inline-block; max-width: 100%; vertical-align: top; }
+.re-imgw img { display: block; max-width: min(100%, 640px); max-height: 420px; margin: 6px 0; border-radius: var(--r-sm, 6px); box-shadow: 0 0 0 1px var(--border-ctrl); background: color-mix(in srgb, var(--text) 6%, transparent); min-width: 40px; min-height: 30px; }
+.re-imgw.ProseMirror-selectednode img, .re-imgw.ProseMirror-selectednode .re-imgchip { box-shadow: 0 0 0 2px var(--text2); }
+.re-imgchip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin: 4px 0; padding: 5px 10px; border-radius: var(--r-sm, 6px); background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text2); font-size: 12.5px; line-height: 1.3; }
+.re-imgchip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.re-imgchip svg { flex: none; }
+.re-doc .ProseMirror-gapcursor:after { border-top-color: var(--text); }
+.re-doc .suggestion, .re-doc [data-decoration-id] { color: var(--text2); }
+
+/* / 메뉴 */
+.re-slash { position: absolute; z-index: 7; min-width: 190px; max-height: 280px; overflow-y: auto; padding: 4px; border-radius: var(--r-md, 8px); background: var(--surface); box-shadow: 0 0 0 1px var(--border-ctrl), 0 10px 28px rgba(0,0,0,.28); display: flex; flex-direction: column; }
+.re-slash[hidden] { display: none; }
+.re-slash-i { display: flex; align-items: center; gap: 9px; text-align: left; padding: 5px 8px; border: none; border-radius: var(--r-sm, 6px); background: transparent; color: var(--text); font: inherit; font-size: 12.5px; }
+.re-slash-ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 5px; box-shadow: 0 0 0 1px var(--border-ctrl); color: var(--text2); }
+.re-slash-i.on, .re-slash-i:hover { background: var(--hover); }
+
+/* 선택 메뉴 */
+.re-bubble { position: absolute; z-index: 7; display: flex; gap: 1px; padding: 3px; border-radius: var(--r-md, 8px); background: var(--surface); box-shadow: 0 0 0 1px var(--border-ctrl), 0 8px 22px rgba(0,0,0,.28); visibility: hidden; }
+.re-bubble[style*="visible"], .re-bubble[data-show] { visibility: visible; }
+
+/* 블록 손잡이 */
+.re-grip { z-index: 4; width: 18px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text3); cursor: grab; opacity: .8; }
+.re-grip:hover { background: var(--hover); color: var(--text2); opacity: 1; }
+.re-grip:active { cursor: grabbing; }
+
+/* 폰 — 손가락 크기 글·여백 */
+.re-mobile .re-doc { padding: 12px 16px 40px; font-size: 16px; line-height: 1.6; }
+.re-mobile .re-doc p { min-height: 1.6em; }
+.re-mobile .re-doc h1 { font-size: 23px; }
+.re-mobile .re-doc h2 { font-size: 19px; }
+.re-mobile .re-doc h3 { font-size: 17px; }
+.re-mobile .re-doc code, .re-mobile .re-doc pre { font-size: 14px; }
+.re-mobile .re-doc ul[data-type="taskList"] li > label input { width: 18px; height: 18px; }
+.re-mobile .re-slash-i { padding: 9px 10px; font-size: 15px; }
+.re-mobile .re-slash { max-height: 240px; min-width: 220px; }
+.re-mobile .re-link-in { font-size: 16px; min-height: 38px; }
+.re-mobile .re-link-ok { font-size: 15px; }

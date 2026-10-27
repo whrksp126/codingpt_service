@@ -3516,43 +3516,6 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; }
 .is-start .tk-input { min-height: 30px; padding: 4px 10px; font-size: 12.5px; }
 .is-start-hint { font-size: 11.5px; line-height: 1.5; color: var(--dim); }
 /* 편집기(rich-editor.js) — 도구 줄 + 보이는 대로 쓰는 본문. 저장은 마크다운. */
-.re { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--base); }
-.re-bar { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--text) 3%, transparent); }
-.re-b { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 4px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text2); }
-.re-b:hover { background: var(--hover); color: var(--text); }
-.re-b:active { background: var(--pressed); }
-.re-tx { font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
-.re-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--border); }
-.re-link { flex: none; display: flex; gap: 6px; padding: 6px; border-bottom: 1px solid var(--border); }
-.re-link[hidden] { display: none; }
-.re-handle { position: absolute; z-index: 3; width: 16px; height: 18px; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text3); cursor: grab; }
-.re-handle:hover { background: var(--hover); color: var(--text2); }
-.re-handle[hidden], .re-dropline[hidden], .re-slash[hidden] { display: none; }
-.re-dropline { position: absolute; z-index: 3; height: 2px; border-radius: 1px; background: var(--text2); pointer-events: none; }
-.re-drag-ghost { position: fixed; z-index: 9999; pointer-events: none; opacity: .75; max-height: 160px; overflow: hidden; padding: 4px 8px; border-radius: var(--r-sm); background: var(--surface); box-shadow: 0 8px 24px rgba(0,0,0,.3); font-size: 13px; color: var(--text); }
-.re-drag-ghost img { display: block; max-width: 100%; max-height: 140px; border-radius: 4px; }
-.re-drag-src { opacity: .35; }
-body.re-dragging, body.re-dragging * { cursor: grabbing !important; user-select: none !important; -webkit-user-select: none !important; }
-.re-doc img { -webkit-user-drag: none; cursor: grab; }
-.re-slash { position: absolute; z-index: 5; min-width: 160px; max-height: 260px; overflow-y: auto; padding: 4px; border-radius: var(--r-md, 8px); background: var(--surface); box-shadow: 0 0 0 1px var(--border-ctrl), 0 10px 28px rgba(0,0,0,.28); display: flex; flex-direction: column; }
-.re-slash-i { text-align: left; padding: 5px 10px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--text); font-size: 12.5px; }
-.re-slash-i.on, .re-slash-i:hover { background: var(--hover); }
-.re-link .tk-input { min-height: 28px; padding: 2px 10px; font-size: 12px; }
-.re-doc { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px 32px; outline: none; font-size: 13.5px; line-height: 1.65; color: var(--text); user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
-.re-doc h1 { font-size: 20px; font-weight: 650; margin: 14px 0 6px; line-height: 1.35; }
-.re-doc h2 { font-size: 16.5px; font-weight: 650; margin: 12px 0 5px; line-height: 1.4; }
-.re-doc h3 { font-size: 14.5px; font-weight: 650; margin: 10px 0 4px; }
-.re-doc h1:first-child, .re-doc h2:first-child, .re-doc h3:first-child { margin-top: 0; }
-.re-doc ul, .re-doc ol { margin: 4px 0; padding-left: 22px; }
-.re-doc ul.re-todo { list-style: none; padding-left: 4px; }
-.re-doc ul.re-todo li { display: flex; align-items: baseline; gap: 7px; }
-.re-doc ul.re-todo input { flex: none; margin: 0; position: relative; top: 2px; }
-.re-doc blockquote { margin: 6px 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--border-strong); color: var(--text2); }
-.re-doc pre { margin: 6px 0; padding: 10px 12px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--text) 6%, transparent); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; line-height: 1.55; white-space: pre-wrap; }
-.re-doc code { padding: 1px 5px; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent); font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
-.re-doc a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
-.re-doc hr { border: none; border-top: 1px solid var(--border-ctrl); margin: 12px 0; }
-.re-doc img { display: block; max-width: min(100%, 640px); max-height: 420px; margin: 6px 0; border-radius: var(--r-sm); box-shadow: 0 0 0 1px var(--border-ctrl); background: color-mix(in srgb, var(--text) 6%, transparent); min-width: 80px; min-height: 40px; }
 .is-del[data-armed] { color: var(--error); }
 /* 첨부 — 본문 아래 띠(이미지는 미리보기, 그 밖은 이름표). */
 .is-atts { display: flex; flex-wrap: wrap; gap: 8px; }

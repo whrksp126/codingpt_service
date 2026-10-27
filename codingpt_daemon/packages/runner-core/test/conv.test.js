@@ -267,6 +267,40 @@ test('터미널 전용 명령 — 에이전트에 보내지 않고 안내를 남
   assert.strictEqual(turnEnds(id).length, 1);
 });
 
+test('/exit·/clear — 채팅이 직접 처리: 엔진을 내리고 탭을 걷거나(=사이드바에서 빠짐) 새 대화로 옮긴다', async () => {
+  const sl = require('../surfaces');
+  const { id } = await start('say 준비');
+  await waitTurnEnd(id);
+  sl.add({ cwd: 'ws', id: 'c-' + id, kind: 'chat', threadId: id });
+  assert.ok(conv.sessionsBrief().some((x) => x.threadId === id), '탭이 있으면 사이드바 행');
+  const r = await rpc('conv.send', { threadId: id, clientId: cid(), text: '/clear' });
+  assert.strictEqual(r.local, 'clear');
+  const next = r.thread.id;
+  assert.ok(next && next !== id);
+  assert.ok(!conv._internals.live.has(id), '옛 엔진은 내린다');
+  const tabs = sl.list({ cwd: 'ws' }).items.filter((x) => x.kind === 'chat');
+  assert.deepStrictEqual(tabs.map((x) => x.threadId), [next], '탭은 새 대화로');
+  assert.ok(frames.some((f) => f.control && f.control.kind === 'cleared' && f.control.next === next));
+  assert.ok(!conv.sessionsBrief().some((x) => x.threadId === id), '옛 대화는 사이드바에서 빠진다');
+  const r2 = await rpc('conv.send', { threadId: next, clientId: cid(), text: '/exit' });
+  assert.strictEqual(r2.local, 'exit');
+  assert.strictEqual(sl.list({ cwd: 'ws' }).items.filter((x) => x.kind === 'chat').length, 0, '/exit 은 탭을 걷는다');
+  assert.ok(!conv.sessionsBrief().some((x) => x.threadId === next));
+  assert.strictEqual(turnEnds(id).length, 1, '에이전트에 글로 보내지 않는다');
+});
+
+test('탭을 닫은 유휴 대화는 엔진이 살아 있어도 사이드바에 없다', async () => {
+  const sl = require('../surfaces');
+  const { id } = await start('say 준비');
+  await waitTurnEnd(id);
+  assert.ok(conv._internals.live.has(id));
+  assert.ok(!conv.sessionsBrief().some((x) => x.threadId === id));
+  sl.add({ cwd: 'ws', id: 'c-' + id, kind: 'chat', threadId: id });
+  assert.ok(conv.sessionsBrief().some((x) => x.threadId === id));
+  sl.remove({ cwd: 'ws', id: 'c-' + id });
+  assert.ok(!conv.sessionsBrief().some((x) => x.threadId === id));
+});
+
 test('보내기 검증 — 빈 본문·clientId 누락·없는 대화', async () => {
   const { id } = await start('say 검증');
   await waitTurnEnd(id);

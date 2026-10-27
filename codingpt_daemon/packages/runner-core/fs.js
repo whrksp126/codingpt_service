@@ -38,6 +38,7 @@ const HIDDEN_DIRS = new Set([
 const MAX_READ_BYTES = 2 * 1024 * 1024; // 2MB 초과 텍스트는 편집 대상에서 제외
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // 이미지 미리보기 base64 상한
 const MAX_WRITE_BASE64_BYTES = 6 * 1024 * 1024; // base64 쓰기(첨부 업로드) 디코드 후 상한
+const MAX_APPEND_BYTES = 300 * 1024 * 1024;      // 조각 이어 쓰기로 만드는 파일 하나의 상한(동영상 첨부)
 // 목록/트리에 노출할 점파일(대부분의 점파일은 숨기되 흔한 편집 대상만 화이트리스트).
 const SHOWN_DOTFILES = new Set([
   '.env', '.gitignore', '.gitattributes', '.eslintrc', '.prettierrc', '.babelrc',
@@ -223,7 +224,13 @@ async function write(params) {
     const buf = Buffer.from(params.content, 'base64');
     if (buf.length > MAX_WRITE_BASE64_BYTES) throw new Error('파일이 너무 큽니다(6MB 제한)');
     await fsp.mkdir(path.dirname(abs), { recursive: true }); // 첨부 디렉토리 등 신규 경로 허용
-    await fsp.writeFile(abs, buf);
+    //  append = 큰 첨부(동영상)를 조각으로 이어 쓴다 — 조각 하나가 6MB 상한, 파일 전체는 MAX_APPEND_BYTES.
+    if (params.append) {
+      let cur = 0;
+      try { cur = (await fsp.stat(abs)).size; } catch (_) { cur = 0; }
+      if (cur + buf.length > MAX_APPEND_BYTES) throw new Error('파일이 너무 큽니다');
+      await fsp.appendFile(abs, buf);
+    } else await fsp.writeFile(abs, buf);
   } else {
     await fsp.writeFile(abs, params.content, 'utf8');
   }

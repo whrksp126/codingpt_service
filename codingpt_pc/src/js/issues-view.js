@@ -12,6 +12,7 @@ import { toast, openTasksDashboard, openRunTerminal, agentName } from "./tasks-v
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { createRichEditor } from "./rich-editor.js";
 import { attachInputUndo } from "./undo-history.js";
+import { showPopupMenu, confirmDialog } from "./sidebar.js";
 import { STATUSES, VIEWS, filterIssues, groupByStatus, sortIssues, sortTable, sourceOptions, openCount } from "./issues-model.js";
 import { createAutosaver, normFields, isBlank, displayTitle, workspaceOptions, isSeatOrWorktree, SAVE_DELAY_EXT_MS } from "./issues-autosave.js";
 
@@ -126,6 +127,7 @@ export function mountIssuesView(container) {
   attachInputUndo(el);   // 검색칸의 ⌘Z
   el.addEventListener("keydown", (e) => { if (e.key === "Escape" && !sheet) closeIssues(); });
   el.addEventListener("click", onClick);
+  el.addEventListener("contextmenu", onRowMenu);
   el.addEventListener("input", (e) => { if (e.target.classList?.contains("is-q")) { query = e.target.value; drawBody(); } });
   el.addEventListener("change", (e) => {
     const k = e.target.dataset?.pref;
@@ -331,10 +333,37 @@ function onClick(e) {
   if (row) { const x = (data.get(curHost())?.issues || []).find((y) => y.id === row.dataset.id); if (x) openSheet(x); }
 }
 
+// ── 항목 메뉴(우클릭) ── 열기 · 상태 · 삭제. 삭제는 여기서만 한다(2026-10-28 사용자 요청 — 이슈 안이 아니라 Tasks 에서).
+function onRowMenu(e) {
+  const row = e.target.closest?.(".is-row[data-id], .is-card[data-id], .is-tr[data-id]");
+  if (!row) return;
+  const h = curHost();
+  const x = (data.get(h)?.issues || []).find((y) => y.id === row.dataset.id);
+  if (!x) return;
+  e.preventDefault();
+  const items = [
+    { icon: icons.edit({ size: 15 }), label: t("열기"), onClick: () => openSheet(x) },
+    { type: "sep" },
+    ...STATUSES.map((st) => ({ icon: x.status === st ? icons.check({ size: 15 }) : `<span style="display:inline-block;width:15px"></span>`, label: t(ST_TEXT[st]),
+      onClick: () => { if (x.status !== st) { patchLocal(h, { ...x, status: st }); void act("orch.issueUpdate", { id: x.id, status: st }); } } })),
+  ];
+  if (x.source.provider === "codingpt") {
+    items.push({ type: "sep" }, { icon: icons.trash({ size: 15 }), label: t("삭제"), danger: true, onClick: () => confirmDialog({
+      title: t("이 작업을 삭제할까요?"), lines: [`${x.key} ${titleOf(x)}`], confirmLabel: t("삭제"),
+      onConfirm: async () => {
+        //  열려 있는 창이 이 이슈면 먼저 닫는다(닫히며 남은 저장이 지운 뒤에 도착해 되살리지 않게, 저장을 끝내고 지운다).
+        if (sheet && sheet.id === x.id) await sheet.closeForDelete();
+        if (await act("orch.issueDelete", { id: x.id }, t("삭제했어요"))) patchLocal(h, null, x.id);
+      },
+    }) });
+  }
+  showPopupMenu(e.clientX, e.clientY, items);
+}
+
 // ── 상세·새 이슈 시트 ─────────────────────────────────────────────────────────
 //  자동 저장이다(2026-10-08 사용자 요청) — 만들기·저장·취소 버튼이 없다. 규칙은 issues-autosave.js(순수) 가 쥔다:
 //   새 이슈는 제목·본문에 뜻 있는 첫 입력이 들어올 때 진짜 이슈가 되고, 그 뒤로는 바뀐 칸만 조용히 저장된다.
-//   창을 닫는 것은 "그만 본다" 일 뿐이다 — 적은 것은 남는다. 지우려면 [삭제] 를 누른다.
+//   창을 닫는 것은 "그만 본다" 일 뿐이다 — 적은 것은 남는다. 지우려면 목록에서 우클릭 → 삭제.
 const lingering = new Map();              // 닫힌 뒤에도 저장이 덜 끝난 것(오프라인 등) — id | "new" → { saver, h }
 const DRAFT_KEY = "cpt.issues.draft";     // 아직 이슈가 못 된 새 초안(만들기가 실패한 채 앱이 꺼져도 남는다)
 const readDraft = (h) => { try { const j = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null"); return j && Number(j.h) === Number(h) && j.fields && !isBlank(j.fields) ? j.fields : null; } catch (_) { return null; } };
@@ -402,7 +431,7 @@ function openSheet(issue) {
   const startAgent = (pref.start && pref.start.agent) || "claude";
   const startMode = (pref.start && pref.start.mode) || "task";
   const field = (label, html) => `<label class="is-prop"><span class="is-prop-l">${esc(t(label))}</span>${html}</label>`;
-  //  창 = 머리줄(번호 + 제목 — 여기서 바로 고친다 + 저장 표시) / 왼쪽 편집기(가득) / 오른쪽 속성 · 시작 · 삭제.
+  //  창 = 머리줄(번호 + 제목 — 여기서 바로 고친다 + 저장 표시) / 왼쪽 편집기(가득) / 오른쪽 속성 · 시작(삭제는 목록 우클릭).
   //  새 이슈에서는 번호·시작·삭제가 숨어 있다가, 이슈가 만들어지면(첫 입력) 나타난다.
   box.innerHTML =
     `<div class="is-sh-head"><span class="is-key"${cur ? "" : " hidden"}>${esc(cur ? cur.key : "")}</span>` +
@@ -424,7 +453,7 @@ function openSheet(issue) {
     `<button class="tv-btn is-go" data-s="start">${esc(t("시작"))}</button>` +
     `<div class="is-start-hint">${esc(t(MODE_HINT[startMode] || ""))}</div>` +
     (cur && cur.link ? `<button class="tv-btn ghost" data-s="goto">${esc(t("진행 중인 일 보기"))}</button>` : "") + `</div>` +
-    (ext ? "" : `<div class="is-acts"${cur ? "" : " hidden"}><button class="tv-btn ghost is-del" data-s="del">${esc(t("삭제"))}</button><span class="is-grow"></span>` +
+    (ext ? "" : `<div class="is-acts"${cur ? "" : " hidden"}><span class="is-grow"></span>` +
       `<button class="tv-btn ghost is-to-gh" data-s="togh" hidden>${esc(t("GitHub 이슈로 만들기"))}</button></div>`) +
     `</aside></div>`;
   overlay.appendChild(box);
@@ -645,12 +674,6 @@ function openSheet(issue) {
       drawAtts();
       return;
     }
-    if (k === "del") {
-      if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = t("한 번 더 누르면 삭제"); return; }   // 브라우저 confirm 을 띄우지 않는다(웹뷰를 멈춘다)
-      await saver.flush();   // 저장 중인 요청이 지운 뒤에 도착해 되살리지 않게, 먼저 끝낸다
-      if (await act("orch.issueDelete", { id: saver.id() }, t("삭제했어요"))) { deleted = true; saver.dispose(); patchLocal(h, null, saver.id()); close(); }
-      return;
-    }
     if (k === "goto") { close(); goTo(h, cur.link); return; }
     if (k === "togh") {
       //  밖(GitHub)에 글을 올리는 일이라 자동으로 하지 않는다 — 누를 때만. 올린 뒤 이 PC 의 초안은 지운다(첨부는 옮겨 붙인다).
@@ -686,7 +709,7 @@ function openSheet(issue) {
       if (r && r.started) { close(); goTo(h, { ...r.started, cwd }); }
     }
   });
-  sheet = { close, onRemote };
+  sheet = { close, onRemote, get id() { return saver.id(); }, closeForDelete: async () => { await saver.flush(); deleted = true; close(); } };
   //  이어받은 글(닫힌 뒤 저장이 덜 끝난 것·만들지 못한 초안)은 다시 저장 줄에 세운다.
   if (carry) put(carry, false);
   if (saver.id()) reveal();

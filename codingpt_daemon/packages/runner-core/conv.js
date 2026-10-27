@@ -210,10 +210,12 @@ function patch(id, fields, { event = false } = {}) {
 
 // ── 사이드바 에이전트 행(orchestration-design §10) ───────────────────────────
 //  채팅으로 하는 대화도 "그 폴더에서 돌아가는 에이전트" 다 — 터미널 에이전트와 같은 목록에 올린다.
-//  올리는 것은 **지금 열려 있는 것**뿐이다: 엔진이 살아 있거나, 어느 기기든 탭으로 열어 둔 대화(공유 표면).
+//  올리는 것은 **지금 열려 있는 것**뿐이다: 어느 기기든 탭으로 열어 둔 대화(공유 표면), 또는 탭 없이도 아직 일하는 중인 대화.
 //  지난 대화 전부를 올리면 목록이 기록 보관함이 된다.
 const sessionListeners = new Set();
 function onSessionsChanged(fn) { sessionListeners.add(fn); return () => sessionListeners.delete(fn); }
+/** 탭(공유 표면)이 바뀌었다 — 사이드바 행 목록이 달라질 수 있다(탭을 닫은 유휴 대화가 빠진다). */
+function touchSessions() { for (const fn of sessionListeners) { try { fn(null); } catch (_) { /* noop */ } } }
 function sessionsBrief() {
   const out = [];
   const openByCwd = new Map();
@@ -231,8 +233,10 @@ function sessionsBrief() {
   try { threads = store.listThreads(); } catch (_) { return out; }
   for (const t of threads) {
     if (!t || !t.id || typeof t.cwd !== 'string') continue;
-    if (!live.has(t.id) && !openIn(t.cwd).has(String(t.id))) continue;
     const state = t.state === 'working' ? 'working' : t.state === 'waiting' ? 'permission' : 'idle';
+    //  탭을 닫은 대화는 엔진이 아직 살아 있어도(유휴 정리 전) 올리지 않는다 — 일하는 중·답을 기다리는 중일 때만 남긴다
+    //  (2026-10-28 신고: 채팅 pane 을 닫아도 사이드바에 계속 남았다).
+    if (!openIn(t.cwd).has(String(t.id)) && !(live.has(t.id) && state !== 'idle')) continue;
     out.push({ cwd: t.cwd, threadId: t.id, agent: t.agent || 'claude', state, since: t.lastAt || t.createdAt || null,
       title: String(t.title || '').slice(0, 120), detail: state === 'working' ? '' : String(t.preview || '').slice(0, 160), model: t.model || null });
   }
@@ -858,6 +862,33 @@ function terminalOnly(thread, text) {
   return c && c.terminalCommands.includes(m[1]) ? m[1] : null;
 }
 
+/** 그 대화를 띄운 탭(공유 표면) 목록. */
+function chatSurfaces(thread) {
+  const sl = lazy('./surfaces');
+  if (!sl) return [];
+  try { return ((sl.list({ cwd: thread.cwd }).items) || []).filter((it) => it.kind === 'chat' && String(it.threadId) === String(thread.id)); } catch (_) { return []; }
+}
+async function localCommand(thread, cmd) {
+  const sl = lazy('./surfaces');
+  const proc = live.get(thread.id);
+  if (proc) await stopProc(proc, cmd === 'clear' ? 'cleared' : 'exited');
+  const tabs = chatSurfaces(thread);
+  let next = null;
+  if (cmd === 'clear') {
+    next = newThread({ id: crypto.randomUUID(), agent: thread.agent, cwd: thread.cwd, mode: thread.mode || 'default', model: thread.model || null, owner: 'chat' });
+    if (thread.effort) next.effort = thread.effort;
+    store.putThread(next);
+    healed.add(next.id);
+    hintThread(next.id);
+    //  새 탭을 먼저 세우고 옛 탭을 걷는다 — 기기가 보는 사이에 탭이 0개가 되는 틈을 만들지 않는다.
+    if (sl) for (const it of tabs) { try { sl.add({ cwd: thread.cwd, id: 'c-' + next.id, kind: 'chat', threadId: next.id, title: '' }); } catch (_) { /* 표면 상한 */ } }
+  }
+  if (sl) for (const it of tabs) { try { sl.remove({ cwd: thread.cwd, id: it.id }); } catch (_) { /* 이미 없음 */ } }
+  for (const fn of sessionListeners) { try { fn(thread.id); } catch (_) { /* noop */ } }
+  push({ control: { kind: cmd === 'clear' ? 'cleared' : 'exited', threadId: thread.id, ...(next ? { next: next.id } : {}) } });
+  return { ok: true, status: 'sent', local: cmd, ...(next ? { thread: publicThread(next) } : {}) };
+}
+
 function sendInto(thread, args) {
   const k = `${thread.id}\n${args.clientId}`;
   const cur = sending.get(k);
@@ -882,6 +913,12 @@ async function sendOnce(thread, { clientId, text, attachments }) {
     key, ts: iso(deps.now()), role: 'user', kind: 'text', text: full, truncated: false, hidden: false,
     clientId, ...(files.length ? { attachments: files.map((f, i) => ({ idx: i, name: f.name, path: f.path, mediaType: f.mediaType })) } : {}),
   };
+
+  //  /exit·/quit·/clear 는 채팅이 직접 한다(2026-10-28 신고: 채팅에 쳐도 엔진에 글로 들어가 아무 일도 없고, 사이드바 행이 남았다).
+  //   /exit = 대화를 끝낸다 — 엔진을 내리고 탭(공유 표면)을 걷는다 → 모든 기기에서 탭이 닫히고 사이드바 행이 사라진다.
+  //   /clear = 새 대화로 갈아탄다 — 대화 ID 가 곧 에이전트 세션이라, 같은 자리에 새 대화를 만들어 탭을 그쪽으로 옮긴다.
+  const local = /^\/(exit|quit|clear)\s*$/i.exec(full.trim());
+  if (local && !files.length) return localCommand(thread, local[1].toLowerCase());
 
   const cmd = terminalOnly(thread, full);
   if (cmd) {
@@ -1559,7 +1596,7 @@ async function _reset() {
 
 module.exports = {
   CAP, MAX_LIVE, ERROR_CODES,
-  configure, start, stop, shutdown, shutdownSync, detachAll, rpc, sessionsBrief, onSessionsChanged,
+  configure, start, stop, shutdown, shutdownSync, detachAll, rpc, sessionsBrief, onSessionsChanged, touchSessions,
   _internals: {
     live, sweep, heal, importSession, answersMap, alwaysLabelOf, composeText, stripTitleMark, publicThread, terminalOf, usageOf, refsOfEvent,
     _reset,

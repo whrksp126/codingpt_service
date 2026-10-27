@@ -2294,6 +2294,8 @@ async function captureDialog({ cwd, tid } = {}) {
 // 터미널 풀 변화(생성/삭제/개명)를 전 기기에 즉시 알림 — 클라이언트 리컨실 tick 트리거(폴링 대기 제거).
 function notifyPoolChanged() {
   sendUiCommand('pool.changed', {}, { mode: 'broadcast', timeoutMs: 5000 }).catch(() => { /* 무시 */ });
+  //  채팅 탭(표면)이 닫히면 사이드바 에이전트 행도 다시 센다(탭을 닫은 유휴 대화가 빠진다).
+  try { require('./conv').touchSessions(); } catch (_) { /* 구 번들 */ }
 }
 
 // 공유 표면(surface.list/add/update/remove) — 유닉스 소켓(이 PC 화면)과 릴레이(폰·다른 PC)가 같은 함수를 탄다.

@@ -1282,7 +1282,7 @@ function wsMenuItems(w) {
 
 // ── 워크스페이스 삭제(서버 목록 메타만 — 로컬 폴더/파일은 절대 건드리지 않음) ──
 // 확인 다이얼로그 — quit-guard 패턴/스타일 재사용(취소 / 위험색 확정 2택).
-function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
+export function confirmDialog({ title, lines, confirmLabel, onConfirm }) {
   if (document.querySelector(".quit-guard-backdrop")) return; // 중복 방지
   const bd = document.createElement("div");
   bd.className = "quit-guard-backdrop";

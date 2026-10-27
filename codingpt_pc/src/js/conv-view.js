@@ -475,6 +475,9 @@ export class ConvView {
         this.ctx.patchTab?.({ threadId: undefined, title: undefined });
         this._setBanner(i18n.t('이 대화는 삭제됐어요.'), "info");
         this._render();
+      } else if (ctl.kind === "cleared" && ctl.next) {
+        // /clear — 데몬이 같은 자리에 새 대화를 만들었다. 이 탭을 그 대화로 옮긴다(탭 닫기는 표면 리컨실이 한다 = /exit).
+        this.openThread(ctl.next, "");
       } else if (ctl.kind === "gone") {
         this._opened = false;
         if (this._visible) void this._open();
