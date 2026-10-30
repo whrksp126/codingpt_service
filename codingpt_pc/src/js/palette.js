@@ -11,7 +11,7 @@
 //
 // 앱(codingpt_app/src/workspace/PaletteSheet.tsx)이 이 화면의 미러다. 판정(순위·모드)은
 //  palette-match.js 를, 명령 표는 commands.js 를, 문구는 text/palette.js 를 **양쪽이 공유**한다.
-import { state, activeWs, wsRuntime, isThisHost } from "./state.js";
+import { state, activeWs, wsRuntime, isThisHost, agentStates } from "./state.js";
 import { api } from "./api.js";
 import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
 import { icons, agentMarkHtml } from "./icons.js";
@@ -114,6 +114,31 @@ function tabRows(term) {
   return M.rankRows(rows, term, MAX_TABS);
 }
 
+/** 지금 도는 에이전트 — 어느 워크스페이스든 바로 간다. 사람을 기다리는 것이 위에 온다. 상태 글자로도 거를 수 있다("승인", "작업"). */
+function agentRows(term) {
+  const T = TX();
+  const WORD = { permission: T.agentBlocked, needsInput: T.agentIdle, working: T.agentWorking, idle: T.agentIdle };
+  const rank = { permission: 0, needsInput: 1, idle: 2, working: 3 };
+  const rows = [];
+  for (const [k, v] of agentStates) {
+    const m = /^(.*)\|(\d+)$/.exec(k);
+    if (!m || !WORD[v.state]) continue;
+    const ws = state.workspaces.find((w) => w.localPath === m[1]);
+    if (!ws) continue;
+    const label = `${ws.name} · ${v.agent || "agent"}`;
+    const score = M.scoreLabeled(label, WORD[v.state], term);
+    if (score == null) continue;
+    rows.push({
+      key: `agent:${k}`, section: T.secAgents, score, sortKey: String(rank[v.state]) + label,
+      icon: agentMarkHtml(v.agent || "claude", { size: 15 }) || icons.terminal({ size: 15 }),
+      label, hint: WORD[v.state],
+      run: () => import("./sidebar.js").then((s) => s.jumpToNotification({ cwd: m[1], win: Number(m[2]) })),
+    });
+  }
+  rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  return term ? M.rankRows(rows, term, MAX_TABS) : rows.slice(0, MAX_TABS);
+}
+
 function fileRows(files, term) {
   const T = TX();
   return M.rankPaths(files, term, MAX_FILES).map((p) => ({
@@ -205,7 +230,7 @@ export function openPalette(initial) {
       rows = commandRows(term);
       setFoot("");
     } else {
-      const tabs = tabRows(term);
+      const tabs = [...agentRows(term), ...tabRows(term)];
       let fr = [];
       if (files) fr = fileRows(files, term);
       rows = [...tabs, ...fr];

@@ -39,11 +39,6 @@ const IC = {
   grip: '<svg viewBox="0 0 10 16" width="10" height="16" fill="currentColor"><circle cx="2.5" cy="3" r="1.4"/><circle cx="7.5" cy="3" r="1.4"/><circle cx="2.5" cy="8" r="1.4"/><circle cx="7.5" cy="8" r="1.4"/><circle cx="2.5" cy="13" r="1.4"/><circle cx="7.5" cy="13" r="1.4"/></svg>',
 };
 const TX = (s) => `<b class="re-tx">${s}</b>`;
-// 도구 줄(PC) — [명령, 이름, 그림]. null = 칸막이.
-const TOOLS = [["h1", "제목 1", TX("H1")], ["h2", "제목 2", TX("H2")], ["h3", "제목 3", TX("H3")], null,
-  ["bold", "굵게", IC.bold], ["italic", "기울임", IC.italic], ["strike", "취소선", IC.strike], ["code", "코드", IC.code], null,
-  ["ul", "글머리 목록", IC.ul], ["ol", "번호 목록", IC.ol], ["todo", "체크 목록", IC.todo], null,
-  ["quote", "인용", IC.quote], ["pre", "코드 블록", IC.pre], ["hr", "구분선", IC.hr], ["link", "링크", IC.link], ["image", "이미지·파일 첨부", IC.image]];
 // "/" 메뉴 — [명령, 이름, 그림, 찾는 말].
 const SLASH = [["text", "텍스트", IC.text, "text p 본문"], ["h1", "제목 1", TX("H1"), "h1 heading"], ["h2", "제목 2", TX("H2"), "h2 heading"], ["h3", "제목 3", TX("H3"), "h3 heading"],
   ["ul", "글머리 목록", IC.ul, "ul bullet list 목록"], ["ol", "번호 목록", IC.ol, "ol number list 목록"], ["todo", "체크 목록", IC.todo, "todo check task 할일"],
@@ -186,17 +181,27 @@ function slashMenu(o, run, host) {
             idx = Math.min(idx, st.items.length - 1);
             menu.innerHTML = st.items.map(([id, label, ic], i) => `<button type="button" class="re-slash-i${i === idx ? " on" : ""}" data-i="${i}"><span class="re-slash-ic">${ic}</span>${esc(t(label))}</button>`).join("");
             const r = st.clientRect && st.clientRect();
+            if (!r) return;
+            menu.hidden = false;
+            //  편집기 영역 안에서만 자리를 잡는다 — 바깥(모달 아래·키보드 뒤)으로 나가면 잘리고 영역이 밀린다.
             const hr = host.getBoundingClientRect();
-            if (r) {
-              menu.hidden = false;
-              const mh = menu.offsetHeight || 260;
-              const below = r.bottom - hr.top + 4;
-              //  아래가 모자라면(폰 — 키보드 위) 줄 위로 띄운다.
-              const vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
-              const top = r.bottom + mh + 8 > vh && r.top - mh - 4 > 0 ? r.top - hr.top - mh - 4 : below;
-              menu.style.top = `${top}px`;
-              menu.style.left = `${Math.max(4, Math.min(r.left - hr.left, hr.width - menu.offsetWidth - 4))}px`;
-              const on = menu.querySelector(".on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest" });
+            const vv = window.visualViewport;
+            const areaTop = Math.max(hr.top, vv ? vv.offsetTop : 0);
+            const areaBot = Math.min(hr.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight);
+            const roomBelow = areaBot - r.bottom - 8;
+            const roomAbove = r.top - areaTop - 8;
+            menu.style.maxHeight = "";
+            const full = menu.offsetHeight;
+            const below = full <= roomBelow || roomBelow >= roomAbove;
+            const h = Math.max(72, Math.min(full, below ? roomBelow : roomAbove));
+            menu.style.maxHeight = `${h}px`;
+            menu.style.top = `${(below ? r.bottom + 4 : r.top - h - 4) - hr.top}px`;
+            menu.style.left = `${Math.max(4, Math.min(r.left - hr.left, hr.width - menu.offsetWidth - 4))}px`;
+            //  ★ scrollIntoView 금지 — 바깥 스크롤 칸까지 같이 밀어 편집기 영역이 위로 올라갔다(2026-10-30 신고). 메뉴 안만 움직인다.
+            const on = menu.querySelector(".on");
+            if (on) {
+              if (on.offsetTop < menu.scrollTop) menu.scrollTop = on.offsetTop;
+              else if (on.offsetTop + on.offsetHeight > menu.scrollTop + menu.clientHeight) menu.scrollTop = on.offsetTop + on.offsetHeight - menu.clientHeight;
             }
           };
           return {
@@ -229,7 +234,7 @@ function slashMenu(o, run, host) {
 
 /**
  * 편집기를 만든다.
- *  o = { value, t(문구), mobile(폰: 도구 줄·손잡이 없음), resolveImage(attId) → Promise<url>, onPaste() → Promise<bool>,
+ *  o = { value, t(문구), mobile(폰: 손잡이 없음), resolveImage(attId) → Promise<url>, onPaste() → Promise<bool>,
  *        onAttach(), onOpenLink(href), onChange(md), onState(state), onFocus(), onBlur() }
  *  → { el, getMarkdown(), setMarkdown(md), insertImage({id,name}, url), removeImage(id), imageIds(), focus(), blur(), exec(cmd, arg), state(), destroy() }
  *  el 에는 글이 바뀔 때 `input` 이벤트가 난다(옛 rich-editor 와 같은 약속).
@@ -241,14 +246,14 @@ export function createIssueEditor(o = {}) {
   const urls = new Map();   // attId → 그림 url("" = 받는 중·못 받음)
   const el = document.createElement("div");
   el.className = "re" + (mobile ? " re-mobile" : "");
-  el.innerHTML = (mobile ? "" : `<div class="re-bar">${TOOLS.map((x) => (x ? `<button type="button" class="re-b" data-cmd="${x[0]}" title="${esc(t(x[1]))}">${x[2]}</button>` : `<span class="re-sep"></span>`)).join("")}</div>`) +
-    `<div class="re-scroll"><div class="re-host"></div></div>` +
+  //  2026-10-30 사용자 결정: 노션처럼 / 메뉴·선택 메뉴로 쓰므로 위쪽 도구 줄은 없다(PC·폰).
+  el.innerHTML = `<div class="re-scroll"><div class="re-host"></div></div>` +
     `<div class="re-link" hidden><input class="re-link-in" placeholder="https://" autocapitalize="off" autocorrect="off" spellcheck="false"><button type="button" class="re-link-ok">${esc(t("링크 넣기"))}</button></div>`;
   const hostEl = el.querySelector(".re-host");
   const linkRow = el.querySelector(".re-link");
   const linkIn = el.querySelector(".re-link-in");
 
-  // ── 선택 메뉴(노션식) — 글을 고르면 위에 굵게·기울임·취소선·코드·링크. PC 만(폰은 키보드 위 도구 줄이 같은 일을 한다).
+  // ── 선택 메뉴(노션식) — 글을 고르면 굵게·기울임·취소선·코드·링크. 폰은 OS 선택 메뉴를 가리지 않게 글 아래에 뜬다.
   const bubble = document.createElement("div");
   bubble.className = "re-bubble";
   bubble.innerHTML = [["bold", "굵게", IC.bold], ["italic", "기울임", IC.italic], ["strike", "취소선", IC.strike], ["code", "코드", IC.code], ["link", "링크", IC.link]]
@@ -321,13 +326,11 @@ export function createIssueEditor(o = {}) {
   };
   let stTimer = 0;
   const pushState = () => {
-    if (!o.onState && mobile) return;
-    clearTimeout(stTimer);
+      clearTimeout(stTimer);
     stTimer = setTimeout(() => {
       const s = state();
       if (o.onState) o.onState(s);
       bubble.querySelectorAll("[data-cmd]").forEach((b) => b.classList.toggle("on", !!s[b.dataset.cmd]));
-      el.querySelectorAll(".re-bar [data-cmd]").forEach((b) => b.classList.toggle("on", !!s[b.dataset.cmd]));
     }, 30);
   };
 
@@ -346,11 +349,12 @@ export function createIssueEditor(o = {}) {
   ];
   if (!mobile) {
     exts.push(DragHandle.configure({ render: () => grip, computePositionConfig: { placement: "left-start", strategy: "absolute" } }));
-    exts.push(BubbleMenu.configure({
-      element: bubble,
-      shouldShow: ({ editor: ed, state: s, from, to }) => from !== to && ed.isEditable && !ed.isActive("codeBlock") && !ed.isActive("image") && !s.selection.node,
-    }));
   }
+  exts.push(BubbleMenu.configure({
+    element: bubble,
+    ...(mobile ? { options: { placement: "bottom" } } : {}),
+    shouldShow: ({ editor: ed, state: s, from, to }) => from !== to && ed.isEditable && !ed.isActive("codeBlock") && !ed.isActive("image") && !s.selection.node,
+  }));
   editor = new Editor({
     element: hostEl,
     extensions: exts,
@@ -366,9 +370,9 @@ export function createIssueEditor(o = {}) {
     onFocus: () => { pushState(); if (o.onFocus) o.onFocus(); },
     onBlur: () => { pushState(); if (o.onBlur) o.onBlur(); },
   });
-  if (!mobile) el.appendChild(bubble);
+  el.appendChild(bubble);
 
-  el.querySelectorAll(".re-bar [data-cmd], .re-bubble [data-cmd]").forEach((b) => {
+  el.querySelectorAll(".re-bubble [data-cmd]").forEach((b) => {
     b.addEventListener("mousedown", (e) => e.preventDefault());
     b.addEventListener("click", () => run(b.dataset.cmd));
   });

@@ -76,6 +76,7 @@ router.post('/auto', accountAuth, daemonController.autoRpc);
 router.post('/conv', accountAuth, daemonController.convRpc);
 // 오케스트레이션(orch.*) — 원격 화면은 보기 + 답하기·결정·멈추기·정리·닫기만. 허용 표 = daemonController.ORCH_RPC_OK.
 router.post('/orch', accountAuth, daemonController.orchRpc);
+router.post('/agentctl', accountAuth, daemonController.agentctlRpc); // 다른 PC 의 에이전트 제어(봉투 불가 시 폴백)
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);
 //  직접 연결(WebRTC) — 외부망에서 서버를 우회하는 경로. 시그널링만 여기를 지나고 영상은 안 지난다.

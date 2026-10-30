@@ -22,6 +22,7 @@ import { bindings, comboOf, IS_WINDOWS } from "./shortcuts.js";
 import { basename } from "./path-utils.js";
 import { initWinCaption } from "./win-caption.js";
 import { openPalette, isPaletteOpen } from "./palette.js";
+import { initPrefix } from "./prefix.js";
 import { mountSettings, updateSettings, deepLinkPair, openSettingsSection } from "./settings.js";
 import {
   hideSetupUpdate,
@@ -285,6 +286,9 @@ window.addEventListener("keydown", (e) => {
   //  "브라우저 기본 동작도 안 되고 우리 동작도 안 되는" 죽은 키가 된다.
   if (runCommand(id)) e.preventDefault();
 });
+
+// 접두키(⌃B 다음 글자) — prefix.js. ⌃B 두 번은 터미널로 그대로 보낸다.
+initPrefix({ t: (s) => i18n.t(s), sendCtrlB: () => focusedPane()?._write?.("\x02"), blocked: () => isPaletteOpen() });
 
 // ── 초기화 ──
 // punch-through 이벤트 실드 — DOM 오버레이(모달/메뉴/드롭다운/게이트)가 떠 있는 동안엔 프리뷰 구멍

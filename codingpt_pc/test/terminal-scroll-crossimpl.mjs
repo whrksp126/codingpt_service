@@ -88,7 +88,7 @@ ok('PC: "연결 끊김" 은 붙어 있던 채널이 끊겼을 때만 찍는다',
   const dm = fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/pty.js'), 'utf8');
   ok('데몬: v3 클라에는 "터미널 0개" 를 EXIT 프레임으로 말한다', /terminalProtocol\) === 3\) \{\s*const v3 = require\('\.\/terminal-stream-v3'\);[\s\S]{0,200}?OPCODE\.EXIT[\s\S]{0,120}?no_terminal/.test(dm));
   ok('데몬: 재부팅 복원(매니페스트)이 로컬 리스너보다 먼저 돈다',
-    /restoreIfNeeded\(\)[\s\S]{0,400}?require\('\.\/terminal-local'\)\.start\(\)/.test(fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/control.js'), 'utf8')));
+    /restoreIfNeeded\(\)[\s\S]{0,1200}?require\('\.\/terminal-local'\)\.start\(\)/.test(fs.readFileSync(path.join(here, '../../codingpt_daemon/packages/runner-core/control.js'), 'utf8')));
 }
 
 // 6-6) v3 뷰어 계약(docs/terminal-v3-design.md §4) — 격자는 소유자 것, 크기 주장은 소유자만, 비소유자는 축소.

@@ -1320,6 +1320,34 @@ async function orchRpc(req, res) {
     return errorResponse(res, err, 500);
   }
 }
+// POST /api/daemon/agentctl  body:{ method, params, hostDeviceId } — 다른 PC 의 에이전트를 부른다(cpt --machine, 평문 폴백).
+//  계정 열쇠가 있으면 데몬은 봉투(/rpc)로 보내고 여기를 타지 않는다. 같은 계정의 **PC 기기만** 부를 수 있다 —
+//  callRpc 가 req.user 의 러너 안에서만 찾으므로 다른 계정의 PC 는 닿지 않는다.
+const AGENTCTL_RPC_OK = new Map([
+  ['actl.list', 15000], ['actl.get', 15000], ['actl.read', 15000], ['actl.result', 15000], ['actl.sendKeys', 15000], ['actl.stop', 20000],
+  ['actl.start', 50000], ['actl.prompt', 40000],
+]);
+async function agentctlRpc(req, res) {
+  try {
+    const b = req.body || {};
+    const method = String(b.method || '');
+    if (!AGENTCTL_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
+    const opts = connOptsOf(req);
+    if (!opts) return errorResponse(res, new Error('대상 PC 가 필요합니다.'), 400);
+    const params = b.params && typeof b.params === 'object' && !Array.isArray(b.params) ? b.params : {};
+    const result = await daemonRelayService.callRpc(req.user.id, method, params, AGENTCTL_RPC_OK.get(method), opts);
+    return successResponse(res, result);
+  } catch (e) {
+    if (e && e.message === 'DAEMON_OFFLINE') {
+      return errorResponse(res, Object.assign(new Error('PC 데몬이 연결되어 있지 않습니다.'), { publicDetail: { code: 'DAEMON_OFFLINE' } }), 409);
+    }
+    const err = e instanceof Error ? e : new Error(String(e));
+    const code = err.message === RELAY_RPC_TIMEOUT_MSG ? 'TIMEOUT' : (err.code ? String(err.code) : 'AGENTCTL_ERROR');
+    err.code = code;
+    err.publicDetail = { code };
+    return errorResponse(res, err, 500);
+  }
+}
 // POST /api/daemon/conv  body:{ method, params, hostDeviceId } — 채팅 v2(conv.*) 평문 REST.
 //  정본 계약 = codingpt_daemon/docs/chat-v2-design.md §4·§8. autoRpc 복제 — 서버는 통로(메서드만 가르고 params 그대로,
 //  검증은 데몬 conv.js 가 전부). 본문(text/attachments/answers)은 로그에 남기지 않는다.
@@ -2035,6 +2063,7 @@ function previewCookieMiddleware(req, res, next) {
 }
 
 module.exports = {
+  agentctlRpc,
   daemonWorkspaces, daemonCreateWorkspace, daemonTerminalStart, daemonMe, updateMe, deleteAccount, daemonDevices,
   emulatorList,
   emulatorStream,

@@ -286,7 +286,9 @@ async function boot(id) {
   if (p.scheme === 'avd') {
     if (!t.emulator) throw new Error('안드로이드 에뮬레이터를 찾을 수 없어요');
     // 켜는 데 수십 초가 걸린다 — 기다리지 않고 띄우기만 하고, 목록 갱신으로 확인하게 한다.
-    const child = cp.spawn(t.emulator, ['-avd', p.value, '-no-boot-anim'], { detached: true, stdio: 'ignore' });
+    //  ★ -no-window — 화면은 CodingPT 의 모바일 탭(스트림)이 정본이다. 창을 띄우면 qemu 창이 사용자 화면 위로 튀어나오고
+    //   폰으로 보는 사용자에겐 아무 쓸모가 없다(2026-10-30 신고).
+    const child = cp.spawn(t.emulator, ['-avd', p.value, '-no-boot-anim', '-no-window'], { detached: true, stdio: 'ignore' });
     child.unref();
     //  ★ avdName 을 돌려준다: 켜지면 이 기기의 id 가 `android:emulator-N` 으로 **바뀌므로**,
     //   화면은 이 이름으로 새 행을 찾아 따라가야 한다(안 그러면 영원히 '꺼짐' 이다).

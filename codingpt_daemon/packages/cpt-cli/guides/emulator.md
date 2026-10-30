@@ -7,6 +7,10 @@
 이 PC 에 붙어 있는 **안드로이드 에뮬레이터/실기기와 iOS 시뮬레이터**를 직접 보고 조작한다.
 앱을 고쳤으면 **사용자에게 묻지 말고 네가 직접 열어서 확인하라** — 그게 이 명령의 값이다.
 
+★ **외부 창을 띄우지 마라.** `emulator -avd …`, `open -a Simulator`, `simctl boot` 를 직접 실행하면 안 된다(막혀 있다) —
+창이 사용자 화면 위로 튀어나오고, 폰으로 보는 사용자는 볼 수도 만질 수도 없다. `cpt emulator boot` 는 창 없이 켜고,
+`cpt emulator show` 가 지금 사용자가 보는 기기에 화면을 띄운다. 순서는 항상 `list → boot → show → ax/tap-label`.
+
 ```
 cpt emulator list                       # 붙어 있는 기기(꺼진 AVD 포함). id 는 android:… / ios:… / avd:…
 cpt emulator boot --device avd:Pixel_9a # 꺼진 기기 켜기(켜지면 id 가 android:emulator-5554 로 바뀐다)

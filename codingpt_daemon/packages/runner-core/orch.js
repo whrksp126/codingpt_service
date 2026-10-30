@@ -1654,6 +1654,7 @@ function roleOfSession(tsession) {
 
 module.exports = {
   configure, start, rpc, roleOfSession, quietSession, buildPreamble, permissionArgs,
+  deps: () => inj, waitAgentLive,   // agent-control.js 가 같은 실행·입력·관찰 경로를 쓴다
   ERROR_CODES, MESSAGE_TYPES, WS_STATUSES, DEFAULT_LIMITS, USER_METHODS, METHODS: Object.keys(METHODS),
   _internals: {
     load, save, tick, prune, advanceDag, livenessOf, storeFile, promptFile, orchDir, _reset, titleOf,

@@ -267,6 +267,15 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   capabilities                          지원 명령 목록
   ping
   agent status                          이 워크스페이스 에이전트 상태(● 작업중 ○ 유휴 ✋ 승인대기)
+  machine                               내 PC 목록(● 켜짐) — 아래 --machine 에 쓰는 이름
+
+  # 이름으로 부르는 에이전트 — 같은 PC·다른 PC 모두 같은 명령 (전체: cpt skills get agent)
+  [--machine <PC>] agent list           에이전트와 상태(working|blocked|idle|starting|gone|unknown)
+  [--machine <PC>] agent start <이름> [--kind claude|codex|gemini] [--cwd <폴더>] [--model <id>] [--skip-permissions]
+  [--machine <PC>] agent prompt <이름> "<지시>" [--wait] [--timeout <ms>]
+  [--machine <PC>] agent wait <이름> [--until idle|blocked|working|gone] [--timeout <ms>]
+  [--machine <PC>] agent result <이름>  마지막 답(대화 기록) · agent read <이름> [--lines <n>] 화면
+  [--machine <PC>] agent send-keys <이름> <키>…   esc enter tab ctrl+c 등 · agent get <이름> · agent stop <이름>
   hooks doctor                          훅 배선 진단(상태·알림이 안 올 때 원인 확인)
   agents [rescan]                       이 PC 의 AI CLI 목록(● 연동 ○ 연동꺼짐 · 미설치)
 
@@ -439,7 +448,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
   skills get index                      무엇을 할 수 있는가 — 할 일 → 주제 표(먼저 읽는다)
-  skills list                           주제 목록(preview·browser·ide·emulator·desktop·orch·tasks·issue·auto·workspace·terminal·layout·basics)
+  skills list                           주제 목록(preview·browser·ide·emulator·desktop·agent·orch·tasks·issue·auto·workspace·terminal·layout·basics)
   skills get <주제>                      그 기능의 안내서(버전 일치) · skills get all = 전부
 
 옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
@@ -477,9 +486,7 @@ async function main() {
             + `${t.agent ? ` ${t.agent}` : ''}${t.summary ? ` — ${String(t.summary).split('\n')[0].slice(0, 60)}` : ''}`
           ).join('\n') || '(에이전트 없음)');
         }
-        process.stderr.write('사용법: cpt agent status\n');
-        process.exitCode = 2;
-        return;
+        return agentCommand(c2, rest, flags);
       }
       // 훅 배선 진단 — "상태/알림이 안 온다" 의 원인(PATH 경쟁·구버전 shim·비활성)을 판별한다.
       case 'hooks': {
@@ -621,6 +628,12 @@ async function main() {
       case 'auto': return autoCommand(c2, rest, flags);
       // 오케스트레이션(docs/orchestration-design.md) — 에이전트가 다른 에이전트를 부린다. 호출자는 터미널 좌표로 식별된다.
       case 'orch': return orchCommand(c2, rest, flags);
+      // 내 PC 들 — --machine 으로 고를 수 있는 곳(같은 계정의 켜진 PC).
+      case 'machine': {
+        const r = await request('machine.list', {}, { timeoutMs: 15000 });
+        const arr = (r && r.machines) || [];
+        return out(r, flags, arr.map((m) => `${m.online ? '●' : '○'} ${m.name}${m.current ? ' (이 PC)' : ''}  #${m.id}`).join('\n') || '(PC 없음)');
+      }
       case 'issue': return issueCommand(c2, rest, flags);
       case 'devices': {
         // 접속 중인 화면(기기) 목록 — --on <기기> 타겟 지정 재료. ● = 지금 활성(executor).
@@ -1138,7 +1151,7 @@ async function main() {
           const payload = await readStdinJson();
           let h = toolHint(process.env, payload);
           //  막는 것은 코디네이터(보통 에이전트)일 때만 — 워커가 다시 워커를 띄우는 길은 깊이 상한이 정한다. 데몬이 안 닿으면 막지 않는다.
-          if (h && h.deny) {
+          if (h && h.deny && !h.denyAlways) {
             let role = null;
             try { role = (await request('orch.status', {}, { timeoutMs: 1500 }))?.caller?.role || null; } catch (_) { role = null; }
             if (role !== 'none' && role !== 'coordinator') h = { text: h.hint };   // worker·worker+coordinator·터미널 밖(user)·응답 없음
@@ -1467,6 +1480,69 @@ function safeParse(s) { try { return JSON.parse(s); } catch (_) { return null; }
 
 // 안내서 — cpt-cli 패키지에 동봉된 guides/<주제>.md 를 그대로 출력(바이너리 버전과 항상 일치).
 //  소켓 불필요(순수 파일 읽기) — 데몬이 죽어 있어도 동작해 에이전트가 명령을 학습할 수 있다.
+// ── 이름으로 부르는 에이전트(cpt agent …) ────────────────────────────────────
+//  판정은 데몬(agent-control.js)이 한다. 긴 대기만 여기서 폴링한다 — 다른 PC 면 요청이 릴레이를 지나므로 짧게 끊어야 한다.
+const AGENT_SETTLED = new Set(['idle', 'blocked', 'gone']);
+async function agentCommand(sub, rest, flags) {
+  const f = (k) => (typeof flags[k] === 'string' ? flags[k] : undefined);
+  const machine = f('machine');
+  const call = (m, p, opt) => request(m, { ...p, ...(machine ? { machine } : {}) }, opt || { timeoutMs: 60000 });
+  const need = (v, usage) => { if (v == null || v === '') { const e = new Error('사용법: cpt agent ' + usage); e.usage = true; throw e; } return v; };
+  const line = (a) => `${a.name || a.ref} ${a.state}${a.kind ? ` ${a.kind}` : ''}${a.cwd ? ` ~/${a.cwd}` : ''}${a.summary ? ` — ${String(a.summary).split('\n')[0].slice(0, 70)}` : ''}`;
+  const waitFor = async (target, until, timeoutMs) => {
+    const t0 = Date.now();
+    const hit = (s) => (until ? until.includes(s) : AGENT_SETTLED.has(s));
+    for (;;) {
+      const a = await call('actl.get', { target });
+      if (hit(a.state)) return { ...a, waitedMs: Date.now() - t0 };
+      if (timeoutMs && Date.now() - t0 >= timeoutMs) { process.exitCode = 1; return { ...a, code: 'TIMEOUT', waitedMs: Date.now() - t0 }; }
+      await new Promise((r) => setTimeout(r, machine ? 3000 : 1000));
+    }
+  };
+  const timeout = flags.timeout != null && flags.timeout !== true ? Number(flags.timeout) : 0;
+  switch (sub) {
+    case 'list': {
+      const r = await call('actl.list', {});
+      return out(r, flags, (r.agents || []).map(line).join('\n') || '(에이전트 없음)');
+    }
+    case 'get': return out(await call('actl.get', { target: need(rest[0], 'get <이름>') }), flags, null);
+    case 'start': {
+      const name = rest[0];
+      if (machine && !f('cwd')) need(null, 'start <이름> --machine <PC> --cwd <폴더>  (다른 PC 는 폴더를 꼭 준다)');
+      const r = await call('actl.start', { name, kind: f('kind'), cwd: f('cwd'), model: f('model'), skipPermissions: !!flags['skip-permissions'] });
+      if (r.ready === false) process.exitCode = 1;
+      return out(r, flags, r.ready === false ? `${r.code}: ${r.hint}` : `시작됨: ${line(r)}`);
+    }
+    case 'prompt': {
+      const target = need(rest[0], 'prompt <이름> "<지시>" [--wait] [--timeout <ms>]');
+      const text = need(f('text') || rest.slice(1).join(' '), 'prompt <이름> "<지시>" [--wait] [--timeout <ms>]');
+      const r = await call('actl.prompt', { target, text });
+      if (r.code === 'AGENT_PROMPT_STALLED') { process.exitCode = 1; return out(r, flags, 'AGENT_PROMPT_STALLED: 들어갔지만 시작 신호가 없습니다. 다시 보내지 말고 agent read 로 확인하세요'); }
+      if (!flags.wait) return out(r, flags, `보냄: ${line(r)}`);
+      const w = await waitFor(target, null, timeout);
+      return out(w, flags, line(w));
+    }
+    case 'wait': {
+      const target = need(rest[0], 'wait <이름> [--until idle|blocked|working|gone] [--timeout <ms>]');
+      const w = await waitFor(target, f('until') ? f('until').split(',') : null, timeout);
+      return out(w, flags, line(w));
+    }
+    case 'read': {
+      const r = await call('actl.read', { target: need(rest[0], 'read <이름> [--lines <n>]'), lines: flags.lines != null ? Number(flags.lines) : undefined });
+      return out(r, flags, r.text);
+    }
+    case 'result': {
+      const r = await call('actl.result', { target: need(rest[0], 'result <이름>') });
+      return out(r, flags, r.text);
+    }
+    case 'send-keys': return out(await call('actl.sendKeys', { target: need(rest[0], 'send-keys <이름> <키>…'), keys: rest.slice(1) }), flags, 'ok');
+    case 'stop': return out(await call('actl.stop', { target: need(rest[0], 'stop <이름> [--force]'), force: !!flags.force }), flags, 'ok');
+    default:
+      process.stderr.write('사용법: cpt [--machine <PC>] agent <status|list|get|start|prompt|wait|read|result|send-keys|stop>\n전체 가이드: cpt skills get agent\n');
+      process.exitCode = 2;
+  }
+}
+
 // ── 오케스트레이션(cpt orch …) ───────────────────────────────────────────────
 //  명령 → RPC 는 얇은 변환이다. 판정(누가 워커이고 누가 코디네이터인가·상한·생존)은 전부 데몬(orch.js)이 한다.
 //  기다리는 명령(check --wait · ask)은 데몬이 응답을 쥐고 있으므로 소켓 타임아웃을 대기 시간보다 길게 잡는다.
@@ -1674,6 +1750,7 @@ const GUIDE_TOPICS = [
   ['ide', '파일·줄·diff 보여주기, 변경 리뷰 받기'],
   ['emulator', '모바일 앱 확인·조작(Android 에뮬레이터 · iOS 시뮬레이터)'],
   ['desktop', '네이티브 앱·창·시스템 설정(에이전트 PC), 로그인/2FA 넘기기'],
+  ['agent', '이름으로 에이전트 시작·지시·대기·결과 받기, 다른 PC 의 에이전트까지(--machine)'],
   ['orch', '여러 에이전트에게 나눠 맡기고 결과 받기(오케스트레이션)'],
   ['tasks', '일 하나를 다른 에이전트에게 전용 브랜치로 넘기기'],
   ['issue', '할 일 적어 두기 · 이슈로 시작하기'],
@@ -1732,6 +1809,17 @@ function toolHint(env, payload) {
         '`cpt orch worker-start --spec "<the same task description>" --title "<short title>" --json`, then collect the result with `cpt orch check --wait` ' +
         '(guide: `cpt skills get orch`). Quick read-only lookups can use an Explore subagent. If `cpt orch` fails, do the job yourself directly.',
     };
+  }
+  if (tool === 'Bash') {
+    const cmd = String(input.command || '');
+    //  내장 모바일 화면을 두고 외부 창을 띄우면 사용자는(폰에서 보고 있을 수도 있다) 볼 수도 만질 수도 없다. 조회성 adb 는 막지 않는다.
+    if (/(^|[\s;&|/])emulator\s+(@|-avd\b)/.test(cmd) || /\bopen\s+(-a\s+)?["']?Simulator\b/.test(cmd) || /Simulator\.app/.test(cmd) || /\bsimctl\s+boot\b/.test(cmd)) {
+      return { deny: true, denyAlways: true, hint: 'Use cpt emulator.', text: 'In CodingPT, never start an emulator/simulator window yourself. Use the built-in mobile screen so the user sees it on any device: ' +
+        '`cpt emulator list` → `cpt emulator boot --device <id>` (runs headless) → `cpt emulator show` (opens the live tab) → drive it with `cpt emulator ax` / `tap-label` / `screenshot`. Guide: `cpt skills get emulator`.' };
+    }
+    if (/\badb\b.*\b(screencap|shell\s+input)\b/.test(cmd) || /\bsimctl\s+io\b/.test(cmd)) {
+      return { text: 'CodingPT: prefer `cpt emulator screenshot` / `tap-label` / `text` over raw adb/simctl — they work the same on Android and iOS and `cpt emulator show` lets the user watch. Guide: `cpt skills get emulator`.' };
+    }
   }
   if (tool === 'Bash' && input.run_in_background === true) {
     return { text: 'CodingPT: background shells are hidden from the user. For a dev server, watcher, build or long run, ' +

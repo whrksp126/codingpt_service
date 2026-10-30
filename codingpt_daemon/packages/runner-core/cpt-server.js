@@ -1663,6 +1663,14 @@ async function dispatch(req, conn) {
       if (cmd === 'agent.status') {
         return { terminals: require('./agent-state').snapshot(resolved.cwdRel) };
       }
+      // 이름으로 부르는 에이전트(agent-control.js). machine 을 주면 같은 메서드를 그 PC 로 보낸다.
+      if (cmd.startsWith('actl.')) {
+        const ctl = require('./agent-control');
+        const { machine, ...p } = args;
+        if (machine) return ctl.peerCall(machine, cmd, p);
+        return ctl.handle(cmd, cmd === 'actl.start' && p.cwd == null ? { ...p, cwd: resolved.cwdRel } : p);
+      }
+      if (cmd === 'machine.list') return { machines: await require('./agent-control').machines() };
       // 훅 배선 자기진단 — "상태가 왜 안 오지"를 라이브에서 판별하는 유일한 수단.
       //  shim 이 PATH 경쟁(다른 터미널 앱의 claude 래퍼)에 밀렸는지, 훅이 실제로 도착하는지를 본다.
       if (cmd === 'hooks.doctor') {
@@ -2332,6 +2340,7 @@ const CAPABILITIES = [
   'desktop.handoff', 'desktop.pause', 'desktop.resume', 'desktop.settings.get', 'desktop.settings.set', 'desktop.pull', 'desktop.delete',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
+  'actl.list', 'actl.get', 'actl.start', 'actl.prompt', 'actl.read', 'actl.result', 'actl.sendKeys', 'actl.stop', 'machine.list',
   // 이 PC 에 설치된 AI CLI 조회(읽기 전용). `agents.wire`/`agents.rescan` 는 아래 이유로 비공개.
   'agents.list',
   // Agent Tasks — 2026-10-06 사용자 결정으로 쓰기도 공개한다(에이전트가 인계·머지까지 스스로).

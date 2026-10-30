@@ -49,6 +49,8 @@ const OPTIONAL_CAPS = [
   ['conv.v1', './conv', 'handle'],
   // 오케스트레이션(docs/orchestration-design.md) — 킬스위치(CPT_ORCH=0)면 handle 이 undefined.
   ['orch.v1', './orch', 'handle'],
+  // 이름으로 부르는 에이전트 — 다른 PC 의 에이전트가 이 PC 의 에이전트를 부린다(agent-control.js).
+  ['agentctl.v1', './agent-control', 'handle'],
 ];
 
 function daemonCaps() {
@@ -515,6 +517,12 @@ function dispatchRpc(ws, method, params, ok, fail) {
     if (serverCaps.length && !hasServerCap(cap)) { fail(codedError(`${fam.toUpperCase()}_DISABLED`, '이 서버에서 이 기능이 꺼져 있습니다')); return; }
     if (method === 'power.event') { fail(codedError('BAD_PARAMS', 'power.event 는 이 PC 의 앱만 보낼 수 있습니다')); return; }
     callLazy('./cpt-server', 'handleAutoRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;
+  }
+  // 다른 PC 의 에이전트가 보낸 지시(cpt --machine …). 같은 계정 기기끼리만 오고, 끄면(daemon.json peerControl:false) 여기서 막힌다.
+  if (method.startsWith('actl.')) {
+    const lib = require('./agent-control');
+    if (!lib.peerEnabled()) { fail(codedError('PEER_DISABLED', '이 PC 는 다른 PC 의 제어를 받지 않습니다')); return; }
+    lib.handle(method, params || {}).then(ok, fail); return;
   }
   // 오케스트레이션(orch.*) — 원격 화면(폰·다른 PC)은 사람 권한이다: 보기 + 답하기·멈추기·닫기(orch.USER_METHODS).
   //  워커를 띄우는 쪽은 이 PC 터미널 안의 에이전트뿐이라 릴레이로는 열리지 않는다. 킬스위치 규칙은 task.* 와 같다.
