@@ -49,6 +49,7 @@ router.use('/usage', usageRoutes); // 사용량 미터링 조회
 router.use('/subscription', subscriptionRoutes); // 구독 플랜/상태
 router.use('/billing', billingRoutes); // 충전/결제/크레딧
 router.use('/onboarding', onboardingRoutes); // 온보딩 설문(익명)
+router.use('/v1', require('./externalRoutes')); // 외부 연동 공개 API(API 키) — 문서 /api/v1/docs
 router.use('/daemon', daemonRoutes); // BYO-PC 데몬 페어링/상태(ws 업그레이드는 app.js 에서)
 router.use('/push', pushRoutes); // 푸시 기기 등록/해제(M3-3)
 router.use('/notifications', notificationRoutes); // 알림 동기화(모바일/PC 공유 인박스)

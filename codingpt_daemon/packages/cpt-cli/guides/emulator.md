@@ -9,11 +9,13 @@
 
 ★ **외부 창을 띄우지 마라.** `emulator -avd …`, `open -a Simulator`, `simctl boot` 를 직접 실행하면 안 된다(막혀 있다) —
 창이 사용자 화면 위로 튀어나오고, 폰으로 보는 사용자는 볼 수도 만질 수도 없다. `cpt emulator boot` 는 창 없이 켜고,
-`cpt emulator show` 가 지금 사용자가 보는 기기에 화면을 띄운다. 순서는 항상 `list → boot → show → ax/tap-label`.
+**`boot` 하면 이 워크스페이스에 모바일 화면 탭이 자동으로 열리고, 기기가 꺼지면(`shutdown` 이든 어떻게 꺼지든) 탭도 자동으로 닫힌다.**
+이미 켜진 기기를 조작할 때도 탭이 없으면 열린다. 다 썼으면 **`shutdown` 으로 꺼라** — 켜 둔 기기는 PC 성능을 계속 먹는다. 순서는 항상 `list → boot → ax/tap-label → shutdown`.
 
 ```
 cpt emulator list                       # 붙어 있는 기기(꺼진 AVD 포함). id 는 android:… / ios:… / avd:…
-cpt emulator boot --device avd:Pixel_9a # 꺼진 기기 켜기(켜지면 id 가 android:emulator-5554 로 바뀐다)
+cpt emulator boot --device avd:Pixel_9a # 꺼진 기기 켜기 + 탭 열기(켜지면 id 가 android:emulator-5554 로 바뀐다)
+cpt emulator shutdown --device <id>     # 끄기 + 탭 닫기
 cpt emulator screenshot --device <id>   # 지금 화면을 파일로 저장(경로를 돌려준다)
 cpt emulator ax --device <id>           # ★ 화면을 글자로 읽기(라벨 + 0~1 좌표)
 cpt emulator ax --device <id> 설정        # 검색어로 거르기

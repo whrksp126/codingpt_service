@@ -715,6 +715,7 @@ function coalescedNotifier(cmd, shape) {
   };
 }
 // 자동화 이름·내용은 싣지 않는다 — id 와 사유뿐(수신 클라가 봉인 auto.list 로 다시 읽는다).
+try { require('./emulator').setOnBooted(followBootedEmulator); } catch (_) { /* 구 번들 */ }
 const notifyAutomationsChanged = coalescedNotifier('automations.changed',
   (host, cur) => ({ host, ids: [...cur.ids], reason: cur.reason }));
 // dispatch.changed {host, planId} — dispatch.js 는 notify({ids:[planId], reason}) 로 부른다(겹치면 마지막 planId + ids 합집합).
@@ -906,6 +907,36 @@ async function assertCptContext(cmd, ctx, resolved) {
   const err = new Error('CodingPT 워크스페이스 밖입니다 — cpt 는 CodingPT 터미널이나 열린 워크스페이스 폴더 안에서만 동작합니다. 이 디렉토리에서는 cpt 를 사용하지 마세요.');
   err.code = 'OUT_OF_CONTEXT';
   throw err;
+}
+
+// 에이전트가 쓰는 기기를 화면에 올린다. 이미 그 기기 표면이 있으면 아무것도 안 한다(사용자의 탭을 끌어오지 않는다).
+//  보는 기기가 없을 때(폰·PC 앱 모두 꺼짐)는 표면만 등록해 둔다 — 다음에 켜는 기기가 리컨실로 연다.
+//  표시 실패가 켜기·조작을 실패시키지는 않는다.
+const EMU_VISIBLE = new Set(['emulator.boot', 'emulator.frame', 'emulator.input', 'emulator.ax', 'emulator.openUrl']);
+async function showEmulator(ctx, device) {
+  if (device.startsWith('desktop:')) return;
+  try {
+    const ws = (await resolveCtx(ctx)).cwdRel;
+    if (!ws) return;
+    const surfaces = require('./surfaces');
+    if (surfaces.list({ cwd: ws }).items.some((s) => s.kind === 'emulator' && s.deviceId === device)) return;
+    try {
+      const target = await resolveTargetDevice();
+      await sendUiCommand('emulatorOpen', { device, ws }, { mode: 'target', target, timeoutMs: 8000 });
+    } catch (_) {
+      await handleSurfaceRpc('surface.add', { cwd: ws, id: 'emu-' + require('crypto').randomBytes(6).toString('hex'), kind: 'emulator', deviceId: device });
+    }
+  } catch (e) { console.warn('[cpt] 모바일 화면 띄우기 실패:', e && e.message); }
+}
+// 안드로이드는 켜지면 id 가 avd:… → android:emulator-N 으로 바뀐다. 그 이름으로 열린 표면을 새 id 로 옮기고 열린 화면도 바꿔 끼운다.
+function followBootedEmulator(from, to) {
+  const surfaces = require('./surfaces');
+  for (const it of surfaces.allEmulators(from)) {
+    surfaces.update({ cwd: it.ws, id: it.id, deviceId: to });
+    resolveTargetDevice()
+      .then((target) => sendUiCommand('emulatorOpen', { device: to, ws: it.ws }, { mode: 'target', target, timeoutMs: 8000 }))
+      .catch(() => { /* 보는 기기 없음 — 다음에 열 때 새 id 로 열린다 */ });
+  }
 }
 
 // 대상 터미널 인덱스 — 명령 인자(idx)가 있으면 그것, 없으면 자기 자신(ctx).
@@ -1107,7 +1138,11 @@ async function dispatch(req, conn) {
   if (cmd.startsWith('emulator.')) {
     const emuLib = lazyMod('./emulator');
     if (!emuLib) throw new Error('이 데몬은 모바일 화면을 지원하지 않습니다(PC 앱 업데이트 필요)');
-    return emuLib.handle(cmd, req.args || {});
+    const r = await emuLib.handle(cmd, req.args || {});
+    //  ★ 터미널 안의 에이전트가 켜거나 만지는 기기는 언제나 사용자 눈에 보여야 한다(2026-10-31 신고: 창 없이 켜져서 PC 만 무거워짐).
+    //   에이전트가 show 를 잊어도 되도록 안내가 아니라 여기서 보장한다. PC 앱은 좌표(ctx)가 없어 이 길을 타지 않는다.
+    if (EMU_VISIBLE.has(cmd) && req.ctx && (req.args || {}).id) await showEmulator(req.ctx, String(req.args.id));
+    return r;
   }
   // 에이전트 PC(게스트 macOS VM) — 수명주기·셸·개입. 화면/입력은 emulator.* 로 `desktop:main` 을 쓴다.
   if (cmd.startsWith('desktop.')) {

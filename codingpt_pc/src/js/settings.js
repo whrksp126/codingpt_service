@@ -29,6 +29,7 @@ import {
 import { IS_WINDOWS } from "./shortcuts.js";
 import * as i18n from './i18n/index.js';
 import { renderPowerCard } from "./power-settings.js";
+import { renderExternalKeys } from "./external-keys.js";
 import { at } from "./text/automations.js";
 
 let root = null;
@@ -59,6 +60,7 @@ const NAV = [
   { key: "connection", label: "계정", group: "계정 및 기기", icon: "user", keywords: "프로필 닉네임 로그인 암호화 PC 기기 로그아웃 탈퇴" },
   { key: "mobile", label: "연결", group: "계정 및 기기", icon: "smartphone", keywords: "휴대폰 태블릿 모바일 Android iOS QR 인증 코드" },
   { key: "supporter", label: "Supporter", group: "계정 및 기기", icon: "verified", keywords: "후원 구독 결제 플랜 관리 4900" },
+  { key: "external", label: "외부 연동", group: "앱", icon: "terminal", keywords: "API 키 key SDK MCP 다른 서비스 연동 integration" },
   { key: "system", label: "시스템", group: "앱", icon: "monitor", keywords: "자동 실행 시작 로그인 권한 다운로드 데스크탑 문서 폴더 접근" },
   //  ★ 실험실(2026-08-14 사용자 확정: "베타 기능들 많아질 것 같다") — 다듬는 중인 기능의 on/off 를
   //   한자리에 모은다. 처음엔 채팅 모드를 `에이전트` 화면에 얹었는데, 베타가 늘면 각 화면에 흩어져
@@ -204,6 +206,9 @@ function renderSection(force) {
         body.firstChild.textContent = String(e && e.message ? e.message : e);
       });
     }
+  } else if (section === "external") {
+    contentEl.innerHTML = "";
+    renderExternalKeys(contentEl);
   } else if (section === "lab") {
     contentEl.innerHTML = LAB_FEATURES.length ? `
       <div class="sm-card2">

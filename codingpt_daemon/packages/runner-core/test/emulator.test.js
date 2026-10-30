@@ -495,3 +495,20 @@ test('★ emulator show 가 CLI·라우팅·공개목록에 모두 있다', () =
   const guide = fs.readFileSync(path.join(__dirname, '..', '..', 'cpt-cli', 'guides', 'emulator.md'), 'utf8');
   assert.ok(/cpt emulator show/.test(guide), '에이전트 안내서에 적혀 있다(안 적으면 아무도 안 쓴다)');
 });
+
+test('켠 기기가 꺼지면 그 화면을 닫는다 — 어떻게 꺼졌든, 켤 때 id 로 열린 표면까지', async () => {
+  const fs = require('fs'), os = require('os'), path = require('path');
+  const runtime = require('../runtime');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cpt-emu-'));
+  const prev = runtime.get();
+  runtime.init({ ...prev, stateDir: path.join(tmp, 'state'), root: tmp });
+  const S = require('../surfaces');
+  fs.mkdirSync(path.join(tmp, 'ws'));
+  S.add({ cwd: path.join(tmp, 'ws'), id: 'emu1', kind: 'emulator', deviceId: 'avd:Fake' });
+  S.add({ cwd: path.join(tmp, 'ws'), id: 'desk', kind: 'emulator', deviceId: 'desktop:macos' });
+  E._tracked.set('avd:Fake', { avdName: 'Fake', liveId: 'android:emulator-5554', since: 0 });
+  await E._sweepTracked();
+  assert.deepStrictEqual(S.list({ cwd: path.join(tmp, 'ws') }).items.map((i) => i.id), ['desk']);
+  assert.ok(!E._tracked.has('avd:Fake'));
+  runtime.init(prev);
+});

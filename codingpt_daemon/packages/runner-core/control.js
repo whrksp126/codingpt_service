@@ -524,6 +524,8 @@ function dispatchRpc(ws, method, params, ok, fail) {
     if (!lib.peerEnabled()) { fail(codedError('PEER_DISABLED', '이 PC 는 다른 PC 의 제어를 받지 않습니다')); return; }
     lib.handle(method, params || {}).then(ok, fail); return;
   }
+  // 외부 서비스(external.js) — back 의 /api/v1 만 부른다. 소유자·허용 폴더 판정은 back 이 키에서 만든 auth 로 데몬이 한다.
+  if (method.startsWith('ext.')) { callLazy('./external', 'handle', [method, params || {}], ok, fail); return; }
   // 오케스트레이션(orch.*) — 원격 화면(폰·다른 PC)은 사람 권한이다: 보기 + 답하기·멈추기·닫기(orch.USER_METHODS).
   //  워커를 띄우는 쪽은 이 PC 터미널 안의 에이전트뿐이라 릴레이로는 열리지 않는다. 킬스위치 규칙은 task.* 와 같다.
   if (method.startsWith('orch.')) {

@@ -448,7 +448,7 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
 
   # 스킬 가이드 (AI 용 전체 사용법 — 이 CLI 로 무엇을 할 수 있는지)
   skills get index                      무엇을 할 수 있는가 — 할 일 → 주제 표(먼저 읽는다)
-  skills list                           주제 목록(preview·browser·ide·emulator·desktop·agent·orch·tasks·issue·auto·workspace·terminal·layout·basics)
+  skills list                           주제 목록(preview·browser·ide·emulator·desktop·agent·external·orch·tasks·issue·auto·workspace·terminal·layout·basics)
   skills get <주제>                      그 기능의 안내서(버전 일치) · skills get all = 전부
 
 옵션: --json (원본 JSON 출력), --on <기기> (화면 조작/브라우저를 특정 기기로 — 이름 부분일치·#id·pc/mobile),
@@ -1751,6 +1751,7 @@ const GUIDE_TOPICS = [
   ['emulator', '모바일 앱 확인·조작(Android 에뮬레이터 · iOS 시뮬레이터)'],
   ['desktop', '네이티브 앱·창·시스템 설정(에이전트 PC), 로그인/2FA 넘기기'],
   ['agent', '이름으로 에이전트 시작·지시·대기·결과 받기, 다른 PC 의 에이전트까지(--machine)'],
+  ['external', '다른 프로젝트·서비스에서 이 PC 의 에이전트를 부르게 연결하기(API·SDK·MCP)'],
   ['orch', '여러 에이전트에게 나눠 맡기고 결과 받기(오케스트레이션)'],
   ['tasks', '일 하나를 다른 에이전트에게 전용 브랜치로 넘기기'],
   ['issue', '할 일 적어 두기 · 이슈로 시작하기'],

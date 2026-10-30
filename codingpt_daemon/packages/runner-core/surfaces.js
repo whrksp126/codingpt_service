@@ -141,6 +141,21 @@ function remove({ cwd, id } = {}) {
   return { ok: true };
 }
 
+/** 이 기기를 보여 주는 모바일 화면 표면을 워크스페이스와 무관하게 전부 닫는다(기기가 꺼졌을 때). 에이전트 PC 는 끄고도 pane 을 쓰므로 뺀다. */
+function removeEmulatorDevices(deviceIds) {
+  const ids = new Set((deviceIds || []).filter((d) => d && !String(d).startsWith('desktop:')));
+  if (!ids.size) return 0;
+  const items = load();
+  const next = items.filter((s) => !(s.kind === 'emulator' && ids.has(s.deviceId)));
+  if (next.length === items.length) return 0;
+  save(next);
+  notify();
+  return items.length - next.length;
+}
+
+/** 이 기기를 띄운 표면들(ws 포함) — 켜진 뒤 id 가 바뀐 기기를 따라갈 때 쓴다. */
+function allEmulators(deviceId) { return load().filter((s) => s.kind === 'emulator' && s.deviceId === deviceId); }
+
 /** 워크스페이스 삭제 때 — 그 폴더의 표면 기록을 전부 지운다. */
 function forgetWs(cwd) {
   const ws = wsKey(cwd);
@@ -160,4 +175,4 @@ async function handle(method, params = {}) {
   }
 }
 
-module.exports = { handle, list, add, update, remove, forgetWs, wsKey, setNotify, KINDS, _file: FILE };
+module.exports = { handle, list, add, update, remove, removeEmulatorDevices, allEmulators, forgetWs, wsKey, setNotify, KINDS, _file: FILE };

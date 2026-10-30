@@ -4,6 +4,7 @@ const rateLimit = require('express-rate-limit');
 const authMiddleware = require('../middlewares/authMiddleware');
 const accountAuth = require('../middlewares/accountAuth');
 const daemonController = require('../controllers/daemonController');
+const externalController = require('../controllers/externalController');
 const syncController = require('../controllers/syncController');
 const approvalController = require('../controllers/approvalController');
 const deviceTrustController = require('../controllers/deviceTrustController');
@@ -76,6 +77,10 @@ router.post('/auto', accountAuth, daemonController.autoRpc);
 router.post('/conv', accountAuth, daemonController.convRpc);
 // 오케스트레이션(orch.*) — 원격 화면은 보기 + 답하기·결정·멈추기·정리·닫기만. 허용 표 = daemonController.ORCH_RPC_OK.
 router.post('/orch', accountAuth, daemonController.orchRpc);
+// 외부 연동 키 — 사람 전용(PC 앱 설정). cpt 로는 열지 않는다(터미널 안 AI 가 자기 권한을 넓힐 수 없게).
+router.get('/api-keys', accountAuth, externalController.listKeys);
+router.post('/api-keys', accountAuth, externalController.createKey);
+router.delete('/api-keys/:id', accountAuth, externalController.revokeKey);
 router.post('/agentctl', accountAuth, daemonController.agentctlRpc); // 다른 PC 의 에이전트 제어(봉투 불가 시 폴백)
 // 라이브 화면(H.264) — 표만 끊는다. 바이트는 WS(/api/daemon/emustream/:token)로만 흐른다.
 router.post('/emulator/stream', accountAuth, daemonController.emulatorStream);

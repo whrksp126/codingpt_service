@@ -290,6 +290,7 @@ async function boot(id) {
     //   폰으로 보는 사용자에겐 아무 쓸모가 없다(2026-10-30 신고).
     const child = cp.spawn(t.emulator, ['-avd', p.value, '-no-boot-anim', '-no-window'], { detached: true, stdio: 'ignore' });
     child.unref();
+    track(id, p.value);
     //  ★ avdName 을 돌려준다: 켜지면 이 기기의 id 가 `android:emulator-N` 으로 **바뀌므로**,
     //   화면은 이 이름으로 새 행을 찾아 따라가야 한다(안 그러면 영원히 '꺼짐' 이다).
     return { ok: true, booting: true, avdName: p.value };
@@ -301,12 +302,62 @@ async function boot(id) {
       // 이미 켜져 있으면 simctl 이 실패로 끝난다 — 그건 실패가 아니다.
       if (!/current state: Booted/i.test(e.stderr || '')) throw e;
     }
-    // 시뮬레이터 창을 띄운다(창이 없어도 스크린샷은 되지만, 사람이 직접 만질 수 있어야 한다).
-    try { await run('/usr/bin/open', ['-a', 'Simulator'], { timeoutMs: 8000 }); } catch (_) { /* noop */ }
+    //  창(Simulator.app)은 띄우지 않는다 — 안드로이드 -no-window 와 같은 이유로 화면은 모바일 탭이 정본이다.
+    track(id, null);
     //  iOS 는 id(udid)가 그대로다 — 따라갈 필요가 없다.
     return { ok: true, booting: true };
   }
-  throw new Error('이미 켜져 있는 기기예요');
+  //  이미 켜진 기기 — 실패가 아니다. 부른 쪽이 화면만 띄우면 된다.
+  track(id, null);
+  return { ok: true, booting: false, alreadyOn: true };
+}
+
+// ── 켜진 기기 ↔ 화면 수명주기 ────────────────────────────────────────────────
+//  사용자 지시(2026-10-31): 꺼지면 그 pane 도 닫는다. CodingPT 가 켠 기기는 창이 없어서 pane 이 남으면 꺼진 화면만 보인다.
+//  어떻게 꺼졌든(끄기 버튼·`adb emu kill`·프로세스 종료) 같은 결과여야 해서 목록을 폴링한다. 추적이 없으면 타이머도 없다.
+const TRACK_MS = 4000;
+const BOOT_DEADLINE_MS = 3 * 60 * 1000;
+const tracked = new Map();    // 켤 때의 id → { avdName, liveId, since }
+let trackTimer = null;
+let onBooted = null;          // (fromId, liveId) — 켜진 뒤 id 가 바뀐 기기를 열린 화면이 따라가게 한다
+
+function closeDeviceSurfaces(ids) {
+  try { require('./surfaces').removeEmulatorDevices(ids); } catch (e) { console.warn('[emulator] 표면 닫기 실패:', e && e.message); }
+}
+function setOnBooted(fn) { onBooted = typeof fn === 'function' ? fn : null; }
+function track(id, avdName) {
+  if (String(id).startsWith('desktop:')) return;
+  if (!tracked.has(id)) tracked.set(id, { avdName: avdName || null, liveId: null, since: Date.now() });
+  if (!trackTimer) {
+    trackTimer = setInterval(() => { sweepTracked().catch(() => { /* 다음 틱에 다시 본다 */ }); }, TRACK_MS);
+    if (trackTimer.unref) trackTimer.unref();
+  }
+}
+async function sweepTracked() {
+  if (!tracked.size) return;
+  const { devices } = await list();
+  for (const [id, t] of tracked) {
+    const live = devices.find((d) => d.state === 'booted' && (d.id === id || d.id === t.liveId || (t.avdName && d.avdName === t.avdName)));
+    if (live) {
+      if (live.id !== t.liveId) {
+        t.liveId = live.id;
+        if (live.id !== id && onBooted) { try { onBooted(id, live.id); } catch (_) { /* noop */ } }
+      }
+      continue;
+    }
+    //  아직 켜지는 중이면(행이 나타난 적 없음) 기다리고, 기한을 넘기면 켜기 실패로 보고 빈 화면을 남기지 않는다.
+    if (!t.liveId && Date.now() - t.since < BOOT_DEADLINE_MS) continue;
+    tracked.delete(id);
+    closeDeviceSurfaces([id, t.liveId]);
+  }
+  if (!tracked.size && trackTimer) { clearInterval(trackTimer); trackTimer = null; }
+}
+
+/** 끄기 명령이 성공했다 — 폴링을 기다리지 않고 바로 닫는다. 켤 때 id(avd:…)로 열린 표면까지 같이. */
+function closeOff(id) {
+  const ids = [id];
+  for (const [from, t] of tracked) if (from === id || t.liveId === id) { ids.push(from, t.liveId); tracked.delete(from); }
+  closeDeviceSurfaces(ids);
 }
 
 async function shutdown(id) {
@@ -316,10 +367,11 @@ async function shutdown(id) {
   const t = tools();
   if (p.scheme === 'ios') {
     await run(t.xcrun, ['simctl', 'shutdown', p.value], { timeoutMs: 30000 });
+    closeOff(id);
     return { ok: true };
   }
   if (p.scheme === 'android') {
-    if (p.value.startsWith('emulator-')) { await run(t.adb, ['-s', p.value, 'emu', 'kill'], { timeoutMs: 10000 }); return { ok: true }; }
+    if (p.value.startsWith('emulator-')) { await run(t.adb, ['-s', p.value, 'emu', 'kill'], { timeoutMs: 10000 }); closeOff(id); return { ok: true }; }
     // 실기기는 우리가 끌 일이 아니다(사용자 폰을 끄는 셈).
     throw new Error('실기기는 여기서 끌 수 없어요');
   }
@@ -1191,8 +1243,9 @@ async function handle(method, params) {
 }
 
 module.exports = {
-  handle, list, boot, shutdown, frame, input, openUrl, streamStart, axTree,
+  handle, list, boot, shutdown, setOnBooted, frame, input, openUrl, streamStart, axTree,
   // 테스트용
+  _sweepTracked: sweepTracked, _tracked: tracked,
   _parseId: parseId, _px: px, _pngSize: pngSize, _resetTools, _tools: tools,
   _parseRawScreencap: parseRawScreencap, _rawToBmp: rawToBmp,
   _lastSize: lastSize, _inputSize: inputSize, _screenSize: screenSize, _toJpeg: toJpeg, toJpeg,

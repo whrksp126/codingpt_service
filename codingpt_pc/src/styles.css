@@ -1064,6 +1064,9 @@ li.CodeMirror-hint-active { background: var(--selected); color: var(--text); }
 .sm-content { flex: 1; min-height: 0; overflow-y: auto; padding: 4px var(--sm-gutter) 48px; }
 .sm-section-title { margin: 0 0 4px; color: var(--text2); font-size: 13px; font-weight: 600; }
 .sm-card2 + .sm-section-title { margin-top: 36px; }
+.ext-input { width: 240px; flex: none; }
+.ext-secret { margin-top: 12px; }
+.ext-secret-value { display: block; margin: 8px 0; font-size: 12px; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .sm-section-note { margin: 14px 0 0; color: var(--text3); font-size: 12px; line-height: 1.55; }
 .sett-attn { color: var(--text2); font-size: 12px; font-weight: 600; }
 .sm-sub { font-size: 13px; color: var(--text3); line-height: 1.6; margin-bottom: 24px; }
