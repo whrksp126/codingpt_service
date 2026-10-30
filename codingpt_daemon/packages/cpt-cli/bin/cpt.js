@@ -19,6 +19,25 @@ const { execFileSync } = require('child_process');
 const TMUX_SOCKET = 'codingpt';
 
 // ── 인자 파서(선언적 미니멀) — --flag value / --flag / 위치 인자 ──
+async function externalCommand(c2, rest, flags) {
+  const paths = typeof flags.paths === 'string' ? flags.paths.split(',').map((p) => p.trim()).filter(Boolean) : undefined;
+  const bypass = flags['allow-bypass'] === true;
+  if (c2 === 'connect') {
+    const dir = path.resolve(typeof flags.dir === 'string' ? flags.dir : (rest[0] || process.cwd()));
+    const r = await request('external.connect', { dir, name: flags.name, paths, allowBypass: bypass, mcp: !!flags.mcp, renew: !!flags.new });
+    return printJson(r);
+  }
+  if (c2 === 'key') {
+    const [sub, arg] = rest;
+    if (sub === 'create') return printJson(await request('external.keyCreate', { name: arg || flags.name, paths, allowBypass: bypass }));
+    if (sub === 'list' || sub == null) return printJson(await request('external.keyList', {}));
+    if (sub === 'revoke') return printJson(await request('external.keyRevoke', { target: arg }));
+  }
+  process.stderr.write('사용법: cpt external connect | cpt external key <create|list|revoke>\n전체 가이드: cpt skills get external\n');
+  process.exitCode = 1;
+  return undefined;
+}
+
 function parseArgv(argv) {
   const flags = {};
   const pos = [];
@@ -267,6 +286,9 @@ const HELP = `cpt - CodingPT 를 유닉스 소켓으로 조작 (터미널 안의
   capabilities                          지원 명령 목록
   ping
   agent status                          이 워크스페이스 에이전트 상태(● 작업중 ○ 유휴 ✋ 승인대기)
+  external connect [--dir <폴더>] [--name <이름>] [--paths a,b] [--allow-bypass] [--mcp] [--new]
+                                        프로젝트를 이 PC 의 에이전트에 연결(키·SDK·스킬). 키 값은 파일로만 저장
+  external key create <이름> [--paths a,b] [--allow-bypass] · external key list · external key revoke <이름|id>
   machine                               내 PC 목록(● 켜짐) — 아래 --machine 에 쓰는 이름
 
   # 이름으로 부르는 에이전트 — 같은 PC·다른 PC 모두 같은 명령 (전체: cpt skills get agent)
@@ -628,6 +650,8 @@ async function main() {
       case 'auto': return autoCommand(c2, rest, flags);
       // 오케스트레이션(docs/orchestration-design.md) — 에이전트가 다른 에이전트를 부린다. 호출자는 터미널 좌표로 식별된다.
       case 'orch': return orchCommand(c2, rest, flags);
+      // 외부 연동 — 다른 프로젝트를 이 PC 의 에이전트에 연결한다. 키 원문은 파일로만 나온다.
+      case 'external': return externalCommand(c2, rest, flags);
       // 내 PC 들 — --machine 으로 고를 수 있는 곳(같은 계정의 켜진 PC).
       case 'machine': {
         const r = await request('machine.list', {}, { timeoutMs: 15000 });
@@ -1751,7 +1775,7 @@ const GUIDE_TOPICS = [
   ['emulator', '모바일 앱 확인·조작(Android 에뮬레이터 · iOS 시뮬레이터)'],
   ['desktop', '네이티브 앱·창·시스템 설정(에이전트 PC), 로그인/2FA 넘기기'],
   ['agent', '이름으로 에이전트 시작·지시·대기·결과 받기, 다른 PC 의 에이전트까지(--machine)'],
-  ['external', '다른 프로젝트·서비스에서 이 PC 의 에이전트를 부르게 연결하기(API·SDK·MCP)'],
+  ['external', '다른 프로젝트·서비스를 이 PC 의 에이전트·구독에 연결하기(키 생성·관리, API·SDK·MCP)'],
   ['orch', '여러 에이전트에게 나눠 맡기고 결과 받기(오케스트레이션)'],
   ['tasks', '일 하나를 다른 에이전트에게 전용 브랜치로 넘기기'],
   ['issue', '할 일 적어 두기 · 이슈로 시작하기'],

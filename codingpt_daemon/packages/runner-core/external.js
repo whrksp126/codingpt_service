@@ -13,6 +13,11 @@
  *  · 소유자가 다른 세션은 "없는 세션" 으로 답한다(존재 여부도 알려 주지 않는다).
  *  · 프롬프트·답변을 로그에 남기지 않는다.
  *  · 끄기: daemon.json externalApi:false / CPT_EXTERNAL=0.
+ *
+ * 키 관리(external.*, `cpt external`) — 사용자 결정(2026-10-31): 같은 PC 의 에이전트가 키를 만들고 관리해도 된다.
+ *  · 원문은 데몬이 받아 ~/.codingpt/keys/ 에 0600 파일로만 쓴다. CLI 응답에는 싣지 않는다 — 대화 기록에 키가 남지 않게.
+ *  · 프로젝트에는 파일 경로만 적는다(.codingpt.json). 그래서 프로젝트 폴더를 커밋해도 키가 새지 않는다.
+ *  · 만들고 폐기할 때마다 사용자에게 알린다. 릴레이로는 열지 않는다(이 PC 터미널 전용).
  */
 'use strict';
 const fs = require('fs');
@@ -210,6 +215,97 @@ async function rpcDelete(p) {
   return { ok: true, ...(e.branch ? { keptBranch: e.branch, keptWorktree: e.cwd } : {}) };
 }
 
+// ── 키 관리(이 PC 전용) ──────────────────────────────────────────────────────
+function keysDir() { return path.join(runtime.stateDir(), 'keys'); }
+function back(method, apiPath, body) { return require('./cpt-server').backFetch(method, apiPath, body); }
+function keyFileOf(key) {
+  const slug = String(key.name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'key';
+  return path.join(keysDir(), `${slug}-${key.id}.key`);
+}
+function tell(title, body) {
+  back('POST', '/api/notifications', { source: 'external', kind: 'external_key', title, body }).catch(() => { /* 알림 실패가 키 작업을 막지 않는다 */ });
+}
+function publicKey(k) {
+  const keyFile = keyFileOf(k);
+  return { id: k.id, name: k.name, prefix: k.prefix, allowedPaths: k.allowedPaths, allowBypass: k.allowBypass, lastUsedAt: k.lastUsedAt, keyFile: fs.existsSync(keyFile) ? keyFile : null };
+}
+function thisDevice() { return (require('./config').load() || {}).deviceId; }
+
+async function keyCreate(p) {
+  const name = String(p.name || '').trim();
+  if (!name) throw coded('BAD_REQUEST', '키 이름이 필요합니다');
+  const auth = { paths: [] };
+  const allowedPaths = (Array.isArray(p.paths) ? p.paths : []).map((x) => allowedAbs(auth, x));
+  const r = await back('POST', '/api/daemon/api-keys', { name, allowedPaths, allowBypass: p.allowBypass === true });
+  const key = r.key;
+  const keyFile = keyFileOf(key);
+  fs.mkdirSync(keysDir(), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(keyFile, r.secret + '\n', { mode: 0o600 });
+  tell('외부 연동 키가 만들어졌어요', `${name} · ${allowedPaths.join(', ') || '홈 폴더 전체'}${key.allowBypass ? ' · 승인 없이 실행 허용' : ''}`);
+  return { ...publicKey(key), keyFile };
+}
+async function keyList() {
+  const r = await back('GET', '/api/daemon/api-keys');
+  const me = thisDevice();
+  return { keys: (r.keys || []).filter((k) => k.deviceId === me).map(publicKey) };
+}
+async function keyRevoke(p) {
+  const target = String(p.target || '').trim();
+  const { keys } = await keyList();
+  const hits = keys.filter((k) => String(k.id) === target || k.name === target || k.prefix === target);
+  if (!hits.length) throw coded('KEY_NOT_FOUND', `키를 찾을 수 없습니다: ${target}`);
+  if (hits.length > 1) throw coded('KEY_AMBIGUOUS', `같은 이름의 키가 여럿입니다. id 로 지정하세요: ${hits.map((k) => k.id).join(', ')}`);
+  await back('DELETE', `/api/daemon/api-keys/${hits[0].id}`);
+  if (hits[0].keyFile) fs.rmSync(hits[0].keyFile, { force: true });
+  tell('외부 연동 키가 폐기됐어요', hits[0].name);
+  return { ok: true, id: hits[0].id, name: hits[0].name };
+}
+
+/** 프로젝트 연결 — 키 + 키 경로 설정 + SDK + 스킬을 한 번에. 키는 이 폴더만 허용이 기본이다. */
+async function connect(p) {
+  const dir = allowedAbs({ paths: [] }, p.dir);
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw coded('BAD_REQUEST', '폴더가 없습니다');
+  const cfgFile = path.join(dir, '.codingpt.json');
+  let prior = null;
+  try { prior = JSON.parse(fs.readFileSync(cfgFile, 'utf8')); } catch (_) { /* 처음 연결 */ }
+  const live = prior && prior.keyId ? (await keyList()).keys.find((k) => k.id === prior.keyId && k.keyFile) : null;
+  let key = live;
+  const reused = !!live && !p.renew;
+  if (!reused) {
+    key = await keyCreate({ name: p.name || path.basename(dir), paths: p.paths && p.paths.length ? p.paths : [dir], allowBypass: p.allowBypass });
+    if (live) await keyRevoke({ target: String(live.id) });
+  }
+  const base = String((require('./config').load() || {}).serverUrl || '').replace(/\/+$/, '');
+  const fetchText = async (rel) => {
+    const res = await fetch(base + rel);
+    if (!res.ok) throw coded('EXTERNAL_ERROR', `${rel} 을 받지 못했습니다(HTTP ${res.status})`);
+    return res.text();
+  };
+  const [sdk, skill] = await Promise.all([fetchText('/api/v1/sdk/codingpt.mjs'), fetchText('/api/v1/skill')]);
+  const files = [cfgFile];
+  const put = (rel, text) => { const f = path.join(dir, rel); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, text); files.push(f); };
+  put('codingpt.mjs', sdk);
+  put('.claude/skills/codingpt/SKILL.md', skill);
+  put('.agents/skills/codingpt/SKILL.md', skill);
+  if (p.mcp) {
+    const f = path.join(dir, '.mcp.json');
+    let cur = {};
+    try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (_) { /* 새 파일 */ }
+    cur.mcpServers = { ...(cur.mcpServers || {}), codingpt: { command: 'node', args: ['codingpt.mjs', 'mcp'] } };
+    fs.writeFileSync(f, JSON.stringify(cur, null, 2) + '\n');
+    files.push(f);
+  }
+  fs.writeFileSync(cfgFile, JSON.stringify({ url: base, keyFile: key.keyFile, keyId: key.id, name: key.name }, null, 2) + '\n');
+  return { ok: true, reused, name: key.name, allowedPaths: key.allowedPaths, allowBypass: key.allowBypass, keyFile: key.keyFile, files };
+}
+
+const LOCAL = { 'external.keyCreate': keyCreate, 'external.keyList': keyList, 'external.keyRevoke': keyRevoke, 'external.connect': connect };
+function local(method, params) {
+  const fn = LOCAL[method];
+  if (!fn) return Promise.reject(coded('BAD_METHOD', `알 수 없는 명령입니다: ${method}`));
+  return Promise.resolve().then(() => fn(params || {}));
+}
+
 async function rpcCaps() {
   const r = await conv('conv.caps', {});
   return { agents: r.agents, modes: r.modes, maxLive: r.maxLive };
@@ -228,4 +324,4 @@ function handle(method, params) {
   return Promise.resolve().then(() => fn(params || {}));
 }
 
-module.exports = { handle, METHODS, _internals: { allowedAbs, eventOf, storeFile, worktreesDir } };
+module.exports = { handle, local, METHODS, _internals: { allowedAbs, eventOf, storeFile, worktreesDir, keysDir } };

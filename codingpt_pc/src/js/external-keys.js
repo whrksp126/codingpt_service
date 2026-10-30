@@ -1,5 +1,5 @@
 // external-keys.js — 설정 > 외부 연동. 다른 서비스가 이 PC 의 에이전트를 부를 때 쓰는 API 키를 만들고 폐기한다.
-//  키는 만드는 PC 에 묶이고 원문은 만들 때 한 번만 보여 준다. 키 관리는 사람 전용이다(cpt 로 열지 않는다).
+//  키는 만드는 PC 에 묶이고 원문은 만들 때 한 번만 보여 준다. 같은 PC 의 에이전트도 `cpt external` 로 관리한다.
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import * as i18n from "./i18n/index.js";

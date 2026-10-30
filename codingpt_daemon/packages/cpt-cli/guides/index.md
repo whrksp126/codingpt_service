@@ -13,7 +13,7 @@ Everything goes through the `cpt` CLI. Before using a feature, read its guide: `
 | Show a file, a line or a diff; ask the user to review changes | `ide` |
 | Check or drive a mobile app (Android emulator / iOS Simulator) | `emulator` |
 | Operate native desktop apps, windows, system settings; hand a login/2FA to the user | `desktop` |
-| Let another project or service use this PC's agents (API, SDK, MCP) | `external` |
+| Connect another project or service to this PC's agents and subscription instead of an AI API key; create or manage its API keys | `external` |
 | Ask one other agent something and get the answer back — same PC or **another of the user's PCs**, claude ↔ codex | `agent` |
 | Split work across agents, run parts in parallel, delegate and collect results — **also when you would start a subagent** for a real sub-job (research, review, one part of the change): a CodingPT worker shows up as a tab the user can watch and steer | `orch` |
 | Hand one job to another agent on its own branch and stop watching it | `tasks` |

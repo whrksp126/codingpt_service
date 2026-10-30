@@ -77,7 +77,7 @@ router.post('/auto', accountAuth, daemonController.autoRpc);
 router.post('/conv', accountAuth, daemonController.convRpc);
 // 오케스트레이션(orch.*) — 원격 화면은 보기 + 답하기·결정·멈추기·정리·닫기만. 허용 표 = daemonController.ORCH_RPC_OK.
 router.post('/orch', accountAuth, daemonController.orchRpc);
-// 외부 연동 키 — 사람 전용(PC 앱 설정). cpt 로는 열지 않는다(터미널 안 AI 가 자기 권한을 넓힐 수 없게).
+// 외부 연동 키 — PC 앱 설정과 같은 PC 의 데몬(`cpt external`)이 쓴다(deviceToken 이라 키는 그 PC 에 묶인다).
 router.get('/api-keys', accountAuth, externalController.listKeys);
 router.post('/api-keys', accountAuth, externalController.createKey);
 router.delete('/api-keys/:id', accountAuth, externalController.revokeKey);

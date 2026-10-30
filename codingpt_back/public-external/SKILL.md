@@ -10,8 +10,11 @@ description: 사용자 PC 의 에이전트(CodingPT)에게 코드 수정·데이
 
 ## 준비
 
-1. `CODINGPT_API_KEY` 가 환경변수에 있는지 본다. 없으면 사용자에게 CodingPT PC 앱 > 설정 > 외부 연동에서 키를 만들어 **서버 측 환경변수**에 넣어 달라고 한다. `.env` 는 커밋하지 않는다.
-2. 도구 파일이 없으면 받는다: `curl -fsSL https://codingpt-back.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs`
+이 스킬과 `codingpt.mjs` 가 프로젝트에 있고 `.codingpt.json` 이 있으면 이미 연결된 것이다. 키는 도구가 알아서 읽으니 값을 찾거나 출력하지 않는다.
+
+연결이 안 돼 있으면:
+- CodingPT 터미널이면(`$CPT_WS` 있음) `cpt external connect` 를 실행한다.
+- 아니면 사용자에게 CodingPT 터미널에서 "이 프로젝트 연결해 줘" 라고 시키거나, PC 앱 설정 > 외부 연동에서 키를 만들어 서버 측 환경변수 `CODINGPT_API_KEY` 에 넣어 달라고 한다.
 
 ## 지금 일을 맡길 때 (CLI)
 

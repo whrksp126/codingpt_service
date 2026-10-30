@@ -115,7 +115,7 @@ function publicFile(kind) {
   };
 }
 
-// ── 키 관리(사람 전용) — PC 앱 설정. 터미널 안 AI 가 부르는 cpt 에는 열지 않는다 ──
+// ── 키 관리 — PC 앱 설정과 같은 PC 의 `cpt external`(데몬). 폰 JWT 로는 만들 수 없다 ──
 async function listKeys(req, res) {
   try {
     const rows = await ExternalApiKey.findAll({ where: { user_id: req.user.id, revoked_at: null }, order: [['created_at', 'DESC']] });

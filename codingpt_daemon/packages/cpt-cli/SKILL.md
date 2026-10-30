@@ -3,7 +3,7 @@ name: cpt-cli
 description: >-
   ONLY for terminals launched by the CodingPT app (env CPT_WS is set; if empty never
   run `cpt`; working on the CodingPT source repo does NOT make this a CodingPT terminal).
-  There, use CodingPT's own features first via the `cpt` CLI:
+  There, use CodingPT's own features first via the `cpt` CLI: connecting another project to this PC's agents/subscription, API keys → `cpt external`;
   web pages → `cpt preview` / `cpt browser` (open, click, type, console, network,
   screenshot; "브라우저로 확인해줘", "프리뷰 열어줘", "페이지 테스트"); files/diffs/review →
   `cpt ide`, `cpt review`

@@ -4,7 +4,7 @@
 에이전트는 PC 의 진짜 폴더에서 파일을 고치고 명령을 실행한다. 일반 LLM API 가 아니라 **PC 에서 일하는 동료에게 일을 맡기는 API** 다.
 
 - 기본 주소: `https://codingpt-back.ghmate.com/api/v1`
-- 인증: `Authorization: Bearer cptx_…` (CodingPT PC 앱 > 설정 > 외부 연동에서 만든다. 원문은 만들 때 한 번만 보인다)
+- 인증: `Authorization: Bearer cptx_…`. CodingPT 터미널의 에이전트가 `cpt external connect` 로 만들거나, 사용자가 PC 앱 > 설정 > 외부 연동에서 만든다
 - 응답은 JSON. 실패는 `{ "success": false, "message": "...", "detail": { "code": "..." } }` — **`detail.code` 로 분기한다.**
 - 현재 지원 에이전트: `claude`.
 
@@ -138,12 +138,14 @@ node codingpt.mjs allow <세션> <요청>
 node codingpt.mjs help
 ```
 
+키 찾는 순서: `new CodingPT({ apiKey })` → `CODINGPT_API_KEY` → 위로 올라가며 찾은 `.codingpt.json` 의 `keyFile`.
+
 MCP(stdio) — 프로젝트의 `.mcp.json`:
 
 ```json
-{ "mcpServers": { "codingpt": { "command": "node", "args": ["codingpt.mjs", "mcp"], "env": { "CODINGPT_API_KEY": "${CODINGPT_API_KEY}" } } } }
+{ "mcpServers": { "codingpt": { "command": "node", "args": ["codingpt.mjs", "mcp"] } } }
 ```
 
 ## 끄기
 
-키 폐기: PC 앱 > 설정 > 외부 연동. PC 전체 차단: `~/.codingpt/daemon.json` 에 `"externalApi": false`.
+키 폐기: PC 앱 > 설정 > 외부 연동 또는 `cpt external key revoke`. PC 전체 차단: `~/.codingpt/daemon.json` 에 `"externalApi": false`.

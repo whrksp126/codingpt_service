@@ -109,3 +109,46 @@ test('이 PC 에서 끄면 전부 막힌다', async () => {
   assert.strictEqual(await code('ext.list', { auth: A }), 'EXTERNAL_DISABLED');
   delete process.env.CPT_EXTERNAL;
 });
+
+test('키 관리 — 원문은 파일로만, 응답에는 경로뿐, 프로젝트에는 경로만', async () => {
+  const cptServer = require('../cpt-server');
+  const config = require('../config');
+  const origLoad = config.load;
+  config.load = () => ({ deviceId: 9, serverUrl: 'http://back.test' });
+  const SECRET = 'cptx_secret_value';
+  const keys = [];
+  cptServer.backFetch = async (method, p, body) => {
+    if (method === 'POST' && p === '/api/daemon/api-keys') {
+      const key = { id: keys.length + 1, name: body.name, prefix: 'cptx_secret', deviceId: 9, allowedPaths: body.allowedPaths, allowBypass: !!body.allowBypass };
+      keys.push(key);
+      return { key, secret: SECRET };
+    }
+    if (method === 'GET') return { keys: keys.concat([{ id: 99, name: '다른PC', deviceId: 1, allowedPaths: [] }]) };
+    if (method === 'DELETE') { keys.splice(keys.findIndex((k) => p.endsWith('/' + k.id)), 1); return { ok: true }; }
+    return {};
+  };
+  const origFetch = global.fetch;
+  global.fetch = async () => ({ ok: true, text: async () => 'FILE' });
+  try {
+    const dir = path.join(tmpHome, 'allowed/app');
+    const r = await X.local('external.connect', { dir, mcp: true });
+    assert.ok(!JSON.stringify(r).includes(SECRET));
+    assert.deepStrictEqual(r.allowedPaths, [dir]);
+    assert.strictEqual(fs.readFileSync(r.keyFile, 'utf8').trim(), SECRET);
+    assert.strictEqual(fs.statSync(r.keyFile).mode & 0o777, 0o600);
+    const cfg = fs.readFileSync(path.join(dir, '.codingpt.json'), 'utf8');
+    assert.ok(!cfg.includes(SECRET));
+    assert.strictEqual(JSON.parse(cfg).keyFile, r.keyFile);
+    assert.ok(fs.existsSync(path.join(dir, '.claude/skills/codingpt/SKILL.md')));
+    assert.ok(fs.existsSync(path.join(dir, 'codingpt.mjs')));
+    assert.ok(JSON.parse(fs.readFileSync(path.join(dir, '.mcp.json'), 'utf8')).mcpServers.codingpt);
+    //  다시 연결하면 키를 또 만들지 않는다
+    assert.strictEqual((await X.local('external.connect', { dir })).reused, true);
+    assert.strictEqual(keys.length, 1);
+    //  다른 PC 의 키는 목록에 없고, 폐기하면 파일도 사라진다
+    assert.deepStrictEqual((await X.local('external.keyList')).keys.map((k) => k.id), [1]);
+    await X.local('external.keyRevoke', { target: 'app' });
+    assert.ok(!fs.existsSync(r.keyFile));
+    await assert.rejects(X.local('external.keyRevoke', { target: 'app' }), (e) => e.code === 'KEY_NOT_FOUND');
+  } finally { config.load = origLoad; global.fetch = origFetch; }
+});

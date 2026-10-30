@@ -3,18 +3,39 @@
 //   SDK:  import { CodingPT } from './codingpt.mjs'
 //   CLI:  node codingpt.mjs help
 //   MCP:  node codingpt.mjs mcp
-// 환경변수: CODINGPT_API_KEY (필수), CODINGPT_URL (기본 https://codingpt-back.ghmate.com)
-import { pathToFileURL } from 'node:url';
+// 키 찾는 순서: apiKey 인자 → CODINGPT_API_KEY → 위로 올라가며 찾은 .codingpt.json 의 keyFile(cpt external connect 가 만든다)
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 const DEFAULT_URL = 'https://codingpt-back.ghmate.com';
+
+/** 시작 폴더부터 위로 .codingpt.json 을 찾는다. 키 값이 아니라 키 파일 경로만 들어 있다. */
+function projectConfig() {
+  for (const start of [process.cwd(), path.dirname(fileURLToPath(import.meta.url))]) {
+    for (let d = start; ; d = path.dirname(d)) {
+      try {
+        const c = JSON.parse(fs.readFileSync(path.join(d, '.codingpt.json'), 'utf8'));
+        const file = String(c.keyFile || '').replace(/^~(?=\/)/, os.homedir());
+        return { url: c.url, apiKey: fs.readFileSync(file, 'utf8').trim() };
+      } catch { /* 없음 — 위로 */ }
+      if (d === path.dirname(d)) break;
+    }
+  }
+  return {};
+}
 
 export class CodingPTError extends Error {
   constructor(message, code, status) { super(message); this.name = 'CodingPTError'; this.code = code; this.status = status; }
 }
 
 export class CodingPT {
-  constructor({ apiKey = process.env.CODINGPT_API_KEY, url = process.env.CODINGPT_URL || DEFAULT_URL } = {}) {
-    if (!apiKey) throw new CodingPTError('CODINGPT_API_KEY 가 없습니다. CodingPT PC 앱 설정 > 외부 연동에서 만드세요', 'UNAUTHORIZED');
+  constructor({ apiKey = process.env.CODINGPT_API_KEY, url = process.env.CODINGPT_URL } = {}) {
+    const found = apiKey ? {} : projectConfig();
+    apiKey = apiKey || found.apiKey;
+    url = url || found.url || DEFAULT_URL;
+    if (!apiKey) throw new CodingPTError('API 키가 없습니다. CodingPT 터미널에서 cpt external connect 를 실행하거나 CODINGPT_API_KEY 를 설정하세요', 'UNAUTHORIZED');
     this.apiKey = apiKey;
     this.base = String(url).replace(/\/+$/, '') + '/api/v1';
   }
@@ -141,7 +162,7 @@ async function mcp() {
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
-const HELP = `codingpt — PC 의 에이전트를 다른 프로젝트에서 부른다 (CODINGPT_API_KEY 필요)
+const HELP = `codingpt — PC 의 에이전트를 다른 프로젝트에서 부른다
 
   workspaces                                   워크스페이스 목록
   sessions                                     이 키로 만든 세션 목록

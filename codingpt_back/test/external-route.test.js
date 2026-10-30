@@ -65,10 +65,10 @@ test('키 인증 — 접두사·해시·폐기', async () => {
   } finally { models.ExternalApiKey.findOne = orig; }
 });
 
-test('키 관리 라우트는 cpt 로 열려 있지 않다', () => {
+test('ext.* 는 cpt 로 열지 않는다 — 키 관리(external.*)만 연다', () => {
   const src = fs.readFileSync(path.join(__dirname, '../../codingpt_daemon/packages/runner-core/cpt-server.js'), 'utf8');
-  assert.ok(!/api-keys/.test(src));
   assert.ok(!/'ext\.[a-zA-Z]+'/.test(src));
+  assert.ok(/'external\.connect'/.test(src));
 });
 
 test('SDK 파일은 공개로 읽힌다', () => {
