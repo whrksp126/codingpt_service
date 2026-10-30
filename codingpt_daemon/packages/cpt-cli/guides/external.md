@@ -3,14 +3,14 @@
 > 명령·플래그의 정본은 `cpt help` 다. 다른 주제: `cpt skills list`
 
 사용자의 다른 프로젝트가 CodingPT 를 통해 이 PC 의 에이전트를 쓰게 할 때 읽는다.
-계약 정본은 https://codingpt.ghmate.com/api/v1/docs 다. 이 파일은 프로젝트에 연결하는 순서만 다룬다.
+계약 정본은 https://codingpt-back.ghmate.com/api/v1/docs 다. 이 파일은 프로젝트에 연결하는 순서만 다룬다.
 
 ## 프로젝트에 연결하기
 
 ```sh
 mkdir -p .claude/skills/codingpt
-curl -fsSL https://codingpt.ghmate.com/api/v1/skill -o .claude/skills/codingpt/SKILL.md
-curl -fsSL https://codingpt.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs
+curl -fsSL https://codingpt-back.ghmate.com/api/v1/skill -o .claude/skills/codingpt/SKILL.md
+curl -fsSL https://codingpt-back.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs
 ```
 
 그러면 그 프로젝트의 에이전트가 사용법을 스스로 안다. 코드에 쓰려면 위 `codingpt.mjs` 를 import 하고, MCP 로 쓰려면 문서의 `.mcp.json` 을 넣는다.

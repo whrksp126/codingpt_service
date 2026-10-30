@@ -6,12 +6,12 @@ description: 사용자 PC 의 에이전트(CodingPT)에게 코드 수정·데이
 # CodingPT 연동
 
 이 프로젝트에서 사용자 PC 의 에이전트를 세션 단위로 부른다. 에이전트는 PC 의 실제 폴더에서 일한다.
-전체 계약: https://codingpt.ghmate.com/api/v1/docs (모르는 필드는 추측하지 말고 이 문서를 읽는다)
+전체 계약: https://codingpt-back.ghmate.com/api/v1/docs (모르는 필드는 추측하지 말고 이 문서를 읽는다)
 
 ## 준비
 
 1. `CODINGPT_API_KEY` 가 환경변수에 있는지 본다. 없으면 사용자에게 CodingPT PC 앱 > 설정 > 외부 연동에서 키를 만들어 **서버 측 환경변수**에 넣어 달라고 한다. `.env` 는 커밋하지 않는다.
-2. 도구 파일이 없으면 받는다: `curl -fsSL https://codingpt.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs`
+2. 도구 파일이 없으면 받는다: `curl -fsSL https://codingpt-back.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs`
 
 ## 지금 일을 맡길 때 (CLI)
 

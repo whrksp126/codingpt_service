@@ -4,7 +4,7 @@ import { api } from "./api.js";
 import { icons } from "./icons.js";
 import * as i18n from "./i18n/index.js";
 
-const DOCS_URL = "https://codingpt.ghmate.com/api/v1/docs";
+const DOCS_URL = "https://codingpt-back.ghmate.com/api/v1/docs";
 const t = (s) => i18n.t(s);
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 

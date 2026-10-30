@@ -3,7 +3,7 @@
 다른 프로젝트·서비스에서 **사용자 PC 에 설치된 에이전트(사용자 자신의 CLI·구독)** 를 세션 단위로 부른다.
 에이전트는 PC 의 진짜 폴더에서 파일을 고치고 명령을 실행한다. 일반 LLM API 가 아니라 **PC 에서 일하는 동료에게 일을 맡기는 API** 다.
 
-- 기본 주소: `https://codingpt.ghmate.com/api/v1`
+- 기본 주소: `https://codingpt-back.ghmate.com/api/v1`
 - 인증: `Authorization: Bearer cptx_…` (CodingPT PC 앱 > 설정 > 외부 연동에서 만든다. 원문은 만들 때 한 번만 보인다)
 - 응답은 JSON. 실패는 `{ "success": false, "message": "...", "detail": { "code": "..." } }` — **`detail.code` 로 분기한다.**
 - 현재 지원 에이전트: `claude`.
@@ -117,7 +117,7 @@ Request = { id, kind:"permission"|"question"|"plan", tool, summary, detail, relP
 ## SDK · CLI · MCP (파일 하나, 의존성 없음, Node 18+)
 
 ```sh
-curl -fsSL https://codingpt.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs
+curl -fsSL https://codingpt-back.ghmate.com/api/v1/sdk/codingpt.mjs -o codingpt.mjs
 ```
 
 ```js

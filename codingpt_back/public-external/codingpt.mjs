@@ -3,10 +3,10 @@
 //   SDK:  import { CodingPT } from './codingpt.mjs'
 //   CLI:  node codingpt.mjs help
 //   MCP:  node codingpt.mjs mcp
-// 환경변수: CODINGPT_API_KEY (필수), CODINGPT_URL (기본 https://codingpt.ghmate.com)
+// 환경변수: CODINGPT_API_KEY (필수), CODINGPT_URL (기본 https://codingpt-back.ghmate.com)
 import { pathToFileURL } from 'node:url';
 
-const DEFAULT_URL = 'https://codingpt.ghmate.com';
+const DEFAULT_URL = 'https://codingpt-back.ghmate.com';
 
 export class CodingPTError extends Error {
   constructor(message, code, status) { super(message); this.name = 'CodingPTError'; this.code = code; this.status = status; }
