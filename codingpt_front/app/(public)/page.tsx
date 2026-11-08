@@ -125,6 +125,28 @@ html{scroll-behavior:smooth}
 .cpt-landing .bubble.agent{align-self:flex-start;background:var(--elevated);border:1px solid var(--line);color:var(--text2);font-family:var(--sans);}
 .cpt-landing .tool-row{font-family:var(--mono);font-size:11px;color:var(--text3);border:1px solid var(--line);background:var(--base);border-radius:8px;padding:8px 10px;}
 
+/* 새 기능 목업 카드 — 무채색, 점 색은 상태 신호만 */
+.cpt-landing .mock{padding:14px 14px 16px;display:flex;flex-direction:column;gap:7px;font-family:var(--sans);}
+.cpt-landing .mock .grp{font-size:11px;color:var(--dim);font-weight:650;letter-spacing:0.04em;margin:2px 2px 2px;}
+.cpt-landing .mock .r{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);background:var(--base);border-radius:9px;font-size:13px;color:var(--text2);}
+.cpt-landing .mock .r.in{margin-left:16px;}
+.cpt-landing .mock .r .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cpt-landing .mock .r .stt{font-size:11.5px;color:var(--text3);}
+.cpt-landing .mock .r .tag{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;}
+.cpt-landing .mock .d{width:7px;height:7px;border-radius:50%;background:var(--border-2);flex:none;}
+.cpt-landing .mock .d.run{background:var(--accent);}
+.cpt-landing .mock .d.ask{background:#febc2e;}
+.cpt-landing .mock .d.done{background:var(--text3);}
+.cpt-landing .mock .ask-box{margin-left:16px;font-size:12.5px;color:var(--text2);border:1px solid var(--border-2);background:var(--elevated);border-radius:9px;padding:9px 11px;line-height:1.55;}
+.cpt-landing .mock .ask-box small{display:block;color:var(--dim);font-size:11px;margin-bottom:3px;}
+.cpt-landing .surfaces{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px;}
+.cpt-landing .surfaces .sf{border:1px solid var(--line);background:var(--base);border-radius:9px;padding:11px;font-family:var(--sans);}
+.cpt-landing .surfaces .sf b{display:block;font-size:12.5px;color:var(--text);font-weight:650;}
+.cpt-landing .surfaces .sf span{display:block;font-size:11.5px;color:var(--text3);line-height:1.5;margin-top:5px;}
+.cpt-landing .surfaces .log{grid-column:1/-1;font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--text3);border:1px solid var(--line);background:var(--base);border-radius:9px;padding:9px 11px;}
+.cpt-landing .surfaces .log .p{color:var(--text2);}
+@media(max-width:560px){.cpt-landing .surfaces{grid-template-columns:1fr;}}
+
 /* 후원 — 무료 사용 안내 + 단일 선택 후원 */
 .cpt-landing .pricing-sec{margin-top:96px;padding:72px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);}
 .cpt-landing .pricing-head{text-align:center;}
@@ -193,7 +215,7 @@ export default function Home() {
         <div className="container">
           <div className="kick">PC에서 하던 AI 코딩을, 어디서나 그대로</div>
           <h1>내 PC의 코딩 에이전트를 폰에서 이어서</h1>
-          <p className="sub">Claude Code·Codex가 돌아가는 PC를 그대로 원격으로 사용하세요. 채팅, 터미널, IDE, 웹 프리뷰까지 모바일에 맞게 이어집니다.</p>
+          <p className="sub">Claude Code·Codex가 돌아가는 PC를 그대로 원격으로 사용하세요. 터미널·채팅·파일·미리보기는 물론, 여러 에이전트에게 나눠 맡긴 일까지 폰에서 지휘합니다.</p>
           <div className="ctas">
             <a className="btn" href="/#start"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 19h14" /></svg>다운로드</a>
             <a className="btn ghost" href="/docs">문서 보기</a>
@@ -240,8 +262,8 @@ export default function Home() {
 
           <div className="row2 rev">
             <div className="txt">
-              <h3>복잡한 TUI는, 편한 채팅 화면으로</h3>
-              <p>터미널 에이전트의 대화와 도구 실행, 선택 화면을 모바일에 맞는 채팅 UI로 보여줘요. 필요하면 원본 터미널도 바로 열 수 있습니다.</p>
+              <h3>복잡한 TUI 대신, 편한 채팅 화면으로</h3>
+              <p>claude·codex와 채팅 화면으로 바로 대화해요. 도구 실행과 승인 요청은 카드로 오고, 모델·추론 강도도 고를 수 있어요. 필요하면 같은 대화를 터미널로 이어갑니다.</p>
             </div>
             <div className="fig card chat-demo" aria-label="터미널 에이전트 대화를 모바일 채팅 UI로 보여주는 예시">
               <div className="bubble user">로그인 오류를 찾아서 고쳐줘</div>
@@ -255,8 +277,8 @@ export default function Home() {
           <div className="row2 rev">
             <div className="txt">
               <h3>에이전트가 짠 코드를, 바로 확인하고 고치기</h3>
-              <p>diff를 열어보고, 파일 트리·전체 검색·에디터 분할까지 PC와 똑같이. 저장하면 내 머신에 즉시 반영돼요.</p>
-              <a className="more" href="/docs">에디터 문서 →</a>
+              <p>파일 트리에서 바뀐 파일을 바로 보고, diff를 열어 확인하고, 그 자리에서 고쳐요. 파일은 터미널 옆 pane 으로 열리고, 저장하면 내 머신에 즉시 반영돼요.</p>
+              <a className="more" href="/docs/editor">파일 문서 →</a>
             </div>
             <img className="fig feat-img" src="/feat-ide.png" alt="에이전트가 만든 변경을 보여주는 코드 에디터의 실시간 git diff" />
           </div>
@@ -268,6 +290,59 @@ export default function Home() {
               <a className="more" href="/docs">미리보기 문서 →</a>
             </div>
             <img className="fig feat-img" src="/feat-preview.png" alt="개발자도구로 요소를 검사하는 실시간 미리보기 — 진짜 localhost 렌더" />
+          </div>
+
+          <div className="row2">
+            <div className="txt">
+              <h3>여러 에이전트에게 나눠 맡기고, 폰에서 지켜보기</h3>
+              <p>에이전트가 작업자를 띄워 일을 나누고 결과를 모아요. 작업자마다 자기 브랜치·작업 폴더에서 일하고, 질문이 오면 폰에서 답하면 됩니다. 진행 현황과 diff·PR까지 한곳에서 확인해요.</p>
+            </div>
+            <div className="fig card" aria-label="코디네이터와 작업자 세 명이 일을 나눠 진행하는 사이드바 예시">
+              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">shopmate-web · 결제 흐름 개편</span></div>
+              <div className="mock">
+                <div className="grp">묶음</div>
+                <div className="r"><span className="d run" /><span className="nm">코디네이터</span><span className="stt">나누는 중</span></div>
+                <div className="r in"><span className="d run" /><span className="nm">작업자 · 결제 API</span><span className="tag">wt/api</span><span className="stt">작업 중</span></div>
+                <div className="r in"><span className="d ask" /><span className="nm">작업자 · 장바구니 UI</span><span className="tag">wt/ui</span><span className="stt">질문 대기</span></div>
+                <div className="ask-box"><small>작업자 · 장바구니 UI</small>무료배송 기준을 3만원으로 둘까요, 설정값으로 뺄까요?</div>
+                <div className="r in"><span className="d done" /><span className="nm">작업자 · 테스트</span><span className="tag">wt/test</span><span className="stt">완료</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="row2 rev">
+            <div className="txt">
+              <h3>할 일을 적어 두면, 에이전트가 이어받기</h3>
+              <p>내 작업 목록과 GitHub 이슈를 한 화면에서 보고, 바로 에이전트에게 맡겨요. &quot;매일 아침&quot;, &quot;새 이슈가 오면&quot; 같은 조건을 걸어 두면 알아서 시작하고 끝나면 알려줍니다.</p>
+            </div>
+            <div className="fig card" aria-label="작업 목록과 자동화 예시">
+              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">Tasks</span></div>
+              <div className="mock">
+                <div className="grp">진행 중</div>
+                <div className="r"><span className="d run" /><span className="nm">쿠폰 적용 순서 버그</span><span className="tag">#42 GitHub</span><span className="stt">claude</span></div>
+                <div className="grp">할 일</div>
+                <div className="r"><span className="d" /><span className="nm">상품 상세 이미지 지연 로딩</span><span className="stt">높음</span></div>
+                <div className="r"><span className="d" /><span className="nm">주문 내역 CSV 내보내기</span><span className="stt">보통</span></div>
+                <div className="grp">자동화</div>
+                <div className="r"><span className="d done" /><span className="nm">매일 09:00 · 의존성 점검 후 요약</span><span className="stt">켜짐</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="row2">
+            <div className="txt">
+              <h3>에이전트가 직접 보고, 눌러 보고, 확인하기</h3>
+              <p>에이전트가 미리보기 브라우저를 클릭하고 콘솔을 읽고, 에뮬레이터·시뮬레이터의 앱을 조작하고, 맥 안의 가상 macOS·Linux(에이전트 PC)에서 데스크톱 앱까지 다뤄요. 그 화면을 폰·태블릿에서 그대로 지켜볼 수 있습니다.</p>
+            </div>
+            <div className="fig card" aria-label="에이전트가 조작하는 세 가지 화면 — 미리보기 브라우저, 모바일 에뮬레이터, 에이전트 PC">
+              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">에이전트가 조작하는 화면</span></div>
+              <div className="surfaces">
+                <div className="sf"><b>미리보기 브라우저</b><span>클릭·입력·콘솔·네트워크·스크린샷</span></div>
+                <div className="sf"><b>에뮬레이터</b><span>Android·iOS 앱 화면을 보고 탭</span></div>
+                <div className="sf"><b>에이전트 PC</b><span>맥 안의 가상 macOS·Linux 데스크톱</span></div>
+                <div className="log"><span className="p">$</span> cpt browser click &quot;결제하기&quot;<br />콘솔 오류 0 · 주문 완료 화면 확인</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -303,6 +378,7 @@ export default function Home() {
             <details><summary>데스크톱 에이전트 도구(ADE)와 뭐가 다른가요?<span className="ic">+</span></summary><p>그런 도구는 PC 앞에 앉아서 쓰죠. CodingPT는 내 머신의 그 환경을 폰·태블릿에서 원격으로 이어받게 해, 자리를 떠나도 에이전트를 계속 지휘하게 합니다.</p></details>
             <details><summary>외부에서 연결할 때 CodingPT 서버를 사용하나요?<span className="ic">+</span></summary><p>네. 서로 다른 네트워크에 있는 내 기기를 찾고 연결하기 위해 CodingPT의 관리형 릴레이와 푸시 서버를 사용합니다. 소스 파일과 AI 자격증명은 내 머신에 보관돼요.</p></details>
             <details><summary>정말 무료인가요?<span className="ic">+</span></summary><p>네. 개인 사용은 기기 수와 핵심 기능 제한 없이 무료예요. 월 4,900원 후원은 CodingPT의 개발과 서버 운영을 돕고 싶은 분만 선택하면 됩니다.</p></details>
+            <details><summary>다른 서비스에서 내 PC의 에이전트를 쓸 수 있나요?<span className="ic">+</span></summary><p>네. 설정의 외부 연동에서 API 키를 만들면, 내 다른 프로젝트나 서비스가 AI API 키 대신 이 PC의 에이전트와 구독으로 일을 맡길 수 있어요. 승인 요청은 호출한 쪽으로 돌아가고, 키는 언제든 폐기할 수 있습니다.</p></details>
             <details><summary>후원은 어떻게 해지하거나 환불받나요?<span className="ic">+</span></summary><p>결제 후 Lemon Squeezy에서 제공하는 구독 관리 링크로 언제든 다음 결제를 해지할 수 있어요. 환불은 별도 요청 후 주문과 이용 내역을 확인해 처리합니다. 자세한 기준은 <a href="/legal/refund" style={{ color: 'var(--text2)', textDecoration: 'underline' }}>환불·취소 정책</a>에서 확인할 수 있습니다.</p></details>
           </div>
         </div>
@@ -344,7 +420,7 @@ export default function Home() {
             </div>
           </div>
 
-          <p className="start-note">같은 계정으로 로그인하면 내 머신이 자동으로 나타납니다. 앱의 간단한 인증 안내를 마치면 <b>내 기기끼리 종단 간 암호화된 프라이빗 연결</b>이 완성돼요.</p>
+          <p className="start-note">같은 계정으로 로그인하면 내 머신이 자동으로 나타납니다. 앱의 간단한 인증 안내를 마치면 <b>내 기기끼리 열쇠를 나눠 가진 프라이빗 연결</b>이 완성되고, 원격 제어 요청은 종단 간 암호화돼요.</p>
           <div className="free">개인 무료 · 외부망 연결과 푸시 포함 · BYO 에이전트</div>
         </div>
       </section>

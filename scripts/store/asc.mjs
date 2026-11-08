@@ -519,12 +519,79 @@ async function cmdWatch(argv) {
   }
 }
 
+/**
+ * 스토어 문구(리스팅) 조회·수정.
+ *   listing get [--version X] [--out f.json]   버전 로케일(설명·키워드·홍보 문구·새 기능)+앱 정보(이름·부제)
+ *   listing set --file f.json [--version X] [--yes]
+ *     f.json = { "<locale>": { description, keywords, promotionalText, whatsNew, name, subtitle } }
+ *     주어진 필드만 고친다. description·keywords·whatsNew 는 **편집 가능한 버전**(제출 준비 등)에만 쓸 수 있고,
+ *     name·subtitle 은 편집 가능한 앱 정보(새 버전과 함께 열린다)에만 쓸 수 있다. promotionalText 는 언제든.
+ */
+const VERSION_FIELDS = ['description', 'keywords', 'promotionalText', 'whatsNew', 'marketingUrl', 'supportUrl'];
+const INFO_FIELDS = ['name', 'subtitle'];
+async function listingTargets(argv) {
+  const vi = argv.indexOf('--version');
+  const app = await appId();
+  const vs = await versions(app.id);
+  const v = vi >= 0 ? vs.find((x) => x.version === argv[vi + 1]) : vs[0];
+  if (!v) die('대상 버전을 찾을 수 없습니다.');
+  const infos = (await api(`/v1/apps/${app.id}/appInfos?limit=5`))?.data || [];
+  //  편집 가능한 appInfo 가 있으면 그것, 없으면 게시 중인 것(읽기 전용).
+  const info = infos.find((i) => !PUBLISHED.has(i.attributes?.state || i.attributes?.appStoreState)) || infos[0];
+  return { app, v, info };
+}
+async function cmdListing(argv) {
+  const sub = argv[0];
+  const { v, info } = await listingTargets(argv);
+  const vlocs = (await api(`/v1/appStoreVersions/${v.id}/appStoreVersionLocalizations?limit=50`))?.data || [];
+  const ilocs = info ? ((await api(`/v1/appInfos/${info.id}/appInfoLocalizations?limit=50`))?.data || []) : [];
+  if (sub === 'get') {
+    const out = {};
+    for (const l of vlocs) { const a = l.attributes || {}; out[a.locale] = Object.fromEntries(VERSION_FIELDS.map((k) => [k, a[k] ?? null])); }
+    for (const l of ilocs) { const a = l.attributes || {}; out[a.locale] = { ...(out[a.locale] || {}), ...Object.fromEntries(INFO_FIELDS.map((k) => [k, a[k] ?? null])) }; }
+    console.error(`버전 ${v.version} (${ko(v.state)}) · 앱 정보 ${info ? (info.attributes?.state || info.attributes?.appStoreState) : '없음'}`);
+    const oi = argv.indexOf('--out');
+    if (oi >= 0) { fs.writeFileSync(argv[oi + 1], JSON.stringify(out, null, 2) + '\n'); console.error(`저장: ${argv[oi + 1]}`); }
+    else console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+  if (sub !== 'set') die('사용: listing get [--version X] [--out f.json] | listing set --file f.json [--version X] [--yes]');
+  const fi = argv.indexOf('--file');
+  if (fi < 0) die('--file 필요');
+  const want = JSON.parse(fs.readFileSync(argv[fi + 1], 'utf8'));
+  const editable = SUBMITTABLE.has(v.state);
+  const plan = [];
+  for (const [locale, fields] of Object.entries(want)) {
+    const vl = vlocs.find((l) => l.attributes?.locale === locale);
+    const il = ilocs.find((l) => l.attributes?.locale === locale);
+    const va = {}; const ia = {};
+    for (const [k, val] of Object.entries(fields)) {
+      if (VERSION_FIELDS.includes(k)) {
+        if (k !== 'promotionalText' && !editable) die(`${locale}.${k}: 버전 ${v.version} 은 편집 불가(${ko(v.state)}) — 새 버전을 먼저 prepare 하세요.`);
+        if (vl && vl.attributes?.[k] !== val) va[k] = val;
+      } else if (INFO_FIELDS.includes(k)) {
+        if (il && il.attributes?.[k] !== val) ia[k] = val;
+      } else die(`알 수 없는 필드: ${k}`);
+    }
+    if (!vl && Object.keys(fields).some((k) => VERSION_FIELDS.includes(k))) die(`버전 로케일 ${locale} 이 없습니다.`);
+    if (Object.keys(va).length) plan.push({ kind: 'appStoreVersionLocalizations', id: vl.id, locale, attrs: va });
+    if (Object.keys(ia).length) plan.push({ kind: 'appInfoLocalizations', id: il.id, locale, attrs: ia });
+  }
+  for (const p of plan) console.log(`${p.locale} ${p.kind}: ${Object.keys(p.attrs).join(', ')}`);
+  if (!plan.length) { console.log('바뀔 것이 없습니다.'); return; }
+  if (!argv.includes('--yes')) { console.log('\n(--yes 없이 실행 — 미리보기만)'); return; }
+  for (const p of plan) {
+    await api(`/v1/${p.kind}/${p.id}`, { method: 'PATCH', body: JSON.stringify({ data: { type: p.kind, id: p.id, attributes: p.attrs } }) });
+  }
+  console.log(`✓ ${plan.length}건 기록`);
+}
+
 const [, , cmd = 'status', ...argv] = process.argv;
 const run = {
   status: cmdStatus, builds: cmdBuilds, preflight: cmdPreflight, prepare: () => cmdPrepare(argv), compliance: () => cmdCompliance(argv),
   'review-set': () => cmdReviewSet(argv), 'release-type': () => cmdReleaseType(argv),
   submit: () => cmdSubmit(argv), cancel: () => cmdCancel(argv),
-  release: () => cmdRelease(argv), watch: () => cmdWatch(argv),
+  release: () => cmdRelease(argv), watch: () => cmdWatch(argv), listing: () => cmdListing(argv),
 }[cmd];
 if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | compliance | review-set --demo-file <json> | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
 run().catch((e) => die(String(e.message || e)));

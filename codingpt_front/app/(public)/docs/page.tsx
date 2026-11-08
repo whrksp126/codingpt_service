@@ -4,7 +4,7 @@ import Link from 'next/link';
 const CARDS: { k: string; t: string; d: string; href: string }[] = [
   { k: '시작하기', t: '설치', d: '무료 데스크톱 앱을 내 머신에 설치하기.', href: '/docs/install' },
   { k: '시작하기', t: '첫 워크스페이스', d: '내 머신의 폴더를 골라 워크스페이스로 열기.', href: '/docs/first-workspace' },
-  { k: '기본 개념', t: '작동 원리', d: '서버가 내용을 읽을 수 없는 종단 간 암호화 릴레이 구조.', href: '/docs/how-it-works' },
+  { k: '기본 개념', t: '작동 원리', d: '릴레이 구조와 종단 간 암호화가 덮는 범위.', href: '/docs/how-it-works' },
   { k: '워크스페이스', t: '터미널 & 내 AI CLI', d: '내 머신 터미널을 폰에서 그대로 이어받기.', href: '/docs/terminal' },
   { k: '워크스페이스', t: 'BYO AI (claude/codex)', d: '이미 쓰는 AI CLI를 그대로 — 키는 내 머신 밖으로 안 나가요.', href: '/docs/byo-ai' },
   { k: '워크스페이스', t: '실시간 미리보기', d: '내 머신 개발 서버를 앱 안 브라우저로.', href: '/docs/preview' },

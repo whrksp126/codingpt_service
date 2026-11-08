@@ -206,7 +206,56 @@ async function cmdUpload(argv) {
   }
 }
 
+/**
+ * 스토어 문구(리스팅) 조회·수정 — edits.listings.
+ *   listing get [--out f.json]
+ *   listing set --file f.json [--yes]   f.json = { "ko-KR": { title, shortDescription, fullDescription } }
+ *   주어진 필드만 바꾸고 커밋한다(커밋 = 변경 심사 제출). ERROR_IF_IN_REVIEW — 진행 중 심사는 건드리지 않는다.
+ */
+async function cmdListing(argv) {
+  const sub = argv[0];
+  const token = await accessToken();
+  const edit = await papi(token, `/applications/${PKG}/edits`, { method: 'POST', body: '{}' });
+  const editId = edit.id;
+  const drop = async () => { try { await papi(token, `/applications/${PKG}/edits/${editId}`, { method: 'DELETE' }); } catch (_) { /* noop */ } };
+  try {
+    const cur = (await papi(token, `/applications/${PKG}/edits/${editId}/listings`))?.listings || [];
+    if (sub === 'get') {
+      const out = Object.fromEntries(cur.map((l) => [l.language, { title: l.title, shortDescription: l.shortDescription, fullDescription: l.fullDescription }]));
+      const oi = argv.indexOf('--out');
+      if (oi >= 0) { fs.writeFileSync(argv[oi + 1], JSON.stringify(out, null, 2) + '\n'); console.error(`저장: ${argv[oi + 1]}`); }
+      else console.log(JSON.stringify(out, null, 2));
+      await drop();
+      return;
+    }
+    if (sub !== 'set') die('사용: listing get [--out f.json] | listing set --file f.json [--yes]');
+    const fi = argv.indexOf('--file');
+    if (fi < 0) die('--file 필요');
+    const want = JSON.parse(fs.readFileSync(argv[fi + 1], 'utf8'));
+    let n = 0;
+    for (const [lang, fields] of Object.entries(want)) {
+      const base = cur.find((l) => l.language === lang);
+      if (!base) die(`리스팅 언어 ${lang} 이 없습니다.`);
+      const changed = Object.keys(fields).filter((k) => base[k] !== fields[k]);
+      if (fields.title && fields.title.length > 30) die(`${lang}.title 30자 초과`);
+      if (fields.shortDescription && fields.shortDescription.length > 80) die(`${lang}.shortDescription 80자 초과(${fields.shortDescription.length})`);
+      if (fields.fullDescription && fields.fullDescription.length > 4000) die(`${lang}.fullDescription 4000자 초과`);
+      console.log(`${lang}: ${changed.join(', ') || '변경 없음'}`);
+      if (!changed.length) continue;
+      n++;
+      if (argv.includes('--yes')) {
+        await papi(token, `/applications/${PKG}/edits/${editId}/listings/${lang}`, {
+          method: 'PATCH', body: JSON.stringify({ ...Object.fromEntries(changed.map((k) => [k, fields[k]])) }),
+        });
+      }
+    }
+    if (!n || !argv.includes('--yes')) { if (n) console.log('\n(--yes 없이 실행 — 미리보기만)'); await drop(); return; }
+    await papi(token, `/applications/${PKG}/edits/${editId}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`, { method: 'POST' });
+    console.log(`✓ ${n}개 언어 리스팅 커밋(심사 제출)`);
+  } catch (e) { await drop(); throw e; }
+}
+
 const [, , cmd = 'status', ...argv] = process.argv;
-const run = { status: cmdStatus, watch: () => cmdWatch(argv), upload: () => cmdUpload(argv) }[cmd];
+const run = { status: cmdStatus, watch: () => cmdWatch(argv), upload: () => cmdUpload(argv), listing: () => cmdListing(argv) }[cmd];
 if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | watch [--interval 900] | upload --aab <경로> [--yes]`);
 run().catch((e) => die(String(e.message || e)));
