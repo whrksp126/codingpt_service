@@ -48,6 +48,11 @@ node codingpt_service/scripts/store/asc.mjs cancel --yes    # 제출 철회
 node codingpt_service/scripts/store/asc.mjs watch      # 상태 전이를 주기 감시(무인 폴링)
 node codingpt_service/scripts/store/asc.mjs release --yes   # 승인 대기 버전을 출시
 
+node codingpt_service/scripts/store/asc.mjs listing get --out cur.json            # 스토어 문구(설명·키워드·홍보·부제)
+node codingpt_service/scripts/store/asc.mjs listing set --file new.json --yes     # 편집 가능한 버전에만(홍보 문구는 언제든)
+
+node codingpt_service/scripts/store/play.mjs listing get --out cur.json           # Play 스토어 문구
+node codingpt_service/scripts/store/play.mjs listing set --file new.json --yes    # 커밋 = 문구 심사 제출
 node codingpt_service/scripts/store/play.mjs status    # Play 트랙별 심사 상태
 node codingpt_service/scripts/store/play.mjs watch     # Play 상태 전이 감시
 ```
