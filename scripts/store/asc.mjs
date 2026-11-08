@@ -586,12 +586,63 @@ async function cmdListing(argv) {
   console.log(`✓ ${plan.length}건 기록`);
 }
 
+/**
+ * 스크린샷 조회·교체.
+ *   shots list [--version X]
+ *   shots replace --type APP_IPHONE_67 --dir <폴더> [--locale ko] [--version X] [--yes]
+ *     폴더의 png 를 파일명 순서대로 올리고 그 세트의 기존 스크린샷은 지운다. 편집 가능한 버전에만.
+ *     업로드 = appScreenshots 예약 → uploadOperations 로 바이트 PUT → uploaded:true + md5 커밋.
+ */
+async function cmdShots(argv) {
+  const sub = argv[0];
+  const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
+  const { v } = await listingTargets(argv);
+  const locale = arg('--locale') || 'ko';
+  const loc = ((await api(`/v1/appStoreVersions/${v.id}/appStoreVersionLocalizations?limit=50`))?.data || []).find((l) => l.attributes?.locale === locale);
+  if (!loc) die(`로케일 ${locale} 없음`);
+  const sets = (await api(`/v1/appStoreVersionLocalizations/${loc.id}/appScreenshotSets?limit=50`))?.data || [];
+  if (sub === 'list') {
+    console.log(`버전 ${v.version} (${ko(v.state)}) · ${locale}`);
+    for (const s of sets) {
+      const shots = (await api(`/v1/appScreenshotSets/${s.id}/appScreenshots?limit=50`))?.data || [];
+      console.log(`  ${s.attributes?.screenshotDisplayType}: ${shots.length}장 ${shots.map((x) => `${x.attributes?.imageAsset?.width}x${x.attributes?.imageAsset?.height}`).join(' ')}`);
+      if (argv.includes('--urls')) for (const x of shots) { const a = x.attributes?.imageAsset; if (a) console.log('    ' + a.templateUrl.replace('{w}', a.width).replace('{h}', a.height).replace('{f}', 'png')); }
+    }
+    return;
+  }
+  if (sub !== 'replace') die('사용: shots list | shots replace --type <displayType> --dir <폴더> [--yes]');
+  if (!SUBMITTABLE.has(v.state)) die(`버전 ${v.version} 은 편집 불가(${ko(v.state)}) — 제출 철회(cancel) 후 다시.`);
+  const type = arg('--type'); const dir = arg('--dir');
+  if (!type || !dir) die('--type, --dir 필요');
+  const files = fs.readdirSync(dir).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort();
+  if (!files.length) die('올릴 이미지가 없습니다.');
+  let set = sets.find((s) => s.attributes?.screenshotDisplayType === type);
+  const old = set ? ((await api(`/v1/appScreenshotSets/${set.id}/appScreenshots?limit=50`))?.data || []) : [];
+  console.log(`${type}: 기존 ${old.length}장 → 새 ${files.length}장 (${files.join(', ')})`);
+  if (!argv.includes('--yes')) { console.log('(--yes 없이 실행 — 미리보기만)'); return; }
+  if (!set) {
+    set = (await api('/v1/appScreenshotSets', { method: 'POST', body: JSON.stringify({ data: { type: 'appScreenshotSets', attributes: { screenshotDisplayType: type }, relationships: { appStoreVersionLocalization: { data: { type: 'appStoreVersionLocalizations', id: loc.id } } } } }) })).data;
+  }
+  for (const o of old) await api(`/v1/appScreenshots/${o.id}`, { method: 'DELETE' });
+  for (const f of files) {
+    const buf = fs.readFileSync(path.join(dir, f));
+    const r = (await api('/v1/appScreenshots', { method: 'POST', body: JSON.stringify({ data: { type: 'appScreenshots', attributes: { fileName: f, fileSize: buf.length }, relationships: { appScreenshotSet: { data: { type: 'appScreenshotSets', id: set.id } } } } }) })).data;
+    for (const op of r.attributes.uploadOperations) {
+      const res = await fetch(op.url, { method: op.method, headers: Object.fromEntries(op.requestHeaders.map((h) => [h.name, h.value])), body: buf.subarray(op.offset, op.offset + op.length) });
+      if (!res.ok) throw new Error(`업로드 실패 ${f}: ${res.status}`);
+    }
+    await api(`/v1/appScreenshots/${r.id}`, { method: 'PATCH', body: JSON.stringify({ data: { type: 'appScreenshots', id: r.id, attributes: { uploaded: true, sourceFileChecksum: crypto.createHash('md5').update(buf).digest('hex') } } }) });
+    console.log(`  ↑ ${f}`);
+  }
+  console.log('✓ 교체 완료 — 처리(수 분) 뒤 shots list 로 확인');
+}
+
 const [, , cmd = 'status', ...argv] = process.argv;
 const run = {
   status: cmdStatus, builds: cmdBuilds, preflight: cmdPreflight, prepare: () => cmdPrepare(argv), compliance: () => cmdCompliance(argv),
   'review-set': () => cmdReviewSet(argv), 'release-type': () => cmdReleaseType(argv),
   submit: () => cmdSubmit(argv), cancel: () => cmdCancel(argv),
-  release: () => cmdRelease(argv), watch: () => cmdWatch(argv), listing: () => cmdListing(argv),
+  release: () => cmdRelease(argv), watch: () => cmdWatch(argv), listing: () => cmdListing(argv), shots: () => cmdShots(argv),
 }[cmd];
 if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | builds | prepare <버전> | compliance | review-set --demo-file <json> | preflight | submit [--yes] | cancel [--yes] | release [--yes] | watch [--interval 600]`);
 run().catch((e) => die(String(e.message || e)));

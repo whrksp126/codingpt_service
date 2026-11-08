@@ -255,7 +255,48 @@ async function cmdListing(argv) {
   } catch (e) { await drop(); throw e; }
 }
 
+/**
+ * 스토어 이미지 조회·교체 — edits.images.
+ *   images list [--lang ko-KR]                      종류별 장수와 URL
+ *   images replace --type phoneScreenshots --dir <폴더> [--lang ko-KR] [--yes]
+ *     그 종류의 기존 이미지를 지우고 폴더의 png/jpg 를 파일명 순서대로 올린 뒤 커밋(=심사 제출).
+ */
+async function cmdImages(argv) {
+  const sub = argv[0];
+  const arg = (k) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : null; };
+  const lang = arg('--lang') || 'ko-KR';
+  const token = await accessToken();
+  const editId = (await papi(token, `/applications/${PKG}/edits`, { method: 'POST', body: '{}' })).id;
+  const drop = async () => { try { await papi(token, `/applications/${PKG}/edits/${editId}`, { method: 'DELETE' }); } catch (_) { /* noop */ } };
+  try {
+    if (sub === 'list') {
+      for (const t of ['phoneScreenshots', 'sevenInchScreenshots', 'tenInchScreenshots', 'featureGraphic', 'icon']) {
+        const r = (await papi(token, `/applications/${PKG}/edits/${editId}/listings/${lang}/${t}`))?.images || [];
+        console.log(`${t}: ${r.length}장`);
+        if (argv.includes('--urls')) for (const im of r) console.log(`  ${im.url}`);
+      }
+      await drop(); return;
+    }
+    if (sub !== 'replace') die('사용: images list [--urls] | images replace --type <종류> --dir <폴더> [--yes]');
+    const type = arg('--type'); const dir = arg('--dir');
+    if (!type || !dir) die('--type, --dir 필요');
+    const files = fs.readdirSync(dir).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort();
+    console.log(`${type}: 새 ${files.length}장 (${files.join(', ')})`);
+    if (!argv.includes('--yes')) { console.log('(--yes 없이 실행 — 미리보기만)'); await drop(); return; }
+    await papi(token, `/applications/${PKG}/edits/${editId}/listings/${lang}/${type}`, { method: 'DELETE' });
+    for (const f of files) {
+      const res = await fetch(`https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${PKG}/edits/${editId}/listings/${lang}/${type}?uploadType=media`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': /\.png$/i.test(f) ? 'image/png' : 'image/jpeg' }, body: fs.readFileSync(path.join(dir, f)),
+      });
+      if (!res.ok) throw new Error(`업로드 실패 ${f}: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      console.log(`  ↑ ${f}`);
+    }
+    await papi(token, `/applications/${PKG}/edits/${editId}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW`, { method: 'POST' });
+    console.log('✓ 교체·커밋(심사 제출)');
+  } catch (e) { await drop(); throw e; }
+}
+
 const [, , cmd = 'status', ...argv] = process.argv;
-const run = { status: cmdStatus, watch: () => cmdWatch(argv), upload: () => cmdUpload(argv), listing: () => cmdListing(argv) }[cmd];
+const run = { status: cmdStatus, watch: () => cmdWatch(argv), upload: () => cmdUpload(argv), listing: () => cmdListing(argv), images: () => cmdImages(argv) }[cmd];
 if (!run) die(`알 수 없는 명령: ${cmd}\n사용: status | watch [--interval 900] | upload --aab <경로> [--yes]`);
 run().catch((e) => die(String(e.message || e)));

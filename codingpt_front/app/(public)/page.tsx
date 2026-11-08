@@ -125,28 +125,6 @@ html{scroll-behavior:smooth}
 .cpt-landing .bubble.agent{align-self:flex-start;background:var(--elevated);border:1px solid var(--line);color:var(--text2);font-family:var(--sans);}
 .cpt-landing .tool-row{font-family:var(--mono);font-size:11px;color:var(--text3);border:1px solid var(--line);background:var(--base);border-radius:8px;padding:8px 10px;}
 
-/* 새 기능 목업 카드 — 무채색, 점 색은 상태 신호만 */
-.cpt-landing .mock{padding:14px 14px 16px;display:flex;flex-direction:column;gap:7px;font-family:var(--sans);}
-.cpt-landing .mock .grp{font-size:11px;color:var(--dim);font-weight:650;letter-spacing:0.04em;margin:2px 2px 2px;}
-.cpt-landing .mock .r{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);background:var(--base);border-radius:9px;font-size:13px;color:var(--text2);}
-.cpt-landing .mock .r.in{margin-left:16px;}
-.cpt-landing .mock .r .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.cpt-landing .mock .r .stt{font-size:11.5px;color:var(--text3);}
-.cpt-landing .mock .r .tag{font-family:var(--mono);font-size:10.5px;color:var(--dim);border:1px solid var(--line);border-radius:5px;padding:1px 6px;}
-.cpt-landing .mock .d{width:7px;height:7px;border-radius:50%;background:var(--border-2);flex:none;}
-.cpt-landing .mock .d.run{background:var(--accent);}
-.cpt-landing .mock .d.ask{background:#febc2e;}
-.cpt-landing .mock .d.done{background:var(--text3);}
-.cpt-landing .mock .ask-box{margin-left:16px;font-size:12.5px;color:var(--text2);border:1px solid var(--border-2);background:var(--elevated);border-radius:9px;padding:9px 11px;line-height:1.55;}
-.cpt-landing .mock .ask-box small{display:block;color:var(--dim);font-size:11px;margin-bottom:3px;}
-.cpt-landing .surfaces{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:14px;}
-.cpt-landing .surfaces .sf{border:1px solid var(--line);background:var(--base);border-radius:9px;padding:11px;font-family:var(--sans);}
-.cpt-landing .surfaces .sf b{display:block;font-size:12.5px;color:var(--text);font-weight:650;}
-.cpt-landing .surfaces .sf span{display:block;font-size:11.5px;color:var(--text3);line-height:1.5;margin-top:5px;}
-.cpt-landing .surfaces .log{grid-column:1/-1;font-family:var(--mono);font-size:11px;line-height:1.8;color:var(--text3);border:1px solid var(--line);background:var(--base);border-radius:9px;padding:9px 11px;}
-.cpt-landing .surfaces .log .p{color:var(--text2);}
-@media(max-width:560px){.cpt-landing .surfaces{grid-template-columns:1fr;}}
-
 /* 후원 — 무료 사용 안내 + 단일 선택 후원 */
 .cpt-landing .pricing-sec{margin-top:96px;padding:72px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);}
 .cpt-landing .pricing-head{text-align:center;}
@@ -228,11 +206,11 @@ export default function Home() {
             <div className="shot-glow" />
             <div className="app-scroll">
               <div className="app">
-                <img className="shot-img" src="/hero-workspace.png" alt="CodingPT 데스크톱 앱 워크스페이스 — 워크스페이스 사이드바, 터미널의 AI 에이전트 세션, 코드 에디터의 실시간 diff, 개발자도구를 연 미리보기" />
+                <img className="shot-img" src="/hero-workspace.png" alt="CodingPT 데스크톱 앱 — 왼쪽 터미널의 AI 에이전트가 오른쪽 미리보기 브라우저를 직접 눌러 보고 콘솔을 확인하는 화면" />
               </div>
             </div>
             <div className="phone">
-              <img className="phone-shot" src="/mobile-workspace.png" alt="같은 AI 에이전트 세션을 폰에서 이어받아 지휘하는 CodingPT 모바일 앱" />
+              <img className="phone-shot" src="/mobile-workspace.png" alt="PC 터미널을 폰에서 그대로 이어받은 CodingPT 모바일 앱 — 테스트 결과와 빌드 로그" />
             </div>
             <p className="cap">실제 CodingPT 워크스페이스 — 터미널의 AI 에이전트를 폰·태블릿에서 그대로 이어받아요</p>
           </div>
@@ -257,7 +235,7 @@ export default function Home() {
               <p>내 머신에서 돌던 claude·codex 세션이 끊기지 않아요. 폰에서 그대로 이어받아 지휘하고, TUI·특수키까지 손안에서 조작합니다.</p>
               <a className="more" href="/docs">터미널 문서 →</a>
             </div>
-            <img className="fig feat-img" src="/feat-terminal.png" alt="폰에서 이어받은 터미널의 AI 에이전트(claude) 세션 — 파일 수정과 diff" />
+            <img className="fig feat-img" src="/feat-terminal.png" alt="터미널의 AI 에이전트(claude) 세션 — 파일 수정과 diff" />
           </div>
 
           <div className="row2 rev">
@@ -265,13 +243,7 @@ export default function Home() {
               <h3>복잡한 TUI 대신, 편한 채팅 화면으로</h3>
               <p>claude·codex와 채팅 화면으로 바로 대화해요. 도구 실행과 승인 요청은 카드로 오고, 모델·추론 강도도 고를 수 있어요. 필요하면 같은 대화를 터미널로 이어갑니다.</p>
             </div>
-            <div className="fig card chat-demo" aria-label="터미널 에이전트 대화를 모바일 채팅 UI로 보여주는 예시">
-              <div className="bubble user">로그인 오류를 찾아서 고쳐줘</div>
-              <div className="bubble agent">관련 파일을 확인하고 원인을 찾고 있어요.</div>
-              <div className="tool-row">✓ Read · authService.ts</div>
-              <div className="tool-row">✓ Edit · login.ts</div>
-              <div className="bubble agent">토큰 갱신 오류를 수정했어요. 변경 내용을 확인해 주세요.</div>
-            </div>
+            <img className="fig feat-img" src="/feat-chat.png" alt="폰에서 같은 에이전트와 채팅 화면으로 대화하는 모습과 터미널 화면" />
           </div>
 
           <div className="row2 rev">
@@ -280,7 +252,7 @@ export default function Home() {
               <p>파일 트리에서 바뀐 파일을 바로 보고, diff를 열어 확인하고, 그 자리에서 고쳐요. 파일은 터미널 옆 pane 으로 열리고, 저장하면 내 머신에 즉시 반영돼요.</p>
               <a className="more" href="/docs/editor">파일 문서 →</a>
             </div>
-            <img className="fig feat-img" src="/feat-ide.png" alt="에이전트가 만든 변경을 보여주는 코드 에디터의 실시간 git diff" />
+            <img className="fig feat-img" src="/feat-ide.png" alt="파일 트리의 변경 표시, 터미널의 diff, 옆 pane 에 열린 파일" />
           </div>
 
           <div className="row2">
@@ -289,7 +261,7 @@ export default function Home() {
               <p>개발 서버를 앱 안 브라우저로. 포트 포워딩으로 진짜 localhost 그대로 — 에이전트가 고치면 화면에 즉시 반영됩니다.</p>
               <a className="more" href="/docs">미리보기 문서 →</a>
             </div>
-            <img className="fig feat-img" src="/feat-preview.png" alt="개발자도구로 요소를 검사하는 실시간 미리보기 — 진짜 localhost 렌더" />
+            <img className="fig feat-img" src="/feat-preview.png" alt="PC에서 돌고 있는 개발 서버(localhost:4173)를 앱 안 브라우저로 연 미리보기" />
           </div>
 
           <div className="row2">
@@ -297,17 +269,7 @@ export default function Home() {
               <h3>여러 에이전트에게 나눠 맡기고, 폰에서 지켜보기</h3>
               <p>에이전트가 작업자를 띄워 일을 나누고 결과를 모아요. 작업자마다 자기 브랜치·작업 폴더에서 일하고, 질문이 오면 폰에서 답하면 됩니다. 진행 현황과 diff·PR까지 한곳에서 확인해요.</p>
             </div>
-            <div className="fig card" aria-label="코디네이터와 작업자 세 명이 일을 나눠 진행하는 사이드바 예시">
-              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">shopmate-web · 결제 흐름 개편</span></div>
-              <div className="mock">
-                <div className="grp">묶음</div>
-                <div className="r"><span className="d run" /><span className="nm">코디네이터</span><span className="stt">나누는 중</span></div>
-                <div className="r in"><span className="d run" /><span className="nm">작업자 · 결제 API</span><span className="tag">wt/api</span><span className="stt">작업 중</span></div>
-                <div className="r in"><span className="d ask" /><span className="nm">작업자 · 장바구니 UI</span><span className="tag">wt/ui</span><span className="stt">질문 대기</span></div>
-                <div className="ask-box"><small>작업자 · 장바구니 UI</small>무료배송 기준을 3만원으로 둘까요, 설정값으로 뺄까요?</div>
-                <div className="r in"><span className="d done" /><span className="nm">작업자 · 테스트</span><span className="tag">wt/test</span><span className="stt">완료</span></div>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-orch.png" alt="작업자들의 결과 요약과 결정이 필요한 질문을 한 시트에서 보는 오케스트레이션 화면" />
           </div>
 
           <div className="row2 rev">
@@ -315,18 +277,7 @@ export default function Home() {
               <h3>할 일을 적어 두면, 에이전트가 이어받기</h3>
               <p>내 작업 목록과 GitHub 이슈를 한 화면에서 보고, 바로 에이전트에게 맡겨요. &quot;매일 아침&quot;, &quot;새 이슈가 오면&quot; 같은 조건을 걸어 두면 알아서 시작하고 끝나면 알려줍니다.</p>
             </div>
-            <div className="fig card" aria-label="작업 목록과 자동화 예시">
-              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">Tasks</span></div>
-              <div className="mock">
-                <div className="grp">진행 중</div>
-                <div className="r"><span className="d run" /><span className="nm">쿠폰 적용 순서 버그</span><span className="tag">#42 GitHub</span><span className="stt">claude</span></div>
-                <div className="grp">할 일</div>
-                <div className="r"><span className="d" /><span className="nm">상품 상세 이미지 지연 로딩</span><span className="stt">높음</span></div>
-                <div className="r"><span className="d" /><span className="nm">주문 내역 CSV 내보내기</span><span className="stt">보통</span></div>
-                <div className="grp">자동화</div>
-                <div className="r"><span className="d done" /><span className="nm">매일 09:00 · 의존성 점검 후 요약</span><span className="stt">켜짐</span></div>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-tasks.png" alt="폰의 Tasks 화면 — 진행 중·리뷰 중·할 일·완료로 나뉜 작업 목록" />
           </div>
 
           <div className="row2">
@@ -334,15 +285,7 @@ export default function Home() {
               <h3>에이전트가 직접 보고, 눌러 보고, 확인하기</h3>
               <p>에이전트가 미리보기 브라우저를 클릭하고 콘솔을 읽고, 에뮬레이터·시뮬레이터의 앱을 조작하고, 맥 안의 가상 macOS·Linux(에이전트 PC)에서 데스크톱 앱까지 다뤄요. 그 화면을 폰·태블릿에서 그대로 지켜볼 수 있습니다.</p>
             </div>
-            <div className="fig card" aria-label="에이전트가 조작하는 세 가지 화면 — 미리보기 브라우저, 모바일 에뮬레이터, 에이전트 PC">
-              <div className="cbar"><span className="cdot" style={{ background: '#ff5f57' }} /><span className="cdot" style={{ background: '#febc2e' }} /><span className="cdot" style={{ background: '#28c840' }} /><span className="u">에이전트가 조작하는 화면</span></div>
-              <div className="surfaces">
-                <div className="sf"><b>미리보기 브라우저</b><span>클릭·입력·콘솔·네트워크·스크린샷</span></div>
-                <div className="sf"><b>에뮬레이터</b><span>Android·iOS 앱 화면을 보고 탭</span></div>
-                <div className="sf"><b>에이전트 PC</b><span>맥 안의 가상 macOS·Linux 데스크톱</span></div>
-                <div className="log"><span className="p">$</span> cpt browser click &quot;결제하기&quot;<br />콘솔 오류 0 · 주문 완료 화면 확인</div>
-              </div>
-            </div>
+            <img className="fig feat-img" src="/feat-agent-pc.png" alt="태블릿에서 지켜보는 에이전트 PC — 맥 안의 가상 macOS에서 에이전트가 메모 앱에 체크리스트를 작성한 화면" />
           </div>
         </div>
       </div>
