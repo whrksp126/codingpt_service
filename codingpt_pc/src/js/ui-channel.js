@@ -65,7 +65,6 @@ export function wirePower() {
     if (kind === "didWake") {
       import("./tasks-api.js").then((m) => m.refreshHostCaps()).catch(() => {});
       import("./tasks-view.js").then((m) => m.refreshAll()).catch(() => {});
-      import("./automations-view.js").then((m) => m.refreshAutomations()).catch(() => {});
     }
   })).catch(() => { /* 이벤트 API 미가용 */ });
 }
@@ -290,9 +289,6 @@ async function connect() {
         import("./tasks-api.js").then((m) => m.noteRunnerStatus(msg.event)).catch(() => {});
         // 깨어 있음(busy/awake 불리언, automation-design §6.6·§7.2) — PC 행·장소 헤더의 sun 글리프.
         import("./automations-api.js").then((m) => { if (m.noteRunnerAwake(msg.event)) S.emit(); }).catch(() => {});
-        if (msg.event && msg.event.online !== false && state.view === "automations") {
-          import("./automations-view.js").then((m) => m.onAutomationsChanged({ host: msg.event.deviceId, reason: "reconciled" })).catch(() => {});
-        }
         if (msg.event && msg.event.online !== false && state.view === "tasks") {
           import("./tasks-view.js").then((m) => m.onTasksChanged({ host: msg.event.deviceId, reason: "reconciled" })).catch(() => {});
         }
@@ -1111,11 +1107,7 @@ const handlers = {
 
   // 자동화 번들 변경 통지(automation-design §2.3) — 데몬 broadcast. 전부 반드시 ok 로 회신(executor 무응답 = UI_TIMEOUT).
   //  automations.changed {host, ids, reason} → 그 host 의 auto.list(300ms 디바운스, 상세가 보는 항목이면 auto.get 도).
-  "automations.changed": async (p) => {
-    const m = await import("./automations-view.js");
-    m.onAutomationsChanged(p || {});
-    return { ok: true };
-  },
+  "automations.changed": async () => ({ ok: true }), // 자동화 제거(2026-11) — 구 데몬의 통지에 응답만
   //  dispatch.changed {host, planId} → 열린 한 줄 지시 시트가 그 계획을 즉시 다시 받는다(2초 폴링을 기다리지 않는다).
   "dispatch.changed": async (p) => {
     const m = await import("./dispatch-sheet.js");

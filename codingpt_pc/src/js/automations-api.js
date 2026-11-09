@@ -88,7 +88,6 @@ export async function powerEvent(kind) {
 // ── caps 게이트(§2.3) — tasks-api 의 호스트 caps 캐시(GET /api/daemon/status runners[].caps)를 그대로 읽는다 ─────
 //  null = 모름(아직 조회 전·오프라인). 모르면 시도한다(구 데몬이면 BAD_PARAMS/UNKNOWN 으로 실패가 드러난다).
 const capOf = (host, cap) => { const c = hostCaps(host); return c == null ? null : c.includes(cap); };
-export function hostHasAuto(host) { return capOf(host, "auto.v1"); }
 export function hostHasDispatch(host) { return capOf(host, "dispatch.v1"); }
 export function hostHasPower(host) { return capOf(host, "power.v1"); }
 

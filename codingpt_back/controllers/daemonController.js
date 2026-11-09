@@ -1253,12 +1253,11 @@ async function taskRpc(req, res) {
 //  · power.event 는 표에 **없다**(로컬 소켓 전용 — 원격 기기가 PC 의 잠자기를 주장할 이유 없음, 부록 Z-13).
 //  · 킬스위치는 method 접두별 cap: auto→auto.v1, dispatch→dispatch.v1, power→power.v1 — 없으면 403 {code:'<FAM>_DISABLED'}.
 const AUTO_RPC_OK = new Map([
-  ['auto.list', 15000], ['auto.get', 15000], ['auto.validate', 15000], ['auto.create', 15000], ['auto.update', 15000], ['auto.remove', 15000],
-  ['auto.pause', 15000], ['auto.resume', 15000], ['auto.pauseAll', 15000], ['auto.runNow', 15000], ['auto.log', 15000],
+  // auto.* 는 자동화 기능 제거(2026-11)로 뺐다.
   ['dispatch.catalog', 30000], ['dispatch.plan', 15000], ['dispatch.get', 15000],
   ['power.status', 15000], ['power.set', 15000], ['power.setup', 15000],
 ]);
-const AUTO_FAMILY_CAP = { auto: 'auto.v1', dispatch: 'dispatch.v1', power: 'power.v1' };
+const AUTO_FAMILY_CAP = { dispatch: 'dispatch.v1', power: 'power.v1' };
 async function autoRpc(req, res) {
   try {
     const b = req.body || {};

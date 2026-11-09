@@ -16,7 +16,7 @@ export default function Page() {
 
       <div className="dx-callout">
         <span className="dx-cb">프라이빗 연결</span>
-        <div>인증 과정에서 종단 간 암호화 열쇠가 내 기기 사이에만 전달됩니다. 이 열쇠로 봉인한 원격 제어 요청은 릴레이 서버가 풀 수 없어요(터미널 화면·미리보기는 전송 구간 암호화 — <a href="/docs/security">범위 보기</a>).</div>
+        <div>인증 과정에서 종단 간 암호화 열쇠가 내 기기 사이에만 전달됩니다. 이 열쇠로 봉인한 원격 제어 요청·터미널 화면·미리보기는 릴레이 서버가 풀 수 없어요(<a href="/docs/security">자세히</a>).</div>
       </div>
 
       <h2>여러 머신</h2>

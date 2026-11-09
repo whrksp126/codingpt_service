@@ -139,8 +139,14 @@ pub fn forward_start(
     port: u16,
     token: String,
     upstream: Option<serde_json::Value>,
+    e2ee: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
     let mut args = serde_json::json!({ "port": port, "token": token });
+    if let Some(e) = e2ee {
+        if !e.is_null() {
+            args["e2ee"] = e;
+        }
+    }
     if let Some(up) = upstream {
         if !up.is_null() {
             args["upstream"] = up;

@@ -178,7 +178,7 @@ function reasonSources() {
   const out = [];
   const t = inj.tasks || safeRequire('./tasks');
   if (t) out.push(t);
-  for (const m of ['./automations', './dispatch']) { const lib = safeRequire(m); if (lib) out.push(lib); }
+  for (const m of ['./dispatch']) { const lib = safeRequire(m); if (lib) out.push(lib); }
   return out;
 }
 function safeRequire(m) { try { return require(m); } catch (_) { return null; } }

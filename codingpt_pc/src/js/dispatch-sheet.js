@@ -6,7 +6,7 @@
 //  3. planner = 활성 PC(없으면 hosts[0]) → dispatch.plan {opId, instruction, catalog:{hosts}}.
 //  4. dispatch.get {planId} 2초 폴링(최대 120초) — ui_command dispatch.changed {host, planId} 가 오면 즉시.
 //  5. done → 플랜 카드(폴백이면 `간단 매칭` pill + 사유). failed → 사유 + [다시 계획].
-//  6. [시작] → tasks[] 순서대로 task.create(origin:{kind:'dispatch', planId}), 포함한 automations[] 는 auto.create.
+//  6. [시작] → tasks[] 순서대로 task.create(origin:{kind:'dispatch', planId})(자동화 제안은 2026-11 기능 제거로 없다).
 //     → 만든 첫 작업의 진행 현황(자동화만 있으면 자동화 장소)으로.
 // 결정권은 사용자에게 있다(§3.4) — 자동 실행 없음. 카드에서 PC·저장소·에이전트·개수·프롬프트를 고칠 수 있다.
 import { state } from "./state.js";
@@ -17,7 +17,6 @@ import { taskRpc, newOpId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
 import { at } from "./text/automations.js";
 import { triggerOf, normalizePlan, planRunTotal, planStartable, fallbackKey, pickPlannerHost } from "./automations-model.js";
-import { whenText } from "./automations-view.js";
 import { agentName, openTasksDashboard, toast } from "./tasks-view.js";
 import { isUncertain, TASK_AGENTS, MAX_RUNS, utf8Bytes, agentModelRow } from "./new-task-sheet.js";
 import { loadAgents } from "./agents-view.js";
@@ -165,7 +164,6 @@ export function openDispatchSheet(prefill) {
     draw();
     const planId = st.planId;
     let firstTask = null;
-    let firstAuto = null;
     for (const t of st.plan.tasks) {
       if (st.done[t.key]) { firstTask = firstTask || st.done[t.key]; continue; }
       const ws = ((catOf(t.host) || {}).workspaces || []).find((w) => w.id === t.workspaceId) || {};
@@ -184,25 +182,8 @@ export function openDispatchSheet(prefill) {
         st.phase = "plan"; st.err = code || "x"; draw(); return;
       }
     }
-    for (const a of st.plan.automations) {
-      if (!a.include) continue;
-      if (st.done[a.key]) { firstAuto = firstAuto || st.done[a.key]; continue; }
-      const opId = st.startOps[a.key] || (st.startOps[a.key] = newOpId());
-      try {
-        const r = await autoRpc("auto.create", {
-          opId, draft: a.draft, createdBy: { kind: "dispatch", deviceId: state.daemon?.deviceId ?? null, planId },
-        }, a.host);
-        st.done[a.key] = { id: r && r.automation && r.automation.id, host: a.host };
-        firstAuto = firstAuto || st.done[a.key];
-      } catch (e) {
-        const code = (e && e.code) || "";
-        if (!isUncertain(code)) delete st.startOps[a.key];
-        st.phase = "plan"; st.err = code || "x"; draw(); return;
-      }
-    }
     close();
     if (firstTask) openTasksDashboard({ taskId: firstTask.taskId, host: firstTask.host });
-    else if (firstAuto) import("./automations-view.js").then((m) => m.openAutomations({ id: firstAuto.id, host: firstAuto.host })).catch(() => {});
   }
 
   // ── 그리기 ──
@@ -321,10 +302,6 @@ export function openDispatchSheet(prefill) {
       card.append(line("dp-sec", at("planTasks")));
       for (const t of p.tasks) card.append(taskItem(t));
     }
-    if (p.automations.length) {
-      card.append(line("dp-sec", at("planAutomations")));
-      for (const a of p.automations) card.append(autoItem(a));
-    }
     return card;
   }
 
@@ -417,36 +394,6 @@ export function openDispatchSheet(prefill) {
     return it;
   }
 
-  function autoItem(a) {
-    const it = document.createElement("div");
-    it.className = "dp-item dp-auto" + (a.include ? "" : " off");
-    const d = a.draft || {};
-    const trig = triggerOf(d.trigger);
-    const v = { ...trig.vars };
-    if (trig.key === "trigOnce") v.t = whenText(v.at);
-    const acts = (d.actions || []).map((x) => at({ "task.create": "actTaskCreate", "terminal.prompt": "actPrompt", notify: "actNotify" }[x.type] || "actNotify"));
-    const lab = document.createElement("label");
-    lab.className = "dp-item-head dp-include";
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = a.include;
-    cb.title = at("include");
-    cb.setAttribute("aria-label", at("include"));
-    cb.addEventListener("change", () => { a.include = cb.checked; draw(); });
-    const nm = document.createElement("span");
-    nm.className = "dp-item-title";
-    nm.textContent = d.name || at(trig.key, v);
-    lab.append(cb, nm);
-    it.append(lab);
-    const meta = document.createElement("div");
-    meta.className = "dp-auto-meta";
-    meta.innerHTML = `<span class="dp-auto-trig">${icons.repeat({ size: 12 })}<span>${esc(at(trig.key, v))}</span></span>`
-      + (acts.length ? `<span>${esc(acts.join(" → "))}</span>` : "")
-      + (st.catalogs.length >= 2 ? `<span>${esc(nameOf(a.host))}</span>` : "");
-    it.append(meta);
-    if (a.why) it.append(line("dp-why", a.why));
-    return it;
-  }
 
   function installedAgents(h) {
     const c = catOf(h);

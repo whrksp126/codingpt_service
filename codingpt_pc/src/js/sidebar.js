@@ -11,9 +11,8 @@ import lan from "./lan.js";
 import { tasksIcon, dashboard, dashboardRows, scopedDashboard, needsInputPerHost, agentName, openTasksDashboard, openRunTerminal, findTask } from "./tasks-view.js";
 import { buildSidebarTasks } from "./sidebar-tasks.js";
 import { isLocalHostId, hostHasTasks, serverHasTasks } from "./tasks-api.js";
-import { taskNotifTarget, autoNotifTarget, pcNotifTarget } from "./notifications.js";
-import { autoAttentionCount, openAutomations } from "./automations-view.js";
-import { hostHasAuto, hostAwake } from "./automations-api.js";
+import { taskNotifTarget, pcNotifTarget } from "./notifications.js";
+import { hostAwake } from "./automations-api.js";
 import { at } from "./text/automations.js";
 import { tt } from "./text/tasks.js";
 import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo, inWorktree, worktreeGroups } from "./orch-model.js";
@@ -110,13 +109,6 @@ export function jumpToNotification(n) {
   const tgt = taskNotifTarget(n);
   if (tgt) {
     openTasksDashboard(tgt);
-    closeNotif();
-    return;
-  }
-  // 자동화 알림(auto_created·auto_failed·auto_paused·auto_notify) → 그 PC 의 자동화 장소, 그 항목(§5.8).
-  const atgt = autoNotifTarget(n);
-  if (atgt) {
-    openAutomations(atgt);
     closeNotif();
     return;
   }
@@ -237,9 +229,8 @@ export function updateSidebar() {
     const wss0 = devices0.length ? S.workspacesForDevice(activeDev0) : [];
     computeTree(activeDev0, wss0);
     const tasksN = sbTasksN;
-    const autoN = autoAttentionCount();
     const sig = JSON.stringify([
-      tasksN, autoN, issuesOpenCount(activeDev0), issuesProviders(activeDev0).join(),
+      tasksN, issuesOpenCount(activeDev0), issuesProviders(activeDev0).join(),
       state.vmScope || "", JSON.stringify(vmPhase),
       state.sidebarCollapsed, state.view, state.activeWsId, !!state.wsStale, state.paired,
       !!state.daemon?.running, state.daemon?.device_name, state.creatingWs, totalUnread,
@@ -537,27 +528,6 @@ function issuesRow() {
   row.innerHTML = `<span class="pc-ic">${icons.tasksList({ size: 15 })}</span><span class="pc-nm">Tasks</span>` +
     provs.map((p) => (icons[p] ? `<span class="is-prov" title="${escapeHtml(p)}">${icons[p]({ size: 13 })}</span>` : "")).join("") + (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => { if (state.view !== "issues") openIssues(); });
-  return row;
-}
-/** 사이드바 `자동화 [n]` 행 — 고른 PC 의 자동화 장소(automation-design §5.9). `진행 현황` 바로 아래, 같은 장소 규칙:
- *  선택 배경은 들어가 있을 때만, 토글이 아니다(다시 눌러도 닫히지 않음). 배지 = 주의(실패·오류 일시정지) 수(error).
- *  auto.v1 이 없는 PC 는 행을 그리되 누르면 업데이트 안내(§5.9). */
-function autoRow() {
-  const n = autoAttentionCount();
-  const row = document.createElement("button");
-  row.className = "pc-row auto-row" + (state.view === "automations" ? " active" : "");
-  row.innerHTML =
-    `<span class="pc-ic">${icons.repeat({ size: 15 })}</span>` +
-    `<span class="pc-nm">${escapeHtml(tt("automations"))}</span>` +
-    (n ? `<span class="wsr-badge">${n}</span>` : "");
-  row.addEventListener("click", () => {
-    if (state.view === "automations") return;
-    if (hostHasAuto(S.activeDeviceId()) === false) {
-      import("./tasks-view.js").then((m) => m.toast(tt("pcNeedsUpdate"))).catch(() => {});
-      return;
-    }
-    openAutomations();
-  });
   return row;
 }
 function openPcSettings(hid) {
@@ -962,7 +932,6 @@ function wsHead(w, g, folded) {
   row.setAttribute("role", "button");
   row.tabIndex = 0;
   row.setAttribute("aria-expanded", folded ? "false" : "true");
-  row.draggable = true;
   row.dataset.wsId = w.id;
   // 색 = 이름 앞 6px 점(.wsr-color). 옛 3px 안쪽 띠(box-shadow)는 선택 테두리와 겹쳐 폐기(디자인 리프레시 2026-09-30).
 
@@ -1114,16 +1083,13 @@ function taskRow(w, t) {
   const dotCls = t.dot === "none" ? "" : " " + t.dot;
   // 자동화가 만든 작업 — 제목 앞 `자동` 칩(automation-design §5.9). 누르면 그 자동화로.
   const origin = (findTask(host, t.taskId) || {}).origin || null;
-  const autoId = origin && origin.kind === "automation" ? origin.automationId || null : null;
   b.innerHTML =
     `<span class="wsg-line"><span class="wsg-ic">${icons.gitBranch({ size: 15 })}</span>` +
-    (autoId ? `<span class="wsg-fan au-chip" title="${escapeHtml(at("automations"))}">${escapeHtml(at("autoBadge"))}</span>` : "") +
     `<span class="wsg-title">${escapeHtml(t.title || tt("title"))}</span>` +
     (fan ? `<span class="wsg-fan">×${t.fanout}</span><span class="wsg-caret2">${open ? icons.chevronDown({ size: 12 }) : icons.chevronRight({ size: 12 })}</span>` : "") +
     `</span>` +
     `<span class="wsg-sub"><span class="tv-dot${dotCls}"></span><span class="wsg-subtx">${escapeHtml(subText)}</span></span>`;
   b.addEventListener("click", (e) => {
-    if (autoId && e.target.closest?.(".au-chip")) { e.stopPropagation(); openAutomations({ id: autoId, host }); return; }
     if (fan && e.target.closest?.(".wsg-fan, .wsg-caret2")) { e.stopPropagation(); toggleFan(t.taskId); return; }
     openTasksDashboard({ taskId: t.taskId, host });
   });
@@ -1150,38 +1116,64 @@ function agentRow(w, t, r) {
 }
 
 // ── 워크스페이스 드래그앤드롭 순서 변경 ──
-let dragSrcId = null;
+//  HTML5 DnD 는 Tauri(WKWebView)에서 네이티브 파일 드롭 처리에 가로채여 dragover/drop 이 오지 않는다 → 포인터 이벤트로 직접.
+//  사이드바는 드래그 중에도 다시 그려질 수 있으므로 행은 매번 data-ws-id 로 다시 찾는다.
+let wsDrag = null; // { id, x0, y0, active, target, after }
+function wsDragClear() {
+  el?.querySelectorAll(".ws-row.drop-before,.ws-row.drop-after,.ws-row.dragging").forEach((r) => r.classList.remove("drop-before", "drop-after", "dragging"));
+}
+function wsDragMove(e) {
+  const d = wsDrag;
+  if (!d) return;
+  if (!d.active) {
+    if (Math.abs(e.clientX - d.x0) < 5 && Math.abs(e.clientY - d.y0) < 5) return;
+    d.active = true;
+    document.body.classList.add("ws-dragging");
+  }
+  e.preventDefault();
+  wsDragClear();
+  el?.querySelector(`.wsg-head[data-ws-id="${CSS.escape(String(d.id))}"]`)?.classList.add("dragging");
+  const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".wsg-head[data-ws-id]");
+  d.target = null;
+  if (!hit || hit.dataset.wsId === String(d.id)) return;
+  const r = hit.getBoundingClientRect();
+  d.target = hit.dataset.wsId;
+  d.after = e.clientY > r.top + r.height / 2;
+  hit.classList.add(d.after ? "drop-after" : "drop-before");
+}
+function wsDragEnd() {
+  const d = wsDrag;
+  wsDrag = null;
+  document.removeEventListener("pointermove", wsDragMove, true);
+  document.removeEventListener("pointerup", wsDragEnd, true);
+  document.removeEventListener("pointercancel", wsDragEnd, true);
+  wsDragClear();
+  document.body.classList.remove("ws-dragging");
+  if (!d || !d.active) return;
+  // 드래그를 끝낸 mouseup 이 만드는 click 은 그룹 토글로 번지지 않게 한 번 삼킨다.
+  const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener("click", swallow, { capture: true, once: true });
+  setTimeout(() => document.removeEventListener("click", swallow, { capture: true }), 0);
+  if (d.target == null) return;
+  const ids = S.sortedWorkspaces().map((x) => String(x.id)).filter((id) => id !== String(d.id));
+  let idx = ids.indexOf(String(d.target));
+  if (idx === -1) idx = ids.length; else if (d.after) idx += 1;
+  ids.splice(idx, 0, String(d.id));
+  const byStr = new Map(S.sortedWorkspaces().map((x) => [String(x.id), x.id]));
+  // 고정 경계를 넘겨 놓으면 놓은 자리의 고정 여부를 따른다 — 안 그러면 고정이 항상 위로 떠서 놓은 자리에 안 간다.
+  const srcId = byStr.get(String(d.id)), tgtId = byStr.get(String(d.target));
+  if (srcId != null && tgtId != null && S.wsPinned(srcId) !== S.wsPinned(tgtId)) S.togglePinWs(srcId);
+  S.applyWsVisualOrder(ids.map((x) => byStr.get(x)));
+}
 function bindWsDrag(row, w) {
-  row.addEventListener("dragstart", (e) => {
-    dragSrcId = w.id;
-    row.classList.add("dragging");
-    try { e.dataTransfer.setData("text/plain", String(w.id)); e.dataTransfer.effectAllowed = "move"; } catch (_) {}
-  });
-  row.addEventListener("dragend", () => {
-    dragSrcId = null;
-    row.classList.remove("dragging");
-    el?.querySelectorAll(".ws-row.drop-before,.ws-row.drop-after").forEach((r) => r.classList.remove("drop-before", "drop-after"));
-  });
-  row.addEventListener("dragover", (e) => {
-    if (dragSrcId == null || dragSrcId === w.id) return;
-    e.preventDefault();
-    try { e.dataTransfer.dropEffect = "move"; } catch (_) {}
-    const r = row.getBoundingClientRect();
-    const after = e.clientY > r.top + r.height / 2;
-    row.classList.toggle("drop-before", !after);
-    row.classList.toggle("drop-after", after);
-  });
-  row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after"));
-  row.addEventListener("drop", (e) => {
-    e.preventDefault();
-    const after = row.classList.contains("drop-after");
-    row.classList.remove("drop-before", "drop-after");
-    if (dragSrcId == null || dragSrcId === w.id) return;
-    const ids = S.sortedWorkspaces().map((x) => x.id).filter((id) => id !== dragSrcId);
-    let idx = ids.indexOf(w.id);
-    if (idx === -1) idx = ids.length; else if (after) idx += 1;
-    ids.splice(idx, 0, dragSrcId);
-    S.applyWsVisualOrder(ids);
+  row.draggable = false;
+  row.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || wsDrag) return;
+    if (e.target.closest?.(".wsg-more, .wsr-rename, input, button")) return;
+    wsDrag = { id: w.id, x0: e.clientX, y0: e.clientY, active: false, target: null, after: false };
+    document.addEventListener("pointermove", wsDragMove, true);
+    document.addEventListener("pointerup", wsDragEnd, true);
+    document.addEventListener("pointercancel", wsDragEnd, true);
   });
 }
 

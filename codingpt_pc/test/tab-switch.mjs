@@ -38,7 +38,7 @@ function method(sig) {
   return src.slice(start + 1, end + 4);
 }
 const BODY = [
-  'async switchTab(i) {', 'async _reattach(win) {', 'async _openChannel(win, replace) {', '_v3Connect(url) {',
+  'async switchTab(i) {', 'async _reattach(win) {', 'async _openChannel(win, replace) {', '_v3Connect(url, e2eeKeys) {',
   'async ensureAttached() {', 'closeTab(i) {',
 ].map(method).join('\n');
 
@@ -85,6 +85,7 @@ function build({ wins, stripPin = false, endpointDelay = () => 0 }) {
     localTmuxBackend: () => true,
     decodeTerminalFrameV3: () => null,
     TERMINAL_OPCODE_V3: {},
+    e2eeWrapSocket: (s) => s, appState: { currentDeviceId: 1 },
     i18n: { t: (s) => s },
     setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
   };

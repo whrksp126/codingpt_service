@@ -574,6 +574,8 @@ pub struct CloudTerminal {
     pub token: String,
     #[serde(rename = "wsBase")]
     pub ws_base: String,
+    /// 종단 간 암호화 선협상 결과(back 이 데몬 e2ee.begin 답을 에코). 오퍼가 없거나 실패면 null/false.
+    pub e2ee: serde_json::Value,
 }
 
 // 원격 터미널 토큰 발급(deviceToken 인증) — 프론트는 이 토큰으로 back 릴레이 WS 연결.
@@ -584,29 +586,36 @@ pub fn cloud_terminal_start(
     cwd: String,
     host_device_id: Option<i64>,
     pane_id: Option<String>,
+    client: Option<String>,
+    e2ee: Option<serde_json::Value>,
 ) -> Result<CloudTerminal, String> {
     let token = device_token().ok_or("페어링이 필요합니다.")?;
     let server = server_url();
     let url = format!("{}/api/daemon/terminal/device-start", server.trim_end_matches('/'));
     // client — 기기 안정 키(pane 세션을 기기별 분리, tmux 크기 공유 방지). 내 deviceId 기반.
-    let client = read_config()
+    //  E2EE 오퍼를 실을 때는 프론트가 트랜스크립트에 넣은 client 를 그대로 써야 한다(키확인 일치).
+    let client = client.filter(|c| !c.is_empty()).unwrap_or_else(|| read_config()
         .and_then(|c| c.get("deviceId").and_then(|v| v.as_i64()))
         .map(|id| format!("pc-{id}"))
-        .unwrap_or_else(|| "pc".into());
+        .unwrap_or_else(|| "pc".into()));
+    let mut body = ureq::json!({
+        "cwd": cwd,
+        "hostDeviceId": host_device_id,
+        "paneId": pane_id.unwrap_or_default(),
+        "client": client,
+        // v3(CPT3): 데몬 VT 정본 + 소유자 1명(codingpt_daemon/docs/terminal-v3-design.md).
+        "terminalProtocol": 3,
+        "deviceName": read_config()
+            .and_then(|c| c.get("deviceName").and_then(|v| v.as_str().map(String::from)))
+            .unwrap_or_default(),
+    });
+    if let Some(off) = e2ee {
+        body["e2ee"] = off;
+    }
     let resp = ureq::post(&url)
         .set("Authorization", &format!("Bearer {token}"))
         .timeout(std::time::Duration::from_secs(10))
-        .send_json(ureq::json!({
-            "cwd": cwd,
-            "hostDeviceId": host_device_id,
-            "paneId": pane_id.unwrap_or_default(),
-            "client": client,
-            // v3(CPT3): 데몬 VT 정본 + 소유자 1명(codingpt_daemon/docs/terminal-v3-design.md).
-            "terminalProtocol": 3,
-            "deviceName": read_config()
-                .and_then(|c| c.get("deviceName").and_then(|v| v.as_str().map(String::from)))
-                .unwrap_or_default(),
-        }))
+        .send_json(body)
         .map_err(|e| format!("터미널 시작 실패: {e}"))?;
     let v = resp
         .into_json::<serde_json::Value>()
@@ -620,7 +629,8 @@ pub fn cloud_terminal_start(
         .trim_end_matches('/')
         .replacen("https://", "wss://", 1)
         .replacen("http://", "ws://", 1);
-    Ok(CloudTerminal { token: tok, ws_base })
+    let e2ee = v.get("e2ee").cloned().unwrap_or(serde_json::Value::Null);
+    Ok(CloudTerminal { token: tok, ws_base, e2ee })
 }
 
 /// PC 로컬 터미널(v3) 루프백 엔드포인트 — 사이드카 데몬이 daemon.json 에 적어 둔 {port, token}.

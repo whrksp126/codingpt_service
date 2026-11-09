@@ -42,7 +42,6 @@ const OPTIONAL_CAPS = [
   ['task.v1', './tasks', 'handle'],             // Agent Tasks(worktree 작업) — jail 밖이면 handle 이 undefined
   // 자동화 번들(docs/automation-design.md §2.3) — 셋 다 env 킬스위치(CPT_AUTOMATIONS/CPT_DISPATCH/CPT_POWER=0)면
   //  handle 이 undefined 라 광고하지 않는다. power 는 darwin 외에서도 undefined(F4 비목표).
-  ['auto.v1', './automations', 'handle'],
   ['dispatch.v1', './dispatch', 'handle'],
   ['power.v1', './power', 'handle'],
   // 채팅 v2(docs/chat-v2-design.md) — 킬스위치(CPT_CONV=0 · daemon.json conv.enabled=false)면 handle 이 undefined.
@@ -511,9 +510,9 @@ function dispatchRpc(ws, method, params, ok, fail) {
   // 자동화 번들(auto.*/dispatch.*/power.* — docs/automation-design.md §2.3). 로컬 소켓과 같은 함수(cpt-server.handleAutoRpc).
   //  킬스위치는 task.* 와 같은 규칙 — 봉인 RPC 는 서버가 메서드를 못 보므로 데몬이 교집합의 다른 한쪽을 지킨다.
   //  power.event(잠자기 알림)는 **이 PC 의 앱만** 보낸다 — 원격 기기가 PC 의 잠자기를 주장할 이유가 없다(Z-13).
-  if (method.startsWith('auto.') || method.startsWith('dispatch.') || method.startsWith('power.')) {
+  if (method.startsWith('dispatch.') || method.startsWith('power.')) {
     const fam = method.split('.')[0];
-    const cap = { auto: 'auto.v1', dispatch: 'dispatch.v1', power: 'power.v1' }[fam];
+    const cap = { dispatch: 'dispatch.v1', power: 'power.v1' }[fam];
     if (serverCaps.length && !hasServerCap(cap)) { fail(codedError(`${fam.toUpperCase()}_DISABLED`, '이 서버에서 이 기능이 꺼져 있습니다')); return; }
     if (method === 'power.event') { fail(codedError('BAD_PARAMS', 'power.event 는 이 PC 의 앱만 보낼 수 있습니다')); return; }
     callLazy('./cpt-server', 'handleAutoRpc', [method, params || {}, { via: 'relay' }], ok, fail); return;

@@ -141,7 +141,6 @@ function computeServerCaps(env = process.env) {
   if (!envOff(env.AGENTSTATE_ENABLED)) caps.push('agentstate.v1');
   if (!envOff(env.TASKS_ENABLED)) caps.push('task.v1');
   if (!envOff(env.DISPATCH_ENABLED)) caps.push('dispatch.v1');
-  if (!envOff(env.AUTOMATIONS_ENABLED)) caps.push('auto.v1');
   if (!envOff(env.POWER_ENABLED)) caps.push('power.v1');
   if (!envOff(env.CONV_ENABLED)) caps.push('conv.v1');
   if (!envOff(env.ORCH_ENABLED)) caps.push('orch.v1');

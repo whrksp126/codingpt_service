@@ -62,7 +62,6 @@ export const COMMANDS = [
   // 자동화 번들(automation-design §5.9·부록 Z-16) — 자동화 장소·한 줄 지시. PC·앱 같은 줄(표 한 벌).
   //  ★ 설계 기본값 `Mod+Shift+U` 는 이미 notif.latestUnread 가 쓴다 → 설계 부록 Z-16 의 충돌 대안 `Mod+Alt+U / Mod+Alt+I`
   //   를 한 쌍으로 쓴다(앱 commands.ts 와 같은 값). win32 는 Ctrl+Alt(AltGr) 금지라 아래 WIN_KEYS 가 Alt+Shift+U/I 로 덮는다.
-  { id: "automations.open", key: "Mod+Alt+U", scope: "global", group: "view", pc: true, app: true, palette: true },
   { id: "dispatch.open", key: "Mod+Alt+I", scope: "global", group: "add", pc: true, app: true, palette: true },
 
   // ── 설정 ──
@@ -105,7 +104,6 @@ const WIN_KEYS = {
   "pane.focusUp": "Alt+ArrowUp",
   "pane.focusDown": "Alt+ArrowDown",
   "sidebar.toggle": "Mod+Shift+B",
-  "automations.open": "Alt+Shift+U",
   "dispatch.open": "Alt+Shift+I",
 };
 

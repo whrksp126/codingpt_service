@@ -156,7 +156,7 @@ ok(leftovers.length === 0, 'text/* 사전에 en 반쪽이 남아 있지 않다',
     const miss = src.filter((k) => !pcCat[lang][k]);
     ok(miss.length === 0, `§11 자동화 문구 ${src.length}개가 PC ${lang} 카탈로그에 있고 비어 있지 않다`, miss.slice(0, 4).join(' | '));
   }
-  const files = ['automations-view.js', 'dispatch-sheet.js', 'power-settings.js'];
+  const files = ['dispatch-sheet.js', 'power-settings.js'];
   const lits = new Set();
   for (const f of files) {
     const code = fs.readFileSync(path.join(PC, f), 'utf8');

@@ -53,14 +53,17 @@ const callSealed = (env, hostDeviceId) => new Promise((res, rej) => control.hand
   res, rej,
 ));
 
-test('스코프 기본값 rpc + 킬스위치 CPT_E2EE=0 = 전면 OFF', () => {
+test('스코프 기본값 stream(2026-11 승격) + 킬스위치 CPT_E2EE=0 = 전면 OFF', () => {
   armKeys();
   withEnv({ CPT_E2EE_SCOPE: undefined, CPT_E2EE: undefined }, () => {
-    assert.strictEqual(gate.scope(), 'rpc');
+    assert.strictEqual(gate.scope(), 'stream');
     assert.strictEqual(gate.allows('rpc'), true);
-    assert.strictEqual(gate.allows('snapshot'), false);
-    assert.strictEqual(gate.allows('stream'), false);
-    assert.deepStrictEqual(gate.caps(), ['e2ee.keys.v1', 'e2ee.rpc.v1'], '기본 스코프에서 stream 능력을 선언하면 안 된다');
+    assert.strictEqual(gate.allows('snapshot'), true);
+    assert.strictEqual(gate.allows('stream'), true);
+    assert.ok(gate.caps().includes('e2ee.stream.v1'), '기본 스코프에서 stream 능력을 선언한다');
+  });
+  withEnv({ CPT_E2EE_SCOPE: 'rpc', CPT_E2EE: undefined }, () => {
+    assert.deepStrictEqual(gate.caps(), ['e2ee.keys.v1', 'e2ee.rpc.v1'], 'rpc 스코프에서 stream 능력을 선언하면 안 된다');
     assert.strictEqual(gate.selfDeviceId(), HOST_DEV);
   });
   withEnv({ CPT_E2EE_SCOPE: 'all', CPT_E2EE: '0' }, () => {

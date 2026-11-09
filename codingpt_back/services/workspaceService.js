@@ -216,13 +216,31 @@ async function listWorkspaces(userId) {
     if (m) ids.push(m[1]);
   }
 
+  // project.json 읽기를 병렬로(순차 N 왕복이 목록·생성 지연의 주범이었다 — 2026-11).
   const metas = [];
-  for (const id of ids) {
-    const meta = await readMeta(uid, id);
-    if (meta) metas.push(meta);
+  const CONC = 16;
+  for (let i = 0; i < ids.length; i += CONC) {
+    const got = await Promise.all(ids.slice(i, i + CONC).map((id) => readMeta(uid, id).catch(() => null)));
+    for (const m of got) if (m) metas.push(m);
   }
   metas.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
-  return metas;
+  return dedupeLocal(metas);
+}
+
+// 같은 PC 의 같은 폴더 = 같은 워크스페이스. 과거에 중복 등록된 것은 가장 먼저 만든 것만 보인다.
+function localKey(m) {
+  if (!m || m.compute !== 'local' || !m.localPath) return null;
+  return `${m.hostDeviceId == null ? '' : m.hostDeviceId}|${String(m.localPath).replace(/\/+$/, '')}`;
+}
+function dedupeLocal(metas) {
+  const keep = new Map();
+  for (const m of metas) {
+    const k = localKey(m);
+    if (!k) continue;
+    const cur = keep.get(k);
+    if (!cur || String(m.createdAt || '') < String(cur.createdAt || '')) keep.set(k, m);
+  }
+  return metas.filter((m) => { const k = localKey(m); return !k || keep.get(k) === m; });
 }
 
 /**
@@ -253,19 +271,28 @@ async function createWorkspace(userId, input = {}) {
     },
     id,
   );
+  // 목록은 한 번만 읽는다 — 중복 판정과 프로젝트 자동 연결이 같이 쓴다.
+  let metas = null;
+  try { metas = await listWorkspaces(uid); } catch (_) { metas = null; }
+  // 같은 PC 의 같은 폴더가 이미 있으면 새로 만들지 않고 그것을 돌려준다(중복 등록 금지).
+  const k = localKey(meta);
+  if (k && metas) {
+    const dup = metas.find((w) => localKey(w) === k);
+    if (dup) return { ...dup, existing: true };
+  }
   // 프로젝트 자동 연결 — 등록 시점 1회 판단(remote 일치 우선, 폴더/워크스페이스 이름 일치 보조).
   //  결과는 projectId 로 저장돼 이후엔 재계산하지 않는다(이름/remote 가 바뀌어도 그룹 유지).
-  meta.projectId = await resolveProjectId(uid, meta);
+  meta.projectId = await resolveProjectId(uid, meta, metas);
   await writeMeta(uid, id, meta);
   return meta;
 }
 
 // 새 워크스페이스가 속할 프로젝트 결정. 기존 사본과 매칭되면 그 프로젝트에 합류(매칭 사본에
 //  projectId 가 없으면 백필), 아니면 새 프로젝트(단독). chat 은 그룹 대상 아님.
-async function resolveProjectId(uid, meta) {
+async function resolveProjectId(uid, meta, known) {
   if (meta.kind !== 'project') return undefined;
-  let metas = [];
-  try { metas = await listWorkspaces(uid); } catch (_) { return genProjectId(); }
+  let metas = known;
+  if (!metas) { try { metas = await listWorkspaces(uid); } catch (_) { return genProjectId(); } }
   const others = metas.filter((w) => w.id !== meta.id && w.kind === 'project');
   const normName = meta.name.trim().toLowerCase();
   const match =
@@ -418,6 +445,23 @@ async function duplicateWorkspace(userId, id) {
 async function deleteWorkspace(userId, id) {
   const uid = requireUid(userId);
   assertWorkspaceId(id);
+  // 숨겨진 중복 사본(같은 PC·같은 폴더)도 함께 지운다 — 안 지우면 삭제 뒤 옛 사본이 다시 나타난다.
+  try {
+    const meta = await readMeta(uid, id);
+    const k = localKey(meta);
+    if (k) {
+      const listedAll = await s3Service.listFiles(workspacesBase(uid), true);
+      const ids = flattenTree(listedAll.success ? listedAll.files : [])
+        .map((n) => ((n.path || '').match(/\/projects\/([A-Za-z0-9_-]+)\/project\.json$/) || [])[1]).filter((x) => x && x !== id);
+      for (const other of ids) {
+        const om = await readMeta(uid, other).catch(() => null);
+        if (om && localKey(om) === k) await deleteWorkspaceFiles(uid, other);
+      }
+    }
+  } catch (_) { /* 중복 정리 실패는 본 삭제를 막지 않는다 */ }
+  return deleteWorkspaceFiles(uid, id);
+}
+async function deleteWorkspaceFiles(uid, id) {
   const listed = await s3Service.listFiles(workspaceDir(uid, id), true);
   const fileNodes = listed.success ? flattenTree(listed.files) : [];
   let deleted = 0;

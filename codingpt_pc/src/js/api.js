@@ -121,8 +121,8 @@ export const api = {
 
   // ── 클라우드 터미널(relay) ──
   // 원격 터미널(back 릴레이) — hostDeviceId 지정=다른 PC 의 워크스페이스(활성 러너 무변경).
-  cloudTerminalStart: (cwd, hostDeviceId, paneId) =>
-    invoke("cloud_terminal_start", { cwd, hostDeviceId: hostDeviceId ?? null, paneId: paneId ?? null }),
+  cloudTerminalStart: (cwd, hostDeviceId, paneId, opts) =>
+    invoke("cloud_terminal_start", { cwd, hostDeviceId: hostDeviceId ?? null, paneId: paneId ?? null, client: opts?.client ?? null, e2ee: opts?.e2ee ?? null }),
 
   // ── 내장 IDE 파일 접근(로컬, 홈 jail) ──
   fsTree: (rel, depth) => invoke("fs_tree", { rel, depth: depth ?? 2 }),
@@ -240,7 +240,7 @@ export const api = {
   // ── 원격 프리뷰 로컬 포트 포워더 — 사이드카 데몬(cpt.sock)에 리스너 기동/정리 지시 ──
   //  결과 { ok:true } | { ok:false, error:'EADDRINUSE'… } (실패는 프록시 폴백 신호).
   // upstream(옵셔널) = LAN 직결 좌표(lan.js upstreamFor). 항상 token 도 함께 넘긴다(릴레이=폴백 전제).
-  forwardStart: (port, token, upstream) => invoke("forward_start", { port, token, upstream: upstream ?? null }),
+  forwardStart: (port, token, upstream, e2ee) => invoke("forward_start", { port, token, upstream: upstream ?? null, e2ee: e2ee ?? null }),
   forwardStop: (port) => invoke("forward_stop", { port }),
   // LAN 직결(기능4) — 사이드카 데몬 위임. 구 데몬/미지원이면 reject → 호출측이 조용히 릴레이 폴백.
   lanProbe: (hostDeviceId) => invoke("lan_probe", { hostDeviceId }),

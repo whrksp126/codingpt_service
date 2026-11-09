@@ -182,7 +182,7 @@ test('킬스위치: conv.v1 이 빠지면 모든 메서드 403 CONV_DISABLED, �
     relay.callRpc = async () => ({ items: [] });
     try {
       const res = fakeRes();
-      await daemonController.autoRpc({ user: { id: 7 }, body: { method: 'auto.list', params: {} }, query: {} }, res);
+      await daemonController.autoRpc({ user: { id: 7 }, body: { method: 'dispatch.get', params: {} }, query: {} }, res);
       assert.strictEqual(res.statusCode, 200);
     } finally { relay.callRpc = orig; }
   });
@@ -198,7 +198,7 @@ test('caps: conv.v1 기본 선언, CONV_ENABLED 는 자기 능력만 회수', ()
   for (const v of ['0', 'false', 'off', 'no', 'OFF', ' No ']) {
     const caps = computeServerCaps({ CONV_ENABLED: v });
     assert.ok(!caps.includes('conv.v1'), `CONV_ENABLED=${v}`);
-    for (const other of ['caps.v1', 'transcript.v1', 'approval.v1', 'task.v1', 'auto.v1']) assert.ok(caps.includes(other), other);
+    for (const other of ['caps.v1', 'transcript.v1', 'approval.v1', 'task.v1']) assert.ok(caps.includes(other), other);
   }
   // 채팅 v1 을 꺼도 v2 는 남는다(별개 능력).
   assert.ok(computeServerCaps({ TRANSCRIPT_ENABLED: '0' }).includes('conv.v1'));

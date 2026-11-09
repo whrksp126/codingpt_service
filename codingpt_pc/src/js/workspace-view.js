@@ -4,7 +4,7 @@ import { state, wsRuntime, activeWs, isLocal, isThisHost } from "./state.js";
 import * as S from "./state.js";
 import * as T from "./tiling.js";
 import { PaneView, isTermTab, termTabLabel, surfaceLabel, surfaceIcon } from "./pane.js";
-import { paneApprovalCount } from "./approvals.js";
+import { forPane } from "./approvals.js";
 import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
@@ -298,7 +298,15 @@ function paneCtx(ws) {
     onNotify: (paneId, win, title, body) => handleOsc(ws, paneId, win, title, body),
     // 터미널 탭 활성화 = 그 win 알림 읽음(서버 스코프). isThisHost 도 라이브(재클레임 반영).
     onTabActivated: (win) => {
-      if (isThisHost(live()) && ws?.localPath && typeof win === "number") S.readScope(ws.localPath, win);
+      // 원격 PC 의 워크스페이스도 같다 — 알림은 서버 것이라 어느 PC 에서 봤든 읽음이다(예전 isThisHost 게이트가
+      //  다른 PC 워크스페이스의 테두리를 클릭해도 안 꺼지게 했다).
+      const cwd = live()?.localPath || ws?.localPath;
+      if (!cwd || typeof win !== "number") return;
+      // 승인 대기 테두리도 클릭으로 확인 처리(카드는 그대로 남는다) — 새 요청이 오면 다시 켜진다.
+      let acked = false;
+      for (const a of forPane(cwd, win)) if (!ackedApprovals.has(a.id)) { ackedApprovals.add(a.id); acked = true; }
+      S.readScope(cwd, win);
+      if (acked) updateUnreadRings(live());
     },
     onSurfacesChanged: () => {},
     onSurfaceClosed: (kind) => S.fireSurfaceClose(kind, ws.id),
@@ -1384,6 +1392,7 @@ export function updateWorkspaceView() {
 //  예전에는 pane 의 아무 탭에나 미읽음이 있으면 본문에 테두리를 둘렀는데, 그 탭은 다른 탭에 가려져
 //  화면에 없다 — 보이지도 않는 것을 가리키는 테두리라 어디를 보라는 건지 알 수 없었다.
 //  가려진 탭은 **탭의 점**(pane.js ptab-wait)이 맡는다. 읽기 전까지 유지 — 모바일과 같은 규칙.
+const ackedApprovals = new Set(); // 사용자가 pane 을 클릭해 확인한 승인 요청 id(테두리만 끈다)
 function updateUnreadRings(ws) {
   const cwd = ws?.localPath || "";
   const unreadWins = new Set(
@@ -1400,7 +1409,8 @@ function updateUnreadRings(ws) {
     //  기다리는 중"인데도 테두리가 꺼져 있었다 — TUI 는 프롬프트가 떠 있는 한 계속 강조하는데
     //  같은 요청을 채팅으로 보면 강조가 없던 비대칭의 원인이다. 대기 자체가 근거여야 한다.
     const on = !!act && typeof act.win === "number"
-      && (unreadWins.has(act.win) || paneApprovalCount(cwd, act.win) > 0);
+      && (unreadWins.has(act.win)
+        || forPane(cwd, act.win).some((a) => (!a.deadlineAt || a.deadlineAt > Date.now()) && !ackedApprovals.has(a.id)));
     const was = p.el.classList.contains("notif-unread");
     if (on) {
       p.el.classList.add("notif-unread");

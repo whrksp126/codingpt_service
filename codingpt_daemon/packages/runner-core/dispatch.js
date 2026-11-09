@@ -65,18 +65,15 @@ const PLAN_TASK_FIELDS = ['host', 'workspaceId', 'repo', 'subdir', 'base', 'titl
 const SYS_PROMPT = [
   '너는 작업 계획기다. 도구를 쓰지 말고, 설명 없이 아래 JSON 스키마의 객체 하나만 출력해라(코드 블록·머리말 금지).',
   '입력: "카탈로그"(사용자 PC 들의 저장소 목록 JSON)와 "지시"(사용자 한 문장).',
-  '할 일: 지시를 수행할 작업(tasks)을 정하고, 지시에 반복·조건("매일", "…마다", "…하면", "자동으로")이 있을 때만 자동화(automations)를 제안한다.',
+  '할 일: 지시를 수행할 작업(tasks)을 정한다.',
   '스키마:',
   '{"summary": string(한 줄 요약),',
   ' "tasks": [{"host": 카탈로그 host 숫자, "workspaceId": 카탈로그 workspaces[].id, "subdir": "" 또는 그 워크스페이스 topDirs 중 하나,',
   '            "base": 브랜치 이름(모르면 카탈로그 branch), "title": 짧은 제목, "prompt": 에이전트에게 줄 구체적 지시,',
   '            "agents": [{"id": "claude"|"codex"|"gemini"(그 host 에 installed 인 것만), "count": 1~4}], "confidence": 0~1, "why": 한 줄 근거}],',
-  ' "automations": [{"host": 숫자, "draft": {"name": string, "trigger": {"type": "schedule", "cron": "0 9 * * *", "tz": "Asia/Seoul"}',
-  '                  | {"type": "github.issues", "repo": 카탈로그 path, "labels": [..], "state": "open"} | {"type": "git.commits", "repo": path, "branch": "main", "remote": "origin"},',
-  '                  "actions": [{"type": "task.create", "repo": path, "agents": [{"id": "claude", "count": 1}], "title": "{issue.title}", "prompt": "…"}]}, "why": string}],',
   ' "questions": [모호한 점이 있으면 짧은 질문, 최대 3개]}',
-  '규칙: tasks 최대 4개, 모든 tasks 의 agents count 합 ≤ 4. automations 최대 3개. 카탈로그에 없는 host/workspaceId 는 쓰지 마라.',
-  '반복·조건 표현이 없으면 automations 는 빈 배열. 확신이 없으면 confidence 를 낮추고 questions 에 적어라.',
+  '규칙: tasks 최대 4개, 모든 tasks 의 agents count 합 ≤ 4. 카탈로그에 없는 host/workspaceId 는 쓰지 마라.',
+  '확신이 없으면 confidence 를 낮추고 questions 에 적어라.',
 ].join('\n');
 
 // ── 주입 ─────────────────────────────────────────────────────────────────────
@@ -461,21 +458,7 @@ function validatePlan(raw, catalog, instruction) {
     });
     runs += n;
   }
-  const automations = [];
-  for (const it of (Array.isArray(raw.automations) ? raw.automations : [])) {
-    if (automations.length >= PLAN_AUTOS_MAX) break;
-    if (!it || typeof it !== 'object') continue;
-    const h = hosts.get(String(it.host));
-    const d = it.draft;
-    if (!h || !d || typeof d !== 'object' || Array.isArray(d)) continue;
-    if (!d.trigger || !TRIGGER_TYPES.has(d.trigger.type)) continue;
-    if (!Array.isArray(d.actions) || !d.actions.length || d.actions.length > 5) continue;
-    if (!d.actions.every((a) => a && ACTION_TYPES.has(a.type))) continue;
-    let draft;
-    try { draft = JSON.parse(JSON.stringify(d)); } catch (_) { continue; }
-    if (bytesOf(JSON.stringify(draft)) > 20000) continue;
-    automations.push({ host: h.host, draft, why: str(it.why, 300) });
-  }
+  const automations = []; // 자동화 기능 제거(2026-11) — 스키마 호환으로 빈 배열만 싣는다
   if (!tasks.length && !automations.length) return null;
   const questions = (Array.isArray(raw.questions) ? raw.questions : []).filter((q) => typeof q === 'string' && q.trim())
     .map((q) => q.trim().slice(0, 300)).slice(0, PLAN_QUESTIONS_MAX);

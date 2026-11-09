@@ -20,8 +20,6 @@ const { SERVER_CAPS, computeServerCaps } = require('../config/caps');
 
 // 설계 §7.1 표 그대로(복사본 — 서버 표가 바뀌면 여기서 깨져야 한다. 바꾸려면 설계 문서 먼저, §13).
 const DESIGN_TABLE = [
-  ['auto.list', 15000], ['auto.get', 15000], ['auto.validate', 15000], ['auto.create', 15000], ['auto.update', 15000], ['auto.remove', 15000],
-  ['auto.pause', 15000], ['auto.resume', 15000], ['auto.pauseAll', 15000], ['auto.runNow', 15000], ['auto.log', 15000],
   ['dispatch.catalog', 30000], ['dispatch.plan', 15000], ['dispatch.get', 15000],
   ['power.status', 15000], ['power.set', 15000], ['power.setup', 15000],
 ];
@@ -76,7 +74,7 @@ test('미허용 메서드 → 400, 데몬에 가지 않는다(power.event 는 �
 });
 
 test('킬스위치: family 별 cap 이 빠지면 403 <FAM>_DISABLED, 다른 family 는 그대로 통과', async () => {
-  const cases = [['auto.v1', 'auto.list', 'AUTO_DISABLED'], ['dispatch.v1', 'dispatch.plan', 'DISPATCH_DISABLED'], ['power.v1', 'power.status', 'POWER_DISABLED']];
+  const cases = [['dispatch.v1', 'dispatch.plan', 'DISPATCH_DISABLED'], ['power.v1', 'power.status', 'POWER_DISABLED']];
   for (const [cap, method, code] of cases) {
     const idx = SERVER_CAPS.indexOf(cap);
     assert.ok(idx >= 0, `이 커밋의 서버는 ${cap} 을 선언한다`);
@@ -96,8 +94,8 @@ test('킬스위치: family 별 cap 이 빠지면 403 <FAM>_DISABLED, 다른 fami
 
 test('caps: 세 능력 기본 선언, 각 스위치는 자기 능력만 회수', () => {
   const all = computeServerCaps({});
-  for (const c of ['auto.v1', 'dispatch.v1', 'power.v1']) assert.ok(all.includes(c), c);
-  const sw = [['AUTOMATIONS_ENABLED', 'auto.v1'], ['DISPATCH_ENABLED', 'dispatch.v1'], ['POWER_ENABLED', 'power.v1']];
+  for (const c of ['dispatch.v1', 'power.v1']) assert.ok(all.includes(c), c);
+  const sw = [['DISPATCH_ENABLED', 'dispatch.v1'], ['POWER_ENABLED', 'power.v1']];
   for (const [env, cap] of sw) {
     for (const v of ['0', 'false', 'off', 'NO']) {
       const caps = computeServerCaps({ [env]: v });
@@ -109,15 +107,15 @@ test('caps: 세 능력 기본 선언, 각 스위치는 자기 능력만 회수',
 });
 
 test('DAEMON_OFFLINE → 409 · 데몬 code 전달 · code 없으면 AUTO_ERROR · 릴레이 타임아웃 → TIMEOUT', async () => {
-  let r = await callAuto({ method: 'auto.list', params: {} }, () => { throw new Error('DAEMON_OFFLINE'); });
+  let r = await callAuto({ method: 'dispatch.get', params: {} }, () => { throw new Error('DAEMON_OFFLINE'); });
   assert.strictEqual(r.res.statusCode, 409);
   for (const code of ['AUTO_LIMIT', 'AUTO_LOOP', 'POWER_SETUP_REQUIRED', 'PLANNER_FAILED', 'AUTO_DISABLED']) {
-    r = await callAuto({ method: 'auto.create', params: {} }, () => { throw Object.assign(new Error('원문'), { code }); });
+    r = await callAuto({ method: 'dispatch.plan', params: {} }, () => { throw Object.assign(new Error('원문'), { code }); });
     assert.strictEqual(r.res.statusCode, 500);
     assert.deepStrictEqual(r.res.body.detail, { code });
     assert.strictEqual(r.res.body.message, '원문');
   }
-  r = await callAuto({ method: 'auto.get', params: {} }, () => { throw new Error('RPC 실패'); });
+  r = await callAuto({ method: 'power.status', params: {} }, () => { throw new Error('RPC 실패'); });
   assert.deepStrictEqual(r.res.body.detail, { code: 'AUTO_ERROR' });
   r = await callAuto({ method: 'dispatch.catalog', params: {} }, () => { throw new Error('데몬이 응답하지 않습니다(RPC 타임아웃).'); });
   assert.deepStrictEqual(r.res.body.detail, { code: 'TIMEOUT' });
@@ -137,11 +135,11 @@ test('라우트 배선: POST /api/daemon/auto (JWT 통과·무인증 401)', asyn
     const post = (auth, body) => fetch(url, { method: 'POST',
       headers: { 'content-type': 'application/json', ...(auth ? { authorization: `Bearer ${auth}` } : {}) },
       body: JSON.stringify(body) });
-    let r = await post(token, { method: 'auto.list', params: {}, hostDeviceId: 12 });
+    let r = await post(token, { method: 'dispatch.get', params: {}, hostDeviceId: 12 });
     assert.strictEqual(r.status, 200);
     assert.deepStrictEqual(await r.json(), { items: [] });
-    assert.deepStrictEqual(seen, [{ uid: 4002, method: 'auto.list' }]);
-    r = await post(null, { method: 'auto.list', params: {} });
+    assert.deepStrictEqual(seen, [{ uid: 4002, method: 'dispatch.get' }]);
+    r = await post(null, { method: 'dispatch.get', params: {} });
     assert.strictEqual(r.status, 401);
     r = await post(token, { method: 'power.event', params: { kind: 'willSleep' } });
     assert.strictEqual(r.status, 400);

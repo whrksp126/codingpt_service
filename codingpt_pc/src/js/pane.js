@@ -33,6 +33,30 @@ import { commandForCombo } from "./commands.js";
 import * as i18n from './i18n/index.js';
 import { decodeTerminalFrameV3, TERMINAL_OPCODE_V3 } from './terminal-stream-v3.js';
 import { createOwnerCover } from './owner-cover.js';
+
+import { createChannel as e2eeChannel } from "../vendor/e2ee/stream-codec.js";
+// 봉인 소켓 — 다른 PC 터미널 스트림(릴레이 경유)의 모든 프레임을 이 연결의 채널로 봉인/해제한다.
+//  문자열 = 제어 JSON(ctrl), 바이트 = 입력(data). 첫 프레임은 뷰어가(데몬이 connId 를 학습) — open 직후 keepalive.
+//  봉인 모드에서 평문 프레임·복호 실패 프레임은 버린다(데몬 pty.js wsPtyIo 의 거울상).
+function e2eeWrapSocket(sock, keys) {
+  if (!keys) return sock;
+  const ch = e2eeChannel(keys);
+  const rawSend = sock.send.bind(sock);
+  sock.send = (d) => rawSend(ch.seal(typeof d === "string" ? d : (d instanceof ArrayBuffer ? new Uint8Array(d) : d)));
+  let onMsg = null;
+  Object.defineProperty(sock, "onmessage", { configurable: true, get: () => onMsg, set: (f) => { onMsg = f; } });
+  sock.addEventListener("message", (ev) => {
+    if (typeof ev.data === "string" || !onMsg) return;
+    let r = null;
+    try { r = ch.open(new Uint8Array(ev.data)); } catch (_) { r = null; }
+    if (!r) return;
+    if (r.kind === 1) { onMsg.call(sock, { data: ch.text(r.payload) }); return; }
+    const b = r.payload;
+    onMsg.call(sock, { data: b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength) });
+  });
+  sock.addEventListener("open", () => { try { sock.send(JSON.stringify({ type: "keepalive" })); } catch (_) { /* noop */ } });
+  return sock;
+}
 // ⚠ state.js 를 직접 import 하지 않는다 — state.js 가 이미 pane.js 를 import 하므로 순환이 된다.
 //  에이전트 상태 조회는 ctx.agentStateOf(워크스페이스 뷰가 주입)로 받는다.
 
@@ -224,14 +248,27 @@ function ensureLocalForward(port, hostDeviceId) {
   const hit = _forwards.get(key);
   if (hit && Date.now() - hit.at < FORWARD_REFRESH_MS) return hit.promise;
   const promise = (async () => {
-    const r = await api.backApi("POST", "/api/daemon/forward/start", { port, hostDeviceId });
+    // 종단 간 암호화 — 이 PC 데몬이 뷰어 오퍼를 만들고 수용까지 한다(봉인도 데몬 forward.js 가). 미지원 = 평문.
+    const client = appState.currentDeviceId != null ? `pc-${appState.currentDeviceId}` : "pc";
+    let off = null;
+    try {
+      const o = await api.e2eeLocal("e2ee.viewerOffer", { purpose: "tcp", hostDeviceId, client, routing: { port } });
+      if (o && o.ok && o.offer) off = o;
+    } catch (_) { off = null; }
+    const r = await api.backApi("POST", "/api/daemon/forward/start", { port, hostDeviceId, client, ...(off ? { e2ee: off.offer } : {}) });
     if (!r?.token) throw new Error(i18n.t('포워딩 토큰 발급 실패'));
+    let e2ee = null;
+    if (off && r.e2ee && typeof r.e2ee === "object") {
+      const acc = await api.e2eeLocal("e2ee.viewerAccept", { pid: off.pid, answer: r.e2ee });
+      if (!acc || !acc.ok || !acc.sid) throw new Error(i18n.t('포워딩 토큰 발급 실패'));
+      e2ee = { sid: acc.sid };
+    }
     // LAN 직결(기능4) — 같은 Wi-Fi 면 직결 좌표를 함께 넘긴다. 데몬이 **연결마다** 직결을 먼저 쓰고,
     //  실패하면 버퍼를 승계해 그 연결만 릴레이(token)로 넘긴다 → 사용자 무자각.
     //  grant 취득 실패/미지원은 null 이라 여기서 아무 일도 일어나지 않는다(기존 동작 그대로).
     let upstream = null;
     try { upstream = await lan.upstreamFor(hostDeviceId, port); } catch (_) { upstream = null; }
-    const fr = await api.forwardStart(port, r.token, upstream);
+    const fr = await api.forwardStart(port, r.token, upstream, e2ee);
     void lan.refreshStatus(hostDeviceId); // 배지(직결) 갱신 — 실패는 조용히 무시
     if (fr?.ok !== true) {
       if (fr?.error === "EADDRINUSE") console.warn(`[preview] 이 PC 의 포트 ${port} 가 사용 중이라 프록시 모드로 엽니다`);
@@ -1878,6 +1915,7 @@ export class PaneView {
     const gen = (this._chanGen = (this._chanGen || 0) + 1);
     try {
       let url;
+      let e2eeKeys = null;
       if (this.ctx.isLocal) {
         const ep = await api.terminalLocalEndpoint();
         if (gen !== this._chanGen) return;
@@ -1893,11 +1931,26 @@ export class PaneView {
         if (typeof win === "number") { q.set("win", String(win)); q.set("pin", "1"); }
         url = `ws://127.0.0.1:${ep.port}/v3/terminal?${q}`;
       } else {
-        const { token, wsBase } = await api.cloudTerminalStart(this.ctx.localPath || "", this.ctx.hostDeviceId ?? null, this.id);
+        // 종단 간 암호화(D단계) — 다른 PC 의 터미널은 릴레이를 거친다. 이 PC 데몬이 오퍼를 만들고(MK 는 데몬만),
+        //  수용 뒤 받은 세션키로 여기서 프레임을 봉인/해제한다 → 릴레이는 암호문만 본다. 미지원·실패 = 평문.
+        const client = appState.currentDeviceId != null ? `pc-${appState.currentDeviceId}` : "pc";
+        const host = this.ctx.hostDeviceId ?? null;
+        let off = null;
+        try {
+          const r = await api.e2eeLocal("e2ee.viewerOffer", { purpose: "pty", hostDeviceId: host, client, routing: { cwd: this.ctx.localPath || "", paneId: this.id, win: null } });
+          if (r && r.ok && r.offer) off = r;
+        } catch (_) { off = null; }
+        const started = await api.cloudTerminalStart(this.ctx.localPath || "", host, this.id, { client, e2ee: off ? off.offer : null });
         if (gen !== this._chanGen) return;
-        url = `${wsBase}/api/daemon/terminal/${token}`;
+        url = `${started.wsBase}/api/daemon/terminal/${started.token}`;
+        if (off && started.e2ee && typeof started.e2ee === "object") {
+          const acc = await api.e2eeLocal("e2ee.viewerAccept", { pid: off.pid, answer: started.e2ee, wantKeys: true });
+          if (!acc || !acc.ok || !acc.keys) throw new Error(i18n.t("터미널 연결 실패: ") + ((acc && acc.code) || "E2EE"));
+          e2eeKeys = acc.keys;
+        }
+        if (gen !== this._chanGen) return;
       }
-      this._v3Connect(url);
+      this._v3Connect(url, e2eeKeys);
     } catch (e) {
       if (gen !== this._chanGen) return;     // 이미 다른 열기가 진행 중 — 옛 실패를 화면에 찍지 않는다
       this.term.write(i18n.t("\n\x1b[31m터미널 연결 실패: ") + e + "\x1b[0m\r\n");
@@ -1905,8 +1958,8 @@ export class PaneView {
     }
   }
 
-  _v3Connect(url) {
-    const ws = new WebSocket(url);
+  _v3Connect(url, e2eeKeys) {
+    const ws = e2eeWrapSocket(new WebSocket(url), e2eeKeys);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     ws.onopen = () => {

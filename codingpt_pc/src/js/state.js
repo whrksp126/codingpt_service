@@ -1108,13 +1108,28 @@ export async function createLocalWorkspace() {
       state.creatingWs = false;
       return;
     }
+    // 이미 등록된 폴더면(같은 PC·같은 경로) 서버를 거치지 않고 그것을 연다 — 중복 등록 금지.
+    const absN = String(abs).replace(/\/+$/, "");
+    const dup = state.workspaces.find((w) => isLocal(w) && isThisHost(w) && w.localPath && !isTaskWorkspace(w)
+      && absN.endsWith("/" + String(w.localPath).replace(/\/+$/, "")));
+    if (dup) {
+      state.activeWsId = dup.id;
+      ensureRuntime(dup.id);
+      state.view = "workspace";
+      return;
+    }
     const meta = await api.createWorkspace(String(abs));
-    await loadWorkspaces();
     if (meta && meta.id) {
+      // 목록 전체를 다시 받기 전에 바로 보여준다(새 워크스페이스는 경로 정보뿐 — 기다릴 이유가 없다).
+      if (!state.workspaces.some((w) => w.id === meta.id)) {
+        state.workspaces = [...state.workspaces, { hostDeviceId: state.currentDeviceId ?? meta.hostDeviceId, hostOnline: true, ...meta }];
+      }
       state.activeWsId = meta.id;
       ensureRuntime(meta.id);
       state.view = "workspace";
+      emit();
     }
+    void loadWorkspaces();
   } catch (e) {
     state.wsError = String(e);
     // 알림 대신 콘솔(폴더가 홈 밖이면 여기로).

@@ -22,11 +22,6 @@ const PRI_TEXT = { none: "없음", low: "낮음", medium: "보통", high: "높�
 const SRC_TEXT = { all: "전체", codingpt: "CodingPT", github: "GitHub", gitlab: "GitLab", linear: "Linear", jira: "Jira", notion: "Notion" };
 //  시작 방식 — "작업"은 Tasks 의 항목 이름이라(2026-10-23) 방식 이름은 "어디서·어떻게" 로 말한다. 고른 방식의 설명을 한 줄 붙인다.
 const MODE_TEXT = { task: "새 브랜치에서", terminal: "지금 폴더에서", orch: "여러 에이전트로 나눠서" };
-const MODE_HINT = {
-  task: "작업 폴더와 브랜치를 따로 만들어 에이전트를 띄워요. 지금 폴더는 그대로이고, 끝나면 확인한 뒤 합쳐요.",
-  terminal: "이 워크스페이스 폴더에 새 터미널 탭을 열고 에이전트를 띄워요. 지금 폴더의 파일을 바로 고쳐요.",
-  orch: "에이전트 하나가 일을 나눠 여러 에이전트에게 맡기고 결과를 모아요. 크고 나눌 수 있는 일에 맞아요.",
-};
 const ERR_TEXT = { GH_AUTH: "GitHub 로그인이 필요해요(gh auth login)", GH_MISSING: "gh 가 설치되어 있지 않아요", ISSUES_DISABLED: "이 저장소는 이슈를 쓰지 않아요",
   NOT_GITHUB: "GitHub 저장소가 아니에요", DAEMON_OFFLINE: "PC 가 연결되어 있지 않아요", START_FAILED: "시작하지 못했어요" };
 const errText = (code) => t(ERR_TEXT[String(code || "")] || "문제가 생겼어요. 다시 시도해 주세요");
@@ -268,6 +263,18 @@ function draw() {
       `<span class="is-qwrap">${icons.search({ size: 13 })}<input class="tk-input is-q" placeholder="${esc(t("작업 검색"))}" value="${esc(query)}"></span>` +
       sel("view", VIEWS.map((v) => [v, t(VIEW_TEXT[v])]), pref.view) +
       `</div><div class="is-warn" hidden></div><div class="is-body"></div>`;
+    if (state.sidebarCollapsed) {
+      // 사이드바가 접혀 있으면 타이틀바 컨트롤(사이드바 토글·알림)을 여기로 옮긴다 — 없으면 다시 펼 길이 없다
+      //  (워크스페이스·진행 현황 헤더와 같은 규칙).
+      const top = el.querySelector(".tv-top");
+      import("./sidebar.js").then((m) => {
+        if (!top.isConnected || top.querySelector(".mt-ctl")) return;
+        const ctl = document.createElement("span");
+        ctl.className = "mt-ctl";
+        ctl.append(m.buildTopControls(false));
+        top.prepend(ctl);
+      }).catch(() => {});
+    }
   }
   drawBody();
 }
@@ -451,7 +458,6 @@ function openSheet(issue) {
     `<select class="tk-input is-s-mode">${opt(["task", "terminal", "orch"], startMode, (v) => t(MODE_TEXT[v]))}</select>` +
     `<select class="tk-input is-s-agent">${opt(["claude", "codex", "gemini"], startAgent, (v) => agentName(v) || v)}</select>` +
     `<button class="tv-btn is-go" data-s="start">${esc(t("시작"))}</button>` +
-    `<div class="is-start-hint">${esc(t(MODE_HINT[startMode] || ""))}</div>` +
     (cur && cur.link ? `<button class="tv-btn ghost" data-s="goto">${esc(t("진행 중인 일 보기"))}</button>` : "") + `</div>` +
     (ext ? "" : `<div class="is-acts"${cur ? "" : " hidden"}><span class="is-grow"></span>` +
       `<button class="tv-btn ghost is-to-gh" data-s="togh" hidden>${esc(t("GitHub 이슈로 만들기"))}</button></div>`) +
@@ -459,7 +465,6 @@ function openSheet(issue) {
   overlay.appendChild(box);
   document.body.appendChild(overlay);
   const q = (s) => box.querySelector(s);
-  q(".is-s-mode").addEventListener("change", (e) => { q(".is-start-hint").textContent = t(MODE_HINT[e.target.value] || ""); });
   const cwdSel = q(".is-f-cwd");
   const fillCwd = (c) => { cwdSel.innerHTML = `<option value="">${esc(t("정하지 않음"))}</option>` + wsOpts(h, c).map((w) => `<option value="${esc(w.cwd)}"${w.cwd === c ? " selected" : ""}>${esc(w.label)}</option>`).join(""); };
   fillCwd(init.cwd);

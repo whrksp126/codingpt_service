@@ -12,7 +12,7 @@
  * ── 킬스위치/단계 ─────────────────────────────────────────────────────────
  *  CPT_E2EE=0            → 전면 OFF(즉시 원복). caps 선언까지 사라져 서버/기기도 평문으로 돈다.
  *                          (e2ee.js enabled() 도 같은 변수를 본다 — 이중 방어)
- *  CPT_E2EE_SCOPE=       off | rpc(기본) | snapshot | stream | all
+ *  CPT_E2EE_SCOPE=       off | rpc | snapshot | stream(기본, 2026-11 승격) | all
  *    off      아무것도 봉인하지 않음
  *    rpc      제어채널 봉투 RPC(sealed) — 적용 순서 B단계
  *    snapshot rpc + 스냅샷 번들 봉인 — C단계
@@ -34,8 +34,9 @@ const LEVELS = { off: 0, rpc: 1, snapshot: 2, stream: 3, all: 3 };
 
 function scope() {
   if (String(process.env.CPT_E2EE || '') === '0') return 'off'; // 킬스위치 최우선
-  const v = String(process.env.CPT_E2EE_SCOPE || 'rpc').trim().toLowerCase();
-  return Object.prototype.hasOwnProperty.call(LEVELS, v) ? v : 'rpc';
+  // 2026-11: 터미널·포워딩 스트림까지 기본 봉인(D단계 승격) — 릴레이는 암호문만 본다.
+  const v = String(process.env.CPT_E2EE_SCOPE || 'stream').trim().toLowerCase();
+  return Object.prototype.hasOwnProperty.call(LEVELS, v) ? v : 'stream';
 }
 
 // stage: 'rpc' | 'snapshot' | 'stream'

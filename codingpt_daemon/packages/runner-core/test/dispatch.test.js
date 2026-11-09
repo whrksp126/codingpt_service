@@ -170,7 +170,7 @@ test('cli 모드 — 가짜 claude: 인자(-p json max-turns 1 --tools "" append
   assert.strictEqual(plan.tasks[1].subdir, '', '카탈로그 topDirs 밖 subdir 은 무시');
   assert.deepStrictEqual(plan.tasks[1].agents, [{ id: 'codex', count: 3 }]);
   assert.ok(plan.tasks.reduce((n, t) => n + t.agents.reduce((m, a) => m + a.count, 0), 0) <= 4, '합계 run ≤ 4');
-  assert.strictEqual(plan.automations.length, 1, '셸 액션 자동화는 버린다');
+  assert.strictEqual(plan.automations.length, 0, '자동화 제안은 버린다(기능 제거)');
   assert.deepStrictEqual(plan.questions, ['정리가 닫기까지인가요?']);
   // 인자·stdin·cwd
   const args = fs.readFileSync(ARGS, 'utf8').split('\n');

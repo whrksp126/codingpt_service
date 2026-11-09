@@ -10,7 +10,7 @@
   body.with-main .shell { width: 100vw; }
   body:not(.with-main) .main { display: none; }</style></head>
 <body>
-<div class="shell"><aside id="sbRoot"></aside><main class="main"><section id="tasksView" class="tasks-view" hidden></section><section id="automationsView" class="automations-view" hidden></section><section id="issuesView" class="issues-view" hidden></section></main></div>
+<div class="shell"><aside id="sbRoot"></aside><main class="main"><section id="tasksView" class="tasks-view" hidden></section><section id="issuesView" class="issues-view" hidden></section></main></div>
 <script src="vendor/xterm/xterm.js"></script>
 <script src="vendor/xterm/xterm-addon-fit.js"></script>
 <script src="vendor/xterm/xterm-addon-search.js"></script>
@@ -206,7 +206,6 @@
   await TA.refreshHostCaps();
   const AA = await import('./js/automations-api.js');
   AA.noteRunnerAwake({ deviceId: 11, online: true, awake: true, busy: true });
-  const AV = await import('./js/automations-view.js');
   const TV = await import('./js/tasks-view.js');
   // 이슈 장소(issues-view.js) 확인용 — `#main-issues`(목록) · `#main-issues-board` · `#main-issues-table` · `-sheet`(상세 시트).
   const iss = (n, title, status, o = {}) => ({ id: o.gh ? `gh:me/codingpt#${n}` : 'iss_' + n, number: n, key: o.gh ? `codingpt#${n}` : '#' + n, title, body: o.body || '', status,
@@ -233,10 +232,7 @@
     if (location.hash.includes('rich')) window.__ISSUES.issues.find((y) => y.id === 'iss_12').body = '# 결제 실패 재시도\n\n결제 API 가 **5xx** 를 주면 `retry()` 로 세 번까지 다시 시도한다.\n\n- [x] 재현 영상\n- [ ] 원인 찾기\n\n1. 결제 버튼\n2. 서버 오류\n\n> 기대: 자동 재시도\n\n```\nPOST /pay 502\n```\n\n참고 [문서](https://a.io)';
   }
   TV.mountTasksView(document.getElementById('tasksView'));
-  AV.mountAutomationsView(document.getElementById('automationsView'));
-  await AV.refreshAutoHost(11);
   if (location.hash.includes('tasks')) S.setView('tasks');
-  if (location.hash.includes('autos')) AV.openAutomations(location.hash.includes('detail') ? { id: 'a_sched', host: 11 } : {});
   S.state.ws[1] = { layout: { kind: 'terminal', id: 'p1', tabs: [{ win: 1 }, { win: 2 }, { win: 3 }], active: location.hash.includes('focus2') ? 1 : 0 }, focusId: location.hash.includes('focus') ? 'p1' : null, surfaces: [], ports: [3000, 5173] };
   // 행 규격 확인용 — 색 점·고정 핀·포트 텍스트·활성 로컬 행(디자인 리프레시 2026-09-30).
   S.wsPrefs.color[1] = '#60a5fa'; S.wsPrefs.color[2] = '#fb923c'; S.wsPrefs.pinned = [1];
@@ -246,8 +242,8 @@
   localStorage.removeItem('cpt.activeDeviceId.v1');
   sb.mountSidebar(document.getElementById('sbRoot'));
   sb.updateSidebar();
-  S.subscribe(() => { sb.updateSidebar(); TV.updateTasksView(); AV.updateAutomationsView(); });
-  TV.updateTasksView(); AV.updateAutomationsView();
+  S.subscribe(() => { sb.updateSidebar(); TV.updateTasksView(); });
+  TV.updateTasksView();
   // 한 줄 지시 시트 — `#dispatch` 해시면 문장을 넣고 [계획] 까지 누른다(목 카탈로그 → 목 플랜).
   window.__dispatch = async (text) => {
     const m = await import('./js/dispatch-sheet.js');

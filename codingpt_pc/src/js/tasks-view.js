@@ -19,7 +19,7 @@ import { buildDashboard, GROUPS, isTaskWorkspace, scopeToHost, needsInputByHost 
 import { taskRpc, refreshHostCaps, hostHasTasks, serverHasTasks, onCapsChanged, newOpId, isLocalHostId } from "./tasks-api.js";
 import { tt, errText } from "./text/tasks.js";
 import { at } from "./text/automations.js";
-import { hostHasAuto, hostHasDispatch, hostAwake } from "./automations-api.js";
+import { hostHasDispatch, hostAwake } from "./automations-api.js";
 import { api } from "./api.js";
 import * as i18n from "./i18n/index.js";
 
@@ -339,7 +339,7 @@ export function updateTasksView() {
   const frameSig = JSON.stringify([wide, !!sel, state.sidebarCollapsed, actH, activeDeviceName(), hostAwake(actH), canDispatch()]);
   const lSig = JSON.stringify([
     wide, sel, focusK, [...collapsed], serverHasTasks(), queryHosts(), [...fixing],
-    queryHosts().map((h) => [h, hostHasAuto(h)]),
+    queryHosts().map((h) => [h, hostHasDispatch(h)]),
     GROUPS.map((g) => dash.groups[g].map((r) => [r.k, r.group, r.reason, r.live && r.live.state, r.approvals.length, r.unread,
       r.run && [r.run.state, r.run.op && r.run.op.opId, r.run.lastOp && r.run.lastOp.opId, r.run.trustPending, r.run.agentGone, r.run.terminalAlive,
         r.run.diff && [r.run.diff.files, r.run.diff.additions, r.run.diff.deletions], r.run.commits && r.run.commits.ahead,
@@ -615,10 +615,8 @@ function card(r) {
   const st = statusOf(r);
   const who = r.kind === "task" ? (task.title || tt("title")) : agentName(r.agent || (r.live && r.live.agent));
   const logo = r.kind === "task" ? tasksIcon({ size: 15 }) : (agentMarkHtml(r.agent || (r.live && r.live.agent), { size: 15 }) || icons.terminal({ size: 15 }));
-  const autoId = task && task.origin && task.origin.kind === "automation" ? task.origin.automationId || null : null;
   c.innerHTML =
     `<div class="tvc-head"><span class="tvc-logo">${logo}</span>`
-    + (autoId ? `<button class="wsg-fan au-chip" title="${esc(at("automations"))}">${esc(at("autoBadge"))}</button>` : "")
     + `<span class="tvc-who">${esc(who)}</span>`
     + `<span class="tvc-where">${esc([pc && pc.name, r.kind === "task" ? null : where].filter(Boolean).join(" · "))}</span>`
     + (r.unread ? `<span class="wsr-badge">${r.unread}</span>` : "")
@@ -630,7 +628,6 @@ function card(r) {
   if (acts.childElementCount) c.append(acts);
   if (openAppr.has(r.k)) { if (r.approvals.length) c.append(approvalBox(r)); else openAppr.delete(r.k); }
   c.addEventListener("click", (e) => {
-    if (autoId && e.target.closest?.(".au-chip")) { e.stopPropagation(); openAutomationsFor(autoId, r.host); return; }
     select(r);
   });
   c.addEventListener("dblclick", () => openRow(r));
@@ -758,7 +755,7 @@ export async function dismissFollowup(host, task, run) {
 /** 카드·상세 공용 버튼 묶음 — auto.v1 이 **있다고 확인된** PC 만 [고치기][무시](구 데몬은 BAD_PARAMS, §2.3). */
 export function followupActions(host, task, run) {
   const out = [];
-  if (hostHasAuto(host) === true) {
+  if (hostHasDispatch(host) === true) {
     const busy = fixing.has(run.id);
     out.push(btn("tv-btn", busy ? tt("fixing") : tt("fix"), () => fixFollowup(host, task, run), { disabled: busy || runLocked(run) }));
     out.push(btn("tv-btn ghost", tt("ignore"), () => dismissFollowup(host, task, run), { disabled: busy }));
@@ -784,9 +781,6 @@ function canDispatch() {
 }
 function openDispatch() {
   import("./dispatch-sheet.js").then((m) => m.openDispatchSheet()).catch(() => {});
-}
-function openAutomationsFor(id, host) {
-  import("./automations-view.js").then((m) => m.openAutomations({ id, host })).catch(() => {});
 }
 
 /** 승인 인라인 응답 — 알림 패널 행과 같은 모양·같은 순서(허용 → 묻지 않기 → 거절). 선택형은 터미널로. */

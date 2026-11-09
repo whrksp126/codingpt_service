@@ -332,6 +332,43 @@ function linkCall(name, args) {
   return a[name](args);
 }
 
+// ── 스트림 뷰어(PC 앱이 다른 PC 의 터미널/포워딩을 볼 때, 기능2 D단계) ─────────────────────────
+//  오퍼는 데몬이 만들고(MK 는 여기서만), 수용 뒤 **세션키만** 돌려준다 — PC 웹뷰가 프레임을 봉인/해제한다.
+//  세션키는 그 연결 하나의 것이라 MK 무노출 원칙은 그대로다. 포워딩(purpose tcp)은 데몬 forward.js 가
+//  같은 프로세스에 등록된 뷰어 세션으로 봉인하므로 sid 만 쓰면 된다.
+const viewerPending = new Map(); // pid → { pending, at }
+function viewerOffer(a = {}) {
+  const e = core();
+  if (!e || typeof e.createViewerOffer !== 'function') return { ok: false, code: 'E2EE_UNSUPPORTED' };
+  const gate = require('./e2ee-gate');
+  if (!gate.allows('stream')) return { ok: false, code: 'E2EE_SCOPE' };
+  const now = Date.now();
+  for (const [k, v] of viewerPending) if (now - v.at > 120000) viewerPending.delete(k);
+  try {
+    const host = a.hostDeviceId != null && a.hostDeviceId !== '' ? Number(a.hostDeviceId) : null;
+    const { offer, pending } = e.createViewerOffer({
+      purpose: a.purpose === 'tcp' ? 'tcp' : 'pty', hostDeviceId: host, client: String(a.client || ''), routing: a.routing || {},
+    });
+    const pid = require('crypto').randomBytes(12).toString('hex');
+    viewerPending.set(pid, { pending, at: now });
+    return { ok: true, pid, offer };
+  } catch (err) { return { ok: false, code: (err && err.code) || 'E2EE_OFFER_FAILED' }; }
+}
+function viewerAccept(a = {}) {
+  const e = core();
+  const it = viewerPending.get(String(a.pid || ''));
+  viewerPending.delete(String(a.pid || ''));
+  if (!e || !it) return { ok: false, code: 'E2EE_NO_PENDING' };
+  try {
+    const ans = a.answer || {};
+    // 트랜스크립트의 hostDeviceId 정본 = back 이 에코한 값(daemonRelayService.negotiateStreamE2ee).
+    if (ans.hostDeviceId != null) it.pending.hostDeviceId = ans.hostDeviceId;
+    const s = e.acceptHostAnswer(it.pending, ans);
+    const b = (x) => Buffer.from(x).toString('base64url');
+    return { ok: true, sid: s.sidB64, keys: a.wantKeys ? { kV2H: b(s.kV2H), kH2V: b(s.kH2V), sid: b(s.sid) } : undefined };
+  } catch (err) { return { ok: false, code: (err && err.code) || 'E2EE_CONFIRM' }; }
+}
+
 /**
  * cpt.sock 디스패처 진입점 — `e2ee.` 로 시작하는 모든 커맨드.
  *  모르는 커맨드는 throw(= 이 데몬이 그 명령을 모른다는 정직한 신호).
@@ -356,6 +393,8 @@ async function handle(cmd, args = {}) {
     case 'e2ee.recovery.restore': return recoveryRestore(args);
     case 'e2ee.openText': return openText(args);
     case 'e2ee.rpc': return rpc(args);
+    case 'e2ee.viewerOffer': return viewerOffer(args);
+    case 'e2ee.viewerAccept': return viewerAccept(args);
     default:
       throw Object.assign(new Error(`알 수 없는 e2ee 명령: ${cmd}`), { code: 'E2EE_UNKNOWN_CMD' });
   }

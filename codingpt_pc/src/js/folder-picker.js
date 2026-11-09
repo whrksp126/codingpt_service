@@ -182,10 +182,19 @@ async function designate() {
   const btn = el && el.querySelector(".fp-designate");
   if (btn) { btn.disabled = true; btn.textContent = i18n.t('지정 중…'); }
   try {
-    const w = await api.remoteWsCreate(targetPath(), B.host);
+    const rel = String(targetPath() || "").replace(/^\/+|\/+$/g, "");
+    const host = B.host;
+    // 같은 PC·같은 폴더가 이미 있으면 그것을 연다(중복 등록 금지) — 서버 왕복 없이.
+    const dup = state.workspaces.find((x) => x.compute === "local" && x.localPath && String(x.localPath).replace(/\/+$/, "") === rel
+      && (host == null || x.hostDeviceId == null || String(x.hostDeviceId) === String(host)));
+    const w = dup || await api.remoteWsCreate(targetPath(), host);
     close();
-    await loadWorkspaces();
-    if (w && w.id) { state.activeWsId = w.id; ensureRuntime(w.id); state.view = "workspace"; emit(); }
+    if (w && w.id) {
+      // 목록 전체 재조회를 기다리지 않고 바로 보여준다.
+      if (!state.workspaces.some((x) => x.id === w.id)) state.workspaces = [...state.workspaces, { hostOnline: true, ...w, hostDeviceId: w.hostDeviceId ?? host ?? null }];
+      state.activeWsId = w.id; ensureRuntime(w.id); state.view = "workspace"; emit();
+    }
+    void loadWorkspaces().then(() => emit());
   } catch (e) {
     console.error("워크스페이스 지정 실패:", e);
     if (btn) { btn.disabled = false; btn.textContent = i18n.t('이 폴더로 지정'); }

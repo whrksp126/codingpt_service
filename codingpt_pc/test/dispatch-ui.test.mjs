@@ -53,11 +53,11 @@ const PLAN = {
   ok(/st\.failedHosts\.push/.test(src) && /catalogFailed/.test(src), "카탈로그 실패 PC 는 빼고 카드 위에 한 줄");
   ok(/PLAN_POLL_MS = 2000/.test(src) && /PLAN_DEADLINE_MS = 120000/.test(src) && /autoRpc\("dispatch\.get", \{ planId: st\.planId \}/.test(src), "dispatch.get 2초 폴링·120초 상한");
   ok(/export function onDispatchChanged/.test(src) && /pollNow/.test(src), "dispatch.changed 수신 즉시 다시 받기");
-  ok(/origin: \{ kind: "dispatch", planId \}/.test(src) && /createdBy: \{ kind: "dispatch", deviceId:[^}]*planId \}/.test(src), "task.create origin / auto.create createdBy = dispatch + planId");
+  ok(/origin: \{ kind: "dispatch", planId \}/.test(src) && !/auto\.create/.test(src), "task.create origin = dispatch + planId · 자동화 생성 없음(기능 제거)");
   ok(/st\.startOps\[t\.key\] \|\| \(st\.startOps\[t\.key\] = newOpId\(\)\)/.test(src) && /if \(!isUncertain\(code\)\) delete st\.startOps/.test(src), "결과 불명 실패 뒤 재시도는 같은 opId(중복 작업 방지)");
   ok(/st\.done\[t\.key\]/.test(src), "이미 만든 항목은 재시도 때 건너뛴다");
   ok(/INSTRUCTION_MAX_BYTES = 4000/.test(src), "지시 문장 ≤ 4000 바이트(§3.3)");
-  ok(/openTasksDashboard\(\{ taskId: firstTask\.taskId, host: firstTask\.host \}\)/.test(src) && /openAutomations\(\{ id: firstAuto\.id, host: firstAuto\.host \}\)/.test(src), "[시작] 뒤: 첫 작업 진행 현황, 자동화만이면 자동화 장소");
+  ok(/openTasksDashboard\(\{ taskId: firstTask\.taskId, host: firstTask\.host \}\)/.test(src) && !/openAutomations/.test(src), "[시작] 뒤: 첫 작업 진행 현황");
   ok(!/[\u{1F300}-\u{1FAFF}]/u.test(src), "이모지 0");
 }
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILED"} — pass ${pass} / fail ${fail}`);
