@@ -1,27 +1,18 @@
-// OS 파일 드롭 경로 스테이징 — macOS TCC 보호 위치의 파일을 ~/.codingpt/drops 로 복사해 그 경로를 넘긴다.
+// OS 파일 드롭 — macOS 드래그 임시파일(⌘⇧4 썸네일을 바로 끌어 놓은 것)을 ~/.codingpt/drops 로 복사해 그 경로를 넘긴다.
 //
-// 왜: tmux 서버는 0.1.415 부터 launchd 작업으로 뜬다(⌘Q 뒤 Dock 잔류 수정). 그 결과 tmux 아래
-//  claude/codex 는 CodingPT 앱의 TCC 허가(다운로드·데스크탑 폴더 접근)를 물려받지 못한다
-//  ("Operation not permitted" 실측). 그래서 ⌘⇧4 스크린샷(데스크탑)·다운로드 파일을 드롭하면
-//  에이전트가 파일을 못 읽어 [Image #N] 변환이 안 되고 경로 글자만 남거나 권한 오류를 낸다.
-//  스크린샷 썸네일 드래그는 /var/folders/…/NSIRD_screencaptureui_* 임시 경로라 곧 사라지기도 한다.
-//  앱(허가 보유)이 드롭 순간 보호되지 않는 곳으로 복사해 두면 에이전트가 항상 읽는다.
-//  프로젝트 폴더처럼 보호되지 않은 경로는 원본 그대로(에이전트가 실제 파일을 고칠 수 있게).
+// 왜: 스크린샷 썸네일 드래그는 /var/folders/…/TemporaryItems/NSIRD_screencaptureui_* 의 **임시 원본**을 준다.
+//  macOS 가 곧 지우고, 드롭을 받은 앱(CodingPT 본체)에게만 읽기가 허락돼 터미널 안 에이전트는 EPERM 을 받는다.
+//  Orca 도 같은 처방이다(src/main/window/dragged-temp-file-copy.ts: "detached PTY daemons get EPERM on
+//  TemporaryItems/NSIRD_* originals"). 다운로드·데스크탑 같은 보통 파일은 원본 경로 그대로 —
+//  tmux 가 앱 아래에서 돌아 앱의 폴더 허가를 물려받으므로 에이전트가 직접 읽는다(tmux-launchd.js).
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const MAX_BYTES: u64 = 512 * 1024 * 1024;
 const KEEP: Duration = Duration::from_secs(3 * 24 * 3600);
 
-fn protected(p: &Path, home: &Path) -> bool {
-    const HOME_SUBS: [&str; 8] = [
-        "Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music",
-        "Library/Mobile Documents", "Library/CloudStorage",
-    ];
-    if HOME_SUBS.iter().any(|s| p.starts_with(home.join(s))) {
-        return true;
-    }
-    ["/var/folders", "/private/var/folders", "/Volumes"].iter().any(|r| p.starts_with(r))
+fn protected(p: &Path, _home: &Path) -> bool {
+    ["/var/folders", "/private/var/folders"].iter().any(|r| p.starts_with(r))
 }
 
 fn sweep(root: &Path) {
@@ -75,11 +66,10 @@ mod tests {
     #[test]
     fn protected_paths() {
         let h = Path::new("/Users/u");
-        assert!(protected(Path::new("/Users/u/Downloads/a.png"), h));
-        assert!(protected(Path::new("/Users/u/Desktop/스크린샷.png"), h));
+        assert!(!protected(Path::new("/Users/u/Downloads/a.png"), h));
+        assert!(!protected(Path::new("/Users/u/Desktop/스크린샷.png"), h));
         assert!(protected(Path::new("/var/folders/x/T/NSIRD_screencaptureui_1/a.png"), h));
         assert!(!protected(Path::new("/Users/u/project/src/a.rs"), h));
-        assert!(!protected(Path::new("/Users/u/DownloadsX/a.png"), h));
     }
     #[test]
     fn stages_temp_file() {

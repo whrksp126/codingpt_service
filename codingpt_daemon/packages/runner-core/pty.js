@@ -618,8 +618,7 @@ async function attachPty(params, io) {
 // ── 멀티 터미널 RPC ──
 // 터미널 = 전용 세션(termSession) 모델. list/new/close = 전 기기 공통 durable 목록(tmux 세션들),
 // select = 이 pane 스트림의 attach 대상 교체. 전용 소켓 -L codingpt 규율 유지.
-// macOS: 서버를 만들 수 있는 명령 앞에서 launchd 서버를 먼저 세운다(tmux-launchd.js — ⌘Q 뒤 Dock 의
-//  "백그라운드에서 실행 중" 방지). 이미 떠 있으면 확인 1회로 끝난다.
+// 서버는 첫 new-session 이 데몬(앱) 아래에서 포크한다 — launchd 실행은 폐기(tmux-launchd.js 머리 주석).
 function ensureTmuxServer() {
   const tmux = findTmux();
   if (!tmux) return Promise.resolve(false);
@@ -627,7 +626,6 @@ function ensureTmuxServer() {
 }
 
 async function runTmux(args) {
-  if (args.includes('new-session')) await ensureTmuxServer();
   return new Promise((resolve, reject) => {
     const tmux = findTmux();
     if (!tmux) return reject(new Error('tmux 가 설치되어 있지 않습니다 (brew install tmux)'));

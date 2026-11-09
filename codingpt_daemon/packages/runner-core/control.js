@@ -837,14 +837,26 @@ function run(config) {
     // ★ 재부팅 복원 — tmux 서버가 없고(재부팅/크래시) 매니페스트가 있으면 터미널을 그 tid 그대로
     //  되살린다(terminal-manifest.js). 리스너를 열기 **전에** 끝내야 PC/폰의 저장된 레이아웃이 첫
     //  attach 부터 실체를 만난다(cmux 처럼 "켜면 그대로"). 데몬만 재시작한 경우엔 서버가 살아 있어 no-op.
+    // ★ 0.1.415~0.1.421 의 launchd tmux 서버 → 앱 아래 서버로 이전(tmux-launchd.js). 복원 **전**에 내려야
+    //  아래 restoreIfNeeded 가 "서버 없음" 을 보고 같은 tid 로 앱 아래에 되살리고, 그 뒤 대화를 이어 붙인다.
+    let migrated = null;
+    try {
+      if (!require('./term-backend').isHostBackend()) {
+        const tm = require('./terminal-manifest');
+        migrated = await require('./tmux-launchd').migrateFromLaunchd({
+          runTmux: require('./pty').runTmux, syncManifest: tm.sync, log: (m) => console.log(m),
+        });
+      }
+    } catch (e) { console.error('[control] tmux 이전 실패:', e.message); }
     try {
       const n = await require('./terminal-manifest').restoreIfNeeded();
       if (n) console.log(`[control] 재부팅 복원 — 터미널 ${n}개 되살림(매니페스트)`);
     } catch (e) { console.error('[control] 터미널 복원 실패:', e.message); }
-    // macOS: 터미널이 하나도 없어도 tmux 서버를 launchd 로 미리 세운다(tmux-launchd.js). PC 앱은 터미널을
-    //  Rust(tmux.rs)로 직접 만들기도 해서, 서버가 없을 때 그쪽이 먼저 만들면 서버가 앱 코얼리션에 들어가
-    //  ⌘Q 뒤에도 Dock 에 "백그라운드에서 실행 중" 이 남는다.
-    try { if (!require('./term-backend').isHostBackend()) await require('./pty').ensureTmuxServer(); } catch (_) { /* 종전 경로로 */ }
+    if (migrated) {
+      require('./tmux-launchd').finishMigration(require('./pty').runTmux, migrated.plan)
+        .then((n) => console.log(`[control] tmux 이전 완료 — 대화 ${n}개 이어 붙임`))
+        .catch((e) => console.error('[control] 대화 이어 붙이기 실패:', e.message));
+    }
     // PC 앱(같은 기기) v3 터미널 루프백 리스너 — 원격과 같은 와이어, 릴레이 왕복 없이.
     try { require('./terminal-local').start(); } catch (e) { console.error('[control] 로컬 터미널 리스너 시작 실패:', e.message); }
     // ⚠ LAN 직결 리스너는 **여기서 열지 않는다.** 데몬의 불변식은 "인바운드 포트 0" 이고,
