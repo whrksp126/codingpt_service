@@ -360,7 +360,10 @@ export function createIssueEditor(o = {}) {
     extensions: exts,
     content: String(o.value || ""),
     contentType: "markdown",
-    editorProps: { attributes: { class: "re-doc", spellcheck: "false", autocapitalize: mobile ? "sentences" : "off" } },
+    //  writingsuggestions=false — macOS/iOS 인라인 예측(커서 뒤 흐린 회색 "ing" 같은 완성 제안)을 끈다. 그 제안은 WebKit 이
+    //   조합(marked text)처럼 DOM 에 끼워 넣어 ProseMirror 의 DOM 관찰과 어긋나고, 붙여넣기로 구조가 바뀐 뒤엔 몇 글자 뒤
+    //   입력이 더 안 먹었다(2026-11-10 신고). 자동 고침도 같은 경로라 PC 에선 끈다.
+    editorProps: { attributes: { class: "re-doc", spellcheck: "false", writingsuggestions: "false", autocorrect: mobile ? "on" : "off", autocapitalize: mobile ? "sentences" : "off" } },
     onUpdate: () => {
       el.dispatchEvent(new Event("input", { bubbles: false }));
       if (o.onChange) o.onChange(editor.getMarkdown().replace(/\s+$/, ""));

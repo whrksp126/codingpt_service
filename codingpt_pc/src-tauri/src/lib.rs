@@ -6,6 +6,7 @@
 
 mod bridge;
 mod cptsock;
+mod dropstage;
 mod fsapi;
 mod power;
 mod preview;
@@ -1233,7 +1234,14 @@ pub fn run() {
                             serde_json::json!({ "kind": "over", "x": position.x, "y": position.y })
                         }
                         D::Drop { paths, position } => {
-                            serde_json::json!({ "kind": "drop", "paths": paths, "x": position.x, "y": position.y })
+                            let paths: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+                            let (x, y) = (position.x, position.y);
+                            let app = window.app_handle().clone();
+                            std::thread::spawn(move || {
+                                let paths = dropstage::stage(paths);
+                                let _ = app.emit("cpt-drag", serde_json::json!({ "kind": "drop", "paths": paths, "x": x, "y": y }));
+                            });
+                            return;
                         }
                         _ => serde_json::json!({ "kind": "leave" }), // Leave + non_exhaustive 미래 변형
                     };

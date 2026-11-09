@@ -380,7 +380,9 @@ unsafe extern "C-unwind" fn dd_prepare(_this: *mut objc2::runtime::AnyObject, _c
 #[cfg(target_os = "macos")]
 unsafe extern "C-unwind" fn dd_perform(this: *mut objc2::runtime::AnyObject, _cmd: objc2::runtime::Sel, sender: *mut objc2::runtime::AnyObject) -> bool {
     let (x, y) = drag_xy(this, sender);
-    emit_cpt_drag("drop", x, y, drag_paths(sender));
+    let paths = drag_paths(sender);
+    // TCC 보호 위치 파일은 복사본 경로로(crate::dropstage 주석). 복사가 메인 스레드를 막지 않게 별 스레드.
+    std::thread::spawn(move || emit_cpt_drag("drop", x, y, crate::dropstage::stage(paths)));
     true
 }
 
