@@ -348,6 +348,7 @@ function makePreviewBar({ getId, getHost, getCtx, initialUrl, initialTheme, onNa
   input.placeholder = i18n.t('URL 또는 검색어 (예: localhost:3000 · 날씨)');
   // macOS 자동수정/자동대문자 제안 풍선이 추천 드롭다운 위에 겹치는 것 방지.
   input.setAttribute("autocorrect", "off");
+  input.setAttribute("writingsuggestions", "false"); // macOS 인라인 예측 끔(lib.rs disable_inline_predictions 와 이중)
   input.setAttribute("autocapitalize", "off");
   input.setAttribute("spellcheck", "false");
   input.setAttribute("autocomplete", "off");

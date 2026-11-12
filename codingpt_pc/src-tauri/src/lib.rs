@@ -932,7 +932,27 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// macOS 인라인 예측(입력 중 커서 뒤에 뜨는 흐린 회색 완성 글자 — "ing" 등)을 **이 앱에서만** 끈다.
+///  WKWebView 는 이 제안을 조합(marked text)처럼 끼워 넣는데, 터미널 입력(textarea 델타)과 Tasks 편집기(ProseMirror)가
+///  그걸 실제 글자로 읽어 영어 3~5글자째부터 입력이 깨졌다(2026-11-12 신고 — 터미널·이슈 편집기 둘 다).
+///  WebKit 은 NSSpellChecker.isAutomaticInlineCompletionEnabled 를 따르고, 그 값은 이 키를 읽는다 —
+///  앱 도메인에 false 를 쓰면 둘 다 false 가 됨을 실측(전역 설정은 그대로, 다른 앱 영향 없음).
+fn disable_inline_predictions() {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::runtime::AnyObject;
+        use objc2::{class, msg_send};
+        let ud: *mut AnyObject = msg_send![class!(NSUserDefaults), standardUserDefaults];
+        if ud.is_null() {
+            return;
+        }
+        let key = objc2_foundation::NSString::from_str("NSAutomaticInlinePredictionEnabled");
+        let _: () = msg_send![ud, setBool: false, forKey: &*key];
+    }
+}
+
 pub fn run() {
+    disable_inline_predictions();
     let mut builder = tauri::Builder::default();
 
     // 단일 인스턴스 + 딥링크(데스크톱): 두 번째 실행/URL 오픈을 기존 인스턴스로 라우팅.
