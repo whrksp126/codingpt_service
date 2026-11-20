@@ -17,6 +17,8 @@ router.post('/pair/claim', daemonController.claimPairCode); // 무인증 — 코
 router.post('/pair/grant', authMiddleware, daemonController.pairGrant); // 승인 직후 앱이 PC 공개키로 봉인한 MK 업로드(추가 탭 0)
 // accountAuth(JWT|deviceToken): PC 앱도 runners[].caps(task.v1 등)를 읽어야 한다(Agent Tasks §2.3 hostCaps).
 //  getStatus 는 req.user.id 만 쓴다 — accountAuth 가 두 인증 모두에서 채운다(JWT 경로는 종전과 동일).
+// 알림 채널 — PC 앱(back_api 는 /api/daemon/* 만 연다)용 같은 라우터. 앱(JWT)은 /api/channels.
+router.use('/channels', require('./channelRoutes'));
 router.get('/status', accountAuth, daemonController.getStatus);
 // PC 데스크톱 GUI — deviceToken 인증(핸들러 내부). 사이드바 워크스페이스 목록 + 클라우드 터미널 토큰.
 router.get('/me', daemonController.daemonMe); // deviceToken 인증 — PC GUI 계정 표시(웹 로그인 후)

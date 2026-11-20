@@ -1,12 +1,26 @@
 ---
 name: codingpt
-description: 사용자 PC 의 에이전트(CodingPT)에게 코드 수정·데이터 고도화 같은 일을 맡기고 답을 받는다. "CodingPT 로", "PC 에이전트에게 시켜", "앱이 스스로 고치게", 서비스 안에서 에이전트 작업을 실시간으로 요청하는 기능을 만들 때 쓴다. 세션 만들기·이어 가기·worktree·승인 처리·서비스 연동 코드 작성을 다룬다.
+description: CodingPT 연동 — (1) 서비스의 장애·버그·이벤트를 개발자의 CodingPT 앱(폰)으로 알림 보내기("문제 생기면 CodingPT 로 알려 줘", "에러 알림", "서버 죽으면 알림", 웹훅·알림 채널) (2) 사용자 PC 의 에이전트에게 코드 수정 같은 일을 맡기고 답 받기("CodingPT 로", "PC 에이전트에게 시켜", "앱이 스스로 고치게"). 알림 채널·웹훅·dedupeKey, 세션 만들기·이어 가기·worktree·승인 처리·서비스 연동 코드 작성을 다룬다.
 ---
 
 # CodingPT 연동
 
 이 프로젝트에서 사용자 PC 의 에이전트를 세션 단위로 부른다. 에이전트는 PC 의 실제 폴더에서 일한다.
 전체 계약: https://codingpt-back.ghmate.com/api/v1/docs (모르는 필드는 추측하지 말고 이 문서를 읽는다)
+
+## 서비스 문제를 개발자 폰으로 알리기(알림 채널)
+
+"문제 생기면 CodingPT 로 알려 줘" 류의 요청이면 이 문서를 먼저 읽는다: https://codingpt-back.ghmate.com/api/v1/docs/channels
+
+```sh
+node codingpt.mjs channel "<프로젝트> 운영 알림"     # 채널 만들기/찾기 → webhookUrl (연결된 프로젝트면)
+curl "$CODINGPT_WEBHOOK_URL"                        # 연결 확인
+node codingpt.mjs notify "테스트 알림" --level info   # CODINGPT_WEBHOOK_URL 로 보내기
+```
+
+- 웹훅 URL 은 비밀이다 — 서버 환경변수 `CODINGPT_WEBHOOK_URL` 에만 둔다. 커밋·로그·브라우저 번들 금지.
+- 보내는 코드는 실패를 삼키고(타임아웃 3초) 서비스를 기다리게 하지 않는다. 반복 오류는 `dedupeKey` 로 묶는다.
+- 본문에는 원인 찾기에 필요한 것(오류·스택 위쪽·경로·버전·로그 링크)을, 비밀값·개인정보는 빼고 넣는다 — 개발자가 이 알림을 그대로 AI 에게 넘겨 고치게 한다.
 
 ## 준비
 

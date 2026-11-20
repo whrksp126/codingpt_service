@@ -8,6 +8,9 @@
 - 응답은 JSON. 실패는 `{ "success": false, "message": "...", "detail": { "code": "..." } }` — **`detail.code` 로 분기한다.**
 - 현재 지원 에이전트: `claude`.
 
+> **서비스의 장애·버그를 개발자 폰(CodingPT 앱)으로 알리려면** → 알림 채널 문서: `https://codingpt-back.ghmate.com/api/v1/docs/channels`
+> (웹훅 URL 하나로 보낸다. 키 불필요. 받은 알림에서 바로 PC 의 AI 에게 고치라고 시킬 수 있다.)
+
 ## 꼭 알아야 할 규칙
 
 - **키는 PC 한 대에 묶인다.** 그 PC 가 꺼져 있으면 `503 DAEMON_OFFLINE`.
@@ -46,6 +49,10 @@ POST /sessions → GET /sessions/:id/events?wait=25 (반복)
 | POST | `/sessions/:id/interrupt` | 지금 턴 중단 |
 | POST | `/sessions/:id/stop` | 프로세스만 내림(대화는 남음) |
 | DELETE | `/sessions/:id` | 세션 삭제. worktree·브랜치는 남고 응답에 경로가 온다 |
+| GET | `/channels` | 알림 채널 목록(웹훅 URL 포함) — [채널 문서](/api/v1/docs/channels) |
+| POST | `/channels` | 알림 채널 만들기 `{ name, cwd? }`(같은 이름이면 기존 것) |
+| POST | `/channels/:id/messages` | 알림 보내기 `{ title?, text?, level?, source?, url?, fields?, dedupeKey? }` |
+| POST | `/hooks/:token` | 웹훅으로 알림 보내기(인증 헤더 없음 — URL 이 곧 권한) |
 
 ### 세션 만들기
 

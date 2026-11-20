@@ -8,7 +8,13 @@ const { successResponse, errorResponse } = require('../utils/response');
 // POST /api/notifications — 알림 발행(클라이언트 발행 경로. 에이전트 알림은 릴레이가 내부 생성).
 async function create(req, res) {
   try {
-    const notification = await notificationService.createNotification(req.account.userId, req.body || {});
+    const b = req.body || {};
+    //  알림 채널이 연 AI 대화의 완료·오류는 채널이 답과 함께 따로 알린다 — 같은 일로 폰이 두 번 울리지 않게 여기서 거른다.
+    if (b.source === 'agent' && typeof b.kind === 'string' && /^conv_/.test(b.kind) && b.threadId
+      && await require('../services/channelService').ownsThread(b.threadId).catch(() => false)) {
+      return successResponse(res, { suppressed: true, reason: 'channel' });
+    }
+    const notification = await notificationService.createNotification(req.account.userId, b);
     return successResponse(res, notification);
   } catch (e) {
     return errorResponse(res, e, e.statusCode || 500);

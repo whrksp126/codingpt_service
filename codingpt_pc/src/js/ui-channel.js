@@ -260,6 +260,10 @@ async function connect() {
         // 새 기기 열쇠 승인(기능2) — 요청 등장/해소. 구 클라이언트는 unknown type 이라 무시 = 안전.
         applyDeviceApprovalEvent(msg.event);
         break;
+      case "channel_event":
+        // 알림 채널 — 새 메시지·채널 변경·AI 진행(라이브 힌트, 정본은 REST). 구 클라는 모르는 type 이라 무시.
+        import("./channels-view.js").then((m) => m.applyChannelEvent(msg.event)).catch(() => {});
+        break;
       case "device_updated":
         // 별칭 변경은 서버 목록이 정본 — 다른 기기에서 바뀐 이름도 즉시 다시 읽는다.
         S.loadDevices();

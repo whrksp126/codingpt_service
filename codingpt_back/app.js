@@ -176,6 +176,11 @@ const startServer = async () => {
       console.log(`🌍 환경: ${process.env.NODE_ENV || 'local'}`);
     });
 
+    // 알림 채널 — 재시작 전에 일하던 AI 대화를 다시 따라간다(답·승인 요청을 채널로 옮기기)
+    require('./services/channelService').resumeAll()
+      .then((n) => { if (n) console.log(`[channel] AI 진행 ${n}개 다시 따라감`); })
+      .catch((e) => console.warn('[channel] resume 실패:', e.message));
+
     // 구독 갱신 / 크레딧 만료 스위퍼 (cron 없이 setInterval)
     try {
       require('./services/billingSweeper').start();

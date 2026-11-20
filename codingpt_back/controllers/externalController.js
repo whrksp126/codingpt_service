@@ -22,6 +22,7 @@ const DOC_FILES = {
   docs: ['API.md', 'text/markdown; charset=utf-8'],
   skill: ['SKILL.md', 'text/markdown; charset=utf-8'],
   sdk: ['codingpt.mjs', 'text/javascript; charset=utf-8'],
+  channels: ['CHANNELS.md', 'text/markdown; charset=utf-8'],
 };
 
 function sha256(s) { return crypto.createHash('sha256').update(String(s)).digest('hex'); }

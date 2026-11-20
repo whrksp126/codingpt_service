@@ -926,6 +926,15 @@ function fanoutAppearance(userId, appearance) {
   if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
 }
 
+// 알림 채널 팬아웃 — {type:'channel_event', event:{kind:'message'|'channel'|'channel_removed'|'agent', …}}.
+//  라이브 전용(버퍼 없음) — 정본은 GET /api/channels/:id/messages. 모르는 type 은 구 클라가 무시한다.
+function fanoutChannelEvent(userId, event) {
+  const payload = { type: 'channel_event', event };
+  broadcastEvent(userId, payload);
+  const set = agentWsClients.get(String(userId));
+  if (set) { const frame = JSON.stringify(payload); for (const ws of set) { try { if (ws.readyState === WebSocket.OPEN) ws.send(frame); } catch (_) { /* noop */ } } }
+}
+
 // 기기 별칭 변경 — 각 클라이언트는 이 힌트를 받으면 GET /devices 정본을 다시 읽는다.
 function fanoutDeviceUpdated(userId, event) {
   const entry = userEntry(userId, false);
@@ -1983,6 +1992,7 @@ module.exports = {
   fanoutAccountDeleted,
   fanoutAppearance,
   fanoutDeviceUpdated,
+  fanoutChannelEvent,
   hasActiveMobileClient,
   presentClient,
   listUiClients,

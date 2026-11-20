@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- 알림 채널 장소 확인용 하네스(개발 전용) — Tauri 없이 브라우저에서 channels-view.js 를 그대로 띄운다.
+     back_api_async 를 로컬 back(http://localhost:5300)으로 그대로 보내고, channel_event 는 /api/daemon/agent/stream 에서 받는다.
+     실행: cd src && python3 -m http.server 8899 → http://localhost:8899/channels-harness.html#<로컬 JWT> -->
+<html lang="ko" data-theme="dark">
+<head><meta charset="utf-8"><title>알림 채널 하네스</title>
+<link rel="stylesheet" href="vendor/xterm/xterm.css"><link rel="stylesheet" href="styles.css">
+<style>body { margin: 0; height: 100vh; display: flex; background: var(--base); } .shell { width: 100vw; display: flex; } .main { flex: 1; display: flex; min-width: 0; height: 100vh; }</style></head>
+<body>
+<div class="shell"><main class="main"><section id="channelsView" class="channels-view" hidden></section></main></div>
+<script src="vendor/xterm/xterm.js"></script>
+<script src="vendor/xterm/xterm-addon-fit.js"></script>
+<script src="vendor/xterm/xterm-addon-search.js"></script>
+<script src="vendor/xterm/xterm-addon-webgl.js"></script>
+<script src="vendor/xterm/xterm-addon-canvas.js"></script>
+<script type="module">
+  const BACK = 'http://localhost:5300';
+  const JWT = decodeURIComponent(location.hash.slice(1));
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        if (cmd === 'back_api_async' || cmd === 'back_api') {
+          const r = await fetch(BACK + args.path, { method: args.method, headers: { Authorization: 'Bearer ' + JWT, 'content-type': 'application/json' }, body: args.body ? JSON.stringify(args.body) : undefined });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`HTTP ${r.status}${j.detail && j.detail.code ? ' ' + j.detail.code : ''}: ${j.message || ''}`);
+          return j;
+        }
+        if (cmd === 'open_external') { window.open(args.url, '_blank'); return null; }
+        return {};
+      },
+    },
+    event: { listen: async () => () => {} },
+  };
+  const S = await import('./js/state.js');
+  const { bootLang } = await import('./js/theme.js');
+  bootLang();
+  const dev = await (await fetch(BACK + '/api/daemon/devices', { headers: { Authorization: 'Bearer ' + JWT } })).json().catch(() => ({}));
+  S.state.devices = (dev.devices || dev.data?.devices || [{ id: 9001, name: '테스트 맥북', role: 'host', online: true, runnerKind: 'local' }]);
+  S.state.currentDeviceId = S.state.devices[0]?.id;
+  S.state.workspaces = [{ id: 'w1', name: 'shop', localPath: '/Users/me/shop', hostDeviceId: 9001, hostOnline: true }];
+  const cv = await import('./js/channels-view.js');
+  cv.mountChannelsView(document.getElementById('channelsView'));
+  S.subscribe?.(() => cv.updateChannelsView());
+  window.__cv = cv;
+  cv.openChannels();
+  setInterval(() => cv.updateChannelsView(), 500);
+  const ws = new WebSocket(BACK.replace('http', 'ws') + '/api/daemon/agent/stream?token=' + encodeURIComponent(JWT));
+  ws.onmessage = (e) => { try { const m = JSON.parse(e.data); if (m.type === 'channel_event') cv.applyChannelEvent(m.event); } catch (_) {} };
+</script>
+</body></html>

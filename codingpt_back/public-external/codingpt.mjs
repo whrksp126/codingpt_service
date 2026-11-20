@@ -26,6 +26,25 @@ function projectConfig() {
   return {};
 }
 
+/**
+ * 알림 채널로 보낸다(키 불필요) — 웹훅 URL: 인자 → CODINGPT_WEBHOOK_URL.
+ *  payload = 문자열 또는 { title?, text?, level?, source?, url?, fields?, dedupeKey? }. 문서: /api/v1/docs/channels
+ *  기본은 실패해도 던지지 않는다(알림이 서비스를 멈추게 하지 않게). { throwOnError:true } 면 던진다.
+ */
+export async function notify(payload, { webhookUrl = process.env.CODINGPT_WEBHOOK_URL, timeoutMs = 3000, throwOnError = false } = {}) {
+  try {
+    if (!webhookUrl) throw new CodingPTError('웹훅 URL 이 없습니다. CODINGPT_WEBHOOK_URL 을 설정하세요', 'NO_WEBHOOK');
+    const body = typeof payload === 'string' ? { text: payload } : payload;
+    const r = await fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new CodingPTError(j.message || `HTTP ${r.status}`, j.detail?.code || 'HTTP_ERROR', r.status);
+    return j;
+  } catch (e) {
+    if (throwOnError) throw e;
+    return { ok: false, error: e.code || 'ERROR', message: e.message };
+  }
+}
+
 export class CodingPTError extends Error {
   constructor(message, code, status) { super(message); this.name = 'CodingPTError'; this.code = code; this.status = status; }
 }
@@ -66,6 +85,13 @@ export class CodingPT {
   interrupt(id) { return this._req('POST', `/sessions/${id}/interrupt`); }
   stop(id) { return this._req('POST', `/sessions/${id}/stop`); }
   deleteSession(id) { return this._req('DELETE', `/sessions/${id}`); }
+
+  // ── 알림 채널(문서: /api/v1/docs/channels) ──
+  async channels() { return (await this._req('GET', '/channels')).channels; }
+  /** { name, description?, cwd? } — 같은 이름이 있으면 그것을 돌려준다. → { id, name, webhookUrl, cwd, created } */
+  async ensureChannel(o) { const r = await this._req('POST', '/channels', o); return { ...r.channel, created: r.created }; }
+  /** 채널 id 로 키를 써서 보낸다. 웹훅 URL 이 있으면 notify() 가 더 간단하다. */
+  sendToChannel(id, payload) { return this._req('POST', `/channels/${id}/messages`, typeof payload === 'string' ? { text: payload } : payload); }
 
   /**
    * 이벤트를 실시간으로 받는다. 일이 멈추면(입력 대기·승인 대기·종료) { type:'settled', session, pending, cursor } 로 끝난다.
@@ -128,6 +154,12 @@ const TOOLS = [
     { id: str, requestId: str, decision: str, always: { type: 'boolean' }, message: str, answers: { type: 'object' } }, ['id', 'requestId', 'decision'],
     (c, a) => c.respond(a.id, a.requestId, { decision: a.decision, always: a.always, message: a.message, answers: a.answers })],
   ['codingpt_session_interrupt', '지금 턴을 중단한다', { id: str }, ['id'], (c, a) => c.interrupt(a.id)],
+  ['codingpt_channel_ensure', 'CodingPT 앱의 알림 채널을 만들거나(같은 이름이면 기존 것) 찾아 웹훅 URL 을 돌려준다. 서비스가 문제를 개발자 폰으로 알리게 할 때 쓴다',
+    { name: str, description: str, cwd: str }, ['name'], (c, a) => c.ensureChannel(a)],
+  ['codingpt_channels', '알림 채널 목록(웹훅 URL 포함)', {}, [], (c) => c.channels()],
+  ['codingpt_channel_send', '알림 채널로 알림 한 건을 보낸다. level=info|success|warning|error|critical',
+    { id: { type: 'number' }, title: str, text: str, level: str, source: str, url: str, dedupeKey: str }, ['id'],
+    (c, a) => c.sendToChannel(a.id, { title: a.title, text: a.text, level: a.level, source: a.source, url: a.url, dedupeKey: a.dedupeKey })],
   ['codingpt_session_delete', '세션을 지운다. worktree·브랜치는 남는다', { id: str }, ['id'], (c, a) => c.deleteSession(a.id)],
 ];
 
@@ -172,6 +204,10 @@ const HELP = `codingpt — PC 의 에이전트를 다른 프로젝트에서 부�
   show <세션> [--after n]                       이벤트 보기
   allow <세션> <요청> | deny <세션> <요청> ["이유"] | answer <세션> <요청> '<JSON>'
   interrupt <세션> · stop <세션> · delete <세션>
+  channels                                     알림 채널 목록(웹훅 URL)
+  channel "<이름>" [--cwd 폴더]                 알림 채널 만들기(같은 이름이면 기존 것)
+  notify "<본문>" [--title t] [--level error] [--source s] [--url u] [--dedupe k] [--webhook URL | --channel id]
+                                               알림 보내기(기본 CODINGPT_WEBHOOK_URL — 키 불필요)
   mcp                                          MCP 서버(stdio)
 `;
 
@@ -184,8 +220,13 @@ async function cli(argv) {
   const [cmd, a, b, c] = pos;
   if (!cmd || cmd === 'help') { process.stdout.write(HELP); return; }
   if (cmd === 'mcp') return mcp();
-  const cp = new CodingPT();
   const print = (o) => process.stdout.write(JSON.stringify(o, null, 2) + '\n');
+  if (cmd === 'notify' && !flags.channel) {
+    const r = await notify({ text: a, title: flags.title, level: flags.level, source: flags.source, url: flags.url, dedupeKey: flags.dedupe },
+      { webhookUrl: flags.webhook || process.env.CODINGPT_WEBHOOK_URL, throwOnError: true });
+    return print(r);
+  }
+  const cp = new CodingPT();
   const finish = async (id, after) => {
     const r = await cp.wait(id, { after });
     print({ id, state: r.session.state, pending: r.pending, text: r.text });
@@ -211,6 +252,9 @@ async function cli(argv) {
     case 'interrupt': return print(await cp.interrupt(a));
     case 'stop': return print(await cp.stop(a));
     case 'delete': return print(await cp.deleteSession(a));
+    case 'channels': return print(await cp.channels());
+    case 'channel': return print(await cp.ensureChannel({ name: a, cwd: flags.cwd, description: flags.description }));
+    case 'notify': return print(await cp.sendToChannel(Number(flags.channel), { text: a, title: flags.title, level: flags.level, source: flags.source, url: flags.url, dedupeKey: flags.dedupe }));
     default: process.stdout.write(HELP); process.exitCode = 1;
   }
 }

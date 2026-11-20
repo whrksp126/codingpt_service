@@ -18,6 +18,7 @@ import { tt } from "./text/tasks.js";
 import { runsForCwd, noteFor, visibleWorkers, attentionCount, sessionTree, shortAgo, inWorktree, worktreeGroups } from "./orch-model.js";
 import { agentGlyphHtml } from "./agent-glyph.js";
 import { openIssues, issuesOpenCount, issuesProviders } from "./issues-view.js";
+import { openChannels, channelsUnread } from "./channels-view.js";
 import { orchSnapshot, openOrchSheet, openWorkerTerminal } from "./orch-view.js";
 import { ot, wsStatusText } from "./text/orch.js";
 import * as i18n from './i18n/index.js';
@@ -117,6 +118,13 @@ export function jumpToNotification(n) {
   if (ptgt) {
     openTasksDashboard(ptgt);
     closeNotif();
+    return;
+  }
+  // 알림 채널(channel_alert·channel_request·channel_agent) — 목적지는 그 채널 방. 채널 id 는 sessionId 'channel:<id>'.
+  if (n && typeof n.kind === "string" && n.kind.startsWith("channel_")) {
+    const m = /^channel:(\d+)$/.exec(String(n.sessionId || ""));
+    closeNotif();
+    openChannels(m ? Number(m[1]) : null);
     return;
   }
   // 채팅 v2 알림(conv_request·conv_done·conv_error) — threadId 가 있으면 터미널이 아니라 **그 대화의 채팅 탭**이다
@@ -306,6 +314,9 @@ export function updateSidebar() {
     // 이 PC 에 만들어 둔 에이전트 PC(VM) — PC 의 하위 항목(2026-10-04 QA: 워크스페이스 아래 작업처럼). 누르면 그 화면을 연다.
     if (isLocalHostId(state, d.id)) { for (const os of VM_KINDS) if (vmPhase[os]) list.appendChild(vmRow(os)); refreshVms(); }
   }
+
+  // ── 알림 채널 — PC 와 무관한 계정 단위 장소(다른 서비스가 보낸 알림 + 그 방에서 AI 대응).
+  list.appendChild(channelsRow());
 
   // ── ①-1 고른 PC 의 `진행 현황` — 진행 현황은 **PC 안의 장소**다(2026-09-29 사용자 확정: 에이전트는
   //  그 PC 에서 돈다). 예전엔 "내 PC" 위에서 모든 PC 를 합쳐 셌고, 누르면 켜고/끄는 버튼이었다.
@@ -528,6 +539,15 @@ function issuesRow() {
   row.innerHTML = `<span class="pc-ic">${icons.tasksList({ size: 15 })}</span><span class="pc-nm">Tasks</span>` +
     provs.map((p) => (icons[p] ? `<span class="is-prov" title="${escapeHtml(p)}">${icons[p]({ size: 13 })}</span>` : "")).join("") + (n ? `<span class="wsr-badge">${n}</span>` : "");
   row.addEventListener("click", () => { if (state.view !== "issues") openIssues(); });
+  return row;
+}
+/** 사이드바 `알림 채널 [n]` 행 — 배지 = 끄지 않은 채널의 미읽음 합. 토글이 아니다. */
+function channelsRow() {
+  const n = channelsUnread();
+  const row = document.createElement("button");
+  row.className = "pc-row channels-row" + (state.view === "channels" ? " active" : "");
+  row.innerHTML = `<span class="pc-ic">${icons.bell({ size: 15 })}</span><span class="pc-nm">${escapeHtml(i18n.t("알림 채널"))}</span>` + (n ? `<span class="wsr-badge">${n}</span>` : "");
+  row.addEventListener("click", () => { if (state.view !== "channels") openChannels(); });
   return row;
 }
 function openPcSettings(hid) {
