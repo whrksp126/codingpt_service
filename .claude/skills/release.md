@@ -127,9 +127,9 @@ python3 -c "b=open('base/assets/index.android.bundle','rb').read();t='새코드�
 
 **심사 감시 → 승인되면 출시**(양 스토어 모두 무인):
 
-제출 직후 `bash codingpt_service/scripts/store/auto-release.sh install <ios 버전> <android 버전>` 을 걸어 둔다 —
-launchd 가 10분마다 확인해 iOS 출시 대기면 `release --yes`, 둘 다 게시(또는 거절)되면 macOS 알림 후 스스로 내린다.
-세션을 닫아도·재부팅해도 계속된다. 로그 `~/Library/Logs/codingpt-auto-release.log`, 확인 `auto-release.sh status`.
+제출 직후 CodingPT 터미널 탭 하나에서 `bash codingpt_service/scripts/store/auto-release.sh watch <ios 버전> <android 버전>` 을
+돌려 둔다 — 10분마다 확인해 iOS 출시 대기면 `release --yes`, 둘 다 게시(또는 거절)되면 macOS 알림 후 끝난다.
+기록 `~/Library/Logs/codingpt-auto-release.log`.
 
 ```bash
 node codingpt_service/scripts/store/asc.mjs status   # PENDING_DEVELOPER_RELEASE 면 release --yes
