@@ -12,7 +12,7 @@
 //
 // 스위트(설계 §2.1): X25519 / HKDF-SHA256 / ChaCha20-Poly1305(IETF) / b64url no-pad
 //
-// 성능 메모: poly1305·x25519·ed25519 는 BigInt 구현이다(정확성 우선). RPC 봉투(수 KB)와 키 수립에는
+// 성능 메모: x25519·ed25519 는 BigInt 구현이다(정확성 우선). poly1305·chacha20 은 32비트 정수 구현(대용량 봉인용). RPC 봉투(수 KB)와 키 수립에는
 //  충분하나, PTY 스트림(kind=data 프레임 폭주)에 쓰기 전에 반드시 계측할 것 — 그래서 기본 scope=rpc.
 
 export const SUITE = 'cpt-e2ee/v1';
@@ -41,57 +41,76 @@ export function concat(...parts) {
   for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
+//  ★ 큰 값(첨부 조각 1MB+)이 이 길을 지난다 — 배열 push·문자 단위 += 는 Hermes 에서 초 단위로
+//   JS 스레드를 막아 입력칸 타이핑이 사라졌다(2026-11-24). 미리 잡은 버퍼에 쓰고, ASCII 는 바로 복사한다.
 export function utf8(s) {
   const str = String(s);
-  const out = [];
+  const out = new Uint8Array(str.length * 3);
+  let o = 0;
   for (let i = 0; i < str.length; i++) {
-    let c = str.codePointAt(i);
-    if (c > 0xffff) i++;
-    if (c < 0x80) out.push(c);
-    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
-    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    let c = str.charCodeAt(i);
+    if (c < 0x80) { out[o++] = c; continue; }
+    if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+      const d = str.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (d - 0xdc00); i++; }
+    }
+    if (c < 0x800) { out[o++] = 0xc0 | (c >> 6); out[o++] = 0x80 | (c & 63); }
+    else if (c < 0x10000) { out[o++] = 0xe0 | (c >> 12); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
+    else { out[o++] = 0xf0 | (c >> 18); out[o++] = 0x80 | ((c >> 12) & 63); out[o++] = 0x80 | ((c >> 6) & 63); out[o++] = 0x80 | (c & 63); }
   }
-  return new Uint8Array(out);
+  return out.slice(0, o);
 }
+const STR_CHUNK = 8192;   // String.fromCharCode.apply 인자 상한(엔진 스택) 안쪽
 export function fromUtf8(bytes) {
   const b = u8(bytes);
-  let s = '';
+  const parts = [];
+  const codes = [];
   for (let i = 0; i < b.length;) {
     const c = b[i];
-    if (c < 0x80) { s += String.fromCharCode(c); i += 1; }
-    else if (c < 0xe0) { s += String.fromCharCode(((c & 31) << 6) | (b[i + 1] & 63)); i += 2; }
-    else if (c < 0xf0) { s += String.fromCharCode(((c & 15) << 12) | ((b[i + 1] & 63) << 6) | (b[i + 2] & 63)); i += 3; }
-    else {
-      const cp = ((c & 7) << 18) | ((b[i + 1] & 63) << 12) | ((b[i + 2] & 63) << 6) | (b[i + 3] & 63);
-      s += String.fromCodePoint(cp); i += 4;
-    }
+    let cp;
+    if (c < 0x80) { cp = c; i += 1; }
+    else if (c < 0xe0) { cp = ((c & 31) << 6) | (b[i + 1] & 63); i += 2; }
+    else if (c < 0xf0) { cp = ((c & 15) << 12) | ((b[i + 1] & 63) << 6) | (b[i + 2] & 63); i += 3; }
+    else { cp = ((c & 7) << 18) | ((b[i + 1] & 63) << 12) | ((b[i + 2] & 63) << 6) | (b[i + 3] & 63); i += 4; }
+    if (cp > 0xffff) {   // 서로게이트 쌍 — fromCodePoint 와 같은 결과
+      cp -= 0x10000;
+      codes.push(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff));
+    } else codes.push(cp);
+    if (codes.length >= STR_CHUNK) { parts.push(String.fromCharCode.apply(null, codes)); codes.length = 0; }
   }
-  return s;
+  if (codes.length) parts.push(String.fromCharCode.apply(null, codes));
+  return parts.join('');
 }
 
 const B64_A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+const B64_C = Array.from(B64_A, (ch) => ch.charCodeAt(0));
+const B64_R = (() => { const r = new Int16Array(128).fill(-1); for (let i = 0; i < 64; i++) r[B64_A.charCodeAt(i)] = i; return r; })();
 /** base64url no-pad 인코딩 — 와이어의 모든 바이트 필드가 이 형식(설계 §2.1). */
 export function b64uEnc(bytes) {
   const b = u8(bytes);
-  let s = '';
+  const parts = [];
+  const codes = new Array(STR_CHUNK);
+  let n = 0;
   for (let i = 0; i < b.length; i += 3) {
-    const n = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);
+    const v = (b[i] << 16) | ((b[i + 1] || 0) << 8) | (b[i + 2] || 0);
     const rem = b.length - i;
-    s += B64_A[(n >> 18) & 63] + B64_A[(n >> 12) & 63];
-    if (rem > 1) s += B64_A[(n >> 6) & 63];
-    if (rem > 2) s += B64_A[n & 63];
+    codes[n++] = B64_C[(v >> 18) & 63]; codes[n++] = B64_C[(v >> 12) & 63];
+    if (rem > 1) codes[n++] = B64_C[(v >> 6) & 63];
+    if (rem > 2) codes[n++] = B64_C[v & 63];
+    if (n >= STR_CHUNK - 4) { parts.push(String.fromCharCode.apply(null, codes.slice(0, n))); n = 0; }
   }
-  return s;
+  if (n) parts.push(String.fromCharCode.apply(null, codes.slice(0, n)));
+  return parts.join('');
 }
 export function b64uDec(str) {
   const s = String(str || '').replace(/=+$/, '');
   const out = new Uint8Array(Math.floor((s.length * 6) / 8));
   let acc = 0, bits = 0, o = 0;
   for (let i = 0; i < s.length; i++) {
-    const v = B64_A.indexOf(s[i]);
+    const ch = s.charCodeAt(i);
+    const v = ch < 128 ? B64_R[ch] : -1;
     if (v < 0) throw new Error('b64u: 잘못된 문자');
-    acc = (acc << 6) | v; bits += 6;
+    acc = ((acc << 6) | v) & 0xffffff; bits += 6;
     if (bits >= 8) { bits -= 8; out[o++] = (acc >> bits) & 0xff; }
   }
   return out.subarray(0, o);
@@ -274,57 +293,453 @@ export function sha512(msg) {
 }
 
 // ── ChaCha20-Poly1305 (IETF, RFC 8439) ─────────────────────────
-function chachaBlock(key32, counter, nonce12, out64) {
-  const s = new Uint32Array(16);
-  s[0] = 0x61707865; s[1] = 0x3320646e; s[2] = 0x79622d32; s[3] = 0x6b206574;
-  const kdv = new DataView(key32.buffer, key32.byteOffset, 32);
-  for (let i = 0; i < 8; i++) s[4 + i] = kdv.getUint32(i * 4, true);
-  s[12] = counter >>> 0;
-  const ndv = new DataView(nonce12.buffer, nonce12.byteOffset, 12);
-  s[13] = ndv.getUint32(0, true); s[14] = ndv.getUint32(4, true); s[15] = ndv.getUint32(8, true);
-  const x = new Uint32Array(s);
-  const QR = (a, b, c, d) => {
-    x[a] = (x[a] + x[b]) >>> 0; x[d] = rotr32(x[d] ^ x[a], 16);
-    x[c] = (x[c] + x[d]) >>> 0; x[b] = rotr32(x[b] ^ x[c], 20);
-    x[a] = (x[a] + x[b]) >>> 0; x[d] = rotr32(x[d] ^ x[a], 24);
-    x[c] = (x[c] + x[d]) >>> 0; x[b] = rotr32(x[b] ^ x[c], 25);
-  };
-  for (let i = 0; i < 10; i++) {
-    QR(0, 4, 8, 12); QR(1, 5, 9, 13); QR(2, 6, 10, 14); QR(3, 7, 11, 15);
-    QR(0, 5, 10, 15); QR(1, 6, 11, 12); QR(2, 7, 8, 13); QR(3, 4, 9, 14);
+//  ★ 블록마다 배열·DataView 를 만들던 구현은 1MB 에 수백 ms 였다 — 키/논스 단어를 한 번만 읽고
+//   상태 배열을 재사용한다(출력은 RFC 8439 그대로, 회귀 테스트가 옛 구현과 바이트 대조).
+function chachaWords(key32, nonce12) {
+  const w = new Uint32Array(16);
+  w[0] = 0x61707865; w[1] = 0x3320646e; w[2] = 0x79622d32; w[3] = 0x6b206574;
+  for (let i = 0; i < 8; i++) {
+    const j = i * 4;
+    w[4 + i] = (key32[j] | (key32[j + 1] << 8) | (key32[j + 2] << 16) | (key32[j + 3] << 24)) >>> 0;
   }
-  const odv = new DataView(out64.buffer, out64.byteOffset, 64);
-  for (let i = 0; i < 16; i++) odv.setUint32(i * 4, (x[i] + s[i]) >>> 0, true);
+  for (let i = 0; i < 3; i++) {
+    const j = i * 4;
+    w[13 + i] = (nonce12[j] | (nonce12[j + 1] << 8) | (nonce12[j + 2] << 16) | (nonce12[j + 3] << 24)) >>> 0;
+  }
+  return w;
+}
+//  인터프리터(Hermes)에서는 배열 인덱싱이 비싸다 — 상태를 지역변수 16개로 들고 한 블록을 돈다.
+function chachaCore(s, x) {
+  let x0 = s[0], x1 = s[1], x2 = s[2], x3 = s[3], x4 = s[4], x5 = s[5], x6 = s[6], x7 = s[7], x8 = s[8], x9 = s[9], x10 = s[10], x11 = s[11], x12 = s[12], x13 = s[13], x14 = s[14], x15 = s[15], t;
+  for (let r = 0; r < 10; r++) {
+      x0 = (x0 + x4) | 0; t = x12 ^ x0; x12 = (t << 16) | (t >>> 16);
+      x8 = (x8 + x12) | 0; t = x4 ^ x8; x4 = (t << 12) | (t >>> 20);
+      x0 = (x0 + x4) | 0; t = x12 ^ x0; x12 = (t << 8) | (t >>> 24);
+      x8 = (x8 + x12) | 0; t = x4 ^ x8; x4 = (t << 7) | (t >>> 25);
+      x1 = (x1 + x5) | 0; t = x13 ^ x1; x13 = (t << 16) | (t >>> 16);
+      x9 = (x9 + x13) | 0; t = x5 ^ x9; x5 = (t << 12) | (t >>> 20);
+      x1 = (x1 + x5) | 0; t = x13 ^ x1; x13 = (t << 8) | (t >>> 24);
+      x9 = (x9 + x13) | 0; t = x5 ^ x9; x5 = (t << 7) | (t >>> 25);
+      x2 = (x2 + x6) | 0; t = x14 ^ x2; x14 = (t << 16) | (t >>> 16);
+      x10 = (x10 + x14) | 0; t = x6 ^ x10; x6 = (t << 12) | (t >>> 20);
+      x2 = (x2 + x6) | 0; t = x14 ^ x2; x14 = (t << 8) | (t >>> 24);
+      x10 = (x10 + x14) | 0; t = x6 ^ x10; x6 = (t << 7) | (t >>> 25);
+      x3 = (x3 + x7) | 0; t = x15 ^ x3; x15 = (t << 16) | (t >>> 16);
+      x11 = (x11 + x15) | 0; t = x7 ^ x11; x7 = (t << 12) | (t >>> 20);
+      x3 = (x3 + x7) | 0; t = x15 ^ x3; x15 = (t << 8) | (t >>> 24);
+      x11 = (x11 + x15) | 0; t = x7 ^ x11; x7 = (t << 7) | (t >>> 25);
+      x0 = (x0 + x5) | 0; t = x15 ^ x0; x15 = (t << 16) | (t >>> 16);
+      x10 = (x10 + x15) | 0; t = x5 ^ x10; x5 = (t << 12) | (t >>> 20);
+      x0 = (x0 + x5) | 0; t = x15 ^ x0; x15 = (t << 8) | (t >>> 24);
+      x10 = (x10 + x15) | 0; t = x5 ^ x10; x5 = (t << 7) | (t >>> 25);
+      x1 = (x1 + x6) | 0; t = x12 ^ x1; x12 = (t << 16) | (t >>> 16);
+      x11 = (x11 + x12) | 0; t = x6 ^ x11; x6 = (t << 12) | (t >>> 20);
+      x1 = (x1 + x6) | 0; t = x12 ^ x1; x12 = (t << 8) | (t >>> 24);
+      x11 = (x11 + x12) | 0; t = x6 ^ x11; x6 = (t << 7) | (t >>> 25);
+      x2 = (x2 + x7) | 0; t = x13 ^ x2; x13 = (t << 16) | (t >>> 16);
+      x8 = (x8 + x13) | 0; t = x7 ^ x8; x7 = (t << 12) | (t >>> 20);
+      x2 = (x2 + x7) | 0; t = x13 ^ x2; x13 = (t << 8) | (t >>> 24);
+      x8 = (x8 + x13) | 0; t = x7 ^ x8; x7 = (t << 7) | (t >>> 25);
+      x3 = (x3 + x4) | 0; t = x14 ^ x3; x14 = (t << 16) | (t >>> 16);
+      x9 = (x9 + x14) | 0; t = x4 ^ x9; x4 = (t << 12) | (t >>> 20);
+      x3 = (x3 + x4) | 0; t = x14 ^ x3; x14 = (t << 8) | (t >>> 24);
+      x9 = (x9 + x14) | 0; t = x4 ^ x9; x4 = (t << 7) | (t >>> 25);
+  }
+  x[0] = (x0 + s[0]) >>> 0; x[1] = (x1 + s[1]) >>> 0; x[2] = (x2 + s[2]) >>> 0; x[3] = (x3 + s[3]) >>> 0; x[4] = (x4 + s[4]) >>> 0; x[5] = (x5 + s[5]) >>> 0; x[6] = (x6 + s[6]) >>> 0; x[7] = (x7 + s[7]) >>> 0; x[8] = (x8 + s[8]) >>> 0; x[9] = (x9 + s[9]) >>> 0; x[10] = (x10 + s[10]) >>> 0; x[11] = (x11 + s[11]) >>> 0; x[12] = (x12 + s[12]) >>> 0; x[13] = (x13 + s[13]) >>> 0; x[14] = (x14 + s[14]) >>> 0; x[15] = (x15 + s[15]) >>> 0;
+}
+function chachaBlock(key32, counter, nonce12, out64) {
+  const s = chachaWords(key32, nonce12);
+  s[12] = counter >>> 0;
+  const x = new Uint32Array(16);
+  chachaCore(s, x);
+  for (let i = 0; i < 16; i++) {
+    const v = x[i], j = i * 4;
+    out64[j] = v & 255; out64[j + 1] = (v >>> 8) & 255; out64[j + 2] = (v >>> 16) & 255; out64[j + 3] = v >>> 24;
+  }
 }
 
+/** data[from,to) 를 키스트림과 XOR 해 out 의 같은 자리에 쓴다. from 은 64 의 배수(블록 경계)여야 한다. */
+function chachaXorRange(s, x, counter0, data, out, from, to) {
+  for (let o = from; o < to; o += 64) {
+    s[12] = (counter0 + o / 64) >>> 0;
+    chachaCore(s, x);
+    const n = Math.min(64, to - o);
+    if (n === 64) {
+      for (let w = 0, j = o; w < 16; w++, j += 4) {
+        const v = x[w];
+        out[j] = data[j] ^ (v & 255); out[j + 1] = data[j + 1] ^ ((v >>> 8) & 255);
+        out[j + 2] = data[j + 2] ^ ((v >>> 16) & 255); out[j + 3] = data[j + 3] ^ (v >>> 24);
+      }
+    } else {
+      for (let i = 0; i < n; i++) out[o + i] = data[o + i] ^ ((x[i >> 2] >>> ((i & 3) << 3)) & 255);
+    }
+  }
+}
 function chacha20Xor(key32, counter0, nonce12, data) {
   const out = new Uint8Array(data.length);
-  const blk = new Uint8Array(64);
-  for (let o = 0; o < data.length; o += 64) {
-    chachaBlock(key32, (counter0 + o / 64) >>> 0, nonce12, blk);
-    const n = Math.min(64, data.length - o);
-    for (let i = 0; i < n; i++) out[o + i] = data[o + i] ^ blk[i];
-  }
+  chachaXorRange(chachaWords(key32, nonce12), new Uint32Array(16), counter0, data, out, 0, data.length);
   return out;
 }
 
-const P1305 = (1n << 130n) - 5n;
-function poly1305(key32, msg) {
-  let r = 0n, s = 0n;
-  for (let i = 15; i >= 0; i--) r = (r << 8n) | BigInt(key32[i]);
-  r &= 0x0ffffffc0ffffffc0ffffffc0fffffffn;
-  for (let i = 31; i >= 16; i--) s = (s << 8n) | BigInt(key32[i]);
-  let acc = 0n;
-  for (let o = 0; o < msg.length; o += 16) {
-    const n = Math.min(16, msg.length - o);
-    let blk = 0n;
-    for (let i = n - 1; i >= 0; i--) blk = (blk << 8n) | BigInt(msg[o + i]);
-    blk |= 1n << BigInt(8 * n);
-    acc = ((acc + blk) * r) % P1305;
+// Poly1305 — tweetnacl-js(nacl-fast.js, Public domain, "Port of Andrew Moon's Poly1305-donna-16") 를
+//  그대로 옮겼다. 예전 BigInt 구현은 1MB 에 ~1초라 첨부 업로드 동안 JS 스레드가 멈췄다(2026-11-24).
+var Poly1305Donna = function(key) {
+  this.buffer = new Uint8Array(16);
+  this.r = new Uint16Array(10);
+  this.h = new Uint16Array(10);
+  this.pad = new Uint16Array(8);
+  this.leftover = 0;
+  this.fin = 0;
+
+  var t0, t1, t2, t3, t4, t5, t6, t7;
+
+  t0 = key[ 0] & 0xff | (key[ 1] & 0xff) << 8; this.r[0] = ( t0                     ) & 0x1fff;
+  t1 = key[ 2] & 0xff | (key[ 3] & 0xff) << 8; this.r[1] = ((t0 >>> 13) | (t1 <<  3)) & 0x1fff;
+  t2 = key[ 4] & 0xff | (key[ 5] & 0xff) << 8; this.r[2] = ((t1 >>> 10) | (t2 <<  6)) & 0x1f03;
+  t3 = key[ 6] & 0xff | (key[ 7] & 0xff) << 8; this.r[3] = ((t2 >>>  7) | (t3 <<  9)) & 0x1fff;
+  t4 = key[ 8] & 0xff | (key[ 9] & 0xff) << 8; this.r[4] = ((t3 >>>  4) | (t4 << 12)) & 0x00ff;
+  this.r[5] = ((t4 >>>  1)) & 0x1ffe;
+  t5 = key[10] & 0xff | (key[11] & 0xff) << 8; this.r[6] = ((t4 >>> 14) | (t5 <<  2)) & 0x1fff;
+  t6 = key[12] & 0xff | (key[13] & 0xff) << 8; this.r[7] = ((t5 >>> 11) | (t6 <<  5)) & 0x1f81;
+  t7 = key[14] & 0xff | (key[15] & 0xff) << 8; this.r[8] = ((t6 >>>  8) | (t7 <<  8)) & 0x1fff;
+  this.r[9] = ((t7 >>>  5)) & 0x007f;
+
+  this.pad[0] = key[16] & 0xff | (key[17] & 0xff) << 8;
+  this.pad[1] = key[18] & 0xff | (key[19] & 0xff) << 8;
+  this.pad[2] = key[20] & 0xff | (key[21] & 0xff) << 8;
+  this.pad[3] = key[22] & 0xff | (key[23] & 0xff) << 8;
+  this.pad[4] = key[24] & 0xff | (key[25] & 0xff) << 8;
+  this.pad[5] = key[26] & 0xff | (key[27] & 0xff) << 8;
+  this.pad[6] = key[28] & 0xff | (key[29] & 0xff) << 8;
+  this.pad[7] = key[30] & 0xff | (key[31] & 0xff) << 8;
+};
+
+Poly1305Donna.prototype.blocks = function(m, mpos, bytes) {
+  var hibit = this.fin ? 0 : (1 << 11);
+  var t0, t1, t2, t3, t4, t5, t6, t7, c;
+  var d0, d1, d2, d3, d4, d5, d6, d7, d8, d9;
+
+  var h0 = this.h[0],
+      h1 = this.h[1],
+      h2 = this.h[2],
+      h3 = this.h[3],
+      h4 = this.h[4],
+      h5 = this.h[5],
+      h6 = this.h[6],
+      h7 = this.h[7],
+      h8 = this.h[8],
+      h9 = this.h[9];
+
+  var r0 = this.r[0],
+      r1 = this.r[1],
+      r2 = this.r[2],
+      r3 = this.r[3],
+      r4 = this.r[4],
+      r5 = this.r[5],
+      r6 = this.r[6],
+      r7 = this.r[7],
+      r8 = this.r[8],
+      r9 = this.r[9];
+
+  while (bytes >= 16) {
+    t0 = m[mpos+ 0] & 0xff | (m[mpos+ 1] & 0xff) << 8; h0 += ( t0                     ) & 0x1fff;
+    t1 = m[mpos+ 2] & 0xff | (m[mpos+ 3] & 0xff) << 8; h1 += ((t0 >>> 13) | (t1 <<  3)) & 0x1fff;
+    t2 = m[mpos+ 4] & 0xff | (m[mpos+ 5] & 0xff) << 8; h2 += ((t1 >>> 10) | (t2 <<  6)) & 0x1fff;
+    t3 = m[mpos+ 6] & 0xff | (m[mpos+ 7] & 0xff) << 8; h3 += ((t2 >>>  7) | (t3 <<  9)) & 0x1fff;
+    t4 = m[mpos+ 8] & 0xff | (m[mpos+ 9] & 0xff) << 8; h4 += ((t3 >>>  4) | (t4 << 12)) & 0x1fff;
+    h5 += ((t4 >>>  1)) & 0x1fff;
+    t5 = m[mpos+10] & 0xff | (m[mpos+11] & 0xff) << 8; h6 += ((t4 >>> 14) | (t5 <<  2)) & 0x1fff;
+    t6 = m[mpos+12] & 0xff | (m[mpos+13] & 0xff) << 8; h7 += ((t5 >>> 11) | (t6 <<  5)) & 0x1fff;
+    t7 = m[mpos+14] & 0xff | (m[mpos+15] & 0xff) << 8; h8 += ((t6 >>>  8) | (t7 <<  8)) & 0x1fff;
+    h9 += ((t7 >>> 5)) | hibit;
+
+    c = 0;
+
+    d0 = c;
+    d0 += h0 * r0;
+    d0 += h1 * (5 * r9);
+    d0 += h2 * (5 * r8);
+    d0 += h3 * (5 * r7);
+    d0 += h4 * (5 * r6);
+    c = (d0 >>> 13); d0 &= 0x1fff;
+    d0 += h5 * (5 * r5);
+    d0 += h6 * (5 * r4);
+    d0 += h7 * (5 * r3);
+    d0 += h8 * (5 * r2);
+    d0 += h9 * (5 * r1);
+    c += (d0 >>> 13); d0 &= 0x1fff;
+
+    d1 = c;
+    d1 += h0 * r1;
+    d1 += h1 * r0;
+    d1 += h2 * (5 * r9);
+    d1 += h3 * (5 * r8);
+    d1 += h4 * (5 * r7);
+    c = (d1 >>> 13); d1 &= 0x1fff;
+    d1 += h5 * (5 * r6);
+    d1 += h6 * (5 * r5);
+    d1 += h7 * (5 * r4);
+    d1 += h8 * (5 * r3);
+    d1 += h9 * (5 * r2);
+    c += (d1 >>> 13); d1 &= 0x1fff;
+
+    d2 = c;
+    d2 += h0 * r2;
+    d2 += h1 * r1;
+    d2 += h2 * r0;
+    d2 += h3 * (5 * r9);
+    d2 += h4 * (5 * r8);
+    c = (d2 >>> 13); d2 &= 0x1fff;
+    d2 += h5 * (5 * r7);
+    d2 += h6 * (5 * r6);
+    d2 += h7 * (5 * r5);
+    d2 += h8 * (5 * r4);
+    d2 += h9 * (5 * r3);
+    c += (d2 >>> 13); d2 &= 0x1fff;
+
+    d3 = c;
+    d3 += h0 * r3;
+    d3 += h1 * r2;
+    d3 += h2 * r1;
+    d3 += h3 * r0;
+    d3 += h4 * (5 * r9);
+    c = (d3 >>> 13); d3 &= 0x1fff;
+    d3 += h5 * (5 * r8);
+    d3 += h6 * (5 * r7);
+    d3 += h7 * (5 * r6);
+    d3 += h8 * (5 * r5);
+    d3 += h9 * (5 * r4);
+    c += (d3 >>> 13); d3 &= 0x1fff;
+
+    d4 = c;
+    d4 += h0 * r4;
+    d4 += h1 * r3;
+    d4 += h2 * r2;
+    d4 += h3 * r1;
+    d4 += h4 * r0;
+    c = (d4 >>> 13); d4 &= 0x1fff;
+    d4 += h5 * (5 * r9);
+    d4 += h6 * (5 * r8);
+    d4 += h7 * (5 * r7);
+    d4 += h8 * (5 * r6);
+    d4 += h9 * (5 * r5);
+    c += (d4 >>> 13); d4 &= 0x1fff;
+
+    d5 = c;
+    d5 += h0 * r5;
+    d5 += h1 * r4;
+    d5 += h2 * r3;
+    d5 += h3 * r2;
+    d5 += h4 * r1;
+    c = (d5 >>> 13); d5 &= 0x1fff;
+    d5 += h5 * r0;
+    d5 += h6 * (5 * r9);
+    d5 += h7 * (5 * r8);
+    d5 += h8 * (5 * r7);
+    d5 += h9 * (5 * r6);
+    c += (d5 >>> 13); d5 &= 0x1fff;
+
+    d6 = c;
+    d6 += h0 * r6;
+    d6 += h1 * r5;
+    d6 += h2 * r4;
+    d6 += h3 * r3;
+    d6 += h4 * r2;
+    c = (d6 >>> 13); d6 &= 0x1fff;
+    d6 += h5 * r1;
+    d6 += h6 * r0;
+    d6 += h7 * (5 * r9);
+    d6 += h8 * (5 * r8);
+    d6 += h9 * (5 * r7);
+    c += (d6 >>> 13); d6 &= 0x1fff;
+
+    d7 = c;
+    d7 += h0 * r7;
+    d7 += h1 * r6;
+    d7 += h2 * r5;
+    d7 += h3 * r4;
+    d7 += h4 * r3;
+    c = (d7 >>> 13); d7 &= 0x1fff;
+    d7 += h5 * r2;
+    d7 += h6 * r1;
+    d7 += h7 * r0;
+    d7 += h8 * (5 * r9);
+    d7 += h9 * (5 * r8);
+    c += (d7 >>> 13); d7 &= 0x1fff;
+
+    d8 = c;
+    d8 += h0 * r8;
+    d8 += h1 * r7;
+    d8 += h2 * r6;
+    d8 += h3 * r5;
+    d8 += h4 * r4;
+    c = (d8 >>> 13); d8 &= 0x1fff;
+    d8 += h5 * r3;
+    d8 += h6 * r2;
+    d8 += h7 * r1;
+    d8 += h8 * r0;
+    d8 += h9 * (5 * r9);
+    c += (d8 >>> 13); d8 &= 0x1fff;
+
+    d9 = c;
+    d9 += h0 * r9;
+    d9 += h1 * r8;
+    d9 += h2 * r7;
+    d9 += h3 * r6;
+    d9 += h4 * r5;
+    c = (d9 >>> 13); d9 &= 0x1fff;
+    d9 += h5 * r4;
+    d9 += h6 * r3;
+    d9 += h7 * r2;
+    d9 += h8 * r1;
+    d9 += h9 * r0;
+    c += (d9 >>> 13); d9 &= 0x1fff;
+
+    c = (((c << 2) + c)) | 0;
+    c = (c + d0) | 0;
+    d0 = c & 0x1fff;
+    c = (c >>> 13);
+    d1 += c;
+
+    h0 = d0;
+    h1 = d1;
+    h2 = d2;
+    h3 = d3;
+    h4 = d4;
+    h5 = d5;
+    h6 = d6;
+    h7 = d7;
+    h8 = d8;
+    h9 = d9;
+
+    mpos += 16;
+    bytes -= 16;
   }
-  acc = (acc + s) & ((1n << 128n) - 1n);
+  this.h[0] = h0;
+  this.h[1] = h1;
+  this.h[2] = h2;
+  this.h[3] = h3;
+  this.h[4] = h4;
+  this.h[5] = h5;
+  this.h[6] = h6;
+  this.h[7] = h7;
+  this.h[8] = h8;
+  this.h[9] = h9;
+};
+
+Poly1305Donna.prototype.finish = function(mac, macpos) {
+  var g = new Uint16Array(10);
+  var c, mask, f, i;
+
+  if (this.leftover) {
+    i = this.leftover;
+    this.buffer[i++] = 1;
+    for (; i < 16; i++) this.buffer[i] = 0;
+    this.fin = 1;
+    this.blocks(this.buffer, 0, 16);
+  }
+
+  c = this.h[1] >>> 13;
+  this.h[1] &= 0x1fff;
+  for (i = 2; i < 10; i++) {
+    this.h[i] += c;
+    c = this.h[i] >>> 13;
+    this.h[i] &= 0x1fff;
+  }
+  this.h[0] += (c * 5);
+  c = this.h[0] >>> 13;
+  this.h[0] &= 0x1fff;
+  this.h[1] += c;
+  c = this.h[1] >>> 13;
+  this.h[1] &= 0x1fff;
+  this.h[2] += c;
+
+  g[0] = this.h[0] + 5;
+  c = g[0] >>> 13;
+  g[0] &= 0x1fff;
+  for (i = 1; i < 10; i++) {
+    g[i] = this.h[i] + c;
+    c = g[i] >>> 13;
+    g[i] &= 0x1fff;
+  }
+  g[9] -= (1 << 13);
+
+  mask = (c ^ 1) - 1;
+  for (i = 0; i < 10; i++) g[i] &= mask;
+  mask = ~mask;
+  for (i = 0; i < 10; i++) this.h[i] = (this.h[i] & mask) | g[i];
+
+  this.h[0] = ((this.h[0]       ) | (this.h[1] << 13)                    ) & 0xffff;
+  this.h[1] = ((this.h[1] >>>  3) | (this.h[2] << 10)                    ) & 0xffff;
+  this.h[2] = ((this.h[2] >>>  6) | (this.h[3] <<  7)                    ) & 0xffff;
+  this.h[3] = ((this.h[3] >>>  9) | (this.h[4] <<  4)                    ) & 0xffff;
+  this.h[4] = ((this.h[4] >>> 12) | (this.h[5] <<  1) | (this.h[6] << 14)) & 0xffff;
+  this.h[5] = ((this.h[6] >>>  2) | (this.h[7] << 11)                    ) & 0xffff;
+  this.h[6] = ((this.h[7] >>>  5) | (this.h[8] <<  8)                    ) & 0xffff;
+  this.h[7] = ((this.h[8] >>>  8) | (this.h[9] <<  5)                    ) & 0xffff;
+
+  f = this.h[0] + this.pad[0];
+  this.h[0] = f & 0xffff;
+  for (i = 1; i < 8; i++) {
+    f = (((this.h[i] + this.pad[i]) | 0) + (f >>> 16)) | 0;
+    this.h[i] = f & 0xffff;
+  }
+
+  mac[macpos+ 0] = (this.h[0] >>> 0) & 0xff;
+  mac[macpos+ 1] = (this.h[0] >>> 8) & 0xff;
+  mac[macpos+ 2] = (this.h[1] >>> 0) & 0xff;
+  mac[macpos+ 3] = (this.h[1] >>> 8) & 0xff;
+  mac[macpos+ 4] = (this.h[2] >>> 0) & 0xff;
+  mac[macpos+ 5] = (this.h[2] >>> 8) & 0xff;
+  mac[macpos+ 6] = (this.h[3] >>> 0) & 0xff;
+  mac[macpos+ 7] = (this.h[3] >>> 8) & 0xff;
+  mac[macpos+ 8] = (this.h[4] >>> 0) & 0xff;
+  mac[macpos+ 9] = (this.h[4] >>> 8) & 0xff;
+  mac[macpos+10] = (this.h[5] >>> 0) & 0xff;
+  mac[macpos+11] = (this.h[5] >>> 8) & 0xff;
+  mac[macpos+12] = (this.h[6] >>> 0) & 0xff;
+  mac[macpos+13] = (this.h[6] >>> 8) & 0xff;
+  mac[macpos+14] = (this.h[7] >>> 0) & 0xff;
+  mac[macpos+15] = (this.h[7] >>> 8) & 0xff;
+};
+
+Poly1305Donna.prototype.update = function(m, mpos, bytes) {
+  var i, want;
+
+  if (this.leftover) {
+    want = (16 - this.leftover);
+    if (want > bytes)
+      want = bytes;
+    for (i = 0; i < want; i++)
+      this.buffer[this.leftover + i] = m[mpos+i];
+    bytes -= want;
+    mpos += want;
+    this.leftover += want;
+    if (this.leftover < 16)
+      return;
+    this.blocks(this.buffer, 0, 16);
+    this.leftover = 0;
+  }
+
+  if (bytes >= 16) {
+    want = bytes - (bytes % 16);
+    this.blocks(m, mpos, want);
+    mpos += want;
+    bytes -= want;
+  }
+
+  if (bytes) {
+    for (i = 0; i < bytes; i++)
+      this.buffer[this.leftover + i] = m[mpos+i];
+    this.leftover += bytes;
+  }
+};
+
+function poly1305(key32, msg) {
+  const st = new Poly1305Donna(key32);
+  st.update(msg, 0, msg.length);
   const tag = new Uint8Array(16);
-  for (let i = 0; i < 16; i++) { tag[i] = Number(acc & 0xffn); acc >>= 8n; }
+  st.finish(tag, 0);
   return tag;
 }
 const pad16 = (n) => (n % 16 === 0 ? 0 : 16 - (n % 16));
@@ -359,6 +774,70 @@ export function aeadOpen(key, nonce, aad, sealed) {
   chachaBlock(k, 0, n, polyKey);
   if (!ctEq(tag, poly1305(polyKey.subarray(0, 32), polyInput(aad, ct)))) return null;
   return chacha20Xor(k, 1, n, ct);
+}
+
+// ── 큰 값용 양보형(async) 변형 ─────────────────────────────────
+//  출력은 동기판과 **바이트 단위로 같다**. 차이는 budgetMs 마다 `pause()` 를 await 해 JS 스레드를
+//  내어준다는 것 하나다. 왜: 첨부 조각(1MB → 봉투 1.8MB)을 한 번에 봉인하면 폰에서 초 단위로 JS 가
+//  멈춰, 그 사이 입력칸에 친 글자가 사라졌다(2026-11-24 사용자 영상). pause 가 없으면 동기판과 같다.
+const SLICE = 4096;   // 시간 확인 간격(바이트/글자). 64 의 배수 — 키스트림 블록 경계와 맞아야 한다.
+async function maybePause(st, pause, budgetMs) {
+  if (pause && Date.now() - st.t >= budgetMs) { await pause(); st.t = Date.now(); }
+}
+export async function aeadSealAsync(key, nonce, aad, plaintext, pause, budgetMs = 12) {
+  const k = u8(key), n = u8(nonce), pt = u8(plaintext);
+  if (k.length !== 32 || n.length !== 12) throw new Error('aead: 키/논스 길이 오류');
+  const polyKey = new Uint8Array(64);
+  chachaBlock(k, 0, n, polyKey);
+  const a = u8(aad || new Uint8Array(0));
+  const mac = new Poly1305Donna(polyKey.subarray(0, 32));
+  mac.update(a, 0, a.length);
+  mac.update(new Uint8Array(pad16(a.length)), 0, pad16(a.length));
+  const out = new Uint8Array(pt.length + 16);
+  const s = chachaWords(k, n), x = new Uint32Array(16);
+  const st = { t: Date.now() };
+  for (let off = 0; off < pt.length; off += SLICE) {
+    const end = Math.min(pt.length, off + SLICE);
+    chachaXorRange(s, x, 1, pt, out, off, end);
+    mac.update(out, off, end - off);
+    await maybePause(st, pause, budgetMs);
+  }
+  const lens = new Uint8Array(16);
+  const dv = new DataView(lens.buffer);
+  dv.setUint32(0, a.length >>> 0, true);
+  dv.setUint32(4, Math.floor(a.length / 4294967296), true);
+  dv.setUint32(8, pt.length >>> 0, true);
+  dv.setUint32(12, Math.floor(pt.length / 4294967296), true);
+  mac.update(new Uint8Array(pad16(pt.length)), 0, pad16(pt.length));
+  mac.update(lens, 0, 16);
+  mac.finish(out, pt.length);
+  return out;
+}
+export async function utf8Async(str, pause, budgetMs = 12) {
+  const st = { t: Date.now() };
+  const src = String(str);
+  const parts = [];
+  for (let i = 0; i < src.length;) {
+    let end = Math.min(src.length, i + SLICE * 4);
+    //  서로게이트 쌍을 가르지 않는다(가르면 각각 3바이트로 인코딩돼 동기판과 달라진다).
+    const last = src.charCodeAt(end - 1);
+    if (end < src.length && last >= 0xd800 && last <= 0xdbff) end += 1;
+    parts.push(utf8(src.slice(i, end)));
+    i = end;
+    await maybePause(st, pause, budgetMs);
+  }
+  return parts.length === 1 ? parts[0] : concat(...parts);
+}
+export async function b64uEncAsync(bytes, pause, budgetMs = 12) {
+  const b = u8(bytes);
+  const st = { t: Date.now() };
+  const STEP = 3 * SLICE * 4;   // 3 의 배수 — 조각을 이어 붙여도 동기판과 같은 문자열
+  const parts = [];
+  for (let off = 0; off < b.length; off += STEP) {
+    parts.push(b64uEnc(b.subarray(off, Math.min(b.length, off + STEP))));
+    await maybePause(st, pause, budgetMs);
+  }
+  return parts.join('');
 }
 
 // ── X25519 (RFC 7748) ─────────────────────────────────────────
@@ -518,7 +997,7 @@ export function ed25519Verify(pub, msg, sig) {
 export default {
   SUITE, b64uEnc, b64uDec, utf8, fromUtf8, concat, copyOf, ctEq, u8,
   setRandomSource, hasRandomSource, randomBytes,
-  sha256, sha512, hmacSha256, hkdf, aeadSeal, aeadOpen,
+  sha256, sha512, hmacSha256, hkdf, aeadSeal, aeadOpen, aeadSealAsync, utf8Async, b64uEncAsync,
   x25519, x25519Public, x25519Keypair,
   ed25519Public, ed25519Keypair, ed25519Sign, ed25519Verify,
 };

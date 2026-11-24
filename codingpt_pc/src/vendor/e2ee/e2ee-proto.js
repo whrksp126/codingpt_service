@@ -12,7 +12,7 @@
 import {
   SUITE, aeadOpen, aeadSeal, b64uDec, b64uEnc, concat, copyOf, ctEq, fromUtf8, hkdf, hmacSha256,
   randomBytes, sha256, u8, utf8, x25519, x25519Public,
-  ed25519Sign, ed25519Verify,
+  ed25519Sign, ed25519Verify, aeadSealAsync, utf8Async, b64uEncAsync,
 } from './e2ee-core.js';
 
 // capability 문자열. 설계서 §2.8 은 'e2ee/v1' 로 적었지만 리포 규약(config/caps.js: 'approval.v1',
@@ -173,6 +173,18 @@ export function sealRpc(mk, epoch, hostDeviceId, bootRand4, counter, payload) {
   const nonce = makeNonce(bootRand4, counter);
   const ct = aeadSeal(key, nonce, rpcAad(K_RPC, epoch, hostDeviceId), utf8(JSON.stringify(payload)));
   return { v: 1, suite: SUITE, epoch, nonce: b64uEnc(nonce), ct: b64uEnc(ct) };
+}
+/**
+ * sealRpc 의 양보형 — 같은 봉투를 만들되 큰 payload(첨부 조각)를 봉인하는 동안 `pause()` 로 JS 스레드를
+ *  내어준다(e2eeCore aeadSealAsync 주석). 논스는 부르는 순간의 counter 로 정해진다 — 끝나는 순서가
+ *  바뀌어도 데몬 리플레이 윈도우(1024) 안이라 괜찮다.
+ */
+export async function sealRpcAsync(mk, epoch, hostDeviceId, bootRand4, counter, payload, pause) {
+  const key = deriveKey(mk, K_RPC);
+  const nonce = makeNonce(bootRand4, counter);
+  const pt = await utf8Async(JSON.stringify(payload), pause);
+  const ct = await aeadSealAsync(key, nonce, rpcAad(K_RPC, epoch, hostDeviceId), pt, pause);
+  return { v: 1, suite: SUITE, epoch, nonce: b64uEnc(nonce), ct: await b64uEncAsync(ct, pause) };
 }
 /** 응답 봉투 개봉 → 평문 객체 | null(복호 실패). */
 export function openRpcResponse(mk, env, hostDeviceId) {
@@ -387,7 +399,7 @@ export default {
   deriveKey, K_RPC, K_RPC_RESP, K_NOTIF, K_SNAPSHOT,
   verifyDigits, verifyCode4, fingerprint6, safetyCode, qrPin,
   sealGrant, openGrant, signGrant, verifyGrantSig, grantSigMsg,
-  rpcAad, makeNonce, sealRpc, openRpcResponse, sealRpcResponse, openRpcRequest,
+  rpcAad, makeNonce, sealRpc, sealRpcAsync, openRpcResponse, sealRpcResponse, openRpcRequest,
   isSealedBody, sealNotifBody, openNotifBody,
   recoveryCode, parseRecoveryCode, normalizeRecoveryCode,
   DIR_V2H, DIR_H2V, KIND_DATA, KIND_CTRL,
