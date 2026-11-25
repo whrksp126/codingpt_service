@@ -870,7 +870,6 @@ async function assertCptContext(cmd, ctx, resolved) {
 //  표시 실패가 켜기·조작을 실패시키지는 않는다.
 const EMU_VISIBLE = new Set(['emulator.boot', 'emulator.frame', 'emulator.input', 'emulator.ax', 'emulator.openUrl']);
 async function showEmulator(ctx, device) {
-  if (device.startsWith('desktop:')) return;
   try {
     const ws = (await resolveCtx(ctx)).cwdRel;
     if (!ws) return;
@@ -1100,25 +1099,6 @@ async function dispatch(req, conn) {
     //   에이전트가 show 를 잊어도 되도록 안내가 아니라 여기서 보장한다. PC 앱은 좌표(ctx)가 없어 이 길을 타지 않는다.
     if (EMU_VISIBLE.has(cmd) && req.ctx && (req.args || {}).id) await showEmulator(req.ctx, String(req.args.id));
     return r;
-  }
-  // 에이전트 PC(게스트 macOS VM) — 수명주기·셸·개입. 화면/입력은 emulator.* 로 `desktop:main` 을 쓴다.
-  if (cmd.startsWith('desktop.')) {
-    const deskLib = lazyMod('./desktop');
-    if (!deskLib) throw new Error('이 데몬은 에이전트 PC을 지원하지 않습니다(PC 앱 업데이트 필요)');
-    if (cmd === 'desktop.handoff') {
-      //  개입 요청 = 사용자에게 부탁. 승인 알림과 같은 채널(back /api/notifications → 폰·PC)로 카드를 띄우고,
-      //  사용자가 데스크톱 화면에서 [계속]을 누를 때까지 이 RPC 는 기다린다(에이전트가 그 사이 멈춰 있게).
-      const reason = String((req.args || {}).reason || '사용자 조작이 필요해요');
-      const p = deskLib.handle(cmd, req.args || {});
-      //  워크스페이스 좌표는 여기(조기 분기)선 아직 안 풀려 있다 — 알림에만 쓰니 실패해도 무방.
-      const ctx = await resolveCtx(req.ctx).catch(() => ({}));
-      backFetch('POST', '/api/notifications', {
-        source: 'desktop', kind: 'desktop_handoff', title: '에이전트 PC — 개입 요청', body: reason,
-        cwd: ctx.cwdRel || undefined, wsName: ctx.cwdRel ? path.basename(ctx.cwdRel) : undefined,
-      }).catch(() => { /* 알림 실패는 카드가 안 뜰 뿐 — 데스크톱 탭의 개입 표시가 남는다 */ });
-      return p;
-    }
-    return deskLib.handle(cmd, req.args || {});
   }
   if (cmd === 'net.ports') {
     const proxyLib = lazyMod('./proxy');
@@ -2328,10 +2308,6 @@ const CAPABILITIES = [
   'emulator.list', 'emulator.boot', 'emulator.shutdown', 'emulator.frame', 'emulator.input', 'emulator.openUrl', 'emulator.ax',
   //  화면에 띄우기 — 프리뷰/IDE 와 같은 급으로 연다(사용자가 보고 있는 기기 1곳).
   'ui.emulatorOpen', 'ui.emulatorClose',
-  // 에이전트 PC — 전부 공개. 격리된 게스트라 에이전트가 마음껏 조작하는 것이 이 기능의 값이다.
-  //  handoff 는 "사용자에게 부탁" 이라 승인 성격이 아니다(자기 승인 경로가 아니다).
-  'desktop.status', 'desktop.start', 'desktop.provision', 'desktop.connect', 'desktop.disconnect', 'desktop.ax', 'desktop.tap', 'desktop.snapshots', 'desktop.snapshot', 'desktop.restore', 'desktop.snapshot.delete', 'desktop.stop', 'desktop.exec', 'desktop.openApp', 'desktop.openUrl', 'desktop.path',
-  'desktop.handoff', 'desktop.pause', 'desktop.resume', 'desktop.settings.get', 'desktop.settings.set', 'desktop.pull', 'desktop.delete',
   'browser.snapshot', 'browser.click', 'browser.scroll', 'browser.press', 'browser.type', 'browser.fill', 'browser.eval', 'browser.wait', 'browser.get', 'browser.screenshot', 'browser.console', 'browser.network',
   'hook.event', 'agent.status', 'hooks.doctor',
   'actl.list', 'actl.get', 'actl.start', 'actl.prompt', 'actl.read', 'actl.result', 'actl.sendKeys', 'actl.stop', 'machine.list',

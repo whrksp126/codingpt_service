@@ -1,4 +1,4 @@
-// 공유 표면 동기화 — 프리뷰·IDE·모바일 화면(에이전트 PC 포함) 의 **존재**를 기기 사이에 나눈다.
+// 공유 표면 동기화 — 프리뷰·IDE·모바일 화면 의 **존재**를 기기 사이에 나눈다.
 //
 // 사용자 결정(2026-09-20): "PC 에서 열어둔 pane 이 다른 기기에도 즉시 보여야 한다" — 2026-07-23 의 "표면은 기기별"
 //  결정을 뒤집었다. 터미널 풀과 같은 모양으로 간다: 어느 기기에서 열면 전부에 나타나고, 어디서 닫으면 전부에서
@@ -108,7 +108,7 @@ async function sync() {
           const r = await api.surfaceAdd(cwd, item);
           const got = r && r.item ? r.item : null;
           if (got && got.id !== e.sid) {
-            //  에이전트 PC 흡수 — 데몬이 이미 있는 표면을 돌려줬다. 로컬 sid 를 갈아 끼운다(다음 목록에 그 id 로 온다).
+            //  흡수 — 데몬이 이미 있는 표면을 돌려줬다. 로컬 sid 를 갈아 끼운다(다음 목록에 그 id 로 온다).
             if (e.tab) e.tab.sid = got.id; else { const l = T.findLeaf(rt.layout, e.leafId); if (l) l.sid = got.id; }
             prev.set(got.id, keyOf(got));
             curIds.add(got.id); curIds.delete(e.sid);
@@ -141,8 +141,7 @@ function tabFor(item) {
   if (item.kind === "preview") return { ...base, url: item.url || null };
   if (item.kind === "ide") return { ...base, openPath: item.openPath || null };
   if (item.kind === "chat") return { ...base, threadId: item.threadId, ...(item.title ? { title: item.title } : {}) };
-  const desk = typeof item.deviceId === "string" && item.deviceId.startsWith("desktop:");
-  return { ...base, deviceId: item.deviceId || null, metaName: item.title || (desk ? i18n.t('에이전트 PC') : "") };
+  return { ...base, deviceId: item.deviceId || null, metaName: item.title || "" };
 }
 
 /**
@@ -164,13 +163,11 @@ export function reconcile(meta, w, items) {
   }
   // ① 기록에서 사라진 것 — 2틱 유예 뒤 닫는다(등록 중인 것은 보호).
   const closeLeaves = [];
-  const deskSeen = new Set();   // OS별로 하나씩만(macOS·Linux 는 각각 독립 pane) — 같은 OS 둘째만 더블링으로 닫는다.
   const localSeen = new Set();
   for (const e of local) {
-    //  더블링 방지 — 같은 sid(흡수로 겹침)·같은 OS 의 에이전트 PC 둘째는 유예 없이 닫는다(먼저 만난 것만 남긴다).
-    const desk = e.kind === "emulator" && typeof e.deviceId === "string" && e.deviceId.startsWith("desktop:");
-    const dup = localSeen.has(e.sid) || (desk && deskSeen.has(e.deviceId));
-    if (!dup) { localSeen.add(e.sid); if (desk) deskSeen.add(e.deviceId); }
+    //  더블링 방지 — 같은 sid 둘째는 유예 없이 닫는다(먼저 만난 것만 남긴다).
+    const dup = localSeen.has(e.sid);
+    if (!dup) localSeen.add(e.sid);
     if (!dup && remote.has(e.sid)) { seen.add(e.sid); if (e.tab) delete e.tab.miss; else { const l = T.findLeaf(w.layout, e.leafId); if (l) delete l.miss; } continue; }
     const holder = e.tab || T.findLeaf(w.layout, e.leafId);
     if (!holder) continue;

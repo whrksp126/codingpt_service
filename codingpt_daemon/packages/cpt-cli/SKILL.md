@@ -7,8 +7,7 @@ description: >-
   web pages → `cpt preview` / `cpt browser` (open, click, type, console, network,
   screenshot; "브라우저로 확인해줘", "프리뷰 열어줘", "페이지 테스트"); files/diffs/review →
   `cpt ide`, `cpt review`
-  ("diff 보여줘", "리뷰해줘"); mobile apps → `cpt emulator` ("앱에서 확인해줘"); native
-  desktop apps and logins/2FA → `cpt desktop`; splitting work across agents → `cpt orch`
+  ("diff 보여줘", "리뷰해줘"); mobile apps → `cpt emulator` ("앱에서 확인해줘"); splitting work across agents → `cpt orch`
   ("병렬로", "나눠서 시켜", `/orch`); issues → `cpt issue`;
   progress and notifications → `cpt notify`, `cpt ws set`. Run `cpt skills get index`
   first, then `cpt skills get <topic>` for the feature you need.
@@ -29,7 +28,7 @@ CodingPT 터미널이 아니다 — `cpt` 를 실행하지 말고 이 스킬 전
 ```
 cpt skills get index        # 무엇을 할 수 있는가 — 할 일 → 주제 표
 cpt skills list             # 주제 목록(한 줄 설명)
-cpt skills get <주제>        # preview · browser · ide · emulator · desktop · orch · tasks · issue · workspace · terminal · layout · basics
+cpt skills get <주제>        # preview · browser · ide · emulator · orch · tasks · issue · workspace · terminal · layout · basics
 ```
 
 - **CodingPT 안에서는 CodingPT 기능을 먼저 쓴다** — 웹 페이지는 `cpt preview`/`cpt browser`, 나눠 맡기기는 `cpt orch`. 사용자는 폰·다른 PC 에서 보고 있을 수 있고, 거기서도 같이 보인다.

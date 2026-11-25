@@ -236,24 +236,12 @@ function sortDevices(rows) {
   return rows.sort((a, b) => rank(a) - rank(b) || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
 }
 
-/** 에이전트 데스크톱 모듈 — darwin 이 아니거나 로드 실패면 없는 것으로 친다(목록·폴링은 돌아야 한다). */
-let _desktopMod = null;
-function desktop() {
-  if (!_desktopMod) {
-    try { _desktopMod = require('./desktop'); } catch (_) { _desktopMod = { deviceRow: async () => null, handle: async () => { throw new Error('데스크톱 모듈이 없어요'); } }; }
-  }
-  return _desktopMod;
-}
-//  에이전트 PC 는 이제 macOS·Linux 두 행(각 독립 VM) — deviceRow 가 배열을 돌려준다.
-async function desktopRow() { try { const r = await desktop().deviceRow(); return Array.isArray(r) ? r : (r ? [r] : []); } catch (_) { return []; } }
-
 async function list() {
   const t = tools();
   const android = await androidDevices();
-  const [avds, ios, desk] = await Promise.all([androidAvds(android), iosSimulators(), desktopRow()]);
+  const [avds, ios] = await Promise.all([androidAvds(android), iosSimulators()]);
   return {
-    //  에이전트 PC(macOS·Linux 게스트)도 각각 한 "기기" 다 — 같은 pane·같은 프레임/입력 계약으로 보인다.
-    devices: sortDevices([...android, ...avds, ...ios, ...desk]),
+    devices: sortDevices([...android, ...avds, ...ios]),
     //  idb 는 companion 까지 있어야 "있다" 고 말한다 — 반쪽 설치를 초록불로 보여 주면 안 된다.
     tools: {
       adb: !!t.adb, emulator: !!t.emulator, simctl: !!t.xcrun, resize: !!t.sips,
@@ -274,14 +262,13 @@ function parseId(id) {
   if (!value) return null;
   // 셸을 거치지 않고 execFile 로만 부르지만, 인자 오염을 원천 차단한다.
   if (!/^[A-Za-z0-9._:@-]+$/.test(value)) return null;
-  if (scheme !== 'android' && scheme !== 'avd' && scheme !== 'ios' && scheme !== 'desktop') return null;
+  if (scheme !== 'android' && scheme !== 'avd' && scheme !== 'ios') return null;
   return { scheme, value };
 }
 
 async function boot(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') { await desktop().handle('desktop.start', { id }); return { ok: true, booting: false }; }
   const t = tools();
   if (p.scheme === 'avd') {
     if (!t.emulator) throw new Error('안드로이드 에뮬레이터를 찾을 수 없어요');
@@ -326,7 +313,6 @@ function closeDeviceSurfaces(ids) {
 }
 function setOnBooted(fn) { onBooted = typeof fn === 'function' ? fn : null; }
 function track(id, avdName) {
-  if (String(id).startsWith('desktop:')) return;
   if (!tracked.has(id)) tracked.set(id, { avdName: avdName || null, liveId: null, since: Date.now() });
   if (!trackTimer) {
     trackTimer = setInterval(() => { sweepTracked().catch(() => { /* 다음 틱에 다시 본다 */ }); }, TRACK_MS);
@@ -363,7 +349,6 @@ function closeOff(id) {
 async function shutdown(id) {
   const p = parseId(id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') return desktop().handle('desktop.stop', { id });
   const t = tools();
   if (p.scheme === 'ios') {
     await run(t.xcrun, ['simctl', 'shutdown', p.value], { timeoutMs: 30000 });
@@ -544,11 +529,6 @@ async function androidRaw(adb, serial) {
 async function frame(args) {
   const p = parseId(args && args.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') {
-    const r = await desktop().handle('desktop.frame', { id: args.id, maxWidth: args && args.maxWidth, quality: args && args.quality });
-    lastSize.set(args.id, { w: r.width, h: r.height });
-    return r;
-  }
   const t = tools();
   let png = null;
   let bmp = null;
@@ -902,7 +882,6 @@ async function input(args) {
   const a = args || {};
   const p = parseId(a.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme === 'desktop') return desktop().handle('desktop.input', a);
   const t = tools();
   const type = String(a.type || '');
 
@@ -1157,7 +1136,6 @@ async function openUrl(args) {
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
   const url = String((args && args.url) || '');
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url)) throw new Error('주소가 올바르지 않아요');
-  if (p.scheme === 'desktop') return desktop().handle('desktop.openUrl', { id: args.id, url });
   const t = tools();
   if (p.scheme === 'android') {
     await run(t.adb, ['-s', p.value, 'shell', 'am', 'start', '-a', 'android.intent.action.VIEW', '-d', url], { timeoutMs: 15000 });
@@ -1178,13 +1156,7 @@ async function streamStart(args) {
   const a = args || {};
   const p = parseId(a.id);
   if (!p) throw new Error('기기 id 가 올바르지 않아요');
-  if (p.scheme !== 'android' && p.scheme !== 'ios' && p.scheme !== 'desktop') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
-  if (p.scheme === 'desktop') {
-    const d = require('./desktop');
-    const st = await d.handle('desktop.status', { id: a.id });
-    if (st.phase !== 'running') throw new Error('에이전트 PC 가 꺼져 있어요');
-    return lazyStream().start({ serial: a.id, deviceId: a.id, kind: 'desktop' });
-  }
+  if (p.scheme !== 'android' && p.scheme !== 'ios') throw new Error('이 기기는 라이브 화면을 지원하지 않아요');
   const t = tools();
   if (p.scheme === 'android' && !t.adb) throw new Error('adb 를 찾을 수 없어요');
   if (p.scheme === 'ios' && !serveSim().available()) {

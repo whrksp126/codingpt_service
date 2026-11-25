@@ -4,20 +4,17 @@
 //   꺼진다"고 믿었고, 화면 없이 부팅된 iOS 시뮬레이터가 22일 동안 3~5분마다 CPU 를 튀기고 있었다.
 //  규칙: 켜져 있으면 [끄고 닫기 / 켜 둔 채 닫기 / 취소], 꺼져 있으면(또는 기기를 안 골랐으면) 묻지 않고 닫는다.
 //   CodingPT 밖에서 켠 기기여도 똑같이 묻는다 — "켜 둔 채 닫기" 가 있어서 손해가 없다.
-//   에이전트 PC(desktop:*)는 대상이 아니다(VM 은 자체 전원 버튼·유휴 정리가 따로 있다).
 //   사용자가 직접 닫을 때만 부른다 — 탭 이동·pane 합치기·다른 기기에서 온 닫기는 묻지 않는다.
 import { api } from "./api.js";
 import * as T from "./tiling.js";
 import * as i18n from "./i18n/index.js";
 
-const isDesk = (id) => typeof id === "string" && id.startsWith("desktop:");
-
 /** 닫히는 노드(leaf 또는 탭) 안의 모바일 화면 기기 id 들. */
 export function emulatorIdsOf(node) {
   const ids = [];
   if (!node) return ids;
-  if (node.kind === "emulator" && node.deviceId && !isDesk(node.deviceId)) ids.push(node.deviceId);
-  for (const t of node.tabs || []) if (t && t.kind === "emulator" && t.deviceId && !isDesk(t.deviceId)) ids.push(t.deviceId);
+  if (node.kind === "emulator" && node.deviceId) ids.push(node.deviceId);
+  for (const t of node.tabs || []) if (t && t.kind === "emulator" && t.deviceId) ids.push(t.deviceId);
   return [...new Set(ids)];
 }
 

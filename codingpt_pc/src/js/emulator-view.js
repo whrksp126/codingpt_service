@@ -14,7 +14,6 @@
 import { api } from "./api.js";
 import { icons } from "./icons.js";
 import { insertAttachment, attachName, shq, toast } from "./attach-insert.js";
-import { setDesktopOs, osOfDeviceId } from "./desktop-os.js";
 import * as i18n from "./i18n/index.js";
 
 function escapeHtml(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -145,8 +144,6 @@ export class EmulatorView {
 
   dispose() {
     this.disposed = true;
-    this._disposedDesk = true;
-    this.stopDeskPoll();
     this.stopVideo();
     clearTimeout(this._capTimer);
     try { this.el.remove(); } catch (_) { /* noop */ }
@@ -177,9 +174,6 @@ export class EmulatorView {
       const r = await api.emulatorList();
       if (this.disposed) return;
       this.devices = (r && r.devices) || [];
-      //  에이전트 PC의 멈춤 상태는 기기 행에 실려 온다 — 폰이 풀었으면 여기 버튼도 따라간다.
-      const desk = this.devices.find((d) => d.kind === "desktop");
-      if (desk && desk.desktop) this.deskPaused = !!desk.desktop.paused;
       this.tools = (r && r.tools) || {};
       this.err = null;
     } catch (e) {
@@ -237,8 +231,6 @@ export class EmulatorView {
   }
 
   device() { return (this.devices || []).find((d) => d.id === this.deviceId) || null; }
-  //  이 pane 이 가리키는 에이전트 PC 의 OS(desktop:macos/linux). 데스크톱이 아니면 null → api 는 데몬 기본 OS.
-  deskOs() { return osOfDeviceId(this.deviceId) || undefined; }
 
   /** 사람이 읽는 기기 이름. 목록을 아직 못 받았으면 빈 문자열(추측한 이름을 탭에 박지 않는다). */
   deviceName() { const d = this.device(); return d ? d.name : ""; }
@@ -271,10 +263,7 @@ export class EmulatorView {
     if (this.videoOn || this.disposed || !this.deviceId) return false;
     //  안드로이드=scrcpy · iOS=serve-sim. 둘 다 같은 바이트를 주므로 여기서 갈라질 이유가 없다.
     //  (해당 PC 에 경로가 없으면 stream.start 가 실패하고 아래에서 조용히 폴링으로 돌아간다.)
-    if (!/^(android|ios|desktop):/.test(this.deviceId)) return false;
-    //  꺼진 에이전트 PC 에 스트림을 열면 데몬이 거절한다 — 켜지면 loadDevices → select 경로가 다시 연다.
-    const dv0 = this.device();
-    if (dv0 && dv0.kind === "desktop" && dv0.state !== "booted") return false;
+    if (!/^(android|ios):/.test(this.deviceId)) return false;
     if (!canDecodeVideo()) { this.videoNote = i18n.t('이 창은 영상 디코딩을 지원하지 않아 화면을 한 장씩 받아요.'); return false; }
     let info;
     try { info = await api.emulatorStreamStart(this.deviceId); }
@@ -401,17 +390,7 @@ export class EmulatorView {
     this.running = true;
     (async () => {
       while (!this.disposed && this.deviceId && this.visible && !this.videoOn) {
-        const dv = this.device();
-        const isDesk = !!(dv && dv.kind === "desktop");
-        //  ★ 에이전트 PC 는 쉬지 않는다 — 사용자는 손을 안 대고 **에이전트가 하는 걸 지켜본다**(그게 이 pane 의 용도).
-        //   60초 유휴 정지는 폰 화면(사용자가 만지는 물건) 규칙이다. 안 보이면 setVisible 이 이미 루프를 세운다.
-        //   (2026-09-19 실사고: 켜고 로그인까지 60초 넘게 걸려 첫 프레임 전에 잠들어 영영 빈 화면)
-        if (!isDesk && Date.now() - this.lastTouch > IDLE_AFTER_MS) {
-          await new Promise((r) => setTimeout(r, 1000));
-          continue;
-        }
-        //  꺼진 에이전트 PC 에는 프레임을 묻지 않는다 — 켜지면 pollDesk 가 기기 목록을 새로 읽어 state 가 바뀐다.
-        if (isDesk && dv.state !== "booted") {
+        if (Date.now() - this.lastTouch > IDLE_AFTER_MS) {
           await new Promise((r) => setTimeout(r, 1000));
           continue;
         }
@@ -430,11 +409,7 @@ export class EmulatorView {
           this.paintFrame();
         } catch (e) {
           if (this.disposed) break;
-          //  에이전트 PC 의 VNC 끊김·붙기실패·연결닫힘은 종료/재연결 과정의 **일시적 이벤트**다 —
-          //   정상적으로 껐는데도 빨간 에러 알림으로 튀던 걸 삼킨다(상태 폴링이 곧 '꺼짐' 으로 정리).
-          const emsg = e && e.message ? e.message : String(e);
-          if (isDesk && /꺼져 있어요|ECONNREFUSED|붙을 수 없|연결이 닫|끊|VNC|영상 인코더/.test(emsg)) this.err = null;
-          else this.err = emsg;
+          this.err = e && e.message ? e.message : String(e);
           this.paintError();
           await new Promise((r) => setTimeout(r, 2000));   // 실패했는데 계속 두드리지 않는다
           continue;
@@ -629,107 +604,6 @@ export class EmulatorView {
    *   줄여 놓은 해상도(wantWidth)로 굳고, 회전해 그린 경우엔 돌아간 그림이 나간다. 원본이 정답이다.
    *  · 저장 위치·삽입 규칙은 프리뷰 요소 캡처(design-pick)와 **같은 길**을 쓴다.
    */
-  /** 데스크톱 상태 바. 상태·해상도·에이전트 상태를 한 줄로, 오른쪽에 버튼. */
-  buildDeskBar(dev, booted) {
-    const bar = document.createElement("div");
-    bar.className = "emu-deskbar";
-    const st = this.deskStatus || (dev && dev.desktop) || {};
-    const handoff = st.handoff || null;
-    const paused = !!st.paused;
-    const left = document.createElement("div");
-    left.className = "emu-deskbar-l";
-    //  글자는 **에이전트가 남긴 개입 사유**뿐(다국어 UI — 상태 문구는 버튼 모양이 말한다, 사용자 결정 2026-09-19).
-    left.innerHTML = booted && handoff ? `${icons.handoffIn({ size: 14 })}<span>${escapeHtml(handoff.reason || "")}</span>` : "";
-    bar.appendChild(left);
-    const right = document.createElement("div");
-    right.className = "emu-deskbar-r";
-    const btn = (label, title, onClick, cls, html) => {
-      const b = document.createElement("button");
-      b.className = "emu-deskbtn" + (cls ? " " + cls : "");
-      if (html) b.innerHTML = html; else b.textContent = label;
-      if (title) b.title = title;
-      b.addEventListener("click", onClick);
-      right.appendChild(b);
-      return b;
-    };
-    if (booted) {
-      //  멈춤↔재개 = 일시정지/재생 아이콘 하나(멈춰 있으면 눌린 모양 + 재생 아이콘).
-      btn("", paused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤'), async () => {
-        try { await api.desktopPause(!paused, this.deskOs()); this.deskPaused = !paused; await this.pollDesk(true); }
-        catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
-      }, "icon" + (paused ? " on" : ""), (paused ? icons.play : icons.pause)({ size: 14 }));
-      btn("", i18n.t('이 화면을 캡처해 에이전트에게 첨부'), (ev) => void this.capture(ev.currentTarget), "icon", icons.camera({ size: 14 }));
-      if (handoff) {
-        //  개입 끝 = 에이전트에게 돌려준다(handoffOut). 주 동작이라 채운 모양.
-        btn("", i18n.t('개입을 끝내고 에이전트를 재개합니다'), async () => {
-          try { await api.desktopPause(false, this.deskOs()); await this.pollDesk(true); }
-          catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
-        }, "icon primary", icons.handoffOut({ size: 14 }));
-      }
-    }
-    //  전원 = 아이콘 하나(켜짐이면 눌린 모양). 켜는 중엔 잠근다 — 두 번 누르면 start 가 겹친다.
-    const starting = st.phase === "starting" || this._powering;
-    const pw = btn("", booted ? i18n.t('끄기') : i18n.t('켜기'), async () => {
-      if (this._powering) return;
-      this._powering = true;
-      try { await this.power(booted ? "shutdown" : "boot"); } finally { this._powering = false; }
-    }, "icon" + (booted ? " on" : ""), icons.power({ size: 14 }));
-    if (starting) pw.disabled = true;
-    //  알림 종 — 화면 아래 안내줄 대신. 상태 바 오른쪽(설정 ··· 옆).
-    right.appendChild(this.bellButton("emu-deskbtn icon", 14));
-    btn("···", i18n.t('더 보기'), (ev) => {
-      const r = ev.currentTarget.getBoundingClientRect();
-      import("./sidebar.js").then((m) => m.showPopupMenu(r.right - 180, r.bottom + 4, [
-        { icon: icons.sliders({ size: 14 }), label: i18n.t('에이전트 PC 설정…'), onClick: () => import("./desktop-sheet.js").then((d) => d.openDesktopSheet(this.deskOs())).catch(() => {}) },
-      ])).catch(() => {});
-    }, "icon");
-    bar.appendChild(right);
-    this.deskBarEl = bar;
-    return bar;
-  }
-
-  /** 데스크톱 상태(멈춤·개입 대기)는 폰이나 cpt 가 바꿀 수 있다 — 탭이 보이는 동안 3초마다 확인해 바를 다시 그린다. */
-  startDeskPoll() {
-    this.stopDeskPoll();
-    this._deskTimer = setInterval(() => void this.pollDesk(false), 3000);
-    void this.pollDesk(false);
-  }
-  stopDeskPoll() { if (this._deskTimer) { clearInterval(this._deskTimer); this._deskTimer = null; } }
-  /** 꺼져 있을 때 화면 한가운데 한 줄 — 켜는 단계(step)를 데몬이 알려 준다(첫 켜기는 설정+재시작이 붙어 1~2분). */
-  deskOffText() {
-    const st = this.deskStatus || {};
-    if (st.phase !== "starting") return i18n.t('에이전트 PC 가 꺼져 있어요');
-    if (st.step === "provision") return i18n.t('처음 켜는 거라 설정하는 중이에요 (1~2분)');
-    if (st.step === "reboot" || st.step === "ax") return i18n.t('설정을 적용하려고 다시 켜는 중…');
-    return i18n.t('켜는 중…');
-  }
-  async pollDesk(force) {
-    if (this._disposedDesk) return;
-    let st = null;
-    try { st = await api.desktopStatus(this.deskOs()); } catch (_) { return; }
-    const prev = this.deskStatus;
-    this.deskStatus = st;
-    this.deskPaused = !!(st && st.paused);
-    //  게스트 OS 를 알게 되면(또는 바뀌면) 탭 파비콘·이름을 그 OS 로 갱신한다(onDeviceChange → buildHead).
-    if (setDesktopOs(st && st.osKind) && this.deviceId) this.onDeviceChange(this.deviceId, this.deviceName());
-    const sig = (x) => x ? `${x.phase}|${x.step || ""}|${x.paused}|${x.handoff ? x.handoff.reason : ""}` : "";
-    if (force || sig(prev) !== sig(st)) {
-      const off = this.el.querySelector(".emu-off");
-      if (off) off.textContent = this.deskOffText();
-      //  바만 갈아 끼운다 — 화면(<img>)을 다시 만들면 프레임 루프가 끊긴다.
-      const dev = this.device();
-      const booted = st && st.phase === "running";
-      const nb = this.buildDeskBar(dev, booted);
-      if (this.deskBarEl && this.deskBarEl.parentNode) this.deskBarEl.parentNode.replaceChild(nb, this.deskBarEl);
-      //  꺼졌다/켜졌다가 바뀌면 기기 목록도 새로 읽어 프레임 루프를 맞춘다.
-      if (prev && (prev.phase === "running") !== booted) {
-        //  켜졌으면 라이브 영상을 붙이고(폴링은 startVideo 가 실패할 때만), 꺼졌으면 영상을 접는다.
-        if (!booted) this.stopVideo();
-        this.loadDevices().then(() => { if (booted && !this.videoOn && !this.disposed) void this.startVideo().then((ok) => { if (!ok) this.ensureLoop(); }); });
-      }
-    }
-  }
-
   async capture(btn) {
     if (!this.deviceId || this._capturing) return;
     this._capturing = true;
@@ -770,7 +644,7 @@ export class EmulatorView {
     //  ★ 끄면 기기 목록으로 돌아간다(2026-08-06). 예전엔 '‹ 목록으로' 버튼이 그 자리를 대신했는데
     //   버튼을 뺐다 — 꺼진 기기 화면에 남아 있어 봐야 볼 것도 조작할 것도 없다.
     const dv = (this.devices || []).find((d) => d.id === id);
-    if (action === "shutdown" && !this.disposed && !(dv && dv.kind === "desktop")) { this.select(null); return; }
+    if (action === "shutdown" && !this.disposed) { this.select(null); return; }
     if (!this.disposed) void this.loadDevices();
   }
 
@@ -807,18 +681,10 @@ export class EmulatorView {
 
   //  화면 아래 줄에 있던 4종 사유를 알림함으로 흘린다. render() 초입에서 부른다.
   feedNotices(dev, booted, canInput) {
-    const isDeskDev = !!(dev && dev.kind === "desktop");
-    //  에이전트 PC 가 꺼졌으면(막 종료) 남아 있던 오류를 흘리지 않는다 — 무대 글이 "꺼져 있어요" 를 이미 말한다.
-    if (isDeskDev && !booted) { this.err = null; this.videoNote = ""; }
-    //  에이전트 PC(desktop)는 영상↔폴링 전환을 사용자에게 알리지 않는다 — 화면은 계속 나오고,
-    //   스트리밍 방식은 내부 사정이라 알아야 할 게 아니다(사용자 지시 2026-09-22: 실제로 필요한 안내만). 일반 에뮬은 그대로.
-    this.pushNotice("video", isDeskDev ? "" : (this.videoNote || ""), "info");
+    this.pushNotice("video", this.videoNote || "", "info");
     this.pushNotice("err", this.err || "", "error");
-    const stx = this.deskStatus || (dev && dev.desktop) || {};
-    const handoff = (dev && dev.kind === "desktop" && booted) ? (stx.handoff || null) : null;
-    this.pushNotice("handoff", handoff ? (handoff.reason || "") : "", "info");
     let inputWhy = "";
-    if (!canInput && dev && dev.kind !== "desktop") {
+    if (!canInput && dev) {
       inputWhy = (dev.caps && dev.caps.inputHint)
         || (dev.state !== "booted"
           ? i18n.t('기기가 아직 켜지지 않았어요 — 다 뜨면 바로 조작할 수 있어요')
@@ -926,7 +792,7 @@ export class EmulatorView {
           row.className = "emu-row" + (d.state === "booted" ? " on" : "");
           const sub = (booting ? i18n.t('켜는 중…') : d.state === "booted" ? i18n.t('켜짐') : i18n.t('꺼짐'))
             + (d.caps && d.caps.frame && !d.caps.input ? ` · ${i18n.t('보기 전용')}` : "");
-          row.innerHTML = `${(d.kind === "desktop" ? icons.monitor : icons.smartphone)({ size: 15 })}<span class="emu-row-t"><b></b><i></i></span>`;
+          row.innerHTML = `${icons.smartphone({ size: 15 })}<span class="emu-row-t"><b></b><i></i></span>`;
           row.querySelector("b").textContent = d.name;
           row.querySelector("i").textContent = sub;
           //  꺼진 기기는 목록에서 바로 켠다 — 예전엔 골라 들어가야 전원 버튼이 보였는데, 꺼진 기기를
@@ -1008,25 +874,6 @@ export class EmulatorView {
         b.addEventListener("click", () => (k === "rotate" ? this.rotate() : this.send({ type: "key", key: k })));
         keys.appendChild(b);
       }
-    }
-    /**
-     * 에이전트 PC — **에이전트 멈춤/재개** 토글. 사용자가 이 화면을 만지는 동안 에이전트 입력이
-     *  큐에 대기하고(데몬이 자동으로 켠다), 개입을 끝내면 이 버튼으로 풀어 준다. 되감기·재시작 같은
-     *  파괴적 조작은 여기 두지 않는다(설정 시트로).
-     */
-    if (false && dev && dev.kind === "desktop" && booted) {
-      const pz = document.createElement("button");
-      pz.className = "emu-key" + (this.deskPaused ? " on" : "");
-      pz.title = this.deskPaused ? i18n.t('에이전트 재개') : i18n.t('에이전트 멈춤');
-      pz.innerHTML = icons[this.deskPaused ? "play" : "pause"]({ size: 22 });
-      pz.addEventListener("click", async () => {
-        try { await api.desktopPause(!this.deskPaused); this.deskPaused = !this.deskPaused; this.render(); }
-        catch (e) { this.err = e && e.message ? e.message : String(e); this.paintError(); }
-      });
-      keys.appendChild(pz);
-      const s1 = document.createElement("span");
-      s1.className = "emu-keys-sep";
-      keys.appendChild(s1);
     }
     //  에뮬레이터 자체를 끄는 전원 — 기기 조작 키와 하는 일이 다르니 구분선으로 나눈다.
     //  ★ '기기 목록으로'(‹) 버튼은 뺐다(2026-08-06 사용자 지시). 끄면 목록으로 돌아간다.
@@ -1113,60 +960,6 @@ export class EmulatorView {
       stage.addEventListener("mouseup", finish);
       //  화면 밖으로 나가도 **뗀 것으로** 마무리한다 — 안 그러면 기기가 계속 눌린 줄 안다.
       stage.addEventListener("mouseleave", finish);
-      /**
-       * 에이전트 PC은 폰이 아니라 **맥 화면**이다 — 우클릭·휠·키보드가 있어야 쓸 수 있다.
-       *  키는 xterm 처럼 pane 이 포커스를 가진 채 받는다(stage 가 tabindex 를 갖는다). 글자는 text 로,
-       *  그 밖(Enter·화살표·⌘ 조합)은 key 조합 문자열로 보낸다 — 데몬 desktop.js 의 계약과 같다.
-       */
-      if (dev && dev.kind === "desktop") {
-        stage.tabIndex = 0;
-        stage.classList.add("emu-desktop");
-        stage.addEventListener("contextmenu", (ev) => {
-          ev.preventDefault();
-          const r = this.ratioOf(ev); if (!r) return;
-          down = null;
-          this.send({ type: "tap", button: "right", x: r.x, y: r.y });
-        });
-        let wheelAcc = 0, wheelTimer = null, wheelAt = null;
-        stage.addEventListener("wheel", (ev) => {
-          ev.preventDefault();
-          const r = this.ratioOf(ev); if (!r) return;
-          wheelAcc += ev.deltaY; wheelAt = r;
-          if (wheelTimer) return;
-          wheelTimer = setTimeout(() => {
-            wheelTimer = null;
-            const dy = Math.max(-30, Math.min(30, Math.round(wheelAcc / 40))) || (wheelAcc > 0 ? 1 : -1);
-            wheelAcc = 0;
-            this.send({ type: "scroll", x: wheelAt.x, y: wheelAt.y, dy });
-          }, 60);
-        }, { passive: false });
-        stage.addEventListener("mousedown", () => stage.focus());
-        const MOD = { Meta: "cmd", Control: "ctrl", Alt: "alt", Shift: "shift" };
-        const NAMED = { Enter: "enter", Backspace: "backspace", Tab: "tab", Escape: "escape", Delete: "delete", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right", Home: "home", End: "end", PageUp: "pageup", PageDown: "pagedown", " ": "space" };
-        stage.addEventListener("keydown", (ev) => {
-          if (MOD[ev.key]) return;                                  // 수식키 단독은 조합에 실려 간다
-          const hasMod = ev.metaKey || ev.ctrlKey || ev.altKey;
-          const named = NAMED[ev.key] || (/^F\d{1,2}$/.test(ev.key) ? ev.key.toLowerCase() : null);
-          if (!named && !hasMod && ev.key.length === 1) {           // 그냥 글자(대문자 포함) — IME 조합은 compositionend 로
-            if (ev.isComposing) return;
-            ev.preventDefault();
-            this.send({ type: "text", text: ev.key });
-            return;
-          }
-          const main = named || (ev.key.length === 1 ? ev.key.toLowerCase() : null);
-          if (!main) return;
-          ev.preventDefault();
-          const mods = [ev.metaKey && "cmd", ev.ctrlKey && "ctrl", ev.altKey && "alt", ev.shiftKey && "shift"].filter(Boolean);
-          this.send({ type: "key", key: [...mods, main].join("+") });
-        });
-        stage.addEventListener("compositionend", (ev) => { if (ev.data) this.send({ type: "text", text: ev.data }); });
-      }
-    } else if (dev && dev.kind === "desktop") {
-      //  꺼진 에이전트 PC — 버튼 대신 한 줄(켜기는 상태 바의 전원 아이콘 하나뿐, 사용자 결정 2026-09-17).
-      const off = document.createElement("div");
-      off.className = "emu-off";
-      off.textContent = this.deskOffText();
-      stage.appendChild(off);
     } else if (!booted) {
       const b = document.createElement("button");
       b.className = "emu-boot";
@@ -1178,19 +971,8 @@ export class EmulatorView {
     //  화면 + 버튼 스트립. 어느 쪽에 붙일지는 **여백이 어디 생기는지**로 정한다(applyLayout).
     const wrap2 = document.createElement("div");
     wrap2.className = "emu-main";
-    const isDesktop = !!(dev && dev.kind === "desktop");
-    if (isDesktop) {
-      //  에이전트 PC은 폰이 아니라 맥 화면 — 옆 스트립 대신 **얇은 상태 바**를 위에 둔다(목업 확정 2026-09-17):
-      //   [● 실행 중 · 1440×900 · 에이전트 조작 중]   [에이전트 멈춤↔재개] [첨부] [계속] [···]
-      this.el.append(this.buildDeskBar(dev, booted));
-      wrap2.append(stage);
-      this.keysEl = null;
-      this.startDeskPoll();
-    } else {
-      wrap2.append(stage, keys);
-      this.keysEl = keys;
-      this.stopDeskPoll();
-    }
+    wrap2.append(stage, keys);
+    this.keysEl = keys;
     this.el.append(wrap2);
     this.mainEl = wrap2;
     //  render 는 <canvas>/<img> 를 새로 만든다 — 배치·표시 회전을 그 위에 다시 얹는다.

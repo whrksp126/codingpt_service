@@ -79,7 +79,9 @@ export function filterCommands(items, q, max) {
   const rest = [];
   for (const c of all) {
     const n = String(c.name || "").slice(1).toLowerCase();
-    if (n.startsWith(s)) pre.push(c);
+    // 별칭(`/rc` → /remote-control) — TUI 처럼 별칭 접두사도 접두사 일치로 친다.
+    const al = Array.isArray(c.aliases) ? c.aliases : [];
+    if (n.startsWith(s) || al.some((a) => String(a).toLowerCase().startsWith(s))) pre.push(c);
     else if (n.includes(s)) rest.push(c);
   }
   return pre.concat(rest).slice(0, cap);

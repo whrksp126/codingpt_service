@@ -10,8 +10,6 @@
 //
 // 정본은 이 파일(<stateDir>/surfaces.json) 이다. 터미널과 달리 살아 있는 실체(tmux)가 없으므로 기록이 곧 존재다.
 //  · id = 클라이언트가 만든 표면 id(sid). 같은 id 로 다시 add 하면 갱신(멱등) — 기기 두 대가 같은 걸 등록해도 하나.
-//  · 에이전트 PC(deviceId `desktop:<os>`)는 OS별로 하나 — 같은 OS 를 다른 id 로 add 하면 있는 것을 돌려준다(macOS·Linux 는 공존)
-//    (클라이언트는 돌려받은 id 를 자기 탭에 붙인다). 맥 1대 = 에이전트 PC 1대.
 //  · 변경은 pool.changed 로 전 기기에 즉시 알린다(터미널과 같은 신호 — 리컨실러가 바로 다시 읽는다).
 const fs = require('fs');
 const path = require('path');
@@ -27,13 +25,13 @@ let notify = () => {};
 /** 변경 알림 훅(cpt-server 가 pool.changed 브로드캐스트를 건다). */
 function setNotify(fn) { notify = typeof fn === 'function' ? fn : () => {}; }
 
+function isDesk(s) { return s && s.kind === 'emulator' && typeof s.deviceId === 'string' && s.deviceId.startsWith('desktop:'); }
 function load() {
   try {
     const j = JSON.parse(fs.readFileSync(FILE(), 'utf8'));
     const items = Array.isArray(j && j.items) ? j.items : [];
-    //  ★ 레거시 `desktop:main` 표면은 버린다(OS별 분리 전 잔재) — 지금은 desktop:macos/linux 만 쓴다.
-    //   그대로 두면 macOS pane 이 둘로 보인다(desktop:main 이 macOS 로 렌더). 읽을 때 걸러 자가 치유한다.
-    return items.filter((s) => s && typeof s.id === 'string' && typeof s.ws === 'string' && KINDS.has(s.kind) && s.deviceId !== 'desktop:main');
+    //  옛 에이전트 PC(VM) 표면(`desktop:*`)은 기능 제거(2026-11-25)로 버린다 — 읽을 때 걸러 자가 치유한다.
+    return items.filter((s) => s && typeof s.id === 'string' && typeof s.ws === 'string' && KINDS.has(s.kind) && !isDesk(s));
   } catch (_) { return []; }
 }
 
@@ -72,7 +70,6 @@ function pick(o = {}) {
   return out;
 }
 
-const isDesk = (s) => s && s.kind === 'emulator' && typeof s.deviceId === 'string' && s.deviceId.startsWith('desktop:');
 const strip = (s) => { const { ws, ...rest } = s; return rest; };
 /** 내용 비교용 — 시각 필드는 뺀다(같은 내용을 다시 넣어도 변경이 아니다). */
 const body = (s) => { const { ws, createdAt, updatedAt, ...rest } = s; return JSON.stringify(rest); };
@@ -89,14 +86,8 @@ function add({ cwd, id, kind, ...props } = {}) {
   if (!KINDS.has(kind)) throw new Error('kind 는 preview|ide|emulator|chat 중 하나입니다.');
   const items = load();
   const p = pick(props);
-  //  레거시 desktop:main 은 등록하지 않는다(위 load 필터와 짝) — 클라가 옛 레이아웃으로 다시 올려도 무시 → 리컨실이 그 탭을 정리한다.
-  if (p.deviceId === 'desktop:main') return { ok: true, legacy: true };
-  // 에이전트 PC 는 **OS별로** 하나(macOS·Linux 독립). 같은 OS(deviceId)가 이미 있으면 그걸 돌려준다(다른 id 로 온 중복만 흡수).
-  //  ★ 예전엔 desktop 전체를 하나로 흡수해서 둘째 OS 표면이 첫째로 합쳐졌다(2026-09-21 실사고: Linux 뒤 macOS 열면 탭이 하나로).
-  if (kind === 'emulator' && p.deviceId && p.deviceId.startsWith('desktop:')) {
-    const had = items.find((s) => s.ws === ws && isDesk(s) && s.deviceId === p.deviceId);
-    if (had && had.id !== sid) return { ok: true, item: strip(had), merged: true };
-  }
+  //  옛 에이전트 PC(VM) 표면은 등록하지 않는다(load 필터와 짝) — 옛 클라가 다시 올려도 무시 → 리컨실이 그 탭을 정리한다.
+  if (kind === 'emulator' && typeof p.deviceId === 'string' && p.deviceId.startsWith('desktop:')) return { ok: true, legacy: true };
   const now = Date.now();
   const i = items.findIndex((s) => s.ws === ws && s.id === sid);
   let item;
@@ -141,9 +132,9 @@ function remove({ cwd, id } = {}) {
   return { ok: true };
 }
 
-/** 이 기기를 보여 주는 모바일 화면 표면을 워크스페이스와 무관하게 전부 닫는다(기기가 꺼졌을 때). 에이전트 PC 는 끄고도 pane 을 쓰므로 뺀다. */
+/** 이 기기를 보여 주는 모바일 화면 표면을 워크스페이스와 무관하게 전부 닫는다(기기가 꺼졌을 때). */
 function removeEmulatorDevices(deviceIds) {
-  const ids = new Set((deviceIds || []).filter((d) => d && !String(d).startsWith('desktop:')));
+  const ids = new Set((deviceIds || []).filter(Boolean));
   if (!ids.size) return 0;
   const items = load();
   const next = items.filter((s) => !(s.kind === 'emulator' && ids.has(s.deviceId)));

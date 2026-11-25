@@ -1157,41 +1157,6 @@ async function emulatorPower(req, res) {
     return successResponse(res, result);
   } catch (e) { return mapRpcError(res, e); }
 }
-/**
- * 에이전트 PC(desktop.*) — 폰이 상태를 보고 멈춤/재개/개입 [계속]/켜기·끄기 를 누른다. 허용 목록만(임의 RPC 통로 금지).
- *  화면·입력은 emulator.* 를 그대로 탄다(기기 id `desktop:main`).
- */
-const DESKTOP_RPC_OK = new Map([
-  ['desktop.status', 20000], ['desktop.pause', 20000], ['desktop.resume', 20000],
-  ['desktop.start', 200000], ['desktop.stop', 60000],
-  //  폰에서 에이전트 PC 설정(게스트 OS·자원·삭제). settings.set 만 params 를 쓴다(나머지는 params 무시).
-  ['desktop.settings.get', 20000], ['desktop.settings.set', 20000], ['desktop.delete', 60000],
-  //  VM 안의 에이전트(데몬 vm-agent.js) — 준비 상태·설치·워크스페이스 사본 만들기/주고받기/치우기.
-  ['desktop.agent.status', 30000], ['desktop.agent.setup', 30000],
-  ['desktop.agent.ws.add', 600000], ['desktop.agent.ws.sync', 600000], ['desktop.agent.ws.remove', 20000],
-]);
-//  desktop.agent.* 가 받는 문자열 인자(그 밖의 params 는 버린다).
-const DESKTOP_AGENT_PARAM_OK = new Set(['path', 'name', 'dir']);
-//  settings.set 이외의 메서드는 임의 params 를 데몬에 흘리지 않는다(통로 오남용 방지) — 화이트리스트만.
-const DESKTOP_PARAM_OK = new Set(['osKind', 'memGB', 'cpu', 'idleOffMin', 'sharedDirs']);
-async function desktopRpc(req, res) {
-  try {
-    const b = req.body || {};
-    const method = String(b.method || '');
-    if (!DESKTOP_RPC_OK.has(method)) return errorResponse(res, new Error('허용되지 않은 명령입니다.'), 400);
-    //  os 로 어느 게스트 VM(macOS·Linux, 동시 실행)인지 고른다 — 데몬 handle 이 params.os 로 라우팅.
-    const params = {};
-    if (b.os === 'macos' || b.os === 'linux') params.os = b.os;
-    if (method === 'desktop.settings.set' && b.params && typeof b.params === 'object') {
-      for (const k of Object.keys(b.params)) if (DESKTOP_PARAM_OK.has(k)) params[k] = b.params[k];
-    }
-    if (method.startsWith('desktop.agent.') && b.params && typeof b.params === 'object') {
-      for (const k of Object.keys(b.params)) if (DESKTOP_AGENT_PARAM_OK.has(k) && typeof b.params[k] === 'string') params[k] = b.params[k].slice(0, 1024);
-    }
-    const result = await daemonRelayService.callRpc(req.user.id, method, params, DESKTOP_RPC_OK.get(method), connOptsOf(req));
-    return successResponse(res, result);
-  } catch (e) { return mapRpcError(res, e); }
-}
 // POST /api/daemon/surface  body:{ method, params, hostDeviceId } — 공유 표면(프리뷰·IDE·모바일 화면) 목록/등록/해제.
 //  폰이 봉인 RPC(E2EE)를 못 쓸 때의 평문 폴백. 데몬 surfaces.js 가 검증한다(여기선 메서드만 가른다).
 const SURFACE_RPC_OK = new Set(['surface.list', 'surface.add', 'surface.update', 'surface.remove']);
@@ -2074,7 +2039,6 @@ module.exports = {
   emulatorInput,
   emulatorPower,
   emulatorOpenUrl,
-  desktopRpc,
   surfaceRpc,
   taskRpc, _TASK_RPC_OK: TASK_RPC_OK, // Agent Tasks 평문 폴백 + 테스트 노출(허용 표 = 설계 §3.3)
   orchRpc, _ORCH_RPC_OK: ORCH_RPC_OK, // 오케스트레이션 평문 REST(사람 권한 메서드만 — orchestration-design.md)

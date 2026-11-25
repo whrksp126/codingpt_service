@@ -46,21 +46,10 @@ test('add/list/update/remove — 멱등·워크스페이스별·와이어 필드
   assert.deepStrictEqual(S.list({ cwd }).items, []);
 });
 
-test('에이전트 PC 는 OS별로 하나 — 같은 OS 는 흡수, macOS·Linux 는 공존', () => {
+test('옛 에이전트 PC(desktop:*) 표면은 등록하지 않는다', () => {
   const cwd = 'proj';
-  const a = S.add({ cwd, id: 'emuA', kind: 'emulator', deviceId: 'desktop:macos' });
-  assert.strictEqual(a.item.id, 'emuA');
-  //  같은 OS 를 다른 id 로 → 있는 것을 돌려준다(흡수)
-  const b = S.add({ cwd, id: 'emuB', kind: 'emulator', deviceId: 'desktop:macos' });
-  assert.strictEqual(b.item.id, 'emuA'); assert.strictEqual(b.merged, true);
-  //  ★ 다른 OS(Linux)는 별개 표면으로 공존한다(예전엔 desktop 하나로 흡수됐다)
-  const l = S.add({ cwd, id: 'emuL', kind: 'emulator', deviceId: 'desktop:linux' });
-  assert.strictEqual(l.item.id, 'emuL'); assert.ok(!l.merged);
-  assert.strictEqual(S.list({ cwd }).items.filter((s) => (s.deviceId || '').startsWith('desktop:')).length, 2);
-  //  일반 모바일 화면은 여럿 가능 — macOS·Linux·android = 3
-  S.add({ cwd, id: 'emuC', kind: 'emulator', deviceId: 'android:emulator-5554' });
-  assert.strictEqual(S.list({ cwd }).items.length, 3);
-  S.forgetWs(cwd);
+  assert.strictEqual(S.add({ cwd, id: 'emuA', kind: 'emulator', deviceId: 'desktop:macos' }).legacy, true);
+  assert.strictEqual(S.list({ cwd }).items.filter((s) => (s.deviceId || '').startsWith('desktop:')).length, 0);
 });
 
 test('cpt-server·control 이 같은 함수를 타고 terminal.list 에 surfaces 를 싣는다(소스 계약)', () => {

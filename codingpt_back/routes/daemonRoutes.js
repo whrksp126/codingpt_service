@@ -68,7 +68,6 @@ router.post('/emulator/frame', accountAuth, daemonController.emulatorFrame);
 router.post('/emulator/input', accountAuth, daemonController.emulatorInput);
 router.post('/emulator/power', accountAuth, daemonController.emulatorPower);
 router.post('/emulator/open-url', accountAuth, daemonController.emulatorOpenUrl);
-router.post('/desktop', accountAuth, daemonController.desktopRpc);
 router.post('/surface', accountAuth, daemonController.surfaceRpc);
 // Agent Tasks(task.*/git.*) 평문 폴백 — 봉인 RPC 가 구조적으로 불가할 때만. 허용 표 = daemonController.TASK_RPC_OK.
 router.post('/task', accountAuth, daemonController.taskRpc);

@@ -505,10 +505,9 @@ test('켠 기기가 꺼지면 그 화면을 닫는다 — 어떻게 꺼졌든, �
   const S = require('../surfaces');
   fs.mkdirSync(path.join(tmp, 'ws'));
   S.add({ cwd: path.join(tmp, 'ws'), id: 'emu1', kind: 'emulator', deviceId: 'avd:Fake' });
-  S.add({ cwd: path.join(tmp, 'ws'), id: 'desk', kind: 'emulator', deviceId: 'desktop:macos' });
   E._tracked.set('avd:Fake', { avdName: 'Fake', liveId: 'android:emulator-5554', since: 0 });
   await E._sweepTracked();
-  assert.deepStrictEqual(S.list({ cwd: path.join(tmp, 'ws') }).items.map((i) => i.id), ['desk']);
+  assert.deepStrictEqual(S.list({ cwd: path.join(tmp, 'ws') }).items.map((i) => i.id), []);
   assert.ok(!E._tracked.has('avd:Fake'));
   runtime.init(prev);
 });

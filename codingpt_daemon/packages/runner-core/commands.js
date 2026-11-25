@@ -36,11 +36,11 @@ const CLAUDE_BUILTIN = [
   { name: '/chrome', desc: 'Open Claude in Chrome settings', chat: 'tui' },
   { name: '/claude-api', desc: 'Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration. TRIGG…' },
   { name: '/claude-in-chrome', desc: 'Automates your Chrome browser to interact with web pages - clicking elements, filling forms, capturing screenshots, reading console logs, and navigating sites.…' },
-  { name: '/clear', desc: 'Start a new session with empty context; previous session stays on disk (resumable with /resume)' },
+  { name: '/clear', aliases: ['reset', 'new'], desc: 'Start a new session with empty context; previous session stays on disk (resumable with /resume)' },
   { name: '/code-review', desc: 'Review the current diff for correctness bugs and reuse/simplification/efficiency cleanups at the given effort level (low/medium: fewer, high-confidence findi…' },
   { name: '/color', desc: 'Set the prompt bar color for this session' },
   { name: '/compact', desc: 'Free up context by summarizing the conversation so far' },
-  { name: '/config', desc: 'Open settings', chat: 'dialog' },
+  { name: '/config', aliases: ['settings'], desc: 'Open settings', chat: 'dialog' },
   { name: '/context', desc: 'Visualize current context usage as a colored grid' },
   { name: '/copy', desc: 'Copy Claude\'s last response to clipboard (or /copy N for the Nth-latest)', chat: 'tui' },
   { name: '/cpt-cli', desc: 'ONLY for terminals launched by the CodingPT app, where the CPT_WS environment variable is set. First check `$CPT_WS`: if it is empty or unset, this skill does …' },
@@ -54,7 +54,7 @@ const CLAUDE_BUILTIN = [
   { name: '/diff', desc: 'View uncommitted changes and per-turn diffs' },
   { name: '/doctor', desc: 'Health-check the user\'s Claude Code setup and fix issues: diagnose installation health — what the `claude doctor` terminal diagnostics cover — from local dat…' },
   { name: '/effort', desc: 'Set effort level for model usage', chat: 'dialog' },
-  { name: '/exit', desc: 'Exit the CLI', chat: 'tui' },
+  { name: '/exit', aliases: ['quit'], desc: 'Exit the CLI', chat: 'tui' },
   { name: '/export', desc: 'Export the current conversation to a file or clipboard' },
   { name: '/fast', desc: 'Toggle fast mode (Opus 5)' },
   { name: '/feedback', desc: 'Send feedback to Anthropic or report a bug' },
@@ -90,11 +90,11 @@ const CLAUDE_BUILTIN = [
   { name: '/release-notes', desc: 'View release notes' },
   { name: '/reload-plugins', desc: 'Activate pending plugin changes in the current session' },
   { name: '/reload-skills', desc: 'Pick up skills added or changed on disk during this session' },
-  { name: '/remote-control', desc: 'Control this session from your phone or claude.ai/code' },
+  { name: '/remote-control', aliases: ['rc'], desc: 'Control this session from your phone or claude.ai/code' },
   { name: '/remote-env', desc: 'Choose the default environment for cloud agents', chat: 'dialog' },
   { name: '/rename', desc: 'Rename the current conversation' },
-  { name: '/resume', desc: 'Resume a previous conversation', chat: 'dialog' },
-  { name: '/rewind', desc: 'Restore the code and/or conversation to a previous point', chat: 'dialog' },
+  { name: '/resume', aliases: ['continue'], desc: 'Resume a previous conversation', chat: 'dialog' },
+  { name: '/rewind', aliases: ['checkpoint'], desc: 'Restore the code and/or conversation to a previous point', chat: 'dialog' },
   { name: '/sandbox', desc: '◯ sandbox disabled (⏎ to configure)', chat: 'dialog' },
   { name: '/scroll-speed', desc: 'Adjust mouse wheel scroll speed', chat: 'tui' },
   { name: '/skills', desc: 'List available skills', chat: 'dialog' },
@@ -276,7 +276,7 @@ function listCommands({ agent, cwdAbs } = {}) {
   if (hit && now - hit.at < CACHE_MS) return { agent: a, items: hit.items };
 
   const builtin = (a === 'codex' ? CODEX_BUILTIN : CLAUDE_BUILTIN)
-    .map((x) => ({ name: x.name, desc: x.desc, chat: x.chat || 'ok', source: 'builtin' }));
+    .map((x) => ({ name: x.name, desc: x.desc, chat: x.chat || 'ok', source: 'builtin', ...(x.aliases ? { aliases: x.aliases } : {}) }));
   const found = a === 'codex' ? discoverCodex() : discoverClaude(cwdAbs);
   // 디스크에서 찾은 것이 표를 이긴다(설명이 최신이고, 덮어쓴 정의가 실제로 실행되는 쪽이다).
   const byName = new Map();
@@ -292,7 +292,7 @@ function listCommands({ agent, cwdAbs } = {}) {
 function findCommand({ agent, cwdAbs, name }) {
   const n = String(name || '').trim().split(/\s+/)[0];
   if (!n.startsWith('/')) return null;
-  return listCommands({ agent, cwdAbs }).items.find((x) => x.name === n) || null;
+  return listCommands({ agent, cwdAbs }).items.find((x) => x.name === n || (x.aliases || []).some((a) => '/' + a === n)) || null;
 }
 
 function _clearCache() { cache.clear(); }

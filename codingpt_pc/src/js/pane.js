@@ -8,7 +8,7 @@ import { confirmEmulatorClose } from "./emulator-close.js";
 import { icons, agentMarkHtml } from "./icons.js";
 import { IdeView } from "./ide.js";
 import { fileIcon } from "./fileicons.js";
-import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
+import { makeRemoteFs } from "./remote-fs.js";
 import lan from "./lan.js";
 import { termFontPx, onScaleChange } from "./display-scale.js";
 import { termTheme, monoFontStack, cmThemeName, onAppearanceChange, termMinContrast, getThemeMode } from "./theme.js";
@@ -16,7 +16,6 @@ import { toggleChiiDevtools, dtPageSlot, dtActive, dtOnPageLoaded, dtDispose, dt
 import { recordVisit, queryHistory, googleSuggest } from "./preview-history.js";
 import { ChatView } from "./chat-view.js";
 import { ConvView, adoptErrorText } from "./conv-view.js";
-import { osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { CHAT, chatBetaEnabled } from "./chat-model.js";
 import { resolveAgentPresence, resolveToggleVisible, resolveChatReady, resolveAgentBrand } from "./agent-signal.js";
 import { paneApprovalCount } from "./approvals.js";
@@ -175,7 +174,6 @@ function b64ToBytes(b64) {
  *  예전엔 `kind === "ide" ? … : 프리뷰` 식 삼항이 두 곳에 흩어져 있었고, 그래서 모바일 화면 pane 이
  *  "프리뷰" 라는 이름과 지구본 아이콘을 달고 다녔다(2026-08-05).
  */
-function isDesktopSurface(node) { return !!(node && String(node.deviceId || "").startsWith("desktop:")); }
 export function surfaceLabel(kind, node) {
   //  파일 pane — 그 파일 이름이 제목이다(IDE 해체, 2026-10).
   if (kind === "ide") return (node && node.openPath ? String(node.openPath).split("/").pop() : "") || i18n.t('파일');
@@ -183,11 +181,7 @@ export function surfaceLabel(kind, node) {
   if (kind === "chat") return (node && node.title) || i18n.t('채팅');
   //  ★ 기기를 고르면 **그 기기 이름**이 탭 제목이다(2026-08-06 사용자 확정). 탭이 여러 개일 때
   //   전부 "모바일 화면" 이면 어느 게 어느 기기인지 알 수가 없다. 아직 안 골랐으면 종류 이름.
-  //  에이전트 PC 는 게스트 OS 로 이름을 붙인다("macOS · VM"/"Linux · VM"). OS 를 아직 모르면 "에이전트 PC".
-  if (kind === "emulator") {
-    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o ? osVmLabel(o) : i18n.t('에이전트 PC'); }
-    return (node && node.metaName) || i18n.t('모바일 화면');
-  }
+  if (kind === "emulator") return (node && node.metaName) || i18n.t('모바일 화면');
   return (node && node.metaTitle) || i18n.t('프리뷰');
 }
 export function surfaceIcon(kind, node) {
@@ -195,11 +189,7 @@ export function surfaceIcon(kind, node) {
   if (kind === "ide") return (o) => fileIcon((node && node.openPath) || "", (o && o.size) || 14);
   //  채팅 = 그 대화를 돌리는 에이전트의 로고(Claude·Codex…). 대화 전(새 채팅)은 기본 에이전트(claude) — 지금 채팅 엔진이 claude 만 띄운다.
   if (kind === "chat") return (o) => agentMarkHtml((node && node.agent) || "claude", o) || icons.chat(o);
-  if (kind === "emulator") {
-    //  에이전트 PC = 게스트 OS 로고(macOS=Apple·Linux=Tux). id 로 판정, 모르면 모니터.
-    if (isDesktopSurface(node)) { const o = osOfDeviceId(node.deviceId); return o === "linux" ? icons.linux : o === "macos" ? icons.apple : icons.monitor; }
-    return icons.smartphone;
-  }
+  if (kind === "emulator") return icons.smartphone;
   return icons.globe;
 }
 
@@ -1235,7 +1225,6 @@ export class PaneView {
   // 내장 IDE(파일트리 + CodeMirror).
   // 파일 전송 계층 — 이 호스트면 로컬 fsapi(기본), 다른 PC 워크스페이스면 back fs 릴레이(원격 IDE).
   _ideFs() {
-    if (this.ctx.isLocal && isVmPath(this.ctx.localPath)) return makeVmFs(); // VM 워크스페이스 = VM 안의 파일
     return this.ctx.isLocal ? null : makeRemoteFs(this.ctx.hostDeviceId);
   }
 
@@ -1263,7 +1252,6 @@ export class PaneView {
       cwd: () => this.ctx.localPath || "",
       hostDeviceId: () => this.ctx.hostDeviceId ?? null,
       isLocal: () => !!this.ctx.isLocal,
-      vmRoot: () => (this.ctx.isLocal && isVmPath(this.ctx.localPath) ? this.ctx.localPath : null), // VM 워크스페이스면 그 자리 경로
       hostOffline: () => !!this.ctx.hostOffline,
       deviceName: () => appState.daemon?.device_name || "",
       tab: () => holder,
@@ -1807,7 +1795,6 @@ export class PaneView {
       // 이 PC 의 터미널인가 — 맞으면 채팅 조회/모드를 **사이드카 데몬 직결**로 보낸다(back 왕복 제거).
       //  라이브 getter 인 이유는 hostDeviceId 와 같다(재클레임으로 로컬/원격이 바뀔 수 있다).
       isLocal: () => !!this.ctx.isLocal,
-      vmRoot: () => (this.ctx.isLocal && isVmPath(this.ctx.localPath) ? this.ctx.localPath : null), // VM 워크스페이스면 그 자리 경로
       tid: () => {
         const t = this.node.tabs?.[this.node.active];
         return t && isTermTab(t) && typeof t.win === "number" ? t.win : null;

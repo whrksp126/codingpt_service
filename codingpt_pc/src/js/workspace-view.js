@@ -9,7 +9,6 @@ import { handleOsc } from "./notifications.js";
 import { buildTopControls } from "./sidebar.js";
 import { api } from "./api.js";
 import { icons, agentMarkHtml } from "./icons.js";
-import { setDesktopOs, osVmLabel, osOfDeviceId } from "./desktop-os.js";
 import { cachedAgents, loadAgents } from "./agents-view.js";
 import { tx } from "./text/index.js";
 import { PALETTE_TEXT } from "./text/palette.js";
@@ -22,7 +21,7 @@ import { hostCaps, serverHasCap, refreshHostCaps } from "./tasks-api.js";
 import { pickConvTab, urlKey } from "./conv-model.js";
 import { confirmEmulatorClose } from "./emulator-close.js";
 import { IdeView } from "./ide.js";
-import { makeRemoteFs, makeVmFs, isVmPath } from "./remote-fs.js";
+import { makeRemoteFs } from "./remote-fs.js";
 
 // 간단 토스트(스냅샷 결과 등) — 화면 하단 중앙 2.8s. punch-through 로 프리뷰 위에 뜬다.
 export function wvToast(msg) {
@@ -171,13 +170,13 @@ function syncTreePanel(ws) {
   try { treeView?.dispose(); } catch (_) { /* noop */ }
   for (const c of [...treePanelEl.children]) if (!c.classList.contains("ws-tree-resizer")) c.remove(); // 그립은 남긴다
   treeWsId = ws.id;
-  const fs = isVmPath(ws.localPath) && isThisHost(ws) ? makeVmFs() : (isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId)); // VM 워크스페이스 = VM 안의 파일
+  const fs = isThisHost(ws) ? null : makeRemoteFs(ws.hostDeviceId);
   treeView = new IdeView(ws.localPath || "", treePanelEl, {
     treeOnly: true,
     fs: fs || undefined,
     onOpenFile: (path, o) => (o && o.split ? smartAdd("ide", { openPath: path }) : openFileAsPane(path)),
-    //  git 표시(변경 글자·무시 흐림) — 그 PC 데몬에 묻는다. VM 안의 파일은 표시하지 않는다(VM 의 git 은 데몬이 못 본다).
-    gitFiles: fs && fs.vm ? null : (root) => import("./tasks-api.js").then((m) => m.taskRpc("git.files", { cwd: root }, ws.hostDeviceId)),
+    //  git 표시(변경 글자·무시 흐림) — 그 PC 데몬에 묻는다.
+    gitFiles: (root) => import("./tasks-api.js").then((m) => m.taskRpc("git.files", { cwd: root }, ws.hostDeviceId)),
   });
   treeView.mount();
 }
@@ -930,10 +929,6 @@ function openAddMenu(anchor) {
   //  모르는 동안에는 그리지 않는다: 눌러도 안 되는 메뉴보다 없는 메뉴가 낫다. 조회가 끝나면 다음에 열 때 나타난다.
   if (convGate(activeWs()) === true) row(icons.chat, i18n.t('채팅'), { onClick: () => smartAdd("chat") });
   else if (convGate(activeWs()) == null) void refreshHostCaps();
-  // 에이전트 PC — 게스트 OS(macOS/Linux)를 하위 메뉴에서 고른다(터미널·웹뷰처럼 `›`).
-  //  기기 목록을 거치지 않게 하는 이유: 사용자에게 데스크톱은 "기기 하나"가 아니라 프리뷰·IDE 와 같은 급의 표면이다.
-  //  ★ 맥 1대에 1대 — 표면도 하나. 이미 열려 있으면 그 탭을 앞으로(두 번 눌러 pane 이 둘이 되지 않게, 2026-09-20).
-  //  에이전트 PC 는 뺐다(2026-10-04 QA) — 사이드바의 PC 아래 `macOS (VM)`/`Linux (VM)` 행에서 연다.
   // 새 작업은 뺐다(2026-10-05 사용자 확정) — 이 메뉴는 "지금 화면에 표면을 더하는 곳"이고, 작업은
   //  진행 현황·자동화·사이드바 워크스페이스 `⋯` 메뉴에서 만든다.
 
@@ -1006,58 +1001,6 @@ function mixedTabFor(kind, extra) {
   //  ⚠ 모르는 종류에 기본값(프리뷰 등)을 주지 않는다 — 그런 "그럴듯한 기본값"이 바로
   //   [모바일 화면] 버튼이 터미널을 만들던 사고의 모양이다. 모르면 아무것도 안 한다.
   return T.leafToTab({ kind, ...(extra || {}) });
-}
-
-// "에이전트 PC ›" 하위 메뉴 — 게스트 OS 두 종(macOS/Linux)을 로고와 함께 고른다(Image #21).
-//  지금 설정된 OS 에는 체크. 목록은 즉시 그리고, 설정이 오면 체크만 채운다(메뉴가 늦게 뜨지 않게).
-// "에이전트 PC ›" 하위 메뉴 — macOS·Linux 를 **각각 독립 pane** 으로 연다(둘 다 동시에 쓸 수 있다).
-//  이미 열려 있는 OS 는 체크로 표시하고, 누르면 그 pane 을 앞으로 끌어온다.
-// 그 OS 의 에이전트 PC pane 을 연다(이미 열려 있으면 앞으로). 두 OS 는 서로 독립 — 하나 열어도 다른 하나는 그대로.
-export function openDesktopOsPane(osKind) {
-  setDesktopOs(osKind);   // 레거시 캐시(파비콘 폴백)
-  if (focusDesktopSurface(osKind)) return;
-  smartAdd("emulator", { deviceId: `desktop:${osKind}`, metaName: osVmLabel(osKind) });
-}
-
-// 지금 이 워크스페이스에 그 OS 의 에이전트 PC pane 이 이미 있나?
-function isDesktopOsOpen(osKind) {
-  const rt = wsRuntime(state.activeWsId);
-  if (!rt || !rt.layout) return false;
-  let found = false;
-  const match = (d) => osOfDeviceId(d) === osKind;
-  T.eachLeaf(rt.layout, (l) => {
-    if (found) return;
-    if (l.kind === "emulator" && match(l.deviceId)) found = true;
-    else if (l.kind === "terminal" && (l.tabs || []).some((t) => t.kind === "emulator" && match(t.deviceId))) found = true;
-  });
-  return found;
-}
-
-/** 이미 열린 에이전트 PC 표면(leaf 또는 혼합 탭)을 앞으로 끌어온다. 없으면 false. */
-export function focusDesktopSurface(osKind) {
-  const rt = wsRuntime(state.activeWsId);
-  if (!rt || !rt.layout) return false;
-  //  os 를 주면 그 OS 의 pane 만(desktop:macos/linux 는 id 로, 레거시 desktop:main 은 osOfDeviceId 로). 없으면 아무 데스크톱.
-  const isDesk = (d) => typeof d === "string" && d.startsWith("desktop:") && (!osKind || osOfDeviceId(d) === osKind);
-  let hit = null;
-  T.eachLeaf(rt.layout, (l) => {
-    if (hit) return;
-    if (l.kind === "emulator" && isDesk(l.deviceId)) hit = { leaf: l };
-    else if (l.kind === "terminal") {
-      const i = (l.tabs || []).findIndex((t) => t.kind === "emulator" && isDesk(t.deviceId));
-      if (i >= 0) hit = { leaf: l, index: i };
-    }
-  });
-  if (!hit) return false;
-  if (hit.index != null) {
-    hit.leaf.active = hit.index;
-    const pane = panes.get(hit.leaf.id);
-    pane?.buildHead();
-    pane?.showActiveTab?.();
-  }
-  S.focusPane(hit.leaf.id);
-  S.emit();
-  return true;
 }
 
 export function smartAdd(kind, extra) {

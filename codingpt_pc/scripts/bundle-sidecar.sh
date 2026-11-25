@@ -216,51 +216,7 @@ if [[ "$TARGET" == darwin-* ]]; then
   fi
 fi
 
-# ── 4c) Lume 번들 (darwin) — 에이전트 데스크톱(게스트 macOS VM)의 하이퍼바이저 CLI ──
-#  데몬 desktop.js 가 lib.rs 주입 CPT_LUME(=<base>/lume/lume) 로 이 바이너리를 우선 쓴다. 사용자 무설치.
-#  릴리스 tar.gz 를 한 번 캐시에 받아 lume.app 을 통째로 넣는다. 재서명은 **가상화 entitlement 만** 남긴다 —
-#  원본의 com.apple.vm.networking(브리지 네트워킹) 은 Apple 승인 entitlement 라 우리 서명으론 실행이 거부된다
-#  (NAT 만 쓰므로 필요도 없다).
-LUME_VER="${LUME_VER:-0.5.3}"
 if [[ "$TARGET" == darwin-* ]]; then
-  LUME_TGZ="$CACHE/lume-$LUME_VER-darwin-arm64.tar.gz"
-  if [ ! -f "$LUME_TGZ" ]; then
-    echo "▸ lume $LUME_VER 내려받기"
-    mkdir -p "$CACHE"
-    curl -fsSL -o "$LUME_TGZ" "https://github.com/trycua/cua/releases/download/lume-v$LUME_VER/lume-$LUME_VER-darwin-arm64.tar.gz" \
-      || { echo "⚠ lume 내려받기 실패 — 에이전트 데스크톱 없이 번들(사용자 PC 에서 lume 별도 설치 필요)" >&2; rm -f "$LUME_TGZ"; }
-  fi
-  if [ -f "$LUME_TGZ" ]; then
-    LUME_OUT="$OUT/lume"
-    rm -rf "$LUME_OUT"; mkdir -p "$LUME_OUT"
-    tar -xzf "$LUME_TGZ" -C "$LUME_OUT" lume.app
-    cat > "$LUME_OUT/lume" <<'SH'
-#!/bin/sh
-exec "$(dirname "$0")/lume.app/Contents/MacOS/lume" "$@"
-SH
-    chmod +x "$LUME_OUT/lume"
-    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
-      ENT_VZ="$PC_DIR/src-tauri/entitlements.lume.plist"
-      codesign --force --timestamp --options runtime --entitlements "$ENT_VZ" --sign "$CODESIGN_IDENTITY" "$LUME_OUT/lume.app"
-      codesign --verify --verbose=1 "$LUME_OUT/lume.app"
-    fi
-    echo "▸ lume 번들 완료 → $LUME_OUT ($("$LUME_OUT/lume" --version 2>/dev/null | tail -1))"
-  fi
-  # 4d. vt-h264 — 에이전트 PC 라이브 영상 인코더(VideoToolbox, Swift 한 파일). swiftc 는 Xcode CLT 에 있다.
-  #  ★ rm -f 후 새로 쓴다(같은 inode 덮어쓰기 = 서명 캐시 불일치로 SIGKILL — 이 파일 머리의 절대 함정).
-  VT_SRC="$DAEMON_SRC/packages/runner-core/native/vt-h264.swift"
-  if [ -f "$VT_SRC" ] && command -v swiftc >/dev/null 2>&1; then
-    rm -f "$OUT/vt-h264"
-    swiftc -O -o "$OUT/vt-h264" "$VT_SRC"
-    if [ -n "${CODESIGN_IDENTITY:-}" ]; then
-      codesign --force --timestamp --options runtime --sign "$CODESIGN_IDENTITY" "$OUT/vt-h264"
-    else
-      codesign -f -s - "$OUT/vt-h264" >/dev/null 2>&1 || true
-    fi
-    echo "▸ vt-h264 번들 완료 → $OUT/vt-h264"
-  else
-    echo "⚠ swiftc 없음 — 에이전트 PC 라이브 영상 없이 번들(프레임 폴링으로 동작)" >&2
-  fi
   # 4e. cpt-stt — 채팅 음성 입력 엔진(Speech + AVAudioEngine, Swift 한 파일). 없으면 마이크 버튼은 시스템 받아쓰기로 떨어진다.
   #  · Info.plist 를 바이너리에 박는다(__TEXT,__info_plist) — 사용 사유 문구가 없으면 권한을 묻는 순간 macOS 가 죽인다.
   #  · 마이크를 열어야 하므로 서명에 audio-input 항목을 준다(아래 5단계의 일괄 서명이 덮어쓰지 않게 거기서 제외한다).
