@@ -293,3 +293,29 @@ test('/compact 요약("This session is being continued…")은 사람이 한 말
   const [plain] = engine.toMsgs({ type: 'user', uuid: 'u-1', message: { role: 'user', content: '안녕' } }, { blockIdx: 0 });
   assert.notStrictEqual(plain.hidden, true);
 });
+
+test('다른 세션의 보고(서브에이전트 hand-back)는 내 말풍선이 아니라 agent_report 다', () => {
+  const body = 'Another Claude session sent a message:\n<agent-message from="ada6a120784e71801">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output. The report follows:\n  결과 파일을 저장했습니다.\n  - 항목 15개\n</agent-message>\n\nThat "other Claude session" is an agent working inside this same session.';
+  // 라이브(stream-json 재생) — origin/isMeta 없음
+  const live = engine.toMsgs({ type: 'user', uuid: 'u1', message: { role: 'user', content: body } });
+  assert.strictEqual(live.length, 1);
+  assert.strictEqual(live[0].kind, 'agent_report');
+  assert.strictEqual(live[0].role, 'system');
+  assert.strictEqual(live[0].text, '결과 파일을 저장했습니다.\n- 항목 15개');
+  assert.strictEqual(live[0].meta.from, 'ada6a120784e71801');
+  assert.strictEqual(live[0].meta.subagent, true);
+  // 세션 파일 — origin.kind peer + isMeta(예전엔 통째로 접혀 사라졌다)
+  const imp = engine.importLine({ type: 'user', uuid: 'u2', isMeta: true, origin: { kind: 'peer', from: 'x1', senderTaskId: 'x1', name: 'app-expert' }, message: { role: 'user', content: body } }, { blockIdx: () => 0 });
+  assert.strictEqual(imp.length, 1);
+  assert.strictEqual(imp[0].kind, 'agent_report');
+  assert.strictEqual(imp[0].meta.name, 'app-expert');
+  assert.ok(!imp[0].hidden);
+  // 평범한 사용자 말은 그대로
+  const plain = engine.toMsgs({ type: 'user', uuid: 'u3', message: { role: 'user', content: '안녕' } });
+  assert.strictEqual(plain[0].kind, 'text');
+});
+
+test('rateOf — unifiedWindows 를 창별로 싣는다(현재 세션·주간 한도)', () => {
+  const r = engine.rateOf({ status: 'allowed', rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 0.35, resetsAt: 1 }, seven_day: { utilization: 0.34, resetsAt: 2 } } });
+  assert.deepStrictEqual(r.windows, { five_hour: { utilization: 0.35, resetsAt: 1 }, seven_day: { utilization: 0.34, resetsAt: 2 } });
+});

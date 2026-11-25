@@ -95,6 +95,45 @@ function toLineShape(o) {
   return { line, ptu };
 }
 
+// ── 다른 세션이 보낸 보고(서브에이전트 hand-back · 동료 에이전트 메시지) ─────────────────
+// 2026-11-25 사용자 신고: "AI 가 마치 내가 입력한 것처럼 보낸다". CLI 는 다른 세션의 메시지를 **user 줄**로 끼워 넣는다
+//  (실측: `origin.kind:'peer'`·`isMeta:true`·content = "Another Claude session sent a message:\n<agent-message from=…>…").
+//  stream-json 재생(--replay-user-messages)에는 origin/isMeta 가 빠질 수 있어 본문 서식으로도 알아본다.
+const PEER_HEAD = /^\s*Another Claude session sent a message:\s*<agent-message\b([^>]*)>\r?\n?/;
+const PEER_PREAMBLE = /^\s*\[Subagent hand-back\][\s\S]*?The report follows:[^\n]*\n/;
+
+/** 보고 본문 정리 — 하네스 머리말·꼬리 주의문을 걷고, 하네스가 넣은 줄 들여쓰기(2칸)를 되돌린다. */
+function peerBody(raw) {
+  let s = String(raw || '');
+  const end = s.indexOf('</agent-message>');
+  if (end >= 0) s = s.slice(0, end);
+  const sub = PEER_PREAMBLE.test(s);
+  s = s.replace(PEER_PREAMBLE, '');
+  const lines = s.split('\n');
+  if (sub && lines.every((l) => !l.trim() || l.startsWith('  '))) s = lines.map((l) => l.slice(2)).join('\n');
+  return { text: s.trim(), subagent: sub };
+}
+
+/** user 줄 → agent_report 메시지 | null. */
+function peerReportOf(o, textCap) {
+  const c = o.message ? o.message.content : null;
+  const txt = textOf(c);
+  const origin = o.origin && typeof o.origin === 'object' ? o.origin : null;
+  const head = PEER_HEAD.exec(txt);
+  if (!head && !(origin && origin.kind === 'peer')) return null;
+  const from = (origin && (origin.from || origin.senderTaskId)) || (head && (/from="([^"]*)"/.exec(head[1]) || [])[1]) || null;
+  const name = (origin && typeof origin.name === 'string' && origin.name) || null;
+  const src = head ? txt.slice(head[0].length) : (origin && typeof origin.body === 'string' ? origin.body : txt);
+  const { text, subagent } = peerBody(src);
+  const cap = textCap || TEXT_CAP;
+  const truncated = text.length > cap;
+  return {
+    ts: o.timestamp || null, role: 'system', kind: 'agent_report',
+    text: truncated ? text.slice(0, cap) : text, truncated,
+    meta: { from: from ? String(from) : null, name, subagent: subagent || !!(origin && origin.senderTaskId) },
+  };
+}
+
 /**
  * 한 줄(assistant/user/system) → [{ key, …ConvMsg }]. 라이브(stdout)와 가져오기(세션 파일)가 **같은 함수**를
  * 타야 같은 메시지가 같은 key 를 얻는다. blockIdx = 이 assistant 줄의 블록 인덱스(호출자가 센다).
@@ -121,6 +160,9 @@ function toMsgs(o, { blockIdx = 0, textCap = TEXT_CAP, closeDraft = false } = {}
     return out;
   }
   if (o.type === 'user') {
+    // 다른 세션(서브에이전트·동료 에이전트)이 보낸 보고 — 사람이 한 말이 아니다. 말풍선 대신 보고 카드(kind 'agent_report').
+    const peer = peerReportOf(o, textCap);
+    if (peer) { push(`u:${uuid}`, peer); return out; }
     for (const { idx, msg } of normalizeLine(line, textCap)) {
       if (msg.kind === 'tool_result' && msg.result && msg.result.toolUseId) { push('r:' + msg.result.toolUseId, msg); continue; }
       const m = { ...msg };
@@ -181,7 +223,15 @@ function rateOf(r) {
   const win = kind && r.unifiedWindows && typeof r.unifiedWindows === 'object' ? r.unifiedWindows[kind] : null;
   const util = Number.isFinite(r.utilization) ? r.utilization : (win && Number.isFinite(win.utilization) ? win.utilization : null);
   const resetsAt = Number.isFinite(r.resetsAt) ? r.resetsAt : (win && Number.isFinite(win.resetsAt) ? win.resetsAt : null);
-  return { status, kind, resetsAt, utilization: util, blocked: status === 'rejected' || !status.startsWith('allowed') };
+  // 창별 사용률(실측 unifiedWindows: five_hour·seven_day·seven_day_overage_included) — 사용량 화면의 "현재 세션·주간 한도".
+  const windows = {};
+  if (r.unifiedWindows && typeof r.unifiedWindows === 'object') {
+    for (const [k, w] of Object.entries(r.unifiedWindows)) {
+      if (!w || typeof w !== 'object') continue;
+      windows[k] = { utilization: Number.isFinite(w.utilization) ? w.utilization : null, resetsAt: Number.isFinite(w.resetsAt) ? w.resetsAt : null };
+    }
+  }
+  return { status, kind, resetsAt, utilization: util, blocked: status === 'rejected' || !status.startsWith('allowed'), ...(Object.keys(windows).length ? { windows } : {}) };
 }
 
 // ── stdout 파서 ──────────────────────────────────────────────────────────────

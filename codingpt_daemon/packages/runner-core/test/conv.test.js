@@ -1085,7 +1085,7 @@ test('사용 한도 경고 — 안내 없이 thread.usage.rateLimit 에만, 실�
   const notices = () => eventsOf(id).filter((e) => e.op === 'notice' && e.code === 'RATE_LIMITED');
   assert.strictEqual(notices().length, 0, '경고는 한도 도달 안내가 아니다');
   let t = (await rpc('conv.open', { threadId: id })).thread;
-  assert.deepStrictEqual(t.usage.rateLimit, { status: 'allowed_warning', kind: 'five_hour', resetsAt: 1790702400, utilization: 0.91, blocked: false });
+  assert.deepStrictEqual(t.usage.rateLimit, { status: 'allowed_warning', kind: 'five_hour', resetsAt: 1790702400, utilization: 0.91, blocked: false, windows: { five_hour: { resetsAt: 1790702400, utilization: 0.91 } } });
   assert.strictEqual(t.usage.contextTokens, 1130, '다른 사용량 필드는 그대로');
   assert.ok(frames.some((f) => f.threadId === id && f.thread && f.thread.usage && f.thread.usage.rateLimit), '힌트로 알린다');
 

@@ -26,6 +26,7 @@ export const icons = {
   sidebarTitlebar: () => '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="ic"><rect x="1.5" y="3" width="13" height="10" rx="2"/><line x1="6.18" y1="4.5" x2="6.18" y2="11.5"/></svg>',
   // 열림 상태 표시용 — 왼쪽 컬럼이 채워진 변형(색이 아니라 채움 유무로 토글 상태를 직관 표현).
   sidebarFilled: (o) => svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M4 4h5v16H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" fill="currentColor" stroke="none"/>', o),
+  bot: (o) => svg('<rect x="4" y="8" width="16" height="12" rx="3"/><line x1="12" y1="4" x2="12" y2="8"/><circle cx="12" cy="3.5" r="1"/><circle cx="9" cy="14" r="1"/><circle cx="15" cy="14" r="1"/>', o),
   bell: (o) => svg('<path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5 2 5.5H4c.5-.5 2-1.5 2-5.5"/><path d="M10 18.5a2 2 0 0 0 4 0"/>', o),
   plus: (o) => svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>', o),
   file: (o) => svg('<path d="M6 3h7l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M13 3v5h5"/>', o),

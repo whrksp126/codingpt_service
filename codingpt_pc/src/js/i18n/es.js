@@ -1341,5 +1341,9 @@ export default {
   "이 작업을 시작할까요?": "¿Iniciar esta tarea?",
   "상태만 바꾸기": "Solo cambiar estado",
   "끌어서 옮기기": "Arrastra para mover",
-  "텍스트": "Texto"
+  "텍스트": "Texto",
+  "서브에이전트": "Subagente",
+  "다른 에이전트": "Otro agente",
+  "{who}의 작업 보고": "Informe de {who}",
+  "{who}의 메시지": "Mensaje de {who}"
 };

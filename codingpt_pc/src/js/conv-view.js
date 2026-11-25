@@ -27,7 +27,7 @@ import {
 } from "./conv-model.js";
 import {
   buildUserRow, buildAssistantRow, paintStream, buildThinkingLive, paintThinkingLive, buildThinkingRow,
-  buildToolRow, buildOrphanRow, buildGroupRow, buildDividerRow, buildTurnRow, buildNoticeRow,
+  buildToolRow, buildOrphanRow, buildGroupRow, buildDividerRow, buildReportRow, buildTurnRow, buildNoticeRow,
   hydrateMedia, loadMedia, showLightbox, mimeOf, isImagePath,
 } from "./conv-rows.js";
 import { ConvComposer, anchorMenu } from "./conv-composer.js";
@@ -794,6 +794,7 @@ export class ConvView {
         return el;
       }
       case "thinking": return buildThinkingRow(r.msg);
+      case "report": return buildReportRow(r.msg);
       case "tool": return buildToolRow(r, this._openTools.has(r.key));
       case "orphan": return buildOrphanRow(r);
       case "group": return buildGroupRow(r);
@@ -956,6 +957,8 @@ export class ConvView {
       }
       return;
     }
+    const rep = t.closest?.(".conv-report-head");
+    if (rep) { rep.parentElement?.classList.toggle("open"); return; }
     const think = t.closest?.(".chat-thinking");
     if (think && think.dataset.full != null) {
       const full = think.dataset.full || "";

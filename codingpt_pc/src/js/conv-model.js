@@ -542,6 +542,25 @@ function localOutput(m) {
   return { ...m, kind: 'tool_result', text: body, hidden: !body, tool: { name: 'local-command', title: '명령 결과' },
     result: { toolUseId: null, ok: !/^\s*<local-command-stderr>/.test(String(m.text || '')), preview: body, bytes: body.length, lines: body ? body.split('\n').length : 0, truncated: false, images: 0 } };
 }
+// 다른 세션(서브에이전트·동료)이 보낸 보고 — 옛 데몬은 사용자 말로 저장했다(2026-11-25 신고: "AI 가 내가 입력한 것처럼").
+//  새 데몬은 처음부터 kind 'agent_report'(role system). 앱 convModel.peerReport 와 같은 규칙.
+const PEER_HEAD = /^\s*Another Claude session sent a message:\s*<agent-message\b([^>]*)>\r?\n?/;
+const PEER_PREAMBLE = /^\s*\[Subagent hand-back\][\s\S]*?The report follows:[^\n]*\n/;
+export function peerReport(m) {
+  if (!m || m.role !== 'user' || m.kind !== 'text') return m;
+  const raw = String(m.text || '');
+  const head = PEER_HEAD.exec(raw);
+  if (!head) return m;
+  let s = raw.slice(head[0].length);
+  const end = s.indexOf('</agent-message>');
+  if (end >= 0) s = s.slice(0, end);
+  const sub = PEER_PREAMBLE.test(s);
+  s = s.replace(PEER_PREAMBLE, '');
+  const lines = s.split('\n');
+  if (sub && lines.every((l) => !l.trim() || l.startsWith('  '))) s = lines.map((l) => l.slice(2)).join('\n');
+  const from = (/from="([^"]*)"/.exec(head[1]) || [])[1] || null;
+  return { ...m, role: 'system', kind: 'agent_report', text: s.trim(), hidden: false, meta: { from, name: null, subagent: sub } };
+}
 function isResultMsg(m) { return !!(m && m.kind === 'tool_result'); }
 function toolIdOfResult(m) {
   if (m.result && m.result.toolUseId) return m.result.toolUseId;
@@ -601,7 +620,7 @@ export function buildRows(st, opts) {
       flat.push({ type: 'notice', key: 'n:' + n.seq, sig: String(n.seq), level: n.level, code: n.code, text: n.text });
       continue;
     }
-    const m = localOutput(it.msg);
+    const m = peerReport(localOutput(it.msg));
     if (st.hidden.has(m.key)) continue;
     if (isResultMsg(m)) {
       const id = toolIdOfResult(m);
@@ -631,6 +650,10 @@ export function buildRows(st, opts) {
     }
     if (m.role === 'assistant' && m.kind === 'text') {
       flat.push({ type: 'assistant', key: m.key, sig: String(m.seq), msg: m, sub: !!m.parent });
+      continue;
+    }
+    if (m.kind === 'agent_report') {
+      flat.push({ type: 'report', key: m.key, sig: String(m.seq), msg: m });
       continue;
     }
     if (m.kind === 'thinking') {

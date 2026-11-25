@@ -1341,5 +1341,9 @@ export default {
   "이 작업을 시작할까요?": "Start this task?",
   "상태만 바꾸기": "Change status only",
   "끌어서 옮기기": "Drag to move",
-  "텍스트": "Text"
+  "텍스트": "Text",
+  "서브에이전트": "Subagent",
+  "다른 에이전트": "Another agent",
+  "{who}의 작업 보고": "Report from {who}",
+  "{who}의 메시지": "Message from {who}"
 };

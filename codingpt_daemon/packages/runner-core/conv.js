@@ -566,7 +566,7 @@ function onEngine(proc, ev) {
       // 경고(한도 근접)는 안내하지 않는다 — thread.usage.rateLimit 에만 싣고(클라가 원하면 표시) 힌트로 알린다.
       //  실제 차단일 때만 notice. 같은 차단(같은 창·같은 해제 시각)이 이어서 와도 한 번만 남긴다.
       const prev = thread.usage && thread.usage.rateLimit;
-      const rateLimit = { status: ev.status, kind: ev.kind || null, resetsAt: ev.resetsAt != null ? ev.resetsAt : null, utilization: ev.utilization != null ? ev.utilization : null };
+      const rateLimit = { status: ev.status, kind: ev.kind || null, resetsAt: ev.resetsAt != null ? ev.resetsAt : null, utilization: ev.utilization != null ? ev.utilization : null, ...(ev.windows ? { windows: ev.windows } : (prev && prev.windows ? { windows: prev.windows } : {})) };
       const again = prev && prev.blocked && prev.kind === rateLimit.kind && prev.resetsAt === rateLimit.resetsAt;
       patch(id, { usage: usageOf(thread.usage, { rateLimit: { ...rateLimit, blocked: !!ev.blocked } }) });
       if (ev.blocked && !again) notice(id, 'warn', 'RATE_LIMITED', '사용 한도에 도달했습니다. 한도가 풀린 뒤 다시 시도하세요');

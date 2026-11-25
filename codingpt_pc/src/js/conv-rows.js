@@ -329,6 +329,24 @@ export function buildGroupRow(r) {
   return row;
 }
 
+/** 다른 세션(서브에이전트·동료 에이전트)의 보고 — 내 말풍선이 아니라 접힌 카드. 머리를 누르면 펼친다. */
+export function buildReportRow(m) {
+  const meta = m.meta || {};
+  const who = meta.name || (meta.subagent ? i18n.t('서브에이전트') : i18n.t('다른 에이전트'));
+  const title = meta.subagent ? i18n.t('{who}의 작업 보고', { who }) : i18n.t('{who}의 메시지', { who });
+  const text = String(m.text || '');
+  const preview = text.replace(/[#*`>|]/g, '').replace(/\s+/g, ' ').trim();
+  const row = document.createElement("div");
+  row.className = "conv-report";
+  row.dataset.key = m.key;
+  row.innerHTML = `<div class="conv-report-head" role="button" tabindex="0">`
+    + `<span class="conv-report-ic">${icons.bot({ size: 14 })}</span>`
+    + `<span class="conv-report-title">${escapeHtml(title)}</span><span class="conv-report-caret">›</span></div>`
+    + `<div class="conv-report-preview">${escapeHtml(preview.slice(0, 280))}</div>`
+    + `<div class="conv-report-body conv-blk">${renderMarkdown(text)}</div>`;
+  return row;
+}
+
 export function buildDividerRow(m) {
   const row = document.createElement("div");
   const known = m.kind === "compact" || m.kind === "divider" || m.kind === "interrupt";

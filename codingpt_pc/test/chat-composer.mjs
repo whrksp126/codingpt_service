@@ -273,8 +273,9 @@ eq("path 없는 파일 노드는 버린다", M.flattenFiles([{ name: "x", dir: f
       ok("회복 가능한 종료에 원문 메시지를 띄우지 않는다", !/e\?\.error\?\.message/.test(cc));
       // `+` 는 4갈래(프로젝트/기기/촬영/갤러리) — 출처가 실제로 넷이라 한 화면으로 합칠 수 없다.
       // `[^>]*` 는 안 된다: icon 속성에 `/>` 가 들어 있어 첫 `>` 에서 끊긴다(실측 0건) → 지연 매칭.
-      const labels = [...cc.matchAll(/<MenuRow[\s\S]*?label="([^"]+)"/g)].map((m) => m[1]);
-      eq("`+` 메뉴 = 프로젝트/기기/촬영/갤러리", labels, ["프로젝트에서 선택", "기기에서 선택", "촬영", "갤러리"]);
+      //  2026-11-25 Claude 앱 문법: 이 폰의 출처 3개는 큰 타일(카메라·사진·파일), 원격 PC 의 프로젝트 파일은 행.
+      const labels = [...cc.matchAll(/<Menu(?:Row|Tile)[\s\S]*?label="([^"]+)"/g)].map((m) => m[1]).filter((l) => l !== "권한");
+      eq("`+` 메뉴 = 카메라/사진/파일 + 프로젝트", labels, ["카메라", "사진", "파일", "프로젝트에서 선택"]);
       ok("프로젝트 선택은 컬럼뷰 시트(워크스페이스 생성과 같은 형식)",
         /<ProjectFileSheet/.test(cc)
         && /COL_W/.test(readFileSync(path.resolve(here, "../../../codingpt_app/src/workspace/chat/ProjectFileSheet.tsx"), "utf8")));

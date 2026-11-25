@@ -646,5 +646,17 @@ const keys = (st) => M.buildRows(st).map((r) => r.type + ':' + r.key);
   if (JSON.stringify(n) === JSON.stringify(['a/c', null, 'b.js'])) pass++; else { fail++; console.log('FAIL normRel', JSON.stringify(n)); }
 }
 
+// 다른 세션의 보고(2026-11-25 "AI 가 내가 입력한 것처럼") — 옛 저장본도 사용자 말풍선이 아니라 report 행
+{
+  const st = M.createConv('t');
+  M.applyOpen(st, { thread: { id: 't' }, headSeq: 2, floorSeq: 1, live: [], events: [
+    { seq: 1, op: 'msg', msg: { seq: 1, key: 'u:1', role: 'user', kind: 'text', text: 'Another Claude session sent a message:\n<agent-message from="abc">\n[Subagent hand-back] x. The report follows:\n  완료했습니다.\n</agent-message>\nnotes' } },
+    { seq: 2, op: 'msg', msg: { seq: 2, key: 'u:2', role: 'system', kind: 'agent_report', text: '새 데몬 보고', meta: { name: 'app-expert', subagent: true } } },
+  ] });
+  const rows = M.buildRows(st);
+  const types = rows.map((r) => r.type).join(',');
+  if (types === 'report,report' && rows[0].msg.text === '완료했습니다.' && rows[0].msg.meta.from === 'abc') pass++; else { fail++; console.log('FAIL peer report rows', types); }
+}
+
 console.log(`\n${fail === 0 ? 'ALL PASS' : 'FAILED'} — pass ${pass} / fail ${fail}`);
 process.exit(fail === 0 ? 0 : 1);

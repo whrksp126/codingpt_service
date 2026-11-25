@@ -3651,3 +3651,21 @@ body.is-card-dragging, body.is-card-dragging * { cursor: grabbing !important; }
 @keyframes chFade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes chPop { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
 @keyframes chPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* 다른 세션의 보고(서브에이전트 hand-back) — 내 말풍선이 아니라 접힌 카드(2026-11-25). */
+.conv-report {
+  align-self: stretch; border: 1px solid var(--border); border-radius: var(--r-lg);
+  background: var(--elevated); padding: 8px 12px;
+}
+.conv-report-head { display: flex; align-items: center; gap: 7px; cursor: default; color: var(--text2); font-size: 12px; font-weight: 500; }
+.conv-report-ic { display: inline-flex; color: var(--text3); }
+.conv-report-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-report-caret { color: var(--dim); transition: transform 150ms ease; }
+.conv-report.open .conv-report-caret { transform: rotate(90deg); }
+.conv-report-preview {
+  margin-top: 4px; font-size: 12px; line-height: 17px; color: var(--text3);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.conv-report-body { display: none; margin-top: 6px; }
+.conv-report.open .conv-report-preview { display: none; }
+.conv-report.open .conv-report-body { display: block; }
