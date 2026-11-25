@@ -354,6 +354,15 @@ export function buildNoticeRow(r) {
   row.className = "conv-notice " + (r.level === "error" ? "error" : r.level === "warn" ? "warn" : "info");
   row.dataset.key = r.key;
   row.textContent = noticeText(r.code, r.text) || convErrorText(r.code);
+  //  원격 제어 주소(claude.ai/code 세션) — 눌러서 바로 연다.
+  const m = r.code === "REMOTE_CONTROL" ? /https:\/\/claude\.ai\/\S+/.exec(String(r.text || "")) : null;
+  if (m) {
+    const a = document.createElement("a");
+    a.href = m[0]; a.textContent = m[0];
+    a.addEventListener("click", (e) => { e.preventDefault(); api.openExternal(m[0]).catch(() => {}); });
+    row.textContent = String(r.text).slice(0, m.index);
+    row.appendChild(a);
+  }
   return row;
 }
 

@@ -1115,8 +1115,12 @@ test('AI 제목 마커 — 걷어 내고, 열린 꼬리는 보류한다', () => 
   assert.strictEqual(c.stripTitleMark('앞말 <!--cpt-title: x--> 뒷말').text, '앞말  뒷말');
 });
 
-test('/remote-control(/rc) 는 터미널 전용 안내', async () => {
+test('/remote-control(/rc) 는 채팅에서 원격 제어를 켜고(주소 안내) 다시 치면 끈다', async () => {
   const id = (await rpc('conv.create', { cwd: '', agent: 'claude' })).thread.id;
-  const r = await rpc('conv.send', { threadId: id, clientId: cid(), text: '/rc' });
-  assert.strictEqual(r.code, 'TERMINAL_ONLY_COMMAND');
+  const on = await rpc('conv.send', { threadId: id, clientId: cid(), text: '/rc' });
+  assert.strictEqual(on.ok, true);
+  assert.strictEqual(on.url, 'https://claude.ai/code/session_fake');
+  const off = await rpc('conv.send', { threadId: id, clientId: cid(), text: '/remote-control' });
+  assert.strictEqual(off.ok, true);
+  assert.ok(!off.url);
 });

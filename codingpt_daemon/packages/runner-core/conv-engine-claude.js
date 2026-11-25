@@ -561,6 +561,9 @@ function start(opts, onEvent) {
     interrupt() { parser.noteInterrupt(); return control({ subtype: 'interrupt' }); },
     setMode(mode) { return control({ subtype: 'set_permission_mode', mode }); },
     setModel(model) { return control({ subtype: 'set_model', model }); },
+    //  원격 제어(claude.ai/code·Claude 앱) — TUI 의 /remote-control 과 같은 브리지를 SDK 제어 요청으로 켠다(2.1.332 실측:
+    //   응답 { session_url, connect_url, bridge_session_id }). 프로세스가 내려가면 함께 끊긴다.
+    remoteControl(enabled, name) { return control({ subtype: 'remote_control', enabled: !!enabled, ...(name ? { name: String(name) } : {}) }, 30000); },
     // 2026-10-02 실측: apply_flag_settings{effortLevel} → success. 이후 턴부터 적용.
     setEffort(effort) { return control({ subtype: 'apply_flag_settings', settings: { effortLevel: String(effort) } }); },
     /** stdin 을 닫아 스스로 끝나게 하고, graceMs 뒤에도 살아 있으면 SIGTERM, 그래도 남으면 SIGKILL. */

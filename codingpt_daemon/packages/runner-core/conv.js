@@ -46,7 +46,9 @@ function stripTitleMark(raw) {
   }
   return { text, title };
 }
-const EXTRA_TERMINAL_COMMANDS = new Set(['remote-control', 'rc']); // 구조화 모드에서 CLI 가 "사용할 수 없다"고만 답하는 TUI 전용 명령
+const EXTRA_TERMINAL_COMMANDS = new Set(); // 구조화 모드에서 CLI 가 "사용할 수 없다"고만 답하는 TUI 전용 명령
+//  /remote-control·/rc 는 채팅이 직접 한다(SDK 제어 요청 remote_control) — 카탈로그의 terminalCommands 에 있어도 막지 않는다.
+const RC_RE = /^\/(remote-control|rc)(?:\s+(.+))?\s*$/i;
 const PREVIEW_MAX = 120;
 const MESSAGE_MAX = 64 * 1024;          // 사용자 입력 상한(ConvMsg 본문 상한과 같다)
 const DETAIL_MAX = 1024 * 1024;         // conv.detail 전문 상한
@@ -853,6 +855,34 @@ function terminalOnly(thread, text) {
   return c && c.terminalCommands.includes(m[1]) ? m[1] : null;
 }
 
+/** /remote-control [이름] — 켜져 있으면 끈다(TUI 와 같은 토글). 결과는 안내 한 줄(주소 포함)로 남긴다. */
+async function remoteControlCommand(thread, base, name) {
+  const id = thread.id;
+  let proc = null;
+  try { proc = await ensureProc(thread); } catch (e) {
+    if (e && e.code === 'START_FAILED') record(id, [{ op: 'msg', msg: { ...base, status: 'failed' } }]);
+    throw e;
+  }
+  const turnOff = !!proc.rcOn;
+  let r = null;
+  try {
+    r = await proc.engine.remoteControl(!turnOff, turnOff ? '' : name);
+  } catch (e) {
+    const out = record(id, [
+      { op: 'msg', msg: { ...base, status: 'failed' } },
+      { op: 'notice', level: 'error', code: 'REMOTE_CONTROL_FAILED', text: `원격 제어를 ${turnOff ? '끄지' : '켜지'} 못했습니다: ${oneLine(String((e && e.message) || e), 200)}` },
+    ]);
+    return { ok: false, status: 'failed', seq: out[0].seq, code: 'REMOTE_CONTROL_FAILED' };
+  }
+  proc.rcOn = !turnOff;
+  const url = r && typeof r.session_url === 'string' ? r.session_url : '';
+  const out = record(id, [
+    { op: 'msg', msg: { ...base, status: 'sent' } },
+    { op: 'notice', level: 'info', code: 'REMOTE_CONTROL', text: turnOff ? '원격 제어를 껐습니다' : `원격 제어가 켜졌습니다 — claude.ai/code 나 Claude 앱에서 이어서 쓸 수 있어요${url ? ` · ${url}` : ''}` },
+  ]);
+  return { ok: true, status: 'sent', seq: out[0].seq, local: 'remote-control', ...(url ? { url } : {}) };
+}
+
 /** 그 대화를 띄운 탭(공유 표면) 목록. */
 function chatSurfaces(thread) {
   const sl = lazy('./surfaces');
@@ -910,6 +940,9 @@ async function sendOnce(thread, { clientId, text, attachments }) {
   //   /clear = 새 대화로 갈아탄다 — 대화 ID 가 곧 에이전트 세션이라, 같은 자리에 새 대화를 만들어 탭을 그쪽으로 옮긴다.
   const local = /^\/(exit|quit|clear)\s*$/i.exec(full.trim());
   if (local && !files.length) return localCommand(thread, local[1].toLowerCase());
+
+  const rc = RC_RE.exec(full.trim());
+  if (rc && !files.length && thread.agent === 'claude') return remoteControlCommand(thread, base, rc[2] ? rc[2].trim().slice(0, 80) : '');
 
   const cmd = terminalOnly(thread, full);
   if (cmd) {
@@ -1459,9 +1492,10 @@ const HANDLERS = {
     const desc = new Map(table.map((it) => [String(it.name).replace(/^\//, ''), it]));
     const c = catalog.get(agent);
     // 에이전트가 직접 알려준 목록이 정본이다. 아직 한 번도 안 띄웠으면 카탈로그 표로 대신한다.
-    const names = c ? c.commands.filter((n) => !c.terminalCommands.includes(n))
+    const names = c ? c.commands.filter((n) => !c.terminalCommands.includes(n) || n === 'remote-control')
       : table.filter((it) => it.chat !== 'tui' && it.chat !== 'dialog').map((it) => String(it.name).replace(/^\//, ''));
-    return { items: names.map((n) => ({ name: '/' + n, desc: (desc.get(n) && desc.get(n).desc) || '' })) };
+    if (agent === 'claude' && !names.includes('remote-control')) names.push('remote-control');
+    return { items: names.map((n) => { const d = desc.get(n); return { name: '/' + n, desc: (d && d.desc) || '', ...(d && d.aliases ? { aliases: d.aliases } : {}) }; }) };
   },
 
   'conv.toTerminal': toTerminal,
@@ -1482,6 +1516,7 @@ function sweep() {
   const now = deps.now();
   for (const proc of [...live.values()]) {
     if (proc.exited || proc.stopping || busy(proc)) continue;
+    if (proc.rcOn) continue;   // 원격 제어 중 = 다른 곳(claude.ai·앱)에서 쓰고 있다 — 유휴로 내리면 그쪽이 끊긴다
     if (now - proc.idleSince < timings.idleMs) continue;
     log(`idle 회수 thread=${proc.id}`);
     stopProc(proc, 'idle').catch(() => {});

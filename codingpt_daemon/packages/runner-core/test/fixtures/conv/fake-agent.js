@@ -342,6 +342,11 @@ function onLine(line) {
       out({ type: 'system', subtype: 'status', status: null, permissionMode: mode, session_id: sessionId, uuid: uid() });
       return;
     }
+    if (r.subtype === 'remote_control') {
+      const resp = r.enabled ? { session_url: 'https://claude.ai/code/session_fake', bridge_session_id: 'cse_fake' } : {};
+      out({ type: 'control_response', response: { subtype: 'success', request_id: o.request_id, response: resp } });
+      return;
+    }
     if (r.subtype === 'set_model') {
       out({ type: 'control_response', response: { subtype: 'error', request_id: o.request_id, error: 'unsupported' } });
       return;
