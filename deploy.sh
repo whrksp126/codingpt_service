@@ -6,6 +6,12 @@ REMOTE_DIR="/srv/projects/codingpt"
 
 case $ENV in
   dev)
+    # dev 서버는 2026-11-26 정리됨(컨테이너·nginx vhost·DNS 제거, DB 볼륨+덤프는 서버 /srv/backups/codingpt_dev 에 보존).
+    #  vhost(deploy/nginx/codingpt.conf 주석 참고)와 DNS 를 다시 만든 뒤 CODINGPT_DEV_REVIVED=1 로 실행.
+    if [ "${CODINGPT_DEV_REVIVED:-}" != 1 ]; then
+      echo ">>> dev 서버는 정리된 상태입니다. 되살리려면 vhost·DNS 복구 후 CODINGPT_DEV_REVIVED=1 ./deploy.sh dev"
+      exit 1
+    fi
     COMPOSE_FILE="docker-compose.dev.yml"
     PROJECT_NAME="codingpt_dev"
     ;;
