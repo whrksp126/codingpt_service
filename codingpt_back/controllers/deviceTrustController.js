@@ -35,7 +35,8 @@ function ok(res, userId, data) {
   return successResponse(res, Object.assign({ userRef: String(userId) }, data || {}));
 }
 
-// 요청 IP — Cloudflare 경유이므로 CF-Connecting-IP 가 정본(레이트리밋 키 함정과 동일 규칙).
+// 요청 IP — nginx_proxy 가 CF-Connecting-IP/X-Real-IP 를 실제 접속 IP 로 덮어써 보낸다(Cloudflare 경유·직통 공통,
+//  deploy/nginx/codingpt.conf). 클라이언트가 보낸 값은 nginx 에서 버려지므로 신뢰해도 된다.
 function ipOf(req) {
   return String(req.headers['cf-connecting-ip'] || req.headers['x-real-ip']
     || String(req.headers['x-forwarded-for'] || '').split(',')[0] || req.ip || '').trim();

@@ -201,7 +201,7 @@ router.get('/preview/ports', accountAuth, daemonController.previewPorts);
 router.post('/preview/start', accountAuth, daemonController.previewStart);
 router.post('/forward/start', accountAuth, daemonController.forwardStart); // 포트 포워딩 토큰(WS 는 app.js upgrade)
 // LAN 직결 소개장(기능4) — 뷰어(폰/PC/데몬)가 대상 PC 의 사설 IP + 단명 grant 를 받는다.
-//  IP당 15분/60회. Cloudflare→nginx 뒤라 req.ip 가 엣지 IP 로 잡히므로 실 클라이언트 IP 로 키를 고정
+//  IP당 15분/60회. nginx 가 덮어쓴 실 클라이언트 IP 헤더로 키를 고정(Cloudflare 경유·직통 공통, 클라 위조값은 nginx 가 버림)
 //  (userRoutes.js:10 realClientIp 와 동일 규칙 — 그쪽을 고치면 여기도 같이 고칠 것).
 //  IPv6 는 /64 를 한 사용자로 묶는다(ipKeyGenerator) — 안 묶으면 IPv6 사용자가 주소를 바꿔 상한을 우회한다.
 const lanClientIp = (req) => {

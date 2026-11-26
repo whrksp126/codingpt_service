@@ -5,8 +5,8 @@ const authMiddleware = require('../middlewares/authMiddleware');
 
 // 인증/토큰 엔드포인트 무차별 대입·코드 그라인딩 방지 — IP당 제한(15분/30회). 실패만 세지 않고 전량 카운트.
 //  다기기 정상 사용(로그인/refresh)엔 넉넉하되, 자동화 공격은 차단하는 수준.
-//  Cloudflare→nginx 뒤라 req.ip 는 매 요청 다른 엣지 IP 로 잡혀 카운터가 안 쌓인다 → 실제 클라이언트 IP
-//  헤더(CF-Connecting-IP → X-Real-IP → X-Forwarded-For 첫 항목)로 키를 고정한다.
+//  nginx_proxy 가 실제 접속 IP 로 덮어쓴 헤더(CF-Connecting-IP → X-Real-IP → X-Forwarded-For 첫 항목)로 키를 고정한다.
+//  Cloudflare 경유·직통 공통(deploy/nginx/codingpt.conf) — 클라이언트가 보낸 값은 nginx 에서 버려져 위조 불가.
 const realClientIp = (req) => {
   const cf = req.headers['cf-connecting-ip'];
   if (cf) return String(cf).trim();

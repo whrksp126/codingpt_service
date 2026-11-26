@@ -26,6 +26,8 @@ ssh -i "$SSH_KEY" -p 222 ghmate@ghmate.iptime.org "
   cd $REMOTE_DIR
   echo '>>> git pull...'
   git pull
+  echo '>>> nginx conf 동기화 (원본=deploy/nginx/)...'
+  bash deploy/nginx/sync.sh
   echo '>>> docker build & up...'
   docker compose -p $PROJECT_NAME -f $COMPOSE_FILE up --build -d back front code-executor agent-worker egress-proxy
   echo '>>> nginx reload...'
